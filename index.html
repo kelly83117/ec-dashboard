@@ -748,15 +748,21 @@
         <button class="nav-item" data-route="dashboard">
           <span class="icon">🏠</span><span>儀表板首頁</span>
         </button>
-        <div class="sidebar-group">倉儲管理</div>
+        <div class="sidebar-group">辦公室</div>
         <button class="nav-item active" data-route="employees">
           <span class="icon">📊</span><span>員工效率看板</span>
         </button>
-        <button class="nav-item" data-route="departments">
-          <span class="icon">🗂️</span><span>辦公室</span>
+        <button class="nav-item" data-route="office-d1">
+          <span class="icon">📣</span><span>行銷</span>
         </button>
-        <button class="nav-item" data-route="logistics">
-          <span class="icon">🚚</span><span>物流追蹤</span>
+        <button class="nav-item" data-route="office-d2">
+          <span class="icon">🛒</span><span>採購</span>
+        </button>
+        <button class="nav-item" data-route="office-d3">
+          <span class="icon">💼</span><span>商開</span>
+        </button>
+        <button class="nav-item" data-route="office-d4">
+          <span class="icon">🎨</span><span>設計</span>
         </button>
         <div class="sidebar-group" id="admin-group" style="display:none">系統管理</div>
         <button class="nav-item" data-route="users" id="nav-users" style="display:none">
@@ -903,6 +909,82 @@ function computeScore(emp) {
 /* ------------- 工具 ------------- */
 const uid = () => Math.random().toString(36).slice(2, 10);
 const DEPT_COLORS = ['#6366f1','#10b981','#f59e0b','#3b82f6','#ec4899','#8b5cf6','#ef4444','#14b8a6','#64748b'];
+
+/* ------------- 各辦公室頁面設定 ------------- */
+const OFFICE_CONFIG = {
+  d1: {
+    icon: '📣',
+    subtitle: '行銷活動、品牌經營與廣告投放',
+    stats: [
+      { icon: '📣', label: '進行中活動', value: '12', meta: '本月新增 3 檔' },
+      { icon: '👥', label: '月觸及人數', value: '48.2k', meta: '較上月 ↑ 12%' },
+      { icon: '💰', label: '本月廣告支出', value: 'NT$285k', meta: '預算使用 72%' },
+      { icon: '🎯', label: '平均轉換率', value: '3.8%', meta: '較上月 ↑ 0.5%' },
+    ],
+    sections: [
+      { title: '進行中的行銷活動', rows: [
+        ['母親節主題活動', '進行中', '5/01 – 5/14', 'IG・FB・LINE'],
+        ['夏季新品上市', '籌備中', '6/01 開跑', '官網・EDM'],
+        ['品牌週年慶倒數', '進行中', '4/20 – 5/20', '全通路'],
+      ]},
+    ],
+    sectionHeads: ['活動名稱', '狀態', '時程', '通路'],
+  },
+  d2: {
+    icon: '🛒',
+    subtitle: '供應商管理、採購單與成本控制',
+    stats: [
+      { icon: '🏭', label: '合作供應商', value: '34', meta: '本月新增 2 家' },
+      { icon: '📋', label: '待處理採購單', value: '18', meta: '逾期 2 張' },
+      { icon: '💵', label: '本月採購金額', value: 'NT$1.2M', meta: '較上月 ↑ 5%' },
+      { icon: '⏱️', label: '平均交期', value: '7.2 天', meta: '較上月 ↓ 0.8 天' },
+    ],
+    sections: [
+      { title: '本月待處理採購單', rows: [
+        ['PO-2026-0512', '永豐紙業', 'NT$ 86,400', '待簽核'],
+        ['PO-2026-0511', '佳穩五金', 'NT$ 142,000', '已下單'],
+        ['PO-2026-0510', '達誠包材', 'NT$ 38,500', '到貨中'],
+      ]},
+    ],
+    sectionHeads: ['採購單號', '供應商', '金額', '狀態'],
+  },
+  d3: {
+    icon: '💼',
+    subtitle: '商業開發、合作洽談與客戶關係',
+    stats: [
+      { icon: '💼', label: '進行中專案', value: '24', meta: '高優先 6 件' },
+      { icon: '🔍', label: '潛在客戶', value: '156', meta: '本週新增 14 位' },
+      { icon: '🤝', label: '本月新合約', value: '8', meta: '達成率 89%' },
+      { icon: '📈', label: '平均成交週期', value: '21 天', meta: '較上月 ↓ 3 天' },
+    ],
+    sections: [
+      { title: '商機追蹤', rows: [
+        ['A 通路合作擴展', '提案中', 'NT$ 1.8M', '王經理'],
+        ['B2B 大客戶導入', '洽談中', 'NT$ 3.2M', '陳總監'],
+        ['品牌聯名專案', '簽約準備', 'NT$ 950k', '吳總監'],
+      ]},
+    ],
+    sectionHeads: ['專案', '階段', '預估金額', '負責人'],
+  },
+  d4: {
+    icon: '🎨',
+    subtitle: '設計專案、視覺與品牌資產',
+    stats: [
+      { icon: '🎨', label: '進行中專案', value: '18', meta: '本週新增 4 件' },
+      { icon: '📝', label: '待審稿', value: '7', meta: '逾期 1 件' },
+      { icon: '👨‍🎨', label: '設計師', value: '12 人', meta: '滿載 8 人' },
+      { icon: '✨', label: '本週交付', value: '23', meta: '較上週 ↑ 6' },
+    ],
+    sections: [
+      { title: '設計工作排程', rows: [
+        ['官網首頁改版', '進行中', '5/22 交付', '林設計師'],
+        ['母親節主視覺', '待審稿', '5/05 上架', '張設計師'],
+        ['夏季商品攝影修圖', '進行中', '6/01 交付', '王設計師'],
+      ]},
+    ],
+    sectionHeads: ['專案', '狀態', '時程', '負責人'],
+  },
+};
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -1098,20 +1180,15 @@ const App = {
 
   render() {
     const main = document.getElementById('main-content');
+    if (this.route && this.route.startsWith('office-')) {
+      main.innerHTML = this.viewOffice(this.route.slice('office-'.length));
+      return;
+    }
     switch (this.route) {
       case 'dashboard': main.innerHTML = this.viewDashboard(); break;
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
-      case 'departments': main.innerHTML = this.viewDepartments(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
-      case 'logistics':
-        main.innerHTML = `
-          <div class="page-header"><h2>物流追蹤</h2><p>查看出貨與配送狀態</p></div>
-          <div class="placeholder-page">
-            <div class="emoji">🚚</div>
-            <h3>物流追蹤模組</h3>
-            <p>此模組尚未實作，可依需求擴充</p>
-          </div>`;
-        break;
+      default: main.innerHTML = this.viewEmployees(); this.bindFilterBar();
     }
   },
 
@@ -1334,8 +1411,7 @@ const App = {
     const employees = Store.get(Store.KEYS.employees, []);
     const departments = Store.get(Store.KEYS.departments, []);
     if (departments.length === 0) {
-      showToast('請先建立至少一個辦公室', 'error');
-      this.navigate('departments');
+      showToast('系統未設定任何辦公室', 'error');
       return;
     }
     const emp = id ? employees.find(e => e.id === id) : null;
@@ -1411,106 +1487,95 @@ const App = {
   },
 
   /* ============================================================
-   *  部門管理
+   *  各辦公室頁面（行銷 / 採購 / 商開 / 設計）
    * ============================================================ */
-  viewDepartments() {
-    const departments = Store.get(Store.KEYS.departments, []);
-    const employees = Store.get(Store.KEYS.employees, []);
+  viewOffice(deptId) {
+    const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
+    const cfg = OFFICE_CONFIG[deptId];
+    if (!dept || !cfg) {
+      return `<div class="placeholder-page"><div class="emoji">❓</div><h3>找不到此辦公室</h3></div>`;
+    }
+    const employees = (Store.get(Store.KEYS.employees, [])).filter(e => e.department === deptId);
+    const color = dept.color;
 
-    const cards = departments.length === 0 ? `
-      <div class="placeholder-page" style="grid-column:1/-1">
-        <div class="emoji">🗂️</div>
-        <h3>還沒有任何辦公室</h3>
-        <p>點右上「新增辦公室」開始建立</p>
+    const statCards = cfg.stats.map(s => `
+      <div class="stat-card">
+        <div class="stat-icon" style="background:${color}22;color:${color}">${s.icon}</div>
+        <div class="stat-label">${escapeHtml(s.label)}</div>
+        <div class="stat-value">${escapeHtml(s.value)}</div>
+        <div class="stat-meta">${escapeHtml(s.meta)}</div>
       </div>
-    ` : departments.map(d => {
-      const count = employees.filter(e => e.department === d.id).length;
-      return `
-        <div class="dept-card">
-          <div class="dept-color" style="background:${d.color}"></div>
-          <h4>${escapeHtml(d.name)}</h4>
-          <div class="count">${count} 位員工</div>
-          <div class="actions">
-            <button class="icon-btn" title="編輯" onclick="App.openDeptModal('${d.id}')">✏️</button>
-            <button class="icon-btn danger" title="刪除" onclick="App.deleteDept('${d.id}')">🗑️</button>
-          </div>
+    `).join('');
+
+    const sectionTables = cfg.sections.map(sec => `
+      <div class="table-card" style="margin-bottom:16px">
+        <div class="table-card-header"><h3>${escapeHtml(sec.title)}</h3></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>${cfg.sectionHeads.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
+            <tbody>
+              ${sec.rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}
+            </tbody>
+          </table>
         </div>
-      `;
-    }).join('');
+      </div>
+    `).join('');
+
+    const memberRows = employees.length === 0
+      ? `<tr><td colspan="6"><div class="empty"><div class="emoji">📭</div>此辦公室目前沒有成員</div></td></tr>`
+      : employees.map(e => {
+          const score = computeScore(e);
+          const scoreClass = score >= 90 ? 'score-good' : score >= 80 ? 'score-ok' : 'score-bad';
+          return `
+            <tr>
+              <td>
+                <div class="employee-cell">
+                  <div class="employee-avatar">${escapeHtml(e.name.slice(0,1))}</div>
+                  <div>
+                    <div class="employee-name">${escapeHtml(e.name)}</div>
+                    <div class="employee-code">${escapeHtml(e.code)}</div>
+                  </div>
+                </div>
+              </td>
+              <td><strong>${e.orders}</strong></td>
+              <td>${e.items}</td>
+              <td>${e.avgTime} 分</td>
+              <td>${e.errorRate}%</td>
+              <td>
+                <div class="score-cell">
+                  <div class="score-bar"><div class="${scoreClass}" style="width:${score}%"></div></div>
+                  <span class="score-value">${score}</span>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('');
 
     return `
       <div class="page-header">
-        <h2>辦公室</h2>
-        <p>新增、編輯或刪除辦公室</p>
+        <h2>
+          <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${color};vertical-align:middle;margin-right:8px"></span>
+          ${cfg.icon} ${escapeHtml(dept.name)}辦公室
+        </h2>
+        <p>${escapeHtml(cfg.subtitle)}</p>
       </div>
-      <div class="filter-bar">
-        <span class="filter-spacer"></span>
-        <button class="btn-add" onclick="App.openDeptModal()">+ 新增辦公室</button>
-      </div>
-      <div class="dept-grid">${cards}</div>
-    `;
-  },
-
-  openDeptModal(id) {
-    const departments = Store.get(Store.KEYS.departments, []);
-    const dept = id ? departments.find(d => d.id === id) : null;
-    const isEdit = !!dept;
-    const d = dept || { name: '', color: DEPT_COLORS[departments.length % DEPT_COLORS.length] };
-
-    this.openModal({
-      title: isEdit ? '編輯辦公室' : '新增辦公室',
-      bodyHtml: `
-        <div class="field"><label>辦公室名稱</label><input id="f-dname" value="${escapeHtml(d.name)}" required></div>
-        <div class="field">
-          <label>標籤顏色</label>
-          <div class="color-options" id="color-options">
-            ${DEPT_COLORS.map(c => `
-              <div class="color-swatch ${c===d.color?'selected':''}" data-color="${c}" style="background:${c}"></div>
-            `).join('')}
-          </div>
+      <div class="stat-grid">${statCards}</div>
+      ${sectionTables}
+      <div class="table-card">
+        <div class="table-card-header">
+          <h3>${escapeHtml(dept.name)}成員</h3>
+          <p>共 ${employees.length} 人</p>
         </div>
-      `,
-      onMount: () => {
-        document.querySelectorAll('#color-options .color-swatch').forEach(sw => {
-          sw.addEventListener('click', () => {
-            document.querySelectorAll('#color-options .color-swatch').forEach(s => s.classList.remove('selected'));
-            sw.classList.add('selected');
-          });
-        });
-      },
-      onSave: () => {
-        const name = document.getElementById('f-dname').value.trim();
-        const color = document.querySelector('#color-options .color-swatch.selected')?.dataset.color || d.color;
-        if (!name) { showToast('請填寫辦公室名稱', 'error'); return false; }
-        const list = Store.get(Store.KEYS.departments, []);
-        if (isEdit) {
-          const i = list.findIndex(x => x.id === dept.id);
-          list[i] = { ...dept, name, color };
-        } else {
-          list.push({ id: uid(), name, color });
-        }
-        Store.set(Store.KEYS.departments, list);
-        showToast(isEdit ? '已更新' : '已新增', 'success');
-        this.render();
-        return true;
-      },
-    });
-  },
-
-  deleteDept(id) {
-    const list = Store.get(Store.KEYS.departments, []);
-    const dept = list.find(d => d.id === id);
-    if (!dept) return;
-    const employees = Store.get(Store.KEYS.employees, []);
-    const used = employees.filter(e => e.department === id).length;
-    if (used > 0) {
-      showToast(`此辦公室有 ${used} 名員工，請先轉移或刪除`, 'error');
-      return;
-    }
-    if (!confirm(`確定要刪除辦公室「${dept.name}」？`)) return;
-    Store.set(Store.KEYS.departments, list.filter(d => d.id !== id));
-    showToast('已刪除', 'success');
-    this.render();
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>員工</th><th>處理訂單</th><th>件數</th><th>平均耗時</th><th>錯誤率</th><th>效率分數</th></tr>
+            </thead>
+            <tbody>${memberRows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
   },
 
   /* ============================================================
