@@ -2088,7 +2088,7 @@ try {
     var box = document.getElementById('js-status');
     if (box && !box.textContent) {
       box.style.color = 'var(--success)';
-      box.textContent = '✓ 系統就緒，可直接按「登入」或「一鍵登入」';
+      box.textContent = '✓ 系統就緒';
     }
   });
   // DOMContentLoaded 可能已經過了，直接也設一次
@@ -2096,7 +2096,7 @@ try {
     var box = document.getElementById('js-status');
     if (box && !box.textContent) {
       box.style.color = '#10b981';
-      box.textContent = '✓ 系統就緒，可直接按「登入」或「一鍵登入」';
+      box.textContent = '✓ 系統就緒';
     }
   }, 50);
 } catch (err) {
