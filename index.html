@@ -1370,8 +1370,6 @@ const App = {
     const yesterdayOf = (p) => +(p.daily?.[ystrDay]) || 0;
     const todayTotal = platforms.reduce((s, p) => s + todayOf(p), 0);
     const yesterdayTotal = platforms.reduce((s, p) => s + yesterdayOf(p), 0);
-    const monthRange = getRangeDates('month');
-    const monthTotal = platforms.reduce((s, p) => s + sumDaily(p.daily, monthRange.start, monthRange.end), 0);
     const overallDelta = yesterdayTotal > 0 ? (todayTotal / yesterdayTotal - 1) * 100 : 0;
 
     const platformCards = platforms.map((p, i) => {
@@ -1418,39 +1416,23 @@ const App = {
         <p>歡迎回來，${escapeHtml(this.currentUser.name)}　今日 ${new Date().toLocaleDateString('zh-TW')}　·　今日總營收 <strong style="color:var(--text)">${fmtNTD(todayTotal)}</strong> ${overallDelta >= 0 ? `<span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span>` : `<span class="down" style="margin-left:6px">↓ ${Math.abs(overallDelta).toFixed(1)}%</span>`}</p>
       </div>
       <div class="stat-grid">${platformCards}</div>
-      <div class="overview-grid">
-        <div class="chart-card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap">
-            <h3 style="margin:0">各平台${range === 'custom' ? '' : currentLabel}營收</h3>
-            <div id="range-pills" style="display:flex;gap:4px;flex-wrap:wrap">${rangePills}</div>
-          </div>
-          ${dateInputs}
-          <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
-            ${currentLabel} 合計 <strong style="color:var(--text)">${fmtNTD(rangeTotal)}</strong>
-            <span style="margin-left:8px;color:var(--text-muted);font-size:12px">（${rd.start.replace(/-/g,'/')} ~ ${rd.end.replace(/-/g,'/')}）</span>
-          </div>
-          <div>
-            ${platforms.map((p, i) => `
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;${i < platforms.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
-                <span class="dept-tag" style="background:${p.color}22;color:${p.color};font-size:14px;padding:5px 14px">${escapeHtml(p.name)}</span>
-                <span style="font-size:20px;font-weight:700;color:var(--text);letter-spacing:-0.02em">${fmtNTD(valueOf(p))}</span>
-              </div>
-            `).join('')}
-          </div>
+      <div class="chart-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap">
+          <h3 style="margin:0">各平台${range === 'custom' ? '' : currentLabel}營收</h3>
+          <div id="range-pills" style="display:flex;gap:4px;flex-wrap:wrap">${rangePills}</div>
         </div>
-        <div class="chart-card">
-          <h3>本月概況</h3>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
-            <div>本月總營收　<strong style="color:var(--text);float:right">${fmtNTD(monthTotal)}</strong></div>
-            <div>今日總營收　<strong style="color:var(--text);float:right">${fmtNTD(todayTotal)}</strong></div>
-            <div>昨日總營收　<strong style="color:var(--text);float:right">${fmtNTD(yesterdayTotal)}</strong></div>
-            <div>合作平台數　<strong style="color:var(--text);float:right">${platforms.length} 個</strong></div>
-            <div>員工總數　<strong style="color:var(--text);float:right">${(Store.get(Store.KEYS.employees, [])).length} 人</strong></div>
-            <div>辦公室總數　<strong style="color:var(--text);float:right">${(Store.get(Store.KEYS.departments, [])).length} 個</strong></div>
-            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-              範例營收為示範資料<br>之後可串接平台 API 顯示即時數字
+        ${dateInputs}
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
+          ${currentLabel} 合計 <strong style="color:var(--text)">${fmtNTD(rangeTotal)}</strong>
+          <span style="margin-left:8px;color:var(--text-muted);font-size:12px">（${rd.start.replace(/-/g,'/')} ~ ${rd.end.replace(/-/g,'/')}）</span>
+        </div>
+        <div>
+          ${platforms.map((p, i) => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;${i < platforms.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+              <span class="dept-tag" style="background:${p.color}22;color:${p.color};font-size:14px;padding:5px 14px">${escapeHtml(p.name)}</span>
+              <span style="font-size:20px;font-weight:700;color:var(--text);letter-spacing:-0.02em">${fmtNTD(valueOf(p))}</span>
             </div>
-          </div>
+          `).join('')}
         </div>
       </div>
     `;
