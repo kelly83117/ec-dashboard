@@ -812,7 +812,7 @@ const Store = {
     employees: 'ec.employees',
     platforms: 'ec.platforms',
     session: 'ec.session',
-    seeded: 'ec.seeded.v4',
+    seeded: 'ec.seeded.v5',
   },
   _mem: {},
   _useMem: (function() {
@@ -885,26 +885,34 @@ function seedData() {
   ]);
 
   Store.set(Store.KEYS.employees, [
-    { id: 'e1', code: 'E001', name: '吳俊傑', department: 'd1', orders: 156, items: 712, avgTime: 3.9, errorRate: 0.5, trend: 'up' },
-    { id: 'e2', code: 'E002', name: '李志強', department: 'd2', orders: 142, items: 638, avgTime: 4.2, errorRate: 0.7, trend: 'up' },
-    { id: 'e3', code: 'E003', name: '蔡欣怡', department: 'd3', orders: 134, items: 598, avgTime: 4.5, errorRate: 1.0, trend: 'up' },
-    { id: 'e4', code: 'E004', name: '張美玲', department: 'd4', orders: 128, items: 552, avgTime: 4.8, errorRate: 1.2, trend: 'up' },
-    { id: 'e5', code: 'E005', name: '黃建宏', department: 'd1', orders: 115, items: 489, avgTime: 5.1, errorRate: 1.8, trend: 'flat' },
-    { id: 'e6', code: 'E006', name: '林雅婷', department: 'd2', orders: 98, items: 412, avgTime: 5.6, errorRate: 2.4, trend: 'down' },
-    { id: 'e7', code: 'E007', name: '王小華', department: 'd3', orders: 87, items: 380, avgTime: 6.2, errorRate: 1.5, trend: 'flat' },
+    { id: 'e1', code: 'E001', name: '吳俊傑', department: 'd1', q1: 82, q2: 86, q3: 89, q4: 92 },
+    { id: 'e2', code: 'E002', name: '李志強', department: 'd2', q1: 78, q2: 82, q3: 85, q4: 87 },
+    { id: 'e3', code: 'E003', name: '蔡欣怡', department: 'd3', q1: 90, q2: 91, q3: 93, q4: 95 },
+    { id: 'e4', code: 'E004', name: '張美玲', department: 'd4', q1: 72, q2: 75, q3: 78, q4: 81 },
+    { id: 'e5', code: 'E005', name: '黃建宏', department: 'd1', q1: 65, q2: 68, q3: 72, q4: 70 },
+    { id: 'e6', code: 'E006', name: '林雅婷', department: 'd2', q1: 58, q2: 62, q3: 60, q4: 64 },
+    { id: 'e7', code: 'E007', name: '王小華', department: 'd3', q1: 88, q2: 85, q3: 90, q4: 89 },
   ]);
 
   Store.set(Store.KEYS.seeded, true);
 }
 
-/* ------------- 計算效率分數（0–100） ------------- */
+/* ------------- 計算年度績效分數（Q1–Q4 平均，0–100） ------------- */
 function computeScore(emp) {
-  // 平均耗時越低、錯誤率越低、件數越高 → 分數越高
-  const timeScore = Math.max(0, 100 - (emp.avgTime - 3) * 12);  // 3 分鐘為基準
-  const errorScore = Math.max(0, 100 - emp.errorRate * 25);
-  const volumeScore = Math.min(100, (emp.items / 750) * 100);
-  const raw = timeScore * 0.35 + errorScore * 0.35 + volumeScore * 0.3;
-  return Math.round(Math.max(0, Math.min(100, raw)));
+  const qs = [emp.q1, emp.q2, emp.q3, emp.q4].filter(q => typeof q === 'number' && !isNaN(q));
+  if (qs.length === 0) return 0;
+  return Math.round(qs.reduce((s, q) => s + q, 0) / qs.length);
+}
+function getQuarterScore(emp, q) {
+  const v = emp[q];
+  return typeof v === 'number' && !isNaN(v) ? v : null;
+}
+function trendFromQuarters(emp) {
+  const a = emp.q3, b = emp.q4;
+  if (typeof a !== 'number' || typeof b !== 'number') return 'flat';
+  if (b - a >= 2) return 'up';
+  if (a - b >= 2) return 'down';
+  return 'flat';
 }
 
 /* ------------- 工具 ------------- */
@@ -1018,7 +1026,7 @@ function showToast(message, type = '') {
  * ============================================================ */
 const App = {
   route: 'employees',
-  filter: { dept: 'all', period: 'week' },
+  filter: { dept: 'all', quarter: 'all' },
 
   init() {
     seedData();
@@ -1310,38 +1318,6 @@ const App = {
     });
   },
 
-  statGridHtml(totalOrders, totalItems, avgScore, avgError, empCount) {
-    const avgPerPerson = empCount ? Math.round(totalItems / empCount) : 0;
-    return `
-      <div class="stat-grid">
-        <div class="stat-card">
-          <div class="stat-icon" style="background:var(--info-soft);color:var(--info)">📋</div>
-          <div class="stat-label">本週訂單處理</div>
-          <div class="stat-value">${totalOrders.toLocaleString()}</div>
-          <div class="stat-meta"><span class="up">↑ 8.2%</span> 較上週</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="background:var(--primary-soft);color:var(--primary)">📦</div>
-          <div class="stat-label">總揀貨件數</div>
-          <div class="stat-value">${totalItems.toLocaleString()}</div>
-          <div class="stat-meta">平均 ${avgPerPerson} 件/人</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="background:var(--success-soft);color:var(--success)">⚡</div>
-          <div class="stat-label">平均效率分數</div>
-          <div class="stat-value">${avgScore}</div>
-          <div class="stat-meta"><span class="up">↑ 2.4</span> 較上週</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="background:var(--warn-soft);color:var(--warn)">⚠️</div>
-          <div class="stat-label">平均錯誤率</div>
-          <div class="stat-value">${avgError}%</div>
-          <div class="stat-meta"><span class="down">↓ 0.3%</span> 較上週</div>
-        </div>
-      </div>
-    `;
-  },
-
   /* ============================================================
    *  績效管理
    * ============================================================ */
@@ -1352,19 +1328,46 @@ const App = {
       ? employees
       : employees.filter(e => e.department === this.filter.dept);
 
-    const totalOrders = filtered.reduce((s, e) => s + e.orders, 0);
-    const totalItems = filtered.reduce((s, e) => s + e.items, 0);
-    const avgScore = filtered.length ? Math.round(filtered.reduce((s,e)=>s+computeScore(e),0) / filtered.length * 10) / 10 : 0;
-    const avgError = filtered.length ? (filtered.reduce((s,e)=>s+e.errorRate,0) / filtered.length).toFixed(2) : '0';
+    const quarter = this.filter.quarter || 'all';
+    const sortKey = quarter === 'all' ? null : quarter;
 
-    // 排序：分數高 → 低
-    const ranked = filtered.map(e => ({ ...e, score: computeScore(e) }))
-      .sort((a, b) => b.score - a.score);
+    const ranked = filtered.map(e => ({
+      ...e,
+      score: computeScore(e),
+      trend: trendFromQuarters(e),
+    })).sort((a, b) => {
+      const av = sortKey ? (getQuarterScore(a, sortKey) ?? -1) : a.score;
+      const bv = sortKey ? (getQuarterScore(b, sortKey) ?? -1) : b.score;
+      return bv - av;
+    });
+
+    const avgScore = ranked.length
+      ? Math.round(ranked.reduce((s, e) => {
+          const v = sortKey ? (getQuarterScore(e, sortKey) ?? 0) : e.score;
+          return s + v;
+        }, 0) / ranked.length * 10) / 10
+      : 0;
+    const excellent = ranked.filter(e => {
+      const v = sortKey ? (getQuarterScore(e, sortKey) ?? 0) : e.score;
+      return v >= 90;
+    }).length;
+    const needsImprov = ranked.filter(e => {
+      const v = sortKey ? (getQuarterScore(e, sortKey) ?? 0) : e.score;
+      return v > 0 && v < 60;
+    }).length;
+    const topPerformer = ranked[0];
 
     const deptMap = Object.fromEntries(departments.map(d => [d.id, d]));
 
+    const cellScore = (val) => {
+      if (val == null) return '<span style="color:var(--text-muted)">—</span>';
+      const cls = val >= 90 ? 'trend-up' : val < 60 ? 'trend-down' : '';
+      return `<span class="${cls}" style="font-weight:600">${val}</span>`;
+    };
+    const highlight = (q) => quarter === q ? 'style="background:var(--primary-soft)"' : '';
+
     const rows = ranked.length === 0 ? `
-      <tr><td colspan="9"><div class="empty"><div class="emoji">📭</div>
+      <tr><td colspan="10"><div class="empty"><div class="emoji">📭</div>
         <div>尚無員工資料</div>
         <div style="font-size:13px;margin-top:4px">點右上「新增員工」開始建立</div>
       </div></td></tr>
@@ -1372,7 +1375,6 @@ const App = {
       const rank = i + 1;
       const rankClass = rank <= 3 ? `rank-${rank}` : 'rank-other';
       const dept = deptMap[e.department];
-      const errClass = e.errorRate < 1 ? 'low' : e.errorRate < 2 ? 'mid' : 'high';
       const scoreClass = e.score >= 90 ? 'score-good' : e.score >= 80 ? 'score-ok' : 'score-bad';
       const trendIcon = e.trend === 'up' ? '<span class="trend-up">↑ 上升</span>'
         : e.trend === 'down' ? '<span class="trend-down">↓ 下降</span>'
@@ -1390,10 +1392,10 @@ const App = {
             </div>
           </td>
           <td>${dept ? `<span class="dept-tag" style="background:${dept.color}22;color:${dept.color}">${escapeHtml(dept.name)}</span>` : '<span style="color:var(--text-muted)">—</span>'}</td>
-          <td><strong>${e.orders}</strong></td>
-          <td>${e.items}</td>
-          <td>${e.avgTime} 分</td>
-          <td><span class="error-rate ${errClass}">${e.errorRate}%</span></td>
+          <td ${highlight('q1')}>${cellScore(getQuarterScore(e, 'q1'))}</td>
+          <td ${highlight('q2')}>${cellScore(getQuarterScore(e, 'q2'))}</td>
+          <td ${highlight('q3')}>${cellScore(getQuarterScore(e, 'q3'))}</td>
+          <td ${highlight('q4')}>${cellScore(getQuarterScore(e, 'q4'))}</td>
           <td>
             <div class="score-cell">
               <div class="score-bar"><div class="${scoreClass}" style="width:${e.score}%"></div></div>
@@ -1418,32 +1420,69 @@ const App = {
       `).join('')}
     `;
 
+    const quarterLabels = { all: '全年', q1: 'Q1', q2: 'Q2', q3: 'Q3', q4: 'Q4' };
+    const quarterPills = ['all','q1','q2','q3','q4'].map(q => `
+      <button class="pill ${quarter === q ? 'active' : ''}" data-quarter="${q}">${quarterLabels[q]}</button>
+    `).join('');
+
+    const currentLabel = quarterLabels[quarter];
+    const tableSubtitle = quarter === 'all'
+      ? `依全年平均分數排序 · 共 ${ranked.length} 人`
+      : `依 ${currentLabel} 分數排序 · 共 ${ranked.length} 人`;
+
     return `
       <div class="page-header">
         <h2>績效管理 <span class="live-dot">即時更新</span></h2>
-        <p>本週倉儲與出貨團隊績效統計</p>
+        <p>各辦公室員工 ${currentLabel} 績效分數（滿分 100 分）</p>
       </div>
-      ${this.statGridHtml(totalOrders, totalItems, avgScore, avgError, filtered.length)}
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-icon" style="background:var(--info-soft);color:var(--info)">📊</div>
+          <div class="stat-label">${currentLabel}平均分數</div>
+          <div class="stat-value">${avgScore}</div>
+          <div class="stat-meta">滿分 100 分</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:var(--success-soft);color:var(--success)">🏆</div>
+          <div class="stat-label">優秀員工（≥ 90）</div>
+          <div class="stat-value">${excellent}</div>
+          <div class="stat-meta">共 ${ranked.length} 人中</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:var(--danger-soft);color:var(--danger)">⚠️</div>
+          <div class="stat-label">待加強（&lt; 60）</div>
+          <div class="stat-value">${needsImprov}</div>
+          <div class="stat-meta">需關注並輔導</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:var(--primary-soft);color:var(--primary)">⭐</div>
+          <div class="stat-label">${currentLabel}最高分</div>
+          <div class="stat-value" style="font-size:22px">${topPerformer ? escapeHtml(topPerformer.name) : '—'}</div>
+          <div class="stat-meta">${topPerformer ? (sortKey ? (getQuarterScore(topPerformer, sortKey) ?? '—') : topPerformer.score) + ' 分' : ''}</div>
+        </div>
+      </div>
       <div class="filter-bar">
         ${deptPills}
         <span style="width:1px;height:24px;background:var(--border);margin:0 4px"></span>
-        <button class="pill ${this.filter.period==='week'?'active':''}" data-period="week">本週</button>
-        <button class="pill ${this.filter.period==='month'?'active':''}" data-period="month">本月</button>
+        ${quarterPills}
         <span class="filter-spacer"></span>
         <button class="btn-add" onclick="App.openEmployeeModal()">+ 新增員工</button>
       </div>
       <div class="table-card">
         <div class="table-card-header">
           <h3>員工績效明細</h3>
-          <p>依效率分數排序 · 共 ${ranked.length} 人</p>
+          <p>${tableSubtitle}</p>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>排名</th><th>員工</th><th>辦公室</th><th>處理訂單</th>
-                <th>揀貨件數</th><th>平均耗時</th><th>錯誤率</th>
-                <th>效率分數</th><th>趨勢</th><th></th>
+                <th>排名</th><th>員工</th><th>辦公室</th>
+                <th ${highlight('q1')}>Q1</th>
+                <th ${highlight('q2')}>Q2</th>
+                <th ${highlight('q3')}>Q3</th>
+                <th ${highlight('q4')}>Q4</th>
+                <th>全年平均</th><th>趨勢</th><th></th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -1460,9 +1499,9 @@ const App = {
         this.render();
       });
     });
-    document.querySelectorAll('.pill[data-period]').forEach(p => {
+    document.querySelectorAll('.pill[data-quarter]').forEach(p => {
       p.addEventListener('click', () => {
-        this.filter.period = p.dataset.period;
+        this.filter.quarter = p.dataset.quarter;
         this.render();
       });
     });
@@ -1478,10 +1517,12 @@ const App = {
     }
     const emp = id ? employees.find(e => e.id === id) : null;
     const isEdit = !!emp;
-    const e = emp || { code:'', name:'', department: departments[0].id, orders:0, items:0, avgTime:5, errorRate:1, trend:'flat' };
+    const e = emp || { code:'', name:'', department: departments[0].id, q1:null, q2:null, q3:null, q4:null };
+
+    const qVal = q => (typeof e[q] === 'number' ? e[q] : '');
 
     this.openModal({
-      title: isEdit ? '編輯員工' : '新增員工',
+      title: isEdit ? '編輯員工績效' : '新增員工',
       bodyHtml: `
         <div class="field-row">
           <div class="field"><label>員工編號</label><input id="f-code" value="${escapeHtml(e.code)}" required></div>
@@ -1493,34 +1534,35 @@ const App = {
             ${departments.map(d => `<option value="${d.id}" ${d.id===e.department?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
           </select>
         </div>
+        <div style="margin:8px 0 4px;font-size:13px;color:var(--text-muted)">季度績效分數（0–100，可空白）</div>
         <div class="field-row">
-          <div class="field"><label>處理訂單</label><input type="number" id="f-orders" min="0" value="${e.orders}"></div>
-          <div class="field"><label>揀貨件數</label><input type="number" id="f-items" min="0" value="${e.items}"></div>
+          <div class="field"><label>Q1</label><input type="number" id="f-q1" min="0" max="100" step="1" value="${qVal('q1')}"></div>
+          <div class="field"><label>Q2</label><input type="number" id="f-q2" min="0" max="100" step="1" value="${qVal('q2')}"></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>平均耗時（分）</label><input type="number" id="f-time" step="0.1" min="0" value="${e.avgTime}"></div>
-          <div class="field"><label>錯誤率（%）</label><input type="number" id="f-error" step="0.1" min="0" value="${e.errorRate}"></div>
-        </div>
-        <div class="field">
-          <label>趨勢</label>
-          <select id="f-trend">
-            <option value="up" ${e.trend==='up'?'selected':''}>↑ 上升</option>
-            <option value="flat" ${e.trend==='flat'?'selected':''}>→ 持平</option>
-            <option value="down" ${e.trend==='down'?'selected':''}>↓ 下降</option>
-          </select>
+          <div class="field"><label>Q3</label><input type="number" id="f-q3" min="0" max="100" step="1" value="${qVal('q3')}"></div>
+          <div class="field"><label>Q4</label><input type="number" id="f-q4" min="0" max="100" step="1" value="${qVal('q4')}"></div>
         </div>
       `,
       onSave: () => {
+        const parseQ = (id) => {
+          const raw = document.getElementById(id).value.trim();
+          if (raw === '') return null;
+          const n = Number(raw);
+          if (!isFinite(n) || n < 0 || n > 100) return 'INVALID';
+          return Math.round(n);
+        };
+        const q1 = parseQ('f-q1'), q2 = parseQ('f-q2'), q3 = parseQ('f-q3'), q4 = parseQ('f-q4');
+        if ([q1,q2,q3,q4].includes('INVALID')) {
+          showToast('季度分數需為 0–100 的整數', 'error');
+          return false;
+        }
         const data = {
           id: emp?.id || uid(),
           code: document.getElementById('f-code').value.trim(),
           name: document.getElementById('f-name').value.trim(),
           department: document.getElementById('f-dept').value,
-          orders: +document.getElementById('f-orders').value || 0,
-          items: +document.getElementById('f-items').value || 0,
-          avgTime: +document.getElementById('f-time').value || 0,
-          errorRate: +document.getElementById('f-error').value || 0,
-          trend: document.getElementById('f-trend').value,
+          q1, q2, q3, q4,
         };
         if (!data.code || !data.name) { showToast('請填寫員工編號與姓名', 'error'); return false; }
         const list = Store.get(Store.KEYS.employees, []);
@@ -1583,8 +1625,14 @@ const App = {
       </div>
     `).join('');
 
+    const cellQ = (v) => {
+      if (v == null) return '<span style="color:var(--text-muted)">—</span>';
+      const cls = v >= 90 ? 'trend-up' : v < 60 ? 'trend-down' : '';
+      return `<span class="${cls}" style="font-weight:600">${v}</span>`;
+    };
+
     const memberRows = employees.length === 0
-      ? `<tr><td colspan="6"><div class="empty"><div class="emoji">📭</div>此辦公室目前沒有成員</div></td></tr>`
+      ? `<tr><td colspan="7"><div class="empty"><div class="emoji">📭</div>此辦公室目前沒有成員</div></td></tr>`
       : employees.map(e => {
           const score = computeScore(e);
           const scoreClass = score >= 90 ? 'score-good' : score >= 80 ? 'score-ok' : 'score-bad';
@@ -1599,10 +1647,10 @@ const App = {
                   </div>
                 </div>
               </td>
-              <td><strong>${e.orders}</strong></td>
-              <td>${e.items}</td>
-              <td>${e.avgTime} 分</td>
-              <td>${e.errorRate}%</td>
+              <td>${cellQ(getQuarterScore(e, 'q1'))}</td>
+              <td>${cellQ(getQuarterScore(e, 'q2'))}</td>
+              <td>${cellQ(getQuarterScore(e, 'q3'))}</td>
+              <td>${cellQ(getQuarterScore(e, 'q4'))}</td>
               <td>
                 <div class="score-cell">
                   <div class="score-bar"><div class="${scoreClass}" style="width:${score}%"></div></div>
@@ -1625,13 +1673,13 @@ const App = {
       ${sectionTables}
       <div class="table-card">
         <div class="table-card-header">
-          <h3>${escapeHtml(dept.name)}成員</h3>
-          <p>共 ${employees.length} 人</p>
+          <h3>${escapeHtml(dept.name)}成員績效</h3>
+          <p>共 ${employees.length} 人 · 滿分 100 分</p>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>員工</th><th>處理訂單</th><th>件數</th><th>平均耗時</th><th>錯誤率</th><th>效率分數</th></tr>
+              <tr><th>員工</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>全年平均</th></tr>
             </thead>
             <tbody>${memberRows}</tbody>
           </table>
