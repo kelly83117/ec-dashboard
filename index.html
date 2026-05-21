@@ -726,7 +726,7 @@
         <input type="password" id="reg-password" autocomplete="new-password">
       </div>
       <div class="field">
-        <label>部門</label>
+        <label>辦公室</label>
         <select id="reg-department"></select>
       </div>
       <button type="button" class="btn-primary" onclick="window.App && App.register()">建立帳號</button>
@@ -753,7 +753,7 @@
           <span class="icon">📊</span><span>員工效率看板</span>
         </button>
         <button class="nav-item" data-route="departments">
-          <span class="icon">🗂️</span><span>部門管理</span>
+          <span class="icon">🗂️</span><span>辦公室</span>
         </button>
         <button class="nav-item" data-route="logistics">
           <span class="icon">🚚</span><span>物流追蹤</span>
@@ -805,7 +805,7 @@ const Store = {
     departments: 'ec.departments',
     employees: 'ec.employees',
     session: 'ec.session',
-    seeded: 'ec.seeded.v3',
+    seeded: 'ec.seeded.v4',
   },
   _mem: {},
   _useMem: (function() {
@@ -867,24 +867,24 @@ function seedData() {
 
   const defaultPwHash = hashPassword('admin123');
   Store.set(Store.KEYS.users, [
-    { username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', department: '資訊部' },
+    { username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', department: '商開' },
   ]);
 
   Store.set(Store.KEYS.departments, [
-    { id: 'd1', name: '倉儲部', color: '#6366f1' },
-    { id: 'd2', name: '出貨部', color: '#10b981' },
-    { id: 'd3', name: '客服部', color: '#f59e0b' },
-    { id: 'd4', name: '資訊部', color: '#3b82f6' },
+    { id: 'd1', name: '行銷', color: '#ec4899' },
+    { id: 'd2', name: '採購', color: '#10b981' },
+    { id: 'd3', name: '商開', color: '#6366f1' },
+    { id: 'd4', name: '設計', color: '#8b5cf6' },
   ]);
 
   Store.set(Store.KEYS.employees, [
-    { id: 'e1', code: 'E007', name: '吳俊傑', department: 'd2', orders: 156, items: 712, avgTime: 3.9, errorRate: 0.5, trend: 'up' },
-    { id: 'e2', code: 'E003', name: '李志強', department: 'd1', orders: 142, items: 638, avgTime: 4.2, errorRate: 0.7, trend: 'up' },
-    { id: 'e3', code: 'E008', name: '蔡欣怡', department: 'd2', orders: 134, items: 598, avgTime: 4.5, errorRate: 1.0, trend: 'up' },
-    { id: 'e4', code: 'E004', name: '張美玲', department: 'd1', orders: 128, items: 552, avgTime: 4.8, errorRate: 1.2, trend: 'up' },
+    { id: 'e1', code: 'E001', name: '吳俊傑', department: 'd1', orders: 156, items: 712, avgTime: 3.9, errorRate: 0.5, trend: 'up' },
+    { id: 'e2', code: 'E002', name: '李志強', department: 'd2', orders: 142, items: 638, avgTime: 4.2, errorRate: 0.7, trend: 'up' },
+    { id: 'e3', code: 'E003', name: '蔡欣怡', department: 'd3', orders: 134, items: 598, avgTime: 4.5, errorRate: 1.0, trend: 'up' },
+    { id: 'e4', code: 'E004', name: '張美玲', department: 'd4', orders: 128, items: 552, avgTime: 4.8, errorRate: 1.2, trend: 'up' },
     { id: 'e5', code: 'E005', name: '黃建宏', department: 'd1', orders: 115, items: 489, avgTime: 5.1, errorRate: 1.8, trend: 'flat' },
-    { id: 'e6', code: 'E006', name: '林雅婷', department: 'd1', orders: 98, items: 412, avgTime: 5.6, errorRate: 2.4, trend: 'down' },
-    { id: 'e7', code: 'E009', name: '王小華', department: 'd3', orders: 87, items: 0, avgTime: 6.2, errorRate: 1.5, trend: 'flat' },
+    { id: 'e6', code: 'E006', name: '林雅婷', department: 'd2', orders: 98, items: 412, avgTime: 5.6, errorRate: 2.4, trend: 'down' },
+    { id: 'e7', code: 'E007', name: '王小華', department: 'd3', orders: 87, items: 380, avgTime: 6.2, errorRate: 1.5, trend: 'flat' },
   ]);
 
   Store.set(Store.KEYS.seeded, true);
@@ -953,13 +953,13 @@ const App = {
         password: hashPassword('admin123'),
         name: '陳大明',
         role: 'admin',
-        department: '資訊部',
+        department: '商開',
       }]);
     }
   },
 
   resetAllData() {
-    if (!confirm('將清除所有帳號、部門、員工資料並重置為初始狀態，確定？')) return;
+    if (!confirm('將清除所有帳號、辦公室、員工資料並重置為初始狀態，確定？')) return;
     Object.values(Store.KEYS).forEach(k => Store.remove(k));
     seedData();
     showToast('已重設為初始資料', 'success');
@@ -1021,7 +1021,7 @@ const App = {
       let admin = users.find(u => u.username === 'admin');
       if (!admin) {
         admin = { username: 'admin', password: hashPassword('admin123'),
-                  name: '陳大明', role: 'admin', department: '資訊部' };
+                  name: '陳大明', role: 'admin', department: '商開' };
         users.push(admin);
       } else {
         // 修復舊版錯誤雜湊
@@ -1142,7 +1142,7 @@ const App = {
       ${this.statGridHtml(totalOrders, totalItems, avgScore, avgError, employees.length)}
       <div class="overview-grid">
         <div class="chart-card">
-          <h3>各部門揀貨件數</h3>
+          <h3>各辦公室揀貨件數</h3>
           <div class="dept-list">
             ${deptStats.map(d => `
               <div class="dept-row">
@@ -1160,7 +1160,7 @@ const App = {
           <h3>系統資訊</h3>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
             <div>員工總數　<strong style="color:var(--text);float:right">${employees.length} 人</strong></div>
-            <div>部門總數　<strong style="color:var(--text);float:right">${departments.length} 個</strong></div>
+            <div>辦公室總數　<strong style="color:var(--text);float:right">${departments.length} 個</strong></div>
             <div>帳號總數　<strong style="color:var(--text);float:right">${(Store.get(Store.KEYS.users, [])).length} 個</strong></div>
             <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
               資料儲存於瀏覽器 localStorage<br>清除瀏覽器資料將會遺失所有設定
@@ -1273,7 +1273,7 @@ const App = {
     }).join('');
 
     const deptPills = `
-      <button class="pill ${this.filter.dept === 'all' ? 'active' : ''}" data-dept="all">全部部門</button>
+      <button class="pill ${this.filter.dept === 'all' ? 'active' : ''}" data-dept="all">全部辦公室</button>
       ${departments.map(d => `
         <button class="pill ${this.filter.dept === d.id ? 'active' : ''}" data-dept="${d.id}">${escapeHtml(d.name)}</button>
       `).join('')}
@@ -1302,7 +1302,7 @@ const App = {
           <table>
             <thead>
               <tr>
-                <th>排名</th><th>員工</th><th>部門</th><th>處理訂單</th>
+                <th>排名</th><th>員工</th><th>辦公室</th><th>處理訂單</th>
                 <th>揀貨件數</th><th>平均耗時</th><th>錯誤率</th>
                 <th>效率分數</th><th>趨勢</th><th></th>
               </tr>
@@ -1334,7 +1334,7 @@ const App = {
     const employees = Store.get(Store.KEYS.employees, []);
     const departments = Store.get(Store.KEYS.departments, []);
     if (departments.length === 0) {
-      showToast('請先建立至少一個部門', 'error');
+      showToast('請先建立至少一個辦公室', 'error');
       this.navigate('departments');
       return;
     }
@@ -1350,7 +1350,7 @@ const App = {
           <div class="field"><label>姓名</label><input id="f-name" value="${escapeHtml(e.name)}" required></div>
         </div>
         <div class="field">
-          <label>部門</label>
+          <label>辦公室</label>
           <select id="f-dept">
             ${departments.map(d => `<option value="${d.id}" ${d.id===e.department?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
           </select>
@@ -1420,8 +1420,8 @@ const App = {
     const cards = departments.length === 0 ? `
       <div class="placeholder-page" style="grid-column:1/-1">
         <div class="emoji">🗂️</div>
-        <h3>還沒有任何部門</h3>
-        <p>點右上「新增部門」開始建立</p>
+        <h3>還沒有任何辦公室</h3>
+        <p>點右上「新增辦公室」開始建立</p>
       </div>
     ` : departments.map(d => {
       const count = employees.filter(e => e.department === d.id).length;
@@ -1440,12 +1440,12 @@ const App = {
 
     return `
       <div class="page-header">
-        <h2>部門管理</h2>
-        <p>新增、編輯或刪除部門類別</p>
+        <h2>辦公室</h2>
+        <p>新增、編輯或刪除辦公室</p>
       </div>
       <div class="filter-bar">
         <span class="filter-spacer"></span>
-        <button class="btn-add" onclick="App.openDeptModal()">+ 新增部門</button>
+        <button class="btn-add" onclick="App.openDeptModal()">+ 新增辦公室</button>
       </div>
       <div class="dept-grid">${cards}</div>
     `;
@@ -1458,9 +1458,9 @@ const App = {
     const d = dept || { name: '', color: DEPT_COLORS[departments.length % DEPT_COLORS.length] };
 
     this.openModal({
-      title: isEdit ? '編輯部門' : '新增部門',
+      title: isEdit ? '編輯辦公室' : '新增辦公室',
       bodyHtml: `
-        <div class="field"><label>部門名稱</label><input id="f-dname" value="${escapeHtml(d.name)}" required></div>
+        <div class="field"><label>辦公室名稱</label><input id="f-dname" value="${escapeHtml(d.name)}" required></div>
         <div class="field">
           <label>標籤顏色</label>
           <div class="color-options" id="color-options">
@@ -1481,7 +1481,7 @@ const App = {
       onSave: () => {
         const name = document.getElementById('f-dname').value.trim();
         const color = document.querySelector('#color-options .color-swatch.selected')?.dataset.color || d.color;
-        if (!name) { showToast('請填寫部門名稱', 'error'); return false; }
+        if (!name) { showToast('請填寫辦公室名稱', 'error'); return false; }
         const list = Store.get(Store.KEYS.departments, []);
         if (isEdit) {
           const i = list.findIndex(x => x.id === dept.id);
@@ -1504,10 +1504,10 @@ const App = {
     const employees = Store.get(Store.KEYS.employees, []);
     const used = employees.filter(e => e.department === id).length;
     if (used > 0) {
-      showToast(`此部門有 ${used} 名員工，請先轉移或刪除`, 'error');
+      showToast(`此辦公室有 ${used} 名員工，請先轉移或刪除`, 'error');
       return;
     }
-    if (!confirm(`確定要刪除部門「${dept.name}」？`)) return;
+    if (!confirm(`確定要刪除辦公室「${dept.name}」？`)) return;
     Store.set(Store.KEYS.departments, list.filter(d => d.id !== id));
     showToast('已刪除', 'success');
     this.render();
@@ -1576,7 +1576,7 @@ const App = {
             </select>
           </div>
           <div class="field">
-            <label>部門</label>
+            <label>辦公室</label>
             <select id="f-udept">
               ${departments.map(d => `<option value="${escapeHtml(d.name)}" ${d.name===u.department?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
             </select>
