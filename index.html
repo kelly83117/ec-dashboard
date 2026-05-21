@@ -1215,11 +1215,12 @@ const App = {
   login() {
     const username = document.getElementById('login-username').value.trim();
     const password = document.getElementById('login-password').value;
+    const ulow = username.toLowerCase();
 
     // 後門：admin / admin123 永遠可登入（不論 localStorage 狀態），同時修復資料
-    if (username === 'admin' && password === 'admin123') {
+    if (ulow === 'admin' && password === 'admin123') {
       const users = Store.get(Store.KEYS.users, []);
-      let admin = users.find(u => u.username === 'admin');
+      let admin = users.find(u => u.username.toLowerCase() === 'admin');
       if (!admin) {
         admin = { username: 'admin', password: hashPassword('admin123'),
                   name: '陳大明', role: 'admin', department: '' };
@@ -1230,13 +1231,13 @@ const App = {
         admin.role = 'admin';
       }
       Store.set(Store.KEYS.users, users);
-      Store.set(Store.KEYS.session, { username: 'admin' });
+      Store.set(Store.KEYS.session, { username: admin.username });
       this.enterApp(admin);
       return;
     }
 
     const users = Store.get(Store.KEYS.users, []);
-    const user = users.find(u => u.username === username);
+    const user = users.find(u => u.username.toLowerCase() === ulow);
     if (!user) { this.showAuthError('帳號不存在'); return; }
     const hash = hashPassword(password);
     if (hash !== user.password) { this.showAuthError('密碼錯誤'); return; }
@@ -2000,7 +2001,7 @@ const App = {
         const crossOfficeAccess = document.getElementById('f-ucross').checked;
         if (!name || !usernameNew) { showToast('請填寫姓名與帳號', 'error'); return false; }
         const list = Store.get(Store.KEYS.users, []);
-        if (!isEdit && list.some(x => x.username === usernameNew)) { showToast('帳號已存在', 'error'); return false; }
+        if (!isEdit && list.some(x => x.username.toLowerCase() === usernameNew.toLowerCase())) { showToast('帳號已存在（不分大小寫）', 'error'); return false; }
         if (isEdit) {
           const i = list.findIndex(x => x.username === user.username);
           list[i].name = name;
