@@ -868,12 +868,20 @@ function hashPassword(pw) {
 function seedData() {
   const defaultPwHash = hashPassword('admin123');
 
-  // Users：若沒有任何 admin 帳號才補上預設 admin（保留你自己加的帳號）
+  // Users：若沒有任何 admin 帳號才補上預設 admin；同時補齊缺漏的 Q1–Q4 欄位
   const users = Store.get(Store.KEYS.users, []);
+  let usersChanged = false;
   if (!users.some(u => u.role === 'admin')) {
-    users.push({ username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', department: '' });
-    Store.set(Store.KEYS.users, users);
+    users.push({ username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', department: '', q1: null, q2: null, q3: null, q4: null });
+    usersChanged = true;
   }
+  users.forEach(u => {
+    if (!('q1' in u)) { u.q1 = null; usersChanged = true; }
+    if (!('q2' in u)) { u.q2 = null; usersChanged = true; }
+    if (!('q3' in u)) { u.q3 = null; usersChanged = true; }
+    if (!('q4' in u)) { u.q4 = null; usersChanged = true; }
+  });
+  if (usersChanged) Store.set(Store.KEYS.users, users);
 
   // Departments：完全沒有才補預設 4 個辦公室
   const departments = Store.get(Store.KEYS.departments);
@@ -886,32 +894,8 @@ function seedData() {
     ]);
   }
 
-  // Employees：完全沒有才放範例資料；有資料則就地遷移舊欄位
-  let employees = Store.get(Store.KEYS.employees);
-  if (!employees) {
-    Store.set(Store.KEYS.employees, [
-      { id: 'e1', code: 'E001', name: '吳俊傑', department: 'd1', q1: 82, q2: 86, q3: 89, q4: 92 },
-      { id: 'e2', code: 'E002', name: '李志強', department: 'd2', q1: 78, q2: 82, q3: 85, q4: 87 },
-      { id: 'e3', code: 'E003', name: '蔡欣怡', department: 'd3', q1: 90, q2: 91, q3: 93, q4: 95 },
-      { id: 'e4', code: 'E004', name: '張美玲', department: 'd4', q1: 72, q2: 75, q3: 78, q4: 81 },
-      { id: 'e5', code: 'E005', name: '黃建宏', department: 'd1', q1: 65, q2: 68, q3: 72, q4: 70 },
-      { id: 'e6', code: 'E006', name: '林雅婷', department: 'd2', q1: 58, q2: 62, q3: 60, q4: 64 },
-      { id: 'e7', code: 'E007', name: '王小華', department: 'd3', q1: 88, q2: 85, q3: 90, q4: 89 },
-    ]);
-  } else {
-    let changed = false;
-    employees.forEach(e => {
-      if ('orders' in e || 'items' in e || 'avgTime' in e || 'errorRate' in e || 'trend' in e) {
-        delete e.orders; delete e.items; delete e.avgTime; delete e.errorRate; delete e.trend;
-        if (typeof e.q1 !== 'number') e.q1 = null;
-        if (typeof e.q2 !== 'number') e.q2 = null;
-        if (typeof e.q3 !== 'number') e.q3 = null;
-        if (typeof e.q4 !== 'number') e.q4 = null;
-        changed = true;
-      }
-    });
-    if (changed) Store.set(Store.KEYS.employees, employees);
-  }
+  // 績效管理已直接讀取使用者帳號，不再需要獨立的 employees 資料；
+  // 舊版的 ec.employees 留在 localStorage 不會影響運作。
 
   Store.set(Store.KEYS.seeded, true);
 }
@@ -1646,18 +1630,20 @@ const App = {
    * ============================================================ */
   viewEmployees() {
     const departments = Store.get(Store.KEYS.departments, []);
-    const employees = Store.get(Store.KEYS.employees, []);
-    const filtered = this.filter.dept === 'all'
-      ? employees
-      : employees.filter(e => e.department === this.filter.dept);
+    const users = Store.get(Store.KEYS.users, []);
+    const deptById = Object.fromEntries(departments.map(d => [d.id, d]));
+    const filterDept = this.filter.dept === 'all' ? null : deptById[this.filter.dept];
+    const filtered = !filterDept
+      ? users
+      : users.filter(u => u.department === filterDept.name);
 
     const quarter = this.filter.quarter || 'all';
     const sortKey = quarter === 'all' ? null : quarter;
 
-    const ranked = filtered.map(e => ({
-      ...e,
-      score: computeScore(e),
-      trend: trendFromQuarters(e),
+    const ranked = filtered.map(u => ({
+      ...u,
+      score: computeScore(u),
+      trend: trendFromQuarters(u),
     })).sort((a, b) => {
       const av = sortKey ? (getQuarterScore(a, sortKey) ?? -1) : a.score;
       const bv = sortKey ? (getQuarterScore(b, sortKey) ?? -1) : b.score;
@@ -1680,7 +1666,7 @@ const App = {
     }).length;
     const topPerformer = ranked[0];
 
-    const deptMap = Object.fromEntries(departments.map(d => [d.id, d]));
+    const deptByName = Object.fromEntries(departments.map(d => [d.name, d]));
 
     const cellScore = (val) => {
       if (val == null) return '<span style="color:var(--text-muted)">—</span>';
@@ -1692,44 +1678,46 @@ const App = {
     const rows = ranked.length === 0 ? `
       <tr><td colspan="10"><div class="empty"><div class="emoji">📭</div>
         <div>尚無員工資料</div>
-        <div style="font-size:13px;margin-top:4px">點右上「新增員工」開始建立</div>
+        <div style="font-size:13px;margin-top:4px">請先到「帳號管理」建立員工帳號</div>
       </div></td></tr>
-    ` : ranked.map((e, i) => {
+    ` : ranked.map((u, i) => {
       const rank = i + 1;
       const rankClass = rank <= 3 ? `rank-${rank}` : 'rank-other';
-      const dept = deptMap[e.department];
-      const scoreClass = e.score >= 90 ? 'score-good' : e.score >= 80 ? 'score-ok' : 'score-bad';
-      const trendIcon = e.trend === 'up' ? '<span class="trend-up">↑ 上升</span>'
-        : e.trend === 'down' ? '<span class="trend-down">↓ 下降</span>'
+      const dept = deptByName[u.department];
+      const scoreClass = u.score >= 90 ? 'score-good' : u.score >= 80 ? 'score-ok' : 'score-bad';
+      const trendIcon = u.trend === 'up' ? '<span class="trend-up">↑ 上升</span>'
+        : u.trend === 'down' ? '<span class="trend-down">↓ 下降</span>'
         : '<span class="trend-flat">→ 持平</span>';
+      const deptCell = dept
+        ? `<span class="dept-tag" style="background:${dept.color}22;color:${dept.color}">${escapeHtml(dept.name)}</span>`
+        : `<span style="color:var(--text-muted)">${escapeHtml(u.department || '全公司')}</span>`;
       return `
         <tr>
           <td><span class="rank-badge ${rankClass}">${rank}</span></td>
           <td>
             <div class="employee-cell">
-              <div class="employee-avatar">${escapeHtml(e.name.slice(0,1))}</div>
+              <div class="employee-avatar">${escapeHtml(u.name.slice(0,1))}</div>
               <div>
-                <div class="employee-name">${escapeHtml(e.name)}</div>
-                <div class="employee-code">${escapeHtml(e.code)}</div>
+                <div class="employee-name">${escapeHtml(u.name)}</div>
+                <div class="employee-code">@${escapeHtml(u.username)}</div>
               </div>
             </div>
           </td>
-          <td>${dept ? `<span class="dept-tag" style="background:${dept.color}22;color:${dept.color}">${escapeHtml(dept.name)}</span>` : '<span style="color:var(--text-muted)">—</span>'}</td>
-          <td ${highlight('q1')}>${cellScore(getQuarterScore(e, 'q1'))}</td>
-          <td ${highlight('q2')}>${cellScore(getQuarterScore(e, 'q2'))}</td>
-          <td ${highlight('q3')}>${cellScore(getQuarterScore(e, 'q3'))}</td>
-          <td ${highlight('q4')}>${cellScore(getQuarterScore(e, 'q4'))}</td>
+          <td>${deptCell}</td>
+          <td ${highlight('q1')}>${cellScore(getQuarterScore(u, 'q1'))}</td>
+          <td ${highlight('q2')}>${cellScore(getQuarterScore(u, 'q2'))}</td>
+          <td ${highlight('q3')}>${cellScore(getQuarterScore(u, 'q3'))}</td>
+          <td ${highlight('q4')}>${cellScore(getQuarterScore(u, 'q4'))}</td>
           <td>
             <div class="score-cell">
-              <div class="score-bar"><div class="${scoreClass}" style="width:${e.score}%"></div></div>
-              <span class="score-value">${e.score}</span>
+              <div class="score-bar"><div class="${scoreClass}" style="width:${u.score}%"></div></div>
+              <span class="score-value">${u.score}</span>
             </div>
           </td>
           <td>${trendIcon}</td>
           <td>
             <div class="row-actions">
-              <button class="icon-btn" title="編輯" onclick="App.openEmployeeModal('${e.id}')">✏️</button>
-              <button class="icon-btn danger" title="刪除" onclick="App.deleteEmployee('${e.id}')">🗑️</button>
+              <button class="icon-btn" title="編輯分數" onclick="App.openScoreModal('${escapeHtml(u.username)}')">✏️</button>
             </div>
           </td>
         </tr>
@@ -1789,7 +1777,7 @@ const App = {
         <span style="width:1px;height:24px;background:var(--border);margin:0 4px"></span>
         ${quarterPills}
         <span class="filter-spacer"></span>
-        <button class="btn-add" onclick="App.openEmployeeModal()">+ 新增員工</button>
+        ${this.currentUser.role === 'admin' ? `<button class="btn-ghost" onclick="App.navigate('users')">前往帳號管理 ↗</button>` : ''}
       </div>
       <div class="table-card">
         <div class="table-card-header">
@@ -1839,34 +1827,25 @@ const App = {
     });
   },
 
-  /* ------------- 員工 Modal ------------- */
-  openEmployeeModal(id) {
-    const employees = Store.get(Store.KEYS.employees, []);
-    const departments = Store.get(Store.KEYS.departments, []);
-    if (departments.length === 0) {
-      showToast('系統未設定任何辦公室', 'error');
-      return;
-    }
-    const emp = id ? employees.find(e => e.id === id) : null;
-    const isEdit = !!emp;
-    const e = emp || { code:'', name:'', department: departments[0].id, q1:null, q2:null, q3:null, q4:null };
-
-    const qVal = q => (typeof e[q] === 'number' ? e[q] : '');
+  /* ------------- 績效分數 Modal（編輯指定使用者的 Q1–Q4） ------------- */
+  openScoreModal(username) {
+    const users = Store.get(Store.KEYS.users, []);
+    const u = users.find(x => x.username === username);
+    if (!u) { showToast('找不到此帳號', 'error'); return; }
+    const qVal = q => (typeof u[q] === 'number' ? u[q] : '');
+    const deptLabel = u.department || '全公司';
 
     this.openModal({
-      title: isEdit ? '編輯員工績效' : '新增員工',
+      title: `編輯績效：${u.name}`,
       bodyHtml: `
-        <div class="field-row">
-          <div class="field"><label>員工編號</label><input id="f-code" value="${escapeHtml(e.code)}" required></div>
-          <div class="field"><label>姓名</label><input id="f-name" value="${escapeHtml(e.name)}" required></div>
-        </div>
         <div class="field">
-          <label>辦公室</label>
-          <select id="f-dept">
-            ${departments.map(d => `<option value="${d.id}" ${d.id===e.department?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
-          </select>
+          <label>帳號</label>
+          <input value="@${escapeHtml(u.username)} · ${escapeHtml(u.name)} · ${escapeHtml(deptLabel)}" disabled
+            style="background:var(--bg);color:var(--text-muted)">
         </div>
-        <div style="margin:8px 0 4px;font-size:13px;color:var(--text-muted)">季度績效分數（0–100，可空白）</div>
+        <div style="margin:4px 0;font-size:13px;color:var(--text-muted)">
+          季度績效分數（0–100，可空白；帳號其他欄位請至「帳號管理」修改）
+        </div>
         <div class="field-row">
           <div class="field"><label>Q1</label><input type="number" id="f-q1" min="0" max="100" step="1" value="${qVal('q1')}"></div>
           <div class="field"><label>Q2</label><input type="number" id="f-q2" min="0" max="100" step="1" value="${qVal('q2')}"></div>
@@ -1889,37 +1868,16 @@ const App = {
           showToast('季度分數需為 0–100 的整數', 'error');
           return false;
         }
-        const data = {
-          id: emp?.id || uid(),
-          code: document.getElementById('f-code').value.trim(),
-          name: document.getElementById('f-name').value.trim(),
-          department: document.getElementById('f-dept').value,
-          q1, q2, q3, q4,
-        };
-        if (!data.code || !data.name) { showToast('請填寫員工編號與姓名', 'error'); return false; }
-        const list = Store.get(Store.KEYS.employees, []);
-        if (isEdit) {
-          const i = list.findIndex(x => x.id === emp.id);
-          list[i] = data;
-        } else {
-          list.push(data);
-        }
-        Store.set(Store.KEYS.employees, list);
-        showToast(isEdit ? '已更新' : '已新增', 'success');
+        const list = Store.get(Store.KEYS.users, []);
+        const i = list.findIndex(x => x.username === username);
+        if (i < 0) { showToast('找不到此帳號', 'error'); return false; }
+        list[i].q1 = q1; list[i].q2 = q2; list[i].q3 = q3; list[i].q4 = q4;
+        Store.set(Store.KEYS.users, list);
+        showToast('已更新', 'success');
         this.render();
         return true;
       },
     });
-  },
-
-  deleteEmployee(id) {
-    const list = Store.get(Store.KEYS.employees, []);
-    const emp = list.find(e => e.id === id);
-    if (!emp) return;
-    if (!confirm(`確定要刪除「${emp.name}」嗎？`)) return;
-    Store.set(Store.KEYS.employees, list.filter(e => e.id !== id));
-    showToast('已刪除', 'success');
-    this.render();
   },
 
   /* ============================================================
@@ -1939,7 +1897,7 @@ const App = {
         <p style="font-size:13px;color:var(--text-muted);margin-top:8px">請聯絡管理員開啟「跨辦公室檢視」權限</p>
       </div>`;
     }
-    const employees = (Store.get(Store.KEYS.employees, [])).filter(e => e.department === deptId);
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => u.department === dept.name);
     const color = dept.color;
 
     const statCards = cfg.stats.map(s => `
@@ -1983,26 +1941,26 @@ const App = {
       return `<span class="${cls}" style="font-weight:600">${v}</span>`;
     };
 
-    const memberRows = employees.length === 0
-      ? `<tr><td colspan="7"><div class="empty"><div class="emoji">📭</div>此辦公室目前沒有成員</div></td></tr>`
-      : employees.map(e => {
-          const score = computeScore(e);
+    const memberRows = members.length === 0
+      ? `<tr><td colspan="6"><div class="empty"><div class="emoji">📭</div>此辦公室目前沒有成員<div style="font-size:13px;margin-top:4px;color:var(--text-muted)">請至「帳號管理」建立帳號並設定辦公室</div></div></td></tr>`
+      : members.map(u => {
+          const score = computeScore(u);
           const scoreClass = score >= 90 ? 'score-good' : score >= 80 ? 'score-ok' : 'score-bad';
           return `
             <tr>
               <td>
                 <div class="employee-cell">
-                  <div class="employee-avatar">${escapeHtml(e.name.slice(0,1))}</div>
+                  <div class="employee-avatar">${escapeHtml(u.name.slice(0,1))}</div>
                   <div>
-                    <div class="employee-name">${escapeHtml(e.name)}</div>
-                    <div class="employee-code">${escapeHtml(e.code)}</div>
+                    <div class="employee-name">${escapeHtml(u.name)}</div>
+                    <div class="employee-code">@${escapeHtml(u.username)}</div>
                   </div>
                 </div>
               </td>
-              <td>${cellQ(getQuarterScore(e, 'q1'))}</td>
-              <td>${cellQ(getQuarterScore(e, 'q2'))}</td>
-              <td>${cellQ(getQuarterScore(e, 'q3'))}</td>
-              <td>${cellQ(getQuarterScore(e, 'q4'))}</td>
+              <td>${cellQ(getQuarterScore(u, 'q1'))}</td>
+              <td>${cellQ(getQuarterScore(u, 'q2'))}</td>
+              <td>${cellQ(getQuarterScore(u, 'q3'))}</td>
+              <td>${cellQ(getQuarterScore(u, 'q4'))}</td>
               <td>
                 <div class="score-cell">
                   <div class="score-bar"><div class="${scoreClass}" style="width:${score}%"></div></div>
@@ -2027,7 +1985,7 @@ const App = {
       <div class="table-card">
         <div class="table-card-header">
           <h3>${escapeHtml(dept.name)}成員績效</h3>
-          <p>共 ${employees.length} 人 · 滿分 100 分</p>
+          <p>共 ${members.length} 人 · 滿分 100 分 · 資料來源：帳號管理</p>
         </div>
         <div class="table-wrap">
           <table>
