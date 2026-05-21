@@ -952,28 +952,109 @@ const PLATFORMS = [
 ];
 const fmtNTD = n => 'NT$ ' + Math.round(n).toLocaleString();
 
-// 把舊版 (today / deltaPct / monthTotal) 平台資料遷移到新版 (today/yesterday/week/month)
+/* ------------- 日期工具 ------------- */
+function toDateStr(d) {
+  // local-time YYYY-MM-DD (避免 toISOString 的 UTC 偏差導致跨日)
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function eachDay(startStr, endStr, fn) {
+  const start = new Date(startStr + 'T00:00:00');
+  const end = new Date(endStr + 'T00:00:00');
+  for (let d = start; d <= end; d = addDays(d, 1)) fn(toDateStr(d));
+}
+function sumDaily(daily, startStr, endStr) {
+  if (!daily || !startStr || !endStr || startStr > endStr) return 0;
+  let s = 0; eachDay(startStr, endStr, k => { s += +daily[k] || 0; });
+  return s;
+}
+function getRangeDates(range, customStart, customEnd) {
+  const now = new Date();
+  const today = toDateStr(now);
+  if (range === 'today')     return { start: today, end: today, label: '今日' };
+  if (range === 'yesterday') { const y = toDateStr(addDays(now, -1)); return { start: y, end: y, label: '昨日' }; }
+  if (range === 'week') {
+    // 本週週一 → 今天
+    const dow = now.getDay() || 7; // Sun=0→7, Mon=1, ... Sat=6
+    return { start: toDateStr(addDays(now, -(dow - 1))), end: today, label: '本週' };
+  }
+  if (range === 'month') {
+    const m1 = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { start: toDateStr(m1), end: today, label: '本月' };
+  }
+  if (range === 'custom') {
+    const s = customStart || toDateStr(addDays(now, -6));
+    const e = customEnd   || today;
+    const label = (s === e) ? s.replace(/-/g, '/') : `${s.replace(/-/g, '/')} ~ ${e.replace(/-/g, '/')}`;
+    return { start: s, end: e, label };
+  }
+  return { start: today, end: today, label: '今日' };
+}
+
+/* ------------- 平台資料遷移：舊 schema → 每日序列 daily{} ------------- */
 function migratePlatforms(platforms) {
   if (!Array.isArray(platforms)) return platforms;
   let changed = false;
   const out = platforms.map(p => {
-    if ('deltaPct' in p || 'monthTotal' in p) {
-      changed = true;
-      const today = +p.today || 0;
-      const delta = +p.deltaPct || 0;
-      const month = +p.monthTotal || +p.month || 0;
-      const yesterday = (1 + delta / 100) !== 0 ? today / (1 + delta / 100) : today;
-      return {
-        name: p.name, icon: p.icon, color: p.color,
-        today,
-        yesterday: Math.round(yesterday),
-        week: Math.round(month * 7 / 30),
-        month: Math.round(month),
-      };
+    // 已是新版（含 daily 物件且至少有資料）
+    if (p.daily && typeof p.daily === 'object' && Object.keys(p.daily).length > 0) {
+      return p;
     }
-    return p;
+    changed = true;
+    // 從舊欄位推估每日資料
+    const today = +p.today || 0;
+    const monthTotal = +p.month || +p.monthTotal || (today * 30);
+    let yesterday = +p.yesterday;
+    if (!isFinite(yesterday) || yesterday < 0) {
+      const delta = +p.deltaPct || 0;
+      yesterday = (1 + delta / 100) !== 0 ? today / (1 + delta / 100) : today;
+    }
+    const avgDaily = monthTotal / 30;
+    const seedBase = p.name.split('').reduce((s, c) => s + c.charCodeAt(0), 0);
+    const daily = {};
+    const now = new Date();
+    for (let i = 89; i >= 0; i--) {
+      const key = toDateStr(addDays(now, -i));
+      const s = Math.sin(seedBase * 0.013 + i * 0.731) * 43758.5453;
+      const r = Math.abs(s - Math.floor(s)); // 0~1
+      const factor = 0.55 + r * 0.9; // 0.55 ~ 1.45
+      daily[key] = Math.round(avgDaily * factor);
+    }
+    daily[toDateStr(now)] = Math.round(today);
+    daily[toDateStr(addDays(now, -1))] = Math.round(yesterday);
+    return { name: p.name, icon: p.icon, color: p.color, daily };
   });
   return changed ? out : platforms;
+}
+
+/* 確保最近 N 天都有資料（每天打開頁面時自動把當天補上，序列會滾動） */
+function ensureDailyRecent(platforms, days = 90) {
+  let changed = false;
+  const now = new Date();
+  platforms.forEach(p => {
+    if (!p.daily) { p.daily = {}; changed = true; }
+    // 找最近一個有值的日期，作為產生後續資料的基準
+    let prev = null;
+    for (let i = days; i >= 0; i--) {
+      const key = toDateStr(addDays(now, -i));
+      if (p.daily[key] != null) { prev = p.daily[key]; break; }
+    }
+    if (prev == null) prev = 100000;
+    for (let i = days - 1; i >= 0; i--) {
+      const key = toDateStr(addDays(now, -i));
+      if (p.daily[key] == null) {
+        const r = Math.abs(Math.sin(key.length + i * 1.7) * 100) % 30 / 100; // 0~0.3
+        const factor = 0.85 + r; // 0.85 ~ 1.15
+        p.daily[key] = Math.round(prev * factor);
+        changed = true;
+      }
+      prev = p.daily[key];
+    }
+  });
+  return changed;
 }
 
 /* ------------- 各辦公室頁面設定 ------------- */
@@ -1071,7 +1152,7 @@ function showToast(message, type = '') {
  * ============================================================ */
 const App = {
   route: 'employees',
-  filter: { dept: 'all', quarter: 'all', range: 'today' },
+  filter: { dept: 'all', quarter: 'all', range: 'today', customStart: '', customEnd: '' },
 
   init() {
     seedData();
@@ -1262,36 +1343,48 @@ const App = {
    *  儀表板首頁
    * ============================================================ */
   viewDashboard() {
-    // 讀取（若是舊版 schema 就遷移並寫回）
-    let platforms = Store.get(Store.KEYS.platforms, null) || PLATFORMS;
-    const migrated = migratePlatforms(platforms);
-    if (migrated !== platforms) {
-      platforms = migrated;
-      Store.set(Store.KEYS.platforms, platforms);
-    }
+    // 讀取 → 遷移舊 schema → 補齊最近 90 天 → 視需要寫回
+    let platforms = Store.get(Store.KEYS.platforms, null);
+    if (!platforms) platforms = JSON.parse(JSON.stringify(PLATFORMS));
+    let migrated = migratePlatforms(platforms);
+    const wasMigrated = migrated !== platforms;
+    if (wasMigrated) platforms = migrated;
+    const extended = ensureDailyRecent(platforms, 90);
+    if (wasMigrated || extended) Store.set(Store.KEYS.platforms, platforms);
+
+    const now = new Date();
+    const todayStr = toDateStr(now);
+    const ystrDay = toDateStr(addDays(now, -1));
 
     const range = this.filter.range || 'today';
-    const rangeLabels = { today: '今日', yesterday: '昨日', week: '本週', month: '本月' };
-    const currentLabel = rangeLabels[range];
+    const customStart = this.filter.customStart || toDateStr(addDays(now, -6));
+    const customEnd = this.filter.customEnd || todayStr;
+    const rd = getRangeDates(range, customStart, customEnd);
+    const currentLabel = rd.label;
 
-    const valueOf = (p) => +p[range] || 0;
+    const valueOf = (p) => sumDaily(p.daily, rd.start, rd.end);
     const rangeTotal = platforms.reduce((s, p) => s + valueOf(p), 0);
     const maxValue = Math.max(1, ...platforms.map(valueOf));
 
-    const todayTotal = platforms.reduce((s, p) => s + (+p.today || 0), 0);
-    const yesterdayTotal = platforms.reduce((s, p) => s + (+p.yesterday || 0), 0);
-    const monthTotal = platforms.reduce((s, p) => s + (+p.month || 0), 0);
+    const todayOf = (p) => +(p.daily?.[todayStr]) || 0;
+    const yesterdayOf = (p) => +(p.daily?.[ystrDay]) || 0;
+    const todayTotal = platforms.reduce((s, p) => s + todayOf(p), 0);
+    const yesterdayTotal = platforms.reduce((s, p) => s + yesterdayOf(p), 0);
+    const monthRange = getRangeDates('month');
+    const monthTotal = platforms.reduce((s, p) => s + sumDaily(p.daily, monthRange.start, monthRange.end), 0);
     const overallDelta = yesterdayTotal > 0 ? (todayTotal / yesterdayTotal - 1) * 100 : 0;
 
     const platformCards = platforms.map((p, i) => {
-      const delta = p.yesterday > 0 ? ((p.today / p.yesterday) - 1) * 100 : 0;
+      const td = todayOf(p);
+      const yd = yesterdayOf(p);
+      const delta = yd > 0 ? ((td / yd) - 1) * 100 : 0;
       return `
         <div class="stat-card" style="position:relative">
           <button class="icon-btn" title="編輯" onclick="App.openPlatformModal(${i})"
             style="position:absolute;top:10px;right:10px">✏️</button>
           <div class="stat-icon" style="background:${p.color}22;color:${p.color}">${p.icon}</div>
           <div class="stat-label">${escapeHtml(p.name)}</div>
-          <div class="stat-value" style="font-size:22px">${fmtNTD(p.today)}</div>
+          <div class="stat-value" style="font-size:22px">${fmtNTD(td)}</div>
           <div class="stat-meta">
             ${delta >= 0
               ? `<span class="up">↑ ${delta.toFixed(1)}%</span>`
@@ -1301,9 +1394,23 @@ const App = {
       `;
     }).join('');
 
-    const rangePills = ['today','yesterday','week','month'].map(r => `
+    const rangeLabels = { today: '今日', yesterday: '昨日', week: '本週', month: '本月', custom: '自訂' };
+    const rangePills = ['today','yesterday','week','month','custom'].map(r => `
       <button class="pill ${range === r ? 'active' : ''}" data-range="${r}" style="padding:4px 12px;font-size:12px">${rangeLabels[r]}</button>
     `).join('');
+
+    const dateInputs = range === 'custom' ? `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;font-size:13px;flex-wrap:wrap">
+        <span style="color:var(--text-muted)">起：</span>
+        <input type="date" id="custom-start" value="${customStart}" max="${todayStr}"
+          style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">
+        <span style="color:var(--text-muted)">迄：</span>
+        <input type="date" id="custom-end" value="${customEnd}" max="${todayStr}"
+          style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">
+        <button class="btn-ghost" id="custom-quick-7"  style="padding:6px 10px;font-size:12px">最近 7 天</button>
+        <button class="btn-ghost" id="custom-quick-30" style="padding:6px 10px;font-size:12px">最近 30 天</button>
+      </div>
+    ` : '';
 
     return `
       <div class="page-header">
@@ -1313,12 +1420,14 @@ const App = {
       <div class="stat-grid">${platformCards}</div>
       <div class="overview-grid">
         <div class="chart-card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:8px;flex-wrap:wrap">
-            <h3 style="margin:0">各平台${currentLabel}營收</h3>
-            <div id="range-pills" style="display:flex;gap:4px">${rangePills}</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap">
+            <h3 style="margin:0">各平台${range === 'custom' ? '' : currentLabel}營收</h3>
+            <div id="range-pills" style="display:flex;gap:4px;flex-wrap:wrap">${rangePills}</div>
           </div>
+          ${dateInputs}
           <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
-            ${currentLabel}合計 <strong style="color:var(--text)">${fmtNTD(rangeTotal)}</strong>
+            ${currentLabel} 合計 <strong style="color:var(--text)">${fmtNTD(rangeTotal)}</strong>
+            <span style="margin-left:8px;color:var(--text-muted);font-size:12px">（${rd.start.replace(/-/g,'/')} ~ ${rd.end.replace(/-/g,'/')}）</span>
           </div>
           <div class="dept-list">
             ${platforms.map(p => `
@@ -1354,15 +1463,62 @@ const App = {
     document.querySelectorAll('#range-pills [data-range]').forEach(btn => {
       btn.addEventListener('click', () => {
         this.filter.range = btn.dataset.range;
+        if (this.filter.range === 'custom' && !this.filter.customStart) {
+          const now = new Date();
+          this.filter.customStart = toDateStr(addDays(now, -6));
+          this.filter.customEnd = toDateStr(now);
+        }
         this.render();
       });
+    });
+    const startEl = document.getElementById('custom-start');
+    const endEl   = document.getElementById('custom-end');
+    if (startEl) startEl.addEventListener('change', () => {
+      let s = startEl.value, e = document.getElementById('custom-end').value;
+      if (s && e && s > e) e = s;
+      this.filter.customStart = s; this.filter.customEnd = e;
+      this.render();
+    });
+    if (endEl) endEl.addEventListener('change', () => {
+      let s = document.getElementById('custom-start').value, e = endEl.value;
+      if (s && e && e < s) s = e;
+      this.filter.customStart = s; this.filter.customEnd = e;
+      this.render();
+    });
+    const q7 = document.getElementById('custom-quick-7');
+    if (q7) q7.addEventListener('click', () => {
+      const now = new Date();
+      this.filter.customStart = toDateStr(addDays(now, -6));
+      this.filter.customEnd = toDateStr(now);
+      this.render();
+    });
+    const q30 = document.getElementById('custom-quick-30');
+    if (q30) q30.addEventListener('click', () => {
+      const now = new Date();
+      this.filter.customStart = toDateStr(addDays(now, -29));
+      this.filter.customEnd = toDateStr(now);
+      this.render();
     });
   },
 
   openPlatformModal(idx) {
-    const platforms = (Store.get(Store.KEYS.platforms, null) || PLATFORMS).map(p => ({ ...p }));
+    let platforms = Store.get(Store.KEYS.platforms, null);
+    if (!platforms) platforms = JSON.parse(JSON.stringify(PLATFORMS));
+    platforms = migratePlatforms(platforms);
+    ensureDailyRecent(platforms, 90);
+    platforms = platforms.map(p => ({ ...p, daily: { ...(p.daily || {}) } }));
+
     const p = platforms[idx];
     if (!p) { showToast('找不到此平台', 'error'); return; }
+
+    const now = new Date();
+    const todayStr = toDateStr(now);
+    const ystrDay = toDateStr(addDays(now, -1));
+    const todayVal = +(p.daily[todayStr]) || 0;
+    const ydayVal  = +(p.daily[ystrDay]) || 0;
+
+    // 提供一個可選的「指定日期」欄位，方便補歷史
+    const customDateDefault = toDateStr(addDays(now, -2));
 
     this.openModal({
       title: `編輯：${p.name}`,
@@ -1373,35 +1529,47 @@ const App = {
         </div>
         <div class="field-row">
           <div class="field">
-            <label>今日營收（NT$）</label>
-            <input type="number" id="f-today" min="0" step="1" value="${p.today || 0}">
+            <label>今日營收（${todayStr.replace(/-/g,'/')}）</label>
+            <input type="number" id="f-today" min="0" step="1" value="${todayVal}">
           </div>
           <div class="field">
-            <label>昨日營收（NT$）</label>
-            <input type="number" id="f-yesterday" min="0" step="1" value="${p.yesterday || 0}">
+            <label>昨日營收（${ystrDay.replace(/-/g,'/')}）</label>
+            <input type="number" id="f-yesterday" min="0" step="1" value="${ydayVal}">
           </div>
+        </div>
+        <div style="margin:14px 0 4px;padding-top:12px;border-top:1px dashed var(--border);font-size:13px;color:var(--text-muted)">
+          補/修指定日期（選填）
         </div>
         <div class="field-row">
           <div class="field">
-            <label>本週累積（NT$）</label>
-            <input type="number" id="f-week" min="0" step="1" value="${p.week || 0}">
+            <label>日期</label>
+            <input type="date" id="f-anydate" value="${customDateDefault}" max="${todayStr}">
           </div>
           <div class="field">
-            <label>本月累積（NT$）</label>
-            <input type="number" id="f-month" min="0" step="1" value="${p.month || 0}">
+            <label>當日營收（NT$）</label>
+            <input type="number" id="f-anyval" min="0" step="1" placeholder="留空不改">
           </div>
         </div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">「較昨日漲跌 %」會自動由今日 / 昨日推算</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+          本週 / 本月 / 自訂區間總額會由每日資料自動加總，無需直接編輯
+        </div>
       `,
       onSave: () => {
         const today = +document.getElementById('f-today').value;
         const yesterday = +document.getElementById('f-yesterday').value;
-        const week = +document.getElementById('f-week').value;
-        const month = +document.getElementById('f-month').value;
-        for (const [label, v] of [['今日', today], ['昨日', yesterday], ['本週', week], ['本月', month]]) {
-          if (!isFinite(v) || v < 0) { showToast(`${label}營收需為非負數字`, 'error'); return false; }
+        if (!isFinite(today) || today < 0) { showToast('今日營收需為非負數字', 'error'); return false; }
+        if (!isFinite(yesterday) || yesterday < 0) { showToast('昨日營收需為非負數字', 'error'); return false; }
+        p.daily[todayStr] = Math.round(today);
+        p.daily[ystrDay] = Math.round(yesterday);
+
+        const anyDate = document.getElementById('f-anydate').value;
+        const anyValRaw = document.getElementById('f-anyval').value;
+        if (anyDate && anyValRaw !== '') {
+          const v = +anyValRaw;
+          if (!isFinite(v) || v < 0) { showToast('指定日期當日營收需為非負數字', 'error'); return false; }
+          p.daily[anyDate] = Math.round(v);
         }
-        platforms[idx] = { ...p, today, yesterday, week, month };
+
         Store.set(Store.KEYS.platforms, platforms);
         showToast(`「${p.name}」已更新`, 'success');
         this.render();
