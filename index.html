@@ -2082,29 +2082,121 @@ const App = {
 };
 
 window.App = App;
-try {
-  App.init();
-  // 顯示成功訊息（綠色），讓使用者知道 JS 跑完了
-  document.addEventListener('DOMContentLoaded', function() {
+
+let __appBooted = false;
+function __bootApp() {
+  if (__appBooted) return; __appBooted = true;
+  try {
+    App.init();
+    document.addEventListener('DOMContentLoaded', function() {
+      var box = document.getElementById('js-status');
+      if (box && !box.textContent) {
+        box.style.color = 'var(--success)';
+        box.textContent = '✓ 系統就緒';
+      }
+    });
+    setTimeout(function() {
+      var box = document.getElementById('js-status');
+      if (box && !box.textContent) {
+        box.style.color = '#10b981';
+        box.textContent = '✓ 系統就緒';
+      }
+    }, 50);
+  } catch (err) {
+    alert('App 初始化失敗：' + err.message + '\n\n' + err.stack);
     var box = document.getElementById('js-status');
-    if (box && !box.textContent) {
-      box.style.color = 'var(--success)';
-      box.textContent = '✓ 系統就緒';
-    }
-  });
-  // DOMContentLoaded 可能已經過了，直接也設一次
-  setTimeout(function() {
-    var box = document.getElementById('js-status');
-    if (box && !box.textContent) {
-      box.style.color = '#10b981';
-      box.textContent = '✓ 系統就緒';
-    }
-  }, 50);
-} catch (err) {
-  alert('App 初始化失敗：' + err.message + '\n\n' + err.stack);
-  var box = document.getElementById('js-status');
-  if (box) box.textContent = '⚠ 初始化失敗：' + err.message;
+    if (box) box.textContent = '⚠ 初始化失敗：' + err.message;
+  }
 }
+
+async function __setupCloud() {
+  try {
+    const cs = window.__cloudStore;
+    if (!cs) throw new Error('cloudStore not available');
+    const snap = await cs.getDoc();
+    let cloudData = snap.exists() ? (snap.data() || {}) : {};
+
+    // 首次遷移：雲端無資料但本機有 → 將本機 localStorage 上傳到雲端
+    if (Object.keys(cloudData).length === 0) {
+      const local = {};
+      for (const k of Object.values(Store.KEYS)) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw !== null) local[k] = JSON.parse(raw);
+        } catch {}
+      }
+      if (Object.keys(local).length > 0) {
+        for (const [k, v] of Object.entries(local)) {
+          await cs.setField(k, v);
+        }
+        cloudData = local;
+      }
+    }
+
+    Store._mem = cloudData;
+    Store._useMem = true;
+
+    // 蓋掉 Store.set / Store.remove，讓所有寫入同步到雲端
+    const origSet = Store.set.bind(Store);
+    Store.set = function(key, value) {
+      origSet(key, value);
+      try { cs.setField(key, value); } catch (e) { console.warn('cloud sync write failed', e); }
+    };
+    const origRemove = Store.remove.bind(Store);
+    Store.remove = function(key) {
+      origRemove(key);
+      try { cs.removeField(key); } catch (e) { console.warn('cloud sync delete failed', e); }
+    };
+
+    // 訂閱：其他人改了資料，這台會即時更新畫面
+    cs.subscribe((data) => {
+      Store._mem = data || {};
+      if (window.App && App.currentUser && typeof App.render === 'function') App.render();
+    });
+  } catch (e) {
+    console.error('Cloud setup failed, falling back to localStorage', e);
+  }
+  __bootApp();
+}
+
+if (window.__cloudStore) {
+  __setupCloud();
+} else {
+  window.addEventListener('cloudStoreReady', __setupCloud, { once: true });
+  // 後門：若 module script 5 秒內沒就緒（網路問題等），先用 localStorage 啟動
+  setTimeout(() => { if (!__appBooted) __bootApp(); }, 5000);
+}
+</script>
+
+<!-- ===================== 雲端同步（Firebase Firestore） ===================== -->
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
+  import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteField, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
+    authDomain: "yc-dashboard-9aa6c.firebaseapp.com",
+    projectId: "yc-dashboard-9aa6c",
+    storageBucket: "yc-dashboard-9aa6c.firebasestorage.app",
+    messagingSenderId: "788748560432",
+    appId: "1:788748560432:web:aaa65e2d253a77eb7425f5"
+  };
+
+  try {
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const docRef = doc(db, 'app', 'main');
+
+    window.__cloudStore = {
+      getDoc: () => getDoc(docRef),
+      setField: (key, value) => setDoc(docRef, { [key]: value }, { merge: true }),
+      removeField: (key) => updateDoc(docRef, { [key]: deleteField() }),
+      subscribe: (cb) => onSnapshot(docRef, snap => cb(snap.exists() ? snap.data() : {})),
+    };
+    window.dispatchEvent(new Event('cloudStoreReady'));
+  } catch (e) {
+    console.error('Firebase init failed:', e);
+  }
 </script>
 </body>
 </html>
