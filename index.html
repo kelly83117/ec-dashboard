@@ -862,37 +862,58 @@ function hashPassword(pw) {
   return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
 }
 
-/* ------------- 預設種子資料 ------------- */
+/* ------------- 種子資料（冪等，只補缺漏，不覆蓋使用者輸入） -------------
+ * 每次載入都會跑，但只在某個鍵不存在時才寫入預設值；
+ * 加上對舊版員工資料 schema（orders/items/...）的就地遷移。
+ * 想完全重置請按登入頁的「↻ 重設範例資料」。
+ */
 function seedData() {
-  if (Store.get(Store.KEYS.seeded)) return;
-
-  // 升級到新版本：清除舊版可能寫壞的資料
-  Store.remove(Store.KEYS.users);
-  Store.remove(Store.KEYS.departments);
-  Store.remove(Store.KEYS.employees);
-  Store.remove(Store.KEYS.session);
-
   const defaultPwHash = hashPassword('admin123');
-  Store.set(Store.KEYS.users, [
-    { username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', department: '商開' },
-  ]);
 
-  Store.set(Store.KEYS.departments, [
-    { id: 'd1', name: '行銷', color: '#ec4899' },
-    { id: 'd2', name: '採購', color: '#10b981' },
-    { id: 'd3', name: '商開', color: '#6366f1' },
-    { id: 'd4', name: '設計', color: '#8b5cf6' },
-  ]);
+  // Users：若沒有任何 admin 帳號才補上預設 admin（保留你自己加的帳號）
+  const users = Store.get(Store.KEYS.users, []);
+  if (!users.some(u => u.role === 'admin')) {
+    users.push({ username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', department: '商開' });
+    Store.set(Store.KEYS.users, users);
+  }
 
-  Store.set(Store.KEYS.employees, [
-    { id: 'e1', code: 'E001', name: '吳俊傑', department: 'd1', q1: 82, q2: 86, q3: 89, q4: 92 },
-    { id: 'e2', code: 'E002', name: '李志強', department: 'd2', q1: 78, q2: 82, q3: 85, q4: 87 },
-    { id: 'e3', code: 'E003', name: '蔡欣怡', department: 'd3', q1: 90, q2: 91, q3: 93, q4: 95 },
-    { id: 'e4', code: 'E004', name: '張美玲', department: 'd4', q1: 72, q2: 75, q3: 78, q4: 81 },
-    { id: 'e5', code: 'E005', name: '黃建宏', department: 'd1', q1: 65, q2: 68, q3: 72, q4: 70 },
-    { id: 'e6', code: 'E006', name: '林雅婷', department: 'd2', q1: 58, q2: 62, q3: 60, q4: 64 },
-    { id: 'e7', code: 'E007', name: '王小華', department: 'd3', q1: 88, q2: 85, q3: 90, q4: 89 },
-  ]);
+  // Departments：完全沒有才補預設 4 個辦公室
+  const departments = Store.get(Store.KEYS.departments);
+  if (!departments || departments.length === 0) {
+    Store.set(Store.KEYS.departments, [
+      { id: 'd1', name: '行銷', color: '#ec4899' },
+      { id: 'd2', name: '採購', color: '#10b981' },
+      { id: 'd3', name: '商開', color: '#6366f1' },
+      { id: 'd4', name: '設計', color: '#8b5cf6' },
+    ]);
+  }
+
+  // Employees：完全沒有才放範例資料；有資料則就地遷移舊欄位
+  let employees = Store.get(Store.KEYS.employees);
+  if (!employees) {
+    Store.set(Store.KEYS.employees, [
+      { id: 'e1', code: 'E001', name: '吳俊傑', department: 'd1', q1: 82, q2: 86, q3: 89, q4: 92 },
+      { id: 'e2', code: 'E002', name: '李志強', department: 'd2', q1: 78, q2: 82, q3: 85, q4: 87 },
+      { id: 'e3', code: 'E003', name: '蔡欣怡', department: 'd3', q1: 90, q2: 91, q3: 93, q4: 95 },
+      { id: 'e4', code: 'E004', name: '張美玲', department: 'd4', q1: 72, q2: 75, q3: 78, q4: 81 },
+      { id: 'e5', code: 'E005', name: '黃建宏', department: 'd1', q1: 65, q2: 68, q3: 72, q4: 70 },
+      { id: 'e6', code: 'E006', name: '林雅婷', department: 'd2', q1: 58, q2: 62, q3: 60, q4: 64 },
+      { id: 'e7', code: 'E007', name: '王小華', department: 'd3', q1: 88, q2: 85, q3: 90, q4: 89 },
+    ]);
+  } else {
+    let changed = false;
+    employees.forEach(e => {
+      if ('orders' in e || 'items' in e || 'avgTime' in e || 'errorRate' in e || 'trend' in e) {
+        delete e.orders; delete e.items; delete e.avgTime; delete e.errorRate; delete e.trend;
+        if (typeof e.q1 !== 'number') e.q1 = null;
+        if (typeof e.q2 !== 'number') e.q2 = null;
+        if (typeof e.q3 !== 'number') e.q3 = null;
+        if (typeof e.q4 !== 'number') e.q4 = null;
+        changed = true;
+      }
+    });
+    if (changed) Store.set(Store.KEYS.employees, employees);
+  }
 
   Store.set(Store.KEYS.seeded, true);
 }
