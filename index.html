@@ -810,6 +810,7 @@ const Store = {
     users: 'ec.users',
     departments: 'ec.departments',
     employees: 'ec.employees',
+    platforms: 'ec.platforms',
     session: 'ec.session',
     seeded: 'ec.seeded.v4',
   },
@@ -1208,14 +1209,17 @@ const App = {
    *  儀表板首頁
    * ============================================================ */
   viewDashboard() {
-    const todayTotal = PLATFORMS.reduce((s, p) => s + p.today, 0);
-    const monthTotal = PLATFORMS.reduce((s, p) => s + p.monthTotal, 0);
-    const maxMonth = Math.max(1, ...PLATFORMS.map(p => p.monthTotal));
-    const yesterdayTotal = PLATFORMS.reduce((s, p) => s + p.today / (1 + p.deltaPct / 100), 0);
-    const overallDelta = (todayTotal / yesterdayTotal - 1) * 100;
+    const platforms = Store.get(Store.KEYS.platforms, null) || PLATFORMS;
+    const todayTotal = platforms.reduce((s, p) => s + p.today, 0);
+    const monthTotal = platforms.reduce((s, p) => s + p.monthTotal, 0);
+    const maxMonth = Math.max(1, ...platforms.map(p => p.monthTotal));
+    const yesterdayTotal = platforms.reduce((s, p) => s + p.today / (1 + p.deltaPct / 100), 0);
+    const overallDelta = yesterdayTotal > 0 ? (todayTotal / yesterdayTotal - 1) * 100 : 0;
 
-    const platformCards = PLATFORMS.map(p => `
-      <div class="stat-card">
+    const platformCards = platforms.map((p, i) => `
+      <div class="stat-card" style="position:relative">
+        <button class="icon-btn" title="編輯" onclick="App.openPlatformModal(${i})"
+          style="position:absolute;top:10px;right:10px">✏️</button>
         <div class="stat-icon" style="background:${p.color}22;color:${p.color}">${p.icon}</div>
         <div class="stat-label">${escapeHtml(p.name)}</div>
         <div class="stat-value" style="font-size:22px">${fmtNTD(p.today)}</div>
@@ -1237,7 +1241,7 @@ const App = {
         <div class="chart-card">
           <h3>本月各平台累積營收</h3>
           <div class="dept-list">
-            ${PLATFORMS.map(p => `
+            ${platforms.map(p => `
               <div class="dept-row">
                 <span class="label">
                   <span class="dept-tag" style="background:${p.color}22;color:${p.color}">${escapeHtml(p.name)}</span>
@@ -1253,7 +1257,7 @@ const App = {
           <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
             <div>本月總營收　<strong style="color:var(--text);float:right">${fmtNTD(monthTotal)}</strong></div>
             <div>今日總營收　<strong style="color:var(--text);float:right">${fmtNTD(todayTotal)}</strong></div>
-            <div>合作平台數　<strong style="color:var(--text);float:right">${PLATFORMS.length} 個</strong></div>
+            <div>合作平台數　<strong style="color:var(--text);float:right">${platforms.length} 個</strong></div>
             <div>員工總數　<strong style="color:var(--text);float:right">${(Store.get(Store.KEYS.employees, [])).length} 人</strong></div>
             <div>辦公室總數　<strong style="color:var(--text);float:right">${(Store.get(Store.KEYS.departments, [])).length} 個</strong></div>
             <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
@@ -1263,6 +1267,47 @@ const App = {
         </div>
       </div>
     `;
+  },
+
+  openPlatformModal(idx) {
+    const platforms = (Store.get(Store.KEYS.platforms, null) || PLATFORMS).map(p => ({ ...p }));
+    const p = platforms[idx];
+    if (!p) { showToast('找不到此平台', 'error'); return; }
+
+    this.openModal({
+      title: `編輯：${p.name}`,
+      bodyHtml: `
+        <div class="field">
+          <label>平台</label>
+          <input value="${escapeHtml(p.name)}" disabled style="background:var(--bg);color:var(--text-muted)">
+        </div>
+        <div class="field">
+          <label>今日營收（NT$）</label>
+          <input type="number" id="f-today" min="0" step="1" value="${p.today}">
+        </div>
+        <div class="field">
+          <label>較昨日漲跌（%）　可填負數，例如 -3.2</label>
+          <input type="number" id="f-delta" step="0.1" value="${p.deltaPct}">
+        </div>
+        <div class="field">
+          <label>本月累積營收（NT$）</label>
+          <input type="number" id="f-month" min="0" step="1" value="${p.monthTotal}">
+        </div>
+      `,
+      onSave: () => {
+        const today = +document.getElementById('f-today').value;
+        const deltaPct = +document.getElementById('f-delta').value;
+        const monthTotal = +document.getElementById('f-month').value;
+        if (!isFinite(today) || today < 0) { showToast('今日營收需為非負數字', 'error'); return false; }
+        if (!isFinite(deltaPct)) { showToast('漲跌百分比格式錯誤', 'error'); return false; }
+        if (!isFinite(monthTotal) || monthTotal < 0) { showToast('本月營收需為非負數字', 'error'); return false; }
+        platforms[idx] = { ...p, today, deltaPct: Math.round(deltaPct * 10) / 10, monthTotal };
+        Store.set(Store.KEYS.platforms, platforms);
+        showToast(`「${p.name}」已更新`, 'success');
+        this.render();
+        return true;
+      },
+    });
   },
 
   statGridHtml(totalOrders, totalItems, avgScore, avgError, empCount) {
