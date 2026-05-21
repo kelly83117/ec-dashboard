@@ -871,7 +871,7 @@ function seedData() {
   // Users：若沒有任何 admin 帳號才補上預設 admin（保留你自己加的帳號）
   const users = Store.get(Store.KEYS.users, []);
   if (!users.some(u => u.role === 'admin')) {
-    users.push({ username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', department: '商開' });
+    users.push({ username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', department: '' });
     Store.set(Store.KEYS.users, users);
   }
 
@@ -1255,7 +1255,7 @@ const App = {
       let admin = users.find(u => u.username === 'admin');
       if (!admin) {
         admin = { username: 'admin', password: hashPassword('admin123'),
-                  name: '陳大明', role: 'admin', department: '商開' };
+                  name: '陳大明', role: 'admin', department: '' };
         users.push(admin);
       } else {
         // 修復舊版錯誤雜湊
@@ -1311,9 +1311,10 @@ const App = {
 
   // 依使用者權限更新側欄的顯示（角色資訊、管理員區、可見的辦公室）
   applyUserPerms(user) {
+    const deptLabel = user.department || '全公司';
     document.getElementById('user-name').textContent = user.name;
     document.getElementById('user-role').textContent =
-      (user.role === 'admin' ? '管理員' : '員工') + '・' + user.department;
+      (user.role === 'admin' ? '管理員' : '員工') + '・' + deptLabel;
     document.getElementById('user-avatar').textContent = user.name.slice(0, 1);
 
     const isAdmin = user.role === 'admin';
@@ -1969,7 +1970,7 @@ const App = {
               <span class="badge-role ${isAdmin?'role-admin':'role-staff'}">${isAdmin?'管理員':'員工'}</span>
               ${crossBadge}
             </div>
-            <div class="meta">@${escapeHtml(u.username)} · ${escapeHtml(u.department)}</div>
+            <div class="meta">@${escapeHtml(u.username)} · ${escapeHtml(u.department || '全公司')}</div>
           </div>
           <button class="icon-btn" title="編輯" onclick="App.openUserModal('${escapeHtml(u.username)}')">✏️</button>
           ${u.username === this.currentUser.username
@@ -2022,6 +2023,7 @@ const App = {
           <div class="field">
             <label>辦公室</label>
             <select id="f-udept">
+              <option value="" ${!u.department ? 'selected' : ''}>—（不限定 / 全公司）</option>
               ${departments.map(d => `<option value="${escapeHtml(d.name)}" ${d.name===u.department?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
             </select>
           </div>
