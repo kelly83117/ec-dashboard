@@ -1630,7 +1630,9 @@ const App = {
    * ============================================================ */
   viewEmployees() {
     const departments = Store.get(Store.KEYS.departments, []);
-    const users = Store.get(Store.KEYS.users, []);
+    const allUsers = Store.get(Store.KEYS.users, []);
+    // 員工績效明細：排除管理員、以及未指派辦公室（全公司）的帳號
+    const users = allUsers.filter(u => u.role !== 'admin' && u.department);
     const deptById = Object.fromEntries(departments.map(d => [d.id, d]));
     const filterDept = this.filter.dept === 'all' ? null : deptById[this.filter.dept];
     const filtered = !filterDept
