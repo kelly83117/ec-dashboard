@@ -910,6 +910,18 @@ function computeScore(emp) {
 const uid = () => Math.random().toString(36).slice(2, 10);
 const DEPT_COLORS = ['#6366f1','#10b981','#f59e0b','#3b82f6','#ec4899','#8b5cf6','#ef4444','#14b8a6','#64748b'];
 
+/* ------------- 平台營收（儀表板首頁） ------------- */
+const PLATFORMS = [
+  { name: '生活好麻吉', icon: '🛍️', color: '#f59e0b', today: 284500, deltaPct: 12.4, monthTotal: 6840000 },
+  { name: '玩樂盒子',   icon: '🎁', color: '#6366f1', today: 156200, deltaPct: 8.2,  monthTotal: 3920000 },
+  { name: '森之旅',     icon: '🌲', color: '#10b981', today: 198700, deltaPct: 5.6,  monthTotal: 5180000 },
+  { name: '維克生活',   icon: '🏡', color: '#14b8a6', today: 92300,  deltaPct: -2.1, monthTotal: 2410000 },
+  { name: 'MOMO',       icon: '🛒', color: '#ec4899', today: 612800, deltaPct: 18.5, monthTotal: 15240000 },
+  { name: 'MO+',        icon: '💎', color: '#db2777', today: 245400, deltaPct: 6.3,  monthTotal: 6120000 },
+  { name: '酷澎',       icon: '🚀', color: '#3b82f6', today: 421900, deltaPct: 14.7, monthTotal: 10580000 },
+];
+const fmtNTD = n => 'NT$ ' + Math.round(n).toLocaleString();
+
 /* ------------- 各辦公室頁面設定 ------------- */
 const OFFICE_CONFIG = {
   d1: {
@@ -1196,51 +1208,56 @@ const App = {
    *  儀表板首頁
    * ============================================================ */
   viewDashboard() {
-    const employees = Store.get(Store.KEYS.employees, []);
-    const departments = Store.get(Store.KEYS.departments, []);
-    const totalOrders = employees.reduce((s, e) => s + e.orders, 0);
-    const totalItems = employees.reduce((s, e) => s + e.items, 0);
-    const avgScore = employees.length ? Math.round(employees.reduce((s,e)=>s+computeScore(e),0) / employees.length * 10) / 10 : 0;
-    const avgError = employees.length ? (employees.reduce((s,e)=>s+e.errorRate,0) / employees.length).toFixed(2) : '0';
+    const todayTotal = PLATFORMS.reduce((s, p) => s + p.today, 0);
+    const monthTotal = PLATFORMS.reduce((s, p) => s + p.monthTotal, 0);
+    const maxMonth = Math.max(1, ...PLATFORMS.map(p => p.monthTotal));
+    const yesterdayTotal = PLATFORMS.reduce((s, p) => s + p.today / (1 + p.deltaPct / 100), 0);
+    const overallDelta = (todayTotal / yesterdayTotal - 1) * 100;
 
-    // 各部門產出
-    const deptStats = departments.map(d => {
-      const emps = employees.filter(e => e.department === d.id);
-      const items = emps.reduce((s,e)=>s+e.items, 0);
-      return { ...d, items, count: emps.length };
-    });
-    const maxItems = Math.max(1, ...deptStats.map(d => d.items));
+    const platformCards = PLATFORMS.map(p => `
+      <div class="stat-card">
+        <div class="stat-icon" style="background:${p.color}22;color:${p.color}">${p.icon}</div>
+        <div class="stat-label">${escapeHtml(p.name)}</div>
+        <div class="stat-value" style="font-size:22px">${fmtNTD(p.today)}</div>
+        <div class="stat-meta">
+          ${p.deltaPct >= 0
+            ? `<span class="up">↑ ${p.deltaPct}%</span>`
+            : `<span class="down">↓ ${Math.abs(p.deltaPct)}%</span>`} 較昨日
+        </div>
+      </div>
+    `).join('');
 
     return `
       <div class="page-header">
         <h2>儀表板首頁 <span class="live-dot">即時資料</span></h2>
-        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　今日 ${new Date().toLocaleDateString('zh-TW')}</p>
+        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　今日 ${new Date().toLocaleDateString('zh-TW')}　·　今日總營收 <strong style="color:var(--text)">${fmtNTD(todayTotal)}</strong> <span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span></p>
       </div>
-      ${this.statGridHtml(totalOrders, totalItems, avgScore, avgError, employees.length)}
+      <div class="stat-grid">${platformCards}</div>
       <div class="overview-grid">
         <div class="chart-card">
-          <h3>各辦公室揀貨件數</h3>
+          <h3>本月各平台累積營收</h3>
           <div class="dept-list">
-            ${deptStats.map(d => `
+            ${PLATFORMS.map(p => `
               <div class="dept-row">
                 <span class="label">
-                  <span class="dept-tag" style="background:${d.color}22;color:${d.color}">${escapeHtml(d.name)}</span>
-                  <span style="color:var(--text-muted);font-size:12px;margin-left:6px">${d.count} 人</span>
+                  <span class="dept-tag" style="background:${p.color}22;color:${p.color}">${escapeHtml(p.name)}</span>
                 </span>
-                <div class="bar"><div style="width:${(d.items/maxItems)*100}%;background:${d.color}"></div></div>
-                <span class="value">${d.items}</span>
+                <div class="bar"><div style="width:${(p.monthTotal/maxMonth)*100}%;background:${p.color}"></div></div>
+                <span class="value" style="min-width:110px">${fmtNTD(p.monthTotal)}</span>
               </div>
             `).join('')}
           </div>
         </div>
         <div class="chart-card">
-          <h3>系統資訊</h3>
+          <h3>本月概況</h3>
           <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
-            <div>員工總數　<strong style="color:var(--text);float:right">${employees.length} 人</strong></div>
-            <div>辦公室總數　<strong style="color:var(--text);float:right">${departments.length} 個</strong></div>
-            <div>帳號總數　<strong style="color:var(--text);float:right">${(Store.get(Store.KEYS.users, [])).length} 個</strong></div>
+            <div>本月總營收　<strong style="color:var(--text);float:right">${fmtNTD(monthTotal)}</strong></div>
+            <div>今日總營收　<strong style="color:var(--text);float:right">${fmtNTD(todayTotal)}</strong></div>
+            <div>合作平台數　<strong style="color:var(--text);float:right">${PLATFORMS.length} 個</strong></div>
+            <div>員工總數　<strong style="color:var(--text);float:right">${(Store.get(Store.KEYS.employees, [])).length} 人</strong></div>
+            <div>辦公室總數　<strong style="color:var(--text);float:right">${(Store.get(Store.KEYS.departments, [])).length} 個</strong></div>
             <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-              資料儲存於瀏覽器 localStorage<br>清除瀏覽器資料將會遺失所有設定
+              範例營收為示範資料<br>之後可串接平台 API 顯示即時數字
             </div>
           </div>
         </div>
