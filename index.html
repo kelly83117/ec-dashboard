@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>電商後台 · 員工效率看板</title>
+<title>元創數位 · 員工效率看板</title>
+<link rel="icon" type="image/png" href="logo.png">
 <style>
   :root {
     --bg: #f1f5f9;
@@ -66,20 +67,17 @@
   }
   .login-logo {
     display: flex;
-    align-items: center;
-    gap: 12px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
     margin-bottom: 28px;
   }
-  .login-logo .badge {
-    width: 44px; height: 44px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, var(--primary), #8b5cf6);
-    color: white;
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 700;
-    font-size: 16px;
+  .login-logo .brand-logo {
+    width: 220px;
+    max-width: 100%;
+    height: auto;
+    display: block;
   }
-  .login-logo h1 { margin: 0; font-size: 20px; }
   .login-logo p { margin: 0; font-size: 12px; color: var(--text-muted); }
   .login-tabs {
     display: flex; gap: 4px;
@@ -176,17 +174,20 @@
   }
   .sidebar-header {
     padding: 20px;
-    display: flex; align-items: center; gap: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
   }
-  .sidebar-header .badge {
-    width: 40px; height: 40px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, var(--primary), #8b5cf6);
-    color: white;
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 700;
+  .sidebar-header .brand-logo {
+    width: 160px;
+    max-width: 100%;
+    height: auto;
+    display: block;
+    background: white;
+    padding: 6px 10px;
+    border-radius: 8px;
   }
-  .sidebar-header h1 { margin: 0; font-size: 15px; color: white; }
   .sidebar-header p { margin: 0; font-size: 11px; color: var(--sidebar-muted); }
   .sidebar-nav { flex: 1; padding: 0 12px; overflow-y: auto; }
   .sidebar-group {
@@ -675,11 +676,8 @@
 <div id="view-login">
   <div class="login-card">
     <div class="login-logo">
-      <div class="badge">EC</div>
-      <div>
-        <h1>電商後台</h1>
-        <p>內部管理系統</p>
-      </div>
+      <img class="brand-logo" src="logo.png" alt="元創數位">
+      <p>元創數位 · 內部管理系統</p>
     </div>
 
     <div class="login-tabs">
@@ -742,11 +740,8 @@
     <!-- 側欄 -->
     <aside class="sidebar">
       <div class="sidebar-header">
-        <div class="badge">EC</div>
-        <div>
-          <h1>電商後台</h1>
-          <p>內部管理系統</p>
-        </div>
+        <img class="brand-logo" src="logo.png" alt="元創數位">
+        <p>元創數位 · 內部管理系統</p>
       </div>
       <nav class="sidebar-nav">
         <div class="sidebar-group">總覽</div>
@@ -793,7 +788,7 @@
 
 <script>
 /* =========================================================================
- *  電商後台 · 員工效率看板
+ *  元創數位 · 員工效率看板
  *  純前端單檔應用：localStorage 帳號 + 部門/員工 CRUD
  *  ========================================================================= */
 
