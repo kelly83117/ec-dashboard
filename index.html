@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>元創數位 · 員工效率看板</title>
+<title>元創數位 · 績效管理</title>
 <link rel="icon" type="image/png" href="logo.png">
 <style>
   :root {
@@ -750,7 +750,7 @@
         </button>
         <div class="sidebar-group">辦公室</div>
         <button class="nav-item active" data-route="employees">
-          <span class="icon">📊</span><span>員工效率看板</span>
+          <span class="icon">📊</span><span>績效管理</span>
         </button>
         <button class="nav-item" data-route="office-d1">
           <span class="icon">📣</span><span>行銷</span>
@@ -794,7 +794,7 @@
 
 <script>
 /* =========================================================================
- *  元創數位 · 員工效率看板
+ *  元創數位 · 績效管理
  *  純前端單檔應用：localStorage 帳號 + 部門/員工 CRUD
  *  ========================================================================= */
 
@@ -1281,7 +1281,7 @@ const App = {
   },
 
   /* ============================================================
-   *  員工效率看板
+   *  績效管理
    * ============================================================ */
   viewEmployees() {
     const departments = Store.get(Store.KEYS.departments, []);
@@ -1358,7 +1358,7 @@ const App = {
 
     return `
       <div class="page-header">
-        <h2>員工效率看板 <span class="live-dot">即時更新</span></h2>
+        <h2>績效管理 <span class="live-dot">即時更新</span></h2>
         <p>本週倉儲與出貨團隊績效統計</p>
       </div>
       ${this.statGridHtml(totalOrders, totalItems, avgScore, avgError, filtered.length)}
