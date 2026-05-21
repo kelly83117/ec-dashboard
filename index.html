@@ -942,15 +942,39 @@ const DEPT_COLORS = ['#6366f1','#10b981','#f59e0b','#3b82f6','#ec4899','#8b5cf6'
 
 /* ------------- 平台營收（儀表板首頁） ------------- */
 const PLATFORMS = [
-  { name: '生活好麻吉', icon: '🛍️', color: '#f59e0b', today: 284500, deltaPct: 12.4, monthTotal: 6840000 },
-  { name: '玩樂盒子',   icon: '🎁', color: '#6366f1', today: 156200, deltaPct: 8.2,  monthTotal: 3920000 },
-  { name: '森之旅',     icon: '🌲', color: '#10b981', today: 198700, deltaPct: 5.6,  monthTotal: 5180000 },
-  { name: '維克生活',   icon: '🏡', color: '#14b8a6', today: 92300,  deltaPct: -2.1, monthTotal: 2410000 },
-  { name: 'MOMO',       icon: '🛒', color: '#ec4899', today: 612800, deltaPct: 18.5, monthTotal: 15240000 },
-  { name: 'MO+',        icon: '💎', color: '#db2777', today: 245400, deltaPct: 6.3,  monthTotal: 6120000 },
-  { name: '酷澎',       icon: '🚀', color: '#3b82f6', today: 421900, deltaPct: 14.7, monthTotal: 10580000 },
+  { name: '生活好麻吉', icon: '🛍️', color: '#f59e0b', today: 284500, yesterday: 253114, week: 1820000, month: 6840000 },
+  { name: '玩樂盒子',   icon: '🎁', color: '#6366f1', today: 156200, yesterday: 144362, week: 1050000, month: 3920000 },
+  { name: '森之旅',     icon: '🌲', color: '#10b981', today: 198700, yesterday: 188163, week: 1380000, month: 5180000 },
+  { name: '維克生活',   icon: '🏡', color: '#14b8a6', today: 92300,  yesterday: 94279,  week: 640000,  month: 2410000 },
+  { name: 'MOMO',       icon: '🛒', color: '#ec4899', today: 612800, yesterday: 517131, week: 4050000, month: 15240000 },
+  { name: 'MO+',        icon: '💎', color: '#db2777', today: 245400, yesterday: 230856, week: 1620000, month: 6120000 },
+  { name: '酷澎',       icon: '🚀', color: '#3b82f6', today: 421900, yesterday: 367829, week: 2810000, month: 10580000 },
 ];
 const fmtNTD = n => 'NT$ ' + Math.round(n).toLocaleString();
+
+// 把舊版 (today / deltaPct / monthTotal) 平台資料遷移到新版 (today/yesterday/week/month)
+function migratePlatforms(platforms) {
+  if (!Array.isArray(platforms)) return platforms;
+  let changed = false;
+  const out = platforms.map(p => {
+    if ('deltaPct' in p || 'monthTotal' in p) {
+      changed = true;
+      const today = +p.today || 0;
+      const delta = +p.deltaPct || 0;
+      const month = +p.monthTotal || +p.month || 0;
+      const yesterday = (1 + delta / 100) !== 0 ? today / (1 + delta / 100) : today;
+      return {
+        name: p.name, icon: p.icon, color: p.color,
+        today,
+        yesterday: Math.round(yesterday),
+        week: Math.round(month * 7 / 30),
+        month: Math.round(month),
+      };
+    }
+    return p;
+  });
+  return changed ? out : platforms;
+}
 
 /* ------------- 各辦公室頁面設定 ------------- */
 const OFFICE_CONFIG = {
@@ -1047,7 +1071,7 @@ function showToast(message, type = '') {
  * ============================================================ */
 const App = {
   route: 'employees',
-  filter: { dept: 'all', quarter: 'all' },
+  filter: { dept: 'all', quarter: 'all', range: 'today' },
 
   init() {
     seedData();
@@ -1227,7 +1251,7 @@ const App = {
       return;
     }
     switch (this.route) {
-      case 'dashboard': main.innerHTML = this.viewDashboard(); break;
+      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); break;
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
       default: main.innerHTML = this.viewEmployees(); this.bindFilterBar();
@@ -1238,45 +1262,72 @@ const App = {
    *  儀表板首頁
    * ============================================================ */
   viewDashboard() {
-    const platforms = Store.get(Store.KEYS.platforms, null) || PLATFORMS;
-    const todayTotal = platforms.reduce((s, p) => s + p.today, 0);
-    const monthTotal = platforms.reduce((s, p) => s + p.monthTotal, 0);
-    const maxMonth = Math.max(1, ...platforms.map(p => p.monthTotal));
-    const yesterdayTotal = platforms.reduce((s, p) => s + p.today / (1 + p.deltaPct / 100), 0);
+    // 讀取（若是舊版 schema 就遷移並寫回）
+    let platforms = Store.get(Store.KEYS.platforms, null) || PLATFORMS;
+    const migrated = migratePlatforms(platforms);
+    if (migrated !== platforms) {
+      platforms = migrated;
+      Store.set(Store.KEYS.platforms, platforms);
+    }
+
+    const range = this.filter.range || 'today';
+    const rangeLabels = { today: '今日', yesterday: '昨日', week: '本週', month: '本月' };
+    const currentLabel = rangeLabels[range];
+
+    const valueOf = (p) => +p[range] || 0;
+    const rangeTotal = platforms.reduce((s, p) => s + valueOf(p), 0);
+    const maxValue = Math.max(1, ...platforms.map(valueOf));
+
+    const todayTotal = platforms.reduce((s, p) => s + (+p.today || 0), 0);
+    const yesterdayTotal = platforms.reduce((s, p) => s + (+p.yesterday || 0), 0);
+    const monthTotal = platforms.reduce((s, p) => s + (+p.month || 0), 0);
     const overallDelta = yesterdayTotal > 0 ? (todayTotal / yesterdayTotal - 1) * 100 : 0;
 
-    const platformCards = platforms.map((p, i) => `
-      <div class="stat-card" style="position:relative">
-        <button class="icon-btn" title="編輯" onclick="App.openPlatformModal(${i})"
-          style="position:absolute;top:10px;right:10px">✏️</button>
-        <div class="stat-icon" style="background:${p.color}22;color:${p.color}">${p.icon}</div>
-        <div class="stat-label">${escapeHtml(p.name)}</div>
-        <div class="stat-value" style="font-size:22px">${fmtNTD(p.today)}</div>
-        <div class="stat-meta">
-          ${p.deltaPct >= 0
-            ? `<span class="up">↑ ${p.deltaPct}%</span>`
-            : `<span class="down">↓ ${Math.abs(p.deltaPct)}%</span>`} 較昨日
+    const platformCards = platforms.map((p, i) => {
+      const delta = p.yesterday > 0 ? ((p.today / p.yesterday) - 1) * 100 : 0;
+      return `
+        <div class="stat-card" style="position:relative">
+          <button class="icon-btn" title="編輯" onclick="App.openPlatformModal(${i})"
+            style="position:absolute;top:10px;right:10px">✏️</button>
+          <div class="stat-icon" style="background:${p.color}22;color:${p.color}">${p.icon}</div>
+          <div class="stat-label">${escapeHtml(p.name)}</div>
+          <div class="stat-value" style="font-size:22px">${fmtNTD(p.today)}</div>
+          <div class="stat-meta">
+            ${delta >= 0
+              ? `<span class="up">↑ ${delta.toFixed(1)}%</span>`
+              : `<span class="down">↓ ${Math.abs(delta).toFixed(1)}%</span>`} 較昨日
+          </div>
         </div>
-      </div>
+      `;
+    }).join('');
+
+    const rangePills = ['today','yesterday','week','month'].map(r => `
+      <button class="pill ${range === r ? 'active' : ''}" data-range="${r}" style="padding:4px 12px;font-size:12px">${rangeLabels[r]}</button>
     `).join('');
 
     return `
       <div class="page-header">
         <h2>儀表板首頁 <span class="live-dot">即時資料</span></h2>
-        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　今日 ${new Date().toLocaleDateString('zh-TW')}　·　今日總營收 <strong style="color:var(--text)">${fmtNTD(todayTotal)}</strong> <span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span></p>
+        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　今日 ${new Date().toLocaleDateString('zh-TW')}　·　今日總營收 <strong style="color:var(--text)">${fmtNTD(todayTotal)}</strong> ${overallDelta >= 0 ? `<span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span>` : `<span class="down" style="margin-left:6px">↓ ${Math.abs(overallDelta).toFixed(1)}%</span>`}</p>
       </div>
       <div class="stat-grid">${platformCards}</div>
       <div class="overview-grid">
         <div class="chart-card">
-          <h3>本月各平台累積營收</h3>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:8px;flex-wrap:wrap">
+            <h3 style="margin:0">各平台${currentLabel}營收</h3>
+            <div id="range-pills" style="display:flex;gap:4px">${rangePills}</div>
+          </div>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
+            ${currentLabel}合計 <strong style="color:var(--text)">${fmtNTD(rangeTotal)}</strong>
+          </div>
           <div class="dept-list">
             ${platforms.map(p => `
               <div class="dept-row">
                 <span class="label">
                   <span class="dept-tag" style="background:${p.color}22;color:${p.color}">${escapeHtml(p.name)}</span>
                 </span>
-                <div class="bar"><div style="width:${(p.monthTotal/maxMonth)*100}%;background:${p.color}"></div></div>
-                <span class="value" style="min-width:110px">${fmtNTD(p.monthTotal)}</span>
+                <div class="bar"><div style="width:${(valueOf(p)/maxValue)*100}%;background:${p.color}"></div></div>
+                <span class="value" style="min-width:110px">${fmtNTD(valueOf(p))}</span>
               </div>
             `).join('')}
           </div>
@@ -1286,6 +1337,7 @@ const App = {
           <div style="font-size:13px;color:var(--text-muted);line-height:1.9">
             <div>本月總營收　<strong style="color:var(--text);float:right">${fmtNTD(monthTotal)}</strong></div>
             <div>今日總營收　<strong style="color:var(--text);float:right">${fmtNTD(todayTotal)}</strong></div>
+            <div>昨日總營收　<strong style="color:var(--text);float:right">${fmtNTD(yesterdayTotal)}</strong></div>
             <div>合作平台數　<strong style="color:var(--text);float:right">${platforms.length} 個</strong></div>
             <div>員工總數　<strong style="color:var(--text);float:right">${(Store.get(Store.KEYS.employees, [])).length} 人</strong></div>
             <div>辦公室總數　<strong style="color:var(--text);float:right">${(Store.get(Store.KEYS.departments, [])).length} 個</strong></div>
@@ -1296,6 +1348,15 @@ const App = {
         </div>
       </div>
     `;
+  },
+
+  bindDashboardPills() {
+    document.querySelectorAll('#range-pills [data-range]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.filter.range = btn.dataset.range;
+        this.render();
+      });
+    });
   },
 
   openPlatformModal(idx) {
@@ -1310,27 +1371,37 @@ const App = {
           <label>平台</label>
           <input value="${escapeHtml(p.name)}" disabled style="background:var(--bg);color:var(--text-muted)">
         </div>
-        <div class="field">
-          <label>今日營收（NT$）</label>
-          <input type="number" id="f-today" min="0" step="1" value="${p.today}">
+        <div class="field-row">
+          <div class="field">
+            <label>今日營收（NT$）</label>
+            <input type="number" id="f-today" min="0" step="1" value="${p.today || 0}">
+          </div>
+          <div class="field">
+            <label>昨日營收（NT$）</label>
+            <input type="number" id="f-yesterday" min="0" step="1" value="${p.yesterday || 0}">
+          </div>
         </div>
-        <div class="field">
-          <label>較昨日漲跌（%）　可填負數，例如 -3.2</label>
-          <input type="number" id="f-delta" step="0.1" value="${p.deltaPct}">
+        <div class="field-row">
+          <div class="field">
+            <label>本週累積（NT$）</label>
+            <input type="number" id="f-week" min="0" step="1" value="${p.week || 0}">
+          </div>
+          <div class="field">
+            <label>本月累積（NT$）</label>
+            <input type="number" id="f-month" min="0" step="1" value="${p.month || 0}">
+          </div>
         </div>
-        <div class="field">
-          <label>本月累積營收（NT$）</label>
-          <input type="number" id="f-month" min="0" step="1" value="${p.monthTotal}">
-        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">「較昨日漲跌 %」會自動由今日 / 昨日推算</div>
       `,
       onSave: () => {
         const today = +document.getElementById('f-today').value;
-        const deltaPct = +document.getElementById('f-delta').value;
-        const monthTotal = +document.getElementById('f-month').value;
-        if (!isFinite(today) || today < 0) { showToast('今日營收需為非負數字', 'error'); return false; }
-        if (!isFinite(deltaPct)) { showToast('漲跌百分比格式錯誤', 'error'); return false; }
-        if (!isFinite(monthTotal) || monthTotal < 0) { showToast('本月營收需為非負數字', 'error'); return false; }
-        platforms[idx] = { ...p, today, deltaPct: Math.round(deltaPct * 10) / 10, monthTotal };
+        const yesterday = +document.getElementById('f-yesterday').value;
+        const week = +document.getElementById('f-week').value;
+        const month = +document.getElementById('f-month').value;
+        for (const [label, v] of [['今日', today], ['昨日', yesterday], ['本週', week], ['本月', month]]) {
+          if (!isFinite(v) || v < 0) { showToast(`${label}營收需為非負數字`, 'error'); return false; }
+        }
+        platforms[idx] = { ...p, today, yesterday, week, month };
         Store.set(Store.KEYS.platforms, platforms);
         showToast(`「${p.name}」已更新`, 'success');
         this.render();
