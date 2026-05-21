@@ -1073,14 +1073,27 @@ const OFFICE_CONFIG = {
       { icon: '💰', label: '本月廣告支出', value: 'NT$285k', meta: '預算使用 72%' },
       { icon: '🎯', label: '平均轉換率', value: '3.8%', meta: '較上月 ↑ 0.5%' },
     ],
-    sections: [
-      { title: '進行中的行銷活動', rows: [
-        ['母親節主題活動', '進行中', '5/01 – 5/14', 'IG・FB・LINE'],
-        ['夏季新品上市', '籌備中', '6/01 開跑', '官網・EDM'],
-        ['品牌週年慶倒數', '進行中', '4/20 – 5/20', '全通路'],
-      ]},
+    tabs: [
+      { key: 'profit', title: '淨利表',
+        heads: ['活動名稱', '投入成本', '營收', '淨利', '利潤率'],
+        rows: [
+          ['母親節主題活動', 'NT$ 124,000', 'NT$ 386,000', 'NT$ 262,000', '67.8%'],
+          ['夏季新品上市',   'NT$ 86,500',  'NT$ 215,000', 'NT$ 128,500', '59.8%'],
+          ['品牌週年慶倒數', 'NT$ 195,000', 'NT$ 521,000', 'NT$ 326,000', '62.6%'],
+          ['IG 達人合作',    'NT$ 52,000',  'NT$ 138,000', 'NT$ 86,000',  '62.3%'],
+        ],
+      },
+      { key: 'insight', title: '洞察表分析',
+        heads: ['維度', '指標', '數值', '備註'],
+        rows: [
+          ['年齡層', '25–34 佔比', '38%', '主力客群'],
+          ['地區',   '雙北佔比',   '54%', '南部待開發'],
+          ['通路',   'IG 轉換率',  '4.2%', '高於整體平均'],
+          ['時段',   '晚間 20–22 點瀏覽佔比', '34%', '主要瀏覽時段'],
+          ['客單價', '本月平均',   'NT$ 1,280', '較上月 ↑ 6%'],
+        ],
+      },
     ],
-    sectionHeads: ['活動名稱', '狀態', '時程', '通路'],
   },
   d2: {
     icon: '🛒',
@@ -1091,14 +1104,36 @@ const OFFICE_CONFIG = {
       { icon: '💵', label: '本月採購金額', value: 'NT$1.2M', meta: '較上月 ↑ 5%' },
       { icon: '⏱️', label: '平均交期', value: '7.2 天', meta: '較上月 ↓ 0.8 天' },
     ],
-    sections: [
-      { title: '本月待處理採購單', rows: [
-        ['PO-2026-0512', '永豐紙業', 'NT$ 86,400', '待簽核'],
-        ['PO-2026-0511', '佳穩五金', 'NT$ 142,000', '已下單'],
-        ['PO-2026-0510', '達誠包材', 'NT$ 38,500', '到貨中'],
-      ]},
+    tabs: [
+      { key: 'order-suggest', title: '叫貨量建議',
+        heads: ['商品', '目前庫存', '上月銷量', '建議叫貨量', '建議下單日'],
+        rows: [
+          ['母嬰用品 A',  '120', '350', '500', '本週內'],
+          ['寢具組 B',    '45',  '180', '300', '5/24 前'],
+          ['保養品 C',    '230', '420', '400', '下週'],
+          ['家電配件 D',  '78',  '210', '350', '5/26 前'],
+        ],
+      },
+      { key: 'vendor-score', title: '廠商評分',
+        heads: ['廠商', '配合月數', '平均交期', '品質', '價格', '綜合評分'],
+        rows: [
+          ['永豐紙業',  '24', '5.2 天', '⭐⭐⭐⭐⭐', '⭐⭐⭐⭐',  '92'],
+          ['佳穩五金',  '18', '7.0 天', '⭐⭐⭐⭐',   '⭐⭐⭐⭐⭐', '88'],
+          ['達誠包材',  '36', '4.5 天', '⭐⭐⭐⭐⭐', '⭐⭐⭐',    '85'],
+          ['新詮國際',  '8',  '8.4 天', '⭐⭐⭐',     '⭐⭐⭐⭐',   '72'],
+        ],
+      },
+      { key: 'stock-warn', title: '庫存預警',
+        heads: ['商品', '當前庫存', '安全庫存', '狀態'],
+        rows: [
+          ['母嬰用品 A', '120', '300', '🔴 不足'],
+          ['寢具組 B',   '45',  '150', '🔴 不足'],
+          ['保養品 C',   '230', '200', '🟢 正常'],
+          ['玩具 D',     '580', '300', '🟡 過剩'],
+          ['家電 E',     '410', '350', '🟢 正常'],
+        ],
+      },
     ],
-    sectionHeads: ['採購單號', '供應商', '金額', '狀態'],
   },
   d3: {
     icon: '💼',
@@ -1109,14 +1144,18 @@ const OFFICE_CONFIG = {
       { icon: '🤝', label: '本月新合約', value: '8', meta: '達成率 89%' },
       { icon: '📈', label: '平均成交週期', value: '21 天', meta: '較上月 ↓ 3 天' },
     ],
-    sections: [
-      { title: '商機追蹤', rows: [
-        ['A 通路合作擴展', '提案中', 'NT$ 1.8M', '王經理'],
-        ['B2B 大客戶導入', '洽談中', 'NT$ 3.2M', '陳總監'],
-        ['品牌聯名專案', '簽約準備', 'NT$ 950k', '吳總監'],
-      ]},
+    tabs: [
+      { key: 'trend', title: '選品趨勢',
+        heads: ['商品', '類別', '月成長率', '競品熱度', '建議'],
+        rows: [
+          ['露營小家電',    '戶外',  '+38%', '高', '加速進貨'],
+          ['Lo-Fi 居家周邊', '生活',  '+22%', '中', '小量試水'],
+          ['寵物智慧用品',  '寵物',  '+45%', '高', '優先選品'],
+          ['機能服飾',      '服飾',  '+18%', '中', '觀望兩週'],
+          ['機能保健食品',  '保健',  '+27%', '高', '加速進貨'],
+        ],
+      },
     ],
-    sectionHeads: ['專案', '階段', '預估金額', '負責人'],
   },
   d4: {
     icon: '🎨',
@@ -1127,14 +1166,43 @@ const OFFICE_CONFIG = {
       { icon: '👨‍🎨', label: '設計師', value: '12 人', meta: '滿載 8 人' },
       { icon: '✨', label: '本週交付', value: '23', meta: '較上週 ↑ 6' },
     ],
-    sections: [
-      { title: '設計工作排程', rows: [
-        ['官網首頁改版', '進行中', '5/22 交付', '林設計師'],
-        ['母親節主視覺', '待審稿', '5/05 上架', '張設計師'],
-        ['夏季商品攝影修圖', '進行中', '6/01 交付', '王設計師'],
-      ]},
+    tabs: [
+      { key: 'draw', title: '製圖',
+        heads: ['專案', '設計師', '截稿日', '狀態'],
+        rows: [
+          ['官網首頁改版',     '林設計師', '5/22', '進行中'],
+          ['母親節主視覺',     '張設計師', '5/05', '待審稿'],
+          ['夏季 Banner 系列', '王設計師', '6/01', '進行中'],
+          ['品牌指南更新',     '林設計師', '6/15', '待開工'],
+        ],
+      },
+      { key: 'image', title: '圖片',
+        heads: ['素材', '類別', '張數', '狀態'],
+        rows: [
+          ['夏季商品攝影', '商品圖', '120', '已修圖'],
+          ['活動現場',     '情境圖', '45',  '已上架'],
+          ['素材庫補充',   '通用',   '80',  '進行中'],
+          ['模特展示',     '商品圖', '60',  '待修圖'],
+        ],
+      },
+      { key: 'copy', title: '文案',
+        heads: ['任務', '通路', '截稿日', '狀態'],
+        rows: [
+          ['母親節 EDM',      'Email',  '5/06', '已上線'],
+          ['週年慶活動頁',    '官網',   '5/15', '審核中'],
+          ['IG 連續貼文',     '社群',   '5/20', '撰寫中'],
+          ['新品上架說明',    '官網',   '5/28', '待開始'],
+        ],
+      },
+      { key: 'title', title: '標題',
+        heads: ['測試', '版本 A', '版本 B', '勝出'],
+        rows: [
+          ['首頁 Banner',  '夏日限時！指定 5 折', '夏季最後一波 5 折',   '版本 B (+12%)'],
+          ['EDM 主旨',     '今晚 9 點開搶',       '錯過今晚就沒了',     '版本 A (+8%)'],
+          ['IG 貼文標題',  '一秒愛上的好物',      '看完我就下單了',     '測試中'],
+        ],
+      },
     ],
-    sectionHeads: ['專案', '狀態', '時程', '負責人'],
   },
 };
 
@@ -1157,7 +1225,7 @@ function showToast(message, type = '') {
  * ============================================================ */
 const App = {
   route: 'employees',
-  filter: { dept: 'all', quarter: 'all', range: 'today', customStart: '', customEnd: '' },
+  filter: { dept: 'all', quarter: 'all', range: 'today', customStart: '', customEnd: '', officeTab: {} },
 
   init() {
     seedData();
@@ -1342,7 +1410,9 @@ const App = {
   render() {
     const main = document.getElementById('main-content');
     if (this.route && this.route.startsWith('office-')) {
-      main.innerHTML = this.viewOffice(this.route.slice('office-'.length));
+      const deptId = this.route.slice('office-'.length);
+      main.innerHTML = this.viewOffice(deptId);
+      this.bindOfficeTabs(deptId);
       return;
     }
     switch (this.route) {
@@ -1760,6 +1830,15 @@ const App = {
     });
   },
 
+  bindOfficeTabs(deptId) {
+    document.querySelectorAll('.pill[data-office-tab]').forEach(p => {
+      p.addEventListener('click', () => {
+        this.filter.officeTab[deptId] = p.dataset.officeTab;
+        this.render();
+      });
+    });
+  },
+
   /* ------------- 員工 Modal ------------- */
   openEmployeeModal(id) {
     const employees = Store.get(Store.KEYS.employees, []);
@@ -1872,19 +1951,31 @@ const App = {
       </div>
     `).join('');
 
-    const sectionTables = cfg.sections.map(sec => `
+    const tabs = cfg.tabs || [];
+    const activeTabKey = this.filter.officeTab[deptId] || tabs[0]?.key;
+    const activeTab = tabs.find(t => t.key === activeTabKey) || tabs[0];
+
+    const tabBar = tabs.length === 0 ? '' : `
+      <div class="filter-bar" style="margin-bottom:16px">
+        ${tabs.map(t => `
+          <button class="pill ${t.key === activeTabKey ? 'active' : ''}" data-office-tab="${escapeHtml(t.key)}">${escapeHtml(t.title)}</button>
+        `).join('')}
+      </div>
+    `;
+
+    const tabContent = !activeTab ? '' : `
       <div class="table-card" style="margin-bottom:16px">
-        <div class="table-card-header"><h3>${escapeHtml(sec.title)}</h3></div>
+        <div class="table-card-header"><h3>${escapeHtml(activeTab.title)}</h3></div>
         <div class="table-wrap">
           <table>
-            <thead><tr>${cfg.sectionHeads.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
+            <thead><tr>${activeTab.heads.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
             <tbody>
-              ${sec.rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}
+              ${activeTab.rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}
             </tbody>
           </table>
         </div>
       </div>
-    `).join('');
+    `;
 
     const cellQ = (v) => {
       if (v == null) return '<span style="color:var(--text-muted)">—</span>';
@@ -1931,7 +2022,8 @@ const App = {
         <p>${escapeHtml(cfg.subtitle)}</p>
       </div>
       <div class="stat-grid">${statCards}</div>
-      ${sectionTables}
+      ${tabBar}
+      ${tabContent}
       <div class="table-card">
         <div class="table-card-header">
           <h3>${escapeHtml(dept.name)}成員績效</h3>
