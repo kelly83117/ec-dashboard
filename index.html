@@ -79,24 +79,6 @@
     display: block;
   }
   .login-logo p { margin: 0; font-size: 12px; color: var(--text-muted); }
-  .login-tabs {
-    display: flex; gap: 4px;
-    background: var(--bg); padding: 4px;
-    border-radius: var(--radius-sm);
-    margin-bottom: 24px;
-  }
-  .login-tabs button {
-    flex: 1; padding: 8px 12px;
-    border: 0; background: transparent;
-    border-radius: 6px;
-    color: var(--text-muted);
-    font-weight: 500;
-  }
-  .login-tabs button.active {
-    background: white;
-    color: var(--text);
-    box-shadow: var(--shadow-sm);
-  }
   .field { margin-bottom: 16px; }
   .field label {
     display: block;
@@ -678,56 +660,24 @@
       <p>元創數位 · 內部管理系統</p>
     </div>
 
-    <div class="login-tabs">
-      <button id="tab-login" class="active" onclick="App.switchAuthTab('login')">登入</button>
-      <button id="tab-register" onclick="App.switchAuthTab('register')">註冊</button>
-    </div>
-
     <div id="login-error" class="login-error"></div>
 
     <!-- 登入表單 -->
     <div id="form-login">
-      <button type="button" class="btn-primary" style="margin-bottom:16px;background:linear-gradient(135deg,#6366f1,#8b5cf6)"
-              onclick="window.App && App.quickAdminLogin()">
-        🚀 一鍵以管理員身分登入
-      </button>
-      <div style="text-align:center;color:var(--text-muted);font-size:12px;margin-bottom:16px">— 或手動輸入 —</div>
       <div class="field">
         <label>帳號</label>
-        <input type="text" id="login-username" autocomplete="username" value="admin">
+        <input type="text" id="login-username" autocomplete="username" placeholder="請輸入帳號">
       </div>
       <div class="field">
         <label>密碼</label>
-        <input type="password" id="login-password" autocomplete="current-password" value="admin123">
+        <input type="password" id="login-password" autocomplete="current-password" placeholder="請輸入密碼">
       </div>
       <button type="button" class="btn-primary" onclick="window.App && App.login()">登入</button>
       <div class="login-hint" id="login-hint">
-        預設管理員帳號：<code>admin</code> / 密碼：<code>admin123</code><br>
-        登入後可至「帳號管理」修改密碼或新增其他帳號。<br>
-        <a href="#" onclick="event.preventDefault(); App.resetAllData();" style="color:var(--primary);text-decoration:none">↻ 重設範例資料</a>
+        請使用管理員建立的帳號登入。<br>
+        如忘記帳號或密碼，請聯絡系統管理員。
         <div id="js-status" style="margin-top:8px;color:var(--danger);font-size:11px"></div>
       </div>
-    </div>
-
-    <!-- 註冊表單 -->
-    <div id="form-register" style="display:none;">
-      <div class="field">
-        <label>姓名</label>
-        <input type="text" id="reg-name">
-      </div>
-      <div class="field">
-        <label>帳號</label>
-        <input type="text" id="reg-username" autocomplete="username">
-      </div>
-      <div class="field">
-        <label>密碼（至少 6 碼）</label>
-        <input type="password" id="reg-password" autocomplete="new-password">
-      </div>
-      <div class="field">
-        <label>辦公室</label>
-        <select id="reg-department"></select>
-      </div>
-      <button type="button" class="btn-primary" onclick="window.App && App.register()">建立帳號</button>
     </div>
   </div>
 </div>
@@ -1244,57 +1194,22 @@ const App = {
     }
   },
 
-  resetAllData() {
-    if (!confirm('將清除所有帳號、辦公室、員工資料並重置為初始狀態，確定？')) return;
-    Object.values(Store.KEYS).forEach(k => Store.remove(k));
-    seedData();
-    showToast('已重設為初始資料', 'success');
-    document.getElementById('login-username').value = 'admin';
-    document.getElementById('login-password').value = 'admin123';
-  },
-
   bindNav() {
     document.querySelectorAll('.nav-item').forEach(btn => {
       btn.addEventListener('click', () => this.navigate(btn.dataset.route));
     });
   },
 
-  /* ------------- 登入/註冊 ------------- */
+  /* ------------- 登入 ------------- */
   showLogin() {
     document.getElementById('view-login').style.display = 'flex';
     document.getElementById('view-app').style.display = 'none';
-    this.populateRegisterDepts();
-  },
-
-  switchAuthTab(tab) {
-    document.getElementById('login-error').classList.remove('show');
-    document.getElementById('tab-login').classList.toggle('active', tab === 'login');
-    document.getElementById('tab-register').classList.toggle('active', tab === 'register');
-    document.getElementById('form-login').style.display = tab === 'login' ? '' : 'none';
-    document.getElementById('form-register').style.display = tab === 'register' ? '' : 'none';
-    document.getElementById('login-hint').style.display = tab === 'login' ? '' : 'none';
-  },
-
-  populateRegisterDepts() {
-    const sel = document.getElementById('reg-department');
-    const depts = Store.get(Store.KEYS.departments, []);
-    sel.innerHTML = depts.map(d => `<option value="${escapeHtml(d.name)}">${escapeHtml(d.name)}</option>`).join('');
   },
 
   showAuthError(msg) {
     const e = document.getElementById('login-error');
     e.textContent = msg;
     e.classList.add('show');
-  },
-
-  quickAdminLogin() {
-    // 強制重設並以 admin 登入
-    Object.values(Store.KEYS).forEach(k => Store.remove(k));
-    seedData();
-    const users = Store.get(Store.KEYS.users, []);
-    const admin = users.find(u => u.username === 'admin');
-    Store.set(Store.KEYS.session, { username: 'admin' });
-    this.enterApp(admin);
   },
 
   login() {
@@ -1327,20 +1242,6 @@ const App = {
     if (hash !== user.password) { this.showAuthError('密碼錯誤'); return; }
     Store.set(Store.KEYS.session, { username: user.username });
     this.enterApp(user);
-  },
-
-  register() {
-    const name = document.getElementById('reg-name').value.trim();
-    const username = document.getElementById('reg-username').value.trim();
-    const password = document.getElementById('reg-password').value;
-    const department = document.getElementById('reg-department').value;
-    if (password.length < 6) { this.showAuthError('密碼至少 6 碼'); return; }
-    const users = Store.get(Store.KEYS.users, []);
-    if (users.some(u => u.username === username)) { this.showAuthError('帳號已存在'); return; }
-    users.push({ username, password: hashPassword(password), name, role: 'staff', department });
-    Store.set(Store.KEYS.users, users);
-    Store.set(Store.KEYS.session, { username });
-    this.enterApp({ username, name, role: 'staff', department });
   },
 
   logout() {
