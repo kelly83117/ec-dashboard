@@ -1105,6 +1105,67 @@ const OFFICE_CONFIG = {
       { icon: '✨', label: '本週交付', value: '23', meta: '較上週 ↑ 6' },
     ],
     tabs: [
+      { key: 'kpi', title: '設計團隊 KPI',
+        customHtml: `
+          <div class="table-card" style="margin-bottom:16px">
+            <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <div>
+                <h3 style="margin:0">設計團隊 KPI</h3>
+                <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted)">每月績效計分標準</p>
+              </div>
+              <div style="font-size:13px;color:var(--text-muted);text-align:right;background:var(--bg);padding:8px 14px;border-radius:8px">
+                基本 <strong style="color:var(--text)">100</strong> ＋ 加分 <strong style="color:var(--success)">+10</strong>　·　封頂 <strong style="color:var(--text)">100</strong>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width:200px">KPI 項目</th>
+                    <th>定義說明</th>
+                    <th style="width:36%">量化指標</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <div style="color:#3b82f6;font-weight:600;font-size:15px">A. 達標工時</div>
+                      <div style="font-size:12px;color:var(--text-muted);margin-top:4px">60 分</div>
+                    </td>
+                    <td style="line-height:1.7">標準工時內完成的件數比率。AI 後標準以 AI 前 × 0.7 換算。設計人員下拉勾選「○ 標準內 / × 超時」。</td>
+                    <td style="line-height:1.7">
+                      <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px">標準工時</div>
+                      主圖 20 分、主圖森 10 分、套圖 1 小時 45 分、Banner 40 分
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div style="color:#f59e0b;font-weight:600;font-size:15px">B. 指派固定任務</div>
+                      <div style="font-size:12px;color:var(--text-muted);margin-top:4px">40 分・必達</div>
+                    </td>
+                    <td style="line-height:1.7">每項為必達職責，起始視為滿分，未完成、逾期或出錯則逐項扣分。</td>
+                    <td style="line-height:1.7">
+                      <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px">每月驗收</div>
+                      完成率、準時率、正確率。漏做扣整次配分、逾期扣 30%、做錯扣 2 分。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div style="color:#10b981;font-weight:600;font-size:15px">C. Skill 加分</div>
+                      <div style="font-size:12px;color:var(--text-muted);margin-top:4px">+10 加分</div>
+                    </td>
+                    <td style="line-height:1.7">加分項，獨立於 A、B 之外。有存就加、沒存不扣。鼓勵主動學習與知識累積。</td>
+                    <td style="line-height:1.7">
+                      <div style="color:var(--text-muted);font-size:12px;margin-bottom:4px">每月存滿即加滿</div>
+                      3 項新技能（新軟體技巧、AI 做法、表現手法、範本等）即加滿 10 分。
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `,
+      },
       { key: 'draw', title: '製圖',
         heads: ['專案', '設計師', '截稿日', '狀態'],
         rows: [
@@ -1879,7 +1940,7 @@ const App = {
       </div>
     `;
 
-    const tabContent = !activeTab ? '' : `
+    const tabContent = !activeTab ? '' : (activeTab.customHtml || `
       <div class="table-card" style="margin-bottom:16px">
         <div class="table-card-header"><h3>${escapeHtml(activeTab.title)}</h3></div>
         <div class="table-wrap">
@@ -1891,7 +1952,7 @@ const App = {
           </table>
         </div>
       </div>
-    `;
+    `);
 
     const cellQ = (v) => {
       if (v == null) return '<span style="color:var(--text-muted)">—</span>';
