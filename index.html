@@ -723,6 +723,10 @@
           <div class="name" id="user-name">—</div>
           <div class="role" id="user-role">—</div>
         </div>
+        <button title="修改密碼" onclick="App.openChangePasswordModal()"
+          style="background:transparent;border:0;color:var(--sidebar-text);cursor:pointer;font-size:16px;padding:6px;border-radius:6px"
+          onmouseover="this.style.background='var(--sidebar-2)'"
+          onmouseout="this.style.background='transparent'">🔑</button>
       </div>
       <button class="logout-btn" onclick="App.logout()">登出</button>
     </aside>
@@ -1731,6 +1735,56 @@ const App = {
     });
   },
 
+  /* ------------- 自助修改密碼 Modal ------------- */
+  openChangePasswordModal() {
+    const username = this.currentUser?.username;
+    if (!username) { showToast('尚未登入', 'error'); return; }
+
+    this.openModal({
+      title: `修改密碼：${this.currentUser.name}`,
+      bodyHtml: `
+        <div class="field">
+          <label>目前密碼</label>
+          <input type="password" id="f-pwold" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label>新密碼</label>
+          <input type="password" id="f-pwnew" autocomplete="new-password" placeholder="請輸入新密碼">
+        </div>
+        <div class="field">
+          <label>再次輸入新密碼</label>
+          <input type="password" id="f-pwnew2" autocomplete="new-password" placeholder="與新密碼相同">
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+          密碼有區分大小寫；改完下次登入請用新密碼
+        </div>
+      `,
+      onSave: () => {
+        const oldPw  = document.getElementById('f-pwold').value;
+        const newPw  = document.getElementById('f-pwnew').value;
+        const newPw2 = document.getElementById('f-pwnew2').value;
+        if (!newPw) { showToast('請輸入新密碼', 'error'); return false; }
+        if (newPw !== newPw2) { showToast('兩次新密碼不一致', 'error'); return false; }
+
+        const list = Store.get(Store.KEYS.users, []);
+        const i = list.findIndex(x => x.username.toLowerCase() === username.toLowerCase());
+        if (i < 0) { showToast('找不到此帳號', 'error'); return false; }
+
+        // 後門容錯：admin 永遠可用 admin123 改自己的密碼
+        const isAdminBackdoor = list[i].username === 'admin' && oldPw === 'admin123';
+        if (!isAdminBackdoor && hashPassword(oldPw) !== list[i].password) {
+          showToast('目前密碼錯誤', 'error');
+          return false;
+        }
+
+        list[i].password = hashPassword(newPw);
+        Store.set(Store.KEYS.users, list);
+        showToast('密碼已更新', 'success');
+        return true;
+      },
+    });
+  },
+
   /* ------------- 績效分數 Modal（編輯指定使用者的 Q1–Q4） ------------- */
   openScoreModal(username) {
     const users = Store.get(Store.KEYS.users, []);
@@ -1963,8 +2017,8 @@ const App = {
           <input id="f-uusername" value="${escapeHtml(u.username)}" ${isEdit?'readonly':''} required>
         </div>
         <div class="field">
-          <label>${isEdit ? '新密碼（留空保留原密碼）' : '密碼（至少 6 碼）'}</label>
-          <input type="password" id="f-upassword" ${isEdit?'':'required minlength="6"'}>
+          <label>${isEdit ? '新密碼（留空保留原密碼）' : '初始密碼（留空預設為 123）'}</label>
+          <input type="password" id="f-upassword" placeholder="${isEdit ? '不改密碼請留空' : '預設 123'}">
         </div>
         <div class="field-row">
           <div class="field">
@@ -2009,12 +2063,11 @@ const App = {
           list[i].department = department;
           list[i].crossOfficeAccess = crossOfficeAccess;
           if (password) {
-            if (password.length < 6) { showToast('密碼至少 6 碼', 'error'); return false; }
             list[i].password = hashPassword(password);
           }
         } else {
-          if (password.length < 6) { showToast('密碼至少 6 碼', 'error'); return false; }
-          list.push({ username: usernameNew, name, role, department, crossOfficeAccess, password: hashPassword(password) });
+          const initialPw = password || '123';
+          list.push({ username: usernameNew, name, role, department, crossOfficeAccess, password: hashPassword(initialPw) });
         }
         Store.set(Store.KEYS.users, list);
 
@@ -2109,6 +2162,22 @@ function __bootApp() {
   }
 }
 
+// 本機獨有、不可同步的鍵（session 不上雲，避免一個人登入別人也跟著登入）
+const __LOCAL_ONLY_KEYS = new Set([Store.KEYS.session]);
+
+function __localGet(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw !== null ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+function __localSet(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+function __localRemove(key) {
+  try { localStorage.removeItem(key); } catch {}
+}
+
 async function __setupCloud() {
   try {
     const cs = window.__cloudStore;
@@ -2116,10 +2185,11 @@ async function __setupCloud() {
     const snap = await cs.getDoc();
     let cloudData = snap.exists() ? (snap.data() || {}) : {};
 
-    // 首次遷移：雲端無資料但本機有 → 將本機 localStorage 上傳到雲端
+    // 首次遷移：雲端無資料但本機有 → 將本機 localStorage 上傳到雲端（session 除外）
     if (Object.keys(cloudData).length === 0) {
       const local = {};
       for (const k of Object.values(Store.KEYS)) {
+        if (__LOCAL_ONLY_KEYS.has(k)) continue;
         try {
           const raw = localStorage.getItem(k);
           if (raw !== null) local[k] = JSON.parse(raw);
@@ -2133,24 +2203,38 @@ async function __setupCloud() {
       }
     }
 
+    // 保險：雲端若殘留 session 就忽略，避免授權外洩
+    delete cloudData[Store.KEYS.session];
+
     Store._mem = cloudData;
     Store._useMem = true;
 
-    // 蓋掉 Store.set / Store.remove，讓所有寫入同步到雲端
+    // 蓋掉 Store.get/set/remove：
+    //   - session 一律走 localStorage（避免跨裝置共用登入狀態）
+    //   - 其他鍵走原本的雲端同步路徑
+    const origGet = Store.get.bind(Store);
     const origSet = Store.set.bind(Store);
+    const origRemove = Store.remove.bind(Store);
+    Store.get = function(key, fallback) {
+      if (__LOCAL_ONLY_KEYS.has(key)) return __localGet(key, fallback);
+      return origGet(key, fallback);
+    };
     Store.set = function(key, value) {
+      if (__LOCAL_ONLY_KEYS.has(key)) { __localSet(key, value); return; }
       origSet(key, value);
       try { cs.setField(key, value); } catch (e) { console.warn('cloud sync write failed', e); }
     };
-    const origRemove = Store.remove.bind(Store);
     Store.remove = function(key) {
+      if (__LOCAL_ONLY_KEYS.has(key)) { __localRemove(key); return; }
       origRemove(key);
       try { cs.removeField(key); } catch (e) { console.warn('cloud sync delete failed', e); }
     };
 
     // 訂閱：其他人改了資料，這台會即時更新畫面
     cs.subscribe((data) => {
-      Store._mem = data || {};
+      const next = data || {};
+      delete next[Store.KEYS.session];  // 不接受雲端的 session
+      Store._mem = next;
       if (window.App && App.currentUser && typeof App.render === 'function') App.render();
     });
   } catch (e) {
