@@ -696,9 +696,6 @@
         <button class="nav-item" data-route="dashboard">
           <span class="icon">🏠</span><span>儀表板首頁</span>
         </button>
-        <button class="nav-item" data-route="revenue-entry">
-          <span class="icon">💰</span><span>營收輸入</span>
-        </button>
         <button class="nav-item active" data-route="employees">
           <span class="icon">📊</span><span>績效管理</span>
         </button>
@@ -1373,8 +1370,7 @@ const App = {
       return;
     }
     switch (this.route) {
-      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); break;
-      case 'revenue-entry': main.innerHTML = this.viewRevenueEntry(); this.bindRevenueEntry(); break;
+      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindRevenueEntry(); break;
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
       default: main.innerHTML = this.viewEmployees(); this.bindFilterBar();
@@ -1477,6 +1473,177 @@ const App = {
           `).join('')}
         </div>
       </div>
+      ${this.dailyLineChartHtml(platforms, 30)}
+      ${this.revenueEntrySectionHtml(platforms)}
+    `;
+  },
+
+  /* 每日營收曲線（近 N 天） */
+  dailyLineChartHtml(platforms, days) {
+    const now = new Date();
+    const dates = [];
+    for (let i = days - 1; i >= 0; i--) dates.push(toDateStr(addDays(now, -i)));
+
+    const series = platforms.map(p => ({
+      name: p.name,
+      color: p.color,
+      icon: p.icon,
+      values: dates.map(d => +(p.daily && p.daily[d]) || 0),
+    }));
+    const maxV = Math.max(1, ...series.flatMap(s => s.values));
+
+    const W = 1000, H = 320;
+    const padL = 70, padR = 20, padT = 16, padB = 36;
+    const cw = W - padL - padR;
+    const ch = H - padT - padB;
+    const xStep = cw / Math.max(1, dates.length - 1);
+
+    // Y 軸格線與刻度（5 段）
+    const yTicks = [];
+    for (let i = 0; i <= 4; i++) {
+      const y = padT + ch - (i / 4) * ch;
+      const v = (maxV / 4) * i;
+      yTicks.push(`
+        <line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="#e2e8f0" stroke-dasharray="3,3"/>
+        <text x="${padL - 10}" y="${y + 4}" font-size="11" fill="#94a3b8" text-anchor="end">${this.fmtTick(v)}</text>
+      `);
+    }
+
+    // X 軸日期標籤（顯示 8 個左右）
+    const xLabelEvery = Math.max(1, Math.round(dates.length / 8));
+    const xLabels = dates.map((d, i) => {
+      if (i % xLabelEvery !== 0 && i !== dates.length - 1) return '';
+      const x = padL + i * xStep;
+      const label = d.slice(5).replace('-', '/');
+      return `<text x="${x}" y="${H - padB + 18}" font-size="11" fill="#64748b" text-anchor="middle">${label}</text>`;
+    }).join('');
+
+    // 折線 + 端點圓
+    const polylines = series.map(s => {
+      const pts = s.values.map((v, i) => {
+        const x = padL + i * xStep;
+        const y = padT + ch - (v / maxV) * ch;
+        return `${x},${y}`;
+      }).join(' ');
+      return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />`;
+    }).join('');
+
+    // 平台圖例
+    const legend = series.map(s => `
+      <button class="line-legend" data-name="${escapeHtml(s.name)}" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:${s.color}14;border:1px solid ${s.color}40;border-radius:999px;font-size:12px;color:${s.color};cursor:pointer;font-weight:500">
+        <span style="width:10px;height:10px;border-radius:50%;background:${s.color}"></span>
+        ${s.icon} ${escapeHtml(s.name)}
+      </button>
+    `).join('');
+
+    return `
+      <div class="chart-card" style="margin-top:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+          <h3 style="margin:0">各平台每日營收曲線</h3>
+          <span style="font-size:12px;color:var(--text-muted)">近 ${days} 天</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${legend}</div>
+        <div style="overflow-x:auto">
+          <svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:700px;height:auto;display:block">
+            ${yTicks.join('')}
+            ${polylines}
+            ${xLabels}
+          </svg>
+        </div>
+      </div>
+    `;
+  },
+
+  fmtTick(v) {
+    if (v >= 1000000) return (v / 1000000).toFixed(1) + 'M';
+    if (v >= 1000) return Math.round(v / 1000) + 'K';
+    return Math.round(v).toString();
+  },
+
+  /* 營收輸入區塊（HTML 片段，不含 page-header） */
+  revenueEntrySectionHtml(platforms) {
+    const now = new Date();
+    const todayStr = toDateStr(now);
+    const entryDate = this.filter.entryDate || todayStr;
+
+    let totalRev = 0, totalAds = 0;
+    const rows = platforms.map((p, i) => {
+      const rev = (p.daily && p.daily[entryDate] != null) ? p.daily[entryDate] : '';
+      const ads = (p.dailyAdSpend && p.dailyAdSpend[entryDate] != null) ? p.dailyAdSpend[entryDate] : '';
+      if (typeof rev === 'number') totalRev += rev;
+      if (typeof ads === 'number') totalAds += ads;
+      const hasAds = PLATFORMS_WITH_AD_SPEND.has(p.name);
+      const roas = (typeof rev === 'number' && rev > 0 && typeof ads === 'number' && ads > 0)
+        ? (rev / ads).toFixed(2) : '—';
+      return `
+        <tr>
+          <td>
+            <span class="dept-tag" style="background:${p.color}22;color:${p.color};font-size:14px;padding:5px 14px">
+              ${p.icon} ${escapeHtml(p.name)}
+            </span>
+          </td>
+          <td>
+            <input type="number" min="0" step="1" class="entry-rev" data-idx="${i}" value="${rev}" placeholder="0"
+              style="width:160px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:15px;font-variant-numeric:tabular-nums;text-align:right">
+          </td>
+          <td>
+            ${hasAds ? `
+              <input type="number" min="0" step="1" class="entry-ads" data-idx="${i}" value="${ads}" placeholder="0"
+                style="width:140px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:15px;font-variant-numeric:tabular-nums;text-align:right">
+            ` : `<span style="color:var(--text-muted)">—</span>`}
+          </td>
+          <td><span class="entry-roas" data-idx="${i}" style="font-weight:600;font-variant-numeric:tabular-nums">${roas}</span></td>
+        </tr>
+      `;
+    }).join('');
+
+    const overallRoas = (totalRev > 0 && totalAds > 0) ? (totalRev / totalAds).toFixed(2) : '—';
+    const isToday = entryDate === todayStr;
+
+    return `
+      <div style="margin-top:16px">
+        <div style="background:var(--surface);padding:18px 20px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <h3 style="margin:0;font-size:16px">💰 營收輸入</h3>
+          <label style="font-weight:500;margin-left:8px">日期</label>
+          <input type="date" id="entry-date" value="${entryDate}" max="${todayStr}"
+            style="padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:15px">
+          ${isToday
+            ? `<span class="up" style="font-size:13px;font-weight:500">● 今日</span>`
+            : `<button class="btn-ghost" id="entry-today" style="padding:6px 14px;font-size:13px">回到今日</button>`}
+          <span style="margin-left:auto;font-size:13px;color:var(--text-muted)">改完數字按右下「儲存」</span>
+        </div>
+        <div class="table-card">
+          <div class="table-card-header">
+            <h3>${entryDate.replace(/-/g, '/')}　各平台數據</h3>
+            <p>ROAS = 營收 ÷ 廣告費，自動計算</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:30%">平台</th>
+                  <th>當日營收（NT$）</th>
+                  <th>廣告費（NT$）</th>
+                  <th>ROAS</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+              <tfoot>
+                <tr style="background:var(--bg);font-weight:600">
+                  <td>合計</td>
+                  <td id="entry-total-rev" style="font-variant-numeric:tabular-nums">${fmtNTD(totalRev)}</td>
+                  <td id="entry-total-ads" style="font-variant-numeric:tabular-nums">${totalAds > 0 ? fmtNTD(totalAds) : '—'}</td>
+                  <td id="entry-total-roas" style="font-variant-numeric:tabular-nums">${overallRoas}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div style="padding:18px 24px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border)">
+            <span id="entry-status" style="font-size:13px;color:var(--text-muted)"></span>
+            <button class="btn-primary" id="entry-save" style="width:auto;padding:10px 28px">💾 儲存</button>
+          </div>
+        </div>
+      </div>
     `;
   },
 
@@ -1523,109 +1690,8 @@ const App = {
   },
 
   /* ============================================================
-   *  營收輸入頁（每日各平台 營收 / 廣告費）
+   *  營收輸入區段 bindRevenueEntry（在儀表板首頁底下啟用）
    * ============================================================ */
-  viewRevenueEntry() {
-    // 讀取 → 遷移 → 補齊 → 寫回
-    let platforms = Store.get(Store.KEYS.platforms, null);
-    if (!platforms) platforms = JSON.parse(JSON.stringify(PLATFORMS));
-    let migrated = migratePlatforms(platforms);
-    const wasMigrated = migrated !== platforms;
-    if (wasMigrated) platforms = migrated;
-    const extended = ensureDailyRecent(platforms, 90);
-    if (wasMigrated || extended) Store.set(Store.KEYS.platforms, platforms);
-
-    const now = new Date();
-    const todayStr = toDateStr(now);
-    const entryDate = this.filter.entryDate || todayStr;
-
-    let totalRev = 0, totalAds = 0;
-    const rows = platforms.map((p, i) => {
-      const rev = (p.daily && p.daily[entryDate] != null) ? p.daily[entryDate] : '';
-      const ads = (p.dailyAdSpend && p.dailyAdSpend[entryDate] != null) ? p.dailyAdSpend[entryDate] : '';
-      if (typeof rev === 'number') totalRev += rev;
-      if (typeof ads === 'number') totalAds += ads;
-      const hasAds = PLATFORMS_WITH_AD_SPEND.has(p.name);
-      const roas = (typeof rev === 'number' && rev > 0 && typeof ads === 'number' && ads > 0)
-        ? (rev / ads).toFixed(2)
-        : '—';
-      return `
-        <tr>
-          <td>
-            <span class="dept-tag" style="background:${p.color}22;color:${p.color};font-size:14px;padding:5px 14px">
-              ${p.icon} ${escapeHtml(p.name)}
-            </span>
-          </td>
-          <td>
-            <input type="number" min="0" step="1" class="entry-rev" data-idx="${i}"
-              value="${rev}" placeholder="0"
-              style="width:160px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:15px;font-variant-numeric:tabular-nums;text-align:right">
-          </td>
-          <td>
-            ${hasAds ? `
-              <input type="number" min="0" step="1" class="entry-ads" data-idx="${i}"
-                value="${ads}" placeholder="0"
-                style="width:140px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:15px;font-variant-numeric:tabular-nums;text-align:right">
-            ` : `<span style="color:var(--text-muted)">—</span>`}
-          </td>
-          <td>
-            <span class="entry-roas" data-idx="${i}" style="font-weight:600;font-variant-numeric:tabular-nums">${roas}</span>
-          </td>
-        </tr>
-      `;
-    }).join('');
-
-    const overallRoas = (totalRev > 0 && totalAds > 0) ? (totalRev / totalAds).toFixed(2) : '—';
-    const isToday = entryDate === todayStr;
-
-    return `
-      <div class="page-header">
-        <h2>💰 營收輸入</h2>
-        <p>每天進來輸入各平台當日的營收與廣告費，儀表板會立刻反映</p>
-      </div>
-      <div style="background:var(--surface);padding:18px 20px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-        <label style="font-weight:600">日期</label>
-        <input type="date" id="entry-date" value="${entryDate}" max="${todayStr}"
-          style="padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:15px">
-        ${isToday
-          ? `<span class="up" style="font-size:13px;font-weight:500">● 今日</span>`
-          : `<button class="btn-ghost" id="entry-today" style="padding:6px 14px;font-size:13px">回到今日</button>`}
-        <span style="margin-left:auto;font-size:13px;color:var(--text-muted)">改完日期、輸入完數字記得按右下「儲存」</span>
-      </div>
-      <div class="table-card">
-        <div class="table-card-header">
-          <h3>${entryDate.replace(/-/g, '/')}　各平台數據</h3>
-          <p>輸入框右上角顯示 NT$；ROAS = 營收 ÷ 廣告費（自動算）</p>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th style="width:30%">平台</th>
-                <th>當日營收（NT$）</th>
-                <th>廣告費（NT$）</th>
-                <th>ROAS</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-            <tfoot>
-              <tr style="background:var(--bg);font-weight:600">
-                <td>合計</td>
-                <td id="entry-total-rev" style="font-variant-numeric:tabular-nums">${fmtNTD(totalRev)}</td>
-                <td id="entry-total-ads" style="font-variant-numeric:tabular-nums">${totalAds > 0 ? fmtNTD(totalAds) : '—'}</td>
-                <td id="entry-total-roas" style="font-variant-numeric:tabular-nums">${overallRoas}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-        <div style="padding:18px 24px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border)">
-          <span id="entry-status" style="font-size:13px;color:var(--text-muted)"></span>
-          <button class="btn-primary" id="entry-save" style="width:auto;padding:10px 28px">💾 儲存</button>
-        </div>
-      </div>
-    `;
-  },
-
   bindRevenueEntry() {
     const recompute = () => {
       let totalRev = 0, totalAds = 0;
