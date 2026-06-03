@@ -1592,24 +1592,46 @@ const App = {
       `;
     }).join('');
 
-    // 計算每日值
-    let values, lineColor, lineLabel;
+    // 計算每日資料
+    // 全賣場模式（activeName == null）：7 條平台曲線同時顯示
+    // 單一平台模式：只顯示該平台一條線
+    let series, lineLabel, lineColor, isMulti;
     if (activeName) {
       const p = platforms.find(x => x.name === activeName);
       if (p) {
-        values = dates.map(d => +(p.daily && p.daily[d]) || 0);
-        lineColor = p.color;
+        series = [{ name: p.name, color: p.color, icon: p.icon,
+                    values: dates.map(d => +(p.daily?.[d]) || 0) }];
         lineLabel = `${p.icon} ${p.name}`;
+        lineColor = p.color;
+        isMulti = false;
       } else {
-        values = dates.map(d => platforms.reduce((s, pp) => s + (+pp.daily?.[d] || 0), 0));
-        lineColor = '#0f172a';
+        series = platforms.map(pp => ({
+          name: pp.name, color: pp.color, icon: pp.icon,
+          values: dates.map(d => +(pp.daily?.[d]) || 0),
+        }));
         lineLabel = '全賣場';
+        lineColor = '#0f172a';
+        isMulti = true;
       }
     } else {
-      values = dates.map(d => platforms.reduce((s, pp) => s + (+pp.daily?.[d] || 0), 0));
+      series = platforms.map(pp => ({
+        name: pp.name, color: pp.color, icon: pp.icon,
+        values: dates.map(d => +(pp.daily?.[d]) || 0),
+      }));
+      lineLabel = '全賣場';
       lineColor = '#0f172a';
-      lineLabel = '總計';
+      isMulti = true;
     }
+
+    // 每日全平台資料供 tooltip 取用
+    const dailyData = dates.map(d => ({
+      date: d,
+      total: platforms.reduce((s, pp) => s + (+pp.daily?.[d] || 0), 0),
+      breakdown: platforms.map(pp => ({
+        name: pp.name, icon: pp.icon, color: pp.color,
+        value: +pp.daily?.[d] || 0,
+      })),
+    }));
 
     // 沒資料的空狀態
     if (dates.length === 0) {
@@ -1626,7 +1648,7 @@ const App = {
       `;
     }
 
-    const maxV = Math.max(1, ...values);
+    const maxV = Math.max(1, ...series.flatMap(s => s.values));
 
     const W = 1000, H = 280;
     const padL = 60, padR = 20, padT = 20, padB = 32;
@@ -1654,22 +1676,25 @@ const App = {
       return `<text x="${x}" y="${H - padB + 18}" font-size="11" fill="#64748b" text-anchor="middle">${label}</text>`;
     }).join('');
 
-    // 折線點
-    const points = values.map((v, i) => {
-      const x = padL + i * xStep;
-      const y = padT + ch - (v / maxV) * ch;
-      return `${x},${y}`;
-    }).join(' ');
-
-    // 資料點圓圈（永遠顯示小圓）
-    const circles = values.map((v, i) => {
-      const x = padL + i * xStep;
-      const y = padT + ch - (v / maxV) * ch;
-      return `<circle cx="${x}" cy="${y}" r="3" fill="white" stroke="${lineColor}" stroke-width="2" />`;
+    // 折線（每個 series 一條）
+    const polylines = series.map(s => {
+      const pts = s.values.map((v, i) => {
+        const x = padL + i * xStep;
+        const y = padT + ch - (v / maxV) * ch;
+        return `${x},${y}`;
+      }).join(' ');
+      return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="${isMulti ? 2 : 2.5}" stroke-linejoin="round" stroke-linecap="round" />`;
     }).join('');
 
+    // 資料點圓圈（每個 series 每天一個）
+    const circles = series.map(s => s.values.map((v, i) => {
+      const x = padL + i * xStep;
+      const y = padT + ch - (v / maxV) * ch;
+      return `<circle cx="${x}" cy="${y}" r="${isMulti ? 2.5 : 3}" fill="white" stroke="${s.color}" stroke-width="${isMulti ? 1.5 : 2}" />`;
+    }).join('')).join('');
+
     // 保存 chart 狀態供 hover handler 使用
-    this._chartState = { dates, values, padL, xStep, W, H, padT, ch, maxV, lineColor, lineLabel };
+    this._chartState = { dates, dailyData, series, padL, xStep, W, H, padT, ch, maxV, lineColor, lineLabel, isMulti, activeName };
 
     return `
       <div class="chart-card" style="margin-top:16px">
@@ -1681,16 +1706,13 @@ const App = {
         <div id="line-chart-container" style="position:relative">
           <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:280px;display:block">
             ${yTicks.join('')}
-            <polyline points="${points}" fill="none" stroke="${lineColor}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
+            ${polylines}
             ${circles}
             ${xLabels}
             <line id="chart-guide" x1="0" y1="${padT}" x2="0" y2="${padT + ch}" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3" style="opacity:0;transition:opacity .1s" />
-            <circle id="chart-active-dot" cx="0" cy="0" r="6" fill="${lineColor}" stroke="white" stroke-width="2" style="opacity:0;transition:opacity .1s" />
+            ${isMulti ? '' : `<circle id="chart-active-dot" cx="0" cy="0" r="6" fill="${lineColor}" stroke="white" stroke-width="2" style="opacity:0;transition:opacity .1s" />`}
           </svg>
-          <div id="line-chart-tooltip" style="position:absolute;display:none;background:#1e293b;color:white;padding:10px 14px;border-radius:8px;font-size:13px;pointer-events:none;white-space:nowrap;box-shadow:0 8px 24px rgba(15,23,42,0.2);z-index:10;transform:translate(-50%, calc(-100% - 10px))">
-            <div id="tooltip-date" style="font-size:11px;opacity:0.7;margin-bottom:4px"></div>
-            <div id="tooltip-value" style="font-size:16px;font-weight:700;font-variant-numeric:tabular-nums"></div>
-          </div>
+          <div id="line-chart-tooltip" style="position:absolute;display:none;background:#1e293b;color:white;padding:10px 14px;border-radius:8px;font-size:13px;pointer-events:none;box-shadow:0 8px 24px rgba(15,23,42,0.2);z-index:10;transform:translate(-50%, calc(-100% - 10px));min-width:200px"></div>
         </div>
       </div>
     `;
@@ -1702,10 +1724,43 @@ const App = {
     const svg = container.querySelector('svg');
     const tooltip = document.getElementById('line-chart-tooltip');
     const guide   = document.getElementById('chart-guide');
-    const activeDot = document.getElementById('chart-active-dot');
-    if (!svg || !tooltip || !guide || !activeDot) return;
+    const activeDot = document.getElementById('chart-active-dot'); // 只有單一平台模式才有
+    if (!svg || !tooltip || !guide) return;
 
-    const { dates, values, padL, xStep, W, H, padT, ch, maxV } = this._chartState;
+    const { dates, dailyData, series, padL, xStep, W, H, padT, ch, maxV, isMulti, activeName } = this._chartState;
+
+    const fmtTooltip = (i) => {
+      const data = dailyData[i];
+      const dateStr = data.date.replace(/-/g, '/');
+      if (isMulti) {
+        // 全賣場模式：顯示日期 + 總計 + 7 個平台明細
+        return `
+          <div style="font-size:11px;opacity:0.7;margin-bottom:6px">${dateStr}</div>
+          <div style="font-size:11px;opacity:0.7">全賣場總計</div>
+          <div style="font-size:18px;font-weight:700;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.18);font-variant-numeric:tabular-nums">NT$ ${Math.round(data.total).toLocaleString()}</div>
+          <div style="font-size:12px;line-height:1.7">
+            ${data.breakdown.map(p => `
+              <div style="display:flex;justify-content:space-between;gap:18px">
+                <span style="opacity:0.9">
+                  <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:6px"></span>
+                  ${p.icon} ${escapeHtml(p.name)}
+                </span>
+                <span style="font-variant-numeric:tabular-nums;opacity:${p.value > 0 ? 1 : 0.4}">${p.value > 0 ? p.value.toLocaleString() : '—'}</span>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      } else {
+        // 單一平台模式
+        const p = data.breakdown.find(x => x.name === activeName);
+        const v = p ? p.value : 0;
+        return `
+          <div style="font-size:11px;opacity:0.7;margin-bottom:4px">${dateStr}</div>
+          <div style="font-size:11px;opacity:0.85;margin-bottom:4px">${p ? escapeHtml(p.icon + ' ' + p.name) : ''}</div>
+          <div style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">NT$ ${Math.round(v).toLocaleString()}</div>
+        `;
+      }
+    };
 
     const update = (e) => {
       const svgRect = svg.getBoundingClientRect();
@@ -1717,15 +1772,14 @@ const App = {
       let i = Math.round((svgX - padL) / xStep);
       i = Math.max(0, Math.min(dates.length - 1, i));
 
-      const date = dates[i];
-      const value = values[i];
-
       const cx = padL + i * xStep;
-      const cy = padT + ch - (value / maxV) * ch;
+      // 多線：tooltip 對齊到該日最高線；單線：對齊到該線
+      const yVal = isMulti
+        ? Math.max(...series.map(s => s.values[i]))
+        : series[0].values[i];
+      const cy = padT + ch - (yVal / maxV) * ch;
 
-      document.getElementById('tooltip-date').textContent = date.replace(/-/g, '/');
-      document.getElementById('tooltip-value').textContent = 'NT$ ' + Math.round(value).toLocaleString();
-
+      tooltip.innerHTML = fmtTooltip(i);
       tooltip.style.left = `${cx * scaleX}px`;
       tooltip.style.top  = `${cy * scaleY}px`;
       tooltip.style.display = 'block';
@@ -1734,15 +1788,17 @@ const App = {
       guide.setAttribute('x2', cx);
       guide.style.opacity = '1';
 
-      activeDot.setAttribute('cx', cx);
-      activeDot.setAttribute('cy', cy);
-      activeDot.style.opacity = '1';
+      if (activeDot && !isMulti) {
+        activeDot.setAttribute('cx', cx);
+        activeDot.setAttribute('cy', cy);
+        activeDot.style.opacity = '1';
+      }
     };
 
     const hide = () => {
       tooltip.style.display = 'none';
       guide.style.opacity = '0';
-      activeDot.style.opacity = '0';
+      if (activeDot) activeDot.style.opacity = '0';
     };
 
     container.addEventListener('mousemove', update);
