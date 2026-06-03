@@ -260,9 +260,9 @@
   .main {
     flex: 1;
     overflow-y: auto;
-    padding: 32px 40px;
+    padding: 20px 28px;
   }
-  .page-header { margin-bottom: 24px; }
+  .page-header { margin-bottom: 14px; }
   .page-header h2 {
     margin: 0 0 4px;
     font-size: 24px;
@@ -1602,21 +1602,21 @@ const App = {
     const sumOver = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
 
     const summaryPills = `
-      <div id="summary-pills" style="display:flex;gap:6px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
-        <span style="font-size:13px;color:var(--text-muted);margin-right:4px;font-weight:600">日期</span>
+      <div id="summary-pills" style="display:flex;gap:5px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--text-muted);margin-right:2px;font-weight:600">日期</span>
         <button class="pill ${summaryRange === 'yesterday' ? 'active' : ''}" data-summary-range="yesterday"
-          style="padding:6px 14px;font-size:12px;font-weight:600">昨日 (${inputDateStr.replace(/-/g, '/')})</button>
+          style="padding:4px 10px;font-size:11px;font-weight:600">昨日 (${inputDateStr.replace(/-/g, '/')})</button>
         <button class="pill ${summaryRange === 'dayBefore' ? 'active' : ''}" data-summary-range="dayBefore"
-          style="padding:6px 14px;font-size:12px;font-weight:600">前日 (${prevDateStr.replace(/-/g, '/')})</button>
-        <span style="width:1px;height:18px;background:var(--border);margin:0 4px"></span>
+          style="padding:4px 10px;font-size:11px;font-weight:600">前日 (${prevDateStr.replace(/-/g, '/')})</button>
+        <span style="width:1px;height:14px;background:var(--border);margin:0 2px"></span>
         <button class="pill ${summaryRange === 'thisMonth' ? 'active' : ''}" data-summary-range="thisMonth"
-          style="padding:6px 14px;font-size:12px;font-weight:600">本月</button>
+          style="padding:4px 10px;font-size:11px;font-weight:600">本月</button>
         <button class="pill ${summaryRange === 'lastMonth' ? 'active' : ''}" data-summary-range="lastMonth"
-          style="padding:6px 14px;font-size:12px;font-weight:600">上月</button>
-        <span style="margin-left:4px;display:inline-flex;align-items:center;gap:4px">
-          <span style="font-size:12px;color:var(--text-muted);font-weight:600">選月份：</span>
+          style="padding:4px 10px;font-size:11px;font-weight:600">上月</button>
+        <span style="display:inline-flex;align-items:center;gap:4px">
+          <span style="font-size:11px;color:var(--text-muted);font-weight:600">選月份：</span>
           <input type="month" id="summary-custom-month" value="${customMonth}" max="${toDateStr(now).slice(0,7)}"
-            style="padding:5px 10px;border:1px solid ${summaryRange === 'customMonth' ? 'var(--primary)' : 'var(--border)'};border-radius:999px;font-size:12px;font-family:inherit;background:${summaryRange === 'customMonth' ? 'var(--primary-soft)' : 'var(--surface)'}">
+            style="padding:3px 8px;border:1px solid ${summaryRange === 'customMonth' ? 'var(--primary)' : 'var(--border)'};border-radius:999px;font-size:11px;font-family:inherit;background:${summaryRange === 'customMonth' ? 'var(--primary-soft)' : 'var(--surface)'}">
         </span>
       </div>
     `;
@@ -1627,17 +1627,21 @@ const App = {
       const prev = members.reduce((s, p) => s + sumOver(p, rangeInfo.compareDates), 0);
       const d    = prev > 0 ? ((cur / prev) - 1) * 100 : 0;
       const iconHtml = g.logo
-        ? `<div class="stat-icon" style="background:white;padding:4px;overflow:hidden">
+        ? `<div class="stat-icon" style="background:white;padding:3px;overflow:hidden;width:32px;height:32px">
              <img src="${g.logo}" alt="${escapeHtml(g.name)}" style="width:100%;height:100%;object-fit:contain;display:block">
            </div>`
-        : `<div class="stat-icon" style="background:${g.color}22;color:${g.color}">${g.icon}</div>`;
+        : `<div class="stat-icon" style="background:${g.color}22;color:${g.color};width:32px;height:32px;font-size:16px">${g.icon}</div>`;
       return `
-        <div class="stat-card" style="border-top:3px solid ${g.color};background:${g.color}06">
-          ${iconHtml}
-          <div class="stat-label" style="font-weight:700">${escapeHtml(g.name)}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin:2px 0 4px;font-weight:500">${escapeHtml(rangeInfo.label)}</div>
-          <div class="stat-value" style="font-size:22px;color:${g.color};font-weight:800">${fmtNTD(cur)}</div>
-          <div class="stat-meta" style="font-weight:500">
+        <div class="stat-card" style="border-top:3px solid ${g.color};background:${g.color}06;padding:12px 14px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            ${iconHtml}
+            <div>
+              <div class="stat-label" style="font-weight:700;font-size:13px;margin:0">${escapeHtml(g.name)}</div>
+              <div style="font-size:10px;color:var(--text-muted);font-weight:500">${escapeHtml(rangeInfo.label)}</div>
+            </div>
+          </div>
+          <div class="stat-value" style="font-size:20px;color:${g.color};font-weight:800;margin:0;line-height:1.1">${fmtNTD(cur)}</div>
+          <div class="stat-meta" style="font-weight:500;margin-top:4px;font-size:11px">
             ${d >= 0
               ? `<span class="up">↑ ${d.toFixed(1)}%</span>`
               : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`} 較${escapeHtml(rangeInfo.compareLabel)}
@@ -1675,32 +1679,33 @@ const App = {
 
       const adsCell = hasAds
         ? `<input type="number" min="0" step="1" class="card-ads" data-idx="${i}" data-original="${inputAds || ''}" value="${inputAds || ''}" placeholder="0" onfocus="this.select()"
-              style="width:100%;max-width:140px;padding:9px 12px;border:1px solid var(--border);border-radius:6px;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;background:white">`
-        : '<span style="color:var(--text-muted);font-size:14px">—</span>';
+              style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;background:white">`
+        : '<span style="color:var(--text-muted);font-size:13px">—</span>';
 
       const roasCell = hasAds
-        ? `<span class="card-roas" data-idx="${i}" style="font-weight:700;font-variant-numeric:tabular-nums;color:${p.color};font-size:17px">${roas}</span>`
-        : '<span style="color:var(--text-muted)">—</span>';
+        ? `<span class="card-roas" data-idx="${i}" style="font-weight:700;font-variant-numeric:tabular-nums;color:${p.color};font-size:14px">${roas}</span>`
+        : '<span style="color:var(--text-muted);font-size:12px">—</span>';
 
       return `
         <tr data-card-idx="${i}" style="border-top:1px solid var(--border)">
-          <td style="padding:12px 16px;white-space:nowrap">
-            <div style="display:flex;align-items:center;gap:10px">
-              <img src="${logoSrc}" alt="" style="width:26px;height:26px;border-radius:5px;object-fit:contain;background:white;padding:1px;flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,0.06)">
-              <span style="font-weight:600;font-size:15px">${escapeHtml(p.name)}</span>
+          <td style="padding:6px 10px;white-space:nowrap">
+            <div style="display:flex;align-items:center;gap:8px">
+              <img src="${logoSrc}" alt="" style="width:22px;height:22px;border-radius:4px;object-fit:contain;background:white;padding:1px;flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,0.06)">
+              <span style="font-weight:600;font-size:13px">${escapeHtml(p.name)}</span>
             </div>
           </td>
-          <td style="padding:10px 16px">
+          <td style="padding:5px 8px">
             <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" data-original="${td || ''}" value="${td || ''}" placeholder="0" onfocus="this.select()"
-              style="width:100%;max-width:160px;padding:9px 12px;border:1px solid var(--border);border-radius:6px;font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;background:white">
+              style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;background:white">
           </td>
-          <td style="padding:10px 16px">${adsCell}</td>
-          <td style="padding:10px 16px;text-align:center">${roasCell}</td>
-          <td style="padding:10px 16px;white-space:nowrap">${deltaCell}</td>
-          <td style="padding:10px 12px;white-space:nowrap;text-align:right">
+          <td style="padding:5px 8px">${adsCell}</td>
+          <td style="padding:5px 8px;text-align:center">${roasCell}</td>
+          <td style="padding:5px 8px;white-space:nowrap;font-size:12px">${deltaCell}</td>
+          <td style="padding:5px 6px;white-space:nowrap;text-align:right">
             <button class="card-confirm" data-idx="${i}" disabled title="確認儲存此列"
-              style="width:36px;height:36px;border:0;border-radius:6px;background:var(--border);color:var(--text-muted);font-size:16px;cursor:not-allowed;transition:all .15s;font-weight:700">✓</button>
-            <button class="icon-btn" title="編輯歷史資料" onclick="App.openPlatformModal(${i})">✏️</button>
+              style="width:30px;height:30px;border:0;border-radius:6px;background:var(--border);color:var(--text-muted);font-size:14px;cursor:not-allowed;transition:all .15s;font-weight:700">✓</button>
+            <button class="icon-btn" title="編輯歷史資料" onclick="App.openPlatformModal(${i})"
+              style="width:30px;height:30px;font-size:14px">✏️</button>
           </td>
         </tr>
       `;
@@ -1714,12 +1719,12 @@ const App = {
       const tint = marketTint[m] || '#6b7280';
       const dividerRow = `
         <tr style="background:linear-gradient(90deg, ${tint}10, transparent)">
-          <td colspan="6" style="padding:10px 16px;border-top:2px solid ${tint}66">
-            <div style="display:flex;align-items:center;gap:10px">
+          <td colspan="6" style="padding:5px 10px;border-top:2px solid ${tint}66">
+            <div style="display:flex;align-items:center;gap:8px">
               <img src="${badge.src}" alt="${escapeHtml(badge.name)}"
-                style="width:24px;height:24px;border-radius:5px;object-fit:contain;background:white;padding:1px;flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,0.06)">
-              <span style="font-size:14px;font-weight:700;color:${tint};letter-spacing:.3px">${escapeHtml(badge.name)}</span>
-              <span style="font-size:12px;color:var(--text-muted);font-weight:500">${items.length} 個賣場</span>
+                style="width:18px;height:18px;border-radius:4px;object-fit:contain;background:white;padding:1px;flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,0.06)">
+              <span style="font-size:12px;font-weight:700;color:${tint};letter-spacing:.3px">${escapeHtml(badge.name)}</span>
+              <span style="font-size:11px;color:var(--text-muted);font-weight:500">${items.length} 個賣場</span>
             </div>
           </td>
         </tr>
@@ -1744,36 +1749,36 @@ const App = {
 
     const totalRow = `
       <tr style="background:var(--bg);border-top:2px solid var(--border)">
-        <td style="padding:14px 16px;font-weight:800;font-size:15px;letter-spacing:.05em">當日總計</td>
-        <td style="padding:14px 16px;text-align:right;font-weight:800;font-size:20px;font-variant-numeric:tabular-nums">NT$ ${grandRev.toLocaleString()}</td>
-        <td style="padding:14px 16px;text-align:right;font-weight:700;font-size:16px;color:var(--text-muted);font-variant-numeric:tabular-nums">NT$ ${grandAds.toLocaleString()}</td>
-        <td style="padding:14px 16px;text-align:center;font-weight:800;font-size:17px;color:#6366f1;font-variant-numeric:tabular-nums">${grandRoas}</td>
-        <td style="padding:14px 16px;font-size:14px">${grandDeltaCell}</td>
+        <td style="padding:8px 10px;font-weight:800;font-size:13px;letter-spacing:.05em">當日總計</td>
+        <td style="padding:8px 10px;text-align:right;font-weight:800;font-size:16px;font-variant-numeric:tabular-nums">NT$ ${grandRev.toLocaleString()}</td>
+        <td style="padding:8px 10px;text-align:right;font-weight:700;font-size:14px;color:var(--text-muted);font-variant-numeric:tabular-nums">NT$ ${grandAds.toLocaleString()}</td>
+        <td style="padding:8px 10px;text-align:center;font-weight:800;font-size:14px;color:#6366f1;font-variant-numeric:tabular-nums">${grandRoas}</td>
+        <td style="padding:8px 10px;font-size:12px">${grandDeltaCell}</td>
         <td></td>
       </tr>
     `;
 
     const revenueTableHtml = `
-      <div class="table-card" style="margin-bottom:20px">
-        <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div class="table-card" style="margin:0">
+        <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 14px">
           <div>
-            <h3 style="margin:0">每日營收填寫</h3>
-            <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted)">直接於對應賣場輸入「營收」與「廣告費」，輸入後按右側 ✓ 或按 Enter 確認儲存</p>
+            <h3 style="margin:0;font-size:15px">每日營收填寫</h3>
+            <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted)">輸入後按右側 ✓ 或 Enter 才會儲存</p>
           </div>
-          <div style="font-size:13px;color:var(--text-muted);background:var(--bg);padding:8px 14px;border-radius:8px;font-variant-numeric:tabular-nums">
-            填寫日期：<strong style="color:var(--text);font-size:15px">${escapeHtml(inputDateStr)}</strong>
+          <div style="font-size:12px;color:var(--text-muted);background:var(--bg);padding:5px 10px;border-radius:6px;font-variant-numeric:tabular-nums">
+            填寫日期：<strong style="color:var(--text);font-size:13px">${escapeHtml(inputDateStr)}</strong>
           </div>
         </div>
         <div class="table-wrap">
-          <table style="border-collapse:separate;border-spacing:0">
+          <table style="border-collapse:separate;border-spacing:0;width:100%">
             <thead>
               <tr style="background:var(--bg)">
-                <th style="padding:12px 16px;text-align:left;width:200px">賣場</th>
-                <th style="padding:12px 16px;text-align:right;width:180px">營收 NT$</th>
-                <th style="padding:12px 16px;text-align:right;width:160px">廣告費 NT$</th>
-                <th style="padding:12px 16px;text-align:center;width:90px">ROAS</th>
-                <th style="padding:12px 16px;text-align:left;width:120px">較前一日</th>
-                <th style="padding:12px 12px;text-align:right;width:100px"></th>
+                <th style="padding:7px 10px;text-align:left;font-size:11px">賣場</th>
+                <th style="padding:7px 10px;text-align:right;font-size:11px">營收 NT$</th>
+                <th style="padding:7px 10px;text-align:right;font-size:11px">廣告費</th>
+                <th style="padding:7px 10px;text-align:center;font-size:11px">ROAS</th>
+                <th style="padding:7px 10px;text-align:left;font-size:11px">較前一日</th>
+                <th style="padding:7px 6px;text-align:right;width:80px"></th>
               </tr>
             </thead>
             <tbody>
@@ -1786,15 +1791,16 @@ const App = {
     `;
 
     return `
-      <div class="page-header">
-        <h2>儀表板首頁 <span class="live-dot">即時資料</span></h2>
-        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　·　${inputDateDisplay}</p>
+      <div class="page-header" style="margin-bottom:10px">
+        <h2 style="font-size:22px;margin:0">儀表板首頁 <span class="live-dot">即時資料</span></h2>
+        <p style="margin:2px 0 0;font-size:13px">歡迎回來，${escapeHtml(this.currentUser.name)}　·　${inputDateDisplay}</p>
       </div>
-      ${monthBlock}
       ${summaryPills}
-      <div class="stat-grid" style="grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));margin-bottom:16px">${summaryCards}</div>
-      ${revenueTableHtml}
-      ${this.dailyLineChartHtml(platforms)}
+      <div class="stat-grid" style="grid-template-columns:repeat(4, 1fr);margin-bottom:12px;gap:10px">${summaryCards}</div>
+      <div style="display:grid;grid-template-columns:1.45fr 1fr;gap:14px;align-items:start">
+        <div>${revenueTableHtml}</div>
+        <div>${this.dailyLineChartHtml(platforms)}</div>
+      </div>
     `;
   },
 
@@ -1818,7 +1824,7 @@ const App = {
 
     // 圖例（全賣場 + 7 個平台）
     const allPill = `
-      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:${activeName === null ? '#0f172a' : 'var(--bg)'};border:1px solid ${activeName === null ? '#0f172a' : 'var(--border)'};border-radius:999px;font-size:12px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">🏪 全賣場</button>
+      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:${activeName === null ? '#0f172a' : 'var(--bg)'};border:1px solid ${activeName === null ? '#0f172a' : 'var(--border)'};border-radius:999px;font-size:11px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">🏪 全賣場</button>
     `;
     const platformPills = platforms.map(p => {
       const isActive = activeName === p.name;
@@ -1827,8 +1833,8 @@ const App = {
       const logoSrc = MARKETPLACE_BADGE[market].src;
       return `
         <button class="line-legend" data-name="${escapeHtml(p.name)}"
-          style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px 5px 5px;background:${isActive ? p.color : p.color + '14'};border:1px solid ${isActive ? p.color : p.color + '40'};border-radius:999px;font-size:12px;color:${isActive ? 'white' : p.color};cursor:pointer;font-weight:600;opacity:${isDimmed ? '0.45' : '1'};transition:opacity .15s">
-          <img src="${logoSrc}" alt="" style="width:20px;height:20px;border-radius:50%;object-fit:contain;background:white;flex-shrink:0">
+          style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px 3px 3px;background:${isActive ? p.color : p.color + '14'};border:1px solid ${isActive ? p.color : p.color + '40'};border-radius:999px;font-size:11px;color:${isActive ? 'white' : p.color};cursor:pointer;font-weight:600;opacity:${isDimmed ? '0.45' : '1'};transition:opacity .15s">
+          <img src="${logoSrc}" alt="" style="width:16px;height:16px;border-radius:50%;object-fit:contain;background:white;flex-shrink:0">
           ${escapeHtml(p.name)}
         </button>
       `;
@@ -1939,14 +1945,14 @@ const App = {
     this._chartState = { dates, dailyData, series, padL, xStep, W, H, padT, ch, maxV, lineColor, lineLabel, isMulti, activeName };
 
     return `
-      <div class="chart-card" style="margin-top:16px">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
-          <h3 style="margin:0">${yMonth} 年 ${mMonth} 月　${escapeHtml(lineLabel)} 每日營收</h3>
-          <span style="font-size:12px;color:var(--text-muted)">滑鼠移到圖上可看當日數字</span>
+      <div class="chart-card" style="margin:0;padding:12px 14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+          <h3 style="margin:0;font-size:14px">${yMonth} 年 ${mMonth} 月　${escapeHtml(lineLabel)} 每日營收</h3>
+          <span style="font-size:11px;color:var(--text-muted)">滑鼠移上去看當日</span>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${allPill}${platformPills}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">${allPill}${platformPills}</div>
         <div id="line-chart-container" style="position:relative">
-          <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:280px;display:block">
+          <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:240px;display:block">
             ${yTicks.join('')}
             ${polylines}
             ${circles}
