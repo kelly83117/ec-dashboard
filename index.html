@@ -1391,21 +1391,23 @@ const App = {
     if (wasMigrated || extended) Store.set(Store.KEYS.platforms, platforms);
 
     const now = new Date();
-    const todayStr = toDateStr(now);
-    const ystrDay = toDateStr(addDays(now, -1));
+    // 行銷每天填的是「昨日」資料，所以輸入日期 = 昨天，比較對象 = 前天
+    const inputDateStr = toDateStr(addDays(now, -1));   // 輸入日期（昨天）
+    const prevDateStr  = toDateStr(addDays(now, -2));   // 比較日期（前天）
+    const inputDateDisplay = inputDateStr.replace(/-/g, '/');
 
-    const todayOf = (p) => +(p.daily?.[todayStr]) || 0;
-    const yesterdayOf = (p) => +(p.daily?.[ystrDay]) || 0;
-    const todayTotal = platforms.reduce((s, p) => s + todayOf(p), 0);
-    const yesterdayTotal = platforms.reduce((s, p) => s + yesterdayOf(p), 0);
-    const overallDelta = yesterdayTotal > 0 ? (todayTotal / yesterdayTotal - 1) * 100 : 0;
+    const inputOf = (p) => +(p.daily?.[inputDateStr]) || 0;
+    const prevOf  = (p) => +(p.daily?.[prevDateStr])  || 0;
+    const inputTotal = platforms.reduce((s, p) => s + inputOf(p), 0);
+    const prevTotal  = platforms.reduce((s, p) => s + prevOf(p),  0);
+    const overallDelta = prevTotal > 0 ? (inputTotal / prevTotal - 1) * 100 : 0;
 
     const platformCards = platforms.map((p, i) => {
-      const td = todayOf(p);
-      const yd = yesterdayOf(p);
+      const td = inputOf(p);
+      const yd = prevOf(p);
       const delta = yd > 0 ? ((td / yd) - 1) * 100 : 0;
       const hasAds = PLATFORMS_WITH_AD_SPEND.has(p.name);
-      const todayAds = +(p.dailyAdSpend?.[todayStr]) || 0;
+      const inputAds = +(p.dailyAdSpend?.[inputDateStr]) || 0;
       return `
         <div class="stat-card" style="position:relative">
           <button class="icon-btn" title="編輯歷史資料" onclick="App.openPlatformModal(${i})"
@@ -1413,21 +1415,21 @@ const App = {
           <div class="stat-icon" style="background:${p.color}22;color:${p.color}">${p.icon}</div>
           <div class="stat-label" style="margin-bottom:10px">${escapeHtml(p.name)}</div>
           <div style="margin-bottom:6px">
-            <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">今日營收 NT$</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">昨日營收 NT$</div>
             <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" value="${td || ''}" placeholder="0"
               style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box">
           </div>
           ${hasAds ? `
             <div style="margin-bottom:6px">
-              <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">廣告費 NT$</div>
-              <input type="number" min="0" step="1" class="card-ads" data-idx="${i}" value="${todayAds || ''}" placeholder="0"
+              <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">昨日廣告費 NT$</div>
+              <input type="number" min="0" step="1" class="card-ads" data-idx="${i}" value="${inputAds || ''}" placeholder="0"
                 style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box">
             </div>
           ` : ''}
           <div class="stat-meta" style="margin-top:6px">
             ${delta >= 0
               ? `<span class="up">↑ ${delta.toFixed(1)}%</span>`
-              : `<span class="down">↓ ${Math.abs(delta).toFixed(1)}%</span>`} 較昨日
+              : `<span class="down">↓ ${Math.abs(delta).toFixed(1)}%</span>`} 較前日
           </div>
         </div>
       `;
@@ -1436,7 +1438,7 @@ const App = {
     return `
       <div class="page-header">
         <h2>儀表板首頁 <span class="live-dot">即時資料</span></h2>
-        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　今日 ${new Date().toLocaleDateString('zh-TW')}　·　今日總營收 <strong style="color:var(--text)">${fmtNTD(todayTotal)}</strong> ${overallDelta >= 0 ? `<span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span>` : `<span class="down" style="margin-left:6px">↓ ${Math.abs(overallDelta).toFixed(1)}%</span>`}　·　<span style="color:var(--text-muted);font-size:13px">直接點卡片上的數字框輸入，移開游標自動儲存</span></p>
+        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　資料日期 ${inputDateDisplay}（昨日）　·　昨日總營收 <strong style="color:var(--text)">${fmtNTD(inputTotal)}</strong> ${overallDelta >= 0 ? `<span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span>` : `<span class="down" style="margin-left:6px">↓ ${Math.abs(overallDelta).toFixed(1)}%</span>`}　·　<span style="color:var(--text-muted);font-size:13px">直接點卡片上的數字框輸入昨日資料，移開游標自動儲存</span></p>
       </div>
       <div class="stat-grid">${platformCards}</div>
       ${this.dailyLineChartHtml(platforms, 30)}
@@ -1445,9 +1447,10 @@ const App = {
 
   /* 每日營收曲線（近 N 天） */
   dailyLineChartHtml(platforms, days) {
-    const now = new Date();
+    // 曲線結束日 = 昨天（最新有資料的一天，今日尚未輸入）
+    const endDate = addDays(new Date(), -1);
     const dates = [];
-    for (let i = days - 1; i >= 0; i--) dates.push(toDateStr(addDays(now, -i)));
+    for (let i = days - 1; i >= 0; i--) dates.push(toDateStr(addDays(endDate, -i)));
 
     // 篩選：可以指定只看其中一個平台（this.filter.chartPlatform）
     const activeName = this.filter.chartPlatform || null;
@@ -1615,7 +1618,8 @@ const App = {
    *  卡片內 inputs（今日營收 + 廣告費）— blur 自動存
    * ============================================================ */
   bindCardInputs() {
-    const todayStr = toDateStr(new Date());
+    // 行銷每天填的是「昨日」的資料，所以寫入日期 = 昨天
+    const inputDateStr = toDateStr(addDays(new Date(), -1));
     const save = (el) => {
       const idx = +el.dataset.idx;
       const isRev = el.classList.contains('card-rev');
@@ -1626,12 +1630,12 @@ const App = {
       if (!list[idx]) return;
       if (isRev) {
         list[idx].daily = list[idx].daily || {};
-        if (val == null || isNaN(val)) delete list[idx].daily[todayStr];
-        else list[idx].daily[todayStr] = Math.round(val);
+        if (val == null || isNaN(val)) delete list[idx].daily[inputDateStr];
+        else list[idx].daily[inputDateStr] = Math.round(val);
       } else {
         list[idx].dailyAdSpend = list[idx].dailyAdSpend || {};
-        if (val == null || isNaN(val)) delete list[idx].dailyAdSpend[todayStr];
-        else list[idx].dailyAdSpend[todayStr] = Math.round(val);
+        if (val == null || isNaN(val)) delete list[idx].dailyAdSpend[inputDateStr];
+        else list[idx].dailyAdSpend[inputDateStr] = Math.round(val);
       }
       Store.set(Store.KEYS.platforms, list);
       // 視覺反饋：邊框閃綠
