@@ -1606,8 +1606,6 @@ const App = {
         <span style="font-size:12px;color:var(--text-muted);margin-right:2px;font-weight:600">日期</span>
         <button class="pill ${summaryRange === 'yesterday' ? 'active' : ''}" data-summary-range="yesterday"
           style="padding:4px 10px;font-size:11px;font-weight:600">昨日 (${inputDateStr.replace(/-/g, '/')})</button>
-        <button class="pill ${summaryRange === 'dayBefore' ? 'active' : ''}" data-summary-range="dayBefore"
-          style="padding:4px 10px;font-size:11px;font-weight:600">前日 (${prevDateStr.replace(/-/g, '/')})</button>
         <span style="width:1px;height:14px;background:var(--border);margin:0 2px"></span>
         <button class="pill ${summaryRange === 'thisMonth' ? 'active' : ''}" data-summary-range="thisMonth"
           style="padding:4px 10px;font-size:11px;font-weight:600">本月</button>
@@ -1704,8 +1702,6 @@ const App = {
           <td style="padding:3px 8px;text-align:center">${roasCell}</td>
           <td style="padding:3px 8px;white-space:nowrap;font-size:12px;text-align:center">${deltaCell}</td>
           <td style="padding:3px 6px;white-space:nowrap;text-align:center">
-            <button class="card-confirm" data-idx="${i}" disabled title="確認儲存此列"
-              style="width:26px;height:26px;border:0;border-radius:5px;background:var(--border);color:var(--text-muted);font-size:13px;cursor:not-allowed;transition:all .15s;font-weight:700">✓</button>
             <button class="icon-btn" title="編輯歷史資料" onclick="App.openPlatformModal(${i})"
               style="width:26px;height:26px;font-size:13px">✏️</button>
           </td>
@@ -1780,7 +1776,7 @@ const App = {
                 <th style="padding:5px 10px;text-align:center;font-size:11px;width:140px">廣告費</th>
                 <th style="padding:5px 10px;text-align:center;font-size:11px;width:70px">ROAS</th>
                 <th style="padding:5px 10px;text-align:center;font-size:11px;width:90px">較前一日</th>
-                <th style="padding:5px 6px;text-align:center;width:76px"></th>
+                <th style="padding:5px 6px;text-align:center;width:44px"></th>
               </tr>
             </thead>
             <tbody>
@@ -2160,13 +2156,13 @@ const App = {
   },
 
   /* ============================================================
-   *  卡片內 inputs（今日營收 + 廣告費）— 需點「確認儲存」才寫入
+   *  卡片內 inputs（今日營收 + 廣告費）— 失焦時跳出確認 / 取消 dialog
    * ============================================================ */
   bindCardInputs() {
     // 行銷每天填的是「昨日」的資料，所以寫入日期 = 昨天
     const inputDateStr = toDateStr(addDays(new Date(), -1));
 
-    // 該卡片的輸入是否有改動
+    // 該列輸入是否有改動
     const isDirty = (idx) => {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
@@ -2176,50 +2172,24 @@ const App = {
       return revChanged || adsChanged;
     };
 
-    // 切換確認按鈕的可用狀態 + 樣式
-    const refreshButton = (idx) => {
-      const row = document.querySelector(`[data-card-idx="${idx}"]`);
-      if (!row) return;
-      const btn = row.querySelector('.card-confirm');
-      const revEl = row.querySelector('.card-rev');
-      const adsEl = row.querySelector('.card-ads');
-      const dirty = isDirty(idx);
-      const color = '#6366f1'; // primary
-      if (dirty) {
-        btn.disabled = false;
-        btn.style.cursor = 'pointer';
-        btn.style.background = color;
-        btn.style.color = 'white';
-        btn.style.boxShadow = `0 2px 8px ${color}40`;
-        btn.title = '確認儲存（Enter）';
-        // 輸入框邊框變色提醒「未儲存」
-        if (revEl && revEl.value.trim() !== (revEl.dataset.original || '').trim()) {
-          revEl.style.borderColor = '#f59e0b';
-          revEl.style.boxShadow = '0 0 0 2px #f59e0b22';
-        } else if (revEl) {
-          revEl.style.borderColor = 'var(--border)';
-          revEl.style.boxShadow = 'none';
-        }
-        if (adsEl && adsEl.value.trim() !== (adsEl.dataset.original || '').trim()) {
-          adsEl.style.borderColor = '#f59e0b';
-          adsEl.style.boxShadow = '0 0 0 2px #f59e0b22';
-        } else if (adsEl) {
-          adsEl.style.borderColor = 'var(--border)';
-          adsEl.style.boxShadow = 'none';
-        }
-      } else {
-        btn.disabled = true;
-        btn.style.cursor = 'not-allowed';
-        btn.style.background = 'var(--border)';
-        btn.style.color = 'var(--text-muted)';
-        btn.style.boxShadow = 'none';
-        btn.title = '已儲存';
-        if (revEl) { revEl.style.borderColor = 'var(--border)'; revEl.style.boxShadow = 'none'; }
-        if (adsEl) { adsEl.style.borderColor = 'var(--border)'; adsEl.style.boxShadow = 'none'; }
+    // 顯示「未儲存」的視覺提示（橘色邊框）
+    const markUnsaved = (idx) => {
+      const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
+      const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
+      const orange = '#f59e0b';
+      if (revEl) {
+        const changed = revEl.value.trim() !== (revEl.dataset.original || '').trim();
+        revEl.style.borderColor = changed ? orange : 'var(--border)';
+        revEl.style.boxShadow = changed ? '0 0 0 2px #f59e0b22' : 'none';
+      }
+      if (adsEl) {
+        const changed = adsEl.value.trim() !== (adsEl.dataset.original || '').trim();
+        adsEl.style.borderColor = changed ? orange : 'var(--border)';
+        adsEl.style.boxShadow = changed ? '0 0 0 2px #f59e0b22' : 'none';
       }
     };
 
-    // 邊打邊更新 ROAS 顯示（不存檔，只是即時運算）
+    // 邊打邊更新 ROAS（不存檔）
     const updateRoas = (idx) => {
       const roasEl = document.querySelector(`.card-roas[data-idx="${idx}"]`);
       if (!roasEl) return;
@@ -2230,7 +2200,17 @@ const App = {
       roasEl.textContent = (rev > 0 && ads > 0) ? (rev / ads).toFixed(2) : '—';
     };
 
-    // 確認儲存：寫入 store 並更新 original
+    // 還原輸入框到原始值
+    const revert = (idx) => {
+      const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
+      const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
+      if (revEl) revEl.value = revEl.dataset.original || '';
+      if (adsEl) adsEl.value = adsEl.dataset.original || '';
+      updateRoas(idx);
+      markUnsaved(idx);
+    };
+
+    // 寫入 store
     const commit = (idx) => {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
@@ -2255,39 +2235,98 @@ const App = {
         adsEl.dataset.original = raw;
       }
       Store.set(Store.KEYS.platforms, list);
-
-      // 視覺反饋：按鈕短暫變綠
-      const row = document.querySelector(`[data-card-idx="${idx}"]`);
-      const btn = row?.querySelector('.card-confirm');
-      if (btn) {
-        btn.style.background = 'var(--success)';
-        btn.style.color = 'white';
-        btn.style.boxShadow = '0 2px 8px rgba(16,185,129,0.4)';
-        setTimeout(() => refreshButton(idx), 800);
-      }
+      markUnsaved(idx);
       showToast('已儲存', 'success');
     };
 
-    // 輸入框：邊打邊算 ROAS、切按鈕狀態
+    // 顯示確認 / 取消 dialog
+    let dialogOpen = false;
+    const promptConfirm = (idx) => {
+      if (dialogOpen) return; // 同一次只跳一次
+      const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
+      const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
+      const platforms = Store.get(Store.KEYS.platforms, null) || [];
+      const platformName = platforms[idx]?.name || '此賣場';
+      const norm = v => (v == null ? '' : String(v).trim());
+      const fmtNum = v => v === '' || v == null ? '—' : (+v).toLocaleString();
+
+      const revOld = revEl?.dataset.original || '';
+      const revNew = revEl?.value.trim() || '';
+      const adsOld = adsEl?.dataset.original || '';
+      const adsNew = adsEl?.value.trim() || '';
+      const revChanged = revEl && norm(revOld) !== norm(revNew);
+      const adsChanged = adsEl && norm(adsOld) !== norm(adsNew);
+      if (!revChanged && !adsChanged) return;
+
+      const diffRow = (label, oldV, newV, changed) => {
+        if (!changed) return '';
+        return `
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px">
+            <span style="min-width:60px;font-size:12px;color:var(--text-muted);font-weight:600">${escapeHtml(label)}</span>
+            <span style="font-variant-numeric:tabular-nums;color:var(--text-muted);text-decoration:line-through;font-size:14px">${fmtNum(oldV)}</span>
+            <span style="color:var(--text-muted);font-size:12px">→</span>
+            <span style="font-variant-numeric:tabular-nums;color:#f59e0b;font-weight:700;font-size:16px">${fmtNum(newV)}</span>
+          </div>
+        `;
+      };
+
+      dialogOpen = true;
+      this.openModal({
+        title: `確認修改 — ${platformName}`,
+        bodyHtml: `
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">
+            日期：<strong style="color:var(--text)">${escapeHtml(inputDateStr)}</strong>
+          </div>
+          ${diffRow('營收', revOld, revNew, revChanged)}
+          ${diffRow('廣告費', adsOld, adsNew, adsChanged)}
+          <div style="margin-top:14px;padding:10px 12px;background:#f59e0b14;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px;color:var(--text)">
+            按「確認」會寫入儲存；按「取消」會還原為原本的數字。
+          </div>
+        `,
+        saveLabel: '確認',
+        cancelLabel: '取消',
+        onSave: () => {
+          dialogOpen = false;
+          commit(idx);
+          return true;
+        },
+        onCancel: () => {
+          dialogOpen = false;
+          revert(idx);
+        },
+      });
+    };
+
+    // 輸入時：邊打邊算 ROAS、標記未儲存
     document.querySelectorAll('.card-rev, .card-ads').forEach(el => {
       const idx = +el.dataset.idx;
       el.addEventListener('input', () => {
         updateRoas(idx);
-        refreshButton(idx);
+        markUnsaved(idx);
       });
       el.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          if (isDirty(idx)) commit(idx);
+          el.blur();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          // Esc 直接還原這格（不存）
+          el.value = el.dataset.original || '';
+          updateRoas(idx);
+          markUnsaved(idx);
         }
       });
-    });
-
-    // 確認按鈕
-    document.querySelectorAll('.card-confirm').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const idx = +btn.dataset.idx;
-        if (isDirty(idx)) commit(idx);
+      el.addEventListener('blur', () => {
+        // 失焦時若有改動 → 跳確認 dialog
+        // 但若新焦點仍在同一列（例如從營收跳到廣告費），先不跳，等整列都離開
+        setTimeout(() => {
+          const active = document.activeElement;
+          const sameRow = active && active.tagName === 'INPUT'
+            && (active.classList.contains('card-rev') || active.classList.contains('card-ads'))
+            && +active.dataset.idx === idx;
+          if (sameRow) return;
+          if (isDirty(idx)) promptConfirm(idx);
+        }, 50);
       });
     });
   },
@@ -3406,21 +3445,27 @@ const App = {
   /* ============================================================
    *  通用 Modal
    * ============================================================ */
-  openModal({ title, bodyHtml, onSave, onMount }) {
+  openModal({ title, bodyHtml, onSave, onMount, onCancel, saveLabel, cancelLabel }) {
     const modal = document.getElementById('modal');
     modal.innerHTML = `
       <div class="modal-header">
         <h3>${escapeHtml(title)}</h3>
-        <button class="icon-btn" onclick="App.closeModal()">✕</button>
+        <button class="icon-btn" id="modal-close-x">✕</button>
       </div>
       <div class="modal-body">${bodyHtml}</div>
       <div class="modal-footer">
-        <button class="btn-ghost" onclick="App.closeModal()">取消</button>
-        <button class="btn-primary" style="width:auto;padding:10px 20px" id="modal-save">儲存</button>
+        <button class="btn-ghost" id="modal-cancel">${escapeHtml(cancelLabel || '取消')}</button>
+        <button class="btn-primary" style="width:auto;padding:10px 20px" id="modal-save">${escapeHtml(saveLabel || '儲存')}</button>
       </div>
     `;
     document.getElementById('modal-backdrop').classList.add('show');
     if (onMount) onMount();
+    const closeWithCancel = () => {
+      if (typeof onCancel === 'function') onCancel();
+      this.closeModal();
+    };
+    document.getElementById('modal-close-x').onclick = closeWithCancel;
+    document.getElementById('modal-cancel').onclick = closeWithCancel;
     document.getElementById('modal-save').onclick = () => {
       const ok = onSave();
       if (ok) this.closeModal();
