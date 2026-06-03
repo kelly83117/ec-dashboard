@@ -898,6 +898,14 @@ const fmtNTD = n => 'NT$ ' + Math.round(n).toLocaleString();
 // 有廣告費的平台（其他平台不填、不顯示廣告費欄位）
 const PLATFORMS_WITH_AD_SPEND = new Set(['生活好麻吉', '玩樂盒子', '森之旅', '維克生活']);
 
+// 平台分組（用於儀表板上方 4 張總覽卡）
+const PLATFORM_GROUPS = [
+  { name: '全賣場總營收', icon: '🏪', color: '#0f172a', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活','MOMO','MO+','酷澎'] },
+  { name: '蝦皮總營收',   icon: '🛒', color: '#ee4d2d', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活'] },
+  { name: 'MOMO 總營收',  icon: '🎀', color: '#e6007e', members: ['MOMO','MO+'] },
+  { name: '酷澎營收',     icon: '🚀', color: '#3b82f6', members: ['酷澎'] },
+];
+
 /* ------------- 日期工具 ------------- */
 function toDateStr(d) {
   // local-time YYYY-MM-DD (避免 toISOString 的 UTC 偏差導致跨日)
@@ -1401,6 +1409,26 @@ const App = {
     const prevTotal  = platforms.reduce((s, p) => s + prevOf(p),  0);
     const overallDelta = prevTotal > 0 ? (inputTotal / prevTotal - 1) * 100 : 0;
 
+    // 4 張總覽卡（全賣場 / 蝦皮 / MOMO / 酷澎）
+    const summaryCards = PLATFORM_GROUPS.map(g => {
+      const members = platforms.filter(p => g.members.includes(p.name));
+      const cur  = members.reduce((s, p) => s + inputOf(p), 0);
+      const prev = members.reduce((s, p) => s + prevOf(p),  0);
+      const d    = prev > 0 ? ((cur / prev) - 1) * 100 : 0;
+      return `
+        <div class="stat-card" style="border-top:3px solid ${g.color};background:${g.color}06">
+          <div class="stat-icon" style="background:${g.color}22;color:${g.color}">${g.icon}</div>
+          <div class="stat-label" style="font-weight:600">${escapeHtml(g.name)}</div>
+          <div class="stat-value" style="font-size:22px;color:${g.color}">${fmtNTD(cur)}</div>
+          <div class="stat-meta">
+            ${d >= 0
+              ? `<span class="up">↑ ${d.toFixed(1)}%</span>`
+              : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`} 較前一日
+          </div>
+        </div>
+      `;
+    }).join('');
+
     const platformCards = platforms.map((p, i) => {
       const td = inputOf(p);
       const yd = prevOf(p);
@@ -1444,8 +1472,9 @@ const App = {
     return `
       <div class="page-header">
         <h2>儀表板首頁 <span class="live-dot">即時資料</span></h2>
-        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　·　${inputDateDisplay} 總營收 <strong style="color:var(--text)">${fmtNTD(inputTotal)}</strong> ${overallDelta >= 0 ? `<span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span>` : `<span class="down" style="margin-left:6px">↓ ${Math.abs(overallDelta).toFixed(1)}%</span>`}　·　<span style="color:var(--text-muted);font-size:13px">直接點卡片上的數字框輸入，移開游標自動儲存</span></p>
+        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　·　${inputDateDisplay}　·　<span style="color:var(--text-muted);font-size:13px">直接點卡片上的數字框輸入，移開游標自動儲存</span></p>
       </div>
+      <div class="stat-grid" style="grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));margin-bottom:16px">${summaryCards}</div>
       <div class="stat-grid">${platformCards}</div>
       ${this.dailyLineChartHtml(platforms, 30)}
     `;
