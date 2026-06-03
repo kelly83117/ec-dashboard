@@ -1576,9 +1576,9 @@ const App = {
     // 切換：null = 總計（全部加總），string = 單一平台
     const activeName = this.filter.chartPlatform || null;
 
-    // 圖例（總計 + 7 個平台）
+    // 圖例（全賣場 + 7 個平台）
     const allPill = `
-      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:${activeName === null ? '#0f172a' : 'var(--bg)'};border:1px solid ${activeName === null ? '#0f172a' : 'var(--border)'};border-radius:999px;font-size:12px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">📊 總計</button>
+      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:${activeName === null ? '#0f172a' : 'var(--bg)'};border:1px solid ${activeName === null ? '#0f172a' : 'var(--border)'};border-radius:999px;font-size:12px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">🏪 全賣場</button>
     `;
     const platformPills = platforms.map(p => {
       const isActive = activeName === p.name;
@@ -1603,7 +1603,7 @@ const App = {
       } else {
         values = dates.map(d => platforms.reduce((s, pp) => s + (+pp.daily?.[d] || 0), 0));
         lineColor = '#0f172a';
-        lineLabel = '總計';
+        lineLabel = '全賣場';
       }
     } else {
       values = dates.map(d => platforms.reduce((s, pp) => s + (+pp.daily?.[d] || 0), 0));
