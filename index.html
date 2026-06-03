@@ -47,6 +47,13 @@
   }
   button { font-family: inherit; cursor: pointer; }
   input, select { font-family: inherit; }
+  /* 移除 number input 預設上下箭頭（spinner） */
+  input[type="number"] { -moz-appearance: textfield; }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
 
   /* ------------- 登入頁 ------------- */
   #view-login {
