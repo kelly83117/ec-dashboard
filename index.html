@@ -1370,7 +1370,7 @@ const App = {
       return;
     }
     switch (this.route) {
-      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindRevenueEntry(); break;
+      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); break;
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
       default: main.innerHTML = this.viewEmployees(); this.bindFilterBar();
@@ -1404,14 +1404,27 @@ const App = {
       const td = todayOf(p);
       const yd = yesterdayOf(p);
       const delta = yd > 0 ? ((td / yd) - 1) * 100 : 0;
+      const hasAds = PLATFORMS_WITH_AD_SPEND.has(p.name);
+      const todayAds = +(p.dailyAdSpend?.[todayStr]) || 0;
       return `
         <div class="stat-card" style="position:relative">
-          <button class="icon-btn" title="編輯" onclick="App.openPlatformModal(${i})"
+          <button class="icon-btn" title="編輯歷史資料" onclick="App.openPlatformModal(${i})"
             style="position:absolute;top:10px;right:10px">✏️</button>
           <div class="stat-icon" style="background:${p.color}22;color:${p.color}">${p.icon}</div>
-          <div class="stat-label">${escapeHtml(p.name)}</div>
-          <div class="stat-value" style="font-size:22px">${fmtNTD(td)}</div>
-          <div class="stat-meta">
+          <div class="stat-label" style="margin-bottom:10px">${escapeHtml(p.name)}</div>
+          <div style="margin-bottom:6px">
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">今日營收 NT$</div>
+            <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" value="${td || ''}" placeholder="0"
+              style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box">
+          </div>
+          ${hasAds ? `
+            <div style="margin-bottom:6px">
+              <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">廣告費 NT$</div>
+              <input type="number" min="0" step="1" class="card-ads" data-idx="${i}" value="${todayAds || ''}" placeholder="0"
+                style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box">
+            </div>
+          ` : ''}
+          <div class="stat-meta" style="margin-top:6px">
             ${delta >= 0
               ? `<span class="up">↑ ${delta.toFixed(1)}%</span>`
               : `<span class="down">↓ ${Math.abs(delta).toFixed(1)}%</span>`} 較昨日
@@ -1423,11 +1436,10 @@ const App = {
     return `
       <div class="page-header">
         <h2>儀表板首頁 <span class="live-dot">即時資料</span></h2>
-        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　今日 ${new Date().toLocaleDateString('zh-TW')}　·　今日總營收 <strong style="color:var(--text)">${fmtNTD(todayTotal)}</strong> ${overallDelta >= 0 ? `<span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span>` : `<span class="down" style="margin-left:6px">↓ ${Math.abs(overallDelta).toFixed(1)}%</span>`}</p>
+        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　今日 ${new Date().toLocaleDateString('zh-TW')}　·　今日總營收 <strong style="color:var(--text)">${fmtNTD(todayTotal)}</strong> ${overallDelta >= 0 ? `<span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span>` : `<span class="down" style="margin-left:6px">↓ ${Math.abs(overallDelta).toFixed(1)}%</span>`}　·　<span style="color:var(--text-muted);font-size:13px">直接點卡片上的數字框輸入，移開游標自動儲存</span></p>
       </div>
       <div class="stat-grid">${platformCards}</div>
       ${this.dailyLineChartHtml(platforms, 30)}
-      ${this.revenueEntrySectionHtml(platforms)}
     `;
   },
 
@@ -1600,8 +1612,41 @@ const App = {
   },
 
   /* ============================================================
-   *  營收輸入區段 bindRevenueEntry（在儀表板首頁底下啟用）
+   *  卡片內 inputs（今日營收 + 廣告費）— blur 自動存
    * ============================================================ */
+  bindCardInputs() {
+    const todayStr = toDateStr(new Date());
+    const save = (el) => {
+      const idx = +el.dataset.idx;
+      const isRev = el.classList.contains('card-rev');
+      const raw = el.value.trim();
+      const val = raw === '' ? null : +raw;
+      const platforms = Store.get(Store.KEYS.platforms, null);
+      const list = migratePlatforms(platforms ? platforms.map(p => ({ ...p })) : JSON.parse(JSON.stringify(PLATFORMS)));
+      if (!list[idx]) return;
+      if (isRev) {
+        list[idx].daily = list[idx].daily || {};
+        if (val == null || isNaN(val)) delete list[idx].daily[todayStr];
+        else list[idx].daily[todayStr] = Math.round(val);
+      } else {
+        list[idx].dailyAdSpend = list[idx].dailyAdSpend || {};
+        if (val == null || isNaN(val)) delete list[idx].dailyAdSpend[todayStr];
+        else list[idx].dailyAdSpend[todayStr] = Math.round(val);
+      }
+      Store.set(Store.KEYS.platforms, list);
+      // 視覺反饋：邊框閃綠
+      el.style.borderColor = 'var(--success)';
+      setTimeout(() => { el.style.borderColor = 'var(--border)'; }, 800);
+    };
+    document.querySelectorAll('.card-rev, .card-ads').forEach(el => {
+      el.addEventListener('blur', () => save(el));
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+      });
+    });
+  },
+
+  /* （已棄用）營收輸入區段 bindRevenueEntry — 保留方法避免外部呼叫崩潰 */
   bindRevenueEntry() {
     const recompute = () => {
       let totalRev = 0, totalAds = 0;
@@ -2453,11 +2498,18 @@ async function __setupCloud() {
     };
 
     // 訂閱：其他人改了資料，這台會即時更新畫面
+    // 但如果使用者正在 input 裡打字，跳過重繪避免焦點被搶走
     cs.subscribe((data) => {
       const next = data || {};
       delete next[Store.KEYS.session];  // 不接受雲端的 session
       Store._mem = next;
-      if (window.App && App.currentUser && typeof App.render === 'function') App.render();
+      if (!(window.App && App.currentUser && typeof App.render === 'function')) return;
+      const active = document.activeElement;
+      const inOurInput = active && active.tagName === 'INPUT' && (
+        active.classList.contains('card-rev') || active.classList.contains('card-ads') ||
+        active.classList.contains('entry-rev') || active.classList.contains('entry-ads')
+      );
+      if (!inOurInput) App.render();
     });
   } catch (e) {
     console.error('Cloud setup failed, falling back to localStorage', e);
