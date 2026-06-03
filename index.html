@@ -1394,16 +1394,6 @@ const App = {
     const todayStr = toDateStr(now);
     const ystrDay = toDateStr(addDays(now, -1));
 
-    const range = this.filter.range || 'today';
-    const customStart = this.filter.customStart || toDateStr(addDays(now, -6));
-    const customEnd = this.filter.customEnd || todayStr;
-    const rd = getRangeDates(range, customStart, customEnd);
-    const currentLabel = rd.label;
-
-    const valueOf = (p) => sumDaily(p.daily, rd.start, rd.end);
-    const rangeTotal = platforms.reduce((s, p) => s + valueOf(p), 0);
-    const maxValue = Math.max(1, ...platforms.map(valueOf));
-
     const todayOf = (p) => +(p.daily?.[todayStr]) || 0;
     const yesterdayOf = (p) => +(p.daily?.[ystrDay]) || 0;
     const todayTotal = platforms.reduce((s, p) => s + todayOf(p), 0);
@@ -1430,49 +1420,12 @@ const App = {
       `;
     }).join('');
 
-    const rangeLabels = { today: '今日', yesterday: '昨日', week: '本週', month: '本月', custom: '自訂' };
-    const rangePills = ['today','yesterday','week','month','custom'].map(r => `
-      <button class="pill ${range === r ? 'active' : ''}" data-range="${r}" style="padding:4px 12px;font-size:12px">${rangeLabels[r]}</button>
-    `).join('');
-
-    const dateInputs = range === 'custom' ? `
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;font-size:13px;flex-wrap:wrap">
-        <span style="color:var(--text-muted)">起：</span>
-        <input type="date" id="custom-start" value="${customStart}" max="${todayStr}"
-          style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">
-        <span style="color:var(--text-muted)">迄：</span>
-        <input type="date" id="custom-end" value="${customEnd}" max="${todayStr}"
-          style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit">
-        <button class="btn-ghost" id="custom-quick-7"  style="padding:6px 10px;font-size:12px">最近 7 天</button>
-        <button class="btn-ghost" id="custom-quick-30" style="padding:6px 10px;font-size:12px">最近 30 天</button>
-      </div>
-    ` : '';
-
     return `
       <div class="page-header">
         <h2>儀表板首頁 <span class="live-dot">即時資料</span></h2>
         <p>歡迎回來，${escapeHtml(this.currentUser.name)}　今日 ${new Date().toLocaleDateString('zh-TW')}　·　今日總營收 <strong style="color:var(--text)">${fmtNTD(todayTotal)}</strong> ${overallDelta >= 0 ? `<span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span>` : `<span class="down" style="margin-left:6px">↓ ${Math.abs(overallDelta).toFixed(1)}%</span>`}</p>
       </div>
       <div class="stat-grid">${platformCards}</div>
-      <div class="chart-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap">
-          <h3 style="margin:0">各平台${range === 'custom' ? '' : currentLabel}營收</h3>
-          <div id="range-pills" style="display:flex;gap:4px;flex-wrap:wrap">${rangePills}</div>
-        </div>
-        ${dateInputs}
-        <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
-          ${currentLabel} 合計 <strong style="color:var(--text)">${fmtNTD(rangeTotal)}</strong>
-          <span style="margin-left:8px;color:var(--text-muted);font-size:12px">（${rd.start.replace(/-/g,'/')} ~ ${rd.end.replace(/-/g,'/')}）</span>
-        </div>
-        <div>
-          ${platforms.map((p, i) => `
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;${i < platforms.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
-              <span class="dept-tag" style="background:${p.color}22;color:${p.color};font-size:14px;padding:5px 14px">${escapeHtml(p.name)}</span>
-              <span style="font-size:20px;font-weight:700;color:var(--text);letter-spacing:-0.02em">${fmtNTD(valueOf(p))}</span>
-            </div>
-          `).join('')}
-        </div>
-      </div>
       ${this.dailyLineChartHtml(platforms, 30)}
       ${this.revenueEntrySectionHtml(platforms)}
     `;
@@ -1484,7 +1437,13 @@ const App = {
     const dates = [];
     for (let i = days - 1; i >= 0; i--) dates.push(toDateStr(addDays(now, -i)));
 
-    const series = platforms.map(p => ({
+    // 篩選：可以指定只看其中一個平台（this.filter.chartPlatform）
+    const activeName = this.filter.chartPlatform || null;
+    const visiblePlatforms = activeName
+      ? platforms.filter(p => p.name === activeName)
+      : platforms;
+
+    const series = visiblePlatforms.map(p => ({
       name: p.name,
       color: p.color,
       icon: p.icon,
@@ -1525,24 +1484,40 @@ const App = {
         const y = padT + ch - (v / maxV) * ch;
         return `${x},${y}`;
       }).join(' ');
-      return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />`;
+      // 單一平台模式時加上端點圓，數據點更明顯
+      const dots = (series.length === 1)
+        ? s.values.map((v, i) => {
+            const x = padL + i * xStep;
+            const y = padT + ch - (v / maxV) * ch;
+            return `<circle cx="${x}" cy="${y}" r="3" fill="${s.color}"><title>${escapeHtml(s.name)} ${dates[i]}: NT$ ${Math.round(v).toLocaleString()}</title></circle>`;
+          }).join('')
+        : '';
+      return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="${series.length === 1 ? 3 : 2}" stroke-linejoin="round" stroke-linecap="round" />${dots}`;
     }).join('');
 
-    // 平台圖例
-    const legend = series.map(s => `
-      <button class="line-legend" data-name="${escapeHtml(s.name)}" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:${s.color}14;border:1px solid ${s.color}40;border-radius:999px;font-size:12px;color:${s.color};cursor:pointer;font-weight:500">
-        <span style="width:10px;height:10px;border-radius:50%;background:${s.color}"></span>
-        ${s.icon} ${escapeHtml(s.name)}
-      </button>
-    `).join('');
+    // 平台圖例（含「全部」+ 7 個平台）；點擊切換 chartPlatform
+    const allPill = `
+      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:${activeName === null ? 'var(--primary)' : 'var(--bg)'};border:1px solid ${activeName === null ? 'var(--primary)' : 'var(--border)'};border-radius:999px;font-size:12px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">全部</button>
+    `;
+    const platformPills = platforms.map(p => {
+      const isActive = activeName === p.name;
+      const isDimmed = activeName !== null && !isActive;
+      return `
+        <button class="line-legend" data-name="${escapeHtml(p.name)}"
+          style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:${isActive ? p.color : p.color + '14'};border:1px solid ${isActive ? p.color : p.color + '40'};border-radius:999px;font-size:12px;color:${isActive ? 'white' : p.color};cursor:pointer;font-weight:500;opacity:${isDimmed ? '0.45' : '1'};transition:opacity .15s">
+          <span style="width:10px;height:10px;border-radius:50%;background:${isActive ? 'white' : p.color}"></span>
+          ${p.icon} ${escapeHtml(p.name)}
+        </button>
+      `;
+    }).join('');
 
     return `
       <div class="chart-card" style="margin-top:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
-          <h3 style="margin:0">各平台每日營收曲線</h3>
-          <span style="font-size:12px;color:var(--text-muted)">近 ${days} 天</span>
+          <h3 style="margin:0">${activeName ? escapeHtml(activeName) + ' 每日營收' : '各平台每日營收曲線'}</h3>
+          <span style="font-size:12px;color:var(--text-muted)">近 ${days} 天${activeName ? '・點「全部」回到所有平台' : '・點任一平台單獨查看'}</span>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${legend}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${allPill}${platformPills}</div>
         <div style="overflow-x:auto">
           <svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:700px;height:auto;display:block">
             ${yTicks.join('')}
@@ -1648,44 +1623,15 @@ const App = {
   },
 
   bindDashboardPills() {
-    document.querySelectorAll('#range-pills [data-range]').forEach(btn => {
+    // 曲線圖圖例：點哪個平台就單獨顯示，點「全部」回到所有平台
+    document.querySelectorAll('.line-legend').forEach(btn => {
       btn.addEventListener('click', () => {
-        this.filter.range = btn.dataset.range;
-        if (this.filter.range === 'custom' && !this.filter.customStart) {
-          const now = new Date();
-          this.filter.customStart = toDateStr(addDays(now, -6));
-          this.filter.customEnd = toDateStr(now);
-        }
+        const name = btn.dataset.name;
+        const next = name || null;
+        // 點到同一個 → 也回到全部
+        this.filter.chartPlatform = (this.filter.chartPlatform === next) ? null : next;
         this.render();
       });
-    });
-    const startEl = document.getElementById('custom-start');
-    const endEl   = document.getElementById('custom-end');
-    if (startEl) startEl.addEventListener('change', () => {
-      let s = startEl.value, e = document.getElementById('custom-end').value;
-      if (s && e && s > e) e = s;
-      this.filter.customStart = s; this.filter.customEnd = e;
-      this.render();
-    });
-    if (endEl) endEl.addEventListener('change', () => {
-      let s = document.getElementById('custom-start').value, e = endEl.value;
-      if (s && e && e < s) s = e;
-      this.filter.customStart = s; this.filter.customEnd = e;
-      this.render();
-    });
-    const q7 = document.getElementById('custom-quick-7');
-    if (q7) q7.addEventListener('click', () => {
-      const now = new Date();
-      this.filter.customStart = toDateStr(addDays(now, -6));
-      this.filter.customEnd = toDateStr(now);
-      this.render();
-    });
-    const q30 = document.getElementById('custom-quick-30');
-    if (q30) q30.addEventListener('click', () => {
-      const now = new Date();
-      this.filter.customStart = toDateStr(addDays(now, -29));
-      this.filter.customEnd = toDateStr(now);
-      this.render();
     });
   },
 
