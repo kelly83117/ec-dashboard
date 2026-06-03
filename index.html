@@ -837,7 +837,7 @@ function seedData() {
   const users = Store.get(Store.KEYS.users, []);
   let usersChanged = false;
   if (!users.some(u => u.role === 'admin')) {
-    users.push({ username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', department: '', q1: null, q2: null, q3: null, q4: null });
+    users.push({ username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', departments: [], q1: null, q2: null, q3: null, q4: null });
     usersChanged = true;
   }
   users.forEach(u => {
@@ -845,6 +845,11 @@ function seedData() {
     if (!('q2' in u)) { u.q2 = null; usersChanged = true; }
     if (!('q3' in u)) { u.q3 = null; usersChanged = true; }
     if (!('q4' in u)) { u.q4 = null; usersChanged = true; }
+    // 將舊版單一 department 字串遷移為 departments 陣列
+    if (!Array.isArray(u.departments)) {
+      u.departments = u.department ? [u.department] : [];
+      usersChanged = true;
+    }
   });
   if (usersChanged) Store.set(Store.KEYS.users, users);
 
@@ -875,11 +880,22 @@ function getQuarterScore(emp, q) {
   const v = emp[q];
   return typeof v === 'number' && !isNaN(v) ? v : null;
 }
+// 取得使用者所屬辦公室清單（相容舊欄位 department）
+function getUserDepts(user) {
+  if (!user) return [];
+  if (Array.isArray(user.departments)) return user.departments.filter(Boolean);
+  if (user.department) return [user.department];
+  return [];
+}
+function getUserDeptLabel(user) {
+  const list = getUserDepts(user);
+  return list.length ? list.join('・') : '全公司';
+}
 function canAccessOffice(user, dept) {
   if (!user || !dept) return false;
   if (user.role === 'admin') return true;
   if (user.crossOfficeAccess === true) return true;
-  return dept.name === user.department;
+  return getUserDepts(user).includes(dept.name);
 }
 
 function trendFromQuarters(emp) {
@@ -1318,7 +1334,7 @@ const App = {
         password: hashPassword('admin123'),
         name: '陳大明',
         role: 'admin',
-        department: '商開',
+        departments: [],
       }]);
     }
   },
@@ -1352,7 +1368,7 @@ const App = {
       let admin = users.find(u => u.username.toLowerCase() === 'admin');
       if (!admin) {
         admin = { username: 'admin', password: hashPassword('admin123'),
-                  name: '陳大明', role: 'admin', department: '' };
+                  name: '陳大明', role: 'admin', departments: [] };
         users.push(admin);
       } else {
         // 修復舊版錯誤雜湊
@@ -1394,7 +1410,7 @@ const App = {
 
   // 依使用者權限更新側欄的顯示（角色資訊、管理員區、可見的辦公室）
   applyUserPerms(user) {
-    const deptLabel = user.department || '全公司';
+    const deptLabel = getUserDeptLabel(user);
     document.getElementById('user-name').textContent = user.name;
     document.getElementById('user-role').textContent =
       (user.role === 'admin' ? '管理員' : '員工') + '・' + deptLabel;
@@ -2274,12 +2290,12 @@ const App = {
     const departments = Store.get(Store.KEYS.departments, []);
     const allUsers = Store.get(Store.KEYS.users, []);
     // 員工績效明細：排除管理員、以及未指派辦公室（全公司）的帳號
-    const users = allUsers.filter(u => u.role !== 'admin' && u.department);
+    const users = allUsers.filter(u => u.role !== 'admin' && getUserDepts(u).length > 0);
     const deptById = Object.fromEntries(departments.map(d => [d.id, d]));
     const filterDept = this.filter.dept === 'all' ? null : deptById[this.filter.dept];
     const filtered = !filterDept
       ? users
-      : users.filter(u => u.department === filterDept.name);
+      : users.filter(u => getUserDepts(u).includes(filterDept.name));
 
     const quarter = this.filter.quarter || 'all';
     const sortKey = quarter === 'all' ? null : quarter;
@@ -2327,14 +2343,19 @@ const App = {
     ` : ranked.map((u, i) => {
       const rank = i + 1;
       const rankClass = rank <= 3 ? `rank-${rank}` : 'rank-other';
-      const dept = deptByName[u.department];
+      const userDepts = getUserDepts(u);
       const scoreClass = u.score >= 90 ? 'score-good' : u.score >= 80 ? 'score-ok' : 'score-bad';
       const trendIcon = u.trend === 'up' ? '<span class="trend-up">↑ 上升</span>'
         : u.trend === 'down' ? '<span class="trend-down">↓ 下降</span>'
         : '<span class="trend-flat">→ 持平</span>';
-      const deptCell = dept
-        ? `<span class="dept-tag" style="background:${dept.color}22;color:${dept.color}">${escapeHtml(dept.name)}</span>`
-        : `<span style="color:var(--text-muted)">${escapeHtml(u.department || '全公司')}</span>`;
+      const deptCell = userDepts.length === 0
+        ? `<span style="color:var(--text-muted)">全公司</span>`
+        : userDepts.map(dn => {
+            const d = deptByName[dn];
+            return d
+              ? `<span class="dept-tag" style="background:${d.color}22;color:${d.color};margin-right:4px">${escapeHtml(d.name)}</span>`
+              : `<span class="dept-tag" style="background:#e5e7eb;color:#6b7280;margin-right:4px">${escapeHtml(dn)}</span>`;
+          }).join('');
       return `
         <tr>
           <td><span class="rank-badge ${rankClass}">${rank}</span></td>
@@ -2484,7 +2505,7 @@ const App = {
   renderDailyProgressTab(deptId, color, dept) {
     const allTasks = Store.get(Store.KEYS.dailyTasks, []);
     const tasks = allTasks.filter(t => t.deptId === deptId);
-    const members = (Store.get(Store.KEYS.users, [])).filter(u => u.department === dept.name);
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
     const f = this.filter.dailyProgress;
 
     // 套用篩選
@@ -2647,9 +2668,9 @@ const App = {
 
     const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
     if (!dept) { showToast('找不到此辦公室', 'error'); return; }
-    const members = (Store.get(Store.KEYS.users, [])).filter(u => u.department === dept.name);
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
     // 若是新增，預設員工 = 當前登入者（若是該辦公室成員），否則第一位成員
-    const defaultEmp = (this.currentUser && this.currentUser.department === dept.name)
+    const defaultEmp = (this.currentUser && getUserDepts(this.currentUser).includes(dept.name))
       ? this.currentUser.username
       : (members[0]?.username || '');
 
@@ -2805,7 +2826,7 @@ const App = {
     const u = users.find(x => x.username === username);
     if (!u) { showToast('找不到此帳號', 'error'); return; }
     const qVal = q => (typeof u[q] === 'number' ? u[q] : '');
-    const deptLabel = u.department || '全公司';
+    const deptLabel = getUserDeptLabel(u);
 
     this.openModal({
       title: `編輯績效：${u.name}`,
@@ -2869,7 +2890,7 @@ const App = {
         <p style="font-size:13px;color:var(--text-muted);margin-top:8px">請聯絡管理員開啟「跨辦公室檢視」權限</p>
       </div>`;
     }
-    const members = (Store.get(Store.KEYS.users, [])).filter(u => u.department === dept.name);
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
     const color = dept.color;
 
     const statCards = cfg.stats.map(s => `
@@ -3001,7 +3022,7 @@ const App = {
               <span class="badge-role ${isAdmin?'role-admin':'role-staff'}">${isAdmin?'管理員':'員工'}</span>
               ${crossBadge}
             </div>
-            <div class="meta">@${escapeHtml(u.username)} · ${escapeHtml(u.department || '全公司')}</div>
+            <div class="meta">@${escapeHtml(u.username)} · ${escapeHtml(getUserDeptLabel(u))}</div>
           </div>
           <button class="icon-btn" title="編輯" onclick="App.openUserModal('${escapeHtml(u.username)}')">✏️</button>
           ${u.username === this.currentUser.username
@@ -3029,7 +3050,8 @@ const App = {
     const user = username ? users.find(u => u.username === username) : null;
     const isEdit = !!user;
     const departments = Store.get(Store.KEYS.departments, []);
-    const u = user || { username:'', name:'', role:'staff', department: departments[0]?.name || '', crossOfficeAccess: false };
+    const u = user || { username:'', name:'', role:'staff', departments: [], crossOfficeAccess: false };
+    const userDepts = getUserDepts(u);
 
     this.openModal({
       title: isEdit ? '編輯帳號' : '新增帳號',
@@ -3043,20 +3065,29 @@ const App = {
           <label>${isEdit ? '新密碼（留空保留原密碼）' : '初始密碼（留空預設為 123）'}</label>
           <input type="password" id="f-upassword" placeholder="${isEdit ? '不改密碼請留空' : '預設 123'}">
         </div>
-        <div class="field-row">
-          <div class="field">
-            <label>權限</label>
-            <select id="f-urole">
-              <option value="staff" ${u.role==='staff'?'selected':''}>員工</option>
-              <option value="admin" ${u.role==='admin'?'selected':''}>管理員</option>
-            </select>
+        <div class="field">
+          <label>權限</label>
+          <select id="f-urole">
+            <option value="staff" ${u.role==='staff'?'selected':''}>員工</option>
+            <option value="admin" ${u.role==='admin'?'selected':''}>管理員</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>辦公室（可複選）</label>
+          <div id="f-udept-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:white">
+            ${departments.map(d => {
+              const checked = userDepts.includes(d.name);
+              return `
+                <label class="dept-check" data-dept-name="${escapeHtml(d.name)}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid ${checked ? d.color : 'var(--border)'};border-radius:6px;background:${checked ? d.color+'15' : 'transparent'};cursor:pointer;transition:all .15s">
+                  <input type="checkbox" class="f-udept-cb" value="${escapeHtml(d.name)}" data-color="${escapeHtml(d.color)}" ${checked ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;accent-color:${d.color}">
+                  <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${d.color}"></span>
+                  <span style="font-weight:500;font-size:14px">${escapeHtml(d.name)}</span>
+                </label>
+              `;
+            }).join('')}
           </div>
-          <div class="field">
-            <label>辦公室</label>
-            <select id="f-udept">
-              <option value="" ${!u.department ? 'selected' : ''}>—（不限定 / 全公司）</option>
-              ${departments.map(d => `<option value="${escapeHtml(d.name)}" ${d.name===u.department?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
-            </select>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:6px">
+            未勾選任何辦公室＝全公司（不歸屬特定辦公室）；可同時勾選多個
           </div>
         </div>
         <div class="field" style="margin-top:4px;padding:12px;background:var(--bg);border-radius:var(--radius-sm)">
@@ -3069,12 +3100,30 @@ const App = {
           </div>
         </div>
       `,
+      onMount: () => {
+        // 勾選/取消勾選時，更新外框視覺
+        document.querySelectorAll('.f-udept-cb').forEach(cb => {
+          cb.addEventListener('change', () => {
+            const wrap = cb.closest('.dept-check');
+            const color = cb.dataset.color;
+            if (cb.checked) {
+              wrap.style.border = `1px solid ${color}`;
+              wrap.style.background = color + '15';
+            } else {
+              wrap.style.border = '1px solid var(--border)';
+              wrap.style.background = 'transparent';
+            }
+          });
+        });
+      },
       onSave: () => {
         const name = document.getElementById('f-uname').value.trim();
         const usernameNew = document.getElementById('f-uusername').value.trim();
         const password = document.getElementById('f-upassword').value;
         const role = document.getElementById('f-urole').value;
-        const department = document.getElementById('f-udept').value;
+        const selectedDepts = Array.from(document.querySelectorAll('.f-udept-cb'))
+          .filter(cb => cb.checked)
+          .map(cb => cb.value);
         const crossOfficeAccess = document.getElementById('f-ucross').checked;
         if (!name || !usernameNew) { showToast('請填寫姓名與帳號', 'error'); return false; }
         const list = Store.get(Store.KEYS.users, []);
@@ -3083,14 +3132,15 @@ const App = {
           const i = list.findIndex(x => x.username === user.username);
           list[i].name = name;
           list[i].role = role;
-          list[i].department = department;
+          list[i].departments = selectedDepts;
+          delete list[i].department; // 移除舊欄位
           list[i].crossOfficeAccess = crossOfficeAccess;
           if (password) {
             list[i].password = hashPassword(password);
           }
         } else {
           const initialPw = password || '123';
-          list.push({ username: usernameNew, name, role, department, crossOfficeAccess, password: hashPassword(initialPw) });
+          list.push({ username: usernameNew, name, role, departments: selectedDepts, crossOfficeAccess, password: hashPassword(initialPw) });
         }
         Store.set(Store.KEYS.users, list);
 
@@ -3098,7 +3148,8 @@ const App = {
         if (isEdit && user.username === this.currentUser.username) {
           this.currentUser.name = name;
           this.currentUser.role = role;
-          this.currentUser.department = department;
+          this.currentUser.departments = selectedDepts;
+          delete this.currentUser.department;
           this.currentUser.crossOfficeAccess = crossOfficeAccess;
           this.applyUserPerms(this.currentUser);
         }
