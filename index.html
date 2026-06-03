@@ -1646,7 +1646,8 @@ const App = {
       `;
     }).join('');
 
-    const platformCards = platforms.map((p, i) => {
+    // 單一卡片渲染（共用：分群後每張卡片仍長一樣）
+    const buildPlatformCard = (p, i) => {
       const td = inputOf(p);
       const yd = prevOf(p);
       const delta = yd > 0 ? ((td / yd) - 1) * 100 : 0;
@@ -1683,6 +1684,65 @@ const App = {
           </div>
         </div>
       `;
+    };
+
+    // 依通路分群（蝦皮 / MOMO / 酷澎）
+    const marketOrder = ['shopee', 'momo', 'coupang'];
+    const marketTint = { shopee: '#ee4d2d', momo: '#ec4899', coupang: '#3b82f6' };
+    const grouped = { shopee: [], momo: [], coupang: [] };
+    platforms.forEach((p, i) => {
+      const m = PLATFORM_MARKETPLACE[p.name] || 'shopee';
+      if (!grouped[m]) grouped[m] = [];
+      grouped[m].push({ p, i });
+    });
+
+    const marketSections = marketOrder.map(m => {
+      const items = grouped[m] || [];
+      if (items.length === 0) return '';
+      const badge = MARKETPLACE_BADGE[m];
+      const tint = marketTint[m] || '#6b7280';
+      // 該通路的總計
+      const groupRev = items.reduce((s, { p }) => s + inputOf(p), 0);
+      const groupPrev = items.reduce((s, { p }) => s + prevOf(p), 0);
+      const groupDelta = groupPrev > 0 ? ((groupRev / groupPrev) - 1) * 100 : 0;
+      const adItems = items.filter(({ p }) => PLATFORMS_WITH_AD_SPEND.has(p.name));
+      const groupAds = adItems.reduce((s, { p }) => s + (+(p.dailyAdSpend?.[inputDateStr]) || 0), 0);
+      const groupRoas = groupAds > 0 ? (groupRev / groupAds).toFixed(2) : null;
+
+      const deltaHtml = groupDelta >= 0
+        ? `<span class="up">↑ ${groupDelta.toFixed(1)}%</span>`
+        : `<span class="down">↓ ${Math.abs(groupDelta).toFixed(1)}%</span>`;
+
+      const cards = items.map(({ p, i }) => buildPlatformCard(p, i)).join('');
+
+      return `
+        <div style="margin-bottom:20px">
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 18px;background:linear-gradient(135deg, ${tint}10, ${tint}05);border:1px solid ${tint}33;border-left:4px solid ${tint};border-radius:10px;margin-bottom:12px">
+            <img src="${badge.src}" alt="${escapeHtml(badge.name)}"
+              style="width:38px;height:38px;border-radius:8px;object-fit:contain;background:white;padding:2px;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
+            <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+              <span style="font-size:18px;font-weight:800;color:var(--text);letter-spacing:.5px">${escapeHtml(badge.name)}</span>
+              <span style="font-size:12px;color:var(--text-muted);font-weight:500">${items.length} 個賣場</span>
+            </div>
+            <span style="flex:1"></span>
+            <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+              <div style="text-align:right">
+                <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">通路總營收</div>
+                <div style="font-size:18px;font-weight:800;color:${tint};font-variant-numeric:tabular-nums;line-height:1.2">NT$ ${groupRev.toLocaleString()}</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${deltaHtml} 較前一日</div>
+              </div>
+              ${groupRoas !== null ? `
+                <div style="text-align:right;padding-left:18px;border-left:1px solid ${tint}33">
+                  <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">通路 ROAS</div>
+                  <div style="font-size:18px;font-weight:800;color:${tint};font-variant-numeric:tabular-nums;line-height:1.2">${groupRoas}</div>
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:2px">廣告 NT$ ${groupAds.toLocaleString()}</div>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+          <div class="stat-grid">${cards}</div>
+        </div>
+      `;
     }).join('');
 
     return `
@@ -1693,7 +1753,7 @@ const App = {
       ${monthBlock}
       ${summaryPills}
       <div class="stat-grid" style="grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));margin-bottom:16px">${summaryCards}</div>
-      <div class="stat-grid">${platformCards}</div>
+      ${marketSections}
       ${this.dailyLineChartHtml(platforms)}
     `;
   },
