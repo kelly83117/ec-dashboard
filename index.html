@@ -1409,21 +1409,42 @@ const App = {
     const prevTotal  = platforms.reduce((s, p) => s + prevOf(p),  0);
     const overallDelta = prevTotal > 0 ? (inputTotal / prevTotal - 1) * 100 : 0;
 
-    // 4 張總覽卡（全賣場 / 蝦皮 / MOMO / 酷澎）
+    // 4 張總覽卡：可切換「昨日 / 前日」
+    const summaryRange = this.filter.summaryRange || 'yesterday';   // yesterday | dayBefore
+    const summaryShowStr = summaryRange === 'yesterday' ? inputDateStr : prevDateStr;
+    const summaryCompareStr = summaryRange === 'yesterday' ? prevDateStr : toDateStr(addDays(now, -3));
+    const summaryShowDisplay = summaryShowStr.replace(/-/g, '/');
+    const summaryLabel = summaryRange === 'yesterday' ? '昨日' : '前日';
+    const compareLabel = summaryRange === 'yesterday' ? '前一日' : '再前一日';
+
+    const summaryShowOf = (p) => +(p.daily?.[summaryShowStr]) || 0;
+    const summaryCompareOf = (p) => +(p.daily?.[summaryCompareStr]) || 0;
+
+    const summaryPills = `
+      <div id="summary-pills" style="display:flex;gap:6px;margin-bottom:12px;align-items:center">
+        <span style="font-size:13px;color:var(--text-muted);margin-right:4px">日期</span>
+        <button class="pill ${summaryRange === 'yesterday' ? 'active' : ''}" data-summary-range="yesterday"
+          style="padding:6px 14px;font-size:12px">昨日 (${inputDateStr.replace(/-/g, '/')})</button>
+        <button class="pill ${summaryRange === 'dayBefore' ? 'active' : ''}" data-summary-range="dayBefore"
+          style="padding:6px 14px;font-size:12px">前日 (${prevDateStr.replace(/-/g, '/')})</button>
+      </div>
+    `;
+
     const summaryCards = PLATFORM_GROUPS.map(g => {
       const members = platforms.filter(p => g.members.includes(p.name));
-      const cur  = members.reduce((s, p) => s + inputOf(p), 0);
-      const prev = members.reduce((s, p) => s + prevOf(p),  0);
+      const cur  = members.reduce((s, p) => s + summaryShowOf(p), 0);
+      const prev = members.reduce((s, p) => s + summaryCompareOf(p), 0);
       const d    = prev > 0 ? ((cur / prev) - 1) * 100 : 0;
       return `
         <div class="stat-card" style="border-top:3px solid ${g.color};background:${g.color}06">
           <div class="stat-icon" style="background:${g.color}22;color:${g.color}">${g.icon}</div>
           <div class="stat-label" style="font-weight:600">${escapeHtml(g.name)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin:2px 0 4px">${summaryLabel}</div>
           <div class="stat-value" style="font-size:22px;color:${g.color}">${fmtNTD(cur)}</div>
           <div class="stat-meta">
             ${d >= 0
               ? `<span class="up">↑ ${d.toFixed(1)}%</span>`
-              : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`} 較前一日
+              : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`} 較${compareLabel}
           </div>
         </div>
       `;
@@ -1474,6 +1495,7 @@ const App = {
         <h2>儀表板首頁 <span class="live-dot">即時資料</span></h2>
         <p>歡迎回來，${escapeHtml(this.currentUser.name)}　·　${inputDateDisplay}　·　<span style="color:var(--text-muted);font-size:13px">直接點卡片上的數字框輸入，移開游標自動儲存</span></p>
       </div>
+      ${summaryPills}
       <div class="stat-grid" style="grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));margin-bottom:16px">${summaryCards}</div>
       <div class="stat-grid">${platformCards}</div>
       ${this.dailyLineChartHtml(platforms, 30)}
@@ -1644,6 +1666,13 @@ const App = {
         const next = name || null;
         // 點到同一個 → 也回到全部
         this.filter.chartPlatform = (this.filter.chartPlatform === next) ? null : next;
+        this.render();
+      });
+    });
+    // 總覽卡日期切換：昨日 / 前日
+    document.querySelectorAll('#summary-pills [data-summary-range]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.filter.summaryRange = btn.dataset.summaryRange;
         this.render();
       });
     });
