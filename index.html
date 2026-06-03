@@ -1832,6 +1832,11 @@ const App = {
 
     const { dates, dailyData, series, padL, xStep, W, H, padT, ch, maxV, isMulti, activeName } = this._chartState;
 
+    const logoFor = (name) => {
+      const m = PLATFORM_MARKETPLACE[name] || 'shopee';
+      return MARKETPLACE_BADGE[m].src;
+    };
+
     const fmtTooltip = (i) => {
       const data = dailyData[i];
       const dateStr = data.date.replace(/-/g, '/');
@@ -1843,10 +1848,11 @@ const App = {
           <div style="font-size:18px;font-weight:700;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.18);font-variant-numeric:tabular-nums">NT$ ${Math.round(data.total).toLocaleString()}</div>
           <div style="font-size:12px;line-height:1.7">
             ${data.breakdown.map(p => `
-              <div style="display:flex;justify-content:space-between;gap:18px">
-                <span style="opacity:0.9">
-                  <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:6px"></span>
-                  ${p.icon} ${escapeHtml(p.name)}
+              <div style="display:flex;justify-content:space-between;gap:18px;align-items:center">
+                <span style="opacity:0.9;display:inline-flex;align-items:center;gap:6px">
+                  <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${p.color}"></span>
+                  <img src="${logoFor(p.name)}" alt="" style="width:16px;height:16px;border-radius:3px;object-fit:contain;background:white;flex-shrink:0">
+                  ${escapeHtml(p.name)}
                 </span>
                 <span style="font-variant-numeric:tabular-nums;opacity:${p.value > 0 ? 1 : 0.4}">${p.value > 0 ? p.value.toLocaleString() : '—'}</span>
               </div>
@@ -1859,7 +1865,10 @@ const App = {
         const v = p ? p.value : 0;
         return `
           <div style="font-size:11px;opacity:0.7;margin-bottom:4px">${dateStr}</div>
-          <div style="font-size:11px;opacity:0.85;margin-bottom:4px">${p ? escapeHtml(p.icon + ' ' + p.name) : ''}</div>
+          ${p ? `<div style="font-size:12px;opacity:0.9;margin-bottom:4px;display:inline-flex;align-items:center;gap:6px">
+            <img src="${logoFor(p.name)}" alt="" style="width:16px;height:16px;border-radius:3px;object-fit:contain;background:white;flex-shrink:0">
+            ${escapeHtml(p.name)}
+          </div>` : ''}
           <div style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">NT$ ${Math.round(v).toLocaleString()}</div>
         `;
       }
