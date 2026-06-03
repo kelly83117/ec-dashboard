@@ -95,7 +95,7 @@
     color: var(--text);
     font-weight: 500;
   }
-  .field input, .field select {
+  .field input, .field select, .field textarea {
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--border);
@@ -103,8 +103,10 @@
     font-size: 14px;
     transition: border-color .15s, box-shadow .15s;
     background: white;
+    color: var(--text);
+    font-family: inherit;
   }
-  .field input:focus, .field select:focus {
+  .field input:focus, .field select:focus, .field textarea:focus {
     outline: none;
     border-color: var(--primary);
     box-shadow: 0 0 0 3px rgba(99, 102, 241, .15);
@@ -771,6 +773,7 @@ const Store = {
     departments: 'ec.departments',
     employees: 'ec.employees',
     platforms: 'ec.platforms',
+    dailyTasks: 'ec.dailyTasks',
     session: 'ec.session',
     seeded: 'ec.seeded.v5',
   },
@@ -1041,6 +1044,25 @@ function ensureDailyRecent(platforms, days = 90) {
   return changed;
 }
 
+/* ------------- 每日工作進度 ------------- */
+const DAILY_TASK_STATUS = {
+  '進行中': { color: '#3b82f6', bg: '#dbeafe', emoji: '🔵' },
+  '已完成': { color: '#10b981', bg: '#d1fae5', emoji: '✅' },
+  '遇阻':   { color: '#ef4444', bg: '#fee2e2', emoji: '⚠️' },
+  '待開始': { color: '#6b7280', bg: '#e5e7eb', emoji: '⏳' },
+};
+const DAILY_TASK_STATUS_LIST = Object.keys(DAILY_TASK_STATUS);
+
+function todayStr() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+function genId() {
+  // Math.random is intentional here — not in workflow script context
+  return 't_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+
 /* ------------- 各辦公室頁面設定 ------------- */
 const OFFICE_CONFIG = {
   d1: {
@@ -1053,6 +1075,7 @@ const OFFICE_CONFIG = {
       { icon: '🎯', label: '平均轉換率', value: '3.8%', meta: '較上月 ↑ 0.5%' },
     ],
     tabs: [
+      { key: 'daily-progress', title: '📋 每日工作進度', dynamic: 'daily-progress' },
       { key: 'profit', title: '淨利表',
         heads: ['活動名稱', '投入成本', '營收', '淨利', '利潤率'],
         rows: [
@@ -1265,7 +1288,7 @@ function showToast(message, type = '') {
  * ============================================================ */
 const App = {
   route: 'employees',
-  filter: { dept: 'all', quarter: 'all', range: 'today', customStart: '', customEnd: '', officeTab: {} },
+  filter: { dept: 'all', quarter: 'all', range: 'today', customStart: '', customEnd: '', officeTab: {}, dailyProgress: { employee: 'all', status: 'all', dateFrom: '', dateTo: '' } },
 
   init() {
     seedData();
@@ -2446,6 +2469,284 @@ const App = {
         this.render();
       });
     });
+    // 每日工作進度的事件綁定（如果當前是這個 tab）
+    const activeTab = this.filter.officeTab[deptId];
+    const cfg = OFFICE_CONFIG[deptId];
+    const tabKey = activeTab || cfg?.tabs?.[0]?.key;
+    if (cfg?.tabs?.find(t => t.key === tabKey && t.dynamic === 'daily-progress')) {
+      this.bindDailyProgress(deptId);
+    }
+  },
+
+  /* ============================================================
+   *  每日工作進度
+   * ============================================================ */
+  renderDailyProgressTab(deptId, color, dept) {
+    const allTasks = Store.get(Store.KEYS.dailyTasks, []);
+    const tasks = allTasks.filter(t => t.deptId === deptId);
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => u.department === dept.name);
+    const f = this.filter.dailyProgress;
+
+    // 套用篩選
+    let filtered = tasks.slice();
+    if (f.employee && f.employee !== 'all') {
+      filtered = filtered.filter(t => t.employee === f.employee);
+    }
+    if (f.status && f.status !== 'all') {
+      filtered = filtered.filter(t => t.status === f.status);
+    }
+    if (f.dateFrom) filtered = filtered.filter(t => t.date >= f.dateFrom);
+    if (f.dateTo)   filtered = filtered.filter(t => t.date <= f.dateTo);
+
+    // 排序：日期新→舊，相同日期 createdAt 新→舊
+    filtered.sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+
+    // 統計
+    const counts = { '進行中': 0, '已完成': 0, '遇阻': 0, '待開始': 0 };
+    tasks.forEach(t => { if (counts[t.status] != null) counts[t.status]++; });
+
+    const statusPills = ['all', ...DAILY_TASK_STATUS_LIST].map(s => {
+      const active = (f.status || 'all') === s;
+      const label = s === 'all' ? `全部 (${tasks.length})` : `${DAILY_TASK_STATUS[s].emoji} ${s} (${counts[s]})`;
+      return `<button class="pill ${active ? 'active' : ''}" data-dp-status="${escapeHtml(s)}">${label}</button>`;
+    }).join('');
+
+    const employeeOptions = `
+      <option value="all" ${(f.employee || 'all') === 'all' ? 'selected' : ''}>全部員工</option>
+      ${members.map(u => `<option value="${escapeHtml(u.username)}" ${f.employee === u.username ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
+    `;
+
+    const rowsHtml = filtered.length === 0
+      ? `<tr><td colspan="6"><div class="empty"><div class="emoji">📋</div>${tasks.length === 0 ? '尚無工作進度紀錄' : '沒有符合篩選條件的紀錄'}<div style="font-size:13px;margin-top:4px;color:var(--text-muted)">${tasks.length === 0 ? '點右上「+ 新增進度」開始記錄' : '試試調整員工或狀態篩選'}</div></div></td></tr>`
+      : filtered.map(t => {
+          const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
+          const canEdit = this.currentUser.role === 'admin' || this.currentUser.username === t.employee;
+          return `
+            <tr>
+              <td style="white-space:nowrap;font-variant-numeric:tabular-nums">${escapeHtml(t.date)}</td>
+              <td>
+                <div class="employee-cell">
+                  <div class="employee-avatar" style="width:28px;height:28px;font-size:13px">${escapeHtml((t.employeeName || t.employee || '?').slice(0,1))}</div>
+                  <div>
+                    <div class="employee-name" style="font-size:13px">${escapeHtml(t.employeeName || t.employee)}</div>
+                  </div>
+                </div>
+              </td>
+              <td style="font-weight:500">${escapeHtml(t.title)}</td>
+              <td><span class="badge-role" style="background:${st.bg};color:${st.color}">${st.emoji} ${escapeHtml(t.status)}</span></td>
+              <td style="color:var(--text-muted);font-size:13px;max-width:280px">${escapeHtml(t.notes || '—')}</td>
+              <td style="white-space:nowrap;text-align:right">
+                ${canEdit ? `
+                  <button class="icon-btn" title="編輯" data-dp-edit="${escapeHtml(t.id)}">✏️</button>
+                  <button class="icon-btn danger" title="刪除" data-dp-del="${escapeHtml(t.id)}">🗑️</button>
+                ` : '<span style="color:var(--text-muted);font-size:12px">—</span>'}
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+    return `
+      <div class="table-card" style="margin-bottom:16px">
+        <div class="table-card-header" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+          <div>
+            <h3 style="margin:0">每日工作進度</h3>
+            <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted)">${dept.name}辦公室成員每日紀錄 · 共 ${tasks.length} 筆</p>
+          </div>
+          <button class="btn-add" data-dp-add="1">+ 新增進度</button>
+        </div>
+        <div style="padding:12px 16px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:12px;color:var(--text-muted)">員工</span>
+            <select id="dp-emp" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
+              ${employeeOptions}
+            </select>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:12px;color:var(--text-muted)">日期</span>
+            <input type="date" id="dp-from" value="${escapeHtml(f.dateFrom || '')}" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
+            <span style="font-size:12px;color:var(--text-muted)">至</span>
+            <input type="date" id="dp-to" value="${escapeHtml(f.dateTo || '')}" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
+          </div>
+          ${(f.employee !== 'all' || f.status !== 'all' || f.dateFrom || f.dateTo) ? `
+            <button class="pill" data-dp-reset="1" style="font-size:12px">✕ 清除篩選</button>
+          ` : ''}
+          <span style="flex:1"></span>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">${statusPills}</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:110px">日期</th>
+                <th style="width:140px">員工</th>
+                <th>工作項目</th>
+                <th style="width:110px">狀態</th>
+                <th>備註</th>
+                <th style="width:100px;text-align:right">操作</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  },
+
+  bindDailyProgress(deptId) {
+    // 員工下拉
+    const emp = document.getElementById('dp-emp');
+    if (emp) emp.addEventListener('change', () => {
+      this.filter.dailyProgress.employee = emp.value;
+      this.render();
+    });
+    // 日期區間
+    const from = document.getElementById('dp-from');
+    if (from) from.addEventListener('change', () => {
+      this.filter.dailyProgress.dateFrom = from.value;
+      this.render();
+    });
+    const to = document.getElementById('dp-to');
+    if (to) to.addEventListener('change', () => {
+      this.filter.dailyProgress.dateTo = to.value;
+      this.render();
+    });
+    // 狀態 pills
+    document.querySelectorAll('[data-dp-status]').forEach(p => {
+      p.addEventListener('click', () => {
+        this.filter.dailyProgress.status = p.dataset.dpStatus;
+        this.render();
+      });
+    });
+    // 清除篩選
+    document.querySelectorAll('[data-dp-reset]').forEach(p => {
+      p.addEventListener('click', () => {
+        this.filter.dailyProgress = { employee: 'all', status: 'all', dateFrom: '', dateTo: '' };
+        this.render();
+      });
+    });
+    // 新增
+    document.querySelectorAll('[data-dp-add]').forEach(p => {
+      p.addEventListener('click', () => this.openDailyTaskModal(deptId));
+    });
+    // 編輯 / 刪除
+    document.querySelectorAll('[data-dp-edit]').forEach(p => {
+      p.addEventListener('click', () => this.openDailyTaskModal(deptId, p.dataset.dpEdit));
+    });
+    document.querySelectorAll('[data-dp-del]').forEach(p => {
+      p.addEventListener('click', () => this.deleteDailyTask(p.dataset.dpDel));
+    });
+  },
+
+  openDailyTaskModal(deptId, taskId) {
+    const all = Store.get(Store.KEYS.dailyTasks, []);
+    const existing = taskId ? all.find(t => t.id === taskId) : null;
+    const isEdit = !!existing;
+
+    const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
+    if (!dept) { showToast('找不到此辦公室', 'error'); return; }
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => u.department === dept.name);
+    // 若是新增，預設員工 = 當前登入者（若是該辦公室成員），否則第一位成員
+    const defaultEmp = (this.currentUser && this.currentUser.department === dept.name)
+      ? this.currentUser.username
+      : (members[0]?.username || '');
+
+    const t = existing || {
+      employee: defaultEmp,
+      date: todayStr(),
+      title: '',
+      status: '進行中',
+      notes: '',
+    };
+
+    if (members.length === 0) {
+      showToast(`${dept.name}辦公室尚無成員，請先至帳號管理新增`, 'error');
+      return;
+    }
+
+    this.openModal({
+      title: isEdit ? '編輯工作進度' : '新增工作進度',
+      bodyHtml: `
+        <div class="field-row">
+          <div class="field">
+            <label>日期</label>
+            <input type="date" id="dpf-date" value="${escapeHtml(t.date)}" required>
+          </div>
+          <div class="field">
+            <label>員工</label>
+            <select id="dpf-emp" ${isEdit ? 'disabled style="background:var(--bg);color:var(--text-muted)"' : ''}>
+              ${members.map(u => `<option value="${escapeHtml(u.username)}" ${u.username === t.employee ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>工作項目</label>
+          <input id="dpf-title" value="${escapeHtml(t.title)}" placeholder="例：完成母親節主視覺 IG 貼文 5 張" required>
+        </div>
+        <div class="field">
+          <label>狀態</label>
+          <select id="dpf-status">
+            ${DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === t.status ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>備註 / 進度說明（選填）</label>
+          <textarea id="dpf-notes" rows="3" placeholder="可填寫遇到的問題、完成比例、需要的支援等" style="font-family:inherit;resize:vertical">${escapeHtml(t.notes || '')}</textarea>
+        </div>
+      `,
+      onSave: () => {
+        const date = document.getElementById('dpf-date').value;
+        const employee = document.getElementById('dpf-emp').value;
+        const title = document.getElementById('dpf-title').value.trim();
+        const status = document.getElementById('dpf-status').value;
+        const notes = document.getElementById('dpf-notes').value.trim();
+        if (!date) { showToast('請選擇日期', 'error'); return false; }
+        if (!title) { showToast('請填寫工作項目', 'error'); return false; }
+        if (!employee) { showToast('請選擇員工', 'error'); return false; }
+        const empUser = members.find(u => u.username === employee);
+        const employeeName = empUser ? empUser.name : employee;
+
+        const list = Store.get(Store.KEYS.dailyTasks, []);
+        if (isEdit) {
+          const i = list.findIndex(x => x.id === taskId);
+          if (i < 0) { showToast('找不到此筆紀錄', 'error'); return false; }
+          list[i] = { ...list[i], date, employee, employeeName, title, status, notes };
+        } else {
+          list.push({
+            id: genId(),
+            deptId,
+            date,
+            employee,
+            employeeName,
+            title,
+            status,
+            notes,
+            createdAt: Date.now(),
+            createdBy: this.currentUser?.username || '',
+          });
+        }
+        Store.set(Store.KEYS.dailyTasks, list);
+        showToast(isEdit ? '已更新' : '已新增', 'success');
+        this.render();
+        return true;
+      },
+    });
+  },
+
+  deleteDailyTask(id) {
+    const list = Store.get(Store.KEYS.dailyTasks, []);
+    const t = list.find(x => x.id === id);
+    if (!t) return;
+    if (this.currentUser.role !== 'admin' && this.currentUser.username !== t.employee) {
+      showToast('僅本人或管理員可刪除', 'error');
+      return;
+    }
+    if (!confirm(`確定要刪除「${t.title}」？`)) return;
+    Store.set(Store.KEYS.dailyTasks, list.filter(x => x.id !== id));
+    showToast('已刪除', 'success');
+    this.render();
   },
 
   /* ------------- 自助修改密碼 Modal ------------- */
@@ -2592,19 +2893,28 @@ const App = {
       </div>
     `;
 
-    const tabContent = !activeTab ? '' : (activeTab.customHtml || `
-      <div class="table-card" style="margin-bottom:16px">
-        <div class="table-card-header"><h3>${escapeHtml(activeTab.title)}</h3></div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr>${activeTab.heads.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
-            <tbody>
-              ${activeTab.rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `);
+    let tabContent = '';
+    if (activeTab) {
+      if (activeTab.dynamic === 'daily-progress') {
+        tabContent = this.renderDailyProgressTab(deptId, color, dept);
+      } else if (activeTab.customHtml) {
+        tabContent = activeTab.customHtml;
+      } else {
+        tabContent = `
+          <div class="table-card" style="margin-bottom:16px">
+            <div class="table-card-header"><h3>${escapeHtml(activeTab.title)}</h3></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr>${activeTab.heads.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
+                <tbody>
+                  ${activeTab.rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }
+    }
 
     const cellQ = (v) => {
       if (v == null) return '<span style="color:var(--text-muted)">—</span>';
