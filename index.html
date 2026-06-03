@@ -1677,14 +1677,16 @@ const App = {
             : `<span class="down" style="font-weight:600">↓ ${Math.abs(delta).toFixed(1)}%</span>`)
         : '<span style="color:var(--text-muted)">—</span>';
 
+      const inputStyle = 'width:120px;padding:4px 10px;border:1px solid var(--border);border-radius:5px;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;color:var(--text);box-sizing:border-box;background:white;height:28px';
+
       const adsCell = hasAds
         ? `<input type="number" min="0" step="1" class="card-ads" data-idx="${i}" data-original="${inputAds || ''}" value="${inputAds || ''}" placeholder="0" onfocus="this.select()"
-              style="width:110px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;background:white;height:28px">`
-        : '<span style="color:var(--text-muted);font-size:13px">—</span>';
+              style="${inputStyle}">`
+        : '<span style="color:var(--text-muted);font-size:14px">—</span>';
 
       const roasCell = hasAds
         ? `<span class="card-roas" data-idx="${i}" style="font-weight:700;font-variant-numeric:tabular-nums;color:${p.color};font-size:13px">${roas}</span>`
-        : '<span style="color:var(--text-muted);font-size:12px">—</span>';
+        : '<span style="color:var(--text-muted);font-size:13px">—</span>';
 
       return `
         <tr data-card-idx="${i}" style="border-top:1px solid var(--border)">
@@ -1694,14 +1696,14 @@ const App = {
               <span style="font-weight:600;font-size:13px">${escapeHtml(p.name)}</span>
             </div>
           </td>
-          <td style="padding:3px 8px;text-align:right">
+          <td style="padding:3px 8px;text-align:center">
             <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" data-original="${td || ''}" value="${td || ''}" placeholder="0" onfocus="this.select()"
-              style="width:130px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;background:white;height:28px">
+              style="${inputStyle}">
           </td>
-          <td style="padding:3px 8px;text-align:right">${adsCell}</td>
+          <td style="padding:3px 8px;text-align:center">${adsCell}</td>
           <td style="padding:3px 8px;text-align:center">${roasCell}</td>
-          <td style="padding:3px 8px;white-space:nowrap;font-size:12px">${deltaCell}</td>
-          <td style="padding:3px 6px;white-space:nowrap;text-align:right">
+          <td style="padding:3px 8px;white-space:nowrap;font-size:12px;text-align:center">${deltaCell}</td>
+          <td style="padding:3px 6px;white-space:nowrap;text-align:center">
             <button class="card-confirm" data-idx="${i}" disabled title="確認儲存此列"
               style="width:26px;height:26px;border:0;border-radius:5px;background:var(--border);color:var(--text-muted);font-size:13px;cursor:not-allowed;transition:all .15s;font-weight:700">✓</button>
             <button class="icon-btn" title="編輯歷史資料" onclick="App.openPlatformModal(${i})"
@@ -1750,10 +1752,10 @@ const App = {
     const totalRow = `
       <tr style="background:var(--bg);border-top:2px solid var(--border)">
         <td style="padding:6px 10px;font-weight:800;font-size:13px;letter-spacing:.05em">當日總計</td>
-        <td style="padding:6px 10px;text-align:right;font-weight:800;font-size:15px;font-variant-numeric:tabular-nums">NT$ ${grandRev.toLocaleString()}</td>
-        <td style="padding:6px 10px;text-align:right;font-weight:700;font-size:13px;color:var(--text-muted);font-variant-numeric:tabular-nums">NT$ ${grandAds.toLocaleString()}</td>
+        <td style="padding:6px 10px;text-align:center;font-weight:800;font-size:14px;font-variant-numeric:tabular-nums">NT$ ${grandRev.toLocaleString()}</td>
+        <td style="padding:6px 10px;text-align:center;font-weight:700;font-size:13px;color:var(--text-muted);font-variant-numeric:tabular-nums">NT$ ${grandAds.toLocaleString()}</td>
         <td style="padding:6px 10px;text-align:center;font-weight:800;font-size:13px;color:#6366f1;font-variant-numeric:tabular-nums">${grandRoas}</td>
-        <td style="padding:6px 10px;font-size:12px">${grandDeltaCell}</td>
+        <td style="padding:6px 10px;font-size:12px;text-align:center">${grandDeltaCell}</td>
         <td></td>
       </tr>
     `;
@@ -1774,11 +1776,11 @@ const App = {
             <thead>
               <tr style="background:var(--bg)">
                 <th style="padding:5px 10px;text-align:left;font-size:11px;width:auto">賣場</th>
-                <th style="padding:5px 10px;text-align:right;font-size:11px;width:150px">營收 NT$</th>
-                <th style="padding:5px 10px;text-align:right;font-size:11px;width:130px">廣告費</th>
+                <th style="padding:5px 10px;text-align:center;font-size:11px;width:140px">營收 NT$</th>
+                <th style="padding:5px 10px;text-align:center;font-size:11px;width:140px">廣告費</th>
                 <th style="padding:5px 10px;text-align:center;font-size:11px;width:70px">ROAS</th>
-                <th style="padding:5px 10px;text-align:left;font-size:11px;width:90px">較前一日</th>
-                <th style="padding:5px 6px;text-align:right;width:76px"></th>
+                <th style="padding:5px 10px;text-align:center;font-size:11px;width:90px">較前一日</th>
+                <th style="padding:5px 6px;text-align:center;width:76px"></th>
               </tr>
             </thead>
             <tbody>
