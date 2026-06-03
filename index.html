@@ -1728,72 +1728,93 @@ const App = {
     let platforms = Store.get(Store.KEYS.platforms, null);
     if (!platforms) platforms = JSON.parse(JSON.stringify(PLATFORMS));
     platforms = migratePlatforms(platforms);
-    platforms = platforms.map(p => ({ ...p, daily: { ...(p.daily || {}) } }));
+    platforms = platforms.map(p => ({
+      ...p,
+      daily: { ...(p.daily || {}) },
+      dailyAdSpend: { ...(p.dailyAdSpend || {}) },
+    }));
 
     const p = platforms[idx];
     if (!p) { showToast('找不到此平台', 'error'); return; }
 
     const now = new Date();
     const todayStr = toDateStr(now);
-    const ystrDay = toDateStr(addDays(now, -1));
-    const todayVal = +(p.daily[todayStr]) || 0;
-    const ydayVal  = +(p.daily[ystrDay]) || 0;
+    const yesterdayStr = toDateStr(addDays(now, -1));
+    const hasAds = PLATFORMS_WITH_AD_SPEND.has(p.name);
 
-    // 提供一個可選的「指定日期」欄位，方便補歷史
-    const customDateDefault = toDateStr(addDays(now, -2));
-
-    this.openModal({
-      title: `編輯：${p.name}`,
-      bodyHtml: `
+    // 重新渲染 modal body 用：日期變動時更新欄位值
+    const renderBody = (dateStr) => {
+      const rev = (p.daily[dateStr] != null) ? p.daily[dateStr] : '';
+      const ads = (p.dailyAdSpend[dateStr] != null) ? p.dailyAdSpend[dateStr] : '';
+      return `
         <div class="field">
           <label>平台</label>
-          <input value="${escapeHtml(p.name)}" disabled style="background:var(--bg);color:var(--text-muted)">
+          <input value="${p.icon} ${escapeHtml(p.name)}" disabled
+            style="background:var(--bg);color:var(--text-muted)">
+        </div>
+        <div class="field">
+          <label>日期</label>
+          <input type="date" id="m-date" value="${dateStr}" max="${todayStr}">
+          <div style="margin-top:6px;font-size:12px;color:var(--text-muted)">
+            預設為昨天，可改其他日期；改完日期欄位下方數字會跟著變
+          </div>
         </div>
         <div class="field-row">
-          <div class="field">
-            <label>今日營收（${todayStr.replace(/-/g,'/')}）</label>
-            <input type="number" id="f-today" min="0" step="1" value="${todayVal}">
-          </div>
-          <div class="field">
-            <label>昨日營收（${ystrDay.replace(/-/g,'/')}）</label>
-            <input type="number" id="f-yesterday" min="0" step="1" value="${ydayVal}">
-          </div>
-        </div>
-        <div style="margin:14px 0 4px;padding-top:12px;border-top:1px dashed var(--border);font-size:13px;color:var(--text-muted)">
-          補/修指定日期（選填）
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label>日期</label>
-            <input type="date" id="f-anydate" value="${customDateDefault}" max="${todayStr}">
-          </div>
           <div class="field">
             <label>當日營收（NT$）</label>
-            <input type="number" id="f-anyval" min="0" step="1" placeholder="留空不改">
+            <input type="number" id="m-rev" min="0" step="1" value="${rev}" placeholder="0" onfocus="this.select()">
+          </div>
+          <div class="field">
+            <label>廣告費（NT$）</label>
+            ${hasAds
+              ? `<input type="number" id="m-ads" min="0" step="1" value="${ads}" placeholder="0" onfocus="this.select()">`
+              : `<input value="此平台沒有廣告費" disabled style="background:var(--bg);color:var(--text-muted)">`}
           </div>
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
-          本週 / 本月 / 自訂區間總額會由每日資料自動加總，無需直接編輯
+          留空表示「沒這筆」，會把該日數值刪掉
         </div>
-      `,
-      onSave: () => {
-        const today = +document.getElementById('f-today').value;
-        const yesterday = +document.getElementById('f-yesterday').value;
-        if (!isFinite(today) || today < 0) { showToast('今日營收需為非負數字', 'error'); return false; }
-        if (!isFinite(yesterday) || yesterday < 0) { showToast('昨日營收需為非負數字', 'error'); return false; }
-        p.daily[todayStr] = Math.round(today);
-        p.daily[ystrDay] = Math.round(yesterday);
+      `;
+    };
 
-        const anyDate = document.getElementById('f-anydate').value;
-        const anyValRaw = document.getElementById('f-anyval').value;
-        if (anyDate && anyValRaw !== '') {
-          const v = +anyValRaw;
-          if (!isFinite(v) || v < 0) { showToast('指定日期當日營收需為非負數字', 'error'); return false; }
-          p.daily[anyDate] = Math.round(v);
+    this.openModal({
+      title: `編輯：${p.icon} ${p.name}`,
+      bodyHtml: renderBody(yesterdayStr),
+      onMount: () => {
+        // 切換日期時，即時更新下方營收與廣告費欄位顯示
+        const dateEl = document.getElementById('m-date');
+        if (!dateEl) return;
+        dateEl.addEventListener('change', () => {
+          const newDate = dateEl.value;
+          if (!newDate) return;
+          const revEl = document.getElementById('m-rev');
+          const adsEl = document.getElementById('m-ads');
+          const newRev = (p.daily[newDate] != null) ? p.daily[newDate] : '';
+          const newAds = (p.dailyAdSpend[newDate] != null) ? p.dailyAdSpend[newDate] : '';
+          if (revEl) revEl.value = newRev;
+          if (adsEl) adsEl.value = newAds;
+        });
+      },
+      onSave: () => {
+        const dateStr = (document.getElementById('m-date') || {}).value;
+        if (!dateStr) { showToast('請選擇日期', 'error'); return false; }
+
+        const revRaw = (document.getElementById('m-rev') || {}).value;
+        const rev = revRaw === '' ? null : +revRaw;
+        if (rev != null && (!isFinite(rev) || rev < 0)) { showToast('營收需為非負數字', 'error'); return false; }
+        if (rev == null) delete p.daily[dateStr];
+        else p.daily[dateStr] = Math.round(rev);
+
+        if (hasAds) {
+          const adsRaw = (document.getElementById('m-ads') || {}).value;
+          const ads = adsRaw === '' ? null : +adsRaw;
+          if (ads != null && (!isFinite(ads) || ads < 0)) { showToast('廣告費需為非負數字', 'error'); return false; }
+          if (ads == null) delete p.dailyAdSpend[dateStr];
+          else p.dailyAdSpend[dateStr] = Math.round(ads);
         }
 
         Store.set(Store.KEYS.platforms, platforms);
-        showToast(`「${p.name}」已更新`, 'success');
+        showToast(`「${p.name}」${dateStr.replace(/-/g,'/')} 已更新`, 'success');
         this.render();
         return true;
       },
