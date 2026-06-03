@@ -2540,34 +2540,73 @@ const App = {
       ${members.map(u => `<option value="${escapeHtml(u.username)}" ${f.employee === u.username ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
     `;
 
-    const rowsHtml = filtered.length === 0
-      ? `<tr><td colspan="6"><div class="empty"><div class="emoji">📋</div>${tasks.length === 0 ? '尚無工作進度紀錄' : '沒有符合篩選條件的紀錄'}<div style="font-size:13px;margin-top:4px;color:var(--text-muted)">${tasks.length === 0 ? '點右上「+ 新增進度」開始記錄' : '試試調整員工或狀態篩選'}</div></div></td></tr>`
-      : filtered.map(t => {
-          const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
-          const canEdit = this.currentUser.role === 'admin' || this.currentUser.username === t.employee;
-          return `
-            <tr>
-              <td style="white-space:nowrap;font-variant-numeric:tabular-nums">${escapeHtml(t.date)}</td>
-              <td>
-                <div class="employee-cell">
-                  <div class="employee-avatar" style="width:28px;height:28px;font-size:13px">${escapeHtml((t.employeeName || t.employee || '?').slice(0,1))}</div>
-                  <div>
-                    <div class="employee-name" style="font-size:13px">${escapeHtml(t.employeeName || t.employee)}</div>
-                  </div>
-                </div>
-              </td>
-              <td style="font-weight:500">${escapeHtml(t.title)}</td>
-              <td style="white-space:nowrap"><span class="badge-role" style="background:${st.bg};color:${st.color};white-space:nowrap">${st.emoji} ${escapeHtml(t.status)}</span></td>
-              <td style="color:var(--text-muted);font-size:13px;max-width:280px">${escapeHtml(t.notes || '—')}</td>
-              <td style="white-space:nowrap;text-align:right">
-                ${canEdit ? `
-                  <button class="icon-btn" title="編輯" data-dp-edit="${escapeHtml(t.id)}">✏️</button>
-                  <button class="icon-btn danger" title="刪除" data-dp-del="${escapeHtml(t.id)}">🗑️</button>
-                ` : '<span style="color:var(--text-muted);font-size:12px">—</span>'}
-              </td>
-            </tr>
-          `;
-        }).join('');
+    // 依日期分組（filtered 已按日期新→舊排序）
+    const grouped = [];
+    let currentGroup = null;
+    filtered.forEach(t => {
+      if (!currentGroup || currentGroup.date !== t.date) {
+        currentGroup = { date: t.date, items: [] };
+        grouped.push(currentGroup);
+      }
+      currentGroup.items.push(t);
+    });
+
+    const weekdayMap = ['週日','週一','週二','週三','週四','週五','週六'];
+    const formatDateHeading = (dateStr) => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      const today = new Date();
+      const tStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+      const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+      const yStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
+      let extra = '';
+      if (dateStr === tStr) extra = ' · 今天';
+      else if (dateStr === yStr) extra = ' · 昨天';
+      return `${dateStr} ${weekdayMap[dt.getDay()]}${extra}`;
+    };
+
+    const timelineHtml = filtered.length === 0
+      ? `<div class="empty" style="padding:48px 24px"><div class="emoji">📋</div>${tasks.length === 0 ? '尚無工作進度紀錄' : '沒有符合篩選條件的紀錄'}<div style="font-size:13px;margin-top:4px;color:var(--text-muted)">${tasks.length === 0 ? '點右上「+ 新增進度」開始記錄' : '試試調整員工或狀態篩選'}</div></div>`
+      : `<div style="padding:8px 8px 16px">${
+          grouped.map(g => `
+            <div style="margin-top:12px">
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 16px;font-size:13px;font-weight:600;color:var(--text-muted)">
+                <span style="display:inline-block;width:4px;height:14px;border-radius:2px;background:${color}"></span>
+                <span style="font-variant-numeric:tabular-nums">${escapeHtml(formatDateHeading(g.date))}</span>
+                <span style="flex:1;height:1px;background:var(--border)"></span>
+                <span style="font-size:12px;font-weight:500;color:var(--text-muted)">${g.items.length} 筆</span>
+              </div>
+              <div style="position:relative;margin:6px 0 6px 24px;padding-left:18px;border-left:2px solid var(--border)">
+                ${g.items.map(t => {
+                  const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
+                  const canEdit = this.currentUser.role === 'admin' || this.currentUser.username === t.employee;
+                  return `
+                    <div class="timeline-entry" style="position:relative;display:flex;align-items:flex-start;gap:14px;padding:12px 14px;margin:8px 0;background:var(--card);border:1px solid var(--border);border-radius:8px;transition:box-shadow .15s">
+                      <span style="position:absolute;left:-26px;top:18px;width:14px;height:14px;border-radius:50%;background:${st.color};border:2px solid var(--card);box-shadow:0 0 0 2px ${st.bg};display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:white">${st.emoji}</span>
+                      <div style="min-width:96px;display:flex;align-items:center;gap:8px">
+                        <div class="employee-avatar" style="width:30px;height:30px;font-size:13px">${escapeHtml((t.employeeName || t.employee || '?').slice(0,1))}</div>
+                        <div style="font-weight:500;font-size:13px">${escapeHtml(t.employeeName || t.employee)}</div>
+                      </div>
+                      <div style="flex:1;min-width:0">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                          <span style="font-weight:600;font-size:14px">${escapeHtml(t.title)}</span>
+                          <span class="badge-role" style="background:${st.bg};color:${st.color};white-space:nowrap;font-size:11px;padding:2px 8px">${st.emoji} ${escapeHtml(t.status)}</span>
+                        </div>
+                        ${t.notes ? `<div style="margin-top:4px;font-size:13px;color:var(--text-muted);line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(t.notes)}</div>` : ''}
+                      </div>
+                      <div style="white-space:nowrap;display:flex;gap:2px">
+                        ${canEdit ? `
+                          <button class="icon-btn" title="編輯" data-dp-edit="${escapeHtml(t.id)}">✏️</button>
+                          <button class="icon-btn danger" title="刪除" data-dp-del="${escapeHtml(t.id)}">🗑️</button>
+                        ` : ''}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `).join('')
+        }</div>`;
 
     return `
       <div class="table-card" style="margin-bottom:16px">
@@ -2597,21 +2636,7 @@ const App = {
           <span style="flex:1"></span>
           <div style="display:flex;gap:6px;flex-wrap:wrap">${statusPills}</div>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th style="width:110px">日期</th>
-                <th style="width:140px">員工</th>
-                <th>工作項目</th>
-                <th style="width:110px">狀態</th>
-                <th>備註</th>
-                <th style="width:100px;text-align:right">操作</th>
-              </tr>
-            </thead>
-            <tbody>${rowsHtml}</tbody>
-          </table>
-        </div>
+        ${timelineHtml}
       </div>
     `;
   },
