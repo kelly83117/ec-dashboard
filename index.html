@@ -43,6 +43,7 @@
     color: var(--text);
     font-size: 14px;
     line-height: 1.5;
+    font-weight: 500;
     -webkit-font-smoothing: antialiased;
   }
   button { font-family: inherit; cursor: pointer; }
@@ -905,6 +906,24 @@ const fmtNTD = n => 'NT$ ' + Math.round(n).toLocaleString();
 // 有廣告費的平台（其他平台不填、不顯示廣告費欄位）
 const PLATFORMS_WITH_AD_SPEND = new Set(['生活好麻吉', '玩樂盒子', '森之旅', '維克生活']);
 
+// 平台所屬通路（卡片上的色標用）
+const PLATFORM_MARKETPLACE = {
+  '生活好麻吉': 'shopee', '玩樂盒子': 'shopee', '森之旅': 'shopee', '維克生活': 'shopee',
+  'MOMO': 'momo', 'MO+': 'momo',
+  '酷澎': 'coupang',
+};
+// 通路色票 + 卡片角落顯示用簡稱
+const MARKETPLACE_BADGE = {
+  shopee:  { bg: '#ee4d2d', label: '蝦皮' },
+  momo:    { bg: '#e6007e', label: 'momo' },
+  coupang: { bg: '#3b82f6', label: '酷澎' },
+};
+function marketplaceBadgeHtml(platformName) {
+  const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
+  const s = MARKETPLACE_BADGE[m];
+  return `<div class="stat-icon" style="background:${s.bg};color:white;font-weight:800;font-size:13px;letter-spacing:.5px">${s.label}</div>`;
+}
+
 // 平台分組（用於儀表板上方 4 張總覽卡）
 const PLATFORM_GROUPS = [
   { name: '全賣場總營收', icon: '🏪', color: '#0f172a', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活','MOMO','MO+','酷澎'] },
@@ -1471,42 +1490,109 @@ const App = {
       </div>
     `;
 
-    // 4 張總覽卡：可切換「昨日 / 前日」
-    const summaryRange = this.filter.summaryRange || 'yesterday';   // yesterday | dayBefore
-    const summaryShowStr = summaryRange === 'yesterday' ? inputDateStr : prevDateStr;
-    const summaryCompareStr = summaryRange === 'yesterday' ? prevDateStr : toDateStr(addDays(now, -3));
-    const summaryShowDisplay = summaryShowStr.replace(/-/g, '/');
-    const summaryLabel = summaryRange === 'yesterday' ? '昨日' : '前日';
-    const compareLabel = summaryRange === 'yesterday' ? '前一日' : '再前一日';
+    // 4 張總覽卡：可切換「昨日 / 前日 / 本月 / 上月 / 自訂月份」
+    const summaryRange = this.filter.summaryRange || 'yesterday';
+    const customMonth = this.filter.summaryMonth || toDateStr(now).slice(0, 7);
 
-    const summaryShowOf = (p) => +(p.daily?.[summaryShowStr]) || 0;
-    const summaryCompareOf = (p) => +(p.daily?.[summaryCompareStr]) || 0;
+    // 工具：給一個範圍類型 + 月份字串，回傳該範圍要加總的日期清單 + 標籤
+    const monthDates = (yyyymm) => {
+      const [y, m] = yyyymm.split('-').map(Number);
+      const firstDay = new Date(y, m - 1, 1);
+      const lastDay = new Date(y, m, 0);   // 該月最後一天
+      const limit = toDateStr(addDays(now, -1));  // 不超過昨日
+      const arr = [];
+      for (let d = new Date(firstDay); toDateStr(d) <= toDateStr(lastDay); d = addDays(d, 1)) {
+        const s = toDateStr(d);
+        if (s <= limit) arr.push(s);
+      }
+      return arr;
+    };
+    const buildRange = (key) => {
+      if (key === 'yesterday') {
+        return {
+          label: '昨日',
+          showDates: [inputDateStr],
+          compareDates: [prevDateStr],
+          compareLabel: '前一日',
+        };
+      }
+      if (key === 'dayBefore') {
+        return {
+          label: '前日',
+          showDates: [prevDateStr],
+          compareDates: [toDateStr(addDays(now, -3))],
+          compareLabel: '再前一日',
+        };
+      }
+      if (key === 'thisMonth') {
+        const ms = toDateStr(now).slice(0, 7);
+        const prevMs = toDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
+        return {
+          label: `${ms.replace('-', '/')} 本月`,
+          showDates: monthDates(ms),
+          compareDates: monthDates(prevMs),
+          compareLabel: '上月',
+        };
+      }
+      if (key === 'lastMonth') {
+        const ms = toDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
+        const prevMs = toDateStr(new Date(now.getFullYear(), now.getMonth() - 2, 1)).slice(0, 7);
+        return {
+          label: `${ms.replace('-', '/')} 上月`,
+          showDates: monthDates(ms),
+          compareDates: monthDates(prevMs),
+          compareLabel: '再上一月',
+        };
+      }
+      // customMonth
+      const [yy, mm] = customMonth.split('-').map(Number);
+      const prevDate = new Date(yy, mm - 2, 1);
+      const prevMs = toDateStr(prevDate).slice(0, 7);
+      return {
+        label: `${customMonth.replace('-', '/')}`,
+        showDates: monthDates(customMonth),
+        compareDates: monthDates(prevMs),
+        compareLabel: '前一月',
+      };
+    };
+    const rangeInfo = buildRange(summaryRange);
+    const sumOver = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
 
     const summaryPills = `
-      <div id="summary-pills" style="display:flex;gap:6px;margin-bottom:12px;align-items:center">
-        <span style="font-size:13px;color:var(--text-muted);margin-right:4px">日期</span>
+      <div id="summary-pills" style="display:flex;gap:6px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:13px;color:var(--text-muted);margin-right:4px;font-weight:600">日期</span>
         <button class="pill ${summaryRange === 'yesterday' ? 'active' : ''}" data-summary-range="yesterday"
-          style="padding:6px 14px;font-size:12px">昨日 (${inputDateStr.replace(/-/g, '/')})</button>
+          style="padding:6px 14px;font-size:12px;font-weight:600">昨日 (${inputDateStr.replace(/-/g, '/')})</button>
         <button class="pill ${summaryRange === 'dayBefore' ? 'active' : ''}" data-summary-range="dayBefore"
-          style="padding:6px 14px;font-size:12px">前日 (${prevDateStr.replace(/-/g, '/')})</button>
+          style="padding:6px 14px;font-size:12px;font-weight:600">前日 (${prevDateStr.replace(/-/g, '/')})</button>
+        <span style="width:1px;height:18px;background:var(--border);margin:0 4px"></span>
+        <button class="pill ${summaryRange === 'thisMonth' ? 'active' : ''}" data-summary-range="thisMonth"
+          style="padding:6px 14px;font-size:12px;font-weight:600">本月</button>
+        <button class="pill ${summaryRange === 'lastMonth' ? 'active' : ''}" data-summary-range="lastMonth"
+          style="padding:6px 14px;font-size:12px;font-weight:600">上月</button>
+        <span style="margin-left:4px;display:inline-flex;align-items:center;gap:4px">
+          <span style="font-size:12px;color:var(--text-muted);font-weight:600">選月份：</span>
+          <input type="month" id="summary-custom-month" value="${customMonth}" max="${toDateStr(now).slice(0,7)}"
+            style="padding:5px 10px;border:1px solid ${summaryRange === 'customMonth' ? 'var(--primary)' : 'var(--border)'};border-radius:999px;font-size:12px;font-family:inherit;background:${summaryRange === 'customMonth' ? 'var(--primary-soft)' : 'var(--surface)'}">
+        </span>
       </div>
     `;
 
     const summaryCards = PLATFORM_GROUPS.map(g => {
       const members = platforms.filter(p => g.members.includes(p.name));
-      const cur  = members.reduce((s, p) => s + summaryShowOf(p), 0);
-      const prev = members.reduce((s, p) => s + summaryCompareOf(p), 0);
+      const cur  = members.reduce((s, p) => s + sumOver(p, rangeInfo.showDates), 0);
+      const prev = members.reduce((s, p) => s + sumOver(p, rangeInfo.compareDates), 0);
       const d    = prev > 0 ? ((cur / prev) - 1) * 100 : 0;
       return `
         <div class="stat-card" style="border-top:3px solid ${g.color};background:${g.color}06">
           <div class="stat-icon" style="background:${g.color}22;color:${g.color}">${g.icon}</div>
-          <div class="stat-label" style="font-weight:600">${escapeHtml(g.name)}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin:2px 0 4px">${summaryLabel}</div>
-          <div class="stat-value" style="font-size:22px;color:${g.color}">${fmtNTD(cur)}</div>
-          <div class="stat-meta">
+          <div class="stat-label" style="font-weight:700">${escapeHtml(g.name)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin:2px 0 4px;font-weight:500">${escapeHtml(rangeInfo.label)}</div>
+          <div class="stat-value" style="font-size:22px;color:${g.color};font-weight:800">${fmtNTD(cur)}</div>
+          <div class="stat-meta" style="font-weight:500">
             ${d >= 0
               ? `<span class="up">↑ ${d.toFixed(1)}%</span>`
-              : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`} 較${compareLabel}
+              : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`} 較${escapeHtml(rangeInfo.compareLabel)}
           </div>
         </div>
       `;
@@ -1522,28 +1608,28 @@ const App = {
         <div class="stat-card" style="position:relative">
           <button class="icon-btn" title="編輯歷史資料" onclick="App.openPlatformModal(${i})"
             style="position:absolute;top:10px;right:10px">✏️</button>
-          <div class="stat-icon" style="background:${p.color}22;color:${p.color}">${p.icon}</div>
-          <div class="stat-label" style="margin-bottom:10px">${escapeHtml(p.name)}</div>
-          <div style="margin-bottom:6px">
-            <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">營收 NT$</div>
+          ${marketplaceBadgeHtml(p.name)}
+          <div class="stat-label" style="margin-bottom:12px;font-weight:600;font-size:14px">${escapeHtml(p.name)}</div>
+          <div style="margin-bottom:8px">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:5px;letter-spacing:.05em;font-weight:600">營收 NT$</div>
             <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" value="${td || ''}" placeholder="0" onfocus="this.select()"
-              style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box">
+              style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;letter-spacing:-0.01em">
           </div>
           ${hasAds ? (() => {
             const roas = (td > 0 && inputAds > 0) ? (td / inputAds).toFixed(2) : '—';
             return `
-              <div style="margin-bottom:6px">
-                <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">廣告費 NT$</div>
+              <div style="margin-bottom:8px">
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:5px;letter-spacing:.05em;font-weight:600">廣告費 NT$</div>
                 <input type="number" min="0" step="1" class="card-ads" data-idx="${i}" value="${inputAds || ''}" placeholder="0" onfocus="this.select()"
-                  style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box">
+                  style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box">
               </div>
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:${p.color}14;border-radius:6px;margin-bottom:6px">
-                <span style="font-size:11px;color:var(--text-muted);letter-spacing:.05em">ROAS</span>
-                <span class="card-roas" data-idx="${i}" style="font-weight:700;font-variant-numeric:tabular-nums;color:${p.color};font-size:14px">${roas}</span>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:${p.color}14;border-radius:6px;margin-bottom:8px">
+                <span style="font-size:12px;color:var(--text-muted);letter-spacing:.05em;font-weight:600">ROAS</span>
+                <span class="card-roas" data-idx="${i}" style="font-weight:700;font-variant-numeric:tabular-nums;color:${p.color};font-size:16px">${roas}</span>
               </div>
             `;
           })() : ''}
-          <div class="stat-meta" style="margin-top:6px">
+          <div class="stat-meta" style="margin-top:8px;font-weight:500">
             ${delta >= 0
               ? `<span class="up">↑ ${delta.toFixed(1)}%</span>`
               : `<span class="down">↓ ${Math.abs(delta).toFixed(1)}%</span>`} 較前一日
@@ -1880,13 +1966,22 @@ const App = {
         this.render();
       });
     });
-    // 總覽卡日期切換：昨日 / 前日
+    // 總覽卡日期切換：昨日 / 前日 / 本月 / 上月
     document.querySelectorAll('#summary-pills [data-summary-range]').forEach(btn => {
       btn.addEventListener('click', () => {
         this.filter.summaryRange = btn.dataset.summaryRange;
         this.render();
       });
     });
+    // 自訂月份 picker
+    const monthPicker = document.getElementById('summary-custom-month');
+    if (monthPicker) {
+      monthPicker.addEventListener('change', () => {
+        this.filter.summaryMonth = monthPicker.value;
+        this.filter.summaryRange = 'customMonth';
+        this.render();
+      });
+    }
   },
 
   /* ============================================================
