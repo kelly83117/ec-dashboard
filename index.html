@@ -1415,13 +1415,13 @@ const App = {
           <div class="stat-icon" style="background:${p.color}22;color:${p.color}">${p.icon}</div>
           <div class="stat-label" style="margin-bottom:10px">${escapeHtml(p.name)}</div>
           <div style="margin-bottom:6px">
-            <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">昨日營收 NT$</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">營收 NT$</div>
             <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" value="${td || ''}" placeholder="0"
               style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box">
           </div>
           ${hasAds ? `
             <div style="margin-bottom:6px">
-              <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">昨日廣告費 NT$</div>
+              <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">廣告費 NT$</div>
               <input type="number" min="0" step="1" class="card-ads" data-idx="${i}" value="${inputAds || ''}" placeholder="0"
                 style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box">
             </div>
@@ -1429,7 +1429,7 @@ const App = {
           <div class="stat-meta" style="margin-top:6px">
             ${delta >= 0
               ? `<span class="up">↑ ${delta.toFixed(1)}%</span>`
-              : `<span class="down">↓ ${Math.abs(delta).toFixed(1)}%</span>`} 較前日
+              : `<span class="down">↓ ${Math.abs(delta).toFixed(1)}%</span>`} 較前一日
           </div>
         </div>
       `;
@@ -1438,7 +1438,7 @@ const App = {
     return `
       <div class="page-header">
         <h2>儀表板首頁 <span class="live-dot">即時資料</span></h2>
-        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　資料日期 ${inputDateDisplay}（昨日）　·　昨日總營收 <strong style="color:var(--text)">${fmtNTD(inputTotal)}</strong> ${overallDelta >= 0 ? `<span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span>` : `<span class="down" style="margin-left:6px">↓ ${Math.abs(overallDelta).toFixed(1)}%</span>`}　·　<span style="color:var(--text-muted);font-size:13px">直接點卡片上的數字框輸入昨日資料，移開游標自動儲存</span></p>
+        <p>歡迎回來，${escapeHtml(this.currentUser.name)}　·　${inputDateDisplay} 總營收 <strong style="color:var(--text)">${fmtNTD(inputTotal)}</strong> ${overallDelta >= 0 ? `<span class="up" style="margin-left:6px">↑ ${overallDelta.toFixed(1)}%</span>` : `<span class="down" style="margin-left:6px">↓ ${Math.abs(overallDelta).toFixed(1)}%</span>`}　·　<span style="color:var(--text-muted);font-size:13px">直接點卡片上的數字框輸入，移開游標自動儲存</span></p>
       </div>
       <div class="stat-grid">${platformCards}</div>
       ${this.dailyLineChartHtml(platforms, 30)}
