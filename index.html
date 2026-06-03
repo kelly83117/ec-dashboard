@@ -914,15 +914,17 @@ const PLATFORM_MARKETPLACE = {
 };
 // 通路 logo 圖檔（檔案放在 logos/ 資料夾）
 const MARKETPLACE_BADGE = {
-  shopee:  'logos/shopee.png',
-  momo:    'logos/momo.png',
-  coupang: 'logos/coupang.png',
+  shopee:  { src: 'logos/shopee.png',  name: '蝦皮' },
+  momo:    { src: 'logos/momo.png',    name: 'MOMO' },
+  coupang: { src: 'logos/coupang.png', name: '酷澎' },
 };
 function marketplaceBadgeHtml(platformName) {
   const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
-  const src = MARKETPLACE_BADGE[m];
-  return `<div class="stat-icon" style="background:white;padding:0;overflow:hidden">
-    <img src="${src}" alt="${m}" style="width:100%;height:100%;object-fit:contain;display:block">
+  const s = MARKETPLACE_BADGE[m];
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    <img src="${s.src}" alt="${s.name}"
+      style="width:36px;height:36px;object-fit:contain;border-radius:8px;flex-shrink:0">
+    <span style="font-size:18px;font-weight:900;color:var(--text);letter-spacing:.5px">${s.name}</span>
   </div>`;
 }
 
