@@ -1409,6 +1409,61 @@ const App = {
     const prevTotal  = platforms.reduce((s, p) => s + prevOf(p),  0);
     const overallDelta = prevTotal > 0 ? (inputTotal / prevTotal - 1) * 100 : 0;
 
+    // 當月總營收（從本月 1 號到昨天的累積）
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthStartStr = toDateStr(monthStart);
+    const yMonth = now.getFullYear();
+    const mMonth = now.getMonth() + 1;
+    let monthTotal = 0;
+    let daysCounted = 0;
+    const seenDays = new Set();
+    platforms.forEach(p => {
+      Object.keys(p.daily || {}).forEach(date => {
+        if (date >= monthStartStr && date <= inputDateStr) {
+          monthTotal += +p.daily[date] || 0;
+          seenDays.add(date);
+        }
+      });
+    });
+    daysCounted = seenDays.size;
+    const monthAvg = daysCounted > 0 ? monthTotal / daysCounted : 0;
+
+    // 計算各群組的本月小計
+    const monthGroupTotals = PLATFORM_GROUPS.map(g => {
+      const members = platforms.filter(p => g.members.includes(p.name));
+      let total = 0;
+      members.forEach(p => {
+        Object.keys(p.daily || {}).forEach(date => {
+          if (date >= monthStartStr && date <= inputDateStr) {
+            total += +p.daily[date] || 0;
+          }
+        });
+      });
+      return { ...g, total };
+    });
+
+    const monthBlock = `
+      <div style="background:linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #ec4899 100%);color:white;border-radius:var(--radius);padding:22px 26px;margin-bottom:16px;box-shadow:0 10px 25px -10px rgba(79,70,229,0.4);overflow:hidden;position:relative">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;position:relative">
+          <div>
+            <div style="font-size:13px;opacity:0.85;margin-bottom:4px;letter-spacing:.05em">📅 ${yMonth} 年 ${mMonth} 月 · 當月總營收</div>
+            <div style="font-size:34px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.02em">${fmtNTD(monthTotal)}</div>
+            <div style="font-size:12px;opacity:0.75;margin-top:6px">
+              累積 ${daysCounted} 天 · 日均 ${fmtNTD(monthAvg)}
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+            ${monthGroupTotals.slice(1).map(g => `
+              <div style="background:rgba(255,255,255,0.12);backdrop-filter:blur(8px);padding:10px 16px;border-radius:10px;min-width:140px">
+                <div style="font-size:11px;opacity:0.85;margin-bottom:2px">${escapeHtml(g.name.replace('總營收','').replace('營收',''))}</div>
+                <div style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">${fmtNTD(g.total)}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+
     // 4 張總覽卡：可切換「昨日 / 前日」
     const summaryRange = this.filter.summaryRange || 'yesterday';   // yesterday | dayBefore
     const summaryShowStr = summaryRange === 'yesterday' ? inputDateStr : prevDateStr;
@@ -1495,6 +1550,7 @@ const App = {
         <h2>儀表板首頁 <span class="live-dot">即時資料</span></h2>
         <p>歡迎回來，${escapeHtml(this.currentUser.name)}　·　${inputDateDisplay}　·　<span style="color:var(--text-muted);font-size:13px">直接點卡片上的數字框輸入，移開游標自動儲存</span></p>
       </div>
+      ${monthBlock}
       ${summaryPills}
       <div class="stat-grid" style="grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));margin-bottom:16px">${summaryCards}</div>
       <div class="stat-grid">${platformCards}</div>
