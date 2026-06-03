@@ -1381,14 +1381,13 @@ const App = {
    *  儀表板首頁
    * ============================================================ */
   viewDashboard() {
-    // 讀取 → 遷移舊 schema → 補齊最近 90 天 → 視需要寫回
+    // 讀取 → 遷移舊 schema → 視需要寫回
+    // 不再自動補空白日子（會產生假數字）；空白就是空白，等使用者輸入
     let platforms = Store.get(Store.KEYS.platforms, null);
     if (!platforms) platforms = JSON.parse(JSON.stringify(PLATFORMS));
     let migrated = migratePlatforms(platforms);
     const wasMigrated = migrated !== platforms;
-    if (wasMigrated) platforms = migrated;
-    const extended = ensureDailyRecent(platforms, 90);
-    if (wasMigrated || extended) Store.set(Store.KEYS.platforms, platforms);
+    if (wasMigrated) { platforms = migrated; Store.set(Store.KEYS.platforms, platforms); }
 
     const now = new Date();
     // 行銷每天填的是「昨日」資料，所以輸入日期 = 昨天，比較對象 = 前天
@@ -1416,13 +1415,13 @@ const App = {
           <div class="stat-label" style="margin-bottom:10px">${escapeHtml(p.name)}</div>
           <div style="margin-bottom:6px">
             <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">營收 NT$</div>
-            <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" value="${td || ''}" placeholder="0"
+            <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" value="${td || ''}" placeholder="0" onfocus="this.select()"
               style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box">
           </div>
           ${hasAds ? `
             <div style="margin-bottom:6px">
               <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;letter-spacing:.05em">廣告費 NT$</div>
-              <input type="number" min="0" step="1" class="card-ads" data-idx="${i}" value="${inputAds || ''}" placeholder="0"
+              <input type="number" min="0" step="1" class="card-ads" data-idx="${i}" value="${inputAds || ''}" placeholder="0" onfocus="this.select()"
                 style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box">
             </div>
           ` : ''}
@@ -1729,7 +1728,6 @@ const App = {
     let platforms = Store.get(Store.KEYS.platforms, null);
     if (!platforms) platforms = JSON.parse(JSON.stringify(PLATFORMS));
     platforms = migratePlatforms(platforms);
-    ensureDailyRecent(platforms, 90);
     platforms = platforms.map(p => ({ ...p, daily: { ...(p.daily || {}) } }));
 
     const p = platforms[idx];
