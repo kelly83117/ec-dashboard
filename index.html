@@ -1443,20 +1443,20 @@ const App = {
     });
 
     const monthBlock = `
-      <div style="background:linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #ec4899 100%);color:white;border-radius:var(--radius);padding:22px 26px;margin-bottom:16px;box-shadow:0 10px 25px -10px rgba(79,70,229,0.4);overflow:hidden;position:relative">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;position:relative">
-          <div>
-            <div style="font-size:13px;opacity:0.85;margin-bottom:4px;letter-spacing:.05em">📅 ${yMonth} 年 ${mMonth} 月 · 當月總營收</div>
-            <div style="font-size:34px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.02em">${fmtNTD(monthTotal)}</div>
-            <div style="font-size:12px;opacity:0.75;margin-top:6px">
-              累積 ${daysCounted} 天 · 日均 ${fmtNTD(monthAvg)}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:22px 26px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:32px;flex-wrap:wrap">
+          <div style="min-width:240px">
+            <div style="font-size:12px;color:var(--text-muted);letter-spacing:.05em;margin-bottom:8px;text-transform:uppercase">${yMonth} 年 ${mMonth} 月 · 當月總營收</div>
+            <div style="font-size:34px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-0.02em;line-height:1.1">${fmtNTD(monthTotal)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:8px">
+              累積 ${daysCounted} 天　·　日均 ${fmtNTD(monthAvg)}
             </div>
           </div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+          <div style="display:flex;gap:32px;flex-wrap:wrap;justify-content:flex-end;flex:1">
             ${monthGroupTotals.slice(1).map(g => `
-              <div style="background:rgba(255,255,255,0.12);backdrop-filter:blur(8px);padding:10px 16px;border-radius:10px;min-width:140px">
-                <div style="font-size:11px;opacity:0.85;margin-bottom:2px">${escapeHtml(g.name.replace('總營收','').replace('營收',''))}</div>
-                <div style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">${fmtNTD(g.total)}</div>
+              <div style="text-align:right;min-width:120px">
+                <div style="font-size:11px;color:var(--text-muted);letter-spacing:.05em;margin-bottom:4px;text-transform:uppercase">${escapeHtml(g.name.replace('總營收','').replace('營收','').trim())}</div>
+                <div style="font-size:20px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-0.02em">${fmtNTD(g.total)}</div>
               </div>
             `).join('')}
           </div>
