@@ -921,10 +921,10 @@ const MARKETPLACE_BADGE = {
 function marketplaceBadgeHtml(platformName) {
   const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
   const s = MARKETPLACE_BADGE[m];
-  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
     <img src="${s.src}" alt="${s.name}"
       style="width:36px;height:36px;object-fit:contain;border-radius:8px;flex-shrink:0">
-    <span style="font-size:18px;font-weight:900;color:var(--text);letter-spacing:.5px">${s.name}</span>
+    <span style="font-size:16px;font-weight:800;color:var(--text);letter-spacing:.3px">${escapeHtml(platformName)}</span>
   </div>`;
 }
 
@@ -1613,7 +1613,6 @@ const App = {
           <button class="icon-btn" title="編輯歷史資料" onclick="App.openPlatformModal(${i})"
             style="position:absolute;top:10px;right:10px">✏️</button>
           ${marketplaceBadgeHtml(p.name)}
-          <div class="stat-label" style="margin-bottom:12px;font-weight:600;font-size:14px">${escapeHtml(p.name)}</div>
           <div style="margin-bottom:8px">
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:5px;letter-spacing:.05em;font-weight:600">營收 NT$</div>
             <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" value="${td || ''}" placeholder="0" onfocus="this.select()"
