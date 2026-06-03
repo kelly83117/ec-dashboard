@@ -1679,7 +1679,7 @@ const App = {
 
       const adsCell = hasAds
         ? `<input type="number" min="0" step="1" class="card-ads" data-idx="${i}" data-original="${inputAds || ''}" value="${inputAds || ''}" placeholder="0" onfocus="this.select()"
-              style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;background:white;height:28px">`
+              style="width:110px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;background:white;height:28px">`
         : '<span style="color:var(--text-muted);font-size:13px">—</span>';
 
       const roasCell = hasAds
@@ -1694,11 +1694,11 @@ const App = {
               <span style="font-weight:600;font-size:13px">${escapeHtml(p.name)}</span>
             </div>
           </td>
-          <td style="padding:3px 8px">
+          <td style="padding:3px 8px;text-align:right">
             <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" data-original="${td || ''}" value="${td || ''}" placeholder="0" onfocus="this.select()"
-              style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;background:white;height:28px">
+              style="width:130px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;background:white;height:28px">
           </td>
-          <td style="padding:3px 8px">${adsCell}</td>
+          <td style="padding:3px 8px;text-align:right">${adsCell}</td>
           <td style="padding:3px 8px;text-align:center">${roasCell}</td>
           <td style="padding:3px 8px;white-space:nowrap;font-size:12px">${deltaCell}</td>
           <td style="padding:3px 6px;white-space:nowrap;text-align:right">
@@ -1770,15 +1770,15 @@ const App = {
           </div>
         </div>
         <div class="table-wrap">
-          <table style="border-collapse:separate;border-spacing:0;width:100%">
+          <table style="border-collapse:separate;border-spacing:0;width:100%;table-layout:fixed">
             <thead>
               <tr style="background:var(--bg)">
-                <th style="padding:5px 10px;text-align:left;font-size:11px">賣場</th>
-                <th style="padding:5px 10px;text-align:right;font-size:11px">營收 NT$</th>
-                <th style="padding:5px 10px;text-align:right;font-size:11px">廣告費</th>
-                <th style="padding:5px 10px;text-align:center;font-size:11px">ROAS</th>
-                <th style="padding:5px 10px;text-align:left;font-size:11px">較前一日</th>
-                <th style="padding:5px 6px;text-align:right;width:80px"></th>
+                <th style="padding:5px 10px;text-align:left;font-size:11px;width:auto">賣場</th>
+                <th style="padding:5px 10px;text-align:right;font-size:11px;width:150px">營收 NT$</th>
+                <th style="padding:5px 10px;text-align:right;font-size:11px;width:130px">廣告費</th>
+                <th style="padding:5px 10px;text-align:center;font-size:11px;width:70px">ROAS</th>
+                <th style="padding:5px 10px;text-align:left;font-size:11px;width:90px">較前一日</th>
+                <th style="padding:5px 6px;text-align:right;width:76px"></th>
               </tr>
             </thead>
             <tbody>
@@ -1797,7 +1797,7 @@ const App = {
       </div>
       ${summaryPills}
       <div class="stat-grid" style="grid-template-columns:repeat(4, 1fr);margin-bottom:12px;gap:10px">${summaryCards}</div>
-      <div style="display:grid;grid-template-columns:1.45fr 1fr;gap:14px;align-items:stretch">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch">
         <div style="display:flex">${revenueTableHtml}</div>
         <div style="display:flex">${this.dailyLineChartHtml(platforms)}</div>
       </div>
