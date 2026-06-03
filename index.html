@@ -912,16 +912,16 @@ const PLATFORM_MARKETPLACE = {
   'MOMO': 'momo', 'MO+': 'momo',
   '酷澎': 'coupang',
 };
-// 通路色票 + 卡片角落顯示用簡稱
+// 通路色票 + 卡片角落顯示用色標
 const MARKETPLACE_BADGE = {
-  shopee:  { bg: '#ee4d2d', label: '蝦皮' },
-  momo:    { bg: '#e6007e', label: 'momo' },
-  coupang: { bg: '#3b82f6', label: '酷澎' },
+  shopee:  { bg: '#ee4d2d', label: '🛍️', fontSize: '22px' },
+  momo:    { bg: '#e6007e', label: 'M',  fontSize: '24px' },
+  coupang: { bg: '#3b82f6', label: '🚀', fontSize: '22px' },
 };
 function marketplaceBadgeHtml(platformName) {
   const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
   const s = MARKETPLACE_BADGE[m];
-  return `<div class="stat-icon" style="background:${s.bg};color:white;font-weight:800;font-size:13px;letter-spacing:.5px">${s.label}</div>`;
+  return `<div class="stat-icon" style="background:${s.bg};color:white;font-weight:900;font-size:${s.fontSize};line-height:1">${s.label}</div>`;
 }
 
 // 平台分組（用於儀表板上方 4 張總覽卡）
