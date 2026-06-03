@@ -1654,13 +1654,13 @@ const App = {
       const hasAds = PLATFORMS_WITH_AD_SPEND.has(p.name);
       const inputAds = +(p.dailyAdSpend?.[inputDateStr]) || 0;
       return `
-        <div class="stat-card" style="position:relative">
+        <div class="stat-card" data-card-idx="${i}" style="position:relative">
           <button class="icon-btn" title="編輯歷史資料" onclick="App.openPlatformModal(${i})"
             style="position:absolute;top:10px;right:10px">✏️</button>
           ${marketplaceBadgeHtml(p.name)}
           <div style="margin-bottom:10px">
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;font-weight:600">營收 NT$</div>
-            <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" value="${td || ''}" placeholder="0" onfocus="this.select()"
+            <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" data-original="${td || ''}" value="${td || ''}" placeholder="0" onfocus="this.select()"
               style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:8px;font-size:28px;font-weight:800;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;letter-spacing:-0.02em;line-height:1.1">
           </div>
           ${hasAds ? (() => {
@@ -1668,7 +1668,7 @@ const App = {
             return `
               <div style="margin-bottom:10px">
                 <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;letter-spacing:.05em;font-weight:600">廣告費 NT$</div>
-                <input type="number" min="0" step="1" class="card-ads" data-idx="${i}" value="${inputAds || ''}" placeholder="0" onfocus="this.select()"
+                <input type="number" min="0" step="1" class="card-ads" data-idx="${i}" data-original="${inputAds || ''}" value="${inputAds || ''}" placeholder="0" onfocus="this.select()"
                   style="width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:8px;font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;text-align:right;color:var(--text);box-sizing:border-box;line-height:1.1">
               </div>
               <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:${p.color}14;border-radius:6px;margin-bottom:10px">
@@ -1677,11 +1677,15 @@ const App = {
               </div>
             `;
           })() : ''}
-          <div class="stat-meta" style="margin-top:8px;font-weight:500">
+          <div class="stat-meta" style="margin-top:8px;font-weight:500;margin-bottom:10px">
             ${delta >= 0
               ? `<span class="up">↑ ${delta.toFixed(1)}%</span>`
               : `<span class="down">↓ ${Math.abs(delta).toFixed(1)}%</span>`} 較前一日
           </div>
+          <button class="card-confirm" data-idx="${i}" disabled
+            style="width:100%;padding:10px 14px;border:0;border-radius:8px;background:var(--border);color:var(--text-muted);font-size:14px;font-weight:700;cursor:not-allowed;transition:all .15s;letter-spacing:.05em">
+            ✓ 確認儲存
+          </button>
         </div>
       `;
     };
@@ -1701,44 +1705,16 @@ const App = {
       if (items.length === 0) return '';
       const badge = MARKETPLACE_BADGE[m];
       const tint = marketTint[m] || '#6b7280';
-      // 該通路的總計
-      const groupRev = items.reduce((s, { p }) => s + inputOf(p), 0);
-      const groupPrev = items.reduce((s, { p }) => s + prevOf(p), 0);
-      const groupDelta = groupPrev > 0 ? ((groupRev / groupPrev) - 1) * 100 : 0;
-      const adItems = items.filter(({ p }) => PLATFORMS_WITH_AD_SPEND.has(p.name));
-      const groupAds = adItems.reduce((s, { p }) => s + (+(p.dailyAdSpend?.[inputDateStr]) || 0), 0);
-      const groupRoas = groupAds > 0 ? (groupRev / groupAds).toFixed(2) : null;
-
-      const deltaHtml = groupDelta >= 0
-        ? `<span class="up">↑ ${groupDelta.toFixed(1)}%</span>`
-        : `<span class="down">↓ ${Math.abs(groupDelta).toFixed(1)}%</span>`;
-
       const cards = items.map(({ p, i }) => buildPlatformCard(p, i)).join('');
 
       return `
         <div style="margin-bottom:20px">
-          <div style="display:flex;align-items:center;gap:14px;padding:12px 18px;background:linear-gradient(135deg, ${tint}10, ${tint}05);border:1px solid ${tint}33;border-left:4px solid ${tint};border-radius:10px;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:12px;padding:8px 4px;margin-bottom:10px">
             <img src="${badge.src}" alt="${escapeHtml(badge.name)}"
-              style="width:38px;height:38px;border-radius:8px;object-fit:contain;background:white;padding:2px;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
-            <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
-              <span style="font-size:18px;font-weight:800;color:var(--text);letter-spacing:.5px">${escapeHtml(badge.name)}</span>
-              <span style="font-size:12px;color:var(--text-muted);font-weight:500">${items.length} 個賣場</span>
-            </div>
-            <span style="flex:1"></span>
-            <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-              <div style="text-align:right">
-                <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">通路總營收</div>
-                <div style="font-size:18px;font-weight:800;color:${tint};font-variant-numeric:tabular-nums;line-height:1.2">NT$ ${groupRev.toLocaleString()}</div>
-                <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${deltaHtml} 較前一日</div>
-              </div>
-              ${groupRoas !== null ? `
-                <div style="text-align:right;padding-left:18px;border-left:1px solid ${tint}33">
-                  <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">通路 ROAS</div>
-                  <div style="font-size:18px;font-weight:800;color:${tint};font-variant-numeric:tabular-nums;line-height:1.2">${groupRoas}</div>
-                  <div style="font-size:11px;color:var(--text-muted);margin-top:2px">廣告 NT$ ${groupAds.toLocaleString()}</div>
-                </div>
-              ` : ''}
-            </div>
+              style="width:28px;height:28px;border-radius:6px;object-fit:contain;background:white;padding:1px;flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,0.06)">
+            <span style="font-size:15px;font-weight:700;color:var(--text);letter-spacing:.3px">${escapeHtml(badge.name)}</span>
+            <span style="font-size:12px;color:var(--text-muted);font-weight:500">${items.length} 個賣場</span>
+            <span style="flex:1;height:1px;background:${tint}33;margin-left:6px"></span>
           </div>
           <div class="stat-grid">${cards}</div>
         </div>
@@ -2103,34 +2079,62 @@ const App = {
   },
 
   /* ============================================================
-   *  卡片內 inputs（今日營收 + 廣告費）— blur 自動存
+   *  卡片內 inputs（今日營收 + 廣告費）— 需點「確認儲存」才寫入
    * ============================================================ */
   bindCardInputs() {
     // 行銷每天填的是「昨日」的資料，所以寫入日期 = 昨天
     const inputDateStr = toDateStr(addDays(new Date(), -1));
-    const save = (el) => {
-      const idx = +el.dataset.idx;
-      const isRev = el.classList.contains('card-rev');
-      const raw = el.value.trim();
-      const val = raw === '' ? null : +raw;
-      const platforms = Store.get(Store.KEYS.platforms, null);
-      const list = migratePlatforms(platforms ? platforms.map(p => ({ ...p })) : JSON.parse(JSON.stringify(PLATFORMS)));
-      if (!list[idx]) return;
-      if (isRev) {
-        list[idx].daily = list[idx].daily || {};
-        if (val == null || isNaN(val)) delete list[idx].daily[inputDateStr];
-        else list[idx].daily[inputDateStr] = Math.round(val);
-      } else {
-        list[idx].dailyAdSpend = list[idx].dailyAdSpend || {};
-        if (val == null || isNaN(val)) delete list[idx].dailyAdSpend[inputDateStr];
-        else list[idx].dailyAdSpend[inputDateStr] = Math.round(val);
-      }
-      Store.set(Store.KEYS.platforms, list);
-      // 視覺反饋：邊框閃綠
-      el.style.borderColor = 'var(--success)';
-      setTimeout(() => { el.style.borderColor = 'var(--border)'; }, 800);
+
+    // 該卡片的輸入是否有改動
+    const isDirty = (idx) => {
+      const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
+      const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
+      const norm = v => (v == null ? '' : String(v).trim());
+      const revChanged = revEl && norm(revEl.value) !== norm(revEl.dataset.original);
+      const adsChanged = adsEl && norm(adsEl.value) !== norm(adsEl.dataset.original);
+      return revChanged || adsChanged;
     };
-    // 邊打邊更新 ROAS 顯示
+
+    // 切換確認按鈕的可用狀態 + 樣式
+    const refreshButton = (idx) => {
+      const card = document.querySelector(`.stat-card[data-card-idx="${idx}"]`);
+      if (!card) return;
+      const btn = card.querySelector('.card-confirm');
+      const revEl = card.querySelector('.card-rev');
+      const adsEl = card.querySelector('.card-ads');
+      const dirty = isDirty(idx);
+      const color = '#6366f1'; // primary
+      if (dirty) {
+        btn.disabled = false;
+        btn.style.cursor = 'pointer';
+        btn.style.background = color;
+        btn.style.color = 'white';
+        btn.style.boxShadow = `0 2px 8px ${color}40`;
+        btn.textContent = '✓ 確認儲存';
+        // 輸入框邊框變色提醒「未儲存」
+        if (revEl && revEl.value.trim() !== (revEl.dataset.original || '').trim()) {
+          revEl.style.borderColor = '#f59e0b';
+        } else if (revEl) {
+          revEl.style.borderColor = 'var(--border)';
+        }
+        if (adsEl && adsEl.value.trim() !== (adsEl.dataset.original || '').trim()) {
+          adsEl.style.borderColor = '#f59e0b';
+        } else if (adsEl) {
+          adsEl.style.borderColor = 'var(--border)';
+        }
+      } else {
+        btn.disabled = true;
+        btn.style.cursor = 'not-allowed';
+        btn.style.background = 'var(--border)';
+        btn.style.color = 'var(--text-muted)';
+        btn.style.boxShadow = 'none';
+        btn.textContent = '✓ 已儲存';
+        if (revEl) revEl.style.borderColor = 'var(--border)';
+        if (adsEl) adsEl.style.borderColor = 'var(--border)';
+      }
+    };
+
+    // 邊打邊更新 ROAS 顯示（不存檔，只是即時運算）
     const updateRoas = (idx) => {
       const roasEl = document.querySelector(`.card-roas[data-idx="${idx}"]`);
       if (!roasEl) return;
@@ -2140,11 +2144,66 @@ const App = {
       const ads = adsEl ? +adsEl.value : 0;
       roasEl.textContent = (rev > 0 && ads > 0) ? (rev / ads).toFixed(2) : '—';
     };
+
+    // 確認儲存：寫入 store 並更新 original
+    const commit = (idx) => {
+      const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
+      const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
+      const platforms = Store.get(Store.KEYS.platforms, null);
+      const list = migratePlatforms(platforms ? platforms.map(p => ({ ...p })) : JSON.parse(JSON.stringify(PLATFORMS)));
+      if (!list[idx]) return;
+
+      const writeField = (key, val) => {
+        list[idx][key] = list[idx][key] || {};
+        if (val == null || isNaN(val) || val === '') delete list[idx][key][inputDateStr];
+        else list[idx][key][inputDateStr] = Math.round(+val);
+      };
+
+      if (revEl) {
+        const raw = revEl.value.trim();
+        writeField('daily', raw === '' ? null : +raw);
+        revEl.dataset.original = raw;
+      }
+      if (adsEl) {
+        const raw = adsEl.value.trim();
+        writeField('dailyAdSpend', raw === '' ? null : +raw);
+        adsEl.dataset.original = raw;
+      }
+      Store.set(Store.KEYS.platforms, list);
+
+      // 視覺反饋：按鈕短暫顯示「已儲存 ✓」
+      const card = document.querySelector(`.stat-card[data-card-idx="${idx}"]`);
+      const btn = card?.querySelector('.card-confirm');
+      if (btn) {
+        btn.textContent = '✓ 已儲存';
+        btn.style.background = 'var(--success)';
+        btn.style.color = 'white';
+        btn.style.boxShadow = '0 2px 8px rgba(16,185,129,0.4)';
+        setTimeout(() => refreshButton(idx), 1000);
+      }
+      showToast('已儲存', 'success');
+    };
+
+    // 輸入框：邊打邊算 ROAS、切按鈕狀態
     document.querySelectorAll('.card-rev, .card-ads').forEach(el => {
-      el.addEventListener('input', () => updateRoas(+el.dataset.idx));
-      el.addEventListener('blur', () => save(el));
+      const idx = +el.dataset.idx;
+      el.addEventListener('input', () => {
+        updateRoas(idx);
+        refreshButton(idx);
+      });
       el.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (isDirty(idx)) commit(idx);
+        }
+      });
+    });
+
+    // 確認按鈕
+    document.querySelectorAll('.card-confirm').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = +btn.dataset.idx;
+        if (isDirty(idx)) commit(idx);
       });
     });
   },
@@ -3390,7 +3449,7 @@ async function __setupCloud() {
     };
 
     // 訂閱：其他人改了資料，這台會即時更新畫面
-    // 但如果使用者正在 input 裡打字，跳過重繪避免焦點被搶走
+    // 但如果使用者正在 input 裡打字、或有尚未確認儲存的更動，跳過重繪避免覆蓋
     cs.subscribe((data) => {
       const next = data || {};
       delete next[Store.KEYS.session];  // 不接受雲端的 session
@@ -3401,7 +3460,12 @@ async function __setupCloud() {
         active.classList.contains('card-rev') || active.classList.contains('card-ads') ||
         active.classList.contains('entry-rev') || active.classList.contains('entry-ads')
       );
-      if (!inOurInput) App.render();
+      // 任一卡片有未儲存更動就不要重繪（避免把使用者打到一半的數字蓋掉）
+      const hasUnsavedChanges = Array.from(document.querySelectorAll('.card-rev, .card-ads')).some(el => {
+        const norm = v => (v == null ? '' : String(v).trim());
+        return norm(el.value) !== norm(el.dataset.original);
+      });
+      if (!inOurInput && !hasUnsavedChanges) App.render();
     });
   } catch (e) {
     console.error('Cloud setup failed, falling back to localStorage', e);
