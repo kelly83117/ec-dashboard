@@ -1378,7 +1378,7 @@ const App = {
       return;
     }
     switch (this.route) {
-      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); break;
+      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip(); break;
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
       default: main.innerHTML = this.viewEmployees(); this.bindFilterBar();
@@ -1554,78 +1554,31 @@ const App = {
       ${summaryPills}
       <div class="stat-grid" style="grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));margin-bottom:16px">${summaryCards}</div>
       <div class="stat-grid">${platformCards}</div>
-      ${this.dailyLineChartHtml(platforms, 30)}
+      ${this.dailyLineChartHtml(platforms)}
     `;
   },
 
   /* 每日營收曲線（近 N 天） */
-  dailyLineChartHtml(platforms, days) {
-    // 曲線結束日 = 昨天（最新有資料的一天，今日尚未輸入）
-    const endDate = addDays(new Date(), -1);
+  dailyLineChartHtml(platforms /* days param ignored now */) {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endDate = addDays(now, -1);
+    const yMonth = now.getFullYear();
+    const mMonth = now.getMonth() + 1;
+    const endStr = toDateStr(endDate);
+
+    // 以本月為主：從本月 1 號到昨日（最新有資料的一天）
     const dates = [];
-    for (let i = days - 1; i >= 0; i--) dates.push(toDateStr(addDays(endDate, -i)));
-
-    // 篩選：可以指定只看其中一個平台（this.filter.chartPlatform）
-    const activeName = this.filter.chartPlatform || null;
-    const visiblePlatforms = activeName
-      ? platforms.filter(p => p.name === activeName)
-      : platforms;
-
-    const series = visiblePlatforms.map(p => ({
-      name: p.name,
-      color: p.color,
-      icon: p.icon,
-      values: dates.map(d => +(p.daily && p.daily[d]) || 0),
-    }));
-    const maxV = Math.max(1, ...series.flatMap(s => s.values));
-
-    const W = 1000, H = 320;
-    const padL = 70, padR = 20, padT = 16, padB = 36;
-    const cw = W - padL - padR;
-    const ch = H - padT - padB;
-    const xStep = cw / Math.max(1, dates.length - 1);
-
-    // Y 軸格線與刻度（5 段）
-    const yTicks = [];
-    for (let i = 0; i <= 4; i++) {
-      const y = padT + ch - (i / 4) * ch;
-      const v = (maxV / 4) * i;
-      yTicks.push(`
-        <line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="#e2e8f0" stroke-dasharray="3,3"/>
-        <text x="${padL - 10}" y="${y + 4}" font-size="11" fill="#94a3b8" text-anchor="end">${this.fmtTick(v)}</text>
-      `);
+    for (let d = new Date(monthStart); toDateStr(d) <= endStr; d = addDays(d, 1)) {
+      dates.push(toDateStr(d));
     }
 
-    // X 軸日期標籤（顯示 8 個左右）
-    const xLabelEvery = Math.max(1, Math.round(dates.length / 8));
-    const xLabels = dates.map((d, i) => {
-      if (i % xLabelEvery !== 0 && i !== dates.length - 1) return '';
-      const x = padL + i * xStep;
-      const label = d.slice(5).replace('-', '/');
-      return `<text x="${x}" y="${H - padB + 18}" font-size="11" fill="#64748b" text-anchor="middle">${label}</text>`;
-    }).join('');
+    // 切換：null = 總計（全部加總），string = 單一平台
+    const activeName = this.filter.chartPlatform || null;
 
-    // 折線 + 端點圓
-    const polylines = series.map(s => {
-      const pts = s.values.map((v, i) => {
-        const x = padL + i * xStep;
-        const y = padT + ch - (v / maxV) * ch;
-        return `${x},${y}`;
-      }).join(' ');
-      // 單一平台模式時加上端點圓，數據點更明顯
-      const dots = (series.length === 1)
-        ? s.values.map((v, i) => {
-            const x = padL + i * xStep;
-            const y = padT + ch - (v / maxV) * ch;
-            return `<circle cx="${x}" cy="${y}" r="3" fill="${s.color}"><title>${escapeHtml(s.name)} ${dates[i]}: NT$ ${Math.round(v).toLocaleString()}</title></circle>`;
-          }).join('')
-        : '';
-      return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="${series.length === 1 ? 3 : 2}" stroke-linejoin="round" stroke-linecap="round" />${dots}`;
-    }).join('');
-
-    // 平台圖例（含「全部」+ 7 個平台）；點擊切換 chartPlatform
+    // 圖例（總計 + 7 個平台）
     const allPill = `
-      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:${activeName === null ? 'var(--primary)' : 'var(--bg)'};border:1px solid ${activeName === null ? 'var(--primary)' : 'var(--border)'};border-radius:999px;font-size:12px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">全部</button>
+      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:${activeName === null ? '#0f172a' : 'var(--bg)'};border:1px solid ${activeName === null ? '#0f172a' : 'var(--border)'};border-radius:999px;font-size:12px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">📊 總計</button>
     `;
     const platformPills = platforms.map(p => {
       const isActive = activeName === p.name;
@@ -1639,22 +1592,161 @@ const App = {
       `;
     }).join('');
 
+    // 計算每日值
+    let values, lineColor, lineLabel;
+    if (activeName) {
+      const p = platforms.find(x => x.name === activeName);
+      if (p) {
+        values = dates.map(d => +(p.daily && p.daily[d]) || 0);
+        lineColor = p.color;
+        lineLabel = `${p.icon} ${p.name}`;
+      } else {
+        values = dates.map(d => platforms.reduce((s, pp) => s + (+pp.daily?.[d] || 0), 0));
+        lineColor = '#0f172a';
+        lineLabel = '總計';
+      }
+    } else {
+      values = dates.map(d => platforms.reduce((s, pp) => s + (+pp.daily?.[d] || 0), 0));
+      lineColor = '#0f172a';
+      lineLabel = '總計';
+    }
+
+    // 沒資料的空狀態
+    if (dates.length === 0) {
+      return `
+        <div class="chart-card" style="margin-top:16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+            <h3 style="margin:0">${yMonth} 年 ${mMonth} 月每日營收</h3>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${allPill}${platformPills}</div>
+          <div style="text-align:center;padding:60px 20px;color:var(--text-muted);font-size:14px">
+            本月還沒有資料 — 等行銷團隊進系統填入昨日數字後，這裡會顯示曲線
+          </div>
+        </div>
+      `;
+    }
+
+    const maxV = Math.max(1, ...values);
+
+    const W = 1000, H = 280;
+    const padL = 60, padR = 20, padT = 20, padB = 32;
+    const cw = W - padL - padR;
+    const ch = H - padT - padB;
+    const xStep = dates.length > 1 ? cw / (dates.length - 1) : cw / 2;
+
+    // Y 軸刻度
+    const yTicks = [];
+    for (let i = 0; i <= 4; i++) {
+      const y = padT + ch - (i / 4) * ch;
+      const v = (maxV / 4) * i;
+      yTicks.push(`
+        <line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="#e2e8f0" stroke-dasharray="3,3"/>
+        <text x="${padL - 10}" y="${y + 4}" font-size="11" fill="#94a3b8" text-anchor="end">${this.fmtTick(v)}</text>
+      `);
+    }
+
+    // X 軸日期標籤
+    const xLabelEvery = Math.max(1, Math.round(dates.length / 8));
+    const xLabels = dates.map((d, i) => {
+      if (i % xLabelEvery !== 0 && i !== dates.length - 1 && i !== 0) return '';
+      const x = padL + i * xStep;
+      const label = d.slice(5).replace('-', '/');
+      return `<text x="${x}" y="${H - padB + 18}" font-size="11" fill="#64748b" text-anchor="middle">${label}</text>`;
+    }).join('');
+
+    // 折線點
+    const points = values.map((v, i) => {
+      const x = padL + i * xStep;
+      const y = padT + ch - (v / maxV) * ch;
+      return `${x},${y}`;
+    }).join(' ');
+
+    // 資料點圓圈（永遠顯示小圓）
+    const circles = values.map((v, i) => {
+      const x = padL + i * xStep;
+      const y = padT + ch - (v / maxV) * ch;
+      return `<circle cx="${x}" cy="${y}" r="3" fill="white" stroke="${lineColor}" stroke-width="2" />`;
+    }).join('');
+
+    // 保存 chart 狀態供 hover handler 使用
+    this._chartState = { dates, values, padL, xStep, W, H, padT, ch, maxV, lineColor, lineLabel };
+
     return `
       <div class="chart-card" style="margin-top:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
-          <h3 style="margin:0">${activeName ? escapeHtml(activeName) + ' 每日營收' : '各平台每日營收曲線'}</h3>
-          <span style="font-size:12px;color:var(--text-muted)">近 ${days} 天${activeName ? '・點「全部」回到所有平台' : '・點任一平台單獨查看'}</span>
+          <h3 style="margin:0">${yMonth} 年 ${mMonth} 月　${escapeHtml(lineLabel)} 每日營收</h3>
+          <span style="font-size:12px;color:var(--text-muted)">滑鼠移到圖上可看當日數字</span>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${allPill}${platformPills}</div>
-        <div style="overflow-x:auto">
-          <svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:700px;height:auto;display:block">
+        <div id="line-chart-container" style="position:relative">
+          <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:280px;display:block">
             ${yTicks.join('')}
-            ${polylines}
+            <polyline points="${points}" fill="none" stroke="${lineColor}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
+            ${circles}
             ${xLabels}
+            <line id="chart-guide" x1="0" y1="${padT}" x2="0" y2="${padT + ch}" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3" style="opacity:0;transition:opacity .1s" />
+            <circle id="chart-active-dot" cx="0" cy="0" r="6" fill="${lineColor}" stroke="white" stroke-width="2" style="opacity:0;transition:opacity .1s" />
           </svg>
+          <div id="line-chart-tooltip" style="position:absolute;display:none;background:#1e293b;color:white;padding:10px 14px;border-radius:8px;font-size:13px;pointer-events:none;white-space:nowrap;box-shadow:0 8px 24px rgba(15,23,42,0.2);z-index:10;transform:translate(-50%, calc(-100% - 10px))">
+            <div id="tooltip-date" style="font-size:11px;opacity:0.7;margin-bottom:4px"></div>
+            <div id="tooltip-value" style="font-size:16px;font-weight:700;font-variant-numeric:tabular-nums"></div>
+          </div>
         </div>
       </div>
     `;
+  },
+
+  bindLineChartTooltip() {
+    const container = document.getElementById('line-chart-container');
+    if (!container || !this._chartState) return;
+    const svg = container.querySelector('svg');
+    const tooltip = document.getElementById('line-chart-tooltip');
+    const guide   = document.getElementById('chart-guide');
+    const activeDot = document.getElementById('chart-active-dot');
+    if (!svg || !tooltip || !guide || !activeDot) return;
+
+    const { dates, values, padL, xStep, W, H, padT, ch, maxV } = this._chartState;
+
+    const update = (e) => {
+      const svgRect = svg.getBoundingClientRect();
+      const x = e.clientX - svgRect.left;
+      const scaleX = svgRect.width / W;
+      const scaleY = svgRect.height / H;
+      const svgX = x / scaleX;
+
+      let i = Math.round((svgX - padL) / xStep);
+      i = Math.max(0, Math.min(dates.length - 1, i));
+
+      const date = dates[i];
+      const value = values[i];
+
+      const cx = padL + i * xStep;
+      const cy = padT + ch - (value / maxV) * ch;
+
+      document.getElementById('tooltip-date').textContent = date.replace(/-/g, '/');
+      document.getElementById('tooltip-value').textContent = 'NT$ ' + Math.round(value).toLocaleString();
+
+      tooltip.style.left = `${cx * scaleX}px`;
+      tooltip.style.top  = `${cy * scaleY}px`;
+      tooltip.style.display = 'block';
+
+      guide.setAttribute('x1', cx);
+      guide.setAttribute('x2', cx);
+      guide.style.opacity = '1';
+
+      activeDot.setAttribute('cx', cx);
+      activeDot.setAttribute('cy', cy);
+      activeDot.style.opacity = '1';
+    };
+
+    const hide = () => {
+      tooltip.style.display = 'none';
+      guide.style.opacity = '0';
+      activeDot.style.opacity = '0';
+    };
+
+    container.addEventListener('mousemove', update);
+    container.addEventListener('mouseleave', hide);
   },
 
   fmtTick(v) {
