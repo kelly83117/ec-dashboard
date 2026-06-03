@@ -1759,7 +1759,7 @@ const App = {
     `;
 
     const revenueTableHtml = `
-      <div class="table-card" style="margin:0">
+      <div class="table-card" style="margin:0;width:100%;display:flex;flex-direction:column">
         <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 14px">
           <div>
             <h3 style="margin:0;font-size:15px">每日營收填寫</h3>
@@ -1797,9 +1797,9 @@ const App = {
       </div>
       ${summaryPills}
       <div class="stat-grid" style="grid-template-columns:repeat(4, 1fr);margin-bottom:12px;gap:10px">${summaryCards}</div>
-      <div style="display:grid;grid-template-columns:1.45fr 1fr;gap:14px;align-items:start">
-        <div>${revenueTableHtml}</div>
-        <div>${this.dailyLineChartHtml(platforms)}</div>
+      <div style="display:grid;grid-template-columns:1.45fr 1fr;gap:14px;align-items:stretch">
+        <div style="display:flex">${revenueTableHtml}</div>
+        <div style="display:flex">${this.dailyLineChartHtml(platforms)}</div>
       </div>
     `;
   },
@@ -1945,14 +1945,14 @@ const App = {
     this._chartState = { dates, dailyData, series, padL, xStep, W, H, padT, ch, maxV, lineColor, lineLabel, isMulti, activeName };
 
     return `
-      <div class="chart-card" style="margin:0;padding:12px 14px">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+      <div class="chart-card" style="margin:0;padding:12px 14px;width:100%;display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;flex-shrink:0">
           <h3 style="margin:0;font-size:14px">${yMonth} 年 ${mMonth} 月　${escapeHtml(lineLabel)} 每日營收</h3>
           <span style="font-size:11px;color:var(--text-muted)">滑鼠移上去看當日</span>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">${allPill}${platformPills}</div>
-        <div id="line-chart-container" style="position:relative">
-          <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:240px;display:block">
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;flex-shrink:0">${allPill}${platformPills}</div>
+        <div id="line-chart-container" style="position:relative;flex:1;min-height:240px;display:flex">
+          <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:100%;display:block">
             ${yTicks.join('')}
             ${polylines}
             ${circles}
