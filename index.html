@@ -1843,13 +1843,20 @@ const App = {
     // 計算每日資料
     // 全賣場模式（activeName == null）：7 條平台曲線同時顯示
     // 單一平台模式：只顯示該平台一條線
-    let series, lineLabel, lineColor, isMulti;
+    const logoImgHtml = (platformName) => {
+      const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
+      const s = MARKETPLACE_BADGE[m];
+      return `<img src="${s.src}" alt="${escapeHtml(s.name)}" style="width:18px;height:18px;border-radius:4px;object-fit:contain;background:white;padding:1px;vertical-align:middle;margin-right:6px;box-shadow:0 1px 2px rgba(0,0,0,0.06)">`;
+    };
+
+    let series, lineLabel, lineLabelHtml, lineColor, isMulti;
     if (activeName) {
       const p = platforms.find(x => x.name === activeName);
       if (p) {
         series = [{ name: p.name, color: p.color, icon: p.icon,
                     values: dates.map(d => +(p.daily?.[d]) || 0) }];
-        lineLabel = `${p.icon} ${p.name}`;
+        lineLabel = p.name;
+        lineLabelHtml = `${logoImgHtml(p.name)}<span style="vertical-align:middle">${escapeHtml(p.name)}</span>`;
         lineColor = p.color;
         isMulti = false;
       } else {
@@ -1858,6 +1865,7 @@ const App = {
           values: dates.map(d => +(pp.daily?.[d]) || 0),
         }));
         lineLabel = '全賣場';
+        lineLabelHtml = '<span style="vertical-align:middle">🏪 全賣場</span>';
         lineColor = '#0f172a';
         isMulti = true;
       }
@@ -1867,6 +1875,7 @@ const App = {
         values: dates.map(d => +(pp.daily?.[d]) || 0),
       }));
       lineLabel = '全賣場';
+      lineLabelHtml = '<span style="vertical-align:middle">🏪 全賣場</span>';
       lineColor = '#0f172a';
       isMulti = true;
     }
@@ -1947,7 +1956,7 @@ const App = {
     return `
       <div class="chart-card" style="margin:0;padding:12px 14px;width:100%;display:flex;flex-direction:column">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;flex-shrink:0">
-          <h3 style="margin:0;font-size:14px">${yMonth} 年 ${mMonth} 月　${escapeHtml(lineLabel)} 每日營收</h3>
+          <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:4px">${yMonth} 年 ${mMonth} 月　${lineLabelHtml} 每日營收</h3>
           <span style="font-size:11px;color:var(--text-muted)">滑鼠移上去看當日</span>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;flex-shrink:0">${allPill}${platformPills}</div>
