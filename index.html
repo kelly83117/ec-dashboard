@@ -3243,6 +3243,23 @@ const App = {
     if (activeTab) {
       if (activeTab.dynamic === 'daily-progress') {
         tabContent = this.renderDailyProgressTab(deptId, color, dept);
+      } else if (activeTab.key === 'profit') {
+        tabContent = window.__profitTabHtml || '';
+        setTimeout(function() {
+          if (typeof SHOPS !== 'undefined') {
+            try {
+              SHOPS.forEach(function(s) {
+                var el = document.getElementById('content-' + s.id);
+                if (el && !el.innerHTML.trim() && typeof shopHTML === 'function') {
+                  el.innerHTML = shopHTML(s.id);
+                }
+              });
+              SHOPS.forEach(function(s) {
+                if (typeof initShopUI === 'function') initShopUI(s.id);
+              });
+            } catch(e) { console.log(e); }
+          }
+        }, 200);
       } else if (activeTab.customHtml) {
         tabContent = activeTab.customHtml;
       } else {
