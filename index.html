@@ -1092,15 +1092,7 @@ const OFFICE_CONFIG = {
     ],
     tabs: [
       { key: 'daily-progress', title: '📋 每日工作進度', dynamic: 'daily-progress' },
-      { key: 'profit', title: '淨利表',
-        heads: ['活動名稱', '投入成本', '營收', '淨利', '利潤率'],
-        rows: [
-          ['母親節主題活動', 'NT$ 124,000', 'NT$ 386,000', 'NT$ 262,000', '67.8%'],
-          ['夏季新品上市',   'NT$ 86,500',  'NT$ 215,000', 'NT$ 128,500', '59.8%'],
-          ['品牌週年慶倒數', 'NT$ 195,000', 'NT$ 521,000', 'NT$ 326,000', '62.6%'],
-          ['IG 達人合作',    'NT$ 52,000',  'NT$ 138,000', 'NT$ 86,000',  '62.3%'],
-        ],
-      },
+      { key: 'profit', title: '淨利表', customHtml: window.__profitTabHtml || '' },
       { key: 'insight', title: '洞察表分析',
         heads: ['維度', '指標', '數值', '備註'],
         rows: [
