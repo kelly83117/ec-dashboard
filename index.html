@@ -1703,12 +1703,13 @@ const App = {
 
       const inputStyle = 'width:120px;padding:4px 10px;border:1px solid var(--border);border-radius:5px;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;color:var(--text);box-sizing:border-box;background:white;height:28px';
 
-      // 輸入框預設帶入「當日已儲存」的值，過 12 點跨日才會自動清成 0
-      const revValue = td > 0 ? td : '';
-      const adsValue = inputAds > 0 ? inputAds : '';
+      // 輸入框預設帶入「當日已儲存」的值（加上千分位逗號），過 12 點跨日才會自動清成 0
+      const fmt = v => (v > 0 ? (+v).toLocaleString() : '');
+      const revValue = fmt(td);
+      const adsValue = fmt(inputAds);
 
       const adsCell = hasAds
-        ? `<input type="number" min="0" step="1" class="card-ads" data-idx="${i}" data-original="${adsValue}" value="${adsValue}" placeholder="0" onfocus="this.select()"
+        ? `<input type="text" inputmode="numeric" class="card-ads" data-idx="${i}" data-original="${adsValue}" value="${adsValue}" placeholder="0" onfocus="this.select()"
               style="${inputStyle}">`
         : '<span style="color:var(--text-muted);font-size:14px">—</span>';
 
@@ -1725,7 +1726,7 @@ const App = {
             </div>
           </td>
           <td style="padding:3px 8px;text-align:center">
-            <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" data-original="${revValue}" value="${revValue}" placeholder="0" onfocus="this.select()"
+            <input type="text" inputmode="numeric" class="card-rev" data-idx="${i}" data-original="${revValue}" value="${revValue}" placeholder="0" onfocus="this.select()"
               style="${inputStyle}">
           </td>
           <td style="padding:3px 8px;text-align:center">${adsCell}</td>
@@ -2192,13 +2193,29 @@ const App = {
     // 行銷每天填的是「昨日」的資料，所以寫入日期 = 昨天
     const inputDateStr = toDateStr(addDays(new Date(), -1));
 
+    // 字串「123,456」→ 數字 123456；空字串 / 非數字 → null
+    const parseAmount = (raw) => {
+      if (raw == null) return null;
+      const digits = String(raw).replace(/[^\d]/g, '');
+      if (digits === '') return null;
+      const n = +digits;
+      return isFinite(n) ? n : null;
+    };
+    // 數字 → 千分位字串
+    const fmtAmount = (n) => (n != null && n > 0 ? n.toLocaleString() : '');
+
+    // 比對兩個值用「數字本身」比，避免逗號干擾
+    const sameVal = (a, b) => {
+      const pa = parseAmount(a), pb = parseAmount(b);
+      return (pa == null ? 0 : pa) === (pb == null ? 0 : pb);
+    };
+
     // 該列輸入是否有改動
     const isDirty = (idx) => {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
-      const norm = v => (v == null ? '' : String(v).trim());
-      const revChanged = revEl && norm(revEl.value) !== norm(revEl.dataset.original);
-      const adsChanged = adsEl && norm(adsEl.value) !== norm(adsEl.dataset.original);
+      const revChanged = revEl && !sameVal(revEl.value, revEl.dataset.original);
+      const adsChanged = adsEl && !sameVal(adsEl.value, adsEl.dataset.original);
       return revChanged || adsChanged;
     };
 
@@ -2208,12 +2225,12 @@ const App = {
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
       const orange = '#f59e0b';
       if (revEl) {
-        const changed = revEl.value.trim() !== (revEl.dataset.original || '').trim();
+        const changed = !sameVal(revEl.value, revEl.dataset.original);
         revEl.style.borderColor = changed ? orange : 'var(--border)';
         revEl.style.boxShadow = changed ? '0 0 0 2px #f59e0b22' : 'none';
       }
       if (adsEl) {
-        const changed = adsEl.value.trim() !== (adsEl.dataset.original || '').trim();
+        const changed = !sameVal(adsEl.value, adsEl.dataset.original);
         adsEl.style.borderColor = changed ? orange : 'var(--border)';
         adsEl.style.boxShadow = changed ? '0 0 0 2px #f59e0b22' : 'none';
       }
@@ -2225,8 +2242,8 @@ const App = {
       if (!roasEl) return;
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
-      const rev = revEl ? +revEl.value : 0;
-      const ads = adsEl ? +adsEl.value : 0;
+      const rev = parseAmount(revEl?.value) || 0;
+      const ads = parseAmount(adsEl?.value) || 0;
       roasEl.textContent = (rev > 0 && ads > 0) ? (rev / ads).toFixed(2) : '—';
     };
 
@@ -2250,19 +2267,23 @@ const App = {
 
       const writeField = (key, val) => {
         list[idx][key] = list[idx][key] || {};
-        if (val == null || isNaN(val) || val === '') delete list[idx][key][inputDateStr];
-        else list[idx][key][inputDateStr] = Math.round(+val);
+        if (val == null || isNaN(val)) delete list[idx][key][inputDateStr];
+        else list[idx][key][inputDateStr] = Math.round(val);
       };
 
       if (revEl) {
-        const raw = revEl.value.trim();
-        writeField('daily', raw === '' ? null : +raw);
-        revEl.dataset.original = raw;
+        const n = parseAmount(revEl.value);
+        writeField('daily', n);
+        const formatted = fmtAmount(n);
+        revEl.value = formatted;
+        revEl.dataset.original = formatted;
       }
       if (adsEl) {
-        const raw = adsEl.value.trim();
-        writeField('dailyAdSpend', raw === '' ? null : +raw);
-        adsEl.dataset.original = raw;
+        const n = parseAmount(adsEl.value);
+        writeField('dailyAdSpend', n);
+        const formatted = fmtAmount(n);
+        adsEl.value = formatted;
+        adsEl.dataset.original = formatted;
       }
       Store.set(Store.KEYS.platforms, list);
       markUnsaved(idx);
@@ -2277,25 +2298,24 @@ const App = {
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
       const platforms = Store.get(Store.KEYS.platforms, null) || [];
       const platformName = platforms[idx]?.name || '此賣場';
-      const norm = v => (v == null ? '' : String(v).trim());
-      const fmtNum = v => v === '' || v == null ? '—' : (+v).toLocaleString();
+      const dispVal = (n) => (n == null || n <= 0 ? '—' : n.toLocaleString());
 
-      const revOld = revEl?.dataset.original || '';
-      const revNew = revEl?.value.trim() || '';
-      const adsOld = adsEl?.dataset.original || '';
-      const adsNew = adsEl?.value.trim() || '';
-      const revChanged = revEl && norm(revOld) !== norm(revNew);
-      const adsChanged = adsEl && norm(adsOld) !== norm(adsNew);
+      const revOldN = parseAmount(revEl?.dataset.original);
+      const revNewN = parseAmount(revEl?.value);
+      const adsOldN = parseAmount(adsEl?.dataset.original);
+      const adsNewN = parseAmount(adsEl?.value);
+      const revChanged = revEl && (revOldN || 0) !== (revNewN || 0);
+      const adsChanged = adsEl && (adsOldN || 0) !== (adsNewN || 0);
       if (!revChanged && !adsChanged) return;
 
-      const diffRow = (label, oldV, newV, changed) => {
+      const diffRow = (label, oldN, newN, changed) => {
         if (!changed) return '';
         return `
           <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px">
             <span style="min-width:60px;font-size:12px;color:var(--text-muted);font-weight:600">${escapeHtml(label)}</span>
-            <span style="font-variant-numeric:tabular-nums;color:var(--text-muted);text-decoration:line-through;font-size:14px">${fmtNum(oldV)}</span>
+            <span style="font-variant-numeric:tabular-nums;color:var(--text-muted);text-decoration:line-through;font-size:14px">${dispVal(oldN)}</span>
             <span style="color:var(--text-muted);font-size:12px">→</span>
-            <span style="font-variant-numeric:tabular-nums;color:#f59e0b;font-weight:700;font-size:16px">${fmtNum(newV)}</span>
+            <span style="font-variant-numeric:tabular-nums;color:#f59e0b;font-weight:700;font-size:16px">${dispVal(newN)}</span>
           </div>
         `;
       };
@@ -2327,10 +2347,26 @@ const App = {
       });
     };
 
-    // 輸入時：邊打邊算 ROAS、標記未儲存
+    // 輸入時：即時加千分位 + 更新 ROAS、標記未儲存
     document.querySelectorAll('.card-rev, .card-ads').forEach(el => {
       const idx = +el.dataset.idx;
       el.addEventListener('input', () => {
+        // 即時格式化：保留游標相對位置
+        const before = el.value;
+        const caret = el.selectionStart || 0;
+        const digitsBeforeCaret = before.slice(0, caret).replace(/[^\d]/g, '').length;
+        const digits = before.replace(/[^\d]/g, '');
+        const formatted = digits === '' ? '' : (+digits).toLocaleString();
+        if (formatted !== before) {
+          el.value = formatted;
+          // 重新放游標：放在「相同位數之後」
+          let count = 0, newCaret = formatted.length;
+          for (let i = 0; i < formatted.length; i++) {
+            if (/\d/.test(formatted[i])) count++;
+            if (count === digitsBeforeCaret) { newCaret = i + 1; break; }
+          }
+          try { el.setSelectionRange(newCaret, newCaret); } catch (_) {}
+        }
         updateRoas(idx);
         markUnsaved(idx);
       });
