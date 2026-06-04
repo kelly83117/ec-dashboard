@@ -1974,11 +1974,23 @@ const App = {
     // 保存 chart 狀態供 hover handler 使用
     this._chartState = { dates, dailyData, series, padL, xStep, W, H, padT, ch, maxV, lineColor, lineLabel, isMulti, activeName };
 
+    // 計算目前選中的 series 累計：全賣場 = 7 個賣場全部加總；單一賣場 = 該賣場本月加總
+    const seriesTotal = series.reduce((s, ss) => s + ss.values.reduce((a, b) => a + b, 0), 0);
+    const daysWithData = dates.filter(d =>
+      series.some(s => s.values[dates.indexOf(d)] > 0)
+    ).length;
+    const totalLabel = isMulti ? '本月全賣場累計' : `本月「${lineLabel}」累計`;
+
     return `
       <div class="chart-card" style="margin:0;padding:12px 14px;width:100%;display:flex;flex-direction:column">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;flex-shrink:0">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px;flex-shrink:0">
           <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:4px">${yMonth} 年 ${mMonth} 月　${lineLabelHtml} 每日營收</h3>
           <span style="font-size:11px;color:var(--text-muted)">滑鼠移上去看當日</span>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px;flex-shrink:0;padding:6px 10px;background:${lineColor}0d;border-left:3px solid ${lineColor};border-radius:6px">
+          <span style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">${escapeHtml(totalLabel)}</span>
+          <span style="font-size:18px;font-weight:800;color:${lineColor};font-variant-numeric:tabular-nums">NT$ ${seriesTotal.toLocaleString()}</span>
+          <span style="font-size:11px;color:var(--text-muted)">${daysWithData} 天有資料</span>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;flex-shrink:0">${allPill}${platformPills}</div>
         <div id="line-chart-container" style="position:relative;flex:1;min-height:240px;display:flex">
