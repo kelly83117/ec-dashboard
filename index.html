@@ -1677,9 +1677,15 @@ const App = {
 
       const inputStyle = 'width:120px;padding:4px 10px;border:1px solid var(--border);border-radius:5px;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;color:var(--text);box-sizing:border-box;background:white;height:28px';
 
+      // 輸入框「永遠」是空的，行銷每天打開就是 0、自己填入
+      // 已儲存的數字會在輸入框下方的小灰字顯示，供查看
+      const savedRevText = td > 0 ? `已儲存：${td.toLocaleString()}` : '';
+      const savedAdsText = inputAds > 0 ? `已儲存：${inputAds.toLocaleString()}` : '';
+
       const adsCell = hasAds
-        ? `<input type="number" min="0" step="1" class="card-ads" data-idx="${i}" data-original="${inputAds || ''}" value="${inputAds || ''}" placeholder="0" onfocus="this.select()"
-              style="${inputStyle}">`
+        ? `<input type="number" min="0" step="1" class="card-ads" data-idx="${i}" data-original="" value="" placeholder="0" onfocus="this.select()"
+              style="${inputStyle}">
+           ${savedAdsText ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;font-variant-numeric:tabular-nums">${savedAdsText}</div>` : ''}`
         : '<span style="color:var(--text-muted);font-size:14px">—</span>';
 
       const roasCell = hasAds
@@ -1695,8 +1701,9 @@ const App = {
             </div>
           </td>
           <td style="padding:3px 8px;text-align:center">
-            <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" data-original="${td || ''}" value="${td || ''}" placeholder="0" onfocus="this.select()"
+            <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" data-original="" value="" placeholder="0" onfocus="this.select()"
               style="${inputStyle}">
+            ${savedRevText ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;font-variant-numeric:tabular-nums">${savedRevText}</div>` : ''}
           </td>
           <td style="padding:3px 8px;text-align:center">${adsCell}</td>
           <td style="padding:3px 8px;text-align:center">${roasCell}</td>
@@ -1761,16 +1768,10 @@ const App = {
         <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px">
           <div>
             <h3 style="margin:0;font-size:14px">每日營收填寫</h3>
-            <p style="margin:1px 0 0;font-size:11px;color:var(--text-muted)">輸入後按 Enter 或點別處跳出確認再儲存</p>
+            <p style="margin:1px 0 0;font-size:11px;color:var(--text-muted)">每天打開都是空白，輸入後按 Enter 或點別處跳出確認再儲存</p>
           </div>
-          <div style="display:flex;align-items:center;gap:6px">
-            <div style="font-size:11px;color:var(--text-muted);background:var(--bg);padding:4px 9px;border-radius:6px;font-variant-numeric:tabular-nums">
-              填寫日期：<strong style="color:var(--text);font-size:12px">${escapeHtml(inputDateStr)}</strong>
-            </div>
-            <button id="clear-day-btn" title="清空 ${escapeHtml(inputDateStr)} 全部賣場的營收 + 廣告費"
-              style="padding:4px 9px;border:1px solid var(--border);border-radius:6px;background:white;color:var(--text-muted);font-size:11px;font-weight:600;cursor:pointer">
-              🗑 清空當日
-            </button>
+          <div style="font-size:11px;color:var(--text-muted);background:var(--bg);padding:4px 9px;border-radius:6px;font-variant-numeric:tabular-nums">
+            填寫日期：<strong style="color:var(--text);font-size:12px">${escapeHtml(inputDateStr)}</strong>
           </div>
         </div>
         <div class="table-wrap">
@@ -2302,47 +2303,6 @@ const App = {
         },
       });
     };
-
-    // 清空當日按鈕
-    const clearBtn = document.getElementById('clear-day-btn');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        if (dialogOpen) return;
-        dialogOpen = true;
-        this.openModal({
-          title: `清空 ${inputDateStr} 全部資料`,
-          bodyHtml: `
-            <div style="font-size:14px;line-height:1.6;color:var(--text)">
-              即將清空 <strong>${escapeHtml(inputDateStr)}</strong> 所有 7 個賣場的：
-              <ul style="margin:8px 0;padding-left:22px;color:var(--text-muted)">
-                <li>營收</li>
-                <li>廣告費</li>
-              </ul>
-              已儲存的歷史資料不會被影響，僅刪除這一天的紀錄。
-            </div>
-            <div style="margin-top:14px;padding:10px 12px;background:#ef444414;border-left:3px solid #ef4444;border-radius:6px;font-size:12px;color:var(--text)">
-              此操作不可復原，請確認後繼續。
-            </div>
-          `,
-          saveLabel: '確認清空',
-          cancelLabel: '取消',
-          onSave: () => {
-            dialogOpen = false;
-            const platforms = Store.get(Store.KEYS.platforms, null);
-            const list = migratePlatforms(platforms ? platforms.map(p => ({ ...p })) : JSON.parse(JSON.stringify(PLATFORMS)));
-            list.forEach(p => {
-              if (p.daily) delete p.daily[inputDateStr];
-              if (p.dailyAdSpend) delete p.dailyAdSpend[inputDateStr];
-            });
-            Store.set(Store.KEYS.platforms, list);
-            showToast(`已清空 ${inputDateStr}`, 'success');
-            this.render();
-            return true;
-          },
-          onCancel: () => { dialogOpen = false; },
-        });
-      });
-    }
 
     // 輸入時：邊打邊算 ROAS、標記未儲存
     document.querySelectorAll('.card-rev, .card-ads').forEach(el => {
