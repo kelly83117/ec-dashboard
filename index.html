@@ -1703,15 +1703,13 @@ const App = {
 
       const inputStyle = 'width:120px;padding:4px 10px;border:1px solid var(--border);border-radius:5px;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;color:var(--text);box-sizing:border-box;background:white;height:28px';
 
-      // 輸入框「永遠」是空的，行銷每天打開就是 0、自己填入
-      // 已儲存的數字會在輸入框下方的小灰字顯示，供查看
-      const savedRevText = td > 0 ? `已儲存：${td.toLocaleString()}` : '';
-      const savedAdsText = inputAds > 0 ? `已儲存：${inputAds.toLocaleString()}` : '';
+      // 輸入框預設帶入「當日已儲存」的值，過 12 點跨日才會自動清成 0
+      const revValue = td > 0 ? td : '';
+      const adsValue = inputAds > 0 ? inputAds : '';
 
       const adsCell = hasAds
-        ? `<input type="number" min="0" step="1" class="card-ads" data-idx="${i}" data-original="" value="" placeholder="0" onfocus="this.select()"
-              style="${inputStyle}">
-           ${savedAdsText ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;font-variant-numeric:tabular-nums">${savedAdsText}</div>` : ''}`
+        ? `<input type="number" min="0" step="1" class="card-ads" data-idx="${i}" data-original="${adsValue}" value="${adsValue}" placeholder="0" onfocus="this.select()"
+              style="${inputStyle}">`
         : '<span style="color:var(--text-muted);font-size:14px">—</span>';
 
       const roasCell = hasAds
@@ -1727,9 +1725,8 @@ const App = {
             </div>
           </td>
           <td style="padding:3px 8px;text-align:center">
-            <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" data-original="" value="" placeholder="0" onfocus="this.select()"
+            <input type="number" min="0" step="1" class="card-rev" data-idx="${i}" data-original="${revValue}" value="${revValue}" placeholder="0" onfocus="this.select()"
               style="${inputStyle}">
-            ${savedRevText ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;font-variant-numeric:tabular-nums">${savedRevText}</div>` : ''}
           </td>
           <td style="padding:3px 8px;text-align:center">${adsCell}</td>
           <td style="padding:3px 8px;text-align:center">${roasCell}</td>
@@ -1794,7 +1791,7 @@ const App = {
         <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px">
           <div>
             <h3 style="margin:0;font-size:14px">每日營收填寫</h3>
-            <p style="margin:1px 0 0;font-size:11px;color:var(--text-muted)">每天打開都是空白，輸入後按 Enter 或點別處跳出確認再儲存</p>
+            <p style="margin:1px 0 0;font-size:11px;color:var(--text-muted)">輸入後按 Enter 或點別處跳出確認再儲存 · 過 12 點自動歸 0</p>
           </div>
           <div style="font-size:11px;color:var(--text-muted);background:var(--bg);padding:4px 9px;border-radius:6px;font-variant-numeric:tabular-nums">
             填寫日期：<strong style="color:var(--text);font-size:12px">${escapeHtml(inputDateStr)}</strong>
