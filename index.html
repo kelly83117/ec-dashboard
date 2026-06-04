@@ -1406,6 +1406,32 @@ const App = {
     document.getElementById('view-app').style.display = 'block';
     this.applyUserPerms(user);
     this.navigate('employees');
+    this.startMidnightWatcher();
+  },
+
+  /* ------------- 跨日自動 reset：每分鐘檢查「昨日」是否變了 ------------- */
+  startMidnightWatcher() {
+    if (this._midnightTimer) return;
+    this._lastInputDate = toDateStr(addDays(new Date(), -1));
+    this._midnightTimer = setInterval(() => {
+      const nowYesterday = toDateStr(addDays(new Date(), -1));
+      if (nowYesterday === this._lastInputDate) return;
+      // 跨日了，自動重新渲染（如果使用者正在打字就不要打斷）
+      const active = document.activeElement;
+      const inOurInput = active && active.tagName === 'INPUT' && (
+        active.classList.contains('card-rev') || active.classList.contains('card-ads')
+      );
+      const hasUnsaved = Array.from(document.querySelectorAll('.card-rev, .card-ads')).some(el => {
+        const norm = v => (v == null ? '' : String(v).trim());
+        return norm(el.value) !== norm(el.dataset.original);
+      });
+      if (inOurInput || hasUnsaved) return; // 等使用者存好或取消後下一分鐘再試
+      this._lastInputDate = nowYesterday;
+      if (this.route === 'dashboard' && typeof this.render === 'function') {
+        this.render();
+        showToast(`已跨日，自動切換至 ${nowYesterday}`, 'success');
+      }
+    }, 60000); // 每 60 秒檢查一次
   },
 
   // 依使用者權限更新側欄的顯示（角色資訊、管理員區、可見的辦公室）
