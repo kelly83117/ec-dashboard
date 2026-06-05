@@ -1436,7 +1436,7 @@ const App = {
     document.getElementById('view-login').style.display = 'none';
     document.getElementById('view-app').style.display = 'block';
     this.applyUserPerms(user);
-    this.navigate('employees');
+    this.navigate('dashboard');
     this.startMidnightWatcher();
   },
 
@@ -1507,7 +1507,7 @@ const App = {
       case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip(); break;
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
-      default: main.innerHTML = this.viewEmployees(); this.bindFilterBar();
+      default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip();
     }
   },
 
