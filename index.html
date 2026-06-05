@@ -1862,7 +1862,7 @@ const App = {
   },
 
   /* ============================================================
-   *  儀表板首頁 - 行銷每日工作進度區塊
+   *  儀表板首頁 - 行銷每週工作進度（週曆檢視）
    * ============================================================ */
   marketingProgressDashboardHtml() {
     const departments = Store.get(Store.KEYS.departments, []);
@@ -1874,64 +1874,144 @@ const App = {
       .filter(u => getUserDepts(u).includes(dept.name));
 
     // filter 狀態
-    const f = this.filter.dashboardMarketing || { employee: 'all' };
-    let filtered = tasks.slice();
+    if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0 };
+    const f = this.filter.dashboardMarketing;
+    const weekOffset = f.weekOffset || 0;
+
+    // 計算當週週一（以週一為一週起點）
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=週日, 1=週一, ..., 6=週六
+    const offsetToMon = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek); // 回到週一
+    const monday = addDays(now, offsetToMon + weekOffset * 7);
+    const weekDates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+    const weekStartStr = toDateStr(weekDates[0]);
+    const weekEndStr   = toDateStr(weekDates[6]);
+    const weekLabel = weekOffset === 0 ? '本週'
+                    : weekOffset === -1 ? '上週'
+                    : weekOffset === 1  ? '下週'
+                    : `${weekOffset > 0 ? '+' : ''}${weekOffset} 週`;
+
+    // 套人員篩選
+    let tasksForWeek = tasks.filter(t => t.date >= weekStartStr && t.date <= weekEndStr);
     if (f.employee && f.employee !== 'all') {
-      filtered = filtered.filter(t => t.employee === f.employee);
+      tasksForWeek = tasksForWeek.filter(t => t.employee === f.employee);
     }
-    // 排序：日期 desc → createdAt desc
-    filtered.sort((a, b) => {
-      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-      return (b.createdAt || 0) - (a.createdAt || 0);
+    // 依日期分群
+    const byDate = {};
+    weekDates.forEach(d => byDate[toDateStr(d)] = []);
+    tasksForWeek.forEach(t => {
+      if (byDate[t.date]) byDate[t.date].push(t);
     });
-    // 取最近 8 筆
-    const recent = filtered.slice(0, 8);
+
+    // 計算當週未完成的待辦
+    const pendingTodos = [];
+    tasksForWeek.forEach(t => {
+      const todos = Array.isArray(t.todos) ? t.todos : [];
+      todos.forEach((td, idx) => {
+        if (!td.done && td.text) {
+          pendingTodos.push({ task: t, todoIdx: idx, text: td.text });
+        }
+      });
+    });
+
+    const todayStr2 = toDateStr(now);
+    const weekDayNames = ['週一','週二','週三','週四','週五','週六','週日'];
 
     const employeeOptions = `
       <option value="all" ${(f.employee || 'all') === 'all' ? 'selected' : ''}>全部人員</option>
       ${members.map(u => `<option value="${escapeHtml(u.username)}" ${f.employee === u.username ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
     `;
 
-    const rowsHtml = recent.length === 0
-      ? `<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">
-          ${tasks.length === 0 ? '行銷團隊尚未填寫任何工作進度' : '此人員沒有工作進度紀錄'}
-        </div>`
-      : recent.map(t => {
-          const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
-          const catMeta = t.category ? getCategoryMeta(t.category) : null;
+    // 各日欄位
+    const columnsHtml = weekDates.map((d, i) => {
+      const dateStr = toDateStr(d);
+      const isToday = dateStr === todayStr2;
+      const dayTasks = byDate[dateStr] || [];
+
+      const taskCardsHtml = dayTasks.length === 0
+        ? `<div style="padding:14px 8px;text-align:center;color:#cbd5e1;font-size:11px">—</div>`
+        : dayTasks.map(t => {
+            const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
+            const catMeta = t.category ? getCategoryMeta(t.category) : null;
+            const catColor = catMeta?.color || '#6b7280';
+            const todos = Array.isArray(t.todos) ? t.todos : [];
+            const doneCount = todos.filter(td => td.done).length;
+            return `
+              <div data-cal-task="${escapeHtml(t.id)}" style="background:white;border:1px solid var(--border);border-left:3px solid ${catColor};border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)'" onmouseout="this.style.boxShadow='none'">
+                <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+                  ${t.category ? `<span style="font-size:9px;font-weight:700;color:${catColor};letter-spacing:.03em">${escapeHtml(t.category)}</span>` : ''}
+                  ${t.subcategory ? `<span style="font-size:9px;color:var(--text-muted)">· ${escapeHtml(t.subcategory)}</span>` : ''}
+                  <span style="margin-left:auto;font-size:11px">${st.emoji}</span>
+                </div>
+                <div style="font-size:12px;font-weight:600;line-height:1.35;color:var(--text);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${escapeHtml(t.title)}</div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:10px;color:var(--text-muted)">
+                  <span>${escapeHtml(t.employeeName || t.employee)}</span>
+                  ${todos.length > 0 ? `<span style="margin-left:auto">📝 ${doneCount}/${todos.length}</span>` : ''}
+                </div>
+              </div>
+            `;
+          }).join('');
+
+      return `
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:${i < 6 ? '1px solid var(--border)' : '0'};background:${isToday ? '#eef2ff44' : 'transparent'}">
+          <div style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);${isToday ? `background:var(--primary);color:white` : ''}">
+            <div style="font-size:10px;font-weight:600;${isToday ? 'color:white' : 'color:var(--text-muted)'};letter-spacing:.05em">${weekDayNames[i]}</div>
+            <div style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;${isToday ? 'color:white' : 'color:var(--text)'}">${d.getMonth()+1}/${d.getDate()}</div>
+          </div>
+          <div style="padding:6px;flex:1;min-height:110px">
+            ${taskCardsHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // 未完成待辦清單
+    const pendingHtml = pendingTodos.length === 0
+      ? `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">本週沒有待辦事項 🎉</div>`
+      : pendingTodos.slice(0, 20).map(({ task, todoIdx, text }) => {
+          const catMeta = task.category ? getCategoryMeta(task.category) : null;
           const catColor = catMeta?.color || '#6b7280';
-          const todos = Array.isArray(t.todos) ? t.todos : [];
-          const doneCount = todos.filter(td => td.done).length;
           return `
-            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border)">
-              <span style="font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:56px">${escapeHtml(t.date.slice(5).replace('-', '/'))}</span>
-              <div style="width:24px;height:24px;border-radius:50%;background:var(--bg);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--text-muted);flex-shrink:0">${escapeHtml((t.employeeName || t.employee || '?').slice(0,1))}</div>
-              <span style="font-size:12px;color:var(--text);font-weight:500;min-width:56px">${escapeHtml(t.employeeName || t.employee)}</span>
-              ${t.category ? `<span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:${catColor}14;color:${catColor};letter-spacing:.03em;flex-shrink:0">${escapeHtml(t.category)}</span>` : ''}
-              ${t.subcategory ? `<span style="font-size:10px;font-weight:500;padding:2px 6px;border-radius:4px;background:var(--bg);color:var(--text-muted);flex-shrink:0">${escapeHtml(t.subcategory)}</span>` : ''}
-              <span style="font-size:13px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.title)}</span>
-              ${todos.length > 0 ? `<span style="font-size:11px;color:var(--text-muted);font-weight:500;flex-shrink:0">📝 ${doneCount}/${todos.length}</span>` : ''}
-              <span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;background:${st.bg};color:${st.color};font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0">${st.emoji} ${escapeHtml(t.status)}</span>
-            </div>
+            <label style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px">
+              <input type="checkbox" class="dp-todo-tick" data-task-id="${escapeHtml(task.id)}" data-todo-idx="${todoIdx}" style="width:14px;height:14px;cursor:pointer;flex-shrink:0">
+              <span style="flex:1;color:var(--text)">${escapeHtml(text)}</span>
+              ${task.category ? `<span style="font-size:10px;font-weight:600;padding:1px 6px;border-radius:3px;background:${catColor}14;color:${catColor};flex-shrink:0">${escapeHtml(task.category)}</span>` : ''}
+              <span style="font-size:10px;color:var(--text-muted);font-variant-numeric:tabular-nums;flex-shrink:0">${task.date.slice(5).replace('-','/')}</span>
+              <span style="font-size:10px;color:var(--text-muted);flex-shrink:0;min-width:50px">${escapeHtml(task.employeeName || task.employee)}</span>
+            </label>
           `;
         }).join('');
 
     return `
-      <div class="table-card" style="margin-top:14px">
-        <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 16px">
-          <div>
-            <h3 style="margin:0;font-size:14px;font-weight:600">行銷每日工作進度</h3>
-            <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted)">最近 ${recent.length} 筆 · 共 ${tasks.length} 筆紀錄</p>
+      <div style="margin-top:14px;display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:start">
+        <div class="table-card">
+          <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 16px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <h3 style="margin:0;font-size:14px;font-weight:600">行銷工作週曆</h3>
+              <div style="display:flex;align-items:center;gap:4px">
+                <button class="pill" data-week-offset="${weekOffset - 1}" title="上一週" style="padding:3px 8px;font-size:11px">←</button>
+                <button class="pill ${weekOffset === 0 ? 'active' : ''}" data-week-offset="0" style="padding:3px 10px;font-size:11px;min-width:60px">${weekLabel}</button>
+                <button class="pill" data-week-offset="${weekOffset + 1}" title="下一週" style="padding:3px 8px;font-size:11px">→</button>
+              </div>
+              <span style="font-size:11px;color:var(--text-muted)">${weekStartStr.slice(5).replace('-','/')} – ${weekEndStr.slice(5).replace('-','/')}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:12px;color:var(--text-muted)">人員</span>
+              <select id="dash-mkt-emp" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;font-family:inherit;cursor:pointer">
+                ${employeeOptions}
+              </select>
+              <button class="pill" data-nav-to="office-d1" style="font-size:11px;padding:5px 10px">完整列表 →</button>
+            </div>
           </div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:12px;color:var(--text-muted)">人員</span>
-            <select id="dash-mkt-emp" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;font-family:inherit;cursor:pointer">
-              ${employeeOptions}
-            </select>
-            <button class="pill" data-nav-to="office-d1" style="font-size:11px;padding:5px 10px">查看全部 →</button>
-          </div>
+          <div style="display:flex;border-top:1px solid var(--border)">${columnsHtml}</div>
         </div>
-        <div>${rowsHtml}</div>
+        <div class="table-card" style="position:sticky;top:14px">
+          <div class="table-card-header" style="padding:12px 16px">
+            <h3 style="margin:0;font-size:14px;font-weight:600">未完成待辦事項 <span style="font-size:11px;color:var(--text-muted);font-weight:500">· 本週 ${pendingTodos.length} 項</span></h3>
+            <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted)">打勾即標記完成</p>
+          </div>
+          <div style="max-height:480px;overflow-y:auto">${pendingHtml}</div>
+        </div>
       </div>
     `;
   },
@@ -2303,11 +2383,41 @@ const App = {
     const dashMktEmp = document.getElementById('dash-mkt-emp');
     if (dashMktEmp) {
       dashMktEmp.addEventListener('change', () => {
-        if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all' };
+        if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0 };
         this.filter.dashboardMarketing.employee = dashMktEmp.value;
         this.render();
       });
     }
+    // 行銷週曆 - 切換週
+    document.querySelectorAll('[data-week-offset]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0 };
+        this.filter.dashboardMarketing.weekOffset = +btn.dataset.weekOffset;
+        this.render();
+      });
+    });
+    // 週曆上點任務卡 → 打開編輯（行銷部 d1）
+    document.querySelectorAll('[data-cal-task]').forEach(card => {
+      card.addEventListener('click', () => {
+        this.openDailyTaskModal('d1', card.dataset.calTask);
+      });
+    });
+    // 儀表板首頁的未完成待辦勾選
+    document.querySelectorAll('.dp-todo-tick').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const taskId = cb.dataset.taskId;
+        const todoIdx = +cb.dataset.todoIdx;
+        const list = Store.get(Store.KEYS.dailyTasks, []);
+        const i = list.findIndex(x => x.id === taskId);
+        if (i < 0) return;
+        if (!Array.isArray(list[i].todos)) list[i].todos = [];
+        if (list[i].todos[todoIdx]) {
+          list[i].todos[todoIdx].done = cb.checked;
+          Store.set(Store.KEYS.dailyTasks, list);
+          this.render();
+        }
+      });
+    });
     // 「查看全部」按鈕 → 跳到行銷辦公室
     document.querySelectorAll('[data-nav-to]').forEach(btn => {
       btn.addEventListener('click', () => this.navigate(btn.dataset.navTo));
