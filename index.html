@@ -1073,6 +1073,41 @@ const DAILY_TASK_STATUS = {
 };
 const DAILY_TASK_STATUS_LIST = Object.keys(DAILY_TASK_STATUS);
 
+// 工作內容分類（行銷專用，但結構通用）
+// 淨利表 / 洞察表 / 影片拍攝；洞察表底下還有第二層分群
+const TASK_CATEGORIES = [
+  {
+    name: '淨利表',
+    color: '#f59e0b',
+    items: ['高利潤商品', '賠錢中', '低淨利', '危險商品', '低效廣告'],
+  },
+  {
+    name: '洞察表',
+    color: '#8b5cf6',
+    groups: [
+      { name: '下滑類', items: ['重跌品', '衰退品'] },
+      { name: '成長類', items: ['爆發品', '成長品'] },
+      { name: '轉換類', items: ['弱轉換', '轉換偏低', '零轉換'] },
+    ],
+  },
+  {
+    name: '影片拍攝',
+    color: '#ec4899',
+    items: [],
+  },
+];
+const TASK_CATEGORY_NAMES = TASK_CATEGORIES.map(c => c.name);
+function getCategoryMeta(name) {
+  return TASK_CATEGORIES.find(c => c.name === name) || null;
+}
+function getCategoryItems(name) {
+  const c = getCategoryMeta(name);
+  if (!c) return [];
+  if (c.items) return c.items;
+  if (c.groups) return c.groups.flatMap(g => g.items);
+  return [];
+}
+
 function todayStr() {
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
@@ -1863,12 +1898,19 @@ const App = {
         </div>`
       : recent.map(t => {
           const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
+          const catMeta = t.category ? getCategoryMeta(t.category) : null;
+          const catColor = catMeta?.color || '#6b7280';
+          const todos = Array.isArray(t.todos) ? t.todos : [];
+          const doneCount = todos.filter(td => td.done).length;
           return `
-            <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)">
-              <span style="font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:64px">${escapeHtml(t.date.slice(5).replace('-', '/'))}</span>
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border)">
+              <span style="font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:56px">${escapeHtml(t.date.slice(5).replace('-', '/'))}</span>
               <div style="width:24px;height:24px;border-radius:50%;background:var(--bg);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--text-muted);flex-shrink:0">${escapeHtml((t.employeeName || t.employee || '?').slice(0,1))}</div>
-              <span style="font-size:12px;color:var(--text);font-weight:500;min-width:60px">${escapeHtml(t.employeeName || t.employee)}</span>
+              <span style="font-size:12px;color:var(--text);font-weight:500;min-width:56px">${escapeHtml(t.employeeName || t.employee)}</span>
+              ${t.category ? `<span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:${catColor}14;color:${catColor};letter-spacing:.03em;flex-shrink:0">${escapeHtml(t.category)}</span>` : ''}
+              ${t.subcategory ? `<span style="font-size:10px;font-weight:500;padding:2px 6px;border-radius:4px;background:var(--bg);color:var(--text-muted);flex-shrink:0">${escapeHtml(t.subcategory)}</span>` : ''}
               <span style="font-size:13px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.title)}</span>
+              ${todos.length > 0 ? `<span style="font-size:11px;color:var(--text-muted);font-weight:500;flex-shrink:0">📝 ${doneCount}/${todos.length}</span>` : ''}
               <span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;background:${st.bg};color:${st.color};font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0">${st.emoji} ${escapeHtml(t.status)}</span>
             </div>
           `;
@@ -2974,19 +3016,38 @@ const App = {
                 ${g.items.map(t => {
                   const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
                   const canEdit = this.currentUser.role === 'admin' || this.currentUser.username === t.employee;
+                  const catMeta = t.category ? getCategoryMeta(t.category) : null;
+                  const catColor = catMeta?.color || '#6b7280';
+                  const todos = Array.isArray(t.todos) ? t.todos : [];
+                  const doneCount = todos.filter(td => td.done).length;
                   return `
-                    <div class="timeline-entry" style="position:relative;display:flex;align-items:flex-start;gap:14px;padding:12px 14px;margin:8px 0;background:var(--card);border:1px solid var(--border);border-radius:8px;transition:box-shadow .15s">
-                      <span style="position:absolute;left:-26px;top:18px;width:14px;height:14px;border-radius:50%;background:${st.color};border:2px solid var(--card);box-shadow:0 0 0 2px ${st.bg};display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:white">${st.emoji}</span>
+                    <div class="timeline-entry" style="position:relative;display:flex;align-items:flex-start;gap:14px;padding:12px 14px;margin:8px 0;background:var(--surface);border:1px solid var(--border);border-radius:8px;transition:box-shadow .15s">
+                      <span style="position:absolute;left:-26px;top:18px;width:14px;height:14px;border-radius:50%;background:${st.color};border:2px solid var(--surface);box-shadow:0 0 0 2px ${st.bg};display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:white">${st.emoji}</span>
                       <div style="min-width:96px;display:flex;align-items:center;gap:8px">
                         <div class="employee-avatar" style="width:30px;height:30px;font-size:13px">${escapeHtml((t.employeeName || t.employee || '?').slice(0,1))}</div>
                         <div style="font-weight:500;font-size:13px">${escapeHtml(t.employeeName || t.employee)}</div>
                       </div>
                       <div style="flex:1;min-width:0">
+                        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px">
+                          ${t.category ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${catColor}14;color:${catColor};letter-spacing:.03em">${escapeHtml(t.category)}</span>` : ''}
+                          ${t.subcategory ? `<span style="font-size:10px;font-weight:500;padding:2px 7px;border-radius:4px;background:var(--bg);color:var(--text-muted)">${escapeHtml(t.subcategory)}</span>` : ''}
+                        </div>
                         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                           <span style="font-weight:600;font-size:14px">${escapeHtml(t.title)}</span>
                           <span class="badge-role" style="background:${st.bg};color:${st.color};white-space:nowrap;font-size:11px;padding:2px 8px">${st.emoji} ${escapeHtml(t.status)}</span>
+                          ${todos.length > 0 ? `<span style="font-size:11px;color:var(--text-muted);font-weight:500">📝 ${doneCount}/${todos.length}</span>` : ''}
                         </div>
-                        ${t.notes ? `<div style="margin-top:4px;font-size:13px;color:var(--text-muted);line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(t.notes)}</div>` : ''}
+                        ${todos.length > 0 ? `
+                          <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px">
+                            ${todos.map((td, ti) => `
+                              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${td.done ? 'var(--text-muted)' : 'var(--text)'};cursor:pointer">
+                                <input type="checkbox" class="dp-todo-tick" data-task-id="${escapeHtml(t.id)}" data-todo-idx="${ti}" ${td.done ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;flex-shrink:0">
+                                <span style="${td.done ? 'text-decoration:line-through' : ''}">${escapeHtml(td.text)}</span>
+                              </label>
+                            `).join('')}
+                          </div>
+                        ` : ''}
+                        ${t.notes ? `<div style="margin-top:6px;font-size:13px;color:var(--text-muted);line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(t.notes)}</div>` : ''}
                       </div>
                       <div style="white-space:nowrap;display:flex;gap:2px">
                         ${canEdit ? `
@@ -3078,6 +3139,22 @@ const App = {
     document.querySelectorAll('[data-dp-del]').forEach(p => {
       p.addEventListener('click', () => this.deleteDailyTask(p.dataset.dpDel));
     });
+    // 行內待辦勾選 (timeline 內 checkbox 切換)
+    document.querySelectorAll('.dp-todo-tick').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const taskId = cb.dataset.taskId;
+        const todoIdx = +cb.dataset.todoIdx;
+        const list = Store.get(Store.KEYS.dailyTasks, []);
+        const i = list.findIndex(x => x.id === taskId);
+        if (i < 0) return;
+        if (!Array.isArray(list[i].todos)) list[i].todos = [];
+        if (list[i].todos[todoIdx]) {
+          list[i].todos[todoIdx].done = cb.checked;
+          Store.set(Store.KEYS.dailyTasks, list);
+          this.render();
+        }
+      });
+    });
   },
 
   openDailyTaskModal(deptId, taskId) {
@@ -3096,15 +3173,53 @@ const App = {
     const t = existing || {
       employee: defaultEmp,
       date: todayStr(),
+      category: TASK_CATEGORY_NAMES[0],
+      subcategory: '',
       title: '',
       status: '進行中',
       notes: '',
+      todos: [],
     };
+    // 舊資料相容
+    if (!Array.isArray(t.todos)) t.todos = [];
 
     if (members.length === 0) {
       showToast(`${dept.name}辦公室尚無成員，請先至帳號管理新增`, 'error');
       return;
     }
+
+    // 建立分類下拉選項
+    const categoryOptions = TASK_CATEGORY_NAMES.map(name =>
+      `<option value="${escapeHtml(name)}" ${name === t.category ? 'selected' : ''}>${escapeHtml(name)}</option>`
+    ).join('');
+
+    // 依分類產生子項下拉的 HTML（支援 optgroup）
+    const buildSubOptions = (catName, selected) => {
+      const meta = getCategoryMeta(catName);
+      if (!meta) return '<option value="">—</option>';
+      if (meta.groups) {
+        return '<option value="">— 請選擇 —</option>' + meta.groups.map(g =>
+          `<optgroup label="${escapeHtml(g.name)}">${g.items.map(it =>
+            `<option value="${escapeHtml(it)}" ${it === selected ? 'selected' : ''}>${escapeHtml(it)}</option>`
+          ).join('')}</optgroup>`
+        ).join('');
+      }
+      if (meta.items && meta.items.length) {
+        return '<option value="">— 請選擇 —</option>' + meta.items.map(it =>
+          `<option value="${escapeHtml(it)}" ${it === selected ? 'selected' : ''}>${escapeHtml(it)}</option>`
+        ).join('');
+      }
+      return '<option value="">（此分類無子項）</option>';
+    };
+
+    // todos 列表 HTML
+    const todoRowHtml = (text, done, idx) => `
+      <div class="todo-row" data-todo-idx="${idx}" style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg);border-radius:6px;margin-bottom:4px">
+        <input type="checkbox" class="todo-done" ${done ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;flex-shrink:0">
+        <input type="text" class="todo-text" value="${escapeHtml(text)}" placeholder="輸入待辦事項" style="flex:1;border:0;background:transparent;font-size:13px;padding:2px;outline:none;${done ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">
+        <button type="button" class="todo-del icon-btn" style="width:24px;height:24px;font-size:11px;flex-shrink:0">✕</button>
+      </div>
+    `;
 
     this.openModal({
       title: isEdit ? '編輯工作進度' : '新增工作進度',
@@ -3121,6 +3236,16 @@ const App = {
             </select>
           </div>
         </div>
+        <div class="field-row">
+          <div class="field">
+            <label>工作內容分類</label>
+            <select id="dpf-category">${categoryOptions}</select>
+          </div>
+          <div class="field">
+            <label>子項</label>
+            <select id="dpf-subcategory">${buildSubOptions(t.category, t.subcategory)}</select>
+          </div>
+        </div>
         <div class="field">
           <label>工作項目</label>
           <input id="dpf-title" value="${escapeHtml(t.title)}" placeholder="例：完成母親節主視覺 IG 貼文 5 張" required>
@@ -3132,16 +3257,74 @@ const App = {
           </select>
         </div>
         <div class="field">
+          <label style="display:flex;align-items:center;justify-content:space-between">
+            <span>待辦事項 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（可拆解此工作的小任務）</span></span>
+            <button type="button" id="dpf-todo-add" style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:white;color:var(--text);font-size:11px;font-weight:600;cursor:pointer">+ 新增一項</button>
+          </label>
+          <div id="dpf-todos">
+            ${t.todos.map((td, i) => todoRowHtml(td.text || '', td.done || false, i)).join('')}
+          </div>
+        </div>
+        <div class="field">
           <label>備註 / 進度說明（選填）</label>
           <textarea id="dpf-notes" rows="3" placeholder="可填寫遇到的問題、完成比例、需要的支援等" style="font-family:inherit;resize:vertical">${escapeHtml(t.notes || '')}</textarea>
         </div>
       `,
+      onMount: () => {
+        // 分類切換時，子項下拉同步更新
+        const catEl = document.getElementById('dpf-category');
+        const subEl = document.getElementById('dpf-subcategory');
+        if (catEl && subEl) {
+          catEl.addEventListener('change', () => {
+            subEl.innerHTML = buildSubOptions(catEl.value, '');
+          });
+        }
+        // todos 互動
+        const todosWrap = document.getElementById('dpf-todos');
+        let todoCounter = t.todos.length;
+        if (todosWrap) {
+          todosWrap.addEventListener('click', (e) => {
+            if (e.target.classList.contains('todo-del')) {
+              e.target.closest('.todo-row')?.remove();
+            }
+          });
+          todosWrap.addEventListener('change', (e) => {
+            if (e.target.classList.contains('todo-done')) {
+              const row = e.target.closest('.todo-row');
+              const txt = row?.querySelector('.todo-text');
+              if (txt) {
+                txt.style.textDecoration = e.target.checked ? 'line-through' : 'none';
+                txt.style.color = e.target.checked ? 'var(--text-muted)' : 'var(--text)';
+              }
+            }
+          });
+        }
+        const addBtn = document.getElementById('dpf-todo-add');
+        if (addBtn && todosWrap) {
+          addBtn.addEventListener('click', () => {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = todoRowHtml('', false, todoCounter++).trim();
+            const newRow = tmp.firstChild;
+            todosWrap.appendChild(newRow);
+            newRow.querySelector('.todo-text')?.focus();
+          });
+        }
+      },
       onSave: () => {
         const date = document.getElementById('dpf-date').value;
         const employee = document.getElementById('dpf-emp').value;
+        const category = document.getElementById('dpf-category').value;
+        const subcategory = document.getElementById('dpf-subcategory').value;
         const title = document.getElementById('dpf-title').value.trim();
         const status = document.getElementById('dpf-status').value;
         const notes = document.getElementById('dpf-notes').value.trim();
+        const todos = Array.from(document.querySelectorAll('#dpf-todos .todo-row'))
+          .map(row => ({
+            text: row.querySelector('.todo-text')?.value.trim() || '',
+            done: row.querySelector('.todo-done')?.checked || false,
+          }))
+          .filter(td => td.text !== '');
+
         if (!date) { showToast('請選擇日期', 'error'); return false; }
         if (!title) { showToast('請填寫工作項目', 'error'); return false; }
         if (!employee) { showToast('請選擇員工', 'error'); return false; }
@@ -3152,7 +3335,7 @@ const App = {
         if (isEdit) {
           const i = list.findIndex(x => x.id === taskId);
           if (i < 0) { showToast('找不到此筆紀錄', 'error'); return false; }
-          list[i] = { ...list[i], date, employee, employeeName, title, status, notes };
+          list[i] = { ...list[i], date, employee, employeeName, category, subcategory, title, status, notes, todos };
         } else {
           list.push({
             id: genId(),
@@ -3160,9 +3343,12 @@ const App = {
             date,
             employee,
             employeeName,
+            category,
+            subcategory,
             title,
             status,
             notes,
+            todos,
             createdAt: Date.now(),
             createdBy: this.currentUser?.username || '',
           });
