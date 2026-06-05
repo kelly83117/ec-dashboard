@@ -1870,38 +1870,71 @@ const App = {
       .filter(u => getUserDepts(u).includes(dept.name));
 
     // filter 狀態
-    if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0 };
+    if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0, viewMode: 'week', monthOffset: 0 };
     const f = this.filter.dashboardMarketing;
+    if (!f.viewMode) f.viewMode = 'week';
+    if (f.monthOffset == null) f.monthOffset = 0;
+    const isMonthMode = f.viewMode === 'month';
     const weekOffset = f.weekOffset || 0;
+    const monthOffset = f.monthOffset || 0;
 
-    // 計算當週週一（以週一為一週起點）
     const now = new Date();
-    const dayOfWeek = now.getDay(); // 0=週日, 1=週一, ..., 6=週六
-    const offsetToMon = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek); // 回到週一
-    const monday = addDays(now, offsetToMon + weekOffset * 7);
-    const weekDates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
-    const weekStartStr = toDateStr(weekDates[0]);
-    const weekEndStr   = toDateStr(weekDates[6]);
-    const weekLabel = weekOffset === 0 ? '本週'
-                    : weekOffset === -1 ? '上週'
-                    : weekOffset === 1  ? '下週'
-                    : `${weekOffset > 0 ? '+' : ''}${weekOffset} 週`;
+    const todayStr2 = toDateStr(now);
+    const weekDayNames = ['週一','週二','週三','週四','週五','週六','週日'];
+
+    // 計算範圍：依檢視模式
+    let rangeStart, rangeEnd, headerLabel, datesInGrid, gridCols, gridRows;
+    let displayLabel; // 例如 "本週" / "6/01 – 6/07" / "2026 年 6 月"
+
+    if (isMonthMode) {
+      // 月檢視：取得目標月份的第一天
+      const target = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+      const yMonth = target.getFullYear();
+      const mMonth = target.getMonth();
+      const firstOfMonth = new Date(yMonth, mMonth, 1);
+      const lastOfMonth = new Date(yMonth, mMonth + 1, 0);
+      // 從第一天前推到週一
+      const dow = firstOfMonth.getDay();
+      const firstMondayOffset = dow === 0 ? -6 : 1 - dow;
+      const gridStart = addDays(firstOfMonth, firstMondayOffset);
+      // 計算所需週數（5 或 6）
+      const totalDays = lastOfMonth.getDate() - firstMondayOffset;
+      const weeks = Math.ceil(totalDays / 7);
+      datesInGrid = Array.from({ length: weeks * 7 }, (_, i) => addDays(gridStart, i));
+      rangeStart = toDateStr(firstOfMonth);
+      rangeEnd = toDateStr(lastOfMonth);
+      gridCols = 7;
+      gridRows = weeks;
+      headerLabel = `${yMonth} 年 ${mMonth + 1} 月`;
+      displayLabel = monthOffset === 0 ? '本月' : monthOffset === -1 ? '上月' : monthOffset === 1 ? '下月' : `${monthOffset > 0 ? '+' : ''}${monthOffset} 月`;
+    } else {
+      // 週檢視
+      const dayOfWeek = now.getDay();
+      const offsetToMon = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
+      const monday = addDays(now, offsetToMon + weekOffset * 7);
+      datesInGrid = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+      rangeStart = toDateStr(datesInGrid[0]);
+      rangeEnd = toDateStr(datesInGrid[6]);
+      gridCols = 7;
+      gridRows = 1;
+      headerLabel = `${rangeStart.slice(5).replace('-','/')} – ${rangeEnd.slice(5).replace('-','/')}`;
+      displayLabel = weekOffset === 0 ? '本週' : weekOffset === -1 ? '上週' : weekOffset === 1 ? '下週' : `${weekOffset > 0 ? '+' : ''}${weekOffset} 週`;
+    }
 
     // 套人員篩選
-    let tasksForWeek = tasks.filter(t => t.date >= weekStartStr && t.date <= weekEndStr);
+    let tasksInRange = tasks.filter(t => t.date >= rangeStart && t.date <= rangeEnd);
     if (f.employee && f.employee !== 'all') {
-      tasksForWeek = tasksForWeek.filter(t => t.employee === f.employee);
+      tasksInRange = tasksInRange.filter(t => t.employee === f.employee);
     }
-    // 依日期分群
     const byDate = {};
-    weekDates.forEach(d => byDate[toDateStr(d)] = []);
-    tasksForWeek.forEach(t => {
+    datesInGrid.forEach(d => { byDate[toDateStr(d)] = []; });
+    tasksInRange.forEach(t => {
       if (byDate[t.date]) byDate[t.date].push(t);
     });
 
-    // 計算當週未完成的待辦
+    // 未完成待辦
     const pendingTodos = [];
-    tasksForWeek.forEach(t => {
+    tasksInRange.forEach(t => {
       const todos = Array.isArray(t.todos) ? t.todos : [];
       todos.forEach((td, idx) => {
         if (!td.done && td.text) {
@@ -1910,61 +1943,108 @@ const App = {
       });
     });
 
-    const todayStr2 = toDateStr(now);
-    const weekDayNames = ['週一','週二','週三','週四','週五','週六','週日'];
-
     const employeeOptions = `
       <option value="all" ${(f.employee || 'all') === 'all' ? 'selected' : ''}>全部人員</option>
       ${members.map(u => `<option value="${escapeHtml(u.username)}" ${f.employee === u.username ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
     `;
 
-    // 各日欄位
-    const columnsHtml = weekDates.map((d, i) => {
-      const dateStr = toDateStr(d);
-      const isToday = dateStr === todayStr2;
-      const dayTasks = byDate[dateStr] || [];
+    // === 月檢視：5-6 列 × 7 欄；每格較緊湊 ===
+    // === 週檢視：1 列 × 7 欄；每格寬鬆 ===
+    let calendarBody = '';
 
-      const taskCardsHtml = dayTasks.length === 0
-        ? `<div style="padding:14px 8px;text-align:center;color:#cbd5e1;font-size:11px">—</div>`
-        : dayTasks.map(t => {
-            const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
-            const catMeta = t.category ? getCategoryMeta(t.category) : null;
-            const catColor = catMeta?.color || '#6b7280';
-            const todos = Array.isArray(t.todos) ? t.todos : [];
-            const doneCount = todos.filter(td => td.done).length;
-            return `
-              <div data-cal-task="${escapeHtml(t.id)}" style="background:white;border:1px solid var(--border);border-left:3px solid ${catColor};border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)'" onmouseout="this.style.boxShadow='none'">
-                <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
-                  ${t.category ? `<span style="font-size:9px;font-weight:700;color:${catColor};letter-spacing:.03em">${escapeHtml(t.category)}</span>` : ''}
-                  ${t.subcategory ? `<span style="font-size:9px;color:var(--text-muted)">· ${escapeHtml(t.subcategory)}</span>` : ''}
-                  <span style="margin-left:auto;font-size:11px">${st.emoji}</span>
-                </div>
-                <div style="font-size:12px;font-weight:600;line-height:1.35;color:var(--text);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${escapeHtml(t.title)}</div>
-                <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:10px;color:var(--text-muted)">
-                  <span>${escapeHtml(t.employeeName || t.employee)}</span>
-                  ${todos.length > 0 ? `<span style="margin-left:auto">📝 ${doneCount}/${todos.length}</span>` : ''}
-                </div>
-              </div>
-            `;
-          }).join('');
-
-      return `
-        <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:${i < 6 ? '1px solid var(--border)' : '0'};background:${isToday ? '#eef2ff44' : 'transparent'}">
-          <div style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);${isToday ? `background:var(--primary);color:white` : ''}">
-            <div style="font-size:10px;font-weight:600;${isToday ? 'color:white' : 'color:var(--text-muted)'};letter-spacing:.05em">${weekDayNames[i]}</div>
-            <div style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;${isToday ? 'color:white' : 'color:var(--text)'}">${d.getMonth()+1}/${d.getDate()}</div>
-          </div>
-          <div style="padding:6px;flex:1;min-height:110px">
-            ${taskCardsHtml}
-          </div>
+    if (isMonthMode) {
+      const targetMonth = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1).getMonth();
+      // 頂部週名稱
+      const headRow = `
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid var(--border);background:var(--bg)">
+          ${weekDayNames.map(n => `<div style="padding:6px 8px;font-size:10px;font-weight:600;color:var(--text-muted);letter-spacing:.05em;text-align:center">${n}</div>`).join('')}
         </div>
       `;
-    }).join('');
+      const cellsHtml = datesInGrid.map((d, i) => {
+        const ds = toDateStr(d);
+        const isToday = ds === todayStr2;
+        const isCurrentMonth = d.getMonth() === targetMonth;
+        const dayTasks = byDate[ds] || [];
+        const more = dayTasks.length - 2;
+        const taskMini = dayTasks.slice(0, 2).map(t => {
+          const catMeta = t.category ? getCategoryMeta(t.category) : null;
+          const catColor = catMeta?.color || '#6b7280';
+          const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', emoji: '•' };
+          return `
+            <div data-cal-task="${escapeHtml(t.id)}" style="background:white;border-left:3px solid ${catColor};border-radius:3px;padding:2px 4px;margin-bottom:2px;cursor:pointer;font-size:10px;line-height:1.3;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(t.title)}${t.employeeName ? ' · ' + escapeHtml(t.employeeName) : ''}">
+              <span style="color:${st.color}">${st.emoji}</span> ${escapeHtml(t.title)}
+            </div>
+          `;
+        }).join('');
 
-    // 未完成待辦清單
+        return `
+          <div style="border-right:${(i+1) % 7 === 0 ? '0' : '1px solid var(--border)'};border-bottom:${i < (gridRows-1)*7 ? '1px solid var(--border)' : '0'};padding:4px 5px;min-height:78px;display:flex;flex-direction:column;background:${isToday ? '#eef2ff44' : 'transparent'};opacity:${isCurrentMonth ? 1 : 0.4}">
+            <div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:3px">
+              <span style="display:inline-flex;align-items:center;justify-content:center;${isToday ? `background:var(--primary);color:white;width:20px;height:20px;border-radius:50%;font-size:11px;font-weight:700` : 'font-size:11px;color:var(--text-muted);font-weight:500'}">${d.getDate()}</span>
+            </div>
+            <div style="flex:1;min-height:0">
+              ${taskMini}
+              ${more > 0 ? `<div style="font-size:9px;color:var(--text-muted);font-weight:600;padding:1px 4px">+${more}</div>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+      calendarBody = `
+        ${headRow}
+        <div style="display:grid;grid-template-columns:repeat(7,1fr)">
+          ${cellsHtml}
+        </div>
+      `;
+    } else {
+      const columnsHtml = datesInGrid.map((d, i) => {
+        const dateStr = toDateStr(d);
+        const isToday = dateStr === todayStr2;
+        const dayTasks = byDate[dateStr] || [];
+
+        const taskCardsHtml = dayTasks.length === 0
+          ? `<div style="padding:14px 8px;text-align:center;color:#cbd5e1;font-size:11px">—</div>`
+          : dayTasks.map(t => {
+              const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
+              const catMeta = t.category ? getCategoryMeta(t.category) : null;
+              const catColor = catMeta?.color || '#6b7280';
+              const todos = Array.isArray(t.todos) ? t.todos : [];
+              const doneCount = todos.filter(td => td.done).length;
+              return `
+                <div data-cal-task="${escapeHtml(t.id)}" style="background:white;border:1px solid var(--border);border-left:3px solid ${catColor};border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)'" onmouseout="this.style.boxShadow='none'">
+                  <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+                    ${t.category ? `<span style="font-size:9px;font-weight:700;color:${catColor};letter-spacing:.03em">${escapeHtml(t.category)}</span>` : ''}
+                    ${t.subcategory ? `<span style="font-size:9px;color:var(--text-muted)">· ${escapeHtml(t.subcategory)}</span>` : ''}
+                    <span style="margin-left:auto;font-size:11px">${st.emoji}</span>
+                  </div>
+                  <div style="font-size:12px;font-weight:600;line-height:1.35;color:var(--text);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${escapeHtml(t.title)}</div>
+                  <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:10px;color:var(--text-muted)">
+                    <span>${escapeHtml(t.employeeName || t.employee)}</span>
+                    ${todos.length > 0 ? `<span style="margin-left:auto">📝 ${doneCount}/${todos.length}</span>` : ''}
+                  </div>
+                </div>
+              `;
+            }).join('');
+
+        return `
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:${i < 6 ? '1px solid var(--border)' : '0'};background:${isToday ? '#eef2ff44' : 'transparent'}">
+            <div style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);${isToday ? `background:var(--primary);color:white` : ''}">
+              <div style="font-size:10px;font-weight:600;${isToday ? 'color:white' : 'color:var(--text-muted)'};letter-spacing:.05em">${weekDayNames[i]}</div>
+              <div style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;${isToday ? 'color:white' : 'color:var(--text)'}">${d.getMonth()+1}/${d.getDate()}</div>
+            </div>
+            <div style="padding:6px;flex:1;min-height:110px">
+              ${taskCardsHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+      calendarBody = `<div style="display:flex">${columnsHtml}</div>`;
+    }
+
+    // 未完成待辦
+    const scopeLabel = isMonthMode ? '本月' : '本週';
     const pendingHtml = pendingTodos.length === 0
-      ? `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">本週沒有待辦事項 🎉</div>`
-      : pendingTodos.slice(0, 20).map(({ task, todoIdx, text }) => {
+      ? `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">${scopeLabel}沒有待辦事項 🎉</div>`
+      : pendingTodos.slice(0, 40).map(({ task, todoIdx, text }) => {
           const catMeta = task.category ? getCategoryMeta(task.category) : null;
           const catColor = catMeta?.color || '#6b7280';
           return `
@@ -1978,18 +2058,27 @@ const App = {
           `;
         }).join('');
 
+    // 上一個 / 下一個 按鈕：依模式而定
+    const prevOffset = isMonthMode ? monthOffset - 1 : weekOffset - 1;
+    const nextOffset = isMonthMode ? monthOffset + 1 : weekOffset + 1;
+    const offsetAttr = isMonthMode ? 'data-month-offset' : 'data-week-offset';
+
     return `
       <div style="display:grid;grid-template-columns:1fr 340px;gap:14px;align-items:start">
         <div class="table-card">
           <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 16px">
-            <div style="display:flex;align-items:center;gap:10px">
-              <h3 style="margin:0;font-size:14px;font-weight:600">工作週曆</h3>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <h3 style="margin:0;font-size:14px;font-weight:600">工作${isMonthMode ? '月' : '週'}曆</h3>
               <div style="display:flex;align-items:center;gap:4px">
-                <button class="pill" data-week-offset="${weekOffset - 1}" title="上一週" style="padding:3px 8px;font-size:11px">←</button>
-                <button class="pill ${weekOffset === 0 ? 'active' : ''}" data-week-offset="0" style="padding:3px 10px;font-size:11px;min-width:60px">${weekLabel}</button>
-                <button class="pill" data-week-offset="${weekOffset + 1}" title="下一週" style="padding:3px 8px;font-size:11px">→</button>
+                <button class="pill" ${offsetAttr}="${prevOffset}" title="上一個" style="padding:3px 8px;font-size:11px">←</button>
+                <button class="pill active" ${offsetAttr}="0" style="padding:3px 10px;font-size:11px;min-width:60px">${displayLabel}</button>
+                <button class="pill" ${offsetAttr}="${nextOffset}" title="下一個" style="padding:3px 8px;font-size:11px">→</button>
               </div>
-              <span style="font-size:11px;color:var(--text-muted)">${weekStartStr.slice(5).replace('-','/')} – ${weekEndStr.slice(5).replace('-','/')}</span>
+              <div style="display:flex;align-items:center;gap:4px;padding-left:6px;border-left:1px solid var(--border);margin-left:4px">
+                <button class="pill ${!isMonthMode ? 'active' : ''}" data-view-mode="week" style="padding:3px 10px;font-size:11px">週</button>
+                <button class="pill ${isMonthMode ? 'active' : ''}" data-view-mode="month" style="padding:3px 10px;font-size:11px">月</button>
+              </div>
+              <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(headerLabel)}</span>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
               <span style="font-size:12px;color:var(--text-muted)">人員</span>
@@ -1999,11 +2088,11 @@ const App = {
               <button class="btn-add" data-cal-add="${escapeHtml(deptId)}" style="padding:5px 12px;font-size:12px">+ 新增進度</button>
             </div>
           </div>
-          <div style="display:flex;border-top:1px solid var(--border)">${columnsHtml}</div>
+          <div style="border-top:1px solid var(--border)">${calendarBody}</div>
         </div>
         <div class="table-card" style="position:sticky;top:14px">
           <div class="table-card-header" style="padding:12px 16px">
-            <h3 style="margin:0;font-size:14px;font-weight:600">未完成待辦事項 <span style="font-size:11px;color:var(--text-muted);font-weight:500">· 本週 ${pendingTodos.length} 項</span></h3>
+            <h3 style="margin:0;font-size:14px;font-weight:600">未完成待辦事項 <span style="font-size:11px;color:var(--text-muted);font-weight:500">· ${scopeLabel} ${pendingTodos.length} 項</span></h3>
             <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted)">打勾即標記完成</p>
           </div>
           <div style="max-height:540px;overflow-y:auto">${pendingHtml}</div>
@@ -3003,18 +3092,43 @@ const App = {
 
   /* ------------- 工作週曆事件綁定 ------------- */
   bindWeeklyCalendar(deptId) {
+    const ensureFilter = () => {
+      if (!this.filter.dashboardMarketing) {
+        this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0, monthOffset: 0, viewMode: 'week' };
+      }
+    };
     // 人員下拉
     const emp = document.getElementById('dash-mkt-emp');
     if (emp) emp.addEventListener('change', () => {
-      if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0 };
+      ensureFilter();
       this.filter.dashboardMarketing.employee = emp.value;
       this.render();
     });
     // 切換週
     document.querySelectorAll('[data-week-offset]').forEach(btn => {
       btn.addEventListener('click', () => {
-        if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0 };
+        ensureFilter();
         this.filter.dashboardMarketing.weekOffset = +btn.dataset.weekOffset;
+        this.render();
+      });
+    });
+    // 切換月
+    document.querySelectorAll('[data-month-offset]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ensureFilter();
+        this.filter.dashboardMarketing.monthOffset = +btn.dataset.monthOffset;
+        this.render();
+      });
+    });
+    // 切換週 / 月 模式
+    document.querySelectorAll('[data-view-mode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ensureFilter();
+        const m = btn.dataset.viewMode;
+        this.filter.dashboardMarketing.viewMode = m;
+        // 切到月模式時重設 monthOffset 為 0（本月）
+        if (m === 'month') this.filter.dashboardMarketing.monthOffset = 0;
+        else this.filter.dashboardMarketing.weekOffset = 0;
         this.render();
       });
     });
