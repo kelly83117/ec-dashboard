@@ -1093,7 +1093,7 @@ const TASK_CATEGORIES = [
   {
     name: '影片拍攝',
     color: '#ec4899',
-    items: [],
+    items: ['室內', '戶外'],
   },
 ];
 const TASK_CATEGORY_NAMES = TASK_CATEGORIES.map(c => c.name);
@@ -3470,14 +3470,14 @@ const App = {
           </div>
         </div>
         <div class="field">
-          <label>工作項目</label>
-          <input id="dpf-title" value="${escapeHtml(t.title)}" placeholder="例：完成母親節主視覺 IG 貼文 5 張" required>
-        </div>
-        <div class="field">
           <label>狀態</label>
           <select id="dpf-status">
             ${DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === t.status ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('')}
           </select>
+        </div>
+        <div class="field">
+          <label>備註 / 進度說明</label>
+          <textarea id="dpf-notes" rows="3" placeholder="說明這次的工作內容、遇到的問題、需要的支援等" style="font-family:inherit;resize:vertical">${escapeHtml(t.notes || '')}</textarea>
         </div>
         <div class="field">
           <label style="display:flex;align-items:center;justify-content:space-between">
@@ -3487,10 +3487,6 @@ const App = {
           <div id="dpf-todos">
             ${t.todos.map((td, i) => todoRowHtml(td.text || '', td.done || false, i)).join('')}
           </div>
-        </div>
-        <div class="field">
-          <label>備註 / 進度說明（選填）</label>
-          <textarea id="dpf-notes" rows="3" placeholder="可填寫遇到的問題、完成比例、需要的支援等" style="font-family:inherit;resize:vertical">${escapeHtml(t.notes || '')}</textarea>
         </div>
       `,
       onMount: () => {
@@ -3538,7 +3534,6 @@ const App = {
         const employee = document.getElementById('dpf-emp').value;
         const category = document.getElementById('dpf-category').value;
         const subcategory = document.getElementById('dpf-subcategory').value;
-        const title = document.getElementById('dpf-title').value.trim();
         const status = document.getElementById('dpf-status').value;
         const notes = document.getElementById('dpf-notes').value.trim();
         const todos = Array.from(document.querySelectorAll('#dpf-todos .todo-row'))
@@ -3548,9 +3543,13 @@ const App = {
           }))
           .filter(td => td.text !== '');
 
+        // 標題自動由「備註首行 → 子項 → 分類」推導，行銷顯示用
+        const firstNoteLine = notes.split('\n')[0].trim();
+        const title = firstNoteLine.slice(0, 60) || subcategory || category || '(未填寫)';
+
         if (!date) { showToast('請選擇日期', 'error'); return false; }
-        if (!title) { showToast('請填寫工作項目', 'error'); return false; }
         if (!employee) { showToast('請選擇員工', 'error'); return false; }
+        if (!category) { showToast('請選擇工作內容分類', 'error'); return false; }
         const empUser = members.find(u => u.username === employee);
         const employeeName = empUser ? empUser.name : employee;
 
