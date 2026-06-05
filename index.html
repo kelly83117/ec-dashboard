@@ -1300,7 +1300,7 @@ function showToast(message, type = '') {
  * ============================================================ */
 const App = {
   route: 'employees',
-  filter: { dept: 'all', quarter: 'all', range: 'today', customStart: '', customEnd: '', officeTab: {}, dailyProgress: { employee: 'all', status: 'all', dateFrom: '', dateTo: '' } },
+  filter: { dept: 'all', quarter: 'all', range: 'today', customStart: '', customEnd: '', officeTab: {}, dailyProgress: { employee: 'all', status: 'all', dateFrom: '', dateTo: '' }, dashboardMarketing: { employee: 'all' } },
 
   init() {
     seedData();
@@ -1822,6 +1822,75 @@ const App = {
         <div style="display:flex">${revenueTableHtml}</div>
         <div style="display:flex">${this.dailyLineChartHtml(platforms)}</div>
       </div>
+      ${this.marketingProgressDashboardHtml()}
+    `;
+  },
+
+  /* ============================================================
+   *  儀表板首頁 - 行銷每日工作進度區塊
+   * ============================================================ */
+  marketingProgressDashboardHtml() {
+    const departments = Store.get(Store.KEYS.departments, []);
+    const dept = departments.find(d => d.id === 'd1');
+    if (!dept) return '';
+    const allTasks = Store.get(Store.KEYS.dailyTasks, []);
+    const tasks = allTasks.filter(t => t.deptId === 'd1');
+    const members = (Store.get(Store.KEYS.users, []))
+      .filter(u => getUserDepts(u).includes(dept.name));
+
+    // filter 狀態
+    const f = this.filter.dashboardMarketing || { employee: 'all' };
+    let filtered = tasks.slice();
+    if (f.employee && f.employee !== 'all') {
+      filtered = filtered.filter(t => t.employee === f.employee);
+    }
+    // 排序：日期 desc → createdAt desc
+    filtered.sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+    // 取最近 8 筆
+    const recent = filtered.slice(0, 8);
+
+    const employeeOptions = `
+      <option value="all" ${(f.employee || 'all') === 'all' ? 'selected' : ''}>全部人員</option>
+      ${members.map(u => `<option value="${escapeHtml(u.username)}" ${f.employee === u.username ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
+    `;
+
+    const rowsHtml = recent.length === 0
+      ? `<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">
+          ${tasks.length === 0 ? '行銷團隊尚未填寫任何工作進度' : '此人員沒有工作進度紀錄'}
+        </div>`
+      : recent.map(t => {
+          const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
+          return `
+            <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)">
+              <span style="font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:64px">${escapeHtml(t.date.slice(5).replace('-', '/'))}</span>
+              <div style="width:24px;height:24px;border-radius:50%;background:var(--bg);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--text-muted);flex-shrink:0">${escapeHtml((t.employeeName || t.employee || '?').slice(0,1))}</div>
+              <span style="font-size:12px;color:var(--text);font-weight:500;min-width:60px">${escapeHtml(t.employeeName || t.employee)}</span>
+              <span style="font-size:13px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.title)}</span>
+              <span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;background:${st.bg};color:${st.color};font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0">${st.emoji} ${escapeHtml(t.status)}</span>
+            </div>
+          `;
+        }).join('');
+
+    return `
+      <div class="table-card" style="margin-top:14px">
+        <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 16px">
+          <div>
+            <h3 style="margin:0;font-size:14px;font-weight:600">行銷每日工作進度</h3>
+            <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted)">最近 ${recent.length} 筆 · 共 ${tasks.length} 筆紀錄</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:12px;color:var(--text-muted)">人員</span>
+            <select id="dash-mkt-emp" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;font-family:inherit;cursor:pointer">
+              ${employeeOptions}
+            </select>
+            <button class="pill" data-nav-to="office-d1" style="font-size:11px;padding:5px 10px">查看全部 →</button>
+          </div>
+        </div>
+        <div>${rowsHtml}</div>
+      </div>
     `;
   },
 
@@ -2188,6 +2257,19 @@ const App = {
         this.render();
       });
     }
+    // 行銷每日工作進度 - 人員下拉
+    const dashMktEmp = document.getElementById('dash-mkt-emp');
+    if (dashMktEmp) {
+      dashMktEmp.addEventListener('change', () => {
+        if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all' };
+        this.filter.dashboardMarketing.employee = dashMktEmp.value;
+        this.render();
+      });
+    }
+    // 「查看全部」按鈕 → 跳到行銷辦公室
+    document.querySelectorAll('[data-nav-to]').forEach(btn => {
+      btn.addEventListener('click', () => this.navigate(btn.dataset.navTo));
+    });
   },
 
   /* ============================================================
