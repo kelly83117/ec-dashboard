@@ -2091,9 +2091,12 @@ const App = {
           <div style="border-top:1px solid var(--border)">${calendarBody}</div>
         </div>
         <div class="table-card" style="position:sticky;top:14px">
-          <div class="table-card-header" style="padding:12px 16px">
-            <h3 style="margin:0;font-size:14px;font-weight:600">未完成待辦事項 <span style="font-size:11px;color:var(--text-muted);font-weight:500">· ${scopeLabel} ${pendingTodos.length} 項</span></h3>
-            <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted)">打勾即標記完成</p>
+          <div class="table-card-header" style="padding:12px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div>
+              <h3 style="margin:0;font-size:14px;font-weight:600">未完成待辦事項 <span style="font-size:11px;color:var(--text-muted);font-weight:500">· ${scopeLabel} ${pendingTodos.length} 項</span></h3>
+              <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted)">打勾即標記完成</p>
+            </div>
+            <button class="btn-add" data-todo-quick-add="${escapeHtml(deptId)}" style="padding:5px 10px;font-size:11px;flex-shrink:0">+ 新增待辦</button>
           </div>
           <div style="max-height:540px;overflow-y:auto">${pendingHtml}</div>
         </div>
@@ -3140,6 +3143,10 @@ const App = {
     document.querySelectorAll('[data-cal-add]').forEach(btn => {
       btn.addEventListener('click', () => this.openDailyTaskModal(deptId));
     });
+    // 快速新增單一待辦
+    document.querySelectorAll('[data-todo-quick-add]').forEach(btn => {
+      btn.addEventListener('click', () => this.openQuickTodoModal(btn.dataset.todoQuickAdd));
+    });
     // 未完成待辦勾選
     document.querySelectorAll('.dp-todo-tick').forEach(cb => {
       cb.addEventListener('change', () => {
@@ -3595,6 +3602,91 @@ const App = {
     Store.set(Store.KEYS.dailyTasks, list.filter(x => x.id !== id));
     showToast('已刪除', 'success');
     this.render();
+  },
+
+  /* ------------- 快速新增單一待辦事項 ------------- */
+  openQuickTodoModal(deptId) {
+    const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
+    if (!dept) { showToast('找不到此辦公室', 'error'); return; }
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
+    if (members.length === 0) {
+      showToast(`${dept.name}辦公室尚無成員，請先至帳號管理新增`, 'error');
+      return;
+    }
+    const defaultEmp = (this.currentUser && getUserDepts(this.currentUser).includes(dept.name))
+      ? this.currentUser.username
+      : (members[0]?.username || '');
+
+    this.openModal({
+      title: '快速新增待辦',
+      bodyHtml: `
+        <div class="field-row">
+          <div class="field">
+            <label>日期</label>
+            <input type="date" id="qtf-date" value="${escapeHtml(todayStr())}" required>
+          </div>
+          <div class="field">
+            <label>負責人員</label>
+            <select id="qtf-emp">
+              ${members.map(u => `<option value="${escapeHtml(u.username)}" ${u.username === defaultEmp ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>分類（選填）</label>
+          <select id="qtf-category">
+            <option value="">— 不指定 —</option>
+            ${TASK_CATEGORY_NAMES.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>待辦內容</label>
+          <input id="qtf-text" placeholder="例：寄送 EDM 給合作品牌" required autofocus>
+        </div>
+        <div class="field" style="margin-top:4px;padding:10px 12px;background:#f59e0b14;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px;color:var(--text)">
+          ✓ 此待辦會建立一筆新的工作進度紀錄（狀態：進行中）
+        </div>
+      `,
+      onMount: () => {
+        const txt = document.getElementById('qtf-text');
+        if (txt) txt.focus();
+      },
+      saveLabel: '新增',
+      onSave: () => {
+        const date = document.getElementById('qtf-date').value;
+        const employee = document.getElementById('qtf-emp').value;
+        const category = document.getElementById('qtf-category').value;
+        const text = document.getElementById('qtf-text').value.trim();
+        if (!date) { showToast('請選擇日期', 'error'); return false; }
+        if (!employee) { showToast('請選擇人員', 'error'); return false; }
+        if (!text) { showToast('請填寫待辦內容', 'error'); return false; }
+
+        const empUser = members.find(u => u.username === employee);
+        const employeeName = empUser ? empUser.name : employee;
+        const title = text.slice(0, 60);
+
+        const list = Store.get(Store.KEYS.dailyTasks, []);
+        list.push({
+          id: genId(),
+          deptId,
+          date,
+          employee,
+          employeeName,
+          category: category || '',
+          subcategory: '',
+          title,
+          status: '進行中',
+          notes: '',
+          todos: [{ text, done: false }],
+          createdAt: Date.now(),
+          createdBy: this.currentUser?.username || '',
+        });
+        Store.set(Store.KEYS.dailyTasks, list);
+        showToast('已新增待辦', 'success');
+        this.render();
+        return true;
+      },
+    });
   },
 
   /* ------------- 自助修改密碼 Modal ------------- */
