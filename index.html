@@ -3816,8 +3816,8 @@ th.tl{text-align:left;}
 td{padding:11px 10px;border-bottom:1px solid #f0f2f7;text-align:right;color:#374151;white-space:nowrap;font-size:13px;}
 td.tl{text-align:left;}
 tbody tr:hover td{background:#fafbff;}
-.td-code{font-family:'DM Mono',monospace;font-size:12px;color:#6b7280;}
-.td-id{font-family:'DM Mono',monospace;font-size:12px;color:#9ca3af;}
+.td-code{font-family:'DM Mono',monospace;font-size:12px;color:#6b7280;min-width:70px;}
+.td-id{font-family:'DM Mono',monospace;font-size:12px;color:#9ca3af;min-width:130px;}
 .td-name{font-weight:500;color:#1a1a2e;white-space:normal;max-width:200px;font-size:13px;}
 .td-num{font-family:'DM Mono',monospace;font-size:13px;}
 .td-pos{color:#10b981;font-weight:600;}.td-neg{color:#ef4444;font-weight:600;}.td-amber{color:#f59e0b;}
@@ -3863,6 +3863,19 @@ tbody tr:hover td{background:#fafbff;}
 .empty{padding:44px 24px;text-align:center;color:#9ca3af;display:flex;flex-direction:column;align-items:center;gap:10px;}
 .empty-icon{font-size:36px;}
 .empty-hint{font-size:13px;line-height:1.8;}
+
+/* Inline edit */
+.edit-btn{background:none;border:none;cursor:pointer;color:#d1d5db;font-size:13px;padding:0 3px;line-height:1;transition:color .12s;vertical-align:middle;}
+.edit-btn:hover{color:#5b5fcf;}
+.cell-val{display:inline;}
+.cell-edited{color:#5b5fcf;font-weight:600;}
+.inline-input{width:80px;padding:3px 6px;border:1.5px solid #5b5fcf;border-radius:5px;font-size:12px;font-family:'DM Mono',monospace;outline:none;background:#fff;text-align:right;}
+.inline-input.text-inp{width:120px;text-align:left;font-family:'Noto Sans TC',sans-serif;}
+.note-cell{max-width:160px;white-space:normal;font-size:12px;color:#6b7280;}
+.note-input{width:140px;padding:4px 7px;border:1.5px solid #5b5fcf;border-radius:5px;font-size:12px;font-family:'Noto Sans TC',sans-serif;outline:none;background:#fff;}
+.growth-pos{color:#10b981;font-weight:600;}
+.growth-neg{color:#ef4444;font-weight:600;}
+.growth-na{color:#9ca3af;}
 
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -4040,11 +4053,15 @@ function onMapFile(e){
           let sid=r2['商品ID'];if(!code||!sid)return;
           sid=Math.round(Number(sid)).toString();
           if(sid==='NaN'||sid==='0'||sid.length<5)return;
-          if(!globalMap[sk][code]){globalMap[sk][code]=[];cnt++;}
-          if(!globalMap[sk][code].includes(sid))globalMap[sk][code].push(sid);
+          if(!globalMap[sk][code]){globalMap[sk][code]={sids:[],name:''};cnt++;}
+          if(!globalMap[sk][code].sids.includes(sid))globalMap[sk][code].sids.push(sid);
+          // 記錄商品名稱（從清單的商品名稱欄位）
+          const pName=(r2['商品名稱']||r2['莫比克名']||'').trim();
+          if(pName&&!globalMap[sk][code].name)globalMap[sk][code].name=pName;
         });
       });
       SHOPS.forEach(s=>{state[s.id].rawMap=globalMap[s.id]||{};});
+      // 重建各賣場 rawMap（相容新格式）
       document.getElementById('uc-map-global').className='ucard ok';
       document.getElementById('ui-map-global').textContent='✅';
       document.getElementById('ut-map-global').textContent=file.name;
@@ -4100,6 +4117,39 @@ function setSpin(shop,show){document.getElementById('spin-'+shop).classList.togg
 function checkReady(shop){const s=state[shop];document.getElementById('gen-'+shop).disabled=!(s.rawMobic&&s.rawAds);}
 function getPlatformRate(){return(parseFloat(document.getElementById('platformRate').value)||20.5)/100;}
 
+// ── 取得對應的「上期」區間 key ──
+function getPrevPeriodKey(shop, month, half) {
+  const [y, m] = month.split('/').map(Number);
+  if (half === 'second') {
+    // 下半月 → 上半月（同月）
+    return lsKey(shop, month, 'first');
+  } else if (half === 'first') {
+    // 上半月 → 上個月下半月
+    const prevMonth = m === 1
+      ? `${y-1}/12`
+      : `${y}/${String(m-1).padStart(2,'0')}`;
+    return lsKey(shop, prevMonth, 'second');
+  } else {
+    // 整月 → 上個月整月
+    const prevMonth = m === 1
+      ? `${y-1}/12`
+      : `${y}/${String(m-1).padStart(2,'0')}`;
+    return lsKey(shop, prevMonth, 'full');
+  }
+}
+
+// 取得上期報表的 code→rev map
+function getPrevRevMap(shop, month, half) {
+  const key = getPrevPeriodKey(shop, month, half);
+  try {
+    const rep = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!rep || !rep.built) return {};
+    const map = {};
+    rep.built.forEach(r => { if (r.code && r.rev) map[r.code] = r.rev; });
+    return map;
+  } catch { return {}; }
+}
+
 // ── Generate ──
 function generate(shop){
   setSpin(shop,true);
@@ -4148,9 +4198,13 @@ function buildShop(shop,days){
     }
   });
 
-  const pm=s.rawMap||{};const adsByCode={};const directROIByCode={};const roiByCode={};const clicksByCode={};const sidsForCode={};
-  Object.entries(pm).forEach(([code,sids])=>{
+  const pm=s.rawMap||{};const adsByCode={};const directROIByCode={};const roiByCode={};const clicksByCode={};const sidsForCode={};const nameForCode={};
+  Object.entries(pm).forEach(([code,entry])=>{
+    // 相容新格式 {sids,name} 和舊格式 array
+    const sids=Array.isArray(entry)?entry:(entry.sids||[]);
+    const pName=Array.isArray(entry)?'':(entry.name||'');
     sidsForCode[code]=sids;
+    if(pName)nameForCode[code]=pName;
     sids.forEach(sid=>{
       if(adsById[sid])adsByCode[code]=(adsByCode[code]||0)+adsById[sid];
       if(directROIById[sid])directROIByCode[code]=directROIById[sid];
@@ -4158,14 +4212,23 @@ function buildShop(shop,days){
       if(clicksById[sid])clicksByCode[code]=(clicksByCode[code]||0)+clicksById[sid];
     });
   });
-  Object.keys(agg).forEach(code=>{if(sidsForCode[code])agg[code].shopeeIds=sidsForCode[code];});
+  Object.keys(agg).forEach(code=>{
+    if(sidsForCode[code])agg[code].shopeeIds=sidsForCode[code];
+  });
 
-  // 有廣告費但無銷售
+  // 有廣告費但無銷售：用商品清單的名稱
   Object.keys(adsByCode).forEach(code=>{
     if(!agg[code]){
-      agg[code]={code,name:'（有廣告費，無銷售紀錄）',qty:0,rev:0,cost:0,gross:0,stock:0,shopeeIds:sidsForCode[code]||[],fromMobic:false};
+      const sids=sidsForCode[code]||[];
+      // 找商品名稱：優先用清單的名稱
+      const pName=nameForCode[code]||'';
+      const displayName=pName||`（商品ID: ${sids[0]||'未知'}）`;
+      agg[code]={code,name:displayName,qty:0,rev:0,cost:0,gross:0,stock:0,shopeeIds:sids,fromMobic:false};
     }
   });
+
+  // 只有好麻吉才抓上期營收
+  const prevRevMap = shop==='好麻吉' ? getPrevRevMap(shop, s.curMonth, s.curHalf) : {};
 
   const built=Object.values(agg).map(p=>{
     const adsFee=adsByCode[p.code]||0;
@@ -4181,9 +4244,14 @@ function buildShop(shop,days){
     const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
     const dayBudget=days>0?adsFee/days:0;
     const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit);
+    // 上半月營收 & 成長比（只有好麻吉）
+    const prevRev = prevRevMap[p.code] ?? null;
+    const growthRate = (prevRev!==null && prevRev>0) ? (p.rev - prevRev) / prevRev : null;
+    const growthAnalysis = shop==='好麻吉' ? calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate) : null;
     return{code:p.code,name:p.name,shopeeIds:p.shopeeIds,qty:p.qty,rev:p.rev,gross:p.gross,
       adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,directROI,roi,roiDiff,
-      dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,analysis};
+      dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,analysis,
+      prevRev, growthRate, growthAnalysis};
   });
   built.sort((a,b)=>{if(!a.fromMobic&&b.fromMobic)return 1;if(a.fromMobic&&!b.fromMobic)return -1;return b.pureProfit-a.pureProfit;});
   return built;
@@ -4208,6 +4276,19 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit){
   if(N<=-2) return{label:'減200',cls:'tag-sub200'};
   if(N<=-1) return{label:'減100',cls:'tag-sub100'};
   return{label:'',cls:''};
+}
+
+// ── 成長比分析公式 ──
+function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate) {
+  // growthRate = (本期-上期)/上期，null 表示無上期資料
+  if (growthRate !== null && growthRate < -0.30) return { label:'🔴重跌品', cls:'tag-danger' };
+  if (growthRate !== null && growthRate > 0.30)  return { label:'🟢爆發品', cls:'tag-high' };
+  if (rev >= 10000)                              return { label:'👑高營收', cls:'tag-add300' };
+  if (rev >= 7000 && rev < 10000)               return { label:'🟨中營收', cls:'tag-add200' };
+  if (rev >= 5000 && rev < 7000)                return { label:'🟡發展品', cls:'tag-add100' };
+  if (pureRate < 0.20)                          return { label:'🔻低利品', cls:'tag-low' };
+  if (prevRev !== null && prevRev > 0 && (rev === 0 || rev === null)) return { label:'⚫斷銷品', cls:'tag-lose' };
+  return { label:'', cls:'' };
 }
 
 // ── Filters & Sort ──
@@ -4281,9 +4362,90 @@ function openFilter(shop,col,isNum,el){
 function outsideClick(e){if(openPopup&&!openPopup.contains(e.target)){closePopup();}}
 function closePopup(){if(openPopup){openPopup.remove();openPopup=null;document.removeEventListener('mousedown',outsideClick);}}
 
+// ── Edit overrides: edits[shop][code][col] = value, notes[shop][code] = text ──
+function getEdits(shop){
+  try{return JSON.parse(localStorage.getItem('ec_edits|'+shop)||'{}');}catch{return{};}
+}
+function saveEdits(shop,edits){
+  try{localStorage.setItem('ec_edits|'+shop,JSON.stringify(edits));}catch{}
+}
+function getNotes(shop){
+  try{return JSON.parse(localStorage.getItem('ec_notes|'+shop)||'{}');}catch{return{};}
+}
+function saveNotes(shop,notes){
+  try{localStorage.setItem('ec_notes|'+shop,JSON.stringify(notes));}catch{}
+}
+
+// 開始編輯數字
+function startEdit(shop,code,col,tdId){
+  const td=document.getElementById(tdId);if(!td)return;
+  const edits=getEdits(shop);
+  const r=state[shop]._built.find(x=>x.code===code);if(!r)return;
+  const cur=(edits[code]?.[col]!==undefined)?edits[code][col]:r[col];
+  const inp=document.createElement('input');
+  inp.type='number';inp.className='inline-input';inp.value=isFinite(cur)?+cur.toFixed(4):'';
+  inp.onblur=()=>commitEdit(shop,code,col,inp.value,tdId);
+  inp.onkeydown=(e)=>{if(e.key==='Enter')inp.blur();if(e.key==='Escape'){applyFilters(shop);}};
+  td.innerHTML='';td.appendChild(inp);inp.focus();inp.select();
+}
+
+function commitEdit(shop,code,col,val,tdId){
+  const edits=getEdits(shop);
+  if(!edits[code])edits[code]={};
+  const numVal=parseFloat(val);
+  if(!isNaN(numVal)){edits[code][col]=numVal;}else{delete edits[code][col];}
+  saveEdits(shop,edits);
+  // 重算這行的衍生欄位
+  recalcRow(shop,code,edits[code]||{});
+  applyFilters(shop);
+}
+
+function recalcRow(shop,code,ov){
+  const built=state[shop]._built;const idx=built.findIndex(r=>r.code===code);if(idx<0)return;
+  const r=built[idx];const PLATFORM=getPlatformRate();
+  const rev   =ov.rev    !==undefined?ov.rev    :r.rev;
+  const gross =ov.gross  !==undefined?ov.gross  :r.gross;
+  const adsFee=ov.adsFee !==undefined?ov.adsFee :r.adsFee;
+  const stock =ov.stock  !==undefined?ov.stock  :r.stock;
+  const clicks=ov.clicks !==undefined?ov.clicks :r.clicks;
+  const platFee=rev*PLATFORM;
+  const pureProfit=gross-adsFee-platFee;
+  const pureRate=rev>0?pureProfit/rev:0;
+  const adsPct=rev>0?adsFee/rev:0;
+  const denom=pureRate+adsPct-0.20;
+  const targetROI=denom>0?1/denom:null;
+  const directROI=ov.directROI!==undefined?ov.directROI:r.directROI;
+  const roi=ov.roi!==undefined?ov.roi:r.roi;
+  const days=state[shop]._days||1;
+  const dayBudget=adsFee/days;
+  const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
+  const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit);
+  Object.assign(built[idx],{rev,gross,adsFee,stock,clicks,platFee,pureProfit,pureRate,adsPct,targetROI,directROI,roi,roiDiff,dayBudget,analysis});
+  // 也更新儲存
+  const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
+}
+
+// 備註編輯
+function startNote(shop,code,tdId){
+  const td=document.getElementById(tdId);if(!td)return;
+  const notes=getNotes(shop);
+  const inp=document.createElement('input');
+  inp.type='text';inp.className='note-input';inp.placeholder='輸入備註…';inp.value=notes[code]||'';
+  inp.onblur=()=>commitNote(shop,code,inp.value,tdId);
+  inp.onkeydown=(e)=>{if(e.key==='Enter')inp.blur();if(e.key==='Escape')applyFilters(shop);};
+  td.innerHTML='';td.appendChild(inp);inp.focus();
+}
+function commitNote(shop,code,val,tdId){
+  const notes=getNotes(shop);
+  if(val.trim())notes[code]=val.trim();else delete notes[code];
+  saveNotes(shop,notes);applyFilters(shop);
+}
+
 // ── Render Table ──
 function renderTable(shop,list){
   const s=state[shop];const built=s._built;
+  const edits=getEdits(shop);
+  const notes=getNotes(shop);
   let tRev=0,tGross=0,tAds=0,tPure=0;
   built.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
   setKpis(shop,tRev,tGross,tAds,tPure);
@@ -4293,8 +4455,6 @@ function renderTable(shop,list){
   const ss=s.sorts||{};
   const si=(col)=>ss.col===col?(ss.dir==='asc'?' ▲':' ▼'):'';
   const hasF=(col)=>!!(s.filters?.[col])||ss.col===col;
-
-  // TH 欄位：商品ID、編號、商品名稱、廣告費、營收、毛利、淨利、淨利率、廣告佔比、可用庫存、目標ROI、直接投入產出、投入產出、實際-目標、點擊數、日預算、分析
   const thN=(col,label)=>`<th><div class="th-wrap"><span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',true,this)">▾</button></div></th>`;
   const thT=(col,label)=>`<th class="tl"><div class="th-wrap tl"><span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',false,this)">▾</button></div></th>`;
 
@@ -4316,49 +4476,90 @@ function renderTable(shop,list){
     ${thN('clicks','點擊數')}
     ${thN('dayBudget','日預算')}
     ${thT('analysisLabel','分析')}
+    <th class="tl">調整備註</th>
+    ${shop==='好麻吉'?`
+    ${thN('prevRev','上半月營收')}
+    ${thN('growthRate','成長比')}
+    <th class="tl">成長分析</th>`:''}
   </tr></thead><tbody>`;
 
+  let rowIdx=0;
   list.forEach(r=>{
     const pc=r.pureProfit>=0?'td-pos':'td-neg';
+    const ov=edits[r.code]||{};
+    const isEdited=(col)=>ov[col]!==undefined;
     const idStr=!r.shopeeIds?.length?'<span style="color:#d1d5db">—</span>':r.shopeeIds.length===1?r.shopeeIds[0]:'<span style="color:#f59e0b">多個</span>';
     const roiDiffStr=r.roiDiff===null?'—':`<span style="color:${r.roiDiff>=0?'#10b981':'#ef4444'};font-weight:600">${r.roiDiff.toFixed(2)}</span>`;
     const anaObj=r.analysis||{label:'',cls:''};
     const anaHtml=anaObj.label?`<span class="tag ${anaObj.cls}">${anaObj.label}</span>`:'—';
+    const note=notes[r.code]||'';
+    const noteId=`note-${shop}-${r.code}`;
+
+    // 可編輯數字欄 helper
+    const editTd=(col,display,cls='')=>{
+      const tid=`td-${shop}-${r.code}-${col}`;
+      const edited=isEdited(col);
+      return `<td class="td-num ${cls} ${edited?'cell-edited':''}" id="${tid}">
+        <span class="cell-val">${display}</span>
+        <button class="edit-btn" onclick="startEdit('${shop}','${r.code}','${col}','${tid}')" title="編輯">✏️</button>
+      </td>`;
+    };
 
     if(!r.fromMobic){
-      // 有廣告費無銷售：只顯示商品ID、編號、名稱、廣告費，其他留空
+      const adsId=`td-${shop}-${r.code}-adsFee`;
       html+=`<tr class="tr-no-rev">
         <td class="tl td-id">${idStr}</td>
         <td class="tl td-code">${r.code}</td>
         <td class="tl td-name" style="color:#9ca3af">${r.name}</td>
-        <td class="td-num td-amber">$${fmtN(r.adsFee)}</td>
-        <td colspan="13" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>
+        <td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}">
+          <span class="cell-val">$${fmtN(r.adsFee)}</span>
+          <button class="edit-btn" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" title="編輯">✏️</button>
+        </td>
+        <td colspan="12" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>
+        <td class="tl note-cell" id="${noteId}">
+          ${note?`<span>${note}</span>`:''}
+          <button class="edit-btn" onclick="startNote('${shop}','${r.code}','${noteId}')" title="加備註">📝</button>
+        </td>
+        ${shop==='好麻吉'?`<td colspan="3"></td>`:''}
       </tr>`;
     }else{
       html+=`<tr>
         <td class="tl td-id">${idStr}</td>
         <td class="tl td-code">${r.code}</td>
         <td class="tl td-name">${r.name}</td>
-        <td class="td-num td-amber">$${fmtN(r.adsFee)}</td>
-        <td class="td-num">$${fmtN(r.rev)}</td>
-        <td class="td-num">$${fmtN(r.gross)}</td>
-        <td class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>
+        ${editTd('adsFee','$'+fmtN(r.adsFee),'td-amber')}
+        ${editTd('rev','$'+fmtN(r.rev))}
+        ${editTd('gross','$'+fmtN(r.gross))}
+        <td class="td-num ${pc} ${isEdited('pureProfit')?'cell-edited':''}">$${fmtN(r.pureProfit)}</td>
         <td>${pill(r.pureRate*100)}</td>
         <td class="td-num">${(r.adsPct*100).toFixed(2)}%</td>
-        <td class="td-num">${r.stock.toLocaleString()}</td>
+        ${editTd('stock',r.stock.toLocaleString())}
         <td class="td-num">${r.targetROI!==null?r.targetROI.toFixed(2):'—'}</td>
-        <td class="td-num">${r.directROI>0?r.directROI.toFixed(2):'—'}</td>
-        <td class="td-num">${r.roi>0?r.roi.toFixed(2):'—'}</td>
+        ${editTd('directROI',r.directROI>0?r.directROI.toFixed(2):'—')}
+        ${editTd('roi',r.roi>0?r.roi.toFixed(2):'—')}
         <td class="td-num">${roiDiffStr}</td>
-        <td class="td-num">${r.clicks>0?r.clicks.toLocaleString():'—'}</td>
+        ${editTd('clicks',r.clicks>0?r.clicks.toLocaleString():'—')}
         <td class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>
         <td class="tl">${anaHtml}</td>
+        <td class="tl note-cell" id="${noteId}">
+          ${note?`<span style="color:#374151">${note}</span>`:''}
+          <button class="edit-btn" onclick="startNote('${shop}','${r.code}','${noteId}')" title="加備註">📝</button>
+        </td>
+        ${shop==='好麻吉'?`
+        <td class="td-num ${r.prevRev!==null?'':'growth-na'}">${r.prevRev!==null?'$'+fmtN(r.prevRev):'—'}</td>
+        <td class="td-num ${r.growthRate===null?'growth-na':r.growthRate>=0?'growth-pos':'growth-neg'}">
+          ${r.growthRate!==null?(r.growthRate>=0?'+':'')+(r.growthRate*100).toFixed(2)+'%':'—'}
+        </td>
+        <td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`:''}
       </tr>`;
     }
+    rowIdx++;
   });
 
   let fRev=0,fGross=0,fAds=0,fPure=0,fQty=0;
   list.forEach(r=>{fRev+=r.rev;fGross+=r.gross;fAds+=r.adsFee;fPure+=r.pureProfit;fQty+=r.qty;});
+  let fPrevRev=0; list.forEach(r=>{if(r.prevRev)fPrevRev+=r.prevRev;});
+  const fGrowth=(fPrevRev>0)?(fRev-fPrevRev)/fPrevRev:null;
   html+=`<tr class="tr-total">
     <td class="tl" colspan="3">小計（${list.length}筆）</td>
     <td class="td-num td-amber">$${fmtN(fAds)}</td>
@@ -4367,6 +4568,11 @@ function renderTable(shop,list){
     <td class="td-num ${fPure>=0?'td-pos':'td-neg'}">$${fmtN(fPure)}</td>
     <td>${fRev>0?pill(fPure/fRev*100):'—'}</td>
     <td colspan="9"></td>
+    <td></td>
+    ${shop==='好麻吉'?`
+    <td class="td-num">$${fmtN(fPrevRev)}</td>
+    <td class="td-num ${fGrowth===null?'growth-na':fGrowth>=0?'growth-pos':'growth-neg'}">${fGrowth!==null?(fGrowth>=0?'+':'')+(fGrowth*100).toFixed(2)+'%':'—'}</td>
+    <td></td>`:''}
   </tr></tbody></table></div>`;
   document.getElementById('tbl-'+shop).innerHTML=html;
 }
@@ -4426,7 +4632,10 @@ function setShop(shop,btn){
 function doExport(shop){
   const built=state[shop]._built;if(!built?.length)return;
   const wb=XLSX.utils.book_new();
-  const h=['商品ID','編號','商品名稱','廣告費','營收','毛利','淨利','淨利率%','廣告佔比%','可用庫存','目標ROI','直接投入產出','投入產出','實際-目標','點擊數','日預算','分析'];
+  const isHaomaji = shop === '好麻吉';
+  const h=['商品ID','編號','商品名稱','廣告費','營收','毛利','淨利','淨利率%','廣告佔比%','可用庫存','目標ROI','直接投入產出','投入產出','實際-目標','點擊數','日預算','分析','調整備註',
+    ...(isHaomaji?['上半月營收','成長比','成長分析']:[])];
+  const exportNotes=getNotes(shop);
   const d=built.map(r=>[
     !r.shopeeIds?.length?'未對應':r.shopeeIds.length===1?r.shopeeIds[0]:'多個',
     r.code,r.name,+r.adsFee.toFixed(0),+r.rev.toFixed(0),+r.gross.toFixed(0),+r.pureProfit.toFixed(0),
@@ -4434,7 +4643,12 @@ function doExport(shop){
     r.targetROI!==null?+r.targetROI.toFixed(2):'-',r.directROI>0?+r.directROI.toFixed(2):'-',
     r.roi>0?+r.roi.toFixed(2):'-',r.roiDiff!==null?+r.roiDiff.toFixed(2):'-',
     r.clicks>0?r.clicks:'-',r.dayBudget>0?+r.dayBudget.toFixed(0):'-',
-    r.analysis?.label||''
+    r.analysis?.label||'', exportNotes[r.code]||'',
+    ...(isHaomaji?[
+      r.prevRev!==null?+r.prevRev.toFixed(0):'-',
+      r.growthRate!==null?+((r.growthRate*100).toFixed(2)):'-',
+      r.growthAnalysis?.label||''
+    ]:[])
   ]);
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([h,...d]),shop);
   XLSX.writeFile(wb,`淨利表_${shop}_${state[shop]._period||''}.xlsx`);
@@ -4461,13 +4675,9 @@ document.addEventListener('click', function(e) {
         try {
           SHOPS.forEach(function(s) {
             var el = document.getElementById('content-' + s.id);
-            if (el && !el.innerHTML.trim() && typeof shopHTML === 'function') {
-              el.innerHTML = shopHTML(s.id);
-            }
+            if (el && !el.innerHTML.trim() && typeof shopHTML === 'function') el.innerHTML = shopHTML(s.id);
           });
-          SHOPS.forEach(function(s) {
-            if (typeof initShopUI === 'function') initShopUI(s.id);
-          });
+          SHOPS.forEach(function(s) { if (typeof initShopUI === 'function') initShopUI(s.id); });
         } catch(e) { console.log(e); }
       }
     }, 150);
