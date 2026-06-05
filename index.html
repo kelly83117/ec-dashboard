@@ -1131,7 +1131,6 @@ const OFFICE_CONFIG = {
     ],
     tabs: [
       { key: 'weekly-calendar', title: '📅 工作週曆', dynamic: 'weekly-calendar' },
-      { key: 'daily-progress', title: '📋 每日工作進度', dynamic: 'daily-progress' },
       { key: 'profit', title: '淨利表', customHtml: window.__profitTabHtml || '' },
       { key: 'insight', title: '洞察表分析',
         heads: ['維度', '指標', '數值', '備註'],
@@ -3718,20 +3717,22 @@ const App = {
       <div class="stat-grid">${statCards}</div>
       ${tabBar}
       ${tabContent}
-      <div class="table-card">
-        <div class="table-card-header">
-          <h3>${escapeHtml(dept.name)}成員績效</h3>
-          <p>共 ${members.length} 人 · 滿分 100 分 · 資料來源：帳號管理</p>
+      ${deptId === 'd1' ? '' : `
+        <div class="table-card">
+          <div class="table-card-header">
+            <h3>${escapeHtml(dept.name)}成員績效</h3>
+            <p>共 ${members.length} 人 · 滿分 100 分 · 資料來源：帳號管理</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>員工</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>全年平均</th></tr>
+              </thead>
+              <tbody>${memberRows}</tbody>
+            </table>
+          </div>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>員工</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>全年平均</th></tr>
-            </thead>
-            <tbody>${memberRows}</tbody>
-          </table>
-        </div>
-      </div>
+      `}
     `;
   },
 
