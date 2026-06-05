@@ -3810,16 +3810,16 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .tscroll{overflow-x:auto;max-height:560px;overflow-y:auto;}
 table{width:100%;border-collapse:collapse;font-size:13px;}
 thead tr{background:#f8f9fc;position:sticky;top:0;z-index:3;}
-th{padding:9px 10px;text-align:right;font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.04em;text-transform:uppercase;border-bottom:1px solid #e4e6ef;white-space:nowrap;cursor:pointer;user-select:none;}
+th{padding:9px 14px;text-align:right;font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.04em;text-transform:uppercase;border-bottom:1px solid #e4e6ef;white-space:nowrap;cursor:pointer;user-select:none;}
 th:hover{color:#5b5fcf;}
 th.tl{text-align:left;}
-td{padding:11px 10px;border-bottom:1px solid #f0f2f7;text-align:right;color:#374151;white-space:nowrap;font-size:13px;}
+td{padding:11px 14px;border-bottom:1px solid #f0f2f7;text-align:right;color:#374151;white-space:nowrap;font-size:13px;}
 td.tl{text-align:left;}
 tbody tr:hover td{background:#fafbff;}
-.td-code{font-family:'DM Mono',monospace;font-size:12px;color:#6b7280;min-width:70px;}
-.td-id{font-family:'DM Mono',monospace;font-size:12px;color:#9ca3af;min-width:130px;}
-.td-name{font-weight:500;color:#1a1a2e;white-space:normal;max-width:200px;font-size:13px;}
-.td-num{font-family:'DM Mono',monospace;font-size:13px;}
+.td-code{font-family:'DM Mono',monospace;font-size:12px;color:#6b7280;min-width:80px;padding-right:12px;}
+.td-id{font-family:'DM Mono',monospace;font-size:12px;color:#9ca3af;min-width:140px;padding-right:16px;}
+.td-name{font-weight:500;color:#1a1a2e;white-space:nowrap;min-width:220px;max-width:320px;overflow:hidden;text-overflow:ellipsis;font-size:13px;}
+.td-num{font-family:'DM Mono',monospace;font-size:13px;min-width:90px;}
 .td-pos{color:#10b981;font-weight:600;}.td-neg{color:#ef4444;font-weight:600;}.td-amber{color:#f59e0b;}
 .tr-total td{background:#f0f4ff !important;font-weight:700;border-top:2px solid #c7d2fe;}
 .tr-no-rev td{color:#9ca3af;}
@@ -4403,25 +4403,23 @@ function commitEdit(shop,code,col,val,tdId){
 function recalcRow(shop,code,ov){
   const built=state[shop]._built;const idx=built.findIndex(r=>r.code===code);if(idx<0)return;
   const r=built[idx];const PLATFORM=getPlatformRate();
-  const rev   =ov.rev    !==undefined?ov.rev    :r.rev;
-  const gross =ov.gross  !==undefined?ov.gross  :r.gross;
-  const adsFee=ov.adsFee !==undefined?ov.adsFee :r.adsFee;
-  const stock =ov.stock  !==undefined?ov.stock  :r.stock;
-  const clicks=ov.clicks !==undefined?ov.clicks :r.clicks;
+  // 只有廣告費可以編輯，重算相關衍生欄位
+  const adsFee=ov.adsFee!==undefined?ov.adsFee:r.adsFee;
+  const rev=r.rev;const gross=r.gross;
   const platFee=rev*PLATFORM;
   const pureProfit=gross-adsFee-platFee;
   const pureRate=rev>0?pureProfit/rev:0;
   const adsPct=rev>0?adsFee/rev:0;
   const denom=pureRate+adsPct-0.20;
   const targetROI=denom>0?1/denom:null;
-  const directROI=ov.directROI!==undefined?ov.directROI:r.directROI;
-  const roi=ov.roi!==undefined?ov.roi:r.roi;
+  const directROI=r.directROI;
   const days=state[shop]._days||1;
   const dayBudget=adsFee/days;
   const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
-  const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit);
-  Object.assign(built[idx],{rev,gross,adsFee,stock,clicks,platFee,pureProfit,pureRate,adsPct,targetROI,directROI,roi,roiDiff,dayBudget,analysis});
-  // 也更新儲存
+  const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit);
+  const growthRate=r.growthRate;
+  const growthAnalysis=shop==='好麻吉'?calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate):null;
+  Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,roiDiff,dayBudget,analysis,growthAnalysis});
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
 
@@ -4480,7 +4478,8 @@ function renderTable(shop,list){
     ${shop==='好麻吉'?`
     ${thN('prevRev','上半月營收')}
     ${thN('growthRate','成長比')}
-    <th class="tl">成長分析</th>`:''}
+    <th class="tl">成長分析</th>
+    <th class="tl">成長調整</th>`:''}
   </tr></thead><tbody>`;
 
   let rowIdx=0;
@@ -4520,7 +4519,7 @@ function renderTable(shop,list){
           ${note?`<span>${note}</span>`:''}
           <button class="edit-btn" onclick="startNote('${shop}','${r.code}','${noteId}')" title="加備註">📝</button>
         </td>
-        ${shop==='好麻吉'?`<td colspan="3"></td>`:''}
+        ${shop==='好麻吉'?`<td colspan="4"></td>`:''}
       </tr>`;
     }else{
       html+=`<tr>
@@ -4528,29 +4527,37 @@ function renderTable(shop,list){
         <td class="tl td-code">${r.code}</td>
         <td class="tl td-name">${r.name}</td>
         ${editTd('adsFee','$'+fmtN(r.adsFee),'td-amber')}
-        ${editTd('rev','$'+fmtN(r.rev))}
-        ${editTd('gross','$'+fmtN(r.gross))}
-        <td class="td-num ${pc} ${isEdited('pureProfit')?'cell-edited':''}">$${fmtN(r.pureProfit)}</td>
+        <td class="td-num">$${fmtN(r.rev)}</td>
+        <td class="td-num">$${fmtN(r.gross)}</td>
+        <td class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>
         <td>${pill(r.pureRate*100)}</td>
         <td class="td-num">${(r.adsPct*100).toFixed(2)}%</td>
-        ${editTd('stock',r.stock.toLocaleString())}
+        <td class="td-num">${r.stock.toLocaleString()}</td>
         <td class="td-num">${r.targetROI!==null?r.targetROI.toFixed(2):'—'}</td>
-        ${editTd('directROI',r.directROI>0?r.directROI.toFixed(2):'—')}
-        ${editTd('roi',r.roi>0?r.roi.toFixed(2):'—')}
+        <td class="td-num">${r.directROI>0?r.directROI.toFixed(2):'—'}</td>
+        <td class="td-num">${r.roi>0?r.roi.toFixed(2):'—'}</td>
         <td class="td-num">${roiDiffStr}</td>
-        ${editTd('clicks',r.clicks>0?r.clicks.toLocaleString():'—')}
+        <td class="td-num">${r.clicks>0?r.clicks.toLocaleString():'—'}</td>
         <td class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>
         <td class="tl">${anaHtml}</td>
         <td class="tl note-cell" id="${noteId}">
           ${note?`<span style="color:#374151">${note}</span>`:''}
           <button class="edit-btn" onclick="startNote('${shop}','${r.code}','${noteId}')" title="加備註">📝</button>
         </td>
-        ${shop==='好麻吉'?`
-        <td class="td-num ${r.prevRev!==null?'':'growth-na'}">${r.prevRev!==null?'$'+fmtN(r.prevRev):'—'}</td>
-        <td class="td-num ${r.growthRate===null?'growth-na':r.growthRate>=0?'growth-pos':'growth-neg'}">
-          ${r.growthRate!==null?(r.growthRate>=0?'+':'')+(r.growthRate*100).toFixed(2)+'%':'—'}
-        </td>
-        <td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`:''}
+        ${shop==='好麻吉'?(()=>{
+          const gnoteId=`gnote-${shop}-${r.code}`;
+          const gnote=getNotes(shop+'_growth')[r.code]||'';
+          return `
+          <td class="td-num ${r.prevRev!==null?'':'growth-na'}">${r.prevRev!==null?'$'+fmtN(r.prevRev):'—'}</td>
+          <td class="td-num ${r.growthRate===null?'growth-na':r.growthRate>=0?'growth-pos':'growth-neg'}">
+            ${r.growthRate!==null?(r.growthRate>=0?'+':'')+(r.growthRate*100).toFixed(2)+'%':'—'}
+          </td>
+          <td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>
+          <td class="tl note-cell" id="${gnoteId}">
+            ${gnote?`<span style="color:#374151">${gnote}</span>`:''}
+            <button class="edit-btn" onclick="startNote('${shop}_growth','${r.code}','${gnoteId}')" title="加備註">📝</button>
+          </td>`;
+        })():''}
       </tr>`;
     }
     rowIdx++;
@@ -4572,7 +4579,7 @@ function renderTable(shop,list){
     ${shop==='好麻吉'?`
     <td class="td-num">$${fmtN(fPrevRev)}</td>
     <td class="td-num ${fGrowth===null?'growth-na':fGrowth>=0?'growth-pos':'growth-neg'}">${fGrowth!==null?(fGrowth>=0?'+':'')+(fGrowth*100).toFixed(2)+'%':'—'}</td>
-    <td></td>`:''}
+    <td></td><td></td>`:''}
   </tr></tbody></table></div>`;
   document.getElementById('tbl-'+shop).innerHTML=html;
 }
@@ -4634,7 +4641,7 @@ function doExport(shop){
   const wb=XLSX.utils.book_new();
   const isHaomaji = shop === '好麻吉';
   const h=['商品ID','編號','商品名稱','廣告費','營收','毛利','淨利','淨利率%','廣告佔比%','可用庫存','目標ROI','直接投入產出','投入產出','實際-目標','點擊數','日預算','分析','調整備註',
-    ...(isHaomaji?['上半月營收','成長比','成長分析']:[])];
+    ...(isHaomaji?['上半月營收','成長比','成長分析','成長調整']:[])];
   const exportNotes=getNotes(shop);
   const d=built.map(r=>[
     !r.shopeeIds?.length?'未對應':r.shopeeIds.length===1?r.shopeeIds[0]:'多個',
