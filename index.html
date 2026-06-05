@@ -3810,10 +3810,10 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .tscroll{overflow-x:auto;max-height:560px;overflow-y:auto;}
 table{width:100%;border-collapse:collapse;font-size:13px;}
 thead tr{background:#f8f9fc;position:sticky;top:0;z-index:3;}
-th{padding:9px 14px;text-align:right;font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.04em;text-transform:uppercase;border-bottom:1px solid #e4e6ef;white-space:nowrap;cursor:pointer;user-select:none;}
+th{padding:9px 18px;text-align:right;font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.04em;text-transform:uppercase;border-bottom:1px solid #e4e6ef;white-space:nowrap;cursor:pointer;user-select:none;}
 th:hover{color:#5b5fcf;}
 th.tl{text-align:left;}
-td{padding:11px 14px;border-bottom:1px solid #f0f2f7;text-align:right;color:#374151;white-space:nowrap;font-size:13px;}
+td{padding:11px 18px;border-bottom:1px solid #f0f2f7;text-align:right;color:#374151;white-space:nowrap;font-size:13px;}
 td.tl{text-align:left;}
 tbody tr:hover td{background:#fafbff;}
 .td-code{font-family:'DM Mono',monospace;font-size:12px;color:#6b7280;min-width:80px;padding-right:12px;}
@@ -3871,7 +3871,7 @@ tbody tr:hover td{background:#fafbff;}
 .cell-edited{color:#5b5fcf;font-weight:600;}
 .inline-input{width:80px;padding:3px 6px;border:1.5px solid #5b5fcf;border-radius:5px;font-size:12px;font-family:'DM Mono',monospace;outline:none;background:#fff;text-align:right;}
 .inline-input.text-inp{width:120px;text-align:left;font-family:'Noto Sans TC',sans-serif;}
-.note-cell{max-width:160px;white-space:normal;font-size:12px;color:#6b7280;}
+.note-cell{min-width:120px;max-width:180px;white-space:normal;font-size:12px;color:#6b7280;padding-right:12px;}
 .note-input{width:140px;padding:4px 7px;border:1.5px solid #5b5fcf;border-radius:5px;font-size:12px;font-family:'Noto Sans TC',sans-serif;outline:none;background:#fff;}
 .growth-pos{color:#10b981;font-weight:600;}
 .growth-neg{color:#ef4444;font-weight:600;}
@@ -4016,8 +4016,25 @@ function updateDaysBadge(shop){
   const d=getDays(state[shop].curMonth,state[shop].curHalf);
   state[shop].days=d;document.getElementById('days-badge-'+shop).textContent=d+' 天';
 }
+function resetUploadCards(shop){
+  // 重置莫筆克卡片
+  state[shop].rawMobic=null;
+  document.getElementById('uc-mobic-'+shop).className='ucard';
+  document.getElementById('ui-mobic-'+shop).textContent='📦';
+  document.getElementById('ut-mobic-'+shop).textContent='莫筆克銷售分析';
+  // 重置廣告卡片
+  state[shop].rawAds=null;
+  document.getElementById('uc-ads-'+shop).className='ucard';
+  document.getElementById('ui-ads-'+shop).textContent='📣';
+  document.getElementById('ut-ads-'+shop).textContent='蝦皮廣告報表';
+  // 按鈕變灰
+  checkReady(shop);
+}
+
 function tryLoadSaved(shop){
   const s=state[shop];const rep=lsLoad(shop,s.curMonth,s.curHalf);
+  // 每次切換區間都重置上傳卡片，避免誤以為已上傳
+  resetUploadCards(shop);
   if(rep){loadIntoUI(shop,rep.built,rep.period,rep.days);}
   else{
     state[shop]._built=null;
@@ -4056,7 +4073,8 @@ function onMapFile(e){
           if(!globalMap[sk][code]){globalMap[sk][code]={sids:[],name:''};cnt++;}
           if(!globalMap[sk][code].sids.includes(sid))globalMap[sk][code].sids.push(sid);
           // 記錄商品名稱（從清單的商品名稱欄位）
-          const pName=(r2['商品名稱']||r2['莫比克名']||'').trim();
+          // 優先用「莫比克名」（C欄），其次商品名稱
+          const pName=(r2['莫比克名']||r2['商品名稱']||'').trim();
           if(pName&&!globalMap[sk][code].name)globalMap[sk][code].name=pName;
         });
       });
@@ -4592,37 +4610,79 @@ function renderSummary(){
     const k=localStorage.key(i);if(!k.startsWith('ec|'))continue;
     try{
       const rep=JSON.parse(localStorage.getItem(k));
-      const shop=k.split('|')[1];
+      const parts=k.split('|');
+      const shop=parts[1];
       let tRev=0,tGross=0,tAds=0,tPure=0;
       rep.built.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
       rows.push({shop,period:rep.period,tRev,tGross,tAds,tPure});
     }catch{}
   }
   if(!rows.length){el.innerHTML=`<div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">尚無儲存資料</div></div>`;return;}
+
+  // 按區間排序（新的在前）
   rows.sort((a,b)=>b.period.localeCompare(a.period));
+
+  // 按區間分組
   const byPeriod={};
-  rows.forEach(r=>{if(!byPeriod[r.period])byPeriod[r.period]=[];byPeriod[r.period].push(r);});
-  let html=`<div style="padding:18px 20px;"><div class="tscroll"><table>
-    <thead><tr><th class="tl">日期區間</th><th class="tl">賣場</th><th>營收</th><th>廣告費</th><th>毛利</th><th>純利</th><th>純利率</th></tr></thead><tbody>`;
-  Object.entries(byPeriod).forEach(([period,rs])=>{
-    let gR=0,gG=0,gA=0,gP=0;rs.forEach(r=>{gR+=r.tRev;gG+=r.tGross;gA+=r.tAds;gP+=r.tPure;});
-    rs.forEach(r=>{
-      const c=SHOPS.find(s=>s.id===r.shop)?.color||'#6b7280';
-      html+=`<tr><td class="tl" style="font-size:12px;color:#9ca3af;font-family:'DM Mono',monospace">${r.period}</td>
-        <td class="tl td-name"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c};margin-right:7px;vertical-align:middle"></span>${r.shop}</td>
-        <td class="td-num">$${fmtN(r.tRev)}</td><td class="td-num td-amber">$${fmtN(r.tAds)}</td>
-        <td class="td-num">$${fmtN(r.tGross)}</td>
-        <td class="td-num ${r.tPure>=0?'td-pos':'td-neg'}">$${fmtN(r.tPure)}</td>
-        <td>${r.tRev>0?pill(r.tPure/r.tRev*100):'—'}</td></tr>`;
-    });
-    html+=`<tr style="background:#f8f9fc;font-weight:700;">
-      <td class="tl" style="color:#5b5fcf;font-size:12px">📊 ${period} 合計</td><td></td>
-      <td class="td-num">$${fmtN(gR)}</td><td class="td-num td-amber">$${fmtN(gA)}</td>
-      <td class="td-num">$${fmtN(gG)}</td>
-      <td class="td-num ${gP>=0?'td-pos':'td-neg'}">$${fmtN(gP)}</td>
-      <td>${gR>0?pill(gP/gR*100):'—'}</td></tr>`;
+  const periodOrder=[];
+  rows.forEach(r=>{
+    if(!byPeriod[r.period]){byPeriod[r.period]=[];periodOrder.push(r.period);}
+    byPeriod[r.period].push(r);
   });
-  html+=`</tbody></table></div><div style="margin-top:10px;font-size:12px;color:#9ca3af;">＊純利 = 毛利 − 廣告費 − 營收 × ${(PLATFORM*100).toFixed(1)}%</div></div>`;
+
+  let html=`<div style="padding:18px 20px;">
+  <div class="tscroll"><table>
+    <thead><tr>
+      <th class="tl" style="min-width:200px">日期區間</th>
+      <th class="tl" style="min-width:100px">賣場</th>
+      <th style="min-width:110px">營收</th>
+      <th style="min-width:110px">廣告費</th>
+      <th style="min-width:110px">毛利</th>
+      <th style="min-width:110px">純利</th>
+      <th style="min-width:80px">純利率</th>
+    </tr></thead><tbody>`;
+
+  periodOrder.forEach(period=>{
+    const rs=byPeriod[period];
+    // 只有一個賣場：不顯示合計列
+    // 多個賣場：顯示各賣場，最後一行是合計
+    const showTotal = rs.length > 1;
+    let gR=0,gG=0,gA=0,gP=0;
+
+    rs.forEach((r,i)=>{
+      const c=SHOPS.find(s=>s.id===r.shop)?.color||'#6b7280';
+      gR+=r.tRev;gG+=r.tGross;gA+=r.tAds;gP+=r.tPure;
+      const isFirst = i===0;
+      html+=`<tr style="${i===0?'border-top:2px solid #e4e6ef':''}">
+        <td class="tl" style="font-size:12px;color:#6b7280;font-family:'DM Mono',monospace;${isFirst?'':'opacity:0'}">${r.period}</td>
+        <td class="tl"><span style="display:inline-flex;align-items:center;gap:7px;font-weight:500;color:#1a1a2e">
+          <span style="width:8px;height:8px;border-radius:50%;background:${c};flex-shrink:0;display:inline-block"></span>${r.shop}
+        </span></td>
+        <td class="td-num">$${fmtN(r.tRev)}</td>
+        <td class="td-num td-amber">$${fmtN(r.tAds)}</td>
+        <td class="td-num">$${fmtN(r.tGross)}</td>
+        <td class="td-num ${r.tPure>=0?'td-pos':'td-neg'}" style="font-weight:600">$${fmtN(r.tPure)}</td>
+        <td>${r.tRev>0?pill(r.tPure/r.tRev*100):'—'}</td>
+      </tr>`;
+    });
+
+    // 多賣場才顯示合計
+    if(showTotal){
+      html+=`<tr style="background:#f8f9fc;">
+        <td class="tl" style="font-size:11px;color:#9ca3af;padding-left:20px">合計</td>
+        <td></td>
+        <td class="td-num" style="font-weight:700">$${fmtN(gR)}</td>
+        <td class="td-num td-amber" style="font-weight:700">$${fmtN(gA)}</td>
+        <td class="td-num" style="font-weight:700">$${fmtN(gG)}</td>
+        <td class="td-num ${gP>=0?'td-pos':'td-neg'}" style="font-weight:700">$${fmtN(gP)}</td>
+        <td>${gR>0?pill(gP/gR*100):'—'}</td>
+      </tr>`;
+    }
+  });
+
+  html+=`</tbody></table></div>
+  <div style="margin-top:12px;font-size:11px;color:#9ca3af;">＊純利 = 毛利 − 廣告費 − 營收 × ${(PLATFORM*100).toFixed(1)}%</div>
+  </div>`;
   el.innerHTML=html;
 }
 
