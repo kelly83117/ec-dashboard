@@ -1821,8 +1821,14 @@ const App = {
             <h3 style="margin:0;font-size:14px">每日營收填寫</h3>
             <p style="margin:1px 0 0;font-size:11px;color:var(--text-muted)">輸入後按 Enter 或點別處跳出確認再儲存 · 過 12 點自動歸 0</p>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);background:var(--bg);padding:4px 9px;border-radius:6px;font-variant-numeric:tabular-nums">
-            填寫日期：<strong style="color:var(--text);font-size:12px">${escapeHtml(inputDateStr)}</strong>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="font-size:11px;color:var(--text-muted);background:var(--bg);padding:4px 9px;border-radius:6px;font-variant-numeric:tabular-nums">
+              填寫日期：<strong style="color:var(--text);font-size:12px">${escapeHtml(inputDateStr)}</strong>
+            </div>
+            <button id="open-month-detail" title="查看本月每日明細"
+              style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:white;color:var(--text);font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px">
+              📅 本月明細
+            </button>
           </div>
         </div>
         <div class="table-wrap">
@@ -2470,9 +2476,175 @@ const App = {
   },
 
   /* ============================================================
+   *  本月明細 — 試算表式檢視
+   * ============================================================ */
+  openMonthlyDetailModal() {
+    let platforms = Store.get(Store.KEYS.platforms, null);
+    if (!platforms) platforms = JSON.parse(JSON.stringify(PLATFORMS));
+    platforms = migratePlatforms(platforms);
+
+    const now = new Date();
+    const yMonth = now.getFullYear();
+    const mMonth = now.getMonth();
+    const lastDay = new Date(yMonth, mMonth + 1, 0).getDate();
+    const dates = Array.from({ length: lastDay }, (_, i) =>
+      `${yMonth}-${String(mMonth + 1).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`
+    );
+
+    // 依通路分群（蝦皮 4 / MOMO 2 / 酷澎 1）
+    const marketOrder = ['shopee', 'momo', 'coupang'];
+    const marketTint = { shopee: '#ee4d2d', momo: '#ec4899', coupang: '#3b82f6' };
+    const grouped = { shopee: [], momo: [], coupang: [] };
+    platforms.forEach(p => {
+      const m = PLATFORM_MARKETPLACE[p.name] || 'shopee';
+      if (!grouped[m]) grouped[m] = [];
+      grouped[m].push(p);
+    });
+
+    // 取所有平台的順序 + 各自是否有廣告費
+    const flatPlatforms = [];
+    marketOrder.forEach(m => grouped[m].forEach(p => flatPlatforms.push({ p, market: m })));
+
+    // 計算每平台每日 / 每平台總計 / 每日總計 / 整月總計
+    const get = (p, d) => +(p.daily?.[d]) || 0;
+    const getAds = (p, d) => +(p.dailyAdSpend?.[d]) || 0;
+
+    const platformTotals = flatPlatforms.map(({ p }) => {
+      const rev = dates.reduce((s, d) => s + get(p, d), 0);
+      const ads = PLATFORMS_WITH_AD_SPEND.has(p.name)
+        ? dates.reduce((s, d) => s + getAds(p, d), 0)
+        : 0;
+      const roas = ads > 0 ? (rev / ads).toFixed(2) : '—';
+      return { rev, ads, roas };
+    });
+
+    // 表頭：通路（合併欄）+ 每平台子欄 + 總計
+    // Row 1: marketplace headers
+    // Row 2: 營收 / 廣告費 / ROAS sub-headers
+
+    const fmt = (n) => n > 0 ? n.toLocaleString() : '—';
+    const fmtCell = (n, dim) => `<td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;color:${dim ? 'var(--text-muted)' : 'var(--text)'}">${fmt(n)}</td>`;
+    const fmtRoas = (rev, ads) => {
+      if (ads === 0) return `<td style="padding:4px 8px;text-align:right;color:var(--text-muted);font-size:12px">—</td>`;
+      const r = (rev / ads).toFixed(2);
+      return `<td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;font-weight:600;color:#4f46e5">${r}</td>`;
+    };
+
+    // 建欄位設定：每平台佔幾欄
+    const colSpec = flatPlatforms.map(({ p }) => {
+      const hasAds = PLATFORMS_WITH_AD_SPEND.has(p.name);
+      return { p, hasAds, cols: hasAds ? 3 : 1 };
+    });
+
+    // 通路合併表頭
+    const marketHeadHtml = marketOrder.map(m => {
+      const items = grouped[m] || [];
+      if (items.length === 0) return '';
+      const tint = marketTint[m];
+      const totalCols = items.reduce((s, p) => s + (PLATFORMS_WITH_AD_SPEND.has(p.name) ? 3 : 1), 0);
+      const badge = MARKETPLACE_BADGE[m];
+      return `<th colspan="${totalCols}" style="padding:6px 8px;background:${tint}14;color:${tint};text-align:center;font-size:11px;font-weight:700;border-left:2px solid ${tint};border-bottom:1px solid var(--border)"><img src="${badge.src}" style="width:14px;height:14px;vertical-align:middle;border-radius:3px;margin-right:4px;object-fit:contain">${escapeHtml(badge.name)}</th>`;
+    }).join('');
+
+    // 平台名稱列
+    const platformHeadHtml = colSpec.map(({ p, cols }) => {
+      return `<th colspan="${cols}" style="padding:6px 6px;text-align:center;font-size:11px;color:var(--text);font-weight:600;border-bottom:1px solid var(--border);border-left:1px solid var(--border)">${escapeHtml(p.name)}</th>`;
+    }).join('');
+
+    // 子欄位列
+    const subHeadHtml = colSpec.map(({ hasAds }) => {
+      if (hasAds) {
+        return `<th style="padding:4px 6px;text-align:right;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>
+                <th style="padding:4px 6px;text-align:right;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">廣告費</th>
+                <th style="padding:4px 6px;text-align:right;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">ROAS</th>`;
+      }
+      return `<th style="padding:4px 6px;text-align:right;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>`;
+    }).join('');
+
+    // 每一天的資料列
+    const todayStrLocal = toDateStr(new Date());
+    const dayRowsHtml = dates.map(d => {
+      const isToday = d === todayStrLocal;
+      const dayLabel = d.slice(5).replace('-', '/');
+      let dayTotal = 0;
+      const cells = colSpec.map(({ p, hasAds }) => {
+        const rev = get(p, d);
+        dayTotal += rev;
+        if (hasAds) {
+          const ads = getAds(p, d);
+          return fmtCell(rev, rev === 0) + fmtCell(ads, ads === 0) + fmtRoas(rev, ads);
+        }
+        return fmtCell(rev, rev === 0);
+      }).join('');
+      return `
+        <tr style="background:${isToday ? '#eef2ff44' : 'transparent'}">
+          <td style="padding:4px 10px;font-size:11px;font-weight:600;color:${isToday ? 'var(--primary)' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;white-space:nowrap;border-right:1px solid var(--border);position:sticky;left:0;background:${isToday ? '#f5f3ff' : 'var(--surface)'};z-index:1">${escapeHtml(dayLabel)}${isToday ? ' ●' : ''}</td>
+          ${cells}
+          <td style="padding:4px 10px;text-align:right;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:${dayTotal > 0 ? 'var(--text)' : 'var(--text-muted)'};border-left:2px solid var(--border);background:var(--bg)">${fmt(dayTotal)}</td>
+        </tr>
+      `;
+    }).join('');
+
+    // 總計列
+    let monthGrandTotal = 0;
+    const totalCells = colSpec.map(({ p, hasAds }, idx) => {
+      const t = platformTotals[idx];
+      monthGrandTotal += t.rev;
+      if (hasAds) {
+        return `<td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:11px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(t.ads)}</td>
+                <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:700;color:#4f46e5;font-variant-numeric:tabular-nums">${t.roas}</td>`;
+      }
+      return `<td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>`;
+    }).join('');
+
+    const tableHtml = `
+      <div style="overflow:auto;max-height:75vh;border:1px solid var(--border);border-radius:8px">
+        <table style="border-collapse:separate;border-spacing:0;min-width:100%;font-size:12px">
+          <thead style="position:sticky;top:0;z-index:2;background:var(--surface)">
+            <tr>
+              <th rowspan="3" style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);position:sticky;left:0;z-index:3">日期</th>
+              ${marketHeadHtml}
+              <th rowspan="3" style="padding:6px 10px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-left:2px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg);min-width:90px">當日總計</th>
+            </tr>
+            <tr>${platformHeadHtml}</tr>
+            <tr>${subHeadHtml}</tr>
+          </thead>
+          <tbody>
+            ${dayRowsHtml}
+          </tbody>
+          <tfoot>
+            <tr style="background:var(--bg);border-top:2px solid var(--border)">
+              <td style="padding:8px 10px;font-size:12px;font-weight:800;color:var(--text);border-right:1px solid var(--border);position:sticky;left:0;background:var(--bg)">總計</td>
+              ${totalCells}
+              <td style="padding:8px 10px;text-align:right;font-size:14px;font-weight:800;color:var(--primary);border-left:2px solid var(--border);font-variant-numeric:tabular-nums">${fmt(monthGrandTotal)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text-muted);text-align:right">
+        ● 標記為今天　·　— 表示該日無資料
+      </div>
+    `;
+
+    this.openModal({
+      title: `📅 ${yMonth} 年 ${mMonth + 1} 月 明細`,
+      bodyHtml: tableHtml,
+      width: '95vw',
+      hideFooter: true,
+    });
+  },
+
+  /* ============================================================
    *  卡片內 inputs（今日營收 + 廣告費）— 失焦時跳出確認 / 取消 dialog
    * ============================================================ */
   bindCardInputs() {
+    // 本月明細按鈕
+    const btnMonthDetail = document.getElementById('open-month-detail');
+    if (btnMonthDetail) {
+      btnMonthDetail.addEventListener('click', () => this.openMonthlyDetailModal());
+    }
+
     // 行銷每天填的是「昨日」的資料，所以寫入日期 = 昨天
     const inputDateStr = toDateStr(addDays(new Date(), -1));
 
@@ -4118,18 +4290,22 @@ const App = {
   /* ============================================================
    *  通用 Modal
    * ============================================================ */
-  openModal({ title, bodyHtml, onSave, onMount, onCancel, saveLabel, cancelLabel }) {
+  openModal({ title, bodyHtml, onSave, onMount, onCancel, saveLabel, cancelLabel, width, hideFooter }) {
     const modal = document.getElementById('modal');
+    if (width) modal.style.maxWidth = width;
+    else modal.style.maxWidth = '';
     modal.innerHTML = `
       <div class="modal-header">
         <h3>${escapeHtml(title)}</h3>
         <button class="icon-btn" id="modal-close-x">✕</button>
       </div>
       <div class="modal-body">${bodyHtml}</div>
-      <div class="modal-footer">
-        <button class="btn-ghost" id="modal-cancel">${escapeHtml(cancelLabel || '取消')}</button>
-        <button class="btn-primary" style="width:auto;padding:10px 20px" id="modal-save">${escapeHtml(saveLabel || '儲存')}</button>
-      </div>
+      ${hideFooter ? '' : `
+        <div class="modal-footer">
+          <button class="btn-ghost" id="modal-cancel">${escapeHtml(cancelLabel || '取消')}</button>
+          <button class="btn-primary" style="width:auto;padding:10px 20px" id="modal-save">${escapeHtml(saveLabel || '儲存')}</button>
+        </div>
+      `}
     `;
     document.getElementById('modal-backdrop').classList.add('show');
     if (onMount) onMount();
@@ -4138,11 +4314,13 @@ const App = {
       this.closeModal();
     };
     document.getElementById('modal-close-x').onclick = closeWithCancel;
-    document.getElementById('modal-cancel').onclick = closeWithCancel;
-    document.getElementById('modal-save').onclick = () => {
-      const ok = onSave();
-      if (ok) this.closeModal();
-    };
+    if (!hideFooter) {
+      document.getElementById('modal-cancel').onclick = closeWithCancel;
+      document.getElementById('modal-save').onclick = () => {
+        const ok = onSave();
+        if (ok) this.closeModal();
+      };
+    }
   },
 
   closeModal() {
