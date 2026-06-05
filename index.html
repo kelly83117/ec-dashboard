@@ -1130,6 +1130,7 @@ const OFFICE_CONFIG = {
       { icon: '🎯', label: '平均轉換率', value: '3.8%', meta: '較上月 ↑ 0.5%' },
     ],
     tabs: [
+      { key: 'weekly-calendar', title: '📅 工作週曆', dynamic: 'weekly-calendar' },
       { key: 'daily-progress', title: '📋 每日工作進度', dynamic: 'daily-progress' },
       { key: 'profit', title: '淨利表', customHtml: window.__profitTabHtml || '' },
       { key: 'insight', title: '洞察表分析',
@@ -1857,19 +1858,15 @@ const App = {
         <div style="display:flex">${revenueTableHtml}</div>
         <div style="display:flex">${this.dailyLineChartHtml(platforms)}</div>
       </div>
-      ${this.marketingProgressDashboardHtml()}
     `;
   },
 
   /* ============================================================
-   *  儀表板首頁 - 行銷每週工作進度（週曆檢視）
+   *  行銷辦公室 - 工作週曆（Google Calendar 風格的週檢視）
    * ============================================================ */
-  marketingProgressDashboardHtml() {
-    const departments = Store.get(Store.KEYS.departments, []);
-    const dept = departments.find(d => d.id === 'd1');
-    if (!dept) return '';
+  renderWeeklyCalendarTab(deptId, color, dept) {
     const allTasks = Store.get(Store.KEYS.dailyTasks, []);
-    const tasks = allTasks.filter(t => t.deptId === 'd1');
+    const tasks = allTasks.filter(t => t.deptId === deptId);
     const members = (Store.get(Store.KEYS.users, []))
       .filter(u => getUserDepts(u).includes(dept.name));
 
@@ -1983,11 +1980,11 @@ const App = {
         }).join('');
 
     return `
-      <div style="margin-top:14px;display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:start">
+      <div style="display:grid;grid-template-columns:1fr 340px;gap:14px;align-items:start">
         <div class="table-card">
           <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 16px">
             <div style="display:flex;align-items:center;gap:10px">
-              <h3 style="margin:0;font-size:14px;font-weight:600">行銷工作週曆</h3>
+              <h3 style="margin:0;font-size:14px;font-weight:600">工作週曆</h3>
               <div style="display:flex;align-items:center;gap:4px">
                 <button class="pill" data-week-offset="${weekOffset - 1}" title="上一週" style="padding:3px 8px;font-size:11px">←</button>
                 <button class="pill ${weekOffset === 0 ? 'active' : ''}" data-week-offset="0" style="padding:3px 10px;font-size:11px;min-width:60px">${weekLabel}</button>
@@ -2000,7 +1997,7 @@ const App = {
               <select id="dash-mkt-emp" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;font-family:inherit;cursor:pointer">
                 ${employeeOptions}
               </select>
-              <button class="pill" data-nav-to="office-d1" style="font-size:11px;padding:5px 10px">完整列表 →</button>
+              <button class="btn-add" data-cal-add="${escapeHtml(deptId)}" style="padding:5px 12px;font-size:12px">+ 新增進度</button>
             </div>
           </div>
           <div style="display:flex;border-top:1px solid var(--border)">${columnsHtml}</div>
@@ -2010,7 +2007,7 @@ const App = {
             <h3 style="margin:0;font-size:14px;font-weight:600">未完成待辦事項 <span style="font-size:11px;color:var(--text-muted);font-weight:500">· 本週 ${pendingTodos.length} 項</span></h3>
             <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted)">打勾即標記完成</p>
           </div>
-          <div style="max-height:480px;overflow-y:auto">${pendingHtml}</div>
+          <div style="max-height:540px;overflow-y:auto">${pendingHtml}</div>
         </div>
       </div>
     `;
@@ -2379,49 +2376,6 @@ const App = {
         this.render();
       });
     }
-    // 行銷每日工作進度 - 人員下拉
-    const dashMktEmp = document.getElementById('dash-mkt-emp');
-    if (dashMktEmp) {
-      dashMktEmp.addEventListener('change', () => {
-        if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0 };
-        this.filter.dashboardMarketing.employee = dashMktEmp.value;
-        this.render();
-      });
-    }
-    // 行銷週曆 - 切換週
-    document.querySelectorAll('[data-week-offset]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0 };
-        this.filter.dashboardMarketing.weekOffset = +btn.dataset.weekOffset;
-        this.render();
-      });
-    });
-    // 週曆上點任務卡 → 打開編輯（行銷部 d1）
-    document.querySelectorAll('[data-cal-task]').forEach(card => {
-      card.addEventListener('click', () => {
-        this.openDailyTaskModal('d1', card.dataset.calTask);
-      });
-    });
-    // 儀表板首頁的未完成待辦勾選
-    document.querySelectorAll('.dp-todo-tick').forEach(cb => {
-      cb.addEventListener('change', () => {
-        const taskId = cb.dataset.taskId;
-        const todoIdx = +cb.dataset.todoIdx;
-        const list = Store.get(Store.KEYS.dailyTasks, []);
-        const i = list.findIndex(x => x.id === taskId);
-        if (i < 0) return;
-        if (!Array.isArray(list[i].todos)) list[i].todos = [];
-        if (list[i].todos[todoIdx]) {
-          list[i].todos[todoIdx].done = cb.checked;
-          Store.set(Store.KEYS.dailyTasks, list);
-          this.render();
-        }
-      });
-    });
-    // 「查看全部」按鈕 → 跳到行銷辦公室
-    document.querySelectorAll('[data-nav-to]').forEach(btn => {
-      btn.addEventListener('click', () => this.navigate(btn.dataset.navTo));
-    });
   },
 
   /* ============================================================
@@ -3036,13 +2990,59 @@ const App = {
         this.render();
       });
     });
-    // 每日工作進度的事件綁定（如果當前是這個 tab）
+    // 動態 tab 的事件綁定
     const activeTab = this.filter.officeTab[deptId];
     const cfg = OFFICE_CONFIG[deptId];
     const tabKey = activeTab || cfg?.tabs?.[0]?.key;
-    if (cfg?.tabs?.find(t => t.key === tabKey && t.dynamic === 'daily-progress')) {
+    const tab = cfg?.tabs?.find(t => t.key === tabKey);
+    if (tab?.dynamic === 'daily-progress') {
       this.bindDailyProgress(deptId);
+    } else if (tab?.dynamic === 'weekly-calendar') {
+      this.bindWeeklyCalendar(deptId);
     }
+  },
+
+  /* ------------- 工作週曆事件綁定 ------------- */
+  bindWeeklyCalendar(deptId) {
+    // 人員下拉
+    const emp = document.getElementById('dash-mkt-emp');
+    if (emp) emp.addEventListener('change', () => {
+      if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0 };
+      this.filter.dashboardMarketing.employee = emp.value;
+      this.render();
+    });
+    // 切換週
+    document.querySelectorAll('[data-week-offset]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0 };
+        this.filter.dashboardMarketing.weekOffset = +btn.dataset.weekOffset;
+        this.render();
+      });
+    });
+    // 點任務卡 → 編輯
+    document.querySelectorAll('[data-cal-task]').forEach(card => {
+      card.addEventListener('click', () => this.openDailyTaskModal(deptId, card.dataset.calTask));
+    });
+    // 新增進度
+    document.querySelectorAll('[data-cal-add]').forEach(btn => {
+      btn.addEventListener('click', () => this.openDailyTaskModal(deptId));
+    });
+    // 未完成待辦勾選
+    document.querySelectorAll('.dp-todo-tick').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const taskId = cb.dataset.taskId;
+        const todoIdx = +cb.dataset.todoIdx;
+        const list = Store.get(Store.KEYS.dailyTasks, []);
+        const i = list.findIndex(x => x.id === taskId);
+        if (i < 0) return;
+        if (!Array.isArray(list[i].todos)) list[i].todos = [];
+        if (list[i].todos[todoIdx]) {
+          list[i].todos[todoIdx].done = cb.checked;
+          Store.set(Store.KEYS.dailyTasks, list);
+          this.render();
+        }
+      });
+    });
   },
 
   /* ============================================================
@@ -3631,7 +3631,9 @@ const App = {
 
     let tabContent = '';
     if (activeTab) {
-      if (activeTab.dynamic === 'daily-progress') {
+      if (activeTab.dynamic === 'weekly-calendar') {
+        tabContent = this.renderWeeklyCalendarTab(deptId, color, dept);
+      } else if (activeTab.dynamic === 'daily-progress') {
         tabContent = this.renderDailyProgressTab(deptId, color, dept);
       } else if (activeTab.key === 'profit') {
         tabContent = window.__profitTabHtml || '';
