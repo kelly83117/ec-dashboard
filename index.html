@@ -2523,11 +2523,11 @@ const App = {
     // Row 2: 營收 / 廣告費 / ROAS sub-headers
 
     const fmt = (n) => n > 0 ? n.toLocaleString() : '—';
-    const fmtCell = (n, dim) => `<td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;color:${dim ? 'var(--text-muted)' : 'var(--text)'}">${fmt(n)}</td>`;
+    const fmtCell = (n, dim) => `<td style="padding:2px 5px;text-align:right;font-variant-numeric:tabular-nums;font-size:11px;color:${dim ? 'var(--text-muted)' : 'var(--text)'}">${fmt(n)}</td>`;
     const fmtRoas = (rev, ads) => {
-      if (ads === 0) return `<td style="padding:4px 8px;text-align:right;color:var(--text-muted);font-size:12px">—</td>`;
+      if (ads === 0) return `<td style="padding:2px 5px;text-align:right;color:var(--text-muted);font-size:11px">—</td>`;
       const r = (rev / ads).toFixed(2);
-      return `<td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;font-weight:600;color:#4f46e5">${r}</td>`;
+      return `<td style="padding:2px 5px;text-align:right;font-variant-numeric:tabular-nums;font-size:11px;font-weight:600;color:#4f46e5">${r}</td>`;
     };
 
     // 建欄位設定：每平台佔幾欄
@@ -2543,86 +2543,100 @@ const App = {
       const tint = marketTint[m];
       const totalCols = items.reduce((s, p) => s + (PLATFORMS_WITH_AD_SPEND.has(p.name) ? 3 : 1), 0);
       const badge = MARKETPLACE_BADGE[m];
-      return `<th colspan="${totalCols}" style="padding:6px 8px;background:${tint}14;color:${tint};text-align:center;font-size:11px;font-weight:700;border-left:2px solid ${tint};border-bottom:1px solid var(--border)"><img src="${badge.src}" style="width:14px;height:14px;vertical-align:middle;border-radius:3px;margin-right:4px;object-fit:contain">${escapeHtml(badge.name)}</th>`;
+      return `<th colspan="${totalCols}" style="padding:4px 6px;background:${tint}14;color:${tint};text-align:center;font-size:10px;font-weight:700;border-left:2px solid ${tint};border-bottom:1px solid var(--border)"><img src="${badge.src}" style="width:12px;height:12px;vertical-align:middle;border-radius:3px;margin-right:3px;object-fit:contain">${escapeHtml(badge.name)}</th>`;
     }).join('');
 
     // 平台名稱列
     const platformHeadHtml = colSpec.map(({ p, cols }) => {
-      return `<th colspan="${cols}" style="padding:6px 6px;text-align:center;font-size:11px;color:var(--text);font-weight:600;border-bottom:1px solid var(--border);border-left:1px solid var(--border)">${escapeHtml(p.name)}</th>`;
+      return `<th colspan="${cols}" style="padding:4px 4px;text-align:center;font-size:10px;color:var(--text);font-weight:600;border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap">${escapeHtml(p.name)}</th>`;
     }).join('');
 
-    // 子欄位列
+    // 子欄位列（短標籤節省空間）
     const subHeadHtml = colSpec.map(({ hasAds }) => {
       if (hasAds) {
-        return `<th style="padding:4px 6px;text-align:right;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>
-                <th style="padding:4px 6px;text-align:right;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">廣告費</th>
-                <th style="padding:4px 6px;text-align:right;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">ROAS</th>`;
+        return `<th style="padding:3px 4px;text-align:right;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>
+                <th style="padding:3px 4px;text-align:right;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">廣告</th>
+                <th style="padding:3px 4px;text-align:right;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">ROAS</th>`;
       }
-      return `<th style="padding:4px 6px;text-align:right;font-size:10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>`;
+      return `<th style="padding:3px 4px;text-align:right;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>`;
     }).join('');
 
     // 每一天的資料列
     const todayStrLocal = toDateStr(new Date());
+    let monthTotalRev = 0;
+    let monthTotalAds = 0;
     const dayRowsHtml = dates.map(d => {
       const isToday = d === todayStrLocal;
       const dayLabel = d.slice(5).replace('-', '/');
-      let dayTotal = 0;
+      let dayRev = 0;
+      let dayAds = 0;
       const cells = colSpec.map(({ p, hasAds }) => {
         const rev = get(p, d);
-        dayTotal += rev;
+        dayRev += rev;
         if (hasAds) {
           const ads = getAds(p, d);
+          dayAds += ads;
           return fmtCell(rev, rev === 0) + fmtCell(ads, ads === 0) + fmtRoas(rev, ads);
         }
         return fmtCell(rev, rev === 0);
       }).join('');
+      monthTotalRev += dayRev;
+      monthTotalAds += dayAds;
+      const dayRoas = dayAds > 0 ? (dayRev / dayAds).toFixed(2) : '—';
       return `
         <tr style="background:${isToday ? '#eef2ff44' : 'transparent'}">
-          <td style="padding:4px 10px;font-size:11px;font-weight:600;color:${isToday ? 'var(--primary)' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;white-space:nowrap;border-right:1px solid var(--border);position:sticky;left:0;background:${isToday ? '#f5f3ff' : 'var(--surface)'};z-index:1">${escapeHtml(dayLabel)}${isToday ? ' ●' : ''}</td>
+          <td style="padding:3px 8px;font-size:11px;font-weight:600;color:${isToday ? 'var(--primary)' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;white-space:nowrap;border-right:1px solid var(--border);position:sticky;left:0;background:${isToday ? '#f5f3ff' : 'var(--surface)'};z-index:1">${escapeHtml(dayLabel)}${isToday ? ' ●' : ''}</td>
           ${cells}
-          <td style="padding:4px 10px;text-align:right;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:${dayTotal > 0 ? 'var(--text)' : 'var(--text-muted)'};border-left:2px solid var(--border);background:var(--bg)">${fmt(dayTotal)}</td>
+          <td style="padding:3px 6px;text-align:right;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:${dayRev > 0 ? 'var(--text)' : 'var(--text-muted)'};border-left:2px solid var(--border);background:var(--bg)">${fmt(dayRev)}</td>
+          <td style="padding:3px 6px;text-align:right;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text-muted);background:var(--bg)">${fmt(dayAds)}</td>
+          <td style="padding:3px 6px;text-align:right;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:${dayAds > 0 ? '#4f46e5' : 'var(--text-muted)'};background:var(--bg)">${dayRoas}</td>
         </tr>
       `;
     }).join('');
 
     // 總計列
-    let monthGrandTotal = 0;
-    const totalCells = colSpec.map(({ p, hasAds }, idx) => {
+    const totalCells = colSpec.map(({ hasAds }, idx) => {
       const t = platformTotals[idx];
-      monthGrandTotal += t.rev;
       if (hasAds) {
-        return `<td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:11px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(t.ads)}</td>
-                <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:700;color:#4f46e5;font-variant-numeric:tabular-nums">${t.roas}</td>`;
+        return `<td style="padding:5px 5px;text-align:right;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>
+                <td style="padding:5px 5px;text-align:right;font-size:10px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(t.ads)}</td>
+                <td style="padding:5px 5px;text-align:right;font-size:11px;font-weight:700;color:#4f46e5;font-variant-numeric:tabular-nums">${t.roas}</td>`;
       }
-      return `<td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>`;
+      return `<td style="padding:5px 5px;text-align:right;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>`;
     }).join('');
+    const monthRoas = monthTotalAds > 0 ? (monthTotalRev / monthTotalAds).toFixed(2) : '—';
 
     const tableHtml = `
-      <div style="overflow:auto;max-height:75vh;border:1px solid var(--border);border-radius:8px">
-        <table style="border-collapse:separate;border-spacing:0;min-width:100%;font-size:12px">
-          <thead style="position:sticky;top:0;z-index:2;background:var(--surface)">
+      <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="border-collapse:separate;border-spacing:0;width:100%;table-layout:auto;font-size:11px">
+          <thead style="background:var(--surface)">
             <tr>
-              <th rowspan="3" style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);position:sticky;left:0;z-index:3">日期</th>
+              <th rowspan="3" style="padding:4px 8px;text-align:left;font-size:10px;color:var(--text-muted);font-weight:600;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);width:46px">日期</th>
               ${marketHeadHtml}
-              <th rowspan="3" style="padding:6px 10px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-left:2px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg);min-width:90px">當日總計</th>
+              <th colspan="3" rowspan="2" style="padding:4px 6px;text-align:center;font-size:10px;color:var(--text-muted);font-weight:700;border-left:2px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg)">當日總計</th>
             </tr>
             <tr>${platformHeadHtml}</tr>
-            <tr>${subHeadHtml}</tr>
+            <tr>${subHeadHtml}
+              <th style="padding:3px 4px;text-align:right;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);background:var(--bg);border-left:2px solid var(--border)">營收</th>
+              <th style="padding:3px 4px;text-align:right;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);background:var(--bg)">廣告</th>
+              <th style="padding:3px 4px;text-align:right;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);background:var(--bg)">ROAS</th>
+            </tr>
           </thead>
           <tbody>
             ${dayRowsHtml}
           </tbody>
           <tfoot>
             <tr style="background:var(--bg);border-top:2px solid var(--border)">
-              <td style="padding:8px 10px;font-size:12px;font-weight:800;color:var(--text);border-right:1px solid var(--border);position:sticky;left:0;background:var(--bg)">總計</td>
+              <td style="padding:6px 8px;font-size:11px;font-weight:800;color:var(--text);border-right:1px solid var(--border);background:var(--bg)">總計</td>
               ${totalCells}
-              <td style="padding:8px 10px;text-align:right;font-size:14px;font-weight:800;color:var(--primary);border-left:2px solid var(--border);font-variant-numeric:tabular-nums">${fmt(monthGrandTotal)}</td>
+              <td style="padding:6px 6px;text-align:right;font-size:13px;font-weight:800;color:var(--primary);border-left:2px solid var(--border);font-variant-numeric:tabular-nums">${fmt(monthTotalRev)}</td>
+              <td style="padding:6px 6px;text-align:right;font-size:11px;font-weight:700;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(monthTotalAds)}</td>
+              <td style="padding:6px 6px;text-align:right;font-size:12px;font-weight:800;color:#4f46e5;font-variant-numeric:tabular-nums">${monthRoas}</td>
             </tr>
           </tfoot>
         </table>
       </div>
-      <div style="margin-top:10px;font-size:11px;color:var(--text-muted);text-align:right">
+      <div style="margin-top:8px;font-size:10px;color:var(--text-muted);text-align:right">
         ● 標記為今天　·　— 表示該日無資料
       </div>
     `;
@@ -2630,7 +2644,7 @@ const App = {
     this.openModal({
       title: `📅 ${yMonth} 年 ${mMonth + 1} 月 明細`,
       bodyHtml: tableHtml,
-      width: '95vw',
+      width: '92vw',
       hideFooter: true,
     });
   },
