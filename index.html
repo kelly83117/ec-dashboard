@@ -1989,14 +1989,10 @@ const App = {
     const notes = Store.get(sKey('notes'), {}) || {};
     const T = Object.assign({}, INSIGHT_DEFAULT_THRESHOLDS, Store.get('ec.insightThresholds', {}) || {});
 
-    // 對照週選擇（filter.insightCompare = periodKey or 'prev'）
+    // 固定 slot：本週 = weeks[0]，上週 = weeks[1]
     const sales = weeks[0] || null;
-    let compareIdx = 1;
-    if (this.filter.insightCompare) {
-      const i = weeks.findIndex(w => w.periodKey === this.filter.insightCompare);
-      if (i >= 0) compareIdx = i;
-    }
-    const salesPrev = (compareIdx >= 0 && weeks[compareIdx] && compareIdx !== 0) ? weeks[compareIdx] : null;
+    const salesPrev = weeks[1] || null;
+    const compareIdx = 1; // 給 prevPrev 計算用
 
     const masterByCode = master?.byCode || {};
     const salesProducts = sales?.products || [];
@@ -2268,16 +2264,13 @@ const App = {
               <button class="pill ${s === currentShop ? 'active' : ''}" data-insight-shop="${escapeHtml(s)}" style="padding:4px 14px;font-size:12px;border:0;${s === currentShop ? '' : 'background:transparent'}">${escapeHtml(s)}</button>
             `).join('')}
           </div>
-          ${weeks.length > 0 ? `
+          ${sales ? `
             <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:8px">本週</span>
-            <span style="padding:4px 10px;background:white;border:1px solid var(--border);border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(displayPeriod(sales?.period) || sales?.periodKey || '—')}</span>
-            ${weeks.length > 1 ? `
-              <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:4px">上週</span>
-              <select id="insight-compare-pick" style="padding:4px 10px;border:1px solid var(--border);border-radius:7px;background:white;font-size:12px;font-family:inherit;cursor:pointer">
-                ${weeks.slice(1).map(w => `<option value="${escapeHtml(w.periodKey || '')}" ${(salesPrev && salesPrev.periodKey === w.periodKey) ? 'selected' : ''}>${escapeHtml(displayPeriod(w.period) || w.periodKey || '?')}</option>`).join('')}
-              </select>
-            ` : ''}
-            <span style="font-size:11px;color:var(--text-muted)">· 共 ${weeks.length} 週歷史</span>
+            <span style="padding:4px 10px;background:white;border:1px solid var(--border);border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(displayPeriod(sales.period) || sales.periodKey || '—')}</span>
+          ` : ''}
+          ${salesPrev ? `
+            <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:4px">上週</span>
+            <span style="padding:4px 10px;background:white;border:1px solid var(--border);border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(displayPeriod(salesPrev.period) || salesPrev.periodKey || '—')}</span>
           ` : ''}
         </div>
         ${uploadGridHtml}
@@ -2641,8 +2634,8 @@ const App = {
       });
     }
 
-    // 銷售排行 共用 handler（同一個函式處理本週/上週兩張卡，內部都進 weeks[]，由 periodKey 自動排序）
-    const wireSalesUpload = (inputId, slotLabel) => {
+    // 銷售排行 — 固定 slot：本週寫到 weeks[0]，上週寫到 weeks[1]，不排序、不會跑掉
+    const wireSalesUpload = (inputId, slotIdx, slotLabel) => {
       const input = document.getElementById(inputId);
       if (!input) return;
       input.addEventListener('change', async (e) => {
@@ -2652,7 +2645,6 @@ const App = {
           showToast(`解析「${currentShop} · ${slotLabel}」中...`, 'info');
           const result = await this.parseInsightExcel(file);
           const periodKey = (result.period || '').replace(/[^0-9]/g, '').slice(0, 16) || `wk-${Date.now()}`;
-          const weeks = Store.get(sKey('weeks'), []) || [];
           const newEntry = {
             products: result.products,
             period: result.period,
@@ -2661,20 +2653,12 @@ const App = {
             uploadedAt: Date.now(),
             uploadedBy: this.currentUser?.username || '',
           };
-          // 同 periodKey 視為重新上傳，移除舊版本
-          const filtered = weeks.filter(w => w.periodKey !== periodKey);
-          filtered.unshift(newEntry);
-          // 排序：新→舊（依 periodKey 數字大小、再退而以 uploadedAt）
-          filtered.sort((a, b) => {
-            const ka = String(a.periodKey || '');
-            const kb = String(b.periodKey || '');
-            if (ka !== kb) return kb.localeCompare(ka);
-            return (b.uploadedAt || 0) - (a.uploadedAt || 0);
-          });
-          // 保留最多 12 週
-          const trimmed = filtered.slice(0, 12);
-          Store.set(sKey('weeks'), trimmed);
-          showToast(`${currentShop} · ${slotLabel}已上傳（${result.products.length} 個商品 · ${result.period}） · 現有 ${trimmed.length} 週歷史`, 'success');
+          // 直接放到指定 slot，不動其他 slot
+          const weeks = (Store.get(sKey('weeks'), []) || []).slice();
+          while (weeks.length <= slotIdx) weeks.push(null);
+          weeks[slotIdx] = newEntry;
+          Store.set(sKey('weeks'), weeks);
+          showToast(`${currentShop} · ${slotLabel}已上傳（${result.products.length} 個商品 · ${result.period}）`, 'success');
           this.render();
         } catch (err) {
           console.error(err);
@@ -2684,8 +2668,8 @@ const App = {
         }
       });
     };
-    wireSalesUpload('insight-sales-upload', '本週銷售排行');
-    wireSalesUpload('insight-salesprev-upload', '上週銷售排行');
+    wireSalesUpload('insight-sales-upload', 0, '本週銷售排行');
+    wireSalesUpload('insight-salesprev-upload', 1, '上週銷售排行');
 
     // 商品表現
     const perfInput = document.getElementById('insight-perf-upload');
@@ -2833,24 +2817,18 @@ const App = {
         if (!confirm(`確定清除 ${currentShop} 的「${label}」？`)) return;
 
         if (piece === 'sales') {
-          // 清掉「本週」= weeks[0]
-          const ws = Store.get(sKey('weeks'), []) || [];
-          if (ws.length > 0) Store.set(sKey('weeks'), ws.slice(1));
-          else Store.remove(sKey('weeks'));
+          // 清掉「本週」slot = weeks[0]（其他 slot 不動）
+          const ws = (Store.get(sKey('weeks'), []) || []).slice();
+          ws[0] = null;
+          // 如果都沒了就整個刪掉
+          if (ws.every(w => !w)) Store.remove(sKey('weeks'));
+          else Store.set(sKey('weeks'), ws);
         } else if (piece === 'salesPrev') {
-          // 清掉「上週」= 對照週（compareIdx，預設 weeks[1]）
-          const ws = Store.get(sKey('weeks'), []) || [];
-          let idx = 1;
-          if (this.filter.insightCompare) {
-            const i = ws.findIndex(w => w.periodKey === this.filter.insightCompare);
-            if (i > 0) idx = i;
-          }
-          if (ws[idx]) {
-            const next = ws.filter((_, i) => i !== idx);
-            Store.set(sKey('weeks'), next);
-            // 重設對照週選擇
-            this.filter.insightCompare = '';
-          }
+          // 清掉「上週」slot = weeks[1]（其他 slot 不動）
+          const ws = (Store.get(sKey('weeks'), []) || []).slice();
+          if (ws.length > 1) ws[1] = null;
+          if (ws.every(w => !w)) Store.remove(sKey('weeks'));
+          else Store.set(sKey('weeks'), ws);
         } else {
           Store.remove(sKey(piece));
         }
