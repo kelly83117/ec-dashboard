@@ -3195,9 +3195,10 @@ const App = {
                 <span style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:999px;background:${st.bg};color:${st.color};font-size:10px;font-weight:600">${st.emoji} ${escapeHtml(t.status)}</span>
                 ${(() => {
                   const creator = t.employeeName || t.employee || '';
-                  const assignees = [...new Set((t.todos || []).map(td => td.assigneeName).filter(Boolean))];
-                  const nameTxt = assignees.length > 0 ? `${creator}-${assignees.join('、')}` : creator;
-                  return `<span style="font-size:10px;color:var(--text-muted);font-weight:500">👤 ${escapeHtml(nameTxt)}</span>`;
+                  const hasAssignee = (t.todos || []).some(td => td.assigneeName);
+                  return hasAssignee
+                    ? `<span style="font-size:10px;color:var(--text-muted);font-weight:500">👤 ${escapeHtml(creator)}</span><span style="font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;background:#ede9fe;color:#5b21b6">指派</span>`
+                    : `<span style="font-size:10px;color:var(--text-muted);font-weight:500">👤 ${escapeHtml(creator)}</span>`;
                 })()}
               </div>
             </div>
@@ -3252,11 +3253,10 @@ const App = {
                   <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px dashed #f3f4f6;font-size:11px;color:var(--text-muted);flex-wrap:wrap">
                     ${(() => {
                       const creator = t.employeeName || t.employee || '';
-                      const assignees = [...new Set((t.todos || []).map(td => td.assigneeName).filter(Boolean))];
-                      const displayName = assignees.length > 0
-                        ? `${creator}-${assignees.join('、')}`
-                        : creator;
-                      return `<span style="font-weight:600;color:var(--text);min-width:0">${escapeHtml(displayName)}</span>`;
+                      const hasAssignee = (t.todos || []).some(td => td.assigneeName);
+                      return hasAssignee
+                        ? `<span style="font-weight:600;color:var(--text);min-width:0">${escapeHtml(creator)}</span><span style="font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;background:#ede9fe;color:#5b21b6;letter-spacing:.05em">指派</span>`
+                        : `<span style="font-weight:600;color:var(--text);min-width:0">${escapeHtml(creator)}</span>`;
                     })()}
                     ${todos.length > 0 ? `<span style="margin-left:auto;font-weight:500;white-space:nowrap">📝 ${doneCount}/${todos.length}</span>` : ''}
                   </div>
