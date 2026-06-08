@@ -1496,13 +1496,14 @@ const App = {
    *  儀表板首頁
    * ============================================================ */
   viewDashboard() {
-    // 讀取 → 遷移舊 schema → 視需要寫回
-    // 不再自動補空白日子（會產生假數字）；空白就是空白，等使用者輸入
+    // 讀取資料
+    // ⚠ 絕對不要在這裡自動 Store.set 寫回 Firestore：
+    //   雲端訂閱還沒完成時 Store.get 會拿到 null，落到 PLATFORMS 預設值；
+    //   如果寫回去就會把使用者真實資料覆蓋成空。
+    //   只在使用者實際儲存時才寫回。
     let platforms = Store.get(Store.KEYS.platforms, null);
     if (!platforms) platforms = JSON.parse(JSON.stringify(PLATFORMS));
-    let migrated = migratePlatforms(platforms);
-    const wasMigrated = migrated !== platforms;
-    if (wasMigrated) { platforms = migrated; Store.set(Store.KEYS.platforms, platforms); }
+    platforms = migratePlatforms(platforms); // 純記憶體轉換，不寫回
 
     const now = new Date();
     // 行銷每天填的是「昨日」資料；若使用者改了日期，以使用者選的為準（可補周末等）
