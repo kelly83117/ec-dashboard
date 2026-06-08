@@ -2134,11 +2134,17 @@ const App = {
     const uploadGridHtml = `
       <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc">
         ${uploadCards.map(u => `
-          <label style="background:white;border:1px solid ${u.loaded ? '#10b98144' : '#e5e7eb'};border-radius:8px;padding:12px 14px;cursor:pointer;display:block;transition:border-color .12s" onmouseover="this.style.borderColor='${u.loaded ? '#10b981' : '#9ca3af'}'" onmouseout="this.style.borderColor='${u.loaded ? '#10b98144' : '#e5e7eb'}'">
+          <label style="background:white;border:1px solid ${u.loaded ? '#10b98144' : '#e5e7eb'};border-radius:8px;padding:12px 14px;cursor:pointer;display:block;transition:border-color .12s;position:relative" onmouseover="this.style.borderColor='${u.loaded ? '#10b981' : '#9ca3af'}'" onmouseout="this.style.borderColor='${u.loaded ? '#10b98144' : '#e5e7eb'}'">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
               <span style="font-size:18px">${u.icon}</span>
               <span style="font-size:13px;font-weight:600;color:var(--text)">${escapeHtml(u.label)}</span>
-              ${u.loaded ? '<span style="margin-left:auto;font-size:11px;color:#10b981;font-weight:700">✓ 已載入</span>' : '<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">點此上傳</span>'}
+              ${u.loaded
+                ? `<span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px">
+                     <span style="font-size:11px;color:#10b981;font-weight:700">✓ 已載入</span>
+                     <button type="button" data-clear-piece="${u.key}" title="清除這份" style="width:20px;height:20px;border:0;border-radius:4px;background:transparent;color:#9ca3af;font-size:13px;line-height:1;cursor:pointer;padding:0" onmouseover="this.style.background='#fee2e2';this.style.color='#dc2626'" onmouseout="this.style.background='transparent';this.style.color='#9ca3af'">✕</button>
+                   </span>`
+                : '<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">點此上傳</span>'
+              }
             </div>
             <div style="font-size:11px;color:var(--text-muted);line-height:1.4">${escapeHtml(u.info)}</div>
             <div style="font-size:10px;color:#cbd5e1;margin-top:3px">${escapeHtml(u.hint)}</div>
@@ -2707,6 +2713,26 @@ const App = {
         this.render();
       });
     }
+
+    // 個別清除按鈕（每張上傳卡的小 ✕）
+    document.querySelectorAll('[data-clear-piece]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        // 卡片是 <label>，點 ✕ 會冒泡觸發 file input 開啟，要擋掉
+        e.preventDefault();
+        e.stopPropagation();
+        const piece = btn.dataset.clearPiece; // 'master' | 'sales' | 'perf'
+        const labels = { master: '商品母表', sales: '本週銷售排行', perf: '商品表現' };
+        const label = labels[piece] || piece;
+        if (!confirm(`確定清除 ${currentShop} 的「${label}」？`)) return;
+        if (piece === 'sales') {
+          Store.remove(sKey('weeks'));
+        } else {
+          Store.remove(sKey(piece));
+        }
+        showToast(`已清除 ${currentShop} · ${label}`, 'success');
+        this.render();
+      });
+    });
 
     // 分類門檻設定（共用）
     const settingsBtn = document.getElementById('insight-settings');
