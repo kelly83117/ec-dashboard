@@ -211,6 +211,20 @@
     color: white;
     box-shadow: 0 4px 12px rgba(99,102,241,.4);
   }
+  .nav-item.nav-sub {
+    padding: 6px 12px 6px 24px;
+    font-size: 12px;
+    color: var(--sidebar-muted);
+    margin-bottom: 1px;
+  }
+  .nav-item.nav-sub:hover { color: white; background: transparent; }
+  .nav-item.nav-sub.active {
+    background: transparent;
+    color: var(--primary);
+    box-shadow: none;
+    font-weight: 600;
+  }
+  .nav-item.nav-sub .icon { display:none; }
   .nav-item .icon { font-size: 16px; line-height: 1; }
   .sidebar-footer {
     padding: 16px;
@@ -716,6 +730,12 @@
         <div class="sidebar-group">辦公室</div>
         <button class="nav-item" data-route="office-d1">
           <span class="icon">📣</span><span>行銷</span>
+        </button>
+        <button class="nav-item nav-sub" data-route="office-d1-profit">
+          <span class="icon"></span><span>↳ 淨利表</span>
+        </button>
+        <button class="nav-item nav-sub" data-route="office-d1-insight">
+          <span class="icon"></span><span>↳ 洞察表分析</span>
         </button>
         <button class="nav-item" data-route="office-d2">
           <span class="icon">🛒</span><span>採購</span>
@@ -1459,8 +1479,11 @@ const App = {
   render() {
     const main = document.getElementById('main-content');
     if (this.route && this.route.startsWith('office-')) {
-      const deptId = this.route.slice('office-'.length);
-      main.innerHTML = this.viewOffice(deptId);
+      const rest = this.route.slice('office-'.length); // 例如 'd1' / 'd1-profit' / 'd1-insight'
+      const firstDash = rest.indexOf('-');
+      const deptId = firstDash > 0 ? rest.slice(0, firstDash) : rest;
+      const subRoute = firstDash > 0 ? rest.slice(firstDash + 1) : null;
+      main.innerHTML = this.viewOffice(deptId, subRoute);
       this.bindOfficeTabs(deptId);
       return;
     }
@@ -3411,8 +3434,8 @@ const App = {
         this.render();
       });
     });
-    // d1（行銷）一定有頂部的工作週曆，要綁
-    if (deptId === 'd1') {
+    // d1（行銷）：只有在主頁（有週曆）才綁；子頁不綁（避免 querySelector 找不到元素）
+    if (deptId === 'd1' && document.querySelector('[data-week-offset], [data-month-offset]')) {
       this.bindWeeklyCalendar(deptId);
     }
     // 動態 tab 的事件綁定
@@ -4164,7 +4187,7 @@ const App = {
   /* ============================================================
    *  各辦公室頁面（行銷 / 採購 / 商開 / 設計）
    * ============================================================ */
-  viewOffice(deptId) {
+  viewOffice(deptId, subRoute = null) {
     const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
     const cfg = OFFICE_CONFIG[deptId];
     if (!dept || !cfg) {
@@ -4289,9 +4312,28 @@ const App = {
         <p>${escapeHtml(cfg.subtitle)}</p>
       </div>
       ${deptId === 'd1' ? '' : `<div class="stat-grid">${statCards}</div>`}
-      ${deptId === 'd1' ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
-      ${tabBar}
-      ${tabContent}
+      ${deptId === 'd1' && !subRoute ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
+      ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
+      ${deptId === 'd1' && subRoute === 'profit' ? `<script>setTimeout(function(){if(typeof SHOPS!=='undefined'){try{SHOPS.forEach(function(s){var el=document.getElementById('content-'+s.id);if(el && !el.innerHTML.trim() && typeof shopHTML==='function'){el.innerHTML=shopHTML(s.id);}});SHOPS.forEach(function(s){if(typeof initShopUI==='function') initShopUI(s.id);});}catch(e){console.log(e);}}}, 200);</script>` : ''}
+      ${deptId === 'd1' && subRoute === 'insight' ? `
+        <div class="table-card" style="margin-bottom:16px">
+          <div class="table-card-header"><h3>洞察表分析</h3></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>維度</th><th>指標</th><th>數值</th><th>備註</th></tr></thead>
+              <tbody>
+                <tr><td>年齡層</td><td>25–34 佔比</td><td>38%</td><td>主力客群</td></tr>
+                <tr><td>地區</td><td>雙北佔比</td><td>54%</td><td>南部待開發</td></tr>
+                <tr><td>通路</td><td>IG 轉換率</td><td>4.2%</td><td>高於整體平均</td></tr>
+                <tr><td>時段</td><td>晚間 20–22 點瀏覽佔比</td><td>34%</td><td>主要瀏覽時段</td></tr>
+                <tr><td>客單價</td><td>本月平均</td><td>NT$ 1,280</td><td>較上月 ↑ 6%</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : ''}
+      ${deptId !== 'd1' ? tabBar : ''}
+      ${deptId !== 'd1' ? tabContent : ''}
       ${deptId === 'd1' ? '' : `
         <div class="table-card">
           <div class="table-card-header">
