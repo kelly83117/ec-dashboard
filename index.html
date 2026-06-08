@@ -211,19 +211,54 @@
     color: white;
     box-shadow: 0 4px 12px rgba(99,102,241,.4);
   }
+  .nav-item.nav-parent .nav-chevron {
+    font-size: 12px;
+    color: var(--sidebar-muted);
+    transition: transform .2s;
+    margin-left: 4px;
+  }
+  .nav-item.nav-parent.expanded .nav-chevron { transform: rotate(180deg); }
+  .nav-sub-group {
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height .25s ease;
+  }
+  .nav-sub-group.expanded {
+    max-height: 240px;
+  }
   .nav-item.nav-sub {
-    padding: 10px 12px 10px 32px;
-    font-size: 16px;
-    color: var(--sidebar-text);
-    margin-bottom: 2px;
+    padding: 8px 12px 8px 44px;
+    font-size: 14px;
+    color: var(--sidebar-muted);
+    margin-bottom: 1px;
     font-weight: 500;
+    position: relative;
+  }
+  .nav-item.nav-sub::before {
+    content: '';
+    position: absolute;
+    left: 30px;
+    top: 50%;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--sidebar-muted);
+    transform: translateY(-50%);
+    opacity: .5;
   }
   .nav-item.nav-sub:hover { color: white; background: var(--sidebar-2); }
+  .nav-item.nav-sub:hover::before { background: white; opacity: 1; }
   .nav-item.nav-sub.active {
-    background: transparent;
-    color: var(--primary);
+    background: var(--sidebar-2);
+    color: white;
     box-shadow: none;
     font-weight: 600;
+  }
+  .nav-item.nav-sub.active::before {
+    background: var(--primary);
+    opacity: 1;
+    width: 6px;
+    height: 6px;
   }
   .nav-item.nav-sub .icon { display:none; }
   .nav-item .icon { font-size: 16px; line-height: 1; }
@@ -729,15 +764,20 @@
           <span class="icon">📊</span><span>績效管理</span>
         </button>
         <div class="sidebar-group">辦公室</div>
-        <button class="nav-item" data-route="office-d1">
-          <span class="icon">📣</span><span>行銷</span>
+        <button class="nav-item nav-parent" data-toggle-group="d1">
+          <span class="icon">📣</span><span style="flex:1">行銷</span><span class="nav-chevron">▾</span>
         </button>
-        <button class="nav-item nav-sub" data-route="office-d1-profit">
-          <span class="icon"></span><span>↳ 淨利表</span>
-        </button>
-        <button class="nav-item nav-sub" data-route="office-d1-insight">
-          <span class="icon"></span><span>↳ 洞察表分析</span>
-        </button>
+        <div class="nav-sub-group" data-group="d1">
+          <button class="nav-item nav-sub" data-route="office-d1">
+            <span>工作週曆</span>
+          </button>
+          <button class="nav-item nav-sub" data-route="office-d1-profit">
+            <span>淨利表</span>
+          </button>
+          <button class="nav-item nav-sub" data-route="office-d1-insight">
+            <span>洞察表分析</span>
+          </button>
+        </div>
         <button class="nav-item" data-route="office-d2">
           <span class="icon">🛒</span><span>採購</span>
         </button>
@@ -1354,7 +1394,17 @@ const App = {
 
   bindNav() {
     document.querySelectorAll('.nav-item').forEach(btn => {
-      btn.addEventListener('click', () => this.navigate(btn.dataset.route));
+      btn.addEventListener('click', () => {
+        // 父層 toggle 按鈕：只展開/收合子項，不導航
+        if (btn.dataset.toggleGroup) {
+          const groupKey = btn.dataset.toggleGroup;
+          const group = document.querySelector(`.nav-sub-group[data-group="${groupKey}"]`);
+          const expanded = btn.classList.toggle('expanded');
+          if (group) group.classList.toggle('expanded', expanded);
+          return;
+        }
+        if (btn.dataset.route) this.navigate(btn.dataset.route);
+      });
     });
   },
 
@@ -1468,6 +1518,15 @@ const App = {
       const dept = departments.find(d => d.id === deptId);
       btn.style.display = canAccessOffice(user, dept) ? '' : 'none';
     });
+    // 父層 toggle 按鈕 + 子項群組：依照群組 key 對應到部門
+    document.querySelectorAll('[data-toggle-group]').forEach(btn => {
+      const deptId = btn.dataset.toggleGroup;
+      const dept = departments.find(d => d.id === deptId);
+      const canSee = canAccessOffice(user, dept);
+      btn.style.display = canSee ? '' : 'none';
+      const group = document.querySelector(`.nav-sub-group[data-group="${deptId}"]`);
+      if (group) group.style.display = canSee ? '' : 'none';
+    });
   },
 
   /* ------------- 路由 ------------- */
@@ -1477,6 +1536,13 @@ const App = {
     document.querySelectorAll('.nav-item').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.route === route);
     });
+    // 若進入到 office-d1 系列任一頁，自動展開行銷子項
+    if (route.startsWith('office-d1')) {
+      const parent = document.querySelector('[data-toggle-group="d1"]');
+      const group = document.querySelector('.nav-sub-group[data-group="d1"]');
+      if (parent) parent.classList.add('expanded');
+      if (group) group.classList.add('expanded');
+    }
     this.render();
   },
 
