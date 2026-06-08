@@ -2705,11 +2705,12 @@ const App = {
     const clearAllBtn = document.getElementById('insight-clear-all');
     if (clearAllBtn) {
       clearAllBtn.addEventListener('click', () => {
-        if (!confirm(`確定清除 ${currentShop} 賣場的全部洞察表資料（母表 / 各週銷售 / 商品表現）？\n備註紀錄會保留。`)) return;
+        // 一按即清，無確認彈窗。連備註也一起清掉。
         Store.remove(sKey('master'));
         Store.remove(sKey('weeks'));
         Store.remove(sKey('perf'));
-        showToast(`已清除 ${currentShop} 資料`, 'success');
+        Store.remove(sKey('notes'));
+        showToast(`已清除 ${currentShop} 全部資料`, 'success');
         this.render();
       });
     }
