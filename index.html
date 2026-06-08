@@ -2109,7 +2109,7 @@ const App = {
     const fmtPct = n => isFinite(n) && n > 0 ? (n * 100).toFixed(2) + '%' : '—';
     const fmtTime = (ts) => ts ? new Date(ts).toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short' }) : '';
 
-    // 上傳狀態卡片（3 個）
+    // 上傳狀態卡片（4 個：母表 / 本週銷售 / 上週銷售 / 商品表現）
     const uploadCards = [
       {
         key: 'master', label: '商品清單（母表）', icon: '📋',
@@ -2121,7 +2121,13 @@ const App = {
         key: 'sales', label: '本週銷售排行', icon: '💰',
         loaded: !!sales, info: sales ? `${salesProducts.length} 個編號 · ${displayPeriod(sales.period) || ''} · ${fmtTime(sales.uploadedAt)}` : '尚未上傳',
         accept: '.xlsx,.xls', inputId: 'insight-sales-upload',
-        hint: '商品編號 / 售價 / 庫存 / 需求 / 獲利'
+        hint: '本週商品銷售（系統會依檔案週期自動歸位）'
+      },
+      {
+        key: 'salesPrev', label: '上週銷售排行', icon: '📅',
+        loaded: !!salesPrev, info: salesPrev ? `${(salesPrev.products || []).length} 個編號 · ${displayPeriod(salesPrev.period) || ''} · ${fmtTime(salesPrev.uploadedAt)}` : '尚未上傳',
+        accept: '.xlsx,.xls', inputId: 'insight-salesprev-upload',
+        hint: '上週商品銷售（成長率/類別流向用）'
       },
       {
         key: 'perf', label: '商品表現（蝦皮）', icon: '📊',
@@ -2132,7 +2138,7 @@ const App = {
     ];
 
     const uploadGridHtml = `
-      <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc">
+      <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc">
         ${uploadCards.map(u => `
           <label style="background:white;border:1px solid ${u.loaded ? '#10b98144' : '#e5e7eb'};border-radius:8px;padding:12px 14px;cursor:pointer;display:block;transition:border-color .12s;position:relative" onmouseover="this.style.borderColor='${u.loaded ? '#10b981' : '#9ca3af'}'" onmouseout="this.style.borderColor='${u.loaded ? '#10b98144' : '#e5e7eb'}'">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
@@ -2635,14 +2641,15 @@ const App = {
       });
     }
 
-    // 銷售排行：保留歷史，新增進 weeks 最前面（同 periodKey 會覆蓋）
-    const salesInput = document.getElementById('insight-sales-upload');
-    if (salesInput) {
-      salesInput.addEventListener('change', async (e) => {
+    // 銷售排行 共用 handler（同一個函式處理本週/上週兩張卡，內部都進 weeks[]，由 periodKey 自動排序）
+    const wireSalesUpload = (inputId, slotLabel) => {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      input.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
         try {
-          showToast(`解析「${currentShop} · 本週銷售排行」中...`, 'info');
+          showToast(`解析「${currentShop} · ${slotLabel}」中...`, 'info');
           const result = await this.parseInsightExcel(file);
           const periodKey = (result.period || '').replace(/[^0-9]/g, '').slice(0, 16) || `wk-${Date.now()}`;
           const weeks = Store.get(sKey('weeks'), []) || [];
@@ -2667,16 +2674,18 @@ const App = {
           // 保留最多 12 週
           const trimmed = filtered.slice(0, 12);
           Store.set(sKey('weeks'), trimmed);
-          showToast(`${currentShop} · 本週銷售已上傳（${result.products.length} 個商品） · 現有 ${trimmed.length} 週歷史`, 'success');
+          showToast(`${currentShop} · ${slotLabel}已上傳（${result.products.length} 個商品 · ${result.period}） · 現有 ${trimmed.length} 週歷史`, 'success');
           this.render();
         } catch (err) {
           console.error(err);
           showToast(`解析失敗：${err.message}`, 'error');
         } finally {
-          salesInput.value = '';
+          input.value = '';
         }
       });
-    }
+    };
+    wireSalesUpload('insight-sales-upload', '本週銷售排行');
+    wireSalesUpload('insight-salesprev-upload', '上週銷售排行');
 
     // 商品表現
     const perfInput = document.getElementById('insight-perf-upload');
@@ -2818,12 +2827,30 @@ const App = {
         // 卡片是 <label>，點 ✕ 會冒泡觸發 file input 開啟，要擋掉
         e.preventDefault();
         e.stopPropagation();
-        const piece = btn.dataset.clearPiece; // 'master' | 'sales' | 'perf'
-        const labels = { master: '商品母表', sales: '本週銷售排行', perf: '商品表現' };
+        const piece = btn.dataset.clearPiece; // 'master' | 'sales' | 'salesPrev' | 'perf'
+        const labels = { master: '商品母表', sales: '本週銷售', salesPrev: '上週銷售', perf: '商品表現' };
         const label = labels[piece] || piece;
         if (!confirm(`確定清除 ${currentShop} 的「${label}」？`)) return;
+
         if (piece === 'sales') {
-          Store.remove(sKey('weeks'));
+          // 清掉「本週」= weeks[0]
+          const ws = Store.get(sKey('weeks'), []) || [];
+          if (ws.length > 0) Store.set(sKey('weeks'), ws.slice(1));
+          else Store.remove(sKey('weeks'));
+        } else if (piece === 'salesPrev') {
+          // 清掉「上週」= 對照週（compareIdx，預設 weeks[1]）
+          const ws = Store.get(sKey('weeks'), []) || [];
+          let idx = 1;
+          if (this.filter.insightCompare) {
+            const i = ws.findIndex(w => w.periodKey === this.filter.insightCompare);
+            if (i > 0) idx = i;
+          }
+          if (ws[idx]) {
+            const next = ws.filter((_, i) => i !== idx);
+            Store.set(sKey('weeks'), next);
+            // 重設對照週選擇
+            this.filter.insightCompare = '';
+          }
         } else {
           Store.remove(sKey(piece));
         }
