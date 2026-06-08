@@ -2405,17 +2405,28 @@ const App = {
           const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
           const SHOPS = ['玩樂', '好麻吉', '森之旅'];
 
-          // 把一個分頁解析成 byCode map
+          // 把一個分頁解析成 byCode map（各賣場 header 不一致，用 alias 比對）
           const parseSheet = (sheetName) => {
             const ws = wb.Sheets[sheetName];
             const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
             if (rows.length < 2) return null;
             const headers = rows[0].map(h => String(h || '').trim());
             const idx = (n) => headers.findIndex(h => h.indexOf(n) >= 0);
-            const cCode = idx('商品編號');
-            const cId   = idx('商品ID');
-            const cMoc  = idx('莫');
-            const cName = idx('商品名稱');
+            // 嘗試多個 alias，返回第一個找到的欄位 index
+            const idxOf = (...names) => {
+              for (const n of names) {
+                const i = idx(n);
+                if (i >= 0) return i;
+              }
+              return -1;
+            };
+            // 商品編號 alias: 「商品編號」(玩樂/森之旅) / 「商品選項貨號」(好麻吉)
+            const cCode = idxOf('商品編號', '商品選項貨號', '商品貨號');
+            // 商品ID 三個分頁都叫商品ID
+            const cId   = idxOf('商品ID');
+            // 莫筆克名稱 / 莫比克名 / 莫比克名稱：用「莫」做寬鬆比對
+            const cMoc  = idxOf('莫');
+            const cName = idxOf('商品名稱');
             if (cCode < 0 || cId < 0) return null;
             const byCode = {};
             for (let r = 1; r < rows.length; r++) {
@@ -2428,7 +2439,7 @@ const App = {
                 mocbicName: cMoc >= 0 ? String(row[cMoc] || '').trim() : '',
               };
             }
-            return { byCode, sheet: sheetName, rawRows: rows.length - 1 };
+            return { byCode, sheet: sheetName, rawRows: rows.length - 1, headers };
           };
 
           // 對每個賣場，先找完整名稱對應，找不到再用第一個字找
