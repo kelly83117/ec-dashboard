@@ -1908,6 +1908,12 @@ const App = {
       if (byDate[t.date]) byDate[t.date].push(t);
     });
 
+    // 狀態統計（右上 badge 用）
+    const statusCounts = { '進行中': 0, '已完成': 0, '遇阻': 0, '待開始': 0 };
+    tasksInRange.forEach(t => {
+      if (statusCounts[t.status] != null) statusCounts[t.status]++;
+    });
+
     // 未完成待辦
     const pendingTodos = [];
     tasksInRange.forEach(t => {
@@ -2056,8 +2062,15 @@ const App = {
               </div>
               <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(headerLabel)}</span>
             </div>
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:12px;color:var(--text-muted)">人員</span>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:4px">
+                ${DAILY_TASK_STATUS_LIST.map(s => {
+                  const meta = DAILY_TASK_STATUS[s];
+                  const c = statusCounts[s] || 0;
+                  return `<span title="${escapeHtml(s)} ${c} 件" style="display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:999px;background:${meta.bg};color:${meta.color};font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;${c === 0 ? 'opacity:.4' : ''}">${meta.emoji} ${escapeHtml(s)} ${c}</span>`;
+                }).join('')}
+              </div>
+              <span style="font-size:12px;color:var(--text-muted);margin-left:6px">人員</span>
               <select id="dash-mkt-emp" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;font-family:inherit;cursor:pointer">
                 ${employeeOptions}
               </select>
