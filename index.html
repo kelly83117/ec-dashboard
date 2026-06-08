@@ -1995,9 +1995,11 @@ const App = {
               const catColor = catMeta?.color || '#6b7280';
               const todos = Array.isArray(t.todos) ? t.todos : [];
               const doneCount = todos.filter(td => td.done).length;
+              const canEdit = this.currentUser.role === 'admin' || this.currentUser.username === t.employee;
               return `
-                <div data-cal-task="${escapeHtml(t.id)}" style="background:white;border:1px solid var(--border);border-left:3px solid ${catColor};border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)'" onmouseout="this.style.boxShadow='none'">
-                  <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;flex-wrap:wrap">
+                <div data-cal-task="${escapeHtml(t.id)}" style="position:relative;background:white;border:1px solid var(--border);border-left:3px solid ${catColor};border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)'" onmouseout="this.style.boxShadow='none'">
+                  ${canEdit ? `<button class="cal-task-del" data-cal-del="${escapeHtml(t.id)}" title="刪除此筆工作進度" style="position:absolute;top:3px;right:3px;width:18px;height:18px;border:0;border-radius:4px;background:transparent;color:#cbd5e1;font-size:11px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0" onmouseover="this.style.background='#fee2e2';this.style.color='#ef4444'" onmouseout="this.style.background='transparent';this.style.color='#cbd5e1'">🗑</button>` : ''}
+                  <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;flex-wrap:wrap;padding-right:${canEdit ? '22px' : '0'}">
                     ${t.category ? `<span style="font-size:9px;font-weight:700;color:${catColor};letter-spacing:.03em">${escapeHtml(t.category)}</span>` : ''}
                     ${t.subcategory ? `<span style="font-size:9px;color:var(--text-muted)">· ${escapeHtml(t.subcategory)}</span>` : ''}
                     <span style="margin-left:auto;display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:999px;background:${st.bg};color:${st.color};font-size:9px;font-weight:700">${st.emoji} ${escapeHtml(t.status)}</span>
@@ -3469,7 +3471,18 @@ const App = {
     });
     // 點任務卡 → 編輯
     document.querySelectorAll('[data-cal-task]').forEach(card => {
-      card.addEventListener('click', () => this.openDailyTaskModal(deptId, card.dataset.calTask));
+      card.addEventListener('click', (e) => {
+        // 點到刪除按鈕時不要觸發編輯
+        if (e.target.closest('[data-cal-del]')) return;
+        this.openDailyTaskModal(deptId, card.dataset.calTask);
+      });
+    });
+    // 刪除按鈕
+    document.querySelectorAll('[data-cal-del]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.deleteDailyTask(btn.dataset.calDel);
+      });
     });
     // 新增進度
     document.querySelectorAll('[data-cal-add]').forEach(btn => {
