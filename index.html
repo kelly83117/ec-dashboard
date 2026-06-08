@@ -1958,6 +1958,220 @@ const App = {
   /* ============================================================
    *  行銷辦公室 - 工作週曆（Google Calendar 風格的週檢視）
    * ============================================================ */
+  /* ============================================================
+   *  營運表現洞察表 — 上傳每週商品銷售排行 Excel，自動依商品編號合併
+   * ============================================================ */
+  renderInsightTabHtml() {
+    const report = Store.get('ec.insightWeekly', null);
+    const products = report?.products || [];
+    const periodLabel = report?.period || '';
+    const uploadedAt = report?.uploadedAt ? new Date(report.uploadedAt).toLocaleString('zh-TW') : '';
+
+    // 排序：營收高→低
+    const sorted = products.slice().sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+
+    // 總計
+    const totalRev = sorted.reduce((s, p) => s + (p.revenue || 0), 0);
+    const totalProfit = sorted.reduce((s, p) => s + (p.profit || 0), 0);
+    const totalQty = sorted.reduce((s, p) => s + (p.qty || 0), 0);
+
+    const fmt = n => (n > 0 || n < 0) ? Math.round(n).toLocaleString() : '—';
+    const fmtPct = n => isFinite(n) ? (n * 100).toFixed(1) + '%' : '—';
+
+    const rowsHtml = sorted.length === 0
+      ? `<tr><td colspan="7" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">尚未上傳任何資料 · 點上方「上傳本週銷售排行」按鈕開始</td></tr>`
+      : sorted.map((p, i) => {
+          const grossMargin = p.revenue > 0 ? p.profit / p.revenue : 0;
+          const netStock = p.stock - p.demand;
+          return `
+            <tr style="border-top:1px solid #f3f4f6">
+              <td style="padding:8px 10px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;width:36px">${i + 1}</td>
+              <td style="padding:8px 10px;font-size:12px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums">${escapeHtml(p.code)}</td>
+              <td style="padding:8px 10px;font-size:13px;color:var(--text);min-width:200px">${escapeHtml(p.name)}</td>
+              <td style="padding:8px 10px;text-align:right;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums">NT$ ${fmt(p.revenue)}</td>
+              <td style="padding:8px 10px;text-align:right;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(p.qty)}</td>
+              <td style="padding:8px 10px;text-align:right;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">NT$ ${fmt(p.profit)} <span style="font-size:10px;color:var(--text-muted)">(${fmtPct(grossMargin)})</span></td>
+              <td style="padding:8px 10px;text-align:right;font-size:12px;color:${netStock <= 0 ? '#ef4444' : netStock < 30 ? '#f59e0b' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${netStock <= 0 ? 700 : 500}">${fmt(netStock)} ${netStock <= 0 ? '⚠' : ''}</td>
+            </tr>
+          `;
+        }).join('');
+
+    return `
+      <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
+          <div>
+            <h3 style="margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em">營運表現洞察表 · 玩樂盒子</h3>
+            <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted)">${periodLabel ? `期間：${escapeHtml(periodLabel)} · 共 ${sorted.length} 件商品` : '尚未上傳資料'}${uploadedAt ? ` · 上次上傳 ${escapeHtml(uploadedAt)}` : ''}</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <label class="btn-add" style="padding:7px 14px;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+              📤 上傳本週銷售排行
+              <input type="file" id="insight-upload" accept=".xlsx,.xls" style="display:none">
+            </label>
+            ${sorted.length > 0 ? `<button id="insight-clear" class="pill" style="padding:6px 12px;font-size:12px">清除資料</button>` : ''}
+          </div>
+        </div>
+        ${sorted.length > 0 ? `
+          <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:1px;background:#e5e7eb;border-bottom:1px solid #e5e7eb">
+            <div style="background:white;padding:14px 18px">
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本期總營收</div>
+              <div style="font-size:22px;font-weight:700;color:var(--text);letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">NT$ ${fmt(totalRev)}</div>
+            </div>
+            <div style="background:white;padding:14px 18px">
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本期總獲利</div>
+              <div style="font-size:22px;font-weight:700;color:#10b981;letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">NT$ ${fmt(totalProfit)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">(${fmtPct(totalRev > 0 ? totalProfit / totalRev : 0)})</span></div>
+            </div>
+            <div style="background:white;padding:14px 18px">
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本期售出件數</div>
+              <div style="font-size:22px;font-weight:700;color:var(--text);letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">${fmt(totalQty)} 件</div>
+            </div>
+          </div>
+        ` : ''}
+        <div class="table-wrap" style="max-height:680px;overflow-y:auto">
+          <table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px">
+            <thead style="position:sticky;top:0;z-index:1;background:#f9fafb">
+              <tr>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">#</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">商品編號</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">商品名稱</th>
+                <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">本期營收</th>
+                <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">售出件數</th>
+                <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">獲利 (毛利率)</th>
+                <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">淨庫存</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  },
+
+  /* 解析上傳的 Excel，依商品編號合併 */
+  parseInsightExcel(file) {
+    return new Promise((resolve, reject) => {
+      if (typeof XLSX === 'undefined') {
+        reject(new Error('XLSX 函式庫未載入，請重新整理頁面'));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const wb = XLSX.read(data, { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          if (rows.length < 2) throw new Error('Excel 沒有資料');
+
+          // Row 0 = headers
+          const headers = rows[0].map(h => String(h || '').trim());
+          // Find column indexes by header name
+          const idx = (name) => headers.findIndex(h => h.indexOf(name) >= 0);
+          const colCode = idx('商品編號');
+          const colName = idx('商品名稱');
+          const colStock = idx('可用庫存');
+          const colDemand = idx('需求');
+          const colPrice = idx('售價');
+          const colCost = idx('成本');
+          const colProfit = idx('獲利');
+          const colQty = idx('銷售數量');
+
+          if (colCode < 0 || colName < 0 || colPrice < 0) {
+            throw new Error(`找不到必要欄位（商品編號 / 商品名稱 / 售價）。實際欄位：${headers.join(', ').slice(0, 200)}`);
+          }
+
+          // 試著從「銷售數量」欄位標題抓出期間，例如「銷售數量(202606010000~202606080000)」
+          const qtyHeader = colQty >= 0 ? headers[colQty] : '';
+          let period = '';
+          const m = qtyHeader.match(/(\d{8})\d*~(\d{8})/);
+          if (m) {
+            const [, s, e] = m;
+            period = `${s.slice(0,4)}/${s.slice(4,6)}/${s.slice(6,8)} – ${e.slice(0,4)}/${e.slice(4,6)}/${e.slice(6,8)}`;
+          }
+
+          const merged = {};
+          for (let r = 1; r < rows.length; r++) {
+            const row = rows[r];
+            const code = String(row[colCode] || '').trim();
+            if (!code) continue;
+            const num = (i) => {
+              if (i < 0) return 0;
+              const v = row[i];
+              if (v === '' || v == null) return 0;
+              const n = +String(v).replace(/,/g, '');
+              return isFinite(n) ? n : 0;
+            };
+            if (!merged[code]) {
+              merged[code] = {
+                code,
+                name: String(row[colName] || '').trim(),
+                stock: 0, demand: 0,
+                revenue: 0, cost: 0, profit: 0, qty: 0,
+              };
+            }
+            merged[code].stock   += num(colStock);
+            merged[code].demand  += num(colDemand);
+            merged[code].revenue += num(colPrice);
+            merged[code].cost    += num(colCost);
+            merged[code].profit  += num(colProfit);
+            merged[code].qty     += num(colQty);
+            // 名稱以較完整版本為主
+            if (!merged[code].name && row[colName]) merged[code].name = String(row[colName]).trim();
+          }
+
+          const products = Object.values(merged);
+          resolve({ products, period, headers, rawRows: rows.length - 1 });
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(reader.error || new Error('讀取失敗'));
+      reader.readAsArrayBuffer(file);
+    });
+  },
+
+  /* 綁定洞察表的事件 */
+  bindInsightTab() {
+    const upload = document.getElementById('insight-upload');
+    if (upload) {
+      upload.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+          showToast('解析中...', 'info');
+          const result = await this.parseInsightExcel(file);
+          if (!result.products.length) {
+            showToast('沒有讀到任何商品資料', 'error');
+            return;
+          }
+          Store.set('ec.insightWeekly', {
+            products: result.products,
+            period: result.period,
+            uploadedAt: Date.now(),
+            uploadedBy: this.currentUser?.username || '',
+            sourceRows: result.rawRows,
+          });
+          showToast(`已合併 ${result.products.length} 個商品（${result.rawRows} 列原始資料）`, 'success');
+          this.render();
+        } catch (err) {
+          console.error(err);
+          showToast('解析失敗：' + err.message, 'error');
+        } finally {
+          upload.value = '';
+        }
+      });
+    }
+    const clearBtn = document.getElementById('insight-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        if (!confirm('確定清除本週洞察表資料？')) return;
+        Store.remove('ec.insightWeekly');
+        showToast('已清除', 'success');
+        this.render();
+      });
+    }
+  },
+
   renderWeeklyCalendarTab(deptId, color, dept) {
     const allTasks = Store.get(Store.KEYS.dailyTasks, []);
     const tasks = allTasks.filter(t => t.deptId === deptId);
@@ -3538,6 +3752,10 @@ const App = {
     if (deptId === 'd1' && document.querySelector('[data-week-offset], [data-month-offset]')) {
       this.bindWeeklyCalendar(deptId);
     }
+    // d1 insight 子頁：洞察表上傳按鈕
+    if (deptId === 'd1' && this.route === 'office-d1-insight') {
+      this.bindInsightTab();
+    }
     // d1 profit 子頁：初始化淨利表的賣場分頁內容
     if (deptId === 'd1' && this.route === 'office-d1-profit' && typeof SHOPS !== 'undefined') {
       setTimeout(() => {
@@ -4430,23 +4648,7 @@ const App = {
       ${deptId === 'd1' ? '' : `<div class="stat-grid">${statCards}</div>`}
       ${deptId === 'd1' && !subRoute ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
-      ${deptId === 'd1' && subRoute === 'insight' ? `
-        <div class="table-card" style="margin-bottom:16px">
-          <div class="table-card-header"><h3>洞察表分析</h3></div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>維度</th><th>指標</th><th>數值</th><th>備註</th></tr></thead>
-              <tbody>
-                <tr><td>年齡層</td><td>25–34 佔比</td><td>38%</td><td>主力客群</td></tr>
-                <tr><td>地區</td><td>雙北佔比</td><td>54%</td><td>南部待開發</td></tr>
-                <tr><td>通路</td><td>IG 轉換率</td><td>4.2%</td><td>高於整體平均</td></tr>
-                <tr><td>時段</td><td>晚間 20–22 點瀏覽佔比</td><td>34%</td><td>主要瀏覽時段</td></tr>
-                <tr><td>客單價</td><td>本月平均</td><td>NT$ 1,280</td><td>較上月 ↑ 6%</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ` : ''}
+      ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId !== 'd1' ? tabBar : ''}
       ${deptId !== 'd1' ? tabContent : ''}
       ${deptId === 'd1' ? '' : `
