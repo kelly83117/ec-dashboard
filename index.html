@@ -6172,8 +6172,8 @@ function lsHasAny(shop){
 }
 
 // ── Init ──
-SHOPS.forEach(s=>{document.getElementById('content-'+s.id).innerHTML=shopHTML(s.id);});
-SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id))document.getElementById('dot-'+s.id).classList.add('on');});
+SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
+SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
 
 function shopHTML(shop){return`
   <div class="period-bar">
@@ -6232,7 +6232,9 @@ function getDays(month,half){
   if(half==='first')return 15;if(half==='second')return last-15;return last;
 }
 function onMonthChange(shop){
-  state[shop].curMonth=document.getElementById('month-sel-'+shop).value;
+  const sel=document.getElementById('month-sel-'+shop);
+  if(!sel)return; // DOM 還沒掛上（例如在 insight 頁），直接略過
+  state[shop].curMonth=sel.value;
   updateDaysBadge(shop);tryLoadSaved(shop);
 }
 function onHalfChange(shop,half,btn){
@@ -6242,7 +6244,9 @@ function onHalfChange(shop,half,btn){
 }
 function updateDaysBadge(shop){
   const d=getDays(state[shop].curMonth,state[shop].curHalf);
-  state[shop].days=d;document.getElementById('days-badge-'+shop).textContent=d+' 天';
+  state[shop].days=d;
+  const badge=document.getElementById('days-badge-'+shop);
+  if(badge)badge.textContent=d+' 天';
 }
 function resetUploadCards(shop){
   // 重置莫筆克卡片
