@@ -2379,8 +2379,11 @@ const App = {
                 revenue: 0, cost: 0, profit: 0, qty: 0,
               };
             }
-            merged[code].stock   += num(colStock);
-            merged[code].demand  += num(colDemand);
+            // 庫存 / 需求 用 MAX（蝦皮匯出時同一商品編號的各規格列會重複顯示整體數字，不能累加）
+            const s = num(colStock), d = num(colDemand);
+            if (s > merged[code].stock) merged[code].stock = s;
+            if (d > merged[code].demand) merged[code].demand = d;
+            // 營收 / 成本 / 獲利 / 銷售數量 是各規格獨立的數字，可以累加
             merged[code].revenue += num(colPrice);
             merged[code].cost    += num(colCost);
             merged[code].profit  += num(colProfit);
