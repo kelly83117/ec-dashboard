@@ -2112,18 +2112,18 @@ const App = {
               const doneCount = todos.filter(td => td.done).length;
               const canEdit = this.currentUser.role === 'admin' || this.currentUser.username === t.employee;
               return `
-                <div data-cal-task="${escapeHtml(t.id)}" style="position:relative;background:white;border:1px solid #e5e7eb;border-radius:8px;padding:11px 12px;margin-bottom:8px;cursor:pointer;transition:border-color .15s, box-shadow .15s" onmouseover="this.style.borderColor='${catColor}';this.style.boxShadow='0 2px 6px rgba(0,0,0,.05)'" onmouseout="this.style.borderColor='#e5e7eb';this.style.boxShadow='none'">
-                  ${canEdit ? `<button class="cal-task-del" data-cal-del="${escapeHtml(t.id)}" title="刪除此筆工作進度" style="position:absolute;top:5px;right:5px;width:22px;height:22px;border:0;border-radius:5px;background:transparent;color:#cbd5e1;font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0" onmouseover="this.style.background='#fee2e2';this.style.color='#ef4444'" onmouseout="this.style.background='transparent';this.style.color='#cbd5e1'">🗑</button>` : ''}
-                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;padding-right:${canEdit ? '26px' : '0'}">
-                    <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${catColor};flex-shrink:0"></span>
-                    ${t.category ? `<span style="font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:.02em">${escapeHtml(t.category)}${t.subcategory ? ' · ' + escapeHtml(t.subcategory) : ''}</span>` : ''}
+                <div data-cal-task="${escapeHtml(t.id)}" style="position:relative;background:white;border:1px solid #e5e7eb;border-radius:7px;padding:8px 10px;margin-bottom:6px;cursor:pointer;transition:border-color .15s, box-shadow .15s" onmouseover="this.style.borderColor='${catColor}';this.style.boxShadow='0 2px 6px rgba(0,0,0,.05)'" onmouseout="this.style.borderColor='#e5e7eb';this.style.boxShadow='none'">
+                  ${canEdit ? `<button class="cal-task-del" data-cal-del="${escapeHtml(t.id)}" title="刪除此筆工作進度" style="position:absolute;top:4px;right:4px;width:18px;height:18px;border:0;border-radius:4px;background:transparent;color:#cbd5e1;font-size:10px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0" onmouseover="this.style.background='#fee2e2';this.style.color='#ef4444'" onmouseout="this.style.background='transparent';this.style.color='#cbd5e1'">🗑</button>` : ''}
+                  <div style="display:flex;align-items:center;gap:5px;margin-bottom:4px;padding-right:${canEdit ? '22px' : '0'}">
+                    <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${catColor};flex-shrink:0"></span>
+                    ${t.category ? `<span style="font-size:10px;font-weight:600;color:var(--text-muted);letter-spacing:.02em">${escapeHtml(t.category)}${t.subcategory ? ' · ' + escapeHtml(t.subcategory) : ''}</span>` : ''}
                   </div>
-                  <div style="font-size:15px;font-weight:600;line-height:1.4;color:var(--text);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin-bottom:8px;letter-spacing:-.01em">${escapeHtml(t.title)}</div>
-                  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                    <span style="display:inline-flex;align-items:center;gap:3px;padding:3px 9px;border-radius:999px;background:${st.bg};color:${st.color};font-size:12px;font-weight:600">${st.emoji} ${escapeHtml(t.status)}</span>
-                    ${t.dueDate ? `<span style="display:inline-flex;align-items:center;gap:3px;color:#ef4444;font-weight:600;font-size:12px" title="預計完成日">📌 ${escapeHtml(t.dueDate.slice(5).replace('-','/'))}</span>` : ''}
+                  <div style="font-size:13px;font-weight:600;line-height:1.4;color:var(--text);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin-bottom:5px;letter-spacing:-.01em">${escapeHtml(t.title)}</div>
+                  <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+                    <span style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:999px;background:${st.bg};color:${st.color};font-size:10px;font-weight:600">${st.emoji} ${escapeHtml(t.status)}</span>
+                    ${t.dueDate ? `<span style="display:inline-flex;align-items:center;gap:2px;color:#ef4444;font-weight:600;font-size:10px" title="預計完成日">📌 ${escapeHtml(t.dueDate.slice(5).replace('-','/'))}</span>` : ''}
                   </div>
-                  <div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #f3f4f6;font-size:12px;color:var(--text-muted)">
+                  <div style="display:flex;align-items:center;gap:6px;margin-top:5px;padding-top:5px;border-top:1px dashed #f3f4f6;font-size:10px;color:var(--text-muted)">
                     <span style="font-weight:600;color:var(--text)">${escapeHtml(t.employeeName || t.employee)}</span>
                     ${todos.length > 0 ? `<span style="margin-left:auto;font-weight:500">📝 ${doneCount}/${todos.length}</span>` : ''}
                   </div>
@@ -2133,11 +2133,11 @@ const App = {
 
         return `
           <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:${i < 6 ? '1px solid #e5e7eb' : '0'};background:${isToday ? '#fafafa' : '#fcfcfd'}">
-            <div style="padding:12px 14px;text-align:left;border-bottom:1px solid #e5e7eb;display:flex;align-items:baseline;gap:10px;background:${isToday ? '#f5f3ff' : 'transparent'}">
-              <div style="font-size:13px;font-weight:600;color:${isToday ? 'var(--primary)' : 'var(--text-muted)'};letter-spacing:.03em">${weekDayNames[i]}</div>
-              <div style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em;color:${isToday ? 'var(--primary)' : 'var(--text)'}">${d.getMonth()+1}/${d.getDate()}</div>
+            <div style="padding:8px 10px;text-align:left;border-bottom:1px solid #e5e7eb;display:flex;align-items:baseline;gap:7px;background:${isToday ? '#f5f3ff' : 'transparent'}">
+              <div style="font-size:11px;font-weight:600;color:${isToday ? 'var(--primary)' : 'var(--text-muted)'};letter-spacing:.03em">${weekDayNames[i]}</div>
+              <div style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em;color:${isToday ? 'var(--primary)' : 'var(--text)'}">${d.getMonth()+1}/${d.getDate()}</div>
             </div>
-            <div style="padding:10px;flex:1;min-height:140px">
+            <div style="padding:7px;flex:1;min-height:110px">
               ${taskCardsHtml}
             </div>
           </div>
@@ -2181,32 +2181,32 @@ const App = {
     return `
       <div style="display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;align-items:start">
         <div style="background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;min-width:0">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding:16px 18px;border-bottom:1px solid #e5e7eb;background:white">
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-              <h3 style="margin:0;font-size:17px;font-weight:600;letter-spacing:-.01em">工作${isMonthMode ? '月' : '週'}曆</h3>
-              <div style="display:flex;align-items:center;gap:2px;background:#f3f4f6;border-radius:8px;padding:3px">
-                <button class="pill" ${offsetAttr}="${prevOffset}" title="上一個" style="padding:4px 10px;font-size:13px;border:0;background:transparent">←</button>
-                <button class="pill active" ${offsetAttr}="0" style="padding:4px 14px;font-size:13px;min-width:60px;border:0">${displayLabel}</button>
-                <button class="pill" ${offsetAttr}="${nextOffset}" title="下一個" style="padding:4px 10px;font-size:13px;border:0;background:transparent">→</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:11px 14px;border-bottom:1px solid #e5e7eb;background:white">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <h3 style="margin:0;font-size:14px;font-weight:600;letter-spacing:-.01em">工作${isMonthMode ? '月' : '週'}曆</h3>
+              <div style="display:flex;align-items:center;gap:2px;background:#f3f4f6;border-radius:7px;padding:2px">
+                <button class="pill" ${offsetAttr}="${prevOffset}" title="上一個" style="padding:3px 8px;font-size:11px;border:0;background:transparent">←</button>
+                <button class="pill active" ${offsetAttr}="0" style="padding:3px 11px;font-size:11px;min-width:52px;border:0">${displayLabel}</button>
+                <button class="pill" ${offsetAttr}="${nextOffset}" title="下一個" style="padding:3px 8px;font-size:11px;border:0;background:transparent">→</button>
               </div>
-              <div style="display:flex;align-items:center;gap:2px;background:#f3f4f6;border-radius:8px;padding:3px">
-                <button class="pill ${!isMonthMode ? 'active' : ''}" data-view-mode="week" style="padding:4px 12px;font-size:13px;border:0;${!isMonthMode ? '' : 'background:transparent'}">週</button>
-                <button class="pill ${isMonthMode ? 'active' : ''}" data-view-mode="month" style="padding:4px 12px;font-size:13px;border:0;${isMonthMode ? '' : 'background:transparent'}">月</button>
+              <div style="display:flex;align-items:center;gap:2px;background:#f3f4f6;border-radius:7px;padding:2px">
+                <button class="pill ${!isMonthMode ? 'active' : ''}" data-view-mode="week" style="padding:3px 10px;font-size:11px;border:0;${!isMonthMode ? '' : 'background:transparent'}">週</button>
+                <button class="pill ${isMonthMode ? 'active' : ''}" data-view-mode="month" style="padding:3px 10px;font-size:11px;border:0;${isMonthMode ? '' : 'background:transparent'}">月</button>
               </div>
-              <span style="font-size:13px;color:var(--text-muted);font-variant-numeric:tabular-nums">${escapeHtml(headerLabel)}</span>
+              <span style="font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums">${escapeHtml(headerLabel)}</span>
             </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <select id="dash-mkt-emp" style="padding:6px 12px;border:1px solid #e5e7eb;border-radius:8px;background:white;color:var(--text);font-size:13px;font-family:inherit;cursor:pointer">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <select id="dash-mkt-emp" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:7px;background:white;color:var(--text);font-size:11px;font-family:inherit;cursor:pointer">
                 ${employeeOptions}
               </select>
-              <button class="btn-add" data-cal-add="${escapeHtml(deptId)}" style="padding:7px 14px;font-size:13px">+ 新增進度</button>
+              <button class="btn-add" data-cal-add="${escapeHtml(deptId)}" style="padding:5px 11px;font-size:11px">+ 新增進度</button>
             </div>
           </div>
-          <div style="display:flex;align-items:center;gap:8px;padding:10px 18px;border-bottom:1px solid #e5e7eb;background:#f9fafb;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px;padding:7px 14px;border-bottom:1px solid #e5e7eb;background:#f9fafb;flex-wrap:wrap">
             ${DAILY_TASK_STATUS_LIST.map(s => {
               const meta = DAILY_TASK_STATUS[s];
               const c = statusCounts[s] || 0;
-              return `<span title="${escapeHtml(s)} ${c} 件" style="display:inline-flex;align-items:center;gap:5px;padding:4px 11px;border-radius:7px;background:${c > 0 ? meta.bg : '#f3f4f6'};color:${c > 0 ? meta.color : '#9ca3af'};font-size:13px;font-weight:600;font-variant-numeric:tabular-nums">${meta.emoji} ${escapeHtml(s)} ${c}</span>`;
+              return `<span title="${escapeHtml(s)} ${c} 件" style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:6px;background:${c > 0 ? meta.bg : '#f3f4f6'};color:${c > 0 ? meta.color : '#9ca3af'};font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">${meta.emoji} ${escapeHtml(s)} ${c}</span>`;
             }).join('')}
           </div>
           <div>${calendarBody}</div>
