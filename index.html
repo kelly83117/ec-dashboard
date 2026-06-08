@@ -2004,8 +2004,9 @@ const App = {
                     <span style="margin-left:auto;display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:999px;background:${st.bg};color:${st.color};font-size:9px;font-weight:700">${st.emoji} ${escapeHtml(t.status)}</span>
                   </div>
                   <div style="font-size:12px;font-weight:600;line-height:1.35;color:var(--text);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${escapeHtml(t.title)}</div>
-                  <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:10px;color:var(--text-muted)">
+                  <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:10px;color:var(--text-muted);flex-wrap:wrap">
                     <span>${escapeHtml(t.employeeName || t.employee)}</span>
+                    ${t.dueDate ? `<span style="display:inline-flex;align-items:center;gap:2px;color:#ef4444;font-weight:600" title="預計完成日">📌 ${escapeHtml(t.dueDate.slice(5).replace('-','/'))}</span>` : ''}
                     ${todos.length > 0 ? `<span style="margin-left:auto">📝 待辦 ${doneCount}/${todos.length}</span>` : ''}
                   </div>
                 </div>
@@ -3593,6 +3594,7 @@ const App = {
                         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                           <span style="font-weight:600;font-size:14px">${escapeHtml(t.title)}</span>
                           <span class="badge-role" style="background:${st.bg};color:${st.color};white-space:nowrap;font-size:11px;padding:2px 8px">${st.emoji} ${escapeHtml(t.status)}</span>
+                          ${t.dueDate ? `<span style="font-size:11px;color:#ef4444;font-weight:600" title="預計完成日">📌 ${escapeHtml(t.dueDate)}</span>` : ''}
                           ${todos.length > 0 ? `<span style="font-size:11px;color:var(--text-muted);font-weight:500">📝 待辦 ${doneCount}/${todos.length}</span>` : ''}
                         </div>
                         ${todos.length > 0 ? `
@@ -3738,6 +3740,7 @@ const App = {
       status: '進行中',
       notes: '',
       todos: [],
+      dueDate: '',
     };
     // 舊資料相容
     if (!Array.isArray(t.todos)) t.todos = [];
@@ -3812,11 +3815,17 @@ const App = {
             <select id="dpf-subcategory">${buildSubOptions(t.category, t.subcategory)}</select>
           </div>
         </div>
-        <div class="field">
-          <label>狀態</label>
-          <select id="dpf-status">
-            ${DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === t.status ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('')}
-          </select>
+        <div class="field-row">
+          <div class="field">
+            <label>狀態</label>
+            <select id="dpf-status">
+              ${DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === t.status ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>預計完成日 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（選填）</span></label>
+            <input type="date" id="dpf-due" value="${escapeHtml(t.dueDate || '')}">
+          </div>
         </div>
         <div class="field">
           <label>備註 / 進度說明</label>
@@ -3878,6 +3887,7 @@ const App = {
         const category = document.getElementById('dpf-category').value;
         const subcategory = document.getElementById('dpf-subcategory').value;
         const status = document.getElementById('dpf-status').value;
+        const dueDate = document.getElementById('dpf-due').value || '';
         const notes = document.getElementById('dpf-notes').value.trim();
         const todos = Array.from(document.querySelectorAll('#dpf-todos .todo-row'))
           .map(row => {
@@ -3906,7 +3916,7 @@ const App = {
         if (isEdit) {
           const i = list.findIndex(x => x.id === taskId);
           if (i < 0) { showToast('找不到此筆紀錄', 'error'); return false; }
-          list[i] = { ...list[i], date, employee, employeeName, category, subcategory, title, status, notes, todos };
+          list[i] = { ...list[i], date, employee, employeeName, category, subcategory, title, status, notes, todos, dueDate };
         } else {
           list.push({
             id: genId(),
@@ -3920,6 +3930,7 @@ const App = {
             status,
             notes,
             todos,
+            dueDate,
             createdAt: Date.now(),
             createdBy: this.currentUser?.username || '',
           });
