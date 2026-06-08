@@ -3195,10 +3195,14 @@ const App = {
                 <span style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:999px;background:${st.bg};color:${st.color};font-size:10px;font-weight:600">${st.emoji} ${escapeHtml(t.status)}</span>
                 ${(() => {
                   const creator = t.employeeName || t.employee || '';
-                  const hasAssignee = (t.todos || []).some(td => td.assigneeName);
-                  return hasAssignee
-                    ? `<span style="font-size:10px;color:var(--text-muted);font-weight:500">👤 ${escapeHtml(creator)}</span><span style="font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;background:#ede9fe;color:#5b21b6">指派</span>`
-                    : `<span style="font-size:10px;color:var(--text-muted);font-weight:500">👤 ${escapeHtml(creator)}</span>`;
+                  const maxAss = (t.todos || []).reduce((m, td) => {
+                    const arr = Array.isArray(td.assignees) ? td.assignees : (td.assignee ? [td.assignee] : []);
+                    return Math.max(m, arr.length);
+                  }, 0);
+                  let badge = '';
+                  if (maxAss >= 2) badge = '<span style="font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e">共同</span>';
+                  else if (maxAss === 1) badge = '<span style="font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;background:#ede9fe;color:#5b21b6">指派</span>';
+                  return `<span style="font-size:10px;color:var(--text-muted);font-weight:500">👤 ${escapeHtml(creator)}</span>${badge}`;
                 })()}
               </div>
             </div>
@@ -3253,10 +3257,15 @@ const App = {
                   <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px dashed #f3f4f6;font-size:11px;color:var(--text-muted);flex-wrap:wrap">
                     ${(() => {
                       const creator = t.employeeName || t.employee || '';
-                      const hasAssignee = (t.todos || []).some(td => td.assigneeName);
-                      return hasAssignee
-                        ? `<span style="font-weight:600;color:var(--text);min-width:0">${escapeHtml(creator)}</span><span style="font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;background:#ede9fe;color:#5b21b6;letter-spacing:.05em">指派</span>`
-                        : `<span style="font-weight:600;color:var(--text);min-width:0">${escapeHtml(creator)}</span>`;
+                      // 算最大的指派人數：個別 todo 內部選的人數最多算幾人
+                      const maxAss = (t.todos || []).reduce((m, td) => {
+                        const arr = Array.isArray(td.assignees) ? td.assignees : (td.assignee ? [td.assignee] : []);
+                        return Math.max(m, arr.length);
+                      }, 0);
+                      let badge = '';
+                      if (maxAss >= 2) badge = '<span style="font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;letter-spacing:.05em">共同</span>';
+                      else if (maxAss === 1) badge = '<span style="font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;background:#ede9fe;color:#5b21b6;letter-spacing:.05em">指派</span>';
+                      return `<span style="font-weight:600;color:var(--text);min-width:0">${escapeHtml(creator)}</span>${badge}`;
                     })()}
                     ${todos.length > 0 ? `<span style="margin-left:auto;font-weight:500;white-space:nowrap">📝 ${doneCount}/${todos.length}</span>` : ''}
                   </div>
@@ -4891,7 +4900,14 @@ const App = {
                               <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${td.done ? 'var(--text-muted)' : 'var(--text)'};cursor:pointer">
                                 <input type="checkbox" class="dp-todo-tick" data-task-id="${escapeHtml(t.id)}" data-todo-idx="${ti}" ${td.done ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;flex-shrink:0">
                                 <span style="flex:1;${td.done ? 'text-decoration:line-through' : ''}">${escapeHtml(td.text)}</span>
-                                ${td.assigneeName ? `<span style="font-size:10px;color:var(--text-muted);font-weight:600;background:var(--bg);padding:1px 6px;border-radius:3px;flex-shrink:0">👤 ${escapeHtml(td.assigneeName)}</span>` : ''}
+                                ${(() => {
+                                  const names = Array.isArray(td.assigneeNames) && td.assigneeNames.length
+                                    ? td.assigneeNames
+                                    : (td.assigneeName ? [td.assigneeName] : []);
+                                  if (names.length === 0) return '';
+                                  const icon = names.length >= 2 ? '👥' : '👤';
+                                  return `<span style="font-size:10px;color:var(--text-muted);font-weight:600;background:var(--bg);padding:1px 6px;border-radius:3px;flex-shrink:0">${icon} ${escapeHtml(names.join('、'))}</span>`;
+                                })()}
                               </label>
                             `).join('')}
                           </div>
@@ -5062,21 +5078,38 @@ const App = {
       return '<option value="">（此分類無子項）</option>';
     };
 
-    // todos 列表 HTML（每條待辦可指派人員）
-    const memberOptsForTodo = (selected) => `
-      <option value="" ${!selected ? 'selected' : ''}>— 指派對象 —</option>
-      ${members.map(u => `<option value="${escapeHtml(u.username)}" ${u.username === selected ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
-    `;
-    const todoRowHtml = (text, done, idx, assignee = '') => `
+    // todos 列表 HTML（每條待辦可複選指派人員）
+    // 標籤：根據選了幾個人，顯示「指派 / N 人 / 共同 N 人」
+    const buildAssigneeLabel = (selectedUsernames) => {
+      const n = selectedUsernames.length;
+      if (n === 0) return '👤 指派';
+      if (n === 1) {
+        const u = members.find(m => m.username === selectedUsernames[0]);
+        return `👤 ${u ? u.name : selectedUsernames[0]}`;
+      }
+      return `👥 共同 ${n} 人`;
+    };
+    const todoRowHtml = (text, done, idx, assignees = []) => {
+      const sel = Array.isArray(assignees) ? assignees : (assignees ? [assignees] : []);
+      return `
       <div class="todo-row" data-todo-idx="${idx}" style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg);border-radius:6px;margin-bottom:4px">
         <input type="checkbox" class="todo-done" ${done ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;flex-shrink:0">
         <input type="text" class="todo-text" value="${escapeHtml(text)}" placeholder="輸入待辦事項" style="flex:1;min-width:0;border:0;background:transparent;font-size:13px;padding:2px;outline:none;${done ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">
-        <select class="todo-assignee" title="指派人員" style="flex-shrink:0;max-width:110px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;background:white;color:var(--text);font-size:11px;font-family:inherit;cursor:pointer">
-          ${memberOptsForTodo(assignee)}
-        </select>
+        <div class="todo-assignees-wrap" data-selected='${JSON.stringify(sel)}' style="position:relative;flex-shrink:0">
+          <button type="button" class="todo-assignees-btn" style="padding:3px 8px;border:1px solid var(--border);border-radius:5px;background:white;color:var(--text);font-size:11px;font-family:inherit;cursor:pointer;white-space:nowrap;min-width:80px">${escapeHtml(buildAssigneeLabel(sel))} ▾</button>
+          <div class="todo-assignees-pop" style="display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:10000;background:white;border:1px solid var(--border);border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.12);min-width:150px;max-height:240px;overflow-y:auto;padding:4px">
+            ${members.map(u => `
+              <label style="display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;font-size:12px;border-radius:4px;transition:background .1s" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='transparent'">
+                <input type="checkbox" class="todo-assignee-cb" value="${escapeHtml(u.username)}" ${sel.includes(u.username) ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer">
+                <span>${escapeHtml(u.name)}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
         <button type="button" class="todo-del icon-btn" style="width:24px;height:24px;font-size:11px;flex-shrink:0">✕</button>
       </div>
     `;
+    };
 
     this.openModal({
       title: isEdit ? '編輯工作進度' : '新增工作進度',
@@ -5125,7 +5158,12 @@ const App = {
             <button type="button" id="dpf-todo-add" style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:white;color:var(--text);font-size:11px;font-weight:600;cursor:pointer">+ 新增一項</button>
           </label>
           <div id="dpf-todos">
-            ${t.todos.map((td, i) => todoRowHtml(td.text || '', td.done || false, i, td.assignee || '')).join('')}
+            ${t.todos.map((td, i) => {
+              const ass = Array.isArray(td.assignees) && td.assignees.length
+                ? td.assignees
+                : (td.assignee ? [td.assignee] : []);
+              return todoRowHtml(td.text || '', td.done || false, i, ass);
+            }).join('')}
           </div>
         </div>
       `,
@@ -5145,6 +5183,19 @@ const App = {
           todosWrap.addEventListener('click', (e) => {
             if (e.target.classList.contains('todo-del')) {
               e.target.closest('.todo-row')?.remove();
+              return;
+            }
+            // 點到指派按鈕 → 切換 popover
+            const btn = e.target.closest('.todo-assignees-btn');
+            if (btn) {
+              const wrap = btn.parentElement;
+              const pop = wrap.querySelector('.todo-assignees-pop');
+              // 關掉其他開著的 popover
+              todosWrap.querySelectorAll('.todo-assignees-pop').forEach(p => {
+                if (p !== pop) p.style.display = 'none';
+              });
+              pop.style.display = pop.style.display === 'none' ? 'block' : 'none';
+              return;
             }
           });
           todosWrap.addEventListener('change', (e) => {
@@ -5156,8 +5207,22 @@ const App = {
                 txt.style.color = e.target.checked ? 'var(--text-muted)' : 'var(--text)';
               }
             }
+            // 指派 checkbox 變更 → 更新按鈕文字 + data-selected
+            if (e.target.classList.contains('todo-assignee-cb')) {
+              const wrap = e.target.closest('.todo-assignees-wrap');
+              const checks = Array.from(wrap.querySelectorAll('.todo-assignee-cb:checked')).map(c => c.value);
+              wrap.dataset.selected = JSON.stringify(checks);
+              const btn = wrap.querySelector('.todo-assignees-btn');
+              if (btn) btn.innerHTML = escapeHtml(buildAssigneeLabel(checks)) + ' ▾';
+            }
           });
         }
+        // 點 modal 任何其他地方關掉所有 popover
+        document.addEventListener('click', (ev) => {
+          if (!ev.target.closest('.todo-assignees-wrap')) {
+            document.querySelectorAll('.todo-assignees-pop').forEach(p => { p.style.display = 'none'; });
+          }
+        });
         const addBtn = document.getElementById('dpf-todo-add');
         if (addBtn && todosWrap) {
           addBtn.addEventListener('click', () => {
@@ -5179,13 +5244,22 @@ const App = {
         const notes = document.getElementById('dpf-notes').value.trim();
         const todos = Array.from(document.querySelectorAll('#dpf-todos .todo-row'))
           .map(row => {
-            const assigneeUsername = row.querySelector('.todo-assignee')?.value || '';
-            const assigneeUser = assigneeUsername ? members.find(u => u.username === assigneeUsername) : null;
+            const wrap = row.querySelector('.todo-assignees-wrap');
+            let selected = [];
+            try { selected = JSON.parse(wrap?.dataset.selected || '[]'); } catch {}
+            const selectedNames = selected.map(un => {
+              const u = members.find(m => m.username === un);
+              return u ? u.name : un;
+            });
             return {
               text: row.querySelector('.todo-text')?.value.trim() || '',
               done: row.querySelector('.todo-done')?.checked || false,
-              assignee: assigneeUsername,
-              assigneeName: assigneeUser ? assigneeUser.name : '',
+              // 新欄位：陣列
+              assignees: selected,
+              assigneeNames: selectedNames,
+              // 舊欄位：相容，存第一個（給舊版讀取）
+              assignee: selected[0] || '',
+              assigneeName: selectedNames[0] || '',
             };
           })
           .filter(td => td.text !== '');
