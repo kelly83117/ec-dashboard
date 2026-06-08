@@ -11,8 +11,8 @@
     --surface: #ffffff;
     --sidebar: #0f172a;
     --sidebar-2: #1e293b;
-    --sidebar-text: #cbd5e1;
-    --sidebar-muted: #64748b;
+    --sidebar-text: #e2e8f0;
+    --sidebar-muted: #94a3b8;
     --primary: #4f46e5;
     --primary-soft: #eef2ff;
     --primary-dark: #4338ca;
@@ -192,19 +192,21 @@
   .nav-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
+    gap: 11px;
+    padding: 12px 14px;
     margin-bottom: 2px;
     border-radius: var(--radius-sm);
     color: var(--sidebar-text);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 16px;
+    font-weight: 500;
     transition: background .15s, color .15s;
     border: 0;
     background: transparent;
     width: 100%;
     text-align: left;
   }
+  .nav-item .icon { font-size: 18px; }
   .nav-item:hover { background: var(--sidebar-2); color: white; }
   .nav-item.active {
     background: var(--primary);
@@ -224,12 +226,12 @@
     transition: max-height .25s ease;
   }
   .nav-sub-group.expanded {
-    max-height: 240px;
+    max-height: 300px;
   }
   .nav-item.nav-sub {
-    padding: 8px 12px 8px 44px;
-    font-size: 14px;
-    color: var(--sidebar-muted);
+    padding: 10px 14px 10px 46px;
+    font-size: 15px;
+    color: var(--sidebar-text);
     margin-bottom: 1px;
     font-weight: 500;
     position: relative;
