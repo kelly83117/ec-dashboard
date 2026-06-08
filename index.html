@@ -2836,19 +2836,21 @@ const App = {
           ${diffRow('營收', revOldN, revNewN, revChanged)}
           ${diffRow('廣告費', adsOldN, adsNewN, adsChanged)}
           <div style="margin-top:14px;padding:10px 12px;background:#f59e0b14;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px;color:var(--text)">
-            按「確認」會寫入儲存；按「取消」會還原為原本的數字。
+            按「確認」會寫入雲端儲存；按「稍後再說」會關掉視窗但保留剛輸入的數字（橘色邊框＝尚未儲存）。
           </div>
         `,
         saveLabel: '確認',
-        cancelLabel: '取消',
+        cancelLabel: '稍後再說',
         onSave: () => {
           dialogOpen = false;
           commit(idx);
           return true;
         },
         onCancel: () => {
+          // 取消只關掉確認視窗 — 輸入框保留使用者打的數字（橘色邊框 = 未儲存）
+          // 等使用者下次點別處或按 Enter 才會再次跳確認
           dialogOpen = false;
-          revert(idx);
+          markUnsaved(idx);
         },
       });
     };
