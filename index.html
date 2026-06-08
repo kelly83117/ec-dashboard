@@ -1750,6 +1750,7 @@ const App = {
           <td style="padding:3px 8px;text-align:center">${roasCell}</td>
           <td style="padding:3px 8px;white-space:nowrap;font-size:12px;text-align:center">${deltaCell}</td>
           <td style="padding:3px 6px;white-space:nowrap;text-align:center">
+            <button class="row-save-btn" data-idx="${i}" title="立即儲存此列" style="display:none;width:26px;height:26px;font-size:14px;font-weight:700;border:0;border-radius:5px;background:#10b981;color:white;cursor:pointer;box-shadow:0 2px 4px rgba(16,185,129,.3);margin-right:2px">✓</button>
             <button class="icon-btn" title="編輯歷史資料" onclick="App.openPlatformModal(${i})"
               style="width:26px;height:26px;font-size:13px">✏️</button>
           </td>
@@ -2725,21 +2726,27 @@ const App = {
       return revChanged || adsChanged;
     };
 
-    // 顯示「未儲存」的視覺提示（橘色邊框）
+    // 顯示「未儲存」的視覺提示（橘色邊框 + 顯示快速儲存按鈕）
     const markUnsaved = (idx) => {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
       const orange = '#f59e0b';
+      let anyDirty = false;
       if (revEl) {
         const changed = !sameVal(revEl.value, revEl.dataset.original);
         revEl.style.borderColor = changed ? orange : 'var(--border)';
         revEl.style.boxShadow = changed ? '0 0 0 2px #f59e0b22' : 'none';
+        if (changed) anyDirty = true;
       }
       if (adsEl) {
         const changed = !sameVal(adsEl.value, adsEl.dataset.original);
         adsEl.style.borderColor = changed ? orange : 'var(--border)';
         adsEl.style.boxShadow = changed ? '0 0 0 2px #f59e0b22' : 'none';
+        if (changed) anyDirty = true;
       }
+      // 該列的「✓ 快速儲存」按鈕：dirty 時顯示，乾淨時隱藏
+      const saveBtn = document.querySelector(`.row-save-btn[data-idx="${idx}"]`);
+      if (saveBtn) saveBtn.style.display = anyDirty ? 'inline-block' : 'none';
     };
 
     // 邊打邊更新 ROAS（不存檔）
@@ -2854,6 +2861,15 @@ const App = {
         },
       });
     };
+
+    // 列上的 ✓ 快速儲存按鈕：直接 commit，跳過確認視窗
+    document.querySelectorAll('.row-save-btn').forEach(btn => {
+      btn.addEventListener('mousedown', (e) => e.preventDefault()); // 不要讓 input 先 blur 跳出確認
+      btn.addEventListener('click', () => {
+        const idx = +btn.dataset.idx;
+        commit(idx);
+      });
+    });
 
     // 輸入時：即時加千分位 + 更新 ROAS、標記未儲存
     document.querySelectorAll('.card-rev, .card-ads').forEach(el => {
