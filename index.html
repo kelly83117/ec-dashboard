@@ -1167,7 +1167,7 @@ function genId() {
 const OFFICE_CONFIG = {
   d1: {
     icon: '📣',
-    subtitle: '行銷活動、品牌經營與廣告投放',
+    subtitle: '',
     stats: [
       { icon: '📣', label: '進行中活動', value: '12', meta: '本月新增 3 檔' },
       { icon: '👥', label: '月觸及人數', value: '48.2k', meta: '較上月 ↑ 12%' },
@@ -5497,7 +5497,7 @@ const App = {
           <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${color};vertical-align:middle;margin-right:8px"></span>
           ${cfg.icon} ${escapeHtml(dept.name)}辦公室
         </h2>
-        <p>${escapeHtml(cfg.subtitle)}</p>
+        ${cfg.subtitle ? `<p>${escapeHtml(cfg.subtitle)}</p>` : ''}
       </div>
       ${deptId === 'd1' ? '' : `<div class="stat-grid">${statCards}</div>`}
       ${deptId === 'd1' && !subRoute ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
