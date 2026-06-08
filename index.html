@@ -2252,6 +2252,7 @@ const App = {
             <button id="insight-settings" class="pill" style="padding:6px 12px;font-size:12px">⚙ 分類設定</button>
             ${sales ? `<button id="insight-export" class="btn-add" style="padding:6px 12px;font-size:12px">⬇ 匯出 Excel</button>` : ''}
             ${(master || sales || perf) ? `<button id="insight-clear-all" class="pill" style="padding:6px 12px;font-size:12px">清除此賣場</button>` : ''}
+            <button id="insight-reset-everything" class="pill" style="padding:6px 12px;font-size:12px;color:#dc2626;border-color:#fecaca">🔥 全部重置（所有賣場）</button>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
@@ -2752,6 +2753,62 @@ const App = {
 
         showToast(`已清除 ${currentShop} 全部資料`, 'success');
         this.render();
+      });
+    }
+
+    // 🔥 全部重置（所有賣場 + 門檻 + 一次性 migration 旗標）
+    const resetAllBtn = document.getElementById('insight-reset-everything');
+    if (resetAllBtn) {
+      resetAllBtn.addEventListener('click', async () => {
+        if (!confirm('🔥 確定要完全重置「洞察分析表」？\n\n會清除：\n• 所有 3 個賣場（玩樂/好麻吉/森之旅）的全部資料\n• 分類門檻設定\n• 舊版遷移旗標\n\n這個動作無法復原。')) return;
+
+        // 1) 重設 filter 狀態
+        this.filter.insightShop = '玩樂';
+        this.filter.insightCompare = '';
+
+        // 2) 蒐集所有要清的 key
+        const keysToWipe = new Set([
+          'ec.insightThresholds',
+          'ec.insightMigrated',
+          'ec.insightWeekly', 'ec.insightWeeklyPrev',
+          'ec.insightMaster', 'ec.insightPerf', 'ec.insightNotes',
+        ]);
+        ['玩樂', '好麻吉', '森之旅'].forEach(s => {
+          ['master', 'weeks', 'perf', 'notes'].forEach(t => {
+            keysToWipe.add(`ec.insight_${s}_${t}`);
+          });
+        });
+        // 額外掃 _mem 跟 localStorage 找所有 ec.insight 開頭的
+        try {
+          if (Store._mem && typeof Store._mem === 'object') {
+            Object.keys(Store._mem).forEach(k => { if (k.startsWith('ec.insight')) keysToWipe.add(k); });
+          }
+        } catch {}
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('ec.insight')) keysToWipe.add(k);
+          }
+        } catch {}
+
+        // 3) 本地全部刪
+        keysToWipe.forEach(k => {
+          try { delete Store._mem[k]; } catch {}
+          try { localStorage.removeItem(k); } catch {}
+        });
+
+        // 4) 雲端 atomic 一次刪所有
+        if (window.__cloudStore && typeof window.__cloudStore.removeFields === 'function') {
+          try {
+            await window.__cloudStore.removeFields(Array.from(keysToWipe));
+          } catch (err) {
+            console.warn('cloud wipe failed', err);
+          }
+        }
+
+        showToast('🔥 洞察分析表全部重置完成，正在重新載入…', 'success');
+        // 5) 強制硬重整避免任何快取殘留
+        setTimeout(() => location.reload(), 600);
       });
     }
 
