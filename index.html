@@ -2705,11 +2705,37 @@ const App = {
     const clearAllBtn = document.getElementById('insight-clear-all');
     if (clearAllBtn) {
       clearAllBtn.addEventListener('click', () => {
-        // 一按即清，無確認彈窗。連備註也一起清掉。
-        Store.remove(sKey('master'));
-        Store.remove(sKey('weeks'));
-        Store.remove(sKey('perf'));
-        Store.remove(sKey('notes'));
+        // 一按即清，無確認彈窗。
+        // 1) 重設相關 filter（不然下拉可能還指向已不存在的週）
+        this.filter.insightCompare = '';
+        // 2) 顯式寫入空值 → 觸發雲端同步，避免 onSnapshot race condition 回填舊資料
+        const prefix = `ec.insight_${currentShop}_`;
+        Store.set(prefix + 'master', null);
+        Store.set(prefix + 'weeks', []);
+        Store.set(prefix + 'perf', null);
+        Store.set(prefix + 'notes', {});
+        // 3) 再 remove，確保 key 不存在於 store
+        Store.remove(prefix + 'master');
+        Store.remove(prefix + 'weeks');
+        Store.remove(prefix + 'perf');
+        Store.remove(prefix + 'notes');
+        // 4) 掃 localStorage 中所有以 prefix 開頭的 key（萬一有遺漏的鍵）
+        try {
+          const removeList = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith(prefix)) removeList.push(k);
+          }
+          removeList.forEach(k => { try { localStorage.removeItem(k); } catch {} });
+        } catch {}
+        // 5) 也清 Store._mem（雲端模式下實際資料源）裡 prefix 開頭的所有 key
+        try {
+          if (Store._mem && typeof Store._mem === 'object') {
+            Object.keys(Store._mem).forEach(k => {
+              if (k.startsWith(prefix)) delete Store._mem[k];
+            });
+          }
+        } catch {}
         showToast(`已清除 ${currentShop} 全部資料`, 'success');
         this.render();
       });
