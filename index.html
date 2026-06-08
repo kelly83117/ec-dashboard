@@ -2029,13 +2029,15 @@ const App = {
       : pendingTodos.slice(0, 40).map(({ task, todoIdx, text }) => {
           const catMeta = task.category ? getCategoryMeta(task.category) : null;
           const catColor = catMeta?.color || '#6b7280';
+          const st = DAILY_TASK_STATUS[task.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
           return `
-            <label style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px">
+            <label style="display:flex;align-items:center;gap:7px;padding:7px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px;flex-wrap:wrap">
               <input type="checkbox" class="dp-todo-tick" data-task-id="${escapeHtml(task.id)}" data-todo-idx="${todoIdx}" style="width:14px;height:14px;cursor:pointer;flex-shrink:0">
-              <span style="flex:1;color:var(--text)">${escapeHtml(text)}</span>
+              <span style="flex:1;min-width:120px;color:var(--text)">${escapeHtml(text)}</span>
+              <span style="display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:999px;background:${st.bg};color:${st.color};font-size:10px;font-weight:700;flex-shrink:0">${st.emoji} ${escapeHtml(task.status)}</span>
               ${task.category ? `<span style="font-size:10px;font-weight:600;padding:1px 6px;border-radius:3px;background:${catColor}14;color:${catColor};flex-shrink:0">${escapeHtml(task.category)}</span>` : ''}
               <span style="font-size:10px;color:var(--text-muted);font-variant-numeric:tabular-nums;flex-shrink:0">${task.date.slice(5).replace('-','/')}</span>
-              <span style="font-size:10px;color:var(--text-muted);flex-shrink:0;min-width:50px">${escapeHtml(task.employeeName || task.employee)}</span>
+              <span style="font-size:10px;color:var(--text-muted);flex-shrink:0;min-width:50px;font-weight:500">${escapeHtml(task.employeeName || task.employee)}</span>
             </label>
           `;
         }).join('');
