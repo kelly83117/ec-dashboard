@@ -1959,38 +1959,148 @@ const App = {
    *  行銷辦公室 - 工作週曆（Google Calendar 風格的週檢視）
    * ============================================================ */
   /* ============================================================
-   *  營運表現洞察表 — 上傳每週商品銷售排行 Excel，自動依商品編號合併
+   *  營運表現洞察表 — 整合 3 份 Excel：母表 / 銷售排行 / 商品表現
+   *  並依商品編號合併、自動分類、警示母表缺漏
    * ============================================================ */
   renderInsightTabHtml() {
-    const report = Store.get('ec.insightWeekly', null);
-    const products = report?.products || [];
-    const periodLabel = report?.period || '';
-    const uploadedAt = report?.uploadedAt ? new Date(report.uploadedAt).toLocaleString('zh-TW') : '';
+    const master = Store.get('ec.insightMaster', null);
+    const sales = Store.get('ec.insightWeekly', null);
+    const perf = Store.get('ec.insightPerf', null);
+
+    const masterByCode = master?.byCode || {};   // { 'D12': { id, name, mocbicName } }
+    const masterByShopeeId = {};
+    Object.entries(masterByCode).forEach(([code, m]) => { if (m.id) masterByShopeeId[m.id] = { code, ...m }; });
+
+    const salesProducts = sales?.products || []; // [{ code, name, revenue, qty, profit, stock, demand }]
+    const perfByShopeeId = perf?.byShopeeId || {}; // { '15224423184': { impressions, clicks, ctr, convRate } }
+
+    // 合併：以 sales 為主，補上 master 的 商品ID + 商品名稱 + perf
+    const merged = salesProducts.map(s => {
+      const m = masterByCode[s.code] || null;
+      const shopeeId = m?.id || '';
+      const p = shopeeId ? perfByShopeeId[shopeeId] : null;
+      return {
+        code: s.code,
+        name: s.name,
+        masterName: m?.name || '',
+        mocbicName: m?.mocbicName || '',
+        shopeeId,
+        revenue: s.revenue || 0,
+        qty: s.qty || 0,
+        profit: s.profit || 0,
+        stock: s.stock || 0,
+        demand: s.demand || 0,
+        impressions: p?.impressions || 0,
+        clicks: p?.clicks || 0,
+        ctr: p?.ctr || 0,
+        convRate: p?.convRate || 0,
+        inMaster: !!m,
+      };
+    });
+
+    // 標記需更新母表的商品
+    const needMasterUpdate = merged.filter(p => !p.inMaster);
 
     // 排序：營收高→低
-    const sorted = products.slice().sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+    const sorted = merged.slice().sort((a, b) => b.revenue - a.revenue);
+
+    // 自動分類規則（粗略，未來可由使用者調整）
+    const classifyProduct = (p) => {
+      if (p.convRate > 0 && p.convRate < 0.008) return { label: '🟢 弱轉換', color: '#10b981' };
+      if (p.clicks > 100 && p.convRate < 0.02) return { label: '🟢 低效轉換', color: '#10b981' };
+      if (p.impressions > 0 && p.convRate === 0) return { label: '🟩 零轉換', color: '#22c55e' };
+      if (p.convRate >= 0.02 && p.convRate <= 0.05) return { label: '🟩 一般轉換', color: '#22c55e' };
+      return null;
+    };
 
     // 總計
-    const totalRev = sorted.reduce((s, p) => s + (p.revenue || 0), 0);
-    const totalProfit = sorted.reduce((s, p) => s + (p.profit || 0), 0);
-    const totalQty = sorted.reduce((s, p) => s + (p.qty || 0), 0);
+    const totalRev = sorted.reduce((s, p) => s + p.revenue, 0);
+    const totalProfit = sorted.reduce((s, p) => s + p.profit, 0);
+    const totalQty = sorted.reduce((s, p) => s + p.qty, 0);
 
     const fmt = n => (n > 0 || n < 0) ? Math.round(n).toLocaleString() : '—';
-    const fmtPct = n => isFinite(n) ? (n * 100).toFixed(1) + '%' : '—';
+    const fmtPct = n => isFinite(n) && n > 0 ? (n * 100).toFixed(2) + '%' : '—';
+    const fmtTime = (ts) => ts ? new Date(ts).toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short' }) : '';
+
+    // 上傳狀態卡片（3 個）
+    const uploadCards = [
+      {
+        key: 'master', label: '商品清單（母表）', icon: '📋',
+        loaded: !!master, info: master ? `${Object.keys(masterByCode).length} 個編號 · ${fmtTime(master.uploadedAt)}` : '尚未上傳',
+        accept: '.xlsx,.xls', inputId: 'insight-master-upload',
+        hint: '玩樂分頁：商品編號 / 商品ID / 莫筆克名稱'
+      },
+      {
+        key: 'sales', label: '本週銷售排行', icon: '💰',
+        loaded: !!sales, info: sales ? `${salesProducts.length} 個編號 · ${sales.period || ''} · ${fmtTime(sales.uploadedAt)}` : '尚未上傳',
+        accept: '.xlsx,.xls', inputId: 'insight-sales-upload',
+        hint: '商品編號 / 售價 / 庫存 / 需求 / 獲利'
+      },
+      {
+        key: 'perf', label: '商品表現（蝦皮）', icon: '📊',
+        loaded: !!perf, info: perf ? `${Object.keys(perfByShopeeId).length} 個商品 · ${fmtTime(perf.uploadedAt)}` : '尚未上傳',
+        accept: '.xlsx,.xls', inputId: 'insight-perf-upload',
+        hint: '商品ID / 曝光 / 點擊 / 轉換率（可出貨）'
+      },
+    ];
+
+    const uploadGridHtml = `
+      <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc">
+        ${uploadCards.map(u => `
+          <label style="background:white;border:1px solid ${u.loaded ? '#10b98144' : '#e5e7eb'};border-radius:8px;padding:12px 14px;cursor:pointer;display:block;transition:border-color .12s" onmouseover="this.style.borderColor='${u.loaded ? '#10b981' : '#9ca3af'}'" onmouseout="this.style.borderColor='${u.loaded ? '#10b98144' : '#e5e7eb'}'">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span style="font-size:18px">${u.icon}</span>
+              <span style="font-size:13px;font-weight:600;color:var(--text)">${escapeHtml(u.label)}</span>
+              ${u.loaded ? '<span style="margin-left:auto;font-size:11px;color:#10b981;font-weight:700">✓ 已載入</span>' : '<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">點此上傳</span>'}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);line-height:1.4">${escapeHtml(u.info)}</div>
+            <div style="font-size:10px;color:#cbd5e1;margin-top:3px">${escapeHtml(u.hint)}</div>
+            <input type="file" id="${u.inputId}" accept="${u.accept}" style="display:none">
+          </label>
+        `).join('')}
+      </div>
+    `;
+
+    // 警示：母表缺漏
+    const warningHtml = needMasterUpdate.length > 0 ? `
+      <div style="margin:14px 18px;padding:10px 14px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px;color:var(--text);line-height:1.5">
+        ⚠️ 有 <strong>${needMasterUpdate.length}</strong> 個商品在銷售排行裡，但<strong>不在母表中</strong>，無法對應到商品 ID / 蝦皮表現。請更新母表 Excel 後重新上傳。
+        <details style="margin-top:6px"><summary style="cursor:pointer;color:var(--text-muted)">查看編號 ▾</summary>
+          <div style="margin-top:6px;font-family:monospace;font-size:11px;color:var(--text-muted)">${needMasterUpdate.map(p => escapeHtml(p.code)).join(', ')}</div>
+        </details>
+      </div>
+    ` : '';
 
     const rowsHtml = sorted.length === 0
-      ? `<tr><td colspan="7" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">尚未上傳任何資料 · 點上方「上傳本週銷售排行」按鈕開始</td></tr>`
+      ? `<tr><td colspan="9" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">尚未上傳銷售排行 Excel</td></tr>`
       : sorted.map((p, i) => {
           const grossMargin = p.revenue > 0 ? p.profit / p.revenue : 0;
           const netStock = p.stock - p.demand;
+          const cls = classifyProduct(p);
           return `
-            <tr style="border-top:1px solid #f3f4f6">
+            <tr style="border-top:1px solid #f3f4f6;${!p.inMaster ? 'background:#fef3c7aa' : ''}">
               <td style="padding:8px 10px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;width:36px">${i + 1}</td>
-              <td style="padding:8px 10px;font-size:12px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums">${escapeHtml(p.code)}</td>
-              <td style="padding:8px 10px;font-size:13px;color:var(--text);min-width:200px">${escapeHtml(p.name)}</td>
+              <td style="padding:8px 10px;font-size:12px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums">
+                ${escapeHtml(p.code)}
+                ${!p.inMaster ? '<span style="display:block;font-size:9px;color:#f59e0b;font-weight:600;margin-top:2px">⚠ 需更新母表</span>' : ''}
+              </td>
+              <td style="padding:8px 10px;font-size:13px;color:var(--text);min-width:200px">
+                <div>${escapeHtml(p.mocbicName || p.name)}</div>
+                ${p.shopeeId ? `<div style="font-size:10px;color:var(--text-muted);font-family:monospace;margin-top:2px">ID: ${escapeHtml(p.shopeeId)}</div>` : ''}
+              </td>
               <td style="padding:8px 10px;text-align:right;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums">NT$ ${fmt(p.revenue)}</td>
               <td style="padding:8px 10px;text-align:right;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(p.qty)}</td>
-              <td style="padding:8px 10px;text-align:right;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">NT$ ${fmt(p.profit)} <span style="font-size:10px;color:var(--text-muted)">(${fmtPct(grossMargin)})</span></td>
+              <td style="padding:8px 10px;text-align:right;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">
+                ${p.impressions > 0 ? fmt(p.impressions) : '—'}
+              </td>
+              <td style="padding:8px 10px;text-align:right;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">
+                ${p.clicks > 0 ? fmt(p.clicks) : '—'}<br>
+                <span style="font-size:10px">${p.ctr > 0 ? fmtPct(p.ctr) : ''}</span>
+              </td>
+              <td style="padding:8px 10px;text-align:right;font-size:12px;font-weight:${p.convRate > 0 ? '600' : '400'};color:${p.convRate > 0 && p.convRate < 0.01 ? '#ef4444' : p.convRate >= 0.02 ? '#10b981' : 'var(--text-muted)'};font-variant-numeric:tabular-nums">
+                ${fmtPct(p.convRate)}
+                ${cls ? `<div style="display:inline-block;font-size:9px;font-weight:600;color:${cls.color};margin-top:2px">${cls.label}</div>` : ''}
+              </td>
               <td style="padding:8px 10px;text-align:right;font-size:12px;color:${netStock <= 0 ? '#ef4444' : netStock < 30 ? '#f59e0b' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${netStock <= 0 ? 700 : 500}">${fmt(netStock)} ${netStock <= 0 ? '⚠' : ''}</td>
             </tr>
           `;
@@ -2001,18 +2111,14 @@ const App = {
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
           <div>
             <h3 style="margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em">營運表現洞察表 · 玩樂盒子</h3>
-            <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted)">${periodLabel ? `期間：${escapeHtml(periodLabel)} · 共 ${sorted.length} 件商品` : '尚未上傳資料'}${uploadedAt ? ` · 上次上傳 ${escapeHtml(uploadedAt)}` : ''}</p>
+            <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted)">上傳 3 份 Excel：商品母表 + 本週銷售 + 蝦皮表現 → 系統自動合併分析</p>
           </div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <label class="btn-add" style="padding:7px 14px;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
-              📤 上傳本週銷售排行
-              <input type="file" id="insight-upload" accept=".xlsx,.xls" style="display:none">
-            </label>
-            ${sorted.length > 0 ? `<button id="insight-clear" class="pill" style="padding:6px 12px;font-size:12px">清除資料</button>` : ''}
-          </div>
+          ${(master || sales || perf) ? `<button id="insight-clear-all" class="pill" style="padding:6px 12px;font-size:12px">清除全部</button>` : ''}
         </div>
+        ${uploadGridHtml}
+        ${warningHtml}
         ${sorted.length > 0 ? `
-          <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:1px;background:#e5e7eb;border-bottom:1px solid #e5e7eb">
+          <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:1px;background:#e5e7eb;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb">
             <div style="background:white;padding:14px 18px">
               <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本期總營收</div>
               <div style="font-size:22px;font-weight:700;color:var(--text);letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">NT$ ${fmt(totalRev)}</div>
@@ -2033,10 +2139,12 @@ const App = {
               <tr>
                 <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">#</th>
                 <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">商品編號</th>
-                <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">商品名稱</th>
+                <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">商品名稱 / 蝦皮 ID</th>
                 <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">本期營收</th>
                 <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">售出件數</th>
-                <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">獲利 (毛利率)</th>
+                <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">曝光</th>
+                <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">點擊 / 點擊率</th>
+                <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">轉換率</th>
                 <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">淨庫存</th>
               </tr>
             </thead>
@@ -2130,43 +2238,149 @@ const App = {
     });
   },
 
-  /* 綁定洞察表的事件 */
+  /* 解析「商品清單」母表（玩樂分頁） */
+  parseInsightMasterExcel(file) {
+    return new Promise((resolve, reject) => {
+      if (typeof XLSX === 'undefined') return reject(new Error('XLSX 函式庫未載入'));
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+          // 找「玩樂」分頁
+          const targetSheet = wb.SheetNames.find(n => n.indexOf('玩') >= 0) || wb.SheetNames[0];
+          const ws = wb.Sheets[targetSheet];
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          if (rows.length < 2) throw new Error(`${targetSheet} 分頁沒有資料`);
+          const headers = rows[0].map(h => String(h || '').trim());
+          const idx = (n) => headers.findIndex(h => h.indexOf(n) >= 0);
+          const cCode = idx('商品編號');
+          const cId   = idx('商品ID');
+          const cMoc  = idx('莫');         // 莫筆克名稱 or 莫比克名
+          const cName = idx('商品名稱');
+          if (cCode < 0 || cId < 0) throw new Error(`找不到「商品編號」或「商品ID」欄位。實際標題：${headers.join(', ').slice(0,200)}`);
+
+          const byCode = {};
+          for (let r = 1; r < rows.length; r++) {
+            const row = rows[r];
+            const code = String(row[cCode] || '').trim();
+            if (!code) continue;
+            const id = String(row[cId] || '').trim();
+            byCode[code] = {
+              id,
+              name: cName >= 0 ? String(row[cName] || '').trim() : '',
+              mocbicName: cMoc >= 0 ? String(row[cMoc] || '').trim() : '',
+            };
+          }
+          resolve({ byCode, sheet: targetSheet, rawRows: rows.length - 1 });
+        } catch (err) { reject(err); }
+      };
+      reader.onerror = () => reject(reader.error || new Error('讀取失敗'));
+      reader.readAsArrayBuffer(file);
+    });
+  },
+
+  /* 解析「商品表現」報表（蝦皮匯出） */
+  parseInsightPerfExcel(file) {
+    return new Promise((resolve, reject) => {
+      if (typeof XLSX === 'undefined') return reject(new Error('XLSX 函式庫未載入'));
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+          // 跨所有分頁合併（蝦皮匯出可能有「最佳表現」、「新上架」、「高潛力」等多分頁）
+          const byShopeeId = {};
+          let totalRows = 0;
+          wb.SheetNames.forEach(sn => {
+            const ws = wb.Sheets[sn];
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+            if (rows.length < 2) return;
+            const headers = rows[0].map(h => String(h || '').trim());
+            const cId = headers.findIndex(h => h === '商品ID' || h.indexOf('商品ID') === 0);
+            const cName = headers.findIndex(h => h.indexOf('商品名稱') >= 0);
+            const cImp = headers.findIndex(h => h.indexOf('曝光') >= 0);
+            const cClk = headers.findIndex(h => h.indexOf('商品點擊數') >= 0 || (h.indexOf('點擊') >= 0 && h.indexOf('率') < 0));
+            const cCtr = headers.findIndex(h => h.indexOf('點擊率') >= 0);
+            const cConv = headers.findIndex(h => h === '轉換率 (可出貨訂單)' || (h.indexOf('轉換率') >= 0 && h.indexOf('可出貨') >= 0));
+            if (cId < 0) return;
+            const parseNum = (v) => {
+              if (v === '' || v == null || v === '-') return 0;
+              const s = String(v).replace(/,/g, '').replace('%', '').trim();
+              const n = +s;
+              if (!isFinite(n)) return 0;
+              // 點擊率/轉換率 在 Excel 是 "4.18%" 字串 → 0.0418
+              return s.indexOf('.') >= 0 || String(v).indexOf('%') >= 0
+                ? (String(v).indexOf('%') >= 0 ? n / 100 : n)
+                : n;
+            };
+            for (let r = 1; r < rows.length; r++) {
+              const row = rows[r];
+              const id = String(row[cId] || '').trim();
+              if (!id || id === '-') continue;
+              // 篩選：必須要有實際數值（曝光 > 0 或 點擊 > 0）
+              const imp = cImp >= 0 ? parseNum(row[cImp]) : 0;
+              const clk = cClk >= 0 ? parseNum(row[cClk]) : 0;
+              if (imp === 0 && clk === 0) continue;
+              // 同一 ID 可能在多分頁重複出現，取最大值
+              const prev = byShopeeId[id] || { impressions: 0, clicks: 0, ctr: 0, convRate: 0 };
+              byShopeeId[id] = {
+                impressions: Math.max(prev.impressions, imp),
+                clicks: Math.max(prev.clicks, clk),
+                ctr: cCtr >= 0 ? Math.max(prev.ctr, parseNum(row[cCtr])) : prev.ctr,
+                convRate: cConv >= 0 ? Math.max(prev.convRate, parseNum(row[cConv])) : prev.convRate,
+                name: cName >= 0 ? String(row[cName] || '').trim() : (prev.name || ''),
+              };
+              totalRows++;
+            }
+          });
+          resolve({ byShopeeId, rawRows: totalRows });
+        } catch (err) { reject(err); }
+      };
+      reader.onerror = () => reject(reader.error || new Error('讀取失敗'));
+      reader.readAsArrayBuffer(file);
+    });
+  },
+
+  /* 綁定洞察表 3 個上傳 + 清除按鈕 */
   bindInsightTab() {
-    const upload = document.getElementById('insight-upload');
-    if (upload) {
-      upload.addEventListener('change', async (e) => {
+    const wireUpload = (inputId, parser, storeKey, label) => {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      input.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
         try {
-          showToast('解析中...', 'info');
-          const result = await this.parseInsightExcel(file);
-          if (!result.products.length) {
-            showToast('沒有讀到任何商品資料', 'error');
-            return;
-          }
-          Store.set('ec.insightWeekly', {
-            products: result.products,
-            period: result.period,
+          showToast(`解析「${label}」中...`, 'info');
+          const result = await parser.call(this, file);
+          // 各檔案的儲存 payload 結構不同，統一補上時間戳
+          const payload = {
+            ...result,
             uploadedAt: Date.now(),
             uploadedBy: this.currentUser?.username || '',
-            sourceRows: result.rawRows,
-          });
-          showToast(`已合併 ${result.products.length} 個商品（${result.rawRows} 列原始資料）`, 'success');
+          };
+          Store.set(storeKey, payload);
+          showToast(`「${label}」已上傳`, 'success');
           this.render();
         } catch (err) {
           console.error(err);
-          showToast('解析失敗：' + err.message, 'error');
+          showToast(`解析失敗：${err.message}`, 'error');
         } finally {
-          upload.value = '';
+          input.value = '';
         }
       });
-    }
-    const clearBtn = document.getElementById('insight-clear');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        if (!confirm('確定清除本週洞察表資料？')) return;
+    };
+
+    wireUpload('insight-master-upload', this.parseInsightMasterExcel, 'ec.insightMaster', '商品清單（母表）');
+    wireUpload('insight-sales-upload',  function(f){ return this.parseInsightExcel(f).then(r => ({ products: r.products, period: r.period, rawRows: r.rawRows })); }, 'ec.insightWeekly', '本週銷售排行');
+    wireUpload('insight-perf-upload',   this.parseInsightPerfExcel, 'ec.insightPerf', '商品表現');
+
+    const clearAllBtn = document.getElementById('insight-clear-all');
+    if (clearAllBtn) {
+      clearAllBtn.addEventListener('click', () => {
+        if (!confirm('確定清除全部洞察表資料（母表 / 銷售排行 / 商品表現）？')) return;
+        Store.remove('ec.insightMaster');
         Store.remove('ec.insightWeekly');
-        showToast('已清除', 'success');
+        Store.remove('ec.insightPerf');
+        showToast('已清除全部', 'success');
         this.render();
       });
     }
