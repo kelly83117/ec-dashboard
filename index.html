@@ -2008,6 +2008,20 @@ const App = {
     (salesPrevPrev?.products || []).forEach(p => { prevPrevByCode[p.code] = p; });
     const perfByShopeeId = perf?.byShopeeId || {};
 
+    // 把蝦皮 exclusive 的結束日（例：6/8 00:00 表示截止到 6/7）顯示成 inclusive
+    const displayPeriod = (period) => {
+      if (!period) return '—';
+      const m = period.match(/^(\d{4})\/(\d{2})\/(\d{2})\s*[–\-—]\s*(\d{4})\/(\d{2})\/(\d{2})$/);
+      if (!m) return period;
+      const [, sy, sm, sd, ey, em, ed] = m;
+      const endDate = new Date(+ey, +em - 1, +ed);
+      endDate.setDate(endDate.getDate() - 1);
+      const ny = endDate.getFullYear();
+      const nm = String(endDate.getMonth() + 1).padStart(2, '0');
+      const nd = String(endDate.getDate()).padStart(2, '0');
+      return `${sy}/${sm}/${sd} – ${ny}/${nm}/${nd}`;
+    };
+
     // 合併：以 sales 為主，補上 master / perf / prev / notes
     const merged = salesProducts.map(s => {
       const m = masterByCode[s.code] || null;
@@ -2105,7 +2119,7 @@ const App = {
       },
       {
         key: 'sales', label: '本週銷售排行', icon: '💰',
-        loaded: !!sales, info: sales ? `${salesProducts.length} 個編號 · ${sales.period || ''} · ${fmtTime(sales.uploadedAt)}` : '尚未上傳',
+        loaded: !!sales, info: sales ? `${salesProducts.length} 個編號 · ${displayPeriod(sales.period) || ''} · ${fmtTime(sales.uploadedAt)}` : '尚未上傳',
         accept: '.xlsx,.xls', inputId: 'insight-sales-upload',
         hint: '商品編號 / 售價 / 庫存 / 需求 / 獲利'
       },
@@ -2242,12 +2256,12 @@ const App = {
             `).join('')}
           </div>
           ${weeks.length > 0 ? `
-            <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:8px">本期</span>
-            <span style="padding:4px 10px;background:white;border:1px solid var(--border);border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(sales?.period || sales?.periodKey || '—')}</span>
+            <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:8px">本週</span>
+            <span style="padding:4px 10px;background:white;border:1px solid var(--border);border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(displayPeriod(sales?.period) || sales?.periodKey || '—')}</span>
             ${weeks.length > 1 ? `
-              <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:4px">對照</span>
+              <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:4px">上週</span>
               <select id="insight-compare-pick" style="padding:4px 10px;border:1px solid var(--border);border-radius:7px;background:white;font-size:12px;font-family:inherit;cursor:pointer">
-                ${weeks.slice(1).map(w => `<option value="${escapeHtml(w.periodKey || '')}" ${(salesPrev && salesPrev.periodKey === w.periodKey) ? 'selected' : ''}>${escapeHtml(w.period || w.periodKey || '?')}</option>`).join('')}
+                ${weeks.slice(1).map(w => `<option value="${escapeHtml(w.periodKey || '')}" ${(salesPrev && salesPrev.periodKey === w.periodKey) ? 'selected' : ''}>${escapeHtml(displayPeriod(w.period) || w.periodKey || '?')}</option>`).join('')}
               </select>
             ` : ''}
             <span style="font-size:11px;color:var(--text-muted)">· 共 ${weeks.length} 週歷史</span>
@@ -2258,15 +2272,15 @@ const App = {
         ${sorted.length > 0 ? `
           <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:1px;background:#e5e7eb;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb">
             <div style="background:white;padding:14px 18px">
-              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本期總營收</div>
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本週總營收</div>
               <div style="font-size:22px;font-weight:700;color:var(--text);letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">NT$ ${fmt(totalRev)}</div>
             </div>
             <div style="background:white;padding:14px 18px">
-              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本期總獲利</div>
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本週總獲利</div>
               <div style="font-size:22px;font-weight:700;color:#10b981;letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">NT$ ${fmt(totalProfit)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">(${fmtPct(totalRev > 0 ? totalProfit / totalRev : 0)})</span></div>
             </div>
             <div style="background:white;padding:14px 18px">
-              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本期售出件數</div>
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本週售出件數</div>
               <div style="font-size:22px;font-weight:700;color:var(--text);letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">${fmt(totalQty)} 件</div>
             </div>
           </div>
