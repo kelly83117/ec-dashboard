@@ -2706,36 +2706,50 @@ const App = {
     if (clearAllBtn) {
       clearAllBtn.addEventListener('click', () => {
         // 一按即清，無確認彈窗。
-        // 1) 重設相關 filter（不然下拉可能還指向已不存在的週）
+        // 1) 重設下拉狀態
         this.filter.insightCompare = '';
-        // 2) 顯式寫入空值 → 觸發雲端同步，避免 onSnapshot race condition 回填舊資料
+
         const prefix = `ec.insight_${currentShop}_`;
-        Store.set(prefix + 'master', null);
-        Store.set(prefix + 'weeks', []);
-        Store.set(prefix + 'perf', null);
-        Store.set(prefix + 'notes', {});
-        // 3) 再 remove，確保 key 不存在於 store
-        Store.remove(prefix + 'master');
-        Store.remove(prefix + 'weeks');
-        Store.remove(prefix + 'perf');
-        Store.remove(prefix + 'notes');
-        // 4) 掃 localStorage 中所有以 prefix 開頭的 key（萬一有遺漏的鍵）
-        try {
-          const removeList = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (k && k.startsWith(prefix)) removeList.push(k);
-          }
-          removeList.forEach(k => { try { localStorage.removeItem(k); } catch {} });
-        } catch {}
-        // 5) 也清 Store._mem（雲端模式下實際資料源）裡 prefix 開頭的所有 key
+        const keysToClear = [
+          prefix + 'master',
+          prefix + 'weeks',
+          prefix + 'perf',
+          prefix + 'notes',
+        ];
+
+        // 2) 先掃 Store._mem，把所有此賣場相關的 key（包括上面 4 個 + 任何遺漏的）一次刪掉
+        const allShopKeys = new Set(keysToClear);
         try {
           if (Store._mem && typeof Store._mem === 'object') {
             Object.keys(Store._mem).forEach(k => {
-              if (k.startsWith(prefix)) delete Store._mem[k];
+              if (k.startsWith(prefix)) {
+                allShopKeys.add(k);
+                delete Store._mem[k];
+              }
             });
           }
         } catch {}
+
+        // 3) 掃 localStorage 同樣處理
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith(prefix)) allShopKeys.add(k);
+          }
+          allShopKeys.forEach(k => { try { localStorage.removeItem(k); } catch {} });
+        } catch {}
+
+        // 4) ✨ 關鍵：一次 atomic 刪掉雲端所有相關欄位（不要逐一刪、避免訂閱 race 把舊資料回填）
+        if (window.__cloudStore && typeof window.__cloudStore.removeFields === 'function') {
+          window.__cloudStore.removeFields(Array.from(allShopKeys))
+            .catch(err => console.warn('cloud batch clear failed', err));
+        } else if (window.__cloudStore) {
+          // fallback：舊版 cloudStore 沒 removeFields，逐個 remove
+          allShopKeys.forEach(k => {
+            try { window.__cloudStore.removeField(k); } catch (e) { console.warn(e); }
+          });
+        }
+
         showToast(`已清除 ${currentShop} 全部資料`, 'success');
         this.render();
       });
@@ -5923,6 +5937,12 @@ if (window.__cloudStore) {
       getDoc: () => getDoc(docRef),
       setField: (key, value) => setDoc(docRef, { [key]: value }, { merge: true }),
       removeField: (key) => updateDoc(docRef, { [key]: deleteField() }),
+      // 一次刪多個 key（atomic），onSnapshot 只觸發一次 → 避免訂閱 race condition
+      removeFields: (keys) => {
+        const obj = {};
+        for (const k of keys) obj[k] = deleteField();
+        return updateDoc(docRef, obj);
+      },
       subscribe: (cb) => onSnapshot(docRef, snap => cb(snap.exists() ? snap.data() : {})),
     };
     window.dispatchEvent(new Event('cloudStoreReady'));
