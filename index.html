@@ -1972,12 +1972,31 @@ const App = {
       };
     }
     const INSIGHT_DEFAULT_THRESHOLDS = window.INSIGHT_DEFAULT_THRESHOLDS;
-    const master = Store.get('ec.insightMaster', null);
-    const sales = Store.get('ec.insightWeekly', null);
-    const salesPrev = Store.get('ec.insightWeeklyPrev', null);
-    const perf = Store.get('ec.insightPerf', null);
-    const notes = Store.get('ec.insightNotes', {}) || {};
+
+    // ============== 賣場切換 ==============
+    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+    const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
+      ? this.filter.insightShop : '玩樂';
+
+    // 一次性遷移：把舊的 ec.insightWeekly 等（玩樂的資料）搬到新 key
+    this.migrateInsightDataIfNeeded();
+
+    const sKey = (type) => `ec.insight_${currentShop}_${type}`;
+
+    const master = Store.get(sKey('master'), null);
+    const weeks = Store.get(sKey('weeks'), []) || [];   // 多週歷史，新→舊
+    const perf  = Store.get(sKey('perf'), null);
+    const notes = Store.get(sKey('notes'), {}) || {};
     const T = Object.assign({}, INSIGHT_DEFAULT_THRESHOLDS, Store.get('ec.insightThresholds', {}) || {});
+
+    // 對照週選擇（filter.insightCompare = periodKey or 'prev'）
+    const sales = weeks[0] || null;
+    let compareIdx = 1;
+    if (this.filter.insightCompare) {
+      const i = weeks.findIndex(w => w.periodKey === this.filter.insightCompare);
+      if (i >= 0) compareIdx = i;
+    }
+    const salesPrev = (compareIdx >= 0 && weeks[compareIdx] && compareIdx !== 0) ? weeks[compareIdx] : null;
 
     const masterByCode = master?.byCode || {};
     const salesProducts = sales?.products || [];
@@ -2145,14 +2164,33 @@ const App = {
       <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
           <div>
-            <h3 style="margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em">營運表現洞察表 · 玩樂盒子</h3>
-            <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted)">上傳 3 份 Excel：商品母表 + 本週銷售 + 蝦皮表現 → 系統自動合併分析${salesPrev ? ' · 已有上週資料可比對' : ''}</p>
+            <h3 style="margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em">營運表現洞察表 · ${escapeHtml(currentShop)}</h3>
+            <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted)">上傳 3 份 Excel：商品母表 + 本週銷售 + 蝦皮表現 → 系統自動合併分析</p>
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <button id="insight-settings" class="pill" style="padding:6px 12px;font-size:12px">⚙ 分類設定</button>
-            ${sorted.length > 0 ? `<button id="insight-export" class="btn-add" style="padding:6px 12px;font-size:12px">⬇ 匯出 Excel</button>` : ''}
-            ${(master || sales || perf) ? `<button id="insight-clear-all" class="pill" style="padding:6px 12px;font-size:12px">清除全部</button>` : ''}
+            ${sales ? `<button id="insight-export" class="btn-add" style="padding:6px 12px;font-size:12px">⬇ 匯出 Excel</button>` : ''}
+            ${(master || sales || perf) ? `<button id="insight-clear-all" class="pill" style="padding:6px 12px;font-size:12px">清除此賣場</button>` : ''}
           </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--text-muted);font-weight:500">賣場</span>
+          <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
+            ${INSIGHT_SHOPS.map(s => `
+              <button class="pill ${s === currentShop ? 'active' : ''}" data-insight-shop="${escapeHtml(s)}" style="padding:4px 14px;font-size:12px;border:0;${s === currentShop ? '' : 'background:transparent'}">${escapeHtml(s)}</button>
+            `).join('')}
+          </div>
+          ${weeks.length > 0 ? `
+            <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:8px">本期</span>
+            <span style="padding:4px 10px;background:white;border:1px solid var(--border);border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(sales?.period || sales?.periodKey || '—')}</span>
+            ${weeks.length > 1 ? `
+              <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:4px">對照</span>
+              <select id="insight-compare-pick" style="padding:4px 10px;border:1px solid var(--border);border-radius:7px;background:white;font-size:12px;font-family:inherit;cursor:pointer">
+                ${weeks.slice(1).map(w => `<option value="${escapeHtml(w.periodKey || '')}" ${(salesPrev && salesPrev.periodKey === w.periodKey) ? 'selected' : ''}>${escapeHtml(w.period || w.periodKey || '?')}</option>`).join('')}
+              </select>
+            ` : ''}
+            <span style="font-size:11px;color:var(--text-muted)">· 共 ${weeks.length} 週歷史</span>
+          ` : ''}
         </div>
         ${uploadGridHtml}
         ${warningHtml}
@@ -2280,16 +2318,21 @@ const App = {
     });
   },
 
-  /* 解析「商品清單」母表（玩樂分頁） */
-  parseInsightMasterExcel(file) {
+  /* 解析「商品清單」母表（依當前賣場選分頁） */
+  parseInsightMasterExcel(file, currentShop) {
     return new Promise((resolve, reject) => {
       if (typeof XLSX === 'undefined') return reject(new Error('XLSX 函式庫未載入'));
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
           const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-          // 找「玩樂」分頁
-          const targetSheet = wb.SheetNames.find(n => n.indexOf('玩') >= 0) || wb.SheetNames[0];
+          // 依當前賣場找對應分頁：玩樂 / 好麻吉 / 森之旅
+          const shop = currentShop || '玩樂';
+          // 中文比對：取賣場名第一個字當搜尋關鍵字（玩 / 好 / 森），找不到就 fallback 完整比對
+          const firstChar = shop.charAt(0);
+          let targetSheet = wb.SheetNames.find(n => n.indexOf(shop) >= 0);
+          if (!targetSheet) targetSheet = wb.SheetNames.find(n => n.indexOf(firstChar) >= 0);
+          if (!targetSheet) targetSheet = wb.SheetNames[0];
           const ws = wb.Sheets[targetSheet];
           const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
           if (rows.length < 2) throw new Error(`${targetSheet} 分頁沒有資料`);
@@ -2383,62 +2426,129 @@ const App = {
   },
 
   /* 綁定洞察表 3 個上傳 + 清除按鈕 */
+  /* ------------- 多賣場：把舊的 ec.insightXxx 搬到 ec.insight_玩樂_xxx，只做一次 ------------- */
+  migrateInsightDataIfNeeded() {
+    if (Store.get('ec.insightMigrated', false)) return;
+    const oldWeekly = Store.get('ec.insightWeekly', null);
+    const oldPrev   = Store.get('ec.insightWeeklyPrev', null);
+    const oldMaster = Store.get('ec.insightMaster', null);
+    const oldPerf   = Store.get('ec.insightPerf', null);
+    const oldNotes  = Store.get('ec.insightNotes', null);
+
+    const mkPeriodKey = (p) => (p || '').replace(/[^0-9]/g, '').slice(0, 16) || `legacy-${Date.now()}`;
+    const weeks = [];
+    if (oldWeekly && oldWeekly.products) {
+      weeks.push({
+        products: oldWeekly.products,
+        period: oldWeekly.period || '',
+        periodKey: mkPeriodKey(oldWeekly.period),
+        rawRows: oldWeekly.rawRows || 0,
+        uploadedAt: oldWeekly.uploadedAt || Date.now(),
+        uploadedBy: oldWeekly.uploadedBy || '',
+      });
+    }
+    if (oldPrev && oldPrev.products) {
+      weeks.push({
+        products: oldPrev.products,
+        period: oldPrev.period || '',
+        periodKey: mkPeriodKey(oldPrev.period) + '-prev',
+        rawRows: 0,
+        uploadedAt: oldPrev.archivedFrom || oldPrev.archivedAt || Date.now(),
+        uploadedBy: '',
+      });
+    }
+    if (weeks.length)  Store.set('ec.insight_玩樂_weeks', weeks);
+    if (oldMaster)     Store.set('ec.insight_玩樂_master', oldMaster);
+    if (oldPerf)       Store.set('ec.insight_玩樂_perf', oldPerf);
+    if (oldNotes)      Store.set('ec.insight_玩樂_notes', oldNotes);
+    Store.set('ec.insightMigrated', true);
+  },
+
   bindInsightTab() {
-    const wireUpload = (inputId, parser, storeKey, label) => {
-      const input = document.getElementById(inputId);
-      if (!input) return;
-      input.addEventListener('change', async (e) => {
+    // 確定當前賣場
+    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+    const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
+      ? this.filter.insightShop : '玩樂';
+    const sKey = (type) => `ec.insight_${currentShop}_${type}`;
+
+    // 賣場切換 pills
+    document.querySelectorAll('[data-insight-shop]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const shop = btn.dataset.insightShop;
+        if (shop === currentShop) return;
+        this.filter.insightShop = shop;
+        this.filter.insightCompare = ''; // 切賣場時重置對照週
+        this.render();
+      });
+    });
+
+    // 對照週切換
+    const cmpPick = document.getElementById('insight-compare-pick');
+    if (cmpPick) {
+      cmpPick.addEventListener('change', (e) => {
+        this.filter.insightCompare = e.target.value;
+        this.render();
+      });
+    }
+
+    // 商品母表上傳：把當前賣場名傳給解析器，挑對應分頁
+    const masterInput = document.getElementById('insight-master-upload');
+    if (masterInput) {
+      masterInput.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
         try {
-          showToast(`解析「${label}」中...`, 'info');
-          const result = await parser.call(this, file);
-          // 各檔案的儲存 payload 結構不同，統一補上時間戳
-          const payload = {
+          showToast(`解析「商品清單（母表 · ${currentShop}）」中...`, 'info');
+          const result = await this.parseInsightMasterExcel(file, currentShop);
+          Store.set(sKey('master'), {
             ...result,
             uploadedAt: Date.now(),
             uploadedBy: this.currentUser?.username || '',
-          };
-          Store.set(storeKey, payload);
-          showToast(`「${label}」已上傳`, 'success');
+          });
+          showToast(`「商品清單 · ${currentShop}」已上傳（${Object.keys(result.byCode || {}).length} 個商品）`, 'success');
           this.render();
         } catch (err) {
           console.error(err);
           showToast(`解析失敗：${err.message}`, 'error');
         } finally {
-          input.value = '';
+          masterInput.value = '';
         }
       });
-    };
+    }
 
-    wireUpload('insight-master-upload', this.parseInsightMasterExcel, 'ec.insightMaster', '商品清單（母表）');
-    // 銷售排行特別處理：上傳前把現有的存到 prev
+    // 銷售排行：保留歷史，新增進 weeks 最前面（同 periodKey 會覆蓋）
     const salesInput = document.getElementById('insight-sales-upload');
     if (salesInput) {
       salesInput.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
         try {
-          showToast('解析「本週銷售排行」中...', 'info');
+          showToast(`解析「${currentShop} · 本週銷售排行」中...`, 'info');
           const result = await this.parseInsightExcel(file);
-          // 把目前的 ec.insightWeekly（如果有）存到 ec.insightWeeklyPrev
-          const current = Store.get('ec.insightWeekly', null);
-          if (current && current.products && current.products.length > 0) {
-            Store.set('ec.insightWeeklyPrev', {
-              products: current.products,
-              period: current.period,
-              archivedFrom: current.uploadedAt,
-              archivedAt: Date.now(),
-            });
-          }
-          Store.set('ec.insightWeekly', {
+          const periodKey = (result.period || '').replace(/[^0-9]/g, '').slice(0, 16) || `wk-${Date.now()}`;
+          const weeks = Store.get(sKey('weeks'), []) || [];
+          const newEntry = {
             products: result.products,
             period: result.period,
+            periodKey,
             rawRows: result.rawRows,
             uploadedAt: Date.now(),
             uploadedBy: this.currentUser?.username || '',
+          };
+          // 同 periodKey 視為重新上傳，移除舊版本
+          const filtered = weeks.filter(w => w.periodKey !== periodKey);
+          filtered.unshift(newEntry);
+          // 排序：新→舊（依 periodKey 數字大小、再退而以 uploadedAt）
+          filtered.sort((a, b) => {
+            const ka = String(a.periodKey || '');
+            const kb = String(b.periodKey || '');
+            if (ka !== kb) return kb.localeCompare(ka);
+            return (b.uploadedAt || 0) - (a.uploadedAt || 0);
           });
-          showToast(`本週銷售已上傳（${result.products.length} 個商品）${current ? '，上週資料已保留作對比' : ''}`, 'success');
+          // 保留最多 12 週
+          const trimmed = filtered.slice(0, 12);
+          Store.set(sKey('weeks'), trimmed);
+          showToast(`${currentShop} · 本週銷售已上傳（${result.products.length} 個商品） · 現有 ${trimmed.length} 週歷史`, 'success');
           this.render();
         } catch (err) {
           console.error(err);
@@ -2448,26 +2558,49 @@ const App = {
         }
       });
     }
-    wireUpload('insight-perf-upload', this.parseInsightPerfExcel, 'ec.insightPerf', '商品表現');
+
+    // 商品表現
+    const perfInput = document.getElementById('insight-perf-upload');
+    if (perfInput) {
+      perfInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+          showToast(`解析「${currentShop} · 商品表現」中...`, 'info');
+          const result = await this.parseInsightPerfExcel(file);
+          Store.set(sKey('perf'), {
+            ...result,
+            uploadedAt: Date.now(),
+            uploadedBy: this.currentUser?.username || '',
+          });
+          showToast(`「${currentShop} · 商品表現」已上傳`, 'success');
+          this.render();
+        } catch (err) {
+          console.error(err);
+          showToast(`解析失敗：${err.message}`, 'error');
+        } finally {
+          perfInput.value = '';
+        }
+      });
+    }
 
     const clearAllBtn = document.getElementById('insight-clear-all');
     if (clearAllBtn) {
       clearAllBtn.addEventListener('click', () => {
-        if (!confirm('確定清除全部洞察表資料（母表 / 本週 / 上週 / 商品表現）？\n備註紀錄會保留。')) return;
-        Store.remove('ec.insightMaster');
-        Store.remove('ec.insightWeekly');
-        Store.remove('ec.insightWeeklyPrev');
-        Store.remove('ec.insightPerf');
-        showToast('已清除', 'success');
+        if (!confirm(`確定清除 ${currentShop} 賣場的全部洞察表資料（母表 / 各週銷售 / 商品表現）？\n備註紀錄會保留。`)) return;
+        Store.remove(sKey('master'));
+        Store.remove(sKey('weeks'));
+        Store.remove(sKey('perf'));
+        showToast(`已清除 ${currentShop} 資料`, 'success');
         this.render();
       });
     }
 
-    // 分類門檻設定
+    // 分類門檻設定（共用）
     const settingsBtn = document.getElementById('insight-settings');
     if (settingsBtn) settingsBtn.addEventListener('click', () => this.openInsightSettingsModal());
 
-    // 匯出 Excel
+    // 匯出 Excel（當前賣場）
     const exportBtn = document.getElementById('insight-export');
     if (exportBtn) exportBtn.addEventListener('click', () => this.exportInsightExcel());
 
@@ -2550,7 +2683,11 @@ const App = {
 
   /* ------------- 商品備註 modal ------------- */
   openInsightNoteModal(code) {
-    const all = Store.get('ec.insightNotes', {}) || {};
+    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+    const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
+      ? this.filter.insightShop : '玩樂';
+    const notesKey = `ec.insight_${currentShop}_notes`;
+    const all = Store.get(notesKey, {}) || {};
     const note = all[code] || { text: '', adjustments: [] };
     const adjustmentsHtml = (note.adjustments || []).slice().reverse().map((a, i) =>
       `<div style="padding:6px 10px;background:var(--bg);border-radius:5px;margin-bottom:4px;font-size:12px;display:flex;gap:8px;align-items:flex-start">
@@ -2637,13 +2774,13 @@ const App = {
       },
       onSave: () => {
         const text = document.getElementById('note-text').value.trim();
-        const allNotes = Store.get('ec.insightNotes', {}) || {};
+        const allNotes = Store.get(notesKey, {}) || {};
         if (!text && (!note.adjustments || note.adjustments.length === 0)) {
           delete allNotes[code];
         } else {
           allNotes[code] = { text, adjustments: note.adjustments || [] };
         }
-        Store.set('ec.insightNotes', allNotes);
+        Store.set(notesKey, allNotes);
         showToast('備註已儲存', 'success');
         this.render();
         return true;
@@ -2654,12 +2791,25 @@ const App = {
   /* ------------- 匯出 Excel ------------- */
   exportInsightExcel() {
     if (typeof XLSX === 'undefined') { showToast('XLSX 函式庫未載入', 'error'); return; }
-    const master = Store.get('ec.insightMaster', null);
-    const sales = Store.get('ec.insightWeekly', null);
-    const salesPrev = Store.get('ec.insightWeeklyPrev', null);
-    const perf = Store.get('ec.insightPerf', null);
-    const notes = Store.get('ec.insightNotes', {}) || {};
-    if (!sales) { showToast('還沒有銷售資料可匯出', 'error'); return; }
+    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+    const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
+      ? this.filter.insightShop : '玩樂';
+    const sKey = (type) => `ec.insight_${currentShop}_${type}`;
+
+    const master = Store.get(sKey('master'), null);
+    const weeks = Store.get(sKey('weeks'), []) || [];
+    const perf  = Store.get(sKey('perf'), null);
+    const notes = Store.get(sKey('notes'), {}) || {};
+    if (!weeks.length) { showToast(`${currentShop} 還沒有銷售資料可匯出`, 'error'); return; }
+
+    // 對照週：和畫面上的選擇一致
+    const sales = weeks[0];
+    let compareIdx = 1;
+    if (this.filter.insightCompare) {
+      const i = weeks.findIndex(w => w.periodKey === this.filter.insightCompare);
+      if (i > 0) compareIdx = i;
+    }
+    const salesPrev = (compareIdx > 0 && weeks[compareIdx]) ? weeks[compareIdx] : null;
     const T = Object.assign({}, window.INSIGHT_DEFAULT_THRESHOLDS, Store.get('ec.insightThresholds', {}) || {});
 
     const masterByCode = master?.byCode || {};
@@ -2713,9 +2863,9 @@ const App = {
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '營運表現洞察');
+    XLSX.utils.book_append_sheet(wb, ws, `營運表現_${currentShop}`);
     const now = new Date();
-    const fname = `洞察表_玩樂_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.xlsx`;
+    const fname = `洞察表_${currentShop}_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.xlsx`;
     XLSX.writeFile(wb, fname);
     showToast(`已匯出 ${fname}`, 'success');
   },
