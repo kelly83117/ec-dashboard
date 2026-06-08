@@ -2115,7 +2115,7 @@ const App = {
         key: 'master', label: '商品清單（母表）', icon: '📋',
         loaded: !!master, info: master ? `${Object.keys(masterByCode).length} 個編號 · ${fmtTime(master.uploadedAt)}` : '尚未上傳',
         accept: '.xlsx,.xls', inputId: 'insight-master-upload',
-        hint: '玩樂分頁：商品編號 / 商品ID / 莫筆克名稱'
+        hint: '一次上傳，自動分配到 3 個賣場分頁'
       },
       {
         key: 'sales', label: '本週銷售排行', icon: '💰',
@@ -2395,45 +2395,62 @@ const App = {
     });
   },
 
-  /* 解析「商品清單」母表（依當前賣場選分頁） */
-  parseInsightMasterExcel(file, currentShop) {
+  /* 解析「商品清單」母表 — 一次解析所有賣場分頁（玩樂/好麻吉/森之旅） */
+  parseInsightMasterExcel(file) {
     return new Promise((resolve, reject) => {
       if (typeof XLSX === 'undefined') return reject(new Error('XLSX 函式庫未載入'));
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
           const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-          // 依當前賣場找對應分頁：玩樂 / 好麻吉 / 森之旅
-          const shop = currentShop || '玩樂';
-          // 中文比對：取賣場名第一個字當搜尋關鍵字（玩 / 好 / 森），找不到就 fallback 完整比對
-          const firstChar = shop.charAt(0);
-          let targetSheet = wb.SheetNames.find(n => n.indexOf(shop) >= 0);
-          if (!targetSheet) targetSheet = wb.SheetNames.find(n => n.indexOf(firstChar) >= 0);
-          if (!targetSheet) targetSheet = wb.SheetNames[0];
-          const ws = wb.Sheets[targetSheet];
-          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-          if (rows.length < 2) throw new Error(`${targetSheet} 分頁沒有資料`);
-          const headers = rows[0].map(h => String(h || '').trim());
-          const idx = (n) => headers.findIndex(h => h.indexOf(n) >= 0);
-          const cCode = idx('商品編號');
-          const cId   = idx('商品ID');
-          const cMoc  = idx('莫');         // 莫筆克名稱 or 莫比克名
-          const cName = idx('商品名稱');
-          if (cCode < 0 || cId < 0) throw new Error(`找不到「商品編號」或「商品ID」欄位。實際標題：${headers.join(', ').slice(0,200)}`);
+          const SHOPS = ['玩樂', '好麻吉', '森之旅'];
 
-          const byCode = {};
-          for (let r = 1; r < rows.length; r++) {
-            const row = rows[r];
-            const code = String(row[cCode] || '').trim();
-            if (!code) continue;
-            const id = String(row[cId] || '').trim();
-            byCode[code] = {
-              id,
-              name: cName >= 0 ? String(row[cName] || '').trim() : '',
-              mocbicName: cMoc >= 0 ? String(row[cMoc] || '').trim() : '',
-            };
+          // 把一個分頁解析成 byCode map
+          const parseSheet = (sheetName) => {
+            const ws = wb.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+            if (rows.length < 2) return null;
+            const headers = rows[0].map(h => String(h || '').trim());
+            const idx = (n) => headers.findIndex(h => h.indexOf(n) >= 0);
+            const cCode = idx('商品編號');
+            const cId   = idx('商品ID');
+            const cMoc  = idx('莫');
+            const cName = idx('商品名稱');
+            if (cCode < 0 || cId < 0) return null;
+            const byCode = {};
+            for (let r = 1; r < rows.length; r++) {
+              const row = rows[r];
+              const code = String(row[cCode] || '').trim();
+              if (!code) continue;
+              byCode[code] = {
+                id: String(row[cId] || '').trim(),
+                name: cName >= 0 ? String(row[cName] || '').trim() : '',
+                mocbicName: cMoc >= 0 ? String(row[cMoc] || '').trim() : '',
+              };
+            }
+            return { byCode, sheet: sheetName, rawRows: rows.length - 1 };
+          };
+
+          // 對每個賣場，先找完整名稱對應，找不到再用第一個字找
+          const shops = {};
+          const matched = [];
+          for (const shop of SHOPS) {
+            const firstChar = shop.charAt(0);
+            let target = wb.SheetNames.find(n => n.indexOf(shop) >= 0);
+            if (!target) target = wb.SheetNames.find(n => n.indexOf(firstChar) >= 0);
+            if (target) {
+              const parsed = parseSheet(target);
+              if (parsed && Object.keys(parsed.byCode).length > 0) {
+                shops[shop] = parsed;
+                matched.push(`${shop}（${target}）`);
+              }
+            }
           }
-          resolve({ byCode, sheet: targetSheet, rawRows: rows.length - 1 });
+
+          if (Object.keys(shops).length === 0) {
+            throw new Error(`找不到任何賣場分頁（預期：玩樂 / 好麻吉 / 森之旅）。實際分頁：${wb.SheetNames.join(', ')}`);
+          }
+          resolve({ shops, matched, allSheets: wb.SheetNames });
         } catch (err) { reject(err); }
       };
       reader.onerror = () => reject(reader.error || new Error('讀取失敗'));
@@ -2568,21 +2585,28 @@ const App = {
       });
     }
 
-    // 商品母表上傳：把當前賣場名傳給解析器，挑對應分頁
+    // 商品母表上傳：一次解析 3 個分頁，自動分配到各賣場
     const masterInput = document.getElementById('insight-master-upload');
     if (masterInput) {
       masterInput.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
         try {
-          showToast(`解析「商品清單（母表 · ${currentShop}）」中...`, 'info');
-          const result = await this.parseInsightMasterExcel(file, currentShop);
-          Store.set(sKey('master'), {
-            ...result,
-            uploadedAt: Date.now(),
-            uploadedBy: this.currentUser?.username || '',
+          showToast('解析「商品清單（母表）」中...', 'info');
+          const { shops, matched } = await this.parseInsightMasterExcel(file);
+          const now = Date.now();
+          const uploadedBy = this.currentUser?.username || '';
+          let totalProducts = 0;
+          Object.keys(shops).forEach(shopName => {
+            const data = shops[shopName];
+            Store.set(`ec.insight_${shopName}_master`, {
+              ...data,
+              uploadedAt: now,
+              uploadedBy,
+            });
+            totalProducts += Object.keys(data.byCode || {}).length;
           });
-          showToast(`「商品清單 · ${currentShop}」已上傳（${Object.keys(result.byCode || {}).length} 個商品）`, 'success');
+          showToast(`商品清單已分配到 ${matched.length} 個賣場：${matched.join('、')} · 共 ${totalProducts} 個商品`, 'success');
           this.render();
         } catch (err) {
           console.error(err);
