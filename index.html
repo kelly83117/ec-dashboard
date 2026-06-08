@@ -3438,6 +3438,22 @@ const App = {
     if (deptId === 'd1' && document.querySelector('[data-week-offset], [data-month-offset]')) {
       this.bindWeeklyCalendar(deptId);
     }
+    // d1 profit 子頁：初始化淨利表的賣場分頁內容
+    if (deptId === 'd1' && this.route === 'office-d1-profit' && typeof SHOPS !== 'undefined') {
+      setTimeout(() => {
+        try {
+          SHOPS.forEach(s => {
+            const el = document.getElementById('content-' + s.id);
+            if (el && !el.innerHTML.trim() && typeof shopHTML === 'function') {
+              el.innerHTML = shopHTML(s.id);
+            }
+          });
+          SHOPS.forEach(s => {
+            if (typeof initShopUI === 'function') initShopUI(s.id);
+          });
+        } catch (e) { console.error('profit init failed', e); }
+      }, 200);
+    }
     // 動態 tab 的事件綁定
     const activeTab = this.filter.officeTab[deptId];
     const cfg = OFFICE_CONFIG[deptId];
@@ -4314,7 +4330,6 @@ const App = {
       ${deptId === 'd1' ? '' : `<div class="stat-grid">${statCards}</div>`}
       ${deptId === 'd1' && !subRoute ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
-      ${deptId === 'd1' && subRoute === 'profit' ? `<script>setTimeout(function(){if(typeof SHOPS!=='undefined'){try{SHOPS.forEach(function(s){var el=document.getElementById('content-'+s.id);if(el && !el.innerHTML.trim() && typeof shopHTML==='function'){el.innerHTML=shopHTML(s.id);}});SHOPS.forEach(function(s){if(typeof initShopUI==='function') initShopUI(s.id);});}catch(e){console.log(e);}}}, 200);</script>` : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? `
         <div class="table-card" style="margin-bottom:16px">
           <div class="table-card-header"><h3>洞察表分析</h3></div>
