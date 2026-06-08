@@ -1505,9 +1505,17 @@ const App = {
     if (wasMigrated) { platforms = migrated; Store.set(Store.KEYS.platforms, platforms); }
 
     const now = new Date();
-    // 行銷每天填的是「昨日」資料，所以輸入日期 = 昨天，比較對象 = 前天
-    const inputDateStr = toDateStr(addDays(now, -1));   // 輸入日期（昨天）
-    const prevDateStr  = toDateStr(addDays(now, -2));   // 比較日期（前天）
+    // 行銷每天填的是「昨日」資料；若使用者改了日期，以使用者選的為準（可補周末等）
+    const defaultInputDate = toDateStr(addDays(now, -1));
+    const todayStrLocal = toDateStr(now);
+    // 不允許選未來日期
+    if (this.filter.entryDate && this.filter.entryDate > todayStrLocal) {
+      this.filter.entryDate = defaultInputDate;
+    }
+    const inputDateStr = this.filter.entryDate || defaultInputDate;
+    // 比較對象 = 前一天
+    const prevDateObj = new Date(inputDateStr + 'T00:00:00');
+    const prevDateStr = toDateStr(addDays(prevDateObj, -1));
     const inputDateDisplay = inputDateStr.replace(/-/g, '/');
 
     const inputOf = (p) => +(p.daily?.[inputDateStr]) || 0;
@@ -1802,9 +1810,14 @@ const App = {
             <h3 style="margin:0;font-size:14px">每日營收填寫</h3>
             <p style="margin:1px 0 0;font-size:11px;color:var(--text-muted)">輸入後按 Enter 或點別處跳出確認再儲存 · 過 12 點自動歸 0</p>
           </div>
-          <div style="display:flex;align-items:center;gap:6px">
-            <div style="font-size:11px;color:var(--text-muted);background:var(--bg);padding:4px 9px;border-radius:6px;font-variant-numeric:tabular-nums">
-              填寫日期：<strong style="color:var(--text);font-size:12px">${escapeHtml(inputDateStr)}</strong>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:4px;background:var(--bg);padding:3px 6px;border-radius:6px">
+              <span style="font-size:11px;color:var(--text-muted);font-weight:500;padding-left:4px">填寫日期</span>
+              <button id="entry-date-prev" title="前一天" style="padding:2px 7px;border:1px solid var(--border);border-radius:4px;background:white;color:var(--text-muted);font-size:11px;cursor:pointer;line-height:1">←</button>
+              <input type="date" id="entry-date-picker" value="${escapeHtml(inputDateStr)}" max="${escapeHtml(todayStrLocal)}"
+                style="padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-weight:600;font-family:inherit;color:var(--text);background:white;width:130px">
+              <button id="entry-date-next" title="後一天" style="padding:2px 7px;border:1px solid var(--border);border-radius:4px;background:white;color:var(--text-muted);font-size:11px;cursor:pointer;line-height:1" ${inputDateStr >= todayStrLocal ? 'disabled' : ''}>→</button>
+              ${inputDateStr !== defaultInputDate ? `<button id="entry-date-reset" title="回到昨天" style="padding:2px 7px;border:0;border-radius:4px;background:var(--primary-soft);color:var(--primary);font-size:10px;font-weight:600;cursor:pointer;margin-left:2px">昨天</button>` : ''}
             </div>
             <button id="open-month-detail" title="查看本月每日明細"
               style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:white;color:var(--text);font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px">
@@ -2639,9 +2652,49 @@ const App = {
     if (btnMonthDetail) {
       btnMonthDetail.addEventListener('click', () => this.openMonthlyDetailModal());
     }
+    // 填寫日期 picker + 前後一天按鈕
+    const picker = document.getElementById('entry-date-picker');
+    const todayLocal = toDateStr(new Date());
+    const defaultEntry = toDateStr(addDays(new Date(), -1));
+    if (picker) {
+      picker.addEventListener('change', () => {
+        let v = picker.value;
+        if (!v) return;
+        if (v > todayLocal) v = todayLocal;
+        this.filter.entryDate = v;
+        this.render();
+      });
+    }
+    const prevBtn = document.getElementById('entry-date-prev');
+    if (prevBtn) {
+      prevBtn.addEventListener('click', () => {
+        const cur = this.filter.entryDate || defaultEntry;
+        const d = new Date(cur + 'T00:00:00');
+        this.filter.entryDate = toDateStr(addDays(d, -1));
+        this.render();
+      });
+    }
+    const nextBtn = document.getElementById('entry-date-next');
+    if (nextBtn) {
+      nextBtn.addEventListener('click', () => {
+        const cur = this.filter.entryDate || defaultEntry;
+        const d = new Date(cur + 'T00:00:00');
+        const next = toDateStr(addDays(d, 1));
+        if (next > todayLocal) return;
+        this.filter.entryDate = next;
+        this.render();
+      });
+    }
+    const resetBtn = document.getElementById('entry-date-reset');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        this.filter.entryDate = defaultEntry;
+        this.render();
+      });
+    }
 
-    // 行銷每天填的是「昨日」的資料，所以寫入日期 = 昨天
-    const inputDateStr = toDateStr(addDays(new Date(), -1));
+    // 寫入日期：以使用者於「填寫日期」picker 選的為準（預設昨天）
+    const inputDateStr = this.filter.entryDate || toDateStr(addDays(new Date(), -1));
 
     // 字串「123,456」→ 數字 123456；空字串 / 非數字 → null
     const parseAmount = (raw) => {
