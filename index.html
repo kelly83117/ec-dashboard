@@ -1092,7 +1092,6 @@ const OFFICE_CONFIG = {
       { icon: '🎯', label: '平均轉換率', value: '3.8%', meta: '較上月 ↑ 0.5%' },
     ],
     tabs: [
-      { key: 'weekly-calendar', title: '📅 工作週曆', dynamic: 'weekly-calendar' },
       { key: 'profit', title: '淨利表', customHtml: window.__profitTabHtml || '' },
       { key: 'insight', title: '洞察表分析',
         heads: ['維度', '指標', '數值', '備註'],
@@ -3410,6 +3409,10 @@ const App = {
         this.render();
       });
     });
+    // d1（行銷）一定有頂部的工作週曆，要綁
+    if (deptId === 'd1') {
+      this.bindWeeklyCalendar(deptId);
+    }
     // 動態 tab 的事件綁定
     const activeTab = this.filter.officeTab[deptId];
     const cfg = OFFICE_CONFIG[deptId];
@@ -4272,7 +4275,8 @@ const App = {
         </h2>
         <p>${escapeHtml(cfg.subtitle)}</p>
       </div>
-      <div class="stat-grid">${statCards}</div>
+      ${deptId === 'd1' ? '' : `<div class="stat-grid">${statCards}</div>`}
+      ${deptId === 'd1' ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
       ${tabBar}
       ${tabContent}
       ${deptId === 'd1' ? '' : `
