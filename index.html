@@ -2002,6 +2002,10 @@ const App = {
     const salesProducts = sales?.products || [];
     const prevByCode = {};
     (salesPrev?.products || []).forEach(p => { prevByCode[p.code] = p; });
+    // 為了算「上週類別」，需要上週的上週（即比對週的前一週）
+    const salesPrevPrev = (compareIdx + 1 < weeks.length) ? weeks[compareIdx + 1] : null;
+    const prevPrevByCode = {};
+    (salesPrevPrev?.products || []).forEach(p => { prevPrevByCode[p.code] = p; });
     const perfByShopeeId = perf?.byShopeeId || {};
 
     // 合併：以 sales 為主，補上 master / perf / prev / notes
@@ -2010,9 +2014,13 @@ const App = {
       const shopeeId = m?.id || '';
       const p = shopeeId ? perfByShopeeId[shopeeId] : null;
       const prev = prevByCode[s.code] || null;
+      const prevPrev = prevPrevByCode[s.code] || null;
       const growthRate = prev && prev.revenue > 0
         ? (s.revenue - prev.revenue) / prev.revenue
         : (s.revenue > 0 && !prev ? null : 0);
+      const prevGrowthRate = prev && prevPrev && prevPrev.revenue > 0
+        ? (prev.revenue - prevPrev.revenue) / prevPrev.revenue
+        : null;
       return {
         code: s.code,
         name: s.name,
@@ -2020,7 +2028,9 @@ const App = {
         shopeeId,
         revenue: s.revenue || 0,
         prevRevenue: prev?.revenue || 0,
+        prevPrevRevenue: prevPrev?.revenue || 0,
         growthRate,
+        prevGrowthRate,
         qty: s.qty || 0,
         profit: s.profit || 0,
         stock: s.stock || 0,
@@ -2037,23 +2047,44 @@ const App = {
     const needMasterUpdate = merged.filter(p => !p.inMaster);
     const sorted = merged.slice().sort((a, b) => b.revenue - a.revenue);
 
+    // 大類分組（成長類/下滑類/轉換類）色票
+    const GROUP_STYLE = {
+      '成長類': { color: '#15803d', bg: '#dcfce7', band: '#22c55e' },
+      '下滑類': { color: '#b91c1c', bg: '#fee2e2', band: '#ef4444' },
+      '轉換類': { color: '#1d4ed8', bg: '#dbeafe', band: '#3b82f6' },
+    };
+    // 由細分類標籤推大類（用於上色和分組）
+    const groupOf = (label) => {
+      if (!label) return null;
+      if (label.indexOf('爆發品') >= 0 || label.indexOf('成長品') >= 0) return '成長類';
+      if (label.indexOf('衰退品') >= 0 || label.indexOf('重跌品') >= 0) return '下滑類';
+      if (label.indexOf('轉換') >= 0) return '轉換類';
+      return null;
+    };
+
     // 完整分類（用使用者設定的門檻）
-    const classifyProduct = (p) => {
+    // metricsOverride 可指定 growthRate，未指定就用 p 本身（用於計算上週類別）
+    const classifyMetrics = (growthRate, convRate, clicks, impressions) => {
       // 成長類（基於 growth rate）— 優先級高
-      if (p.growthRate !== null && p.growthRate !== undefined) {
-        const g = p.growthRate * 100;
-        if (g >= T.explosion)    return { label: '🟡 爆發品',  color: '#eab308', bg: '#fef9c3' };
+      if (growthRate !== null && growthRate !== undefined) {
+        const g = growthRate * 100;
+        if (g >= T.explosion)    return { label: '🟡 爆發品',  color: '#a16207', bg: '#fef9c3' };
         if (g >= T.growth)       return { label: '🟨 成長品',  color: '#ca8a04', bg: '#fef9c3' };
         if (g <= T.heavyDrop)    return { label: '🔴 重跌品',  color: '#dc2626', bg: '#fee2e2' };
         if (g <= T.drop)         return { label: '🟥 衰退品',  color: '#ea580c', bg: '#fed7aa' };
       }
       // 轉換類（基於轉換率）
-      if (p.convRate > 0 && p.convRate * 100 < T.weakConv) return { label: '🟢 弱轉換', color: '#10b981', bg: '#d1fae5' };
-      if (p.clicks > T.lowEffClicks && p.convRate * 100 < T.lowEffConv) return { label: '🟢 低效轉換', color: '#10b981', bg: '#d1fae5' };
-      if (p.impressions > 0 && p.convRate === 0) return { label: '🟩 零轉換', color: '#22c55e', bg: '#dcfce7' };
-      if (p.convRate * 100 >= T.normalConvLow && p.convRate * 100 <= T.normalConvHigh) return { label: '🟩 一般轉換', color: '#22c55e', bg: '#dcfce7' };
+      if (convRate > 0 && convRate * 100 < T.weakConv) return { label: '🟢 弱轉換', color: '#10b981', bg: '#d1fae5' };
+      if (clicks > T.lowEffClicks && convRate * 100 < T.lowEffConv) return { label: '🟢 低效轉換', color: '#10b981', bg: '#d1fae5' };
+      if (impressions > 0 && convRate === 0) return { label: '🟩 零轉換', color: '#22c55e', bg: '#dcfce7' };
+      if (convRate * 100 >= T.normalConvLow && convRate * 100 <= T.normalConvHigh) return { label: '🟩 一般轉換', color: '#22c55e', bg: '#dcfce7' };
       return null;
     };
+    const classifyProduct = (p) => classifyMetrics(p.growthRate, p.convRate, p.clicks, p.impressions);
+    // 上週類別只用 growth（沒有歷史的轉換數據），且不知道上週的曝光/點擊就傳 0
+    const classifyPrev = (p) => p.prevGrowthRate !== null
+      ? classifyMetrics(p.prevGrowthRate, 0, 0, 0)
+      : null;
 
     // 總計
     const totalRev = sorted.reduce((s, p) => s + p.revenue, 0);
@@ -2123,13 +2154,42 @@ const App = {
     };
 
     const rowsHtml = sorted.length === 0
-      ? `<tr><td colspan="11" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">尚未上傳銷售排行 Excel</td></tr>`
+      ? `<tr><td colspan="13" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">尚未上傳銷售排行 Excel</td></tr>`
       : sorted.map((p, i) => {
           const netStock = p.stock - p.demand;
           const cls = classifyProduct(p);
+          const prevCls = classifyPrev(p);
+          const grp = groupOf(cls?.label);
+          const prevGrp = groupOf(prevCls?.label);
+          const grpStyle = grp ? GROUP_STYLE[grp] : null;
           const hasNote = p.note && (p.note.text || (p.note.adjustments && p.note.adjustments.length > 0));
+
+          // 流向：上週類別 → 本週類別；只有本週就只顯示本週；都沒有顯示 —
+          let flowHtml = '—';
+          if (prevCls && cls) {
+            const arrowColor = prevGrp === grp ? '#9ca3af' : (grp === '下滑類' ? '#ef4444' : grp === '成長類' ? '#10b981' : '#3b82f6');
+            flowHtml = `
+              <div style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:11px">
+                <span style="padding:1px 5px;border-radius:4px;background:${prevCls.bg};color:${prevCls.color};font-weight:600">${escapeHtml(prevCls.label)}</span>
+                <span style="color:${arrowColor};font-weight:700">→</span>
+                <span style="padding:1px 5px;border-radius:4px;background:${cls.bg};color:${cls.color};font-weight:600">${escapeHtml(cls.label)}</span>
+              </div>`;
+          } else if (cls) {
+            flowHtml = `<span style="padding:1px 5px;border-radius:4px;background:${cls.bg};color:${cls.color};font-weight:600;font-size:11px">${escapeHtml(cls.label)}</span>`;
+          }
+
+          // 大類 chip
+          const groupChip = grp
+            ? `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:5px;background:${grpStyle.bg};color:${grpStyle.color};font-weight:700;font-size:11px;letter-spacing:.02em">${grp}</span>`
+            : '<span style="color:var(--text-muted)">—</span>';
+
+          // 列底色：大類淡色 + 缺母表覆蓋
+          const bandColor = grpStyle ? grpStyle.band : 'transparent';
+          const rowBg = !p.inMaster ? '#fef3c7aa' : (grpStyle ? grpStyle.bg + '40' : '');
+
           return `
-            <tr style="border-top:1px solid #f3f4f6;${!p.inMaster ? 'background:#fef3c7aa' : ''}">
+            <tr style="border-top:1px solid #f3f4f6;background:${rowBg}">
+              <td style="padding:0;width:4px;background:${bandColor}"></td>
               <td style="padding:8px 8px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;width:32px">${i + 1}</td>
               <td style="padding:8px 8px;font-size:12px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums">
                 ${escapeHtml(p.code)}
@@ -2151,7 +2211,8 @@ const App = {
                 ${p.ctr > 0 ? `<div style="font-size:10px;margin-top:1px">${fmtPct(p.ctr)}</div>` : ''}
               </td>
               <td style="padding:8px 8px;text-align:right;font-size:12px;font-weight:${p.convRate > 0 ? '600' : '400'};color:${p.convRate > 0 && p.convRate < 0.01 ? '#ef4444' : p.convRate >= 0.02 ? '#10b981' : 'var(--text-muted)'};font-variant-numeric:tabular-nums">${fmtPct(p.convRate)}</td>
-              <td style="padding:8px 8px;text-align:center;font-size:11px">${cls ? `<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:${cls.bg};color:${cls.color};font-weight:700;white-space:nowrap">${cls.label}</span>` : '—'}</td>
+              <td style="padding:8px 8px;text-align:center;font-size:11px">${groupChip}</td>
+              <td style="padding:8px 8px;text-align:center;font-size:11px">${flowHtml}</td>
               <td style="padding:8px 8px;text-align:right;font-size:12px;color:${netStock <= 0 ? '#ef4444' : netStock < 30 ? '#f59e0b' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${netStock <= 0 ? 700 : 500};white-space:nowrap">${fmt(netStock)} ${netStock <= 0 ? '⚠' : ''}</td>
               <td style="padding:6px 6px;text-align:center;white-space:nowrap">
                 <button class="icon-btn" data-insight-note="${escapeHtml(p.code)}" title="${hasNote ? '已有備註，點看 / 編輯' : '新增備註'}" style="width:26px;height:26px;font-size:13px;${hasNote ? 'background:#fef3c7;border-radius:5px' : ''}">📝</button>
@@ -2214,6 +2275,7 @@ const App = {
           <table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px">
             <thead style="position:sticky;top:0;z-index:1;background:#f9fafb">
               <tr>
+                <th style="padding:0;width:4px;border-bottom:1px solid #e5e7eb"></th>
                 <th style="padding:8px 8px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">#</th>
                 <th style="padding:8px 8px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">商品編號</th>
                 <th style="padding:8px 8px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">商品名稱 / ID</th>
@@ -2223,7 +2285,8 @@ const App = {
                 <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">曝光</th>
                 <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">點擊</th>
                 <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">轉換率</th>
-                <th style="padding:8px 8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">類別判定</th>
+                <th style="padding:8px 8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">大類</th>
+                <th style="padding:8px 8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">上週 → 本週</th>
                 <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">淨庫存</th>
                 <th style="padding:8px 6px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb;width:40px">備註</th>
               </tr>
@@ -2815,6 +2878,10 @@ const App = {
     const masterByCode = master?.byCode || {};
     const prevByCode = {};
     (salesPrev?.products || []).forEach(p => { prevByCode[p.code] = p; });
+    // 上週類別需要前前一週
+    const salesPrevPrev = (compareIdx + 1 < weeks.length) ? weeks[compareIdx + 1] : null;
+    const prevPrevByCode = {};
+    (salesPrevPrev?.products || []).forEach(p => { prevPrevByCode[p.code] = p; });
     const perfByShopeeId = perf?.byShopeeId || {};
 
     const classify = (g, conv, clicks, imp) => {
@@ -2831,15 +2898,26 @@ const App = {
       if (conv * 100 >= T.normalConvLow && conv * 100 <= T.normalConvHigh) return '🟩 一般轉換';
       return '';
     };
+    const groupOf = (label) => {
+      if (!label) return '';
+      if (label.indexOf('爆發品') >= 0 || label.indexOf('成長品') >= 0) return '成長類';
+      if (label.indexOf('衰退品') >= 0 || label.indexOf('重跌品') >= 0) return '下滑類';
+      if (label.indexOf('轉換') >= 0) return '轉換類';
+      return '';
+    };
 
     const rows = sales.products.slice().sort((a, b) => b.revenue - a.revenue).map(s => {
       const m = masterByCode[s.code] || {};
       const id = m.id || '';
       const p = id ? (perfByShopeeId[id] || {}) : {};
       const prev = prevByCode[s.code];
+      const prevPrev = prevPrevByCode[s.code];
       const g = prev && prev.revenue > 0 ? (s.revenue - prev.revenue) / prev.revenue : null;
+      const prevG = prev && prevPrev && prevPrev.revenue > 0 ? (prev.revenue - prevPrev.revenue) / prevPrev.revenue : null;
       const n = notes[s.code] || {};
       const adjList = (n.adjustments || []).map(a => `${a.date} ${a.text}`).join(' | ');
+      const cls = classify(g, p.convRate || 0, p.clicks || 0, p.impressions || 0);
+      const prevCls = prevG !== null ? classify(prevG, 0, 0, 0) : '';
       return {
         '商品ID': id,
         '商品編號': s.code,
@@ -2854,7 +2932,10 @@ const App = {
         '點擊': p.clicks || '',
         '點擊率': p.ctr ? (p.ctr * 100).toFixed(2) + '%' : '',
         '轉換率': p.convRate ? (p.convRate * 100).toFixed(2) + '%' : '',
-        '判定類別': classify(g, p.convRate || 0, p.clicks || 0, p.impressions || 0),
+        '大類': groupOf(cls),
+        '上週類別': prevCls,
+        '本週類別': cls,
+        '判斷結果': (prevCls && cls) ? `${prevCls} → ${cls}` : cls,
         '淨庫存': s.stock - s.demand,
         '備註': n.text || '',
         '調整紀錄': adjList,
