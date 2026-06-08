@@ -3768,7 +3768,7 @@ const App = {
 
     // todos 列表 HTML（每條待辦可指派人員）
     const memberOptsForTodo = (selected) => `
-      <option value="" ${!selected ? 'selected' : ''}>— 同任務 —</option>
+      <option value="" ${!selected ? 'selected' : ''}>— 指派對象 —</option>
       ${members.map(u => `<option value="${escapeHtml(u.username)}" ${u.username === selected ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
     `;
     const todoRowHtml = (text, done, idx, assignee = '') => `
