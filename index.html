@@ -1460,7 +1460,10 @@ const App = {
 
     const departments = Store.get(Store.KEYS.departments, []);
     document.querySelectorAll('[data-route^="office-"]').forEach(btn => {
-      const deptId = btn.dataset.route.replace('office-', '');
+      // 子路由如 'office-d1-profit' 也要對應到 d1 部門做權限判斷
+      const rest = btn.dataset.route.slice('office-'.length);
+      const firstDash = rest.indexOf('-');
+      const deptId = firstDash > 0 ? rest.slice(0, firstDash) : rest;
       const dept = departments.find(d => d.id === deptId);
       btn.style.display = canAccessOffice(user, dept) ? '' : 'none';
     });
