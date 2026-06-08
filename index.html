@@ -777,6 +777,7 @@ const Store = {
     departments: 'ec.departments',
     employees: 'ec.employees',
     platforms: 'ec.platforms',
+    platformsBackup: 'ec.platformsBackup',
     dailyTasks: 'ec.dailyTasks',
     session: 'ec.session',
     seeded: 'ec.seeded.v5',
@@ -1018,32 +1019,7 @@ function migratePlatforms(platforms) {
   return changed ? out : platforms;
 }
 
-/* 確保最近 N 天都有資料（每天打開頁面時自動把當天補上，序列會滾動） */
-function ensureDailyRecent(platforms, days = 90) {
-  let changed = false;
-  const now = new Date();
-  platforms.forEach(p => {
-    if (!p.daily) { p.daily = {}; changed = true; }
-    // 找最近一個有值的日期，作為產生後續資料的基準
-    let prev = null;
-    for (let i = days; i >= 0; i--) {
-      const key = toDateStr(addDays(now, -i));
-      if (p.daily[key] != null) { prev = p.daily[key]; break; }
-    }
-    if (prev == null) prev = 100000;
-    for (let i = days - 1; i >= 0; i--) {
-      const key = toDateStr(addDays(now, -i));
-      if (p.daily[key] == null) {
-        const r = Math.abs(Math.sin(key.length + i * 1.7) * 100) % 30 / 100; // 0~0.3
-        const factor = 0.85 + r; // 0.85 ~ 1.15
-        p.daily[key] = Math.round(prev * factor);
-        changed = true;
-      }
-      prev = p.daily[key];
-    }
-  });
-  return changed;
-}
+/* (已移除 ensureDailyRecent — 不再自動補空白日子的假數字) */
 
 /* ------------- 每日工作進度 ------------- */
 const DAILY_TASK_STATUS = {
@@ -2632,8 +2608,11 @@ const App = {
           </tfoot>
         </table>
       </div>
-      <div style="margin-top:4px;font-size:10px;color:var(--text-muted);text-align:right">
-        ${dates.length === 0 ? '本月還沒有任何日期可顯示' : `共 ${dates.length} 天 · ● 今天 · — 無資料`}
+      <div style="margin-top:4px;display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text-muted)">
+        <button id="restore-backup-btn" style="padding:4px 9px;border:1px solid var(--border);border-radius:5px;background:white;color:var(--text-muted);font-size:11px;cursor:pointer;font-weight:500" title="從上一次儲存前的備份還原資料">
+          ↩ 還原上一版
+        </button>
+        <span>${dates.length === 0 ? '本月還沒有任何日期可顯示' : `共 ${dates.length} 天 · ● 今天 · — 無資料`}</span>
       </div>
     `;
 
@@ -2642,6 +2621,65 @@ const App = {
       bodyHtml: tableHtml,
       width: '85vw',
       hideFooter: true,
+      onMount: () => {
+        const btn = document.getElementById('restore-backup-btn');
+        if (btn) btn.addEventListener('click', () => this.restorePlatformsBackup());
+      },
+    });
+  },
+
+  /* ------------- 還原 platforms 備份 ------------- */
+  restorePlatformsBackup() {
+    const backup = Store.get(Store.KEYS.platformsBackup, null);
+    if (!backup || !backup.data) {
+      showToast('沒有可還原的備份', 'error');
+      return;
+    }
+    const ts = new Date(backup.timestamp || 0);
+    const tsLabel = isFinite(ts.getTime())
+      ? `${ts.getFullYear()}/${String(ts.getMonth()+1).padStart(2,'0')}/${String(ts.getDate()).padStart(2,'0')} ${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}`
+      : '時間未知';
+
+    // 統計備份內容
+    const backupSummary = (backup.data || []).map(p => {
+      const days = Object.keys(p.daily || {}).length;
+      return `${p.name}：${days} 天有資料`;
+    }).join('<br>');
+
+    this.closeModal();
+    this.openModal({
+      title: '⚠️ 還原上一版營收資料',
+      bodyHtml: `
+        <div style="font-size:13px;color:var(--text);line-height:1.7">
+          <p style="margin:0 0 10px">準備從備份還原以下資料：</p>
+          <div style="padding:10px 14px;background:var(--bg);border-radius:6px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;line-height:1.8;margin-bottom:12px">
+            <div style="font-weight:600;color:var(--text);margin-bottom:6px">備份時間：${escapeHtml(tsLabel)}${backup.savedBy ? ` · 由 ${escapeHtml(backup.savedBy)} 觸發` : ''}</div>
+            ${backupSummary}
+          </div>
+          <div style="padding:10px 12px;background:#fee2e2;border-left:3px solid #ef4444;border-radius:6px;font-size:12px">
+            <strong>注意</strong>：還原會把目前所有營收 / 廣告費資料覆蓋成備份的版本。<br>
+            如果你今天有填新的資料但還沒備份過，會 <strong>遺失</strong>。確定要還原嗎？
+          </div>
+        </div>
+      `,
+      saveLabel: '確認還原',
+      cancelLabel: '取消',
+      onSave: () => {
+        // 還原前再備份一次當前資料（避免使用者按錯後無法 redo）
+        const current = Store.get(Store.KEYS.platforms, null);
+        if (current) {
+          Store.set(Store.KEYS.platformsBackup, {
+            data: current,
+            timestamp: Date.now(),
+            savedBy: this.currentUser?.username || '',
+            note: '還原前自動備份',
+          });
+        }
+        Store.set(Store.KEYS.platforms, backup.data);
+        showToast('✓ 已還原到備份版本', 'success');
+        this.render();
+        return true;
+      },
     });
   },
 
@@ -2773,6 +2811,17 @@ const App = {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
       const platforms = Store.get(Store.KEYS.platforms, null);
+
+      // 🔒 寫入前先備份：把目前雲端版本存到 ec.platformsBackup
+      //   如果未來資料出意外，可在 📅 本月明細 視窗按「還原上一版」救回
+      if (platforms && Array.isArray(platforms)) {
+        Store.set(Store.KEYS.platformsBackup, {
+          data: platforms,
+          timestamp: Date.now(),
+          savedBy: this.currentUser?.username || '',
+        });
+      }
+
       const list = migratePlatforms(platforms ? platforms.map(p => ({ ...p })) : JSON.parse(JSON.stringify(PLATFORMS)));
       if (!list[idx]) return;
 
