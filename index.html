@@ -4968,9 +4968,27 @@ const App = {
         const list = Store.get(Store.KEYS.dailyTasks, []);
         const i = list.findIndex(x => x.id === taskId);
         if (i < 0) return;
+        const title = list[i].title || '待辦';
         list[i].status = newStatus;
         Store.set(Store.KEYS.dailyTasks, list);
-        showToast(`已將「${list[i].title || '待辦'}」改為 ${newStatus}`, 'success');
+
+        // 改為「已完成」→ 詢問是否刪除
+        if (newStatus === '已完成') {
+          const ok = confirm(`「${title}」已完成 ✅\n\n是否要從清單中刪除這筆？\n（不刪也可以，會留在「已完成」分頁）`);
+          if (ok) {
+            const list2 = Store.get(Store.KEYS.dailyTasks, []);
+            const j = list2.findIndex(x => x.id === taskId);
+            if (j >= 0) {
+              list2.splice(j, 1);
+              Store.set(Store.KEYS.dailyTasks, list2);
+              showToast(`已刪除「${title}」`, 'success');
+              this.render();
+              return;
+            }
+          }
+        }
+
+        showToast(`已將「${title}」改為 ${newStatus}`, 'success');
         this.render();
       });
     });
