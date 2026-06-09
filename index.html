@@ -3464,24 +3464,25 @@ const App = {
           const creatorName = task.employeeName || task.employee || '';
           const isShared = assigneeNames.length >= 2;
           const isAssigned = assigneeNames.length === 1 && assigneeNames[0] !== creatorName;
+          // 「自己」不顯示徽章；只有指派 / 共同 才顯示
           const typeBadge = isShared
             ? `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e">👥 共同</span>`
             : (isAssigned
                 ? `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#ede9fe;color:#5b21b6">👤 指派</span>`
-                : `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#dbeafe;color:#1e40af">🙋 自己</span>`);
+                : '');
           const displayParticipants = isShared
             ? assigneeNames.join('、')
             : (isAssigned ? `${creatorName} → ${assigneeNames[0]}` : creatorName);
           // 狀態下拉：點一下展開可改狀態
           const statusOptions = DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === task.status ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('');
           return `
-            <div style="display:block;padding:12px 16px;border-bottom:1px solid #f3f4f6;background:white;transition:background .12s" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">
+            <div data-cal-task="${escapeHtml(task.id)}" style="display:block;padding:12px 16px;border-bottom:1px solid #f3f4f6;background:white;transition:background .12s;cursor:pointer" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'" title="點一下編輯此待辦事項">
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
                 <span style="flex:1;min-width:0;color:var(--text);font-size:14px;line-height:1.4;font-weight:600">${escapeHtml(text)}</span>
                 ${typeBadge}
               </div>
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                <select class="dp-status-select" data-task-id="${escapeHtml(task.id)}" title="點此更改狀態"
+                <select class="dp-status-select" data-task-id="${escapeHtml(task.id)}" title="點此更改狀態" onclick="event.stopPropagation()"
                   style="padding:3px 8px;border-radius:999px;background:${st.bg};color:${st.color};font-size:11px;font-weight:600;border:1px solid ${st.color}33;cursor:pointer;font-family:inherit;line-height:1.4">
                   ${statusOptions}
                 </select>
