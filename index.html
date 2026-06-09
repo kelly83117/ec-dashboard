@@ -1813,7 +1813,7 @@ const App = {
             : `<span class="down" style="font-weight:600">↓ ${Math.abs(delta).toFixed(1)}%</span>`)
         : '<span style="color:var(--text-muted)">—</span>';
 
-      const inputStyle = 'width:120px;padding:4px 10px;border:1px solid var(--border);border-radius:5px;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;color:var(--text);box-sizing:border-box;background:white;height:28px';
+      const inputStyle = 'width:100%;max-width:110px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;color:var(--text);box-sizing:border-box;background:white;height:28px';
 
       // 輸入框預設帶入「當日已儲存」的值（加上千分位逗號），過 12 點跨日才會自動清成 0
       const fmt = v => (v > 0 ? (+v).toLocaleString() : '');
@@ -1831,10 +1831,10 @@ const App = {
 
       return `
         <tr data-card-idx="${i}" style="border-top:1px solid var(--border)">
-          <td style="padding:3px 10px;white-space:nowrap">
-            <div style="display:flex;align-items:center;gap:7px">
-              <img src="${logoSrc}" alt="" style="width:20px;height:20px;border-radius:4px;object-fit:contain;background:white;padding:1px;flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,0.06)">
-              <span style="font-weight:600;font-size:13px">${escapeHtml(p.name)}</span>
+          <td style="padding:3px 6px;white-space:nowrap;overflow:hidden">
+            <div style="display:flex;align-items:center;gap:6px;min-width:0">
+              <img src="${logoSrc}" alt="" style="width:18px;height:18px;border-radius:4px;object-fit:contain;background:white;padding:1px;flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,0.06)">
+              <span style="font-weight:600;font-size:13px;white-space:nowrap" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>
             </div>
           </td>
           <td style="padding:3px 8px;text-align:center">
@@ -1889,11 +1889,11 @@ const App = {
 
     const totalRow = `
       <tr style="background:var(--bg);border-top:2px solid var(--border)">
-        <td style="padding:6px 10px;font-weight:800;font-size:13px;letter-spacing:.05em">當日總計</td>
-        <td style="padding:6px 10px;text-align:center;font-weight:800;font-size:14px;font-variant-numeric:tabular-nums">NT$ ${grandRev.toLocaleString()}</td>
-        <td style="padding:6px 10px;text-align:center;font-weight:700;font-size:13px;color:var(--text-muted);font-variant-numeric:tabular-nums">NT$ ${grandAds.toLocaleString()}</td>
-        <td style="padding:6px 10px;text-align:center;font-weight:800;font-size:13px;color:#6366f1;font-variant-numeric:tabular-nums">${grandRoas}</td>
-        <td style="padding:6px 10px;font-size:12px;text-align:center">${grandDeltaCell}</td>
+        <td style="padding:6px 6px;font-weight:800;font-size:13px;letter-spacing:.05em">當日總計</td>
+        <td style="padding:6px 4px;text-align:center;font-weight:800;font-size:13px;font-variant-numeric:tabular-nums">NT$ ${grandRev.toLocaleString()}</td>
+        <td style="padding:6px 4px;text-align:center;font-weight:700;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">NT$ ${grandAds.toLocaleString()}</td>
+        <td style="padding:6px 4px;text-align:center;font-weight:800;font-size:13px;color:#6366f1;font-variant-numeric:tabular-nums">${grandRoas}</td>
+        <td style="padding:6px 4px;font-size:12px;text-align:center">${grandDeltaCell}</td>
         <td></td>
       </tr>
     `;
@@ -1924,12 +1924,12 @@ const App = {
           <table style="border-collapse:separate;border-spacing:0;width:100%;table-layout:fixed">
             <thead>
               <tr style="background:var(--bg)">
-                <th style="padding:5px 10px;text-align:left;font-size:11px;width:auto">賣場</th>
-                <th style="padding:5px 10px;text-align:center;font-size:11px;width:140px">營收 NT$</th>
-                <th style="padding:5px 10px;text-align:center;font-size:11px;width:140px">廣告費</th>
-                <th style="padding:5px 10px;text-align:center;font-size:11px;width:70px">ROAS</th>
-                <th style="padding:5px 10px;text-align:center;font-size:11px;width:90px">較前一日</th>
-                <th style="padding:5px 6px;text-align:center;width:36px"></th>
+                <th style="padding:5px 6px;text-align:left;font-size:11px;min-width:110px">賣場</th>
+                <th style="padding:5px 4px;text-align:center;font-size:11px;width:115px">營收 NT$</th>
+                <th style="padding:5px 4px;text-align:center;font-size:11px;width:115px">廣告費</th>
+                <th style="padding:5px 4px;text-align:center;font-size:11px;width:58px">ROAS</th>
+                <th style="padding:5px 4px;text-align:center;font-size:11px;width:78px">較前一日</th>
+                <th style="padding:5px 4px;text-align:center;width:32px"></th>
               </tr>
             </thead>
             <tbody>
