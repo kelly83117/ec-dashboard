@@ -3094,6 +3094,44 @@ const App = {
     const todayStr2 = toDateStr(now);
     const weekDayNames = ['週一','週二','週三','週四','週五','週六','週日'];
 
+    // 台灣國定假日（依行政院公告，未來年份請每年確認更新）
+    const TW_HOLIDAYS = {
+      // 2025
+      '2025-01-01': '元旦',
+      '2025-01-27': '春節彈性放假',
+      '2025-01-28': '除夕', '2025-01-29': '春節初一', '2025-01-30': '春節初二', '2025-01-31': '春節初三',
+      '2025-02-28': '二二八紀念日',
+      '2025-04-03': '兒童節彈性', '2025-04-04': '兒童節', '2025-04-05': '清明節',
+      '2025-05-01': '勞動節',
+      '2025-05-30': '端午節彈性', '2025-05-31': '端午節',
+      '2025-10-06': '中秋節',
+      '2025-10-10': '國慶日',
+      // 2026
+      '2026-01-01': '元旦', '2026-01-02': '元旦彈性',
+      '2026-02-16': '春節彈性', '2026-02-17': '除夕', '2026-02-18': '春節初一',
+      '2026-02-19': '春節初二', '2026-02-20': '春節初三',
+      '2026-02-27': '二二八彈性', '2026-02-28': '二二八紀念日', '2026-03-02': '二二八補假',
+      '2026-04-03': '清明/兒童節彈性', '2026-04-06': '清明節補假',
+      '2026-05-01': '勞動節',
+      '2026-06-19': '端午節',
+      '2026-09-25': '中秋節',
+      '2026-10-09': '國慶日彈性', '2026-10-12': '國慶日補假',
+    };
+    const getHoliday = (dateStr) => TW_HOLIDAYS[dateStr] || null;
+    const isOffDay = (d) => {
+      const dow = d.getDay();
+      if (dow === 0 || dow === 6) return true;
+      return !!TW_HOLIDAYS[toDateStr(d)];
+    };
+    // 連假判定：本日是 off-day 且前後連續 off-day 加起來 ≥ 3 天
+    const isLongWeekend = (d) => {
+      if (!isOffDay(d)) return false;
+      let count = 1;
+      for (let i = 1; i < 12; i++) { if (isOffDay(addDays(d, -i))) count++; else break; }
+      for (let i = 1; i < 12; i++) { if (isOffDay(addDays(d, i))) count++; else break; }
+      return count >= 3;
+    };
+
     // 計算範圍：依檢視模式
     let rangeStart, rangeEnd, headerLabel, datesInGrid, gridCols, gridRows;
     let displayLabel; // 例如 "本週" / "6/01 – 6/07" / "2026 年 6 月"
@@ -3209,10 +3247,21 @@ const App = {
           `;
         }).join('');
 
+        const holidayNameM = getHoliday(ds);
+        const longWkM = isLongWeekend(d);
+        const dowM = d.getDay();
+        const isWeekendM = (dowM === 0 || dowM === 6);
+        const cellBgM = holidayNameM
+          ? '#fef2f2'
+          : (longWkM && isWeekendM ? '#fff7ed'
+              : (isToday ? '#f5f3ff' : (isCurrentMonth ? '#fcfcfd' : '#fafafa')));
+        const dayColorM = holidayNameM ? '#b91c1c' : (isWeekendM ? '#ea580c' : (isToday ? 'white' : 'var(--text-muted)'));
         return `
-          <div style="border-right:${(i+1) % 7 === 0 ? '0' : '1px solid #e5e7eb'};border-bottom:${i < (gridRows-1)*7 ? '1px solid #e5e7eb' : '0'};padding:8px 9px;min-height:130px;display:flex;flex-direction:column;background:${isToday ? '#f5f3ff' : (isCurrentMonth ? '#fcfcfd' : '#fafafa')};opacity:${isCurrentMonth ? 1 : 0.5}">
-            <div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:6px">
-              <span style="display:inline-flex;align-items:center;justify-content:center;${isToday ? `background:var(--primary);color:white;width:28px;height:28px;border-radius:50%;font-size:15px;font-weight:700` : 'font-size:15px;color:var(--text-muted);font-weight:600'}">${d.getDate()}</span>
+          <div style="border-right:${(i+1) % 7 === 0 ? '0' : '1px solid #e5e7eb'};border-bottom:${i < (gridRows-1)*7 ? '1px solid #e5e7eb' : '0'};padding:8px 9px;min-height:130px;display:flex;flex-direction:column;background:${cellBgM};opacity:${isCurrentMonth ? 1 : 0.5}">
+            <div style="display:flex;align-items:center;gap:4px;margin-bottom:6px">
+              ${holidayNameM ? `<span style="font-size:10px;font-weight:600;color:#b91c1c;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(holidayNameM)}">🎉 ${escapeHtml(holidayNameM)}</span>` : ''}
+              ${longWkM && !holidayNameM ? '<span style="font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;background:#fed7aa;color:#9a3412">連假</span>' : ''}
+              <span style="margin-left:auto;display:inline-flex;align-items:center;justify-content:center;${isToday ? `background:var(--primary);color:white;width:26px;height:26px;border-radius:50%;font-size:14px;font-weight:700` : `font-size:14px;color:${dayColorM};font-weight:600`}">${d.getDate()}</span>
             </div>
             <div style="flex:1;min-height:0">
               ${taskMini}
@@ -3273,11 +3322,26 @@ const App = {
               `;
             }).join('');
 
+        const holidayName = getHoliday(ds);
+        const longWk = isLongWeekend(d);
+        const dow = d.getDay();
+        const isWeekend = (dow === 0 || dow === 6);
+        const cellBg = holidayName
+          ? '#fef2f2'  // 國定假日：淺紅
+          : (longWk && isWeekend ? '#fff7ed'  // 連假中的週末：淺橘
+              : (isToday ? '#fafafa' : '#fcfcfd'));
+        const headerBg = holidayName ? '#fee2e2' : (longWk && isWeekend ? '#ffedd5' : (isToday ? '#f5f3ff' : 'transparent'));
+        const labelColor = holidayName ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text-muted)'));
+        const dateColor = holidayName ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text)'));
         return `
-          <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:${i < 6 ? '1px solid #e5e7eb' : '0'};background:${isToday ? '#fafafa' : '#fcfcfd'}">
-            <div style="padding:10px 12px;text-align:left;border-bottom:1px solid #e5e7eb;display:flex;align-items:baseline;gap:8px;background:${isToday ? '#f5f3ff' : 'transparent'}">
-              <div style="font-size:12px;font-weight:600;color:${isToday ? 'var(--primary)' : 'var(--text-muted)'};letter-spacing:.03em">${weekDayNames[i]}</div>
-              <div style="font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em;color:${isToday ? 'var(--primary)' : 'var(--text)'}">${d.getMonth()+1}/${d.getDate()}</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:${i < 6 ? '1px solid #e5e7eb' : '0'};background:${cellBg}">
+            <div style="padding:10px 12px;text-align:left;border-bottom:1px solid #e5e7eb;background:${headerBg}">
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <div style="font-size:12px;font-weight:600;color:${labelColor};letter-spacing:.03em">${weekDayNames[i]}</div>
+                <div style="font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em;color:${dateColor}">${d.getMonth()+1}/${d.getDate()}</div>
+                ${longWk ? '<span style="margin-left:auto;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#fed7aa;color:#9a3412;letter-spacing:.05em">連假</span>' : ''}
+              </div>
+              ${holidayName ? `<div style="font-size:11px;font-weight:600;color:#b91c1c;margin-top:3px">🎉 ${escapeHtml(holidayName)}</div>` : ''}
             </div>
             <div style="padding:8px;flex:1;min-height:120px">
               ${taskCardsHtml}
