@@ -3169,14 +3169,14 @@ const App = {
       headerLabel = `${yMonth} 年 ${mMonth + 1} 月`;
       displayLabel = monthOffset === 0 ? '本月' : monthOffset === -1 ? '上月' : monthOffset === 1 ? '下月' : `${monthOffset > 0 ? '+' : ''}${monthOffset} 月`;
     } else {
-      // 週檢視
+      // 週檢視：只顯示週一到週五（隱藏週末，筆電寬度才不會被擠）
       const dayOfWeek = now.getDay();
       const offsetToMon = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
       const monday = addDays(now, offsetToMon + weekOffset * 7);
-      datesInGrid = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+      datesInGrid = Array.from({ length: 5 }, (_, i) => addDays(monday, i));
       rangeStart = toDateStr(datesInGrid[0]);
-      rangeEnd = toDateStr(datesInGrid[6]);
-      gridCols = 7;
+      rangeEnd = toDateStr(datesInGrid[4]);
+      gridCols = 5;
       gridRows = 1;
       headerLabel = `${rangeStart.slice(5).replace('-','/')} – ${rangeEnd.slice(5).replace('-','/')}`;
       displayLabel = weekOffset === 0 ? '本週' : weekOffset === -1 ? '上週' : weekOffset === 1 ? '下週' : `${weekOffset > 0 ? '+' : ''}${weekOffset} 週`;
@@ -3347,7 +3347,7 @@ const App = {
         const labelColor = holidayName ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text-muted)'));
         const dateColor = holidayName ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text)'));
         return `
-          <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:${i < 6 ? '1px solid #e5e7eb' : '0'};background:${cellBg}">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:${i < 4 ? '1px solid #e5e7eb' : '0'};background:${cellBg}">
             <div style="padding:10px 12px;text-align:left;border-bottom:1px solid #e5e7eb;background:${headerBg}">
               <div style="display:flex;align-items:baseline;gap:8px">
                 <div style="font-size:12px;font-weight:600;color:${labelColor};letter-spacing:.03em">${weekDayNames[i]}</div>
