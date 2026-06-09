@@ -3305,11 +3305,13 @@ const App = {
               return `
                 <div data-cal-task="${escapeHtml(t.id)}" style="position:relative;background:white;border:1px solid #e5e7eb;border-radius:7px;padding:9px 11px;margin-bottom:7px;cursor:pointer;transition:border-color .15s, box-shadow .15s" onmouseover="this.style.borderColor='${catColor}';this.style.boxShadow='0 2px 6px rgba(0,0,0,.05)'" onmouseout="this.style.borderColor='#e5e7eb';this.style.boxShadow='none'">
                   ${canEdit ? `<button class="cal-task-del" data-cal-del="${escapeHtml(t.id)}" title="刪除此筆工作進度" style="position:absolute;top:4px;right:4px;width:20px;height:20px;border:0;border-radius:4px;background:transparent;color:#cbd5e1;font-size:11px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0" onmouseover="this.style.background='#fee2e2';this.style.color='#ef4444'" onmouseout="this.style.background='transparent';this.style.color='#cbd5e1'">🗑</button>` : ''}
-                  <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px;padding-right:${canEdit ? '22px' : '0'};min-width:0">
-                    <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${catColor};flex-shrink:0"></span>
-                    ${t.category ? `<span style="font-size:11px;font-weight:600;color:var(--text-muted);letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0" title="${escapeHtml(t.category)}${t.subcategory ? ' · ' + escapeHtml(t.subcategory) : ''}">${escapeHtml(t.category)}${t.subcategory ? ' · ' + escapeHtml(t.subcategory) : ''}</span>` : ''}
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding-right:${canEdit ? '22px' : '0'};min-width:0">
+                    <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${catColor};flex-shrink:0"></span>
+                    ${t.category
+                      ? `<span style="font-size:13px;font-weight:600;color:var(--text);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0" title="${escapeHtml(t.category)}${t.subcategory ? ' · ' + escapeHtml(t.subcategory) : ''}\n${escapeHtml(t.title)}">${escapeHtml(t.category)}${t.subcategory ? ' · ' + escapeHtml(t.subcategory) : ''}</span>`
+                      : `<span style="font-size:13px;font-weight:600;color:var(--text);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>`
+                    }
                   </div>
-                  <div style="font-size:14px;font-weight:600;line-height:1.4;color:var(--text);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-bottom:6px;letter-spacing:-.01em" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</div>
                   <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
                     <span style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:999px;background:${st.bg};color:${st.color};font-size:11px;font-weight:600">${st.emoji} ${escapeHtml(t.status)}</span>
                     ${t.dueDate ? `<span style="display:inline-flex;align-items:center;gap:2px;color:#ef4444;font-weight:600;font-size:11px" title="預計完成日">📌 ${escapeHtml(t.dueDate.slice(5).replace('-','/'))}</span>` : ''}
