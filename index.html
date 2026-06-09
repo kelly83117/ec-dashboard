@@ -5268,20 +5268,6 @@ const App = {
           <label>備註 / 進度說明</label>
           <textarea id="dpf-notes" rows="3" placeholder="說明這次的工作內容、遇到的問題、需要的支援等" style="font-family:inherit;resize:vertical">${escapeHtml(t.notes || '')}</textarea>
         </div>
-        <div class="field">
-          <label style="display:flex;align-items:center;justify-content:space-between">
-            <span>待辦事項 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（可拆解此工作的小任務）</span></span>
-            <button type="button" id="dpf-todo-add" style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:white;color:var(--text);font-size:11px;font-weight:600;cursor:pointer">+ 新增一項</button>
-          </label>
-          <div id="dpf-todos">
-            ${t.todos.map((td, i) => {
-              const ass = Array.isArray(td.assignees) && td.assignees.length
-                ? td.assignees
-                : (td.assignee ? [td.assignee] : []);
-              return todoRowHtml(td.text || '', td.done || false, i, ass);
-            }).join('')}
-          </div>
-        </div>
       `,
       onMount: () => {
         // 分類切換時，子項下拉同步更新
@@ -5358,27 +5344,8 @@ const App = {
         const status = document.getElementById('dpf-status').value;
         const dueDate = document.getElementById('dpf-due').value || '';
         const notes = document.getElementById('dpf-notes').value.trim();
-        const todos = Array.from(document.querySelectorAll('#dpf-todos .todo-row'))
-          .map(row => {
-            const wrap = row.querySelector('.todo-assignees-wrap');
-            let selected = [];
-            try { selected = JSON.parse(wrap?.dataset.selected || '[]'); } catch {}
-            const selectedNames = selected.map(un => {
-              const u = members.find(m => m.username === un);
-              return u ? u.name : un;
-            });
-            return {
-              text: row.querySelector('.todo-text')?.value.trim() || '',
-              done: row.querySelector('.todo-done')?.checked || false,
-              // 新欄位：陣列
-              assignees: selected,
-              assigneeNames: selectedNames,
-              // 舊欄位：相容，存第一個（給舊版讀取）
-              assignee: selected[0] || '',
-              assigneeName: selectedNames[0] || '',
-            };
-          })
-          .filter(td => td.text !== '');
+        // 待辦事項已從表單移除：編輯時保留原有 todos，新增時為空陣列
+        const todos = isEdit ? (Array.isArray(t.todos) ? t.todos : []) : [];
 
         // 標題自動由「備註首行 → 子項 → 分類」推導，行銷顯示用
         const firstNoteLine = notes.split('\n')[0].trim();
