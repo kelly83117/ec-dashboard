@@ -4936,12 +4936,11 @@ const App = {
         this.render();
       });
     });
-    // 點任務卡 → 編輯
+    // 點任務卡 / 待辦事項 → 用新模式 modal 編輯（與新增同樣樣式）
     document.querySelectorAll('[data-cal-task]').forEach(card => {
       card.addEventListener('click', (e) => {
-        // 點到刪除按鈕時不要觸發編輯
         if (e.target.closest('[data-cal-del]')) return;
-        this.openDailyTaskModal(deptId, card.dataset.calTask);
+        this.openQuickTodoModal(deptId, card.dataset.calTask);
       });
     });
     // 刪除按鈕
@@ -5505,7 +5504,7 @@ const App = {
   },
 
   /* ------------- 快速新增單一待辦事項 ------------- */
-  openQuickTodoModal(deptId) {
+  openQuickTodoModal(deptId, taskId) {
     const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
     if (!dept) { showToast('找不到此辦公室', 'error'); return; }
     const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
@@ -5517,55 +5516,89 @@ const App = {
       ? this.currentUser.username
       : (members[0]?.username || '');
 
+    // 編輯模式：讀現有任務並填入預設值
+    let editing = null;
+    let initType = 'self', initText = '', initAssignees = [];
+    let initDate = todayStr(), initDue = '', initCategory = '', initStatus = '進行中';
+    if (taskId) {
+      const all = Store.get(Store.KEYS.dailyTasks, []);
+      editing = all.find(x => x.id === taskId);
+      if (!editing) { showToast('找不到此筆紀錄', 'error'); return; }
+      initText = editing.todos?.[0]?.text || editing.title || '';
+      initDate = editing.date || todayStr();
+      initDue = editing.dueDate || '';
+      initCategory = editing.category || '';
+      initStatus = editing.status || '進行中';
+      const td0 = editing.todos?.[0] || {};
+      initAssignees = Array.isArray(td0.assignees) && td0.assignees.length
+        ? td0.assignees
+        : (td0.assignee ? [td0.assignee] : []);
+      // 推斷類型
+      if (editing.assignmentType) {
+        initType = editing.assignmentType;
+      } else if (initAssignees.length >= 2) {
+        initType = 'shared';
+      } else if (initAssignees.length === 1 && editing.employee !== initAssignees[0]) {
+        initType = 'assigned';
+      } else {
+        initType = 'self';
+      }
+    }
+
     this.openModal({
-      title: '新增待辦事項',
+      title: taskId ? '編輯待辦事項' : '新增待辦事項',
       bodyHtml: `
         <div class="field">
           <label>類型</label>
           <div id="qtf-type-pills" style="display:flex;gap:4px;background:#f3f4f6;padding:3px;border-radius:8px">
-            <label data-type-pill="self" style="flex:1;padding:8px 10px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;background:white;color:#1e40af;box-shadow:0 1px 2px rgba(0,0,0,.06);transition:all .15s">
-              <input type="radio" name="qtf-type" value="self" checked style="display:none">
+            <label data-type-pill="self" style="flex:1;padding:8px 10px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#9ca3af;transition:all .15s">
+              <input type="radio" name="qtf-type" value="self" ${initType === 'self' ? 'checked' : ''} style="display:none">
               🙋 自己做
             </label>
             <label data-type-pill="assigned" style="flex:1;padding:8px 10px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#9ca3af;transition:all .15s">
-              <input type="radio" name="qtf-type" value="assigned" style="display:none">
+              <input type="radio" name="qtf-type" value="assigned" ${initType === 'assigned' ? 'checked' : ''} style="display:none">
               👤 指派他人
             </label>
             <label data-type-pill="shared" style="flex:1;padding:8px 10px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#9ca3af;transition:all .15s">
-              <input type="radio" name="qtf-type" value="shared" style="display:none">
+              <input type="radio" name="qtf-type" value="shared" ${initType === 'shared' ? 'checked' : ''} style="display:none">
               👥 共同
             </label>
           </div>
         </div>
         <div class="field">
           <label>待辦內容</label>
-          <input id="qtf-text" placeholder="例：寄送 EDM 給合作品牌" required autofocus>
+          <input id="qtf-text" value="${escapeHtml(initText)}" placeholder="例：寄送 EDM 給合作品牌" required autofocus>
         </div>
-        <div class="field" id="qtf-assigned-wrap" style="display:none">
+        <div class="field" id="qtf-assigned-wrap" style="display:${initType === 'assigned' ? 'block' : 'none'}">
           <label>指派給</label>
           <select id="qtf-assigned-sel">
-            ${members.filter(u => u.username !== defaultEmp).map(u => `<option value="${escapeHtml(u.username)}">${escapeHtml(u.name)}</option>`).join('')}
+            ${members.filter(u => u.username !== defaultEmp).map(u => `<option value="${escapeHtml(u.username)}" ${initAssignees.includes(u.username) ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
           </select>
         </div>
-        <div class="field" id="qtf-shared-wrap" style="display:none">
+        <div class="field" id="qtf-shared-wrap" style="display:${initType === 'shared' ? 'block' : 'none'}">
           <label>參與人員（可複選）</label>
           <div id="qtf-shared-list" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px;border:1px solid var(--border);border-radius:6px;background:#fcfcfd;max-height:140px;overflow-y:auto">
-            ${members.map(u => `
+            ${members.map(u => {
+              const checked = initType === 'shared'
+                ? initAssignees.includes(u.username)
+                : (u.username === defaultEmp);
+              return `
               <label style="display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border:1px solid var(--border);border-radius:5px;background:white;cursor:pointer;font-size:12px">
-                <input type="checkbox" class="qtf-shared-cb" value="${escapeHtml(u.username)}" ${u.username === defaultEmp ? 'checked' : ''} style="width:14px;height:14px">
+                <input type="checkbox" class="qtf-shared-cb" value="${escapeHtml(u.username)}" ${checked ? 'checked' : ''} style="width:14px;height:14px">
                 ${escapeHtml(u.name)}
               </label>
-            `).join('')}
+              `;
+            }).join('')}
           </div>
         </div>
         <div class="field-row">
           <div class="field">
             <label>開始日期</label>
-            <input type="date" id="qtf-date" value="${escapeHtml(todayStr())}" required>
+            <input type="date" id="qtf-date" value="${escapeHtml(initDate)}" required>
           </div>
           <div class="field">
             <label>預計完成日 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（選填）</span></label>
-            <input type="date" id="qtf-due">
+            <input type="date" id="qtf-due" value="${escapeHtml(initDue)}">
           </div>
         </div>
         <div class="field-row">
@@ -5573,20 +5606,20 @@ const App = {
             <label>分類（選填）</label>
             <select id="qtf-category">
               <option value="">— 不指定 —</option>
-              ${TASK_CATEGORY_NAMES.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
+              ${TASK_CATEGORY_NAMES.map(name => `<option value="${escapeHtml(name)}" ${name === initCategory ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')}
             </select>
           </div>
           <div class="field">
             <label>狀態</label>
             <select id="qtf-status">
-              ${DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === '進行中' ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('')}
+              ${DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === initStatus ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('')}
             </select>
           </div>
         </div>
       `,
       onMount: () => {
         const txt = document.getElementById('qtf-text');
-        if (txt) txt.focus();
+        if (txt) { txt.focus(); txt.select && txt.select(); }
         // 類型切換
         const assignedWrap = document.getElementById('qtf-assigned-wrap');
         const sharedWrap = document.getElementById('qtf-shared-wrap');
@@ -5606,8 +5639,10 @@ const App = {
           p.querySelector('input').checked = true;
           updateType();
         }));
+        // 初次套用當前選中類型的樣式
+        updateType();
       },
-      saveLabel: '新增',
+      saveLabel: taskId ? '儲存' : '新增',
       onSave: () => {
         const type = document.querySelector('input[name="qtf-type"]:checked')?.value || 'self';
         const date = document.getElementById('qtf-date').value;
@@ -5622,7 +5657,7 @@ const App = {
         let ownerUsername = defaultEmp;
         let assignees = [];
         if (type === 'self') {
-          ownerUsername = defaultEmp;
+          ownerUsername = (editing && editing.assignmentType === 'self') ? editing.employee : defaultEmp;
           assignees = [];
         } else if (type === 'assigned') {
           ownerUsername = document.getElementById('qtf-assigned-sel').value;
@@ -5632,7 +5667,7 @@ const App = {
           const checks = Array.from(document.querySelectorAll('.qtf-shared-cb:checked')).map(c => c.value);
           if (checks.length < 2) { showToast('共同類型至少要選 2 個人員', 'error'); return false; }
           assignees = checks;
-          ownerUsername = defaultEmp; // 共同任務掛在建立者的行事曆
+          ownerUsername = (editing && editing.assignmentType === 'shared') ? editing.employee : defaultEmp;
         }
 
         const ownerUser = members.find(u => u.username === ownerUsername);
@@ -5644,32 +5679,60 @@ const App = {
         const title = text.slice(0, 60);
 
         const list = Store.get(Store.KEYS.dailyTasks, []);
-        list.push({
-          id: genId(),
-          deptId,
-          date,
-          dueDate,
-          employee: ownerUsername,
-          employeeName: ownerName,
-          category: category || '',
-          subcategory: '',
-          title,
-          status,
-          notes: '',
-          todos: [{
-            text,
-            done: false,
-            assignees,
-            assigneeNames,
-            assignee: assignees[0] || '',
-            assigneeName: assigneeNames[0] || '',
-          }],
-          assignmentType: type,
-          createdAt: Date.now(),
-          createdBy: this.currentUser?.username || '',
-        });
-        Store.set(Store.KEYS.dailyTasks, list);
-        showToast('已新增待辦事項', 'success');
+        if (taskId) {
+          // 編輯模式：以原任務為基礎更新
+          const i = list.findIndex(x => x.id === taskId);
+          if (i < 0) { showToast('找不到此筆紀錄', 'error'); return false; }
+          const prev = list[i];
+          list[i] = {
+            ...prev,
+            date,
+            dueDate,
+            employee: ownerUsername,
+            employeeName: ownerName,
+            category: category || '',
+            title,
+            status,
+            todos: [{
+              ...(prev.todos?.[0] || {}),
+              text,
+              assignees,
+              assigneeNames,
+              assignee: assignees[0] || '',
+              assigneeName: assigneeNames[0] || '',
+            }],
+            assignmentType: type,
+          };
+          Store.set(Store.KEYS.dailyTasks, list);
+          showToast('已更新待辦事項', 'success');
+        } else {
+          list.push({
+            id: genId(),
+            deptId,
+            date,
+            dueDate,
+            employee: ownerUsername,
+            employeeName: ownerName,
+            category: category || '',
+            subcategory: '',
+            title,
+            status,
+            notes: '',
+            todos: [{
+              text,
+              done: false,
+              assignees,
+              assigneeNames,
+              assignee: assignees[0] || '',
+              assigneeName: assigneeNames[0] || '',
+            }],
+            assignmentType: type,
+            createdAt: Date.now(),
+            createdBy: this.currentUser?.username || '',
+          });
+          Store.set(Store.KEYS.dailyTasks, list);
+          showToast('已新增待辦事項', 'success');
+        }
         this.render();
         return true;
       },
