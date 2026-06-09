@@ -3960,7 +3960,8 @@ const App = {
     // Row 2: 營收 / 廣告費 / ROAS sub-headers
 
     const fmt = (n) => n > 0 ? n.toLocaleString() : '—';
-    const fmtCell = (n, dim) => `<td style="padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px;color:${dim ? '#cbd5e1' : 'var(--text)'};line-height:1.4">${fmt(n)}</td>`;
+    // 各賣場第一欄會加上 border-left 區隔（leftBorder='1px solid #e5e7eb' or ''）
+    const fmtCell = (n, dim, leftBorder) => `<td style="padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px;color:${dim ? '#cbd5e1' : 'var(--text)'};line-height:1.4;${leftBorder ? `border-left:${leftBorder}` : ''}">${fmt(n)}</td>`;
     const fmtRoas = (rev, ads) => {
       if (ads === 0) return `<td style="padding:5px 8px;text-align:right;color:#cbd5e1;font-size:13px;line-height:1.4">—</td>`;
       const r = (rev / ads).toFixed(2);
@@ -3988,14 +3989,15 @@ const App = {
       return `<th colspan="${cols}" style="padding:6px 6px;text-align:center;font-size:13px;color:var(--text);font-weight:600;border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap">${escapeHtml(p.name)}</th>`;
     }).join('');
 
-    // 子欄位列（短標籤節省空間）
+    // 子欄位列（短標籤節省空間） — 各賣場第一欄加 border-left 區隔
     const subHeadHtml = colSpec.map(({ hasAds }) => {
+      const lb = 'border-left:1px solid var(--border);';
       if (hasAds) {
-        return `<th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>
+        return `<th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);${lb}">營收</th>
                 <th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">廣告</th>
                 <th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">ROAS</th>`;
       }
-      return `<th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>`;
+      return `<th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);${lb}">營收</th>`;
     }).join('');
 
     // 每一天的資料列
@@ -4014,12 +4016,14 @@ const App = {
         dayRev += rev;
         const m = PLATFORM_MARKETPLACE[p.name] || 'shopee';
         marketSubtotals[m] += rev;
+        // 每個賣場的第一欄加 border-left 區隔
+        const lb = '1px solid #e5e7eb';
         if (hasAds) {
           const ads = getAds(p, d);
           dayAds += ads;
-          return fmtCell(rev, rev === 0) + fmtCell(ads, ads === 0) + fmtRoas(rev, ads);
+          return fmtCell(rev, rev === 0, lb) + fmtCell(ads, ads === 0) + fmtRoas(rev, ads);
         }
-        return fmtCell(rev, rev === 0);
+        return fmtCell(rev, rev === 0, lb);
       }).join('');
       monthTotalRev += dayRev;
       monthTotalAds += dayAds;
@@ -4043,12 +4047,13 @@ const App = {
     // 總計列：個別賣場 + 通路小計
     const totalCells = colSpec.map(({ hasAds }, idx) => {
       const t = platformTotals[idx];
+      const lb = 'border-left:1px solid var(--border);';
       if (hasAds) {
-        return `<td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>
+        return `<td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;${lb}">${fmt(t.rev)}</td>
                 <td style="padding:7px 8px;text-align:right;font-size:13px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(t.ads)}</td>
                 <td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:700;color:#4f46e5;font-variant-numeric:tabular-nums">${t.roas}</td>`;
       }
-      return `<td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>`;
+      return `<td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;${lb}">${fmt(t.rev)}</td>`;
     }).join('');
 
     // 通路月總計
