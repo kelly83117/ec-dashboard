@@ -3458,7 +3458,6 @@ const App = {
           const creatorName = task.employeeName || task.employee || '';
           const isShared = assigneeNames.length >= 2;
           const isAssigned = assigneeNames.length === 1 && assigneeNames[0] !== creatorName;
-          const isSelf = !isShared && !isAssigned;
           const typeBadge = isShared
             ? `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e">👥 共同</span>`
             : (isAssigned
@@ -3467,20 +3466,24 @@ const App = {
           const displayParticipants = isShared
             ? assigneeNames.join('、')
             : (isAssigned ? `${creatorName} → ${assigneeNames[0]}` : creatorName);
+          // 狀態下拉：點一下展開可改狀態
+          const statusOptions = DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === task.status ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('');
           return `
-            <label style="display:block;padding:10px 14px;border-bottom:1px solid #f3f4f6;cursor:pointer;background:white;transition:background .12s" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">
+            <div style="display:block;padding:10px 14px;border-bottom:1px solid #f3f4f6;background:white;transition:background .12s" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
-                <input type="checkbox" class="dp-todo-tick" data-task-id="${escapeHtml(task.id)}" data-todo-idx="${todoIdx}" ${done ? 'checked' : ''} style="width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:${catColor}">
-                <span style="flex:1;min-width:0;color:${done ? 'var(--text-muted)' : 'var(--text)'};font-size:13px;line-height:1.4;font-weight:500;${done ? 'text-decoration:line-through' : ''}">${escapeHtml(text)}</span>
+                <span style="flex:1;min-width:0;color:var(--text);font-size:13px;line-height:1.4;font-weight:500">${escapeHtml(text)}</span>
                 ${typeBadge}
               </div>
-              <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding-left:23px">
-                <span style="display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:999px;background:${st.bg};color:${st.color};font-size:10px;font-weight:600">${st.emoji} ${escapeHtml(task.status)}</span>
+              <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+                <select class="dp-status-select" data-task-id="${escapeHtml(task.id)}" title="點此更改狀態"
+                  style="padding:2px 6px;border-radius:999px;background:${st.bg};color:${st.color};font-size:10px;font-weight:600;border:1px solid ${st.color}33;cursor:pointer;font-family:inherit;line-height:1.4">
+                  ${statusOptions}
+                </select>
                 ${task.category ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--text-muted);font-weight:500"><span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${catColor}"></span>${escapeHtml(task.category)}</span>` : ''}
                 ${task.dueDate ? `<span style="font-size:10px;color:#ef4444;font-weight:600" title="預計完成日">📌 ${escapeHtml(task.dueDate.slice(5).replace('-','/'))}</span>` : ''}
                 <span style="margin-left:auto;font-size:10px;color:var(--text-muted);font-weight:500">${escapeHtml(displayParticipants)}</span>
               </div>
-            </label>
+            </div>
           `;
         }).join('');
 
@@ -4951,7 +4954,21 @@ const App = {
     document.querySelectorAll('[data-todo-quick-add]').forEach(btn => {
       btn.addEventListener('click', () => this.openQuickTodoModal(btn.dataset.todoQuickAdd));
     });
-    // 未完成待辦勾選
+    // 待辦事項 — 狀態下拉改動
+    document.querySelectorAll('.dp-status-select').forEach(sel => {
+      sel.addEventListener('change', () => {
+        const taskId = sel.dataset.taskId;
+        const newStatus = sel.value;
+        const list = Store.get(Store.KEYS.dailyTasks, []);
+        const i = list.findIndex(x => x.id === taskId);
+        if (i < 0) return;
+        list[i].status = newStatus;
+        Store.set(Store.KEYS.dailyTasks, list);
+        showToast(`已將「${list[i].title || '待辦'}」改為 ${newStatus}`, 'success');
+        this.render();
+      });
+    });
+    // 每日工作進度 tab 內的 todo 勾選還是維持原本行為
     document.querySelectorAll('.dp-todo-tick').forEach(cb => {
       cb.addEventListener('change', () => {
         const taskId = cb.dataset.taskId;
