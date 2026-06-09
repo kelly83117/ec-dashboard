@@ -3322,7 +3322,7 @@ const App = {
               `;
             }).join('');
 
-        const holidayName = getHoliday(ds);
+        const holidayName = getHoliday(dateStr);
         const longWk = isLongWeekend(d);
         const dow = d.getDay();
         const isWeekend = (dow === 0 || dow === 6);
