@@ -3852,11 +3852,11 @@ const App = {
     // Row 2: 營收 / 廣告費 / ROAS sub-headers
 
     const fmt = (n) => n > 0 ? n.toLocaleString() : '—';
-    const fmtCell = (n, dim) => `<td style="padding:1px 4px;text-align:right;font-variant-numeric:tabular-nums;font-size:10px;color:${dim ? '#cbd5e1' : 'var(--text)'};line-height:1.3">${fmt(n)}</td>`;
+    const fmtCell = (n, dim) => `<td style="padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px;color:${dim ? '#cbd5e1' : 'var(--text)'};line-height:1.4">${fmt(n)}</td>`;
     const fmtRoas = (rev, ads) => {
-      if (ads === 0) return `<td style="padding:1px 4px;text-align:right;color:#cbd5e1;font-size:10px;line-height:1.3">—</td>`;
+      if (ads === 0) return `<td style="padding:5px 8px;text-align:right;color:#cbd5e1;font-size:13px;line-height:1.4">—</td>`;
       const r = (rev / ads).toFixed(2);
-      return `<td style="padding:1px 4px;text-align:right;font-variant-numeric:tabular-nums;font-size:10px;font-weight:600;color:#4f46e5;line-height:1.3">${r}</td>`;
+      return `<td style="padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px;font-weight:600;color:#4f46e5;line-height:1.4">${r}</td>`;
     };
 
     // 建欄位設定：每平台佔幾欄
@@ -3872,22 +3872,22 @@ const App = {
       const tint = marketTint[m];
       const totalCols = items.reduce((s, p) => s + (PLATFORMS_WITH_AD_SPEND.has(p.name) ? 3 : 1), 0);
       const badge = MARKETPLACE_BADGE[m];
-      return `<th colspan="${totalCols}" style="padding:4px 6px;background:${tint}14;color:${tint};text-align:center;font-size:10px;font-weight:700;border-left:2px solid ${tint};border-bottom:1px solid var(--border)"><img src="${badge.src}" style="width:12px;height:12px;vertical-align:middle;border-radius:3px;margin-right:3px;object-fit:contain">${escapeHtml(badge.name)}</th>`;
+      return `<th colspan="${totalCols}" style="padding:7px 8px;background:${tint}14;color:${tint};text-align:center;font-size:13px;font-weight:700;border-left:2px solid ${tint};border-bottom:1px solid var(--border)"><img src="${badge.src}" style="width:15px;height:15px;vertical-align:middle;border-radius:3px;margin-right:4px;object-fit:contain">${escapeHtml(badge.name)}</th>`;
     }).join('');
 
     // 平台名稱列
     const platformHeadHtml = colSpec.map(({ p, cols }) => {
-      return `<th colspan="${cols}" style="padding:4px 4px;text-align:center;font-size:10px;color:var(--text);font-weight:600;border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap">${escapeHtml(p.name)}</th>`;
+      return `<th colspan="${cols}" style="padding:6px 6px;text-align:center;font-size:13px;color:var(--text);font-weight:600;border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap">${escapeHtml(p.name)}</th>`;
     }).join('');
 
     // 子欄位列（短標籤節省空間）
     const subHeadHtml = colSpec.map(({ hasAds }) => {
       if (hasAds) {
-        return `<th style="padding:3px 4px;text-align:right;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>
-                <th style="padding:3px 4px;text-align:right;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">廣告</th>
-                <th style="padding:3px 4px;text-align:right;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">ROAS</th>`;
+        return `<th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>
+                <th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">廣告</th>
+                <th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">ROAS</th>`;
       }
-      return `<th style="padding:3px 4px;text-align:right;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>`;
+      return `<th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">營收</th>`;
     }).join('');
 
     // 每一天的資料列
@@ -3917,17 +3917,17 @@ const App = {
       monthTotalAds += dayAds;
 
       const subtotalCell = (val, tint, bold) => `
-        <td style="padding:1px 6px;text-align:right;font-size:10px;font-weight:${bold ? '700' : '600'};font-variant-numeric:tabular-nums;color:${val > 0 ? (tint || 'var(--text)') : '#cbd5e1'};background:var(--bg);border-left:1px solid var(--border)">${fmt(val)}</td>
+        <td style="padding:5px 8px;text-align:right;font-size:13px;font-weight:${bold ? '700' : '600'};font-variant-numeric:tabular-nums;color:${val > 0 ? (tint || 'var(--text)') : '#cbd5e1'};background:var(--bg);border-left:1px solid var(--border)">${fmt(val)}</td>
       `;
 
       return `
-        <tr style="background:${isToday ? '#eef2ff44' : 'transparent'};line-height:1.3">
-          <td style="padding:1px 6px;font-size:10px;font-weight:600;color:${isToday ? 'var(--primary)' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;white-space:nowrap;border-right:1px solid var(--border);background:${isToday ? '#f5f3ff' : 'var(--surface)'}">${escapeHtml(dayLabel)}${isToday ? ' ●' : ''}</td>
+        <tr style="background:${isToday ? '#eef2ff44' : 'transparent'};line-height:1.4">
+          <td style="padding:5px 10px;font-size:13px;font-weight:600;color:${isToday ? 'var(--primary)' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;white-space:nowrap;border-right:1px solid var(--border);background:${isToday ? '#f5f3ff' : 'var(--surface)'}">${escapeHtml(dayLabel)}${isToday ? ' ●' : ''}</td>
           ${cells}
           ${subtotalCell(marketSubtotals.shopee, '#ee4d2d')}
           ${subtotalCell(marketSubtotals.momo, '#ec4899')}
           ${subtotalCell(marketSubtotals.coupang, '#3b82f6')}
-          <td style="padding:1px 6px;text-align:right;font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;color:${dayRev > 0 ? 'var(--text)' : '#cbd5e1'};background:#fef3c7;border-left:2px solid var(--warn)">${fmt(dayRev)}</td>
+          <td style="padding:5px 10px;text-align:right;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;color:${dayRev > 0 ? 'var(--text)' : '#cbd5e1'};background:#fef3c7;border-left:2px solid var(--warn)">${fmt(dayRev)}</td>
         </tr>
       `;
     }).join('');
@@ -3936,11 +3936,11 @@ const App = {
     const totalCells = colSpec.map(({ hasAds }, idx) => {
       const t = platformTotals[idx];
       if (hasAds) {
-        return `<td style="padding:5px 5px;text-align:right;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>
-                <td style="padding:5px 5px;text-align:right;font-size:10px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(t.ads)}</td>
-                <td style="padding:5px 5px;text-align:right;font-size:11px;font-weight:700;color:#4f46e5;font-variant-numeric:tabular-nums">${t.roas}</td>`;
+        return `<td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>
+                <td style="padding:7px 8px;text-align:right;font-size:13px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(t.ads)}</td>
+                <td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:700;color:#4f46e5;font-variant-numeric:tabular-nums">${t.roas}</td>`;
       }
-      return `<td style="padding:5px 5px;text-align:right;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>`;
+      return `<td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(t.rev)}</td>`;
     }).join('');
 
     // 通路月總計
@@ -3951,19 +3951,19 @@ const App = {
 
     const tableHtml = `
       <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">
-        <table style="border-collapse:separate;border-spacing:0;width:100%;table-layout:auto;font-size:10px">
+        <table style="border-collapse:separate;border-spacing:0;width:100%;table-layout:auto;font-size:13px">
           <thead style="background:var(--surface)">
             <tr>
-              <th rowspan="3" style="padding:3px 6px;text-align:left;font-size:9px;color:var(--text-muted);font-weight:600;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);width:42px">日期</th>
+              <th rowspan="3" style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted);font-weight:600;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);width:56px">日期</th>
               ${marketHeadHtml}
-              <th colspan="4" rowspan="2" style="padding:3px 6px;text-align:center;font-size:10px;color:var(--text-muted);font-weight:700;border-left:2px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg)">通路小計 / 當日總計</th>
+              <th colspan="4" rowspan="2" style="padding:6px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-left:2px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg)">通路小計 / 當日總計</th>
             </tr>
             <tr>${platformHeadHtml}</tr>
             <tr>${subHeadHtml}
-              <th style="padding:2px 5px;text-align:right;font-size:9px;color:#ee4d2d;font-weight:700;border-bottom:1px solid var(--border);background:#ee4d2d10;border-left:2px solid var(--border)">蝦皮總</th>
-              <th style="padding:2px 5px;text-align:right;font-size:9px;color:#ec4899;font-weight:700;border-bottom:1px solid var(--border);background:#ec489910">MOMO</th>
-              <th style="padding:2px 5px;text-align:right;font-size:9px;color:#3b82f6;font-weight:700;border-bottom:1px solid var(--border);background:#3b82f610">酷澎</th>
-              <th style="padding:2px 5px;text-align:right;font-size:9px;color:var(--warn);font-weight:700;border-bottom:1px solid var(--border);background:#fef3c7;border-left:2px solid var(--warn)">當日總營收</th>
+              <th style="padding:5px 6px;text-align:right;font-size:11px;color:#ee4d2d;font-weight:700;border-bottom:1px solid var(--border);background:#ee4d2d10;border-left:2px solid var(--border)">蝦皮總</th>
+              <th style="padding:5px 6px;text-align:right;font-size:11px;color:#ec4899;font-weight:700;border-bottom:1px solid var(--border);background:#ec489910">MOMO</th>
+              <th style="padding:5px 6px;text-align:right;font-size:11px;color:#3b82f6;font-weight:700;border-bottom:1px solid var(--border);background:#3b82f610">酷澎</th>
+              <th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--warn);font-weight:700;border-bottom:1px solid var(--border);background:#fef3c7;border-left:2px solid var(--warn)">當日總營收</th>
             </tr>
           </thead>
           <tbody>
@@ -3971,18 +3971,18 @@ const App = {
           </tbody>
           <tfoot>
             <tr style="background:var(--bg);border-top:2px solid var(--border)">
-              <td style="padding:5px 6px;font-size:11px;font-weight:800;color:var(--text);border-right:1px solid var(--border);background:var(--bg)">總計</td>
+              <td style="padding:8px 10px;font-size:14px;font-weight:800;color:var(--text);border-right:1px solid var(--border);background:var(--bg)">總計</td>
               ${totalCells}
-              <td style="padding:5px 6px;text-align:right;font-size:11px;font-weight:800;color:#ee4d2d;background:#ee4d2d18;border-left:2px solid var(--border);font-variant-numeric:tabular-nums">${fmt(monthSubtotals.shopee)}</td>
-              <td style="padding:5px 6px;text-align:right;font-size:11px;font-weight:800;color:#ec4899;background:#ec489918;font-variant-numeric:tabular-nums">${fmt(monthSubtotals.momo)}</td>
-              <td style="padding:5px 6px;text-align:right;font-size:11px;font-weight:800;color:#3b82f6;background:#3b82f618;font-variant-numeric:tabular-nums">${fmt(monthSubtotals.coupang)}</td>
-              <td style="padding:5px 6px;text-align:right;font-size:12px;font-weight:800;color:var(--warn);background:#fef3c7;border-left:2px solid var(--warn);font-variant-numeric:tabular-nums">${fmt(monthTotalRev)}</td>
+              <td style="padding:8px 10px;text-align:right;font-size:14px;font-weight:800;color:#ee4d2d;background:#ee4d2d18;border-left:2px solid var(--border);font-variant-numeric:tabular-nums">${fmt(monthSubtotals.shopee)}</td>
+              <td style="padding:8px 10px;text-align:right;font-size:14px;font-weight:800;color:#ec4899;background:#ec489918;font-variant-numeric:tabular-nums">${fmt(monthSubtotals.momo)}</td>
+              <td style="padding:8px 10px;text-align:right;font-size:14px;font-weight:800;color:#3b82f6;background:#3b82f618;font-variant-numeric:tabular-nums">${fmt(monthSubtotals.coupang)}</td>
+              <td style="padding:8px 10px;text-align:right;font-size:16px;font-weight:800;color:var(--warn);background:#fef3c7;border-left:2px solid var(--warn);font-variant-numeric:tabular-nums">${fmt(monthTotalRev)}</td>
             </tr>
           </tfoot>
         </table>
       </div>
-      <div style="margin-top:4px;display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text-muted)">
-        <button id="restore-backup-btn" style="padding:4px 9px;border:1px solid var(--border);border-radius:5px;background:white;color:var(--text-muted);font-size:11px;cursor:pointer;font-weight:500" title="從上一次儲存前的備份還原資料">
+      <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text-muted)">
+        <button id="restore-backup-btn" style="padding:6px 11px;border:1px solid var(--border);border-radius:5px;background:white;color:var(--text-muted);font-size:12px;cursor:pointer;font-weight:500" title="從上一次儲存前的備份還原資料">
           ↩ 還原上一版
         </button>
         <span>${dates.length === 0 ? '本月還沒有任何日期可顯示' : `共 ${dates.length} 天 · ● 今天 · — 無資料`}</span>
