@@ -3435,7 +3435,7 @@ const App = {
     });
 
     const todoFilterPills = `
-      <div style="display:flex;align-items:center;gap:4px;padding:7px 12px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:5px;padding:9px 14px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
         ${[
           { key: 'pending', label: '未完成', emoji: '○' },
           { key: 'all', label: '全部', emoji: '•' },
@@ -3446,7 +3446,7 @@ const App = {
         ].map(p => {
           const active = f.todoStatus === p.key;
           const cnt = todoStatusCounts[p.key] || 0;
-          return `<button class="pill" data-todo-status="${escapeHtml(p.key)}" style="padding:3px 9px;font-size:11px;border:0;background:${active ? 'var(--primary)' : 'transparent'};color:${active ? 'white' : 'var(--text-muted)'};font-weight:${active ? '700' : '500'}">${p.emoji} ${escapeHtml(p.label)} ${cnt}</button>`;
+          return `<button class="pill" data-todo-status="${escapeHtml(p.key)}" style="padding:4px 11px;font-size:12px;border:0;background:${active ? 'var(--primary)' : 'transparent'};color:${active ? 'white' : 'var(--text-muted)'};font-weight:${active ? '700' : '500'}">${p.emoji} ${escapeHtml(p.label)} ${cnt}</button>`;
         }).join('')}
       </div>
     `;
@@ -3475,19 +3475,19 @@ const App = {
           // 狀態下拉：點一下展開可改狀態
           const statusOptions = DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === task.status ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('');
           return `
-            <div style="display:block;padding:10px 14px;border-bottom:1px solid #f3f4f6;background:white;transition:background .12s" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
-                <span style="flex:1;min-width:0;color:var(--text);font-size:13px;line-height:1.4;font-weight:500">${escapeHtml(text)}</span>
+            <div style="display:block;padding:12px 16px;border-bottom:1px solid #f3f4f6;background:white;transition:background .12s" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <span style="flex:1;min-width:0;color:var(--text);font-size:14px;line-height:1.4;font-weight:600">${escapeHtml(text)}</span>
                 ${typeBadge}
               </div>
-              <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                 <select class="dp-status-select" data-task-id="${escapeHtml(task.id)}" title="點此更改狀態"
-                  style="padding:2px 6px;border-radius:999px;background:${st.bg};color:${st.color};font-size:10px;font-weight:600;border:1px solid ${st.color}33;cursor:pointer;font-family:inherit;line-height:1.4">
+                  style="padding:3px 8px;border-radius:999px;background:${st.bg};color:${st.color};font-size:11px;font-weight:600;border:1px solid ${st.color}33;cursor:pointer;font-family:inherit;line-height:1.4">
                   ${statusOptions}
                 </select>
-                ${task.category ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--text-muted);font-weight:500"><span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${catColor}"></span>${escapeHtml(task.category)}</span>` : ''}
-                ${task.dueDate ? `<span style="font-size:10px;color:#ef4444;font-weight:600" title="預計完成日">📌 ${escapeHtml(task.dueDate.slice(5).replace('-','/'))}</span>` : ''}
-                <span style="margin-left:auto;font-size:10px;color:var(--text-muted);font-weight:500">${escapeHtml(displayParticipants)}</span>
+                ${task.category ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--text-muted);font-weight:500"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${catColor}"></span>${escapeHtml(task.category)}</span>` : ''}
+                ${task.dueDate ? `<span style="font-size:11px;color:#ef4444;font-weight:600" title="預計完成日">📌 ${escapeHtml(task.dueDate.slice(5).replace('-','/'))}</span>` : ''}
+                <span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-weight:500">${escapeHtml(displayParticipants)}</span>
               </div>
             </div>
           `;
@@ -3499,7 +3499,7 @@ const App = {
     const offsetAttr = isMonthMode ? 'data-month-offset' : 'data-week-offset';
 
     return `
-      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(220px, 280px);gap:14px;align-items:start">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(280px, 360px);gap:16px;align-items:start">
         <div style="background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;overflow:visible;min-width:0">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:13px 16px;border-bottom:1px solid #e5e7eb;background:white">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -3540,7 +3540,7 @@ const App = {
             <button class="btn-add" data-todo-quick-add="${escapeHtml(deptId)}" style="padding:5px 12px;font-size:12px;flex-shrink:0">+ 新增</button>
           </div>
           ${todoFilterPills}
-          <div style="max-height:560px;overflow-y:auto;background:#fcfcfd">${pendingHtml}</div>
+          <div style="max-height:720px;overflow-y:auto;background:#fcfcfd">${pendingHtml}</div>
         </div>
       </div>
     `;
