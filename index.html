@@ -3284,14 +3284,15 @@ const App = {
                 </select>
                 ${(() => {
                   const creator = t.employeeName || t.employee || '';
-                  const maxAss = (t.todos || []).reduce((m, td) => {
-                    const arr = Array.isArray(td.assignees) ? td.assignees : (td.assignee ? [td.assignee] : []);
-                    return Math.max(m, arr.length);
-                  }, 0);
-                  let badge = '';
-                  if (maxAss >= 2) badge = '<span style="font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e">共同</span>';
-                  else if (maxAss === 1) badge = '<span style="font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;background:#ede9fe;color:#5b21b6">指派</span>';
-                  return `<span style="font-size:10px;color:var(--text-muted);font-weight:500">👤 ${escapeHtml(creator)}</span>${badge}`;
+                  const allAssignees = new Set();
+                  (t.todos || []).forEach(td => {
+                    const arr = Array.isArray(td.assigneeNames) && td.assigneeNames.length
+                      ? td.assigneeNames
+                      : (td.assigneeName ? [td.assigneeName] : []);
+                    arr.forEach(n => allAssignees.add(n));
+                  });
+                  const names = allAssignees.size > 0 ? Array.from(allAssignees).join('、') : creator;
+                  return `<span style="font-size:10px;color:var(--text-muted);font-weight:500">👤 ${escapeHtml(names)}</span>`;
                 })()}
               </div>
               ${t.notes && t.notes.trim() ? `<div class="cal-note-popup">${escapeHtml(t.notes)}</div>` : ''}
@@ -3363,15 +3364,16 @@ const App = {
                   <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px dashed #f3f4f6;font-size:11px;color:var(--text-muted);flex-wrap:wrap">
                     ${(() => {
                       const creator = t.employeeName || t.employee || '';
-                      // 算最大的指派人數：個別 todo 內部選的人數最多算幾人
-                      const maxAss = (t.todos || []).reduce((m, td) => {
-                        const arr = Array.isArray(td.assignees) ? td.assignees : (td.assignee ? [td.assignee] : []);
-                        return Math.max(m, arr.length);
-                      }, 0);
-                      let badge = '';
-                      if (maxAss >= 2) badge = '<span style="font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;letter-spacing:.05em">共同</span>';
-                      else if (maxAss === 1) badge = '<span style="font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;background:#ede9fe;color:#5b21b6;letter-spacing:.05em">指派</span>';
-                      return `<span style="font-weight:600;color:var(--text);min-width:0">${escapeHtml(creator)}</span>${badge}`;
+                      // 列出所有指派對象姓名（含自己 / 指派 / 共同），看名字就知道誰要做
+                      const allAssignees = new Set();
+                      (t.todos || []).forEach(td => {
+                        const arr = Array.isArray(td.assigneeNames) && td.assigneeNames.length
+                          ? td.assigneeNames
+                          : (td.assigneeName ? [td.assigneeName] : []);
+                        arr.forEach(n => allAssignees.add(n));
+                      });
+                      const names = allAssignees.size > 0 ? Array.from(allAssignees).join('、') : creator;
+                      return `<span style="font-weight:600;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis">${escapeHtml(names)}</span>`;
                     })()}
                     ${todos.length > 0 ? `<span style="margin-left:auto;font-weight:500;white-space:nowrap">📝 ${doneCount}/${todos.length}</span>` : ''}
                   </div>
@@ -3464,12 +3466,8 @@ const App = {
           const creatorName = task.employeeName || task.employee || '';
           const isShared = assigneeNames.length >= 2;
           const isAssigned = assigneeNames.length === 1 && assigneeNames[0] !== creatorName;
-          // 「自己」不顯示徽章；只有指派 / 共同 才顯示
-          const typeBadge = isShared
-            ? `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e">👥 共同</span>`
-            : (isAssigned
-                ? `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#ede9fe;color:#5b21b6">👤 指派</span>`
-                : '');
+          // 全部不顯示徽章，看人員名字就知道是誰做
+          const typeBadge = '';
           const displayParticipants = isShared
             ? assigneeNames.join('、')
             : (isAssigned ? `${creatorName} → ${assigneeNames[0]}` : creatorName);
