@@ -3354,14 +3354,7 @@ const App = {
                       const hol = getHoliday(ds);
                       return `<div style="border-right:1px solid #f3f4f6;background:${isToday ? '#f5f3ff44' : (hol ? '#fef2f244' : (isWeekend ? '#fff7ed44' : 'transparent'))}"></div>`;
                     }).join('')}
-                    <div data-cal-task="${escapeHtml(t.id)}" class="cal-task-card" title="${escapeHtml(t.title)} · ${escapeHtml(t.status)}${t.dueDate ? ' · 預計 ' + escapeHtml(t.dueDate) : ''}" style="position:absolute;left:calc(${(startIdx / totalDays) * 100}% + 2px);top:6px;height:${ROW_H - 12}px;width:calc(${(colSpan / totalDays) * 100}% - 4px);background:${catColor}1f;border:1px solid ${catColor};border-left:4px solid ${catColor};border-radius:6px;display:flex;flex-direction:column;justify-content:center;padding:4px 11px;cursor:pointer;overflow:hidden;color:var(--text)" onmouseover="this.style.background='${catColor}33';this.style.boxShadow='0 2px 6px rgba(0,0,0,.08)'" onmouseout="this.style.background='${catColor}1f';this.style.boxShadow='none'">
-                      <div style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                        <span style="font-size:13px">${st.emoji}</span>
-                        <span style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(t.title)}</span>
-                      </div>
-                      <div style="font-size:12px;color:var(--text-muted);font-weight:500;line-height:1.25;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                        ${escapeHtml(assigneesText)}${t.dueDate ? ` · 📌 ${escapeHtml(t.dueDate.slice(5).replace('-','/'))}` : ''}
-                      </div>
+                    <div data-cal-task="${escapeHtml(t.id)}" class="cal-task-card" title="${escapeHtml(t.title)} · ${escapeHtml(t.status)}${t.dueDate ? ' · 預計 ' + escapeHtml(t.dueDate) : ''}" style="position:absolute;left:calc(${(startIdx / totalDays) * 100}% + 2px);top:12px;height:${ROW_H - 24}px;width:calc(${(colSpan / totalDays) * 100}% - 4px);background:${catColor};border:1px solid ${catColor};border-radius:5px;cursor:pointer;transition:transform .12s, box-shadow .12s" onmouseover="this.style.boxShadow='0 3px 10px rgba(0,0,0,.18)';this.style.transform='translateY(-1px)'" onmouseout="this.style.boxShadow='none';this.style.transform='translateY(0)'">
                       ${t.notes && t.notes.trim() ? `<div class="cal-note-popup">${escapeHtml(t.notes)}</div>` : ''}
                     </div>
                   </div>
