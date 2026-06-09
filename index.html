@@ -3474,7 +3474,7 @@ const App = {
           // 狀態下拉：點一下展開可改狀態
           const statusOptions = DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === task.status ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('');
           return `
-            <div data-cal-task="${escapeHtml(task.id)}" style="display:block;padding:12px 16px;border-bottom:1px solid #f3f4f6;background:white;transition:background .12s;cursor:pointer" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'" title="點一下編輯此待辦事項">
+            <div data-cal-task="${escapeHtml(task.id)}" data-todo-source="list" style="display:block;padding:12px 16px;border-bottom:1px solid #f3f4f6;background:white;transition:background .12s;cursor:pointer" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'" title="點一下編輯此待辦事項">
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
                 <span style="flex:1;min-width:0;color:var(--text);font-size:14px;line-height:1.4;font-weight:600">${escapeHtml(text)}</span>
                 ${typeBadge}
@@ -4937,10 +4937,12 @@ const App = {
       });
     });
     // 點任務卡 / 待辦事項 → 用新模式 modal 編輯（與新增同樣樣式）
+    // 從「待辦事項」側欄點進來的才顯示刪除按鈕；工作週曆卡片不顯示
     document.querySelectorAll('[data-cal-task]').forEach(card => {
       card.addEventListener('click', (e) => {
         if (e.target.closest('[data-cal-del]')) return;
-        this.openQuickTodoModal(deptId, card.dataset.calTask);
+        const fromTodoList = card.dataset.todoSource === 'list';
+        this.openQuickTodoModal(deptId, card.dataset.calTask, { showDelete: fromTodoList });
       });
     });
     // 刪除按鈕
@@ -5504,7 +5506,8 @@ const App = {
   },
 
   /* ------------- 快速新增單一待辦事項 ------------- */
-  openQuickTodoModal(deptId, taskId) {
+  openQuickTodoModal(deptId, taskId, opts) {
+    const showDelete = !!(opts && opts.showDelete);
     const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
     if (!dept) { showToast('找不到此辦公室', 'error'); return; }
     const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
@@ -5643,7 +5646,7 @@ const App = {
         updateType();
       },
       saveLabel: taskId ? '儲存' : '新增',
-      onDelete: taskId ? () => {
+      onDelete: (taskId && showDelete) ? () => {
         const editingNow = (Store.get(Store.KEYS.dailyTasks, [])).find(x => x.id === taskId);
         const titleForConfirm = editingNow?.title || editingNow?.todos?.[0]?.text || '此筆待辦';
         if (!confirm(`確定要刪除「${titleForConfirm}」？\n\n這個動作無法復原。`)) return false;
