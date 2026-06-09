@@ -1131,7 +1131,7 @@ const TASK_CATEGORIES = [
     ],
   },
   {
-    name: '影片拍攝',
+    name: '拍攝',
     color: '#ec4899',
     items: ['室內', '戶外'],
   },
@@ -1142,8 +1142,13 @@ const TASK_CATEGORIES = [
   },
 ];
 const TASK_CATEGORY_NAMES = TASK_CATEGORIES.map(c => c.name);
+// 舊名 → 新名對應，避免歷史資料的分類找不到 meta
+const TASK_CATEGORY_ALIASES = {
+  '影片拍攝': '拍攝',
+};
 function getCategoryMeta(name) {
-  return TASK_CATEGORIES.find(c => c.name === name) || null;
+  const canonical = TASK_CATEGORY_ALIASES[name] || name;
+  return TASK_CATEGORIES.find(c => c.name === canonical) || null;
 }
 function getCategoryItems(name) {
   const c = getCategoryMeta(name);
