@@ -3117,19 +3117,25 @@ const App = {
       '2026-09-25': '中秋節',
       '2026-10-09': '國慶日彈性', '2026-10-12': '國慶日補假',
     };
-    const getHoliday = (dateStr) => TW_HOLIDAYS[dateStr] || null;
+    const getHoliday = (dateStr) => {
+      try { return TW_HOLIDAYS[dateStr] || null; } catch { return null; }
+    };
     const isOffDay = (d) => {
-      const dow = d.getDay();
-      if (dow === 0 || dow === 6) return true;
-      return !!TW_HOLIDAYS[toDateStr(d)];
+      try {
+        const dow = d.getDay();
+        if (dow === 0 || dow === 6) return true;
+        return !!TW_HOLIDAYS[toDateStr(d)];
+      } catch { return false; }
     };
     // 連假判定：本日是 off-day 且前後連續 off-day 加起來 ≥ 3 天
     const isLongWeekend = (d) => {
-      if (!isOffDay(d)) return false;
-      let count = 1;
-      for (let i = 1; i < 12; i++) { if (isOffDay(addDays(d, -i))) count++; else break; }
-      for (let i = 1; i < 12; i++) { if (isOffDay(addDays(d, i))) count++; else break; }
-      return count >= 3;
+      try {
+        if (!isOffDay(d)) return false;
+        let count = 1;
+        for (let i = 1; i < 12; i++) { if (isOffDay(addDays(d, -i))) count++; else break; }
+        for (let i = 1; i < 12; i++) { if (isOffDay(addDays(d, i))) count++; else break; }
+        return count >= 3;
+      } catch { return false; }
     };
 
     // 計算範圍：依檢視模式
