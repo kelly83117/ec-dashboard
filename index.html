@@ -5643,6 +5643,19 @@ const App = {
         updateType();
       },
       saveLabel: taskId ? '儲存' : '新增',
+      onDelete: taskId ? () => {
+        const editingNow = (Store.get(Store.KEYS.dailyTasks, [])).find(x => x.id === taskId);
+        const titleForConfirm = editingNow?.title || editingNow?.todos?.[0]?.text || '此筆待辦';
+        if (!confirm(`確定要刪除「${titleForConfirm}」？\n\n這個動作無法復原。`)) return false;
+        const list2 = Store.get(Store.KEYS.dailyTasks, []);
+        const j = list2.findIndex(x => x.id === taskId);
+        if (j < 0) { showToast('找不到此筆紀錄', 'error'); return false; }
+        list2.splice(j, 1);
+        Store.set(Store.KEYS.dailyTasks, list2);
+        showToast('已刪除', 'success');
+        this.render();
+        return true;
+      } : null,
       onSave: () => {
         const type = document.querySelector('input[name="qtf-type"]:checked')?.value || 'self';
         const date = document.getElementById('qtf-date').value;
@@ -6171,7 +6184,7 @@ const App = {
   /* ============================================================
    *  通用 Modal
    * ============================================================ */
-  openModal({ title, bodyHtml, onSave, onMount, onCancel, saveLabel, cancelLabel, width, hideFooter }) {
+  openModal({ title, bodyHtml, onSave, onMount, onCancel, onDelete, saveLabel, cancelLabel, deleteLabel, width, hideFooter }) {
     const modal = document.getElementById('modal');
     if (width) modal.style.maxWidth = width;
     else modal.style.maxWidth = '';
@@ -6182,9 +6195,14 @@ const App = {
       </div>
       <div class="modal-body">${bodyHtml}</div>
       ${hideFooter ? '' : `
-        <div class="modal-footer">
-          <button class="btn-ghost" id="modal-cancel">${escapeHtml(cancelLabel || '取消')}</button>
-          <button class="btn-primary" style="width:auto;padding:10px 20px" id="modal-save">${escapeHtml(saveLabel || '儲存')}</button>
+        <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <div>
+            ${onDelete ? `<button id="modal-delete" style="padding:10px 18px;border:1px solid #fecaca;border-radius:8px;background:white;color:#dc2626;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='white'">🗑 ${escapeHtml(deleteLabel || '刪除')}</button>` : ''}
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn-ghost" id="modal-cancel">${escapeHtml(cancelLabel || '取消')}</button>
+            <button class="btn-primary" style="width:auto;padding:10px 20px" id="modal-save">${escapeHtml(saveLabel || '儲存')}</button>
+          </div>
         </div>
       `}
     `;
@@ -6201,6 +6219,13 @@ const App = {
         const ok = onSave();
         if (ok) this.closeModal();
       };
+      if (onDelete) {
+        const delBtn = document.getElementById('modal-delete');
+        if (delBtn) delBtn.onclick = () => {
+          const ok = onDelete();
+          if (ok) this.closeModal();
+        };
+      }
     }
   },
 
