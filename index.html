@@ -3129,6 +3129,7 @@ const App = {
     if (!f.viewMode) f.viewMode = 'week';
     if (f.monthOffset == null) f.monthOffset = 0;
     const isMonthMode = f.viewMode === 'month';
+    const isGanttMode = f.viewMode === 'gantt';
     const weekOffset = f.weekOffset || 0;
     const monthOffset = f.monthOffset || 0;
 
@@ -3184,7 +3185,21 @@ const App = {
     let rangeStart, rangeEnd, headerLabel, datesInGrid, gridCols, gridRows;
     let displayLabel; // 例如 "本週" / "6/01 – 6/07" / "2026 年 6 月"
 
-    if (isMonthMode) {
+    if (isGanttMode) {
+      // 甘特圖檢視：依當前月份顯示
+      const target = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+      const yMonth = target.getFullYear();
+      const mMonth = target.getMonth();
+      const firstOfMonth = new Date(yMonth, mMonth, 1);
+      const lastOfMonth = new Date(yMonth, mMonth + 1, 0);
+      datesInGrid = Array.from({ length: lastOfMonth.getDate() }, (_, i) => new Date(yMonth, mMonth, i + 1));
+      rangeStart = toDateStr(firstOfMonth);
+      rangeEnd = toDateStr(lastOfMonth);
+      gridCols = datesInGrid.length;
+      gridRows = 1;
+      headerLabel = `${yMonth} 年 ${mMonth + 1} 月`;
+      displayLabel = monthOffset === 0 ? '本月' : monthOffset === -1 ? '上月' : monthOffset === 1 ? '下月' : `${monthOffset > 0 ? '+' : ''}${monthOffset} 月`;
+    } else if (isMonthMode) {
       // 月檢視：取得目標月份的第一天
       const target = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
       const yMonth = target.getFullYear();
@@ -3256,7 +3271,95 @@ const App = {
     // === 週檢視：1 列 × 7 欄；每格寬鬆 ===
     let calendarBody = '';
 
-    if (isMonthMode) {
+    if (isGanttMode) {
+      // ============ 甘特圖 ============
+      const totalDays = datesInGrid.length;
+      const monthStart = datesInGrid[0];
+      const monthStartMs = monthStart.getTime();
+      const dayMs = 86400000;
+
+      // 依員工分組
+      const tasksGrouped = {};
+      tasksInRange.forEach(t => {
+        const empKey = t.employee || '?';
+        if (!tasksGrouped[empKey]) tasksGrouped[empKey] = { name: t.employeeName || t.employee, tasks: [] };
+        tasksGrouped[empKey].tasks.push(t);
+      });
+      // 依 date asc 排
+      Object.values(tasksGrouped).forEach(g => g.tasks.sort((a, b) => (a.date || '').localeCompare(b.date || '')));
+
+      const ROW_H = 32;
+      const ganttHeader = `
+        <div style="display:flex;border-bottom:2px solid #e5e7eb;background:#f9fafb">
+          <div style="flex:0 0 180px;padding:10px 12px;font-size:12px;font-weight:600;color:var(--text-muted);border-right:1px solid #e5e7eb">員工 · 任務</div>
+          <div style="flex:1;display:grid;grid-template-columns:repeat(${totalDays}, 1fr);min-width:0">
+            ${datesInGrid.map(d => {
+              const ds = toDateStr(d);
+              const dow = d.getDay();
+              const isToday = ds === todayStr2;
+              const isWeekend = (dow === 0 || dow === 6);
+              const hol = getHoliday(ds);
+              return `<div style="padding:6px 0;text-align:center;font-size:10px;line-height:1.2;border-right:1px solid #f3f4f6;background:${isToday ? '#f5f3ff' : (hol ? '#fef2f2' : (isWeekend ? '#fff7ed' : 'transparent'))};color:${hol ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text-muted)'))};font-weight:${isToday || hol ? '700' : '500'}">
+                <div>${d.getDate()}</div>
+                <div style="font-size:9px;color:${isWeekend || hol ? 'inherit' : '#cbd5e1'}">${['日','一','二','三','四','五','六'][dow]}</div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+      `;
+
+      const employeeIds = Object.keys(tasksGrouped);
+      const ganttRowsHtml = employeeIds.length === 0
+        ? `<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:13px">${headerLabel}沒有符合條件的任務</div>`
+        : employeeIds.map(empKey => {
+            const g = tasksGrouped[empKey];
+            return g.tasks.map((t, ti) => {
+              const startDate = new Date(t.date);
+              const endDate = t.dueDate ? new Date(t.dueDate) : startDate;
+              // 截斷在本月範圍內
+              const startIdx = Math.max(0, Math.floor((startDate - monthStartMs) / dayMs));
+              const endIdx = Math.min(totalDays - 1, Math.floor((endDate - monthStartMs) / dayMs));
+              if (endIdx < 0 || startIdx >= totalDays) return ''; // 不在當月
+              const colStart = startIdx + 1;
+              const colSpan = Math.max(1, endIdx - startIdx + 1);
+              const catMeta = t.category ? getCategoryMeta(t.category) : null;
+              const catColor = catMeta?.color || '#6b7280';
+              const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
+              const isFirst = ti === 0;
+              const empName = isFirst ? (g.name || empKey) : '';
+              return `
+                <div style="display:flex;border-bottom:1px solid #f3f4f6;background:white">
+                  <div style="flex:0 0 180px;padding:6px 12px;font-size:12px;border-right:1px solid #e5e7eb;display:flex;align-items:center;gap:6px;min-width:0">
+                    <span style="flex:0 0 50px;font-weight:600;color:${isFirst ? 'var(--text)' : 'transparent'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(empName)}</span>
+                    <span style="flex:1;min-width:0;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>
+                  </div>
+                  <div style="flex:1;display:grid;grid-template-columns:repeat(${totalDays}, 1fr);min-width:0;position:relative;height:${ROW_H}px">
+                    ${datesInGrid.map((d, i) => {
+                      const ds = toDateStr(d);
+                      const dow = d.getDay();
+                      const isToday = ds === todayStr2;
+                      const isWeekend = (dow === 0 || dow === 6);
+                      const hol = getHoliday(ds);
+                      return `<div style="border-right:1px solid #f3f4f6;background:${isToday ? '#f5f3ff44' : (hol ? '#fef2f244' : (isWeekend ? '#fff7ed44' : 'transparent'))}"></div>`;
+                    }).join('')}
+                    <div data-cal-task="${escapeHtml(t.id)}" class="cal-task-card" title="${escapeHtml(t.title)} · ${escapeHtml(t.status)}${t.dueDate ? ' · 預計 ' + escapeHtml(t.dueDate) : ''}" style="position:absolute;left:calc(${(startIdx / totalDays) * 100}% + 2px);top:4px;height:${ROW_H - 8}px;width:calc(${(colSpan / totalDays) * 100}% - 4px);background:${catColor}22;border:1px solid ${catColor};border-left:4px solid ${catColor};border-radius:5px;display:flex;align-items:center;padding:0 8px;cursor:pointer;overflow:hidden;font-size:11px;font-weight:600;color:var(--text);white-space:nowrap" onmouseover="this.style.background='${catColor}33';this.style.boxShadow='0 2px 6px rgba(0,0,0,.08)'" onmouseout="this.style.background='${catColor}22';this.style.boxShadow='none'">
+                      <span style="margin-right:6px">${st.emoji}</span>
+                      <span style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(t.title)}</span>
+                      ${t.notes && t.notes.trim() ? `<div class="cal-note-popup">${escapeHtml(t.notes)}</div>` : ''}
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }).join('');
+
+      calendarBody = `
+        ${ganttHeader}
+        <div style="overflow-y:auto;max-height:560px">
+          ${ganttRowsHtml}
+        </div>
+      `;
+    } else if (isMonthMode) {
       const targetMonth = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1).getMonth();
       // 頂部週名稱
       const headRow = `
@@ -3413,7 +3516,7 @@ const App = {
     }
 
     // 待辦事項：狀態篩選
-    const scopeLabel = isMonthMode ? '本月' : '本週';
+    const scopeLabel = (isMonthMode || isGanttMode) ? '本月' : '本週';
     if (!f.todoStatus) f.todoStatus = 'pending'; // 'all' | 'pending' | '進行中' | '已完成' | '遇阻' | '待開始'
 
     // 收集所有 todos 並依狀態過濾
@@ -3493,24 +3596,26 @@ const App = {
         }).join('');
 
     // 上一個 / 下一個 按鈕：依模式而定
-    const prevOffset = isMonthMode ? monthOffset - 1 : weekOffset - 1;
-    const nextOffset = isMonthMode ? monthOffset + 1 : weekOffset + 1;
-    const offsetAttr = isMonthMode ? 'data-month-offset' : 'data-week-offset';
+    const useMonthNav = isMonthMode || isGanttMode;
+    const prevOffset = useMonthNav ? monthOffset - 1 : weekOffset - 1;
+    const nextOffset = useMonthNav ? monthOffset + 1 : weekOffset + 1;
+    const offsetAttr = useMonthNav ? 'data-month-offset' : 'data-week-offset';
 
     return `
       <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(280px, 360px);gap:16px;align-items:start">
         <div style="background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;overflow:visible;min-width:0">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:13px 16px;border-bottom:1px solid #e5e7eb;background:white">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-              <h3 style="margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em">工作${isMonthMode ? '月' : '週'}曆</h3>
+              <h3 style="margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em">工作${isGanttMode ? '甘特圖' : (isMonthMode ? '月曆' : '週曆')}</h3>
               <div style="display:flex;align-items:center;gap:2px;background:#f3f4f6;border-radius:7px;padding:2px">
                 <button class="pill" ${offsetAttr}="${prevOffset}" title="上一個" style="padding:3px 9px;font-size:12px;border:0;background:transparent">←</button>
                 <button class="pill active" ${offsetAttr}="0" style="padding:3px 12px;font-size:12px;min-width:54px;border:0">${displayLabel}</button>
                 <button class="pill" ${offsetAttr}="${nextOffset}" title="下一個" style="padding:3px 9px;font-size:12px;border:0;background:transparent">→</button>
               </div>
               <div style="display:flex;align-items:center;gap:2px;background:#f3f4f6;border-radius:7px;padding:2px">
-                <button class="pill ${!isMonthMode ? 'active' : ''}" data-view-mode="week" style="padding:3px 11px;font-size:12px;border:0;${!isMonthMode ? '' : 'background:transparent'}">週</button>
+                <button class="pill ${f.viewMode === 'week' ? 'active' : ''}" data-view-mode="week" style="padding:3px 11px;font-size:12px;border:0;${f.viewMode === 'week' ? '' : 'background:transparent'}">週</button>
                 <button class="pill ${isMonthMode ? 'active' : ''}" data-view-mode="month" style="padding:3px 11px;font-size:12px;border:0;${isMonthMode ? '' : 'background:transparent'}">月</button>
+                <button class="pill ${isGanttMode ? 'active' : ''}" data-view-mode="gantt" style="padding:3px 11px;font-size:12px;border:0;${isGanttMode ? '' : 'background:transparent'}">甘特</button>
               </div>
               <span style="font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${escapeHtml(headerLabel)}</span>
             </div>
