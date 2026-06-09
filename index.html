@@ -3404,28 +3404,81 @@ const App = {
       calendarBody = `<div style="display:flex">${columnsHtml}</div>`;
     }
 
-    // 未完成待辦
+    // 待辦事項：狀態篩選
     const scopeLabel = isMonthMode ? '本月' : '本週';
-    const pendingHtml = pendingTodos.length === 0
-      ? `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">${scopeLabel}沒有待辦事項 🎉</div>`
-      : pendingTodos.slice(0, 40).map(({ task, todoIdx, text }) => {
+    if (!f.todoStatus) f.todoStatus = 'pending'; // 'all' | 'pending' | '進行中' | '已完成' | '遇阻' | '待開始'
+
+    // 收集所有 todos 並依狀態過濾
+    const allTodoRows = [];
+    tasksInRange.forEach(t => {
+      const todos = Array.isArray(t.todos) ? t.todos : [];
+      todos.forEach((td, idx) => {
+        if (td.text) allTodoRows.push({ task: t, todoIdx: idx, text: td.text, done: !!td.done });
+      });
+    });
+    // 各狀態的計數（依任務狀態）
+    const todoStatusCounts = { all: allTodoRows.length, pending: 0, '進行中': 0, '已完成': 0, '遇阻': 0, '待開始': 0 };
+    allTodoRows.forEach(r => {
+      if (!r.done) todoStatusCounts.pending++;
+      if (todoStatusCounts[r.task.status] != null) todoStatusCounts[r.task.status]++;
+    });
+    const filteredRows = allTodoRows.filter(r => {
+      if (f.todoStatus === 'all') return true;
+      if (f.todoStatus === 'pending') return !r.done;
+      return r.task.status === f.todoStatus;
+    });
+
+    const todoFilterPills = `
+      <div style="display:flex;align-items:center;gap:4px;padding:7px 12px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
+        ${[
+          { key: 'pending', label: '未完成', emoji: '○' },
+          { key: 'all', label: '全部', emoji: '•' },
+          { key: '進行中', label: '進行中', emoji: DAILY_TASK_STATUS['進行中'].emoji },
+          { key: '已完成', label: '已完成', emoji: DAILY_TASK_STATUS['已完成'].emoji },
+          { key: '遇阻', label: '遇阻', emoji: DAILY_TASK_STATUS['遇阻'].emoji },
+          { key: '待開始', label: '待開始', emoji: DAILY_TASK_STATUS['待開始'].emoji },
+        ].map(p => {
+          const active = f.todoStatus === p.key;
+          const cnt = todoStatusCounts[p.key] || 0;
+          return `<button class="pill" data-todo-status="${escapeHtml(p.key)}" style="padding:3px 9px;font-size:11px;border:0;background:${active ? 'var(--primary)' : 'transparent'};color:${active ? 'white' : 'var(--text-muted)'};font-weight:${active ? '700' : '500'}">${p.emoji} ${escapeHtml(p.label)} ${cnt}</button>`;
+        }).join('')}
+      </div>
+    `;
+
+    const pendingHtml = filteredRows.length === 0
+      ? `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">${scopeLabel}沒有符合條件的待辦 🎉</div>`
+      : filteredRows.slice(0, 40).map(({ task, todoIdx, text, done }) => {
           const catMeta = task.category ? getCategoryMeta(task.category) : null;
           const catColor = catMeta?.color || '#6b7280';
           const st = DAILY_TASK_STATUS[task.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
           const td = task.todos?.[todoIdx];
-          const displayName = (td?.assigneeName) || task.employeeName || task.employee;
-          const hasAssignee = !!td?.assigneeName;
+          const assigneeNames = Array.isArray(td?.assigneeNames) && td.assigneeNames.length
+            ? td.assigneeNames
+            : (td?.assigneeName ? [td.assigneeName] : []);
+          const creatorName = task.employeeName || task.employee || '';
+          const isShared = assigneeNames.length >= 2;
+          const isAssigned = assigneeNames.length === 1 && assigneeNames[0] !== creatorName;
+          const isSelf = !isShared && !isAssigned;
+          const typeBadge = isShared
+            ? `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e">👥 共同</span>`
+            : (isAssigned
+                ? `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#ede9fe;color:#5b21b6">👤 指派</span>`
+                : `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#dbeafe;color:#1e40af">🙋 自己</span>`);
+          const displayParticipants = isShared
+            ? assigneeNames.join('、')
+            : (isAssigned ? `${creatorName} → ${assigneeNames[0]}` : creatorName);
           return `
             <label style="display:block;padding:10px 14px;border-bottom:1px solid #f3f4f6;cursor:pointer;background:white;transition:background .12s" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
-                <input type="checkbox" class="dp-todo-tick" data-task-id="${escapeHtml(task.id)}" data-todo-idx="${todoIdx}" style="width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:${catColor}">
-                <span style="flex:1;min-width:0;color:var(--text);font-size:13px;line-height:1.4;font-weight:500">${escapeHtml(text)}</span>
+                <input type="checkbox" class="dp-todo-tick" data-task-id="${escapeHtml(task.id)}" data-todo-idx="${todoIdx}" ${done ? 'checked' : ''} style="width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:${catColor}">
+                <span style="flex:1;min-width:0;color:${done ? 'var(--text-muted)' : 'var(--text)'};font-size:13px;line-height:1.4;font-weight:500;${done ? 'text-decoration:line-through' : ''}">${escapeHtml(text)}</span>
+                ${typeBadge}
               </div>
               <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding-left:23px">
                 <span style="display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:999px;background:${st.bg};color:${st.color};font-size:10px;font-weight:600">${st.emoji} ${escapeHtml(task.status)}</span>
                 ${task.category ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--text-muted);font-weight:500"><span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${catColor}"></span>${escapeHtml(task.category)}</span>` : ''}
-                <span style="font-size:10px;color:var(--text-muted);font-variant-numeric:tabular-nums">${task.date.slice(5).replace('-','/')}</span>
-                <span style="margin-left:auto;font-size:10px;color:${hasAssignee ? 'var(--text)' : 'var(--text-muted)'};font-weight:${hasAssignee ? '600' : '500'}" title="${hasAssignee ? '待辦指派人員' : '任務負責人'}">${hasAssignee ? '👤 ' : ''}${escapeHtml(displayName)}</span>
+                ${task.dueDate ? `<span style="font-size:10px;color:#ef4444;font-weight:600" title="預計完成日">📌 ${escapeHtml(task.dueDate.slice(5).replace('-','/'))}</span>` : ''}
+                <span style="margin-left:auto;font-size:10px;color:var(--text-muted);font-weight:500">${escapeHtml(displayParticipants)}</span>
               </div>
             </label>
           `;
@@ -3472,12 +3525,13 @@ const App = {
         <div style="position:sticky;top:14px;background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
           <div style="padding:14px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px solid #e5e7eb;background:white">
             <div>
-              <h3 style="margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em">未完成待辦</h3>
-              <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted);font-weight:500;font-variant-numeric:tabular-nums">${scopeLabel} ${pendingTodos.length} 項 · 勾選即完成</p>
+              <h3 style="margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em">待辦事項</h3>
+              <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted);font-weight:500;font-variant-numeric:tabular-nums">${scopeLabel} · 共 ${allTodoRows.length} 項</p>
             </div>
             <button class="btn-add" data-todo-quick-add="${escapeHtml(deptId)}" style="padding:5px 12px;font-size:12px;flex-shrink:0">+ 新增</button>
           </div>
-          <div style="max-height:620px;overflow-y:auto;background:#fcfcfd">${pendingHtml}</div>
+          ${todoFilterPills}
+          <div style="max-height:560px;overflow-y:auto;background:#fcfcfd">${pendingHtml}</div>
         </div>
       </div>
     `;
@@ -4846,6 +4900,14 @@ const App = {
         this.render();
       });
     });
+    // 待辦狀態篩選 pills
+    document.querySelectorAll('[data-todo-status]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ensureFilter();
+        this.filter.dashboardMarketing.todoStatus = btn.dataset.todoStatus;
+        this.render();
+      });
+    });
     // 切換月
     document.querySelectorAll('[data-month-offset]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -5416,51 +5478,129 @@ const App = {
       : (members[0]?.username || '');
 
     this.openModal({
-      title: '快速新增待辦',
+      title: '新增待辦事項',
       bodyHtml: `
-        <div class="field-row">
-          <div class="field">
-            <label>日期</label>
-            <input type="date" id="qtf-date" value="${escapeHtml(todayStr())}" required>
-          </div>
-          <div class="field">
-            <label>負責人員</label>
-            <select id="qtf-emp">
-              ${members.map(u => `<option value="${escapeHtml(u.username)}" ${u.username === defaultEmp ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
-            </select>
-          </div>
-        </div>
         <div class="field">
-          <label>分類（選填）</label>
-          <select id="qtf-category">
-            <option value="">— 不指定 —</option>
-            ${TASK_CATEGORY_NAMES.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
-          </select>
+          <label>類型</label>
+          <div id="qtf-type-pills" style="display:flex;gap:4px;background:#f3f4f6;padding:3px;border-radius:8px">
+            <label data-type-pill="self" style="flex:1;padding:8px 10px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;background:white;color:#1e40af;box-shadow:0 1px 2px rgba(0,0,0,.06);transition:all .15s">
+              <input type="radio" name="qtf-type" value="self" checked style="display:none">
+              🙋 自己做
+            </label>
+            <label data-type-pill="assigned" style="flex:1;padding:8px 10px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#9ca3af;transition:all .15s">
+              <input type="radio" name="qtf-type" value="assigned" style="display:none">
+              👤 指派他人
+            </label>
+            <label data-type-pill="shared" style="flex:1;padding:8px 10px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#9ca3af;transition:all .15s">
+              <input type="radio" name="qtf-type" value="shared" style="display:none">
+              👥 共同
+            </label>
+          </div>
         </div>
         <div class="field">
           <label>待辦內容</label>
           <input id="qtf-text" placeholder="例：寄送 EDM 給合作品牌" required autofocus>
         </div>
-        <div class="field" style="margin-top:4px;padding:10px 12px;background:#f59e0b14;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px;color:var(--text)">
-          ✓ 此待辦會建立一筆新的工作進度紀錄（狀態：進行中）
+        <div class="field" id="qtf-assigned-wrap" style="display:none">
+          <label>指派給</label>
+          <select id="qtf-assigned-sel">
+            ${members.filter(u => u.username !== defaultEmp).map(u => `<option value="${escapeHtml(u.username)}">${escapeHtml(u.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" id="qtf-shared-wrap" style="display:none">
+          <label>參與人員（可複選）</label>
+          <div id="qtf-shared-list" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px;border:1px solid var(--border);border-radius:6px;background:#fcfcfd;max-height:140px;overflow-y:auto">
+            ${members.map(u => `
+              <label style="display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border:1px solid var(--border);border-radius:5px;background:white;cursor:pointer;font-size:12px">
+                <input type="checkbox" class="qtf-shared-cb" value="${escapeHtml(u.username)}" ${u.username === defaultEmp ? 'checked' : ''} style="width:14px;height:14px">
+                ${escapeHtml(u.name)}
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>開始日期</label>
+            <input type="date" id="qtf-date" value="${escapeHtml(todayStr())}" required>
+          </div>
+          <div class="field">
+            <label>預計完成日 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（選填）</span></label>
+            <input type="date" id="qtf-due">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>分類（選填）</label>
+            <select id="qtf-category">
+              <option value="">— 不指定 —</option>
+              ${TASK_CATEGORY_NAMES.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>狀態</label>
+            <select id="qtf-status">
+              ${DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === '進行中' ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('')}
+            </select>
+          </div>
         </div>
       `,
       onMount: () => {
         const txt = document.getElementById('qtf-text');
         if (txt) txt.focus();
+        // 類型切換
+        const assignedWrap = document.getElementById('qtf-assigned-wrap');
+        const sharedWrap = document.getElementById('qtf-shared-wrap');
+        const pills = document.querySelectorAll('[data-type-pill]');
+        const updateType = () => {
+          const v = document.querySelector('input[name="qtf-type"]:checked')?.value || 'self';
+          assignedWrap.style.display = v === 'assigned' ? 'block' : 'none';
+          sharedWrap.style.display = v === 'shared' ? 'block' : 'none';
+          pills.forEach(p => {
+            const isActive = p.dataset.typePill === v;
+            p.style.background = isActive ? 'white' : 'transparent';
+            p.style.color = isActive ? (v === 'self' ? '#1e40af' : (v === 'assigned' ? '#5b21b6' : '#92400e')) : '#9ca3af';
+            p.style.boxShadow = isActive ? '0 1px 2px rgba(0,0,0,.06)' : 'none';
+          });
+        };
+        pills.forEach(p => p.addEventListener('click', () => {
+          p.querySelector('input').checked = true;
+          updateType();
+        }));
       },
       saveLabel: '新增',
       onSave: () => {
+        const type = document.querySelector('input[name="qtf-type"]:checked')?.value || 'self';
         const date = document.getElementById('qtf-date').value;
-        const employee = document.getElementById('qtf-emp').value;
+        const dueDate = document.getElementById('qtf-due').value || '';
         const category = document.getElementById('qtf-category').value;
+        const status = document.getElementById('qtf-status').value || '進行中';
         const text = document.getElementById('qtf-text').value.trim();
-        if (!date) { showToast('請選擇日期', 'error'); return false; }
-        if (!employee) { showToast('請選擇人員', 'error'); return false; }
+        if (!date) { showToast('請選擇開始日期', 'error'); return false; }
         if (!text) { showToast('請填寫待辦內容', 'error'); return false; }
 
-        const empUser = members.find(u => u.username === employee);
-        const employeeName = empUser ? empUser.name : employee;
+        // 解析類型 → 決定 owner（task.employee）跟 assignees
+        let ownerUsername = defaultEmp;
+        let assignees = [];
+        if (type === 'self') {
+          ownerUsername = defaultEmp;
+          assignees = [];
+        } else if (type === 'assigned') {
+          ownerUsername = document.getElementById('qtf-assigned-sel').value;
+          if (!ownerUsername) { showToast('請選擇要指派的人員', 'error'); return false; }
+          assignees = [ownerUsername];
+        } else if (type === 'shared') {
+          const checks = Array.from(document.querySelectorAll('.qtf-shared-cb:checked')).map(c => c.value);
+          if (checks.length < 2) { showToast('共同類型至少要選 2 個人員', 'error'); return false; }
+          assignees = checks;
+          ownerUsername = defaultEmp; // 共同任務掛在建立者的行事曆
+        }
+
+        const ownerUser = members.find(u => u.username === ownerUsername);
+        const ownerName = ownerUser ? ownerUser.name : ownerUsername;
+        const assigneeNames = assignees.map(un => {
+          const u = members.find(m => m.username === un);
+          return u ? u.name : un;
+        });
         const title = text.slice(0, 60);
 
         const list = Store.get(Store.KEYS.dailyTasks, []);
@@ -5468,19 +5608,28 @@ const App = {
           id: genId(),
           deptId,
           date,
-          employee,
-          employeeName,
+          dueDate,
+          employee: ownerUsername,
+          employeeName: ownerName,
           category: category || '',
           subcategory: '',
           title,
-          status: '進行中',
+          status,
           notes: '',
-          todos: [{ text, done: false }],
+          todos: [{
+            text,
+            done: false,
+            assignees,
+            assigneeNames,
+            assignee: assignees[0] || '',
+            assigneeName: assigneeNames[0] || '',
+          }],
+          assignmentType: type,
           createdAt: Date.now(),
           createdBy: this.currentUser?.username || '',
         });
         Store.set(Store.KEYS.dailyTasks, list);
-        showToast('已新增待辦', 'success');
+        showToast('已新增待辦事項', 'success');
         this.render();
         return true;
       },
