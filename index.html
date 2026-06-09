@@ -3991,7 +3991,7 @@ const App = {
 
     // 子欄位列（短標籤節省空間） — 各賣場第一欄加 border-left 區隔
     const subHeadHtml = colSpec.map(({ hasAds }) => {
-      const lb = 'border-left:1px solid var(--border);';
+      const lb = 'border-left:1px solid #94a3b8;';
       if (hasAds) {
         return `<th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);${lb}">營收</th>
                 <th style="padding:5px 6px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">廣告</th>
@@ -4017,7 +4017,7 @@ const App = {
         const m = PLATFORM_MARKETPLACE[p.name] || 'shopee';
         marketSubtotals[m] += rev;
         // 每個賣場的第一欄加 border-left 區隔
-        const lb = '1px solid #e5e7eb';
+        const lb = '1px solid #94a3b8';
         if (hasAds) {
           const ads = getAds(p, d);
           dayAds += ads;
@@ -4047,7 +4047,7 @@ const App = {
     // 總計列：個別賣場 + 通路小計
     const totalCells = colSpec.map(({ hasAds }, idx) => {
       const t = platformTotals[idx];
-      const lb = 'border-left:1px solid var(--border);';
+      const lb = 'border-left:1px solid #94a3b8;';
       if (hasAds) {
         return `<td style="padding:7px 8px;text-align:right;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;${lb}">${fmt(t.rev)}</td>
                 <td style="padding:7px 8px;text-align:right;font-size:13px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(t.ads)}</td>
