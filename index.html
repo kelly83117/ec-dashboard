@@ -2277,9 +2277,58 @@ const App = {
       return `<span style="color:${color};font-weight:700">${arrow} ${Math.abs(pct).toFixed(0)}%</span>`;
     };
 
-    const rowsHtml = sorted.length === 0
-      ? `<tr><td colspan="13" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">尚未上傳銷售排行 Excel</td></tr>`
-      : sorted.map((p, i) => {
+    // 細分類篩選：先計算每個分類的商品數
+    const classifyOf = (p) => {
+      const c = classifyProduct(p);
+      return c ? c.label.replace(/^[^一-龥]+/, '').trim() : '';
+    };
+    const classCounts = {};
+    sorted.forEach(p => {
+      const c = classifyOf(p);
+      if (c) classCounts[c] = (classCounts[c] || 0) + 1;
+    });
+    const currentClass = this.filter.insightClass || 'all';
+    const filteredSorted = currentClass === 'all'
+      ? sorted
+      : sorted.filter(p => classifyOf(p) === currentClass);
+
+    const CLASS_PILLS = [
+      { group: '下滑類', color: '#b91c1c', items: [
+        { key: '重跌品', emoji: '🔴' },
+        { key: '衰退品', emoji: '🟥' },
+      ]},
+      { group: '成長類', color: '#15803d', items: [
+        { key: '爆發品', emoji: '🟡' },
+        { key: '成長品', emoji: '🟨' },
+      ]},
+      { group: '轉換類', color: '#1d4ed8', items: [
+        { key: '弱轉換', emoji: '🟢' },
+        { key: '低效轉換', emoji: '🟢' },
+        { key: '零轉換', emoji: '🟩' },
+        { key: '一般轉換', emoji: '🟩' },
+      ]},
+    ];
+
+    const classFilterHtml = sorted.length > 0 ? `
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc">
+        <span style="font-size:12px;color:var(--text-muted);font-weight:500">篩選分類</span>
+        <button class="pill ${currentClass === 'all' ? 'active' : ''}" data-insight-class="all" style="padding:4px 12px;font-size:12px;border:0;${currentClass === 'all' ? 'background:var(--primary);color:white;font-weight:700' : 'background:transparent;color:var(--text-muted)'}">全部 ${sorted.length}</button>
+        ${CLASS_PILLS.map(g => `
+          <span style="display:inline-flex;align-items:center;gap:4px;padding-left:6px;border-left:2px solid ${g.color}33">
+            <span style="font-size:10px;color:${g.color};font-weight:700;letter-spacing:.05em">${escapeHtml(g.group)}</span>
+            ${g.items.map(it => {
+              const cnt = classCounts[it.key] || 0;
+              const isActive = currentClass === it.key;
+              return `<button class="pill ${isActive ? 'active' : ''}" data-insight-class="${escapeHtml(it.key)}" style="padding:3px 10px;font-size:11px;border:0;${isActive ? 'background:'+g.color+';color:white;font-weight:700' : 'background:transparent;color:'+(cnt > 0 ? g.color : '#cbd5e1')+';font-weight:600'}">${it.emoji} ${escapeHtml(it.key)} ${cnt}</button>`;
+            }).join('')}
+          </span>
+        `).join('')}
+      </div>
+    ` : '';
+
+    const rowsHtml = filteredSorted.length === 0
+      ? `<tr><td colspan="13" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">${sorted.length === 0 ? '尚未上傳銷售排行 Excel' : `沒有符合「${escapeHtml(currentClass)}」的商品`}</td></tr>`
+      : filteredSorted.map((p, i) => {
           const netStock = p.stock - p.demand;
           const cls = classifyProduct(p);
           const prevCls = classifyPrev(p);
@@ -2392,6 +2441,7 @@ const App = {
             </div>
           </div>
         ` : ''}
+        ${classFilterHtml}
         <div class="table-wrap" style="max-height:680px;overflow-y:auto">
           <table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px">
             <thead style="position:sticky;top:0;z-index:1;background:#f9fafb">
@@ -2905,6 +2955,14 @@ const App = {
     // 分類門檻設定（共用）
     const settingsBtn = document.getElementById('insight-settings');
     if (settingsBtn) settingsBtn.addEventListener('click', () => this.openInsightSettingsModal());
+
+    // 細分類篩選 pills
+    document.querySelectorAll('[data-insight-class]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.filter.insightClass = btn.dataset.insightClass;
+        this.render();
+      });
+    });
 
     // 匯出 Excel（當前賣場）
     const exportBtn = document.getElementById('insight-export');
