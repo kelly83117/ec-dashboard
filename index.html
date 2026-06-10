@@ -6704,6 +6704,7 @@ async function __setupCloud() {
       const now = Date.now();
       const arr = Array.isArray(keys) ? keys : [keys];
       arr.forEach(k => window.__recentlyDeleted.set(k, now));
+      console.log('[mark deleted]', arr);
     };
 
     // 訂閱：其他人改了資料，這台會即時更新畫面
@@ -6711,15 +6712,18 @@ async function __setupCloud() {
     cs.subscribe((data) => {
       const next = data || {};
       delete next[Store.KEYS.session];  // 不接受雲端的 session
-      // 過濾掉「最近 5 秒內剛刪掉」的 key（避免 race 把它們又帶回來）
+      // 過濾掉「最近 30 秒內剛刪掉」的 key（避免 race 把它們又帶回來；給足網路 / 雲端延遲）
       const now = Date.now();
+      const filteredOut = [];
       window.__recentlyDeleted.forEach((ts, k) => {
-        if (now - ts < 5000) {
+        if (now - ts < 30000) {
+          if (next[k] !== undefined) filteredOut.push(k);
           delete next[k];
         } else {
           window.__recentlyDeleted.delete(k);
         }
       });
+      if (filteredOut.length) console.log('[subscribe] filtered out recently deleted:', filteredOut);
       Store._mem = next;
       if (!(window.App && App.currentUser && typeof App.render === 'function')) return;
       const active = document.activeElement;
