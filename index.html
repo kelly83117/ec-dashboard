@@ -6752,7 +6752,7 @@ if (window.__cloudStore) {
 <!-- ===================== 雲端同步（Firebase Firestore） ===================== -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
-  import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteField, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+  import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteField, onSnapshot, FieldPath } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
   const firebaseConfig = {
     apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
@@ -6771,12 +6771,16 @@ if (window.__cloudStore) {
     window.__cloudStore = {
       getDoc: () => getDoc(docRef),
       setField: (key, value) => setDoc(docRef, { [key]: value }, { merge: true }),
-      removeField: (key) => updateDoc(docRef, { [key]: deleteField() }),
-      // 一次刪多個 key（atomic），onSnapshot 只觸發一次 → 避免訂閱 race condition
+      // 用 FieldPath 包字面欄位名稱 → Firestore 才不會把含「.」的 key 當作巢狀路徑
+      removeField: (key) => updateDoc(docRef, new FieldPath(key), deleteField()),
       removeFields: (keys) => {
-        const obj = {};
-        for (const k of keys) obj[k] = deleteField();
-        return updateDoc(docRef, obj);
+        // updateDoc 的 (ref, field, value, ...) 變體：交替傳入 FieldPath + sentinel
+        const args = [docRef];
+        for (const k of keys) {
+          args.push(new FieldPath(k));
+          args.push(deleteField());
+        }
+        return updateDoc(...args);
       },
       subscribe: (cb) => onSnapshot(docRef, snap => cb(snap.exists() ? snap.data() : {})),
     };
