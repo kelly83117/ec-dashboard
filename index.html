@@ -2408,7 +2408,7 @@ const App = {
                 <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">轉換率</th>
                 <th style="padding:8px 8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">大類</th>
                 <th style="padding:8px 8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">上週 → 本週</th>
-                <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">淨庫存</th>
+                <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">可用庫存</th>
                 <th style="padding:8px 6px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb;width:40px">備註</th>
               </tr>
             </thead>
@@ -2481,11 +2481,10 @@ const App = {
                 revenue: 0, cost: 0, profit: 0, qty: 0,
               };
             }
-            // 庫存 / 需求 用 MAX（蝦皮匯出時同一商品編號的各規格列會重複顯示整體數字，不能累加）
-            const s = num(colStock), d = num(colDemand);
-            if (s > merged[code].stock) merged[code].stock = s;
-            if (d > merged[code].demand) merged[code].demand = d;
-            // 營收 / 成本 / 獲利 / 銷售數量 是各規格獨立的數字，可以累加
+            // 庫存 / 需求 同商品編號各規格累加（可用庫存 = SUM(J - K) 每列）
+            merged[code].stock   += num(colStock);
+            merged[code].demand  += num(colDemand);
+            // 營收 / 成本 / 獲利 / 銷售數量 也累加（各規格獨立）
             merged[code].revenue += num(colPrice);
             merged[code].cost    += num(colCost);
             merged[code].profit  += num(colProfit);
@@ -3180,7 +3179,7 @@ const App = {
         '上週類別': prevCls,
         '本週類別': cls,
         '判斷結果': (prevCls && cls) ? `${prevCls} → ${cls}` : cls,
-        '淨庫存': s.stock - s.demand,
+        '可用庫存': s.stock - s.demand,
         '備註': n.text || '',
         '調整紀錄': adjList,
       };
