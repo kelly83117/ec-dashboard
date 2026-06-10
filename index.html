@@ -2861,15 +2861,9 @@ const App = {
         e.stopPropagation();
         const piece = btn.dataset.clearPiece; // 'master' | 'sales' | 'salesPrev' | 'perf'
         const labels = { master: '商品母表', sales: '本週銷售', salesPrev: '上週銷售', perf: '商品表現' };
-        const inputIds = {
-          master: 'insight-master-upload',
-          sales: 'insight-sales-upload',
-          salesPrev: 'insight-salesprev-upload',
-          perf: 'insight-perf-upload',
-        };
         const label = labels[piece] || piece;
 
-        // 1) 直接清除（無確認彈窗）
+        // 直接清除（無確認彈窗、不自動開啟檔案選擇）
         if (piece === 'sales') {
           const ws = (Store.get(sKey('weeks'), []) || []).slice();
           ws[0] = null;
@@ -2883,14 +2877,9 @@ const App = {
         } else {
           Store.remove(sKey(piece));
         }
-        showToast(`已清除 ${currentShop} · ${label}，請選新檔案`, 'success');
+        showToast(`已清除 ${currentShop} · ${label}`, 'success');
+        // 重新繪製 → 卡片自動恢復為「點此上傳」狀態
         this.render();
-
-        // 2) 重新繪製後立即觸發對應的 file input → 跳出檔案選擇視窗
-        setTimeout(() => {
-          const inputEl = document.getElementById(inputIds[piece]);
-          if (inputEl) inputEl.click();
-        }, 50);
       });
     });
 
