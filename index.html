@@ -6778,15 +6778,27 @@ if (window.__cloudStore) {
     const FIRESTORE_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
       + '/databases/(default)/documents/app/main';
     const restDeleteFields = async (keys) => {
+      console.log('[restDeleteFields] called with', keys);
       const params = keys.map(k => 'updateMask.fieldPaths=' + encodeURIComponent('`' + k + '`')).join('&');
       const url = FIRESTORE_REST_BASE + '?' + params;
-      const resp = await fetch(url, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{"fields":{}}'
-      });
-      if (!resp.ok) throw new Error('REST delete failed: ' + resp.status);
-      return resp.json();
+      console.log('[restDeleteFields] URL:', url);
+      try {
+        const resp = await fetch(url, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{"fields":{}}'
+        });
+        console.log('[restDeleteFields] response:', resp.status, resp.statusText);
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          console.error('[restDeleteFields] error body:', text);
+          throw new Error('REST delete failed: ' + resp.status);
+        }
+        return resp.json();
+      } catch (err) {
+        console.error('[restDeleteFields] fetch threw:', err);
+        throw err;
+      }
     };
 
     window.__cloudStore = {
