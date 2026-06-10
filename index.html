@@ -6168,9 +6168,14 @@ const App = {
    *  各辦公室頁面（行銷 / 採購 / 商開 / 設計）
    * ============================================================ */
   viewOffice(deptId, subRoute = null) {
-    const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
+    const departments = Store.get(Store.KEYS.departments, []);
+    const dept = departments.find(d => d.id === deptId);
     const cfg = OFFICE_CONFIG[deptId];
     if (!dept || !cfg) {
+      // 部門資料還沒載入完（雲端訂閱 race）→ 顯示空白，等下一次 render
+      if (departments.length === 0) {
+        return '<div style="padding:60px;text-align:center;color:transparent">.</div>';
+      }
       return `<div class="placeholder-page"><div class="emoji">❓</div><h3>找不到此辦公室</h3></div>`;
     }
     if (!canAccessOffice(this.currentUser, dept)) {
