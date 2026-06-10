@@ -1592,7 +1592,13 @@ const App = {
     document.getElementById('view-login').style.display = 'none';
     document.getElementById('view-app').style.display = 'block';
     this.applyUserPerms(user);
-    this.navigate('dashboard');
+    // 還原上次瀏覽的路由（重新整理後不會跳回首頁）
+    let savedRoute = 'dashboard';
+    try {
+      const r = localStorage.getItem('ec.lastRoute');
+      if (r) savedRoute = r;
+    } catch {}
+    this.navigate(savedRoute);
     this.startMidnightWatcher();
   },
 
@@ -1657,6 +1663,8 @@ const App = {
   navigate(route) {
     if (!route) return;
     this.route = route;
+    // 持久化目前路由
+    try { localStorage.setItem('ec.lastRoute', route); } catch {}
     document.querySelectorAll('.nav-item').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.route === route);
     });
@@ -2335,7 +2343,7 @@ const App = {
     ` : '';
 
     const rowsHtml = filteredSorted.length === 0
-      ? `<tr><td colspan="13" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">${sorted.length === 0 ? '尚未上傳銷售排行 Excel' : `沒有符合「${escapeHtml(currentClass)}」的商品`}</td></tr>`
+      ? `<tr><td colspan="12" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">${sorted.length === 0 ? '尚未上傳銷售排行 Excel' : `沒有符合「${escapeHtml(currentClass)}」的商品`}</td></tr>`
       : filteredSorted.map((p, i) => {
           const netStock = p.stock - p.demand;
           const cls = classifyProduct(p);
@@ -2376,21 +2384,17 @@ const App = {
                 ${escapeHtml(p.code)}
                 ${!p.inMaster ? '<span style="display:block;font-size:10px;color:#f59e0b;font-weight:600;margin-top:2px">⚠ 需更新母表</span>' : ''}
               </td>
-              <td style="padding:8px 8px 8px 0;font-size:15px;color:var(--text);min-width:220px;max-width:320px">
-                <div style="line-height:1.4;font-weight:600;font-size:15px">${escapeHtml(p.mocbicName || p.name)}</div>
-                ${p.shopeeId ? `<div style="font-size:12px;color:var(--text-muted);font-family:monospace;margin-top:3px">ID: ${escapeHtml(p.shopeeId)}</div>` : ''}
+              <td style="padding:8px 8px 8px 0;font-size:15px;color:var(--text);min-width:220px;max-width:320px;text-align:left">
+                <div style="line-height:1.4;font-weight:600;font-size:15px;text-align:left">${escapeHtml(p.mocbicName || p.name)}</div>
+                ${p.shopeeId ? `<div style="font-size:12px;color:var(--text-muted);font-family:monospace;margin-top:3px;text-align:left">ID: ${escapeHtml(p.shopeeId)}</div>` : ''}
               </td>
               <td style="padding:8px 8px;text-align:right;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums">
                 NT$ ${fmt(p.revenue)}
                 ${p.prevRevenue > 0 ? `<div style="font-size:10px;color:var(--text-muted);font-weight:500;margin-top:1px">上週 ${fmt(p.prevRevenue)}</div>` : ''}
               </td>
               <td style="padding:8px 8px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums">${fmtGrowth(p.growthRate)}</td>
-              <td style="padding:8px 8px;text-align:right;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(p.qty)}</td>
               <td style="padding:8px 8px;text-align:right;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${p.impressions > 0 ? fmt(p.impressions) : '—'}</td>
-              <td style="padding:8px 8px;text-align:right;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">
-                ${p.clicks > 0 ? fmt(p.clicks) : '—'}
-                ${p.ctr > 0 ? `<div style="font-size:10px;margin-top:1px">${fmtPct(p.ctr)}</div>` : ''}
-              </td>
+              <td style="padding:8px 8px;text-align:right;font-size:12px;color:${p.ctr > 0 && p.ctr < 0.03 ? '#ef4444' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${p.ctr > 0 && p.ctr < 0.03 ? '600' : '500'}">${fmtPct(p.ctr)}</td>
               <td style="padding:8px 8px;text-align:right;font-size:12px;font-weight:${p.convRate > 0 ? '600' : '400'};color:${p.convRate > 0 && p.convRate < 0.01 ? '#ef4444' : p.convRate >= 0.02 ? '#10b981' : 'var(--text-muted)'};font-variant-numeric:tabular-nums">${fmtPct(p.convRate)}</td>
               <td style="padding:8px 8px;text-align:center;font-size:11px">${groupChip}</td>
               <td style="padding:8px 8px;text-align:center;font-size:11px">${flowHtml}</td>
@@ -2434,7 +2438,7 @@ const App = {
         ${uploadGridHtml}
         ${warningHtml}
         ${sorted.length > 0 ? `
-          <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:1px;background:#e5e7eb;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb">
+          <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:1px;background:#e5e7eb;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb">
             <div style="background:white;padding:14px 18px">
               <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本週總營收</div>
               <div style="font-size:22px;font-weight:700;color:var(--text);letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">NT$ ${fmt(totalRev)}</div>
@@ -2442,10 +2446,6 @@ const App = {
             <div style="background:white;padding:14px 18px">
               <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本週總獲利</div>
               <div style="font-size:22px;font-weight:700;color:#10b981;letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">NT$ ${fmt(totalProfit)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">(${fmtPct(totalRev > 0 ? totalProfit / totalRev : 0)})</span></div>
-            </div>
-            <div style="background:white;padding:14px 18px">
-              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本週售出件數</div>
-              <div style="font-size:22px;font-weight:700;color:var(--text);letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">${fmt(totalQty)} 件</div>
             </div>
           </div>
         ` : ''}
@@ -2460,9 +2460,8 @@ const App = {
                 <th style="padding:10px 8px 10px 0;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">商品名稱 / ID</th>
                 <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">本期 / 上週營收</th>
                 <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">成長率</th>
-                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">售出</th>
-                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">曝光</th>
-                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">點擊</th>
+                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">曝光次數</th>
+                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">點擊率</th>
                 <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">轉換率</th>
                 <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">大類</th>
                 <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上週 → 本週</th>
