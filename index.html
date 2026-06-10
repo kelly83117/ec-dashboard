@@ -2855,7 +2855,7 @@ const App = {
 
     // 個別清除按鈕（每張上傳卡的小 ✕）
     document.querySelectorAll('[data-clear-piece]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', async (e) => {
         // 卡片是 <label>，點 ✕ 會冒泡觸發 file input 開啟，要擋掉
         e.preventDefault();
         e.stopPropagation();
@@ -2863,22 +2863,42 @@ const App = {
         const labels = { master: '商品母表', sales: '本週銷售', salesPrev: '上週銷售', perf: '商品表現' };
         const label = labels[piece] || piece;
 
-        // 直接清除（無確認彈窗、不自動開啟檔案選擇）
-        if (piece === 'sales') {
+        // 1) 本地立刻清掉
+        if (piece === 'sales' || piece === 'salesPrev') {
           const ws = (Store.get(sKey('weeks'), []) || []).slice();
-          ws[0] = null;
-          if (ws.every(w => !w)) Store.remove(sKey('weeks'));
-          else Store.set(sKey('weeks'), ws);
-        } else if (piece === 'salesPrev') {
-          const ws = (Store.get(sKey('weeks'), []) || []).slice();
-          if (ws.length > 1) ws[1] = null;
-          if (ws.every(w => !w)) Store.remove(sKey('weeks'));
-          else Store.set(sKey('weeks'), ws);
+          if (piece === 'sales') ws[0] = null;
+          else if (ws.length > 1) ws[1] = null;
+          // 本地 _mem 直接改（不走 cloud-wrapped Store.set 以免 race）
+          if (ws.every(w => !w)) {
+            try { delete Store._mem[sKey('weeks')]; } catch {}
+            try { localStorage.removeItem(sKey('weeks')); } catch {}
+          } else {
+            try { Store._mem[sKey('weeks')] = ws; } catch {}
+            try { localStorage.setItem(sKey('weeks'), JSON.stringify(ws)); } catch {}
+          }
+          // 雲端：直接 set 為 array 或 removeFields
+          if (window.__cloudStore) {
+            try {
+              if (ws.every(w => !w)) {
+                await window.__cloudStore.removeFields([sKey('weeks')]);
+              } else {
+                await window.__cloudStore.setField(sKey('weeks'), ws);
+              }
+            } catch (err) { console.warn('cloud clear failed', err); }
+          }
         } else {
-          Store.remove(sKey(piece));
+          // master / perf：直接 atomic 從雲端 + 本地刪除
+          const k = sKey(piece);
+          try { delete Store._mem[k]; } catch {}
+          try { localStorage.removeItem(k); } catch {}
+          if (window.__cloudStore && typeof window.__cloudStore.removeFields === 'function') {
+            try { await window.__cloudStore.removeFields([k]); }
+            catch (err) { console.warn('cloud clear failed', err); }
+          } else if (window.__cloudStore) {
+            try { window.__cloudStore.removeField(k); } catch {}
+          }
         }
         showToast(`已清除 ${currentShop} · ${label}`, 'success');
-        // 重新繪製 → 卡片自動恢復為「點此上傳」狀態
         this.render();
       });
     });
