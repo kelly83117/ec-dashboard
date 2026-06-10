@@ -104,7 +104,7 @@
     border: 3px solid #e5e7eb;
     border-top-color: var(--primary);
     border-radius: 50%;
-    animation: spin .8s linear infinite;
+    animation: spin .45s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   .login-card {
@@ -3836,7 +3836,7 @@ const App = {
     const offsetAttr = useMonthNav ? 'data-month-offset' : 'data-week-offset';
 
     return `
-      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(280px, 360px);gap:16px;align-items:start">
+      <div style="display:grid;grid-template-columns:${isGanttMode ? 'minmax(0,1fr)' : 'minmax(0,1fr) minmax(280px, 360px)'};gap:16px;align-items:start">
         <div style="background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;overflow:visible;min-width:0">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:13px 16px;border-bottom:1px solid #e5e7eb;background:white">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -3869,6 +3869,7 @@ const App = {
           </div>
           <div>${calendarBody}</div>
         </div>
+        ${isGanttMode ? '' : `
         <div style="position:sticky;top:14px;background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
           <div style="padding:14px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px solid #e5e7eb;background:white">
             <div>
@@ -3880,6 +3881,7 @@ const App = {
           ${todoFilterPills}
           <div style="max-height:720px;overflow-y:auto;background:#fcfcfd">${pendingHtml}</div>
         </div>
+        `}
       </div>
     `;
   },
