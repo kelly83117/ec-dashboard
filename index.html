@@ -6704,7 +6704,7 @@ async function __setupCloud() {
       const now = Date.now();
       const arr = Array.isArray(keys) ? keys : [keys];
       arr.forEach(k => window.__recentlyDeleted.set(k, now));
-      console.log('[mark deleted]', arr);
+      console.warn('[mark deleted]', arr);
     };
 
     // 訂閱：其他人改了資料，這台會即時更新畫面
@@ -6723,7 +6723,7 @@ async function __setupCloud() {
           window.__recentlyDeleted.delete(k);
         }
       });
-      if (filteredOut.length) console.log('[subscribe] filtered out recently deleted:', filteredOut);
+      if (filteredOut.length) console.warn('[subscribe] filtered out recently deleted:', filteredOut);
       Store._mem = next;
       if (!(window.App && App.currentUser && typeof App.render === 'function')) return;
       const active = document.activeElement;
@@ -6778,17 +6778,17 @@ if (window.__cloudStore) {
     const FIRESTORE_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
       + '/databases/(default)/documents/app/main';
     const restDeleteFields = async (keys) => {
-      console.log('[restDeleteFields] called with', keys);
+      console.warn('[restDeleteFields] called with', keys);
       const params = keys.map(k => 'updateMask.fieldPaths=' + encodeURIComponent('`' + k + '`')).join('&');
       const url = FIRESTORE_REST_BASE + '?' + params;
-      console.log('[restDeleteFields] URL:', url);
+      console.warn('[restDeleteFields] URL:', url);
       try {
         const resp = await fetch(url, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: '{"fields":{}}'
         });
-        console.log('[restDeleteFields] response:', resp.status, resp.statusText);
+        console.warn('[restDeleteFields] response:', resp.status, resp.statusText);
         if (!resp.ok) {
           const text = await resp.text().catch(() => '');
           console.error('[restDeleteFields] error body:', text);
