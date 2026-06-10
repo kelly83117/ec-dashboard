@@ -188,6 +188,9 @@
   }
   body.sidebar-collapsed .sidebar { width: 0; }
   body.sidebar-collapsed .sidebar > * { opacity: 0; pointer-events: none; }
+  /* 收合後右側畫面整體等比放大（zoom 兼容性更好，不會破壞 flex/fixed） */
+  .main { transition: zoom .25s ease; }
+  body.sidebar-collapsed .main { zoom: 1.12; }
   /* 收合按鈕：浮在側欄外側邊緣，永遠可見 */
   .sidebar-toggle {
     position: fixed;
