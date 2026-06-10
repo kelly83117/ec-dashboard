@@ -3066,10 +3066,6 @@ const App = {
       width: '560px',
       bodyHtml: `
         <div class="field">
-          <label>長期備註（這個商品的特性、注意事項等）</label>
-          <textarea id="note-text" rows="3" placeholder="例：主圖偏暗，需要重拍 / 競品有 PD 認證，我們也要加" style="font-family:inherit;resize:vertical">${escapeHtml(note.text || '')}</textarea>
-        </div>
-        <div class="field">
           <label style="display:flex;align-items:center;justify-content:space-between">
             <span>調整紀錄 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（新增動作會自動加日期）</span></span>
             <button id="note-add-adj" type="button" style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:white;font-size:11px;font-weight:600;cursor:pointer">+ 新增動作</button>
@@ -3079,6 +3075,10 @@ const App = {
             <button id="note-save-adj" type="button" style="padding:6px 12px;border:0;border-radius:5px;background:var(--primary);color:white;font-size:12px;cursor:pointer">送出</button>
           </div>
           <div id="note-adj-list" style="max-height:240px;overflow-y:auto">${adjustmentsHtml || '<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">尚無調整紀錄</div>'}</div>
+        </div>
+        <div class="field">
+          <label>長期備註（這個商品的特性、注意事項等）</label>
+          <textarea id="note-text" rows="3" placeholder="例：主圖偏暗，需要重拍 / 競品有 PD 認證，我們也要加" style="font-family:inherit;resize:vertical">${escapeHtml(note.text || '')}</textarea>
         </div>
       `,
       saveLabel: '儲存備註',
