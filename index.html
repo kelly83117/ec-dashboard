@@ -79,12 +79,34 @@
   /* ------------- 登入頁 ------------- */
   #view-login {
     min-height: 100vh;
-    display: flex;
+    display: none;
     align-items: center;
     justify-content: center;
     background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
     padding: 24px;
   }
+  /* 全屏載入遮罩（同步啟動，啟動完才隱藏，避免 view-login 或部分 UI 閃現） */
+  #view-boot {
+    position: fixed;
+    inset: 0;
+    background: #fcfcfd;
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 18px;
+    transition: opacity .18s ease;
+  }
+  #view-boot.hide { opacity: 0; pointer-events: none; }
+  #view-boot .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid #e5e7eb;
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .login-card {
     background: white;
     border-radius: 16px;
@@ -812,6 +834,12 @@
 </head>
 <body>
 
+<!-- ============== 啟動遮罩（同步顯示，App 啟動完才隱藏） ============== -->
+<div id="view-boot">
+  <div class="spinner"></div>
+  <div style="font-size:13px;color:#9ca3af;font-weight:500;letter-spacing:.08em">載入中</div>
+</div>
+
 <!-- ============== 登入頁 ============== -->
 <div id="view-login">
   <div class="login-card">
@@ -1536,6 +1564,15 @@ const App = {
   showLogin() {
     document.getElementById('view-login').style.display = 'flex';
     document.getElementById('view-app').style.display = 'none';
+    this._hideBoot();
+  },
+
+  /* 隱藏全屏載入遮罩（淡出後移除）*/
+  _hideBoot() {
+    const el = document.getElementById('view-boot');
+    if (!el) return;
+    el.classList.add('hide');
+    setTimeout(() => { try { el.parentNode && el.parentNode.removeChild(el); } catch {} }, 220);
   },
 
   showAuthError(msg) {
@@ -1618,6 +1655,7 @@ const App = {
     // 4) 最後才切顯示，畫面已經是目標頁的樣子，不會閃 "?" 或首頁
     document.getElementById('view-login').style.display = 'none';
     document.getElementById('view-app').style.display = 'block';
+    this._hideBoot();
     this.startMidnightWatcher();
   },
 
