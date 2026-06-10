@@ -2350,9 +2350,9 @@ const App = {
     ` : '';
 
     const fmtGrowth = (g) => {
-      if (g === null || g === undefined) return '<span style="color:var(--text-muted);font-size:11px">—</span>';
+      if (g === null || g === undefined) return '<span style="color:var(--text-muted)">—</span>';
       const pct = g * 100;
-      if (pct === 0) return '<span style="color:var(--text-muted);font-size:11px">0%</span>';
+      if (pct === 0) return '<span style="color:var(--text-muted)">0%</span>';
       const color = pct > 0 ? '#10b981' : '#ef4444';
       const arrow = pct > 0 ? '↑' : '↓';
       return `<span style="color:${color};font-weight:700">${arrow} ${Math.abs(pct).toFixed(0)}%</span>`;
@@ -2368,11 +2368,16 @@ const App = {
       const c = classifyOf(p);
       if (c) classCounts[c] = (classCounts[c] || 0) + 1;
     });
-    const currentClass = this.filter.insightClass || 'all';
+    // 複選：insightClass 是已勾選的類別陣列；空陣列 / null = 全部
+    // 相容舊資料：如果是字串就轉成陣列
+    let selectedClasses = this.filter.insightClass;
+    if (typeof selectedClasses === 'string') selectedClasses = selectedClasses === 'all' || !selectedClasses ? [] : [selectedClasses];
+    if (!Array.isArray(selectedClasses)) selectedClasses = [];
+    const selectedSet = new Set(selectedClasses);
     const ctrLowFilter = !!this.filter.insightCtrLow;
-    let filteredSorted = currentClass === 'all'
+    let filteredSorted = selectedSet.size === 0
       ? sorted
-      : sorted.filter(p => classifyOf(p) === currentClass);
+      : sorted.filter(p => selectedSet.has(classifyOf(p)));
     if (ctrLowFilter) {
       filteredSorted = filteredSorted.filter(p => p.ctr > 0 && p.ctr < 0.03);
     }
@@ -2395,17 +2400,18 @@ const App = {
       ]},
     ];
 
+    const allActive = selectedSet.size === 0;
     const classFilterHtml = sorted.length > 0 ? `
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc">
-        <span style="font-size:13px;color:var(--text);font-weight:600">篩選分類</span>
-        <button class="pill ${currentClass === 'all' ? 'active' : ''}" data-insight-class="all" style="padding:5px 14px;font-size:13px;border:0;${currentClass === 'all' ? 'background:var(--primary);color:white;font-weight:700' : 'background:transparent;color:var(--text-muted);font-weight:600'}">全部 ${sorted.length}</button>
+        <span style="font-size:13px;color:var(--text);font-weight:600">篩選分類<span style="font-size:11px;color:var(--text-muted);font-weight:500;margin-left:4px">（可複選）</span></span>
+        <button class="pill ${allActive ? 'active' : ''}" data-insight-class="all" style="padding:5px 14px;font-size:13px;border:0;${allActive ? 'background:var(--primary);color:white;font-weight:700' : 'background:transparent;color:var(--text-muted);font-weight:600'}">全部 ${sorted.length}</button>
         ${CLASS_PILLS.map(g => `
           <span style="display:inline-flex;align-items:center;gap:5px;padding-left:8px;border-left:2px solid ${g.color}33">
             <span style="font-size:12px;color:${g.color};font-weight:700;letter-spacing:.05em">${escapeHtml(g.group)}</span>
             ${g.items.map(it => {
               const cnt = classCounts[it.key] || 0;
-              const isActive = currentClass === it.key;
-              return `<button class="pill ${isActive ? 'active' : ''}" data-insight-class="${escapeHtml(it.key)}" style="padding:4px 12px;font-size:13px;border:0;${isActive ? 'background:'+g.color+';color:white;font-weight:700' : 'background:transparent;color:'+(cnt > 0 ? g.color : '#cbd5e1')+';font-weight:600'}">${it.emoji} ${escapeHtml(it.key)} ${cnt}</button>`;
+              const isActive = selectedSet.has(it.key);
+              return `<button class="pill ${isActive ? 'active' : ''}" data-insight-class="${escapeHtml(it.key)}" style="padding:4px 12px;font-size:13px;border:0;${isActive ? 'background:'+g.color+';color:white;font-weight:700;box-shadow:0 0 0 2px '+g.color+'33' : 'background:transparent;color:'+(cnt > 0 ? g.color : '#cbd5e1')+';font-weight:600'}">${it.emoji} ${escapeHtml(it.key)} ${cnt}</button>`;
             }).join('')}
           </span>
         `).join('')}
@@ -2416,7 +2422,7 @@ const App = {
     ` : '';
 
     const rowsHtml = filteredSorted.length === 0
-      ? `<tr><td colspan="12" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">${sorted.length === 0 ? '尚未上傳銷售排行 Excel' : `沒有符合「${escapeHtml(currentClass)}」的商品`}</td></tr>`
+      ? `<tr><td colspan="11" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">${sorted.length === 0 ? '尚未上傳銷售排行 Excel' : `沒有符合「${escapeHtml(Array.from(selectedSet).join('、') || '全部')}」的商品`}</td></tr>`
       : filteredSorted.map((p, i) => {
           const netStock = p.stock - p.demand;
           const cls = classifyProduct(p);
@@ -2431,18 +2437,18 @@ const App = {
           if (prevCls && cls) {
             const arrowColor = prevGrp === grp ? '#9ca3af' : (grp === '下滑類' ? '#ef4444' : grp === '成長類' ? '#10b981' : '#3b82f6');
             flowHtml = `
-              <div style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:11px">
-                <span style="padding:1px 5px;border-radius:4px;background:${prevCls.bg};color:${prevCls.color};font-weight:600">${escapeHtml(prevCls.label)}</span>
+              <div style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:13px">
+                <span style="padding:2px 7px;border-radius:5px;background:${prevCls.bg};color:${prevCls.color};font-weight:700">${escapeHtml(prevCls.label)}</span>
                 <span style="color:${arrowColor};font-weight:700">→</span>
-                <span style="padding:1px 5px;border-radius:4px;background:${cls.bg};color:${cls.color};font-weight:600">${escapeHtml(cls.label)}</span>
+                <span style="padding:2px 7px;border-radius:5px;background:${cls.bg};color:${cls.color};font-weight:700">${escapeHtml(cls.label)}</span>
               </div>`;
           } else if (cls) {
-            flowHtml = `<span style="padding:1px 5px;border-radius:4px;background:${cls.bg};color:${cls.color};font-weight:600;font-size:11px">${escapeHtml(cls.label)}</span>`;
+            flowHtml = `<span style="padding:2px 7px;border-radius:5px;background:${cls.bg};color:${cls.color};font-weight:700;font-size:13px">${escapeHtml(cls.label)}</span>`;
           }
 
           // 大類 chip
           const groupChip = grp
-            ? `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:5px;background:${grpStyle.bg};color:${grpStyle.color};font-weight:700;font-size:11px;letter-spacing:.02em">${grp}</span>`
+            ? `<span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:6px;background:${grpStyle.bg};color:${grpStyle.color};font-weight:700;font-size:13px;letter-spacing:.02em">${grp}</span>`
             : '<span style="color:var(--text-muted)">—</span>';
 
           // 列底色：大類淡色 + 缺母表覆蓋
@@ -2453,25 +2459,25 @@ const App = {
             <tr style="border-top:1px solid #f3f4f6;background:${rowBg}">
               <td style="padding:0;width:4px;background:${bandColor}"></td>
               <td style="padding:8px 8px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;width:32px">${i + 1}</td>
-              <td style="padding:8px 2px 8px 8px;font-size:15px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap;width:1%">
-                ${escapeHtml(p.code)}
-                ${!p.inMaster ? '<span style="display:block;font-size:10px;color:#f59e0b;font-weight:600;margin-top:2px">⚠ 需更新母表</span>' : ''}
+              <td style="padding:8px 8px;color:var(--text);min-width:260px;max-width:360px;text-align:left;vertical-align:top">
+                <div style="display:grid;grid-template-columns:56px 1fr;column-gap:10px;row-gap:3px;align-items:center">
+                  <div style="font-weight:700;font-size:15px;line-height:1.4;font-variant-numeric:tabular-nums;white-space:nowrap">${escapeHtml(p.code)}</div>
+                  <div style="font-weight:600;font-size:15px;line-height:1.4">${escapeHtml(p.mocbicName || p.name)}</div>
+                  ${p.shopeeId ? `<div></div><div style="font-size:12px;color:var(--text-muted);font-family:monospace;line-height:1.2">ID: ${escapeHtml(p.shopeeId)}</div>` : ''}
+                </div>
+                ${!p.inMaster ? '<div style="font-size:10px;color:#f59e0b;font-weight:600;margin-top:4px;line-height:1.2">⚠ 需更新母表</div>' : ''}
               </td>
-              <td style="padding:8px 8px 8px 0;font-size:15px;color:var(--text);min-width:220px;max-width:320px;text-align:left">
-                <div style="line-height:1.4;font-weight:600;font-size:15px;text-align:left">${escapeHtml(p.mocbicName || p.name)}</div>
-                ${p.shopeeId ? `<div style="font-size:12px;color:var(--text-muted);font-family:monospace;margin-top:3px;text-align:left">ID: ${escapeHtml(p.shopeeId)}</div>` : ''}
-              </td>
-              <td style="padding:8px 8px;text-align:right;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums">
+              <td style="padding:8px 8px;text-align:right;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;vertical-align:top">
                 NT$ ${fmt(p.revenue)}
                 ${p.prevRevenue > 0 ? `<div style="font-size:10px;color:var(--text-muted);font-weight:500;margin-top:1px">上週 ${fmt(p.prevRevenue)}</div>` : ''}
               </td>
-              <td style="padding:8px 8px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums">${fmtGrowth(p.growthRate)}</td>
-              <td style="padding:8px 8px;text-align:right;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${p.impressions > 0 ? fmt(p.impressions) : '—'}</td>
-              <td style="padding:8px 8px;text-align:right;font-size:12px;color:${p.ctr > 0 && p.ctr < 0.03 ? '#ef4444' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${p.ctr > 0 && p.ctr < 0.03 ? '600' : '500'}">${fmtPct(p.ctr)}</td>
-              <td style="padding:8px 8px;text-align:right;font-size:12px;font-weight:${p.convRate > 0 ? '600' : '400'};color:${p.convRate > 0 && p.convRate < 0.01 ? '#ef4444' : p.convRate >= 0.02 ? '#10b981' : 'var(--text-muted)'};font-variant-numeric:tabular-nums">${fmtPct(p.convRate)}</td>
-              <td style="padding:8px 8px;text-align:center;font-size:11px">${groupChip}</td>
-              <td style="padding:8px 8px;text-align:center;font-size:11px">${flowHtml}</td>
-              <td style="padding:8px 8px;text-align:right;font-size:12px;color:${netStock <= 0 ? '#ef4444' : netStock < 30 ? '#f59e0b' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${netStock <= 0 ? 700 : 500};white-space:nowrap">${fmt(netStock)} ${netStock <= 0 ? '⚠' : ''}</td>
+              <td style="padding:8px 8px;text-align:right;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;vertical-align:top">${fmtGrowth(p.growthRate)}</td>
+              <td style="padding:8px 8px;text-align:right;font-size:14px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums;vertical-align:top">${p.impressions > 0 ? fmt(p.impressions) : '—'}</td>
+              <td style="padding:8px 8px;text-align:right;font-size:14px;color:${p.ctr > 0 && p.ctr < 0.03 ? '#ef4444' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${p.ctr > 0 && p.ctr < 0.03 ? '700' : '600'};vertical-align:top">${fmtPct(p.ctr)}</td>
+              <td style="padding:8px 8px;text-align:right;font-size:14px;font-weight:${p.convRate > 0 ? '700' : '500'};color:${p.convRate > 0 && p.convRate < 0.01 ? '#ef4444' : p.convRate >= 0.02 ? '#10b981' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;vertical-align:top">${fmtPct(p.convRate)}</td>
+              <td style="padding:8px 8px;text-align:center;font-size:13px;vertical-align:top">${groupChip}</td>
+              <td style="padding:8px 8px;text-align:center;font-size:13px;vertical-align:top">${flowHtml}</td>
+              <td style="padding:8px 8px;text-align:right;font-size:14px;color:${netStock <= 0 ? '#ef4444' : netStock < 30 ? '#f59e0b' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${netStock <= 0 ? 700 : 600};white-space:nowrap;vertical-align:top">${fmt(netStock)} ${netStock <= 0 ? '⚠' : ''}</td>
               <td style="padding:6px 6px;text-align:center;white-space:nowrap">
                 <button class="icon-btn" data-insight-note="${escapeHtml(p.code)}" title="${hasNote ? '已有備註，點看 / 編輯' : '新增備註'}" style="width:26px;height:26px;font-size:13px;${hasNote ? 'background:#fef3c7;border-radius:5px' : ''}">📝</button>
               </td>
@@ -2529,8 +2535,7 @@ const App = {
               <tr>
                 <th style="padding:0;width:4px;border-bottom:1px solid #e5e7eb"></th>
                 <th style="padding:8px 8px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">#</th>
-                <th style="padding:10px 2px 10px 8px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap;width:1%">商品編號</th>
-                <th style="padding:10px 8px 10px 0;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">商品名稱 / ID</th>
+                <th style="padding:10px 8px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">商品編號 / 名稱 / ID</th>
                 <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">本期 / 上週營收</th>
                 <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">成長率</th>
                 <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">曝光次數</th>
@@ -2835,14 +2840,36 @@ const App = {
       });
     }
 
+    // 上傳中視覺反饋：選好檔案後立刻在卡片上覆蓋 spinner，讓使用者知道有反應
+    // render() 重建卡片時遮罩會自然消失；只有 error 路徑需要手動移除
+    const showUploadingOverlay = (inputId) => {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      const label = input.closest('label');
+      if (!label || label.querySelector('.__upload-overlay')) return;
+      const overlay = document.createElement('div');
+      overlay.className = '__upload-overlay';
+      overlay.style.cssText = 'position:absolute;inset:0;background:rgba(255,255,255,.94);border-radius:8px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;font-weight:700;color:#5b5fcf;z-index:10;pointer-events:none';
+      overlay.innerHTML = '<div class="spin"></div><span>上傳中…</span>';
+      label.appendChild(overlay);
+    };
+    const hideUploadingOverlay = (inputId) => {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      const label = input.closest('label');
+      if (!label) return;
+      const overlay = label.querySelector('.__upload-overlay');
+      if (overlay) overlay.remove();
+    };
+
     // 商品母表上傳：一次解析 3 個分頁，自動分配到各賣場
     const masterInput = document.getElementById('insight-master-upload');
     if (masterInput) {
       masterInput.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        showUploadingOverlay('insight-master-upload');
         try {
-          showToast('解析「商品清單（母表）」中...', 'info');
           const { shops, matched } = await this.parseInsightMasterExcel(file);
           const now = Date.now();
           const uploadedBy = this.currentUser?.username || '';
@@ -2860,6 +2887,7 @@ const App = {
           this.render();
         } catch (err) {
           console.error(err);
+          hideUploadingOverlay('insight-master-upload');
           showToast(`解析失敗：${err.message}`, 'error');
         } finally {
           masterInput.value = '';
@@ -2874,8 +2902,8 @@ const App = {
       input.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        showUploadingOverlay(inputId);
         try {
-          showToast(`解析「${currentShop} · ${slotLabel}」中...`, 'info');
           const result = await this.parseInsightExcel(file);
           const periodKey = (result.period || '').replace(/[^0-9]/g, '').slice(0, 16) || `wk-${Date.now()}`;
           const newEntry = {
@@ -2895,6 +2923,7 @@ const App = {
           this.render();
         } catch (err) {
           console.error(err);
+          hideUploadingOverlay(inputId);
           showToast(`解析失敗：${err.message}`, 'error');
         } finally {
           input.value = '';
@@ -2910,8 +2939,8 @@ const App = {
       perfInput.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        showUploadingOverlay('insight-perf-upload');
         try {
-          showToast(`解析「${currentShop} · 商品表現」中...`, 'info');
           const result = await this.parseInsightPerfExcel(file);
           Store.set(sKey('perf'), {
             ...result,
@@ -2922,6 +2951,7 @@ const App = {
           this.render();
         } catch (err) {
           console.error(err);
+          hideUploadingOverlay('insight-perf-upload');
           showToast(`解析失敗：${err.message}`, 'error');
         } finally {
           perfInput.value = '';
@@ -3046,10 +3076,21 @@ const App = {
     const settingsBtn = document.getElementById('insight-settings');
     if (settingsBtn) settingsBtn.addEventListener('click', () => this.openInsightSettingsModal());
 
-    // 細分類篩選 pills
+    // 細分類篩選 pills（複選：點同一個再次取消，點「全部」清空）
     document.querySelectorAll('[data-insight-class]').forEach(btn => {
       btn.addEventListener('click', () => {
-        this.filter.insightClass = btn.dataset.insightClass;
+        const key = btn.dataset.insightClass;
+        let cur = this.filter.insightClass;
+        if (typeof cur === 'string') cur = cur === 'all' || !cur ? [] : [cur];
+        if (!Array.isArray(cur)) cur = [];
+        if (key === 'all') {
+          cur = [];
+        } else {
+          const idx = cur.indexOf(key);
+          if (idx >= 0) cur.splice(idx, 1);
+          else cur.push(key);
+        }
+        this.filter.insightClass = cur;
         this.render();
       });
     });
@@ -3304,7 +3345,14 @@ const App = {
       return '';
     };
 
-    const rows = sales.products.slice().sort((a, b) => b.revenue - a.revenue).map(s => {
+    // 把畫面上的篩選套進來：細分類（複選）+ 點擊率<3% 開關
+    let selectedClasses = this.filter.insightClass;
+    if (typeof selectedClasses === 'string') selectedClasses = selectedClasses === 'all' || !selectedClasses ? [] : [selectedClasses];
+    if (!Array.isArray(selectedClasses)) selectedClasses = [];
+    const selectedSet = new Set(selectedClasses);
+    const ctrLowFilter = !!this.filter.insightCtrLow;
+
+    let rows = sales.products.slice().sort((a, b) => b.revenue - a.revenue).map(s => {
       const m = masterByCode[s.code] || {};
       const id = m.id || '';
       const p = id ? (perfByShopeeId[id] || {}) : {};
@@ -3316,7 +3364,10 @@ const App = {
       const adjList = (n.adjustments || []).map(a => `${a.date} ${a.text}`).join(' | ');
       const cls = classify(g, p.convRate || 0, p.clicks || 0, p.impressions || 0);
       const prevCls = prevG !== null ? classify(prevG, 0, 0, 0) : '';
+      const ctrVal = p.ctr || 0;
       return {
+        _classifyKey: cls.replace(/^[^\s]+\s*/, ''),
+        _ctr: ctrVal,
         '商品ID': id,
         '商品編號': s.code,
         '莫筆克名稱': m.mocbicName || '',
@@ -3340,13 +3391,28 @@ const App = {
       };
     });
 
+    // 套類別篩選（複選任一命中即可）
+    let suffix = '';
+    if (selectedSet.size > 0) {
+      rows = rows.filter(r => selectedSet.has(r._classifyKey));
+      suffix = `_${Array.from(selectedSet).join('+')}`;
+    }
+    if (ctrLowFilter) {
+      rows = rows.filter(r => r._ctr > 0 && r._ctr < 0.03);
+      suffix += '_點擊率低於3%';
+    }
+    // 移除暫存欄位
+    rows.forEach(r => { delete r._classifyKey; delete r._ctr; });
+
+    if (rows.length === 0) { showToast('目前篩選沒有任何商品可匯出', 'error'); return; }
+
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, `營運表現_${currentShop}`);
     const now = new Date();
-    const fname = `洞察表_${currentShop}_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.xlsx`;
+    const fname = `洞察表_${currentShop}${suffix}_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.xlsx`;
     XLSX.writeFile(wb, fname);
-    showToast(`已匯出 ${fname}`, 'success');
+    showToast(`已匯出 ${fname}（${rows.length} 筆）`, 'success');
   },
 
   renderWeeklyCalendarTab(deptId, color, dept) {
@@ -6689,6 +6755,8 @@ async function __setupCloud() {
     };
     Store.set = function(key, value) {
       if (__LOCAL_ONLY_KEYS.has(key)) { __localSet(key, value); return; }
+      // 寫入時把 key 從「最近刪除」名單移除，否則訂閱回呼會把剛上傳的資料當成 race 過濾掉
+      if (window.__unmarkRecentlyDeleted) window.__unmarkRecentlyDeleted(key);
       origSet(key, value);
       try { cs.setField(key, value); } catch (e) { console.warn('cloud sync write failed', e); }
     };
@@ -6705,6 +6773,12 @@ async function __setupCloud() {
       const arr = Array.isArray(keys) ? keys : [keys];
       arr.forEach(k => window.__recentlyDeleted.set(k, now));
       console.warn('[mark deleted]', arr);
+    };
+    window.__unmarkRecentlyDeleted = (keys) => {
+      const arr = Array.isArray(keys) ? keys : [keys];
+      let removed = false;
+      arr.forEach(k => { if (window.__recentlyDeleted.delete(k)) removed = true; });
+      if (removed) console.warn('[unmark deleted]', arr);
     };
 
     // 訂閱：其他人改了資料，這台會即時更新畫面
