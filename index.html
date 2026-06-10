@@ -1592,14 +1592,34 @@ const App = {
     document.getElementById('view-login').style.display = 'none';
     document.getElementById('view-app').style.display = 'block';
     this.applyUserPerms(user);
-    // 還原上次瀏覽的路由（重新整理後不會跳回首頁）
+    // 還原上次瀏覽的路由 - 雙重儲存 (sessionStorage 先, 再 localStorage)
     let savedRoute = 'dashboard';
     try {
-      const r = localStorage.getItem('ec.lastRoute');
+      const r = sessionStorage.getItem('ec.lastRoute') || localStorage.getItem('ec.lastRoute');
       if (r) savedRoute = r;
     } catch {}
+    // 驗證該 route 此使用者仍有權限存取，否則 fallback 到 dashboard
+    if (savedRoute && savedRoute !== 'dashboard') {
+      const ok = this._isRouteAllowed(savedRoute, user);
+      if (!ok) savedRoute = 'dashboard';
+    }
     this.navigate(savedRoute);
     this.startMidnightWatcher();
+  },
+
+  _isRouteAllowed(route, user) {
+    if (route === 'dashboard') return true;
+    if (route === 'employees') return true;
+    if (route === 'users') return user.role === 'admin';
+    if (route.startsWith('office-')) {
+      const rest = route.slice('office-'.length);
+      const firstDash = rest.indexOf('-');
+      const deptId = firstDash > 0 ? rest.slice(0, firstDash) : rest;
+      const departments = Store.get(Store.KEYS.departments, []);
+      const dept = departments.find(d => d.id === deptId);
+      return canAccessOffice(user, dept);
+    }
+    return true;
   },
 
   /* ------------- 跨日自動 reset：每分鐘檢查「昨日」是否變了 ------------- */
@@ -1663,7 +1683,8 @@ const App = {
   navigate(route) {
     if (!route) return;
     this.route = route;
-    // 持久化目前路由
+    // 持久化目前路由 - 同時存 sessionStorage 跟 localStorage 雙重保險
+    try { sessionStorage.setItem('ec.lastRoute', route); } catch {}
     try { localStorage.setItem('ec.lastRoute', route); } catch {}
     document.querySelectorAll('.nav-item').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.route === route);
