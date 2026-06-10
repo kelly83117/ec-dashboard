@@ -2364,11 +2364,11 @@ const App = {
             <tr style="border-top:1px solid #f3f4f6;background:${rowBg}">
               <td style="padding:0;width:4px;background:${bandColor}"></td>
               <td style="padding:8px 8px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;width:32px">${i + 1}</td>
-              <td style="padding:8px 8px;font-size:12px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums">
+              <td style="padding:8px 4px;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap">
                 ${escapeHtml(p.code)}
                 ${!p.inMaster ? '<span style="display:block;font-size:9px;color:#f59e0b;font-weight:600;margin-top:2px">⚠ 需更新母表</span>' : ''}
               </td>
-              <td style="padding:8px 8px;font-size:14px;color:var(--text);min-width:200px;max-width:300px">
+              <td style="padding:8px 8px 8px 0;font-size:14px;color:var(--text);min-width:200px;max-width:300px">
                 <div style="line-height:1.4;font-weight:600;font-size:14px">${escapeHtml(p.mocbicName || p.name)}</div>
                 ${p.shopeeId ? `<div style="font-size:11px;color:var(--text-muted);font-family:monospace;margin-top:3px">ID: ${escapeHtml(p.shopeeId)}</div>` : ''}
               </td>
@@ -2448,18 +2448,18 @@ const App = {
               <tr>
                 <th style="padding:0;width:4px;border-bottom:1px solid #e5e7eb"></th>
                 <th style="padding:8px 8px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">#</th>
-                <th style="padding:8px 8px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">商品編號</th>
-                <th style="padding:8px 8px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">商品名稱 / ID</th>
-                <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">本期 / 上週營收</th>
-                <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">成長率</th>
-                <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">售出</th>
-                <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">曝光</th>
-                <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">點擊</th>
-                <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">轉換率</th>
-                <th style="padding:8px 8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">大類</th>
-                <th style="padding:8px 8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">上週 → 本週</th>
-                <th style="padding:8px 8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">可用庫存</th>
-                <th style="padding:8px 6px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb;width:40px">備註</th>
+                <th style="padding:10px 4px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">商品編號</th>
+                <th style="padding:10px 8px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">商品名稱 / ID</th>
+                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">本期 / 上週營收</th>
+                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">成長率</th>
+                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">售出</th>
+                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">曝光</th>
+                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">點擊</th>
+                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">轉換率</th>
+                <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">大類</th>
+                <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上週 → 本週</th>
+                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">可用庫存</th>
+                <th style="padding:10px 6px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;width:40px">備註</th>
               </tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
