@@ -3011,6 +3011,7 @@ const App = {
           if (ws.every(w => !w)) {
             try { delete Store._mem[k2('weeks')]; } catch {}
             try { localStorage.removeItem(k2('weeks')); } catch {}
+            if (window.__markRecentlyDeleted) window.__markRecentlyDeleted(k2('weeks'));
           } else {
             try { Store._mem[k2('weeks')] = ws; } catch {}
             try { localStorage.setItem(k2('weeks'), JSON.stringify(ws)); } catch {}
@@ -3028,6 +3029,7 @@ const App = {
           const k = k2(piece);
           try { delete Store._mem[k]; } catch {}
           try { localStorage.removeItem(k); } catch {}
+          if (window.__markRecentlyDeleted) window.__markRecentlyDeleted(k);
           if (window.__cloudStore && typeof window.__cloudStore.removeFields === 'function') {
             try { await window.__cloudStore.removeFields([k]); }
             catch (err) { console.warn('cloud clear failed', err); }
@@ -6696,11 +6698,28 @@ async function __setupCloud() {
       try { cs.removeField(key); } catch (e) { console.warn('cloud sync delete failed', e); }
     };
 
+    // 暫存「剛剛刪掉的 key」(避免訂閱 race 把它們從雲端 snapshot 帶回來)
+    window.__recentlyDeleted = window.__recentlyDeleted || new Map();
+    window.__markRecentlyDeleted = (keys) => {
+      const now = Date.now();
+      const arr = Array.isArray(keys) ? keys : [keys];
+      arr.forEach(k => window.__recentlyDeleted.set(k, now));
+    };
+
     // 訂閱：其他人改了資料，這台會即時更新畫面
     // 但如果使用者正在 input 裡打字、或有尚未確認儲存的更動，跳過重繪避免覆蓋
     cs.subscribe((data) => {
       const next = data || {};
       delete next[Store.KEYS.session];  // 不接受雲端的 session
+      // 過濾掉「最近 5 秒內剛刪掉」的 key（避免 race 把它們又帶回來）
+      const now = Date.now();
+      window.__recentlyDeleted.forEach((ts, k) => {
+        if (now - ts < 5000) {
+          delete next[k];
+        } else {
+          window.__recentlyDeleted.delete(k);
+        }
+      });
       Store._mem = next;
       if (!(window.App && App.currentUser && typeof App.render === 'function')) return;
       const active = document.activeElement;
