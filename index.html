@@ -183,7 +183,35 @@
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    transition: width .25s ease;
+    overflow: hidden;
   }
+  body.sidebar-collapsed .sidebar { width: 0; }
+  body.sidebar-collapsed .sidebar > * { opacity: 0; pointer-events: none; }
+  /* 收合按鈕：浮在側欄外側邊緣，永遠可見 */
+  .sidebar-toggle {
+    position: fixed;
+    top: 16px;
+    left: 226px; /* 240 - 14 = 226，按鈕剛好騎在邊緣 */
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: white;
+    color: var(--text);
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: left .25s ease, transform .25s ease;
+    font-weight: 700;
+  }
+  .sidebar-toggle:hover { background: #f3f4f6; transform: scale(1.08); }
+  body.sidebar-collapsed .sidebar-toggle { left: 8px; }
   .sidebar-header {
     padding: 16px 20px 14px;
     display: flex;
@@ -807,6 +835,7 @@
 
 <!-- ============== 主應用 ============== -->
 <div id="view-app">
+  <button id="sidebar-toggle-btn" class="sidebar-toggle" title="收合 / 展開側欄">‹</button>
   <div class="app-layout">
     <!-- 側欄 -->
     <aside class="sidebar">
@@ -1427,6 +1456,7 @@ const App = {
     seedData();
     this.ensureAdmin();
     this.bindNav();
+    this.bindSidebarToggle();
     // 若是記憶體模式，提醒使用者資料不會持久化
     if (Store._useMem) {
       console.warn('[EC] localStorage 不可用，使用記憶體儲存（重新整理會清空）');
@@ -1469,6 +1499,27 @@ const App = {
         }
         if (btn.dataset.route) this.navigate(btn.dataset.route);
       });
+    });
+  },
+
+  /* ------------- 側欄收合 ------------- */
+  bindSidebarToggle() {
+    const btn = document.getElementById('sidebar-toggle-btn');
+    if (!btn) return;
+    // 還原上次的狀態
+    try {
+      if (localStorage.getItem('ec.sidebarCollapsed') === '1') {
+        document.body.classList.add('sidebar-collapsed');
+      }
+    } catch {}
+    const updateIcon = () => {
+      btn.textContent = document.body.classList.contains('sidebar-collapsed') ? '›' : '‹';
+    };
+    updateIcon();
+    btn.addEventListener('click', () => {
+      const collapsed = document.body.classList.toggle('sidebar-collapsed');
+      try { localStorage.setItem('ec.sidebarCollapsed', collapsed ? '1' : '0'); } catch {}
+      updateIcon();
     });
   },
 
@@ -3354,9 +3405,7 @@ const App = {
                       const hol = getHoliday(ds);
                       return `<div style="border-right:1px solid #f3f4f6;background:${isToday ? '#f5f3ff44' : (hol ? '#fef2f244' : (isWeekend ? '#fff7ed44' : 'transparent'))}"></div>`;
                     }).join('')}
-                    <div data-cal-task="${escapeHtml(t.id)}" class="cal-task-card" title="${escapeHtml(t.title)} · ${escapeHtml(t.status)}${t.dueDate ? ' · 預計 ' + escapeHtml(t.dueDate) : ''}" style="position:absolute;left:calc(${(startIdx / totalDays) * 100}% + 2px);top:12px;height:${ROW_H - 24}px;width:calc(${(colSpan / totalDays) * 100}% - 4px);background:${catColor};border:1px solid ${catColor};border-radius:5px;cursor:pointer;transition:transform .12s, box-shadow .12s" onmouseover="this.style.boxShadow='0 3px 10px rgba(0,0,0,.18)';this.style.transform='translateY(-1px)'" onmouseout="this.style.boxShadow='none';this.style.transform='translateY(0)'">
-                      ${t.notes && t.notes.trim() ? `<div class="cal-note-popup">${escapeHtml(t.notes)}</div>` : ''}
-                    </div>
+                    <div data-cal-task="${escapeHtml(t.id)}" title="${escapeHtml(t.title)} · ${escapeHtml(t.status)}${t.dueDate ? ' · 預計 ' + escapeHtml(t.dueDate) : ''}" style="position:absolute;left:calc(${(startIdx / totalDays) * 100}% + 2px);top:12px;height:${ROW_H - 24}px;width:calc(${(colSpan / totalDays) * 100}% - 4px);background:${catColor};border:1px solid ${catColor};border-radius:5px;cursor:pointer;transition:transform .12s, box-shadow .12s" onmouseover="this.style.boxShadow='0 3px 10px rgba(0,0,0,.18)';this.style.transform='translateY(-1px)'" onmouseout="this.style.boxShadow='none';this.style.transform='translateY(0)'"></div>
                   </div>
                 </div>
               `;
