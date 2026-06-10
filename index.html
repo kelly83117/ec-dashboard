@@ -2982,42 +2982,50 @@ const App = {
       });
     }
 
-    // 個別清除按鈕（每張上傳卡的小 ✕）
-    document.querySelectorAll('[data-clear-piece]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
+    // 個別清除按鈕（每張上傳卡的小 ✕）— 使用 document 級事件代理，避免重繪後綁定失效
+    if (!this._clearPieceBound) {
+      this._clearPieceBound = true;
+      document.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-clear-piece]');
+        if (!btn) return;
+        // 只在洞察表頁時處理
+        if (this.route !== 'office-d1-insight') return;
         // 卡片是 <label>，點 ✕ 會冒泡觸發 file input 開啟，要擋掉
         e.preventDefault();
         e.stopPropagation();
+
+        // 重新讀當前賣場（this.filter.insightShop 即時的值）
+        const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+        const curShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
+          ? this.filter.insightShop : '玩樂';
+        const k2 = (type) => `ec.insight_${curShop}_${type}`;
+
         const piece = btn.dataset.clearPiece; // 'master' | 'sales' | 'salesPrev' | 'perf'
         const labels = { master: '商品母表', sales: '本週銷售', salesPrev: '上週銷售', perf: '商品表現' };
         const label = labels[piece] || piece;
 
-        // 1) 本地立刻清掉
         if (piece === 'sales' || piece === 'salesPrev') {
-          const ws = (Store.get(sKey('weeks'), []) || []).slice();
+          const ws = (Store.get(k2('weeks'), []) || []).slice();
           if (piece === 'sales') ws[0] = null;
           else if (ws.length > 1) ws[1] = null;
-          // 本地 _mem 直接改（不走 cloud-wrapped Store.set 以免 race）
           if (ws.every(w => !w)) {
-            try { delete Store._mem[sKey('weeks')]; } catch {}
-            try { localStorage.removeItem(sKey('weeks')); } catch {}
+            try { delete Store._mem[k2('weeks')]; } catch {}
+            try { localStorage.removeItem(k2('weeks')); } catch {}
           } else {
-            try { Store._mem[sKey('weeks')] = ws; } catch {}
-            try { localStorage.setItem(sKey('weeks'), JSON.stringify(ws)); } catch {}
+            try { Store._mem[k2('weeks')] = ws; } catch {}
+            try { localStorage.setItem(k2('weeks'), JSON.stringify(ws)); } catch {}
           }
-          // 雲端：直接 set 為 array 或 removeFields
           if (window.__cloudStore) {
             try {
               if (ws.every(w => !w)) {
-                await window.__cloudStore.removeFields([sKey('weeks')]);
+                await window.__cloudStore.removeFields([k2('weeks')]);
               } else {
-                await window.__cloudStore.setField(sKey('weeks'), ws);
+                await window.__cloudStore.setField(k2('weeks'), ws);
               }
             } catch (err) { console.warn('cloud clear failed', err); }
           }
         } else {
-          // master / perf：直接 atomic 從雲端 + 本地刪除
-          const k = sKey(piece);
+          const k = k2(piece);
           try { delete Store._mem[k]; } catch {}
           try { localStorage.removeItem(k); } catch {}
           if (window.__cloudStore && typeof window.__cloudStore.removeFields === 'function') {
@@ -3027,10 +3035,10 @@ const App = {
             try { window.__cloudStore.removeField(k); } catch {}
           }
         }
-        showToast(`已清除 ${currentShop} · ${label}`, 'success');
+        showToast(`已清除 ${curShop} · ${label}`, 'success');
         this.render();
-      });
-    });
+      }, true); // capture phase 確保比 label 的預設 click 行為更早處理
+    }
 
     // 分類門檻設定（共用）
     const settingsBtn = document.getElementById('insight-settings');
