@@ -2432,6 +2432,27 @@ const App = {
           const grpStyle = grp ? GROUP_STYLE[grp] : null;
           const hasNote = p.note && (p.note.text || (p.note.adjustments && p.note.adjustments.length > 0));
 
+          // 滑鼠 hover 顯示的內容：同日合併、用「、」串、最新在上；最後加長期備註
+          let hoverPreview = '';
+          if (hasNote) {
+            const lines = [];
+            const adjMap = new Map();
+            (p.note.adjustments || []).forEach(a => {
+              const d = a.date || '';
+              if (!adjMap.has(d)) adjMap.set(d, []);
+              adjMap.get(d).push(a.text || '');
+            });
+            const sortedDates = Array.from(adjMap.keys()).sort((a, b) => b.localeCompare(a));
+            sortedDates.forEach(d => lines.push(`${d}　${adjMap.get(d).join('、')}`));
+            if (p.note.text) {
+              if (lines.length) lines.push('────────');
+              lines.push(`📌 ${p.note.text}`);
+            }
+            hoverPreview = lines.join('\n');
+          } else {
+            hoverPreview = '新增備註 / 調整紀錄';
+          }
+
           // 流向：上週類別 → 本週類別；只有本週就只顯示本週；都沒有顯示 —
           let flowHtml = '—';
           if (prevCls && cls) {
@@ -2482,7 +2503,7 @@ const App = {
               <td style="padding:8px 8px;text-align:center;font-size:13px;vertical-align:top">${flowHtml}</td>
               <td style="padding:8px 8px;text-align:center;font-size:14px;color:${netStock <= 0 ? '#ef4444' : netStock < 30 ? '#f59e0b' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${netStock <= 0 ? 700 : 600};white-space:nowrap;vertical-align:top">${fmt(netStock)} ${netStock <= 0 ? '⚠' : ''}</td>
               <td style="padding:6px 6px;text-align:center;white-space:nowrap">
-                <button class="icon-btn" data-insight-note="${escapeHtml(p.code)}" title="${hasNote ? '已有備註，點看 / 編輯' : '新增備註'}" style="width:26px;height:26px;font-size:13px;${hasNote ? 'background:#fef3c7;border-radius:5px' : ''}">📝</button>
+                <button class="icon-btn" data-insight-note="${escapeHtml(p.code)}" title="${escapeHtml(hoverPreview)}" style="width:26px;height:26px;font-size:13px;${hasNote ? 'background:#fef3c7;border-radius:5px' : ''}">📝</button>
               </td>
             </tr>
           `;
