@@ -3893,8 +3893,8 @@ const App = {
       `;
 
       const employeeIds = Object.keys(tasksGrouped);
-      // 給每位員工一個固定的色（依名字 hash 取色盤色），用作頭像底色
-      const EMP_PALETTE = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#84cc16','#f43f5e','#0ea5e9','#d946ef'];
+      // 員工色：使用一致調性的中性色盤（飽和度較低、不刺眼），所有人 bg 統一為淺灰色
+      const EMP_PALETTE = ['#4f46e5','#0891b2','#0d9488','#65a30d','#b45309','#c2410c','#be185d','#7c3aed','#1d4ed8','#475569'];
       const empColorOf = (name) => {
         let h = 0; for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
         return EMP_PALETTE[h % EMP_PALETTE.length];
@@ -3930,15 +3930,15 @@ const App = {
                 arr.forEach(n => assigneeSet.add(n));
               });
               const assigneesText = assigneeSet.size > 0 ? Array.from(assigneeSet).join('、') : (g.name || empKey);
-              const empBg = empColor + '20'; // 20% 透明度作為員工色塊背景
               const isLastOfEmp = ti === g.tasks.length - 1;
               return `
-                <div style="display:flex;background:white;${isFirst && eIdx > 0 ? 'border-top:2px solid #d1d5db;' : (isFirst ? '' : 'border-top:1px solid #f3f4f6;')}">
-                  <div style="flex:0 0 ${EMP_W}px;background:${empBg};border-right:2px solid ${empColor};display:flex;align-items:center;justify-content:center;min-width:0;padding:6px 4px;position:relative">
+                <div style="display:flex;background:white;${isFirst && eIdx > 0 ? 'border-top:2px solid #e5e7eb;' : (isFirst ? '' : 'border-top:1px solid #f3f4f6;')}">
+                  <div style="flex:0 0 ${EMP_W}px;background:#fafbfc;border-right:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;min-width:0;padding:6px 4px;position:relative">
+                    <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:${empColor}"></div>
                     ${isFirst ? `
                       <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
-                        <div style="font-weight:800;color:${empColor};font-size:15px;letter-spacing:.05em;text-align:center;line-height:1.25">${escapeHtml(empName)}</div>
-                        ${g.tasks.length > 1 ? `<span style="font-size:10px;color:white;font-weight:700;background:${empColor};padding:1px 7px;border-radius:99px;line-height:1.3">${g.tasks.length} 項</span>` : ''}
+                        <div style="font-weight:800;color:var(--text);font-size:15px;letter-spacing:.05em;text-align:center;line-height:1.25">${escapeHtml(empName)}</div>
+                        ${g.tasks.length > 1 ? `<span style="font-size:10px;color:var(--text-muted);font-weight:600;background:#e5e7eb;padding:1px 7px;border-radius:99px;line-height:1.3">${g.tasks.length} 項</span>` : ''}
                       </div>
                     ` : ''}
                   </div>
