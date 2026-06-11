@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-3">
+<meta name="app-version" content="2026-06-11-4">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -9100,38 +9100,47 @@ function renderSummary(){
 
   // 收集所有來源：localStorage + 雲端 app/profit + 雲端 app/main（過渡期）
   const seen=new Set();
+  let dbg = { profitKeys:0, mainKeys:0, localKeys:0, added:0, skipped:[], errors:[] };
   const addRow=(k,rep)=>{
-    if(seen.has(k) || !rep || !rep.built) return;
+    if(seen.has(k)) { return; }
+    if(!rep) { dbg.skipped.push(k+':no_rep'); return; }
+    if(!rep.built) { dbg.skipped.push(k+':no_built'); return; }
+    if(!Array.isArray(rep.built)) { dbg.skipped.push(k+':built_not_array(type='+typeof rep.built+')'); return; }
     seen.add(k);
     try{
       const parts=k.split('|');
       const shop=parts[1];
       let tRev=0,tGross=0,tAds=0,tPure=0;
-      rep.built.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
+      rep.built.forEach(r=>{tRev+=(r.rev||0);tGross+=(r.gross||0);tAds+=(r.adsFee||0);tPure+=(r.pureProfit||0);});
       rows.push({shop,period:rep.period,tRev,tGross,tAds,tPure});
-    }catch{}
+      dbg.added++;
+    }catch(err){ dbg.errors.push(k+':'+err.message); }
   };
   // 1) 雲端 profit doc 優先
   try{
     if(window.Store && Store._profitMem){
       for(const k of Object.keys(Store._profitMem)){
-        if(k.startsWith('ec|')) addRow(k, Store._profitMem[k]);
+        if(k.startsWith('ec|')) { dbg.profitKeys++; addRow(k, Store._profitMem[k]); }
       }
     }
-  }catch{}
+  }catch(e){ dbg.errors.push('profitMem:'+e.message); }
   // 2) 雲端 main doc（過渡期相容）
   try{
     if(window.Store && Store._mem){
       for(const k of Object.keys(Store._mem)){
-        if(k.startsWith('ec|')) addRow(k, Store._mem[k]);
+        if(k.startsWith('ec|')) { dbg.mainKeys++; addRow(k, Store._mem[k]); }
       }
     }
-  }catch{}
+  }catch(e){ dbg.errors.push('mem:'+e.message); }
   // 3) localStorage 後備
-  for(let i=0;i<localStorage.length;i++){
-    const k=localStorage.key(i);if(!k || !k.startsWith('ec|'))continue;
-    try{ addRow(k, JSON.parse(localStorage.getItem(k))); }catch{}
-  }
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);if(!k || !k.startsWith('ec|'))continue;
+      dbg.localKeys++;
+      try{ addRow(k, JSON.parse(localStorage.getItem(k))); }catch{}
+    }
+  }catch{}
+  console.warn('[renderSummary] 結果：', dbg);
 
   if(!rows.length){el.innerHTML=`<div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">尚無儲存資料</div></div>`;return;}
 
