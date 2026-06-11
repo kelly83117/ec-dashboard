@@ -7902,6 +7902,9 @@ function getAnaThresh(){try{return Object.assign({},ANA_THRESH_DEF,JSON.parse(lo
 function saveAnaThresh(t){localStorage.setItem('ec_ana_thresh',JSON.stringify(t));}
 function getCustomAnaRules(){try{return JSON.parse(localStorage.getItem('ec_ana_custom')||'[]');}catch{return[];}}
 function saveCustomAnaRules(r){localStorage.setItem('ec_ana_custom',JSON.stringify(r));}
+function getDisabledAnaTags(){try{return JSON.parse(localStorage.getItem('ec_ana_disabled')||'[]');}catch{return[];}}
+function disableAnaTag(label){const a=getDisabledAnaTags();if(!a.includes(label))a.push(label);localStorage.setItem('ec_ana_disabled',JSON.stringify(a));renderAnaModalBody();reapplyAnaToAll();}
+function restoreAnaTag(label){const a=getDisabledAnaTags().filter(l=>l!==label);localStorage.setItem('ec_ana_disabled',JSON.stringify(a));renderAnaModalBody();reapplyAnaToAll();}
 function evalAnaConds(conds,vals){
   if(!conds||!conds.length)return false;
   return conds.every(c=>{
@@ -7918,25 +7921,26 @@ function evalAnaConds(conds,vals){
 // $D=廣告費, $H=淨利率%, $K=目標ROI, $N=實際-目標, $O=點擊數, $P=純利
 function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit){
   const t=getAnaThresh();
+  const dis=new Set(getDisabledAnaTags());
+  const ok=l=>!dis.has(l);
   const D=adsFee, H=pureRate*100, K=targetROI, N=roiDiff, O=clicks, P=pureProfit;
-  if(D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
-  if(D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
-  if(D===0 && (N===null||N===undefined||!isFinite(N))) return{label:'低淨利',cls:'tag-low'};
-  if(D>0 && H<0) return{label:'賠錢中',cls:'tag-lose'};
-  if(D>0 && K!==null && K!==undefined && K<0) return{label:'低淨利',cls:'tag-low'};
-  if(D>0 && H>=0 && H<t.badAdsMaxH) return{label:'低效廣告',cls:'tag-bad'};
-  // 自訂標籤（在加減碼前判斷）
+  if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
+  if(ok('高利潤商品')&&D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
+  if(ok('低淨利')&&D===0 && (N===null||N===undefined||!isFinite(N))) return{label:'低淨利',cls:'tag-low'};
+  if(ok('賠錢中')&&D>0 && H<0) return{label:'賠錢中',cls:'tag-lose'};
+  if(ok('低淨利')&&D>0 && K!==null && K!==undefined && K<0) return{label:'低淨利',cls:'tag-low'};
+  if(ok('低效廣告')&&D>0 && H>=0 && H<t.badAdsMaxH) return{label:'低效廣告',cls:'tag-bad'};
   for(const ct of getCustomAnaRules()){
     if(evalAnaConds(ct.conds,{D,H,K,N,O,P}))return{label:ct.label,cls:ct.cls||'tag-add100'};
   }
   if(N===null||N===undefined||!isFinite(N)||O<t.clickMin) return{label:'',cls:''};
-  if(N>=t.add300) return{label:'加300',cls:'tag-add300'};
-  if(N>=t.add200) return{label:'加200',cls:'tag-add200'};
-  if(N>=t.add100) return{label:'加100',cls:'tag-add100'};
-  if(N>=t.add50&&N<t.add100) return{label:'加50',cls:'tag-add50'};
-  if(N<=t.sub300) return{label:'減300',cls:'tag-sub300'};
-  if(N<=t.sub200) return{label:'減200',cls:'tag-sub200'};
-  if(N<=t.sub100) return{label:'減100',cls:'tag-sub100'};
+  if(ok('加300')&&N>=t.add300) return{label:'加300',cls:'tag-add300'};
+  if(ok('加200')&&N>=t.add200) return{label:'加200',cls:'tag-add200'};
+  if(ok('加100')&&N>=t.add100) return{label:'加100',cls:'tag-add100'};
+  if(ok('加50')&&N>=t.add50&&N<t.add100) return{label:'加50',cls:'tag-add50'};
+  if(ok('減300')&&N<=t.sub300) return{label:'減300',cls:'tag-sub300'};
+  if(ok('減200')&&N<=t.sub200) return{label:'減200',cls:'tag-sub200'};
+  if(ok('減100')&&N<=t.sub100) return{label:'減100',cls:'tag-sub100'};
   return{label:'',cls:''};
 }
 
@@ -7973,11 +7977,9 @@ function openAnaSettings(shop){
 function closeAnaSettings(){document.getElementById('ana-overlay')?.classList.remove('open');}
 function renderAnaModalBody(){
   const t=getAnaThresh();const custom=getCustomAnaRules();
+  const disabled=getDisabledAnaTags();
   const inp=(id,val,step='1',w='58px')=>`<input type="number" id="anas-${id}" value="${val}" step="${step}" style="width:${w}">`;
-  const fOpts=ANA_FIELD_OPTS.map(o=>`<option value="${o.v}">${o.l}</option>`).join('');
-  const opOpts=['>=','>','<=','<','=','!='].map(o=>`<option value="${o}">${o}</option>`).join('');
   const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}">${o.l}</option>`).join('');
-
   const condRowHtml=(i,c)=>`<div class="ana-cond-row" id="anacr-${i}">
     <select class="ana-cond-f">${ANA_FIELD_OPTS.map(o=>`<option value="${o.v}"${o.v===c.f?' selected':''}>${o.l}</option>`).join('')}</select>
     <select class="ana-cond-op">${['>=','>','<=','<','=','!='].map(o=>`<option value="${o}"${o===c.op?' selected':''}>${o}</option>`).join('')}</select>
@@ -7985,11 +7987,12 @@ function renderAnaModalBody(){
     <button class="ana-cond-del" onclick="removeNewCond(${i})">✕</button>
   </div>`;
   const condRows=_anaNewConds.map((c,i)=>condRowHtml(i,c)).join('');
-
+  const trash=(label,fn)=>`<button class="ana-rule-del" onclick="${fn}(decodeURIComponent('${encodeURIComponent(label)}'))" title="停用此標籤">🗑</button>`;
   const customRows=custom.length?custom.map((ct,i)=>{
     const condDesc=ct.conds.map(c=>`${c.f} ${c.op} ${c.v}`).join(' 且 ');
-    return`<div class="ana-rule-row"><span class="ana-rule-tag ${ct.cls||'tag-add100'}">${ct.label}</span><span class="ana-rule-desc" style="font-size:12px;color:#6b7280">${condDesc}</span><button class="ana-rule-del" onclick="deleteCustomAnaRule(${i})" title="刪除">✕</button></div>`;
+    return`<div class="ana-rule-row"><span class="ana-rule-tag ${ct.cls||'tag-add100'}">${ct.label}</span><span class="ana-rule-desc" style="font-size:12px;color:#6b7280">${condDesc}</span><button class="ana-rule-del" onclick="deleteCustomAnaRule(${i})" title="刪除">🗑</button></div>`;
   }).join(''):`<div class="ana-custom-empty">尚無自訂標籤</div>`;
+  const disabledSection=disabled.length?`<div class="ana-sec-hdr" style="margin-top:16px">已停用標籤</div>${disabled.map(l=>`<div class="ana-rule-row" style="opacity:.5"><span class="ana-rule-tag tag-low" style="min-width:auto;padding:4px 8px">${l}</span><span class="ana-rule-desc" style="font-size:12px;color:#9ca3af">已停用</span><button class="ana-rule-del" style="color:#10b981" onclick="restoreAnaTag(decodeURIComponent('${encodeURIComponent(l)}'))" title="恢復">↩</button></div>`).join('')}`:'';
 
   document.getElementById('ana-modal-body').innerHTML=`
     <div class="ana-sec-hdr">加減碼前提</div>
@@ -7998,23 +8001,24 @@ function renderAnaModalBody(){
       <span class="ana-rule-desc">O欄（過去7天點擊）> ${inp('clickMin',t.clickMin)}</span>
     </div>
     <div class="ana-sec-hdr">加預算</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">加300</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add300',t.add300)} (含)以上</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">加200</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add200',t.add200)} (含)以上</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">加100</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add100',t.add100)} (含)以上</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add50">加50</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add50',t.add50)} (含)且 < ${inp('add50max',t.add100)}</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">加300</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add300',t.add300)} (含)以上</span>${trash('加300','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">加200</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add200',t.add200)} (含)以上</span>${trash('加200','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">加100</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add100',t.add100)} (含)以上</span>${trash('加100','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add50">加50</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add50',t.add50)} 且 < ${inp('add50max',t.add100)}</span>${trash('加50','disableAnaTag')}</div>
     <div class="ana-sec-hdr">減預算</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub300">減300</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub300',t.sub300)}</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub200">減200</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub200',t.sub200)}</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub100">減100</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub100',t.sub100)}</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub300">減300</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub300',t.sub300)}</span>${trash('減300','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub200">減200</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub200',t.sub200)}</span>${trash('減200','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub100">減100</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub100',t.sub100)}</span>${trash('減100','disableAnaTag')}</div>
     <div class="ana-sec-hdr">分析標籤</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">D欄(廣告費)=0 且 H欄(淨利率%) > ${inp('highMinH',t.highMinH,'0.1')} %</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">D欄(廣告費) > 0 且 H欄(淨利率%) &lt; 0%（固定）</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">D欄(廣告費) > 0 且 K欄(目標ROI) &lt; 0（固定）</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">危險商品</span><span class="ana-rule-desc">D欄(廣告費)=0 且 H欄(淨利率%) 0% ~ ${inp('dangerMaxH',t.dangerMaxH,'0.1')} %</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-bad">低效廣告</span><span class="ana-rule-desc">D欄(廣告費) > 0 且 H欄(淨利率%) &lt; ${inp('badAdsMaxH',t.badAdsMaxH,'0.1')} %</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">D=0 且 H > ${inp('highMinH',t.highMinH,'0.1')} %</span>${trash('高利潤商品','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">D > 0 且 H &lt; 0%</span>${trash('賠錢中','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">D > 0 且 目標ROI &lt; 0</span>${trash('低淨利','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">危險商品</span><span class="ana-rule-desc">D=0 且 H 0%~${inp('dangerMaxH',t.dangerMaxH,'0.1')} %</span>${trash('危險商品','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-bad">低效廣告</span><span class="ana-rule-desc">D > 0 且 H &lt; ${inp('badAdsMaxH',t.badAdsMaxH,'0.1')} %</span>${trash('低效廣告','disableAnaTag')}</div>
     <div class="ana-sec-hdr">自訂標籤</div>
     <div id="ana-custom-list">${customRows}</div>
-    <div class="ana-add-box" style="margin-top:12px">
+    ${disabledSection}
+    <div class="ana-add-box" style="margin-top:14px">
       <div class="ana-add-box-title">＋ 新增自訂標籤</div>
       <div class="ana-field-row"><label>名稱</label><input type="text" id="anas-new-label" placeholder="標籤名稱"></div>
       <div class="ana-field-row"><label>顏色</label><select id="anas-new-cls">${clsOpts}</select></div>
@@ -8082,21 +8086,25 @@ const GROWTH_THRESH_DEF={fallPct:30,risePct:30,highRev:10000,midRevMin:7000,midR
 function getGrowthThresh(){try{return Object.assign({},GROWTH_THRESH_DEF,JSON.parse(localStorage.getItem('ec_growth_thresh')||'{}'));}catch{return{...GROWTH_THRESH_DEF};}}
 function saveGrowthThresh(t){localStorage.setItem('ec_growth_thresh',JSON.stringify(t));}
 function getCustomGrowthRules(){try{return JSON.parse(localStorage.getItem('ec_growth_custom')||'[]');}catch{return[];}}
+function getDisabledGrowthTags(){try{return JSON.parse(localStorage.getItem('ec_growth_disabled')||'[]');}catch{return[];}}
+function disableGrowthTag(label){const a=getDisabledGrowthTags();if(!a.includes(label))a.push(label);localStorage.setItem('ec_growth_disabled',JSON.stringify(a));renderGrowthModalBody();reapplyAnaToAll();}
+function restoreGrowthTag(label){const a=getDisabledGrowthTags().filter(l=>l!==label);localStorage.setItem('ec_growth_disabled',JSON.stringify(a));renderGrowthModalBody();reapplyAnaToAll();}
 function saveCustomGrowthRules(r){localStorage.setItem('ec_growth_custom',JSON.stringify(r));}
 function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate) {
   const t=getGrowthThresh();
+  const dis=new Set(getDisabledGrowthTags());
+  const ok=l=>!dis.has(l);
   const G=growthRate, R=rev, P=pureRate*100;
-  if (G !== null && G < -(t.fallPct/100)) return { label:'🔴重跌品', cls:'tag-danger' };
-  if (G !== null && G > (t.risePct/100))  return { label:'🟢爆發品', cls:'tag-high' };
-  // 自訂成長標籤
+  if(ok('🔴重跌品')&&G !== null && G < -(t.fallPct/100)) return { label:'🔴重跌品', cls:'tag-danger' };
+  if(ok('🟢爆發品')&&G !== null && G > (t.risePct/100))  return { label:'🟢爆發品', cls:'tag-high' };
   for(const ct of getCustomGrowthRules()){
     if(evalAnaConds(ct.conds,{G:G??0,R,P,prevRev:prevRev??0}))return{label:ct.label,cls:ct.cls||'tag-add100'};
   }
-  if (R >= t.highRev)                           return { label:'👑高營收', cls:'tag-add300' };
-  if (R >= t.midRevMin && R < t.midRevMax)      return { label:'🟨中營收', cls:'tag-add200' };
-  if (R >= t.devRevMin && R < t.devRevMax)      return { label:'🟡發展品', cls:'tag-add100' };
-  if (P < t.lowPurePct)                         return { label:'🔻低利品', cls:'tag-low' };
-  if (prevRev !== null && prevRev > 0 && (rev === 0 || rev === null)) return { label:'⚫斷銷品', cls:'tag-lose' };
+  if(ok('👑高營收')&&R >= t.highRev)                           return { label:'👑高營收', cls:'tag-add300' };
+  if(ok('🟨中營收')&&R >= t.midRevMin && R < t.midRevMax)      return { label:'🟨中營收', cls:'tag-add200' };
+  if(ok('🟡發展品')&&R >= t.devRevMin && R < t.devRevMax)      return { label:'🟡發展品', cls:'tag-add100' };
+  if(ok('🔻低利品')&&P < t.lowPurePct)                         return { label:'🔻低利品', cls:'tag-low' };
+  if(ok('⚫斷銷品')&&prevRev !== null && prevRev > 0 && (rev === 0 || rev === null)) return { label:'⚫斷銷品', cls:'tag-lose' };
   return { label:'', cls:'' };
 }
 
@@ -8127,9 +8135,8 @@ function openGrowthSettings(shop){
 function closeGrowthSettings(){document.getElementById('growth-overlay')?.classList.remove('open');}
 function renderGrowthModalBody(){
   const t=getGrowthThresh();const custom=getCustomGrowthRules();
+  const disabled=getDisabledGrowthTags();
   const inp=(id,val,step='1',w='70px')=>`<input type="number" id="grths-${id}" value="${val}" step="${step}" style="width:${w}">`;
-  const fOpts=GROWTH_FIELD_OPTS.map(o=>`<option value="${o.v}">${o.l}</option>`).join('');
-  const opOpts=['>=','>','<=','<','=','!='].map(o=>`<option value="${o}">${o}</option>`).join('');
   const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}">${o.l}</option>`).join('');
   const condRowHtml=(i,c)=>`<div class="ana-cond-row" id="grthcr-${i}">
     <select class="ana-cond-f">${GROWTH_FIELD_OPTS.map(o=>`<option value="${o.v}"${o.v===c.f?' selected':''}>${o.l}</option>`).join('')}</select>
@@ -8138,24 +8145,27 @@ function renderGrowthModalBody(){
     <button class="ana-cond-del" onclick="removeGrowthCond(${i})">✕</button>
   </div>`;
   const condRows=_growthNewConds.map((c,i)=>condRowHtml(i,c)).join('');
+  const trash=(label)=>`<button class="ana-rule-del" onclick="disableGrowthTag(decodeURIComponent('${encodeURIComponent(label)}'))" title="停用此標籤">🗑</button>`;
   const customRows=custom.length?custom.map((ct,i)=>{
     const condDesc=ct.conds.map(c=>`${c.f} ${c.op} ${c.v}`).join(' 且 ');
-    return`<div class="ana-rule-row"><span class="ana-rule-tag ${ct.cls||'tag-add100'}">${ct.label}</span><span class="ana-rule-desc" style="font-size:12px;color:#6b7280">${condDesc}</span><button class="ana-rule-del" onclick="deleteCustomGrowthRule(${i})">✕</button></div>`;
+    return`<div class="ana-rule-row"><span class="ana-rule-tag ${ct.cls||'tag-add100'}">${ct.label}</span><span class="ana-rule-desc" style="font-size:12px;color:#6b7280">${condDesc}</span><button class="ana-rule-del" onclick="deleteCustomGrowthRule(${i})" title="刪除">🗑</button></div>`;
   }).join(''):`<div class="ana-custom-empty">尚無自訂標籤</div>`;
+  const disabledSection=disabled.length?`<div class="ana-sec-hdr" style="margin-top:16px">已停用標籤</div>${disabled.map(l=>`<div class="ana-rule-row" style="opacity:.5"><span class="ana-rule-tag tag-low" style="min-width:auto;padding:4px 8px">${l}</span><span class="ana-rule-desc" style="font-size:12px;color:#9ca3af">已停用</span><button class="ana-rule-del" style="color:#10b981" onclick="restoreGrowthTag(decodeURIComponent('${encodeURIComponent(l)}'))" title="恢復">↩</button></div>`).join('')}`:'';
   document.getElementById('growth-modal-body').innerHTML=`
     <div class="ana-sec-hdr">成長類</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">🔴重跌品</span><span class="ana-rule-desc">成長率 &lt; -${inp('fallPct',t.fallPct,'0.1')} %</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-high">🟢爆發品</span><span class="ana-rule-desc">成長率 > ${inp('risePct',t.risePct,'0.1')} %</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">🔴重跌品</span><span class="ana-rule-desc">成長率 &lt; -${inp('fallPct',t.fallPct,'0.1')} %</span>${trash('🔴重跌品')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-high">🟢爆發品</span><span class="ana-rule-desc">成長率 > ${inp('risePct',t.risePct,'0.1')} %</span>${trash('🟢爆發品')}</div>
     <div class="ana-sec-hdr">營收類</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">👑高營收</span><span class="ana-rule-desc">營收 ≥ ${inp('highRev',t.highRev,'100','80px')} 以上</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">🟨中營收</span><span class="ana-rule-desc">營收 ${inp('midRevMin',t.midRevMin,'100','80px')} ~ ${inp('midRevMax',t.midRevMax,'100','80px')}</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">🟡發展品</span><span class="ana-rule-desc">營收 ${inp('devRevMin',t.devRevMin,'100','80px')} ~ ${inp('devRevMax',t.devRevMax,'100','80px')}</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">👑高營收</span><span class="ana-rule-desc">營收 ≥ ${inp('highRev',t.highRev,'100','80px')}</span>${trash('👑高營收')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">🟨中營收</span><span class="ana-rule-desc">營收 ${inp('midRevMin',t.midRevMin,'100','80px')} ~ ${inp('midRevMax',t.midRevMax,'100','80px')}</span>${trash('🟨中營收')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">🟡發展品</span><span class="ana-rule-desc">營收 ${inp('devRevMin',t.devRevMin,'100','80px')} ~ ${inp('devRevMax',t.devRevMax,'100','80px')}</span>${trash('🟡發展品')}</div>
     <div class="ana-sec-hdr">利潤類</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">🔻低利品</span><span class="ana-rule-desc">淨利率 &lt; ${inp('lowPurePct',t.lowPurePct,'0.1')} %</span></div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">⚫斷銷品</span><span class="ana-rule-desc">上期有銷售，本期營收 = 0（固定）</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">🔻低利品</span><span class="ana-rule-desc">淨利率 &lt; ${inp('lowPurePct',t.lowPurePct,'0.1')} %</span>${trash('🔻低利品')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">⚫斷銷品</span><span class="ana-rule-desc">上期有銷售，本期營收 = 0</span>${trash('⚫斷銷品')}</div>
     <div class="ana-sec-hdr">自訂標籤</div>
     <div id="growth-custom-list">${customRows}</div>
-    <div class="ana-add-box" style="margin-top:12px">
+    ${disabledSection}
+    <div class="ana-add-box" style="margin-top:14px">
       <div class="ana-add-box-title">＋ 新增自訂標籤</div>
       <div class="ana-field-row"><label>名稱</label><input type="text" id="grths-new-label" placeholder="標籤名稱"></div>
       <div class="ana-field-row"><label>顏色</label><select id="grths-new-cls">${clsOpts}</select></div>
