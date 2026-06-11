@@ -3226,6 +3226,13 @@ const App = {
     const all = Store.get(notesKey, {}) || {};
     const note = all[code] || { text: '', adjustments: [] };
 
+    // 查商品名稱：先看母表（莫筆克名 > 商品名稱），再 fallback 到本週銷售
+    const master = Store.get(`ec.insight_${currentShop}_master`, null);
+    const masterEntry = master?.byCode?.[code];
+    const weeks = Store.get(`ec.insight_${currentShop}_weeks`, []) || [];
+    const salesEntry = (weeks[0]?.products || []).find(p => p.code === code);
+    const productName = masterEntry?.mocbicName || masterEntry?.name || salesEntry?.name || '';
+
     // 紀錄樣式：淺紫色背景 + 紫色文字，跟一般輸入區做視覺區隔
     const renderAdjItem = (a, i, totalLen) => `
       <div style="padding:7px 11px;background:#eef2ff;border-left:3px solid #6366f1;border-radius:5px;margin-bottom:5px;font-size:12px;display:flex;gap:8px;align-items:flex-start">
@@ -3271,7 +3278,7 @@ const App = {
     };
 
     this.openModal({
-      title: `📝 商品備註 — ${code}`,
+      title: productName ? `${code} · ${productName}` : code,
       width: '560px',
       hideFooter: true,
       onCancel: flushPendingInput, // X 按鈕關閉時也會 flush
