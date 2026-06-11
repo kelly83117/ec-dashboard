@@ -7220,11 +7220,18 @@ if (window.__cloudStore) {
     try {
       Store._profitMem = Store._profitMem || {};
       onSnapshot(profitDocRef, snap => {
-        Store._profitMem = snap.exists() ? (snap.data() || {}) : {};
+        const data = snap.exists() ? (snap.data() || {}) : {};
+        const keys = Object.keys(data);
+        console.warn('[profit subscribe] 收到', keys.length, '筆雲端資料：', keys);
+        Store._profitMem = data;
+        // 通知其他模組（如淨利表）重新讀資料
+        window.dispatchEvent(new Event('profitDataReady'));
         // 淨利表資料變動 → 觸發 re-render 讓畫面同步
         if (window.App && App.currentUser && typeof App.render === 'function') {
           try { App.render(); } catch {}
         }
+      }, err => {
+        console.error('[profit subscribe] 訂閱失敗：', err);
       });
     } catch (e) { console.warn('profit subscribe failed', e); }
 
@@ -7639,6 +7646,18 @@ function lsHasAny(shop){
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
+
+// ── 雲端資料到達時自動重載 ──
+window.addEventListener('profitDataReady', ()=>{
+  console.warn('[淨利表] 收到 profitDataReady，重新載入各賣場');
+  try{
+    SHOPS.forEach(s=>{
+      onMonthChange(s.id);
+      if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
+    });
+    if(typeof renderSummary==='function') renderSummary();
+  }catch(e){ console.warn('[淨利表] 重載失敗', e); }
+});
 
 // ── v3 一次性遷移：把淨利表資料從 app/main 搬到 app/profit、本地推上去、清掉 app/main 的舊欄位 ──
 (function backfillProfitToCloud(){
