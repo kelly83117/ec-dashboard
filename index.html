@@ -7590,22 +7590,10 @@ SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.inn
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
 
 function shopHTML(shop){return`
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto auto;gap:10px;align-items:center;margin-bottom:12px">
-    <label class="ucard" id="uc-map-${shop}">
-      <input type="file" accept=".xlsx,.xls" onchange="onMapFile(event,'${shop}')">
-      <div class="ucard-icon" id="ui-map-${shop}">🗂</div>
-      <div class="ucard-info"><div class="ucard-title" id="ut-map-${shop}">蝦皮商品清單</div><div class="ucard-sub" id="us-map-${shop}">上傳一次，三個賣場共用</div></div>
-    </label>
-    <label class="ucard" id="uc-mobic-${shop}">
-      <input type="file" accept=".xlsx,.xls" onchange="onFile(event,'${shop}','mobic')">
-      <div class="ucard-icon" id="ui-mobic-${shop}">📦</div>
-      <div class="ucard-info"><div class="ucard-title" id="ut-mobic-${shop}">莫筆克銷售分析</div><div class="ucard-sub">.xlsx</div></div>
-    </label>
-    <label class="ucard" id="uc-ads-${shop}">
-      <input type="file" accept=".csv" onchange="onFile(event,'${shop}','ads')">
-      <div class="ucard-icon" id="ui-ads-${shop}">📣</div>
-      <div class="ucard-info"><div class="ucard-title" id="ut-ads-${shop}">蝦皮廣告報表</div><div class="ucard-sub">.csv</div></div>
-    </label>
+  <div style="display:none">
+    <label class="ucard" id="uc-map-${shop}"><input type="file" accept=".xlsx,.xls" onchange="onMapFile(event,'${shop}')"><div class="ucard-icon" id="ui-map-${shop}">🗂</div><div class="ucard-info"><div class="ucard-title" id="ut-map-${shop}">蝦皮商品清單</div><div class="ucard-sub" id="us-map-${shop}">上傳一次，三個賣場共用</div></div></label>
+    <label class="ucard" id="uc-mobic-${shop}"><input type="file" accept=".xlsx,.xls" onchange="onFile(event,'${shop}','mobic')"><div class="ucard-icon" id="ui-mobic-${shop}">📦</div><div class="ucard-info"><div class="ucard-title" id="ut-mobic-${shop}">莫筆克銷售分析</div><div class="ucard-sub">.xlsx</div></div></label>
+    <label class="ucard" id="uc-ads-${shop}"><input type="file" accept=".csv" onchange="onFile(event,'${shop}','ads')"><div class="ucard-icon" id="ui-ads-${shop}">📣</div><div class="ucard-info"><div class="ucard-title" id="ut-ads-${shop}">蝦皮廣告報表</div><div class="ucard-sub">.csv</div></div></label>
     <div class="spin-row" id="spin-${shop}"><div class="spin"></div>讀取中…</div>
     <button class="gen-btn" id="gen-${shop}" onclick="generate('${shop}')" disabled>▶ 產生並儲存</button>
   </div>
