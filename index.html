@@ -2422,7 +2422,7 @@ const App = {
     ` : '';
 
     const rowsHtml = filteredSorted.length === 0
-      ? `<tr><td colspan="11" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">${sorted.length === 0 ? '尚未上傳銷售排行 Excel' : `沒有符合「${escapeHtml(Array.from(selectedSet).join('、') || '全部')}」的商品`}</td></tr>`
+      ? `<tr><td colspan="12" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">${sorted.length === 0 ? '尚未上傳銷售排行 Excel' : `沒有符合「${escapeHtml(Array.from(selectedSet).join('、') || '全部')}」的商品`}</td></tr>`
       : filteredSorted.map((p, i) => {
           const netStock = p.stock - p.demand;
           const cls = classifyProduct(p);
@@ -2466,6 +2466,9 @@ const App = {
                   ${p.shopeeId ? `<div></div><div style="font-size:12px;color:var(--text-muted);font-family:monospace;line-height:1.2">ID: ${escapeHtml(p.shopeeId)}</div>` : ''}
                 </div>
                 ${!p.inMaster ? '<div style="font-size:10px;color:#f59e0b;font-weight:600;margin-top:4px;line-height:1.2">⚠ 需更新母表</div>' : ''}
+              </td>
+              <td style="padding:8px 8px;text-align:right;font-size:13px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums;vertical-align:top">
+                ${p.prevPrevRevenue > 0 ? `NT$ ${fmt(p.prevPrevRevenue)}` : '—'}
               </td>
               <td style="padding:8px 8px;text-align:right;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;vertical-align:top">
                 NT$ ${fmt(p.revenue)}
@@ -2536,6 +2539,7 @@ const App = {
                 <th style="padding:0;width:4px;border-bottom:1px solid #e5e7eb"></th>
                 <th style="padding:8px 8px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">#</th>
                 <th style="padding:10px 8px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">商品編號 / 名稱 / ID</th>
+                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上上週營收</th>
                 <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">本期 / 上週營收</th>
                 <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">成長率</th>
                 <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">曝光次數</th>
@@ -2914,12 +2918,22 @@ const App = {
             uploadedAt: Date.now(),
             uploadedBy: this.currentUser?.username || '',
           };
-          // 直接放到指定 slot，不動其他 slot
           const weeks = (Store.get(sKey('weeks'), []) || []).slice();
+          let shifted = false;
+          // 上傳「本週」時自動往後推：weeks[0] → weeks[1] → weeks[2]，最多保留 3 週
+          // 條件：上傳的是 slot 0 且 period 跟現有 weeks[0] 不同（避免重複上傳同一週導致誤推）
+          if (slotIdx === 0 && weeks[0] && weeks[0].periodKey !== periodKey) {
+            weeks[2] = weeks[1] || null;
+            weeks[1] = weeks[0];
+            shifted = true;
+          }
           while (weeks.length <= slotIdx) weeks.push(null);
           weeks[slotIdx] = newEntry;
+          // 截斷只保留前 3 週
+          if (weeks.length > 3) weeks.length = 3;
           Store.set(sKey('weeks'), weeks);
-          showToast(`${currentShop} · ${slotLabel}已上傳（${result.products.length} 個商品 · ${result.period}）`, 'success');
+          const shiftMsg = shifted ? '（上週/上上週已自動往後推）' : '';
+          showToast(`${currentShop} · ${slotLabel}已上傳（${result.products.length} 個商品 · ${result.period}）${shiftMsg}`, 'success');
           this.render();
         } catch (err) {
           console.error(err);
@@ -3372,6 +3386,7 @@ const App = {
         '商品編號': s.code,
         '莫筆克名稱': m.mocbicName || '',
         '商品名稱': s.name,
+        '上上週營收': prevPrev?.revenue || '',
         '上週營收': prev?.revenue || '',
         '本週營收': s.revenue,
         '成長率': g !== null ? (g * 100).toFixed(1) + '%' : '',
