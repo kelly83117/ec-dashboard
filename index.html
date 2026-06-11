@@ -5594,6 +5594,7 @@ const App = {
               el.innerHTML = shopHTML(s.id);
             }
           });
+          if(typeof initProfitPeriodControls==='function') initProfitPeriodControls();
           SHOPS.forEach(s => {
             if (typeof initShopUI === 'function') initShopUI(s.id);
           });
@@ -6656,6 +6657,7 @@ const App = {
                   el.innerHTML = shopHTML(s.id);
                 }
               });
+              if(typeof initProfitPeriodControls==='function') initProfitPeriodControls();
               SHOPS.forEach(function(s) {
                 if (typeof initShopUI === 'function') initShopUI(s.id);
               });
@@ -7386,15 +7388,18 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
     <div class="spin-row" id="spin-map"><div class="spin"></div>讀取中…</div>
     <span id="map-status" style="font-size:13px;color:#9ca3af"></span>
   </div>
-  <div style="display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
-    <span style="font-size:12px;color:#6b7280;font-weight:500">賣場</span>
-    <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
-      <button class="stab active" onclick="setShop('總表',this)"><span class="sdot" style="background:#6b7280"></span>總表</button>
-      <button class="stab" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉<span class="stab-ok" id="dot-好麻吉"></span></button>
-      <button class="stab" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂<span class="stab-ok" id="dot-玩樂"></span></button>
-      <button class="stab" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅<span class="stab-ok" id="dot-森之旅"></span></button>
-      <button class="stab" onclick="setShop('酷澎',this)"><span class="sdot" style="background:#ef4444"></span>酷澎<span class="stab-ok" id="dot-酷澎"></span></button>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:12px">
+      <span style="font-size:12px;color:#6b7280;font-weight:500">賣場</span>
+      <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
+        <button class="stab active" onclick="setShop('總表',this)"><span class="sdot" style="background:#6b7280"></span>總表</button>
+        <button class="stab" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉<span class="stab-ok" id="dot-好麻吉"></span></button>
+        <button class="stab" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂<span class="stab-ok" id="dot-玩樂"></span></button>
+        <button class="stab" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅<span class="stab-ok" id="dot-森之旅"></span></button>
+        <button class="stab" onclick="setShop('酷澎',this)"><span class="sdot" style="background:#ef4444"></span>酷澎<span class="stab-ok" id="dot-酷澎"></span></button>
+      </div>
     </div>
+    <div id="profit-period-wrap" style="display:none;align-items:center;gap:8px;flex-wrap:wrap"></div>
   </div>
   <div id="content-總表" class="shop-content active" style="padding:16px 20px">
     <div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">請先到各賣場分頁產生報表</div></div>
@@ -7434,16 +7439,6 @@ SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.inn
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
 
 function shopHTML(shop){return`
-  <div class="period-bar">
-    <div class="period-bar-label">📅 區間</div>
-    <select class="month-select" id="month-sel-${shop}" onchange="onMonthChange('${shop}')">
-      ${MONTHS.map(m=>`<option value="${m}" ${m==='2026/05'?'selected':''}>${m}</option>`).join('')}
-    </select>
-    <div class="half-btns" id="half-btns-${shop}">
-      ${HALVES.map(h=>`<button class="half-btn ${h.id==='first'?'active':''}" onclick="onHalfChange('${shop}','${h.id}',this)">${h.label}</button>`).join('')}
-    </div>
-    <span class="days-badge" id="days-badge-${shop}">15 天</span>
-  </div>
   <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:center;margin-bottom:12px">
     <label class="ucard" id="uc-mobic-${shop}">
       <input type="file" accept=".xlsx,.xls" onchange="onFile(event,'${shop}','mobic')">
@@ -7494,9 +7489,11 @@ function getDays(month,half){
 }
 function onMonthChange(shop){
   const sel=document.getElementById('month-sel-'+shop);
-  if(!sel)return; // DOM 還沒掛上（例如在 insight 頁），直接略過
+  if(!sel)return;
   state[shop].curMonth=sel.value;
-  updateDaysBadge(shop);tryLoadSaved(shop);
+  updateDaysBadge(shop);
+  updateHalfBtnLabels(shop);
+  tryLoadSaved(shop);
 }
 function onHalfChange(shop,half,btn){
   state[shop].curHalf=half;
@@ -8185,7 +8182,58 @@ function setShop(shop,btn){
   document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
   document.getElementById('content-'+shop).classList.add('active');
+  const wrap=document.getElementById('profit-period-wrap');
+  if(wrap){
+    SHOPS.forEach(s=>{const el=document.getElementById('period-row-'+s.id);if(el)el.style.display=s.id===shop?'flex':'none';});
+    wrap.style.display=shop==='總表'?'none':'flex';
+  }
   if(shop==='總表')renderSummary();
+}
+
+function updateHalfBtnLabels(shop){
+  const m=state[shop]?.curMonth||'2026/05';
+  const[y,mo]=m.split('/');
+  const last=new Date(+y,+mo,0).getDate();
+  const curHalf=state[shop]?.curHalf||'first';
+  const btns=[
+    {id:'first',label:`${mo}/1–${mo}/15`},
+    {id:'second',label:`${mo}/16–${mo}/${last}`},
+    {id:'full',label:`${mo}/1–${mo}/${last}`},
+  ];
+  const container=document.getElementById('half-btns-'+shop);
+  if(!container)return;
+  container.innerHTML=btns.map(h=>
+    `<button class="half-btn ${h.id===curHalf?'active':''}" onclick="onHalfChange('${shop}','${h.id}',this)">${h.label}</button>`
+  ).join('');
+}
+
+function initProfitPeriodControls(){
+  const wrap=document.getElementById('profit-period-wrap');
+  if(!wrap||wrap.dataset.init)return;
+  wrap.dataset.init='1';
+  SHOPS.forEach(s=>{
+    const div=document.createElement('div');
+    div.id='period-row-'+s.id;
+    div.style.cssText='display:none;align-items:center;gap:8px;flex-wrap:wrap';
+    div.innerHTML=`<select class="month-select" id="month-sel-${s.id}" onchange="onMonthChange('${s.id}')">
+      ${MONTHS.map(mo=>`<option value="${mo}" ${mo===(state[s.id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
+    </select>
+    <div id="half-btns-${s.id}" style="display:flex;gap:4px"></div>
+    <span class="days-badge" id="days-badge-${s.id}">15 天</span>`;
+    wrap.appendChild(div);
+    updateHalfBtnLabels(s.id);
+    updateDaysBadge(s.id);
+  });
+  if(curShop&&curShop!=='總表'){
+    const el=document.getElementById('period-row-'+curShop);
+    if(el)el.style.display='flex';
+    wrap.style.display='flex';
+  }
+}
+
+function initShopUI(shop){
+  onMonthChange(shop);
+  if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
 }
 
 // ── Export ──
@@ -8239,6 +8287,7 @@ document.addEventListener('click', function(e) {
             var el = document.getElementById('content-' + s.id);
             if (el && !el.innerHTML.trim() && typeof shopHTML === 'function') el.innerHTML = shopHTML(s.id);
           });
+          if(typeof initProfitPeriodControls==='function') initProfitPeriodControls();
           SHOPS.forEach(function(s) { if (typeof initShopUI === 'function') initShopUI(s.id); });
         } catch(e) { console.log(e); }
       }
