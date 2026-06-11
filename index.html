@@ -7609,8 +7609,11 @@ SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.inn
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
 
 // ── 一次性 backfill：把舊資料 (僅在 localStorage) 推到雲端，讓其他電腦看得到 ──
+// v2：除了 ec|/ec_edits|/ec_notes|，再加上 ec_ana_*、ec_growth_*、ec_hcols|*
 (function backfillProfitToCloud(){
-  const FLAG='ec.profit_backfilled_v1';
+  const FLAG='ec.profit_backfilled_v2';
+  const PREFIXES=['ec|','ec_edits|','ec_notes|','ec_ana_','ec_growth_','ec_hcols|'];
+  function isProfitKey(k){ return PREFIXES.some(p=>k.startsWith(p)); }
   function doBackfill(){
     try{
       if(localStorage.getItem(FLAG)==='1') return;
@@ -7619,10 +7622,7 @@ SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getEle
       for(let i=0;i<localStorage.length;i++){
         const k=localStorage.key(i);
         if(!k) continue;
-        // 三種淨利表 key：ec|shop|month|half / ec_edits|shop / ec_notes|shop
-        if(k.startsWith('ec|') || k.startsWith('ec_edits|') || k.startsWith('ec_notes|')){
-          pushKeys.push(k);
-        }
+        if(isProfitKey(k)) pushKeys.push(k);
       }
       if(pushKeys.length===0){ try{localStorage.setItem(FLAG,'1');}catch{} return; }
       // 跟雲端比對，雲端沒有的才推（避免覆蓋同事更新的版本）
@@ -7637,7 +7637,7 @@ SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getEle
             pushed++;
           }catch{}
         });
-        console.log('[淨利表] backfill 完成，推上雲端', pushed, '/', pushKeys.length, '筆');
+        console.log('[淨利表] backfill v2 完成，推上雲端', pushed, '/', pushKeys.length, '筆');
         try{localStorage.setItem(FLAG,'1');}catch{}
       }).catch(err=>{ console.warn('[淨利表] backfill 失敗', err); });
     }catch(err){ console.warn('[淨利表] backfill 例外', err); }
@@ -7984,15 +7984,17 @@ function buildShop(shop,days){
   return built;
 }
 
-// ── 分析規則設定 ──
+// ── 分析規則設定（雲端同步） ──
 const ANA_THRESH_DEF={clickMin:100,dangerMaxH:10,highMinH:30,badAdsMaxH:10,add300:3,add200:2,add100:1,add50:0,sub300:-3,sub200:-2,sub100:-1};
-function getAnaThresh(){try{return Object.assign({},ANA_THRESH_DEF,JSON.parse(localStorage.getItem('ec_ana_thresh')||'{}'));}catch{return{...ANA_THRESH_DEF};}}
-function saveAnaThresh(t){localStorage.setItem('ec_ana_thresh',JSON.stringify(t));}
-function getCustomAnaRules(){try{return JSON.parse(localStorage.getItem('ec_ana_custom')||'[]');}catch{return[];}}
-function saveCustomAnaRules(r){localStorage.setItem('ec_ana_custom',JSON.stringify(r));}
-function getDisabledAnaTags(){try{return JSON.parse(localStorage.getItem('ec_ana_disabled')||'[]');}catch{return[];}}
-function disableAnaTag(label){const a=getDisabledAnaTags();if(!a.includes(label))a.push(label);localStorage.setItem('ec_ana_disabled',JSON.stringify(a));renderAnaModalBody();reapplyAnaToAll();}
-function restoreAnaTag(label){const a=getDisabledAnaTags().filter(l=>l!==label);localStorage.setItem('ec_ana_disabled',JSON.stringify(a));renderAnaModalBody();reapplyAnaToAll();}
+function _cloudRead(k){ try{ if(window.Store && Store._mem && Store._mem[k]!==undefined) return Store._mem[k]; }catch{} try{ const raw=localStorage.getItem(k); return raw?JSON.parse(raw):undefined; }catch{return undefined;} }
+function _cloudWrite(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch{} try{ if(window.__cloudStore) window.__cloudStore.setField(k,v); }catch{} }
+function getAnaThresh(){const v=_cloudRead('ec_ana_thresh'); return Object.assign({},ANA_THRESH_DEF,v||{});}
+function saveAnaThresh(t){_cloudWrite('ec_ana_thresh',t);}
+function getCustomAnaRules(){return _cloudRead('ec_ana_custom')||[];}
+function saveCustomAnaRules(r){_cloudWrite('ec_ana_custom',r);}
+function getDisabledAnaTags(){return _cloudRead('ec_ana_disabled')||[];}
+function disableAnaTag(label){const a=getDisabledAnaTags();if(!a.includes(label))a.push(label);_cloudWrite('ec_ana_disabled',a);renderAnaModalBody();reapplyAnaToAll();}
+function restoreAnaTag(label){const a=getDisabledAnaTags().filter(l=>l!==label);_cloudWrite('ec_ana_disabled',a);renderAnaModalBody();reapplyAnaToAll();}
 function evalAnaConds(conds,vals){
   if(!conds||!conds.length)return false;
   return conds.every(c=>{
@@ -8312,15 +8314,15 @@ function reapplyAnaToAll(){
   });
 }
 
-// ── 成長比分析公式 ──
+// ── 成長比分析公式（雲端同步） ──
 const GROWTH_THRESH_DEF={fallPct:30,risePct:30,highRev:10000,midRevMin:7000,midRevMax:10000,devRevMin:5000,devRevMax:7000,lowPurePct:20};
-function getGrowthThresh(){try{return Object.assign({},GROWTH_THRESH_DEF,JSON.parse(localStorage.getItem('ec_growth_thresh')||'{}'));}catch{return{...GROWTH_THRESH_DEF};}}
-function saveGrowthThresh(t){localStorage.setItem('ec_growth_thresh',JSON.stringify(t));}
-function getCustomGrowthRules(){try{return JSON.parse(localStorage.getItem('ec_growth_custom')||'[]');}catch{return[];}}
-function getDisabledGrowthTags(){try{return JSON.parse(localStorage.getItem('ec_growth_disabled')||'[]');}catch{return[];}}
-function disableGrowthTag(label){const a=getDisabledGrowthTags();if(!a.includes(label))a.push(label);localStorage.setItem('ec_growth_disabled',JSON.stringify(a));renderGrowthModalBody();reapplyAnaToAll();}
-function restoreGrowthTag(label){const a=getDisabledGrowthTags().filter(l=>l!==label);localStorage.setItem('ec_growth_disabled',JSON.stringify(a));renderGrowthModalBody();reapplyAnaToAll();}
-function saveCustomGrowthRules(r){localStorage.setItem('ec_growth_custom',JSON.stringify(r));}
+function getGrowthThresh(){const v=_cloudRead('ec_growth_thresh'); return Object.assign({},GROWTH_THRESH_DEF,v||{});}
+function saveGrowthThresh(t){_cloudWrite('ec_growth_thresh',t);}
+function getCustomGrowthRules(){return _cloudRead('ec_growth_custom')||[];}
+function getDisabledGrowthTags(){return _cloudRead('ec_growth_disabled')||[];}
+function disableGrowthTag(label){const a=getDisabledGrowthTags();if(!a.includes(label))a.push(label);_cloudWrite('ec_growth_disabled',a);renderGrowthModalBody();reapplyAnaToAll();}
+function restoreGrowthTag(label){const a=getDisabledGrowthTags().filter(l=>l!==label);_cloudWrite('ec_growth_disabled',a);renderGrowthModalBody();reapplyAnaToAll();}
+function saveCustomGrowthRules(r){_cloudWrite('ec_growth_custom',r);}
 function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate) {
   const t=getGrowthThresh();
   const dis=new Set(getDisabledGrowthTags());
@@ -8725,10 +8727,14 @@ const PROFIT_COLS=[
   {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'分析'},{key:'note',label:'調整'},
   {key:'growthRate',label:'成長比',grow:true},{key:'growthAnalysis',label:'成長分析',grow:true},{key:'growthNote',label:'成長調整',grow:true},
 ];
-function getHiddenCols(shop){try{return new Set(JSON.parse(localStorage.getItem('ec_hcols|'+shop)||'[]'));}catch{return new Set();}}
+function getHiddenCols(shop){
+  const k='ec_hcols|'+shop;
+  const arr=_cloudRead(k)||[];
+  return new Set(arr);
+}
 function toggleHiddenCol(shop,key){
   const s=getHiddenCols(shop);if(s.has(key))s.delete(key);else s.add(key);
-  try{localStorage.setItem('ec_hcols|'+shop,JSON.stringify([...s]));}catch{}
+  _cloudWrite('ec_hcols|'+shop,[...s]);
   applyFilters(shop);renderColPicker(shop);
 }
 function renderColPicker(shop){
@@ -8744,7 +8750,7 @@ function renderColPicker(shop){
       <button onclick="resetHiddenCols('${shop}')" style="font-size:11px;color:#5b5fcf;background:none;border:none;cursor:pointer;font-weight:600">顯示全部</button>
     </div>`;
 }
-function resetHiddenCols(shop){try{localStorage.removeItem('ec_hcols|'+shop);}catch{}applyFilters(shop);renderColPicker(shop);}
+function resetHiddenCols(shop){_cloudWrite('ec_hcols|'+shop,[]);applyFilters(shop);renderColPicker(shop);}
 function openColPicker(shop,btn){
   let m=document.getElementById('colpick-'+shop);
   if(m){m.remove();return;}
