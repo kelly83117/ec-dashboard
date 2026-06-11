@@ -7231,7 +7231,7 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 
 .shop-content{display:none;}
 .shop-content.active{display:block;}
-.sub-rev{font-size:11px;color:#9ca3af;font-family:'DM Mono',monospace;margin-top:2px;line-height:1.3;}
+.sub-rev{font-size:13px;color:#6b7280;font-weight:500;font-family:'Noto Sans TC',sans-serif;margin-top:2px;line-height:1.3;}
 
 /* Period */
 .period-bar{background:#f8f9fc;border-radius:10px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
@@ -7298,7 +7298,7 @@ tbody tr:hover td{background:#fafbff;}
 .td-code{font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#374151;min-width:60px;padding-right:6px;white-space:nowrap;}
 .td-id{font-family:'DM Mono',monospace;font-size:12px;color:#9ca3af;min-width:140px;padding-right:16px;}
 .td-name{font-weight:700;color:#1a1a2e;white-space:nowrap;min-width:220px;max-width:320px;overflow:hidden;text-overflow:ellipsis;font-size:15px;}
-.td-num{font-size:14px;font-weight:700;min-width:90px;font-family:'Noto Sans TC',sans-serif;}
+.td-num{font-size:15px;font-weight:700;min-width:90px;font-family:'Noto Sans TC',sans-serif;}
 .sub-id{font-size:11px;color:#9ca3af;font-family:'DM Mono',monospace;margin-top:1px;line-height:1.2;}
 .td-pos{color:#10b981;font-weight:700;}.td-neg{color:#ef4444;font-weight:700;}.td-amber{color:#f59e0b;}
 .tr-total td{background:#f0f4ff !important;font-weight:700;border-top:2px solid #c7d2fe;}
@@ -8659,7 +8659,7 @@ function renderTable(shop,list){
         <td class="tl td-code">${r.code}</td>
         <td class="tl td-name">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         ${vc('adsFee')?editTd('adsFee','$'+fmtN(r.adsFee),'td-amber'):''}
-        ${vc('rev')?`<td class="td-num">$${fmtN(r.rev)}${shop==='好麻吉'?`<div class="sub-rev">${r.prevRev!==null?'$'+fmtN(r.prevRev):'—'}</div>`:''}</td>`:''}
+        ${vc('rev')?`<td class="td-num">$${fmtN(r.rev)}${shop==='好麻吉'?`<div class="sub-rev">${r.prevRev!==null?'上半月 $'+fmtN(r.prevRev):'—'}</div>`:''}</td>`:''}
         ${vc('gross')?`<td class="td-num">$${fmtN(r.gross)}</td>`:''}
         ${vc('pureProfit')?`<td class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`:''}
         ${vc('pureRate')?`<td>${pill(r.pureRate*100)}</td>`:''}
