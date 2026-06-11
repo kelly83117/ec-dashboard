@@ -2257,7 +2257,28 @@ const App = {
     });
 
     const needMasterUpdate = merged.filter(p => !p.inMaster);
-    const sorted = merged.slice().sort((a, b) => b.revenue - a.revenue);
+
+    // 排序：可點欄位標題切換
+    const sortKey = this.filter.insightSortKey || 'revenue';
+    const sortDir = this.filter.insightSortDir || 'desc';
+    const sortGetters = {
+      code: p => p.code || '',
+      prevPrev: p => p.prevPrevRevenue || 0,
+      revenue: p => p.revenue || 0,
+      growth: p => (p.growthRate == null ? -Infinity : p.growthRate),
+      impressions: p => p.impressions || 0,
+      ctr: p => p.ctr || 0,
+      convRate: p => p.convRate || 0,
+      stock: p => (p.stock - p.demand),
+    };
+    const getter = sortGetters[sortKey] || sortGetters.revenue;
+    const sorted = merged.slice().sort((a, b) => {
+      const va = getter(a), vb = getter(b);
+      let cmp;
+      if (typeof va === 'string' || typeof vb === 'string') cmp = String(va).localeCompare(String(vb));
+      else cmp = (va - vb);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
 
     // 大類分組（成長類/下滑類/轉換類）色票
     const GROUP_STYLE = {
@@ -2591,17 +2612,22 @@ const App = {
               <tr>
                 <th style="padding:0;width:4px;border-bottom:1px solid #e5e7eb"></th>
                 <th style="padding:8px 8px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">#</th>
-                <th style="padding:10px 8px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">商品編號 / 名稱 / ID</th>
-                ${visCol('prevPrev') ? `<th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上上週營收</th>` : ''}
-                ${visCol('revenue') ? `<th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">本週 / 上週營收</th>` : ''}
-                ${visCol('growth') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">成長率</th>` : ''}
-                ${visCol('impressions') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">曝光次數</th>` : ''}
-                ${visCol('ctr') ? `<th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">點擊率</th>` : ''}
-                ${visCol('convRate') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">轉換率</th>` : ''}
+                ${(() => {
+                  const arrowFor = (k) => k === sortKey ? `<span style="margin-left:3px;color:var(--primary);font-weight:700">${sortDir === 'asc' ? '↑' : '↓'}</span>` : '<span style="margin-left:3px;color:#d1d5db;font-weight:500">⇅</span>';
+                  const sortableTh = (key, label, align, extra = '') =>
+                    `<th data-sort-key="${key}" title="點擊排序" style="padding:10px 8px;text-align:${align};font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;cursor:pointer;user-select:none;${extra}">${label}${arrowFor(key)}</th>`;
+                  return `<th data-sort-key="code" title="點擊排序" style="padding:10px 8px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;cursor:pointer;user-select:none">商品編號 / 名稱 / ID${arrowFor('code')}</th>
+                ${visCol('prevPrev') ? sortableTh('prevPrev', '上上週營收', 'right', 'white-space:nowrap') : ''}
+                ${visCol('revenue') ? sortableTh('revenue', '本週 / 上週營收', 'right', 'white-space:nowrap') : ''}
+                ${visCol('growth') ? sortableTh('growth', '成長率', 'center') : ''}
+                ${visCol('impressions') ? sortableTh('impressions', '曝光次數', 'center', 'white-space:nowrap') : ''}
+                ${visCol('ctr') ? sortableTh('ctr', '點擊率', 'right', 'white-space:nowrap') : ''}
+                ${visCol('convRate') ? sortableTh('convRate', '轉換率', 'center') : ''}
                 ${visCol('group') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">大類</th>` : ''}
                 ${visCol('flow') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上週 → 本週</th>` : ''}
-                ${visCol('stock') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">可用庫存</th>` : ''}
-                ${visCol('note') ? `<th style="padding:10px 6px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;width:40px">調整</th>` : ''}
+                ${visCol('stock') ? sortableTh('stock', '可用庫存', 'center') : ''}
+                ${visCol('note') ? `<th style="padding:10px 6px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;width:40px">調整</th>` : ''}`;
+                })()}
               </tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
@@ -3162,6 +3188,22 @@ const App = {
     // 分類門檻設定（共用）
     const settingsBtn = document.getElementById('insight-settings');
     if (settingsBtn) settingsBtn.addEventListener('click', () => this.openInsightSettingsModal());
+
+    // 表頭排序：點同一欄切換 asc/desc，點別欄則切到該欄（預設 desc，code 預設 asc）
+    document.querySelectorAll('[data-sort-key]').forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.sortKey;
+        const curKey = this.filter.insightSortKey || 'revenue';
+        const curDir = this.filter.insightSortDir || 'desc';
+        if (curKey === key) {
+          this.filter.insightSortDir = curDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          this.filter.insightSortKey = key;
+          this.filter.insightSortDir = (key === 'code') ? 'asc' : 'desc';
+        }
+        this.render();
+      });
+    });
 
     // 欄位顯示切換
     document.querySelectorAll('[data-col-toggle]').forEach(cb => {
