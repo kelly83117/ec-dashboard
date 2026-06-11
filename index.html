@@ -1236,7 +1236,7 @@ const TASK_CATEGORIES = [
   },
   {
     name: '拍攝',
-    color: '#ec4899',
+    color: '#0d9488',
     items: ['室內', '戶外'],
   },
   {
@@ -3955,7 +3955,7 @@ const App = {
                       const hol = getHoliday(ds);
                       return `<div style="border-right:1px solid #f3f4f6;background:${isToday ? '#f5f3ff44' : (hol ? '#fef2f244' : (isWeekend ? '#fff7ed44' : 'transparent'))}"></div>`;
                     }).join('')}
-                    <div data-cal-task="${escapeHtml(t.id)}" title="${escapeHtml(t.title)} · ${escapeHtml(t.status)}${t.dueDate ? ' · 預計 ' + escapeHtml(t.dueDate) : ''}" style="position:absolute;left:calc(${(startIdx / totalDays) * 100}% + 2px);top:12px;height:${ROW_H - 24}px;width:calc(${(colSpan / totalDays) * 100}% - 4px);background:${catColor};border:1px solid ${catColor};border-radius:5px;cursor:pointer;transition:transform .12s, box-shadow .12s" onmouseover="this.style.boxShadow='0 3px 10px rgba(0,0,0,.18)';this.style.transform='translateY(-1px)'" onmouseout="this.style.boxShadow='none';this.style.transform='translateY(0)'"></div>
+                    <div data-cal-task="${escapeHtml(t.id)}" title="${escapeHtml(t.title)} · ${escapeHtml(t.status)}${t.dueDate ? ' · 預計 ' + escapeHtml(t.dueDate) : ''}" style="position:absolute;left:calc(${(startIdx / totalDays) * 100}% + 2px);top:${(ROW_H - 18) / 2}px;height:18px;width:calc(${(colSpan / totalDays) * 100}% - 4px);background:${catColor};border:1px solid ${catColor};border-radius:4px;cursor:pointer;transition:transform .12s, box-shadow .12s" onmouseover="this.style.boxShadow='0 3px 10px rgba(0,0,0,.18)';this.style.transform='translateY(-1px)'" onmouseout="this.style.boxShadow='none';this.style.transform='translateY(0)'"></div>
                   </div>
                 </div>
               `;
