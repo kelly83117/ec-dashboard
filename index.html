@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-4">
+<meta name="app-version" content="2026-06-11-5">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -7681,16 +7681,16 @@ function lsSave(shop,month,half,built,period,days){
 function lsLoad(shop,month,half){
   const k=lsKey(shop,month,half);
   // 雲端優先：先看新的 profit doc，再 fallback 到舊的 main doc（過渡期相容）
-  try{ if(window.Store && Store._profitMem && Store._profitMem[k]) return Store._profitMem[k]; }catch{}
-  try{ if(window.Store && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
+  try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[k]) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
   try{const d=localStorage.getItem(k);return d?JSON.parse(d):null;}catch{return null;}
 }
 function lsHasAny(shop){
   try{
-    if(window.Store && Store._profitMem){
+    if(typeof Store!='undefined' && Store._profitMem){
       for(const k of Object.keys(Store._profitMem)){ if(k.startsWith(`ec|${shop}|`)) return true; }
     }
-    if(window.Store && Store._mem){
+    if(typeof Store!='undefined' && Store._mem){
       for(const k of Object.keys(Store._mem)){ if(k.startsWith(`ec|${shop}|`)) return true; }
     }
   }catch{}
@@ -7988,8 +7988,8 @@ function getPrevPeriodKey(shop, month, half) {
 function getPrevRevMap(shop, month, half) {
   const key = getPrevPeriodKey(shop, month, half);
   let rep = null;
-  try{ if(window.Store && Store._profitMem && Store._profitMem[key]) rep = Store._profitMem[key]; }catch{}
-  try{ if(!rep && window.Store && Store._mem && Store._mem[key]) rep = Store._mem[key]; }catch{}
+  try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[key]) rep = Store._profitMem[key]; }catch{}
+  try{ if(!rep && typeof Store!='undefined' && Store._mem && Store._mem[key]) rep = Store._mem[key]; }catch{}
   if(!rep){
     try { rep = JSON.parse(localStorage.getItem(key) || 'null'); } catch {}
   }
@@ -8114,8 +8114,8 @@ function buildShop(shop,days){
 const ANA_THRESH_DEF={clickMin:100,dangerMaxH:10,highMinH:30,badAdsMaxH:10,add300:3,add200:2,add100:1,add50:0,sub300:-3,sub200:-2,sub100:-1};
 function _cloudRead(k){
   // 雲端優先：profit 文件 > 過渡期 main 文件 > 本地
-  try{ if(window.Store && Store._profitMem && Store._profitMem[k]!==undefined) return Store._profitMem[k]; }catch{}
-  try{ if(window.Store && Store._mem && Store._mem[k]!==undefined) return Store._mem[k]; }catch{}
+  try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[k]!==undefined) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]!==undefined) return Store._mem[k]; }catch{}
   try{ const raw=localStorage.getItem(k); return raw?JSON.parse(raw):undefined; }catch{return undefined;}
 }
 function _cloudWrite(k,v){
@@ -8756,8 +8756,8 @@ function closePopup(){if(openPopup){openPopup.remove();openPopup=null;document.r
 // 雲端優先：寫入時同時存本地與雲端；讀取時優先用雲端 Store._mem
 function getEdits(shop){
   const k='ec_edits|'+shop;
-  try{ if(window.Store && Store._profitMem && Store._profitMem[k]) return Store._profitMem[k]; }catch{}
-  try{ if(window.Store && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
+  try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[k]) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
   try{return JSON.parse(localStorage.getItem(k)||'{}');}catch{return{};}
 }
 function saveEdits(shop,edits){
@@ -8772,8 +8772,8 @@ function getNotes(shop){
     Object.keys(raw||{}).forEach(c=>{ if(typeof raw[c]==='string') raw[c]={adjustments:[{date:'',text:raw[c]}]}; });
     return raw||{};
   };
-  try{ if(window.Store && Store._profitMem && Store._profitMem[k]) return migrate(JSON.parse(JSON.stringify(Store._profitMem[k]))); }catch{}
-  try{ if(window.Store && Store._mem && Store._mem[k]) return migrate(JSON.parse(JSON.stringify(Store._mem[k]))); }catch{}
+  try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[k]) return migrate(JSON.parse(JSON.stringify(Store._profitMem[k]))); }catch{}
+  try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return migrate(JSON.parse(JSON.stringify(Store._mem[k]))); }catch{}
   try{ return migrate(JSON.parse(localStorage.getItem(k)||'{}')); }catch{return{};}
 }
 function saveNotes(shop,notes){
@@ -9118,7 +9118,7 @@ function renderSummary(){
   };
   // 1) 雲端 profit doc 優先
   try{
-    if(window.Store && Store._profitMem){
+    if(typeof Store!='undefined' && Store._profitMem){
       for(const k of Object.keys(Store._profitMem)){
         if(k.startsWith('ec|')) { dbg.profitKeys++; addRow(k, Store._profitMem[k]); }
       }
@@ -9126,7 +9126,7 @@ function renderSummary(){
   }catch(e){ dbg.errors.push('profitMem:'+e.message); }
   // 2) 雲端 main doc（過渡期相容）
   try{
-    if(window.Store && Store._mem){
+    if(typeof Store!='undefined' && Store._mem){
       for(const k of Object.keys(Store._mem)){
         if(k.startsWith('ec|')) { dbg.mainKeys++; addRow(k, Store._mem[k]); }
       }
