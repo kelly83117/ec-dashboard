@@ -8587,7 +8587,8 @@ function renderTable(shop,list){
   const edits=getEdits(shop);
   const notes=getNotes(shop);
   let tRev=0,tGross=0,tAds=0,tPure=0;
-  built.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
+  const kpiSrc=list;
+  kpiSrc.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
   setKpis(shop,tRev,tGross,tAds,tPure);
   document.getElementById('period-tag-'+shop).textContent=s._period||'';
   document.getElementById('cnt-'+shop).textContent=list.length+' 筆';
