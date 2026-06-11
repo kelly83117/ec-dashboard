@@ -2878,16 +2878,36 @@ const App = {
           const now = Date.now();
           const uploadedBy = this.currentUser?.username || '';
           let totalProducts = 0;
+          let totalNew = 0;
+          let totalUpdated = 0;
           Object.keys(shops).forEach(shopName => {
             const data = shops[shopName];
-            Store.set(`ec.insight_${shopName}_master`, {
+            // 合併式更新：保留舊母表的所有商品，新檔案的同編號會覆蓋（更新最新資料），新編號則加入
+            const prevMaster = Store.get(`ec.insight_${shopName}_master`, null);
+            const prevByCode = (prevMaster && prevMaster.byCode) ? prevMaster.byCode : {};
+            const mergedByCode = { ...prevByCode };
+            const incomingByCode = data.byCode || {};
+            let newCount = 0, updatedCount = 0;
+            Object.keys(incomingByCode).forEach(code => {
+              if (prevByCode[code]) updatedCount++;
+              else newCount++;
+              mergedByCode[code] = incomingByCode[code];
+            });
+            const mergedData = {
               ...data,
+              byCode: mergedByCode,
               uploadedAt: now,
               uploadedBy,
-            });
-            totalProducts += Object.keys(data.byCode || {}).length;
+            };
+            Store.set(`ec.insight_${shopName}_master`, mergedData);
+            totalProducts += Object.keys(mergedByCode).length;
+            totalNew += newCount;
+            totalUpdated += updatedCount;
           });
-          showToast(`商品清單已分配到 ${matched.length} 個賣場：${matched.join('、')} · 共 ${totalProducts} 個商品`, 'success');
+          const diffMsg = (totalNew > 0 || totalUpdated > 0)
+            ? `（新增 ${totalNew}、更新 ${totalUpdated}）`
+            : '';
+          showToast(`商品清單已合併到 ${matched.length} 個賣場：${matched.join('、')} · 共 ${totalProducts} 個商品${diffMsg}`, 'success');
           this.render();
         } catch (err) {
           console.error(err);
