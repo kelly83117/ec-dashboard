@@ -8290,11 +8290,13 @@ function applyFilters(shop){
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q));
   if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l));
+  const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
     if(!f||f.val===''||f.val===undefined)return;
     list=list.filter(r=>{
-      const v=r[col];
-      if(f.type==='text')return(v+'').toLowerCase().includes(f.val.toLowerCase());
+      const raw=r[col];
+      const v=PCT_COLS.has(col)?num(raw)*100:raw;
+      if(f.type==='text')return(raw+'').toLowerCase().includes(f.val.toLowerCase());
       if(f.type==='range'){const n=num(v);if(f.min!==null&&n<f.min)return false;if(f.max!==null&&n>f.max)return false;return true;}
       if(f.type==='min')return num(v)>=parseFloat(f.val);
       if(f.type==='max')return num(v)<=parseFloat(f.val);
