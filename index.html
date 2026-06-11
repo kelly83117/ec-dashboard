@@ -7486,7 +7486,35 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <span style="font-size:12px;color:#6b7280">%</span>
         <span style="font-size:11px;color:#9ca3af">（修改後重新產生即套用）</span>
       </div>
+      <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
       <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
+    </div>
+  </div>
+  <div class="ana-overlay" id="upload-modal-overlay" onclick="if(event.target===this)closeUploadModal()">
+    <div class="ana-modal" style="width:520px;max-width:96vw">
+      <div class="ana-modal-hdr"><span>上傳檔案</span><button class="ana-close-btn" onclick="closeUploadModal()">✕</button></div>
+      <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
+        <div style="font-size:12px;color:#9ca3af;margin-bottom:4px" id="upm-shop-hint">目前賣場：—</div>
+        <label class="ucard" id="upm-map" style="width:100%;box-sizing:border-box">
+          <input type="file" accept=".xlsx,.xls" onchange="onGlobalFile(event,'map')">
+          <div class="ucard-icon" id="upm-map-icon">🗂</div>
+          <div class="ucard-info"><div class="ucard-title" id="upm-map-title">蝦皮商品清單</div><div class="ucard-sub">上傳一次，三個賣場共用</div></div>
+        </label>
+        <label class="ucard" id="upm-mobic" style="width:100%;box-sizing:border-box">
+          <input type="file" accept=".xlsx,.xls" onchange="onGlobalFile(event,'mobic')">
+          <div class="ucard-icon" id="upm-mobic-icon">📦</div>
+          <div class="ucard-info"><div class="ucard-title" id="upm-mobic-title">莫筆克銷售分析</div><div class="ucard-sub">.xlsx</div></div>
+        </label>
+        <label class="ucard" id="upm-ads" style="width:100%;box-sizing:border-box">
+          <input type="file" accept=".csv" onchange="onGlobalFile(event,'ads')">
+          <div class="ucard-icon" id="upm-ads-icon">📣</div>
+          <div class="ucard-info"><div class="ucard-title" id="upm-ads-title">蝦皮廣告報表</div><div class="ucard-sub">.csv</div></div>
+        </label>
+      </div>
+      <div class="ana-modal-ftr" style="justify-content:space-between;align-items:center">
+        <span style="font-size:12px;color:#9ca3af">上傳莫筆克＋廣告報表後可產生</span>
+        <button class="gen-btn" id="upm-gen-btn" onclick="onGlobalGenerate()" disabled>▶ 產生報表</button>
+      </div>
     </div>
   </div>
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
@@ -7981,6 +8009,71 @@ function openAnaSettings(shop){
   ov.classList.add('open');
 }
 function closeAnaSettings(){document.getElementById('ana-overlay')?.classList.remove('open');}
+
+// ── Global Upload Modal ──
+function openUploadModal(){
+  const ov=document.getElementById('upload-modal-overlay');if(!ov)return;
+  const shop=curShop==='總表'?SHOPS[0].id:curShop;
+  document.getElementById('upm-shop-hint').textContent='目前賣場：'+shop;
+  // sync map card state
+  const mapOk=!!globalMap&&Object.keys(globalMap).length>0;
+  document.getElementById('upm-map').className='ucard'+(mapOk?' ok':'');
+  document.getElementById('upm-map-icon').textContent=mapOk?'✅':'🗂';
+  document.getElementById('upm-map-title').textContent=mapOk?'商品清單已載入':'蝦皮商品清單';
+  // sync mobic/ads
+  const s=state[shop];
+  const mobicOk=!!s.rawMobic;
+  document.getElementById('upm-mobic').className='ucard'+(mobicOk?' ok':'');
+  document.getElementById('upm-mobic-icon').textContent=mobicOk?'✅':'📦';
+  document.getElementById('upm-mobic-title').textContent=mobicOk?'莫筆克已載入':'莫筆克銷售分析';
+  const adsOk=!!s.rawAds;
+  document.getElementById('upm-ads').className='ucard'+(adsOk?' ok':'');
+  document.getElementById('upm-ads-icon').textContent=adsOk?'✅':'📣';
+  document.getElementById('upm-ads-title').textContent=adsOk?'廣告報表已載入':'蝦皮廣告報表';
+  document.getElementById('upm-gen-btn').disabled=!(mobicOk&&adsOk);
+  ov.classList.add('open');
+}
+function closeUploadModal(){document.getElementById('upload-modal-overlay')?.classList.remove('open');}
+function onGlobalFile(event,type){
+  const shop=curShop==='總表'?SHOPS[0].id:curShop;
+  if(type==='map'){
+    // reuse existing map input logic by creating a fake event proxy
+    onMapFile(event,shop);
+    setTimeout(()=>{
+      const mapOk=!!globalMap&&Object.keys(globalMap).length>0;
+      document.getElementById('upm-map').className='ucard'+(mapOk?' ok':'');
+      document.getElementById('upm-map-icon').textContent=mapOk?'✅':'🗂';
+      document.getElementById('upm-map-title').textContent=mapOk?'商品清單已載入':'蝦皮商品清單';
+    },500);
+  } else {
+    onFile(event,shop,type);
+    setTimeout(()=>{
+      const s=state[shop];
+      if(type==='mobic'){
+        const ok=!!s.rawMobic;
+        document.getElementById('upm-mobic').className='ucard'+(ok?' ok':'');
+        document.getElementById('upm-mobic-icon').textContent=ok?'✅':'📦';
+        document.getElementById('upm-mobic-title').textContent=ok?'莫筆克已載入':'莫筆克銷售分析';
+      } else {
+        const ok=!!s.rawAds;
+        document.getElementById('upm-ads').className='ucard'+(ok?' ok':'');
+        document.getElementById('upm-ads-icon').textContent=ok?'✅':'📣';
+        document.getElementById('upm-ads-title').textContent=ok?'廣告報表已載入':'蝦皮廣告報表';
+      }
+      const s2=state[shop];
+      document.getElementById('upm-gen-btn').disabled=!(s2.rawMobic&&s2.rawAds);
+    },800);
+  }
+}
+function onGlobalGenerate(){
+  const shop=curShop==='總表'?SHOPS[0].id:curShop;
+  closeUploadModal();
+  // switch to that shop first
+  const btn=document.querySelector(`button[onclick*="setShop('${shop}']`)||document.querySelector(`[data-shop="${shop}"]`);
+  if(curShop!==shop)setShop(shop,null);
+  setTimeout(()=>generate(shop),50);
+}
+
 function renderAnaModalBody(){
   const t=getAnaThresh();const custom=getCustomAnaRules();
   const disabled=getDisabledAnaTags();
