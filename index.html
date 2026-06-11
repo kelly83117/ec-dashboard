@@ -7316,6 +7316,16 @@ tbody tr:hover td{background:#fafbff;}
 .tag-sub200{background:#fee2e2;color:#991b1b;}
 .tag-sub100{background:#fff7ed;color:#9a3412;}
 
+/* Tag filter bar */
+.tag-filter-bar{display:flex;flex-wrap:wrap;gap:6px;padding:10px 0 8px;border-bottom:1px solid #e5e7eb;margin-bottom:8px;}
+.tfpill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:12px;font-weight:600;color:#374151;transition:all .15s;user-select:none;}
+.tfpill:hover{border-color:#9ca3af;}
+.tfpill.active{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
+.tfpill-all{background:#f9fafb;border-color:#e5e7eb;}
+.tfpill-all.active{background:#1a1a2e;color:#fff;border-color:#1a1a2e;}
+.tfpill-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.tfpill-cnt{font-size:11px;opacity:.75;font-weight:700;}
+
 /* Filter popup */
 .th-wrap{position:relative;display:inline-flex;align-items:center;gap:3px;width:100%;justify-content:flex-end;}
 .th-wrap.tl{justify-content:flex-start;}
@@ -7402,8 +7412,31 @@ const SHOPS=[{id:'好麻吉',color:'#5b5fcf'},{id:'玩樂',color:'#10b981'},{id:
 const MONTHS=['2025/01','2025/02','2025/03','2025/04','2025/05','2025/06','2025/07','2025/08','2025/09','2025/10','2025/11','2025/12','2026/01','2026/02','2026/03','2026/04','2026/05','2026/06','2026/07','2026/08','2026/09','2026/10','2026/11','2026/12'];
 const HALVES=[{id:'first',label:'上半（1-15）'},{id:'second',label:'下半（16-末）'},{id:'full',label:'整月（1-末）'}];
 
+const ANA_TAGS=[
+  {label:'危險商品',cls:'tag-danger',dot:'#991b1b'},
+  {label:'高利潤商品',cls:'tag-high',dot:'#065f46'},
+  {label:'低淨利',cls:'tag-low',dot:'#92400e'},
+  {label:'賠錢中',cls:'tag-lose',dot:'#7f1d1d'},
+  {label:'低效廣告',cls:'tag-bad',dot:'#78350f'},
+  {label:'加300',cls:'tag-add300',dot:'#1e40af'},
+  {label:'加200',cls:'tag-add200',dot:'#1e40af'},
+  {label:'加100',cls:'tag-add100',dot:'#5b21b6'},
+  {label:'加50',cls:'tag-add50',dot:'#166534'},
+  {label:'減300',cls:'tag-sub300',dot:'#7f1d1d'},
+  {label:'減200',cls:'tag-sub200',dot:'#991b1b'},
+  {label:'減100',cls:'tag-sub100',dot:'#9a3412'},
+];
+const GROWTH_TAGS=[
+  {label:'🔴重跌品',cls:'tag-danger',dot:'#991b1b'},
+  {label:'🟢爆發品',cls:'tag-high',dot:'#065f46'},
+  {label:'👑高營收',cls:'tag-add300',dot:'#1e40af'},
+  {label:'🟨中營收',cls:'tag-add200',dot:'#1e40af'},
+  {label:'🟡發展品',cls:'tag-add100',dot:'#5b21b6'},
+  {label:'🔻低利品',cls:'tag-low',dot:'#92400e'},
+  {label:'⚫斷銷品',cls:'tag-lose',dot:'#7f1d1d'},
+];
 const state={};
-SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawMap:{},curMonth:'2026/05',curHalf:'first',days:15,_built:null,_period:'',filters:{},sorts:{}};});
+SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawMap:{},curMonth:'2026/05',curHalf:'first',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilter:null};});
 let globalMap={};
 let curShop='總表';
 let openPopup=null;
@@ -7458,6 +7491,7 @@ function shopHTML(shop){return`
       <div><div class="kpi-l">廣告佔比</div><div class="kpi-v small" id="kv-adpct-${shop}">—</div></div>
     </div>
   </div>
+  <div class="tag-filter-bar" id="tfbar-${shop}"></div>
   <div class="toolbar" id="tb-${shop}">
     <span class="period-tag" id="period-tag-${shop}"></span>
     <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')">
@@ -7538,7 +7572,7 @@ function loadIntoUI(shop,built,period,days){
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
-  state[shop].filters={};state[shop].sorts={};
+  state[shop].filters={};state[shop].sorts={};state[shop].tagFilter=null;
   document.getElementById('period-tag-'+shop).textContent=period;
   document.getElementById('exp-'+shop).disabled=false;
   applyFilters(shop);
@@ -7803,12 +7837,38 @@ function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate) {
   return { label:'', cls:'' };
 }
 
+// ── Tag filter bar ──
+function setTagFilter(shop,label){
+  state[shop].tagFilter=(state[shop].tagFilter===label)?null:label;
+  applyFilters(shop);
+}
+function updateTagFilterBar(shop){
+  const bar=document.getElementById('tfbar-'+shop);if(!bar)return;
+  const built=state[shop]._built;if(!built||!built.length){bar.innerHTML='';return;}
+  const cur=state[shop].tagFilter;
+  const counts={};
+  built.forEach(r=>{
+    const a=r.analysis?.label;if(a)counts[a]=(counts[a]||0)+1;
+    const g=r.growthAnalysis?.label;if(g)counts[g]=(counts[g]||0)+1;
+  });
+  const allTags=[...ANA_TAGS,...(shop==='好麻吉'?GROWTH_TAGS:[])];
+  const pills=allTags.filter(t=>counts[t.label]).map(t=>{
+    const active=cur===t.label?' active':'';
+    return`<span class="tfpill${active}" onclick="setTagFilter('${shop}','${t.label.replace(/'/g,"\\'")}')" title="${t.label}">
+      <span class="tfpill-dot" style="background:${t.dot}"></span>${t.label}<span class="tfpill-cnt">${counts[t.label]}</span>
+    </span>`;
+  }).join('');
+  const total=built.length;
+  bar.innerHTML=`<span class="tfpill tfpill-all${cur===null?' active':''}" onclick="setTagFilter('${shop}',null)">全部 <span class="tfpill-cnt">${total}</span></span>${pills}`;
+}
+
 // ── Filters & Sort ──
 function applyFilters(shop){
   const s=state[shop];if(!s._built||!s._built.length)return;
   const q=(document.getElementById('search-'+shop).value||'').toLowerCase();
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q));
+  if(s.tagFilter)list=list.filter(r=>r.analysis?.label===s.tagFilter||r.growthAnalysis?.label===s.tagFilter);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
     if(!f||f.val===''||f.val===undefined)return;
     list=list.filter(r=>{
@@ -7831,6 +7891,7 @@ function applyFilters(shop){
     });
   }
   renderTable(shop,list);
+  updateTagFilterBar(shop);
 }
 function setSort(shop,col,dir){state[shop].sorts={col,dir};applyFilters(shop);}
 function setColFilter(shop,col,type,val){
