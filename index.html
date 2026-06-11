@@ -9018,18 +9018,44 @@ function renderTable(shop,list){
 // ── Summary ──
 function renderSummary(){
   const el=document.getElementById('content-總表');
+  if(!el) return; // 切換頁面時可能還沒渲染出來，避免 null.innerHTML 噴錯
   const PLATFORM=getPlatformRate();const rows=[];
-  for(let i=0;i<localStorage.length;i++){
-    const k=localStorage.key(i);if(!k.startsWith('ec|'))continue;
+
+  // 收集所有來源：localStorage + 雲端 app/profit + 雲端 app/main（過渡期）
+  const seen=new Set();
+  const addRow=(k,rep)=>{
+    if(seen.has(k) || !rep || !rep.built) return;
+    seen.add(k);
     try{
-      const rep=JSON.parse(localStorage.getItem(k));
       const parts=k.split('|');
       const shop=parts[1];
       let tRev=0,tGross=0,tAds=0,tPure=0;
       rep.built.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
       rows.push({shop,period:rep.period,tRev,tGross,tAds,tPure});
     }catch{}
+  };
+  // 1) 雲端 profit doc 優先
+  try{
+    if(window.Store && Store._profitMem){
+      for(const k of Object.keys(Store._profitMem)){
+        if(k.startsWith('ec|')) addRow(k, Store._profitMem[k]);
+      }
+    }
+  }catch{}
+  // 2) 雲端 main doc（過渡期相容）
+  try{
+    if(window.Store && Store._mem){
+      for(const k of Object.keys(Store._mem)){
+        if(k.startsWith('ec|')) addRow(k, Store._mem[k]);
+      }
+    }
+  }catch{}
+  // 3) localStorage 後備
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);if(!k || !k.startsWith('ec|'))continue;
+    try{ addRow(k, JSON.parse(localStorage.getItem(k))); }catch{}
   }
+
   if(!rows.length){el.innerHTML=`<div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">尚無儲存資料</div></div>`;return;}
 
   // 按區間排序（新的在前）
