@@ -7577,23 +7577,74 @@ let globalMap={};
 let curShop='總表';
 let openPopup=null;
 
-// ── LocalStorage ──
+// ── Storage（雲端優先、本地為快取後備） ──
 function lsKey(shop,month,half){return`ec|${shop}|${month}|${half}`;}
 function lsSave(shop,month,half,built,period,days){
-  try{localStorage.setItem(lsKey(shop,month,half),JSON.stringify({built,period,days,rate:getPlatformRate(),ts:Date.now()}));}
-  catch(e){alert('儲存失敗');}
+  const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
+  // 1) 本地（離線時還可看到）
+  try{localStorage.setItem(lsKey(shop,month,half),JSON.stringify(payload));}catch(e){alert('儲存失敗');}
+  // 2) 雲端（讓其他電腦看到）
+  try{ if(window.__cloudStore) window.__cloudStore.setField(lsKey(shop,month,half),payload); }catch{}
 }
 function lsLoad(shop,month,half){
-  try{const d=localStorage.getItem(lsKey(shop,month,half));return d?JSON.parse(d):null;}catch{return null;}
+  const k=lsKey(shop,month,half);
+  // 雲端有資料就用雲端（Store._mem 是訂閱回呼帶下來的整份雲端 doc）
+  try{ if(window.Store && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
+  // 否則 fallback 到本地
+  try{const d=localStorage.getItem(k);return d?JSON.parse(d):null;}catch{return null;}
 }
 function lsHasAny(shop){
-  for(let i=0;i<localStorage.length;i++){if(localStorage.key(i).startsWith(`ec|${shop}|`))return true;}
+  // 雲端 + 本地任一邊有就算有
+  try{
+    if(window.Store && Store._mem){
+      for(const k of Object.keys(Store._mem)){ if(k.startsWith(`ec|${shop}|`)) return true; }
+    }
+  }catch{}
+  for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k && k.startsWith(`ec|${shop}|`))return true;}
   return false;
 }
 
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
+
+// ── 一次性 backfill：把舊資料 (僅在 localStorage) 推到雲端，讓其他電腦看得到 ──
+(function backfillProfitToCloud(){
+  const FLAG='ec.profit_backfilled_v1';
+  function doBackfill(){
+    try{
+      if(localStorage.getItem(FLAG)==='1') return;
+      if(!window.__cloudStore) return;
+      const pushKeys=[];
+      for(let i=0;i<localStorage.length;i++){
+        const k=localStorage.key(i);
+        if(!k) continue;
+        // 三種淨利表 key：ec|shop|month|half / ec_edits|shop / ec_notes|shop
+        if(k.startsWith('ec|') || k.startsWith('ec_edits|') || k.startsWith('ec_notes|')){
+          pushKeys.push(k);
+        }
+      }
+      if(pushKeys.length===0){ try{localStorage.setItem(FLAG,'1');}catch{} return; }
+      // 跟雲端比對，雲端沒有的才推（避免覆蓋同事更新的版本）
+      Promise.resolve(window.__cloudStore.getDoc()).then(snap=>{
+        const cloudData=(snap && typeof snap.data==='function')?(snap.data()||{}):{};
+        let pushed=0;
+        pushKeys.forEach(k=>{
+          if(cloudData[k]!==undefined) return; // 雲端已有，不覆蓋
+          try{
+            const val=JSON.parse(localStorage.getItem(k));
+            window.__cloudStore.setField(k,val);
+            pushed++;
+          }catch{}
+        });
+        console.log('[淨利表] backfill 完成，推上雲端', pushed, '/', pushKeys.length, '筆');
+        try{localStorage.setItem(FLAG,'1');}catch{}
+      }).catch(err=>{ console.warn('[淨利表] backfill 失敗', err); });
+    }catch(err){ console.warn('[淨利表] backfill 例外', err); }
+  }
+  if(window.__cloudStore){ doBackfill(); }
+  else{ window.addEventListener('cloudStoreReady', doBackfill, { once:true }); }
+})();
 
 function shopHTML(shop){return`
   <div style="display:none">
@@ -8558,21 +8609,31 @@ function outsideClick(e){if(openPopup&&!openPopup.contains(e.target)){closePopup
 function closePopup(){if(openPopup){openPopup.remove();openPopup=null;document.removeEventListener('mousedown',outsideClick);}}
 
 // ── Edit overrides: edits[shop][code][col] = value, notes[shop][code] = text ──
+// 雲端優先：寫入時同時存本地與雲端；讀取時優先用雲端 Store._mem
 function getEdits(shop){
-  try{return JSON.parse(localStorage.getItem('ec_edits|'+shop)||'{}');}catch{return{};}
+  const k='ec_edits|'+shop;
+  try{ if(window.Store && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
+  try{return JSON.parse(localStorage.getItem(k)||'{}');}catch{return{};}
 }
 function saveEdits(shop,edits){
-  try{localStorage.setItem('ec_edits|'+shop,JSON.stringify(edits));}catch{}
+  const k='ec_edits|'+shop;
+  try{localStorage.setItem(k,JSON.stringify(edits));}catch{}
+  try{ if(window.__cloudStore) window.__cloudStore.setField(k,edits); }catch{}
 }
 function getNotes(shop){
-  try{
-    const raw=JSON.parse(localStorage.getItem('ec_notes|'+shop)||'{}');
-    Object.keys(raw).forEach(k=>{if(typeof raw[k]==='string')raw[k]={adjustments:[{date:'',text:raw[k]}]};});
-    return raw;
-  }catch{return{};}
+  const k='ec_notes|'+shop;
+  // 統一把舊版字串備註遷移成 {adjustments:[{date:'',text}]} 結構
+  const migrate=(raw)=>{
+    Object.keys(raw||{}).forEach(c=>{ if(typeof raw[c]==='string') raw[c]={adjustments:[{date:'',text:raw[c]}]}; });
+    return raw||{};
+  };
+  try{ if(window.Store && Store._mem && Store._mem[k]) return migrate(JSON.parse(JSON.stringify(Store._mem[k]))); }catch{}
+  try{ return migrate(JSON.parse(localStorage.getItem(k)||'{}')); }catch{return{};}
 }
 function saveNotes(shop,notes){
-  try{localStorage.setItem('ec_notes|'+shop,JSON.stringify(notes));}catch{}
+  const k='ec_notes|'+shop;
+  try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
+  try{ if(window.__cloudStore) window.__cloudStore.setField(k,notes); }catch{}
 }
 function buildNoteCell(shopKey,code,noteId,noteData){
   let adjList=[];
