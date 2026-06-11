@@ -2161,6 +2161,25 @@ const App = {
     const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
       ? this.filter.insightShop : '玩樂';
 
+    // ============== 欄位顯示控制 ==============
+    // 不可隱藏：band、#、商品編號/名稱/ID
+    const INSIGHT_COLS = [
+      { key: 'prevPrev', label: '上上週營收' },
+      { key: 'revenue', label: '本週 / 上週營收' },
+      { key: 'growth', label: '成長率' },
+      { key: 'impressions', label: '曝光次數' },
+      { key: 'ctr', label: '點擊率' },
+      { key: 'convRate', label: '轉換率' },
+      { key: 'group', label: '大類' },
+      { key: 'flow', label: '上週 → 本週' },
+      { key: 'stock', label: '可用庫存' },
+      { key: 'note', label: '調整' },
+    ];
+    const hiddenColsArr = Array.isArray(this.filter.insightHiddenCols) ? this.filter.insightHiddenCols : [];
+    const hiddenCols = new Set(hiddenColsArr);
+    const visCol = (k) => !hiddenCols.has(k);
+    const visibleColCount = 3 + INSIGHT_COLS.filter(c => visCol(c.key)).length;
+
     // 一次性遷移：把舊的 ec.insightWeekly 等（玩樂的資料）搬到新 key
     this.migrateInsightDataIfNeeded();
 
@@ -2422,7 +2441,7 @@ const App = {
     ` : '';
 
     const rowsHtml = filteredSorted.length === 0
-      ? `<tr><td colspan="12" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">${sorted.length === 0 ? '尚未上傳銷售排行 Excel' : `沒有符合「${escapeHtml(Array.from(selectedSet).join('、') || '全部')}」的商品`}</td></tr>`
+      ? `<tr><td colspan="${visibleColCount}" style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">${sorted.length === 0 ? '尚未上傳銷售排行 Excel' : `沒有符合「${escapeHtml(Array.from(selectedSet).join('、') || '全部')}」的商品`}</td></tr>`
       : filteredSorted.map((p, i) => {
           const netStock = p.stock - p.demand;
           const cls = classifyProduct(p);
@@ -2488,23 +2507,23 @@ const App = {
                 </div>
                 ${!p.inMaster ? '<div style="font-size:10px;color:#f59e0b;font-weight:600;margin-top:4px;line-height:1.2">⚠ 需更新母表</div>' : ''}
               </td>
-              <td style="padding:8px 8px;text-align:right;font-size:13px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums;vertical-align:top">
+              ${visCol('prevPrev') ? `<td style="padding:8px 8px;text-align:right;font-size:13px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums;vertical-align:top">
                 ${p.prevPrevRevenue > 0 ? `NT$ ${fmt(p.prevPrevRevenue)}` : '—'}
-              </td>
-              <td style="padding:8px 8px;text-align:right;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;vertical-align:top">
+              </td>` : ''}
+              ${visCol('revenue') ? `<td style="padding:8px 8px;text-align:right;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;vertical-align:top">
                 NT$ ${fmt(p.revenue)}
                 ${p.prevRevenue > 0 ? `<div style="font-size:10px;color:var(--text-muted);font-weight:500;margin-top:1px">上週 ${fmt(p.prevRevenue)}</div>` : ''}
-              </td>
-              <td style="padding:8px 8px;text-align:center;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;vertical-align:top">${fmtGrowth(p.growthRate)}</td>
-              <td style="padding:8px 8px;text-align:center;font-size:14px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums;vertical-align:top">${p.impressions > 0 ? fmt(p.impressions) : '—'}</td>
-              <td style="padding:8px 8px;text-align:right;font-size:14px;color:${p.ctr > 0 && p.ctr < 0.03 ? '#ef4444' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${p.ctr > 0 && p.ctr < 0.03 ? '700' : '600'};vertical-align:top">${fmtPct(p.ctr)}</td>
-              <td style="padding:8px 8px;text-align:center;font-size:14px;font-weight:${p.convRate > 0 ? '700' : '500'};color:${p.convRate > 0 && p.convRate < 0.01 ? '#ef4444' : p.convRate >= 0.02 ? '#10b981' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;vertical-align:top">${fmtPct(p.convRate)}</td>
-              <td style="padding:8px 8px;text-align:center;font-size:13px;vertical-align:top">${groupChip}</td>
-              <td style="padding:8px 8px;text-align:center;font-size:13px;vertical-align:top">${flowHtml}</td>
-              <td style="padding:8px 8px;text-align:center;font-size:14px;color:${netStock <= 0 ? '#ef4444' : netStock < 30 ? '#f59e0b' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${netStock <= 0 ? 700 : 600};white-space:nowrap;vertical-align:top">${fmt(netStock)} ${netStock <= 0 ? '⚠' : ''}</td>
-              <td style="padding:6px 6px;text-align:center;white-space:nowrap">
+              </td>` : ''}
+              ${visCol('growth') ? `<td style="padding:8px 8px;text-align:center;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;vertical-align:top">${fmtGrowth(p.growthRate)}</td>` : ''}
+              ${visCol('impressions') ? `<td style="padding:8px 8px;text-align:center;font-size:14px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums;vertical-align:top">${p.impressions > 0 ? fmt(p.impressions) : '—'}</td>` : ''}
+              ${visCol('ctr') ? `<td style="padding:8px 8px;text-align:right;font-size:14px;color:${p.ctr > 0 && p.ctr < 0.03 ? '#ef4444' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${p.ctr > 0 && p.ctr < 0.03 ? '700' : '600'};vertical-align:top">${fmtPct(p.ctr)}</td>` : ''}
+              ${visCol('convRate') ? `<td style="padding:8px 8px;text-align:center;font-size:14px;font-weight:${p.convRate > 0 ? '700' : '500'};color:${p.convRate > 0 && p.convRate < 0.01 ? '#ef4444' : p.convRate >= 0.02 ? '#10b981' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;vertical-align:top">${fmtPct(p.convRate)}</td>` : ''}
+              ${visCol('group') ? `<td style="padding:8px 8px;text-align:center;font-size:13px;vertical-align:top">${groupChip}</td>` : ''}
+              ${visCol('flow') ? `<td style="padding:8px 8px;text-align:center;font-size:13px;vertical-align:top">${flowHtml}</td>` : ''}
+              ${visCol('stock') ? `<td style="padding:8px 8px;text-align:center;font-size:14px;color:${netStock <= 0 ? '#ef4444' : netStock < 30 ? '#f59e0b' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${netStock <= 0 ? 700 : 600};white-space:nowrap;vertical-align:top">${fmt(netStock)} ${netStock <= 0 ? '⚠' : ''}</td>` : ''}
+              ${visCol('note') ? `<td style="padding:6px 6px;text-align:center;white-space:nowrap">
                 <button class="icon-btn" data-insight-note="${escapeHtml(p.code)}" title="${escapeHtml(hoverPreview)}" style="width:26px;height:26px;font-size:13px;${hasNote ? 'background:#fef3c7;border-radius:5px' : ''}">📝</button>
-              </td>
+              </td>` : ''}
             </tr>
           `;
         }).join('');
@@ -2517,6 +2536,19 @@ const App = {
             <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted)">上傳 3 份 Excel：商品母表 + 本週銷售 + 蝦皮表現 → 系統自動合併分析</p>
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <details id="insight-col-menu" style="position:relative" ${this._insightColMenuOpen ? 'open' : ''}>
+              <summary class="pill" style="padding:6px 12px;font-size:12px;list-style:none;cursor:pointer;user-select:none">👁 欄位 (${INSIGHT_COLS.length - hiddenCols.size}/${INSIGHT_COLS.length})</summary>
+              <div style="position:absolute;top:36px;right:0;background:white;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);padding:8px;min-width:180px;z-index:100">
+                ${INSIGHT_COLS.map(c => `
+                  <label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;font-size:12px;border-radius:5px;user-select:none" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''">
+                    <input type="checkbox" data-col-toggle="${c.key}" ${visCol(c.key) ? 'checked' : ''} style="margin:0;cursor:pointer">
+                    <span>${escapeHtml(c.label)}</span>
+                  </label>
+                `).join('')}
+                <div style="border-top:1px solid #f3f4f6;margin:6px 0 4px"></div>
+                <button id="insight-col-show-all" type="button" style="width:100%;padding:6px;border:0;background:transparent;font-size:11px;color:var(--primary);cursor:pointer;border-radius:5px;font-weight:600">顯示全部</button>
+              </div>
+            </details>
             <button id="insight-settings" class="pill" style="padding:6px 12px;font-size:12px">⚙ 分類設定</button>
             ${sales ? `<button id="insight-export" class="btn-add" style="padding:6px 12px;font-size:12px">⬇ 匯出 Excel</button>` : ''}
             ${(master || sales || perf) ? `<button id="insight-clear-all" class="pill" style="padding:6px 12px;font-size:12px">清除此賣場</button>` : ''}
@@ -2560,16 +2592,16 @@ const App = {
                 <th style="padding:0;width:4px;border-bottom:1px solid #e5e7eb"></th>
                 <th style="padding:8px 8px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-bottom:1px solid #e5e7eb">#</th>
                 <th style="padding:10px 8px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">商品編號 / 名稱 / ID</th>
-                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上上週營收</th>
-                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">本週 / 上週營收</th>
-                <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">成長率</th>
-                <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">曝光次數</th>
-                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">點擊率</th>
-                <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">轉換率</th>
-                <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">大類</th>
-                <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上週 → 本週</th>
-                <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">可用庫存</th>
-                <th style="padding:10px 6px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;width:40px">調整</th>
+                ${visCol('prevPrev') ? `<th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上上週營收</th>` : ''}
+                ${visCol('revenue') ? `<th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">本週 / 上週營收</th>` : ''}
+                ${visCol('growth') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">成長率</th>` : ''}
+                ${visCol('impressions') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">曝光次數</th>` : ''}
+                ${visCol('ctr') ? `<th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">點擊率</th>` : ''}
+                ${visCol('convRate') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">轉換率</th>` : ''}
+                ${visCol('group') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">大類</th>` : ''}
+                ${visCol('flow') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上週 → 本週</th>` : ''}
+                ${visCol('stock') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">可用庫存</th>` : ''}
+                ${visCol('note') ? `<th style="padding:10px 6px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;width:40px">調整</th>` : ''}
               </tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
@@ -3130,6 +3162,38 @@ const App = {
     // 分類門檻設定（共用）
     const settingsBtn = document.getElementById('insight-settings');
     if (settingsBtn) settingsBtn.addEventListener('click', () => this.openInsightSettingsModal());
+
+    // 欄位顯示切換
+    document.querySelectorAll('[data-col-toggle]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const key = cb.dataset.colToggle;
+        let cur = Array.isArray(this.filter.insightHiddenCols) ? this.filter.insightHiddenCols.slice() : [];
+        if (cb.checked) cur = cur.filter(k => k !== key);
+        else if (!cur.includes(key)) cur.push(key);
+        this.filter.insightHiddenCols = cur;
+        this._insightColMenuOpen = true; // re-render 時保持下拉開啟
+        this.render();
+      });
+    });
+    // 顯示全部
+    const showAllBtn = document.getElementById('insight-col-show-all');
+    if (showAllBtn) showAllBtn.addEventListener('click', () => {
+      this.filter.insightHiddenCols = [];
+      this._insightColMenuOpen = true;
+      this.render();
+    });
+    // 點下拉以外的地方關閉
+    const colMenu = document.getElementById('insight-col-menu');
+    if (colMenu) {
+      colMenu.addEventListener('toggle', () => { this._insightColMenuOpen = colMenu.open; });
+      const closeOnOutside = (e) => {
+        if (colMenu.open && !colMenu.contains(e.target)) {
+          colMenu.open = false;
+          this._insightColMenuOpen = false;
+        }
+      };
+      document.addEventListener('click', closeOnOutside, { capture: true });
+    }
 
     // 細分類篩選 pills（複選：點同一個再次取消，點「全部」清空）
     document.querySelectorAll('[data-insight-class]').forEach(btn => {
