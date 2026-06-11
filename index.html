@@ -3238,34 +3238,28 @@ const App = {
       width: '560px',
       bodyHtml: `
         <div class="field">
-          <label style="display:flex;align-items:center;justify-content:space-between">
-            <span>調整紀錄 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（新增動作會自動加日期）</span></span>
-            <button id="note-add-adj" type="button" style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:white;font-size:11px;font-weight:600;cursor:pointer">+ 新增動作</button>
-          </label>
-          <div id="note-adj-input-row" style="display:none;gap:6px;margin-bottom:8px">
+          <label><span>調整紀錄 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（按 Enter 或「送出」即可新增，自動加日期）</span></span></label>
+          <div id="note-adj-input-row" style="display:flex;gap:6px;margin-bottom:8px">
             <input type="text" id="note-new-adj" placeholder="例：調整主圖 / 加強廣告預算 +500" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:5px;font-size:12px">
             <button id="note-save-adj" type="button" style="padding:6px 12px;border:0;border-radius:5px;background:var(--primary);color:white;font-size:12px;cursor:pointer">送出</button>
           </div>
           <div id="note-adj-list" style="max-height:240px;overflow-y:auto">${adjustmentsHtml || '<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">尚無調整紀錄</div>'}</div>
         </div>
         <div class="field">
-          <label>長期備註（這個商品的特性、注意事項等）</label>
-          <textarea id="note-text" rows="3" placeholder="例：主圖偏暗，需要重拍 / 競品有 PD 認證，我們也要加" style="font-family:inherit;resize:vertical">${escapeHtml(note.text || '')}</textarea>
+          <label style="font-size:12px">長期備註<span style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:4px">（商品特性、注意事項）</span></label>
+          <textarea id="note-text" rows="2" placeholder="例：主圖偏暗需重拍 / 競品有 PD 認證" style="font-family:inherit;resize:vertical;font-size:12px;padding:6px 8px;min-height:50px">${escapeHtml(note.text || '')}</textarea>
         </div>
       `,
       saveLabel: '儲存備註',
       cancelLabel: '關閉',
       onMount: () => {
-        const addBtn = document.getElementById('note-add-adj');
-        const inputRow = document.getElementById('note-adj-input-row');
         const saveAdjBtn = document.getElementById('note-save-adj');
         const newAdjInput = document.getElementById('note-new-adj');
         const adjList = document.getElementById('note-adj-list');
 
-        addBtn.addEventListener('click', () => {
-          inputRow.style.display = 'flex';
-          newAdjInput.focus();
-        });
+        // 打開即可直接輸入
+        setTimeout(() => newAdjInput.focus(), 30);
+
         const commitAdj = () => {
           const text = newAdjInput.value.trim();
           if (!text) return;
@@ -3283,7 +3277,7 @@ const App = {
           ).join('');
           adjList.innerHTML = reRender;
           newAdjInput.value = '';
-          inputRow.style.display = 'none';
+          newAdjInput.focus();
           bindDelButtons();
         };
         saveAdjBtn.addEventListener('click', commitAdj);
