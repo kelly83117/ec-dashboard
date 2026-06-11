@@ -3467,9 +3467,9 @@ const App = {
         const commitAdj = () => {
           const text = newAdjInput.value.trim();
           if (!text) return;
-          // 防呆：1.5 秒內相同文字不重複加入
+          // 防呆：800ms 內相同文字不重複加入
           const now = Date.now();
-          if (text === lastCommittedText && (now - lastCommittedAt) < 1500) return;
+          if (text === lastCommittedText && (now - lastCommittedAt) < 800) return;
           lastCommittedText = text;
           lastCommittedAt = now;
 
@@ -3479,21 +3479,20 @@ const App = {
           note.adjustments.push({ date: dateStr, text, by: this.currentUser?.username || '' });
           adjList.innerHTML = renderAdjList();
 
-          // 視覺確認：輸入框變綠色 + 顯示 ✓ 已加入；1.2 秒後清空換下一筆
-          newAdjInput.style.transition = 'background-color .2s, border-color .2s';
+          // 視覺確認：輸入框變綠色 + 顯示 ✓ 已加入；0.5 秒後清空換下一筆
+          newAdjInput.style.transition = 'background-color .15s, border-color .15s';
           newAdjInput.style.background = '#dcfce7';
           newAdjInput.style.borderColor = '#10b981';
           const flashTimer = window.__noteFlashTimer;
           if (flashTimer) clearTimeout(flashTimer);
           window.__noteFlashTimer = setTimeout(() => {
-            // 只有在文字沒被使用者改過時才清空
             if (newAdjInput && newAdjInput.value.trim() === text) {
               newAdjInput.value = '';
             }
             newAdjInput.style.background = '';
             newAdjInput.style.borderColor = '';
             newAdjInput.focus();
-          }, 1200);
+          }, 500);
 
           autoSave();
           this.render();
