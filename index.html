@@ -7490,6 +7490,12 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
     </div>
   </div>
+  <div class="ana-overlay" id="dist-modal-overlay" onclick="if(event.target===this)closeDistModal()">
+    <div class="ana-modal" style="width:560px;max-width:96vw">
+      <div class="ana-modal-hdr"><span>階層分布圖</span><button class="ana-close-btn" onclick="closeDistModal()">✕</button></div>
+      <div class="ana-modal-body" id="dist-modal-body" style="padding:20px;overflow-y:auto;max-height:72vh"></div>
+    </div>
+  </div>
   <div class="ana-overlay" id="upload-modal-overlay" onclick="if(event.target===this)closeUploadModal()">
     <div class="ana-modal" style="width:520px;max-width:96vw">
       <div class="ana-modal-hdr"><span>上傳檔案</span><button class="ana-close-btn" onclick="closeUploadModal()">✕</button></div>
@@ -7610,6 +7616,7 @@ function shopHTML(shop){return`
     <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')">
     <span class="row-cnt" id="cnt-${shop}"></span>
     <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
+    <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
   </div>
   <div id="tbl-${shop}">
     <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">選擇區間後上傳報表，按「▶ 產生並儲存」</div></div>
@@ -8022,6 +8029,84 @@ function openUploadModal(){
   ov.classList.add('open');
 }
 function closeUploadModal(){document.getElementById('upload-modal-overlay')?.classList.remove('open');}
+
+// ── Distribution Modal ──
+function openDistModal(shop){
+  const built=state[shop]?._built;
+  if(!built||!built.length){alert('請先產生報表');return;}
+  const ov=document.getElementById('dist-modal-overlay');if(!ov)return;
+  document.getElementById('dist-modal-body').innerHTML=buildDistHtml(shop,built);
+  ov.classList.add('open');
+}
+function closeDistModal(){document.getElementById('dist-modal-overlay')?.classList.remove('open');}
+function buildDistHtml(shop,built){
+  const ads=built.filter(r=>r.adsFee>0);
+  const noAds=built.filter(r=>r.adsFee===0);
+  const total=built.length;
+  const adsTotal=ads.length;
+  const noAdsTotal=noAds.length;
+  const avgBudget=adsTotal>0?Math.round(ads.reduce((s,r)=>s+r.dayBudget,0)/adsTotal):0;
+  const pct=(n,d)=>d>0?Math.round(n/d*100)+'%':'0%';
+  const H=r=>r.pureRate*100;
+  // ads pureRate
+  const aH=(fn)=>ads.filter(fn).length;
+  const nH=(fn)=>noAds.filter(fn).length;
+  const th=(txt,bg='#1e3a8a',color='#fff')=>`<th style="background:${bg};color:${color};padding:6px 10px;font-size:12px;font-weight:600;text-align:center;border:1px solid #cbd5e1">${txt}</th>`;
+  const td=(txt,align='center',bold=false)=>`<td style="padding:5px 10px;font-size:12px;text-align:${align};border:1px solid #e2e8f0;${bold?'font-weight:700':''};">${txt}</td>`;
+  const rowHL=(label,cnt,tot,bg='#dbeafe',fg='#1e3a8a')=>`<tr style="background:${bg}"><td style="padding:5px 10px;font-size:12px;font-weight:700;color:${fg};text-align:center;border:1px solid #e2e8f0">${label}</td>${td(cnt,'center',true)}${td(pct(cnt,tot),'center',true)}</tr>`;
+  const row=(label,cnt,tot)=>`<tr><td style="padding:5px 10px;font-size:12px;text-align:center;border:1px solid #e2e8f0">${label}</td>${td(cnt)}${td(pct(cnt,tot))}</tr>`;
+  const hdStyle='background:#1e3a8a;color:#fff;padding:8px 12px;font-size:13px;font-weight:700;border-radius:6px 6px 0 0;';
+  const tblStyle='border-collapse:collapse;width:100%';
+  // ── ads section ──
+  const adsHtml=`
+  <div style="margin-bottom:20px">
+    <div style="${hdStyle}">有投廣告商品</div>
+    <table style="${tblStyle}">
+      <tbody>
+        <tr style="background:#f0f7ff"><td style="padding:5px 10px;font-size:12px;border:1px solid #e2e8f0" colspan="3"><b>總投廣商品數量</b></td><td style="padding:5px 10px;font-size:12px;font-weight:700;border:1px solid #e2e8f0" colspan="1">${adsTotal}</td></tr>
+        <tr style="background:#f0f7ff"><td style="padding:5px 10px;font-size:12px;border:1px solid #e2e8f0" colspan="3"><b>投廣日預算均值</b></td><td style="padding:5px 10px;font-size:12px;font-weight:700;border:1px solid #e2e8f0" colspan="1">NT$${avgBudget}</td></tr>
+        <tr>${th('欄位')}${th('項目（扣除廣告費）')}${th('數量')}${th('商品數量佔比 %')}</tr>
+        ${rowHL('淨利率 >20%', aH(r=>H(r)>=20), adsTotal)}
+        ${rowHL('淨利率 <20%', aH(r=>H(r)<20), adsTotal)}
+        <tr style="background:#f8f9fa"><td colspan="4" style="padding:3px 10px;font-size:11px;color:#6b7280;border:1px solid #e2e8f0">淨利率階層</td></tr>
+        ${row('< 0%', aH(r=>H(r)<0), adsTotal)}
+        ${row('0% - 10%', aH(r=>H(r)>=0&&H(r)<10), adsTotal)}
+        ${row('10% - 15%', aH(r=>H(r)>=10&&H(r)<15), adsTotal)}
+        ${row('15% - 20%', aH(r=>H(r)>=15&&H(r)<20), adsTotal)}
+        ${row('20% - 30%', aH(r=>H(r)>=20&&H(r)<30), adsTotal)}
+        ${row('> 30%', aH(r=>H(r)>=30), adsTotal)}
+        ${rowHL('日預算 >$200', aH(r=>r.dayBudget>200), adsTotal,'#fff3cd','#92400e')}
+        ${rowHL('日預算 <$200', aH(r=>r.dayBudget<=200&&r.dayBudget>0), adsTotal,'#fff3cd','#92400e')}
+        <tr style="background:#f8f9fa"><td colspan="4" style="padding:3px 10px;font-size:11px;color:#6b7280;border:1px solid #e2e8f0">日預算階層</td></tr>
+        ${row('< $100', aH(r=>r.dayBudget<100&&r.dayBudget>0), adsTotal)}
+        ${row('$100 - $200', aH(r=>r.dayBudget>=100&&r.dayBudget<200), adsTotal)}
+        ${row('$200 - $300', aH(r=>r.dayBudget>=200&&r.dayBudget<300), adsTotal)}
+        ${row('$300 - $400', aH(r=>r.dayBudget>=300&&r.dayBudget<400), adsTotal)}
+        ${row('> $400', aH(r=>r.dayBudget>=400), adsTotal)}
+      </tbody>
+    </table>
+  </div>`;
+  // ── no ads section ──
+  const noAdsHtml=`
+  <div>
+    <div style="${hdStyle}">未投廣告商品</div>
+    <table style="${tblStyle}">
+      <tbody>
+        <tr style="background:#f0f7ff"><td style="padding:5px 10px;font-size:12px;border:1px solid #e2e8f0" colspan="3"><b>未投廣商品數量</b></td><td style="padding:5px 10px;font-size:12px;font-weight:700;border:1px solid #e2e8f0">${noAdsTotal}</td></tr>
+        <tr>${th('欄位')}${th('項目（廣告費為 $0）')}${th('數量')}${th('商品數量佔比 %')}</tr>
+        <tr style="background:#f8f9fa"><td colspan="4" style="padding:3px 10px;font-size:11px;color:#6b7280;border:1px solid #e2e8f0">淨利率階層</td></tr>
+        ${row('< 0%', nH(r=>H(r)<0), noAdsTotal)}
+        ${row('0% - 10%', nH(r=>H(r)>=0&&H(r)<10), noAdsTotal)}
+        ${row('10% - 20%', nH(r=>H(r)>=10&&H(r)<20), noAdsTotal)}
+        ${row('20% - 30%', nH(r=>H(r)>=20&&H(r)<30), noAdsTotal)}
+        ${row('30% - 40%', nH(r=>H(r)>=30&&H(r)<40), noAdsTotal)}
+        ${row('> 40%', nH(r=>H(r)>=40), noAdsTotal)}
+      </tbody>
+    </table>
+  </div>`;
+  return adsHtml+noAdsHtml;
+}
+
 function onGlobalFile(event,type){
   const shop=curShop==='總表'?SHOPS[0].id:curShop;
   if(type==='map'){
