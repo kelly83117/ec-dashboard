@@ -3867,7 +3867,8 @@ const App = {
               const isToday = ds === todayStr2;
               const isWeekend = (dow === 0 || dow === 6);
               const hol = getHoliday(ds);
-              return `<div style="padding:7px 0;text-align:center;font-size:12px;line-height:1.2;border-right:1px solid #f3f4f6;background:${isToday ? '#f5f3ff' : (hol ? '#fef2f2' : (isWeekend ? '#fff7ed' : 'transparent'))};color:${hol ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text-muted)'))};font-weight:${isToday || hol ? '700' : '500'}">
+              const headerBg = isToday ? '#f5f3ff' : (hol ? '#fef2f2' : (isWeekend ? '#fff7ed' : 'transparent'));
+              return `<div data-cell-date="${escapeHtml(ds)}" title="點此新增進度（${d.getMonth()+1}/${d.getDate()}）" style="padding:7px 0;text-align:center;font-size:12px;line-height:1.2;border-right:1px solid #f3f4f6;background:${headerBg};color:${hol ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text-muted)'))};font-weight:${isToday || hol ? '700' : '500'};cursor:pointer;transition:background-color .15s" onmouseover="this.style.backgroundColor='${hol ? '#fee2e2' : (isWeekend ? '#ffedd5' : '#f3f4f6')}'" onmouseout="this.style.backgroundColor='${headerBg}'">
                 <div style="font-size:14px;font-weight:700">${d.getDate()}</div>
                 <div style="font-size:11px;color:${isWeekend || hol ? 'inherit' : '#cbd5e1'};margin-top:2px">${['日','一','二','三','四','五','六'][dow]}</div>
               </div>`;
@@ -3992,7 +3993,7 @@ const App = {
               : (isToday ? '#f5f3ff' : (isCurrentMonth ? '#fcfcfd' : '#fafafa')));
         const dayColorM = holidayNameM ? '#b91c1c' : (isWeekendM ? '#ea580c' : (isToday ? 'white' : 'var(--text-muted)'));
         return `
-          <div style="border-right:${(i+1) % 7 === 0 ? '0' : '1px solid #e5e7eb'};border-bottom:${i < (gridRows-1)*7 ? '1px solid #e5e7eb' : '0'};padding:8px 9px;min-height:130px;display:flex;flex-direction:column;background:${cellBgM};opacity:${isCurrentMonth ? 1 : 0.5}">
+          <div data-cell-date="${escapeHtml(ds)}" title="點此新增進度（${d.getMonth()+1}/${d.getDate()}）" style="border-right:${(i+1) % 7 === 0 ? '0' : '1px solid #e5e7eb'};border-bottom:${i < (gridRows-1)*7 ? '1px solid #e5e7eb' : '0'};padding:8px 9px;min-height:130px;display:flex;flex-direction:column;background:${cellBgM};opacity:${isCurrentMonth ? 1 : 0.5};cursor:pointer;transition:background-color .15s" onmouseover="this.style.backgroundColor='${holidayNameM ? '#fee2e2' : (longWkM && isWeekendM ? '#ffedd5' : '#f3f4f6')}'" onmouseout="this.style.backgroundColor='${cellBgM}'">
             <div style="display:flex;align-items:center;gap:4px;margin-bottom:6px">
               ${holidayNameM ? `<span style="font-size:10px;font-weight:600;color:#b91c1c;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(holidayNameM)}">🎉 ${escapeHtml(holidayNameM)}</span>` : ''}
               ${longWkM && !holidayNameM ? '<span style="font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;background:#fed7aa;color:#9a3412">連假</span>' : ''}
@@ -4076,7 +4077,7 @@ const App = {
         const labelColor = holidayName ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text-muted)'));
         const dateColor = holidayName ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text)'));
         return `
-          <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:${i < 4 ? '1px solid #e5e7eb' : '0'};background:${cellBg}">
+          <div data-cell-date="${escapeHtml(dateStr)}" title="點此新增進度（${d.getMonth()+1}/${d.getDate()}）" style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:${i < 4 ? '1px solid #e5e7eb' : '0'};background:${cellBg};cursor:pointer;transition:background-color .15s" onmouseover="this.style.backgroundColor='${holidayName ? '#fee2e2' : (longWk && isWeekend ? '#ffedd5' : '#f3f4f6')}'" onmouseout="this.style.backgroundColor='${cellBg}'">
             <div style="padding:10px 12px;text-align:left;border-bottom:1px solid #e5e7eb;background:${headerBg}">
               <div style="display:flex;align-items:baseline;gap:8px">
                 <div style="font-size:12px;font-weight:600;color:${labelColor};letter-spacing:.03em">${weekDayNames[i]}</div>
@@ -5647,6 +5648,15 @@ const App = {
     document.querySelectorAll('[data-cal-add]').forEach(btn => {
       btn.addEventListener('click', () => this.openDailyTaskModal(deptId));
     });
+    // 點任一格子（週 / 月 / 甘特日期表頭）→ 用該日期開啟新增 modal
+    document.querySelectorAll('[data-cell-date]').forEach(cell => {
+      cell.addEventListener('click', (e) => {
+        // 點在任務卡 / 狀態下拉 / 刪除鈕上：交給原本 handler 處理
+        if (e.target.closest('[data-cal-task]') || e.target.closest('.dp-status-select')
+            || e.target.closest('[data-cal-del]')) return;
+        this.openDailyTaskModal(deptId, null, { date: cell.dataset.cellDate });
+      });
+    });
     // 快速新增單一待辦
     document.querySelectorAll('[data-todo-quick-add]').forEach(btn => {
       btn.addEventListener('click', () => this.openQuickTodoModal(btn.dataset.todoQuickAdd));
@@ -5932,7 +5942,7 @@ const App = {
     });
   },
 
-  openDailyTaskModal(deptId, taskId) {
+  openDailyTaskModal(deptId, taskId, prefill) {
     const all = Store.get(Store.KEYS.dailyTasks, []);
     const existing = taskId ? all.find(t => t.id === taskId) : null;
     const isEdit = !!existing;
@@ -5947,7 +5957,7 @@ const App = {
 
     const t = existing || {
       employee: defaultEmp,
-      date: todayStr(),
+      date: (prefill && prefill.date) || todayStr(),
       category: TASK_CATEGORY_NAMES[0],
       subcategory: '',
       title: '',
