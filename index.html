@@ -6661,6 +6661,7 @@ const App = {
               SHOPS.forEach(function(s) {
                 if (typeof initShopUI === 'function') initShopUI(s.id);
               });
+              if(typeof renderSummary==='function') renderSummary();
             } catch(e) { console.log(e); }
           }
         }, 200);
@@ -7476,11 +7477,14 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       <h3 style="margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em">淨利表</h3>
       <p style="margin:3px 0 0;font-size:12px;color:#6b7280">上傳莫筆克銷售分析 + 蝦皮廣告報表 → 自動計算淨利</p>
     </div>
-    <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:6px 10px">
-      <span style="font-size:12px;color:#6b7280;font-weight:500">平台手續費</span>
-      <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:60px">
-      <span style="font-size:12px;color:#6b7280">%</span>
-      <span style="font-size:11px;color:#9ca3af">（修改後重新產生即套用）</span>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:6px 10px">
+        <span style="font-size:12px;color:#6b7280;font-weight:500">平台手續費</span>
+        <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:60px">
+        <span style="font-size:12px;color:#6b7280">%</span>
+        <span style="font-size:11px;color:#9ca3af">（修改後重新產生即套用）</span>
+      </div>
+      <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
     </div>
   </div>
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
@@ -7588,7 +7592,6 @@ function shopHTML(shop){return`
     <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')">
     <span class="row-cnt" id="cnt-${shop}"></span>
     <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
-    <button class="export-btn" id="exp-${shop}" onclick="doExport('${shop}')" disabled>⬇ 匯出 Excel</button>
   </div>
   <div id="tbl-${shop}">
     <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">選擇區間後上傳報表，按「▶ 產生並儲存」</div></div>
@@ -7650,7 +7653,7 @@ function tryLoadSaved(shop){
     state[shop]._built=null;
     document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">此區間尚無資料，請上傳報表產生</div></div>`;
     document.getElementById('period-tag-'+shop).textContent='';
-    document.getElementById('exp-'+shop).disabled=true;
+    if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;}
     setKpis(shop,0,0,0,0);
   }
 }
@@ -7668,7 +7671,7 @@ function loadIntoUI(shop,built,period,days){
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
   state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];
   document.getElementById('period-tag-'+shop).textContent=period;
-  document.getElementById('exp-'+shop).disabled=false;
+  if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=false;}
   applyFilters(shop);
 }
 
@@ -8800,6 +8803,12 @@ function setShop(shop,btn){
   if(wrap){
     SHOPS.forEach(s=>{const el=document.getElementById('period-row-'+s.id);if(el)el.style.display=s.id===shop?'flex':'none';});
     wrap.style.display=shop==='總表'?'none':'flex';
+  }
+  // sync global export button
+  const gb=document.getElementById('global-exp-btn');
+  if(gb){
+    if(shop==='總表'){gb.disabled=true;}
+    else{gb.disabled=!(state[shop]?._built?.length);}
   }
   if(shop==='總表')renderSummary();
 }
