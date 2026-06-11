@@ -8327,11 +8327,16 @@ function setColFilter(shop,col,type,val){
 }
 function clearColFilter(shop,col){delete(state[shop].filters||{})[col];state[shop].sorts={};applyFilters(shop);}
 function applyFpNum(shop,col,sid){
-  const min=document.getElementById('fp-min-'+sid)?.value??'';
-  const max=document.getElementById('fp-max-'+sid)?.value??'';
+  const minEl=document.getElementById('fp-min-'+sid);
+  const maxEl=document.getElementById('fp-max-'+sid);
+  console.log('[applyFpNum]',shop,col,sid,'minEl=',minEl,'maxEl=',maxEl);
+  const min=minEl?.value??'';
+  const max=maxEl?.value??'';
+  console.log('[applyFpNum] min=',min,'max=',max);
   if(!state[shop].filters)state[shop].filters={};
   if(min===''&&max===''){delete state[shop].filters[col];}
   else state[shop].filters[col]={type:'range',min:min===''?null:parseFloat(min),max:max===''?null:parseFloat(max)};
+  console.log('[applyFpNum] filter set=',JSON.stringify(state[shop].filters[col]));
   applyFilters(shop);
 }
 function applyFpTxt(shop,col,sid){
