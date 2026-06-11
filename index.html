@@ -7317,22 +7317,27 @@ tbody tr:hover td{background:#fafbff;}
 .tag-sub100{background:#fff7ed;color:#9a3412;}
 
 /* Tag filter bar */
-.tag-filter-bar{display:flex;flex-direction:column;gap:5px;padding:8px 0;border-bottom:1px solid #e5e7eb;margin-bottom:8px;}
-.tfrow{display:flex;align-items:center;gap:5px;flex-wrap:wrap;}
-.tfrow-lbl{font-size:12px;color:#9ca3af;font-weight:700;min-width:52px;flex-shrink:0;}
-.tfpill{display:inline-flex;align-items:center;gap:4px;padding:4px 11px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:13px;font-weight:600;color:#374151;transition:all .15s;user-select:none;flex-shrink:0;}
+.tag-filter-bar{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 0 8px;border-bottom:1px solid #e5e7eb;margin-bottom:8px;}
+.tfrow{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;}
+.tfrow-lbl{font-size:12px;color:#9ca3af;font-weight:700;flex-shrink:0;}
+.tfpill{display:inline-flex;align-items:center;gap:5px;padding:5px 13px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:14px;font-weight:600;color:#374151;transition:all .15s;user-select:none;flex-shrink:0;}
 .tfpill:hover{border-color:#9ca3af;background:#e9eaec;}
 .tfpill.active{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
-.tfpill-all{background:#1a1a2e;color:#fff;border-color:#1a1a2e;}
+.tfpill-all{background:#1a1a2e;color:#fff;border-color:#1a1a2e;font-size:15px;padding:5px 16px;}
 .tfpill-all:hover{opacity:.85;}
-.tfpill-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
-.tfpill-cnt{font-size:12px;font-weight:700;opacity:.8;}
+.tfpill-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.tfpill-cnt{font-size:13px;font-weight:700;opacity:.8;}
 .tfdrop-wrap{position:relative;display:inline-flex;}
 .tfdrop-menu{display:none;position:absolute;top:calc(100% + 4px);left:0;background:#fff;border:1px solid #e4e6ef;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.1);z-index:200;min-width:130px;padding:4px 0;}
 .tfdrop-menu.open{display:block;}
-.tfdrop-item{padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;display:flex;justify-content:space-between;gap:10px;color:#374151;white-space:nowrap;}
+.tfdrop-item{padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;display:flex;justify-content:space-between;gap:10px;color:#374151;white-space:nowrap;}
 .tfdrop-item:hover{background:#f3f4f6;}
 .tfdrop-item.sel{color:#4338ca;background:#eef2ff;}
+/* Note adj cell */
+.note-adj-cell{display:flex;align-items:flex-start;gap:5px;cursor:pointer;padding:5px 7px;border-radius:6px;min-width:130px;max-width:190px;transition:background .1s;}
+.note-adj-date{font-size:11px;color:#6366f1;font-weight:700;line-height:1.2;}
+.note-adj-text{font-size:13px;color:#312e81;font-weight:600;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all;}
+.note-add-popup{position:absolute;top:calc(100% + 4px);left:0;z-index:400;background:#fff;border:1px solid #e4e6ef;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.13);padding:12px 14px;min-width:230px;}
 
 /* Filter popup */
 .th-wrap{position:relative;display:inline-flex;align-items:center;gap:3px;width:100%;justify-content:flex-end;}
@@ -7886,7 +7891,7 @@ function updateTagFilterBar(shop){
   let row2='';
   if(shop==='好麻吉'){
     const gp=GROWTH_TAGS.filter(t=>counts[t.label]).map(mkPill).join('');
-    if(gp)row2=`<div class="tfrow">${allPill}<span class="tfrow-lbl">成長分析</span>${gp}</div>`;
+    if(gp)row2=`<div class="tfrow"><span class="tfrow-lbl">成長分析</span>${gp}</div>`;
   }
   bar.innerHTML=row1+row2;
 }
@@ -7981,10 +7986,39 @@ function saveEdits(shop,edits){
   try{localStorage.setItem('ec_edits|'+shop,JSON.stringify(edits));}catch{}
 }
 function getNotes(shop){
-  try{return JSON.parse(localStorage.getItem('ec_notes|'+shop)||'{}');}catch{return{};}
+  try{
+    const raw=JSON.parse(localStorage.getItem('ec_notes|'+shop)||'{}');
+    Object.keys(raw).forEach(k=>{if(typeof raw[k]==='string')raw[k]={adjustments:[{date:'',text:raw[k]}]};});
+    return raw;
+  }catch{return{};}
 }
 function saveNotes(shop,notes){
   try{localStorage.setItem('ec_notes|'+shop,JSON.stringify(notes));}catch{}
+}
+function buildNoteCell(shopKey,code,noteId,noteData){
+  let adjList=[];
+  if(noteData){if(typeof noteData==='string')adjList=[{date:'',text:noteData}];else adjList=noteData.adjustments||[];}
+  const adjMap=new Map();
+  adjList.forEach(a=>{const d=a.date||'';if(!adjMap.has(d))adjMap.set(d,[]);adjMap.get(d).push(a.text||'');});
+  const sorted=[...adjMap.keys()].filter(d=>d).sort((a,b)=>b.localeCompare(a));
+  const noDateItems=adjMap.get('')||[];
+  const hoverLines=sorted.map(d=>`${d}　${adjMap.get(d).join('、')}`);
+  if(noDateItems.length)hoverLines.push(...noDateItems);
+  const hoverText=hoverLines.join('\n');
+  const latestDate=sorted[0]||'';
+  const latestText=latestDate?adjMap.get(latestDate).join('、'):(noDateItems[0]||'');
+  const hasNote=!!latestText;
+  const bg=hasNote?'#fef3c7':'';const hBg=hasNote?'#fde68a':'#f3f4f6';
+  const ce=code.replace(/'/g,"\\'");
+  const ht=hoverText.replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  return`<td class="tl" style="padding:4px 8px;vertical-align:top">
+    <div class="note-adj-cell" id="${noteId}" title="${ht}" style="background:${bg}"
+      onmouseover="this.style.background='${hBg}'" onmouseout="this.style.background='${bg}'"
+      onclick="openNotePopup('${shopKey}','${ce}','${noteId}')">
+      ${hasNote?`<div style="flex:1;min-width:0">${latestDate?`<div class="note-adj-date">${latestDate}</div>`:''}<div class="note-adj-text">${latestText.replace(/</g,'&lt;')}</div></div><span style="font-size:13px;flex-shrink:0;margin-top:1px">📝</span>`
+      :`<div style="flex:1;color:#9ca3af;font-size:11px;padding:2px 0">點此新增</div><span style="font-size:13px;flex-shrink:0">📝</span>`}
+    </div>
+  </td>`;
 }
 
 // 開始編輯數字
@@ -8034,21 +8068,37 @@ function recalcRow(shop,code,ov){
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
 
-// 備註編輯
-function startNote(shop,code,tdId){
-  const td=document.getElementById(tdId);if(!td)return;
-  const notes=getNotes(shop);
-  const inp=document.createElement('input');
-  inp.type='text';inp.className='note-input';inp.placeholder='輸入備註…';inp.value=notes[code]||'';
-  inp.onblur=()=>commitNote(shop,code,inp.value,tdId);
-  inp.onkeydown=(e)=>{if(e.key==='Enter')inp.blur();if(e.key==='Escape')applyFilters(shop);};
-  td.innerHTML='';td.appendChild(inp);inp.focus();
+// 備註 popup
+let _notePopup=null;
+function closeNotePopup(){if(_notePopup){_notePopup.remove();_notePopup=null;}}
+document.addEventListener('click',e=>{if(_notePopup&&!_notePopup.contains(e.target)&&!e.target.closest('.note-adj-cell'))closeNotePopup();});
+function openNotePopup(shopKey,code,cellId){
+  closeNotePopup();
+  const cell=document.getElementById(cellId);if(!cell)return;
+  const now=new Date();
+  const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
+  const pop=document.createElement('div');pop.className='note-add-popup';_notePopup=pop;
+  pop.innerHTML=`<div style="font-size:11px;color:#6366f1;font-weight:700;margin-bottom:6px">${today}</div>
+    <input id="nap-inp" class="note-input" type="text" placeholder="輸入備註…" style="width:180px;display:block">
+    <div style="display:flex;gap:6px;margin-top:8px;justify-content:flex-end">
+      <button onclick="closeNotePopup()" style="padding:3px 10px;border:1px solid #e4e6ef;border-radius:6px;background:#fff;cursor:pointer;font-size:12px">取消</button>
+      <button id="nap-save" style="padding:3px 10px;border:none;border-radius:6px;background:#5b5fcf;color:#fff;cursor:pointer;font-size:12px;font-weight:700">儲存</button>
+    </div>`;
+  cell.style.position='relative';cell.appendChild(pop);
+  const inp=pop.querySelector('#nap-inp');inp.focus();
+  const save=()=>{
+    const v=inp.value.trim();if(!v)return;
+    const notes=getNotes(shopKey);
+    if(!notes[code])notes[code]={adjustments:[]};
+    if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
+    notes[code].adjustments.push({date:today,text:v});
+    saveNotes(shopKey,notes);closeNotePopup();applyFilters(shopKey.replace('_growth',''));
+  };
+  pop.querySelector('#nap-save').onclick=save;
+  inp.onkeydown=e=>{if(e.key==='Enter')save();if(e.key==='Escape')closeNotePopup();};
 }
-function commitNote(shop,code,val,tdId){
-  const notes=getNotes(shop);
-  if(val.trim())notes[code]=val.trim();else delete notes[code];
-  saveNotes(shop,notes);applyFilters(shop);
-}
+function startNote(shop,code,tdId){openNotePopup(shop,code,tdId);}
+function commitNote(shop,code,val,tdId){}
 
 // ── Render Table ──
 function renderTable(shop,list){
@@ -8100,7 +8150,6 @@ function renderTable(shop,list){
     const roiDiffStr=r.roiDiff===null?'—':`<span style="color:${r.roiDiff>=0?'#10b981':'#ef4444'};font-weight:600">${r.roiDiff.toFixed(2)}</span>`;
     const anaObj=r.analysis||{label:'',cls:''};
     const anaHtml=anaObj.label?`<span class="tag ${anaObj.cls}">${anaObj.label}</span>`:'—';
-    const note=notes[r.code]||'';
     const noteId=`note-${shop}-${r.code}`;
 
     // 可編輯數字欄 helper
@@ -8123,10 +8172,7 @@ function renderTable(shop,list){
           <button class="edit-btn" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" title="編輯">✏️</button>
         </td>
         <td colspan="11" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>
-        <td class="tl note-cell" id="${noteId}">
-          ${note?`<span>${note}</span>`:''}
-          <button class="edit-btn" onclick="startNote('${shop}','${r.code}','${noteId}')" title="加備註">📝</button>
-        </td>
+        ${buildNoteCell(shop,r.code,noteId,notes[r.code])}
         ${shop==='好麻吉'?`<td colspan="3"></td>`:''}
       </tr>`;
     }else{
@@ -8147,22 +8193,15 @@ function renderTable(shop,list){
         <td class="td-num">${r.clicks>0?r.clicks.toLocaleString():'—'}</td>
         <td class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>
         <td class="tl">${anaHtml}</td>
-        <td class="tl note-cell" id="${noteId}">
-          ${note?`<span style="color:#374151">${note}</span>`:''}
-          <button class="edit-btn" onclick="startNote('${shop}','${r.code}','${noteId}')" title="加備註">📝</button>
-        </td>
+        ${buildNoteCell(shop,r.code,noteId,notes[r.code])}
         ${shop==='好麻吉'?(()=>{
           const gnoteId=`gnote-${shop}-${r.code}`;
-          const gnote=getNotes(shop+'_growth')[r.code]||'';
           return `
           <td class="td-num" style="text-align:center">
             ${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}
           </td>
           <td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>
-          <td class="tl note-cell" id="${gnoteId}">
-            ${gnote?`<span style="color:#374151">${gnote}</span>`:''}
-            <button class="edit-btn" onclick="startNote('${shop}_growth','${r.code}','${gnoteId}')" title="加備註">📝</button>
-          </td>`;
+          ${buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code])}`;
         })():''}
       </tr>`;
     }
