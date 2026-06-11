@@ -7198,6 +7198,36 @@ if (window.__cloudStore) {
       removeFields: (keys) => restDeleteFields(keys),
       subscribe: (cb) => onSnapshot(docRef, snap => cb(snap.exists() ? snap.data() : {})),
     };
+
+    // ============== 淨利表獨立文件 app/profit（避免 app/main 撞 1MB 上限） ==============
+    const profitDocRef = doc(db, 'app', 'profit');
+    const PROFIT_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
+      + '/databases/(default)/documents/app/profit';
+    const restDeleteProfitFields = async (keys) => {
+      const params = keys.map(k => 'updateMask.fieldPaths=' + encodeURIComponent('`' + k + '`')).join('&');
+      const url = PROFIT_REST_BASE + '?' + params;
+      const resp = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{"fields":{}}' });
+      if (!resp.ok) throw new Error('REST delete failed: ' + resp.status);
+      return resp.json();
+    };
+    window.__cloudProfit = {
+      getDoc: () => getDoc(profitDocRef),
+      setField: (key, value) => setDoc(profitDocRef, { [key]: value }, { merge: true }),
+      removeFields: (keys) => restDeleteProfitFields(keys),
+      subscribe: (cb) => onSnapshot(profitDocRef, snap => cb(snap.exists() ? snap.data() : {})),
+    };
+    // 訂閱 profit doc → 寫入 Store._profitMem，提供 lsLoad/_cloudRead 讀取
+    try {
+      Store._profitMem = Store._profitMem || {};
+      onSnapshot(profitDocRef, snap => {
+        Store._profitMem = snap.exists() ? (snap.data() || {}) : {};
+        // 淨利表資料變動 → 觸發 re-render 讓畫面同步
+        if (window.App && App.currentUser && typeof App.render === 'function') {
+          try { App.render(); } catch {}
+        }
+      });
+    } catch (e) { console.warn('profit subscribe failed', e); }
+
     window.dispatchEvent(new Event('cloudStoreReady'));
   } catch (e) {
     console.error('Firebase init failed:', e);
@@ -7583,19 +7613,21 @@ function lsSave(shop,month,half,built,period,days){
   const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
   // 1) 本地（離線時還可看到）
   try{localStorage.setItem(lsKey(shop,month,half),JSON.stringify(payload));}catch(e){alert('儲存失敗');}
-  // 2) 雲端（讓其他電腦看到）
-  try{ if(window.__cloudStore) window.__cloudStore.setField(lsKey(shop,month,half),payload); }catch{}
+  // 2) 雲端（淨利表用獨立的 app/profit 文件，避免 app/main 撞 1MB 上限）
+  try{ if(window.__cloudProfit) window.__cloudProfit.setField(lsKey(shop,month,half),payload); }catch{}
 }
 function lsLoad(shop,month,half){
   const k=lsKey(shop,month,half);
-  // 雲端有資料就用雲端（Store._mem 是訂閱回呼帶下來的整份雲端 doc）
+  // 雲端優先：先看新的 profit doc，再 fallback 到舊的 main doc（過渡期相容）
+  try{ if(window.Store && Store._profitMem && Store._profitMem[k]) return Store._profitMem[k]; }catch{}
   try{ if(window.Store && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
-  // 否則 fallback 到本地
   try{const d=localStorage.getItem(k);return d?JSON.parse(d):null;}catch{return null;}
 }
 function lsHasAny(shop){
-  // 雲端 + 本地任一邊有就算有
   try{
+    if(window.Store && Store._profitMem){
+      for(const k of Object.keys(Store._profitMem)){ if(k.startsWith(`ec|${shop}|`)) return true; }
+    }
     if(window.Store && Store._mem){
       for(const k of Object.keys(Store._mem)){ if(k.startsWith(`ec|${shop}|`)) return true; }
     }
@@ -7608,41 +7640,58 @@ function lsHasAny(shop){
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
 
-// ── 一次性 backfill：把舊資料 (僅在 localStorage) 推到雲端，讓其他電腦看得到 ──
-// v2：除了 ec|/ec_edits|/ec_notes|，再加上 ec_ana_*、ec_growth_*、ec_hcols|*
+// ── v3 一次性遷移：把淨利表資料從 app/main 搬到 app/profit、本地推上去、清掉 app/main 的舊欄位 ──
 (function backfillProfitToCloud(){
-  const FLAG='ec.profit_backfilled_v2';
+  const FLAG='ec.profit_backfilled_v3';
   const PREFIXES=['ec|','ec_edits|','ec_notes|','ec_ana_','ec_growth_','ec_hcols|'];
   function isProfitKey(k){ return PREFIXES.some(p=>k.startsWith(p)); }
-  function doBackfill(){
+  async function doBackfill(){
     try{
       if(localStorage.getItem(FLAG)==='1') return;
-      if(!window.__cloudStore) return;
-      const pushKeys=[];
+      if(!window.__cloudStore || !window.__cloudProfit) return;
+
+      // 1) 抓 app/main 和 app/profit 的現況
+      const [mainSnap, profitSnap] = await Promise.all([
+        window.__cloudStore.getDoc(),
+        window.__cloudProfit.getDoc(),
+      ]);
+      const mainData = (mainSnap && mainSnap.exists()) ? (mainSnap.data()||{}) : {};
+      const profitData = (profitSnap && profitSnap.exists()) ? (profitSnap.data()||{}) : {};
+
+      // 2) 從 app/main 搬到 app/profit（雲端為主，覆蓋本地）
+      const fromMain = Object.keys(mainData).filter(isProfitKey);
+      let moved = 0;
+      for(const k of fromMain){
+        if(profitData[k]!==undefined) continue; // app/profit 已有，不蓋
+        try{ await window.__cloudProfit.setField(k, mainData[k]); moved++; }catch(e){ console.warn('搬移失敗', k, e); }
+      }
+      // 搬完後刪除 app/main 的舊欄位，釋放 1MB 額度
+      if(fromMain.length>0){
+        try{ await window.__cloudStore.removeFields(fromMain); console.log('[淨利表] 已從 app/main 清掉', fromMain.length, '個淨利表欄位'); }
+        catch(e){ console.warn('清掉 app/main 失敗', e); }
+      }
+
+      // 3) 本地有但雲端兩邊都沒有的 → 推到 app/profit
+      const localKeys=[];
       for(let i=0;i<localStorage.length;i++){
         const k=localStorage.key(i);
-        if(!k) continue;
-        if(isProfitKey(k)) pushKeys.push(k);
+        if(k && isProfitKey(k)) localKeys.push(k);
       }
-      if(pushKeys.length===0){ try{localStorage.setItem(FLAG,'1');}catch{} return; }
-      // 跟雲端比對，雲端沒有的才推（避免覆蓋同事更新的版本）
-      Promise.resolve(window.__cloudStore.getDoc()).then(snap=>{
-        const cloudData=(snap && typeof snap.data==='function')?(snap.data()||{}):{};
-        let pushed=0;
-        pushKeys.forEach(k=>{
-          if(cloudData[k]!==undefined) return; // 雲端已有，不覆蓋
-          try{
-            const val=JSON.parse(localStorage.getItem(k));
-            window.__cloudStore.setField(k,val);
-            pushed++;
-          }catch{}
-        });
-        console.log('[淨利表] backfill v2 完成，推上雲端', pushed, '/', pushKeys.length, '筆');
-        try{localStorage.setItem(FLAG,'1');}catch{}
-      }).catch(err=>{ console.warn('[淨利表] backfill 失敗', err); });
-    }catch(err){ console.warn('[淨利表] backfill 例外', err); }
+      let pushed=0;
+      for(const k of localKeys){
+        if(profitData[k]!==undefined || mainData[k]!==undefined) continue;
+        try{
+          const val=JSON.parse(localStorage.getItem(k));
+          await window.__cloudProfit.setField(k,val);
+          pushed++;
+        }catch{}
+      }
+
+      console.log(`[淨利表] backfill v3 完成：從 main 搬 ${moved} 筆、本地新推 ${pushed} 筆`);
+      try{localStorage.setItem(FLAG,'1');}catch{}
+    }catch(err){ console.warn('[淨利表] backfill v3 失敗', err); }
   }
-  if(window.__cloudStore){ doBackfill(); }
+  if(window.__cloudStore && window.__cloudProfit){ doBackfill(); }
   else{ window.addEventListener('cloudStoreReady', doBackfill, { once:true }); }
 })();
 
@@ -7986,8 +8035,16 @@ function buildShop(shop,days){
 
 // ── 分析規則設定（雲端同步） ──
 const ANA_THRESH_DEF={clickMin:100,dangerMaxH:10,highMinH:30,badAdsMaxH:10,add300:3,add200:2,add100:1,add50:0,sub300:-3,sub200:-2,sub100:-1};
-function _cloudRead(k){ try{ if(window.Store && Store._mem && Store._mem[k]!==undefined) return Store._mem[k]; }catch{} try{ const raw=localStorage.getItem(k); return raw?JSON.parse(raw):undefined; }catch{return undefined;} }
-function _cloudWrite(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch{} try{ if(window.__cloudStore) window.__cloudStore.setField(k,v); }catch{} }
+function _cloudRead(k){
+  // 雲端優先：profit 文件 > 過渡期 main 文件 > 本地
+  try{ if(window.Store && Store._profitMem && Store._profitMem[k]!==undefined) return Store._profitMem[k]; }catch{}
+  try{ if(window.Store && Store._mem && Store._mem[k]!==undefined) return Store._mem[k]; }catch{}
+  try{ const raw=localStorage.getItem(k); return raw?JSON.parse(raw):undefined; }catch{return undefined;}
+}
+function _cloudWrite(k,v){
+  try{localStorage.setItem(k,JSON.stringify(v));}catch{}
+  try{ if(window.__cloudProfit) window.__cloudProfit.setField(k,v); }catch{}
+}
 function getAnaThresh(){const v=_cloudRead('ec_ana_thresh'); return Object.assign({},ANA_THRESH_DEF,v||{});}
 function saveAnaThresh(t){_cloudWrite('ec_ana_thresh',t);}
 function getCustomAnaRules(){return _cloudRead('ec_ana_custom')||[];}
@@ -8622,13 +8679,14 @@ function closePopup(){if(openPopup){openPopup.remove();openPopup=null;document.r
 // 雲端優先：寫入時同時存本地與雲端；讀取時優先用雲端 Store._mem
 function getEdits(shop){
   const k='ec_edits|'+shop;
+  try{ if(window.Store && Store._profitMem && Store._profitMem[k]) return Store._profitMem[k]; }catch{}
   try{ if(window.Store && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
   try{return JSON.parse(localStorage.getItem(k)||'{}');}catch{return{};}
 }
 function saveEdits(shop,edits){
   const k='ec_edits|'+shop;
   try{localStorage.setItem(k,JSON.stringify(edits));}catch{}
-  try{ if(window.__cloudStore) window.__cloudStore.setField(k,edits); }catch{}
+  try{ if(window.__cloudProfit) window.__cloudProfit.setField(k,edits); }catch{}
 }
 function getNotes(shop){
   const k='ec_notes|'+shop;
@@ -8637,13 +8695,14 @@ function getNotes(shop){
     Object.keys(raw||{}).forEach(c=>{ if(typeof raw[c]==='string') raw[c]={adjustments:[{date:'',text:raw[c]}]}; });
     return raw||{};
   };
+  try{ if(window.Store && Store._profitMem && Store._profitMem[k]) return migrate(JSON.parse(JSON.stringify(Store._profitMem[k]))); }catch{}
   try{ if(window.Store && Store._mem && Store._mem[k]) return migrate(JSON.parse(JSON.stringify(Store._mem[k]))); }catch{}
   try{ return migrate(JSON.parse(localStorage.getItem(k)||'{}')); }catch{return{};}
 }
 function saveNotes(shop,notes){
   const k='ec_notes|'+shop;
   try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
-  try{ if(window.__cloudStore) window.__cloudStore.setField(k,notes); }catch{}
+  try{ if(window.__cloudProfit) window.__cloudProfit.setField(k,notes); }catch{}
 }
 function buildNoteCell(shopKey,code,noteId,noteData){
   let adjList=[];
