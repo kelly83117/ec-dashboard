@@ -7529,6 +7529,16 @@ function tryLoadSaved(shop){
   }
 }
 function loadIntoUI(shop,built,period,days){
+  if(built&&Array.isArray(built)){
+    built.forEach(r=>{
+      if(!r.analysis){
+        r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
+      }
+      if(shop==='好麻吉'&&!r.growthAnalysis){
+        r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
+      }
+    });
+  }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
   state[shop].filters={};state[shop].sorts={};
   document.getElementById('period-tag-'+shop).textContent=period;
