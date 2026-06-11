@@ -7317,14 +7317,16 @@ tbody tr:hover td{background:#fafbff;}
 .tag-sub100{background:#fff7ed;color:#9a3412;}
 
 /* Tag filter bar */
-.tag-filter-bar{display:flex;flex-wrap:wrap;gap:6px;padding:10px 0 8px;border-bottom:1px solid #e5e7eb;margin-bottom:8px;}
-.tfpill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:12px;font-weight:600;color:#374151;transition:all .15s;user-select:none;}
-.tfpill:hover{border-color:#9ca3af;}
+.tag-filter-bar{display:flex;align-items:center;gap:5px;padding:8px 0 8px;border-bottom:1px solid #e5e7eb;margin-bottom:8px;overflow-x:auto;scrollbar-width:none;flex-wrap:nowrap;white-space:nowrap;}
+.tag-filter-bar::-webkit-scrollbar{display:none;}
+.tfpill{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:12px;font-weight:600;color:#374151;transition:all .15s;user-select:none;flex-shrink:0;}
+.tfpill:hover{border-color:#9ca3af;background:#e9eaec;}
 .tfpill.active{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
-.tfpill-all{background:#f9fafb;border-color:#e5e7eb;}
-.tfpill-all.active{background:#1a1a2e;color:#fff;border-color:#1a1a2e;}
-.tfpill-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
-.tfpill-cnt{font-size:11px;opacity:.75;font-weight:700;}
+.tfpill-all{background:#1a1a2e;color:#fff;border-color:#1a1a2e;}
+.tfpill-all.active,.tfpill-all:hover{background:#1a1a2e;opacity:.85;border-color:#1a1a2e;color:#fff;}
+.tfpill-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.tfpill-cnt{font-size:11px;font-weight:700;opacity:.8;}
+.tfbar-sep{width:1px;height:18px;background:#d1d5db;flex-shrink:0;margin:0 2px;}
 
 /* Filter popup */
 .th-wrap{position:relative;display:inline-flex;align-items:center;gap:3px;width:100%;justify-content:flex-end;}
@@ -7851,15 +7853,16 @@ function updateTagFilterBar(shop){
     const a=r.analysis?.label;if(a)counts[a]=(counts[a]||0)+1;
     const g=r.growthAnalysis?.label;if(g)counts[g]=(counts[g]||0)+1;
   });
-  const allTags=[...ANA_TAGS,...(shop==='好麻吉'?GROWTH_TAGS:[])];
-  const pills=allTags.filter(t=>counts[t.label]).map(t=>{
+  const mkPill=(t)=>{
     const active=cur===t.label?' active':'';
-    return`<span class="tfpill${active}" onclick="setTagFilter('${shop}','${t.label.replace(/'/g,"\\'")}')" title="${t.label}">
-      <span class="tfpill-dot" style="background:${t.dot}"></span>${t.label}<span class="tfpill-cnt">${counts[t.label]}</span>
-    </span>`;
-  }).join('');
+    const lbl=t.label.replace(/'/g,"\\'");
+    return`<span class="tfpill${active}" onclick="setTagFilter('${shop}','${lbl}')" title="${t.label}"><span class="tfpill-dot" style="background:${t.dot}"></span>${t.label} <span class="tfpill-cnt">${counts[t.label]}</span></span>`;
+  };
+  const anaPills=ANA_TAGS.filter(t=>counts[t.label]).map(mkPill).join('');
+  const growthPills=shop==='好麻吉'?GROWTH_TAGS.filter(t=>counts[t.label]).map(mkPill).join(''):'';
+  const sep=(anaPills&&growthPills)?'<span class="tfbar-sep"></span>':'';
   const total=built.length;
-  bar.innerHTML=`<span class="tfpill tfpill-all${cur===null?' active':''}" onclick="setTagFilter('${shop}',null)">全部 <span class="tfpill-cnt">${total}</span></span>${pills}`;
+  bar.innerHTML=`<span class="tfpill tfpill-all" onclick="setTagFilter('${shop}',null)">全部 <span class="tfpill-cnt">${total}</span></span>${anaPills}${sep}${growthPills}`;
 }
 
 // ── Filters & Sort ──
