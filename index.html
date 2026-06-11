@@ -7230,7 +7230,6 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 
 .shop-content{display:none;}
 .shop-content.active{display:block;}
-.sub-id{font-size:11px;color:#9ca3af;font-family:'DM Mono',monospace;margin-top:2px;line-height:1.3;}
 .sub-rev{font-size:11px;color:#9ca3af;font-family:'DM Mono',monospace;margin-top:2px;line-height:1.3;}
 
 /* Period */
@@ -7293,10 +7292,11 @@ th.tl{text-align:left;}
 td{padding:11px 18px;border-bottom:1px solid #f0f2f7;text-align:right;color:#374151;white-space:nowrap;font-size:13px;}
 td.tl{text-align:left;}
 tbody tr:hover td{background:#fafbff;}
-.td-code{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:#374151;min-width:60px;padding-right:6px;white-space:nowrap;}
+.td-code{font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#374151;min-width:60px;padding-right:6px;white-space:nowrap;}
 .td-id{font-family:'DM Mono',monospace;font-size:12px;color:#9ca3af;min-width:140px;padding-right:16px;}
-.td-name{font-weight:700;color:#1a1a2e;white-space:nowrap;min-width:220px;max-width:320px;overflow:hidden;text-overflow:ellipsis;font-size:13px;}
-.td-num{font-family:'DM Mono',monospace;font-size:14px;font-weight:600;min-width:90px;}
+.td-name{font-weight:700;color:#1a1a2e;white-space:nowrap;min-width:220px;max-width:320px;overflow:hidden;text-overflow:ellipsis;font-size:15px;}
+.td-num{font-family:'DM Mono',monospace;font-size:14px;font-weight:700;min-width:90px;}
+.sub-id{font-size:11px;color:#9ca3af;font-family:'DM Mono',monospace;margin-top:1px;line-height:1.2;}
 .td-pos{color:#10b981;font-weight:600;}.td-neg{color:#ef4444;font-weight:600;}.td-amber{color:#f59e0b;}
 .tr-total td{background:#f0f4ff !important;font-weight:700;border-top:2px solid #c7d2fe;}
 .tr-no-rev td{color:#9ca3af;}
@@ -8047,8 +8047,8 @@ function renderTable(shop,list){
           const gnoteId=`gnote-${shop}-${r.code}`;
           const gnote=getNotes(shop+'_growth')[r.code]||'';
           return `
-          <td class="td-num ${r.growthRate===null?'growth-na':r.growthRate>=0?'growth-pos':'growth-neg'}">
-            ${r.growthRate!==null?(r.growthRate>=0?'+':'')+(r.growthRate*100).toFixed(2)+'%':'—'}
+          <td class="td-num" style="text-align:center">
+            ${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}
           </td>
           <td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>
           <td class="tl note-cell" id="${gnoteId}">
@@ -8075,7 +8075,7 @@ function renderTable(shop,list){
     <td colspan="9"></td>
     <td></td>
     ${shop==='好麻吉'?`
-    <td class="td-num ${fGrowth===null?'growth-na':fGrowth>=0?'growth-pos':'growth-neg'}">${fGrowth!==null?(fGrowth>=0?'+':'')+(fGrowth*100).toFixed(2)+'%':'—'}</td>
+    <td class="td-num" style="text-align:center">${fGrowth===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${fGrowth>=0?'#10b981':'#ef4444'};font-weight:700">${fGrowth>=0?'↑':'↓'} ${Math.abs(fGrowth*100).toFixed(0)}%</span>`}</td>
     <td></td><td></td>`:''}
   </tr></tbody></table></div>`;
   document.getElementById('tbl-'+shop).innerHTML=html;
