@@ -7764,17 +7764,18 @@ function buildShop(shop,days){
 // $D=廣告費, $H=淨利率, $K=目標ROI, $N=實際-目標, $O=點擊數
 function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit){
   const D=adsFee, H=pureRate, K=targetROI, N=roiDiff, O=clicks;
+  // $D=廣告費 $H=淨利率 $K=目標ROI $N=實際-目標 $O=點擊數
   if(D===0 && H>=0 && H<0.1) return{label:'危險商品',cls:'tag-danger'};
   if(D===0 && H>0.3) return{label:'高利潤商品',cls:'tag-high'};
-  if(D===0 && (K===null||K===undefined)) return{label:'低淨利',cls:'tag-low'};
+  if(D===0 && (N===null||N===undefined||!isFinite(N))) return{label:'低淨利',cls:'tag-low'};
   if(D>0 && H<0) return{label:'賠錢中',cls:'tag-lose'};
-  if(D>0 && pureProfit<0) return{label:'低淨利',cls:'tag-low'};
+  if(D>0 && K!==null && K!==undefined && K<0) return{label:'低淨利',cls:'tag-low'};
   if(D>0 && H>=0 && H<0.1) return{label:'低效廣告',cls:'tag-bad'};
   if(N===null||N===undefined||!isFinite(N)||O<100) return{label:'',cls:''};
   if(N>=3) return{label:'加300',cls:'tag-add300'};
   if(N>=2) return{label:'加200',cls:'tag-add200'};
   if(N>=1) return{label:'加100',cls:'tag-add100'};
-  if(N>=0) return{label:'加50',cls:'tag-add50'};
+  if(N>=0&&N<1) return{label:'加50',cls:'tag-add50'};
   if(N<=-3) return{label:'減300',cls:'tag-sub300'};
   if(N<=-2) return{label:'減200',cls:'tag-sub200'};
   if(N<=-1) return{label:'減100',cls:'tag-sub100'};
