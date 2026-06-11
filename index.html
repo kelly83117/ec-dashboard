@@ -7376,7 +7376,7 @@ tbody tr:hover td{background:#fafbff;}
 .th-wrap.tl{justify-content:flex-start;}
 .filter-btn{background:none;border:none;cursor:pointer;color:#d1d5db;font-size:11px;padding:0 2px;line-height:1;transition:color .12s;}
 .filter-btn:hover,.filter-btn.on{color:#5b5fcf;}
-.filter-popup{display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:100;background:#fff;border:1px solid #e4e6ef;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.12);padding:12px;min-width:170px;}
+.filter-popup{display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:100;background:#fff;border:1px solid #e4e6ef;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.12);padding:14px;min-width:230px;}
 .filter-popup.tl{right:auto;left:0;}
 .filter-popup.open{display:block;}
 .filter-popup-title{font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;}
@@ -7388,6 +7388,58 @@ tbody tr:hover td{background:#fafbff;}
 .fp-sort-btn.on{background:#5b5fcf;border-color:#5b5fcf;color:#fff;}
 .fp-clear{width:100%;margin-top:6px;padding:6px;border:1px solid #e4e6ef;border-radius:6px;background:#fff;font-size:12px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;color:#9ca3af;}
 .fp-clear:hover{color:#ef4444;border-color:#ef4444;}
+.fp-confirm-row{display:flex;gap:6px;margin-top:6px;}
+.fp-confirm{flex:1;padding:7px;background:#5b5fcf;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;font-weight:600;}
+.fp-confirm:hover{background:#4d52b8;}
+.fp-clear2{flex:1;padding:7px;border:1px solid #e4e6ef;border-radius:6px;background:#fff;font-size:12px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;color:#9ca3af;}
+.fp-clear2:hover{color:#ef4444;border-color:#ef4444;}
+.fp-label{font-size:12px;color:#6b7280;margin-bottom:2px;display:block;}
+
+/* ── Ana Settings Modal ── */
+.ana-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;}
+.ana-overlay.open{display:flex;}
+.ana-modal{background:#fff;border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.22);width:640px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;}
+.ana-modal-hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 14px;border-bottom:1px solid #e4e6ef;}
+.ana-modal-title{font-size:15px;font-weight:700;color:#1f2937;}
+.ana-modal-x{background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af;padding:2px 8px;border-radius:5px;}
+.ana-modal-x:hover{color:#374151;background:#f3f4f6;}
+.ana-modal-body{flex:1;overflow-y:auto;padding:18px 22px;}
+.ana-sec-hdr{font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.07em;text-transform:uppercase;margin:16px 0 8px;padding-bottom:5px;border-bottom:1px solid #f3f4f6;}
+.ana-sec-hdr:first-child{margin-top:0;}
+.ana-rule-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f9fafb;}
+.ana-rule-tag{min-width:82px;text-align:center;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;flex-shrink:0;}
+.ana-rule-desc{flex:1;font-size:13px;color:#374151;line-height:2.2;}
+.ana-rule-desc input[type=number]{width:58px;padding:2px 6px;border:1px solid #d1d5db;border-radius:5px;font-size:13px;background:#f8f9fc;text-align:center;font-family:monospace;}
+.ana-rule-desc input[type=number]:focus{outline:none;border-color:#5b5fcf;}
+.ana-rule-del{background:none;border:none;cursor:pointer;color:#d1d5db;font-size:14px;padding:4px 6px;border-radius:4px;flex-shrink:0;}
+.ana-rule-del:hover{color:#ef4444;background:#fef2f2;}
+.ana-custom-empty{color:#9ca3af;font-size:13px;font-style:italic;padding:6px 0;}
+.ana-add-box{margin-top:14px;padding:14px 16px;border:1.5px dashed #e4e6ef;border-radius:10px;background:#fafbff;}
+.ana-add-box-title{font-size:12px;font-weight:700;color:#5b5fcf;margin-bottom:10px;}
+.ana-field-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;}
+.ana-field-row label{font-size:12px;color:#6b7280;min-width:44px;}
+.ana-field-row input[type=text]{padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:#fff;font-family:'Noto Sans TC',sans-serif;outline:none;min-width:120px;}
+.ana-field-row select{padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:#fff;font-family:'Noto Sans TC',sans-serif;outline:none;}
+.ana-field-row input[type=text]:focus,.ana-field-row select:focus{border-color:#5b5fcf;}
+.ana-conds-wrap{margin-bottom:8px;}
+.ana-cond-row{display:flex;gap:5px;align-items:center;margin-bottom:6px;}
+.ana-cond-row select{padding:5px 7px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;background:#fff;font-family:'Noto Sans TC',sans-serif;outline:none;}
+.ana-cond-row input[type=number]{width:72px;padding:5px 7px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;outline:none;font-family:monospace;}
+.ana-cond-row select:focus,.ana-cond-row input:focus{border-color:#5b5fcf;}
+.ana-cond-f{width:120px!important;}.ana-cond-op{width:54px!important;}
+.ana-cond-del{background:none;border:none;cursor:pointer;color:#d1d5db;font-size:13px;padding:2px 5px;}
+.ana-cond-del:hover{color:#ef4444;}
+.ana-add-cond-btn{font-size:12px;color:#6b7280;border:1px dashed #d1d5db;background:none;border-radius:5px;padding:4px 12px;cursor:pointer;margin-bottom:10px;}
+.ana-add-cond-btn:hover{border-color:#5b5fcf;color:#5b5fcf;}
+.ana-submit-row{display:flex;gap:8px;}
+.ana-add-rule-btn{padding:7px 18px;background:#5b5fcf;color:#fff;border:none;border-radius:7px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;font-weight:600;}
+.ana-add-rule-btn:hover{background:#4d52b8;}
+.ana-modal-ftr{padding:12px 20px;border-top:1px solid #e4e6ef;display:flex;justify-content:flex-end;gap:8px;}
+.ana-save-btn{padding:9px 24px;background:#5b5fcf;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Noto Sans TC',sans-serif;}
+.ana-save-btn:hover{background:#4d52b8;}
+.ana-cancel-btn{padding:9px 18px;background:#f3f4f6;color:#6b7280;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;}
+.ana-gear-btn{background:none;border:none;cursor:pointer;font-size:13px;color:#9ca3af;padding:1px 5px;border-radius:4px;vertical-align:middle;margin-left:2px;line-height:1;}
+.ana-gear-btn:hover{color:#5b5fcf;background:#eff0ff;}
 
 .pill{display:inline-block;padding:2px 9px;border-radius:10px;font-size:12px;font-weight:600;}
 .ph{background:#d1fae5;color:#065f46;}.pm{background:#fef3c7;color:#92400e;}.pl{background:#fee2e2;color:#991b1b;}.pn{background:#f3f4f6;color:#9ca3af;}
@@ -7844,26 +7896,185 @@ function buildShop(shop,days){
   return built;
 }
 
+// ── 分析規則設定 ──
+const ANA_THRESH_DEF={clickMin:100,dangerMaxH:10,highMinH:30,badAdsMaxH:10,add300:3,add200:2,add100:1,add50:0,sub300:-3,sub200:-2,sub100:-1};
+function getAnaThresh(){try{return Object.assign({},ANA_THRESH_DEF,JSON.parse(localStorage.getItem('ec_ana_thresh')||'{}'));}catch{return{...ANA_THRESH_DEF};}}
+function saveAnaThresh(t){localStorage.setItem('ec_ana_thresh',JSON.stringify(t));}
+function getCustomAnaRules(){try{return JSON.parse(localStorage.getItem('ec_ana_custom')||'[]');}catch{return[];}}
+function saveCustomAnaRules(r){localStorage.setItem('ec_ana_custom',JSON.stringify(r));}
+function evalAnaConds(conds,vals){
+  if(!conds||!conds.length)return false;
+  return conds.every(c=>{
+    const v=vals[c.f];if(v===null||v===undefined)return false;
+    const cv=parseFloat(c.v);
+    if(c.op==='>')return v>cv;if(c.op==='>=')return v>=cv;
+    if(c.op==='<')return v<cv;if(c.op==='<=')return v<=cv;
+    if(c.op==='=')return v===cv;if(c.op==='!=')return v!==cv;
+    return false;
+  });
+}
+
 // ── 分析公式 ──
-// $D=廣告費, $H=淨利率, $K=目標ROI, $N=實際-目標, $O=點擊數
+// $D=廣告費, $H=淨利率%, $K=目標ROI, $N=實際-目標, $O=點擊數, $P=純利
 function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit){
-  const D=adsFee, H=pureRate, K=targetROI, N=roiDiff, O=clicks;
-  // $D=廣告費 $H=淨利率 $K=目標ROI $N=實際-目標 $O=點擊數
-  if(D===0 && H>=0 && H<0.1) return{label:'危險商品',cls:'tag-danger'};
-  if(D===0 && H>0.3) return{label:'高利潤商品',cls:'tag-high'};
+  const t=getAnaThresh();
+  const D=adsFee, H=pureRate*100, K=targetROI, N=roiDiff, O=clicks, P=pureProfit;
+  if(D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
+  if(D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
   if(D===0 && (N===null||N===undefined||!isFinite(N))) return{label:'低淨利',cls:'tag-low'};
   if(D>0 && H<0) return{label:'賠錢中',cls:'tag-lose'};
   if(D>0 && K!==null && K!==undefined && K<0) return{label:'低淨利',cls:'tag-low'};
-  if(D>0 && H>=0 && H<0.1) return{label:'低效廣告',cls:'tag-bad'};
-  if(N===null||N===undefined||!isFinite(N)||O<100) return{label:'',cls:''};
-  if(N>=3) return{label:'加300',cls:'tag-add300'};
-  if(N>=2) return{label:'加200',cls:'tag-add200'};
-  if(N>=1) return{label:'加100',cls:'tag-add100'};
-  if(N>=0&&N<1) return{label:'加50',cls:'tag-add50'};
-  if(N<=-3) return{label:'減300',cls:'tag-sub300'};
-  if(N<=-2) return{label:'減200',cls:'tag-sub200'};
-  if(N<=-1) return{label:'減100',cls:'tag-sub100'};
+  if(D>0 && H>=0 && H<t.badAdsMaxH) return{label:'低效廣告',cls:'tag-bad'};
+  // 自訂標籤（在加減碼前判斷）
+  for(const ct of getCustomAnaRules()){
+    if(evalAnaConds(ct.conds,{D,H,K,N,O,P}))return{label:ct.label,cls:ct.cls||'tag-add100'};
+  }
+  if(N===null||N===undefined||!isFinite(N)||O<t.clickMin) return{label:'',cls:''};
+  if(N>=t.add300) return{label:'加300',cls:'tag-add300'};
+  if(N>=t.add200) return{label:'加200',cls:'tag-add200'};
+  if(N>=t.add100) return{label:'加100',cls:'tag-add100'};
+  if(N>=t.add50&&N<t.add100) return{label:'加50',cls:'tag-add50'};
+  if(N<=t.sub300) return{label:'減300',cls:'tag-sub300'};
+  if(N<=t.sub200) return{label:'減200',cls:'tag-sub200'};
+  if(N<=t.sub100) return{label:'減100',cls:'tag-sub100'};
   return{label:'',cls:''};
+}
+
+// ── 分析設定 Modal ──
+let _anaNewConds=[];
+const ANA_FIELD_OPTS=[
+  {v:'D',l:'廣告費(D)'},{v:'H',l:'淨利率%(H)'},{v:'K',l:'目標ROI(K)'},
+  {v:'N',l:'實際-目標(N)'},{v:'O',l:'點擊數(O)'},{v:'P',l:'純利(P)'}
+];
+const ANA_CLS_OPTS=[
+  {v:'tag-add300',l:'藍色'},{v:'tag-high',l:'綠色'},{v:'tag-danger',l:'紅色'},
+  {v:'tag-lose',l:'深紅'},{v:'tag-low',l:'橘色'},{v:'tag-bad',l:'棕色'},
+  {v:'tag-add100',l:'紫色'},{v:'tag-add50',l:'淺綠'},
+];
+function openAnaSettings(shop){
+  let ov=document.getElementById('ana-overlay');
+  if(!ov){
+    ov=document.createElement('div');ov.id='ana-overlay';ov.className='ana-overlay';
+    ov.innerHTML=`<div class="ana-modal" onclick="event.stopPropagation()">
+      <div class="ana-modal-hdr"><span class="ana-modal-title">⚙ 分析標籤設定</span><button class="ana-modal-x" onclick="closeAnaSettings()">✕</button></div>
+      <div class="ana-modal-body" id="ana-modal-body"></div>
+      <div class="ana-modal-ftr">
+        <button class="ana-cancel-btn" onclick="closeAnaSettings()">取消</button>
+        <button class="ana-save-btn" onclick="saveAnaSettings()">儲存並套用</button>
+      </div>
+    </div>`;
+    ov.onclick=closeAnaSettings;
+    document.body.appendChild(ov);
+  }
+  _anaNewConds=[];
+  renderAnaModalBody();
+  ov.classList.add('open');
+}
+function closeAnaSettings(){document.getElementById('ana-overlay')?.classList.remove('open');}
+function renderAnaModalBody(){
+  const t=getAnaThresh();const custom=getCustomAnaRules();
+  const inp=(id,val,step='1',w='58px')=>`<input type="number" id="anas-${id}" value="${val}" step="${step}" style="width:${w}">`;
+  const fOpts=ANA_FIELD_OPTS.map(o=>`<option value="${o.v}">${o.l}</option>`).join('');
+  const opOpts=['>=','>','<=','<','=','!='].map(o=>`<option value="${o}">${o}</option>`).join('');
+  const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}">${o.l}</option>`).join('');
+
+  const condRowHtml=(i,c)=>`<div class="ana-cond-row" id="anacr-${i}">
+    <select class="ana-cond-f">${ANA_FIELD_OPTS.map(o=>`<option value="${o.v}"${o.v===c.f?' selected':''}>${o.l}</option>`).join('')}</select>
+    <select class="ana-cond-op">${['>=','>','<=','<','=','!='].map(o=>`<option value="${o}"${o===c.op?' selected':''}>${o}</option>`).join('')}</select>
+    <input type="number" class="ana-cond-v" value="${c.v}" style="width:72px">
+    <button class="ana-cond-del" onclick="removeNewCond(${i})">✕</button>
+  </div>`;
+  const condRows=_anaNewConds.map((c,i)=>condRowHtml(i,c)).join('');
+
+  const customRows=custom.length?custom.map((ct,i)=>{
+    const condDesc=ct.conds.map(c=>`${c.f} ${c.op} ${c.v}`).join(' 且 ');
+    return`<div class="ana-rule-row"><span class="ana-rule-tag ${ct.cls||'tag-add100'}">${ct.label}</span><span class="ana-rule-desc" style="font-size:12px;color:#6b7280">${condDesc}</span><button class="ana-rule-del" onclick="deleteCustomAnaRule(${i})" title="刪除">✕</button></div>`;
+  }).join(''):`<div class="ana-custom-empty">尚無自訂標籤</div>`;
+
+  document.getElementById('ana-modal-body').innerHTML=`
+    <div class="ana-sec-hdr">加減碼前提</div>
+    <div class="ana-rule-row">
+      <span class="ana-rule-tag tag-add300" style="min-width:72px">前提</span>
+      <span class="ana-rule-desc">O欄（過去7天點擊）> ${inp('clickMin',t.clickMin)}</span>
+    </div>
+    <div class="ana-sec-hdr">加預算</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">加300</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add300',t.add300)} (含)以上</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">加200</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add200',t.add200)} (含)以上</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">加100</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add100',t.add100)} (含)以上</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add50">加50</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add50',t.add50)} (含)且 < ${inp('add50max',t.add100)}</span></div>
+    <div class="ana-sec-hdr">減預算</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub300">減300</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub300',t.sub300)}</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub200">減200</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub200',t.sub200)}</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub100">減100</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub100',t.sub100)}</span></div>
+    <div class="ana-sec-hdr">分析標籤</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">D欄(廣告費)=0 且 H欄(淨利率%) > ${inp('highMinH',t.highMinH,'0.1')} %</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">D欄(廣告費) > 0 且 H欄(淨利率%) &lt; 0%（固定）</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">D欄(廣告費) > 0 且 K欄(目標ROI) &lt; 0（固定）</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">危險商品</span><span class="ana-rule-desc">D欄(廣告費)=0 且 H欄(淨利率%) 0% ~ ${inp('dangerMaxH',t.dangerMaxH,'0.1')} %</span></div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-bad">低效廣告</span><span class="ana-rule-desc">D欄(廣告費) > 0 且 H欄(淨利率%) &lt; ${inp('badAdsMaxH',t.badAdsMaxH,'0.1')} %</span></div>
+    <div class="ana-sec-hdr">自訂標籤</div>
+    <div id="ana-custom-list">${customRows}</div>
+    <div class="ana-add-box" style="margin-top:12px">
+      <div class="ana-add-box-title">＋ 新增自訂標籤</div>
+      <div class="ana-field-row"><label>名稱</label><input type="text" id="anas-new-label" placeholder="標籤名稱"></div>
+      <div class="ana-field-row"><label>顏色</label><select id="anas-new-cls">${clsOpts}</select></div>
+      <div class="ana-conds-wrap" id="ana-new-conds">${condRows}</div>
+      <button class="ana-add-cond-btn" onclick="addNewAnaCond()">＋ 新增條件</button>
+      <div class="ana-submit-row"><button class="ana-add-rule-btn" onclick="submitNewAnaRule()">新增標籤</button></div>
+    </div>`;
+}
+function addNewAnaCond(){_anaNewConds.push({f:'D',op:'>=',v:'0'});renderAnaModalBody();}
+function removeNewCond(i){_anaNewConds.splice(i,1);renderAnaModalBody();}
+function readNewConds(){
+  const rows=document.querySelectorAll('#ana-new-conds .ana-cond-row');
+  return Array.from(rows).map(r=>({
+    f:r.querySelector('.ana-cond-f').value,
+    op:r.querySelector('.ana-cond-op').value,
+    v:r.querySelector('.ana-cond-v').value
+  }));
+}
+function submitNewAnaRule(){
+  const label=(document.getElementById('anas-new-label').value||'').trim();
+  if(!label){alert('請輸入標籤名稱');return;}
+  const cls=document.getElementById('anas-new-cls').value;
+  const conds=readNewConds();
+  if(!conds.length){alert('請至少新增一個條件');return;}
+  const rules=getCustomAnaRules();
+  rules.push({label,cls,conds});
+  saveCustomAnaRules(rules);
+  _anaNewConds=[];
+  renderAnaModalBody();
+  reapplyAnaToAll();
+}
+function deleteCustomAnaRule(i){
+  const rules=getCustomAnaRules();rules.splice(i,1);saveCustomAnaRules(rules);
+  renderAnaModalBody();reapplyAnaToAll();
+}
+function g(id){const el=document.getElementById('anas-'+id);return el?parseFloat(el.value):undefined;}
+function saveAnaSettings(){
+  const t={
+    clickMin:g('clickMin')??100,
+    dangerMaxH:g('dangerMaxH')??10,highMinH:g('highMinH')??30,badAdsMaxH:g('badAdsMaxH')??10,
+    add300:g('add300')??3,add200:g('add200')??2,add100:g('add100')??1,add50:g('add50')??0,
+    sub300:g('sub300')??-3,sub200:g('sub200')??-2,sub100:g('sub100')??-1,
+  };
+  saveAnaThresh(t);
+  closeAnaSettings();
+  reapplyAnaToAll();
+}
+function reapplyAnaToAll(){
+  SHOPS.forEach(s=>{
+    const built=state[s.id]._built;if(!built)return;
+    built.forEach(r=>{
+      r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
+      r.analysisLabel=r.analysis?.label||'';
+      if(s.id==='好麻吉'){
+        r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
+        r.growthAnalysisLabel=r.growthAnalysis?.label||'';
+      }
+    });
+    applyFilters(s.id);
+  });
 }
 
 // ── 成長比分析公式 ──
@@ -7923,7 +8134,12 @@ function updateTagFilterBar(shop){
   const fixedPills=FIXED.filter(t=>counts[t.label]).map(mkPill).join('');
   const addDrop=mkDrop(`tfd-add-${shop}`,'加預算','#1e40af',ADD_LBLS);
   const subDrop=mkDrop(`tfd-sub-${shop}`,'減預算','#991b1b',SUB_LBLS);
-  const row1=`<div class="tfrow"><span class="tfrow-lbl">分析標籤</span>${fixedPills}${addDrop}${subDrop}</div>`;
+  const customPills=getCustomAnaRules().filter(ct=>counts[ct.label]).map(ct=>{
+    const active=sel.includes(ct.label)?' active':'';
+    const lbl=ct.label.replace(/'/g,"\\'");
+    return`<span class="tfpill${active}" onclick="setTagFilter('${shop}','${lbl}')">${ct.label} <span class="tfpill-cnt">${counts[ct.label]}</span></span>`;
+  }).join('');
+  const row1=`<div class="tfrow"><span class="tfrow-lbl">分析標籤</span><button class="ana-gear-btn" onclick="openAnaSettings('${shop}')" title="設定分析規則">⚙</button>${fixedPills}${addDrop}${subDrop}${customPills}</div>`;
   let row2='';
   if(shop==='好麻吉'){
     const gp=GROWTH_TAGS.filter(t=>counts[t.label]).map(mkPill).join('');
@@ -7953,6 +8169,7 @@ function applyFilters(shop){
     list=list.filter(r=>{
       const v=r[col];
       if(f.type==='text')return(v+'').toLowerCase().includes(f.val.toLowerCase());
+      if(f.type==='range'){const n=num(v);if(f.min!==null&&n<f.min)return false;if(f.max!==null&&n>f.max)return false;return true;}
       if(f.type==='min')return num(v)>=parseFloat(f.val);
       if(f.type==='max')return num(v)<=parseFloat(f.val);
       return true;
@@ -7980,6 +8197,21 @@ function setColFilter(shop,col,type,val){
   applyFilters(shop);
 }
 function clearColFilter(shop,col){delete(state[shop].filters||{})[col];state[shop].sorts={};applyFilters(shop);}
+function applyFpNum(shop,col,sid){
+  const min=document.getElementById('fp-min-'+sid)?.value??'';
+  const max=document.getElementById('fp-max-'+sid)?.value??'';
+  if(!state[shop].filters)state[shop].filters={};
+  if(min===''&&max===''){delete state[shop].filters[col];}
+  else state[shop].filters[col]={type:'range',min:min===''?null:parseFloat(min),max:max===''?null:parseFloat(max)};
+  applyFilters(shop);
+}
+function applyFpTxt(shop,col,sid){
+  const val=document.getElementById('fp-txt-'+sid)?.value??'';
+  if(!state[shop].filters)state[shop].filters={};
+  if(val==='')delete state[shop].filters[col];
+  else state[shop].filters[col]={type:'text',val};
+  applyFilters(shop);
+}
 
 // ── Filter Popup ──
 function openFilter(shop,col,isNum,el){
@@ -7988,23 +8220,34 @@ function openFilter(shop,col,isNum,el){
   const p=document.createElement('div');
   const isLeft=el.closest('th.tl');
   p.className='filter-popup open'+(isLeft?' tl':'');
+  const minV=cf?.type==='range'?cf.min??'':cf?.type==='min'?cf.val:'';
+  const maxV=cf?.type==='range'?cf.max??'':cf?.type==='max'?cf.val:'';
+  const sid=shop+'__'+col;
   if(isNum){
-    p.innerHTML=`<div class="filter-popup-title">篩選數字</div>
-      <input type="number" placeholder="最小值" value="${cf?.type==='min'?cf.val:''}" oninput="setColFilter('${shop}','${col}','min',this.value)">
-      <input type="number" placeholder="最大值" value="${cf?.type==='max'?cf.val:''}" oninput="setColFilter('${shop}','${col}','max',this.value)">
+    p.innerHTML=`<div class="filter-popup-title">篩選範圍</div>
+      <label class="fp-label">最小值</label>
+      <input type="number" id="fp-min-${sid}" placeholder="不限" value="${minV}" style="margin-bottom:8px">
+      <label class="fp-label">最大值</label>
+      <input type="number" id="fp-max-${sid}" placeholder="不限" value="${maxV}" style="margin-bottom:6px">
       <div class="fp-sort-row">
         <button class="fp-sort-btn ${cs?.col===col&&cs?.dir==='asc'?'on':''}" onclick="setSort('${shop}','${col}','asc')">↑ 小到大</button>
         <button class="fp-sort-btn ${cs?.col===col&&cs?.dir==='desc'?'on':''}" onclick="setSort('${shop}','${col}','desc')">↓ 大到小</button>
       </div>
-      <button class="fp-clear" onclick="clearColFilter('${shop}','${col}');closePopup()">✕ 清除</button>`;
+      <div class="fp-confirm-row">
+        <button class="fp-clear2" onclick="clearColFilter('${shop}','${col}');closePopup()">✕ 清除</button>
+        <button class="fp-confirm" onclick="applyFpNum('${shop}','${col}','${sid}');closePopup()">確定</button>
+      </div>`;
   }else{
     p.innerHTML=`<div class="filter-popup-title">篩選文字</div>
-      <input type="text" placeholder="輸入關鍵字…" value="${cf?.val||''}" oninput="setColFilter('${shop}','${col}','text',this.value)">
+      <input type="text" id="fp-txt-${sid}" placeholder="輸入關鍵字…" value="${cf?.val||''}" style="margin-bottom:6px">
       <div class="fp-sort-row">
         <button class="fp-sort-btn ${cs?.col===col&&cs?.dir==='asc'?'on':''}" onclick="setSort('${shop}','${col}','asc')">↑ A→Z</button>
         <button class="fp-sort-btn ${cs?.col===col&&cs?.dir==='desc'?'on':''}" onclick="setSort('${shop}','${col}','desc')">↓ Z→A</button>
       </div>
-      <button class="fp-clear" onclick="clearColFilter('${shop}','${col}');closePopup()">✕ 清除</button>`;
+      <div class="fp-confirm-row">
+        <button class="fp-clear2" onclick="clearColFilter('${shop}','${col}');closePopup()">✕ 清除</button>
+        <button class="fp-confirm" onclick="applyFpTxt('${shop}','${col}','${sid}');closePopup()">確定</button>
+      </div>`;
   }
   el.closest('th').style.position='relative';
   el.closest('th').appendChild(p);
