@@ -7436,10 +7436,9 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       <span style="font-size:12px;color:#6b7280;font-weight:500">賣場</span>
       <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
         <button class="stab active" onclick="setShop('總表',this)"><span class="sdot" style="background:#6b7280"></span>總表</button>
-        <button class="stab" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉<span class="stab-ok" id="dot-好麻吉"></span></button>
-        <button class="stab" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂<span class="stab-ok" id="dot-玩樂"></span></button>
-        <button class="stab" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅<span class="stab-ok" id="dot-森之旅"></span></button>
-        <button class="stab" onclick="setShop('酷澎',this)"><span class="sdot" style="background:#ef4444"></span>酷澎<span class="stab-ok" id="dot-酷澎"></span></button>
+        <button class="stab" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉</button>
+        <button class="stab" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
+        <button class="stab" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
       </div>
     </div>
     <div id="profit-period-wrap" style="display:none;align-items:center;gap:8px;flex-wrap:wrap"></div>
@@ -7453,7 +7452,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div id="content-酷澎" class="shop-content" style="padding:16px 20px"></div>
 </div>`;
 
-const SHOPS=[{id:'好麻吉',color:'#5b5fcf'},{id:'玩樂',color:'#10b981'},{id:'森之旅',color:'#f59e0b'},{id:'酷澎',color:'#ef4444'}];
+const SHOPS=[{id:'好麻吉',color:'#5b5fcf'},{id:'玩樂',color:'#10b981'},{id:'森之旅',color:'#f59e0b'}];
 const MONTHS=['2025/01','2025/02','2025/03','2025/04','2025/05','2025/06','2025/07','2025/08','2025/09','2025/10','2025/11','2025/12','2026/01','2026/02','2026/03','2026/04','2026/05','2026/06','2026/07','2026/08','2026/09','2026/10','2026/11','2026/12'];
 const HALVES=[{id:'first',label:'上半（1-15）'},{id:'second',label:'下半（16-末）'},{id:'full',label:'整月（1-末）'}];
 
@@ -7530,15 +7529,10 @@ function shopHTML(shop){return`
       <div class="kpi-big-cell"><div class="kpi-l">本期純利</div><div class="kpi-v green" id="kv-net-${shop}">—</div></div>
       <div class="kpi-big-cell"><div class="kpi-l">廣告費</div><div class="kpi-v amber" id="kv-ads-${shop}">—</div></div>
     </div>
-    <div class="kpi-small-row">
-      <div><div class="kpi-l">毛利</div><div class="kpi-v small" id="kv-gross-${shop}">—</div></div>
-      <div><div class="kpi-l">純利率</div><div class="kpi-v small amber" id="kv-margin-${shop}">—</div></div>
-      <div><div class="kpi-l">廣告佔比</div><div class="kpi-v small" id="kv-adpct-${shop}">—</div></div>
-    </div>
   </div>
   <div class="tag-filter-bar" id="tfbar-${shop}"></div>
   <div class="toolbar" id="tb-${shop}">
-    <span class="period-tag" id="period-tag-${shop}"></span>
+    <span id="period-tag-${shop}" style="display:none"></span>
     <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')">
     <span class="row-cnt" id="cnt-${shop}"></span>
     <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
@@ -7906,7 +7900,7 @@ function updateTagFilterBar(shop){
   const mkPill=(t)=>{
     const active=sel.includes(t.label)?' active':'';
     const lbl=t.label.replace(/'/g,"\\'");
-    return`<span class="tfpill${active}" onclick="setTagFilter('${shop}','${lbl}')" title="${t.label}"><span class="tfpill-dot" style="background:${t.dot}"></span>${t.label} <span class="tfpill-cnt">${counts[t.label]}</span></span>`;
+    return`<span class="tfpill${active}" onclick="setTagFilter('${shop}','${lbl}')" title="${t.label}">${t.label} <span class="tfpill-cnt">${counts[t.label]}</span></span>`;
   };
   const FIXED=[
     {label:'危險商品',dot:'#991b1b'},{label:'高利潤商品',dot:'#065f46'},
@@ -7919,7 +7913,7 @@ function updateTagFilterBar(shop){
     if(!total)return'';
     const isActive=lbls.some(l=>sel.includes(l));
     const items=lbls.filter(l=>counts[l]).map(l=>`<div class="tfdrop-item${sel.includes(l)?' sel':''}" onclick="setTagFilter('${shop}','${l}');closeTfDrop()">${l} <span class="tfpill-cnt">${counts[l]}</span></div>`).join('');
-    return`<div class="tfdrop-wrap"><span class="tfpill${isActive?' active':''}" onclick="toggleTfDrop(event,'${id}')"><span class="tfpill-dot" style="background:${dot}"></span>${label} <span class="tfpill-cnt">${total}</span> ▾</span><div class="tfdrop-menu" id="${id}">${items}</div></div>`;
+    return`<div class="tfdrop-wrap"><span class="tfpill${isActive?' active':''}" onclick="toggleTfDrop(event,'${id}')">${label} <span class="tfpill-cnt">${total}</span> ▾</span><div class="tfdrop-menu" id="${id}">${items}</div></div>`;
   };
   const total=built.length;
   const allActive=!sel.length;
@@ -8529,14 +8523,11 @@ function doExport(shop){
 // ── Helpers ──
 function setKpis(shop,rev,gross,ads,pure){
   document.getElementById('kv-rev-'+shop).textContent='NT$ '+fmtN(rev);
-  document.getElementById('kv-gross-'+shop).textContent='NT$ '+fmtN(gross);
-  document.getElementById('kv-ads-'+shop).textContent='NT$ '+fmtN(ads);
   const pureEl=document.getElementById('kv-net-'+shop);
-  const margin=rev?(pure/rev*100).toFixed(1)+'%':'—';
-  pureEl.innerHTML='NT$ '+fmtN(pure)+' <span style="font-size:13px;color:#6b7280;font-weight:500">('+margin+')</span>';
+  pureEl.innerHTML='NT$ '+fmtN(pure)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(pure/rev*100).toFixed(1)}%)</span>`:'');
   pureEl.className='kpi-v '+(pure>=0?'green':'red');
-  document.getElementById('kv-margin-'+shop).textContent=rev?(pure/rev*100).toFixed(1)+'%':'—';
-  document.getElementById('kv-adpct-'+shop).textContent=rev?(ads/rev*100).toFixed(2)+'%':'—';
+  const adsEl=document.getElementById('kv-ads-'+shop);
+  adsEl.innerHTML='NT$ '+fmtN(ads)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(ads/rev*100).toFixed(2)}%)</span>`:'');
 }
 function num(v){return parseFloat((v+'').replace(/[,$%]/g,'').trim())||0;}
 function fmtN(v){return Math.abs(Math.round(v)).toLocaleString();}
