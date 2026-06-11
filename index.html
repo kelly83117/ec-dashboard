@@ -7834,7 +7834,11 @@ function markCard(shop,type,icon,title,cls){
 }
 function setSpin(shop,show){document.getElementById('spin-'+shop).classList.toggle('show',show);}
 function checkReady(shop){const s=state[shop];document.getElementById('gen-'+shop).disabled=!(s.rawMobic&&s.rawAds);}
-function getPlatformRate(){return(parseFloat(document.getElementById('platformRate').value)||20.5)/100;}
+function getPlatformRate(){
+  const el=document.getElementById('platformRate');
+  if(!el) return 20.5/100; // 元素還沒渲染出來時用預設值，避免 null .value 噴錯
+  return(parseFloat(el.value)||20.5)/100;
+}
 
 // ── 取得對應的「上期」區間 key ──
 function getPrevPeriodKey(shop, month, half) {
@@ -7886,7 +7890,11 @@ function generate(shop){
     setSpin(shop,false);
   },80);
 }
-function getPlatformRate(){return(parseFloat(document.getElementById('platformRate').value)||20.5)/100;}
+function getPlatformRate(){
+  const el=document.getElementById('platformRate');
+  if(!el) return 20.5/100; // 元素還沒渲染出來時用預設值，避免 null .value 噴錯
+  return(parseFloat(el.value)||20.5)/100;
+}
 
 function buildShop(shop,days){
   const s=state[shop];const PLATFORM=getPlatformRate();
