@@ -3233,19 +3233,32 @@ const App = {
     const salesEntry = (weeks[0]?.products || []).find(p => p.code === code);
     const productName = masterEntry?.mocbicName || masterEntry?.name || salesEntry?.name || '';
 
-    // 紀錄樣式：淺紫色背景 + 紫色文字，跟一般輸入區做視覺區隔
-    const renderAdjItem = (a, i, totalLen) => `
-      <div style="padding:7px 11px;background:#eef2ff;border-left:3px solid #6366f1;border-radius:5px;margin-bottom:5px;font-size:12px;display:flex;gap:8px;align-items:flex-start">
-        <span style="color:#6366f1;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;min-width:80px">${escapeHtml(a.date || '')}</span>
-        <span style="flex:1;line-height:1.4;color:#312e81;font-weight:500">${escapeHtml(a.text || '')}</span>
-        <button class="icon-btn" data-del-adj="${(totalLen - 1 - i)}" style="width:20px;height:20px;font-size:10px;color:#6366f1">✕</button>
-      </div>`;
+    // 紀錄樣式：淺紫色背景 + 紫色文字。同一天的多筆 → 同列顯示，用「、」串起；
+    // ✕ 刪除整列（同一天的所有調整一次刪），data-del-date 帶日期。
     const renderAdjList = () => {
-      const list = (note.adjustments || []).slice().reverse();
-      const totalLen = note.adjustments?.length || 0;
-      return list.length === 0
-        ? '<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">尚無調整紀錄</div>'
-        : list.map((a, i) => renderAdjItem(a, i, totalLen)).join('');
+      const all = note.adjustments || [];
+      if (all.length === 0) {
+        return '<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">尚無調整紀錄</div>';
+      }
+      // 依日期分組，保留輸入順序
+      const groups = new Map(); // date -> { date, texts: [] }
+      all.forEach(a => {
+        const d = a.date || '';
+        if (!groups.has(d)) groups.set(d, { date: d, texts: [] });
+        groups.get(d).texts.push(a.text || '');
+      });
+      // 最新日期排最上面
+      const sortedKeys = Array.from(groups.keys()).sort((a, b) => b.localeCompare(a));
+      return sortedKeys.map(k => {
+        const g = groups.get(k);
+        const joined = g.texts.join('、');
+        return `
+          <div style="padding:7px 11px;background:#eef2ff;border-left:3px solid #6366f1;border-radius:5px;margin-bottom:5px;font-size:12px;display:flex;gap:8px;align-items:flex-start">
+            <span style="color:#6366f1;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;min-width:80px">${escapeHtml(g.date)}</span>
+            <span style="flex:1;line-height:1.4;color:#312e81;font-weight:500">${escapeHtml(joined)}</span>
+            <button class="icon-btn" data-del-date="${escapeHtml(g.date)}" title="刪除這一天的所有紀錄" style="width:20px;height:20px;font-size:10px;color:#6366f1">✕</button>
+          </div>`;
+      }).join('');
     };
 
     // 自動儲存：每次調整 / 長期備註變動立刻寫入 Store
@@ -3310,10 +3323,10 @@ const App = {
         setTimeout(() => newAdjInput.focus(), 30);
 
         const bindDelButtons = () => {
-          adjList.querySelectorAll('[data-del-adj]').forEach(b => {
+          adjList.querySelectorAll('[data-del-date]').forEach(b => {
             b.addEventListener('click', () => {
-              const idx = +b.dataset.delAdj;
-              note.adjustments.splice(idx, 1);
+              const targetDate = b.dataset.delDate;
+              note.adjustments = (note.adjustments || []).filter(a => (a.date || '') !== targetDate);
               adjList.innerHTML = renderAdjList();
               autoSave();
               this.render();
