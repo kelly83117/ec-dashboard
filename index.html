@@ -7293,9 +7293,9 @@ th.tl{text-align:left;}
 td{padding:11px 18px;border-bottom:1px solid #f0f2f7;text-align:right;color:#374151;white-space:nowrap;font-size:13px;}
 td.tl{text-align:left;}
 tbody tr:hover td{background:#fafbff;}
-.td-code{font-family:'DM Mono',monospace;font-size:12px;color:#6b7280;min-width:80px;padding-right:12px;}
+.td-code{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:#374151;min-width:60px;padding-right:6px;white-space:nowrap;}
 .td-id{font-family:'DM Mono',monospace;font-size:12px;color:#9ca3af;min-width:140px;padding-right:16px;}
-.td-name{font-weight:500;color:#1a1a2e;white-space:nowrap;min-width:220px;max-width:320px;overflow:hidden;text-overflow:ellipsis;font-size:13px;}
+.td-name{font-weight:700;color:#1a1a2e;white-space:nowrap;min-width:220px;max-width:320px;overflow:hidden;text-overflow:ellipsis;font-size:13px;}
 .td-num{font-family:'DM Mono',monospace;font-size:14px;font-weight:600;min-width:90px;}
 .td-pos{color:#10b981;font-weight:600;}.td-neg{color:#ef4444;font-weight:600;}.td-amber{color:#f59e0b;}
 .tr-total td{background:#f0f4ff !important;font-weight:700;border-top:2px solid #c7d2fe;}
@@ -8009,7 +8009,7 @@ function renderTable(shop,list){
       const adsId=`td-${shop}-${r.code}-adsFee`;
       html+=`<tr class="tr-no-rev">
         <td class="tl td-code">${r.code}</td>
-        <td class="tl td-name" style="color:#9ca3af">${r.name}<div class="sub-id">${idStr}</div></td>
+        <td class="tl td-name" style="color:#9ca3af">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         <td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}">
           <span class="cell-val">$${fmtN(r.adsFee)}</span>
           <button class="edit-btn" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" title="編輯">✏️</button>
@@ -8024,7 +8024,7 @@ function renderTable(shop,list){
     }else{
       html+=`<tr>
         <td class="tl td-code">${r.code}</td>
-        <td class="tl td-name">${r.name}<div class="sub-id">${idStr}</div></td>
+        <td class="tl td-name">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         ${editTd('adsFee','$'+fmtN(r.adsFee),'td-amber')}
         <td class="td-num">$${fmtN(r.rev)}${shop==='好麻吉'?`<div class="sub-rev">${r.prevRev!==null?'$'+fmtN(r.prevRev):'—'}</div>`:''}</td>
         <td class="td-num">$${fmtN(r.gross)}</td>
