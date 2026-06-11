@@ -3462,19 +3462,43 @@ const App = {
           });
         };
 
+        let lastCommittedText = '';
+        let lastCommittedAt = 0;
         const commitAdj = () => {
           const text = newAdjInput.value.trim();
           if (!text) return;
-          const now = new Date();
-          const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
+          // 防呆：1.5 秒內相同文字不重複加入
+          const now = Date.now();
+          if (text === lastCommittedText && (now - lastCommittedAt) < 1500) return;
+          lastCommittedText = text;
+          lastCommittedAt = now;
+
+          const d = new Date();
+          const dateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
           note.adjustments = note.adjustments || [];
           note.adjustments.push({ date: dateStr, text, by: this.currentUser?.username || '' });
           adjList.innerHTML = renderAdjList();
-          newAdjInput.value = '';
-          newAdjInput.focus();
+
+          // 視覺確認：輸入框變綠色 + 顯示 ✓ 已加入；1.2 秒後清空換下一筆
+          newAdjInput.style.transition = 'background-color .2s, border-color .2s';
+          newAdjInput.style.background = '#dcfce7';
+          newAdjInput.style.borderColor = '#10b981';
+          const flashTimer = window.__noteFlashTimer;
+          if (flashTimer) clearTimeout(flashTimer);
+          window.__noteFlashTimer = setTimeout(() => {
+            // 只有在文字沒被使用者改過時才清空
+            if (newAdjInput && newAdjInput.value.trim() === text) {
+              newAdjInput.value = '';
+            }
+            newAdjInput.style.background = '';
+            newAdjInput.style.borderColor = '';
+            newAdjInput.focus();
+          }, 1200);
+
           autoSave();
           this.render();
           bindDelButtons();
+          showToast(`✓ 已加入：${text.length > 20 ? text.slice(0, 20) + '…' : text}`, 'success');
         };
         saveAdjBtn.addEventListener('click', commitAdj);
         newAdjInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') commitAdj(); });
