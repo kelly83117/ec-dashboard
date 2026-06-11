@@ -3705,9 +3705,9 @@ const App = {
     const todayStr2 = toDateStr(now);
     const weekDayNames = ['週一','週二','週三','週四','週五','週六','週日'];
 
-    // 台灣國定假日（依行政院公告，未來年份請每年確認更新）
+    // 台灣國定假日（依行政院公告；未來年份的彈性放假/補班日需每年確認更新）
     const TW_HOLIDAYS = {
-      // 2025
+      // ===== 2025 =====
       '2025-01-01': '元旦',
       '2025-01-27': '春節彈性放假',
       '2025-01-28': '除夕', '2025-01-29': '春節初一', '2025-01-30': '春節初二', '2025-01-31': '春節初三',
@@ -3717,16 +3717,27 @@ const App = {
       '2025-05-30': '端午節彈性', '2025-05-31': '端午節',
       '2025-10-06': '中秋節',
       '2025-10-10': '國慶日',
-      // 2026
+
+      // ===== 2026 =====
       '2026-01-01': '元旦', '2026-01-02': '元旦彈性',
       '2026-02-16': '春節彈性', '2026-02-17': '除夕', '2026-02-18': '春節初一',
       '2026-02-19': '春節初二', '2026-02-20': '春節初三',
       '2026-02-27': '二二八彈性', '2026-02-28': '二二八紀念日', '2026-03-02': '二二八補假',
-      '2026-04-03': '清明/兒童節彈性', '2026-04-06': '清明節補假',
+      '2026-04-03': '清明/兒童節彈性', '2026-04-04': '兒童節', '2026-04-05': '清明節', '2026-04-06': '清明節補假',
       '2026-05-01': '勞動節',
       '2026-06-19': '端午節',
       '2026-09-25': '中秋節',
-      '2026-10-09': '國慶日彈性', '2026-10-12': '國慶日補假',
+      '2026-10-09': '國慶日彈性', '2026-10-10': '國慶日', '2026-10-12': '國慶日補假',
+
+      // ===== 2027（國定假日；彈性放假日期待行政院公告再更新） =====
+      '2027-01-01': '元旦',
+      '2027-02-05': '除夕', '2027-02-06': '春節初一', '2027-02-07': '春節初二', '2027-02-08': '春節初三', '2027-02-09': '春節初四',
+      '2027-02-28': '二二八紀念日', '2027-03-01': '二二八補假',
+      '2027-04-04': '兒童節', '2027-04-05': '清明節',
+      '2027-05-01': '勞動節', '2027-05-03': '勞動節補假',
+      '2027-06-09': '端午節',
+      '2027-09-15': '中秋節',
+      '2027-10-10': '國慶日', '2027-10-11': '國慶日補假',
     };
     const getHoliday = (dateStr) => {
       try { return TW_HOLIDAYS[dateStr] || null; } catch { return null; }
@@ -4019,8 +4030,8 @@ const App = {
         return `
           <div data-cell-date="${escapeHtml(ds)}" title="點此新增進度（${d.getMonth()+1}/${d.getDate()}）" style="border-right:${(i+1) % 7 === 0 ? '0' : '1px solid #e5e7eb'};border-bottom:${i < (gridRows-1)*7 ? '1px solid #e5e7eb' : '0'};padding:8px 9px;min-height:130px;display:flex;flex-direction:column;background:${cellBgM};opacity:${isCurrentMonth ? 1 : 0.5};cursor:pointer;transition:background-color .15s" onmouseover="this.style.backgroundColor='${holidayNameM ? '#fee2e2' : (longWkM && isWeekendM ? '#ffedd5' : '#f3f4f6')}'" onmouseout="this.style.backgroundColor='${cellBgM}'">
             <div style="display:flex;align-items:center;gap:4px;margin-bottom:6px">
-              ${holidayNameM ? `<span style="font-size:10px;font-weight:600;color:#b91c1c;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(holidayNameM)}">🎉 ${escapeHtml(holidayNameM)}</span>` : ''}
-              ${longWkM && !holidayNameM ? '<span style="font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;background:#fed7aa;color:#9a3412">連假</span>' : ''}
+              ${holidayNameM ? `<span style="font-size:12.5px;font-weight:700;color:#b91c1c;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em" title="${escapeHtml(holidayNameM)}">🎉 ${escapeHtml(holidayNameM)}</span>` : ''}
+              ${longWkM && !holidayNameM ? '<span style="font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px;background:#fed7aa;color:#9a3412;letter-spacing:.05em">連假</span>' : ''}
               <span style="margin-left:auto;display:inline-flex;align-items:center;justify-content:center;${isToday ? `background:var(--primary);color:white;width:26px;height:26px;border-radius:50%;font-size:14px;font-weight:700` : `font-size:14px;color:${dayColorM};font-weight:600`}">${d.getDate()}</span>
             </div>
             <div style="flex:1;min-height:0">
