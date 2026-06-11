@@ -7910,16 +7910,19 @@ function getPrevPeriodKey(shop, month, half) {
   }
 }
 
-// 取得上期報表的 code→rev map
+// 取得上期報表的 code→rev map（雲端優先，過渡期看 main，最後 fallback 本地）
 function getPrevRevMap(shop, month, half) {
   const key = getPrevPeriodKey(shop, month, half);
-  try {
-    const rep = JSON.parse(localStorage.getItem(key) || 'null');
-    if (!rep || !rep.built) return {};
-    const map = {};
-    rep.built.forEach(r => { if (r.code && r.rev) map[r.code] = r.rev; });
-    return map;
-  } catch { return {}; }
+  let rep = null;
+  try{ if(window.Store && Store._profitMem && Store._profitMem[key]) rep = Store._profitMem[key]; }catch{}
+  try{ if(!rep && window.Store && Store._mem && Store._mem[key]) rep = Store._mem[key]; }catch{}
+  if(!rep){
+    try { rep = JSON.parse(localStorage.getItem(key) || 'null'); } catch {}
+  }
+  if (!rep || !rep.built) return {};
+  const map = {};
+  rep.built.forEach(r => { if (r.code && r.rev) map[r.code] = r.rev; });
+  return map;
 }
 
 // ── Generate ──
