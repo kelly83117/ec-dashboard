@@ -7376,18 +7376,6 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       <span style="font-size:11px;color:#9ca3af">（修改後重新產生即套用）</span>
     </div>
   </div>
-  <div style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
-    <label class="ucard" id="uc-map-global" style="min-width:200px">
-      <input type="file" accept=".xlsx,.xls" onchange="onMapFile(event)">
-      <div class="ucard-icon" id="ui-map-global">🗂</div>
-      <div class="ucard-info">
-        <div class="ucard-title" id="ut-map-global">蝦皮商品清單</div>
-        <div class="ucard-sub" id="us-map-global">上傳一次，三個賣場共用</div>
-      </div>
-    </label>
-    <div class="spin-row" id="spin-map"><div class="spin"></div>讀取中…</div>
-    <span id="map-status" style="font-size:13px;color:#9ca3af"></span>
-  </div>
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
     <div style="display:flex;align-items:center;gap:12px">
       <span style="font-size:12px;color:#6b7280;font-weight:500">賣場</span>
@@ -7439,7 +7427,12 @@ SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.inn
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
 
 function shopHTML(shop){return`
-  <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:center;margin-bottom:12px">
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto auto;gap:10px;align-items:center;margin-bottom:12px">
+    <label class="ucard" id="uc-map-${shop}">
+      <input type="file" accept=".xlsx,.xls" onchange="onMapFile(event,'${shop}')">
+      <div class="ucard-icon" id="ui-map-${shop}">🗂</div>
+      <div class="ucard-info"><div class="ucard-title" id="ut-map-${shop}">蝦皮商品清單</div><div class="ucard-sub" id="us-map-${shop}">上傳一次，三個賣場共用</div></div>
+    </label>
     <label class="ucard" id="uc-mobic-${shop}">
       <input type="file" accept=".xlsx,.xls" onchange="onFile(event,'${shop}','mobic')">
       <div class="ucard-icon" id="ui-mobic-${shop}">📦</div>
@@ -7497,8 +7490,9 @@ function onMonthChange(shop){
 }
 function onHalfChange(shop,half,btn){
   state[shop].curHalf=half;
-  document.querySelectorAll(`#half-btns-${shop} .half-btn`).forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');updateDaysBadge(shop);tryLoadSaved(shop);
+  updateHalfBtnLabels(shop);
+  updateDaysBadge(shop);
+  tryLoadSaved(shop);
 }
 function updateDaysBadge(shop){
   const d=getDays(state[shop].curMonth,state[shop].curHalf);
@@ -7543,9 +7537,8 @@ function loadIntoUI(shop,built,period,days){
 }
 
 // ── Map ──
-function onMapFile(e){
+function onMapFile(e,shop){
   const file=e.target.files[0];if(!file)return;
-  document.getElementById('spin-map').classList.add('show');
   const r=new FileReader();
   r.onload=ev=>{
     try{
@@ -7562,21 +7555,23 @@ function onMapFile(e){
           if(sid==='NaN'||sid==='0'||sid.length<5)return;
           if(!globalMap[sk][code]){globalMap[sk][code]={sids:[],name:''};cnt++;}
           if(!globalMap[sk][code].sids.includes(sid))globalMap[sk][code].sids.push(sid);
-          // 記錄商品名稱（從清單的商品名稱欄位）
-          // 優先用「莫比克名」（C欄），其次商品名稱
           const pName=(r2['莫比克名']||r2['商品名稱']||'').trim();
           if(pName&&!globalMap[sk][code].name)globalMap[sk][code].name=pName;
         });
       });
-      SHOPS.forEach(s=>{state[s.id].rawMap=globalMap[s.id]||{};});
-      // 重建各賣場 rawMap（相容新格式）
-      document.getElementById('uc-map-global').className='ucard ok';
-      document.getElementById('ui-map-global').textContent='✅';
-      document.getElementById('ut-map-global').textContent=file.name;
-      document.getElementById('us-map-global').textContent=`已載入 ${cnt} 筆`;
-      SHOPS.forEach(s=>checkReady(s.id));
-    }catch(err){document.getElementById('map-status').textContent='失敗：'+err.message;}
-    document.getElementById('spin-map').classList.remove('show');
+      SHOPS.forEach(s=>{
+        state[s.id].rawMap=globalMap[s.id]||{};
+        const uc=document.getElementById('uc-map-'+s.id);
+        const ui=document.getElementById('ui-map-'+s.id);
+        const ut=document.getElementById('ut-map-'+s.id);
+        const us=document.getElementById('us-map-'+s.id);
+        if(uc)uc.className='ucard ok';
+        if(ui)ui.textContent='✅';
+        if(ut)ut.textContent=file.name;
+        if(us)us.textContent=`已載入 ${cnt} 筆`;
+        checkReady(s.id);
+      });
+    }catch(err){alert('商品清單讀取失敗：'+err.message);}
   };
   r.readAsBinaryString(file);
 }
@@ -8202,8 +8197,10 @@ function updateHalfBtnLabels(shop){
   ];
   const container=document.getElementById('half-btns-'+shop);
   if(!container)return;
+  const on='padding:4px 10px;background:#1a1a2e;color:white;border:1px solid #1a1a2e;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums';
+  const off='padding:4px 10px;background:white;color:#374151;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums';
   container.innerHTML=btns.map(h=>
-    `<button class="half-btn ${h.id===curHalf?'active':''}" onclick="onHalfChange('${shop}','${h.id}',this)">${h.label}</button>`
+    `<button style="${h.id===curHalf?on:off}" onclick="onHalfChange('${shop}','${h.id}',this)">${h.label}</button>`
   ).join('');
 }
 
@@ -8215,14 +8212,15 @@ function initProfitPeriodControls(){
     const div=document.createElement('div');
     div.id='period-row-'+s.id;
     div.style.cssText='display:none;align-items:center;gap:8px;flex-wrap:wrap';
-    div.innerHTML=`<select class="month-select" id="month-sel-${s.id}" onchange="onMonthChange('${s.id}')">
-      ${MONTHS.map(mo=>`<option value="${mo}" ${mo===(state[s.id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
-    </select>
-    <div id="half-btns-${s.id}" style="display:flex;gap:4px"></div>
-    <span class="days-badge" id="days-badge-${s.id}">15 天</span>`;
+    div.innerHTML=`
+      <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
+      <select id="month-sel-${s.id}" onchange="onMonthChange('${s.id}')" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+        ${MONTHS.map(mo=>`<option value="${mo}" ${mo===(state[s.id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
+      </select>
+      <span style="font-size:12px;color:#6b7280;font-weight:500;margin-left:4px">區間</span>
+      <div id="half-btns-${s.id}" style="display:flex;gap:4px"></div>`;
     wrap.appendChild(div);
     updateHalfBtnLabels(s.id);
-    updateDaysBadge(s.id);
   });
   if(curShop&&curShop!=='總表'){
     const el=document.getElementById('period-row-'+curShop);
@@ -8234,6 +8232,12 @@ function initProfitPeriodControls(){
 function initShopUI(shop){
   onMonthChange(shop);
   if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
+  if(Object.keys(globalMap).length>0){
+    const uc=document.getElementById('uc-map-'+shop);
+    const ui=document.getElementById('ui-map-'+shop);
+    if(uc)uc.className='ucard ok';
+    if(ui)ui.textContent='✅';
+  }
 }
 
 // ── Export ──
