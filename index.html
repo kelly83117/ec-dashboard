@@ -8049,84 +8049,55 @@ function buildDistHtml(shop,built){
   const H=r=>r.pureRate*100;
   const aC=(fn)=>ads.filter(fn).length;
   const nC=(fn)=>noAds.filter(fn).length;
-  const tblStyle='border-collapse:collapse;width:100%;margin-bottom:20px';
-  const cell=(txt,opts={})=>{
-    const{bg='',fg='#374151',bold=false,rowspan=1,align='center',sub=false}=opts;
-    return `<td rowspan="${rowspan}" style="padding:5px 10px;font-size:${sub?'11':'12'}px;text-align:${align};border:1px solid #e2e8f0;${bg?'background:'+bg+';':''}${fg?'color:'+fg+';':''}${bold?'font-weight:700;':''}">${txt}</td>`;
+  const T='border-collapse:collapse;width:100%;margin-bottom:24px';
+  const B='1px solid #e2e8f0';
+  const th=(t,bg)=>`<th style="background:${bg};color:#fff;padding:7px 10px;font-size:12px;font-weight:700;text-align:center;border:${B}">${t}</th>`;
+  // 欄位cell (col1), 項目cell (col2), 數量cell (col3), 佔比cell (col4)
+  const r4=(c1,c1bg,c1fg,c1bold,c2,c2bg,c2fg,c2bold,n,tot,rowbg='')=>{
+    const rs=s=>`style="padding:6px 10px;font-size:12px;text-align:center;border:${B};${s}"`;
+    return `<tr${rowbg?` style="background:${rowbg}"`:''}>
+      <td ${rs(`background:${c1bg};color:${c1fg};font-weight:${c1bold?700:400}`)}>${c1}</td>
+      <td ${rs(`background:${c2bg};color:${c2fg};font-weight:${c2bold?700:400}`)}>${c2}</td>
+      <td ${rs(`background:${rowbg||''};font-weight:${(c2bold)?700:400}`)}>${n}</td>
+      <td ${rs(`background:${rowbg||''};font-weight:${(c2bold)?700:400}`)}>${pct(n,tot)}</td>
+    </tr>`;
   };
-  const hdr=(txt,bg)=>`<th style="background:${bg};color:#fff;padding:6px 10px;font-size:12px;font-weight:600;text-align:center;border:1px solid rgba(0,0,0,.1)">${txt}</th>`;
+  const rSub=(lbl,n,tot,labelBg='',labelFg='#6b7280')=>r4(labelBg?lbl:'',labelBg,labelFg,!!labelBg, lbl,labelBg,labelFg,!!labelBg,n,tot,labelBg);
+  // label-only row for section names like "淨利率階層"
+  const rLabel=(t,bg='#f1f5f9',fg='#64748b')=>`<tr style="background:${bg}"><td colspan="4" style="padding:4px 10px;font-size:11px;font-weight:600;color:${fg};border:${B};letter-spacing:.03em">${t}</td></tr>`;
+  // meta info row
+  const rMeta=(label,val)=>`<tr style="background:#f8fafc"><td colspan="3" style="padding:5px 12px;font-size:12px;border:${B}"><b>${label}</b></td><td style="padding:5px 12px;font-size:12px;font-weight:700;border:${B}">${val}</td></tr>`;
 
-  // ── ads: pureRate rows ──
-  const aPureHL1=aC(r=>H(r)>=20); const aPureHL2=aC(r=>H(r)<20);
-  const aPureSub=[
-    ['< 0%',aC(r=>H(r)<0)],['0% - 10%',aC(r=>H(r)>=0&&H(r)<10)],
-    ['10% - 15%',aC(r=>H(r)>=10&&H(r)<15)],['15% - 20%',aC(r=>H(r)>=15&&H(r)<20)],
-    ['20% - 30%',aC(r=>H(r)>=20&&H(r)<30)],['>30%',aC(r=>H(r)>=30)]
-  ];
-  // ads: budget rows
-  const aBudHL1=aC(r=>r.dayBudget>200); const aBudHL2=aC(r=>r.dayBudget<=200&&r.dayBudget>0);
-  const aBudSub=[
-    ['< $100',aC(r=>r.dayBudget>0&&r.dayBudget<100)],['$100-$200',aC(r=>r.dayBudget>=100&&r.dayBudget<200)],
-    ['$200-$300',aC(r=>r.dayBudget>=200&&r.dayBudget<300)],['$300-$400',aC(r=>r.dayBudget>=300&&r.dayBudget<400)],
-    ['> $400',aC(r=>r.dayBudget>=400)]
-  ];
+  const bluBg='#dbeafe'; const bluFg='#1e40af';
+  const orgBg='#fef3c7'; const orgFg='#92400e';
 
-  const pureSpan=2+aPureSub.length; const budSpan=2+aBudSub.length;
-
-  const adsRows=`
-    <tr style="background:#dbeafe">
-      ${cell('淨利率',{bg:'#dbeafe',fg:'#1e3a8a',bold:true,rowspan:pureSpan,align:'center'})}
-      ${cell('> 20%',{bg:'#dbeafe',fg:'#1e3a8a',bold:true})}
-      ${cell(aPureHL1,{bg:'#dbeafe',fg:'#1e3a8a',bold:true})}
-      ${cell(pct(aPureHL1,adsTotal),{bg:'#dbeafe',fg:'#1e3a8a',bold:true})}
-    </tr>
-    <tr style="background:#dbeafe">
-      ${cell('< 20%',{bg:'#dbeafe',fg:'#1e3a8a',bold:true})}
-      ${cell(aPureHL2,{bg:'#dbeafe',fg:'#1e3a8a',bold:true})}
-      ${cell(pct(aPureHL2,adsTotal),{bg:'#dbeafe',fg:'#1e3a8a',bold:true})}
-    </tr>
-    ${aPureSub.map(([lbl,n])=>`<tr>${cell(lbl)}${cell(n)}${cell(pct(n,adsTotal))}</tr>`).join('')}
-    <tr style="background:#fff3cd">
-      ${cell('日預算',{bg:'#fff3cd',fg:'#92400e',bold:true,rowspan:budSpan,align:'center'})}
-      ${cell('> $200',{bg:'#fff3cd',fg:'#92400e',bold:true})}
-      ${cell(aBudHL1,{bg:'#fff3cd',fg:'#92400e',bold:true})}
-      ${cell(pct(aBudHL1,adsTotal),{bg:'#fff3cd',fg:'#92400e',bold:true})}
-    </tr>
-    <tr style="background:#fff3cd">
-      ${cell('< $200',{bg:'#fff3cd',fg:'#92400e',bold:true})}
-      ${cell(aBudHL2,{bg:'#fff3cd',fg:'#92400e',bold:true})}
-      ${cell(pct(aBudHL2,adsTotal),{bg:'#fff3cd',fg:'#92400e',bold:true})}
-    </tr>
-    ${aBudSub.map(([lbl,n])=>`<tr>${cell(lbl)}${cell(n)}${cell(pct(n,adsTotal))}</tr>`).join('')}`;
-
-  // ── no ads: pureRate ──
-  const nPureSub=[
-    ['< 0%',nC(r=>H(r)<0)],['0% - 10%',nC(r=>H(r)>=0&&H(r)<10)],
-    ['10% - 20%',nC(r=>H(r)>=10&&H(r)<20)],['20% - 30%',nC(r=>H(r)>=20&&H(r)<30)],
-    ['30% - 40%',nC(r=>H(r)>=30&&H(r)<40)],['>40%',nC(r=>H(r)>=40)]
-  ];
-  const nPureSpan=nPureSub.length;
-  const noAdsRows=`
-    ${nPureSub.map(([lbl,n],i)=>`<tr>${i===0?cell('淨利率',{bg:'#dcfce7',fg:'#14532d',bold:true,rowspan:nPureSpan,align:'center'}):''
-    }${cell(lbl)}${cell(n)}${cell(pct(n,noAdsTotal))}</tr>`).join('')}`;
-
-  const metaStyle='padding:5px 12px;font-size:12px;border:1px solid #e2e8f0;background:#f8fafc';
-  return `
-  <table style="${tblStyle}">
-    <thead><tr>${hdr('欄位','#1e3a8a')}${hdr('項目（扣除廣告費）','#1e3a8a')}${hdr('數量','#1e3a8a')}${hdr('商品數量佔比 %','#1e3a8a')}</tr></thead>
+  const adsHtml=`<table style="${T}">
+    <thead><tr>${th('欄位','#1e3a8a')}${th('項目（扣除廣告費）','#1e3a8a')}${th('數量','#1e3a8a')}${th('商品數量佔比 %','#1e3a8a')}</tr></thead>
     <tbody>
-      <tr><td colspan="2" style="${metaStyle}"><b>總投廣商品數量</b></td><td colspan="2" style="${metaStyle};font-weight:700">${adsTotal}</td></tr>
-      <tr><td colspan="2" style="${metaStyle}"><b>投廣日預算均值</b></td><td colspan="2" style="${metaStyle};font-weight:700">NT$${avgBudget}</td></tr>
-      ${adsRows}
-    </tbody>
-  </table>
-  <table style="${tblStyle}">
-    <thead><tr>${hdr('欄位','#166534')}${hdr('項目（廣告費為 $0）','#166534')}${hdr('數量','#166534')}${hdr('商品數量佔比 %','#166534')}</tr></thead>
-    <tbody>
-      <tr><td colspan="2" style="${metaStyle}"><b>未投廣商品數量</b></td><td colspan="2" style="${metaStyle};font-weight:700">${noAdsTotal}</td></tr>
-      ${noAdsRows}
+      ${rMeta('總投廣商品數量',adsTotal)}
+      ${rMeta('投廣日預算均值','NT$'+avgBudget)}
+      ${r4('淨利率',bluBg,bluFg,true,'>20%',bluBg,bluFg,true,aC(r=>H(r)>=20),adsTotal,bluBg)}
+      ${r4('',bluBg,bluFg,false,'<20%',bluBg,bluFg,true,aC(r=>H(r)<20),adsTotal,bluBg)}
+      ${rLabel('淨利率階層')}
+      ${[['< 0%',aC(r=>H(r)<0)],['0% - 10%',aC(r=>H(r)>=0&&H(r)<10)],['10% - 15%',aC(r=>H(r)>=10&&H(r)<15)],['15% - 20%',aC(r=>H(r)>=15&&H(r)<20)],['20% - 30%',aC(r=>H(r)>=20&&H(r)<30)],['>30%',aC(r=>H(r)>=30)]].map(([l,n])=>r4('','','#374151',false,l,'','#374151',false,n,adsTotal)).join('')}
+      ${r4('日預算',orgBg,orgFg,true,'>$200',orgBg,orgFg,true,aC(r=>r.dayBudget>200),adsTotal,orgBg)}
+      ${r4('',orgBg,orgFg,false,'<$200',orgBg,orgFg,true,aC(r=>r.dayBudget<=200&&r.dayBudget>0),adsTotal,orgBg)}
+      ${rLabel('日預算階層')}
+      ${[['< $100',aC(r=>r.dayBudget>0&&r.dayBudget<100)],['$100 - $200',aC(r=>r.dayBudget>=100&&r.dayBudget<200)],['$200 - $300',aC(r=>r.dayBudget>=200&&r.dayBudget<300)],['$300 - $400',aC(r=>r.dayBudget>=300&&r.dayBudget<400)],['> $400',aC(r=>r.dayBudget>=400)]].map(([l,n])=>r4('','','#374151',false,l,'','#374151',false,n,adsTotal)).join('')}
     </tbody>
   </table>`;
+
+  const grnHd='#166534';
+  const noAdsHtml=`<table style="${T}">
+    <thead><tr>${th('欄位',grnHd)}${th('項目（廣告費為 $0）',grnHd)}${th('數量',grnHd)}${th('商品數量佔比 %',grnHd)}</tr></thead>
+    <tbody>
+      ${rMeta('未投廣商品數量',noAdsTotal)}
+      ${rLabel('淨利率階層')}
+      ${[['< 0%',nC(r=>H(r)<0)],['0% - 10%',nC(r=>H(r)>=0&&H(r)<10)],['10% - 20%',nC(r=>H(r)>=10&&H(r)<20)],['20% - 30%',nC(r=>H(r)>=20&&H(r)<30)],['30% - 40%',nC(r=>H(r)>=30&&H(r)<40)],['>40%',nC(r=>H(r)>=40)]].map(([l,n])=>r4('','','#374151',false,l,'','#374151',false,n,noAdsTotal)).join('')}
+    </tbody>
+  </table>`;
+
+  return adsHtml+noAdsHtml;
 }
 
 function onGlobalFile(event,type){
