@@ -8292,7 +8292,8 @@ function applyFilters(shop){
   if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l));
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
-    if(!f||f.val===''||f.val===undefined)return;
+    if(!f)return;
+    if(f.type!=='range'&&(f.val===''||f.val===undefined))return;
     list=list.filter(r=>{
       const raw=r[col];
       const v=PCT_COLS.has(col)?num(raw)*100:raw;
