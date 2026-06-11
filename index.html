@@ -7317,27 +7317,59 @@ tbody tr:hover td{background:#fafbff;}
 .tag-sub100{background:#fff7ed;color:#9a3412;}
 
 /* Tag filter bar */
-.tag-filter-bar{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 0 8px;border-bottom:1px solid #e5e7eb;margin-bottom:8px;}
-.tfrow{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;}
+.tag-filter-bar{display:flex;align-items:stretch;gap:10px;padding:8px 0;border-bottom:1px solid #e5e7eb;margin-bottom:8px;}
+.tf-all-wrap{display:flex;align-items:center;padding-right:10px;border-right:1px solid #e5e7eb;flex-shrink:0;}
+.tf-rows{flex:1;display:flex;flex-direction:column;gap:5px;justify-content:center;}
+.tfrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .tfrow-lbl{font-size:12px;color:#9ca3af;font-weight:700;flex-shrink:0;}
-.tfpill{display:inline-flex;align-items:center;gap:5px;padding:5px 13px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:14px;font-weight:600;color:#374151;transition:all .15s;user-select:none;flex-shrink:0;}
+.tfpill{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:13px;font-weight:600;color:#374151;transition:all .15s;user-select:none;flex-shrink:0;}
 .tfpill:hover{border-color:#9ca3af;background:#e9eaec;}
 .tfpill.active{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
-.tfpill-all{background:#1a1a2e;color:#fff;border-color:#1a1a2e;font-size:15px;padding:5px 16px;}
+.tfpill-all{background:#1a1a2e;color:#fff;border-color:#1a1a2e;font-size:14px;padding:6px 16px;}
 .tfpill-all:hover{opacity:.85;}
-.tfpill-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
-.tfpill-cnt{font-size:13px;font-weight:700;opacity:.8;}
+.tfpill-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.tfpill-cnt{font-size:12px;font-weight:700;opacity:.8;}
 .tfdrop-wrap{position:relative;display:inline-flex;}
 .tfdrop-menu{display:none;position:absolute;top:calc(100% + 4px);left:0;background:#fff;border:1px solid #e4e6ef;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.1);z-index:200;min-width:130px;padding:4px 0;}
 .tfdrop-menu.open{display:block;}
-.tfdrop-item{padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;display:flex;justify-content:space-between;gap:10px;color:#374151;white-space:nowrap;}
+.tfdrop-item{padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;display:flex;justify-content:space-between;gap:10px;color:#374151;white-space:nowrap;}
 .tfdrop-item:hover{background:#f3f4f6;}
 .tfdrop-item.sel{color:#4338ca;background:#eef2ff;}
 /* Note adj cell */
 .note-adj-cell{display:flex;align-items:flex-start;gap:5px;cursor:pointer;padding:5px 7px;border-radius:6px;min-width:130px;max-width:190px;transition:background .1s;}
 .note-adj-date{font-size:11px;color:#6366f1;font-weight:700;line-height:1.2;}
 .note-adj-text{font-size:13px;color:#312e81;font-weight:600;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all;}
-.note-add-popup{position:absolute;top:calc(100% + 4px);left:0;z-index:400;background:#fff;border:1px solid #e4e6ef;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.13);padding:12px 14px;min-width:230px;}
+/* Profit note modal */
+.pnm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:3000;align-items:center;justify-content:center;}
+.pnm-overlay.open{display:flex;}
+.pnm-box{background:#fff;border-radius:14px;width:500px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;}
+.pnm-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px;border-bottom:1px solid #e5e7eb;}
+.pnm-title{font-size:15px;font-weight:700;color:#1a1a2e;}
+.pnm-close{background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af;line-height:1;padding:2px 4px;}
+.pnm-close:hover{color:#374151;}
+.pnm-body{flex:1;overflow-y:auto;padding:16px 20px;}
+.pnm-section{font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.05em;margin-bottom:10px;}
+.pnm-input-row{display:flex;gap:8px;margin-bottom:12px;}
+.pnm-inp{flex:1;padding:8px 11px;border:1.5px solid #e4e6ef;border-radius:8px;font-size:13px;outline:none;font-family:'Noto Sans TC',sans-serif;}
+.pnm-inp:focus{border-color:#5b5fcf;}
+.pnm-send{padding:8px 16px;background:#5b5fcf;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;}
+.pnm-send:hover{background:#4c50b8;}
+.pnm-list{display:flex;flex-direction:column;gap:5px;}
+.pnm-entry{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background:#f8f9ff;border-left:3px solid #6366f1;border-radius:0 6px 6px 0;}
+.pnm-entry-date{font-size:11px;color:#6366f1;font-weight:700;white-space:nowrap;padding-top:2px;min-width:68px;}
+.pnm-entry-text{flex:1;font-size:13px;color:#312e81;font-weight:600;line-height:1.4;}
+.pnm-entry-del{background:none;border:none;cursor:pointer;color:#d1d5db;font-size:16px;padding:0 2px;line-height:1;}
+.pnm-entry-del:hover{color:#ef4444;}
+.pnm-footer{padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;}
+.pnm-close-btn{padding:7px 22px;border:1px solid #e4e6ef;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;}
+/* Column picker */
+.col-pick-btn{padding:5px 11px;border:1px solid #e4e6ef;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#374151;}
+.col-pick-btn:hover{background:#f3f4f6;}
+.col-picker-wrap{position:relative;display:inline-block;}
+.col-picker-menu{display:none;position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid #e4e6ef;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.1);z-index:300;min-width:155px;padding:4px 0;}
+.col-picker-menu.open{display:block;}
+.cp-row{display:flex;align-items:center;gap:8px;padding:6px 13px;cursor:pointer;font-size:13px;color:#374151;user-select:none;}
+.cp-row:hover{background:#f3f4f6;}
 
 /* Filter popup */
 .th-wrap{position:relative;display:inline-flex;align-items:center;gap:3px;width:100%;justify-content:flex-end;}
@@ -7449,7 +7481,7 @@ const GROWTH_TAGS=[
   {label:'⚫斷銷品',cls:'tag-lose',dot:'#7f1d1d'},
 ];
 const state={};
-SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawMap:{},curMonth:'2026/05',curHalf:'first',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilter:null};});
+SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawMap:{},curMonth:'2026/05',curHalf:'first',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
 let globalMap={};
 let curShop='總表';
 let openPopup=null;
@@ -7509,6 +7541,7 @@ function shopHTML(shop){return`
     <span class="period-tag" id="period-tag-${shop}"></span>
     <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')">
     <span class="row-cnt" id="cnt-${shop}"></span>
+    <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
     <button class="export-btn" id="exp-${shop}" onclick="doExport('${shop}')" disabled>⬇ 匯出 Excel</button>
   </div>
   <div id="tbl-${shop}">
@@ -7585,7 +7618,7 @@ function loadIntoUI(shop,built,period,days){
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
-  state[shop].filters={};state[shop].sorts={};state[shop].tagFilter=null;
+  state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];
   document.getElementById('period-tag-'+shop).textContent=period;
   document.getElementById('exp-'+shop).disabled=false;
   applyFilters(shop);
@@ -7852,20 +7885,26 @@ function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate) {
 
 // ── Tag filter bar ──
 function setTagFilter(shop,label){
-  state[shop].tagFilter=(state[shop].tagFilter===label)?null:label;
+  if(label===null){state[shop].tagFilters=[];}
+  else{
+    const arr=state[shop].tagFilters||[];
+    const idx=arr.indexOf(label);
+    if(idx>=0)arr.splice(idx,1);else arr.push(label);
+    state[shop].tagFilters=arr;
+  }
   applyFilters(shop);
 }
 function updateTagFilterBar(shop){
   const bar=document.getElementById('tfbar-'+shop);if(!bar)return;
   const built=state[shop]._built;if(!built||!built.length){bar.innerHTML='';return;}
-  const cur=state[shop].tagFilter;
+  const sel=state[shop].tagFilters||[];
   const counts={};
   built.forEach(r=>{
     const a=r.analysis?.label;if(a)counts[a]=(counts[a]||0)+1;
     const g=r.growthAnalysis?.label;if(g)counts[g]=(counts[g]||0)+1;
   });
   const mkPill=(t)=>{
-    const active=cur===t.label?' active':'';
+    const active=sel.includes(t.label)?' active':'';
     const lbl=t.label.replace(/'/g,"\\'");
     return`<span class="tfpill${active}" onclick="setTagFilter('${shop}','${lbl}')" title="${t.label}"><span class="tfpill-dot" style="background:${t.dot}"></span>${t.label} <span class="tfpill-cnt">${counts[t.label]}</span></span>`;
   };
@@ -7878,22 +7917,23 @@ function updateTagFilterBar(shop){
   const mkDrop=(id,label,dot,lbls)=>{
     const total=lbls.reduce((s,l)=>s+(counts[l]||0),0);
     if(!total)return'';
-    const isActive=lbls.includes(cur);
-    const items=lbls.filter(l=>counts[l]).map(l=>`<div class="tfdrop-item${cur===l?' sel':''}" onclick="setTagFilter('${shop}','${l}');closeTfDrop()">${l} <span class="tfpill-cnt">${counts[l]}</span></div>`).join('');
+    const isActive=lbls.some(l=>sel.includes(l));
+    const items=lbls.filter(l=>counts[l]).map(l=>`<div class="tfdrop-item${sel.includes(l)?' sel':''}" onclick="setTagFilter('${shop}','${l}');closeTfDrop()">${l} <span class="tfpill-cnt">${counts[l]}</span></div>`).join('');
     return`<div class="tfdrop-wrap"><span class="tfpill${isActive?' active':''}" onclick="toggleTfDrop(event,'${id}')"><span class="tfpill-dot" style="background:${dot}"></span>${label} <span class="tfpill-cnt">${total}</span> ▾</span><div class="tfdrop-menu" id="${id}">${items}</div></div>`;
   };
   const total=built.length;
+  const allActive=!sel.length;
+  const allPill=`<span class="tfpill tfpill-all${allActive?'':' active'}" style="${allActive?'':'opacity:.7'}" onclick="setTagFilter('${shop}',null)">全部 <span class="tfpill-cnt">${total}</span></span>`;
   const fixedPills=FIXED.filter(t=>counts[t.label]).map(mkPill).join('');
   const addDrop=mkDrop(`tfd-add-${shop}`,'加預算','#1e40af',ADD_LBLS);
   const subDrop=mkDrop(`tfd-sub-${shop}`,'減預算','#991b1b',SUB_LBLS);
-  const allPill=`<span class="tfpill tfpill-all" onclick="setTagFilter('${shop}',null)">全部 <span class="tfpill-cnt">${total}</span></span>`;
-  const row1=`<div class="tfrow">${allPill}<span class="tfrow-lbl">分析標籤</span>${fixedPills}${addDrop}${subDrop}</div>`;
+  const row1=`<div class="tfrow"><span class="tfrow-lbl">分析標籤</span>${fixedPills}${addDrop}${subDrop}</div>`;
   let row2='';
   if(shop==='好麻吉'){
     const gp=GROWTH_TAGS.filter(t=>counts[t.label]).map(mkPill).join('');
     if(gp)row2=`<div class="tfrow"><span class="tfrow-lbl">成長分析</span>${gp}</div>`;
   }
-  bar.innerHTML=row1+row2;
+  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row1}${row2}</div>`;
 }
 function toggleTfDrop(e,id){
   e.stopPropagation();
@@ -7911,7 +7951,7 @@ function applyFilters(shop){
   const q=(document.getElementById('search-'+shop).value||'').toLowerCase();
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q));
-  if(s.tagFilter)list=list.filter(r=>r.analysis?.label===s.tagFilter||r.growthAnalysis?.label===s.tagFilter);
+  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l));
   Object.entries(s.filters||{}).forEach(([col,f])=>{
     if(!f||f.val===''||f.val===undefined)return;
     list=list.filter(r=>{
@@ -8014,7 +8054,7 @@ function buildNoteCell(shopKey,code,noteId,noteData){
   return`<td class="tl" style="padding:4px 8px;vertical-align:top">
     <div class="note-adj-cell" id="${noteId}" title="${ht}" style="background:${bg}"
       onmouseover="this.style.background='${hBg}'" onmouseout="this.style.background='${bg}'"
-      onclick="openNotePopup('${shopKey}','${ce}','${noteId}')">
+      onclick="openNotePopup('${shopKey}','${ce}')">
       ${hasNote?`<div style="flex:1;min-width:0">${latestDate?`<div class="note-adj-date">${latestDate}</div>`:''}<div class="note-adj-text">${latestText.replace(/</g,'&lt;')}</div></div><span style="font-size:13px;flex-shrink:0;margin-top:1px">📝</span>`
       :`<div style="flex:1;color:#9ca3af;font-size:11px;padding:2px 0">點此新增</div><span style="font-size:13px;flex-shrink:0">📝</span>`}
     </div>
@@ -8068,37 +8108,113 @@ function recalcRow(shop,code,ov){
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
 
-// 備註 popup
-let _notePopup=null;
-function closeNotePopup(){if(_notePopup){_notePopup.remove();_notePopup=null;}}
-document.addEventListener('click',e=>{if(_notePopup&&!_notePopup.contains(e.target)&&!e.target.closest('.note-adj-cell'))closeNotePopup();});
-function openNotePopup(shopKey,code,cellId){
-  closeNotePopup();
-  const cell=document.getElementById(cellId);if(!cell)return;
+// ── Note modal ──
+const PROFIT_COLS=[
+  {key:'adsFee',label:'廣告費'},{key:'rev',label:'營收'},{key:'gross',label:'毛利'},
+  {key:'pureProfit',label:'淨利'},{key:'pureRate',label:'淨利率%'},{key:'adsPct',label:'廣告佔比'},
+  {key:'stock',label:'可用庫存'},{key:'targetROI',label:'目標ROI'},{key:'directROI',label:'直接ROI'},
+  {key:'roi',label:'投入產出'},{key:'roiDiff',label:'實際-目標'},{key:'clicks',label:'點擊數'},
+  {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'分析'},{key:'note',label:'調整'},
+  {key:'growthRate',label:'成長比',grow:true},{key:'growthAnalysis',label:'成長分析',grow:true},{key:'growthNote',label:'成長調整',grow:true},
+];
+function getHiddenCols(shop){try{return new Set(JSON.parse(localStorage.getItem('ec_hcols|'+shop)||'[]'));}catch{return new Set();}}
+function toggleHiddenCol(shop,key){
+  const s=getHiddenCols(shop);if(s.has(key))s.delete(key);else s.add(key);
+  try{localStorage.setItem('ec_hcols|'+shop,JSON.stringify([...s]));}catch{}
+  applyFilters(shop);renderColPicker(shop);
+}
+function renderColPicker(shop){
+  const m=document.getElementById('colpick-'+shop);if(!m)return;
+  const hc=getHiddenCols(shop);
+  const cols=PROFIT_COLS.filter(c=>!c.grow||shop==='好麻吉');
+  const vis=cols.length-hc.size;
+  m.innerHTML=`<div style="padding:6px 13px 4px;font-size:11px;color:#9ca3af;font-weight:700;display:flex;justify-content:space-between;align-items:center">欄位 <span>${vis}/${cols.length}</span></div>`
+    +cols.map(c=>`<div class="cp-row" onclick="toggleHiddenCol('${shop}','${c.key}');event.stopPropagation()">
+      <input type="checkbox" ${!hc.has(c.key)?'checked':''} style="margin:0;pointer-events:none"> ${c.label}
+    </div>`).join('')
+    +`<div style="padding:4px 13px 6px;border-top:1px solid #e5e7eb;text-align:right">
+      <button onclick="resetHiddenCols('${shop}')" style="font-size:11px;color:#5b5fcf;background:none;border:none;cursor:pointer;font-weight:600">顯示全部</button>
+    </div>`;
+}
+function resetHiddenCols(shop){try{localStorage.removeItem('ec_hcols|'+shop);}catch{}applyFilters(shop);renderColPicker(shop);}
+function openColPicker(shop,btn){
+  let m=document.getElementById('colpick-'+shop);
+  if(m){m.remove();return;}
+  m=document.createElement('div');m.id='colpick-'+shop;m.className='col-picker-menu open';
+  const wrap=btn?.closest('.col-picker-wrap');
+  (wrap||btn?.parentElement||document.body).appendChild(m);
+  renderColPicker(shop);
+  setTimeout(()=>document.addEventListener('click',function h(e){if(!m.contains(e.target)){m.remove();document.removeEventListener('click',h);}},{},true),0);
+}
+
+let _pnm=null;
+function openNotePopup(shopKey,code){
+  _pnm={shopKey,code};
+  let modal=document.getElementById('profit-note-modal');
+  if(!modal){
+    modal=document.createElement('div');modal.id='profit-note-modal';modal.className='pnm-overlay';
+    modal.innerHTML=`<div class="pnm-box" onclick="event.stopPropagation()">
+      <div class="pnm-header"><div class="pnm-title" id="pnm-title"></div><button class="pnm-close" onclick="closeProfitNoteModal()">×</button></div>
+      <div class="pnm-body">
+        <div class="pnm-section">調整紀錄（按 Enter 或「送出」新增，自動加日期・自動儲存）</div>
+        <div class="pnm-input-row"><input id="pnm-inp" class="pnm-inp" type="text" placeholder="例：調整主圖 / 加強廣告預算 +500"><button class="pnm-send" onclick="submitProfitNote()">送出</button></div>
+        <div id="pnm-list" class="pnm-list"></div>
+      </div>
+      <div class="pnm-footer"><button class="pnm-close-btn" onclick="closeProfitNoteModal()">關閉</button></div>
+    </div>`;
+    modal.onclick=closeProfitNoteModal;
+    document.body.appendChild(modal);
+    document.getElementById('pnm-inp').onkeydown=e=>{if(e.key==='Enter')submitProfitNote();if(e.key==='Escape')closeProfitNoteModal();};
+  }
+  const baseShop=shopKey.replace('_growth','');
+  const r=state[baseShop]?._built?.find(x=>x.code===code);
+  document.getElementById('pnm-title').textContent=r?`${code}・${r.name}`:code;
+  renderPnmList();
+  modal.classList.add('open');
+  setTimeout(()=>document.getElementById('pnm-inp')?.focus(),60);
+}
+function renderPnmList(){
+  if(!_pnm)return;
+  const {shopKey,code}=_pnm;
+  const notes=getNotes(shopKey);const nd=notes[code];
+  let adj=[];
+  if(nd){if(typeof nd==='string')adj=[{date:'',text:nd}];else adj=nd.adjustments||[];}
+  const el=document.getElementById('pnm-list');if(!el)return;
+  if(!adj.length){el.innerHTML='<div style="padding:14px;text-align:center;color:#9ca3af;font-size:12px">尚無調整紀錄</div>';return;}
+  const map=new Map();
+  adj.forEach((a,i)=>{const d=a.date||'—';if(!map.has(d))map.set(d,[]);map.get(d).push({text:a.text,i});});
+  const sorted=[...map.keys()].sort((a,b)=>b.localeCompare(a));
+  el.innerHTML=sorted.map(d=>map.get(d).map(({text,i})=>`<div class="pnm-entry">
+    <div class="pnm-entry-date">${d}</div>
+    <div class="pnm-entry-text">${text.replace(/</g,'&lt;')}</div>
+    <button class="pnm-entry-del" onclick="deleteProfitNote(${i})">×</button>
+  </div>`).join('')).join('');
+}
+function submitProfitNote(){
+  if(!_pnm)return;
+  const inp=document.getElementById('pnm-inp');const v=inp?.value.trim();if(!v)return;
+  const {shopKey,code}=_pnm;
   const now=new Date();
   const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
-  const pop=document.createElement('div');pop.className='note-add-popup';_notePopup=pop;
-  pop.innerHTML=`<div style="font-size:11px;color:#6366f1;font-weight:700;margin-bottom:6px">${today}</div>
-    <input id="nap-inp" class="note-input" type="text" placeholder="輸入備註…" style="width:180px;display:block">
-    <div style="display:flex;gap:6px;margin-top:8px;justify-content:flex-end">
-      <button onclick="closeNotePopup()" style="padding:3px 10px;border:1px solid #e4e6ef;border-radius:6px;background:#fff;cursor:pointer;font-size:12px">取消</button>
-      <button id="nap-save" style="padding:3px 10px;border:none;border-radius:6px;background:#5b5fcf;color:#fff;cursor:pointer;font-size:12px;font-weight:700">儲存</button>
-    </div>`;
-  cell.style.position='relative';cell.appendChild(pop);
-  const inp=pop.querySelector('#nap-inp');inp.focus();
-  const save=()=>{
-    const v=inp.value.trim();if(!v)return;
-    const notes=getNotes(shopKey);
-    if(!notes[code])notes[code]={adjustments:[]};
-    if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
-    notes[code].adjustments.push({date:today,text:v});
-    saveNotes(shopKey,notes);closeNotePopup();applyFilters(shopKey.replace('_growth',''));
-  };
-  pop.querySelector('#nap-save').onclick=save;
-  inp.onkeydown=e=>{if(e.key==='Enter')save();if(e.key==='Escape')closeNotePopup();};
+  const notes=getNotes(shopKey);
+  if(!notes[code])notes[code]={adjustments:[]};
+  if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
+  notes[code].adjustments.push({date:today,text:v});
+  saveNotes(shopKey,notes);inp.value='';
+  renderPnmList();applyFilters(shopKey.replace('_growth',''));
 }
-function startNote(shop,code,tdId){openNotePopup(shop,code,tdId);}
-function commitNote(shop,code,val,tdId){}
+function deleteProfitNote(origIdx){
+  if(!_pnm)return;
+  const {shopKey,code}=_pnm;
+  const notes=getNotes(shopKey);if(!notes[code])return;
+  if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
+  notes[code].adjustments.splice(origIdx,1);
+  if(!notes[code].adjustments.length)delete notes[code];
+  saveNotes(shopKey,notes);renderPnmList();applyFilters(shopKey.replace('_growth',''));
+}
+function closeProfitNoteModal(){document.getElementById('profit-note-modal')?.classList.remove('open');_pnm=null;}
+function startNote(shop,code){openNotePopup(shop,code);}
+function commitNote(){}
 
 // ── Render Table ──
 function renderTable(shop,list){
@@ -8117,28 +8233,29 @@ function renderTable(shop,list){
   const thN=(col,label)=>`<th><div class="th-wrap"><span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',true,this)">▾</button></div></th>`;
   const thT=(col,label)=>`<th class="tl"><div class="th-wrap tl"><span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',false,this)">▾</button></div></th>`;
 
+  const hc=getHiddenCols(shop);const vc=k=>!hc.has(k);
   let html=`<div class="tscroll"><table><thead><tr>
     ${thT('code','編號')}
     ${thT('name','名稱 / ID')}
-    ${thN('adsFee','廣告費')}
-    ${thN('rev',shop==='好麻吉'?'營收 / 上半月':'營收')}
-    ${thN('gross','毛利')}
-    ${thN('pureProfit','淨利')}
-    ${thN('pureRate','淨利率%')}
-    ${thN('adsPct','廣告佔比')}
-    ${thN('stock','可用庫存')}
-    ${thN('targetROI','目標ROI')}
-    ${thN('directROI','直接投入產出')}
-    ${thN('roi','投入產出')}
-    ${thN('roiDiff','實際-目標')}
-    ${thN('clicks','點擊數')}
-    ${thN('dayBudget','日預算')}
-    ${thT('analysisLabel','分析')}
-    <th class="tl">調整備註</th>
+    ${vc('adsFee')?thN('adsFee','廣告費'):''}
+    ${vc('rev')?thN('rev',shop==='好麻吉'?'營收 / 上半月':'營收'):''}
+    ${vc('gross')?thN('gross','毛利'):''}
+    ${vc('pureProfit')?thN('pureProfit','淨利'):''}
+    ${vc('pureRate')?thN('pureRate','淨利率%'):''}
+    ${vc('adsPct')?thN('adsPct','廣告佔比'):''}
+    ${vc('stock')?thN('stock','可用庫存'):''}
+    ${vc('targetROI')?thN('targetROI','目標ROI'):''}
+    ${vc('directROI')?thN('directROI','直接ROI'):''}
+    ${vc('roi')?thN('roi','投入產出'):''}
+    ${vc('roiDiff')?thN('roiDiff','實際-目標'):''}
+    ${vc('clicks')?thN('clicks','點擊數'):''}
+    ${vc('dayBudget')?thN('dayBudget','日預算'):''}
+    ${vc('analysisLabel')?thT('analysisLabel','分析'):''}
+    ${vc('note')?'<th class="tl">調整</th>':''}
     ${shop==='好麻吉'?`
-    ${thN('growthRate','成長比')}
-    <th class="tl">成長分析</th>
-    <th class="tl">成長調整</th>`:''}
+    ${vc('growthRate')?thN('growthRate','成長比'):''}
+    ${vc('growthAnalysis')?'<th class="tl">成長分析</th>':''}
+    ${vc('growthNote')?'<th class="tl">成長調整</th>':''}`:''}
   </tr></thead><tbody>`;
 
   let rowIdx=0;
@@ -8164,44 +8281,40 @@ function renderTable(shop,list){
 
     if(!r.fromMobic){
       const adsId=`td-${shop}-${r.code}-adsFee`;
+      const noRevSpan=[vc('rev'),vc('gross'),vc('pureProfit'),vc('pureRate'),vc('adsPct'),vc('stock'),vc('targetROI'),vc('directROI'),vc('roi'),vc('roiDiff'),vc('clicks'),vc('dayBudget'),vc('analysisLabel')].filter(Boolean).length;
       html+=`<tr class="tr-no-rev">
         <td class="tl td-code">${r.code}</td>
         <td class="tl td-name" style="color:#9ca3af">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
-        <td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}">
-          <span class="cell-val">$${fmtN(r.adsFee)}</span>
-          <button class="edit-btn" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" title="編輯">✏️</button>
-        </td>
-        <td colspan="11" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>
-        ${buildNoteCell(shop,r.code,noteId,notes[r.code])}
-        ${shop==='好麻吉'?`<td colspan="3"></td>`:''}
+        ${vc('adsFee')?`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}"><span class="cell-val">$${fmtN(r.adsFee)}</span><button class="edit-btn" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" title="編輯">✏️</button></td>`:''}
+        ${noRevSpan>0?`<td colspan="${noRevSpan}" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>`:''}
+        ${vc('note')?buildNoteCell(shop,r.code,noteId,notes[r.code]):''}
+        ${shop==='好麻吉'?`${vc('growthRate')?'<td></td>':''}${vc('growthAnalysis')?'<td></td>':''}${vc('growthNote')?'<td></td>':''}`:''}
       </tr>`;
     }else{
       html+=`<tr>
         <td class="tl td-code">${r.code}</td>
         <td class="tl td-name">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
-        ${editTd('adsFee','$'+fmtN(r.adsFee),'td-amber')}
-        <td class="td-num">$${fmtN(r.rev)}${shop==='好麻吉'?`<div class="sub-rev">${r.prevRev!==null?'$'+fmtN(r.prevRev):'—'}</div>`:''}</td>
-        <td class="td-num">$${fmtN(r.gross)}</td>
-        <td class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>
-        <td>${pill(r.pureRate*100)}</td>
-        <td class="td-num">${(r.adsPct*100).toFixed(2)}%</td>
-        <td class="td-num">${r.stock.toLocaleString()}</td>
-        <td class="td-num">${r.targetROI!==null?r.targetROI.toFixed(2):'—'}</td>
-        <td class="td-num">${r.directROI>0?r.directROI.toFixed(2):'—'}</td>
-        <td class="td-num">${r.roi>0?r.roi.toFixed(2):'—'}</td>
-        <td class="td-num">${roiDiffStr}</td>
-        <td class="td-num">${r.clicks>0?r.clicks.toLocaleString():'—'}</td>
-        <td class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>
-        <td class="tl">${anaHtml}</td>
-        ${buildNoteCell(shop,r.code,noteId,notes[r.code])}
+        ${vc('adsFee')?editTd('adsFee','$'+fmtN(r.adsFee),'td-amber'):''}
+        ${vc('rev')?`<td class="td-num">$${fmtN(r.rev)}${shop==='好麻吉'?`<div class="sub-rev">${r.prevRev!==null?'$'+fmtN(r.prevRev):'—'}</div>`:''}</td>`:''}
+        ${vc('gross')?`<td class="td-num">$${fmtN(r.gross)}</td>`:''}
+        ${vc('pureProfit')?`<td class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`:''}
+        ${vc('pureRate')?`<td>${pill(r.pureRate*100)}</td>`:''}
+        ${vc('adsPct')?`<td class="td-num">${(r.adsPct*100).toFixed(2)}%</td>`:''}
+        ${vc('stock')?`<td class="td-num">${r.stock.toLocaleString()}</td>`:''}
+        ${vc('targetROI')?`<td class="td-num">${r.targetROI!==null?r.targetROI.toFixed(2):'—'}</td>`:''}
+        ${vc('directROI')?`<td class="td-num">${r.directROI>0?r.directROI.toFixed(2):'—'}</td>`:''}
+        ${vc('roi')?`<td class="td-num">${r.roi>0?r.roi.toFixed(2):'—'}</td>`:''}
+        ${vc('roiDiff')?`<td class="td-num">${roiDiffStr}</td>`:''}
+        ${vc('clicks')?`<td class="td-num">${r.clicks>0?r.clicks.toLocaleString():'—'}</td>`:''}
+        ${vc('dayBudget')?`<td class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>`:''}
+        ${vc('analysisLabel')?`<td class="tl">${anaHtml}</td>`:''}
+        ${vc('note')?buildNoteCell(shop,r.code,noteId,notes[r.code]):''}
         ${shop==='好麻吉'?(()=>{
           const gnoteId=`gnote-${shop}-${r.code}`;
           return `
-          <td class="td-num" style="text-align:center">
-            ${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}
-          </td>
-          <td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>
-          ${buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code])}`;
+          ${vc('growthRate')?`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`:''}
+          ${vc('growthAnalysis')?`<td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`:''}
+          ${vc('growthNote')?buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]):''}`;
         })():''}
       </tr>`;
     }
