@@ -2473,7 +2473,10 @@ const App = {
           const hasNote = p.note && (p.note.text || (p.note.adjustments && p.note.adjustments.length > 0));
 
           // 滑鼠 hover 顯示的內容：同日合併、用「、」串、最新在上；最後加長期備註
+          // 同時抓出「最新一筆」直接顯示在表格內
           let hoverPreview = '';
+          let latestAdjText = '';
+          let latestAdjDate = '';
           if (hasNote) {
             const lines = [];
             const adjMap = new Map();
@@ -2489,8 +2492,18 @@ const App = {
               lines.push(`📌 ${p.note.text}`);
             }
             hoverPreview = lines.join('\n');
+            // 最新一筆：取 adjustments 陣列的最後一筆（保留輸入順序）
+            const adjArr = p.note.adjustments || [];
+            if (adjArr.length > 0) {
+              const last = adjArr[adjArr.length - 1];
+              latestAdjText = last.text || '';
+              latestAdjDate = last.date || '';
+            } else if (p.note.text) {
+              latestAdjText = p.note.text;
+              latestAdjDate = '📌';
+            }
           } else {
-            hoverPreview = '新增備註 / 調整紀錄';
+            hoverPreview = '點此新增備註 / 調整紀錄';
           }
 
           // 流向：上週類別 → 本週類別；只有本週就只顯示本週；都沒有顯示 —
@@ -2520,11 +2533,11 @@ const App = {
             <tr style="border-top:1px solid #f3f4f6;background:${rowBg}">
               <td style="padding:0;width:4px;background:${bandColor}"></td>
               <td style="padding:8px 8px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;width:32px">${i + 1}</td>
-              <td style="padding:8px 8px;color:var(--text);min-width:260px;max-width:360px;text-align:left;vertical-align:top">
-                <div style="display:grid;grid-template-columns:56px 1fr;column-gap:10px;row-gap:3px;align-items:center">
-                  <div style="font-weight:700;font-size:15px;line-height:1.4;font-variant-numeric:tabular-nums;white-space:nowrap">${escapeHtml(p.code)}</div>
-                  <div style="font-weight:600;font-size:15px;line-height:1.4">${escapeHtml(p.mocbicName || p.name)}</div>
-                  ${p.shopeeId ? `<div></div><div style="font-size:12px;color:var(--text-muted);font-family:monospace;line-height:1.2">ID: ${escapeHtml(p.shopeeId)}</div>` : ''}
+              <td style="padding:8px 6px 8px 8px;color:var(--text);min-width:200px;max-width:280px;text-align:left;vertical-align:top">
+                <div style="display:grid;grid-template-columns:48px 1fr;column-gap:6px;row-gap:2px;align-items:center">
+                  <div style="font-weight:700;font-size:14px;line-height:1.4;font-variant-numeric:tabular-nums;white-space:nowrap">${escapeHtml(p.code)}</div>
+                  <div style="font-weight:600;font-size:14px;line-height:1.4">${escapeHtml(p.mocbicName || p.name)}</div>
+                  ${p.shopeeId ? `<div></div><div style="font-size:11px;color:var(--text-muted);font-family:monospace;line-height:1.2">ID: ${escapeHtml(p.shopeeId)}</div>` : ''}
                 </div>
                 ${!p.inMaster ? '<div style="font-size:10px;color:#f59e0b;font-weight:600;margin-top:4px;line-height:1.2">⚠ 需更新母表</div>' : ''}
               </td>
@@ -2542,8 +2555,19 @@ const App = {
               ${visCol('group') ? `<td style="padding:8px 8px;text-align:center;font-size:13px;vertical-align:top">${groupChip}</td>` : ''}
               ${visCol('flow') ? `<td style="padding:8px 8px;text-align:center;font-size:13px;vertical-align:top">${flowHtml}</td>` : ''}
               ${visCol('stock') ? `<td style="padding:8px 8px;text-align:center;font-size:14px;color:${netStock <= 0 ? '#ef4444' : netStock < 30 ? '#f59e0b' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${netStock <= 0 ? 700 : 600};white-space:nowrap;vertical-align:top">${fmt(netStock)} ${netStock <= 0 ? '⚠' : ''}</td>` : ''}
-              ${visCol('note') ? `<td style="padding:6px 6px;text-align:center;white-space:nowrap">
-                <button class="icon-btn" data-insight-note="${escapeHtml(p.code)}" title="${escapeHtml(hoverPreview)}" style="width:26px;height:26px;font-size:13px;${hasNote ? 'background:#fef3c7;border-radius:5px' : ''}">📝</button>
+              ${visCol('note') ? `<td style="padding:6px 8px;vertical-align:top;min-width:140px;max-width:200px">
+                <div data-insight-note="${escapeHtml(p.code)}" title="${escapeHtml(hoverPreview)}" style="display:flex;align-items:flex-start;gap:4px;cursor:pointer;padding:4px 6px;border-radius:5px;${hasNote ? 'background:#fef3c7' : ''}" onmouseover="this.style.background='${hasNote ? '#fde68a' : '#f3f4f6'}'" onmouseout="this.style.background='${hasNote ? '#fef3c7' : ''}'">
+                  ${latestAdjText ? `
+                    <div style="flex:1;min-width:0;line-height:1.3">
+                      <div style="font-size:11px;color:#6366f1;font-weight:700;font-variant-numeric:tabular-nums">${escapeHtml(latestAdjDate)}</div>
+                      <div style="font-size:12px;color:#312e81;font-weight:500;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all">${escapeHtml(latestAdjText)}</div>
+                    </div>
+                    <span style="font-size:13px;flex-shrink:0">📝</span>
+                  ` : `
+                    <div style="flex:1;color:var(--text-muted);font-size:11px;text-align:center;padding:2px 0">點此新增</div>
+                    <span style="font-size:13px;flex-shrink:0">📝</span>
+                  `}
+                </div>
               </td>` : ''}
             </tr>
           `;
@@ -2626,7 +2650,7 @@ const App = {
                 ${visCol('group') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">大類</th>` : ''}
                 ${visCol('flow') ? `<th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上週 → 本週</th>` : ''}
                 ${visCol('stock') ? sortableTh('stock', '可用庫存', 'center') : ''}
-                ${visCol('note') ? `<th style="padding:10px 6px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;width:40px">調整</th>` : ''}`;
+                ${visCol('note') ? `<th style="padding:10px 8px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;min-width:140px">調整（最新）</th>` : ''}`;
                 })()}
               </tr>
             </thead>
