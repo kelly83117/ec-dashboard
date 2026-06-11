@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- 禁止瀏覽器快取主檔，確保每次都拿最新版（解決使用者看到舊版的問題） -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
+<meta name="app-version" content="2026-06-11-3">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -944,6 +950,55 @@
 
 <!-- ============== Toast ============== -->
 <div class="toast" id="toast"></div>
+
+<!-- ============== 自動清快取（讓所有電腦點網址就能拿到最新版） ============== -->
+<script>
+(function autoRefreshOnVersionChange(){
+  try {
+    const META_VERSION = document.querySelector('meta[name="app-version"]')?.content || '';
+    if (!META_VERSION) return;
+
+    // 1) 清掉所有可能阻擋更新的 Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(r => r.unregister());
+      }).catch(()=>{});
+    }
+
+    // 2) 比對版本：跟 localStorage 存的舊版號比對
+    let lastVer = '';
+    try { lastVer = localStorage.getItem('__app_version') || ''; } catch {}
+    if (lastVer === META_VERSION) {
+      console.log('[version] 目前已是最新版', META_VERSION);
+      return;
+    }
+
+    console.warn('[version] 偵測到新版！舊:', lastVer || '(無)', '→ 新:', META_VERSION);
+
+    // 3) 清掉 Cache API 裡所有舊資源
+    if ('caches' in window) {
+      caches.keys().then(names => {
+        return Promise.all(names.map(n => {
+          console.warn('[version] 清掉舊 cache:', n);
+          return caches.delete(n);
+        }));
+      }).then(() => {
+        try { localStorage.setItem('__app_version', META_VERSION); } catch {}
+        // 第一次部署時 lastVer 是空的，避免無限重載
+        if (lastVer && lastVer !== META_VERSION) {
+          console.warn('[version] 即將自動重載...');
+          location.reload();
+        }
+      }).catch(err => {
+        console.warn('[version] 清 cache 失敗：', err);
+        try { localStorage.setItem('__app_version', META_VERSION); } catch {}
+      });
+    } else {
+      try { localStorage.setItem('__app_version', META_VERSION); } catch {}
+    }
+  } catch (e) { console.warn('[version] 檢測例外', e); }
+})();
+</script>
 
 <script>
 /* =========================================================================
