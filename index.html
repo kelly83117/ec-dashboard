@@ -3255,13 +3255,29 @@ const App = {
       Store.set(notesKey, allNotes);
     };
 
+    // 給 onCancel 用：關閉前把還在輸入框的文字也存成紀錄，避免遺失
+    const flushPendingInput = () => {
+      const inp = document.getElementById('note-new-adj');
+      if (!inp) return;
+      const text = inp.value.trim();
+      if (!text) return;
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
+      note.adjustments = note.adjustments || [];
+      note.adjustments.push({ date: dateStr, text, by: this.currentUser?.username || '' });
+      inp.value = '';
+      autoSave();
+      this.render();
+    };
+
     this.openModal({
       title: `📝 商品備註 — ${code}`,
       width: '560px',
       hideFooter: true,
+      onCancel: flushPendingInput, // X 按鈕關閉時也會 flush
       bodyHtml: `
         <div class="field">
-          <label><span>調整紀錄 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（按 Enter 或「送出」即可新增，自動加日期、自動儲存）</span></span></label>
+          <label><span>調整紀錄 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（按 Enter 或「送出」新增，自動加日期、自動儲存。打了字直接關閉也會自動存）</span></span></label>
           <div id="note-adj-input-row" style="display:flex;gap:6px;margin-bottom:8px">
             <input type="text" id="note-new-adj" placeholder="例：調整主圖 / 加強廣告預算 +500" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:5px;font-size:12px">
             <button id="note-save-adj" type="button" style="padding:6px 12px;border:0;border-radius:5px;background:var(--primary);color:white;font-size:12px;cursor:pointer">送出</button>
@@ -3328,7 +3344,18 @@ const App = {
           this.render();
         });
 
+        // 額外保護：失焦時也把還沒按 Enter 的文字存起來
+        newAdjInput.addEventListener('blur', () => {
+          // 避免 commitAdj 重複（按送出時也會 blur）
+          setTimeout(() => {
+            if (document.getElementById('note-new-adj') === newAdjInput && newAdjInput.value.trim()) {
+              commitAdj();
+            }
+          }, 150);
+        });
+
         closeBtn.addEventListener('click', () => {
+          flushPendingInput();
           autoSave();
           this.render();
           this.closeModal();
