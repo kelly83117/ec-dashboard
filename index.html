@@ -7606,8 +7606,10 @@ function loadIntoUI(shop,built,period,days){
   if(built&&Array.isArray(built)){
     built.forEach(r=>{
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
+      r.analysisLabel=r.analysis?.label||'';
       if(shop==='好麻吉'){
         r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
+        r.growthAnalysisLabel=r.growthAnalysis?.label||'';
       }
     });
   }
@@ -8248,7 +8250,7 @@ function renderTable(shop,list){
     ${vc('note')?'<th class="tl">調整</th>':''}
     ${shop==='好麻吉'?`
     ${vc('growthRate')?thN('growthRate','成長比'):''}
-    ${vc('growthAnalysis')?'<th class="tl">成長分析</th>':''}
+    ${vc('growthAnalysis')?thT('growthAnalysisLabel','成長分析'):''}
     ${vc('growthNote')?'<th class="tl">成長調整</th>':''}`:''}
   </tr></thead><tbody>`;
 
