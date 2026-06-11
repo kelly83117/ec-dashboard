@@ -2480,7 +2480,7 @@ const App = {
               <td style="padding:8px 8px;text-align:right;font-size:14px;font-weight:${p.convRate > 0 ? '700' : '500'};color:${p.convRate > 0 && p.convRate < 0.01 ? '#ef4444' : p.convRate >= 0.02 ? '#10b981' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;vertical-align:top">${fmtPct(p.convRate)}</td>
               <td style="padding:8px 8px;text-align:center;font-size:13px;vertical-align:top">${groupChip}</td>
               <td style="padding:8px 8px;text-align:center;font-size:13px;vertical-align:top">${flowHtml}</td>
-              <td style="padding:8px 8px;text-align:right;font-size:14px;color:${netStock <= 0 ? '#ef4444' : netStock < 30 ? '#f59e0b' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${netStock <= 0 ? 700 : 600};white-space:nowrap;vertical-align:top">${fmt(netStock)} ${netStock <= 0 ? '⚠' : ''}</td>
+              <td style="padding:8px 8px;text-align:center;font-size:14px;color:${netStock <= 0 ? '#ef4444' : netStock < 30 ? '#f59e0b' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;font-weight:${netStock <= 0 ? 700 : 600};white-space:nowrap;vertical-align:top">${fmt(netStock)} ${netStock <= 0 ? '⚠' : ''}</td>
               <td style="padding:6px 6px;text-align:center;white-space:nowrap">
                 <button class="icon-btn" data-insight-note="${escapeHtml(p.code)}" title="${hasNote ? '已有備註，點看 / 編輯' : '新增備註'}" style="width:26px;height:26px;font-size:13px;${hasNote ? 'background:#fef3c7;border-radius:5px' : ''}">📝</button>
               </td>
@@ -2547,7 +2547,7 @@ const App = {
                 <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">轉換率</th>
                 <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">大類</th>
                 <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上週 → 本週</th>
-                <th style="padding:10px 8px;text-align:right;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">可用庫存</th>
+                <th style="padding:10px 8px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">可用庫存</th>
                 <th style="padding:10px 6px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;width:40px">備註</th>
               </tr>
             </thead>
