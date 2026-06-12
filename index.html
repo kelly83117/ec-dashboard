@@ -7821,10 +7821,11 @@ let openPopup=null;
 function lsKey(shop,month,half){return`ec|${shop}|${month}|${half}`;}
 function lsSave(shop,month,half,built,period,days){
   const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
-  // 1) 本地（離線時還可看到）
   try{localStorage.setItem(lsKey(shop,month,half),JSON.stringify(payload));}catch(e){alert('儲存失敗');}
-  // 2) 雲端（淨利表用獨立的 app/profit 文件，避免 app/main 撞 1MB 上限）
-  try{ if(window.__cloudProfit) window.__cloudProfit.setField(lsKey(shop,month,half),payload); }catch{}
+  // edit 期間延遲推雲端，避免 profitDataReady 觸發全表重渲染造成閃爍
+  const pushCloud=()=>{try{if(window.__cloudProfit)window.__cloudProfit.setField(lsKey(shop,month,half),payload);}catch{}};
+  const delay=(_editedAt[shop]&&Date.now()-_editedAt[shop]<2000)?2500:0;
+  if(delay)setTimeout(pushCloud,delay);else pushCloud();
 }
 function lsLoad(shop,month,half){
   const k=lsKey(shop,month,half);
@@ -8954,7 +8955,9 @@ function getEdits(shop){
 function saveEdits(shop,edits){
   const k='ec_edits|'+shop;
   try{localStorage.setItem(k,JSON.stringify(edits));}catch{}
-  try{ if(window.__cloudProfit) window.__cloudProfit.setField(k,edits); }catch{}
+  const pushCloud=()=>{try{if(window.__cloudProfit)window.__cloudProfit.setField(k,edits);}catch{}};
+  const delay=(_editedAt[shop]&&Date.now()-_editedAt[shop]<2000)?2500:0;
+  if(delay)setTimeout(pushCloud,delay);else pushCloud();
 }
 function getNotes(shop){
   const k='ec_notes|'+shop;
