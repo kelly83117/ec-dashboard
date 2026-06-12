@@ -9679,12 +9679,12 @@ function renderSummary(){
     const label=full?`${sm}月份`:(sm===em?`${sm}/${sd} – ${sm}/${ed}`:`${sm}/${sd} – ${em}/${ed}`);
     if(full){
       tbody+=`<tr style="background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
-        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap">${label}
+        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:#eef2ff;z-index:1">${label}
           <button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="margin-left:4px;background:none;border:none;color:#9ca3af;cursor:pointer;font-size:10px;padding:0;vertical-align:middle" title="刪除">✕</button>
         </td>${dataCells(row.shops,true,row.id)}</tr>`;
     } else {
       tbody+=`<tr style="border-top:1px solid #f0f0f0">
-        <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums">${label}
+        <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:white;z-index:1">${label}
           <button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="margin-left:4px;background:none;border:none;color:#d1d5db;cursor:pointer;font-size:10px;padding:0;vertical-align:middle" title="刪除">✕</button>
         </td>${dataCells(row.shops,true,row.id)}</tr>`;
     }
@@ -9695,7 +9695,7 @@ function renderSummary(){
   el.innerHTML=`<div style="padding:14px 16px 16px">
     <div class="tscroll"><table style="border-collapse:collapse;width:100%">
       <thead>
-        <tr><th rowspan="2" style="padding:8px 12px;background:#f8fafc;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;text-align:left;white-space:nowrap;vertical-align:middle;min-width:110px">區間</th>${shopGroupHdr}</tr>
+        <tr><th rowspan="2" style="padding:8px 12px;background:#f8fafc;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;text-align:left;white-space:nowrap;vertical-align:middle;min-width:110px;position:sticky;left:0;z-index:3">區間</th>${shopGroupHdr}</tr>
         <tr style="border-bottom:2px solid #e5e7eb">${shopSubHdr}</tr>
       </thead>
       <tbody>${tbody}</tbody>
