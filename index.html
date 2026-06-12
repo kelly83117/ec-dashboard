@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-27">
+<meta name="app-version" content="2026-06-11-28">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2434,7 +2434,7 @@ const App = {
           <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc">
             <div>
               <h3 style="margin:0;font-size:15px;font-weight:700">📤 上傳檔案</h3>
-              <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted)">點下方任一卡片即可上傳對應的 Excel；上傳過的會顯示 ✓ 已載入</p>
+              <p style="margin:2px 0 0;font-size:12px;color:#dc2626;font-weight:700">載入最新上週銷售排行，直接拖移到上週銷售排行位置，系統會自動將檔案換位處理</p>
             </div>
             <button id="insight-upload-close" type="button" style="width:30px;height:30px;border:1px solid var(--border);background:white;border-radius:6px;font-size:14px;cursor:pointer;color:var(--text-muted)">✕</button>
           </div>
@@ -3062,12 +3062,44 @@ const App = {
       if (overlay) overlay.remove();
     };
 
+    // 上傳前二次確認：顯示檔名 + 目標位置，使用者按「確認寫入」才會真的處理
+    const confirmUpload = (cardLabel, file, input) => new Promise((resolve) => {
+      const size = file && file.size ? `${(file.size / 1024).toFixed(0)} KB` : '';
+      this.openModal({
+        title: '📥 確認寫入',
+        width: '420px',
+        bodyHtml: `
+          <div style="font-size:13px;line-height:1.6;color:var(--text)">
+            即將寫入這份檔案：
+            <div style="margin-top:8px;padding:10px 12px;background:var(--bg);border-radius:7px;border-left:3px solid var(--primary)">
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">${escapeHtml(cardLabel)}</div>
+              <div style="font-size:13px;font-weight:700;color:var(--text);margin-top:2px;word-break:break-all">${escapeHtml(file?.name || '')}</div>
+              ${size ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${size}</div>` : ''}
+            </div>
+            <div style="margin-top:10px;padding:8px 10px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;font-size:11px;color:#92400e;line-height:1.5">
+              ⚠️ 上週銷售排行會自動往後推位；其他類型直接覆蓋舊資料。
+            </div>
+          </div>
+        `,
+        saveLabel: '確認寫入',
+        cancelLabel: '取消',
+        onSave: () => { resolve(true); return true; },
+        onCancel: () => {
+          // 取消時清空 input.value，使用者可以重新挑同一份檔案
+          if (input) input.value = '';
+          resolve(false);
+        },
+      });
+    });
+
     // 商品母表上傳：一次解析 3 個分頁，自動分配到各賣場
     const masterInput = document.getElementById('insight-master-upload');
     if (masterInput) {
       masterInput.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        const ok = await confirmUpload('商品清單（母表）— 三個賣場共用', file, masterInput);
+        if (!ok) return;
         showUploadingOverlay('insight-master-upload');
         try {
           const { shops, matched } = await this.parseInsightMasterExcel(file);
@@ -3122,6 +3154,9 @@ const App = {
       input.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        const cardLabel = `${currentShop} · ${slotLabel}`;
+        const ok = await confirmUpload(cardLabel, file, input);
+        if (!ok) return;
         showUploadingOverlay(inputId);
         try {
           const result = await this.parseInsightExcel(file);
@@ -3170,6 +3205,8 @@ const App = {
       perfInput.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        const ok = await confirmUpload(`${currentShop} · 商品表現（蝦皮）`, file, perfInput);
+        if (!ok) return;
         showUploadingOverlay('insight-perf-upload');
         try {
           const result = await this.parseInsightPerfExcel(file);
