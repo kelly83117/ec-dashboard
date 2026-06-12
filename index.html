@@ -7995,8 +7995,6 @@ function tryLoadSaved(shop){
   }
 }
 function loadIntoUI(shop,built,period,days){
-  // edit 後 2s 內阻擋 cloud sync 觸發的重渲染，避免閃爍
-  if(_editedAt[shop]&&Date.now()-_editedAt[shop]<2000)return;
   if(built&&Array.isArray(built)){
     built.forEach(r=>{
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
