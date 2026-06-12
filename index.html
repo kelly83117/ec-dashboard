@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-23">
+<meta name="app-version" content="2026-06-11-24">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2462,7 +2462,9 @@ const App = {
         <summary class="pill" style="padding:4px 10px;background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;font-size:12px;font-weight:600;color:#92400e;list-style:none;cursor:pointer;user-select:none">⚠️ ${needMasterUpdate.length} 個商品不在母表</summary>
         <div style="position:absolute;top:32px;left:0;z-index:50;background:white;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);padding:10px 14px;min-width:280px;max-width:480px;font-size:12px;color:var(--text);line-height:1.5">
           請更新母表 Excel 後重新上傳，否則這些商品<strong>無法對應到商品 ID / 蝦皮表現</strong>。
-          <div style="margin-top:6px;font-family:monospace;font-size:11px;color:var(--text-muted);word-break:break-all">${needMasterUpdate.map(p => escapeHtml(p.code)).join(', ')}</div>
+          <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
+            ${needMasterUpdate.map(p => `<button class="insight-jump-code" data-jump-code="${escapeHtml(p.code)}" style="padding:2px 8px;border:1px solid #fcd34d;background:#fef9c3;border-radius:5px;font-size:11px;font-weight:700;color:#92400e;cursor:pointer;font-family:monospace" onmouseover="this.style.background='#fde68a'" onmouseout="this.style.background='#fef9c3'">${escapeHtml(p.code)}</button>`).join('')}
+          </div>
         </div>
       </details>
     ` : '';
@@ -2631,7 +2633,7 @@ const App = {
           const rowBg = !p.inMaster ? '#fef3c7aa' : (grpStyle ? grpStyle.bg + '40' : '');
 
           return `
-            <tr style="border-top:1px solid #f3f4f6;background:${rowBg}">
+            <tr data-product-code="${escapeHtml(p.code)}" style="border-top:1px solid #f3f4f6;background:${rowBg};transition:background-color .4s">
               <td style="padding:0;width:4px;background:${bandColor}"></td>
               <td style="padding:8px 8px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;width:32px">${i + 1}</td>
               <td style="padding:8px 4px 8px 8px;color:var(--text);width:1%;white-space:nowrap;text-align:left;vertical-align:top">
@@ -3362,6 +3364,39 @@ const App = {
       };
       document.addEventListener('click', closeOnOutside, { capture: true });
     }
+
+    // 點警示裡的編號 → 找到該商品的列、捲動定位、黃色閃光
+    document.querySelectorAll('[data-jump-code]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const code = btn.dataset.jumpCode;
+        // 若有篩選正在套用，先清掉避免那筆被過濾掉看不到
+        const selectedCnt = Array.isArray(this.filter.insightClass) ? this.filter.insightClass.length : 0;
+        if (selectedCnt > 0 || this.filter.insightCtrLow) {
+          this.filter.insightClass = [];
+          this.filter.insightCtrLow = false;
+          this.render();
+          // render 後 DOM 重建，下一帧再 scroll
+          requestAnimationFrame(() => scrollToCode(code));
+        } else {
+          scrollToCode(code);
+        }
+        // 關掉警示下拉，免得擋到畫面
+        const det = btn.closest('details'); if (det) det.open = false;
+      });
+    });
+    const scrollToCode = (code) => {
+      const tr = document.querySelector(`tr[data-product-code="${code}"]`);
+      if (!tr) { showToast(`找不到 ${code}（可能在其他分頁或被篩掉了）`, 'error'); return; }
+      tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // 黃色閃光 3 次
+      const orig = tr.style.background;
+      let n = 0;
+      const flash = () => {
+        tr.style.background = '#fef3c7';
+        setTimeout(() => { tr.style.background = orig; if (++n < 3) setTimeout(flash, 240); }, 240);
+      };
+      flash();
+    };
 
     // 細分類篩選 pills（複選：點同一個再次取消，點「全部」清空）
     document.querySelectorAll('[data-insight-class]').forEach(btn => {
