@@ -6829,13 +6829,6 @@ const App = {
         }).join('');
 
     return `
-      <div class="page-header">
-        <h2>
-          <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${color};vertical-align:middle;margin-right:8px"></span>
-          ${cfg.icon} ${escapeHtml(dept.name)}辦公室
-        </h2>
-        ${cfg.subtitle ? `<p>${escapeHtml(cfg.subtitle)}</p>` : ''}
-      </div>
       ${deptId === 'd1' ? '' : `<div class="stat-grid">${statCards}</div>`}
       ${deptId === 'd1' && !subRoute ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
@@ -7622,7 +7615,6 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
     <div>
       <h3 style="margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em">淨利表</h3>
-      <p style="margin:3px 0 0;font-size:12px;color:#6b7280">上傳莫筆克銷售分析 + 蝦皮廣告報表 → 自動計算淨利</p>
     </div>
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:6px 10px">
