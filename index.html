@@ -9614,7 +9614,12 @@ function renderSummary(){
   const el=document.getElementById('content-總表');
   if(!el)return;
   const rate=getPlatformRate();
-  const rows=getSummaryRows().slice().sort((a,b)=>a.start.localeCompare(b.start));
+  const rows=getSummaryRows().slice().sort((a,b)=>{
+    if(a.end!==b.end)return a.end.localeCompare(b.end);
+    const af=isFullMonth(a),bf=isFullMonth(b);
+    if(af!==bf)return af?1:-1;
+    return a.start.localeCompare(b.start);
+  });
   const fmt=n=>fmtN(Math.round(n||0));
   const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':'—';
   const calcPure=(d)=>(d.gross||0)-(d.ads||0)-(d.rev||0)*rate;
@@ -9663,7 +9668,7 @@ function renderSummary(){
       tbody+=`<tr style="border-top:1px solid #f0f0f0">
         <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums">${label}
           <button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="margin-left:4px;background:none;border:none;color:#d1d5db;cursor:pointer;font-size:10px;padding:0;vertical-align:middle" title="刪除">✕</button>
-        </td>${dataCells(row.shops,false,row.id)}</tr>`;
+        </td>${dataCells(row.shops,true,row.id)}</tr>`;
     }
   });
 
