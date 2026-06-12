@@ -6801,6 +6801,11 @@ const App = {
                 if (typeof initShopUI === 'function') initShopUI(s.id);
               });
               if(typeof renderSummary==='function') renderSummary();
+              // 重渲染後恢復正在操作的 tab
+              if(typeof curShop!=='undefined' && curShop && curShop!=='總表'){
+                var _rb=document.querySelector('button[onclick*="setShop(\''+curShop+'\'"]');
+                if(typeof setShop==='function') setShop(curShop,_rb||null);
+              }
             } catch(e) { console.log(e); }
           }
         }, 200);
