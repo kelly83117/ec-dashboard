@@ -7625,20 +7625,18 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
       </div>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px">
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
+      <div style="display:flex;align-items:center;gap:22px;flex-wrap:wrap">
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-change-header" style="font-size:12px;font-weight:600"></span></div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+      </div>
       <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
         <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <div style="display:flex;align-items:center;gap:22px;flex-wrap:wrap;margin-right:6px">
-          <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-change-header" style="font-size:12px;font-weight:600"></span></div></div>
-          <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
-          <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
-          <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
-        </div>
+      <div style="display:flex;gap:8px">
+        <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
+        <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
       </div>
     </div>
   </div>
@@ -9425,10 +9423,22 @@ function setKpis(shop,rev,gross,ads,pure,prevRev){
 function syncHeaderKpis(shop){
   if(shop==='總表'||!state[shop]){return;}
   const s=state[shop];
-  if(!s._built||!s._built.length){setKpis(shop,0,0,0,0,0);return;}
-  let tRev=0,tGross=0,tAds=0,tPure=0,tPrevRev=0;
-  s._built.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;if(r.prevRev)tPrevRev+=r.prevRev;});
-  setKpis(shop,tRev,tGross,tAds,tPure,tPrevRev||null);
+  if(!s._built||!s._built.length){setKpis(shop,0,0,0,0,null);return;}
+  let tRev=0,tGross=0,tAds=0,tPure=0;
+  s._built.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
+  // 直接讀取上期儲存報表算總營收
+  let prevTotalRev=null;
+  try{
+    const m=s.curMonth,h=s.curHalf;
+    const [y,mo]=m.split('/').map(Number);
+    let prevM,prevH;
+    if(h==='second'){prevM=m;prevH='first';}
+    else if(h==='first'){prevM=mo===1?`${y-1}/12`:`${y}/${String(mo-1).padStart(2,'0')}`;prevH='second';}
+    else{prevM=mo===1?`${y-1}/12`:`${y}/${String(mo-1).padStart(2,'0')}`;prevH='full';}
+    const prevRep=lsLoad(shop,prevM,prevH);
+    if(prevRep&&prevRep.built&&prevRep.built.length){let t=0;prevRep.built.forEach(r=>{t+=r.rev||0;});if(t>0)prevTotalRev=t;}
+  }catch{}
+  setKpis(shop,tRev,tGross,tAds,tPure,prevTotalRev);
 }
 function num(v){return parseFloat((v+'').replace(/[,$%]/g,'').trim())||0;}
 function fmtN(v){return Math.abs(Math.round(v)).toLocaleString();}
