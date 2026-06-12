@@ -7646,6 +7646,32 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       <div class="ana-modal-body" id="dist-modal-body" style="padding:20px;overflow-y:auto;max-height:72vh"></div>
     </div>
   </div>
+  <div class="ana-overlay" id="ads-edit-overlay" onclick="if(event.target===this)closeAdsEditModal()">
+    <div class="ana-modal" style="width:400px;max-width:96vw">
+      <div class="ana-modal-hdr"><span>修改廣告費</span><button class="ana-close-btn" onclick="closeAdsEditModal()">✕</button></div>
+      <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:16px">
+        <div>
+          <div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px">商品</div>
+          <div id="ads-edit-product" style="font-size:14px;font-weight:600;color:#1a1a2e"></div>
+        </div>
+        <div style="display:flex;gap:20px">
+          <div>
+            <div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px">目前廣告費</div>
+            <div id="ads-edit-current" style="font-size:18px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums"></div>
+          </div>
+          <div style="flex:1">
+            <div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px">新廣告費</div>
+            <input type="number" id="ads-edit-input" oninput="updateAdsEditPreview()" onkeydown="if(event.key==='Enter')confirmAdsEdit();if(event.key==='Escape')closeAdsEditModal()" style="width:100%;padding:7px 10px;border:1.5px solid #5b5fcf;border-radius:8px;font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;outline:none;box-sizing:border-box">
+          </div>
+        </div>
+        <div id="ads-edit-preview" style="background:#f8f9fc;border-radius:8px;padding:10px 14px;font-size:13px;min-height:36px"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+          <button onclick="closeAdsEditModal()" style="padding:8px 18px;border:1.5px solid #e5e7eb;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#6b7280;cursor:pointer">取消</button>
+          <button onclick="confirmAdsEdit()" style="padding:8px 18px;border:0;border-radius:8px;background:#5b5fcf;font-size:13px;font-weight:700;color:white;cursor:pointer">確認修改</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="ana-overlay" id="upload-modal-overlay" onclick="if(event.target===this)closeUploadModal()">
     <div class="ana-modal" style="width:520px;max-width:96vw">
       <div class="ana-modal-hdr"><span>上傳檔案</span><button class="ana-close-btn" onclick="closeUploadModal()">✕</button></div>
@@ -8888,16 +8914,43 @@ function buildNoteCell(shopKey,code,noteId,noteData){
 }
 
 // 開始編輯數字
+let _adsEditPending=null;
 function startEdit(shop,code,col,tdId){
-  const td=document.getElementById(tdId);if(!td)return;
-  const edits=getEdits(shop);
   const r=state[shop]._built.find(x=>x.code===code);if(!r)return;
+  const edits=getEdits(shop);
   const cur=(edits[code]?.[col]!==undefined)?edits[code][col]:r[col];
-  const inp=document.createElement('input');
-  inp.type='number';inp.className='inline-input';inp.value=isFinite(cur)?+cur.toFixed(4):'';
-  inp.onblur=()=>commitEdit(shop,code,col,inp.value,tdId);
-  inp.onkeydown=(e)=>{if(e.key==='Enter')inp.blur();if(e.key==='Escape'){applyFilters(shop);}};
-  td.innerHTML='';td.appendChild(inp);inp.focus();inp.select();
+  _adsEditPending={shop,code,col,tdId};
+  document.getElementById('ads-edit-product').textContent=r.name+' ('+r.code+')';
+  document.getElementById('ads-edit-current').textContent='$'+fmtN(r.adsFee);
+  const inp=document.getElementById('ads-edit-input');
+  inp.value=isFinite(cur)?+cur.toFixed(0):'';
+  updateAdsEditPreview();
+  document.getElementById('ads-edit-overlay').classList.add('open');
+  setTimeout(()=>{inp.focus();inp.select();},80);
+}
+function updateAdsEditPreview(){
+  if(!_adsEditPending)return;
+  const{shop,code}=_adsEditPending;
+  const r=state[shop]._built.find(x=>x.code===code);if(!r)return;
+  const newAds=parseFloat(document.getElementById('ads-edit-input').value);
+  const el=document.getElementById('ads-edit-preview');
+  if(isNaN(newAds)){el.innerHTML='';return;}
+  const PLATFORM=getPlatformRate();
+  const newPure=r.gross-newAds-(r.rev*PLATFORM);
+  const newPureRate=r.rev>0?newPure/r.rev*100:0;
+  const col=newPure>=0?'#10b981':'#ef4444';
+  el.innerHTML=`修改後：純利 <strong style="color:${col}">$${fmtN(newPure)}</strong>　純利率 <strong style="color:${col}">${newPureRate.toFixed(1)}%</strong>`;
+}
+function confirmAdsEdit(){
+  if(!_adsEditPending)return;
+  const{shop,code,col,tdId}=_adsEditPending;
+  const val=document.getElementById('ads-edit-input').value;
+  closeAdsEditModal();
+  commitEdit(shop,code,col,val,tdId);
+}
+function closeAdsEditModal(){
+  document.getElementById('ads-edit-overlay')?.classList.remove('open');
+  _adsEditPending=null;
 }
 
 function commitEdit(shop,code,col,val,tdId){
@@ -9104,9 +9157,8 @@ function renderTable(shop,list){
     const editTd=(col,display,cls='')=>{
       const tid=`td-${shop}-${r.code}-${col}`;
       const edited=isEdited(col);
-      return `<td class="td-num ${cls} ${edited?'cell-edited':''}" id="${tid}">
+      return `<td class="td-num ${cls} ${edited?'cell-edited':''}" id="${tid}" onclick="startEdit('${shop}','${r.code}','${col}','${tid}')" style="cursor:pointer" title="點擊編輯">
         <span class="cell-val">${display}</span>
-        <button class="edit-btn" onclick="startEdit('${shop}','${r.code}','${col}','${tid}')" title="編輯">✏️</button>
       </td>`;
     };
 
@@ -9116,7 +9168,7 @@ function renderTable(shop,list){
       html+=`<tr class="tr-no-rev">
         <td class="tl td-code">${r.code}</td>
         <td class="tl td-name" style="color:#9ca3af">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
-        ${vc('adsFee')?`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}"><span class="cell-val">$${fmtN(r.adsFee)}</span><button class="edit-btn" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" title="編輯">✏️</button></td>`:''}
+        ${vc('adsFee')?`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span></td>`:''}
         ${noRevSpan>0?`<td colspan="${noRevSpan}" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>`:''}
         ${vc('note')?buildNoteCell(shop,r.code,noteId,notes[r.code]):''}
         ${shop==='好麻吉'?`${vc('growthRate')?'<td></td>':''}${vc('growthAnalysis')?'<td></td>':''}${vc('growthNote')?'<td></td>':''}`:''}
