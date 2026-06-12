@@ -7984,18 +7984,17 @@ SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getEle
 // ── 雲端資料到達時自動重載 ──
 window.addEventListener('profitDataReady', (e)=>{
   const changedShops = e.detail?.changedShops;
-  // 只更新真正有資料變動的賣場，避免其他賣場頁面閃爍
-  const shopsToUpdate = (changedShops && changedShops.length)
-    ? SHOPS.filter(s => changedShops.includes(s.id))
-    : SHOPS;
-  console.warn('[淨利表] 收到 profitDataReady，更新賣場：', shopsToUpdate.map(s=>s.id));
+  // null/undefined = 初次載入，更新全部；空陣列 = 只有非賣場資料（如_summary_v1）變動，跳過
+  const shopsToUpdate = changedShops==null ? SHOPS : SHOPS.filter(s=>changedShops.includes(s.id));
   try{
     shopsToUpdate.forEach(s=>{
       onMonthChange(s.id);
       if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
     });
+    // 只有賣場資料（非 _summary_v1）變動時才重新渲染總表
+    const hasSummaryChange=changedShops==null||(changedShops&&changedShops.length>0);
     const skipSummary=window._summaryJustSaved&&(Date.now()-window._summaryJustSaved<5000);
-    if(typeof renderSummary==='function'&&!skipSummary) renderSummary();
+    if(typeof renderSummary==='function'&&hasSummaryChange&&!skipSummary) renderSummary();
     // 重載後確保當前賣場 tab 正確：只在 tab 真的跑掉時才修復
     if(curShop&&curShop!=='總表'){
       const content=document.getElementById('content-'+curShop);
