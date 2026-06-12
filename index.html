@@ -9541,19 +9541,17 @@ function renderTable(shop,list){
 function renderSummary(){
   const el=document.getElementById('content-總表');
   if(!el)return;
-  const PLATFORM=getPlatformRate();
 
   // Collect data: key = "ec|shop|month|half" → {tRev,tGross,tAds,tPure}
   const data={};
-  const seen=new Set();
   const addEntry=(k,rep)=>{
-    if(seen.has(k))return;
     if(!rep?.built||!Array.isArray(rep.built))return;
-    seen.add(k);
     const parts=k.split('|');
+    if(parts.length<4)return;
     const shop=parts[1],month=parts[2],half=parts[3];
     if(!SHOPS.find(s=>s.id===shop))return;
     const dk=`${month}|${half}`;
+    if(data[dk]?.[shop])return;
     if(!data[dk])data[dk]={};
     let tRev=0,tGross=0,tAds=0,tPure=0;
     rep.built.forEach(r=>{tRev+=(r.rev||0);tGross+=(r.gross||0);tAds+=(r.adsFee||0);tPure+=(r.pureProfit||0);});
@@ -9565,79 +9563,80 @@ function renderSummary(){
 
   if(!Object.keys(data).length){el.innerHTML=`<div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">尚無儲存資料</div></div>`;return;}
 
-  // Available months sorted desc
-  const allMonths=[...new Set(Object.keys(data).map(k=>k.split('|')[0]))].sort((a,b)=>b.localeCompare(a));
-  if(!el._curMonth||!allMonths.includes(el._curMonth))el._curMonth=allMonths[0];
-  const curMonth=el._curMonth;
+  const allMonths=[...new Set(Object.keys(data).map(k=>k.split('|')[0]))].sort();
+  const fmt=n=>n!=null?fmtN(Math.round(n)):' — ';
+  const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':' — ';
+  const dash='<span style="color:#d1d5db">—</span>';
 
-  // Month tabs
-  const tabsHtml=allMonths.slice(0,8).map(m=>{
-    const active=m===curMonth;
-    return`<button onclick="switchSummaryMonth('${m}')" style="padding:5px 16px;border-radius:20px;border:1.5px solid ${active?'#5b5fcf':'#e5e7eb'};background:${active?'#ede9fe':'white'};color:${active?'#5b5fcf':'#6b7280'};font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">${m}</button>`;
+  // Shop column group headers
+  const shopGroupHdr=SHOPS.map(s=>`<th colspan="6" style="text-align:center;background:${s.color};color:white;font-weight:700;font-size:13px;padding:7px 4px;border-left:2px solid rgba(255,255,255,.4)">${s.id}</th>`).join('');
+  const shopSubHdr=SHOPS.map(()=>`
+    <th style="min-width:78px">營收</th>
+    <th style="min-width:65px">廣告</th>
+    <th style="min-width:78px">毛利</th>
+    <th style="min-width:78px">純利</th>
+    <th style="min-width:62px">純利率%</th>
+    <th style="min-width:62px">廣告佔比%</th>`).join('');
+
+  const shopCells=(shopData,bold)=>SHOPS.map(s=>{
+    const d=shopData[s.id];
+    const bw=bold?'font-weight:700;':'';
+    const bl='border-left:2px solid #e5e7eb;';
+    if(!d)return`<td style="${bl}${bw}text-align:center;color:#d1d5db" colspan="6">—</td>`;
+    return`<td style="${bl}${bw}text-align:right;padding:6px 10px">${fmt(d.tRev)}</td>
+      <td style="${bw}text-align:right;padding:6px 10px;color:#b45309">${fmt(d.tAds)}</td>
+      <td style="${bw}text-align:right;padding:6px 10px">${fmt(d.tGross)}</td>
+      <td style="${bw}text-align:right;padding:6px 10px;color:${d.tPure>=0?'#059669':'#dc2626'}">${fmt(d.tPure)}</td>
+      <td style="${bw}text-align:right;padding:6px 10px">${pct(d.tPure,d.tRev)}</td>
+      <td style="${bw}text-align:right;padding:6px 10px;color:#b45309">${pct(d.tAds,d.tRev)}</td>`;
   }).join('');
 
-  // Period info helper
-  const periodInfo=(month,half)=>{
+  let rows='';
+  allMonths.forEach(month=>{
     const[y,mo]=month.split('/').map(Number);
     const last=new Date(y,mo,0).getDate();
     const m=String(mo);
-    if(half==='full')return{dateRange:`${m}/1 – ${m}/${last}`,label:'整月',totalLabel:'整月小計'};
-    if(half==='second')return{dateRange:`${m}/16 – ${m}/${last}`,label:'下半月',totalLabel:'小計'};
-    return{dateRange:`${m}/1 – ${m}/15`,label:'上半月',totalLabel:'小計'};
-  };
+    const monthTotals={};
 
-  // Grand totals for the whole month (sum of full or first+second)
-  let monthGR=0,monthGA=0,monthGG=0,monthGP=0,monthHasData=false;
-
-  let tableRows='';
-  const HALF_ORDER=['full','second','first'];
-  HALF_ORDER.forEach(half=>{
-    const dk=`${curMonth}|${half}`;
-    const shopData=data[dk]||{};
-    const hasAny=SHOPS.some(s=>shopData[s.id]);
-    if(!hasAny)return;
-    const pi=periodInfo(curMonth,half);
-    let gR=0,gG=0,gA=0,gP=0;
-    const shopRows=SHOPS.map((s,i)=>{
-      const d=shopData[s.id];
-      if(d){gR+=d.tRev;gG+=d.tGross;gA+=d.tAds;gP+=d.tPure;}
-      const pureCol=d?(d.tPure>=0?'td-pos':'td-neg'):'';
-      const periodCell=i===0?`<td class="tl" rowspan="${SHOPS.length+1}" style="vertical-align:middle;padding:10px 14px;border-right:1px solid #f0f0f0"><div style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;font-variant-numeric:tabular-nums">${pi.dateRange}</div><div style="font-size:11px;color:#9ca3af;margin-top:3px">${pi.label}</div></td>`:'';
-      return`<tr style="${i===0?'border-top:2px solid #e4e6ef':''}">
-        ${periodCell}
-        <td class="tl"><span style="display:inline-flex;align-items:center;gap:7px;font-weight:500;color:#1a1a2e"><span style="width:8px;height:8px;border-radius:50%;background:${s.color};flex-shrink:0;display:inline-block"></span>${s.id}</span></td>
-        <td class="td-num">${d?'$'+fmtN(d.tRev):'<span style="color:#d1d5db">—</span>'}</td>
-        <td class="td-num td-amber">${d?'$'+fmtN(d.tAds):'<span style="color:#d1d5db">—</span>'}</td>
-        <td class="td-num">${d?'$'+fmtN(d.tGross):'<span style="color:#d1d5db">—</span>'}</td>
-        <td class="td-num ${pureCol}" style="font-weight:600">${d?'$'+fmtN(d.tPure):'<span style="color:#d1d5db">—</span>'}</td>
+    // First half row (1–15)
+    const firstDk=`${month}|first`;
+    const firstData=data[firstDk]||{};
+    if(SHOPS.some(s=>firstData[s.id])){
+      SHOPS.forEach(s=>{const d=firstData[s.id];if(!d)return;if(!monthTotals[s.id])monthTotals[s.id]={tRev:0,tGross:0,tAds:0,tPure:0};monthTotals[s.id].tRev+=d.tRev;monthTotals[s.id].tGross+=d.tGross;monthTotals[s.id].tAds+=d.tAds;monthTotals[s.id].tPure+=d.tPure;});
+      rows+=`<tr style="border-top:1px solid #e5e7eb"><td style="padding:6px 12px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums">${m}/1 – ${m}/15</td>${shopCells(firstData,false)}</tr>`;
+    }
+    // Second half row (16–end)
+    const secondDk=`${month}|second`;
+    const secondData=data[secondDk]||{};
+    if(SHOPS.some(s=>secondData[s.id])){
+      SHOPS.forEach(s=>{const d=secondData[s.id];if(!d)return;if(!monthTotals[s.id])monthTotals[s.id]={tRev:0,tGross:0,tAds:0,tPure:0};monthTotals[s.id].tRev+=d.tRev;monthTotals[s.id].tGross+=d.tGross;monthTotals[s.id].tAds+=d.tAds;monthTotals[s.id].tPure+=d.tPure;});
+      rows+=`<tr style="border-top:1px solid #e5e7eb"><td style="padding:6px 12px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums">${m}/16 – ${m}/${last}</td>${shopCells(secondData,false)}</tr>`;
+    }
+    // Full period (整月) if stored separately
+    const fullDk=`${month}|full`;
+    const fullData=data[fullDk]||{};
+    if(SHOPS.some(s=>fullData[s.id])&&!SHOPS.some(s=>firstData[s.id]||secondData[s.id])){
+      SHOPS.forEach(s=>{const d=fullData[s.id];if(!d)return;if(!monthTotals[s.id])monthTotals[s.id]={tRev:0,tGross:0,tAds:0,tPure:0};monthTotals[s.id].tRev+=d.tRev;monthTotals[s.id].tGross+=d.tGross;monthTotals[s.id].tAds+=d.tAds;monthTotals[s.id].tPure+=d.tPure;});
+      rows+=`<tr style="border-top:1px solid #e5e7eb"><td style="padding:6px 12px;font-size:12px;white-space:nowrap;color:#374151">${m}/1 – ${m}/${last}</td>${shopCells(fullData,false)}</tr>`;
+    }
+    // Monthly total row
+    if(Object.keys(monthTotals).length){
+      rows+=`<tr style="background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
+        <td style="padding:7px 12px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap">${mo}月份</td>
+        ${shopCells(monthTotals,true)}
       </tr>`;
-    }).join('');
-    const subColor=half==='full'?'#5b5fcf':'#374151';
-    const subBg=half==='full'?'#eeeeff':'#f8f9fc';
-    tableRows+=shopRows+`<tr style="background:${subBg}">
-      <td class="tl" style="font-size:13px;font-weight:700;color:${subColor};padding-left:18px">${pi.totalLabel}</td>
-      <td class="td-num" style="font-weight:700;color:${subColor}">$${fmtN(gR)}</td>
-      <td class="td-num td-amber" style="font-weight:700">$${fmtN(gA)}</td>
-      <td class="td-num" style="font-weight:700">$${fmtN(gG)}</td>
-      <td class="td-num ${gP>=0?'td-pos':'td-neg'}" style="font-weight:700">$${fmtN(gP)}</td>
-    </tr>`;
-    if(half!=='full'){monthGR+=gR;monthGA+=gA;monthGG+=gG;monthGP+=gP;monthHasData=true;}
+    }
   });
 
   el.innerHTML=`<div style="padding:14px 16px 4px">
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">${tabsHtml}</div>
-    <div class="tscroll"><table>
-      <thead><tr>
-        <th class="tl" style="min-width:130px">日期區間</th>
-        <th class="tl" style="min-width:80px">賣場</th>
-        <th style="min-width:110px">營收</th>
-        <th style="min-width:100px">廣告費</th>
-        <th style="min-width:110px">毛利</th>
-        <th style="min-width:110px">純利</th>
-      </tr></thead>
-      <tbody>${tableRows}</tbody>
+    <div class="tscroll"><table style="border-collapse:collapse;width:100%">
+      <thead>
+        <tr><th rowspan="2" style="padding:8px 12px;background:#f8fafc;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;text-align:left;white-space:nowrap;vertical-align:middle">區間</th>${shopGroupHdr}</tr>
+        <tr style="background:#f8fafc;border-bottom:2px solid #e5e7eb">${shopSubHdr}</tr>
+      </thead>
+      <tbody>${rows}</tbody>
     </table></div>
-    <div style="margin-top:10px;font-size:11px;color:#9ca3af">＊純利 = 毛利 − 廣告費 − 營收 × ${(PLATFORM*100).toFixed(1)}%</div>
+    <div style="margin-top:10px;font-size:11px;color:#9ca3af">＊純利率 = 純利 ÷ 營收 ｜ 廣告佔比 = 廣告 ÷ 營收</div>
   </div>`;
 }
 
