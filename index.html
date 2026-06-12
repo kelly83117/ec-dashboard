@@ -7626,15 +7626,15 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       </div>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
-      <div style="display:flex;align-items:center;gap:22px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-change-header" style="font-size:12px;font-weight:600"></span></div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+        <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
+          <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
+        </div>
       </div>
-      <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
-        <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
-      </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;align-self:flex-end">
         <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
         <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
       </div>
