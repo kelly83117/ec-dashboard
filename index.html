@@ -7859,10 +7859,16 @@ window.addEventListener('profitDataReady', ()=>{
       if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
     });
     if(typeof renderSummary==='function') renderSummary();
-    // 重載後確保當前賣場 tab 仍顯示正確
+    // 重載後確保當前賣場 tab 正確：只在 tab 真的跑掉時才修復（避免移除/加回 active 造成閃爍）
     if(curShop&&curShop!=='總表'){
-      const btn=document.querySelector(`button[onclick*="setShop('${curShop}'"]`);
-      if(btn&&typeof setShop==='function')setShop(curShop,btn);
+      const content=document.getElementById('content-'+curShop);
+      if(content&&!content.classList.contains('active')){
+        document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
+        content.classList.add('active');
+        const kpi=document.getElementById('header-kpi-block');if(kpi)kpi.style.display='flex';
+        const btnB=document.getElementById('header-btn-block');if(btnB)btnB.style.display='flex';
+      }
+      if(typeof syncHeaderKpis==='function')syncHeaderKpis(curShop);
     }
   }catch(e){ console.warn('[淨利表] 重載失敗', e); }
 });
