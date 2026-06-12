@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-26">
+<meta name="app-version" content="2026-06-11-27">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -3264,6 +3264,27 @@ const App = {
         const piece = btn.dataset.clearPiece; // 'master' | 'sales' | 'salesPrev' | 'salesPrevPrev' | 'perf'
         const labels = { master: '商品母表', sales: '上週銷售', salesPrev: '上上週銷售', salesPrevPrev: '上上上週銷售', perf: '商品表現' };
         const label = labels[piece] || piece;
+
+        // 二次確認：避免誤觸 ✕ 弄掉重要資料
+        const confirmed = await new Promise((resolve) => {
+          this.openModal({
+            title: '⚠️ 確認清除',
+            width: '420px',
+            bodyHtml: `
+              <div style="font-size:13px;line-height:1.6;color:var(--text)">
+                即將清除 <strong style="color:#dc2626">${escapeHtml(curShop)} · ${escapeHtml(label)}</strong> 的檔案。
+                <div style="margin-top:10px;padding:10px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px;color:#92400e">
+                  ⚠️ 此動作<strong>無法復原</strong>。清除後若要使用，需要重新上傳檔案。
+                </div>
+              </div>
+            `,
+            saveLabel: '確認清除',
+            cancelLabel: '取消',
+            onSave: () => { resolve(true); return true; },
+            onCancel: () => { resolve(false); },
+          });
+        });
+        if (!confirmed) return;
 
         if (piece === 'sales' || piece === 'salesPrev' || piece === 'salesPrevPrev') {
           const ws = (Store.get(k2('weeks'), []) || []).slice();
