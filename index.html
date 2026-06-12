@@ -8032,8 +8032,12 @@ function loadIntoUI(shop,built,period,days){
   state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];
   document.getElementById('period-tag-'+shop).textContent=period;
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=false;}
-  // edit 後 2s 內跳過全表重渲染（patchRow 已更新 cell），避免閃爍
-  if(_editedAt[shop]&&Date.now()-_editedAt[shop]<2000)return;
+  // edit 後 2s 內：若 tbl 已有 table 元素（patchRow 已填），跳過避免閃爍；
+  // 若 tbl 是空的（DOM 被父層清掉重注入），仍需 applyFilters 補資料
+  if(_editedAt[shop]&&Date.now()-_editedAt[shop]<2000){
+    const tblEl=document.getElementById('tbl-'+shop);
+    if(tblEl&&tblEl.querySelector('table'))return;
+  }
   applyFilters(shop);
 }
 
