@@ -7803,21 +7803,39 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         </div>
         <label class="ucard" id="upm-map" style="width:100%;box-sizing:border-box">
           <input type="file" id="upm-map-input" accept=".xlsx,.xls" onchange="onGlobalFile(event,'map')">
-          <button id="upm-map-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('map')" style="display:none;background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
+          <button id="upm-map-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('map')" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
           <div class="ucard-icon" id="upm-map-icon">🗂</div>
-          <div class="ucard-info"><div class="ucard-title" id="upm-map-title">蝦皮商品清單</div><div class="ucard-sub">上傳一次，三個賣場共用</div></div>
+          <div class="ucard-info">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="ucard-title" id="upm-map-title">蝦皮商品清單</div>
+              <span id="upm-map-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
+            </div>
+            <div class="ucard-sub">上傳一次，三個賣場共用</div>
+          </div>
         </label>
         <label class="ucard" id="upm-mobic" style="width:100%;box-sizing:border-box">
           <input type="file" id="upm-mobic-input" accept=".xlsx,.xls" onchange="onGlobalFile(event,'mobic')">
-          <button id="upm-mobic-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('mobic')" style="display:none;background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
+          <button id="upm-mobic-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('mobic')" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
           <div class="ucard-icon" id="upm-mobic-icon">📦</div>
-          <div class="ucard-info"><div class="ucard-title" id="upm-mobic-title">莫筆克銷售分析</div><div class="ucard-sub">.xlsx</div></div>
+          <div class="ucard-info">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="ucard-title" id="upm-mobic-title">莫筆克銷售分析</div>
+              <span id="upm-mobic-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
+            </div>
+            <div class="ucard-sub">.xlsx</div>
+          </div>
         </label>
         <label class="ucard" id="upm-ads" style="width:100%;box-sizing:border-box">
           <input type="file" id="upm-ads-input" accept=".csv" onchange="onGlobalFile(event,'ads')">
-          <button id="upm-ads-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('ads')" style="display:none;background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
+          <button id="upm-ads-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('ads')" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
           <div class="ucard-icon" id="upm-ads-icon">📣</div>
-          <div class="ucard-info"><div class="ucard-title" id="upm-ads-title">蝦皮廣告報表</div><div class="ucard-sub">.csv</div></div>
+          <div class="ucard-info">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="ucard-title" id="upm-ads-title">蝦皮廣告報表</div>
+              <span id="upm-ads-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
+            </div>
+            <div class="ucard-sub">.csv</div>
+          </div>
         </label>
       </div>
       <div class="ana-modal-ftr" style="justify-content:space-between;align-items:center">
@@ -8419,33 +8437,27 @@ function openUploadModal(){
   const ov=document.getElementById('upload-modal-overlay');if(!ov)return;
   const shop=curShop==='總表'?SHOPS[0].id:curShop;
   document.getElementById('upm-shop-hint').textContent='目前賣場：'+shop;
+  function syncCard(id,ok,okIcon,defaultIcon,okLabel,defaultLabel){
+    document.getElementById('upm-'+id).className='ucard'+(ok?' ok':'');
+    document.getElementById('upm-'+id+'-icon').textContent=ok?okIcon:defaultIcon;
+    document.getElementById('upm-'+id+'-title').textContent=ok?okLabel:defaultLabel;
+    document.getElementById('upm-'+id+'-status').textContent=ok?'✅ 已載入':'✗ 未載入';
+    document.getElementById('upm-'+id+'-status').style.color=ok?'#10b981':'#ef4444';
+    document.getElementById('upm-'+id+'-input').disabled=ok;
+    document.getElementById('upm-'+id+'-input').style.pointerEvents=ok?'none':'';
+    document.getElementById('upm-'+id+'-del').style.opacity=ok?'1':'0.35';
+    document.getElementById('upm-'+id+'-del').style.pointerEvents=ok?'':'none';
+    document.getElementById('upm-'+id).style.cursor=ok?'default':'pointer';
+  }
   // sync map card state
   const mapOk=!!globalMap&&Object.keys(globalMap).length>0;
-  document.getElementById('upm-map').className='ucard'+(mapOk?' ok':'');
-  document.getElementById('upm-map-icon').textContent=mapOk?'✅':'🗂';
-  document.getElementById('upm-map-title').textContent=mapOk?'商品清單 已載入':'蝦皮商品清單';
-  document.getElementById('upm-map-input').disabled=mapOk;
-  document.getElementById('upm-map-input').style.pointerEvents=mapOk?'none':'';
-  document.getElementById('upm-map-del').style.display=mapOk?'inline-block':'none';
-  document.getElementById('upm-map').style.cursor=mapOk?'default':'pointer';
+  syncCard('map',mapOk,'✅','🗂','蝦皮商品清單','蝦皮商品清單');
   // sync mobic/ads
   const s=state[shop];
   const mobicOk=!!s.rawMobic;
-  document.getElementById('upm-mobic').className='ucard'+(mobicOk?' ok':'');
-  document.getElementById('upm-mobic-icon').textContent=mobicOk?'✅':'📦';
-  document.getElementById('upm-mobic-title').textContent=mobicOk?'莫筆克 已載入':'莫筆克銷售分析';
-  document.getElementById('upm-mobic-input').disabled=mobicOk;
-  document.getElementById('upm-mobic-input').style.pointerEvents=mobicOk?'none':'';
-  document.getElementById('upm-mobic-del').style.display=mobicOk?'inline-block':'none';
-  document.getElementById('upm-mobic').style.cursor=mobicOk?'default':'pointer';
+  syncCard('mobic',mobicOk,'✅','📦','莫筆克銷售分析','莫筆克銷售分析');
   const adsOk=!!s.rawAds;
-  document.getElementById('upm-ads').className='ucard'+(adsOk?' ok':'');
-  document.getElementById('upm-ads-icon').textContent=adsOk?'✅':'📣';
-  document.getElementById('upm-ads-title').textContent=adsOk?'廣告報表 已載入':'蝦皮廣告報表';
-  document.getElementById('upm-ads-input').disabled=adsOk;
-  document.getElementById('upm-ads-input').style.pointerEvents=adsOk?'none':'';
-  document.getElementById('upm-ads-del').style.display=adsOk?'inline-block':'none';
-  document.getElementById('upm-ads').style.cursor=adsOk?'default':'pointer';
+  syncCard('ads',adsOk,'✅','📣','蝦皮廣告報表','蝦皮廣告報表');
   document.getElementById('upm-gen-btn').disabled=!(mobicOk&&adsOk);
   ov.classList.add('open');
 }
