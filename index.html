@@ -7835,6 +7835,7 @@ function shopHTML(shop){return`
   <div class="tag-filter-bar" id="tfbar-${shop}"></div>
   <div class="toolbar" id="tb-${shop}">
     <span id="period-tag-${shop}" style="display:none"></span>
+    <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')" style="display:none">
     <span class="row-cnt" id="cnt-${shop}"></span>
     <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
     <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
