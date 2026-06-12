@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-8">
+<meta name="app-version" content="2026-06-11-9">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2220,14 +2220,14 @@ const App = {
     // ============== 欄位顯示控制 ==============
     // 不可隱藏：band、#、商品編號/名稱/ID
     const INSIGHT_COLS = [
-      { key: 'prevPrev', label: '上上週營收' },
-      { key: 'revenue', label: '本週 / 上週營收' },
+      { key: 'prevPrev', label: '上上上週營收' },
+      { key: 'revenue', label: '上週 / 上上週營收' },
       { key: 'growth', label: '成長率' },
       { key: 'impressions', label: '曝光次數' },
       { key: 'ctr', label: '點擊率' },
       { key: 'convRate', label: '轉換率' },
       { key: 'group', label: '大類' },
-      { key: 'flow', label: '上週 → 本週' },
+      { key: 'flow', label: '上上週 → 上週' },
       { key: 'stock', label: '可用庫存' },
       { key: 'note', label: '調整' },
     ];
@@ -2393,16 +2393,16 @@ const App = {
         hint: '一次上傳，自動分配到 3 個賣場分頁'
       },
       {
-        key: 'sales', label: '本週銷售排行', icon: '💰',
+        key: 'sales', label: '上週銷售排行', icon: '💰',
         loaded: !!sales, info: sales ? `${salesProducts.length} 個編號 · ${displayPeriod(sales.period) || ''} · ${fmtTime(sales.uploadedAt)}` : '尚未上傳',
         accept: '.xlsx,.xls', inputId: 'insight-sales-upload',
-        hint: '本週商品銷售（系統會依檔案週期自動歸位）'
+        hint: '上週商品銷售（系統會依檔案週期自動歸位）'
       },
       {
-        key: 'salesPrev', label: '上週銷售排行', icon: '📅',
+        key: 'salesPrev', label: '上上週銷售排行', icon: '📅',
         loaded: !!salesPrev, info: salesPrev ? `${(salesPrev.products || []).length} 個編號 · ${displayPeriod(salesPrev.period) || ''} · ${fmtTime(salesPrev.uploadedAt)}` : '尚未上傳',
         accept: '.xlsx,.xls', inputId: 'insight-salesprev-upload',
-        hint: '上週商品銷售（成長率/類別流向用）'
+        hint: '上上週商品銷售（成長率/類別流向用）'
       },
       {
         key: 'perf', label: '商品表現（蝦皮）', icon: '📊',
@@ -2412,26 +2412,38 @@ const App = {
       },
     ];
 
+    // 上傳區包成浮窗，預設隱藏；點「📤 上傳檔案」按鈕才開啟
     const uploadGridHtml = `
-      <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc">
-        ${uploadCards.map(u => `
-          <label style="background:white;border:1px solid ${u.loaded ? '#10b98144' : '#e5e7eb'};border-radius:8px;padding:12px 14px;cursor:pointer;display:block;transition:border-color .12s;position:relative" onmouseover="this.style.borderColor='${u.loaded ? '#10b981' : '#9ca3af'}'" onmouseout="this.style.borderColor='${u.loaded ? '#10b98144' : '#e5e7eb'}'">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-              <span style="font-size:18px">${u.icon}</span>
-              <span style="font-size:13px;font-weight:600;color:var(--text)">${escapeHtml(u.label)}</span>
-              ${u.loaded
-                ? `<span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px">
-                     <span style="font-size:11px;color:#10b981;font-weight:700">✓ 已載入</span>
-                     <button type="button" data-clear-piece="${u.key}" title="清除這份" style="width:20px;height:20px;border:0;border-radius:4px;background:transparent;color:#9ca3af;font-size:13px;line-height:1;cursor:pointer;padding:0" onmouseover="this.style.background='#fee2e2';this.style.color='#dc2626'" onmouseout="this.style.background='transparent';this.style.color='#9ca3af'">✕</button>
-                   </span>`
-                : '<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">點此上傳</span>'
-              }
+      <div id="insight-upload-overlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9000;align-items:center;justify-content:center;padding:24px">
+        <div style="background:white;border-radius:12px;width:100%;max-width:880px;box-shadow:0 20px 60px rgba(0,0,0,.25);overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc">
+            <div>
+              <h3 style="margin:0;font-size:15px;font-weight:700">📤 上傳檔案</h3>
+              <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted)">點下方任一卡片即可上傳對應的 Excel；上傳過的會顯示 ✓ 已載入</p>
             </div>
-            <div style="font-size:11px;color:var(--text-muted);line-height:1.4">${escapeHtml(u.info)}</div>
-            <div style="font-size:10px;color:#cbd5e1;margin-top:3px">${escapeHtml(u.hint)}</div>
-            <input type="file" id="${u.inputId}" accept="${u.accept}" style="display:none">
-          </label>
-        `).join('')}
+            <button id="insight-upload-close" type="button" style="width:30px;height:30px;border:1px solid var(--border);background:white;border-radius:6px;font-size:14px;cursor:pointer;color:var(--text-muted)">✕</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:12px;padding:18px;background:#fafbfc">
+            ${uploadCards.map(u => `
+              <label style="background:white;border:1px solid ${u.loaded ? '#10b98144' : '#e5e7eb'};border-radius:8px;padding:14px 16px;cursor:pointer;display:block;transition:border-color .12s;position:relative" onmouseover="this.style.borderColor='${u.loaded ? '#10b981' : '#9ca3af'}'" onmouseout="this.style.borderColor='${u.loaded ? '#10b98144' : '#e5e7eb'}'">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                  <span style="font-size:18px">${u.icon}</span>
+                  <span style="font-size:14px;font-weight:600;color:var(--text)">${escapeHtml(u.label)}</span>
+                  ${u.loaded
+                    ? `<span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px">
+                         <span style="font-size:11px;color:#10b981;font-weight:700">✓ 已載入</span>
+                         <button type="button" data-clear-piece="${u.key}" title="清除這份" style="width:20px;height:20px;border:0;border-radius:4px;background:transparent;color:#9ca3af;font-size:13px;line-height:1;cursor:pointer;padding:0" onmouseover="this.style.background='#fee2e2';this.style.color='#dc2626'" onmouseout="this.style.background='transparent';this.style.color='#9ca3af'">✕</button>
+                       </span>`
+                    : '<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">點此上傳</span>'
+                  }
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.4">${escapeHtml(u.info)}</div>
+                <div style="font-size:11px;color:#cbd5e1;margin-top:3px">${escapeHtml(u.hint)}</div>
+                <input type="file" id="${u.inputId}" accept="${u.accept}" style="display:none">
+              </label>
+            `).join('')}
+          </div>
+        </div>
       </div>
     `;
 
@@ -2497,6 +2509,22 @@ const App = {
     ];
 
     const allActive = selectedSet.size === 0;
+    const ctrPillHtml = `<button class="pill ${ctrLowFilter ? 'active' : ''}" data-insight-ctr-low="${ctrLowFilter ? '0' : '1'}" title="只看點擊率 < 3% 的商品" style="padding:4px 12px;font-size:13px;border:0;${ctrLowFilter ? 'background:#f59e0b;color:white;font-weight:700' : 'background:transparent;color:'+(ctrLowCount > 0 ? '#b45309' : '#cbd5e1')+';font-weight:600'}">📉 點擊率&lt;3% ${ctrLowCount}</button>`;
+    const colMenuHtml = `
+      <details id="insight-col-menu" style="position:relative;margin-left:auto" ${this._insightColMenuOpen ? 'open' : ''}>
+        <summary class="pill" style="padding:6px 12px;font-size:12px;list-style:none;cursor:pointer;user-select:none">👁 欄位 (${INSIGHT_COLS.length - hiddenCols.size}/${INSIGHT_COLS.length})</summary>
+        <div style="position:absolute;top:36px;right:0;background:white;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);padding:8px;min-width:180px;z-index:100">
+          ${INSIGHT_COLS.map(c => `
+            <label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;font-size:12px;border-radius:5px;user-select:none" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''">
+              <input type="checkbox" data-col-toggle="${c.key}" ${visCol(c.key) ? 'checked' : ''} style="margin:0;cursor:pointer">
+              <span>${escapeHtml(c.label)}</span>
+            </label>
+          `).join('')}
+          <div style="border-top:1px solid #f3f4f6;margin:6px 0 4px"></div>
+          <button id="insight-col-show-all" type="button" style="width:100%;padding:6px;border:0;background:transparent;font-size:11px;color:var(--primary);cursor:pointer;border-radius:5px;font-weight:600">顯示全部</button>
+        </div>
+      </details>
+    `;
     const classFilterHtml = sorted.length > 0 ? `
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc">
         <span style="font-size:13px;color:var(--text);font-weight:600">篩選分類<span style="font-size:11px;color:var(--text-muted);font-weight:500;margin-left:4px">（可複選）</span></span>
@@ -2509,11 +2537,10 @@ const App = {
               const isActive = selectedSet.has(it.key);
               return `<button class="pill ${isActive ? 'active' : ''}" data-insight-class="${escapeHtml(it.key)}" style="padding:4px 12px;font-size:13px;border:0;${isActive ? 'background:'+g.color+';color:white;font-weight:700;box-shadow:0 0 0 2px '+g.color+'33' : 'background:transparent;color:'+(cnt > 0 ? g.color : '#cbd5e1')+';font-weight:600'}">${it.emoji} ${escapeHtml(it.key)} ${cnt}</button>`;
             }).join('')}
+            ${g.group === '轉換類' ? ctrPillHtml : ''}
           </span>
         `).join('')}
-        <span style="display:inline-flex;align-items:center;gap:5px;padding-left:8px;border-left:2px solid #f59e0b44;margin-left:auto">
-          <button class="pill ${ctrLowFilter ? 'active' : ''}" data-insight-ctr-low="${ctrLowFilter ? '0' : '1'}" title="只看點擊率 < 3% 的商品" style="padding:4px 12px;font-size:13px;border:0;${ctrLowFilter ? 'background:#f59e0b;color:white;font-weight:700' : 'background:transparent;color:'+(ctrLowCount > 0 ? '#b45309' : '#cbd5e1')+';font-weight:600'}">📉 點擊率&lt;3% ${ctrLowCount}</button>
-        </span>
+        ${colMenuHtml}
       </div>
     ` : '';
 
@@ -2600,7 +2627,7 @@ const App = {
               </td>` : ''}
               ${visCol('revenue') ? `<td style="padding:8px 4px;text-align:right;font-size:14px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;vertical-align:top;line-height:1.4">
                 NT$ ${fmt(p.revenue)}
-                ${p.prevRevenue > 0 ? `<div style="font-size:13px;color:var(--text-muted);font-weight:600;margin-top:3px;line-height:1.3">上週 ${fmt(p.prevRevenue)}</div>` : ''}
+                ${p.prevRevenue > 0 ? `<div style="font-size:13px;color:var(--text-muted);font-weight:600;margin-top:3px;line-height:1.3">上上週 ${fmt(p.prevRevenue)}</div>` : ''}
               </td>` : ''}
               ${visCol('growth') ? `<td style="padding:8px 4px;text-align:center;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;vertical-align:top">${fmtGrowth(p.growthRate)}</td>` : ''}
               ${visCol('impressions') ? `<td style="padding:8px 4px;text-align:center;font-size:14px;font-weight:600;color:var(--text-muted);font-variant-numeric:tabular-nums;vertical-align:top">${p.impressions > 0 ? fmt(p.impressions) : '—'}</td>` : ''}
@@ -2632,22 +2659,10 @@ const App = {
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
           <div>
             <h3 style="margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em">營運表現洞察表 · ${escapeHtml(currentShop)}</h3>
-            <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted)">上傳 3 份 Excel：商品母表 + 本週銷售 + 蝦皮表現 → 系統自動合併分析</p>
+            <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted)">上傳 4 份 Excel：商品母表 + 上週銷售 + 上上週銷售 + 蝦皮表現 → 系統自動合併分析</p>
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <details id="insight-col-menu" style="position:relative" ${this._insightColMenuOpen ? 'open' : ''}>
-              <summary class="pill" style="padding:6px 12px;font-size:12px;list-style:none;cursor:pointer;user-select:none">👁 欄位 (${INSIGHT_COLS.length - hiddenCols.size}/${INSIGHT_COLS.length})</summary>
-              <div style="position:absolute;top:36px;right:0;background:white;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);padding:8px;min-width:180px;z-index:100">
-                ${INSIGHT_COLS.map(c => `
-                  <label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;font-size:12px;border-radius:5px;user-select:none" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''">
-                    <input type="checkbox" data-col-toggle="${c.key}" ${visCol(c.key) ? 'checked' : ''} style="margin:0;cursor:pointer">
-                    <span>${escapeHtml(c.label)}</span>
-                  </label>
-                `).join('')}
-                <div style="border-top:1px solid #f3f4f6;margin:6px 0 4px"></div>
-                <button id="insight-col-show-all" type="button" style="width:100%;padding:6px;border:0;background:transparent;font-size:11px;color:var(--primary);cursor:pointer;border-radius:5px;font-weight:600">顯示全部</button>
-              </div>
-            </details>
+            <button id="insight-upload-open" class="btn-add" style="padding:6px 14px;font-size:12px">📤 上傳檔案</button>
             <button id="insight-settings" class="pill" style="padding:6px 12px;font-size:12px">⚙ 分類設定</button>
             ${sales ? `<button id="insight-export" class="btn-add" style="padding:6px 12px;font-size:12px">⬇ 匯出 Excel</button>` : ''}
             ${(master || sales || perf) ? `<button id="insight-clear-all" class="pill" style="padding:6px 12px;font-size:12px">清除此賣場</button>` : ''}
@@ -2661,11 +2676,11 @@ const App = {
             `).join('')}
           </div>
           ${sales ? `
-            <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:8px">本週</span>
+            <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:8px">上週</span>
             <span style="padding:4px 10px;background:white;border:1px solid var(--border);border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(displayPeriod(sales.period) || sales.periodKey || '—')}</span>
           ` : ''}
           ${salesPrev ? `
-            <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:4px">上週</span>
+            <span style="font-size:12px;color:var(--text-muted);font-weight:500;margin-left:4px">上上週</span>
             <span style="padding:4px 10px;background:white;border:1px solid var(--border);border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(displayPeriod(salesPrev.period) || salesPrev.periodKey || '—')}</span>
           ` : ''}
         </div>
@@ -2674,11 +2689,11 @@ const App = {
         ${sorted.length > 0 ? `
           <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:1px;background:#e5e7eb;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb">
             <div style="background:white;padding:14px 18px">
-              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本週總營收</div>
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">上週總營收</div>
               <div style="font-size:22px;font-weight:700;color:var(--text);letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">NT$ ${fmt(totalRev)}</div>
             </div>
             <div style="background:white;padding:14px 18px">
-              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">本週總獲利</div>
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">上週總獲利</div>
               <div style="font-size:22px;font-weight:700;color:#10b981;letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px">NT$ ${fmt(totalProfit)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">(${fmtPct(totalRev > 0 ? totalProfit / totalRev : 0)})</span></div>
             </div>
           </div>
@@ -2695,14 +2710,14 @@ const App = {
                   const sortableTh = (key, label, align, extra = '') =>
                     `<th data-sort-key="${key}" title="點擊排序" style="padding:10px 4px;text-align:${align};font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;cursor:pointer;user-select:none;${extra}">${label}${arrowFor(key)}</th>`;
                   return `<th data-sort-key="code" title="點擊排序" style="padding:10px 8px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;cursor:pointer;user-select:none">商品編號 / 名稱 / ID${arrowFor('code')}</th>
-                ${visCol('prevPrev') ? sortableTh('prevPrev', '上上週營收', 'left', 'white-space:nowrap') : ''}
-                ${visCol('revenue') ? sortableTh('revenue', '本週 / 上週營收', 'right', 'white-space:nowrap') : ''}
+                ${visCol('prevPrev') ? sortableTh('prevPrev', '上上上週營收', 'left', 'white-space:nowrap') : ''}
+                ${visCol('revenue') ? sortableTh('revenue', '上週 / 上上週營收', 'right', 'white-space:nowrap') : ''}
                 ${visCol('growth') ? sortableTh('growth', '成長率', 'center') : ''}
                 ${visCol('impressions') ? sortableTh('impressions', '曝光次數', 'center', 'white-space:nowrap') : ''}
                 ${visCol('ctr') ? sortableTh('ctr', '點擊率', 'right', 'white-space:nowrap') : ''}
                 ${visCol('convRate') ? sortableTh('convRate', '轉換率', 'center') : ''}
                 ${visCol('group') ? `<th style="padding:10px 4px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">大類</th>` : ''}
-                ${visCol('flow') ? `<th style="padding:10px 4px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上週 → 本週</th>` : ''}
+                ${visCol('flow') ? `<th style="padding:10px 4px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上上週 → 上週</th>` : ''}
                 ${visCol('stock') ? sortableTh('stock', '可用庫存', 'center') : ''}
                 ${visCol('note') ? `<th style="padding:10px 6px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;min-width:130px">調整（最新）</th>` : ''}`;
                 })()}
@@ -3109,7 +3124,7 @@ const App = {
           // 截斷只保留前 3 週
           if (weeks.length > 3) weeks.length = 3;
           Store.set(sKey('weeks'), weeks);
-          const shiftMsg = shifted ? '（上週/上上週已自動往後推）' : '';
+          const shiftMsg = shifted ? '（上上週/上上上週已自動往後推）' : '';
           showToast(`${currentShop} · ${slotLabel}已上傳（${result.products.length} 個商品 · ${result.period}）${shiftMsg}`, 'success');
           this.render();
         } catch (err) {
@@ -3121,8 +3136,8 @@ const App = {
         }
       });
     };
-    wireSalesUpload('insight-sales-upload', 0, '本週銷售排行');
-    wireSalesUpload('insight-salesprev-upload', 1, '上週銷售排行');
+    wireSalesUpload('insight-sales-upload', 0, '上週銷售排行');
+    wireSalesUpload('insight-salesprev-upload', 1, '上上週銷售排行');
 
     // 商品表現
     const perfInput = document.getElementById('insight-perf-upload');
@@ -3222,7 +3237,7 @@ const App = {
         const k2 = (type) => `ec.insight_${curShop}_${type}`;
 
         const piece = btn.dataset.clearPiece; // 'master' | 'sales' | 'salesPrev' | 'perf'
-        const labels = { master: '商品母表', sales: '本週銷售', salesPrev: '上週銷售', perf: '商品表現' };
+        const labels = { master: '商品母表', sales: '上週銷售', salesPrev: '上上週銷售', perf: '商品表現' };
         const label = labels[piece] || piece;
 
         if (piece === 'sales' || piece === 'salesPrev') {
@@ -3266,6 +3281,23 @@ const App = {
     // 分類門檻設定（共用）
     const settingsBtn = document.getElementById('insight-settings');
     if (settingsBtn) settingsBtn.addEventListener('click', () => this.openInsightSettingsModal());
+
+    // 📤 上傳檔案：開啟浮窗
+    const uploadOpenBtn = document.getElementById('insight-upload-open');
+    const uploadOverlay = document.getElementById('insight-upload-overlay');
+    const uploadCloseBtn = document.getElementById('insight-upload-close');
+    if (uploadOpenBtn && uploadOverlay) {
+      uploadOpenBtn.addEventListener('click', () => { uploadOverlay.style.display = 'flex'; });
+    }
+    if (uploadCloseBtn && uploadOverlay) {
+      uploadCloseBtn.addEventListener('click', () => { uploadOverlay.style.display = 'none'; });
+    }
+    if (uploadOverlay) {
+      uploadOverlay.addEventListener('click', (e) => {
+        // 點背景關閉，點內部不關
+        if (e.target === uploadOverlay) uploadOverlay.style.display = 'none';
+      });
+    }
 
     // 表頭排序：點同一欄切換 asc/desc，點別欄則切到該欄（預設 desc，code 預設 asc）
     document.querySelectorAll('[data-sort-key]').forEach(th => {
@@ -3696,9 +3728,9 @@ const App = {
         '商品編號': s.code,
         '莫筆克名稱': m.mocbicName || '',
         '商品名稱': s.name,
-        '上上週營收': prevPrev?.revenue || '',
-        '上週營收': prev?.revenue || '',
-        '本週營收': s.revenue,
+        '上上上週營收': prevPrev?.revenue || '',
+        '上上週營收': prev?.revenue || '',
+        '上週營收': s.revenue,
         '成長率': g !== null ? (g * 100).toFixed(1) + '%' : '',
         '售出件數': s.qty,
         '獲利': s.profit,
@@ -3707,8 +3739,8 @@ const App = {
         '點擊率': p.ctr ? (p.ctr * 100).toFixed(2) + '%' : '',
         '轉換率': p.convRate ? (p.convRate * 100).toFixed(2) + '%' : '',
         '大類': groupOf(cls),
-        '上週類別': prevCls,
-        '本週類別': cls,
+        '上上週類別': prevCls,
+        '上週類別': cls,
         '判斷結果': (prevCls && cls) ? `${prevCls} → ${cls}` : cls,
         '可用庫存': s.stock - s.demand,
         '備註': n.text || '',
