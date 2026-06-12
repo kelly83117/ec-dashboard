@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-5">
+<meta name="app-version" content="2026-06-11-6">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -5152,21 +5152,20 @@ const App = {
           ${diffRow('營收', revOldN, revNewN, revChanged)}
           ${diffRow('廣告費', adsOldN, adsNewN, adsChanged)}
           <div style="margin-top:14px;padding:10px 12px;background:#f59e0b14;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px;color:var(--text)">
-            按「確認」會寫入雲端儲存；按「稍後再說」會關掉視窗但保留剛輸入的數字（橘色邊框＝尚未儲存）。
+            按「確認」會寫入雲端儲存；按「取消」會還原為原本的金額。
           </div>
         `,
         saveLabel: '確認',
-        cancelLabel: '稍後再說',
+        cancelLabel: '取消',
         onSave: () => {
           dialogOpen = false;
           commit(idx);
           return true;
         },
         onCancel: () => {
-          // 取消只關掉確認視窗 — 輸入框保留使用者打的數字（橘色邊框 = 未儲存）
-          // 等使用者下次點別處或按 Enter 才會再次跳確認
+          // 沒按確認就還原 — 不要一直顯示未確認的數字
           dialogOpen = false;
-          markUnsaved(idx);
+          revert(idx);
         },
       });
     };
