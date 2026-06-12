@@ -7777,6 +7777,18 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       </div>
     </div>
   </div>
+  <div class="ana-overlay" id="delete-file-overlay" onclick="if(event.target===this)closeDeleteFileModal()">
+    <div class="ana-modal" style="width:360px;max-width:96vw">
+      <div class="ana-modal-hdr"><span>刪除確認</span><button class="ana-close-btn" onclick="closeDeleteFileModal()">✕</button></div>
+      <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:16px">
+        <div id="delete-file-msg" style="font-size:14px;color:#374151;line-height:1.6"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+          <button onclick="closeDeleteFileModal()" style="padding:8px 18px;border:1.5px solid #e5e7eb;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#6b7280;cursor:pointer">取消</button>
+          <button onclick="confirmDeleteFile()" style="padding:8px 18px;border:0;border-radius:8px;background:#ef4444;font-size:13px;font-weight:700;color:white;cursor:pointer">刪除</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="ana-overlay" id="upload-modal-overlay" onclick="if(event.target===this)closeUploadModal()">
     <div class="ana-modal" style="width:520px;max-width:96vw">
       <div class="ana-modal-hdr"><span>上傳檔案</span><button class="ana-close-btn" onclick="closeUploadModal()">✕</button></div>
@@ -7790,17 +7802,20 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           </div>
         </div>
         <label class="ucard" id="upm-map" style="width:100%;box-sizing:border-box">
-          <input type="file" accept=".xlsx,.xls" onchange="onGlobalFile(event,'map')">
+          <input type="file" id="upm-map-input" accept=".xlsx,.xls" onchange="onGlobalFile(event,'map')">
+          <button id="upm-map-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('map')" style="display:none;background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
           <div class="ucard-icon" id="upm-map-icon">🗂</div>
           <div class="ucard-info"><div class="ucard-title" id="upm-map-title">蝦皮商品清單</div><div class="ucard-sub">上傳一次，三個賣場共用</div></div>
         </label>
         <label class="ucard" id="upm-mobic" style="width:100%;box-sizing:border-box">
-          <input type="file" accept=".xlsx,.xls" onchange="onGlobalFile(event,'mobic')">
+          <input type="file" id="upm-mobic-input" accept=".xlsx,.xls" onchange="onGlobalFile(event,'mobic')">
+          <button id="upm-mobic-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('mobic')" style="display:none;background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
           <div class="ucard-icon" id="upm-mobic-icon">📦</div>
           <div class="ucard-info"><div class="ucard-title" id="upm-mobic-title">莫筆克銷售分析</div><div class="ucard-sub">.xlsx</div></div>
         </label>
         <label class="ucard" id="upm-ads" style="width:100%;box-sizing:border-box">
-          <input type="file" accept=".csv" onchange="onGlobalFile(event,'ads')">
+          <input type="file" id="upm-ads-input" accept=".csv" onchange="onGlobalFile(event,'ads')">
+          <button id="upm-ads-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('ads')" style="display:none;background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
           <div class="ucard-icon" id="upm-ads-icon">📣</div>
           <div class="ucard-info"><div class="ucard-title" id="upm-ads-title">蝦皮廣告報表</div><div class="ucard-sub">.csv</div></div>
         </label>
@@ -8408,21 +8423,59 @@ function openUploadModal(){
   const mapOk=!!globalMap&&Object.keys(globalMap).length>0;
   document.getElementById('upm-map').className='ucard'+(mapOk?' ok':'');
   document.getElementById('upm-map-icon').textContent=mapOk?'✅':'🗂';
-  document.getElementById('upm-map-title').textContent=mapOk?'商品清單已載入':'蝦皮商品清單';
+  document.getElementById('upm-map-title').textContent=mapOk?'商品清單 已載入':'蝦皮商品清單';
+  document.getElementById('upm-map-input').disabled=mapOk;
+  document.getElementById('upm-map-input').style.pointerEvents=mapOk?'none':'';
+  document.getElementById('upm-map-del').style.display=mapOk?'inline-block':'none';
+  document.getElementById('upm-map').style.cursor=mapOk?'default':'pointer';
   // sync mobic/ads
   const s=state[shop];
   const mobicOk=!!s.rawMobic;
   document.getElementById('upm-mobic').className='ucard'+(mobicOk?' ok':'');
   document.getElementById('upm-mobic-icon').textContent=mobicOk?'✅':'📦';
-  document.getElementById('upm-mobic-title').textContent=mobicOk?'莫筆克已載入':'莫筆克銷售分析';
+  document.getElementById('upm-mobic-title').textContent=mobicOk?'莫筆克 已載入':'莫筆克銷售分析';
+  document.getElementById('upm-mobic-input').disabled=mobicOk;
+  document.getElementById('upm-mobic-input').style.pointerEvents=mobicOk?'none':'';
+  document.getElementById('upm-mobic-del').style.display=mobicOk?'inline-block':'none';
+  document.getElementById('upm-mobic').style.cursor=mobicOk?'default':'pointer';
   const adsOk=!!s.rawAds;
   document.getElementById('upm-ads').className='ucard'+(adsOk?' ok':'');
   document.getElementById('upm-ads-icon').textContent=adsOk?'✅':'📣';
-  document.getElementById('upm-ads-title').textContent=adsOk?'廣告報表已載入':'蝦皮廣告報表';
+  document.getElementById('upm-ads-title').textContent=adsOk?'廣告報表 已載入':'蝦皮廣告報表';
+  document.getElementById('upm-ads-input').disabled=adsOk;
+  document.getElementById('upm-ads-input').style.pointerEvents=adsOk?'none':'';
+  document.getElementById('upm-ads-del').style.display=adsOk?'inline-block':'none';
+  document.getElementById('upm-ads').style.cursor=adsOk?'default':'pointer';
   document.getElementById('upm-gen-btn').disabled=!(mobicOk&&adsOk);
   ov.classList.add('open');
 }
 function closeUploadModal(){document.getElementById('upload-modal-overlay')?.classList.remove('open');}
+
+let _deleteFilePending=null;
+function openDeleteFileModal(type){
+  const labels={'map':'蝦皮商品清單','mobic':'莫筆克銷售分析','ads':'蝦皮廣告報表'};
+  _deleteFilePending=type;
+  document.getElementById('delete-file-msg').textContent='確定要刪除「'+labels[type]+'」嗎？刪除後需重新上傳。';
+  document.getElementById('delete-file-overlay').classList.add('open');
+}
+function closeDeleteFileModal(){
+  _deleteFilePending=null;
+  document.getElementById('delete-file-overlay')?.classList.remove('open');
+}
+function confirmDeleteFile(){
+  const type=_deleteFilePending;
+  if(!type){closeDeleteFileModal();return;}
+  closeDeleteFileModal();
+  if(type==='map'){
+    globalMap={};
+  } else {
+    const shop=curShop==='總表'?SHOPS[0].id:curShop;
+    if(type==='mobic')state[shop].rawMobic=null;
+    if(type==='ads')state[shop].rawAds=null;
+    delete state[shop]._built;
+  }
+  openUploadModal();
+}
 
 // ── Distribution Modal ──
 function openDistModal(shop){
