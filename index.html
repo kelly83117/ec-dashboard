@@ -7823,6 +7823,11 @@ window.addEventListener('profitDataReady', ()=>{
       if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
     });
     if(typeof renderSummary==='function') renderSummary();
+    // 重載後確保當前賣場 tab 仍顯示正確
+    if(curShop&&curShop!=='總表'){
+      const btn=document.querySelector(`button[onclick*="setShop('${curShop}'"]`);
+      if(btn&&typeof setShop==='function')setShop(curShop,btn);
+    }
   }catch(e){ console.warn('[淨利表] 重載失敗', e); }
 });
 
