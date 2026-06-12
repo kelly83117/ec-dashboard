@@ -7984,6 +7984,8 @@ function tryLoadSaved(shop){
   }
 }
 function loadIntoUI(shop,built,period,days){
+  // edit 後 2s 內阻擋 cloud sync 觸發的重渲染，避免閃爍
+  if(_editedAt[shop]&&Date.now()-_editedAt[shop]<2000)return;
   if(built&&Array.isArray(built)){
     built.forEach(r=>{
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
@@ -8960,6 +8962,7 @@ function buildNoteCell(shopKey,code,noteId,noteData){
 
 // 開始編輯數字
 let _adsEditPending=null;
+const _editedAt={}; // shop → timestamp，edit 後 2s 內阻擋 loadIntoUI 重渲染
 function startEdit(shop,code,col,tdId){
   const r=state[shop]._built.find(x=>x.code===code);if(!r)return;
   const edits=getEdits(shop);
@@ -8991,6 +8994,7 @@ function confirmAdsEdit(){
   const{shop,code,col,tdId}=_adsEditPending;
   const val=document.getElementById('ads-edit-input').value;
   closeAdsEditModal();
+  _editedAt[shop]=Date.now(); // 記錄 edit 時間，阻擋後續 loadIntoUI 重渲染
   commitEdit(shop,code,col,val,tdId);
   // 若被 async 重渲染跳回總表，才介入修正（已正確則不動 DOM 避免閃爍）
   const stayOnShop=()=>{
