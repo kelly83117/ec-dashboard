@@ -8990,15 +8990,17 @@ function confirmAdsEdit(){
   const val=document.getElementById('ads-edit-input').value;
   closeAdsEditModal();
   commitEdit(shop,code,col,val,tdId);
-  // 強制停留在此賣場，覆蓋所有 async 重渲染造成的跳回總表
+  // 若被 async 重渲染跳回總表，才介入修正（已正確則不動 DOM 避免閃爍）
   const stayOnShop=()=>{
+    const target=document.getElementById('content-'+shop);
+    if(!target)return;
+    if(target.classList.contains('active')&&curShop===shop)return; // 已正確，不動
     curShop=shop;
     document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
-    const c=document.getElementById('content-'+shop);if(c)c.classList.add('active');
+    target.classList.add('active');
     const kpi=document.getElementById('header-kpi-block');if(kpi)kpi.style.display='flex';
-    const btn=document.getElementById('header-btn-block');if(btn)btn.style.display='flex';
-    const wrapRow=document.getElementById('profit-period-wrap-row');
-    if(wrapRow)wrapRow.style.display='flex';
+    const btnB=document.getElementById('header-btn-block');if(btnB)btnB.style.display='flex';
+    const wrapRow=document.getElementById('profit-period-wrap-row');if(wrapRow)wrapRow.style.display='flex';
     const periodEl=document.getElementById('period-row-'+shop);if(periodEl)periodEl.style.display='flex';
     SHOPS.forEach(s=>{if(s.id!==shop){const el=document.getElementById('period-row-'+s.id);if(el)el.style.display='none';}});
     document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
