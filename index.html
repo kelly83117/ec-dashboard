@@ -9536,114 +9536,172 @@ function renderTable(shop,list){
 }
 
 // ── Summary ──
+// ── Summary Table helpers (independent manual-entry table) ──
+function getSummaryRows(){
+  try{
+    if(typeof Store!='undefined'&&Store._profitMem?._summary_v1)return Store._profitMem._summary_v1;
+    const s=localStorage.getItem('ec_summary_v1');return s?JSON.parse(s):[];
+  }catch{return [];}
+}
+function saveSummaryRows(rows){
+  try{localStorage.setItem('ec_summary_v1',JSON.stringify(rows));}catch{}
+  try{if(window.__cloudProfit)window.__cloudProfit.setField('_summary_v1',rows);}catch{}
+}
+function openAddSummaryRowModal(){
+  const today=new Date();
+  const fmtD=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const dow=today.getDay()||7;
+  const mon=new Date(today);mon.setDate(today.getDate()-dow+1);
+  const sun=new Date(mon);sun.setDate(mon.getDate()+6);
+  const ov=document.createElement('div');
+  ov.className='ana-overlay open';ov.style.zIndex='3000';
+  ov.innerHTML=`<div class="ana-modal" style="width:320px;max-width:96vw">
+    <div class="ana-modal-hdr"><span>新增週次</span><button class="ana-close-btn" onclick="this.closest('.ana-overlay').remove()">✕</button></div>
+    <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:6px"><label style="font-size:12px;color:#6b7280;font-weight:600">開始日期</label>
+        <input type="date" id="sum-add-start" value="${fmtD(mon)}" style="padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px"></div>
+      <div style="display:flex;flex-direction:column;gap:6px"><label style="font-size:12px;color:#6b7280;font-weight:600">結束日期</label>
+        <input type="date" id="sum-add-end" value="${fmtD(sun)}" style="padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+        <button onclick="this.closest('.ana-overlay').remove()" style="padding:8px 18px;border:1.5px solid #e5e7eb;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#6b7280;cursor:pointer">取消</button>
+        <button onclick="confirmAddSummaryRow(this)" style="padding:8px 18px;border:0;border-radius:8px;background:#5b5fcf;font-size:13px;font-weight:700;color:white;cursor:pointer">新增</button>
+      </div>
+    </div></div>`;
+  document.body.appendChild(ov);
+  ov.onclick=e=>{if(e.target===ov)ov.remove();};
+}
+function confirmAddSummaryRow(btn){
+  const start=document.getElementById('sum-add-start').value;
+  const end=document.getElementById('sum-add-end').value;
+  if(!start||!end){alert('請填入日期');return;}
+  if(start>end){alert('開始日期不能晚於結束日期');return;}
+  const rows=getSummaryRows();
+  if(rows.find(r=>r.start===start&&r.end===end)){alert('此週次已存在');return;}
+  rows.push({id:'sw_'+Date.now(),start,end,shops:{}});
+  rows.sort((a,b)=>a.start.localeCompare(b.start));
+  saveSummaryRows(rows);
+  btn.closest('.ana-overlay').remove();
+  renderSummary();
+}
+function deleteSummaryRow(id){
+  if(!confirm('確定刪除這週的資料？'))return;
+  saveSummaryRows(getSummaryRows().filter(r=>r.id!==id));
+  renderSummary();
+}
+function editSummaryCell(rowId,shop,field,tdEl){
+  const rows=getSummaryRows();
+  const row=rows.find(r=>r.id===rowId);if(!row)return;
+  if(!row.shops)row.shops={};
+  if(!row.shops[shop])row.shops[shop]={};
+  const curVal=row.shops[shop][field]||'';
+  const origContent=tdEl.innerHTML;
+  const inp=document.createElement('input');
+  inp.type='number';inp.value=curVal;
+  inp.style.cssText='width:80px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
+  tdEl.innerHTML='';tdEl.appendChild(inp);inp.focus();if(inp.value)inp.select();
+  let done=false;
+  const save=()=>{
+    if(done)return;done=true;
+    const v=parseFloat(inp.value);
+    if(!isNaN(v)&&v>0)row.shops[shop][field]=v;else delete row.shops[shop][field];
+    saveSummaryRows(rows);renderSummary();
+  };
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}if(e.key==='Escape'){done=true;tdEl.innerHTML=origContent;}});
+  inp.addEventListener('blur',save);
+}
+
 function renderSummary(){
   const el=document.getElementById('content-總表');
   if(!el)return;
+  const rate=getPlatformRate();
+  const rows=getSummaryRows().slice().sort((a,b)=>a.start.localeCompare(b.start));
+  const fmt=n=>fmtN(Math.round(n||0));
+  const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':'—';
+  const calcPure=(d)=>(d.gross||0)-(d.ads||0)-(d.rev||0)*rate;
 
-  // Collect data: key = "ec|shop|month|half" → {tRev,tGross,tAds,tPure}
-  const data={};
-  const addEntry=(k,rep)=>{
-    if(!rep?.built||!Array.isArray(rep.built))return;
-    const parts=k.split('|');
-    if(parts.length<4)return;
-    const shop=parts[1],month=parts[2],half=parts[3];
-    if(!SHOPS.find(s=>s.id===shop))return;
-    const dk=`${month}|${half}`;
-    if(data[dk]?.[shop])return;
-    if(!data[dk])data[dk]={};
-    let tRev=0,tGross=0,tAds=0,tPure=0;
-    rep.built.forEach(r=>{tRev+=(r.rev||0);tGross+=(r.gross||0);tAds+=(r.adsFee||0);tPure+=(r.pureProfit||0);});
-    data[dk][shop]={tRev,tGross,tAds,tPure};
-  };
-  try{if(typeof Store!='undefined'&&Store._profitMem){for(const k of Object.keys(Store._profitMem)){if(k.startsWith('ec|'))addEntry(k,Store._profitMem[k]);}}}catch{}
-  try{if(typeof Store!='undefined'&&Store._mem){for(const k of Object.keys(Store._mem)){if(k.startsWith('ec|'))addEntry(k,Store._mem[k]);}}}catch{}
-  try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(!k||!k.startsWith('ec|'))continue;try{addEntry(k,JSON.parse(localStorage.getItem(k)));}catch{}}}catch{}
+  const shopGroupHdr=SHOPS.map(s=>`<th colspan="6" style="text-align:center;background:${s.color};color:white;font-weight:700;font-size:13px;padding:7px 4px;border-left:2px solid rgba(255,255,255,.3)">${s.id}</th>`).join('');
+  const shopSubHdr=SHOPS.map(()=>`<th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">營收</th><th style="min-width:62px;font-size:11px;font-weight:600;background:#f8fafc">廣告</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">毛利</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">純利</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">純利率%</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">廣告佔比%</th>`).join('');
 
-  if(!Object.keys(data).length){el.innerHTML=`<div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">尚無儲存資料</div></div>`;return;}
-
-  const allMonths=[...new Set(Object.keys(data).map(k=>k.split('|')[0]))].sort();
-  const fmt=n=>n!=null?fmtN(Math.round(n)):' — ';
-  const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':' — ';
-  const dash='<span style="color:#d1d5db">—</span>';
-
-  // Shop column group headers
-  const shopGroupHdr=SHOPS.map(s=>`<th colspan="6" style="text-align:center;background:${s.color};color:white;font-weight:700;font-size:13px;padding:7px 4px;border-left:2px solid rgba(255,255,255,.4)">${s.id}</th>`).join('');
-  const shopSubHdr=SHOPS.map(()=>`
-    <th style="min-width:78px">營收</th>
-    <th style="min-width:65px">廣告</th>
-    <th style="min-width:78px">毛利</th>
-    <th style="min-width:78px">純利</th>
-    <th style="min-width:62px">純利率%</th>
-    <th style="min-width:62px">廣告佔比%</th>`).join('');
-
-  const shopCells=(shopData,bold)=>SHOPS.map(s=>{
-    const d=shopData[s.id];
-    const bw=bold?'font-weight:700;':'';
+  const dataCells=(shopMap,editable,rowId)=>SHOPS.map(s=>{
+    const d=shopMap?.[s.id]||{};
+    const p=calcPure(d);
     const bl='border-left:2px solid #e5e7eb;';
-    if(!d)return`<td style="${bl}${bw}text-align:center;color:#d1d5db" colspan="6">—</td>`;
-    return`<td style="${bl}${bw}text-align:right;padding:6px 10px">${fmt(d.tRev)}</td>
-      <td style="${bw}text-align:right;padding:6px 10px;color:#b45309">${fmt(d.tAds)}</td>
-      <td style="${bw}text-align:right;padding:6px 10px">${fmt(d.tGross)}</td>
-      <td style="${bw}text-align:right;padding:6px 10px;color:${d.tPure>=0?'#059669':'#dc2626'}">${fmt(d.tPure)}</td>
-      <td style="${bw}text-align:right;padding:6px 10px">${pct(d.tPure,d.tRev)}</td>
-      <td style="${bw}text-align:right;padding:6px 10px;color:#b45309">${pct(d.tAds,d.tRev)}</td>`;
+    const blB='border-left:2px solid #c7d2fe;';
+    const borderL=editable?bl:blB;
+    const bw=editable?'':'font-weight:700;';
+    const onclick=(f)=>editable?`onclick="editSummaryCell('${rowId}','${s.id}','${f}',this)" style="${borderL}${bw}text-align:right;padding:5px 8px;cursor:pointer"`:`style="${borderL}${bw}text-align:right;padding:6px 8px"`;
+    const dash='<span style="color:#d1d5db">—</span>';
+    const hasData=d.rev||d.gross||d.ads;
+    return`<td ${onclick('rev')}>${d.rev?fmt(d.rev):dash}</td>
+      <td style="${bw}text-align:right;padding:5px 8px;color:#b45309;${editable?'cursor:pointer':''}" ${editable?`onclick="editSummaryCell('${rowId}','${s.id}','ads',this)"`:''} >${d.ads?fmt(d.ads):dash}</td>
+      <td style="${bw}text-align:right;padding:5px 8px;${editable?'cursor:pointer':''}" ${editable?`onclick="editSummaryCell('${rowId}','${s.id}','gross',this)"`:''} >${d.gross?fmt(d.gross):dash}</td>
+      <td style="${bw}text-align:right;padding:5px 8px;color:${p>=0?'#059669':'#dc2626'}">${hasData?fmt(p):dash}</td>
+      <td style="${bw}text-align:right;padding:5px 8px">${d.rev?pct(p,d.rev):'—'}</td>
+      <td style="${bw}text-align:right;padding:5px 8px;color:#b45309">${(d.rev&&d.ads)?pct(d.ads,d.rev):'—'}</td>`;
   }).join('');
 
-  let rows='';
-  allMonths.forEach(month=>{
-    const[y,mo]=month.split('/').map(Number);
-    const last=new Date(y,mo,0).getDate();
-    const m=String(mo);
-    const monthTotals={};
+  const sumShops=(weekRows)=>{
+    const t={};SHOPS.forEach(s=>{t[s.id]={rev:0,ads:0,gross:0};});
+    weekRows.forEach(r=>SHOPS.forEach(s=>{const d=r.shops?.[s.id]||{};t[s.id].rev+=(d.rev||0);t[s.id].ads+=(d.ads||0);t[s.id].gross+=(d.gross||0);}));
+    return t;
+  };
 
-    // First half row (1–15)
-    const firstDk=`${month}|first`;
-    const firstData=data[firstDk]||{};
-    if(SHOPS.some(s=>firstData[s.id])){
-      SHOPS.forEach(s=>{const d=firstData[s.id];if(!d)return;if(!monthTotals[s.id])monthTotals[s.id]={tRev:0,tGross:0,tAds:0,tPure:0};monthTotals[s.id].tRev+=d.tRev;monthTotals[s.id].tGross+=d.tGross;monthTotals[s.id].tAds+=d.tAds;monthTotals[s.id].tPure+=d.tPure;});
-      rows+=`<tr style="border-top:1px solid #e5e7eb"><td style="padding:6px 12px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums">${m}/1 – ${m}/15</td>${shopCells(firstData,false)}</tr>`;
+  // Group rows by month (end date's month)
+  const moMap={};const moOrder=[];
+  rows.forEach(row=>{
+    const e=new Date(row.end+'T12:00:00');
+    const mo=`${e.getFullYear()}-${String(e.getMonth()+1).padStart(2,'0')}`;
+    if(!moMap[mo]){moMap[mo]=[];moOrder.push(mo);}
+    moMap[mo].push(row);
+  });
+
+  let tbody='';
+  moOrder.forEach(mo=>{
+    const moRows=moMap[mo];
+    const m=parseInt(mo.split('-')[1]);
+    const first=moRows.filter(r=>new Date(r.end+'T12:00:00').getDate()<=15);
+    const second=moRows.filter(r=>new Date(r.end+'T12:00:00').getDate()>15);
+
+    const rowTr=row=>{
+      const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
+      const sm=s.getMonth()+1,sd=s.getDate(),em=e.getMonth()+1,ed=e.getDate();
+      const label=sm===em?`${sm}/${sd} – ${sm}/${ed}`:`${sm}/${sd} – ${em}/${ed}`;
+      return`<tr style="border-top:1px solid #f0f0f0">
+        <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums">${label}
+          <button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="margin-left:4px;background:none;border:none;color:#d1d5db;cursor:pointer;font-size:10px;padding:0;vertical-align:middle" title="刪除">✕</button>
+        </td>${dataCells(row.shops,true,row.id)}</tr>`;
+    };
+
+    first.forEach(r=>{tbody+=rowTr(r);});
+    if(first.length&&second.length){
+      const t=sumShops(first);
+      tbody+=`<tr style="background:#f0fdf4;border-top:2px solid #86efac"><td style="padding:6px 12px;font-size:13px;font-weight:700;color:#15803d;white-space:nowrap">${m}月中</td>${dataCells(t,false,'')}</tr>`;
     }
-    // Second half row (16–end)
-    const secondDk=`${month}|second`;
-    const secondData=data[secondDk]||{};
-    if(SHOPS.some(s=>secondData[s.id])){
-      SHOPS.forEach(s=>{const d=secondData[s.id];if(!d)return;if(!monthTotals[s.id])monthTotals[s.id]={tRev:0,tGross:0,tAds:0,tPure:0};monthTotals[s.id].tRev+=d.tRev;monthTotals[s.id].tGross+=d.tGross;monthTotals[s.id].tAds+=d.tAds;monthTotals[s.id].tPure+=d.tPure;});
-      rows+=`<tr style="border-top:1px solid #e5e7eb"><td style="padding:6px 12px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums">${m}/16 – ${m}/${last}</td>${shopCells(secondData,false)}</tr>`;
-    }
-    // Full period (整月) if stored separately
-    const fullDk=`${month}|full`;
-    const fullData=data[fullDk]||{};
-    if(SHOPS.some(s=>fullData[s.id])&&!SHOPS.some(s=>firstData[s.id]||secondData[s.id])){
-      SHOPS.forEach(s=>{const d=fullData[s.id];if(!d)return;if(!monthTotals[s.id])monthTotals[s.id]={tRev:0,tGross:0,tAds:0,tPure:0};monthTotals[s.id].tRev+=d.tRev;monthTotals[s.id].tGross+=d.tGross;monthTotals[s.id].tAds+=d.tAds;monthTotals[s.id].tPure+=d.tPure;});
-      rows+=`<tr style="border-top:1px solid #e5e7eb"><td style="padding:6px 12px;font-size:12px;white-space:nowrap;color:#374151">${m}/1 – ${m}/${last}</td>${shopCells(fullData,false)}</tr>`;
-    }
-    // Monthly total row
-    if(Object.keys(monthTotals).length){
-      rows+=`<tr style="background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
-        <td style="padding:7px 12px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap">${mo}月份</td>
-        ${shopCells(monthTotals,true)}
-      </tr>`;
+    second.forEach(r=>{tbody+=rowTr(r);});
+    if(moRows.length){
+      const t=sumShops(moRows);
+      tbody+=`<tr style="background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe"><td style="padding:7px 12px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap">${m}月份</td>${dataCells(t,false,'')}</tr>`;
     }
   });
 
-  el.innerHTML=`<div style="padding:14px 16px 4px">
+  if(!rows.length)tbody=`<tr><td colspan="${1+SHOPS.length*6}" style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">尚無資料，點下方「＋ 新增週次」開始輸入</td></tr>`;
+
+  el.innerHTML=`<div style="padding:14px 16px 16px">
     <div class="tscroll"><table style="border-collapse:collapse;width:100%">
       <thead>
-        <tr><th rowspan="2" style="padding:8px 12px;background:#f8fafc;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;text-align:left;white-space:nowrap;vertical-align:middle">區間</th>${shopGroupHdr}</tr>
-        <tr style="background:#f8fafc;border-bottom:2px solid #e5e7eb">${shopSubHdr}</tr>
+        <tr><th rowspan="2" style="padding:8px 12px;background:#f8fafc;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;text-align:left;white-space:nowrap;vertical-align:middle;min-width:110px">區間</th>${shopGroupHdr}</tr>
+        <tr style="border-bottom:2px solid #e5e7eb">${shopSubHdr}</tr>
       </thead>
-      <tbody>${rows}</tbody>
+      <tbody>${tbody}</tbody>
     </table></div>
-    <div style="margin-top:10px;font-size:11px;color:#9ca3af">＊純利率 = 純利 ÷ 營收 ｜ 廣告佔比 = 廣告 ÷ 營收</div>
+    <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button onclick="openAddSummaryRowModal()" style="padding:7px 18px;border:1.5px dashed #c7d2fe;border-radius:8px;background:white;color:#5b5fcf;font-size:13px;font-weight:600;cursor:pointer">＋ 新增週次</button>
+      <span style="font-size:11px;color:#9ca3af">純利 = 毛利 − 廣告 − 營收×${(rate*100).toFixed(1)}%　｜　點擊數字可編輯</span>
+    </div>
   </div>`;
 }
 
-function switchSummaryMonth(month){
-  const el=document.getElementById('content-總表');
-  if(el)el._curMonth=month;
-  renderSummary();
-}
-
+// ── (legacy unused) ──
 // ── Tab switch ──
 function setShop(shop,btn){
   curShop=shop;
