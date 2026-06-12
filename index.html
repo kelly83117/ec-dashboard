@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-6">
+<meta name="app-version" content="2026-06-11-7">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4324,13 +4324,19 @@ const App = {
   /* 每日營收曲線（近 N 天） */
   dailyLineChartHtml(platforms /* days param ignored now */) {
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endDate = addDays(now, -1);
-    const yMonth = now.getFullYear();
-    const mMonth = now.getMonth() + 1;
+    // 月份位移：0 = 本月、-1 = 上月、-2 = 上上月...（不允許未來月份）
+    const monthOffset = Math.min(0, this.filter.chartMonthOffset || 0);
+    const target = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+    const yMonth = target.getFullYear();
+    const mMonth = target.getMonth() + 1;
+    const monthStart = new Date(yMonth, mMonth - 1, 1);
+    const lastOfMonth = new Date(yMonth, mMonth, 0);
+    // 本月只顯示到昨日；過去月份顯示整月
+    const endDate = (monthOffset === 0) ? addDays(now, -1) : lastOfMonth;
     const endStr = toDateStr(endDate);
+    const isCurrent = monthOffset === 0;
+    const monthLabel = isCurrent ? '本月' : `${mMonth}月`;
 
-    // 以本月為主：從本月 1 號到昨日（最新有資料的一天）
     const dates = [];
     for (let d = new Date(monthStart); toDateStr(d) <= endStr; d = addDays(d, 1)) {
       dates.push(toDateStr(d));
@@ -4412,11 +4418,17 @@ const App = {
       return `
         <div class="chart-card" style="margin-top:16px">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
-            <h3 style="margin:0">${yMonth} 年 ${mMonth} 月每日營收</h3>
+            <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:6px">
+              <button id="chart-month-prev" title="看上個月" style="border:1px solid var(--border);background:white;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted)">‹</button>
+              <span style="min-width:90px;text-align:center">${yMonth} 年 ${mMonth} 月</span>
+              <button id="chart-month-next" title="看下個月" ${isCurrent ? 'disabled' : ''} style="border:1px solid var(--border);background:${isCurrent ? '#f9fafb' : 'white'};border-radius:6px;width:24px;height:24px;cursor:${isCurrent ? 'not-allowed' : 'pointer'};font-size:12px;display:inline-flex;align-items:center;justify-content:center;color:${isCurrent ? '#cbd5e1' : 'var(--text-muted)'}">›</button>
+              ${!isCurrent ? '<button id="chart-month-reset" title="回到本月" style="border:1px solid var(--border);background:white;border-radius:6px;padding:0 8px;height:24px;cursor:pointer;font-size:11px;color:var(--text-muted)">回本月</button>' : ''}
+              <span style="margin-left:4px">每日營收</span>
+            </h3>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${allPill}${platformPills}</div>
           <div style="text-align:center;padding:60px 20px;color:var(--text-muted);font-size:14px">
-            本月還沒有資料 — 等行銷團隊進系統填入昨日數字後，這裡會顯示曲線
+            ${monthLabel}還沒有資料 ${isCurrent ? '— 等行銷團隊進系統填入昨日數字後，這裡會顯示曲線' : ''}
           </div>
         </div>
       `;
@@ -4475,12 +4487,18 @@ const App = {
     const daysWithData = dates.filter(d =>
       series.some(s => s.values[dates.indexOf(d)] > 0)
     ).length;
-    const totalLabel = isMulti ? '本月全賣場累計' : `本月「${lineLabel}」累計`;
+    const totalLabel = isMulti ? `${monthLabel}全賣場累計` : `${monthLabel}「${lineLabel}」累計`;
 
     return `
       <div class="chart-card" style="margin:0;padding:12px 14px;width:100%;display:flex;flex-direction:column">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px;flex-shrink:0">
-          <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:4px">${yMonth} 年 ${mMonth} 月　${lineLabelHtml} 每日營收</h3>
+          <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:6px">
+            <button id="chart-month-prev" title="看上個月" style="border:1px solid var(--border);background:white;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted)">‹</button>
+            <span style="min-width:90px;text-align:center">${yMonth} 年 ${mMonth} 月</span>
+            <button id="chart-month-next" title="看下個月" ${isCurrent ? 'disabled' : ''} style="border:1px solid var(--border);background:${isCurrent ? '#f9fafb' : 'white'};border-radius:6px;width:24px;height:24px;cursor:${isCurrent ? 'not-allowed' : 'pointer'};font-size:12px;display:inline-flex;align-items:center;justify-content:center;color:${isCurrent ? '#cbd5e1' : 'var(--text-muted)'}">›</button>
+            ${!isCurrent ? '<button id="chart-month-reset" title="回到本月" style="border:1px solid var(--border);background:white;border-radius:6px;padding:0 8px;height:24px;cursor:pointer;font-size:11px;color:var(--text-muted)">回本月</button>' : ''}
+            <span style="margin-left:4px">${lineLabelHtml} 每日營收</span>
+          </h3>
           <span style="font-size:11px;color:var(--text-muted)">滑鼠移上去看當日</span>
         </div>
         <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-shrink:0">
@@ -4667,6 +4685,22 @@ const App = {
         this.filter.chartPlatform = (this.filter.chartPlatform === next) ? null : next;
         this.render();
       });
+    });
+    // 折線圖月份切換：‹ 上一月、› 下一月、回本月
+    const prevBtn = document.getElementById('chart-month-prev');
+    if (prevBtn) prevBtn.addEventListener('click', () => {
+      this.filter.chartMonthOffset = (this.filter.chartMonthOffset || 0) - 1;
+      this.render();
+    });
+    const nextBtn = document.getElementById('chart-month-next');
+    if (nextBtn) nextBtn.addEventListener('click', () => {
+      const cur = this.filter.chartMonthOffset || 0;
+      if (cur < 0) { this.filter.chartMonthOffset = cur + 1; this.render(); }
+    });
+    const resetBtn = document.getElementById('chart-month-reset');
+    if (resetBtn) resetBtn.addEventListener('click', () => {
+      this.filter.chartMonthOffset = 0;
+      this.render();
     });
     // 總覽卡日期切換：昨日 / 前日 / 本月 / 上月
     document.querySelectorAll('#summary-pills [data-summary-range]').forEach(btn => {
