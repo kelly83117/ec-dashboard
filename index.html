@@ -8302,7 +8302,7 @@ function generate(shop){
       const days=s.days;
       const built=buildShop(shop,days);
       lsSave(shop,s.curMonth,s.curHalf,built,period,days);
-      document.getElementById('dot-'+shop).classList.add('on');
+      const dotEl=document.getElementById('dot-'+shop);if(dotEl)dotEl.classList.add('on');
       loadIntoUI(shop,built,period,days);
       if(curShop==='總表')renderSummary();
     }catch(err){alert('['+shop+'] 產生失敗：'+err.message);}
