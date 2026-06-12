@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-7">
+<meta name="app-version" content="2026-06-11-8">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4324,18 +4324,25 @@ const App = {
   /* 每日營收曲線（近 N 天） */
   dailyLineChartHtml(platforms /* days param ignored now */) {
     const now = new Date();
-    // 月份位移：0 = 本月、-1 = 上月、-2 = 上上月...（不允許未來月份）
-    const monthOffset = Math.min(0, this.filter.chartMonthOffset || 0);
-    const target = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
-    const yMonth = target.getFullYear();
-    const mMonth = target.getMonth() + 1;
+    const curY = now.getFullYear();
+    const curM = now.getMonth() + 1;
+    // 年/月分開記：預設本月；不允許未來
+    let yMonth = this.filter.chartYear || curY;
+    let mMonth = this.filter.chartMonth || curM;
+    if (yMonth > curY || (yMonth === curY && mMonth > curM)) {
+      yMonth = curY; mMonth = curM;
+    }
     const monthStart = new Date(yMonth, mMonth - 1, 1);
     const lastOfMonth = new Date(yMonth, mMonth, 0);
+    const isCurrent = (yMonth === curY && mMonth === curM);
     // 本月只顯示到昨日；過去月份顯示整月
-    const endDate = (monthOffset === 0) ? addDays(now, -1) : lastOfMonth;
+    const endDate = isCurrent ? addDays(now, -1) : lastOfMonth;
     const endStr = toDateStr(endDate);
-    const isCurrent = monthOffset === 0;
     const monthLabel = isCurrent ? '本月' : `${mMonth}月`;
+    // 給下拉選單用：年份從 2024 到當年；月份永遠 1-12（含禁用判斷由 JS 過濾或 disabled）
+    const yearOpts = [];
+    for (let y = curY; y >= 2024; y--) yearOpts.push(y);
+    const monthOpts = Array.from({length:12}, (_,i)=>i+1);
 
     const dates = [];
     for (let d = new Date(monthStart); toDateStr(d) <= endStr; d = addDays(d, 1)) {
@@ -4418,11 +4425,17 @@ const App = {
       return `
         <div class="chart-card" style="margin-top:16px">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
-            <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:6px">
-              <button id="chart-month-prev" title="看上個月" style="border:1px solid var(--border);background:white;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted)">‹</button>
-              <span style="min-width:90px;text-align:center">${yMonth} 年 ${mMonth} 月</span>
-              <button id="chart-month-next" title="看下個月" ${isCurrent ? 'disabled' : ''} style="border:1px solid var(--border);background:${isCurrent ? '#f9fafb' : 'white'};border-radius:6px;width:24px;height:24px;cursor:${isCurrent ? 'not-allowed' : 'pointer'};font-size:12px;display:inline-flex;align-items:center;justify-content:center;color:${isCurrent ? '#cbd5e1' : 'var(--text-muted)'}">›</button>
-              ${!isCurrent ? '<button id="chart-month-reset" title="回到本月" style="border:1px solid var(--border);background:white;border-radius:6px;padding:0 8px;height:24px;cursor:pointer;font-size:11px;color:var(--text-muted)">回本月</button>' : ''}
+            <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <select id="chart-year-sel" style="border:1px solid var(--border);background:white;border-radius:6px;height:26px;padding:0 6px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text)">
+                ${yearOpts.map(y => `<option value="${y}" ${y===yMonth?'selected':''}>${y} 年</option>`).join('')}
+              </select>
+              <select id="chart-month-sel" style="border:1px solid var(--border);background:white;border-radius:6px;height:26px;padding:0 6px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text)">
+                ${monthOpts.map(m => {
+                  const isFuture = (yMonth===curY && m>curM);
+                  return `<option value="${m}" ${m===mMonth?'selected':''} ${isFuture?'disabled':''}>${m} 月</option>`;
+                }).join('')}
+              </select>
+              ${!isCurrent ? '<button id="chart-month-reset" title="回到本月" style="border:1px solid var(--border);background:white;border-radius:6px;padding:0 10px;height:26px;cursor:pointer;font-size:11px;color:var(--text-muted)">回本月</button>' : ''}
               <span style="margin-left:4px">每日營收</span>
             </h3>
           </div>
@@ -4492,11 +4505,17 @@ const App = {
     return `
       <div class="chart-card" style="margin:0;padding:12px 14px;width:100%;display:flex;flex-direction:column">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px;flex-shrink:0">
-          <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:6px">
-            <button id="chart-month-prev" title="看上個月" style="border:1px solid var(--border);background:white;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted)">‹</button>
-            <span style="min-width:90px;text-align:center">${yMonth} 年 ${mMonth} 月</span>
-            <button id="chart-month-next" title="看下個月" ${isCurrent ? 'disabled' : ''} style="border:1px solid var(--border);background:${isCurrent ? '#f9fafb' : 'white'};border-radius:6px;width:24px;height:24px;cursor:${isCurrent ? 'not-allowed' : 'pointer'};font-size:12px;display:inline-flex;align-items:center;justify-content:center;color:${isCurrent ? '#cbd5e1' : 'var(--text-muted)'}">›</button>
-            ${!isCurrent ? '<button id="chart-month-reset" title="回到本月" style="border:1px solid var(--border);background:white;border-radius:6px;padding:0 8px;height:24px;cursor:pointer;font-size:11px;color:var(--text-muted)">回本月</button>' : ''}
+          <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <select id="chart-year-sel" style="border:1px solid var(--border);background:white;border-radius:6px;height:26px;padding:0 6px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text)">
+              ${yearOpts.map(y => `<option value="${y}" ${y===yMonth?'selected':''}>${y} 年</option>`).join('')}
+            </select>
+            <select id="chart-month-sel" style="border:1px solid var(--border);background:white;border-radius:6px;height:26px;padding:0 6px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text)">
+              ${monthOpts.map(m => {
+                const isFuture = (yMonth===curY && m>curM);
+                return `<option value="${m}" ${m===mMonth?'selected':''} ${isFuture?'disabled':''}>${m} 月</option>`;
+              }).join('')}
+            </select>
+            ${!isCurrent ? '<button id="chart-month-reset" title="回到本月" style="border:1px solid var(--border);background:white;border-radius:6px;padding:0 10px;height:26px;cursor:pointer;font-size:11px;color:var(--text-muted)">回本月</button>' : ''}
             <span style="margin-left:4px">${lineLabelHtml} 每日營收</span>
           </h3>
           <span style="font-size:11px;color:var(--text-muted)">滑鼠移上去看當日</span>
@@ -4686,20 +4705,21 @@ const App = {
         this.render();
       });
     });
-    // 折線圖月份切換：‹ 上一月、› 下一月、回本月
-    const prevBtn = document.getElementById('chart-month-prev');
-    if (prevBtn) prevBtn.addEventListener('click', () => {
-      this.filter.chartMonthOffset = (this.filter.chartMonthOffset || 0) - 1;
+    // 折線圖年/月下拉：分開選
+    const yearSel = document.getElementById('chart-year-sel');
+    if (yearSel) yearSel.addEventListener('change', () => {
+      this.filter.chartYear = +yearSel.value;
       this.render();
     });
-    const nextBtn = document.getElementById('chart-month-next');
-    if (nextBtn) nextBtn.addEventListener('click', () => {
-      const cur = this.filter.chartMonthOffset || 0;
-      if (cur < 0) { this.filter.chartMonthOffset = cur + 1; this.render(); }
+    const monthSel = document.getElementById('chart-month-sel');
+    if (monthSel) monthSel.addEventListener('change', () => {
+      this.filter.chartMonth = +monthSel.value;
+      this.render();
     });
     const resetBtn = document.getElementById('chart-month-reset');
     if (resetBtn) resetBtn.addEventListener('click', () => {
-      this.filter.chartMonthOffset = 0;
+      this.filter.chartYear = null;
+      this.filter.chartMonth = null;
       this.render();
     });
     // 總覽卡日期切換：昨日 / 前日 / 本月 / 上月
