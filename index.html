@@ -7499,7 +7499,8 @@ if (window.__cloudStore) {
         window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
         // 淨利表資料變動 → 觸發 re-render 讓畫面同步（只有賣場資料變動才觸發，避免總表編輯閃爍）
         const _hasSummaryOnly = changedShops.size === 0;
-        const _justSaved = window._summaryJustSaved && (Date.now() - window._summaryJustSaved < 5000);
+        const _justSaved = (window._summaryJustSaved && (Date.now() - window._summaryJustSaved < 5000))
+                        || (window._shopJustSaved   && (Date.now() - window._shopJustSaved   < 5000));
         if (!_hasSummaryOnly && !_justSaved && window.App && App.currentUser && typeof App.render === 'function') {
           try { App.render(); } catch {}
         }
@@ -9125,6 +9126,7 @@ function getEdits(shop){
   try{return JSON.parse(localStorage.getItem(k)||'{}');}catch{return{};}
 }
 function saveEdits(shop,edits){
+  window._shopJustSaved=Date.now();
   const k='ec_edits|'+shop;
   try{localStorage.setItem(k,JSON.stringify(edits));}catch{}
   try{if(window.__cloudProfit)window.__cloudProfit.setField(k,edits);}catch{}
