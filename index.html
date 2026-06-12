@@ -9025,9 +9025,45 @@ function commitEdit(shop,code,col,val,tdId){
   const numVal=parseFloat(val);
   if(!isNaN(numVal)){edits[code][col]=numVal;}else{delete edits[code][col];}
   saveEdits(shop,edits);
-  // 重算這行的衍生欄位
   recalcRow(shop,code,edits[code]||{});
-  applyFilters(shop);
+  // adsFee 只更新有變動的 cell，避免整張表重渲染造成閃爍
+  if(col==='adsFee'){patchRow(shop,code,edits[code]||{});}
+  else{applyFilters(shop);}
+}
+
+function patchRow(shop,code,ov){
+  const r=state[shop]._built.find(x=>x.code===code);if(!r)return;
+  const edited=ov.adsFee!==undefined;
+  // adsFee cell
+  const adsEl=document.getElementById(`td-${shop}-${code}-adsFee`);
+  if(adsEl){
+    adsEl.querySelector('.cell-val').textContent='$'+fmtN(r.adsFee);
+    adsEl.className=`td-num td-amber ${edited?'cell-edited':''} `.trim();
+    adsEl.style.cursor='pointer';
+  }
+  // pureProfit
+  const pureEl=document.getElementById(`td-${shop}-${code}-pureProfit`);
+  if(pureEl){pureEl.textContent='$'+fmtN(r.pureProfit);pureEl.className='td-num '+(r.pureProfit>=0?'td-pos':'td-neg');}
+  // pureRate
+  const rateEl=document.getElementById(`td-${shop}-${code}-pureRate`);
+  if(rateEl)rateEl.innerHTML=pill(r.pureRate*100);
+  // adsPct
+  const pctEl=document.getElementById(`td-${shop}-${code}-adsPct`);
+  if(pctEl)pctEl.textContent=(r.adsPct*100).toFixed(2)+'%';
+  // targetROI
+  const roiEl=document.getElementById(`td-${shop}-${code}-targetROI`);
+  if(roiEl)roiEl.textContent=r.targetROI!==null?r.targetROI.toFixed(2):'—';
+  // roiDiff
+  const diffEl=document.getElementById(`td-${shop}-${code}-roiDiff`);
+  if(diffEl)diffEl.innerHTML=r.roiDiff===null?'—':`<span style="color:${r.roiDiff>=0?'#10b981':'#ef4444'};font-weight:600">${r.roiDiff.toFixed(2)}</span>`;
+  // dayBudget
+  const budEl=document.getElementById(`td-${shop}-${code}-dayBudget`);
+  if(budEl)budEl.textContent=r.dayBudget>0?'$'+fmtN(r.dayBudget):'—';
+  // analysis
+  const anaEl=document.getElementById(`td-${shop}-${code}-analysis`);
+  if(anaEl){const a=r.analysis||{};anaEl.innerHTML=a.label?`<span class="tag ${a.cls}">${a.label}</span>`:'—';}
+  // KPI 小計列
+  syncHeaderKpis(shop);
 }
 
 function recalcRow(shop,code,ov){
@@ -9246,17 +9282,17 @@ function renderTable(shop,list){
         ${vc('adsFee')?editTd('adsFee','$'+fmtN(r.adsFee),'td-amber'):''}
         ${vc('rev')?`<td class="td-num">$${fmtN(r.rev)}${shop==='好麻吉'?`<div class="sub-rev">${r.prevRev!==null?'上半月 $'+fmtN(r.prevRev):'—'}</div>`:''}</td>`:''}
         ${vc('gross')?`<td class="td-num">$${fmtN(r.gross)}</td>`:''}
-        ${vc('pureProfit')?`<td class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`:''}
-        ${vc('pureRate')?`<td>${pill(r.pureRate*100)}</td>`:''}
-        ${vc('adsPct')?`<td class="td-num">${(r.adsPct*100).toFixed(2)}%</td>`:''}
+        ${vc('pureProfit')?`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`:''}
+        ${vc('pureRate')?`<td id="td-${shop}-${r.code}-pureRate">${pill(r.pureRate*100)}</td>`:''}
+        ${vc('adsPct')?`<td id="td-${shop}-${r.code}-adsPct" class="td-num">${(r.adsPct*100).toFixed(2)}%</td>`:''}
         ${vc('stock')?`<td class="td-num">${r.stock.toLocaleString()}</td>`:''}
-        ${vc('targetROI')?`<td class="td-num">${r.targetROI!==null?r.targetROI.toFixed(2):'—'}</td>`:''}
+        ${vc('targetROI')?`<td id="td-${shop}-${r.code}-targetROI" class="td-num">${r.targetROI!==null?r.targetROI.toFixed(2):'—'}</td>`:''}
         ${vc('directROI')?`<td class="td-num">${r.directROI>0?r.directROI.toFixed(2):'—'}</td>`:''}
         ${vc('roi')?`<td class="td-num">${r.roi>0?r.roi.toFixed(2):'—'}</td>`:''}
-        ${vc('roiDiff')?`<td class="td-num">${roiDiffStr}</td>`:''}
+        ${vc('roiDiff')?`<td id="td-${shop}-${r.code}-roiDiff" class="td-num">${roiDiffStr}</td>`:''}
         ${vc('clicks')?`<td class="td-num">${r.clicks>0?r.clicks.toLocaleString():'—'}</td>`:''}
-        ${vc('dayBudget')?`<td class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>`:''}
-        ${vc('analysisLabel')?`<td class="tl">${anaHtml}</td>`:''}
+        ${vc('dayBudget')?`<td id="td-${shop}-${r.code}-dayBudget" class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>`:''}
+        ${vc('analysisLabel')?`<td id="td-${shop}-${r.code}-analysis" class="tl">${anaHtml}</td>`:''}
         ${vc('note')?buildNoteCell(shop,r.code,noteId,notes[r.code]):''}
         ${shop==='好麻吉'?(()=>{
           const gnoteId=`gnote-${shop}-${r.code}`;
