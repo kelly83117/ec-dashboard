@@ -7461,9 +7461,10 @@ tbody tr:hover td{background:#fafbff;}
 .tag-filter-bar{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:400;background:#fff;border:1px solid #e4e6ef;border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.14);padding:18px 20px;min-width:460px;max-width:96vw;}
 .tag-filter-bar.open{display:block;}
 .tf-all-wrap{display:flex;align-items:center;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #f0f0f5;}
-.tf-rows{display:flex;flex-direction:column;gap:12px;}
-.tfrow{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;}
-.tfrow-lbl{font-size:12px;color:#9ca3af;font-weight:700;flex-shrink:0;min-width:60px;letter-spacing:.04em;padding-top:5px;}
+.tf-rows{display:flex;flex-direction:column;gap:16px;}
+.tfrow{display:grid;grid-template-columns:80px 1fr;gap:0 14px;align-items:start;}
+.tfrow-lbl{font-size:14px;color:#374151;font-weight:700;padding-top:6px;white-space:nowrap;}
+.tfrow-pills{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
 .tfpill{display:inline-flex;align-items:center;gap:5px;padding:5px 14px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:14px;font-weight:600;color:#374151;transition:all .15s;user-select:none;flex-shrink:0;}
 .tfpill:hover{border-color:#9ca3af;background:#e9eaec;}
 .tfpill.active{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
@@ -8671,7 +8672,10 @@ function updateTagFilterBar(shop){
     const lbl=ct.label.replace(/'/g,"\\'");
     return`<span class="tfpill${active}" onclick="setTagFilter('${shop}','${lbl}')">${ct.label} <span class="tfpill-cnt">${counts[ct.label]}</span></span>`;
   }).join('');
-  const row1=`<div class="tfrow"><span class="tfrow-lbl">分析標籤</span><button class="ana-gear-btn" onclick="openAnaSettings('${shop}')" title="設定分析規則">⚙</button>${fixedPills}${addDrop}${subDrop}${customPills}</div>`;
+  const row1=`<div class="tfrow">
+    <div><span class="tfrow-lbl">分析標籤</span><button class="ana-gear-btn" onclick="openAnaSettings('${shop}')" title="設定分析規則">⚙</button></div>
+    <div class="tfrow-pills">${fixedPills}${addDrop}${subDrop}${customPills}</div>
+  </div>`;
   let row2='';
   if(shop==='好麻吉'){
     const gCustomPills=getCustomGrowthRules().filter(ct=>counts[ct.label]).map(ct=>{
@@ -8679,7 +8683,10 @@ function updateTagFilterBar(shop){
       return`<span class="tfpill${active}" onclick="setTagFilter('${shop}','${lbl}')">${ct.label} <span class="tfpill-cnt">${counts[ct.label]}</span></span>`;
     }).join('');
     const gp=GROWTH_TAGS.filter(t=>counts[t.label]).map(mkPill).join('')+gCustomPills;
-    if(gp)row2=`<div class="tfrow"><span class="tfrow-lbl">成長分析</span><button class="ana-gear-btn" onclick="openGrowthSettings('${shop}')" title="設定成長分析規則">⚙</button>${gp}</div>`;
+    if(gp)row2=`<div class="tfrow">
+      <div><span class="tfrow-lbl">成長分析</span><button class="ana-gear-btn" onclick="openGrowthSettings('${shop}')" title="設定成長分析規則">⚙</button></div>
+      <div class="tfrow-pills">${gp}</div>
+    </div>`;
   }
   bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row1}${row2}</div>`;
 }
