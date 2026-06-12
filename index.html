@@ -7465,7 +7465,7 @@ tbody tr:hover td{background:#fafbff;}
 .tfrow{display:grid;grid-template-columns:80px 1fr;gap:0 14px;align-items:start;}
 .tfrow-lbl{font-size:14px;color:#374151;font-weight:700;padding-top:6px;white-space:nowrap;}
 .tfrow-pills{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
-.tfpill{display:inline-flex;align-items:center;gap:5px;padding:5px 14px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:14px;font-weight:600;color:#374151;transition:all .15s;user-select:none;flex-shrink:0;}
+.tfpill{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 14px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:14px;font-weight:600;color:#374151;transition:all .15s;user-select:none;width:100%;box-sizing:border-box;}
 .tfpill:hover{border-color:#9ca3af;background:#e9eaec;}
 .tfpill.active{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
 .tfpill-all{background:#1a1a2e;color:#fff;border-color:#1a1a2e;font-size:15px;padding:6px 18px;}
@@ -7621,12 +7621,6 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:6px 10px">
-        <span style="font-size:12px;color:#6b7280;font-weight:500">平台手續費</span>
-        <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:60px">
-        <span style="font-size:12px;color:#6b7280">%</span>
-        <span style="font-size:11px;color:#9ca3af">（修改後重新產生即套用）</span>
-      </div>
       <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
       <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
     </div>
@@ -7674,7 +7668,14 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <button class="stab" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
       </div>
     </div>
-    <div id="profit-period-wrap" style="display:none;align-items:center;gap:8px;flex-wrap:wrap"></div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <div id="profit-period-wrap" style="display:none;align-items:center;gap:8px;flex-wrap:wrap"></div>
+      <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:5px 10px">
+        <span style="font-size:12px;color:#6b7280;font-weight:500">平台手續費</span>
+        <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:54px">
+        <span style="font-size:12px;color:#6b7280">%</span>
+      </div>
+    </div>
   </div>
   <div id="content-總表" class="shop-content active" style="padding:16px 20px">
     <div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">請先到各賣場分頁產生報表</div></div>
