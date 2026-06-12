@@ -7422,7 +7422,7 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .period-tag{font-size:12px;color:#6b7280;background:#f3f4f6;padding:3px 10px;border-radius:6px;font-family:'DM Mono',monospace;}
 
 /* Table */
-.tscroll{overflow-x:auto;max-height:700px;overflow-y:auto;}
+.tscroll{overflow-x:auto;max-height:820px;overflow-y:auto;}
 table{width:100%;border-collapse:collapse;font-size:13px;}
 thead tr{background:#f8f9fc;position:sticky;top:0;z-index:3;}
 th{padding:9px 18px;text-align:right;font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.04em;text-transform:uppercase;border-bottom:1px solid #e4e6ef;white-space:nowrap;cursor:pointer;user-select:none;}
@@ -7433,9 +7433,9 @@ td{padding:11px 18px;border-bottom:1px solid #f0f2f7;text-align:right;color:#374
 td.tl{text-align:left;}
 .tscroll td.tl{text-align:left;}
 tbody tr:hover td{background:#fafbff;}
-.td-code{font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#374151;min-width:60px;padding-right:6px;white-space:nowrap;}
+.td-code{font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#374151;min-width:44px;padding-right:4px;white-space:nowrap;}
 .td-id{font-family:'DM Mono',monospace;font-size:12px;color:#9ca3af;min-width:140px;padding-right:16px;}
-.td-name{font-weight:700;color:#1a1a2e;white-space:nowrap;min-width:220px;max-width:320px;overflow:hidden;text-overflow:ellipsis;font-size:15px;}
+.td-name{font-weight:700;color:#1a1a2e;white-space:nowrap;min-width:180px;max-width:280px;overflow:hidden;text-overflow:ellipsis;font-size:15px;}
 .td-num{font-size:16px;font-weight:700;min-width:90px;font-family:'Noto Sans TC',sans-serif !important;}
 .sub-id{font-size:11px;color:#9ca3af;font-family:'DM Mono',monospace;margin-top:1px;line-height:1.2;}
 .td-pos{color:#10b981;font-weight:700;}.td-neg{color:#ef4444;font-weight:700;}.td-amber{color:#f59e0b;}
@@ -7615,17 +7615,17 @@ tbody tr:hover td{background:#fafbff;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;padding:12px 18px;border-bottom:1px solid #e5e7eb">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:8px 14px;border-bottom:1px solid #e5e7eb">
     <div style="display:flex;flex-direction:column;gap:5px">
       <button class="stab active" style="background:#ee4d2d;color:#fff;border-color:#ee4d2d;font-weight:700;width:100%;justify-content:center;font-size:15px" onclick="setShop('總表',this)">🛒 蝦皮</button>
       <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
-        <button class="stab" style="font-size:14px" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉</button>
-        <button class="stab" style="font-size:14px" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
-        <button class="stab" style="font-size:14px" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
-        <button class="stab" style="font-size:14px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
+        <button class="stab" style="font-size:15px" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉</button>
+        <button class="stab" style="font-size:15px" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
+        <button class="stab" style="font-size:15px" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
+        <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
       </div>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+    <div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px">
       <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
         <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
       </div>
@@ -8137,8 +8137,7 @@ function buildShop(shop,days){
     }
   });
 
-  // 只有好麻吉才抓上期營收
-  const prevRevMap = shop==='好麻吉' ? getPrevRevMap(shop, s.curMonth, s.curHalf) : {};
+  const prevRevMap = getPrevRevMap(shop, s.curMonth, s.curHalf);
 
   const built=Object.values(agg).map(p=>{
     const adsFee=adsByCode[p.code]||0;
