@@ -7819,10 +7819,7 @@ function lsKey(shop,month,half){return`ec|${shop}|${month}|${half}`;}
 function lsSave(shop,month,half,built,period,days){
   const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
   try{localStorage.setItem(lsKey(shop,month,half),JSON.stringify(payload));}catch(e){alert('儲存失敗');}
-  // edit 期間延遲推雲端，避免 profitDataReady 觸發全表重渲染造成閃爍
-  const pushCloud=()=>{try{if(window.__cloudProfit)window.__cloudProfit.setField(lsKey(shop,month,half),payload);}catch{}};
-  const delay=(_editedAt[shop]&&Date.now()-_editedAt[shop]<2000)?2500:0;
-  if(delay)setTimeout(pushCloud,delay);else pushCloud();
+  try{if(window.__cloudProfit)window.__cloudProfit.setField(lsKey(shop,month,half),payload);}catch{}
 }
 function lsLoad(shop,month,half){
   const k=lsKey(shop,month,half);
@@ -7969,12 +7966,14 @@ function getDays(month,half){
 function onMonthChange(shop){
   const sel=document.getElementById('month-sel-'+shop);
   if(!sel)return;
+  delete _editedAt[shop]; // 用戶主動切換月份，清除 edit 保護
   state[shop].curMonth=sel.value;
   updateDaysBadge(shop);
   updateHalfBtnLabels(shop);
   tryLoadSaved(shop);
 }
 function onHalfChange(shop,half,btn){
+  delete _editedAt[shop]; // 用戶主動切換區間，清除 edit 保護
   state[shop].curHalf=half;
   updateHalfBtnLabels(shop);
   updateDaysBadge(shop);
@@ -8030,9 +8029,8 @@ function loadIntoUI(shop,built,period,days){
   state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];
   document.getElementById('period-tag-'+shop).textContent=period;
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=false;}
-  // edit 後 2s 內：若 tbl 已有 table 元素（patchRow 已填），跳過避免閃爍；
-  // 若 tbl 是空的（DOM 被父層清掉重注入），仍需 applyFilters 補資料
-  if(_editedAt[shop]&&Date.now()-_editedAt[shop]<2000){
+  // patchRow 已更新過時：若 tbl 有 table 就跳過，避免閃爍；若 tbl 空（DOM 被清）仍需補渲染
+  if(_editedAt[shop]){
     const tblEl=document.getElementById('tbl-'+shop);
     if(tblEl&&tblEl.querySelector('table'))return;
   }
@@ -8952,9 +8950,7 @@ function getEdits(shop){
 function saveEdits(shop,edits){
   const k='ec_edits|'+shop;
   try{localStorage.setItem(k,JSON.stringify(edits));}catch{}
-  const pushCloud=()=>{try{if(window.__cloudProfit)window.__cloudProfit.setField(k,edits);}catch{}};
-  const delay=(_editedAt[shop]&&Date.now()-_editedAt[shop]<2000)?2500:0;
-  if(delay)setTimeout(pushCloud,delay);else pushCloud();
+  try{if(window.__cloudProfit)window.__cloudProfit.setField(k,edits);}catch{}
 }
 function getNotes(shop){
   const k='ec_notes|'+shop;
