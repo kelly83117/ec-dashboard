@@ -7835,7 +7835,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       </div>
     </div>
   </div>
-  <div class="ana-overlay" id="delete-file-overlay" onclick="if(event.target===this)closeDeleteFileModal()">
+  <div class="ana-overlay" id="delete-file-overlay" style="z-index:3000" onclick="if(event.target===this)closeDeleteFileModal()">
     <div class="ana-modal" style="width:360px;max-width:96vw">
       <div class="ana-modal-hdr"><span>刪除確認</span><button class="ana-close-btn" onclick="closeDeleteFileModal()">✕</button></div>
       <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:16px">
