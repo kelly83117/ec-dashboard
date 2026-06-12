@@ -9640,47 +9640,30 @@ function renderSummary(){
       <td style="${bw}text-align:right;padding:5px 8px;color:#b45309">${(d.rev&&d.ads)?pct(d.ads,d.rev):'—'}</td>`;
   }).join('');
 
-  const sumShops=(weekRows)=>{
-    const t={};SHOPS.forEach(s=>{t[s.id]={rev:0,ads:0,gross:0};});
-    weekRows.forEach(r=>SHOPS.forEach(s=>{const d=r.shops?.[s.id]||{};t[s.id].rev+=(d.rev||0);t[s.id].ads+=(d.ads||0);t[s.id].gross+=(d.gross||0);}));
-    return t;
+  // Check if a row covers an entire month (e.g. 5/1–5/31 → show as "5月份" bold row)
+  const isFullMonth=row=>{
+    const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
+    if(s.getFullYear()!==e.getFullYear()||s.getMonth()!==e.getMonth())return false;
+    const lastDay=new Date(s.getFullYear(),s.getMonth()+1,0).getDate();
+    return s.getDate()===1&&e.getDate()===lastDay;
   };
 
-  // Group rows by month (end date's month)
-  const moMap={};const moOrder=[];
-  rows.forEach(row=>{
-    const e=new Date(row.end+'T12:00:00');
-    const mo=`${e.getFullYear()}-${String(e.getMonth()+1).padStart(2,'0')}`;
-    if(!moMap[mo]){moMap[mo]=[];moOrder.push(mo);}
-    moMap[mo].push(row);
-  });
-
   let tbody='';
-  moOrder.forEach(mo=>{
-    const moRows=moMap[mo];
-    const m=parseInt(mo.split('-')[1]);
-    const first=moRows.filter(r=>new Date(r.end+'T12:00:00').getDate()<=15);
-    const second=moRows.filter(r=>new Date(r.end+'T12:00:00').getDate()>15);
-
-    const rowTr=row=>{
-      const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
-      const sm=s.getMonth()+1,sd=s.getDate(),em=e.getMonth()+1,ed=e.getDate();
-      const label=sm===em?`${sm}/${sd} – ${sm}/${ed}`:`${sm}/${sd} – ${em}/${ed}`;
-      return`<tr style="border-top:1px solid #f0f0f0">
+  rows.forEach(row=>{
+    const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
+    const sm=s.getMonth()+1,sd=s.getDate(),em=e.getMonth()+1,ed=e.getDate();
+    const full=isFullMonth(row);
+    const label=full?`${sm}月份`:(sm===em?`${sm}/${sd} – ${sm}/${ed}`:`${sm}/${sd} – ${em}/${ed}`);
+    if(full){
+      tbody+=`<tr style="background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
+        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap">${label}
+          <button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="margin-left:4px;background:none;border:none;color:#9ca3af;cursor:pointer;font-size:10px;padding:0;vertical-align:middle" title="刪除">✕</button>
+        </td>${dataCells(row.shops,true,row.id)}</tr>`;
+    } else {
+      tbody+=`<tr style="border-top:1px solid #f0f0f0">
         <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums">${label}
           <button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="margin-left:4px;background:none;border:none;color:#d1d5db;cursor:pointer;font-size:10px;padding:0;vertical-align:middle" title="刪除">✕</button>
-        </td>${dataCells(row.shops,true,row.id)}</tr>`;
-    };
-
-    first.forEach(r=>{tbody+=rowTr(r);});
-    if(first.length&&second.length){
-      const t=sumShops(first);
-      tbody+=`<tr style="background:#f0fdf4;border-top:2px solid #86efac"><td style="padding:6px 12px;font-size:13px;font-weight:700;color:#15803d;white-space:nowrap">${m}月中</td>${dataCells(t,false,'')}</tr>`;
-    }
-    second.forEach(r=>{tbody+=rowTr(r);});
-    if(moRows.length){
-      const t=sumShops(moRows);
-      tbody+=`<tr style="background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe"><td style="padding:7px 12px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap">${m}月份</td>${dataCells(t,false,'')}</tr>`;
+        </td>${dataCells(row.shops,false,row.id)}</tr>`;
     }
   });
 
