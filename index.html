@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-17">
+<meta name="app-version" content="2026-06-11-18">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -9641,5 +9641,22 @@ document.addEventListener('click', function(e) {
 });
 </script>
 <!-- ===== 淨利表 END ===== -->
+
+<!-- 全站強制黑體（覆蓋所有區塊的 font-family 設定，包含 profit / Noto Sans / DM Mono） -->
+<style>
+  *, *::before, *::after {
+    font-family:
+      "Microsoft JhengHei", "微軟正黑體",
+      "PingFang TC", "蘋方-繁",
+      "Heiti TC", "黑體-繁",
+      "Noto Sans TC", "思源黑體",
+      -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif !important;
+  }
+  /* 表格數字仍要對齊，所以保留 tabular-nums，但用黑體 */
+  [style*="tabular-nums"], .nums, td, th {
+    font-variant-numeric: tabular-nums !important;
+  }
+</style>
 </body>
 </html>
