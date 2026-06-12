@@ -9604,7 +9604,25 @@ function editSummaryCell(rowId,shop,field,tdEl){
     if(done)return;done=true;
     const v=parseFloat(inp.value);
     if(!isNaN(v)&&v>0)row.shops[shop][field]=v;else delete row.shops[shop][field];
-    saveSummaryRows(rows);renderSummary();
+    saveSummaryRows(rows);
+    // patch cells without re-rendering
+    const d=row.shops[shop]||{};
+    const rate=getPlatformRate();
+    const pure=(d.gross||0)-(d.ads||0)-(d.rev||0)*rate;
+    const fmt=n=>fmtN(Math.round(n||0));
+    const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':'—';
+    const dash='<span style="color:#d1d5db">—</span>';
+    const sid=`${rowId}__${shop}`;
+    const patch=(sfx,html)=>{const el=document.getElementById('sc-'+sid+'-'+sfx);if(el)el.innerHTML=html;};
+    patch('rev',d.rev?fmt(d.rev):dash);
+    patch('ads',d.ads?`<span style="color:#b45309">${fmt(d.ads)}</span>`:dash);
+    patch('gross',d.gross?fmt(d.gross):dash);
+    const hasData=d.rev||d.gross||d.ads;
+    patch('pure',hasData?`<span style="color:${pure>=0?'#059669':'#dc2626'}">${fmt(pure)}</span>`:dash);
+    patch('pr',d.rev?pct(pure,d.rev):'—');
+    patch('ar',(d.rev&&d.ads)?pct(d.ads,d.rev):'—');
+    // restore cursor on edited cell
+    tdEl.style.cursor='pointer';
   };
   inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}if(e.key==='Escape'){done=true;tdEl.innerHTML=origContent;}});
   inp.addEventListener('blur',save);
@@ -9642,13 +9660,14 @@ function renderSummary(){
     const bw=editable?'':'font-weight:700;';
     const onclick=(f)=>editable?`onclick="editSummaryCell('${rowId}','${s.id}','${f}',this)" style="${borderL}${bw}text-align:right;padding:5px 8px;cursor:pointer"`:`style="${borderL}${bw}text-align:right;padding:6px 8px"`;
     const dash='<span style="color:#d1d5db">—</span>';
+    const sid=rowId?`${rowId}__${s.id}`:'';
     const hasData=d.rev||d.gross||d.ads;
-    return`<td ${onclick('rev')}>${d.rev?fmt(d.rev):dash}</td>
-      <td style="${bw}text-align:right;padding:5px 8px;color:#b45309;${editable?'cursor:pointer':''}" ${editable?`onclick="editSummaryCell('${rowId}','${s.id}','ads',this)"`:''} >${d.ads?fmt(d.ads):dash}</td>
-      <td style="${bw}text-align:right;padding:5px 8px;${editable?'cursor:pointer':''}" ${editable?`onclick="editSummaryCell('${rowId}','${s.id}','gross',this)"`:''} >${d.gross?fmt(d.gross):dash}</td>
-      <td style="${bw}text-align:right;padding:5px 8px;color:${p>=0?'#059669':'#dc2626'}">${hasData?fmt(p):dash}</td>
-      <td style="${bw}text-align:right;padding:5px 8px">${d.rev?pct(p,d.rev):'—'}</td>
-      <td style="${bw}text-align:right;padding:5px 8px;color:#b45309">${(d.rev&&d.ads)?pct(d.ads,d.rev):'—'}</td>`;
+    return`<td ${onclick('rev')} id="${sid?'sc-'+sid+'-rev':''}">${d.rev?fmt(d.rev):dash}</td>
+      <td style="${bw}text-align:right;padding:5px 8px;color:#b45309;${editable?'cursor:pointer':''}" ${editable?`onclick="editSummaryCell('${rowId}','${s.id}','ads',this)"`:''} id="${sid?'sc-'+sid+'-ads':''}">${d.ads?fmt(d.ads):dash}</td>
+      <td style="${bw}text-align:right;padding:5px 8px;${editable?'cursor:pointer':''}" ${editable?`onclick="editSummaryCell('${rowId}','${s.id}','gross',this)"`:''} id="${sid?'sc-'+sid+'-gross':''}">${d.gross?fmt(d.gross):dash}</td>
+      <td style="${bw}text-align:right;padding:5px 8px;" id="${sid?'sc-'+sid+'-pure':''}">${hasData?`<span style="color:${p>=0?'#059669':'#dc2626'}">${fmt(p)}</span>`:dash}</td>
+      <td style="${bw}text-align:right;padding:5px 8px" id="${sid?'sc-'+sid+'-pr':''}">${d.rev?pct(p,d.rev):'—'}</td>
+      <td style="${bw}text-align:right;padding:5px 8px;color:#b45309" id="${sid?'sc-'+sid+'-ar':''}">${(d.rev&&d.ads)?pct(d.ads,d.rev):'—'}</td>`;
   }).join('');
 
 
