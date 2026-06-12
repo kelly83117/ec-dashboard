@@ -8078,17 +8078,19 @@ function updateDaysBadge(shop){
   if(badge)badge.textContent=d+' 天';
 }
 function resetUploadCards(shop){
-  // 重置莫筆克卡片
-  state[shop].rawMobic=null;
-  document.getElementById('uc-mobic-'+shop).className='ucard';
-  document.getElementById('ui-mobic-'+shop).textContent='📦';
-  document.getElementById('ut-mobic-'+shop).textContent='莫筆克銷售分析';
-  // 重置廣告卡片
-  state[shop].rawAds=null;
-  document.getElementById('uc-ads-'+shop).className='ucard';
-  document.getElementById('ui-ads-'+shop).textContent='📣';
-  document.getElementById('ut-ads-'+shop).textContent='蝦皮廣告報表';
-  // 按鈕變灰
+  // 只重置舊版 per-shop 上傳卡片的 UI，不清除 rawMobic/rawAds
+  const mobic=document.getElementById('uc-mobic-'+shop);
+  if(mobic)mobic.className='ucard';
+  const mi=document.getElementById('ui-mobic-'+shop);
+  if(mi)mi.textContent='📦';
+  const mt=document.getElementById('ut-mobic-'+shop);
+  if(mt)mt.textContent='莫筆克銷售分析';
+  const ads=document.getElementById('uc-ads-'+shop);
+  if(ads)ads.className='ucard';
+  const ai=document.getElementById('ui-ads-'+shop);
+  if(ai)ai.textContent='📣';
+  const at=document.getElementById('ut-ads-'+shop);
+  if(at)at.textContent='蝦皮廣告報表';
   checkReady(shop);
 }
 
