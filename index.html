@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-16">
+<meta name="app-version" content="2026-06-11-17">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2205,9 +2205,15 @@ const App = {
     /* 預設分類門檻（使用者可調） */
     if (!window.INSIGHT_DEFAULT_THRESHOLDS) {
       window.INSIGHT_DEFAULT_THRESHOLDS = {
-        explosion: 100, growth: 30, drop: -20, heavyDrop: -40,
-        weakConv: 0.8, lowEffConv: 2, lowEffClicks: 100,
-        normalConvLow: 2, normalConvHigh: 5,
+        explosion: 50,    // 爆發品：成長比 > 50%
+        growth: 10,       // 成長品：成長比 10% ~ 50%
+        drop: -10,        // 衰退品：成長比 -10% ~ -50%
+        heavyDrop: -50,   // 重跌品：成長比 < -50%
+        ctrMin: 3,        // 轉換條件門檻：點擊率 > 3%
+        weakConvMin: 1,   // 弱轉換：1% ~ 3%
+        weakConvMax: 3,
+        lowConvMin: 3,    // 轉換偏低：3% ~ 6%
+        lowConvMax: 6,
       };
     }
     const INSIGHT_DEFAULT_THRESHOLDS = window.INSIGHT_DEFAULT_THRESHOLDS;
@@ -2353,26 +2359,29 @@ const App = {
 
     // 完整分類（用使用者設定的門檻）
     // metricsOverride 可指定 growthRate，未指定就用 p 本身（用於計算上週類別）
-    const classifyMetrics = (growthRate, convRate, clicks, impressions) => {
+    const classifyMetrics = (growthRate, convRate, clicks, impressions, ctr) => {
       // 成長類（基於 growth rate）— 優先級高
       if (growthRate !== null && growthRate !== undefined) {
         const g = growthRate * 100;
-        if (g >= T.explosion)    return { label: '🟡 爆發品',  color: '#a16207', bg: '#fef9c3' };
+        if (g > T.explosion)     return { label: '🟡 爆發品',  color: '#a16207', bg: '#fef9c3' };
         if (g >= T.growth)       return { label: '🟨 成長品',  color: '#ca8a04', bg: '#fef9c3' };
-        if (g <= T.heavyDrop)    return { label: '🔴 重跌品',  color: '#dc2626', bg: '#fee2e2' };
+        if (g < T.heavyDrop)     return { label: '🔴 重跌品',  color: '#dc2626', bg: '#fee2e2' };
         if (g <= T.drop)         return { label: '🟥 衰退品',  color: '#ea580c', bg: '#fed7aa' };
       }
-      // 轉換類（基於轉換率）
-      if (convRate > 0 && convRate * 100 < T.weakConv) return { label: '🟢 弱轉換', color: '#10b981', bg: '#d1fae5' };
-      if (clicks > T.lowEffClicks && convRate * 100 < T.lowEffConv) return { label: '🟢 低效轉換', color: '#10b981', bg: '#d1fae5' };
-      if (impressions > 0 && convRate === 0) return { label: '🟩 零轉換', color: '#22c55e', bg: '#dcfce7' };
-      if (convRate * 100 >= T.normalConvLow && convRate * 100 <= T.normalConvHigh) return { label: '🟩 一般轉換', color: '#22c55e', bg: '#dcfce7' };
+      // 轉換類（需要點擊率 > T.ctrMin，例：> 3%）
+      const ctrPct = (ctr || 0) * 100;
+      const convPct = (convRate || 0) * 100;
+      if (ctrPct > T.ctrMin) {
+        if (convRate === 0)                                              return { label: '🟩 零轉換',   color: '#22c55e', bg: '#dcfce7' };
+        if (convPct >= T.weakConvMin && convPct < T.weakConvMax)         return { label: '🟢 弱轉換',   color: '#10b981', bg: '#d1fae5' };
+        if (convPct >= T.lowConvMin && convPct <= T.lowConvMax)          return { label: '🟢 轉換偏低', color: '#10b981', bg: '#d1fae5' };
+      }
       return null;
     };
-    const classifyProduct = (p) => classifyMetrics(p.growthRate, p.convRate, p.clicks, p.impressions);
-    // 上週類別只用 growth（沒有歷史的轉換數據），且不知道上週的曝光/點擊就傳 0
+    const classifyProduct = (p) => classifyMetrics(p.growthRate, p.convRate, p.clicks, p.impressions, p.ctr);
+    // 上週類別只用 growth（沒有歷史的轉換數據）
     const classifyPrev = (p) => p.prevGrowthRate !== null
-      ? classifyMetrics(p.prevGrowthRate, 0, 0, 0)
+      ? classifyMetrics(p.prevGrowthRate, 0, 0, 0, 0)
       : null;
 
     // 總計
@@ -2503,9 +2512,8 @@ const App = {
       ]},
       { group: '轉換類', color: '#1d4ed8', items: [
         { key: '弱轉換', emoji: '🟢' },
-        { key: '低效轉換', emoji: '🟢' },
+        { key: '轉換偏低', emoji: '🟢' },
         { key: '零轉換', emoji: '🟩' },
-        { key: '一般轉換', emoji: '🟩' },
       ]},
     ];
 
@@ -2526,7 +2534,7 @@ const App = {
             <button id="insight-col-show-all" type="button" style="width:100%;padding:6px;border:0;background:transparent;font-size:11px;color:var(--primary);cursor:pointer;border-radius:5px;font-weight:600">顯示全部</button>
           </div>
         </details>
-        <button id="insight-settings" class="pill" style="padding:6px 12px;font-size:12px">⚙ 分類設定</button>
+        <button id="insight-settings" class="pill" style="padding:6px 12px;font-size:12px">⚙ 分類門檻設定</button>
       </span>
     `;
     const classFilterHtml = sorted.length > 0 ? `
@@ -3400,54 +3408,60 @@ const App = {
   /* ------------- 分類門檻設定 modal ------------- */
   openInsightSettingsModal() {
     const T = Object.assign({}, window.INSIGHT_DEFAULT_THRESHOLDS, Store.get('ec.insightThresholds', {}) || {});
+    const inp = (id, val, step) => `<input id="${id}" type="number" value="${val}" step="${step}" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums;width:70px">`;
+    const rangeInp = (idLo, valLo, idHi, valHi) => `
+      <div style="display:flex;align-items:center;gap:6px">
+        ${inp(idLo, valLo, 0.5)}
+        <span style="color:var(--text-muted)">~</span>
+        ${inp(idHi, valHi, 0.5)}
+        <span style="font-size:12px;color:var(--text-muted)">%</span>
+      </div>`;
     this.openModal({
       title: '⚙ 分類門檻設定',
-      width: '480px',
+      width: '520px',
       bodyHtml: `
         <p style="margin:0 0 12px;font-size:12px;color:var(--text-muted)">
           系統會依下面門檻自動把商品分類。修改後新門檻立刻生效。
         </p>
-        <div style="display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center;font-size:13px">
-          <label>🟡 爆發品：成長率 ≥</label>
-          <input id="ths-explosion" type="number" value="${T.explosion}" step="5" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums">
+        <div style="font-size:13px">
+          <div style="background:#fee2e2;border-left:3px solid #b91c1c;padding:6px 10px;font-weight:700;color:#b91c1c;border-radius:4px;margin-bottom:6px">下滑類</div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:0 6px 8px">
+            <label>🔴 重跌品：成長比 &lt;</label>
+            <div style="display:flex;align-items:center;gap:6px">${inp('ths-heavyDrop', T.heavyDrop, 5)}<span style="font-size:12px;color:var(--text-muted)">%</span></div>
+            <label>🟥 衰退品：成長比 範圍</label>
+            ${rangeInp('ths-heavyDrop2', T.heavyDrop, 'ths-drop', T.drop)}
+          </div>
 
-          <label>🟨 成長品：成長率 ≥</label>
-          <input id="ths-growth" type="number" value="${T.growth}" step="5" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums">
+          <div style="background:#dcfce7;border-left:3px solid #15803d;padding:6px 10px;font-weight:700;color:#15803d;border-radius:4px;margin-bottom:6px">成長類</div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:0 6px 8px">
+            <label>🟡 爆發品：成長比 &gt;</label>
+            <div style="display:flex;align-items:center;gap:6px">${inp('ths-explosion', T.explosion, 5)}<span style="font-size:12px;color:var(--text-muted)">%</span></div>
+            <label>🟨 成長品：成長比 範圍</label>
+            ${rangeInp('ths-growth', T.growth, 'ths-explosion2', T.explosion)}
+          </div>
 
-          <label>🟥 衰退品：成長率 ≤</label>
-          <input id="ths-drop" type="number" value="${T.drop}" step="5" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums">
-
-          <label>🔴 重跌品：成長率 ≤</label>
-          <input id="ths-heavyDrop" type="number" value="${T.heavyDrop}" step="5" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums">
-
-          <div style="grid-column:1/3;border-top:1px solid var(--border);margin:8px 0 4px"></div>
-
-          <label>🟢 弱轉換：轉換率 <</label>
-          <input id="ths-weakConv" type="number" value="${T.weakConv}" step="0.1" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums">
-
-          <label>🟢 低效轉換：轉換率 <</label>
-          <input id="ths-lowEffConv" type="number" value="${T.lowEffConv}" step="0.1" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums">
-
-          <label>　└ 且點擊 ></label>
-          <input id="ths-lowEffClicks" type="number" value="${T.lowEffClicks}" step="10" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums">
-
-          <label>🟩 一般轉換範圍 <span style="color:var(--text-muted);font-size:11px">（低 ~ 高）</span></label>
-          <div style="display:flex;gap:4px">
-            <input id="ths-normalConvLow" type="number" value="${T.normalConvLow}" step="0.1" style="width:42px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums">
-            <input id="ths-normalConvHigh" type="number" value="${T.normalConvHigh}" step="0.1" style="width:42px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;text-align:right;font-variant-numeric:tabular-nums">
+          <div style="background:#dbeafe;border-left:3px solid #1d4ed8;padding:6px 10px;font-weight:700;color:#1d4ed8;border-radius:4px;margin-bottom:6px">轉換類（皆需 點擊率 &gt; <input id="ths-ctrMin" type="number" value="${T.ctrMin}" step="0.5" style="width:55px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;text-align:right;font-variant-numeric:tabular-nums">%）</div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:0 6px 4px">
+            <label>🟢 弱轉換：轉換率 範圍</label>
+            ${rangeInp('ths-weakConvMin', T.weakConvMin, 'ths-weakConvMax', T.weakConvMax)}
+            <label>🟢 轉換偏低：轉換率 範圍</label>
+            ${rangeInp('ths-lowConvMin', T.lowConvMin, 'ths-lowConvMax', T.lowConvMax)}
+            <label>🟩 零轉換</label>
+            <span style="color:var(--text-muted);font-size:12px">轉換率 = 0%</span>
           </div>
         </div>
         <div style="margin-top:14px;padding:10px;background:var(--bg);border-radius:6px;font-size:11px;color:var(--text-muted);line-height:1.6">
-          📌 成長率：百分比，正數=成長、負數=下滑（要負號）<br>
-          📌 轉換率：百分比（不含 % 符號）<br>
-          📌 想恢復預設？按「恢復預設」
+          📌 成長比 / 轉換率 / 點擊率 都以百分比輸入（不含 % 符號）<br>
+          📌 衰退品的「上界」自動連動重跌品下界；成長品的「上界」自動連動爆發品下界。
         </div>
       `,
       saveLabel: '儲存',
       cancelLabel: '取消',
       onSave: () => {
         const get = (id) => {
-          const v = +document.getElementById(id).value;
+          const el = document.getElementById(id);
+          if (!el) return 0;
+          const v = +el.value;
           return isFinite(v) ? v : 0;
         };
         Store.set('ec.insightThresholds', {
@@ -3455,11 +3469,11 @@ const App = {
           growth: get('ths-growth'),
           drop: get('ths-drop'),
           heavyDrop: get('ths-heavyDrop'),
-          weakConv: get('ths-weakConv'),
-          lowEffConv: get('ths-lowEffConv'),
-          lowEffClicks: get('ths-lowEffClicks'),
-          normalConvLow: get('ths-normalConvLow'),
-          normalConvHigh: get('ths-normalConvHigh'),
+          ctrMin: get('ths-ctrMin'),
+          weakConvMin: get('ths-weakConvMin'),
+          weakConvMax: get('ths-weakConvMax'),
+          lowConvMin: get('ths-lowConvMin'),
+          lowConvMax: get('ths-lowConvMax'),
         });
         showToast('門檻已更新', 'success');
         this.render();
@@ -3693,18 +3707,21 @@ const App = {
     (salesPrevPrev?.products || []).forEach(p => { prevPrevByCode[p.code] = p; });
     const perfByShopeeId = perf?.byShopeeId || {};
 
-    const classify = (g, conv, clicks, imp) => {
+    const classify = (g, conv, clicks, imp, ctr) => {
       if (g !== null && g !== undefined) {
         const gPct = g * 100;
-        if (gPct >= T.explosion) return '🟡 爆發品';
+        if (gPct > T.explosion) return '🟡 爆發品';
         if (gPct >= T.growth) return '🟨 成長品';
-        if (gPct <= T.heavyDrop) return '🔴 重跌品';
+        if (gPct < T.heavyDrop) return '🔴 重跌品';
         if (gPct <= T.drop) return '🟥 衰退品';
       }
-      if (conv > 0 && conv * 100 < T.weakConv) return '🟢 弱轉換';
-      if (clicks > T.lowEffClicks && conv * 100 < T.lowEffConv) return '🟢 低效轉換';
-      if (imp > 0 && conv === 0) return '🟩 零轉換';
-      if (conv * 100 >= T.normalConvLow && conv * 100 <= T.normalConvHigh) return '🟩 一般轉換';
+      const ctrPct = (ctr || 0) * 100;
+      const convPct = (conv || 0) * 100;
+      if (ctrPct > T.ctrMin) {
+        if (conv === 0) return '🟩 零轉換';
+        if (convPct >= T.weakConvMin && convPct < T.weakConvMax) return '🟢 弱轉換';
+        if (convPct >= T.lowConvMin && convPct <= T.lowConvMax) return '🟢 轉換偏低';
+      }
       return '';
     };
     const groupOf = (label) => {
@@ -3732,8 +3749,8 @@ const App = {
       const prevG = prev && prevPrev && prevPrev.revenue > 0 ? (prev.revenue - prevPrev.revenue) / prevPrev.revenue : null;
       const n = notes[s.code] || {};
       const adjList = (n.adjustments || []).map(a => `${a.date} ${a.text}`).join(' | ');
-      const cls = classify(g, p.convRate || 0, p.clicks || 0, p.impressions || 0);
-      const prevCls = prevG !== null ? classify(prevG, 0, 0, 0) : '';
+      const cls = classify(g, p.convRate || 0, p.clicks || 0, p.impressions || 0, p.ctr || 0);
+      const prevCls = prevG !== null ? classify(prevG, 0, 0, 0, 0) : '';
       const ctrVal = p.ctr || 0;
       return {
         _classifyKey: cls.replace(/^[^\s]+\s*/, ''),
