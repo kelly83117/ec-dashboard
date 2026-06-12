@@ -7612,9 +7612,14 @@ tbody tr:hover td{background:#fafbff;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
-    <div>
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
+    <div style="display:flex;align-items:center;gap:28px;flex-wrap:wrap">
       <h3 style="margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em">淨利表</h3>
+      <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">本期總營收</div><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+      </div>
     </div>
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:6px 10px">
@@ -7822,17 +7827,14 @@ function shopHTML(shop){return`
     <div class="spin-row" id="spin-${shop}"><div class="spin"></div>讀取中…</div>
     <button class="gen-btn" id="gen-${shop}" onclick="generate('${shop}')" disabled>▶ 產生並儲存</button>
   </div>
-  <div class="kpi-strip" id="kpi-${shop}">
-    <div class="kpi-big-row">
-      <div class="kpi-big-cell"><div class="kpi-l">本期總營收</div><div class="kpi-v blue" id="kv-rev-${shop}">—</div></div>
-      <div class="kpi-big-cell"><div class="kpi-l">本期純利</div><div class="kpi-v green" id="kv-net-${shop}">—</div></div>
-      <div class="kpi-big-cell"><div class="kpi-l">廣告費</div><div class="kpi-v amber" id="kv-ads-${shop}">—</div></div>
-    </div>
+  <div style="display:none" id="kpi-${shop}">
+    <div id="kv-rev-${shop}"></div>
+    <div id="kv-net-${shop}"></div>
+    <div id="kv-ads-${shop}"></div>
   </div>
   <div class="tag-filter-bar" id="tfbar-${shop}"></div>
   <div class="toolbar" id="tb-${shop}">
     <span id="period-tag-${shop}" style="display:none"></span>
-    <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')">
     <span class="row-cnt" id="cnt-${shop}"></span>
     <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
     <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
@@ -9367,10 +9369,17 @@ function doExport(shop){
 function setKpis(shop,rev,gross,ads,pure){
   document.getElementById('kv-rev-'+shop).textContent='NT$ '+fmtN(rev);
   const pureEl=document.getElementById('kv-net-'+shop);
-  pureEl.innerHTML='NT$ '+fmtN(pure)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(pure/rev*100).toFixed(1)}%)</span>`:'');
-  pureEl.className='kpi-v '+(pure>=0?'green':'red');
-  const adsEl=document.getElementById('kv-ads-'+shop);
-  adsEl.innerHTML='NT$ '+fmtN(ads)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(ads/rev*100).toFixed(2)}%)</span>`:'');
+  const pureHtml='NT$ '+fmtN(pure)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(pure/rev*100).toFixed(1)}%)</span>`:'');
+  pureEl.innerHTML=pureHtml;
+  const adsHtml='NT$ '+fmtN(ads)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(ads/rev*100).toFixed(2)}%)</span>`:'');
+  document.getElementById('kv-ads-'+shop).innerHTML=adsHtml;
+  // 同步更新 header KPI
+  const hRev=document.getElementById('kv-rev-header');
+  const hNet=document.getElementById('kv-net-header');
+  const hAds=document.getElementById('kv-ads-header');
+  if(hRev) hRev.textContent='NT$ '+fmtN(rev);
+  if(hNet){hNet.innerHTML=pureHtml;hNet.style.color=pure>=0?'#10b981':'#ef4444';}
+  if(hAds) hAds.innerHTML=adsHtml;
 }
 function num(v){return parseFloat((v+'').replace(/[,$%]/g,'').trim())||0;}
 function fmtN(v){return Math.abs(Math.round(v)).toLocaleString();}
