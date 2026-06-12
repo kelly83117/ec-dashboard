@@ -7464,8 +7464,8 @@ tbody tr:hover td{background:#fafbff;}
 .tf-rows{display:flex;flex-direction:column;gap:16px;}
 .tfrow{display:grid;grid-template-columns:80px 1fr;gap:0 14px;align-items:start;}
 .tfrow-lbl{font-size:14px;color:#374151;font-weight:700;padding-top:6px;white-space:nowrap;}
-.tfrow-pills{display:grid;grid-template-columns:1fr 38px 1fr 38px;gap:6px 0;align-items:center;}
-.tfpill{display:flex;align-items:center;gap:6px;padding:5px 10px 5px 14px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:14px;font-weight:600;color:#374151;transition:all .15s;user-select:none;width:100%;box-sizing:border-box;margin-right:4px;}
+.tfrow-pills{display:grid;grid-template-columns:1fr 38px 1fr 38px;gap:6px 6px;align-items:center;}
+.tfpill{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:14px;font-weight:600;color:#374151;transition:all .15s;user-select:none;width:100%;box-sizing:border-box;}
 .tfpill:hover{border-color:#9ca3af;background:#e9eaec;}
 .tfpill.active{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
 .tfpill-all{background:#1a1a2e;color:#fff;border-color:#1a1a2e;font-size:15px;padding:6px 18px;}
@@ -7616,12 +7616,13 @@ tbody tr:hover td{background:#fafbff;}
 <script>
 window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding:12px 18px;border-bottom:1px solid #e5e7eb">
-    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-      <button class="stab active" style="background:#ee4d2d;color:#fff;border-color:#ee4d2d;font-weight:700" onclick="setShop('總表',this)">🛒 蝦皮</button>
+    <div style="display:flex;flex-direction:column;gap:5px">
+      <button class="stab active" style="background:#ee4d2d;color:#fff;border-color:#ee4d2d;font-weight:700;align-self:flex-start" onclick="setShop('總表',this)">🛒 蝦皮</button>
       <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
         <button class="stab" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉</button>
         <button class="stab" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
         <button class="stab" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
+        <button class="stab" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -7683,10 +7684,11 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div id="content-好麻吉" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-玩樂" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-森之旅" class="shop-content" style="padding:16px 20px"></div>
+  <div id="content-維克" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-酷澎" class="shop-content" style="padding:16px 20px"></div>
 </div>`;
 
-const SHOPS=[{id:'好麻吉',color:'#5b5fcf'},{id:'玩樂',color:'#10b981'},{id:'森之旅',color:'#f59e0b'}];
+const SHOPS=[{id:'好麻吉',color:'#5b5fcf'},{id:'玩樂',color:'#10b981'},{id:'森之旅',color:'#f59e0b'},{id:'維克',color:'#14b8a6'}];
 const MONTHS=['2025/01','2025/02','2025/03','2025/04','2025/05','2025/06','2025/07','2025/08','2025/09','2025/10','2025/11','2025/12','2026/01','2026/02','2026/03','2026/04','2026/05','2026/06','2026/07','2026/08','2026/09','2026/10','2026/11','2026/12'];
 const HALVES=[{id:'first',label:'上半（1-15）'},{id:'second',label:'下半（16-末）'},{id:'full',label:'整月（1-末）'}];
 
@@ -8665,7 +8667,7 @@ function updateTagFilterBar(shop){
     if(!total)return'';
     const isActive=lbls.some(l=>sel.includes(l));
     const items=lbls.filter(l=>counts[l]).map(l=>`<div class="tfdrop-item${sel.includes(l)?' sel':''}" onclick="event.stopPropagation();setTagFilter('${shop}','${l}');closeTfDrop()">${l} <span class="tfpill-cnt">${counts[l]}</span></div>`).join('');
-    return`<div class="tfdrop-wrap" style="grid-column:span 2"><span class="tfpill${isActive?' active':''}" style="width:100%;justify-content:space-between" onclick="toggleTfDrop(event,'${id}')">${label} <span class="tfpill-cnt">${total}</span> ▾</span><div class="tfdrop-menu" id="${id}">${items}</div></div>`;
+    return`<div class="tfdrop-wrap"><span class="tfpill${isActive?' active':''}" style="width:100%" onclick="toggleTfDrop(event,'${id}')">${label} ▾</span><div class="tfdrop-menu" id="${id}">${items}</div></div><span class="tfpill-cnt-cell" onclick="event.stopPropagation();toggleTfDrop(event,'${id}')">${total}</span>`;
   };
   const total=built.length;
   const allActive=!sel.length;
