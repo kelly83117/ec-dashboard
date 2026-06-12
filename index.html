@@ -9614,6 +9614,12 @@ function renderSummary(){
   const el=document.getElementById('content-總表');
   if(!el)return;
   const rate=getPlatformRate();
+  const isFullMonth=row=>{
+    const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
+    if(s.getFullYear()!==e.getFullYear()||s.getMonth()!==e.getMonth())return false;
+    const lastDay=new Date(s.getFullYear(),s.getMonth()+1,0).getDate();
+    return s.getDate()===1&&e.getDate()===lastDay;
+  };
   const rows=getSummaryRows().slice().sort((a,b)=>{
     if(a.end!==b.end)return a.end.localeCompare(b.end);
     const af=isFullMonth(a),bf=isFullMonth(b);
@@ -9645,13 +9651,6 @@ function renderSummary(){
       <td style="${bw}text-align:right;padding:5px 8px;color:#b45309">${(d.rev&&d.ads)?pct(d.ads,d.rev):'—'}</td>`;
   }).join('');
 
-  // Check if a row covers an entire month (e.g. 5/1–5/31 → show as "5月份" bold row)
-  const isFullMonth=row=>{
-    const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
-    if(s.getFullYear()!==e.getFullYear()||s.getMonth()!==e.getMonth())return false;
-    const lastDay=new Date(s.getFullYear(),s.getMonth()+1,0).getDate();
-    return s.getDate()===1&&e.getDate()===lastDay;
-  };
 
   let tbody='';
   rows.forEach(row=>{
