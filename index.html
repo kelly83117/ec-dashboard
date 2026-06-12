@@ -7615,7 +7615,7 @@ tbody tr:hover td{background:#fafbff;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding:12px 18px;border-bottom:1px solid #e5e7eb">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;padding:12px 18px;border-bottom:1px solid #e5e7eb">
     <div style="display:flex;flex-direction:column;gap:5px">
       <button class="stab active" style="background:#ee4d2d;color:#fff;border-color:#ee4d2d;font-weight:700;align-self:flex-start" onclick="setShop('總表',this)">🛒 蝦皮</button>
       <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
@@ -7625,14 +7625,19 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <button class="stab" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
       </div>
     </div>
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <div style="display:flex;align-items:center;gap:28px;flex-wrap:wrap;margin-right:8px">
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+        <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
+          <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
+        </div>
+        <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
+        <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:28px;flex-wrap:wrap">
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">本期總營收</div><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
       </div>
-      <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
-      <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
     </div>
   </div>
   <div class="ana-overlay" id="dist-modal-overlay" onclick="if(event.target===this)closeDistModal()">
@@ -7674,9 +7679,6 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <button class="gen-btn" id="upm-gen-btn" onclick="onGlobalGenerate()" disabled>▶ 產生報表</button>
       </div>
     </div>
-  </div>
-  <div id="profit-period-wrap-row" style="display:none;align-items:center;justify-content:flex-end;gap:8px;padding:8px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
-    <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
   </div>
   <div id="content-總表" class="shop-content active" style="padding:16px 20px">
     <div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">請先到各賣場分頁產生報表</div></div>
