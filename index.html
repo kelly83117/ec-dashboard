@@ -7485,11 +7485,20 @@ if (window.__cloudStore) {
       Store._profitMem = Store._profitMem || {};
       onSnapshot(profitDocRef, snap => {
         const data = snap.exists() ? (snap.data() || {}) : {};
-        const keys = Object.keys(data);
-        console.warn('[profit subscribe] 收到', keys.length, '筆雲端資料：', keys);
+        const oldData = Store._profitMem || {};
+        // 偵測哪些賣場的資料實際變動
+        const changedShops = new Set();
+        const allKeys = new Set([...Object.keys(data), ...Object.keys(oldData)]);
+        allKeys.forEach(k => {
+          if(JSON.stringify(data[k]) !== JSON.stringify(oldData[k])){
+            const shop = k.split('|')[1];
+            if(shop) changedShops.add(shop);
+          }
+        });
+        console.warn('[profit subscribe] 收到變動，影響賣場：', [...changedShops]);
         Store._profitMem = data;
-        // 通知其他模組（如淨利表）重新讀資料
-        window.dispatchEvent(new Event('profitDataReady'));
+        // 只通知有變動的賣場
+        window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
         // 淨利表資料變動 → 觸發 re-render 讓畫面同步
         if (window.App && App.currentUser && typeof App.render === 'function') {
           try { App.render(); } catch {}
@@ -7975,15 +7984,20 @@ SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.inn
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
 
 // ── 雲端資料到達時自動重載 ──
-window.addEventListener('profitDataReady', ()=>{
-  console.warn('[淨利表] 收到 profitDataReady，重新載入各賣場');
+window.addEventListener('profitDataReady', (e)=>{
+  const changedShops = e.detail?.changedShops;
+  // 只更新真正有資料變動的賣場，避免其他賣場頁面閃爍
+  const shopsToUpdate = (changedShops && changedShops.length)
+    ? SHOPS.filter(s => changedShops.includes(s.id))
+    : SHOPS;
+  console.warn('[淨利表] 收到 profitDataReady，更新賣場：', shopsToUpdate.map(s=>s.id));
   try{
-    SHOPS.forEach(s=>{
+    shopsToUpdate.forEach(s=>{
       onMonthChange(s.id);
       if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
     });
     if(typeof renderSummary==='function') renderSummary();
-    // 重載後確保當前賣場 tab 正確：只在 tab 真的跑掉時才修復（避免移除/加回 active 造成閃爍）
+    // 重載後確保當前賣場 tab 正確：只在 tab 真的跑掉時才修復
     if(curShop&&curShop!=='總表'){
       const content=document.getElementById('content-'+curShop);
       if(content&&!content.classList.contains('active')){
