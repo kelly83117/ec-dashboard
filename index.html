@@ -7497,8 +7497,10 @@ if (window.__cloudStore) {
         Store._profitMem = data;
         // 只通知有變動的賣場
         window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
-        // 淨利表資料變動 → 觸發 re-render 讓畫面同步
-        if (window.App && App.currentUser && typeof App.render === 'function') {
+        // 淨利表資料變動 → 觸發 re-render 讓畫面同步（只有賣場資料變動才觸發，避免總表編輯閃爍）
+        const _hasSummaryOnly = changedShops.size === 0;
+        const _justSaved = window._summaryJustSaved && (Date.now() - window._summaryJustSaved < 5000);
+        if (!_hasSummaryOnly && !_justSaved && window.App && App.currentUser && typeof App.render === 'function') {
           try { App.render(); } catch {}
         }
       }, err => {
