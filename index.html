@@ -8248,8 +8248,8 @@ function markCard(shop,type,icon,title,cls){
   document.getElementById('ui-'+type+'-'+shop).textContent=icon;
   document.getElementById('ut-'+type+'-'+shop).textContent=title.length>22?title.slice(0,22)+'…':title;
 }
-function setSpin(shop,show){document.getElementById('spin-'+shop).classList.toggle('show',show);}
-function checkReady(shop){const s=state[shop];document.getElementById('gen-'+shop).disabled=!(s.rawMobic&&s.rawAds);}
+function setSpin(shop,show){const el=document.getElementById('spin-'+shop);if(el)el.classList.toggle('show',show);}
+function checkReady(shop){const s=state[shop];const g=document.getElementById('gen-'+shop);if(g)g.disabled=!(s.rawMobic&&s.rawAds);}
 function getPlatformRate(){
   const el=document.getElementById('platformRate');
   if(!el) return 20.5/100; // 元素還沒渲染出來時用預設值，避免 null .value 噴錯
