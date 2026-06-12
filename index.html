@@ -7994,7 +7994,8 @@ window.addEventListener('profitDataReady', (e)=>{
       onMonthChange(s.id);
       if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
     });
-    if(typeof renderSummary==='function') renderSummary();
+    const skipSummary=window._summaryJustSaved&&(Date.now()-window._summaryJustSaved<5000);
+    if(typeof renderSummary==='function'&&!skipSummary) renderSummary();
     // 重載後確保當前賣場 tab 正確：只在 tab 真的跑掉時才修復
     if(curShop&&curShop!=='總表'){
       const content=document.getElementById('content-'+curShop);
@@ -9544,6 +9545,7 @@ function getSummaryRows(){
   }catch{return [];}
 }
 function saveSummaryRows(rows){
+  window._summaryJustSaved=Date.now();
   try{localStorage.setItem('ec_summary_v1',JSON.stringify(rows));}catch{}
   try{if(window.__cloudProfit)window.__cloudProfit.setField('_summary_v1',rows);}catch{}
 }
