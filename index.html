@@ -8305,7 +8305,7 @@ function generate(shop){
       const dotEl=document.getElementById('dot-'+shop);if(dotEl)dotEl.classList.add('on');
       loadIntoUI(shop,built,period,days);
       if(curShop==='總表')renderSummary();
-    }catch(err){alert('['+shop+'] 產生失敗：'+err.message);}
+    }catch(err){alert('['+shop+'] 產生失敗：'+err.message+'\n\n'+err.stack);}
     setSpin(shop,false);
   },80);
 }
