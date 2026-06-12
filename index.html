@@ -8009,6 +8009,8 @@ function loadIntoUI(shop,built,period,days){
   state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];
   document.getElementById('period-tag-'+shop).textContent=period;
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=false;}
+  // edit 後 2s 內跳過全表重渲染（patchRow 已更新 cell），避免閃爍
+  if(_editedAt[shop]&&Date.now()-_editedAt[shop]<2000)return;
   applyFilters(shop);
 }
 
