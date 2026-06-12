@@ -8426,6 +8426,7 @@ function _cloudRead(k){
   try{ const raw=localStorage.getItem(k); return raw?JSON.parse(raw):undefined; }catch{return undefined;}
 }
 function _cloudWrite(k,v){
+  window._shopJustSaved=Date.now();
   try{localStorage.setItem(k,JSON.stringify(v));}catch{}
   try{ if(window.__cloudProfit) window.__cloudProfit.setField(k,v); }catch{}
 }
