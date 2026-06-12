@@ -7457,12 +7457,13 @@ tbody tr:hover td{background:#fafbff;}
 .tag-sub200{background:#fee2e2;color:#991b1b;}
 .tag-sub100{background:#fff7ed;color:#9a3412;}
 
-/* Tag filter bar */
-.tag-filter-bar{display:flex;align-items:stretch;gap:10px;padding:8px 0;border-bottom:1px solid #e5e7eb;margin-bottom:8px;}
-.tf-all-wrap{display:flex;align-items:center;padding-right:10px;border-right:1px solid #e5e7eb;flex-shrink:0;}
-.tf-rows{flex:1;display:flex;flex-direction:column;gap:5px;justify-content:center;}
+/* Tag filter bar – popup mode */
+.tag-filter-bar{display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:400;background:#fff;border:1px solid #e4e6ef;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.13);padding:14px 16px;min-width:340px;max-width:92vw;}
+.tag-filter-bar.open{display:block;}
+.tf-all-wrap{display:flex;align-items:center;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #f3f4f6;}
+.tf-rows{display:flex;flex-direction:column;gap:8px;}
 .tfrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
-.tfrow-lbl{font-size:12px;color:#9ca3af;font-weight:700;flex-shrink:0;}
+.tfrow-lbl{font-size:11px;color:#9ca3af;font-weight:700;flex-shrink:0;min-width:52px;letter-spacing:.04em;}
 .tfpill{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:13px;font-weight:600;color:#374151;transition:all .15s;user-select:none;flex-shrink:0;}
 .tfpill:hover{border-color:#9ca3af;background:#e9eaec;}
 .tfpill.active{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
@@ -7612,16 +7613,13 @@ tbody tr:hover td{background:#fafbff;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
-    <div style="display:flex;align-items:center;gap:28px;flex-wrap:wrap">
-      <h3 style="margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em">淨利表</h3>
-      <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+  <div style="display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:14px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:28px;flex-wrap:wrap;margin-right:8px">
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">本期總營收</div><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
       </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:6px 10px">
         <span style="font-size:12px;color:#6b7280;font-weight:500">平台手續費</span>
         <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:60px">
@@ -7832,11 +7830,14 @@ function shopHTML(shop){return`
     <div id="kv-net-${shop}"></div>
     <div id="kv-ads-${shop}"></div>
   </div>
-  <div class="tag-filter-bar" id="tfbar-${shop}"></div>
-  <div class="toolbar" id="tb-${shop}">
+  <div class="toolbar" id="tb-${shop}" style="position:relative">
     <span id="period-tag-${shop}" style="display:none"></span>
     <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')" style="display:none">
     <span class="row-cnt" id="cnt-${shop}"></span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:4px;position:relative">
+      <button class="col-pick-btn" id="tag-btn-${shop}" onclick="toggleTagPopup('${shop}',this)">🏷 標籤</button>
+      <div class="tag-filter-bar" id="tfbar-${shop}"></div>
+    </div>
     <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
     <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
   </div>
@@ -8682,6 +8683,17 @@ function updateTagFilterBar(shop){
   }
   bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row1}${row2}</div>`;
 }
+function toggleTagPopup(shop,btn){
+  const bar=document.getElementById('tfbar-'+shop);if(!bar)return;
+  const isOpen=bar.classList.contains('open');
+  document.querySelectorAll('.tag-filter-bar.open').forEach(el=>el.classList.remove('open'));
+  if(!isOpen){updateTagFilterBar(shop);bar.classList.add('open');}
+}
+document.addEventListener('click',function(e){
+  if(!e.target.closest('.tag-filter-bar')&&!e.target.closest('[id^="tag-btn-"]')){
+    document.querySelectorAll('.tag-filter-bar.open').forEach(el=>el.classList.remove('open'));
+  }
+});
 function toggleTfDrop(e,id){
   e.stopPropagation();
   const m=document.getElementById(id);if(!m)return;
@@ -9283,6 +9295,7 @@ function setShop(shop,btn){
     else{gb.disabled=!(state[shop]?._built?.length);}
   }
   if(shop==='總表')renderSummary();
+  else syncHeaderKpis(shop);
 }
 
 function updateHalfBtnLabels(shop){
@@ -9368,19 +9381,27 @@ function doExport(shop){
 
 // ── Helpers ──
 function setKpis(shop,rev,gross,ads,pure){
-  document.getElementById('kv-rev-'+shop).textContent='NT$ '+fmtN(rev);
+  const revEl=document.getElementById('kv-rev-'+shop);if(revEl)revEl.textContent='NT$ '+fmtN(rev);
   const pureEl=document.getElementById('kv-net-'+shop);
   const pureHtml='NT$ '+fmtN(pure)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(pure/rev*100).toFixed(1)}%)</span>`:'');
-  pureEl.innerHTML=pureHtml;
+  if(pureEl)pureEl.innerHTML=pureHtml;
   const adsHtml='NT$ '+fmtN(ads)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(ads/rev*100).toFixed(2)}%)</span>`:'');
-  document.getElementById('kv-ads-'+shop).innerHTML=adsHtml;
-  // 同步更新 header KPI
+  const adsEl=document.getElementById('kv-ads-'+shop);if(adsEl)adsEl.innerHTML=adsHtml;
+  if(shop!==curShop)return;
   const hRev=document.getElementById('kv-rev-header');
   const hNet=document.getElementById('kv-net-header');
   const hAds=document.getElementById('kv-ads-header');
-  if(hRev) hRev.textContent='NT$ '+fmtN(rev);
+  if(hRev)hRev.textContent='NT$ '+fmtN(rev);
   if(hNet){hNet.innerHTML=pureHtml;hNet.style.color=pure>=0?'#10b981':'#ef4444';}
-  if(hAds) hAds.innerHTML=adsHtml;
+  if(hAds)hAds.innerHTML=adsHtml;
+}
+function syncHeaderKpis(shop){
+  if(shop==='總表'||!state[shop]){return;}
+  const s=state[shop];
+  if(!s._built||!s._built.length){setKpis(shop,0,0,0,0);return;}
+  let tRev=0,tGross=0,tAds=0,tPure=0;
+  s._built.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
+  setKpis(shop,tRev,tGross,tAds,tPure);
 }
 function num(v){return parseFloat((v+'').replace(/[,$%]/g,'').trim())||0;}
 function fmtN(v){return Math.abs(Math.round(v)).toLocaleString();}
