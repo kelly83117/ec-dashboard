@@ -7464,7 +7464,7 @@ tbody tr:hover td{background:#fafbff;}
 .tf-rows{display:flex;flex-direction:column;gap:16px;}
 .tfrow{display:grid;grid-template-columns:80px 1fr;gap:0 14px;align-items:start;}
 .tfrow-lbl{font-size:14px;color:#374151;font-weight:700;padding-top:6px;white-space:nowrap;}
-.tfrow-pills{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
+.tfrow-pills{display:flex;flex-direction:column;gap:6px;}
 .tfpill{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 14px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:14px;font-weight:600;color:#374151;transition:all .15s;user-select:none;width:100%;box-sizing:border-box;}
 .tfpill:hover{border-color:#9ca3af;background:#e9eaec;}
 .tfpill.active{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
@@ -7635,7 +7635,14 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
     <div class="ana-modal" style="width:520px;max-width:96vw">
       <div class="ana-modal-hdr"><span>上傳檔案</span><button class="ana-close-btn" onclick="closeUploadModal()">✕</button></div>
       <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
-        <div style="font-size:12px;color:#9ca3af;margin-bottom:4px" id="upm-shop-hint">目前賣場：—</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <div style="font-size:12px;color:#9ca3af" id="upm-shop-hint">目前賣場：—</div>
+          <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:5px 10px">
+            <span style="font-size:12px;color:#6b7280;font-weight:500">平台手續費</span>
+            <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:54px">
+            <span style="font-size:12px;color:#6b7280">%</span>
+          </div>
+        </div>
         <label class="ucard" id="upm-map" style="width:100%;box-sizing:border-box">
           <input type="file" accept=".xlsx,.xls" onchange="onGlobalFile(event,'map')">
           <div class="ucard-icon" id="upm-map-icon">🗂</div>
@@ -7668,14 +7675,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <button class="stab" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
       </div>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <div id="profit-period-wrap" style="display:none;align-items:center;gap:8px;flex-wrap:wrap"></div>
-      <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:5px 10px">
-        <span style="font-size:12px;color:#6b7280;font-weight:500">平台手續費</span>
-        <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:54px">
-        <span style="font-size:12px;color:#6b7280">%</span>
-      </div>
-    </div>
+    <div id="profit-period-wrap" style="display:none;align-items:center;gap:8px;flex-wrap:wrap"></div>
   </div>
   <div id="content-總表" class="shop-content active" style="padding:16px 20px">
     <div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">請先到各賣場分頁產生報表</div></div>
