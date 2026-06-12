@@ -7625,12 +7625,12 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
       </div>
     </div>
-    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+    <div id="header-kpi-block" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
       <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-change-header" style="font-size:12px;font-weight:600"></span></div></div>
       <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
       <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-right:12px">
+    <div id="header-btn-block" style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-right:12px">
       <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
         <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
       </div>
@@ -9175,125 +9175,110 @@ function renderTable(shop,list){
 // ── Summary ──
 function renderSummary(){
   const el=document.getElementById('content-總表');
-  if(!el) return; // 切換頁面時可能還沒渲染出來，避免 null.innerHTML 噴錯
-  const PLATFORM=getPlatformRate();const rows=[];
+  if(!el)return;
+  const PLATFORM=getPlatformRate();
 
-  // 收集所有來源：localStorage + 雲端 app/profit + 雲端 app/main（過渡期）
+  // Collect data: key = "ec|shop|month|half" → {tRev,tGross,tAds,tPure}
+  const data={};
   const seen=new Set();
-  let dbg = { profitKeys:0, mainKeys:0, localKeys:0, added:0, skipped:[], errors:[] };
-  const addRow=(k,rep)=>{
-    if(seen.has(k)) { return; }
-    if(!rep) { dbg.skipped.push(k+':no_rep'); return; }
-    if(!rep.built) { dbg.skipped.push(k+':no_built'); return; }
-    if(!Array.isArray(rep.built)) { dbg.skipped.push(k+':built_not_array(type='+typeof rep.built+')'); return; }
+  const addEntry=(k,rep)=>{
+    if(seen.has(k))return;
+    if(!rep?.built||!Array.isArray(rep.built))return;
     seen.add(k);
-    try{
-      const parts=k.split('|');
-      const shop=parts[1];
-      let tRev=0,tGross=0,tAds=0,tPure=0;
-      rep.built.forEach(r=>{tRev+=(r.rev||0);tGross+=(r.gross||0);tAds+=(r.adsFee||0);tPure+=(r.pureProfit||0);});
-      rows.push({shop,period:rep.period,tRev,tGross,tAds,tPure});
-      dbg.added++;
-    }catch(err){ dbg.errors.push(k+':'+err.message); }
+    const parts=k.split('|');
+    const shop=parts[1],month=parts[2],half=parts[3];
+    if(!SHOPS.find(s=>s.id===shop))return;
+    const dk=`${month}|${half}`;
+    if(!data[dk])data[dk]={};
+    let tRev=0,tGross=0,tAds=0,tPure=0;
+    rep.built.forEach(r=>{tRev+=(r.rev||0);tGross+=(r.gross||0);tAds+=(r.adsFee||0);tPure+=(r.pureProfit||0);});
+    data[dk][shop]={tRev,tGross,tAds,tPure};
   };
-  // 1) 雲端 profit doc 優先
-  try{
-    if(typeof Store!='undefined' && Store._profitMem){
-      for(const k of Object.keys(Store._profitMem)){
-        if(k.startsWith('ec|')) { dbg.profitKeys++; addRow(k, Store._profitMem[k]); }
-      }
-    }
-  }catch(e){ dbg.errors.push('profitMem:'+e.message); }
-  // 2) 雲端 main doc（過渡期相容）
-  try{
-    if(typeof Store!='undefined' && Store._mem){
-      for(const k of Object.keys(Store._mem)){
-        if(k.startsWith('ec|')) { dbg.mainKeys++; addRow(k, Store._mem[k]); }
-      }
-    }
-  }catch(e){ dbg.errors.push('mem:'+e.message); }
-  // 3) localStorage 後備
-  try{
-    for(let i=0;i<localStorage.length;i++){
-      const k=localStorage.key(i);if(!k || !k.startsWith('ec|'))continue;
-      dbg.localKeys++;
-      try{ addRow(k, JSON.parse(localStorage.getItem(k))); }catch{}
-    }
-  }catch{}
-  console.warn('[renderSummary] 結果：', dbg);
+  try{if(typeof Store!='undefined'&&Store._profitMem){for(const k of Object.keys(Store._profitMem)){if(k.startsWith('ec|'))addEntry(k,Store._profitMem[k]);}}}catch{}
+  try{if(typeof Store!='undefined'&&Store._mem){for(const k of Object.keys(Store._mem)){if(k.startsWith('ec|'))addEntry(k,Store._mem[k]);}}}catch{}
+  try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(!k||!k.startsWith('ec|'))continue;try{addEntry(k,JSON.parse(localStorage.getItem(k)));}catch{}}}catch{}
 
-  if(!rows.length){el.innerHTML=`<div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">尚無儲存資料</div></div>`;return;}
+  if(!Object.keys(data).length){el.innerHTML=`<div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">尚無儲存資料</div></div>`;return;}
 
-  // 按區間排序（新的在前）
-  rows.sort((a,b)=>b.period.localeCompare(a.period));
+  // Available months sorted desc
+  const allMonths=[...new Set(Object.keys(data).map(k=>k.split('|')[0]))].sort((a,b)=>b.localeCompare(a));
+  if(!el._curMonth||!allMonths.includes(el._curMonth))el._curMonth=allMonths[0];
+  const curMonth=el._curMonth;
 
-  // 按區間分組
-  const byPeriod={};
-  const periodOrder=[];
-  rows.forEach(r=>{
-    if(!byPeriod[r.period]){byPeriod[r.period]=[];periodOrder.push(r.period);}
-    byPeriod[r.period].push(r);
-  });
+  // Month tabs
+  const tabsHtml=allMonths.slice(0,8).map(m=>{
+    const active=m===curMonth;
+    return`<button onclick="switchSummaryMonth('${m}')" style="padding:5px 16px;border-radius:20px;border:1.5px solid ${active?'#5b5fcf':'#e5e7eb'};background:${active?'#ede9fe':'white'};color:${active?'#5b5fcf':'#6b7280'};font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">${m}</button>`;
+  }).join('');
 
-  let html=`<div style="padding:18px 20px;">
-  <div class="tscroll"><table>
-    <thead><tr>
-      <th class="tl" style="min-width:200px">日期區間</th>
-      <th class="tl" style="min-width:100px">賣場</th>
-      <th style="min-width:110px">營收</th>
-      <th style="min-width:110px">廣告費</th>
-      <th style="min-width:110px">毛利</th>
-      <th style="min-width:110px">純利</th>
-      <th style="min-width:80px">純利率</th>
-    </tr></thead><tbody>`;
+  // Period info helper
+  const periodInfo=(month,half)=>{
+    const[y,mo]=month.split('/').map(Number);
+    const last=new Date(y,mo,0).getDate();
+    const m=String(mo);
+    if(half==='full')return{dateRange:`${m}/1 – ${m}/${last}`,label:'整月',totalLabel:'整月小計'};
+    if(half==='second')return{dateRange:`${m}/16 – ${m}/${last}`,label:'下半月',totalLabel:'小計'};
+    return{dateRange:`${m}/1 – ${m}/15`,label:'上半月',totalLabel:'小計'};
+  };
 
-  periodOrder.forEach(period=>{
-    const rs=byPeriod[period];
-    // 只有一個賣場：不顯示合計列
-    // 多個賣場：顯示各賣場，最後一行是合計
-    const showTotal = rs.length > 1;
+  // Grand totals for the whole month (sum of full or first+second)
+  let monthGR=0,monthGA=0,monthGG=0,monthGP=0,monthHasData=false;
+
+  let tableRows='';
+  const HALF_ORDER=['full','second','first'];
+  HALF_ORDER.forEach(half=>{
+    const dk=`${curMonth}|${half}`;
+    const shopData=data[dk]||{};
+    const hasAny=SHOPS.some(s=>shopData[s.id]);
+    if(!hasAny)return;
+    const pi=periodInfo(curMonth,half);
     let gR=0,gG=0,gA=0,gP=0;
-
-    rs.forEach((r,i)=>{
-      const c=SHOPS.find(s=>s.id===r.shop)?.color||'#6b7280';
-      gR+=r.tRev;gG+=r.tGross;gA+=r.tAds;gP+=r.tPure;
-      const isFirst = i===0;
-      html+=`<tr style="${i===0?'border-top:2px solid #e4e6ef':''}">
-        <td class="tl" style="font-size:12px;color:#6b7280;font-family:'DM Mono',monospace;${isFirst?'':'opacity:0'}">${r.period}</td>
-        <td class="tl"><span style="display:inline-flex;align-items:center;gap:7px;font-weight:500;color:#1a1a2e">
-          <span style="width:8px;height:8px;border-radius:50%;background:${c};flex-shrink:0;display:inline-block"></span>${r.shop}
-        </span></td>
-        <td class="td-num">$${fmtN(r.tRev)}</td>
-        <td class="td-num td-amber">$${fmtN(r.tAds)}</td>
-        <td class="td-num">$${fmtN(r.tGross)}</td>
-        <td class="td-num ${r.tPure>=0?'td-pos':'td-neg'}" style="font-weight:600">$${fmtN(r.tPure)}</td>
-        <td>${r.tRev>0?pill(r.tPure/r.tRev*100):'—'}</td>
+    const shopRows=SHOPS.map((s,i)=>{
+      const d=shopData[s.id];
+      if(d){gR+=d.tRev;gG+=d.tGross;gA+=d.tAds;gP+=d.tPure;}
+      const pureCol=d?(d.tPure>=0?'td-pos':'td-neg'):'';
+      const periodCell=i===0?`<td class="tl" rowspan="${SHOPS.length+1}" style="vertical-align:middle;padding:10px 14px;border-right:1px solid #f0f0f0"><div style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;font-variant-numeric:tabular-nums">${pi.dateRange}</div><div style="font-size:11px;color:#9ca3af;margin-top:3px">${pi.label}</div></td>`:'';
+      return`<tr style="${i===0?'border-top:2px solid #e4e6ef':''}">
+        ${periodCell}
+        <td class="tl"><span style="display:inline-flex;align-items:center;gap:7px;font-weight:500;color:#1a1a2e"><span style="width:8px;height:8px;border-radius:50%;background:${s.color};flex-shrink:0;display:inline-block"></span>${s.id}</span></td>
+        <td class="td-num">${d?'$'+fmtN(d.tRev):'<span style="color:#d1d5db">—</span>'}</td>
+        <td class="td-num td-amber">${d?'$'+fmtN(d.tAds):'<span style="color:#d1d5db">—</span>'}</td>
+        <td class="td-num">${d?'$'+fmtN(d.tGross):'<span style="color:#d1d5db">—</span>'}</td>
+        <td class="td-num ${pureCol}" style="font-weight:600">${d?'$'+fmtN(d.tPure):'<span style="color:#d1d5db">—</span>'}</td>
       </tr>`;
-    });
-
-    // 多賣場才顯示合計
-    if(showTotal){
-      html+=`<tr style="background:#f8f9fc;">
-        <td class="tl" style="font-size:11px;color:#9ca3af;padding-left:20px">合計</td>
-        <td></td>
-        <td class="td-num" style="font-weight:700">$${fmtN(gR)}</td>
-        <td class="td-num td-amber" style="font-weight:700">$${fmtN(gA)}</td>
-        <td class="td-num" style="font-weight:700">$${fmtN(gG)}</td>
-        <td class="td-num ${gP>=0?'td-pos':'td-neg'}" style="font-weight:700">$${fmtN(gP)}</td>
-        <td>${gR>0?pill(gP/gR*100):'—'}</td>
-      </tr>`;
-    }
+    }).join('');
+    const subColor=half==='full'?'#5b5fcf':'#374151';
+    const subBg=half==='full'?'#eeeeff':'#f8f9fc';
+    tableRows+=shopRows+`<tr style="background:${subBg}">
+      <td class="tl" style="font-size:13px;font-weight:700;color:${subColor};padding-left:18px">${pi.totalLabel}</td>
+      <td class="td-num" style="font-weight:700;color:${subColor}">$${fmtN(gR)}</td>
+      <td class="td-num td-amber" style="font-weight:700">$${fmtN(gA)}</td>
+      <td class="td-num" style="font-weight:700">$${fmtN(gG)}</td>
+      <td class="td-num ${gP>=0?'td-pos':'td-neg'}" style="font-weight:700">$${fmtN(gP)}</td>
+    </tr>`;
+    if(half!=='full'){monthGR+=gR;monthGA+=gA;monthGG+=gG;monthGP+=gP;monthHasData=true;}
   });
 
-  html+=`</tbody></table></div>
-  <div style="margin-top:12px;font-size:11px;color:#9ca3af;">＊純利 = 毛利 − 廣告費 − 營收 × ${(PLATFORM*100).toFixed(1)}%</div>
+  el.innerHTML=`<div style="padding:14px 16px 4px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">${tabsHtml}</div>
+    <div class="tscroll"><table>
+      <thead><tr>
+        <th class="tl" style="min-width:130px">日期區間</th>
+        <th class="tl" style="min-width:80px">賣場</th>
+        <th style="min-width:110px">營收</th>
+        <th style="min-width:100px">廣告費</th>
+        <th style="min-width:110px">毛利</th>
+        <th style="min-width:110px">純利</th>
+      </tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table></div>
+    <div style="margin-top:10px;font-size:11px;color:#9ca3af">＊純利 = 毛利 − 廣告費 − 營收 × ${(PLATFORM*100).toFixed(1)}%</div>
   </div>`;
-  el.innerHTML=html;
 }
 
 function switchSummaryMonth(month){
   const el=document.getElementById('content-總表');
-  el._curMonth=month;
+  if(el)el._curMonth=month;
   renderSummary();
 }
 
@@ -9311,6 +9296,12 @@ function setShop(shop,btn){
     const showPeriod=shop!=='總表';
     if(wrapRow)wrapRow.style.display=showPeriod?'flex':'none';
   }
+  // show/hide KPI & upload/export when on 總表
+  const isSummary=shop==='總表';
+  const kpiBlock=document.getElementById('header-kpi-block');
+  const btnBlock=document.getElementById('header-btn-block');
+  if(kpiBlock)kpiBlock.style.display=isSummary?'none':'flex';
+  if(btnBlock)btnBlock.style.display=isSummary?'none':'flex';
   // sync global export button
   const gb=document.getElementById('global-exp-btn');
   if(gb){
