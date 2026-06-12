@@ -7615,7 +7615,15 @@ tbody tr:hover td{background:#fafbff;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
-  <div style="display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:14px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding:12px 18px;border-bottom:1px solid #e5e7eb">
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <button class="stab active" style="background:#ee4d2d;color:#fff;border-color:#ee4d2d;font-weight:700" onclick="setShop('總表',this)">🛒 蝦皮</button>
+      <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
+        <button class="stab" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉</button>
+        <button class="stab" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
+        <button class="stab" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
+      </div>
+    </div>
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div style="display:flex;align-items:center;gap:28px;flex-wrap:wrap;margin-right:8px">
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">本期總營收</div><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
@@ -7666,21 +7674,8 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       </div>
     </div>
   </div>
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
-    <div style="display:flex;align-items:center;gap:8px">
-      <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
-        <button class="stab active" onclick="setShop('總表',this)"><span class="sdot" style="background:#6b7280"></span>總表</button>
-      </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px">
-        <span style="font-size:10px;color:#ee4d2d;font-weight:700;letter-spacing:.5px;padding-left:4px">🛒 蝦皮</span>
-        <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
-          <button class="stab" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉</button>
-          <button class="stab" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
-          <button class="stab" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
-        </div>
-      </div>
-    </div>
-    <div id="profit-period-wrap" style="display:none;align-items:center;gap:8px;flex-wrap:wrap"></div>
+  <div id="profit-period-wrap-row" style="display:none;align-items:center;justify-content:flex-end;gap:8px;padding:8px 18px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
+    <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
   </div>
   <div id="content-總表" class="shop-content active" style="padding:16px 20px">
     <div class="empty"><div class="empty-icon">📊</div><div class="empty-hint">請先到各賣場分頁產生報表</div></div>
@@ -9302,13 +9297,16 @@ function switchSummaryMonth(month){
 // ── Tab switch ──
 function setShop(shop,btn){
   curShop=shop;
-  document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
+  document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
   document.getElementById('content-'+shop).classList.add('active');
   const wrap=document.getElementById('profit-period-wrap');
+  const wrapRow=document.getElementById('profit-period-wrap-row');
   if(wrap){
     SHOPS.forEach(s=>{const el=document.getElementById('period-row-'+s.id);if(el)el.style.display=s.id===shop?'flex':'none';});
-    wrap.style.display=shop==='總表'?'none':'flex';
+    const showPeriod=shop!=='總表';
+    if(wrapRow)wrapRow.style.display=showPeriod?'flex':'none';
   }
   // sync global export button
   const gb=document.getElementById('global-exp-btn');
@@ -9356,7 +9354,8 @@ function initProfitPeriodControls(){
   if(curShop&&curShop!=='總表'){
     const el=document.getElementById('period-row-'+curShop);
     if(el)el.style.display='flex';
-    wrap.style.display='flex';
+    const wrapRow=document.getElementById('profit-period-wrap-row');
+    if(wrapRow)wrapRow.style.display='flex';
   }
 }
 
