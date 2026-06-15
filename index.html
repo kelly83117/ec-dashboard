@@ -8450,28 +8450,33 @@ function _doGenerate(shop){
 }
 
 function openUnmatchedModal(shop,unmatched,onConfirm){
-  // Build product options from rawMobic
   const s=state[shop];
-  const codes=[...new Set((s.rawMobic||[]).map(r=>(r['商品編號']||'').trim()).filter(Boolean))];
+  // 建立商品清單（有銷售的）供搜尋用
   const codeNames={};
   (s.rawMobic||[]).forEach(r=>{const c=(r['商品編號']||'').trim();if(c&&!codeNames[c])codeNames[c]=(r['商品名稱']||'').trim();});
-  const productOpts=codes.map(c=>`<option value="${c}">${c}${codeNames[c]?' – '+codeNames[c]:''}</option>`).join('');
+  const allCodes=Object.keys(codeNames);
+  // 存到 window 供 umSearch 使用
+  window._umCodeNames=codeNames;window._umAllCodes=allCodes;
 
   const rows=unmatched.map((u,i)=>{
-    const label=u.type==='code'
-      ? `商品: ${u.code}${u.name?' – '+u.name:''}<br><span style="color:#b45309;font-weight:600">廣告費: $${fmtN(Math.round(u.spend))}</span>`
-      : `廣告ID: ${u.sid}<br><span style="color:#b45309;font-weight:600">花費: $${fmtN(Math.round(u.spend))}</span>`;
+    const nameHtml=u.type==='code'
+      ? `<div style="font-size:12px;color:#374151;font-weight:600">${u.code}</div><div style="font-size:11px;color:#6b7280;margin-top:2px;max-width:240px;word-break:break-all">${u.name||''}</div><div style="font-size:12px;color:#b45309;font-weight:600;margin-top:3px">廣告費: $${fmtN(Math.round(u.spend))}</div>`
+      : `<div style="font-size:12px;color:#374151;font-family:monospace">${u.sid}</div><div style="font-size:12px;color:#b45309;font-weight:600;margin-top:3px">花費: $${fmtN(Math.round(u.spend))}</div>`;
+    const defaultNew=u.spend<10;
     return `<tr style="border-bottom:1px solid #f0f0f0">
-      <td style="padding:8px 10px;font-size:12px;color:#374151;white-space:nowrap">${label}</td>
-      <td style="padding:8px 10px">
+      <td style="padding:10px 12px;vertical-align:top;min-width:220px">${nameHtml}</td>
+      <td style="padding:10px 12px;vertical-align:top;min-width:260px">
         <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;cursor:pointer">
-          <input type="radio" name="um-${i}" value="merge" checked onchange="umToggle(${i})"> 加到現有商品
+          <input type="radio" name="um-${i}" value="merge" ${defaultNew?'':'checked'} onchange="umToggle(${i})"> 加到現有商品
         </label>
-        <select id="um-sel-${i}" style="width:100%;padding:4px 8px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:12px;margin-bottom:6px">
-          <option value="">— 選擇商品 —</option>${productOpts}
-        </select>
+        <div id="um-wrap-${i}" style="position:relative;margin-bottom:6px;${defaultNew?'display:none':''}">
+          <input id="um-inp-${i}" type="text" placeholder="搜尋商品編號或名稱…" oninput="umSearch(${i})" onfocus="umSearch(${i})" onblur="setTimeout(()=>umHideDrop(${i}),200)"
+            style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:12px">
+          <input type="hidden" id="um-sel-${i}" value="">
+          <div id="um-drop-${i}" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e5e7eb;border-radius:6px;max-height:160px;overflow-y:auto;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.1)"></div>
+        </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-          <input type="radio" name="um-${i}" value="new" onchange="umToggle(${i})"> 直接新增到最下面
+          <input type="radio" name="um-${i}" value="new" ${defaultNew?'checked':''} onchange="umToggle(${i})"> 直接新增到最下面
         </label>
       </td>
     </tr>`;
@@ -8480,17 +8485,21 @@ function openUnmatchedModal(shop,unmatched,onConfirm){
   const totalSpend=unmatched.reduce((s,u)=>s+u.spend,0);
   const ov=document.createElement('div');
   ov.className='ana-overlay open';ov.id='unmatched-modal-ov';ov.style.zIndex='3000';
-  ov.innerHTML=`<div class="ana-modal" style="width:560px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column">
+  ov.innerHTML=`<div class="ana-modal" style="width:min(860px,95vw);max-height:90vh;display:flex;flex-direction:column">
     <div class="ana-modal-hdr"><span>廣告費對帳 – ${shop}</span><button class="ana-close-btn" onclick="document.getElementById('unmatched-modal-ov').remove()">✕</button></div>
-    <div style="padding:10px 20px;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between">
-      <span>共 <b style="color:#374151">${unmatched.length}</b> 筆廣告費找不到對應商品，合計 <b style="color:#b45309">$${fmtN(Math.round(totalSpend))}</b></span>
-      <button onclick="umSetAll('new')" style="padding:4px 10px;border:1.5px solid #e5e7eb;border-radius:6px;background:white;font-size:11px;cursor:pointer;color:#374151">全部新增到最下面</button>
+    <div style="padding:10px 20px;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <span>共 <b style="color:#374151">${unmatched.length}</b> 筆廣告費找不到對應銷售商品，合計 <b style="color:#b45309">$${fmtN(Math.round(totalSpend))}</b></span>
+      <div style="display:flex;gap:6px">
+        <button onclick="umSetAll('merge')" style="padding:4px 10px;border:1.5px solid #e5e7eb;border-radius:6px;background:white;font-size:11px;cursor:pointer;color:#374151">全部加到現有商品</button>
+        <button onclick="umSetAll('new')" style="padding:4px 10px;border:1.5px solid #5b5fcf;border-radius:6px;background:white;font-size:11px;cursor:pointer;color:#5b5fcf">全部新增到最下面</button>
+      </div>
     </div>
     <div style="overflow-y:auto;flex:1">
-      <table style="width:100%;border-collapse:collapse">
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed">
+        <colgroup><col style="width:48%"><col style="width:52%"></colgroup>
         <thead><tr style="background:#f8fafc;border-bottom:2px solid #e5e7eb">
-          <th style="padding:8px 10px;font-size:11px;color:#6b7280;text-align:left;font-weight:600">商品 / 花費</th>
-          <th style="padding:8px 10px;font-size:11px;color:#6b7280;text-align:left;font-weight:600">處理方式</th>
+          <th style="padding:8px 12px;font-size:11px;color:#6b7280;text-align:left;font-weight:600">商品 / 廣告費</th>
+          <th style="padding:8px 12px;font-size:11px;color:#6b7280;text-align:left;font-weight:600">處理方式</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -8502,15 +8511,38 @@ function openUnmatchedModal(shop,unmatched,onConfirm){
   </div>`;
   document.body.appendChild(ov);
   ov.onclick=e=>{if(e.target===ov)ov.remove();};
-  // store callback
   window._unmatchedCallback=onConfirm;
   window._unmatchedData=unmatched;
   window._unmatchedShop=shop;
 }
 function umToggle(i){
-  const sel=document.getElementById('um-sel-'+i);
+  const wrap=document.getElementById('um-wrap-'+i);
   const isMerge=document.querySelector(`input[name="um-${i}"][value="merge"]`)?.checked;
-  if(sel)sel.style.display=isMerge?'':'none';
+  if(wrap)wrap.style.display=isMerge?'':'none';
+}
+function umSearch(i){
+  const inp=document.getElementById('um-inp-'+i);
+  const drop=document.getElementById('um-drop-'+i);
+  if(!inp||!drop)return;
+  const q=inp.value.trim().toLowerCase();
+  const codes=window._umAllCodes||[];
+  const names=window._umCodeNames||{};
+  const filtered=q?codes.filter(c=>c.toLowerCase().includes(q)||(names[c]||'').toLowerCase().includes(q)):codes;
+  drop.innerHTML=filtered.slice(0,80).map(c=>`<div onclick="umSelect(${i},'${c.replace(/'/g,'\\\'')}')" style="padding:6px 10px;font-size:12px;cursor:pointer;border-bottom:1px solid #f3f4f6;color:#374151" onmouseenter="this.style.background='#f0f4ff'" onmouseleave="this.style.background=''">${c}${names[c]?' – <span style=color:#6b7280>'+names[c]+'</span>':''}</div>`).join('');
+  drop.style.display=filtered.length?'':'none';
+}
+function umSelect(i,code){
+  const inp=document.getElementById('um-inp-'+i);
+  const sel=document.getElementById('um-sel-'+i);
+  const drop=document.getElementById('um-drop-'+i);
+  const names=window._umCodeNames||{};
+  if(inp)inp.value=code+(names[code]?' – '+names[code]:'');
+  if(sel)sel.value=code;
+  if(drop)drop.style.display='none';
+}
+function umHideDrop(i){
+  const drop=document.getElementById('um-drop-'+i);
+  if(drop)drop.style.display='none';
 }
 function umSetAll(val){
   const n=window._unmatchedData?.length||0;
