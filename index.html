@@ -9038,7 +9038,6 @@ function buildDistHtml(shop,built){
   const aPureSub=[['< 0%',aC(r=>H(r)<0)],['0% - 10%',aC(r=>H(r)>=0&&H(r)<10)],['10% - 15%',aC(r=>H(r)>=10&&H(r)<15)],['15% - 20%',aC(r=>H(r)>=15&&H(r)<20)],['20% - 30%',aC(r=>H(r)>=20&&H(r)<30)],['>30%',aC(r=>H(r)>=30)]];
   // budget sub-rows for ads
   const aBudSub=[['< $100',aC(r=>r.dayBudget<100)],['$100 - $200',aC(r=>r.dayBudget>=100&&r.dayBudget<200)],['$200 - $300',aC(r=>r.dayBudget>=200&&r.dayBudget<300)],['$300 - $400',aC(r=>r.dayBudget>=300&&r.dayBudget<400)],['> $400',aC(r=>r.dayBudget>=400)]];
-  const pct=(n,d)=>d>0?Math.round(n/d*100)+'%':'0%';
 
   const n20p=aC(r=>H(r)>=20), n20m=aC(r=>H(r)<20);
   const nB200p=aC(r=>r.dayBudget>200), nB200m=aC(r=>r.dayBudget<=200);
