@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-43">
+<meta name="app-version" content="2026-06-11-44">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -7542,7 +7542,10 @@ if (window.__cloudStore) {
     };
 
     // ============== 淨利表獨立文件 app/profit（避免 app/main 撞 1MB 上限） ==============
+    // app/profit 只放「當期」資料；舊月份各自獨立 doc（app/profit_YYYY_MM）避免單檔過大
     const profitDocRef = doc(db, 'app', 'profit');
+    const PROFIT_ARCHIVE_DOCS = ['profit_2026_05'];
+    const profitArchiveRefs = PROFIT_ARCHIVE_DOCS.map(name => doc(db, 'app', name));
     const PROFIT_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
       + '/databases/(default)/documents/app/profit';
     const restDeleteProfitFields = async (keys) => {
@@ -7558,34 +7561,43 @@ if (window.__cloudStore) {
       removeFields: (keys) => restDeleteProfitFields(keys),
       subscribe: (cb) => onSnapshot(profitDocRef, snap => cb(snap.exists() ? snap.data() : {})),
     };
-    // 訂閱 profit doc → 寫入 Store._profitMem，提供 lsLoad/_cloudRead 讀取
+    // 訂閱 profit doc + archive docs → 合併寫入 Store._profitMem
+    // 每個 doc 各自記下自己的最新資料，merge 時用 archive + current 順序（current 優先）
     try {
       Store._profitMem = Store._profitMem || {};
-      onSnapshot(profitDocRef, snap => {
-        const data = snap.exists() ? (snap.data() || {}) : {};
+      const profitParts = { current: {}, archives: {} };
+      const mergeAndNotify = () => {
+        const data = {};
+        Object.values(profitParts.archives).forEach(d => Object.assign(data, d));
+        Object.assign(data, profitParts.current);
         const oldData = Store._profitMem || {};
-        // 偵測哪些賣場的資料實際變動
         const changedShops = new Set();
         const allKeys = new Set([...Object.keys(data), ...Object.keys(oldData)]);
         allKeys.forEach(k => {
-          if(JSON.stringify(data[k]) !== JSON.stringify(oldData[k])){
+          if (JSON.stringify(data[k]) !== JSON.stringify(oldData[k])) {
             const shop = k.split('|')[1];
-            if(shop) changedShops.add(shop);
+            if (shop) changedShops.add(shop);
           }
         });
         console.warn('[profit subscribe] 收到變動，影響賣場：', [...changedShops]);
         Store._profitMem = data;
-        // 只通知有變動的賣場
         window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
-        // 淨利表資料變動 → 觸發 re-render 讓畫面同步（只有賣場資料變動才觸發，避免總表編輯閃爍）
         const _hasSummaryOnly = changedShops.size === 0;
         const _justSaved = (window._summaryJustSaved && (Date.now() - window._summaryJustSaved < 5000))
                         || (window._shopJustSaved   && (Date.now() - window._shopJustSaved   < 5000));
         if (!_hasSummaryOnly && !_justSaved && window.App && App.currentUser && typeof App.render === 'function') {
           try { App.render(); } catch {}
         }
-      }, err => {
-        console.error('[profit subscribe] 訂閱失敗：', err);
+      };
+      onSnapshot(profitDocRef, snap => {
+        profitParts.current = snap.exists() ? (snap.data() || {}) : {};
+        mergeAndNotify();
+      }, err => { console.error('[profit subscribe] 訂閱失敗：', err); });
+      profitArchiveRefs.forEach((ref, idx) => {
+        onSnapshot(ref, snap => {
+          profitParts.archives[PROFIT_ARCHIVE_DOCS[idx]] = snap.exists() ? (snap.data() || {}) : {};
+          mergeAndNotify();
+        }, err => { console.error('[profit archive subscribe 失敗]', PROFIT_ARCHIVE_DOCS[idx], err); });
       });
     } catch (e) { console.warn('profit subscribe failed', e); }
 
