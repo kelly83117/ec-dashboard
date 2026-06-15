@@ -8051,7 +8051,14 @@ function lsKey(shop,month,half){return`ec|${shop}|${month}|${half}`;}
 function lsSave(shop,month,half,built,period,days){
   const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
   try{localStorage.setItem(lsKey(shop,month,half),JSON.stringify(payload));}catch(e){alert('儲存失敗');}
-  try{if(window.__cloudProfit)window.__cloudProfit.setField(lsKey(shop,month,half),payload);}catch{}
+  if(window.__cloudProfit){
+    window.__cloudProfit.setField(lsKey(shop,month,half),payload).catch(e=>{
+      console.error('[雲端同步失敗]',e);
+      const msg=e&&e.message||String(e);
+      const tip=msg.includes('maximum allowed size')?'\n\n原因：Firestore 文件超過 1MB 上限，請聯繫 Kelly 清理舊資料。':'';
+      alert('⚠️ 雲端同步失敗，同事將看不到此次資料。\n'+msg+tip);
+    });
+  }
 }
 function lsLoad(shop,month,half){
   const k=lsKey(shop,month,half);
