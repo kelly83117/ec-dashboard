@@ -8462,21 +8462,20 @@ function openUnmatchedModal(shop,unmatched,onConfirm){
     const nameHtml=u.type==='code'
       ? `<div style="font-size:12px;color:#374151;font-weight:600">${u.code}</div><div style="font-size:11px;color:#6b7280;margin-top:2px;max-width:240px;word-break:break-all">${u.name||''}</div><div style="font-size:12px;color:#b45309;font-weight:600;margin-top:3px">廣告費: $${fmtN(Math.round(u.spend))}</div>`
       : `<div style="font-size:12px;color:#374151;font-family:monospace">${u.sid}</div><div style="font-size:12px;color:#b45309;font-weight:600;margin-top:3px">花費: $${fmtN(Math.round(u.spend))}</div>`;
-    const defaultNew=u.spend<10;
     return `<tr style="border-bottom:1px solid #f0f0f0">
       <td style="padding:10px 12px;vertical-align:top;min-width:220px">${nameHtml}</td>
       <td style="padding:10px 12px;vertical-align:top;min-width:260px">
         <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;cursor:pointer">
-          <input type="radio" name="um-${i}" value="merge" ${defaultNew?'':'checked'} onchange="umToggle(${i})"> 加到現有商品
+          <input type="radio" name="um-${i}" value="merge" checked onchange="umToggle(${i})"> 加到現有商品
         </label>
-        <div id="um-wrap-${i}" style="position:relative;margin-bottom:6px;${defaultNew?'display:none':''}">
+        <div id="um-wrap-${i}" style="position:relative;margin-bottom:6px;">
           <input id="um-inp-${i}" type="text" placeholder="搜尋商品編號或名稱…" oninput="umSearch(${i})" onfocus="umSearch(${i})" onblur="setTimeout(()=>umHideDrop(${i}),200)"
             style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:12px">
           <input type="hidden" id="um-sel-${i}" value="">
           <div id="um-drop-${i}" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e5e7eb;border-radius:6px;max-height:160px;overflow-y:auto;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.1)"></div>
         </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-          <input type="radio" name="um-${i}" value="new" ${defaultNew?'checked':''} onchange="umToggle(${i})"> 直接新增到最下面
+          <input type="radio" name="um-${i}" value="new" onchange="umToggle(${i})"> 直接新增到最下面
         </label>
       </td>
     </tr>`;
