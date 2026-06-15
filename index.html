@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-41">
+<meta name="app-version" content="2026-06-11-42">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -3616,12 +3616,12 @@ const App = {
 
           <div style="background:#dbeafe;border-left:3px solid #1d4ed8;padding:6px 10px;font-weight:700;color:#1d4ed8;border-radius:4px;margin-bottom:6px">轉換類（皆需 點擊率 &gt; <input id="ths-ctrMin" type="number" value="${T.ctrMin}" step="0.5" style="width:55px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;text-align:right;font-variant-numeric:tabular-nums">%）</div>
           <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:0 6px 4px">
-            <label>❎ 零轉換</label>
-            <span style="color:var(--text-muted);font-size:12px">轉換率 = 0%</span>
             <label>🟢 弱轉換：轉換率 範圍</label>
             ${rangeInp('ths-weakConvMin', T.weakConvMin, 'ths-weakConvMax', T.weakConvMax)}
             <label>🟩 轉換偏低：轉換率 範圍</label>
             ${rangeInp('ths-lowConvMin', T.lowConvMin, 'ths-lowConvMax', T.lowConvMax)}
+            <label>❎ 零轉換</label>
+            <span style="color:var(--text-muted);font-size:12px">轉換率 = 0% 且 點擊率 &gt; 3%</span>
           </div>
         </div>
         <div style="margin-top:14px;padding:10px;background:var(--bg);border-radius:6px;font-size:11px;color:var(--text-muted);line-height:1.6">
