@@ -9613,6 +9613,7 @@ function getNotes(shop){
   try{ return migrate(JSON.parse(localStorage.getItem(k)||'{}')); }catch{return{};}
 }
 function saveNotes(shop,notes){
+  window._shopJustSaved=Date.now();
   const k='ec_notes|'+shop;
   try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
   try{ if(window.__cloudProfit) window.__cloudProfit.setField(k,notes); }catch{}
