@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-38">
+<meta name="app-version" content="2026-06-11-39">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2359,11 +2359,11 @@ const App = {
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
-    // 大類分組（成長類/下滑類/轉換類）色票
+    // 大類分組色票（成長=黃 / 轉換=綠 / 下滑=橘）
     const GROUP_STYLE = {
-      '成長類': { color: '#15803d', bg: '#dcfce7', band: '#22c55e' },
-      '下滑類': { color: '#b91c1c', bg: '#fee2e2', band: '#ef4444' },
-      '轉換類': { color: '#1d4ed8', bg: '#dbeafe', band: '#3b82f6' },
+      '成長類': { color: '#a16207', bg: '#fef9c3', band: '#eab308' },
+      '下滑類': { color: '#c2410c', bg: '#ffedd5', band: '#f97316' },
+      '轉換類': { color: '#15803d', bg: '#dcfce7', band: '#22c55e' },
     };
     // 由細分類標籤推大類（用於上色和分組）
     const groupOf = (label) => {
@@ -2385,19 +2385,23 @@ const App = {
     //     🟩 轉換偏低 = 轉換率 3%~6%
     //   過去週期沒有自己的轉換/點擊資料，沿用「當前」的轉換率與點擊率做 fallback 判斷（與 Sheet 母表邏輯一致）
     const classifyMetrics = (growthRate, convRate, clicks, impressions, ctr) => {
+      // 同大類用相同色（成長類=黃 / 下滑類=橘 / 轉換類=綠），方便視覺分群
+      const GROW = { color: '#a16207', bg: '#fef9c3' };  // 黃
+      const DROP = { color: '#c2410c', bg: '#ffedd5' };  // 橘
+      const CONV = { color: '#15803d', bg: '#dcfce7' };  // 綠
       if (growthRate !== null && growthRate !== undefined) {
         const g = growthRate * 100;
-        if (g > T.explosion)  return { label: '🟡 爆發品', color: '#a16207', bg: '#fef9c3' };
-        if (g >= T.growth)    return { label: '🟨 成長品', color: '#ca8a04', bg: '#fef9c3' };
-        if (g < T.heavyDrop)  return { label: '🔴 重跌品', color: '#dc2626', bg: '#fee2e2' };
-        if (g <= T.drop)      return { label: '🟥 衰退品', color: '#ea580c', bg: '#fed7aa' };
+        if (g > T.explosion)  return { label: '🟡 爆發品', ...GROW };
+        if (g >= T.growth)    return { label: '🟨 成長品', ...GROW };
+        if (g < T.heavyDrop)  return { label: '🔴 重跌品', ...DROP };
+        if (g <= T.drop)      return { label: '🟥 衰退品', ...DROP };
       }
       const ctrPct = (ctr || 0) * 100;
       const convPct = (convRate || 0) * 100;
       if (ctrPct > T.ctrMin) {
-        if (convRate === 0)                                              return { label: '❎ 零轉換',   color: '#b91c1c', bg: '#fee2e2' };
-        if (convPct >= T.weakConvMin && convPct < T.weakConvMax)         return { label: '🟢 弱轉換',   color: '#10b981', bg: '#d1fae5' };
-        if (convPct >= T.lowConvMin && convPct <= T.lowConvMax)          return { label: '🟩 轉換偏低', color: '#15803d', bg: '#dcfce7' };
+        if (convRate === 0)                                              return { label: '❎ 零轉換',   ...CONV };
+        if (convPct >= T.weakConvMin && convPct < T.weakConvMax)         return { label: '🟢 弱轉換',   ...CONV };
+        if (convPct >= T.lowConvMin && convPct <= T.lowConvMax)          return { label: '🟩 轉換偏低', ...CONV };
       }
       return null;
     };
