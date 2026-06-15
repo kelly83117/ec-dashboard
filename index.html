@@ -9004,54 +9004,51 @@ function buildDistHtml(shop,built){
   const noAds=built.filter(r=>r.adsFee===0);
   const adsTotal=ads.length;
   const noAdsTotal=noAds.length;
-  const avgBudget=adsTotal>0?Math.round(ads.reduce((s,r)=>s+r.dayBudget,0)/adsTotal):0;
+  const adsWithBudget=ads.filter(r=>r.dayBudget>0);
+  const avgBudget=adsWithBudget.length>0?Math.round(adsWithBudget.reduce((s,r)=>s+r.dayBudget,0)/adsWithBudget.length):0;
   const pct=(n,d)=>d>0?Math.round(n/d*100)+'%':'0%';
   const H=r=>r.pureRate*100;
   const aC=(fn)=>ads.filter(fn).length;
   const nC=(fn)=>noAds.filter(fn).length;
-  const T='border-collapse:collapse;width:100%;margin-bottom:24px';
-  const B='1px solid #e2e8f0';
-  const th=(t,bg)=>`<th style="background:${bg};color:#fff;padding:7px 10px;font-size:12px;font-weight:700;text-align:center;border:${B}">${t}</th>`;
-  const td=(t,s='')=>`<td style="padding:6px 10px;font-size:12px;text-align:center;border:${B};${s}">${t}</td>`;
-  const tdL=(t,rs,s='')=>`<td rowspan="${rs}" style="padding:6px 10px;font-size:12px;text-align:center;font-weight:700;border:${B};${s}">${t}</td>`;
-  const rMeta=(label,val)=>`<tr style="background:#f8fafc"><td colspan="3" style="padding:5px 12px;font-size:12px;border:${B}"><b>${label}</b></td><td style="padding:5px 12px;font-size:12px;font-weight:700;border:${B}">${val}</td></tr>`;
+  // Colors
+  const BLU_HD='#2E5496'; const BLU_HI='#4472C4'; const BLU_LT='#D9E2F3'; const BLU_LB='#BDD7EE';
+  const ORG_HD='#C55A11'; const ORG_HI='#ED7D31'; const ORG_LT='#FCE4D6'; const ORG_LB='#F4B183';
+  const GRN_HD='#2E75B6'; const GRN_HI='#5B9BD5'; const GRN_LT='#DDEBF7';
+  const BDR='1px solid #c8d6e8';
+
+  const T='border-collapse:collapse;width:100%;margin-bottom:28px;border-radius:6px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08)';
+  const th=(t,bg)=>`<th style="background:${bg};color:#fff;padding:8px 12px;font-size:12px;font-weight:700;text-align:center;border:${BDR}">${t}</th>`;
+  const td=(t,bg='#fff',color='#222',bold=false)=>`<td style="padding:6px 12px;font-size:12px;text-align:center;border:${BDR};background:${bg};color:${color};font-weight:${bold?'700':'400'}">${t}</td>`;
+  const tdL=(t,rs,bg,color='#fff')=>`<td rowspan="${rs}" style="padding:6px 12px;font-size:12px;text-align:center;font-weight:700;border:${BDR};background:${bg};color:${color}">${t}</td>`;
+  const rMeta=(label,val,bg='#f0f4fa')=>`<tr><td colspan="3" style="padding:7px 14px;font-size:12px;border:${BDR};background:${bg}"><b>${label}</b></td><td style="padding:7px 14px;font-size:13px;font-weight:700;border:${BDR};background:${bg}">${val}</td></tr>`;
 
   // pureRate sub-rows for ads
   const aPureSub=[['< 0%',aC(r=>H(r)<0)],['0% - 10%',aC(r=>H(r)>=0&&H(r)<10)],['10% - 15%',aC(r=>H(r)>=10&&H(r)<15)],['15% - 20%',aC(r=>H(r)>=15&&H(r)<20)],['20% - 30%',aC(r=>H(r)>=20&&H(r)<30)],['>30%',aC(r=>H(r)>=30)]];
   // budget sub-rows for ads
-  const aBudSub=[['< $100',aC(r=>r.dayBudget>0&&r.dayBudget<100)],['$100 - $200',aC(r=>r.dayBudget>=100&&r.dayBudget<200)],['$200 - $300',aC(r=>r.dayBudget>=200&&r.dayBudget<300)],['$300 - $400',aC(r=>r.dayBudget>=300&&r.dayBudget<400)],['> $400',aC(r=>r.dayBudget>=400)]];
-  const pRS=2+aPureSub.length; // rowspan for 淨利率 = 2 highlight + sub
-  const bRS=2+aBudSub.length;  // rowspan for 日預算
+  const aBudSub=[['< $100',aC(r=>r.dayBudget<100)],['$100 - $200',aC(r=>r.dayBudget>=100&&r.dayBudget<200)],['$200 - $300',aC(r=>r.dayBudget>=200&&r.dayBudget<300)],['$300 - $400',aC(r=>r.dayBudget>=300&&r.dayBudget<400)],['> $400',aC(r=>r.dayBudget>=400)]];
+  const pct=(n,d)=>d>0?Math.round(n/d*100)+'%':'0%';
 
-  const blu='background:#dbeafe;color:#1e40af;font-weight:700;';
+  const n20p=aC(r=>H(r)>=20), n20m=aC(r=>H(r)<20);
+  const nB200p=aC(r=>r.dayBudget>200), nB200m=aC(r=>r.dayBudget<=200);
 
   const adsRows=`
-    <tr style="background:#dbeafe">
-      ${tdL('淨利率',pRS,'background:#dbeafe;color:#1e40af;')}
-      ${td('>20%',blu)}${td(aC(r=>H(r)>=20),blu)}${td(pct(aC(r=>H(r)>=20),adsTotal),blu)}
-    </tr>
-    <tr style="background:#dbeafe">
-      ${td('<20%',blu)}${td(aC(r=>H(r)<20),blu)}${td(pct(aC(r=>H(r)<20),adsTotal),blu)}
-    </tr>
-    ${aPureSub.map(([l,n])=>`<tr>${td(l)}${td(n)}${td(pct(n,adsTotal))}</tr>`).join('')}
-    <tr>
-      ${tdL('日預算',bRS,'')}
-      ${td('>$200')}${td(aC(r=>r.dayBudget>200))}${td(pct(aC(r=>r.dayBudget>200),adsTotal))}
-    </tr>
-    <tr>
-      ${td('<$200')}${td(aC(r=>r.dayBudget<=200&&r.dayBudget>0))}${td(pct(aC(r=>r.dayBudget<=200&&r.dayBudget>0),adsTotal))}
-    </tr>
-    ${aBudSub.map(([l,n])=>`<tr>${td(l)}${td(n)}${td(pct(n,adsTotal))}</tr>`).join('')}`;
+    <tr>${tdL('淨利率',2,BLU_HI)}${td('>20%',BLU_HI,'#fff',true)}${td(n20p,BLU_HI,'#fff',true)}${td(pct(n20p,adsTotal),BLU_HI,'#fff',true)}</tr>
+    <tr>${td('<20%',BLU_HI,'#fff',true)}${td(n20m,BLU_HI,'#fff',true)}${td(pct(n20m,adsTotal),BLU_HI,'#fff',true)}</tr>
+    ${aPureSub.map(([l,n],i)=>`<tr>${i===0?tdL('淨利率階層',aPureSub.length,BLU_LB,'#1a3260'):''
+      }${td(l,BLU_LT,'#1a3260')}${td(n,BLU_LT,'#1a3260')}${td(pct(n,adsTotal),BLU_LT,'#1a3260')}</tr>`).join('')}
+    <tr>${tdL('日預算',2,ORG_HI)}${td('>$200',ORG_HI,'#fff',true)}${td(nB200p,ORG_HI,'#fff',true)}${td(pct(nB200p,adsTotal),ORG_HI,'#fff',true)}</tr>
+    <tr>${td('<$200',ORG_HI,'#fff',true)}${td(nB200m,ORG_HI,'#fff',true)}${td(pct(nB200m,adsTotal),ORG_HI,'#fff',true)}</tr>
+    ${aBudSub.map(([l,n],i)=>`<tr>${i===0?tdL('日預算階層',aBudSub.length,ORG_LB,'#5c2000'):''
+      }${td(l,ORG_LT,'#5c2000')}${td(n,ORG_LT,'#5c2000')}${td(pct(n,adsTotal),ORG_LT,'#5c2000')}</tr>`).join('')}`;
 
   // no-ads pureRate sub-rows
   const nPureSub=[['< 0%',nC(r=>H(r)<0)],['0% - 10%',nC(r=>H(r)>=0&&H(r)<10)],['10% - 20%',nC(r=>H(r)>=10&&H(r)<20)],['20% - 30%',nC(r=>H(r)>=20&&H(r)<30)],['30% - 40%',nC(r=>H(r)>=30&&H(r)<40)],['>40%',nC(r=>H(r)>=40)]];
-  const noAdsRows=nPureSub.map(([l,n],i)=>`<tr>${i===0?tdL('淨利率',nPureSub.length,''):''
-    }${td(l)}${td(n)}${td(pct(n,noAdsTotal))}</tr>`).join('');
+  const noAdsRows=nPureSub.map(([l,n],i)=>`<tr>${i===0?tdL('淨利率',nPureSub.length,GRN_HI):''
+    }${td(l,GRN_LT,'#1a3260')}${td(n,GRN_LT,'#1a3260')}${td(pct(n,noAdsTotal),GRN_LT,'#1a3260')}</tr>`).join('');
 
-  const grnHd='#166534';
   return `
   <table style="${T}">
-    <thead><tr>${th('欄位','#1e3a8a')}${th('項目（扣除廣告費）','#1e3a8a')}${th('數量','#1e3a8a')}${th('商品數量佔比 %','#1e3a8a')}</tr></thead>
+    <thead><tr>${th('欄位',BLU_HD)}${th('項目（扣除廣告費）',BLU_HD)}${th('數量',BLU_HD)}${th('商品數量佔比 %',BLU_HD)}</tr></thead>
     <tbody>
       ${rMeta('總投廣商品數量',adsTotal)}
       ${rMeta('投廣日預算均值','NT$'+avgBudget)}
@@ -9059,9 +9056,9 @@ function buildDistHtml(shop,built){
     </tbody>
   </table>
   <table style="${T}">
-    <thead><tr>${th('欄位',grnHd)}${th('項目（廣告費為 $0）',grnHd)}${th('數量',grnHd)}${th('商品數量佔比 %',grnHd)}</tr></thead>
+    <thead><tr>${th('欄位',GRN_HD)}${th('項目（廣告費為 $0）',GRN_HD)}${th('數量',GRN_HD)}${th('商品數量佔比 %',GRN_HD)}</tr></thead>
     <tbody>
-      ${rMeta('未投廣商品數量',noAdsTotal)}
+      ${rMeta('未投廣商品數量',noAdsTotal,'#e8f4fc')}
       ${noAdsRows}
     </tbody>
   </table>`;
