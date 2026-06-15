@@ -8402,7 +8402,9 @@ function findUnmatchedAds(shop){
   const pm=s.rawMap||{};
   const mapped=new Set();
   Object.values(pm).forEach(e=>{const sids=Array.isArray(e)?e:(e.sids||[]);sids.forEach(sid=>mapped.add(String(sid)));});
-  return Object.entries(adsById).filter(([sid])=>!mapped.has(String(sid))).map(([sid,spend])=>({sid,spend}));
+  const result=Object.entries(adsById).filter(([sid])=>!mapped.has(String(sid))).map(([sid,spend])=>({sid,spend}));
+  console.log(`[${shop}] rawAds有花費ID數:${Object.keys(adsById).length}, 已對應:${Object.keys(adsById).length-result.length}, 未對應:${result.length}`, result.map(r=>r.sid));
+  return result;
 }
 
 function generate(shop){
