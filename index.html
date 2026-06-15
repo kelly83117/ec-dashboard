@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-44">
+<meta name="app-version" content="2026-06-11-46">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -8078,6 +8078,22 @@ let curShop='總表';
 let openPopup=null;
 
 // ── Storage（雲端優先、本地為快取後備） ──
+// 雲端寫入失敗時必須讓使用者知道（不能靜默吞掉），否則資料只留本機，重整就消失
+function _cloudWriteSafe(key, payload, label){
+  if(!window.__cloudProfit){
+    alert('⚠️ 雲端未連線，資料只存在本機，重新整理會消失。\n本次寫入：' + (label || key));
+    return;
+  }
+  window.__cloudProfit.setField(key, payload).catch(e => {
+    const msg = String(e && e.message || e);
+    if(msg.indexOf('exceeds the maximum allowed size') >= 0){
+      alert('⚠️ 雲端寫入失敗：' + (label || key) + '\n\n單檔 1MB 已滿，請通知 Kelly 把舊月份搬到 archive。\n資料還在本機，重整前請先匯出 Excel 備份！');
+    } else {
+      alert('⚠️ 雲端寫入失敗：' + (label || key) + '\n\n錯誤：' + msg + '\n資料只存本機，重整會消失。請聯絡 Kelly。');
+    }
+    console.error('[cloud write fail]', label || key, e);
+  });
+}
 function lsKey(shop,month,half){return`ec|${shop}|${month}|${half}`;}
 function lsSave(shop,month,half,built,period,days){
   const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
@@ -8896,7 +8912,7 @@ function _cloudRead(k){
 function _cloudWrite(k,v){
   window._shopJustSaved=Date.now();
   try{localStorage.setItem(k,JSON.stringify(v));}catch{}
-  try{ if(window.__cloudProfit) window.__cloudProfit.setField(k,v); }catch{}
+  _cloudWriteSafe(k, v, k);
 }
 function getAnaThresh(){const v=_cloudRead('ec_ana_thresh'); return Object.assign({},ANA_THRESH_DEF,v||{});}
 function saveAnaThresh(t){_cloudWrite('ec_ana_thresh',t);}
@@ -9599,7 +9615,7 @@ function saveEdits(shop,edits){
   window._shopJustSaved=Date.now();
   const k='ec_edits|'+shop;
   try{localStorage.setItem(k,JSON.stringify(edits));}catch{}
-  try{if(window.__cloudProfit)window.__cloudProfit.setField(k,edits);}catch{}
+  _cloudWriteSafe(k, edits, shop+' 編輯紀錄');
 }
 function getNotes(shop){
   const k='ec_notes|'+shop;
@@ -9616,7 +9632,7 @@ function saveNotes(shop,notes){
   window._shopJustSaved=Date.now();
   const k='ec_notes|'+shop;
   try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
-  try{ if(window.__cloudProfit) window.__cloudProfit.setField(k,notes); }catch{}
+  _cloudWriteSafe(k, notes, shop+' 備註');
 }
 function buildNoteCell(shopKey,code,noteId,noteData){
   let adjList=[];
@@ -10021,7 +10037,7 @@ function getSummaryRows(){
 function saveSummaryRows(rows){
   window._summaryJustSaved=Date.now();
   try{localStorage.setItem('ec_summary_v1',JSON.stringify(rows));}catch{}
-  try{if(window.__cloudProfit)window.__cloudProfit.setField('_summary_v1',rows);}catch{}
+  _cloudWriteSafe('_summary_v1', rows, '總表');
 }
 function openAddSummaryRowModal(){
   const today=new Date();
