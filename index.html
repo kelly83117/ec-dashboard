@@ -7686,6 +7686,7 @@ td{padding:11px 18px;border-bottom:1px solid #f0f2f7;text-align:right;color:#374
 td.tl{text-align:left;}
 .tscroll td.tl{text-align:left;}
 tbody tr:hover td{background:#fafbff;}
+tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .td-code{font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#374151;min-width:44px;padding-right:4px;white-space:nowrap;}
 .td-id{font-family:'DM Mono',monospace;font-size:12px;color:#9ca3af;min-width:140px;padding-right:16px;}
 .td-name{font-weight:700;color:#1a1a2e;white-space:nowrap;min-width:180px;max-width:280px;overflow:hidden;text-overflow:ellipsis;font-size:15px;}
@@ -8807,9 +8808,8 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit){
   const D=adsFee, H=pureRate*100, K=targetROI, N=roiDiff, O=clicks, P=pureProfit;
   if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
   if(ok('高利潤商品')&&D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
-  if(ok('低淨利')&&D===0 && (N===null||N===undefined||!isFinite(N))) return{label:'低淨利',cls:'tag-low'};
   if(ok('賠錢中')&&D>0 && H<0) return{label:'賠錢中',cls:'tag-lose'};
-  if(ok('低淨利')&&D>0 && K!==null && K!==undefined && K<0) return{label:'低淨利',cls:'tag-low'};
+  if(ok('低淨利')&&D>0 && ((K!==null&&K!==undefined&&K<0)||(N===null||N===undefined||!isFinite(N)))) return{label:'低淨利',cls:'tag-low'};
   if(ok('低效廣告')&&D>0 && H>=0 && H<t.badAdsMaxH) return{label:'低效廣告',cls:'tag-bad'};
   for(const ct of getCustomAnaRules()){
     if(evalAnaConds(ct.conds,{D,H,K,N,O,P}))return{label:ct.label,cls:ct.cls||'tag-add100'};
@@ -9068,7 +9068,7 @@ function renderAnaModalBody(){
     <div class="ana-sec-hdr">分析標籤</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 > ${inp('highMinH',t.highMinH,'0.1')} %</span>${trash('高利潤商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">廣告費 > 0 且 純利率 &lt; 0%</span>${trash('賠錢中','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">廣告費 > 0 且 目標ROI &lt; 0</span>${trash('低淨利','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">廣告費 > 0 且 目標ROI &lt; 0<br><span style="color:#9ca3af;font-size:11px">或 廣告費 > 0 且 直接ROI差距顯示「—」</span></span>${trash('低淨利','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">危險商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 0%~${inp('dangerMaxH',t.dangerMaxH,'0.1')} %</span>${trash('危險商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-bad">低效廣告</span><span class="ana-rule-desc">廣告費 > 0 且 純利率 &lt; ${inp('badAdsMaxH',t.badAdsMaxH,'0.1')} %</span>${trash('低效廣告','disableAnaTag')}</div>
     <div class="ana-sec-hdr">自訂標籤</div>
@@ -9780,12 +9780,12 @@ function renderTable(shop,list){
   const si=(col)=>ss.col===col?(ss.dir==='asc'?' ▲':' ▼'):'';
   const hasF=(col)=>!!(s.filters?.[col])||ss.col===col;
   const thN=(col,label)=>`<th><div class="th-wrap"><span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',true,this)">▾</button></div></th>`;
-  const thT=(col,label)=>`<th class="tl"><div class="th-wrap tl"><span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',false,this)">▾</button></div></th>`;
+  const thT=(col,label,sticky='')=>`<th class="tl" style="${sticky}"><div class="th-wrap tl"><span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',false,this)">▾</button></div></th>`;
 
   const hc=getHiddenCols(shop);const vc=k=>!hc.has(k);
   let html=`<div class="tscroll"><table><thead><tr>
-    ${thT('code','編號')}
-    ${thT('name','名稱 / ID')}
+    ${thT('code','編號','position:sticky;left:0;z-index:4;background:#f8f9fc')}
+    ${thT('name','名稱 / ID','position:sticky;left:60px;z-index:4;background:#f8f9fc')}
     ${vc('adsFee')?thN('adsFee','廣告費'):''}
     ${vc('rev')?thN('rev',shop==='好麻吉'?'營收 / 上半月':'營收'):''}
     ${vc('gross')?thN('gross','毛利'):''}
@@ -9831,8 +9831,8 @@ function renderTable(shop,list){
       const adsId=`td-${shop}-${r.code}-adsFee`;
       const noRevSpan=[vc('rev'),vc('gross'),vc('pureProfit'),vc('pureRate'),vc('adsPct'),vc('stock'),vc('targetROI'),vc('directROI'),vc('roi'),vc('roiDiff'),vc('clicks'),vc('dayBudget'),vc('analysisLabel')].filter(Boolean).length;
       html+=`<tr class="tr-no-rev">
-        <td class="tl td-code">${r.code}</td>
-        <td class="tl td-name" style="color:#9ca3af">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
+        <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
+        <td class="tl td-name" style="position:sticky;left:60px;background:#fff;z-index:2;color:#9ca3af">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         ${vc('adsFee')?`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">${fmtAds(r.adsFee)}</span></td>`:''}
         ${noRevSpan>0?`<td colspan="${noRevSpan}" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>`:''}
         ${vc('note')?buildNoteCell(shop,r.code,noteId,notes[r.code]):''}
@@ -9840,8 +9840,8 @@ function renderTable(shop,list){
       </tr>`;
     }else{
       html+=`<tr>
-        <td class="tl td-code">${r.code}</td>
-        <td class="tl td-name">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
+        <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
+        <td class="tl td-name" style="position:sticky;left:60px;background:#fff;z-index:2">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         ${vc('adsFee')?editTd('adsFee',fmtAds(r.adsFee),'td-amber'):''}
         ${vc('rev')?`<td class="td-num">$${fmtN(r.rev)}${shop==='好麻吉'?`<div class="sub-rev">${r.prevRev!==null?'上半月 $'+fmtN(r.prevRev):'—'}</div>`:''}</td>`:''}
         ${vc('gross')?`<td class="td-num">$${fmtN(r.gross)}</td>`:''}
