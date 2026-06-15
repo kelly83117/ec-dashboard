@@ -9066,11 +9066,11 @@ function renderAnaModalBody(){
     <div class="ana-rule-row"><span class="ana-rule-tag tag-sub200">減200</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub200',t.sub200)}</span>${trash('減200','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-sub100">減100</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub100',t.sub100)}</span>${trash('減100','disableAnaTag')}</div>
     <div class="ana-sec-hdr">分析標籤</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">D=0 且 H > ${inp('highMinH',t.highMinH,'0.1')} %</span>${trash('高利潤商品','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">D > 0 且 H &lt; 0%</span>${trash('賠錢中','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">D > 0 且 目標ROI &lt; 0</span>${trash('低淨利','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">危險商品</span><span class="ana-rule-desc">D=0 且 H 0%~${inp('dangerMaxH',t.dangerMaxH,'0.1')} %</span>${trash('危險商品','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-bad">低效廣告</span><span class="ana-rule-desc">D > 0 且 H &lt; ${inp('badAdsMaxH',t.badAdsMaxH,'0.1')} %</span>${trash('低效廣告','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 > ${inp('highMinH',t.highMinH,'0.1')} %</span>${trash('高利潤商品','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">廣告費 > 0 且 純利率 &lt; 0%</span>${trash('賠錢中','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">廣告費 > 0 且 目標ROI &lt; 0</span>${trash('低淨利','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">危險商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 0%~${inp('dangerMaxH',t.dangerMaxH,'0.1')} %</span>${trash('危險商品','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-bad">低效廣告</span><span class="ana-rule-desc">廣告費 > 0 且 純利率 &lt; ${inp('badAdsMaxH',t.badAdsMaxH,'0.1')} %</span>${trash('低效廣告','disableAnaTag')}</div>
     <div class="ana-sec-hdr">自訂標籤</div>
     <div id="ana-custom-list">${customRows}</div>
     ${disabledSection}
