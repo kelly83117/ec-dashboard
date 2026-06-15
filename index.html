@@ -9478,7 +9478,7 @@ function startEdit(shop,code,col,tdId){
   const cur=(edits[code]?.[col]!==undefined)?edits[code][col]:r[col];
   _adsEditPending={shop,code,col,tdId};
   document.getElementById('ads-edit-product').textContent=r.name+' ('+r.code+')';
-  document.getElementById('ads-edit-current').textContent='$'+fmtN(r.adsFee);
+  document.getElementById('ads-edit-current').textContent=fmtAds(r.adsFee);
   const inp=document.getElementById('ads-edit-input');
   inp.value=isFinite(cur)?+cur.toFixed(0):'';
   updateAdsEditPreview();
@@ -9546,7 +9546,7 @@ function patchRow(shop,code,ov){
   // adsFee cell
   const adsEl=document.getElementById(`td-${shop}-${code}-adsFee`);
   if(adsEl){
-    adsEl.querySelector('.cell-val').textContent='$'+fmtN(r.adsFee);
+    adsEl.querySelector('.cell-val').textContent=fmtAds(r.adsFee);
     adsEl.className=`td-num td-amber ${edited?'cell-edited':''} `.trim();
     adsEl.style.cursor='pointer';
   }
@@ -9779,7 +9779,7 @@ function renderTable(shop,list){
       html+=`<tr class="tr-no-rev">
         <td class="tl td-code">${r.code}</td>
         <td class="tl td-name" style="color:#9ca3af">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
-        ${vc('adsFee')?`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span></td>`:''}
+        ${vc('adsFee')?`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">${fmtAds(r.adsFee)}</span></td>`:''}
         ${noRevSpan>0?`<td colspan="${noRevSpan}" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>`:''}
         ${vc('note')?buildNoteCell(shop,r.code,noteId,notes[r.code]):''}
         ${shop==='好麻吉'?`${vc('growthRate')?'<td></td>':''}${vc('growthAnalysis')?'<td></td>':''}${vc('growthNote')?'<td></td>':''}`:''}
@@ -9788,7 +9788,7 @@ function renderTable(shop,list){
       html+=`<tr>
         <td class="tl td-code">${r.code}</td>
         <td class="tl td-name">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
-        ${vc('adsFee')?editTd('adsFee','$'+fmtN(r.adsFee),'td-amber'):''}
+        ${vc('adsFee')?editTd('adsFee',fmtAds(r.adsFee),'td-amber'):''}
         ${vc('rev')?`<td class="td-num">$${fmtN(r.rev)}${shop==='好麻吉'?`<div class="sub-rev">${r.prevRev!==null?'上半月 $'+fmtN(r.prevRev):'—'}</div>`:''}</td>`:''}
         ${vc('gross')?`<td class="td-num">$${fmtN(r.gross)}</td>`:''}
         ${vc('pureProfit')?`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`:''}
@@ -10160,6 +10160,7 @@ function syncHeaderKpis(shop){
 }
 function num(v){return parseFloat((v+'').replace(/[,$%]/g,'').trim())||0;}
 function fmtN(v){return Math.abs(Math.round(v)).toLocaleString();}
+function fmtAds(v){const n=Math.abs(v);return n===0?'0':n.toLocaleString('zh-TW',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function pill(r){if(r===null||r===undefined)return'<span class="pill pn">—</span>';const c=r>=55?'ph':r>=35?'pm':'pl';return`<span class="pill ${c}">${r.toFixed(1)}%</span>`;}
 
 document.addEventListener('click', function(e) {
