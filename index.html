@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-35">
+<meta name="app-version" content="2026-06-11-36">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -1286,7 +1286,7 @@ const TASK_CATEGORIES = [
     groups: [
       { name: '下滑類', items: ['重跌品', '衰退品'] },
       { name: '成長類', items: ['爆發品', '成長品'] },
-      { name: '轉換類', items: ['弱轉換', '轉換偏低', '零轉換'] },
+      { name: '轉換類', items: ['零轉換', '弱轉換', '轉換偏低'] },
     ],
   },
   {
@@ -2376,35 +2376,34 @@ const App = {
 
     // 完整分類（用使用者設定的門檻）
     // metricsOverride 可指定 growthRate，未指定就用 p 本身（用於計算上週類別）
+    // 依【玩】洞察表規則：7 分類
+    //   成長類（依該期間 growth）：🟡 爆發品 > 50% / 🟨 成長品 10%~50%
+    //   下滑類（依該期間 growth）：🟥 衰退品 -10%~-50% / 🔴 重跌品 < -50%
+    //   轉換類（成長率落在 ±10% 中間時 fallback，皆需點擊率 > 3%）：
+    //     ❎ 零轉換 = 轉換率 0%
+    //     🟢 弱轉換 = 轉換率 1%~3%
+    //     🟩 轉換偏低 = 轉換率 3%~6%
+    //   過去週期沒有自己的轉換/點擊資料，沿用「當前」的轉換率與點擊率做 fallback 判斷（與 Sheet 母表邏輯一致）
     const classifyMetrics = (growthRate, convRate, clicks, impressions, ctr) => {
-      // 成長類（基於 growth rate）— 優先級高
       if (growthRate !== null && growthRate !== undefined) {
         const g = growthRate * 100;
-        if (g > T.explosion)     return { label: '🟡 爆發品',  color: '#a16207', bg: '#fef9c3' };
-        if (g >= T.growth)       return { label: '🟨 成長品',  color: '#ca8a04', bg: '#fef9c3' };
-        if (g < T.heavyDrop)     return { label: '🔴 重跌品',  color: '#dc2626', bg: '#fee2e2' };
-        if (g <= T.drop)         return { label: '🟥 衰退品',  color: '#ea580c', bg: '#fed7aa' };
+        if (g > T.explosion)  return { label: '🟡 爆發品', color: '#a16207', bg: '#fef9c3' };
+        if (g >= T.growth)    return { label: '🟨 成長品', color: '#ca8a04', bg: '#fef9c3' };
+        if (g < T.heavyDrop)  return { label: '🔴 重跌品', color: '#dc2626', bg: '#fee2e2' };
+        if (g <= T.drop)      return { label: '🟥 衰退品', color: '#ea580c', bg: '#fed7aa' };
       }
-      // 轉換類（需要點擊率 > T.ctrMin，例：> 3%）
       const ctrPct = (ctr || 0) * 100;
       const convPct = (convRate || 0) * 100;
       if (ctrPct > T.ctrMin) {
-        if (convRate === 0)                                              return { label: '🟩 零轉換',   color: '#22c55e', bg: '#dcfce7' };
+        if (convRate === 0)                                              return { label: '❎ 零轉換',   color: '#b91c1c', bg: '#fee2e2' };
         if (convPct >= T.weakConvMin && convPct < T.weakConvMax)         return { label: '🟢 弱轉換',   color: '#10b981', bg: '#d1fae5' };
-        if (convPct >= T.lowConvMin && convPct <= T.lowConvMax)          return { label: '🟢 轉換偏低', color: '#10b981', bg: '#d1fae5' };
+        if (convPct >= T.lowConvMin && convPct <= T.lowConvMax)          return { label: '🟩 轉換偏低', color: '#15803d', bg: '#dcfce7' };
       }
       return null;
     };
-    const classifyProduct = (p) => classifyMetrics(p.growthRate, p.convRate, p.clicks, p.impressions, p.ctr);
-    // 往年週次只能用 growth（沒有歷史轉換數據）；落在 ±10% 中間視為「一般」
-    const NEUTRAL = { label: '⚪ 一般', color: '#475569', bg: '#e2e8f0' };
-    const classifyByGrowthOrNeutral = (g) => {
-      if (g === null || g === undefined) return null;
-      const cls = classifyMetrics(g, 0, 0, 0, 0);
-      return cls || NEUTRAL;
-    };
-    const classifyPrev = (p) => classifyByGrowthOrNeutral(p.prevGrowthRate);
-    const classifyPrevPrev = (p) => classifyByGrowthOrNeutral(p.prevPrevGrowthRate);
+    const classifyProduct  = (p) => classifyMetrics(p.growthRate,        p.convRate, p.clicks, p.impressions, p.ctr);
+    const classifyPrev     = (p) => classifyMetrics(p.prevGrowthRate,    p.convRate, p.clicks, p.impressions, p.ctr);
+    const classifyPrevPrev = (p) => classifyMetrics(p.prevPrevGrowthRate, p.convRate, p.clicks, p.impressions, p.ctr);
 
     // 總計
     const totalRev = sorted.reduce((s, p) => s + p.revenue, 0);
@@ -2542,9 +2541,9 @@ const App = {
         { key: '成長品', emoji: '🟨' },
       ]},
       { group: '轉換類', color: '#1d4ed8', items: [
+        { key: '零轉換', emoji: '❎' },
         { key: '弱轉換', emoji: '🟢' },
-        { key: '轉換偏低', emoji: '🟢' },
-        { key: '零轉換', emoji: '🟩' },
+        { key: '轉換偏低', emoji: '🟩' },
       ]},
     ];
 
@@ -3618,12 +3617,12 @@ const App = {
 
           <div style="background:#dbeafe;border-left:3px solid #1d4ed8;padding:6px 10px;font-weight:700;color:#1d4ed8;border-radius:4px;margin-bottom:6px">轉換類（皆需 點擊率 &gt; <input id="ths-ctrMin" type="number" value="${T.ctrMin}" step="0.5" style="width:55px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;text-align:right;font-variant-numeric:tabular-nums">%）</div>
           <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:0 6px 4px">
+            <label>❎ 零轉換</label>
+            <span style="color:var(--text-muted);font-size:12px">轉換率 = 0%</span>
             <label>🟢 弱轉換：轉換率 範圍</label>
             ${rangeInp('ths-weakConvMin', T.weakConvMin, 'ths-weakConvMax', T.weakConvMax)}
-            <label>🟢 轉換偏低：轉換率 範圍</label>
+            <label>🟩 轉換偏低：轉換率 範圍</label>
             ${rangeInp('ths-lowConvMin', T.lowConvMin, 'ths-lowConvMax', T.lowConvMax)}
-            <label>🟩 零轉換</label>
-            <span style="color:var(--text-muted);font-size:12px">轉換率 = 0%</span>
           </div>
         </div>
         <div style="margin-top:14px;padding:10px;background:var(--bg);border-radius:6px;font-size:11px;color:var(--text-muted);line-height:1.6">
@@ -3894,9 +3893,9 @@ const App = {
       const ctrPct = (ctr || 0) * 100;
       const convPct = (conv || 0) * 100;
       if (ctrPct > T.ctrMin) {
-        if (conv === 0) return '🟩 零轉換';
+        if (conv === 0) return '❎ 零轉換';
         if (convPct >= T.weakConvMin && convPct < T.weakConvMax) return '🟢 弱轉換';
-        if (convPct >= T.lowConvMin && convPct <= T.lowConvMax) return '🟢 轉換偏低';
+        if (convPct >= T.lowConvMin && convPct <= T.lowConvMax) return '🟩 轉換偏低';
       }
       return '';
     };
