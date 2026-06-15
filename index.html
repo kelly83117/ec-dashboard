@@ -7488,7 +7488,7 @@ if (window.__cloudStore) {
 <!-- ===================== 雲端同步（Firebase Firestore） ===================== -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
-  import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteField, onSnapshot, FieldPath } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+  import { getFirestore, doc, collection, getDoc, setDoc, updateDoc, deleteField, onSnapshot, FieldPath } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
   const firebaseConfig = {
     apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
@@ -7600,6 +7600,37 @@ if (window.__cloudStore) {
         }, err => { console.error('[profit archive subscribe 失敗]', PROFIT_ARCHIVE_DOCS[idx], err); });
       });
     } catch (e) { console.warn('profit subscribe failed', e); }
+
+    // ===== profits collection：每個賣場×月份×半月 = 獨立文件，永遠不超 1MB =====
+    try {
+      const profitsColRef = collection(db, 'profits');
+      window.__cloudProfitCol = {
+        setReport: (key, value) => setDoc(doc(db, 'profits', key), value),
+      };
+      onSnapshot(profitsColRef, snap => {
+        Store._profitMem = Store._profitMem || {};
+        const incoming = {};
+        snap.forEach(d => { incoming[d.id] = d.data(); });
+        const oldMem = Store._profitMem;
+        const changedShops = new Set();
+        Object.keys(incoming).forEach(k => {
+          if (JSON.stringify(incoming[k]) !== JSON.stringify(oldMem[k])) {
+            const shop = k.split('|')[2]; // ec|profit|shop|month|half
+            if (shop) changedShops.add(shop);
+          }
+        });
+        // 合併：collection 資料 + 原有 app/profit 設定資料（分析條件等）
+        Object.assign(Store._profitMem, incoming);
+        if (changedShops.size > 0) {
+          console.log('[profits collection] 收到更新，影響賣場：', [...changedShops]);
+          window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
+          const _justSaved = (window._shopJustSaved && (Date.now() - window._shopJustSaved < 5000));
+          if (!_justSaved && window.App && App.currentUser && typeof App.render === 'function') {
+            try { App.render(); } catch {}
+          }
+        }
+      }, err => { console.error('[profits collection subscribe 失敗]', err); });
+    } catch (e) { console.warn('profits collection subscribe failed', e); }
 
     window.dispatchEvent(new Event('cloudStoreReady'));
   } catch (e) {
@@ -8051,12 +8082,10 @@ function lsKey(shop,month,half){return`ec|${shop}|${month}|${half}`;}
 function lsSave(shop,month,half,built,period,days){
   const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
   try{localStorage.setItem(lsKey(shop,month,half),JSON.stringify(payload));}catch(e){alert('儲存失敗');}
-  if(window.__cloudProfit){
-    window.__cloudProfit.setField(lsKey(shop,month,half),payload).catch(e=>{
+  if(window.__cloudProfitCol){
+    window.__cloudProfitCol.setReport(lsKey(shop,month,half),payload).catch(e=>{
       console.error('[雲端同步失敗]',e);
-      const msg=e&&e.message||String(e);
-      const tip=msg.includes('maximum allowed size')?'\n\n原因：Firestore 文件超過 1MB 上限，請聯繫 Kelly 清理舊資料。':'';
-      alert('⚠️ 雲端同步失敗，同事將看不到此次資料。\n'+msg+tip);
+      alert('⚠️ 雲端同步失敗，同事將看不到此次資料。\n'+(e&&e.message||String(e)));
     });
   }
 }
@@ -9039,7 +9068,7 @@ function buildDistHtml(shop,built){
   const th=(t,bg)=>`<th style="background:${bg};color:#fff;padding:8px 12px;font-size:12px;font-weight:700;text-align:center;border:${BDR}">${t}</th>`;
   const td=(t,bg='#fff',color='#222',bold=false)=>`<td style="padding:6px 12px;font-size:12px;text-align:center;border:${BDR};background:${bg};color:${color};font-weight:${bold?'700':'400'}">${t}</td>`;
   const tdL=(t,rs,bg,color='#fff')=>`<td rowspan="${rs}" style="padding:6px 12px;font-size:12px;text-align:center;font-weight:700;border:${BDR};background:${bg};color:${color}">${t}</td>`;
-  const rMeta=(label,val,bg='#f0f4fa')=>`<tr><td colspan="3" style="padding:7px 14px;font-size:12px;border:${BDR};background:${bg}"><b>${label}</b></td><td style="padding:7px 14px;font-size:13px;font-weight:700;border:${BDR};background:${bg}">${val}</td></tr>`;
+  const rMeta=(label,val,bg='#f0f4fa')=>`<tr><td colspan="3" style="padding:7px 14px;font-size:12px;border:${BDR};background:${bg};text-align:left"><b>${label}</b></td><td style="padding:7px 14px;font-size:13px;font-weight:700;border:${BDR};background:${bg};text-align:left">${val}</td></tr>`;
 
   // pureRate sub-rows for ads
   const aPureSub=[['< 0%',aC(r=>H(r)<0)],['0% - 10%',aC(r=>H(r)>=0&&H(r)<10)],['10% - 15%',aC(r=>H(r)>=10&&H(r)<15)],['15% - 20%',aC(r=>H(r)>=15&&H(r)<20)],['20% - 30%',aC(r=>H(r)>=20&&H(r)<30)],['>30%',aC(r=>H(r)>=30)]];
