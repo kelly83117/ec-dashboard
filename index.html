@@ -8932,27 +8932,31 @@ function openUploadModal(){
   const ov=document.getElementById('upload-modal-overlay');if(!ov)return;
   const shop=curShop==='總表'?SHOPS[0].id:curShop;
   document.getElementById('upm-shop-hint').textContent='目前賣場：'+shop;
-  function syncCard(id,ok,okIcon,defaultIcon,okLabel,defaultLabel){
-    document.getElementById('upm-'+id).className='ucard'+(ok?' ok':'');
-    document.getElementById('upm-'+id+'-icon').textContent=ok?okIcon:defaultIcon;
-    document.getElementById('upm-'+id+'-title').textContent=ok?okLabel:defaultLabel;
-    document.getElementById('upm-'+id+'-status').textContent=ok?'✅ 已載入':'✗ 未載入';
-    document.getElementById('upm-'+id+'-status').style.color=ok?'#10b981':'#ef4444';
+  function getMeta(key){try{const m=localStorage.getItem(key);return m?JSON.parse(m):null;}catch{return null;}}
+  function syncCard(id,ok,okIcon,defaultIcon,okLabel,defaultLabel,metaKey){
+    const meta=getMeta(metaKey);
+    const wasLoaded=!ok&&!!meta; // 刷新後有紀錄但無資料
+    const show=ok||wasLoaded;
+    document.getElementById('upm-'+id).className='ucard'+(show?' ok':'');
+    document.getElementById('upm-'+id+'-icon').textContent=show?okIcon:defaultIcon;
+    document.getElementById('upm-'+id+'-title').textContent=show?(meta?.name||okLabel).slice(0,22):defaultLabel;
+    document.getElementById('upm-'+id+'-status').textContent=ok?'✅ 已載入':wasLoaded?'✅ 已載入（需重新上傳）':'✗ 未載入';
+    document.getElementById('upm-'+id+'-status').style.color=show?'#10b981':'#ef4444';
     document.getElementById('upm-'+id+'-input').disabled=ok;
     document.getElementById('upm-'+id+'-input').style.pointerEvents=ok?'none':'';
-    document.getElementById('upm-'+id+'-del').style.opacity=ok?'1':'0.35';
-    document.getElementById('upm-'+id+'-del').style.pointerEvents=ok?'':'none';
+    document.getElementById('upm-'+id+'-del').style.opacity=show?'1':'0.35';
+    document.getElementById('upm-'+id+'-del').style.pointerEvents=show?'':'none';
     document.getElementById('upm-'+id).style.cursor=ok?'default':'pointer';
   }
   // sync map card state
   const mapOk=!!globalMap&&Object.keys(globalMap).length>0;
-  syncCard('map',mapOk,'✅','🗂','蝦皮商品清單','蝦皮商品清單');
+  syncCard('map',mapOk,'✅','🗂','蝦皮商品清單','蝦皮商品清單','ec|filemeta|globalMap');
   // sync mobic/ads
   const s=state[shop];
   const mobicOk=!!s.rawMobic;
-  syncCard('mobic',mobicOk,'✅','📦','莫筆克銷售分析','莫筆克銷售分析');
+  syncCard('mobic',mobicOk,'✅','📦','莫筆克銷售分析','莫筆克銷售分析',`ec|filemeta|${shop}|mobic`);
   const adsOk=!!s.rawAds;
-  syncCard('ads',adsOk,'✅','📣','蝦皮廣告報表','蝦皮廣告報表');
+  syncCard('ads',adsOk,'✅','📣','蝦皮廣告報表','蝦皮廣告報表',`ec|filemeta|${shop}|ads`);
   document.getElementById('upm-gen-btn').disabled=!(mobicOk&&adsOk);
   ov.classList.add('open');
 }
@@ -8975,10 +8979,12 @@ function confirmDeleteFile(){
   closeDeleteFileModal();
   if(type==='map'){
     globalMap={};
+    try{localStorage.removeItem('ec|filemeta|globalMap');}catch(e){}
+    SHOPS.forEach(s=>{state[s.id].rawMap={};});
   } else {
     const shop=curShop==='總表'?SHOPS[0].id:curShop;
-    if(type==='mobic')state[shop].rawMobic=null;
-    if(type==='ads')state[shop].rawAds=null;
+    if(type==='mobic'){state[shop].rawMobic=null;try{localStorage.removeItem(`ec|filemeta|${shop}|mobic`);}catch(e){}}
+    if(type==='ads'){state[shop].rawAds=null;try{localStorage.removeItem(`ec|filemeta|${shop}|ads`);}catch(e){}}
     delete state[shop]._built;
   }
   openUploadModal();
