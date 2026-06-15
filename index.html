@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-29">
+<meta name="app-version" content="2026-06-11-30">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2440,7 +2440,7 @@ const App = {
           </div>
           <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:12px;padding:18px;background:#fafbfc">
             ${uploadCards.map(u => `
-              <label style="background:white;border:1px solid ${u.loaded ? '#10b98144' : '#e5e7eb'};border-radius:8px;padding:14px 16px;cursor:pointer;display:block;transition:border-color .12s;position:relative" onmouseover="this.style.borderColor='${u.loaded ? '#10b981' : '#9ca3af'}'" onmouseout="this.style.borderColor='${u.loaded ? '#10b98144' : '#e5e7eb'}'">
+              <label data-drop-input="${u.inputId}" style="background:white;border:1px solid ${u.loaded ? '#10b98144' : '#e5e7eb'};border-radius:8px;padding:14px 16px;cursor:pointer;display:block;transition:border-color .12s,background-color .12s;position:relative" onmouseover="this.style.borderColor='${u.loaded ? '#10b981' : '#9ca3af'}'" onmouseout="this.style.borderColor='${u.loaded ? '#10b98144' : '#e5e7eb'}'">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
                   <span style="font-size:18px">${u.icon}</span>
                   <span style="font-size:14px;font-weight:600;color:var(--text)">${escapeHtml(u.label)}</span>
@@ -3378,6 +3378,54 @@ const App = {
       uploadOverlay.addEventListener('click', (e) => {
         // 點背景關閉，點內部不關
         if (e.target === uploadOverlay) uploadOverlay.style.display = 'none';
+      });
+    }
+
+    // ── 拖放上傳：拖檔案到 label 卡片 → 自動指派給對應的 file input → 觸發 change → 跑原本確認流程 ──
+    document.querySelectorAll('[data-drop-input]').forEach(label => {
+      const inputId = label.dataset.dropInput;
+      label.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        label.style.borderColor = '#5b5fcf';
+        label.style.background = '#eef2ff';
+      });
+      label.addEventListener('dragleave', (e) => {
+        // 離開 label（不是內部子元素）才還原
+        if (e.target === label) {
+          label.style.borderColor = '';
+          label.style.background = '';
+        }
+      });
+      label.addEventListener('drop', (e) => {
+        e.preventDefault();
+        label.style.borderColor = '';
+        label.style.background = '';
+        const file = e.dataTransfer.files?.[0];
+        if (!file) return;
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        // 把拖進來的檔案塞進對應 input + 派發 change 事件，讓原本 handler 跑 confirmUpload + 解析
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          input.files = dt.files;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (err) {
+          console.warn('drag-drop failed', err);
+          showToast('拖放失敗，請改用點擊上傳', 'error');
+        }
+      });
+    });
+    // 全頁面阻擋拖檔到非卡片區域時瀏覽器自動打開檔案
+    if (uploadOverlay && !this._uploadDropGuardBound) {
+      this._uploadDropGuardBound = true;
+      ['dragover', 'drop'].forEach(evt => {
+        window.addEventListener(evt, (e) => {
+          if (uploadOverlay.style.display !== 'flex') return;
+          if (e.target.closest('[data-drop-input]')) return;
+          e.preventDefault();
+        });
       });
     }
 
