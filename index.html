@@ -8472,23 +8472,26 @@ function openUnmatchedModal(shop,unmatched,onConfirm){
     </div>
     <div style="padding:14px 20px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid #e5e7eb">
       <button onclick="document.getElementById('unmatched-modal-ov').remove()" style="padding:8px 18px;border:1.5px solid #e5e7eb;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#6b7280;cursor:pointer">取消</button>
-      <button onclick="confirmUnmatched('${shop}',${JSON.stringify(unmatched).replace(/'/g,"\\'")})" style="padding:8px 18px;border:0;border-radius:8px;background:#5b5fcf;font-size:13px;font-weight:700;color:white;cursor:pointer">確認並產生報表</button>
+      <button onclick="confirmUnmatched()" style="padding:8px 18px;border:0;border-radius:8px;background:#5b5fcf;font-size:13px;font-weight:700;color:white;cursor:pointer">確認並產生報表</button>
     </div>
   </div>`;
   document.body.appendChild(ov);
   ov.onclick=e=>{if(e.target===ov)ov.remove();};
   // store callback
   window._unmatchedCallback=onConfirm;
-  window._unmatchedCount=unmatched.length;
+  window._unmatchedData=unmatched;
+  window._unmatchedShop=shop;
 }
 function umToggle(i){
   const sel=document.getElementById('um-sel-'+i);
   const isMerge=document.querySelector(`input[name="um-${i}"][value="merge"]`)?.checked;
   if(sel)sel.style.display=isMerge?'':'none';
 }
-function confirmUnmatched(shop,unmatched){
+function confirmUnmatched(){
+  const unmatched=window._unmatchedData||[];
+  const shop=window._unmatchedShop;
   const s=state[shop];
-  const n=window._unmatchedCount||unmatched.length;
+  const n=unmatched.length;
   for(let i=0;i<n;i++){
     const isMerge=document.querySelector(`input[name="um-${i}"][value="merge"]`)?.checked;
     const sid=unmatched[i].sid;
