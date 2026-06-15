@@ -9057,14 +9057,14 @@ function renderAnaModalBody(){
       <span class="ana-rule-desc">O欄（過去7天點擊）> ${inp('clickMin',t.clickMin)}</span>
     </div>
     <div class="ana-sec-hdr">加預算</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">加300</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add300',t.add300)} (含)以上</span>${trash('加300','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">加200</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add200',t.add200)} (含)以上</span>${trash('加200','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">加100</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add100',t.add100)} (含)以上</span>${trash('加100','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add50">加50</span><span class="ana-rule-desc">N欄（實際-目標）≥ ${inp('add50',t.add50)} 且 < ${inp('add50max',t.add100)}</span>${trash('加50','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">加300</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add300',t.add300)} (含)以上</span>${trash('加300','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">加200</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add200',t.add200)} (含)以上</span>${trash('加200','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">加100</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add100',t.add100)} (含)以上</span>${trash('加100','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add50">加50</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add50',t.add50)} 且 < ${inp('add50max',t.add100)}</span>${trash('加50','disableAnaTag')}</div>
     <div class="ana-sec-hdr">減預算</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub300">減300</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub300',t.sub300)}</span>${trash('減300','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub200">減200</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub200',t.sub200)}</span>${trash('減200','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub100">減100</span><span class="ana-rule-desc">N欄（實際-目標）≤ ${inp('sub100',t.sub100)}</span>${trash('減100','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub300">減300</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub300',t.sub300)}</span>${trash('減300','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub200">減200</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub200',t.sub200)}</span>${trash('減200','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub100">減100</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub100',t.sub100)}</span>${trash('減100','disableAnaTag')}</div>
     <div class="ana-sec-hdr">分析標籤</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">D=0 且 H > ${inp('highMinH',t.highMinH,'0.1')} %</span>${trash('高利潤商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">D > 0 且 H &lt; 0%</span>${trash('賠錢中','disableAnaTag')}</div>
