@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-40">
+<meta name="app-version" content="2026-06-11-41">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2641,28 +2641,23 @@ const App = {
             hoverPreview = '點此新增備註 / 調整紀錄';
           }
 
-          // 流向：上上上週 → 上上週 → 上週（從舊到新；缺資料的就降級顯示）
+          // 流向：上上上週 → 上上週 → 上週（從舊到新；任一格沒分類就用 — 佔位，不會整欄消失）
           const prevPrevCls = classifyPrevPrev(p);
           const prevPrevGrp = groupOf(prevPrevCls?.label);
           const pill = (c) => `<span style="padding:2px 7px;border-radius:5px;background:${c.bg};color:${c.color};font-weight:700">${escapeHtml(c.label)}</span>`;
+          const emptyPill = '<span style="color:var(--text-muted);font-weight:700;padding:2px 7px">—</span>';
           const arrowOf = (fromGrp, toGrp) => {
             const sameGrp = fromGrp === toGrp;
             const c = sameGrp ? '#9ca3af' : (toGrp === '下滑類' ? '#ef4444' : toGrp === '成長類' ? '#10b981' : '#3b82f6');
             return `<span style="color:${c};font-weight:700">→</span>`;
           };
+          // 只要任一週有分類就顯示完整三格流向；都沒有才整欄降級成 —
           let flowHtml = '—';
-          if (prevPrevCls && prevCls && cls) {
+          if (prevPrevCls || prevCls || cls) {
             flowHtml = `
               <div style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:13px">
-                ${pill(prevPrevCls)}${arrowOf(prevPrevGrp, prevGrp)}${pill(prevCls)}${arrowOf(prevGrp, grp)}${pill(cls)}
+                ${prevPrevCls ? pill(prevPrevCls) : emptyPill}${arrowOf(prevPrevGrp, prevGrp)}${prevCls ? pill(prevCls) : emptyPill}${arrowOf(prevGrp, grp)}${cls ? pill(cls) : emptyPill}
               </div>`;
-          } else if (prevCls && cls) {
-            flowHtml = `
-              <div style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:13px">
-                ${pill(prevCls)}${arrowOf(prevGrp, grp)}${pill(cls)}
-              </div>`;
-          } else if (cls) {
-            flowHtml = `<span style="padding:2px 7px;border-radius:5px;background:${cls.bg};color:${cls.color};font-weight:700;font-size:13px">${escapeHtml(cls.label)}</span>`;
           }
 
           // 大類 chip
