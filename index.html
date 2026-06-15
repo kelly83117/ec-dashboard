@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-11-31">
+<meta name="app-version" content="2026-06-11-32">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2233,7 +2233,7 @@ const App = {
       { key: 'ctr', label: '點擊率' },
       { key: 'convRate', label: '轉換率' },
       { key: 'group', label: '大類' },
-      { key: 'flow', label: '上上週 → 上週' },
+      { key: 'flow', label: '上上上週 → 上上週 → 上週' },
       { key: 'stock', label: '可用庫存' },
       { key: 'note', label: '調整' },
     ];
@@ -2262,10 +2262,14 @@ const App = {
     const salesProducts = sales?.products || [];
     const prevByCode = {};
     (salesPrev?.products || []).forEach(p => { prevByCode[p.code] = p; });
-    // 為了算「上週類別」，需要上週的上週（即比對週的前一週）
+    // 為了算「上上週類別」，需要上上週的上一週
     const salesPrevPrev = (compareIdx + 1 < weeks.length) ? weeks[compareIdx + 1] : null;
     const prevPrevByCode = {};
     (salesPrevPrev?.products || []).forEach(p => { prevPrevByCode[p.code] = p; });
+    // 為了算「上上上週類別」，需要 weeks[3]（隱藏第四週，自動往後推留下來的）
+    const salesPrevPrevPrev = (compareIdx + 2 < weeks.length) ? weeks[compareIdx + 2] : null;
+    const prevPrevPrevByCode = {};
+    (salesPrevPrevPrev?.products || []).forEach(p => { prevPrevPrevByCode[p.code] = p; });
     const perfByShopeeId = perf?.byShopeeId || {};
 
     // 把蝦皮 exclusive 的結束日（例：6/8 00:00 表示截止到 6/7）顯示成 inclusive
@@ -2289,11 +2293,16 @@ const App = {
       const p = shopeeId ? perfByShopeeId[shopeeId] : null;
       const prev = prevByCode[s.code] || null;
       const prevPrev = prevPrevByCode[s.code] || null;
+      const prevPrevPrev = prevPrevPrevByCode[s.code] || null;
       const growthRate = prev && prev.revenue > 0
         ? (s.revenue - prev.revenue) / prev.revenue
         : (s.revenue > 0 && !prev ? null : 0);
       const prevGrowthRate = prev && prevPrev && prevPrev.revenue > 0
         ? (prev.revenue - prevPrev.revenue) / prevPrev.revenue
+        : null;
+      // 上上週 vs 上上上週 → 算出「上上上週類別」用的成長率
+      const prevPrevGrowthRate = prevPrev && prevPrevPrev && prevPrevPrev.revenue > 0
+        ? (prevPrev.revenue - prevPrevPrev.revenue) / prevPrevPrev.revenue
         : null;
       return {
         code: s.code,
@@ -2305,6 +2314,7 @@ const App = {
         prevPrevRevenue: prevPrev?.revenue || 0,
         growthRate,
         prevGrowthRate,
+        prevPrevGrowthRate,
         qty: s.qty || 0,
         profit: s.profit || 0,
         stock: s.stock || 0,
@@ -2379,9 +2389,13 @@ const App = {
       return null;
     };
     const classifyProduct = (p) => classifyMetrics(p.growthRate, p.convRate, p.clicks, p.impressions, p.ctr);
-    // 上週類別只用 growth（沒有歷史的轉換數據）
+    // 上上週類別只用 growth（沒有歷史的轉換數據）
     const classifyPrev = (p) => p.prevGrowthRate !== null
       ? classifyMetrics(p.prevGrowthRate, 0, 0, 0, 0)
+      : null;
+    // 上上上週類別（用 weeks[3] 比較）
+    const classifyPrevPrev = (p) => p.prevPrevGrowthRate !== null
+      ? classifyMetrics(p.prevPrevGrowthRate, 0, 0, 0, 0)
       : null;
 
     // 總計
@@ -2615,15 +2629,25 @@ const App = {
             hoverPreview = '點此新增備註 / 調整紀錄';
           }
 
-          // 流向：上週類別 → 本週類別；只有本週就只顯示本週；都沒有顯示 —
+          // 流向：上上上週 → 上上週 → 上週（從舊到新；缺資料的就降級顯示）
+          const prevPrevCls = classifyPrevPrev(p);
+          const prevPrevGrp = groupOf(prevPrevCls?.label);
+          const pill = (c) => `<span style="padding:2px 7px;border-radius:5px;background:${c.bg};color:${c.color};font-weight:700">${escapeHtml(c.label)}</span>`;
+          const arrowOf = (fromGrp, toGrp) => {
+            const sameGrp = fromGrp === toGrp;
+            const c = sameGrp ? '#9ca3af' : (toGrp === '下滑類' ? '#ef4444' : toGrp === '成長類' ? '#10b981' : '#3b82f6');
+            return `<span style="color:${c};font-weight:700">→</span>`;
+          };
           let flowHtml = '—';
-          if (prevCls && cls) {
-            const arrowColor = prevGrp === grp ? '#9ca3af' : (grp === '下滑類' ? '#ef4444' : grp === '成長類' ? '#10b981' : '#3b82f6');
+          if (prevPrevCls && prevCls && cls) {
             flowHtml = `
               <div style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:13px">
-                <span style="padding:2px 7px;border-radius:5px;background:${prevCls.bg};color:${prevCls.color};font-weight:700">${escapeHtml(prevCls.label)}</span>
-                <span style="color:${arrowColor};font-weight:700">→</span>
-                <span style="padding:2px 7px;border-radius:5px;background:${cls.bg};color:${cls.color};font-weight:700">${escapeHtml(cls.label)}</span>
+                ${pill(prevPrevCls)}${arrowOf(prevPrevGrp, prevGrp)}${pill(prevCls)}${arrowOf(prevGrp, grp)}${pill(cls)}
+              </div>`;
+          } else if (prevCls && cls) {
+            flowHtml = `
+              <div style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:13px">
+                ${pill(prevCls)}${arrowOf(prevGrp, grp)}${pill(cls)}
               </div>`;
           } else if (cls) {
             flowHtml = `<span style="padding:2px 7px;border-radius:5px;background:${cls.bg};color:${cls.color};font-weight:700;font-size:13px">${escapeHtml(cls.label)}</span>`;
@@ -2739,7 +2763,7 @@ const App = {
                 ${visCol('ctr') ? sortableTh('ctr', '點擊率', 'right', 'white-space:nowrap') : ''}
                 ${visCol('convRate') ? sortableTh('convRate', '轉換率', 'center') : ''}
                 ${visCol('group') ? `<th style="padding:10px 4px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">大類</th>` : ''}
-                ${visCol('flow') ? `<th style="padding:10px 4px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上上週 → 上週</th>` : ''}
+                ${visCol('flow') ? `<th style="padding:10px 4px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">上上上週 → 上上週 → 上週</th>` : ''}
                 ${visCol('stock') ? sortableTh('stock', '可用庫存', 'center') : ''}
                 ${visCol('note') ? `<th style="padding:10px 6px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;min-width:130px">調整（最新）</th>` : ''}`;
                 })()}
@@ -3169,17 +3193,19 @@ const App = {
           };
           const weeks = (Store.get(sKey('weeks'), []) || []).slice();
           let shifted = false;
-          // 上傳「本週」時自動往後推：weeks[0] → weeks[1] → weeks[2]，最多保留 3 週
-          // 條件：上傳的是 slot 0 且 period 跟現有 weeks[0] 不同（避免重複上傳同一週導致誤推）
+          // 上傳「上週」時自動往後推：weeks[0] → weeks[1] → weeks[2] → weeks[3]，最多保留 4 週
+          // weeks[3] 是隱藏的第四週（不開上傳卡片），用來算「上上上週」的分類
+          // 條件：上傳的是 slot 0 且 period 跟現有 weeks[0] 不同
           if (slotIdx === 0 && weeks[0] && weeks[0].periodKey !== periodKey) {
+            weeks[3] = weeks[2] || null;
             weeks[2] = weeks[1] || null;
             weeks[1] = weeks[0];
             shifted = true;
           }
           while (weeks.length <= slotIdx) weeks.push(null);
           weeks[slotIdx] = newEntry;
-          // 截斷只保留前 3 週
-          if (weeks.length > 3) weeks.length = 3;
+          // 截斷只保留前 4 週
+          if (weeks.length > 4) weeks.length = 4;
           Store.set(sKey('weeks'), weeks);
           const shiftMsg = shifted ? '（上上週/上上上週已自動往後推）' : '';
           showToast(`${currentShop} · ${slotLabel}已上傳（${result.products.length} 個商品 · ${result.period}）${shiftMsg}`, 'success');
