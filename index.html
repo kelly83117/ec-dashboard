@@ -8298,9 +8298,63 @@ function onMapFile(e,shop){
         if(us)us.textContent=`已載入 ${cnt} 筆`;
         checkReady(s.id);
       });
+      // 驗證對照表
+      validateMapWarnings(globalMap);
     }catch(err){alert('商品清單讀取失敗：'+err.message);}
   };
   r.readAsBinaryString(file);
+}
+
+function validateMapWarnings(gMap){
+  const issues=[];
+  SHOPS.forEach(shopObj=>{
+    const sk=shopObj.id;
+    const map=gMap[sk]||{};
+    const sidToCode={};
+    Object.entries(map).forEach(([code,entry])=>{
+      const sids=Array.isArray(entry)?entry:(entry.sids||[]);
+      sids.forEach(sid=>{
+        if(!sidToCode[sid])sidToCode[sid]=[];
+        sidToCode[sid].push(code);
+      });
+    });
+    Object.entries(sidToCode).forEach(([sid,codes])=>{
+      if(codes.length>1)issues.push({shop:sk,sid,codes});
+    });
+  });
+  if(!issues.length)return;
+  const lines=issues.map(i=>`・[${i.shop}] SID ${i.sid} 同時對應到 ${i.codes.join('、')}（廣告費會重複計算）`).join('\n');
+  showMapWarnBanner(`⚠️ 商品對照表有 ${issues.length} 筆 SID 對應到多個商品編號，廣告費會重複計算：\n\n${lines}`);
+}
+
+function checkAdsReconcile(shop,built){
+  const s=state[shop];
+  if(!s.rawAds||!s.rawAds.length)return;
+  // CSV 廣告費總計（所有 SID 的花費）
+  let csvTotal=0;
+  s.rawAds.forEach(r=>{
+    const sid=(r['商品 ID']||'').trim();
+    const spend=num(r['花費']||0);
+    if(sid&&sid!=='-'&&spend>0)csvTotal+=spend;
+  });
+  // 報表廣告費總計（只有對到商品的）
+  const reportTotal=built.reduce((acc,r)=>acc+(r.adsFee||0),0);
+  const diff=Math.round((reportTotal-csvTotal)*100)/100;
+  if(Math.abs(diff)<0.5)return; // 差不到 $0.50 忽略
+  const sign=diff>0?'+':'';
+  const msg=`[${shop}] 廣告費對帳差異：CSV 總計 ${fmtAds(csvTotal)}，報表合計 ${fmtAds(reportTotal)}（差 ${sign}${fmtAds(diff)}）\n可能原因：商品對照表有 SID 重複對應到多個商品，或有 SID 不在對照表內。`;
+  showMapWarnBanner(msg);
+}
+
+function showMapWarnBanner(msg){
+  let el=document.getElementById('map-warn-banner');
+  if(!el){
+    el=document.createElement('div');
+    el.id='map-warn-banner';
+    el.style.cssText='position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:9999;background:#fff8e6;border:2px solid #f59e0b;border-radius:10px;padding:16px 20px;max-width:680px;width:90vw;box-shadow:0 4px 24px rgba(0,0,0,.15);font-size:13px;line-height:1.7;color:#92400e;white-space:pre-wrap;';
+    document.body.appendChild(el);
+  }
+  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px"><div>${msg.replace(/\n/g,'<br>')}</div><button onclick="document.getElementById('map-warn-banner').remove()" style="flex-shrink:0;background:#f59e0b;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">關閉</button></div>`;
 }
 
 // ── Files ──
@@ -8450,6 +8504,7 @@ function _doGenerate(shop){
       const dotEl=document.getElementById('dot-'+shop);if(dotEl)dotEl.classList.add('on');
       loadIntoUI(shop,built,period,days);
       if(curShop==='總表')renderSummary();
+      checkAdsReconcile(shop,built);
     }catch(err){alert('['+shop+'] 產生失敗：'+err.message+'\n\n'+err.stack);}
     setSpin(shop,false);
   },80);
