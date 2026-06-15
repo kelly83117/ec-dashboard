@@ -8394,12 +8394,15 @@ function getPrevRevMap(shop, month, half) {
 function findUnmatchedAds(shop){
   const s=state[shop];
   if(!s.rawAds||!s.rawAds.length)return[];
-  // 建立 adsById
-  const adsById={};
+  // 建立 adsById 與 sidNames
+  const adsById={};const sidNames={};
   s.rawAds.forEach(r=>{
     const sid=(r['商品 ID']||'').trim();
     const spend=num(r['花費']||0);
-    if(sid&&sid!=='-'&&spend>0)adsById[sid]=(adsById[sid]||0)+spend;
+    if(sid&&sid!=='-'){
+      if(spend>0)adsById[sid]=(adsById[sid]||0)+spend;
+      if(!sidNames[sid]){const n=(r['商品名稱']||r['廣告名稱']||r['名稱']||'').trim();if(n)sidNames[sid]=n;}
+    }
   });
   const pm=s.rawMap||{};
   // 建立 adsByCode 與 sidsForCode
@@ -8413,11 +8416,16 @@ function findUnmatchedAds(shop){
   // Type A：sid 有花費但完全不在 rawMap
   const mapped=new Set();
   Object.values(pm).forEach(e=>{const sids=Array.isArray(e)?e:(e.sids||[]);sids.forEach(sid=>mapped.add(String(sid)));});
-  const typeA=Object.entries(adsById).filter(([sid])=>!mapped.has(String(sid))).map(([sid,spend])=>({type:'sid',sid,spend}));
+  const typeA=Object.entries(adsById).filter(([sid])=>!mapped.has(String(sid))).map(([sid,spend])=>({type:'sid',sid,spend,name:sidNames[sid]||''}));
   // Type B：有廣告費的商品碼，但 rawMobic 這期沒有銷售
   const codesWithSales=new Set();
   (s.rawMobic||[]).forEach(r=>{const c=(r['商品編號']||'').trim();if(c)codesWithSales.add(c);});
-  const typeB=Object.entries(adsByCode).filter(([code])=>!codesWithSales.has(code)).map(([code,spend])=>({type:'code',code,spend,name:nameForCode[code]||'',sids:sidsForCode[code]||[]}));
+  const typeB=Object.entries(adsByCode).filter(([code])=>!codesWithSales.has(code)).map(([code,spend])=>{
+    const sids=sidsForCode[code]||[];
+    const nameFromMap=nameForCode[code]||'';
+    const nameFromAds=sids.map(sid=>sidNames[sid]||'').find(n=>n)||'';
+    return {type:'code',code,spend,name:nameFromMap||nameFromAds,sids};
+  });
   const result=[...typeA,...typeB];
   console.log(`[${shop}] TypeA(sid無對應):${typeA.length}, TypeB(有廣告無銷售):${typeB.length}`, result);
   return result;
