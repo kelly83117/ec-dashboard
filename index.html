@@ -8065,17 +8065,13 @@ function lsHasAny(shop){
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
 
-// 從 localStorage 還原上傳狀態
+// 從 localStorage 還原上傳卡片狀態（只還原 UI，原始資料需重新上傳才能產生）
 (function restoreUploads(){
-  // 還原商品對照表
   try{
-    const raw=localStorage.getItem('ec|raw|globalMap');
     const meta=localStorage.getItem('ec|filemeta|globalMap');
-    if(raw&&meta){
-      globalMap=JSON.parse(raw);
+    if(meta){
       const m=JSON.parse(meta);
       SHOPS.forEach(s=>{
-        state[s.id].rawMap=globalMap[s.id]||{};
         const uc=document.getElementById('uc-map-'+s.id);
         const ui=document.getElementById('ui-map-'+s.id);
         const ut=document.getElementById('ut-map-'+s.id);
@@ -8088,22 +8084,16 @@ SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getEle
       });
     }
   }catch(e){}
-  // 還原各賣場 mobic / ads
   SHOPS.forEach(s=>{
     ['mobic','ads'].forEach(type=>{
       try{
-        const raw=localStorage.getItem(`ec|raw|${s.id}|${type}`);
         const meta=localStorage.getItem(`ec|filemeta|${s.id}|${type}`);
-        if(raw&&meta){
-          const data=JSON.parse(raw);
+        if(meta){
           const m=JSON.parse(meta);
-          if(type==='mobic')state[s.id].rawMobic=data;
-          else state[s.id].rawAds=data;
           markCard(s.id,type,'✅',m.name||'','ok');
         }
       }catch(e){}
     });
-    checkReady(s.id);
   });
 })();
 
@@ -8113,7 +8103,7 @@ function deleteUpload(shop,type){
     :type==='mobic'?`確定要刪除 ${shop} 的莫筆克銷售資料？`:`確定要刪除 ${shop} 的廣告報表？`;
   if(!confirm(msg))return;
   if(isMap){
-    try{localStorage.removeItem('ec|raw|globalMap');localStorage.removeItem('ec|filemeta|globalMap');}catch(e){}
+    try{localStorage.removeItem('ec|filemeta|globalMap');}catch(e){}
     globalMap={};
     SHOPS.forEach(s=>{
       state[s.id].rawMap={};
@@ -8128,7 +8118,7 @@ function deleteUpload(shop,type){
       const del=document.getElementById('del-map-'+s.id);if(del)del.style.display='none';
     });
   }else{
-    try{localStorage.removeItem(`ec|raw|${shop}|${type}`);localStorage.removeItem(`ec|filemeta|${shop}|${type}`);}catch(e){}
+    try{localStorage.removeItem(`ec|filemeta|${shop}|${type}`);}catch(e){}
     const icon=type==='mobic'?'📦':'📣';
     const title=type==='mobic'?'莫筆克銷售分析':'蝦皮廣告報表';
     if(type==='mobic')state[shop].rawMobic=null;
@@ -8360,7 +8350,7 @@ function onMapFile(e,shop){
           if(pName&&!globalMap[sk][code].name)globalMap[sk][code].name=pName;
         });
       });
-      try{localStorage.setItem('ec|raw|globalMap',JSON.stringify(globalMap));localStorage.setItem('ec|filemeta|globalMap',JSON.stringify({name:file.name,cnt}));}catch(e){}
+      try{localStorage.setItem('ec|filemeta|globalMap',JSON.stringify({name:file.name,cnt}));}catch(e){}
       SHOPS.forEach(s=>{
         state[s.id].rawMap=globalMap[s.id]||{};
         const uc=document.getElementById('uc-map-'+s.id);
@@ -8443,7 +8433,7 @@ function onFile(e,shop,type){
         const wb=XLSX.read(ev.target.result,{type:'binary'});
         const sName=wb.SheetNames.find(s=>s==='銷售統計'||s.includes('銷售'))||wb.SheetNames[0];
         state[shop].rawMobic=XLSX.utils.sheet_to_json(wb.Sheets[sName],{defval:''});
-        try{localStorage.setItem(`ec|raw|${shop}|mobic`,JSON.stringify(state[shop].rawMobic));localStorage.setItem(`ec|filemeta|${shop}|mobic`,JSON.stringify({name:file.name}));}catch(e){}
+        try{localStorage.setItem(`ec|filemeta|${shop}|mobic`,JSON.stringify({name:file.name}));}catch(e){}
         markCard(shop,'mobic','✅',file.name,'ok');
       }catch(err){markCard(shop,'mobic','❌','讀取失敗','err');}
       setSpin(shop,false);checkReady(shop);
@@ -8454,7 +8444,7 @@ function onFile(e,shop,type){
       try{
         const text=new TextDecoder('utf-8').decode(ev.target.result);
         state[shop].rawAds=parseAdsCsv(text);
-        try{localStorage.setItem(`ec|raw|${shop}|ads`,JSON.stringify(state[shop].rawAds));localStorage.setItem(`ec|filemeta|${shop}|ads`,JSON.stringify({name:file.name}));}catch(e){}
+        try{localStorage.setItem(`ec|filemeta|${shop}|ads`,JSON.stringify({name:file.name}));}catch(e){}
         markCard(shop,'ads','✅',file.name,'ok');
       }catch(err){markCard(shop,'ads','❌','讀取失敗','err');}
       setSpin(shop,false);checkReady(shop);
