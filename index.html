@@ -8574,11 +8574,19 @@ function confirmUnmatched(){
   for(let i=0;i<n;i++){
     const u=unmatched[i];
     const isMerge=document.querySelector(`input[name="um-${i}"][value="merge"]`)?.checked;
+    // 取得目標商品碼：先看 hidden input，再從文字框第一個 dash 前解析
+    const getTargetCode=(idx)=>{
+      let code=document.getElementById('um-sel-'+idx)?.value||'';
+      if(!code){
+        const txt=(document.getElementById('um-inp-'+idx)?.value||'').trim();
+        if(txt)code=txt.split(' – ')[0].trim();
+      }
+      return code&&(window._umAllCodes||[]).includes(code)?code:'';
+    };
     if(u.type==='code'){
       // 有廣告費但無銷售的商品碼
-      if(isMerge){
-        const targetCode=document.getElementById('um-sel-'+i)?.value;
-        if(!targetCode){alert('請為每筆選擇要加入的商品，或選擇「直接新增到最下面」');return;}
+      const targetCode=isMerge?getTargetCode(i):'';
+      if(isMerge&&targetCode){
         // 把這個 code 的 sids 移到 targetCode
         const srcEntry=s.rawMap[u.code];
         const srcSids=srcEntry?(Array.isArray(srcEntry)?srcEntry:(srcEntry.sids||[])):[];
@@ -8588,17 +8596,16 @@ function confirmUnmatched(){
         srcSids.forEach(sid=>{if(!tgtSids.includes(sid))tgtSids.push(sid);});
         if(Array.isArray(s.rawMap[targetCode]))s.rawMap[targetCode]=tgtSids;
         else s.rawMap[targetCode].sids=tgtSids;
-        // 清掉原本的 sids，讓這個 code 不再有廣告費
+        // 清掉原本的 sids
         if(Array.isArray(s.rawMap[u.code]))s.rawMap[u.code]=[];
         else if(s.rawMap[u.code])s.rawMap[u.code].sids=[];
       }
-      // 選「新增到最下面」→ 不動 rawMap，buildShop 會自動加
+      // 選「新增到最下面」或merge但沒選商品 → 不動 rawMap，buildShop 會自動加
     } else {
       // type==='sid'：sid 完全不在 rawMap
       const sid=u.sid;
-      if(isMerge){
-        const targetCode=document.getElementById('um-sel-'+i)?.value;
-        if(!targetCode){alert('請為每筆選擇要加入的商品，或選擇「直接新增到最下面」');return;}
+      const targetCode=isMerge?getTargetCode(i):'';
+      if(isMerge&&targetCode){
         if(!s.rawMap[targetCode])s.rawMap[targetCode]={sids:[],name:''};
         const entry=s.rawMap[targetCode];
         const sids=Array.isArray(entry)?entry:(entry.sids||[]);
