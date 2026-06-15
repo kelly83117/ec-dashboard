@@ -8459,10 +8459,11 @@ function openUnmatchedModal(shop,unmatched,onConfirm){
   window._umCodeNames=codeNames;window._umAllCodes=allCodes;
 
   const rows=unmatched.map((u,i)=>{
-    const shortName=(u.name||'').slice(0,30)+((u.name||'').length>30?'…':'');
-    const label=u.type==='code'
-      ? `<span style="font-weight:600;color:#374151">${u.code}</span>${shortName?` <span style="color:#6b7280;font-size:11px">– ${shortName}</span>`:''}`
-      : `<span style="font-family:monospace;color:#374151">${u.sid}</span>`;
+    const shortName=(u.name||'').slice(0,28)+((u.name||'').length>28?'…':'');
+    const sidList=u.type==='code'?(u.sids||[]).join(', '):(u.sid||'');
+    const codeTag=u.type==='code'?`<span style="font-size:10px;background:#f0f4ff;color:#5b5fcf;border-radius:3px;padding:1px 5px;margin-left:4px">${u.code}</span>`:'';
+    const label=`<span style="font-family:monospace;font-size:12px;color:#374151">${sidList}</span>${codeTag}${shortName?`<br><span style="color:#6b7280;font-size:11px">${shortName}</span>`:''}`;
+
     return `<tr style="border-bottom:1px solid #f0f0f0">
       <td style="padding:8px 12px;vertical-align:middle;width:42%">
         <div style="font-size:12px;line-height:1.5;word-break:break-all">${label}</div>
