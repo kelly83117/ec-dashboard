@@ -8393,6 +8393,7 @@ function getPrevRevMap(shop, month, half) {
 function findUnmatchedAds(shop){
   const s=state[shop];
   if(!s.rawAds||!s.rawAds.length)return[];
+  // 建立 adsById
   const adsById={};
   s.rawAds.forEach(r=>{
     const sid=(r['商品 ID']||'').trim();
@@ -8400,10 +8401,24 @@ function findUnmatchedAds(shop){
     if(sid&&sid!=='-'&&spend>0)adsById[sid]=(adsById[sid]||0)+spend;
   });
   const pm=s.rawMap||{};
+  // 建立 adsByCode 與 sidsForCode
+  const adsByCode={};const sidsForCode={};const nameForCode={};
+  Object.entries(pm).forEach(([code,entry])=>{
+    const sids=Array.isArray(entry)?entry:(entry.sids||[]);
+    const name=(entry.name)||'';
+    sidsForCode[code]=sids;nameForCode[code]=name;
+    sids.forEach(sid=>{if(adsById[sid]){adsByCode[code]=(adsByCode[code]||0)+adsById[sid];}});
+  });
+  // Type A：sid 有花費但完全不在 rawMap
   const mapped=new Set();
   Object.values(pm).forEach(e=>{const sids=Array.isArray(e)?e:(e.sids||[]);sids.forEach(sid=>mapped.add(String(sid)));});
-  const result=Object.entries(adsById).filter(([sid])=>!mapped.has(String(sid))).map(([sid,spend])=>({sid,spend}));
-  console.log(`[${shop}] rawAds有花費ID數:${Object.keys(adsById).length}, 已對應:${Object.keys(adsById).length-result.length}, 未對應:${result.length}`, result.map(r=>r.sid));
+  const typeA=Object.entries(adsById).filter(([sid])=>!mapped.has(String(sid))).map(([sid,spend])=>({type:'sid',sid,spend}));
+  // Type B：有廣告費的商品碼，但 rawMobic 這期沒有銷售
+  const codesWithSales=new Set();
+  (s.rawMobic||[]).forEach(r=>{const c=(r['商品編號']||'').trim();if(c)codesWithSales.add(c);});
+  const typeB=Object.entries(adsByCode).filter(([code])=>!codesWithSales.has(code)).map(([code,spend])=>({type:'code',code,spend,name:nameForCode[code]||'',sids:sidsForCode[code]||[]}));
+  const result=[...typeA,...typeB];
+  console.log(`[${shop}] TypeA(sid無對應):${typeA.length}, TypeB(有廣告無銷售):${typeB.length}`, result);
   return result;
 }
 
@@ -8442,9 +8457,12 @@ function openUnmatchedModal(shop,unmatched,onConfirm){
   (s.rawMobic||[]).forEach(r=>{const c=(r['商品編號']||'').trim();if(c&&!codeNames[c])codeNames[c]=(r['商品名稱']||'').trim();});
   const productOpts=codes.map(c=>`<option value="${c}">${c}${codeNames[c]?' – '+codeNames[c]:''}</option>`).join('');
 
-  const rows=unmatched.map((u,i)=>`
-    <tr style="border-bottom:1px solid #f0f0f0">
-      <td style="padding:8px 10px;font-size:12px;color:#374151;white-space:nowrap">ID: ${u.sid}<br><span style="color:#b45309;font-weight:600">花費: $${fmtN(Math.round(u.spend))}</span></td>
+  const rows=unmatched.map((u,i)=>{
+    const label=u.type==='code'
+      ? `商品: ${u.code}${u.name?' – '+u.name:''}<br><span style="color:#b45309;font-weight:600">廣告費: $${fmtN(Math.round(u.spend))}</span>`
+      : `廣告ID: ${u.sid}<br><span style="color:#b45309;font-weight:600">花費: $${fmtN(Math.round(u.spend))}</span>`;
+    return `<tr style="border-bottom:1px solid #f0f0f0">
+      <td style="padding:8px 10px;font-size:12px;color:#374151;white-space:nowrap">${label}</td>
       <td style="padding:8px 10px">
         <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;cursor:pointer">
           <input type="radio" name="um-${i}" value="merge" checked onchange="umToggle(${i})"> 加到現有商品
@@ -8456,17 +8474,22 @@ function openUnmatchedModal(shop,unmatched,onConfirm){
           <input type="radio" name="um-${i}" value="new" onchange="umToggle(${i})"> 直接新增到最下面
         </label>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
+  const totalSpend=unmatched.reduce((s,u)=>s+u.spend,0);
   const ov=document.createElement('div');
   ov.className='ana-overlay open';ov.id='unmatched-modal-ov';ov.style.zIndex='3000';
-  ov.innerHTML=`<div class="ana-modal" style="width:520px;max-width:96vw;max-height:85vh;display:flex;flex-direction:column">
+  ov.innerHTML=`<div class="ana-modal" style="width:560px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column">
     <div class="ana-modal-hdr"><span>廣告費對帳 – ${shop}</span><button class="ana-close-btn" onclick="document.getElementById('unmatched-modal-ov').remove()">✕</button></div>
-    <div style="padding:12px 20px;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb">以下廣告 ID 在商品清單中找不到對應商品，請選擇處理方式後再產生報表</div>
+    <div style="padding:10px 20px;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between">
+      <span>共 <b style="color:#374151">${unmatched.length}</b> 筆廣告費找不到對應商品，合計 <b style="color:#b45309">$${fmtN(Math.round(totalSpend))}</b></span>
+      <button onclick="umSetAll('new')" style="padding:4px 10px;border:1.5px solid #e5e7eb;border-radius:6px;background:white;font-size:11px;cursor:pointer;color:#374151">全部新增到最下面</button>
+    </div>
     <div style="overflow-y:auto;flex:1">
       <table style="width:100%;border-collapse:collapse">
         <thead><tr style="background:#f8fafc;border-bottom:2px solid #e5e7eb">
-          <th style="padding:8px 10px;font-size:11px;color:#6b7280;text-align:left;font-weight:600">廣告 ID / 花費</th>
+          <th style="padding:8px 10px;font-size:11px;color:#6b7280;text-align:left;font-weight:600">商品 / 花費</th>
           <th style="padding:8px 10px;font-size:11px;color:#6b7280;text-align:left;font-weight:600">處理方式</th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -8489,32 +8512,56 @@ function umToggle(i){
   const isMerge=document.querySelector(`input[name="um-${i}"][value="merge"]`)?.checked;
   if(sel)sel.style.display=isMerge?'':'none';
 }
+function umSetAll(val){
+  const n=window._unmatchedData?.length||0;
+  for(let i=0;i<n;i++){
+    const r=document.querySelector(`input[name="um-${i}"][value="${val}"]`);
+    if(r){r.checked=true;umToggle(i);}
+  }
+}
 function confirmUnmatched(){
   const unmatched=window._unmatchedData||[];
   const shop=window._unmatchedShop;
   const s=state[shop];
   const n=unmatched.length;
   for(let i=0;i<n;i++){
+    const u=unmatched[i];
     const isMerge=document.querySelector(`input[name="um-${i}"][value="merge"]`)?.checked;
-    const sid=unmatched[i].sid;
-    if(isMerge){
-      const targetCode=document.getElementById('um-sel-'+i)?.value;
-      if(!targetCode){alert('請為每個廣告 ID 選擇要加入的商品，或選擇「直接新增到最下面」');return;}
-      // Add sid to rawMap[targetCode]
-      if(!s.rawMap[targetCode])s.rawMap[targetCode]={sids:[],name:''};
-      const entry=s.rawMap[targetCode];
-      const sids=Array.isArray(entry)?entry:(entry.sids||[]);
-      if(!sids.includes(sid))sids.push(sid);
-      if(Array.isArray(s.rawMap[targetCode]))s.rawMap[targetCode]=sids;
-      else s.rawMap[targetCode].sids=sids;
-      // also update globalMap
-      if(globalMap[shop]&&globalMap[shop][targetCode]){
-        if(!globalMap[shop][targetCode].sids.includes(sid))globalMap[shop][targetCode].sids.push(sid);
+    if(u.type==='code'){
+      // 有廣告費但無銷售的商品碼
+      if(isMerge){
+        const targetCode=document.getElementById('um-sel-'+i)?.value;
+        if(!targetCode){alert('請為每筆選擇要加入的商品，或選擇「直接新增到最下面」');return;}
+        // 把這個 code 的 sids 移到 targetCode
+        const srcEntry=s.rawMap[u.code];
+        const srcSids=srcEntry?(Array.isArray(srcEntry)?srcEntry:(srcEntry.sids||[])):[];
+        if(!s.rawMap[targetCode])s.rawMap[targetCode]={sids:[],name:''};
+        const tgtEntry=s.rawMap[targetCode];
+        const tgtSids=Array.isArray(tgtEntry)?tgtEntry:(tgtEntry.sids||[]);
+        srcSids.forEach(sid=>{if(!tgtSids.includes(sid))tgtSids.push(sid);});
+        if(Array.isArray(s.rawMap[targetCode]))s.rawMap[targetCode]=tgtSids;
+        else s.rawMap[targetCode].sids=tgtSids;
+        // 清掉原本的 sids，讓這個 code 不再有廣告費
+        if(Array.isArray(s.rawMap[u.code]))s.rawMap[u.code]=[];
+        else if(s.rawMap[u.code])s.rawMap[u.code].sids=[];
       }
+      // 選「新增到最下面」→ 不動 rawMap，buildShop 會自動加
     } else {
-      // Add as standalone new row
-      const newCode='_u_'+sid;
-      if(!s.rawMap[newCode])s.rawMap[newCode]={sids:[sid],name:''};
+      // type==='sid'：sid 完全不在 rawMap
+      const sid=u.sid;
+      if(isMerge){
+        const targetCode=document.getElementById('um-sel-'+i)?.value;
+        if(!targetCode){alert('請為每筆選擇要加入的商品，或選擇「直接新增到最下面」');return;}
+        if(!s.rawMap[targetCode])s.rawMap[targetCode]={sids:[],name:''};
+        const entry=s.rawMap[targetCode];
+        const sids=Array.isArray(entry)?entry:(entry.sids||[]);
+        if(!sids.includes(sid))sids.push(sid);
+        if(Array.isArray(s.rawMap[targetCode]))s.rawMap[targetCode]=sids;
+        else s.rawMap[targetCode].sids=sids;
+      } else {
+        const newCode='_u_'+sid;
+        if(!s.rawMap[newCode])s.rawMap[newCode]={sids:[sid],name:''};
+      }
     }
   }
   document.getElementById('unmatched-modal-ov')?.remove();
