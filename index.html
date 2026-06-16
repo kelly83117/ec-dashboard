@@ -8107,21 +8107,33 @@ function lsSave(shop,month,half,built,period,days){
   try{localStorage.setItem(lsKey(shop,month,half),JSON.stringify(payload));}catch(e){}
   const k=lsKey(shop,month,half);
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=payload;}catch{}
-  // 顯示「☁ 同步雲端」按鈕
+  _showSyncBtn(shop);
+}
+function _showSyncBtn(shop){
   const btn=document.getElementById('sync-btn-'+shop);
-  if(btn){btn.style.display='';btn.textContent='☁ 同步雲端';btn.disabled=false;btn.style.background='#f59e0b';btn.style.color='#fff';}
+  if(btn){btn.style.display='';btn.textContent='☁ 同步雲端';btn.disabled=false;btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';}
 }
 function syncToCloud(shop){
-  const s=state[shop];
-  if(!s||!s._built){alert('請先產生報表');return;}
   const btn=document.getElementById('sync-btn-'+shop);
   if(btn){btn.disabled=true;btn.textContent='同步中…';}
-  const k=lsKey(shop,s.curMonth,s.curHalf);
-  const payload=Store._profitMem&&Store._profitMem[k];
-  if(!payload){alert('找不到資料，請重新產生報表');if(btn){btn.disabled=false;}return;}
-  if(!window.__cloudProfitCol){alert('雲端未連線');if(btn){btn.disabled=false;}return;}
-  window.__cloudProfitCol.setReport(k,payload).then(()=>{
-    if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';setTimeout(()=>{btn.style.display='none';},2000);}
+  if(!window.__cloudProfit||!window.__cloudProfitCol){alert('雲端未連線');if(btn)btn.disabled=false;return;}
+  const promises=[];
+  // 同步報表
+  const s=state[shop];
+  if(s&&s._built){
+    const k=lsKey(shop,s.curMonth,s.curHalf);
+    const payload=Store._profitMem&&Store._profitMem[k];
+    if(payload) promises.push(window.__cloudProfitCol.setReport(k,payload));
+  }
+  // 同步備註
+  const notes=getNotes(shop);
+  if(Object.keys(notes).length>0) promises.push(window.__cloudProfit.setField('ec_notes|'+shop,notes));
+  // 同步編輯
+  const edits=getEdits(shop);
+  if(Object.keys(edits).length>0) promises.push(window.__cloudProfit.setField('ec_edits|'+shop,edits));
+  if(promises.length===0){alert('沒有需要同步的資料');if(btn)btn.disabled=false;return;}
+  Promise.all(promises).then(()=>{
+    if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';setTimeout(()=>{btn.style.display='none';},2000);}
   }).catch(e=>{
     alert('⚠️ 同步失敗：'+(e&&e.message||String(e)));
     if(btn){btn.disabled=false;btn.textContent='☁ 同步雲端';}
@@ -9654,7 +9666,7 @@ function saveEdits(shop,edits){
   const k='ec_edits|'+shop;
   try{localStorage.setItem(k,JSON.stringify(edits));}catch{}
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=edits;}catch{}
-  _cloudWriteSafe(k, edits, shop+' 編輯紀錄');
+  _showSyncBtn(shop);
 }
 function getNotes(shop){
   const k='ec_notes|'+shop;
@@ -9672,7 +9684,7 @@ function saveNotes(shop,notes){
   const k='ec_notes|'+shop;
   try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=notes;}catch{}
-  _cloudWriteSafe(k, notes, shop+' 備註');
+  _showSyncBtn(shop);
 }
 function buildNoteCell(shopKey,code,noteId,noteData){
   let adjList=[];
