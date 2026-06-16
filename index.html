@@ -7584,12 +7584,8 @@ if (window.__cloudStore) {
         // merge：只更新非報表 key，不讓 profitDoc 舊資料覆蓋 profits collection 的新資料
         Object.keys(data).forEach(k => { if (!k.startsWith('ec|')) Store._profitMem[k] = data[k]; });
         window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
-        const _hasSummaryOnly = changedShops.size === 0;
-        const _justSaved = (window._summaryJustSaved && (Date.now() - window._summaryJustSaved < 5000))
-                        || (window._shopJustSaved   && (Date.now() - window._shopJustSaved   < 5000));
-        if (!_hasSummaryOnly && !_justSaved && window.App && App.currentUser && typeof App.render === 'function') {
-          try { App.render(); } catch {}
-        }
+        // 不做 App.render()（全頁重繪）：profitDoc 變動只需精準更新受影響賣場，避免好麻吉等無關賣場閃爍
+        // profitDataReady listener 已處理 onMonthChange；此處不重複觸發
       };
       onSnapshot(profitDocRef, snap => {
         profitParts.current = snap.exists() ? (snap.data() || {}) : {};
@@ -8375,7 +8371,6 @@ function tryLoadSaved(shop){
   }
 }
 function loadIntoUI(shop,built,period,days){
-  if(shop==='好麻吉')console.error('[DEBUG] loadIntoUI 好麻吉 called from:\n'+(new Error().stack||'(no stack)'));
   if(built&&Array.isArray(built)){
     built.forEach(r=>{
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
