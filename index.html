@@ -8203,6 +8203,17 @@ window.addEventListener('profitDataReady', (e)=>{
   try{
     shopsToUpdate.forEach(s=>{
       onMonthChange(s.id);
+      // 若目前月份無資料，自動切到 profits collection 裡最新有資料的月份
+      if(!state[s.id]?._built){
+        const shopKeys=Object.keys(Store._profitMem||{}).filter(k=>k.startsWith(`ec|${s.id}|`));
+        if(shopKeys.length>0){
+          const months=[...new Set(shopKeys.map(k=>k.split('|')[2]))].filter(Boolean).sort().reverse();
+          if(months[0]){
+            const sel=document.getElementById('month-sel-'+s.id);
+            if(sel&&sel.value!==months[0]){sel.value=months[0];onMonthChange(s.id);}
+          }
+        }
+      }
       if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
     });
     // 只有賣場資料（非 _summary_v1）變動時才重新渲染總表
