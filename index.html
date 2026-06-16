@@ -8429,8 +8429,9 @@ function onMapFile(e,shop){
         const del=document.getElementById('del-map-'+s.id);if(del)del.style.display='';
         checkReady(s.id);
       });
-      // 驗證對照表
-      validateMapWarnings(globalMap);
+      // 驗證對照表（先關閉 modal，確保警示可見）
+      closeUploadModal();
+      setTimeout(()=>validateMapWarnings(globalMap),200);
     }catch(err){alert('商品清單讀取失敗：'+err.message);}
   };
   r.readAsBinaryString(file);
