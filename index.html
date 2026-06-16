@@ -8438,25 +8438,24 @@ function onMapFile(e,shop){
 }
 
 function validateMapWarnings(gMap){
+  // 只掃描目前賣場，避免其他賣場的警示干擾
+  const shop=curShop==='總表'?SHOPS[0].id:curShop;
   const issues=[];
-  SHOPS.forEach(shopObj=>{
-    const sk=shopObj.id;
-    const map=gMap[sk]||{};
-    const sidToCode={};
-    Object.entries(map).forEach(([code,entry])=>{
-      const sids=Array.isArray(entry)?entry:(entry.sids||[]);
-      sids.forEach(sid=>{
-        if(!sidToCode[sid])sidToCode[sid]=[];
-        sidToCode[sid].push(code);
-      });
-    });
-    Object.entries(sidToCode).forEach(([sid,codes])=>{
-      if(codes.length>1)issues.push({shop:sk,sid,codes});
+  const map=gMap[shop]||{};
+  const sidToCode={};
+  Object.entries(map).forEach(([code,entry])=>{
+    const sids=Array.isArray(entry)?entry:(entry.sids||[]);
+    sids.forEach(sid=>{
+      if(!sidToCode[sid])sidToCode[sid]=[];
+      sidToCode[sid].push(code);
     });
   });
+  Object.entries(sidToCode).forEach(([sid,codes])=>{
+    if(codes.length>1)issues.push({sid,codes});
+  });
   if(!issues.length)return;
-  const lines=issues.map(i=>`・[${i.shop}] SID ${i.sid} 同時對應到 ${i.codes.join('、')}（廣告費會重複計算）`).join('\n');
-  showMapWarnBanner(`⚠️ 商品對照表有 ${issues.length} 筆 SID 對應到多個商品編號，廣告費會重複計算：\n\n${lines}`);
+  const lines=issues.map(i=>`・SID ${i.sid} 同時對應到 ${i.codes.join('、')}（廣告費會重複計算）`).join('\n');
+  showMapWarnBanner(`⚠️ [${shop}] 商品對照表有 ${issues.length} 筆 SID 重複對應，廣告費會重複計算：\n\n${lines}`);
 }
 
 function checkAdsReconcile(shop,built){
