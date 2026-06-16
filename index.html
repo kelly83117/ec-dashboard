@@ -8071,7 +8071,8 @@ const GROWTH_TAGS=[
   {label:'⚫斷銷品',cls:'tag-lose',dot:'#7f1d1d'},
 ];
 const state={};
-SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawMap:{},curMonth:'2026/05',curHalf:'first',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
+const _initNow=new Date();const _initCurMonth=`${_initNow.getFullYear()}/${String(_initNow.getMonth()+1).padStart(2,'0')}`;
+SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawMap:{},curMonth:_initCurMonth,curHalf:'first',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
 let globalMap={};
 let curShop='總表';
 let openPopup=null;
