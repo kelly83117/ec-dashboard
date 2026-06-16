@@ -9885,8 +9885,8 @@ function submitProfitNote(){
   if(!notes[code])notes[code]={adjustments:[]};
   if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
   notes[code].adjustments.push({date:today,text:v});
-  saveNotes(shopKey,notes);inp.value='';
-  renderPnmList();applyFilters(shopKey.replace('_growth',''));
+  saveNotes(shopKey,notes);
+  closeProfitNoteModal();
 }
 function deleteProfitNote(origIdx){
   if(!_pnm)return;
