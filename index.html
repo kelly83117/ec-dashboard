@@ -7576,10 +7576,11 @@ if (window.__cloudStore) {
         Object.keys(data).forEach(k => {
           if (JSON.stringify(data[k]) !== JSON.stringify(oldData[k])) {
             const shop = k.split('|')[1];
+            console.error('[DEBUG mergeAndNotify] diff key=',k,'shop=',shop);
             if (shop) changedShops.add(shop);
           }
         });
-        console.warn('[profit subscribe] 收到變動，影響賣場：', [...changedShops]);
+        console.error('[DEBUG mergeAndNotify] changedShops=',[...changedShops],'_shopJustSaved=',window._shopJustSaved);
         // merge 而非覆蓋，保留 profits collection 的 key
         Object.assign(Store._profitMem, data);
         window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
@@ -8199,6 +8200,7 @@ window.addEventListener('profitDataReady', (e)=>{
   const changedShops = e.detail?.changedShops;
   // 剛儲存過（備註/編輯）→ Firestore echo 回來，不重新 render 避免閃爍
   const justSaved = window._shopJustSaved && (Date.now()-window._shopJustSaved < 5000);
+  console.error('[DEBUG profitDataReady] changedShops=',JSON.stringify(changedShops),'justSaved=',justSaved,'_shopJustSaved=',window._shopJustSaved,'now=',Date.now());
   if(justSaved) return;
   // null/undefined = 初次載入，更新全部；空陣列 = 只有非賣場資料（如_summary_v1）變動，跳過
   const shopsToUpdate = changedShops==null ? SHOPS : SHOPS.filter(s=>changedShops.includes(s.id));
