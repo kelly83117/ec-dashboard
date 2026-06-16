@@ -7572,17 +7572,17 @@ if (window.__cloudStore) {
         Object.assign(data, profitParts.current);
         const oldData = Store._profitMem || {};
         const changedShops = new Set();
-        // 只比對 profitDoc 自己的 key，不納入 profits collection 的 key（會誤判）
+        // 只比對 profitDoc 自己的非報表 key（ec_notes|、ec_edits| 等）
+        // ec|shop|month|half 格式是舊版遺留在 profitDoc 的報表資料，以 profits collection 為準，不比對
         Object.keys(data).forEach(k => {
+          if (k.startsWith('ec|')) return; // 舊版報表殘留 key，跳過
           if (JSON.stringify(data[k]) !== JSON.stringify(oldData[k])) {
             const shop = k.split('|')[1];
-            console.error('[DEBUG mergeAndNotify] diff key=',k,'shop=',shop);
             if (shop) changedShops.add(shop);
           }
         });
-        console.error('[DEBUG mergeAndNotify] changedShops=',[...changedShops],'_shopJustSaved=',window._shopJustSaved);
-        // merge 而非覆蓋，保留 profits collection 的 key
-        Object.assign(Store._profitMem, data);
+        // merge：只更新非報表 key，不讓 profitDoc 舊資料覆蓋 profits collection 的新資料
+        Object.keys(data).forEach(k => { if (!k.startsWith('ec|')) Store._profitMem[k] = data[k]; });
         window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
         const _hasSummaryOnly = changedShops.size === 0;
         const _justSaved = (window._summaryJustSaved && (Date.now() - window._summaryJustSaved < 5000))
@@ -7619,7 +7619,7 @@ if (window.__cloudStore) {
         const changedShops = new Set();
         Object.keys(incoming).forEach(k => {
           if (JSON.stringify(incoming[k]) !== JSON.stringify(oldMem[k])) {
-            const shop = k.split('|')[2]; // ec|profit|shop|month|half
+            const shop = k.split('|')[1]; // ec|shop|month|half
             if (shop) changedShops.add(shop);
           }
         });
@@ -8200,7 +8200,6 @@ window.addEventListener('profitDataReady', (e)=>{
   const changedShops = e.detail?.changedShops;
   // 剛儲存過（備註/編輯）→ Firestore echo 回來，不重新 render 避免閃爍
   const justSaved = window._shopJustSaved && (Date.now()-window._shopJustSaved < 5000);
-  console.error('[DEBUG profitDataReady] changedShops=',JSON.stringify(changedShops),'justSaved=',justSaved,'_shopJustSaved=',window._shopJustSaved,'now=',Date.now());
   if(justSaved) return;
   // null/undefined = 初次載入，更新全部；空陣列 = 只有非賣場資料（如_summary_v1）變動，跳過
   const shopsToUpdate = changedShops==null ? SHOPS : SHOPS.filter(s=>changedShops.includes(s.id));
