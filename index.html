@@ -8196,6 +8196,9 @@ function deleteUpload(shop,type){
 // ── 雲端資料到達時自動重載 ──
 window.addEventListener('profitDataReady', (e)=>{
   const changedShops = e.detail?.changedShops;
+  // 剛儲存過（備註/編輯）→ Firestore echo 回來，不重新 render 避免閃爍
+  const justSaved = window._shopJustSaved && (Date.now()-window._shopJustSaved < 5000);
+  if(justSaved) return;
   // null/undefined = 初次載入，更新全部；空陣列 = 只有非賣場資料（如_summary_v1）變動，跳過
   const shopsToUpdate = changedShops==null ? SHOPS : SHOPS.filter(s=>changedShops.includes(s.id));
   try{
