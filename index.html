@@ -7604,13 +7604,15 @@ if (window.__cloudStore) {
     // ===== profits collection：每個賣場×月份×半月 = 獨立文件，永遠不超 1MB =====
     try {
       const profitsColRef = collection(db, 'profits');
+      const toDocId = k => k.replace(/\//g, '__');
+      const fromDocId = id => id.replace(/__/g, '/');
       window.__cloudProfitCol = {
-        setReport: (key, value) => setDoc(doc(db, 'profits', key), value),
+        setReport: (key, value) => setDoc(doc(db, 'profits', toDocId(key)), value),
       };
       onSnapshot(profitsColRef, snap => {
         Store._profitMem = Store._profitMem || {};
         const incoming = {};
-        snap.forEach(d => { incoming[d.id] = d.data(); });
+        snap.forEach(d => { incoming[fromDocId(d.id)] = d.data(); });
         const oldMem = Store._profitMem;
         const changedShops = new Set();
         Object.keys(incoming).forEach(k => {
