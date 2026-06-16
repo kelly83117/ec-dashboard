@@ -8375,6 +8375,7 @@ function tryLoadSaved(shop){
   }
 }
 function loadIntoUI(shop,built,period,days){
+  if(shop==='好麻吉')console.error('[DEBUG] loadIntoUI 好麻吉 called from:\n'+(new Error().stack||'(no stack)'));
   if(built&&Array.isArray(built)){
     built.forEach(r=>{
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
