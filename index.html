@@ -9850,14 +9850,13 @@ const PROFIT_COLS=[
   {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'分析'},{key:'note',label:'調整'},
   {key:'growthRate',label:'成長比',grow:true},{key:'growthAnalysis',label:'成長分析',grow:true},{key:'growthNote',label:'成長調整',grow:true},
 ];
+const _HCOLS_LS='ec_hcols_user';
 function getHiddenCols(shop){
-  const k='ec_hcols|'+shop;
-  const arr=_cloudRead(k)||[];
-  return new Set(arr);
+  try{const raw=localStorage.getItem(_HCOLS_LS);return new Set(raw?JSON.parse(raw):[]);}catch{return new Set();}
 }
 function toggleHiddenCol(shop,key){
   const s=getHiddenCols(shop);if(s.has(key))s.delete(key);else s.add(key);
-  _cloudWrite('ec_hcols|'+shop,[...s]);
+  try{localStorage.setItem(_HCOLS_LS,JSON.stringify([...s]));}catch{}
   applyFilters(shop);renderColPicker(shop);
 }
 function renderColPicker(shop){
@@ -9873,7 +9872,7 @@ function renderColPicker(shop){
       <button onclick="resetHiddenCols('${shop}')" style="font-size:11px;color:#5b5fcf;background:none;border:none;cursor:pointer;font-weight:600">顯示全部</button>
     </div>`;
 }
-function resetHiddenCols(shop){_cloudWrite('ec_hcols|'+shop,[]);applyFilters(shop);renderColPicker(shop);}
+function resetHiddenCols(shop){try{localStorage.removeItem(_HCOLS_LS);}catch{}applyFilters(shop);renderColPicker(shop);}
 function openColPicker(shop,btn){
   let m=document.getElementById('colpick-'+shop);
   if(m){m.remove();return;}
