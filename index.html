@@ -9620,6 +9620,7 @@ function saveEdits(shop,edits){
   window._shopJustSaved=Date.now();
   const k='ec_edits|'+shop;
   try{localStorage.setItem(k,JSON.stringify(edits));}catch{}
+  try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=edits;}catch{}
   _cloudWriteSafe(k, edits, shop+' 編輯紀錄');
 }
 function getNotes(shop){
@@ -9637,6 +9638,7 @@ function saveNotes(shop,notes){
   window._shopJustSaved=Date.now();
   const k='ec_notes|'+shop;
   try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
+  try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=notes;}catch{}
   _cloudWriteSafe(k, notes, shop+' 備註');
 }
 function buildNoteCell(shopKey,code,noteId,noteData){
@@ -9892,6 +9894,7 @@ function submitProfitNote(){
   notes[code].adjustments.push({date:today,text:v});
   saveNotes(shopKey,notes);
   closeProfitNoteModal();
+  applyFilters(shopKey.replace('_growth',''));
 }
 function deleteProfitNote(origIdx){
   if(!_pnm)return;
