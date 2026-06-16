@@ -7581,8 +7581,14 @@ if (window.__cloudStore) {
             if (shop) changedShops.add(shop);
           }
         });
-        // merge：只更新非報表 key，不讓 profitDoc 舊資料覆蓋 profits collection 的新資料
-        Object.keys(data).forEach(k => { if (!k.startsWith('ec|')) Store._profitMem[k] = data[k]; });
+        // 非報表 key（notes/edits 等）直接覆蓋；報表 key（ec|shop|month|half）只在 profits collection 尚未有該 key 時才填入（新資料優先）
+        Object.keys(data).forEach(k => {
+          if (k.startsWith('ec|')) {
+            if (Store._profitMem[k] === undefined) Store._profitMem[k] = data[k];
+          } else {
+            Store._profitMem[k] = data[k];
+          }
+        });
         window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
         // 不做 App.render()（全頁重繪）：profitDoc 變動只需精準更新受影響賣場，避免好麻吉等無關賣場閃爍
         // profitDataReady listener 已處理 onMonthChange；此處不重複觸發
