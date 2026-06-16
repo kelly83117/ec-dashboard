@@ -9047,10 +9047,11 @@ function confirmDeleteFile(){
     globalMap={};
     try{localStorage.removeItem('ec|filemeta|globalMap');}catch(e){}
     SHOPS.forEach(s=>{state[s.id].rawMap={};});
+    try{document.getElementById('upm-map-input').value='';}catch(e){}
   } else {
     const shop=curShop==='總表'?SHOPS[0].id:curShop;
-    if(type==='mobic'){state[shop].rawMobic=null;try{localStorage.removeItem(`ec|filemeta|${shop}|mobic`);}catch(e){}}
-    if(type==='ads'){state[shop].rawAds=null;try{localStorage.removeItem(`ec|filemeta|${shop}|ads`);}catch(e){}}
+    if(type==='mobic'){state[shop].rawMobic=null;try{localStorage.removeItem(`ec|filemeta|${shop}|mobic`);}catch(e){};try{document.getElementById('upm-mobic-input').value='';}catch(e){}}
+    if(type==='ads'){state[shop].rawAds=null;try{localStorage.removeItem(`ec|filemeta|${shop}|ads`);}catch(e){};try{document.getElementById('upm-ads-input').value='';}catch(e){}}
     delete state[shop]._built;
   }
   openUploadModal();
