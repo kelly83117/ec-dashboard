@@ -8102,14 +8102,30 @@ function _cloudWriteSafe(key, payload, label){
 }
 function lsKey(shop,month,half){return`ec|${shop}|${month}|${half}`;}
 function lsSave(shop,month,half,built,period,days){
+  // 只存本機；同步雲端需手動按「☁ 同步雲端」
   const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
-  try{localStorage.setItem(lsKey(shop,month,half),JSON.stringify(payload));}catch(e){alert('儲存失敗');}
-  if(window.__cloudProfitCol){
-    window.__cloudProfitCol.setReport(lsKey(shop,month,half),payload).catch(e=>{
-      console.error('[雲端同步失敗]',e);
-      alert('⚠️ 雲端同步失敗，同事將看不到此次資料。\n'+(e&&e.message||String(e)));
-    });
-  }
+  try{localStorage.setItem(lsKey(shop,month,half),JSON.stringify(payload));}catch(e){}
+  const k=lsKey(shop,month,half);
+  try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=payload;}catch{}
+  // 顯示「☁ 同步雲端」按鈕
+  const btn=document.getElementById('sync-btn-'+shop);
+  if(btn){btn.style.display='';btn.textContent='☁ 同步雲端';btn.disabled=false;btn.style.background='#f59e0b';btn.style.color='#fff';}
+}
+function syncToCloud(shop){
+  const s=state[shop];
+  if(!s||!s._built){alert('請先產生報表');return;}
+  const btn=document.getElementById('sync-btn-'+shop);
+  if(btn){btn.disabled=true;btn.textContent='同步中…';}
+  const k=lsKey(shop,s.curMonth,s.curHalf);
+  const payload=Store._profitMem&&Store._profitMem[k];
+  if(!payload){alert('找不到資料，請重新產生報表');if(btn){btn.disabled=false;}return;}
+  if(!window.__cloudProfitCol){alert('雲端未連線');if(btn){btn.disabled=false;}return;}
+  window.__cloudProfitCol.setReport(k,payload).then(()=>{
+    if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';setTimeout(()=>{btn.style.display='none';},2000);}
+  }).catch(e=>{
+    alert('⚠️ 同步失敗：'+(e&&e.message||String(e)));
+    if(btn){btn.disabled=false;btn.textContent='☁ 同步雲端';}
+  });
 }
 function lsLoad(shop,month,half){
   const k=lsKey(shop,month,half);
@@ -8318,6 +8334,7 @@ function shopHTML(shop){return`
     </div>
     <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
     <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
+    <button id="sync-btn-${shop}" onclick="syncToCloud('${shop}')" style="display:none;margin-left:4px;padding:4px 12px;border-radius:7px;border:none;cursor:pointer;font-size:13px;font-weight:600">☁ 同步雲端</button>
   </div>
   <div id="tbl-${shop}">
     <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">選擇區間後上傳報表，按「▶ 產生並儲存」</div></div>
