@@ -7572,15 +7572,16 @@ if (window.__cloudStore) {
         Object.assign(data, profitParts.current);
         const oldData = Store._profitMem || {};
         const changedShops = new Set();
-        const allKeys = new Set([...Object.keys(data), ...Object.keys(oldData)]);
-        allKeys.forEach(k => {
+        // 只比對 profitDoc 自己的 key，不納入 profits collection 的 key（會誤判）
+        Object.keys(data).forEach(k => {
           if (JSON.stringify(data[k]) !== JSON.stringify(oldData[k])) {
             const shop = k.split('|')[1];
             if (shop) changedShops.add(shop);
           }
         });
         console.warn('[profit subscribe] 收到變動，影響賣場：', [...changedShops]);
-        Store._profitMem = data;
+        // merge 而非覆蓋，保留 profits collection 的 key
+        Object.assign(Store._profitMem, data);
         window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
         const _hasSummaryOnly = changedShops.size === 0;
         const _justSaved = (window._summaryJustSaved && (Date.now() - window._summaryJustSaved < 5000))
