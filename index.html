@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-16-02">
+<meta name="app-version" content="2026-06-17-01">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -741,6 +741,73 @@
     .overview-grid { grid-template-columns: 1fr; }
     .main { padding: 20px; }
     .sidebar { width: 200px; }
+  }
+
+  /* ============ 手機適配 (≤ 768px) ============ */
+  @media (max-width: 768px) {
+    /* 側欄 → 抽屜：預設藏起來，需要時從左滑出 */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 78vw;
+      max-width: 280px;
+      z-index: 9000;
+      transform: translateX(-100%);
+      transition: transform .22s ease;
+      box-shadow: 6px 0 28px rgba(0,0,0,.18);
+    }
+    body.mobile-drawer-open .sidebar { transform: translateX(0); }
+    body.mobile-drawer-open::after {
+      content: '';
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.42);
+      z-index: 8500;
+    }
+    /* main 全寬，padding 縮 */
+    .main { padding: 12px 12px 72px; }
+    body.sidebar-collapsed .main { zoom: 1; }
+    /* sidebar toggle：浮在左上角，點開抽屜 */
+    .sidebar-toggle {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      width: 38px;
+      height: 38px;
+      background: white;
+      border: 1px solid var(--border);
+      box-shadow: 0 2px 8px rgba(0,0,0,.12);
+      z-index: 9100;
+      font-size: 18px;
+    }
+    /* 標題縮小 */
+    .page-header { margin-bottom: 12px; padding-left: 50px; }
+    .page-header h2 { font-size: 17px; }
+    .page-header p { font-size: 12px; }
+    /* 卡片 grid → 1 欄或 2 欄 */
+    .stat-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+    .stat-card { padding: 10px 12px !important; }
+    .stat-card .stat-value, .summary-card-value { font-size: 17px !important; }
+    /* 表格容器內部水平滾動 + sticky header */
+    .table-wrap, .table-card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .table-wrap table { min-width: 540px; }
+    /* 輸入框與按鈕加大 touch target */
+    input, button, select { font-size: 14px; }
+    button { min-height: 36px; }
+    /* modal 全螢幕 */
+    .modal-backdrop > div, .pnm-box, .ana-modal { width: 96vw !important; max-height: 92vh; }
+    /* 圖表自適應 */
+    canvas { max-width: 100% !important; height: auto !important; }
+    /* 隱藏次要欄位/標籤 */
+    .hide-on-mobile { display: none !important; }
+    /* 表格欄字級縮小 */
+    th, td { font-size: 12px !important; padding: 4px 4px !important; }
+  }
+  @media (max-width: 480px) {
+    .stat-grid { grid-template-columns: 1fr !important; }
+    .page-header h2 { font-size: 16px; }
+    .main { padding: 10px 8px 72px; }
   }
   .chart-card {
     background: var(--surface);
@@ -1599,21 +1666,54 @@ const App = {
   bindSidebarToggle() {
     const btn = document.getElementById('sidebar-toggle-btn');
     if (!btn) return;
-    // 還原上次的狀態
+    const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
+    // 還原上次的狀態（桌機才用 collapse，手機一律抽屜）
     try {
-      if (localStorage.getItem('ec.sidebarCollapsed') === '1') {
+      if (!isMobile() && localStorage.getItem('ec.sidebarCollapsed') === '1') {
         document.body.classList.add('sidebar-collapsed');
       }
     } catch {}
     const updateIcon = () => {
-      btn.textContent = document.body.classList.contains('sidebar-collapsed') ? '›' : '‹';
+      if (isMobile()) {
+        btn.textContent = document.body.classList.contains('mobile-drawer-open') ? '✕' : '☰';
+      } else {
+        btn.textContent = document.body.classList.contains('sidebar-collapsed') ? '›' : '‹';
+      }
     };
     updateIcon();
     btn.addEventListener('click', () => {
-      const collapsed = document.body.classList.toggle('sidebar-collapsed');
-      try { localStorage.setItem('ec.sidebarCollapsed', collapsed ? '1' : '0'); } catch {}
+      if (isMobile()) {
+        document.body.classList.toggle('mobile-drawer-open');
+      } else {
+        const collapsed = document.body.classList.toggle('sidebar-collapsed');
+        try { localStorage.setItem('ec.sidebarCollapsed', collapsed ? '1' : '0'); } catch {}
+      }
       updateIcon();
     });
+    // 點側欄外的 backdrop 區域 → 關抽屜
+    document.addEventListener('click', (e) => {
+      if (!isMobile()) return;
+      if (!document.body.classList.contains('mobile-drawer-open')) return;
+      const sidebar = document.querySelector('.sidebar');
+      if (!sidebar) return;
+      if (sidebar.contains(e.target) || btn.contains(e.target)) return;
+      document.body.classList.remove('mobile-drawer-open');
+      updateIcon();
+    });
+    // 點側欄裡的項目（nav 切頁）→ 自動關抽屜
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) {
+      sidebar.addEventListener('click', (e) => {
+        if (!isMobile()) return;
+        if (e.target.closest('.nav-item, .nav-sub')) {
+          setTimeout(() => {
+            document.body.classList.remove('mobile-drawer-open');
+            updateIcon();
+          }, 80);
+        }
+      });
+    }
+    window.addEventListener('resize', updateIcon);
   },
 
   /* ------------- 登入 ------------- */
