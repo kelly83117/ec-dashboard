@@ -6004,6 +6004,7 @@ const App = {
           SHOPS.forEach(s => {
             if (typeof initShopUI === 'function') initShopUI(s.id);
           });
+          try{const _sv=localStorage.getItem('ec_curShop');if(_sv&&_sv!=='總表'&&typeof setShop==='function'){const _sb=document.querySelector("button[onclick*=\"setShop('"+_sv+"'\"]");setShop(_sv,_sb||null);}}catch{}
         } catch (e) { console.error('profit init failed', e); }
       }, 200);
     }
@@ -7069,10 +7070,7 @@ const App = {
               });
               if(typeof renderSummary==='function') renderSummary();
               // 重渲染後恢復正在操作的 tab
-              if(typeof curShop!=='undefined' && curShop && curShop!=='總表'){
-                var _rb=document.querySelector('button[onclick*="setShop(\''+curShop+'\'"]');
-                if(typeof setShop==='function') setShop(curShop,_rb||null);
-              }
+              try{const _sv=localStorage.getItem('ec_curShop')||(typeof curShop!=='undefined'&&curShop!=='總表'?curShop:null);if(_sv&&_sv!=='總表'&&typeof setShop==='function'){var _rb=document.querySelector("button[onclick*=\"setShop('"+_sv+"'\"]");setShop(_sv,_rb||null);}}catch{}
             } catch(e) { console.log(e); }
           }
         }, 200);
@@ -10324,6 +10322,7 @@ function renderSummary(){
 // ── Tab switch ──
 function setShop(shop,btn){
   curShop=shop;
+  try{localStorage.setItem('ec_curShop',shop);}catch{}
   document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
@@ -10486,6 +10485,7 @@ document.addEventListener('click', function(e) {
           });
           if(typeof initProfitPeriodControls==='function') initProfitPeriodControls();
           SHOPS.forEach(function(s) { if (typeof initShopUI === 'function') initShopUI(s.id); });
+          try{var _sv=localStorage.getItem('ec_curShop');if(_sv&&_sv!=='總表'&&typeof setShop==='function'){var _sb=document.querySelector("button[onclick*=\"setShop('"+_sv+"'\"]");setShop(_sv,_sb||null);}}catch{}
         } catch(e) { console.log(e); }
       }
     }, 150);
