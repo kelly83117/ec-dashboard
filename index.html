@@ -9969,9 +9969,10 @@ function openNotePopup(shopKey,code){
   const baseShop=shopKey.replace('_growth','');
   const r=state[baseShop]?._built?.find(x=>x.code===code);
   document.getElementById('pnm-title').textContent=r?`${code}・${r.name}`:code;
+  const pnmInp=document.getElementById('pnm-inp');if(pnmInp)pnmInp.value='';
   renderPnmList();
   modal.classList.add('open');
-  setTimeout(()=>document.getElementById('pnm-inp')?.focus(),60);
+  setTimeout(()=>pnmInp?.focus(),60);
 }
 function renderPnmList(){
   if(!_pnm)return;
