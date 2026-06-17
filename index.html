@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-17-03">
+<meta name="app-version" content="2026-06-17-04">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -1829,6 +1829,12 @@ const App = {
     document.getElementById('view-app').style.display = 'block';
     this._hideBoot();
     this.startMidnightWatcher();
+    // 5) 若雲端 snapshot 在 enterApp 之前已抵達（手機慢、Firebase 比 UI 快），
+    //    那次 render 用的是空 Store；補一次 render 才會顯示出來
+    if (window.__pendingFirstRender) {
+      window.__pendingFirstRender = false;
+      setTimeout(() => { try { this.render(); } catch {} }, 0);
+    }
   },
 
   _isRouteAllowed(route, user) {
@@ -7619,6 +7625,7 @@ async function __setupCloud() {
 
     // 訂閱：其他人改了資料，這台會即時更新畫面
     // 但如果使用者正在 input 裡打字、或有尚未確認儲存的更動，跳過重繪避免覆蓋
+    let __firstCloudSnapshot = true;
     cs.subscribe((data) => {
       const next = data || {};
       delete next[Store.KEYS.session];  // 不接受雲端的 session
@@ -7635,7 +7642,19 @@ async function __setupCloud() {
       });
       if (filteredOut.length) console.warn('[subscribe] filtered out recently deleted:', filteredOut);
       Store._mem = next;
-      if (!(window.App && App.currentUser && typeof App.render === 'function')) return;
+      // 首批雲端 snapshot 一定強制重繪（即便 App 尚未準備、或 dirty check 誤判）
+      // 否則手機開頁時，「dashboard 先用空資料 render → 雲端到了但被 dirty 條件擋住」會看不到數字
+      const isFirstSnapshot = __firstCloudSnapshot;
+      __firstCloudSnapshot = false;
+      if (!(window.App && App.currentUser && typeof App.render === 'function')) {
+        // App 還沒準備好，等準備好再補一次 render（由 enterApp 那邊處理）
+        if (isFirstSnapshot) window.__pendingFirstRender = true;
+        return;
+      }
+      if (isFirstSnapshot) {
+        try { App.render(); } catch (e) { console.warn('first cloud snapshot render failed', e); }
+        return;
+      }
       const active = document.activeElement;
       const inOurInput = active && active.tagName === 'INPUT' && (
         active.classList.contains('card-rev') || active.classList.contains('card-ads') ||
