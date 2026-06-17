@@ -10083,12 +10083,16 @@ function renderTable(shop,list){
 
     if(!r.fromMobic){
       const adsId=`td-${shop}-${r.code}-adsFee`;
-      const noRevSpan=[vc('rev'),vc('gross'),vc('pureProfit'),vc('pureRate'),vc('adsPct'),vc('stock'),vc('targetROI'),vc('directROI'),vc('roi'),vc('roiDiff'),vc('clicks'),vc('dayBudget'),vc('analysisLabel')].filter(Boolean).length;
+      const pc=r.pureProfit>=0?'td-pos':'td-neg';
+      const noRevSpan1=[vc('rev'),vc('gross')].filter(Boolean).length;
+      const noRevSpan2=[vc('pureRate'),vc('adsPct'),vc('stock'),vc('targetROI'),vc('directROI'),vc('roi'),vc('roiDiff'),vc('clicks'),vc('dayBudget'),vc('analysisLabel')].filter(Boolean).length;
       html+=`<tr class="tr-no-rev">
         <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
         <td class="tl td-name" style="position:sticky;left:60px;background:#fff;z-index:2;color:#9ca3af">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         ${vc('adsFee')?`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">${fmtAds(r.adsFee)}</span></td>`:''}
-        ${noRevSpan>0?`<td colspan="${noRevSpan}" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>`:''}
+        ${noRevSpan1>0?`<td colspan="${noRevSpan1}" style="color:#d1d5db;text-align:center;font-size:12px">—</td>`:''}
+        ${vc('pureProfit')?`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`:''}
+        ${noRevSpan2>0?`<td colspan="${noRevSpan2}" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>`:''}
         ${vc('note')?buildNoteCell(shop,r.code,noteId,notes[r.code]):''}
         ${shop==='好麻吉'?`${vc('growthRate')?'<td></td>':''}${vc('growthAnalysis')?'<td></td>':''}${vc('growthNote')?'<td></td>':''}`:''}
       </tr>`;
