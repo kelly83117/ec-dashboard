@@ -8714,15 +8714,24 @@ function getPrevRevMap(shop, month, half) {
 // ── Generate ──
 function findUnmatchedAds(shop){
   const s=state[shop];
-  if(!s.rawAds||!s.rawAds.length)return[];
+  if((!s.rawAds||!s.rawAds.length)&&(!s.rawSelAds||!s.rawSelAds.length))return[];
   // 建立 adsById 與 sidNames
   const adsById={};const sidNames={};
-  s.rawAds.forEach(r=>{
+  (s.rawAds||[]).forEach(r=>{
     const sid=(r['商品 ID']||'').trim();
     const spend=num(r['花費']||0);
     if(sid&&sid!=='-'){
       if(spend>0)adsById[sid]=(adsById[sid]||0)+spend;
       if(!sidNames[sid]){const n=(r['商品名稱']||r['廣告名稱']||r['名稱']||'').trim();if(n)sidNames[sid]=n;}
+    }
+  });
+  // 合併選品廣告清單
+  (s.rawSelAds||[]).forEach(r=>{
+    const sid=(r['商品 ID']||r['商品ID']||'').trim();
+    const spend=num(r['花費']||r['廣告費']||0);
+    if(sid&&sid!=='-'){
+      if(spend>0)adsById[sid]=(adsById[sid]||0)+spend;
+      if(!sidNames[sid]){const n=(r['商品名稱']||r['名稱']||'').trim();if(n)sidNames[sid]=n;}
     }
   });
   const pm=s.rawMap||{};
@@ -8964,7 +8973,7 @@ function buildShop(shop,days){
 
   // 廣告資料：花費、直接投入產出比、投入產出比、點擊數
   const adsById={};const directROIById={};const roiById={};const clicksById={};
-  s.rawAds.forEach(r=>{
+  (s.rawAds||[]).forEach(r=>{
     const sid=(r['商品 ID']||'').trim();
     const spend=num(r['花費']||0);
     const droi=num(r['直接投入產出比']||0);
@@ -8976,6 +8985,12 @@ function buildShop(shop,days){
       if(roi>0)roiById[sid]=roi;
       if(clicks>0)clicksById[sid]=(clicksById[sid]||0)+clicks;
     }
+  });
+  // 合併選品廣告清單（只加花費，無 ROI/點擊資料）
+  (s.rawSelAds||[]).forEach(r=>{
+    const sid=(r['商品 ID']||r['商品ID']||'').trim();
+    const spend=num(r['花費']||r['廣告費']||0);
+    if(sid&&sid!=='-'&&spend>0)adsById[sid]=(adsById[sid]||0)+spend;
   });
 
   const pm=s.rawMap||{};const adsByCode={};const directROIByCode={};const roiByCode={};const clicksByCode={};const sidsForCode={};const nameForCode={};
