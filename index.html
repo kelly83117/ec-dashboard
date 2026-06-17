@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-16-01">
+<meta name="app-version" content="2026-06-16-02">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2000,23 +2000,28 @@ const App = {
       </div>
     `;
 
-    const summaryCards = PLATFORM_GROUPS.map(g => {
+    // 用 data-* 帶 group members 索引，方便輸入時即時加上「未存欄位的差值」
+    const summaryCards = PLATFORM_GROUPS.map((g, gi) => {
       const members = platforms.filter(p => g.members.includes(p.name));
+      const memberIdxs = members.map(p => platforms.indexOf(p)).filter(i => i >= 0);
       const cur  = members.reduce((s, p) => s + sumOver(p, rangeInfo.showDates), 0);
       const prev = members.reduce((s, p) => s + sumOver(p, rangeInfo.compareDates), 0);
       const d    = prev > 0 ? ((cur / prev) - 1) * 100 : 0;
       const iconHtml = g.logo
         ? `<img src="${g.logo}" alt="${escapeHtml(g.name)}" style="width:22px;height:22px;object-fit:contain;border-radius:4px;display:block">`
         : `<span style="font-size:16px;line-height:1">${g.icon}</span>`;
+      // 是否「昨日」單日範圍 → 才需要 live 計算（多日範圍只能算已存的）
+      const isSingleDay = rangeInfo.showDates && rangeInfo.showDates.length === 1
+                          && rangeInfo.showDates[0] === inputDateStr;
       return `
-        <div class="stat-card" style="padding:14px 16px;background:white;border:1px solid var(--border);border-radius:10px;box-shadow:none">
+        <div class="stat-card summary-card" data-group-idx="${gi}" data-member-idxs="${memberIdxs.join(',')}" data-base-cur="${cur}" data-prev="${prev}" data-single-day="${isSingleDay ? '1' : '0'}" style="padding:14px 16px;background:white;border:1px solid var(--border);border-radius:10px;box-shadow:none">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;color:var(--text-muted)">
             ${iconHtml}
             <span style="font-size:12px;font-weight:600;letter-spacing:.02em">${escapeHtml(g.name)}</span>
             <span style="margin-left:auto;font-size:10px;color:var(--text-muted);font-weight:500">${escapeHtml(rangeInfo.label)}</span>
           </div>
-          <div style="font-size:22px;color:var(--text);font-weight:700;margin:0;line-height:1.15;font-variant-numeric:tabular-nums;letter-spacing:-.01em">${fmtNTD(cur)}</div>
-          <div style="margin-top:6px;font-size:11px;color:var(--text-muted);font-weight:500">
+          <div class="summary-card-value" style="font-size:22px;color:var(--text);font-weight:700;margin:0;line-height:1.15;font-variant-numeric:tabular-nums;letter-spacing:-.01em">${fmtNTD(cur)}</div>
+          <div class="summary-card-delta" style="margin-top:6px;font-size:11px;color:var(--text-muted);font-weight:500">
             ${d >= 0
               ? `<span class="up">↑ ${d.toFixed(1)}%</span>`
               : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`} 較${escapeHtml(rangeInfo.compareLabel)}
@@ -2129,10 +2134,10 @@ const App = {
     const totalRow = `
       <tr style="background:var(--bg);border-top:2px solid var(--border)">
         <td style="padding:6px 6px;font-weight:800;font-size:13px;letter-spacing:.05em">當日總計</td>
-        <td style="padding:6px 4px;text-align:center;font-weight:800;font-size:13px;font-variant-numeric:tabular-nums">NT$ ${grandRev.toLocaleString()}</td>
-        <td style="padding:6px 4px;text-align:center;font-weight:700;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">NT$ ${grandAds.toLocaleString()}</td>
-        <td style="padding:6px 4px;text-align:center;font-weight:800;font-size:13px;color:#6366f1;font-variant-numeric:tabular-nums">${grandRoas}</td>
-        <td style="padding:6px 4px;font-size:12px;text-align:center">${grandDeltaCell}</td>
+        <td id="grand-rev-cell" data-base-rev="${grandRev}" style="padding:6px 4px;text-align:center;font-weight:800;font-size:13px;font-variant-numeric:tabular-nums">NT$ ${grandRev.toLocaleString()}</td>
+        <td id="grand-ads-cell" data-base-ads="${grandAds}" style="padding:6px 4px;text-align:center;font-weight:700;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">NT$ ${grandAds.toLocaleString()}</td>
+        <td id="grand-roas-cell" style="padding:6px 4px;text-align:center;font-weight:800;font-size:13px;color:#6366f1;font-variant-numeric:tabular-nums">${grandRoas}</td>
+        <td id="grand-delta-cell" data-prev-total="${grandPrev}" style="padding:6px 4px;font-size:12px;text-align:center">${grandDeltaCell}</td>
         <td></td>
       </tr>
     `;
@@ -5348,6 +5353,59 @@ const App = {
       roasEl.textContent = (rev > 0 && ads > 0) ? (rev / ads).toFixed(2) : '—';
     };
 
+    // 邊打邊更新「當日總計」 + 上方 summary 卡片（不存檔，純 UI 反映輸入）
+    // 邏輯：抓所有 .card-rev / .card-ads 當下 value 重新加總，覆蓋顯示
+    const fmtNTD2 = (n) => 'NT$ ' + (Math.round(n) || 0).toLocaleString();
+    const updateLiveTotals = () => {
+      // 撈每個 idx 當下輸入值（已存的會跟 dataset.original 一致）
+      const revByIdx = {};
+      const adsByIdx = {};
+      document.querySelectorAll('.card-rev').forEach(el => {
+        revByIdx[+el.dataset.idx] = parseAmount(el.value) || 0;
+      });
+      document.querySelectorAll('.card-ads').forEach(el => {
+        adsByIdx[+el.dataset.idx] = parseAmount(el.value) || 0;
+      });
+      const revVals = Object.values(revByIdx);
+      const adsVals = Object.values(adsByIdx);
+      const totalRev = revVals.reduce((a,b)=>a+b,0);
+      const totalAds = adsVals.reduce((a,b)=>a+b,0);
+      // 當日總計列
+      const revCell = document.getElementById('grand-rev-cell');
+      const adsCell = document.getElementById('grand-ads-cell');
+      const roasCell = document.getElementById('grand-roas-cell');
+      const deltaCell = document.getElementById('grand-delta-cell');
+      if (revCell) revCell.textContent = fmtNTD2(totalRev);
+      if (adsCell) adsCell.textContent = fmtNTD2(totalAds);
+      if (roasCell) roasCell.textContent = (totalAds > 0 && totalRev > 0) ? (totalRev/totalAds).toFixed(2) : '—';
+      if (deltaCell) {
+        const prev = +deltaCell.dataset.prevTotal || 0;
+        if (prev > 0) {
+          const d = (totalRev / prev - 1) * 100;
+          deltaCell.innerHTML = d >= 0
+            ? `<span class="up" style="font-weight:700">↑ ${d.toFixed(1)}%</span>`
+            : `<span class="down" style="font-weight:700">↓ ${Math.abs(d).toFixed(1)}%</span>`;
+        }
+      }
+      // 上方 summary 卡片（僅單日範圍才同步）
+      document.querySelectorAll('.summary-card').forEach(card => {
+        if (card.dataset.singleDay !== '1') return;
+        const memberIdxs = (card.dataset.memberIdxs || '').split(',').filter(Boolean).map(n=>+n);
+        const cur = memberIdxs.reduce((s,i) => s + (revByIdx[i] || 0), 0);
+        const prev = +card.dataset.prev || 0;
+        const valEl = card.querySelector('.summary-card-value');
+        const deltaEl = card.querySelector('.summary-card-delta');
+        if (valEl) valEl.textContent = fmtNTD2(cur);
+        if (deltaEl && prev > 0) {
+          const d = (cur / prev - 1) * 100;
+          const compareLabel = deltaEl.textContent.replace(/^[↑↓]\s*[\d.]+%\s*/, '').trim() || '較前一日';
+          deltaEl.innerHTML = (d >= 0
+            ? `<span class="up">↑ ${d.toFixed(1)}%</span>`
+            : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`) + ' ' + compareLabel;
+        }
+      });
+    };
+
     // 還原輸入框到原始值
     const revert = (idx) => {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
@@ -5491,6 +5549,7 @@ const App = {
         }
         updateRoas(idx);
         markUnsaved(idx);
+        updateLiveTotals();
       });
       el.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -5705,9 +5764,12 @@ const App = {
           else p.dailyAdSpend[dateStr] = Math.round(ads);
         }
 
+        // 先標記「剛存」讓雲端 subscribe 不要重複重繪
+        window._platformJustSaved = Date.now();
         Store.set(Store.KEYS.platforms, platforms);
         showToast(`「${p.name}」${dateStr.replace(/-/g,'/')} 已更新`, 'success');
-        this.render();
+        // 重繪延到下一個 tick → modal 先關閉，使用者感覺秒回
+        setTimeout(() => { try { this.render(); } catch {} }, 0);
         return true;
       },
     });
@@ -7468,7 +7530,9 @@ async function __setupCloud() {
         const norm = v => (v == null ? '' : String(v).trim());
         return norm(el.value) !== norm(el.dataset.original);
       });
-      if (!inOurInput && !hasUnsavedChanges) App.render();
+      // 剛剛在本機存過 → setTimeout 已經排好重繪了，跳過雲端 bounce-back 的重複重繪
+      const justSavedLocally = window._platformJustSaved && (Date.now() - window._platformJustSaved < 2000);
+      if (!inOurInput && !hasUnsavedChanges && !justSavedLocally) App.render();
     });
   } catch (e) {
     console.error('Cloud setup failed, falling back to localStorage', e);
