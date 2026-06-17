@@ -8141,7 +8141,7 @@ const GROWTH_TAGS=[
 ];
 const state={};
 const _initNow=new Date();const _initCurMonth=`${_initNow.getFullYear()}/${String(_initNow.getMonth()+1).padStart(2,'0')}`;
-SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawMap:{},curMonth:_initCurMonth,curHalf:'first',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
+SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawMap:{},curMonth:_initCurMonth,curHalf:'first',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
 let globalMap={};
 let curShop='總表';
 let openPopup=null;
@@ -8261,7 +8261,9 @@ SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getEle
 function deleteUpload(shop,type){
   const isMap=type==='map';
   const msg=isMap?'確定要刪除商品對照表？（所有賣場共用，刪除後需重新上傳）'
-    :type==='mobic'?`確定要刪除 ${shop} 的莫筆克銷售資料？`:`確定要刪除 ${shop} 的廣告報表？`;
+    :type==='mobic'?`確定要刪除 ${shop} 的莫筆克銷售資料？`
+    :type==='ads'?`確定要刪除 ${shop} 的廣告報表？`
+    :`確定要刪除 ${shop} 的選品廣告清單？`;
   if(!confirm(msg))return;
   if(isMap){
     try{localStorage.removeItem('ec|filemeta|globalMap');}catch(e){}
@@ -8280,10 +8282,11 @@ function deleteUpload(shop,type){
     });
   }else{
     try{localStorage.removeItem(`ec|filemeta|${shop}|${type}`);}catch(e){}
-    const icon=type==='mobic'?'📦':'📣';
-    const title=type==='mobic'?'莫筆克銷售分析':'蝦皮廣告報表';
+    const icon=type==='mobic'?'📦':type==='ads'?'📣':'🎯';
+    const title=type==='mobic'?'莫筆克銷售分析':type==='ads'?'蝦皮廣告報表':'選品廣告清單';
     if(type==='mobic')state[shop].rawMobic=null;
-    else state[shop].rawAds=null;
+    else if(type==='ads')state[shop].rawAds=null;
+    else state[shop].rawSelAds=null;
     markCard(shop,type,icon,title,'');
     checkReady(shop);
   }
@@ -8391,6 +8394,7 @@ function shopHTML(shop){return`
     <label class="ucard" id="uc-map-${shop}"><input type="file" accept=".xlsx,.xls" onchange="onMapFile(event,'${shop}')"><div class="ucard-icon" id="ui-map-${shop}">🗂</div><div class="ucard-info"><div class="ucard-title" id="ut-map-${shop}">蝦皮商品清單</div><div class="ucard-sub" id="us-map-${shop}"></div></div><span id="del-map-${shop}" onclick="event.preventDefault();event.stopPropagation();deleteUpload('${shop}','map')" style="display:none;margin-left:auto;color:#ef4444;cursor:pointer;padding:2px 8px;font-size:14px;flex-shrink:0" title="刪除">🗑</span></label>
     <label class="ucard" id="uc-mobic-${shop}"><input type="file" accept=".xlsx,.xls" onchange="onFile(event,'${shop}','mobic')"><div class="ucard-icon" id="ui-mobic-${shop}">📦</div><div class="ucard-info"><div class="ucard-title" id="ut-mobic-${shop}">莫筆克銷售分析</div><div class="ucard-sub">.xlsx</div></div><span id="del-mobic-${shop}" onclick="event.preventDefault();event.stopPropagation();deleteUpload('${shop}','mobic')" style="display:none;margin-left:auto;color:#ef4444;cursor:pointer;padding:2px 8px;font-size:14px;flex-shrink:0" title="刪除">🗑</span></label>
     <label class="ucard" id="uc-ads-${shop}"><input type="file" accept=".csv" onchange="onFile(event,'${shop}','ads')"><div class="ucard-icon" id="ui-ads-${shop}">📣</div><div class="ucard-info"><div class="ucard-title" id="ut-ads-${shop}">蝦皮廣告報表</div><div class="ucard-sub">.csv</div></div><span id="del-ads-${shop}" onclick="event.preventDefault();event.stopPropagation();deleteUpload('${shop}','ads')" style="display:none;margin-left:auto;color:#ef4444;cursor:pointer;padding:2px 8px;font-size:14px;flex-shrink:0" title="刪除">🗑</span></label>
+    <label class="ucard" id="uc-selads-${shop}"><input type="file" accept=".xlsx,.xls" onchange="onFile(event,'${shop}','selads')"><div class="ucard-icon" id="ui-selads-${shop}">🎯</div><div class="ucard-info"><div class="ucard-title" id="ut-selads-${shop}">選品廣告清單</div><div class="ucard-sub">.xlsx（選填）</div></div><span id="del-selads-${shop}" onclick="event.preventDefault();event.stopPropagation();deleteUpload('${shop}','selads')" style="display:none;margin-left:auto;color:#ef4444;cursor:pointer;padding:2px 8px;font-size:14px;flex-shrink:0" title="刪除">🗑</span></label>
     <div class="spin-row" id="spin-${shop}"><div class="spin"></div>讀取中…</div>
     <button class="gen-btn" id="gen-${shop}" onclick="generate('${shop}')" disabled>▶ 產生並儲存</button>
   </div>
@@ -8462,6 +8466,14 @@ function resetUploadCards(shop){
   if(ai)ai.textContent='📣';
   const at=document.getElementById('ut-ads-'+shop);
   if(at)at.textContent='蝦皮廣告報表';
+  const selads=document.getElementById('uc-selads-'+shop);
+  if(selads)selads.className='ucard';
+  const sai=document.getElementById('ui-selads-'+shop);
+  if(sai)sai.textContent='🎯';
+  const sat=document.getElementById('ut-selads-'+shop);
+  if(sat)sat.textContent='選品廣告清單';
+  const sadel=document.getElementById('del-selads-'+shop);
+  if(sadel)sadel.style.display='none';
   checkReady(shop);
 }
 
@@ -8613,7 +8625,7 @@ function onFile(e,shop,type){
       }catch(err){markCard(shop,'mobic','❌','讀取失敗','err');}
       setSpin(shop,false);checkReady(shop);
     };r.readAsBinaryString(file);
-  }else{
+  }else if(type==='ads'){
     const r=new FileReader();
     r.onload=ev=>{
       try{
@@ -8624,6 +8636,18 @@ function onFile(e,shop,type){
       }catch(err){markCard(shop,'ads','❌','讀取失敗','err');}
       setSpin(shop,false);checkReady(shop);
     };r.readAsArrayBuffer(file);
+  }else if(type==='selads'){
+    const r=new FileReader();
+    r.onload=ev=>{
+      try{
+        const wb=XLSX.read(ev.target.result,{type:'binary'});
+        const sName=wb.SheetNames[0];
+        state[shop].rawSelAds=XLSX.utils.sheet_to_json(wb.Sheets[sName],{defval:''});
+        try{localStorage.setItem(`ec|filemeta|${shop}|selads`,JSON.stringify({name:file.name}));}catch(e){}
+        markCard(shop,'selads','✅',file.name,'ok');
+      }catch(err){markCard(shop,'selads','❌','讀取失敗','err');}
+      setSpin(shop,false);checkReady(shop);
+    };r.readAsBinaryString(file);
   }
 }
 function parseAdsCsv(text){
