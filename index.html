@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-26">
+<meta name="app-version" content="2026-06-18-27">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -3644,6 +3644,8 @@ const App = {
         window.__updateInsightSyncBadge();
         if (failed.length === 0) {
           showToast('已同步到雲端 ✓', 'success');
+          // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌
+          try { this._updateDailyProgressFromInsight(); } catch (e) { console.warn('[autoSummary]', e); }
         } else {
           alert('部分同步失敗：\n' + failed.join('\n'));
         }
@@ -3944,6 +3946,115 @@ const App = {
   },
 
   /* ------------- 商品備註 modal ------------- */
+  /* ------------- 同步洞察表後，把今天的調整自動寫進該同事的工作日誌 ------------- */
+  _updateDailyProgressFromInsight() {
+    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
+    const userName = this.currentUser && this.currentUser.name;
+    const usernameId = this.currentUser && this.currentUser.username;
+    if (!userName || !ALLOWED_NAMES.includes(userName)) return; // 只處理 3 位員工，admin/Kelly 不寫
+
+    const now = new Date();
+    const todayDash  = toDateStr(now);              // 2026-06-18
+    const todaySlash = todayDash.replace(/-/g, '/'); // 2026/06/18
+
+    // 共用門檻
+    const T = Object.assign({}, window.INSIGHT_DEFAULT_THRESHOLDS || {
+      explosion: 50, growth: 10, drop: -10, heavyDrop: -50,
+      ctrMin: 3, weakConvMin: 1, weakConvMax: 3, lowConvMin: 3, lowConvMax: 6,
+    }, Store.get('ec.insightThresholds', {}) || {});
+
+    // 對某商品判定分類
+    const classify = (shop, code) => {
+      const weeks = Store.get(`ec.insight_${shop}_weeks`, []) || [];
+      const sales = (weeks[0] && weeks[0].products) || [];
+      const salesPrev = (weeks[1] && weeks[1].products) || [];
+      const master = Store.get(`ec.insight_${shop}_master`, null);
+      const perf = Store.get(`ec.insight_${shop}_perf`, null);
+      const p = sales.find(x => x.code === code);
+      if (!p) return null;
+      const prev = salesPrev.find(x => x.code === code);
+      const growthRate = (prev && prev.revenue > 0)
+        ? (p.revenue - prev.revenue) / prev.revenue
+        : null;
+      const m = master && master.byCode && master.byCode[code];
+      const shopeeId = (m && m.id) || '';
+      const perfEntry = (shopeeId && perf && perf.byShopeeId) ? perf.byShopeeId[shopeeId] : null;
+      const convRate = (perfEntry && perfEntry.convRate) || 0;
+      const ctr = (perfEntry && perfEntry.ctr) || 0;
+      if (growthRate !== null && growthRate !== undefined) {
+        const g = growthRate * 100;
+        if (g > T.explosion) return '爆發品';
+        if (g >= T.growth)   return '成長品';
+        if (g < T.heavyDrop) return '重跌品';
+        if (g <= T.drop)     return '衰退品';
+      }
+      const ctrPct = ctr * 100;
+      const convPct = convRate * 100;
+      if (ctrPct > T.ctrMin) {
+        if (convRate === 0) return '零轉換';
+        if (convPct >= T.weakConvMin && convPct < T.weakConvMax) return '弱轉換';
+        if (convPct >= T.lowConvMin && convPct <= T.lowConvMax)  return '轉換偏低';
+      }
+      return null;
+    };
+
+    // 跨 3 個賣場統計今天的調整
+    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+    const counts = {};
+    INSIGHT_SHOPS.forEach(shop => {
+      const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
+      Object.keys(notes).forEach(code => {
+        const adjustments = (notes[code] && notes[code].adjustments) || [];
+        const hit = adjustments.some(a => {
+          const d = (a.date || '').slice(0, 10);
+          const dateOk = d === todayDash || d === todaySlash;
+          const byOk = !a.by || a.by === usernameId || a.by === userName;
+          return dateOk && byOk;
+        });
+        if (hit) {
+          const cls = classify(shop, code);
+          if (cls) counts[cls] = (counts[cls] || 0) + 1;
+        }
+      });
+    });
+    if (Object.keys(counts).length === 0) return;
+
+    // 排序：下滑類 → 成長類 → 轉換類
+    const ORDER = ['重跌品', '衰退品', '爆發品', '成長品', '零轉換', '弱轉換', '轉換偏低'];
+    const EMOJI = { '重跌品':'🔴','衰退品':'🟥','爆發品':'🟡','成長品':'🟨','零轉換':'❎','弱轉換':'🟢','轉換偏低':'🟩' };
+    const lines = [];
+    let idx = 1;
+    ORDER.forEach(label => {
+      if (counts[label]) lines.push(`${idx++}. ${EMOJI[label]} ${label} ${counts[label]} 個`);
+    });
+    const summaryText = '【洞察表 · 今日調整】\n' + lines.join('\n');
+
+    // 更新工作日誌（本機儲存，使用者要按「☁ 同步雲端」推到雲端讓老闆看到）
+    const all = Store.get('ec.dailyProgress', {}) || {};
+    const day = Object.assign({}, all[todayDash] || {});
+    const existing = day[userName] || '';
+    // 移除舊的「【洞察表 · 今日調整】」區塊（若有），再 append 新版
+    const cleaned = existing.replace(/【洞察表 · 今日調整】[\s\S]*?(?=\n\n【|$)/g, '').replace(/\s+$/, '');
+    const newText = cleaned ? cleaned + '\n\n' + summaryText : summaryText;
+    day[userName] = newText;
+    const next = Object.assign({}, all, { [todayDash]: day });
+
+    if (typeof Store.setLocalOnly === 'function') {
+      Store.setLocalOnly('ec.dailyProgress', next);
+    } else {
+      Store.set('ec.dailyProgress', next);
+    }
+    window.__dpPendingNames = window.__dpPendingNames || new Set();
+    window.__dpPendingNames.add(userName);
+
+    // 若工作日誌頁的 textarea 還在畫面上，同步 UI
+    const ta = document.querySelector(`.dp-textarea[data-dp-name="${userName}"]`);
+    if (ta) ta.value = newText;
+    if (typeof window.__updateDpSyncBadge === 'function') window.__updateDpSyncBadge();
+
+    showToast(`已自動更新 ${userName} 的工作日誌（記得按「☁ 同步雲端」推給老闆）`, 'info');
+  },
+
   openInsightNoteModal(code) {
     const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
     const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
