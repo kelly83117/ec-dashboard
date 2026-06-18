@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-03">
+<meta name="app-version" content="2026-06-18-04">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2347,6 +2347,13 @@ const App = {
 
     // ============== 賣場切換 ==============
     const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+    // 還原上次選的賣場（每台電腦記憶）
+    if (!this.filter.insightShop) {
+      try {
+        const lastShop = localStorage.getItem('ec.insightLastShop');
+        if (lastShop && INSIGHT_SHOPS.indexOf(lastShop) >= 0) this.filter.insightShop = lastShop;
+      } catch {}
+    }
     const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
       ? this.filter.insightShop : '玩樂';
 
@@ -2364,19 +2371,27 @@ const App = {
       { key: 'stock', label: '可用庫存' },
       { key: 'note', label: '調整' },
     ];
-    // 洞察表所有篩選/排序/欄位偏好：每台電腦 localStorage 記憶（不同步雲端）
-    // 包：欄位顯示、大類篩選、CTR<3% 開關、排序、賣場
-    if (!this._insightPrefsLoaded) {
+    // 洞察表偏好：每家賣場各自獨立，每台電腦 localStorage 記憶（不同步雲端）
+    // 包：欄位顯示、大類篩選、CTR<3% 開關、排序
+    // 切換賣場時自動重載對應賣場的偏好
+    if (this._loadedPrefsForShop !== currentShop) {
+      let saved = {};
       try {
-        const saved = JSON.parse(localStorage.getItem('ec.insightPrefs') || '{}');
-        if (Array.isArray(saved.hiddenCols) && !Array.isArray(this.filter.insightHiddenCols)) this.filter.insightHiddenCols = saved.hiddenCols;
-        if (Array.isArray(saved.cls) && !Array.isArray(this.filter.insightClass)) this.filter.insightClass = saved.cls;
-        if (typeof saved.ctrLow === 'boolean' && this.filter.insightCtrLow === undefined) this.filter.insightCtrLow = saved.ctrLow;
-        if (saved.sortKey && !this.filter.insightSortKey) this.filter.insightSortKey = saved.sortKey;
-        if (saved.sortDir && !this.filter.insightSortDir) this.filter.insightSortDir = saved.sortDir;
-        if (saved.shop && !this.filter.insightShop) this.filter.insightShop = saved.shop;
+        const raw = localStorage.getItem(`ec.insightPrefs__${currentShop}`);
+        if (raw) {
+          saved = JSON.parse(raw) || {};
+        } else {
+          // 兼容舊版單一 key（3 家共用），首次切換時以舊資料為起點
+          const old = localStorage.getItem('ec.insightPrefs');
+          if (old) saved = JSON.parse(old) || {};
+        }
       } catch {}
-      this._insightPrefsLoaded = true;
+      this.filter.insightHiddenCols = Array.isArray(saved.hiddenCols) ? saved.hiddenCols : [];
+      this.filter.insightClass = Array.isArray(saved.cls) ? saved.cls : [];
+      this.filter.insightCtrLow = !!saved.ctrLow;
+      this.filter.insightSortKey = saved.sortKey || '';
+      this.filter.insightSortDir = saved.sortDir || '';
+      this._loadedPrefsForShop = currentShop;
     }
     if (!Array.isArray(this.filter.insightHiddenCols)) this.filter.insightHiddenCols = [];
     const hiddenColsArr = this.filter.insightHiddenCols;
@@ -3696,17 +3711,18 @@ const App = {
       });
     });
 
-    // 共用：把所有洞察表偏好打包寫入 localStorage（每台電腦記憶）
+    // 共用：把當前賣場的洞察表偏好打包寫入 localStorage（每家賣場各自獨立、每台電腦記憶）
     const persistInsightPrefs = () => {
       try {
-        localStorage.setItem('ec.insightPrefs', JSON.stringify({
+        const shop = this.filter.insightShop || '玩樂';
+        localStorage.setItem(`ec.insightPrefs__${shop}`, JSON.stringify({
           hiddenCols: this.filter.insightHiddenCols || [],
           cls: Array.isArray(this.filter.insightClass) ? this.filter.insightClass : [],
           ctrLow: !!this.filter.insightCtrLow,
           sortKey: this.filter.insightSortKey || '',
           sortDir: this.filter.insightSortDir || '',
-          shop: this.filter.insightShop || '',
         }));
+        localStorage.setItem('ec.insightLastShop', shop);
       } catch {}
     };
     // 欄位顯示切換
