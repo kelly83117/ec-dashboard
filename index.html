@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-31">
+<meta name="app-version" content="2026-06-18-32">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -3975,7 +3975,8 @@ const App = {
   /* ------------- 商品備註 modal ------------- */
   /* ------------- 同步洞察表 / 淨利表後，自動匯入今日調整摘要到工作日誌 ------------- */
   // 也處理「刪除全部當日紀錄後」自動把摘要區塊一併清掉
-  _updateDailyProgressFromAdjustments() {
+  // opts.silent = true → 不顯示 toast（給每次小編輯/刪除用）
+  _updateDailyProgressFromAdjustments(opts) {
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
     const userName = this.currentUser && this.currentUser.name;
     const usernameId = this.currentUser && this.currentUser.username;
@@ -4135,13 +4136,14 @@ const App = {
     window.__dpPendingNames = window.__dpPendingNames || new Set();
     window.__dpPendingNames.add(userName);
 
-    // 若工作日誌頁的 textarea 還在畫面上，同步 UI
+    // 若工作日誌頁的 textarea 還在畫面上，同步 UI（但別蓋掉使用者正在打字的內容）
     const ta = document.querySelector(`.dp-textarea[data-dp-name="${userName}"]`);
-    if (ta) ta.value = newText;
+    if (ta && document.activeElement !== ta) ta.value = newText;
     if (typeof window.__updateDpSyncBadge === 'function') window.__updateDpSyncBadge();
 
+    const silent = opts && opts.silent;
     const hasContent = insightBlock || profitBlock;
-    if (hasContent) {
+    if (hasContent && !silent) {
       showToast(`已自動更新 ${userName} 的工作日誌（記得按「☁ 同步雲端」推給老闆）`, 'info');
     }
   },
@@ -10192,6 +10194,8 @@ function saveNotes(shop,notes){
   try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=notes;}catch{}
   _showSyncBtn(shop);
+  // 立即同步工作日誌摘要（不必等按 ☁ 同步雲端；silent 不顯示 toast 避免太吵）
+  try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}
 }
 function buildNoteCell(shopKey,code,noteId,noteData){
   let adjList=[];
