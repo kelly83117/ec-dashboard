@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-22">
+<meta name="app-version" content="2026-06-18-23">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -7374,15 +7374,6 @@ const App = {
             未啟用任何辦公室＝全公司（不歸屬特定辦公室）
           </div>
         </div>
-        <div class="field" style="margin-top:4px;padding:12px;background:var(--bg);border-radius:var(--radius-sm)">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
-            <input type="checkbox" id="f-ucross" ${u.crossOfficeAccess ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer">
-            <span style="font-weight:500">允許檢視其他辦公室的工作事項</span>
-          </label>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:6px;padding-left:24px">
-            未勾選時，僅能看到自己所屬辦公室的內容；管理員不受此限制
-          </div>
-        </div>
       `,
       onMount: () => {
         // 點 ▶/▼ 展開或收起該部門的子功能
@@ -7418,7 +7409,6 @@ const App = {
         const selectedDepts = Array.from(document.querySelectorAll('.f-udept-cb'))
           .filter(cb => cb.checked)
           .map(cb => cb.value);
-        const crossOfficeAccess = document.getElementById('f-ucross').checked;
         // 收集每個部門的子功能勾選 → officeFeatures
         const officeFeatures = {};
         selectedDepts.forEach(deptName => {
@@ -7437,7 +7427,7 @@ const App = {
           list[i].role = role;
           list[i].departments = selectedDepts;
           delete list[i].department; // 移除舊欄位
-          list[i].crossOfficeAccess = crossOfficeAccess;
+          delete list[i].crossOfficeAccess; // 已移除此功能
           list[i].officeFeatures = officeFeatures;
           delete list[i].canManageLineNotify; // 改由 officeFeatures.行銷.lineNotify 取代
           if (password) {
@@ -7445,7 +7435,7 @@ const App = {
           }
         } else {
           const initialPw = password || '123';
-          list.push({ username: usernameNew, name, role, departments: selectedDepts, crossOfficeAccess, officeFeatures, password: hashPassword(initialPw) });
+          list.push({ username: usernameNew, name, role, departments: selectedDepts, officeFeatures, password: hashPassword(initialPw) });
         }
         Store.set(Store.KEYS.users, list);
 
@@ -7455,7 +7445,7 @@ const App = {
           this.currentUser.role = role;
           this.currentUser.departments = selectedDepts;
           delete this.currentUser.department;
-          this.currentUser.crossOfficeAccess = crossOfficeAccess;
+          delete this.currentUser.crossOfficeAccess;
           this.currentUser.officeFeatures = officeFeatures;
           delete this.currentUser.canManageLineNotify;
           this.applyUserPerms(this.currentUser);
