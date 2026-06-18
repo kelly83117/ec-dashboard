@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-01">
+<meta name="app-version" content="2026-06-18-02">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2364,7 +2364,14 @@ const App = {
       { key: 'stock', label: '可用庫存' },
       { key: 'note', label: '調整' },
     ];
-    const hiddenColsArr = Array.isArray(this.filter.insightHiddenCols) ? this.filter.insightHiddenCols : [];
+    // 欄位顯示狀態：每台電腦 localStorage 記憶（不同步雲端，每人各自的偏好）
+    if (!Array.isArray(this.filter.insightHiddenCols)) {
+      try {
+        const saved = localStorage.getItem('ec.insightHiddenCols');
+        this.filter.insightHiddenCols = saved ? JSON.parse(saved) : [];
+      } catch { this.filter.insightHiddenCols = []; }
+    }
+    const hiddenColsArr = this.filter.insightHiddenCols;
     const hiddenCols = new Set(hiddenColsArr);
     const visCol = (k) => !hiddenCols.has(k);
     const visibleColCount = 2 + INSIGHT_COLS.filter(c => visCol(c.key)).length;
@@ -3679,7 +3686,10 @@ const App = {
       });
     });
 
-    // 欄位顯示切換
+    // 欄位顯示切換 + 寫入 localStorage（每台電腦記憶各自的欄位偏好）
+    const persistHiddenCols = (arr) => {
+      try { localStorage.setItem('ec.insightHiddenCols', JSON.stringify(arr || [])); } catch {}
+    };
     document.querySelectorAll('[data-col-toggle]').forEach(cb => {
       cb.addEventListener('change', () => {
         const key = cb.dataset.colToggle;
@@ -3687,6 +3697,7 @@ const App = {
         if (cb.checked) cur = cur.filter(k => k !== key);
         else if (!cur.includes(key)) cur.push(key);
         this.filter.insightHiddenCols = cur;
+        persistHiddenCols(cur);
         this._insightColMenuOpen = true; // re-render 時保持下拉開啟
         this.render();
       });
@@ -3695,6 +3706,7 @@ const App = {
     const showAllBtn = document.getElementById('insight-col-show-all');
     if (showAllBtn) showAllBtn.addEventListener('click', () => {
       this.filter.insightHiddenCols = [];
+      persistHiddenCols([]);
       this._insightColMenuOpen = true;
       this.render();
     });
