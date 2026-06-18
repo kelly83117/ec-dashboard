@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-17">
+<meta name="app-version" content="2026-06-18-18">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -992,6 +992,9 @@
           <button class="nav-item nav-sub" data-route="office-d1-insight">
             <span>洞察表分析</span>
           </button>
+          <button class="nav-item nav-sub" id="nav-d1-line" onclick="App.openBossLineConfigModal()" style="display:none">
+            <span>⚙️ LINE 通知設定</span>
+          </button>
         </div>
         <button class="nav-item" data-route="office-d2">
           <span class="icon">🛒</span><span>採購</span>
@@ -1888,6 +1891,10 @@ const App = {
     const isAdmin = user.role === 'admin';
     document.getElementById('admin-group').style.display = isAdmin ? '' : 'none';
     document.getElementById('nav-users').style.display = isAdmin ? '' : 'none';
+    // 行銷子選單：⚙️ LINE 通知設定（admin 或勾選 canManageLineNotify 才看得到）
+    const canManageLine = isAdmin || user.canManageLineNotify === true;
+    const navLine = document.getElementById('nav-d1-line');
+    if (navLine) navLine.style.display = canManageLine ? '' : 'none';
 
     const departments = Store.get(Store.KEYS.departments, []);
     document.querySelectorAll('[data-route^="office-"]').forEach(btn => {
