@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-06">
+<meta name="app-version" content="2026-06-18-07">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4243,582 +4243,81 @@ const App = {
   },
 
   renderWeeklyCalendarTab(deptId, color, dept) {
-    const allTasks = Store.get(Store.KEYS.dailyTasks, []);
-    const tasks = allTasks.filter(t => t.deptId === deptId);
-    const members = (Store.get(Store.KEYS.users, []))
-      .filter(u => getUserDepts(u).includes(dept.name));
-
-    // filter 狀態
-    if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0, viewMode: 'week', monthOffset: 0 };
-    const f = this.filter.dashboardMarketing;
-    if (!f.viewMode) f.viewMode = 'week';
-    if (f.monthOffset == null) f.monthOffset = 0;
-    const isMonthMode = f.viewMode === 'month';
-    const isGanttMode = f.viewMode === 'gantt';
-    const weekOffset = f.weekOffset || 0;
-    const monthOffset = f.monthOffset || 0;
-
+    // 老闆指示：移除月曆/週曆/甘特圖，每位同事下班前 5 分鐘寫今日工作進度即可
+    // 只保留 3 位同事：陳君葳、洪嘉蓮、郭雅琪
+    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
+    const users = Store.get(Store.KEYS.users, []);
     const now = new Date();
-    const todayStr2 = toDateStr(now);
-    const weekDayNames = ['週一','週二','週三','週四','週五','週六','週日'];
+    const todayStr = toDateStr(now);
 
-    // 台灣國定假日（依行政院公告；未來年份的彈性放假/補班日需每年確認更新）
-    const TW_HOLIDAYS = {
-      // ===== 2025 =====
-      '2025-01-01': '元旦',
-      '2025-01-27': '春節彈性放假',
-      '2025-01-28': '除夕', '2025-01-29': '春節初一', '2025-01-30': '春節初二', '2025-01-31': '春節初三',
-      '2025-02-28': '二二八紀念日',
-      '2025-04-03': '兒童節彈性', '2025-04-04': '兒童節', '2025-04-05': '清明節',
-      '2025-05-01': '勞動節',
-      '2025-05-30': '端午節彈性', '2025-05-31': '端午節',
-      '2025-10-06': '中秋節',
-      '2025-10-10': '國慶日',
+    if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
+    const f = this.filter.dashboardMarketing;
+    if (!f.viewDate) f.viewDate = todayStr;
+    if (f.viewDate > todayStr) f.viewDate = todayStr;
+    const viewDate = f.viewDate;
+    const isToday = viewDate === todayStr;
+    const dateDisplay = viewDate.replace(/-/g, '/');
 
-      // ===== 2026 =====
-      '2026-01-01': '元旦', '2026-01-02': '元旦彈性',
-      '2026-02-16': '春節彈性', '2026-02-17': '除夕', '2026-02-18': '春節初一',
-      '2026-02-19': '春節初二', '2026-02-20': '春節初三',
-      '2026-02-27': '二二八彈性', '2026-02-28': '二二八紀念日', '2026-03-02': '二二八補假',
-      '2026-04-03': '清明/兒童節彈性', '2026-04-04': '兒童節', '2026-04-05': '清明節', '2026-04-06': '清明節補假',
-      '2026-05-01': '勞動節',
-      '2026-06-19': '端午節',
-      '2026-09-25': '中秋節',
-      '2026-10-09': '國慶日彈性', '2026-10-10': '國慶日', '2026-10-12': '國慶日補假',
+    const allProgress = Store.get('ec.dailyProgress', {}) || {};
+    const dayProgress = allProgress[viewDate] || {};
 
-      // ===== 2027（國定假日；彈性放假日期待行政院公告再更新） =====
-      '2027-01-01': '元旦',
-      '2027-02-05': '除夕', '2027-02-06': '春節初一', '2027-02-07': '春節初二', '2027-02-08': '春節初三', '2027-02-09': '春節初四',
-      '2027-02-28': '二二八紀念日', '2027-03-01': '二二八補假',
-      '2027-04-04': '兒童節', '2027-04-05': '清明節',
-      '2027-05-01': '勞動節', '2027-05-03': '勞動節補假',
-      '2027-06-09': '端午節',
-      '2027-09-15': '中秋節',
-      '2027-10-10': '國慶日', '2027-10-11': '國慶日補假',
-    };
-    const getHoliday = (dateStr) => {
-      try { return TW_HOLIDAYS[dateStr] || null; } catch { return null; }
-    };
-    const isOffDay = (d) => {
-      try {
-        const dow = d.getDay();
-        if (dow === 0 || dow === 6) return true;
-        return !!TW_HOLIDAYS[toDateStr(d)];
-      } catch { return false; }
-    };
-    // 連假判定：本日是 off-day 且前後連續 off-day 加起來 ≥ 3 天
-    const isLongWeekend = (d) => {
-      try {
-        if (!isOffDay(d)) return false;
-        let count = 1;
-        for (let i = 1; i < 12; i++) { if (isOffDay(addDays(d, -i))) count++; else break; }
-        for (let i = 1; i < 12; i++) { if (isOffDay(addDays(d, i))) count++; else break; }
-        return count >= 3;
-      } catch { return false; }
-    };
-
-    // 計算範圍：依檢視模式
-    let rangeStart, rangeEnd, headerLabel, datesInGrid, gridCols, gridRows;
-    let displayLabel; // 例如 "本週" / "6/01 – 6/07" / "2026 年 6 月"
-
-    if (isGanttMode) {
-      // 甘特圖檢視：依當前月份顯示
-      const target = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
-      const yMonth = target.getFullYear();
-      const mMonth = target.getMonth();
-      const firstOfMonth = new Date(yMonth, mMonth, 1);
-      const lastOfMonth = new Date(yMonth, mMonth + 1, 0);
-      datesInGrid = Array.from({ length: lastOfMonth.getDate() }, (_, i) => new Date(yMonth, mMonth, i + 1));
-      rangeStart = toDateStr(firstOfMonth);
-      rangeEnd = toDateStr(lastOfMonth);
-      gridCols = datesInGrid.length;
-      gridRows = 1;
-      headerLabel = `${yMonth} 年 ${mMonth + 1} 月`;
-      displayLabel = monthOffset === 0 ? '本月' : monthOffset === -1 ? '上月' : monthOffset === 1 ? '下月' : `${monthOffset > 0 ? '+' : ''}${monthOffset} 月`;
-    } else if (isMonthMode) {
-      // 月檢視：取得目標月份的第一天
-      const target = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
-      const yMonth = target.getFullYear();
-      const mMonth = target.getMonth();
-      const firstOfMonth = new Date(yMonth, mMonth, 1);
-      const lastOfMonth = new Date(yMonth, mMonth + 1, 0);
-      // 從第一天前推到週一
-      const dow = firstOfMonth.getDay();
-      const firstMondayOffset = dow === 0 ? -6 : 1 - dow;
-      const gridStart = addDays(firstOfMonth, firstMondayOffset);
-      // 計算所需週數（5 或 6）
-      const totalDays = lastOfMonth.getDate() - firstMondayOffset;
-      const weeks = Math.ceil(totalDays / 7);
-      datesInGrid = Array.from({ length: weeks * 7 }, (_, i) => addDays(gridStart, i));
-      rangeStart = toDateStr(firstOfMonth);
-      rangeEnd = toDateStr(lastOfMonth);
-      gridCols = 7;
-      gridRows = weeks;
-      headerLabel = `${yMonth} 年 ${mMonth + 1} 月`;
-      displayLabel = monthOffset === 0 ? '本月' : monthOffset === -1 ? '上月' : monthOffset === 1 ? '下月' : `${monthOffset > 0 ? '+' : ''}${monthOffset} 月`;
-    } else {
-      // 週檢視：只顯示週一到週五（隱藏週末，筆電寬度才不會被擠）
-      const dayOfWeek = now.getDay();
-      const offsetToMon = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
-      const monday = addDays(now, offsetToMon + weekOffset * 7);
-      datesInGrid = Array.from({ length: 5 }, (_, i) => addDays(monday, i));
-      rangeStart = toDateStr(datesInGrid[0]);
-      rangeEnd = toDateStr(datesInGrid[4]);
-      gridCols = 5;
-      gridRows = 1;
-      headerLabel = `${rangeStart.slice(5).replace('-','/')} – ${rangeEnd.slice(5).replace('-','/')}`;
-      displayLabel = weekOffset === 0 ? '本週' : weekOffset === -1 ? '上週' : weekOffset === 1 ? '下週' : `${weekOffset > 0 ? '+' : ''}${weekOffset} 週`;
-    }
-
-    // 套人員篩選
-    let tasksInRange = tasks.filter(t => t.date >= rangeStart && t.date <= rangeEnd);
-    if (f.employee && f.employee !== 'all') {
-      tasksInRange = tasksInRange.filter(t => t.employee === f.employee);
-    }
-    const byDate = {};
-    datesInGrid.forEach(d => { byDate[toDateStr(d)] = []; });
-    tasksInRange.forEach(t => {
-      if (byDate[t.date]) byDate[t.date].push(t);
-    });
-
-    // 狀態統計（右上 badge 用）
-    const statusCounts = { '進行中': 0, '已完成': 0, '遇阻': 0, '待開始': 0 };
-    tasksInRange.forEach(t => {
-      if (statusCounts[t.status] != null) statusCounts[t.status]++;
-    });
-
-    // 未完成待辦
-    const pendingTodos = [];
-    tasksInRange.forEach(t => {
-      const todos = Array.isArray(t.todos) ? t.todos : [];
-      todos.forEach((td, idx) => {
-        if (!td.done && td.text) {
-          pendingTodos.push({ task: t, todoIdx: idx, text: td.text });
-        }
-      });
-    });
-
-    const employeeOptions = `
-      <option value="all" ${(f.employee || 'all') === 'all' ? 'selected' : ''}>全部人員</option>
-      ${members.map(u => `<option value="${escapeHtml(u.username)}" ${f.employee === u.username ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
-    `;
-
-    // === 月檢視：5-6 列 × 7 欄；每格較緊湊 ===
-    // === 週檢視：1 列 × 7 欄；每格寬鬆 ===
-    let calendarBody = '';
-
-    if (isGanttMode) {
-      // ============ 甘特圖 ============
-      const totalDays = datesInGrid.length;
-      const monthStart = datesInGrid[0];
-      const monthStartMs = monthStart.getTime();
-      const dayMs = 86400000;
-
-      // 依員工分組
-      const tasksGrouped = {};
-      tasksInRange.forEach(t => {
-        const empKey = t.employee || '?';
-        if (!tasksGrouped[empKey]) tasksGrouped[empKey] = { name: t.employeeName || t.employee, tasks: [] };
-        tasksGrouped[empKey].tasks.push(t);
-      });
-      // 依 date asc 排
-      Object.values(tasksGrouped).forEach(g => g.tasks.sort((a, b) => (a.date || '').localeCompare(b.date || '')));
-
-      const ROW_H = 60;
-      const EMP_W = 72;
-      const TASK_W = 200;
-      const LABEL_W = EMP_W + TASK_W;
-      const ganttHeader = `
-        <div style="display:flex;border-bottom:2px solid #d1d5db;background:#fafbfc;color:var(--text)">
-          <div style="flex:0 0 ${EMP_W}px;padding:12px 8px;font-size:13px;font-weight:700;text-align:center;border-right:1px solid #e5e7eb;letter-spacing:.05em">員工</div>
-          <div style="flex:0 0 ${TASK_W}px;padding:12px 14px;font-size:13px;font-weight:700;text-align:center;border-right:1px solid #e5e7eb;letter-spacing:.05em">任務內容</div>
-          <div style="flex:1;display:grid;grid-template-columns:repeat(${totalDays}, 1fr);min-width:0">
-            ${datesInGrid.map(d => {
-              const ds = toDateStr(d);
-              const dow = d.getDay();
-              const isToday = ds === todayStr2;
-              const isWeekend = (dow === 0 || dow === 6);
-              const hol = getHoliday(ds);
-              const headerBg = isToday ? '#f5f3ff' : (hol ? '#fef2f2' : (isWeekend ? '#fff7ed' : 'transparent'));
-              return `<div data-cell-date="${escapeHtml(ds)}" title="點此新增進度（${d.getMonth()+1}/${d.getDate()}）" style="padding:7px 0;text-align:center;font-size:12px;line-height:1.2;border-right:1px solid #f3f4f6;background:${headerBg};color:${hol ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text-muted)'))};font-weight:${isToday || hol ? '700' : '500'};cursor:pointer;transition:background-color .15s" onmouseover="this.style.backgroundColor='${hol ? '#fee2e2' : (isWeekend ? '#ffedd5' : '#f3f4f6')}'" onmouseout="this.style.backgroundColor='${headerBg}'">
-                <div style="font-size:14px;font-weight:700">${d.getDate()}</div>
-                <div style="font-size:11px;color:${isWeekend || hol ? 'inherit' : '#cbd5e1'};margin-top:2px">${['日','一','二','三','四','五','六'][dow]}</div>
-              </div>`;
-            }).join('')}
-          </div>
-        </div>
-      `;
-
-      const employeeIds = Object.keys(tasksGrouped);
-      // 員工色：使用一致調性的中性色盤（飽和度較低、不刺眼），所有人 bg 統一為淺灰色
-      const EMP_PALETTE = ['#4f46e5','#0891b2','#0d9488','#65a30d','#b45309','#c2410c','#be185d','#7c3aed','#1d4ed8','#475569'];
-      const empColorOf = (name) => {
-        let h = 0; for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-        return EMP_PALETTE[h % EMP_PALETTE.length];
+    const personInfos = ALLOWED_NAMES.map(name => {
+      const u = users.find(uu => uu.name === name || uu.username === name);
+      return {
+        name,
+        avatar: u && (u.avatar || u.avatarUrl) || '',
+        text: dayProgress[name] || '',
       };
-      const ganttRowsHtml = employeeIds.length === 0
-        ? `<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:13px">${headerLabel}沒有符合條件的任務</div>`
-        : employeeIds.map((empKey, eIdx) => {
-            const g = tasksGrouped[empKey];
-            const empColor = empColorOf(g.name || empKey);
-            const empInitial = (g.name || empKey).slice(0, 1);
-            return g.tasks.map((t, ti) => {
-              const startDate = new Date(t.date);
-              const endDate = t.dueDate ? new Date(t.dueDate) : startDate;
-              // 截斷在本月範圍內
-              const startIdx = Math.max(0, Math.floor((startDate - monthStartMs) / dayMs));
-              const endIdx = Math.min(totalDays - 1, Math.floor((endDate - monthStartMs) / dayMs));
-              if (endIdx < 0 || startIdx >= totalDays) return ''; // 不在當月
-              const colStart = startIdx + 1;
-              const colSpan = Math.max(1, endIdx - startIdx + 1);
-              const catMeta = t.category ? getCategoryMeta(t.category) : null;
-              const catColor = catMeta?.color || '#6b7280';
-              const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
-              const isFirst = ti === 0;
-              const empName = isFirst ? (g.name || empKey) : '';
-              // 「其他」分類不顯示分類名（直接讓任務標題接著呈現）
-              const categoryText = (t.category && t.category !== '其他') ? `${t.category}${t.subcategory ? ' · ' + t.subcategory : ''}` : '';
-              // 取所有指派姓名（含建立者 fallback）
-              const assigneeSet = new Set();
-              (t.todos || []).forEach(td => {
-                const arr = Array.isArray(td.assigneeNames) && td.assigneeNames.length
-                  ? td.assigneeNames
-                  : (td.assigneeName ? [td.assigneeName] : []);
-                arr.forEach(n => assigneeSet.add(n));
-              });
-              const assigneesText = assigneeSet.size > 0 ? Array.from(assigneeSet).join('、') : (g.name || empKey);
-              const isLastOfEmp = ti === g.tasks.length - 1;
-              return `
-                <div style="display:flex;background:white;${isFirst && eIdx > 0 ? 'border-top:2px solid #e5e7eb;' : (isFirst ? '' : 'border-top:1px solid #f3f4f6;')}">
-                  <div style="flex:0 0 ${EMP_W}px;background:#fafbfc;border-right:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;min-width:0;padding:6px 4px;position:relative">
-                    <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:${empColor}"></div>
-                    ${isFirst ? `
-                      <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
-                        <div style="font-weight:800;color:var(--text);font-size:15px;letter-spacing:.05em;text-align:center;line-height:1.25">${escapeHtml(empName)}</div>
-                        ${g.tasks.length > 1 ? `<span style="font-size:10px;color:var(--text-muted);font-weight:600;background:#e5e7eb;padding:1px 7px;border-radius:99px;line-height:1.3">${g.tasks.length} 項</span>` : ''}
-                      </div>
-                    ` : ''}
-                  </div>
-                  <div style="flex:0 0 ${TASK_W}px;padding:10px 12px;border-right:1px solid #e5e7eb;display:flex;flex-direction:column;justify-content:center;gap:3px;min-width:0">
-                    ${categoryText ? `<div style="display:flex;align-items:center;gap:6px;font-size:14px;color:${catColor};font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em" title="${escapeHtml(categoryText)}"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${catColor};flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(categoryText)}</span></div>` : ''}
-                    <div style="font-size:${categoryText ? '11.5px' : '14px'};color:${categoryText ? 'var(--text-muted)' : 'var(--text)'};font-weight:${categoryText ? '500' : '700'};line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${categoryText ? 'padding-left:14px;' : ''}" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</div>
-                  </div>
-                  <div style="flex:1;display:grid;grid-template-columns:repeat(${totalDays}, 1fr);min-width:0;position:relative;height:${ROW_H}px">
-                    ${datesInGrid.map((d, i) => {
-                      const ds = toDateStr(d);
-                      const dow = d.getDay();
-                      const isToday = ds === todayStr2;
-                      const isWeekend = (dow === 0 || dow === 6);
-                      const hol = getHoliday(ds);
-                      return `<div style="border-right:1px solid #f3f4f6;background:${isToday ? '#f5f3ff44' : (hol ? '#fef2f244' : (isWeekend ? '#fff7ed44' : 'transparent'))}"></div>`;
-                    }).join('')}
-                    <div data-cal-task="${escapeHtml(t.id)}" title="${escapeHtml(t.title)} · ${escapeHtml(t.status)}${t.dueDate ? ' · 預計 ' + escapeHtml(t.dueDate) : ''}" style="position:absolute;left:calc(${(startIdx / totalDays) * 100}% + 2px);top:${(ROW_H - 18) / 2}px;height:18px;width:calc(${(colSpan / totalDays) * 100}% - 4px);background:${catColor};border:1px solid ${catColor};border-radius:4px;cursor:pointer;transition:transform .12s, box-shadow .12s" onmouseover="this.style.boxShadow='0 3px 10px rgba(0,0,0,.18)';this.style.transform='translateY(-1px)'" onmouseout="this.style.boxShadow='none';this.style.transform='translateY(0)'"></div>
-                  </div>
-                </div>
-              `;
-            }).join('');
-          }).join('');
+    });
 
-      calendarBody = `
-        ${ganttHeader}
-        <div style="overflow-y:auto;max-height:560px">
-          ${ganttRowsHtml}
-        </div>
-      `;
-    } else if (isMonthMode) {
-      const targetMonth = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1).getMonth();
-      // 頂部週名稱
-      const headRow = `
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #e5e7eb;background:#f9fafb">
-          ${weekDayNames.map(n => `<div style="padding:10px 10px;font-size:13px;font-weight:600;color:var(--text-muted);letter-spacing:.03em;text-align:center">${n}</div>`).join('')}
-        </div>
-      `;
-      const cellsHtml = datesInGrid.map((d, i) => {
-        const ds = toDateStr(d);
-        const isToday = ds === todayStr2;
-        const isCurrentMonth = d.getMonth() === targetMonth;
-        const dayTasks = byDate[ds] || [];
-        const more = dayTasks.length - 3;
-        const taskMini = dayTasks.slice(0, 3).map(t => {
-          const catMeta = t.category ? getCategoryMeta(t.category) : null;
-          const catColor = catMeta?.color || '#6b7280';
-          const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
-          // 「其他」分類不顯示分類名（直接讓標題接著呈現）
-          const categoryLine = (t.category && t.category !== '其他')
-            ? `<div style="font-size:12px;color:${catColor};font-weight:700;letter-spacing:.02em;line-height:1.3;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">● ${escapeHtml(t.category)}${t.subcategory ? ' · ' + escapeHtml(t.subcategory) : ''}</div>`
-            : '';
-          return `
-            <div class="cal-task-card" data-cal-task="${escapeHtml(t.id)}" style="background:white;border:1px solid #e5e7eb;border-left:3px solid ${catColor};border-radius:5px;padding:7px 10px;margin-bottom:5px;cursor:pointer;transition:box-shadow .12s,border-color .12s" onmouseover="this.style.boxShadow='0 1px 4px rgba(0,0,0,.06)';this.style.borderColor='${catColor}'" onmouseout="this.style.boxShadow='none';this.style.borderColor='#e5e7eb'" title="${escapeHtml(t.title)}${t.employeeName ? ' · ' + escapeHtml(t.employeeName) : ''}">
-              ${categoryLine}
-              <div style="font-size:14px;line-height:1.35;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;margin-bottom:4px">${escapeHtml(t.title)}</div>
-              <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
-                <select class="dp-status-select" data-task-id="${escapeHtml(t.id)}" title="點此更改狀態" onclick="event.stopPropagation()"
-                  style="padding:2px 7px;border-radius:999px;background:${st.bg};color:${st.color};font-size:12px;font-weight:600;border:1px solid ${st.color}33;cursor:pointer;font-family:inherit;line-height:1.4">
-                  ${DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === t.status ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('')}
-                </select>
-                ${(() => {
-                  const creator = t.employeeName || t.employee || '';
-                  const allAssignees = new Set();
-                  (t.todos || []).forEach(td => {
-                    const arr = Array.isArray(td.assigneeNames) && td.assigneeNames.length
-                      ? td.assigneeNames
-                      : (td.assigneeName ? [td.assigneeName] : []);
-                    arr.forEach(n => allAssignees.add(n));
-                  });
-                  const names = allAssignees.size > 0 ? Array.from(allAssignees).join('、') : creator;
-                  return `<span style="font-size:12px;color:var(--text-muted);font-weight:600">👤 ${escapeHtml(names)}</span>`;
-                })()}
-              </div>
-              ${t.notes && t.notes.trim() ? `<div class="cal-note-popup">${escapeHtml(t.notes)}</div>` : ''}
+    const cards = personInfos.map(p => {
+      const initial = p.name.slice(0, 1);
+      const hasText = p.text && p.text.trim().length > 0;
+      const statusChip = hasText
+        ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#d1fae5;color:#047857;font-size:11px;font-weight:600">✓ 已填</span>`
+        : `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600">尚未填</span>`;
+      const avatarHtml = p.avatar
+        ? `<img src="${escapeHtml(p.avatar)}" alt="${escapeHtml(p.name)}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0">`
+        : `<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#a5b4fc,#818cf8);color:white;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0">${escapeHtml(initial)}</div>`;
+      return `
+        <div class="dp-card" data-dp-name="${escapeHtml(p.name)}" style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:10px;min-width:0">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0">
+            ${avatarHtml}
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:600;color:var(--text)">${escapeHtml(p.name)}</div>
+              <div style="margin-top:2px">${statusChip}</div>
             </div>
-          `;
-        }).join('');
-
-        const holidayNameM = getHoliday(ds);
-        const longWkM = isLongWeekend(d);
-        const dowM = d.getDay();
-        const isWeekendM = (dowM === 0 || dowM === 6);
-        const cellBgM = holidayNameM
-          ? '#fef2f2'
-          : (longWkM && isWeekendM ? '#fff7ed'
-              : (isToday ? '#f5f3ff' : (isCurrentMonth ? '#fcfcfd' : '#fafafa')));
-        const dayColorM = holidayNameM ? '#b91c1c' : (isWeekendM ? '#ea580c' : (isToday ? 'white' : 'var(--text-muted)'));
-        return `
-          <div data-cell-date="${escapeHtml(ds)}" title="點此新增進度（${d.getMonth()+1}/${d.getDate()}）" style="border-right:${(i+1) % 7 === 0 ? '0' : '1px solid #e5e7eb'};border-bottom:${i < (gridRows-1)*7 ? '1px solid #e5e7eb' : '0'};padding:8px 9px;min-height:130px;display:flex;flex-direction:column;background:${cellBgM};opacity:${isCurrentMonth ? 1 : 0.5};cursor:pointer;transition:background-color .15s" onmouseover="this.style.backgroundColor='${holidayNameM ? '#fee2e2' : (longWkM && isWeekendM ? '#ffedd5' : '#f3f4f6')}'" onmouseout="this.style.backgroundColor='${cellBgM}'">
-            <div style="display:flex;align-items:center;gap:4px;margin-bottom:6px">
-              ${holidayNameM ? `<span style="font-size:12.5px;font-weight:700;color:#b91c1c;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.02em" title="${escapeHtml(holidayNameM)}">🎉 ${escapeHtml(holidayNameM)}</span>` : ''}
-              ${longWkM && !holidayNameM ? '<span style="font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px;background:#fed7aa;color:#9a3412;letter-spacing:.05em">連假</span>' : ''}
-              <span style="margin-left:auto;display:inline-flex;align-items:center;justify-content:center;${isToday ? `background:var(--primary);color:white;width:26px;height:26px;border-radius:50%;font-size:14px;font-weight:700` : `font-size:14px;color:${dayColorM};font-weight:600`}">${d.getDate()}</span>
-            </div>
-            <div style="flex:1;min-height:0">
-              ${taskMini}
-              ${more > 0 ? `<div style="font-size:11px;color:var(--primary);font-weight:600;padding:2px 7px;cursor:pointer">+${more} 更多</div>` : ''}
-            </div>
+            <span class="dp-saved-flag" style="display:none;color:#10b981;font-size:11px;font-weight:600;letter-spacing:.04em">✓ 已存</span>
           </div>
-        `;
-      }).join('');
-      calendarBody = `
-        ${headRow}
-        <div style="display:grid;grid-template-columns:repeat(7,1fr)">
-          ${cellsHtml}
+          <textarea class="dp-textarea" data-dp-name="${escapeHtml(p.name)}"
+            placeholder="${isToday ? '今天做了什麼？目前進度如何？明天計畫…' : '查看歷史紀錄（唯讀）'}"
+            ${isToday ? '' : 'readonly'}
+            style="width:100%;min-height:130px;padding:10px 12px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;line-height:1.55;resize:vertical;color:var(--text);${isToday ? 'background:white' : 'background:#f9fafb;color:#475569'}">${escapeHtml(p.text)}</textarea>
         </div>
       `;
-    } else {
-      const columnsHtml = datesInGrid.map((d, i) => {
-        const dateStr = toDateStr(d);
-        const isToday = dateStr === todayStr2;
-        const dayTasks = byDate[dateStr] || [];
+    }).join('');
 
-        const taskCardsHtml = dayTasks.length === 0
-          ? `<div style="padding:14px 8px;text-align:center;color:#cbd5e1;font-size:11px">—</div>`
-          : dayTasks.map(t => {
-              const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
-              const catMeta = t.category ? getCategoryMeta(t.category) : null;
-              const catColor = catMeta?.color || '#6b7280';
-              const todos = Array.isArray(t.todos) ? t.todos : [];
-              const doneCount = todos.filter(td => td.done).length;
-              const canEdit = this.currentUser.role === 'admin' || this.currentUser.username === t.employee;
-              return `
-                <div class="cal-task-card" data-cal-task="${escapeHtml(t.id)}" style="background:white;border:1px solid #e5e7eb;border-radius:7px;padding:9px 11px;margin-bottom:7px;cursor:pointer;transition:border-color .15s, box-shadow .15s" onmouseover="this.style.borderColor='${catColor}';this.style.boxShadow='0 2px 6px rgba(0,0,0,.05)'" onmouseout="this.style.borderColor='#e5e7eb';this.style.boxShadow='none'">
-                  ${canEdit ? `<button class="cal-task-del" data-cal-del="${escapeHtml(t.id)}" title="刪除此筆工作進度" style="position:absolute;top:4px;right:4px;width:20px;height:20px;border:0;border-radius:4px;background:transparent;color:#cbd5e1;font-size:11px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0" onmouseover="this.style.background='#fee2e2';this.style.color='#ef4444'" onmouseout="this.style.background='transparent';this.style.color='#cbd5e1'">🗑</button>` : ''}
-                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding-right:${canEdit ? '22px' : '0'};min-width:0">
-                    <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${catColor};flex-shrink:0"></span>
-                    ${(t.category && t.category !== '其他')
-                      ? `<span style="font-size:13px;font-weight:600;color:var(--text);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0" title="${escapeHtml(t.category)}${t.subcategory ? ' · ' + escapeHtml(t.subcategory) : ''}\n${escapeHtml(t.title)}">${escapeHtml(t.category)}${t.subcategory ? ' · ' + escapeHtml(t.subcategory) : ''}</span>`
-                      : `<span style="font-size:13px;font-weight:600;color:var(--text);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>`
-                    }
-                  </div>
-                  <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
-                    <select class="dp-status-select" data-task-id="${escapeHtml(t.id)}" title="點此更改狀態" onclick="event.stopPropagation()"
-                      style="padding:2px 6px;border-radius:999px;background:${st.bg};color:${st.color};font-size:11px;font-weight:600;border:1px solid ${st.color}33;cursor:pointer;font-family:inherit;line-height:1.4">
-                      ${DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === t.status ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('')}
-                    </select>
-                    ${t.dueDate ? `<span style="display:inline-flex;align-items:center;gap:2px;color:#ef4444;font-weight:600;font-size:11px" title="預計完成日">📌 ${escapeHtml(t.dueDate.slice(5).replace('-','/'))}</span>` : ''}
-                  </div>
-                  <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px dashed #f3f4f6;font-size:11px;color:var(--text-muted);flex-wrap:wrap">
-                    ${(() => {
-                      const creator = t.employeeName || t.employee || '';
-                      // 列出所有指派對象姓名（含自己 / 指派 / 共同），看名字就知道誰要做
-                      const allAssignees = new Set();
-                      (t.todos || []).forEach(td => {
-                        const arr = Array.isArray(td.assigneeNames) && td.assigneeNames.length
-                          ? td.assigneeNames
-                          : (td.assigneeName ? [td.assigneeName] : []);
-                        arr.forEach(n => allAssignees.add(n));
-                      });
-                      const names = allAssignees.size > 0 ? Array.from(allAssignees).join('、') : creator;
-                      return `<span style="font-weight:600;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis">${escapeHtml(names)}</span>`;
-                    })()}
-                    ${todos.length > 0 ? `<span style="margin-left:auto;font-weight:500;white-space:nowrap">📝 ${doneCount}/${todos.length}</span>` : ''}
-                  </div>
-                  ${t.notes && t.notes.trim() ? `<div class="cal-note-popup">${escapeHtml(t.notes)}</div>` : ''}
-                </div>
-              `;
-            }).join('');
-
-        const holidayName = getHoliday(dateStr);
-        const longWk = isLongWeekend(d);
-        const dow = d.getDay();
-        const isWeekend = (dow === 0 || dow === 6);
-        const cellBg = holidayName
-          ? '#fef2f2'  // 國定假日：淺紅
-          : (longWk && isWeekend ? '#fff7ed'  // 連假中的週末：淺橘
-              : (isToday ? '#fafafa' : '#fcfcfd'));
-        const headerBg = holidayName ? '#fee2e2' : (longWk && isWeekend ? '#ffedd5' : (isToday ? '#f5f3ff' : 'transparent'));
-        const labelColor = holidayName ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text-muted)'));
-        const dateColor = holidayName ? '#b91c1c' : (isWeekend ? '#ea580c' : (isToday ? 'var(--primary)' : 'var(--text)'));
-        return `
-          <div data-cell-date="${escapeHtml(dateStr)}" title="點此新增進度（${d.getMonth()+1}/${d.getDate()}）" style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:${i < 4 ? '1px solid #e5e7eb' : '0'};background:${cellBg};cursor:pointer;transition:background-color .15s" onmouseover="this.style.backgroundColor='${holidayName ? '#fee2e2' : (longWk && isWeekend ? '#ffedd5' : '#f3f4f6')}'" onmouseout="this.style.backgroundColor='${cellBg}'">
-            <div style="padding:10px 12px;text-align:left;border-bottom:1px solid #e5e7eb;background:${headerBg}">
-              <div style="display:flex;align-items:baseline;gap:8px">
-                <div style="font-size:12px;font-weight:600;color:${labelColor};letter-spacing:.03em">${weekDayNames[i]}</div>
-                <div style="font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em;color:${dateColor}">${d.getMonth()+1}/${d.getDate()}</div>
-                ${longWk ? '<span style="margin-left:auto;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#fed7aa;color:#9a3412;letter-spacing:.05em">連假</span>' : ''}
-              </div>
-              ${holidayName ? `<div style="font-size:11px;font-weight:600;color:#b91c1c;margin-top:3px">🎉 ${escapeHtml(holidayName)}</div>` : ''}
-            </div>
-            <div style="padding:8px;flex:1;min-height:120px">
-              ${taskCardsHtml}
-            </div>
-          </div>
-        `;
-      }).join('');
-      calendarBody = `<div style="display:flex">${columnsHtml}</div>`;
-    }
-
-    // 待辦事項：狀態篩選
-    const scopeLabel = (isMonthMode || isGanttMode) ? '本月' : '本週';
-    if (!f.todoStatus) f.todoStatus = 'pending'; // 'all' | 'pending' | '進行中' | '已完成' | '遇阻' | '待開始'
-
-    // 收集所有 todos 並依狀態過濾
-    const allTodoRows = [];
-    tasksInRange.forEach(t => {
-      const todos = Array.isArray(t.todos) ? t.todos : [];
-      todos.forEach((td, idx) => {
-        if (td.text) allTodoRows.push({ task: t, todoIdx: idx, text: td.text, done: !!td.done });
-      });
-    });
-    // 各狀態的計數（依任務狀態）
-    const todoStatusCounts = { all: allTodoRows.length, pending: 0, '進行中': 0, '已完成': 0, '遇阻': 0, '待開始': 0 };
-    allTodoRows.forEach(r => {
-      if (!r.done) todoStatusCounts.pending++;
-      if (todoStatusCounts[r.task.status] != null) todoStatusCounts[r.task.status]++;
-    });
-    const filteredRows = allTodoRows.filter(r => {
-      if (f.todoStatus === 'all') return true;
-      if (f.todoStatus === 'pending') return !r.done;
-      return r.task.status === f.todoStatus;
-    });
-
-    const todoFilterPills = `
-      <div style="display:flex;align-items:center;gap:5px;padding:9px 14px;border-bottom:1px solid #e5e7eb;background:#fafbfc;flex-wrap:wrap">
-        ${[
-          { key: 'pending', label: '未完成', emoji: '○' },
-          { key: 'all', label: '全部', emoji: '•' },
-          { key: '進行中', label: '進行中', emoji: DAILY_TASK_STATUS['進行中'].emoji },
-          { key: '已完成', label: '已完成', emoji: DAILY_TASK_STATUS['已完成'].emoji },
-          { key: '遇阻', label: '遇阻', emoji: DAILY_TASK_STATUS['遇阻'].emoji },
-          { key: '待開始', label: '待開始', emoji: DAILY_TASK_STATUS['待開始'].emoji },
-        ].map(p => {
-          const active = f.todoStatus === p.key;
-          const cnt = todoStatusCounts[p.key] || 0;
-          return `<button class="pill" data-todo-status="${escapeHtml(p.key)}" style="padding:4px 11px;font-size:12px;border:0;background:${active ? 'var(--primary)' : 'transparent'};color:${active ? 'white' : 'var(--text-muted)'};font-weight:${active ? '700' : '500'}">${p.emoji} ${escapeHtml(p.label)} ${cnt}</button>`;
-        }).join('')}
-      </div>
-    `;
-
-    const pendingHtml = filteredRows.length === 0
-      ? `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">${scopeLabel}沒有符合條件的待辦 🎉</div>`
-      : filteredRows.slice(0, 40).map(({ task, todoIdx, text, done }) => {
-          const catMeta = task.category ? getCategoryMeta(task.category) : null;
-          const catColor = catMeta?.color || '#6b7280';
-          const st = DAILY_TASK_STATUS[task.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
-          const td = task.todos?.[todoIdx];
-          const assigneeNames = Array.isArray(td?.assigneeNames) && td.assigneeNames.length
-            ? td.assigneeNames
-            : (td?.assigneeName ? [td.assigneeName] : []);
-          const creatorName = task.employeeName || task.employee || '';
-          const isShared = assigneeNames.length >= 2;
-          const isAssigned = assigneeNames.length === 1 && assigneeNames[0] !== creatorName;
-          // 全部不顯示徽章，看人員名字就知道是誰做
-          const typeBadge = '';
-          const displayParticipants = isShared
-            ? assigneeNames.join('、')
-            : (isAssigned ? `${creatorName} → ${assigneeNames[0]}` : creatorName);
-          // 狀態下拉：點一下展開可改狀態
-          const statusOptions = DAILY_TASK_STATUS_LIST.map(s => `<option value="${escapeHtml(s)}" ${s === task.status ? 'selected' : ''}>${DAILY_TASK_STATUS[s].emoji} ${s}</option>`).join('');
-          return `
-            <div data-cal-task="${escapeHtml(task.id)}" data-todo-source="list" style="display:block;padding:12px 16px;border-bottom:1px solid #f3f4f6;background:white;transition:background .12s;cursor:pointer" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'" title="點一下編輯此待辦事項">
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-                <span style="flex:1;min-width:0;color:var(--text);font-size:14px;line-height:1.4;font-weight:600">${escapeHtml(text)}</span>
-                ${typeBadge}
-              </div>
-              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                <select class="dp-status-select" data-task-id="${escapeHtml(task.id)}" title="點此更改狀態" onclick="event.stopPropagation()"
-                  style="padding:3px 8px;border-radius:999px;background:${st.bg};color:${st.color};font-size:11px;font-weight:600;border:1px solid ${st.color}33;cursor:pointer;font-family:inherit;line-height:1.4">
-                  ${statusOptions}
-                </select>
-                ${task.category ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--text-muted);font-weight:500"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${catColor}"></span>${escapeHtml(task.category)}</span>` : ''}
-                ${task.dueDate ? `<span style="font-size:11px;color:#ef4444;font-weight:600" title="預計完成日">📌 ${escapeHtml(task.dueDate.slice(5).replace('-','/'))}</span>` : ''}
-                <span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-weight:500">${escapeHtml(displayParticipants)}</span>
-              </div>
-            </div>
-          `;
-        }).join('');
-
-    // 上一個 / 下一個 按鈕：依模式而定
-    const useMonthNav = isMonthMode || isGanttMode;
-    const prevOffset = useMonthNav ? monthOffset - 1 : weekOffset - 1;
-    const nextOffset = useMonthNav ? monthOffset + 1 : weekOffset + 1;
-    const offsetAttr = useMonthNav ? 'data-month-offset' : 'data-week-offset';
+    const dateInputBg = isToday ? 'white' : '#fef3c7';
 
     return `
-      <div style="display:grid;grid-template-columns:${isGanttMode ? 'minmax(0,1fr)' : 'minmax(0,1fr) minmax(280px, 360px)'};gap:16px;align-items:start">
-        <div style="background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;overflow:visible;min-width:0">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:13px 16px;border-bottom:1px solid #e5e7eb;background:white">
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-              <h3 style="margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em">工作${isGanttMode ? '甘特圖' : (isMonthMode ? '月曆' : '週曆')}</h3>
-              <div style="display:flex;align-items:center;gap:2px;background:#f3f4f6;border-radius:7px;padding:2px">
-                <button class="pill" ${offsetAttr}="${prevOffset}" title="上一個" style="padding:3px 9px;font-size:12px;border:0;background:transparent">←</button>
-                <button class="pill active" ${offsetAttr}="0" style="padding:3px 12px;font-size:12px;min-width:54px;border:0">${displayLabel}</button>
-                <button class="pill" ${offsetAttr}="${nextOffset}" title="下一個" style="padding:3px 9px;font-size:12px;border:0;background:transparent">→</button>
-              </div>
-              <div style="display:flex;align-items:center;gap:2px;background:#f3f4f6;border-radius:7px;padding:2px">
-                <button class="pill ${f.viewMode === 'week' ? 'active' : ''}" data-view-mode="week" style="padding:3px 11px;font-size:12px;border:0;${f.viewMode === 'week' ? '' : 'background:transparent'}">週</button>
-                <button class="pill ${isMonthMode ? 'active' : ''}" data-view-mode="month" style="padding:3px 11px;font-size:12px;border:0;${isMonthMode ? '' : 'background:transparent'}">月</button>
-                <button class="pill ${isGanttMode ? 'active' : ''}" data-view-mode="gantt" style="padding:3px 11px;font-size:12px;border:0;${isGanttMode ? '' : 'background:transparent'}">甘特</button>
-              </div>
-              <span style="font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${escapeHtml(headerLabel)}</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
-              <select id="dash-mkt-emp" style="padding:5px 11px;border:1px solid #e5e7eb;border-radius:7px;background:white;color:var(--text);font-size:12px;font-family:inherit;cursor:pointer">
-                ${employeeOptions}
-              </select>
-              <button class="btn-add" data-cal-add="${escapeHtml(deptId)}" style="padding:6px 12px;font-size:12px">+ 新增進度</button>
-            </div>
+      <div style="background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px 16px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+          <div style="min-width:0">
+            <h3 style="margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em">每日工作進度 · ${escapeHtml(dateDisplay)}${isToday ? '<span style="margin-left:8px;font-size:11px;font-weight:500;color:var(--primary);background:var(--primary-soft);padding:2px 8px;border-radius:999px">今天</span>' : ''}</h3>
+            <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted)">下班前 5 分鐘寫一下今天的工作進度即可。輸入停 1.5 秒會自動儲存到雲端。</p>
           </div>
-          <div style="display:flex;align-items:center;gap:6px;padding:8px 16px;border-bottom:1px solid #e5e7eb;background:#f9fafb;flex-wrap:wrap">
-            ${DAILY_TASK_STATUS_LIST.map(s => {
-              const meta = DAILY_TASK_STATUS[s];
-              const c = statusCounts[s] || 0;
-              return `<span title="${escapeHtml(s)} ${c} 件" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:6px;background:${c > 0 ? meta.bg : '#f3f4f6'};color:${c > 0 ? meta.color : '#9ca3af'};font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">${meta.emoji} ${escapeHtml(s)} ${c}</span>`;
-            }).join('')}
+          <div style="display:flex;align-items:center;gap:6px">
+            <button id="dp-prev-day" title="前一天" style="padding:5px 10px;border:1px solid var(--border);background:white;border-radius:6px;font-size:12px;cursor:pointer">←</button>
+            <input type="date" id="dp-date-picker" value="${viewDate}" max="${todayStr}"
+              style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;color:var(--text);background:${dateInputBg}">
+            <button id="dp-next-day" title="後一天" ${viewDate >= todayStr ? 'disabled' : ''}
+              style="padding:5px 10px;border:1px solid var(--border);background:white;border-radius:6px;font-size:12px;cursor:${viewDate >= todayStr ? 'not-allowed' : 'pointer'};${viewDate >= todayStr ? 'opacity:.4' : ''}">→</button>
+            ${!isToday ? `<button id="dp-back-today" style="padding:5px 12px;border:0;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:600;cursor:pointer">回到今天</button>` : ''}
           </div>
-          <div>${calendarBody}</div>
         </div>
-        ${isGanttMode ? '' : `
-        <div style="position:sticky;top:14px;background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
-          <div style="padding:14px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px solid #e5e7eb;background:white">
-            <div>
-              <h3 style="margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em">待辦事項</h3>
-              <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted);font-weight:500;font-variant-numeric:tabular-nums">${scopeLabel} · 共 ${allTodoRows.length} 項</p>
-            </div>
-            <button class="btn-add" data-todo-quick-add="${escapeHtml(deptId)}" style="padding:5px 12px;font-size:12px;flex-shrink:0">+ 新增</button>
-          </div>
-          ${todoFilterPills}
-          <div style="max-height:720px;overflow-y:auto;background:#fcfcfd">${pendingHtml}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
+          ${cards}
         </div>
-        `}
       </div>
     `;
   },
@@ -6243,8 +5742,8 @@ const App = {
         this.render();
       });
     });
-    // d1（行銷）：只有在主頁（有週曆）才綁；子頁不綁（避免 querySelector 找不到元素）
-    if (deptId === 'd1' && document.querySelector('[data-week-offset], [data-month-offset]')) {
+    // d1（行銷）：只有在主頁（有每日進度卡片）才綁；子頁不綁（避免 querySelector 找不到元素）
+    if (deptId === 'd1' && document.querySelector('#dp-date-picker, .dp-card')) {
       this.bindWeeklyCalendar(deptId);
     }
     // d1 insight 子頁：洞察表上傳按鈕
@@ -6284,306 +5783,84 @@ const App = {
   },
 
   /* ------------- 工作週曆事件綁定 ------------- */
+  /* ------------- 每日工作進度（新版：3 人卡片） ------------- */
   bindWeeklyCalendar(deptId) {
     const ensureFilter = () => {
-      if (!this.filter.dashboardMarketing) {
-        this.filter.dashboardMarketing = { employee: 'all', weekOffset: 0, monthOffset: 0, viewMode: 'week' };
-      }
+      if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
     };
-    // 人員下拉
-    const emp = document.getElementById('dash-mkt-emp');
-    if (emp) emp.addEventListener('change', () => {
+    const todayStr = toDateStr(new Date());
+
+    // 日期切換
+    const datePicker = document.getElementById('dp-date-picker');
+    if (datePicker) datePicker.addEventListener('change', () => {
       ensureFilter();
-      this.filter.dashboardMarketing.employee = emp.value;
+      const v = datePicker.value;
+      if (!v || v > todayStr) return;
+      this.filter.dashboardMarketing.viewDate = v;
       this.render();
     });
-    // 切換週
-    document.querySelectorAll('[data-week-offset]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        ensureFilter();
-        this.filter.dashboardMarketing.weekOffset = +btn.dataset.weekOffset;
-        this.render();
-      });
+    const prevBtn = document.getElementById('dp-prev-day');
+    if (prevBtn) prevBtn.addEventListener('click', () => {
+      ensureFilter();
+      const cur = this.filter.dashboardMarketing.viewDate || todayStr;
+      this.filter.dashboardMarketing.viewDate = toDateStr(addDays(new Date(cur + 'T00:00:00'), -1));
+      this.render();
     });
-    // 待辦狀態篩選 pills
-    document.querySelectorAll('[data-todo-status]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        ensureFilter();
-        this.filter.dashboardMarketing.todoStatus = btn.dataset.todoStatus;
-        this.render();
-      });
+    const nextBtn = document.getElementById('dp-next-day');
+    if (nextBtn) nextBtn.addEventListener('click', () => {
+      ensureFilter();
+      const cur = this.filter.dashboardMarketing.viewDate || todayStr;
+      const nxt = toDateStr(addDays(new Date(cur + 'T00:00:00'), 1));
+      if (nxt > todayStr) return;
+      this.filter.dashboardMarketing.viewDate = nxt;
+      this.render();
     });
-    // 切換月
-    document.querySelectorAll('[data-month-offset]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        ensureFilter();
-        this.filter.dashboardMarketing.monthOffset = +btn.dataset.monthOffset;
-        this.render();
-      });
-    });
-    // 切換週 / 月 模式
-    document.querySelectorAll('[data-view-mode]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        ensureFilter();
-        const m = btn.dataset.viewMode;
-        this.filter.dashboardMarketing.viewMode = m;
-        // 切到月模式時重設 monthOffset 為 0（本月）
-        if (m === 'month') this.filter.dashboardMarketing.monthOffset = 0;
-        else this.filter.dashboardMarketing.weekOffset = 0;
-        this.render();
-      });
-    });
-    // 點任務卡 / 待辦事項 → 用新模式 modal 編輯（與新增同樣樣式）
-    // 從「待辦事項」側欄點進來的才顯示刪除按鈕；工作週曆卡片不顯示
-    document.querySelectorAll('[data-cal-task]').forEach(card => {
-      card.addEventListener('click', (e) => {
-        if (e.target.closest('[data-cal-del]')) return;
-        const fromTodoList = card.dataset.todoSource === 'list';
-        this.openQuickTodoModal(deptId, card.dataset.calTask, { showDelete: fromTodoList });
-      });
-    });
-    // 刪除按鈕
-    document.querySelectorAll('[data-cal-del]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.deleteDailyTask(btn.dataset.calDel);
-      });
-    });
-    // 新增進度
-    document.querySelectorAll('[data-cal-add]').forEach(btn => {
-      btn.addEventListener('click', () => this.openDailyTaskModal(deptId));
-    });
-    // 點任一格子（週 / 月 / 甘特日期表頭）→ 用該日期開啟新增 modal
-    document.querySelectorAll('[data-cell-date]').forEach(cell => {
-      cell.addEventListener('click', (e) => {
-        // 點在任務卡 / 狀態下拉 / 刪除鈕上：交給原本 handler 處理
-        if (e.target.closest('[data-cal-task]') || e.target.closest('.dp-status-select')
-            || e.target.closest('[data-cal-del]')) return;
-        this.openDailyTaskModal(deptId, null, { date: cell.dataset.cellDate });
-      });
-    });
-    // 快速新增單一待辦
-    document.querySelectorAll('[data-todo-quick-add]').forEach(btn => {
-      btn.addEventListener('click', () => this.openQuickTodoModal(btn.dataset.todoQuickAdd));
-    });
-    // 待辦事項 — 狀態下拉改動
-    document.querySelectorAll('.dp-status-select').forEach(sel => {
-      sel.addEventListener('change', () => {
-        const taskId = sel.dataset.taskId;
-        const newStatus = sel.value;
-        const list = Store.get(Store.KEYS.dailyTasks, []);
-        const i = list.findIndex(x => x.id === taskId);
-        if (i < 0) return;
-        const title = list[i].title || '待辦';
-        list[i].status = newStatus;
-        Store.set(Store.KEYS.dailyTasks, list);
-
-        // 改為「已完成」→ 詢問是否刪除
-        if (newStatus === '已完成') {
-          const ok = confirm(`「${title}」已完成 ✅\n\n是否要從清單中刪除這筆？\n（不刪也可以，會留在「已完成」分頁）`);
-          if (ok) {
-            const list2 = Store.get(Store.KEYS.dailyTasks, []);
-            const j = list2.findIndex(x => x.id === taskId);
-            if (j >= 0) {
-              list2.splice(j, 1);
-              Store.set(Store.KEYS.dailyTasks, list2);
-              showToast(`已刪除「${title}」`, 'success');
-              this.render();
-              return;
-            }
-          }
-        }
-
-        showToast(`已將「${title}」改為 ${newStatus}`, 'success');
-        this.render();
-      });
-    });
-    // 每日工作進度 tab 內的 todo 勾選還是維持原本行為
-    document.querySelectorAll('.dp-todo-tick').forEach(cb => {
-      cb.addEventListener('change', () => {
-        const taskId = cb.dataset.taskId;
-        const todoIdx = +cb.dataset.todoIdx;
-        const list = Store.get(Store.KEYS.dailyTasks, []);
-        const i = list.findIndex(x => x.id === taskId);
-        if (i < 0) return;
-        if (!Array.isArray(list[i].todos)) list[i].todos = [];
-        if (list[i].todos[todoIdx]) {
-          list[i].todos[todoIdx].done = cb.checked;
-          Store.set(Store.KEYS.dailyTasks, list);
-          this.render();
-        }
-      });
-    });
-  },
-
-  /* ============================================================
-   *  每日工作進度
-   * ============================================================ */
-  renderDailyProgressTab(deptId, color, dept) {
-    const allTasks = Store.get(Store.KEYS.dailyTasks, []);
-    const tasks = allTasks.filter(t => t.deptId === deptId);
-    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
-    const f = this.filter.dailyProgress;
-
-    // 套用篩選
-    let filtered = tasks.slice();
-    if (f.employee && f.employee !== 'all') {
-      filtered = filtered.filter(t => t.employee === f.employee);
-    }
-    if (f.status && f.status !== 'all') {
-      filtered = filtered.filter(t => t.status === f.status);
-    }
-    if (f.dateFrom) filtered = filtered.filter(t => t.date >= f.dateFrom);
-    if (f.dateTo)   filtered = filtered.filter(t => t.date <= f.dateTo);
-
-    // 排序：日期新→舊，相同日期 createdAt 新→舊
-    filtered.sort((a, b) => {
-      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-      return (b.createdAt || 0) - (a.createdAt || 0);
+    const backTodayBtn = document.getElementById('dp-back-today');
+    if (backTodayBtn) backTodayBtn.addEventListener('click', () => {
+      ensureFilter();
+      this.filter.dashboardMarketing.viewDate = todayStr;
+      this.render();
     });
 
-    // 統計
-    const counts = { '進行中': 0, '已完成': 0, '遇阻': 0, '待開始': 0 };
-    tasks.forEach(t => { if (counts[t.status] != null) counts[t.status]++; });
+    // 自動儲存（debounce 1.5s）— 僅當查看「今天」時可寫
+    const viewDate = (this.filter.dashboardMarketing && this.filter.dashboardMarketing.viewDate) || todayStr;
+    if (viewDate !== todayStr) return; // 歷史日期唯讀
 
-    const statusPills = ['all', ...DAILY_TASK_STATUS_LIST].map(s => {
-      const active = (f.status || 'all') === s;
-      const label = s === 'all' ? `全部 (${tasks.length})` : `${DAILY_TASK_STATUS[s].emoji} ${s} (${counts[s]})`;
-      return `<button class="pill ${active ? 'active' : ''}" data-dp-status="${escapeHtml(s)}">${label}</button>`;
-    }).join('');
-
-    const employeeOptions = `
-      <option value="all" ${(f.employee || 'all') === 'all' ? 'selected' : ''}>全部員工</option>
-      ${members.map(u => `<option value="${escapeHtml(u.username)}" ${f.employee === u.username ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
-    `;
-
-    // 依日期分組（filtered 已按日期新→舊排序）
-    const grouped = [];
-    let currentGroup = null;
-    filtered.forEach(t => {
-      if (!currentGroup || currentGroup.date !== t.date) {
-        currentGroup = { date: t.date, items: [] };
-        grouped.push(currentGroup);
-      }
-      currentGroup.items.push(t);
-    });
-
-    const weekdayMap = ['週日','週一','週二','週三','週四','週五','週六'];
-    const formatDateHeading = (dateStr) => {
-      const [y, m, d] = dateStr.split('-').map(Number);
-      const dt = new Date(y, m - 1, d);
-      const today = new Date();
-      const tStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-      const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-      const yStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
-      let extra = '';
-      if (dateStr === tStr) extra = ' · 今天';
-      else if (dateStr === yStr) extra = ' · 昨天';
-      return `${dateStr} ${weekdayMap[dt.getDay()]}${extra}`;
+    const saveProgress = (name, text) => {
+      const all = Store.get('ec.dailyProgress', {}) || {};
+      const day = all[viewDate] || {};
+      const trimmed = (text || '').trim();
+      if (trimmed) day[name] = trimmed;
+      else delete day[name];
+      if (Object.keys(day).length === 0) delete all[viewDate];
+      else all[viewDate] = day;
+      Store.set('ec.dailyProgress', all);
     };
 
-    const timelineHtml = filtered.length === 0
-      ? `<div class="empty" style="padding:48px 24px"><div class="emoji">📋</div>${tasks.length === 0 ? '尚無工作進度紀錄' : '沒有符合篩選條件的紀錄'}<div style="font-size:13px;margin-top:4px;color:var(--text-muted)">${tasks.length === 0 ? '點右上「+ 新增進度」開始記錄' : '試試調整員工或狀態篩選'}</div></div>`
-      : `<div style="padding:8px 8px 16px">${
-          grouped.map(g => `
-            <div style="margin-top:12px">
-              <div style="display:flex;align-items:center;gap:10px;padding:8px 16px;font-size:13px;font-weight:600;color:var(--text-muted)">
-                <span style="display:inline-block;width:4px;height:14px;border-radius:2px;background:${color}"></span>
-                <span style="font-variant-numeric:tabular-nums">${escapeHtml(formatDateHeading(g.date))}</span>
-                <span style="flex:1;height:1px;background:var(--border)"></span>
-                <span style="font-size:12px;font-weight:500;color:var(--text-muted)">${g.items.length} 筆</span>
-              </div>
-              <div style="position:relative;margin:6px 0 6px 24px;padding-left:18px;border-left:2px solid var(--border)">
-                ${g.items.map(t => {
-                  const st = DAILY_TASK_STATUS[t.status] || { color: '#6b7280', bg: '#e5e7eb', emoji: '•' };
-                  const canEdit = this.currentUser.role === 'admin' || this.currentUser.username === t.employee;
-                  const catMeta = t.category ? getCategoryMeta(t.category) : null;
-                  const catColor = catMeta?.color || '#6b7280';
-                  const todos = Array.isArray(t.todos) ? t.todos : [];
-                  const doneCount = todos.filter(td => td.done).length;
-                  return `
-                    <div class="timeline-entry" style="position:relative;display:flex;align-items:flex-start;gap:14px;padding:12px 14px;margin:8px 0;background:var(--surface);border:1px solid var(--border);border-radius:8px;transition:box-shadow .15s">
-                      <span style="position:absolute;left:-26px;top:18px;width:14px;height:14px;border-radius:50%;background:${st.color};border:2px solid var(--surface);box-shadow:0 0 0 2px ${st.bg};display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:white">${st.emoji}</span>
-                      <div style="min-width:96px;display:flex;align-items:center;gap:8px">
-                        <div class="employee-avatar" style="width:30px;height:30px;font-size:13px">${escapeHtml((t.employeeName || t.employee || '?').slice(0,1))}</div>
-                        <div style="font-weight:500;font-size:13px">${escapeHtml(t.employeeName || t.employee)}</div>
-                      </div>
-                      <div style="flex:1;min-width:0">
-                        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px">
-                          ${t.category ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${catColor}14;color:${catColor};letter-spacing:.03em">${escapeHtml(t.category)}</span>` : ''}
-                          ${t.subcategory ? `<span style="font-size:10px;font-weight:500;padding:2px 7px;border-radius:4px;background:var(--bg);color:var(--text-muted)">${escapeHtml(t.subcategory)}</span>` : ''}
-                        </div>
-                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                          <span style="font-weight:600;font-size:14px">${escapeHtml(t.title)}</span>
-                          <span class="badge-role" style="background:${st.bg};color:${st.color};white-space:nowrap;font-size:11px;padding:2px 8px">${st.emoji} ${escapeHtml(t.status)}</span>
-                          ${t.dueDate ? `<span style="font-size:11px;color:#ef4444;font-weight:600" title="預計完成日">📌 ${escapeHtml(t.dueDate)}</span>` : ''}
-                          ${todos.length > 0 ? `<span style="font-size:11px;color:var(--text-muted);font-weight:500">📝 待辦 ${doneCount}/${todos.length}</span>` : ''}
-                        </div>
-                        ${todos.length > 0 ? `
-                          <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px">
-                            ${todos.map((td, ti) => `
-                              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:${td.done ? 'var(--text-muted)' : 'var(--text)'};cursor:pointer">
-                                <input type="checkbox" class="dp-todo-tick" data-task-id="${escapeHtml(t.id)}" data-todo-idx="${ti}" ${td.done ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;flex-shrink:0">
-                                <span style="flex:1;${td.done ? 'text-decoration:line-through' : ''}">${escapeHtml(td.text)}</span>
-                                ${(() => {
-                                  const names = Array.isArray(td.assigneeNames) && td.assigneeNames.length
-                                    ? td.assigneeNames
-                                    : (td.assigneeName ? [td.assigneeName] : []);
-                                  if (names.length === 0) return '';
-                                  const icon = names.length >= 2 ? '👥' : '👤';
-                                  return `<span style="font-size:10px;color:var(--text-muted);font-weight:600;background:var(--bg);padding:1px 6px;border-radius:3px;flex-shrink:0">${icon} ${escapeHtml(names.join('、'))}</span>`;
-                                })()}
-                              </label>
-                            `).join('')}
-                          </div>
-                        ` : ''}
-                        ${t.notes ? `<div style="margin-top:6px;font-size:13px;color:var(--text-muted);line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(t.notes)}</div>` : ''}
-                      </div>
-                      <div style="white-space:nowrap;display:flex;gap:2px">
-                        ${canEdit ? `
-                          <button class="icon-btn" title="編輯" data-dp-edit="${escapeHtml(t.id)}">✏️</button>
-                          <button class="icon-btn danger" title="刪除" data-dp-del="${escapeHtml(t.id)}">🗑️</button>
-                        ` : ''}
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
-              </div>
-            </div>
-          `).join('')
-        }</div>`;
-
-    return `
-      <div class="table-card" style="margin-bottom:16px">
-        <div class="table-card-header" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
-          <div>
-            <h3 style="margin:0">每日工作進度</h3>
-            <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted)">${dept.name}辦公室成員每日紀錄 · 共 ${tasks.length} 筆</p>
-          </div>
-          <button class="btn-add" data-dp-add="1">+ 新增進度</button>
-        </div>
-        <div style="padding:12px 16px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:12px;align-items:center">
-          <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-size:12px;color:var(--text-muted)">員工</span>
-            <select id="dp-emp" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
-              ${employeeOptions}
-            </select>
-          </div>
-          <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-size:12px;color:var(--text-muted)">日期</span>
-            <input type="date" id="dp-from" value="${escapeHtml(f.dateFrom || '')}" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
-            <span style="font-size:12px;color:var(--text-muted)">至</span>
-            <input type="date" id="dp-to" value="${escapeHtml(f.dateTo || '')}" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px">
-          </div>
-          ${(f.employee !== 'all' || f.status !== 'all' || f.dateFrom || f.dateTo) ? `
-            <button class="pill" data-dp-reset="1" style="font-size:12px">✕ 清除篩選</button>
-          ` : ''}
-          <span style="flex:1"></span>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">${statusPills}</div>
-        </div>
-        ${timelineHtml}
-      </div>
-    `;
+    const timers = new Map();
+    document.querySelectorAll('.dp-textarea').forEach(ta => {
+      const name = ta.dataset.dpName;
+      const card = ta.closest('.dp-card');
+      const savedFlag = card ? card.querySelector('.dp-saved-flag') : null;
+      const showSaved = () => {
+        if (!savedFlag) return;
+        savedFlag.style.display = 'inline';
+        clearTimeout(savedFlag._t);
+        savedFlag._t = setTimeout(() => { savedFlag.style.display = 'none'; }, 1500);
+      };
+      ta.addEventListener('input', () => {
+        clearTimeout(timers.get(name));
+        timers.set(name, setTimeout(() => {
+          saveProgress(name, ta.value);
+          showSaved();
+        }, 1500));
+      });
+      ta.addEventListener('blur', () => {
+        clearTimeout(timers.get(name));
+        saveProgress(name, ta.value);
+        showSaved();
+      });
+    });
   },
 
   bindDailyProgress(deptId) {
