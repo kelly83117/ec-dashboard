@@ -49,11 +49,37 @@ export default {
   },
 
   // Cron：每天 09:00 Asia/Taipei 推未完成清單給老闆
+  // Cron 處理：依不同時間觸發不同通知
+  //  '0 2 * * 2-6'   → 早上 09:00 Asia/Taipei 推老闆未完成清單  → sendMorningDigest
+  //  '55 9 * * 2-6'  → 下午 17:55 Asia/Taipei 提醒同事填工作日誌 → sendEveningReminder
   async scheduled(event, env) {
-    try { await sendMorningDigest(env); }
-    catch (e) { console.error('[scheduled] failed:', e); }
+    try {
+      const cron = (event && event.cron) || '';
+      if (cron === '55 9 * * 2-6') {
+        await sendEveningReminder(env);
+      } else {
+        await sendMorningDigest(env);
+      }
+    } catch (e) { console.error('[scheduled] failed:', e); }
   },
 };
+
+// ======================================================================
+// 每天下午 17:55 提醒同事填工作日誌
+// ======================================================================
+async function sendEveningReminder(env) {
+  if (!env.LINE_CHANNEL_TOKEN || !env.FIREBASE_PROJECT_ID) {
+    console.warn('[eveningReminder] missing env vars');
+    return;
+  }
+  const docFields = await firestoreGetFields(FIRESTORE_DOC_PATH, env);
+  const lineConfig = fromFirestoreValue(docFields['ec.lineConfig']) || {};
+  const userIds = lineConfig.userIds || {};
+  const ids = Object.values(userIds).filter(Boolean);
+  if (ids.length === 0) { console.warn('[eveningReminder] no employee userIds'); return; }
+  const text = '⏰ 下班前 5 分鐘提醒\n\n別忘了填寫今天的「工作日誌」喔！\n寫完記得按「☁ 同步雲端」上傳，老闆才看得到。\n\n→ https://kelly83117.github.io/ec-dashboard/';
+  await pushLineMessage(ids, [{ type: 'text', text }], env);
+}
 
 // ======================================================================
 // 儀表板 → Worker：推送任務通知
