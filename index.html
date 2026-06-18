@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-12">
+<meta name="app-version" content="2026-06-18-13">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4275,19 +4275,21 @@ const App = {
       const fg = overdue ? '#dc2626' : '#4b5563';
       return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:6px;background:${bg};color:${fg};font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">📅 ${escapeHtml(due.replace(/-/g, '/'))}${overdue ? ' 逾期' : ''}</span>`;
     };
-    const taskItems = bossTasks.map(t => {
-      const isDone = t.status === 'done';
+    // 主畫面只列「未完成」任務；完成的進歷史紀錄 modal
+    const pendingTasks = bossTasks.filter(t => t.status !== 'done');
+    const doneCount = bossTasks.length - pendingTasks.length;
+    const taskItems = pendingTasks.map(t => {
       const isMine = t.assignee === '全體' || t.assignee === myName;
       const canToggle = isAdmin || isMine;
       const assigneeBadge = t.assignee === '全體'
         ? '<span style="padding:2px 8px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700">全體</span>'
         : `<span style="padding:2px 8px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:700">${escapeHtml(t.assignee || '—')}</span>`;
       return `
-        <div class="boss-task-row" data-task-id="${escapeHtml(t.id)}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:${isDone ? '#f9fafb' : 'white'};border:1px solid var(--border);border-radius:8px;${isDone ? 'opacity:.65' : ''}">
-          <button class="boss-task-toggle" data-task-id="${escapeHtml(t.id)}" title="${isDone ? '取消完成' : '標記完成'}" ${canToggle ? '' : 'disabled'}
-            style="width:22px;height:22px;border-radius:6px;border:1.5px solid ${isDone ? '#10b981' : '#cbd5e1'};background:${isDone ? '#10b981' : 'white'};color:white;font-size:13px;cursor:${canToggle ? 'pointer' : 'not-allowed'};flex-shrink:0;display:flex;align-items:center;justify-content:center;${canToggle ? '' : 'opacity:.5'}">${isDone ? '✓' : ''}</button>
+        <div class="boss-task-row" data-task-id="${escapeHtml(t.id)}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:white;border:1px solid var(--border);border-radius:8px">
+          <button class="boss-task-toggle" data-task-id="${escapeHtml(t.id)}" title="標記完成" ${canToggle ? '' : 'disabled'}
+            style="width:22px;height:22px;border-radius:6px;border:1.5px solid #cbd5e1;background:white;color:white;font-size:13px;cursor:${canToggle ? 'pointer' : 'not-allowed'};flex-shrink:0;display:flex;align-items:center;justify-content:center;${canToggle ? '' : 'opacity:.5'}"></button>
           <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:500;color:var(--text);line-height:1.5;${isDone ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">${escapeHtml(t.desc || '')}</div>
+            <div style="font-size:13px;font-weight:500;color:var(--text);line-height:1.5">${escapeHtml(t.desc || '')}</div>
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px">
               ${assigneeBadge}
               ${dueChip(t.due)}
@@ -4304,19 +4306,20 @@ const App = {
     }).join('');
     const bossTasksHtml = `
       <div style="background:linear-gradient(180deg,#fef3c7,#fffbeb);border:1px solid #fcd34d;border-radius:10px;padding:14px 14px 12px;margin-bottom:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:${bossTasks.length ? '10px' : '0'};flex-wrap:wrap">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:${pendingTasks.length ? '10px' : '0'};flex-wrap:wrap">
           <div style="display:flex;align-items:center;gap:8px">
             <span style="font-size:15px">📋</span>
             <h4 style="margin:0;font-size:14px;font-weight:700;color:#92400e">老闆指派的任務</h4>
             ${pendingCount > 0 ? `<span style="padding:2px 9px;border-radius:999px;background:#dc2626;color:white;font-size:11px;font-weight:700">${pendingCount} 待辦</span>` : '<span style="padding:2px 9px;border-radius:999px;background:#10b981;color:white;font-size:11px;font-weight:700">全數完成</span>'}
           </div>
           <div style="display:flex;align-items:center;gap:6px">
+            <button id="boss-task-history" title="查看已完成的歷史任務" style="padding:5px 11px;border:1px solid #fcd34d;background:white;border-radius:6px;font-size:12px;color:#92400e;cursor:pointer;display:inline-flex;align-items:center;gap:5px">📜 歷史 (${doneCount})</button>
             ${isAdmin ? `<button id="boss-task-line-cfg" title="LINE 通知設定" style="padding:5px 9px;border:1px solid #fcd34d;background:white;border-radius:6px;font-size:12px;color:#92400e;cursor:pointer">⚙️ LINE 通知</button>` : ''}
             ${isAdmin ? `<button id="boss-task-add" style="padding:6px 14px;border:0;border-radius:7px;background:#f59e0b;color:white;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px">+ 新增任務</button>` : ''}
           </div>
         </div>
-        ${bossTasks.length === 0
-          ? `<div style="padding:14px;text-align:center;color:#92400e;font-size:12px">${isAdmin ? '尚無任務。點上方「+ 新增任務」來指派' : '老闆目前沒有指派任務 ✓'}</div>`
+        ${pendingTasks.length === 0
+          ? `<div style="padding:14px;text-align:center;color:#92400e;font-size:12px">${isAdmin ? (bossTasks.length === 0 ? '尚無任務。點上方「+ 新增任務」來指派' : '全數完成 🎉 點上方「📜 歷史」看已完成的任務') : '老闆目前沒有指派任務 ✓'}</div>`
           : `<div style="display:flex;flex-direction:column;gap:6px">${taskItems}</div>`
         }
       </div>
@@ -4522,6 +4525,68 @@ const App = {
         });
         showToast('LINE 通知設定已儲存', 'success');
         return true;
+      },
+    });
+  },
+
+  /* ------------- 老闆任務歷史紀錄 modal ------------- */
+  openBossTaskHistoryModal() {
+    const isAdmin = this.currentUser && this.currentUser.role === 'admin';
+    const all = (Store.get('ec.bossTasks', []) || []).slice();
+    const done = all.filter(t => t.status === 'done');
+    // 完成時間越近排越前面
+    done.sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
+
+    const fmtDate = (ts) => {
+      if (!ts) return '—';
+      const d = new Date(ts);
+      const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+      const hh = String(d.getHours()).padStart(2,'0'), mm = String(d.getMinutes()).padStart(2,'0');
+      return `${y}/${m}/${day} ${hh}:${mm}`;
+    };
+
+    const items = done.map(t => {
+      const assigneeBadge = t.assignee === '全體'
+        ? '<span style="padding:2px 8px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700">全體</span>'
+        : `<span style="padding:2px 8px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:700">${escapeHtml(t.assignee || '—')}</span>`;
+      const dueLine = t.due ? `<span style="font-size:11px;color:var(--text-muted)">📅 預計 ${escapeHtml(t.due.replace(/-/g, '/'))}</span>` : '';
+      const doneByLine = t.doneBy ? `<span style="font-size:11px;color:#10b981;font-weight:600">✓ ${escapeHtml(t.doneBy)}</span>` : '';
+      return `
+        <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:#f9fafb;border:1px solid var(--border);border-radius:8px">
+          <div style="width:22px;height:22px;border-radius:6px;background:#10b981;color:white;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✓</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:500;color:var(--text);line-height:1.5;text-decoration:line-through;color:#6b7280">${escapeHtml(t.desc || '')}</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:11px;color:var(--text-muted)">
+              ${assigneeBadge}
+              ${doneByLine}
+              <span>📅 完成 ${escapeHtml(fmtDate(t.doneAt))}</span>
+              ${dueLine}
+            </div>
+          </div>
+          ${isAdmin ? `<button class="boss-task-history-del" data-task-id="${escapeHtml(t.id)}" title="從歷史中刪除" style="width:26px;height:26px;border:1px solid #fecaca;background:white;border-radius:5px;font-size:12px;cursor:pointer;color:#dc2626;flex-shrink:0">✕</button>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    this.openModal({
+      title: `📜 已完成的歷史任務 (${done.length})`,
+      width: '600px',
+      bodyHtml: done.length === 0
+        ? '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px">目前還沒有已完成的任務</div>'
+        : `<div style="display:flex;flex-direction:column;gap:6px;max-height:60vh;overflow-y:auto">${items}</div>`,
+      hideFooter: true,
+      onMount: () => {
+        document.querySelectorAll('.boss-task-history-del').forEach(b => {
+          b.addEventListener('click', () => {
+            if (!confirm('從歷史中刪除這筆？無法復原。')) return;
+            const list = (Store.get('ec.bossTasks', []) || []).filter(t => t.id !== b.dataset.taskId);
+            Store.set('ec.bossTasks', list);
+            showToast('已刪除', 'success');
+            this.closeModal();
+            this.openBossTaskHistoryModal();
+            this.render();
+          });
+        });
       },
     });
   },
@@ -6082,9 +6147,11 @@ const App = {
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
 
-    // 老闆任務：新增 / 編輯 / 刪除 / 切換完成狀態 / LINE 設定
+    // 老闆任務：新增 / 編輯 / 刪除 / 切換完成狀態 / 歷史 / LINE 設定
     const addBtn = document.getElementById('boss-task-add');
     if (addBtn) addBtn.addEventListener('click', () => this.openBossTaskModal());
+    const historyBtn = document.getElementById('boss-task-history');
+    if (historyBtn) historyBtn.addEventListener('click', () => this.openBossTaskHistoryModal());
     const lineCfgBtn = document.getElementById('boss-task-line-cfg');
     if (lineCfgBtn) lineCfgBtn.addEventListener('click', () => this.openBossLineConfigModal());
     document.querySelectorAll('.boss-task-edit').forEach(b => {
