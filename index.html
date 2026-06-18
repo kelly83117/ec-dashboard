@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-02">
+<meta name="app-version" content="2026-06-18-03">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2364,13 +2364,21 @@ const App = {
       { key: 'stock', label: '可用庫存' },
       { key: 'note', label: '調整' },
     ];
-    // 欄位顯示狀態：每台電腦 localStorage 記憶（不同步雲端，每人各自的偏好）
-    if (!Array.isArray(this.filter.insightHiddenCols)) {
+    // 洞察表所有篩選/排序/欄位偏好：每台電腦 localStorage 記憶（不同步雲端）
+    // 包：欄位顯示、大類篩選、CTR<3% 開關、排序、賣場
+    if (!this._insightPrefsLoaded) {
       try {
-        const saved = localStorage.getItem('ec.insightHiddenCols');
-        this.filter.insightHiddenCols = saved ? JSON.parse(saved) : [];
-      } catch { this.filter.insightHiddenCols = []; }
+        const saved = JSON.parse(localStorage.getItem('ec.insightPrefs') || '{}');
+        if (Array.isArray(saved.hiddenCols) && !Array.isArray(this.filter.insightHiddenCols)) this.filter.insightHiddenCols = saved.hiddenCols;
+        if (Array.isArray(saved.cls) && !Array.isArray(this.filter.insightClass)) this.filter.insightClass = saved.cls;
+        if (typeof saved.ctrLow === 'boolean' && this.filter.insightCtrLow === undefined) this.filter.insightCtrLow = saved.ctrLow;
+        if (saved.sortKey && !this.filter.insightSortKey) this.filter.insightSortKey = saved.sortKey;
+        if (saved.sortDir && !this.filter.insightSortDir) this.filter.insightSortDir = saved.sortDir;
+        if (saved.shop && !this.filter.insightShop) this.filter.insightShop = saved.shop;
+      } catch {}
+      this._insightPrefsLoaded = true;
     }
+    if (!Array.isArray(this.filter.insightHiddenCols)) this.filter.insightHiddenCols = [];
     const hiddenColsArr = this.filter.insightHiddenCols;
     const hiddenCols = new Set(hiddenColsArr);
     const visCol = (k) => !hiddenCols.has(k);
@@ -3194,6 +3202,7 @@ const App = {
         if (shop === currentShop) return;
         this.filter.insightShop = shop;
         this.filter.insightCompare = ''; // 切賣場時重置對照週
+        if (this._persistInsightPrefs) this._persistInsightPrefs();
         this.render();
       });
     });
@@ -3682,14 +3691,25 @@ const App = {
           this.filter.insightSortKey = key;
           this.filter.insightSortDir = (key === 'code') ? 'asc' : 'desc';
         }
+        if (this._persistInsightPrefs) this._persistInsightPrefs();
         this.render();
       });
     });
 
-    // 欄位顯示切換 + 寫入 localStorage（每台電腦記憶各自的欄位偏好）
-    const persistHiddenCols = (arr) => {
-      try { localStorage.setItem('ec.insightHiddenCols', JSON.stringify(arr || [])); } catch {}
+    // 共用：把所有洞察表偏好打包寫入 localStorage（每台電腦記憶）
+    const persistInsightPrefs = () => {
+      try {
+        localStorage.setItem('ec.insightPrefs', JSON.stringify({
+          hiddenCols: this.filter.insightHiddenCols || [],
+          cls: Array.isArray(this.filter.insightClass) ? this.filter.insightClass : [],
+          ctrLow: !!this.filter.insightCtrLow,
+          sortKey: this.filter.insightSortKey || '',
+          sortDir: this.filter.insightSortDir || '',
+          shop: this.filter.insightShop || '',
+        }));
+      } catch {}
     };
+    // 欄位顯示切換
     document.querySelectorAll('[data-col-toggle]').forEach(cb => {
       cb.addEventListener('change', () => {
         const key = cb.dataset.colToggle;
@@ -3697,7 +3717,7 @@ const App = {
         if (cb.checked) cur = cur.filter(k => k !== key);
         else if (!cur.includes(key)) cur.push(key);
         this.filter.insightHiddenCols = cur;
-        persistHiddenCols(cur);
+        persistInsightPrefs();
         this._insightColMenuOpen = true; // re-render 時保持下拉開啟
         this.render();
       });
@@ -3706,10 +3726,12 @@ const App = {
     const showAllBtn = document.getElementById('insight-col-show-all');
     if (showAllBtn) showAllBtn.addEventListener('click', () => {
       this.filter.insightHiddenCols = [];
-      persistHiddenCols([]);
+      persistInsightPrefs();
       this._insightColMenuOpen = true;
       this.render();
     });
+    // 暴露給其他地方（賣場切換、排序、大類篩選、CTR 開關、清除）使用
+    this._persistInsightPrefs = persistInsightPrefs;
     // 點下拉以外的地方關閉
     const colMenu = document.getElementById('insight-col-menu');
     if (colMenu) {
@@ -3732,6 +3754,7 @@ const App = {
         if (selectedCnt > 0 || this.filter.insightCtrLow) {
           this.filter.insightClass = [];
           this.filter.insightCtrLow = false;
+          if (this._persistInsightPrefs) this._persistInsightPrefs();
           this.render();
           // render 後 DOM 重建，下一帧再 scroll
           requestAnimationFrame(() => scrollToCode(code));
@@ -3771,6 +3794,7 @@ const App = {
           else cur.push(key);
         }
         this.filter.insightClass = cur;
+        if (this._persistInsightPrefs) this._persistInsightPrefs();
         this.render();
       });
     });
@@ -3778,6 +3802,7 @@ const App = {
     document.querySelectorAll('[data-insight-ctr-low]').forEach(btn => {
       btn.addEventListener('click', () => {
         this.filter.insightCtrLow = btn.dataset.insightCtrLow === '1';
+        if (this._persistInsightPrefs) this._persistInsightPrefs();
         this.render();
       });
     });
