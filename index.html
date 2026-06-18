@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-32">
+<meta name="app-version" content="2026-06-18-33">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -3672,7 +3672,8 @@ const App = {
         if (failed.length === 0) {
           showToast('已同步到雲端 ✓', 'success');
           // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌（含洞察表與淨利表）
-          try { this._updateDailyProgressFromAdjustments(); } catch (e) { console.warn('[autoSummary]', e); }
+          // pushToCloud:true → 連同工作日誌也一起推給老闆，避免切頁時還跳「未同步」提醒
+          try { this._updateDailyProgressFromAdjustments({ pushToCloud: true }); } catch (e) { console.warn('[autoSummary]', e); }
         } else {
           alert('部分同步失敗：\n' + failed.join('\n'));
         }
@@ -4142,9 +4143,21 @@ const App = {
     if (typeof window.__updateDpSyncBadge === 'function') window.__updateDpSyncBadge();
 
     const silent = opts && opts.silent;
+    const pushToCloud = opts && opts.pushToCloud;
     const hasContent = insightBlock || profitBlock;
+
+    // 若這次是由「☁ 同步雲端」按鈕觸發的，把工作日誌也一起推到雲端
+    // 避免使用者按完 sync 後切頁還是被提醒「工作日誌未同步」
+    if (pushToCloud && typeof Store.pushKeyToCloud === 'function') {
+      Store.pushKeyToCloud('ec.dailyProgress').then(() => {
+        window.__dpPendingNames.delete(userName);
+        if (typeof window.__updateDpSyncBadge === 'function') window.__updateDpSyncBadge();
+      }).catch(e => { console.warn('[autoSummary push]', e); });
+    }
+
     if (hasContent && !silent) {
-      showToast(`已自動更新 ${userName} 的工作日誌（記得按「☁ 同步雲端」推給老闆）`, 'info');
+      const tail = pushToCloud ? '（已連同推給老闆）' : '（記得按「☁ 同步雲端」推給老闆）';
+      showToast(`已自動更新 ${userName} 的工作日誌${tail}`, 'info');
     }
   },
 
@@ -8601,7 +8614,8 @@ function syncToCloud(shop){
   Promise.all(promises).then(()=>{
     if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';setTimeout(()=>{btn.style.display='none';},2000);}
     // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌（含洞察表與淨利表）
-    try { if(window.App && typeof App._updateDailyProgressFromAdjustments === 'function') App._updateDailyProgressFromAdjustments(); }
+    // pushToCloud:true → 連同工作日誌也一起推給老闆，避免切頁時還跳「未同步」提醒
+    try { if(window.App && typeof App._updateDailyProgressFromAdjustments === 'function') App._updateDailyProgressFromAdjustments({ pushToCloud: true }); }
     catch(e){ console.warn('[autoSummary profit]', e); }
   }).catch(e=>{
     alert('⚠️ 同步失敗：'+(e&&e.message||String(e)));
