@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-19">
+<meta name="app-version" content="2026-06-18-20">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -1228,6 +1228,25 @@ function canAccessOffice(user, dept) {
   return getUserDepts(user).includes(dept.name);
 }
 
+// 辦公室內可細分的功能（per-dept feature list）
+// 預設此 dept 沒有 features 設定 = 全部都有（往後相容舊資料）
+const OFFICE_FEATURES = {
+  '行銷': [
+    { key: 'calendar',   label: '工作週曆' },
+    { key: 'profit',     label: '淨利表' },
+    { key: 'insight',    label: '洞察表分析' },
+    { key: 'lineNotify', label: 'LINE 通知設定' },
+  ],
+};
+function hasOfficeFeature(user, deptName, featureKey) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  if (!getUserDepts(user).includes(deptName)) return false;
+  const features = user.officeFeatures && user.officeFeatures[deptName];
+  if (!Array.isArray(features)) return true; // 舊資料 = 全部都有
+  return features.includes(featureKey);
+}
+
 function trendFromQuarters(emp) {
   const a = emp.q3, b = emp.q4;
   if (typeof a !== 'number' || typeof b !== 'number') return 'flat';
@@ -1890,13 +1909,24 @@ const App = {
     document.getElementById('nav-users').style.display = isAdmin ? '' : 'none';
 
     const departments = Store.get(Store.KEYS.departments, []);
+    // 子路由 → feature key 對應（同部門的不同子頁）
+    const ROUTE_FEATURE = {
+      'office-d1':         'calendar',
+      'office-d1-profit':  'profit',
+      'office-d1-insight': 'insight',
+    };
     document.querySelectorAll('[data-route^="office-"]').forEach(btn => {
-      // 子路由如 'office-d1-profit' 也要對應到 d1 部門做權限判斷
-      const rest = btn.dataset.route.slice('office-'.length);
+      const route = btn.dataset.route;
+      const rest = route.slice('office-'.length);
       const firstDash = rest.indexOf('-');
       const deptId = firstDash > 0 ? rest.slice(0, firstDash) : rest;
       const dept = departments.find(d => d.id === deptId);
-      btn.style.display = canAccessOffice(user, dept) ? '' : 'none';
+      let visible = canAccessOffice(user, dept);
+      // 子路由再加 feature 檢查（admin 不受限）
+      if (visible && dept && ROUTE_FEATURE[route] && user.role !== 'admin') {
+        visible = hasOfficeFeature(user, dept.name, ROUTE_FEATURE[route]);
+      }
+      btn.style.display = visible ? '' : 'none';
     });
     // 父層 toggle 按鈕 + 子項群組：依照群組 key 對應到部門
     document.querySelectorAll('[data-toggle-group]').forEach(btn => {
@@ -4250,7 +4280,10 @@ const App = {
     const now = new Date();
     const todayStr = toDateStr(now);
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
-    const canManageLine = isAdmin || (this.currentUser && this.currentUser.canManageLineNotify === true);
+    // 舊欄位 canManageLineNotify 仍兼容；新版改用 officeFeatures['行銷'].includes('lineNotify')
+    const canManageLine = isAdmin
+      || hasOfficeFeature(this.currentUser, '行銷', 'lineNotify')
+      || (this.currentUser && this.currentUser.canManageLineNotify === true);
     const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
 
     if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
@@ -4427,11 +4460,13 @@ const App = {
     }
   },
 
-  /* ------------- LINE 通知設定（admin / 有 canManageLineNotify 旗標的同事可進入） ------------- */
+  /* ------------- LINE 通知設定（依 officeFeatures['行銷'].lineNotify 權限） ------------- */
   openBossLineConfigModal() {
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
-    const canManageLine = isAdmin || (this.currentUser && this.currentUser.canManageLineNotify === true);
+    const canManageLine = isAdmin
+      || hasOfficeFeature(this.currentUser, '行銷', 'lineNotify')
+      || (this.currentUser && this.currentUser.canManageLineNotify === true);
     if (!canManageLine) { showToast('沒有權限', 'error'); return; }
     const cfg = Store.get('ec.lineConfig', null) || { workerUrl: '', secret: '', userIds: {}, bossUserIds: [] };
     const uid = (name) => (cfg.userIds && cfg.userIds[name]) || '';
@@ -7312,6 +7347,30 @@ const App = {
             未勾選任何辦公室＝全公司（不歸屬特定辦公室）；可同時勾選多個
           </div>
         </div>
+        ${Object.keys(OFFICE_FEATURES).map(deptName => {
+          const dept = departments.find(d => d.name === deptName);
+          if (!dept) return '';
+          const isChecked = userDepts.includes(deptName);
+          const savedFeatures = (u.officeFeatures && u.officeFeatures[deptName]);
+          const features = OFFICE_FEATURES[deptName];
+          return `
+            <div class="field f-feat-block" data-dept="${escapeHtml(deptName)}" style="margin-top:4px;padding:12px;background:${dept.color}10;border:1px solid ${dept.color}40;border-radius:var(--radius-sm);${isChecked ? '' : 'display:none'}">
+              <div style="font-size:12px;font-weight:700;color:${dept.color};margin-bottom:8px">${escapeHtml(deptName)} · 可使用的功能</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                ${features.map(f => {
+                  const fChecked = !Array.isArray(savedFeatures) ? true : savedFeatures.includes(f.key);
+                  return `
+                    <label style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:white;border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:13px">
+                      <input type="checkbox" class="f-ufeat-cb" data-dept="${escapeHtml(deptName)}" value="${escapeHtml(f.key)}" ${fChecked ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;accent-color:${dept.color}">
+                      <span>${escapeHtml(f.label)}</span>
+                    </label>
+                  `;
+                }).join('')}
+              </div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:6px">沒勾選的功能 = 看不到該頁／按鈕；管理員不受此限制</div>
+            </div>
+          `;
+        }).join('')}
         <div class="field" style="margin-top:4px;padding:12px;background:var(--bg);border-radius:var(--radius-sm)">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
             <input type="checkbox" id="f-ucross" ${u.crossOfficeAccess ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer">
@@ -7321,19 +7380,9 @@ const App = {
             未勾選時，僅能看到自己所屬辦公室的內容；管理員不受此限制
           </div>
         </div>
-        <div class="field" style="margin-top:4px;padding:12px;background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--radius-sm)">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
-            <input type="checkbox" id="f-uLineCfg" ${u.canManageLineNotify ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer">
-            <span style="font-weight:500;color:#92400e">⚙️ 可管理 LINE 通知設定</span>
-          </label>
-          <div style="font-size:12px;color:#92400e;margin-top:6px;padding-left:24px">
-            勾選後該同事可以開啟「⚙️ LINE 通知」設定 modal、修改 token / userId 等。<br>
-            管理員（admin）不受此限制，預設可管理。
-          </div>
-        </div>
       `,
       onMount: () => {
-        // 勾選/取消勾選時，更新外框視覺
+        // 勾選/取消勾選時，更新外框視覺 + 展開/收起對應子功能區塊
         document.querySelectorAll('.f-udept-cb').forEach(cb => {
           cb.addEventListener('change', () => {
             const wrap = cb.closest('.dept-check');
@@ -7345,6 +7394,9 @@ const App = {
               wrap.style.border = '1px solid var(--border)';
               wrap.style.background = 'transparent';
             }
+            // 展開/收起子功能
+            const featBlock = document.querySelector(`.f-feat-block[data-dept="${cb.value}"]`);
+            if (featBlock) featBlock.style.display = cb.checked ? '' : 'none';
           });
         });
       },
@@ -7357,7 +7409,15 @@ const App = {
           .filter(cb => cb.checked)
           .map(cb => cb.value);
         const crossOfficeAccess = document.getElementById('f-ucross').checked;
-        const canManageLineNotify = (document.getElementById('f-uLineCfg') || {}).checked || false;
+        // 收集每個部門的子功能勾選 → officeFeatures
+        const officeFeatures = {};
+        selectedDepts.forEach(deptName => {
+          if (!OFFICE_FEATURES[deptName]) return;
+          const features = Array.from(document.querySelectorAll(`.f-ufeat-cb[data-dept="${deptName}"]`))
+            .filter(cb => cb.checked)
+            .map(cb => cb.value);
+          officeFeatures[deptName] = features;
+        });
         if (!name || !usernameNew) { showToast('請填寫姓名與帳號', 'error'); return false; }
         const list = Store.get(Store.KEYS.users, []);
         if (!isEdit && list.some(x => x.username.toLowerCase() === usernameNew.toLowerCase())) { showToast('帳號已存在（不分大小寫）', 'error'); return false; }
@@ -7368,13 +7428,14 @@ const App = {
           list[i].departments = selectedDepts;
           delete list[i].department; // 移除舊欄位
           list[i].crossOfficeAccess = crossOfficeAccess;
-          list[i].canManageLineNotify = canManageLineNotify;
+          list[i].officeFeatures = officeFeatures;
+          delete list[i].canManageLineNotify; // 改由 officeFeatures.行銷.lineNotify 取代
           if (password) {
             list[i].password = hashPassword(password);
           }
         } else {
           const initialPw = password || '123';
-          list.push({ username: usernameNew, name, role, departments: selectedDepts, crossOfficeAccess, canManageLineNotify, password: hashPassword(initialPw) });
+          list.push({ username: usernameNew, name, role, departments: selectedDepts, crossOfficeAccess, officeFeatures, password: hashPassword(initialPw) });
         }
         Store.set(Store.KEYS.users, list);
 
@@ -7385,7 +7446,8 @@ const App = {
           this.currentUser.departments = selectedDepts;
           delete this.currentUser.department;
           this.currentUser.crossOfficeAccess = crossOfficeAccess;
-          this.currentUser.canManageLineNotify = canManageLineNotify;
+          this.currentUser.officeFeatures = officeFeatures;
+          delete this.currentUser.canManageLineNotify;
           this.applyUserPerms(this.currentUser);
         }
 
