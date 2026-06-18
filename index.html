@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-20">
+<meta name="app-version" content="2026-06-18-21">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -7330,47 +7330,51 @@ const App = {
           </select>
         </div>
         <div class="field">
-          <label>辦公室（可複選）</label>
-          <div id="f-udept-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:white">
+          <label>權限設定</label>
+          <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;background:white">
+            <div style="display:grid;grid-template-columns:1fr 70px;padding:9px 14px;background:#f3f4f6;font-size:12px;font-weight:700;color:#374151">
+              <div>功能</div>
+              <div style="text-align:center">啟用</div>
+            </div>
             ${departments.map(d => {
-              const checked = userDepts.includes(d.name);
-              return `
-                <label class="dept-check" data-dept-name="${escapeHtml(d.name)}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid ${checked ? d.color : 'var(--border)'};border-radius:6px;background:${checked ? d.color+'15' : 'transparent'};cursor:pointer;transition:all .15s">
-                  <input type="checkbox" class="f-udept-cb" value="${escapeHtml(d.name)}" data-color="${escapeHtml(d.color)}" ${checked ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;accent-color:${d.color}">
-                  <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${d.color}"></span>
-                  <span style="font-weight:500;font-size:14px">${escapeHtml(d.name)}</span>
-                </label>
+              const isChecked = userDepts.includes(d.name);
+              const features = OFFICE_FEATURES[d.name] || [];
+              const savedFeatures = (u.officeFeatures && u.officeFeatures[d.name]);
+              const hasFeatures = features.length > 0;
+              const parentRow = `
+                <div class="perm-parent-row" data-dept="${escapeHtml(d.name)}" style="display:grid;grid-template-columns:1fr 70px;padding:10px 14px;border-top:1px solid #e5e7eb;background:white;align-items:center">
+                  <div ${hasFeatures ? `class="perm-expand" data-dept-toggle="${escapeHtml(d.name)}" style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none"` : 'style="display:flex;align-items:center;gap:8px"'}>
+                    ${hasFeatures ? `<span class="perm-chevron" data-state="collapsed" style="display:inline-block;font-size:10px;color:#6b7280;width:12px;transition:transform .15s">▶</span>` : '<span style="display:inline-block;width:12px"></span>'}
+                    <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${d.color};flex-shrink:0"></span>
+                    <span style="font-weight:600;font-size:13px;color:#1f2937">${escapeHtml(d.name)}</span>
+                  </div>
+                  <div style="text-align:center">
+                    <input type="checkbox" class="f-udept-cb" value="${escapeHtml(d.name)}" data-color="${escapeHtml(d.color)}" ${isChecked ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer;accent-color:${d.color}">
+                  </div>
+                </div>
               `;
+              const subRows = hasFeatures ? features.map(f => {
+                const fChecked = !Array.isArray(savedFeatures) ? true : savedFeatures.includes(f.key);
+                return `
+                  <div class="perm-sub-row" data-parent="${escapeHtml(d.name)}" style="display:none;grid-template-columns:1fr 70px;padding:7px 14px 7px 48px;border-top:1px solid #f3f4f6;background:#fafbfc;align-items:center">
+                    <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569">
+                      <span style="color:#9ca3af">─</span>
+                      <span>${escapeHtml(f.label)}</span>
+                    </div>
+                    <div style="text-align:center">
+                      <input type="checkbox" class="f-ufeat-cb" data-dept="${escapeHtml(d.name)}" value="${escapeHtml(f.key)}" ${fChecked ? 'checked' : ''} ${isChecked ? '' : 'disabled'} style="width:16px;height:16px;cursor:${isChecked ? 'pointer' : 'not-allowed'};accent-color:${d.color};${isChecked ? '' : 'opacity:.4'}">
+                    </div>
+                  </div>
+                `;
+              }).join('') : '';
+              return parentRow + subRows;
             }).join('')}
           </div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:6px">
-            未勾選任何辦公室＝全公司（不歸屬特定辦公室）；可同時勾選多個
+            點 ▶ 展開該部門可使用的功能；停用辦公室時下方功能會自動鎖住<br>
+            未啟用任何辦公室＝全公司（不歸屬特定辦公室）
           </div>
         </div>
-        ${Object.keys(OFFICE_FEATURES).map(deptName => {
-          const dept = departments.find(d => d.name === deptName);
-          if (!dept) return '';
-          const isChecked = userDepts.includes(deptName);
-          const savedFeatures = (u.officeFeatures && u.officeFeatures[deptName]);
-          const features = OFFICE_FEATURES[deptName];
-          return `
-            <div class="field f-feat-block" data-dept="${escapeHtml(deptName)}" style="margin-top:4px;padding:12px;background:${dept.color}10;border:1px solid ${dept.color}40;border-radius:var(--radius-sm);${isChecked ? '' : 'display:none'}">
-              <div style="font-size:12px;font-weight:700;color:${dept.color};margin-bottom:8px">${escapeHtml(deptName)} · 可使用的功能</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-                ${features.map(f => {
-                  const fChecked = !Array.isArray(savedFeatures) ? true : savedFeatures.includes(f.key);
-                  return `
-                    <label style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:white;border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:13px">
-                      <input type="checkbox" class="f-ufeat-cb" data-dept="${escapeHtml(deptName)}" value="${escapeHtml(f.key)}" ${fChecked ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;accent-color:${dept.color}">
-                      <span>${escapeHtml(f.label)}</span>
-                    </label>
-                  `;
-                }).join('')}
-              </div>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:6px">沒勾選的功能 = 看不到該頁／按鈕；管理員不受此限制</div>
-            </div>
-          `;
-        }).join('')}
         <div class="field" style="margin-top:4px;padding:12px;background:var(--bg);border-radius:var(--radius-sm)">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
             <input type="checkbox" id="f-ucross" ${u.crossOfficeAccess ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer">
@@ -7382,21 +7386,28 @@ const App = {
         </div>
       `,
       onMount: () => {
-        // 勾選/取消勾選時，更新外框視覺 + 展開/收起對應子功能區塊
+        // 點 ▶/▼ 展開或收起該部門的子功能
+        document.querySelectorAll('[data-dept-toggle]').forEach(area => {
+          area.addEventListener('click', () => {
+            const deptName = area.dataset.deptToggle;
+            const chevron = area.querySelector('.perm-chevron');
+            const isCollapsed = chevron.dataset.state === 'collapsed';
+            chevron.dataset.state = isCollapsed ? 'expanded' : 'collapsed';
+            chevron.style.transform = isCollapsed ? 'rotate(90deg)' : 'rotate(0deg)';
+            document.querySelectorAll(`.perm-sub-row[data-parent="${deptName}"]`).forEach(row => {
+              row.style.display = isCollapsed ? 'grid' : 'none';
+            });
+          });
+        });
+        // 父啟用切換時，子功能跟著可/不可用（不會自動取消勾選，只是 disable）
         document.querySelectorAll('.f-udept-cb').forEach(cb => {
           cb.addEventListener('change', () => {
-            const wrap = cb.closest('.dept-check');
-            const color = cb.dataset.color;
-            if (cb.checked) {
-              wrap.style.border = `1px solid ${color}`;
-              wrap.style.background = color + '15';
-            } else {
-              wrap.style.border = '1px solid var(--border)';
-              wrap.style.background = 'transparent';
-            }
-            // 展開/收起子功能
-            const featBlock = document.querySelector(`.f-feat-block[data-dept="${cb.value}"]`);
-            if (featBlock) featBlock.style.display = cb.checked ? '' : 'none';
+            const deptName = cb.value;
+            document.querySelectorAll(`.f-ufeat-cb[data-dept="${deptName}"]`).forEach(sub => {
+              sub.disabled = !cb.checked;
+              sub.style.cursor = cb.checked ? 'pointer' : 'not-allowed';
+              sub.style.opacity = cb.checked ? '1' : '.4';
+            });
           });
         });
       },
