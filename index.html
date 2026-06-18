@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-08">
+<meta name="app-version" content="2026-06-18-09">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4310,7 +4310,10 @@ const App = {
             <h4 style="margin:0;font-size:14px;font-weight:700;color:#92400e">老闆指派的任務</h4>
             ${pendingCount > 0 ? `<span style="padding:2px 9px;border-radius:999px;background:#dc2626;color:white;font-size:11px;font-weight:700">${pendingCount} 待辦</span>` : '<span style="padding:2px 9px;border-radius:999px;background:#10b981;color:white;font-size:11px;font-weight:700">全數完成</span>'}
           </div>
-          ${isAdmin ? `<button id="boss-task-add" style="padding:6px 14px;border:0;border-radius:7px;background:#f59e0b;color:white;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px">+ 新增任務</button>` : ''}
+          <div style="display:flex;align-items:center;gap:6px">
+            ${isAdmin ? `<button id="boss-task-line-cfg" title="LINE 通知設定" style="padding:5px 9px;border:1px solid #fcd34d;background:white;border-radius:6px;font-size:12px;color:#92400e;cursor:pointer">⚙️ LINE 通知</button>` : ''}
+            ${isAdmin ? `<button id="boss-task-add" style="padding:6px 14px;border:0;border-radius:7px;background:#f59e0b;color:white;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px">+ 新增任務</button>` : ''}
+          </div>
         </div>
         ${bossTasks.length === 0
           ? `<div style="padding:14px;text-align:center;color:#92400e;font-size:12px">${isAdmin ? '尚無任務。點上方「+ 新增任務」來指派' : '老闆目前沒有指派任務 ✓'}</div>`
@@ -4384,6 +4387,122 @@ const App = {
     `;
   },
 
+  /* ------------- LINE 通知：呼叫 Cloudflare Worker push 訊息 ------------- */
+  async pushLineNotify(recipientNames, message) {
+    try {
+      const cfg = Store.get('ec.lineConfig', null);
+      if (!cfg || !cfg.workerUrl || !cfg.secret) return { skipped: true, reason: '尚未設定 LINE 通知' };
+      const ids = recipientNames
+        .map(name => cfg.userIds && cfg.userIds[name])
+        .filter(Boolean);
+      if (ids.length === 0) return { skipped: true, reason: '指派對象沒有 LINE userId' };
+      const resp = await fetch(cfg.workerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Notify-Secret': cfg.secret },
+        body: JSON.stringify({ recipientUserIds: ids, message }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      return { ok: resp.ok, data };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e) };
+    }
+  },
+
+  /* ------------- LINE 通知設定（admin only） ------------- */
+  openBossLineConfigModal() {
+    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
+    const isAdmin = this.currentUser && this.currentUser.role === 'admin';
+    if (!isAdmin) { showToast('沒有權限', 'error'); return; }
+    const cfg = Store.get('ec.lineConfig', null) || { workerUrl: '', secret: '', userIds: {} };
+    const uid = (name) => (cfg.userIds && cfg.userIds[name]) || '';
+
+    this.openModal({
+      title: 'LINE 通知設定',
+      width: '560px',
+      bodyHtml: `
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;background:#f9fafb;padding:10px 12px;border-radius:7px">
+          📖 設定步驟請見 <code>LINE_NOTIFY_SETUP.md</code>。所有欄位填好後，按下方「測試通知」會發一封測試訊息給 3 位同事。
+        </div>
+        <div class="field">
+          <label>Cloudflare Worker URL</label>
+          <input type="url" id="ln-worker" placeholder="https://yc-line-notify.xxx.workers.dev" value="${escapeHtml(cfg.workerUrl || '')}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace">
+        </div>
+        <div class="field">
+          <label>通知密碼（NOTIFY_SECRET）</label>
+          <input type="text" id="ln-secret" placeholder="跟 Cloudflare Worker 設的密碼一樣" value="${escapeHtml(cfg.secret || '')}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace">
+        </div>
+        <div style="margin-top:14px;padding-top:10px;border-top:1px solid #e5e7eb">
+          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">同事 LINE userId（格式：U 開頭 32 字元）</div>
+          ${ALLOWED_NAMES.map(n => `
+            <div class="field" style="margin-bottom:8px">
+              <label style="font-size:12px">${escapeHtml(n)}</label>
+              <input type="text" data-line-uid="${escapeHtml(n)}" placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" value="${escapeHtml(uid(n))}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace">
+            </div>
+          `).join('')}
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px">
+          <button type="button" id="ln-test-btn" style="padding:8px 14px;border:1px solid var(--border);background:white;border-radius:7px;font-size:13px;cursor:pointer">📤 測試通知</button>
+          <span id="ln-test-result" style="font-size:12px;color:var(--text-muted);align-self:center"></span>
+        </div>
+      `,
+      saveLabel: '儲存設定',
+      cancelLabel: '取消',
+      onMount: () => {
+        const testBtn = document.getElementById('ln-test-btn');
+        const testResult = document.getElementById('ln-test-result');
+        if (testBtn) {
+          testBtn.addEventListener('click', async () => {
+            const newCfg = {
+              workerUrl: (document.getElementById('ln-worker') || {}).value || '',
+              secret: (document.getElementById('ln-secret') || {}).value || '',
+              userIds: {},
+            };
+            document.querySelectorAll('[data-line-uid]').forEach(i => { newCfg.userIds[i.dataset.lineUid] = (i.value || '').trim(); });
+            if (!newCfg.workerUrl || !newCfg.secret) { testResult.textContent = '⚠️ 先填 Worker URL 與密碼'; testResult.style.color = '#dc2626'; return; }
+            const ids = ALLOWED_NAMES.map(n => newCfg.userIds[n]).filter(Boolean);
+            if (ids.length === 0) { testResult.textContent = '⚠️ 至少填一位 userId'; testResult.style.color = '#dc2626'; return; }
+            testBtn.disabled = true;
+            testResult.textContent = '送出中…'; testResult.style.color = 'var(--text-muted)';
+            try {
+              const resp = await fetch(newCfg.workerUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Notify-Secret': newCfg.secret },
+                body: JSON.stringify({
+                  recipientUserIds: ids,
+                  message: '🔔 元創儀表板測試通知\n如果你收到這則訊息，代表設定成功 ✓',
+                }),
+              });
+              const data = await resp.json().catch(() => ({}));
+              if (resp.ok && data.ok) {
+                testResult.textContent = '✓ 已送出，3 位同事請看 LINE'; testResult.style.color = '#10b981';
+              } else {
+                testResult.textContent = '✕ 失敗：' + (data.error || resp.status); testResult.style.color = '#dc2626';
+              }
+            } catch (e) {
+              testResult.textContent = '✕ 連線失敗：' + (e.message || e); testResult.style.color = '#dc2626';
+            } finally {
+              testBtn.disabled = false;
+            }
+          });
+        }
+      },
+      onSave: () => {
+        const userIds = {};
+        document.querySelectorAll('[data-line-uid]').forEach(i => {
+          const v = (i.value || '').trim();
+          if (v) userIds[i.dataset.lineUid] = v;
+        });
+        Store.set('ec.lineConfig', {
+          workerUrl: ((document.getElementById('ln-worker') || {}).value || '').trim(),
+          secret: ((document.getElementById('ln-secret') || {}).value || '').trim(),
+          userIds,
+        });
+        showToast('LINE 通知設定已儲存', 'success');
+        return true;
+      },
+    });
+  },
+
   /* ------------- 老闆任務：新增 / 編輯 modal ------------- */
   openBossTaskModal(taskId) {
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
@@ -4427,17 +4546,20 @@ const App = {
         const text = (descEl && descEl.value || '').trim();
         if (!text) { showToast('請輸入任務內容', 'error'); return false; }
         const list = (Store.get('ec.bossTasks', []) || []).slice();
+        const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
+        const assigneeVal = assigneeEl ? assigneeEl.value : '全體';
+        const dueVal = dueEl ? dueEl.value : '';
         if (existing) {
           const idx = list.findIndex(t => t.id === existing.id);
           if (idx >= 0) {
-            list[idx] = { ...list[idx], desc: text, assignee: assigneeEl ? assigneeEl.value : '全體', due: dueEl ? dueEl.value : '' };
+            list[idx] = { ...list[idx], desc: text, assignee: assigneeVal, due: dueVal };
           }
         } else {
           list.push({
             id: 'bt-' + Math.random().toString(36).slice(2, 10),
             desc: text,
-            assignee: assigneeEl ? assigneeEl.value : '全體',
-            due: dueEl ? dueEl.value : '',
+            assignee: assigneeVal,
+            due: dueVal,
             status: 'todo',
             createdBy: (this.currentUser && this.currentUser.username) || '',
             createdAt: Date.now(),
@@ -4446,6 +4568,19 @@ const App = {
         Store.set('ec.bossTasks', list);
         showToast(existing ? '已更新' : '已指派', 'success');
         this.render();
+        // 新增任務時自動推 LINE 通知（編輯時不重發，避免吵到同事）
+        if (!existing) {
+          const recipients = assigneeVal === '全體' ? ALLOWED_NAMES : [assigneeVal];
+          const msg = '🔔 元創內部通知\n[老闆指派任務]\n' + text
+            + '\n👤 指派給：' + assigneeVal
+            + (dueVal ? '\n📅 截止：' + dueVal.replace(/-/g, '/') : '')
+            + '\n→ 前往儀表板查看 https://kelly83117.github.io/ec-dashboard/';
+          this.pushLineNotify(recipients, msg).then(r => {
+            if (r && r.skipped) { /* 未設定就靜默 */ }
+            else if (r && r.ok) showToast('已通知 LINE', 'info');
+            else if (r && !r.ok) console.warn('[line notify]', r);
+          });
+        }
         return true;
       },
     });
@@ -5921,9 +6056,11 @@ const App = {
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
 
-    // 老闆任務：新增 / 編輯 / 刪除 / 切換完成狀態
+    // 老闆任務：新增 / 編輯 / 刪除 / 切換完成狀態 / LINE 設定
     const addBtn = document.getElementById('boss-task-add');
     if (addBtn) addBtn.addEventListener('click', () => this.openBossTaskModal());
+    const lineCfgBtn = document.getElementById('boss-task-line-cfg');
+    if (lineCfgBtn) lineCfgBtn.addEventListener('click', () => this.openBossLineConfigModal());
     document.querySelectorAll('.boss-task-edit').forEach(b => {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
