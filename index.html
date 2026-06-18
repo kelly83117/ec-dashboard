@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-09">
+<meta name="app-version" content="2026-06-18-10">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4389,17 +4389,28 @@ const App = {
 
   /* ------------- LINE 通知：呼叫 Cloudflare Worker push 訊息 ------------- */
   async pushLineNotify(recipientNames, message) {
+    const cfg = Store.get('ec.lineConfig', null);
+    if (!cfg || !cfg.workerUrl || !cfg.secret) return { skipped: true, reason: '尚未設定 LINE 通知' };
+    const ids = recipientNames
+      .map(name => cfg.userIds && cfg.userIds[name])
+      .filter(Boolean);
+    if (ids.length === 0) return { skipped: true, reason: '指派對象沒有 LINE userId' };
+    return this._pushLineRaw(cfg, ids, message);
+  },
+  // 直接用 userId 推（給「通知老闆」這類情境用，因為老闆 userId 跟 3 位同事分開存）
+  async pushLineNotifyToBoss(message) {
+    const cfg = Store.get('ec.lineConfig', null);
+    if (!cfg || !cfg.workerUrl || !cfg.secret) return { skipped: true, reason: '尚未設定 LINE 通知' };
+    const ids = Array.isArray(cfg.bossUserIds) ? cfg.bossUserIds.filter(Boolean) : [];
+    if (ids.length === 0) return { skipped: true, reason: '尚未設定老闆 userId' };
+    return this._pushLineRaw(cfg, ids, message);
+  },
+  async _pushLineRaw(cfg, recipientUserIds, message) {
     try {
-      const cfg = Store.get('ec.lineConfig', null);
-      if (!cfg || !cfg.workerUrl || !cfg.secret) return { skipped: true, reason: '尚未設定 LINE 通知' };
-      const ids = recipientNames
-        .map(name => cfg.userIds && cfg.userIds[name])
-        .filter(Boolean);
-      if (ids.length === 0) return { skipped: true, reason: '指派對象沒有 LINE userId' };
       const resp = await fetch(cfg.workerUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Notify-Secret': cfg.secret },
-        body: JSON.stringify({ recipientUserIds: ids, message }),
+        body: JSON.stringify({ recipientUserIds, message }),
       });
       const data = await resp.json().catch(() => ({}));
       return { ok: resp.ok, data };
@@ -4413,15 +4424,16 @@ const App = {
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     if (!isAdmin) { showToast('沒有權限', 'error'); return; }
-    const cfg = Store.get('ec.lineConfig', null) || { workerUrl: '', secret: '', userIds: {} };
+    const cfg = Store.get('ec.lineConfig', null) || { workerUrl: '', secret: '', userIds: {}, bossUserIds: [] };
     const uid = (name) => (cfg.userIds && cfg.userIds[name]) || '';
+    const bossIds = Array.isArray(cfg.bossUserIds) ? cfg.bossUserIds.filter(Boolean).join('\n') : '';
 
     this.openModal({
       title: 'LINE 通知設定',
       width: '560px',
       bodyHtml: `
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;background:#f9fafb;padding:10px 12px;border-radius:7px">
-          📖 設定步驟請見 <code>LINE_NOTIFY_SETUP.md</code>。所有欄位填好後，按下方「測試通知」會發一封測試訊息給 3 位同事。
+          📖 設定步驟請見 <code>LINE_NOTIFY_SETUP.md</code>。所有欄位填好後，按下方「測試通知」會發一封測試訊息。
         </div>
         <div class="field">
           <label>Cloudflare Worker URL</label>
@@ -4432,13 +4444,17 @@ const App = {
           <input type="text" id="ln-secret" placeholder="跟 Cloudflare Worker 設的密碼一樣" value="${escapeHtml(cfg.secret || '')}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace">
         </div>
         <div style="margin-top:14px;padding-top:10px;border-top:1px solid #e5e7eb">
-          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">同事 LINE userId（格式：U 開頭 32 字元）</div>
+          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">同事 LINE userId<span style="font-weight:400;color:var(--text-muted);font-size:11px">（新任務時通知，格式：U 開頭 32 字元）</span></div>
           ${ALLOWED_NAMES.map(n => `
             <div class="field" style="margin-bottom:8px">
               <label style="font-size:12px">${escapeHtml(n)}</label>
               <input type="text" data-line-uid="${escapeHtml(n)}" placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" value="${escapeHtml(uid(n))}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace">
             </div>
           `).join('')}
+        </div>
+        <div style="margin-top:14px;padding-top:10px;border-top:1px solid #e5e7eb">
+          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">老闆 LINE userId<span style="font-weight:400;color:var(--text-muted);font-size:11px">（任務完成時通知；一行一個，可填多個）</span></div>
+          <textarea id="ln-boss-ids" placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" style="width:100%;min-height:70px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace;resize:vertical">${escapeHtml(bossIds)}</textarea>
         </div>
         <div style="margin-top:14px;display:flex;gap:8px">
           <button type="button" id="ln-test-btn" style="padding:8px 14px;border:1px solid var(--border);background:white;border-radius:7px;font-size:13px;cursor:pointer">📤 測試通知</button>
@@ -4452,21 +4468,21 @@ const App = {
         const testResult = document.getElementById('ln-test-result');
         if (testBtn) {
           testBtn.addEventListener('click', async () => {
-            const newCfg = {
-              workerUrl: (document.getElementById('ln-worker') || {}).value || '',
-              secret: (document.getElementById('ln-secret') || {}).value || '',
-              userIds: {},
-            };
-            document.querySelectorAll('[data-line-uid]').forEach(i => { newCfg.userIds[i.dataset.lineUid] = (i.value || '').trim(); });
-            if (!newCfg.workerUrl || !newCfg.secret) { testResult.textContent = '⚠️ 先填 Worker URL 與密碼'; testResult.style.color = '#dc2626'; return; }
-            const ids = ALLOWED_NAMES.map(n => newCfg.userIds[n]).filter(Boolean);
+            const workerUrl = (document.getElementById('ln-worker') || {}).value || '';
+            const secret = (document.getElementById('ln-secret') || {}).value || '';
+            const userIds = {};
+            document.querySelectorAll('[data-line-uid]').forEach(i => { userIds[i.dataset.lineUid] = (i.value || '').trim(); });
+            const bossIds = ((document.getElementById('ln-boss-ids') || {}).value || '')
+              .split(/[\n,\s]+/).map(s => s.trim()).filter(Boolean);
+            if (!workerUrl || !secret) { testResult.textContent = '⚠️ 先填 Worker URL 與密碼'; testResult.style.color = '#dc2626'; return; }
+            const ids = [...ALLOWED_NAMES.map(n => userIds[n]).filter(Boolean), ...bossIds];
             if (ids.length === 0) { testResult.textContent = '⚠️ 至少填一位 userId'; testResult.style.color = '#dc2626'; return; }
             testBtn.disabled = true;
             testResult.textContent = '送出中…'; testResult.style.color = 'var(--text-muted)';
             try {
-              const resp = await fetch(newCfg.workerUrl, {
+              const resp = await fetch(workerUrl, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Notify-Secret': newCfg.secret },
+                headers: { 'Content-Type': 'application/json', 'X-Notify-Secret': secret },
                 body: JSON.stringify({
                   recipientUserIds: ids,
                   message: '🔔 元創儀表板測試通知\n如果你收到這則訊息，代表設定成功 ✓',
@@ -4474,7 +4490,7 @@ const App = {
               });
               const data = await resp.json().catch(() => ({}));
               if (resp.ok && data.ok) {
-                testResult.textContent = '✓ 已送出，3 位同事請看 LINE'; testResult.style.color = '#10b981';
+                testResult.textContent = `✓ 已送出，${ids.length} 位請看 LINE`; testResult.style.color = '#10b981';
               } else {
                 testResult.textContent = '✕ 失敗：' + (data.error || resp.status); testResult.style.color = '#dc2626';
               }
@@ -4492,10 +4508,13 @@ const App = {
           const v = (i.value || '').trim();
           if (v) userIds[i.dataset.lineUid] = v;
         });
+        const bossUserIds = ((document.getElementById('ln-boss-ids') || {}).value || '')
+          .split(/[\n,\s]+/).map(s => s.trim()).filter(Boolean);
         Store.set('ec.lineConfig', {
           workerUrl: ((document.getElementById('ln-worker') || {}).value || '').trim(),
           secret: ((document.getElementById('ln-secret') || {}).value || '').trim(),
           userIds,
+          bossUserIds,
         });
         showToast('LINE 通知設定已儲存', 'success');
         return true;
@@ -6087,6 +6106,7 @@ const App = {
         // 權限：admin、或本人被指派的（assignee = 自己 / 全體）才能切
         const canToggle = isAdmin || t.assignee === '全體' || t.assignee === myName;
         if (!canToggle) { showToast('沒有權限', 'error'); return; }
+        const wasNotDone = t.status !== 'done';
         if (t.status === 'done') {
           list[idx] = { ...t, status: 'todo', doneAt: null, doneBy: null };
         } else {
@@ -6094,6 +6114,18 @@ const App = {
         }
         Store.set('ec.bossTasks', list);
         this.render();
+        // 由「未完成」→「完成」時通知老闆（取消勾選不通知，避免吵）
+        if (wasNotDone) {
+          const dueLine = t.due ? '\n📅 原訂截止：' + t.due.replace(/-/g, '/') : '';
+          const msg = '✅ 任務完成通知\n' + (t.desc || '')
+            + '\n👤 完成者：' + (myName || '未知')
+            + dueLine
+            + '\n→ 前往儀表板查看 https://kelly83117.github.io/ec-dashboard/';
+          this.pushLineNotifyToBoss(msg).then(r => {
+            if (r && r.ok) showToast('已通知老闆 LINE', 'info');
+            else if (r && !r.skipped) console.warn('[line notify boss]', r);
+          });
+        }
       });
     });
 
