@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-10">
+<meta name="app-version" content="2026-06-18-11">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4388,29 +4388,33 @@ const App = {
   },
 
   /* ------------- LINE 通知：呼叫 Cloudflare Worker push 訊息 ------------- */
-  async pushLineNotify(recipientNames, message) {
+  // opts.kind / opts.task：worker v2 收到會送出帶按鈕的 Flex Message（kind='assigned'）
+  async pushLineNotify(recipientNames, message, opts) {
     const cfg = Store.get('ec.lineConfig', null);
     if (!cfg || !cfg.workerUrl || !cfg.secret) return { skipped: true, reason: '尚未設定 LINE 通知' };
     const ids = recipientNames
       .map(name => cfg.userIds && cfg.userIds[name])
       .filter(Boolean);
     if (ids.length === 0) return { skipped: true, reason: '指派對象沒有 LINE userId' };
-    return this._pushLineRaw(cfg, ids, message);
+    return this._pushLineRaw(cfg, ids, message, opts);
   },
   // 直接用 userId 推（給「通知老闆」這類情境用，因為老闆 userId 跟 3 位同事分開存）
-  async pushLineNotifyToBoss(message) {
+  async pushLineNotifyToBoss(message, opts) {
     const cfg = Store.get('ec.lineConfig', null);
     if (!cfg || !cfg.workerUrl || !cfg.secret) return { skipped: true, reason: '尚未設定 LINE 通知' };
     const ids = Array.isArray(cfg.bossUserIds) ? cfg.bossUserIds.filter(Boolean) : [];
     if (ids.length === 0) return { skipped: true, reason: '尚未設定老闆 userId' };
-    return this._pushLineRaw(cfg, ids, message);
+    return this._pushLineRaw(cfg, ids, message, opts);
   },
-  async _pushLineRaw(cfg, recipientUserIds, message) {
+  async _pushLineRaw(cfg, recipientUserIds, message, opts) {
     try {
+      const body = { recipientUserIds, message };
+      if (opts && opts.kind) body.kind = opts.kind;
+      if (opts && opts.task) body.task = opts.task;
       const resp = await fetch(cfg.workerUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Notify-Secret': cfg.secret },
-        body: JSON.stringify({ recipientUserIds, message }),
+        body: JSON.stringify(body),
       });
       const data = await resp.json().catch(() => ({}));
       return { ok: resp.ok, data };
@@ -4587,14 +4591,17 @@ const App = {
         Store.set('ec.bossTasks', list);
         showToast(existing ? '已更新' : '已指派', 'success');
         this.render();
-        // 新增任務時自動推 LINE 通知（編輯時不重發，避免吵到同事）
+        // 新增任務時自動推 LINE 通知（帶 task 物件 → worker 會送出有「✓ 標記完成」按鈕的卡片）
+        // 編輯時不重發，避免吵到同事
         if (!existing) {
           const recipients = assigneeVal === '全體' ? ALLOWED_NAMES : [assigneeVal];
-          const msg = '🔔 元創內部通知\n[老闆指派任務]\n' + text
+          const newTask = list[list.length - 1]; // 剛 push 進去的那一筆
+          // fallback 文字（worker 不支援 task 格式時 / 老 worker 還是 legacy）
+          const fallbackMsg = '🔔 元創內部通知\n[老闆指派任務]\n' + text
             + '\n👤 指派給：' + assigneeVal
             + (dueVal ? '\n📅 截止：' + dueVal.replace(/-/g, '/') : '')
             + '\n→ 前往儀表板查看 https://kelly83117.github.io/ec-dashboard/';
-          this.pushLineNotify(recipients, msg).then(r => {
+          this.pushLineNotify(recipients, fallbackMsg, { kind: 'assigned', task: newTask }).then(r => {
             if (r && r.skipped) { /* 未設定就靜默 */ }
             else if (r && r.ok) showToast('已通知 LINE', 'info');
             else if (r && !r.ok) console.warn('[line notify]', r);
