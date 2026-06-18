@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-15">
+<meta name="app-version" content="2026-06-18-16">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4448,20 +4448,29 @@ const App = {
         </div>
         <div class="field">
           <label>通知密碼（NOTIFY_SECRET）</label>
-          <input type="text" id="ln-secret" placeholder="跟 Cloudflare Worker 設的密碼一樣" value="${escapeHtml(cfg.secret || '')}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace">
+          <div style="position:relative">
+            <input type="password" id="ln-secret" placeholder="跟 Cloudflare Worker 設的密碼一樣" value="${escapeHtml(cfg.secret || '')}" style="width:100%;padding:8px 38px 8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace">
+            <button type="button" data-toggle-reveal="ln-secret" title="顯示 / 隱藏" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);width:28px;height:28px;border:0;background:transparent;cursor:pointer;font-size:14px;color:var(--text-muted)">👁</button>
+          </div>
         </div>
         <div style="margin-top:14px;padding-top:10px;border-top:1px solid #e5e7eb">
           <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">同事 LINE userId<span style="font-weight:400;color:var(--text-muted);font-size:11px">（新任務時通知，格式：U 開頭 32 字元）</span></div>
           ${ALLOWED_NAMES.map(n => `
             <div class="field" style="margin-bottom:8px">
               <label style="font-size:12px">${escapeHtml(n)}</label>
-              <input type="text" data-line-uid="${escapeHtml(n)}" placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" value="${escapeHtml(uid(n))}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace">
+              <div style="position:relative">
+                <input type="password" data-line-uid="${escapeHtml(n)}" placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" value="${escapeHtml(uid(n))}" style="width:100%;padding:8px 38px 8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace">
+                <button type="button" data-toggle-reveal-uid="${escapeHtml(n)}" title="顯示 / 隱藏" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);width:28px;height:28px;border:0;background:transparent;cursor:pointer;font-size:14px;color:var(--text-muted)">👁</button>
+              </div>
             </div>
           `).join('')}
         </div>
         <div style="margin-top:14px;padding-top:10px;border-top:1px solid #e5e7eb">
-          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">老闆 LINE userId<span style="font-weight:400;color:var(--text-muted);font-size:11px">（任務完成時通知；一行一個，可填多個）</span></div>
-          <textarea id="ln-boss-ids" placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" style="width:100%;min-height:70px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace;resize:vertical">${escapeHtml(bossIds)}</textarea>
+          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+            <span>老闆 LINE userId<span style="font-weight:400;color:var(--text-muted);font-size:11px">（任務完成時通知；一行一個，可填多個）</span></span>
+            <button type="button" id="ln-boss-reveal" title="顯示 / 隱藏" style="border:0;background:transparent;cursor:pointer;font-size:14px;color:var(--text-muted)">👁</button>
+          </div>
+          <textarea id="ln-boss-ids" placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" style="width:100%;min-height:70px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:monospace;resize:vertical;-webkit-text-security:disc;text-security:disc">${escapeHtml(bossIds)}</textarea>
         </div>
         <div style="margin-top:14px;display:flex;gap:8px">
           <button type="button" id="ln-test-btn" style="padding:8px 14px;border:1px solid var(--border);background:white;border-radius:7px;font-size:13px;cursor:pointer">📤 測試通知</button>
@@ -4471,6 +4480,35 @@ const App = {
       saveLabel: '儲存設定',
       cancelLabel: '取消',
       onMount: () => {
+        // 👁 切換顯示密碼欄
+        const toggleInput = (input, btn) => {
+          const isShown = input.type === 'text';
+          input.type = isShown ? 'password' : 'text';
+          btn.textContent = isShown ? '👁' : '🙈';
+        };
+        document.querySelectorAll('[data-toggle-reveal]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const input = document.getElementById(btn.dataset.toggleReveal);
+            if (input) toggleInput(input, btn);
+          });
+        });
+        document.querySelectorAll('[data-toggle-reveal-uid]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const input = document.querySelector(`[data-line-uid="${btn.dataset.toggleRevealUid}"]`);
+            if (input) toggleInput(input, btn);
+          });
+        });
+        const bossReveal = document.getElementById('ln-boss-reveal');
+        const bossTextarea = document.getElementById('ln-boss-ids');
+        if (bossReveal && bossTextarea) {
+          bossReveal.addEventListener('click', () => {
+            const masked = bossTextarea.style.webkitTextSecurity === 'disc' || !bossTextarea.style.webkitTextSecurity;
+            bossTextarea.style.webkitTextSecurity = masked ? 'none' : 'disc';
+            bossTextarea.style.textSecurity = masked ? 'none' : 'disc';
+            bossReveal.textContent = masked ? '🙈' : '👁';
+          });
+        }
+
         const testBtn = document.getElementById('ln-test-btn');
         const testResult = document.getElementById('ln-test-result');
         if (testBtn) {
