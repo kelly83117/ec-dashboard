@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-11">
+<meta name="app-version" content="2026-06-18-12">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4555,7 +4555,7 @@ const App = {
             </select>
           </div>
           <div class="field">
-            <label>截止日（選填）</label>
+            <label>預計完成日（選填）</label>
             <input type="date" id="bt-due" value="${escapeHtml(due)}" min="${todayStr}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
           </div>
         </div>
@@ -6123,7 +6123,7 @@ const App = {
         this.render();
         // 由「未完成」→「完成」時通知老闆（取消勾選不通知，避免吵）
         if (wasNotDone) {
-          const dueLine = t.due ? '\n📅 原訂截止：' + t.due.replace(/-/g, '/') : '';
+          const dueLine = t.due ? '\n📅 預計完成日：' + t.due.replace(/-/g, '/') : '';
           const msg = '✅ 任務完成通知\n' + (t.desc || '')
             + '\n👤 完成者：' + (myName || '未知')
             + dueLine
