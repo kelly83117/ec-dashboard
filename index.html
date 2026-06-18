@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-17-04">
+<meta name="app-version" content="2026-06-18-01">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2863,6 +2863,10 @@ const App = {
               </div>
             ` : ''}
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <button id="insight-sync-cloud" class="btn-add" title="把這台機器上未同步的調整紀錄一次推到雲端" style="padding:6px 12px;font-size:12px;background:#fff;color:#475569;border:1px solid #cbd5e1;display:inline-flex;align-items:center;gap:6px">
+                <span>☁ 同步雲端</span>
+                <span id="insight-sync-badge" style="display:none;min-width:18px;height:18px;padding:0 5px;background:#ef4444;color:white;border-radius:9px;font-size:10px;font-weight:700;align-items:center;justify-content:center;line-height:1">0</span>
+              </button>
               <button id="insight-upload-open" class="btn-add" style="padding:6px 14px;font-size:12px">📤 上傳檔案</button>
               ${sales ? `<button id="insight-export" class="btn-add" style="padding:6px 12px;font-size:12px">⬇ 匯出 Excel</button>` : ''}
             </div>
@@ -3524,6 +3528,76 @@ const App = {
     const settingsBtn = document.getElementById('insight-settings');
     if (settingsBtn) settingsBtn.addEventListener('click', () => this.openInsightSettingsModal());
 
+    // ☁ 同步雲端：把本機累積的洞察表調整紀錄一次推上雲
+    const syncBtn = document.getElementById('insight-sync-cloud');
+    const syncBadge = document.getElementById('insight-sync-badge');
+    window.__insightPendingNotes = window.__insightPendingNotes || new Set();
+    window.__updateInsightSyncBadge = () => {
+      const btn = document.getElementById('insight-sync-cloud');
+      const badge = document.getElementById('insight-sync-badge');
+      if (!btn || !badge) return;
+      const n = window.__insightPendingNotes ? window.__insightPendingNotes.size : 0;
+      if (n > 0) {
+        badge.textContent = n;
+        badge.style.display = 'inline-flex';
+        btn.style.background = '#fef3c7';
+        btn.style.borderColor = '#f59e0b';
+        btn.style.color = '#92400e';
+      } else {
+        badge.style.display = 'none';
+        btn.style.background = '#fff';
+        btn.style.borderColor = '#cbd5e1';
+        btn.style.color = '#475569';
+      }
+    };
+    window.__updateInsightSyncBadge();
+    if (syncBtn) {
+      syncBtn.addEventListener('click', async () => {
+        const pending = window.__insightPendingNotes;
+        if (!pending || pending.size === 0) {
+          showToast('沒有待同步的調整', 'info');
+          return;
+        }
+        if (typeof Store.pushKeyToCloud !== 'function') {
+          alert('雲端 API 尚未就緒，請重新整理後再試。');
+          return;
+        }
+        syncBtn.disabled = true;
+        const originalHtml = syncBtn.innerHTML;
+        syncBtn.innerHTML = '<span>☁ 同步中…</span>';
+        const failed = [];
+        for (const key of Array.from(pending)) {
+          try {
+            await Store.pushKeyToCloud(key);
+            pending.delete(key);
+          } catch (e) {
+            failed.push(key + ': ' + (e && e.message || e));
+          }
+        }
+        syncBtn.disabled = false;
+        syncBtn.innerHTML = originalHtml;
+        window.__updateInsightSyncBadge();
+        if (failed.length === 0) {
+          showToast('已同步到雲端 ✓', 'success');
+        } else {
+          alert('部分同步失敗：\n' + failed.join('\n'));
+        }
+      });
+    }
+
+    // 離開頁面前若有未同步，提醒（瀏覽器原生確認框）
+    if (!window.__insightUnloadGuardInstalled) {
+      window.__insightUnloadGuardInstalled = true;
+      window.addEventListener('beforeunload', (e) => {
+        const n = window.__insightPendingNotes ? window.__insightPendingNotes.size : 0;
+        if (n > 0) {
+          e.preventDefault();
+          e.returnValue = '';
+          return '';
+        }
+      });
+    }
+
     // 📤 上傳檔案：開啟浮窗
     const uploadOpenBtn = document.getElementById('insight-upload-open');
     const uploadOverlay = document.getElementById('insight-upload-overlay');
@@ -3826,7 +3900,8 @@ const App = {
       }).join('');
     };
 
-    // 自動儲存：每次調整 / 長期備註變動立刻寫入 Store
+    // 多人協作策略：先 local-only 儲存，不直接推雲端
+    // 使用者按 header 的「☁ 同步雲端」鈕才一次推上去，避免多人同時編輯互蓋
     const autoSave = () => {
       const textareaEl = document.getElementById('note-text');
       const longText = textareaEl ? textareaEl.value.trim() : (note.text || '');
@@ -3837,7 +3912,14 @@ const App = {
       } else {
         allNotes[code] = { text: longText, adjustments: note.adjustments || [] };
       }
-      Store.set(notesKey, allNotes);
+      if (typeof Store.setLocalOnly === 'function') {
+        Store.setLocalOnly(notesKey, allNotes);
+        window.__insightPendingNotes = window.__insightPendingNotes || new Set();
+        window.__insightPendingNotes.add(notesKey);
+        if (typeof window.__updateInsightSyncBadge === 'function') window.__updateInsightSyncBadge();
+      } else {
+        Store.set(notesKey, allNotes); // 後備：本機 API 還沒準備好就走舊路徑
+      }
     };
 
     // 給 onCancel 用：關閉前把還在輸入框的文字也存成紀錄，避免遺失
@@ -7602,6 +7684,22 @@ async function __setupCloud() {
       origSet(key, value);
       try { cs.setField(key, value); } catch (e) { console.warn('cloud sync write failed', e); }
     };
+    // local-only 寫入：只更新 Store._mem + localStorage，不推雲端
+    // 用於多人協作場景：先在本機收集編輯，等使用者按「同步雲端」才一次推
+    Store.setLocalOnly = function(key, value) {
+      if (window.__unmarkRecentlyDeleted) window.__unmarkRecentlyDeleted(key);
+      origSet(key, value);
+    };
+    // 手動把指定 key 推到雲端（搭配 setLocalOnly 使用）
+    Store.pushKeyToCloud = async function(key) {
+      try {
+        await cs.setField(key, Store._mem[key]);
+        return true;
+      } catch (e) {
+        console.error('[pushKeyToCloud] 失敗', key, e);
+        throw e;
+      }
+    };
     Store.remove = function(key) {
       if (__LOCAL_ONLY_KEYS.has(key)) { __localRemove(key); return; }
       origRemove(key);
@@ -7641,6 +7739,14 @@ async function __setupCloud() {
         }
       });
       if (filteredOut.length) console.warn('[subscribe] filtered out recently deleted:', filteredOut);
+      // 保護本機未同步的洞察表 notes：若 pending 中的 key 在 next 也有，保留本機版本
+      // 否則使用者編輯到一半就被別人雲端版本蓋掉
+      const pending = window.__insightPendingNotes;
+      if (pending && pending.size > 0) {
+        pending.forEach(k => {
+          if (Store._mem && Store._mem[k] !== undefined) next[k] = Store._mem[k];
+        });
+      }
       Store._mem = next;
       // 首批雲端 snapshot 一定強制重繪（即便 App 尚未準備、或 dirty check 誤判）
       // 否則手機開頁時，「dashboard 先用空資料 render → 雲端到了但被 dirty 條件擋住」會看不到數字
