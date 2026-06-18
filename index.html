@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-07">
+<meta name="app-version" content="2026-06-18-08">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4249,6 +4249,8 @@ const App = {
     const users = Store.get(Store.KEYS.users, []);
     const now = new Date();
     const todayStr = toDateStr(now);
+    const isAdmin = this.currentUser && this.currentUser.role === 'admin';
+    const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
 
     if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
     const f = this.filter.dashboardMarketing;
@@ -4257,6 +4259,65 @@ const App = {
     const viewDate = f.viewDate;
     const isToday = viewDate === todayStr;
     const dateDisplay = viewDate.replace(/-/g, '/');
+
+    // 老闆指派的任務區
+    const bossTasks = (Store.get('ec.bossTasks', []) || []).slice();
+    bossTasks.sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'done' ? 1 : -1;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+    const pendingCount = bossTasks.filter(t => t.status !== 'done').length;
+    const assigneeOpts = ['全體', ...ALLOWED_NAMES];
+    const dueChip = (due) => {
+      if (!due) return '';
+      const overdue = due < todayStr;
+      const bg = overdue ? '#fee2e2' : '#f3f4f6';
+      const fg = overdue ? '#dc2626' : '#4b5563';
+      return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:6px;background:${bg};color:${fg};font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">📅 ${escapeHtml(due.replace(/-/g, '/'))}${overdue ? ' 逾期' : ''}</span>`;
+    };
+    const taskItems = bossTasks.map(t => {
+      const isDone = t.status === 'done';
+      const isMine = t.assignee === '全體' || t.assignee === myName;
+      const canToggle = isAdmin || isMine;
+      const assigneeBadge = t.assignee === '全體'
+        ? '<span style="padding:2px 8px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700">全體</span>'
+        : `<span style="padding:2px 8px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:700">${escapeHtml(t.assignee || '—')}</span>`;
+      return `
+        <div class="boss-task-row" data-task-id="${escapeHtml(t.id)}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:${isDone ? '#f9fafb' : 'white'};border:1px solid var(--border);border-radius:8px;${isDone ? 'opacity:.65' : ''}">
+          <button class="boss-task-toggle" data-task-id="${escapeHtml(t.id)}" title="${isDone ? '取消完成' : '標記完成'}" ${canToggle ? '' : 'disabled'}
+            style="width:22px;height:22px;border-radius:6px;border:1.5px solid ${isDone ? '#10b981' : '#cbd5e1'};background:${isDone ? '#10b981' : 'white'};color:white;font-size:13px;cursor:${canToggle ? 'pointer' : 'not-allowed'};flex-shrink:0;display:flex;align-items:center;justify-content:center;${canToggle ? '' : 'opacity:.5'}">${isDone ? '✓' : ''}</button>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:500;color:var(--text);line-height:1.5;${isDone ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">${escapeHtml(t.desc || '')}</div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px">
+              ${assigneeBadge}
+              ${dueChip(t.due)}
+            </div>
+          </div>
+          ${isAdmin ? `
+            <div style="display:flex;gap:4px;flex-shrink:0">
+              <button class="boss-task-edit" data-task-id="${escapeHtml(t.id)}" title="編輯" style="width:26px;height:26px;border:1px solid var(--border);background:white;border-radius:5px;font-size:12px;cursor:pointer;color:var(--text-muted)">✎</button>
+              <button class="boss-task-del" data-task-id="${escapeHtml(t.id)}" title="刪除" style="width:26px;height:26px;border:1px solid #fecaca;background:white;border-radius:5px;font-size:12px;cursor:pointer;color:#dc2626">✕</button>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+    const bossTasksHtml = `
+      <div style="background:linear-gradient(180deg,#fef3c7,#fffbeb);border:1px solid #fcd34d;border-radius:10px;padding:14px 14px 12px;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:${bossTasks.length ? '10px' : '0'};flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:15px">📋</span>
+            <h4 style="margin:0;font-size:14px;font-weight:700;color:#92400e">老闆指派的任務</h4>
+            ${pendingCount > 0 ? `<span style="padding:2px 9px;border-radius:999px;background:#dc2626;color:white;font-size:11px;font-weight:700">${pendingCount} 待辦</span>` : '<span style="padding:2px 9px;border-radius:999px;background:#10b981;color:white;font-size:11px;font-weight:700">全數完成</span>'}
+          </div>
+          ${isAdmin ? `<button id="boss-task-add" style="padding:6px 14px;border:0;border-radius:7px;background:#f59e0b;color:white;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px">+ 新增任務</button>` : ''}
+        </div>
+        ${bossTasks.length === 0
+          ? `<div style="padding:14px;text-align:center;color:#92400e;font-size:12px">${isAdmin ? '尚無任務。點上方「+ 新增任務」來指派' : '老闆目前沒有指派任務 ✓'}</div>`
+          : `<div style="display:flex;flex-direction:column;gap:6px">${taskItems}</div>`
+        }
+      </div>
+    `;
 
     const allProgress = Store.get('ec.dailyProgress', {}) || {};
     const dayProgress = allProgress[viewDate] || {};
@@ -4315,11 +4376,79 @@ const App = {
             ${!isToday ? `<button id="dp-back-today" style="padding:5px 12px;border:0;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:600;cursor:pointer">回到今天</button>` : ''}
           </div>
         </div>
+        ${bossTasksHtml}
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
           ${cards}
         </div>
       </div>
     `;
+  },
+
+  /* ------------- 老闆任務：新增 / 編輯 modal ------------- */
+  openBossTaskModal(taskId) {
+    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
+    const todayStr = toDateStr(new Date());
+    const isAdmin = this.currentUser && this.currentUser.role === 'admin';
+    if (!isAdmin) { showToast('沒有權限', 'error'); return; }
+    const all = (Store.get('ec.bossTasks', []) || []).slice();
+    let existing = null;
+    if (taskId) existing = all.find(t => t.id === taskId);
+    const desc = existing ? existing.desc : '';
+    const assignee = existing ? existing.assignee : '全體';
+    const due = existing ? (existing.due || '') : '';
+
+    this.openModal({
+      title: existing ? '編輯任務' : '新增任務',
+      width: '480px',
+      bodyHtml: `
+        <div class="field">
+          <label>任務內容</label>
+          <textarea id="bt-desc" placeholder="要交辦什麼事？" style="width:100%;min-height:90px;padding:10px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;line-height:1.5;resize:vertical">${escapeHtml(desc)}</textarea>
+        </div>
+        <div class="field-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="field">
+            <label>指派給</label>
+            <select id="bt-assignee" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;background:white">
+              ${['全體', ...ALLOWED_NAMES].map(n => `<option value="${escapeHtml(n)}" ${n === assignee ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>截止日（選填）</label>
+            <input type="date" id="bt-due" value="${escapeHtml(due)}" min="${todayStr}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
+          </div>
+        </div>
+      `,
+      saveLabel: existing ? '儲存' : '指派',
+      cancelLabel: '取消',
+      onSave: () => {
+        const descEl = document.getElementById('bt-desc');
+        const assigneeEl = document.getElementById('bt-assignee');
+        const dueEl = document.getElementById('bt-due');
+        const text = (descEl && descEl.value || '').trim();
+        if (!text) { showToast('請輸入任務內容', 'error'); return false; }
+        const list = (Store.get('ec.bossTasks', []) || []).slice();
+        if (existing) {
+          const idx = list.findIndex(t => t.id === existing.id);
+          if (idx >= 0) {
+            list[idx] = { ...list[idx], desc: text, assignee: assigneeEl ? assigneeEl.value : '全體', due: dueEl ? dueEl.value : '' };
+          }
+        } else {
+          list.push({
+            id: 'bt-' + Math.random().toString(36).slice(2, 10),
+            desc: text,
+            assignee: assigneeEl ? assigneeEl.value : '全體',
+            due: dueEl ? dueEl.value : '',
+            status: 'todo',
+            createdBy: (this.currentUser && this.currentUser.username) || '',
+            createdAt: Date.now(),
+          });
+        }
+        Store.set('ec.bossTasks', list);
+        showToast(existing ? '已更新' : '已指派', 'success');
+        this.render();
+        return true;
+      },
+    });
   },
 
   /* 每日營收曲線（近 N 天） */
@@ -5783,12 +5912,53 @@ const App = {
   },
 
   /* ------------- 工作週曆事件綁定 ------------- */
-  /* ------------- 每日工作進度（新版：3 人卡片） ------------- */
+  /* ------------- 每日工作進度（新版：3 人卡片 + 老闆任務） ------------- */
   bindWeeklyCalendar(deptId) {
     const ensureFilter = () => {
       if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
     };
     const todayStr = toDateStr(new Date());
+    const isAdmin = this.currentUser && this.currentUser.role === 'admin';
+    const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
+
+    // 老闆任務：新增 / 編輯 / 刪除 / 切換完成狀態
+    const addBtn = document.getElementById('boss-task-add');
+    if (addBtn) addBtn.addEventListener('click', () => this.openBossTaskModal());
+    document.querySelectorAll('.boss-task-edit').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.openBossTaskModal(b.dataset.taskId);
+      });
+    });
+    document.querySelectorAll('.boss-task-del').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!confirm('確定刪除這個任務？')) return;
+        const list = (Store.get('ec.bossTasks', []) || []).filter(t => t.id !== b.dataset.taskId);
+        Store.set('ec.bossTasks', list);
+        showToast('已刪除', 'success');
+        this.render();
+      });
+    });
+    document.querySelectorAll('.boss-task-toggle').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const list = (Store.get('ec.bossTasks', []) || []).slice();
+        const idx = list.findIndex(t => t.id === b.dataset.taskId);
+        if (idx < 0) return;
+        const t = list[idx];
+        // 權限：admin、或本人被指派的（assignee = 自己 / 全體）才能切
+        const canToggle = isAdmin || t.assignee === '全體' || t.assignee === myName;
+        if (!canToggle) { showToast('沒有權限', 'error'); return; }
+        if (t.status === 'done') {
+          list[idx] = { ...t, status: 'todo', doneAt: null, doneBy: null };
+        } else {
+          list[idx] = { ...t, status: 'done', doneAt: Date.now(), doneBy: myName };
+        }
+        Store.set('ec.bossTasks', list);
+        this.render();
+      });
+    });
 
     // 日期切換
     const datePicker = document.getElementById('dp-date-picker');
