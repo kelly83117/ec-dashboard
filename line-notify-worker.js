@@ -100,8 +100,6 @@ async function handleNotify(request, env, ALLOWED_ORIGIN) {
 // ======================================================================
 async function handleLineWebhook(request, env) {
   const bodyText = await request.text();
-  // log 完整內容到 Cloudflare logs，方便抓 userId
-  try { console.log('[webhook body]', bodyText); } catch {}
   // 簽章驗證
   if (env.LINE_CHANNEL_SECRET) {
     const sig = request.headers.get('X-Line-Signature') || '';
