@@ -8823,7 +8823,7 @@ function loadIntoUI(shop,built,period,days){
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
-  state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];
+  state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=getTagFilters();
   document.getElementById('period-tag-'+shop).textContent=period;
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=false;}
   // patchRow 已更新過時：若 tbl 有 table 就跳過，避免閃爍；若 tbl 空（DOM 被清）仍需補渲染
@@ -9870,13 +9870,15 @@ function saveGrowthSettings(){
 }
 
 // ── Tag filter bar ──
+function getTagFilters(){try{const r=localStorage.getItem('ec_tagfilters_user');return r?JSON.parse(r):[];}catch{return[];}}
+function saveTagFilters(arr){try{localStorage.setItem('ec_tagfilters_user',JSON.stringify(arr));}catch{}}
 function setTagFilter(shop,label){
-  if(label===null){state[shop].tagFilters=[];}
+  if(label===null){state[shop].tagFilters=[];saveTagFilters([]);}
   else{
     const arr=state[shop].tagFilters||[];
     const idx=arr.indexOf(label);
     if(idx>=0)arr.splice(idx,1);else arr.push(label);
-    state[shop].tagFilters=arr;
+    state[shop].tagFilters=arr;saveTagFilters(arr);
   }
   applyFilters(shop);
   // 重新開啟彈窗（innerHTML 更新後 open class 需補回）
@@ -10706,7 +10708,7 @@ function setShop(shop,btn){
     else{gb.disabled=!(state[shop]?._built?.length);}
   }
   if(shop==='總表')renderSummary();
-  else syncHeaderKpis(shop);
+  else{if(state[shop]?._built?.length)applyFilters(shop);syncHeaderKpis(shop);}
 }
 
 function updateHalfBtnLabels(shop){
