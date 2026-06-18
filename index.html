@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-28">
+<meta name="app-version" content="2026-06-18-29">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4459,7 +4459,6 @@ const App = {
           </div>
           <div style="display:flex;align-items:center;gap:6px">
             <button id="boss-task-history" title="查看已完成的歷史任務" style="padding:5px 11px;border:1px solid #fcd34d;background:white;border-radius:6px;font-size:12px;color:#92400e;cursor:pointer;display:inline-flex;align-items:center;gap:5px">📜 歷史 (${doneCount})</button>
-            ${canManageLine ? `<button id="boss-task-line-cfg" title="LINE 通知設定" style="padding:5px 9px;border:1px solid #fcd34d;background:white;border-radius:6px;font-size:12px;color:#92400e;cursor:pointer">⚙️ LINE 通知</button>` : ''}
             ${isAdmin ? `<button id="boss-task-add" style="padding:6px 14px;border:0;border-radius:7px;background:#f59e0b;color:white;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px">+ 新增任務</button>` : ''}
           </div>
         </div>
@@ -4524,6 +4523,7 @@ const App = {
               style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;color:var(--text);background:${dateInputBg}">
             <button id="dp-next-day" title="後一天" ${viewDate >= todayStr ? 'disabled' : ''}
               style="padding:5px 10px;border:1px solid var(--border);background:white;border-radius:6px;font-size:12px;cursor:${viewDate >= todayStr ? 'not-allowed' : 'pointer'};${viewDate >= todayStr ? 'opacity:.4' : ''}">→</button>
+            ${canManageLine ? `<button id="boss-task-line-cfg" title="LINE 通知設定" style="padding:5px 11px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:5px">⚙️ LINE 通知</button>` : ''}
             ${!isToday ? `<button id="dp-back-today" style="padding:5px 12px;border:0;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:600;cursor:pointer">回到今天</button>` : ''}
           </div>
         </div>
