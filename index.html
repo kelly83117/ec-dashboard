@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-05">
+<meta name="app-version" content="2026-06-18-06">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2371,6 +2371,13 @@ const App = {
       { key: 'stock', label: '可用庫存' },
       { key: 'note', label: '調整' },
     ];
+    // 第一次進入洞察表 → 把舊版共用 key 清掉（避免污染新賣場的偏好）
+    // 之前是 3 家賣場共用 ec.insightPrefs，現在改成 per-shop，舊 key 留著沒意義且會誤導 fallback
+    if (!window.__insightLegacyKeyCleared) {
+      window.__insightLegacyKeyCleared = true;
+      try { localStorage.removeItem('ec.insightPrefs'); } catch {}
+    }
+
     // 洞察表偏好：每家賣場各自獨立，每台電腦 localStorage 記憶（不同步雲端）
     // 包：欄位顯示、大類篩選、CTR<3% 開關、排序
     // 切換賣場時自動重載對應賣場的偏好
@@ -2378,13 +2385,7 @@ const App = {
       let saved = {};
       try {
         const raw = localStorage.getItem(`ec.insightPrefs__${currentShop}`);
-        if (raw) {
-          saved = JSON.parse(raw) || {};
-        } else {
-          // 兼容舊版單一 key（3 家共用），首次切換時以舊資料為起點
-          const old = localStorage.getItem('ec.insightPrefs');
-          if (old) saved = JSON.parse(old) || {};
-        }
+        if (raw) saved = JSON.parse(raw) || {};
       } catch {}
       this.filter.insightHiddenCols = Array.isArray(saved.hiddenCols) ? saved.hiddenCols : [];
       this.filter.insightClass = Array.isArray(saved.cls) ? saved.cls : [];
