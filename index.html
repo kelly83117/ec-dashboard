@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-13">
+<meta name="app-version" content="2026-06-18-14">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4371,9 +4371,10 @@ const App = {
         <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:14px">
           <div style="min-width:0">
             <h3 style="margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em">每日工作進度 · ${escapeHtml(dateDisplay)}${isToday ? '<span style="margin-left:8px;font-size:11px;font-weight:500;color:var(--primary);background:var(--primary-soft);padding:2px 8px;border-radius:999px">今天</span>' : ''}</h3>
-            <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted)">下班前 5 分鐘寫一下今天的工作進度即可。輸入停 1.5 秒會自動儲存到雲端。</p>
+            <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted)">下班前 5 分鐘寫一下今天的工作進度即可。寫完按「☁ 同步雲端」上傳。</p>
           </div>
-          <div style="display:flex;align-items:center;gap:6px">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            ${isToday ? `<button id="dp-sync-cloud" title="把今天的進度上傳到雲端，同事才看得到" style="padding:5px 12px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><span>☁ 同步雲端</span><span id="dp-sync-badge" style="display:none;min-width:18px;height:18px;padding:0 5px;background:#ef4444;color:white;border-radius:9px;font-size:10px;font-weight:700;align-items:center;justify-content:center;line-height:1">0</span></button>` : ''}
             <button id="dp-prev-day" title="前一天" style="padding:5px 10px;border:1px solid var(--border);background:white;border-radius:6px;font-size:12px;cursor:pointer">←</button>
             <input type="date" id="dp-date-picker" value="${viewDate}" max="${todayStr}"
               style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;color:var(--text);background:${dateInputBg}">
@@ -6239,15 +6240,44 @@ const App = {
     const viewDate = (this.filter.dashboardMarketing && this.filter.dashboardMarketing.viewDate) || todayStr;
     if (viewDate !== todayStr) return; // 歷史日期唯讀
 
-    const saveProgress = (name, text) => {
+    // 每位同事各自的待同步狀態（誰打過字但還沒推雲端）
+    window.__dpPendingNames = window.__dpPendingNames || new Set();
+    const updateSyncBadge = () => {
+      const btn = document.getElementById('dp-sync-cloud');
+      const badge = document.getElementById('dp-sync-badge');
+      if (!btn || !badge) return;
+      const n = window.__dpPendingNames.size;
+      if (n > 0) {
+        badge.textContent = n;
+        badge.style.display = 'inline-flex';
+        btn.style.background = '#fef3c7';
+        btn.style.borderColor = '#f59e0b';
+        btn.style.color = '#92400e';
+      } else {
+        badge.style.display = 'none';
+        btn.style.background = 'white';
+        btn.style.borderColor = '#cbd5e1';
+        btn.style.color = '#475569';
+      }
+    };
+
+    // 只寫本機（不推雲端）+ 標記為 pending
+    const saveProgressLocal = (name, text) => {
       const all = Store.get('ec.dailyProgress', {}) || {};
-      const day = all[viewDate] || {};
+      const day = { ...(all[viewDate] || {}) };
       const trimmed = (text || '').trim();
       if (trimmed) day[name] = trimmed;
       else delete day[name];
-      if (Object.keys(day).length === 0) delete all[viewDate];
-      else all[viewDate] = day;
-      Store.set('ec.dailyProgress', all);
+      const next = { ...all };
+      if (Object.keys(day).length === 0) delete next[viewDate];
+      else next[viewDate] = day;
+      if (typeof Store.setLocalOnly === 'function') {
+        Store.setLocalOnly('ec.dailyProgress', next);
+      } else {
+        Store.set('ec.dailyProgress', next);
+      }
+      window.__dpPendingNames.add(name);
+      updateSyncBadge();
     };
 
     const timers = new Map();
@@ -6255,25 +6285,71 @@ const App = {
       const name = ta.dataset.dpName;
       const card = ta.closest('.dp-card');
       const savedFlag = card ? card.querySelector('.dp-saved-flag') : null;
-      const showSaved = () => {
+      const showSaved = (text) => {
         if (!savedFlag) return;
+        savedFlag.textContent = text || '⏳ 本機已存（待同步）';
+        savedFlag.style.color = '#f59e0b';
         savedFlag.style.display = 'inline';
         clearTimeout(savedFlag._t);
-        savedFlag._t = setTimeout(() => { savedFlag.style.display = 'none'; }, 1500);
+        savedFlag._t = setTimeout(() => { savedFlag.style.display = 'none'; }, 2000);
       };
       ta.addEventListener('input', () => {
         clearTimeout(timers.get(name));
         timers.set(name, setTimeout(() => {
-          saveProgress(name, ta.value);
+          saveProgressLocal(name, ta.value);
           showSaved();
         }, 1500));
       });
       ta.addEventListener('blur', () => {
         clearTimeout(timers.get(name));
-        saveProgress(name, ta.value);
+        saveProgressLocal(name, ta.value);
         showSaved();
       });
     });
+
+    // ☁ 同步雲端按鈕：把本機累積的進度推到雲端
+    const syncBtn = document.getElementById('dp-sync-cloud');
+    if (syncBtn) {
+      updateSyncBadge();
+      syncBtn.addEventListener('click', async () => {
+        if (window.__dpPendingNames.size === 0) {
+          showToast('沒有待同步的進度', 'info');
+          return;
+        }
+        if (typeof Store.pushKeyToCloud !== 'function') {
+          alert('雲端 API 尚未就緒，請重新整理後再試。');
+          return;
+        }
+        syncBtn.disabled = true;
+        const originalHtml = syncBtn.innerHTML;
+        syncBtn.innerHTML = '<span>☁ 同步中…</span>';
+        try {
+          await Store.pushKeyToCloud('ec.dailyProgress');
+          window.__dpPendingNames.clear();
+          syncBtn.innerHTML = originalHtml;
+          updateSyncBadge();
+          showToast('已同步到雲端 ✓', 'success');
+        } catch (e) {
+          syncBtn.innerHTML = originalHtml;
+          alert('同步失敗：' + (e && e.message || e));
+        } finally {
+          syncBtn.disabled = false;
+        }
+      });
+    }
+
+    // 離開頁面前若有未同步，提醒
+    if (!window.__dpUnloadGuardInstalled) {
+      window.__dpUnloadGuardInstalled = true;
+      window.addEventListener('beforeunload', (e) => {
+        const n = window.__dpPendingNames ? window.__dpPendingNames.size : 0;
+        if (n > 0) {
+          e.preventDefault();
+          e.returnValue = '';
+          return '';
+        }
+      });
+    }
   },
 
   bindDailyProgress(deptId) {
