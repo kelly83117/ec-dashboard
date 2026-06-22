@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-49">
+<meta name="app-version" content="2026-06-18-50">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4298,12 +4298,23 @@ const App = {
       this.render();
     };
 
+    // 關閉備註視窗後 → 把該商品列捲回視野中央，不要被 render() 把畫面拉回最上面
+    const scrollBackToProduct = () => {
+      // render() 改 innerHTML 會把 main 的 scrollTop 重置為 0，等下個 frame 再找元素
+      requestAnimationFrame(() => {
+        try {
+          const el = document.querySelector(`[data-insight-note="${CSS.escape(code)}"]`);
+          if (el) el.scrollIntoView({ block: 'center', behavior: 'instant' });
+        } catch {}
+      });
+    };
+
     this.openModal({
       title: productName ? `${code} · ${productName}` : code,
       width: '560px',
       hideFooter: true,
       enableEsc: true, // 洞察表備註專用：填完按 ESC 直接關閉視窗
-      onCancel: flushPendingInput, // X 按鈕關閉時也會 flush
+      onCancel: () => { flushPendingInput(); scrollBackToProduct(); }, // X 按鈕 / ESC 關閉
       bodyHtml: `
         <div class="field">
           <label><span>調整紀錄 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（按 Enter 或「送出」新增，自動加日期、自動儲存。打了字直接關閉也會自動存）</span></span></label>
@@ -4454,6 +4465,7 @@ const App = {
           autoSave();
           this.render();
           this.closeModal();
+          scrollBackToProduct();
         });
 
         bindDelButtons();
