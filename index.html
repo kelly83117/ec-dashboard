@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-45">
+<meta name="app-version" content="2026-06-18-46">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -1686,6 +1686,23 @@ const App = {
     if (Store._useMem) {
       console.warn('[EC] localStorage 不可用，使用記憶體儲存（重新整理會清空）');
     }
+    // 整個應用層級的「離開頁面警告」：偵測所有未同步來源
+    //   洞察表 / 淨利表 / 工作日誌 / 儀表板營收卡片
+    if (!window.__appUnloadGuardInstalled) {
+      window.__appUnloadGuardInstalled = true;
+      window.addEventListener('beforeunload', (e) => {
+        try {
+          const reasons = (typeof this._checkUnsyncedSources === 'function')
+            ? this._checkUnsyncedSources()
+            : [];
+          if (reasons.length > 0) {
+            e.preventDefault();
+            e.returnValue = '';
+            return '';
+          }
+        } catch {}
+      });
+    }
     const session = Store.get(Store.KEYS.session);
     if (session) {
       const user = (Store.get(Store.KEYS.users, [])).find(u => u.username === session.username);
@@ -1983,6 +2000,16 @@ const App = {
     }
     if (window.__dpPendingNames && window.__dpPendingNames.size > 0) {
       reasons.push(`工作日誌（${window.__dpPendingNames.size} 人）`);
+    }
+    // 儀表板首頁的營收 / 廣告費卡片：value 跟 dataset.original 不一致 = 還沒按 ✓ 存
+    const dirtyCards = Array.from(document.querySelectorAll('.card-rev, .card-ads')).filter(el => {
+      const norm = v => (v == null ? '' : String(v).trim());
+      return norm(el.value) !== norm(el.dataset.original);
+    });
+    if (dirtyCards.length > 0) {
+      // 依列 (data-idx) 去重，避免同一列 rev + ads 都 dirty 時被計兩次
+      const rows = new Set(dirtyCards.map(el => el.dataset.idx));
+      reasons.push(`每日營收（${rows.size} 列未按 ✓ 儲存）`);
     }
     return reasons;
   },
