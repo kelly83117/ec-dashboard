@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-33">
+<meta name="app-version" content="2026-06-18-34">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4198,7 +4198,7 @@ const App = {
         return `
           <div style="padding:7px 11px;background:#eef2ff;border-left:3px solid #6366f1;border-radius:5px;margin-bottom:5px;font-size:12px;display:flex;gap:8px;align-items:flex-start">
             <span style="color:#6366f1;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;min-width:80px">${escapeHtml(g.date)}</span>
-            <span style="flex:1;line-height:1.4;color:#312e81;font-weight:500">${escapeHtml(joined)}</span>
+            <span data-edit-date="${escapeHtml(g.date)}" title="點兩下編輯" style="flex:1;line-height:1.4;color:#312e81;font-weight:500;cursor:pointer">${escapeHtml(joined)}</span>
             <button class="icon-btn" data-del-date="${escapeHtml(g.date)}" title="刪除這一天的所有紀錄" style="width:20px;height:20px;font-size:10px;color:#6366f1">✕</button>
           </div>`;
       }).join('');
@@ -4282,6 +4282,48 @@ const App = {
               autoSave();
               this.render();
               bindDelButtons();
+              bindEditChips();
+            });
+          });
+        };
+
+        // 雙擊調整記錄 → 變成 inline input 編輯
+        const bindEditChips = () => {
+          adjList.querySelectorAll('[data-edit-date]').forEach(span => {
+            span.addEventListener('dblclick', () => {
+              const targetDate = span.dataset.editDate;
+              const current = span.textContent;
+              const input = document.createElement('input');
+              input.type = 'text';
+              input.value = current;
+              input.style.cssText = 'flex:1;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:12px;font-family:inherit;color:#312e81;font-weight:500';
+              const parent = span.parentNode;
+              parent.replaceChild(input, span);
+              input.focus();
+              input.select();
+              let done = false;
+              const finish = (save) => {
+                if (done) return; done = true;
+                if (save) {
+                  const newText = input.value.trim();
+                  if (newText && newText !== current) {
+                    // 該日所有紀錄合併為單筆新文字（仍保留原日期）
+                    const others = (note.adjustments || []).filter(a => (a.date || '') !== targetDate);
+                    others.push({ date: targetDate, text: newText, by: this.currentUser?.username || '' });
+                    note.adjustments = others;
+                    autoSave();
+                    this.render();
+                  }
+                }
+                adjList.innerHTML = renderAdjList();
+                bindDelButtons();
+                bindEditChips();
+              };
+              input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+                else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+              });
+              input.addEventListener('blur', () => finish(true));
             });
           });
         };
@@ -4321,6 +4363,7 @@ const App = {
           autoSave();
           this.render();
           bindDelButtons();
+          bindEditChips();
           showToast(`✓ 已加入：${text.length > 20 ? text.slice(0, 20) + '…' : text}`, 'success');
         };
         saveAdjBtn.addEventListener('click', commitAdj);
@@ -4356,6 +4399,7 @@ const App = {
         });
 
         bindDelButtons();
+        bindEditChips();
       },
     });
   },
