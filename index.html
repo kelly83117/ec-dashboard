@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-48">
+<meta name="app-version" content="2026-06-18-49">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -5987,22 +5987,11 @@ const App = {
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
       const platforms = Store.get(Store.KEYS.platforms, null);
 
-      console.warn('[SAVE] 開始 commit', { idx, inputDateStr,
-        revInput: revEl?.value, revOrig: revEl?.dataset.original,
-        adsInput: adsEl?.value, adsOrig: adsEl?.dataset.original,
-        platformName: platforms?.[idx]?.name,
-        hasLocalOnly: typeof Store.setLocalOnly,
-        hasPush: typeof Store.pushKeyToCloud,
-        hasCloudStore: !!window.__cloudStore });
-
       window._platformJustSaved = Date.now();
 
-      // 寫入前先備份目前版本
-      const backup = (platforms && Array.isArray(platforms)) ? {
-        data: platforms,
-        timestamp: Date.now(),
-        savedBy: this.currentUser?.username || '',
-      } : null;
+      // ⚠ 不再寫 platformsBackup：跟 platforms 完全重複會讓 Firestore 文件 *2 體積，
+      //   先前因此撞到 1 MiB 上限導致所有寫入被靜默拒絕。
+      //   如需還原，請從 Firestore 控制台用版本歷史復原。
 
       const list = migratePlatforms(platforms ? platforms.map(p => ({ ...p })) : JSON.parse(JSON.stringify(PLATFORMS)));
       if (!list[idx]) return;
@@ -6020,31 +6009,17 @@ const App = {
       //    雲端寫入，那條路徑出錯時會被吃掉，使用者看不到失敗
       const hasLocalOnly = typeof Store.setLocalOnly === 'function';
       if (hasLocalOnly) {
-        if (backup) Store.setLocalOnly(Store.KEYS.platformsBackup, backup);
         Store.setLocalOnly(Store.KEYS.platforms, list);
       } else {
-        if (backup) Store.set(Store.KEYS.platformsBackup, backup);
         Store.set(Store.KEYS.platforms, list);
       }
-
-      console.warn('[SAVE] 本機 _mem 已寫入', {
-        memHasPlatforms: !!(Store._mem && Store._mem[Store.KEYS.platforms]),
-        savedValueForIdx: Store._mem?.[Store.KEYS.platforms]?.[idx]?.daily?.[inputDateStr],
-        savedAdsForIdx: Store._mem?.[Store.KEYS.platforms]?.[idx]?.dailyAdSpend?.[inputDateStr]
-      });
 
       showToast('儲存中...', 'info');
 
       // 2) 等雲端寫入完成 — 失敗就跳明確錯誤、輸入框維持橘色 dirty
       try {
         if (typeof Store.pushKeyToCloud === 'function') {
-          console.warn('[SAVE] 開始推到雲端 (backup)');
-          if (backup) await Store.pushKeyToCloud(Store.KEYS.platformsBackup);
-          console.warn('[SAVE] 開始推到雲端 (platforms)');
           await Store.pushKeyToCloud(Store.KEYS.platforms);
-          console.warn('[SAVE] 雲端寫入完成 ✓');
-        } else {
-          console.warn('[SAVE] pushKeyToCloud 不存在 — 雲端可能還沒 setup');
         }
       } catch (e) {
         console.error('[SAVE] ❌ 雲端儲存失敗', e);
