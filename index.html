@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-47">
+<meta name="app-version" content="2026-06-18-48">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -5987,6 +5987,14 @@ const App = {
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
       const platforms = Store.get(Store.KEYS.platforms, null);
 
+      console.warn('[SAVE] 開始 commit', { idx, inputDateStr,
+        revInput: revEl?.value, revOrig: revEl?.dataset.original,
+        adsInput: adsEl?.value, adsOrig: adsEl?.dataset.original,
+        platformName: platforms?.[idx]?.name,
+        hasLocalOnly: typeof Store.setLocalOnly,
+        hasPush: typeof Store.pushKeyToCloud,
+        hasCloudStore: !!window.__cloudStore });
+
       window._platformJustSaved = Date.now();
 
       // 寫入前先備份目前版本
@@ -6019,16 +6027,27 @@ const App = {
         Store.set(Store.KEYS.platforms, list);
       }
 
+      console.warn('[SAVE] 本機 _mem 已寫入', {
+        memHasPlatforms: !!(Store._mem && Store._mem[Store.KEYS.platforms]),
+        savedValueForIdx: Store._mem?.[Store.KEYS.platforms]?.[idx]?.daily?.[inputDateStr],
+        savedAdsForIdx: Store._mem?.[Store.KEYS.platforms]?.[idx]?.dailyAdSpend?.[inputDateStr]
+      });
+
       showToast('儲存中...', 'info');
 
       // 2) 等雲端寫入完成 — 失敗就跳明確錯誤、輸入框維持橘色 dirty
       try {
         if (typeof Store.pushKeyToCloud === 'function') {
+          console.warn('[SAVE] 開始推到雲端 (backup)');
           if (backup) await Store.pushKeyToCloud(Store.KEYS.platformsBackup);
+          console.warn('[SAVE] 開始推到雲端 (platforms)');
           await Store.pushKeyToCloud(Store.KEYS.platforms);
+          console.warn('[SAVE] 雲端寫入完成 ✓');
+        } else {
+          console.warn('[SAVE] pushKeyToCloud 不存在 — 雲端可能還沒 setup');
         }
       } catch (e) {
-        console.error('[commit] 雲端儲存失敗', e);
+        console.error('[SAVE] ❌ 雲端儲存失敗', e);
         const errMsg = (e && e.message) ? e.message : String(e);
         showToast('❌ 雲端儲存失敗', 'error');
         alert('❌ 儲存到雲端失敗：\n\n' + errMsg + '\n\n你的值還在輸入框內（橘色邊框未消除），\n請再按一次 ✓ 重試，或開 F12 Console 看完整錯誤訊息。');
@@ -6109,11 +6128,12 @@ const App = {
       });
     };
 
-    // 列上的 ✓ 快速儲存按鈕：直接 commit，跳過確認視窗
+    // 列上的 ✓ 快速儲存按鈕：直接 commit
     document.querySelectorAll('.row-save-btn').forEach(btn => {
-      btn.addEventListener('mousedown', (e) => e.preventDefault()); // 不要讓 input 先 blur 跳出確認
+      btn.addEventListener('mousedown', (e) => e.preventDefault()); // 不要讓 input 先 blur
       btn.addEventListener('click', () => {
         const idx = +btn.dataset.idx;
+        console.warn('[SAVE] ✓ 按鈕被按下', { idx, ver: document.querySelector('meta[name=app-version]')?.content });
         commit(idx);
       });
     });
