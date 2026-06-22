@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-38">
+<meta name="app-version" content="2026-06-18-39">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -4245,6 +4245,7 @@ const App = {
       title: productName ? `${code} · ${productName}` : code,
       width: '560px',
       hideFooter: true,
+      enableEsc: true, // 洞察表備註專用：填完按 ESC 直接關閉視窗
       onCancel: flushPendingInput, // X 按鈕關閉時也會 flush
       bodyHtml: `
         <div class="field">
@@ -5873,6 +5874,12 @@ const App = {
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
       const platforms = Store.get(Store.KEYS.platforms, null);
 
+      // 整個 commit 期間都是「剛剛存過」的保護窗口
+      // 包含 platformsBackup 觸發的雲端 snapshot 也要被擋掉，否則
+      // backup 的 setDoc 可能在 platforms setDoc 之前先回 snapshot，
+      // 那時 next.ec.platforms 還是舊資料 → _mem 被舊資料蓋掉
+      window._platformJustSaved = Date.now();
+
       // 🔒 寫入前先備份：把目前雲端版本存到 ec.platformsBackup
       //   如果未來資料出意外，可在 📅 本月明細 視窗按「還原上一版」救回
       if (platforms && Array.isArray(platforms)) {
@@ -5906,9 +5913,7 @@ const App = {
         adsEl.value = formatted;
         adsEl.dataset.original = formatted;
       }
-      // 🔒 在 Store.set 之前先打旗標 — 防止雲端 subscribe 在我們的寫入抵達雲端之前
-      //   用舊 snapshot 蓋掉本機 _mem，導致剛輸入的值在重繪時消失
-      window._platformJustSaved = Date.now();
+      // 旗標已在 commit() 開頭設好，這裡直接寫入
       Store.set(Store.KEYS.platforms, list);
       markUnsaved(idx);
       // 同步更新上方 summary / 圖表（用已存的最新值；不重新整頁，避免閃爍跟蓋掉相鄰欄位的草稿）
@@ -7738,7 +7743,7 @@ const App = {
   /* ============================================================
    *  通用 Modal
    * ============================================================ */
-  openModal({ title, bodyHtml, onSave, onMount, onCancel, onDelete, saveLabel, cancelLabel, deleteLabel, width, hideFooter }) {
+  openModal({ title, bodyHtml, onSave, onMount, onCancel, onDelete, saveLabel, cancelLabel, deleteLabel, width, hideFooter, enableEsc }) {
     const modal = document.getElementById('modal');
     if (width) modal.style.maxWidth = width;
     else modal.style.maxWidth = '';
@@ -7765,15 +7770,19 @@ const App = {
       if (typeof onCancel === 'function') onCancel();
       this.closeModal();
     };
-    // 按 ESC 關閉 modal（若 inline 編輯等其他地方已 e.preventDefault，這裡會跳過）
+    // ESC 關閉 modal — 預設關閉，避免儀表板首頁 / 淨利表的輸入框
+    //   被誤觸時觸發 onCancel 連帶把使用者剛打的值還原為空白
+    //   只有明確 opt-in 的 modal（目前僅洞察表備註）才會啟用
     if (this._modalEscHandler) document.removeEventListener('keydown', this._modalEscHandler);
-    this._modalEscHandler = (e) => {
-      if (e.key !== 'Escape') return;
-      if (e.defaultPrevented) return; // 已被 inner handler 處理
-      e.preventDefault();
-      closeWithCancel();
-    };
-    document.addEventListener('keydown', this._modalEscHandler);
+    if (enableEsc) {
+      this._modalEscHandler = (e) => {
+        if (e.key !== 'Escape') return;
+        if (e.defaultPrevented) return; // 已被 inner handler 處理
+        e.preventDefault();
+        closeWithCancel();
+      };
+      document.addEventListener('keydown', this._modalEscHandler);
+    }
 
     if (onMount) onMount();
     document.getElementById('modal-close-x').onclick = closeWithCancel;
