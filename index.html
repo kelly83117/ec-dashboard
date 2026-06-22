@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-43">
+<meta name="app-version" content="2026-06-18-44">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -5465,19 +5465,24 @@ const App = {
 
   /* ============================================================
    *  本月明細 — 試算表式檢視
+   *  參數 yArg / mArg（0-indexed）：可切到任何月份；不傳就用當月
    * ============================================================ */
-  openMonthlyDetailModal() {
+  openMonthlyDetailModal(yArg, mArg) {
     let platforms = Store.get(Store.KEYS.platforms, null);
     if (!platforms) platforms = JSON.parse(JSON.stringify(PLATFORMS));
     platforms = migratePlatforms(platforms);
 
     const now = new Date();
-    const yMonth = now.getFullYear();
-    const mMonth = now.getMonth();
+    const curY = now.getFullYear();
+    const curM = now.getMonth(); // 0-indexed
+    const yMonth = (yArg != null) ? yArg : curY;
+    const mMonth = (mArg != null) ? mArg : curM;
+    const isCurrentMonth = (yMonth === curY && mMonth === curM);
     const lastDay = new Date(yMonth, mMonth + 1, 0).getDate();
     const todayDay = now.getDate();
-    // 只顯示「本月 1 號 到 今天」的日期（未來空白日不顯示，避免列數太多要捲動）
-    const dates = Array.from({ length: todayDay }, (_, i) =>
+    // 本月只顯示「1 號 → 今天」；過去月份顯示整個月
+    const dayCount = isCurrentMonth ? todayDay : lastDay;
+    const dates = Array.from({ length: dayCount }, (_, i) =>
       `${yMonth}-${String(mMonth + 1).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`
     );
 
@@ -5615,8 +5620,20 @@ const App = {
       monthSubtotals[market] += platformTotals[idx].rev;
     });
 
+    // 月份分頁：當年 1 月到目前月份；不限制只看當月，可往回切其他月
+    const monthTabsHtml = (() => {
+      const tabs = [];
+      for (let m = 0; m <= curM; m++) {
+        const active = (yMonth === curY && mMonth === m);
+        tabs.push(`<button class="month-tab-btn" data-y="${curY}" data-m="${m}"
+          style="padding:5px 12px;border:1px solid ${active ? 'var(--primary)' : 'var(--border)'};border-radius:5px;background:${active ? 'var(--primary)' : 'white'};color:${active ? 'white' : 'var(--text)'};font-size:12px;font-weight:${active ? '700' : '500'};cursor:pointer;font-family:inherit;white-space:nowrap">${m + 1} 月${active ? '' : ''}</button>`);
+      }
+      return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${tabs.join('')}</div>`;
+    })();
+
     const tableHtml = `
-      <div style="border:1px solid var(--border);border-radius:6px;overflow:auto;max-height:calc(95vh - 130px)">
+      ${monthTabsHtml}
+      <div style="border:1px solid var(--border);border-radius:6px;overflow:auto;max-height:calc(95vh - 170px)">
         <table style="border-collapse:separate;border-spacing:0;width:100%;table-layout:auto;font-size:12px">
           <thead style="background:var(--surface);position:sticky;top:0;z-index:1">
             <tr>
@@ -5647,11 +5664,8 @@ const App = {
           </tfoot>
         </table>
       </div>
-      <div style="margin-top:5px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-muted)">
-        <button id="restore-backup-btn" style="padding:4px 9px;border:1px solid var(--border);border-radius:5px;background:white;color:var(--text-muted);font-size:11px;cursor:pointer;font-weight:500" title="從上一次儲存前的備份還原資料">
-          ↩ 還原上一版
-        </button>
-        <span>${dates.length === 0 ? '本月還沒有任何日期可顯示' : `共 ${dates.length} 天 · ● 今天 · — 無資料`}</span>
+      <div style="margin-top:5px;text-align:right;font-size:11px;color:var(--text-muted)">
+        <span>${dates.length === 0 ? '本月還沒有任何日期可顯示' : `共 ${dates.length} 天${isCurrentMonth ? ' · ● 今天' : ''} · — 無資料`}</span>
       </div>
     `;
 
@@ -5661,8 +5675,15 @@ const App = {
       width: '95vw',
       hideFooter: true,
       onMount: () => {
-        const btn = document.getElementById('restore-backup-btn');
-        if (btn) btn.addEventListener('click', () => this.restorePlatformsBackup());
+        // 月份分頁切換：先關掉再用新月份開
+        document.querySelectorAll('.month-tab-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const y = +btn.dataset.y;
+            const m = +btn.dataset.m;
+            this.closeModal();
+            setTimeout(() => this.openMonthlyDetailModal(y, m), 0);
+          });
+        });
       },
     });
   },
