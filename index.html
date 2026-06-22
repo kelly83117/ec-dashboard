@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-46">
+<meta name="app-version" content="2026-06-18-47">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -5981,27 +5981,20 @@ const App = {
       markUnsaved(idx);
     };
 
-    // 寫入 store
-    const commit = (idx) => {
+    // 寫入 store — async 版：本機先寫，然後等雲端確認，失敗會跳明確錯誤
+    const commit = async (idx) => {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
       const platforms = Store.get(Store.KEYS.platforms, null);
 
-      // 整個 commit 期間都是「剛剛存過」的保護窗口
-      // 包含 platformsBackup 觸發的雲端 snapshot 也要被擋掉，否則
-      // backup 的 setDoc 可能在 platforms setDoc 之前先回 snapshot，
-      // 那時 next.ec.platforms 還是舊資料 → _mem 被舊資料蓋掉
       window._platformJustSaved = Date.now();
 
-      // 🔒 寫入前先備份：把目前雲端版本存到 ec.platformsBackup
-      //   如果未來資料出意外，可在 📅 本月明細 視窗按「還原上一版」救回
-      if (platforms && Array.isArray(platforms)) {
-        Store.set(Store.KEYS.platformsBackup, {
-          data: platforms,
-          timestamp: Date.now(),
-          savedBy: this.currentUser?.username || '',
-        });
-      }
+      // 寫入前先備份目前版本
+      const backup = (platforms && Array.isArray(platforms)) ? {
+        data: platforms,
+        timestamp: Date.now(),
+        savedBy: this.currentUser?.username || '',
+      } : null;
 
       const list = migratePlatforms(platforms ? platforms.map(p => ({ ...p })) : JSON.parse(JSON.stringify(PLATFORMS)));
       if (!list[idx]) return;
@@ -6012,26 +6005,50 @@ const App = {
         else list[idx][key][inputDateStr] = Math.round(val);
       };
 
+      if (revEl) writeField('daily', parseAmount(revEl.value));
+      if (adsEl) writeField('dailyAdSpend', parseAmount(adsEl.value));
+
+      // 1) 本機 _mem 先寫好（同步）— 用 setLocalOnly 避免 Store.set 自帶的 fire-and-forget
+      //    雲端寫入，那條路徑出錯時會被吃掉，使用者看不到失敗
+      const hasLocalOnly = typeof Store.setLocalOnly === 'function';
+      if (hasLocalOnly) {
+        if (backup) Store.setLocalOnly(Store.KEYS.platformsBackup, backup);
+        Store.setLocalOnly(Store.KEYS.platforms, list);
+      } else {
+        if (backup) Store.set(Store.KEYS.platformsBackup, backup);
+        Store.set(Store.KEYS.platforms, list);
+      }
+
+      showToast('儲存中...', 'info');
+
+      // 2) 等雲端寫入完成 — 失敗就跳明確錯誤、輸入框維持橘色 dirty
+      try {
+        if (typeof Store.pushKeyToCloud === 'function') {
+          if (backup) await Store.pushKeyToCloud(Store.KEYS.platformsBackup);
+          await Store.pushKeyToCloud(Store.KEYS.platforms);
+        }
+      } catch (e) {
+        console.error('[commit] 雲端儲存失敗', e);
+        const errMsg = (e && e.message) ? e.message : String(e);
+        showToast('❌ 雲端儲存失敗', 'error');
+        alert('❌ 儲存到雲端失敗：\n\n' + errMsg + '\n\n你的值還在輸入框內（橘色邊框未消除），\n請再按一次 ✓ 重試，或開 F12 Console 看完整錯誤訊息。');
+        return;
+      }
+
+      // 3) 雲端確認後才把 dataset.original 對齊新值 → 邊框變灰、✓ 按鈕隱藏
       if (revEl) {
-        const n = parseAmount(revEl.value);
-        writeField('daily', n);
-        const formatted = fmtAmount(n);
+        const formatted = fmtAmount(parseAmount(revEl.value));
         revEl.value = formatted;
         revEl.dataset.original = formatted;
       }
       if (adsEl) {
-        const n = parseAmount(adsEl.value);
-        writeField('dailyAdSpend', n);
-        const formatted = fmtAmount(n);
+        const formatted = fmtAmount(parseAmount(adsEl.value));
         adsEl.value = formatted;
         adsEl.dataset.original = formatted;
       }
-      // 旗標已在 commit() 開頭設好，這裡直接寫入
-      Store.set(Store.KEYS.platforms, list);
       markUnsaved(idx);
-      // 同步更新上方 summary / 圖表（用已存的最新值；不重新整頁，避免閃爍跟蓋掉相鄰欄位的草稿）
       try { updateLiveTotals(); } catch {}
-      showToast('已儲存', 'success');
+      showToast('已儲存 ✓', 'success');
     };
 
     // 顯示確認 / 取消 dialog
