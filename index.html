@@ -1522,9 +1522,62 @@ const OFFICE_CONFIG = {
   d3: {
     icon: '💼',
     subtitle: '商業開發、合作洽談與客戶關係',
-    stats: [],
+    stats: [
+      { icon: '🔥', label: '本月熱銷品項', value: '12', meta: '較上月 ↑ 3 件' },
+      { icon: '📦', label: '待評估商品', value: '28', meta: '本週新增 6 件' },
+      { icon: '✅', label: '已推薦進貨', value: '9', meta: '採購確認 7 件' },
+      { icon: '💰', label: '預估毛利率', value: '38%', meta: '目標 35%' },
+    ],
     tabs: [
       { key: 'ai-select', title: '🤖 AI 選品', dynamic: 'ai-select' },
+      { key: 'overview', title: '📊 選品總覽', customHtml: `
+        <div class="table-card" style="margin-bottom:16px">
+          <div class="table-card-header"><h3>本月選品狀態</h3></div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:16px">
+            <div style="text-align:center;padding:20px;background:var(--bg-card,#f0fdf4);border-radius:10px">
+              <div style="font-size:32px;font-weight:700;color:#059669">9</div>
+              <div style="font-size:13px;color:#059669;margin-top:4px">✅ 推薦進貨</div>
+            </div>
+            <div style="text-align:center;padding:20px;background:var(--bg-card,#fffbeb);border-radius:10px">
+              <div style="font-size:32px;font-weight:700;color:#d97706">14</div>
+              <div style="font-size:13px;color:#d97706;margin-top:4px">👀 觀察中</div>
+            </div>
+            <div style="text-align:center;padding:20px;background:var(--bg-card,#fef2f2);border-radius:10px">
+              <div style="font-size:32px;font-weight:700;color:#dc2626">5</div>
+              <div style="font-size:13px;color:#dc2626;margin-top:4px">❌ 不建議</div>
+            </div>
+          </div>
+        </div>
+        <div class="table-card" style="margin-bottom:16px">
+          <div class="table-card-header"><h3>熱門品類排行</h3></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>品類</th><th>評估件數</th><th>推薦率</th><th>平均毛利率</th><th>趨勢</th></tr></thead>
+              <tbody>
+                <tr><td>寵物用品</td><td>8</td><td>75%</td><td>42%</td><td style="color:#059669">↑ 上升</td></tr>
+                <tr><td>戶外露營</td><td>6</td><td>67%</td><td>38%</td><td style="color:#059669">↑ 上升</td></tr>
+                <tr><td>居家生活</td><td>7</td><td>57%</td><td>35%</td><td style="color:#6b7280">→ 持平</td></tr>
+                <tr><td>保健食品</td><td>4</td><td>50%</td><td>33%</td><td style="color:#6b7280">→ 持平</td></tr>
+                <tr><td>3C 配件</td><td>3</td><td>33%</td><td>28%</td><td style="color:#dc2626">↓ 下滑</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="table-card">
+          <div class="table-card-header"><h3>近期推薦進貨清單</h3></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>商品名稱</th><th>品類</th><th>預估毛利率</th><th>建議首批量</th><th>狀態</th></tr></thead>
+              <tbody>
+                <tr><td>寵物自動飲水機</td><td>寵物</td><td>42%</td><td>200 件</td><td><span style="background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:999px;font-size:12px">採購確認</span></td></tr>
+                <tr><td>露營折疊燈</td><td>戶外</td><td>38%</td><td>150 件</td><td><span style="background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:999px;font-size:12px">採購確認</span></td></tr>
+                <tr><td>珪藻土浴墊</td><td>居家</td><td>35%</td><td>300 件</td><td><span style="background:#fef3c7;color:#92400e;padding:2px 10px;border-radius:999px;font-size:12px">待採購確認</span></td></tr>
+                <tr><td>機能保健食品</td><td>保健</td><td>33%</td><td>100 件</td><td><span style="background:#fef3c7;color:#92400e;padding:2px 10px;border-radius:999px;font-size:12px">待採購確認</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` },
     ],
   },
   d4: {
