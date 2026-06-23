@@ -7859,25 +7859,26 @@ const App = {
   renderImgSearchTab() {
     return `
       <div class="table-card" style="margin-bottom:16px">
-        <div class="table-card-header"><h3>以圖搜貨</h3><p>上傳商品圖片，自動搜尋 1688 與蝦皮賣家</p></div>
-        <div style="padding:20px">
-          <div id="img-drop-zone" style="border:2px dashed var(--border);border-radius:12px;padding:40px;text-align:center;cursor:pointer;transition:border-color .2s">
-            <div style="font-size:40px;margin-bottom:12px">📷</div>
-            <div style="font-size:15px;font-weight:500;margin-bottom:6px">點擊或拖曳圖片至此</div>
-            <div style="font-size:13px;color:var(--text-muted)">支援 JPG、PNG、WEBP</div>
-            <input id="img-file-input" type="file" accept="image/*" style="display:none">
-          </div>
-          <div id="img-preview-wrap" style="display:none;margin-top:16px;text-align:center">
-            <img id="img-preview" style="max-height:200px;border-radius:8px;border:1px solid var(--border)">
-            <div style="margin-top:12px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-              <button id="btn-search-1688" style="padding:10px 24px;background:#e8320a;color:white;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit">搜尋 1688 賣家</button>
-              <button id="btn-search-shopee" style="padding:10px 24px;background:#ee4d2d;color:white;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit">搜尋蝦皮賣家</button>
-              <button id="btn-clear-img" style="padding:10px 24px;background:none;border:1px solid var(--border);border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit">清除</button>
+        <div class="table-card-header"><h3>以圖搜貨</h3></div>
+        <div style="padding:14px;display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
+            <div id="img-drop-zone" style="border:2px dashed var(--border);border-radius:8px;padding:14px 20px;text-align:center;cursor:pointer;width:140px;box-sizing:border-box">
+              <div style="font-size:24px">📷</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:4px">點擊或拖曳圖片</div>
+              <input id="img-file-input" type="file" accept="image/*" style="display:none">
+            </div>
+            <div id="img-preview-wrap" style="display:none">
+              <img id="img-preview" style="width:140px;height:100px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">
             </div>
           </div>
-          <div id="img-search-loading" style="display:none;text-align:center;padding:30px;color:var(--text-muted)">搜尋中，請稍候...</div>
-          <div id="img-search-results" style="margin-top:16px"></div>
+          <div style="display:flex;flex-direction:column;gap:8px;justify-content:center">
+            <button id="btn-search-1688" style="padding:8px 18px;background:#e8320a;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">搜尋 1688 賣家</button>
+            <button id="btn-search-shopee" style="padding:8px 18px;background:#ee4d2d;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">搜尋蝦皮賣家</button>
+            <button id="btn-clear-img" style="padding:8px 18px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">清除</button>
+          </div>
         </div>
+        <div id="img-search-loading" style="display:none;text-align:center;padding:16px;color:var(--text-muted);font-size:13px">搜尋中...</div>
+        <div id="img-search-results" style="padding:0 14px 14px"></div>
       </div>`;
   },
 
