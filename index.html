@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-58">
+<meta name="app-version" content="2026-06-18-59">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -8062,14 +8062,18 @@ const App = {
           `;
         }).join('');
 
+    // d1 行銷、d4 設計都不顯示「成員績效」表與上方統計卡片區
+    //   d4 已改用個人 KPI 頁，集體季度績效不適用
+    const showMemberKpiTable = deptId !== 'd1' && deptId !== 'd4';
+    const showStatGrid = deptId !== 'd1' && deptId !== 'd4';
     return `
-      ${deptId === 'd1' ? '' : `<div class="stat-grid">${statCards}</div>`}
+      ${showStatGrid ? `<div class="stat-grid">${statCards}</div>` : ''}
       ${deptId === 'd1' && !subRoute ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId !== 'd1' ? tabBar : ''}
       ${deptId !== 'd1' ? tabContent : ''}
-      ${deptId === 'd1' ? '' : `
+      ${showMemberKpiTable ? `
         <div class="table-card">
           <div class="table-card-header">
             <h3>${escapeHtml(dept.name)}成員績效</h3>
@@ -8084,7 +8088,7 @@ const App = {
             </table>
           </div>
         </div>
-      `}
+      ` : ''}
     `;
   },
 
