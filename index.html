@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-52">
+<meta name="app-version" content="2026-06-18-53">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -2607,6 +2607,18 @@ const App = {
     // 排序：可點欄位標題切換
     const sortKey = this.filter.insightSortKey || 'revenue';
     const sortDir = this.filter.insightSortDir || 'desc';
+    // 取該商品「最新一筆調整」的日期（轉成可比較整數 YYYYMMDD）
+    //   無調整紀錄 → -Infinity，desc 排序時自動掉到最後
+    const latestAdjInt = (note) => {
+      const adjs = note && note.adjustments;
+      if (!adjs || adjs.length === 0) return -Infinity;
+      let max = -Infinity;
+      for (const a of adjs) {
+        const n = +String(a.date || '').replace(/\D/g, '');
+        if (isFinite(n) && n > max) max = n;
+      }
+      return max;
+    };
     const sortGetters = {
       code: p => p.code || '',
       prevPrev: p => p.prevPrevRevenue || 0,
@@ -2616,6 +2628,7 @@ const App = {
       ctr: p => p.ctr || 0,
       convRate: p => p.convRate || 0,
       stock: p => (p.stock - p.demand),
+      note: p => latestAdjInt(p.note),
     };
     const getter = sortGetters[sortKey] || sortGetters.revenue;
     const sorted = merged.slice().sort((a, b) => {
@@ -3043,7 +3056,7 @@ const App = {
                 ${visCol('group') ? `<th style="padding:10px 4px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">大類</th>` : ''}
                 ${visCol('flow') ? `<th style="padding:10px 4px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">判斷結果</th>` : ''}
                 ${visCol('stock') ? sortableTh('stock', '可用庫存', 'center') : ''}
-                ${visCol('note') ? `<th style="padding:10px 6px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;min-width:130px">調整（最新）</th>` : ''}`;
+                ${visCol('note') ? `<th data-sort-key="note" title="點擊依「最新調整日期」排序" style="padding:10px 6px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;min-width:130px;cursor:pointer;user-select:none">調整（最新）${arrowFor('note')}</th>` : ''}`;
                 })()}
               </tr>
             </thead>
