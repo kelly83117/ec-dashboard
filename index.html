@@ -1530,6 +1530,7 @@ const OFFICE_CONFIG = {
     ],
     tabs: [
       { key: 'ai-select', title: '🤖 AI 選品', dynamic: 'ai-select' },
+      { key: 'img-search', title: '🔍 以圖搜貨', dynamic: 'img-search' },
       { key: 'overview', title: '📊 選品總覽', customHtml: `
         <div class="table-card" style="margin-bottom:16px">
           <div class="table-card-header"><h3>本月選品狀態</h3></div>
@@ -6658,6 +6659,8 @@ const App = {
       this.bindDesignKpi(deptId);
     } else if (tab?.dynamic === 'ai-select') {
       this.bindAiSelect(deptId);
+    } else if (tab?.dynamic === 'img-search') {
+      this.bindImgSearch();
     }
   },
 
@@ -7853,6 +7856,94 @@ const App = {
     return header + sectionA + sectionB + sectionC;
   },
 
+  renderImgSearchTab() {
+    return `
+      <div class="table-card" style="margin-bottom:16px">
+        <div class="table-card-header"><h3>以圖搜貨</h3><p>上傳商品圖片，自動搜尋 1688 與蝦皮賣家</p></div>
+        <div style="padding:20px">
+          <div id="img-drop-zone" style="border:2px dashed var(--border);border-radius:12px;padding:40px;text-align:center;cursor:pointer;transition:border-color .2s">
+            <div style="font-size:40px;margin-bottom:12px">📷</div>
+            <div style="font-size:15px;font-weight:500;margin-bottom:6px">點擊或拖曳圖片至此</div>
+            <div style="font-size:13px;color:var(--text-muted)">支援 JPG、PNG、WEBP</div>
+            <input id="img-file-input" type="file" accept="image/*" style="display:none">
+          </div>
+          <div id="img-preview-wrap" style="display:none;margin-top:16px;text-align:center">
+            <img id="img-preview" style="max-height:200px;border-radius:8px;border:1px solid var(--border)">
+            <div style="margin-top:12px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+              <button id="btn-search-1688" style="padding:10px 24px;background:#e8320a;color:white;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit">搜尋 1688 賣家</button>
+              <button id="btn-search-shopee" style="padding:10px 24px;background:#ee4d2d;color:white;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit">搜尋蝦皮賣家</button>
+              <button id="btn-clear-img" style="padding:10px 24px;background:none;border:1px solid var(--border);border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit">清除</button>
+            </div>
+          </div>
+          <div id="img-search-loading" style="display:none;text-align:center;padding:30px;color:var(--text-muted)">搜尋中，請稍候...</div>
+          <div id="img-search-results" style="margin-top:16px"></div>
+        </div>
+      </div>`;
+  },
+
+  bindImgSearch() {
+    const WORKER = 'https://ec-image-search.jessica-d31.workers.dev';
+    const dropZone = document.getElementById('img-drop-zone');
+    const fileInput = document.getElementById('img-file-input');
+    const previewWrap = document.getElementById('img-preview-wrap');
+    const preview = document.getElementById('img-preview');
+    const loading = document.getElementById('img-search-loading');
+    const results = document.getElementById('img-search-results');
+    let currentFile = null;
+
+    const showPreview = (file) => {
+      currentFile = file;
+      const reader = new FileReader();
+      reader.onload = e => { preview.src = e.target.result; previewWrap.style.display = ''; };
+      reader.readAsDataURL(file);
+    };
+
+    dropZone?.addEventListener('click', () => fileInput?.click());
+    fileInput?.addEventListener('change', e => { if (e.target.files[0]) showPreview(e.target.files[0]); });
+    dropZone?.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = '#10b981'; });
+    dropZone?.addEventListener('dragleave', () => { dropZone.style.borderColor = ''; });
+    dropZone?.addEventListener('drop', e => { e.preventDefault(); dropZone.style.borderColor = ''; if (e.dataTransfer.files[0]) showPreview(e.dataTransfer.files[0]); });
+
+    document.getElementById('btn-clear-img')?.addEventListener('click', () => {
+      currentFile = null; previewWrap.style.display = 'none'; results.innerHTML = ''; if (fileInput) fileInput.value = '';
+    });
+
+    const doSearch = async (target) => {
+      if (!currentFile) { showToast('請先上傳圖片', 'error'); return; }
+      loading.style.display = ''; results.innerHTML = '';
+      try {
+        const form = new FormData();
+        form.append('image', currentFile, currentFile.name);
+        const resp = await fetch(WORKER + '?target=' + target, { method: 'POST', body: form });
+        const data = await resp.json();
+        loading.style.display = 'none';
+        if (!data.items || data.items.length === 0) {
+          results.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted)">未找到相似商品，請換張圖片試試</div>';
+          return;
+        }
+        const platformName = target === '1688' ? '1688' : '蝦皮';
+        results.innerHTML = \`
+          <div style="font-size:14px;font-weight:500;margin-bottom:12px">找到 \${data.items.length} 個 \${platformName} 相似商品</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px">
+            \${data.items.map(item => \`
+              <a href="\${item.url}" target="_blank" style="display:block;border:1px solid var(--border);border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;transition:box-shadow .2s" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.12)'" onmouseout="this.style.boxShadow=''">
+                <img src="\${item.img}" style="width:100%;height:140px;object-fit:cover" onerror="this.style.display='none'">
+                <div style="padding:8px">
+                  <div style="font-size:12px;line-height:1.4;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">\${escapeHtml(item.title)}</div>
+                  <div style="font-size:13px;font-weight:600;color:#e8320a">\${escapeHtml(item.price)}</div>
+                </div>
+              </a>\`).join('')}
+          </div>\`;
+      } catch (e) {
+        loading.style.display = 'none';
+        results.innerHTML = '<div style="text-align:center;padding:20px;color:#dc2626">搜尋失敗：' + e.message + '</div>';
+      }
+    };
+
+    document.getElementById('btn-search-1688')?.addEventListener('click', () => doSearch('1688'));
+    document.getElementById('btn-search-shopee')?.addEventListener('click', () => doSearch('shopee'));
+  },
+
   renderAiSelectTab(deptId, color, dept) {
     const records = Store.get('ec.aiSelect', []);
     const badge = (rec) => {
@@ -8169,6 +8260,8 @@ const App = {
         tabContent = this.renderDesignKpiTab(deptId, color, dept);
       } else if (activeTab.dynamic === 'ai-select') {
         tabContent = this.renderAiSelectTab(deptId, color, dept);
+      } else if (activeTab.dynamic === 'img-search') {
+        tabContent = this.renderImgSearchTab();
       } else if (activeTab.key === 'profit') {
         tabContent = window.__profitTabHtml || '';
         setTimeout(function() {
