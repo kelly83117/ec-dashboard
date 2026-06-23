@@ -9353,7 +9353,7 @@ function onFile(e,shop,type){
         const wb=XLSX.read(ev.target.result,{type:'binary'});
         const sName=wb.SheetNames.find(s=>s==='銷售統計'||s.includes('銷售'))||wb.SheetNames[0];
         state[shop].rawMobic=XLSX.utils.sheet_to_json(wb.Sheets[sName],{defval:''});
-        try{localStorage.setItem(`ec|filemeta|${shop}|mobic`,JSON.stringify({name:file.name}));}catch(e){}
+        try{localStorage.setItem(fmKey(shop,'mobic'),JSON.stringify({name:file.name}));}catch(e){}
         markCard(shop,'mobic','✅',file.name,'ok');
       }catch(err){markCard(shop,'mobic','❌','讀取失敗','err');}
       setSpin(shop,false);checkReady(shop);
@@ -9364,7 +9364,7 @@ function onFile(e,shop,type){
       try{
         const text=new TextDecoder('utf-8').decode(ev.target.result);
         state[shop].rawAds=parseAdsCsv(text);
-        try{localStorage.setItem(`ec|filemeta|${shop}|ads`,JSON.stringify({name:file.name}));}catch(e){}
+        try{localStorage.setItem(fmKey(shop,'ads'),JSON.stringify({name:file.name}));}catch(e){}
         markCard(shop,'ads','✅',file.name,'ok');
       }catch(err){markCard(shop,'ads','❌','讀取失敗','err');}
       setSpin(shop,false);checkReady(shop);
@@ -9376,13 +9376,14 @@ function onFile(e,shop,type){
         const wb=XLSX.read(ev.target.result,{type:'binary'});
         const sName=wb.SheetNames[0];
         state[shop].rawSelAds=XLSX.utils.sheet_to_json(wb.Sheets[sName],{defval:''});
-        try{localStorage.setItem(`ec|filemeta|${shop}|selads`,JSON.stringify({name:file.name}));}catch(e){}
+        try{localStorage.setItem(fmKey(shop,'selads'),JSON.stringify({name:file.name}));}catch(e){}
         markCard(shop,'selads','✅',file.name,'ok');
       }catch(err){markCard(shop,'selads','❌','讀取失敗','err');}
       setSpin(shop,false);checkReady(shop);
     };r.readAsBinaryString(file);
   }
 }
+function fmKey(shop,type){const s=state[shop]||{};return`ec|filemeta|${shop}|${s.curMonth||''}|${s.curHalf||''}|${type}`;}
 function parseAdsCsv(text){
   const lines=text.split('\n');
   let hi=lines.findIndex(l=>l.includes('廣告名稱')&&l.includes('花費'));if(hi<0)hi=7;
@@ -9901,9 +9902,9 @@ function openUploadModal(){
   // sync mobic/ads
   const s=state[shop];
   const mobicOk=!!s.rawMobic;
-  syncCard('mobic',mobicOk,'✅','📦','莫筆克銷售分析','莫筆克銷售分析',`ec|filemeta|${shop}|mobic`);
+  syncCard('mobic',mobicOk,'✅','📦','莫筆克銷售分析','莫筆克銷售分析',fmKey(shop,'mobic'));
   const adsOk=!!s.rawAds;
-  syncCard('ads',adsOk,'✅','📣','蝦皮廣告報表','蝦皮廣告報表',`ec|filemeta|${shop}|ads`);
+  syncCard('ads',adsOk,'✅','📣','蝦皮廣告報表','蝦皮廣告報表',fmKey(shop,'ads'));
   document.getElementById('upm-gen-btn').disabled=!(mobicOk&&adsOk);
   ov.classList.add('open');
 }
@@ -9931,8 +9932,8 @@ function confirmDeleteFile(){
     try{document.getElementById('upm-map-input').value='';}catch(e){}
   } else {
     const shop=curShop==='總表'?SHOPS[0].id:curShop;
-    if(type==='mobic'){state[shop].rawMobic=null;try{localStorage.removeItem(`ec|filemeta|${shop}|mobic`);}catch(e){};try{document.getElementById('upm-mobic-input').value='';}catch(e){}}
-    if(type==='ads'){state[shop].rawAds=null;try{localStorage.removeItem(`ec|filemeta|${shop}|ads`);}catch(e){};try{document.getElementById('upm-ads-input').value='';}catch(e){}}
+    if(type==='mobic'){state[shop].rawMobic=null;try{localStorage.removeItem(fmKey(shop,'mobic'));}catch(e){};try{document.getElementById('upm-mobic-input').value='';}catch(e){}}
+    if(type==='ads'){state[shop].rawAds=null;try{localStorage.removeItem(fmKey(shop,'ads'));}catch(e){};try{document.getElementById('upm-ads-input').value='';}catch(e){}}
     delete state[shop]._built;
   }
   openUploadModal();
