@@ -8826,6 +8826,18 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <div class="ucard-sub">.csv</div>
           </div>
         </label>
+        <label class="ucard" id="upm-selads" style="width:100%;box-sizing:border-box">
+          <input type="file" id="upm-selads-input" accept=".xlsx,.xls" onchange="onGlobalFile(event,'selads')">
+          <button id="upm-selads-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('selads')" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
+          <div class="ucard-icon" id="upm-selads-icon">🎯</div>
+          <div class="ucard-info">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="ucard-title" id="upm-selads-title">選品廣告清單</div>
+              <span id="upm-selads-status" style="font-size:11px;font-weight:600;color:#9ca3af">— 選填</span>
+            </div>
+            <div class="ucard-sub">.xlsx</div>
+          </div>
+        </label>
       </div>
       <div class="ana-modal-ftr" style="justify-content:space-between;align-items:center">
         <span style="font-size:12px;color:#9ca3af">上傳莫筆克＋廣告報表後可產生</span>
@@ -9905,6 +9917,15 @@ function openUploadModal(){
   syncCard('mobic',mobicOk,'✅','📦','莫筆克銷售分析','莫筆克銷售分析',fmKey(shop,'mobic'));
   const adsOk=!!s.rawAds;
   syncCard('ads',adsOk,'✅','📣','蝦皮廣告報表','蝦皮廣告報表',fmKey(shop,'ads'));
+  const seladsOk=!!s.rawSelAds;
+  const seladsMeta=getMeta(fmKey(shop,'selads'));
+  document.getElementById('upm-selads').className='ucard'+(seladsOk?' ok':'');
+  document.getElementById('upm-selads-icon').textContent=seladsOk?'✅':'🎯';
+  document.getElementById('upm-selads-title').textContent=seladsOk?(seladsMeta?.name||'選品廣告清單').slice(0,22):'選品廣告清單';
+  document.getElementById('upm-selads-status').textContent=seladsOk?'✅ 已載入':'— 選填';
+  document.getElementById('upm-selads-status').style.color=seladsOk?'#10b981':'#9ca3af';
+  document.getElementById('upm-selads-del').style.opacity=seladsOk?'1':'0.35';
+  document.getElementById('upm-selads-del').style.pointerEvents=seladsOk?'':'none';
   document.getElementById('upm-gen-btn').disabled=!(mobicOk&&adsOk);
   ov.classList.add('open');
 }
@@ -9912,7 +9933,7 @@ function closeUploadModal(){document.getElementById('upload-modal-overlay')?.cla
 
 let _deleteFilePending=null;
 function openDeleteFileModal(type){
-  const labels={'map':'蝦皮商品清單','mobic':'莫筆克銷售分析','ads':'蝦皮廣告報表'};
+  const labels={'map':'蝦皮商品清單','mobic':'莫筆克銷售分析','ads':'蝦皮廣告報表','selads':'選品廣告清單'};
   _deleteFilePending=type;
   document.getElementById('delete-file-msg').textContent='確定要刪除「'+labels[type]+'」嗎？刪除後需重新上傳。';
   document.getElementById('delete-file-overlay').classList.add('open');
@@ -9934,6 +9955,7 @@ function confirmDeleteFile(){
     const shop=curShop==='總表'?SHOPS[0].id:curShop;
     if(type==='mobic'){state[shop].rawMobic=null;try{localStorage.removeItem(fmKey(shop,'mobic'));}catch(e){};try{document.getElementById('upm-mobic-input').value='';}catch(e){}}
     if(type==='ads'){state[shop].rawAds=null;try{localStorage.removeItem(fmKey(shop,'ads'));}catch(e){};try{document.getElementById('upm-ads-input').value='';}catch(e){}}
+    if(type==='selads'){state[shop].rawSelAds=null;try{localStorage.removeItem(fmKey(shop,'selads'));}catch(e){};try{document.getElementById('upm-selads-input').value='';}catch(e){}}
     delete state[shop]._built;
   }
   openUploadModal();
@@ -10032,11 +10054,18 @@ function onGlobalFile(event,type){
         document.getElementById('upm-mobic').className='ucard'+(ok?' ok':'');
         document.getElementById('upm-mobic-icon').textContent=ok?'✅':'📦';
         document.getElementById('upm-mobic-title').textContent=ok?'莫筆克已載入':'莫筆克銷售分析';
-      } else {
+      }else if(type==='ads'){
         const ok=!!s.rawAds;
         document.getElementById('upm-ads').className='ucard'+(ok?' ok':'');
         document.getElementById('upm-ads-icon').textContent=ok?'✅':'📣';
         document.getElementById('upm-ads-title').textContent=ok?'廣告報表已載入':'蝦皮廣告報表';
+      }else if(type==='selads'){
+        const ok=!!s.rawSelAds;
+        document.getElementById('upm-selads').className='ucard'+(ok?' ok':'');
+        document.getElementById('upm-selads-icon').textContent=ok?'✅':'🎯';
+        document.getElementById('upm-selads-title').textContent=ok?'選品廣告已載入':'選品廣告清單';
+        document.getElementById('upm-selads-status').textContent=ok?'✅ 已載入':'— 選填';
+        document.getElementById('upm-selads-status').style.color=ok?'#10b981':'#9ca3af';
       }
       const s2=state[shop];
       document.getElementById('upm-gen-btn').disabled=!(s2.rawMobic&&s2.rawAds);
