@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-50">
+<meta name="app-version" content="2026-06-18-51">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -429,11 +429,6 @@
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: .4; }
-  }
-  /* 營收輸入列的 ✓ 儲存鈕脈衝：提醒使用者「資料還沒存」 */
-  @keyframes rowSavePulse {
-    0%, 100% { transform: scale(1); box-shadow: 0 3px 8px rgba(16,185,129,.45); }
-    50%      { transform: scale(1.08); box-shadow: 0 5px 14px rgba(16,185,129,.65); }
   }
 
   /* 統計卡片 */
@@ -2325,7 +2320,7 @@ const App = {
           <td style="padding:3px 8px;text-align:center">${roasCell}</td>
           <td style="padding:3px 8px;white-space:nowrap;font-size:12px;text-align:center">${deltaCell}</td>
           <td style="padding:3px 6px;white-space:nowrap;text-align:center">
-            <button class="row-save-btn" data-idx="${i}" title="按此存檔 — 未按就不會寫入雲端" style="display:none;width:32px;height:32px;font-size:18px;font-weight:700;border:0;border-radius:6px;background:#10b981;color:white;cursor:pointer;box-shadow:0 3px 8px rgba(16,185,129,.45);animation:rowSavePulse 1.4s ease-in-out infinite">✓</button>
+            <button class="row-save-btn" data-idx="${i}" title="按此存檔 — 未按就不會寫入雲端" style="display:none;width:24px;height:24px;font-size:13px;font-weight:700;border:0;border-radius:5px;background:#10b981;color:white;cursor:pointer;box-shadow:0 1px 3px rgba(16,185,129,.35)">✓</button>
           </td>
         </tr>
       `;
