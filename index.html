@@ -7922,18 +7922,14 @@ const App = {
           return;
         }
         const platformName = target === '1688' ? '1688' : '蝦皮';
-        results.innerHTML = \`
-          <div style="font-size:14px;font-weight:500;margin-bottom:12px">找到 \${data.items.length} 個 \${platformName} 相似商品</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px">
-            \${data.items.map(item => \`
-              <a href="\${item.url}" target="_blank" style="display:block;border:1px solid var(--border);border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;transition:box-shadow .2s" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.12)'" onmouseout="this.style.boxShadow=''">
-                <img src="\${item.img}" style="width:100%;height:140px;object-fit:cover" onerror="this.style.display='none'">
-                <div style="padding:8px">
-                  <div style="font-size:12px;line-height:1.4;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">\${escapeHtml(item.title)}</div>
-                  <div style="font-size:13px;font-weight:600;color:#e8320a">\${escapeHtml(item.price)}</div>
-                </div>
-              </a>\`).join('')}
-          </div>\`;
+        const cards = data.items.map(item =>
+          '<a href="' + item.url + '" target="_blank" style="display:block;border:1px solid var(--border);border-radius:8px;overflow:hidden;text-decoration:none;color:inherit">' +
+          '<img src="' + item.img + '" style="width:100%;height:140px;object-fit:cover" onerror="this.style.display=\'none\'">' +
+          '<div style="padding:8px"><div style="font-size:12px;line-height:1.4;margin-bottom:4px">' + escapeHtml(item.title) + '</div>' +
+          '<div style="font-size:13px;font-weight:600;color:#e8320a">' + escapeHtml(item.price) + '</div></div></a>'
+        ).join('');
+        results.innerHTML = '<div style="font-size:14px;font-weight:500;margin-bottom:12px">找到 ' + data.items.length + ' 個 ' + platformName + ' 相似商品</div>' +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px">' + cards + '</div>';
       } catch (e) {
         loading.style.display = 'none';
         results.innerHTML = '<div style="text-align:center;padding:20px;color:#dc2626">搜尋失敗：' + e.message + '</div>';
