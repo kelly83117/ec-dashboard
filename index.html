@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-53">
+<meta name="app-version" content="2026-06-18-54">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -3043,9 +3043,18 @@ const App = {
               <tr>
                 <th style="padding:0;width:4px;border-bottom:1px solid #e5e7eb"></th>
                 ${(() => {
-                  const arrowFor = (k) => k === sortKey ? `<span style="margin-left:2px;color:var(--primary);font-weight:700">${sortDir === 'asc' ? '↑' : '↓'}</span>` : '<span style="margin-left:2px;color:#d1d5db;font-weight:500">⇅</span>';
+                  // 漏斗排序圖示：active 時用實心藍漏斗 + 方向箭頭；未啟用用淡灰漏斗
+                  const hasActiveSort = !!this.filter.insightSortKey;
+                  const arrowFor = (k) => {
+                    const active = (hasActiveSort && k === sortKey);
+                    if (active) {
+                      const dirArr = sortDir === 'asc' ? '↑' : '↓';
+                      return `<span style="display:inline-flex;align-items:center;gap:1px;margin-left:3px;color:var(--primary);font-weight:700;font-size:11px"><svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="vertical-align:-1px"><path d="M2 2h12l-4.5 6v5l-3 1.5V8L2 2z"/></svg>${dirArr}</span>`;
+                    }
+                    return `<span style="margin-left:3px;color:#cbd5e1;font-weight:500"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" style="vertical-align:-1px"><path d="M2 2h12l-4.5 6v5l-3 1.5V8L2 2z"/></svg></span>`;
+                  };
                   const sortableTh = (key, label, align, extra = '') =>
-                    `<th data-sort-key="${key}" title="點擊排序" style="padding:10px 4px;text-align:${align};font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;cursor:pointer;user-select:none;${extra}">${label}${arrowFor(key)}</th>`;
+                    `<th data-sort-key="${key}" title="點此選擇排序" style="padding:10px 4px;text-align:${align};font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;cursor:pointer;user-select:none;${extra}">${label}${arrowFor(key)}</th>`;
                   return `<th data-sort-key="code" title="點擊排序" style="padding:10px 8px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;cursor:pointer;user-select:none">商品編號 / 名稱 / ID${arrowFor('code')}</th>
                 ${visCol('prevPrev') ? sortableTh('prevPrev', '上上上週營收', 'left', 'white-space:nowrap') : ''}
                 ${visCol('revenue') ? sortableTh('revenue', '上週 / 上上週營收', 'right', 'white-space:nowrap') : ''}
@@ -3823,20 +3832,82 @@ const App = {
       });
     }
 
-    // 表頭排序：點同一欄切換 asc/desc，點別欄則切到該欄（預設 desc，code 預設 asc）
+    // 表頭排序：點欄位漏斗 → 浮出小選單（由大到小 / 由小到大 / 取消排序）
+    const closeSortMenu = () => {
+      const m = document.getElementById('sort-menu-popup');
+      if (m) m.remove();
+    };
+    const openSortMenu = (anchor, key) => {
+      closeSortMenu();
+      const rect = anchor.getBoundingClientRect();
+      const menu = document.createElement('div');
+      menu.id = 'sort-menu-popup';
+      menu.style.cssText = `
+        position:fixed;top:${rect.bottom + 4}px;left:${Math.min(rect.left, window.innerWidth - 170)}px;
+        z-index:99998;background:white;border:1px solid var(--border);border-radius:8px;
+        box-shadow:0 8px 24px rgba(0,0,0,.12);padding:4px;min-width:150px;
+        display:flex;flex-direction:column;gap:2px;font-family:inherit
+      `;
+      const curKey = this.filter.insightSortKey;
+      const curDir = this.filter.insightSortDir;
+      const mkBtn = (icon, label, dir, active) => `
+        <button data-sort-action="${dir}" style="display:flex;align-items:center;gap:8px;padding:7px 12px;border:0;
+          background:${active ? '#eef2ff' : 'transparent'};color:${active ? 'var(--primary)' : 'var(--text)'};
+          font-size:13px;font-weight:${active ? '700' : '500'};cursor:pointer;text-align:left;border-radius:5px;
+          font-family:inherit;white-space:nowrap">
+          <span style="width:14px;display:inline-block;text-align:center">${icon}</span><span>${label}</span>
+        </button>`;
+      menu.innerHTML =
+        mkBtn('↓', '由大到小', 'desc', curKey === key && curDir === 'desc') +
+        mkBtn('↑', '由小到大', 'asc',  curKey === key && curDir === 'asc') +
+        `<div style="height:1px;background:var(--border);margin:2px 4px"></div>` +
+        mkBtn('✕', '取消排序', 'clear', !curKey);
+      document.body.appendChild(menu);
+      menu.querySelectorAll('[data-sort-action]').forEach(btn => {
+        btn.addEventListener('mouseover', () => {
+          if (btn.style.background === 'transparent' || !btn.style.background) btn.style.background = '#f9fafb';
+        });
+        btn.addEventListener('mouseout', () => {
+          // 維持 active 高亮，其餘恢復
+          const action = btn.dataset.sortAction;
+          const isActive = (action === 'clear' && !curKey) || (curKey === key && curDir === action);
+          btn.style.background = isActive ? '#eef2ff' : 'transparent';
+        });
+        btn.addEventListener('click', () => {
+          const action = btn.dataset.sortAction;
+          if (action === 'clear') {
+            this.filter.insightSortKey = '';
+            this.filter.insightSortDir = '';
+          } else {
+            this.filter.insightSortKey = key;
+            this.filter.insightSortDir = action;
+          }
+          if (this._persistInsightPrefs) this._persistInsightPrefs();
+          closeSortMenu();
+          this.render();
+        });
+      });
+      // 點外面關閉
+      setTimeout(() => {
+        document.addEventListener('click', function offClose(e) {
+          if (!menu.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) {
+            closeSortMenu();
+            document.removeEventListener('click', offClose);
+          }
+        });
+        document.addEventListener('keydown', function escClose(e) {
+          if (e.key === 'Escape') {
+            closeSortMenu();
+            document.removeEventListener('keydown', escClose);
+          }
+        });
+      }, 0);
+    };
     document.querySelectorAll('[data-sort-key]').forEach(th => {
-      th.addEventListener('click', () => {
+      th.addEventListener('click', (e) => {
+        e.stopPropagation();
         const key = th.dataset.sortKey;
-        const curKey = this.filter.insightSortKey || 'revenue';
-        const curDir = this.filter.insightSortDir || 'desc';
-        if (curKey === key) {
-          this.filter.insightSortDir = curDir === 'asc' ? 'desc' : 'asc';
-        } else {
-          this.filter.insightSortKey = key;
-          this.filter.insightSortDir = (key === 'code') ? 'asc' : 'desc';
-        }
-        if (this._persistInsightPrefs) this._persistInsightPrefs();
-        this.render();
+        openSortMenu(th, key);
       });
     });
 
