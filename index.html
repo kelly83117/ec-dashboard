@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-51">
+<meta name="app-version" content="2026-06-18-52">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -5988,12 +5988,17 @@ const App = {
       markUnsaved(idx);
     };
 
+    // 標記正在 commit 的列 — blur 還原邏輯看到這個 flag 就跳過，
+    //   避免「按 Enter 觸發 commit、commit 還在跑、blur 提前還原」的競爭
+    const isCommitting = new Set();
+
     // 寫入 store — async 版：本機先寫，然後等雲端確認，失敗會跳明確錯誤
     const commit = async (idx) => {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
       const platforms = Store.get(Store.KEYS.platforms, null);
 
+      isCommitting.add(idx);
       window._platformJustSaved = Date.now();
 
       // ⚠ 不再寫 platformsBackup：跟 platforms 完全重複會讓 Firestore 文件 *2 體積，
@@ -6030,6 +6035,7 @@ const App = {
         }
       } catch (e) {
         console.error('[SAVE] ❌ 雲端儲存失敗', e);
+        isCommitting.delete(idx);
         const errMsg = (e && e.message) ? e.message : String(e);
         showToast('❌ 雲端儲存失敗', 'error');
         alert('❌ 儲存到雲端失敗：\n\n' + errMsg + '\n\n你的值還在輸入框內（橘色邊框未消除），\n請再按一次 ✓ 重試，或開 F12 Console 看完整錯誤訊息。');
@@ -6048,6 +6054,7 @@ const App = {
         adsEl.dataset.original = formatted;
       }
       markUnsaved(idx);
+      isCommitting.delete(idx);
       try { updateLiveTotals(); } catch {}
       showToast('已儲存 ✓', 'success');
     };
@@ -6145,16 +6152,36 @@ const App = {
         updateLiveTotals();
       });
       el.addEventListener('keydown', (e) => {
-        // Enter / Esc 都只是失焦，不再自動儲存
-        // （使用者要求：必須按 ✓ 按鈕才會寫入雲端）
-        if (e.key === 'Enter' || e.key === 'Escape') {
+        if (e.key === 'Enter') {
+          // Enter 視同按 ✓：有變動就 commit
           e.preventDefault();
+          if (isDirty(idx)) commit(idx);
+          else el.blur();
+        } else if (e.key === 'Escape') {
+          // Esc 取消編輯：還原為原值，然後失焦（blur handler 看到不 dirty 就不再動）
+          e.preventDefault();
+          if (isDirty(idx)) revert(idx);
           el.blur();
         }
       });
-      // blur 不再自動儲存 — 改成必須按該列的 ✓ 按鈕才會存
-      // （使用者明確要求：未按勾勾就不寫入雲端 / 不視為完成）
-      // 視覺提示維持：dirty 時邊框轉橘 + ✓ 按鈕浮出，提醒使用者要按確認
+
+      // 失焦時若有未按 ✓ 的變動 → 自動還原為原值
+      // （使用者要求：沒按勾勾不寫入雲端，且輸入框跳回原值，不要留橘色 dirty 狀態）
+      el.addEventListener('blur', () => {
+        // 延遲一下確認真的離開該列：
+        //   - 同列 rev→ads 切換時不還原，等整列都離開
+        //   - 點 ✓ 按鈕時 mousedown preventDefault 已擋掉 blur，這裡正常不會跑
+        //   - 但保險起見也檢查 isCommitting，避免 commit 跑到一半被 revert
+        setTimeout(() => {
+          if (isCommitting.has(idx)) return;
+          const active = document.activeElement;
+          const sameRow = active && active.tagName === 'INPUT'
+            && (active.classList.contains('card-rev') || active.classList.contains('card-ads'))
+            && +active.dataset.idx === idx;
+          if (sameRow) return;
+          if (isDirty(idx)) revert(idx);
+        }, 100);
+      });
     });
   },
 
