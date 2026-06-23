@@ -8,7 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本號（每次部署都會變），給 JS 端的版本檢查使用 -->
-<meta name="app-version" content="2026-06-18-59">
+<meta name="app-version" content="2026-06-18-60">
 <title>元創 · 管理系統</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
@@ -7612,15 +7612,13 @@ const App = {
     const data = Store.get(key, null) || { entries: [], fixedTasks: {}, skills: [] };
     const k = this._calcDesignKpi(data);
 
-    // 進度條：今日基準 vs 實際
-    const workDays = this._workingDaysInMonth(st.yMonth);
-    const todayIdx = this._workingDayIndexToday(st.yMonth);
-    const dailyTarget = 100 / workDays;
-    const todayTarget = Math.min(100, dailyTarget * todayIdx);
-    const diff = k.total - todayTarget;
-    const diffSign = diff >= 0 ? '+' : '';
-    const diffColor = diff >= 0 ? '#10b981' : '#ef4444';
-    const diffLabel = diff >= 0 ? '領先' : '落後';
+    // 今日累計顯示（使用者 2026-06-23 選擇）：直接秀今天做了多少件
+    const todayStr = toDateStr(new Date());
+    const todayEntries = (data.entries || []).filter(e => e.date === todayStr);
+    const todayTotal = todayEntries.length;
+    const todayMet = todayEntries.filter(e => e.met).length;
+    const todayMinutes = todayEntries.reduce((s, e) => s + (+e.stdMinutes || 0), 0);
+    const todaySkillCount = (data.skills || []).filter(s => s.date === todayStr).length;
 
     // admin 才能切設計師 / 月份
     const switcher = st.isAdmin ? `
@@ -7631,11 +7629,15 @@ const App = {
       <input type="month" class="design-kpi-month" value="${st.yMonth}" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">`;
 
     // ───────── A 區：工時記錄表 ─────────
+    // 圖種與標準工時（使用者 2026-06-23 確認）
     const PRESET_TYPES = [
       { name: '主圖', minutes: 20 },
       { name: '主圖（森）', minutes: 10 },
       { name: '套圖', minutes: 105 },
       { name: 'Banner', minutes: 40 },
+      { name: '剪輯-有素材', minutes: 60 },
+      { name: '剪輯-自拍', minutes: 120 },
+      { name: '社群圖文', minutes: 15 },
     ];
     const entriesRowsHtml = (data.entries || []).length === 0
       ? `<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px">本月還沒有工時記錄</td></tr>`
@@ -7775,9 +7777,8 @@ const App = {
         </div>
       </div>`;
 
-    // 進度條的視覺位置（0-100%）
+    // 進度條：本月綜合分數 0-100%
     const pct = Math.max(0, Math.min(100, k.total));
-    const targetPct = Math.max(0, Math.min(100, todayTarget));
 
     const header = `
       <div class="table-card" style="margin-bottom:16px;border-top:3px solid ${color}">
@@ -7787,24 +7788,37 @@ const App = {
               <div style="font-size:13px;color:var(--text-muted);margin-bottom:2px">設計師 · ${escapeHtml(st.viewName)}</div>
               <h2 style="margin:0;font-size:22px">${escapeHtml(st.yMonth.replace('-','/'))} 月績效</h2>
             </div>
-            ${switcher}
-          </div>
-          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:8px">
-            <div style="font-size:36px;font-weight:800;color:${color};font-variant-numeric:tabular-nums;line-height:1">${k.total.toFixed(1)}<span style="font-size:16px;color:var(--text-muted);font-weight:500"> / 100</span></div>
-            <div style="font-size:14px;color:var(--text-muted)">
-              <div>今日基準 <strong style="color:var(--text)">${todayTarget.toFixed(1)}</strong> 分（第 ${todayIdx} / ${workDays} 工作天）</div>
-              <div style="margin-top:2px">${diffLabel} <strong style="color:${diffColor}">${diffSign}${diff.toFixed(1)}</strong> 分　·　每日目標 <strong style="color:var(--text)">${dailyTarget.toFixed(1)}</strong> 分</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button id="design-kpi-info-btn" class="btn-ghost" style="padding:6px 12px;font-size:13px">📖 指標說明</button>
+              ${switcher}
             </div>
           </div>
-          <!-- 進度條：底色 = 100% 灰，藍色 = 實際分，紅色虛線 = 今日基準 -->
+          <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:10px">
+            <div style="font-size:36px;font-weight:800;color:${color};font-variant-numeric:tabular-nums;line-height:1">${k.total.toFixed(1)}<span style="font-size:16px;color:var(--text-muted);font-weight:500"> / 100</span></div>
+            <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px">
+              <div style="background:#eff6ff;padding:8px 14px;border-radius:8px;border-left:3px solid #3b82f6">
+                <div style="font-size:11px;color:var(--text-muted);font-weight:600">今日完成</div>
+                <div style="font-size:18px;font-weight:800;color:#3b82f6;font-variant-numeric:tabular-nums">${todayTotal} <span style="font-size:12px;color:var(--text-muted);font-weight:500">件</span></div>
+              </div>
+              <div style="background:#ecfdf5;padding:8px 14px;border-radius:8px;border-left:3px solid #10b981">
+                <div style="font-size:11px;color:var(--text-muted);font-weight:600">今日達標</div>
+                <div style="font-size:18px;font-weight:800;color:#10b981;font-variant-numeric:tabular-nums">${todayMet} <span style="font-size:12px;color:var(--text-muted);font-weight:500">件 / ${todayTotal}</span></div>
+              </div>
+              <div style="background:#fef3c7;padding:8px 14px;border-radius:8px;border-left:3px solid #f59e0b">
+                <div style="font-size:11px;color:var(--text-muted);font-weight:600">今日工時</div>
+                <div style="font-size:18px;font-weight:800;color:#f59e0b;font-variant-numeric:tabular-nums">${todayMinutes} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分</span></div>
+              </div>
+              <div style="background:#f5f3ff;padding:8px 14px;border-radius:8px;border-left:3px solid #8b5cf6">
+                <div style="font-size:11px;color:var(--text-muted);font-weight:600">本月 Skill</div>
+                <div style="font-size:18px;font-weight:800;color:#8b5cf6;font-variant-numeric:tabular-nums">${k.skillCount} <span style="font-size:12px;color:var(--text-muted);font-weight:500">/ 3</span></div>
+              </div>
+            </div>
+          </div>
           <div style="position:relative;height:14px;background:var(--bg);border-radius:8px;overflow:hidden;border:1px solid var(--border)">
             <div style="position:absolute;top:0;left:0;height:100%;width:${pct}%;background:linear-gradient(90deg, ${color}88 0%, ${color} 100%);border-radius:7px;transition:width .3s ease"></div>
-            <div style="position:absolute;top:-2px;bottom:-2px;left:${targetPct}%;width:2px;background:#ef4444"></div>
           </div>
           <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:4px">
-            <span>0</span>
-            <span style="color:#ef4444">今日基準 ${todayTarget.toFixed(1)}</span>
-            <span>100</span>
+            <span>0 分</span><span>50 分</span><span>100 分</span>
           </div>
         </div>
       </div>`;
@@ -7835,6 +7849,12 @@ const App = {
       const key = `ec.designKpi_${st.viewName}_${st.yMonth}`;
       return Store.get(key, null) || { entries: [], fixedTasks: {}, skills: [] };
     };
+
+    // 指標說明 modal
+    const infoBtn = document.getElementById('design-kpi-info-btn');
+    if (infoBtn) {
+      infoBtn.addEventListener('click', () => this._openDesignKpiInfoModal());
+    }
 
     // admin 切設計師
     document.querySelectorAll('[data-design-pick]').forEach(btn => {
@@ -7929,6 +7949,64 @@ const App = {
         (data.skills || []).splice(idx, 1);
         saveAndRender(data);
       });
+    });
+  },
+
+  // 設計 KPI 指標說明 modal — 文字版（同 Excel「指標說明」分頁的圖片內容）
+  _openDesignKpiInfoModal() {
+    const body = `
+      <div style="font-size:13px;line-height:1.7;color:var(--text)">
+        <div style="padding:12px 14px;background:#eef2ff;border-radius:8px;margin-bottom:14px;font-size:12px;color:#4338ca">
+          📐 <strong>計分公式</strong>　基本 100 ＝ A(60) ＋ B(30) ＋ C(10)　·　加分 ＋10（封頂 100）
+        </div>
+
+        <h4 style="margin:14px 0 8px;font-size:14px;color:#3b82f6;border-left:3px solid #3b82f6;padding-left:8px">A. 達標工時內完成率 (60 分)</h4>
+        <div style="padding:10px 14px;background:var(--bg);border-radius:6px;margin-bottom:6px">
+          <strong>計算方式：</strong>達標工時內完成的件數 ÷ 當期接案總件數 × 100% × 60 分<br>
+          <span style="font-size:12px;color:var(--text-muted)">範例：當月接 30 件，27 件在標準工時內完成 → 90% × 60 = 54 分</span>
+        </div>
+        <div style="padding:10px 14px;background:#fff7ed;border-radius:6px;border-left:3px solid #fb923c">
+          <strong>📋 圖種與標準工時：</strong>
+          <table style="width:100%;margin-top:6px;font-size:12px;border-collapse:collapse">
+            <tr style="background:#fed7aa"><th style="padding:5px 8px;text-align:left">圖種</th><th style="padding:5px 8px;text-align:right">標準工時</th></tr>
+            <tr><td style="padding:5px 8px;border-top:1px solid #fdba74">主圖</td><td style="padding:5px 8px;border-top:1px solid #fdba74;text-align:right;font-variant-numeric:tabular-nums">20 分</td></tr>
+            <tr><td style="padding:5px 8px;border-top:1px solid #fdba74">主圖（森）</td><td style="padding:5px 8px;border-top:1px solid #fdba74;text-align:right;font-variant-numeric:tabular-nums">10 分</td></tr>
+            <tr><td style="padding:5px 8px;border-top:1px solid #fdba74">套圖</td><td style="padding:5px 8px;border-top:1px solid #fdba74;text-align:right;font-variant-numeric:tabular-nums">1 小時 45 分（105 分）</td></tr>
+            <tr><td style="padding:5px 8px;border-top:1px solid #fdba74">Banner</td><td style="padding:5px 8px;border-top:1px solid #fdba74;text-align:right;font-variant-numeric:tabular-nums">40 分</td></tr>
+            <tr><td style="padding:5px 8px;border-top:1px solid #fdba74">剪輯-有素材</td><td style="padding:5px 8px;border-top:1px solid #fdba74;text-align:right;font-variant-numeric:tabular-nums">1 小時（60 分）</td></tr>
+            <tr><td style="padding:5px 8px;border-top:1px solid #fdba74">剪輯-自拍</td><td style="padding:5px 8px;border-top:1px solid #fdba74;text-align:right;font-variant-numeric:tabular-nums">2 小時（120 分）</td></tr>
+            <tr><td style="padding:5px 8px;border-top:1px solid #fdba74">社群圖文</td><td style="padding:5px 8px;border-top:1px solid #fdba74;text-align:right;font-variant-numeric:tabular-nums">15 分</td></tr>
+          </table>
+        </div>
+
+        <h4 style="margin:18px 0 8px;font-size:14px;color:#f59e0b;border-left:3px solid #f59e0b;padding-left:8px">B. 指派固定任務 (30 分起算)</h4>
+        <div style="padding:10px 14px;background:var(--bg);border-radius:6px;margin-bottom:6px">
+          每項從滿分起算，主管按月驗收：<br>
+          <span style="font-size:12px">• <strong>漏做：</strong>該項該次配分全數扣除（漏做達 2 次以上加重扣分並列入面談）<br>
+          • <strong>做錯／設定錯誤：</strong>每錯一次扣 2 分；若造成營收損失或客訴，加重扣分</span>
+        </div>
+        <table style="width:100%;margin-top:6px;font-size:12px;border-collapse:collapse">
+          <tr style="background:#fde68a"><th style="padding:5px 8px;text-align:left">任務</th><th style="padding:5px 8px;text-align:left">執行時段</th><th style="padding:5px 8px;text-align:right">配分</th></tr>
+          <tr><td style="padding:5px 8px;border-top:1px solid #fcd34d">設定小黃標、促銷組合、優惠券</td><td style="padding:5px 8px;border-top:1px solid #fcd34d">每週 4 小時</td><td style="padding:5px 8px;border-top:1px solid #fcd34d;text-align:right;font-variant-numeric:tabular-nums">10</td></tr>
+          <tr><td style="padding:5px 8px;border-top:1px solid #fcd34d">上架（蝦皮、酷澎）</td><td style="padding:5px 8px;border-top:1px solid #fcd34d">每週一天</td><td style="padding:5px 8px;border-top:1px solid #fcd34d;text-align:right;font-variant-numeric:tabular-nums">10</td></tr>
+          <tr><td style="padding:5px 8px;border-top:1px solid #fcd34d">排程洞察表換主圖</td><td style="padding:5px 8px;border-top:1px solid #fcd34d">每週一天</td><td style="padding:5px 8px;border-top:1px solid #fcd34d;text-align:right;font-variant-numeric:tabular-nums">5</td></tr>
+          <tr><td style="padding:5px 8px;border-top:1px solid #fcd34d">優化標題（酷澎、蝦皮）</td><td style="padding:5px 8px;border-top:1px solid #fcd34d">每週一天</td><td style="padding:5px 8px;border-top:1px solid #fcd34d;text-align:right;font-variant-numeric:tabular-nums">5</td></tr>
+        </table>
+
+        <h4 style="margin:18px 0 8px;font-size:14px;color:#10b981;border-left:3px solid #10b981;padding-left:8px">C. Skill 技能累積（基本 10 ＋ 加分 +10）</h4>
+        <div style="padding:10px 14px;background:#ecfdf5;border-radius:6px;border-left:3px solid #10b981">
+          <strong>什麼算一項 skill？</strong>新軟體技巧、新 AI 做法、新表現手法或範本等，整理建檔存下即計一項。<br><br>
+          <strong>每月目標：</strong>每月滿 3 項 = 10 分（未滿按比例計）<br>
+          <strong>驗收方式：</strong>以建檔內容為憑（如筆記、範本、操作流程），主管確認後計分<br>
+          <strong>加分：</strong>3 項基本要求，超過 3 項每項 +5 分，最多 +10
+        </div>
+      </div>`;
+    this.openModal({
+      title: '📐 設計團隊 KPI 指標說明',
+      bodyHtml: body,
+      width: '680px',
+      hideFooter: true,
+      enableEsc: true,
     });
   },
 
