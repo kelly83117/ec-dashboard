@@ -7970,7 +7970,7 @@ const App = {
         if (aliEl) {
           aliEl.innerHTML = data.ali && data.ali.length > 0
             ? data.ali.map(i => renderCard(i, '#e8320a')).join('')
-            : '<a href="' + (data.imgbbUrl ? 'https://s.1688.com/youyuan/index.htm?imageAddress=' + encodeURIComponent(data.imgbbUrl) : 'https://s.1688.com/youyuan/index.htm') + '" target="_blank" style="display:block;padding:10px;border:1px dashed var(--border);border-radius:6px;font-size:12px;color:#e8320a;text-decoration:none;text-align:center">點此在 1688 以圖搜款 ↗</a>';
+            : '<a href="' + (data.aliSearchUrl || 'https://s.1688.com/youyuan/index.htm') + '" target="_blank" style="display:block;padding:10px;border:1px dashed var(--border);border-radius:6px;font-size:12px;color:#e8320a;text-decoration:none;text-align:center">點此在 1688 以圖搜款 ↗</a>';
         }
         if (shopeeEl) {
           shopeeEl.innerHTML = data.shopee && data.shopee.length > 0
@@ -7999,8 +7999,8 @@ const App = {
         const resp = await fetch('https://ec-image-search.jessica-d31.workers.dev', { method: 'POST', body: fd });
         const data = await resp.json();
         if (loading) loading.style.display = 'none';
-        if (data.imgbbUrl) {
-          window.open('https://yandex.com/images/search?url=' + encodeURIComponent(data.imgbbUrl) + '&rpt=imageview', '_blank');
+        if (data.yandexUrl) {
+          window.open(data.yandexUrl, '_blank');
         } else {
           showToast('上傳失敗，請稍後再試', 'error');
         }
