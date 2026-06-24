@@ -13,18 +13,18 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 <style>
   :root {
-    --bg: #f8fafc;
+    --bg: #fff8f5;
     --surface: #ffffff;
-    --sidebar: #0f172a;
-    --sidebar-2: #1e293b;
-    --sidebar-text: #e2e8f0;
-    --sidebar-muted: #94a3b8;
-    --primary: #4f46e5;
-    --primary-soft: #eef2ff;
-    --primary-dark: #4338ca;
-    --border: #e5e7eb;
-    --text: #111827;
-    --text-muted: #6b7280;
+    --sidebar: #2d0a00;
+    --sidebar-2: #4a1500;
+    --sidebar-text: #ffe8d6;
+    --sidebar-muted: #c09070;
+    --primary: #ff5722;
+    --primary-soft: #fff3ef;
+    --primary-dark: #e64a19;
+    --border: #f0e0d8;
+    --text: #1a0800;
+    --text-muted: #7a5a4a;
     --success: #10b981;
     --success-soft: #d1fae5;
     --warn: #f59e0b;
@@ -33,11 +33,11 @@
     --danger-soft: #fee2e2;
     --info: #3b82f6;
     --info-soft: #dbeafe;
-    --shadow-sm: 0 1px 2px rgba(15,23,42,.04);
-    --shadow: 0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04);
-    --shadow-lg: 0 10px 25px -5px rgba(15,23,42,.1), 0 8px 10px -6px rgba(15,23,42,.05);
-    --radius: 12px;
-    --radius-sm: 8px;
+    --shadow-sm: 0 1px 3px rgba(255,87,34,.08);
+    --shadow: 0 2px 6px rgba(255,87,34,.1), 0 1px 3px rgba(255,87,34,.06);
+    --shadow-lg: 0 10px 30px -5px rgba(255,87,34,.18), 0 8px 12px -6px rgba(255,87,34,.1);
+    --radius: 14px;
+    --radius-sm: 9px;
   }
 
   * { box-sizing: border-box; }
@@ -88,7 +88,7 @@
     display: none;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+    background: linear-gradient(135deg, #ff5722 0%, #ff8a00 40%, #ffb300 100%);
     padding: 24px;
   }
   /* 全屏載入遮罩（同步啟動，啟動完才隱藏，避免 view-login 或部分 UI 閃現） */
@@ -206,7 +206,7 @@
   /* 側欄 */
   .sidebar {
     width: 240px;
-    background: var(--sidebar);
+    background: linear-gradient(180deg, #2d0a00 0%, #4a1200 40%, #6d1f00 100%);
     color: var(--sidebar-text);
     display: flex;
     flex-direction: column;
@@ -294,9 +294,9 @@
   .nav-item .icon { font-size: 18px; }
   .nav-item:hover { background: var(--sidebar-2); color: white; }
   .nav-item.active {
-    background: var(--primary);
+    background: linear-gradient(90deg, var(--primary) 0%, #ff8a00 100%);
     color: white;
-    box-shadow: 0 4px 12px rgba(99,102,241,.4);
+    box-shadow: 0 4px 14px rgba(255,87,34,.5);
   }
   .nav-item.nav-parent .nav-chevron {
     font-size: 12px;
@@ -442,25 +442,47 @@
     background: var(--surface);
     padding: 20px;
     border-radius: var(--radius);
-    border: 1px solid var(--border);
-    box-shadow: var(--shadow-sm);
+    border: 0;
+    box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+    transition: transform .15s, box-shadow .15s;
   }
+  .stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    opacity: .08;
+    transform: translate(20px, -20px);
+    background: currentColor;
+  }
+  .stat-grid .stat-card:nth-child(1) { background: linear-gradient(135deg, #fff3ef 0%, #ffe8e0 100%); border-left: 4px solid #ff5722; }
+  .stat-grid .stat-card:nth-child(2) { background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 4px solid #f59e0b; }
+  .stat-grid .stat-card:nth-child(3) { background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border-left: 4px solid #10b981; }
+  .stat-grid .stat-card:nth-child(4) { background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-left: 4px solid #3b82f6; }
   .stat-card .stat-icon {
-    width: 40px; height: 40px;
-    border-radius: 10px;
+    width: 44px; height: 44px;
+    border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 20px;
+    font-size: 22px;
     margin-bottom: 12px;
+    background: rgba(255,255,255,.7);
+    box-shadow: 0 2px 8px rgba(0,0,0,.08);
   }
   .stat-card .stat-label {
     font-size: 13px;
     color: var(--text-muted);
     margin-bottom: 4px;
+    font-weight: 500;
   }
   .stat-card .stat-value {
-    font-size: 28px;
-    font-weight: 700;
+    font-size: 30px;
+    font-weight: 800;
     margin-bottom: 8px;
+    letter-spacing: -.02em;
   }
   .stat-card .stat-meta {
     font-size: 12px;
@@ -489,10 +511,10 @@
   }
   .pill:hover { color: var(--text); border-color: #d1d5db; }
   .pill.active {
-    background: var(--text);
+    background: linear-gradient(90deg, var(--primary) 0%, #ff8a00 100%);
     color: white;
-    border-color: var(--text);
     border-color: var(--primary);
+    box-shadow: 0 2px 8px rgba(255,87,34,.35);
   }
   .filter-spacer { flex: 1; }
   .btn-add {
@@ -521,16 +543,20 @@
   /* 表格 */
   .table-card {
     background: var(--surface);
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    box-shadow: none;
+    border-radius: var(--radius);
+    border: 0;
+    box-shadow: var(--shadow);
     overflow: hidden;
+    transition: box-shadow .15s;
   }
+  .table-card:hover { box-shadow: var(--shadow-lg); }
   .table-card-header {
-    padding: 20px 24px;
+    padding: 18px 24px;
     border-bottom: 1px solid var(--border);
+    background: linear-gradient(90deg, #fff8f5 0%, #fff 100%);
+    border-left: 4px solid var(--primary);
   }
-  .table-card-header h3 { margin: 0 0 4px; font-size: 16px; }
+  .table-card-header h3 { margin: 0 0 2px; font-size: 16px; font-weight: 700; color: var(--text); }
   .table-card-header p { margin: 0; font-size: 13px; color: var(--text-muted); }
   .table-wrap { overflow-x: auto; }
   table {
@@ -540,12 +566,14 @@
   }
   th {
     text-align: left;
-    padding: 14px 24px;
+    padding: 12px 24px;
     font-size: 12px;
-    color: var(--text-muted);
-    background: var(--bg);
-    font-weight: 500;
+    color: var(--primary-dark);
+    background: linear-gradient(90deg, #fff3ef 0%, #fff8f5 100%);
+    font-weight: 700;
     white-space: nowrap;
+    letter-spacing: .02em;
+    text-transform: uppercase;
   }
   td {
     padding: 16px 24px;
@@ -1460,10 +1488,10 @@ const OFFICE_CONFIG = {
     icon: '📣',
     subtitle: '',
     stats: [
-      { icon: '📣', label: '進行中活動', value: '12', meta: '本月新增 3 檔' },
-      { icon: '👥', label: '月觸及人數', value: '48.2k', meta: '較上月 ↑ 12%' },
-      { icon: '💰', label: '本月廣告支出', value: 'NT$285k', meta: '預算使用 72%' },
-      { icon: '🎯', label: '平均轉換率', value: '3.8%', meta: '較上月 ↑ 0.5%' },
+      { icon: '📣', label: '進行中活動', value: '0', meta: '本月新增 0 檔' },
+      { icon: '👥', label: '月觸及人數', value: '0', meta: '較上月 —' },
+      { icon: '💰', label: '本月廣告支出', value: 'NT$0', meta: '預算使用 0%' },
+      { icon: '🎯', label: '平均轉換率', value: '0%', meta: '較上月 —' },
     ],
     tabs: [
       { key: 'profit', title: '淨利表', customHtml: window.__profitTabHtml || '' },
@@ -1483,10 +1511,10 @@ const OFFICE_CONFIG = {
     icon: '🛒',
     subtitle: '供應商管理、採購單與成本控制',
     stats: [
-      { icon: '🏭', label: '合作供應商', value: '34', meta: '本月新增 2 家' },
-      { icon: '📋', label: '待處理採購單', value: '18', meta: '逾期 2 張' },
-      { icon: '💵', label: '本月採購金額', value: 'NT$1.2M', meta: '較上月 ↑ 5%' },
-      { icon: '⏱️', label: '平均交期', value: '7.2 天', meta: '較上月 ↓ 0.8 天' },
+      { icon: '🏭', label: '合作供應商', value: '0', meta: '本月新增 0 家' },
+      { icon: '📋', label: '待處理採購單', value: '0', meta: '逾期 0 張' },
+      { icon: '💵', label: '本月採購金額', value: 'NT$0', meta: '較上月 —' },
+      { icon: '⏱️', label: '平均交期', value: '0 天', meta: '較上月 —' },
     ],
     tabs: [
       { key: 'order-suggest', title: '叫貨量建議',
@@ -1523,10 +1551,10 @@ const OFFICE_CONFIG = {
     icon: '💼',
     subtitle: '商業開發、合作洽談與客戶關係',
     stats: [
-      { icon: '🔥', label: '本月熱銷品項', value: '12', meta: '較上月 ↑ 3 件' },
-      { icon: '📦', label: '待評估商品', value: '28', meta: '本週新增 6 件' },
-      { icon: '✅', label: '已推薦進貨', value: '9', meta: '採購確認 7 件' },
-      { icon: '💰', label: '預估毛利率', value: '38%', meta: '目標 35%' },
+      { icon: '🔥', label: '本月熱銷品項', value: '0', meta: '較上月 —' },
+      { icon: '📦', label: '待評估商品', value: '0', meta: '本週新增 0 件' },
+      { icon: '✅', label: '已推薦進貨', value: '0', meta: '採購確認 0 件' },
+      { icon: '💰', label: '預估毛利率', value: '0%', meta: '目標 35%' },
     ],
     tabs: [
       { key: 'ai-select', title: '🤖 AI 選品', dynamic: 'ai-select' },
@@ -1536,15 +1564,15 @@ const OFFICE_CONFIG = {
           <div class="table-card-header"><h3>本月選品狀態</h3></div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:16px">
             <div style="text-align:center;padding:20px;background:var(--bg-card,#f0fdf4);border-radius:10px">
-              <div style="font-size:32px;font-weight:700;color:#059669">9</div>
+              <div style="font-size:32px;font-weight:700;color:#059669">0</div>
               <div style="font-size:13px;color:#059669;margin-top:4px">✅ 推薦進貨</div>
             </div>
             <div style="text-align:center;padding:20px;background:var(--bg-card,#fffbeb);border-radius:10px">
-              <div style="font-size:32px;font-weight:700;color:#d97706">14</div>
+              <div style="font-size:32px;font-weight:700;color:#d97706">0</div>
               <div style="font-size:13px;color:#d97706;margin-top:4px">👀 觀察中</div>
             </div>
             <div style="text-align:center;padding:20px;background:var(--bg-card,#fef2f2);border-radius:10px">
-              <div style="font-size:32px;font-weight:700;color:#dc2626">5</div>
+              <div style="font-size:32px;font-weight:700;color:#dc2626">0</div>
               <div style="font-size:13px;color:#dc2626;margin-top:4px">❌ 不建議</div>
             </div>
           </div>
@@ -1555,11 +1583,7 @@ const OFFICE_CONFIG = {
             <table>
               <thead><tr><th>品類</th><th>評估件數</th><th>推薦率</th><th>平均毛利率</th><th>趨勢</th></tr></thead>
               <tbody>
-                <tr><td>寵物用品</td><td>8</td><td>75%</td><td>42%</td><td style="color:#059669">↑ 上升</td></tr>
-                <tr><td>戶外露營</td><td>6</td><td>67%</td><td>38%</td><td style="color:#059669">↑ 上升</td></tr>
-                <tr><td>居家生活</td><td>7</td><td>57%</td><td>35%</td><td style="color:#6b7280">→ 持平</td></tr>
-                <tr><td>保健食品</td><td>4</td><td>50%</td><td>33%</td><td style="color:#6b7280">→ 持平</td></tr>
-                <tr><td>3C 配件</td><td>3</td><td>33%</td><td>28%</td><td style="color:#dc2626">↓ 下滑</td></tr>
+                <tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:20px">暫無資料</td></tr>
               </tbody>
             </table>
           </div>
@@ -1570,10 +1594,7 @@ const OFFICE_CONFIG = {
             <table>
               <thead><tr><th>商品名稱</th><th>品類</th><th>預估毛利率</th><th>建議首批量</th><th>狀態</th></tr></thead>
               <tbody>
-                <tr><td>寵物自動飲水機</td><td>寵物</td><td>42%</td><td>200 件</td><td><span style="background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:999px;font-size:12px">採購確認</span></td></tr>
-                <tr><td>露營折疊燈</td><td>戶外</td><td>38%</td><td>150 件</td><td><span style="background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:999px;font-size:12px">採購確認</span></td></tr>
-                <tr><td>珪藻土浴墊</td><td>居家</td><td>35%</td><td>300 件</td><td><span style="background:#fef3c7;color:#92400e;padding:2px 10px;border-radius:999px;font-size:12px">待採購確認</span></td></tr>
-                <tr><td>機能保健食品</td><td>保健</td><td>33%</td><td>100 件</td><td><span style="background:#fef3c7;color:#92400e;padding:2px 10px;border-radius:999px;font-size:12px">待採購確認</span></td></tr>
+                <tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:20px">暫無資料</td></tr>
               </tbody>
             </table>
           </div>
