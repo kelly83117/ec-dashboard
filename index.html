@@ -7971,7 +7971,8 @@ const App = {
             if (data.ali && data.ali.length > 0) {
               aliEl.innerHTML = data.ali.map(i => renderItem(i, '#e8320a')).join('');
             } else {
-              aliEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px">查無結果，請換張圖片試試</div>';
+              const aliUrl = data.aliSearchUrl || ('https://s.1688.com/selloffer/offerlist.htm?keywords=' + encodeURIComponent(data.keyword || ''));
+              aliEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0">自動搜尋受限，<a href="' + aliUrl + '" target="_blank" style="color:#e8320a;font-weight:600;text-decoration:none">點此在 1688 搜尋「' + (data.keyword || '') + '」↗</a></div>';
             }
           }
         }
@@ -7980,7 +7981,8 @@ const App = {
             if (data.shopee && data.shopee.length > 0) {
               shopeeEl.innerHTML = data.shopee.map(i => renderItem(i, '#ee4d2d')).join('');
             } else {
-              shopeeEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px">查無結果，請換張圖片試試</div>';
+              const shopeeUrl = data.shopeeSearchUrl || ('https://shopee.tw/search?keyword=' + encodeURIComponent(data.keyword || ''));
+              shopeeEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0">自動搜尋受限，<a href="' + shopeeUrl + '" target="_blank" style="color:#ee4d2d;font-weight:600;text-decoration:none">點此在蝦皮搜尋「' + (data.keyword || '') + '」↗</a></div>';
             }
           }
         }
