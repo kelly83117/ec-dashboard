@@ -10107,6 +10107,12 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <div class="ucard-sub">.xlsx</div>
           </div>
         </label>
+        <div style="margin-top:4px">
+          <div style="font-size:11px;color:#9ca3af;font-weight:700;margin-bottom:4px;padding-left:2px">廣告群組（可多檔，選填）</div>
+          <div id="upm-groupads-list" style="display:flex;flex-direction:column;gap:6px"></div>
+          <input type="file" id="upm-groupads-input" accept=".xlsx,.xls" style="display:none" onchange="onGlobalFile(event,'groupads')">
+          <button onclick="document.getElementById('upm-groupads-input').click()" style="margin-top:6px;width:100%;border:1.5px dashed #d1d5db;border-radius:9px;padding:8px;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600" onmouseover="this.style.borderColor='#5b5fcf';this.style.color='#5b5fcf'" onmouseout="this.style.borderColor='#d1d5db';this.style.color='#6b7280'">＋ 新增廣告群組</button>
+        </div>
       </div>
       <div class="ana-modal-ftr" style="justify-content:space-between;align-items:center">
         <span style="font-size:12px;color:#9ca3af">上傳莫筆克＋廣告報表後可產生</span>
@@ -10151,7 +10157,7 @@ const GROWTH_TAGS=[
 ];
 const state={};
 const _initNow=new Date();const _initCurMonth=`${_initNow.getFullYear()}/${String(_initNow.getMonth()+1).padStart(2,'0')}`;
-SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawMap:{},curMonth:_initCurMonth,curHalf:'first',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
+SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_initCurMonth,curHalf:'first',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
 let globalMap={};
 let curShop='總表';
 let openPopup=null;
@@ -10662,9 +10668,46 @@ function onFile(e,shop,type){
       }catch(err){markCard(shop,'selads','❌','讀取失敗','err');}
       setSpin(shop,false);checkReady(shop);
     };r.readAsBinaryString(file);
+  }else if(type==='groupads'){
+    const r=new FileReader();
+    r.onload=ev=>{
+      try{
+        const wb=XLSX.read(ev.target.result,{type:'binary'});
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+        if(!state[shop].rawGroupAdsList)state[shop].rawGroupAdsList=[];
+        state[shop].rawGroupAdsList.push({name:file.name,rows});
+        saveGroupAdsMeta(shop);
+      }catch(err){alert('讀取失敗：'+file.name);}
+      setSpin(shop,false);checkReady(shop);
+    };r.readAsBinaryString(file);
   }
 }
 function fmKey(shop,type){const s=state[shop]||{};return`ec|filemeta|${shop}|${s.curMonth||''}|${s.curHalf||''}|${type}`;}
+function renderGroupAdsCards(shop){
+  const list=document.getElementById('upm-groupads-list');if(!list)return;
+  const arr=state[shop]?.rawGroupAdsList||[];
+  if(!arr.length){list.innerHTML='';return;}
+  list.innerHTML=arr.map((g,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;border:1.5px solid #10b981;border-radius:9px;padding:9px 14px;background:#f0fdf4">
+      <span style="font-size:17px">✅</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:#065f46;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.name}</div>
+        <div style="font-size:11px;color:#9ca3af">${g.rows.length} 筆</div>
+      </div>
+      <button onclick="removeGroupAds('${shop}',${i})" style="background:none;border:none;cursor:pointer;font-size:17px;color:#ef4444;flex-shrink:0" title="刪除">🗑️</button>
+    </div>`).join('');
+}
+function removeGroupAds(shop,idx){
+  const arr=state[shop]?.rawGroupAdsList||[];
+  arr.splice(idx,1);
+  state[shop].rawGroupAdsList=arr;
+  saveGroupAdsMeta(shop);
+  renderGroupAdsCards(shop);
+}
+function saveGroupAdsMeta(shop){
+  const arr=state[shop]?.rawGroupAdsList||[];
+  try{localStorage.setItem(fmKey(shop,'groupads'),JSON.stringify(arr.map(g=>({name:g.name}))));}catch{}
+}
 function parseAdsCsv(text){
   const lines=text.split('\n');
   let hi=lines.findIndex(l=>l.includes('廣告名稱')&&l.includes('花費'));if(hi<0)hi=7;
@@ -10749,6 +10792,15 @@ function findUnmatchedAds(shop){
       if(!sidNames[sid]){const n=(r['商品名稱']||r['名稱']||'').trim();if(n)sidNames[sid]=n;}
     }
   });
+  // 合併廣告群組
+  (s.rawGroupAdsList||[]).forEach(g=>(g.rows||[]).forEach(r=>{
+    const sid=(r['商品 ID']||r['商品ID']||'').trim();
+    const spend=num(r['花費']||r['廣告費']||0);
+    if(sid&&sid!=='-'){
+      if(spend>0)adsById[sid]=(adsById[sid]||0)+spend;
+      if(!sidNames[sid]){const n=(r['商品名稱']||r['名稱']||'').trim();if(n)sidNames[sid]=n;}
+    }
+  }));
   const pm=s.rawMap||{};
   // 建立 adsByCode 與 sidsForCode
   const adsByCode={};const sidsForCode={};const nameForCode={};
@@ -11007,6 +11059,12 @@ function buildShop(shop,days){
     const spend=num(r['花費']||r['廣告費']||0);
     if(sid&&sid!=='-'&&spend>0)adsById[sid]=(adsById[sid]||0)+spend;
   });
+  // 合併廣告群組
+  (s.rawGroupAdsList||[]).forEach(g=>(g.rows||[]).forEach(r=>{
+    const sid=(r['商品 ID']||r['商品ID']||'').trim();
+    const spend=num(r['花費']||r['廣告費']||0);
+    if(sid&&sid!=='-'&&spend>0)adsById[sid]=(adsById[sid]||0)+spend;
+  }));
 
   const pm=s.rawMap||{};const adsByCode={};const directROIByCode={};const roiByCode={};const clicksByCode={};const sidsForCode={};const nameForCode={};
   Object.entries(pm).forEach(([code,entry])=>{
@@ -11196,6 +11254,7 @@ function openUploadModal(){
   document.getElementById('upm-selads-del').style.opacity=seladsOk?'1':'0.35';
   document.getElementById('upm-selads-del').style.pointerEvents=seladsOk?'':'none';
   document.getElementById('upm-gen-btn').disabled=!(mobicOk&&adsOk);
+  renderGroupAdsCards(shop);
   ov.classList.add('open');
 }
 function closeUploadModal(){document.getElementById('upload-modal-overlay')?.classList.remove('open');}
@@ -11335,6 +11394,9 @@ function onGlobalFile(event,type){
         document.getElementById('upm-selads-title').textContent=ok?'選品廣告已載入':'選品廣告清單';
         document.getElementById('upm-selads-status').textContent=ok?'✅ 已載入':'— 選填';
         document.getElementById('upm-selads-status').style.color=ok?'#10b981':'#9ca3af';
+      }else if(type==='groupads'){
+        renderGroupAdsCards(shop);
+        try{document.getElementById('upm-groupads-input').value='';}catch{}
       }
       const s2=state[shop];
       document.getElementById('upm-gen-btn').disabled=!(s2.rawMobic&&s2.rawAds);
