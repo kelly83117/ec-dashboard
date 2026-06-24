@@ -7934,7 +7934,7 @@ const App = {
 
     const statusEl = document.getElementById('img-search-status');
 
-    const getImageUrl = async () => {
+    const uploadAndGetData = async () => {
       if (!currentFile) { showToast('請先上傳圖片', 'error'); return null; }
       if (loading) loading.style.display = 'flex';
       if (loadingText) loadingText.textContent = '上傳圖片中...';
@@ -7945,9 +7945,7 @@ const App = {
         const resp = await fetch('https://ec-image-search.jessica-d31.workers.dev', { method: 'POST', body: fd });
         const data = await resp.json();
         if (loading) loading.style.display = 'none';
-        const url = data.imgbbUrl || data.imageUrl || null;
-        if (statusEl && url) { statusEl.style.display = ''; statusEl.textContent = '圖片網址：' + url; }
-        return url;
+        return data;
       } catch(e) {
         if (loading) loading.style.display = 'none';
         showToast('上傳失敗，請稍後再試', 'error');
@@ -7956,33 +7954,40 @@ const App = {
     };
 
     document.getElementById('btn-search-lens')?.addEventListener('click', async () => {
-      const url = await getImageUrl();
-      if (!url) return;
-      window.open('https://lens.google.com/uploadbyurl?url=' + encodeURIComponent(url), '_blank');
-      if (statusEl) { statusEl.style.display = ''; statusEl.textContent = '✅ Google Lens 已開啟（新分頁）— 可直接看相似商品，包含 1688、蝦皮來源'; }
+      const data = await uploadAndGetData();
+      if (!data) return;
+      if (data.lensUrl) {
+        window.open(data.lensUrl, '_blank');
+        if (statusEl) { statusEl.style.display = ''; statusEl.textContent = '✅ Google Lens 已開啟（新分頁）— 可看相似商品，包含 1688、蝦皮來源'; }
+      } else {
+        showToast('Google Lens 上傳失敗，請稍後再試', 'error');
+      }
     });
 
     document.getElementById('btn-search-1688')?.addEventListener('click', async () => {
-      const url = await getImageUrl();
-      if (!url) return;
-      window.open('https://s.1688.com/youyuan/index.htm?imageAddress=' + encodeURIComponent(url), '_blank');
+      const data = await uploadAndGetData();
+      if (!data) return;
+      const url = data.aliSearchUrl || ('https://s.1688.com/youyuan/index.htm' + (data.imgbbUrl ? '?imageAddress=' + encodeURIComponent(data.imgbbUrl) : ''));
+      window.open(url, '_blank');
       if (statusEl) { statusEl.style.display = ''; statusEl.textContent = '✅ 1688 以圖搜款已開啟（新分頁）'; }
     });
 
     document.getElementById('btn-search-shopee')?.addEventListener('click', async () => {
-      const url = await getImageUrl();
-      if (!url) return;
-      window.open('https://shopee.tw/search?image=' + encodeURIComponent(url), '_blank');
-      if (statusEl) { statusEl.style.display = ''; statusEl.textContent = '✅ 蝦皮以圖搜款已開啟（新分頁）'; }
+      const data = await uploadAndGetData();
+      if (!data) return;
+      window.open('https://shopee.tw/', '_blank');
+      if (statusEl) { statusEl.style.display = ''; statusEl.textContent = '✅ 蝦皮已開啟（新分頁）'; }
     });
 
     document.getElementById('btn-search-both')?.addEventListener('click', async () => {
-      const url = await getImageUrl();
-      if (!url) return;
-      window.open('https://lens.google.com/uploadbyurl?url=' + encodeURIComponent(url), '_blank');
-      window.open('https://s.1688.com/youyuan/index.htm?imageAddress=' + encodeURIComponent(url), '_blank');
-      window.open('https://shopee.tw/search?image=' + encodeURIComponent(url), '_blank');
-      if (statusEl) { statusEl.style.display = ''; statusEl.textContent = '✅ Google Lens、1688、蝦皮 三個搜尋頁已同時開啟'; }
+      const data = await uploadAndGetData();
+      if (!data) return;
+      if (data.lensUrl) window.open(data.lensUrl, '_blank');
+      if (data.aliSearchUrl) window.open(data.aliSearchUrl, '_blank');
+      if (statusEl) {
+        statusEl.style.display = '';
+        statusEl.textContent = data.lensUrl ? '✅ Google Lens + 1688 已同時開啟（新分頁）' : '✅ 1688 已開啟（新分頁）';
+      }
     });
   },
 
