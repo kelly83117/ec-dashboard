@@ -8000,7 +8000,7 @@ const App = {
         const data = await resp.json();
         if (loading) loading.style.display = 'none';
         if (data.imgbbUrl) {
-          window.open('https://www.google.com/searchbyimage?image_url=' + encodeURIComponent(data.imgbbUrl) + '&safe=off', '_blank');
+          window.open('https://yandex.com/images/search?url=' + encodeURIComponent(data.imgbbUrl) + '&rpt=imageview', '_blank');
         } else {
           showToast('上傳失敗，請稍後再試', 'error');
         }
