@@ -7859,7 +7859,7 @@ const App = {
   renderImgSearchTab() {
     return `
       <div class="table-card" style="margin-bottom:16px">
-        <div class="table-card-header"><h3>以圖搜貨</h3></div>
+        <div class="table-card-header"><h3>以圖搜貨</h3><p>上傳圖片後，自動開啟 1688 與蝦皮搜尋頁面，Ctrl+V 貼上即可搜尋</p></div>
         <div style="padding:14px;display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
           <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
             <div id="img-drop-zone" style="border:2px dashed var(--border);border-radius:8px;padding:14px 20px;text-align:center;cursor:pointer;width:140px;box-sizing:border-box">
@@ -7872,24 +7872,25 @@ const App = {
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:8px;justify-content:center">
-            <button id="btn-search-1688" style="padding:8px 18px;background:#10b981;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:500">🔍 開始比價</button>
+            <button id="btn-search-1688" style="padding:8px 18px;background:#e8320a;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:500">🔍 搜尋 1688</button>
+            <button id="btn-search-shopee" style="padding:8px 18px;background:#ee4d2d;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:500">🛒 搜尋蝦皮</button>
+            <button id="btn-search-both" style="padding:8px 18px;background:#10b981;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:500">⚡ 同時搜尋兩者</button>
             <button id="btn-clear-img" style="padding:8px 18px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">清除</button>
-            <button id="btn-search-shopee" style="display:none"></button>
+          </div>
+          <div id="img-search-hint" style="display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 16px;font-size:13px;line-height:1.8;color:#166534">
+            ✅ 圖片已複製到剪貼簿！<br>
+            搜尋頁面已開啟，請在搜尋框按 <strong>Ctrl+V</strong> 貼上圖片
           </div>
         </div>
-        <div id="img-search-loading" style="display:none;text-align:center;padding:16px;color:var(--text-muted);font-size:13px">搜尋中...</div>
-        <div id="img-search-results" style="padding:0 14px 14px"></div>
       </div>`;
   },
 
   bindImgSearch() {
-    const WORKER = 'https://ec-image-search.jessica-d31.workers.dev';
     const dropZone = document.getElementById('img-drop-zone');
     const fileInput = document.getElementById('img-file-input');
     const previewWrap = document.getElementById('img-preview-wrap');
     const preview = document.getElementById('img-preview');
-    const loading = document.getElementById('img-search-loading');
-    const results = document.getElementById('img-search-results');
+    const hint = document.getElementById('img-search-hint');
     let currentFile = null;
 
     const showPreview = (file) => {
@@ -7906,52 +7907,38 @@ const App = {
     dropZone?.addEventListener('drop', e => { e.preventDefault(); dropZone.style.borderColor = ''; if (e.dataTransfer.files[0]) showPreview(e.dataTransfer.files[0]); });
 
     document.getElementById('btn-clear-img')?.addEventListener('click', () => {
-      currentFile = null; previewWrap.style.display = 'none'; results.innerHTML = ''; if (fileInput) fileInput.value = '';
+      currentFile = null; previewWrap.style.display = 'none'; if (hint) hint.style.display = 'none'; if (fileInput) fileInput.value = '';
     });
 
-    const renderCards = (items, platform) => {
-      if (!items || items.length === 0) return '<div style="color:var(--text-muted);font-size:13px;padding:10px 0">未找到相似商品</div>';
-      return items.map((item, i) =>
-        '<a href="' + item.url + '" target="_blank" style="display:flex;gap:10px;align-items:center;padding:8px;border:1px solid var(--border);border-radius:8px;text-decoration:none;color:inherit;margin-bottom:8px">' +
-        '<div style="font-size:13px;font-weight:700;color:var(--text-muted);min-width:18px">#' + (i+1) + '</div>' +
-        '<img src="' + item.img + '" style="width:48px;height:48px;object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.style.display=\'none\'">' +
-        '<div style="flex:1;min-width:0">' +
-        '<div style="font-size:12px;line-height:1.4;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + escapeHtml(item.title) + '</div>' +
-        '<div style="font-size:13px;font-weight:600;color:' + (platform === '1688' ? '#e8320a' : '#ee4d2d') + '">' + escapeHtml(item.price || item.priceText) + '</div>' +
-        (item.sold ? '<div style="font-size:11px;color:var(--text-muted)">已售 ' + item.sold + '</div>' : '') +
-        '</div></a>'
-      ).join('');
-    };
-
-    const doSearchBoth = async () => {
+    const copyAndOpen = async (urls) => {
       if (!currentFile) { showToast('請先上傳圖片', 'error'); return; }
-      loading.style.display = ''; results.innerHTML = '';
       try {
-        const form1 = new FormData(); form1.append('image', currentFile, currentFile.name);
-        const form2 = new FormData(); form2.append('image', currentFile, currentFile.name);
-        const [r1, r2] = await Promise.all([
-          fetch(WORKER + '?target=1688', { method: 'POST', body: form1 }).then(r => r.json()).catch(() => ({ items: [] })),
-          fetch(WORKER + '?target=shopee', { method: 'POST', body: form2 }).then(r => r.json()).catch(() => ({ items: [] }))
-        ]);
-        loading.style.display = 'none';
-        results.innerHTML =
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px">' +
-          '<div>' +
-          '<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#e8320a">1688 價格最低前三</div>' +
-          renderCards(r1.items, '1688') +
-          '</div>' +
-          '<div>' +
-          '<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#ee4d2d">蝦皮熱銷前三</div>' +
-          renderCards(r2.items, 'shopee') +
-          '</div></div>';
-      } catch (e) {
-        loading.style.display = 'none';
-        results.innerHTML = '<div style="color:#dc2626;font-size:13px">搜尋失敗：' + e.message + '</div>';
+        const bitmap = await createImageBitmap(currentFile);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width; canvas.height = bitmap.height;
+        canvas.getContext('2d').drawImage(bitmap, 0, 0);
+        canvas.toBlob(async (blob) => {
+          try {
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+            showToast('圖片已複製！請在搜尋頁按 Ctrl+V', 'success');
+          } catch(e) {
+            showToast('已開啟搜尋頁面，請手動貼上圖片', '');
+          }
+          urls.forEach(u => window.open(u, '_blank'));
+          if (hint) hint.style.display = '';
+        }, 'image/png');
+      } catch(e) {
+        urls.forEach(u => window.open(u, '_blank'));
+        if (hint) hint.style.display = '';
       }
     };
 
-    document.getElementById('btn-search-1688')?.addEventListener('click', doSearchBoth);
-    document.getElementById('btn-search-shopee')?.addEventListener('click', doSearchBoth);
+    document.getElementById('btn-search-1688')?.addEventListener('click', () =>
+      copyAndOpen(['https://s.1688.com/youyuan/index.htm']));
+    document.getElementById('btn-search-shopee')?.addEventListener('click', () =>
+      copyAndOpen(['https://shopee.tw/']));
+    document.getElementById('btn-search-both')?.addEventListener('click', () =>
+      copyAndOpen(['https://s.1688.com/youyuan/index.htm', 'https://shopee.tw/']));
   },
 
   renderAiSelectTab(deptId, color, dept) {
