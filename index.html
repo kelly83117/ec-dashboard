@@ -1594,6 +1594,11 @@ const OFFICE_CONFIG = {
     tabs: [
       { key: 'ai-select', title: '🤖 AI 選品', dynamic: 'ai-select' },
       { key: 'shopee-trend', title: '🔥 蝦皮熱搜榜', dynamic: 'shopee-trend' },
+      { key: 'supplier', title: '🏭 供應商管理', dynamic: 'supplier-mgmt' },
+      { key: 'profit-calc', title: '💰 毛利試算機', dynamic: 'profit-calc' },
+      { key: 'kanban', title: '📋 選品任務板', dynamic: 'product-kanban' },
+      { key: 'competitor', title: '📈 競品追蹤', dynamic: 'competitor-track' },
+      { key: 'launch', title: '🗓️ 上架計劃表', dynamic: 'launch-plan' },
       { key: 'overview', title: '📊 選品總覽', customHtml: `
         <div class="table-card" style="margin-bottom:16px">
           <div class="table-card-header"><h3>本月選品狀態</h3></div>
@@ -6719,6 +6724,16 @@ const App = {
       this.bindImgSearch();
     } else if (tab?.dynamic === 'shopee-trend') {
       this.bindShopeeTrend();
+    } else if (tab?.dynamic === 'supplier-mgmt') {
+      this.bindSupplierTab();
+    } else if (tab?.dynamic === 'profit-calc') {
+      this.bindProfitCalcTab();
+    } else if (tab?.dynamic === 'product-kanban') {
+      this.bindKanbanTab();
+    } else if (tab?.dynamic === 'competitor-track') {
+      this.bindCompetitorTab();
+    } else if (tab?.dynamic === 'launch-plan') {
+      this.bindLaunchPlanTab();
     }
   },
 
@@ -7974,6 +7989,410 @@ const App = {
     };
   },
 
+  /* ===== 供應商管理 ===== */
+  renderSupplierTab() {
+    const suppliers = JSON.parse(localStorage.getItem('ec_d3_suppliers') || '[]');
+    const sc = { '合作中': '#d1fae5,#065f46', '洽談中': '#fef3c7,#92400e', '暫停': '#fee2e2,#991b1b', '備選': '#eff6ff,#1e40af' };
+    const rows = suppliers.length === 0
+      ? '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:24px">尚無資料，點擊「＋ 新增」開始建立</td></tr>'
+      : suppliers.map((s, i) => {
+          const [bg, fc] = (sc[s.status] || '#f3f4f6,#374151').split(',');
+          return `<tr>
+            <td style="font-weight:600">${escapeHtml(s.name)}</td>
+            <td>${escapeHtml(s.cat||'')}</td>
+            <td>${escapeHtml(s.contact||'')}</td>
+            <td>${escapeHtml(s.phone||'')}</td>
+            <td>${escapeHtml(s.moq||'')}</td>
+            <td>${escapeHtml(s.price||'')}</td>
+            <td><span style="background:${bg};color:${fc};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${escapeHtml(s.status||'')}</span></td>
+            <td style="color:var(--text-muted);max-width:160px">${escapeHtml(s.note||'')}</td>
+            <td><button class="d3-sup-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button></td>
+          </tr>`;
+        }).join('');
+    return `<div class="table-card">
+      <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><h3>🏭 供應商管理</h3><p>記錄合作或洽談中的供應商資訊</p></div>
+        <button id="d3-sup-add" style="padding:7px 16px;background:#ff5722;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+      </div>
+      <div id="d3-sup-form" style="display:none;padding:16px;background:#fff8f5;border-bottom:1px solid var(--border);display:none">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
+          <input id="d3-sup-name" placeholder="供應商名稱 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="d3-sup-cat" placeholder="主要品類" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="d3-sup-contact" placeholder="聯絡人" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+          <input id="d3-sup-phone" placeholder="電話 / LINE" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="d3-sup-moq" placeholder="最低起訂量" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="d3-sup-price" placeholder="報價範圍" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <select id="d3-sup-status" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <option>合作中</option><option>洽談中</option><option>備選</option><option>暫停</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px">
+          <input id="d3-sup-note" placeholder="備註" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <button id="d3-sup-save" style="padding:8px 18px;background:#ff5722;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+          <button id="d3-sup-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>供應商</th><th>品類</th><th>聯絡人</th><th>電話/LINE</th><th>最低起訂</th><th>報價範圍</th><th>狀態</th><th>備註</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`;
+  },
+  bindSupplierTab() {
+    const form = document.getElementById('d3-sup-form');
+    document.getElementById('d3-sup-add')?.addEventListener('click', () => {
+      form.style.display = form.style.display === 'none' ? '' : 'none';
+    });
+    document.getElementById('d3-sup-cancel')?.addEventListener('click', () => { form.style.display = 'none'; });
+    document.getElementById('d3-sup-save')?.addEventListener('click', () => {
+      const name = document.getElementById('d3-sup-name')?.value.trim();
+      if (!name) { alert('請填寫供應商名稱'); return; }
+      const list = JSON.parse(localStorage.getItem('ec_d3_suppliers') || '[]');
+      list.push({ name, cat: document.getElementById('d3-sup-cat')?.value.trim(), contact: document.getElementById('d3-sup-contact')?.value.trim(), phone: document.getElementById('d3-sup-phone')?.value.trim(), moq: document.getElementById('d3-sup-moq')?.value.trim(), price: document.getElementById('d3-sup-price')?.value.trim(), status: document.getElementById('d3-sup-status')?.value, note: document.getElementById('d3-sup-note')?.value.trim() });
+      localStorage.setItem('ec_d3_suppliers', JSON.stringify(list));
+      this.render();
+    });
+    document.querySelectorAll('.d3-sup-del').forEach(btn => btn.addEventListener('click', () => {
+      const list = JSON.parse(localStorage.getItem('ec_d3_suppliers') || '[]');
+      list.splice(+btn.dataset.i, 1);
+      localStorage.setItem('ec_d3_suppliers', JSON.stringify(list));
+      this.render();
+    }));
+  },
+
+  /* ===== 毛利試算機 ===== */
+  renderProfitCalcTab() {
+    const hist = JSON.parse(localStorage.getItem('ec_d3_calc_hist') || '[]');
+    const histRows = hist.length === 0
+      ? '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:16px">尚無試算紀錄</td></tr>'
+      : hist.slice().reverse().map((h, i) => `<tr>
+          <td style="font-weight:600">${escapeHtml(h.name||'—')}</td>
+          <td>NT$ ${Number(h.cost).toLocaleString()}</td>
+          <td>NT$ ${Number(h.price).toLocaleString()}</td>
+          <td style="color:${h.margin>=35?'#059669':h.margin>=20?'#d97706':'#dc2626'};font-weight:700">${h.margin}%</td>
+          <td>NT$ ${Number(h.profit).toLocaleString()}</td>
+          <td><button class="d3-calc-del" data-i="${hist.length-1-i}" style="padding:2px 8px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button></td>
+        </tr>`).join('');
+    return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+      <div class="table-card">
+        <div class="table-card-header"><h3>💰 毛利試算機</h3><p>輸入成本與售價，即時計算毛利率</p></div>
+        <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
+          <div>
+            <label style="font-size:12px;color:var(--text-muted);font-weight:600;display:block;margin-bottom:5px">商品名稱（選填）</label>
+            <input id="d3-calc-name" placeholder="例：藍牙耳機" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:12px;color:var(--text-muted);font-weight:600;display:block;margin-bottom:5px">進貨成本 (NT$) *</label>
+              <input id="d3-calc-cost" type="number" placeholder="0" min="0" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text-muted);font-weight:600;display:block;margin-bottom:5px">建議售價 (NT$) *</label>
+              <input id="d3-calc-price" type="number" placeholder="0" min="0" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:12px;color:var(--text-muted);font-weight:600;display:block;margin-bottom:5px">平台費率 (%)</label>
+              <input id="d3-calc-fee" type="number" placeholder="5" min="0" max="100" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text-muted);font-weight:600;display:block;margin-bottom:5px">運費 + 雜費 (NT$)</label>
+              <input id="d3-calc-ship" type="number" placeholder="0" min="0" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
+            </div>
+          </div>
+          <div id="d3-calc-result" style="display:none;background:linear-gradient(135deg,#fff3ef,#fff8f5);border-radius:10px;padding:16px;border:1px solid #fdd0b8">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;text-align:center">
+              <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:4px">毛利潤</div><div id="d3-calc-r-profit" style="font-size:22px;font-weight:800;color:#ff5722"></div></div>
+              <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:4px">毛利率</div><div id="d3-calc-r-margin" style="font-size:22px;font-weight:800"></div></div>
+              <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:4px">損益兩平售價</div><div id="d3-calc-r-break" style="font-size:22px;font-weight:800;color:#6b7280"></div></div>
+            </div>
+            <div id="d3-calc-r-judge" style="margin-top:12px;text-align:center;font-size:13px;font-weight:600;padding:6px 12px;border-radius:6px"></div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="d3-calc-go" style="flex:1;padding:10px;background:#ff5722;color:white;border:0;border-radius:7px;font-size:14px;font-weight:700;cursor:pointer">計算</button>
+            <button id="d3-calc-save" style="display:none;padding:10px 16px;background:none;border:1px solid #ff5722;color:#ff5722;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">儲存紀錄</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-card">
+        <div class="table-card-header"><h3>📂 試算紀錄</h3></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>商品</th><th>進貨成本</th><th>售價</th><th>毛利率</th><th>毛利潤</th><th></th></tr></thead>
+          <tbody id="d3-calc-hist-tbody">${histRows}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+  },
+  bindProfitCalcTab() {
+    let lastResult = null;
+    const calc = () => {
+      const cost = parseFloat(document.getElementById('d3-calc-cost')?.value) || 0;
+      const price = parseFloat(document.getElementById('d3-calc-price')?.value) || 0;
+      const fee = parseFloat(document.getElementById('d3-calc-fee')?.value) || 0;
+      const ship = parseFloat(document.getElementById('d3-calc-ship')?.value) || 0;
+      if (!cost || !price) return;
+      const totalCost = cost + ship + price * (fee / 100);
+      const profit = price - totalCost;
+      const margin = price > 0 ? Math.round((profit / price) * 1000) / 10 : 0;
+      const breakeven = Math.ceil(totalCost);
+      const resEl = document.getElementById('d3-calc-result');
+      const saveBtn = document.getElementById('d3-calc-save');
+      if (resEl) resEl.style.display = '';
+      if (saveBtn) saveBtn.style.display = '';
+      document.getElementById('d3-calc-r-profit').textContent = `NT$ ${profit.toLocaleString('zh-TW', {maximumFractionDigits:0})}`;
+      const marginEl = document.getElementById('d3-calc-r-margin');
+      if (marginEl) { marginEl.textContent = `${margin}%`; marginEl.style.color = margin >= 35 ? '#059669' : margin >= 20 ? '#d97706' : '#dc2626'; }
+      document.getElementById('d3-calc-r-break').textContent = `NT$ ${breakeven.toLocaleString()}`;
+      const judge = document.getElementById('d3-calc-r-judge');
+      if (judge) {
+        if (margin >= 35) { judge.textContent = '✅ 優良 — 毛利率達標（≥35%）'; judge.style.cssText = 'background:#d1fae5;color:#065f46;margin-top:12px;text-align:center;font-size:13px;font-weight:600;padding:6px 12px;border-radius:6px'; }
+        else if (margin >= 20) { judge.textContent = '⚠️ 尚可 — 毛利率偏低，建議議價或調售價'; judge.style.cssText = 'background:#fef3c7;color:#92400e;margin-top:12px;text-align:center;font-size:13px;font-weight:600;padding:6px 12px;border-radius:6px'; }
+        else { judge.textContent = '❌ 危險 — 毛利率過低，不建議進貨'; judge.style.cssText = 'background:#fee2e2;color:#991b1b;margin-top:12px;text-align:center;font-size:13px;font-weight:600;padding:6px 12px;border-radius:6px'; }
+      }
+      lastResult = { name: document.getElementById('d3-calc-name')?.value.trim(), cost, price, fee, ship, profit: Math.round(profit), margin };
+    };
+    document.getElementById('d3-calc-go')?.addEventListener('click', calc);
+    ['d3-calc-cost','d3-calc-price','d3-calc-fee','d3-calc-ship'].forEach(id => document.getElementById(id)?.addEventListener('input', () => { if (lastResult) calc(); }));
+    document.getElementById('d3-calc-save')?.addEventListener('click', () => {
+      if (!lastResult) return;
+      const hist = JSON.parse(localStorage.getItem('ec_d3_calc_hist') || '[]');
+      hist.push(lastResult);
+      localStorage.setItem('ec_d3_calc_hist', JSON.stringify(hist));
+      this.render();
+    });
+    document.querySelectorAll('.d3-calc-del').forEach(btn => btn.addEventListener('click', () => {
+      const hist = JSON.parse(localStorage.getItem('ec_d3_calc_hist') || '[]');
+      hist.splice(+btn.dataset.i, 1);
+      localStorage.setItem('ec_d3_calc_hist', JSON.stringify(hist));
+      this.render();
+    }));
+  },
+
+  /* ===== 選品任務板 ===== */
+  renderKanbanTab() {
+    const data = JSON.parse(localStorage.getItem('ec_d3_kanban') || '[]');
+    const cols = ['待評估', '評估中', '已推薦', '結案'];
+    const colColors = { '待評估': '#eff6ff,#1e40af,#3b82f6', '評估中': '#fef3c7,#92400e,#f59e0b', '已推薦': '#d1fae5,#065f46,#10b981', '結案': '#f3f4f6,#374151,#9ca3af' };
+    const colHtml = cols.map(col => {
+      const items = data.filter(d => d.col === col);
+      const [bg, fc, bc] = colColors[col].split(',');
+      return `<div style="flex:1;min-width:200px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:13px;font-weight:700;color:${fc};background:${bg};padding:4px 12px;border-radius:999px">${col} <span style="opacity:.7">${items.length}</span></span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;min-height:60px" id="d3-kb-col-${col}">
+          ${items.map((item, idx) => {
+            const realIdx = data.indexOf(item);
+            const colIdx = cols.indexOf(col);
+            return `<div style="background:white;border-radius:9px;padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,.08);border-left:3px solid ${bc}">
+              <div style="font-weight:600;font-size:13px;margin-bottom:4px">${escapeHtml(item.name)}</div>
+              <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(item.cat||'')}${item.margin ? ' · 預估毛利 ' + item.margin + '%' : ''}</div>
+              <div style="margin-top:8px;display:flex;gap:6px">
+                ${colIdx > 0 ? `<button class="d3-kb-prev" data-i="${realIdx}" style="padding:2px 8px;border:1px solid var(--border);border-radius:5px;font-size:11px;cursor:pointer;background:white">← 退回</button>` : ''}
+                ${colIdx < 3 ? `<button class="d3-kb-next" data-i="${realIdx}" style="padding:2px 8px;background:${bc};color:white;border:0;border-radius:5px;font-size:11px;cursor:pointer">推進 →</button>` : ''}
+                <button class="d3-kb-del" data-i="${realIdx}" style="padding:2px 8px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:11px;cursor:pointer;margin-left:auto">✕</button>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="table-card" style="margin-bottom:16px">
+      <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><h3>📋 選品任務板</h3><p>拖曳商品跨欄，追蹤每個選品的評估進度</p></div>
+        <button id="d3-kb-add" style="padding:7px 16px;background:#ff5722;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增商品</button>
+      </div>
+      <div id="d3-kb-form" style="display:none;padding:14px 20px;background:#fff8f5;border-bottom:1px solid var(--border)">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <input id="d3-kb-name" placeholder="商品名稱 *" style="flex:2;min-width:140px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="d3-kb-cat" placeholder="品類" style="flex:1;min-width:100px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="d3-kb-margin" type="number" placeholder="預估毛利率%" style="flex:1;min-width:100px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <select id="d3-kb-col" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            ${cols.map(c => `<option>${c}</option>`).join('')}
+          </select>
+          <button id="d3-kb-save" style="padding:8px 16px;background:#ff5722;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">新增</button>
+          <button id="d3-kb-cancel" style="padding:8px 12px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+        </div>
+      </div>
+      <div style="padding:16px;display:flex;gap:12px;overflow-x:auto">${colHtml}</div>
+    </div>`;
+  },
+  bindKanbanTab() {
+    const cols = ['待評估', '評估中', '已推薦', '結案'];
+    const form = document.getElementById('d3-kb-form');
+    document.getElementById('d3-kb-add')?.addEventListener('click', () => { form.style.display = form.style.display === 'none' ? '' : 'none'; });
+    document.getElementById('d3-kb-cancel')?.addEventListener('click', () => { form.style.display = 'none'; });
+    document.getElementById('d3-kb-save')?.addEventListener('click', () => {
+      const name = document.getElementById('d3-kb-name')?.value.trim();
+      if (!name) { alert('請填寫商品名稱'); return; }
+      const list = JSON.parse(localStorage.getItem('ec_d3_kanban') || '[]');
+      list.push({ name, cat: document.getElementById('d3-kb-cat')?.value.trim(), margin: document.getElementById('d3-kb-margin')?.value.trim(), col: document.getElementById('d3-kb-col')?.value });
+      localStorage.setItem('ec_d3_kanban', JSON.stringify(list));
+      this.render();
+    });
+    document.querySelectorAll('.d3-kb-next').forEach(btn => btn.addEventListener('click', () => {
+      const list = JSON.parse(localStorage.getItem('ec_d3_kanban') || '[]');
+      const i = +btn.dataset.i; const ci = cols.indexOf(list[i]?.col);
+      if (ci < 3) { list[i].col = cols[ci + 1]; localStorage.setItem('ec_d3_kanban', JSON.stringify(list)); this.render(); }
+    }));
+    document.querySelectorAll('.d3-kb-prev').forEach(btn => btn.addEventListener('click', () => {
+      const list = JSON.parse(localStorage.getItem('ec_d3_kanban') || '[]');
+      const i = +btn.dataset.i; const ci = cols.indexOf(list[i]?.col);
+      if (ci > 0) { list[i].col = cols[ci - 1]; localStorage.setItem('ec_d3_kanban', JSON.stringify(list)); this.render(); }
+    }));
+    document.querySelectorAll('.d3-kb-del').forEach(btn => btn.addEventListener('click', () => {
+      const list = JSON.parse(localStorage.getItem('ec_d3_kanban') || '[]');
+      list.splice(+btn.dataset.i, 1);
+      localStorage.setItem('ec_d3_kanban', JSON.stringify(list));
+      this.render();
+    }));
+  },
+
+  /* ===== 競品追蹤 ===== */
+  renderCompetitorTab() {
+    const data = JSON.parse(localStorage.getItem('ec_d3_competitors') || '[]');
+    const rows = data.length === 0
+      ? '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:24px">尚無資料</td></tr>'
+      : data.map((d, i) => {
+          const diff = d.ourPrice && d.compPrice ? Number(d.ourPrice) - Number(d.compPrice) : null;
+          const diffStr = diff === null ? '—' : diff > 0 ? `<span style="color:#dc2626">貴 ${diff.toLocaleString()}</span>` : diff < 0 ? `<span style="color:#059669">便宜 ${Math.abs(diff).toLocaleString()}</span>` : '相同';
+          return `<tr>
+            <td style="font-weight:600">${escapeHtml(d.name)}</td>
+            <td>NT$ ${Number(d.ourPrice||0).toLocaleString()}</td>
+            <td>${escapeHtml(d.compName||'')}</td>
+            <td>${escapeHtml(d.platform||'')}</td>
+            <td>NT$ ${Number(d.compPrice||0).toLocaleString()}</td>
+            <td>${diffStr}</td>
+            <td style="color:var(--text-muted)">${escapeHtml(d.updated||'')}</td>
+            <td><button class="d3-comp-del" data-i="${i}" style="padding:2px 8px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button></td>
+          </tr>`;
+        }).join('');
+    return `<div class="table-card">
+      <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><h3>📈 競品追蹤</h3><p>追蹤各平台競品售價，掌握市場定價區間</p></div>
+        <button id="d3-comp-add" style="padding:7px 16px;background:#ff5722;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+      </div>
+      <div id="d3-comp-form" style="display:none;padding:14px 20px;background:#fff8f5;border-bottom:1px solid var(--border)">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
+          <input id="d3-comp-name" placeholder="我方商品名稱 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="d3-comp-our" type="number" placeholder="我方售價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="d3-comp-cname" placeholder="競品名稱/店家" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px">
+          <select id="d3-comp-platform" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <option>蝦皮</option><option>momo</option><option>PChome</option><option>露天</option><option>Yahoo</option><option>其他</option>
+          </select>
+          <input id="d3-comp-cprice" type="number" placeholder="競品售價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="d3-comp-updated" placeholder="更新日期" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <div style="display:flex;gap:8px">
+            <button id="d3-comp-save" style="flex:1;padding:8px;background:#ff5722;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+            <button id="d3-comp-cancel" style="padding:8px 12px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>我方商品</th><th>我方售價</th><th>競品名稱</th><th>平台</th><th>競品售價</th><th>價差</th><th>更新日</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`;
+  },
+  bindCompetitorTab() {
+    const form = document.getElementById('d3-comp-form');
+    document.getElementById('d3-comp-add')?.addEventListener('click', () => { form.style.display = form.style.display === 'none' ? '' : 'none'; });
+    document.getElementById('d3-comp-cancel')?.addEventListener('click', () => { form.style.display = 'none'; });
+    document.getElementById('d3-comp-save')?.addEventListener('click', () => {
+      const name = document.getElementById('d3-comp-name')?.value.trim();
+      if (!name) { alert('請填寫商品名稱'); return; }
+      const list = JSON.parse(localStorage.getItem('ec_d3_competitors') || '[]');
+      list.push({ name, ourPrice: document.getElementById('d3-comp-our')?.value, compName: document.getElementById('d3-comp-cname')?.value.trim(), platform: document.getElementById('d3-comp-platform')?.value, compPrice: document.getElementById('d3-comp-cprice')?.value, updated: document.getElementById('d3-comp-updated')?.value.trim() || new Date().toLocaleDateString('zh-TW') });
+      localStorage.setItem('ec_d3_competitors', JSON.stringify(list));
+      this.render();
+    });
+    document.querySelectorAll('.d3-comp-del').forEach(btn => btn.addEventListener('click', () => {
+      const list = JSON.parse(localStorage.getItem('ec_d3_competitors') || '[]');
+      list.splice(+btn.dataset.i, 1);
+      localStorage.setItem('ec_d3_competitors', JSON.stringify(list));
+      this.render();
+    }));
+  },
+
+  /* ===== 上架計劃表 ===== */
+  renderLaunchPlanTab() {
+    const data = JSON.parse(localStorage.getItem('ec_d3_launch') || '[]');
+    const sc = { '規劃中': '#eff6ff,#1e40af', '備貨中': '#fef3c7,#92400e', '已上架': '#d1fae5,#065f46', '延期': '#fee2e2,#991b1b', '取消': '#f3f4f6,#374151' };
+    const today = new Date().toISOString().slice(0,10);
+    const rows = data.length === 0
+      ? '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:24px">尚無資料</td></tr>'
+      : data.map((d, i) => {
+          const [bg, fc] = (sc[d.status] || '#f3f4f6,#374151').split(',');
+          const overdue = d.status !== '已上架' && d.status !== '取消' && d.date && d.date < today;
+          return `<tr style="${overdue ? 'background:#fff5f5' : ''}">
+            <td style="font-weight:600">${escapeHtml(d.name)}</td>
+            <td style="${overdue ? 'color:#dc2626;font-weight:600' : ''}">${escapeHtml(d.date||'—')}${overdue ? ' ⚠️' : ''}</td>
+            <td>${escapeHtml(d.owner||'')}</td>
+            <td><span style="background:${bg};color:${fc};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${escapeHtml(d.status||'')}</span></td>
+            <td style="color:var(--text-muted)">${escapeHtml(d.note||'')}</td>
+            <td>
+              <select class="d3-launch-status" data-i="${i}" style="padding:3px 6px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-family:inherit">
+                ${['規劃中','備貨中','已上架','延期','取消'].map(s => `<option${s===d.status?' selected':''}>${s}</option>`).join('')}
+              </select>
+            </td>
+            <td><button class="d3-launch-del" data-i="${i}" style="padding:2px 8px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button></td>
+          </tr>`;
+        }).join('');
+    return `<div class="table-card">
+      <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><h3>🗓️ 上架計劃表</h3><p>追蹤推薦商品的備貨與上架進度，逾期項目會標紅</p></div>
+        <button id="d3-launch-add" style="padding:7px 16px;background:#ff5722;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+      </div>
+      <div id="d3-launch-form" style="display:none;padding:14px 20px;background:#fff8f5;border-bottom:1px solid var(--border)">
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 2fr auto auto;gap:10px;align-items:center">
+          <input id="d3-launch-name" placeholder="商品名稱 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="d3-launch-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="d3-launch-owner" placeholder="負責人" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <select id="d3-launch-status" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <option>規劃中</option><option>備貨中</option><option>已上架</option><option>延期</option><option>取消</option>
+          </select>
+          <input id="d3-launch-note" placeholder="備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <button id="d3-launch-save" style="padding:8px 16px;background:#ff5722;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">儲存</button>
+          <button id="d3-launch-cancel" style="padding:8px 12px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>商品名稱</th><th>預計上架日</th><th>負責人</th><th>狀態</th><th>備註</th><th>更新狀態</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`;
+  },
+  bindLaunchPlanTab() {
+    const form = document.getElementById('d3-launch-form');
+    document.getElementById('d3-launch-add')?.addEventListener('click', () => { form.style.display = form.style.display === 'none' ? '' : 'none'; });
+    document.getElementById('d3-launch-cancel')?.addEventListener('click', () => { form.style.display = 'none'; });
+    document.getElementById('d3-launch-save')?.addEventListener('click', () => {
+      const name = document.getElementById('d3-launch-name')?.value.trim();
+      if (!name) { alert('請填寫商品名稱'); return; }
+      const list = JSON.parse(localStorage.getItem('ec_d3_launch') || '[]');
+      list.push({ name, date: document.getElementById('d3-launch-date')?.value, owner: document.getElementById('d3-launch-owner')?.value.trim(), status: document.getElementById('d3-launch-status')?.value, note: document.getElementById('d3-launch-note')?.value.trim() });
+      localStorage.setItem('ec_d3_launch', JSON.stringify(list));
+      this.render();
+    });
+    document.querySelectorAll('.d3-launch-status').forEach(sel => sel.addEventListener('change', () => {
+      const list = JSON.parse(localStorage.getItem('ec_d3_launch') || '[]');
+      list[+sel.dataset.i].status = sel.value;
+      localStorage.setItem('ec_d3_launch', JSON.stringify(list));
+      this.render();
+    }));
+    document.querySelectorAll('.d3-launch-del').forEach(btn => btn.addEventListener('click', () => {
+      const list = JSON.parse(localStorage.getItem('ec_d3_launch') || '[]');
+      list.splice(+btn.dataset.i, 1);
+      localStorage.setItem('ec_d3_launch', JSON.stringify(list));
+      this.render();
+    }));
+  },
+
   renderImgSearchTab() {
     return '<div class="table-card" style="margin-bottom:16px">'
       + '<div class="table-card-header"><h3>以圖搜貨</h3><p>上傳圖片，自動搜尋 1688 推薦賣家 & 蝦皮熱銷商品</p></div>'
@@ -8443,6 +8862,16 @@ const App = {
         tabContent = this.renderImgSearchTab();
       } else if (activeTab.dynamic === 'shopee-trend') {
         tabContent = this.renderShopeeTrendTab();
+      } else if (activeTab.dynamic === 'supplier-mgmt') {
+        tabContent = this.renderSupplierTab();
+      } else if (activeTab.dynamic === 'profit-calc') {
+        tabContent = this.renderProfitCalcTab();
+      } else if (activeTab.dynamic === 'product-kanban') {
+        tabContent = this.renderKanbanTab();
+      } else if (activeTab.dynamic === 'competitor-track') {
+        tabContent = this.renderCompetitorTab();
+      } else if (activeTab.dynamic === 'launch-plan') {
+        tabContent = this.renderLaunchPlanTab();
       } else if (activeTab.key === 'profit') {
         tabContent = window.__profitTabHtml || '';
         setTimeout(function() {
