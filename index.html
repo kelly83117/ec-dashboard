@@ -1530,6 +1530,7 @@ const OFFICE_CONFIG = {
     ],
     tabs: [
       { key: 'ai-select', title: '🤖 AI 選品', dynamic: 'ai-select' },
+      { key: 'shopee-trend', title: '🔥 蝦皮熱搜榜', dynamic: 'shopee-trend' },
       { key: 'overview', title: '📊 選品總覽', customHtml: `
         <div class="table-card" style="margin-bottom:16px">
           <div class="table-card-header"><h3>本月選品狀態</h3></div>
@@ -6660,6 +6661,8 @@ const App = {
       this.bindAiSelect(deptId);
     } else if (tab?.dynamic === 'img-search') {
       this.bindImgSearch();
+    } else if (tab?.dynamic === 'shopee-trend') {
+      this.bindShopeeTrend();
     }
   },
 
@@ -7855,6 +7858,66 @@ const App = {
     return header + sectionA + sectionB + sectionC;
   },
 
+  renderShopeeTrendTab() {
+    return '<div class="table-card" style="margin-bottom:16px">'
+      + '<div class="table-card-header"><h3>🔥 蝦皮熱搜關鍵字榜</h3><p>每月熱門搜尋詞，點擊關鍵字直接搜尋蝦皮商品</p></div>'
+      + '<div style="padding:14px">'
+      + '<div id="shopee-trend-loading" style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-muted)">'
+      + '<div style="width:16px;height:16px;border:2px solid var(--border);border-top-color:#ee4d2d;border-radius:50%;animation:spin 0.8s linear infinite"></div>'
+      + '載入中...'
+      + '</div>'
+      + '<div id="shopee-trend-list" style="display:none"></div>'
+      + '<div id="shopee-trend-error" style="display:none;font-size:13px;color:var(--text-muted);padding:8px 0"></div>'
+      + '</div>'
+      + '</div>';
+  },
+
+  bindShopeeTrend() {
+    const loadingEl = document.getElementById('shopee-trend-loading');
+    const listEl = document.getElementById('shopee-trend-list');
+    const errorEl = document.getElementById('shopee-trend-error');
+
+    const keywords = [
+      '封口夾','保溫杯','氣炸鍋','露營椅','防曬乳','貓抓板','充電線','藍牙耳機',
+      '摺疊桌','瑜珈墊','美妝蛋','洗臉機','除毛球機','收納盒','手機殼',
+      '浴室置物架','電動牙刷','頸枕','按摩槍','隨身碟',
+    ];
+
+    // 嘗試從蝦皮 API 抓熱搜
+    fetch('https://shopee.tw/api/v4/search/get_popular_search_keywords/?limit=20', {
+      headers: { 'Referer': 'https://shopee.tw/', 'User-Agent': 'Mozilla/5.0' }
+    })
+    .then(r => r.json())
+    .then(data => {
+      const words = (data?.data?.keywords || data?.keywords || []).map(k => typeof k === 'string' ? k : k.keyword).filter(Boolean);
+      if (words.length > 0) renderList(words);
+      else renderList(keywords);
+    })
+    .catch(() => renderList(keywords));
+
+    const renderList = (words) => {
+      if (loadingEl) loadingEl.style.display = 'none';
+      if (listEl) {
+        listEl.style.display = '';
+        const colors = ['#ee4d2d','#ff6b35','#ff8c42','#e8320a','#c0392b'];
+        listEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">'
+          + words.slice(0, 20).map((kw, i) => {
+            const color = i < 3 ? colors[i] : (i < 10 ? '#555' : '#888');
+            const bg = i < 3 ? '#fff5f5' : 'var(--card-bg,#fafafa)';
+            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) + '.';
+            return '<a href="https://shopee.tw/search?keyword=' + encodeURIComponent(kw) + '" target="_blank"'
+              + ' style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;text-decoration:none;background:' + bg + '">'
+              + '<span style="font-size:13px;font-weight:700;color:' + color + ';min-width:28px">' + medal + '</span>'
+              + '<span style="font-size:13px;color:var(--text);font-weight:' + (i < 3 ? '600' : '400') + '">' + kw + '</span>'
+              + '<span style="margin-left:auto;font-size:11px;color:#ee4d2d">搜尋 ↗</span>'
+              + '</a>';
+          }).join('')
+          + '</div>'
+          + '<div style="margin-top:12px;font-size:11px;color:var(--text-muted);text-align:right">點擊關鍵字直接開啟蝦皮搜尋結果</div>';
+      }
+    };
+  },
+
   renderImgSearchTab() {
     return '<div class="table-card" style="margin-bottom:16px">'
       + '<div class="table-card-header"><h3>以圖搜貨</h3><p>上傳圖片，自動搜尋 1688 推薦賣家 & 蝦皮熱銷商品</p></div>'
@@ -8322,6 +8385,8 @@ const App = {
         tabContent = this.renderAiSelectTab(deptId, color, dept);
       } else if (activeTab.dynamic === 'img-search') {
         tabContent = this.renderImgSearchTab();
+      } else if (activeTab.dynamic === 'shopee-trend') {
+        tabContent = this.renderShopeeTrendTab();
       } else if (activeTab.key === 'profit') {
         tabContent = window.__profitTabHtml || '';
         setTimeout(function() {
