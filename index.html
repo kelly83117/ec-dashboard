@@ -1593,7 +1593,7 @@ const OFFICE_CONFIG = {
     ],
     tabs: [
       { key: 'ai-select', title: '🤖 AI 選品', dynamic: 'ai-select' },
-      { key: 'shopee-trend', title: '🔥 蝦皮熱搜榜', dynamic: 'shopee-trend' },
+      { key: 'shopee-trend', title: '🔍 Google 熱搜榜', dynamic: 'shopee-trend' },
       { key: 'supplier', title: '🏭 供應商管理', dynamic: 'supplier-mgmt' },
       { key: 'profit-calc', title: '💰 毛利試算機', dynamic: 'profit-calc' },
       { key: 'kanban', title: '📋 選品任務板', dynamic: 'product-kanban' },
@@ -7930,63 +7930,118 @@ const App = {
   },
 
   renderShopeeTrendTab() {
-    return '<div class="table-card" style="margin-bottom:16px">'
-      + '<div class="table-card-header"><h3>🔥 蝦皮熱搜關鍵字榜</h3><p>每月熱門搜尋詞，點擊關鍵字直接搜尋蝦皮商品</p></div>'
-      + '<div style="padding:14px">'
-      + '<div id="shopee-trend-loading" style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-muted)">'
-      + '<div style="width:16px;height:16px;border:2px solid var(--border);border-top-color:#ee4d2d;border-radius:50%;animation:spin 0.8s linear infinite"></div>'
-      + '載入中...'
-      + '</div>'
-      + '<div id="shopee-trend-list" style="display:none"></div>'
-      + '<div id="shopee-trend-error" style="display:none;font-size:13px;color:var(--text-muted);padding:8px 0"></div>'
-      + '</div>'
-      + '</div>';
+    return `<div class="table-card">
+      <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div>
+          <h3>🔍 Google 台灣熱搜榜</h3>
+          <p>來源：Google Trends 台灣每日熱門搜尋，資料為當日即時更新</p>
+        </div>
+        <button id="gt-refresh" style="padding:6px 14px;border:1px solid var(--border);background:white;border-radius:7px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px">
+          🔄 重新整理
+        </button>
+      </div>
+      <div style="padding:16px">
+        <div id="gt-loading" style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-muted);padding:8px 0">
+          <div style="width:16px;height:16px;border:2px solid var(--border);border-top-color:#4285f4;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+          從 Google Trends 載入中...
+        </div>
+        <div id="gt-list" style="display:none"></div>
+        <div id="gt-error" style="display:none;padding:16px;text-align:center;color:var(--text-muted);font-size:13px"></div>
+      </div>
+    </div>`;
   },
 
   bindShopeeTrend() {
-    const loadingEl = document.getElementById('shopee-trend-loading');
-    const listEl = document.getElementById('shopee-trend-list');
-    const errorEl = document.getElementById('shopee-trend-error');
+    const loadingEl = document.getElementById('gt-loading');
+    const listEl = document.getElementById('gt-list');
+    const errorEl = document.getElementById('gt-error');
 
-    const keywords = [
-      '封口夾','保溫杯','氣炸鍋','露營椅','防曬乳','貓抓板','充電線','藍牙耳機',
-      '摺疊桌','瑜珈墊','美妝蛋','洗臉機','除毛球機','收納盒','手機殼',
-      '浴室置物架','電動牙刷','頸枕','按摩槍','隨身碟',
-    ];
+    const load = () => {
+      if (loadingEl) { loadingEl.style.display = 'flex'; }
+      if (listEl) listEl.style.display = 'none';
+      if (errorEl) errorEl.style.display = 'none';
 
-    // 嘗試從蝦皮 API 抓熱搜
-    fetch('https://shopee.tw/api/v4/search/get_popular_search_keywords/?limit=20', {
-      headers: { 'Referer': 'https://shopee.tw/', 'User-Agent': 'Mozilla/5.0' }
-    })
-    .then(r => r.json())
-    .then(data => {
-      const words = (data?.data?.keywords || data?.keywords || []).map(k => typeof k === 'string' ? k : k.keyword).filter(Boolean);
-      if (words.length > 0) renderList(words);
-      else renderList(keywords);
-    })
-    .catch(() => renderList(keywords));
+      const rssUrl = 'https://trends.google.com/trends/trendingsearches/daily/rss?geo=TW';
+      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(rssUrl);
 
-    const renderList = (words) => {
-      if (loadingEl) loadingEl.style.display = 'none';
-      if (listEl) {
-        listEl.style.display = '';
-        const colors = ['#ee4d2d','#ff6b35','#ff8c42','#e8320a','#c0392b'];
-        listEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">'
-          + words.slice(0, 20).map((kw, i) => {
-            const color = i < 3 ? colors[i] : (i < 10 ? '#555' : '#888');
-            const bg = i < 3 ? '#fff5f5' : 'var(--card-bg,#fafafa)';
-            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) + '.';
-            return '<a href="https://shopee.tw/search?keyword=' + encodeURIComponent(kw) + '" target="_blank"'
-              + ' style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;text-decoration:none;background:' + bg + '">'
-              + '<span style="font-size:13px;font-weight:700;color:' + color + ';min-width:28px">' + medal + '</span>'
-              + '<span style="font-size:13px;color:var(--text);font-weight:' + (i < 3 ? '600' : '400') + '">' + kw + '</span>'
-              + '<span style="margin-left:auto;font-size:11px;color:#ee4d2d">搜尋 ↗</span>'
-              + '</a>';
-          }).join('')
-          + '</div>'
-          + '<div style="margin-top:12px;font-size:11px;color:var(--text-muted);text-align:right">點擊關鍵字直接開啟蝦皮搜尋結果</div>';
-      }
+      fetch(proxyUrl)
+        .then(r => { if (!r.ok) throw new Error('fetch failed'); return r.text(); })
+        .then(xml => {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(xml, 'text/xml');
+          const items = Array.from(doc.querySelectorAll('item')).slice(0, 20);
+          if (!items.length) throw new Error('no items');
+
+          if (loadingEl) loadingEl.style.display = 'none';
+          if (listEl) {
+            listEl.style.display = '';
+            const rows = items.map((item, i) => {
+              const title = item.querySelector('title')?.textContent || '';
+              const traffic = item.querySelector('approx_traffic')?.textContent || '';
+              const newsTitle = item.querySelector('news_item_title')?.textContent || '';
+              const newsUrl = item.querySelector('news_item_url')?.textContent || '';
+              const searchUrl = 'https://trends.google.com.tw/trending?geo=TW';
+              const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+              const rankColor = i < 3 ? '#4285f4' : i < 10 ? '#555' : '#999';
+              const bg = i < 3 ? '#f0f6ff' : '#fafafa';
+              return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:9px;background:${bg};margin-bottom:8px">
+                <span style="font-size:14px;font-weight:800;color:${rankColor};min-width:32px;text-align:center">${medal}</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:14px;font-weight:${i<3?'700':'500'};color:var(--text)">${escapeHtml(title)}</div>
+                  ${newsTitle ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(newsTitle)}</div>` : ''}
+                </div>
+                ${traffic ? `<span style="font-size:11px;color:#4285f4;font-weight:600;white-space:nowrap">${escapeHtml(traffic)} 搜尋</span>` : ''}
+                <div style="display:flex;gap:6px;flex-shrink:0">
+                  <a href="https://www.google.com/search?q=${encodeURIComponent(title)}" target="_blank" style="padding:3px 9px;background:#4285f4;color:white;border-radius:5px;font-size:11px;text-decoration:none;font-weight:600">Google</a>
+                  <a href="https://shopee.tw/search?keyword=${encodeURIComponent(title)}" target="_blank" style="padding:3px 9px;background:#ee4d2d;color:white;border-radius:5px;font-size:11px;text-decoration:none;font-weight:600">蝦皮</a>
+                </div>
+              </div>`;
+            }).join('');
+
+            listEl.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${
+              items.map((item, i) => {
+                const title = item.querySelector('title')?.textContent || '';
+                const traffic = item.querySelector('approx_traffic')?.textContent || '';
+                const newsTitle = item.querySelector('news_item_title')?.textContent || '';
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+                const rankColor = i < 3 ? '#4285f4' : i < 10 ? '#555' : '#999';
+                const bg = i < 3 ? '#f0f6ff' : '#fafafa';
+                return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:${bg}">
+                  <span style="font-size:13px;font-weight:800;color:${rankColor};min-width:28px;text-align:center">${medal}</span>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:${i<3?'700':'500'};color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(title)}</div>
+                    ${traffic ? `<div style="font-size:11px;color:#4285f4;font-weight:600;margin-top:1px">${escapeHtml(traffic)} 搜尋次數</div>` : ''}
+                    ${newsTitle ? `<div style="font-size:11px;color:var(--text-muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(newsTitle)}</div>` : ''}
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+                    <a href="https://www.google.com/search?q=${encodeURIComponent(title)}" target="_blank" style="padding:2px 8px;background:#4285f4;color:white;border-radius:5px;font-size:11px;text-decoration:none;font-weight:600;text-align:center">Google</a>
+                    <a href="https://shopee.tw/search?keyword=${encodeURIComponent(title)}" target="_blank" style="padding:2px 8px;background:#ee4d2d;color:white;border-radius:5px;font-size:11px;text-decoration:none;font-weight:600;text-align:center">蝦皮</a>
+                  </div>
+                </div>`;
+              }).join('')
+            }</div>
+            <div style="margin-top:12px;font-size:11px;color:var(--text-muted);display:flex;align-items:center;justify-content:space-between">
+              <span>資料來源：Google Trends 台灣 · 每日更新</span>
+              <a href="https://trends.google.com.tw/trending?geo=TW" target="_blank" style="color:#4285f4;text-decoration:none;font-weight:600">查看完整榜單 ↗</a>
+            </div>`;
+          }
+        })
+        .catch(() => {
+          if (loadingEl) loadingEl.style.display = 'none';
+          if (errorEl) {
+            errorEl.style.display = '';
+            errorEl.innerHTML = `<div style="padding:20px;text-align:center">
+              <div style="font-size:24px;margin-bottom:8px">😔</div>
+              <div style="font-weight:600;margin-bottom:6px">無法載入 Google Trends 資料</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">可能是網路或 CORS 問題</div>
+              <a href="https://trends.google.com.tw/trending?geo=TW" target="_blank" style="padding:8px 18px;background:#4285f4;color:white;border-radius:7px;font-size:13px;text-decoration:none;font-weight:600">直接開啟 Google Trends ↗</a>
+            </div>`;
+          }
+        });
     };
+
+    load();
+    document.getElementById('gt-refresh')?.addEventListener('click', load);
   },
 
   /* ===== 供應商管理 ===== */
