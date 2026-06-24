@@ -7858,7 +7858,7 @@ const App = {
 
   renderImgSearchTab() {
     return '<div class="table-card" style="margin-bottom:16px">'
-      + '<div class="table-card-header"><h3>以圖搜貨</h3><p>上傳圖片後點搜尋，自動帶入圖片開啟 1688 / 蝦皮以圖搜款頁面</p></div>'
+      + '<div class="table-card-header"><h3>以圖搜貨</h3><p>上傳圖片，自動搜尋 1688 推薦賣家 & 蝦皮熱銷商品</p></div>'
       + '<div style="padding:14px">'
       + '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px">'
       + '<div style="display:flex;flex-direction:column;gap:8px;align-items:center">'
@@ -7870,18 +7870,22 @@ const App = {
       + '<div id="img-preview-wrap" style="display:none"><img id="img-preview" style="width:140px;height:100px;object-fit:cover;border-radius:6px;border:1px solid var(--border)"></div>'
       + '</div>'
       + '<div style="display:flex;flex-direction:column;gap:8px;justify-content:center">'
-      + '<button id="btn-search-lens" style="padding:8px 18px;background:#4285f4;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:500">🔍 Google Lens 搜圖</button>'
-      + '<button id="btn-search-1688" style="padding:8px 18px;background:#e8320a;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:500">🏷️ 搜尋 1688</button>'
-      + '<button id="btn-search-shopee" style="padding:8px 18px;background:#ee4d2d;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:500">🛒 搜尋蝦皮</button>'
-      + '<button id="btn-search-both" style="padding:8px 18px;background:#10b981;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:500">⚡ 全部搜尋</button>'
+      + '<button id="btn-search-both" style="padding:8px 18px;background:#10b981;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:500">🔍 搜尋商品</button>'
+      + '<button id="btn-search-lens" style="padding:8px 14px;background:none;border:1px solid #4285f4;color:#4285f4;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit">↗ Google Lens 開新頁</button>'
       + '<button id="btn-clear-img" style="padding:8px 18px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">清除</button>'
       + '</div>'
       + '<div id="img-search-loading" style="display:none;align-items:center;gap:10px;font-size:13px;color:var(--text-muted);padding:8px 0">'
       + '<div style="width:18px;height:18px;border:2px solid var(--border);border-top-color:#10b981;border-radius:50%;animation:spin 0.8s linear infinite"></div>'
-      + '<span id="img-search-loading-text">上傳圖片中...</span>'
+      + '<span id="img-search-loading-text">AI 辨識中...</span>'
       + '</div>'
       + '</div>'
-      + '<div id="img-search-status" style="display:none;font-size:13px;padding:10px 12px;border-radius:8px;background:#f0fdf4;border:1px solid #86efac;color:#166534"></div>'
+      + '<div id="img-search-results" style="display:none;margin-top:12px">'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
+      + '<div><div style="font-size:13px;font-weight:600;color:#e8320a;margin-bottom:8px">🏷️ 1688 推薦賣家</div><div id="ali-results"></div></div>'
+      + '<div><div style="font-size:13px;font-weight:600;color:#ee4d2d;margin-bottom:8px">🔥 蝦皮熱銷商品</div><div id="shopee-results"></div></div>'
+      + '</div>'
+      + '<div id="img-search-lens-link" style="display:none;margin-top:10px;font-size:12px;color:var(--text-muted)"></div>'
+      + '</div>'
       + '</div>'
       + '</div>';
   },
@@ -7934,60 +7938,70 @@ const App = {
 
     const statusEl = document.getElementById('img-search-status');
 
-    const uploadAndGetData = async () => {
-      if (!currentFile) { showToast('請先上傳圖片', 'error'); return null; }
+    const resultsWrap = document.getElementById('img-search-results');
+    const aliEl = document.getElementById('ali-results');
+    const shopeeEl = document.getElementById('shopee-results');
+    const lensLinkEl = document.getElementById('img-search-lens-link');
+
+    const renderCard = (item, color) => {
+      const title = (item.title || item.url || '').substring(0, 45);
+      const displayTitle = title || '查看商品';
+      return '<a href="' + item.url + '" target="_blank" style="display:flex;gap:8px;align-items:center;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;text-decoration:none;color:inherit">'
+        + (item.img ? '<img src="' + item.img + '" style="width:44px;height:44px;object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.style.display=\'none\'">' : '')
+        + '<div style="flex:1;min-width:0">'
+        + '<div style="font-size:12px;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">' + displayTitle + '</div>'
+        + (item.price ? '<div style="font-size:13px;font-weight:600;color:' + color + ';margin-top:2px">' + item.price + '</div>' : '')
+        + '<div style="font-size:11px;color:var(--text-muted)">' + (item.source || '') + ' ↗</div>'
+        + '</div></a>';
+    };
+
+    const doSearch = async () => {
+      if (!currentFile) { showToast('請先上傳圖片', 'error'); return; }
       if (loading) loading.style.display = 'flex';
-      if (loadingText) loadingText.textContent = '上傳圖片中...';
-      if (statusEl) statusEl.style.display = 'none';
+      if (loadingText) loadingText.textContent = 'AI 辨識中...';
+      if (resultsWrap) resultsWrap.style.display = 'none';
       try {
         const fd = new FormData();
         fd.append('image', currentFile);
         const resp = await fetch('https://ec-image-search.jessica-d31.workers.dev', { method: 'POST', body: fd });
         const data = await resp.json();
         if (loading) loading.style.display = 'none';
-        return data;
+
+        if (aliEl) {
+          aliEl.innerHTML = data.ali && data.ali.length > 0
+            ? data.ali.map(i => renderCard(i, '#e8320a')).join('')
+            : '<a href="' + (data.imgbbUrl ? 'https://s.1688.com/youyuan/index.htm?imageAddress=' + encodeURIComponent(data.imgbbUrl) : 'https://s.1688.com/youyuan/index.htm') + '" target="_blank" style="display:block;padding:10px;border:1px dashed var(--border);border-radius:6px;font-size:12px;color:#e8320a;text-decoration:none;text-align:center">點此在 1688 以圖搜款 ↗</a>';
+        }
+        if (shopeeEl) {
+          shopeeEl.innerHTML = data.shopee && data.shopee.length > 0
+            ? data.shopee.map(i => renderCard(i, '#ee4d2d')).join('')
+            : '<a href="https://shopee.tw/search" target="_blank" style="display:block;padding:10px;border:1px dashed var(--border);border-radius:6px;font-size:12px;color:#ee4d2d;text-decoration:none;text-align:center">點此前往蝦皮搜尋 ↗</a>';
+        }
+        if (lensLinkEl && data.lensUrl) {
+          lensLinkEl.style.display = '';
+          lensLinkEl.innerHTML = '或 <a href="' + data.lensUrl + '" target="_blank" style="color:#4285f4">開啟 Google Lens 查看更多相似商品 ↗</a>';
+        }
+        if (resultsWrap) resultsWrap.style.display = '';
       } catch(e) {
         if (loading) loading.style.display = 'none';
-        showToast('上傳失敗，請稍後再試', 'error');
-        return null;
+        showToast('搜尋失敗，請稍後再試', 'error');
       }
     };
 
+    document.getElementById('btn-search-both')?.addEventListener('click', doSearch);
     document.getElementById('btn-search-lens')?.addEventListener('click', async () => {
-      const data = await uploadAndGetData();
-      if (!data) return;
-      if (data.lensUrl) {
-        window.open(data.lensUrl, '_blank');
-        if (statusEl) { statusEl.style.display = ''; statusEl.textContent = '✅ Google Lens 已開啟（新分頁）— 可看相似商品，包含 1688、蝦皮來源'; }
-      } else {
-        showToast('Google Lens 上傳失敗，請稍後再試', 'error');
-      }
-    });
-
-    document.getElementById('btn-search-1688')?.addEventListener('click', async () => {
-      const data = await uploadAndGetData();
-      if (!data) return;
-      const url = data.aliSearchUrl || ('https://s.1688.com/youyuan/index.htm' + (data.imgbbUrl ? '?imageAddress=' + encodeURIComponent(data.imgbbUrl) : ''));
-      window.open(url, '_blank');
-      if (statusEl) { statusEl.style.display = ''; statusEl.textContent = '✅ 1688 以圖搜款已開啟（新分頁）'; }
-    });
-
-    document.getElementById('btn-search-shopee')?.addEventListener('click', async () => {
-      const data = await uploadAndGetData();
-      if (!data) return;
-      window.open('https://shopee.tw/', '_blank');
-      if (statusEl) { statusEl.style.display = ''; statusEl.textContent = '✅ 蝦皮已開啟（新分頁）'; }
-    });
-
-    document.getElementById('btn-search-both')?.addEventListener('click', async () => {
-      const data = await uploadAndGetData();
-      if (!data) return;
-      if (data.lensUrl) window.open(data.lensUrl, '_blank');
-      if (data.aliSearchUrl) window.open(data.aliSearchUrl, '_blank');
-      if (statusEl) {
-        statusEl.style.display = '';
-        statusEl.textContent = data.lensUrl ? '✅ Google Lens + 1688 已同時開啟（新分頁）' : '✅ 1688 已開啟（新分頁）';
-      }
+      if (!currentFile) { showToast('請先上傳圖片', 'error'); return; }
+      if (loading) loading.style.display = 'flex';
+      if (loadingText) loadingText.textContent = '上傳中...';
+      try {
+        const fd = new FormData();
+        fd.append('image', currentFile);
+        const resp = await fetch('https://ec-image-search.jessica-d31.workers.dev', { method: 'POST', body: fd });
+        const data = await resp.json();
+        if (loading) loading.style.display = 'none';
+        if (data.lensUrl) window.open(data.lensUrl, '_blank');
+        else showToast('Google Lens 失敗，請稍後再試', 'error');
+      } catch(e) { if (loading) loading.style.display = 'none'; showToast('失敗', 'error'); }
     });
   },
 
