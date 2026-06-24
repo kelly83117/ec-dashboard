@@ -7858,7 +7858,7 @@ const App = {
 
   renderImgSearchTab() {
     return '<div class="table-card" style="margin-bottom:16px">'
-      + '<div class="table-card-header"><h3>以圖搜貨</h3><p>上傳圖片，AI 自動辨識並搜尋 1688 最便宜 & 蝦皮熱銷前3名</p></div>'
+      + '<div class="table-card-header"><h3>以圖搜貨</h3><p>上傳圖片後點搜尋，自動帶入圖片開啟 1688 / 蝦皮以圖搜款頁面</p></div>'
       + '<div style="padding:14px">'
       + '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px">'
       + '<div style="display:flex;flex-direction:column;gap:8px;align-items:center">'
@@ -7877,22 +7877,10 @@ const App = {
       + '</div>'
       + '<div id="img-search-loading" style="display:none;align-items:center;gap:10px;font-size:13px;color:var(--text-muted);padding:8px 0">'
       + '<div style="width:18px;height:18px;border:2px solid var(--border);border-top-color:#10b981;border-radius:50%;animation:spin 0.8s linear infinite"></div>'
-      + '<span id="img-search-loading-text">AI 辨識中...</span>'
+      + '<span id="img-search-loading-text">上傳圖片中...</span>'
       + '</div>'
       + '</div>'
-      + '<div id="img-search-keyword" style="display:none;margin-bottom:10px;font-size:13px;color:var(--text-muted)"></div>'
-      + '<div id="img-search-results" style="display:none">'
-      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
-      + '<div>'
-      + '<div style="font-size:13px;font-weight:600;color:#e8320a;margin-bottom:8px">🏷️ 1688 最便宜前3名</div>'
-      + '<div id="ali-results"></div>'
-      + '</div>'
-      + '<div>'
-      + '<div style="font-size:13px;font-weight:600;color:#ee4d2d;margin-bottom:8px">🔥 蝦皮熱銷前3名</div>'
-      + '<div id="shopee-results"></div>'
-      + '</div>'
-      + '</div>'
-      + '</div>'
+      + '<div id="img-search-status" style="display:none;font-size:13px;padding:10px 12px;border-radius:8px;background:#f0fdf4;border:1px solid #86efac;color:#166534"></div>'
       + '</div>'
       + '</div>';
   },
@@ -7943,58 +7931,37 @@ const App = {
         + '</a>';
     };
 
+    const statusEl = document.getElementById('img-search-status');
+
     const doSearch = async (platform) => {
       if (!currentFile) { showToast('請先上傳圖片', 'error'); return; }
-      if (loading) { loading.style.display = 'flex'; }
-      if (loadingText) loadingText.textContent = 'AI 辨識圖片中...';
-      if (resultsWrap) resultsWrap.style.display = 'none';
-      if (keywordWrap) keywordWrap.style.display = 'none';
+      if (loading) loading.style.display = 'flex';
+      if (loadingText) loadingText.textContent = '上傳圖片中...';
+      if (statusEl) statusEl.style.display = 'none';
 
       try {
         const fd = new FormData();
         fd.append('image', currentFile);
-        if (loadingText) loadingText.textContent = '搜尋中...';
         const resp = await fetch('https://ec-image-search.jessica-d31.workers.dev', { method: 'POST', body: fd });
         const data = await resp.json();
-
         if (loading) loading.style.display = 'none';
-        if (data.keyword && keywordWrap) {
-          keywordWrap.style.display = '';
-          keywordWrap.textContent = '🔎 辨識關鍵字：' + data.keyword;
-        }
 
-        const aliEl = document.getElementById('ali-results');
-        const shopeeEl = document.getElementById('shopee-results');
+        if (!data.imageUrl) { showToast('圖片上傳失敗，請再試', 'error'); return; }
 
-        if (platform === '1688' || platform === 'both') {
-          if (aliEl) {
-            if (data.ali && data.ali.length > 0) {
-              aliEl.innerHTML = data.ali.map(i => renderItem(i, '#e8320a')).join('');
-            } else {
-              const aliUrl = data.aliSearchUrl || ('https://s.1688.com/selloffer/offerlist.htm?keywords=' + encodeURIComponent(data.keyword || ''));
-              aliEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0">自動搜尋受限，<a href="' + aliUrl + '" target="_blank" style="color:#e8320a;font-weight:600;text-decoration:none">點此在 1688 搜尋「' + (data.keyword || '') + '」↗</a></div>';
-            }
-          }
-        }
-        if (platform === 'shopee' || platform === 'both') {
-          if (shopeeEl) {
-            if (data.shopee && data.shopee.length > 0) {
-              shopeeEl.innerHTML = data.shopee.map(i => renderItem(i, '#ee4d2d')).join('');
-            } else {
-              const shopeeUrl = data.shopeeSearchUrl || ('https://shopee.tw/search?keyword=' + encodeURIComponent(data.keyword || ''));
-              shopeeEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0">自動搜尋受限，<a href="' + shopeeUrl + '" target="_blank" style="color:#ee4d2d;font-weight:600;text-decoration:none">點此在蝦皮搜尋「' + (data.keyword || '') + '」↗</a></div>';
-            }
-          }
-        }
+        const ali1688Url = 'https://s.1688.com/youyuan/index.htm?imageAddress=' + encodeURIComponent(data.imageUrl);
+        const shopeeUrl = 'https://shopee.tw/search?image=' + encodeURIComponent(data.imageUrl);
 
-        if (resultsWrap) {
-          resultsWrap.style.display = '';
-          const grid = resultsWrap.querySelector('div');
-          if (grid) {
-            if (platform === '1688') grid.style.gridTemplateColumns = '1fr';
-            else if (platform === 'shopee') { grid.style.gridTemplateColumns = '1fr'; if (aliEl) aliEl.parentElement.style.display = 'none'; }
-            else grid.style.gridTemplateColumns = '1fr 1fr';
-          }
+        if (platform === '1688' || platform === 'both') window.open(ali1688Url, '_blank');
+        if (platform === 'shopee' || platform === 'both') window.open(shopeeUrl, '_blank');
+
+        if (statusEl) {
+          statusEl.style.display = '';
+          let msg = '✅ 已開啟';
+          if (platform === '1688') msg += ' 1688 以圖搜款';
+          else if (platform === 'shopee') msg += ' 蝦皮以圖搜款';
+          else msg += ' 1688 & 蝦皮以圖搜款';
+          msg += '（新分頁）— 圖片已自動帶入，直接看結果即可';
+          statusEl.textContent = msg;
         }
       } catch(e) {
         if (loading) loading.style.display = 'none';
