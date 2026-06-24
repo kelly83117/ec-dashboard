@@ -7989,19 +7989,25 @@ const App = {
     };
 
     document.getElementById('btn-search-both')?.addEventListener('click', doSearch);
-    document.getElementById('btn-search-lens')?.addEventListener('click', async () => {
+    document.getElementById('btn-search-lens')?.addEventListener('click', () => {
       if (!currentFile) { showToast('請先上傳圖片', 'error'); return; }
-      if (loading) loading.style.display = 'flex';
-      if (loadingText) loadingText.textContent = '上傳中...';
-      try {
-        const fd = new FormData();
-        fd.append('image', currentFile);
-        const resp = await fetch('https://ec-image-search.jessica-d31.workers.dev', { method: 'POST', body: fd });
-        const data = await resp.json();
-        if (loading) loading.style.display = 'none';
-        if (data.lensUrl) window.open(data.lensUrl, '_blank');
-        else showToast('Google Lens 失敗，請稍後再試', 'error');
-      } catch(e) { if (loading) loading.style.display = 'none'; showToast('失敗', 'error'); }
+      // 直接從瀏覽器送圖片到 Google Lens（保留使用者 session，結果才正確）
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = 'https://lens.google.com/v3/upload?hl=zh-TW&re=df&stcs=' + Date.now();
+      form.target = '_blank';
+      form.enctype = 'multipart/form-data';
+      form.style.display = 'none';
+      const fi = document.createElement('input');
+      fi.type = 'file';
+      fi.name = 'encoded_image';
+      const dt = new DataTransfer();
+      dt.items.add(currentFile);
+      fi.files = dt.files;
+      form.appendChild(fi);
+      document.body.appendChild(form);
+      form.submit();
+      document.body.removeChild(form);
     });
   },
 
