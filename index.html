@@ -7945,7 +7945,9 @@ const App = {
         const resp = await fetch('https://ec-image-search.jessica-d31.workers.dev', { method: 'POST', body: fd });
         const data = await resp.json();
         if (loading) loading.style.display = 'none';
-        return data.imgbbUrl || data.imageUrl || null;
+        const url = data.imgbbUrl || data.imageUrl || null;
+        if (statusEl && url) { statusEl.style.display = ''; statusEl.textContent = '圖片網址：' + url; }
+        return url;
       } catch(e) {
         if (loading) loading.style.display = 'none';
         showToast('上傳失敗，請稍後再試', 'error');
