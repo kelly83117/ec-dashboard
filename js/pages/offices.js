@@ -168,19 +168,14 @@ Object.assign(App, {
     const diffColor = diff >= 0 ? '#10b981' : '#ef4444';
     const diffLabel = diff >= 0 ? '領先' : '落後';
 
-    // 「📖 指標說明」按鈕 — 紫色實心，避免白底卡片內混色看不見
-    const infoBtn = `<button id="design-kpi-info-btn" type="button" style="padding:7px 14px;font-size:13px;font-weight:600;border:0;border-radius:6px;background:var(--primary);color:white;cursor:pointer;font-family:inherit;box-shadow:0 1px 3px rgba(79,70,229,.25)">📖 指標說明</button>`;
+    // 「📖 指標說明」按鈕已移到 d4 的 tabBar 位置（取代原「個人績效」pill），這裡不再重複放
     // admin 才能切設計師 / 月份
     const switcher = st.isAdmin ? `
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        ${infoBtn}
         ${st.DESIGNERS.map(n => `<button class="pill ${n === st.viewName ? 'active' : ''}" data-design-pick="${escapeHtml(n)}">${escapeHtml(n)}</button>`).join('')}
         <input type="month" class="design-kpi-month" value="${st.yMonth}" style="margin-left:8px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
       </div>` : `
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        ${infoBtn}
-        <input type="month" class="design-kpi-month" value="${st.yMonth}" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-      </div>`;
+      <input type="month" class="design-kpi-month" value="${st.yMonth}" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">`;
 
     // ───────── A 區：工時記錄表 ─────────
     // 圖種與標準工時（依 D:\Windows\Desktop\設計.xlsx 指標說明圖 量化指標）
@@ -566,13 +561,19 @@ Object.assign(App, {
     const activeTabKey = this.filter.officeTab[deptId] || tabs[0]?.key;
     const activeTab = tabs.find(t => t.key === activeTabKey) || tabs[0];
 
-    const tabBar = tabs.length === 0 ? '' : `
+    // d4 設計：把 tabBar 整個換成「📖 指標說明」按鈕（取代原本的「個人績效」pill）
+    //   d4 只有一個 tab，「個人績效」字樣其實沒意義；改放 KPI 圖按鈕更實用
+    const tabBar = tabs.length === 0 ? '' : (deptId === 'd4' ? `
+      <div class="filter-bar" style="margin-bottom:16px">
+        <button id="design-kpi-info-btn" type="button" style="padding:7px 14px;font-size:13px;font-weight:600;border:0;border-radius:6px;background:var(--primary);color:white;cursor:pointer;font-family:inherit;box-shadow:0 1px 3px rgba(79,70,229,.25)">📖 指標說明</button>
+      </div>
+    ` : `
       <div class="filter-bar" style="margin-bottom:16px">
         ${tabs.map(t => `
           <button class="pill ${t.key === activeTabKey ? 'active' : ''}" data-office-tab="${escapeHtml(t.key)}">${escapeHtml(t.title)}</button>
         `).join('')}
       </div>
-    `;
+    `);
 
     let tabContent = '';
     if (activeTab) {
