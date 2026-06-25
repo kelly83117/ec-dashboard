@@ -381,7 +381,7 @@ Object.assign(App, {
       { id: 'taobao', name: '淘寶',   color: '#ff5000', icon: '🛒', hotUrl: 'https://www.taobao.com',            searchUrl: 'https://s.taobao.com/search?q=' },
     ];
     const platformBtns = PLATFORMS.map(p =>
-      `<a href="${p.hotUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:${p.color};color:white;border-radius:7px;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap">${p.icon} ${p.name}</a>`
+      `<a href="${p.hotUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:5px;padding:5px 11px;background:${p.color};color:white;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap">${p.icon} ${p.name}</a>`
     ).join('');
 
     return `
@@ -389,24 +389,33 @@ Object.assign(App, {
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
           <div>
             <h3 style="margin:0;font-size:15px">🔥 熱搜雷達</h3>
-            <p style="margin:2px 0 0;font-size:12px;color:var(--text-muted)">Google 台灣即時熱搜 · 一鍵跨平台搜尋找起飛商品</p>
+            <p style="margin:2px 0 0;font-size:12px;color:var(--text-muted)">Google 台灣即時熱搜 → 自動找出蝦皮起飛商品</p>
           </div>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             ${platformBtns}
-            <button id="dash-gt-refresh" style="padding:6px 12px;border:1px solid var(--border);background:white;border-radius:7px;font-size:12px;cursor:pointer">🔄</button>
+            <button id="dash-gt-refresh" style="padding:5px 10px;border:1px solid var(--border);background:white;border-radius:6px;font-size:12px;cursor:pointer">🔄</button>
           </div>
         </div>
 
-        <!-- 一鍵搜尋列 -->
+        <!-- 起飛商品（自動） -->
+        <div style="padding:10px 14px;border-bottom:1px solid var(--border)">
+          <div style="font-size:12px;font-weight:700;color:#d97706;margin-bottom:8px">🚀 正在起飛的商品（自動推薦）</div>
+          <div id="dash-rising-loading" style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+            <div style="width:12px;height:12px;border:2px solid var(--border);border-top-color:#f59e0b;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+            <span id="dash-rising-status">等待熱搜關鍵字載入...</span>
+          </div>
+          <div id="dash-rising-list" style="display:none"></div>
+          <div id="dash-rising-error" style="display:none"></div>
+        </div>
+
+        <!-- 一鍵搜尋 + Google Trends -->
         <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px">
           <input id="dash-trend-kw" type="text" placeholder="輸入關鍵字，一鍵在四大平台搜尋..."
             style="flex:1;padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
-          <button id="dash-trend-search" style="padding:7px 18px;background:#6366f1;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">🔍 全部搜尋</button>
+          <button id="dash-trend-search" style="padding:7px 16px;background:#6366f1;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">🔍 全部搜尋</button>
         </div>
-
-        <!-- Google Trends 列表 -->
         <div style="padding:12px 14px">
-          <div id="dash-gt-loading" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);padding:6px 0">
+          <div id="dash-gt-loading" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);padding:4px 0">
             <div style="width:13px;height:13px;border:2px solid var(--border);border-top-color:#4285f4;border-radius:50%;animation:spin 0.8s linear infinite"></div>載入 Google 台灣熱搜中...
           </div>
           <div id="dash-gt-list" style="display:none"></div>
@@ -422,6 +431,76 @@ Object.assign(App, {
       { id: '1688',   name: '1688',   color: '#ff6600', icon: '🏭', searchUrl: 'https://s.1688.com/selloffer/offerlist.htm?keywords=' },
       { id: 'taobao', name: '淘寶',   color: '#ff5000', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
     ];
+
+    // 自動分析起飛商品
+    const loadRising = async (keywords) => {
+      const loadingEl = document.getElementById('dash-rising-loading');
+      const statusEl = document.getElementById('dash-rising-status');
+      const listEl = document.getElementById('dash-rising-list');
+      const errorEl = document.getElementById('dash-rising-error');
+      if (loadingEl) loadingEl.style.display = 'flex';
+      if (listEl) listEl.style.display = 'none';
+      if (errorEl) errorEl.style.display = 'none';
+
+      const proxy = 'https://api.allorigins.win/raw?url=';
+      const top = keywords.slice(0, 5);
+      const results = [];
+      for (let i = 0; i < top.length; i++) {
+        const kw = top[i];
+        if (statusEl) statusEl.textContent = `分析 (${i+1}/${top.length})：${kw}`;
+        try {
+          const url = `https://shopee.tw/api/v4/search/search_item?by=sales&keyword=${encodeURIComponent(kw)}&limit=2&newest=0&order=desc&page_type=search&scenario=PAGE_GLOBAL_SEARCH&version=2`;
+          const data = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(6000) }).then(r => r.json());
+          (data?.items || []).forEach(item => {
+            const b = item.item_basic || item;
+            const name = b.name || '';
+            const price = b.price ? Math.round(b.price / 100000) : 0;
+            const sold = b.historical_sold || b.sold || 0;
+            const itemId = b.itemid || b.item_id;
+            const shopId = b.shopid || b.shop_id;
+            const image = b.image || '';
+            if (name && itemId && shopId) results.push({ keyword: kw, name, price, sold, itemId, shopId, image });
+          });
+        } catch { /* skip */ }
+      }
+
+      if (loadingEl) loadingEl.style.display = 'none';
+      if (!listEl) return;
+
+      if (results.length === 0) {
+        if (errorEl) {
+          errorEl.style.display = '';
+          errorEl.innerHTML = `<div style="font-size:12px;color:var(--text-muted)">API 受限，請點平台按鈕直接搜尋</div>`;
+        }
+        return;
+      }
+
+      // 每個關鍵字取最高銷量一筆
+      const seen = new Set();
+      const deduped = results.filter(r => { if (seen.has(r.keyword)) return false; seen.add(r.keyword); return true; });
+      deduped.sort((a, b) => b.sold - a.sold);
+
+      listEl.style.display = '';
+      listEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">` +
+        deduped.map(r => {
+          const imgUrl = r.image ? `https://cf.shopee.tw/file/${r.image}_tn` : '';
+          const soldStr = r.sold >= 10000 ? (r.sold/10000).toFixed(1)+'萬' : r.sold.toLocaleString();
+          return `<a href="https://shopee.tw/product/${r.shopId}/${r.itemId}" target="_blank"
+            style="display:flex;flex-direction:column;border:1px solid var(--border);border-radius:9px;overflow:hidden;text-decoration:none;color:inherit"
+            onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
+            ${imgUrl ? `<img src="${imgUrl}" style="width:100%;aspect-ratio:1;object-fit:cover;background:#f3f4f6" onerror="this.style.display='none'">` : `<div style="aspect-ratio:1;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:28px">🛍</div>`}
+            <div style="padding:8px 10px">
+              <div style="font-size:11px;background:#ee4d2d22;color:#ee4d2d;display:inline-block;padding:1px 6px;border-radius:999px;font-weight:600;margin-bottom:4px">🔥 ${escapeHtml(r.keyword)}</div>
+              <div style="font-size:12px;font-weight:600;line-height:1.4;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escapeHtml(r.name)}</div>
+              <div style="margin-top:6px;display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:13px;font-weight:700;color:#ee4d2d">NT$${r.price.toLocaleString()}</span>
+                <span style="font-size:10px;color:var(--text-muted)">售${soldStr}</span>
+              </div>
+            </div>
+          </a>`;
+        }).join('') + `</div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">蝦皮台灣 · 依熱搜自動取得</div>`;
+    };
 
     // 一鍵跨平台搜尋
     const searchBtn = document.getElementById('dash-trend-search');
@@ -452,7 +531,7 @@ Object.assign(App, {
           if (loading) loading.style.display = 'none';
           if (!list) return;
           list.style.display = '';
-          list.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px">' +
+          list.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:7px">' +
             items.map((item, i) => {
               const title = item.querySelector('title')?.textContent || '';
               const traffic = item.querySelector('approx_traffic')?.textContent || '';
@@ -460,30 +539,34 @@ Object.assign(App, {
               const bg = i < 3 ? '#f0f6ff' : (i % 2 === 0 ? '#fafafa' : 'white');
               const rankColor = i < 3 ? '#4285f4' : i < 10 ? '#555' : '#999';
               const pLinks = PLATFORMS.map(p =>
-                `<a href="${p.searchUrl}${encodeURIComponent(title)}" target="_blank" style="padding:2px 6px;background:${p.color};color:white;border-radius:4px;font-size:10px;text-decoration:none;font-weight:600">${p.icon}${p.name}</a>`
+                `<a href="${p.searchUrl}${encodeURIComponent(title)}" target="_blank" style="padding:2px 5px;background:${p.color};color:white;border-radius:4px;font-size:9px;text-decoration:none;font-weight:600">${p.icon}${p.name}</a>`
               ).join('');
-              return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:${bg}">
-                <span style="font-weight:800;color:${rankColor};min-width:24px;text-align:center;font-size:12px;flex-shrink:0">${medal}</span>
+              return `<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:${bg}">
+                <span style="font-weight:800;color:${rankColor};min-width:22px;text-align:center;font-size:11px;flex-shrink:0">${medal}</span>
                 <div style="flex:1;min-width:0">
-                  <div style="font-size:13px;font-weight:${i<3?'700':'500'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(title)}</div>
-                  ${traffic ? `<div style="font-size:10px;color:#4285f4;margin-top:1px">${escapeHtml(traffic)} 搜尋</div>` : ''}
+                  <div style="font-size:12px;font-weight:${i<3?'700':'500'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(title)}</div>
+                  ${traffic ? `<div style="font-size:10px;color:#4285f4;margin-top:1px">${escapeHtml(traffic)}</div>` : ''}
                 </div>
-                <div style="display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;max-width:100px">${pLinks}</div>
+                <div style="display:flex;gap:2px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;max-width:90px">${pLinks}</div>
               </div>`;
             }).join('') + '</div>' +
-            '<div style="margin-top:10px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;align-items:center">' +
-            '<span>來源：Google Trends 台灣 · 每日更新</span>' +
-            '<a href="https://trends.google.com.tw/trending?geo=TW" target="_blank" style="color:#4285f4;text-decoration:none;font-weight:600">查看完整榜單 ↗</a></div>';
+            '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between">' +
+            '<span>Google Trends 台灣 · 每日更新</span>' +
+            '<a href="https://trends.google.com.tw/trending?geo=TW" target="_blank" style="color:#4285f4;text-decoration:none">完整榜單 ↗</a></div>';
+          // 載入完後自動分析起飛商品
+          const keywords = items.map(item => item.querySelector('title')?.textContent || '').filter(Boolean);
+          loadRising(keywords);
         })
         .catch(() => {
           if (loading) loading.style.display = 'none';
           if (error) {
             error.style.display = '';
-            error.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;font-size:13px;color:var(--text-muted)">
+            error.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;font-size:12px;color:var(--text-muted)">
               <span>無法自動載入（請確認網路）</span>
-              <a href="https://trends.google.com.tw/trending?geo=TW" target="_blank" style="padding:5px 12px;background:#4285f4;color:white;border-radius:6px;font-size:12px;text-decoration:none">開啟 Google Trends ↗</a>
+              <a href="https://trends.google.com.tw/trending?geo=TW" target="_blank" style="padding:4px 10px;background:#4285f4;color:white;border-radius:5px;font-size:11px;text-decoration:none">開啟 ↗</a>
             </div>`;
           }
+          loadRising(['防曬', '涼感', '露營', '寵物', '美妝']);
         });
     };
     document.getElementById('dash-gt-refresh')?.addEventListener('click', loadGT);
