@@ -1832,7 +1832,39 @@ const App = {
       { id: 'taobao',  name: '淘寶',   color: '#ff5000', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
     ];
 
-    // 自動搜尋蝦皮起飛商品
+    // 自動分析起飛商品（PChome 主力 + 蝦皮備援）
+    const _fetchPChome = async (kw, proxy) => {
+      const url = `https://ecshweb.pchome.com.tw/search/v3.3/?q=${encodeURIComponent(kw)}&page=1&sort=rnk/dc`;
+      const data = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(7000) }).then(r => r.json());
+      return (data?.Prods || []).slice(0, 2).map(p => {
+        const id = p.Id || '';
+        return {
+          keyword: kw, name: p.Name || '', price: p.Price || 0,
+          sold: p.totalReviewNum || 0,
+          url: `https://24h.pchome.com.tw/prod/${id}`,
+          image: id ? `https://a.ecimg.tw/items/${id.slice(0,8)}/${id}/000001.jpg` : '',
+          source: 'PChome'
+        };
+      }).filter(r => r.name);
+    };
+    const _fetchShopee = async (kw, proxy) => {
+      const url = `https://shopee.tw/api/v4/search/search_item?by=sales&keyword=${encodeURIComponent(kw)}&limit=2&newest=0&order=desc&page_type=search&scenario=PAGE_GLOBAL_SEARCH&version=2`;
+      const data = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(7000) }).then(r => r.json());
+      return (data?.items || []).map(item => {
+        const b = item.item_basic || item;
+        const itemId = b.itemid || b.item_id;
+        const shopId = b.shopid || b.shop_id;
+        const image = b.image || '';
+        return {
+          keyword: kw, name: b.name || '', price: b.price ? Math.round(b.price / 100000) : 0,
+          sold: b.historical_sold || b.sold || 0,
+          url: `https://shopee.tw/product/${shopId}/${itemId}`,
+          image: image ? `https://cf.shopee.tw/file/${image}_tn` : '',
+          source: '蝦皮'
+        };
+      }).filter(r => r.name && r.url.includes('/product/'));
+    };
+
     const loadRisingProducts = async (keywords) => {
       const loadingEl = document.getElementById('tr-rising-loading');
       const statusEl = document.getElementById('tr-rising-status');
@@ -1842,75 +1874,67 @@ const App = {
       if (listEl) listEl.style.display = 'none';
       if (errorEl) errorEl.style.display = 'none';
 
-      const results = [];
       const proxy = 'https://api.allorigins.win/raw?url=';
       const top = keywords.slice(0, 6);
+      const results = [];
 
       for (let i = 0; i < top.length; i++) {
         const kw = top[i];
-        if (statusEl) statusEl.textContent = `分析關鍵字 (${i+1}/${top.length})：${kw}`;
+        if (statusEl) statusEl.textContent = `分析 (${i+1}/${top.length})：${kw}`;
         try {
-          const url = `https://shopee.tw/api/v4/search/search_item?by=sales&keyword=${encodeURIComponent(kw)}&limit=3&newest=0&order=desc&page_type=search&scenario=PAGE_GLOBAL_SEARCH&version=2`;
-          const data = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(6000) }).then(r => r.json());
-          const items = data?.items || [];
-          items.forEach(item => {
-            const b = item.item_basic || item;
-            const name = b.name || b.title || '';
-            const price = b.price ? Math.round(b.price / 100000) : (b.price_min ? Math.round(b.price_min / 100000) : 0);
-            const sold = b.historical_sold || b.sold || 0;
-            const itemId = b.itemid || b.item_id;
-            const shopId = b.shopid || b.shop_id;
-            const image = b.image || b.images?.[0] || '';
-            if (name && itemId && shopId) {
-              results.push({ keyword: kw, name, price, sold, itemId, shopId, image });
-            }
-          });
-        } catch { /* skip */ }
+          const prods = await _fetchPChome(kw, proxy);
+          if (prods.length) { results.push(...prods); continue; }
+        } catch {}
+        try {
+          const prods = await _fetchShopee(kw, proxy);
+          results.push(...prods);
+        } catch {}
       }
 
       if (loadingEl) loadingEl.style.display = 'none';
       if (!listEl) return;
 
       if (results.length === 0) {
-        if (errorEl) {
-          errorEl.style.display = '';
-          errorEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:13px">
-            無法自動取得蝦皮商品（API 受限）<br>
-            <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-              ${top.map(kw => `<a href="https://shopee.tw/search?keyword=${encodeURIComponent(kw)}" target="_blank" style="padding:4px 10px;background:#ee4d2d22;color:#ee4d2d;border-radius:999px;text-decoration:none;font-size:12px;font-weight:600">${escapeHtml(kw)}</a>`).join('')}
-            </div>
-          </div>`;
-        }
+        listEl.style.display = '';
+        listEl.innerHTML = `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">
+          <div style="font-size:24px;margin-bottom:8px">⏳</div>
+          資料抓取中，請稍候幾秒後按「🔄 重新分析」
+        </div>`;
         return;
       }
 
-      // 同關鍵字只取銷量最高 1 筆，排序
+      // 每個關鍵字取最高評論數/銷量一筆
       const seen = new Set();
       const deduped = results.filter(r => { if (seen.has(r.keyword)) return false; seen.add(r.keyword); return true; });
       deduped.sort((a, b) => b.sold - a.sold);
 
+      const srcColors = { 'PChome': '#0067b8', '蝦皮': '#ee4d2d' };
       listEl.style.display = '';
       listEl.innerHTML = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px">
           ${deduped.map(r => {
-            const imgUrl = r.image ? `https://cf.shopee.tw/file/${r.image}_tn` : '';
-            const soldStr = r.sold >= 10000 ? (r.sold/10000).toFixed(1)+'萬' : r.sold.toLocaleString();
-            return `<a href="https://shopee.tw/product/${r.shopId}/${r.itemId}" target="_blank"
+            const soldStr = r.sold >= 10000 ? (r.sold/10000).toFixed(1)+'萬則評論' : r.sold > 0 ? r.sold+'則評論' : '';
+            const srcColor = srcColors[r.source] || '#666';
+            return `<a href="${r.url}" target="_blank"
               style="display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden;text-decoration:none;color:inherit;transition:box-shadow .15s"
               onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
-              ${imgUrl ? `<img src="${imgUrl}" style="width:100%;aspect-ratio:1;object-fit:cover;background:#f3f4f6" onerror="this.style.display='none'">` : `<div style="width:100%;aspect-ratio:1;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:32px">🛍</div>`}
-              <div style="padding:10px 12px;flex:1">
-                <div style="font-size:12px;background:#ee4d2d22;color:#ee4d2d;display:inline-block;padding:2px 8px;border-radius:999px;font-weight:600;margin-bottom:6px">🔥 ${escapeHtml(r.keyword)}</div>
-                <div style="font-size:13px;font-weight:600;line-height:1.4;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escapeHtml(r.name)}</div>
+              <div style="position:relative">
+                <img src="${r.image}" style="width:100%;aspect-ratio:1;object-fit:cover;background:#f3f4f6;display:block"
+                  onerror="this.parentNode.innerHTML='<div style=\'width:100%;aspect-ratio:1;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:36px\'>🛍</div>'">
+                <span style="position:absolute;top:6px;left:6px;background:${srcColor};color:white;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px">${r.source}</span>
+              </div>
+              <div style="padding:10px 12px;flex:1;display:flex;flex-direction:column">
+                <div style="font-size:11px;background:#f59e0b22;color:#d97706;display:inline-block;padding:2px 7px;border-radius:999px;font-weight:600;margin-bottom:5px;width:fit-content">🔥 ${escapeHtml(r.keyword)}</div>
+                <div style="font-size:13px;font-weight:600;line-height:1.4;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;flex:1">${escapeHtml(r.name)}</div>
                 <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between">
-                  <span style="font-size:15px;font-weight:700;color:#ee4d2d">NT$${r.price.toLocaleString()}</span>
-                  <span style="font-size:11px;color:var(--text-muted)">售出 ${soldStr}</span>
+                  <span style="font-size:15px;font-weight:700;color:${srcColor}">NT$${r.price.toLocaleString()}</span>
+                  ${soldStr ? `<span style="font-size:10px;color:var(--text-muted)">${soldStr}</span>` : ''}
                 </div>
               </div>
             </a>`;
           }).join('')}
         </div>
-        <div style="margin-top:10px;font-size:11px;color:var(--text-muted)">來源：蝦皮台灣 · 依熱搜關鍵字自動取得銷量最高商品</div>`;
+        <div style="margin-top:10px;font-size:11px;color:var(--text-muted)">來源：PChome 24h / 蝦皮台灣 · 依 Google 熱搜關鍵字自動取得</div>`;
     };
 
     // 一鍵跨平台搜尋
