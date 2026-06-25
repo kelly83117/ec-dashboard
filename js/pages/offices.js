@@ -168,23 +168,28 @@ Object.assign(App, {
     const diffColor = diff >= 0 ? '#10b981' : '#ef4444';
     const diffLabel = diff >= 0 ? '領先' : '落後';
 
+    // 「📖 指標說明」按鈕 — 大家都看得到，點開跳出完整 KPI 圖
+    const infoBtn = `<button id="design-kpi-info-btn" class="btn-ghost" style="padding:6px 12px;font-size:13px">📖 指標說明</button>`;
     // admin 才能切設計師 / 月份
     const switcher = st.isAdmin ? `
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        ${infoBtn}
         ${st.DESIGNERS.map(n => `<button class="pill ${n === st.viewName ? 'active' : ''}" data-design-pick="${escapeHtml(n)}">${escapeHtml(n)}</button>`).join('')}
         <input type="month" class="design-kpi-month" value="${st.yMonth}" style="margin-left:8px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
       </div>` : `
-      <input type="month" class="design-kpi-month" value="${st.yMonth}" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">`;
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${infoBtn}
+        <input type="month" class="design-kpi-month" value="${st.yMonth}" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+      </div>`;
 
     // ───────── A 區：工時記錄表 ─────────
-    // 圖種與標準工時（依 D:\Windows\Desktop\設計.xlsx「指標說明」頁圖2 量化指標）
+    // 圖種與標準工時（依 D:\Windows\Desktop\設計.xlsx 指標說明圖 量化指標）
     const PRESET_TYPES = [
       { name: '主圖',          minutes: 20 },
-      { name: '主圖（森）',     minutes: 10 },
-      { name: '套圖',          minutes: 105 },  // 1 小時 45 分
+      { name: '套圖',          minutes: 45 },
       { name: 'Banner',        minutes: 40 },
-      { name: '剪輯-有素材',    minutes: 60 },   // 1 小時
-      { name: '剪輯-自拍',      minutes: 120 },  // 2 小時
+      { name: '剪輯（有素材）', minutes: 60 },
+      { name: '剪輯（自拍）',   minutes: 120 },
       { name: '社群圖文',       minutes: 15 },
     ];
     const entriesRowsHtml = (data.entries || []).length === 0
@@ -409,6 +414,12 @@ Object.assign(App, {
       return Store.get(key, null) || { entries: [], fixedTasks: {}, skills: [] };
     };
 
+    // 📖 指標說明 — 跳出 KPI 全圖
+    const infoBtn = document.getElementById('design-kpi-info-btn');
+    if (infoBtn) {
+      infoBtn.addEventListener('click', () => this._openDesignKpiInfoModal());
+    }
+
     // admin 切設計師
     document.querySelectorAll('[data-design-pick]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -502,6 +513,24 @@ Object.assign(App, {
         (data.skills || []).splice(idx, 1);
         saveAndRender(data);
       });
+    });
+  },
+
+  // 設計 KPI 指標說明 modal — 顯示 D:\Windows\Desktop\設計.xlsx 內的 KPI 全圖
+  _openDesignKpiInfoModal() {
+    this.openModal({
+      title: '📐 設計團隊 KPI 指標說明',
+      width: '92vw',
+      hideFooter: true,
+      enableEsc: true,
+      bodyHtml: `
+        <div style="padding:4px 0">
+          <div style="background:#eef2ff;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#4338ca">
+            📋 總分 100 分　·　A 達標工時 60 分　·　B 指派固定任務 30 分　·　C Skill 累積 10 分（額外加分最高 +10，總分仍以 100 計）
+          </div>
+          <img src="assets/design/kpi_overview.jpg" alt="設計團隊 KPI 指標說明" style="display:block;width:100%;height:auto;border-radius:8px;border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.08)">
+        </div>
+      `,
     });
   },
   viewOffice(deptId, subRoute = null) {
