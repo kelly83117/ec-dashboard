@@ -177,11 +177,15 @@ Object.assign(App, {
       <input type="month" class="design-kpi-month" value="${st.yMonth}" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">`;
 
     // ───────── A 區：工時記錄表 ─────────
+    // 圖種與標準工時（依 D:\Windows\Desktop\設計.xlsx「指標說明」頁圖2 量化指標）
     const PRESET_TYPES = [
-      { name: '主圖', minutes: 20 },
-      { name: '主圖（森）', minutes: 10 },
-      { name: '套圖', minutes: 105 },
-      { name: 'Banner', minutes: 40 },
+      { name: '主圖',          minutes: 20 },
+      { name: '主圖（森）',     minutes: 10 },
+      { name: '套圖',          minutes: 105 },  // 1 小時 45 分
+      { name: 'Banner',        minutes: 40 },
+      { name: '剪輯-有素材',    minutes: 60 },   // 1 小時
+      { name: '剪輯-自拍',      minutes: 120 },  // 2 小時
+      { name: '社群圖文',       minutes: 15 },
     ];
     const entriesRowsHtml = (data.entries || []).length === 0
       ? `<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px">本月還沒有工時記錄</td></tr>`
@@ -325,6 +329,11 @@ Object.assign(App, {
     const pct = Math.max(0, Math.min(100, k.total));
     const targetPct = Math.max(0, Math.min(100, todayTarget));
 
+    // 三張並排小卡：每日目標 / 今日應達 / 領先(落後)
+    const statusBg = diff >= 0 ? '#ecfdf5' : '#fee2e2';
+    const statusBand = diff >= 0 ? '#10b981' : '#ef4444';
+    const statusIcon = diff >= 0 ? '🚀' : '⚠️';
+
     const header = `
       <div class="table-card" style="margin-bottom:16px;border-top:3px solid ${color}">
         <div style="padding:18px 22px">
@@ -335,22 +344,41 @@ Object.assign(App, {
             </div>
             ${switcher}
           </div>
-          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:8px">
-            <div style="font-size:36px;font-weight:800;color:${color};font-variant-numeric:tabular-nums;line-height:1">${k.total.toFixed(1)}<span style="font-size:16px;color:var(--text-muted);font-weight:500"> / 100</span></div>
-            <div style="font-size:14px;color:var(--text-muted)">
-              <div>今日基準 <strong style="color:var(--text)">${todayTarget.toFixed(1)}</strong> 分（第 ${todayIdx} / ${workDays} 工作天）</div>
-              <div style="margin-top:2px">${diffLabel} <strong style="color:${diffColor}">${diffSign}${diff.toFixed(1)}</strong> 分　·　每日目標 <strong style="color:var(--text)">${dailyTarget.toFixed(1)}</strong> 分</div>
-            </div>
+
+          <!-- 大字目前分數 -->
+          <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+            <div style="font-size:42px;font-weight:800;color:${color};font-variant-numeric:tabular-nums;line-height:1">${k.total.toFixed(1)}</div>
+            <div style="font-size:18px;color:var(--text-muted);font-weight:500">/ 100 分</div>
           </div>
-          <!-- 進度條：底色 = 100% 灰，藍色 = 實際分，紅色虛線 = 今日基準 -->
-          <div style="position:relative;height:14px;background:var(--bg);border-radius:8px;overflow:hidden;border:1px solid var(--border)">
+
+          <!-- 進度條：藍色 = 實際分；紅色細線 = 今日基準位置 -->
+          <div style="position:relative;height:14px;background:var(--bg);border-radius:8px;overflow:hidden;border:1px solid var(--border);margin-bottom:4px">
             <div style="position:absolute;top:0;left:0;height:100%;width:${pct}%;background:linear-gradient(90deg, ${color}88 0%, ${color} 100%);border-radius:7px;transition:width .3s ease"></div>
-            <div style="position:absolute;top:-2px;bottom:-2px;left:${targetPct}%;width:2px;background:#ef4444"></div>
+            <div style="position:absolute;top:-2px;bottom:-2px;left:${targetPct}%;width:2px;background:#ef4444" title="今日應達基準"></div>
           </div>
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:4px">
-            <span>0</span>
-            <span style="color:#ef4444">今日基準 ${todayTarget.toFixed(1)}</span>
-            <span>100</span>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:14px">
+            <span>0 分</span>
+            <span style="color:#ef4444">▲ 今日應達 ${todayTarget.toFixed(1)}</span>
+            <span>100 分</span>
+          </div>
+
+          <!-- 三張並排：每日進度分數拆解 -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));gap:10px">
+            <div style="background:#eef2ff;border-left:3px solid #6366f1;padding:10px 14px;border-radius:7px">
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:2px">每日該完成的分數</div>
+              <div style="font-size:22px;font-weight:800;color:#4338ca;font-variant-numeric:tabular-nums;line-height:1">${dailyTarget.toFixed(2)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分/天</span></div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:3px">100 分 ÷ ${workDays} 工作天</div>
+            </div>
+            <div style="background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:7px">
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:2px">今天應該已累計</div>
+              <div style="font-size:22px;font-weight:800;color:#92400e;font-variant-numeric:tabular-nums;line-height:1">${todayTarget.toFixed(1)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分</span></div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:3px">第 ${todayIdx} / ${workDays} 個工作天</div>
+            </div>
+            <div style="background:${statusBg};border-left:3px solid ${statusBand};padding:10px 14px;border-radius:7px">
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:2px">${statusIcon} ${diffLabel}進度</div>
+              <div style="font-size:22px;font-weight:800;color:${statusBand};font-variant-numeric:tabular-nums;line-height:1">${diffSign}${diff.toFixed(1)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分</span></div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${diff >= 0 ? '太棒了，繼續保持' : '加把勁就追得回來'}</div>
+            </div>
           </div>
         </div>
       </div>`;
