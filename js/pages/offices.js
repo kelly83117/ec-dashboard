@@ -168,8 +168,8 @@ Object.assign(App, {
     const diffColor = diff >= 0 ? '#10b981' : '#ef4444';
     const diffLabel = diff >= 0 ? '領先' : '落後';
 
-    // 「📖 指標說明」按鈕 — 大家都看得到，點開跳出完整 KPI 圖
-    const infoBtn = `<button id="design-kpi-info-btn" class="btn-ghost" style="padding:6px 12px;font-size:13px">📖 指標說明</button>`;
+    // 「📖 指標說明」按鈕 — 紫色實心，避免白底卡片內混色看不見
+    const infoBtn = `<button id="design-kpi-info-btn" type="button" style="padding:7px 14px;font-size:13px;font-weight:600;border:0;border-radius:6px;background:var(--primary);color:white;cursor:pointer;font-family:inherit;box-shadow:0 1px 3px rgba(79,70,229,.25)">📖 指標說明</button>`;
     // admin 才能切設計師 / 月份
     const switcher = st.isAdmin ? `
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
