@@ -370,8 +370,126 @@ Object.assign(App, {
         <div style="display:flex">${revenueTableHtml}</div>
         <div style="display:flex">${this.dailyLineChartHtml(platforms)}</div>
       </div>
+      ${this.renderDashboardTrendWidget()}
     `;
   },
+  renderDashboardTrendWidget() {
+    const PLATFORMS = [
+      { id: 'shopee', name: '蝦皮',   color: '#ee4d2d', icon: '🛍', hotUrl: 'https://shopee.tw/flash_sale',    searchUrl: 'https://shopee.tw/search?keyword=' },
+      { id: 'tiktok', name: 'TikTok', color: '#010101', icon: '📱', hotUrl: 'https://www.tiktok.com/trending',  searchUrl: 'https://www.tiktok.com/search?q=' },
+      { id: '1688',   name: '1688',   color: '#ff6600', icon: '🏭', hotUrl: 'https://www.1688.com/huo/',         searchUrl: 'https://s.1688.com/selloffer/offerlist.htm?keywords=' },
+      { id: 'taobao', name: '淘寶',   color: '#ff5000', icon: '🛒', hotUrl: 'https://www.taobao.com',            searchUrl: 'https://s.taobao.com/search?q=' },
+    ];
+    const platformBtns = PLATFORMS.map(p =>
+      `<a href="${p.hotUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:${p.color};color:white;border-radius:7px;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap">${p.icon} ${p.name}</a>`
+    ).join('');
+
+    return `
+      <div class="table-card" style="margin-top:16px">
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div>
+            <h3 style="margin:0;font-size:15px">🔥 熱搜雷達</h3>
+            <p style="margin:2px 0 0;font-size:12px;color:var(--text-muted)">Google 台灣即時熱搜 · 一鍵跨平台搜尋找起飛商品</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            ${platformBtns}
+            <button id="dash-gt-refresh" style="padding:6px 12px;border:1px solid var(--border);background:white;border-radius:7px;font-size:12px;cursor:pointer">🔄</button>
+          </div>
+        </div>
+
+        <!-- 一鍵搜尋列 -->
+        <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px">
+          <input id="dash-trend-kw" type="text" placeholder="輸入關鍵字，一鍵在四大平台搜尋..."
+            style="flex:1;padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
+          <button id="dash-trend-search" style="padding:7px 18px;background:#6366f1;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">🔍 全部搜尋</button>
+        </div>
+
+        <!-- Google Trends 列表 -->
+        <div style="padding:12px 14px">
+          <div id="dash-gt-loading" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);padding:6px 0">
+            <div style="width:13px;height:13px;border:2px solid var(--border);border-top-color:#4285f4;border-radius:50%;animation:spin 0.8s linear infinite"></div>載入 Google 台灣熱搜中...
+          </div>
+          <div id="dash-gt-list" style="display:none"></div>
+          <div id="dash-gt-error" style="display:none"></div>
+        </div>
+      </div>`;
+  },
+
+  bindDashboardTrendRadar() {
+    const PLATFORMS = [
+      { id: 'shopee', name: '蝦皮',   color: '#ee4d2d', icon: '🛍', searchUrl: 'https://shopee.tw/search?keyword=' },
+      { id: 'tiktok', name: 'TikTok', color: '#010101', icon: '📱', searchUrl: 'https://www.tiktok.com/search?q=' },
+      { id: '1688',   name: '1688',   color: '#ff6600', icon: '🏭', searchUrl: 'https://s.1688.com/selloffer/offerlist.htm?keywords=' },
+      { id: 'taobao', name: '淘寶',   color: '#ff5000', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
+    ];
+
+    // 一鍵跨平台搜尋
+    const searchBtn = document.getElementById('dash-trend-search');
+    const kwInput = document.getElementById('dash-trend-kw');
+    const doSearch = () => {
+      const kw = (kwInput?.value || '').trim();
+      if (!kw) { showToast('請輸入關鍵字', 'error'); return; }
+      PLATFORMS.forEach(p => window.open(p.searchUrl + encodeURIComponent(kw), '_blank'));
+    };
+    searchBtn?.addEventListener('click', doSearch);
+    kwInput?.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+    // Google Trends 載入
+    const loadGT = () => {
+      const loading = document.getElementById('dash-gt-loading');
+      const list = document.getElementById('dash-gt-list');
+      const error = document.getElementById('dash-gt-error');
+      if (loading) loading.style.display = 'flex';
+      if (list) list.style.display = 'none';
+      if (error) error.style.display = 'none';
+
+      fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent('https://trends.google.com/trends/trendingsearches/daily/rss?geo=TW'))
+        .then(r => { if (!r.ok) throw new Error(); return r.text(); })
+        .then(xml => {
+          const doc = new DOMParser().parseFromString(xml, 'text/xml');
+          const items = Array.from(doc.querySelectorAll('item')).slice(0, 20);
+          if (!items.length) throw new Error();
+          if (loading) loading.style.display = 'none';
+          if (!list) return;
+          list.style.display = '';
+          list.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px">' +
+            items.map((item, i) => {
+              const title = item.querySelector('title')?.textContent || '';
+              const traffic = item.querySelector('approx_traffic')?.textContent || '';
+              const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+              const bg = i < 3 ? '#f0f6ff' : (i % 2 === 0 ? '#fafafa' : 'white');
+              const rankColor = i < 3 ? '#4285f4' : i < 10 ? '#555' : '#999';
+              const pLinks = PLATFORMS.map(p =>
+                `<a href="${p.searchUrl}${encodeURIComponent(title)}" target="_blank" style="padding:2px 6px;background:${p.color};color:white;border-radius:4px;font-size:10px;text-decoration:none;font-weight:600">${p.icon}${p.name}</a>`
+              ).join('');
+              return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:${bg}">
+                <span style="font-weight:800;color:${rankColor};min-width:24px;text-align:center;font-size:12px;flex-shrink:0">${medal}</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:${i<3?'700':'500'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(title)}</div>
+                  ${traffic ? `<div style="font-size:10px;color:#4285f4;margin-top:1px">${escapeHtml(traffic)} 搜尋</div>` : ''}
+                </div>
+                <div style="display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;max-width:100px">${pLinks}</div>
+              </div>`;
+            }).join('') + '</div>' +
+            '<div style="margin-top:10px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;align-items:center">' +
+            '<span>來源：Google Trends 台灣 · 每日更新</span>' +
+            '<a href="https://trends.google.com.tw/trending?geo=TW" target="_blank" style="color:#4285f4;text-decoration:none;font-weight:600">查看完整榜單 ↗</a></div>';
+        })
+        .catch(() => {
+          if (loading) loading.style.display = 'none';
+          if (error) {
+            error.style.display = '';
+            error.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;font-size:13px;color:var(--text-muted)">
+              <span>無法自動載入（請確認網路）</span>
+              <a href="https://trends.google.com.tw/trending?geo=TW" target="_blank" style="padding:5px 12px;background:#4285f4;color:white;border-radius:6px;font-size:12px;text-decoration:none">開啟 Google Trends ↗</a>
+            </div>`;
+          }
+        });
+    };
+    document.getElementById('dash-gt-refresh')?.addEventListener('click', loadGT);
+    loadGT();
+  },
+
   dailyLineChartHtml(platforms /* days param ignored now */) {
     const now = new Date();
     const curY = now.getFullYear();

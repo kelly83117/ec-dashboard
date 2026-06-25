@@ -423,6 +423,7 @@ const OFFICE_CONFIG = {
     ],
     tabs: [
       { key: 'ai-select', title: '🤖 AI 選品', dynamic: 'ai-select' },
+      { key: 'trend-radar', title: '🔥 熱搜雷達', dynamic: 'trend-radar' },
       { key: 'supplier', title: '🏭 供應商管理', dynamic: 'supplier-mgmt' },
       { key: 'profit-calc', title: '💰 毛利試算機', dynamic: 'profit-calc' },
       { key: 'kanban', title: '📋 選品任務板', dynamic: 'product-kanban' },
@@ -880,10 +881,10 @@ const App = {
       return;
     }
     switch (this.route) {
-      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip(); break;
+      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip(); this.bindDashboardTrendRadar(); break;
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
-      default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip();
+      default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip(); this.bindDashboardTrendRadar();
     }
   },
 
@@ -1676,6 +1677,307 @@ const App = {
           showToast('上傳失敗，請稍後再試', 'error');
         }
       } catch(e) { if (loading) loading.style.display = 'none'; showToast('失敗', 'error'); }
+    });
+  },
+
+  /* ===== 熱搜雷達 ===== */
+  renderTrendRadarTab() {
+    const logs = JSON.parse(localStorage.getItem('ec_d3_trend_logs') || '[]');
+    const PLATFORMS = [
+      { id: 'shopee',  name: '蝦皮',   color: '#ee4d2d', icon: '🛍', hotUrl: 'https://shopee.tw/flash_sale',     searchUrl: 'https://shopee.tw/search?keyword=' },
+      { id: 'tiktok',  name: 'TikTok', color: '#010101', icon: '📱', hotUrl: 'https://www.tiktok.com/trending',   searchUrl: 'https://www.tiktok.com/search?q=' },
+      { id: '1688',    name: '1688',   color: '#ff6600', icon: '🏭', hotUrl: 'https://www.1688.com/huo/',          searchUrl: 'https://s.1688.com/selloffer/offerlist.htm?keywords=' },
+      { id: 'taobao',  name: '淘寶',   color: '#ff5000', icon: '🛒', hotUrl: 'https://www.taobao.com',             searchUrl: 'https://s.taobao.com/search?q=' },
+    ];
+
+    const logRows = logs.length === 0
+      ? `<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text-muted);font-size:13px">還沒有記錄，發現起飛商品就記在這裡！</td></tr>`
+      : logs.map((l, i) => {
+          const p = PLATFORMS.find(x => x.id === l.platform);
+          const trendColor = l.trend === '🚀 急速上升' ? '#059669' : l.trend === '📈 穩定成長' ? '#2563eb' : '#d97706';
+          return `<tr>
+            <td style="font-size:12px;color:var(--text-muted);white-space:nowrap">${escapeHtml(l.date || '')}</td>
+            <td><span style="background:${p ? p.color+'22' : '#eee'};color:${p ? p.color : '#666'};padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600">${p ? p.icon+' '+p.name : escapeHtml(l.platformName || l.platform)}</span></td>
+            <td style="font-weight:600">${escapeHtml(l.keyword || '')}</td>
+            <td style="font-size:13px;color:var(--text-muted)">${escapeHtml(l.heat || '')}</td>
+            <td style="color:${trendColor};font-weight:600;font-size:13px;white-space:nowrap">${escapeHtml(l.trend || '')}</td>
+            <td style="font-size:12px;color:var(--text-muted);max-width:160px">${escapeHtml(l.note || '')}</td>
+            <td><button class="trend-log-del" data-i="${i}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;padding:2px 6px">🗑</button></td>
+          </tr>`;
+        }).join('');
+
+    const platformBtns = PLATFORMS.map(p =>
+      `<a href="${p.hotUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:${p.color};color:white;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;white-space:nowrap">${p.icon} ${p.name} 熱搜</a>`
+    ).join('');
+
+    return `
+      <!-- 平台快速入口 -->
+      <div class="table-card" style="margin-bottom:16px">
+        <div class="table-card-header">
+          <h3>🔥 多平台熱搜入口</h3>
+          <p>點擊直接前往各平台最新熱搜 / 爆款榜單</p>
+        </div>
+        <div style="padding:14px 16px;display:flex;flex-wrap:wrap;gap:10px">${platformBtns}</div>
+      </div>
+
+      <!-- 一鍵跨平台搜尋 -->
+      <div class="table-card" style="margin-bottom:16px">
+        <div class="table-card-header"><h3>🔍 一鍵跨平台搜尋</h3><p>輸入關鍵字，同時在四大平台開啟搜尋結果</p></div>
+        <div style="padding:14px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <input id="trend-kw" type="text" placeholder="例：露營燈、磁吸手機殼、寵物推車..." style="flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--border);border-radius:7px;font-size:14px;font-family:inherit;box-sizing:border-box">
+          <button id="trend-search-all" style="padding:9px 22px;background:#6366f1;color:white;border:0;border-radius:7px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap">🔍 全部搜尋</button>
+        </div>
+      </div>
+
+      <!-- Google Trends 台灣 -->
+      <div class="table-card" style="margin-bottom:16px">
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div><h3>📊 Google 台灣即時熱搜</h3><p>每日熱門關鍵字 · 點擊直接跳轉各平台搜尋</p></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button id="tr-gt-refresh" style="padding:5px 12px;border:1px solid var(--border);background:white;border-radius:6px;font-size:13px;cursor:pointer">🔄 重整</button>
+            <a href="https://trends.google.com.tw/trending?geo=TW" target="_blank" style="padding:5px 12px;background:#4285f4;color:white;border-radius:6px;font-size:13px;text-decoration:none;font-weight:600">開啟 Trends ↗</a>
+          </div>
+        </div>
+        <div style="padding:14px 16px">
+          <div id="tr-gt-loading" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted)">
+            <div style="width:14px;height:14px;border:2px solid var(--border);border-top-color:#4285f4;border-radius:50%;animation:spin 0.8s linear infinite"></div>載入中...
+          </div>
+          <div id="tr-gt-list" style="display:none"></div>
+          <div id="tr-gt-error" style="display:none"></div>
+        </div>
+      </div>
+
+      <!-- TikTok 熱門 Hashtag -->
+      <div class="table-card" style="margin-bottom:16px">
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div><h3>📱 TikTok 台灣熱門話題</h3><p>近 7 天熱門 Hashtag · 挖掘爆款品類趨勢</p></div>
+          <a href="https://ads.tiktok.com/business/creativecenter/inspiration/popular/hashtag/pc/zh" target="_blank"
+             style="padding:5px 12px;background:#010101;color:white;border-radius:6px;font-size:13px;text-decoration:none;font-weight:600">開啟 Creative Center ↗</a>
+        </div>
+        <div style="padding:14px 16px">
+          <div id="tr-tt-loading" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted)">
+            <div style="width:14px;height:14px;border:2px solid var(--border);border-top-color:#333;border-radius:50%;animation:spin 0.8s linear infinite"></div>載入中...
+          </div>
+          <div id="tr-tt-list" style="display:none"></div>
+          <div id="tr-tt-error" style="display:none"></div>
+        </div>
+      </div>
+
+      <!-- 手動起飛商品記錄 -->
+      <div class="table-card" style="margin-bottom:16px">
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div><h3>📝 起飛商品記錄</h3><p>把各平台發現的起飛商品記錄在這裡，作為選品決策依據</p></div>
+          <button id="trend-log-add-btn" style="padding:7px 16px;background:#10b981;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增紀錄</button>
+        </div>
+        <div id="trend-log-form" style="display:none;padding:14px 16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
+            <div style="min-width:120px">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">平台</div>
+              <select id="tl-platform" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+                <option value="shopee">🛍 蝦皮</option>
+                <option value="tiktok">📱 TikTok</option>
+                <option value="1688">🏭 1688</option>
+                <option value="taobao">🛒 淘寶</option>
+              </select>
+            </div>
+            <div style="flex:2;min-width:160px">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">商品 / 關鍵字 *</div>
+              <input id="tl-keyword" type="text" placeholder="例：磁吸行動電源、露營帳篷" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box">
+            </div>
+            <div style="flex:1;min-width:140px">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">熱度指標</div>
+              <input id="tl-heat" type="text" placeholder="例：搜尋+30%、1.2億觀看" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box">
+            </div>
+            <div style="min-width:130px">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">趨勢判斷</div>
+              <select id="tl-trend" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+                <option>🚀 急速上升</option>
+                <option>📈 穩定成長</option>
+                <option>👀 觀察中</option>
+              </select>
+            </div>
+            <div style="flex:2;min-width:160px">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">備註</div>
+              <input id="tl-note" type="text" placeholder="例：競品少、客單價高" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box">
+            </div>
+            <button id="tl-save" style="padding:7px 16px;background:#10b981;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+            <button id="tl-cancel" style="padding:7px 12px;border:1px solid var(--border);background:white;border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table style="width:100%;font-size:13px">
+            <thead style="background:var(--surface)">
+              <tr>
+                <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted);width:90px">日期</th>
+                <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted);width:90px">平台</th>
+                <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted)">商品 / 關鍵字</th>
+                <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted);width:150px">熱度指標</th>
+                <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted);width:120px">趨勢判斷</th>
+                <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted)">備註</th>
+                <th style="padding:8px 10px;width:40px"></th>
+              </tr>
+            </thead>
+            <tbody>${logRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  },
+
+  bindTrendRadar() {
+    const PLATFORMS = [
+      { id: 'shopee',  name: '蝦皮',   color: '#ee4d2d', icon: '🛍', searchUrl: 'https://shopee.tw/search?keyword=' },
+      { id: 'tiktok',  name: 'TikTok', color: '#010101', icon: '📱', searchUrl: 'https://www.tiktok.com/search?q=' },
+      { id: '1688',    name: '1688',   color: '#ff6600', icon: '🏭', searchUrl: 'https://s.1688.com/selloffer/offerlist.htm?keywords=' },
+      { id: 'taobao',  name: '淘寶',   color: '#ff5000', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
+    ];
+
+    // 一鍵跨平台搜尋
+    document.getElementById('trend-search-all')?.addEventListener('click', () => {
+      const kw = (document.getElementById('trend-kw')?.value || '').trim();
+      if (!kw) { showToast('請輸入關鍵字', 'error'); return; }
+      PLATFORMS.forEach(p => window.open(p.searchUrl + encodeURIComponent(kw), '_blank'));
+    });
+    document.getElementById('trend-kw')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('trend-search-all')?.click();
+    });
+
+    // Google Trends 載入
+    const loadGT = () => {
+      const loading = document.getElementById('tr-gt-loading');
+      const list = document.getElementById('tr-gt-list');
+      const error = document.getElementById('tr-gt-error');
+      if (loading) loading.style.display = 'flex';
+      if (list) list.style.display = 'none';
+      if (error) error.style.display = 'none';
+
+      fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent('https://trends.google.com/trends/trendingsearches/daily/rss?geo=TW'))
+        .then(r => { if (!r.ok) throw new Error(); return r.text(); })
+        .then(xml => {
+          const doc = new DOMParser().parseFromString(xml, 'text/xml');
+          const items = Array.from(doc.querySelectorAll('item')).slice(0, 20);
+          if (!items.length) throw new Error();
+          if (loading) loading.style.display = 'none';
+          if (!list) return;
+          list.style.display = '';
+          list.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+            items.map((item, i) => {
+              const title = item.querySelector('title')?.textContent || '';
+              const traffic = item.querySelector('approx_traffic')?.textContent || '';
+              const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+              const bg = i < 3 ? '#f0f6ff' : (i % 2 === 0 ? '#fafafa' : 'white');
+              const rankColor = i < 3 ? '#4285f4' : i < 10 ? '#555' : '#999';
+              const platformLinks = PLATFORMS.map(p =>
+                `<a href="${p.searchUrl}${encodeURIComponent(title)}" target="_blank" style="padding:2px 7px;background:${p.color};color:white;border-radius:4px;font-size:10px;text-decoration:none;font-weight:600;text-align:center">${p.icon}${p.name}</a>`
+              ).join('');
+              return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:${bg}">
+                <span style="font-weight:800;color:${rankColor};min-width:28px;text-align:center;font-size:13px">${medal}</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:${i<3?'700':'500'};color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(title)}</div>
+                  ${traffic ? `<div style="font-size:11px;color:#4285f4;margin-top:1px">${escapeHtml(traffic)} 搜尋</div>` : ''}
+                </div>
+                <div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0">${platformLinks}</div>
+              </div>`;
+            }).join('') + '</div>' +
+            '<div style="margin-top:10px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;align-items:center">' +
+            '<span>來源：Google Trends 台灣 · 每日更新</span>' +
+            '<a href="https://trends.google.com.tw/trending?geo=TW" target="_blank" style="color:#4285f4;text-decoration:none;font-weight:600">查看完整榜單 ↗</a></div>';
+        })
+        .catch(() => {
+          if (loading) loading.style.display = 'none';
+          if (error) {
+            error.style.display = '';
+            error.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text-muted)">
+              <div style="font-size:22px;margin-bottom:6px">😔</div>
+              <div style="font-size:13px;margin-bottom:10px">無法自動載入（CORS / 網路限制）</div>
+              <a href="https://trends.google.com.tw/trending?geo=TW" target="_blank" style="padding:6px 14px;background:#4285f4;color:white;border-radius:6px;font-size:13px;text-decoration:none">開啟 Google Trends ↗</a>
+            </div>`;
+          }
+        });
+    };
+    document.getElementById('tr-gt-refresh')?.addEventListener('click', loadGT);
+    loadGT();
+
+    // TikTok Creative Center 熱門 Hashtag
+    const loadTT = () => {
+      const loading = document.getElementById('tr-tt-loading');
+      const list = document.getElementById('tr-tt-list');
+      const error = document.getElementById('tr-tt-error');
+      if (loading) loading.style.display = 'flex';
+      if (list) list.style.display = 'none';
+      if (error) error.style.display = 'none';
+
+      const ttUrl = 'https://ads.tiktok.com/business/creativecenter/api/v1/trending/hashtags/list?period=7&page=1&limit=20&country_code=TW&language=zh-Hant';
+      fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(ttUrl))
+        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+        .then(data => {
+          const tags = (data?.data?.list) || [];
+          if (!tags.length) throw new Error('no data');
+          if (loading) loading.style.display = 'none';
+          if (!list) return;
+          list.style.display = '';
+          const tagChips = tags.map((t, i) => {
+            const name = t.hashtag_name || t.name || '';
+            const views = t.video_views || t.view_count || 0;
+            const viewStr = views >= 1e8 ? (views/1e8).toFixed(1)+'億' : views >= 1e4 ? Math.round(views/1e4)+'萬' : (views || '');
+            const bg = i < 3 ? '#010101' : '#f3f4f6';
+            const fg = i < 3 ? 'white' : 'var(--text)';
+            return `<a href="https://www.tiktok.com/search?q=${encodeURIComponent('#'+name)}" target="_blank"
+              style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;background:${bg};color:${fg};border-radius:999px;text-decoration:none;font-size:13px;font-weight:600">
+              #${escapeHtml(name)}${viewStr ? `<span style="font-size:10px;opacity:.75">${viewStr}</span>` : ''}
+            </a>`;
+          }).join('');
+          list.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:8px">${tagChips}</div>
+            <div style="margin-top:10px;font-size:11px;color:var(--text-muted)">來源：TikTok Creative Center · 近 7 天 TW 熱門標籤</div>`;
+        })
+        .catch(() => {
+          if (loading) loading.style.display = 'none';
+          if (error) {
+            error.style.display = '';
+            error.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text-muted)">
+              <div style="font-size:13px;margin-bottom:10px">TikTok API 受限，請直接開啟 Creative Center 查看</div>
+              <a href="https://ads.tiktok.com/business/creativecenter/inspiration/popular/hashtag/pc/zh" target="_blank" style="padding:6px 14px;background:#010101;color:white;border-radius:6px;font-size:13px;text-decoration:none">開啟 TikTok Creative Center ↗</a>
+            </div>`;
+          }
+        });
+    };
+    loadTT();
+
+    // 起飛商品記錄表單
+    const form = document.getElementById('trend-log-form');
+    document.getElementById('trend-log-add-btn')?.addEventListener('click', () => {
+      if (!form) return;
+      form.style.display = form.style.display === 'none' ? '' : 'none';
+    });
+    document.getElementById('tl-cancel')?.addEventListener('click', () => {
+      if (form) form.style.display = 'none';
+    });
+    document.getElementById('tl-save')?.addEventListener('click', () => {
+      const kw = (document.getElementById('tl-keyword')?.value || '').trim();
+      if (!kw) { showToast('請填寫商品 / 關鍵字', 'error'); return; }
+      const platform = document.getElementById('tl-platform')?.value || 'shopee';
+      const pInfo = PLATFORMS.find(p => p.id === platform);
+      const list = JSON.parse(localStorage.getItem('ec_d3_trend_logs') || '[]');
+      list.unshift({
+        date: new Date().toISOString().slice(0, 10),
+        platform,
+        platformName: pInfo?.name || platform,
+        keyword: kw,
+        heat: (document.getElementById('tl-heat')?.value || '').trim(),
+        trend: document.getElementById('tl-trend')?.value || '',
+        note: (document.getElementById('tl-note')?.value || '').trim(),
+      });
+      localStorage.setItem('ec_d3_trend_logs', JSON.stringify(list));
+      showToast('已記錄！', 'success');
+      this.render();
+    });
+    document.querySelectorAll('.trend-log-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const list = JSON.parse(localStorage.getItem('ec_d3_trend_logs') || '[]');
+        list.splice(+btn.dataset.i, 1);
+        localStorage.setItem('ec_d3_trend_logs', JSON.stringify(list));
+        showToast('已刪除', 'success');
+        this.render();
+      });
     });
   },
 

@@ -51,6 +51,8 @@ Object.assign(App, {
       this.bindDesignKpi(deptId);
     } else if (tab?.dynamic === 'ai-select') {
       this.bindAiSelect(deptId);
+    } else if (tab?.dynamic === 'trend-radar') {
+      this.bindTrendRadar();
     } else if (tab?.dynamic === 'img-search') {
       this.bindImgSearch();
     } else if (tab?.dynamic === 'shopee-trend') {
@@ -585,6 +587,8 @@ Object.assign(App, {
         tabContent = this.renderDesignKpiTab(deptId, color, dept);
       } else if (activeTab.dynamic === 'ai-select') {
         tabContent = this.renderAiSelectTab(deptId, color, dept);
+      } else if (activeTab.dynamic === 'trend-radar') {
+        tabContent = this.renderTrendRadarTab();
       } else if (activeTab.dynamic === 'img-search') {
         tabContent = this.renderImgSearchTab();
       } else if (activeTab.dynamic === 'shopee-trend') {
