@@ -520,13 +520,13 @@ Object.assign(App, {
   _openDesignKpiInfoModal() {
     this.openModal({
       title: '',
-      width: '90vw',
+      width: '70vw',
       hideFooter: true,
       enableEsc: true,
       bodyHtml: `
         <div style="padding:0;text-align:center">
           <img src="assets/design/kpi_overview.jpg" alt="設計團隊 KPI 指標說明"
-               style="display:block;max-width:100%;max-height:calc(90vh - 110px);width:auto;height:auto;margin:0 auto;border-radius:8px;border:1px solid var(--border)">
+               style="display:block;max-width:100%;max-height:calc(80vh - 90px);width:auto;height:auto;margin:0 auto;border-radius:8px;border:1px solid var(--border)">
         </div>
       `,
     });
