@@ -516,19 +516,19 @@ Object.assign(App, {
     });
   },
 
-  // 設計 KPI 指標說明 modal — 顯示 D:\Windows\Desktop\設計.xlsx 內的 KPI 全圖
+  // 設計 KPI 指標說明 modal — 圖片自動縮放到視窗大小，不需捲動
+  //   modal 寬度給夠（CSS 預設 max-width 480px 會把圖卡住溢出）；
+  //   圖片同時鎖住 max-width:100% 跟 max-height:viewport，自動依比例縮
   _openDesignKpiInfoModal() {
     this.openModal({
       title: '📐 設計團隊 KPI 指標說明',
-      width: '92vw',
+      width: '90vw',
       hideFooter: true,
       enableEsc: true,
       bodyHtml: `
-        <div style="padding:4px 0">
-          <div style="background:#eef2ff;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#4338ca">
-            📋 總分 100 分　·　A 達標工時 60 分　·　B 指派固定任務 30 分　·　C Skill 累積 10 分（額外加分最高 +10，總分仍以 100 計）
-          </div>
-          <img src="assets/design/kpi_overview.jpg" alt="設計團隊 KPI 指標說明" style="display:block;width:100%;height:auto;border-radius:8px;border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.08)">
+        <div style="padding:0;text-align:center">
+          <img src="assets/design/kpi_overview.jpg" alt="設計團隊 KPI 指標說明"
+               style="display:block;max-width:100%;max-height:calc(90vh - 130px);width:auto;height:auto;margin:0 auto;border-radius:8px;border:1px solid var(--border)">
         </div>
       `,
     });
