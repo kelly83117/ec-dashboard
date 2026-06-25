@@ -1,0 +1,16 @@
+# 開發工具產出（個人本機，不入版控）
+_screenshot_*.png
+_verify_*.png
+*.tmp
+
+# 大型資料備份（不是程式碼）
+_backup_*.json
+
+# IDE / 工具本機設定
+.claude/launch.json
+.vscode/
+.idea/
+
+# 系統垃圾
+Thumbs.db
+.DS_Store

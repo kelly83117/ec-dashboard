@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[self-check 提醒] 回報前要自問：(1) 有實際開瀏覽器/curl/server 跑過 → 寫「🟢 已實測」 (2) 只跑程式碼檢查/grep/sed → 寫「🟡 未實測 browser，只程式碼驗證」 (3) 純改文件/md/設定 → 寫「⚪ 無需測試」。永遠不要漏掉這行驗證狀態。'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[stop-check] 你的最後一則回報結尾有「🟢 已實測 / 🟡 未實測 / ⚪ 無需測試」驗證狀態行嗎？沒有就補上。'"
+          }
+        ]
+      }
+    ]
+  }
+}
