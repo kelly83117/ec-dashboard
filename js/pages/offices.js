@@ -516,19 +516,17 @@ Object.assign(App, {
     });
   },
 
-  // 設計 KPI 指標說明 modal — 圖片自動縮放到視窗大小，不需捲動
-  //   modal 寬度給夠（CSS 預設 max-width 480px 會把圖卡住溢出）；
-  //   圖片同時鎖住 max-width:100% 跟 max-height:viewport，自動依比例縮
+  // 設計 KPI 指標說明 modal — 只放圖，不放標題（標題已寫在圖內）
   _openDesignKpiInfoModal() {
     this.openModal({
-      title: '📐 設計團隊 KPI 指標說明',
+      title: '',
       width: '90vw',
       hideFooter: true,
       enableEsc: true,
       bodyHtml: `
         <div style="padding:0;text-align:center">
           <img src="assets/design/kpi_overview.jpg" alt="設計團隊 KPI 指標說明"
-               style="display:block;max-width:100%;max-height:calc(90vh - 130px);width:auto;height:auto;margin:0 auto;border-radius:8px;border:1px solid var(--border)">
+               style="display:block;max-width:100%;max-height:calc(90vh - 110px);width:auto;height:auto;margin:0 auto;border-radius:8px;border:1px solid var(--border)">
         </div>
       `,
     });
