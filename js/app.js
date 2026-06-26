@@ -1044,27 +1044,20 @@ const App = {
       if (listEl) listEl.style.display = 'none';
       if (errorEl) errorEl.style.display = 'none';
 
-      const rssUrl = 'https://trends.google.com/trends/trendingsearches/daily/rss?geo=TW';
-      const e = encodeURIComponent(rssUrl);
-      const proxyTries = [
-        'https://corsproxy.io/?' + e,
-        'https://crossorigin.me/' + rssUrl,
-        'https://api.allorigins.win/raw?url=' + e,
-      ];
-      const proxyFetch = async () => {
-        for (const u of proxyTries) {
-          try { const r = await fetch(u, { signal: AbortSignal.timeout(8000) }); if (r.ok) return r; } catch {}
-        }
-        throw new Error('proxy_fail');
-      };
-
-      proxyFetch()
-        .then(r => r.text())
-        .then(xml => {
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(xml, 'text/xml');
-          const items = Array.from(doc.querySelectorAll('item')).slice(0, 20);
-          if (!items.length) throw new Error('no items');
+      // 從 GitHub Actions 每日自動更新的 JSON 讀取（同 domain，無 CORS 問題）
+      fetch('/data/trends.json?_=' + Date.now(), { signal: AbortSignal.timeout(8000) })
+        .then(r => r.json())
+        .then(data => {
+          const rawItems = data.items || [];
+          if (!rawItems.length) throw new Error('no items');
+          // 轉成統一格式供後續使用
+          const items = rawItems.map(it => ({
+            querySelector: (sel) => {
+              if (sel === 'title') return { textContent: it.title };
+              if (sel === 'approx_traffic') return it.traffic ? { textContent: it.traffic } : null;
+              return null;
+            }
+          }));
 
           if (loadingEl) loadingEl.style.display = 'none';
           if (listEl) {
@@ -1976,12 +1969,18 @@ const App = {
       if (list) list.style.display = 'none';
       if (error) error.style.display = 'none';
 
-      _pfetch('https://trends.google.com/trends/trendingsearches/daily/rss?geo=TW')
-        .then(r => r.text())
-        .then(xml => {
-          const doc = new DOMParser().parseFromString(xml, 'text/xml');
-          const items = Array.from(doc.querySelectorAll('item')).slice(0, 20);
-          if (!items.length) throw new Error();
+      fetch('/data/trends.json?_=' + Date.now(), { signal: AbortSignal.timeout(8000) })
+        .then(r => r.json())
+        .then(data => {
+          const rawItems = data.items || [];
+          if (!rawItems.length) throw new Error();
+          const items = rawItems.map(it => ({
+            querySelector: (sel) => {
+              if (sel === 'title') return { textContent: it.title };
+              if (sel === 'approx_traffic') return it.traffic ? { textContent: it.traffic } : null;
+              return null;
+            }
+          }));
           if (loading) loading.style.display = 'none';
           if (!list) return;
           list.style.display = '';
