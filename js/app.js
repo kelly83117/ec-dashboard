@@ -1701,7 +1701,6 @@ const App = {
             <h3 style="margin:0;color:#d97706">🚀 正在起飛的商品（自動推薦）</h3>
             <p style="margin:2px 0 0;font-size:12px;color:var(--text-muted)">根據 Google 台灣熱搜關鍵字，自動在蝦皮找出最多人買的相關商品</p>
           </div>
-          <button id="tr-rising-refresh" style="padding:5px 12px;border:1px solid var(--border);background:white;border-radius:6px;font-size:13px;cursor:pointer">🔄 重新分析</button>
         </div>
         <div style="padding:14px 16px">
           <div id="tr-rising-loading" style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-muted);padding:6px 0">
