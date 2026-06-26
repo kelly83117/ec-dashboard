@@ -1745,11 +1745,7 @@ const App = {
         }).join('');
 
     const platformBtns = PLATFORMS.map(p =>
-      `<a href="${p.hotUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:${p.color};color:white;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;white-space:nowrap">${p.icon} ${p.name} 熱搜</a>`
-    ).join('');
-
-    const platformBtns = PLATFORMS.map(p =>
-      `<a href="${p.hotUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:${p.color};color:white;border-radius:7px;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap">${p.icon} ${p.name}</a>`
+      `<a href="${p.hotUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:${p.color};color:white;border-radius:7px;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap">${p.icon} ${p.name} 熱搜</a>`
     ).join('');
 
     const logTableBody = `

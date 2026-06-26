@@ -190,16 +190,16 @@ Object.assign(App, {
       { name: '社群圖文',       minutes: 15 },
     ];
     const entriesRowsHtml = (data.entries || []).length === 0
-      ? `<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px">本月還沒有工時記錄</td></tr>`
+      ? `<tr><td colspan="7" style="padding:24px;text-align:left;color:var(--text-muted);font-size:13px">本月還沒有工時記錄</td></tr>`
       : (data.entries || []).map((e, i) => `
         <tr data-entry-idx="${i}">
-          <td style="padding:6px 8px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${escapeHtml(e.date || '')}</td>
-          <td style="padding:6px 8px;font-size:13px">${escapeHtml(e.product || '')}</td>
-          <td style="padding:6px 8px;font-size:13px;color:var(--text-muted)">${escapeHtml(e.type || '')}</td>
-          <td style="padding:6px 8px;font-size:13px;text-align:center;font-variant-numeric:tabular-nums">${e.stdMinutes || ''}</td>
-          <td style="padding:6px 8px;text-align:center">${e.met ? '<span style="color:#10b981;font-weight:700">✓ 達標</span>' : '<span style="color:#ef4444;font-weight:700">✗ 超時</span>'}</td>
-          <td style="padding:6px 8px;font-size:12px;color:var(--text-muted)">${escapeHtml(e.note || '')}</td>
-          <td style="padding:6px 8px;text-align:center"><button class="icon-btn design-entry-del" data-entry-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
+          <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${escapeHtml(e.date || '')}</td>
+          <td style="padding:6px 8px;text-align:left;font-size:13px">${escapeHtml(e.product || '')}</td>
+          <td style="padding:6px 8px;text-align:left;font-size:13px;color:var(--text-muted)">${escapeHtml(e.type || '')}</td>
+          <td style="padding:6px 8px;text-align:left;font-size:13px;font-variant-numeric:tabular-nums">${e.stdMinutes || ''}</td>
+          <td style="padding:6px 8px;text-align:left">${e.met ? '<span style="color:#10b981;font-weight:700">✓ 達標</span>' : '<span style="color:#ef4444;font-weight:700">✗ 超時</span>'}</td>
+          <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted)">${escapeHtml(e.note || '')}</td>
+          <td style="padding:6px 8px;text-align:left"><button class="icon-btn design-entry-del" data-entry-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
         </tr>`).join('');
 
     const sectionA = `
@@ -236,10 +236,10 @@ Object.assign(App, {
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:96px">日期</th>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted)">商品</th>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:110px">圖種</th>
-                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted);width:80px">標準(分)</th>
-                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted);width:80px">是否達標</th>
+                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:80px">標準(分)</th>
+                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:80px">是否達標</th>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:140px">備註</th>
-                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted);width:40px"></th>
+                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:40px"></th>
               </tr>
             </thead>
             <tbody>${entriesRowsHtml}</tbody>
@@ -250,12 +250,12 @@ Object.assign(App, {
     // ───────── B 區：固定任務 ─────────
     const taskRowsHtml = k.tasksScored.map(t => `
       <tr data-task-key="${t.key}">
-        <td style="padding:8px 12px;font-size:13px;font-weight:600">${escapeHtml(t.name)}</td>
-        <td style="padding:8px 12px;font-size:12px;color:var(--text-muted)">${escapeHtml(t.schedule)}</td>
-        <td style="padding:8px 12px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:600">${t.points}</td>
-        <td style="padding:6px 8px;text-align:center"><input type="number" class="design-task-missed" data-task-key="${t.key}" min="0" value="${t.missed}" style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:5px;font-size:13px;text-align:center;font-family:inherit"></td>
-        <td style="padding:6px 8px;text-align:center"><input type="number" class="design-task-errors" data-task-key="${t.key}" min="0" value="${t.errors}" style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:5px;font-size:13px;text-align:center;font-family:inherit"></td>
-        <td style="padding:8px 12px;text-align:center;font-size:14px;font-weight:700;color:${t.score >= t.points ? '#10b981' : t.score > 0 ? '#f59e0b' : '#ef4444'};font-variant-numeric:tabular-nums">${t.score.toFixed(1)}</td>
+        <td style="padding:8px 12px;text-align:left;font-size:13px;font-weight:600">${escapeHtml(t.name)}</td>
+        <td style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted)">${escapeHtml(t.schedule)}</td>
+        <td style="padding:8px 12px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:600">${t.points}</td>
+        <td style="padding:6px 8px;text-align:left"><input type="number" class="design-task-missed" data-task-key="${t.key}" min="0" value="${t.missed}" style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:5px;font-size:13px;text-align:left;font-family:inherit"></td>
+        <td style="padding:6px 8px;text-align:left"><input type="number" class="design-task-errors" data-task-key="${t.key}" min="0" value="${t.errors}" style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:5px;font-size:13px;text-align:left;font-family:inherit"></td>
+        <td style="padding:8px 12px;text-align:left;font-size:14px;font-weight:700;color:${t.score >= t.points ? '#10b981' : t.score > 0 ? '#f59e0b' : '#ef4444'};font-variant-numeric:tabular-nums">${t.score.toFixed(1)}</td>
       </tr>`).join('');
 
     const sectionB = `
@@ -268,15 +268,15 @@ Object.assign(App, {
           <div style="font-size:24px;font-weight:800;color:#f59e0b;font-variant-numeric:tabular-nums">${k.scoreB.toFixed(1)} <span style="font-size:13px;color:var(--text-muted);font-weight:500">/ 30</span></div>
         </div>
         <div class="table-wrap">
-          <table style="width:100%;font-size:13px">
+          <table style="width:auto;font-size:13px">
             <thead style="background:var(--surface)">
               <tr>
-                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted)">固定任務</th>
+                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:280px">固定任務</th>
                 <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:120px">執行時段</th>
-                <th style="padding:8px 12px;text-align:center;font-size:12px;color:var(--text-muted);width:60px">配分</th>
-                <th style="padding:8px 12px;text-align:center;font-size:12px;color:var(--text-muted);width:90px">漏做(次)</th>
-                <th style="padding:8px 12px;text-align:center;font-size:12px;color:var(--text-muted);width:90px">做錯(次)</th>
-                <th style="padding:8px 12px;text-align:center;font-size:12px;color:var(--text-muted);width:80px">本項得分</th>
+                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:60px">配分</th>
+                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:90px">漏做(次)</th>
+                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:90px">做錯(次)</th>
+                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:80px">本項得分</th>
               </tr>
             </thead>
             <tbody>${taskRowsHtml}</tbody>
@@ -286,14 +286,14 @@ Object.assign(App, {
 
     // ───────── C 區：Skill 累積 ─────────
     const skillsRowsHtml = (data.skills || []).length === 0
-      ? `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px">本月尚無 Skill 紀錄（每月需 3 項才能拿基本 10 分）</td></tr>`
+      ? `<tr><td colspan="5" style="padding:24px;text-align:left;color:var(--text-muted);font-size:13px">本月尚無 Skill 紀錄（每月需 3 項才能拿基本 10 分）</td></tr>`
       : (data.skills || []).map((s, i) => `
         <tr data-skill-idx="${i}">
-          <td style="padding:6px 8px;font-size:12px;color:var(--text-muted)">${escapeHtml(s.date || '')}</td>
-          <td style="padding:6px 8px;font-size:13px;font-weight:600">${escapeHtml(s.name || '')}</td>
-          <td style="padding:6px 8px;font-size:12px;color:var(--text-muted)">${escapeHtml(s.notes || '')}</td>
-          <td style="padding:6px 8px;text-align:center">${s.confirmed ? '<span style="color:#10b981;font-weight:700">✓</span>' : '<span style="color:var(--text-muted)">—</span>'}</td>
-          <td style="padding:6px 8px;text-align:center"><button class="icon-btn design-skill-del" data-skill-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
+          <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted)">${escapeHtml(s.date || '')}</td>
+          <td style="padding:6px 8px;text-align:left;font-size:13px;font-weight:600">${escapeHtml(s.name || '')}</td>
+          <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted)">${escapeHtml(s.notes || '')}</td>
+          <td style="padding:6px 8px;text-align:left">${s.confirmed ? '<span style="color:#10b981;font-weight:700">✓</span>' : '<span style="color:var(--text-muted)">—</span>'}</td>
+          <td style="padding:6px 8px;text-align:left"><button class="icon-btn design-skill-del" data-skill-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
         </tr>`).join('');
 
     const sectionC = `
@@ -318,8 +318,8 @@ Object.assign(App, {
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:96px">日期</th>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:200px">技能名稱</th>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted)">內容 / 位置</th>
-                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted);width:80px">主管確認</th>
-                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted);width:40px"></th>
+                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:80px">主管確認</th>
+                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:40px"></th>
               </tr>
             </thead>
             <tbody>${skillsRowsHtml}</tbody>
