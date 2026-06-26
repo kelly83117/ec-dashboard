@@ -1895,15 +1895,11 @@ const App = {
       }).filter(r => r.name);
     };
 
-    // 本地備援商品（API 失敗時顯示）
-    const _fetchLocalProducts = async (keywords) => {
+    // 本地備援商品（API 失敗時顯示，只顯示確定符合關鍵字的商品，不亂配）
+    const _fetchLocalProducts = async () => {
       try {
         const d = await fetch('data/products.json?_=' + Date.now()).then(r => r.json());
-        const items = d.items || [];
-        return keywords.flatMap(kw => {
-          const match = items.filter(p => p.keyword === kw || kw.includes(p.keyword) || p.keyword.includes(kw));
-          return match.length ? match.slice(0, 1) : (items.length ? [{ ...items[Math.floor(Math.random() * items.length)], keyword: kw }] : []);
-        });
+        return d.items || [];
       } catch { return []; }
     };
 
@@ -1955,7 +1951,7 @@ const App = {
       if (errorEl) errorEl.style.display = 'none';
 
       // 先顯示備援商品，讓畫面立刻有東西
-      const localProds = await _fetchLocalProducts(keywords.slice(0, 6));
+      const localProds = await _fetchLocalProducts();
       if (localProds.length) {
         if (loadingEl) loadingEl.style.display = 'none';
         _renderProducts(localProds, listEl, false);
