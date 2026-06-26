@@ -54,7 +54,7 @@ Object.assign(App, {
           <button class="boss-task-toggle" data-task-id="${escapeHtml(t.id)}" title="標記完成" ${canToggle ? '' : 'disabled'}
             style="width:22px;height:22px;border-radius:6px;border:1.5px solid #cbd5e1;background:white;color:white;font-size:13px;cursor:${canToggle ? 'pointer' : 'not-allowed'};flex-shrink:0;display:flex;align-items:center;justify-content:center;${canToggle ? '' : 'opacity:.5'}"></button>
           <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:500;color:var(--text);line-height:1.5">${escapeHtml(t.desc || '')}</div>
+            <div style="font-size:13px;font-weight:500;color:var(--text);line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(t.desc || '')}</div>
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px">
               ${assigneeBadge}
               ${dueChip(t.due)}
