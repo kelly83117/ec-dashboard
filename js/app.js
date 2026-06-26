@@ -1900,7 +1900,7 @@ const App = {
       const deduped = results.filter(r => { if (seen.has(r.keyword)) return false; seen.add(r.keyword); return true; }).slice(0, 5);
       deduped.sort((a, b) => (b.sold || 0) - (a.sold || 0));
       const srcColors = { 'PChome': '#0067b8', '蝦皮': '#ee4d2d' };
-      const tag = isLive ? '' : '<div style="font-size:10px;color:#f59e0b;margin-bottom:8px">⚡ 即時抓取失敗，顯示備援商品 · 點擊可直達蝦皮搜尋</div>';
+      const tag = '';
       listEl.style.display = '';
       listEl.innerHTML = tag + `
         <div style="display:flex;flex-direction:column;gap:8px">
