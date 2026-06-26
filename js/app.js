@@ -1907,6 +1907,44 @@ const App = {
       } catch { return []; }
     };
 
+    const _renderProducts = (results, listEl, isLive) => {
+      if (!listEl) return;
+      const seen = new Set();
+      const deduped = results.filter(r => { if (seen.has(r.keyword)) return false; seen.add(r.keyword); return true; });
+      deduped.sort((a, b) => (b.sold || 0) - (a.sold || 0));
+      const srcColors = { 'PChome': '#0067b8', '蝦皮': '#ee4d2d' };
+      const tag = isLive ? '' : '<div style="font-size:10px;color:#f59e0b;margin-bottom:8px">⚡ 即時抓取失敗，顯示備援商品 · 點擊可直達蝦皮搜尋</div>';
+      listEl.style.display = '';
+      listEl.innerHTML = tag + `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px">
+          ${deduped.map(r => {
+            const soldStr = (r.sold||0) >= 10000 ? ((r.sold)/10000).toFixed(1)+'萬筆' : (r.sold||0) > 0 ? (r.sold)+'筆' : '';
+            const sc = srcColors[r.source] || '#ee4d2d';
+            const imgHtml = r.image
+              ? `<img src="${r.image}" style="width:100%;aspect-ratio:1;object-fit:cover;background:#f3f4f6;display:block" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+              : '';
+            return `<a href="${r.url}" target="_blank"
+              style="display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden;text-decoration:none;color:inherit;transition:box-shadow .15s"
+              onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
+              <div style="position:relative">
+                ${imgHtml}
+                <div style="aspect-ratio:1;background:linear-gradient(135deg,#fee2e2,#fef3c7);display:${r.image?'none':'flex'};align-items:center;justify-content:center;font-size:32px">🛍</div>
+                <span style="position:absolute;top:6px;left:6px;background:${sc};color:white;font-size:9px;font-weight:700;padding:2px 7px;border-radius:999px">${r.source}</span>
+              </div>
+              <div style="padding:9px 11px;flex:1;display:flex;flex-direction:column">
+                <div style="font-size:10px;background:#f59e0b22;color:#d97706;padding:2px 6px;border-radius:999px;font-weight:600;margin-bottom:4px;width:fit-content">🔥 ${escapeHtml(r.keyword)}</div>
+                <div style="font-size:12px;font-weight:600;line-height:1.4;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;flex:1">${escapeHtml(r.name)}</div>
+                <div style="margin-top:7px;display:flex;align-items:center;justify-content:space-between">
+                  <span style="font-size:14px;font-weight:700;color:${sc}">NT$${(r.price||0).toLocaleString()}</span>
+                  ${soldStr ? `<span style="font-size:10px;color:var(--text-muted)">${soldStr}</span>` : ''}
+                </div>
+              </div>
+            </a>`;
+          }).join('')}
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">${isLive ? '即時資料：蝦皮/PChome · 依熱搜關鍵字自動取得' : '備援資料 · 點商品卡片可在蝦皮搜尋該商品'}</div>`;
+    };
+
     const loadRisingProducts = async (keywords) => {
       const loadingEl = document.getElementById('tr-rising-loading');
       const statusEl = document.getElementById('tr-rising-status');
@@ -1916,73 +1954,39 @@ const App = {
       if (listEl) listEl.style.display = 'none';
       if (errorEl) errorEl.style.display = 'none';
 
-      const top = keywords.slice(0, 6);
-      const results = [];
-
-      for (let i = 0; i < top.length; i++) {
-        const kw = top[i];
-        if (statusEl) statusEl.textContent = `分析 (${i+1}/${top.length})：${kw}`;
-        try {
-          const prods = await _fetchShopee(kw);
-          if (prods.length) { results.push(...prods); continue; }
-        } catch {}
-        try {
-          const prods = await _fetchPChome(kw);
-          if (prods.length) { results.push(...prods); continue; }
-        } catch {}
+      // 先顯示備援商品，讓畫面立刻有東西
+      const localProds = await _fetchLocalProducts(keywords.slice(0, 6));
+      if (localProds.length) {
+        if (loadingEl) loadingEl.style.display = 'none';
+        _renderProducts(localProds, listEl, false);
       }
 
-      // 若 API 全部失敗，讀本地備援
-      if (results.length === 0) {
-        if (statusEl) statusEl.textContent = '讀取本地備援商品...';
-        const local = await _fetchLocalProducts(top);
-        results.push(...local);
+      // 背景嘗試即時 API
+      const top = keywords.slice(0, 6);
+      const results = [];
+      for (let i = 0; i < top.length; i++) {
+        const kw = top[i];
+        if (statusEl) statusEl.textContent = `即時更新 (${i+1}/${top.length})：${kw}`;
+        try { const p = await _fetchShopee(kw); if (p.length) { results.push(...p); continue; } } catch {}
+        try { const p = await _fetchPChome(kw); if (p.length) { results.push(...p); continue; } } catch {}
       }
 
       if (loadingEl) loadingEl.style.display = 'none';
-      if (!listEl) return;
+      if (results.length > 0) {
+        // 即時資料成功，取代備援
+        _renderProducts(results, listEl, true);
+      }
+      // 否則保留已顯示的備援商品
 
-      if (results.length === 0) {
-        listEl.style.display = '';
-        listEl.innerHTML = `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">
-          <div style="font-size:24px;margin-bottom:8px">⏳</div>
-          商品資料讀取失敗，請按「🔄 重新分析」
-        </div>`;
+      if (!listEl || (localProds.length === 0 && results.length === 0)) {
+        if (listEl) {
+          listEl.style.display = '';
+          listEl.innerHTML = `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center"><div style="font-size:24px;margin-bottom:8px">⚠️</div>無法載入商品</div>`;
+        }
         return;
       }
 
-      // 每個關鍵字取最高評論數/銷量一筆
-      const seen = new Set();
-      const deduped = results.filter(r => { if (seen.has(r.keyword)) return false; seen.add(r.keyword); return true; });
-      deduped.sort((a, b) => b.sold - a.sold);
-
-      const srcColors = { 'PChome': '#0067b8', '蝦皮': '#ee4d2d' };
-      listEl.style.display = '';
-      listEl.innerHTML = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px">
-          ${deduped.map(r => {
-            const soldStr = r.sold >= 10000 ? (r.sold/10000).toFixed(1)+'萬則評論' : r.sold > 0 ? r.sold+'則評論' : '';
-            const srcColor = srcColors[r.source] || '#666';
-            return `<a href="${r.url}" target="_blank"
-              style="display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden;text-decoration:none;color:inherit;transition:box-shadow .15s"
-              onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
-              <div style="position:relative">
-                <img src="${r.image}" style="width:100%;aspect-ratio:1;object-fit:cover;background:#f3f4f6;display:block"
-                  onerror="this.parentNode.innerHTML='<div style=\'width:100%;aspect-ratio:1;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:36px\'>🛍</div>'">
-                <span style="position:absolute;top:6px;left:6px;background:${srcColor};color:white;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px">${r.source}</span>
-              </div>
-              <div style="padding:10px 12px;flex:1;display:flex;flex-direction:column">
-                <div style="font-size:11px;background:#f59e0b22;color:#d97706;display:inline-block;padding:2px 7px;border-radius:999px;font-weight:600;margin-bottom:5px;width:fit-content">🔥 ${escapeHtml(r.keyword)}</div>
-                <div style="font-size:13px;font-weight:600;line-height:1.4;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;flex:1">${escapeHtml(r.name)}</div>
-                <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between">
-                  <span style="font-size:15px;font-weight:700;color:${srcColor}">NT$${r.price.toLocaleString()}</span>
-                  ${soldStr ? `<span style="font-size:10px;color:var(--text-muted)">${soldStr}</span>` : ''}
-                </div>
-              </div>
-            </a>`;
-          }).join('')}
-        </div>
-        <div style="margin-top:10px;font-size:11px;color:var(--text-muted)">來源：PChome 24h / 蝦皮台灣 · 依 Google 熱搜關鍵字自動取得</div>`;
+      // 渲染已由 _renderProducts 處理完畢
     };
 
     // 一鍵跨平台搜尋
