@@ -38,8 +38,7 @@ jobs:
             "Referer": "https://shopping.pchome.com.tw/",
           }
 
-          # 排除關鍵字（不符合規範）
-          EXCLUDE = ["噴霧", "美妝", "化妝", "保養", "電器", "電風扇", "吹風機", "品牌"]
+          EXCLUDE = ["噴霧", "美妝", "化妝", "保養", "電器", "電風扇", "吹風機"]
 
           items = []
           for (search_kw, label_kw) in KEYWORDS:
@@ -52,55 +51,39 @@ jobs:
               prods = (data.get("Prods") or [])[:3]
               added = 0
               for p in prods:
-                name = p.get("Name", "")
-                pid  = p.get("Id", "")
+                name  = p.get("Name", "")
+                pid   = p.get("Id", "")
                 price = (p.get("Price") or {}).get("M", 0)
                 pic   = p.get("picS", "")
-
-                # 過濾不符合規範的商品
                 if any(bad in name for bad in EXCLUDE):
                   continue
                 if not name or not pid:
                   continue
-
-                # PChome 圖片網址
-                img_url = f"https://a.ecimg.tw/items/{pic}" if pic else ""
-
-                # PChome 商品頁
-                prod_url = f"https://24h.pchome.com.tw/prod/{pid}"
-
                 items.append({
                   "keyword": label_kw,
                   "name":    name,
                   "price":   price,
                   "sold":    0,
-                  "url":     prod_url,
-                  "image":   img_url,
+                  "url":     f"https://24h.pchome.com.tw/prod/{pid}",
+                  "image":   f"https://a.ecimg.tw/items/{pic}" if pic else "",
                   "source":  "PChome"
                 })
                 added += 1
                 if added >= 2:
                   break
-
               print(f"OK {search_kw}: {added} items")
               time.sleep(0.8)
-
             except Exception as e:
               print(f"SKIP {search_kw}: {e}")
 
-          print(f"\nTotal: {len(items)} products")
-
-          # 只有抓到商品才寫檔，避免覆蓋舊資料
+          print(f"Total: {len(items)} products")
           if items:
             os.makedirs("data", exist_ok=True)
             with open("data/products.json", "w", encoding="utf-8") as f:
-              json.dump({
-                "updated": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "items": items
-              }, f, ensure_ascii=False, indent=2)
+              json.dump({"updated": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), "items": items}, f, ensure_ascii=False, indent=2)
             print("Saved products.json")
           else:
-            print("Got 0 products — keeping existing products.json unchanged")
+            print("Got 0 — keeping existing file")
           PYEOF
 
       - name: Commit and push
