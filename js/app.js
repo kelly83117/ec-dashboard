@@ -1815,7 +1815,7 @@ const App = {
     const PLATFORMS = [
       { id: 'shopee',  name: '蝦皮',   color: '#ee4d2d', icon: '🛍', searchUrl: 'https://shopee.tw/search?keyword=' },
       { id: 'tiktok',  name: 'TikTok', color: '#010101', icon: '📱', searchUrl: 'https://www.tiktok.com/search?q=' },
-      { id: '1688',    name: '1688',   color: '#ff6600', icon: '🏭', searchUrl: 'https://www.1688.com/offer_search.htm?keywords=' },
+      { id: '1688',    name: '1688',   color: '#ff6600', icon: '🏭', searchUrl: 'https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=' },
       { id: 'taobao',  name: '淘寶',   color: '#ff5000', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
     ];
 
