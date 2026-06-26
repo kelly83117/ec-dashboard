@@ -1803,8 +1803,9 @@ const App = {
         <div class="table-card-header"><h3>🔍 一鍵跨平台搜尋</h3><p>輸入關鍵字同時在四大平台搜尋，或直接點平台熱搜入口</p></div>
         <div style="padding:12px 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--border)">
           <input id="trend-kw" type="text" placeholder="輸入關鍵字..." style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
-          <button id="trend-search-all" style="padding:8px 18px;background:#6366f1;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">🔍 全部搜尋</button>
+          <button id="trend-search-all" style="padding:8px 18px;background:#6366f1;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">🔍 搜尋</button>
         </div>
+        <div id="trend-links" style="padding:10px 16px;display:none;flex-wrap:wrap;gap:8px"></div>
         <div style="padding:12px 16px;display:flex;flex-wrap:wrap;gap:8px">${platformBtns}</div>
       </div>
     ` + logTableBody;
@@ -1969,11 +1970,18 @@ const App = {
       // 渲染已由 _renderProducts 處理完畢
     };
 
-    // 一鍵跨平台搜尋
+    // 一鍵跨平台搜尋 — 顯示連結讓使用者點擊（繞過瀏覽器彈出封鎖）
     document.getElementById('trend-search-all')?.addEventListener('click', () => {
       const kw = (document.getElementById('trend-kw')?.value || '').trim();
       if (!kw) { showToast('請輸入關鍵字', 'error'); return; }
-      PLATFORMS.forEach((p, i) => setTimeout(() => window.open(p.searchUrl + encodeURIComponent(kw), '_blank'), i * 300));
+      const linksEl = document.getElementById('trend-links');
+      if (!linksEl) return;
+      linksEl.style.display = 'flex';
+      linksEl.innerHTML = PLATFORMS.map(p =>
+        `<a href="${p.searchUrl + encodeURIComponent(kw)}" target="_blank" rel="noopener"
+          style="padding:7px 14px;background:${p.color};color:white;border-radius:7px;font-size:13px;font-weight:600;text-decoration:none">
+          ${p.icon} ${p.name} ↗</a>`
+      ).join('');
     });
     document.getElementById('trend-kw')?.addEventListener('keydown', e => {
       if (e.key === 'Enter') document.getElementById('trend-search-all')?.click();
