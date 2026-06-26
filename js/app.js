@@ -1916,28 +1916,22 @@ const App = {
       const tag = isLive ? '' : '<div style="font-size:10px;color:#f59e0b;margin-bottom:8px">⚡ 即時抓取失敗，顯示備援商品 · 點擊可直達蝦皮搜尋</div>';
       listEl.style.display = '';
       listEl.innerHTML = tag + `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px">
-          ${deduped.map(r => {
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${deduped.map((r, i) => {
             const soldStr = (r.sold||0) >= 10000 ? ((r.sold)/10000).toFixed(1)+'萬筆' : (r.sold||0) > 0 ? (r.sold)+'筆' : '';
             const sc = srcColors[r.source] || '#ee4d2d';
-            const imgHtml = r.image
-              ? `<img src="${r.image}" style="width:100%;aspect-ratio:1;object-fit:cover;background:#f3f4f6;display:block" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
-              : '';
+            const medals = ['🥇','🥈','🥉','4.','5.'];
             return `<a href="${r.url}" target="_blank"
-              style="display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden;text-decoration:none;color:inherit;transition:box-shadow .15s"
+              style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;text-decoration:none;color:inherit;transition:box-shadow .15s"
               onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
-              <div style="position:relative">
-                ${imgHtml}
-                <div style="aspect-ratio:1;background:linear-gradient(135deg,#fee2e2,#fef3c7);display:${r.image?'none':'flex'};align-items:center;justify-content:center;font-size:32px">🛍</div>
-                <span style="position:absolute;top:6px;left:6px;background:${sc};color:white;font-size:9px;font-weight:700;padding:2px 7px;border-radius:999px">${r.source}</span>
+              <div style="font-size:18px;width:24px;text-align:center;flex-shrink:0">${medals[i]||''}</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:10px;color:#d97706;font-weight:600;margin-bottom:2px">🔥 ${escapeHtml(r.keyword)}</div>
+                <div style="font-size:12px;font-weight:600;line-height:1.4;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(r.name)}</div>
               </div>
-              <div style="padding:9px 11px;flex:1;display:flex;flex-direction:column">
-                <div style="font-size:10px;background:#f59e0b22;color:#d97706;padding:2px 6px;border-radius:999px;font-weight:600;margin-bottom:4px;width:fit-content">🔥 ${escapeHtml(r.keyword)}</div>
-                <div style="font-size:12px;font-weight:600;line-height:1.4;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;flex:1">${escapeHtml(r.name)}</div>
-                <div style="margin-top:7px;display:flex;align-items:center;justify-content:space-between">
-                  <span style="font-size:14px;font-weight:700;color:${sc}">NT$${(r.price||0).toLocaleString()}</span>
-                  ${soldStr ? `<span style="font-size:10px;color:var(--text-muted)">${soldStr}</span>` : ''}
-                </div>
+              <div style="text-align:right;flex-shrink:0">
+                <div style="font-size:14px;font-weight:700;color:${sc}">NT$${(r.price||0).toLocaleString()}</div>
+                ${soldStr ? `<div style="font-size:10px;color:var(--text-muted)">${soldStr}</div>` : ''}
               </div>
             </a>`;
           }).join('')}
