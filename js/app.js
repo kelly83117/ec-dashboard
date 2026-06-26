@@ -1798,20 +1798,6 @@ const App = {
       </div>`;
 
     return risingSection + keywordsSection + `
-      <!-- TikTok 熱門話題 -->
-      <div class="table-card" style="margin-bottom:16px">
-        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div><h3>📱 TikTok 台灣熱門話題</h3><p>近 7 天熱門 Hashtag</p></div>
-          <a href="https://ads.tiktok.com/business/creativecenter/inspiration/popular/hashtag/pc/zh" target="_blank" style="padding:5px 12px;background:#010101;color:white;border-radius:6px;font-size:13px;text-decoration:none;font-weight:600">Creative Center ↗</a>
-        </div>
-        <div style="padding:14px 16px">
-          <div id="tr-tt-loading" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted)">
-            <div style="width:13px;height:13px;border:2px solid var(--border);border-top-color:#333;border-radius:50%;animation:spin 0.8s linear infinite"></div>載入中...
-          </div>
-          <div id="tr-tt-list" style="display:none"></div>
-          <div id="tr-tt-error" style="display:none"></div>
-        </div>
-      </div>
       <!-- 平台快速入口 + 一鍵搜尋 -->
       <div class="table-card" style="margin-bottom:16px">
         <div class="table-card-header"><h3>🔍 一鍵跨平台搜尋</h3><p>輸入關鍵字同時在四大平台搜尋，或直接點平台熱搜入口</p></div>
