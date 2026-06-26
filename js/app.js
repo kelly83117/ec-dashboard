@@ -1856,12 +1856,16 @@ const App = {
       throw new Error('all_fail');
     };
 
-    // 蝦皮直接抓（優先，SPA API）
+    // 蝦皮（透過 Cloudflare Worker 代理，解決 CORS）
     const _fetchShopee = async (kw) => {
-      const url = `https://shopee.tw/api/v4/search/search_item?by=sales&keyword=${encodeURIComponent(kw)}&limit=3&newest=0&order=desc&page_type=search&scenario=PAGE_GLOBAL_SEARCH&version=2`;
+      const workerUrl = `https://ec-image-search.jessica-d31.workers.dev/?kw=${encodeURIComponent(kw)}`;
       let data;
-      try { data = await (await _directFetch(url)).json(); }
-      catch { data = await (await _proxyFetch(url)).json(); }
+      try { data = await (await fetch(workerUrl, { signal: AbortSignal.timeout(10000) })).json(); }
+      catch {
+        const url = `https://shopee.tw/api/v4/search/search_item?by=sales&keyword=${encodeURIComponent(kw)}&limit=3&newest=0&order=desc&page_type=search&scenario=PAGE_GLOBAL_SEARCH&version=2`;
+        try { data = await (await _directFetch(url)).json(); }
+        catch { data = await (await _proxyFetch(url)).json(); }
+      }
       return (data?.items || []).map(item => {
         const b = item.item_basic || item;
         const itemId = b.itemid || b.item_id;
