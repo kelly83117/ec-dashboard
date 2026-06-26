@@ -1973,7 +1973,7 @@ const App = {
     document.getElementById('trend-search-all')?.addEventListener('click', () => {
       const kw = (document.getElementById('trend-kw')?.value || '').trim();
       if (!kw) { showToast('請輸入關鍵字', 'error'); return; }
-      PLATFORMS.forEach(p => window.open(p.searchUrl + encodeURIComponent(kw), '_blank'));
+      PLATFORMS.forEach((p, i) => setTimeout(() => window.open(p.searchUrl + encodeURIComponent(kw), '_blank'), i * 300));
     });
     document.getElementById('trend-kw')?.addEventListener('keydown', e => {
       if (e.key === 'Enter') document.getElementById('trend-search-all')?.click();
