@@ -1832,38 +1832,36 @@ const App = {
       { id: 'taobao',  name: '淘寶',   color: '#ff5000', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
     ];
 
-    // 多重 CORS proxy 輪詢（allorigins.win 已失效，改用備援清單）
-    const _pfetch = async (url) => {
+    // 直接呼叫（瀏覽器原生，Shopee 是 SPA 自己就用 JS 呼叫這個 API）
+    const _directFetch = async (url) => {
+      const r = await fetch(url, {
+        signal: AbortSignal.timeout(8000),
+        credentials: 'omit',
+        headers: { 'accept': 'application/json, text/plain, */*' }
+      });
+      if (!r.ok) throw new Error(r.status);
+      return r;
+    };
+
+    // 備援 proxy 輪詢
+    const _proxyFetch = async (url) => {
       const e = encodeURIComponent(url);
       const tries = [
         () => fetch('https://corsproxy.io/?url=' + e, { signal: AbortSignal.timeout(8000) }),
-        () => fetch('https://crossorigin.me/' + url, { signal: AbortSignal.timeout(8000) }),
         () => fetch('https://api.allorigins.win/raw?url=' + e, { signal: AbortSignal.timeout(8000) }),
       ];
       for (const t of tries) {
         try { const r = await t(); if (r.ok) return r; } catch {}
       }
-      throw new Error('proxy_fail');
+      throw new Error('all_fail');
     };
 
-    // 自動分析起飛商品（PChome 主力 + 蝦皮備援）
-    const _fetchPChome = async (kw) => {
-      const url = `https://ecshweb.pchome.com.tw/search/v3.3/?q=${encodeURIComponent(kw)}&page=1&sort=rnk/dc`;
-      const data = await (await _pfetch(url)).json();
-      return (data?.Prods || []).slice(0, 2).map(p => {
-        const id = p.Id || '';
-        return {
-          keyword: kw, name: p.Name || '', price: p.Price || 0,
-          sold: p.totalReviewNum || 0,
-          url: `https://24h.pchome.com.tw/prod/${id}`,
-          image: id ? `https://a.ecimg.tw/items/${id.slice(0,8)}/${id}/000001.jpg` : '',
-          source: 'PChome'
-        };
-      }).filter(r => r.name);
-    };
+    // 蝦皮直接抓（優先，SPA API）
     const _fetchShopee = async (kw) => {
-      const url = `https://shopee.tw/api/v4/search/search_item?by=sales&keyword=${encodeURIComponent(kw)}&limit=2&newest=0&order=desc&page_type=search&scenario=PAGE_GLOBAL_SEARCH&version=2`;
-      const data = await (await _pfetch(url)).json();
+      const url = `https://shopee.tw/api/v4/search/search_item?by=sales&keyword=${encodeURIComponent(kw)}&limit=3&newest=0&order=desc&page_type=search&scenario=PAGE_GLOBAL_SEARCH&version=2`;
+      let data;
+      try { data = await (await _directFetch(url)).json(); }
+      catch { data = await (await _proxyFetch(url)).json(); }
       return (data?.items || []).map(item => {
         const b = item.item_basic || item;
         const itemId = b.itemid || b.item_id;
@@ -1877,6 +1875,36 @@ const App = {
           source: '蝦皮'
         };
       }).filter(r => r.name && r.url.includes('/product/'));
+    };
+
+    // PChome 直接抓
+    const _fetchPChome = async (kw) => {
+      const url = `https://ecshweb.pchome.com.tw/search/v3.3/?q=${encodeURIComponent(kw)}&page=1&sort=rnk/dc`;
+      let data;
+      try { data = await (await _directFetch(url)).json(); }
+      catch { data = await (await _proxyFetch(url)).json(); }
+      return (data?.Prods || []).slice(0, 2).map(p => {
+        const id = p.Id || '';
+        return {
+          keyword: kw, name: p.Name || '', price: p.Price || 0,
+          sold: p.totalReviewNum || 0,
+          url: `https://24h.pchome.com.tw/prod/${id}`,
+          image: id ? `https://a.ecimg.tw/items/${id.slice(0,8)}/${id}/000001.jpg` : '',
+          source: 'PChome'
+        };
+      }).filter(r => r.name);
+    };
+
+    // 本地備援商品（API 失敗時顯示）
+    const _fetchLocalProducts = async (keywords) => {
+      try {
+        const d = await fetch('data/products.json?_=' + Date.now()).then(r => r.json());
+        const items = d.items || [];
+        return keywords.flatMap(kw => {
+          const match = items.filter(p => p.keyword === kw || kw.includes(p.keyword) || p.keyword.includes(kw));
+          return match.length ? match.slice(0, 1) : (items.length ? [{ ...items[Math.floor(Math.random() * items.length)], keyword: kw }] : []);
+        });
+      } catch { return []; }
     };
 
     const loadRisingProducts = async (keywords) => {
@@ -1895,13 +1923,20 @@ const App = {
         const kw = top[i];
         if (statusEl) statusEl.textContent = `分析 (${i+1}/${top.length})：${kw}`;
         try {
-          const prods = await _fetchPChome(kw);
+          const prods = await _fetchShopee(kw);
           if (prods.length) { results.push(...prods); continue; }
         } catch {}
         try {
-          const prods = await _fetchShopee(kw);
-          results.push(...prods);
+          const prods = await _fetchPChome(kw);
+          if (prods.length) { results.push(...prods); continue; }
         } catch {}
+      }
+
+      // 若 API 全部失敗，讀本地備援
+      if (results.length === 0) {
+        if (statusEl) statusEl.textContent = '讀取本地備援商品...';
+        const local = await _fetchLocalProducts(top);
+        results.push(...local);
       }
 
       if (loadingEl) loadingEl.style.display = 'none';
@@ -1911,7 +1946,7 @@ const App = {
         listEl.style.display = '';
         listEl.innerHTML = `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">
           <div style="font-size:24px;margin-bottom:8px">⏳</div>
-          資料抓取中，請稍候幾秒後按「🔄 重新分析」
+          商品資料讀取失敗，請按「🔄 重新分析」
         </div>`;
         return;
       }
