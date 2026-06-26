@@ -1045,7 +1045,7 @@ const App = {
       if (errorEl) errorEl.style.display = 'none';
 
       // 從 GitHub Actions 每日自動更新的 JSON 讀取（同 domain，無 CORS 問題）
-      fetch('/data/trends.json?_=' + Date.now(), { signal: AbortSignal.timeout(8000) })
+      fetch('data/trends.json?_=' + Date.now(), { signal: AbortSignal.timeout(8000) })
         .then(r => r.json())
         .then(data => {
           const rawItems = data.items || [];
@@ -1836,7 +1836,7 @@ const App = {
     const _pfetch = async (url) => {
       const e = encodeURIComponent(url);
       const tries = [
-        () => fetch('https://corsproxy.io/?' + e, { signal: AbortSignal.timeout(8000) }),
+        () => fetch('https://corsproxy.io/?url=' + e, { signal: AbortSignal.timeout(8000) }),
         () => fetch('https://crossorigin.me/' + url, { signal: AbortSignal.timeout(8000) }),
         () => fetch('https://api.allorigins.win/raw?url=' + e, { signal: AbortSignal.timeout(8000) }),
       ];
@@ -1969,7 +1969,7 @@ const App = {
       if (list) list.style.display = 'none';
       if (error) error.style.display = 'none';
 
-      fetch('/data/trends.json?_=' + Date.now(), { signal: AbortSignal.timeout(8000) })
+      fetch('data/trends.json?_=' + Date.now(), { signal: AbortSignal.timeout(8000) })
         .then(r => r.json())
         .then(data => {
           const rawItems = data.items || [];
