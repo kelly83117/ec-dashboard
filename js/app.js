@@ -1045,10 +1045,21 @@ const App = {
       if (errorEl) errorEl.style.display = 'none';
 
       const rssUrl = 'https://trends.google.com/trends/trendingsearches/daily/rss?geo=TW';
-      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(rssUrl);
+      const e = encodeURIComponent(rssUrl);
+      const proxyTries = [
+        'https://corsproxy.io/?' + e,
+        'https://crossorigin.me/' + rssUrl,
+        'https://api.allorigins.win/raw?url=' + e,
+      ];
+      const proxyFetch = async () => {
+        for (const u of proxyTries) {
+          try { const r = await fetch(u, { signal: AbortSignal.timeout(8000) }); if (r.ok) return r; } catch {}
+        }
+        throw new Error('proxy_fail');
+      };
 
-      fetch(proxyUrl)
-        .then(r => { if (!r.ok) throw new Error('fetch failed'); return r.text(); })
+      proxyFetch()
+        .then(r => r.text())
         .then(xml => {
           const parser = new DOMParser();
           const doc = parser.parseFromString(xml, 'text/xml');
@@ -1832,10 +1843,24 @@ const App = {
       { id: 'taobao',  name: '淘寶',   color: '#ff5000', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
     ];
 
+    // 多重 CORS proxy 輪詢（allorigins.win 已失效，改用備援清單）
+    const _pfetch = async (url) => {
+      const e = encodeURIComponent(url);
+      const tries = [
+        () => fetch('https://corsproxy.io/?' + e, { signal: AbortSignal.timeout(8000) }),
+        () => fetch('https://crossorigin.me/' + url, { signal: AbortSignal.timeout(8000) }),
+        () => fetch('https://api.allorigins.win/raw?url=' + e, { signal: AbortSignal.timeout(8000) }),
+      ];
+      for (const t of tries) {
+        try { const r = await t(); if (r.ok) return r; } catch {}
+      }
+      throw new Error('proxy_fail');
+    };
+
     // 自動分析起飛商品（PChome 主力 + 蝦皮備援）
-    const _fetchPChome = async (kw, proxy) => {
+    const _fetchPChome = async (kw) => {
       const url = `https://ecshweb.pchome.com.tw/search/v3.3/?q=${encodeURIComponent(kw)}&page=1&sort=rnk/dc`;
-      const data = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(7000) }).then(r => r.json());
+      const data = await (await _pfetch(url)).json();
       return (data?.Prods || []).slice(0, 2).map(p => {
         const id = p.Id || '';
         return {
@@ -1847,9 +1872,9 @@ const App = {
         };
       }).filter(r => r.name);
     };
-    const _fetchShopee = async (kw, proxy) => {
+    const _fetchShopee = async (kw) => {
       const url = `https://shopee.tw/api/v4/search/search_item?by=sales&keyword=${encodeURIComponent(kw)}&limit=2&newest=0&order=desc&page_type=search&scenario=PAGE_GLOBAL_SEARCH&version=2`;
-      const data = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(7000) }).then(r => r.json());
+      const data = await (await _pfetch(url)).json();
       return (data?.items || []).map(item => {
         const b = item.item_basic || item;
         const itemId = b.itemid || b.item_id;
@@ -1874,7 +1899,6 @@ const App = {
       if (listEl) listEl.style.display = 'none';
       if (errorEl) errorEl.style.display = 'none';
 
-      const proxy = 'https://api.allorigins.win/raw?url=';
       const top = keywords.slice(0, 6);
       const results = [];
 
@@ -1882,11 +1906,11 @@ const App = {
         const kw = top[i];
         if (statusEl) statusEl.textContent = `分析 (${i+1}/${top.length})：${kw}`;
         try {
-          const prods = await _fetchPChome(kw, proxy);
+          const prods = await _fetchPChome(kw);
           if (prods.length) { results.push(...prods); continue; }
         } catch {}
         try {
-          const prods = await _fetchShopee(kw, proxy);
+          const prods = await _fetchShopee(kw);
           results.push(...prods);
         } catch {}
       }
@@ -1956,8 +1980,8 @@ const App = {
       if (list) list.style.display = 'none';
       if (error) error.style.display = 'none';
 
-      fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent('https://trends.google.com/trends/trendingsearches/daily/rss?geo=TW'))
-        .then(r => { if (!r.ok) throw new Error(); return r.text(); })
+      _pfetch('https://trends.google.com/trends/trendingsearches/daily/rss?geo=TW')
+        .then(r => r.text())
         .then(xml => {
           const doc = new DOMParser().parseFromString(xml, 'text/xml');
           const items = Array.from(doc.querySelectorAll('item')).slice(0, 20);
@@ -2022,8 +2046,8 @@ const App = {
       if (error) error.style.display = 'none';
 
       const ttUrl = 'https://ads.tiktok.com/business/creativecenter/api/v1/trending/hashtags/list?period=7&page=1&limit=20&country_code=TW&language=zh-Hant';
-      fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(ttUrl))
-        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+      _pfetch(ttUrl)
+        .then(r => r.json())
         .then(data => {
           const tags = (data?.data?.list) || [];
           if (!tags.length) throw new Error('no data');

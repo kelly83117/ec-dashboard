@@ -432,10 +432,24 @@ Object.assign(App, {
       { id: 'taobao', name: '淘寶',   color: '#ff5000', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
     ];
 
+    // 多重 CORS proxy 輪詢
+    const _pfetch = async (url) => {
+      const e = encodeURIComponent(url);
+      const tries = [
+        () => fetch('https://corsproxy.io/?' + e, { signal: AbortSignal.timeout(8000) }),
+        () => fetch('https://crossorigin.me/' + url, { signal: AbortSignal.timeout(8000) }),
+        () => fetch('https://api.allorigins.win/raw?url=' + e, { signal: AbortSignal.timeout(8000) }),
+      ];
+      for (const t of tries) {
+        try { const r = await t(); if (r.ok) return r; } catch {}
+      }
+      throw new Error('proxy_fail');
+    };
+
     // 自動分析起飛商品（PChome 主力 + 蝦皮備援）
-    const _fetchPC = async (kw, proxy) => {
+    const _fetchPC = async (kw) => {
       const url = `https://ecshweb.pchome.com.tw/search/v3.3/?q=${encodeURIComponent(kw)}&page=1&sort=rnk/dc`;
-      const data = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(7000) }).then(r => r.json());
+      const data = await (await _pfetch(url)).json();
       return (data?.Prods || []).slice(0, 2).map(p => {
         const id = p.Id || '';
         return { keyword: kw, name: p.Name || '', price: p.Price || 0, sold: p.totalReviewNum || 0,
@@ -444,9 +458,9 @@ Object.assign(App, {
           source: 'PChome' };
       }).filter(r => r.name);
     };
-    const _fetchSP = async (kw, proxy) => {
+    const _fetchSP = async (kw) => {
       const url = `https://shopee.tw/api/v4/search/search_item?by=sales&keyword=${encodeURIComponent(kw)}&limit=2&newest=0&order=desc&page_type=search&scenario=PAGE_GLOBAL_SEARCH&version=2`;
-      const data = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(7000) }).then(r => r.json());
+      const data = await (await _pfetch(url)).json();
       return (data?.items || []).map(item => {
         const b = item.item_basic || item;
         const itemId = b.itemid || b.item_id; const shopId = b.shopid || b.shop_id;
@@ -467,14 +481,13 @@ Object.assign(App, {
       if (listEl) listEl.style.display = 'none';
       if (errorEl) errorEl.style.display = 'none';
 
-      const proxy = 'https://api.allorigins.win/raw?url=';
       const top = keywords.slice(0, 5);
       const results = [];
       for (let i = 0; i < top.length; i++) {
         const kw = top[i];
         if (statusEl) statusEl.textContent = `分析 (${i+1}/${top.length})：${kw}`;
-        try { const p = await _fetchPC(kw, proxy); if (p.length) { results.push(...p); continue; } } catch {}
-        try { const p = await _fetchSP(kw, proxy); results.push(...p); } catch {}
+        try { const p = await _fetchPC(kw); if (p.length) { results.push(...p); continue; } } catch {}
+        try { const p = await _fetchSP(kw); results.push(...p); } catch {}
       }
 
       if (loadingEl) loadingEl.style.display = 'none';
@@ -536,8 +549,8 @@ Object.assign(App, {
       if (list) list.style.display = 'none';
       if (error) error.style.display = 'none';
 
-      fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent('https://trends.google.com/trends/trendingsearches/daily/rss?geo=TW'))
-        .then(r => { if (!r.ok) throw new Error(); return r.text(); })
+      _pfetch('https://trends.google.com/trends/trendingsearches/daily/rss?geo=TW')
+        .then(r => r.text())
         .then(xml => {
           const doc = new DOMParser().parseFromString(xml, 'text/xml');
           const items = Array.from(doc.querySelectorAll('item')).slice(0, 20);
