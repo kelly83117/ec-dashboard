@@ -569,6 +569,13 @@ Object.assign(App, {
       <div class="filter-bar" style="margin-bottom:16px">
         <button id="design-kpi-info-btn" type="button" style="padding:7px 14px;font-size:13px;font-weight:600;border:0;border-radius:6px;background:var(--primary);color:white;cursor:pointer;font-family:inherit;box-shadow:0 1px 3px rgba(79,70,229,.25)">📖 指標說明</button>
       </div>
+    ` : deptId === 'd3' ? `
+      <div style="display:flex;flex-direction:column;gap:4px">
+        ${tabs.map(t => `
+          <button class="pill ${t.key === activeTabKey ? 'active' : ''}" data-office-tab="${escapeHtml(t.key)}"
+            style="text-align:left;white-space:nowrap;justify-content:flex-start;padding:8px 14px">${escapeHtml(t.title)}</button>
+        `).join('')}
+      </div>
     ` : `
       <div class="filter-bar" style="margin-bottom:16px">
         ${tabs.map(t => `
@@ -688,8 +695,12 @@ Object.assign(App, {
       ${deptId === 'd1' && !subRoute ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
-      ${deptId !== 'd1' ? tabBar : ''}
-      ${deptId !== 'd1' ? tabContent : ''}
+      ${deptId === 'd3' ? `
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;align-items:start">
+          <div>${tabBar}</div>
+          <div>${tabContent}</div>
+        </div>
+      ` : deptId !== 'd1' ? tabBar + tabContent : ''}
       ${showMemberKpiTable ? `
         <div class="table-card">
           <div class="table-card-header">
