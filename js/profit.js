@@ -248,9 +248,10 @@ function syncToCloud(shop){
     const payload=Store._profitMem&&Store._profitMem[k];
     if(payload) promises.push(window.__cloudProfitCol.setReport(k,payload));
   }
-  // 同步備註
-  const notes=getNotes(shop);
-  if(Object.keys(notes).length>0) promises.push(window.__cloudProfit.setField('ec_notes|'+shop,notes));
+  // 同步備註（按期間獨立存）
+  const _nk=shop+'|'+(s?.curMonth||'')+'|'+(s?.curHalf||'');
+  const notes=getNotes(_nk);
+  if(Object.keys(notes).length>0) promises.push(window.__cloudProfit.setField('ec_notes|'+_nk,notes));
   // 同步編輯
   const edits=getEdits(shop);
   if(Object.keys(edits).length>0) promises.push(window.__cloudProfit.setField('ec_edits|'+shop,edits));
@@ -2146,7 +2147,7 @@ function openNotePopup(shopKey,code){
     document.body.appendChild(modal);
     document.getElementById('pnm-inp').onkeydown=e=>{if(e.key==='Enter')submitProfitNote();if(e.key==='Escape')closeProfitNoteModal();};
   }
-  const baseShop=shopKey.replace('_growth','');
+  const baseShop=shopKey.split('|')[0].replace('_growth','');
   const r=state[baseShop]?._built?.find(x=>x.code===code);
   document.getElementById('pnm-title').textContent=r?`${code}・${r.name}`:code;
   const pnmInp=document.getElementById('pnm-inp');if(pnmInp)pnmInp.value='';
@@ -2183,7 +2184,7 @@ function submitProfitNote(){
   notes[code].adjustments.push({date:today,text:v});
   saveNotes(shopKey,notes);
   closeProfitNoteModal();
-  applyFilters(shopKey.replace('_growth',''));
+  applyFilters(shopKey.split('|')[0].replace('_growth',''));
 }
 function deleteProfitNote(origIdx){
   if(!_pnm)return;
@@ -2202,7 +2203,8 @@ function commitNote(){}
 function renderTable(shop,list){
   const s=state[shop];const built=s._built;
   const edits=getEdits(shop);
-  const notes=getNotes(shop);
+  const noteKey=shop+'|'+s.curMonth+'|'+s.curHalf;
+  const notes=getNotes(noteKey);
   let tRev=0,tGross=0,tAds=0,tPure=0;
   const kpiSrc=list;
   kpiSrc.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
@@ -2273,8 +2275,8 @@ function renderTable(shop,list){
         ${noRevSpan1>0?`<td colspan="${noRevSpan1}" style="color:#d1d5db;text-align:center;font-size:12px">—</td>`:''}
         ${vc('pureProfit')?`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`:''}
         ${noRevSpan2>0?`<td colspan="${noRevSpan2}" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>`:''}
-        ${vc('note')?buildNoteCell(shop,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})()):''}
-        ${shop==='好麻吉'?`${vc('growthRate')?'<td></td>':''}${vc('growthAnalysis')?'<td></td>':''}${vc('growthNote')?'<td></td>':''}`:''}
+        ${vc('note')?buildNoteCell(noteKey,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})()):''}
+        ${shop==='好麻吉'?(()=>{const gnoteId=`gnote-${shop}-${r.code}`;return`${vc('growthRate')?'<td></td>':''}${vc('growthAnalysis')?'<td></td>':''}${vc('growthNote')?buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]):''}`;})():''}
       </tr>`;
     }else{
       html+=`<tr>
@@ -2294,7 +2296,7 @@ function renderTable(shop,list){
         ${vc('clicks')?`<td class="td-num">${r.clicks>0?r.clicks.toLocaleString():'—'}</td>`:''}
         ${vc('dayBudget')?`<td id="td-${shop}-${r.code}-dayBudget" class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>`:''}
         ${vc('analysisLabel')?`<td id="td-${shop}-${r.code}-analysis" class="tl">${anaHtml}</td>`:''}
-        ${vc('note')?buildNoteCell(shop,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})()):''}
+        ${vc('note')?buildNoteCell(noteKey,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})()):''}
         ${shop==='好麻吉'?(()=>{
           const gnoteId=`gnote-${shop}-${r.code}`;
           return `
