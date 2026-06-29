@@ -2464,68 +2464,79 @@ function renderSummary(){
   }).join('');
 
 
-  // 只顯示最近兩個月（本月 + 上個月），其他放進「歷史明細」
+  // 只顯示最近兩個月（本月 + 上個月），其他放進「歷史明細」彈窗
   const now=new Date();
   const prevDate=new Date(now.getFullYear(),now.getMonth()-1,1);
   const prevYM=`${prevDate.getFullYear()}-${String(prevDate.getMonth()+1).padStart(2,'0')}`;
   const recentRows=rows.filter(r=>r.end.substring(0,7)>=prevYM);
   const histRows=rows.filter(r=>r.end.substring(0,7)<prevYM);
 
-  // 單行隱藏（頁面內有效）
-  if(!window._sumHiddenRows)window._sumHiddenRows=new Set();
-  window.toggleHideSumRow=function(btn){
-    const tr=btn.closest('tr');if(!tr)return;
-    const rid=tr.dataset.rid;
-    if(window._sumHiddenRows.has(rid)){
-      window._sumHiddenRows.delete(rid);tr.style.display='';
-      btn.textContent='−';
-    } else {
-      window._sumHiddenRows.add(rid);tr.style.display='none';
-    }
-  };
-
-  const buildRow=(row,bgFull,bgNorm)=>{
-    const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
-    const sm=s.getMonth()+1,sd=s.getDate(),em=e.getMonth()+1,ed=e.getDate();
-    const full=isFullMonth(row);
-    const label=full?`${sm}月份`:(sm===em?`${sm}/${sd} – ${sm}/${ed}`:`${sm}/${sd} – ${em}/${ed}`);
-    const isHidden=window._sumHiddenRows.has(row.id);
-    const hideStyle=isHidden?'style="display:none"':'';
-    const minusBtnStyle='background:none;border:1px solid #d1d5db;border-radius:3px;color:#9ca3af;cursor:pointer;font-size:11px;padding:0 4px;line-height:16px;vertical-align:middle;margin-left:4px';
-    const hideBtn=`<button onclick="event.stopPropagation();toggleHideSumRow(this)" style="${minusBtnStyle}" title="隱藏此行">${isHidden?'＋':'−'}</button>`;
-    const delBtn=`<button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="background:none;border:none;color:#d1d5db;cursor:pointer;font-size:10px;padding:0;vertical-align:middle;margin-left:2px" title="刪除">✕</button>`;
-    if(full){
-      return`<tr data-rid="${row.id}" ${hideStyle} style="background:${bgFull||'#eef2ff'};border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
-        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:${bgFull||'#eef2ff'};z-index:1">${label}${hideBtn}${delBtn}</td>${dataCells(row.shops,true,row.id)}</tr>`;
-    }
-    return`<tr data-rid="${row.id}" ${hideStyle} style="background:${bgNorm||'white'};border-top:1px solid #f0f0f0">
-      <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:${bgNorm||'white'};z-index:1">${label}${hideBtn}${delBtn}</td>${dataCells(row.shops,true,row.id)}</tr>`;
-  };
-
-  const buildTbody=(rowList,bgFull,bgNorm)=>rowList.map(r=>buildRow(r,bgFull,bgNorm)).join('');
-
   const thead=`<thead>
     <tr><th rowspan="2" style="padding:8px 12px;background:#f8fafc;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;text-align:left;white-space:nowrap;vertical-align:middle;min-width:110px;position:sticky;left:0;z-index:3">區間</th>${shopGroupHdr}</tr>
     <tr style="border-bottom:2px solid #e5e7eb">${shopSubHdr}</tr>
   </thead>`;
 
-  const tbody=buildTbody(recentRows)||`<tr><td colspan="${1+SHOPS.length*6}" style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">尚無資料，點下方「＋ 新增週次」開始輸入</td></tr>`;
+  // 主表用（無隱藏按鈕）
+  const buildMainRow=(row)=>{
+    const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
+    const sm=s.getMonth()+1,sd=s.getDate(),em=e.getMonth()+1,ed=e.getDate();
+    const full=isFullMonth(row);
+    const label=full?`${sm}月份`:(sm===em?`${sm}/${sd} – ${sm}/${ed}`:`${sm}/${sd} – ${em}/${ed}`);
+    const delBtn=`<button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="background:none;border:none;color:#d1d5db;cursor:pointer;font-size:10px;padding:0;vertical-align:middle;margin-left:4px" title="刪除">✕</button>`;
+    if(full){
+      return`<tr style="background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
+        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:#eef2ff;z-index:1">${label}${delBtn}</td>${dataCells(row.shops,true,row.id)}</tr>`;
+    }
+    return`<tr style="border-top:1px solid #f0f0f0">
+      <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:white;z-index:1">${label}${delBtn}</td>${dataCells(row.shops,true,row.id)}</tr>`;
+  };
 
-  const histSection=histRows.length?`
-  <details style="margin-bottom:10px">
-    <summary style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:4px 11px;background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:20px;font-size:12px;color:#64748b;font-weight:600;list-style:none;user-select:none">
-      📋 歷史明細 <span style="font-weight:400;color:#94a3b8;font-size:11px">${histRows.length} 筆</span> <span style="font-size:9px;color:#94a3b8">▾</span>
-    </summary>
-    <div style="margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden" class="tscroll">
-      <table style="border-collapse:collapse;width:100%">
-        ${thead}
-        <tbody>${buildTbody(histRows,'#f0fdf4','#f9fafb')}</tbody>
-      </table>
-    </div>
-  </details>`:'';
+  // 彈窗用（左側有 − 隱藏按鈕）
+  const buildModalRow=(row,bgFull,bgNorm)=>{
+    const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
+    const sm=s.getMonth()+1,sd=s.getDate(),em=e.getMonth()+1,ed=e.getDate();
+    const full=isFullMonth(row);
+    const label=full?`${sm}月份`:(sm===em?`${sm}/${sd} – ${sm}/${ed}`:`${sm}/${sd} – ${em}/${ed}`);
+    const hideBtn=`<button onclick="event.stopPropagation();(function(btn){const tr=btn.closest('tr');tr.style.display='none';})(this)" style="background:none;border:1px solid #d1d5db;border-radius:3px;color:#9ca3af;cursor:pointer;font-size:11px;padding:0 5px;line-height:17px;vertical-align:middle;margin-right:6px;flex-shrink:0" title="隱藏此行">−</button>`;
+    if(full){
+      return`<tr style="background:${bgFull||'#eef2ff'};border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
+        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:${bgFull||'#eef2ff'};z-index:1;display:flex;align-items:center">${hideBtn}${label}</td>${dataCells(row.shops,false,row.id)}</tr>`;
+    }
+    return`<tr style="background:${bgNorm||'white'};border-top:1px solid #f0f0f0">
+      <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:${bgNorm||'white'};z-index:1;display:flex;align-items:center">${hideBtn}${label}</td>${dataCells(row.shops,false,row.id)}</tr>`;
+  };
+
+  const tbody=recentRows.map(r=>buildMainRow(r)).join('')||`<tr><td colspan="${1+SHOPS.length*6}" style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">尚無資料，點下方「＋ 新增週次」開始輸入</td></tr>`;
+
+  // 彈窗：所有資料（歷史 + 本月上月），歷史用淡綠背景
+  const modalTbody=[
+    ...histRows.map(r=>buildModalRow(r,'#f0fdf4','#f9fafb')),
+    ...recentRows.map(r=>buildModalRow(r))
+  ].join('');
+
+  window._sumOpenModal=function(){
+    const old=document.getElementById('sum-hist-overlay');
+    if(old){old.remove();return;}
+    const ov=document.createElement('div');
+    ov.id='sum-hist-overlay';
+    ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center';
+    ov.innerHTML=`<div style="background:white;border-radius:12px;width:92%;max-width:960px;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="padding:14px 18px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+        <span style="font-weight:700;font-size:15px;color:#1e293b">📋 歷史明細　<span style="font-size:12px;font-weight:400;color:#94a3b8">共 ${rows.length} 筆　淡綠色 = 已移入歷史</span></span>
+        <button onclick="document.getElementById('sum-hist-overlay').remove()" style="background:none;border:none;font-size:22px;color:#94a3b8;cursor:pointer;line-height:1">×</button>
+      </div>
+      <div style="overflow:auto;flex:1" class="tscroll">
+        <table style="border-collapse:collapse;width:100%">${thead}<tbody>${modalTbody}</tbody></table>
+      </div>
+    </div>`;
+    ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+    document.body.appendChild(ov);
+  };
+
+  const histBtn=rows.length?`<button onclick="window._sumOpenModal()" style="margin-bottom:10px;padding:4px 12px;background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:20px;font-size:12px;color:#64748b;font-weight:600;cursor:pointer">📋 歷史明細 <span style="color:#94a3b8;font-weight:400">${rows.length} 筆</span></button>`:'';
 
   el.innerHTML=`<div style="padding:14px 16px 16px">
-    ${histSection}
+    ${histBtn}
     <div class="tscroll"><table style="border-collapse:collapse;width:100%">
       ${thead}
       <tbody>${tbody}</tbody>
