@@ -2517,44 +2517,47 @@ function renderSummary(){
     ...recentRows.map(r=>buildModalRow(r))
   ].join('');
 
-  // 切換單行折疊/展開（只隱藏資料欄，留下日期列可點還原）
+  // 更新「已隱藏」chip 列
+  function _sumRefreshChips(ov){
+    const bar=ov.querySelector('#sum-chip-bar');
+    if(!bar)return;
+    const hidden=[...ov.querySelectorAll('.sum-modal-row[style*="display:none"],.sum-modal-row[style*="display: none"]')];
+    if(!hidden.length){bar.style.display='none';bar.innerHTML='';return;}
+    bar.style.display='flex';
+    bar.innerHTML='<span style="font-size:11px;color:#9ca3af;white-space:nowrap;align-self:center">已隱藏：</span>'
+      +hidden.map(tr=>{
+        const rid=tr.dataset.rid;
+        const lbl=tr.querySelector('td')?.textContent?.trim()||rid;
+        return`<span style="display:inline-flex;align-items:center;gap:3px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:12px;padding:2px 8px;font-size:11px;color:#64748b;white-space:nowrap">
+          ${lbl}<button onclick="_sumRestoreRow('${rid}')" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:13px;padding:0;line-height:1;margin-left:2px" title="還原">＋</button>
+        </span>`;
+      }).join('')
+      +'<button onclick="_sumShowAll()" style="margin-left:4px;padding:2px 8px;border:1px solid #e2e8f0;border-radius:12px;font-size:11px;color:#64748b;background:#f8fafc;cursor:pointer;white-space:nowrap">全部顯示</button>';
+  }
+
+  // 隱藏單行（完全消失，加入 chip）
   window._sumToggleRow=function(btn){
     const tr=btn.closest('tr');
-    const collapsed=tr.classList.contains('sum-collapsed');
-    if(collapsed){
-      // 展開
-      tr.classList.remove('sum-collapsed');
-      tr.querySelectorAll('.sum-data-td').forEach(td=>{td.style.display='';});
-      tr.style.opacity='1';
-      btn.textContent='−';btn.title='隱藏此行';
-    } else {
-      // 折疊：只隱藏資料欄，日期列保留（可點還原）
-      tr.classList.add('sum-collapsed');
-      tr.querySelectorAll('.sum-data-td').forEach(td=>{td.style.display='none';});
-      tr.style.opacity='0.45';
-      btn.textContent='＋';btn.title='還原此行';
-    }
+    tr.style.display='none';
     const ov=document.getElementById('sum-hist-overlay');
-    if(ov){
-      const n=ov.querySelectorAll('.sum-modal-row.sum-collapsed').length;
-      const badge=ov.querySelector('#sum-hidden-badge');
-      if(badge)badge.textContent=n>0?`（${n} 行已隱藏）`:'';
-    }
+    if(ov)_sumRefreshChips(ov);
   };
 
-  // 顯示全部
+  // 還原單行（從 chip 點）
+  window._sumRestoreRow=function(rid){
+    const ov=document.getElementById('sum-hist-overlay');
+    if(!ov)return;
+    const tr=ov.querySelector(`.sum-modal-row[data-rid="${rid}"]`);
+    if(tr)tr.style.display='';
+    _sumRefreshChips(ov);
+  };
+
+  // 全部顯示
   window._sumShowAll=function(){
     const ov=document.getElementById('sum-hist-overlay');
     if(!ov)return;
-    ov.querySelectorAll('.sum-modal-row.sum-collapsed').forEach(tr=>{
-      tr.classList.remove('sum-collapsed');
-      tr.querySelectorAll('.sum-data-td').forEach(td=>{td.style.display='';});
-      tr.style.opacity='1';
-      const btn=tr.querySelector('.sum-hide-btn');
-      if(btn){btn.textContent='−';btn.title='隱藏此行';}
-    });
-    const badge=ov.querySelector('#sum-hidden-badge');
-    if(badge)badge.textContent='';
+    ov.querySelectorAll('.sum-modal-row').forEach(tr=>{tr.style.display='';});
+    _sumRefreshChips(ov);
   };
 
   window._sumOpenModal=function(){
@@ -2564,15 +2567,11 @@ function renderSummary(){
     ov.id='sum-hist-overlay';
     ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px';
     ov.innerHTML=`<div style="background:white;border-radius:14px;width:98%;max-width:1400px;height:90vh;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,.35)">
-      <div style="padding:14px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:12px">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <span style="font-weight:700;font-size:15px;color:#1e293b">📋 歷史明細</span>
-          <span style="font-size:12px;color:#94a3b8">共 ${rows.length} 筆　淡綠 = 已移入歷史</span>
-          <span id="sum-hidden-badge" style="font-size:12px;color:#f59e0b;font-weight:600"></span>
-          <button onclick="_sumShowAll()" style="padding:3px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;color:#64748b;background:#f8fafc;cursor:pointer">全部顯示</button>
-        </div>
+      <div style="padding:12px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:12px">
+        <span style="font-weight:700;font-size:15px;color:#1e293b">📋 歷史明細　<span style="font-size:12px;font-weight:400;color:#94a3b8">共 ${rows.length} 筆　淡綠 = 已移入歷史</span></span>
         <button onclick="document.getElementById('sum-hist-overlay').remove()" style="background:none;border:none;font-size:24px;color:#94a3b8;cursor:pointer;line-height:1;flex-shrink:0">×</button>
       </div>
+      <div id="sum-chip-bar" style="display:none;flex-wrap:wrap;gap:5px;padding:8px 16px;border-bottom:1px solid #f1f5f9;flex-shrink:0;align-items:center"></div>
       <div style="overflow:auto;flex:1;padding:0">
         <table style="border-collapse:collapse;width:100%;font-size:13px">${thead}<tbody>${modalTbody}</tbody></table>
       </div>
