@@ -26,7 +26,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         </div>
         <div style="width:1px;background:#e5e7eb;align-self:stretch"></div>
         <div style="display:flex;flex-direction:column;gap:5px">
-          <button class="stab" style="background:#c0392b;color:#fff;border-color:#c0392b;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.9" onclick="setCoupangShop('總表',this)">酷澎｜總表</button>
+          <button class="stab" style="background:#0ea5e9;color:#fff;border-color:#0ea5e9;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.9" onclick="setCoupangShop('總表',this)">酷澎｜總表</button>
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setCoupangShop('麻吉',this)"><span class="sdot" style="background:#c0392b"></span>麻吉</button>
             <button class="stab" style="font-size:15px" onclick="setCoupangShop('露營館',this)"><span class="sdot" style="background:#e74c3c"></span>露營館</button>
