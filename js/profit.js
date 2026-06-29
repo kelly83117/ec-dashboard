@@ -2466,61 +2466,70 @@ function renderSummary(){
 
   // 只顯示最近兩個月（本月 + 上個月），其他放進「歷史明細」
   const now=new Date();
-  const curYM=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   const prevDate=new Date(now.getFullYear(),now.getMonth()-1,1);
   const prevYM=`${prevDate.getFullYear()}-${String(prevDate.getMonth()+1).padStart(2,'0')}`;
   const recentRows=rows.filter(r=>r.end.substring(0,7)>=prevYM);
   const histRows=rows.filter(r=>r.end.substring(0,7)<prevYM);
 
-  const buildTbody=(rowList)=>{
-    let t='';
-    rowList.forEach(row=>{
-      const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
-      const sm=s.getMonth()+1,sd=s.getDate(),em=e.getMonth()+1,ed=e.getDate();
-      const full=isFullMonth(row);
-      const label=full?`${sm}月份`:(sm===em?`${sm}/${sd} – ${sm}/${ed}`:`${sm}/${sd} – ${em}/${ed}`);
-      if(full){
-        t+=`<tr style="background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
-          <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:#eef2ff;z-index:1">${label}
-            <button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="margin-left:4px;background:none;border:none;color:#9ca3af;cursor:pointer;font-size:10px;padding:0;vertical-align:middle" title="刪除">✕</button>
-          </td>${dataCells(row.shops,true,row.id)}</tr>`;
-      } else {
-        t+=`<tr style="border-top:1px solid #f0f0f0">
-          <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:white;z-index:1">${label}
-            <button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="margin-left:4px;background:none;border:none;color:#d1d5db;cursor:pointer;font-size:10px;padding:0;vertical-align:middle" title="刪除">✕</button>
-          </td>${dataCells(row.shops,true,row.id)}</tr>`;
-      }
-    });
-    return t;
+  // 單行隱藏（頁面內有效）
+  if(!window._sumHiddenRows)window._sumHiddenRows=new Set();
+  window.toggleHideSumRow=function(btn){
+    const tr=btn.closest('tr');if(!tr)return;
+    const rid=tr.dataset.rid;
+    if(window._sumHiddenRows.has(rid)){
+      window._sumHiddenRows.delete(rid);tr.style.display='';
+      btn.textContent='−';
+    } else {
+      window._sumHiddenRows.add(rid);tr.style.display='none';
+    }
   };
 
-  const tbody=buildTbody(recentRows)||`<tr><td colspan="${1+SHOPS.length*6}" style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">尚無資料，點下方「＋ 新增週次」開始輸入</td></tr>`;
+  const buildRow=(row,bgFull,bgNorm)=>{
+    const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
+    const sm=s.getMonth()+1,sd=s.getDate(),em=e.getMonth()+1,ed=e.getDate();
+    const full=isFullMonth(row);
+    const label=full?`${sm}月份`:(sm===em?`${sm}/${sd} – ${sm}/${ed}`:`${sm}/${sd} – ${em}/${ed}`);
+    const isHidden=window._sumHiddenRows.has(row.id);
+    const hideStyle=isHidden?'style="display:none"':'';
+    const minusBtnStyle='background:none;border:1px solid #d1d5db;border-radius:3px;color:#9ca3af;cursor:pointer;font-size:11px;padding:0 4px;line-height:16px;vertical-align:middle;margin-left:4px';
+    const hideBtn=`<button onclick="event.stopPropagation();toggleHideSumRow(this)" style="${minusBtnStyle}" title="隱藏此行">${isHidden?'＋':'−'}</button>`;
+    const delBtn=`<button onclick="event.stopPropagation();deleteSummaryRow('${row.id}')" style="background:none;border:none;color:#d1d5db;cursor:pointer;font-size:10px;padding:0;vertical-align:middle;margin-left:2px" title="刪除">✕</button>`;
+    if(full){
+      return`<tr data-rid="${row.id}" ${hideStyle} style="background:${bgFull||'#eef2ff'};border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
+        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:${bgFull||'#eef2ff'};z-index:1">${label}${hideBtn}${delBtn}</td>${dataCells(row.shops,true,row.id)}</tr>`;
+    }
+    return`<tr data-rid="${row.id}" ${hideStyle} style="background:${bgNorm||'white'};border-top:1px solid #f0f0f0">
+      <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:${bgNorm||'white'};z-index:1">${label}${hideBtn}${delBtn}</td>${dataCells(row.shops,true,row.id)}</tr>`;
+  };
+
+  const buildTbody=(rowList,bgFull,bgNorm)=>rowList.map(r=>buildRow(r,bgFull,bgNorm)).join('');
 
   const thead=`<thead>
     <tr><th rowspan="2" style="padding:8px 12px;background:#f8fafc;border-bottom:2px solid #e5e7eb;font-size:12px;color:#6b7280;text-align:left;white-space:nowrap;vertical-align:middle;min-width:110px;position:sticky;left:0;z-index:3">區間</th>${shopGroupHdr}</tr>
     <tr style="border-bottom:2px solid #e5e7eb">${shopSubHdr}</tr>
   </thead>`;
 
+  const tbody=buildTbody(recentRows)||`<tr><td colspan="${1+SHOPS.length*6}" style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">尚無資料，點下方「＋ 新增週次」開始輸入</td></tr>`;
+
   const histSection=histRows.length?`
-  <details style="margin-top:14px">
-    <summary style="cursor:pointer;padding:9px 14px;background:#f8fafc;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;color:#6b7280;font-weight:600;display:flex;align-items:center;gap:6px;list-style:none;user-select:none">
-      <span style="font-size:15px">📋</span> 歷史明細
-      <span style="font-size:11px;font-weight:400;color:#9ca3af">（${histRows.length} 筆，點擊展開）</span>
+  <details style="margin-bottom:10px">
+    <summary style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:4px 11px;background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:20px;font-size:12px;color:#64748b;font-weight:600;list-style:none;user-select:none">
+      📋 歷史明細 <span style="font-weight:400;color:#94a3b8;font-size:11px">${histRows.length} 筆</span> <span style="font-size:9px;color:#94a3b8">▾</span>
     </summary>
-    <div style="margin-top:8px" class="tscroll">
+    <div style="margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden" class="tscroll">
       <table style="border-collapse:collapse;width:100%">
         ${thead}
-        <tbody>${buildTbody(histRows)}</tbody>
+        <tbody>${buildTbody(histRows,'#f0fdf4','#f9fafb')}</tbody>
       </table>
     </div>
   </details>`:'';
 
   el.innerHTML=`<div style="padding:14px 16px 16px">
+    ${histSection}
     <div class="tscroll"><table style="border-collapse:collapse;width:100%">
       ${thead}
       <tbody>${tbody}</tbody>
     </table></div>
-    ${histSection}
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button onclick="openAddSummaryRowModal()" style="padding:7px 18px;border:1.5px dashed #c7d2fe;border-radius:8px;background:white;color:#5b5fcf;font-size:13px;font-weight:600;cursor:pointer">＋ 新增週次</button>
       <span style="font-size:11px;color:#9ca3af">純利 = 毛利 − 廣告 − 營收×${(rate*100).toFixed(1)}%　｜　點擊數字可編輯</span>
