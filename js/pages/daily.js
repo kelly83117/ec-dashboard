@@ -321,7 +321,7 @@ Object.assign(App, {
         <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:#f9fafb;border:1px solid var(--border);border-radius:8px">
           <div style="width:22px;height:22px;border-radius:6px;background:#10b981;color:white;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✓</div>
           <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:500;color:var(--text);line-height:1.5;text-decoration:line-through;color:#6b7280">${escapeHtml(t.desc || '')}</div>
+            <div style="font-size:13px;font-weight:500;color:var(--text);line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(t.desc || '')}</div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:11px;color:var(--text-muted)">
               ${assigneeBadge}
               ${doneByLine}
