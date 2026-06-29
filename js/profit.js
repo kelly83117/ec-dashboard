@@ -16,7 +16,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         </div>
         <div style="width:1px;background:#e5e7eb;align-self:stretch"></div>
         <div style="display:flex;flex-direction:column;gap:5px">
-          <button class="stab" id="momo-summary-btn" style="background:#d4380d;color:#fff;border-color:#d4380d;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.7" onclick="setMomoShop('總表',this)">MOMO｜總表</button>
+          <button class="stab" id="momo-summary-btn" style="background:#e91e8c;color:#fff;border-color:#e91e8c;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.9" onclick="setMomoShop('總表',this)">MOMO｜總表</button>
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setMomoShop('甲配',this)"><span class="sdot" style="background:#d4380d"></span>甲配</button>
             <button class="stab" style="font-size:15px" onclick="setMomoShop('乙配',this)"><span class="sdot" style="background:#fa541c"></span>乙配</button>
