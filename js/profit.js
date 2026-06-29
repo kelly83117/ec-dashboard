@@ -4,12 +4,21 @@ const Store = window.Store;
 window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:10px 14px;border-bottom:1px solid #e5e7eb">
     <div style="display:flex;flex-direction:column;gap:5px">
-      <button class="stab active" style="background:#ee4d2d;color:#fff;border-color:#ee4d2d;font-weight:700;width:100%;justify-content:center;font-size:15px" onclick="setShop('總表',this)">蝦皮｜總表</button>
-      <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
+      <div style="display:flex;gap:6px">
+        <button class="stab active" id="plat-btn-shopee" style="background:#ee4d2d;color:#fff;border-color:#ee4d2d;font-weight:700;justify-content:center;font-size:15px" onclick="setPlatform('shopee',this)">蝦皮｜總表</button>
+        <button class="stab" id="plat-btn-momo" style="background:#d4380d;color:#fff;border-color:#d4380d;font-weight:700;justify-content:center;font-size:15px;opacity:0.55" onclick="setPlatform('momo',this)">MOMO｜總表</button>
+      </div>
+      <div id="shopee-tabs" style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
         <button class="stab" style="font-size:15px" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉</button>
         <button class="stab" style="font-size:15px" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
         <button class="stab" style="font-size:15px" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
         <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
+      </div>
+      <div id="momo-tabs" style="display:none;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
+        <button class="stab" id="momo-tab-甲配" style="font-size:15px" onclick="setMomoShop('甲配',this)"><span class="sdot" style="background:#d4380d"></span>甲配</button>
+        <button class="stab" id="momo-tab-乙配" style="font-size:15px" onclick="setMomoShop('乙配',this)"><span class="sdot" style="background:#fa8c16"></span>乙配</button>
+        <button class="stab" id="momo-tab-MO+麻吉" style="font-size:15px" onclick="setMomoShop('MO+麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>MO+麻吉</button>
+        <button class="stab" id="momo-tab-MO+森之旅" style="font-size:15px" onclick="setMomoShop('MO+森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>MO+森之旅</button>
       </div>
     </div>
     <div id="header-kpi-block" style="display:none;align-items:center;gap:18px;flex-wrap:wrap">
@@ -150,6 +159,12 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div id="content-森之旅" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-維克" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-酷澎" class="shop-content" style="padding:16px 20px"></div>
+  <div id="momo-platform" style="display:none">
+    <div id="momo-content-甲配" class="momo-shop-content" style="display:none"></div>
+    <div id="momo-content-乙配" class="momo-shop-content" style="display:none"></div>
+    <div id="momo-content-MO+麻吉" class="momo-shop-content" style="display:none"></div>
+    <div id="momo-content-MO+森之旅" class="momo-shop-content" style="display:none"></div>
+  </div>
 </div>`;
 
 const SHOPS=[{id:'好麻吉',color:'#5b5fcf'},{id:'玩樂',color:'#10b981'},{id:'森之旅',color:'#f59e0b'},{id:'維克',color:'#14b8a6'}];
@@ -296,6 +311,8 @@ function lsHasAny(shop){
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
+MOMO_SHOPS.forEach(s=>{const el=document.getElementById('momo-content-'+s);if(el)el.innerHTML=momoShopHTML(s);});
+setMomoShop('甲配',document.getElementById('momo-tab-甲配'));
 
 // 從 localStorage 還原上傳卡片狀態（只還原 UI，原始資料需重新上傳才能產生）
 (function restoreUploads(){
@@ -2629,6 +2646,61 @@ function setShop(shop,btn){
   else{if(state[shop]?._built?.length)applyFilters(shop);syncHeaderKpis(shop);}
 }
 
+const MOMO_SHOPS=['甲配','乙配','MO+麻吉','MO+森之旅'];
+let curPlatform='shopee';
+let curMomoShop='甲配';
+
+function momoShopHTML(shop){return`<div style="padding:16px 20px">
+  <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #e5e7eb">
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期總營收</div><div style="font-size:20px;font-weight:700;color:#374151">—</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期純利</div><div style="font-size:20px;font-weight:700;color:#10b981">—</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">月份</div><div style="font-size:16px;font-weight:600;color:#374151">—</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">區間</div><div style="font-size:16px;font-weight:600;color:#374151">—</div></div>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button class="export-btn" disabled style="opacity:0.4;cursor:default">⬆ 上傳檔案</button>
+      <button class="export-btn" disabled style="opacity:0.4;cursor:default">☁ 同步雲端</button>
+      <button class="export-btn" disabled style="opacity:0.4;cursor:default">⬇ 匯出 Excel</button>
+    </div>
+  </div>
+  <div style="background:#f9fafb;border:1.5px dashed #d1d5db;border-radius:10px;padding:48px;text-align:center;color:#9ca3af">
+    <div style="font-size:36px;margin-bottom:8px">📊</div>
+    <div style="font-size:14px;font-weight:600">階層分布圖</div>
+    <div style="font-size:12px;margin-top:4px">上傳資料後可查看</div>
+  </div>
+</div>`;}
+
+function setPlatform(platform,btn){
+  curPlatform=platform;
+  document.getElementById('plat-btn-shopee').style.opacity=platform==='shopee'?'1':'0.55';
+  document.getElementById('plat-btn-momo').style.opacity=platform==='momo'?'1':'0.55';
+  document.getElementById('shopee-tabs').style.display=platform==='shopee'?'flex':'none';
+  document.getElementById('momo-tabs').style.display=platform==='momo'?'flex':'none';
+  const momoPlatEl=document.getElementById('momo-platform');
+  if(momoPlatEl)momoPlatEl.style.display=platform==='momo'?'block':'none';
+  if(platform==='shopee'){
+    document.querySelectorAll('.momo-shop-content').forEach(el=>el.style.display='none');
+    const summaryContent=document.getElementById('content-總表');
+    if(summaryContent){
+      document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
+      summaryContent.classList.add('active');
+    }
+    const activeShopBtn=document.querySelector('#shopee-tabs .stab.active');
+    setShop('總表',activeShopBtn);
+  } else {
+    document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
+    setMomoShop(curMomoShop,document.getElementById('momo-tab-'+curMomoShop));
+  }
+}
+
+function setMomoShop(shop,btn){
+  curMomoShop=shop;
+  document.querySelectorAll('#momo-tabs .stab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  document.querySelectorAll('.momo-shop-content').forEach(el=>el.style.display='none');
+  const el=document.getElementById('momo-content-'+shop);
+  if(el)el.style.display='block';
+}
+
 function updateHalfBtnLabels(shop){
   const m=state[shop]?.curMonth||'2026/05';
   const[y,mo]=m.split('/');
@@ -2795,7 +2867,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  setKpis,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
+  setKpis,setMomoShop,setPlatform,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
