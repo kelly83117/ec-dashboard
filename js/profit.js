@@ -33,7 +33,14 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           </div>
         </div>
       </div>
-      <div id="header-btn-block" style="display:none;flex-direction:column;align-items:flex-end;gap:6px">
+    </div>
+    <div id="header-kpi-row" style="display:none;align-items:center;gap:18px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid #f3f4f6">
+      <div id="header-kpi-block" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-change-header" style="font-size:12px;font-weight:600"></span></div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+      </div>
+      <div id="header-btn-block" style="display:none;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto">
         <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
           <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
         </div>
@@ -43,11 +50,6 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
         </div>
       </div>
-    </div>
-    <div id="header-kpi-block" style="display:none;align-items:center;gap:18px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid #f3f4f6">
-      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-change-header" style="font-size:12px;font-weight:600"></span></div></div>
-      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
-      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
     </div>
   </div>
   <div class="ana-overlay" id="dist-modal-overlay" onclick="if(event.target===this)closeDistModal()">
@@ -427,7 +429,7 @@ window.addEventListener('profitDataReady', (e)=>{
       if(content&&!content.classList.contains('active')){
         document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
         content.classList.add('active');
-        const kpi=document.getElementById('header-kpi-block');if(kpi)kpi.style.display='flex';
+        const kpi=document.getElementById('header-kpi-row');if(kpi)kpi.style.display='flex';
         const btnB=document.getElementById('header-btn-block');if(btnB)btnB.style.display='flex';
       }
       if(typeof syncHeaderKpis==='function')syncHeaderKpis(curShop);
@@ -2031,7 +2033,7 @@ function confirmAdsEdit(){
     curShop=shop;
     document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
     target.classList.add('active');
-    const kpi=document.getElementById('header-kpi-block');if(kpi)kpi.style.display='flex';
+    const kpi=document.getElementById('header-kpi-row');if(kpi)kpi.style.display='flex';
     const btnB=document.getElementById('header-btn-block');if(btnB)btnB.style.display='flex';
     const wrapRow=document.getElementById('profit-period-wrap-row');if(wrapRow)wrapRow.style.display='flex';
     const periodEl=document.getElementById('period-row-'+shop);if(periodEl)periodEl.style.display='flex';
@@ -2645,7 +2647,7 @@ function setShop(shop,btn){
   }
   // show/hide KPI & upload/export when on 總表
   const isSummary=shop==='總表';
-  const kpiBlock=document.getElementById('header-kpi-block');
+  const kpiBlock=document.getElementById('header-kpi-row');
   const btnBlock=document.getElementById('header-btn-block');
   if(kpiBlock)kpiBlock.style.display=isSummary?'none':'flex';
   if(btnBlock)btnBlock.style.display=isSummary?'none':'flex';
@@ -2687,7 +2689,7 @@ function setMomoShop(shop,btn){
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
   const el=document.getElementById('momo-content-'+shop);
   if(el){el.classList.add('active');if(!el.dataset.init){el.innerHTML=momoShopHTML(shop);el.dataset.init='1';}}
-  const kpiBlock=document.getElementById('header-kpi-block');
+  const kpiBlock=document.getElementById('header-kpi-row');
   const btnBlock=document.getElementById('header-btn-block');
   if(kpiBlock)kpiBlock.style.display='none';
   if(btnBlock)btnBlock.style.display='none';
@@ -2699,7 +2701,7 @@ function setCoupangShop(shop,btn){
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
   const el=document.getElementById('coupang-content-'+shop);
   if(el){el.classList.add('active');if(!el.dataset.init){el.innerHTML=momoShopHTML(shop);el.dataset.init='1';}}
-  const kpiBlock=document.getElementById('header-kpi-block');
+  const kpiBlock=document.getElementById('header-kpi-row');
   const btnBlock=document.getElementById('header-btn-block');
   if(kpiBlock)kpiBlock.style.display='none';
   if(btnBlock)btnBlock.style.display='none';
