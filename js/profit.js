@@ -24,6 +24,14 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+森之旅',this)"><span class="sdot" style="background:#ffa940"></span>MO+森之旅</button>
           </div>
         </div>
+        <div style="width:1px;background:#e5e7eb;align-self:stretch"></div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <button class="stab" style="background:#c0392b;color:#fff;border-color:#c0392b;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.9" onclick="setCoupangShop('總表',this)">酷澎｜總表</button>
+          <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
+            <button class="stab" style="font-size:15px" onclick="setCoupangShop('麻吉',this)"><span class="sdot" style="background:#c0392b"></span>麻吉</button>
+            <button class="stab" style="font-size:15px" onclick="setCoupangShop('露營館',this)"><span class="sdot" style="background:#e74c3c"></span>露營館</button>
+          </div>
+        </div>
       </div>
       <div id="header-btn-block" style="display:none;flex-direction:column;align-items:flex-end;gap:6px">
         <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
@@ -169,6 +177,9 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div id="momo-content-乙配" class="shop-content" style="padding:16px 20px"></div>
   <div id="momo-content-MO+麻吉" class="shop-content" style="padding:16px 20px"></div>
   <div id="momo-content-MO+森之旅" class="shop-content" style="padding:16px 20px"></div>
+  <div id="coupang-content-總表" class="shop-content" style="padding:16px 20px"></div>
+  <div id="coupang-content-麻吉" class="shop-content" style="padding:16px 20px"></div>
+  <div id="coupang-content-露營館" class="shop-content" style="padding:16px 20px"></div>
 </div>`;
 
 const SHOPS=[{id:'好麻吉',color:'#5b5fcf'},{id:'玩樂',color:'#10b981'},{id:'森之旅',color:'#f59e0b'},{id:'維克',color:'#14b8a6'}];
@@ -2682,6 +2693,18 @@ function setMomoShop(shop,btn){
   if(btnBlock)btnBlock.style.display='none';
 }
 
+function setCoupangShop(shop,btn){
+  document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
+  const el=document.getElementById('coupang-content-'+shop);
+  if(el){el.classList.add('active');if(!el.dataset.init){el.innerHTML=momoShopHTML(shop);el.dataset.init='1';}}
+  const kpiBlock=document.getElementById('header-kpi-block');
+  const btnBlock=document.getElementById('header-btn-block');
+  if(kpiBlock)kpiBlock.style.display='none';
+  if(btnBlock)btnBlock.style.display='none';
+}
+
 function updateHalfBtnLabels(shop){
   const m=state[shop]?.curMonth||'2026/05';
   const[y,mo]=m.split('/');
@@ -2848,7 +2871,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
+  setCoupangShop,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
