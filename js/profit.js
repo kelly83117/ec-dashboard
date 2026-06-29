@@ -2702,15 +2702,15 @@ function momoShopHTML(shop,platform='momo'){
   const uploadBtn=isCoupang
     ?`<button class="export-btn" onclick="openCoupangUpload('${shop}')" style="border-color:#0ea5e9;color:#0ea5e9">⬆ 上傳檔案</button>`
     :`<button class="export-btn" disabled style="opacity:0.4;cursor:default">⬆ 上傳檔案</button>`;
+  const tableArea=isCoupang
+    ?`<div id="cup-tbl-${shop}"><div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳三個檔案後按「▶ 產生並儲存」</div></div></div>`
+    :`<div style="background:#f9fafb;border:1.5px dashed #d1d5db;border-radius:10px;padding:48px;text-align:center;color:#9ca3af"><div style="font-size:36px;margin-bottom:8px">📊</div><div style="font-size:14px;font-weight:600">階層分布圖</div><div style="font-size:12px;margin-top:4px">上傳資料後可查看</div></div>`;
   return`
-  <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #e5e7eb">
-    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期總營收</div><div style="font-size:20px;font-weight:700;color:#374151">—</div></div>
-    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期純利</div><div style="font-size:20px;font-weight:700;color:#10b981">—</div></div>
+  <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #e5e7eb">
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期總營收</div><div id="cup-kv-rev-${shop}" style="font-size:20px;font-weight:700;color:#374151">—</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期純利</div><div id="cup-kv-net-${shop}" style="font-size:20px;font-weight:700;color:#10b981">—</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">純利率</div><div id="cup-kv-rate-${shop}" style="font-size:20px;font-weight:700;color:#6366f1">—</div></div>
     <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-      <div style="display:flex;align-items:center;gap:16px">
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">月份</div><div style="font-size:14px;font-weight:600;color:#374151">—</div></div>
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">區間</div><div style="font-size:14px;font-weight:600;color:#374151">—</div></div>
-      </div>
       <div style="display:flex;gap:8px">
         ${uploadBtn}
         <button class="export-btn" disabled style="opacity:0.4;cursor:default">☁ 同步雲端</button>
@@ -2718,11 +2718,8 @@ function momoShopHTML(shop,platform='momo'){
       </div>
     </div>
   </div>
-  <div style="background:#f9fafb;border:1.5px dashed #d1d5db;border-radius:10px;padding:48px;text-align:center;color:#9ca3af">
-    <div style="font-size:36px;margin-bottom:8px">📊</div>
-    <div style="font-size:14px;font-weight:600">階層分布圖</div>
-    <div style="font-size:12px;margin-top:4px">上傳資料後可查看</div>
-  </div>`;}
+  ${tableArea}`;
+}
 
 function setMomoShop(shop,btn){
   curMomoShop=shop;
@@ -2767,8 +2764,114 @@ function onCoupangFile(e,type){
   if(btn)btn.disabled=!allReady;
 }
 function generateCoupang(){
-  // 資料處理邏輯後續補充
-  alert('資料處理功能即將加入');
+  const btn=document.getElementById('cup-gen-btn');
+  if(btn){btn.disabled=true;btn.textContent='處理中…';}
+  Promise.all([
+    readXlsx(_cupFiles.sales),
+    readXlsx(_cupFiles.idlist),
+    readXlsx(_cupFiles.cost),
+  ]).then(([salesRows,idRows,costRows])=>{
+    // 建立 ID → 編號 對照表（商品ID清單）
+    const idMap={};
+    idRows.slice(1).forEach(r=>{
+      const id=String(r[0]||'').trim();
+      const code=String(r[1]||'').trim();
+      if(id)idMap[id]=code;
+    });
+    // 建立 編號/ID → 成本 對照表（莫筆克成本清單）
+    const costMap={};
+    costRows.slice(1).forEach(r=>{
+      const key=String(r[0]||'').trim();
+      const cost=parseFloat(r[1])||0;
+      if(key)costMap[key]=cost;
+    });
+    // 整合銷售資料
+    const rows=[];
+    salesRows.slice(1).forEach(r=>{
+      const productId=String(r[0]||'').trim();
+      const name=String(r[1]||'').trim();
+      if(!productId&&!name)return;
+      const rev=parseFloat(r[2])||0;
+      const qty=parseFloat(r[3])||0;
+      const stock=parseFloat(r[4])||0;
+      const code=idMap[productId]||'';
+      const unitCost=costMap[code]||costMap[productId]||0;
+      const salesCost=unitCost*qty;
+      const gross=rev-salesCost;
+      const net=gross;
+      const netRate=rev>0?net/rev:0;
+      rows.push({productId,code,name,rev,salesCost,unitCost,gross,net,netRate,qty,stock});
+    });
+    renderCoupangTable(_cupShop,rows);
+    if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
+    closeCoupangUpload();
+  }).catch(err=>{
+    console.error(err);
+    alert('解析失敗，請確認檔案格式');
+    if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
+  });
+}
+
+function readXlsx(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const data=new Uint8Array(e.target.result);
+        const wb=XLSX.read(data,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        resolve(XLSX.utils.sheet_to_json(ws,{header:1,defval:''}));
+      }catch(err){reject(err);}
+    };
+    reader.onerror=reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function renderCoupangTable(shop,rows){
+  const tbl=document.getElementById('cup-tbl-'+shop);
+  if(!tbl)return;
+  const totalRev=rows.reduce((s,r)=>s+r.rev,0);
+  const totalNet=rows.reduce((s,r)=>s+r.net,0);
+  const totalRate=totalRev>0?totalNet/totalRev:0;
+  const fmtM=n=>'NT$ '+Math.round(n).toLocaleString();
+  const fmtP=n=>(n*100).toFixed(1)+'%';
+  // 更新 KPI
+  const revEl=document.getElementById('cup-kv-rev-'+shop);
+  const netEl=document.getElementById('cup-kv-net-'+shop);
+  const rateEl=document.getElementById('cup-kv-rate-'+shop);
+  if(revEl)revEl.textContent=fmtM(totalRev);
+  if(netEl)netEl.textContent=fmtM(totalNet);
+  if(rateEl)rateEl.textContent=fmtP(totalRate);
+  // 表格
+  const cols=[
+    {k:'productId',label:'商品ID'},
+    {k:'code',label:'編號'},
+    {k:'name',label:'商品名稱'},
+    {k:'rev',label:'銷售額',fmt:fmtM},
+    {k:'unitCost',label:'成本',fmt:fmtM},
+    {k:'salesCost',label:'銷售成本',fmt:fmtM},
+    {k:'gross',label:'毛利',fmt:fmtM},
+    {k:'net',label:'純利',fmt:fmtM},
+    {k:'netRate',label:'純利率',fmt:fmtP},
+    {k:'qty',label:'銷售數量',fmt:n=>Math.round(n).toLocaleString()},
+    {k:'stock',label:'可用庫存',fmt:n=>Math.round(n).toLocaleString()},
+  ];
+  const thStyle='padding:8px 10px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;white-space:nowrap;border-bottom:2px solid #e5e7eb;background:#f9fafb;position:sticky;top:0;z-index:1';
+  const tdStyle='padding:8px 10px;font-size:13px;border-bottom:1px solid #f3f4f6;white-space:nowrap';
+  const thead=cols.map(c=>`<th style="${thStyle}">${c.label}</th>`).join('');
+  const tbody=rows.map((r,i)=>{
+    const bg=i%2===0?'#fff':'#fafafa';
+    const tds=cols.map(c=>{
+      let v=r[c.k];
+      const disp=c.fmt?c.fmt(v):v;
+      const isNum=typeof v==='number';
+      const color=c.k==='net'?(v>=0?'#10b981':'#ef4444'):c.k==='netRate'?(v>=0?'#6366f1':'#ef4444'):'inherit';
+      return`<td style="${tdStyle};background:${bg};${isNum?'text-align:right;':''}color:${color}">${disp}</td>`;
+    }).join('');
+    return`<tr>${tds}</tr>`;
+  }).join('');
+  tbl.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
 }
 
 function updateHalfBtnLabels(shop){
@@ -2937,7 +3040,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangUpload,generateCoupang,onCoupangFile,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
+  closeCoupangUpload,generateCoupang,onCoupangFile,openCoupangUpload,renderCoupangTable,setCoupangShop,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
