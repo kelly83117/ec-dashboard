@@ -2497,15 +2497,16 @@ function renderSummary(){
     const sm=s.getMonth()+1,sd=s.getDate(),em=e.getMonth()+1,ed=e.getDate();
     const full=isFullMonth(row);
     const label=full?`${sm}月份`:(sm===em?`${sm}/${sd} – ${sm}/${ed}`:`${sm}/${sd} – ${em}/${ed}`);
-    const hideBtnStyle='background:none;border:1px solid #d1d5db;border-radius:3px;color:#9ca3af;cursor:pointer;font-size:12px;padding:0 5px;line-height:18px;vertical-align:middle;margin-right:5px';
+    const hideBtnStyle='background:none;border:1px solid #d1d5db;border-radius:3px;color:#9ca3af;cursor:pointer;font-size:12px;padding:0 5px;line-height:18px;vertical-align:middle;margin-right:5px;flex-shrink:0';
     const hideBtn=`<button class="sum-hide-btn" onclick="event.stopPropagation();_sumToggleRow(this)" style="${hideBtnStyle}" title="隱藏此行">−</button>`;
     const bg1=bgFull||'#eef2ff',bg2=bgNorm||'white';
+    const dataTds=dataCells(row.shops,false,row.id).replace(/<td /g,'<td class="sum-data-td" ');
     if(full){
       return`<tr data-rid="${row.id}" class="sum-modal-row" style="background:${bg1};border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
-        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:${bg1};z-index:1">${hideBtn}${label}</td>${dataCells(row.shops,false,row.id)}</tr>`;
+        <td style="padding:6px 10px 6px 8px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:${bg1};z-index:1;text-align:left">${hideBtn}${label}</td>${dataTds}</tr>`;
     }
     return`<tr data-rid="${row.id}" class="sum-modal-row" style="background:${bg2};border-top:1px solid #f0f0f0">
-      <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:${bg2};z-index:1">${hideBtn}${label}</td>${dataCells(row.shops,false,row.id)}</tr>`;
+      <td style="padding:4px 10px 4px 8px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:${bg2};z-index:1;text-align:left">${hideBtn}${label}</td>${dataTds}</tr>`;
   };
 
   const tbody=recentRows.map(r=>buildMainRow(r)).join('')||`<tr><td colspan="${1+SHOPS.length*6}" style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">尚無資料，點下方「＋ 新增週次」開始輸入</td></tr>`;
@@ -2516,18 +2517,28 @@ function renderSummary(){
     ...recentRows.map(r=>buildModalRow(r))
   ].join('');
 
-  // 切換單行隱藏/顯示，並更新 header 隱藏計數
+  // 切換單行折疊/展開（只隱藏資料欄，留下日期列可點還原）
   window._sumToggleRow=function(btn){
     const tr=btn.closest('tr');
-    const hidden=tr.style.display==='none';
-    tr.style.display=hidden?'':'none';
-    btn.textContent=hidden?'−':'＋';
-    btn.title=hidden?'隱藏此行':'還原此行';
+    const collapsed=tr.classList.contains('sum-collapsed');
+    if(collapsed){
+      // 展開
+      tr.classList.remove('sum-collapsed');
+      tr.querySelectorAll('.sum-data-td').forEach(td=>{td.style.display='';});
+      tr.style.opacity='1';
+      btn.textContent='−';btn.title='隱藏此行';
+    } else {
+      // 折疊：只隱藏資料欄，日期列保留（可點還原）
+      tr.classList.add('sum-collapsed');
+      tr.querySelectorAll('.sum-data-td').forEach(td=>{td.style.display='none';});
+      tr.style.opacity='0.45';
+      btn.textContent='＋';btn.title='還原此行';
+    }
     const ov=document.getElementById('sum-hist-overlay');
     if(ov){
-      const hiddenCount=ov.querySelectorAll('.sum-modal-row[style*="display: none"], .sum-modal-row[style*="display:none"]').length;
+      const n=ov.querySelectorAll('.sum-modal-row.sum-collapsed').length;
       const badge=ov.querySelector('#sum-hidden-badge');
-      if(badge)badge.textContent=hiddenCount>0?`（${hiddenCount} 行已隱藏）`:'';
+      if(badge)badge.textContent=n>0?`（${n} 行已隱藏）`:'';
     }
   };
 
@@ -2535,8 +2546,10 @@ function renderSummary(){
   window._sumShowAll=function(){
     const ov=document.getElementById('sum-hist-overlay');
     if(!ov)return;
-    ov.querySelectorAll('.sum-modal-row').forEach(tr=>{
-      tr.style.display='';
+    ov.querySelectorAll('.sum-modal-row.sum-collapsed').forEach(tr=>{
+      tr.classList.remove('sum-collapsed');
+      tr.querySelectorAll('.sum-data-td').forEach(td=>{td.style.display='';});
+      tr.style.opacity='1';
       const btn=tr.querySelector('.sum-hide-btn');
       if(btn){btn.textContent='−';btn.title='隱藏此行';}
     });
