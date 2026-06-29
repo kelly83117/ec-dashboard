@@ -2491,42 +2491,77 @@ function renderSummary(){
       <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:white;z-index:1">${label}${delBtn}</td>${dataCells(row.shops,true,row.id)}</tr>`;
   };
 
-  // 彈窗用（左側有 − 隱藏按鈕）
+  // 彈窗用（左側有 − 隱藏按鈕，帶 data-rid 供顯示全部用）
   const buildModalRow=(row,bgFull,bgNorm)=>{
     const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
     const sm=s.getMonth()+1,sd=s.getDate(),em=e.getMonth()+1,ed=e.getDate();
     const full=isFullMonth(row);
     const label=full?`${sm}月份`:(sm===em?`${sm}/${sd} – ${sm}/${ed}`:`${sm}/${sd} – ${em}/${ed}`);
-    const hideBtn=`<button onclick="event.stopPropagation();(function(btn){const tr=btn.closest('tr');tr.style.display='none';})(this)" style="background:none;border:1px solid #d1d5db;border-radius:3px;color:#9ca3af;cursor:pointer;font-size:11px;padding:0 5px;line-height:17px;vertical-align:middle;margin-right:6px;flex-shrink:0" title="隱藏此行">−</button>`;
+    const hideBtnStyle='background:none;border:1px solid #d1d5db;border-radius:3px;color:#9ca3af;cursor:pointer;font-size:12px;padding:0 5px;line-height:18px;vertical-align:middle;margin-right:5px';
+    const hideBtn=`<button class="sum-hide-btn" onclick="event.stopPropagation();_sumToggleRow(this)" style="${hideBtnStyle}" title="隱藏此行">−</button>`;
+    const bg1=bgFull||'#eef2ff',bg2=bgNorm||'white';
     if(full){
-      return`<tr style="background:${bgFull||'#eef2ff'};border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
-        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:${bgFull||'#eef2ff'};z-index:1;display:flex;align-items:center">${hideBtn}${label}</td>${dataCells(row.shops,false,row.id)}</tr>`;
+      return`<tr data-rid="${row.id}" class="sum-modal-row" style="background:${bg1};border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">
+        <td style="padding:7px 10px;font-size:13px;font-weight:700;color:#4338ca;white-space:nowrap;position:sticky;left:0;background:${bg1};z-index:1">${hideBtn}${label}</td>${dataCells(row.shops,false,row.id)}</tr>`;
     }
-    return`<tr style="background:${bgNorm||'white'};border-top:1px solid #f0f0f0">
-      <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:${bgNorm||'white'};z-index:1;display:flex;align-items:center">${hideBtn}${label}</td>${dataCells(row.shops,false,row.id)}</tr>`;
+    return`<tr data-rid="${row.id}" class="sum-modal-row" style="background:${bg2};border-top:1px solid #f0f0f0">
+      <td style="padding:5px 10px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:${bg2};z-index:1">${hideBtn}${label}</td>${dataCells(row.shops,false,row.id)}</tr>`;
   };
 
   const tbody=recentRows.map(r=>buildMainRow(r)).join('')||`<tr><td colspan="${1+SHOPS.length*6}" style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">尚無資料，點下方「＋ 新增週次」開始輸入</td></tr>`;
 
-  // 彈窗：所有資料（歷史 + 本月上月），歷史用淡綠背景
+  // 彈窗：歷史（淡綠）在上，近兩個月（白）在下
   const modalTbody=[
     ...histRows.map(r=>buildModalRow(r,'#f0fdf4','#f9fafb')),
     ...recentRows.map(r=>buildModalRow(r))
   ].join('');
+
+  // 切換單行隱藏/顯示，並更新 header 隱藏計數
+  window._sumToggleRow=function(btn){
+    const tr=btn.closest('tr');
+    const hidden=tr.style.display==='none';
+    tr.style.display=hidden?'':'none';
+    btn.textContent=hidden?'−':'＋';
+    btn.title=hidden?'隱藏此行':'還原此行';
+    const ov=document.getElementById('sum-hist-overlay');
+    if(ov){
+      const hiddenCount=ov.querySelectorAll('.sum-modal-row[style*="display: none"], .sum-modal-row[style*="display:none"]').length;
+      const badge=ov.querySelector('#sum-hidden-badge');
+      if(badge)badge.textContent=hiddenCount>0?`（${hiddenCount} 行已隱藏）`:'';
+    }
+  };
+
+  // 顯示全部
+  window._sumShowAll=function(){
+    const ov=document.getElementById('sum-hist-overlay');
+    if(!ov)return;
+    ov.querySelectorAll('.sum-modal-row').forEach(tr=>{
+      tr.style.display='';
+      const btn=tr.querySelector('.sum-hide-btn');
+      if(btn){btn.textContent='−';btn.title='隱藏此行';}
+    });
+    const badge=ov.querySelector('#sum-hidden-badge');
+    if(badge)badge.textContent='';
+  };
 
   window._sumOpenModal=function(){
     const old=document.getElementById('sum-hist-overlay');
     if(old){old.remove();return;}
     const ov=document.createElement('div');
     ov.id='sum-hist-overlay';
-    ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center';
-    ov.innerHTML=`<div style="background:white;border-radius:12px;width:92%;max-width:960px;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-      <div style="padding:14px 18px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
-        <span style="font-weight:700;font-size:15px;color:#1e293b">📋 歷史明細　<span style="font-size:12px;font-weight:400;color:#94a3b8">共 ${rows.length} 筆　淡綠色 = 已移入歷史</span></span>
-        <button onclick="document.getElementById('sum-hist-overlay').remove()" style="background:none;border:none;font-size:22px;color:#94a3b8;cursor:pointer;line-height:1">×</button>
+    ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML=`<div style="background:white;border-radius:14px;width:98%;max-width:1400px;height:90vh;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,.35)">
+      <div style="padding:14px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:12px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-weight:700;font-size:15px;color:#1e293b">📋 歷史明細</span>
+          <span style="font-size:12px;color:#94a3b8">共 ${rows.length} 筆　淡綠 = 已移入歷史</span>
+          <span id="sum-hidden-badge" style="font-size:12px;color:#f59e0b;font-weight:600"></span>
+          <button onclick="_sumShowAll()" style="padding:3px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;color:#64748b;background:#f8fafc;cursor:pointer">全部顯示</button>
+        </div>
+        <button onclick="document.getElementById('sum-hist-overlay').remove()" style="background:none;border:none;font-size:24px;color:#94a3b8;cursor:pointer;line-height:1;flex-shrink:0">×</button>
       </div>
-      <div style="overflow:auto;flex:1" class="tscroll">
-        <table style="border-collapse:collapse;width:100%">${thead}<tbody>${modalTbody}</tbody></table>
+      <div style="overflow:auto;flex:1;padding:0">
+        <table style="border-collapse:collapse;width:100%;font-size:13px">${thead}<tbody>${modalTbody}</tbody></table>
       </div>
     </div>`;
     ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
