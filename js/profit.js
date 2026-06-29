@@ -2,42 +2,44 @@
 const Store = window.Store;
 
 window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:10px 14px;border-bottom:1px solid #e5e7eb">
-    <div style="display:flex;gap:12px;align-items:flex-start">
-      <div style="display:flex;flex-direction:column;gap:5px">
-        <button class="stab active" style="background:#ee4d2d;color:#fff;border-color:#ee4d2d;font-weight:700;width:100%;justify-content:center;font-size:15px" onclick="setShop('總表',this)">蝦皮｜總表</button>
-        <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
-          <button class="stab" style="font-size:15px" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉</button>
-          <button class="stab" style="font-size:15px" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
-          <button class="stab" style="font-size:15px" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
-          <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
+  <div style="padding:10px 14px;border-bottom:1px solid #e5e7eb">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <button class="stab active" style="background:#ee4d2d;color:#fff;border-color:#ee4d2d;font-weight:700;width:100%;justify-content:center;font-size:15px" onclick="setShop('總表',this)">蝦皮｜總表</button>
+          <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
+            <button class="stab" style="font-size:15px" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉</button>
+            <button class="stab" style="font-size:15px" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
+            <button class="stab" style="font-size:15px" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
+            <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
+          </div>
+        </div>
+        <div style="width:1px;background:#e5e7eb;align-self:stretch"></div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <button class="stab" id="momo-summary-btn" style="background:#d4380d;color:#fff;border-color:#d4380d;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.7" onclick="setMomoShop('總表',this)">MOMO｜總表</button>
+          <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
+            <button class="stab" style="font-size:15px" onclick="setMomoShop('甲配',this)"><span class="sdot" style="background:#d4380d"></span>甲配</button>
+            <button class="stab" style="font-size:15px" onclick="setMomoShop('乙配',this)"><span class="sdot" style="background:#fa541c"></span>乙配</button>
+            <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+麻吉',this)"><span class="sdot" style="background:#ff7a45"></span>MO+麻吉</button>
+            <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+森之旅',this)"><span class="sdot" style="background:#ffa940"></span>MO+森之旅</button>
+          </div>
         </div>
       </div>
-      <div style="width:1px;background:#e5e7eb;align-self:stretch"></div>
-      <div style="display:flex;flex-direction:column;gap:5px">
-        <button class="stab" id="momo-summary-btn" style="background:#d4380d;color:#fff;border-color:#d4380d;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.7" onclick="setMomoShop('總表',this)">MOMO｜總表</button>
-        <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
-          <button class="stab" style="font-size:15px" onclick="setMomoShop('甲配',this)"><span class="sdot" style="background:#d4380d"></span>甲配</button>
-          <button class="stab" style="font-size:15px" onclick="setMomoShop('乙配',this)"><span class="sdot" style="background:#fa541c"></span>乙配</button>
-          <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+麻吉',this)"><span class="sdot" style="background:#ff7a45"></span>MO+麻吉</button>
-          <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+森之旅',this)"><span class="sdot" style="background:#ffa940"></span>MO+森之旅</button>
+      <div id="header-btn-block" style="display:none;flex-direction:column;align-items:flex-end;gap:6px">
+        <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
+          <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
+          <button id="global-sync-btn" class="export-btn" onclick="syncToCloud(curShop)" style="opacity:0.4;cursor:default" disabled>☁ 同步雲端</button>
+          <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
         </div>
       </div>
     </div>
-    <div id="header-kpi-block" style="display:none;align-items:center;gap:18px;flex-wrap:wrap">
+    <div id="header-kpi-block" style="display:none;align-items:center;gap:18px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid #f3f4f6">
       <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-change-header" style="font-size:12px;font-weight:600"></span></div></div>
       <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
       <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
-    </div>
-    <div id="header-btn-block" style="display:none;flex-direction:column;align-items:flex-end;gap:6px;margin-right:12px">
-      <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
-        <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
-        <button id="global-sync-btn" class="export-btn" onclick="syncToCloud(curShop)" style="opacity:0.4;cursor:default" disabled>☁ 同步雲端</button>
-        <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
-      </div>
     </div>
   </div>
   <div class="ana-overlay" id="dist-modal-overlay" onclick="if(event.target===this)closeDistModal()">
