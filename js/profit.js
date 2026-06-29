@@ -2771,12 +2771,13 @@ function generateCoupang(){
     readXlsx(_cupFiles.idlist),
     readXlsx(_cupFiles.cost),
   ]).then(([salesRows,idRows,costRows])=>{
-    // 建立 ID → 編號 對照表（商品ID清單）
+    // 建立 ID → {編號, 名稱} 對照表（商品ID清單：A=ID, B=編號, C=名稱）
     const idMap={};
     idRows.slice(1).forEach(r=>{
       const id=String(r[0]||'').trim();
       const code=String(r[1]||'').trim();
-      if(id)idMap[id]=code;
+      const idName=String(r[2]||'').trim();
+      if(id)idMap[id]={code,name:idName};
     });
     // 建立 編號/ID → 成本 對照表（莫筆克成本清單）
     const costMap={};
@@ -2794,13 +2795,15 @@ function generateCoupang(){
       const rev=parseFloat(r[6])||0;             // G欄 銷售額(NTD)
       const qty=parseFloat(r[8])||0;             // I欄 銷售量
       const stock=0;                              // 可用庫存待第二/三檔補充
-      const code=idMap[productId]||'';
+      const mapped=idMap[productId]||{};
+      const code=mapped.code||'';
+      const mappedName=mapped.name||name;  // 優先用第二個表的名稱
       const unitCost=costMap[code]||costMap[productId]||0;
       const salesCost=unitCost*qty;
       const gross=rev-salesCost;
       const net=gross;
       const netRate=rev>0?net/rev:0;
-      rows.push({productId,code,name,rev,salesCost,unitCost,gross,net,netRate,qty,stock});
+      rows.push({productId,code,name:mappedName,rev,salesCost,unitCost,gross,net,netRate,qty,stock});
     });
     renderCoupangTable(_cupShop,rows);
     if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
