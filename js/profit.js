@@ -2785,15 +2785,15 @@ function generateCoupang(){
       const cost=parseFloat(r[1])||0;
       if(key)costMap[key]=cost;
     });
-    // 整合銷售資料
+    // 整合銷售資料（商品銷售欄位：D=註冊商品ID, C=商品名稱, G=銷售額NTD, I=銷售量）
     const rows=[];
     salesRows.slice(1).forEach(r=>{
-      const productId=String(r[0]||'').trim();
-      const name=String(r[1]||'').trim();
+      const productId=String(r[3]||'').trim();  // D欄 註冊商品ID
+      const name=String(r[2]||'').trim();        // C欄 商品名稱
       if(!productId&&!name)return;
-      const rev=parseFloat(r[2])||0;
-      const qty=parseFloat(r[3])||0;
-      const stock=parseFloat(r[4])||0;
+      const rev=parseFloat(r[6])||0;             // G欄 銷售額(NTD)
+      const qty=parseFloat(r[8])||0;             // I欄 銷售量
+      const stock=0;                              // 可用庫存待第二/三檔補充
       const code=idMap[productId]||'';
       const unitCost=costMap[code]||costMap[productId]||0;
       const salesCost=unitCost*qty;
