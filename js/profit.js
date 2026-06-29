@@ -52,6 +52,43 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       </div>
     </div>
   </div>
+  <div class="ana-overlay" id="coupang-upload-overlay" onclick="if(event.target===this)closeCoupangUpload()">
+    <div class="ana-modal" style="width:480px;max-width:96vw">
+      <div class="ana-modal-hdr"><span id="coupang-upload-title">上傳檔案｜酷澎</span><button class="ana-close-btn" onclick="closeCoupangUpload()">✕</button></div>
+      <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
+        <label class="ucard" id="cup-sales-card" style="width:100%;box-sizing:border-box">
+          <input type="file" id="cup-sales-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'sales')">
+          <div class="ucard-icon">🛒</div>
+          <div style="flex:1;min-width:0">
+            <div class="ucard-title">商品銷售</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px">酷澎商品銷售報表 (.xlsx)</div>
+          </div>
+          <span id="cup-sales-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
+        </label>
+        <label class="ucard" id="cup-idlist-card" style="width:100%;box-sizing:border-box">
+          <input type="file" id="cup-idlist-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'idlist')">
+          <div class="ucard-icon">📋</div>
+          <div style="flex:1;min-width:0">
+            <div class="ucard-title">商品ID清單</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px">商品對照清單 (.xlsx)</div>
+          </div>
+          <span id="cup-idlist-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
+        </label>
+        <label class="ucard" id="cup-cost-card" style="width:100%;box-sizing:border-box">
+          <input type="file" id="cup-cost-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'cost')">
+          <div class="ucard-icon">💰</div>
+          <div style="flex:1;min-width:0">
+            <div class="ucard-title">莫筆克成本清單</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px">成本對照表 (.xlsx)</div>
+          </div>
+          <span id="cup-cost-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
+        </label>
+      </div>
+      <div class="ana-modal-ftr">
+        <button class="gen-btn" id="cup-gen-btn" onclick="generateCoupang()" disabled>▶ 產生並儲存</button>
+      </div>
+    </div>
+  </div>
   <div class="ana-overlay" id="dist-modal-overlay" onclick="if(event.target===this)closeDistModal()">
     <div class="ana-modal" style="width:560px;max-width:96vw">
       <div class="ana-modal-hdr"><span>階層分布圖</span><button class="ana-close-btn" onclick="closeDistModal()">✕</button></div>
@@ -2660,7 +2697,12 @@ function setShop(shop,btn){
 const MOMO_SHOPS=['總表','甲配','乙配','MO+麻吉','MO+森之旅'];
 let curMomoShop=null;
 
-function momoShopHTML(shop){return`
+function momoShopHTML(shop,platform='momo'){
+  const isCoupang=platform==='coupang';
+  const uploadBtn=isCoupang
+    ?`<button class="export-btn" onclick="openCoupangUpload('${shop}')" style="border-color:#0ea5e9;color:#0ea5e9">⬆ 上傳檔案</button>`
+    :`<button class="export-btn" disabled style="opacity:0.4;cursor:default">⬆ 上傳檔案</button>`;
+  return`
   <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #e5e7eb">
     <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期總營收</div><div style="font-size:20px;font-weight:700;color:#374151">—</div></div>
     <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期純利</div><div style="font-size:20px;font-weight:700;color:#10b981">—</div></div>
@@ -2670,7 +2712,7 @@ function momoShopHTML(shop){return`
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">區間</div><div style="font-size:14px;font-weight:600;color:#374151">—</div></div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="export-btn" disabled style="opacity:0.4;cursor:default">⬆ 上傳檔案</button>
+        ${uploadBtn}
         <button class="export-btn" disabled style="opacity:0.4;cursor:default">☁ 同步雲端</button>
         <button class="export-btn" disabled style="opacity:0.4;cursor:default">⬇ 匯出 Excel</button>
       </div>
@@ -2698,9 +2740,35 @@ function setCoupangShop(shop,btn){
   if(btn)btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
   const el=document.getElementById('coupang-content-'+shop);
-  if(el){el.classList.add('active');if(!el.dataset.init){el.innerHTML=momoShopHTML(shop);el.dataset.init='1';}}
+  if(el){el.classList.add('active');if(!el.dataset.init){el.innerHTML=momoShopHTML(shop,'coupang');el.dataset.init='1';}}
   const kpiBlock=document.getElementById('header-kpi-row');
   if(kpiBlock)kpiBlock.style.display='none';
+}
+
+let _cupShop='';
+const _cupFiles={sales:null,idlist:null,cost:null};
+
+function openCoupangUpload(shop){
+  _cupShop=shop;
+  document.getElementById('coupang-upload-title').textContent='上傳檔案｜酷澎 · '+shop;
+  document.getElementById('coupang-upload-overlay').style.display='flex';
+}
+function closeCoupangUpload(){
+  document.getElementById('coupang-upload-overlay').style.display='none';
+}
+function onCoupangFile(e,type){
+  const file=e.target.files[0];if(!file)return;
+  _cupFiles[type]=file;
+  const statusId={sales:'cup-sales-status',idlist:'cup-idlist-status',cost:'cup-cost-status'}[type];
+  const el=document.getElementById(statusId);
+  if(el){el.textContent='✓ '+file.name;el.style.color='#10b981';}
+  const allReady=_cupFiles.sales&&_cupFiles.idlist&&_cupFiles.cost;
+  const btn=document.getElementById('cup-gen-btn');
+  if(btn)btn.disabled=!allReady;
+}
+function generateCoupang(){
+  // 資料處理邏輯後續補充
+  alert('資料處理功能即將加入');
 }
 
 function updateHalfBtnLabels(shop){
@@ -2869,7 +2937,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  setCoupangShop,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
+  closeCoupangUpload,generateCoupang,onCoupangFile,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
