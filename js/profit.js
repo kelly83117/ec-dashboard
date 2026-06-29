@@ -2664,12 +2664,16 @@ function momoShopHTML(shop){return`
   <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #e5e7eb">
     <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期總營收</div><div style="font-size:20px;font-weight:700;color:#374151">—</div></div>
     <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期純利</div><div style="font-size:20px;font-weight:700;color:#10b981">—</div></div>
-    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">月份</div><div style="font-size:16px;font-weight:600;color:#374151">—</div></div>
-    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">區間</div><div style="font-size:16px;font-weight:600;color:#374151">—</div></div>
-    <div style="margin-left:auto;display:flex;gap:8px">
-      <button class="export-btn" disabled style="opacity:0.4;cursor:default">⬆ 上傳檔案</button>
-      <button class="export-btn" disabled style="opacity:0.4;cursor:default">☁ 同步雲端</button>
-      <button class="export-btn" disabled style="opacity:0.4;cursor:default">⬇ 匯出 Excel</button>
+    <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <div style="display:flex;align-items:center;gap:16px">
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">月份</div><div style="font-size:14px;font-weight:600;color:#374151">—</div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">區間</div><div style="font-size:14px;font-weight:600;color:#374151">—</div></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="export-btn" disabled style="opacity:0.4;cursor:default">⬆ 上傳檔案</button>
+        <button class="export-btn" disabled style="opacity:0.4;cursor:default">☁ 同步雲端</button>
+        <button class="export-btn" disabled style="opacity:0.4;cursor:default">⬇ 匯出 Excel</button>
+      </div>
     </div>
   </div>
   <div style="background:#f9fafb;border:1.5px dashed #d1d5db;border-radius:10px;padding:48px;text-align:center;color:#9ca3af">
