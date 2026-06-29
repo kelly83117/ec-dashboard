@@ -2273,7 +2273,7 @@ function renderTable(shop,list){
         ${noRevSpan1>0?`<td colspan="${noRevSpan1}" style="color:#d1d5db;text-align:center;font-size:12px">—</td>`:''}
         ${vc('pureProfit')?`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`:''}
         ${noRevSpan2>0?`<td colspan="${noRevSpan2}" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>`:''}
-        ${vc('note')?buildNoteCell(shop,r.code,noteId,notes[r.code]):''}
+        ${vc('note')?buildNoteCell(shop,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})()):''}
         ${shop==='好麻吉'?`${vc('growthRate')?'<td></td>':''}${vc('growthAnalysis')?'<td></td>':''}${vc('growthNote')?'<td></td>':''}`:''}
       </tr>`;
     }else{
@@ -2294,7 +2294,7 @@ function renderTable(shop,list){
         ${vc('clicks')?`<td class="td-num">${r.clicks>0?r.clicks.toLocaleString():'—'}</td>`:''}
         ${vc('dayBudget')?`<td id="td-${shop}-${r.code}-dayBudget" class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>`:''}
         ${vc('analysisLabel')?`<td id="td-${shop}-${r.code}-analysis" class="tl">${anaHtml}</td>`:''}
-        ${vc('note')?buildNoteCell(shop,r.code,noteId,notes[r.code]):''}
+        ${vc('note')?buildNoteCell(shop,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})()):''}
         ${shop==='好麻吉'?(()=>{
           const gnoteId=`gnote-${shop}-${r.code}`;
           return `
