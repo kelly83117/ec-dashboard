@@ -1690,10 +1690,10 @@ const App = {
   renderTrendRadarTab() {
     const logs = JSON.parse(localStorage.getItem('ec_d3_trend_logs') || '[]');
     const PLATFORMS = [
-      { id: 'shopee',  name: '蝦皮',   color: '#fee2e2', textColor: '#b91c1c', icon: '🛍', hotUrl: 'https://shopee.tw/flash_sale',     searchUrl: 'https://shopee.tw/search?keyword=' },
-      { id: 'tiktok',  name: 'TikTok', color: '#f3f4f6', textColor: '#374151', icon: '📱', hotUrl: 'https://www.tiktok.com/trending',   searchUrl: 'https://www.tiktok.com/search?q=' },
-      { id: '1688',    name: '1688',   color: '#ffedd5', textColor: '#c2410c', icon: '🏭', hotUrl: 'https://www.1688.com/huo/',          searchUrl: 'https://s.1688.com/selloffer/offerlist.htm?keywords=' },
-      { id: 'taobao',  name: '淘寶',   color: '#fff7ed', textColor: '#ea580c', icon: '🛒', hotUrl: 'https://www.taobao.com',             searchUrl: 'https://s.taobao.com/search?q=' },
+      { id: 'shopee',  name: '蝦皮',   color: '#fca5a5', textColor: '#7f1d1d', icon: '🛍', hotUrl: 'https://shopee.tw/flash_sale',     searchUrl: 'https://shopee.tw/search?keyword=' },
+      { id: 'tiktok',  name: 'TikTok', color: '#d1d5db', textColor: '#111827', icon: '📱', hotUrl: 'https://www.tiktok.com/trending',   searchUrl: 'https://www.tiktok.com/search?q=' },
+      { id: '1688',    name: '1688',   color: '#fdba74', textColor: '#7c2d12', icon: '🏭', hotUrl: 'https://www.1688.com/huo/',          searchUrl: 'https://s.1688.com/selloffer/offerlist.htm?keywords=' },
+      { id: 'taobao',  name: '淘寶',   color: '#fb923c', textColor: '#431407', icon: '🛒', hotUrl: 'https://www.taobao.com',             searchUrl: 'https://s.taobao.com/search?q=' },
     ];
     // 🚀 起飛商品推薦區（自動）放在最上方，讓使用者一進來就看到
     const risingSection = `
@@ -1814,10 +1814,10 @@ const App = {
 
   bindTrendRadar() {
     const PLATFORMS = [
-      { id: 'shopee',  name: '蝦皮',   color: '#fee2e2', textColor: '#b91c1c', icon: '🛍', searchUrl: 'https://shopee.tw/search?keyword=' },
-      { id: 'tiktok',  name: 'TikTok', color: '#f3f4f6', textColor: '#374151', icon: '📱', searchUrl: 'https://www.tiktok.com/search?q=' },
-      { id: '1688',    name: '1688',   color: '#ffedd5', textColor: '#c2410c', icon: '🏭', searchUrl: 'https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=' },
-      { id: 'taobao',  name: '淘寶',   color: '#fff7ed', textColor: '#ea580c', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
+      { id: 'shopee',  name: '蝦皮',   color: '#fca5a5', textColor: '#7f1d1d', icon: '🛍', searchUrl: 'https://shopee.tw/search?keyword=' },
+      { id: 'tiktok',  name: 'TikTok', color: '#d1d5db', textColor: '#111827', icon: '📱', searchUrl: 'https://www.tiktok.com/search?q=' },
+      { id: '1688',    name: '1688',   color: '#fdba74', textColor: '#7c2d12', icon: '🏭', searchUrl: 'https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=' },
+      { id: 'taobao',  name: '淘寶',   color: '#fb923c', textColor: '#431407', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
     ];
 
     // 直接呼叫（瀏覽器原生，Shopee 是 SPA 自己就用 JS 呼叫這個 API）
