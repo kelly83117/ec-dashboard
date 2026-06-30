@@ -243,14 +243,23 @@ Object.assign(App, {
         </div>
         <div style="padding:10px 14px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap">
           <div style="flex:1;min-width:130px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">日期</label><input type="date" id="designA-date" value="${toDateStr(new Date())}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit"></div>
-          <div style="flex:2;min-width:160px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">商品 / 標題</label><input type="text" id="designA-product" placeholder="例：森之旅 夏季新品" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit"></div>
-          <div style="flex:1.2;min-width:130px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">圖種</label>
-            <select id="designA-type" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;background:white">
-              ${PRESET_TYPES.map(t => `<option value="${escapeHtml(t.name)}" data-mins="${t.minutes}">${escapeHtml(t.name)}</option>`).join('')}
-              <option value="" data-mins="0">其他</option>
-            </select>
-          </div>
-          <div style="width:90px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">標準(分)</label><input type="number" min="1" id="designA-mins" value="20" readonly tabindex="-1" title="依圖種自動帶入，不可手動修改" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;text-align:center;background:#f3f4f6;color:var(--text-muted);cursor:not-allowed"></div>
+          ${(() => {
+            const running = this._designTimer?.status === 'running';
+            const tProduct = running ? escapeHtml(this._designTimer.product) : '';
+            const tType = running ? this._designTimer.type : '';
+            const tStd = running ? this._designTimer.stdMin : 20;
+            const locked = running ? 'readonly tabindex="-1" title="計時中，不可修改" style="background:#f3f4f6;cursor:not-allowed"' : '';
+            const lockedSel = running ? 'disabled title="計時中，不可修改" style="background:#f3f4f6;cursor:not-allowed"' : '';
+            return `
+              <div style="flex:2;min-width:160px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">商品 / 標題</label><input type="text" id="designA-product" placeholder="例：森之旅 夏季新品" value="${tProduct}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit${running ? ';background:#f3f4f6;cursor:not-allowed' : ''}" ${running ? 'readonly tabindex="-1" title="計時中，不可修改"' : ''}></div>
+              <div style="flex:1.2;min-width:130px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">圖種</label>
+                <select id="designA-type" ${running ? 'disabled title="計時中，不可修改"' : ''} style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;background:${running ? '#f3f4f6' : 'white'};${running ? 'cursor:not-allowed' : ''}">
+                  ${PRESET_TYPES.map(t => `<option value="${escapeHtml(t.name)}" data-mins="${t.minutes}" ${tType === t.name ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}
+                  <option value="" data-mins="0">其他</option>
+                </select>
+              </div>
+              <div style="width:90px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">標準(分)</label><input type="number" min="1" id="designA-mins" value="${tStd}" readonly tabindex="-1" title="依圖種自動帶入，不可手動修改" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;text-align:center;background:#f3f4f6;color:var(--text-muted);cursor:not-allowed"></div>`;
+          })()}
           <div style="width:100px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">是否達標</label>
             <select id="designA-met" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;background:white;color:#10b981;font-weight:700">
               <option value="1" style="color:#10b981;font-weight:700">○ 標準內</option><option value="0" style="color:#ef4444;font-weight:700">× 超時</option>
