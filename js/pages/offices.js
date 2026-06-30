@@ -229,7 +229,7 @@ Object.assign(App, {
           <td style="padding:6px 8px;text-align:left;font-size:13px;font-variant-numeric:tabular-nums">${e.stdMinutes || ''}</td>
           <td style="padding:6px 8px;text-align:left">${e.met ? '<span style="color:#10b981;font-weight:700">✓ 達標</span>' : '<span style="color:#ef4444;font-weight:700">✗ 超時</span>'}</td>
           <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted)">${escapeHtml(e.note || '')}</td>
-          <td style="padding:6px 8px;text-align:left"><button class="icon-btn design-entry-del" data-entry-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
+          <td style="padding:6px 8px;text-align:right"><button class="icon-btn design-entry-del" data-entry-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
         </tr>`).join('');
 
     const sectionA = `
@@ -267,7 +267,7 @@ Object.assign(App, {
           <button id="designA-add" class="btn-primary" style="width:auto;padding:7px 16px;height:32px;font-size:13px">＋ 新增</button>
         </div>
         <div class="table-wrap" style="max-height:300px;overflow-y:auto">
-          <table style="width:auto;font-size:13px">
+          <table style="width:100%;font-size:13px">
             <thead style="background:var(--surface);position:sticky;top:0">
               <tr>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:96px">日期</th>
@@ -276,7 +276,7 @@ Object.assign(App, {
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:80px">標準(分)</th>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:80px">是否達標</th>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:140px">備註</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:40px"></th>
+                <th style="padding:7px 8px;text-align:right;font-size:12px;color:var(--text-muted)"></th>
               </tr>
             </thead>
             <tbody>${entriesRowsHtml}</tbody>
