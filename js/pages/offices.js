@@ -220,16 +220,16 @@ Object.assign(App, {
       { name: '社群圖文',       minutes: 15 },
     ];
     const entriesRowsHtml = (data.entries || []).length === 0
-      ? `<tr><td colspan="7" style="padding:24px;text-align:left;color:var(--text-muted);font-size:13px">本月還沒有工時記錄</td></tr>`
+      ? `<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px">本月還沒有工時記錄</td></tr>`
       : (data.entries || []).map((e, i) => `
         <tr data-entry-idx="${i}">
-          <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${escapeHtml(e.date || '')}</td>
-          <td style="padding:6px 8px;text-align:left;font-size:13px">${escapeHtml(e.product || '')}</td>
-          <td style="padding:6px 8px;text-align:left;font-size:13px;color:var(--text-muted)">${escapeHtml(e.type || '')}</td>
-          <td style="padding:6px 8px;text-align:left;font-size:13px;font-variant-numeric:tabular-nums">${e.stdMinutes || ''}</td>
-          <td style="padding:6px 8px;text-align:left">${e.met ? '<span style="color:#10b981;font-weight:700">✓ 達標</span>' : '<span style="color:#ef4444;font-weight:700">✗ 超時</span>'}</td>
-          <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted)">${escapeHtml(e.note || '')}</td>
-          <td style="padding:6px 8px;text-align:left"><button class="icon-btn design-entry-del" data-entry-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
+          <td style="padding:6px 8px;text-align:center;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${escapeHtml(e.date || '')}</td>
+          <td style="padding:6px 8px;text-align:center;font-size:13px">${escapeHtml(e.product || '')}</td>
+          <td style="padding:6px 8px;text-align:center;font-size:13px;color:var(--text-muted)">${escapeHtml(e.type || '')}</td>
+          <td style="padding:6px 8px;text-align:center;font-size:13px;font-variant-numeric:tabular-nums">${e.stdMinutes || ''}</td>
+          <td style="padding:6px 8px;text-align:center">${e.met ? '<span style="color:#10b981;font-weight:700">✓ 達標</span>' : '<span style="color:#ef4444;font-weight:700">✗ 超時</span>'}</td>
+          <td style="padding:6px 8px;text-align:center;font-size:12px;color:var(--text-muted)">${escapeHtml(e.note || '')}</td>
+          <td style="padding:6px 8px;text-align:center"><button class="icon-btn design-entry-del" data-entry-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
         </tr>`).join('');
 
     const sectionA = `
@@ -270,13 +270,13 @@ Object.assign(App, {
           <table style="width:100%;font-size:13px">
             <thead style="background:var(--surface);position:sticky;top:0">
               <tr>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:96px">日期</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted)">商品</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:110px">圖種</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:80px">標準(分)</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:80px">是否達標</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:140px">備註</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:40px"></th>
+                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted);width:96px">日期</th>
+                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted)">商品</th>
+                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted);width:110px">圖種</th>
+                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted);width:80px">標準(分)</th>
+                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted);width:80px">是否達標</th>
+                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted);width:140px">備註</th>
+                <th style="padding:7px 8px;text-align:center;font-size:12px;color:var(--text-muted);width:40px"></th>
               </tr>
             </thead>
             <tbody>${entriesRowsHtml}</tbody>
