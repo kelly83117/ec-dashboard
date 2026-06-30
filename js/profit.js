@@ -2948,8 +2948,29 @@ function mergeCoupangRows(rows){
 
 const _cupMergedRows={};
 
+function cupNotesKey(shop,month,half){return'ec_coupang_notes|'+shop+'|'+month+'|'+half;}
+function cupLoadNotes(shop,month,half){
+  try{const d=localStorage.getItem(cupNotesKey(shop,month,half));return d?JSON.parse(d):{};}catch{return{};}
+}
+function cupSaveNotes(shop,month,half,notes){
+  try{localStorage.setItem(cupNotesKey(shop,month,half),JSON.stringify(notes));}catch(e){}
+}
+function onCupNoteChange(shop,code,value){
+  const p=_cupPeriod[shop]||{month:'2026/06',half:'first'};
+  const notes=cupLoadNotes(shop,p.month,p.half);
+  notes[code]=value;
+  cupSaveNotes(shop,p.month,p.half,notes);
+  const rows=_cupMergedRows[shop]||[];
+  const r=rows.find(x=>x.code===code);
+  if(r)r.note=value;
+  if(window.__cloudProfit)window.__cloudProfit.setField(cupNotesKey(shop,p.month,p.half),notes).catch(()=>{});
+}
+
 function renderCoupangTable(shop,rawRows){
   const rows=mergeCoupangRows(rawRows);
+  const p=_cupPeriod[shop]||{month:'2026/06',half:'first'};
+  const notes=cupLoadNotes(shop,p.month,p.half);
+  rows.forEach(r=>{r.note=notes[r.code]||'';});
   _cupMergedRows[shop]=rows;
   const tbl=document.getElementById('cup-tbl-'+shop);
   if(!tbl)return;
@@ -2978,8 +2999,9 @@ function renderCoupangTable(shop,rawRows){
     {k:'netRate',label:'純利率',fmt:fmtP},
     {k:'qty',label:'銷售數量',fmt:fmtN},
     {k:'stock',label:'可用庫存',fmt:fmtN},
+    {k:'note',label:'調整'},
   ];
-  const leftCols=new Set(['productId','code','name']);
+  const leftCols=new Set(['productId','code','name','note']);
   const thStyle='padding:4px 10px 4px 0;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;white-space:nowrap;border-bottom:2px solid #e5e7eb;background:#f9fafb;position:sticky;top:0;z-index:1';
   const tdStyle='padding:3px 10px 3px 0;font-size:12.5px;border-bottom:1px solid #f3f4f6;white-space:nowrap;line-height:1.3';
   const thead=cols.map(c=>`<th style="${thStyle};text-align:${leftCols.has(c.k)?'left':'right'}">${c.label}</th>`).join('');
@@ -2987,6 +3009,10 @@ function renderCoupangTable(shop,rawRows){
     const bg=i%2===0?'#fff':'#fafafa';
     const tds=cols.map(c=>{
       let v=r[c.k];
+      if(c.k==='note'){
+        const esc=String(v||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+        return`<td style="${tdStyle};background:${bg};text-align:left"><input type="text" value="${esc}" placeholder="輸入調整…" oninput="onCupNoteChange('${shop}','${r.code}',this.value)" style="width:120px;border:1px solid #e5e7eb;border-radius:5px;padding:2px 6px;font-size:12px;outline:none;background:#fff"></td>`;
+      }
       const disp=c.fmt?c.fmt(v):v;
       const align=leftCols.has(c.k)?'left':'right';
       const color=c.k==='net'?(v>=0?'#10b981':'#ef4444'):c.k==='netRate'?(v>=0?'#6366f1':'#ef4444'):'inherit';
@@ -3192,7 +3218,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
+  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
