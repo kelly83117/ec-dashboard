@@ -2688,6 +2688,30 @@ function setShop(shop,btn){
 const MOMO_SHOPS=['總表','甲配','乙配','MO+麻吉','MO+森之旅'];
 let curMomoShop=null;
 
+const _cupPeriod={};
+function cupHalfLabel(month,half){
+  const[y,mo]=month.split('/');const last=new Date(+y,+mo,0).getDate();
+  if(half==='first')return`${mo}/1–${mo}/15`;
+  if(half==='second')return`${mo}/16–${mo}/${last}`;
+  return`${mo}/1–${mo}/${last}`;
+}
+function onCupMonthChange(shop,platform,sel){
+  _cupPeriod[shop]=_cupPeriod[shop]||{month:'2026/06',half:'first'};
+  _cupPeriod[shop].month=sel.value;
+  updateCupHalfSelect(shop,platform);
+}
+function onCupHalfChange(shop,platform,sel){
+  _cupPeriod[shop]=_cupPeriod[shop]||{month:'2026/06',half:'first'};
+  _cupPeriod[shop].half=sel.value;
+}
+function updateCupHalfSelect(shop,platform){
+  const p=_cupPeriod[shop]||{month:'2026/06',half:'first'};
+  const sel=document.getElementById('cup-half-sel-'+shop);
+  if(!sel)return;
+  const opts=['first','second','full'];
+  sel.innerHTML=opts.map(h=>`<option value="${h}"${h===p.half?' selected':''}>${cupHalfLabel(p.month,h)}</option>`).join('');
+}
+
 function momoShopHTML(shop,platform='momo'){
   const isCoupang=platform==='coupang';
   const uploadBtn=isCoupang
@@ -2696,15 +2720,23 @@ function momoShopHTML(shop,platform='momo'){
   const tableArea=isCoupang
     ?`<div id="cup-tbl-${shop}"><div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個檔案後按「▶ 產生並儲存」</div></div></div>`
     :`<div style="background:#f9fafb;border:1.5px dashed #d1d5db;border-radius:10px;padding:48px;text-align:center;color:#9ca3af"><div style="font-size:36px;margin-bottom:8px">📊</div><div style="font-size:14px;font-weight:600">階層分布圖</div><div style="font-size:12px;margin-top:4px">上傳資料後可查看</div></div>`;
+  _cupPeriod[shop]=_cupPeriod[shop]||{month:'2026/06',half:'first'};
+  const p=_cupPeriod[shop];
   return`
   <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #e5e7eb">
     <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期總營收</div><div id="cup-kv-rev-${shop}" style="font-size:20px;font-weight:700;color:#374151">—</div></div>
     <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期純利</div><div id="cup-kv-net-${shop}" style="font-size:20px;font-weight:700;color:#10b981">—</div></div>
     <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">純利率</div><div id="cup-kv-rate-${shop}" style="font-size:20px;font-weight:700;color:#6366f1">—</div></div>
     <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-      <div style="display:flex;align-items:center;gap:16px">
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">月份</div><div style="font-size:14px;font-weight:600;color:#374151">—</div></div>
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">區間</div><div style="font-size:14px;font-weight:600;color:#374151">—</div></div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
+        <select onchange="onCupMonthChange('${shop}','${platform}',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+          ${MONTHS.map(mo=>`<option value="${mo}"${mo===p.month?' selected':''}>${mo}</option>`).join('')}
+        </select>
+        <span style="font-size:12px;color:#6b7280;font-weight:500">區間</span>
+        <select id="cup-half-sel-${shop}" onchange="onCupHalfChange('${shop}','${platform}',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+          ${['first','second','full'].map(h=>`<option value="${h}"${h===p.half?' selected':''}>${cupHalfLabel(p.month,h)}</option>`).join('')}
+        </select>
       </div>
       <div style="display:flex;gap:8px">
         ${uploadBtn}
@@ -3025,7 +3057,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangUpload,generateCoupang,onCoupangFile,openCoupangUpload,renderCoupangTable,setCoupangShop,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
+  closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,openCoupangUpload,renderCoupangTable,setCoupangShop,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
