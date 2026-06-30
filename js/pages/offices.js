@@ -257,19 +257,9 @@ Object.assign(App, {
             </select>
           </div>
           <div style="flex:1.5;min-width:120px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">備註（選填）</label><input type="text" id="designA-note" placeholder="" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit"></div>
-          ${(() => {
-            const t = this._designTimer;
-            if (!t) return `<button id="designA-start" title="按下開始計時，完成後自動填入耗時 + 是否達標" style="width:auto;padding:7px 14px;height:32px;font-size:13px;background:#10b981;color:white;border:0;border-radius:6px;font-weight:600;cursor:pointer">⏱ 開始計時</button>`;
-            if (t.status === 'running') return `<button id="designA-stop" title="按下後自動填入耗時 + 達標判定" style="width:auto;padding:7px 14px;height:32px;font-size:13px;background:#ef4444;color:white;border:0;border-radius:6px;font-weight:600;cursor:pointer;font-variant-numeric:tabular-nums">⏹ 完成 <span id="designA-elapsed">0:00</span></button>`;
-            // done
-            const bg = t.met ? '#10b981' : '#ef4444';
-            const icon = t.met ? '✓' : '✗';
-            const label = t.met ? '標準內' : '超時';
-            return `<div style="display:flex;align-items:center;gap:4px">
-              <div style="padding:7px 14px;height:32px;line-height:18px;font-size:13px;background:${bg};color:white;border-radius:6px;font-weight:700;display:inline-flex;align-items:center;font-variant-numeric:tabular-nums" title="實際耗時 ${t.mins} 分，標準 ${t.stdMin} 分">${icon} ${label} · ${t.mins} 分</div>
-              <button id="designA-reset" title="重新計時" style="width:32px;height:32px;border:1px solid var(--border);background:white;border-radius:6px;font-size:14px;cursor:pointer;color:var(--text-muted)">↺</button>
-            </div>`;
-          })()}
+          ${this._designTimer?.status === 'running'
+            ? `<button id="designA-stop" title="按下後自動新增此筆記錄" style="width:auto;padding:7px 14px;height:32px;font-size:13px;background:#ef4444;color:white;border:0;border-radius:6px;font-weight:600;cursor:pointer;font-variant-numeric:tabular-nums">⏹ 完成 <span id="designA-elapsed">0:00</span></button>`
+            : `<button id="designA-start" title="先填商品 + 選圖種，按下開始計時；完成時自動新增" style="width:auto;padding:7px 14px;height:32px;font-size:13px;background:#10b981;color:white;border:0;border-radius:6px;font-weight:600;cursor:pointer">⏱ 開始計時</button>`}
           <button id="designA-add" class="btn-primary" style="width:auto;padding:7px 16px;height:32px;font-size:13px">＋ 新增</button>
         </div>
         <div class="table-wrap" style="max-height:300px;overflow-y:auto">
@@ -493,48 +483,43 @@ Object.assign(App, {
       metSel.addEventListener('change', syncMetColor);
       syncMetColor();
     }
-    // A 區 — 計時器：開始 / 完成（自動填日期、達標/超時、備註寫實際分鐘）
+    // A 區 — 計時器：開始要先填商品，完成後直接新增到下方表格
     const startBtn = document.getElementById('designA-start');
     if (startBtn) {
       startBtn.addEventListener('click', () => {
-        this._designTimer = { startTs: Date.now(), status: 'running' };
+        const productEl = document.getElementById('designA-product');
+        const product = (productEl?.value || '').trim();
+        if (!product) { showToast('請先填寫「商品 / 標題」再開始計時', 'error'); productEl?.focus(); return; }
+        // 暫存商品 + 圖種 + 標準分鐘到 timer state（render 後表單會重畫，要先存起來）
+        const typeSelEl = document.getElementById('designA-type');
+        const type = typeSelEl ? (typeSelEl.value || (typeSelEl.options[typeSelEl.selectedIndex]?.text || '其他')) : '';
+        const stdMin = +((document.getElementById('designA-mins') || {}).value) || 0;
+        this._designTimer = { startTs: Date.now(), status: 'running', product, type, stdMin };
         this.render();
       });
     }
     const stopBtn = document.getElementById('designA-stop');
     if (stopBtn) {
       stopBtn.addEventListener('click', () => {
-        const elapsedMs = Date.now() - this._designTimer.startTs;
+        const t = this._designTimer;
+        const elapsedMs = Date.now() - t.startTs;
         const elapsedMin = Math.max(1, Math.round(elapsedMs / 60000));
-        const stdMin = +(document.getElementById('designA-mins')?.value) || 0;
-        const met = stdMin > 0 && elapsedMin <= stdMin;
-        this._designTimer = { status: 'done', met, mins: elapsedMin, stdMin };
-        this.render();
-        // form 自動填寫由 bindDesignKpi 內的「timer done → 寫表單」段落處理
+        const met = t.stdMin > 0 && elapsedMin <= t.stdMin;
+        const data = loadData();
+        data.entries = data.entries || [];
+        data.entries.unshift({
+          date: toDateStr(new Date()),
+          product: t.product,
+          type: t.type,
+          stdMinutes: t.stdMin,
+          met,
+          note: `實際 ${elapsedMin} 分鐘`,
+        });
+        this._designTimer = null;
+        saveAndRender(data);
+        showToast(`✓ 已新增 ${t.product} · ${met ? '標準內' : '超時'} · ${elapsedMin} 分`, met ? 'success' : 'error');
       });
       this._designTimerTick();
-    }
-    // timer 狀態 = done 時，把結果寫進表單（在 render 之後執行，不會被覆蓋）
-    if (this._designTimer?.status === 'done') {
-      const t = this._designTimer;
-      const dateEl = document.getElementById('designA-date');
-      if (dateEl) dateEl.value = toDateStr(new Date());
-      const metEl = document.getElementById('designA-met');
-      if (metEl) { metEl.value = t.met ? '1' : '0'; metEl.dispatchEvent(new Event('change')); }
-      const noteEl = document.getElementById('designA-note');
-      if (noteEl && !(noteEl.value || '').startsWith('實際')) {
-        noteEl.value = `實際 ${t.mins} 分鐘`;
-      }
-    }
-    const resetBtn = document.getElementById('designA-reset');
-    if (resetBtn) {
-      resetBtn.addEventListener('click', () => {
-        this._designTimer = null;
-        // 清掉備註裡的「實際 X 分鐘」前綴
-        const noteEl = document.getElementById('designA-note');
-        if (noteEl) noteEl.value = (noteEl.value || '').replace(/^實際\s*\d+\s*分鐘(\s*·\s*)?/, '');
-        this.render();
-      });
     }
     // A 區 — 新增記錄
     const addABtn = document.getElementById('designA-add');
