@@ -2699,10 +2699,12 @@ function onCupMonthChange(shop,platform,sel){
   _cupPeriod[shop]=_cupPeriod[shop]||{month:'2026/06',half:'first'};
   _cupPeriod[shop].month=sel.value;
   updateCupHalfSelect(shop,platform);
+  if(platform==='coupang')cupTryLoadSaved(shop);
 }
 function onCupHalfChange(shop,platform,sel){
   _cupPeriod[shop]=_cupPeriod[shop]||{month:'2026/06',half:'first'};
   _cupPeriod[shop].half=sel.value;
+  if(platform==='coupang')cupTryLoadSaved(shop);
 }
 function updateCupHalfSelect(shop,platform){
   const p=_cupPeriod[shop]||{month:'2026/06',half:'first'};
@@ -2740,12 +2742,69 @@ function momoShopHTML(shop,platform='momo'){
       </div>
       <div style="display:flex;gap:8px">
         ${uploadBtn}
-        <button class="export-btn" disabled style="opacity:0.4;cursor:default">☁ 同步雲端</button>
+        ${isCoupang
+          ?`<button class="export-btn" id="cup-sync-${shop}" disabled style="opacity:0.4;cursor:default" onclick="syncCoupangToCloud('${shop}')">☁ 同步雲端</button>`
+          :`<button class="export-btn" disabled style="opacity:0.4;cursor:default">☁ 同步雲端</button>`}
         <button class="export-btn" disabled style="opacity:0.4;cursor:default">⬇ 匯出 Excel</button>
       </div>
     </div>
   </div>
   ${tableArea}`;
+}
+
+// ── 酷澎 資料持久化 ──
+function cupLsKey(shop,month,half){return'ec_coupang|'+shop+'|'+month+'|'+half;}
+function cupLsSave(shop,month,half,rows){
+  const payload={rows,ts:Date.now()};
+  try{localStorage.setItem(cupLsKey(shop,month,half),JSON.stringify(payload));}catch(e){}
+}
+function cupLsLoad(shop,month,half){
+  try{const d=localStorage.getItem(cupLsKey(shop,month,half));return d?JSON.parse(d):null;}catch{return null;}
+}
+function cupShowSyncBtn(shop){
+  const btn=document.getElementById('cup-sync-'+shop);
+  if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent='☁ 同步雲端';}
+}
+function cupTryLoadSaved(shop){
+  const p=_cupPeriod[shop]||{month:'2026/06',half:'first'};
+  const saved=cupLsLoad(shop,p.month,p.half);
+  if(saved&&saved.rows){
+    renderCoupangTable(shop,saved.rows);
+    cupShowSyncBtn(shop);
+  }else{
+    const tbl=document.getElementById('cup-tbl-'+shop);
+    if(tbl)tbl.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個檔案後按「▶ 產生並儲存」</div></div>`;
+    const revEl=document.getElementById('cup-kv-rev-'+shop);
+    const netEl=document.getElementById('cup-kv-net-'+shop);
+    const rateEl=document.getElementById('cup-kv-rate-'+shop);
+    if(revEl)revEl.textContent='—';
+    if(netEl)netEl.textContent='—';
+    if(rateEl)rateEl.textContent='—';
+    const btn=document.getElementById('cup-sync-'+shop);
+    if(btn){btn.disabled=true;btn.style.opacity='0.4';btn.style.cursor='default';btn.style.background='';btn.style.color='';btn.style.borderColor='';btn.textContent='☁ 同步雲端';}
+  }
+}
+function syncCoupangToCloud(shop){
+  const btn=document.getElementById('cup-sync-'+shop);
+  if(btn){btn.disabled=true;btn.textContent='同步中…';}
+  if(!window.__cloudProfit){
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'雲端尚未就緒，請重新整理。',kind:'warn'});
+    else if(typeof showToast==='function') showToast('雲端未連線','error');
+    if(btn)cupShowSyncBtn(shop);
+    return;
+  }
+  const p=_cupPeriod[shop]||{month:'2026/06',half:'first'};
+  const saved=cupLsLoad(shop,p.month,p.half);
+  if(!saved){if(btn)btn.disabled=false;return;}
+  window.__cloudProfit.setField(cupLsKey(shop,p.month,p.half),saved).then(()=>{
+    if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';}
+  }).catch(e=>{
+    const msg=(e&&e.message)||String(e);
+    if(window.App&&typeof App.showAlertModal==='function'){
+      App.showAlertModal({title:'同步失敗',message:'資料還在本機，請稍後再試。',detail:msg,kind:'error'});
+    }else if(typeof showToast==='function') showToast('同步失敗：'+msg,'error');
+    cupShowSyncBtn(shop);
+  });
 }
 
 function setMomoShop(shop,btn){
@@ -2767,6 +2826,7 @@ function setCoupangShop(shop,btn){
   if(el){el.classList.add('active');if(!el.dataset.init){el.innerHTML=momoShopHTML(shop,'coupang');el.dataset.init='1';}}
   const kpiBlock=document.getElementById('header-kpi-row');
   if(kpiBlock)kpiBlock.style.display='none';
+  if(shop!=='總表')cupTryLoadSaved(shop);
 }
 
 let _cupShop='';
@@ -2824,6 +2884,9 @@ function generateCoupang(){
       rows.push({productId,code,name,rev,salesCost,gross,net,netRate,qty,stock});
     });
     renderCoupangTable(_cupShop,rows);
+    const p=_cupPeriod[_cupShop]||{month:'2026/06',half:'first'};
+    cupLsSave(_cupShop,p.month,p.half,rows);
+    cupShowSyncBtn(_cupShop);
     if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
     closeCoupangUpload();
   }).catch(err=>{
@@ -3083,7 +3146,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,openCoupangUpload,renderCoupangTable,setCoupangShop,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
+  closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
