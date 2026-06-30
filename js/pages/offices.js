@@ -899,18 +899,18 @@ Object.assign(App, {
     // d1 行銷、d4 設計都不顯示「成員績效」表與上方統計卡片區
     //   d4 已改用個人 KPI 頁，集體季度績效不適用
     const showMemberKpiTable = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3';
-    const showStatGrid = deptId !== 'd1' && deptId !== 'd4';
+    const showStatGrid = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3';
     const inner = `
       ${showStatGrid ? `<div class="stat-grid">${statCards}</div>` : ''}
+      ${deptId === 'd3' ? `<div style="margin-bottom:20px">${this.renderFestivalCalendarTab()}</div>` : ''}
       ${deptId === 'd1' && !subRoute ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId === 'd3' ? `
-        <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;align-items:start;margin-top:20px">
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;align-items:start">
           <div>${tabBar}</div>
           <div>${tabContent}</div>
         </div>
-        <div style="margin-top:20px">${this.renderFestivalCalendarTab()}</div>
       ` : deptId !== 'd1' ? tabBar + tabContent : ''}
       ${showMemberKpiTable ? `
         <div class="table-card">
