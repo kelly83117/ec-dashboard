@@ -1900,31 +1900,30 @@ const App = {
       const seen = new Set();
       const deduped = results.filter(r => { if (seen.has(r.keyword)) return false; seen.add(r.keyword); return true; }).slice(0, 5);
       deduped.sort((a, b) => (b.sold || 0) - (a.sold || 0));
-      const srcColors = { 'PChome': '#0067b8', '蝦皮': '#ee4d2d' };
-      const tag = '';
+      const isAI = results.some(r => r.source === 'AI推薦');
+      const medals = ['🥇','🥈','🥉','4.','5.'];
       listEl.style.display = '';
-      listEl.innerHTML = tag + `
+      listEl.innerHTML = `
         <div style="display:flex;flex-direction:column;gap:8px">
           ${deduped.map((r, i) => {
             const soldStr = (r.sold||0) >= 10000 ? ((r.sold)/10000).toFixed(1)+'萬筆' : (r.sold||0) > 0 ? (r.sold)+'筆' : '';
-            const sc = srcColors[r.source] || '#ee4d2d';
-            const medals = ['🥇','🥈','🥉','4.','5.'];
             return `<a href="${r.url}" target="_blank"
               style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;text-decoration:none;color:inherit;transition:box-shadow .15s"
               onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
               <div style="font-size:18px;width:24px;text-align:center;flex-shrink:0">${medals[i]||''}</div>
               <div style="flex:1;min-width:0">
-                <div style="font-size:10px;color:#d97706;font-weight:600;margin-bottom:2px">🔥 ${escapeHtml(r.keyword)}</div>
+                <div style="font-size:10px;color:#7c3aed;font-weight:600;margin-bottom:2px">🤖 ${escapeHtml(r.keyword)}</div>
                 <div style="font-size:12px;font-weight:600;line-height:1.4;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(r.name)}</div>
+                ${r.reason ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(r.reason)}</div>` : ''}
               </div>
               <div style="text-align:right;flex-shrink:0">
-                <div style="font-size:14px;font-weight:700;color:${sc}">NT$${(r.price||0).toLocaleString()}</div>
+                <div style="font-size:14px;font-weight:700;color:#7c3aed">NT$${(r.price||0).toLocaleString()}</div>
                 ${soldStr ? `<div style="font-size:10px;color:var(--text-muted)">${soldStr}</div>` : ''}
               </div>
             </a>`;
           }).join('')}
         </div>
-        <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">${isLive ? '即時資料：蝦皮/PChome · 依熱搜關鍵字自動取得' : '備援資料 · 點商品卡片可在蝦皮搜尋該商品'}</div>`;
+        <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">🤖 Claude AI 每天早上 9 點根據節慶與季節自動推薦 · 點商品可在蝦皮搜尋</div>`;
     };
 
     const loadRisingProducts = async (keywords) => {
