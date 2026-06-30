@@ -836,11 +836,11 @@ Object.assign(App, {
 
     const fmt = (n) => n > 0 ? n.toLocaleString() : '—';
     // 緊湊版：cell padding 縮一半、字小一級、line-height 收緊；筆電可一頁看完整月
-    const fmtCell = (n, dim, leftBorder) => `<td style="padding:2px 6px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;color:${dim ? '#cbd5e1' : 'var(--text)'};line-height:1.25;${leftBorder ? `border-left:${leftBorder}` : ''}">${fmt(n)}</td>`;
+    const fmtCell = (n, dim, leftBorder) => `<td style="padding:2px 6px;text-align:center;font-variant-numeric:tabular-nums;font-size:12px;color:${dim ? '#cbd5e1' : 'var(--text)'};line-height:1.25;${leftBorder ? `border-left:${leftBorder}` : ''}">${fmt(n)}</td>`;
     const fmtRoas = (rev, ads) => {
-      if (ads === 0) return `<td style="padding:2px 6px;text-align:right;color:#cbd5e1;font-size:12px;line-height:1.25">—</td>`;
+      if (ads === 0) return `<td style="padding:2px 6px;text-align:center;color:#cbd5e1;font-size:12px;line-height:1.25">—</td>`;
       const r = (rev / ads).toFixed(2);
-      return `<td style="padding:2px 6px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;font-weight:600;color:#4f46e5;line-height:1.25">${r}</td>`;
+      return `<td style="padding:2px 6px;text-align:center;font-variant-numeric:tabular-nums;font-size:12px;font-weight:600;color:#4f46e5;line-height:1.25">${r}</td>`;
     };
 
     // 建欄位設定：每平台佔幾欄
@@ -868,11 +868,11 @@ Object.assign(App, {
     const subHeadHtml = colSpec.map(({ hasAds }) => {
       const lb = 'border-left:1px solid #94a3b8;';
       if (hasAds) {
-        return `<th style="padding:3px 5px;text-align:right;font-size:10.5px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);${lb}">營收</th>
-                <th style="padding:3px 5px;text-align:right;font-size:10.5px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">廣告</th>
-                <th style="padding:3px 5px;text-align:right;font-size:10.5px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">ROAS</th>`;
+        return `<th style="padding:3px 5px;text-align:center;font-size:10.5px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);${lb}">營收</th>
+                <th style="padding:3px 5px;text-align:center;font-size:10.5px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">廣告</th>
+                <th style="padding:3px 5px;text-align:center;font-size:10.5px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border)">ROAS</th>`;
       }
-      return `<th style="padding:3px 5px;text-align:right;font-size:10.5px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);${lb}">營收</th>`;
+      return `<th style="padding:3px 5px;text-align:center;font-size:10.5px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);${lb}">營收</th>`;
     }).join('');
 
     // 每一天的資料列
@@ -909,7 +909,7 @@ Object.assign(App, {
 
       return `
         <tr style="background:${isToday ? '#eef2ff44' : 'transparent'};line-height:1.25">
-          <td style="padding:2px 8px;font-size:12px;font-weight:600;color:${isToday ? 'var(--primary)' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;white-space:nowrap;border-right:1px solid var(--border);background:${isToday ? '#f5f3ff' : 'var(--surface)'}">${escapeHtml(dayLabel)}${isToday ? ' ●' : ''}</td>
+          <td style="padding:2px 8px;text-align:center;font-size:12px;font-weight:600;color:${isToday ? 'var(--primary)' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;white-space:nowrap;border-right:1px solid var(--border);background:${isToday ? '#f5f3ff' : 'var(--surface)'}">${escapeHtml(dayLabel)}${isToday ? ' ●' : ''}</td>
           ${cells}
           ${subtotalCell(marketSubtotals.shopee, '#ee4d2d')}
           ${subtotalCell(marketSubtotals.momo, '#ec4899')}
