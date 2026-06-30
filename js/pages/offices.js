@@ -252,7 +252,15 @@ Object.assign(App, {
               <td style="padding:6px 8px;text-align:left;font-size:13px;color:var(--text-muted)">${escapeHtml(e.type || '')}</td>
               <td style="padding:6px 8px;text-align:left;font-size:13px;font-variant-numeric:tabular-nums">${e.stdMinutes || ''}</td>
               <td style="padding:6px 8px;text-align:left">${metCell}</td>
-              <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted)">${escapeHtml(e.note || '')}</td>
+              <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted);line-height:1.6">${(() => {
+                if (!e.note) return '';
+                // 每個「→」開一行，數字粗體 + 深色，原因斜體
+                let h = escapeHtml(e.note);
+                h = h.replace(/ → /g, '<br>↳ ');
+                h = h.replace(/(\d+)\s*分鐘/g, '<strong style="color:var(--text);font-variant-numeric:tabular-nums">$1 分</strong>');
+                h = h.replace(/（原因：([^）]+)）/g, '<span style="color:#ef4444">（$1）</span>');
+                return h;
+              })()}</td>
               <td style="padding:6px 8px;text-align:right;white-space:nowrap">${rejectBtn}${unrejectBtn}${redoBtn}<button class="icon-btn design-entry-del" data-entry-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
             </tr>`;
         }).join('');
