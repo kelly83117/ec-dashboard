@@ -1690,10 +1690,10 @@ const App = {
   renderTrendRadarTab() {
     const logs = JSON.parse(localStorage.getItem('ec_d3_trend_logs') || '[]');
     const PLATFORMS = [
-      { id: 'shopee',  name: '蝦皮',   color: '#ee4d2d', icon: '🛍', hotUrl: 'https://shopee.tw/flash_sale',     searchUrl: 'https://shopee.tw/search?keyword=' },
-      { id: 'tiktok',  name: 'TikTok', color: '#010101', icon: '📱', hotUrl: 'https://www.tiktok.com/trending',   searchUrl: 'https://www.tiktok.com/search?q=' },
-      { id: '1688',    name: '1688',   color: '#ff6600', icon: '🏭', hotUrl: 'https://www.1688.com/huo/',          searchUrl: 'https://s.1688.com/selloffer/offerlist.htm?keywords=' },
-      { id: 'taobao',  name: '淘寶',   color: '#ff5000', icon: '🛒', hotUrl: 'https://www.taobao.com',             searchUrl: 'https://s.taobao.com/search?q=' },
+      { id: 'shopee',  name: '蝦皮',   color: '#fee2e2', textColor: '#b91c1c', icon: '🛍', hotUrl: 'https://shopee.tw/flash_sale',     searchUrl: 'https://shopee.tw/search?keyword=' },
+      { id: 'tiktok',  name: 'TikTok', color: '#f3f4f6', textColor: '#374151', icon: '📱', hotUrl: 'https://www.tiktok.com/trending',   searchUrl: 'https://www.tiktok.com/search?q=' },
+      { id: '1688',    name: '1688',   color: '#ffedd5', textColor: '#c2410c', icon: '🏭', hotUrl: 'https://www.1688.com/huo/',          searchUrl: 'https://s.1688.com/selloffer/offerlist.htm?keywords=' },
+      { id: 'taobao',  name: '淘寶',   color: '#fff7ed', textColor: '#ea580c', icon: '🛒', hotUrl: 'https://www.taobao.com',             searchUrl: 'https://s.taobao.com/search?q=' },
     ];
     // 🚀 起飛商品推薦區（自動）放在最上方，讓使用者一進來就看到
     const risingSection = `
@@ -1750,7 +1750,7 @@ const App = {
         }).join('');
 
     const platformBtns = PLATFORMS.map(p =>
-      `<a href="${p.hotUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:${p.color};color:white;border-radius:7px;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap">${p.icon} ${p.name} 熱搜</a>`
+      `<a href="${p.hotUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:${p.color};color:${p.textColor};border-radius:7px;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap;border:1px solid ${p.textColor}22">${p.icon} ${p.name} 熱搜</a>`
     ).join('');
 
     const logTableBody = `
@@ -1814,10 +1814,10 @@ const App = {
 
   bindTrendRadar() {
     const PLATFORMS = [
-      { id: 'shopee',  name: '蝦皮',   color: '#ee4d2d', icon: '🛍', searchUrl: 'https://shopee.tw/search?keyword=' },
-      { id: 'tiktok',  name: 'TikTok', color: '#010101', icon: '📱', searchUrl: 'https://www.tiktok.com/search?q=' },
-      { id: '1688',    name: '1688',   color: '#ff6600', icon: '🏭', searchUrl: 'https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=' },
-      { id: 'taobao',  name: '淘寶',   color: '#ff5000', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
+      { id: 'shopee',  name: '蝦皮',   color: '#fee2e2', textColor: '#b91c1c', icon: '🛍', searchUrl: 'https://shopee.tw/search?keyword=' },
+      { id: 'tiktok',  name: 'TikTok', color: '#f3f4f6', textColor: '#374151', icon: '📱', searchUrl: 'https://www.tiktok.com/search?q=' },
+      { id: '1688',    name: '1688',   color: '#ffedd5', textColor: '#c2410c', icon: '🏭', searchUrl: 'https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=' },
+      { id: 'taobao',  name: '淘寶',   color: '#fff7ed', textColor: '#ea580c', icon: '🛒', searchUrl: 'https://s.taobao.com/search?q=' },
     ];
 
     // 直接呼叫（瀏覽器原生，Shopee 是 SPA 自己就用 JS 呼叫這個 API）
@@ -1980,7 +1980,7 @@ const App = {
       linksEl.style.display = 'flex';
       linksEl.innerHTML = PLATFORMS.map(p =>
         `<a href="${p.searchUrl + encodeURIComponent(kw)}" target="_blank" rel="noopener"
-          style="padding:7px 14px;background:${p.color};color:white;border-radius:7px;font-size:13px;font-weight:600;text-decoration:none">
+          style="padding:7px 14px;background:${p.color};color:${p.textColor};border:1px solid ${p.textColor}22;border-radius:7px;font-size:13px;font-weight:600;text-decoration:none">
           ${p.icon} ${p.name} ↗</a>`
       ).join('');
     });
