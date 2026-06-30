@@ -902,7 +902,6 @@ Object.assign(App, {
     const showStatGrid = deptId !== 'd1' && deptId !== 'd4';
     const inner = `
       ${showStatGrid ? `<div class="stat-grid">${statCards}</div>` : ''}
-      ${deptId === 'd3' ? `<div style="margin-top:20px;margin-bottom:4px">${this.renderFestivalCalendarTab()}</div>` : ''}
       ${deptId === 'd1' && !subRoute ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
@@ -911,6 +910,7 @@ Object.assign(App, {
           <div>${tabBar}</div>
           <div>${tabContent}</div>
         </div>
+        <div style="margin-top:20px">${this.renderFestivalCalendarTab()}</div>
       ` : deptId !== 'd1' ? tabBar + tabContent : ''}
       ${showMemberKpiTable ? `
         <div class="table-card">
