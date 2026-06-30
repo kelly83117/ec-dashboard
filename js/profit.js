@@ -2790,14 +2790,17 @@ function onCoupangFile(e,type){
   const btn=document.getElementById('cup-gen-btn');
   if(btn)btn.disabled=!allReady;
 }
+const COUPANG_IDLIST_SHEET={'麻吉':'商品清單【好】','露營館':'商品清單【森】'};
+
 function generateCoupang(){
   const btn=document.getElementById('cup-gen-btn');
   if(btn){btn.disabled=true;btn.textContent='處理中…';}
+  const idSheet=COUPANG_IDLIST_SHEET[_cupShop];
   Promise.all([
     readXlsx(_cupFiles.mobic),
-    readXlsx(_cupFiles.idlist),
+    readXlsx(_cupFiles.idlist,idSheet),
   ]).then(([mobicRows,idRows])=>{
-    // 建立 編號 → 商品ID 對照表（商品ID清單：A=商品ID, B=編號）
+    // 建立 編號 → 商品ID 對照表（商品ID清單：A=供應商商品ID, B=莫筆克編號, C=名稱）
     const codeToId={};
     idRows.slice(1).forEach(r=>{
       const id=String(r[0]||'').trim();
@@ -2830,14 +2833,15 @@ function generateCoupang(){
   });
 }
 
-function readXlsx(file){
+function readXlsx(file,sheetName){
   return new Promise((resolve,reject)=>{
     const reader=new FileReader();
     reader.onload=e=>{
       try{
         const data=new Uint8Array(e.target.result);
         const wb=XLSX.read(data,{type:'array'});
-        const ws=wb.Sheets[wb.SheetNames[0]];
+        const name=(sheetName&&wb.SheetNames.includes(sheetName))?sheetName:wb.SheetNames[0];
+        const ws=wb.Sheets[name];
         resolve(XLSX.utils.sheet_to_json(ws,{header:1,defval:''}));
       }catch(err){reject(err);}
     };
