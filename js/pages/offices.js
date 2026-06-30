@@ -128,9 +128,11 @@ Object.assign(App, {
     const fixedTasks = (data && data.fixedTasks) || {};
     const tasksScored = DESIGN_FIXED_TASKS.map(t => {
       const st = fixedTasks[t.key] || { missed: 0, errors: 0 };
-      const perMissPenalty = t.points / t.monthlyTimes;
-      const score = Math.max(0, t.points - (st.missed || 0) * perMissPenalty - (st.errors || 0) * 2);
-      return { ...t, missed: st.missed || 0, errors: st.errors || 0, score };
+      const missed = st.missed || 0;
+      const errors = st.errors || 0;
+      // 漏做 ≥ 1 直接歸零本項分數；否則只扣做錯（每次 -2）
+      const score = missed >= 1 ? 0 : Math.max(0, t.points - errors * 2);
+      return { ...t, missed, errors, score };
     });
     const scoreB = tasksScored.reduce((s, t) => s + t.score, 0);
 
@@ -263,7 +265,7 @@ Object.assign(App, {
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
             <h3 style="margin:0;font-size:16px;color:#f59e0b">B. 指派固定任務</h3>
-            <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">滿分起算，漏做 / 做錯逐項扣分</p>
+            <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">滿分起算，漏做 ≥ 1 該項直接 0 分；做錯每次 -2</p>
           </div>
           <div style="font-size:24px;font-weight:800;color:#f59e0b;font-variant-numeric:tabular-nums">${k.scoreB.toFixed(1)} <span style="font-size:13px;color:var(--text-muted);font-weight:500">/ 30</span></div>
         </div>
