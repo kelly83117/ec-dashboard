@@ -2913,7 +2913,35 @@ function readXlsx(file,sheetName){
   });
 }
 
-function renderCoupangTable(shop,rows){
+function mergeCoupangRows(rows){
+  const map=new Map();
+  const order=[];
+  rows.forEach(r=>{
+    const key=r.code||r.productId||r.name;
+    if(!map.has(key)){
+      map.set(key,{...r});
+      order.push(key);
+    }else{
+      const m=map.get(key);
+      m.rev+=r.rev;
+      m.salesCost+=r.salesCost;
+      m.gross+=r.gross;
+      m.qty+=r.qty;
+      m.stock+=r.stock;
+      if(!m.productId&&r.productId)m.productId=r.productId;
+      if(!m.name&&r.name)m.name=r.name;
+    }
+  });
+  return order.map(k=>{
+    const m=map.get(k);
+    m.net=m.gross-(m.rev*0.175);
+    m.netRate=m.rev>0?m.net/m.rev:0;
+    return m;
+  });
+}
+
+function renderCoupangTable(shop,rawRows){
+  const rows=mergeCoupangRows(rawRows);
   const tbl=document.getElementById('cup-tbl-'+shop);
   if(!tbl)return;
   const totalRev=rows.reduce((s,r)=>s+r.rev,0);
@@ -2942,17 +2970,18 @@ function renderCoupangTable(shop,rows){
     {k:'qty',label:'銷售數量',fmt:fmtN},
     {k:'stock',label:'可用庫存',fmt:fmtN},
   ];
+  const leftCols=new Set(['productId','code','name']);
   const thStyle='padding:5px 8px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;white-space:nowrap;border-bottom:2px solid #e5e7eb;background:#f9fafb;position:sticky;top:0;z-index:1';
   const tdStyle='padding:4px 8px;font-size:12.5px;border-bottom:1px solid #f3f4f6;white-space:nowrap;line-height:1.3';
-  const thead=cols.map(c=>`<th style="${thStyle}">${c.label}</th>`).join('');
+  const thead=cols.map(c=>`<th style="${thStyle};text-align:${leftCols.has(c.k)?'left':'right'}">${c.label}</th>`).join('');
   const tbody=rows.map((r,i)=>{
     const bg=i%2===0?'#fff':'#fafafa';
     const tds=cols.map(c=>{
       let v=r[c.k];
       const disp=c.fmt?c.fmt(v):v;
-      const isNum=typeof v==='number';
+      const align=leftCols.has(c.k)?'left':'right';
       const color=c.k==='net'?(v>=0?'#10b981':'#ef4444'):c.k==='netRate'?(v>=0?'#6366f1':'#ef4444'):'inherit';
-      return`<td style="${tdStyle};background:${bg};${isNum?'text-align:right;':''}color:${color}">${disp}</td>`;
+      return`<td style="${tdStyle};background:${bg};text-align:${align};color:${color}">${disp}</td>`;
     }).join('');
     return`<tr>${tds}</tr>`;
   }).join('');
