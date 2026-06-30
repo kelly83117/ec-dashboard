@@ -2768,17 +2768,17 @@ function generateCoupang(){
       const code=String(r[1]||'').trim();
       if(code)codeToId[code]=id;
     });
-    // 解析莫筆克銷售分析（欄位待確認，暫定：A=編號, B=商品名稱, C=銷售額, D=銷售成本, E=毛利, F=銷售數量, G=可用庫存）
+    // 解析莫筆克銷售分析（C=編號, D=商品名稱, J=可用庫存, O=銷售額, Q=銷售成本, R=毛利, S=銷售數量）
     const rows=[];
     mobicRows.slice(1).forEach(r=>{
-      const code=String(r[0]||'').trim();   // A欄 編號
-      const name=String(r[1]||'').trim();   // B欄 商品名稱
+      const code=String(r[2]||'').trim();   // C欄 編號
+      const name=String(r[3]||'').trim();   // D欄 商品名稱
       if(!code&&!name)return;
-      const rev=parseFloat(r[2])||0;        // C欄 銷售額
-      const salesCost=parseFloat(r[3])||0;  // D欄 銷售成本
-      const gross=parseFloat(r[4])||0;      // E欄 毛利
-      const qty=parseFloat(r[5])||0;        // F欄 銷售數量
-      const stock=parseFloat(r[6])||0;      // G欄 可用庫存
+      const stock=parseFloat(r[9])||0;       // J欄 可用庫存
+      const rev=parseFloat(r[14])||0;        // O欄 銷售額
+      const salesCost=parseFloat(r[16])||0;  // Q欄 銷售成本
+      const gross=parseFloat(r[17])||0;      // R欄 毛利
+      const qty=parseFloat(r[18])||0;        // S欄 銷售數量
       const productId=codeToId[code]||'';
       const net=gross-(rev*0.175);          // 純利 = 毛利 - 銷售額×17.5%
       const netRate=rev>0?net/rev:0;
