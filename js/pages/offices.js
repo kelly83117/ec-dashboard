@@ -424,29 +424,13 @@ Object.assign(App, {
             <div style="font-size:18px;color:var(--text-muted);font-weight:500">/ 100 分</div>
           </div>
 
-          <!-- 進度條：藍色 = 實際分；紅色細線 = 今日基準位置 -->
+          <!-- 進度條：實際得分 vs 100 -->
           <div style="position:relative;height:14px;background:var(--bg);border-radius:8px;overflow:hidden;border:1px solid var(--border);margin-bottom:4px">
             <div style="position:absolute;top:0;left:0;height:100%;width:${pct}%;background:linear-gradient(90deg, ${color}88 0%, ${color} 100%);border-radius:7px;transition:width .3s ease"></div>
-            <div style="position:absolute;top:-2px;bottom:-2px;left:${targetPct}%;width:2px;background:#ef4444" title="今日應達基準"></div>
           </div>
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)">
             <span>0 分</span>
-            <span style="color:#ef4444">▲ 今日應達 ${Math.round(todayTarget)}</span>
             <span>100 分</span>
-          </div>
-
-          <!-- 三張並排：每日進度分數拆解 -->
-          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));gap:10px">
-            <div style="background:#eef2ff;border-left:3px solid #6366f1;padding:10px 14px;border-radius:7px">
-              <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:2px">每日該完成的分數</div>
-              <div style="font-size:22px;font-weight:800;color:#4338ca;font-variant-numeric:tabular-nums;line-height:1">${Math.round(dailyTarget)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分/天</span></div>
-              <div style="font-size:10px;color:var(--text-muted);margin-top:3px">100 分 ÷ ${workDays} 工作天</div>
-            </div>
-            <div style="background:${statusBg};border-left:3px solid ${statusBand};padding:10px 14px;border-radius:7px">
-              <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:2px">${statusIcon} ${diffLabel}進度</div>
-              <div style="font-size:22px;font-weight:800;color:${statusBand};font-variant-numeric:tabular-nums;line-height:1">${diffSign}${Math.round(diff)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分</span></div>
-              <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${diff >= 0 ? '太棒了，繼續保持' : '加把勁就追得回來'}</div>
-            </div>
           </div>
         </div>
       </div>`;
