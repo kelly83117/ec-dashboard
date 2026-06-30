@@ -531,13 +531,19 @@ Object.assign(App, {
         const data = loadData();
         data.entries = data.entries || [];
         if (t.redoEntryIdx != null && data.entries[t.redoEntryIdx]) {
-          // 重做模式：覆蓋原 entry 的時間 + 清退回標記
+          // 重做模式：覆蓋原 entry 的時間 + 清退回標記，但 note 保留歷史
           const old = data.entries[t.redoEntryIdx];
+          const oldNote = (old.note || '').trim();
+          const reason = old.rejectReason || '';
+          const reasonSeg = reason ? `（原因：${reason}）` : '';
+          const newNote = oldNote
+            ? `${oldNote} → 重做 ${elapsedMin} 分鐘${reasonSeg}`
+            : `重做 ${elapsedMin} 分鐘${reasonSeg}`;
           data.entries[t.redoEntryIdx] = {
             ...old,
             date: toDateStr(new Date()),
             met,
-            note: `重做 ${elapsedMin} 分鐘`,
+            note: newNote,
             rejected: false,
             rejectReason: '',
             rejectedBy: '',
