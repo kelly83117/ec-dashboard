@@ -2694,7 +2694,7 @@ function momoShopHTML(shop,platform='momo'){
     ?`<button class="export-btn" onclick="openCoupangUpload('${shop}')" style="border-color:#0ea5e9;color:#0ea5e9">⬆ 上傳檔案</button>`
     :`<button class="export-btn" disabled style="opacity:0.4;cursor:default">⬆ 上傳檔案</button>`;
   const tableArea=isCoupang
-    ?`<div id="cup-tbl-${shop}"><div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳三個檔案後按「▶ 產生並儲存」</div></div></div>`
+    ?`<div id="cup-tbl-${shop}"><div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個檔案後按「▶ 產生並儲存」</div></div></div>`
     :`<div style="background:#f9fafb;border:1.5px dashed #d1d5db;border-radius:10px;padding:48px;text-align:center;color:#9ca3af"><div style="font-size:36px;margin-bottom:8px">📊</div><div style="font-size:14px;font-weight:600">階層分布圖</div><div style="font-size:12px;margin-top:4px">上傳資料後可查看</div></div>`;
   return`
   <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #e5e7eb">
@@ -2702,6 +2702,10 @@ function momoShopHTML(shop,platform='momo'){
     <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">本期純利</div><div id="cup-kv-net-${shop}" style="font-size:20px;font-weight:700;color:#10b981">—</div></div>
     <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">純利率</div><div id="cup-kv-rate-${shop}" style="font-size:20px;font-weight:700;color:#6366f1">—</div></div>
     <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <div style="display:flex;align-items:center;gap:16px">
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">月份</div><div style="font-size:14px;font-weight:600;color:#374151">—</div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">區間</div><div style="font-size:14px;font-weight:600;color:#374151">—</div></div>
+      </div>
       <div style="display:flex;gap:8px">
         ${uploadBtn}
         <button class="export-btn" disabled style="opacity:0.4;cursor:default">☁ 同步雲端</button>
