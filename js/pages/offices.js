@@ -442,11 +442,6 @@ Object.assign(App, {
               <div style="font-size:22px;font-weight:800;color:#4338ca;font-variant-numeric:tabular-nums;line-height:1">${Math.round(dailyTarget)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分/天</span></div>
               <div style="font-size:10px;color:var(--text-muted);margin-top:3px">100 分 ÷ ${workDays} 工作天</div>
             </div>
-            <div style="background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:7px">
-              <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:2px">今天應該已累計</div>
-              <div style="font-size:22px;font-weight:800;color:#92400e;font-variant-numeric:tabular-nums;line-height:1">${Math.round(todayTarget)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分</span></div>
-              <div style="font-size:10px;color:var(--text-muted);margin-top:3px">第 ${todayIdx} / ${workDays} 個工作天</div>
-            </div>
             <div style="background:${statusBg};border-left:3px solid ${statusBand};padding:10px 14px;border-radius:7px">
               <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:2px">${statusIcon} ${diffLabel}進度</div>
               <div style="font-size:22px;font-weight:800;color:${statusBand};font-variant-numeric:tabular-nums;line-height:1">${diffSign}${Math.round(diff)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分</span></div>
