@@ -247,7 +247,7 @@ Object.assign(App, {
           <div style="flex:1.2;min-width:130px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">圖種</label>
             <select id="designA-type" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;background:white">
               ${PRESET_TYPES.map(t => `<option value="${escapeHtml(t.name)}" data-mins="${t.minutes}">${escapeHtml(t.name)}</option>`).join('')}
-              <option value="" data-mins="0">其他...</option>
+              <option value="" data-mins="0">其他</option>
             </select>
           </div>
           <div style="width:90px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">標準(分)</label><input type="number" min="1" id="designA-mins" value="20" readonly tabindex="-1" title="依圖種自動帶入，不可手動修改" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;text-align:center;background:#f3f4f6;color:var(--text-muted);cursor:not-allowed"></div>
@@ -466,14 +466,14 @@ Object.assign(App, {
       });
     }
 
-    // A 區 — 圖種 select → 自動帶標準工時
+    // A 區 — 圖種 select → 自動帶標準工時；選「其他」時清空（臨時指派不需計時）
     const typeSel = document.getElementById('designA-type');
     const minsInp = document.getElementById('designA-mins');
     if (typeSel && minsInp) {
       typeSel.addEventListener('change', () => {
         const opt = typeSel.options[typeSel.selectedIndex];
         const mins = +(opt?.dataset?.mins) || 0;
-        if (mins > 0) minsInp.value = mins;
+        minsInp.value = mins > 0 ? mins : '';
       });
     }
     // A 區 — 是否達標 select 字色跟著選項變（標準內綠 / 超時紅）
@@ -494,6 +494,7 @@ Object.assign(App, {
         const typeSelEl = document.getElementById('designA-type');
         const type = typeSelEl ? (typeSelEl.value || (typeSelEl.options[typeSelEl.selectedIndex]?.text || '其他')) : '';
         const stdMin = +((document.getElementById('designA-mins') || {}).value) || 0;
+        if (stdMin <= 0) { showToast('「其他」類型無標準工時，請手動填表後按「＋ 新增」', 'error'); return; }
         this._designTimer = { startTs: Date.now(), status: 'running', product, type, stdMin };
         this.render();
       });
