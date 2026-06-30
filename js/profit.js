@@ -80,6 +80,12 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       </div>
     </div>
   </div>
+  <div class="ana-overlay" id="coupang-dist-overlay" onclick="if(event.target===this)closeCoupangDist()">
+    <div class="ana-modal" style="width:400px;max-width:96vw">
+      <div class="ana-modal-hdr"><span>階層分布｜純利率區間</span><button class="ana-close-btn" onclick="closeCoupangDist()">✕</button></div>
+      <div class="ana-modal-body" id="coupang-dist-body" style="padding:20px;overflow-y:auto;max-height:72vh"></div>
+    </div>
+  </div>
   <div class="ana-overlay" id="dist-modal-overlay" onclick="if(event.target===this)closeDistModal()">
     <div class="ana-modal" style="width:560px;max-width:96vw">
       <div class="ana-modal-hdr"><span>階層分布圖</span><button class="ana-close-btn" onclick="closeDistModal()">✕</button></div>
@@ -2720,7 +2726,7 @@ function momoShopHTML(shop,platform='momo'){
     ?`<button class="export-btn" onclick="openCoupangUpload('${shop}')" style="border-color:#0ea5e9;color:#0ea5e9">⬆ 上傳檔案</button>`
     :`<button class="export-btn" disabled style="opacity:0.4;cursor:default">⬆ 上傳檔案</button>`;
   const tableArea=isCoupang
-    ?`<div id="cup-tbl-${shop}"><div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個檔案後按「▶ 產生並儲存」</div></div></div>`
+    ?`<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="col-pick-btn" onclick="openCoupangDist('${shop}')">📊 階層分布</button></div><div id="cup-tbl-${shop}"><div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個檔案後按「▶ 產生並儲存」</div></div></div>`
     :`<div style="background:#f9fafb;border:1.5px dashed #d1d5db;border-radius:10px;padding:48px;text-align:center;color:#9ca3af"><div style="font-size:36px;margin-bottom:8px">📊</div><div style="font-size:14px;font-weight:600">階層分布圖</div><div style="font-size:12px;margin-top:4px">上傳資料後可查看</div></div>`;
   _cupPeriod[shop]=_cupPeriod[shop]||{month:'2026/06',half:'first'};
   const p=_cupPeriod[shop];
@@ -2940,8 +2946,11 @@ function mergeCoupangRows(rows){
   });
 }
 
+const _cupMergedRows={};
+
 function renderCoupangTable(shop,rawRows){
   const rows=mergeCoupangRows(rawRows);
+  _cupMergedRows[shop]=rows;
   const tbl=document.getElementById('cup-tbl-'+shop);
   if(!tbl)return;
   const totalRev=rows.reduce((s,r)=>s+r.rev,0);
@@ -2971,8 +2980,8 @@ function renderCoupangTable(shop,rawRows){
     {k:'stock',label:'可用庫存',fmt:fmtN},
   ];
   const leftCols=new Set(['productId','code','name']);
-  const thStyle='padding:5px 8px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;white-space:nowrap;border-bottom:2px solid #e5e7eb;background:#f9fafb;position:sticky;top:0;z-index:1';
-  const tdStyle='padding:4px 8px;font-size:12.5px;border-bottom:1px solid #f3f4f6;white-space:nowrap;line-height:1.3';
+  const thStyle='padding:4px 10px 4px 0;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;white-space:nowrap;border-bottom:2px solid #e5e7eb;background:#f9fafb;position:sticky;top:0;z-index:1';
+  const tdStyle='padding:3px 10px 3px 0;font-size:12.5px;border-bottom:1px solid #f3f4f6;white-space:nowrap;line-height:1.3';
   const thead=cols.map(c=>`<th style="${thStyle};text-align:${leftCols.has(c.k)?'left':'right'}">${c.label}</th>`).join('');
   const tbody=rows.map((r,i)=>{
     const bg=i%2===0?'#fff':'#fafafa';
@@ -2985,7 +2994,11 @@ function renderCoupangTable(shop,rawRows){
     }).join('');
     return`<tr>${tds}</tr>`;
   }).join('');
-  // 階層表：純利率區間分布
+  tbl.innerHTML=`<div style="overflow-x:auto"><table style="width:auto;border-collapse:collapse"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
+}
+
+function openCoupangDist(shop){
+  const rows=_cupMergedRows[shop]||[];
   const buckets=[
     {label:'0%以下',test:r=>r.netRate<0},
     {label:'0~10%',test:r=>r.netRate>=0&&r.netRate<=0.10},
@@ -2996,17 +3009,21 @@ function renderCoupangTable(shop,rawRows){
     {label:'50%以上',test:r=>r.netRate>0.50},
   ];
   const distRows=buckets.map(b=>({label:b.label,count:rows.filter(b.test).length}));
-  const distThStyle='padding:5px 8px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;white-space:nowrap;border-bottom:2px solid #e5e7eb;background:#f9fafb';
-  const distTdStyle='padding:4px 8px;font-size:12.5px;border-bottom:1px solid #f3f4f6;white-space:nowrap;text-align:right';
-  const distTable=`
-    <div style="margin-top:18px">
-      <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:8px">📊 階層分布｜商品總數 ${rows.length}</div>
-      <table style="border-collapse:collapse;min-width:240px">
-        <thead><tr><th style="${distThStyle}">純利率區間</th><th style="${distThStyle};text-align:right">商品數</th></tr></thead>
-        <tbody>${distRows.map((d,i)=>`<tr><td style="${distTdStyle.replace('text-align:right','')};background:${i%2===0?'#fff':'#fafafa'}">${d.label}</td><td style="${distTdStyle};background:${i%2===0?'#fff':'#fafafa'}">${d.count}</td></tr>`).join('')}</tbody>
-      </table>
-    </div>`;
-  tbl.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>${distTable}`;
+  const thStyle='padding:6px 10px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;white-space:nowrap;border-bottom:2px solid #e5e7eb;background:#f9fafb';
+  const tdStyle='padding:6px 10px;font-size:13px;border-bottom:1px solid #f3f4f6;white-space:nowrap';
+  const body=document.getElementById('coupang-dist-body');
+  if(body){
+    body.innerHTML=`
+      <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">商品總數：${rows.length}</div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr><th style="${thStyle}">純利率區間</th><th style="${thStyle};text-align:right">商品數</th></tr></thead>
+        <tbody>${distRows.map((d,i)=>`<tr><td style="${tdStyle};background:${i%2===0?'#fff':'#fafafa'}">${d.label}</td><td style="${tdStyle};text-align:right;background:${i%2===0?'#fff':'#fafafa'}">${d.count}</td></tr>`).join('')}</tbody>
+      </table>`;
+  }
+  document.getElementById('coupang-dist-overlay').classList.add('open');
+}
+function closeCoupangDist(){
+  document.getElementById('coupang-dist-overlay')?.classList.remove('open');
 }
 
 function updateHalfBtnLabels(shop){
@@ -3175,7 +3192,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
+  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
