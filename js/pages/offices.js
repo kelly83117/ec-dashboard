@@ -260,11 +260,6 @@ Object.assign(App, {
               </div>
               <div style="width:90px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">標準(分)</label><input type="number" min="1" id="designA-mins" value="${tStd}" readonly tabindex="-1" title="依圖種自動帶入，不可手動修改" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;text-align:center;background:#f3f4f6;color:var(--text-muted);cursor:not-allowed"></div>`;
           })()}
-          <div style="width:100px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">是否達標</label>
-            <select id="designA-met" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;background:white;color:#10b981;font-weight:700">
-              <option value="1" style="color:#10b981;font-weight:700">○ 標準內</option><option value="0" style="color:#ef4444;font-weight:700">× 超時</option>
-            </select>
-          </div>
           <div style="flex:1.5;min-width:120px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">備註（選填）</label><input type="text" id="designA-note" placeholder="" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit"></div>
           ${this._designTimer?.status === 'running'
             ? `<button id="designA-stop" title="按下後自動新增此筆記錄" style="width:auto;padding:7px 14px;height:32px;font-size:13px;background:#ef4444;color:white;border:0;border-radius:6px;font-weight:600;cursor:pointer;font-variant-numeric:tabular-nums">⏹ 完成 <span id="designA-elapsed">0:00</span></button>`
@@ -485,13 +480,6 @@ Object.assign(App, {
         minsInp.value = mins > 0 ? mins : '';
       });
     }
-    // A 區 — 是否達標 select 字色跟著選項變（標準內綠 / 超時紅）
-    const metSel = document.getElementById('designA-met');
-    if (metSel) {
-      const syncMetColor = () => { metSel.style.color = metSel.value === '1' ? '#10b981' : '#ef4444'; };
-      metSel.addEventListener('change', syncMetColor);
-      syncMetColor();
-    }
     // A 區 — 計時器：開始要先填商品，完成後直接新增到下方表格
     const startBtn = document.getElementById('designA-start');
     if (startBtn) {
@@ -540,8 +528,10 @@ Object.assign(App, {
         const typeSelEl = document.getElementById('designA-type');
         const type = typeSelEl ? typeSelEl.value || (typeSelEl.options[typeSelEl.selectedIndex]?.text?.split(' ')[0] || '其他') : '';
         const stdMinutes = +((document.getElementById('designA-mins') || {}).value) || 0;
-        const met = ((document.getElementById('designA-met') || {}).value) === '1';
         const note = ((document.getElementById('designA-note') || {}).value || '').trim();
+        // 手動新增 → 嘗試從備註的「實際 N 分鐘」推算達標；找不到就預設達標
+        const m = note.match(/實際\s*(\d+)\s*分鐘/);
+        const met = (m && stdMinutes > 0) ? (+m[1] <= stdMinutes) : true;
         if (!date || !product) { showToast('請填寫日期 + 商品', 'error'); return; }
         const data = loadData();
         data.entries = data.entries || [];
