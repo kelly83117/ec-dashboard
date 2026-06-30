@@ -267,16 +267,16 @@ Object.assign(App, {
           <button id="designA-add" class="btn-primary" style="width:auto;padding:7px 16px;height:32px;font-size:13px">＋ 新增</button>
         </div>
         <div class="table-wrap" style="max-height:300px;overflow-y:auto">
-          <table style="width:100%;font-size:13px">
+          <table style="width:auto;font-size:13px">
             <thead style="background:var(--surface);position:sticky;top:0">
               <tr>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:96px">日期</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:280px">商品</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:110px">圖種</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:80px">標準(分)</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:80px">是否達標</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:140px">備註</th>
-                <th style="padding:7px 8px;text-align:right;font-size:12px;color:var(--text-muted)"></th>
+                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:274px">商品</th>
+                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:120px">圖種</th>
+                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:75px">標準(分)</th>
+                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:90px">是否達標</th>
+                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:110px">備註</th>
+                <th style="padding:7px 8px;text-align:right;font-size:12px;color:var(--text-muted);width:80px"></th>
               </tr>
             </thead>
             <tbody>${entriesRowsHtml}</tbody>
@@ -308,11 +308,11 @@ Object.assign(App, {
           <table style="width:auto;font-size:13px">
             <thead style="background:var(--surface)">
               <tr>
-                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:390px">固定任務</th>
+                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:370px">固定任務</th>
                 <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:120px">執行時段</th>
-                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:60px">配分</th>
+                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:75px">配分</th>
                 <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:90px">漏做(次)</th>
-                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:90px">做錯(次)</th>
+                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:110px">做錯(次)</th>
                 <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:80px">本項得分</th>
               </tr>
             </thead>
