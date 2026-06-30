@@ -56,32 +56,23 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
     <div class="ana-modal" style="width:480px;max-width:96vw">
       <div class="ana-modal-hdr"><span id="coupang-upload-title">上傳檔案｜酷澎</span><button class="ana-close-btn" onclick="closeCoupangUpload()">✕</button></div>
       <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
-        <label class="ucard" id="cup-sales-card" style="width:100%;box-sizing:border-box">
-          <input type="file" id="cup-sales-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'sales')">
-          <div class="ucard-icon">🛒</div>
+        <label class="ucard" id="cup-mobic-card" style="width:100%;box-sizing:border-box">
+          <input type="file" id="cup-mobic-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'mobic')">
+          <div class="ucard-icon">📦</div>
           <div style="flex:1;min-width:0">
-            <div class="ucard-title">商品銷售</div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:2px">酷澎商品銷售報表 (.xlsx)</div>
+            <div class="ucard-title">莫筆克銷售分析</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px">含銷售額、銷售成本、毛利、數量、庫存 (.xlsx)</div>
           </div>
-          <span id="cup-sales-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
+          <span id="cup-mobic-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
         </label>
         <label class="ucard" id="cup-idlist-card" style="width:100%;box-sizing:border-box">
           <input type="file" id="cup-idlist-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'idlist')">
           <div class="ucard-icon">📋</div>
           <div style="flex:1;min-width:0">
             <div class="ucard-title">商品ID清單</div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:2px">商品對照清單 (.xlsx)</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px">商品ID ↔ 編號對照 (.xlsx)</div>
           </div>
           <span id="cup-idlist-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
-        </label>
-        <label class="ucard" id="cup-cost-card" style="width:100%;box-sizing:border-box">
-          <input type="file" id="cup-cost-input" accept=".xlsx,.xls" onchange="onCoupangFile(event,'cost')">
-          <div class="ucard-icon">💰</div>
-          <div style="flex:1;min-width:0">
-            <div class="ucard-title">莫筆克成本清單</div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:2px">成本對照表 (.xlsx)</div>
-          </div>
-          <span id="cup-cost-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
         </label>
       </div>
       <div class="ana-modal-ftr">
@@ -2743,7 +2734,7 @@ function setCoupangShop(shop,btn){
 }
 
 let _cupShop='';
-const _cupFiles={sales:null,idlist:null,cost:null};
+const _cupFiles={mobic:null,idlist:null};
 
 function openCoupangUpload(shop){
   _cupShop=shop;
@@ -2756,10 +2747,10 @@ function closeCoupangUpload(){
 function onCoupangFile(e,type){
   const file=e.target.files[0];if(!file)return;
   _cupFiles[type]=file;
-  const statusId={sales:'cup-sales-status',idlist:'cup-idlist-status',cost:'cup-cost-status'}[type];
+  const statusId={mobic:'cup-mobic-status',idlist:'cup-idlist-status'}[type];
   const el=document.getElementById(statusId);
   if(el){el.textContent='✓ '+file.name;el.style.color='#10b981';}
-  const allReady=_cupFiles.sales&&_cupFiles.idlist&&_cupFiles.cost;
+  const allReady=_cupFiles.mobic&&_cupFiles.idlist;
   const btn=document.getElementById('cup-gen-btn');
   if(btn)btn.disabled=!allReady;
 }
@@ -2767,43 +2758,31 @@ function generateCoupang(){
   const btn=document.getElementById('cup-gen-btn');
   if(btn){btn.disabled=true;btn.textContent='處理中…';}
   Promise.all([
-    readXlsx(_cupFiles.sales),
+    readXlsx(_cupFiles.mobic),
     readXlsx(_cupFiles.idlist),
-    readXlsx(_cupFiles.cost),
-  ]).then(([salesRows,idRows,costRows])=>{
-    // 建立 ID → {編號, 名稱} 對照表（商品ID清單：A=ID, B=編號, C=名稱）
-    const idMap={};
+  ]).then(([mobicRows,idRows])=>{
+    // 建立 編號 → 商品ID 對照表（商品ID清單：A=商品ID, B=編號）
+    const codeToId={};
     idRows.slice(1).forEach(r=>{
       const id=String(r[0]||'').trim();
       const code=String(r[1]||'').trim();
-      const idName=String(r[2]||'').trim();
-      if(id)idMap[id]={code,name:idName};
+      if(code)codeToId[code]=id;
     });
-    // 建立 編號/ID → 成本 對照表（莫筆克成本清單）
-    const costMap={};
-    costRows.slice(1).forEach(r=>{
-      const key=String(r[0]||'').trim();
-      const cost=parseFloat(r[1])||0;
-      if(key)costMap[key]=cost;
-    });
-    // 整合銷售資料（商品銷售欄位：D=註冊商品ID, C=商品名稱, G=銷售額NTD, I=銷售量）
+    // 解析莫筆克銷售分析（欄位待確認，暫定：A=編號, B=商品名稱, C=銷售額, D=銷售成本, E=毛利, F=銷售數量, G=可用庫存）
     const rows=[];
-    salesRows.slice(1).forEach(r=>{
-      const productId=String(r[3]||'').trim();  // D欄 註冊商品ID
-      const name=String(r[2]||'').trim();        // C欄 商品名稱
-      if(!productId&&!name)return;
-      const rev=parseFloat(r[6])||0;             // G欄 銷售額(NTD)
-      const qty=parseFloat(r[8])||0;             // I欄 銷售量
-      const stock=0;                              // 可用庫存待第二/三檔補充
-      const mapped=idMap[productId]||{};
-      const code=mapped.code||'';
-      const mappedName=mapped.name||name;  // 優先用第二個表的名稱
-      const unitCost=costMap[code]||costMap[productId]||0;
-      const salesCost=unitCost*qty;
-      const gross=rev-salesCost;
-      const net=gross;
+    mobicRows.slice(1).forEach(r=>{
+      const code=String(r[0]||'').trim();   // A欄 編號
+      const name=String(r[1]||'').trim();   // B欄 商品名稱
+      if(!code&&!name)return;
+      const rev=parseFloat(r[2])||0;        // C欄 銷售額
+      const salesCost=parseFloat(r[3])||0;  // D欄 銷售成本
+      const gross=parseFloat(r[4])||0;      // E欄 毛利
+      const qty=parseFloat(r[5])||0;        // F欄 銷售數量
+      const stock=parseFloat(r[6])||0;      // G欄 可用庫存
+      const productId=codeToId[code]||'';
+      const net=gross-(rev*0.175);          // 純利 = 毛利 - 銷售額×17.5%
       const netRate=rev>0?net/rev:0;
-      rows.push({productId,code,name:mappedName,rev,salesCost,unitCost,gross,net,netRate,qty,stock});
+      rows.push({productId,code,name,rev,salesCost,gross,net,netRate,qty,stock});
     });
     renderCoupangTable(_cupShop,rows);
     if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
@@ -2852,7 +2831,6 @@ function renderCoupangTable(shop,rows){
     {k:'code',label:'編號'},
     {k:'name',label:'商品名稱'},
     {k:'rev',label:'銷售額',fmt:fmtM},
-    {k:'unitCost',label:'成本',fmt:fmtM},
     {k:'salesCost',label:'銷售成本',fmt:fmtM},
     {k:'gross',label:'毛利',fmt:fmtM},
     {k:'net',label:'純利',fmt:fmtM},
