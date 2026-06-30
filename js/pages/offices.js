@@ -53,6 +53,8 @@ Object.assign(App, {
       this.bindAiSelect(deptId);
     } else if (tab?.dynamic === 'trend-radar') {
       this.bindTrendRadar();
+    } else if (tab?.dynamic === 'festival-calendar') {
+      // 靜態渲染，不需要額外 bind
     } else if (tab?.dynamic === 'img-search') {
       this.bindImgSearch();
     } else if (tab?.dynamic === 'shopee-trend') {
@@ -675,6 +677,8 @@ Object.assign(App, {
         tabContent = this.renderAiSelectTab(deptId, color, dept);
       } else if (activeTab.dynamic === 'trend-radar') {
         tabContent = this.renderTrendRadarTab();
+      } else if (activeTab.dynamic === 'festival-calendar') {
+        tabContent = this.renderFestivalCalendarTab();
       } else if (activeTab.dynamic === 'img-search') {
         tabContent = this.renderImgSearchTab();
       } else if (activeTab.dynamic === 'shopee-trend') {
@@ -798,5 +802,84 @@ Object.assign(App, {
       ` : ''}
     `;
     return deptId === 'd3' ? `<div class="dept-d3-view">${inner}</div>` : inner;
+  },
+
+  renderFestivalCalendarTab() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yr = today.getFullYear();
+
+    const FESTIVALS = [
+      { name: '農曆春節',    date: '2026-02-17', prepDays: 60, emoji: '🧧', tags: ['年貨禮盒', '居家佈置', '保暖用品', '零食禮盒'] },
+      { name: '情人節',      date: '2026-02-14', prepDays: 30, emoji: '💝', tags: ['香氛蠟燭', '收納禮盒', '居家佈置'] },
+      { name: '38婦女節',    date: '2026-03-08', prepDays: 21, emoji: '🌸', tags: ['居家清潔', '收納整理', '廚房用品'] },
+      { name: '清明連假',    date: '2026-04-04', prepDays: 21, emoji: '🌿', tags: ['戶外用品', '野餐墊', '保溫瓶'] },
+      { name: '母親節',      date: '2026-05-10', prepDays: 30, emoji: '💐', tags: ['廚房用品', '居家收納', '保溫瓶', '保鮮盒'] },
+      { name: '端午節',      date: '2026-06-19', prepDays: 21, emoji: '🐉', tags: ['廚房用品', '禮盒包裝', '保冷袋'] },
+      { name: '父親節',      date: '2026-08-08', prepDays: 30, emoji: '👔', tags: ['居家工具', '戶外用品', '保溫瓶'] },
+      { name: '中元節',      date: '2026-08-27', prepDays: 14, emoji: '🏮', tags: ['祭祀用品', '居家清潔', '整理收納'] },
+      { name: '中秋節',      date: '2026-09-25', prepDays: 30, emoji: '🥮', tags: ['戶外烤肉', '保冷袋', '餐具組', '折疊桌椅'] },
+      { name: '雙11購物節',  date: `${yr}-11-11`, prepDays: 45, emoji: '🛒', tags: ['全品類衝量', '收納箱', '廚房用品', '寢具'] },
+      { name: '雙12購物節',  date: `${yr}-12-12`, prepDays: 30, emoji: '🎁', tags: ['年終清倉', '居家收納', '保溫瓶'] },
+      { name: '聖誕節',      date: `${yr}-12-25`, prepDays: 30, emoji: '🎄', tags: ['居家佈置', '禮品包裝', '收納盒'] },
+      { name: '跨年',        date: `${yr}-12-31`, prepDays: 14, emoji: '🎆', tags: ['派對用品', '居家清潔', '收納整理'] },
+      { name: '元旦',        date: `${yr+1}-01-01`, prepDays: 14, emoji: '🎊', tags: ['新年大掃除', '收納箱', '清潔用品'] },
+    ];
+
+    const rows = FESTIVALS
+      .map(f => {
+        let d = new Date(f.date);
+        if (d < today) d.setFullYear(d.getFullYear() + 1);
+        const days = Math.round((d - today) / 86400000);
+        const prepDate = new Date(d - f.prepDays * 86400000);
+        const prepDays = Math.round((prepDate - today) / 86400000);
+        return { ...f, d, days, prepDate, prepDays };
+      })
+      .filter(f => f.days <= 180)
+      .sort((a, b) => a.days - b.days);
+
+    const urgColor = (days) => days <= 30 ? '#ef4444' : days <= 60 ? '#f97316' : '#22c55e';
+    const urgBg   = (days) => days <= 30 ? '#fef2f2' : days <= 60 ? '#fff7ed' : '#f0fdf4';
+    const urgLabel = (days) => days <= 30 ? '緊急' : days <= 60 ? '準備中' : '規劃中';
+
+    const cards = rows.map(f => {
+      const c = urgColor(f.days);
+      const bg = urgBg(f.days);
+      const prepStr = f.prepDays <= 0
+        ? `<span style="color:#ef4444;font-weight:700">⚠️ 備貨時間已到！</span>`
+        : `最晚 <b>${f.prepDays}</b> 天後開始備貨`;
+      return `
+        <div style="border:1.5px solid ${c}33;border-radius:12px;padding:14px 16px;background:${bg}">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:22px">${f.emoji}</span>
+              <div>
+                <div style="font-size:14px;font-weight:700;color:var(--text)">${escapeHtml(f.name)}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${f.d.getMonth()+1}/${f.d.getDate()}</div>
+              </div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:22px;font-weight:800;color:${c};line-height:1">${f.days}</div>
+              <div style="font-size:10px;color:${c};font-weight:600">天後</div>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${prepStr}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">
+            ${f.tags.map(t => `<span style="font-size:11px;padding:2px 8px;background:${c}18;color:${c};border-radius:999px;font-weight:600">${t}</span>`).join('')}
+          </div>
+          <div style="margin-top:8px;display:inline-block;font-size:10px;padding:2px 8px;border-radius:999px;background:${c};color:white;font-weight:700">${urgLabel(f.days)}</div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="table-card">
+        <div class="table-card-header">
+          <h3>🎉 節慶選品日曆</h3>
+          <p>未來 180 天台灣重要節慶 · 建議備貨品類與時間</p>
+        </div>
+        <div style="padding:14px 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">
+          ${cards || '<div style="color:var(--text-muted);padding:20px">近期無重要節慶</div>'}
+        </div>
+      </div>`;
   },
 });
