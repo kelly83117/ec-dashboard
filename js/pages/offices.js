@@ -258,9 +258,9 @@ Object.assign(App, {
                   <option value="" data-mins="0">其他</option>
                 </select>
               </div>
-              <div style="width:90px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">標準(分)</label><input type="number" min="1" id="designA-mins" value="${tStd}" readonly tabindex="-1" title="依圖種自動帶入，不可手動修改" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;text-align:center;background:#f3f4f6;color:var(--text-muted);cursor:not-allowed"></div>`;
+              <div style="width:90px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">標準(分鐘)</label><input type="number" min="1" id="designA-mins" value="${tStd}" readonly tabindex="-1" title="依圖種自動帶入，不可手動修改" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;text-align:center;background:#f3f4f6;color:var(--text-muted);cursor:not-allowed"></div>`;
           })()}
-          <div style="flex:1.5;min-width:120px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">備註（選填）</label><input type="text" id="designA-note" placeholder="" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit"></div>
+          <div style="flex:1.5;min-width:120px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">備註</label><input type="text" id="designA-note" placeholder="" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit"></div>
           ${this._designTimer?.status === 'running'
             ? `<button id="designA-stop" title="按下後自動新增此筆記錄" style="width:auto;padding:7px 14px;height:32px;font-size:13px;background:#ef4444;color:white;border:0;border-radius:6px;font-weight:600;cursor:pointer;font-variant-numeric:tabular-nums">⏹ 完成 <span id="designA-elapsed">0:00</span></button>`
             : `<button id="designA-start" title="先填商品 + 選圖種，按下開始計時；完成時自動新增" style="width:auto;padding:7px 14px;height:32px;font-size:13px;background:#10b981;color:white;border:0;border-radius:6px;font-weight:600;cursor:pointer">⏱ 開始計時</button>`}
@@ -273,7 +273,7 @@ Object.assign(App, {
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:96px">日期</th>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:274px">商品</th>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:120px">圖種</th>
-                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:75px">標準(分)</th>
+                <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:75px">標準(分鐘)</th>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:90px">是否達標</th>
                 <th style="padding:7px 8px;text-align:left;font-size:12px;color:var(--text-muted);width:110px">備註</th>
                 <th style="padding:7px 8px;text-align:right;font-size:12px;color:var(--text-muted)"></th>
