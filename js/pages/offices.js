@@ -222,10 +222,10 @@ Object.assign(App, {
               <option value="" data-mins="0">其他...</option>
             </select>
           </div>
-          <div style="width:90px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">標準(分)</label><input type="number" min="1" id="designA-mins" value="20" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;text-align:right"></div>
+          <div style="width:90px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">標準(分)</label><input type="number" min="1" id="designA-mins" value="20" readonly tabindex="-1" title="依圖種自動帶入，不可手動修改" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;text-align:right;background:#f3f4f6;color:var(--text-muted);cursor:not-allowed"></div>
           <div style="width:100px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">是否達標</label>
-            <select id="designA-met" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;background:white">
-              <option value="1">○ 標準內</option><option value="0">× 超時</option>
+            <select id="designA-met" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit;background:white;color:#10b981;font-weight:700">
+              <option value="1" style="color:#10b981;font-weight:700">○ 標準內</option><option value="0" style="color:#ef4444;font-weight:700">× 超時</option>
             </select>
           </div>
           <div style="flex:1.5;min-width:120px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">備註（選填）</label><input type="text" id="designA-note" placeholder="" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit"></div>
@@ -444,6 +444,13 @@ Object.assign(App, {
         const mins = +(opt?.dataset?.mins) || 0;
         if (mins > 0) minsInp.value = mins;
       });
+    }
+    // A 區 — 是否達標 select 字色跟著選項變（標準內綠 / 超時紅）
+    const metSel = document.getElementById('designA-met');
+    if (metSel) {
+      const syncMetColor = () => { metSel.style.color = metSel.value === '1' ? '#10b981' : '#ef4444'; };
+      metSel.addEventListener('change', syncMetColor);
+      syncMetColor();
     }
     // A 區 — 新增記錄
     const addABtn = document.getElementById('designA-add');
