@@ -209,9 +209,9 @@ Object.assign(App, {
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
             <h3 style="margin:0;font-size:16px;color:#3b82f6">A. 達標工時內完成率</h3>
-            <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">本月接 ${k.totalCount} 件 · 達標 ${k.metCount} 件 · 達標率 ${(k.rateA*100).toFixed(1)}%</p>
+            <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">本月接 ${k.totalCount} 件 · 達標 ${k.metCount} 件 · 達標率 ${Math.round(k.rateA*100)}%</p>
           </div>
-          <div style="font-size:24px;font-weight:800;color:#3b82f6;font-variant-numeric:tabular-nums">${k.scoreA.toFixed(1)} <span style="font-size:13px;color:var(--text-muted);font-weight:500">/ 60</span></div>
+          <div style="font-size:24px;font-weight:800;color:#3b82f6;font-variant-numeric:tabular-nums">${Math.round(k.scoreA)} <span style="font-size:13px;color:var(--text-muted);font-weight:500">/ 60</span></div>
         </div>
         <div style="padding:10px 14px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap">
           <div style="flex:1;min-width:130px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">日期</label><input type="date" id="designA-date" value="${toDateStr(new Date())}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit"></div>
@@ -257,7 +257,7 @@ Object.assign(App, {
         <td style="padding:8px 12px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:600">${t.points}</td>
         <td style="padding:6px 8px;text-align:left"><input type="number" class="design-task-missed" data-task-key="${t.key}" min="0" value="${t.missed}" style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:5px;font-size:13px;text-align:left;font-family:inherit"></td>
         <td style="padding:6px 8px;text-align:left"><input type="number" class="design-task-errors" data-task-key="${t.key}" min="0" value="${t.errors}" style="width:64px;padding:5px 6px;border:1px solid var(--border);border-radius:5px;font-size:13px;text-align:left;font-family:inherit"></td>
-        <td style="padding:8px 12px;text-align:left;font-size:14px;font-weight:700;color:${t.score >= t.points ? '#10b981' : t.score > 0 ? '#f59e0b' : '#ef4444'};font-variant-numeric:tabular-nums">${t.score.toFixed(1)}</td>
+        <td style="padding:8px 12px;text-align:left;font-size:14px;font-weight:700;color:${t.score >= t.points ? '#10b981' : t.score > 0 ? '#f59e0b' : '#ef4444'};font-variant-numeric:tabular-nums">${Math.round(t.score)}</td>
       </tr>`).join('');
 
     const sectionB = `
@@ -267,7 +267,7 @@ Object.assign(App, {
             <h3 style="margin:0;font-size:16px;color:#f59e0b">B. 指派固定任務</h3>
             <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">滿分起算，漏做 ≥ 1 該項直接 0 分；做錯每次 -2</p>
           </div>
-          <div style="font-size:24px;font-weight:800;color:#f59e0b;font-variant-numeric:tabular-nums">${k.scoreB.toFixed(1)} <span style="font-size:13px;color:var(--text-muted);font-weight:500">/ 30</span></div>
+          <div style="font-size:24px;font-weight:800;color:#f59e0b;font-variant-numeric:tabular-nums">${Math.round(k.scoreB)} <span style="font-size:13px;color:var(--text-muted);font-weight:500">/ 30</span></div>
         </div>
         <div class="table-wrap">
           <table style="width:auto;font-size:13px">
@@ -305,7 +305,7 @@ Object.assign(App, {
             <h3 style="margin:0;font-size:16px;color:#10b981">C. Skill 技能累積</h3>
             <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">本月已存 ${k.skillCount} 項 · 目標 3 項 → 滿分 10 · 超過每項 +5（最多 +10）</p>
           </div>
-          <div style="font-size:24px;font-weight:800;color:#10b981;font-variant-numeric:tabular-nums">${k.scoreCBase.toFixed(1)} <span style="font-size:13px;color:var(--text-muted);font-weight:500">/ 10</span>${k.scoreCExtra > 0 ? `<span style="font-size:13px;color:#10b981;font-weight:700;margin-left:6px">+${k.scoreCExtra}</span>` : ''}</div>
+          <div style="font-size:24px;font-weight:800;color:#10b981;font-variant-numeric:tabular-nums">${Math.round(k.scoreCBase)} <span style="font-size:13px;color:var(--text-muted);font-weight:500">/ 10</span>${k.scoreCExtra > 0 ? `<span style="font-size:13px;color:#10b981;font-weight:700;margin-left:6px">+${k.scoreCExtra}</span>` : ''}</div>
         </div>
         <div style="padding:10px 14px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap">
           <div style="flex:1;min-width:120px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px">日期</label><input type="date" id="designC-date" value="${toDateStr(new Date())}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-family:inherit"></div>
@@ -351,7 +351,7 @@ Object.assign(App, {
 
           <!-- 大字目前分數 -->
           <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
-            <div style="font-size:42px;font-weight:800;color:${color};font-variant-numeric:tabular-nums;line-height:1">${k.total.toFixed(1)}</div>
+            <div style="font-size:42px;font-weight:800;color:${color};font-variant-numeric:tabular-nums;line-height:1">${Math.round(k.total)}</div>
             <div style="font-size:18px;color:var(--text-muted);font-weight:500">/ 100 分</div>
           </div>
 
@@ -362,7 +362,7 @@ Object.assign(App, {
           </div>
           <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:14px">
             <span>0 分</span>
-            <span style="color:#ef4444">▲ 今日應達 ${todayTarget.toFixed(1)}</span>
+            <span style="color:#ef4444">▲ 今日應達 ${Math.round(todayTarget)}</span>
             <span>100 分</span>
           </div>
 
@@ -370,17 +370,17 @@ Object.assign(App, {
           <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));gap:10px">
             <div style="background:#eef2ff;border-left:3px solid #6366f1;padding:10px 14px;border-radius:7px">
               <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:2px">每日該完成的分數</div>
-              <div style="font-size:22px;font-weight:800;color:#4338ca;font-variant-numeric:tabular-nums;line-height:1">${dailyTarget.toFixed(2)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分/天</span></div>
+              <div style="font-size:22px;font-weight:800;color:#4338ca;font-variant-numeric:tabular-nums;line-height:1">${Math.round(dailyTarget)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分/天</span></div>
               <div style="font-size:10px;color:var(--text-muted);margin-top:3px">100 分 ÷ ${workDays} 工作天</div>
             </div>
             <div style="background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:7px">
               <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:2px">今天應該已累計</div>
-              <div style="font-size:22px;font-weight:800;color:#92400e;font-variant-numeric:tabular-nums;line-height:1">${todayTarget.toFixed(1)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分</span></div>
+              <div style="font-size:22px;font-weight:800;color:#92400e;font-variant-numeric:tabular-nums;line-height:1">${Math.round(todayTarget)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分</span></div>
               <div style="font-size:10px;color:var(--text-muted);margin-top:3px">第 ${todayIdx} / ${workDays} 個工作天</div>
             </div>
             <div style="background:${statusBg};border-left:3px solid ${statusBand};padding:10px 14px;border-radius:7px">
               <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:2px">${statusIcon} ${diffLabel}進度</div>
-              <div style="font-size:22px;font-weight:800;color:${statusBand};font-variant-numeric:tabular-nums;line-height:1">${diffSign}${diff.toFixed(1)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分</span></div>
+              <div style="font-size:22px;font-weight:800;color:${statusBand};font-variant-numeric:tabular-nums;line-height:1">${diffSign}${Math.round(diff)} <span style="font-size:12px;color:var(--text-muted);font-weight:500">分</span></div>
               <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${diff >= 0 ? '太棒了，繼續保持' : '加把勁就追得回來'}</div>
             </div>
           </div>
