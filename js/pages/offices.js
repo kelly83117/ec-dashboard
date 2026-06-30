@@ -104,20 +104,24 @@ Object.assign(App, {
     const DESIGNERS = ['林美玲', '沈思妤'];
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     const myName = this.currentUser && this.currentUser.name;
+    const myDepts = (this.currentUser && this.currentUser.departments) || [];
     const myIsDesigner = DESIGNERS.includes(myName);
-    // 選哪位設計師：本人只能看自己；admin 可切換
+    const myIsMarketing = myDepts.includes('行銷');
+    // 行銷退回權限：admin 或 行銷部門
+    const canReject = isAdmin || myIsMarketing;
+    // 選哪位設計師：本人只能看自己；admin / 行銷 可切換
     let viewName = null;
     if (myIsDesigner) {
-      viewName = myName; // 強制看自己，不可看別人
-    } else if (isAdmin) {
+      viewName = myName;
+    } else if (isAdmin || myIsMarketing) {
       viewName = this.filter.designKpiName && DESIGNERS.includes(this.filter.designKpiName)
         ? this.filter.designKpiName : DESIGNERS[0];
     }
-    // 月份：預設本月，admin 可切換
+    // 月份：預設本月，admin / 行銷 可切換
     const now = new Date();
     const defMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
     const yMonth = this.filter.designKpiMonth || defMonth;
-    return { DESIGNERS, isAdmin, myName, myIsDesigner, viewName, yMonth };
+    return { DESIGNERS, isAdmin, myName, myIsDesigner, myIsMarketing, canReject, viewName, yMonth };
   },
   _workingDaysInMonth(yMonthStr) {
     const [y, m] = yMonthStr.split('-').map(Number);
@@ -151,7 +155,9 @@ Object.assign(App, {
     ];
     const entries = (data && data.entries) || [];
     const totalCount = entries.length;
-    const metCount = entries.filter(e => e.met).length;
+    // 被行銷退回的算超時（不算達標）
+    const metCount = entries.filter(e => e.met && !e.rejected).length;
+    const rejectedCount = entries.filter(e => e.rejected).length;
     const rateA = totalCount > 0 ? (metCount / totalCount) : 0;
     const scoreA = rateA * 60;
 
@@ -173,7 +179,7 @@ Object.assign(App, {
 
     const total = Math.min(100, scoreA + scoreB + scoreCBase + scoreCExtra);
     return {
-      DESIGN_FIXED_TASKS, totalCount, metCount, rateA, scoreA,
+      DESIGN_FIXED_TASKS, totalCount, metCount, rejectedCount, rateA, scoreA,
       tasksScored, scoreB,
       skillCount, scoreCBase, scoreCExtra,
       total
@@ -203,8 +209,8 @@ Object.assign(App, {
     const diffLabel = diff >= 0 ? '領先' : '落後';
 
     // 「📖 指標說明」按鈕已移到 d4 的 tabBar 位置（取代原「個人績效」pill），這裡不再重複放
-    // admin 才能切設計師 / 月份
-    const switcher = st.isAdmin ? `
+    // admin / 行銷 才能切設計師 / 月份（行銷需要看設計師 KPI 才能退回）
+    const switcher = (st.isAdmin || st.myIsMarketing) ? `
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         ${st.DESIGNERS.map(n => `<button class="pill ${n === st.viewName ? 'active' : ''}" data-design-pick="${escapeHtml(n)}">${escapeHtml(n)}</button>`).join('')}
         <input type="month" class="design-kpi-month" value="${st.yMonth}" style="margin-left:8px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
@@ -223,23 +229,40 @@ Object.assign(App, {
     ];
     const entriesRowsHtml = (data.entries || []).length === 0
       ? `<tr><td colspan="7" style="padding:24px;text-align:left;color:var(--text-muted);font-size:13px">本月還沒有工時記錄</td></tr>`
-      : (data.entries || []).map((e, i) => `
-        <tr data-entry-idx="${i}">
-          <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${escapeHtml(e.date || '')}</td>
-          <td style="padding:6px 8px;text-align:left;font-size:13px">${escapeHtml(e.product || '')}</td>
-          <td style="padding:6px 8px;text-align:left;font-size:13px;color:var(--text-muted)">${escapeHtml(e.type || '')}</td>
-          <td style="padding:6px 8px;text-align:left;font-size:13px;font-variant-numeric:tabular-nums">${e.stdMinutes || ''}</td>
-          <td style="padding:6px 8px;text-align:left">${e.met ? '<span style="color:#10b981;font-weight:700">✓ 達標</span>' : '<span style="color:#ef4444;font-weight:700">✗ 超時</span>'}</td>
-          <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted)">${escapeHtml(e.note || '')}</td>
-          <td style="padding:6px 8px;text-align:right"><button class="icon-btn design-entry-del" data-entry-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
-        </tr>`).join('');
+      : (data.entries || []).map((e, i) => {
+          const rejected = !!e.rejected;
+          const rowBg = rejected ? 'background:#fef2f2' : '';
+          const rejectTitle = rejected
+            ? `行銷退回：${e.rejectReason || ''}　— ${e.rejectedBy || ''}　${e.rejectedAt ? new Date(e.rejectedAt).toLocaleDateString('zh-TW') : ''}`
+            : '';
+          const metCell = rejected
+            ? `<span style="color:#ef4444;font-weight:700" title="${escapeHtml(rejectTitle)}">✗ 行銷退回</span>`
+            : (e.met ? '<span style="color:#10b981;font-weight:700">✓ 達標</span>' : '<span style="color:#ef4444;font-weight:700">✗ 超時</span>');
+          // 按鈕組合：退回 / 解除退回 / 重做 / 刪除
+          const rejectBtn = (st.canReject && !rejected)
+            ? `<button class="icon-btn design-entry-reject" data-entry-idx="${i}" title="行銷退回（時間達標但品質不滿意）" style="color:#f59e0b;margin-right:2px">↩</button>` : '';
+          const unrejectBtn = (st.canReject && rejected)
+            ? `<button class="icon-btn design-entry-unreject" data-entry-idx="${i}" title="解除退回（誤按或設計師已修正）" style="color:#10b981;margin-right:2px">↪</button>` : '';
+          const redoBtn = rejected
+            ? `<button class="icon-btn design-entry-redo" data-entry-idx="${i}" title="重做計時（完成後覆蓋此筆時間並清除退回）" style="color:#3b82f6;margin-right:2px">🔄</button>` : '';
+          return `
+            <tr data-entry-idx="${i}" style="${rowBg}">
+              <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${escapeHtml(e.date || '')}</td>
+              <td style="padding:6px 8px;text-align:left;font-size:13px">${escapeHtml(e.product || '')}</td>
+              <td style="padding:6px 8px;text-align:left;font-size:13px;color:var(--text-muted)">${escapeHtml(e.type || '')}</td>
+              <td style="padding:6px 8px;text-align:left;font-size:13px;font-variant-numeric:tabular-nums">${e.stdMinutes || ''}</td>
+              <td style="padding:6px 8px;text-align:left">${metCell}</td>
+              <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted)">${escapeHtml(e.note || '')}</td>
+              <td style="padding:6px 8px;text-align:right;white-space:nowrap">${rejectBtn}${unrejectBtn}${redoBtn}<button class="icon-btn design-entry-del" data-entry-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
+            </tr>`;
+        }).join('');
 
     const sectionA = `
       <div class="table-card" style="margin-bottom:16px;border-top:3px solid #3b82f6">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
             <h3 style="margin:0;font-size:16px;color:#3b82f6">A. 達標工時內完成率</h3>
-            <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">本月接 ${k.totalCount} 件 · 達標 ${k.metCount} 件 · 達標率 ${Math.round(k.rateA*100)}%</p>
+            <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">本月接 ${k.totalCount} 件 · 達標 ${k.metCount} 件${k.rejectedCount > 0 ? ` · <span style="color:#ef4444;font-weight:600">行銷退回 ${k.rejectedCount} 件</span>` : ''} · 達標率 ${Math.round(k.rateA*100)}%</p>
           </div>
           <div style="font-size:24px;font-weight:800;color:#3b82f6;font-variant-numeric:tabular-nums">${Math.round(k.scoreA)} <span style="font-size:13px;color:var(--text-muted);font-weight:500">/ 60</span></div>
         </div>
@@ -507,17 +530,35 @@ Object.assign(App, {
         const met = t.stdMin > 0 && elapsedMin <= t.stdMin;
         const data = loadData();
         data.entries = data.entries || [];
-        data.entries.unshift({
-          date: toDateStr(new Date()),
-          product: t.product,
-          type: t.type,
-          stdMinutes: t.stdMin,
-          met,
-          note: `實際 ${elapsedMin} 分鐘`,
-        });
-        this._designTimer = null;
-        saveAndRender(data);
-        showToast(`✓ 已新增 ${t.product} · ${met ? '標準內' : '超時'} · ${elapsedMin} 分`, met ? 'success' : 'error');
+        if (t.redoEntryIdx != null && data.entries[t.redoEntryIdx]) {
+          // 重做模式：覆蓋原 entry 的時間 + 清退回標記
+          const old = data.entries[t.redoEntryIdx];
+          data.entries[t.redoEntryIdx] = {
+            ...old,
+            date: toDateStr(new Date()),
+            met,
+            note: `重做 ${elapsedMin} 分鐘`,
+            rejected: false,
+            rejectReason: '',
+            rejectedBy: '',
+            rejectedAt: 0,
+          };
+          this._designTimer = null;
+          saveAndRender(data);
+          showToast(`🔄 已重做 ${t.product} · ${met ? '標準內' : '超時'} · ${elapsedMin} 分`, met ? 'success' : 'error');
+        } else {
+          data.entries.unshift({
+            date: toDateStr(new Date()),
+            product: t.product,
+            type: t.type,
+            stdMinutes: t.stdMin,
+            met,
+            note: `實際 ${elapsedMin} 分鐘`,
+          });
+          this._designTimer = null;
+          saveAndRender(data);
+          showToast(`✓ 已新增 ${t.product} · ${met ? '標準內' : '超時'} · ${elapsedMin} 分`, met ? 'success' : 'error');
+        }
       });
       this._designTimerTick();
     }
@@ -542,6 +583,78 @@ Object.assign(App, {
         saveAndRender(data);
       });
     }
+    // A 區 — 行銷退回（admin / 行銷部門可按）
+    document.querySelectorAll('.design-entry-reject').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = +btn.dataset.entryIdx;
+        const data = loadData();
+        const e = (data.entries || [])[idx];
+        if (!e) return;
+        this.openModal({
+          title: `行銷退回：${e.product || ''}`,
+          bodyHtml: `
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px">
+              這筆紀錄會從「✓ 達標」改成「✗ 行銷退回」，A 區達標率會即時下降。
+              設計師後續可按 🔄 重做計時，完成後會覆蓋這筆時間並清掉退回標記。
+            </div>
+            <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:4px">退回理由（必填）</label>
+            <textarea id="reject-reason" placeholder="例：主圖配色不符品牌、字體太小、背景雜亂..." style="width:100%;min-height:80px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;resize:vertical"></textarea>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:6px">退回者：${escapeHtml(this.currentUser?.name || this.currentUser?.username || '')}</div>`,
+          saveLabel: '確認退回',
+          onSave: () => {
+            const reason = (document.getElementById('reject-reason')?.value || '').trim();
+            if (!reason) { showToast('請填寫退回理由', 'error'); return false; }
+            const data2 = loadData();
+            const e2 = (data2.entries || [])[idx];
+            if (e2) {
+              e2.rejected = true;
+              e2.rejectReason = reason;
+              e2.rejectedBy = this.currentUser?.name || this.currentUser?.username || '';
+              e2.rejectedAt = Date.now();
+              saveAndRender(data2);
+            }
+            return true;
+          },
+          onMount: () => { setTimeout(() => document.getElementById('reject-reason')?.focus(), 50); },
+        });
+      });
+    });
+    // A 區 — 解除退回
+    document.querySelectorAll('.design-entry-unreject').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = +btn.dataset.entryIdx;
+        const data = loadData();
+        const e = (data.entries || [])[idx];
+        if (!e) return;
+        e.rejected = false;
+        e.rejectReason = '';
+        e.rejectedBy = '';
+        e.rejectedAt = 0;
+        saveAndRender(data);
+        showToast(`已解除退回 ${e.product || ''}`, 'success');
+      });
+    });
+    // A 區 — 重做計時（rejected entry 才會出現）
+    document.querySelectorAll('.design-entry-redo').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (this._designTimer?.status === 'running') {
+          showToast('已有計時中，請先按「⏹ 完成」', 'error'); return;
+        }
+        const idx = +btn.dataset.entryIdx;
+        const data = loadData();
+        const e = (data.entries || [])[idx];
+        if (!e) return;
+        const stdMin = +e.stdMinutes || 0;
+        if (stdMin <= 0) { showToast('此筆無標準工時（其他類型），無法重做計時', 'error'); return; }
+        this._designTimer = {
+          startTs: Date.now(), status: 'running',
+          product: e.product, type: e.type, stdMin,
+          redoEntryIdx: idx,
+        };
+        this.render();
+        showToast(`🔄 重做計時開始：${e.product}`, 'success');
+      });
+    });
     // A 區 — 刪除
     document.querySelectorAll('.design-entry-del').forEach(btn => {
       btn.addEventListener('click', () => {

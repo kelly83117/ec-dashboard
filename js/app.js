@@ -143,6 +143,8 @@ function canAccessOffice(user, dept) {
   if (!user || !dept) return false;
   if (user.role === 'admin') return true;
   if (user.crossOfficeAccess === true) return true;
+  // 行銷部門可進「設計」辦公室（d4），對 KPI 紀錄做退回審核
+  if (dept.id === 'd4' && getUserDepts(user).includes('行銷')) return true;
   return getUserDepts(user).includes(dept.name);
 }
 
