@@ -308,7 +308,7 @@ Object.assign(App, {
           <table style="width:auto;font-size:13px">
             <thead style="background:var(--surface)">
               <tr>
-                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:280px">固定任務</th>
+                <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:390px">固定任務</th>
                 <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:120px">執行時段</th>
                 <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:60px">配分</th>
                 <th style="padding:8px 12px;text-align:left;font-size:12px;color:var(--text-muted);width:90px">漏做(次)</th>
