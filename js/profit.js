@@ -2857,6 +2857,7 @@ function renderCoupangTable(shop,rows){
   const totalNet=rows.reduce((s,r)=>s+r.net,0);
   const totalRate=totalRev>0?totalNet/totalRev:0;
   const fmtM=n=>'NT$ '+Math.round(n).toLocaleString();
+  const fmtN=n=>Math.round(n).toLocaleString();
   const fmtP=n=>(n*100).toFixed(1)+'%';
   // 更新 KPI
   const revEl=document.getElementById('cup-kv-rev-'+shop);
@@ -2871,15 +2872,15 @@ function renderCoupangTable(shop,rows){
     {k:'code',label:'編號'},
     {k:'name',label:'商品名稱'},
     {k:'rev',label:'銷售額',fmt:fmtM},
-    {k:'salesCost',label:'銷售成本',fmt:fmtM},
-    {k:'gross',label:'毛利',fmt:fmtM},
+    {k:'salesCost',label:'銷售成本',fmt:fmtN},
+    {k:'gross',label:'毛利',fmt:fmtN},
     {k:'net',label:'純利',fmt:fmtM},
     {k:'netRate',label:'純利率',fmt:fmtP},
-    {k:'qty',label:'銷售數量',fmt:n=>Math.round(n).toLocaleString()},
-    {k:'stock',label:'可用庫存',fmt:n=>Math.round(n).toLocaleString()},
+    {k:'qty',label:'銷售數量',fmt:fmtN},
+    {k:'stock',label:'可用庫存',fmt:fmtN},
   ];
-  const thStyle='padding:8px 10px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;white-space:nowrap;border-bottom:2px solid #e5e7eb;background:#f9fafb;position:sticky;top:0;z-index:1';
-  const tdStyle='padding:8px 10px;font-size:13px;border-bottom:1px solid #f3f4f6;white-space:nowrap';
+  const thStyle='padding:5px 8px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;white-space:nowrap;border-bottom:2px solid #e5e7eb;background:#f9fafb;position:sticky;top:0;z-index:1';
+  const tdStyle='padding:4px 8px;font-size:12.5px;border-bottom:1px solid #f3f4f6;white-space:nowrap;line-height:1.3';
   const thead=cols.map(c=>`<th style="${thStyle}">${c.label}</th>`).join('');
   const tbody=rows.map((r,i)=>{
     const bg=i%2===0?'#fff':'#fafafa';
@@ -2892,7 +2893,28 @@ function renderCoupangTable(shop,rows){
     }).join('');
     return`<tr>${tds}</tr>`;
   }).join('');
-  tbl.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
+  // 階層表：純利率區間分布
+  const buckets=[
+    {label:'0%以下',test:r=>r.netRate<0},
+    {label:'0~10%',test:r=>r.netRate>=0&&r.netRate<=0.10},
+    {label:'11~20%',test:r=>r.netRate>0.10&&r.netRate<=0.20},
+    {label:'21~30%',test:r=>r.netRate>0.20&&r.netRate<=0.30},
+    {label:'31~40%',test:r=>r.netRate>0.30&&r.netRate<=0.40},
+    {label:'41~50%',test:r=>r.netRate>0.40&&r.netRate<=0.50},
+    {label:'50%以上',test:r=>r.netRate>0.50},
+  ];
+  const distRows=buckets.map(b=>({label:b.label,count:rows.filter(b.test).length}));
+  const distThStyle='padding:5px 8px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;white-space:nowrap;border-bottom:2px solid #e5e7eb;background:#f9fafb';
+  const distTdStyle='padding:4px 8px;font-size:12.5px;border-bottom:1px solid #f3f4f6;white-space:nowrap;text-align:right';
+  const distTable=`
+    <div style="margin-top:18px">
+      <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:8px">📊 階層分布｜商品總數 ${rows.length}</div>
+      <table style="border-collapse:collapse;min-width:240px">
+        <thead><tr><th style="${distThStyle}">純利率區間</th><th style="${distThStyle};text-align:right">商品數</th></tr></thead>
+        <tbody>${distRows.map((d,i)=>`<tr><td style="${distTdStyle.replace('text-align:right','')};background:${i%2===0?'#fff':'#fafafa'}">${d.label}</td><td style="${distTdStyle};background:${i%2===0?'#fff':'#fafafa'}">${d.count}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+  tbl.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>${distTable}`;
 }
 
 function updateHalfBtnLabels(shop){
