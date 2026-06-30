@@ -896,6 +896,7 @@ Object.assign(App, {
           <div>${tabBar}</div>
           <div>${tabContent}</div>
         </div>
+        <div style="margin-top:20px">${this.renderFestivalCalendarTab()}</div>
       ` : deptId !== 'd1' ? tabBar + tabContent : ''}
       ${showMemberKpiTable ? `
         <div class="table-card">

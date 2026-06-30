@@ -426,7 +426,6 @@ const OFFICE_CONFIG = {
     tabs: [
       { key: 'ai-select', title: '🤖 AI 選品', dynamic: 'ai-select' },
       { key: 'trend-radar', title: '🔥 熱搜雷達', dynamic: 'trend-radar' },
-      { key: 'festival-cal', title: '🎉 節慶日曆', dynamic: 'festival-calendar' },
       { key: 'supplier', title: '🏭 供應商管理', dynamic: 'supplier-mgmt' },
       { key: 'profit-calc', title: '💰 毛利試算機', dynamic: 'profit-calc' },
       { key: 'kanban', title: '📋 選品任務板', dynamic: 'product-kanban' },
