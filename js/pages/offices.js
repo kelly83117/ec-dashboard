@@ -239,12 +239,13 @@ Object.assign(App, {
             ? `<span style="color:#ef4444;font-weight:700" title="${escapeHtml(rejectTitle)}">✗ 行銷退回</span>`
             : (e.met ? '<span style="color:#10b981;font-weight:700">✓ 達標</span>' : '<span style="color:#ef4444;font-weight:700">✗ 超時</span>');
           // 按鈕組合：退回 / 解除退回 / 重做 / 刪除
+          const btnSz = 'width:36px;height:36px;font-size:20px';
           const rejectBtn = (st.canReject && !rejected)
-            ? `<button class="icon-btn design-entry-reject" data-entry-idx="${i}" title="行銷退回（時間達標但品質不滿意）" style="color:#f59e0b;margin-right:2px">↩</button>` : '';
+            ? `<button class="icon-btn design-entry-reject" data-entry-idx="${i}" title="行銷退回（時間達標但品質不滿意）" style="${btnSz};color:#f59e0b;margin-right:2px">↩</button>` : '';
           const unrejectBtn = (st.canReject && rejected)
-            ? `<button class="icon-btn design-entry-unreject" data-entry-idx="${i}" title="解除退回（誤按或設計師已修正）" style="color:#10b981;margin-right:2px">↪</button>` : '';
+            ? `<button class="icon-btn design-entry-unreject" data-entry-idx="${i}" title="解除退回（誤按或設計師已修正）" style="${btnSz};color:#10b981;margin-right:2px">↪</button>` : '';
           const redoBtn = rejected
-            ? `<button class="icon-btn design-entry-redo" data-entry-idx="${i}" title="重做計時（完成後覆蓋此筆時間並清除退回）" style="color:#3b82f6;margin-right:2px">🔄</button>` : '';
+            ? `<button class="icon-btn design-entry-redo" data-entry-idx="${i}" title="重做計時（完成後覆蓋此筆時間並清除退回）" style="${btnSz};color:#3b82f6;margin-right:2px">🔄</button>` : '';
           return `
             <tr data-entry-idx="${i}" style="${rowBg}">
               <td style="padding:6px 8px;text-align:left;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums">${escapeHtml(e.date || '')}</td>
@@ -261,7 +262,7 @@ Object.assign(App, {
                 h = h.replace(/（原因：([^）]+)）/g, '<span style="color:#ef4444">（$1）</span>');
                 return h;
               })()}</td>
-              <td style="padding:6px 8px;text-align:right;white-space:nowrap">${rejectBtn}${unrejectBtn}${redoBtn}<button class="icon-btn design-entry-del" data-entry-idx="${i}" title="刪除" style="color:#ef4444">✕</button></td>
+              <td style="padding:6px 8px;text-align:right;white-space:nowrap">${rejectBtn}${unrejectBtn}${redoBtn}<button class="icon-btn design-entry-del" data-entry-idx="${i}" title="刪除" style="${btnSz};color:#ef4444">✕</button></td>
             </tr>`;
         }).join('');
 
