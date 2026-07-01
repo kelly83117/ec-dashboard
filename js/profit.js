@@ -817,7 +817,7 @@ function onFile(e,shop,type){
       try{
         let rows;
         if(isCsv){
-          rows=parseAdsCsv(ev.target.result).filter(r=>(r['商品 ID']||r['商品ID']||'').trim()!=='-');
+          rows=parseAdsCsv(ev.target.result);
         }else{
           const wb=XLSX.read(ev.target.result,{type:'binary'});
           rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
@@ -878,12 +878,12 @@ function saveGroupAdsMeta(shop){
 }
 function parseAdsCsv(text){
   const lines=text.split('\n');
-  let hi=lines.findIndex(l=>l.includes('廣告名稱')&&l.includes('花費'));if(hi<0)hi=7;
+  let hi=lines.findIndex(l=>l.includes('花費')&&(l.includes('商品 ID')||l.includes('商品ID')));if(hi<0)hi=7;
   const headers=splitCSV(lines[hi]).map(h=>h.replace(/^"|"$/g,'').trim());
   return lines.slice(hi+1).filter(l=>l.trim()).map(line=>{
     const vals=splitCSV(line).map(v=>v.replace(/^"|"$/g,'').trim());
     const obj={};headers.forEach((h,i)=>{obj[h]=vals[i]||'';});return obj;
-  }).filter(r=>(r['廣告名稱']||r['廣告/商品名稱'])&&(r['商品 ID']||r['商品ID']||'').trim()!=='-');
+  }).filter(r=>{const sid=(r['商品 ID']||r['商品ID']||'').trim();return sid&&sid!=='-';});
 }
 function splitCSV(line){const res=[];let cur='';let q=false;for(let c of line){if(c==='"'){q=!q;}else if(c===','&&!q){res.push(cur);cur='';}else{cur+=c;}}res.push(cur);return res;}
 function markCard(shop,type,icon,title,cls){
