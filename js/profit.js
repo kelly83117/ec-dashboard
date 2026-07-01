@@ -991,9 +991,9 @@ function findUnmatchedAds(shop){
     const nameFromAds=sids.map(sid=>sidNames[sid]||'').find(n=>n)||'';
     return {type:'code',code,spend,name:nameFromMap||nameFromAds,sids};
   });
-  const result=[...typeA,...typeB];
-  console.log(`[${shop}] TypeA(sid無對應):${typeA.length}, TypeB(有廣告無銷售):${typeB.length}`, result);
-  return result;
+  // TypeB（有廣告無銷售）由 buildShop 自動處理（建立零銷售列），不需要用戶介入
+  console.log(`[${shop}] TypeA(sid無對應):${typeA.length}, TypeB(有廣告無銷售，自動處理):${typeB.length}`);
+  return typeA;
 }
 
 function generate(shop){
