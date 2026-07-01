@@ -965,9 +965,12 @@ Object.assign(App, {
       const c = urgColor(f.days);
       const bg = urgBg(f.days);
       const orderDay = nextOrderDay(f.prepDays <= 0 ? today : f.prepDate);
+      const orderDayOfWeek = orderDay.getDay();
+      const isMonday = orderDayOfWeek === 1;
+      const orderLabel = isMonday ? '週一主力叫貨 🔼 多叫' : '週四補量叫貨 🔽 少叫';
       const orderDayStr = f.prepDays <= 0
         ? `<span style="color:#ef4444;font-weight:700">⚠️ 備貨時間已到！</span>`
-        : `最晚 <b>${f.prepDays}</b> 天後 · 叫貨日 ${orderDay.getMonth()+1}/${orderDay.getDate()}（${['日','一','二','三','四','五','六'][orderDay.getDay()]}）`;
+        : `最晚 <b>${f.prepDays}</b> 天後 · ${orderDay.getMonth()+1}/${orderDay.getDate()}（${orderLabel}）`;
       const multColor = f.mult >= 3 ? '#dc2626' : f.mult >= 2 ? '#f97316' : '#ca8a04';
       return `
         <div style="border:1.5px solid ${c}33;border-radius:12px;padding:14px 16px;background:${bg}">
