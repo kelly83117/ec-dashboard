@@ -838,7 +838,7 @@ function parseAdsCsv(text){
   return lines.slice(hi+1).filter(l=>l.trim()).map(line=>{
     const vals=splitCSV(line).map(v=>v.replace(/^"|"$/g,'').trim());
     const obj={};headers.forEach((h,i)=>{obj[h]=vals[i]||'';});return obj;
-  }).filter(r=>r['廣告名稱']);
+  }).filter(r=>(r['廣告名稱']||r['廣告/商品名稱'])&&(r['商品 ID']||r['商品ID']||'').trim()!=='-');
 }
 function splitCSV(line){const res=[];let cur='';let q=false;for(let c of line){if(c==='"'){q=!q;}else if(c===','&&!q){res.push(cur);cur='';}else{cur+=c;}}res.push(cur);return res;}
 function markCard(shop,type,icon,title,cls){
