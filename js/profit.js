@@ -1085,9 +1085,12 @@ function openUnmatchedModal(shop,unmatched,onConfirm){
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <div style="padding:14px 20px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid #e5e7eb">
-      <button onclick="document.getElementById('unmatched-modal-ov').remove()" style="padding:8px 18px;border:1.5px solid #e5e7eb;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#6b7280;cursor:pointer">取消</button>
-      <button onclick="confirmUnmatched()" style="padding:8px 18px;border:0;border-radius:8px;background:#5b5fcf;font-size:13px;font-weight:700;color:white;cursor:pointer">確認並產生報表</button>
+    <div style="padding:14px 20px;display:flex;gap:8px;justify-content:space-between;align-items:center;border-top:1px solid #e5e7eb">
+      <button onclick="ignoreAllUnmatched()" style="padding:8px 18px;border:1.5px solid #f59e0b;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#b45309;cursor:pointer" title="廣告費計入總計但不新增商品行">忽略全部未對應</button>
+      <div style="display:flex;gap:8px">
+        <button onclick="document.getElementById('unmatched-modal-ov').remove()" style="padding:8px 18px;border:1.5px solid #e5e7eb;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#6b7280;cursor:pointer">取消</button>
+        <button onclick="confirmUnmatched()" style="padding:8px 18px;border:0;border-radius:8px;background:#5b5fcf;font-size:13px;font-weight:700;color:white;cursor:pointer">確認並產生報表</button>
+      </div>
     </div>
   </div>`;
   document.body.appendChild(ov);
@@ -1131,6 +1134,17 @@ function umSetAll(val){
     const r=document.querySelector(`input[name="um-${i}"][value="${val}"]`);
     if(r){r.checked=true;umToggle(i);}
   }
+}
+function ignoreAllUnmatched(){
+  // 把全部未對應廣告費記到 state，讓總廣告費正確但不新增商品行
+  const unmatched=window._unmatchedData||[];
+  const shop=window._unmatchedShop;
+  if(shop&&state[shop]){
+    const extra=unmatched.reduce((s,u)=>s+(u.spend||0),0);
+    state[shop]._extraAdsFee=(state[shop]._extraAdsFee||0)+extra;
+  }
+  document.getElementById('unmatched-modal-ov')?.remove();
+  if(window._unmatchedCallback)window._unmatchedCallback();
 }
 function confirmUnmatched(){
   const unmatched=window._unmatchedData||[];
@@ -2324,6 +2338,8 @@ function renderTable(shop,list){
   let tRev=0,tGross=0,tAds=0,tPure=0;
   const kpiSrc=list;
   kpiSrc.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
+  const extra=state[shop]?._extraAdsFee||0;
+  tAds+=extra;tPure-=extra;
   setKpis(shop,tRev,tGross,tAds,tPure);
   document.getElementById('period-tag-'+shop).textContent=s._period||'';
   document.getElementById('cnt-'+shop).textContent=list.length+' 筆';
@@ -3273,6 +3289,6 @@ Object.assign(window, {
   closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
-  umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
+  ignoreAllUnmatched,umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
   updateTagFilterBar,validateMapWarnings,
 });
