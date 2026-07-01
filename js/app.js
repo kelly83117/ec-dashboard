@@ -2236,12 +2236,8 @@ const App = {
             <input id="ai-price" type="number" placeholder="例：399" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-family:inherit;box-sizing:border-box">
           </div>
           <div style="flex:1;min-width:100px">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">競品熱度</div>
-            <select id="ai-heat" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-family:inherit;box-sizing:border-box">
-              <option value="高">高</option>
-              <option value="中">中</option>
-              <option value="低">低</option>
-            </select>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">對手月銷量</div>
+            <input id="ai-heat" type="number" placeholder="例：500" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-family:inherit;box-sizing:border-box">
           </div>
           <div style="flex:1;min-width:100px">
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">法規風險</div>
