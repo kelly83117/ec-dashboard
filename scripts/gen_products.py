@@ -33,9 +33,9 @@ if not api_key:
     sys.exit(1)
 
 MODELS = [
-    "qwen/qwen3-8b:free",
-    "mistralai/mistral-7b-instruct:free",
-    "google/gemma-3-4b-it:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemma-4-27b-it:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
 ]
 
 def call_api(model):
