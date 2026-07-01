@@ -961,48 +961,35 @@ Object.assign(App, {
     const urgBg   = (days) => days <= 30 ? '#fef2f2' : days <= 60 ? '#fff7ed' : '#f0fdf4';
     const urgLabel = (days) => days <= 30 ? '緊急' : days <= 60 ? '準備中' : '規劃中';
 
-    const cards = rows.map(f => {
-      const c = urgColor(f.days);
-      const bg = urgBg(f.days);
-      const orderDay = nextOrderDay(f.prepDays <= 0 ? today : f.prepDate);
-      const orderDayOfWeek = orderDay.getDay();
-      const isMonday = orderDayOfWeek === 1;
-      const orderLabel = isMonday ? '週一主力叫貨 🔼 多叫' : '週四補量叫貨 🔽 少叫';
-      const orderDayStr = f.prepDays <= 0
-        ? `<span style="color:#ef4444;font-weight:700">⚠️ 備貨時間已到！</span>`
-        : `最晚 <b>${f.prepDays}</b> 天後 · ${orderDay.getMonth()+1}/${orderDay.getDate()}（${orderLabel}）`;
-      const multColor = f.mult >= 3 ? '#dc2626' : f.mult >= 2 ? '#f97316' : '#ca8a04';
-      return `
-        <div style="border:1.5px solid ${c}33;border-radius:12px;padding:14px 16px;background:${bg}">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:22px">${f.emoji}</span>
-              <div>
-                <div style="font-size:14px;font-weight:700;color:var(--text)">${escapeHtml(f.name)}</div>
-                <div style="font-size:11px;color:var(--text-muted)">${f.d.getMonth()+1}/${f.d.getDate()}</div>
-              </div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-size:22px;font-weight:800;color:${c};line-height:1">${f.days}</div>
-              <div style="font-size:10px;color:${c};font-weight:600">天後</div>
-            </div>
-          </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">${orderDayStr}</div>
-          <div style="display:flex;flex-wrap:wrap;gap:4px">
-            ${f.tags.map(t => `<span style="font-size:11px;padding:2px 8px;background:${c}18;color:${c};border-radius:999px;font-weight:600">${t}</span>`).join('')}
-          </div>
-          <div style="margin-top:8px;display:inline-block;font-size:10px;padding:2px 8px;border-radius:999px;background:${c};color:white;font-weight:700">${urgLabel(f.days)}</div>
-        </div>`;
-    }).join('');
+    const f = rows[0];
+    if (!f) return `<div class="table-card" style="padding:14px 16px;color:var(--text-muted);font-size:13px">近期無重要節慶</div>`;
+
+    const c = urgColor(f.days);
+    const bg = urgBg(f.days);
+    const orderDay = nextOrderDay(f.prepDays <= 0 ? today : f.prepDate);
+    const isMonday = orderDay.getDay() === 1;
+    const orderLabel = isMonday ? '週一主力叫貨 🔼 多叫' : '週四補量叫貨 🔽 少叫';
+    const orderDayStr = f.prepDays <= 0
+      ? `⚠️ 備貨時間已到！`
+      : `最晚 ${f.prepDays} 天後 · ${orderDay.getMonth()+1}/${orderDay.getDate()}（${orderLabel}）`;
 
     return `
-      <div class="table-card">
-        <div class="table-card-header">
-          <h3>🎉 節慶選品日曆</h3>
-          <p>未來 180 天台灣重要節慶 · 建議備貨品類與時間</p>
+      <div style="border:1.5px solid ${c}33;border-radius:10px;padding:10px 14px;background:${bg};display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:24px">${f.emoji}</span>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:14px;font-weight:700;color:var(--text)">${escapeHtml(f.name)}</span>
+            <span style="font-size:12px;color:var(--text-muted)">${f.d.getMonth()+1}/${f.d.getDate()}</span>
+            <span style="font-size:11px;padding:1px 8px;border-radius:999px;background:${c};color:white;font-weight:700">${urgLabel(f.days)}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${orderDayStr}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">
+            ${f.tags.map(t => `<span style="font-size:11px;padding:1px 7px;background:${c}18;color:${c};border-radius:999px;font-weight:600">${t}</span>`).join('')}
+          </div>
         </div>
-        <div style="padding:14px 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">
-          ${cards || '<div style="color:var(--text-muted);padding:20px">近期無重要節慶</div>'}
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:28px;font-weight:800;color:${c};line-height:1">${f.days}</div>
+          <div style="font-size:10px;color:${c};font-weight:600">天後</div>
         </div>
       </div>`;
   },
