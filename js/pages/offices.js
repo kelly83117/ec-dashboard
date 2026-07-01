@@ -918,21 +918,32 @@ Object.assign(App, {
     const yr = today.getFullYear();
 
     const FESTIVALS = [
-      { name: '農曆春節',    date: '2026-02-17', prepDays: 60, emoji: '🧧', tags: ['年貨禮盒', '居家佈置', '保暖用品', '零食禮盒'] },
-      { name: '情人節',      date: '2026-02-14', prepDays: 30, emoji: '💝', tags: ['香氛蠟燭', '收納禮盒', '居家佈置'] },
-      { name: '38婦女節',    date: '2026-03-08', prepDays: 21, emoji: '🌸', tags: ['居家清潔', '收納整理', '廚房用品'] },
-      { name: '清明連假',    date: '2026-04-04', prepDays: 21, emoji: '🌿', tags: ['戶外用品', '野餐墊', '保溫瓶'] },
-      { name: '母親節',      date: '2026-05-10', prepDays: 30, emoji: '💐', tags: ['廚房用品', '居家收納', '保溫瓶', '保鮮盒'] },
-      { name: '端午節',      date: '2026-06-19', prepDays: 21, emoji: '🐉', tags: ['廚房用品', '禮盒包裝', '保冷袋'] },
-      { name: '父親節',      date: '2026-08-08', prepDays: 30, emoji: '👔', tags: ['居家工具', '戶外用品', '保溫瓶'] },
-      { name: '中元節',      date: '2026-08-27', prepDays: 14, emoji: '🏮', tags: ['祭祀用品', '居家清潔', '整理收納'] },
-      { name: '中秋節',      date: '2026-09-25', prepDays: 30, emoji: '🥮', tags: ['戶外烤肉', '保冷袋', '餐具組', '折疊桌椅'] },
-      { name: '雙11購物節',  date: `${yr}-11-11`, prepDays: 45, emoji: '🛒', tags: ['全品類衝量', '收納箱', '廚房用品', '寢具'] },
-      { name: '雙12購物節',  date: `${yr}-12-12`, prepDays: 30, emoji: '🎁', tags: ['年終清倉', '居家收納', '保溫瓶'] },
-      { name: '聖誕節',      date: `${yr}-12-25`, prepDays: 30, emoji: '🎄', tags: ['居家佈置', '禮品包裝', '收納盒'] },
-      { name: '跨年',        date: `${yr}-12-31`, prepDays: 14, emoji: '🎆', tags: ['派對用品', '居家清潔', '收納整理'] },
-      { name: '元旦',        date: `${yr+1}-01-01`, prepDays: 14, emoji: '🎊', tags: ['新年大掃除', '收納箱', '清潔用品'] },
+      { name: '農曆春節',    date: '2026-02-17', prepDays: 60, emoji: '🧧', mult: 3, tags: ['年貨禮盒', '居家佈置', '保暖用品', '零食禮盒'] },
+      { name: '情人節',      date: '2026-02-14', prepDays: 30, emoji: '💝', mult: 1.5, tags: ['香氛蠟燭', '收納禮盒', '居家佈置'] },
+      { name: '38婦女節',    date: '2026-03-08', prepDays: 21, emoji: '🌸', mult: 1.5, tags: ['居家清潔', '收納整理', '廚房用品'] },
+      { name: '清明連假',    date: '2026-04-04', prepDays: 21, emoji: '🌿', mult: 1.5, tags: ['戶外用品', '野餐墊', '保溫瓶'] },
+      { name: '母親節',      date: '2026-05-10', prepDays: 30, emoji: '💐', mult: 2, tags: ['廚房用品', '居家收納', '保溫瓶', '保鮮盒'] },
+      { name: '端午節',      date: '2026-06-19', prepDays: 21, emoji: '🐉', mult: 2, tags: ['廚房用品', '禮盒包裝', '保冷袋'] },
+      { name: '父親節',      date: '2026-08-08', prepDays: 30, emoji: '👔', mult: 2, tags: ['居家工具', '戶外用品', '保溫瓶'] },
+      { name: '中元節',      date: '2026-08-27', prepDays: 14, emoji: '🏮', mult: 1.5, tags: ['祭祀用品', '居家清潔', '整理收納'] },
+      { name: '中秋節',      date: '2026-09-25', prepDays: 30, emoji: '🥮', mult: 2.5, tags: ['戶外烤肉', '保冷袋', '餐具組', '折疊桌椅'] },
+      { name: '雙11購物節',  date: `${yr}-11-11`, prepDays: 45, emoji: '🛒', mult: 3, tags: ['全品類衝量', '收納箱', '廚房用品', '寢具'] },
+      { name: '雙12購物節',  date: `${yr}-12-12`, prepDays: 30, emoji: '🎁', mult: 2, tags: ['年終清倉', '居家收納', '保溫瓶'] },
+      { name: '聖誕節',      date: `${yr}-12-25`, prepDays: 30, emoji: '🎄', mult: 2, tags: ['居家佈置', '禮品包裝', '收納盒'] },
+      { name: '跨年',        date: `${yr}-12-31`, prepDays: 14, emoji: '🎆', mult: 1.5, tags: ['派對用品', '居家清潔', '收納整理'] },
+      { name: '元旦',        date: `${yr+1}-01-01`, prepDays: 14, emoji: '🎊', mult: 1.5, tags: ['新年大掃除', '收納箱', '清潔用品'] },
     ];
+
+    // 下一個週一或週四
+    const nextOrderDay = (fromDate) => {
+      const d = new Date(fromDate);
+      for (let i = 0; i <= 7; i++) {
+        const day = d.getDay();
+        if (day === 1 || day === 4) return new Date(d);
+        d.setDate(d.getDate() + 1);
+      }
+      return d;
+    };
 
     const rows = FESTIVALS
       .map(f => {
@@ -953,9 +964,11 @@ Object.assign(App, {
     const cards = rows.map(f => {
       const c = urgColor(f.days);
       const bg = urgBg(f.days);
-      const prepStr = f.prepDays <= 0
+      const orderDay = nextOrderDay(f.prepDays <= 0 ? today : f.prepDate);
+      const orderDayStr = f.prepDays <= 0
         ? `<span style="color:#ef4444;font-weight:700">⚠️ 備貨時間已到！</span>`
-        : `最晚 <b>${f.prepDays}</b> 天後開始備貨`;
+        : `最晚 <b>${f.prepDays}</b> 天後 · 叫貨日 ${orderDay.getMonth()+1}/${orderDay.getDate()}（${['日','一','二','三','四','五','六'][orderDay.getDay()]}）`;
+      const multColor = f.mult >= 3 ? '#dc2626' : f.mult >= 2 ? '#f97316' : '#ca8a04';
       return `
         <div style="border:1.5px solid ${c}33;border-radius:12px;padding:14px 16px;background:${bg}">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
@@ -971,7 +984,10 @@ Object.assign(App, {
               <div style="font-size:10px;color:${c};font-weight:600">天後</div>
             </div>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${prepStr}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">${orderDayStr}</div>
+          <div style="margin-bottom:8px;display:inline-flex;align-items:center;gap:5px;background:${multColor}15;border:1px solid ${multColor}44;border-radius:7px;padding:3px 10px">
+            <span style="font-size:11px;color:${multColor};font-weight:700">📦 建議備貨 ${f.mult}x 平常叫貨量</span>
+          </div>
           <div style="display:flex;flex-wrap:wrap;gap:4px">
             ${f.tags.map(t => `<span style="font-size:11px;padding:2px 8px;background:${c}18;color:${c};border-radius:999px;font-weight:600">${t}</span>`).join('')}
           </div>
