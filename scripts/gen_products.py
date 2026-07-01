@@ -48,6 +48,11 @@ req = urllib.request.Request(url, data=payload, headers={
 try:
     with urllib.request.urlopen(req, timeout=30) as resp:
         result = json.loads(resp.read())
+except urllib.error.HTTPError as e:
+    body = e.read().decode("utf-8", errors="replace")
+    print(f"API error: HTTP Error {e.code}: {e.reason}", file=sys.stderr)
+    print(f"Response body: {body}", file=sys.stderr)
+    sys.exit(1)
 except Exception as e:
     print(f"API error: {e}", file=sys.stderr)
     sys.exit(1)
