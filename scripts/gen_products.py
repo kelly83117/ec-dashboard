@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import json, datetime, urllib.request, urllib.parse, os, sys, time
+import json, datetime, urllib.request, urllib.parse, os, sys
 
 today = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
 date_str = today.strftime("%Y-%m-%d")
@@ -27,54 +27,37 @@ prompt = (
     ']'
 )
 
-api_key = os.environ.get("OPENROUTER_API_KEY", "")
+api_key = os.environ.get("GITHUB_TOKEN", "")
 if not api_key:
-    print("Error: OPENROUTER_API_KEY not set", file=sys.stderr)
+    print("Error: GITHUB_TOKEN not set", file=sys.stderr)
     sys.exit(1)
 
-MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemma-4-27b-it:free",
-    "qwen/qwen3-next-80b-a3b-instruct:free",
-]
+payload = json.dumps({
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": prompt}],
+    "temperature": 0.7,
+    "max_tokens": 1024
+}).encode("utf-8")
 
-def call_api(model):
-    payload = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7,
-        "max_tokens": 1024
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://openrouter.ai/api/v1/chat/completions",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://kelly83117.github.io/ec-dashboard",
-            "X-Title": "ec-dashboard"
-        }
-    )
+req = urllib.request.Request(
+    "https://models.inference.ai.azure.com/chat/completions",
+    data=payload,
+    headers={
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+)
+
+try:
     with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read())
-
-result = None
-for model in MODELS:
-    try:
-        print(f"Trying model: {model}")
-        result = call_api(model)
-        print(f"Success with model: {model}")
-        break
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        print(f"Model {model} failed: {e.code} - {body[:200]}", file=sys.stderr)
-        time.sleep(3)
-    except Exception as e:
-        print(f"Model {model} error: {e}", file=sys.stderr)
-        time.sleep(3)
-
-if not result:
-    print("All models failed", file=sys.stderr)
+        result = json.loads(resp.read())
+except urllib.error.HTTPError as e:
+    body = e.read().decode("utf-8", errors="replace")
+    print(f"API error: HTTP Error {e.code}: {e.reason}", file=sys.stderr)
+    print(f"Response body: {body}", file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print(f"API error: {e}", file=sys.stderr)
     sys.exit(1)
 
 text = result["choices"][0]["message"]["content"].strip()
