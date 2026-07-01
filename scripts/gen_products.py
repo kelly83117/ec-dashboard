@@ -28,21 +28,23 @@ prompt = (
 )
 
 payload = json.dumps({
-    "model": "llama-3.3-70b-versatile",
+    "model": "meta-llama/llama-3.3-70b-instruct:free",
     "messages": [{"role": "user", "content": prompt}],
     "temperature": 0.7,
     "max_tokens": 1024
 }).encode("utf-8")
 
-api_key = os.environ.get("GROQ_API_KEY", "")
+api_key = os.environ.get("OPENROUTER_API_KEY", "")
 if not api_key:
-    print("Error: GROQ_API_KEY not set", file=sys.stderr)
+    print("Error: OPENROUTER_API_KEY not set", file=sys.stderr)
     sys.exit(1)
 
-url = "https://api.groq.com/openai/v1/chat/completions"
+url = "https://openrouter.ai/api/v1/chat/completions"
 req = urllib.request.Request(url, data=payload, headers={
     "Content-Type": "application/json",
-    "Authorization": f"Bearer {api_key}"
+    "Authorization": f"Bearer {api_key}",
+    "HTTP-Referer": "https://kelly83117.github.io/ec-dashboard",
+    "X-Title": "ec-dashboard"
 })
 
 try:
