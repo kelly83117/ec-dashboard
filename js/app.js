@@ -1910,15 +1910,15 @@ const App = {
             return `<a href="${r.url}" target="_blank"
               style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;text-decoration:none;color:inherit;transition:box-shadow .15s"
               onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
-              <div style="font-size:18px;width:24px;text-align:center;flex-shrink:0">${medals[i]||''}</div>
+              <div style="font-size:20px;width:28px;text-align:center;flex-shrink:0">${medals[i]||''}</div>
               <div style="flex:1;min-width:0">
-                <div style="font-size:10px;color:#7c3aed;font-weight:600;margin-bottom:2px">🤖 ${escapeHtml(r.keyword)}</div>
-                <div style="font-size:12px;font-weight:600;line-height:1.4;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(r.name)}</div>
-                ${r.reason ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(r.reason)}</div>` : ''}
+                <div style="font-size:12px;color:#7c3aed;font-weight:600;margin-bottom:3px">🤖 ${escapeHtml(r.keyword)}</div>
+                <div style="font-size:14px;font-weight:600;line-height:1.4;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(r.name)}</div>
+                ${r.reason ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px">${escapeHtml(r.reason)}</div>` : ''}
               </div>
               <div style="text-align:right;flex-shrink:0">
-                <div style="font-size:14px;font-weight:700;color:#7c3aed">NT$${(r.price||0).toLocaleString()}</div>
-                ${soldStr ? `<div style="font-size:10px;color:var(--text-muted)">${soldStr}</div>` : ''}
+                <div style="font-size:16px;font-weight:700;color:#7c3aed">NT$${(r.price||0).toLocaleString()}</div>
+                ${soldStr ? `<div style="font-size:11px;color:var(--text-muted)">${soldStr}</div>` : ''}
               </div>
             </a>`;
           }).join('')}
