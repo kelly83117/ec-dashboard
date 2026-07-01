@@ -719,23 +719,60 @@ function validateMapWarnings(gMap){
 function checkAdsReconcile(shop,built){
   const s=state[shop];
   if(!s.rawAds||!s.rawAds.length)return;
-  // CSV 廣告費總計（所有 SID 的花費）
-  let csvTotal=0;
-  s.rawAds.forEach(r=>{
-    const sid=(r['商品 ID']||'').trim();
-    const spend=num(r['花費']||0);
-    if(sid&&sid!=='-'&&spend>0)csvTotal+=spend;
+  // 彙整所有來源 SID→花費
+  const adsById={};const sidNames={};
+  const addSrc=(rows,sidKey,nameKey)=>(rows||[]).forEach(r=>{
+    const sid=(r[sidKey]||r['商品ID']||'').trim();
+    const spend=num(r['花費']||r['廣告費']||0);
+    if(sid&&sid!=='-'&&spend>0){adsById[sid]=(adsById[sid]||0)+spend;}
+    if(sid&&!sidNames[sid]){const n=(r[nameKey]||r['廣告/商品名稱']||r['商品名稱']||r['廣告名稱']||'').trim();if(n)sidNames[sid]=n;}
   });
-  // 報表廣告費總計（只有對到商品的）
+  addSrc(s.rawAds,'商品 ID','商品名稱');
+  addSrc(s.rawSelAds,'商品 ID','商品名稱');
+  (s.rawGroupAdsList||[]).forEach(g=>addSrc(g.rows,'商品 ID','廣告/商品名稱'));
+  const csvTotal=Object.values(adsById).reduce((a,b)=>a+b,0);
   const reportTotal=built.reduce((acc,r)=>acc+(r.adsFee||0),0);
   const diff=Math.round((reportTotal-csvTotal)*100)/100;
-  if(Math.abs(diff)<0.5)return; // 差不到 $0.50 忽略
+  if(Math.abs(diff)<0.5)return;
+  // 找出未對應的 SID
+  const mapped=new Set();
+  Object.values(s.rawMap||{}).forEach(e=>{(Array.isArray(e)?e:(e.sids||[])).forEach(sid=>mapped.add(String(sid)));});
+  const unmapped=Object.entries(adsById).filter(([sid])=>!mapped.has(String(sid))).map(([sid,spend])=>({sid,spend,name:sidNames[sid]||''})).sort((a,b)=>b.spend-a.spend);
   const sign=diff>0?'+':'';
-  const msg=`[${shop}] 廣告費對帳差異：CSV 總計 ${fmtAds(csvTotal)}，報表合計 ${fmtAds(reportTotal)}（差 ${sign}${fmtAds(diff)}）\n可能原因：商品對照表有 SID 重複對應到多個商品，或有 SID 不在對照表內。`;
-  showMapWarnBanner(msg);
+  const msg=`[${shop}] 廣告費對帳差異：CSV 總計 ${fmtAds(csvTotal)}，報表合計 ${fmtAds(reportTotal)}（差 ${sign}${fmtAds(diff)}）`;
+  showMapWarnBanner(msg,()=>showReconcileDetail(shop,unmapped,diff));
+}
+function showReconcileDetail(shop,unmapped,diff){
+  let old=document.getElementById('reconcile-detail-ov');if(old)old.remove();
+  const ov=document.createElement('div');
+  ov.className='ana-overlay open';ov.id='reconcile-detail-ov';ov.style.zIndex='3100';
+  const rows=unmapped.length?unmapped.map(u=>`<tr><td style="padding:5px 10px;color:#6b7280;font-size:12px">${u.sid}</td><td style="padding:5px 10px;font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.name||'—'}</td><td style="padding:5px 10px;text-align:right;font-weight:600;color:#b45309;font-size:12px">$${fmtN(Math.round(u.spend))}</td></tr>`).join(''):`<tr><td colspan="3" style="padding:16px;text-align:center;color:#9ca3af;font-size:12px">無未對應的 SID（差異可能來自重複對應）</td></tr>`;
+  ov.innerHTML=`<div class="ana-modal" style="width:min(680px,95vw);max-height:85vh;display:flex;flex-direction:column">
+    <div class="ana-modal-hdr"><span>廣告費對帳明細｜${shop}</span><button class="ana-close-btn" onclick="document.getElementById('reconcile-detail-ov').remove()">✕</button></div>
+    <div style="padding:12px 20px;background:#fff8e6;border-bottom:1px solid #fde68a;font-size:12px;color:#92400e">
+      差異 <b>${diff>0?'+':''}${fmtAds(diff)}</b>，下列 <b>${unmapped.length}</b> 個商品 SID 有廣告費但不在商品對照表中（廣告費無法分攤到商品）
+    </div>
+    <div style="overflow-y:auto;flex:1">
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:#f9fafb;position:sticky;top:0">
+          <th style="padding:7px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600">商品 SID</th>
+          <th style="padding:7px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600">廣告名稱</th>
+          <th style="padding:7px 10px;text-align:right;font-size:11px;color:#6b7280;font-weight:600">廣告費</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="padding:10px 20px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af">
+      解決方法：到「商品對照表」為這些 SID 加入對應的商品編號
+    </div>
+  </div>`;
+  ov.onclick=e=>{if(e.target===ov)ov.remove();};
+  document.body.appendChild(ov);
 }
 
-function showMapWarnBanner(msg){
+let _warnDetailCb=null;
+function showMapWarnBanner(msg,onDetail){
+  _warnDetailCb=onDetail||null;
   let el=document.getElementById('map-warn-banner');
   if(!el){
     el=document.createElement('div');
@@ -743,7 +780,8 @@ function showMapWarnBanner(msg){
     el.style.cssText='position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:9999;background:#fff8e6;border:2px solid #f59e0b;border-radius:10px;padding:16px 20px;max-width:680px;width:90vw;box-shadow:0 4px 24px rgba(0,0,0,.15);font-size:13px;line-height:1.7;color:#92400e;white-space:pre-wrap;';
     document.body.appendChild(el);
   }
-  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px"><div>${msg.replace(/\n/g,'<br>')}</div><button onclick="document.getElementById('map-warn-banner').remove()" style="flex-shrink:0;background:#f59e0b;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">關閉</button></div>`;
+  const detailBtn=onDetail?`<button onclick="_warnDetailCb&&_warnDetailCb()" style="flex-shrink:0;background:#fff;color:#b45309;border:1.5px solid #f59e0b;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-weight:600">查看明細</button>`:'';
+  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div>${msg.replace(/\n/g,'<br>')}</div><div style="display:flex;gap:6px;flex-shrink:0">${detailBtn}<button onclick="document.getElementById('map-warn-banner').remove()" style="background:#f59e0b;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">關閉</button></div></div>`;
 }
 
 // ── Files ──
@@ -3225,7 +3263,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,splitCSV,
+  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
