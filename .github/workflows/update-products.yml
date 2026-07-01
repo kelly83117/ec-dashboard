@@ -13,56 +13,65 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate AI product recommendations
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Write AI script
         run: |
-          python3 - <<'PYEOF'
-          import json, datetime, urllib.request, urllib.parse, os
+          cat > /tmp/gen_products.py << 'SCRIPT_END'
+          import json, datetime, urllib.request, urllib.parse, os, sys
 
           today = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
           date_str = today.strftime("%Y-%m-%d")
           month = today.month
 
-          prompt = f"""今天是 {date_str}，台灣電商市場。
-
-請推薦 5 個目前最適合在蝦皮上架銷售的【居家生活用品】，每個商品給一個精準的蝦皮搜尋關鍵字。
-
-選品規則（嚴格遵守）：
-- 只能是居家生活用品（收納、廚房、浴室、寢具、清潔、文具等）
-- 不能有品牌名稱
-- 不能是美妝、化妝品、保養品
-- 不能是電器、3C 產品
-- 不能是噴霧類產品
-- 根據 {month} 月的季節和台灣即將到來的節慶選擇當季熱門商品
-
-請只回傳 JSON 陣列，不要加任何說明文字：
-[
-  {{
-    "keyword": "搜尋關鍵字",
-    "name": "完整商品名稱描述（20字內，不含品牌）",
-    "price": 預估售價數字（新台幣整數）,
-    "sold": 預估月銷量數字,
-    "reason": "推薦原因（15字內）"
-  }}
-]"""
+          lines = [
+            f"今天是 {date_str}，台灣電商市場。",
+            "",
+            f"請推薦 5 個目前最適合在蝦皮上架銷售的居家生活用品，每個商品給一個精準的蝦皮搜尋關鍵字。",
+            "",
+            f"選品規則（嚴格遵守）：",
+            f"- 只能是居家生活用品（收納、廚房、浴室、寢具、清潔、文具等）",
+            f"- 不能有品牌名稱",
+            f"- 不能是美妝、化妝品、保養品",
+            f"- 不能是電器、3C 產品",
+            f"- 不能是噴霧類產品",
+            f"- 根據 {month} 月的季節和台灣即將到來的節慶選擇當季熱門商品",
+            "",
+            f"請只回傳 JSON 陣列，不要加任何說明文字：",
+            '[',
+            '  {',
+            '    "keyword": "搜尋關鍵字",',
+            '    "name": "完整商品名稱描述（20字內，不含品牌）",',
+            '    "price": 預估售價數字（新台幣整數）,',
+            '    "sold": 預估月銷量數字,',
+            '    "reason": "推薦原因（15字內）"',
+            '  }',
+            ']',
+          ]
+          prompt = "\n".join(lines)
 
           payload = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1024}
           }).encode()
 
-          url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={os.environ['GEMINI_API_KEY']}"
+          api_key = os.environ["GEMINI_API_KEY"]
+          url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
           req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
 
-          with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read())
+          try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+              result = json.loads(resp.read())
+          except Exception as e:
+            print(f"API error: {e}", file=sys.stderr)
+            sys.exit(1)
 
           text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
           start = text.find("[")
           end = text.rfind("]") + 1
-          items_raw = json.loads(text[start:end])
+          if start < 0 or end <= 0:
+            print("No JSON found in response", file=sys.stderr)
+            sys.exit(1)
 
+          items_raw = json.loads(text[start:end])
           items = []
           for it in items_raw[:5]:
             kw = it.get("keyword", "")
@@ -80,10 +89,15 @@ jobs:
           with open("data/products.json", "w", encoding="utf-8") as f:
             json.dump({"updated": date_str, "items": items}, f, ensure_ascii=False, indent=2)
 
-          print(f"Generated {len(items)} AI recommendations")
+          print(f"Generated {len(items)} recommendations")
           for it in items:
-            print(f"  - {it['keyword']}: {it['name']} NT${it['price']} ({it['reason']})")
-          PYEOF
+            print(f"  - {it['keyword']}: {it['name']} NT${it['price']}")
+          SCRIPT_END
+
+      - name: Run AI script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python3 /tmp/gen_products.py
 
       - name: Commit and push
         run: |
