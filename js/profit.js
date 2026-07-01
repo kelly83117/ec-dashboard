@@ -1216,31 +1216,45 @@ function buildShop(shop,days){
   });
 
   // 廣告資料：花費、直接投入產出比、投入產出比、點擊數
+  // 優先順序：① 蝦皮廣告（rawAds）② 選品廣告（rawSelAds）③ 廣告群組（rawGroupAdsList）
+  // 廣告費累加，ROI/點擊以①為主，①無資料才用②③補
   const adsById={};const directROIById={};const roiById={};const clicksById={};
+  const getSid=r=>(r['商品 ID']||r['商品ID']||'').trim();
+  // ① 蝦皮廣告 — 主要來源，ROI/點擊以此為準
   (s.rawAds||[]).forEach(r=>{
-    const sid=(r['商品 ID']||'').trim();
+    const sid=getSid(r);if(!sid||sid==='-')return;
     const spend=num(r['花費']||0);
     const droi=num(r['直接投入產出比']||0);
     const roi=num(r['投入產出比']||0);
     const clicks=num(r['點擊數']||0);
-    if(sid&&sid!=='-'){
-      if(spend>0)adsById[sid]=(adsById[sid]||0)+spend;
-      if(droi>0)directROIById[sid]=droi;
-      if(roi>0)roiById[sid]=roi;
-      if(clicks>0)clicksById[sid]=(clicksById[sid]||0)+clicks;
-    }
+    if(spend>0)adsById[sid]=(adsById[sid]||0)+spend;
+    if(droi>0)directROIById[sid]=droi;
+    if(roi>0)roiById[sid]=roi;
+    if(clicks>0)clicksById[sid]=(clicksById[sid]||0)+clicks;
   });
-  // 合併選品廣告清單（只加花費，無 ROI/點擊資料）
+  // ② 選品廣告 — 廣告費累加，ROI/點擊僅補①未設的欄位
   (s.rawSelAds||[]).forEach(r=>{
-    const sid=(r['商品 ID']||r['商品ID']||'').trim();
+    const sid=getSid(r);if(!sid||sid==='-')return;
     const spend=num(r['花費']||r['廣告費']||0);
-    if(sid&&sid!=='-'&&spend>0)adsById[sid]=(adsById[sid]||0)+spend;
+    const droi=num(r['直接投入產出比']||0);
+    const roi=num(r['投入產出比']||0);
+    const clicks=num(r['點擊數']||0);
+    if(spend>0)adsById[sid]=(adsById[sid]||0)+spend;
+    if(!directROIById[sid]&&droi>0)directROIById[sid]=droi;
+    if(!roiById[sid]&&roi>0)roiById[sid]=roi;
+    if(!clicksById[sid]&&clicks>0)clicksById[sid]=clicks;
   });
-  // 合併廣告群組
+  // ③ 廣告群組 — 廣告費累加，ROI/點擊僅補①②未設的欄位
   (s.rawGroupAdsList||[]).forEach(g=>(g.rows||[]).forEach(r=>{
-    const sid=(r['商品 ID']||r['商品ID']||'').trim();
+    const sid=getSid(r);if(!sid||sid==='-')return;
     const spend=num(r['花費']||r['廣告費']||0);
-    if(sid&&sid!=='-'&&spend>0)adsById[sid]=(adsById[sid]||0)+spend;
+    const droi=num(r['直接投入產出比']||0);
+    const roi=num(r['投入產出比']||0);
+    const clicks=num(r['點擊數']||0);
+    if(spend>0)adsById[sid]=(adsById[sid]||0)+spend;
+    if(!directROIById[sid]&&droi>0)directROIById[sid]=droi;
+    if(!roiById[sid]&&roi>0)roiById[sid]=roi;
+    if(!clicksById[sid]&&clicks>0)clicksById[sid]=clicks;
   }));
 
   const pm=s.rawMap||{};const adsByCode={};const directROIByCode={};const roiByCode={};const clicksByCode={};const sidsForCode={};const nameForCode={};
