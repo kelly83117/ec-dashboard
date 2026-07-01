@@ -2291,7 +2291,9 @@ const App = {
       if (!cost || !price || price <= cost) { showToast('請確認成本與售價（售價需高於成本）', 'error'); return; }
 
       const margin = Math.round((price - cost) / price * 100);
-      const heatScore = heat === '高' ? 30 : heat === '中' ? 20 : 10;
+      const competitorSold = parseInt(heat) || 0;
+      // 對手月銷量評分：>1000筆=滿分，市場夠大；100-1000中等；<100偏冷
+      const heatScore = competitorSold >= 1000 ? 30 : competitorSold >= 500 ? 25 : competitorSold >= 200 ? 20 : competitorSold >= 100 ? 15 : competitorSold > 0 ? 8 : 10;
       const riskPenalty = risk === '高' ? 30 : risk === '中' ? 10 : 0;
       const marginScore = Math.min(margin, 50);
       const score = Math.max(0, Math.min(100, heatScore + marginScore + 20 - riskPenalty));
@@ -2300,7 +2302,7 @@ const App = {
       const suggestQty = score >= 70 ? 200 : score >= 40 ? 100 : 50;
 
       const records = Store.get('ec.aiSelect', []);
-      records.unshift({ name, cost, price, margin, heat, riskLevel: risk, riskNote, score, suggestPrice, suggestQty, createdAt: Date.now() });
+      records.unshift({ name, cost, price, margin, heat: competitorSold > 0 ? competitorSold + '筆/月' : '未填', riskLevel: risk, riskNote, score, suggestPrice, suggestQty, createdAt: Date.now() });
       Store.set('ec.aiSelect', records);
       showToast('AI 分析完成！', 'success');
       this.render();
