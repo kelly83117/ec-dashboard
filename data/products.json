@@ -1,50 +1,50 @@
 {
-  "updated": "2026-06-26",
+  "updated": "2026-07-01",
   "items": [
     {
-      "keyword": "收納箱",
-      "name": "可疊加透明收納箱 附蓋整理箱 衣物玩具雜物 大容量",
-      "price": 199,
-      "sold": 41200,
-      "url": "https://shopee.tw/search?keyword=%E5%8F%AF%E7%96%8A%E5%8A%A0%E9%80%8F%E6%98%8E%E6%94%B6%E7%B4%8D%E7%AE%B1",
-      "image": "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=300&h=300&fit=crop",
-      "source": "蝦皮"
+      "keyword": "防潮收納箱",
+      "name": "多功能防潮收納箱",
+      "price": 599,
+      "sold": 300,
+      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BD%AE%E6%94%B6%E7%B4%8D%E7%AE%B1",
+      "reason": "適合梅雨季節收納",
+      "source": "AI推薦"
     },
     {
-      "keyword": "珪藻土地墊",
-      "name": "珪藻土速乾吸水地墊 浴室防滑腳踏墊 60x39cm",
-      "price": 299,
-      "sold": 35000,
-      "url": "https://shopee.tw/search?keyword=%E7%8F%AA%E8%97%BB%E5%9C%9F%E9%80%9F%E4%B9%BE%E5%90%B8%E6%B0%B4%E5%9C%B0%E5%A2%8A",
-      "image": "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=300&h=300&fit=crop",
-      "source": "蝦皮"
+      "keyword": "抗菌廚房海綿",
+      "name": "強效抗菌廚房清潔海綿",
+      "price": 129,
+      "sold": 500,
+      "url": "https://shopee.tw/search?keyword=%E6%8A%97%E8%8F%8C%E5%BB%9A%E6%88%BF%E6%B5%B7%E7%B6%BF",
+      "reason": "清潔需求上升",
+      "source": "AI推薦"
     },
     {
-      "keyword": "廚房瀝水架",
-      "name": "不鏽鋼廚房瀝水架 碗盤置物架 水槽旁收納 可伸縮",
+      "keyword": "可重複使用餐具",
+      "name": "環保可重複使用餐具組",
+      "price": 399,
+      "sold": 250,
+      "url": "https://shopee.tw/search?keyword=%E5%8F%AF%E9%87%8D%E8%A4%87%E4%BD%BF%E7%94%A8%E9%A4%90%E5%85%B7",
+      "reason": "適合夏季野餐使用",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "透氣床墊保護套",
+      "name": "透氣防水床墊保護套",
+      "price": 799,
+      "sold": 200,
+      "url": "https://shopee.tw/search?keyword=%E9%80%8F%E6%B0%A3%E5%BA%8A%E5%A2%8A%E4%BF%9D%E8%AD%B7%E5%A5%97",
+      "reason": "適合夏季涼快睡眠",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "浴室防滑墊",
+      "name": "柔軟浴室防滑墊",
       "price": 349,
-      "sold": 22600,
-      "url": "https://shopee.tw/search?keyword=%E4%B8%8D%E9%8F%BD%E9%8B%BC%E5%BB%9A%E6%88%BF%E7%80%9D%E6%B0%B4%E6%9E%B6",
-      "image": "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=300&h=300&fit=crop",
-      "source": "蝦皮"
-    },
-    {
-      "keyword": "不鏽鋼保溫瓶",
-      "name": "316不鏽鋼保溫瓶 雙層真空 24h保溫保冷 500ml",
-      "price": 349,
-      "sold": 44200,
-      "url": "https://shopee.tw/search?keyword=316%E4%B8%8D%E9%8F%BD%E9%8B%BC%E4%BF%9D%E6%BA%AB%E7%93%B6",
-      "image": "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=300&h=300&fit=crop",
-      "source": "蝦皮"
-    },
-    {
-      "keyword": "掛鉤",
-      "name": "無痕掛鉤 強力黏貼牆面不留痕 防水浴室廚房 10入",
-      "price": 99,
-      "sold": 62400,
-      "url": "https://shopee.tw/search?keyword=%E7%84%A1%E7%97%95%E6%8E%9B%E9%89%A4%E9%98%B2%E6%B0%B4",
-      "image": "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300&h=300&fit=crop",
-      "source": "蝦皮"
+      "sold": 400,
+      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E9%98%B2%E6%BB%91%E5%A2%8A",
+      "reason": "提升浴室安全性",
+      "source": "AI推薦"
     }
   ]
 }
