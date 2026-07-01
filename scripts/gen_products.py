@@ -125,7 +125,7 @@ for s in sup_raw[:5]:
         "price_range": s.get("price_range", ""),
         "moq": s.get("moq", ""),
         "reason": s.get("reason", ""),
-        "url": f"https://s.1688.com/selloffer/offerlist.htm?keywords={urllib.parse.quote(kw)}"
+        "url": f"https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords={urllib.parse.quote(kw, safe='')}"
     })
 
 with open("data/suppliers.json", "w", encoding="utf-8") as f:
