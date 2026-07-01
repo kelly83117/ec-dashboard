@@ -15,7 +15,7 @@ jobs:
 
       - name: Generate AI product recommendations
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python3 - <<'PYEOF'
           import json, datetime, urllib.request, urllib.parse, os
@@ -23,21 +23,20 @@ jobs:
           today = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
           date_str = today.strftime("%Y-%m-%d")
           month = today.month
-          day = today.day
 
           prompt = f"""今天是 {date_str}，台灣電商市場。
 
 請推薦 5 個目前最適合在蝦皮上架銷售的【居家生活用品】，每個商品給一個精準的蝦皮搜尋關鍵字。
 
-選品規則（非常重要，嚴格遵守）：
+選品規則（嚴格遵守）：
 - 只能是居家生活用品（收納、廚房、浴室、寢具、清潔、文具等）
 - 不能有品牌名稱
 - 不能是美妝、化妝品、保養品
 - 不能是電器、3C 產品
-- 不能是噴霧類產品（需要衛福部許可）
-- 根據當前月份（{month}月）和即將到來的台灣節慶選擇當季熱門商品
+- 不能是噴霧類產品
+- 根據 {month} 月的季節和台灣即將到來的節慶選擇當季熱門商品
 
-請用以下 JSON 格式回覆，不要加任何說明文字：
+請只回傳 JSON 陣列，不要加任何說明文字：
 [
   {{
     "keyword": "搜尋關鍵字",
@@ -49,26 +48,17 @@ jobs:
 ]"""
 
           payload = json.dumps({
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 1024,
-            "messages": [{"role": "user", "content": prompt}]
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1024}
           }).encode()
 
-          req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=payload,
-            headers={
-              "x-api-key": os.environ["ANTHROPIC_API_KEY"],
-              "anthropic-version": "2023-06-01",
-              "content-type": "application/json"
-            }
-          )
+          url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={os.environ['GEMINI_API_KEY']}"
+          req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
 
           with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read())
 
-          text = result["content"][0]["text"].strip()
-          # 只取 JSON 部分
+          text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
           start = text.find("[")
           end = text.rfind("]") + 1
           items_raw = json.loads(text[start:end])
@@ -86,17 +76,13 @@ jobs:
               "source": "AI推薦"
             })
 
-
           os.makedirs("data", exist_ok=True)
           with open("data/products.json", "w", encoding="utf-8") as f:
-            json.dump({
-              "updated": date_str,
-              "items": items
-            }, f, ensure_ascii=False, indent=2)
+            json.dump({"updated": date_str, "items": items}, f, ensure_ascii=False, indent=2)
 
           print(f"Generated {len(items)} AI recommendations")
           for it in items:
-            print(f"  - {it['keyword']}: {it['name']} NT${it['price']}")
+            print(f"  - {it['keyword']}: {it['name']} NT${it['price']} ({it['reason']})")
           PYEOF
 
       - name: Commit and push
