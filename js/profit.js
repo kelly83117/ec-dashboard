@@ -3140,9 +3140,9 @@ function updateHalfBtnLabels(shop){
   const last=new Date(+y,+mo,0).getDate();
   const curHalf=state[shop]?.curHalf||'first';
   const btns=[
-    {id:'first',label:`${mo}/1–${mo}/15`},
-    {id:'second',label:`${mo}/16–${mo}/${last}`},
-    {id:'full',label:`${mo}/1–${mo}/${last}`},
+    {id:'first',label:'上半月'},
+    {id:'second',label:'下半月'},
+    {id:'full',label:'整月'},
   ];
   const container=document.getElementById('half-btns-'+shop);
   if(!container)return;
