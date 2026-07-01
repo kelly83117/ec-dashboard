@@ -988,9 +988,6 @@ Object.assign(App, {
             </div>
           </div>
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">${orderDayStr}</div>
-          <div style="margin-bottom:8px;display:inline-flex;align-items:center;gap:5px;background:${multColor}15;border:1px solid ${multColor}44;border-radius:7px;padding:3px 10px">
-            <span style="font-size:11px;color:${multColor};font-weight:700">📦 建議備貨 ${f.mult}x 平常叫貨量</span>
-          </div>
           <div style="display:flex;flex-wrap:wrap;gap:4px">
             ${f.tags.map(t => `<span style="font-size:11px;padding:2px 8px;background:${c}18;color:${c};border-radius:999px;font-weight:600">${t}</span>`).join('')}
           </div>
