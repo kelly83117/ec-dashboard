@@ -192,7 +192,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <div style="margin-top:4px">
           <div style="font-size:11px;color:#9ca3af;font-weight:700;margin-bottom:4px;padding-left:2px">廣告群組（可多檔，選填）</div>
           <div id="upm-groupads-list" style="display:flex;flex-direction:column;gap:6px"></div>
-          <input type="file" id="upm-groupads-input" accept=".xlsx,.xls" style="display:none" onchange="onGlobalFile(event,'groupads')">
+          <input type="file" id="upm-groupads-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="onGlobalFile(event,'groupads')">
           <button onclick="document.getElementById('upm-groupads-input').click()" style="margin-top:6px;width:100%;border:1.5px dashed #d1d5db;border-radius:9px;padding:8px;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600" onmouseover="this.style.borderColor='#5b5fcf';this.style.color='#5b5fcf'" onmouseout="this.style.borderColor='#d1d5db';this.style.color='#6b7280'">＋ 新增廣告群組</button>
         </div>
       </div>
@@ -785,17 +785,24 @@ function onFile(e,shop,type){
       setSpin(shop,false);checkReady(shop);
     };r.readAsBinaryString(file);
   }else if(type==='groupads'){
+    const isCsv=file.name.toLowerCase().endsWith('.csv');
     const r=new FileReader();
     r.onload=ev=>{
       try{
-        const wb=XLSX.read(ev.target.result,{type:'binary'});
-        const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+        let rows;
+        if(isCsv){
+          rows=parseAdsCsv(ev.target.result);
+        }else{
+          const wb=XLSX.read(ev.target.result,{type:'binary'});
+          rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+        }
         if(!state[shop].rawGroupAdsList)state[shop].rawGroupAdsList=[];
         state[shop].rawGroupAdsList.push({name:file.name,rows});
         saveGroupAdsMeta(shop);
       }catch(err){alert('讀取失敗：'+file.name);}
       setSpin(shop,false);checkReady(shop);
-    };r.readAsBinaryString(file);
+    };
+    if(isCsv)r.readAsText(file,'UTF-8');else r.readAsBinaryString(file);
   }
 }
 function fmKey(shop,type){const s=state[shop]||{};return`ec|filemeta|${shop}|${s.curMonth||''}|${s.curHalf||''}|${type}`;}
