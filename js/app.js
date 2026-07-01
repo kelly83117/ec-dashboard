@@ -1135,6 +1135,19 @@ const App = {
 
   /* ===== 供應商管理 ===== */
   renderSupplierTab() {
+    const aiSuppliersSection = `
+      <div class="table-card" style="margin-bottom:16px;border-top:3px solid #f97316">
+        <div class="table-card-header">
+          <div>
+            <h3 style="margin:0;color:#c2410c">🤖 AI 今日推薦找貨方向</h3>
+            <p style="margin:2px 0 0;font-size:12px;color:var(--text-muted)">根據當季節慶自動推薦 · 每天早上 9 點更新 · 點連結直接開 1688 搜尋</p>
+          </div>
+        </div>
+        <div id="ai-suppliers-content" style="padding:14px 16px">
+          <div style="font-size:13px;color:var(--text-muted)">載入中...</div>
+        </div>
+      </div>`;
+
     const suppliers = JSON.parse(localStorage.getItem('ec_d3_suppliers') || '[]');
     const sc = { '合作中': '#d1fae5,#065f46', '洽談中': '#fef3c7,#92400e', '暫停': '#fee2e2,#991b1b', '備選': '#eff6ff,#1e40af' };
     const rows = suppliers.length === 0
@@ -1153,7 +1166,7 @@ const App = {
             <td><button class="d3-sup-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button></td>
           </tr>`;
         }).join('');
-    return `<div class="table-card">
+    return aiSuppliersSection + `<div class="table-card">
       <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <div><h3>🏭 供應商管理</h3><p>記錄合作或洽談中的供應商資訊</p></div>
         <button id="d3-sup-add" style="padding:7px 16px;background:#ff5722;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
@@ -1185,6 +1198,34 @@ const App = {
     </div>`;
   },
   bindSupplierTab() {
+    // 載入 AI 供應商推薦
+    fetch('data/suppliers.json?_=' + Date.now())
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const el = document.getElementById('ai-suppliers-content');
+        if (!el) return;
+        if (!data || !data.items || !data.items.length) {
+          el.innerHTML = '<div style="font-size:13px;color:var(--text-muted)">暫無推薦，明天早上 9 點更新</div>';
+          return;
+        }
+        el.innerHTML = `
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
+            ${data.items.map(s => `
+              <a href="${s.url}" target="_blank" style="display:block;padding:12px 14px;border:1px solid #fed7aa;border-radius:10px;text-decoration:none;color:inherit;background:#fff7ed;transition:box-shadow .15s"
+                onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
+                <div style="font-size:13px;font-weight:700;color:#c2410c;margin-bottom:4px">🏭 ${escapeHtml(s.name)}</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">${escapeHtml(s.reason)}</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:11px">
+                  ${s.price_range ? `<span style="background:#fff;border:1px solid #fed7aa;padding:2px 7px;border-radius:5px;color:#92400e">💰 ${escapeHtml(s.price_range)}/件</span>` : ''}
+                  ${s.moq ? `<span style="background:#fff;border:1px solid #fed7aa;padding:2px 7px;border-radius:5px;color:#92400e">📦 最低 ${escapeHtml(s.moq)}</span>` : ''}
+                </div>
+                <div style="margin-top:8px;font-size:11px;color:#f97316;font-weight:600">開啟 1688 搜尋 ↗</div>
+              </a>`).join('')}
+          </div>
+          <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">更新時間：${data.updated || '—'}</div>`;
+      })
+      .catch(() => {});
+
     const form = document.getElementById('d3-sup-form');
     document.getElementById('d3-sup-add')?.addEventListener('click', () => {
       form.style.display = form.style.display === 'none' ? '' : 'none';
