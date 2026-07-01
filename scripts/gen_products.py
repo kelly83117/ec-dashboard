@@ -5,7 +5,44 @@ today = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
 date_str = today.strftime("%Y-%m-%d")
 month = today.month
 
-prompt = (
+api_key = os.environ.get("GITHUB_TOKEN", "")
+if not api_key:
+    print("Error: GITHUB_TOKEN not set", file=sys.stderr)
+    sys.exit(1)
+
+def call_ai(prompt):
+    payload = json.dumps({
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "max_tokens": 1024
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://models.inference.ai.azure.com/chat/completions",
+        data=payload,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+        return result["choices"][0]["message"]["content"].strip()
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        print(f"API error: {e.code} {body[:200]}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"API error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+def parse_json(text):
+    start = text.find("[")
+    end = text.rfind("]") + 1
+    if start < 0 or end <= 0:
+        return []
+    return json.loads(text[start:end])
+
+# ── 1. 產品推薦 ──────────────────────────────
+products_prompt = (
     f"今天是 {date_str}，台灣電商市場。\n\n"
     f"請推薦 5 個目前最適合在蝦皮上架銷售的居家生活用品，每個商品給一個精準的蝦皮搜尋關鍵字。\n\n"
     f"選品規則（嚴格遵守）：\n"
@@ -16,60 +53,13 @@ prompt = (
     f"- 不能是噴霧類產品\n"
     f"- 根據 {month} 月的季節和台灣即將到來的節慶選擇當季熱門商品\n\n"
     "請只回傳 JSON 陣列，不要加任何說明文字：\n"
-    '[\n'
-    '  {\n'
-    '    "keyword": "搜尋關鍵字",\n'
-    '    "name": "完整商品名稱描述（20字內，不含品牌）",\n'
-    '    "price": 預估售價數字,\n'
-    '    "sold": 預估月銷量數字,\n'
-    '    "reason": "推薦原因（15字內）"\n'
-    '  }\n'
-    ']'
+    '[{"keyword":"搜尋關鍵字","name":"完整商品名稱（20字內，不含品牌）","price":預估售價數字,"sold":預估月銷量數字,"reason":"推薦原因（15字內）"}]'
 )
 
-api_key = os.environ.get("GITHUB_TOKEN", "")
-if not api_key:
-    print("Error: GITHUB_TOKEN not set", file=sys.stderr)
-    sys.exit(1)
-
-payload = json.dumps({
-    "model": "gpt-4o-mini",
-    "messages": [{"role": "user", "content": prompt}],
-    "temperature": 0.7,
-    "max_tokens": 1024
-}).encode("utf-8")
-
-req = urllib.request.Request(
-    "https://models.inference.ai.azure.com/chat/completions",
-    data=payload,
-    headers={
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-)
-
-try:
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        result = json.loads(resp.read())
-except urllib.error.HTTPError as e:
-    body = e.read().decode("utf-8", errors="replace")
-    print(f"API error: HTTP Error {e.code}: {e.reason}", file=sys.stderr)
-    print(f"Response body: {body}", file=sys.stderr)
-    sys.exit(1)
-except Exception as e:
-    print(f"API error: {e}", file=sys.stderr)
-    sys.exit(1)
-
-text = result["choices"][0]["message"]["content"].strip()
-start = text.find("[")
-end = text.rfind("]") + 1
-if start < 0 or end <= 0:
-    print("No JSON found in response", file=sys.stderr)
-    sys.exit(1)
-
-items_raw = json.loads(text[start:end])
+print("Generating product recommendations...")
+products_raw = parse_json(call_ai(products_prompt))
 items = []
-for it in items_raw[:5]:
+for it in products_raw[:5]:
     kw = it.get("keyword", "")
     items.append({
         "keyword": kw,
@@ -84,7 +74,26 @@ for it in items_raw[:5]:
 os.makedirs("data", exist_ok=True)
 with open("data/products.json", "w", encoding="utf-8") as f:
     json.dump({"updated": date_str, "items": items}, f, ensure_ascii=False, indent=2)
+print(f"  → {len(items)} products saved")
 
-print(f"Generated {len(items)} recommendations")
-for it in items:
-    print(f"  - {it['keyword']}: {it['name']} NT${it['price']}")
+# ── 2. 熱搜關鍵字 ──────────────────────────────
+trends_prompt = (
+    f"今天是 {date_str}，台灣電商市場。\n\n"
+    f"請根據 {month} 月的季節、台灣節慶與近期生活趨勢，推薦 10 個目前台灣消費者在蝦皮最常搜尋的關鍵字。\n\n"
+    f"規則：\n"
+    f"- 關鍵字要是消費者搜尋的詞，不是商品描述\n"
+    f"- 涵蓋不同品類（居家、廚房、清潔、收納、寢具等）\n"
+    f"- 不能有品牌名稱\n"
+    f"- traffic 用 '50K+' / '30K+' / '20K+' / '10K+' / '5K+' 格式\n\n"
+    '請只回傳 JSON 陣列：[{"title":"關鍵字","traffic":"50K+"}]'
+)
+
+print("Generating trending keywords...")
+trends_raw = parse_json(call_ai(trends_prompt))
+trends = [{"title": t.get("title", ""), "traffic": t.get("traffic", "10K+")} for t in trends_raw[:10] if t.get("title")]
+
+with open("data/trends.json", "w", encoding="utf-8") as f:
+    json.dump({"updated": date_str, "items": trends}, f, ensure_ascii=False, indent=2)
+print(f"  → {len(trends)} keywords saved")
+for t in trends:
+    print(f"    - {t['title']} ({t['traffic']})")
