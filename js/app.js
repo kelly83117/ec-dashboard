@@ -428,7 +428,6 @@ const OFFICE_CONFIG = {
       { key: 'trend-radar', title: '🔥 熱搜雷達', dynamic: 'trend-radar' },
       { key: 'supplier', title: '🏭 供應商管理', dynamic: 'supplier-mgmt' },
       { key: 'profit-calc', title: '💰 毛利試算機', dynamic: 'profit-calc' },
-      { key: 'kanban', title: '📋 選品任務板', dynamic: 'product-kanban' },
       { key: 'competitor', title: '📈 競品追蹤', dynamic: 'competitor-track' },
       { key: 'launch', title: '🗓️ 上架計劃表', dynamic: 'launch-plan' },
       { key: 'overview', title: '📊 選品總覽', customHtml: `
