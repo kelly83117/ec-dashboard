@@ -28,17 +28,22 @@ prompt = (
 )
 
 payload = json.dumps({
-    "contents": [{"parts": [{"text": prompt}]}],
-    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1024}
+    "model": "llama-3.3-70b-versatile",
+    "messages": [{"role": "user", "content": prompt}],
+    "temperature": 0.7,
+    "max_tokens": 1024
 }).encode("utf-8")
 
-api_key = os.environ.get("GEMINI_API_KEY", "")
+api_key = os.environ.get("GROQ_API_KEY", "")
 if not api_key:
-    print("Error: GEMINI_API_KEY not set", file=sys.stderr)
+    print("Error: GROQ_API_KEY not set", file=sys.stderr)
     sys.exit(1)
 
-url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+url = "https://api.groq.com/openai/v1/chat/completions"
+req = urllib.request.Request(url, data=payload, headers={
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {api_key}"
+})
 
 try:
     with urllib.request.urlopen(req, timeout=30) as resp:
@@ -47,7 +52,7 @@ except Exception as e:
     print(f"API error: {e}", file=sys.stderr)
     sys.exit(1)
 
-text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
+text = result["choices"][0]["message"]["content"].strip()
 start = text.find("[")
 end = text.rfind("]") + 1
 if start < 0 or end <= 0:

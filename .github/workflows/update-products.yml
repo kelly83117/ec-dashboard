@@ -15,7 +15,7 @@ jobs:
 
       - name: Run AI recommendations
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python3 scripts/gen_products.py
 
       - name: Commit and push
