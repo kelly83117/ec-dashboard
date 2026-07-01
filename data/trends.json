@@ -1,15 +1,45 @@
 {
-  "updated": "",
+  "updated": "2026-07-01",
   "items": [
-    {"title": "收納箱", "traffic": "50K+"},
-    {"title": "珪藻土地墊", "traffic": "30K+"},
-    {"title": "廚房瀝水架", "traffic": "20K+"},
-    {"title": "浴室置物架", "traffic": "20K+"},
-    {"title": "抽真空袋", "traffic": "15K+"},
-    {"title": "不鏽鋼保溫瓶", "traffic": "15K+"},
-    {"title": "矽膠保鮮盒", "traffic": "10K+"},
-    {"title": "竹炭除臭包", "traffic": "10K+"},
-    {"title": "掛鉤", "traffic": "10K+"},
-    {"title": "曬衣架", "traffic": "8K+"}
+    {
+      "title": "冷氣清洗",
+      "traffic": "50K+"
+    },
+    {
+      "title": "夏季居家收納",
+      "traffic": "30K+"
+    },
+    {
+      "title": "防蚊用品",
+      "traffic": "30K+"
+    },
+    {
+      "title": "冰涼床墊",
+      "traffic": "20K+"
+    },
+    {
+      "title": "戶外野餐用品",
+      "traffic": "20K+"
+    },
+    {
+      "title": "清潔劑",
+      "traffic": "30K+"
+    },
+    {
+      "title": "夏季保鮮盒",
+      "traffic": "10K+"
+    },
+    {
+      "title": "輕便折疊椅",
+      "traffic": "10K+"
+    },
+    {
+      "title": "消暑飲品配方",
+      "traffic": "5K+"
+    },
+    {
+      "title": "涼感衣物",
+      "traffic": "50K+"
+    }
   ]
 }

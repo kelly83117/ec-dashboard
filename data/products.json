@@ -3,47 +3,47 @@
   "items": [
     {
       "keyword": "防潮收納箱",
-      "name": "多功能防潮收納箱",
-      "price": 599,
+      "name": "防潮密封收納箱",
+      "price": 800,
       "sold": 300,
       "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BD%AE%E6%94%B6%E7%B4%8D%E7%AE%B1",
-      "reason": "適合梅雨季節收納",
+      "reason": "適合梅雨季節使用",
       "source": "AI推薦"
     },
     {
-      "keyword": "抗菌廚房海綿",
-      "name": "強效抗菌廚房清潔海綿",
-      "price": 129,
+      "keyword": "洗碗手套",
+      "name": "耐高溫洗碗手套",
+      "price": 150,
       "sold": 500,
-      "url": "https://shopee.tw/search?keyword=%E6%8A%97%E8%8F%8C%E5%BB%9A%E6%88%BF%E6%B5%B7%E7%B6%BF",
-      "reason": "清潔需求上升",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "可重複使用餐具",
-      "name": "環保可重複使用餐具組",
-      "price": 399,
-      "sold": 250,
-      "url": "https://shopee.tw/search?keyword=%E5%8F%AF%E9%87%8D%E8%A4%87%E4%BD%BF%E7%94%A8%E9%A4%90%E5%85%B7",
-      "reason": "適合夏季野餐使用",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "透氣床墊保護套",
-      "name": "透氣防水床墊保護套",
-      "price": 799,
-      "sold": 200,
-      "url": "https://shopee.tw/search?keyword=%E9%80%8F%E6%B0%A3%E5%BA%8A%E5%A2%8A%E4%BF%9D%E8%AD%B7%E5%A5%97",
-      "reason": "適合夏季涼快睡眠",
+      "url": "https://shopee.tw/search?keyword=%E6%B4%97%E7%A2%97%E6%89%8B%E5%A5%97",
+      "reason": "實用且耐用的清潔工具",
       "source": "AI推薦"
     },
     {
       "keyword": "浴室防滑墊",
-      "name": "柔軟浴室防滑墊",
-      "price": 349,
+      "name": "浴室防滑地墊",
+      "price": 400,
       "sold": 400,
       "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E9%98%B2%E6%BB%91%E5%A2%8A",
-      "reason": "提升浴室安全性",
+      "reason": "保障浴室安全，提升舒適度",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "多功能收納籃",
+      "name": "可折疊多功能收納籃",
+      "price": 250,
+      "sold": 600,
+      "url": "https://shopee.tw/search?keyword=%E5%A4%9A%E5%8A%9F%E8%83%BD%E6%94%B6%E7%B4%8D%E7%B1%83",
+      "reason": "節省空間，收納方便",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "床單套組",
+      "name": "涼感床單套組",
+      "price": 1200,
+      "sold": 350,
+      "url": "https://shopee.tw/search?keyword=%E5%BA%8A%E5%96%AE%E5%A5%97%E7%B5%84",
+      "reason": "夏季清涼睡眠必備",
       "source": "AI推薦"
     }
   ]
