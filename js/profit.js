@@ -178,7 +178,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           </div>
         </label>
         <label class="ucard" id="upm-selads" style="width:100%;box-sizing:border-box">
-          <input type="file" id="upm-selads-input" accept=".xlsx,.xls" onchange="onGlobalFile(event,'selads')">
+          <input type="file" id="upm-selads-input" accept=".xlsx,.xls,.csv" onchange="onGlobalFile(event,'selads')">
           <button id="upm-selads-del" onclick="event.preventDefault();event.stopPropagation();openDeleteFileModal('selads')" style="background:none;border:none;cursor:pointer;font-size:17px;padding:2px 6px 2px 0;flex-shrink:0" title="刪除">🗑️</button>
           <div class="ucard-icon" id="upm-selads-icon">🎯</div>
           <div class="ucard-info">
@@ -811,17 +811,24 @@ function onFile(e,shop,type){
       setSpin(shop,false);checkReady(shop);
     };r.readAsArrayBuffer(file);
   }else if(type==='selads'){
+    const isCsv=file.name.toLowerCase().endsWith('.csv');
     const r=new FileReader();
     r.onload=ev=>{
       try{
-        const wb=XLSX.read(ev.target.result,{type:'binary'});
-        const sName=wb.SheetNames[0];
-        state[shop].rawSelAds=XLSX.utils.sheet_to_json(wb.Sheets[sName],{defval:''});
+        let rows;
+        if(isCsv){
+          rows=parseAdsCsv(ev.target.result).filter(r=>(r['商品 ID']||r['商品ID']||'').trim()!=='-');
+        }else{
+          const wb=XLSX.read(ev.target.result,{type:'binary'});
+          rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+        }
+        state[shop].rawSelAds=rows;
         try{localStorage.setItem(fmKey(shop,'selads'),JSON.stringify({name:file.name}));}catch(e){}
         markCard(shop,'selads','✅',file.name,'ok');
       }catch(err){markCard(shop,'selads','❌','讀取失敗','err');}
       setSpin(shop,false);checkReady(shop);
-    };r.readAsBinaryString(file);
+    };
+    if(isCsv)r.readAsText(file,'UTF-8');else r.readAsBinaryString(file);
   }else if(type==='groupads'){
     const isCsv=file.name.toLowerCase().endsWith('.csv');
     const r=new FileReader();
@@ -950,7 +957,7 @@ function findUnmatchedAds(shop){
     const spend=num(r['花費']||r['廣告費']||0);
     if(sid&&sid!=='-'){
       if(spend>0)adsById[sid]=(adsById[sid]||0)+spend;
-      if(!sidNames[sid]){const n=(r['商品名稱']||r['名稱']||'').trim();if(n)sidNames[sid]=n;}
+      if(!sidNames[sid]){const n=(r['商品名稱']||r['廣告/商品名稱']||r['名稱']||'').trim();if(n)sidNames[sid]=n;}
     }
   });
   // 合併廣告群組
