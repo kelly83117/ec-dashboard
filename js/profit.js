@@ -2456,8 +2456,8 @@ const PROFIT_COLS=[
   {key:'pureProfit',label:'淨利'},{key:'pureRate',label:'淨利率%'},{key:'adsPct',label:'廣告佔比'},
   {key:'stock',label:'可用庫存'},{key:'targetROI',label:'目標ROI'},{key:'directROI',label:'直接ROI'},
   {key:'roi',label:'投入產出'},{key:'roiDiff',label:'實際-目標'},{key:'clicks',label:'點擊數'},
-  {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'分析'},{key:'note',label:'調整'},
-  {key:'growthRate',label:'成長比',grow:true},{key:'growthAnalysis',label:'成長分析',grow:true},{key:'growthNote',label:'成長調整',grow:true},
+  {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'分析'},{key:'note',label:'廣告調整'},
+  {key:'growthRate',label:'成長比',grow:true},{key:'growthAnalysis',label:'成長分析',grow:true},{key:'growthNote',label:'商品調整',grow:true},
 ];
 const _HCOLS_LS='ec_hcols_user';
 function getHiddenCols(shop){
@@ -2602,11 +2602,11 @@ function renderTable(shop,list){
     ${vc('clicks')?thN('clicks','點擊數'):''}
     ${vc('dayBudget')?thN('dayBudget','日預算'):''}
     ${vc('analysisLabel')?thT('analysisLabel','分析'):''}
-    ${vc('note')?'<th class="tl">調整</th>':''}
+    ${vc('note')?'<th class="tl">廣告調整</th>':''}
     ${shop==='好麻吉'?`
     ${vc('growthRate')?thN('growthRate','成長比'):''}
     ${vc('growthAnalysis')?thT('growthAnalysisLabel','成長分析'):''}
-    ${vc('growthNote')?'<th class="tl">成長調整</th>':''}`:''}
+    ${vc('growthNote')?'<th class="tl">商品調整</th>':''}`:''}
   </tr></thead><tbody>`;
 
   let rowIdx=0;
