@@ -2854,6 +2854,14 @@ function setShop(shop,btn){
     if(shop==='總表'){gb.disabled=true;}
     else{gb.disabled=!(state[shop]?._built?.length);}
   }
+  // sync global sync button
+  const sb=document.getElementById('global-sync-btn');
+  if(sb){
+    const hasData=shop!=='總表'&&!!(state[shop]?._built?.length);
+    sb.disabled=!hasData;sb.style.opacity=hasData?'1':'0.4';sb.style.cursor=hasData?'pointer':'default';
+    if(hasData){sb.style.background='#f59e0b';sb.style.color='#fff';sb.style.borderColor='#f59e0b';}
+    else{sb.style.background='';sb.style.color='';sb.style.borderColor='';}
+  }
   if(shop==='總表')renderSummary();
   else{if(state[shop]?._built?.length)applyFilters(shop);syncHeaderKpis(shop);}
 }
