@@ -197,6 +197,15 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .sugg-cond-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
 .sugg-add-btn{font-size:12px;padding:5px 10px;border:1px dashed #c7c9f5;border-radius:6px;background:#fafbff;color:#5b5fcf;cursor:pointer;font-weight:600;}
 .sugg-disabled-row{display:flex;align-items:center;gap:8px;padding:6px 0;opacity:.55;}
+.sugg-badge.b-amber{background:#fef3c7;color:#78350f;}
+.sugg-badge.b-green{background:#ecfdf5;color:#065f46;}
+.sugg-rule-stat{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;flex-shrink:0;}
+.sugg-rule-stat.s-none{background:#f3f4f6;color:#6b7280;}
+.sugg-rule-stat.s-red{background:#fee2e2;color:#991b1b;}
+.sugg-rule-stat.s-amber{background:#fef3c7;color:#78350f;}
+.sugg-rule-stat.s-green{background:#ecfdf5;color:#065f46;}
+.sugg-rule-bar{margin-top:8px;height:6px;background:#f3f4f6;border-radius:3px;overflow:hidden;}
+.sugg-rule-bar-fill{height:100%;border-radius:3px;}
 
 /* Filter popup */
 .th-wrap{position:relative;display:inline-flex;align-items:center;gap:3px;width:100%;justify-content:flex-end;}

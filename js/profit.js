@@ -2500,15 +2500,25 @@ function toggleSuggDone(shop,code){
   applyFilters(shop);
   if(_suggAlertShop===shop)renderSuggAlertList();
 }
-function matchSuggRules(r){
-  return getSuggRules().filter(rule=>rule.active!==false&&rule.conds.every(c=>{
+function suggRuleConds(rule,r){
+  return rule.conds.every(c=>{
     const val=suggFieldValue(r,c.f);const v=Number(c.v);
     if(c.op==='>')return val>v;
     if(c.op==='>=')return val>=v;
     if(c.op==='<')return val<v;
     if(c.op==='<=')return val<=v;
     return val===v;
-  }));
+  });
+}
+function matchSuggRules(r){
+  return getSuggRules().filter(rule=>rule.active!==false&&suggRuleConds(rule,r));
+}
+function suggRuleStats(shop,rule){
+  const built=state[shop]?._built||[];
+  const matched=built.filter(r=>suggRuleConds(rule,r));
+  const total=matched.length;
+  const done=matched.filter(r=>isSuggDone(shop,r.code)).length;
+  return{total,done};
 }
 function buildSuggCell(shop,r){
   const hit=matchSuggRules(r);
@@ -2522,8 +2532,15 @@ function buildSuggCell(shop,r){
 }
 function updateSuggBadge(shop){
   const s=state[shop];const b=document.getElementById('sugg-badge-'+shop);if(!s||!b)return;
-  const n=(s._built||[]).filter(r=>matchSuggRules(r).length&&!isSuggDone(shop,r.code)).length;
-  b.textContent=n>0?n:'';b.style.display=n>0?'inline-block':'none';
+  const matched=(s._built||[]).filter(r=>matchSuggRules(r).length);
+  const total=matched.length;
+  b.classList.remove('b-amber','b-green');
+  if(total===0){b.textContent='';b.style.display='none';return;}
+  const done=matched.filter(r=>isSuggDone(shop,r.code)).length;
+  b.style.display='inline-block';
+  if(done===0){b.textContent=total;}
+  else if(done<total){b.textContent=done+'/'+total+' 已完成';b.classList.add('b-amber');}
+  else{b.textContent='✓ 全部完成';b.classList.add('b-green');}
 }
 function updateSuggChip(shop){
   const s=state[shop];const chip=document.getElementById('sugg-chip-'+shop);if(!chip)return;
@@ -2598,12 +2615,22 @@ function suggCondRowHtml(ri,ci,c){
 }
 function suggRuleCardHtml(r,ri){
   const colorOpts=SUGG_COLORS.map(o=>`<option value="${o.v}"${o.v===r.color?' selected':''}>${o.l}</option>`).join('');
+  const{total,done}=suggRuleStats(_suggEditShop,r);
+  let statCls='s-none',statText=total+' 項符合',barColor='#e5e7eb',pct=0;
+  if(total>0){
+    pct=Math.round(done/total*100);
+    if(done===0){statCls='s-red';statText=`0/${total} 已完成`;barColor='#ef4444';}
+    else if(done<total){statCls='s-amber';statText=`${done}/${total} 已完成`;barColor='#f59e0b';}
+    else{statCls='s-green';statText='✓ 全部完成';barColor='#10b981';}
+  }
   return`<div class="sugg-rule-row" data-ri="${ri}">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
       <input type="text" class="sr-name" value="${r.name}" style="flex:1;font-weight:700" placeholder="規則名稱">
+      <span class="sugg-rule-stat ${statCls}">${statText}</span>
       <button onclick="disableSuggRule(${ri})" title="停用此規則" style="background:none;border:none;cursor:pointer">🗑</button>
     </div>
-    <div class="sr-conds">${r.conds.map((c,ci)=>suggCondRowHtml(ri,ci,c)).join('')}</div>
+    ${total>0?`<div class="sugg-rule-bar"><div class="sugg-rule-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>`:''}
+    <div class="sr-conds" style="margin-top:10px">${r.conds.map((c,ci)=>suggCondRowHtml(ri,ci,c)).join('')}</div>
     <button class="sugg-add-btn" onclick="addSuggCond(${ri})">＋ 新增條件</button>
     <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
       <span style="font-size:12px;color:#6b7280;white-space:nowrap">跳出提醒文字</span>
