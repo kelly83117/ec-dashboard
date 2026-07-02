@@ -1289,8 +1289,9 @@ function buildShop(shop,days){
   // 廣告資料：花費、直接投入產出比、投入產出比、點擊數
   // 優先順序：① 蝦皮廣告（rawAds）② 選品廣告（rawSelAds）③ 廣告群組（rawGroupAdsList）
   // 廣告費累加，ROI/點擊以①為主，①無資料才用②③補
-  const adsById={};const directROIById={};const roiById={};const clicksById={};
+  const adsById={};const directROIById={};const roiById={};const clicksById={};const sidNamesById={};
   const getSid=r=>(r['商品 ID']||r['商品ID']||'').trim();
+  const getSidName=r=>(r['商品名稱']||r['廣告/商品名稱']||r['廣告名稱']||'').trim();
   // ① 蝦皮廣告 — 主要來源，ROI/點擊以此為準
   (s.rawAds||[]).forEach(r=>{
     const sid=getSid(r);if(!sid||sid==='-')return;
@@ -1302,6 +1303,7 @@ function buildShop(shop,days){
     if(droi>0)directROIById[sid]=droi;
     if(roi>0)roiById[sid]=roi;
     if(clicks>0)clicksById[sid]=(clicksById[sid]||0)+clicks;
+    const n=getSidName(r);if(n&&!sidNamesById[sid])sidNamesById[sid]=n;
   });
   // ② 選品廣告 — 廣告費累加，ROI/點擊僅補①未設的欄位
   (s.rawSelAds||[]).forEach(r=>{
@@ -1314,6 +1316,7 @@ function buildShop(shop,days){
     if(!directROIById[sid]&&droi>0)directROIById[sid]=droi;
     if(!roiById[sid]&&roi>0)roiById[sid]=roi;
     if(!clicksById[sid]&&clicks>0)clicksById[sid]=clicks;
+    const n=getSidName(r);if(n&&!sidNamesById[sid])sidNamesById[sid]=n;
   });
   // ③ 廣告群組 — 廣告費累加，ROI/點擊僅補①②未設的欄位
   (s.rawGroupAdsList||[]).forEach(g=>(g.rows||[]).forEach(r=>{
@@ -1326,6 +1329,7 @@ function buildShop(shop,days){
     if(!directROIById[sid]&&droi>0)directROIById[sid]=droi;
     if(!roiById[sid]&&roi>0)roiById[sid]=roi;
     if(!clicksById[sid]&&clicks>0)clicksById[sid]=clicks;
+    const n=getSidName(r);if(n&&!sidNamesById[sid])sidNamesById[sid]=n;
   }));
 
   const pm=s.rawMap||{};const adsByCode={};const directROIByCode={};const roiByCode={};const clicksByCode={};const sidsForCode={};const nameForCode={};
@@ -1346,13 +1350,13 @@ function buildShop(shop,days){
     if(sidsForCode[code])agg[code].shopeeIds=sidsForCode[code];
   });
 
-  // 有廣告費但無銷售：用商品清單的名稱
+  // 有廣告費但無銷售：用商品清單的名稱，次用廣告CSV名稱
   Object.keys(adsByCode).forEach(code=>{
     if(!agg[code]){
       const sids=sidsForCode[code]||[];
-      // 找商品名稱：優先用清單的名稱
       const pName=nameForCode[code]||'';
-      const displayName=pName||`（商品ID: ${sids[0]||'未知'}）`;
+      const adName=sids.map(sid=>sidNamesById[sid]||'').find(n=>n)||'';
+      const displayName=pName||adName||`（商品ID: ${sids[0]||'未知'}）`;
       agg[code]={code,name:displayName,qty:0,rev:0,cost:0,gross:0,stock:0,shopeeIds:sids,fromMobic:false};
     }
   });
