@@ -198,7 +198,10 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       </div>
       <div class="ana-modal-ftr" style="justify-content:space-between;align-items:center">
         <span style="font-size:12px;color:#9ca3af">上傳莫筆克＋廣告報表後可產生</span>
-        <button class="gen-btn" id="upm-gen-btn" onclick="onGlobalGenerate()" disabled>▶ 產生報表</button>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="upm-clear-btn" onclick="clearPeriodFromModal()" style="padding:8px 16px;border:1.5px solid #fca5a5;border-radius:8px;background:#fff;color:#ef4444;font-size:13px;font-weight:600;cursor:pointer">🗑 清除重傳</button>
+          <button class="gen-btn" id="upm-gen-btn" onclick="onGlobalGenerate()" disabled>▶ 產生報表</button>
+        </div>
       </div>
     </div>
   </div>
@@ -549,7 +552,6 @@ function shopHTML(shop){return`
     </div>
     <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
     <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
-    <button class="col-pick-btn" id="clear-btn-${shop}" onclick="clearPeriod('${shop}')" style="margin-left:2px;display:none;color:#ef4444;border-color:#fca5a5" title="清除此區間報表">🗑 清除</button>
   </div>
   <div id="tbl-${shop}">
     <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">選擇區間後上傳報表，按「▶ 產生並儲存」</div></div>
@@ -628,6 +630,10 @@ function tryLoadSaved(shop){
     updateTagFilterBar(shop);
   }
 }
+function clearPeriodFromModal(){
+  const shop=curShop==='總表'?SHOPS[0].id:curShop;
+  clearPeriod(shop);
+}
 function clearPeriod(shop){
   const s=state[shop];
   const periodLabel=getPeriodLabel(s.curMonth,s.curHalf);
@@ -671,7 +677,6 @@ function clearPeriod(shop){
   document.getElementById('cnt-'+shop).textContent='';
   document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">報表已清除，請重新上傳並產生</div></div>`;
   setKpis(shop,0,0,0,0);
-  const cb=document.getElementById('clear-btn-'+shop);if(cb)cb.style.display='none';
   const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;
   // 重置廣告群組卡片
   const groupList=document.getElementById('upm-groupads-list');if(groupList)groupList.innerHTML='';
@@ -1628,12 +1633,20 @@ function onGlobalFile(event,type){
         const ok=!!s.rawMobic;
         document.getElementById('upm-mobic').className='ucard'+(ok?' ok':'');
         document.getElementById('upm-mobic-icon').textContent=ok?'✅':'📦';
-        document.getElementById('upm-mobic-title').textContent=ok?'莫筆克已載入':'莫筆克銷售分析';
+        document.getElementById('upm-mobic-title').textContent=ok?'莫筆克銷售分析':'莫筆克銷售分析';
+        const ms=document.getElementById('upm-mobic-status');if(ms){ms.textContent=ok?'✅ 已載入':'✗ 未載入';ms.style.color=ok?'#10b981':'#ef4444';}
+        const md=document.getElementById('upm-mobic-del');if(md){md.style.opacity=ok?'1':'0.35';md.style.pointerEvents=ok?'':'none';}
+        const mi=document.getElementById('upm-mobic-input');if(mi){mi.disabled=ok;mi.style.pointerEvents=ok?'none':'';}
+        document.getElementById('upm-mobic').style.cursor=ok?'default':'pointer';
       }else if(type==='ads'){
         const ok=!!s.rawAds;
         document.getElementById('upm-ads').className='ucard'+(ok?' ok':'');
         document.getElementById('upm-ads-icon').textContent=ok?'✅':'📣';
-        document.getElementById('upm-ads-title').textContent=ok?'廣告報表已載入':'蝦皮廣告報表';
+        document.getElementById('upm-ads-title').textContent=ok?'蝦皮廣告報表':'蝦皮廣告報表';
+        const as=document.getElementById('upm-ads-status');if(as){as.textContent=ok?'✅ 已載入':'✗ 未載入';as.style.color=ok?'#10b981':'#ef4444';}
+        const ad=document.getElementById('upm-ads-del');if(ad){ad.style.opacity=ok?'1':'0.35';ad.style.pointerEvents=ok?'':'none';}
+        const ai=document.getElementById('upm-ads-input');if(ai){ai.disabled=ok;ai.style.pointerEvents=ok?'none':'';}
+        document.getElementById('upm-ads').style.cursor=ok?'default':'pointer';
       }else if(type==='selads'){
         const ok=!!s.rawSelAds;
         document.getElementById('upm-selads').className='ucard'+(ok?' ok':'');
@@ -3338,7 +3351,7 @@ Object.assign(window, { SHOPS, MONTHS, HALVES, state, globalMap });
 Object.assign(window, {
   _cloudRead,_cloudWrite,_cloudWriteSafe,_doGenerate,_showSyncBtn,addGrowthCond,addNewAnaCond,
   applyFilters,applyFpNum,applyFpTxt,buildDistHtml,buildNoteCell,buildShop,calcAnalysis,
-  calcGrowthAnalysis,checkAdsReconcile,checkReady,clearColFilter,clearPeriod,closeAdsEditModal,
+  calcGrowthAnalysis,checkAdsReconcile,checkReady,clearColFilter,clearPeriod,clearPeriodFromModal,closeAdsEditModal,
   closeAnaSettings,closeDeleteFileModal,closeDistModal,closeGrowthSettings,closePopup,
   closeProfitNoteModal,closeTfDrop,closeUploadModal,commitEdit,commitNote,confirmAddSummaryRow,
   confirmAdsEdit,confirmDeleteFile,confirmUnmatched,deleteCustomAnaRule,deleteCustomGrowthRule,
