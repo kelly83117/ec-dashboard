@@ -3343,6 +3343,7 @@ function onCupMonthChange(shop,platform,sel){
   if(platform==='coupang'){_cupPeriod[shop].half='full';}
   updateCupHalfSelect(shop,platform);
   if(platform==='coupang'&&shop!=='總表')cupTryLoadSaved(shop);
+  if(platform==='coupang'&&shop==='總表')loadCoupangBuyout();
 }
 function onCupHalfChange(shop,platform,sel){
   _cupPeriod[shop]=_cupPeriod[shop]||{month:'2026/06',half:'first'};
@@ -3355,6 +3356,217 @@ function updateCupHalfSelect(shop,platform){
   if(!sel)return;
   const opts=['first','second','full'];
   sel.innerHTML=opts.map(h=>`<option value="${h}"${h===p.half?' selected':''}>${cupHalfLabel(p.month,h)}</option>`).join('');
+}
+
+// ── 酷澎總表（跨店彙總儀表板）──
+function coupangSumShopCardHTML(shop){
+  return`<div style="background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:16px 20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <span style="font-weight:700;font-size:15px;color:#1a1a2e">${shop}</span>
+      <span style="font-size:12px;color:#9ca3af" id="cup-sum-${shop}-orders">— 筆訂單</span>
+    </div>
+    <div style="display:flex;gap:20px;margin-bottom:12px">
+      <div><div style="font-size:12px;color:#9ca3af">營收</div><div style="font-size:17px;font-weight:700;color:#374151" id="cup-sum-${shop}-rev">—</div></div>
+      <div><div style="font-size:12px;color:#9ca3af">純利</div><div style="font-size:17px;font-weight:700;color:#10b981" id="cup-sum-${shop}-profit">—</div></div>
+      <div><div style="font-size:12px;color:#9ca3af">純利率</div><div style="font-size:17px;font-weight:700;color:#374151" id="cup-sum-${shop}-rate">—</div></div>
+    </div>
+    <div style="height:8px;border-radius:4px;background:#f3f4f6" id="cup-sum-${shop}-bar"></div>
+  </div>`;
+}
+function coupangSummaryHTML(){
+  _cupPeriod['總表']=_cupPeriod['總表']||{month:'2026/06',half:'full'};
+  const p=_cupPeriod['總表'];
+  return`
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+    <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
+    <select onchange="onCupMonthChange('總表','coupang',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+      ${MONTHS.map(mo=>`<option value="${mo}"${mo===p.month?' selected':''}>${mo}</option>`).join('')}
+    </select>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button class="col-pick-btn" id="cup-sum-view-card" onclick="setCoupangSummaryView('card')" style="border-color:#0ea5e9;color:#0ea5e9">卡片式</button>
+      <button class="col-pick-btn" id="cup-sum-view-table" onclick="setCoupangSummaryView('table')">原始表格</button>
+    </div>
+  </div>
+
+  <div id="cup-sum-card-view">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+      <div style="background:#f8f9fc;border-radius:12px;padding:14px 16px">
+        <div style="font-size:12px;color:#9ca3af;font-weight:600;margin-bottom:6px">總訂單數</div>
+        <div style="font-size:22px;font-weight:700;color:#374151" id="cup-sum-kpi-orders">—</div>
+      </div>
+      <div style="background:#f8f9fc;border-radius:12px;padding:14px 16px">
+        <div style="font-size:12px;color:#9ca3af;font-weight:600;margin-bottom:6px">總營收</div>
+        <div style="font-size:22px;font-weight:700;color:#374151" id="cup-sum-kpi-rev">—</div>
+      </div>
+      <div style="background:#f8f9fc;border-radius:12px;padding:14px 16px">
+        <div style="font-size:12px;color:#9ca3af;font-weight:600;margin-bottom:6px">總純利</div>
+        <div style="font-size:22px;font-weight:700;color:#10b981" id="cup-sum-kpi-profit">—</div>
+      </div>
+      <div style="background:#f8f9fc;border-radius:12px;padding:14px 16px">
+        <div style="font-size:12px;color:#9ca3af;font-weight:600;margin-bottom:6px">純利率</div>
+        <div style="font-size:22px;font-weight:700;color:#374151" id="cup-sum-kpi-rate">—</div>
+      </div>
+    </div>
+
+    <div style="background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:16px 20px;margin-bottom:20px">
+      <div style="font-size:13px;color:#6b7280;font-weight:600;margin-bottom:10px">近 6 個月營收與純利趨勢</div>
+      <div id="cup-sum-trend-empty" style="padding:48px 20px;text-align:center;color:#9ca3af">
+        <div style="font-size:32px;margin-bottom:8px">📈</div>
+        <div style="font-size:13px">尚未串接資料</div>
+      </div>
+      <div style="position:relative;height:240px;display:none" id="cup-sum-trend-wrap"><canvas id="cup-sum-trend-chart"></canvas></div>
+    </div>
+
+    <div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:10px">酷澎商城</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+      ${coupangSumShopCardHTML('麻吉')}
+      ${coupangSumShopCardHTML('露營館')}
+    </div>
+
+    <div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:8px">酷澎(買斷) <span style="font-weight:400;color:#9ca3af">— 手動輸入</span></div>
+    <div style="background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:16px 20px">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
+        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">訂單數</label><input type="number" id="cup-bo-qty" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
+        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">營收</label><input type="number" id="cup-bo-rev" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
+        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">商品成本</label><input type="number" id="cup-bo-cost" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
+        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">手續費</label><input type="number" id="cup-bo-fee" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
+        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">退貨運費</label><input type="number" id="cup-bo-ret" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
+        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">稅金</label><input type="number" id="cup-bo-tax" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
+        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">耗材</label><input type="number" id="cup-bo-material" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
+      </div>
+      <div style="display:flex;gap:28px;padding-top:12px;border-top:1px solid #f3f4f6">
+        <div><div style="font-size:12px;color:#9ca3af">純利（自動計算）</div><div id="cup-bo-profit" style="font-size:18px;font-weight:700;color:#374151">—</div></div>
+        <div><div style="font-size:12px;color:#9ca3af">純利率（自動計算）</div><div id="cup-bo-rate" style="font-size:18px;font-weight:700;color:#374151">—</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="cup-sum-table-view" style="display:none">
+    <div style="overflow-x:auto;border:1px solid #e4e6ef;border-radius:12px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:#f8fafc;border-bottom:2px solid #e5e7eb">
+            <th style="padding:8px 12px;text-align:left;color:#6b7280;font-weight:700">名稱</th>
+            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">訂單數</th>
+            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">營收</th>
+            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">商品成本</th>
+            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">手續費</th>
+            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">退貨運費</th>
+            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">稅金</th>
+            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">耗材</th>
+            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">純利</th>
+            <th style="padding:8px 12px;text-align:right;color:#6b7280;font-weight:700">純利率</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-top:1px solid #f0f2f7;font-weight:700;background:#fafbff">
+            <td style="padding:8px 12px">酷澎商城</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-orders">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-rev">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-cost">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-fee">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-ret">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-tax">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-material">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-profit">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-mall-rate">—</td>
+          </tr>
+          <tr style="border-top:1px solid #f0f2f7">
+            <td style="padding:8px 12px 8px 28px">麻吉</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-orders">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-rev">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-cost">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-fee">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-ret">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-tax">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-material">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-profit">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-麻吉-rate">—</td>
+          </tr>
+          <tr style="border-top:1px solid #f0f2f7">
+            <td style="padding:8px 12px 8px 28px">露營館</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-orders">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-rev">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-cost">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-fee">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-ret">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-tax">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-material">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-profit">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-露營館-rate">—</td>
+          </tr>
+          <tr style="border-top:1px solid #f0f2f7">
+            <td style="padding:8px 12px">酷澎(買斷)</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-qty">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-rev">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-cost">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-fee">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-ret">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-tax">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-material">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-profit">—</td>
+            <td style="padding:8px 12px;text-align:right" id="cup-tbl-bo-rate">—</td>
+          </tr>
+          <tr class="tr-total">
+            <td>總計</td>
+            <td class="td-num" id="cup-tbl-total-orders">—</td>
+            <td class="td-num" id="cup-tbl-total-rev">—</td>
+            <td class="td-num" id="cup-tbl-total-cost">—</td>
+            <td class="td-num" id="cup-tbl-total-fee">—</td>
+            <td class="td-num" id="cup-tbl-total-ret">—</td>
+            <td class="td-num" id="cup-tbl-total-tax">—</td>
+            <td class="td-num" id="cup-tbl-total-material">—</td>
+            <td class="td-num" id="cup-tbl-total-profit">—</td>
+            <td class="td-num" id="cup-tbl-total-rate">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+function setCoupangSummaryView(v){
+  const cardEl=document.getElementById('cup-sum-card-view');
+  const tableEl=document.getElementById('cup-sum-table-view');
+  const btnCard=document.getElementById('cup-sum-view-card');
+  const btnTable=document.getElementById('cup-sum-view-table');
+  if(!cardEl||!tableEl)return;
+  cardEl.style.display=v==='card'?'block':'none';
+  tableEl.style.display=v==='table'?'block':'none';
+  if(btnCard){btnCard.style.borderColor=v==='card'?'#0ea5e9':'';btnCard.style.color=v==='card'?'#0ea5e9':'';}
+  if(btnTable){btnTable.style.borderColor=v==='table'?'#0ea5e9':'';btnTable.style.color=v==='table'?'#0ea5e9':'';}
+}
+function coupangBuyoutKey(month){return'ec_coupang_buyout|'+month;}
+function getCoupangBuyout(month){return _cloudRead(coupangBuyoutKey(month))||{};}
+function saveCoupangBuyout(month,data){_cloudWrite(coupangBuyoutKey(month),data);}
+function loadCoupangBuyout(){
+  const p=_cupPeriod['總表']||{month:'2026/06'};
+  const d=getCoupangBuyout(p.month);
+  const setVal=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v||'';};
+  setVal('cup-bo-qty',d.qty);setVal('cup-bo-rev',d.rev);setVal('cup-bo-cost',d.cost);
+  setVal('cup-bo-fee',d.fee);setVal('cup-bo-ret',d.ret);setVal('cup-bo-tax',d.tax);setVal('cup-bo-material',d.material);
+  recalcCoupangBuyout();
+}
+function recalcCoupangBuyout(){
+  const g=id=>{const el=document.getElementById(id);return el?parseFloat(el.value)||0:0;};
+  const qty=g('cup-bo-qty'),rev=g('cup-bo-rev'),cost=g('cup-bo-cost'),fee=g('cup-bo-fee'),ret=g('cup-bo-ret'),tax=g('cup-bo-tax'),material=g('cup-bo-material');
+  const profit=rev-cost-fee-ret-tax-material;
+  const hasAny=!!(qty||rev||cost||fee||ret||tax||material);
+  const profitEl=document.getElementById('cup-bo-profit');
+  const rateEl=document.getElementById('cup-bo-rate');
+  if(profitEl)profitEl.textContent=hasAny?'NT$'+fmtN(profit):'—';
+  if(rateEl)rateEl.textContent=rev>0?(profit/rev*100).toFixed(2)+'%':'—';
+  const set=(id,val)=>{const el=document.getElementById(id);if(el)el.textContent=val;};
+  set('cup-tbl-bo-qty',qty?fmtN(qty):'—');
+  set('cup-tbl-bo-rev',rev?fmtN(rev):'—');
+  set('cup-tbl-bo-cost',cost?fmtN(cost):'—');
+  set('cup-tbl-bo-fee',fee?fmtN(fee):'—');
+  set('cup-tbl-bo-ret',ret?fmtN(ret):'—');
+  set('cup-tbl-bo-tax',tax?fmtN(tax):'—');
+  set('cup-tbl-bo-material',material?fmtN(material):'—');
+  set('cup-tbl-bo-profit',hasAny?fmtN(profit):'—');
+  set('cup-tbl-bo-rate',rev>0?(profit/rev*100).toFixed(2)+'%':'—');
+  const p=_cupPeriod['總表']||{month:'2026/06'};
+  saveCoupangBuyout(p.month,{qty,rev,cost,fee,ret,tax,material});
 }
 
 function momoShopHTML(shop,platform='momo'){
@@ -3473,7 +3685,14 @@ function setCoupangShop(shop,btn){
   if(btn)btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
   const el=document.getElementById('coupang-content-'+shop);
-  if(el){el.classList.add('active');if(!el.dataset.init){el.innerHTML=momoShopHTML(shop,'coupang');el.dataset.init='1';}}
+  if(el){
+    el.classList.add('active');
+    if(!el.dataset.init){
+      el.innerHTML=shop==='總表'?coupangSummaryHTML():momoShopHTML(shop,'coupang');
+      el.dataset.init='1';
+      if(shop==='總表')loadCoupangBuyout();
+    }
+  }
   const kpiBlock=document.getElementById('header-kpi-row');
   if(kpiBlock)kpiBlock.style.display='none';
   if(shop!=='總表')cupTryLoadSaved(shop);
@@ -3867,6 +4086,7 @@ Object.assign(window, {
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
+  coupangSummaryHTML,setCoupangSummaryView,recalcCoupangBuyout,loadCoupangBuyout,getCoupangBuyout,saveCoupangBuyout,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
