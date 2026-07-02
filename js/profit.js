@@ -549,6 +549,7 @@ function shopHTML(shop){return`
     </div>
     <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
     <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
+    <button class="col-pick-btn" id="clear-btn-${shop}" onclick="clearPeriod('${shop}')" style="margin-left:2px;display:none;color:#ef4444;border-color:#fca5a5" title="清除此區間報表">🗑 清除</button>
   </div>
   <div id="tbl-${shop}">
     <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">選擇區間後上傳報表，按「▶ 產生並儲存」</div></div>
@@ -627,6 +628,21 @@ function tryLoadSaved(shop){
     updateTagFilterBar(shop);
   }
 }
+function clearPeriod(shop){
+  const s=state[shop];
+  if(!confirm(`確定要清除「${shop}」${s._period||'此區間'}的報表嗎？`))return;
+  try{localStorage.removeItem(lsKey(shop,s.curMonth,s.curHalf));}catch(e){}
+  try{if(typeof Store!=='undefined'&&Store._profitMem)delete Store._profitMem[lsKey(shop,s.curMonth,s.curHalf)];}catch{}
+  state[shop]._built=null;state[shop]._period='';state[shop]._extraAdsFee=0;
+  document.getElementById('period-tag-'+shop).textContent='';
+  document.getElementById('period-tag-'+shop).style.display='none';
+  const search=document.getElementById('search-'+shop);if(search)search.style.display='none';
+  document.getElementById('cnt-'+shop).textContent='';
+  document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">報表已清除，請重新上傳並產生</div></div>`;
+  setKpis(shop,0,0,0,0);
+  const cb=document.getElementById('clear-btn-'+shop);if(cb)cb.style.display='none';
+  const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;
+}
 function loadIntoUI(shop,built,period,days){
   if(built&&Array.isArray(built)){
     built.forEach(r=>{
@@ -641,6 +657,7 @@ function loadIntoUI(shop,built,period,days){
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
   state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=getTagFilters();
   document.getElementById('period-tag-'+shop).textContent=period;
+  const cb=document.getElementById('clear-btn-'+shop);if(cb)cb.style.display='';
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=false;}
   // patchRow 已更新過時：若 tbl 有 table 就跳過，避免閃爍；若 tbl 空（DOM 被清）仍需補渲染
   if(_editedAt[shop]){
@@ -3286,7 +3303,7 @@ Object.assign(window, { SHOPS, MONTHS, HALVES, state, globalMap });
 Object.assign(window, {
   _cloudRead,_cloudWrite,_cloudWriteSafe,_doGenerate,_showSyncBtn,addGrowthCond,addNewAnaCond,
   applyFilters,applyFpNum,applyFpTxt,buildDistHtml,buildNoteCell,buildShop,calcAnalysis,
-  calcGrowthAnalysis,checkAdsReconcile,checkReady,clearColFilter,closeAdsEditModal,
+  calcGrowthAnalysis,checkAdsReconcile,checkReady,clearColFilter,clearPeriod,closeAdsEditModal,
   closeAnaSettings,closeDeleteFileModal,closeDistModal,closeGrowthSettings,closePopup,
   closeProfitNoteModal,closeTfDrop,closeUploadModal,commitEdit,commitNote,confirmAddSummaryRow,
   confirmAdsEdit,confirmDeleteFile,confirmUnmatched,deleteCustomAnaRule,deleteCustomGrowthRule,
