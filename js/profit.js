@@ -772,19 +772,19 @@ function onMapFile(e,shop){
         const del=document.getElementById('del-map-'+s.id);if(del)del.style.display='';
         checkReady(s.id);
       });
-      // 若有任何賣場 0 筆，顯示警告
+      // 若有任何賣場 0 筆 AND 有 sheet 未分派到任一賣場 → 跳「手動指派」modal
       const zeroShops = SHOPS.filter(s=>!globalMap[s.id]||Object.keys(globalMap[s.id]).length===0).map(s=>s.id);
-      if(zeroShops.length>0){
-        const unclaimedSheets = sheetAssignments.filter(a=>!SHOPS.some(s=>s.id===a.shop)).map(a=>`「${a.sheet}」→ ${a.shop}`).join('\n');
+      const orphanSheets = sheetAssignments.filter(a=>!SHOPS.some(s=>s.id===a.shop)&&a.codes>0);
+      closeUploadModal();
+      if(zeroShops.length>0 && orphanSheets.length>0){
+        showSheetReassignModal(orphanSheets, zeroShops, sheetAssignments, file.name);
+      } else if(zeroShops.length>0){
         showMapWarnBanner(
           `⚠️ 這些賣場沒有對照到商品：${zeroShops.join('、')}\n\n`+
-          `原因可能是 Excel 內對應 sheet 名稱不含賣場名。已知 sheet 分派：\n`+
-          sheetAssignments.map(a=>`・「${a.sheet}」→ ${a.shop}（${a.codes} 筆）`).join('\n')+
-          `\n\n請把 sheet 改名（含賣場關鍵字如「好麻吉」/「生活好麻吉」），或告訴管理員。`
+          `已知 sheet 分派：\n`+
+          sheetAssignments.map(a=>`・「${a.sheet}」→ ${a.shop}（${a.codes} 筆）`).join('\n')
         );
       }
-      // 驗證對照表（先關閉 modal，確保警示可見）
-      closeUploadModal();
       setTimeout(()=>validateMapWarnings(globalMap),200);
     }catch(err){alert('商品清單讀取失敗：'+err.message);}
   };
@@ -879,6 +879,91 @@ function showMapWarnBanner(msg,onDetail){
   const detailBtn=onDetail?`<button onclick="_warnDetailCb&&_warnDetailCb()" style="flex-shrink:0;background:#fff;color:#b45309;border:1.5px solid #f59e0b;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-weight:600">查看明細</button>`:'';
   el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div>${msg.replace(/\n/g,'<br>')}</div><div style="display:flex;gap:6px;flex-shrink:0">${detailBtn}<button onclick="document.getElementById('map-warn-banner').remove()" style="background:#f59e0b;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px">關閉</button></div></div>`;
 }
+
+// 手動指派 sheet → shop（自動對應失敗時彈出）
+function showSheetReassignModal(orphanSheets, zeroShops, allAssignments, fileName){
+  const old=document.getElementById('sheet-reassign-overlay'); if(old) old.remove();
+  const modal=document.createElement('div');
+  modal.id='sheet-reassign-overlay';
+  modal.className='ana-overlay open';
+  modal.style.zIndex='4000';
+  const assignedList=allAssignments.filter(a=>SHOPS.some(s=>s.id===a.shop)).map(a=>`<div style="font-size:12px;color:#065f46;margin:2px 0">✓ 「${escapeHtmlLike(a.sheet)}」 → <b>${a.shop}</b>（${a.codes} 筆）</div>`).join('');
+  const shopOpts=SHOPS.map(s=>{
+    const isZero=zeroShops.includes(s.id);
+    return `<option value="${s.id}"${isZero?' style="font-weight:700;background:#fef3c7"':''}>${s.id}${isZero?' ⚠ 缺對照':''}</option>`;
+  }).join('');
+  const orphanRows=orphanSheets.map((u,i)=>`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:10px;background:#fef3c7;border-radius:8px;border:1px solid #fcd34d">
+      <div style="flex:1;font-size:13px">
+        <div style="font-weight:600;color:#78350f">「${escapeHtmlLike(u.sheet)}」</div>
+        <div style="font-size:11px;color:#9a3412;margin-top:2px">${u.codes} 筆商品資料</div>
+      </div>
+      <div style="font-size:13px;color:#78350f">→</div>
+      <select id="reassign-sel-${i}" data-orig-key="${escapeHtmlLike(u.shop)}" style="padding:7px 12px;border:1px solid #d97706;border-radius:6px;font-size:13px;background:white;min-width:130px;font-weight:600">
+        <option value="">-- 選擇賣場 --</option>
+        ${shopOpts}
+        <option value="__skip__">忽略此 sheet</option>
+      </select>
+    </div>`).join('');
+  modal.innerHTML=`
+    <div class="ana-modal" style="width:min(560px,95vw);max-height:90vh;display:flex;flex-direction:column">
+      <div class="ana-modal-hdr">
+        <span>🗂 指派 sheet 到賣場</span>
+        <button class="ana-close-btn" onclick="document.getElementById('sheet-reassign-overlay').remove()">✕</button>
+      </div>
+      <div style="padding:16px;overflow-y:auto;flex:1">
+        <div style="font-size:13px;color:#374151;margin-bottom:14px;line-height:1.6">
+          你上傳的檔案<b>「${escapeHtmlLike(fileName)}」</b>內，下列 sheet 沒能自動對應到賣場。<br>
+          請幫每個 sheet 指派要塞給哪個賣場：
+        </div>
+        ${orphanRows}
+        ${assignedList?`<div style="margin-top:16px;padding-top:12px;border-top:1px solid #e5e7eb"><div style="font-size:12px;color:#6b7280;margin-bottom:6px">已自動對應（不需處理）：</div>${assignedList}</div>`:''}
+        <div style="margin-top:12px;font-size:11px;color:#9ca3af">下次上傳前把 sheet 改名成含賣場關鍵字（如「好麻吉」、「玩樂盒子」）可省下這步。</div>
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px">
+        <button onclick="document.getElementById('sheet-reassign-overlay').remove()" style="padding:8px 16px;border:1px solid #d1d5db;border-radius:6px;background:white;font-size:13px;cursor:pointer">取消</button>
+        <button id="reassign-confirm-btn" style="padding:8px 20px;border:0;border-radius:6px;background:#5b5fcf;color:white;font-size:13px;font-weight:600;cursor:pointer">✓ 確認指派</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  document.getElementById('reassign-confirm-btn').addEventListener('click',()=>{
+    let changed=0;
+    orphanSheets.forEach((u,i)=>{
+      const sel=document.getElementById('reassign-sel-'+i);
+      const target=sel?.value;
+      if(!target||target==='__skip__') return;
+      const fromKey=u.shop;
+      if(globalMap[fromKey]){
+        globalMap[target]=globalMap[target]||{};
+        // 合併（同 code 已存在的 sids 也累加，避免蓋掉）
+        Object.entries(globalMap[fromKey]).forEach(([code,entry])=>{
+          if(!globalMap[target][code]) globalMap[target][code]={sids:[],name:''};
+          const srcSids=Array.isArray(entry)?entry:(entry.sids||[]);
+          srcSids.forEach(sid=>{ if(!globalMap[target][code].sids.includes(sid)) globalMap[target][code].sids.push(sid); });
+          if(!globalMap[target][code].name && entry.name) globalMap[target][code].name=entry.name;
+        });
+        delete globalMap[fromKey];
+        changed++;
+      }
+    });
+    // 更新每個 shop 的 rawMap + UI
+    SHOPS.forEach(s=>{
+      state[s.id].rawMap=globalMap[s.id]||{};
+      const shopCnt=Object.keys(globalMap[s.id]||{}).length;
+      const us=document.getElementById('us-map-'+s.id);
+      const ui=document.getElementById('ui-map-'+s.id);
+      const uc=document.getElementById('uc-map-'+s.id);
+      if(us) us.textContent = shopCnt>0?`已載入 ${shopCnt} 筆`:'⚠ 對照到 0 筆';
+      if(ui) ui.textContent = shopCnt>0?'✅':'⚠️';
+      if(uc) uc.className = shopCnt>0?'ucard ok':'ucard';
+    });
+    document.getElementById('sheet-reassign-overlay').remove();
+    if(typeof showToast==='function') showToast(`✓ 已重新指派 ${changed} 個 sheet`,'success');
+    setTimeout(()=>validateMapWarnings(globalMap),100);
+  });
+}
+// 簡易 escape（避開 sheet name 含 HTML 特殊字）
+function escapeHtmlLike(s){return String(s||'').replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));}
 
 // ── Files ──
 function onFile(e,shop,type){
@@ -3444,6 +3529,7 @@ Object.assign(window, {
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
+  showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   ignoreAllUnmatched,umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
