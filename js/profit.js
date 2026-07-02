@@ -719,6 +719,7 @@ function loadIntoUI(shop,built,period,days){
     const tblEl=document.getElementById('tbl-'+shop);
     if(tblEl&&tblEl.querySelector('table'))return;
   }
+  reconcileSuggDoneFromNotes(shop);
   applyFilters(shop);
 }
 
@@ -2508,6 +2509,22 @@ function markSuggDone(shop,code){
   saveSuggDone(shop,s.curMonth,s.curHalf,done);
   applyFilters(shop);
   if(_suggAlertShop===shop)renderSuggAlertList();
+}
+// 補救措施：商品已經有「廣告調整」備註、但因為當時舊版程式或其他原因沒被標記已優化，
+// 每次資料載入時重新核對一次，避免漏標。只在真的有變動時才寫回。
+function reconcileSuggDoneFromNotes(shop){
+  const s=state[shop];if(!s||!s._built||!s._built.length)return;
+  const noteKey=shop+'|'+s.curMonth+'|'+s.curHalf;
+  const notes=getNotes(noteKey);
+  const done=getSuggDone(shop,s.curMonth,s.curHalf);
+  let changed=false;
+  s._built.forEach(r=>{
+    if(done[r.code])return;
+    const nd=notes[r.code];
+    const hasNote=nd&&(typeof nd==='string'?nd.trim():(nd.adjustments||[]).length);
+    if(hasNote&&matchSuggRules(r).length){done[r.code]=true;changed=true;}
+  });
+  if(changed)saveSuggDone(shop,s.curMonth,s.curHalf,done);
 }
 function suggRuleConds(rule,r){
   return rule.conds.every(c=>{
