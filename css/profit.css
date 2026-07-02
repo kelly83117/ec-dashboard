@@ -180,6 +180,23 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .col-picker-menu.open{display:block;}
 .cp-row{display:flex;align-items:center;gap:8px;padding:6px 13px;cursor:pointer;font-size:13px;color:#374151;user-select:none;}
 .cp-row:hover{background:#f3f4f6;}
+/* Suggestion rules (建議) */
+.sugg-btn-wrap{display:flex;align-items:center;border:1px solid #e4e6ef;border-radius:8px;overflow:hidden;}
+.sugg-btn-wrap .col-pick-btn{border:none;border-radius:0;}
+.sugg-gear-btn{border:none;border-left:1px solid #e4e6ef;padding:7px 9px;background:#fff;cursor:pointer;font-size:13px;color:#6b7280;}
+.sugg-gear-btn:hover{background:#f3f4f6;}
+.sugg-badge{display:none;margin-left:5px;background:#ef4444;color:#fff;font-size:11px;font-weight:700;padding:1px 6px;border-radius:10px;vertical-align:1px;}
+.sugg-filter-chip{display:none;align-items:center;gap:6px;font-size:12px;color:#1e40af;background:#eef2ff;border-radius:6px;padding:4px 10px;margin-right:8px;}
+.sugg-filter-chip button{border:none;background:none;color:#1e40af;font-weight:700;cursor:pointer;font-size:12px;padding:0;text-decoration:underline;}
+.sugg-tag{cursor:pointer;display:inline-flex;align-items:center;gap:4px;}
+.sugg-tag.sugg-done{background:#d1fae5;color:#065f46;text-decoration:line-through;opacity:.8;}
+.sugg-rule-row{border:1px solid #e4e6ef;border-radius:10px;padding:11px;margin-bottom:10px;}
+.sugg-rule-row input[type=text]{padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;outline:none;font-family:'Noto Sans TC',sans-serif;}
+.sugg-rule-row select{padding:5px 7px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;background:#fff;font-family:'Noto Sans TC',sans-serif;outline:none;}
+.sugg-rule-row input[type=number]{width:70px;padding:5px 7px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;outline:none;font-family:monospace;}
+.sugg-cond-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
+.sugg-add-btn{font-size:12px;padding:5px 10px;border:1px dashed #c7c9f5;border-radius:6px;background:#fafbff;color:#5b5fcf;cursor:pointer;font-weight:600;}
+.sugg-disabled-row{display:flex;align-items:center;gap:8px;padding:6px 0;opacity:.55;}
 
 /* Filter popup */
 .th-wrap{position:relative;display:inline-flex;align-items:center;gap:3px;width:100%;justify-content:flex-end;}

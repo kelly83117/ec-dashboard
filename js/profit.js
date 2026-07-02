@@ -553,9 +553,17 @@ function shopHTML(shop){return`
     <span id="period-tag-${shop}" style="display:none"></span>
     <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')" style="display:none">
     <span class="row-cnt" id="cnt-${shop}"></span>
+    <span class="sugg-filter-chip" id="sugg-chip-${shop}">
+      <span id="sugg-chip-text-${shop}"></span>
+      <button onclick="clearSuggFilter('${shop}')">清除篩選</button>
+    </span>
     <div style="margin-left:auto;display:flex;align-items:center;gap:4px;position:relative">
       <button class="col-pick-btn" id="tag-btn-${shop}" onclick="toggleTagPopup('${shop}',this)">🏷 標籤</button>
       <div class="tag-filter-bar" id="tfbar-${shop}"></div>
+    </div>
+    <div class="sugg-btn-wrap">
+      <button class="col-pick-btn" id="sugg-btn-${shop}" onclick="applySuggFilter('${shop}')" title="只顯示符合建議規則的商品">💡 建議<span class="sugg-badge" id="sugg-badge-${shop}"></span></button>
+      <button class="sugg-gear-btn" onclick="openSuggSettings('${shop}')" title="設定建議規則">⚙</button>
     </div>
     <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
     <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
@@ -1216,6 +1224,7 @@ function _doGenerate(shop){
       loadIntoUI(shop,built,period,days);
       if(curShop==='總表')renderSummary();
       checkAdsReconcile(shop,built);
+      checkSuggAlert(shop,built);
     }catch(err){alert('['+shop+'] 產生失敗：'+err.message+'\n\n'+err.stack);}
     setSpin(shop,false);
   },80);
@@ -2165,6 +2174,7 @@ function applyFilters(shop){
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q));
   if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l));
+  if(s.suggFilterActive)list=list.filter(r=>matchSuggRules(r).length);
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
     if(!f)return;
@@ -2192,6 +2202,8 @@ function applyFilters(shop){
   }
   renderTable(shop,list);
   updateTagFilterBar(shop);
+  updateSuggBadge(shop);
+  updateSuggChip(shop);
 }
 function setSort(shop,col,dir){state[shop].sorts={col,dir};applyFilters(shop);}
 function setColFilter(shop,col,type,val){
@@ -2455,6 +2467,238 @@ function recalcRow(shop,code,ov){
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
 
+// ── Suggestion rules (建議) ──
+const SUGG_DEFAULT_RULES=[
+  {id:1,name:'廣告效率過低',tag:'建議關閉廣告',color:'amber',active:true,conds:[{f:'clicks',op:'>',v:100},{f:'roi',op:'<',v:8}]},
+];
+const SUGG_FIELDS=[{v:'clicks',l:'點擊數'},{v:'roi',l:'投入產出(ROI)'},{v:'pureProfit',l:'淨利'},{v:'pureRate',l:'淨利率%',pct:true}];
+const SUGG_OPS=['>','>=','<','<=','='];
+const SUGG_COLORS=[{v:'amber',l:'橘',cls:'tag-bad'},{v:'red',l:'紅',cls:'tag-danger'},{v:'blue',l:'藍',cls:'tag-add300'}];
+function suggColorCls(v){return(SUGG_COLORS.find(c=>c.v===v)||SUGG_COLORS[0]).cls;}
+function suggFieldValue(r,f){
+  if(f==='pureRate')return Number(r.pureRate||0)*100;
+  return Number(r[f]||0);
+}
+function getSuggRules(){
+  const v=_cloudRead('ec_sugg_rules');
+  return v||SUGG_DEFAULT_RULES.map(r=>({...r,conds:r.conds.map(c=>({...c}))}));
+}
+function saveSuggRules(rules){_cloudWrite('ec_sugg_rules',rules);}
+function suggDoneKey(shop,month,half){return`ec_sugg_done|${shop}|${month}|${half}`;}
+function getSuggDone(shop,month,half){return _cloudRead(suggDoneKey(shop,month,half))||{};}
+function saveSuggDone(shop,month,half,done){_cloudWrite(suggDoneKey(shop,month,half),done);}
+function isSuggDone(shop,code){
+  const s=state[shop];if(!s)return false;
+  const done=getSuggDone(shop,s.curMonth,s.curHalf);
+  return !!done[code];
+}
+function toggleSuggDone(shop,code){
+  const s=state[shop];if(!s)return;
+  const done=getSuggDone(shop,s.curMonth,s.curHalf);
+  if(done[code])delete done[code];else done[code]=true;
+  saveSuggDone(shop,s.curMonth,s.curHalf,done);
+  applyFilters(shop);
+  if(_suggAlertShop===shop)renderSuggAlertList();
+}
+function matchSuggRules(r){
+  return getSuggRules().filter(rule=>rule.active!==false&&rule.conds.every(c=>{
+    const val=suggFieldValue(r,c.f);const v=Number(c.v);
+    if(c.op==='>')return val>v;
+    if(c.op==='>=')return val>=v;
+    if(c.op==='<')return val<v;
+    if(c.op==='<=')return val<=v;
+    return val===v;
+  }));
+}
+function buildSuggCell(shop,r){
+  const hit=matchSuggRules(r);
+  if(!hit.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
+  const codeEsc=r.code.replace(/'/g,"\\'");
+  if(isSuggDone(shop,r.code)){
+    return`<td class="tl"><span class="tag sugg-tag sugg-done" onclick="toggleSuggDone('${shop}','${codeEsc}')" title="點擊取消已優化">✓ 已優化</span></td>`;
+  }
+  const tagsHtml=hit.map(rule=>`<span class="tag sugg-tag ${suggColorCls(rule.color)}" onclick="toggleSuggDone('${shop}','${codeEsc}')" title="點擊標記為已優化">${rule.tag}</span>`).join(' ');
+  return`<td class="tl">${tagsHtml}</td>`;
+}
+function updateSuggBadge(shop){
+  const s=state[shop];const b=document.getElementById('sugg-badge-'+shop);if(!s||!b)return;
+  const n=(s._built||[]).filter(r=>matchSuggRules(r).length&&!isSuggDone(shop,r.code)).length;
+  b.textContent=n>0?n:'';b.style.display=n>0?'inline-block':'none';
+}
+function updateSuggChip(shop){
+  const s=state[shop];const chip=document.getElementById('sugg-chip-'+shop);if(!chip)return;
+  if(s?.suggFilterActive){
+    chip.style.display='flex';
+    const n=(s._built||[]).filter(r=>matchSuggRules(r).length).length;
+    document.getElementById('sugg-chip-text-'+shop).textContent='已篩選：僅顯示 '+n+' 項符合建議規則的商品';
+  }else{chip.style.display='none';}
+}
+function applySuggFilter(shop){
+  const s=state[shop];if(!s)return;
+  s.suggFilterActive=!s.suggFilterActive;
+  applyFilters(shop);
+}
+function clearSuggFilter(shop){
+  const s=state[shop];if(!s)return;
+  s.suggFilterActive=false;
+  applyFilters(shop);
+}
+
+// ── Suggestion rule settings modal ──
+let _suggDraft=null;
+let _suggEditShop=null;
+function openSuggSettings(shop){
+  let ov=document.getElementById('sugg-overlay');
+  if(!ov){
+    ov=document.createElement('div');ov.id='sugg-overlay';ov.className='ana-overlay';
+    ov.innerHTML=`<div class="ana-modal" onclick="event.stopPropagation()">
+      <div class="ana-modal-hdr"><span class="ana-modal-title">⚙ 建議規則設定</span><button class="ana-modal-x" onclick="closeSuggSettings()">✕</button></div>
+      <div class="ana-modal-body" id="sugg-modal-body"></div>
+      <div id="sugg-scope-note" style="padding:0 22px 12px;font-size:11.5px;color:#9ca3af"></div>
+      <div class="ana-modal-ftr">
+        <button class="ana-cancel-btn" onclick="closeSuggSettings()">取消</button>
+        <button class="ana-save-btn" onclick="saveSuggSettings()">儲存並套用</button>
+      </div>
+    </div>`;
+    ov.onclick=closeSuggSettings;
+    document.body.appendChild(ov);
+  }
+  _suggEditShop=shop;
+  document.getElementById('sugg-scope-note').textContent=`套用範圍：僅限「${shop}」目前這份報表，下次上傳新報表會自動套用已啟用的規則；其他月份資料不受影響。`;
+  _suggDraft=getSuggRules().map(r=>({...r,conds:r.conds.map(c=>({...c}))}));
+  renderSuggModalBody();
+  ov.classList.add('open');
+}
+function closeSuggSettings(){document.getElementById('sugg-overlay')?.classList.remove('open');_suggDraft=null;}
+function syncSuggDraftFromDOM(){
+  if(!_suggDraft)return;
+  document.querySelectorAll('#sugg-modal-body .sugg-rule-row').forEach(card=>{
+    const ri=parseInt(card.dataset.ri);const r=_suggDraft[ri];if(!r)return;
+    r.name=card.querySelector('.sr-name').value;
+    r.tag=card.querySelector('.sr-tag').value;
+    r.color=card.querySelector('.sr-color').value;
+    card.querySelectorAll('.sugg-cond-row').forEach((row,ci)=>{
+      if(!r.conds[ci])return;
+      r.conds[ci].f=row.querySelector('.sc-f').value;
+      r.conds[ci].op=row.querySelector('.sc-op').value;
+      r.conds[ci].v=parseFloat(row.querySelector('.sc-v').value)||0;
+    });
+  });
+}
+function suggCondRowHtml(ri,ci,c){
+  const fOpts=SUGG_FIELDS.map(o=>`<option value="${o.v}"${o.v===c.f?' selected':''}>${o.l}</option>`).join('');
+  const opOpts=SUGG_OPS.map(o=>`<option value="${o}"${o===c.op?' selected':''}>${o}</option>`).join('');
+  return`<div class="sugg-cond-row">
+    <span style="font-size:12px;color:#9ca3af;width:20px;text-align:center">${ci>0?'且':'若'}</span>
+    <select class="sc-f">${fOpts}</select>
+    <select class="sc-op">${opOpts}</select>
+    <input type="number" class="sc-v" value="${c.v}">
+    <button onclick="removeSuggCond(${ri},${ci})" title="刪除條件" style="background:none;border:none;cursor:pointer;color:#9ca3af;margin-left:auto">✕</button>
+  </div>`;
+}
+function suggRuleCardHtml(r,ri){
+  const colorOpts=SUGG_COLORS.map(o=>`<option value="${o.v}"${o.v===r.color?' selected':''}>${o.l}</option>`).join('');
+  return`<div class="sugg-rule-row" data-ri="${ri}">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <input type="text" class="sr-name" value="${r.name}" style="flex:1;font-weight:700" placeholder="規則名稱">
+      <button onclick="disableSuggRule(${ri})" title="停用此規則" style="background:none;border:none;cursor:pointer">🗑</button>
+    </div>
+    <div class="sr-conds">${r.conds.map((c,ci)=>suggCondRowHtml(ri,ci,c)).join('')}</div>
+    <button class="sugg-add-btn" onclick="addSuggCond(${ri})">＋ 新增條件</button>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+      <span style="font-size:12px;color:#6b7280;white-space:nowrap">跳出提醒文字</span>
+      <input type="text" class="sr-tag" value="${r.tag}" style="flex:1">
+      <select class="sr-color">${colorOpts}</select>
+    </div>
+  </div>`;
+}
+function renderSuggModalBody(){
+  const withIdx=_suggDraft.map((r,i)=>({r,i}));
+  const activeList=withIdx.filter(x=>x.r.active!==false);
+  const activeHtml=activeList.length?activeList.map(x=>suggRuleCardHtml(x.r,x.i)).join(''):'<div style="text-align:center;color:#9ca3af;font-size:12px;padding:10px">尚無啟用的規則</div>';
+  const disabled=withIdx.filter(x=>x.r.active===false);
+  const disabledHtml=disabled.length?`<div class="ana-sec-hdr" style="margin-top:16px">已停用規則</div>`
+    +disabled.map(x=>`<div class="sugg-disabled-row"><span style="flex:1;font-size:12.5px">${x.r.name}</span><button onclick="restoreSuggRule(${x.i})" title="恢復" style="background:none;border:none;cursor:pointer;color:#10b981">↩</button></div>`).join(''):'';
+  document.getElementById('sugg-modal-body').innerHTML=`
+    <div style="font-size:12px;color:#9ca3af;margin-bottom:12px">上傳「${_suggEditShop}」報表後，符合規則全部條件的商品會自動跳出提醒；規則會記住，下次上傳不用重新設定。</div>
+    <div id="sugg-active-list">${activeHtml}</div>
+    <button class="sugg-add-btn" onclick="addSuggRule()" style="margin-top:2px">＋ 新增規則</button>
+    ${disabledHtml}`;
+}
+function addSuggCond(ri){syncSuggDraftFromDOM();_suggDraft[ri].conds.push({f:'clicks',op:'>',v:0});renderSuggModalBody();}
+function removeSuggCond(ri,ci){syncSuggDraftFromDOM();if(_suggDraft[ri].conds.length>1)_suggDraft[ri].conds.splice(ci,1);renderSuggModalBody();}
+function disableSuggRule(ri){syncSuggDraftFromDOM();_suggDraft[ri].active=false;renderSuggModalBody();}
+function restoreSuggRule(ri){syncSuggDraftFromDOM();_suggDraft[ri].active=true;renderSuggModalBody();}
+function addSuggRule(){
+  syncSuggDraftFromDOM();
+  const maxId=_suggDraft.reduce((m,r)=>Math.max(m,r.id||0),0);
+  _suggDraft.push({id:maxId+1,name:'新規則',tag:'建議調整',color:'blue',active:true,conds:[{f:'clicks',op:'>',v:0}]});
+  renderSuggModalBody();
+}
+function saveSuggSettings(){
+  syncSuggDraftFromDOM();
+  saveSuggRules(_suggDraft);
+  const shop=_suggEditShop;
+  closeSuggSettings();
+  if(shop){updateSuggBadge(shop);applyFilters(shop);}
+}
+
+// ── Suggestion alert popup（產生報表後跳出）──
+let _suggAlertRows=null;
+let _suggAlertShop=null;
+function checkSuggAlert(shop,built){
+  updateSuggBadge(shop);
+  const matched=(built||[]).filter(r=>matchSuggRules(r).length);
+  const unresolved=matched.filter(r=>!isSuggDone(shop,r.code));
+  if(!unresolved.length)return;
+  _suggAlertRows=matched;_suggAlertShop=shop;
+  let ov=document.getElementById('sugg-alert-overlay');
+  if(!ov){
+    ov=document.createElement('div');ov.id='sugg-alert-overlay';ov.className='ana-overlay';
+    ov.innerHTML=`<div class="ana-modal" style="width:420px" onclick="event.stopPropagation()">
+      <div class="ana-modal-hdr"><span class="ana-modal-title">⚠ 廣告效率提醒</span><button class="ana-modal-x" onclick="closeSuggAlert()">✕</button></div>
+      <div style="padding:14px 22px;font-size:12.5px;color:#6b7280" id="sugg-alert-sub"></div>
+      <div style="max-height:260px;overflow-y:auto;padding:0 22px" id="sugg-alert-list"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 22px;border-top:1px solid #e4e6ef">
+        <button class="ana-cancel-btn" onclick="closeSuggAlert()">略過</button>
+        <button class="ana-save-btn" onclick="gotoSuggFiltered()">前往查看</button>
+      </div>
+    </div>`;
+    ov.onclick=closeSuggAlert;
+    document.body.appendChild(ov);
+  }
+  renderSuggAlertList();
+  ov.classList.add('open');
+}
+function closeSuggAlert(){document.getElementById('sugg-alert-overlay')?.classList.remove('open');}
+function renderSuggAlertList(){
+  const shop=_suggAlertShop;const rows=_suggAlertRows||[];
+  const sub=document.getElementById('sugg-alert-sub');if(sub)sub.textContent=`「${shop}」有 ${rows.length} 項商品符合建議規則`;
+  const list=document.getElementById('sugg-alert-list');if(!list)return;
+  list.innerHTML=rows.map(r=>{
+    const codeEsc=r.code.replace(/'/g,"\\'");
+    const done=isSuggDone(shop,r.code);
+    const tagsHtml=done
+      ?`<span class="tag sugg-tag sugg-done" onclick="toggleSuggDone('${shop}','${codeEsc}')" title="點擊取消已優化">✓ 已優化</span>`
+      :matchSuggRules(r).map(rule=>`<span class="tag sugg-tag ${suggColorCls(rule.color)}" onclick="toggleSuggDone('${shop}','${codeEsc}')" title="點擊標記為已優化">${rule.tag}</span>`).join(' ');
+    return`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid #f3f4f6">
+      <span style="font-size:13px">${r.name}</span>
+      <span style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:12px;color:#6b7280;font-family:monospace">點擊 ${r.clicks||0} · ROI ${(r.roi||0).toFixed(1)}</span>
+        ${tagsHtml}
+      </span>
+    </div>`;
+  }).join('');
+}
+function gotoSuggFiltered(){
+  const shop=_suggAlertShop;
+  closeSuggAlert();
+  if(!shop)return;
+  state[shop].suggFilterActive=true;
+  applyFilters(shop);
+  document.getElementById('tbl-'+shop)?.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
 // ── Note modal ──
 const PROFIT_COLS=[
   {key:'adsFee',label:'廣告費'},{key:'rev',label:'營收'},{key:'gross',label:'毛利'},
@@ -2612,6 +2856,7 @@ function renderTable(shop,list){
     ${vc('growthRate')?thN('growthRate','成長比'):''}
     ${vc('growthAnalysis')?thT('growthAnalysisLabel','成長分析'):''}
     ${vc('growthNote')?'<th class="tl">商品調整</th>':''}`:''}
+    <th class="tl">建議</th>
   </tr></thead><tbody>`;
 
   let rowIdx=0;
@@ -2648,6 +2893,7 @@ function renderTable(shop,list){
         ${noRevSpan2>0?`<td colspan="${noRevSpan2}" style="color:#d1d5db;text-align:center;font-size:12px">— 無銷售資料 —</td>`:''}
         ${vc('note')?buildNoteCell(noteKey,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})()):''}
         ${shop==='好麻吉'?(()=>{const gnoteId=`gnote-${shop}-${r.code}`;return`${vc('growthRate')?'<td></td>':''}${vc('growthAnalysis')?'<td></td>':''}${vc('growthNote')?buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]):''}`;})():''}
+        ${buildSuggCell(shop,r)}
       </tr>`;
     }else{
       html+=`<tr>
@@ -2675,6 +2921,7 @@ function renderTable(shop,list){
           ${vc('growthAnalysis')?`<td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`:''}
           ${vc('growthNote')?buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]):''}`;
         })():''}
+        ${buildSuggCell(shop,r)}
       </tr>`;
     }
     rowIdx++;
@@ -2696,6 +2943,7 @@ function renderTable(shop,list){
     ${shop==='好麻吉'?`
     <td class="td-num" style="text-align:center">${fGrowth===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${fGrowth>=0?'#10b981':'#ef4444'};font-weight:700">${fGrowth>=0?'↑':'↓'} ${Math.abs(fGrowth*100).toFixed(0)}%</span>`}</td>
     <td></td><td></td>`:''}
+    <td></td>
   </tr></tbody></table></div>`;
   document.getElementById('tbl-'+shop).innerHTML=html;
 }
@@ -3543,4 +3791,8 @@ Object.assign(window, {
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   ignoreAllUnmatched,umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
   updateTagFilterBar,validateMapWarnings,
+  applySuggFilter,clearSuggFilter,openSuggSettings,closeSuggSettings,saveSuggSettings,
+  addSuggCond,removeSuggCond,disableSuggRule,restoreSuggRule,addSuggRule,toggleSuggDone,
+  closeSuggAlert,gotoSuggFiltered,checkSuggAlert,matchSuggRules,getSuggRules,saveSuggRules,
+  updateSuggBadge,updateSuggChip,buildSuggCell,
 });
