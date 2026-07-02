@@ -2500,6 +2500,15 @@ function toggleSuggDone(shop,code){
   applyFilters(shop);
   if(_suggAlertShop===shop)renderSuggAlertList();
 }
+function markSuggDone(shop,code){
+  const s=state[shop];if(!s)return;
+  const done=getSuggDone(shop,s.curMonth,s.curHalf);
+  if(done[code])return;
+  done[code]=true;
+  saveSuggDone(shop,s.curMonth,s.curHalf,done);
+  applyFilters(shop);
+  if(_suggAlertShop===shop)renderSuggAlertList();
+}
 function suggRuleConds(rule,r){
   return rule.conds.every(c=>{
     const val=suggFieldValue(r,c.f);const v=Number(c.v);
@@ -2824,7 +2833,12 @@ function submitProfitNote(){
   notes[code].adjustments.push({date:today,text:v});
   saveNotes(shopKey,notes);
   closeProfitNoteModal();
-  applyFilters(shopKey.split('|')[0].replace('_growth',''));
+  const shop=shopKey.split('|')[0].replace('_growth','');
+  if(!shopKey.includes('_growth')){
+    const r=state[shop]?._built?.find(x=>x.code===code);
+    if(r&&matchSuggRules(r).length)markSuggDone(shop,code);
+  }
+  applyFilters(shop);
 }
 function deleteProfitNote(origIdx){
   if(!_pnm)return;
@@ -3820,6 +3834,6 @@ Object.assign(window, {
   updateTagFilterBar,validateMapWarnings,
   applySuggFilter,clearSuggFilter,openSuggSettings,closeSuggSettings,saveSuggSettings,
   addSuggCond,removeSuggCond,disableSuggRule,restoreSuggRule,addSuggRule,toggleSuggDone,
-  closeSuggAlert,gotoSuggFiltered,checkSuggAlert,matchSuggRules,getSuggRules,saveSuggRules,
+  closeSuggAlert,gotoSuggFiltered,checkSuggAlert,matchSuggRules,getSuggRules,saveSuggRules,markSuggDone,
   updateSuggBadge,updateSuggChip,buildSuggCell,
 });
