@@ -714,17 +714,26 @@ function onMapFile(e,shop){
       const wb=XLSX.read(ev.target.result,{type:'binary'});
       globalMap={};let cnt=0;
       wb.SheetNames.forEach(sName=>{
-        const rows=XLSX.utils.sheet_to_json(wb.Sheets[sName],{defval:''});
+        // 用 header:1 讀陣列，避免欄名有不可見字元導致對不到
+        const raw=XLSX.utils.sheet_to_json(wb.Sheets[sName],{header:1,defval:''});
+        if(raw.length<2)return;
+        // 找各欄的 index（從第一列 header 辨識）
+        const hdr=raw[0].map(h=>String(h).trim());
+        const colCode=hdr.findIndex(h=>h==='商品選項貨號'||h==='商品編號');
+        const colSid=hdr.findIndex(h=>h==='商品ID'||h==='商品 ID');
+        const colName=hdr.findIndex(h=>h==='莫比克名'||h==='商品名稱');
+        if(colCode<0||colSid<0)return; // 找不到必要欄
         const sk=SHOPS.find(s=>sName.includes(s.id)||s.id.includes(sName))?.id||sName;
         if(!globalMap[sk])globalMap[sk]={};
-        rows.forEach(r2=>{
-          const code=(r2['商品選項貨號']||r2['商品編號']||'').toString().trim();
-          let sid=r2['商品ID'];if(!code||!sid)return;
-          sid=Math.round(Number(sid)).toString();
+        raw.slice(1).forEach(row=>{
+          const code=String(row[colCode]||'').trim();
+          const rawSid=row[colSid];
+          if(!code||rawSid===''||rawSid===undefined||rawSid===null)return;
+          let sid=Math.round(Number(rawSid)).toString();
           if(sid==='NaN'||sid==='0'||sid.length<5)return;
           if(!globalMap[sk][code]){globalMap[sk][code]={sids:[],name:''};cnt++;}
           if(!globalMap[sk][code].sids.includes(sid))globalMap[sk][code].sids.push(sid);
-          const pName=(r2['莫比克名']||r2['商品名稱']||'').trim();
+          const pName=colName>=0?String(row[colName]||'').trim():'';
           if(pName&&!globalMap[sk][code].name)globalMap[sk][code].name=pName;
         });
       });
