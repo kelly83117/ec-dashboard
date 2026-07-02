@@ -630,7 +630,8 @@ function tryLoadSaved(shop){
 }
 function clearPeriod(shop){
   const s=state[shop];
-  if(!confirm(`確定要清除「${shop}」${s._period||'此區間'}的報表與已上傳的檔案嗎？`))return;
+  const periodLabel=getPeriodLabel(s.curMonth,s.curHalf);
+  if(!confirm(`確定要清除「${shop}」${periodLabel}的報表與已上傳的檔案嗎？`))return;
   // 清除報表
   try{localStorage.removeItem(lsKey(shop,s.curMonth,s.curHalf));}catch(e){}
   try{if(typeof Store!=='undefined'&&Store._profitMem)delete Store._profitMem[lsKey(shop,s.curMonth,s.curHalf)];}catch{}
