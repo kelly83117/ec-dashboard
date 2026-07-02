@@ -47,6 +47,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <div style="display:flex;gap:8px">
           <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
           <button id="global-sync-btn" class="export-btn" onclick="syncToCloud(curShop)" style="opacity:0.4;cursor:default" disabled>☁ 同步雲端</button>
+          <button id="global-force-push-btn" class="export-btn" onclick="forcePushAllLocalProfits()" style="border-color:#f59e0b;color:#f59e0b" title="把本機 localStorage 裡所有賣場、所有期間的報表全推到雲端（用來救別人看不到的舊資料）">🚀 推送本機全部</button>
           <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
         </div>
       </div>
@@ -306,6 +307,53 @@ function _showSyncBtn(shop){
     btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent=`☁ 同步雲端 (${n})`;
   }
 }
+// 一鍵推送本機所有 ec|shop|month|half 報表到雲端
+//   救援情境：同步 bug 修好前留下的舊本機報表，pending set 已清空，
+//   一般 syncToCloud 撈不到 → 這個 helper 直接掃 localStorage + _profitMem
+//   把所有 ec|* 都當 pending 塞回去，再交給 syncToCloud 推。
+function forcePushAllLocalProfits(){
+  if(!window.__cloudProfitCol){
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'請稍後再試。',kind:'warn'});
+    else if(typeof showToast==='function') showToast('雲端未連線','error');
+    return;
+  }
+  // 收集所有 ec|* 報表 key（記憶體 + localStorage 都掃，去重）
+  const keys=new Set();
+  try{
+    if(typeof Store!=='undefined'&&Store._profitMem){
+      Object.keys(Store._profitMem).forEach(k=>{ if(k.startsWith('ec|')) keys.add(k); });
+    }
+  }catch{}
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.startsWith('ec|')) keys.add(k);
+    }
+  }catch{}
+  if(keys.size===0){
+    if(typeof showToast==='function') showToast('本機沒有任何報表可推送','info');
+    return;
+  }
+  const byShop={};
+  keys.forEach(k=>{ const s=k.split('|')[1]; byShop[s]=(byShop[s]||0)+1; });
+  const summary=Object.entries(byShop).map(([s,n])=>`  • ${s}：${n} 份`).join('\n');
+  const ok=confirm(`即將把本機所有報表推送到雲端（覆蓋雲端同名資料）：\n\n${summary}\n\n共 ${keys.size} 份。確定？`);
+  if(!ok) return;
+  // 全部塞進 pending set，交給 syncToCloud 統一處理
+  keys.forEach(k=>{
+    _pendingSyncKeys.add(k);
+    // 補救：若 _profitMem 沒有這 key（只在 localStorage 裡），撈回來讓 syncToCloud 拿得到
+    if(!(Store._profitMem&&Store._profitMem[k])){
+      try{
+        const raw=localStorage.getItem(k);
+        if(raw){ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=JSON.parse(raw); }
+      }catch{}
+    }
+  });
+  _showSyncBtn();
+  syncToCloud(window.curShop||'好麻吉');
+}
+
 function syncToCloud(shop){
   const btn=document.getElementById('global-sync-btn');
   if(btn){btn.disabled=true;btn.textContent='同步中…';}
@@ -4095,7 +4143,7 @@ Object.assign(window, {
   coupangSummaryHTML,setCoupangSummaryView,recalcCoupangBuyout,loadCoupangBuyout,getCoupangBuyout,saveCoupangBuyout,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
-  syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
+  syncToCloud,forcePushAllLocalProfits,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   ignoreAllUnmatched,umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
   updateTagFilterBar,validateMapWarnings,
   applySuggFilter,clearSuggFilter,openSuggSettings,closeSuggSettings,saveSuggSettings,
