@@ -509,9 +509,17 @@ const App = {
     this.ensureAdmin();
     this.bindNav();
     this.bindSidebarToggle();
-    // 若是記憶體模式，提醒使用者資料不會持久化
+    // 記憶體模式：雲端同步下這是正常狀態（Store._mem 為主，Firestore 為持久層）
+    // 只有 localStorage 真的寫不進去（quota / 隱私模式）時才提醒
     if (Store._useMem) {
-      console.warn('[EC] localStorage 不可用，使用記憶體儲存（重新整理會清空）');
+      try {
+        localStorage.setItem('__ec_ls_probe__', '1');
+        localStorage.removeItem('__ec_ls_probe__');
+        // localStorage 正常，_useMem=true 是因為雲端同步；不需要顯眼警告
+        console.log('[EC] 使用記憶體 + 雲端同步模式（正常）');
+      } catch {
+        console.warn('[EC] localStorage 不可用（隱私模式或空間爆），本次資料重整後會清空');
+      }
     }
     // 整個應用層級的「離開頁面警告」：偵測所有未同步來源
     //   洞察表 / 淨利表 / 工作日誌 / 儀表板營收卡片

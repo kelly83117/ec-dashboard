@@ -197,7 +197,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         </div>
       </div>
       <div class="ana-modal-ftr" style="justify-content:space-between;align-items:center">
-        <span style="font-size:12px;color:#9ca3af">上傳莫筆克＋廣告報表後可產生</span>
+        <span id="upm-gen-hint" style="font-size:12px;color:#9ca3af">上傳莫筆克＋廣告報表後可產生</span>
         <div style="display:flex;gap:8px;align-items:center">
           <button id="upm-clear-btn" onclick="clearPeriodFromModal()" style="padding:8px 16px;border:1.5px solid #fca5a5;border-radius:8px;background:#fff;color:#ef4444;font-size:13px;font-weight:600;cursor:pointer">🗑 清除重傳</button>
           <button class="gen-btn" id="upm-gen-btn" onclick="onGlobalGenerate()" disabled>▶ 產生報表</button>
@@ -1521,10 +1521,12 @@ function openUploadModal(){
   function syncCard(id,ok,okIcon,defaultIcon,okLabel,defaultLabel,metaKey){
     const meta=getMeta(metaKey);
     const wasLoaded=!ok&&!!meta; // 刷新後有紀錄但無資料
-    const show=ok||wasLoaded;
-    document.getElementById('upm-'+id).className='ucard'+(show?' ok':'');
-    document.getElementById('upm-'+id+'-icon').textContent=show?okIcon:defaultIcon;
-    document.getElementById('upm-'+id+'-title').textContent=show?(meta?.name||okLabel).slice(0,22):defaultLabel;
+    const card=document.getElementById('upm-'+id);
+    // ok=綠色 ucard.ok，wasLoaded=暖色警告（提醒需重新上傳），未載入=一般
+    card.className='ucard'+(ok?' ok':(wasLoaded?' warn':''));
+    // icon 分三態：ok=綠✅、wasLoaded=🔄（提醒需重上傳）、未載入=預設 icon
+    document.getElementById('upm-'+id+'-icon').textContent=ok?okIcon:(wasLoaded?'🔄':defaultIcon);
+    document.getElementById('upm-'+id+'-title').textContent=(ok||wasLoaded)?(meta?.name||okLabel).slice(0,22):defaultLabel;
     document.getElementById('upm-'+id+'-status').textContent=ok?'✅ 已載入':wasLoaded?'🔄 點此重新上傳':'✗ 未載入';
     document.getElementById('upm-'+id+'-status').style.color=ok?'#10b981':wasLoaded?'#f59e0b':'#ef4444';
     // ok=true：禁用 input（需透過垃圾桶刪除後才能換檔），wasLoaded：啟用 input（點卡片直接重傳）
@@ -1554,6 +1556,18 @@ function openUploadModal(){
   document.getElementById('upm-selads-del').style.opacity=seladsOk?'1':'0.35';
   document.getElementById('upm-selads-del').style.pointerEvents=seladsOk?'':'none';
   document.getElementById('upm-gen-btn').disabled=!(mobicOk&&adsOk);
+  // 若三大檔中有任何一個是 wasLoaded 狀態（有 meta 但無 raw），提示使用者需要重新上傳
+  const anyWasLoaded=(!mapOk&&!!getMeta('ec|filemeta|globalMap'))||(!mobicOk&&!!getMeta(fmKey(shop,'mobic')))||(!adsOk&&!!getMeta(fmKey(shop,'ads')));
+  const hintEl=document.getElementById('upm-gen-hint');
+  if(hintEl){
+    if(anyWasLoaded&&!(mobicOk&&adsOk)){
+      hintEl.innerHTML='⚠️ <b style="color:#b45309">頁面重整後解析的資料會清空</b>，請點 🔄 卡片重新上傳原檔案';
+      hintEl.style.color='#b45309';
+    } else {
+      hintEl.textContent='上傳莫筆克＋廣告報表後可產生';
+      hintEl.style.color='#9ca3af';
+    }
+  }
   renderGroupAdsCards(shop);
   ov.classList.add('open');
 }
