@@ -529,8 +529,8 @@ function shopHTML(shop){return`
   <div style="display:none">
     <label class="ucard" id="uc-map-${shop}"><input type="file" accept=".xlsx,.xls" onchange="onMapFile(event,'${shop}')"><div class="ucard-icon" id="ui-map-${shop}">🗂</div><div class="ucard-info"><div class="ucard-title" id="ut-map-${shop}">蝦皮商品清單</div><div class="ucard-sub" id="us-map-${shop}"></div></div><span id="del-map-${shop}" onclick="event.preventDefault();event.stopPropagation();deleteUpload('${shop}','map')" style="display:none;margin-left:auto;color:#ef4444;cursor:pointer;padding:2px 8px;font-size:14px;flex-shrink:0" title="刪除">🗑</span></label>
     <label class="ucard" id="uc-mobic-${shop}"><input type="file" accept=".xlsx,.xls" onchange="onFile(event,'${shop}','mobic')"><div class="ucard-icon" id="ui-mobic-${shop}">📦</div><div class="ucard-info"><div class="ucard-title" id="ut-mobic-${shop}">莫筆克銷售分析</div><div class="ucard-sub">.xlsx</div></div><span id="del-mobic-${shop}" onclick="event.preventDefault();event.stopPropagation();deleteUpload('${shop}','mobic')" style="display:none;margin-left:auto;color:#ef4444;cursor:pointer;padding:2px 8px;font-size:14px;flex-shrink:0" title="刪除">🗑</span></label>
-    <label class="ucard" id="uc-ads-${shop}"><input type="file" accept=".csv" onchange="onFile(event,'${shop}','ads')"><div class="ucard-icon" id="ui-ads-${shop}">📣</div><div class="ucard-info"><div class="ucard-title" id="ut-ads-${shop}">蝦皮廣告報表</div><div class="ucard-sub">.csv</div></div><span id="del-ads-${shop}" onclick="event.preventDefault();event.stopPropagation();deleteUpload('${shop}','ads')" style="display:none;margin-left:auto;color:#ef4444;cursor:pointer;padding:2px 8px;font-size:14px;flex-shrink:0" title="刪除">🗑</span></label>
-    <label class="ucard" id="uc-selads-${shop}"><input type="file" accept=".xlsx,.xls" onchange="onFile(event,'${shop}','selads')"><div class="ucard-icon" id="ui-selads-${shop}">🎯</div><div class="ucard-info"><div class="ucard-title" id="ut-selads-${shop}">選品廣告清單</div><div class="ucard-sub">.xlsx（選填）</div></div><span id="del-selads-${shop}" onclick="event.preventDefault();event.stopPropagation();deleteUpload('${shop}','selads')" style="display:none;margin-left:auto;color:#ef4444;cursor:pointer;padding:2px 8px;font-size:14px;flex-shrink:0" title="刪除">🗑</span></label>
+    <label class="ucard" id="uc-ads-${shop}"><input type="file" accept=".csv" onchange="onFile(event,'${shop}','ads')"><div class="ucard-icon" id="ui-ads-${shop}">📣</div><div class="ucard-info"><div class="ucard-title" id="ut-ads-${shop}">蝦皮廣告報表</div><div class="ucard-sub" id="us-ads-${shop}">.csv</div></div><span id="del-ads-${shop}" onclick="event.preventDefault();event.stopPropagation();deleteUpload('${shop}','ads')" style="display:none;margin-left:auto;color:#ef4444;cursor:pointer;padding:2px 8px;font-size:14px;flex-shrink:0" title="刪除">🗑</span></label>
+    <label class="ucard" id="uc-selads-${shop}"><input type="file" accept=".xlsx,.xls,.csv" onchange="onFile(event,'${shop}','selads')"><div class="ucard-icon" id="ui-selads-${shop}">🎯</div><div class="ucard-info"><div class="ucard-title" id="ut-selads-${shop}">選品廣告清單</div><div class="ucard-sub" id="us-selads-${shop}">.xlsx / .csv（選填）</div></div><span id="del-selads-${shop}" onclick="event.preventDefault();event.stopPropagation();deleteUpload('${shop}','selads')" style="display:none;margin-left:auto;color:#ef4444;cursor:pointer;padding:2px 8px;font-size:14px;flex-shrink:0" title="刪除">🗑</span></label>
     <div class="spin-row" id="spin-${shop}"><div class="spin"></div>讀取中…</div>
     <button class="gen-btn" id="gen-${shop}" onclick="generate('${shop}')" disabled>▶ 產生並儲存</button>
   </div>
@@ -805,8 +805,10 @@ function onFile(e,shop,type){
       try{
         const text=new TextDecoder('utf-8').decode(ev.target.result);
         state[shop].rawAds=parseAdsCsv(text);
+        const spend=state[shop].rawAds.reduce((s,r)=>s+num(r['花費']||0),0);
         try{localStorage.setItem(fmKey(shop,'ads'),JSON.stringify({name:file.name}));}catch(e){}
         markCard(shop,'ads','✅',file.name,'ok');
+        const us=document.getElementById('us-ads-'+shop);if(us)us.textContent=`廣告費：$${spend.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})}`;
       }catch(err){markCard(shop,'ads','❌','讀取失敗','err');}
       setSpin(shop,false);checkReady(shop);
     };r.readAsArrayBuffer(file);
@@ -823,8 +825,10 @@ function onFile(e,shop,type){
           rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
         }
         state[shop].rawSelAds=rows;
+        const spend=rows.reduce((s,r)=>s+num(r['花費']||r['廣告費']||0),0);
         try{localStorage.setItem(fmKey(shop,'selads'),JSON.stringify({name:file.name}));}catch(e){}
         markCard(shop,'selads','✅',file.name,'ok');
+        const us=document.getElementById('us-selads-'+shop);if(us)us.textContent=`廣告費：$${spend.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})}`;
       }catch(err){markCard(shop,'selads','❌','讀取失敗','err');}
       setSpin(shop,false);checkReady(shop);
     };
@@ -860,7 +864,7 @@ function renderGroupAdsCards(shop){
       <span style="font-size:17px">✅</span>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:600;color:#065f46;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.name}</div>
-        <div style="font-size:11px;color:#9ca3af">${g.rows.length} 筆</div>
+        <div style="font-size:11px;color:#9ca3af">${g.rows.length} 筆｜廣告費：$${g.rows.reduce((s,r)=>s+num(r['花費']||r['廣告費']||0),0).toLocaleString('en-US',{maximumFractionDigits:0})}</div>
       </div>
       <button onclick="removeGroupAds('${shop}',${i})" style="background:none;border:none;cursor:pointer;font-size:17px;color:#ef4444;flex-shrink:0" title="刪除">🗑️</button>
     </div>`).join('');
