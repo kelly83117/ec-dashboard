@@ -1253,7 +1253,21 @@ Object.assign(App, {
     // ☁ 同步雲端：把本機累積的洞察表調整紀錄一次推上雲
     const syncBtn = document.getElementById('insight-sync-cloud');
     const syncBadge = document.getElementById('insight-sync-badge');
-    window.__insightPendingNotes = window.__insightPendingNotes || new Set();
+    // pending set 從 localStorage 還原（避免重整後遺失，導致雲端 snapshot 蓋掉未同步的本機刪除）
+    if (!window.__insightPendingNotes) {
+      window.__insightPendingNotes = new Set(
+        (() => { try { return JSON.parse(localStorage.getItem('ec.insightPendingNotes') || '[]'); } catch { return []; } })()
+      );
+    }
+    // 讓 add/delete 都同步寫回 localStorage
+    if (!window.__insightPendingNotes.__persistWrapped) {
+      const origAdd = window.__insightPendingNotes.add.bind(window.__insightPendingNotes);
+      const origDel = window.__insightPendingNotes.delete.bind(window.__insightPendingNotes);
+      const persist = () => { try { localStorage.setItem('ec.insightPendingNotes', JSON.stringify(Array.from(window.__insightPendingNotes))); } catch {} };
+      window.__insightPendingNotes.add = (k) => { const r = origAdd(k); persist(); return r; };
+      window.__insightPendingNotes.delete = (k) => { const r = origDel(k); persist(); return r; };
+      window.__insightPendingNotes.__persistWrapped = true;
+    }
     window.__updateInsightSyncBadge = () => {
       const btn = document.getElementById('insight-sync-cloud');
       const badge = document.getElementById('insight-sync-badge');

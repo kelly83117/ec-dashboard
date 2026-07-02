@@ -2550,6 +2550,16 @@ async function __setupCloud() {
       if (justSavedPlatforms && Store._mem && Store._mem[Store.KEYS.platforms] !== undefined) {
         next[Store.KEYS.platforms] = Store._mem[Store.KEYS.platforms];
       }
+      // 保護「洞察表 pending 未同步的 note key」：使用者已本機刪過調整但還沒按☁同步，
+      //   雲端還有舊資料，若讓 next 覆蓋會讓「已刪除」的調整跑回來
+      try {
+        const pending = window.__insightPendingNotes;
+        if (pending && pending.size > 0 && Store._mem) {
+          pending.forEach(pk => {
+            if (Store._mem[pk] !== undefined) next[pk] = Store._mem[pk];
+          });
+        }
+      } catch {}
       Store._mem = next;
       // 首批雲端 snapshot 一定強制重繪（即便 App 尚未準備、或 dirty check 誤判）
       // 否則手機開頁時，「dashboard 先用空資料 render → 雲端到了但被 dirty 條件擋住」會看不到數字
