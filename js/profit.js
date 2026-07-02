@@ -250,7 +250,10 @@ const GROWTH_TAGS=[
 ];
 const state={};
 const _initNow=new Date();const _initCurMonth=`${_initNow.getFullYear()}/${String(_initNow.getMonth()+1).padStart(2,'0')}`;
-SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_initCurMonth,curHalf:'first',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
+// 讀上次使用者離開時的月份/區間；沒有就用當月/上半月（讓使用者下次回來停在原本位置）
+function _readLastMonth(shopId){try{const v=localStorage.getItem('ec_lastMonth_'+shopId);return v&&MONTHS.indexOf(v)>=0?v:_initCurMonth;}catch{return _initCurMonth;}}
+function _readLastHalf(shopId){try{const v=localStorage.getItem('ec_lastHalf_'+shopId);return v==='first'||v==='second'?v:'first';}catch{return 'first';}}
+SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
 let globalMap={};
 let curShop='總表';
 let openPopup=null;
@@ -578,6 +581,7 @@ function onMonthChange(shop){
   if(!sel)return;
   delete _editedAt[shop]; // 用戶主動切換月份，清除 edit 保護
   state[shop].curMonth=sel.value;
+  try{localStorage.setItem('ec_lastMonth_'+shop,sel.value);}catch{} // 記住這個賣場的最後月份
   updateDaysBadge(shop);
   updateHalfBtnLabels(shop);
   tryLoadSaved(shop);
@@ -585,6 +589,7 @@ function onMonthChange(shop){
 function onHalfChange(shop,half,btn){
   delete _editedAt[shop]; // 用戶主動切換區間，清除 edit 保護
   state[shop].curHalf=half;
+  try{localStorage.setItem('ec_lastHalf_'+shop,half);}catch{} // 記住這個賣場的最後區間
   updateHalfBtnLabels(shop);
   updateDaysBadge(shop);
   tryLoadSaved(shop);
