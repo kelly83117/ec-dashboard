@@ -1051,7 +1051,10 @@ function findUnmatchedAds(shop){
     return {type:'code',code,spend,name:nameFromMap||nameFromAds,sids};
   });
   // TypeB（有廣告無銷售）由 buildShop 自動處理（建立零銷售列），不需要用戶介入
-  console.log(`[${shop}] TypeA(sid無對應):${typeA.length}, TypeB(有廣告無銷售，自動處理):${typeB.length}`);
+  const mapSidCount=mapped.size;
+  console.log(`[${shop}] rawMap codes:${Object.keys(pm).length}, mapped SIDs:${mapSidCount}, adsById SIDs:${Object.keys(adsById).length}, TypeA:${typeA.length}, TypeB:${typeB.length}`);
+  // 把診斷資訊附在 typeA 陣列上，供 modal 顯示
+  typeA._debug={mapSidCount,adsSidCount:Object.keys(adsById).length};
   return typeA;
 }
 
@@ -1128,7 +1131,7 @@ function openUnmatchedModal(shop,unmatched,onConfirm){
   ov.innerHTML=`<div class="ana-modal" style="width:min(860px,95vw);max-height:90vh;display:flex;flex-direction:column">
     <div class="ana-modal-hdr"><span>廣告費對帳 – ${shop}</span><button class="ana-close-btn" onclick="document.getElementById('unmatched-modal-ov').remove()">✕</button></div>
     <div style="padding:10px 20px;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <span>共 <b style="color:#374151">${unmatched.length}</b> 筆廣告費找不到對應銷售商品，合計 <b style="color:#b45309">$${fmtN(Math.round(totalSpend))}</b></span>
+      <span>共 <b style="color:#374151">${unmatched.length}</b> 筆廣告費找不到對應銷售商品，合計 <b style="color:#b45309">$${fmtN(Math.round(totalSpend))}</b><span style="font-size:11px;color:#9ca3af;margin-left:10px">（商品清單已載入 ${unmatched._debug?.mapSidCount??'?'} 個SID，廣告共 ${unmatched._debug?.adsSidCount??'?'} 個SID）</span></span>
       <div style="display:flex;gap:6px">
         <button onclick="umSetAll('merge')" style="padding:4px 10px;border:1.5px solid #e5e7eb;border-radius:6px;background:white;font-size:11px;cursor:pointer;color:#374151">全部加到現有商品</button>
         <button onclick="umSetAll('new')" style="padding:4px 10px;border:1.5px solid #5b5fcf;border-radius:6px;background:white;font-size:11px;cursor:pointer;color:#5b5fcf">全部新增到最下面</button>
