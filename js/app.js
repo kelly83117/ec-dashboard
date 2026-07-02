@@ -2449,6 +2449,23 @@ async function __setupCloud() {
     // 保險：雲端若殘留 session 就忽略，避免授權外洩
     delete cloudData[Store.KEYS.session];
 
+    // 初次雲端載入：若 localStorage 有 pending 未同步的 key，用本機版本覆蓋雲端（否則
+    // 使用者上次本機刪除的內容會被雲端舊資料蓋回來）
+    try {
+      const pendingRaw = localStorage.getItem('ec.insightPendingNotes');
+      if (pendingRaw) {
+        const pending = JSON.parse(pendingRaw);
+        if (Array.isArray(pending)) {
+          pending.forEach(pk => {
+            try {
+              const localRaw = localStorage.getItem(pk);
+              if (localRaw !== null) cloudData[pk] = JSON.parse(localRaw);
+            } catch {}
+          });
+        }
+      }
+    } catch {}
+
     Store._mem = cloudData;
     Store._useMem = true;
 
@@ -2476,11 +2493,14 @@ async function __setupCloud() {
         }
       } catch (e) { __notifyCloudFail(key, e); }
     };
-    // local-only 寫入：只更新 Store._mem + localStorage，不推雲端
+    // local-only 寫入：更新 Store._mem + localStorage，不推雲端
     // 用於多人協作場景：先在本機收集編輯，等使用者按「同步雲端」才一次推
+    // 注意：origSet 在 _useMem=true（雲端模式必為 true）時只寫 _mem 不寫 localStorage，
+    //       導致重整後本機編輯全部消失。這裡強制兩處都寫，重整後可恢復。
     Store.setLocalOnly = function(key, value) {
       if (window.__unmarkRecentlyDeleted) window.__unmarkRecentlyDeleted(key);
-      origSet(key, value);
+      try { Store._mem[key] = value; } catch {}
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
     };
     // 手動把指定 key 推到雲端（搭配 setLocalOnly 使用）
     Store.pushKeyToCloud = async function(key) {
