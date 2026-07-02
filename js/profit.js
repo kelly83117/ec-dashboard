@@ -1472,12 +1472,14 @@ function openUploadModal(){
     document.getElementById('upm-'+id).className='ucard'+(show?' ok':'');
     document.getElementById('upm-'+id+'-icon').textContent=show?okIcon:defaultIcon;
     document.getElementById('upm-'+id+'-title').textContent=show?(meta?.name||okLabel).slice(0,22):defaultLabel;
-    document.getElementById('upm-'+id+'-status').textContent=ok?'✅ 已載入':wasLoaded?'✅ 已載入（需重新上傳）':'✗ 未載入';
-    document.getElementById('upm-'+id+'-status').style.color=show?'#10b981':'#ef4444';
+    document.getElementById('upm-'+id+'-status').textContent=ok?'✅ 已載入':wasLoaded?'🔄 點此重新上傳':'✗ 未載入';
+    document.getElementById('upm-'+id+'-status').style.color=ok?'#10b981':wasLoaded?'#f59e0b':'#ef4444';
+    // ok=true：禁用 input（需透過垃圾桶刪除後才能換檔），wasLoaded：啟用 input（點卡片直接重傳）
     document.getElementById('upm-'+id+'-input').disabled=ok;
     document.getElementById('upm-'+id+'-input').style.pointerEvents=ok?'none':'';
-    document.getElementById('upm-'+id+'-del').style.opacity=show?'1':'0.35';
-    document.getElementById('upm-'+id+'-del').style.pointerEvents=show?'':'none';
+    // 垃圾桶只在 ok=true（真的載入中）才顯示，避免 label 內 button 衝突
+    document.getElementById('upm-'+id+'-del').style.opacity=ok?'1':'0.35';
+    document.getElementById('upm-'+id+'-del').style.pointerEvents=ok?'':'none';
     document.getElementById('upm-'+id).style.cursor=ok?'default':'pointer';
   }
   // sync map card state
