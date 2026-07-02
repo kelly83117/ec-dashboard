@@ -884,6 +884,7 @@ Object.assign(App, {
       ${showStatGrid ? `<div class="stat-grid">${statCards}</div>` : ''}
       ${deptId === 'd3' ? `<div style="margin-bottom:20px">${this.renderFestivalCalendarTab()}</div>` : ''}
       ${deptId === 'd1' && !subRoute ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
+      ${deptId === 'd1' && subRoute === 'kpi' ? this.renderMarketingKpiTabHtml() : ''}
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId === 'd3' ? `
@@ -910,6 +911,20 @@ Object.assign(App, {
       ` : ''}
     `;
     return deptId === 'd3' ? `<div class="dept-d3-view">${inner}</div>` : inner;
+  },
+
+  renderMarketingKpiTabHtml() {
+    return `
+      <div class="table-card">
+        <div class="table-card-header">
+          <h3>行銷團隊 KPI</h3>
+          <p>本頁預留給後續 KPI 內容</p>
+        </div>
+        <div style="padding:32px;text-align:center;color:#9ca3af">
+          尚未設定 KPI 項目
+        </div>
+      </div>
+    `;
   },
 
   renderFestivalCalendarTab() {
