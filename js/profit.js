@@ -278,9 +278,12 @@ function lsKey(shop,month,half){return`ec|${shop}|${month}|${half}`;}
 function lsSave(shop,month,half,built,period,days){
   // 只存本機；同步雲端需手動按「☁ 同步雲端」
   const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
-  try{localStorage.setItem(lsKey(shop,month,half),JSON.stringify(payload));}catch(e){}
   const k=lsKey(shop,month,half);
+  try{localStorage.setItem(k,JSON.stringify(payload));}catch(e){}
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=payload;}catch{}
+  // 記完整的 lsKey 到 pending set — 這樣使用者切到別的月份/賣場再產生報表，
+  //   舊的月份/賣場也還在 pending 裡，按同步時會一起推上雲端（避免只推當前顯示那份）
+  _pendingSyncKeys.add(k);
   _showSyncBtn(shop);
 }
 function _showSyncBtn(shop){
@@ -306,29 +309,41 @@ function syncToCloud(shop){
     if(btn)btn.disabled=false;return;
   }
   const promises=[];
-  // 同步報表（若當前 shop 有已產生的 build）
+  const syncedReports=[]; // 記錄有推的報表 key，方便 debug + toast
+  // 同步當前 shop 的備註 / 編輯（按期間獨立存）
   const s=state[shop];
-  if(s&&s._built){
-    const k=lsKey(shop,s.curMonth,s.curHalf);
-    const payload=Store._profitMem&&Store._profitMem[k];
-    if(payload) promises.push(window.__cloudProfitCol.setReport(k,payload));
-  }
-  // 同步備註（按期間獨立存）
   const _nk=shop+'|'+(s?.curMonth||'')+'|'+(s?.curHalf||'');
   const notes=getNotes(_nk);
   if(Object.keys(notes).length>0) promises.push(window.__cloudProfit.setField('ec_notes|'+_nk,notes));
-  // 同步編輯
   const edits=getEdits(shop);
   if(Object.keys(edits).length>0) promises.push(window.__cloudProfit.setField('ec_edits|'+shop,edits));
-  // 同步所有 pending keys（分析設定、成長標籤、總表 rows 等由 _cloudWriteSafe 累積下來的）
+  // 遍歷所有 pending keys：
+  //   ec|... 開頭  = 報表 key，用 setReport 推到 profits collection
+  //   __shop__|... = shop-level marker，忽略（歷史原因保留）
+  //   其他        = 設定/標籤/總表 rows 等，用 setField 推到 profit doc
   _pendingSyncKeys.forEach(pk=>{
-    if(pk.startsWith('__shop__|')) return; // 這是 shop-level marker，資料已由上面的 report 分支處理
-    // 從 _mem 或 localStorage 撈本機值推上雲端
+    if(pk.startsWith('__shop__|')) return;
+    if(pk.startsWith('ec|')){
+      // 報表 key
+      const payload=Store._profitMem&&Store._profitMem[pk];
+      if(payload){ promises.push(window.__cloudProfitCol.setReport(pk,payload)); syncedReports.push(pk); }
+      return;
+    }
+    // field key（設定類）
     let val=null;
     try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
     if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} }
     if(val!==null && val!==undefined) promises.push(window.__cloudProfit.setField(pk,val));
   });
+  // 兼容舊行為：如果 pending 沒帶當前 shop 的報表（例如舊版產生的報表），額外推一次
+  if(s&&s._built){
+    const k=lsKey(shop,s.curMonth,s.curHalf);
+    if(!syncedReports.includes(k)){
+      const payload=Store._profitMem&&Store._profitMem[k];
+      if(payload) promises.push(window.__cloudProfitCol.setReport(k,payload));
+    }
+  }
+  console.log('[syncToCloud] pushing', promises.length, '筆；報表 keys:', syncedReports);
   if(promises.length===0){
     if(typeof showToast==='function') showToast('沒有需要同步的資料','info');
     if(btn){btn.disabled=false; _showSyncBtn();} return;
