@@ -255,38 +255,21 @@ let globalMap={};
 let curShop='總表';
 let openPopup=null;
 
-// ── Storage（雲端優先、本地為快取後備） ──
-// 雲端寫入失敗時必須讓使用者知道（不能靜默吞掉），否則資料只留本機，重整就消失
+// ── Storage（本機優先、雲端手動同步） ──
+// 追蹤所有已改但還沒推雲端的 key，讓使用者按「☁ 同步雲端」時一次推
+const _pendingSyncKeys = new Set();
+function _markPending(key){
+  _pendingSyncKeys.add(key);
+  _showSyncBtn();
+}
+// 本機儲存（不推雲端），加到 pending 集合等使用者手動同步
 function _cloudWriteSafe(key, payload, label){
-  const showModal = (opts) => {
-    if (window.App && typeof window.App.showAlertModal === 'function') {
-      window.App.showAlertModal(opts);
-    } else {
-      // App 還沒就緒就退回 toast；不要再用 native alert
-      if (typeof window.showToast === 'function') window.showToast('⚠️ ' + opts.title + '：' + opts.message.split('\n')[0], 'error');
-    }
-  };
-  if(!window.__cloudProfit){
-    showModal({ title: '雲端未連線', message: '資料只存在本機，重新整理會消失。\n本次寫入：' + (label || key), kind: 'warn', dedupeKey: 'profit-no-cloud' });
-    return;
-  }
-  window.__cloudProfit.setField(key, payload).catch(e => {
-    const msg = String(e && e.message || e);
-    if(msg.indexOf('exceeds the maximum allowed size') >= 0){
-      showModal({
-        title: '雲端寫入失敗（淨利表 1 MiB 已滿）',
-        message: (label || key) + '\n\n請通知 Kelly 把舊月份搬到 archive。\n資料還在本機，重整前請先匯出 Excel 備份！',
-        detail: msg, kind: 'error', dedupeKey: 'profit-quota-' + key,
-      });
-    } else {
-      showModal({
-        title: '雲端寫入失敗',
-        message: (label || key) + '\n\n資料只存本機，重整會消失。請聯絡 Kelly。',
-        detail: msg, kind: 'error', dedupeKey: 'profit-fail-' + key,
-      });
-    }
-    console.error('[cloud write fail]', label || key, e);
-  });
+  // 存 localStorage
+  try{ localStorage.setItem(key, JSON.stringify(payload)); }catch{}
+  // 存 in-memory mirror（讓其他讀取的地方拿得到最新值）
+  try{ if(typeof Store!=='undefined' && Store._mem) Store._mem[key] = payload; }catch{}
+  // 標記待同步
+  _markPending(key);
 }
 function lsKey(shop,month,half){return`ec|${shop}|${month}|${half}`;}
 function lsSave(shop,month,half,built,period,days){
@@ -298,8 +281,18 @@ function lsSave(shop,month,half,built,period,days){
   _showSyncBtn(shop);
 }
 function _showSyncBtn(shop){
+  // 標記該 shop 的資料為 pending（給既有 lsSave 呼叫用）
+  if(shop) _pendingSyncKeys.add('__shop__|'+shop);
   const btn=document.getElementById('global-sync-btn');
-  if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent='☁ 同步雲端';}
+  if(!btn) return;
+  const n=_pendingSyncKeys.size;
+  if(n===0){
+    // 沒有待同步：按鈕還是可按（讓使用者隨時能推），但變灰淡
+    btn.disabled=false;btn.style.opacity='0.6';btn.style.cursor='pointer';btn.style.background='';btn.style.color='';btn.style.borderColor='';btn.textContent='☁ 同步雲端';
+  }else{
+    // 有待同步：橘色亮起 + 顯示筆數
+    btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent=`☁ 同步雲端 (${n})`;
+  }
 }
 function syncToCloud(shop){
   const btn=document.getElementById('global-sync-btn');
@@ -310,7 +303,7 @@ function syncToCloud(shop){
     if(btn)btn.disabled=false;return;
   }
   const promises=[];
-  // 同步報表
+  // 同步報表（若當前 shop 有已產生的 build）
   const s=state[shop];
   if(s&&s._built){
     const k=lsKey(shop,s.curMonth,s.curHalf);
@@ -324,14 +317,25 @@ function syncToCloud(shop){
   // 同步編輯
   const edits=getEdits(shop);
   if(Object.keys(edits).length>0) promises.push(window.__cloudProfit.setField('ec_edits|'+shop,edits));
+  // 同步所有 pending keys（分析設定、成長標籤、總表 rows 等由 _cloudWriteSafe 累積下來的）
+  _pendingSyncKeys.forEach(pk=>{
+    if(pk.startsWith('__shop__|')) return; // 這是 shop-level marker，資料已由上面的 report 分支處理
+    // 從 _mem 或 localStorage 撈本機值推上雲端
+    let val=null;
+    try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
+    if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} }
+    if(val!==null && val!==undefined) promises.push(window.__cloudProfit.setField(pk,val));
+  });
   if(promises.length===0){
     if(typeof showToast==='function') showToast('沒有需要同步的資料','info');
-    if(btn)btn.disabled=false;return;
+    if(btn){btn.disabled=false; _showSyncBtn();} return;
   }
   Promise.all(promises).then(()=>{
-    if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';setTimeout(()=>{btn.style.display='none';},2000);}
-    // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌（含洞察表與淨利表）
-    // pushToCloud:true → 連同工作日誌也一起推給老闆，避免切頁時還跳「未同步」提醒
+    // 同步完成 → 清 pending set
+    _pendingSyncKeys.clear();
+    if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';setTimeout(()=>{ _showSyncBtn(); },2000);}
+    if(typeof showToast==='function') showToast('✓ 已同步 '+promises.length+' 筆到雲端','success');
+    // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌
     try { if(window.App && typeof App._updateDailyProgressFromAdjustments === 'function') App._updateDailyProgressFromAdjustments({ pushToCloud: true }); }
     catch(e){ console.warn('[autoSummary profit]', e); }
   }).catch(e=>{
@@ -339,7 +343,7 @@ function syncToCloud(shop){
     if(window.App&&typeof App.showAlertModal==='function'){
       App.showAlertModal({title:'淨利表同步失敗',message:'部分資料沒推上雲端。資料還在本機，重整前請先匯出 Excel 備份。',detail:msg,kind:'error'});
     } else if(typeof showToast==='function') showToast('同步失敗：'+msg,'error');
-    if(btn){btn.disabled=false;btn.textContent='☁ 同步雲端';}
+    if(btn){btn.disabled=false; _showSyncBtn();}
   });
 }
 function lsLoad(shop,month,half){
