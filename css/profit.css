@@ -79,7 +79,9 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .period-tag{font-size:12px;color:#6b7280;background:#f3f4f6;padding:3px 10px;border-radius:6px;font-family:'DM Mono',monospace;}
 
 /* Table */
-.tscroll{overflow-x:scroll;overflow-y:auto;max-height:820px;scrollbar-gutter:stable;}
+/* max-height 改用視窗相對高度：讓 .tscroll box 底部（水平滾軸位置）永遠在
+   viewport 內，使用者不必往下滾才看得到水平滾軸 */
+.tscroll{overflow-x:scroll;overflow-y:auto;max-height:calc(100vh - 280px);min-height:420px;scrollbar-gutter:stable;}
 /* 水平滾軸永遠可見，避免使用者不知道有更多欄位可以往右滑（Windows 11 Chrome 預設 auto 會 hover 才顯示） */
 .tscroll::-webkit-scrollbar{height:12px;width:12px;}
 .tscroll::-webkit-scrollbar-track{background:#f1f5f9;border-radius:6px;}
