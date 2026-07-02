@@ -635,16 +635,35 @@ function clearPeriod(shop){
   // 清除報表
   try{localStorage.removeItem(lsKey(shop,s.curMonth,s.curHalf));}catch(e){}
   try{if(typeof Store!=='undefined'&&Store._profitMem)delete Store._profitMem[lsKey(shop,s.curMonth,s.curHalf)];}catch{}
-  // 清除上傳的檔案資料與 localStorage 中的 filemeta
+  // 清除上傳的檔案資料（全部 localStorage filemeta key，不管哪個區間）
   state[shop].rawMobic=null;
   state[shop].rawAds=null;
   state[shop].rawSelAds=null;
   state[shop].rawGroupAdsList=[];
   state[shop]._built=null;state[shop]._period='';state[shop]._extraAdsFee=0;
-  ['mobic','ads','selads'].forEach(t=>{try{localStorage.removeItem(fmKey(shop,t));}catch(e){}});
+  // 刪除所有此賣場的 filemeta（不限月份/區間）
+  const keysToRemove=[];
+  for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith(`ec|filemeta|${shop}|`))keysToRemove.push(k);}
+  keysToRemove.forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
   saveGroupAdsMeta(shop);
-  // 重置上傳卡片 UI
+  // 重置上傳卡片 UI（uc- 舊版 & upm- 新版）
   resetUploadCards(shop);
+  // 直接重設 upm 卡片（不靠 openUploadModal 重開）
+  ['mobic','ads'].forEach(t=>{
+    const icon=t==='mobic'?'📦':'📣';const label=t==='mobic'?'莫筆克銷售分析':'蝦皮廣告報表';
+    const el=document.getElementById('upm-'+t);if(el)el.className='ucard';
+    const ei=document.getElementById('upm-'+t+'-icon');if(ei)ei.textContent=icon;
+    const et=document.getElementById('upm-'+t+'-title');if(et)et.textContent=label;
+    const es=document.getElementById('upm-'+t+'-status');if(es){es.textContent='✗ 未載入';es.style.color='#ef4444';}
+    const ed=document.getElementById('upm-'+t+'-del');if(ed){ed.style.opacity='0.35';ed.style.pointerEvents='none';}
+    const inp=document.getElementById('upm-'+t+'-input');if(inp){inp.disabled=false;inp.style.pointerEvents='';inp.value='';}
+  });
+  const selSt=document.getElementById('upm-selads-status');if(selSt){selSt.textContent='— 選填';selSt.style.color='#9ca3af';}
+  const selEl=document.getElementById('upm-selads');if(selEl)selEl.className='ucard';
+  const selI=document.getElementById('upm-selads-icon');if(selI)selI.textContent='🎯';
+  const selT=document.getElementById('upm-selads-title');if(selT)selT.textContent='選品廣告清單';
+  const selD=document.getElementById('upm-selads-del');if(selD){selD.style.opacity='0.35';selD.style.pointerEvents='none';}
+  const genBtn=document.getElementById('upm-gen-btn');if(genBtn)genBtn.disabled=true;
   // 重置表格 & KPI
   document.getElementById('period-tag-'+shop).textContent='';
   document.getElementById('period-tag-'+shop).style.display='none';
