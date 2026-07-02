@@ -1,5 +1,5 @@
 {
-  "updated": "2026-07-01",
+  "updated": "2026-07-02",
   "items": [
     {
       "keyword": "收纳盒",
@@ -7,39 +7,39 @@
       "price_range": "3-8元",
       "moq": "100個",
       "reason": "暑假整理收納旺季",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=收纳盒"
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E7%9B%92"
     },
     {
       "keyword": "厨房用具",
-      "name": "实用厨房工具套装",
-      "price_range": "5-15元",
+      "name": "不锈钢厨具套装",
+      "price_range": "15-40元",
       "moq": "50套",
-      "reason": "暑假家庭聚餐需求增加",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=厨房用具"
+      "reason": "夏季烹饪需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E7%94%A8%E5%85%B7"
     },
     {
       "keyword": "浴室收纳",
       "name": "浴室置物架",
-      "price_range": "20-50元",
+      "price_range": "20-60元",
       "moq": "30个",
-      "reason": "夏季清凉浴室整理需求",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=浴室收纳"
+      "reason": "暑假家庭装修潮",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%BA%B3"
     },
     {
       "keyword": "床上用品",
-      "name": "夏季清凉床单",
-      "price_range": "15-30元",
+      "name": "凉感床单",
+      "price_range": "25-70元",
       "moq": "50套",
-      "reason": "夏季床品更新热潮",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=床上用品"
+      "reason": "夏季降温需求上升",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E4%B8%8A%E7%94%A8%E5%93%81"
     },
     {
       "keyword": "清洁工具",
-      "name": "多功能清洁拖把",
+      "name": "环保清洁拖把",
       "price_range": "10-25元",
       "moq": "100个",
-      "reason": "暑假大扫除需求增加",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=清洁工具"
+      "reason": "暑假大扫除时节",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E5%B7%A5%E5%85%B7"
     }
   ]
 }
