@@ -713,44 +713,76 @@ function onMapFile(e,shop){
     try{
       const wb=XLSX.read(ev.target.result,{type:'binary'});
       globalMap={};let cnt=0;
+      // 賣場別名：sheet 名稱含這些字串會分派到對應 shop（大小寫不敏感）
+      const SHOP_MATCH_ALIASES = {
+        '好麻吉': ['好麻吉','生活好麻吉'],
+        '玩樂':   ['玩樂','玩樂盒子'],
+        '森之旅': ['森之旅'],
+        '維克':   ['維克','維克生活']
+      };
+      const sheetAssignments = []; // [{sheet, shop, codes}] 之後 console 輸出
       wb.SheetNames.forEach(sName=>{
         // 用 header:1 讀陣列，避免欄名有不可見字元導致對不到
         const raw=XLSX.utils.sheet_to_json(wb.Sheets[sName],{header:1,defval:''});
-        if(raw.length<2)return;
+        if(raw.length<2){sheetAssignments.push({sheet:sName,shop:'(空 sheet)',codes:0});return;}
         // 找各欄的 index（從第一列 header 辨識）
         const hdr=raw[0].map(h=>String(h).trim());
         const colCode=hdr.findIndex(h=>h==='商品選項貨號'||h==='商品編號');
         const colSid=hdr.findIndex(h=>h==='商品ID'||h==='商品 ID');
         const colName=hdr.findIndex(h=>h==='莫比克名'||h==='商品名稱');
-        if(colCode<0||colSid<0)return; // 找不到必要欄
-        const sk=SHOPS.find(s=>sName.includes(s.id)||s.id.includes(sName))?.id||sName;
+        if(colCode<0||colSid<0){sheetAssignments.push({sheet:sName,shop:'(缺欄位)',codes:0});return;}
+        // 用別名 + fallback substring 分派
+        const sNameLower = sName.toLowerCase();
+        let sk = null;
+        for(const s of SHOPS){
+          const aliases = SHOP_MATCH_ALIASES[s.id] || [s.id];
+          if(aliases.some(a=>sNameLower.includes(a.toLowerCase()) || a.toLowerCase().includes(sNameLower))){
+            sk = s.id; break;
+          }
+        }
+        if(!sk) sk = sName; // fallback：分到一個「未匹配」bucket，不會被任何 shop 使用
         if(!globalMap[sk])globalMap[sk]={};
+        let sheetCnt = 0;
         raw.slice(1).forEach(row=>{
           const code=String(row[colCode]||'').trim();
           const rawSid=row[colSid];
           if(!code||rawSid===''||rawSid===undefined||rawSid===null)return;
           let sid=Math.round(Number(rawSid)).toString();
           if(sid==='NaN'||sid==='0'||sid.length<5)return;
-          if(!globalMap[sk][code]){globalMap[sk][code]={sids:[],name:''};cnt++;}
+          if(!globalMap[sk][code]){globalMap[sk][code]={sids:[],name:''};cnt++;sheetCnt++;}
           if(!globalMap[sk][code].sids.includes(sid))globalMap[sk][code].sids.push(sid);
           const pName=colName>=0?String(row[colName]||'').trim():'';
           if(pName&&!globalMap[sk][code].name)globalMap[sk][code].name=pName;
         });
+        sheetAssignments.push({sheet:sName,shop:sk,codes:sheetCnt});
       });
+      console.log('[商品對照表] sheet 分派結果：',sheetAssignments);
       try{localStorage.setItem('ec|filemeta|globalMap',JSON.stringify({name:file.name,cnt}));}catch(e){}
       SHOPS.forEach(s=>{
         state[s.id].rawMap=globalMap[s.id]||{};
+        const shopCnt = Object.keys(globalMap[s.id]||{}).length;
         const uc=document.getElementById('uc-map-'+s.id);
         const ui=document.getElementById('ui-map-'+s.id);
         const ut=document.getElementById('ut-map-'+s.id);
         const us=document.getElementById('us-map-'+s.id);
-        if(uc)uc.className='ucard ok';
-        if(ui)ui.textContent='✅';
+        if(uc)uc.className = shopCnt > 0 ? 'ucard ok' : 'ucard'; // 0 筆就不顯示 ok
+        if(ui)ui.textContent = shopCnt > 0 ? '✅' : '⚠️';
         if(ut)ut.textContent=file.name;
-        if(us)us.textContent=`已載入 ${cnt} 筆`;
+        if(us)us.textContent = shopCnt > 0 ? `已載入 ${shopCnt} 筆` : '⚠ 對照到 0 筆，此賣場廣告費將全部要手動對應';
         const del=document.getElementById('del-map-'+s.id);if(del)del.style.display='';
         checkReady(s.id);
       });
+      // 若有任何賣場 0 筆，顯示警告
+      const zeroShops = SHOPS.filter(s=>!globalMap[s.id]||Object.keys(globalMap[s.id]).length===0).map(s=>s.id);
+      if(zeroShops.length>0){
+        const unclaimedSheets = sheetAssignments.filter(a=>!SHOPS.some(s=>s.id===a.shop)).map(a=>`「${a.sheet}」→ ${a.shop}`).join('\n');
+        showMapWarnBanner(
+          `⚠️ 這些賣場沒有對照到商品：${zeroShops.join('、')}\n\n`+
+          `原因可能是 Excel 內對應 sheet 名稱不含賣場名。已知 sheet 分派：\n`+
+          sheetAssignments.map(a=>`・「${a.sheet}」→ ${a.shop}（${a.codes} 筆）`).join('\n')+
+          `\n\n請把 sheet 改名（含賣場關鍵字如「好麻吉」/「生活好麻吉」），或告訴管理員。`
+        );
+      }
       // 驗證對照表（先關閉 modal，確保警示可見）
       closeUploadModal();
       setTimeout(()=>validateMapWarnings(globalMap),200);
