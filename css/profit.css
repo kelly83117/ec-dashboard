@@ -79,7 +79,13 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .period-tag{font-size:12px;color:#6b7280;background:#f3f4f6;padding:3px 10px;border-radius:6px;font-family:'DM Mono',monospace;}
 
 /* Table */
-.tscroll{overflow-x:auto;max-height:820px;overflow-y:auto;}
+.tscroll{overflow-x:scroll;overflow-y:auto;max-height:820px;scrollbar-gutter:stable;}
+/* 水平滾軸永遠可見，避免使用者不知道有更多欄位可以往右滑（Windows 11 Chrome 預設 auto 會 hover 才顯示） */
+.tscroll::-webkit-scrollbar{height:12px;width:12px;}
+.tscroll::-webkit-scrollbar-track{background:#f1f5f9;border-radius:6px;}
+.tscroll::-webkit-scrollbar-thumb{background:#94a3b8;border-radius:6px;border:2px solid #f1f5f9;}
+.tscroll::-webkit-scrollbar-thumb:hover{background:#64748b;}
+.tscroll::-webkit-scrollbar-corner{background:#f1f5f9;}
 table{width:100%;border-collapse:collapse;font-size:13px;}
 thead tr{background:#f8f9fc;position:sticky;top:0;z-index:3;}
 th{padding:9px 18px;text-align:right;font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.04em;text-transform:uppercase;border-bottom:1px solid #e4e6ef;white-space:nowrap;cursor:pointer;user-select:none;}
