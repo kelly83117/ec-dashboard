@@ -3371,6 +3371,10 @@ document.addEventListener('click', function(e) {
 
 /* ===================== window 匯流排 ===================== */
 Object.assign(window, { SHOPS, MONTHS, HALVES, state, globalMap });
+// curShop 是 module 內部 let，會被 setShop / setCoupangShop / setMomoShop 重新賦值。
+// inline handler（如 onclick="syncToCloud(curShop)"）在 ESM 下讀不到 module scope，
+// 用 defineProperty 掛成 window 的 live getter，每次讀都拿到最新值。
+Object.defineProperty(window, 'curShop', { get: () => curShop, configurable: true });
 
 Object.assign(window, {
   _cloudRead,_cloudWrite,_cloudWriteSafe,_doGenerate,_showSyncBtn,addGrowthCond,addNewAnaCond,
