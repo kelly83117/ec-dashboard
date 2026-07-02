@@ -630,10 +630,21 @@ function tryLoadSaved(shop){
 }
 function clearPeriod(shop){
   const s=state[shop];
-  if(!confirm(`確定要清除「${shop}」${s._period||'此區間'}的報表嗎？`))return;
+  if(!confirm(`確定要清除「${shop}」${s._period||'此區間'}的報表與已上傳的檔案嗎？`))return;
+  // 清除報表
   try{localStorage.removeItem(lsKey(shop,s.curMonth,s.curHalf));}catch(e){}
   try{if(typeof Store!=='undefined'&&Store._profitMem)delete Store._profitMem[lsKey(shop,s.curMonth,s.curHalf)];}catch{}
+  // 清除上傳的檔案資料與 localStorage 中的 filemeta
+  state[shop].rawMobic=null;
+  state[shop].rawAds=null;
+  state[shop].rawSelAds=null;
+  state[shop].rawGroupAdsList=[];
   state[shop]._built=null;state[shop]._period='';state[shop]._extraAdsFee=0;
+  ['mobic','ads','selads'].forEach(t=>{try{localStorage.removeItem(fmKey(shop,t));}catch(e){}});
+  saveGroupAdsMeta(shop);
+  // 重置上傳卡片 UI
+  resetUploadCards(shop);
+  // 重置表格 & KPI
   document.getElementById('period-tag-'+shop).textContent='';
   document.getElementById('period-tag-'+shop).style.display='none';
   const search=document.getElementById('search-'+shop);if(search)search.style.display='none';
@@ -642,6 +653,8 @@ function clearPeriod(shop){
   setKpis(shop,0,0,0,0);
   const cb=document.getElementById('clear-btn-'+shop);if(cb)cb.style.display='none';
   const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;
+  // 重置廣告群組卡片
+  const groupList=document.getElementById('upm-groupads-list');if(groupList)groupList.innerHTML='';
 }
 function loadIntoUI(shop,built,period,days){
   if(built&&Array.isArray(built)){
