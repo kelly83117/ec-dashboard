@@ -1944,13 +1944,27 @@ Object.assign(App, {
       this.render();
     };
 
-    // 關閉備註視窗後 → 把該商品列捲回視野中央，不要被 render() 把畫面拉回最上面
+    // 開 modal 前先記下 main 的捲軸位置，關閉後還原（不再強制置中，避免商品跳位）
+    const _mainEl = document.querySelector('.main') || document.getElementById('main-content');
+    const _savedScroll = _mainEl ? _mainEl.scrollTop : 0;
+    // 關閉備註視窗後 → 還原原本捲軸位置，讓使用者停在原本看的地方
     const scrollBackToProduct = () => {
-      // render() 改 innerHTML 會把 main 的 scrollTop 重置為 0，等下個 frame 再找元素
       requestAnimationFrame(() => {
         try {
+          const mainEl = document.querySelector('.main') || document.getElementById('main-content');
+          if (!mainEl) return;
+          // 先試著還原原本位置
+          mainEl.scrollTop = _savedScroll;
+          // 若排序變動導致商品完全不在視野（例如剛加了調整，該商品被排到最新頂端），
+          // 才 fallback 用 scrollIntoView 找回來。用容器 bounds 判斷，不是 window.innerHeight
           const el = document.querySelector(`[data-insight-note="${CSS.escape(code)}"]`);
-          if (el) el.scrollIntoView({ block: 'center', behavior: 'instant' });
+          if (el) {
+            const cRect = mainEl.getBoundingClientRect();
+            const eRect = el.getBoundingClientRect();
+            // 只有「完全在容器視野外」（整個元素在頂邊上或底邊下）才 fallback
+            const totallyOutOfView = eRect.bottom < cRect.top || eRect.top > cRect.bottom;
+            if (totallyOutOfView) el.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+          }
         } catch {}
       });
     };
