@@ -286,12 +286,18 @@ function lsSave(shop,month,half,built,period,days){
   _pendingSyncKeys.add(k);
   _showSyncBtn(shop);
 }
+// 真實 pending 筆數（排除 __shop__| 這種只用來點亮按鈕的 marker）
+function _realPendingCount(){
+  let n=0;
+  _pendingSyncKeys.forEach(k=>{ if(!k.startsWith('__shop__|')) n++; });
+  return n;
+}
+window.__profitPendingCount = _realPendingCount;
+
 function _showSyncBtn(shop){
-  // 標記該 shop 的資料為 pending（給既有 lsSave 呼叫用）
-  if(shop) _pendingSyncKeys.add('__shop__|'+shop);
   const btn=document.getElementById('global-sync-btn');
   if(!btn) return;
-  const n=_pendingSyncKeys.size;
+  const n=_realPendingCount();
   if(n===0){
     // 沒有待同步：按鈕還是可按（讓使用者隨時能推），但變灰淡
     btn.disabled=false;btn.style.opacity='0.6';btn.style.cursor='pointer';btn.style.background='';btn.style.color='';btn.style.borderColor='';btn.textContent='☁ 同步雲端';

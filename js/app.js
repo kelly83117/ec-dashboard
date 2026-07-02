@@ -828,10 +828,10 @@ const App = {
     if (window.__insightPendingNotes && window.__insightPendingNotes.size > 0) {
       reasons.push(`洞察表（${window.__insightPendingNotes.size} 個賣場）`);
     }
-    // 淨利表：global-sync-btn 沒有 hidden 且非 disabled 時 = 有 pending
-    const profitBtn = document.getElementById('global-sync-btn');
-    if (profitBtn && profitBtn.style.display !== 'none' && !profitBtn.disabled) {
-      reasons.push('淨利表');
+    // 淨利表：讀真實 pending 計數（排除 shop marker）
+    const profitPending = typeof window.__profitPendingCount === 'function' ? window.__profitPendingCount() : 0;
+    if (profitPending > 0) {
+      reasons.push(`淨利表（${profitPending} 筆）`);
     }
     if (window.__dpPendingNames && window.__dpPendingNames.size > 0) {
       reasons.push(`工作日誌（${window.__dpPendingNames.size} 人）`);
