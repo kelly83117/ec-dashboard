@@ -93,6 +93,10 @@ thead tr{background:#f8f9fc;position:sticky;top:0;z-index:3;}
 th{padding:9px 18px;text-align:right;font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.04em;text-transform:uppercase;border-bottom:1px solid #e4e6ef;white-space:nowrap;cursor:pointer;user-select:none;}
 th:hover{color:#5b5fcf;}
 th.tl{text-align:left;}
+th[draggable="true"]{cursor:grab;}
+th[draggable="true"]:active{cursor:grabbing;}
+th.col-dragging{opacity:.35;}
+th.col-drag-over{box-shadow:inset 2px 0 0 #5b5fcf;}
 .tscroll td{padding:11px 18px;border-bottom:1px solid #f0f2f7;text-align:right;color:#374151;white-space:nowrap;font-size:15px;font-family:'Noto Sans TC',sans-serif !important;}
 td{padding:11px 18px;border-bottom:1px solid #f0f2f7;text-align:right;color:#374151;white-space:nowrap;font-size:14px;}
 td.tl{text-align:left;}
