@@ -214,7 +214,7 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 /* Filter popup */
 .th-wrap{position:relative;display:inline-flex;align-items:center;gap:3px;width:100%;justify-content:flex-end;}
 .th-wrap.tl{justify-content:flex-start;}
-.filter-btn{background:none;border:none;cursor:pointer;color:#d1d5db;font-size:11px;padding:0 2px;line-height:1;transition:color .12s;}
+.filter-btn{background:none;border:none;cursor:pointer;color:#d1d5db;font-size:15px;padding:0 2px;line-height:1;transition:color .12s;}
 .filter-btn:hover,.filter-btn.on{color:#5b5fcf;}
 .filter-popup{display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:100;background:#fff;border:1px solid #e4e6ef;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.12);padding:14px;min-width:230px;}
 .filter-popup.tl{right:auto;left:0;}
