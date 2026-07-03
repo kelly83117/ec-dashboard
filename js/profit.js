@@ -1633,8 +1633,21 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit){
   return{label:'',cls:''};
 }
 
+// 新增自訂標籤表單共用：新增/刪除條件會整段重繪表單，重繪前先把使用者
+// 已輸入的名稱/顏色/條件值同步回草稿變數，避免整段被預設值蓋掉。
+function _syncCondDraft(conds,containerSel){
+  document.querySelectorAll(containerSel+' .ana-cond-row').forEach((row,i)=>{
+    if(!conds[i])return;
+    conds[i].f=row.querySelector('.ana-cond-f').value;
+    conds[i].op=row.querySelector('.ana-cond-op').value;
+    conds[i].v=row.querySelector('.ana-cond-v').value;
+  });
+}
+
 // ── 分析設定 Modal ──
 let _anaNewConds=[];
+let _anaNewLabel='';
+let _anaNewCls='tag-add300';
 const ANA_FIELD_OPTS=[
   {v:'D',l:'廣告費(D)'},{v:'H',l:'淨利率%(H)'},{v:'K',l:'目標ROI(K)'},
   {v:'N',l:'實際-目標(N)'},{v:'O',l:'點擊數(O)'},{v:'P',l:'純利(P)'}
@@ -1659,7 +1672,7 @@ function openAnaSettings(shop){
     ov.onclick=closeAnaSettings;
     document.body.appendChild(ov);
   }
-  _anaNewConds=[];
+  _anaNewConds=[];_anaNewLabel='';_anaNewCls='tag-add300';
   renderAnaModalBody();
   ov.classList.add('open');
 }
@@ -1891,7 +1904,7 @@ function renderAnaModalBody(){
   const t=getAnaThresh();const custom=getCustomAnaRules();
   const disabled=getDisabledAnaTags();
   const inp=(id,val,step='1',w='58px')=>`<input type="number" id="anas-${id}" value="${val}" step="${step}" style="width:${w}">`;
-  const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}">${o.l}</option>`).join('');
+  const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}"${o.v===_anaNewCls?' selected':''}>${o.l}</option>`).join('');
   const condRowHtml=(i,c)=>`<div class="ana-cond-row" id="anacr-${i}">
     <select class="ana-cond-f">${ANA_FIELD_OPTS.map(o=>`<option value="${o.v}"${o.v===c.f?' selected':''}>${o.l}</option>`).join('')}</select>
     <select class="ana-cond-op">${['>=','>','<=','<','=','!='].map(o=>`<option value="${o}"${o===c.op?' selected':''}>${o}</option>`).join('')}</select>
@@ -1932,15 +1945,20 @@ function renderAnaModalBody(){
     ${disabledSection}
     <div class="ana-add-box" style="margin-top:14px">
       <div class="ana-add-box-title">＋ 新增自訂標籤</div>
-      <div class="ana-field-row"><label>名稱</label><input type="text" id="anas-new-label" placeholder="標籤名稱"></div>
+      <div class="ana-field-row"><label>名稱</label><input type="text" id="anas-new-label" placeholder="標籤名稱" value="${_anaNewLabel.replace(/"/g,'&quot;')}"></div>
       <div class="ana-field-row"><label>顏色</label><select id="anas-new-cls">${clsOpts}</select></div>
       <div class="ana-conds-wrap" id="ana-new-conds">${condRows}</div>
       <button class="ana-add-cond-btn" onclick="addNewAnaCond()">＋ 新增條件</button>
       <div class="ana-submit-row"><button class="ana-add-rule-btn" onclick="submitNewAnaRule()">新增標籤</button></div>
     </div>`;
 }
-function addNewAnaCond(){_anaNewConds.push({f:'D',op:'>=',v:'0'});renderAnaModalBody();}
-function removeNewCond(i){_anaNewConds.splice(i,1);renderAnaModalBody();}
+function _syncAnaNewDraft(){
+  _anaNewLabel=document.getElementById('anas-new-label')?.value??_anaNewLabel;
+  _anaNewCls=document.getElementById('anas-new-cls')?.value??_anaNewCls;
+  _syncCondDraft(_anaNewConds,'#ana-new-conds');
+}
+function addNewAnaCond(){_syncAnaNewDraft();_anaNewConds.push({f:'D',op:'>=',v:'0'});renderAnaModalBody();}
+function removeNewCond(i){_syncAnaNewDraft();_anaNewConds.splice(i,1);renderAnaModalBody();}
 function readNewConds(){
   const rows=document.querySelectorAll('#ana-new-conds .ana-cond-row');
   return Array.from(rows).map(r=>({
@@ -1958,7 +1976,7 @@ function submitNewAnaRule(){
   const rules=getCustomAnaRules();
   rules.push({label,cls,conds});
   saveCustomAnaRules(rules);
-  _anaNewConds=[];
+  _anaNewConds=[];_anaNewLabel='';_anaNewCls='tag-add300';
   renderAnaModalBody();
   reapplyAnaToAll();
 }
@@ -1996,6 +2014,8 @@ function reapplyAnaToAll(){
 
 // ── 測試標籤（純自訂規則，沿用分析標籤同一套條件引擎，但獨立存放） ──
 let _testNewConds=[];
+let _testNewLabel='';
+let _testNewCls='tag-add300';
 function getCustomTestRules(){return _cloudRead('ec_test_custom')||[];}
 function saveCustomTestRules(r){_cloudWrite('ec_test_custom',r);}
 function calcTestTag(D,H,K,N,O,P){
@@ -2027,14 +2047,14 @@ function openTestSettings(shop){
     ov.onclick=closeTestSettings;
     document.body.appendChild(ov);
   }
-  _testNewConds=[];
+  _testNewConds=[];_testNewLabel='';_testNewCls='tag-add300';
   renderTestModalBody();
   ov.classList.add('open');
 }
 function closeTestSettings(){document.getElementById('test-overlay')?.classList.remove('open');}
 function renderTestModalBody(){
   const custom=getCustomTestRules();
-  const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}">${o.l}</option>`).join('');
+  const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}"${o.v===_testNewCls?' selected':''}>${o.l}</option>`).join('');
   const condRowHtml=(i,c)=>`<div class="ana-cond-row" id="testcr-${i}">
     <select class="ana-cond-f">${ANA_FIELD_OPTS.map(o=>`<option value="${o.v}"${o.v===c.f?' selected':''}>${o.l}</option>`).join('')}</select>
     <select class="ana-cond-op">${['>=','>','<=','<','=','!='].map(o=>`<option value="${o}"${o===c.op?' selected':''}>${o}</option>`).join('')}</select>
@@ -2052,15 +2072,20 @@ function renderTestModalBody(){
     <div id="test-custom-list">${customRows}</div>
     <div class="ana-add-box" style="margin-top:14px">
       <div class="ana-add-box-title">＋ 新增測試標籤</div>
-      <div class="ana-field-row"><label>名稱</label><input type="text" id="tests-new-label" placeholder="標籤名稱"></div>
+      <div class="ana-field-row"><label>名稱</label><input type="text" id="tests-new-label" placeholder="標籤名稱" value="${_testNewLabel.replace(/"/g,'&quot;')}"></div>
       <div class="ana-field-row"><label>顏色</label><select id="tests-new-cls">${clsOpts}</select></div>
       <div class="ana-conds-wrap" id="test-new-conds">${condRows}</div>
       <button class="ana-add-cond-btn" onclick="addNewTestCond()">＋ 新增條件</button>
       <div class="ana-submit-row"><button class="ana-add-rule-btn" onclick="submitNewTestRule()">新增標籤</button></div>
     </div>`;
 }
-function addNewTestCond(){_testNewConds.push({f:'D',op:'>=',v:'0'});renderTestModalBody();}
-function removeNewTestCond(i){_testNewConds.splice(i,1);renderTestModalBody();}
+function _syncTestNewDraft(){
+  _testNewLabel=document.getElementById('tests-new-label')?.value??_testNewLabel;
+  _testNewCls=document.getElementById('tests-new-cls')?.value??_testNewCls;
+  _syncCondDraft(_testNewConds,'#test-new-conds');
+}
+function addNewTestCond(){_syncTestNewDraft();_testNewConds.push({f:'D',op:'>=',v:'0'});renderTestModalBody();}
+function removeNewTestCond(i){_syncTestNewDraft();_testNewConds.splice(i,1);renderTestModalBody();}
 function readNewTestConds(){
   const rows=document.querySelectorAll('#test-new-conds .ana-cond-row');
   return Array.from(rows).map(r=>({
@@ -2078,7 +2103,7 @@ function submitNewTestRule(){
   const rules=getCustomTestRules();
   rules.push({label,cls,conds});
   saveCustomTestRules(rules);
-  _testNewConds=[];
+  _testNewConds=[];_testNewLabel='';_testNewCls='tag-add300';
   renderTestModalBody();
   reapplyTestTagToAll();
 }
@@ -2116,6 +2141,8 @@ function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate) {
 
 // ── 成長分析設定 Modal ──
 let _growthNewConds=[];
+let _growthNewLabel='';
+let _growthNewCls='tag-add300';
 const GROWTH_FIELD_OPTS=[
   {v:'G',l:'成長率%(G)'},{v:'R',l:'營收(R)'},{v:'P',l:'淨利率%(P)'},{v:'prevRev',l:'上期營收'}
 ];
@@ -2134,7 +2161,7 @@ function openGrowthSettings(shop){
     ov.onclick=closeGrowthSettings;
     document.body.appendChild(ov);
   }
-  _growthNewConds=[];
+  _growthNewConds=[];_growthNewLabel='';_growthNewCls='tag-add300';
   renderGrowthModalBody();
   ov.classList.add('open');
 }
@@ -2143,7 +2170,7 @@ function renderGrowthModalBody(){
   const t=getGrowthThresh();const custom=getCustomGrowthRules();
   const disabled=getDisabledGrowthTags();
   const inp=(id,val,step='1',w='70px')=>`<input type="number" id="grths-${id}" value="${val}" step="${step}" style="width:${w}">`;
-  const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}">${o.l}</option>`).join('');
+  const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}"${o.v===_growthNewCls?' selected':''}>${o.l}</option>`).join('');
   const condRowHtml=(i,c)=>`<div class="ana-cond-row" id="grthcr-${i}">
     <select class="ana-cond-f">${GROWTH_FIELD_OPTS.map(o=>`<option value="${o.v}"${o.v===c.f?' selected':''}>${o.l}</option>`).join('')}</select>
     <select class="ana-cond-op">${['>=','>','<=','<','=','!='].map(o=>`<option value="${o}"${o===c.op?' selected':''}>${o}</option>`).join('')}</select>
@@ -2173,15 +2200,20 @@ function renderGrowthModalBody(){
     ${disabledSection}
     <div class="ana-add-box" style="margin-top:14px">
       <div class="ana-add-box-title">＋ 新增自訂標籤</div>
-      <div class="ana-field-row"><label>名稱</label><input type="text" id="grths-new-label" placeholder="標籤名稱"></div>
+      <div class="ana-field-row"><label>名稱</label><input type="text" id="grths-new-label" placeholder="標籤名稱" value="${_growthNewLabel.replace(/"/g,'&quot;')}"></div>
       <div class="ana-field-row"><label>顏色</label><select id="grths-new-cls">${clsOpts}</select></div>
       <div class="ana-conds-wrap" id="growth-new-conds">${condRows}</div>
       <button class="ana-add-cond-btn" onclick="addGrowthCond()">＋ 新增條件</button>
       <div class="ana-submit-row"><button class="ana-add-rule-btn" onclick="submitNewGrowthRule()">新增標籤</button></div>
     </div>`;
 }
-function addGrowthCond(){_growthNewConds.push({f:'G',op:'>=',v:'0'});renderGrowthModalBody();}
-function removeGrowthCond(i){_growthNewConds.splice(i,1);renderGrowthModalBody();}
+function _syncGrowthNewDraft(){
+  _growthNewLabel=document.getElementById('grths-new-label')?.value??_growthNewLabel;
+  _growthNewCls=document.getElementById('grths-new-cls')?.value??_growthNewCls;
+  _syncCondDraft(_growthNewConds,'#growth-new-conds');
+}
+function addGrowthCond(){_syncGrowthNewDraft();_growthNewConds.push({f:'G',op:'>=',v:'0'});renderGrowthModalBody();}
+function removeGrowthCond(i){_syncGrowthNewDraft();_growthNewConds.splice(i,1);renderGrowthModalBody();}
 function readGrowthNewConds(){
   return Array.from(document.querySelectorAll('#growth-new-conds .ana-cond-row')).map(r=>({
     f:r.querySelector('.ana-cond-f').value,op:r.querySelector('.ana-cond-op').value,v:r.querySelector('.ana-cond-v').value
@@ -2194,7 +2226,7 @@ function submitNewGrowthRule(){
   const conds=readGrowthNewConds();
   if(!conds.length){alert('請至少新增一個條件');return;}
   const rules=getCustomGrowthRules();rules.push({label,cls,conds});saveCustomGrowthRules(rules);
-  _growthNewConds=[];renderGrowthModalBody();reapplyAnaToAll();
+  _growthNewConds=[];_growthNewLabel='';_growthNewCls='tag-add300';renderGrowthModalBody();reapplyAnaToAll();
 }
 function deleteCustomGrowthRule(i){
   const rules=getCustomGrowthRules();rules.splice(i,1);saveCustomGrowthRules(rules);
