@@ -1,49 +1,49 @@
 {
-  "updated": "2026-07-02",
+  "updated": "2026-07-03",
   "items": [
     {
-      "keyword": "防潮收納箱",
-      "name": "防潮密封收納箱",
-      "price": 799,
-      "sold": 150,
-      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BD%AE%E6%94%B6%E7%B4%8D%E7%AE%B1",
-      "reason": "適合梅雨季節防潮",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "竹製餐具",
-      "name": "環保竹製餐具組",
-      "price": 399,
-      "sold": 200,
-      "url": "https://shopee.tw/search?keyword=%E7%AB%B9%E8%A3%BD%E9%A4%90%E5%85%B7",
-      "reason": "夏季野餐必備",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "浴室防滑墊",
-      "name": "浴室防滑吸水地墊",
+      "keyword": "收納箱",
+      "name": "多功能收納箱",
       "price": 299,
-      "sold": 180,
-      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E9%98%B2%E6%BB%91%E5%A2%8A",
-      "reason": "提升浴室安全性",
+      "sold": 300,
+      "url": "https://shopee.tw/search?keyword=%E6%94%B6%E7%B4%8D%E7%AE%B1",
+      "reason": "適合整理居家雜物",
       "source": "AI推薦"
     },
     {
-      "keyword": "多功能收納架",
-      "name": "多層置物收納架",
-      "price": 899,
-      "sold": 120,
-      "url": "https://shopee.tw/search?keyword=%E5%A4%9A%E5%8A%9F%E8%83%BD%E6%94%B6%E7%B4%8D%E6%9E%B6",
-      "reason": "夏季整理收納需求",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "棉麻床單",
-      "name": "透氣棉麻床單組",
-      "price": 1299,
+      "keyword": "浴簾",
+      "name": "防水浴簾",
+      "price": 399,
       "sold": 250,
-      "url": "https://shopee.tw/search?keyword=%E6%A3%89%E9%BA%BB%E5%BA%8A%E5%96%AE",
-      "reason": "適合夏季清爽睡眠",
+      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E7%B0%BE",
+      "reason": "夏季清涼裝飾必備",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "涼席",
+      "name": "天然涼席",
+      "price": 899,
+      "sold": 500,
+      "url": "https://shopee.tw/search?keyword=%E6%B6%BC%E5%B8%AD",
+      "reason": "炎熱夏季清涼良伴",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "菜板",
+      "name": "環保竹製菜板",
+      "price": 199,
+      "sold": 400,
+      "url": "https://shopee.tw/search?keyword=%E8%8F%9C%E6%9D%BF",
+      "reason": "廚房必需品，實用又環保",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "收納籃",
+      "name": "手提收納籃",
+      "price": 249,
+      "sold": 350,
+      "url": "https://shopee.tw/search?keyword=%E6%94%B6%E7%B4%8D%E7%B1%83",
+      "reason": "多用途收納，方便實用",
       "source": "AI推薦"
     }
   ]
