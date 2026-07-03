@@ -1784,7 +1784,7 @@ function buildDistHtml(shop,built){
   const th=(t,bg)=>`<th style="background:${bg};color:#fff;padding:8px 12px;font-size:12px;font-weight:700;text-align:center;border:${BDR}">${t}</th>`;
   const td=(t,bg='#fff',color='#222',bold=false)=>`<td style="padding:6px 12px;font-size:12px;text-align:center;border:${BDR};background:${bg};color:${color};font-weight:${bold?'700':'400'}">${t}</td>`;
   const tdL=(t,rs,bg,color='#fff')=>`<td rowspan="${rs}" style="padding:6px 12px;font-size:12px;text-align:center;font-weight:700;border:${BDR};background:${bg};color:${color}">${t}</td>`;
-  const rMeta=(label,val,bg='#f0f4fa')=>`<tr><td colspan="3" style="padding:7px 14px;font-size:12px;border:${BDR};background:${bg};text-align:left"><b>${label}</b></td><td style="padding:7px 14px;font-size:13px;font-weight:700;border:${BDR};background:${bg};text-align:left">${val}</td></tr>`;
+  const rMeta=(label,val,bg='#f0f4fa')=>`<tr><td style="padding:7px 14px;font-size:12px;border:${BDR};background:${bg};text-align:left"><b>${label}</b></td><td colspan="3" style="padding:7px 14px;font-size:13px;font-weight:700;border:${BDR};background:${bg};text-align:left">${val}</td></tr>`;
 
   // pureRate sub-rows for ads
   const aPureSub=[['< 0%',aC(r=>H(r)<0)],['0% - 10%',aC(r=>H(r)>=0&&H(r)<10)],['10% - 15%',aC(r=>H(r)>=10&&H(r)<15)],['15% - 20%',aC(r=>H(r)>=15&&H(r)<20)],['20% - 30%',aC(r=>H(r)>=20&&H(r)<30)],['>30%',aC(r=>H(r)>=30)]];
@@ -1811,17 +1811,17 @@ function buildDistHtml(shop,built){
 
   return `
   <table style="${T}">
-    <thead><tr>${th('欄位',BLU_HD)}${th('項目（扣除廣告費）',BLU_HD)}${th('數量',BLU_HD)}${th('商品數量佔比 %',BLU_HD)}</tr></thead>
     <tbody>
       ${rMeta('總投廣商品數量',adsTotal)}
       ${rMeta('投廣日預算均值','NT$'+avgBudget)}
+      <tr>${th('欄位',BLU_HD)}${th('項目（扣除廣告費）',BLU_HD)}${th('數量',BLU_HD)}${th('商品數量佔比 %',BLU_HD)}</tr>
       ${adsRows}
     </tbody>
   </table>
   <table style="${T}">
-    <thead><tr>${th('欄位',GRN_HD)}${th('項目（廣告費為 $0）',GRN_HD)}${th('數量',GRN_HD)}${th('商品數量佔比 %',GRN_HD)}</tr></thead>
     <tbody>
       ${rMeta('未投廣商品數量',noAdsTotal,'#e8f4fc')}
+      <tr>${th('欄位',GRN_HD)}${th('項目（廣告費為 $0）',GRN_HD)}${th('數量',GRN_HD)}${th('商品數量佔比 %',GRN_HD)}</tr>
       ${noAdsRows}
     </tbody>
   </table>`;
