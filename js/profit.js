@@ -2308,12 +2308,13 @@ function updateTagFilterBar(shop){
     const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
     return`<span class="tfpill${active}" ${ca}>${ct.label}</span><span class="tfpill-cnt-cell" ${ca}>${cnt}</span>`;
   }).join('');
-  const testPills=getCustomTestRules().filter(ct=>counts[ct.label]).map(ct=>{
+  const testPills=getCustomTestRules().map(ct=>{
+    const{total,done}=testRuleStats(shop,ct);
+    if(!total)return'';
     const active=sel.includes(ct.label)?' active':'';
     const lbl=ct.label.replace(/'/g,"\\'");
-    const cnt=counts[ct.label]||0;
     const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
-    return`<span class="tfpill${active}" ${ca}>${ct.label}</span><span class="tfpill-cnt-cell" ${ca}>${cnt}</span>`;
+    return`<span class="tfpill${active}" ${ca}>${ct.label}</span><span class="tfpill-cnt-cell" ${ca}>${done}/${total}</span>`;
   }).join('');
   const row0=`<div class="tfrow">
     <div><span class="tfrow-lbl">測試標籤</span><button class="ana-gear-btn" onclick="openTestSettings('${shop}')" title="設定測試標籤">⚙</button></div>
@@ -2672,6 +2673,13 @@ function isSuggDone(shop,code){
   if(hasEdited)return true;
   const r=s._built?.find(x=>x.code===code);
   return !!(r&&r.note&&String(r.note).trim());
+}
+function testRuleStats(shop,rule){
+  const built=state[shop]?._built||[];
+  const matched=built.filter(r=>r.testTags?.some(tt=>tt.label===rule.label));
+  const total=matched.length;
+  const done=matched.filter(r=>isSuggDone(shop,r.code)).length;
+  return{total,done};
 }
 function buildSuggCell(shop,r){
   if(!r.testTags?.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
