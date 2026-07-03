@@ -2007,9 +2007,6 @@ function reapplyAnaToAll(){
 }
 
 // ── 測試標籤（純自訂規則，沿用分析標籤同一套條件引擎，但獨立存放） ──
-let _testNewConds=[];
-let _testNewLabel='';
-let _testNewCls='tag-add300';
 // 預設帶一筆規則進來：原本獨立「建議」功能唯一的規則（廣告效率過低，
 // 點擊數>100 且 投入產出<10），併入測試標籤後就不用再維護獨立的建議規則系統。
 const TEST_DEFAULT_RULES=[
@@ -2038,6 +2035,8 @@ function reapplyTestTagToAll(){
     applyFilters(s.id);
   });
 }
+let _testDraft=null;
+let _testEditShop=null;
 function openTestSettings(shop){
   let ov=document.getElementById('test-overlay');
   if(!ov){
@@ -2046,75 +2045,89 @@ function openTestSettings(shop){
       <div class="ana-modal-hdr"><span class="ana-modal-title">⚙ 測試標籤設定</span><button class="ana-modal-x" onclick="closeTestSettings()">✕</button></div>
       <div class="ana-modal-body" id="test-modal-body"></div>
       <div class="ana-modal-ftr">
-        <button class="ana-save-btn" onclick="closeTestSettings()">完成</button>
+        <button class="ana-cancel-btn" onclick="closeTestSettings()">取消</button>
+        <button class="ana-save-btn" onclick="saveTestSettings()">儲存並套用</button>
       </div>
     </div>`;
     ov.onclick=closeTestSettings;
     document.body.appendChild(ov);
   }
-  _testNewConds=[];_testNewLabel='';_testNewCls='tag-add300';
+  _testEditShop=shop;
+  _testDraft=getCustomTestRules().map(r=>({...r,conds:r.conds.map(c=>({...c}))}));
   renderTestModalBody();
   ov.classList.add('open');
 }
-function closeTestSettings(){document.getElementById('test-overlay')?.classList.remove('open');}
-function renderTestModalBody(){
-  const custom=getCustomTestRules();
-  const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}"${o.v===_testNewCls?' selected':''}>${o.l}</option>`).join('');
-  const condRowHtml=(i,c)=>`<div class="ana-cond-row" id="testcr-${i}">
-    <select class="ana-cond-f">${ANA_FIELD_OPTS.map(o=>`<option value="${o.v}"${o.v===c.f?' selected':''}>${o.l}</option>`).join('')}</select>
-    <select class="ana-cond-op">${['>=','>','<=','<','=','!='].map(o=>`<option value="${o}"${o===c.op?' selected':''}>${o}</option>`).join('')}</select>
-    <input type="number" class="ana-cond-v" value="${c.v}" style="width:72px">
-    <button class="ana-cond-del" onclick="removeNewTestCond(${i})">✕</button>
+function closeTestSettings(){document.getElementById('test-overlay')?.classList.remove('open');_testDraft=null;}
+function syncTestDraftFromDOM(){
+  if(!_testDraft)return;
+  document.querySelectorAll('#test-modal-body .sugg-rule-row').forEach(card=>{
+    const ri=parseInt(card.dataset.ri);const r=_testDraft[ri];if(!r)return;
+    r.label=card.querySelector('.sr-name').value;
+    r.cls=card.querySelector('.sr-color').value;
+    card.querySelectorAll('.sugg-cond-row').forEach((row,ci)=>{
+      if(!r.conds[ci])return;
+      r.conds[ci].f=row.querySelector('.sc-f').value;
+      r.conds[ci].op=row.querySelector('.sc-op').value;
+      r.conds[ci].v=row.querySelector('.sc-v').value;
+    });
+  });
+}
+function testCondRowHtml(ri,ci,c){
+  const fOpts=ANA_FIELD_OPTS.map(o=>`<option value="${o.v}"${o.v===c.f?' selected':''}>${o.l}</option>`).join('');
+  const opOpts=['>','>=','<','<=','=','!='].map(o=>`<option value="${o}"${o===c.op?' selected':''}>${o}</option>`).join('');
+  return`<div class="sugg-cond-row">
+    <span style="font-size:12px;color:#9ca3af;width:20px;text-align:center">${ci>0?'且':'若'}</span>
+    <select class="sc-f">${fOpts}</select>
+    <select class="sc-op">${opOpts}</select>
+    <input type="number" class="sc-v" value="${c.v}">
+    <button onclick="removeTestDraftCond(${ri},${ci})" title="刪除條件" style="background:none;border:none;cursor:pointer;color:#9ca3af;margin-left:auto">✕</button>
   </div>`;
-  const condRows=_testNewConds.map((c,i)=>condRowHtml(i,c)).join('');
-  const customRows=custom.length?custom.map((ct,i)=>{
-    const condDesc=ct.conds.map(c=>`${c.f} ${c.op} ${c.v}`).join(' 且 ');
-    return`<div class="ana-rule-row"><span class="ana-rule-tag ${ct.cls||'tag-add100'}">${ct.label}</span><span class="ana-rule-desc" style="font-size:12px;color:#6b7280">${condDesc}</span><button class="ana-rule-del" onclick="deleteCustomTestRule(${i})" title="刪除">🗑</button></div>`;
-  }).join(''):`<div class="ana-custom-empty">尚無測試標籤</div>`;
-
+}
+function testRuleCardHtml(r,ri){
+  const colorOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}"${o.v===r.cls?' selected':''}>${o.l}</option>`).join('');
+  const{total,done}=testRuleStats(_testEditShop,r);
+  let statCls='s-none',statText=total+' 項符合',barColor='#e5e7eb',pct=0;
+  if(total>0){
+    pct=Math.round(done/total*100);
+    if(done===0){statCls='s-red';statText=`0/${total} 已完成`;barColor='#ef4444';}
+    else if(done<total){statCls='s-amber';statText=`${done}/${total} 已完成`;barColor='#f59e0b';}
+    else{statCls='s-green';statText='✓ 全部完成';barColor='#10b981';}
+  }
+  return`<div class="sugg-rule-row" data-ri="${ri}">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <input type="text" class="sr-name" value="${r.label}" style="flex:1;font-weight:700" placeholder="標籤名稱">
+      <span class="sugg-rule-stat ${statCls}">${statText}</span>
+      <button onclick="deleteTestDraftRule(${ri})" title="刪除標籤" style="background:none;border:none;cursor:pointer">🗑</button>
+    </div>
+    ${total>0?`<div class="sugg-rule-bar"><div class="sugg-rule-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>`:''}
+    <div class="sr-conds" style="margin-top:10px">${r.conds.map((c,ci)=>testCondRowHtml(ri,ci,c)).join('')}</div>
+    <button class="sugg-add-btn" onclick="addTestDraftCond(${ri})">＋ 新增條件</button>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+      <span style="font-size:12px;color:#6b7280;white-space:nowrap">顏色</span>
+      <select class="sr-color">${colorOpts}</select>
+    </div>
+  </div>`;
+}
+function renderTestModalBody(){
+  const html=_testDraft.length?_testDraft.map((r,i)=>testRuleCardHtml(r,i)).join(''):'<div style="text-align:center;color:#9ca3af;font-size:12px;padding:10px">尚無測試標籤</div>';
   document.getElementById('test-modal-body').innerHTML=`
-    <div class="ana-sec-hdr">測試標籤</div>
-    <div id="test-custom-list">${customRows}</div>
-    <div class="ana-add-box" style="margin-top:14px">
-      <div class="ana-add-box-title">＋ 新增測試標籤</div>
-      <div class="ana-field-row"><label>名稱</label><input type="text" id="tests-new-label" placeholder="標籤名稱" value="${_testNewLabel.replace(/"/g,'&quot;')}"></div>
-      <div class="ana-field-row"><label>顏色</label><select id="tests-new-cls">${clsOpts}</select></div>
-      <div class="ana-conds-wrap" id="test-new-conds">${condRows}</div>
-      <button class="ana-add-cond-btn" onclick="addNewTestCond()">＋ 新增條件</button>
-      <div class="ana-submit-row"><button class="ana-add-rule-btn" onclick="submitNewTestRule()">新增標籤</button></div>
-    </div>`;
+    <div style="font-size:12px;color:#9ca3af;margin-bottom:12px">符合規則全部條件的商品會掛上這個標籤，可以在「🏷 標籤」選單裡篩選；規則會記住，下次上傳不用重新設定。</div>
+    <div id="test-active-list">${html}</div>
+    <button class="sugg-add-btn" onclick="addTestDraftRule()" style="margin-top:2px">＋ 新增規則</button>`;
 }
-function _syncTestNewDraft(){
-  _testNewLabel=document.getElementById('tests-new-label')?.value??_testNewLabel;
-  _testNewCls=document.getElementById('tests-new-cls')?.value??_testNewCls;
-  _syncCondDraft(_testNewConds,'#test-new-conds');
-}
-function addNewTestCond(){_syncTestNewDraft();_testNewConds.push({f:'D',op:'>=',v:'0'});renderTestModalBody();}
-function removeNewTestCond(i){_syncTestNewDraft();_testNewConds.splice(i,1);renderTestModalBody();}
-function readNewTestConds(){
-  const rows=document.querySelectorAll('#test-new-conds .ana-cond-row');
-  return Array.from(rows).map(r=>({
-    f:r.querySelector('.ana-cond-f').value,
-    op:r.querySelector('.ana-cond-op').value,
-    v:r.querySelector('.ana-cond-v').value
-  }));
-}
-function submitNewTestRule(){
-  const label=(document.getElementById('tests-new-label').value||'').trim();
-  if(!label){alert('請輸入標籤名稱');return;}
-  const cls=document.getElementById('tests-new-cls').value;
-  const conds=readNewTestConds();
-  if(!conds.length){alert('請至少新增一個條件');return;}
-  const rules=getCustomTestRules();
-  rules.push({label,cls,conds});
-  saveCustomTestRules(rules);
-  _testNewConds=[];_testNewLabel='';_testNewCls='tag-add300';
+function addTestDraftCond(ri){syncTestDraftFromDOM();_testDraft[ri].conds.push({f:'D',op:'>=',v:'0'});renderTestModalBody();}
+function removeTestDraftCond(ri,ci){syncTestDraftFromDOM();if(_testDraft[ri].conds.length>1)_testDraft[ri].conds.splice(ci,1);renderTestModalBody();}
+function deleteTestDraftRule(ri){syncTestDraftFromDOM();_testDraft.splice(ri,1);renderTestModalBody();}
+function addTestDraftRule(){
+  syncTestDraftFromDOM();
+  _testDraft.push({label:'新標籤',cls:'tag-add300',conds:[{f:'D',op:'>=',v:'0'}]});
   renderTestModalBody();
-  reapplyTestTagToAll();
 }
-function deleteCustomTestRule(i){
-  const rules=getCustomTestRules();rules.splice(i,1);saveCustomTestRules(rules);
-  renderTestModalBody();reapplyTestTagToAll();
+function saveTestSettings(){
+  syncTestDraftFromDOM();
+  saveCustomTestRules(_testDraft);
+  closeTestSettings();
+  reapplyTestTagToAll();
 }
 
 // ── 成長比分析公式（雲端同步） ──
@@ -4128,7 +4141,7 @@ Object.assign(window, {
   loadIntoUI,lsHasAny,lsKey,lsLoad,lsSave,markCard,num,onFile,onGlobalFile,onGlobalGenerate,
   onHalfChange,onMapFile,onMonthChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
-  openTestSettings,closeTestSettings,addNewTestCond,removeNewTestCond,submitNewTestRule,deleteCustomTestRule,
+  openTestSettings,closeTestSettings,addTestDraftCond,removeTestDraftCond,deleteTestDraftRule,addTestDraftRule,saveTestSettings,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
