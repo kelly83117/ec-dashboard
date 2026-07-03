@@ -607,10 +607,6 @@ function shopHTML(shop){return`
       <button class="col-pick-btn" id="tag-btn-${shop}" onclick="toggleTagPopup('${shop}',this)">🏷 標籤</button>
       <div class="tag-filter-bar" id="tfbar-${shop}"></div>
     </div>
-    <div class="sugg-btn-wrap">
-      <button class="col-pick-btn" id="sugg-btn-${shop}" onclick="applySuggFilter('${shop}')" title="只顯示符合建議規則的商品">💡 建議<span class="sugg-badge" id="sugg-badge-${shop}"></span></button>
-      <button class="sugg-gear-btn" onclick="openSuggSettings('${shop}')" title="設定建議規則">⚙</button>
-    </div>
     <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
     <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
   </div>
@@ -767,7 +763,6 @@ function loadIntoUI(shop,built,period,days){
     const tblEl=document.getElementById('tbl-'+shop);
     if(tblEl&&tblEl.querySelector('table'))return;
   }
-  reconcileSuggDoneFromNotes(shop);
   applyFilters(shop);
 }
 
@@ -2333,12 +2328,12 @@ function updateTagFilterBar(shop){
     </div>`;
   }
   const suggPills=getSuggRules().filter(rule=>rule.active!==false).map(rule=>{
-    const cnt=built.filter(r=>suggRuleConds(rule,r)).length;
-    if(!cnt)return'';
+    const {total,done}=suggRuleStats(shop,rule);
+    if(!total)return'';
     const active=sel.includes(rule.tag)?' active':'';
     const lbl=rule.tag.replace(/'/g,"\\'");
     const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
-    return`<span class="tfpill${active}" ${ca}>${rule.tag}</span><span class="tfpill-cnt-cell" ${ca}>${cnt}</span>`;
+    return`<span class="tfpill${active}" ${ca}>${rule.tag}</span><span class="tfpill-cnt-cell" ${ca}>${done}/${total}</span>`;
   }).join('');
   const row3=`<div class="tfrow">
     <div><span class="tfrow-lbl">建議</span><button class="ana-gear-btn" onclick="openSuggSettings('${shop}')" title="設定建議規則">⚙</button></div>
@@ -2685,46 +2680,17 @@ function getSuggRules(){
   return v||SUGG_DEFAULT_RULES.map(r=>({...r,conds:r.conds.map(c=>({...c}))}));
 }
 function saveSuggRules(rules){_cloudWrite('ec_sugg_rules',rules);}
-function suggDoneKey(shop,month,half){return`ec_sugg_done|${shop}|${month}|${half}`;}
-function getSuggDone(shop,month,half){return _cloudRead(suggDoneKey(shop,month,half))||{};}
-function saveSuggDone(shop,month,half,done){_cloudWrite(suggDoneKey(shop,month,half),done);}
+// 完成判定：只看「廣告調整」欄位有沒有打字（r.note 或使用者備註），
+// 不再用獨立的已優化旗標——打了字就算完成，不用另外點擊標記。
 function isSuggDone(shop,code){
   const s=state[shop];if(!s)return false;
-  const done=getSuggDone(shop,s.curMonth,s.curHalf);
-  return !!done[code];
-}
-function toggleSuggDone(shop,code){
-  const s=state[shop];if(!s)return;
-  const done=getSuggDone(shop,s.curMonth,s.curHalf);
-  if(done[code])delete done[code];else done[code]=true;
-  saveSuggDone(shop,s.curMonth,s.curHalf,done);
-  applyFilters(shop);
-  if(_suggAlertShop===shop)renderSuggAlertList();
-}
-function markSuggDone(shop,code){
-  const s=state[shop];if(!s)return;
-  const done=getSuggDone(shop,s.curMonth,s.curHalf);
-  if(done[code])return;
-  done[code]=true;
-  saveSuggDone(shop,s.curMonth,s.curHalf,done);
-  applyFilters(shop);
-  if(_suggAlertShop===shop)renderSuggAlertList();
-}
-// 補救措施：商品已經有「廣告調整」備註、但因為當時舊版程式或其他原因沒被標記已優化，
-// 每次資料載入時重新核對一次，避免漏標。只在真的有變動時才寫回。
-function reconcileSuggDoneFromNotes(shop){
-  const s=state[shop];if(!s||!s._built||!s._built.length)return;
   const noteKey=shop+'|'+s.curMonth+'|'+s.curHalf;
   const notes=getNotes(noteKey);
-  const done=getSuggDone(shop,s.curMonth,s.curHalf);
-  let changed=false;
-  s._built.forEach(r=>{
-    if(done[r.code])return;
-    const nd=notes[r.code];
-    const hasNote=nd&&(typeof nd==='string'?nd.trim():(nd.adjustments||[]).length);
-    if(hasNote&&matchSuggRules(r).length){done[r.code]=true;changed=true;}
-  });
-  if(changed)saveSuggDone(shop,s.curMonth,s.curHalf,done);
+  const nd=notes[code];
+  const hasEdited=nd&&(typeof nd==='string'?!!nd.trim():!!(nd.adjustments||[]).length);
+  if(hasEdited)return true;
+  const r=s._built?.find(x=>x.code===code);
+  return !!(r&&r.note&&String(r.note).trim());
 }
 function suggRuleConds(rule,r){
   return rule.conds.every(c=>{
@@ -2750,10 +2716,11 @@ function buildSuggCell(shop,r){
   const hit=matchSuggRules(r);
   if(!hit.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
   const codeEsc=r.code.replace(/'/g,"\\'");
+  const s=state[shop];const noteKey=shop+'|'+s.curMonth+'|'+s.curHalf;
   if(isSuggDone(shop,r.code)){
-    return`<td class="tl"><span class="tag sugg-tag sugg-done" onclick="toggleSuggDone('${shop}','${codeEsc}')" title="點擊取消已優化">✓ 已優化</span></td>`;
+    return`<td class="tl"><span class="tag sugg-tag sugg-done" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊查看/編輯廣告調整">✓ 已優化</span></td>`;
   }
-  const tagsHtml=hit.map(rule=>`<span class="tag sugg-tag ${suggColorCls(rule.color)}" onclick="toggleSuggDone('${shop}','${codeEsc}')" title="點擊標記為已優化">${rule.tag}</span>`).join(' ');
+  const tagsHtml=hit.map(rule=>`<span class="tag sugg-tag ${suggColorCls(rule.color)}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${rule.tag}</span>`).join(' ');
   return`<td class="tl">${tagsHtml}</td>`;
 }
 function updateSuggBadge(shop){
@@ -2928,12 +2895,13 @@ function renderSuggAlertList(){
   const shop=_suggAlertShop;const rows=_suggAlertRows||[];
   const sub=document.getElementById('sugg-alert-sub');if(sub)sub.textContent=`「${shop}」有 ${rows.length} 項商品符合建議規則`;
   const list=document.getElementById('sugg-alert-list');if(!list)return;
+  const s=state[shop];const noteKey=s?shop+'|'+s.curMonth+'|'+s.curHalf:shop;
   list.innerHTML=rows.map(r=>{
     const codeEsc=r.code.replace(/'/g,"\\'");
     const done=isSuggDone(shop,r.code);
     const tagsHtml=done
-      ?`<span class="tag sugg-tag sugg-done" onclick="toggleSuggDone('${shop}','${codeEsc}')" title="點擊取消已優化">✓ 已優化</span>`
-      :matchSuggRules(r).map(rule=>`<span class="tag sugg-tag ${suggColorCls(rule.color)}" onclick="toggleSuggDone('${shop}','${codeEsc}')" title="點擊標記為已優化">${rule.tag}</span>`).join(' ');
+      ?`<span class="tag sugg-tag sugg-done" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊查看/編輯廣告調整">✓ 已優化</span>`
+      :matchSuggRules(r).map(rule=>`<span class="tag sugg-tag ${suggColorCls(rule.color)}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${rule.tag}</span>`).join(' ');
     return`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid #f3f4f6">
       <span style="font-size:13px">${r.name}</span>
       <span style="display:flex;align-items:center;gap:10px">
@@ -3101,10 +3069,6 @@ function submitProfitNote(){
   saveNotes(shopKey,notes);
   closeProfitNoteModal();
   const shop=shopKey.split('|')[0].replace('_growth','');
-  if(!shopKey.includes('_growth')){
-    const r=state[shop]?._built?.find(x=>x.code===code);
-    if(r&&matchSuggRules(r).length)markSuggDone(shop,code);
-  }
   applyFilters(shop);
 }
 function deleteProfitNote(origIdx){
@@ -3114,7 +3078,7 @@ function deleteProfitNote(origIdx){
   if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
   notes[code].adjustments.splice(origIdx,1);
   if(!notes[code].adjustments.length)delete notes[code];
-  saveNotes(shopKey,notes);renderPnmList();applyFilters(shopKey.replace('_growth',''));
+  saveNotes(shopKey,notes);renderPnmList();applyFilters(shopKey.split('|')[0].replace('_growth',''));
 }
 function closeProfitNoteModal(){document.getElementById('profit-note-modal')?.classList.remove('open');_pnm=null;}
 function startNote(shop,code){openNotePopup(shop,code);}
@@ -4333,8 +4297,8 @@ Object.assign(window, {
   ignoreAllUnmatched,umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
   updateTagFilterBar,validateMapWarnings,
   applySuggFilter,clearSuggFilter,openSuggSettings,closeSuggSettings,saveSuggSettings,
-  addSuggCond,removeSuggCond,disableSuggRule,restoreSuggRule,addSuggRule,toggleSuggDone,
-  closeSuggAlert,gotoSuggFiltered,checkSuggAlert,matchSuggRules,getSuggRules,saveSuggRules,markSuggDone,
+  addSuggCond,removeSuggCond,disableSuggRule,restoreSuggRule,addSuggRule,
+  closeSuggAlert,gotoSuggFiltered,checkSuggAlert,matchSuggRules,getSuggRules,saveSuggRules,
   updateSuggBadge,updateSuggChip,buildSuggCell,
   colDragStart,colDragOver,colDrop,colDragEnd,colDragEnter,colDragLeave,resetColOrder,
 });
