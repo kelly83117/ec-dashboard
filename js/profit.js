@@ -687,7 +687,6 @@ function tryLoadSaved(shop){
     if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;}
     setKpis(shop,0,0,0,0);
     updateTagFilterBar(shop);
-    updateSuggBadge(shop);
   }
 }
 function clearPeriodFromModal(){
@@ -746,7 +745,7 @@ function loadIntoUI(shop,built,period,days){
     built.forEach(r=>{
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.analysisLabel=r.analysis?.label||'';
-      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
+      r.testTags=calcTestTags(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       if(shop==='好麻吉'){
         r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
         r.growthAnalysisLabel=r.growthAnalysis?.label||'';
@@ -1556,14 +1555,14 @@ function buildShop(shop,days){
     const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
     const dayBudget=days>0?adsFee/days:0;
     const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit,roi);
-    const testTag=calcTestTag(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit,roi);
+    const testTags=calcTestTags(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit,roi);
     // 上半月營收 & 成長比（只有好麻吉）
     const prevRev = prevRevMap[p.code] ?? null;
     const growthRate = (prevRev!==null && prevRev>0) ? (p.rev - prevRev) / prevRev : null;
     const growthAnalysis = shop==='好麻吉' ? calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate) : null;
     return{code:p.code,name:p.name,shopeeIds:p.shopeeIds,qty:p.qty,rev:p.rev,gross:p.gross,
       adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,directROI,roi,roiDiff,
-      dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,analysis,testTag,
+      dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,analysis,testTags,
       prevRev, growthRate, growthAnalysis};
   });
   built.sort((a,b)=>{if(!a.fromMobic&&b.fromMobic)return 1;if(a.fromMobic&&!b.fromMobic)return -1;return b.pureProfit-a.pureProfit;});
@@ -1997,7 +1996,7 @@ function reapplyAnaToAll(){
     built.forEach(r=>{
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.analysisLabel=r.analysis?.label||'';
-      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
+      r.testTags=calcTestTags(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       if(s.id==='好麻吉'){
         r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
         r.growthAnalysisLabel=r.growthAnalysis?.label||'';
@@ -2011,38 +2010,30 @@ function reapplyAnaToAll(){
 let _testNewConds=[];
 let _testNewLabel='';
 let _testNewCls='tag-add300';
-// 預設帶規則進來：直接從既有「建議」規則（雲端目前實際設定的門檻，
-// 不是寫死的初始值）換算成測試標籤格式，併入後就不用再維護獨立的建議規則系統。
-function _suggFieldToTestField(f){
-  if(f==='clicks')return'O';
-  if(f==='roi')return'R';
-  if(f==='pureProfit')return'P';
-  if(f==='pureRate')return'H';
-  return f;
-}
-function _defaultTestRulesFromSugg(){
-  return getSuggRules().filter(r=>r.active!==false).map(r=>({
-    label:r.tag,
-    cls:suggColorCls(r.color),
-    conds:r.conds.map(c=>({f:_suggFieldToTestField(c.f),op:c.op,v:String(c.v)})),
-  }));
-}
+// 預設帶一筆規則進來：原本獨立「建議」功能唯一的規則（廣告效率過低，
+// 點擊數>100 且 投入產出<10），併入測試標籤後就不用再維護獨立的建議規則系統。
+const TEST_DEFAULT_RULES=[
+  {label:'建議關閉廣告',cls:'tag-bad',conds:[{f:'O',op:'>',v:'100'},{f:'R',op:'<',v:'10'}]},
+];
 function getCustomTestRules(){
   const v=_cloudRead('ec_test_custom');
-  return v||_defaultTestRulesFromSugg();
+  return v||TEST_DEFAULT_RULES.map(r=>({...r,conds:r.conds.map(c=>({...c}))}));
 }
 function saveCustomTestRules(r){_cloudWrite('ec_test_custom',r);}
-function calcTestTag(D,H,K,N,O,P,R){
+// 回傳「全部」符合條件的規則（不是只回傳第一個命中的），
+// 讓同一列可以同時掛多個測試標籤。
+function calcTestTags(D,H,K,N,O,P,R){
+  const out=[];
   for(const ct of getCustomTestRules()){
-    if(evalAnaConds(ct.conds,{D,H,K,N,O,P,R}))return{label:ct.label,cls:ct.cls||'tag-add100'};
+    if(evalAnaConds(ct.conds,{D,H,K,N,O,P,R}))out.push({label:ct.label,cls:ct.cls||'tag-add100'});
   }
-  return{label:'',cls:''};
+  return out;
 }
 function reapplyTestTagToAll(){
   SHOPS.forEach(s=>{
     const built=state[s.id]._built;if(!built)return;
     built.forEach(r=>{
-      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
+      r.testTags=calcTestTags(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
     });
     applyFilters(s.id);
   });
@@ -2282,7 +2273,7 @@ function updateTagFilterBar(shop){
   built.forEach(r=>{
     const a=r.analysis?.label;if(a)counts[a]=(counts[a]||0)+1;
     const g=r.growthAnalysis?.label;if(g)counts[g]=(counts[g]||0)+1;
-    const tt=r.testTag?.label;if(tt)counts[tt]=(counts[tt]||0)+1;
+    (r.testTags||[]).forEach(tt=>{counts[tt.label]=(counts[tt.label]||0)+1;});
   });
   const mkPill=(t)=>{
     const active=sel.includes(t.label)?' active':'';
@@ -2375,8 +2366,8 @@ function applyFilters(shop){
   const q=(document.getElementById('search-'+shop).value||'').toLowerCase();
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q));
-  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l||r.testTag?.label===l));
-  if(s.suggFilterActive)list=list.filter(r=>matchSuggRules(r).length);
+  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l||(r.testTags||[]).some(tt=>tt.label===l)));
+  if(s.suggFilterActive)list=list.filter(r=>r.testTags?.length);
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
     if(!f)return;
@@ -2404,7 +2395,6 @@ function applyFilters(shop){
   }
   renderTable(shop,list);
   updateTagFilterBar(shop);
-  updateSuggBadge(shop);
   updateSuggChip(shop);
 }
 function setSort(shop,col,dir){state[shop].sorts={col,dir};applyFilters(shop);}
@@ -2663,32 +2653,16 @@ function recalcRow(shop,code,ov){
   const dayBudget=adsFee/days;
   const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
   const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
-  const testTag=calcTestTag(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
+  const testTags=calcTestTags(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
   const growthRate=r.growthRate;
   const growthAnalysis=shop==='好麻吉'?calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate):null;
-  Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,roiDiff,dayBudget,analysis,testTag,growthAnalysis});
+  Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,roiDiff,dayBudget,analysis,testTags,growthAnalysis});
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
 
-// ── Suggestion rules (建議) ──
-const SUGG_DEFAULT_RULES=[
-  {id:1,name:'廣告效率過低',tag:'建議關閉廣告',color:'amber',active:true,conds:[{f:'clicks',op:'>',v:100},{f:'roi',op:'<',v:8}]},
-];
-const SUGG_FIELDS=[{v:'clicks',l:'點擊數'},{v:'roi',l:'投入產出(ROI)'},{v:'pureProfit',l:'淨利'},{v:'pureRate',l:'淨利率%',pct:true}];
-const SUGG_OPS=['>','>=','<','<=','='];
-const SUGG_COLORS=[{v:'amber',l:'橘',cls:'tag-bad'},{v:'red',l:'紅',cls:'tag-danger'},{v:'blue',l:'藍',cls:'tag-add300'}];
-function suggColorCls(v){return(SUGG_COLORS.find(c=>c.v===v)||SUGG_COLORS[0]).cls;}
-function suggFieldValue(r,f){
-  if(f==='pureRate')return Number(r.pureRate||0)*100;
-  return Number(r[f]||0);
-}
-function getSuggRules(){
-  const v=_cloudRead('ec_sugg_rules');
-  return v||SUGG_DEFAULT_RULES.map(r=>({...r,conds:r.conds.map(c=>({...c}))}));
-}
-function saveSuggRules(rules){_cloudWrite('ec_sugg_rules',rules);}
+// ── 建議（併入測試標籤，統一由 r.testTags 驅動，不再獨立維護一套規則）──
 // 完成判定：只看「廣告調整」欄位有沒有打字（r.note 或使用者備註），
-// 不再用獨立的已優化旗標——打了字就算完成，不用另外點擊標記。
+// 打了字就算完成，不用另外點擊標記。
 function isSuggDone(shop,code){
   const s=state[shop];if(!s)return false;
   const noteKey=shop+'|'+s.curMonth+'|'+s.curHalf;
@@ -2699,54 +2673,21 @@ function isSuggDone(shop,code){
   const r=s._built?.find(x=>x.code===code);
   return !!(r&&r.note&&String(r.note).trim());
 }
-function suggRuleConds(rule,r){
-  return rule.conds.every(c=>{
-    const val=suggFieldValue(r,c.f);const v=Number(c.v);
-    if(c.op==='>')return val>v;
-    if(c.op==='>=')return val>=v;
-    if(c.op==='<')return val<v;
-    if(c.op==='<=')return val<=v;
-    return val===v;
-  });
-}
-function matchSuggRules(r){
-  return getSuggRules().filter(rule=>rule.active!==false&&suggRuleConds(rule,r));
-}
-function suggRuleStats(shop,rule){
-  const built=state[shop]?._built||[];
-  const matched=built.filter(r=>suggRuleConds(rule,r));
-  const total=matched.length;
-  const done=matched.filter(r=>isSuggDone(shop,r.code)).length;
-  return{total,done};
-}
 function buildSuggCell(shop,r){
-  const hit=matchSuggRules(r);
-  if(!hit.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
+  if(!r.testTags?.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
   const codeEsc=r.code.replace(/'/g,"\\'");
   const s=state[shop];const noteKey=shop+'|'+s.curMonth+'|'+s.curHalf;
   if(isSuggDone(shop,r.code)){
     return`<td class="tl"><span class="tag sugg-tag sugg-done" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊查看/編輯廣告調整">✓ 已優化</span></td>`;
   }
-  const tagsHtml=hit.map(rule=>`<span class="tag sugg-tag ${suggColorCls(rule.color)}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${rule.tag}</span>`).join(' ');
+  const tagsHtml=r.testTags.map(tt=>`<span class="tag sugg-tag ${tt.cls}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${tt.label}</span>`).join(' ');
   return`<td class="tl">${tagsHtml}</td>`;
-}
-function updateSuggBadge(shop){
-  const s=state[shop];const b=document.getElementById('sugg-badge-'+shop);if(!s||!b)return;
-  const matched=(s._built||[]).filter(r=>matchSuggRules(r).length);
-  const total=matched.length;
-  b.classList.remove('b-amber','b-green');
-  if(total===0){b.textContent='';b.style.display='none';return;}
-  const done=matched.filter(r=>isSuggDone(shop,r.code)).length;
-  b.style.display='inline-block';
-  if(done===0){b.textContent=total;}
-  else if(done<total){b.textContent=done+'/'+total+' 已完成';b.classList.add('b-amber');}
-  else{b.textContent='✓ 全部完成';b.classList.add('b-green');}
 }
 function updateSuggChip(shop){
   const s=state[shop];const chip=document.getElementById('sugg-chip-'+shop);if(!chip)return;
   if(s?.suggFilterActive){
     chip.style.display='flex';
-    const n=(s._built||[]).filter(r=>matchSuggRules(r).length).length;
+    const n=(s._built||[]).filter(r=>r.testTags?.length).length;
     document.getElementById('sugg-chip-text-'+shop).textContent='已篩選：僅顯示 '+n+' 項符合建議規則的商品';
   }else{chip.style.display='none';}
 }
@@ -2761,121 +2702,11 @@ function clearSuggFilter(shop){
   applyFilters(shop);
 }
 
-// ── Suggestion rule settings modal ──
-let _suggDraft=null;
-let _suggEditShop=null;
-function openSuggSettings(shop){
-  let ov=document.getElementById('sugg-overlay');
-  if(!ov){
-    ov=document.createElement('div');ov.id='sugg-overlay';ov.className='ana-overlay';
-    ov.innerHTML=`<div class="ana-modal" onclick="event.stopPropagation()">
-      <div class="ana-modal-hdr"><span class="ana-modal-title">⚙ 建議規則設定</span><button class="ana-modal-x" onclick="closeSuggSettings()">✕</button></div>
-      <div class="ana-modal-body" id="sugg-modal-body"></div>
-      <div id="sugg-scope-note" style="padding:0 22px 12px;font-size:11.5px;color:#9ca3af"></div>
-      <div class="ana-modal-ftr">
-        <button class="ana-cancel-btn" onclick="closeSuggSettings()">取消</button>
-        <button class="ana-save-btn" onclick="saveSuggSettings()">儲存並套用</button>
-      </div>
-    </div>`;
-    ov.onclick=closeSuggSettings;
-    document.body.appendChild(ov);
-  }
-  _suggEditShop=shop;
-  document.getElementById('sugg-scope-note').textContent=`套用範圍：僅限「${shop}」目前這份報表，下次上傳新報表會自動套用已啟用的規則；其他月份資料不受影響。`;
-  _suggDraft=getSuggRules().map(r=>({...r,conds:r.conds.map(c=>({...c}))}));
-  renderSuggModalBody();
-  ov.classList.add('open');
-}
-function closeSuggSettings(){document.getElementById('sugg-overlay')?.classList.remove('open');_suggDraft=null;}
-function syncSuggDraftFromDOM(){
-  if(!_suggDraft)return;
-  document.querySelectorAll('#sugg-modal-body .sugg-rule-row').forEach(card=>{
-    const ri=parseInt(card.dataset.ri);const r=_suggDraft[ri];if(!r)return;
-    r.name=card.querySelector('.sr-name').value;
-    r.tag=card.querySelector('.sr-tag').value;
-    r.color=card.querySelector('.sr-color').value;
-    card.querySelectorAll('.sugg-cond-row').forEach((row,ci)=>{
-      if(!r.conds[ci])return;
-      r.conds[ci].f=row.querySelector('.sc-f').value;
-      r.conds[ci].op=row.querySelector('.sc-op').value;
-      r.conds[ci].v=parseFloat(row.querySelector('.sc-v').value)||0;
-    });
-  });
-}
-function suggCondRowHtml(ri,ci,c){
-  const fOpts=SUGG_FIELDS.map(o=>`<option value="${o.v}"${o.v===c.f?' selected':''}>${o.l}</option>`).join('');
-  const opOpts=SUGG_OPS.map(o=>`<option value="${o}"${o===c.op?' selected':''}>${o}</option>`).join('');
-  return`<div class="sugg-cond-row">
-    <span style="font-size:12px;color:#9ca3af;width:20px;text-align:center">${ci>0?'且':'若'}</span>
-    <select class="sc-f">${fOpts}</select>
-    <select class="sc-op">${opOpts}</select>
-    <input type="number" class="sc-v" value="${c.v}">
-    <button onclick="removeSuggCond(${ri},${ci})" title="刪除條件" style="background:none;border:none;cursor:pointer;color:#9ca3af;margin-left:auto">✕</button>
-  </div>`;
-}
-function suggRuleCardHtml(r,ri){
-  const colorOpts=SUGG_COLORS.map(o=>`<option value="${o.v}"${o.v===r.color?' selected':''}>${o.l}</option>`).join('');
-  const{total,done}=suggRuleStats(_suggEditShop,r);
-  let statCls='s-none',statText=total+' 項符合',barColor='#e5e7eb',pct=0;
-  if(total>0){
-    pct=Math.round(done/total*100);
-    if(done===0){statCls='s-red';statText=`0/${total} 已完成`;barColor='#ef4444';}
-    else if(done<total){statCls='s-amber';statText=`${done}/${total} 已完成`;barColor='#f59e0b';}
-    else{statCls='s-green';statText='✓ 全部完成';barColor='#10b981';}
-  }
-  return`<div class="sugg-rule-row" data-ri="${ri}">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      <input type="text" class="sr-name" value="${r.name}" style="flex:1;font-weight:700" placeholder="規則名稱">
-      <span class="sugg-rule-stat ${statCls}">${statText}</span>
-      <button onclick="disableSuggRule(${ri})" title="停用此規則" style="background:none;border:none;cursor:pointer">🗑</button>
-    </div>
-    ${total>0?`<div class="sugg-rule-bar"><div class="sugg-rule-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>`:''}
-    <div class="sr-conds" style="margin-top:10px">${r.conds.map((c,ci)=>suggCondRowHtml(ri,ci,c)).join('')}</div>
-    <button class="sugg-add-btn" onclick="addSuggCond(${ri})">＋ 新增條件</button>
-    <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
-      <span style="font-size:12px;color:#6b7280;white-space:nowrap">跳出提醒文字</span>
-      <input type="text" class="sr-tag" value="${r.tag}" style="flex:1">
-      <select class="sr-color">${colorOpts}</select>
-    </div>
-  </div>`;
-}
-function renderSuggModalBody(){
-  const withIdx=_suggDraft.map((r,i)=>({r,i}));
-  const activeList=withIdx.filter(x=>x.r.active!==false);
-  const activeHtml=activeList.length?activeList.map(x=>suggRuleCardHtml(x.r,x.i)).join(''):'<div style="text-align:center;color:#9ca3af;font-size:12px;padding:10px">尚無啟用的規則</div>';
-  const disabled=withIdx.filter(x=>x.r.active===false);
-  const disabledHtml=disabled.length?`<div class="ana-sec-hdr" style="margin-top:16px">已停用規則</div>`
-    +disabled.map(x=>`<div class="sugg-disabled-row"><span style="flex:1;font-size:12.5px">${x.r.name}</span><button onclick="restoreSuggRule(${x.i})" title="恢復" style="background:none;border:none;cursor:pointer;color:#10b981">↩</button></div>`).join(''):'';
-  document.getElementById('sugg-modal-body').innerHTML=`
-    <div style="font-size:12px;color:#9ca3af;margin-bottom:12px">上傳「${_suggEditShop}」報表後，符合規則全部條件的商品會自動跳出提醒；規則會記住，下次上傳不用重新設定。</div>
-    <div id="sugg-active-list">${activeHtml}</div>
-    <button class="sugg-add-btn" onclick="addSuggRule()" style="margin-top:2px">＋ 新增規則</button>
-    ${disabledHtml}`;
-}
-function addSuggCond(ri){syncSuggDraftFromDOM();_suggDraft[ri].conds.push({f:'clicks',op:'>',v:0});renderSuggModalBody();}
-function removeSuggCond(ri,ci){syncSuggDraftFromDOM();if(_suggDraft[ri].conds.length>1)_suggDraft[ri].conds.splice(ci,1);renderSuggModalBody();}
-function disableSuggRule(ri){syncSuggDraftFromDOM();_suggDraft[ri].active=false;renderSuggModalBody();}
-function restoreSuggRule(ri){syncSuggDraftFromDOM();_suggDraft[ri].active=true;renderSuggModalBody();}
-function addSuggRule(){
-  syncSuggDraftFromDOM();
-  const maxId=_suggDraft.reduce((m,r)=>Math.max(m,r.id||0),0);
-  _suggDraft.push({id:maxId+1,name:'新規則',tag:'建議調整',color:'blue',active:true,conds:[{f:'clicks',op:'>',v:0}]});
-  renderSuggModalBody();
-}
-function saveSuggSettings(){
-  syncSuggDraftFromDOM();
-  saveSuggRules(_suggDraft);
-  const shop=_suggEditShop;
-  closeSuggSettings();
-  if(shop){updateSuggBadge(shop);applyFilters(shop);}
-}
-
 // ── Suggestion alert popup（產生報表後跳出）──
 let _suggAlertRows=null;
 let _suggAlertShop=null;
 function checkSuggAlert(shop,built){
-  updateSuggBadge(shop);
-  const matched=(built||[]).filter(r=>matchSuggRules(r).length);
+  const matched=(built||[]).filter(r=>r.testTags?.length);
   const unresolved=matched.filter(r=>!isSuggDone(shop,r.code));
   if(!unresolved.length)return;
   _suggAlertRows=matched;_suggAlertShop=shop;
@@ -2908,7 +2739,7 @@ function renderSuggAlertList(){
     const done=isSuggDone(shop,r.code);
     const tagsHtml=done
       ?`<span class="tag sugg-tag sugg-done" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊查看/編輯廣告調整">✓ 已優化</span>`
-      :matchSuggRules(r).map(rule=>`<span class="tag sugg-tag ${suggColorCls(rule.color)}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${rule.tag}</span>`).join(' ');
+      :r.testTags.map(tt=>`<span class="tag sugg-tag ${tt.cls}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${tt.label}</span>`).join(' ');
     return`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid #f3f4f6">
       <span style="font-size:13px">${r.name}</span>
       <span style="display:flex;align-items:center;gap:10px">
@@ -4303,9 +4134,8 @@ Object.assign(window, {
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   ignoreAllUnmatched,umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
   updateTagFilterBar,validateMapWarnings,
-  applySuggFilter,clearSuggFilter,openSuggSettings,closeSuggSettings,saveSuggSettings,
-  addSuggCond,removeSuggCond,disableSuggRule,restoreSuggRule,addSuggRule,
-  closeSuggAlert,gotoSuggFiltered,checkSuggAlert,matchSuggRules,getSuggRules,saveSuggRules,
-  updateSuggBadge,updateSuggChip,buildSuggCell,
+  applySuggFilter,clearSuggFilter,
+  closeSuggAlert,gotoSuggFiltered,checkSuggAlert,
+  updateSuggChip,buildSuggCell,
   colDragStart,colDragOver,colDrop,colDragEnd,colDragEnter,colDragLeave,resetColOrder,
 });
