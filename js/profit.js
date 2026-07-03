@@ -750,6 +750,7 @@ function loadIntoUI(shop,built,period,days){
     built.forEach(r=>{
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
       r.analysisLabel=r.analysis?.label||'';
+      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
       if(shop==='好麻吉'){
         r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
         r.growthAnalysisLabel=r.growthAnalysis?.label||'';
@@ -1560,13 +1561,14 @@ function buildShop(shop,days){
     const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
     const dayBudget=days>0?adsFee/days:0;
     const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit);
+    const testTag=calcTestTag(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit);
     // 上半月營收 & 成長比（只有好麻吉）
     const prevRev = prevRevMap[p.code] ?? null;
     const growthRate = (prevRev!==null && prevRev>0) ? (p.rev - prevRev) / prevRev : null;
     const growthAnalysis = shop==='好麻吉' ? calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate) : null;
     return{code:p.code,name:p.name,shopeeIds:p.shopeeIds,qty:p.qty,rev:p.rev,gross:p.gross,
       adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,directROI,roi,roiDiff,
-      dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,analysis,
+      dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,analysis,testTag,
       prevRev, growthRate, growthAnalysis};
   });
   built.sort((a,b)=>{if(!a.fromMobic&&b.fromMobic)return 1;if(a.fromMobic&&!b.fromMobic)return -1;return b.pureProfit-a.pureProfit;});
@@ -1982,6 +1984,7 @@ function reapplyAnaToAll(){
     built.forEach(r=>{
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
       r.analysisLabel=r.analysis?.label||'';
+      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
       if(s.id==='好麻吉'){
         r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
         r.growthAnalysisLabel=r.growthAnalysis?.label||'';
@@ -1989,6 +1992,99 @@ function reapplyAnaToAll(){
     });
     applyFilters(s.id);
   });
+}
+
+// ── 測試標籤（純自訂規則，沿用分析標籤同一套條件引擎，但獨立存放） ──
+let _testNewConds=[];
+function getCustomTestRules(){return _cloudRead('ec_test_custom')||[];}
+function saveCustomTestRules(r){_cloudWrite('ec_test_custom',r);}
+function calcTestTag(D,H,K,N,O,P){
+  for(const ct of getCustomTestRules()){
+    if(evalAnaConds(ct.conds,{D,H,K,N,O,P}))return{label:ct.label,cls:ct.cls||'tag-add100'};
+  }
+  return{label:'',cls:''};
+}
+function reapplyTestTagToAll(){
+  SHOPS.forEach(s=>{
+    const built=state[s.id]._built;if(!built)return;
+    built.forEach(r=>{
+      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
+    });
+    applyFilters(s.id);
+  });
+}
+function openTestSettings(shop){
+  let ov=document.getElementById('test-overlay');
+  if(!ov){
+    ov=document.createElement('div');ov.id='test-overlay';ov.className='ana-overlay';
+    ov.innerHTML=`<div class="ana-modal" onclick="event.stopPropagation()">
+      <div class="ana-modal-hdr"><span class="ana-modal-title">⚙ 測試標籤設定</span><button class="ana-modal-x" onclick="closeTestSettings()">✕</button></div>
+      <div class="ana-modal-body" id="test-modal-body"></div>
+      <div class="ana-modal-ftr">
+        <button class="ana-save-btn" onclick="closeTestSettings()">完成</button>
+      </div>
+    </div>`;
+    ov.onclick=closeTestSettings;
+    document.body.appendChild(ov);
+  }
+  _testNewConds=[];
+  renderTestModalBody();
+  ov.classList.add('open');
+}
+function closeTestSettings(){document.getElementById('test-overlay')?.classList.remove('open');}
+function renderTestModalBody(){
+  const custom=getCustomTestRules();
+  const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}">${o.l}</option>`).join('');
+  const condRowHtml=(i,c)=>`<div class="ana-cond-row" id="testcr-${i}">
+    <select class="ana-cond-f">${ANA_FIELD_OPTS.map(o=>`<option value="${o.v}"${o.v===c.f?' selected':''}>${o.l}</option>`).join('')}</select>
+    <select class="ana-cond-op">${['>=','>','<=','<','=','!='].map(o=>`<option value="${o}"${o===c.op?' selected':''}>${o}</option>`).join('')}</select>
+    <input type="number" class="ana-cond-v" value="${c.v}" style="width:72px">
+    <button class="ana-cond-del" onclick="removeNewTestCond(${i})">✕</button>
+  </div>`;
+  const condRows=_testNewConds.map((c,i)=>condRowHtml(i,c)).join('');
+  const customRows=custom.length?custom.map((ct,i)=>{
+    const condDesc=ct.conds.map(c=>`${c.f} ${c.op} ${c.v}`).join(' 且 ');
+    return`<div class="ana-rule-row"><span class="ana-rule-tag ${ct.cls||'tag-add100'}">${ct.label}</span><span class="ana-rule-desc" style="font-size:12px;color:#6b7280">${condDesc}</span><button class="ana-rule-del" onclick="deleteCustomTestRule(${i})" title="刪除">🗑</button></div>`;
+  }).join(''):`<div class="ana-custom-empty">尚無測試標籤</div>`;
+
+  document.getElementById('test-modal-body').innerHTML=`
+    <div class="ana-sec-hdr">測試標籤</div>
+    <div id="test-custom-list">${customRows}</div>
+    <div class="ana-add-box" style="margin-top:14px">
+      <div class="ana-add-box-title">＋ 新增測試標籤</div>
+      <div class="ana-field-row"><label>名稱</label><input type="text" id="tests-new-label" placeholder="標籤名稱"></div>
+      <div class="ana-field-row"><label>顏色</label><select id="tests-new-cls">${clsOpts}</select></div>
+      <div class="ana-conds-wrap" id="test-new-conds">${condRows}</div>
+      <button class="ana-add-cond-btn" onclick="addNewTestCond()">＋ 新增條件</button>
+      <div class="ana-submit-row"><button class="ana-add-rule-btn" onclick="submitNewTestRule()">新增標籤</button></div>
+    </div>`;
+}
+function addNewTestCond(){_testNewConds.push({f:'D',op:'>=',v:'0'});renderTestModalBody();}
+function removeNewTestCond(i){_testNewConds.splice(i,1);renderTestModalBody();}
+function readNewTestConds(){
+  const rows=document.querySelectorAll('#test-new-conds .ana-cond-row');
+  return Array.from(rows).map(r=>({
+    f:r.querySelector('.ana-cond-f').value,
+    op:r.querySelector('.ana-cond-op').value,
+    v:r.querySelector('.ana-cond-v').value
+  }));
+}
+function submitNewTestRule(){
+  const label=(document.getElementById('tests-new-label').value||'').trim();
+  if(!label){alert('請輸入標籤名稱');return;}
+  const cls=document.getElementById('tests-new-cls').value;
+  const conds=readNewTestConds();
+  if(!conds.length){alert('請至少新增一個條件');return;}
+  const rules=getCustomTestRules();
+  rules.push({label,cls,conds});
+  saveCustomTestRules(rules);
+  _testNewConds=[];
+  renderTestModalBody();
+  reapplyTestTagToAll();
+}
+function deleteCustomTestRule(i){
+  const rules=getCustomTestRules();rules.splice(i,1);saveCustomTestRules(rules);
+  renderTestModalBody();reapplyTestTagToAll();
 }
 
 // ── 成長比分析公式（雲端同步） ──
@@ -2140,6 +2236,7 @@ function updateTagFilterBar(shop){
   built.forEach(r=>{
     const a=r.analysis?.label;if(a)counts[a]=(counts[a]||0)+1;
     const g=r.growthAnalysis?.label;if(g)counts[g]=(counts[g]||0)+1;
+    const tt=r.testTag?.label;if(tt)counts[tt]=(counts[tt]||0)+1;
   });
   const mkPill=(t)=>{
     const active=sel.includes(t.label)?' active':'';
@@ -2174,6 +2271,17 @@ function updateTagFilterBar(shop){
     const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
     return`<span class="tfpill${active}" ${ca}>${ct.label}</span><span class="tfpill-cnt-cell" ${ca}>${cnt}</span>`;
   }).join('');
+  const testPills=getCustomTestRules().filter(ct=>counts[ct.label]).map(ct=>{
+    const active=sel.includes(ct.label)?' active':'';
+    const lbl=ct.label.replace(/'/g,"\\'");
+    const cnt=counts[ct.label]||0;
+    const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
+    return`<span class="tfpill${active}" ${ca}>${ct.label}</span><span class="tfpill-cnt-cell" ${ca}>${cnt}</span>`;
+  }).join('');
+  const row0=`<div class="tfrow">
+    <div><span class="tfrow-lbl">測試標籤</span><button class="ana-gear-btn" onclick="openTestSettings('${shop}')" title="設定測試標籤">⚙</button></div>
+    <div class="tfrow-pills">${testPills||'<span style="font-size:11px;color:#9ca3af;padding:5px 0">尚無測試標籤，點 ⚙ 新增</span>'}</div>
+  </div>`;
   const row1=`<div class="tfrow">
     <div><span class="tfrow-lbl">分析標籤</span><button class="ana-gear-btn" onclick="openAnaSettings('${shop}')" title="設定分析規則">⚙</button></div>
     <div class="tfrow-pills">${fixedPills}${addDrop}${subDrop}${customPills}</div>
@@ -2192,7 +2300,19 @@ function updateTagFilterBar(shop){
       <div class="tfrow-pills">${gp}</div>
     </div>`;
   }
-  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row1}${row2}</div>`;
+  const suggPills=getSuggRules().filter(rule=>rule.active!==false).map(rule=>{
+    const cnt=built.filter(r=>suggRuleConds(rule,r)).length;
+    if(!cnt)return'';
+    const active=sel.includes(rule.tag)?' active':'';
+    const lbl=rule.tag.replace(/'/g,"\\'");
+    const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
+    return`<span class="tfpill${active}" ${ca}>${rule.tag}</span><span class="tfpill-cnt-cell" ${ca}>${cnt}</span>`;
+  }).join('');
+  const row3=`<div class="tfrow">
+    <div><span class="tfrow-lbl">建議</span><button class="ana-gear-btn" onclick="openSuggSettings('${shop}')" title="設定建議規則">⚙</button></div>
+    <div class="tfrow-pills">${suggPills||'<span style="font-size:11px;color:#9ca3af;padding:5px 0">尚無符合資料的建議</span>'}</div>
+  </div>`;
+  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row0}${row1}${row2}${row3}</div>`;
 }
 function toggleTagPopup(shop,btn){
   const bar=document.getElementById('tfbar-'+shop);if(!bar)return;
@@ -2221,7 +2341,7 @@ function applyFilters(shop){
   const q=(document.getElementById('search-'+shop).value||'').toLowerCase();
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q));
-  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l));
+  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l||r.testTag?.label===l||matchSuggRules(r).some(rule=>rule.tag===l)));
   if(s.suggFilterActive)list=list.filter(r=>matchSuggRules(r).length);
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
@@ -2509,9 +2629,10 @@ function recalcRow(shop,code,ov){
   const dayBudget=adsFee/days;
   const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
   const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit);
+  const testTag=calcTestTag(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit);
   const growthRate=r.growthRate;
   const growthAnalysis=shop==='好麻吉'?calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate):null;
-  Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,roiDiff,dayBudget,analysis,growthAnalysis});
+  Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,roiDiff,dayBudget,analysis,testTag,growthAnalysis});
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
 
@@ -4165,6 +4286,7 @@ Object.assign(window, {
   loadIntoUI,lsHasAny,lsKey,lsLoad,lsSave,markCard,num,onFile,onGlobalFile,onGlobalGenerate,
   onHalfChange,onMapFile,onMonthChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
+  openTestSettings,closeTestSettings,addNewTestCond,removeNewTestCond,submitNewTestRule,deleteCustomTestRule,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
