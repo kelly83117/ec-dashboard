@@ -744,9 +744,9 @@ function clearPeriod(shop){
 function loadIntoUI(shop,built,period,days){
   if(built&&Array.isArray(built)){
     built.forEach(r=>{
-      r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
+      r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.analysisLabel=r.analysis?.label||'';
-      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
+      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       if(shop==='好麻吉'){
         r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
         r.growthAnalysisLabel=r.growthAnalysis?.label||'';
@@ -1555,8 +1555,8 @@ function buildShop(shop,days){
     const targetROI=denom>0?1/denom:null;
     const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
     const dayBudget=days>0?adsFee/days:0;
-    const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit);
-    const testTag=calcTestTag(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit);
+    const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit,roi);
+    const testTag=calcTestTag(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit,roi);
     // 上半月營收 & 成長比（只有好麻吉）
     const prevRev = prevRevMap[p.code] ?? null;
     const growthRate = (prevRev!==null && prevRev>0) ? (p.rev - prevRev) / prevRev : null;
@@ -1604,18 +1604,18 @@ function evalAnaConds(conds,vals){
 
 // ── 分析公式 ──
 // $D=廣告費, $H=淨利率%, $K=目標ROI, $N=實際-目標, $O=點擊數, $P=純利
-function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit){
+function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, roi){
   const t=getAnaThresh();
   const dis=new Set(getDisabledAnaTags());
   const ok=l=>!dis.has(l);
-  const D=adsFee, H=pureRate*100, K=targetROI, N=roiDiff, O=clicks, P=pureProfit;
+  const D=adsFee, H=pureRate*100, K=targetROI, N=roiDiff, O=clicks, P=pureProfit, R=roi;
   if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
   if(ok('高利潤商品')&&D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
   if(ok('賠錢中')&&D>0 && H<0) return{label:'賠錢中',cls:'tag-lose'};
   if(ok('低淨利')&&D>0 && ((K!==null&&K!==undefined&&K<0)||(N===null||N===undefined||!isFinite(N)))) return{label:'低淨利',cls:'tag-low'};
   if(ok('低效廣告')&&D>0 && H>=0 && H<t.badAdsMaxH) return{label:'低效廣告',cls:'tag-bad'};
   for(const ct of getCustomAnaRules()){
-    if(evalAnaConds(ct.conds,{D,H,K,N,O,P}))return{label:ct.label,cls:ct.cls||'tag-add100'};
+    if(evalAnaConds(ct.conds,{D,H,K,N,O,P,R}))return{label:ct.label,cls:ct.cls||'tag-add100'};
   }
   if(N===null||N===undefined||!isFinite(N)||O<t.clickMin) return{label:'',cls:''};
   if(ok('加300')&&N>=t.add300) return{label:'加300',cls:'tag-add300'};
@@ -1645,7 +1645,7 @@ let _anaNewLabel='';
 let _anaNewCls='tag-add300';
 const ANA_FIELD_OPTS=[
   {v:'D',l:'廣告費(D)'},{v:'H',l:'淨利率%(H)'},{v:'K',l:'目標ROI(K)'},
-  {v:'N',l:'實際-目標(N)'},{v:'O',l:'點擊數(O)'},{v:'P',l:'純利(P)'}
+  {v:'N',l:'實際-目標(N)'},{v:'O',l:'點擊數(O)'},{v:'P',l:'純利(P)'},{v:'R',l:'投入產出(R)'}
 ];
 const ANA_CLS_OPTS=[
   {v:'tag-add300',l:'藍色'},{v:'tag-high',l:'綠色'},{v:'tag-danger',l:'紅色'},
@@ -1995,9 +1995,9 @@ function reapplyAnaToAll(){
   SHOPS.forEach(s=>{
     const built=state[s.id]._built;if(!built)return;
     built.forEach(r=>{
-      r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
+      r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.analysisLabel=r.analysis?.label||'';
-      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
+      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       if(s.id==='好麻吉'){
         r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
         r.growthAnalysisLabel=r.growthAnalysis?.label||'';
@@ -2011,11 +2011,30 @@ function reapplyAnaToAll(){
 let _testNewConds=[];
 let _testNewLabel='';
 let _testNewCls='tag-add300';
-function getCustomTestRules(){return _cloudRead('ec_test_custom')||[];}
+// 預設帶規則進來：直接從既有「建議」規則（雲端目前實際設定的門檻，
+// 不是寫死的初始值）換算成測試標籤格式，併入後就不用再維護獨立的建議規則系統。
+function _suggFieldToTestField(f){
+  if(f==='clicks')return'O';
+  if(f==='roi')return'R';
+  if(f==='pureProfit')return'P';
+  if(f==='pureRate')return'H';
+  return f;
+}
+function _defaultTestRulesFromSugg(){
+  return getSuggRules().filter(r=>r.active!==false).map(r=>({
+    label:r.tag,
+    cls:suggColorCls(r.color),
+    conds:r.conds.map(c=>({f:_suggFieldToTestField(c.f),op:c.op,v:String(c.v)})),
+  }));
+}
+function getCustomTestRules(){
+  const v=_cloudRead('ec_test_custom');
+  return v||_defaultTestRulesFromSugg();
+}
 function saveCustomTestRules(r){_cloudWrite('ec_test_custom',r);}
-function calcTestTag(D,H,K,N,O,P){
+function calcTestTag(D,H,K,N,O,P,R){
   for(const ct of getCustomTestRules()){
-    if(evalAnaConds(ct.conds,{D,H,K,N,O,P}))return{label:ct.label,cls:ct.cls||'tag-add100'};
+    if(evalAnaConds(ct.conds,{D,H,K,N,O,P,R}))return{label:ct.label,cls:ct.cls||'tag-add100'};
   }
   return{label:'',cls:''};
 }
@@ -2023,7 +2042,7 @@ function reapplyTestTagToAll(){
   SHOPS.forEach(s=>{
     const built=state[s.id]._built;if(!built)return;
     built.forEach(r=>{
-      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0);
+      r.testTag=calcTestTag(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
     });
     applyFilters(s.id);
   });
@@ -2327,19 +2346,7 @@ function updateTagFilterBar(shop){
       <div class="tfrow-pills">${gp}</div>
     </div>`;
   }
-  const suggPills=getSuggRules().filter(rule=>rule.active!==false).map(rule=>{
-    const {total,done}=suggRuleStats(shop,rule);
-    if(!total)return'';
-    const active=sel.includes(rule.tag)?' active':'';
-    const lbl=rule.tag.replace(/'/g,"\\'");
-    const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
-    return`<span class="tfpill${active}" ${ca}>${rule.tag}</span><span class="tfpill-cnt-cell" ${ca}>${done}/${total}</span>`;
-  }).join('');
-  const row3=`<div class="tfrow">
-    <div><span class="tfrow-lbl">建議</span><button class="ana-gear-btn" onclick="openSuggSettings('${shop}')" title="設定建議規則">⚙</button></div>
-    <div class="tfrow-pills">${suggPills||'<span style="font-size:11px;color:#9ca3af;padding:5px 0">尚無符合資料的建議</span>'}</div>
-  </div>`;
-  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row0}${row1}${row2}${row3}</div>`;
+  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row0}${row1}${row2}</div>`;
 }
 function toggleTagPopup(shop,btn){
   const bar=document.getElementById('tfbar-'+shop);if(!bar)return;
@@ -2368,7 +2375,7 @@ function applyFilters(shop){
   const q=(document.getElementById('search-'+shop).value||'').toLowerCase();
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q));
-  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l||r.testTag?.label===l||matchSuggRules(r).some(rule=>rule.tag===l)));
+  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l||r.testTag?.label===l));
   if(s.suggFilterActive)list=list.filter(r=>matchSuggRules(r).length);
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
@@ -2655,8 +2662,8 @@ function recalcRow(shop,code,ov){
   const days=state[shop]._days||1;
   const dayBudget=adsFee/days;
   const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
-  const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit);
-  const testTag=calcTestTag(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit);
+  const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
+  const testTag=calcTestTag(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
   const growthRate=r.growthRate;
   const growthAnalysis=shop==='好麻吉'?calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate):null;
   Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,roiDiff,dayBudget,analysis,testTag,growthAnalysis});
