@@ -47,7 +47,6 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <div style="display:flex;gap:8px">
           <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
           <button id="global-sync-btn" class="export-btn" onclick="syncToCloud(curShop)" style="opacity:0.4;cursor:default" disabled>☁ 同步雲端</button>
-          <button id="global-force-push-btn" class="export-btn" onclick="forcePushAllLocalProfits()" style="border-color:#f59e0b;color:#f59e0b" title="把本機 localStorage 裡所有賣場、所有期間的報表全推到雲端（用來救別人看不到的舊資料）">🚀 推送本機全部</button>
           <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
         </div>
       </div>
@@ -307,51 +306,27 @@ function _showSyncBtn(shop){
     btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent=`☁ 同步雲端 (${n})`;
   }
 }
-// 一鍵推送本機所有 ec|shop|month|half 報表到雲端
-//   救援情境：同步 bug 修好前留下的舊本機報表，pending set 已清空，
-//   一般 syncToCloud 撈不到 → 這個 helper 直接掃 localStorage + _profitMem
-//   把所有 ec|* 都當 pending 塞回去，再交給 syncToCloud 推。
-function forcePushAllLocalProfits(){
-  if(!window.__cloudProfitCol){
-    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'請稍後再試。',kind:'warn'});
-    else if(typeof showToast==='function') showToast('雲端未連線','error');
-    return;
-  }
-  // 收集所有 ec|* 報表 key（記憶體 + localStorage 都掃，去重）
-  const keys=new Set();
+// 掃出本機所有 ec|shop|month|half 報表 key 塞進 pending set
+//   讓 syncToCloud 不只推「本次會話新增」的，也把 localStorage 裡累積
+//   （包含前次重整前留下、pending set 已清空）的一併推上雲端。
+function _sweepAllLocalReportsIntoPending(){
   try{
     if(typeof Store!=='undefined'&&Store._profitMem){
-      Object.keys(Store._profitMem).forEach(k=>{ if(k.startsWith('ec|')) keys.add(k); });
+      Object.keys(Store._profitMem).forEach(k=>{ if(k.startsWith('ec|')) _pendingSyncKeys.add(k); });
     }
   }catch{}
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
-      if(k&&k.startsWith('ec|')) keys.add(k);
+      if(k&&k.startsWith('ec|')){
+        _pendingSyncKeys.add(k);
+        // localStorage 有但 _profitMem 沒有 → 撈回 _profitMem 讓推送流程拿得到
+        if(!(Store._profitMem&&Store._profitMem[k])){
+          try{ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+        }
+      }
     }
   }catch{}
-  if(keys.size===0){
-    if(typeof showToast==='function') showToast('本機沒有任何報表可推送','info');
-    return;
-  }
-  const byShop={};
-  keys.forEach(k=>{ const s=k.split('|')[1]; byShop[s]=(byShop[s]||0)+1; });
-  const summary=Object.entries(byShop).map(([s,n])=>`  • ${s}：${n} 份`).join('\n');
-  const ok=confirm(`即將把本機所有報表推送到雲端（覆蓋雲端同名資料）：\n\n${summary}\n\n共 ${keys.size} 份。確定？`);
-  if(!ok) return;
-  // 全部塞進 pending set，交給 syncToCloud 統一處理
-  keys.forEach(k=>{
-    _pendingSyncKeys.add(k);
-    // 補救：若 _profitMem 沒有這 key（只在 localStorage 裡），撈回來讓 syncToCloud 拿得到
-    if(!(Store._profitMem&&Store._profitMem[k])){
-      try{
-        const raw=localStorage.getItem(k);
-        if(raw){ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=JSON.parse(raw); }
-      }catch{}
-    }
-  });
-  _showSyncBtn();
-  syncToCloud(window.curShop||'好麻吉');
 }
 
 function syncToCloud(shop){
@@ -362,6 +337,8 @@ function syncToCloud(shop){
     else if(typeof showToast==='function') showToast('雲端未連線','error');
     if(btn)btn.disabled=false;return;
   }
+  // 一併把本機累積的所有 ec|* 報表塞進 pending，確保重整後遺失的也會被推
+  _sweepAllLocalReportsIntoPending();
   const promises=[];
   const syncedReports=[]; // 記錄有推的報表 key，方便 debug + toast
   // 同步當前 shop 的備註 / 編輯（按期間獨立存）
@@ -4198,7 +4175,7 @@ Object.assign(window, {
   coupangSummaryHTML,setCoupangSummaryView,recalcCoupangBuyout,loadCoupangBuyout,getCoupangBuyout,saveCoupangBuyout,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
-  syncToCloud,forcePushAllLocalProfits,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
+  syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   ignoreAllUnmatched,umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
   updateTagFilterBar,validateMapWarnings,
   applySuggFilter,clearSuggFilter,openSuggSettings,closeSuggSettings,saveSuggSettings,
