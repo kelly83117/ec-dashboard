@@ -153,6 +153,7 @@ function canAccessOffice(user, dept) {
 const OFFICE_FEATURES = {
   '行銷': [
     { key: 'calendar',   label: '工作日誌' },
+    { key: 'kpi',        label: 'KPI' },
     { key: 'profit',     label: '淨利表' },
     { key: 'insight',    label: '洞察表' },
     { key: 'lineNotify', label: 'LINE 通知設定' },
@@ -794,6 +795,7 @@ const App = {
     // 子路由 → feature key 對應（同部門的不同子頁）
     const ROUTE_FEATURE = {
       'office-d1':         'calendar',
+      'office-d1-kpi':     'kpi',
       'office-d1-profit':  'profit',
       'office-d1-insight': 'insight',
     };
