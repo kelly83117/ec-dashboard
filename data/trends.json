@@ -1,8 +1,8 @@
 {
-  "updated": "2026-07-03",
+  "updated": "2026-07-04",
   "items": [
     {
-      "title": "夏季家電",
+      "title": "夏季防蚊",
       "traffic": "50K+"
     },
     {
@@ -10,35 +10,35 @@
       "traffic": "30K+"
     },
     {
-      "title": "戶外野餐",
-      "traffic": "20K+"
-    },
-    {
-      "title": "防蚊噴霧",
+      "title": "戶外野餐用品",
       "traffic": "30K+"
     },
     {
-      "title": "收納盒",
-      "traffic": "50K+"
-    },
-    {
-      "title": "涼感衣物",
+      "title": "冷氣清潔",
       "traffic": "20K+"
     },
     {
-      "title": "廚房清潔劑",
-      "traffic": "10K+"
+      "title": "洗衣精",
+      "traffic": "20K+"
+    },
+    {
+      "title": "收納箱",
+      "traffic": "30K+"
     },
     {
       "title": "水壺",
-      "traffic": "30K+"
-    },
-    {
-      "title": "沙灘椅",
       "traffic": "20K+"
     },
     {
-      "title": "夏季水果刀具",
+      "title": "BBQ用品",
+      "traffic": "10K+"
+    },
+    {
+      "title": "防曬霜",
+      "traffic": "50K+"
+    },
+    {
+      "title": "冰箱收納",
       "traffic": "10K+"
     }
   ]

@@ -1,49 +1,49 @@
 {
-  "updated": "2026-07-03",
+  "updated": "2026-07-04",
   "items": [
     {
-      "keyword": "收納箱",
-      "name": "多功能收納箱",
+      "keyword": "竹製收納盒",
+      "name": "多功能竹製收納盒",
       "price": 299,
-      "sold": 300,
-      "url": "https://shopee.tw/search?keyword=%E6%94%B6%E7%B4%8D%E7%AE%B1",
-      "reason": "適合整理居家雜物",
+      "sold": 1500,
+      "url": "https://shopee.tw/search?keyword=%E7%AB%B9%E8%A3%BD%E6%94%B6%E7%B4%8D%E7%9B%92",
+      "reason": "環保材質，夏季清爽",
       "source": "AI推薦"
     },
     {
-      "keyword": "浴簾",
-      "name": "防水浴簾",
-      "price": 399,
-      "sold": 250,
-      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E7%B0%BE",
-      "reason": "夏季清涼裝飾必備",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "涼席",
-      "name": "天然涼席",
-      "price": 899,
-      "sold": 500,
-      "url": "https://shopee.tw/search?keyword=%E6%B6%BC%E5%B8%AD",
-      "reason": "炎熱夏季清涼良伴",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "菜板",
-      "name": "環保竹製菜板",
+      "keyword": "防潮除濕包",
+      "name": "家庭用防潮除濕包",
       "price": 199,
-      "sold": 400,
-      "url": "https://shopee.tw/search?keyword=%E8%8F%9C%E6%9D%BF",
-      "reason": "廚房必需品，實用又環保",
+      "sold": 1200,
+      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BD%AE%E9%99%A4%E6%BF%95%E5%8C%85",
+      "reason": "防潮需求增長，適合梅雨季",
       "source": "AI推薦"
     },
     {
-      "keyword": "收納籃",
-      "name": "手提收納籃",
-      "price": 249,
-      "sold": 350,
-      "url": "https://shopee.tw/search?keyword=%E6%94%B6%E7%B4%8D%E7%B1%83",
-      "reason": "多用途收納，方便實用",
+      "keyword": "清潔拖把",
+      "name": "可更換拖把清潔工具",
+      "price": 399,
+      "sold": 1000,
+      "url": "https://shopee.tw/search?keyword=%E6%B8%85%E6%BD%94%E6%8B%96%E6%8A%8A",
+      "reason": "夏季大掃除必備",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "冰絲涼感床單",
+      "name": "透氣冰絲涼感床單",
+      "price": 599,
+      "sold": 800,
+      "url": "https://shopee.tw/search?keyword=%E5%86%B0%E7%B5%B2%E6%B6%BC%E6%84%9F%E5%BA%8A%E5%96%AE",
+      "reason": "夏季降溫，提升睡眠舒適度",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "戶外野餐墊",
+      "name": "防水戶外野餐墊",
+      "price": 499,
+      "sold": 600,
+      "url": "https://shopee.tw/search?keyword=%E6%88%B6%E5%A4%96%E9%87%8E%E9%A4%90%E5%A2%8A",
+      "reason": "適合暑假戶外活動",
       "source": "AI推薦"
     }
   ]
