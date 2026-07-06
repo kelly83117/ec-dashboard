@@ -3410,7 +3410,15 @@ const KPI_GROUPS=[
       {k:'pure',l:'純利(實收)',fmt:'money',calc:d=>(d.rev-d.ret)-d.cost-d.ship-d.misc-d.tax-d.material},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>(d.rev-d.ret)>0?((d.rev-d.ret)-d.cost-d.ship-d.misc-d.tax-d.material)/(d.rev-d.ret):0},
     ],
-    order:['qty','rev','cost','ret','actualRev','ship','misc','tax','material','receivable','pure','pureRate']},
+    order:['qty','rev','cost','ret','actualRev','ship','misc','tax','material','receivable','pure','pureRate'],
+    // 寄倉運費：好麻吉／森之旅固定共用一筆合併儲存格（不算進這兩個賣場各自的純利，只影響小計）；
+    // 甲配／露營館這個欄位不適用（灰底不能編輯）；寄倉維持自己獨立的數字。
+    fieldMerge:{
+      ship:{
+        mergeGroups:[{shops:['mo+0號店(好麻吉)','mo+1號店(森之旅)']}],
+        notApplicable:['MOMO-甲配','mo+2號店(露營館)'],
+      },
+    }},
 ];
 function _kpiFmt(v,fmt){
   if(fmt==='pct')return v?(v*100).toFixed(2)+'%':'—';
@@ -3612,6 +3620,38 @@ function _kpiSummaryCardsHtml(row){
     }).join('')}
   </div>`;
 }
+// 找出某個賣場在某個欄位是否被合併（跟其他賣場共用一格）或不適用（例如 MOMO 寄倉運費：
+// 好麻吉/森之旅共用一格、甲配/露營館不適用），回傳 null 代表這個賣場照正常方式獨立編輯。
+function _kpiFieldMergeStatus(group,field,shop){
+  const cfg=group.fieldMerge?.[field];
+  if(!cfg)return null;
+  if(cfg.notApplicable?.includes(shop))return{type:'na'};
+  const g=cfg.mergeGroups?.find(mg=>mg.shops.includes(shop));
+  if(g)return{type:'merged',shops:g.shops,mergeKey:group.key+':'+field+':'+g.shops[0]};
+  return null;
+}
+function editKpiMergedField(month,mergeKey,tdEl){
+  const rows=getKpiRows();
+  let row=rows.find(r=>r.month===month);
+  if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
+  if(!row.kpiFieldMerges)row.kpiFieldMerges={};
+  const curVal=row.kpiFieldMerges[mergeKey]!=null?row.kpiFieldMerges[mergeKey]:'';
+  const origContent=tdEl.innerHTML;
+  const inp=document.createElement('input');
+  inp.type='number';inp.value=curVal;
+  inp.style.cssText='width:100px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
+  tdEl.innerHTML='';tdEl.appendChild(inp);inp.focus();if(inp.value)inp.select();
+  let done=false;
+  const save=()=>{
+    if(done)return;done=true;
+    const v=parseFloat(inp.value);
+    if(inp.value.trim()!==''&&!isNaN(v))row.kpiFieldMerges[mergeKey]=v;else delete row.kpiFieldMerges[mergeKey];
+    saveKpiRows(rows);
+    renderKpiTab();
+  };
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}if(e.key==='Escape'){done=true;tdEl.innerHTML=origContent;}});
+  inp.addEventListener('blur',()=>setTimeout(()=>{if(document.activeElement!==inp)save();},120));
+}
 function _kpiGroupTableHtml(row,group){
   const expanded=_kpiExpandedGroups.has(row.month+':'+group.key);
   // 公式欄位（如稅金、實際營收、純利）現在也能點擊打數字覆蓋，不是只有手動欄位才能編輯。
@@ -3643,7 +3683,15 @@ function _kpiGroupTableHtml(row,group){
   let totalRev=0,totalPure=0;
   const bodyRows=group.shops.map((shop,shopIdx)=>{
     const raw=row[group.key]?.[shop]||{};
-    const d=_kpiCalcAll(raw,group);
+    // 有些欄位這個賣場是合併/不適用（例如 MOMO 寄倉運費），算這個賣場自己的純利時要當作 0，
+    // 費用改成算在合併儲存格或小計上，不會讓這個賣場的公式因為缺值變成 NaN。
+    let rawForCalc=raw;
+    if(group.fieldMerge){
+      const zeroFields={};
+      Object.keys(group.fieldMerge).forEach(f=>{if(_kpiFieldMergeStatus(group,f,shop))zeroFields[f]=0;});
+      if(Object.keys(zeroFields).length)rawForCalc={...raw,...zeroFields};
+    }
+    const d=_kpiCalcAll(rawForCalc,group);
     totalRev+=d.rev||0;
     totalPure+=d[pureKey]||0;
     const cells=cols.map(c=>{
@@ -3652,6 +3700,18 @@ function _kpiGroupTableHtml(row,group){
         const tid=`kpi-${row.month}-${group.key}-common`;
         const dispVal=commonCost?fmtN(Math.round(commonCost)):'<span style="color:#d1d5db">—</span>';
         return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;background:#eef4ff;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一賣場）">${dispVal}</td>`;
+      }
+      const mergeStatus=_kpiFieldMergeStatus(group,c.k,shop);
+      if(mergeStatus?.type==='na'){
+        return `<td style="padding:6px 10px;background:#374151" title="這個賣場不適用${c.l}">&nbsp;</td>`;
+      }
+      if(mergeStatus?.type==='merged'){
+        if(shopIdx!==group.shops.indexOf(mergeStatus.shops[0]))return '';
+        const mergedVal=(row.kpiFieldMerges||{})[mergeStatus.mergeKey]||0;
+        totals[c.k]=(totals[c.k]||0)+mergedVal;
+        const tid=`kpi-${row.month}-${mergeStatus.mergeKey}`.replace(/["'\s:]/g,'_');
+        const dispVal=mergedVal?fmtN(Math.round(mergedVal)):'<span style="color:#d1d5db">—</span>';
+        return `<td id="${tid}" rowspan="${mergeStatus.shops.length}" onclick="editKpiMergedField('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;background:#eef4ff;vertical-align:middle" title="${mergeStatus.shops.join('+')}共用一格${c.l}，只影響小計，不算進各自純利">${dispVal}</td>`;
       }
       totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);
       const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
@@ -4628,7 +4688,7 @@ Object.assign(window, {
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,
-  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,
+  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
