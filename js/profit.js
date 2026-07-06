@@ -3375,7 +3375,7 @@ const KPI_GROUPS=[
   {key:'shopee',title:'蝦皮',color:'#ee4d2d',shops:['好麻吉','玩樂','維克','森之旅'],
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'實際營收'},{k:'cost',l:'商品成本'},{k:'ads',l:'廣告費'},{k:'fee',l:'手續費'},{k:'misc',l:'各項費用'}],
     formula:[
-      {k:'aov',l:'客單價',fmt:'money',calc:d=>d.qty>0?d.rev/d.qty:0},
+      {k:'aov',l:'客單價',fmt:'money',avg:true,calc:d=>d.qty>0?d.rev/d.qty:0},
       {k:'costPct',l:'成本佔比',fmt:'pct',calc:d=>d.rev>0?d.cost/d.rev:0},
       {k:'adsPct',l:'廣告佔比',fmt:'pct',calc:d=>d.rev>0?d.ads/d.rev:0},
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.ads-d.fee-d.misc},
@@ -3407,8 +3407,8 @@ const KPI_GROUPS=[
     formula:[
       {k:'actualRev',l:'實際營收',fmt:'money',calc:d=>d.rev-d.ret},
       {k:'tax',l:'稅金(5%)',fmt:'money',calc:d=>(d.rev-d.ret)*0.05},
-      {k:'pure',l:'純利(實收)',fmt:'money',calc:d=>(d.rev-d.ret)-d.cost-d.ship-d.misc-(d.rev-d.ret)*0.05-d.material},
-      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>(d.rev-d.ret)>0?((d.rev-d.ret)-d.cost-d.ship-d.misc-(d.rev-d.ret)*0.05-d.material)/(d.rev-d.ret):0},
+      {k:'pure',l:'純利(實收)',fmt:'money',calc:d=>(d.rev-d.ret)-d.cost-d.ship-d.misc-d.tax-d.material},
+      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>(d.rev-d.ret)>0?((d.rev-d.ret)-d.cost-d.ship-d.misc-d.tax-d.material)/(d.rev-d.ret):0},
     ],
     order:['qty','rev','cost','ret','actualRev','ship','misc','tax','material','receivable','pure','pureRate']},
 ];
@@ -3418,7 +3418,9 @@ function _kpiFmt(v,fmt){
 }
 function _kpiCalcAll(d,group){
   const out={...d};
-  group.formula.forEach(f=>{out[f.k]=f.calc(out)||0;});
+  // 公式欄位現在也能手動打數字覆蓋（例如稅金每月手算不一定剛好是 5%）——
+  // 已經有手動填的值就不要被公式蓋掉，沒填才用公式算出預設值。
+  group.formula.forEach(f=>{if(out[f.k]==null)out[f.k]=f.calc(out)||0;});
   return out;
 }
 // 一個月只會做一次這張表，所以不用「新增月份」的額外步驟——
@@ -3611,7 +3613,8 @@ function _kpiSummaryCardsHtml(row){
 }
 function _kpiGroupTableHtml(row,group){
   const expanded=_kpiExpandedGroups.has(row.month+':'+group.key);
-  const allCols=[...group.manual.map(c=>({...c,editable:true})),...group.formula.map(c=>({...c,editable:false}))];
+  // 公式欄位（如稅金、實際營收、純利）現在也能點擊打數字覆蓋，不是只有手動欄位才能編輯。
+  const allCols=[...group.manual.map(c=>({...c,editable:true})),...group.formula.map(c=>({...c,editable:true}))];
   if(group.commonCostLabel)allCols.push({k:'_common',l:group.commonCostShortLabel||group.commonCostLabel,editable:false,isCommon:true});
   const cols=group.order?group.order.map(k=>allCols.find(c=>c.k===k)).filter(Boolean):allCols;
   // 欄位固定表格版面＋每欄等寬，欄位之間才會平均分配空間，不會被瀏覽器依內容長短撐出忽大忽小的間隔。
@@ -3652,14 +3655,10 @@ function _kpiGroupTableHtml(row,group){
       totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);
       const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
       const shopArg=shop.replace(/'/g,"\\'");
-      if(c.editable){
-        const dispVal=d[c.k]?fmtN(Math.round(d[c.k])):'<span style="color:#d1d5db">—</span>';
-        return `<td id="${tid}" onclick="kpiCellClick('${row.month}','${group.key}','${shopArg}','${c.k}',this,true)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap" title="點擊編輯；輸入 = 後點其他欄位可帶入公式，如 =實際營收*21%">${dispVal}</td>`;
-      }
-      const val=_kpiFmt(d[c.k],c.fmt);
+      const dispVal=_kpiFmt(d[c.k],c.fmt);
       const isPure=c.k.startsWith('pure')&&c.fmt==='money';
       const color=isPure?(d[c.k]>=0?'#059669':'#dc2626'):'#374151';
-      return `<td id="${tid}" onclick="kpiCellClick('${row.month}','${group.key}','${shopArg}','${c.k}',this,false)" style="padding:6px 10px;text-align:right;font-size:12.5px;color:${color};white-space:nowrap" title="公式編輯時可點這裡帶入 ${c.l}">${val}</td>`;
+      return `<td id="${tid}" onclick="kpiCellClick('${row.month}','${group.key}','${shopArg}','${c.k}',this,true)" style="padding:6px 10px;text-align:right;font-size:12.5px;color:${color};cursor:pointer;white-space:nowrap" title="點擊編輯；輸入 = 後點其他欄位可帶入公式，如 =實際營收*21%">${dispVal}</td>`;
     }).join('');
     return `<tr style="border-top:1px solid #f0f0f0">
       <td style="padding:6px 12px;font-size:12.5px;font-weight:600;color:#374151;background:#fff;text-align:left;white-space:nowrap">${shop}</td>
@@ -3672,9 +3671,9 @@ function _kpiGroupTableHtml(row,group){
     if(c.isCommon)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151;background:#eef4ff">${commonCost?fmtN(Math.round(commonCost)):'—'}</td>`;
     if(c.k===pureKey)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:${totalPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(totalPure))}</td>`;
     if(c.k==='pureRate')return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}</td>`;
-    if(c.editable)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${totals[c.k]?fmtN(Math.round(totals[c.k])):'—'}</td>`;
-    // 其他公式欄位（如成本佔比、廣告佔比、客單價）：套用同一個 calc 公式，用小計後的加總數字去算，
-    // 例如成本佔比小計＝商品成本小計/實際營收小計。
+    // 比率／平均型欄位（成本佔比、廣告佔比、客單價）不能直接加總，要用小計後的加總數字重算；
+    // 其餘金額型欄位（不管原本是手動輸入還是公式，現在都能點擊覆蓋）本身可以加總，包含被手動覆蓋過的值。
+    if(c.fmt!=='pct'&&!c.avg)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${totals[c.k]?fmtN(Math.round(totals[c.k])):'—'}</td>`;
     return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;color:#374151">${_kpiFmt(c.calc(totals),c.fmt)}</td>`;
   }).join('');
   const subtotalRow=`<tr style="border-top:1px solid #e5e7eb;background:#f8f9fc">
