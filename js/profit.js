@@ -3593,7 +3593,7 @@ function _kpiGroupTableHtml(row,group){
       return `<td style="padding:6px 10px;text-align:right;font-size:12.5px;color:${color};white-space:nowrap">${val}</td>`;
     }).join('');
     return `<tr style="border-top:1px solid #f0f0f0">
-      <td style="padding:6px 12px;font-size:12.5px;font-weight:600;color:#374151;background:#fff">${shop}</td>
+      <td style="padding:6px 12px;font-size:12.5px;font-weight:600;color:#374151;background:#fff;text-align:left;white-space:nowrap">${shop}</td>
       ${cells}
     </tr>`;
   }).join('');
@@ -3605,7 +3605,7 @@ function _kpiGroupTableHtml(row,group){
   if(group.commonCostLabel){
     const tid=`kpi-${row.month}-${group.key}-common`;
     commonRow=`<tr style="border-top:1px solid #f0f0f0">
-      <td style="padding:5px 12px;font-size:11.5px;color:#9ca3af;background:#fff">${group.commonCostLabel}</td>
+      <td style="padding:5px 12px;font-size:11.5px;color:#9ca3af;background:#fff;text-align:left;white-space:nowrap">${group.commonCostLabel}</td>
       <td id="${tid}" colspan="${cols.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:5px 10px;text-align:right;font-size:12px;color:#9ca3af;cursor:pointer" title="點擊編輯">${commonCost?fmtN(Math.round(commonCost)):'<span style="color:#d1d5db">—</span>'}</td>
     </tr>`;
   }
@@ -3617,7 +3617,7 @@ function _kpiGroupTableHtml(row,group){
     return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;color:#9ca3af">—</td>`;
   }).join('');
   const subtotalRow=`<tr style="border-top:1px solid #e5e7eb;background:#f8f9fc">
-    <td style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#374151;background:#f8f9fc">小計</td>
+    <td style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#374151;background:#f8f9fc;text-align:left;white-space:nowrap">小計</td>
     ${subtotalCells}
   </tr>`;
   return `<div style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;overflow:hidden">
@@ -3707,9 +3707,11 @@ function _kpiYearViewHtml(){
   ${_kpiYearShopBreakdownHtml(rows)}`;
 }
 // 各賣場全年營收/純利彙總——把選定年份 12 個月的資料，依賣場加總。
+// 依組別分段顯示（組別標題列 + 該組小計），跟月結表的分組視覺語言一致，避免十幾個賣場混成一長串。
 function _kpiYearShopBreakdownHtml(rows){
-  const shopRowsHtml=KPI_GROUPS.map(g=>{
+  const groupBlocks=KPI_GROUPS.map(g=>{
     const pureKey=g.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))?.k;
+    let groupRev=0,groupPure=0;
     const shopTrs=g.shops.map(shop=>{
       let rev=0,pure=0;
       for(let m=1;m<=12;m++){
@@ -3719,15 +3721,22 @@ function _kpiYearShopBreakdownHtml(rows){
         const d=_kpiCalcAll(row[g.key]?.[shop]||{},g);
         rev+=d.rev||0;pure+=d[pureKey]||0;
       }
+      groupRev+=rev;groupPure+=pure;
       const rate=rev>0?pure/rev*100:null;
       return `<tr style="border-top:1px solid #f0f0f0">
-        <td style="padding:6px 12px;font-size:12.5px;font-weight:600;color:#374151;border-left:3px solid ${g.color}">${shop}</td>
+        <td style="padding:6px 12px 6px 20px;font-size:12.5px;color:#374151;text-align:left;white-space:nowrap">${shop}</td>
         <td style="padding:6px 10px;text-align:right;font-size:12.5px">${rev?fmtN(Math.round(rev)):'—'}</td>
         <td style="padding:6px 10px;text-align:right;font-size:12.5px;color:${pure<0?'#dc2626':'#374151'}">${rev||pure?fmtN(Math.round(pure)):'—'}</td>
         <td style="padding:6px 10px;text-align:right;font-size:12.5px">${rate!==null?rate.toFixed(2)+'%':'—'}</td>
       </tr>`;
     }).join('');
-    return shopTrs;
+    const groupRate=groupRev>0?groupPure/groupRev*100:null;
+    const headerRow=`<tr style="background:#f8f9fc;border-top:1px solid #e5e7eb">
+      <td colspan="4" style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#1e293b;border-left:3px solid ${g.color};text-align:left;white-space:nowrap">${g.title}
+        <span style="font-weight:400;color:#9ca3af;margin-left:10px">全年純利 <b style="font-weight:700;color:${groupPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(groupPure))}</b>${groupRate!==null?`　純利率 ${groupRate.toFixed(2)}%`:''}</span>
+      </td>
+    </tr>`;
+    return headerRow+shopTrs;
   }).join('');
   return `<div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:8px">各賣場全年統計</div>
   <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto">
@@ -3738,7 +3747,7 @@ function _kpiYearShopBreakdownHtml(rows){
         <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">全年純利</th>
         <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">純利率</th>
       </tr></thead>
-      <tbody>${shopRowsHtml}</tbody>
+      <tbody>${groupBlocks}</tbody>
     </table>
   </div>`;
 }
