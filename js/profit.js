@@ -3611,8 +3611,10 @@ function _kpiGroupTableHtml(row,group){
   const expanded=_kpiExpandedGroups.has(row.month+':'+group.key);
   const allCols=[...group.manual.map(c=>({...c,editable:true})),...group.formula.map(c=>({...c,editable:false}))];
   const cols=group.order?group.order.map(k=>allCols.find(c=>c.k===k)).filter(Boolean):allCols;
+  // 欄位固定表格版面＋每欄等寬，欄位之間才會平均分配空間，不會被瀏覽器依內容長短撐出忽大忽小的間隔。
+  const colgroup=`<colgroup><col style="width:130px">${cols.map(()=>`<col style="width:calc((100% - 130px)/${cols.length})">`).join('')}</colgroup>`;
   const thead=`<tr style="background:#f8f9fc">
-    <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc;min-width:130px">${group.shops.length>1?'賣場':'名稱'}</th>
+    <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc">${group.shops.length>1?'賣場':'名稱'}</th>
     ${cols.map(c=>{
       if(KPI_NOTEABLE_FIELDS.has(c.k)){
         const note=(row.kpiFieldNotes||{})[group.key+':'+c.k];
@@ -3657,7 +3659,7 @@ function _kpiGroupTableHtml(row,group){
   if(group.commonCostLabel){
     const tid=`kpi-${row.month}-${group.key}-common`;
     commonRow=`<tr style="border-top:1px solid #f0f0f0">
-      <td style="padding:5px 12px;font-size:11.5px;color:#9ca3af;background:#fff;text-align:left;white-space:nowrap">${group.commonCostLabel}</td>
+      <td style="padding:5px 12px;font-size:11.5px;color:#9ca3af;background:#fff;text-align:left">${group.commonCostLabel}</td>
       <td id="${tid}" colspan="${cols.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:5px 10px;text-align:right;font-size:12px;color:#9ca3af;cursor:pointer" title="點擊編輯">${commonCost?fmtN(Math.round(commonCost)):'<span style="color:#d1d5db">—</span>'}</td>
     </tr>`;
   }
@@ -3678,7 +3680,7 @@ function _kpiGroupTableHtml(row,group){
       <span style="color:#9ca3af;display:inline-block;transition:transform .15s;transform:rotate(${expanded?90:0}deg)">▸</span>
     </div>
     ${expanded?`<div style="overflow-x:auto">
-      <table style="border-collapse:collapse;width:auto;min-width:max-content"><thead>${thead}</thead><tbody>${bodyRows}${commonRow}${subtotalRow}</tbody></table>
+      <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:700px">${colgroup}<thead>${thead}</thead><tbody>${bodyRows}${commonRow}${subtotalRow}</tbody></table>
     </div>`:''}
   </div>`;
 }
@@ -3741,7 +3743,8 @@ function _kpiYearViewHtml(){
     <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
   </div>
   <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto;margin-bottom:20px">
-    <table style="border-collapse:collapse;width:auto;min-width:max-content">
+    <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:600px">
+      <colgroup><col style="width:110px">${Array.from({length:KPI_GROUPS.length+1}).map(()=>`<col style="width:calc((100% - 110px)/${KPI_GROUPS.length+1})">`).join('')}</colgroup>
       <thead><tr style="background:#f8f9fc">
         <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700">月份</th>
         ${KPI_GROUPS.map(g=>`<th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">${g.title}純利</th>`).join('')}
@@ -3792,7 +3795,8 @@ function _kpiYearShopBreakdownHtml(rows){
   }).join('');
   return `<div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:8px">各賣場全年統計</div>
   <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto">
-    <table style="border-collapse:collapse;width:auto;min-width:max-content">
+    <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:500px">
+      <colgroup><col style="width:25%"><col style="width:25%"><col style="width:25%"><col style="width:25%"></colgroup>
       <thead><tr style="background:#f8f9fc">
         <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700">賣場</th>
         <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">全年營收</th>
@@ -3814,7 +3818,7 @@ function renderKpiTab(){
   el.innerHTML=`<div style="padding:14px 16px 16px">${modeTabsHtml}${body}</div>`;
 }
 function buildKpiTabHtml(){
-  return `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;max-width:1180px">
+  return `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
     <div id="kpi-tab-content"></div>
   </div>`;
 }
