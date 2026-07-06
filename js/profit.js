@@ -3512,9 +3512,10 @@ function editKpiCell(month,groupKey,shop,field,tdEl){
     const raw=inp.value.trim();
     const isPlain=/^-?\d+(\.\d+)?$/.test(raw);
     const computed=_kpiEvalFormula(raw,shopData,group);
-    if(raw===''||isNaN(computed)||computed===0){
+    if(raw===''||isNaN(computed)){
       delete shopData[field];delete shopData[field+'Formula'];
     }else{
+      // 打 0 是刻意要蓋成 0（跟完全沒填、留給公式自動算不一樣），要真的存下來，不能當作空白清掉。
       shopData[field]=computed;
       if(isPlain)delete shopData[field+'Formula'];else shopData[field+'Formula']=raw;
     }
@@ -3655,7 +3656,9 @@ function _kpiGroupTableHtml(row,group){
       totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);
       const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
       const shopArg=shop.replace(/'/g,"\\'");
-      const dispVal=_kpiFmt(d[c.k],c.fmt);
+      // 有明確存過值（就算是刻意打的 0）都要顯示出數字，不能因為是 0 就跟「完全沒填」一樣顯示 —。
+      const explicitlySet=raw[c.k]!=null;
+      const dispVal=explicitlySet?(c.fmt==='pct'?(d[c.k]*100).toFixed(2)+'%':fmtN(Math.round(d[c.k]))):_kpiFmt(d[c.k],c.fmt);
       const isPure=c.k.startsWith('pure')&&c.fmt==='money';
       const color=isPure?(d[c.k]>=0?'#059669':'#dc2626'):'#374151';
       return `<td id="${tid}" onclick="kpiCellClick('${row.month}','${group.key}','${shopArg}','${c.k}',this,true)" style="padding:6px 10px;text-align:right;font-size:12.5px;color:${color};cursor:pointer;white-space:nowrap" title="點擊編輯；輸入 = 後點其他欄位可帶入公式，如 =實際營收*21%">${dispVal}</td>`;
