@@ -1,5 +1,5 @@
 {
-  "updated": "2026-07-05",
+  "updated": "2026-07-06",
   "items": [
     {
       "keyword": "收纳盒",
@@ -10,35 +10,35 @@
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E7%9B%92"
     },
     {
-      "keyword": "厨房用具",
-      "name": "不锈钢厨房工具套装",
-      "price_range": "10-30元",
-      "moq": "50套",
-      "reason": "夏季烹饪活动增多",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E7%94%A8%E5%85%B7"
+      "keyword": "廚房收納架",
+      "name": "多層廚房收納架",
+      "price_range": "20-50元",
+      "moq": "50個",
+      "reason": "夏季烹飪需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BB%9A%E6%88%BF%E6%94%B6%E7%B4%8D%E6%9E%B6"
     },
     {
-      "keyword": "浴室收纳",
-      "name": "浴室架子收纳用品",
-      "price_range": "15-35元",
-      "moq": "20个",
-      "reason": "适合夏季浴室整理",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%BA%B3"
+      "keyword": "浴室置物架",
+      "name": "浴室多功能置物架",
+      "price_range": "25-60元",
+      "moq": "30個",
+      "reason": "提升居家浴室整理",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E7%BD%AE%E7%89%A9%E6%9E%B6"
     },
     {
       "keyword": "床上用品",
-      "name": "透气床单套装",
-      "price_range": "30-60元",
-      "moq": "30套",
+      "name": "夏季涼感床單",
+      "price_range": "15-35元",
+      "moq": "100套",
       "reason": "夏季床品需求上升",
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E4%B8%8A%E7%94%A8%E5%93%81"
     },
     {
       "keyword": "清洁用品",
-      "name": "环保清洁拖把",
-      "price_range": "20-50元",
-      "moq": "50个",
-      "reason": "假期大扫除需要",
+      "name": "多功能清洁布",
+      "price_range": "1-5元",
+      "moq": "200個",
+      "reason": "暑期大掃除需求",
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E7%94%A8%E5%93%81"
     }
   ]
