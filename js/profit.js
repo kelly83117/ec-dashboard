@@ -3362,6 +3362,13 @@ function getKpiRows(){
 }
 function saveKpiRows(rows){
   try{localStorage.setItem('ec_kpi_v1',JSON.stringify(rows));}catch{}
+  try{ if(typeof Store!=='undefined'){ Store._profitMem=Store._profitMem||{}; Store._profitMem._kpi_v1=rows; } }catch{}
+  // KPI 是偶爾才存一次的手動輸入，這裡沒有另外的「同步雲端」按鈕可以點，
+  // 所以直接即時推雲端，不要走 _cloudWriteSafe 的「本機優先、等按鈕手動同步」流程
+  // （不然像淨利表分頁那樣要另外去按同步鈕，資料才會真的進雲端）。
+  if(window.__cloudProfit&&typeof window.__cloudProfit.setField==='function'){
+    window.__cloudProfit.setField('_kpi_v1', rows).catch(e=>console.warn('[KPI] 雲端同步失敗，稍後會透過同步雲端按鈕補推',e));
+  }
   _cloudWriteSafe('_kpi_v1', rows, 'KPI月結表');
 }
 const KPI_GROUPS=[
