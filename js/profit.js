@@ -3418,43 +3418,22 @@ function _kpiCalcAll(d,group){
   group.formula.forEach(f=>{out[f.k]=f.calc(out)||0;});
   return out;
 }
-function openAddKpiMonthModal(){
-  const now=new Date();
-  const cur=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  const ov=document.createElement('div');
-  ov.className='ana-overlay open';ov.style.zIndex='3000';
-  ov.innerHTML=`<div class="ana-modal" style="width:280px;max-width:96vw">
-    <div class="ana-modal-hdr"><span>新增月份</span><button class="ana-close-btn" onclick="this.closest('.ana-overlay').remove()">✕</button></div>
-    <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
-      <div style="display:flex;flex-direction:column;gap:6px"><label style="font-size:12px;color:#6b7280;font-weight:600">月份</label>
-        <input type="month" id="kpi-add-month" value="${cur}" style="padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
-        <button onclick="this.closest('.ana-overlay').remove()" style="padding:8px 18px;border:1.5px solid #e5e7eb;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#6b7280;cursor:pointer">取消</button>
-        <button onclick="confirmAddKpiMonth(this)" style="padding:8px 18px;border:0;border-radius:8px;background:#5b5fcf;font-size:13px;font-weight:700;color:white;cursor:pointer">新增</button>
-      </div>
-    </div></div>`;
-  document.body.appendChild(ov);
-  ov.onclick=e=>{if(e.target===ov)ov.remove();};
+// 一個月只會做一次這張表，所以不用「新增月份」的額外步驟——
+// 年份/月份直接用下拉選單指定，選到的月份如果還沒有資料，
+// 畫面上就顯示空白可編輯的表格，真的填了數字才會建立/儲存那個月。
+function _kpiEmptyRow(month){return{id:month,month,shopee:{},coupang:{},other:{},website:{},momo:{}};}
+function getOrCreateKpiRow(month){
+  return getKpiRows().find(r=>r.month===month)||_kpiEmptyRow(month);
 }
-function confirmAddKpiMonth(btn){
-  const month=document.getElementById('kpi-add-month').value;
-  if(!month){alert('請選擇月份');return;}
-  const rows=getKpiRows();
-  if(rows.find(r=>r.month===month)){alert('此月份已存在');return;}
-  rows.push({id:'km_'+Date.now(),month,shopee:{},coupang:{},other:{},website:{},momo:{}});
-  rows.sort((a,b)=>a.month.localeCompare(b.month));
-  saveKpiRows(rows);
-  btn.closest('.ana-overlay').remove();
+function deleteKpiRow(month){
+  if(!confirm('確定清空這個月份的資料？'))return;
+  saveKpiRows(getKpiRows().filter(r=>r.month!==month));
   renderKpiTab();
 }
-function deleteKpiRow(id){
-  if(!confirm('確定刪除這個月份的資料？'))return;
-  saveKpiRows(getKpiRows().filter(r=>r.id!==id));
-  renderKpiTab();
-}
-function editKpiCell(rowId,groupKey,shop,field,tdEl){
+function editKpiCell(month,groupKey,shop,field,tdEl){
   const rows=getKpiRows();
-  const row=rows.find(r=>r.id===rowId);if(!row)return;
+  let row=rows.find(r=>r.month===month);
+  if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
   if(!row[groupKey])row[groupKey]={};
   if(!row[groupKey][shop])row[groupKey][shop]={};
   const curVal=row[groupKey][shop][field]||'';
@@ -3474,9 +3453,10 @@ function editKpiCell(rowId,groupKey,shop,field,tdEl){
   inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}if(e.key==='Escape'){done=true;tdEl.innerHTML=origContent;}});
   inp.addEventListener('blur',save);
 }
-function editKpiCommonCost(rowId,groupKey,tdEl){
+function editKpiCommonCost(month,groupKey,tdEl){
   const rows=getKpiRows();
-  const row=rows.find(r=>r.id===rowId);if(!row)return;
+  let row=rows.find(r=>r.month===month);
+  if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
   const fieldName=groupKey+'Common';
   const curVal=row[fieldName]||'';
   const origContent=tdEl.innerHTML;
@@ -3591,30 +3571,90 @@ function _kpiGroupTableHtml(row,group){
     </div>`:''}
   </div>`;
 }
-function _kpiMonthBlockHtml(row){
-  const[y,m]=row.month.split('-');
-  const delBtn=`<button onclick="deleteKpiRow('${row.id}')" style="background:none;border:none;color:#d1d5db;cursor:pointer;font-size:12px;margin-left:6px" title="刪除">✕</button>`;
-  return `<div style="margin-bottom:28px;padding-bottom:8px;border-bottom:2px solid #e5e7eb">
-    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px">
-      <span style="font-size:16px;font-weight:700;color:#1e293b">${y}年${m}月</span>
-      ${delBtn}
-    </div>
-    ${_kpiSummaryCardsHtml(row)}
-    ${KPI_GROUPS.map(g=>_kpiGroupTableHtml(row,g)).join('')}
+// ── 檢視狀態：月結表／年度總表 切換、目前選的年月（預設今天所在的年月）──
+let _kpiViewMode='month';
+const _KPI_NOW=new Date();
+let _kpiCurYear=_KPI_NOW.getFullYear();
+let _kpiCurMonthNum=_KPI_NOW.getMonth()+1;
+function _kpiYM(){return `${_kpiCurYear}-${String(_kpiCurMonthNum).padStart(2,'0')}`;}
+function _kpiYearOptions(){
+  const cur=_KPI_NOW.getFullYear();
+  const years=[];
+  for(let y=cur-2;y<=cur+1;y++)years.push(y);
+  if(!years.includes(_kpiCurYear))years.push(_kpiCurYear);
+  return years.sort((a,b)=>a-b);
+}
+function setKpiViewMode(mode){_kpiViewMode=mode;renderKpiTab();}
+function setKpiYear(y){_kpiCurYear=parseInt(y);renderKpiTab();}
+function setKpiMonthNum(m){_kpiCurMonthNum=parseInt(m);renderKpiTab();}
+function _kpiMonthViewHtml(){
+  const month=_kpiYM();
+  const row=getOrCreateKpiRow(month);
+  const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===_kpiCurYear?' selected':''}>${y}年</option>`).join('');
+  const monthOpts=Array.from({length:12},(_,i)=>i+1).map(m=>`<option value="${m}"${m===_kpiCurMonthNum?' selected':''}>${m}月</option>`).join('');
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+    <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
+    <select onchange="setKpiMonthNum(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${monthOpts}</select>
+    <button onclick="deleteKpiRow('${month}')" style="background:none;border:none;color:#d1d5db;cursor:pointer;font-size:12px;margin-left:4px" title="清空這個月份的資料">清空此月份</button>
+  </div>
+  ${_kpiSummaryCardsHtml(row)}
+  ${KPI_GROUPS.map(g=>_kpiGroupTableHtml(row,g)).join('')}
+  <div style="margin-top:6px"><span style="font-size:11px;color:#9ca3af">灰底欄位為公式自動計算，白底欄位點擊可編輯，點分組列可展開/收合明細</span></div>`;
+}
+function _kpiYearViewHtml(){
+  const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===_kpiCurYear?' selected':''}>${y}年</option>`).join('');
+  const rows=getKpiRows();
+  const groupGrand={};
+  let grandPure=0;
+  const isCurMonth=(m)=>_kpiCurYear===_KPI_NOW.getFullYear()&&m===_KPI_NOW.getMonth()+1;
+  const monthRows=Array.from({length:12},(_,i)=>i+1).map(m=>{
+    const month=`${_kpiCurYear}-${String(m).padStart(2,'0')}`;
+    const row=rows.find(r=>r.month===month);
+    let monthPure=0;
+    const tds=KPI_GROUPS.map(g=>{
+      if(!row)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;color:#d1d5db">—</td>`;
+      const{totalPure}=_kpiGroupTotals(row,g);
+      monthPure+=totalPure;
+      groupGrand[g.key]=(groupGrand[g.key]||0)+totalPure;
+      return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;color:${totalPure<0?'#dc2626':'#374151'}">${fmtN(Math.round(totalPure))}</td>`;
+    }).join('');
+    grandPure+=monthPure;
+    return `<tr style="border-top:1px solid #f0f0f0;${isCurMonth(m)?'background:#eef2ff':''}">
+      <td style="padding:7px 12px;font-size:12.5px;font-weight:600">${m}月</td>
+      ${tds}
+      <td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:${monthPure>=0?'#059669':'#dc2626'}">${row?fmtN(Math.round(monthPure)):'—'}</td>
+    </tr>`;
+  }).join('');
+  const totalCells=KPI_GROUPS.map(g=>`<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700">${fmtN(Math.round(groupGrand[g.key]||0))}</td>`).join('');
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+    <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
+  </div>
+  <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto">
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="background:#f8f9fc">
+        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700">月份</th>
+        ${KPI_GROUPS.map(g=>`<th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">${g.title}純利</th>`).join('')}
+        <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">合計純利</th>
+      </tr></thead>
+      <tbody>${monthRows}
+        <tr style="border-top:2px solid #e5e7eb;background:#f8f9fc">
+          <td style="padding:7px 12px;font-size:12.5px;font-weight:700">全年合計</td>
+          ${totalCells}
+          <td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:${grandPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(grandPure))}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>`;
 }
 function renderKpiTab(){
   const el=document.getElementById('kpi-tab-content');
   if(!el)return;
-  const rows=getKpiRows().slice().sort((a,b)=>b.month.localeCompare(a.month));
-  const body=rows.length?rows.map(_kpiMonthBlockHtml).join(''):`<div style="text-align:center;padding:50px;color:#9ca3af;font-size:13px">尚無資料，點下方「＋ 新增月份」開始輸入</div>`;
-  el.innerHTML=`<div style="padding:14px 16px 16px">
-    ${body}
-    <div style="margin-top:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button onclick="openAddKpiMonthModal()" style="padding:7px 18px;border:1.5px dashed #c7d2fe;border-radius:8px;background:white;color:#5b5fcf;font-size:13px;font-weight:600;cursor:pointer">＋ 新增月份</button>
-      <span style="font-size:11px;color:#9ca3af">灰底欄位為公式自動計算，白底欄位點擊可編輯，點分組列可展開/收合明細</span>
-    </div>
+  const modeTabsHtml=`<div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid #e5e7eb">
+    <div onclick="setKpiViewMode('month')" style="padding:8px 16px;font-size:13px;font-weight:${_kpiViewMode==='month'?700:400};color:${_kpiViewMode==='month'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='month'?'#5b5fcf':'transparent'};cursor:pointer">月結表</div>
+    <div onclick="setKpiViewMode('year')" style="padding:8px 16px;font-size:13px;font-weight:${_kpiViewMode==='year'?700:400};color:${_kpiViewMode==='year'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='year'?'#5b5fcf':'transparent'};cursor:pointer">年度總表</div>
   </div>`;
+  const body=_kpiViewMode==='year'?_kpiYearViewHtml():_kpiMonthViewHtml();
+  el.innerHTML=`<div style="padding:14px 16px 16px">${modeTabsHtml}${body}</div>`;
 }
 function buildKpiTabHtml(){
   return `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
@@ -4417,7 +4457,7 @@ Object.assign(window, {
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
-  buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,openAddKpiMonthModal,confirmAddKpiMonth,
+  buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,
   deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
