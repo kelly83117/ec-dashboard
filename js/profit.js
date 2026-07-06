@@ -3381,7 +3381,8 @@ const KPI_GROUPS=[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.ads-d.fee-d.misc},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.ads-d.fee-d.misc)/d.rev:0},
     ],
-    commonCostLabel:'倉儲運費+便利袋+宅配通+大榮（整組共同費用，只影響小計純利）'},
+    commonCostLabel:'倉儲運費+便利袋+宅配通+大榮（整組共同費用，只影響小計純利）',
+    order:['aov','qty','rev','cost','costPct','ads','adsPct','fee','misc','pure','pureRate']},
   {key:'coupang',title:'酷澎',color:'#7c6fe0',shops:['商城-好麻吉','商城-森之旅','酷澎買斷'],
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
     formula:[
@@ -3433,21 +3434,31 @@ function deleteKpiRow(month){
 // 手動輸入欄允許打公式（例如 rev*21%），用同一個賣場已經填過的欄位名稱
 // 當變數；備註只開放給手續費/運費類欄位（key 是 fee 或 ship 的都算）。
 const KPI_NOTEABLE_FIELDS=new Set(['fee','ship']);
-function _kpiFieldValues(shopData){
+// 目前正在編輯公式的儲存格（供「點其他欄位帶入公式」使用）：{month,groupKey,shop,field,inputEl}
+let _kpiFormulaCtx=null;
+function _kpiFieldValues(shopData,group){
+  const calc=_kpiCalcAll(shopData||{},group);
   const out={};
-  Object.keys(shopData||{}).forEach(k=>{
+  Object.keys(calc).forEach(k=>{
     if(k.endsWith('Formula')||k.endsWith('Note'))return;
-    out[k]=shopData[k];
+    out[k]=calc[k];
   });
   return out;
 }
-function _kpiEvalFormula(str,fieldValues){
+function _kpiEvalFormula(str,shopData,group){
   if(str==null||str==='')return NaN;
   let s=String(str).trim();
+  if(s[0]==='=')s=s.slice(1).trim();
   if(/^-?\d+(\.\d+)?$/.test(s))return parseFloat(s);
-  Object.keys(fieldValues).sort((a,b)=>b.length-a.length).forEach(name=>{
+  const values=_kpiFieldValues(shopData,group);
+  // 中文欄位名稱（不能用 \b，中文不算 word 字元）跟英文 key（可以用 \b）都支援代換，
+  // 先代換較長的名稱，避免「純利率」被「純利」搶先命中一部分。
+  [...group.manual,...group.formula].slice().sort((a,b)=>b.l.length-a.l.length).forEach(f=>{
+    if(s.includes(f.l))s=s.split(f.l).join('('+(Number(values[f.k])||0)+')');
+  });
+  Object.keys(values).sort((a,b)=>b.length-a.length).forEach(name=>{
     const re=new RegExp('\\b'+name+'\\b','g');
-    if(re.test(s))s=s.replace(re,'('+(Number(fieldValues[name])||0)+')');
+    if(re.test(s))s=s.replace(re,'('+(Number(values[name])||0)+')');
   });
   s=s.replace(/(\d+(\.\d+)?)\s*%/g,'($1/100)');
   if(!/^[\d+\-*/.()\s]+$/.test(s))return NaN;
@@ -3456,6 +3467,24 @@ function _kpiEvalFormula(str,fieldValues){
     return typeof val==='number'&&isFinite(val)?val:NaN;
   }catch{return NaN;}
 }
+// 儲存格點擊分派：如果目前同一列有其他欄位正在編輯公式，點這裡是「帶入參照」而不是打開自己的編輯框。
+function kpiCellClick(month,groupKey,shop,field,tdEl,editable){
+  const ctx=_kpiFormulaCtx;
+  if(ctx&&ctx.month===month&&ctx.groupKey===groupKey&&ctx.shop===shop&&ctx.field!==field){
+    const group=KPI_GROUPS.find(g=>g.key===groupKey);
+    const f=[...group.manual,...group.formula].find(x=>x.k===field);
+    if(f){
+      const inp=ctx.inputEl;
+      const start=inp.selectionStart??inp.value.length;
+      const end=inp.selectionEnd??inp.value.length;
+      inp.value=inp.value.slice(0,start)+f.l+inp.value.slice(end);
+      const pos=start+f.l.length;
+      inp.focus();inp.setSelectionRange(pos,pos);
+    }
+    return;
+  }
+  if(editable)editKpiCell(month,groupKey,shop,field,tdEl);
+}
 function editKpiCell(month,groupKey,shop,field,tdEl){
   const rows=getKpiRows();
   let row=rows.find(r=>r.month===month);
@@ -3463,14 +3492,15 @@ function editKpiCell(month,groupKey,shop,field,tdEl){
   if(!row[groupKey])row[groupKey]={};
   if(!row[groupKey][shop])row[groupKey][shop]={};
   const shopData=row[groupKey][shop];
+  const group=KPI_GROUPS.find(g=>g.key===groupKey);
   const curVal=shopData[field+'Formula']!=null?shopData[field+'Formula']:(shopData[field]!=null?shopData[field]:'');
   const noteable=KPI_NOTEABLE_FIELDS.has(field);
   const origContent=tdEl.innerHTML;
   const wrap=document.createElement('div');
   wrap.style.cssText='display:flex;flex-direction:column;gap:2px;align-items:flex-end';
   const inp=document.createElement('input');
-  inp.type='text';inp.value=curVal;inp.placeholder='數字或公式，如 rev*21%';
-  inp.style.cssText='width:120px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
+  inp.type='text';inp.value=curVal;inp.placeholder='數字或公式，如 =實際營收*21%';
+  inp.style.cssText='width:150px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
   wrap.appendChild(inp);
   let noteInp=null;
   if(noteable){
@@ -3481,12 +3511,14 @@ function editKpiCell(month,groupKey,shop,field,tdEl){
   }
   tdEl.innerHTML='';tdEl.style.whiteSpace='normal';tdEl.appendChild(wrap);
   inp.focus();if(inp.value)inp.select();
+  _kpiFormulaCtx={month,groupKey,shop,field,inputEl:inp};
   let done=false;
   const save=()=>{
     if(done)return;done=true;
+    if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;
     const raw=inp.value.trim();
     const isPlain=/^-?\d+(\.\d+)?$/.test(raw);
-    const computed=_kpiEvalFormula(raw,_kpiFieldValues(shopData));
+    const computed=_kpiEvalFormula(raw,shopData,group);
     if(raw===''||isNaN(computed)||computed===0){
       delete shopData[field];delete shopData[field+'Formula'];
     }else{
@@ -3502,7 +3534,7 @@ function editKpiCell(month,groupKey,shop,field,tdEl){
   };
   const onKey=e=>{
     if(e.key==='Enter'){e.preventDefault();if(e.target===inp&&noteInp)noteInp.focus();else save();}
-    if(e.key==='Escape'){done=true;tdEl.style.whiteSpace='';tdEl.innerHTML=origContent;}
+    if(e.key==='Escape'){done=true;if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;tdEl.style.whiteSpace='';tdEl.innerHTML=origContent;}
   };
   const onBlur=()=>setTimeout(()=>{if(!wrap.contains(document.activeElement))save();},120);
   inp.addEventListener('keydown',onKey);inp.addEventListener('blur',onBlur);
@@ -3564,7 +3596,8 @@ function _kpiSummaryCardsHtml(row){
 }
 function _kpiGroupTableHtml(row,group){
   const expanded=_kpiExpandedGroups.has(row.month+':'+group.key);
-  const cols=[...group.manual.map(c=>({...c,editable:true})),...group.formula.map(c=>({...c,editable:false}))];
+  const allCols=[...group.manual.map(c=>({...c,editable:true})),...group.formula.map(c=>({...c,editable:false}))];
+  const cols=group.order?group.order.map(k=>allCols.find(c=>c.k===k)).filter(Boolean):allCols;
   const thead=`<tr style="background:#f8f9fc">
     <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc;min-width:130px">${group.shops.length>1?'賣場':'名稱'}</th>
     ${cols.map(c=>`<th style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap">${c.l}</th>`).join('')}
@@ -3579,18 +3612,19 @@ function _kpiGroupTableHtml(row,group){
     totalPure+=d[pureKey]||0;
     const cells=cols.map(c=>{
       totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);
+      const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
+      const shopArg=shop.replace(/'/g,"\\'");
       if(c.editable){
-        const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
         const noteVal=raw[c.k+'Note'];
         const dispVal=d[c.k]?fmtN(Math.round(d[c.k])):'<span style="color:#d1d5db">—</span>';
         const noteMark=noteVal?` <span style="color:#f59e0b;font-size:8px" aria-hidden="true">●</span>`:'';
-        const titleAttr=noteVal?`${c.l}：備註 ${noteVal.replace(/"/g,'&quot;')}`:'點擊編輯，可輸入公式如 rev*21%';
-        return `<td id="${tid}" onclick="editKpiCell('${row.month}','${group.key}','${shop.replace(/'/g,"\\'")}','${c.k}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap" title="${titleAttr}">${dispVal}${noteMark}</td>`;
+        const titleAttr=noteVal?`${c.l}：備註 ${noteVal.replace(/"/g,'&quot;')}`:'點擊編輯；輸入 = 後點其他欄位可帶入公式，如 =實際營收*21%';
+        return `<td id="${tid}" onclick="kpiCellClick('${row.month}','${group.key}','${shopArg}','${c.k}',this,true)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap" title="${titleAttr}">${dispVal}${noteMark}</td>`;
       }
       const val=_kpiFmt(d[c.k],c.fmt);
       const isPure=c.k.startsWith('pure')&&c.fmt==='money';
       const color=isPure?(d[c.k]>=0?'#059669':'#dc2626'):'#374151';
-      return `<td style="padding:6px 10px;text-align:right;font-size:12.5px;color:${color};white-space:nowrap">${val}</td>`;
+      return `<td id="${tid}" onclick="kpiCellClick('${row.month}','${group.key}','${shopArg}','${c.k}',this,false)" style="padding:6px 10px;text-align:right;font-size:12.5px;color:${color};white-space:nowrap" title="公式編輯時可點這裡帶入 ${c.l}">${val}</td>`;
     }).join('');
     return `<tr style="border-top:1px solid #f0f0f0">
       <td style="padding:6px 12px;font-size:12.5px;font-weight:600;color:#374151;background:#fff;text-align:left;white-space:nowrap">${shop}</td>
@@ -3626,7 +3660,7 @@ function _kpiGroupTableHtml(row,group){
       <span style="color:#9ca3af;display:inline-block;transition:transform .15s;transform:rotate(${expanded?90:0}deg)">▸</span>
     </div>
     ${expanded?`<div style="overflow-x:auto">
-      <table style="border-collapse:collapse;width:100%;min-width:max-content"><thead>${thead}</thead><tbody>${bodyRows}${commonRow}${subtotalRow}</tbody></table>
+      <table style="border-collapse:collapse;width:auto;min-width:max-content"><thead>${thead}</thead><tbody>${bodyRows}${commonRow}${subtotalRow}</tbody></table>
     </div>`:''}
   </div>`;
 }
@@ -3689,7 +3723,7 @@ function _kpiYearViewHtml(){
     <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
   </div>
   <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto;margin-bottom:20px">
-    <table style="border-collapse:collapse;width:100%">
+    <table style="border-collapse:collapse;width:auto;min-width:max-content">
       <thead><tr style="background:#f8f9fc">
         <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700">月份</th>
         ${KPI_GROUPS.map(g=>`<th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">${g.title}純利</th>`).join('')}
@@ -3740,7 +3774,7 @@ function _kpiYearShopBreakdownHtml(rows){
   }).join('');
   return `<div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:8px">各賣場全年統計</div>
   <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto">
-    <table style="border-collapse:collapse;width:100%">
+    <table style="border-collapse:collapse;width:auto;min-width:max-content">
       <thead><tr style="background:#f8f9fc">
         <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700">賣場</th>
         <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">全年營收</th>
@@ -4563,7 +4597,7 @@ Object.assign(window, {
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,
-  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,
+  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
