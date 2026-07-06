@@ -3672,7 +3672,9 @@ function _kpiGroupTableHtml(row,group){
     if(c.k===pureKey)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:${totalPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(totalPure))}</td>`;
     if(c.k==='pureRate')return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}</td>`;
     if(c.editable)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${totals[c.k]?fmtN(Math.round(totals[c.k])):'—'}</td>`;
-    return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;color:#9ca3af">—</td>`;
+    // 其他公式欄位（如成本佔比、廣告佔比、客單價）：套用同一個 calc 公式，用小計後的加總數字去算，
+    // 例如成本佔比小計＝商品成本小計/實際營收小計。
+    return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;color:#374151">${_kpiFmt(c.calc(totals),c.fmt)}</td>`;
   }).join('');
   const subtotalRow=`<tr style="border-top:1px solid #e5e7eb;background:#f8f9fc">
     <td style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#374151;background:#f8f9fc;text-align:left;white-space:nowrap">小計</td>
