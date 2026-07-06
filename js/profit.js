@@ -3409,7 +3409,8 @@ const KPI_GROUPS=[
       {k:'tax',l:'稅金(5%)',fmt:'money',calc:d=>(d.rev-d.ret)*0.05},
       {k:'pure',l:'純利(實收)',fmt:'money',calc:d=>(d.rev-d.ret)-d.cost-d.ship-d.misc-(d.rev-d.ret)*0.05-d.material},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>(d.rev-d.ret)>0?((d.rev-d.ret)-d.cost-d.ship-d.misc-(d.rev-d.ret)*0.05-d.material)/(d.rev-d.ret):0},
-    ]},
+    ],
+    order:['qty','rev','cost','ret','actualRev','ship','misc','tax','material','receivable','pure','pureRate']},
 ];
 function _kpiFmt(v,fmt){
   if(fmt==='pct')return v?(v*100).toFixed(2)+'%':'—';
