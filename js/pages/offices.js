@@ -914,17 +914,10 @@ Object.assign(App, {
   },
 
   renderMarketingKpiTabHtml() {
-    return `
-      <div class="table-card">
-        <div class="table-card-header">
-          <h3>行銷團隊 KPI</h3>
-          <p>本頁預留給後續 KPI 內容</p>
-        </div>
-        <div style="padding:32px;text-align:center;color:#9ca3af">
-          尚未設定 KPI 項目
-        </div>
-      </div>
-    `;
+    setTimeout(function() {
+      if (typeof renderKpiTab === 'function') renderKpiTab();
+    }, 200);
+    return (typeof buildKpiTabHtml === 'function') ? buildKpiTabHtml() : '';
   },
 
   renderFestivalCalendarTab() {
