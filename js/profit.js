@@ -3494,22 +3494,11 @@ function editKpiCell(month,groupKey,shop,field,tdEl){
   const shopData=row[groupKey][shop];
   const group=KPI_GROUPS.find(g=>g.key===groupKey);
   const curVal=shopData[field+'Formula']!=null?shopData[field+'Formula']:(shopData[field]!=null?shopData[field]:'');
-  const noteable=KPI_NOTEABLE_FIELDS.has(field);
   const origContent=tdEl.innerHTML;
-  const wrap=document.createElement('div');
-  wrap.style.cssText='display:flex;flex-direction:column;gap:2px;align-items:flex-end';
   const inp=document.createElement('input');
   inp.type='text';inp.value=curVal;inp.placeholder='數字或公式，如 =實際營收*21%';
   inp.style.cssText='width:150px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
-  wrap.appendChild(inp);
-  let noteInp=null;
-  if(noteable){
-    noteInp=document.createElement('input');
-    noteInp.type='text';noteInp.value=shopData[field+'Note']||'';noteInp.placeholder='備註，如：便利袋100、宅配通200';
-    noteInp.style.cssText='width:160px;border:1px solid #d1d5db;border-radius:4px;padding:2px 6px;font-size:11px;text-align:right;outline:none;color:#6b7280';
-    wrap.appendChild(noteInp);
-  }
-  tdEl.innerHTML='';tdEl.style.whiteSpace='normal';tdEl.appendChild(wrap);
+  tdEl.innerHTML='';tdEl.style.whiteSpace='normal';tdEl.appendChild(inp);
   inp.focus();if(inp.value)inp.select();
   _kpiFormulaCtx={month,groupKey,shop,field,inputEl:inp};
   let done=false;
@@ -3525,20 +3514,44 @@ function editKpiCell(month,groupKey,shop,field,tdEl){
       shopData[field]=computed;
       if(isPlain)delete shopData[field+'Formula'];else shopData[field+'Formula']=raw;
     }
-    if(noteInp){
-      const n=noteInp.value.trim();
-      if(n)shopData[field+'Note']=n;else delete shopData[field+'Note'];
-    }
     saveKpiRows(rows);
     renderKpiTab();
   };
-  const onKey=e=>{
-    if(e.key==='Enter'){e.preventDefault();if(e.target===inp&&noteInp)noteInp.focus();else save();}
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();save();}
     if(e.key==='Escape'){done=true;if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;tdEl.style.whiteSpace='';tdEl.innerHTML=origContent;}
+  });
+  inp.addEventListener('blur',()=>setTimeout(()=>{if(document.activeElement!==inp)save();},120));
+}
+// 手續費/運費的備註是「這個月、這個組別」共用一則，跟點哪個賣場的數字無關——
+// 從欄位標題點進去編輯，跟編輯賣場數字的輸入框完全分開。
+function editKpiFieldNote(month,groupKey,field,thEl){
+  const rows=getKpiRows();
+  let row=rows.find(r=>r.month===month);
+  if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
+  if(!row.kpiFieldNotes)row.kpiFieldNotes={};
+  const key=groupKey+':'+field;
+  const cur=row.kpiFieldNotes[key]||'';
+  const origContent=thEl.innerHTML;
+  const inp=document.createElement('input');
+  inp.type='text';inp.value=cur;inp.placeholder='備註，如：便利袋8000、宅配通7000';
+  inp.style.cssText='width:190px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:11.5px;text-align:right;outline:none;font-weight:400;color:#374151';
+  inp.onclick=e=>e.stopPropagation();
+  thEl.innerHTML='';thEl.appendChild(inp);
+  inp.focus();if(inp.value)inp.select();
+  let done=false;
+  const save=()=>{
+    if(done)return;done=true;
+    const v=inp.value.trim();
+    if(v)row.kpiFieldNotes[key]=v;else delete row.kpiFieldNotes[key];
+    saveKpiRows(rows);
+    renderKpiTab();
   };
-  const onBlur=()=>setTimeout(()=>{if(!wrap.contains(document.activeElement))save();},120);
-  inp.addEventListener('keydown',onKey);inp.addEventListener('blur',onBlur);
-  if(noteInp){noteInp.addEventListener('keydown',onKey);noteInp.addEventListener('blur',onBlur);}
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();save();}
+    if(e.key==='Escape'){done=true;thEl.innerHTML=origContent;}
+  });
+  inp.addEventListener('blur',()=>setTimeout(()=>{if(document.activeElement!==inp)save();},120));
 }
 function editKpiCommonCost(month,groupKey,tdEl){
   const rows=getKpiRows();
@@ -3600,7 +3613,15 @@ function _kpiGroupTableHtml(row,group){
   const cols=group.order?group.order.map(k=>allCols.find(c=>c.k===k)).filter(Boolean):allCols;
   const thead=`<tr style="background:#f8f9fc">
     <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc;min-width:130px">${group.shops.length>1?'賣場':'名稱'}</th>
-    ${cols.map(c=>`<th style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap">${c.l}</th>`).join('')}
+    ${cols.map(c=>{
+      if(KPI_NOTEABLE_FIELDS.has(c.k)){
+        const note=(row.kpiFieldNotes||{})[group.key+':'+c.k];
+        const dot=note?` <span style="color:#f59e0b;font-size:8px" aria-hidden="true">●</span>`:'';
+        const title=note?`備註：${note.replace(/"/g,'&quot;')}（點擊修改，這個月共用一則）`:'點擊新增這個月的備註（例如：便利袋8000、宅配通7000）';
+        return `<th onclick="editKpiFieldNote('${row.month}','${group.key}','${c.k}',this)" style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap;cursor:pointer" title="${title}">${c.l}${dot}</th>`;
+      }
+      return `<th style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap">${c.l}</th>`;
+    }).join('')}
   </tr>`;
   const{pureKey}=_kpiGroupTotals(row,group);
   const totals={};
@@ -3615,11 +3636,8 @@ function _kpiGroupTableHtml(row,group){
       const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
       const shopArg=shop.replace(/'/g,"\\'");
       if(c.editable){
-        const noteVal=raw[c.k+'Note'];
         const dispVal=d[c.k]?fmtN(Math.round(d[c.k])):'<span style="color:#d1d5db">—</span>';
-        const noteMark=noteVal?` <span style="color:#f59e0b;font-size:8px" aria-hidden="true">●</span>`:'';
-        const titleAttr=noteVal?`${c.l}：備註 ${noteVal.replace(/"/g,'&quot;')}`:'點擊編輯；輸入 = 後點其他欄位可帶入公式，如 =實際營收*21%';
-        return `<td id="${tid}" onclick="kpiCellClick('${row.month}','${group.key}','${shopArg}','${c.k}',this,true)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap" title="${titleAttr}">${dispVal}${noteMark}</td>`;
+        return `<td id="${tid}" onclick="kpiCellClick('${row.month}','${group.key}','${shopArg}','${c.k}',this,true)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap" title="點擊編輯；輸入 = 後點其他欄位可帶入公式，如 =實際營收*21%">${dispVal}</td>`;
       }
       const val=_kpiFmt(d[c.k],c.fmt);
       const isPure=c.k.startsWith('pure')&&c.fmt==='money';
@@ -3796,7 +3814,7 @@ function renderKpiTab(){
   el.innerHTML=`<div style="padding:14px 16px 16px">${modeTabsHtml}${body}</div>`;
 }
 function buildKpiTabHtml(){
-  return `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
+  return `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;max-width:1180px">
     <div id="kpi-tab-content"></div>
   </div>`;
 }
@@ -4597,7 +4615,7 @@ Object.assign(window, {
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,
-  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,
+  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
