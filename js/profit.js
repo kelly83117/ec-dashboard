@@ -3699,11 +3699,11 @@ function _kpiGroupTableHtml(row,group){
         if(shopIdx!==0)return '';
         const tid=`kpi-${row.month}-${group.key}-common`;
         const dispVal=commonCost?fmtN(Math.round(commonCost)):'<span style="color:#d1d5db">—</span>';
-        return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;background:#eef4ff;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一賣場）">${dispVal}</td>`;
+        return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一賣場）">${dispVal}</td>`;
       }
       const mergeStatus=_kpiFieldMergeStatus(group,c.k,shop);
       if(mergeStatus?.type==='na'){
-        return `<td style="padding:6px 10px;background:#374151" title="這個賣場不適用${c.l}">&nbsp;</td>`;
+        return `<td style="padding:6px 10px;text-align:right;font-size:12.5px;color:#d1d5db" title="這個賣場不適用${c.l}">—</td>`;
       }
       if(mergeStatus?.type==='merged'){
         if(shopIdx!==group.shops.indexOf(mergeStatus.shops[0]))return '';
@@ -3711,7 +3711,7 @@ function _kpiGroupTableHtml(row,group){
         totals[c.k]=(totals[c.k]||0)+mergedVal;
         const tid=`kpi-${row.month}-${mergeStatus.mergeKey}`.replace(/["'\s:]/g,'_');
         const dispVal=mergedVal?fmtN(Math.round(mergedVal)):'<span style="color:#d1d5db">—</span>';
-        return `<td id="${tid}" rowspan="${mergeStatus.shops.length}" onclick="editKpiMergedField('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;background:#eef4ff;vertical-align:middle" title="${mergeStatus.shops.join('+')}共用一格${c.l}，只影響小計，不算進各自純利">${dispVal}</td>`;
+        return `<td id="${tid}" rowspan="${mergeStatus.shops.length}" onclick="editKpiMergedField('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${mergeStatus.shops.join('+')}共用一格${c.l}，只影響小計，不算進各自純利">${dispVal}</td>`;
       }
       totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);
       const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
@@ -3731,7 +3731,7 @@ function _kpiGroupTableHtml(row,group){
   totalPure-=commonCost;
   const pureRateAgg=totalRev>0?totalPure/totalRev:0;
   const subtotalCells=cols.map(c=>{
-    if(c.isCommon)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151;background:#eef4ff">${commonCost?fmtN(Math.round(commonCost)):'—'}</td>`;
+    if(c.isCommon)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${commonCost?fmtN(Math.round(commonCost)):'—'}</td>`;
     if(c.k===pureKey)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:${totalPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(totalPure))}</td>`;
     if(c.k==='pureRate')return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}</td>`;
     // 比率／平均型欄位（成本佔比、廣告佔比、客單價）不能直接加總，要用小計後的加總數字重算；
