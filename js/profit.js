@@ -3495,15 +3495,48 @@ function editKpiCommonCost(rowId,groupKey,tdEl){
   inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}if(e.key==='Escape'){done=true;tdEl.innerHTML=origContent;}});
   inp.addEventListener('blur',save);
 }
+// 只算總營收/總純利/純利率，不組 HTML——給總覽卡片跟明細表格共用。
+function _kpiGroupTotals(row,group){
+  const pureKey=group.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))?.k;
+  let totalRev=0,totalPure=0;
+  group.shops.forEach(shop=>{
+    const d=_kpiCalcAll(row[group.key]?.[shop]||{},group);
+    totalRev+=d.rev||0;
+    totalPure+=d[pureKey]||0;
+  });
+  if(group.commonCostLabel)totalPure-=(row[group.key+'Common']||0);
+  return{totalRev,totalPure,pureRateAgg:totalRev>0?totalPure/totalRev:0,pureKey};
+}
+// 哪些「row.id:group.key」目前是展開狀態——只是畫面互動狀態，不用存雲端，
+// 重新整理會回到全部收合。
+const _kpiExpandedGroups=new Set();
+function toggleKpiGroup(rowId,groupKey){
+  const id=rowId+':'+groupKey;
+  if(_kpiExpandedGroups.has(id))_kpiExpandedGroups.delete(id);else _kpiExpandedGroups.add(id);
+  renderKpiTab();
+}
+function _kpiSummaryCardsHtml(row){
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px">
+    ${KPI_GROUPS.map(g=>{
+      const{totalPure,pureRateAgg,totalRev}=_kpiGroupTotals(row,g);
+      return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
+        <div style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${g.color};display:inline-block;flex-shrink:0"></span>${g.title}</div>
+        <div style="font-size:18px;font-weight:700;margin-top:5px;color:${totalPure>=0?'#059669':'#dc2626'}">NT$${fmtN(Math.round(totalPure))}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:1px">純利率 ${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
 function _kpiGroupTableHtml(row,group){
+  const expanded=_kpiExpandedGroups.has(row.id+':'+group.key);
   const cols=[...group.manual.map(c=>({...c,editable:true})),...group.formula.map(c=>({...c,editable:false}))];
   const thead=`<tr style="background:#f8f9fc">
     <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;position:sticky;left:0;z-index:2;background:#f8f9fc;min-width:130px">${group.shops.length>1?'賣場':'名稱'}</th>
     ${cols.map(c=>`<th style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap">${c.l}</th>`).join('')}
   </tr>`;
-  const pureKey=group.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))?.k;
-  let totalRev=0,totalPure=0;
+  const{pureKey}=_kpiGroupTotals(row,group);
   const totals={};
+  let totalRev=0,totalPure=0;
   const bodyRows=group.shops.map(shop=>{
     const raw=row[group.key]?.[shop]||{};
     const d=_kpiCalcAll(raw,group);
@@ -3548,14 +3581,14 @@ function _kpiGroupTableHtml(row,group){
     <td style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#374151;position:sticky;left:0;background:#f8f9fc;z-index:1">小計</td>
     ${subtotalCells}
   </tr>`;
-  return `<div style="margin-bottom:18px">
-    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;border-left:3px solid ${group.color};padding-left:8px">
-      <span style="font-size:13px;font-weight:700;color:#1e293b">${group.title}</span>
-      <span style="font-size:11.5px;color:#9ca3af">總營收 NT$${fmtN(Math.round(totalRev))}　總純利 <span style="color:${totalPure>=0?'#059669':'#dc2626'}">NT$${fmtN(Math.round(totalPure))}</span>　純利率 ${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}</span>
+  return `<div style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;overflow:hidden">
+    <div onclick="toggleKpiGroup('${row.id}','${group.key}')" style="padding:10px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;background:#fff">
+      <span style="font-size:13px;font-weight:700;color:#1e293b;border-left:3px solid ${group.color};padding-left:8px">${group.title}</span>
+      <span style="color:#9ca3af;display:inline-block;transition:transform .15s;transform:rotate(${expanded?90:0}deg)">▸</span>
     </div>
-    <div class="tscroll" style="border:1px solid #e5e7eb;border-radius:8px;overflow:auto">
-      <table style="border-collapse:collapse;width:100%"><thead>${thead}</thead><tbody>${bodyRows}${commonRow}${subtotalRow}</tbody></table>
-    </div>
+    ${expanded?`<div style="overflow-x:auto">
+      <table style="border-collapse:collapse;width:100%;min-width:max-content"><thead>${thead}</thead><tbody>${bodyRows}${commonRow}${subtotalRow}</tbody></table>
+    </div>`:''}
   </div>`;
 }
 function _kpiMonthBlockHtml(row){
@@ -3566,6 +3599,7 @@ function _kpiMonthBlockHtml(row){
       <span style="font-size:16px;font-weight:700;color:#1e293b">${y}年${m}月</span>
       ${delBtn}
     </div>
+    ${_kpiSummaryCardsHtml(row)}
     ${KPI_GROUPS.map(g=>_kpiGroupTableHtml(row,g)).join('')}
   </div>`;
 }
@@ -3578,7 +3612,7 @@ function renderKpiTab(){
     ${body}
     <div style="margin-top:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button onclick="openAddKpiMonthModal()" style="padding:7px 18px;border:1.5px dashed #c7d2fe;border-radius:8px;background:white;color:#5b5fcf;font-size:13px;font-weight:600;cursor:pointer">＋ 新增月份</button>
-      <span style="font-size:11px;color:#9ca3af">灰底欄位為公式自動計算，白底欄位點擊可編輯</span>
+      <span style="font-size:11px;color:#9ca3af">灰底欄位為公式自動計算，白底欄位點擊可編輯，點分組列可展開/收合明細</span>
     </div>
   </div>`;
 }
@@ -4384,7 +4418,7 @@ Object.assign(window, {
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,openAddKpiMonthModal,confirmAddKpiMonth,
-  deleteKpiRow,editKpiCell,editKpiCommonCost,
+  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
