@@ -3382,7 +3382,8 @@ const KPI_GROUPS=[
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.ads-d.fee-d.misc)/d.rev:0},
     ],
     commonCostLabel:'倉儲運費+便利袋+宅配通+大榮（整組共同費用，只影響小計純利）',
-    order:['aov','qty','rev','cost','costPct','ads','adsPct','fee','misc','pure','pureRate']},
+    commonCostShortLabel:'物流運費',
+    order:['aov','qty','rev','cost','costPct','ads','adsPct','fee','misc','_common','pure','pureRate']},
   {key:'coupang',title:'酷澎',color:'#7c6fe0',shops:['商城-好麻吉','商城-森之旅','酷澎買斷'],
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
     formula:[
@@ -3610,12 +3611,16 @@ function _kpiSummaryCardsHtml(row){
 function _kpiGroupTableHtml(row,group){
   const expanded=_kpiExpandedGroups.has(row.month+':'+group.key);
   const allCols=[...group.manual.map(c=>({...c,editable:true})),...group.formula.map(c=>({...c,editable:false}))];
+  if(group.commonCostLabel)allCols.push({k:'_common',l:group.commonCostShortLabel||group.commonCostLabel,editable:false,isCommon:true});
   const cols=group.order?group.order.map(k=>allCols.find(c=>c.k===k)).filter(Boolean):allCols;
   // 欄位固定表格版面＋每欄等寬，欄位之間才會平均分配空間，不會被瀏覽器依內容長短撐出忽大忽小的間隔。
   const colgroup=`<colgroup><col style="width:130px">${cols.map(()=>`<col style="width:calc((100% - 130px)/${cols.length})">`).join('')}</colgroup>`;
   const thead=`<tr style="background:#f8f9fc">
     <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc">${group.shops.length>1?'賣場':'名稱'}</th>
     ${cols.map(c=>{
+      if(c.isCommon){
+        return `<th style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap" title="${group.commonCostLabel}">${c.l}</th>`;
+      }
       if(KPI_NOTEABLE_FIELDS.has(c.k)){
         const note=(row.kpiFieldNotes||{})[group.key+':'+c.k];
         const dot=note?` <span style="color:#f59e0b;font-size:8px" aria-hidden="true">●</span>`:'';
@@ -3626,14 +3631,23 @@ function _kpiGroupTableHtml(row,group){
     }).join('')}
   </tr>`;
   const{pureKey}=_kpiGroupTotals(row,group);
+  // 共同費用：整組共用一筆，只影響小計純利，不分攤到各賣場——用 rowspan 直向合併成一欄，不再另外多一行。
+  const commonField=group.key+'Common';
+  const commonCost=row[commonField]||0;
   const totals={};
   let totalRev=0,totalPure=0;
-  const bodyRows=group.shops.map(shop=>{
+  const bodyRows=group.shops.map((shop,shopIdx)=>{
     const raw=row[group.key]?.[shop]||{};
     const d=_kpiCalcAll(raw,group);
     totalRev+=d.rev||0;
     totalPure+=d[pureKey]||0;
     const cells=cols.map(c=>{
+      if(c.isCommon){
+        if(shopIdx!==0)return '';
+        const tid=`kpi-${row.month}-${group.key}-common`;
+        const dispVal=commonCost?fmtN(Math.round(commonCost)):'<span style="color:#d1d5db">—</span>';
+        return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;background:#eef4ff;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一賣場）">${dispVal}</td>`;
+      }
       totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);
       const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
       const shopArg=shop.replace(/'/g,"\\'");
@@ -3651,20 +3665,10 @@ function _kpiGroupTableHtml(row,group){
       ${cells}
     </tr>`;
   }).join('');
-  // 共同費用：整組共用一筆，只影響小計純利，不分攤到各賣場
-  const commonField=group.key+'Common';
-  const commonCost=row[commonField]||0;
   totalPure-=commonCost;
-  let commonRow='';
-  if(group.commonCostLabel){
-    const tid=`kpi-${row.month}-${group.key}-common`;
-    commonRow=`<tr style="border-top:1px solid #f0f0f0">
-      <td style="padding:5px 12px;font-size:11.5px;color:#9ca3af;background:#fff;text-align:left">${group.commonCostLabel}</td>
-      <td id="${tid}" colspan="${cols.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:5px 10px;text-align:right;font-size:12px;color:#9ca3af;cursor:pointer" title="點擊編輯">${commonCost?fmtN(Math.round(commonCost)):'<span style="color:#d1d5db">—</span>'}</td>
-    </tr>`;
-  }
   const pureRateAgg=totalRev>0?totalPure/totalRev:0;
   const subtotalCells=cols.map(c=>{
+    if(c.isCommon)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151;background:#eef4ff">${commonCost?fmtN(Math.round(commonCost)):'—'}</td>`;
     if(c.k===pureKey)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:${totalPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(totalPure))}</td>`;
     if(c.k==='pureRate')return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}</td>`;
     if(c.editable)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${totals[c.k]?fmtN(Math.round(totals[c.k])):'—'}</td>`;
@@ -3680,7 +3684,7 @@ function _kpiGroupTableHtml(row,group){
       <span style="color:#9ca3af;display:inline-block;transition:transform .15s;transform:rotate(${expanded?90:0}deg)">▸</span>
     </div>
     ${expanded?`<div style="overflow-x:auto">
-      <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:700px">${colgroup}<thead>${thead}</thead><tbody>${bodyRows}${commonRow}${subtotalRow}</tbody></table>
+      <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:700px">${colgroup}<thead>${thead}</thead><tbody>${bodyRows}${subtotalRow}</tbody></table>
     </div>`:''}
   </div>`;
 }
