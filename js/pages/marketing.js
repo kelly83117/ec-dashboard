@@ -1944,28 +1944,43 @@ Object.assign(App, {
       this.render();
     };
 
-    // 開 modal 前先記下 main 的捲軸位置，關閉後還原（不再強制置中，避免商品跳位）
+    // 開 modal 前記下商品「在容器內」的相對位置（像素值不可靠，重繪後高度會變）
     const _mainEl = document.querySelector('.main') || document.getElementById('main-content');
     const _savedScroll = _mainEl ? _mainEl.scrollTop : 0;
-    // 關閉備註視窗後 → 還原原本捲軸位置，讓使用者停在原本看的地方
+    let _origViewportOffset = null;
+    try {
+      const _origEl = document.querySelector(`[data-insight-note="${CSS.escape(code)}"]`);
+      if (_mainEl && _origEl) {
+        const cRect = _mainEl.getBoundingClientRect();
+        const eRect = _origEl.getBoundingClientRect();
+        _origViewportOffset = eRect.top - cRect.top; // 商品原本在容器內從上算的位置
+      }
+    } catch {}
+    // 關閉備註視窗後 → 找回商品元素，把它調回同樣的相對位置
+    //   單次不夠：關 modal 後可能還有雲端 snapshot 觸發二次 render 把 scrollTop 吃掉
+    //   → 用 rAF + 兩個延遲時間點各再跑一次，抵禦後續重繪
     const scrollBackToProduct = () => {
-      requestAnimationFrame(() => {
+      const doScroll = () => {
         try {
           const mainEl = document.querySelector('.main') || document.getElementById('main-content');
           if (!mainEl) return;
-          // 先試著還原原本位置
-          mainEl.scrollTop = _savedScroll;
-          // 若排序變動導致商品完全不在視野（例如剛加了調整，該商品被排到最新頂端），
-          // 才 fallback 用 scrollIntoView 找回來。用容器 bounds 判斷，不是 window.innerHeight
           const el = document.querySelector(`[data-insight-note="${CSS.escape(code)}"]`);
-          if (el) {
+          if (el && _origViewportOffset !== null) {
+            // 目前商品在容器內的偏移 → 加上差值讓它回到原本位置
             const cRect = mainEl.getBoundingClientRect();
             const eRect = el.getBoundingClientRect();
-            // 只有「完全在容器視野外」（整個元素在頂邊上或底邊下）才 fallback
-            const totallyOutOfView = eRect.bottom < cRect.top || eRect.top > cRect.bottom;
-            if (totallyOutOfView) el.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+            const currentOffset = eRect.top - cRect.top;
+            mainEl.scrollTop += currentOffset - _origViewportOffset;
+          } else {
+            // 找不到商品（很罕見）→ 至少還原到儲存的像素值
+            mainEl.scrollTop = _savedScroll;
           }
         } catch {}
+      };
+      requestAnimationFrame(() => {
+        doScroll();
+        setTimeout(doScroll, 120);
+        setTimeout(doScroll, 400); // 抵禦雲端 snapshot 遲來的 render
       });
     };
 
