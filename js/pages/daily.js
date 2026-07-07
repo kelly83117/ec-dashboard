@@ -7,6 +7,8 @@ Object.assign(App, {
     // 老闆指示：移除月曆/週曆/甘特圖，每位同事下班前 5 分鐘寫今日工作進度即可
     // 只保留 3 位同事：陳君葳、洪嘉蓮、郭雅琪
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
+    // 月曆上用來標示「這天誰填過」的顏色點：陳君葳(Vivian)紫、洪嘉蓮(inna)藍、郭雅琪(Kelly)黃
+    const PERSON_COLORS = { '陳君葳': '#8b5cf6', '洪嘉蓮': '#3b82f6', '郭雅琪': '#f59e0b' };
     const users = Store.get(Store.KEYS.users, []);
     const now = new Date();
     const todayStr = toDateStr(now);
@@ -94,27 +96,45 @@ Object.assign(App, {
 
     const allProgress = Store.get('ec.dailyProgress', {}) || {};
     const dayProgress = allProgress[viewDate] || {};
+    // 舊資料是一整段文字，第一次在新版打勾清單顯示時包成一筆項目，不會不見
+    const normItems = (v) => {
+      if (Array.isArray(v)) return v;
+      if (v && String(v).trim()) return [{ id: 'legacy', text: String(v).trim(), done: false }];
+      return [];
+    };
 
     const personInfos = ALLOWED_NAMES.map(name => {
       const u = users.find(uu => uu.name === name || uu.username === name);
       return {
         name,
         avatar: u && (u.avatar || u.avatarUrl) || '',
-        text: dayProgress[name] || '',
+        items: normItems(dayProgress[name]),
       };
     });
 
     const cards = personInfos.map(p => {
       const initial = p.name.slice(0, 1);
-      const hasText = p.text && p.text.trim().length > 0;
-      const statusChip = hasText
-        ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#d1fae5;color:#047857;font-size:11px;font-weight:600">✓ 已填</span>`
-        : `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600">尚未填</span>`;
+      const doneCount = p.items.filter(it => it.done).length;
+      const statusChip = p.items.length === 0
+        ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600">尚未填</span>`
+        : doneCount === p.items.length
+          ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#d1fae5;color:#047857;font-size:11px;font-weight:600">✓ 全部完成</span>`
+          : `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#e0e7ff;color:#4338ca;font-size:11px;font-weight:600">${doneCount}/${p.items.length} 已完成</span>`;
       const avatarHtml = p.avatar
         ? `<img src="${escapeHtml(p.avatar)}" alt="${escapeHtml(p.name)}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0">`
-        : `<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#a5b4fc,#818cf8);color:white;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0">${escapeHtml(initial)}</div>`;
+        : `<div style="width:38px;height:38px;border-radius:50%;background:${PERSON_COLORS[p.name]};color:white;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0">${escapeHtml(initial)}</div>`;
+      const itemRows = p.items.map(it => `
+        <div class="dp-todo-row" data-item-id="${escapeHtml(it.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
+          <span style="color:${PERSON_COLORS[p.name]};font-size:13px;flex-shrink:0">●</span>
+          <span style="flex:1;min-width:0;font-size:13px;color:${it.done ? '#9ca3af' : 'var(--text)'};text-decoration:${it.done ? 'line-through' : 'none'};word-break:break-word">${escapeHtml(it.text)}</span>
+          <input type="checkbox" class="dp-todo-check" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" ${it.done ? 'checked' : ''} ${isToday ? '' : 'disabled'} style="width:16px;height:16px;cursor:${isToday ? 'pointer' : 'default'};flex-shrink:0">
+          ${it.done ? '<span style="font-size:10.5px;color:#10b981;font-weight:700;flex-shrink:0">已完成</span>' : ''}
+          ${isToday ? `<button class="dp-todo-del" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" title="刪除" style="border:0;background:none;color:#d1d5db;cursor:pointer;font-size:13px;flex-shrink:0">✕</button>` : ''}
+        </div>
+      `).join('');
+      const emptyHint = p.items.length === 0 ? `<div style="padding:10px 2px;color:var(--text-muted);font-size:12.5px">${isToday ? '還沒有待辦事項' : '這天沒有紀錄'}</div>` : '';
       return `
-        <div class="dp-card" data-dp-name="${escapeHtml(p.name)}" style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:10px;min-width:0">
+        <div class="dp-card" data-dp-name="${escapeHtml(p.name)}" style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:8px;min-width:0">
           <div style="display:flex;align-items:center;gap:10px;min-width:0">
             ${avatarHtml}
             <div style="flex:1;min-width:0">
@@ -123,15 +143,19 @@ Object.assign(App, {
             </div>
             <span class="dp-saved-flag" style="display:none;color:#10b981;font-size:11px;font-weight:600;letter-spacing:.04em">✓ 已存</span>
           </div>
-          <textarea class="dp-textarea" data-dp-name="${escapeHtml(p.name)}"
-            placeholder="${isToday ? '今天做了什麼？目前進度如何？明天計畫…' : '查看歷史紀錄（唯讀）'}"
-            ${isToday ? '' : 'readonly'}
-            style="width:100%;min-height:130px;padding:10px 12px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;line-height:1.55;resize:vertical;color:var(--text);${isToday ? 'background:white' : 'background:#f9fafb;color:#475569'}">${escapeHtml(p.text)}</textarea>
+          <div class="dp-todo-list">${itemRows}${emptyHint}</div>
+          ${isToday ? `
+            <div style="display:flex;gap:6px;margin-top:2px">
+              <input type="text" class="dp-todo-add-input" data-dp-name="${escapeHtml(p.name)}" placeholder="新增待辦事項，按 Enter 加入"
+                style="flex:1;min-width:0;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;color:var(--text)">
+              <button class="dp-todo-add-btn" data-dp-name="${escapeHtml(p.name)}" style="padding:7px 12px;border:0;border-radius:7px;background:var(--primary-soft);color:var(--primary);font-size:13px;font-weight:600;cursor:pointer">+</button>
+            </div>
+          ` : ''}
         </div>
       `;
     }).join('');
 
-    // 左邊月曆：可以直接點日期切換查看，格子上會標「幾人已填」，方便回頭找哪一天有寫過東西
+    // 左邊月曆：可以直接點日期切換查看，格子下方會標每個人的顏色點（誰填過這天），方便回頭找哪一天做過什麼
     const [calY, calM] = calMonth.split('-').map(Number);
     const firstWeekday = new Date(calY, calM - 1, 1).getDay();
     const daysInMonth = new Date(calY, calM, 0).getDate();
@@ -142,29 +166,36 @@ Object.assign(App, {
       const isCellToday = dateStr === todayStr;
       const isCellSelected = dateStr === viewDate;
       const isFuture = dateStr > todayStr;
-      const filledCount = Object.values(allProgressForCal[dateStr] || {}).filter(t => t && t.trim()).length;
+      const dayEntries = allProgressForCal[dateStr] || {};
+      const filledNames = ALLOWED_NAMES.filter(n => {
+        const v = dayEntries[n];
+        return Array.isArray(v) ? v.length > 0 : !!(v && String(v).trim());
+      });
       const bg = isCellSelected ? 'var(--primary)' : isCellToday ? 'var(--primary-soft)' : 'transparent';
       const fg = isCellSelected ? 'white' : isFuture ? '#cbd5e1' : 'var(--text)';
+      const dots = filledNames.map(n => `<span style="width:6px;height:6px;border-radius:50%;background:${isCellSelected ? 'white' : PERSON_COLORS[n]}"></span>`).join('');
       calCells.push(`
         <button class="dp-cal-day" data-date="${dateStr}" ${isFuture ? 'disabled' : ''}
-          style="position:relative;aspect-ratio:1;border:1px solid ${isCellToday && !isCellSelected ? 'var(--primary)' : 'transparent'};border-radius:7px;background:${bg};color:${fg};font-size:12px;font-weight:${isCellSelected || isCellToday ? '700' : '500'};cursor:${isFuture ? 'not-allowed' : 'pointer'};display:flex;align-items:center;justify-content:center">
-          ${d}
-          ${filledCount > 0 ? `<span style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:${isCellSelected ? 'white' : '#10b981'}"></span>` : ''}
+          style="position:relative;aspect-ratio:1;border:1px solid ${isCellToday && !isCellSelected ? 'var(--primary)' : 'transparent'};border-radius:9px;background:${bg};color:${fg};font-size:15px;font-weight:${isCellSelected || isCellToday ? '700' : '500'};cursor:${isFuture ? 'not-allowed' : 'pointer'};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding-bottom:2px">
+          <span>${d}</span>
+          <span style="display:flex;gap:2px;height:6px">${dots}</span>
         </button>
       `);
     }
+    const legendHtml = ALLOWED_NAMES.map(n => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted)"><span style="width:7px;height:7px;border-radius:50%;background:${PERSON_COLORS[n]}"></span>${escapeHtml(n)}</span>`).join('');
     const calendarHtml = `
-      <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:12px;flex:0 0 260px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <button id="dp-cal-prev-month" style="border:0;background:none;cursor:pointer;font-size:14px;color:var(--text-muted);padding:2px 6px">‹</button>
-          <div style="font-size:13px;font-weight:600">${calY}年${calM}月</div>
-          <button id="dp-cal-next-month" style="border:0;background:none;cursor:pointer;font-size:14px;color:var(--text-muted);padding:2px 6px">›</button>
+      <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:16px;flex:0 0 380px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <button id="dp-cal-prev-month" style="border:0;background:none;cursor:pointer;font-size:18px;color:var(--text-muted);padding:2px 8px">‹</button>
+          <div style="font-size:16px;font-weight:700">${calY}年${calM}月</div>
+          <button id="dp-cal-next-month" style="border:0;background:none;cursor:pointer;font-size:18px;color:var(--text-muted);padding:2px 8px">›</button>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font-size:10.5px;color:var(--text-muted);text-align:center;margin-bottom:4px">
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;font-size:12px;color:var(--text-muted);text-align:center;margin-bottom:6px">
           <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">${calCells.join('')}</div>
-        ${!isToday ? `<button id="dp-back-today" style="width:100%;margin-top:10px;padding:6px;border:0;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:600;cursor:pointer">回到今天</button>` : ''}
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">${calCells.join('')}</div>
+        <div style="display:flex;gap:14px;justify-content:center;margin-top:12px">${legendHtml}</div>
+        ${!isToday ? `<button id="dp-back-today" style="width:100%;margin-top:10px;padding:7px;border:0;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:600;cursor:pointer">回到今天</button>` : ''}
       </div>
     `;
 
@@ -600,11 +631,19 @@ Object.assign(App, {
     };
 
     // 只寫本機（不推雲端）+ 標記為 pending
-    const saveProgressLocal = (name, text) => {
+    const normItemsForBind = (v) => {
+      if (Array.isArray(v)) return v.slice();
+      if (v && String(v).trim()) return [{ id: 'legacy', text: String(v).trim(), done: false }];
+      return [];
+    };
+    const getItemsFor = (name) => {
+      const all = Store.get('ec.dailyProgress', {}) || {};
+      return normItemsForBind((all[viewDate] || {})[name]);
+    };
+    const saveProgressItems = (name, items) => {
       const all = Store.get('ec.dailyProgress', {}) || {};
       const day = { ...(all[viewDate] || {}) };
-      const trimmed = (text || '').trim();
-      if (trimmed) day[name] = trimmed;
+      if (items && items.length) day[name] = items;
       else delete day[name];
       const next = { ...all };
       if (Object.keys(day).length === 0) delete next[viewDate];
@@ -617,31 +656,44 @@ Object.assign(App, {
       window.__dpPendingNames.add(name);
       updateSyncBadge();
     };
-
-    const timers = new Map();
-    document.querySelectorAll('.dp-textarea').forEach(ta => {
-      const name = ta.dataset.dpName;
-      const card = ta.closest('.dp-card');
-      const savedFlag = card ? card.querySelector('.dp-saved-flag') : null;
-      const showSaved = (text) => {
-        if (!savedFlag) return;
-        savedFlag.textContent = text || '⏳ 本機已存（待同步）';
-        savedFlag.style.color = '#f59e0b';
-        savedFlag.style.display = 'inline';
-        clearTimeout(savedFlag._t);
-        savedFlag._t = setTimeout(() => { savedFlag.style.display = 'none'; }, 2000);
-      };
-      ta.addEventListener('input', () => {
-        clearTimeout(timers.get(name));
-        timers.set(name, setTimeout(() => {
-          saveProgressLocal(name, ta.value);
-          showSaved();
-        }, 1500));
+    const addTodoItem = (name, text) => {
+      const trimmed = (text || '').trim();
+      if (!trimmed) return;
+      const items = getItemsFor(name);
+      items.push({ id: genId(), text: trimmed, done: false });
+      saveProgressItems(name, items);
+      this.render();
+    };
+    document.querySelectorAll('.dp-todo-check').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const name = cb.dataset.dpName, id = cb.dataset.itemId;
+        const items = getItemsFor(name);
+        const item = items.find(it => it.id === id);
+        if (item) item.done = cb.checked;
+        saveProgressItems(name, items);
+        this.render();
       });
-      ta.addEventListener('blur', () => {
-        clearTimeout(timers.get(name));
-        saveProgressLocal(name, ta.value);
-        showSaved();
+    });
+    document.querySelectorAll('.dp-todo-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const name = btn.dataset.dpName, id = btn.dataset.itemId;
+        saveProgressItems(name, getItemsFor(name).filter(it => it.id !== id));
+        this.render();
+      });
+    });
+    document.querySelectorAll('.dp-todo-add-input').forEach(inp => {
+      inp.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        addTodoItem(inp.dataset.dpName, inp.value);
+      });
+    });
+    document.querySelectorAll('.dp-todo-add-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const card = btn.closest('.dp-card');
+        const inp = card ? card.querySelector('.dp-todo-add-input') : null;
+        if (!inp) return;
+        addTodoItem(btn.dataset.dpName, inp.value);
       });
     });
 
