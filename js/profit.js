@@ -2846,13 +2846,47 @@ function colDragEnter(e){e.preventDefault();e.currentTarget.classList.add('col-d
 function colDragLeave(e){e.currentTarget.classList.remove('col-drag-over');}
 function resetColOrder(shop){try{localStorage.removeItem(_COLORDER_LS);}catch{}applyFilters(shop);renderColPicker(shop);}
 
+// 欄位選單裡也能直接拖曳排序（不用跑去拖表頭），跟表頭拖曳共用同一份 getColOrder/saveColOrder，
+// 兩邊拖曳結果互通——這樣要把最後一欄搬到最前面，在這個直向清單裡拖一下就好，不用在寬表格上橫向拖半天。
+let _cpRowDrag=null;
+function cpRowDragStart(e,shop,key){
+  _cpRowDrag={shop,key};
+  e.dataTransfer.effectAllowed='move';
+  try{e.dataTransfer.setData('text/plain',key);}catch{}
+  e.currentTarget.classList.add('cp-row-dragging');
+}
+function cpRowDragOver(e){e.preventDefault();e.dataTransfer.dropEffect='move';}
+function cpRowDragEnter(e){e.preventDefault();e.currentTarget.classList.add('cp-row-drag-over');}
+function cpRowDragLeave(e){e.currentTarget.classList.remove('cp-row-drag-over');}
+function cpRowDrop(e,shop,targetKey){
+  e.preventDefault();
+  const row=e.currentTarget;row.classList.remove('cp-row-drag-over');
+  if(!_cpRowDrag||_cpRowDrag.shop!==shop||_cpRowDrag.key===targetKey){_cpRowDrag=null;return;}
+  const rect=row.getBoundingClientRect();
+  const after=(e.clientY-rect.top)>rect.height/2;
+  let order=getColOrder().filter(k=>k!==_cpRowDrag.key);
+  let idx=order.indexOf(targetKey);
+  if(idx<0)idx=order.length;else if(after)idx++;
+  order.splice(idx,0,_cpRowDrag.key);
+  saveColOrder(order);
+  _cpRowDrag=null;
+  applyFilters(shop);
+  renderColPicker(shop);
+}
+function cpRowDragEnd(e){e.currentTarget.classList.remove('cp-row-dragging');document.querySelectorAll('.cp-row-drag-over').forEach(el=>el.classList.remove('cp-row-drag-over'));}
+
 function renderColPicker(shop){
   const m=document.getElementById('colpick-'+shop);if(!m)return;
   const hc=getHiddenCols(shop);
   const cols=getOrderedCols(shop);
   const vis=cols.length-hc.size;
   m.innerHTML=`<div style="padding:6px 13px 4px;font-size:11px;color:#9ca3af;font-weight:700;display:flex;justify-content:space-between;align-items:center">欄位 <span>${vis}/${cols.length}</span></div>`
-    +cols.map(c=>`<div class="cp-row" onclick="toggleHiddenCol('${shop}','${c.key}');event.stopPropagation()">
+    +cols.map(c=>`<div class="cp-row" draggable="true"
+      ondragstart="cpRowDragStart(event,'${shop}','${c.key}')" ondragover="cpRowDragOver(event)"
+      ondragenter="cpRowDragEnter(event)" ondragleave="cpRowDragLeave(event)"
+      ondrop="cpRowDrop(event,'${shop}','${c.key}')" ondragend="cpRowDragEnd(event)"
+      onclick="toggleHiddenCol('${shop}','${c.key}');event.stopPropagation()">
+      <span class="cp-row-handle">⠿</span>
       <input type="checkbox" ${!hc.has(c.key)?'checked':''} style="margin:0;pointer-events:none"> ${c.label}
     </div>`).join('')
     +`<div style="padding:4px 13px 6px;border-top:1px solid #e5e7eb;text-align:right;display:flex;gap:10px;justify-content:flex-end">
@@ -4762,4 +4796,5 @@ Object.assign(window, {
   closeSuggAlert,gotoSuggFiltered,checkSuggAlert,
   updateSuggChip,buildSuggCell,
   colDragStart,colDragOver,colDrop,colDragEnd,colDragEnter,colDragLeave,resetColOrder,
+  cpRowDragStart,cpRowDragOver,cpRowDragEnter,cpRowDragLeave,cpRowDrop,cpRowDragEnd,
 });
