@@ -4115,19 +4115,10 @@ function coupangSummaryHTML(){
     </div>
 
     <div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:10px">酷澎商城</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
       ${coupangSumShopCardHTML('麻吉')}
       ${coupangSumShopCardHTML('露營館')}
-    </div>
-
-    <div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:8px">酷澎(買斷)</div>
-    <div style="background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:16px 20px;margin-bottom:20px">
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
-        <div><div style="font-size:12px;color:#9ca3af">訂單數</div><div id="cup-bo-qty-disp" style="font-size:17px;font-weight:700;color:#374151">—</div></div>
-        <div><div style="font-size:12px;color:#9ca3af">營收</div><div id="cup-bo-rev-disp" style="font-size:17px;font-weight:700;color:#374151">—</div></div>
-        <div><div style="font-size:12px;color:#9ca3af">純利</div><div id="cup-bo-profit" style="font-size:17px;font-weight:700;color:#10b981">—</div></div>
-        <div><div style="font-size:12px;color:#9ca3af">純利率</div><div id="cup-bo-rate" style="font-size:17px;font-weight:700;color:#374151">—</div></div>
-      </div>
+      ${coupangSumShopCardHTML('買斷')}
     </div>
   </div>
 
@@ -4260,10 +4251,7 @@ function syncCoupangSummaryFromKpi(){
   };
   fillCard('麻吉',majhi);
   fillCard('露營館',camp);
-  setTxt('cup-bo-qty-disp',buyout.qty?fmtN(buyout.qty):'—');
-  setTxt('cup-bo-rev-disp',buyout.rev?fmtN(Math.round(buyout.rev)):'—');
-  setTxt('cup-bo-profit',buyout.rev||buyout.pure?fmtN(Math.round(buyout.pure)):'—');
-  setTxt('cup-bo-rate',buyout.rate!==null?buyout.rate.toFixed(2)+'%':'—');
+  fillCard('買斷',buyout);
 
   const fillTblRow=(prefix,d,qtyKey)=>{
     setTxt(`cup-tbl-${prefix}-${qtyKey}`,d.qty?fmtN(d.qty):'—');
@@ -4281,6 +4269,49 @@ function syncCoupangSummaryFromKpi(){
   fillTblRow('露營館',camp,'orders');
   fillTblRow('bo',buyout,'qty');
   fillTblRow('total',total,'orders');
+
+  renderCupTrendChart(month);
+}
+let _cupTrendChart=null;
+// 近 6 個月營收/純利趨勢：以目前選的月份為終點，往前推 6 個月，抓 KPI 三個賣場加總。
+function renderCupTrendChart(endMonth){
+  const emptyEl=document.getElementById('cup-sum-trend-empty');
+  const wrapEl=document.getElementById('cup-sum-trend-wrap');
+  const canvas=document.getElementById('cup-sum-trend-chart');
+  if(!emptyEl||!wrapEl||!canvas)return;
+  const rows=getKpiRows();
+  const[endY,endM]=endMonth.split('-').map(Number);
+  const months=[];
+  for(let i=5;i>=0;i--){
+    let y=endY,m=endM-i;
+    while(m<=0){m+=12;y--;}
+    months.push(`${y}-${String(m).padStart(2,'0')}`);
+  }
+  const labels=months.map(m=>m.slice(5)+'月');
+  const revData=[],pureData=[];
+  let hasAny=false;
+  months.forEach(m=>{
+    const row=rows.find(r=>r.month===m);
+    const majhi=_cupKpiShopData(row,'商城-好麻吉'),camp=_cupKpiShopData(row,'商城-露營館'),buyout=_cupKpiShopData(row,'酷澎買斷');
+    const rev=majhi.rev+camp.rev+buyout.rev,pure=majhi.pure+camp.pure+buyout.pure;
+    if(rev)hasAny=true;
+    revData.push(Math.round(rev));pureData.push(Math.round(pure));
+  });
+  if(!hasAny){
+    emptyEl.style.display='block';wrapEl.style.display='none';
+    if(_cupTrendChart){_cupTrendChart.destroy();_cupTrendChart=null;}
+    return;
+  }
+  emptyEl.style.display='none';wrapEl.style.display='block';
+  if(_cupTrendChart)_cupTrendChart.destroy();
+  _cupTrendChart=new Chart(canvas.getContext('2d'),{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'營收',data:revData,borderColor:'#0ea5e9',backgroundColor:'#0ea5e9',tension:.3},
+      {label:'純利',data:pureData,borderColor:'#10b981',backgroundColor:'#10b981',tension:.3},
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top'}},scales:{y:{ticks:{callback:v=>fmtN(v)}}}}
+  });
 }
 
 function momoShopHTML(shop,platform='momo'){
