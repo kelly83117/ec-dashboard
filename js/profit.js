@@ -3384,7 +3384,7 @@ const KPI_GROUPS=[
     commonCostLabel:'倉儲運費+便利袋+宅配通+大榮（整組共同費用，只影響小計純利）',
     commonCostShortLabel:'物流運費',
     order:['aov','qty','rev','cost','costPct','ads','adsPct','fee','misc','_common','pure','pureRate']},
-  {key:'coupang',title:'酷澎',color:'#7c6fe0',shops:['商城-好麻吉','商城-森之旅','酷澎買斷'],
+  {key:'coupang',title:'酷澎',color:'#7c6fe0',shops:['商城-好麻吉','商城-露營館','酷澎買斷'],
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
     formula:[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material},
