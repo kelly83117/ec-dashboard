@@ -3811,24 +3811,26 @@ function _kpiYearViewHtml(){
   return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
     <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
   </div>
-  <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto;margin-bottom:20px">
-    <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:600px">
-      <colgroup><col style="width:110px">${Array.from({length:KPI_GROUPS.length+1}).map(()=>`<col style="width:calc((100% - 110px)/${KPI_GROUPS.length+1})">`).join('')}</colgroup>
-      <thead><tr style="background:#f8f9fc">
-        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700">月份</th>
-        ${KPI_GROUPS.map(g=>`<th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">${g.title}純利</th>`).join('')}
-        <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">合計純利</th>
-      </tr></thead>
-      <tbody>${monthRows}
-        <tr style="border-top:2px solid #e5e7eb;background:#f8f9fc">
-          <td style="padding:7px 12px;font-size:12.5px;font-weight:700">全年合計</td>
-          ${totalCells}
-          <td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:${grandPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(grandPure))}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-  ${_kpiYearShopBreakdownHtml(rows)}`;
+  <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+    <div style="overflow-x:auto">
+      <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:600px">
+        <colgroup><col style="width:110px">${Array.from({length:KPI_GROUPS.length+1}).map(()=>`<col style="width:calc((100% - 110px)/${KPI_GROUPS.length+1})">`).join('')}</colgroup>
+        <thead><tr style="background:#f8f9fc">
+          <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700">月份</th>
+          ${KPI_GROUPS.map(g=>`<th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">${g.title}純利</th>`).join('')}
+          <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">合計純利</th>
+        </tr></thead>
+        <tbody>${monthRows}
+          <tr style="border-top:2px solid #e5e7eb;background:#f8f9fc">
+            <td style="padding:7px 12px;font-size:12.5px;font-weight:700">全年合計</td>
+            ${totalCells}
+            <td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:${grandPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(grandPure))}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    ${_kpiYearShopBreakdownHtml(rows)}
+  </div>`;
 }
 // 各賣場全年營收/純利彙總——把選定年份 12 個月的資料，依賣場加總。
 // 依組別分段顯示（組別標題列 + 該組小計），跟月結表的分組視覺語言一致，避免十幾個賣場混成一長串。
@@ -3862,8 +3864,8 @@ function _kpiYearShopBreakdownHtml(rows){
     </tr>`;
     return headerRow+shopTrs;
   }).join('');
-  return `<div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:8px">各賣場全年統計</div>
-  <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto">
+  return `<div style="padding:10px 12px 2px;font-size:12.5px;font-weight:700;color:#1e293b;border-top:2px solid #e5e7eb;background:#f8f9fc">各賣場全年統計</div>
+  <div style="overflow-x:auto">
     <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:500px">
       <colgroup><col style="width:25%"><col style="width:25%"><col style="width:25%"><col style="width:25%"></colgroup>
       <thead><tr style="background:#f8f9fc">
