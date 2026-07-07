@@ -3820,15 +3820,12 @@ const KPI_SHOP_COLORS=[
   {key:'維克',bg:'#E8F1FC'},
   {key:'森之旅',bg:'#E9F7EC'},
   {key:'酷澎買斷',bg:'#FDECEF'},
-  {key:'業外',bg:'#FFF9E0'},
-  {key:'官網',bg:'#E4F7F5'},
   {key:'MOMO-甲配',bg:'#EEF0FA'},
-  {key:'MOMO-寄倉',bg:'#FCEEE0'},
   {key:'露營館',bg:'#FBEAF0'},
 ];
 function _kpiShopBgColor(shop){
   const found=KPI_SHOP_COLORS.find(c=>shop.includes(c.key));
-  return found?found.bg:'#f3f4f6';
+  return found?found.bg:'#ffffff';
 }
 function _kpiYearViewHtml(){
   const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===_kpiCurYear?' selected':''}>${y}年</option>`).join('');
