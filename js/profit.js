@@ -4040,7 +4040,7 @@ function onCupMonthChange(shop,platform,sel){
   if(platform==='coupang'){_cupPeriod[shop].half='full';}
   updateCupHalfSelect(shop,platform);
   if(platform==='coupang'&&shop!=='總表')cupTryLoadSaved(shop);
-  if(platform==='coupang'&&shop==='總表')loadCoupangBuyout();
+  if(platform==='coupang'&&shop==='總表')syncCoupangSummaryFromKpi();
 }
 function onCupHalfChange(shop,platform,sel){
   _cupPeriod[shop]=_cupPeriod[shop]||{month:'2026/06',half:'first'};
@@ -4120,20 +4120,13 @@ function coupangSummaryHTML(){
       ${coupangSumShopCardHTML('露營館')}
     </div>
 
-    <div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:8px">酷澎(買斷) <span style="font-weight:400;color:#9ca3af">— 手動輸入</span></div>
-    <div style="background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:16px 20px">
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
-        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">訂單數</label><input type="number" id="cup-bo-qty" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
-        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">營收</label><input type="number" id="cup-bo-rev" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
-        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">商品成本</label><input type="number" id="cup-bo-cost" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
-        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">手續費</label><input type="number" id="cup-bo-fee" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
-        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">退貨運費</label><input type="number" id="cup-bo-ret" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
-        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">稅金</label><input type="number" id="cup-bo-tax" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
-        <div><label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px">耗材</label><input type="number" id="cup-bo-material" oninput="recalcCoupangBuyout()" placeholder="0" style="width:100%;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;outline:none;font-family:monospace;box-sizing:border-box"></div>
-      </div>
-      <div style="display:flex;gap:28px;padding-top:12px;border-top:1px solid #f3f4f6">
-        <div><div style="font-size:12px;color:#9ca3af">純利（自動計算）</div><div id="cup-bo-profit" style="font-size:18px;font-weight:700;color:#374151">—</div></div>
-        <div><div style="font-size:12px;color:#9ca3af">純利率（自動計算）</div><div id="cup-bo-rate" style="font-size:18px;font-weight:700;color:#374151">—</div></div>
+    <div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:8px">酷澎(買斷)</div>
+    <div style="background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:16px 20px;margin-bottom:20px">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+        <div><div style="font-size:12px;color:#9ca3af">訂單數</div><div id="cup-bo-qty-disp" style="font-size:17px;font-weight:700;color:#374151">—</div></div>
+        <div><div style="font-size:12px;color:#9ca3af">營收</div><div id="cup-bo-rev-disp" style="font-size:17px;font-weight:700;color:#374151">—</div></div>
+        <div><div style="font-size:12px;color:#9ca3af">純利</div><div id="cup-bo-profit" style="font-size:17px;font-weight:700;color:#10b981">—</div></div>
+        <div><div style="font-size:12px;color:#9ca3af">純利率</div><div id="cup-bo-rate" style="font-size:17px;font-weight:700;color:#374151">—</div></div>
       </div>
     </div>
   </div>
@@ -4232,38 +4225,62 @@ function setCoupangSummaryView(v){
   if(btnCard){btnCard.style.borderColor=v==='card'?'#0ea5e9':'';btnCard.style.color=v==='card'?'#0ea5e9':'';}
   if(btnTable){btnTable.style.borderColor=v==='table'?'#0ea5e9':'';btnTable.style.color=v==='table'?'#0ea5e9':'';}
 }
-function coupangBuyoutKey(month){return'ec_coupang_buyout|'+month;}
-function getCoupangBuyout(month){return _cloudRead(coupangBuyoutKey(month))||{};}
-function saveCoupangBuyout(month,data){_cloudWrite(coupangBuyoutKey(month),data);}
-function loadCoupangBuyout(){
-  const p=_cupPeriod['總表']||{month:'2026/06'};
-  const d=getCoupangBuyout(p.month);
-  const setVal=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v||'';};
-  setVal('cup-bo-qty',d.qty);setVal('cup-bo-rev',d.rev);setVal('cup-bo-cost',d.cost);
-  setVal('cup-bo-fee',d.fee);setVal('cup-bo-ret',d.ret);setVal('cup-bo-tax',d.tax);setVal('cup-bo-material',d.material);
-  recalcCoupangBuyout();
+// 酷澎總表的三個賣場（商城-好麻吉/商城-露營館/酷澎買斷）現在直接抓 KPI 那邊填好的資料，
+// 不用再手動輸入一次；月份選單切換時（onCupMonthChange）跟頁籤第一次開啟時都會呼叫這裡。
+function _cupKpiShopData(row,shop){
+  const group=KPI_GROUPS.find(g=>g.key==='coupang');
+  const raw=row?.coupang?.[shop]||{};
+  const d=_kpiCalcAll(raw,group);
+  const rev=d.rev||0,pure=d.pure||0;
+  return{qty:d.qty||0,rev,cost:d.cost||0,fee:d.fee||0,ret:d.ret||0,tax:d.tax||0,material:d.material||0,pure,rate:rev>0?pure/rev*100:null};
 }
-function recalcCoupangBuyout(){
-  const g=id=>{const el=document.getElementById(id);return el?parseFloat(el.value)||0:0;};
-  const qty=g('cup-bo-qty'),rev=g('cup-bo-rev'),cost=g('cup-bo-cost'),fee=g('cup-bo-fee'),ret=g('cup-bo-ret'),tax=g('cup-bo-tax'),material=g('cup-bo-material');
-  const profit=rev-cost-fee-ret-tax-material;
-  const hasAny=!!(qty||rev||cost||fee||ret||tax||material);
-  const profitEl=document.getElementById('cup-bo-profit');
-  const rateEl=document.getElementById('cup-bo-rate');
-  if(profitEl)profitEl.textContent=hasAny?'NT$'+fmtN(profit):'—';
-  if(rateEl)rateEl.textContent=rev>0?(profit/rev*100).toFixed(2)+'%':'—';
-  const set=(id,val)=>{const el=document.getElementById(id);if(el)el.textContent=val;};
-  set('cup-tbl-bo-qty',qty?fmtN(qty):'—');
-  set('cup-tbl-bo-rev',rev?fmtN(rev):'—');
-  set('cup-tbl-bo-cost',cost?fmtN(cost):'—');
-  set('cup-tbl-bo-fee',fee?fmtN(fee):'—');
-  set('cup-tbl-bo-ret',ret?fmtN(ret):'—');
-  set('cup-tbl-bo-tax',tax?fmtN(tax):'—');
-  set('cup-tbl-bo-material',material?fmtN(material):'—');
-  set('cup-tbl-bo-profit',hasAny?fmtN(profit):'—');
-  set('cup-tbl-bo-rate',rev>0?(profit/rev*100).toFixed(2)+'%':'—');
+function syncCoupangSummaryFromKpi(){
   const p=_cupPeriod['總表']||{month:'2026/06'};
-  saveCoupangBuyout(p.month,{qty,rev,cost,fee,ret,tax,material});
+  const month=p.month.replace('/','-');
+  const row=getKpiRows().find(r=>r.month===month);
+  const majhi=_cupKpiShopData(row,'商城-好麻吉');
+  const camp=_cupKpiShopData(row,'商城-露營館');
+  const buyout=_cupKpiShopData(row,'酷澎買斷');
+  const mall={qty:majhi.qty+camp.qty,rev:majhi.rev+camp.rev,cost:majhi.cost+camp.cost,fee:majhi.fee+camp.fee,ret:majhi.ret+camp.ret,tax:majhi.tax+camp.tax,material:majhi.material+camp.material,pure:majhi.pure+camp.pure};
+  mall.rate=mall.rev>0?mall.pure/mall.rev*100:null;
+  const total={qty:mall.qty+buyout.qty,rev:mall.rev+buyout.rev,cost:mall.cost+buyout.cost,fee:mall.fee+buyout.fee,ret:mall.ret+buyout.ret,tax:mall.tax+buyout.tax,material:mall.material+buyout.material,pure:mall.pure+buyout.pure};
+  total.rate=total.rev>0?total.pure/total.rev*100:null;
+
+  const setTxt=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  setTxt('cup-sum-kpi-orders',total.qty?fmtN(total.qty):'—');
+  setTxt('cup-sum-kpi-rev',total.rev?'NT$'+fmtN(Math.round(total.rev)):'—');
+  setTxt('cup-sum-kpi-profit',total.rev||total.pure?'NT$'+fmtN(Math.round(total.pure)):'—');
+  setTxt('cup-sum-kpi-rate',total.rate!==null?total.rate.toFixed(2)+'%':'—');
+
+  const fillCard=(shopLabel,d)=>{
+    setTxt(`cup-sum-${shopLabel}-orders`,(d.qty?fmtN(d.qty):'0')+' 筆訂單');
+    setTxt(`cup-sum-${shopLabel}-rev`,d.rev?fmtN(Math.round(d.rev)):'—');
+    setTxt(`cup-sum-${shopLabel}-profit`,d.rev||d.pure?fmtN(Math.round(d.pure)):'—');
+    setTxt(`cup-sum-${shopLabel}-rate`,d.rate!==null?d.rate.toFixed(2)+'%':'—');
+  };
+  fillCard('麻吉',majhi);
+  fillCard('露營館',camp);
+  setTxt('cup-bo-qty-disp',buyout.qty?fmtN(buyout.qty):'—');
+  setTxt('cup-bo-rev-disp',buyout.rev?fmtN(Math.round(buyout.rev)):'—');
+  setTxt('cup-bo-profit',buyout.rev||buyout.pure?fmtN(Math.round(buyout.pure)):'—');
+  setTxt('cup-bo-rate',buyout.rate!==null?buyout.rate.toFixed(2)+'%':'—');
+
+  const fillTblRow=(prefix,d,qtyKey)=>{
+    setTxt(`cup-tbl-${prefix}-${qtyKey}`,d.qty?fmtN(d.qty):'—');
+    setTxt(`cup-tbl-${prefix}-rev`,d.rev?fmtN(Math.round(d.rev)):'—');
+    setTxt(`cup-tbl-${prefix}-cost`,d.cost?fmtN(Math.round(d.cost)):'—');
+    setTxt(`cup-tbl-${prefix}-fee`,d.fee?fmtN(Math.round(d.fee)):'—');
+    setTxt(`cup-tbl-${prefix}-ret`,d.ret?fmtN(Math.round(d.ret)):'—');
+    setTxt(`cup-tbl-${prefix}-tax`,d.tax?fmtN(Math.round(d.tax)):'—');
+    setTxt(`cup-tbl-${prefix}-material`,d.material?fmtN(Math.round(d.material)):'—');
+    setTxt(`cup-tbl-${prefix}-profit`,d.rev||d.pure?fmtN(Math.round(d.pure)):'—');
+    setTxt(`cup-tbl-${prefix}-rate`,d.rate!==null?d.rate.toFixed(2)+'%':'—');
+  };
+  fillTblRow('mall',mall,'orders');
+  fillTblRow('麻吉',majhi,'orders');
+  fillTblRow('露營館',camp,'orders');
+  fillTblRow('bo',buyout,'qty');
+  fillTblRow('total',total,'orders');
 }
 
 function momoShopHTML(shop,platform='momo'){
@@ -4387,7 +4404,7 @@ function setCoupangShop(shop,btn){
     if(!el.dataset.init){
       el.innerHTML=shop==='總表'?coupangSummaryHTML():momoShopHTML(shop,'coupang');
       el.dataset.init='1';
-      if(shop==='總表')loadCoupangBuyout();
+      if(shop==='總表')syncCoupangSummaryFromKpi();
     }
   }
   const kpiBlock=document.getElementById('header-kpi-row');
@@ -4786,7 +4803,7 @@ Object.assign(window, {
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
-  coupangSummaryHTML,setCoupangSummaryView,recalcCoupangBuyout,loadCoupangBuyout,getCoupangBuyout,saveCoupangBuyout,
+  coupangSummaryHTML,setCoupangSummaryView,syncCoupangSummaryFromKpi,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
