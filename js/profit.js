@@ -3856,6 +3856,14 @@ function _kpiYearShopBreakdownHtml(rows){
         <td style="padding:6px 10px;text-align:right;font-size:12.5px">${rate!==null?rate.toFixed(2)+'%':'—'}</td>
       </tr>`;
     }).join('');
+    // 整組共同費用（如物流運費）全年加總也要扣掉，才會跟上面月份趨勢表的「全年合計」數字一致。
+    if(g.commonCostLabel){
+      for(let m=1;m<=12;m++){
+        const month=`${_kpiCurYear}-${String(m).padStart(2,'0')}`;
+        const row=rows.find(r=>r.month===month);
+        if(row)groupPure-=(row[g.key+'Common']||0);
+      }
+    }
     const groupRate=groupRev>0?groupPure/groupRev*100:null;
     const headerRow=`<tr style="background:#f8f9fc;border-top:1px solid #e5e7eb">
       <td colspan="4" style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#1e293b;border-left:3px solid ${g.color};text-align:left;white-space:nowrap">${g.title}
