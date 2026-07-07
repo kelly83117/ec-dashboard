@@ -24,6 +24,9 @@ Object.assign(App, {
     const viewDate = f.viewDate;
     const isToday = viewDate === todayStr;
     const dateDisplay = viewDate.replace(/-/g, '/');
+    if (!f.calMonth) f.calMonth = viewDate.slice(0, 7);
+    const calMonth = f.calMonth;
+    const allProgressForCal = Store.get('ec.dailyProgress', {}) || {};
 
     // 老闆指派的任務區
     const bossTasks = (Store.get('ec.bossTasks', []) || []).slice();
@@ -128,7 +131,42 @@ Object.assign(App, {
       `;
     }).join('');
 
-    const dateInputBg = isToday ? 'white' : '#fef3c7';
+    // 左邊月曆：可以直接點日期切換查看，格子上會標「幾人已填」，方便回頭找哪一天有寫過東西
+    const [calY, calM] = calMonth.split('-').map(Number);
+    const firstWeekday = new Date(calY, calM - 1, 1).getDay();
+    const daysInMonth = new Date(calY, calM, 0).getDate();
+    const calCells = [];
+    for (let i = 0; i < firstWeekday; i++) calCells.push('<div></div>');
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${calY}-${String(calM).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const isCellToday = dateStr === todayStr;
+      const isCellSelected = dateStr === viewDate;
+      const isFuture = dateStr > todayStr;
+      const filledCount = Object.values(allProgressForCal[dateStr] || {}).filter(t => t && t.trim()).length;
+      const bg = isCellSelected ? 'var(--primary)' : isCellToday ? 'var(--primary-soft)' : 'transparent';
+      const fg = isCellSelected ? 'white' : isFuture ? '#cbd5e1' : 'var(--text)';
+      calCells.push(`
+        <button class="dp-cal-day" data-date="${dateStr}" ${isFuture ? 'disabled' : ''}
+          style="position:relative;aspect-ratio:1;border:1px solid ${isCellToday && !isCellSelected ? 'var(--primary)' : 'transparent'};border-radius:7px;background:${bg};color:${fg};font-size:12px;font-weight:${isCellSelected || isCellToday ? '700' : '500'};cursor:${isFuture ? 'not-allowed' : 'pointer'};display:flex;align-items:center;justify-content:center">
+          ${d}
+          ${filledCount > 0 ? `<span style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:${isCellSelected ? 'white' : '#10b981'}"></span>` : ''}
+        </button>
+      `);
+    }
+    const calendarHtml = `
+      <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:12px;flex:0 0 260px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <button id="dp-cal-prev-month" style="border:0;background:none;cursor:pointer;font-size:14px;color:var(--text-muted);padding:2px 6px">‹</button>
+          <div style="font-size:13px;font-weight:600">${calY}年${calM}月</div>
+          <button id="dp-cal-next-month" style="border:0;background:none;cursor:pointer;font-size:14px;color:var(--text-muted);padding:2px 6px">›</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font-size:10.5px;color:var(--text-muted);text-align:center;margin-bottom:4px">
+          <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">${calCells.join('')}</div>
+        ${!isToday ? `<button id="dp-back-today" style="width:100%;margin-top:10px;padding:6px;border:0;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:600;cursor:pointer">回到今天</button>` : ''}
+      </div>
+    `;
 
     return `
       <div style="background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px 16px">
@@ -138,18 +176,15 @@ Object.assign(App, {
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             ${isToday ? `<button id="dp-sync-cloud" title="把今天的進度上傳到雲端，同事才看得到" style="padding:5px 12px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><span>☁ 同步雲端</span><span id="dp-sync-badge" style="display:none;min-width:18px;height:18px;padding:0 5px;background:#ef4444;color:white;border-radius:9px;font-size:10px;font-weight:700;align-items:center;justify-content:center;line-height:1">0</span></button>` : ''}
-            <button id="dp-prev-day" title="前一天" style="padding:5px 10px;border:1px solid var(--border);background:white;border-radius:6px;font-size:12px;cursor:pointer">←</button>
-            <input type="date" id="dp-date-picker" value="${viewDate}" max="${todayStr}"
-              style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;color:var(--text);background:${dateInputBg}">
-            <button id="dp-next-day" title="後一天" ${viewDate >= todayStr ? 'disabled' : ''}
-              style="padding:5px 10px;border:1px solid var(--border);background:white;border-radius:6px;font-size:12px;cursor:${viewDate >= todayStr ? 'not-allowed' : 'pointer'};${viewDate >= todayStr ? 'opacity:.4' : ''}">→</button>
             ${canManageLine ? `<button id="boss-task-line-cfg" title="LINE 通知設定" style="padding:5px 11px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:5px">⚙️ LINE 通知</button>` : ''}
-            ${!isToday ? `<button id="dp-back-today" style="padding:5px 12px;border:0;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:600;cursor:pointer">回到今天</button>` : ''}
           </div>
         </div>
         ${bossTasksHtml}
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
-          ${cards}
+        <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+          ${calendarHtml}
+          <div style="flex:1;min-width:280px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">
+            ${cards}
+          </div>
         </div>
       </div>
     `;
@@ -504,35 +539,38 @@ Object.assign(App, {
       });
     });
 
-    // 日期切換
-    const datePicker = document.getElementById('dp-date-picker');
-    if (datePicker) datePicker.addEventListener('change', () => {
+    // 日期切換：改用左邊月曆點選，月曆本身可以前後翻月（不影響目前選的日期）
+    document.querySelectorAll('.dp-cal-day').forEach(btn => {
+      if (btn.disabled) return;
+      btn.addEventListener('click', () => {
+        ensureFilter();
+        this.filter.dashboardMarketing.viewDate = btn.dataset.date;
+        this.render();
+      });
+    });
+    const calPrevBtn = document.getElementById('dp-cal-prev-month');
+    if (calPrevBtn) calPrevBtn.addEventListener('click', () => {
       ensureFilter();
-      const v = datePicker.value;
-      if (!v || v > todayStr) return;
-      this.filter.dashboardMarketing.viewDate = v;
+      const cur = this.filter.dashboardMarketing.calMonth || todayStr.slice(0, 7);
+      const d = new Date(cur + '-01T00:00:00');
+      d.setMonth(d.getMonth() - 1);
+      this.filter.dashboardMarketing.calMonth = toDateStr(d).slice(0, 7);
       this.render();
     });
-    const prevBtn = document.getElementById('dp-prev-day');
-    if (prevBtn) prevBtn.addEventListener('click', () => {
+    const calNextBtn = document.getElementById('dp-cal-next-month');
+    if (calNextBtn) calNextBtn.addEventListener('click', () => {
       ensureFilter();
-      const cur = this.filter.dashboardMarketing.viewDate || todayStr;
-      this.filter.dashboardMarketing.viewDate = toDateStr(addDays(new Date(cur + 'T00:00:00'), -1));
-      this.render();
-    });
-    const nextBtn = document.getElementById('dp-next-day');
-    if (nextBtn) nextBtn.addEventListener('click', () => {
-      ensureFilter();
-      const cur = this.filter.dashboardMarketing.viewDate || todayStr;
-      const nxt = toDateStr(addDays(new Date(cur + 'T00:00:00'), 1));
-      if (nxt > todayStr) return;
-      this.filter.dashboardMarketing.viewDate = nxt;
+      const cur = this.filter.dashboardMarketing.calMonth || todayStr.slice(0, 7);
+      const d = new Date(cur + '-01T00:00:00');
+      d.setMonth(d.getMonth() + 1);
+      this.filter.dashboardMarketing.calMonth = toDateStr(d).slice(0, 7);
       this.render();
     });
     const backTodayBtn = document.getElementById('dp-back-today');
     if (backTodayBtn) backTodayBtn.addEventListener('click', () => {
       ensureFilter();
       this.filter.dashboardMarketing.viewDate = todayStr;
+      this.filter.dashboardMarketing.calMonth = todayStr.slice(0, 7);
       this.render();
     });
 
