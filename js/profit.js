@@ -3783,16 +3783,46 @@ function _kpiMonthViewHtml(){
   ${KPI_GROUPS.map(g=>_kpiGroupTableHtml(row,g)).join('')}
   <div style="margin-top:6px"><span style="font-size:11px;color:#9ca3af">灰底欄位為公式自動計算，白底欄位點擊可編輯，點分組列可展開/收合明細</span></div>`;
 }
-// 年度總表：統一成一張表，列＝各賣場（依組別分段），欄＝12個月純利＋全年營收/純利/純利率，
+// 年度總表：統一成一張表，列＝各賣場（依組別分段），欄＝12個月＋全年營收/純利/純利率，
 // 不再是「月份 x 組別」趨勢表跟「各賣場全年統計」上下兩張表並存。
+// 每月欄位可切換顯示純利或營收（方案 C），全年欄位固定同時顯示營收+純利，並附上跟去年全年比的成長率。
+let _kpiYearMetric='pure';
+function setKpiYearMetric(m){_kpiYearMetric=m;renderKpiTab();}
+// 算某個賣場在指定年度的全年營收/純利（沿用月結表明細排除合併/不適用欄位的邏輯）。
+function _kpiShopAnnualTotal(rows,year,group,shop,pureKey){
+  let rev=0,pure=0;
+  for(let m=1;m<=12;m++){
+    const month=`${year}-${String(m).padStart(2,'0')}`;
+    const row=rows.find(r=>r.month===month);
+    if(!row)continue;
+    const raw=row[group.key]?.[shop]||{};
+    let rawForCalc=raw;
+    if(group.fieldMerge){
+      const zeroFields={};
+      Object.keys(group.fieldMerge).forEach(f=>{if(_kpiFieldMergeStatus(group,f,shop))zeroFields[f]=0;});
+      if(Object.keys(zeroFields).length)rawForCalc={...raw,...zeroFields};
+    }
+    const d=_kpiCalcAll(rawForCalc,group);
+    rev+=d.rev||0;pure+=d[pureKey]||0;
+  }
+  return{rev,pure};
+}
+function _kpiYoyHtml(cur,prev){
+  if(!prev)return '';
+  const pct=(cur-prev)/prev*100;
+  const color=pct>=0?'#059669':'#dc2626';
+  const sign=pct>=0?'+':'';
+  return ` <span style="font-weight:400;font-size:11px;color:${color}">(${sign}${pct.toFixed(1)}%)</span>`;
+}
 function _kpiYearViewHtml(){
   const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===_kpiCurYear?' selected':''}>${y}年</option>`).join('');
   const rows=getKpiRows();
+  const prevYear=_kpiCurYear-1;
   const monthGrand=Array(12).fill(0);
-  let grandRev=0,grandPure=0;
+  let grandRev=0,grandPure=0,grandPrevRev=0,grandPrevPure=0;
   const groupBlocks=KPI_GROUPS.map(g=>{
     const pureKey=g.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))?.k;
-    let groupRev=0,groupPure=0;
+    let groupRev=0,groupPure=0,groupPrevRev=0,groupPrevPure=0;
     const shopTrs=g.shops.map(shop=>{
       let annualRev=0,annualPure=0;
       const monthTds=Array.from({length:12},(_,i)=>{
@@ -3809,49 +3839,66 @@ function _kpiYearViewHtml(){
           if(Object.keys(zeroFields).length)rawForCalc={...raw,...zeroFields};
         }
         const d=_kpiCalcAll(rawForCalc,g);
-        const v=d[pureKey]||0;
-        annualRev+=d.rev||0;annualPure+=v;monthGrand[i]+=v;
-        return `<td style="padding:6px 6px;text-align:right;font-size:12px;color:${v<0?'#dc2626':'#374151'}">${v?fmtN(Math.round(v)):'—'}</td>`;
+        const pureV=d[pureKey]||0,revV=d.rev||0;
+        annualRev+=revV;annualPure+=pureV;
+        const v=_kpiYearMetric==='rev'?revV:pureV;
+        monthGrand[i]+=v;
+        const color=_kpiYearMetric==='pure'&&v<0?'#dc2626':'#374151';
+        return `<td style="padding:6px 6px;text-align:right;font-size:12px;color:${color}">${v?fmtN(Math.round(v)):'—'}</td>`;
       }).join('');
       groupRev+=annualRev;groupPure+=annualPure;grandRev+=annualRev;grandPure+=annualPure;
+      const prev=_kpiShopAnnualTotal(rows,prevYear,g,shop,pureKey);
+      groupPrevRev+=prev.rev;groupPrevPure+=prev.pure;grandPrevRev+=prev.rev;grandPrevPure+=prev.pure;
       const rate=annualRev>0?annualPure/annualRev*100:null;
       return `<tr style="border-top:1px solid #f0f0f0">
         <td style="padding:6px 12px 6px 20px;font-size:12.5px;color:#374151;text-align:left;white-space:nowrap">${shop}</td>
         ${monthTds}
-        <td style="padding:6px 8px;text-align:right;font-size:12px">${annualRev?fmtN(Math.round(annualRev)):'—'}</td>
-        <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:700;color:${annualPure<0?'#dc2626':'#059669'}">${annualRev||annualPure?fmtN(Math.round(annualPure)):'—'}</td>
+        <td style="padding:6px 8px;text-align:right;font-size:12px">${annualRev?fmtN(Math.round(annualRev)):'—'}${_kpiYoyHtml(annualRev,prev.rev)}</td>
+        <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:700;color:${annualPure<0?'#dc2626':'#059669'}">${annualRev||annualPure?fmtN(Math.round(annualPure)):'—'}${_kpiYoyHtml(annualPure,prev.pure)}</td>
         <td style="padding:6px 8px;text-align:right;font-size:12px">${rate!==null?rate.toFixed(2)+'%':'—'}</td>
       </tr>`;
     }).join('');
-    // 整組共同費用（如物流運費）全年加總要扣掉，跟賣場明細頁的小計邏輯一致。
+    // 整組共同費用（如物流運費）全年加總要扣掉，跟賣場明細頁的小計邏輯一致（今年、去年都要扣）。
     if(g.commonCostLabel){
       for(let m=1;m<=12;m++){
-        const month=`${_kpiCurYear}-${String(m).padStart(2,'0')}`;
-        const row=rows.find(r=>r.month===month);
-        const c=row?.[g.key+'Common']||0;
-        groupPure-=c;grandPure-=c;
+        const monthCur=`${_kpiCurYear}-${String(m).padStart(2,'0')}`;
+        const rowCur=rows.find(r=>r.month===monthCur);
+        const cCur=rowCur?.[g.key+'Common']||0;
+        groupPure-=cCur;grandPure-=cCur;
+        const monthPrev=`${prevYear}-${String(m).padStart(2,'0')}`;
+        const rowPrev=rows.find(r=>r.month===monthPrev);
+        const cPrev=rowPrev?.[g.key+'Common']||0;
+        groupPrevPure-=cPrev;grandPrevPure-=cPrev;
       }
     }
     const groupRate=groupRev>0?groupPure/groupRev*100:null;
     const headerRow=`<tr style="background:#f8f9fc;border-top:1px solid #e5e7eb">
       <td colspan="16" style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#1e293b;border-left:3px solid ${g.color};text-align:left;white-space:nowrap">${g.title}
-        <span style="font-weight:400;color:#9ca3af;margin-left:10px">全年純利 <b style="font-weight:700;color:${groupPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(groupPure))}</b>${groupRate!==null?`　純利率 ${groupRate.toFixed(2)}%`:''}</span>
+        <span style="font-weight:400;color:#9ca3af;margin-left:10px">全年純利 <b style="font-weight:700;color:${groupPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(groupPure))}</b>${_kpiYoyHtml(groupPure,groupPrevPure)}${groupRate!==null?`　純利率 ${groupRate.toFixed(2)}%`:''}</span>
       </td>
     </tr>`;
     return headerRow+shopTrs;
   }).join('');
   const grandRate=grandRev>0?grandPure/grandRev*100:null;
-  const monthGrandTds=monthGrand.map(v=>`<td style="padding:7px 6px;text-align:right;font-size:12px;font-weight:700;color:${v<0?'#dc2626':'#374151'}">${fmtN(Math.round(v))}</td>`).join('');
+  const monthGrandTds=monthGrand.map(v=>{
+    const color=_kpiYearMetric==='pure'&&v<0?'#dc2626':'#374151';
+    return `<td style="padding:7px 6px;text-align:right;font-size:12px;font-weight:700;color:${color}">${fmtN(Math.round(v))}</td>`;
+  }).join('');
   const grandRow=`<tr style="border-top:2px solid #e5e7eb;background:#f8f9fc">
     <td style="padding:7px 12px;font-size:12.5px;font-weight:700">全年總計</td>
     ${monthGrandTds}
-    <td style="padding:7px 8px;text-align:right;font-size:12px;font-weight:700">${fmtN(Math.round(grandRev))}</td>
-    <td style="padding:7px 8px;text-align:right;font-size:12px;font-weight:700;color:${grandPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(grandPure))}</td>
+    <td style="padding:7px 8px;text-align:right;font-size:12px;font-weight:700">${fmtN(Math.round(grandRev))}${_kpiYoyHtml(grandRev,grandPrevRev)}</td>
+    <td style="padding:7px 8px;text-align:right;font-size:12px;font-weight:700;color:${grandPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(grandPure))}${_kpiYoyHtml(grandPure,grandPrevPure)}</td>
     <td style="padding:7px 8px;text-align:right;font-size:12px;font-weight:700">${grandRate!==null?grandRate.toFixed(2)+'%':'—'}</td>
   </tr>`;
   const monthHeaders=Array.from({length:12},(_,i)=>`<th style="padding:7px 6px;color:#6b7280;font-size:11px;font-weight:700;text-align:right;white-space:nowrap">${i+1}月</th>`).join('');
-  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+  const metricToggle=`<div style="display:flex;gap:6px">
+    <div onclick="setKpiYearMetric('pure')" style="padding:5px 14px;font-size:12.5px;font-weight:${_kpiYearMetric==='pure'?700:400};color:${_kpiYearMetric==='pure'?'#fff':'#6b7280'};background:${_kpiYearMetric==='pure'?'#5b5fcf':'#f3f4f6'};border-radius:6px;cursor:pointer">純利</div>
+    <div onclick="setKpiYearMetric('rev')" style="padding:5px 14px;font-size:12.5px;font-weight:${_kpiYearMetric==='rev'?700:400};color:${_kpiYearMetric==='rev'?'#fff':'#6b7280'};background:${_kpiYearMetric==='rev'?'#5b5fcf':'#f3f4f6'};border-radius:6px;cursor:pointer">營收</div>
+  </div>`;
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:16px">
     <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
+    ${metricToggle}
   </div>
   <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto">
     <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:1150px">
@@ -4678,7 +4725,7 @@ Object.assign(window, {
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
-  buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,
+  buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,setKpiYearMetric,
   deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
