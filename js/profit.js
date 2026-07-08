@@ -3643,13 +3643,16 @@ function toggleKpiGroup(month,groupKey){
   renderKpiTab();
 }
 function _kpiSummaryCardsHtml(row){
-  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px">
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px">
     ${KPI_GROUPS.map(g=>{
       const{totalPure,pureRateAgg,totalRev}=_kpiGroupTotals(row,g);
       return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
         <div style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${g.color};display:inline-block;flex-shrink:0"></span>${g.title}</div>
-        <div style="font-size:18px;font-weight:700;margin-top:5px;color:${totalPure>=0?'#059669':'#dc2626'}">NT$${fmtN(Math.round(totalPure))}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:1px">純利率 ${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:6px">營收</div>
+        <div style="font-size:14px;font-weight:600;color:#374151">NT$${fmtN(Math.round(totalRev))}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:5px">純利</div>
+        <div style="font-size:18px;font-weight:700;color:${totalPure>=0?'#059669':'#dc2626'}">NT$${fmtN(Math.round(totalPure))}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:2px">純利率 ${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}</div>
       </div>`;
     }).join('')}
   </div>`;
