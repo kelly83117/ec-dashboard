@@ -4719,10 +4719,33 @@ function renderCoupangTable(shop,rawRows){
   if(rateEl)rateEl.textContent=(totalRate*100).toFixed(1)+'%';
   renderCoupangTableBody(shop);
 }
+// 點欄位標題排序：跟 setSort 一樣三段循環（大到小→小到大→還原原始順序），每個賣場各自記自己的排序狀態。
+const _cupSort={};
+function cupSetSort(shop,col){
+  const cur=_cupSort[shop];
+  if(!cur||cur.col!==col)_cupSort[shop]={col,dir:'desc'};
+  else if(cur.dir==='desc')_cupSort[shop]={col,dir:'asc'};
+  else delete _cupSort[shop];
+  renderCoupangTableBody(shop);
+}
+function cupSortRows(shop,rows){
+  const s=_cupSort[shop];
+  if(!s)return rows;
+  const colDef=CUP_TABLE_COLS.find(c=>c.k===s.col);
+  const isNum=!!(colDef&&colDef.fmt);
+  return[...rows].sort((a,b)=>{
+    if(isNum){
+      const va=Number(a[s.col])||0,vb=Number(b[s.col])||0;
+      return s.dir==='asc'?va-vb:vb-va;
+    }
+    const va=String(a[s.col]||''),vb=String(b[s.col]||'');
+    return s.dir==='asc'?va.localeCompare(vb):vb.localeCompare(va);
+  });
+}
 // 表格本體：跟蝦皮好麻吉共用同一套 table/th/td 全站樣式（width:100%、統一內距），
 // 欄位可拖曳排序，順序另外存一份（欄位集合跟好麻吉不同）。
 function renderCoupangTableBody(shop){
-  const rows=_cupMergedRows[shop]||[];
+  const rows=cupSortRows(shop,_cupMergedRows[shop]||[]);
   const tbl=document.getElementById('cup-tbl-'+shop);
   if(!tbl)return;
   const fmtFns={
@@ -4733,7 +4756,9 @@ function renderCoupangTableBody(shop){
   const hc=getCupHiddenCols();
   const cols=getCupOrderedCols().filter(c=>!hc.has(c.k));
   const dragAttrs=(key)=>`draggable="true" ondragstart="cupColDragStart(event,'${key}')" ondragover="cupColDragOver(event)" ondragenter="cupColDragEnter(event)" ondragleave="cupColDragLeave(event)" ondrop="cupColDrop(event,'${shop}','${key}')" ondragend="cupColDragEnd(event)"`;
-  const thead=cols.map(c=>`<th class="${CUP_TABLE_LEFT_COLS.has(c.k)?'tl':''}" ${dragAttrs(c.k)}>${c.label}</th>`).join('');
+  const curSort=_cupSort[shop];
+  const sortArrow=(key)=>curSort&&curSort.col===key?(curSort.dir==='asc'?' ▲':' ▼'):'';
+  const thead=cols.map(c=>`<th class="${CUP_TABLE_LEFT_COLS.has(c.k)?'tl':''}" ${dragAttrs(c.k)}><span onclick="cupSetSort('${shop}','${c.k}')" style="cursor:pointer">${c.label}${sortArrow(c.k)}</span></th>`).join('');
   const tbody=rows.map(r=>{
     const tds=cols.map(c=>{
       const v=r[c.k];
@@ -4969,4 +4994,5 @@ Object.assign(window, {
   renderCoupangTableBody,
   toggleCupHiddenCol,resetCupHiddenCols,resetCupColOrder,openCupColPicker,
   cupPickRowDragStart,cupPickRowDragOver,cupPickRowDragEnter,cupPickRowDragLeave,cupPickRowDrop,cupPickRowDragEnd,
+  cupSetSort,
 });
