@@ -4757,10 +4757,13 @@ function renderCoupangTableBody(shop){
   const cols=getCupOrderedCols().filter(c=>!hc.has(c.k));
   const dragAttrs=(key)=>`draggable="true" ondragstart="cupColDragStart(event,'${key}')" ondragover="cupColDragOver(event)" ondragenter="cupColDragEnter(event)" ondragleave="cupColDragLeave(event)" ondrop="cupColDrop(event,'${shop}','${key}')" ondragend="cupColDragEnd(event)"`;
   const curSort=_cupSort[shop];
-  const sortArrow=(key)=>curSort&&curSort.col===key?(curSort.dir==='asc'?' ▲':' ▼'):'';
+  // 平常就顯示一個淡灰色的排序小圖示，讓人看得出來這欄可以點擊排序；目前排序中的那欄改顯示實心箭頭
+  const sortIcon=(key)=>curSort&&curSort.col===key
+    ?`<span style="color:#5b5fcf;font-weight:700">${curSort.dir==='asc'?'▲':'▼'}</span>`
+    :`<span style="color:#d1d5db">⇅</span>`;
   const thead=cols.map(c=>{
     const isLeft=CUP_TABLE_LEFT_COLS.has(c.k);
-    return `<th class="${isLeft?'tl':''}" ${dragAttrs(c.k)}><span class="th-wrap${isLeft?' tl':''}" onclick="cupSetSort('${shop}','${c.k}')" style="cursor:pointer">${c.label}${sortArrow(c.k)}</span></th>`;
+    return `<th class="${isLeft?'tl':''}" ${dragAttrs(c.k)}><span class="th-wrap${isLeft?' tl':''}" onclick="cupSetSort('${shop}','${c.k}')" style="cursor:pointer;gap:4px">${c.label}${sortIcon(c.k)}</span></th>`;
   }).join('');
   const tbody=rows.map(r=>{
     const tds=cols.map(c=>{
