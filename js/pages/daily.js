@@ -557,6 +557,30 @@ Object.assign(App, {
           list[idx] = { ...t, status: 'done', doneAt: Date.now(), doneBy: myName };
         }
         Store.set('ec.bossTasks', list);
+        // 同步更新同事待辦清單中，從這筆老闆任務複製過去的項目勾選狀態
+        const dp = Store.get('ec.dailyProgress', {}) || {};
+        let dpChanged = false;
+        const nextDp = { ...dp };
+        Object.keys(nextDp).forEach(dateKey => {
+          const dayEntry = nextDp[dateKey];
+          if (!dayEntry) return;
+          let dayChanged = false;
+          const nextDay = { ...dayEntry };
+          Object.keys(nextDay).forEach(person => {
+            const items = nextDay[person];
+            if (!Array.isArray(items)) return;
+            const newItems = items.map(it => it.bossTaskId === t.id ? { ...it, done: wasNotDone } : it);
+            if (newItems.some((it, i) => it !== items[i])) {
+              nextDay[person] = newItems;
+              dayChanged = true;
+            }
+          });
+          if (dayChanged) {
+            nextDp[dateKey] = nextDay;
+            dpChanged = true;
+          }
+        });
+        if (dpChanged) Store.set('ec.dailyProgress', nextDp);
         this.render();
         // 由「未完成」→「完成」時通知老闆（取消勾選不通知，避免吵）
         if (wasNotDone) {
