@@ -4324,7 +4324,7 @@ function momoShopHTML(shop,platform='momo'){
     ?`<button class="export-btn" onclick="openCoupangUpload('${shop}')" style="border-color:#0ea5e9;color:#0ea5e9">⬆ 上傳檔案</button>`
     :`<button class="export-btn" disabled style="opacity:0.4;cursor:default">⬆ 上傳檔案</button>`;
   const tableArea=isCoupang
-    ?`<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="col-pick-btn" onclick="openCoupangDist('${shop}')">📊 階層分布</button></div><div id="cup-tbl-${shop}"><div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個檔案後按「▶ 產生並儲存」</div></div></div>`
+    ?`<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px"><div class="col-picker-wrap"><button class="col-pick-btn" onclick="openCupColPicker('${shop}',this)">☰ 欄位</button></div><button class="col-pick-btn" onclick="openCoupangDist('${shop}')">📊 階層分布</button></div><div id="cup-tbl-${shop}"><div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個檔案後按「▶ 產生並儲存」</div></div></div>`
     :`<div style="background:#f9fafb;border:1.5px dashed #d1d5db;border-radius:10px;padding:48px;text-align:center;color:#9ca3af"><div style="font-size:36px;margin-bottom:8px">📊</div><div style="font-size:14px;font-weight:600">階層分布圖</div><div style="font-size:12px;margin-top:4px">上傳資料後可查看</div></div>`;
   _cupPeriod[shop]=_cupPeriod[shop]||{month:'2026/06',half:'first'};
   const p=_cupPeriod[shop];
@@ -4609,6 +4609,72 @@ function getCupOrderedCols(){
   byKey.forEach(c=>out.push(c));
   return out;
 }
+// 欄位顯示/隱藏（跟順序一樣，麻吉/露營館共用一份）
+const _CUP_HCOLS_LS='ec_hcols_coupang';
+function getCupHiddenCols(){
+  try{const raw=localStorage.getItem(_CUP_HCOLS_LS);return new Set(raw?JSON.parse(raw):[]);}catch{return new Set();}
+}
+function toggleCupHiddenCol(shop,key){
+  const s=getCupHiddenCols();if(s.has(key))s.delete(key);else s.add(key);
+  try{localStorage.setItem(_CUP_HCOLS_LS,JSON.stringify([...s]));}catch{}
+  renderCoupangTableBody(shop);renderCupColPicker(shop);
+}
+function resetCupHiddenCols(shop){try{localStorage.removeItem(_CUP_HCOLS_LS);}catch{}renderCoupangTableBody(shop);renderCupColPicker(shop);}
+function resetCupColOrder(shop){try{localStorage.removeItem(_CUP_COLORDER_LS);}catch{}renderCoupangTableBody(shop);renderCupColPicker(shop);}
+// 欄位選單（跟好麻吉的 col-picker 同一套外觀，選單裡也能直接拖曳排序）
+let _cupPickRowDrag=null;
+function cupPickRowDragStart(e,shop,key){
+  _cupPickRowDrag=key;
+  e.dataTransfer.effectAllowed='move';
+  try{e.dataTransfer.setData('text/plain',key);}catch{}
+  e.currentTarget.classList.add('cp-row-dragging');
+}
+function cupPickRowDragOver(e){e.preventDefault();e.dataTransfer.dropEffect='move';}
+function cupPickRowDragEnter(e){e.preventDefault();e.currentTarget.classList.add('cp-row-drag-over');}
+function cupPickRowDragLeave(e){e.currentTarget.classList.remove('cp-row-drag-over');}
+function cupPickRowDrop(e,shop,targetKey){
+  e.preventDefault();
+  e.currentTarget.classList.remove('cp-row-drag-over');
+  if(!_cupPickRowDrag||_cupPickRowDrag===targetKey){_cupPickRowDrag=null;return;}
+  const rect=e.currentTarget.getBoundingClientRect();
+  const after=(e.clientY-rect.top)>rect.height/2;
+  let order=getCupColKeys().filter(k=>k!==_cupPickRowDrag);
+  let idx=order.indexOf(targetKey);
+  if(idx<0)idx=order.length;else if(after)idx++;
+  order.splice(idx,0,_cupPickRowDrag);
+  saveCupColKeys(order);
+  _cupPickRowDrag=null;
+  renderCoupangTableBody(shop);renderCupColPicker(shop);
+}
+function cupPickRowDragEnd(e){e.currentTarget.classList.remove('cp-row-dragging');document.querySelectorAll('.cp-row-drag-over').forEach(el=>el.classList.remove('cp-row-drag-over'));}
+function renderCupColPicker(shop){
+  const m=document.getElementById('colpick-cup-'+shop);if(!m)return;
+  const hc=getCupHiddenCols();
+  const cols=getCupOrderedCols();
+  const vis=cols.length-hc.size;
+  m.innerHTML=`<div style="padding:6px 13px 4px;font-size:11px;color:#9ca3af;font-weight:700;display:flex;justify-content:space-between;align-items:center">欄位 <span>${vis}/${cols.length}</span></div>`
+    +cols.map(c=>`<div class="cp-row" draggable="true"
+      ondragstart="cupPickRowDragStart(event,'${shop}','${c.k}')" ondragover="cupPickRowDragOver(event)"
+      ondragenter="cupPickRowDragEnter(event)" ondragleave="cupPickRowDragLeave(event)"
+      ondrop="cupPickRowDrop(event,'${shop}','${c.k}')" ondragend="cupPickRowDragEnd(event)"
+      onclick="toggleCupHiddenCol('${shop}','${c.k}');event.stopPropagation()">
+      <span class="cp-row-handle">⠿</span>
+      <input type="checkbox" ${!hc.has(c.k)?'checked':''} style="margin:0;pointer-events:none"> ${c.label}
+    </div>`).join('')
+    +`<div style="padding:4px 13px 6px;border-top:1px solid #e5e7eb;text-align:right;display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="resetCupColOrder('${shop}')" style="font-size:11px;color:#5b5fcf;background:none;border:none;cursor:pointer;font-weight:600">重設順序</button>
+      <button onclick="resetCupHiddenCols('${shop}')" style="font-size:11px;color:#5b5fcf;background:none;border:none;cursor:pointer;font-weight:600">顯示全部</button>
+    </div>`;
+}
+function openCupColPicker(shop,btn){
+  let m=document.getElementById('colpick-cup-'+shop);
+  if(m){m.remove();return;}
+  m=document.createElement('div');m.id='colpick-cup-'+shop;m.className='col-picker-menu open';
+  const wrap=btn?.closest('.col-picker-wrap');
+  (wrap||btn?.parentElement||document.body).appendChild(m);
+  renderCupColPicker(shop);
+  setTimeout(()=>document.addEventListener('click',function h(e){if(!m.contains(e.target)){m.remove();document.removeEventListener('click',h);}},{},true),0);
+}
 let _cupColDrag=null;
 function cupColDragStart(e,key){
   _cupColDrag=key;
@@ -4664,7 +4730,8 @@ function renderCoupangTableBody(shop){
     num:n=>Math.round(n).toLocaleString(),
     pct:n=>(n*100).toFixed(1)+'%',
   };
-  const cols=getCupOrderedCols();
+  const hc=getCupHiddenCols();
+  const cols=getCupOrderedCols().filter(c=>!hc.has(c.k));
   const dragAttrs=(key)=>`draggable="true" ondragstart="cupColDragStart(event,'${key}')" ondragover="cupColDragOver(event)" ondragenter="cupColDragEnter(event)" ondragleave="cupColDragLeave(event)" ondrop="cupColDrop(event,'${shop}','${key}')" ondragend="cupColDragEnd(event)"`;
   const thead=cols.map(c=>`<th class="${CUP_TABLE_LEFT_COLS.has(c.k)?'tl':''}" ${dragAttrs(c.k)}>${c.label}</th>`).join('');
   const tbody=rows.map(r=>{
@@ -4900,4 +4967,6 @@ Object.assign(window, {
   cpRowDragStart,cpRowDragOver,cpRowDragEnter,cpRowDragLeave,cpRowDrop,cpRowDragEnd,
   cupColDragStart,cupColDragOver,cupColDragEnter,cupColDragLeave,cupColDrop,cupColDragEnd,
   renderCoupangTableBody,
+  toggleCupHiddenCol,resetCupHiddenCols,resetCupColOrder,openCupColPicker,
+  cupPickRowDragStart,cupPickRowDragOver,cupPickRowDragEnter,cupPickRowDragLeave,cupPickRowDrop,cupPickRowDragEnd,
 });
