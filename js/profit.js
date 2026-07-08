@@ -4577,61 +4577,111 @@ function onCupNoteChange(shop,code,value){
   if(window.__cloudProfit)window.__cloudProfit.setField(cupNotesKey(shop,p.month,p.half),notes).catch(()=>{});
 }
 
+// 酷澎表格欄位定義（跟蝦皮好麻吉的 PROFIT_COLS 是不同欄位集合，麻吉/露營館共用一份順序）
+const CUP_TABLE_COLS=[
+  {k:'productId',label:'商品ID'},
+  {k:'code',label:'編號'},
+  {k:'name',label:'商品名稱'},
+  {k:'rev',label:'銷售額',fmt:'money'},
+  {k:'salesCost',label:'銷售成本',fmt:'num'},
+  {k:'gross',label:'毛利',fmt:'num'},
+  {k:'net',label:'純利',fmt:'money'},
+  {k:'netRate',label:'純利率',fmt:'pct'},
+  {k:'qty',label:'銷售數量',fmt:'num'},
+  {k:'stock',label:'可用庫存',fmt:'num'},
+  {k:'note',label:'調整'},
+];
+const CUP_TABLE_LEFT_COLS=new Set(['productId','code','name','note']);
+const _CUP_COLORDER_LS='ec_colorder_coupang';
+function getCupColKeys(){
+  try{
+    const raw=localStorage.getItem(_CUP_COLORDER_LS);
+    const saved=raw?JSON.parse(raw):[];
+    if(Array.isArray(saved)&&saved.length)return saved;
+  }catch{}
+  return CUP_TABLE_COLS.map(c=>c.k);
+}
+function saveCupColKeys(order){try{localStorage.setItem(_CUP_COLORDER_LS,JSON.stringify(order));}catch{}}
+function getCupOrderedCols(){
+  const byKey=new Map(CUP_TABLE_COLS.map(c=>[c.k,c]));
+  const out=[];
+  getCupColKeys().forEach(k=>{if(byKey.has(k)){out.push(byKey.get(k));byKey.delete(k);}});
+  byKey.forEach(c=>out.push(c));
+  return out;
+}
+let _cupColDrag=null;
+function cupColDragStart(e,key){
+  _cupColDrag=key;
+  e.dataTransfer.effectAllowed='move';
+  try{e.dataTransfer.setData('text/plain',key);}catch{}
+  e.currentTarget.classList.add('col-dragging');
+}
+function cupColDragOver(e){e.preventDefault();e.dataTransfer.dropEffect='move';}
+function cupColDragEnter(e){e.preventDefault();e.currentTarget.classList.add('col-drag-over');}
+function cupColDragLeave(e){e.currentTarget.classList.remove('col-drag-over');}
+function cupColDrop(e,shop,targetKey){
+  e.preventDefault();
+  e.currentTarget.classList.remove('col-drag-over');
+  if(!_cupColDrag||_cupColDrag===targetKey){_cupColDrag=null;return;}
+  const rect=e.currentTarget.getBoundingClientRect();
+  const after=(e.clientX-rect.left)>rect.width/2;
+  let order=getCupColKeys().filter(k=>k!==_cupColDrag);
+  let idx=order.indexOf(targetKey);
+  if(idx<0)idx=order.length;else if(after)idx++;
+  order.splice(idx,0,_cupColDrag);
+  saveCupColKeys(order);
+  _cupColDrag=null;
+  renderCoupangTableBody(shop);
+}
+function cupColDragEnd(e){e.currentTarget.classList.remove('col-dragging');document.querySelectorAll('.col-drag-over').forEach(el=>el.classList.remove('col-drag-over'));}
+
 function renderCoupangTable(shop,rawRows){
   const rows=mergeCoupangRows(rawRows);
   const p=_cupPeriod[shop]||{month:'2026/06',half:'first'};
   const notes=cupLoadNotes(shop,p.month,p.half);
   rows.forEach(r=>{r.note=notes[r.code]||'';});
   _cupMergedRows[shop]=rows;
-  const tbl=document.getElementById('cup-tbl-'+shop);
-  if(!tbl)return;
   const totalRev=rows.reduce((s,r)=>s+r.rev,0);
   const totalNet=rows.reduce((s,r)=>s+r.net,0);
   const totalRate=totalRev>0?totalNet/totalRev:0;
-  const fmtM=n=>'NT$ '+Math.round(n).toLocaleString();
-  const fmtN=n=>Math.round(n).toLocaleString();
-  const fmtP=n=>(n*100).toFixed(1)+'%';
   // 更新 KPI
   const revEl=document.getElementById('cup-kv-rev-'+shop);
   const netEl=document.getElementById('cup-kv-net-'+shop);
   const rateEl=document.getElementById('cup-kv-rate-'+shop);
-  if(revEl)revEl.textContent=fmtM(totalRev);
-  if(netEl)netEl.textContent=fmtM(totalNet);
-  if(rateEl)rateEl.textContent=fmtP(totalRate);
-  // 表格
-  const cols=[
-    {k:'productId',label:'商品ID'},
-    {k:'code',label:'編號'},
-    {k:'name',label:'商品名稱'},
-    {k:'rev',label:'銷售額',fmt:fmtM},
-    {k:'salesCost',label:'銷售成本',fmt:fmtN},
-    {k:'gross',label:'毛利',fmt:fmtN},
-    {k:'net',label:'純利',fmt:fmtM},
-    {k:'netRate',label:'純利率',fmt:fmtP},
-    {k:'qty',label:'銷售數量',fmt:fmtN},
-    {k:'stock',label:'可用庫存',fmt:fmtN},
-    {k:'note',label:'調整'},
-  ];
-  const leftCols=new Set(['productId','code','name','note']);
-  const thStyle='padding:4px 10px 4px 0;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;white-space:nowrap;border-bottom:2px solid #e5e7eb;background:#f9fafb;position:sticky;top:0;z-index:1';
-  const tdStyle='padding:3px 10px 3px 0;font-size:12.5px;border-bottom:1px solid #f3f4f6;white-space:nowrap;line-height:1.3';
-  const thead=cols.map(c=>`<th style="${thStyle};text-align:${leftCols.has(c.k)?'left':'right'}">${c.label}</th>`).join('');
-  const tbody=rows.map((r,i)=>{
-    const bg=i%2===0?'#fff':'#fafafa';
+  if(revEl)revEl.textContent='NT$ '+Math.round(totalRev).toLocaleString();
+  if(netEl)netEl.textContent='NT$ '+Math.round(totalNet).toLocaleString();
+  if(rateEl)rateEl.textContent=(totalRate*100).toFixed(1)+'%';
+  renderCoupangTableBody(shop);
+}
+// 表格本體：跟蝦皮好麻吉共用同一套 table/th/td 全站樣式（width:100%、統一內距），
+// 欄位可拖曳排序，順序另外存一份（欄位集合跟好麻吉不同）。
+function renderCoupangTableBody(shop){
+  const rows=_cupMergedRows[shop]||[];
+  const tbl=document.getElementById('cup-tbl-'+shop);
+  if(!tbl)return;
+  const fmtFns={
+    money:n=>'NT$ '+Math.round(n).toLocaleString(),
+    num:n=>Math.round(n).toLocaleString(),
+    pct:n=>(n*100).toFixed(1)+'%',
+  };
+  const cols=getCupOrderedCols();
+  const dragAttrs=(key)=>`draggable="true" ondragstart="cupColDragStart(event,'${key}')" ondragover="cupColDragOver(event)" ondragenter="cupColDragEnter(event)" ondragleave="cupColDragLeave(event)" ondrop="cupColDrop(event,'${shop}','${key}')" ondragend="cupColDragEnd(event)"`;
+  const thead=cols.map(c=>`<th class="${CUP_TABLE_LEFT_COLS.has(c.k)?'tl':''}" ${dragAttrs(c.k)}>${c.label}</th>`).join('');
+  const tbody=rows.map(r=>{
     const tds=cols.map(c=>{
-      let v=r[c.k];
+      const v=r[c.k];
       if(c.k==='note'){
         const esc=String(v||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-        return`<td style="${tdStyle};background:${bg};text-align:left"><input type="text" value="${esc}" placeholder="輸入調整…" oninput="onCupNoteChange('${shop}','${r.code}',this.value)" style="width:120px;border:1px solid #e5e7eb;border-radius:5px;padding:2px 6px;font-size:12px;outline:none;background:#fff"></td>`;
+        return`<td class="tl"><input type="text" value="${esc}" placeholder="輸入調整…" oninput="onCupNoteChange('${shop}','${r.code}',this.value)" style="width:120px;border:1px solid #e5e7eb;border-radius:5px;padding:2px 6px;font-size:12px;outline:none;background:#fff"></td>`;
       }
-      const disp=c.fmt?c.fmt(v):v;
-      const align=leftCols.has(c.k)?'left':'right';
-      const color=c.k==='net'?(v>=0?'#10b981':'#ef4444'):c.k==='netRate'?(v>=0?'#6366f1':'#ef4444'):'inherit';
-      return`<td style="${tdStyle};background:${bg};text-align:${align};color:${color}">${disp}</td>`;
+      const disp=c.fmt?fmtFns[c.fmt](v):v;
+      const cls=CUP_TABLE_LEFT_COLS.has(c.k)?'tl':(c.k==='net'?(v>=0?'td-pos':'td-neg'):'');
+      const style=c.k==='netRate'?`style="color:${v>=0?'#6366f1':'#ef4444'};font-weight:700"`:'';
+      return`<td class="${cls}" ${style}>${disp}</td>`;
     }).join('');
     return`<tr>${tds}</tr>`;
   }).join('');
-  tbl.innerHTML=`<div style="overflow-x:auto"><table style="width:auto;border-collapse:collapse"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
+  tbl.innerHTML=`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
 }
 
 function openCoupangDist(shop){
@@ -4848,4 +4898,6 @@ Object.assign(window, {
   updateSuggChip,buildSuggCell,
   colDragStart,colDragOver,colDrop,colDragEnd,colDragEnter,colDragLeave,resetColOrder,
   cpRowDragStart,cpRowDragOver,cpRowDragEnter,cpRowDragLeave,cpRowDrop,cpRowDragEnd,
+  cupColDragStart,cupColDragOver,cupColDragEnter,cupColDragLeave,cupColDrop,cupColDragEnd,
+  renderCoupangTableBody,
 });
