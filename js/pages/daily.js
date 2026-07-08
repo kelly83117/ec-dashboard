@@ -665,6 +665,30 @@ Object.assign(App, {
         const item = items.find(it => it.id === id);
         if (item) item.done = cb.checked;
         saveProgressItems(name, items);
+        // 如果這筆待辦事項是老闆指派的任務同步過來的，勾選/取消勾選時同步更新老闆指派任務的完成狀態
+        if (item && item.bossTaskId) {
+          const list = (Store.get('ec.bossTasks', []) || []).slice();
+          const idx = list.findIndex(t => t.id === item.bossTaskId);
+          if (idx >= 0) {
+            const t = list[idx];
+            const wasNotDone = t.status !== 'done';
+            list[idx] = cb.checked
+              ? { ...t, status: 'done', doneAt: Date.now(), doneBy: name }
+              : { ...t, status: 'todo', doneAt: null, doneBy: null };
+            Store.set('ec.bossTasks', list);
+            if (cb.checked && wasNotDone) {
+              const dueLine = t.due ? '\n📅 預計完成日：' + t.due.replace(/-/g, '/') : '';
+              const msg = '✅ 任務完成通知\n' + (t.desc || '')
+                + '\n👤 完成者：' + name
+                + dueLine
+                + '\n→ 前往儀表板查看 https://kelly83117.github.io/ec-dashboard/';
+              this.pushLineNotifyToBoss(msg).then(r => {
+                if (r && r.ok) showToast('已通知老闆 LINE', 'info');
+                else if (r && !r.skipped) console.warn('[line notify boss]', r);
+              });
+            }
+          }
+        }
         this.render();
       });
     });
