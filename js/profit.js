@@ -595,24 +595,54 @@ function shopHTML(shop){return`
     <div id="kv-net-${shop}"></div>
     <div id="kv-ads-${shop}"></div>
   </div>
-  <div class="toolbar" id="tb-${shop}" style="position:relative">
-    <span id="period-tag-${shop}" style="display:none"></span>
-    <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')" style="display:none">
-    <span class="row-cnt" id="cnt-${shop}"></span>
-    <span class="sugg-filter-chip" id="sugg-chip-${shop}">
-      <span id="sugg-chip-text-${shop}"></span>
-      <button onclick="clearSuggFilter('${shop}')">清除篩選</button>
-    </span>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:4px;position:relative">
-      <button class="col-pick-btn" id="tag-btn-${shop}" onclick="toggleTagPopup('${shop}',this)">🏷 標籤</button>
-      <div class="tag-filter-bar" id="tfbar-${shop}"></div>
+  ${shop==='好麻吉'?`
+  <div style="display:flex;gap:4px;border-bottom:1px solid #e4e6ef;margin-bottom:16px">
+    <div class="shop-view-tab" id="svtab-${shop}-profit" onclick="setShopViewMode('${shop}','profit')" style="padding:9px 18px;font-size:13px;font-weight:700;color:#5b5fcf;border-bottom:2px solid #5b5fcf;cursor:pointer">淨利表</div>
+    <div class="shop-view-tab" id="svtab-${shop}-affiliate" onclick="setShopViewMode('${shop}','affiliate')" style="padding:9px 18px;font-size:13px;font-weight:400;color:#9ca3af;border-bottom:2px solid transparent;cursor:pointer">聯盟行銷</div>
+  </div>`:''}
+  <div id="sv-profit-${shop}">
+    <div class="toolbar" id="tb-${shop}" style="position:relative">
+      <span id="period-tag-${shop}" style="display:none"></span>
+      <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')" style="display:none">
+      <span class="row-cnt" id="cnt-${shop}"></span>
+      <span class="sugg-filter-chip" id="sugg-chip-${shop}">
+        <span id="sugg-chip-text-${shop}"></span>
+        <button onclick="clearSuggFilter('${shop}')">清除篩選</button>
+      </span>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:4px;position:relative">
+        <button class="col-pick-btn" id="tag-btn-${shop}" onclick="toggleTagPopup('${shop}',this)">🏷 標籤</button>
+        <div class="tag-filter-bar" id="tfbar-${shop}"></div>
+      </div>
+      <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
+      <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
     </div>
-    <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
-    <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
+    <div id="tbl-${shop}">
+      <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">選擇區間後上傳報表，按「▶ 產生並儲存」</div></div>
+    </div>
   </div>
-  <div id="tbl-${shop}">
-    <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">選擇區間後上傳報表，按「▶ 產生並儲存」</div></div>
-  </div>`;
+  ${shop==='好麻吉'?`
+  <div id="sv-affiliate-${shop}" style="display:none">
+    <div style="background:#f8f9fc;border:1px dashed #d1d5db;border-radius:10px;padding:48px;text-align:center;color:#9ca3af">
+      <div style="font-size:36px;margin-bottom:8px">🔗</div>
+      <div style="font-size:14px;font-weight:600">聯盟行銷</div>
+      <div style="font-size:12px;margin-top:4px">尚未建置，之後再補上內容</div>
+    </div>
+  </div>`:''}`;
+}
+// 賣場內容切換：淨利表 / 聯盟行銷（目前只有好麻吉有這個切換，兩個畫面都是同一份 shopHTML 裡的區塊，切換只是顯示/隱藏，不重新渲染）
+function setShopViewMode(shop,mode){
+  const profitEl=document.getElementById('sv-profit-'+shop);
+  const affEl=document.getElementById('sv-affiliate-'+shop);
+  if(profitEl)profitEl.style.display=mode==='profit'?'':'none';
+  if(affEl)affEl.style.display=mode==='affiliate'?'':'none';
+  const tabs={profit:document.getElementById('svtab-'+shop+'-profit'),affiliate:document.getElementById('svtab-'+shop+'-affiliate')};
+  Object.entries(tabs).forEach(([m,el])=>{
+    if(!el)return;
+    const active=m===mode;
+    el.style.color=active?'#5b5fcf':'#9ca3af';
+    el.style.fontWeight=active?'700':'400';
+    el.style.borderBottomColor=active?'#5b5fcf':'transparent';
+  });
 }
 
 // ── Period ──
@@ -5001,4 +5031,5 @@ Object.assign(window, {
   toggleCupHiddenCol,resetCupHiddenCols,resetCupColOrder,openCupColPicker,
   cupPickRowDragStart,cupPickRowDragOver,cupPickRowDragEnter,cupPickRowDragLeave,cupPickRowDrop,cupPickRowDragEnd,
   cupSetSort,
+  setShopViewMode,
 });
