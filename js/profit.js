@@ -3817,44 +3817,8 @@ function _kpiMonthViewHtml(){
     <button onclick="deleteKpiRow('${month}')" style="background:none;border:none;color:#d1d5db;cursor:pointer;font-size:12px;margin-left:4px" title="清空這個月份的資料">清空此月份</button>
   </div>
   ${_kpiSummaryCardsHtml(row)}
-  ${_kpiSummaryPieWrapHtml()}
   ${KPI_GROUPS.map(g=>_kpiGroupTableHtml(row,g)).join('')}
   <div style="margin-top:6px"><span style="font-size:11px;color:#9ca3af">灰底欄位為公式自動計算，白底欄位點擊可編輯，點分組列可展開/收合明細</span></div>`;
-}
-function _kpiSummaryPieWrapHtml(){
-  return `<div style="background:#f8f9fc;border-radius:8px;padding:16px;margin-bottom:16px">
-    <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:10px">各平台營收佔比</div>
-    <div id="kpi-pie-empty" style="display:none;text-align:center;color:#9ca3af;font-size:12px;padding:30px 0">這個月還沒有資料</div>
-    <div id="kpi-pie-wrap" style="height:220px"><canvas id="kpi-pie-chart"></canvas></div>
-  </div>`;
-}
-let _kpiSummaryPieChart=null;
-// 總覽卡片下面的甜甜圈圖：各平台這個月的營收佔比，顏色跟卡片上的圓點一致。
-function renderKpiSummaryPie(month){
-  const emptyEl=document.getElementById('kpi-pie-empty');
-  const wrapEl=document.getElementById('kpi-pie-wrap');
-  const canvas=document.getElementById('kpi-pie-chart');
-  if(!emptyEl||!wrapEl||!canvas)return;
-  const row=getOrCreateKpiRow(month);
-  const labels=[],data=[],colors=[];
-  let hasAny=false;
-  KPI_GROUPS.forEach(g=>{
-    const{totalRev}=_kpiGroupTotals(row,g);
-    if(totalRev>0)hasAny=true;
-    labels.push(g.title);data.push(Math.round(totalRev));colors.push(g.color);
-  });
-  if(!hasAny){
-    emptyEl.style.display='block';wrapEl.style.display='none';
-    if(_kpiSummaryPieChart){_kpiSummaryPieChart.destroy();_kpiSummaryPieChart=null;}
-    return;
-  }
-  emptyEl.style.display='none';wrapEl.style.display='block';
-  if(_kpiSummaryPieChart)_kpiSummaryPieChart.destroy();
-  _kpiSummaryPieChart=new Chart(canvas.getContext('2d'),{
-    type:'doughnut',
-    data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'#fff'}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{boxWidth:10,font:{size:11}}},tooltip:{callbacks:{label:ctx=>ctx.label+'：NT$'+fmtN(ctx.parsed)}}},cutout:'60%'}
-  });
 }
 // 年度總表：統一成一張表，列＝各賣場（依組別分段），欄＝12個月＋全年營收/純利/純利率，
 // 不再是「月份 x 組別」趨勢表跟「各賣場全年統計」上下兩張表並存。
@@ -4018,8 +3982,6 @@ function renderKpiTab(){
   </div>`;
   const body=_kpiViewMode==='year'?_kpiYearViewHtml():_kpiMonthViewHtml();
   el.innerHTML=`<div style="padding:14px 16px 16px">${modeTabsHtml}${body}</div>`;
-  if(_kpiViewMode==='month')renderKpiSummaryPie(_kpiYM());
-  else if(_kpiSummaryPieChart){_kpiSummaryPieChart.destroy();_kpiSummaryPieChart=null;}
 }
 function buildKpiTabHtml(){
   return `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
