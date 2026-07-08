@@ -4758,7 +4758,10 @@ function renderCoupangTableBody(shop){
   const dragAttrs=(key)=>`draggable="true" ondragstart="cupColDragStart(event,'${key}')" ondragover="cupColDragOver(event)" ondragenter="cupColDragEnter(event)" ondragleave="cupColDragLeave(event)" ondrop="cupColDrop(event,'${shop}','${key}')" ondragend="cupColDragEnd(event)"`;
   const curSort=_cupSort[shop];
   const sortArrow=(key)=>curSort&&curSort.col===key?(curSort.dir==='asc'?' ▲':' ▼'):'';
-  const thead=cols.map(c=>`<th class="${CUP_TABLE_LEFT_COLS.has(c.k)?'tl':''}" ${dragAttrs(c.k)}><span onclick="cupSetSort('${shop}','${c.k}')" style="cursor:pointer">${c.label}${sortArrow(c.k)}</span></th>`).join('');
+  const thead=cols.map(c=>{
+    const isLeft=CUP_TABLE_LEFT_COLS.has(c.k);
+    return `<th class="${isLeft?'tl':''}" ${dragAttrs(c.k)}><span class="th-wrap${isLeft?' tl':''}" onclick="cupSetSort('${shop}','${c.k}')" style="cursor:pointer">${c.label}${sortArrow(c.k)}</span></th>`;
+  }).join('');
   const tbody=rows.map(r=>{
     const tds=cols.map(c=>{
       const v=r[c.k];
