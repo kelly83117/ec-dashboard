@@ -9,6 +9,12 @@ Object.assign(App, {
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
     // 月曆上用來標示「這天誰填過」的顏色點：陳君葳(Vivian)紫、洪嘉蓮(inna)藍、郭雅琪(Kelly)黃
     const PERSON_COLORS = { '陳君葳': '#8b5cf6', '洪嘉蓮': '#3b82f6', '郭雅琪': '#f59e0b' };
+    // 月曆待辦事項條的淡色底：左邊一條深色，底色用淡色，不要整條實色
+    const PERSON_LIGHT = {
+      '陳君葳': { bg: '#ede9fe', text: '#6d28d9' },
+      '洪嘉蓮': { bg: '#dbeafe', text: '#1d4ed8' },
+      '郭雅琪': { bg: '#fef3c7', text: '#92400e' },
+    };
     const users = Store.get(Store.KEYS.users, []);
     const now = new Date();
     const todayStr = toDateStr(now);
@@ -145,12 +151,15 @@ Object.assign(App, {
       ALLOWED_NAMES.forEach(n => {
         const v = dayEntries[n];
         const arr = Array.isArray(v) ? v : (v && String(v).trim() ? [{ text: String(v).trim(), done: false }] : []);
-        arr.forEach(it => dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n] }));
+        arr.forEach(it => dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n], light: PERSON_LIGHT[n] }));
       });
       const shownItems = dayItems.slice(0, MAX_CAL_BARS);
       const extraCount = dayItems.length - shownItems.length;
       const barsHtml = shownItems.map(it => `
-        <div style="background:${it.color};color:white;font-size:10px;line-height:1.6;padding:1px 5px;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;box-sizing:border-box;opacity:${it.done ? '0.55' : '1'};text-decoration:${it.done ? 'line-through' : 'none'}">${escapeHtml(it.text)}</div>
+        <div style="display:flex;align-items:stretch;background:${it.light.bg};border-radius:4px;overflow:hidden;width:100%;box-sizing:border-box;opacity:${it.done ? '0.55' : '1'}">
+          <span style="width:3px;flex-shrink:0;background:${it.color}"></span>
+          <span style="flex:1;min-width:0;font-size:10px;line-height:1.6;padding:1px 5px;color:${it.light.text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-decoration:${it.done ? 'line-through' : 'none'}">${escapeHtml(it.text)}</span>
+        </div>
       `).join('');
       const extraHtml = extraCount > 0 ? `<div style="font-size:9.5px;color:var(--text-muted);padding-left:2px">+${extraCount}</div>` : '';
       const numBg = isCellSelected ? 'var(--primary)' : isCellToday ? 'var(--primary-soft)' : 'transparent';
