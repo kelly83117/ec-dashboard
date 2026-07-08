@@ -28,9 +28,10 @@ Object.assign(App, {
     if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
     const f = this.filter.dashboardMarketing;
     if (!f.viewDate) f.viewDate = todayStr;
-    if (f.viewDate > todayStr) f.viewDate = todayStr;
     const viewDate = f.viewDate;
     const isToday = viewDate === todayStr;
+    // 過去日期唯讀（保留歷史紀錄不能改），今天和未來日期都可以新增待辦事項（方便先排之後要做的事）
+    const isEditable = viewDate >= todayStr;
     const dateDisplay = viewDate.replace(/-/g, '/');
     if (!f.calMonth) f.calMonth = viewDate.slice(0, 7);
     const calMonth = f.calMonth;
@@ -106,12 +107,12 @@ Object.assign(App, {
         <div class="dp-todo-row" data-item-id="${escapeHtml(it.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
           <span style="color:${PERSON_COLORS[p.name]};font-size:13px;flex-shrink:0">●</span>
           <span style="flex:1;min-width:0;font-size:13px;color:${it.done ? '#9ca3af' : 'var(--text)'};text-decoration:${it.done ? 'line-through' : 'none'};word-break:break-word">${escapeHtml(it.text)}</span>
-          <input type="checkbox" class="dp-todo-check" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" ${it.done ? 'checked' : ''} ${isToday ? '' : 'disabled'} style="width:16px;height:16px;cursor:${isToday ? 'pointer' : 'default'};flex-shrink:0">
+          <input type="checkbox" class="dp-todo-check" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" ${it.done ? 'checked' : ''} ${isEditable ? '' : 'disabled'} style="width:16px;height:16px;cursor:${isEditable ? 'pointer' : 'default'};flex-shrink:0">
           ${it.done ? '<span style="font-size:10.5px;color:#10b981;font-weight:700;flex-shrink:0">已完成</span>' : ''}
-          ${isToday ? `<button class="dp-todo-del" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" title="刪除" style="border:0;background:none;color:#d1d5db;cursor:pointer;font-size:13px;flex-shrink:0">✕</button>` : ''}
+          ${isEditable ? `<button class="dp-todo-del" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" title="刪除" style="border:0;background:none;color:#d1d5db;cursor:pointer;font-size:13px;flex-shrink:0">✕</button>` : ''}
         </div>
       `).join('');
-      const emptyHint = p.items.length === 0 ? `<div style="padding:10px 2px;color:var(--text-muted);font-size:12.5px">${isToday ? '還沒有待辦事項' : '這天沒有紀錄'}</div>` : '';
+      const emptyHint = p.items.length === 0 ? `<div style="padding:10px 2px;color:var(--text-muted);font-size:12.5px">${isEditable ? '還沒有待辦事項' : '這天沒有紀錄'}</div>` : '';
       return `
         <div class="dp-card" data-dp-name="${escapeHtml(p.name)}" style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:8px;min-width:0">
           <div style="display:flex;align-items:center;gap:10px;min-width:0">
@@ -123,7 +124,7 @@ Object.assign(App, {
             <span class="dp-saved-flag" style="display:none;color:#10b981;font-size:11px;font-weight:600;letter-spacing:.04em">✓ 已存</span>
           </div>
           <div class="dp-todo-list">${itemRows}${emptyHint}</div>
-          ${isToday ? `
+          ${isEditable ? `
             <div style="display:flex;gap:6px;margin-top:2px">
               <input type="text" class="dp-todo-add-input" data-dp-name="${escapeHtml(p.name)}" placeholder="新增待辦事項，按 Enter 加入"
                 style="flex:1;min-width:0;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;color:var(--text)">
@@ -138,14 +139,13 @@ Object.assign(App, {
     const [calY, calM] = calMonth.split('-').map(Number);
     const firstWeekday = new Date(calY, calM - 1, 1).getDay();
     const daysInMonth = new Date(calY, calM, 0).getDate();
-    const MAX_CAL_BARS = 3;
+    const MAX_CAL_BARS = 5;
     const calCells = [];
     for (let i = 0; i < firstWeekday; i++) calCells.push('<div></div>');
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${calY}-${String(calM).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const isCellToday = dateStr === todayStr;
       const isCellSelected = dateStr === viewDate;
-      const isFuture = dateStr > todayStr;
       const dayEntries = allProgressForCal[dateStr] || {};
       const dayItems = [];
       ALLOWED_NAMES.forEach(n => {
@@ -163,10 +163,10 @@ Object.assign(App, {
       `).join('');
       const extraHtml = extraCount > 0 ? `<div style="font-size:9.5px;color:var(--text-muted);padding-left:2px">+${extraCount}</div>` : '';
       const numBg = isCellSelected ? 'var(--primary)' : isCellToday ? 'var(--primary-soft)' : 'transparent';
-      const numColor = isCellSelected ? 'white' : isCellToday ? 'var(--primary)' : (isFuture ? '#cbd5e1' : 'var(--text)');
+      const numColor = isCellSelected ? 'white' : isCellToday ? 'var(--primary)' : 'var(--text)';
       calCells.push(`
-        <button class="dp-cal-day" data-date="${dateStr}" ${isFuture ? 'disabled' : ''}
-          style="position:relative;min-width:0;min-height:92px;border:${isCellSelected ? '2px solid var(--primary)' : '1px solid #f1f5f9'};border-radius:10px;background:white;cursor:${isFuture ? 'not-allowed' : 'pointer'};display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:6px;gap:3px;overflow:hidden">
+        <button class="dp-cal-day" data-date="${dateStr}"
+          style="position:relative;min-width:0;min-height:130px;border:${isCellSelected ? '2px solid var(--primary)' : '1px solid #f1f5f9'};border-radius:10px;background:white;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:6px;gap:3px;overflow:hidden">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${numBg};color:${numColor};font-size:13px;font-weight:${isCellSelected || isCellToday ? '700' : '500'};flex-shrink:0">${d}</span>
           <div style="display:flex;flex-direction:column;gap:2px;width:100%">${barsHtml}${extraHtml}</div>
         </button>
@@ -196,7 +196,7 @@ Object.assign(App, {
             <h3 style="margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em">每日工作進度 · ${escapeHtml(dateDisplay)}${isToday ? '<span style="margin-left:8px;font-size:11px;font-weight:500;color:var(--primary);background:var(--primary-soft);padding:2px 8px;border-radius:999px">今天</span>' : ''}</h3>
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            ${isToday ? `<button id="dp-sync-cloud" title="把今天的進度上傳到雲端，同事才看得到" style="padding:5px 12px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><span>☁ 同步雲端</span><span id="dp-sync-badge" style="display:none;min-width:18px;height:18px;padding:0 5px;background:#ef4444;color:white;border-radius:9px;font-size:10px;font-weight:700;align-items:center;justify-content:center;line-height:1">0</span></button>` : ''}
+            ${isEditable ? `<button id="dp-sync-cloud" title="把進度上傳到雲端，同事才看得到" style="padding:5px 12px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><span>☁ 同步雲端</span><span id="dp-sync-badge" style="display:none;min-width:18px;height:18px;padding:0 5px;background:#ef4444;color:white;border-radius:9px;font-size:10px;font-weight:700;align-items:center;justify-content:center;line-height:1">0</span></button>` : ''}
             <button id="boss-task-history" title="查看已完成的歷史任務" style="padding:5px 11px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:5px">📜 歷史 (${doneCount})</button>
             ${isAdmin ? `<button id="boss-task-add" style="padding:5px 12px;border:0;border-radius:6px;background:#f59e0b;color:white;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px">+ 新增任務</button>` : ''}
             ${canManageLine ? `<button id="boss-task-line-cfg" title="LINE 通知設定" style="padding:5px 11px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:5px">⚙️ LINE 通知</button>` : ''}
@@ -575,7 +575,6 @@ Object.assign(App, {
 
     // 日期切換：改用左邊月曆點選，月曆本身可以前後翻月（不影響目前選的日期）
     document.querySelectorAll('.dp-cal-day').forEach(btn => {
-      if (btn.disabled) return;
       btn.addEventListener('click', () => {
         ensureFilter();
         this.filter.dashboardMarketing.viewDate = btn.dataset.date;
@@ -608,9 +607,9 @@ Object.assign(App, {
       this.render();
     });
 
-    // 自動儲存（debounce 1.5s）— 僅當查看「今天」時可寫
+    // 自動儲存（debounce 1.5s）— 過去日期唯讀，今天和未來日期都可以寫
     const viewDate = (this.filter.dashboardMarketing && this.filter.dashboardMarketing.viewDate) || todayStr;
-    if (viewDate !== todayStr) return; // 歷史日期唯讀
+    if (viewDate < todayStr) return; // 過去日期唯讀
 
     // 每位同事各自的待同步狀態（誰打過字但還沒推雲端）
     window.__dpPendingNames = window.__dpPendingNames || new Set();
