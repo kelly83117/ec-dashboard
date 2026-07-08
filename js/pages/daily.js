@@ -17,7 +17,6 @@ Object.assign(App, {
     const canManageLine = isAdmin
       || hasOfficeFeature(this.currentUser, '行銷', 'lineNotify')
       || (this.currentUser && this.currentUser.canManageLineNotify === true);
-    const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
 
     if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
     const f = this.filter.dashboardMarketing;
@@ -30,69 +29,9 @@ Object.assign(App, {
     const calMonth = f.calMonth;
     const allProgressForCal = Store.get('ec.dailyProgress', {}) || {};
 
-    // 老闆指派的任務區
+    // 老闆指派的任務：主畫面的清單先拿掉，只留「新增任務」「歷史」按鈕移到最上面工具列
     const bossTasks = (Store.get('ec.bossTasks', []) || []).slice();
-    bossTasks.sort((a, b) => {
-      if (a.status !== b.status) return a.status === 'done' ? 1 : -1;
-      return (b.createdAt || 0) - (a.createdAt || 0);
-    });
-    const pendingCount = bossTasks.filter(t => t.status !== 'done').length;
-    const assigneeOpts = ['全體', ...ALLOWED_NAMES];
-    const dueChip = (due) => {
-      if (!due) return '';
-      const overdue = due < todayStr;
-      const bg = overdue ? '#fee2e2' : '#f3f4f6';
-      const fg = overdue ? '#dc2626' : '#4b5563';
-      return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:6px;background:${bg};color:${fg};font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">📅 ${escapeHtml(due.replace(/-/g, '/'))}${overdue ? ' 逾期' : ''}</span>`;
-    };
-    // 主畫面只列「未完成」任務；完成的進歷史紀錄 modal
-    const pendingTasks = bossTasks.filter(t => t.status !== 'done');
-    const doneCount = bossTasks.length - pendingTasks.length;
-    const taskItems = pendingTasks.map(t => {
-      const isMine = t.assignee === '全體' || t.assignee === myName;
-      const canToggle = isAdmin || isMine;
-      const assigneeBadge = t.assignee === '全體'
-        ? '<span style="padding:2px 8px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700">全體</span>'
-        : `<span style="padding:2px 8px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:700">${escapeHtml(t.assignee || '—')}</span>`;
-      return `
-        <div class="boss-task-row" data-task-id="${escapeHtml(t.id)}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:white;border:1px solid var(--border);border-radius:8px">
-          <button class="boss-task-toggle" data-task-id="${escapeHtml(t.id)}" title="標記完成" ${canToggle ? '' : 'disabled'}
-            style="width:22px;height:22px;border-radius:6px;border:1.5px solid #cbd5e1;background:white;color:white;font-size:13px;cursor:${canToggle ? 'pointer' : 'not-allowed'};flex-shrink:0;display:flex;align-items:center;justify-content:center;${canToggle ? '' : 'opacity:.5'}"></button>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:500;color:var(--text);line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(t.desc || '')}</div>
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px">
-              ${assigneeBadge}
-              ${dueChip(t.due)}
-            </div>
-          </div>
-          ${isAdmin ? `
-            <div style="display:flex;gap:4px;flex-shrink:0">
-              <button class="boss-task-edit" data-task-id="${escapeHtml(t.id)}" title="編輯" style="width:26px;height:26px;border:1px solid var(--border);background:white;border-radius:5px;font-size:12px;cursor:pointer;color:var(--text-muted)">✎</button>
-              <button class="boss-task-del" data-task-id="${escapeHtml(t.id)}" title="刪除" style="width:26px;height:26px;border:1px solid #fecaca;background:white;border-radius:5px;font-size:12px;cursor:pointer;color:#dc2626">✕</button>
-            </div>
-          ` : ''}
-        </div>
-      `;
-    }).join('');
-    const bossTasksHtml = `
-      <div style="background:linear-gradient(180deg,#fef3c7,#fffbeb);border:1px solid #fcd34d;border-radius:10px;padding:14px 14px 12px;margin-bottom:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:${pendingTasks.length ? '10px' : '0'};flex-wrap:wrap">
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:15px">📋</span>
-            <h4 style="margin:0;font-size:14px;font-weight:700;color:#92400e">老闆指派的任務</h4>
-            ${pendingCount > 0 ? `<span style="padding:2px 9px;border-radius:999px;background:#dc2626;color:white;font-size:11px;font-weight:700">${pendingCount} 待辦</span>` : '<span style="padding:2px 9px;border-radius:999px;background:#10b981;color:white;font-size:11px;font-weight:700">全數完成</span>'}
-          </div>
-          <div style="display:flex;align-items:center;gap:6px">
-            <button id="boss-task-history" title="查看已完成的歷史任務" style="padding:5px 11px;border:1px solid #fcd34d;background:white;border-radius:6px;font-size:12px;color:#92400e;cursor:pointer;display:inline-flex;align-items:center;gap:5px">📜 歷史 (${doneCount})</button>
-            ${isAdmin ? `<button id="boss-task-add" style="padding:6px 14px;border:0;border-radius:7px;background:#f59e0b;color:white;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px">+ 新增任務</button>` : ''}
-          </div>
-        </div>
-        ${pendingTasks.length === 0
-          ? `<div style="padding:14px;text-align:center;color:#92400e;font-size:12px">${isAdmin ? (bossTasks.length === 0 ? '尚無任務。點上方「+ 新增任務」來指派' : '全數完成 🎉 點上方「📜 歷史」看已完成的任務') : '老闆目前沒有指派任務 ✓'}</div>`
-          : `<div style="display:flex;flex-direction:column;gap:6px">${taskItems}</div>`
-        }
-      </div>
-    `;
+    const doneCount = bossTasks.filter(t => t.status === 'done').length;
 
     const allProgress = Store.get('ec.dailyProgress', {}) || {};
     const dayProgress = allProgress[viewDate] || {};
@@ -176,26 +115,26 @@ Object.assign(App, {
       const dots = filledNames.map(n => `<span style="width:6px;height:6px;border-radius:50%;background:${isCellSelected ? 'white' : PERSON_COLORS[n]}"></span>`).join('');
       calCells.push(`
         <button class="dp-cal-day" data-date="${dateStr}" ${isFuture ? 'disabled' : ''}
-          style="position:relative;aspect-ratio:1;border:1px solid ${isCellToday && !isCellSelected ? 'var(--primary)' : 'transparent'};border-radius:9px;background:${bg};color:${fg};font-size:15px;font-weight:${isCellSelected || isCellToday ? '700' : '500'};cursor:${isFuture ? 'not-allowed' : 'pointer'};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding-bottom:2px">
+          style="position:relative;min-width:0;aspect-ratio:1;border:1px solid ${isCellToday && !isCellSelected ? 'var(--primary)' : 'transparent'};border-radius:10px;background:${bg};color:${fg};font-size:17px;font-weight:${isCellSelected || isCellToday ? '700' : '500'};cursor:${isFuture ? 'not-allowed' : 'pointer'};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding-bottom:2px">
           <span>${d}</span>
-          <span style="display:flex;gap:2px;height:6px">${dots}</span>
+          <span style="display:flex;gap:3px;height:7px">${dots}</span>
         </button>
       `);
     }
     const legendHtml = ALLOWED_NAMES.map(n => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted)"><span style="width:7px;height:7px;border-radius:50%;background:${PERSON_COLORS[n]}"></span>${escapeHtml(n)}</span>`).join('');
     const calendarHtml = `
-      <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:16px;flex:0 0 380px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <button id="dp-cal-prev-month" style="border:0;background:none;cursor:pointer;font-size:18px;color:var(--text-muted);padding:2px 8px">‹</button>
-          <div style="font-size:16px;font-weight:700">${calY}年${calM}月</div>
-          <button id="dp-cal-next-month" style="border:0;background:none;cursor:pointer;font-size:18px;color:var(--text-muted);padding:2px 8px">›</button>
+      <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:20px;min-width:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <button id="dp-cal-prev-month" style="border:0;background:none;cursor:pointer;font-size:20px;color:var(--text-muted);padding:2px 10px">‹</button>
+          <div style="font-size:18px;font-weight:700">${calY}年${calM}月</div>
+          <button id="dp-cal-next-month" style="border:0;background:none;cursor:pointer;font-size:20px;color:var(--text-muted);padding:2px 10px">›</button>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;font-size:12px;color:var(--text-muted);text-align:center;margin-bottom:6px">
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;font-size:13px;color:var(--text-muted);text-align:center;margin-bottom:8px">
           <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">${calCells.join('')}</div>
-        <div style="display:flex;gap:14px;justify-content:center;margin-top:12px">${legendHtml}</div>
-        ${!isToday ? `<button id="dp-back-today" style="width:100%;margin-top:10px;padding:7px;border:0;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:600;cursor:pointer">回到今天</button>` : ''}
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">${calCells.join('')}</div>
+        <div style="display:flex;gap:16px;justify-content:center;margin-top:14px">${legendHtml}</div>
+        ${!isToday ? `<button id="dp-back-today" style="width:100%;margin-top:12px;padding:8px;border:0;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-size:13px;font-weight:600;cursor:pointer">回到今天</button>` : ''}
       </div>
     `;
 
@@ -207,13 +146,14 @@ Object.assign(App, {
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             ${isToday ? `<button id="dp-sync-cloud" title="把今天的進度上傳到雲端，同事才看得到" style="padding:5px 12px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><span>☁ 同步雲端</span><span id="dp-sync-badge" style="display:none;min-width:18px;height:18px;padding:0 5px;background:#ef4444;color:white;border-radius:9px;font-size:10px;font-weight:700;align-items:center;justify-content:center;line-height:1">0</span></button>` : ''}
+            <button id="boss-task-history" title="查看已完成的歷史任務" style="padding:5px 11px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:5px">📜 歷史 (${doneCount})</button>
+            ${isAdmin ? `<button id="boss-task-add" style="padding:5px 12px;border:0;border-radius:6px;background:#f59e0b;color:white;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px">+ 新增任務</button>` : ''}
             ${canManageLine ? `<button id="boss-task-line-cfg" title="LINE 通知設定" style="padding:5px 11px;border:1px solid #cbd5e1;background:white;border-radius:6px;font-size:12px;color:#475569;cursor:pointer;display:inline-flex;align-items:center;gap:5px">⚙️ LINE 通知</button>` : ''}
           </div>
         </div>
-        ${bossTasksHtml}
-        <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
           ${calendarHtml}
-          <div style="flex:1;min-width:280px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">
+          <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
             ${cards}
           </div>
         </div>
@@ -511,64 +451,14 @@ Object.assign(App, {
       if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
     };
     const todayStr = toDateStr(new Date());
-    const isAdmin = this.currentUser && this.currentUser.role === 'admin';
-    const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
 
-    // 老闆任務：新增 / 編輯 / 刪除 / 切換完成狀態 / 歷史 / LINE 設定
+    // 老闆任務：新增 / 歷史 / LINE 設定
     const addBtn = document.getElementById('boss-task-add');
     if (addBtn) addBtn.addEventListener('click', () => this.openBossTaskModal());
     const historyBtn = document.getElementById('boss-task-history');
     if (historyBtn) historyBtn.addEventListener('click', () => this.openBossTaskHistoryModal());
     const lineCfgBtn = document.getElementById('boss-task-line-cfg');
     if (lineCfgBtn) lineCfgBtn.addEventListener('click', () => this.openBossLineConfigModal());
-    document.querySelectorAll('.boss-task-edit').forEach(b => {
-      b.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.openBossTaskModal(b.dataset.taskId);
-      });
-    });
-    document.querySelectorAll('.boss-task-del').forEach(b => {
-      b.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!confirm('確定刪除這個任務？')) return;
-        const list = (Store.get('ec.bossTasks', []) || []).filter(t => t.id !== b.dataset.taskId);
-        Store.set('ec.bossTasks', list);
-        showToast('已刪除', 'success');
-        this.render();
-      });
-    });
-    document.querySelectorAll('.boss-task-toggle').forEach(b => {
-      b.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const list = (Store.get('ec.bossTasks', []) || []).slice();
-        const idx = list.findIndex(t => t.id === b.dataset.taskId);
-        if (idx < 0) return;
-        const t = list[idx];
-        // 權限：admin、或本人被指派的（assignee = 自己 / 全體）才能切
-        const canToggle = isAdmin || t.assignee === '全體' || t.assignee === myName;
-        if (!canToggle) { showToast('沒有權限', 'error'); return; }
-        const wasNotDone = t.status !== 'done';
-        if (t.status === 'done') {
-          list[idx] = { ...t, status: 'todo', doneAt: null, doneBy: null };
-        } else {
-          list[idx] = { ...t, status: 'done', doneAt: Date.now(), doneBy: myName };
-        }
-        Store.set('ec.bossTasks', list);
-        this.render();
-        // 由「未完成」→「完成」時通知老闆（取消勾選不通知，避免吵）
-        if (wasNotDone) {
-          const dueLine = t.due ? '\n📅 預計完成日：' + t.due.replace(/-/g, '/') : '';
-          const msg = '✅ 任務完成通知\n' + (t.desc || '')
-            + '\n👤 完成者：' + (myName || '未知')
-            + dueLine
-            + '\n→ 前往儀表板查看 https://kelly83117.github.io/ec-dashboard/';
-          this.pushLineNotifyToBoss(msg).then(r => {
-            if (r && r.ok) showToast('已通知老闆 LINE', 'info');
-            else if (r && !r.skipped) console.warn('[line notify boss]', r);
-          });
-        }
-      });
-    });
 
     // 日期切換：改用左邊月曆點選，月曆本身可以前後翻月（不影響目前選的日期）
     document.querySelectorAll('.dp-cal-day').forEach(btn => {
