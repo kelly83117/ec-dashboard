@@ -13,6 +13,7 @@ Object.assign(App, {
     const now = new Date();
     const todayStr = toDateStr(now);
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
+    const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
     // 舊欄位 canManageLineNotify 仍兼容；新版改用 officeFeatures['行銷'].includes('lineNotify')
     const canManageLine = isAdmin
       || hasOfficeFeature(this.currentUser, '行銷', 'lineNotify')
@@ -29,9 +30,42 @@ Object.assign(App, {
     const calMonth = f.calMonth;
     const allProgressForCal = Store.get('ec.dailyProgress', {}) || {};
 
-    // 老闆指派的任務：主畫面的清單先拿掉，只留「新增任務」「歷史」按鈕移到最上面工具列
+    // 老闆指派的任務：以卡片形式放在右邊待辦事項最上面，已完成的收進「歷史」
     const bossTasks = (Store.get('ec.bossTasks', []) || []).slice();
     const doneCount = bossTasks.filter(t => t.status === 'done').length;
+    const pendingBossTasks = bossTasks.filter(t => t.status !== 'done').sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const bossStatusChip = pendingBossTasks.length === 0
+      ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#d1fae5;color:#047857;font-size:11px;font-weight:600">✓ 全部完成</span>`
+      : `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600">${pendingBossTasks.length} 筆待處理</span>`;
+    const bossItemRows = pendingBossTasks.map(t => {
+      const assigneeColor = t.assignee === '全體' ? '#f59e0b' : (PERSON_COLORS[t.assignee] || '#f59e0b');
+      const canToggle = isAdmin || t.assignee === '全體' || t.assignee === myName;
+      return `
+        <div class="dp-todo-row" data-task-id="${escapeHtml(t.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
+          <span style="color:${assigneeColor};font-size:13px;flex-shrink:0">●</span>
+          <span style="flex:1;min-width:0;font-size:13px;color:var(--text);word-break:break-word">${escapeHtml(t.desc || '')}</span>
+          <span style="font-size:10px;color:var(--text-muted);flex-shrink:0;white-space:nowrap">${escapeHtml(t.assignee || '')}</span>
+          <input type="checkbox" class="boss-task-toggle" data-task-id="${escapeHtml(t.id)}" ${canToggle ? '' : 'disabled'} style="width:16px;height:16px;cursor:${canToggle ? 'pointer' : 'not-allowed'};flex-shrink:0">
+          ${isAdmin ? `
+            <button class="boss-task-edit" data-task-id="${escapeHtml(t.id)}" title="編輯" style="border:0;background:none;color:#94a3b8;cursor:pointer;font-size:12px;flex-shrink:0">✎</button>
+            <button class="boss-task-del" data-task-id="${escapeHtml(t.id)}" title="刪除" style="border:0;background:none;color:#d1d5db;cursor:pointer;font-size:13px;flex-shrink:0">✕</button>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+    const bossEmptyHint = pendingBossTasks.length === 0 ? `<div style="padding:10px 2px;color:var(--text-muted);font-size:12.5px">目前沒有指派中的任務</div>` : '';
+    const bossCardHtml = `
+      <div class="dp-card" style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:8px;min-width:0">
+        <div style="display:flex;align-items:center;gap:10px;min-width:0">
+          <div style="width:38px;height:38px;border-radius:50%;background:#f59e0b;color:white;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0">📋</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600;color:var(--text)">老闆指派任務</div>
+            <div style="margin-top:2px">${bossStatusChip}</div>
+          </div>
+        </div>
+        <div class="dp-todo-list">${bossItemRows}${bossEmptyHint}</div>
+      </div>
+    `;
 
     const allProgress = Store.get('ec.dailyProgress', {}) || {};
     const dayProgress = allProgress[viewDate] || {};
@@ -94,10 +128,11 @@ Object.assign(App, {
       `;
     }).join('');
 
-    // 左邊月曆：可以直接點日期切換查看，格子下方會標每個人的顏色點（誰填過這天），方便回頭找哪一天做過什麼
+    // 左邊月曆：可以直接點日期切換查看，格子裡直接顯示當天每個人的待辦事項（跟右邊卡片同步），方便回頭找哪一天做過什麼
     const [calY, calM] = calMonth.split('-').map(Number);
     const firstWeekday = new Date(calY, calM - 1, 1).getDay();
     const daysInMonth = new Date(calY, calM, 0).getDate();
+    const MAX_CAL_BARS = 3;
     const calCells = [];
     for (let i = 0; i < firstWeekday; i++) calCells.push('<div></div>');
     for (let d = 1; d <= daysInMonth; d++) {
@@ -106,18 +141,25 @@ Object.assign(App, {
       const isCellSelected = dateStr === viewDate;
       const isFuture = dateStr > todayStr;
       const dayEntries = allProgressForCal[dateStr] || {};
-      const filledNames = ALLOWED_NAMES.filter(n => {
+      const dayItems = [];
+      ALLOWED_NAMES.forEach(n => {
         const v = dayEntries[n];
-        return Array.isArray(v) ? v.length > 0 : !!(v && String(v).trim());
+        const arr = Array.isArray(v) ? v : (v && String(v).trim() ? [{ text: String(v).trim(), done: false }] : []);
+        arr.forEach(it => dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n] }));
       });
-      const bg = isCellSelected ? 'var(--primary)' : isCellToday ? 'var(--primary-soft)' : 'transparent';
-      const fg = isCellSelected ? 'white' : isFuture ? '#cbd5e1' : 'var(--text)';
-      const dots = filledNames.map(n => `<span style="width:6px;height:6px;border-radius:50%;background:${isCellSelected ? 'white' : PERSON_COLORS[n]}"></span>`).join('');
+      const shownItems = dayItems.slice(0, MAX_CAL_BARS);
+      const extraCount = dayItems.length - shownItems.length;
+      const barsHtml = shownItems.map(it => `
+        <div style="background:${it.color};color:white;font-size:10px;line-height:1.6;padding:1px 5px;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;box-sizing:border-box;opacity:${it.done ? '0.55' : '1'};text-decoration:${it.done ? 'line-through' : 'none'}">${escapeHtml(it.text)}</div>
+      `).join('');
+      const extraHtml = extraCount > 0 ? `<div style="font-size:9.5px;color:var(--text-muted);padding-left:2px">+${extraCount}</div>` : '';
+      const numBg = isCellSelected ? 'var(--primary)' : isCellToday ? 'var(--primary-soft)' : 'transparent';
+      const numColor = isCellSelected ? 'white' : isCellToday ? 'var(--primary)' : (isFuture ? '#cbd5e1' : 'var(--text)');
       calCells.push(`
         <button class="dp-cal-day" data-date="${dateStr}" ${isFuture ? 'disabled' : ''}
-          style="position:relative;min-width:0;aspect-ratio:1;border:1px solid ${isCellToday && !isCellSelected ? 'var(--primary)' : 'transparent'};border-radius:10px;background:${bg};color:${fg};font-size:17px;font-weight:${isCellSelected || isCellToday ? '700' : '500'};cursor:${isFuture ? 'not-allowed' : 'pointer'};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding-bottom:2px">
-          <span>${d}</span>
-          <span style="display:flex;gap:3px;height:7px">${dots}</span>
+          style="position:relative;min-width:0;min-height:92px;border:${isCellSelected ? '2px solid var(--primary)' : '1px solid #f1f5f9'};border-radius:10px;background:white;cursor:${isFuture ? 'not-allowed' : 'pointer'};display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:6px;gap:3px;overflow:hidden">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${numBg};color:${numColor};font-size:13px;font-weight:${isCellSelected || isCellToday ? '700' : '500'};flex-shrink:0">${d}</span>
+          <div style="display:flex;flex-direction:column;gap:2px;width:100%">${barsHtml}${extraHtml}</div>
         </button>
       `);
     }
@@ -129,11 +171,11 @@ Object.assign(App, {
           <div style="font-size:18px;font-weight:700">${calY}年${calM}月</div>
           <button id="dp-cal-next-month" style="border:0;background:none;cursor:pointer;font-size:20px;color:var(--text-muted);padding:2px 10px">›</button>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;font-size:13px;color:var(--text-muted);text-align:center;margin-bottom:8px">
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;font-size:13px;color:var(--text-muted);text-align:center;margin-bottom:10px">
           <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">${calCells.join('')}</div>
-        <div style="display:flex;gap:16px;justify-content:center;margin-top:14px">${legendHtml}</div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px">${calCells.join('')}</div>
+        <div style="display:flex;gap:16px;justify-content:center;margin-top:16px">${legendHtml}</div>
         ${!isToday ? `<button id="dp-back-today" style="width:100%;margin-top:12px;padding:8px;border:0;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-size:13px;font-weight:600;cursor:pointer">回到今天</button>` : ''}
       </div>
     `;
@@ -154,6 +196,7 @@ Object.assign(App, {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
           ${calendarHtml}
           <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+            ${bossCardHtml}
             ${cards}
           </div>
         </div>
@@ -431,6 +474,17 @@ Object.assign(App, {
         if (!existing) {
           const recipients = assigneeVal === '全體' ? ALLOWED_NAMES : [assigneeVal];
           const newTask = list[list.length - 1]; // 剛 push 進去的那一筆
+          // 同步把這筆任務加進被指派人今天的待辦事項清單，不用自己再打一次
+          const allProgress = Store.get('ec.dailyProgress', {}) || {};
+          const nextProgress = { ...allProgress };
+          const todayEntry = { ...(nextProgress[todayStr] || {}) };
+          recipients.forEach(name => {
+            const existingItems = Array.isArray(todayEntry[name]) ? todayEntry[name].slice() : [];
+            existingItems.push({ id: genId(), text, done: false, bossTaskId: newTask.id });
+            todayEntry[name] = existingItems;
+          });
+          nextProgress[todayStr] = todayEntry;
+          Store.set('ec.dailyProgress', nextProgress);
           // fallback 文字（worker 不支援 task 格式時 / 老 worker 還是 legacy）
           const fallbackMsg = '🔔 元創內部通知\n[老闆指派任務]\n' + text
             + '\n👤 指派給：' + assigneeVal
@@ -451,14 +505,64 @@ Object.assign(App, {
       if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
     };
     const todayStr = toDateStr(new Date());
+    const isAdmin = this.currentUser && this.currentUser.role === 'admin';
+    const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
 
-    // 老闆任務：新增 / 歷史 / LINE 設定
+    // 老闆任務：新增 / 編輯 / 刪除 / 切換完成 / 歷史 / LINE 設定
     const addBtn = document.getElementById('boss-task-add');
     if (addBtn) addBtn.addEventListener('click', () => this.openBossTaskModal());
     const historyBtn = document.getElementById('boss-task-history');
     if (historyBtn) historyBtn.addEventListener('click', () => this.openBossTaskHistoryModal());
     const lineCfgBtn = document.getElementById('boss-task-line-cfg');
     if (lineCfgBtn) lineCfgBtn.addEventListener('click', () => this.openBossLineConfigModal());
+    document.querySelectorAll('.boss-task-edit').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.openBossTaskModal(b.dataset.taskId);
+      });
+    });
+    document.querySelectorAll('.boss-task-del').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!confirm('確定刪除這個任務？')) return;
+        const list = (Store.get('ec.bossTasks', []) || []).filter(t => t.id !== b.dataset.taskId);
+        Store.set('ec.bossTasks', list);
+        showToast('已刪除', 'success');
+        this.render();
+      });
+    });
+    document.querySelectorAll('.boss-task-toggle').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (b.disabled) { showToast('沒有權限', 'error'); return; }
+        const list = (Store.get('ec.bossTasks', []) || []).slice();
+        const idx = list.findIndex(t => t.id === b.dataset.taskId);
+        if (idx < 0) return;
+        const t = list[idx];
+        const canToggle = isAdmin || t.assignee === '全體' || t.assignee === myName;
+        if (!canToggle) { showToast('沒有權限', 'error'); return; }
+        const wasNotDone = t.status !== 'done';
+        if (t.status === 'done') {
+          list[idx] = { ...t, status: 'todo', doneAt: null, doneBy: null };
+        } else {
+          list[idx] = { ...t, status: 'done', doneAt: Date.now(), doneBy: myName };
+        }
+        Store.set('ec.bossTasks', list);
+        this.render();
+        // 由「未完成」→「完成」時通知老闆（取消勾選不通知，避免吵）
+        if (wasNotDone) {
+          const dueLine = t.due ? '\n📅 預計完成日：' + t.due.replace(/-/g, '/') : '';
+          const msg = '✅ 任務完成通知\n' + (t.desc || '')
+            + '\n👤 完成者：' + (myName || '未知')
+            + dueLine
+            + '\n→ 前往儀表板查看 https://kelly83117.github.io/ec-dashboard/';
+          this.pushLineNotifyToBoss(msg).then(r => {
+            if (r && r.ok) showToast('已通知老闆 LINE', 'info');
+            else if (r && !r.skipped) console.warn('[line notify boss]', r);
+          });
+        }
+      });
+    });
 
     // 日期切換：改用左邊月曆點選，月曆本身可以前後翻月（不影響目前選的日期）
     document.querySelectorAll('.dp-cal-day').forEach(btn => {
