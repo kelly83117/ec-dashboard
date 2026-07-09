@@ -761,11 +761,19 @@
       z-index: 8500;
     }
     /* main 占滿，padding 給足兩側呼吸 */
+    /* 手機版 overflow-x 保留 auto — 有寬過螢幕的內容時會顯示水平捲軸，
+       不再無腦切掉右邊看不到 */
     .main {
       padding: 56px 14px 24px;  /* 頂部 56px 留給浮動 toggle */
-      overflow-x: hidden;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
       zoom: 1 !important;  /* 取消桌機 sidebar-collapsed 的 zoom 放大 */
     }
+    /* main 水平捲軸樣式：讓使用者一眼看到「可以左右滑」的提示 */
+    .main::-webkit-scrollbar { height: 10px; }
+    .main::-webkit-scrollbar-track { background: #e5e7eb; }
+    .main::-webkit-scrollbar-thumb { background: #9ca3af; border-radius: 5px; }
+    .main::-webkit-scrollbar-thumb:hover { background: #6b7280; }
     /* sidebar toggle：浮在左上角的圓鈕 */
     .sidebar-toggle {
       position: fixed;
