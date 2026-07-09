@@ -4419,6 +4419,7 @@ function momoShopHTML(shop,platform='momo'){
 // MOMO 甲配專用畫面：跟其他 MOMO 賣場（乙配/MO+麻吉/MO+森之旅）的報表格式不一樣（多了流量/瀏覽量等欄位、
 // 另外還有每日趨勢），所以另外做一套，不共用 momoShopHTML。
 const _mypPeriod={};
+const MYP_HALF_LABEL={first:'上半月',second:'下半月',full:'整月'};
 function momoYipeiHTML(shop){
   _mypPeriod[shop]=_mypPeriod[shop]||{month:'2026/06',half:'first'};
   const p=_mypPeriod[shop];
@@ -4430,7 +4431,7 @@ function momoYipeiHTML(shop){
     </select>
     <span style="font-size:12px;color:#6b7280;font-weight:500">區間</span>
     <select id="myp-half-sel-${shop}" onchange="onMypHalfChange('${shop}',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
-      ${['first','second','full'].map(h=>`<option value="${h}"${h===p.half?' selected':''}>${cupHalfLabel(p.month,h)}</option>`).join('')}
+      ${['first','second','full'].map(h=>`<option value="${h}"${h===p.half?' selected':''}>${MYP_HALF_LABEL[h]}</option>`).join('')}
     </select>
     <button class="export-btn" onclick="openMomoRptUpload('${shop}')" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
     <button class="export-btn" id="myp-sync-${shop}" disabled style="opacity:0.4;cursor:default" onclick="syncMomoRptToCloud('${shop}')">☁ 同步雲端</button>
@@ -4442,8 +4443,6 @@ function momoYipeiHTML(shop){
 function onMypMonthChange(shop,sel){
   _mypPeriod[shop]=_mypPeriod[shop]||{month:'2026/06',half:'first'};
   _mypPeriod[shop].month=sel.value;
-  const halfSel=document.getElementById('myp-half-sel-'+shop);
-  if(halfSel)halfSel.innerHTML=['first','second','full'].map(h=>`<option value="${h}"${h===_mypPeriod[shop].half?' selected':''}>${cupHalfLabel(_mypPeriod[shop].month,h)}</option>`).join('');
   momoRptTryLoadSaved(shop);
 }
 function onMypHalfChange(shop,sel){
