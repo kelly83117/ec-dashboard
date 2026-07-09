@@ -826,6 +826,27 @@
       flex-shrink: 0 !important;
       white-space: nowrap;
     }
+    /* 內容區加水平捲軸：內容寬過螢幕時可左右滑，永遠有可見捲軸提示 */
+    .d3-tab-content {
+      overflow-x: scroll;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-gutter: stable;
+      padding-bottom: 4px;
+    }
+    .d3-tab-content::-webkit-scrollbar {
+      height: 10px;
+    }
+    .d3-tab-content::-webkit-scrollbar-track {
+      background: #e5e7eb;
+      border-radius: 5px;
+    }
+    .d3-tab-content::-webkit-scrollbar-thumb {
+      background: #9ca3af;
+      border-radius: 5px;
+    }
+    .d3-tab-content::-webkit-scrollbar-thumb:hover {
+      background: #6b7280;
+    }
   }
   /* 更小螢幕：stat-grid 改 1 欄 */
   @media (max-width: 460px) {
