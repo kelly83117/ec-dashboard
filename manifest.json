@@ -1,0 +1,32 @@
+{
+  "name": "元創數位 · 內部管理系統",
+  "short_name": "元創儀表板",
+  "description": "元創數位公司內部管理系統：儀表板、淨利表、洞察表、工作日誌、KPI、帳號管理",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f6fa",
+  "theme_color": "#29A89C",
+  "lang": "zh-Hant",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
