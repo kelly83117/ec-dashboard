@@ -2620,8 +2620,9 @@ if (window.__cloudStore) {
   __setupCloud();
 } else {
   window.addEventListener('cloudStoreReady', __setupCloud, { once: true });
-  // 後門：若 module script 5 秒內沒就緒（網路問題等），先用 localStorage 啟動
-  setTimeout(() => { if (!__appBooted) __bootApp(); }, 5000);
+  // 後門：若 module script 2 秒內沒就緒（手機 4G 弱網），先用 localStorage 啟動
+  //   雲端資料回來後訂閱事件仍會觸發 __setupCloud → 補 re-render
+  setTimeout(() => { if (!__appBooted) __bootApp(); }, 2000);
 }
 
 /* ===================== window 匯流排 ===================== */
