@@ -730,6 +730,15 @@
     .sidebar { width: 200px; }
   }
 
+  /* 商開 (d3) 的 tab 佈局：桌機左側 tab 選單 + 右側內容 */
+  .d3-tab-layout {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+  .d3-tab-content { min-width: 0; }  /* 讓內部 table-wrap 的 overflow-x 生效 */
+
   /* ============ 手機適配 (≤ 768px) ============ */
   @media (max-width: 768px) {
     /* 側欄 → 抽屜：fixed 定位，預設藏在左側外 */
@@ -802,6 +811,21 @@
     canvas { max-width: 100% !important; }
     /* 隱藏次要欄位 */
     .hide-on-mobile { display: none !important; }
+    /* 商開手機版：tab 改成上方水平捲動、內容佔滿寬（原本左 160px 佔太多，右側被切掉） */
+    .d3-tab-layout {
+      grid-template-columns: 1fr !important;
+      gap: 12px !important;
+    }
+    .d3-tab-layout .d3-tab-bar > div {
+      flex-direction: row !important;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 4px;
+    }
+    .d3-tab-layout .d3-tab-bar .pill {
+      flex-shrink: 0 !important;
+      white-space: nowrap;
+    }
   }
   /* 更小螢幕：stat-grid 改 1 欄 */
   @media (max-width: 460px) {

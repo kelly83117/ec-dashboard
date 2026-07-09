@@ -888,9 +888,9 @@ Object.assign(App, {
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId === 'd3' ? `
-        <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;align-items:start">
-          <div>${tabBar}</div>
-          <div>${tabContent}</div>
+        <div class="d3-tab-layout">
+          <div class="d3-tab-bar">${tabBar}</div>
+          <div class="d3-tab-content">${tabContent}</div>
         </div>
       ` : deptId !== 'd1' ? tabBar + tabContent : ''}
       ${showMemberKpiTable ? `
