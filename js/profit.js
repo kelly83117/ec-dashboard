@@ -4416,15 +4416,15 @@ function momoShopHTML(shop,platform='momo'){
   ${tableArea}`;
 }
 
-// MOMO 乙配專用畫面：跟其他 MOMO 賣場（甲配/MO+麻吉/MO+森之旅）的報表格式不一樣（多了流量/瀏覽量等欄位、
+// MOMO 甲配專用畫面：跟其他 MOMO 賣場（乙配/MO+麻吉/MO+森之旅）的報表格式不一樣（多了流量/瀏覽量等欄位、
 // 另外還有每日趨勢），所以另外做一套，不共用 momoShopHTML。
-function momoYipeiHTML(){
+function momoYipeiHTML(shop){
   return `
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
-    <button class="export-btn" onclick="openMomoRptUpload('乙配')" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
-    <button class="export-btn" id="myp-sync-乙配" disabled style="opacity:0.4;cursor:default" onclick="syncMomoRptToCloud('乙配')">☁ 同步雲端</button>
+    <button class="export-btn" onclick="openMomoRptUpload('${shop}')" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
+    <button class="export-btn" id="myp-sync-${shop}" disabled style="opacity:0.4;cursor:default" onclick="syncMomoRptToCloud('${shop}')">☁ 同步雲端</button>
   </div>
-  <div id="myp-body-乙配">
+  <div id="myp-body-${shop}">
     <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個報表後按「▶ 產生並儲存」</div></div>
   </div>`;
 }
@@ -4496,11 +4496,11 @@ function setMomoShop(shop,btn){
   const el=document.getElementById('momo-content-'+shop);
   if(el){
     el.classList.add('active');
-    if(!el.dataset.init){el.innerHTML=shop==='乙配'?momoYipeiHTML():momoShopHTML(shop);el.dataset.init='1';}
+    if(!el.dataset.init){el.innerHTML=shop==='甲配'?momoYipeiHTML(shop):momoShopHTML(shop);el.dataset.init='1';}
   }
   const kpiBlock=document.getElementById('header-kpi-row');
   if(kpiBlock)kpiBlock.style.display='none';
-  if(shop==='乙配')momoRptTryLoadSaved(shop);
+  if(shop==='甲配')momoRptTryLoadSaved(shop);
 }
 
 function setCoupangShop(shop,btn){
@@ -4605,7 +4605,7 @@ function readXlsx(file,sheetName){
   });
 }
 
-// ── MOMO 乙配報表：上傳「商品分析」+「銷售分析」兩份 MOMO 後台報表，解析成 KPI 總覽 + 每日趨勢 + 商品明細表 ──
+// ── MOMO 甲配報表：上傳「商品分析」+「銷售分析」兩份 MOMO 後台報表，解析成 KPI 總覽 + 每日趨勢 + 商品明細表 ──
 let _mypShop='';
 const _mypFiles={product:null,sales:null};
 const _mypData={};
