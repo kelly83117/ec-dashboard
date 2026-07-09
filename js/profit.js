@@ -80,6 +80,34 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       </div>
     </div>
   </div>
+  <div class="ana-overlay" id="momo-rpt-upload-overlay" onclick="if(event.target===this)closeMomoRptUpload()">
+    <div class="ana-modal" style="width:480px;max-width:96vw">
+      <div class="ana-modal-hdr"><span id="momo-rpt-upload-title">上傳檔案｜MOMO</span><button class="ana-close-btn" onclick="closeMomoRptUpload()">✕</button></div>
+      <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
+        <label class="ucard" id="myp-product-card" style="width:100%;box-sizing:border-box">
+          <input type="file" id="myp-product-input" accept=".xlsx,.xls" onchange="onMomoRptFile(event,'product')">
+          <div class="ucard-icon">📦</div>
+          <div style="flex:1;min-width:0">
+            <div class="ucard-title">商品分析報表</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px">含瀏覽量、流量成長率、訂購數等商品明細 (.xls/.xlsx)</div>
+          </div>
+          <span id="myp-product-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
+        </label>
+        <label class="ucard" id="myp-sales-card" style="width:100%;box-sizing:border-box">
+          <input type="file" id="myp-sales-input" accept=".xlsx,.xls" onchange="onMomoRptFile(event,'sales')">
+          <div class="ucard-icon">📊</div>
+          <div style="flex:1;min-width:0">
+            <div class="ucard-title">銷售分析報表</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px">含本期/前期總覽跟每日明細 (.xls/.xlsx)</div>
+          </div>
+          <span id="myp-sales-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
+        </label>
+      </div>
+      <div class="ana-modal-ftr">
+        <button class="gen-btn" id="myp-gen-btn" onclick="generateMomoRpt()" disabled>▶ 產生並儲存</button>
+      </div>
+    </div>
+  </div>
   <div class="ana-overlay" id="coupang-dist-overlay" onclick="if(event.target===this)closeCoupangDist()">
     <div class="ana-modal" style="width:400px;max-width:96vw">
       <div class="ana-modal-hdr"><span>階層分布｜純利率區間</span><button class="ana-close-btn" onclick="closeCoupangDist()">✕</button></div>
@@ -4388,6 +4416,19 @@ function momoShopHTML(shop,platform='momo'){
   ${tableArea}`;
 }
 
+// MOMO 乙配專用畫面：跟其他 MOMO 賣場（甲配/MO+麻吉/MO+森之旅）的報表格式不一樣（多了流量/瀏覽量等欄位、
+// 另外還有每日趨勢），所以另外做一套，不共用 momoShopHTML。
+function momoYipeiHTML(){
+  return `
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
+    <button class="export-btn" onclick="openMomoRptUpload('乙配')" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
+    <button class="export-btn" id="myp-sync-乙配" disabled style="opacity:0.4;cursor:default" onclick="syncMomoRptToCloud('乙配')">☁ 同步雲端</button>
+  </div>
+  <div id="myp-body-乙配">
+    <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個報表後按「▶ 產生並儲存」</div></div>
+  </div>`;
+}
+
 // ── 酷澎 資料持久化 ──
 function cupLsKey(shop,month,half){return'ec_coupang|'+shop+'|'+month+'|'+half;}
 function cupLsSave(shop,month,half,rows){
@@ -4453,9 +4494,13 @@ function setMomoShop(shop,btn){
   if(btn)btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
   const el=document.getElementById('momo-content-'+shop);
-  if(el){el.classList.add('active');if(!el.dataset.init){el.innerHTML=momoShopHTML(shop);el.dataset.init='1';}}
+  if(el){
+    el.classList.add('active');
+    if(!el.dataset.init){el.innerHTML=shop==='乙配'?momoYipeiHTML():momoShopHTML(shop);el.dataset.init='1';}
+  }
   const kpiBlock=document.getElementById('header-kpi-row');
   if(kpiBlock)kpiBlock.style.display='none';
+  if(shop==='乙配')momoRptTryLoadSaved(shop);
 }
 
 function setCoupangShop(shop,btn){
@@ -4558,6 +4603,349 @@ function readXlsx(file,sheetName){
     reader.onerror=reject;
     reader.readAsArrayBuffer(file);
   });
+}
+
+// ── MOMO 乙配報表：上傳「商品分析」+「銷售分析」兩份 MOMO 後台報表，解析成 KPI 總覽 + 每日趨勢 + 商品明細表 ──
+let _mypShop='';
+const _mypFiles={product:null,sales:null};
+const _mypData={};
+function openMomoRptUpload(shop){
+  _mypShop=shop;
+  document.getElementById('momo-rpt-upload-title').textContent='上傳檔案｜MOMO · '+shop;
+  document.getElementById('momo-rpt-upload-overlay').style.display='flex';
+}
+function closeMomoRptUpload(){
+  document.getElementById('momo-rpt-upload-overlay').style.display='none';
+}
+function onMomoRptFile(e,type){
+  const file=e.target.files[0];if(!file)return;
+  _mypFiles[type]=file;
+  const statusId={product:'myp-product-status',sales:'myp-sales-status'}[type];
+  const el=document.getElementById(statusId);
+  if(el){el.textContent='✓ '+file.name;el.style.color='#10b981';}
+  const btn=document.getElementById('myp-gen-btn');
+  if(btn)btn.disabled=!(_mypFiles.product&&_mypFiles.sales);
+}
+// 商品分析報表的「銷售表現」分頁：找到含「品號」的表頭列，後面接的就是商品明細，遇到空白列結束。
+function parseMomoProductRows(rows){
+  let headerIdx=-1;
+  for(let i=0;i<rows.length;i++){if(rows[i]&&rows[i][1]==='品號'){headerIdx=i;break;}}
+  if(headerIdx<0)return[];
+  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
+  const pct=v=>parseFloat(String(v).replace('%',''))/100||0;
+  const out=[];
+  for(let i=headerIdx+1;i<rows.length;i++){
+    const r=rows[i];
+    if(!r||!r[1])break;
+    out.push({
+      code:String(r[1]).trim(),name:String(r[2]||'').trim(),price:num(r[3]),stock:num(r[4]),
+      visitors:num(r[5]),views:num(r[6]),prevViews:num(r[7]),trafficGrowth:pct(r[8]),follows:num(r[9]),
+      orderQty:num(r[10]),orderAmt:num(r[11]),convRate:pct(r[12]),cancelQty:num(r[13]),returnQty:num(r[14]),uncheckedQty:num(r[15]),
+    });
+  }
+  return out;
+}
+// 銷售分析報表的「總覽」分頁：目前/前期/去年同期比較 + 每日明細（拿來畫趨勢線）。
+function parseMomoSalesOverview(rows){
+  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
+  const findRow=prefix=>rows.find(r=>r&&String(r[0]||'').startsWith(prefix));
+  const toMetrics=r=>r?{buyers:num(r[1]),orders:num(r[2]),qty:num(r[3]),amt:num(r[4]),cost:num(r[5]),aov:num(r[6])}:null;
+  const overview={
+    current:toMetrics(findRow('目前')),
+    prev:toMetrics(findRow('前期')),
+    lastYear:toMetrics(findRow('去年同期')),
+  };
+  // 每日明細：表頭那列第一欄開頭是「日期」，接下來的列第一欄要是 MM/DD 格式，直到不是為止
+  let dailyHeaderIdx=-1;
+  for(let i=0;i<rows.length;i++){if(rows[i]&&String(rows[i][0]||'').startsWith('日期')){dailyHeaderIdx=i;break;}}
+  const dailyTrend=[];
+  if(dailyHeaderIdx>=0){
+    for(let i=dailyHeaderIdx+1;i<rows.length;i++){
+      const r=rows[i];
+      if(!r||!/^\d{2}\/\d{2}$/.test(String(r[0]||'').trim()))break;
+      dailyTrend.push({date:String(r[0]).trim(),buyers:num(r[1]),orders:num(r[2]),qty:num(r[3]),amt:num(r[4])});
+    }
+  }
+  overview.dailyTrend=dailyTrend;
+  return overview;
+}
+function generateMomoRpt(){
+  const btn=document.getElementById('myp-gen-btn');
+  if(btn){btn.disabled=true;btn.textContent='處理中…';}
+  Promise.all([
+    readXlsx(_mypFiles.product,'銷售表現'),
+    readXlsx(_mypFiles.sales,'總覽'),
+  ]).then(([productRows,salesRows])=>{
+    const products=parseMomoProductRows(productRows);
+    const overview=parseMomoSalesOverview(salesRows);
+    if(!overview.current){throw new Error('找不到「目前」總覽列，請確認銷售分析報表格式');}
+    const data={products,overview:{current:overview.current,prev:overview.prev,lastYear:overview.lastYear},dailyTrend:overview.dailyTrend,ts:Date.now()};
+    _mypData[_mypShop]=data;
+    momoRptLsSave(_mypShop,data);
+    renderMomoRptShop(_mypShop,data);
+    momoRptShowSyncBtn(_mypShop);
+    if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
+    closeMomoRptUpload();
+  }).catch(err=>{
+    console.error(err);
+    alert('解析失敗，請確認檔案格式：'+((err&&err.message)||err));
+    if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
+  });
+}
+function momoRptLsKey(shop){return'ec_momo_rpt|'+shop;}
+function momoRptLsSave(shop,data){try{localStorage.setItem(momoRptLsKey(shop),JSON.stringify(data));}catch(e){}}
+function momoRptLsLoad(shop){
+  const k=momoRptLsKey(shop);
+  try{if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]!==undefined)return Store._profitMem[k];}catch{}
+  try{if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]!==undefined)return Store._mem[k];}catch{}
+  try{const d=localStorage.getItem(k);return d?JSON.parse(d):null;}catch{return null;}
+}
+function momoRptShowSyncBtn(shop){
+  const btn=document.getElementById('myp-sync-'+shop);
+  if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent='☁ 同步雲端';}
+}
+function momoRptTryLoadSaved(shop){
+  const saved=momoRptLsLoad(shop);
+  if(saved){_mypData[shop]=saved;renderMomoRptShop(shop,saved);momoRptShowSyncBtn(shop);}
+}
+function syncMomoRptToCloud(shop){
+  const btn=document.getElementById('myp-sync-'+shop);
+  if(btn){btn.disabled=true;btn.textContent='同步中…';}
+  if(!window.__cloudProfit){
+    if(window.App&&typeof App.showAlertModal==='function')App.showAlertModal({title:'雲端未連線',message:'雲端尚未就緒，請重新整理。',kind:'warn'});
+    else if(typeof showToast==='function')showToast('雲端未連線','error');
+    if(btn)momoRptShowSyncBtn(shop);
+    return;
+  }
+  const saved=momoRptLsLoad(shop);
+  if(!saved){if(btn)btn.disabled=false;return;}
+  window.__cloudProfit.setField(momoRptLsKey(shop),saved).then(()=>{
+    if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';}
+  }).catch(e=>{
+    const msg=(e&&e.message)||String(e);
+    if(window.App&&typeof App.showAlertModal==='function'){
+      App.showAlertModal({title:'同步失敗',message:'資料還在本機，請稍後再試。',detail:msg,kind:'error'});
+    }else if(typeof showToast==='function')showToast('同步失敗：'+msg,'error');
+    momoRptShowSyncBtn(shop);
+  });
+}
+
+// KPI 卡片 + 每日趨勢圖 + 商品明細表
+function renderMomoRptShop(shop,data){
+  const body=document.getElementById('myp-body-'+shop);
+  if(!body)return;
+  const cur=data.overview.current,prev=data.overview.prev;
+  if(!cur){body.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">解析失敗，找不到總覽資料</div></div>`;return;}
+  const chg=(c,p)=>p?((c-p)/p*100):null;
+  const chgHtml=(c,p)=>{
+    const v=chg(c,p);
+    if(v===null)return'';
+    const up=v>=0;
+    return `<div style="font-size:11px;color:${up?'#10b981':'#ef4444'};margin-top:2px">${up?'↑':'↓'}${Math.abs(v).toFixed(1)}% 較上期</div>`;
+  };
+  const cards=[
+    {label:'有購人數',v:cur.buyers,p:prev&&prev.buyers,fmt:n=>n.toLocaleString()},
+    {label:'訂單數',v:cur.orders,p:prev&&prev.orders,fmt:n=>n.toLocaleString()},
+    {label:'訂購數',v:cur.qty,p:prev&&prev.qty,fmt:n=>n.toLocaleString()},
+    {label:'訂購金額',v:cur.amt,p:prev&&prev.amt,fmt:n=>'NT$ '+n.toLocaleString()},
+    {label:'客單價',v:cur.aov,p:prev&&prev.aov,fmt:n=>'NT$ '+n.toLocaleString()},
+  ];
+  const cardsHtml=cards.map(c=>`
+    <div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
+      <div style="font-size:11px;color:#9ca3af;font-weight:600">${c.label}</div>
+      <div style="font-size:19px;font-weight:700;color:#1f2937;margin-top:4px">${c.fmt(c.v)}</div>
+      ${chgHtml(c.v,c.p)}
+    </div>
+  `).join('');
+  body.innerHTML=`
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px">${cardsHtml}</div>
+    <div style="background:#fff;border:1px solid #e4e6ef;border-radius:10px;padding:14px;margin-bottom:16px">
+      <div style="font-size:11px;color:#9ca3af;margin-bottom:6px">每日訂購金額</div>
+      <div style="height:140px;position:relative"><canvas id="myp-trend-${shop}"></canvas></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">
+      <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openMypColPicker('${shop}',this)">☰ 欄位</button></div>
+    </div>
+    <div id="myp-tbl-${shop}"></div>
+  `;
+  renderMomoRptChart(shop,data.dailyTrend);
+  renderMomoRptTableBody(shop);
+}
+let _mypChart=null;
+function renderMomoRptChart(shop,dailyTrend){
+  const canvas=document.getElementById('myp-trend-'+shop);
+  if(!canvas||!dailyTrend||!dailyTrend.length)return;
+  if(_mypChart)_mypChart.destroy();
+  _mypChart=new Chart(canvas.getContext('2d'),{
+    type:'line',
+    data:{labels:dailyTrend.map(d=>d.date),datasets:[{label:'訂購金額',data:dailyTrend.map(d=>d.amt),borderColor:'#5b5fcf',backgroundColor:'#5b5fcf',tension:.3}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v.toLocaleString()}}}}
+  });
+}
+
+// 商品明細表欄位（跟蝦皮好麻吉/酷澎不同的欄位集合，另外存一份順序/顯示設定）
+const MOMO_TABLE_COLS=[
+  {k:'code',label:'品號'},{k:'name',label:'商品名稱'},{k:'price',label:'售價',fmt:'num'},
+  {k:'stock',label:'可接單量',fmt:'num'},{k:'views',label:'瀏覽量',fmt:'num'},{k:'prevViews',label:'前期瀏覽量',fmt:'num'},
+  {k:'trafficGrowth',label:'流量成長率',fmt:'pct'},{k:'follows',label:'加入追蹤數',fmt:'num'},
+  {k:'orderQty',label:'訂購數',fmt:'num'},{k:'orderAmt',label:'訂購金額',fmt:'money'},{k:'convRate',label:'商品成交率',fmt:'pct'},
+  {k:'cancelQty',label:'取消數',fmt:'num'},{k:'returnQty',label:'退貨數',fmt:'num'},{k:'uncheckedQty',label:'未結帳數',fmt:'num'},
+];
+const MOMO_TABLE_LEFT_COLS=new Set(['code','name']);
+const _MYP_COLORDER_LS='ec_colorder_momo';
+function getMypColKeys(){
+  try{const raw=localStorage.getItem(_MYP_COLORDER_LS);const saved=raw?JSON.parse(raw):[];if(Array.isArray(saved)&&saved.length)return saved;}catch{}
+  return MOMO_TABLE_COLS.map(c=>c.k);
+}
+function saveMypColKeys(order){try{localStorage.setItem(_MYP_COLORDER_LS,JSON.stringify(order));}catch{}}
+function getMypOrderedCols(){
+  const byKey=new Map(MOMO_TABLE_COLS.map(c=>[c.k,c]));
+  const out=[];
+  getMypColKeys().forEach(k=>{if(byKey.has(k)){out.push(byKey.get(k));byKey.delete(k);}});
+  byKey.forEach(c=>out.push(c));
+  return out;
+}
+const _MYP_HCOLS_LS='ec_hcols_momo';
+function getMypHiddenCols(){try{const raw=localStorage.getItem(_MYP_HCOLS_LS);return new Set(raw?JSON.parse(raw):[]);}catch{return new Set();}}
+function toggleMypHiddenCol(shop,key){
+  const s=getMypHiddenCols();if(s.has(key))s.delete(key);else s.add(key);
+  try{localStorage.setItem(_MYP_HCOLS_LS,JSON.stringify([...s]));}catch{}
+  renderMomoRptTableBody(shop);renderMypColPicker(shop);
+}
+function resetMypHiddenCols(shop){try{localStorage.removeItem(_MYP_HCOLS_LS);}catch{}renderMomoRptTableBody(shop);renderMypColPicker(shop);}
+function resetMypColOrder(shop){try{localStorage.removeItem(_MYP_COLORDER_LS);}catch{}renderMomoRptTableBody(shop);renderMypColPicker(shop);}
+let _mypColDrag=null;
+function mypColDragStart(e,key){
+  _mypColDrag=key;
+  e.dataTransfer.effectAllowed='move';
+  try{e.dataTransfer.setData('text/plain',key);}catch{}
+  e.currentTarget.classList.add('col-dragging');
+}
+function mypColDragOver(e){e.preventDefault();e.dataTransfer.dropEffect='move';}
+function mypColDragEnter(e){e.preventDefault();e.currentTarget.classList.add('col-drag-over');}
+function mypColDragLeave(e){e.currentTarget.classList.remove('col-drag-over');}
+function mypColDrop(e,shop,targetKey){
+  e.preventDefault();
+  e.currentTarget.classList.remove('col-drag-over');
+  if(!_mypColDrag||_mypColDrag===targetKey){_mypColDrag=null;return;}
+  const rect=e.currentTarget.getBoundingClientRect();
+  const after=(e.clientX-rect.left)>rect.width/2;
+  let order=getMypColKeys().filter(k=>k!==_mypColDrag);
+  let idx=order.indexOf(targetKey);
+  if(idx<0)idx=order.length;else if(after)idx++;
+  order.splice(idx,0,_mypColDrag);
+  saveMypColKeys(order);
+  _mypColDrag=null;
+  renderMomoRptTableBody(shop);
+}
+function mypColDragEnd(e){e.currentTarget.classList.remove('col-dragging');document.querySelectorAll('.col-drag-over').forEach(el=>el.classList.remove('col-drag-over'));}
+let _mypPickRowDrag=null;
+function mypPickRowDragStart(e,shop,key){
+  _mypPickRowDrag=key;
+  e.dataTransfer.effectAllowed='move';
+  try{e.dataTransfer.setData('text/plain',key);}catch{}
+  e.currentTarget.classList.add('cp-row-dragging');
+}
+function mypPickRowDragOver(e){e.preventDefault();e.dataTransfer.dropEffect='move';}
+function mypPickRowDragEnter(e){e.preventDefault();e.currentTarget.classList.add('cp-row-drag-over');}
+function mypPickRowDragLeave(e){e.currentTarget.classList.remove('cp-row-drag-over');}
+function mypPickRowDrop(e,shop,targetKey){
+  e.preventDefault();
+  e.currentTarget.classList.remove('cp-row-drag-over');
+  if(!_mypPickRowDrag||_mypPickRowDrag===targetKey){_mypPickRowDrag=null;return;}
+  const rect=e.currentTarget.getBoundingClientRect();
+  const after=(e.clientY-rect.top)>rect.height/2;
+  let order=getMypColKeys().filter(k=>k!==_mypPickRowDrag);
+  let idx=order.indexOf(targetKey);
+  if(idx<0)idx=order.length;else if(after)idx++;
+  order.splice(idx,0,_mypPickRowDrag);
+  saveMypColKeys(order);
+  _mypPickRowDrag=null;
+  renderMomoRptTableBody(shop);renderMypColPicker(shop);
+}
+function mypPickRowDragEnd(e){e.currentTarget.classList.remove('cp-row-dragging');document.querySelectorAll('.cp-row-drag-over').forEach(el=>el.classList.remove('cp-row-drag-over'));}
+function renderMypColPicker(shop){
+  const m=document.getElementById('colpick-myp-'+shop);if(!m)return;
+  const hc=getMypHiddenCols();
+  const cols=getMypOrderedCols();
+  const vis=cols.length-hc.size;
+  m.innerHTML=`<div style="padding:6px 13px 4px;font-size:11px;color:#9ca3af;font-weight:700;display:flex;justify-content:space-between;align-items:center">欄位 <span>${vis}/${cols.length}</span></div>`
+    +cols.map(c=>`<div class="cp-row" draggable="true"
+      ondragstart="mypPickRowDragStart(event,'${shop}','${c.k}')" ondragover="mypPickRowDragOver(event)"
+      ondragenter="mypPickRowDragEnter(event)" ondragleave="mypPickRowDragLeave(event)"
+      ondrop="mypPickRowDrop(event,'${shop}','${c.k}')" ondragend="mypPickRowDragEnd(event)"
+      onclick="toggleMypHiddenCol('${shop}','${c.k}');event.stopPropagation()">
+      <span class="cp-row-handle">⠿</span>
+      <input type="checkbox" ${!hc.has(c.k)?'checked':''} style="margin:0;pointer-events:none"> ${c.label}
+    </div>`).join('')
+    +`<div style="padding:4px 13px 6px;border-top:1px solid #e5e7eb;text-align:right;display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="resetMypColOrder('${shop}')" style="font-size:11px;color:#5b5fcf;background:none;border:none;cursor:pointer;font-weight:600">重設順序</button>
+      <button onclick="resetMypHiddenCols('${shop}')" style="font-size:11px;color:#5b5fcf;background:none;border:none;cursor:pointer;font-weight:600">顯示全部</button>
+    </div>`;
+}
+function openMypColPicker(shop,btn){
+  let m=document.getElementById('colpick-myp-'+shop);
+  if(m){m.remove();return;}
+  m=document.createElement('div');m.id='colpick-myp-'+shop;m.className='col-picker-menu open';
+  const wrap=btn?.closest('.col-picker-wrap');
+  (wrap||btn?.parentElement||document.body).appendChild(m);
+  renderMypColPicker(shop);
+  setTimeout(()=>document.addEventListener('click',function h(e){if(!m.contains(e.target)){m.remove();document.removeEventListener('click',h);}},{},true),0);
+}
+const _mypSort={};
+function mypSetSort(shop,col){
+  const cur=_mypSort[shop];
+  if(!cur||cur.col!==col)_mypSort[shop]={col,dir:'desc'};
+  else if(cur.dir==='desc')_mypSort[shop]={col,dir:'asc'};
+  else delete _mypSort[shop];
+  renderMomoRptTableBody(shop);
+}
+function mypSortRows(shop,rows){
+  const s=_mypSort[shop];
+  if(!s)return rows;
+  const colDef=MOMO_TABLE_COLS.find(c=>c.k===s.col);
+  const isNum=!!(colDef&&colDef.fmt);
+  return[...rows].sort((a,b)=>{
+    if(isNum){
+      const va=Number(a[s.col])||0,vb=Number(b[s.col])||0;
+      return s.dir==='asc'?va-vb:vb-va;
+    }
+    const va=String(a[s.col]||''),vb=String(b[s.col]||'');
+    return s.dir==='asc'?va.localeCompare(vb):vb.localeCompare(va);
+  });
+}
+function renderMomoRptTableBody(shop){
+  const rows=mypSortRows(shop,(_mypData[shop]&&_mypData[shop].products)||[]);
+  const tbl=document.getElementById('myp-tbl-'+shop);
+  if(!tbl)return;
+  if(!rows.length){tbl.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">沒有商品資料</div></div>`;return;}
+  const fmtFns={
+    money:n=>'NT$ '+Math.round(n).toLocaleString(),
+    num:n=>Math.round(n).toLocaleString(),
+    pct:n=>(n*100).toFixed(1)+'%',
+  };
+  const hc=getMypHiddenCols();
+  const cols=getMypOrderedCols().filter(c=>!hc.has(c.k));
+  const dragAttrs=(key)=>`draggable="true" ondragstart="mypColDragStart(event,'${key}')" ondragover="mypColDragOver(event)" ondragenter="mypColDragEnter(event)" ondragleave="mypColDragLeave(event)" ondrop="mypColDrop(event,'${shop}','${key}')" ondragend="mypColDragEnd(event)"`;
+  const curSort=_mypSort[shop];
+  const sortIcon=(key)=>curSort&&curSort.col===key
+    ?`<span style="color:#5b5fcf;font-weight:700">${curSort.dir==='asc'?'▲':'▼'}</span>`
+    :`<span style="color:#d1d5db">⇅</span>`;
+  const thead=cols.map(c=>{
+    const isLeft=MOMO_TABLE_LEFT_COLS.has(c.k);
+    return `<th class="${isLeft?'tl':''}" ${dragAttrs(c.k)}><span class="th-wrap${isLeft?' tl':''}" onclick="mypSetSort('${shop}','${c.k}')" style="cursor:pointer;gap:4px">${c.label}${sortIcon(c.k)}</span></th>`;
+  }).join('');
+  const tbody=rows.map(r=>{
+    const tds=cols.map(c=>{
+      const v=r[c.k];
+      const disp=c.fmt?fmtFns[c.fmt](v):v;
+      const cls=MOMO_TABLE_LEFT_COLS.has(c.k)?'tl':'';
+      const style=c.k==='trafficGrowth'?`style="color:${v>=0?'#10b981':'#ef4444'};font-weight:700"`:'';
+      return`<td class="${cls}" ${style}>${disp}</td>`;
+    }).join('');
+    return`<tr>${tds}</tr>`;
+  }).join('');
+  tbl.innerHTML=`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
 }
 
 function mergeCoupangRows(rows){
@@ -5032,4 +5420,9 @@ Object.assign(window, {
   cupPickRowDragStart,cupPickRowDragOver,cupPickRowDragEnter,cupPickRowDragLeave,cupPickRowDrop,cupPickRowDragEnd,
   cupSetSort,
   setShopViewMode,
+  openMomoRptUpload,closeMomoRptUpload,onMomoRptFile,generateMomoRpt,syncMomoRptToCloud,
+  openMypColPicker,toggleMypHiddenCol,resetMypHiddenCols,resetMypColOrder,
+  mypColDragStart,mypColDragOver,mypColDragEnter,mypColDragLeave,mypColDrop,mypColDragEnd,
+  mypPickRowDragStart,mypPickRowDragOver,mypPickRowDragEnter,mypPickRowDragLeave,mypPickRowDrop,mypPickRowDragEnd,
+  mypSetSort,
 });
