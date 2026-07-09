@@ -4751,7 +4751,6 @@ function momoRptTryLoadSaved(shop){
     if(kpiBlock)kpiBlock.innerHTML=`<div style="font-size:13px;color:#9ca3af">尚未上傳報表</div>`;
     const content=document.getElementById('myp-content-'+shop);
     if(content)content.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">這個區間還沒有資料，上傳兩個報表後按「▶ 產生並儲存」</div></div>`;
-    if(_mypChart){_mypChart.destroy();_mypChart=null;}
     const btn=document.getElementById('myp-sync-'+shop);
     if(btn){btn.disabled=true;btn.style.opacity='0.4';btn.style.cursor='default';btn.style.background='';btn.style.color='';btn.style.borderColor='';btn.textContent='☁ 同步雲端';}
   }
@@ -4800,37 +4799,20 @@ function renderMomoRptShop(shop,data){
     <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">純利率</div><div style="font-size:20px;font-weight:700;color:#6366f1;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
   `;
   content.innerHTML=`
-    <div style="background:#fff;border:1px solid #e4e6ef;border-radius:10px;padding:14px;margin-bottom:16px">
-      <div style="font-size:11px;color:#9ca3af;margin-bottom:6px">每日訂購金額</div>
-      <div style="height:140px;position:relative"><canvas id="myp-trend-${shop}"></canvas></div>
-    </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">
       <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openMypColPicker('${shop}',this)">☰ 欄位</button></div>
     </div>
     <div id="myp-tbl-${shop}"></div>
   `;
-  renderMomoRptChart(shop,data.dailyTrend);
   renderMomoRptTableBody(shop);
-}
-let _mypChart=null;
-function renderMomoRptChart(shop,dailyTrend){
-  const canvas=document.getElementById('myp-trend-'+shop);
-  if(!canvas||!dailyTrend||!dailyTrend.length)return;
-  if(_mypChart)_mypChart.destroy();
-  _mypChart=new Chart(canvas.getContext('2d'),{
-    type:'line',
-    data:{labels:dailyTrend.map(d=>d.date),datasets:[{label:'訂購金額',data:dailyTrend.map(d=>d.amt),borderColor:'#5b5fcf',backgroundColor:'#5b5fcf',tension:.3}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v.toLocaleString()}}}}
-  });
 }
 
 // 商品明細表欄位（跟蝦皮好麻吉/酷澎不同的欄位集合，另外存一份順序/顯示設定）
 const MOMO_TABLE_COLS=[
-  {k:'code',label:'品號'},{k:'name',label:'商品名稱'},{k:'price',label:'售價',fmt:'num'},
-  {k:'stock',label:'可接單量',fmt:'num'},{k:'views',label:'瀏覽量',fmt:'num'},{k:'prevViews',label:'前期瀏覽量',fmt:'num'},
-  {k:'trafficGrowth',label:'流量成長率',fmt:'pct'},{k:'follows',label:'加入追蹤數',fmt:'num'},
-  {k:'orderQty',label:'訂購數',fmt:'num'},{k:'orderAmt',label:'訂購金額',fmt:'money'},{k:'convRate',label:'商品成交率',fmt:'pct'},
-  {k:'cancelQty',label:'取消數',fmt:'num'},{k:'returnQty',label:'退貨數',fmt:'num'},{k:'uncheckedQty',label:'未結帳數',fmt:'num'},
+  {k:'code',label:'品號'},{k:'name',label:'商品名稱'},
+  {k:'stock',label:'可接單量',fmt:'num'},{k:'views',label:'瀏覽量',fmt:'num'},
+  {k:'trafficGrowth',label:'流量成長率',fmt:'pct'},
+  {k:'orderQty',label:'訂購數',fmt:'num'},{k:'orderAmt',label:'訂購金額',fmt:'money'},{k:'returnQty',label:'退貨數',fmt:'num'},
 ];
 const MOMO_TABLE_LEFT_COLS=new Set(['code','name']);
 const _MYP_COLORDER_LS='ec_colorder_momo';
@@ -4979,8 +4961,12 @@ function renderMomoRptTableBody(shop){
   const tbody=rows.map(r=>{
     const tds=cols.map(c=>{
       const v=r[c.k];
-      const disp=c.fmt?fmtFns[c.fmt](v):v;
       const cls=MOMO_TABLE_LEFT_COLS.has(c.k)?'tl':'';
+      // 瀏覽量下面順便帶出前期瀏覽量（不用另外佔一欄）
+      if(c.k==='views'){
+        return`<td class="${cls}"><div>${fmtFns.num(v)}</div><div style="font-size:10px;color:#9ca3af;margin-top:2px">前期 ${fmtFns.num(r.prevViews)}</div></td>`;
+      }
+      const disp=c.fmt?fmtFns[c.fmt](v):v;
       const style=c.k==='trafficGrowth'?`style="color:${v>=0?'#10b981':'#ef4444'};font-weight:700"`:'';
       return`<td class="${cls}" ${style}>${disp}</td>`;
     }).join('');
