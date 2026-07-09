@@ -4770,14 +4770,21 @@ function syncMomoRptToCloud(shop){
 function renderMomoRptShop(shop,data){
   const body=document.getElementById('myp-body-'+shop);
   if(!body)return;
-  const cur=data.overview.current;
+  const cur=data.overview.current,prev=data.overview.prev;
   if(!cur){body.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">解析失敗，找不到總覽資料</div></div>`;return;}
-  // 純利／純利率先留空，等下面商品明細表可以算出純利後再接上來（跟蝦皮好麻吉一樣：營收/純利/純利率）
+  // 純利／純利率先留空，等下面商品明細表可以算出純利後再接上來（跟蝦皮好麻吉一樣：營收/純利/純利率，間距也對齊 header-kpi-row 那份）
+  let revChangeHtml='';
+  if(prev&&prev.amt>0&&cur.amt>0){
+    const pct=(cur.amt-prev.amt)/prev.amt*100;
+    const sign=pct>=0?'+':'';
+    const col=pct>=0?'#10b981':'#ef4444';
+    revChangeHtml=`<span style="color:${col}">(${sign}${pct.toFixed(1)}% 較上期)</span>`;
+  }
   body.innerHTML=`
-    <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #e5e7eb">
-      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">營收</div><div style="font-size:20px;font-weight:700;color:#374151">NT$ ${Math.round(cur.amt).toLocaleString()}</div></div>
-      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">純利</div><div style="font-size:20px;font-weight:700;color:#10b981">—</div></div>
-      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">純利率</div><div style="font-size:20px;font-weight:700;color:#6366f1">—</div></div>
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:16px">
+      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">營收</div><div style="display:flex;align-items:baseline;gap:5px"><div style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">NT$ ${Math.round(cur.amt).toLocaleString()}</div><span style="font-size:12px;font-weight:600">${revChangeHtml}</span></div></div>
+      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">純利</div><div style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">純利率</div><div style="font-size:20px;font-weight:700;color:#6366f1;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
     </div>
     <div style="background:#fff;border:1px solid #e4e6ef;border-radius:10px;padding:14px;margin-bottom:16px">
       <div style="font-size:11px;color:#9ca3af;margin-bottom:6px">每日訂購金額</div>
