@@ -81,33 +81,21 @@ function hashPassword(pw) {
 function seedData() {
   const defaultPwHash = hashPassword('admin123');
 
-  // Users：若沒有任何 admin 帳號才補上預設 admin；同時補齊缺漏的 Q1–Q4 欄位
+  // Users：只在「雲端訂閱 ready」且「真的完全沒有 admin」時補預設 admin。
   //
-  // ⚠ 資料保護：雲端訂閱可能還沒 ready，此時 Store.get 會拿到空陣列。
-  //   如果我們判斷「沒 admin → push 新 admin → 寫回」，就會把雲端所有帳號
-  //   覆寫成只剩一個新 admin。歷史事件：曾發生過（fallback 縮短到 2 秒後觸發）。
-  //   → 只有在「雲端訂閱已 ready 且回傳的確是空 users」時才允許 seed。
+  // ⚠ 資料保護（Kelly 事件的元兇）：Firestore SDK 有 local cache，重整時初始
+  //   snapshot 可能是舊 cache 狀態（比伺服器晚幾秒同步）。舊版在此對每個 user
+  //   forEach 補 q1/q2/q3/q4/departments 後 Store.set(users, users) 寫回雲端 —
+  //   這會把「伺服器上剛寫入的新資料」覆蓋成「cache 中的舊資料」（因為寫入基於
+  //   cache 中看到的 users）。已移除整段 migration 寫回。
+  //   相容性：computeScore/getUserDepts 都有 fallback，缺欄位不會壞事。
   const cloudReady = !!(window.__cloudStore && window.__firstMainSnapshotDone);
+  if (!cloudReady) return;
   const users = Store.get(Store.KEYS.users, []);
-  let usersChanged = false;
-  if (cloudReady && !users.some(u => u.role === 'admin')) {
+  if (!users.some(u => u.role === 'admin')) {
     users.push({ username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', departments: [], q1: null, q2: null, q3: null, q4: null });
-    usersChanged = true;
+    Store.set(Store.KEYS.users, users);
   }
-  // 補欄位只在「真的有帳號」時做；空陣列時不動，避免雲端未 ready 時誤寫
-  if (users.length > 0) {
-    users.forEach(u => {
-      if (!('q1' in u)) { u.q1 = null; usersChanged = true; }
-      if (!('q2' in u)) { u.q2 = null; usersChanged = true; }
-      if (!('q3' in u)) { u.q3 = null; usersChanged = true; }
-      if (!('q4' in u)) { u.q4 = null; usersChanged = true; }
-      if (!Array.isArray(u.departments)) {
-        u.departments = u.department ? [u.department] : [];
-        usersChanged = true;
-      }
-    });
-  }
-  if (usersChanged && cloudReady) Store.set(Store.KEYS.users, users);
 
   // Departments：完全沒有才補預設 4 個辦公室
   const departments = Store.get(Store.KEYS.departments);
@@ -2365,6 +2353,7 @@ window.App = App;
 let __appBooted = false;
 function __bootApp() {
   if (__appBooted) return; __appBooted = true;
+  window.__appBootAtMs = Date.now();
   try {
     App.init();
     document.addEventListener('DOMContentLoaded', function() {
@@ -2495,15 +2484,26 @@ async function __setupCloud() {
     };
     Store.set = function(key, value) {
       if (__LOCAL_ONLY_KEYS.has(key)) { __localSet(key, value); return; }
-      // ⚠ 資料保護：擋掉「把 users 從 N 個縮成 1~2 個」的可疑寫入
-      //   避免任何路徑（不管 seedData bug、race condition、還是別的 code）
-      //   把好幾個帳號覆蓋成只剩 admin。真的要刪除靠 users.js 的手動流程。
+      // ⚠ 資料保護：擋掉可疑的「users → 1~2 個」寫入
+      //   避免任何路徑（seedData bug、Firestore cache race、別的 code）
+      //   把多個帳號覆蓋成只剩 admin。真的要刪除靠 users.js 手動流程（單筆刪除）。
       if (key === Store.KEYS.users && Array.isArray(value)) {
         const cur = Store._mem && Store._mem[key];
-        if (Array.isArray(cur) && cur.length >= 3 && value.length < cur.length - 1) {
-          console.error('[USERS 寫入防護] 拒絕：目前有', cur.length, '個帳號，即將被覆蓋成', value.length, '個');
+        const curLen = Array.isArray(cur) ? cur.length : 0;
+        // Case A：目前有 3+ 個，新寫入砍到 1~2 個 → 明顯異常
+        if (curLen >= 3 && value.length < curLen - 1) {
+          console.error('[USERS 寫入防護] 拒絕縮減：目前', curLen, '個 → 即將', value.length, '個');
           console.trace('[USERS 寫入防護] 呼叫來源');
-          return; // 直接不寫，_mem 保留原本、雲端也不動
+          return;
+        }
+        // Case B：Firestore SDK cache race — 開頁前 15 秒內 _mem 尚未穩定，
+        //   任何「寫入僅 1 個 admin」的行為都不放行（seedData 舊 bug 遺跡）。
+        //   拿掉 seedData 的 migration 後理論上不會走到，但這是最後一道防線。
+        const bootAgeMs = window.__appBootAtMs ? (Date.now() - window.__appBootAtMs) : Infinity;
+        if (bootAgeMs < 15000 && value.length <= 1) {
+          console.error('[USERS 寫入防護] 拒絕開頁後', Math.round(bootAgeMs/1000), '秒內的 1 個 admin 寫入（cache race）');
+          console.trace('[USERS 寫入防護] 呼叫來源');
+          return;
         }
       }
       // 寫入時把 key 從「最近刪除」名單移除，否則訂閱回呼會把剛上傳的資料當成 race 過濾掉
