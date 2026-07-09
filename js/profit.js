@@ -4420,23 +4420,34 @@ function momoShopHTML(shop,platform='momo'){
 // 另外還有每日趨勢），所以另外做一套，不共用 momoShopHTML。
 const _mypPeriod={};
 const MYP_HALF_LABEL={first:'上半月',second:'下半月',full:'整月'};
+// 整排（KPI 數字 + 月份/區間/上傳/同步）完全比照蝦皮好麻吉的 header-kpi-row：
+// 左邊數字、右邊按鈕用 margin-left:auto 推到最右邊，同一行。
 function momoYipeiHTML(shop){
   _mypPeriod[shop]=_mypPeriod[shop]||{month:'2026/06',half:'first'};
   const p=_mypPeriod[shop];
   return `
-  <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-bottom:12px">
-    <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
-    <select onchange="onMypMonthChange('${shop}',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
-      ${MONTHS.map(mo=>`<option value="${mo}"${mo===p.month?' selected':''}>${mo}</option>`).join('')}
-    </select>
-    <span style="font-size:12px;color:#6b7280;font-weight:500">區間</span>
-    <select id="myp-half-sel-${shop}" onchange="onMypHalfChange('${shop}',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
-      ${['first','second','full'].map(h=>`<option value="${h}"${h===p.half?' selected':''}>${MYP_HALF_LABEL[h]}</option>`).join('')}
-    </select>
-    <button class="export-btn" onclick="openMomoRptUpload('${shop}')" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
-    <button class="export-btn" id="myp-sync-${shop}" disabled style="opacity:0.4;cursor:default" onclick="syncMomoRptToCloud('${shop}')">☁ 同步雲端</button>
+  <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:16px">
+    <div id="myp-kpi-block-${shop}" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+      <div style="font-size:13px;color:#9ca3af">尚未上傳報表</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
+        <select onchange="onMypMonthChange('${shop}',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+          ${MONTHS.map(mo=>`<option value="${mo}"${mo===p.month?' selected':''}>${mo}</option>`).join('')}
+        </select>
+        <span style="font-size:12px;color:#6b7280;font-weight:500">區間</span>
+        <select id="myp-half-sel-${shop}" onchange="onMypHalfChange('${shop}',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+          ${['first','second','full'].map(h=>`<option value="${h}"${h===p.half?' selected':''}>${MYP_HALF_LABEL[h]}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="export-btn" onclick="openMomoRptUpload('${shop}')" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
+        <button class="export-btn" id="myp-sync-${shop}" disabled style="opacity:0.4;cursor:default" onclick="syncMomoRptToCloud('${shop}')">☁ 同步雲端</button>
+      </div>
+    </div>
   </div>
-  <div id="myp-body-${shop}">
+  <div id="myp-content-${shop}">
     <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個報表後按「▶ 產生並儲存」</div></div>
   </div>`;
 }
@@ -4736,8 +4747,10 @@ function momoRptTryLoadSaved(shop){
     momoRptShowSyncBtn(shop);
   }else{
     delete _mypData[shop];
-    const body=document.getElementById('myp-body-'+shop);
-    if(body)body.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">這個區間還沒有資料，上傳兩個報表後按「▶ 產生並儲存」</div></div>`;
+    const kpiBlock=document.getElementById('myp-kpi-block-'+shop);
+    if(kpiBlock)kpiBlock.innerHTML=`<div style="font-size:13px;color:#9ca3af">尚未上傳報表</div>`;
+    const content=document.getElementById('myp-content-'+shop);
+    if(content)content.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">這個區間還沒有資料，上傳兩個報表後按「▶ 產生並儲存」</div></div>`;
     if(_mypChart){_mypChart.destroy();_mypChart=null;}
     const btn=document.getElementById('myp-sync-'+shop);
     if(btn){btn.disabled=true;btn.style.opacity='0.4';btn.style.cursor='default';btn.style.background='';btn.style.color='';btn.style.borderColor='';btn.textContent='☁ 同步雲端';}
@@ -4766,13 +4779,14 @@ function syncMomoRptToCloud(shop){
   });
 }
 
-// KPI 卡片 + 每日趨勢圖 + 商品明細表
+// KPI 數字（跟月份/按鈕同一行，塞進 myp-kpi-block）+ 每日趨勢圖 + 商品明細表（myp-content）
 function renderMomoRptShop(shop,data){
-  const body=document.getElementById('myp-body-'+shop);
-  if(!body)return;
+  const kpiBlock=document.getElementById('myp-kpi-block-'+shop);
+  const content=document.getElementById('myp-content-'+shop);
+  if(!kpiBlock||!content)return;
   const cur=data.overview.current,prev=data.overview.prev;
-  if(!cur){body.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">解析失敗，找不到總覽資料</div></div>`;return;}
-  // 純利／純利率先留空，等下面商品明細表可以算出純利後再接上來（跟蝦皮好麻吉一樣：營收/純利/純利率，間距也對齊 header-kpi-row 那份）
+  if(!cur){content.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">解析失敗，找不到總覽資料</div></div>`;return;}
+  // 純利／純利率先留空，等下面商品明細表可以算出純利後再接上來（跟蝦皮好麻吉一樣：營收/純利/純利率）
   let revChangeHtml='';
   if(prev&&prev.amt>0&&cur.amt>0){
     const pct=(cur.amt-prev.amt)/prev.amt*100;
@@ -4780,12 +4794,12 @@ function renderMomoRptShop(shop,data){
     const col=pct>=0?'#10b981':'#ef4444';
     revChangeHtml=`<span style="color:${col}">(${sign}${pct.toFixed(1)}% 較上期)</span>`;
   }
-  body.innerHTML=`
-    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:16px">
-      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">營收</div><div style="display:flex;align-items:baseline;gap:5px"><div style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">NT$ ${Math.round(cur.amt).toLocaleString()}</div><span style="font-size:12px;font-weight:600">${revChangeHtml}</span></div></div>
-      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">純利</div><div style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
-      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">純利率</div><div style="font-size:20px;font-weight:700;color:#6366f1;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
-    </div>
+  kpiBlock.innerHTML=`
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">營收</div><div style="display:flex;align-items:baseline;gap:5px"><div style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">NT$ ${Math.round(cur.amt).toLocaleString()}</div><span style="font-size:12px;font-weight:600">${revChangeHtml}</span></div></div>
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">純利</div><div style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">純利率</div><div style="font-size:20px;font-weight:700;color:#6366f1;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+  `;
+  content.innerHTML=`
     <div style="background:#fff;border:1px solid #e4e6ef;border-radius:10px;padding:14px;margin-bottom:16px">
       <div style="font-size:11px;color:#9ca3af;margin-bottom:6px">每日訂購金額</div>
       <div style="height:140px;position:relative"><canvas id="myp-trend-${shop}"></canvas></div>
