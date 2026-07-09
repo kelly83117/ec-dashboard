@@ -4770,31 +4770,15 @@ function syncMomoRptToCloud(shop){
 function renderMomoRptShop(shop,data){
   const body=document.getElementById('myp-body-'+shop);
   if(!body)return;
-  const cur=data.overview.current,prev=data.overview.prev;
+  const cur=data.overview.current;
   if(!cur){body.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">解析失敗，找不到總覽資料</div></div>`;return;}
-  const chg=(c,p)=>p?((c-p)/p*100):null;
-  const chgHtml=(c,p)=>{
-    const v=chg(c,p);
-    if(v===null)return'';
-    const up=v>=0;
-    return `<div style="font-size:11px;color:${up?'#10b981':'#ef4444'};margin-top:2px">${up?'↑':'↓'}${Math.abs(v).toFixed(1)}% 較上期</div>`;
-  };
-  const cards=[
-    {label:'有購人數',v:cur.buyers,p:prev&&prev.buyers,fmt:n=>n.toLocaleString()},
-    {label:'訂單數',v:cur.orders,p:prev&&prev.orders,fmt:n=>n.toLocaleString()},
-    {label:'訂購數',v:cur.qty,p:prev&&prev.qty,fmt:n=>n.toLocaleString()},
-    {label:'訂購金額',v:cur.amt,p:prev&&prev.amt,fmt:n=>'NT$ '+n.toLocaleString()},
-    {label:'客單價',v:cur.aov,p:prev&&prev.aov,fmt:n=>'NT$ '+n.toLocaleString()},
-  ];
-  const cardsHtml=cards.map(c=>`
-    <div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
-      <div style="font-size:11px;color:#9ca3af;font-weight:600">${c.label}</div>
-      <div style="font-size:19px;font-weight:700;color:#1f2937;margin-top:4px">${c.fmt(c.v)}</div>
-      ${chgHtml(c.v,c.p)}
-    </div>
-  `).join('');
+  // 純利／純利率先留空，等下面商品明細表可以算出純利後再接上來（跟蝦皮好麻吉一樣：營收/純利/純利率）
   body.innerHTML=`
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px">${cardsHtml}</div>
+    <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #e5e7eb">
+      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">營收</div><div style="font-size:20px;font-weight:700;color:#374151">NT$ ${Math.round(cur.amt).toLocaleString()}</div></div>
+      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">純利</div><div style="font-size:20px;font-weight:700;color:#10b981">—</div></div>
+      <div><div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase">純利率</div><div style="font-size:20px;font-weight:700;color:#6366f1">—</div></div>
+    </div>
     <div style="background:#fff;border:1px solid #e4e6ef;border-radius:10px;padding:14px;margin-bottom:16px">
       <div style="font-size:11px;color:#9ca3af;margin-bottom:6px">每日訂購金額</div>
       <div style="height:140px;position:relative"><canvas id="myp-trend-${shop}"></canvas></div>
