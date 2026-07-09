@@ -652,6 +652,9 @@ function shopHTML(shop){return`
     <div id="kv-ads-${shop}"></div>
   </div>
   ${shop==='好麻吉'?`
+  <div id="aff-header-${shop}" style="display:none">
+    ${affHeaderHtml(shop)}
+  </div>
   <div style="display:flex;gap:4px;border-bottom:1px solid #e4e6ef;margin-bottom:16px">
     <div class="shop-view-tab" id="svtab-${shop}-profit" onclick="setShopViewMode('${shop}','profit')" style="padding:9px 18px;font-size:13px;font-weight:700;color:#5b5fcf;border-bottom:2px solid #5b5fcf;cursor:pointer">淨利表</div>
     <div class="shop-view-tab" id="svtab-${shop}-affiliate" onclick="setShopViewMode('${shop}','affiliate')" style="padding:9px 18px;font-size:13px;font-weight:400;color:#9ca3af;border-bottom:2px solid transparent;cursor:pointer">聯盟行銷</div>
@@ -678,34 +681,42 @@ function shopHTML(shop){return`
   </div>
   ${shop==='好麻吉'?`
   <div id="sv-affiliate-${shop}" style="display:none">
-    ${affMarketingHTML(shop)}
+    <div id="aff-content-${shop}">
+      <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個報表後按「▶ 產生並儲存」</div></div>
+    </div>
   </div>`:''}`;
 }
-// 聯盟行銷（目前只有好麻吉）：上傳「推廣訂單報表」+「蝦皮商品清單」兩份檔案，整理成商品層級的分潤明細表。
-function affMarketingHTML(shop){
+// 聯盟行銷（目前只有好麻吉）的「總覽列」：跟淨利表的 header-kpi-row 同一個視覺位置（切到聯盟行銷分頁時
+// 兩邊互相替換顯示，各自獨立不共用元素、不會互相覆蓋），上傳「推廣訂單報表」+「蝦皮商品清單」兩份檔案。
+function affHeaderHtml(shop){
   return `
-  <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #f3f4f6">
     <div id="aff-kpi-block-${shop}" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
       <div style="font-size:13px;color:#9ca3af">尚未上傳報表</div>
     </div>
     <div style="display:flex;gap:8px;margin-left:auto">
       <button class="export-btn" onclick="openAffUpload('${shop}')" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
       <button class="export-btn" id="aff-sync-${shop}" disabled style="opacity:0.4;cursor:default" onclick="syncAffRptToCloud('${shop}')">☁ 同步雲端</button>
+      <button class="export-btn" id="aff-clear-${shop}" disabled style="opacity:0.4;cursor:default;border-color:#ef4444;color:#ef4444" onclick="clearAffRpt('${shop}')">🗑 清除</button>
     </div>
-  </div>
-  <div id="aff-content-${shop}">
-    <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個報表後按「▶ 產生並儲存」</div></div>
   </div>`;
 }
 // 賣場內容切換：淨利表 / 聯盟行銷（目前只有好麻吉有這個切換，兩個畫面都是同一份 shopHTML 裡的區塊，切換只是顯示/隱藏，不重新渲染）
+const _shopViewMode={};
 function setShopViewMode(shop,mode){
+  _shopViewMode[shop]=mode;
   const profitEl=document.getElementById('sv-profit-'+shop);
   const affEl=document.getElementById('sv-affiliate-'+shop);
+  const affHeaderEl=document.getElementById('aff-header-'+shop);
+  const globalKpiRow=document.getElementById('header-kpi-row');
   if(profitEl)profitEl.style.display=mode==='profit'?'':'none';
   if(affEl){
     affEl.style.display=mode==='affiliate'?'':'none';
     if(mode==='affiliate'&&!affEl.dataset.loaded){affEl.dataset.loaded='1';affRptTryLoadSaved(shop);}
   }
+  // 淨利表跟聯盟行銷各自獨立的總覽列，切分頁時互相替換顯示，不共用同一組元素
+  if(affHeaderEl)affHeaderEl.style.display=mode==='affiliate'?'':'none';
+  if(globalKpiRow&&shop==='好麻吉')globalKpiRow.style.display=mode==='affiliate'?'none':'flex';
   const tabs={profit:document.getElementById('svtab-'+shop+'-profit'),affiliate:document.getElementById('svtab-'+shop+'-affiliate')};
   Object.entries(tabs).forEach(([m,el])=>{
     if(!el)return;
@@ -4109,7 +4120,11 @@ function setShop(shop,btn){
   // show/hide KPI & upload/export when on 總表
   const isSummary=shop==='總表';
   const kpiBlock=document.getElementById('header-kpi-row');
-  if(kpiBlock)kpiBlock.style.display=isSummary?'none':'flex';
+  // 好麻吉的聯盟行銷分頁有自己獨立的總覽列，切回好麻吉時要記得沿用上次停在哪個分頁
+  const onAffTab=shop==='好麻吉'&&_shopViewMode[shop]==='affiliate';
+  if(kpiBlock)kpiBlock.style.display=(isSummary||onAffTab)?'none':'flex';
+  const affHeaderEl=document.getElementById('aff-header-'+shop);
+  if(affHeaderEl)affHeaderEl.style.display=onAffTab?'':'none';
   // sync global export button
   const gb=document.getElementById('global-exp-btn');
   if(gb){
@@ -5128,10 +5143,30 @@ function affRptLsLoad(shop){
 function affRptShowSyncBtn(shop){
   const btn=document.getElementById('aff-sync-'+shop);
   if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent='☁ 同步雲端';}
+  const clearBtn=document.getElementById('aff-clear-'+shop);
+  if(clearBtn){clearBtn.disabled=false;clearBtn.style.opacity='1';clearBtn.style.cursor='pointer';}
 }
 function affRptTryLoadSaved(shop){
   const saved=affRptLsLoad(shop);
   if(saved){_affData[shop]=saved;renderAffRptShop(shop,saved);affRptShowSyncBtn(shop);}
+}
+// 上傳錯資料或想重來時可以整個清掉（本機 + 雲端都刪），回到「尚未上傳報表」的初始狀態。
+function clearAffRpt(shop){
+  if(!confirm('確定要清除目前的聯盟行銷資料？清掉之後要重新上傳才會有資料。'))return;
+  delete _affData[shop];
+  try{localStorage.removeItem(affRptLsKey(shop));}catch{}
+  const kpiBlock=document.getElementById('aff-kpi-block-'+shop);
+  if(kpiBlock)kpiBlock.innerHTML=`<div style="font-size:13px;color:#9ca3af">尚未上傳報表</div>`;
+  const content=document.getElementById('aff-content-'+shop);
+  if(content)content.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個報表後按「▶ 產生並儲存」</div></div>`;
+  const syncBtn=document.getElementById('aff-sync-'+shop);
+  if(syncBtn){syncBtn.disabled=true;syncBtn.style.opacity='0.4';syncBtn.style.cursor='default';syncBtn.style.background='';syncBtn.style.color='';syncBtn.style.borderColor='';syncBtn.textContent='☁ 同步雲端';}
+  const clearBtn=document.getElementById('aff-clear-'+shop);
+  if(clearBtn){clearBtn.disabled=true;clearBtn.style.opacity='0.4';clearBtn.style.cursor='default';}
+  if(window.__cloudProfit&&typeof window.__cloudProfit.removeFields==='function'){
+    window.__cloudProfit.removeFields([affRptLsKey(shop)]).catch(e=>console.warn('[聯盟行銷] 雲端清除失敗',e));
+  }
+  showToast('已清除，可以重新上傳','success');
 }
 function syncAffRptToCloud(shop){
   const btn=document.getElementById('aff-sync-'+shop);
@@ -5696,7 +5731,7 @@ Object.assign(window, {
   setShopViewMode,
   openMomoRptUpload,closeMomoRptUpload,onMomoRptFile,generateMomoRpt,syncMomoRptToCloud,
   onMypMonthChange,onMypHalfChange,
-  openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,
+  openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   openMypColPicker,toggleMypHiddenCol,resetMypHiddenCols,resetMypColOrder,
   mypColDragStart,mypColDragOver,mypColDragEnter,mypColDragLeave,mypColDrop,mypColDragEnd,
   mypPickRowDragStart,mypPickRowDragOver,mypPickRowDragEnter,mypPickRowDragLeave,mypPickRowDrop,mypPickRowDragEnd,
