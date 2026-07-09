@@ -856,6 +856,37 @@
       background: #6b7280;
     }
   }
+
+  /* PWA 專用重整按鈕：預設完全隱藏（純網頁模式下有網址列可以重整） */
+  .pwa-refresh { display: none; }
+  /* 僅「加到主畫面後開啟」的 standalone 模式顯示 */
+  @media (display-mode: standalone), (display-mode: minimal-ui), (display-mode: fullscreen) {
+    .pwa-refresh {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      width: 40px;
+      height: 40px;
+      background: white;
+      color: #0f172a;
+      border: 1px solid var(--border);
+      box-shadow: 0 3px 10px rgba(0,0,0,.10);
+      z-index: 9100;
+      font-size: 22px;
+      font-weight: 700;
+      border-radius: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .pwa-refresh:active {
+      transform: rotate(-45deg);
+      transition: transform .12s ease;
+    }
+  }
+
   /* 更小螢幕：stat-grid 改 1 欄 */
   @media (max-width: 460px) {
     .stat-grid,
