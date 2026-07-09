@@ -338,8 +338,8 @@ Object.assign(App, {
             </button>
           </div>
         </div>
-        <div class="table-wrap">
-          <table style="border-collapse:separate;border-spacing:0;width:100%;table-layout:fixed">
+        <div class="table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+          <table style="border-collapse:separate;border-spacing:0;width:100%;min-width:520px;table-layout:fixed">
             <thead>
               <tr style="background:var(--bg)">
                 <th style="padding:5px 6px;text-align:left;font-size:11px;min-width:110px">賣場</th>
