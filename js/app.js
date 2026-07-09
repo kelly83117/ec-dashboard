@@ -82,24 +82,32 @@ function seedData() {
   const defaultPwHash = hashPassword('admin123');
 
   // Users：若沒有任何 admin 帳號才補上預設 admin；同時補齊缺漏的 Q1–Q4 欄位
+  //
+  // ⚠ 資料保護：雲端訂閱可能還沒 ready，此時 Store.get 會拿到空陣列。
+  //   如果我們判斷「沒 admin → push 新 admin → 寫回」，就會把雲端所有帳號
+  //   覆寫成只剩一個新 admin。歷史事件：曾發生過（fallback 縮短到 2 秒後觸發）。
+  //   → 只有在「雲端訂閱已 ready 且回傳的確是空 users」時才允許 seed。
+  const cloudReady = !!(window.__cloudStore && window.__firstMainSnapshotDone);
   const users = Store.get(Store.KEYS.users, []);
   let usersChanged = false;
-  if (!users.some(u => u.role === 'admin')) {
+  if (cloudReady && !users.some(u => u.role === 'admin')) {
     users.push({ username: 'admin', password: defaultPwHash, name: '陳大明', role: 'admin', departments: [], q1: null, q2: null, q3: null, q4: null });
     usersChanged = true;
   }
-  users.forEach(u => {
-    if (!('q1' in u)) { u.q1 = null; usersChanged = true; }
-    if (!('q2' in u)) { u.q2 = null; usersChanged = true; }
-    if (!('q3' in u)) { u.q3 = null; usersChanged = true; }
-    if (!('q4' in u)) { u.q4 = null; usersChanged = true; }
-    // 將舊版單一 department 字串遷移為 departments 陣列
-    if (!Array.isArray(u.departments)) {
-      u.departments = u.department ? [u.department] : [];
-      usersChanged = true;
-    }
-  });
-  if (usersChanged) Store.set(Store.KEYS.users, users);
+  // 補欄位只在「真的有帳號」時做；空陣列時不動，避免雲端未 ready 時誤寫
+  if (users.length > 0) {
+    users.forEach(u => {
+      if (!('q1' in u)) { u.q1 = null; usersChanged = true; }
+      if (!('q2' in u)) { u.q2 = null; usersChanged = true; }
+      if (!('q3' in u)) { u.q3 = null; usersChanged = true; }
+      if (!('q4' in u)) { u.q4 = null; usersChanged = true; }
+      if (!Array.isArray(u.departments)) {
+        u.departments = u.department ? [u.department] : [];
+        usersChanged = true;
+      }
+    });
+  }
+  if (usersChanged && cloudReady) Store.set(Store.KEYS.users, users);
 
   // Departments：完全沒有才補預設 4 個辦公室
   const departments = Store.get(Store.KEYS.departments);
@@ -552,6 +560,10 @@ const App = {
 
   // 若不知為何沒有任何使用者，自動補回預設 admin（避免被鎖在外面）
   ensureAdmin() {
+    // ⚠ 資料保護：與 seedData 同理，雲端未 ready 時空陣列不能拿來當「真的沒帳號」的訊號。
+    //   曾發生：fallback 2 秒觸發 ensureAdmin → 覆寫雲端所有帳號成只剩 [admin]。
+    const cloudReady = !!(window.__cloudStore && window.__firstMainSnapshotDone);
+    if (!cloudReady) return;
     const users = Store.get(Store.KEYS.users, []);
     if (users.length === 0) {
       Store.set(Store.KEYS.users, [{
@@ -2587,12 +2599,20 @@ async function __setupCloud() {
       // 否則手機開頁時，「dashboard 先用空資料 render → 雲端到了但被 dirty 條件擋住」會看不到數字
       const isFirstSnapshot = __firstCloudSnapshot;
       __firstCloudSnapshot = false;
+      // 標記主 doc 首批 snapshot 已回來 → seedData / ensureAdmin 才敢寫入
+      //   （沒這旗標時，空 users 陣列會誤觸「補預設 admin 蓋掉雲端」的災難）
+      window.__firstMainSnapshotDone = true;
       if (!(window.App && App.currentUser && typeof App.render === 'function')) {
         // App 還沒準備好，等準備好再補一次 render（由 enterApp 那邊處理）
         if (isFirstSnapshot) window.__pendingFirstRender = true;
         return;
       }
       if (isFirstSnapshot) {
+        // 首批 snapshot 回來後才安全地執行 seed / ensureAdmin：
+        //   若雲端沒 admin（真乾淨新裝）→ 補一個；若雲端已有帳號 → 不動。
+        //   之前這兩個函式在 boot 時就跑，雲端還沒回來 → 誤判成「沒 admin」→ 覆寫雲端。
+        try { if (typeof seedData === 'function') seedData(); } catch (e) { console.warn('post-snapshot seedData failed', e); }
+        try { if (App && typeof App.ensureAdmin === 'function') App.ensureAdmin(); } catch (e) { console.warn('post-snapshot ensureAdmin failed', e); }
         try { App.render(); } catch (e) { console.warn('first cloud snapshot render failed', e); }
         return;
       }
@@ -2620,9 +2640,10 @@ if (window.__cloudStore) {
   __setupCloud();
 } else {
   window.addEventListener('cloudStoreReady', __setupCloud, { once: true });
-  // 後門：若 module script 2 秒內沒就緒（手機 4G 弱網），先用 localStorage 啟動
-  //   雲端資料回來後訂閱事件仍會觸發 __setupCloud → 補 re-render
-  setTimeout(() => { if (!__appBooted) __bootApp(); }, 2000);
+  // 後門：module script 沒就緒時的兜底（純離線狀態）。
+  //   ⚠ 不能設太短：seedData / ensureAdmin 目前靠 __firstMainSnapshotDone 判斷
+  //     雲端是否 ready 才允許寫入。真的斷網時仍會走 fallback → 只在本機讀 localStorage。
+  setTimeout(() => { if (!__appBooted) __bootApp(); }, 5000);
 }
 
 /* ===================== window 匯流排 ===================== */
