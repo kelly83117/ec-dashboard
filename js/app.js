@@ -2495,11 +2495,21 @@ async function __setupCloud() {
     };
     Store.set = function(key, value) {
       if (__LOCAL_ONLY_KEYS.has(key)) { __localSet(key, value); return; }
+      // ⚠ 資料保護：擋掉「把 users 從 N 個縮成 1~2 個」的可疑寫入
+      //   避免任何路徑（不管 seedData bug、race condition、還是別的 code）
+      //   把好幾個帳號覆蓋成只剩 admin。真的要刪除靠 users.js 的手動流程。
+      if (key === Store.KEYS.users && Array.isArray(value)) {
+        const cur = Store._mem && Store._mem[key];
+        if (Array.isArray(cur) && cur.length >= 3 && value.length < cur.length - 1) {
+          console.error('[USERS 寫入防護] 拒絕：目前有', cur.length, '個帳號，即將被覆蓋成', value.length, '個');
+          console.trace('[USERS 寫入防護] 呼叫來源');
+          return; // 直接不寫，_mem 保留原本、雲端也不動
+        }
+      }
       // 寫入時把 key 從「最近刪除」名單移除，否則訂閱回呼會把剛上傳的資料當成 race 過濾掉
       if (window.__unmarkRecentlyDeleted) window.__unmarkRecentlyDeleted(key);
       origSet(key, value);
       // 雲端寫入失敗一定要讓使用者看到（先前撞 1 MiB 上限的事件就是被靜默 reject 吃掉）
-      // sync 階段不太可能 throw（setDoc 是 async），主要靠下面的 .catch 接 promise rejection
       try {
         const p = cs.setField(key, value);
         if (p && typeof p.then === 'function') {
