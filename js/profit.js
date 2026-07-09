@@ -108,6 +108,34 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       </div>
     </div>
   </div>
+  <div class="ana-overlay" id="aff-upload-overlay" onclick="if(event.target===this)closeAffUpload()">
+    <div class="ana-modal" style="width:480px;max-width:96vw">
+      <div class="ana-modal-hdr"><span id="aff-upload-title">上傳檔案｜聯盟行銷</span><button class="ana-close-btn" onclick="closeAffUpload()">✕</button></div>
+      <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
+        <label class="ucard" id="aff-conv-card" style="width:100%;box-sizing:border-box">
+          <input type="file" id="aff-conv-input" accept=".csv" onchange="onAffFile(event,'conv')">
+          <div class="ucard-icon">📦</div>
+          <div style="flex:1;min-width:0">
+            <div class="ucard-title">推廣訂單報表</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px">SellerConversionReport (.csv)</div>
+          </div>
+          <span id="aff-conv-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
+        </label>
+        <label class="ucard" id="aff-list-card" style="width:100%;box-sizing:border-box">
+          <input type="file" id="aff-list-input" accept=".xlsx,.xls" onchange="onAffFile(event,'list')">
+          <div class="ucard-icon">📋</div>
+          <div style="flex:1;min-width:0">
+            <div class="ucard-title">蝦皮商品清單</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px">商品ID ↔ 莫比克名對照，讀「好麻吉」分頁 (.xlsx)</div>
+          </div>
+          <span id="aff-list-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
+        </label>
+      </div>
+      <div class="ana-modal-ftr">
+        <button class="gen-btn" id="aff-gen-btn" onclick="generateAffRpt()" disabled>▶ 產生並儲存</button>
+      </div>
+    </div>
+  </div>
   <div class="ana-overlay" id="coupang-dist-overlay" onclick="if(event.target===this)closeCoupangDist()">
     <div class="ana-modal" style="width:400px;max-width:96vw">
       <div class="ana-modal-hdr"><span>階層分布｜純利率區間</span><button class="ana-close-btn" onclick="closeCoupangDist()">✕</button></div>
@@ -650,19 +678,34 @@ function shopHTML(shop){return`
   </div>
   ${shop==='好麻吉'?`
   <div id="sv-affiliate-${shop}" style="display:none">
-    <div style="background:#f8f9fc;border:1px dashed #d1d5db;border-radius:10px;padding:48px;text-align:center;color:#9ca3af">
-      <div style="font-size:36px;margin-bottom:8px">🔗</div>
-      <div style="font-size:14px;font-weight:600">聯盟行銷</div>
-      <div style="font-size:12px;margin-top:4px">尚未建置，之後再補上內容</div>
-    </div>
+    ${affMarketingHTML(shop)}
   </div>`:''}`;
+}
+// 聯盟行銷（目前只有好麻吉）：上傳「推廣訂單報表」+「蝦皮商品清單」兩份檔案，整理成商品層級的分潤明細表。
+function affMarketingHTML(shop){
+  return `
+  <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:16px">
+    <div id="aff-kpi-block-${shop}" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+      <div style="font-size:13px;color:#9ca3af">尚未上傳報表</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-left:auto">
+      <button class="export-btn" onclick="openAffUpload('${shop}')" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
+      <button class="export-btn" id="aff-sync-${shop}" disabled style="opacity:0.4;cursor:default" onclick="syncAffRptToCloud('${shop}')">☁ 同步雲端</button>
+    </div>
+  </div>
+  <div id="aff-content-${shop}">
+    <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個報表後按「▶ 產生並儲存」</div></div>
+  </div>`;
 }
 // 賣場內容切換：淨利表 / 聯盟行銷（目前只有好麻吉有這個切換，兩個畫面都是同一份 shopHTML 裡的區塊，切換只是顯示/隱藏，不重新渲染）
 function setShopViewMode(shop,mode){
   const profitEl=document.getElementById('sv-profit-'+shop);
   const affEl=document.getElementById('sv-affiliate-'+shop);
   if(profitEl)profitEl.style.display=mode==='profit'?'':'none';
-  if(affEl)affEl.style.display=mode==='affiliate'?'':'none';
+  if(affEl){
+    affEl.style.display=mode==='affiliate'?'':'none';
+    if(mode==='affiliate'&&!affEl.dataset.loaded){affEl.dataset.loaded='1';affRptTryLoadSaved(shop);}
+  }
   const tabs={profit:document.getElementById('svtab-'+shop+'-profit'),affiliate:document.getElementById('svtab-'+shop+'-affiliate')};
   Object.entries(tabs).forEach(([m,el])=>{
     if(!el)return;
@@ -4975,6 +5018,210 @@ function renderMomoRptTableBody(shop){
   tbl.innerHTML=`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
 }
 
+// ── 蝦皮好麻吉 聯盟行銷：上傳「推廣訂單報表」(SellerConversionReport.csv) + 「蝦皮商品清單」(.xlsx，讀好麻吉分頁)，
+// 依商品ID合併算出銷售額/分潤率/推廣費用，商品名稱優先用商品清單裡的莫比克名，沒有的話退回報表自帶的蝦皮商品名稱 ──
+let _affShop='';
+const _affFiles={conv:null,list:null};
+const _affData={};
+function openAffUpload(shop){
+  _affShop=shop;
+  document.getElementById('aff-upload-title').textContent='上傳檔案｜聯盟行銷 · '+shop;
+  document.getElementById('aff-upload-overlay').style.display='flex';
+}
+function closeAffUpload(){
+  document.getElementById('aff-upload-overlay').style.display='none';
+}
+function onAffFile(e,type){
+  const file=e.target.files[0];if(!file)return;
+  _affFiles[type]=file;
+  const statusId={conv:'aff-conv-status',list:'aff-list-status'}[type];
+  const el=document.getElementById(statusId);
+  if(el){el.textContent='✓ '+file.name;el.style.color='#10b981';}
+  const btn=document.getElementById('aff-gen-btn');
+  if(btn)btn.disabled=!(_affFiles.conv&&_affFiles.list);
+}
+function readCsvText(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>resolve(e.target.result);
+    reader.onerror=reject;
+    reader.readAsText(file,'UTF-8');
+  });
+}
+// 推廣訂單報表：一個商品ID可能出現很多列（每筆訂單一列），照ID合併加總銷售額/推廣費用，分潤率取同ID裡最常出現的那個。
+function parseAffConversionCsv(text){
+  const lines=text.replace(/^﻿/,'').split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length)return[];
+  const headers=splitCSV(lines[0]).map(h=>h.replace(/^"|"$/g,'').trim());
+  const idIdx=headers.indexOf('商品編號');
+  const nameIdx=headers.indexOf('商品名稱');
+  const priceIdx=headers.indexOf('購買價格($)');
+  const rateIdx=headers.indexOf('推廣者商品分潤率');
+  const costIdx=headers.indexOf('推廣費用($)');
+  if(idIdx<0)throw new Error('找不到「商品編號」欄位，請確認是 SellerConversionReport 報表');
+  const map=new Map();
+  for(let i=1;i<lines.length;i++){
+    const vals=splitCSV(lines[i]).map(v=>v.replace(/^"|"$/g,'').trim());
+    const id=vals[idIdx];
+    if(!id)continue;
+    if(!map.has(id))map.set(id,{id,fallbackName:vals[nameIdx]||'',sales:0,cost:0,rateCounts:{}});
+    const g=map.get(id);
+    g.sales+=parseFloat(vals[priceIdx])||0;
+    g.cost+=parseFloat(vals[costIdx])||0;
+    const rate=vals[rateIdx];
+    if(rate)g.rateCounts[rate]=(g.rateCounts[rate]||0)+1;
+  }
+  return[...map.values()].map(g=>{
+    let bestRate='',bestCount=0;
+    Object.entries(g.rateCounts).forEach(([rate,count])=>{if(count>bestCount){bestCount=count;bestRate=rate;}});
+    return{id:g.id,fallbackName:g.fallbackName,sales:g.sales,cost:g.cost,rate:bestRate};
+  });
+}
+function generateAffRpt(){
+  const btn=document.getElementById('aff-gen-btn');
+  if(btn){btn.disabled=true;btn.textContent='處理中…';}
+  Promise.all([
+    readCsvText(_affFiles.conv),
+    readXlsx(_affFiles.list,'好麻吉'),
+  ]).then(([csvText,mappingRows])=>{
+    const products=parseAffConversionCsv(csvText);
+    const header=mappingRows[0]||[];
+    const idIdx=header.indexOf('商品ID');
+    const mobicIdx=header.indexOf('莫比克名');
+    const idToMobic={};
+    for(let i=1;i<mappingRows.length;i++){
+      const row=mappingRows[i];
+      const rawId=row[idIdx];
+      const mobic=row[mobicIdx];
+      if(rawId==null||rawId==='')continue;
+      const id=String(Math.trunc(rawId));
+      if(mobic&&!idToMobic[id])idToMobic[id]=mobic;
+    }
+    products.forEach(p=>{
+      const mobic=idToMobic[p.id];
+      p.name=mobic||p.fallbackName;
+      p.matched=!!mobic;
+    });
+    const totalSales=products.reduce((s,p)=>s+p.sales,0);
+    const totalCost=products.reduce((s,p)=>s+p.cost,0);
+    const data={products,totalSales,totalCost,ts:Date.now()};
+    _affData[_affShop]=data;
+    affRptLsSave(_affShop,data);
+    renderAffRptShop(_affShop,data);
+    affRptShowSyncBtn(_affShop);
+    if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
+    closeAffUpload();
+  }).catch(err=>{
+    console.error(err);
+    alert('解析失敗，請確認檔案格式：'+((err&&err.message)||err));
+    if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
+  });
+}
+function affRptLsKey(shop){return'ec_aff_rpt|'+shop;}
+function affRptLsSave(shop,data){try{localStorage.setItem(affRptLsKey(shop),JSON.stringify(data));}catch(e){}}
+function affRptLsLoad(shop){
+  const k=affRptLsKey(shop);
+  try{if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]!==undefined)return Store._profitMem[k];}catch{}
+  try{if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]!==undefined)return Store._mem[k];}catch{}
+  try{const d=localStorage.getItem(k);return d?JSON.parse(d):null;}catch{return null;}
+}
+function affRptShowSyncBtn(shop){
+  const btn=document.getElementById('aff-sync-'+shop);
+  if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent='☁ 同步雲端';}
+}
+function affRptTryLoadSaved(shop){
+  const saved=affRptLsLoad(shop);
+  if(saved){_affData[shop]=saved;renderAffRptShop(shop,saved);affRptShowSyncBtn(shop);}
+}
+function syncAffRptToCloud(shop){
+  const btn=document.getElementById('aff-sync-'+shop);
+  if(btn){btn.disabled=true;btn.textContent='同步中…';}
+  if(!window.__cloudProfit){
+    if(window.App&&typeof App.showAlertModal==='function')App.showAlertModal({title:'雲端未連線',message:'雲端尚未就緒，請重新整理。',kind:'warn'});
+    else if(typeof showToast==='function')showToast('雲端未連線','error');
+    if(btn)affRptShowSyncBtn(shop);
+    return;
+  }
+  const saved=affRptLsLoad(shop);
+  if(!saved){if(btn)btn.disabled=false;return;}
+  window.__cloudProfit.setField(affRptLsKey(shop),saved).then(()=>{
+    if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';}
+  }).catch(e=>{
+    const msg=(e&&e.message)||String(e);
+    if(window.App&&typeof App.showAlertModal==='function'){
+      App.showAlertModal({title:'同步失敗',message:'資料還在本機，請稍後再試。',detail:msg,kind:'error'});
+    }else if(typeof showToast==='function')showToast('同步失敗：'+msg,'error');
+    affRptShowSyncBtn(shop);
+  });
+}
+// KPI 數字（商品數/銷售額合計/推廣費用合計/分潤佔比）+ 商品明細表
+function renderAffRptShop(shop,data){
+  const kpiBlock=document.getElementById('aff-kpi-block-'+shop);
+  const content=document.getElementById('aff-content-'+shop);
+  if(!kpiBlock||!content)return;
+  const{products,totalSales,totalCost}=data;
+  const costRatio=totalSales>0?totalCost/totalSales*100:null;
+  kpiBlock.innerHTML=`
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">商品數</div><div style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">${products.length.toLocaleString()}</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">銷售額合計</div><div style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">$${Math.round(totalSales).toLocaleString()}</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">推廣費用合計</div><div style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">$${Math.round(totalCost).toLocaleString()}</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">分潤佔比</div><div style="font-size:20px;font-weight:700;color:#6366f1;font-variant-numeric:tabular-nums;letter-spacing:-.01em">${costRatio===null?'—':costRatio.toFixed(1)+'%'}</div></div>
+  `;
+  content.innerHTML=`<div id="aff-tbl-${shop}"></div>`;
+  renderAffRptTableBody(shop);
+}
+const _affSort={};
+function affSetSort(shop,col){
+  const cur=_affSort[shop];
+  if(!cur||cur.col!==col)_affSort[shop]={col,dir:'desc'};
+  else if(cur.dir==='desc')_affSort[shop]={col,dir:'asc'};
+  else delete _affSort[shop];
+  renderAffRptTableBody(shop);
+}
+function affSortRows(shop,rows){
+  const s=_affSort[shop];
+  if(!s)return rows;
+  const numeric=new Set(['sales','cost','rateNum']);
+  return[...rows].sort((a,b)=>{
+    if(numeric.has(s.col)){
+      const va=Number(a[s.col])||0,vb=Number(b[s.col])||0;
+      return s.dir==='asc'?va-vb:vb-va;
+    }
+    const va=String(a[s.col]||''),vb=String(b[s.col]||'');
+    return s.dir==='asc'?va.localeCompare(vb):vb.localeCompare(va);
+  });
+}
+function renderAffRptTableBody(shop){
+  const products=((_affData[shop]&&_affData[shop].products)||[]).map(p=>({...p,rateNum:parseFloat(p.rate)||0}));
+  const rows=affSortRows(shop,products);
+  const tbl=document.getElementById('aff-tbl-'+shop);
+  if(!tbl)return;
+  if(!rows.length){tbl.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">沒有商品資料</div></div>`;return;}
+  const cols=[
+    {k:'id',label:'商品ID',left:true},
+    {k:'name',label:'商品名稱',left:true},
+    {k:'sales',label:'銷售額'},
+    {k:'rateNum',label:'分潤率'},
+    {k:'cost',label:'推廣費用'},
+  ];
+  const curSort=_affSort[shop];
+  const sortIcon=(key)=>curSort&&curSort.col===key
+    ?`<span style="color:#5b5fcf;font-weight:700">${curSort.dir==='asc'?'▲':'▼'}</span>`
+    :`<span style="color:#d1d5db">⇅</span>`;
+  const thead=cols.map(c=>`<th class="${c.left?'tl':''}"><span class="th-wrap${c.left?' tl':''}" onclick="affSetSort('${shop}','${c.k}')" style="cursor:pointer;gap:4px">${c.label}${sortIcon(c.k)}</span></th>`).join('');
+  const tbody=rows.map(p=>`
+    <tr>
+      <td class="tl" style="font-family:'DM Mono',monospace;color:#9ca3af">${p.id}</td>
+      <td class="tl">${escapeHtmlAff(p.name)}${p.matched?'':' <span style="font-size:10px;font-weight:600;padding:1px 6px;border-radius:999px;background:#fef3c7;color:#92400e;border:1px solid #fde68a">代用名</span>'}</td>
+      <td>$${Math.round(p.sales).toLocaleString()}</td>
+      <td style="color:#5b5fcf;font-weight:700">${p.rate||'—'}</td>
+      <td>$${Math.round(p.cost).toLocaleString()}</td>
+    </tr>
+  `).join('');
+  tbl.innerHTML=`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
+}
+function escapeHtmlAff(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
 function mergeCoupangRows(rows){
   const map=new Map();
   const order=[];
@@ -5449,6 +5696,7 @@ Object.assign(window, {
   setShopViewMode,
   openMomoRptUpload,closeMomoRptUpload,onMomoRptFile,generateMomoRpt,syncMomoRptToCloud,
   onMypMonthChange,onMypHalfChange,
+  openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,
   openMypColPicker,toggleMypHiddenCol,resetMypHiddenCols,resetMypColOrder,
   mypColDragStart,mypColDragOver,mypColDragEnter,mypColDragLeave,mypColDrop,mypColDragEnd,
   mypPickRowDragStart,mypPickRowDragOver,mypPickRowDragEnter,mypPickRowDragLeave,mypPickRowDrop,mypPickRowDragEnd,
