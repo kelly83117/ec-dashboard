@@ -4418,15 +4418,38 @@ function momoShopHTML(shop,platform='momo'){
 
 // MOMO 甲配專用畫面：跟其他 MOMO 賣場（乙配/MO+麻吉/MO+森之旅）的報表格式不一樣（多了流量/瀏覽量等欄位、
 // 另外還有每日趨勢），所以另外做一套，不共用 momoShopHTML。
+const _mypPeriod={};
 function momoYipeiHTML(shop){
+  _mypPeriod[shop]=_mypPeriod[shop]||{month:'2026/06',half:'first'};
+  const p=_mypPeriod[shop];
   return `
-  <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
+  <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-bottom:12px">
+    <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
+    <select onchange="onMypMonthChange('${shop}',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+      ${MONTHS.map(mo=>`<option value="${mo}"${mo===p.month?' selected':''}>${mo}</option>`).join('')}
+    </select>
+    <span style="font-size:12px;color:#6b7280;font-weight:500">區間</span>
+    <select id="myp-half-sel-${shop}" onchange="onMypHalfChange('${shop}',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+      ${['first','second','full'].map(h=>`<option value="${h}"${h===p.half?' selected':''}>${cupHalfLabel(p.month,h)}</option>`).join('')}
+    </select>
     <button class="export-btn" onclick="openMomoRptUpload('${shop}')" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
     <button class="export-btn" id="myp-sync-${shop}" disabled style="opacity:0.4;cursor:default" onclick="syncMomoRptToCloud('${shop}')">☁ 同步雲端</button>
   </div>
   <div id="myp-body-${shop}">
     <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個報表後按「▶ 產生並儲存」</div></div>
   </div>`;
+}
+function onMypMonthChange(shop,sel){
+  _mypPeriod[shop]=_mypPeriod[shop]||{month:'2026/06',half:'first'};
+  _mypPeriod[shop].month=sel.value;
+  const halfSel=document.getElementById('myp-half-sel-'+shop);
+  if(halfSel)halfSel.innerHTML=['first','second','full'].map(h=>`<option value="${h}"${h===_mypPeriod[shop].half?' selected':''}>${cupHalfLabel(_mypPeriod[shop].month,h)}</option>`).join('');
+  momoRptTryLoadSaved(shop);
+}
+function onMypHalfChange(shop,sel){
+  _mypPeriod[shop]=_mypPeriod[shop]||{month:'2026/06',half:'first'};
+  _mypPeriod[shop].half=sel.value;
+  momoRptTryLoadSaved(shop);
 }
 
 // ── 酷澎 資料持久化 ──
@@ -4680,8 +4703,9 @@ function generateMomoRpt(){
     const overview=parseMomoSalesOverview(salesRows);
     if(!overview.current){throw new Error('找不到「目前」總覽列，請確認銷售分析報表格式');}
     const data={products,overview:{current:overview.current,prev:overview.prev,lastYear:overview.lastYear},dailyTrend:overview.dailyTrend,ts:Date.now()};
+    const p=_mypPeriod[_mypShop]||{month:'2026/06',half:'first'};
     _mypData[_mypShop]=data;
-    momoRptLsSave(_mypShop,data);
+    momoRptLsSave(_mypShop,p.month,p.half,data);
     renderMomoRptShop(_mypShop,data);
     momoRptShowSyncBtn(_mypShop);
     if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
@@ -4692,10 +4716,10 @@ function generateMomoRpt(){
     if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
   });
 }
-function momoRptLsKey(shop){return'ec_momo_rpt|'+shop;}
-function momoRptLsSave(shop,data){try{localStorage.setItem(momoRptLsKey(shop),JSON.stringify(data));}catch(e){}}
-function momoRptLsLoad(shop){
-  const k=momoRptLsKey(shop);
+function momoRptLsKey(shop,month,half){return'ec_momo_rpt|'+shop+'|'+month+'|'+half;}
+function momoRptLsSave(shop,month,half,data){try{localStorage.setItem(momoRptLsKey(shop,month,half),JSON.stringify(data));}catch(e){}}
+function momoRptLsLoad(shop,month,half){
+  const k=momoRptLsKey(shop,month,half);
   try{if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]!==undefined)return Store._profitMem[k];}catch{}
   try{if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]!==undefined)return Store._mem[k];}catch{}
   try{const d=localStorage.getItem(k);return d?JSON.parse(d):null;}catch{return null;}
@@ -4705,8 +4729,20 @@ function momoRptShowSyncBtn(shop){
   if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent='☁ 同步雲端';}
 }
 function momoRptTryLoadSaved(shop){
-  const saved=momoRptLsLoad(shop);
-  if(saved){_mypData[shop]=saved;renderMomoRptShop(shop,saved);momoRptShowSyncBtn(shop);}
+  const p=_mypPeriod[shop]||{month:'2026/06',half:'first'};
+  const saved=momoRptLsLoad(shop,p.month,p.half);
+  if(saved){
+    _mypData[shop]=saved;
+    renderMomoRptShop(shop,saved);
+    momoRptShowSyncBtn(shop);
+  }else{
+    delete _mypData[shop];
+    const body=document.getElementById('myp-body-'+shop);
+    if(body)body.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">這個區間還沒有資料，上傳兩個報表後按「▶ 產生並儲存」</div></div>`;
+    if(_mypChart){_mypChart.destroy();_mypChart=null;}
+    const btn=document.getElementById('myp-sync-'+shop);
+    if(btn){btn.disabled=true;btn.style.opacity='0.4';btn.style.cursor='default';btn.style.background='';btn.style.color='';btn.style.borderColor='';btn.textContent='☁ 同步雲端';}
+  }
 }
 function syncMomoRptToCloud(shop){
   const btn=document.getElementById('myp-sync-'+shop);
@@ -4717,9 +4753,10 @@ function syncMomoRptToCloud(shop){
     if(btn)momoRptShowSyncBtn(shop);
     return;
   }
-  const saved=momoRptLsLoad(shop);
+  const p=_mypPeriod[shop]||{month:'2026/06',half:'first'};
+  const saved=momoRptLsLoad(shop,p.month,p.half);
   if(!saved){if(btn)btn.disabled=false;return;}
-  window.__cloudProfit.setField(momoRptLsKey(shop),saved).then(()=>{
+  window.__cloudProfit.setField(momoRptLsKey(shop,p.month,p.half),saved).then(()=>{
     if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';}
   }).catch(e=>{
     const msg=(e&&e.message)||String(e);
@@ -5421,6 +5458,7 @@ Object.assign(window, {
   cupSetSort,
   setShopViewMode,
   openMomoRptUpload,closeMomoRptUpload,onMomoRptFile,generateMomoRpt,syncMomoRptToCloud,
+  onMypMonthChange,onMypHalfChange,
   openMypColPicker,toggleMypHiddenCol,resetMypHiddenCols,resetMypColOrder,
   mypColDragStart,mypColDragOver,mypColDragEnter,mypColDragLeave,mypColDrop,mypColDragEnd,
   mypPickRowDragStart,mypPickRowDragOver,mypPickRowDragEnter,mypPickRowDragLeave,mypPickRowDrop,mypPickRowDragEnd,
