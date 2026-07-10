@@ -1,5 +1,5 @@
 {
-  "updated": "2026-07-09",
+  "updated": "2026-07-10",
   "items": [
     {
       "keyword": "收纳盒",
@@ -10,36 +10,36 @@
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E7%9B%92"
     },
     {
-      "keyword": "厨房用具",
-      "name": "不锈钢厨具套装",
-      "price_range": "10-30元",
-      "moq": "50個",
-      "reason": "暑期家庭聚餐需求增加",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E7%94%A8%E5%85%B7"
-    },
-    {
-      "keyword": "浴室收纳",
-      "name": "浴室置物架",
-      "price_range": "15-25元",
-      "moq": "20個",
-      "reason": "夏季清凉家居布置热潮",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%BA%B3"
-    },
-    {
-      "keyword": "清洁工具",
-      "name": "多功能清洁刷",
-      "price_range": "5-12元",
-      "moq": "100個",
-      "reason": "夏季大扫除需求上升",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E5%B7%A5%E5%85%B7"
-    },
-    {
-      "keyword": "床上用品",
-      "name": "透气床单套件",
+      "keyword": "厨房收纳架",
+      "name": "多层厨房收纳架",
       "price_range": "20-50元",
-      "moq": "30套",
-      "reason": "暑假床品更新适合",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E4%B8%8A%E7%94%A8%E5%93%81"
+      "moq": "50個",
+      "reason": "夏季烹饪需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E6%94%B6%E7%BA%B3%E6%9E%B6"
+    },
+    {
+      "keyword": "浴室收纳柜",
+      "name": "卫浴收纳柜",
+      "price_range": "30-70元",
+      "moq": "30個",
+      "reason": "迎接暑假家庭聚会",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%BA%B3%E6%9F%9C"
+    },
+    {
+      "keyword": "床单被套",
+      "name": "夏季清凉床单被套",
+      "price_range": "50-120元",
+      "moq": "20套",
+      "reason": "暑假出游及亲友聚会",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E5%8D%95%E8%A2%AB%E5%A5%97"
+    },
+    {
+      "keyword": "清洁拖把",
+      "name": "旋转清洁拖把",
+      "price_range": "15-35元",
+      "moq": "100個",
+      "reason": "夏季清洁需求提升",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E6%8B%96%E6%8A%8A"
     }
   ]
 }
