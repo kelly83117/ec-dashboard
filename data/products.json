@@ -1,49 +1,49 @@
 {
-  "updated": "2026-07-10",
+  "updated": "2026-07-11",
   "items": [
     {
-      "keyword": "夏季冰涼床墊",
-      "name": "透氣冰涼床墊",
-      "price": 1200,
+      "keyword": "防潮收納盒",
+      "name": "防潮收納盒大容量",
+      "price": 299,
       "sold": 500,
-      "url": "https://shopee.tw/search?keyword=%E5%A4%8F%E5%AD%A3%E5%86%B0%E6%B6%BC%E5%BA%8A%E5%A2%8A",
-      "reason": "適合夏季舒適睡眠",
+      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BD%AE%E6%94%B6%E7%B4%8D%E7%9B%92",
+      "reason": "適合梅雨季節使用",
       "source": "AI推薦"
     },
     {
-      "keyword": "防潮收納箱",
-      "name": "多用途防潮收納箱",
-      "price": 800,
-      "sold": 600,
-      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BD%AE%E6%94%B6%E7%B4%8D%E7%AE%B1",
-      "reason": "有效防潮，適合儲物",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "浴室防滑墊",
-      "name": "靜音防滑浴室墊",
-      "price": 300,
+      "keyword": "竹製廚具",
+      "name": "天然竹製料理叉刀具",
+      "price": 199,
       "sold": 700,
-      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E9%98%B2%E6%BB%91%E5%A2%8A",
-      "reason": "增強安全，適合夏季使用",
+      "url": "https://shopee.tw/search?keyword=%E7%AB%B9%E8%A3%BD%E5%BB%9A%E5%85%B7",
+      "reason": "環保且耐用的廚房用品",
       "source": "AI推薦"
     },
     {
-      "keyword": "廚房收納架",
-      "name": "多層廚房收納架",
-      "price": 1500,
-      "sold": 400,
-      "url": "https://shopee.tw/search?keyword=%E5%BB%9A%E6%88%BF%E6%94%B6%E7%B4%8D%E6%9E%B6",
-      "reason": "提升廚房空間利用",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "戶外野餐墊",
-      "name": "防水戶外野餐墊",
-      "price": 600,
+      "keyword": "浴室收納架",
+      "name": "多層浴室收納架",
+      "price": 399,
       "sold": 300,
-      "url": "https://shopee.tw/search?keyword=%E6%88%B6%E5%A4%96%E9%87%8E%E9%A4%90%E5%A2%8A",
-      "reason": "夏季露營野餐必備",
+      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%B4%8D%E6%9E%B6",
+      "reason": "提升浴室空間利用率",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "床上整理袋",
+      "name": "床上床下整理收納袋",
+      "price": 249,
+      "sold": 400,
+      "url": "https://shopee.tw/search?keyword=%E5%BA%8A%E4%B8%8A%E6%95%B4%E7%90%86%E8%A2%8B",
+      "reason": "清爽整理床上物品",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "防滑浴墊",
+      "name": "安全防滑浴室墊",
+      "price": 179,
+      "sold": 600,
+      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BB%91%E6%B5%B4%E5%A2%8A",
+      "reason": "保障家庭使用安全",
       "source": "AI推薦"
     }
   ]
