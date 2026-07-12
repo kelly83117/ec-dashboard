@@ -1,49 +1,49 @@
 {
-  "updated": "2026-07-11",
+  "updated": "2026-07-12",
   "items": [
     {
-      "keyword": "防潮收納盒",
-      "name": "防潮收納盒大容量",
-      "price": 299,
-      "sold": 500,
-      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BD%AE%E6%94%B6%E7%B4%8D%E7%9B%92",
-      "reason": "適合梅雨季節使用",
+      "keyword": "涼感床單",
+      "name": "夏季涼感床單組",
+      "price": 799,
+      "sold": 300,
+      "url": "https://shopee.tw/search?keyword=%E6%B6%BC%E6%84%9F%E5%BA%8A%E5%96%AE",
+      "reason": "適合夏季使用，清涼舒適",
       "source": "AI推薦"
     },
     {
-      "keyword": "竹製廚具",
-      "name": "天然竹製料理叉刀具",
-      "price": 199,
-      "sold": 700,
-      "url": "https://shopee.tw/search?keyword=%E7%AB%B9%E8%A3%BD%E5%BB%9A%E5%85%B7",
-      "reason": "環保且耐用的廚房用品",
+      "keyword": "收納箱",
+      "name": "多功能收納箱",
+      "price": 499,
+      "sold": 250,
+      "url": "https://shopee.tw/search?keyword=%E6%94%B6%E7%B4%8D%E7%AE%B1",
+      "reason": "家庭收納必備，實用性高",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "野餐墊",
+      "name": "防水野餐墊",
+      "price": 399,
+      "sold": 200,
+      "url": "https://shopee.tw/search?keyword=%E9%87%8E%E9%A4%90%E5%A2%8A",
+      "reason": "夏季戶外活動熱門商品",
       "source": "AI推薦"
     },
     {
       "keyword": "浴室收納架",
-      "name": "多層浴室收納架",
-      "price": 399,
-      "sold": 300,
+      "name": "浴室多層收納架",
+      "price": 599,
+      "sold": 180,
       "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%B4%8D%E6%9E%B6",
-      "reason": "提升浴室空間利用率",
+      "reason": "改善浴室收納，提升空間",
       "source": "AI推薦"
     },
     {
-      "keyword": "床上整理袋",
-      "name": "床上床下整理收納袋",
-      "price": 249,
-      "sold": 400,
-      "url": "https://shopee.tw/search?keyword=%E5%BA%8A%E4%B8%8A%E6%95%B4%E7%90%86%E8%A2%8B",
-      "reason": "清爽整理床上物品",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "防滑浴墊",
-      "name": "安全防滑浴室墊",
-      "price": 179,
-      "sold": 600,
-      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BB%91%E6%B5%B4%E5%A2%8A",
-      "reason": "保障家庭使用安全",
+      "keyword": "廚房置物架",
+      "name": "廚房多層置物架",
+      "price": 699,
+      "sold": 220,
+      "url": "https://shopee.tw/search?keyword=%E5%BB%9A%E6%88%BF%E7%BD%AE%E7%89%A9%E6%9E%B6",
+      "reason": "有效利用廚房空間",
       "source": "AI推薦"
     }
   ]
