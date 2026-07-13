@@ -1334,6 +1334,14 @@ Object.assign(App, {
       isCommitting.delete(idx);
       try { updateLiveTotals(); } catch {}
       showToast('已儲存 ✓', 'success');
+      // 若沒有其他列還在編輯（避免蓋掉使用者打到一半的值），
+      //   做完整 re-render → 右側折線圖、本月累計、當月總營收全部更新
+      const anyOtherDirty = Array.from(document.querySelectorAll('.card-rev, .card-ads')).some(el => {
+        return !sameVal(el.value, el.dataset.original || '');
+      });
+      if (!anyOtherDirty) {
+        try { this.render(); } catch {}
+      }
     };
 
     // 顯示確認 / 取消 dialog
