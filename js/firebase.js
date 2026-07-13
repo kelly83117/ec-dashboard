@@ -164,6 +164,28 @@ try {
     };
   } catch {}
 
+  // ============== 洞察表獨立文件 app/insight（避免 app/main 撞 1MB 上限） ==============
+  // 洞察表的 ec.insight_{shop}_master 資料量會隨著商品累積變大，
+  // 加上 users / departments / platforms 等擠在 app/main 會很快撞 1MB 上限。
+  // → 把 ec.insight_* 全部挪到 app/insight 獨立文件。
+  const insightDocRef = doc(db, 'app', 'insight');
+  const INSIGHT_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
+    + '/databases/(default)/documents/app/insight';
+  const restDeleteInsightFields = async (keys) => {
+    const params = keys.map(k => 'updateMask.fieldPaths=' + encodeURIComponent('`' + k + '`')).join('&');
+    const url = INSIGHT_REST_BASE + '?' + params;
+    const resp = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{"fields":{}}' });
+    if (!resp.ok) throw new Error('REST delete failed: ' + resp.status);
+    return resp.json();
+  };
+  window.__cloudInsight = {
+    getDoc: () => getDoc(insightDocRef),
+    setField: (key, value) => setDoc(insightDocRef, { [key]: value }, { merge: true }),
+    removeField: (key) => restDeleteInsightFields([key]),
+    removeFields: (keys) => restDeleteInsightFields(keys),
+    subscribe: (cb) => onSnapshot(insightDocRef, snap => cb(snap.exists() ? snap.data() : {})),
+  };
+
   window.dispatchEvent(new Event('cloudStoreReady'));
 
   // 首頁渲染完後 1.5 秒（給 dashboard / 圖表時間），背景把重量級訂閱接上

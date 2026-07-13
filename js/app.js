@@ -2469,6 +2469,40 @@ async function __setupCloud() {
       }
     } catch {}
 
+    // ============== 洞察表資料從 app/insight 拉回，合併進 Store._mem ==============
+    // 洞察表獨立 doc 避免 app/main 撞 1 MiB 上限（events: users/departments/platforms +
+    // insight master 加起來太快超過）。首批 snapshot + 訂閱後續變動都合併進 _mem。
+    let insightData = {};
+    try {
+      if (window.__cloudInsight) {
+        const iSnap = await window.__cloudInsight.getDoc();
+        insightData = iSnap.exists() ? (iSnap.data() || {}) : {};
+      }
+    } catch (e) { console.warn('[insight] 初次讀取失敗', e); }
+    Object.assign(cloudData, insightData);
+
+    // 一次性 migration：把還躺在 app/main 的 ec.insight_* 搬到 app/insight，再從 main 刪掉
+    // → 讓 app/main 立刻小於 1 MiB，Kelly 才能繼續寫入 users/departments 等
+    try {
+      const insightKeysInMain = Object.keys(cloudData).filter(k => k.startsWith('ec.insight_') && !insightData[k]);
+      if (insightKeysInMain.length > 0 && window.__cloudInsight) {
+        console.warn('[insight migration] 搬', insightKeysInMain.length, '個 key 從 app/main → app/insight');
+        for (const k of insightKeysInMain) {
+          try {
+            await window.__cloudInsight.setField(k, cloudData[k]);
+          } catch (e) { console.error('[insight migration] 搬', k, '失敗', e); }
+        }
+        // 全部成功後才從 app/main 刪掉（用 REST removeFields 一次刪，避免多次寫入）
+        try {
+          const cs0 = window.__cloudStore;
+          if (cs0 && typeof cs0.removeFields === 'function') {
+            await cs0.removeFields(insightKeysInMain);
+            console.warn('[insight migration] app/main 已清掉', insightKeysInMain.length, '個 ec.insight_* key');
+          }
+        } catch (e) { console.error('[insight migration] app/main 刪除失敗（但 app/insight 已備份）', e); }
+      }
+    } catch (e) { console.warn('[insight migration] 例外', e); }
+
     Store._mem = cloudData;
     Store._useMem = true;
 
@@ -2509,9 +2543,14 @@ async function __setupCloud() {
       // 寫入時把 key 從「最近刪除」名單移除，否則訂閱回呼會把剛上傳的資料當成 race 過濾掉
       if (window.__unmarkRecentlyDeleted) window.__unmarkRecentlyDeleted(key);
       origSet(key, value);
-      // 雲端寫入失敗一定要讓使用者看到（先前撞 1 MiB 上限的事件就是被靜默 reject 吃掉）
+      // ec.insight_* 走獨立的 app/insight 文件（避免 app/main 撞 1 MiB 上限）
+      //   洞察表的 master 資料量會隨商品數持續增長，跟 users/departments 擠在
+      //   同一份 app/main 很快就會爆。分開存 → 各自有 1 MiB 額度。
+      const targetCloud = (typeof key === 'string' && key.startsWith('ec.insight_') && window.__cloudInsight)
+        ? window.__cloudInsight
+        : cs;
       try {
-        const p = cs.setField(key, value);
+        const p = targetCloud.setField(key, value);
         if (p && typeof p.then === 'function') {
           p.catch(err => __notifyCloudFail(key, err));
         }
@@ -2528,8 +2567,9 @@ async function __setupCloud() {
     };
     // 手動把指定 key 推到雲端（搭配 setLocalOnly 使用）
     Store.pushKeyToCloud = async function(key) {
+      const target = (typeof key === 'string' && key.startsWith('ec.insight_') && window.__cloudInsight) ? window.__cloudInsight : cs;
       try {
-        await cs.setField(key, Store._mem[key]);
+        await target.setField(key, Store._mem[key]);
         return true;
       } catch (e) {
         console.error('[pushKeyToCloud] 失敗', key, e);
@@ -2539,8 +2579,9 @@ async function __setupCloud() {
     Store.remove = function(key) {
       if (__LOCAL_ONLY_KEYS.has(key)) { __localRemove(key); return; }
       origRemove(key);
+      const targetCloud = (typeof key === 'string' && key.startsWith('ec.insight_') && window.__cloudInsight) ? window.__cloudInsight : cs;
       try {
-        const p = cs.removeField(key);
+        const p = targetCloud.removeField(key);
         if (p && typeof p.then === 'function') {
           p.catch(err => __notifyCloudFail(key, err, '刪除'));
         }
@@ -2640,6 +2681,26 @@ async function __setupCloud() {
       const justSavedLocally = window._platformJustSaved && (Date.now() - window._platformJustSaved < 2000);
       if (!inOurInput && !hasUnsavedChanges && !justSavedLocally) App.render();
     });
+
+    // 訂閱 app/insight：其他人改了洞察表資料，這台會收到更新
+    // 合併進 _mem 但不重新賦值整個 _mem（避免蓋掉 app/main 的資料）
+    try {
+      if (window.__cloudInsight) {
+        window.__cloudInsight.subscribe((idata) => {
+          if (!idata) return;
+          try {
+            Object.keys(idata).forEach(k => {
+              if (Store._mem) Store._mem[k] = idata[k];
+            });
+            // 有洞察表變動且不在編輯狀態 → 重繪
+            if (window.App && App.currentUser && typeof App.render === 'function') {
+              const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
+              if (!inputInProgress) { try { App.render(); } catch {} }
+            }
+          } catch (e) { console.warn('[insight subscribe] merge 失敗', e); }
+        });
+      }
+    } catch (e) { console.warn('[insight subscribe] 訂閱失敗', e); }
   } catch (e) {
     console.error('Cloud setup failed, falling back to localStorage', e);
   }
