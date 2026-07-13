@@ -1,5 +1,5 @@
 {
-  "updated": "2026-07-12",
+  "updated": "2026-07-13",
   "items": [
     {
       "keyword": "收纳盒",
@@ -10,36 +10,36 @@
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E7%9B%92"
     },
     {
-      "keyword": "竹製砧板",
-      "name": "環保竹製砧板",
-      "price_range": "10-20元",
-      "moq": "50個",
-      "reason": "夏季烹飪需求增加",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E7%AB%B9%E8%A3%BD%E7%A0%A7%E6%9D%BF"
+      "keyword": "浴巾",
+      "name": "吸水浴巾",
+      "price_range": "10-30元",
+      "moq": "50條",
+      "reason": "夏季洗澡需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%B7%BE"
     },
     {
-      "keyword": "浴室收納架",
-      "name": "多功能浴室收納架",
-      "price_range": "15-30元",
-      "moq": "30個",
-      "reason": "即將到來的居家整頓需求",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%B4%8D%E6%9E%B6"
+      "keyword": "廚具套裝",
+      "name": "不鏽鋼廚具套裝",
+      "price_range": "20-60元",
+      "moq": "30套",
+      "reason": "夏季烹飪需求上升",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BB%9A%E5%85%B7%E5%A5%97%E8%A3%9D"
     },
     {
-      "keyword": "床單套件",
-      "name": "涼感床單套件",
-      "price_range": "30-60元",
-      "moq": "20套",
-      "reason": "夏季清涼睡眠需求上升",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E5%96%AE%E5%A5%97%E4%BB%B6"
+      "keyword": "清潔用品",
+      "name": "環保清潔劑",
+      "price_range": "5-15元",
+      "moq": "100瓶",
+      "reason": "暑假大掃除需求高",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%BD%94%E7%94%A8%E5%93%81"
     },
     {
-      "keyword": "清潔拖把",
-      "name": "自動清潔拖把",
-      "price_range": "20-40元",
-      "moq": "50個",
-      "reason": "暑期清潔需求增長",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%BD%94%E6%8B%96%E6%8A%8A"
+      "keyword": "床單",
+      "name": "棉質床單",
+      "price_range": "20-50元",
+      "moq": "50套",
+      "reason": "夏季換季床品需求",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E5%96%AE"
     }
   ]
 }
