@@ -4941,6 +4941,8 @@ const MOMO_TABLE_COLS=[
   {k:'stock',label:'可接單量',fmt:'num'},{k:'views',label:'瀏覽量',fmt:'num'},
   {k:'trafficGrowth',label:'流量成長率',fmt:'pct'},
   {k:'orderQty',label:'訂購數',fmt:'num'},{k:'orderAmt',label:'訂購金額',fmt:'money'},{k:'returnQty',label:'退貨數',fmt:'num'},
+  // 毛利/純利/純利率：公式還沒定案，先把欄位放上去，資料還沒算出來時顯示 —
+  {k:'gross',label:'毛利',fmt:'money'},{k:'net',label:'純利',fmt:'money'},{k:'netRate',label:'純利率',fmt:'pct'},
 ];
 const MOMO_TABLE_LEFT_COLS=new Set(['code','name']);
 const _MYP_COLORDER_LS='ec_colorder_momo';
@@ -5094,7 +5096,7 @@ function renderMomoRptTableBody(shop){
       if(c.k==='views'){
         return`<td class="${cls}"><div>${fmtFns.num(v)}</div><div style="font-size:10px;color:#9ca3af;margin-top:2px">前期 ${fmtFns.num(r.prevViews)}</div></td>`;
       }
-      const disp=c.fmt?fmtFns[c.fmt](v):v;
+      const disp=(v===undefined||v===null)?'<span style="color:#d1d5db">—</span>':(c.fmt?fmtFns[c.fmt](v):v);
       const style=c.k==='trafficGrowth'?`style="color:${v>=0?'#10b981':'#ef4444'};font-weight:700"`:'';
       return`<td class="${cls}" ${style}>${disp}</td>`;
     }).join('');
