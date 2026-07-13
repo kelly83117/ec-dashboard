@@ -342,10 +342,16 @@ function lsSave(shop,month,half,built,period,days){
   _pendingSyncKeys.add(k);
   _showSyncBtn(shop);
 }
-// 真實 pending 筆數（排除 __shop__| 這種只用來點亮按鈕的 marker）
+// 真實 pending 筆數（排除 __shop__| marker 和 _summary_v1）
+//   _summary_v1 是總表資料，總表已改為自動同步（saveSummaryRows 直接推雲端），
+//   不會經過 pending set；但舊版可能已把它塞進 set → 保險排除掉，避免離開頁面誤跳「未同步」。
 function _realPendingCount(){
   let n=0;
-  _pendingSyncKeys.forEach(k=>{ if(!k.startsWith('__shop__|')) n++; });
+  _pendingSyncKeys.forEach(k=>{
+    if(k.startsWith('__shop__|')) return;
+    if(k==='_summary_v1') return;
+    n++;
+  });
   return n;
 }
 window.__profitPendingCount = _realPendingCount;
@@ -3239,8 +3245,23 @@ function getSummaryRows(){
 }
 function saveSummaryRows(rows){
   window._summaryJustSaved=Date.now();
+  // 本機立刻更新（UI 即時反映）
   try{localStorage.setItem('ec_summary_v1',JSON.stringify(rows));}catch{}
-  _cloudWriteSafe('_summary_v1', rows, '總表');
+  try{if(typeof Store!=='undefined'&&Store._mem)Store._mem['_summary_v1']=rows;}catch{}
+  // 總表直接推雲端，不進 pending set —
+  //   總表 tab 本身沒有渲染「☁ 同步雲端」按鈕（那顆按鈕只在賣場 tab 有），
+  //   所以總表變動要靠自動同步。這裡走 __cloudProfit.setField 直接寫 app/profit。
+  try{
+    if(window.__cloudProfit && typeof window.__cloudProfit.setField==='function'){
+      const p = window.__cloudProfit.setField('_summary_v1', rows);
+      if(p && typeof p.then==='function'){
+        p.catch(e=>{
+          console.error('[saveSummaryRows] 雲端寫入失敗', e);
+          if(typeof showToast==='function') showToast('❌ 總表雲端寫入失敗', 'error');
+        });
+      }
+    }
+  }catch(e){ console.error('[saveSummaryRows] 雲端寫入異常', e); }
 }
 function openAddSummaryRowModal(){
   const today=new Date();
