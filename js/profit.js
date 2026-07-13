@@ -3248,6 +3248,9 @@ function saveSummaryRows(rows){
   // 本機立刻更新（UI 即時反映）
   try{localStorage.setItem('ec_summary_v1',JSON.stringify(rows));}catch{}
   try{if(typeof Store!=='undefined'&&Store._mem)Store._mem['_summary_v1']=rows;}catch{}
+  // getSummaryRows() 讀取優先看 Store._profitMem，這裡沒同步更新的話，
+  // 網路來回還沒完成、畫面就先重新 render（切賣場分頁）時會讀到舊值，看起來像數字消失了
+  try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem['_summary_v1']=rows;}catch{}
   // 總表直接推雲端，不進 pending set —
   //   總表 tab 本身沒有渲染「☁ 同步雲端」按鈕（那顆按鈕只在賣場 tab 有），
   //   所以總表變動要靠自動同步。這裡走 __cloudProfit.setField 直接寫 app/profit。
