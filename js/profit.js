@@ -3243,20 +3243,60 @@ function getSummaryRows(){
     const s=localStorage.getItem('ec_summary_v1');return s?JSON.parse(s):[];
   }catch{return [];}
 }
-function saveSummaryRows(rows){
+// 多人同時編輯保護：寫入前先讀雲端最新，把 diff 疊上去再寫回
+//   diff 可選：{type:'edit', rowId, shop, field, value, start, end}
+//              {type:'add', row}
+//              {type:'delete', rowId}
+//   有 diff → fetch cloud → 套 diff → 寫回 (本地兩個人同時打不會互蓋)
+//   沒 diff → 直接把 rows 整包寫回（fallback，保留舊行為）
+async function saveSummaryRows(rows, diff){
   window._summaryJustSaved=Date.now();
-  // 本機立刻更新（UI 即時反映）
+  // 先本機立刻更新（UI 即時反映）
   try{localStorage.setItem('ec_summary_v1',JSON.stringify(rows));}catch{}
-  try{if(typeof Store!=='undefined'&&Store._mem)Store._mem['_summary_v1']=rows;}catch{}
-  // getSummaryRows() 讀取優先看 Store._profitMem，這裡沒同步更新的話，
-  // 網路來回還沒完成、畫面就先重新 render（切賣場分頁）時會讀到舊值，看起來像數字消失了
-  try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem['_summary_v1']=rows;}catch{}
-  // 總表直接推雲端，不進 pending set —
-  //   總表 tab 本身沒有渲染「☁ 同步雲端」按鈕（那顆按鈕只在賣場 tab 有），
-  //   所以總表變動要靠自動同步。這裡走 __cloudProfit.setField 直接寫 app/profit。
+  // getSummaryRows() 讀取優先看 Store._profitMem；沒同步更新的話網路來回還沒完成、
+  // 畫面就先重新 render 時會讀到舊值，看起來像數字消失了 → _mem + _profitMem 雙寫
+  try{
+    if(typeof Store!=='undefined'){
+      if(Store._mem) Store._mem['_summary_v1']=rows;
+      if(Store._profitMem) Store._profitMem['_summary_v1']=rows;
+    }
+  }catch{}
+  // 有 diff 且雲端可連 → 讀最新版套 diff 上去（fetch-merge-write 避免多人互蓋）
+  let mergedRows = rows;
+  if(diff && window.__cloudProfit && typeof window.__cloudProfit.getDoc==='function'){
+    try{
+      const snap = await window.__cloudProfit.getDoc();
+      const cloudRows = (snap.exists()? snap.data() : {})?.['_summary_v1'] || [];
+      // 用 cloud 當基底，套 diff
+      if(diff.type==='edit'){
+        let cr = cloudRows.find(r=>r.id===diff.rowId);
+        if(!cr){ cr = { id: diff.rowId, start: diff.start, end: diff.end, shops: {} }; cloudRows.push(cr); }
+        cr.shops = cr.shops || {};
+        cr.shops[diff.shop] = cr.shops[diff.shop] || {};
+        if(diff.value != null && !isNaN(diff.value) && diff.value > 0) cr.shops[diff.shop][diff.field] = diff.value;
+        else delete cr.shops[diff.shop][diff.field];
+        mergedRows = cloudRows;
+      } else if(diff.type==='add'){
+        if(!cloudRows.find(r=>r.id===diff.row.id)) cloudRows.push(diff.row);
+        cloudRows.sort((a,b)=>(a.start||'').localeCompare(b.start||''));
+        mergedRows = cloudRows;
+      } else if(diff.type==='delete'){
+        mergedRows = cloudRows.filter(r=>r.id!==diff.rowId);
+      }
+      // 本機同步覆蓋成合併後版本，避免下次讀本機拿到舊資料
+      try{localStorage.setItem('ec_summary_v1',JSON.stringify(mergedRows));}catch{}
+      try{
+        if(typeof Store!=='undefined'){
+          if(Store._mem) Store._mem['_summary_v1']=mergedRows;
+          if(Store._profitMem) Store._profitMem['_summary_v1']=mergedRows;
+        }
+      }catch{}
+    }catch(e){ console.warn('[saveSummaryRows] 讀雲端合併失敗，直接寫本機版', e); }
+  }
+  // 推雲端（fire-and-forget，錯了跳 toast）
   try{
     if(window.__cloudProfit && typeof window.__cloudProfit.setField==='function'){
-      const p = window.__cloudProfit.setField('_summary_v1', rows);
+      const p = window.__cloudProfit.setField('_summary_v1', mergedRows);
       if(p && typeof p.then==='function'){
         p.catch(e=>{
           console.error('[saveSummaryRows] 雲端寫入失敗', e);
@@ -3296,15 +3336,19 @@ function confirmAddSummaryRow(btn){
   if(start>end){alert('開始日期不能晚於結束日期');return;}
   const rows=getSummaryRows();
   if(rows.find(r=>r.start===start&&r.end===end)){alert('此週次已存在');return;}
-  rows.push({id:'sw_'+Date.now(),start,end,shops:{}});
+  const newRow = {id:'sw_'+Date.now(),start,end,shops:{}};
+  rows.push(newRow);
   rows.sort((a,b)=>a.start.localeCompare(b.start));
-  saveSummaryRows(rows);
+  // 傳 diff 讓 saveSummaryRows 疊在雲端最新版之上，避免蓋掉別人剛新增的其他週次
+  saveSummaryRows(rows, { type:'add', row: newRow });
   btn.closest('.ana-overlay').remove();
   renderSummary();
 }
 function deleteSummaryRow(id){
   if(!confirm('確定刪除這週的資料？'))return;
-  saveSummaryRows(getSummaryRows().filter(r=>r.id!==id));
+  const filtered = getSummaryRows().filter(r=>r.id!==id);
+  // 傳 diff 讓 saveSummaryRows 從雲端最新版扣掉這 id，避免刪除時蓋掉別人剛新增的
+  saveSummaryRows(filtered, { type:'delete', rowId: id });
   renderSummary();
 }
 function editSummaryCell(rowId,shop,field,tdEl){
@@ -3322,8 +3366,10 @@ function editSummaryCell(rowId,shop,field,tdEl){
   const save=()=>{
     if(done)return;done=true;
     const v=parseFloat(inp.value);
-    if(!isNaN(v)&&v>0)row.shops[shop][field]=v;else delete row.shops[shop][field];
-    saveSummaryRows(rows);
+    const isValid = !isNaN(v) && v > 0;
+    if(isValid)row.shops[shop][field]=v;else delete row.shops[shop][field];
+    // 傳 diff 讓 saveSummaryRows 能 fetch 雲端最新版 + 只疊這格改動，避免多人同時打互蓋
+    saveSummaryRows(rows, { type:'edit', rowId, shop, field, value: isValid ? v : null, start: row.start, end: row.end });
     // patch cells without re-rendering
     const d=row.shops[shop]||{};
     const rate=getPlatformRate();
