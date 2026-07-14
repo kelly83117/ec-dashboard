@@ -1151,7 +1151,7 @@ const App = {
       : list.map((p, i) => `<tr>
           <td style="font-size:12px;color:var(--text-muted);white-space:nowrap">${escapeHtml(p.code||'')}</td>
           <td style="font-weight:600">${escapeHtml(p.name||'')}</td>
-          <td style="color:var(--text-muted)">${escapeHtml(p.note||'')}</td>
+          <td style="color:var(--text)">${escapeHtml(p.note||'')}</td>
           <td>${escapeHtml(p.shop||'')}</td>
           <td style="text-align:right">NT$${Number(p.price||0).toLocaleString()}</td>
           <td style="text-align:center">${p.yellowTag ? `<span style="color:#dc2626;font-weight:700;font-size:13px">NT$${Number(p.yellowTag).toLocaleString()}</span>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
