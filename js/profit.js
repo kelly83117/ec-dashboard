@@ -4496,10 +4496,12 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
         <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${r.growS} 分</div>
       </div>
       <div style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15">${valDisp}</div>
-      <div style="font-size:11.5px;color:#9ca3af;margin-top:3px">目標 ${r.t.grow[0]}%</div>
-      <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #e5e7eb;font-size:11px;color:#9ca3af;display:flex;flex-direction:column;gap:4px">
-        ${editableNum('前期純利','prevProfit',r.m.prevProfit,fmtN)}
-        ${editableNum('本期純利','curProfit',r.m.curProfit,fmtN)}
+      <div style="font-size:11.5px;color:#9ca3af;margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span>目標 ${r.t.grow[0]}%</span>
+        <span style="color:#d1d5db">｜</span>
+        ${editableNum('前期','prevProfit',r.m.prevProfit,fmtN)}
+        <span style="color:#d1d5db">→</span>
+        ${editableNum('本期','curProfit',r.m.curProfit,fmtN)}
       </div>
     </div>`;
   })();
