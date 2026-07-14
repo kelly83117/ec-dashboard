@@ -864,10 +864,8 @@ function loadIntoUI(shop,built,period,days){
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.analysisLabel=r.analysis?.label||'';
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      if(shop==='好麻吉'){
-        r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
-        r.growthAnalysisLabel=r.growthAnalysis?.label||'';
-      }
+      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
+      r.growthAnalysisLabel=r.growthAnalysis?.label||'';
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
@@ -1674,10 +1672,10 @@ function buildShop(shop,days){
     const dayBudget=days>0?adsFee/days:0;
     const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit,roi);
     const testTags=calcTestTags(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit,roi);
-    // 上半月營收 & 成長比（只有好麻吉）
+    // 上期營收 & 成長比（所有賣場都算：整月賣場比對上個月整月，好麻吉上/下半月比對同月/上月對應半月）
     const prevRev = prevRevMap[p.code] ?? null;
     const growthRate = (prevRev!==null && prevRev>0) ? (p.rev - prevRev) / prevRev : null;
-    const growthAnalysis = shop==='好麻吉' ? calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate) : null;
+    const growthAnalysis = calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate);
     return{code:p.code,name:p.name,shopeeIds:p.shopeeIds,qty:p.qty,rev:p.rev,gross:p.gross,
       adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,directROI,roi,roiDiff,
       dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,analysis,testTags,
@@ -2115,10 +2113,8 @@ function reapplyAnaToAll(){
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.analysisLabel=r.analysis?.label||'';
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      if(s.id==='好麻吉'){
-        r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
-        r.growthAnalysisLabel=r.growthAnalysis?.label||'';
-      }
+      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
+      r.growthAnalysisLabel=r.growthAnalysis?.label||'';
     });
     applyFilters(s.id);
   });
@@ -2456,19 +2452,17 @@ function updateTagFilterBar(shop){
     <div class="tfrow-pills">${fixedPills}${addDrop}${subDrop}${customPills}</div>
   </div>`;
   let row2='';
-  if(shop==='好麻吉'){
-    const gCustomPills=getCustomGrowthRules().filter(ct=>counts[ct.label]).map(ct=>{
-      const active=sel.includes(ct.label)?' active':'';const lbl=ct.label.replace(/'/g,"\\'");
-      const cnt=counts[ct.label]||0;
-      const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
-      return`<span class="tfpill${active}" ${ca}>${ct.label}</span><span class="tfpill-cnt-cell" ${ca}>${cnt}</span>`;
-    }).join('');
-    const gp=GROWTH_TAGS.filter(t=>counts[t.label]).map(mkPill).join('')+gCustomPills;
-    if(gp)row2=`<div class="tfrow">
-      <div><span class="tfrow-lbl">成長分析</span><button class="ana-gear-btn" onclick="openGrowthSettings('${shop}')" title="設定成長分析規則">⚙</button></div>
-      <div class="tfrow-pills">${gp}</div>
-    </div>`;
-  }
+  const gCustomPills=getCustomGrowthRules().filter(ct=>counts[ct.label]).map(ct=>{
+    const active=sel.includes(ct.label)?' active':'';const lbl=ct.label.replace(/'/g,"\\'");
+    const cnt=counts[ct.label]||0;
+    const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
+    return`<span class="tfpill${active}" ${ca}>${ct.label}</span><span class="tfpill-cnt-cell" ${ca}>${cnt}</span>`;
+  }).join('');
+  const gp=GROWTH_TAGS.filter(t=>counts[t.label]).map(mkPill).join('')+gCustomPills;
+  if(gp)row2=`<div class="tfrow">
+    <div><span class="tfrow-lbl">成長分析</span><button class="ana-gear-btn" onclick="openGrowthSettings('${shop}')" title="設定成長分析規則">⚙</button></div>
+    <div class="tfrow-pills">${gp}</div>
+  </div>`;
   bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row0}${row1}${row2}</div>`;
 }
 function toggleTagPopup(shop,btn){
@@ -2787,7 +2781,7 @@ function recalcRow(shop,code,ov){
   const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
   const testTags=calcTestTags(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
   const growthRate=r.growthRate;
-  const growthAnalysis=shop==='好麻吉'?calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate):null;
+  const growthAnalysis=calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate);
   Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,roiDiff,dayBudget,analysis,testTags,growthAnalysis});
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
@@ -2928,7 +2922,7 @@ function getColOrder(){
 }
 function saveColOrder(order){try{localStorage.setItem(_COLORDER_LS,JSON.stringify(order));}catch{}}
 function getOrderedCols(shop){
-  const avail=PROFIT_COLS.filter(c=>!c.grow||shop==='好麻吉');
+  const avail=PROFIT_COLS;
   const byKey=new Map(avail.map(c=>[c.key,c]));
   const order=getColOrder();
   const out=[];
@@ -3121,7 +3115,7 @@ function renderTable(shop,list){
   // 拖曳表頭調整欄位順序：拖曳來源/目標都用 data-colkey 標記的欄位鍵
   const dragAttrs=(key)=>`draggable="true" ondragstart="colDragStart(event,'${shop}','${key}')" ondragover="colDragOver(event)" ondragenter="colDragEnter(event)" ondragleave="colDragLeave(event)" ondrop="colDrop(event,'${shop}','${key}')" ondragend="colDragEnd(event)"`;
   const HEADER_LABEL={
-    adsFee:'廣告費', rev:shop==='好麻吉'?'營收 / 上半月':'營收', gross:'毛利', pureProfit:'淨利',
+    adsFee:'廣告費', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利',
     pureRate:'淨利率%', adsPct:'廣告佔比', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
     roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算',
     analysisLabel:'分析', note:'廣告調整',
@@ -3171,7 +3165,7 @@ function renderTable(shop,list){
         adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">${fmtAds(r.adsFee)}</span></td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
         note:noteCellHtml,
-        growthNote:shop==='好麻吉'?buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]):'',
+        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
       };
       const bodyCells=orderedCols.map(c=>{
         if(mobicCell[c.key]!==undefined)return mobicCell[c.key];
@@ -3187,7 +3181,7 @@ function renderTable(shop,list){
     }else{
       const rowCell={
         adsFee:editTd('adsFee',fmtAds(r.adsFee),'td-amber'),
-        rev:`<td class="td-num">$${fmtN(r.rev)}${shop==='好麻吉'?`<div class="sub-rev">${r.prevRev!==null?'上半月 $'+fmtN(r.prevRev):'—'}</div>`:''}</td>`,
+        rev:`<td class="td-num">$${fmtN(r.rev)}<div class="sub-rev">${r.prevRev!==null?'上期 $'+fmtN(r.prevRev):'—'}</div></td>`,
         gross:`<td class="td-num">$${fmtN(r.gross)}</td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
         pureRate:`<td id="td-${shop}-${r.code}-pureRate">${pill(r.pureRate*100)}</td>`,
@@ -3201,9 +3195,9 @@ function renderTable(shop,list){
         dayBudget:`<td id="td-${shop}-${r.code}-dayBudget" class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>`,
         analysisLabel:`<td id="td-${shop}-${r.code}-analysis" class="tl">${anaHtml}</td>`,
         note:noteCellHtml,
-        growthRate:shop==='好麻吉'?`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`:'',
-        growthAnalysis:shop==='好麻吉'?`<td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`:'',
-        growthNote:shop==='好麻吉'?buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]):'',
+        growthRate:`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`,
+        growthAnalysis:`<td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`,
+        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
       };
       html+=`<tr>
         <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
@@ -3221,11 +3215,11 @@ function renderTable(shop,list){
   const fGrowth=(fPrevRev>0)?(fRev-fPrevRev)/fPrevRev:null;
   const totalCell={
     adsFee:`<td class="td-num td-amber">$${fmtN(fAds)}</td>`,
-    rev:`<td class="td-num">$${fmtN(fRev)}${shop==='好麻吉'?`<div class="sub-rev">$${fmtN(fPrevRev)}</div>`:''}</td>`,
+    rev:`<td class="td-num">$${fmtN(fRev)}<div class="sub-rev">$${fmtN(fPrevRev)}</div></td>`,
     gross:`<td class="td-num">$${fmtN(fGross)}</td>`,
     pureProfit:`<td class="td-num ${fPure>=0?'td-pos':'td-neg'}">$${fmtN(fPure)}</td>`,
     pureRate:`<td>${fRev>0?pill(fPure/fRev*100):'—'}</td>`,
-    growthRate:shop==='好麻吉'?`<td class="td-num" style="text-align:center">${fGrowth===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${fGrowth>=0?'#10b981':'#ef4444'};font-weight:700">${fGrowth>=0?'↑':'↓'} ${Math.abs(fGrowth*100).toFixed(0)}%</span>`}</td>`:'',
+    growthRate:`<td class="td-num" style="text-align:center">${fGrowth===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${fGrowth>=0?'#10b981':'#ef4444'};font-weight:700">${fGrowth>=0?'↑':'↓'} ${Math.abs(fGrowth*100).toFixed(0)}%</span>`}</td>`,
   };
   html+=`<tr class="tr-total">
     <td class="tl" colspan="2">小計（${list.length}筆）</td>
@@ -6134,10 +6128,10 @@ function initShopUI(shop){
 function doExport(shop){
   const built=state[shop]._built;if(!built?.length)return;
   const wb=XLSX.utils.book_new();
-  const isHaomaji = shop === '好麻吉';
   const h=['商品ID','編號','商品名稱','廣告費','營收','毛利','淨利','淨利率%','廣告佔比%','可用庫存','目標ROI','直接投入產出','投入產出','實際-目標','點擊數','日預算','分析','調整備註',
-    ...(isHaomaji?['上半月營收','成長比','成長分析','成長調整']:[])];
+    '上期營收','成長比','成長分析','成長調整'];
   const exportNotes=getNotes(shop);
+  const exportGrowthNotes=getNotes(shop+'_growth');
   const d=built.map(r=>[
     !r.shopeeIds?.length?'未對應':r.shopeeIds.length===1?r.shopeeIds[0]:'多個',
     r.code,r.name,+r.adsFee.toFixed(0),+r.rev.toFixed(0),+r.gross.toFixed(0),+r.pureProfit.toFixed(0),
@@ -6146,11 +6140,10 @@ function doExport(shop){
     r.roi>0?+r.roi.toFixed(2):'-',r.roiDiff!==null?+r.roiDiff.toFixed(2):'-',
     r.clicks>0?r.clicks:'-',r.dayBudget>0?+r.dayBudget.toFixed(0):'-',
     r.analysis?.label||'', exportNotes[r.code]||'',
-    ...(isHaomaji?[
-      r.prevRev!==null?+r.prevRev.toFixed(0):'-',
-      r.growthRate!==null?+((r.growthRate*100).toFixed(2)):'-',
-      r.growthAnalysis?.label||''
-    ]:[])
+    r.prevRev!==null?+r.prevRev.toFixed(0):'-',
+    r.growthRate!==null?+((r.growthRate*100).toFixed(2)):'-',
+    r.growthAnalysis?.label||'',
+    exportGrowthNotes[r.code]?.adjustments?.map(a=>a.text).join('; ')||''
   ]);
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([h,...d]),shop);
   XLSX.writeFile(wb,`淨利表_${shop}_${state[shop]._period||''}.xlsx`);
