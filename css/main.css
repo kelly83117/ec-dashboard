@@ -1038,6 +1038,7 @@
     border-left: 3px solid #9ca3af;
   }
   .dept-d3-view .table-card-header h3 { font-weight: 700; color: #111827; }
+  .dept-d3-view td { text-align: left !important; }
   .dept-d3-view th {
     background: #f3f4f6;
     color: #6b7280;
