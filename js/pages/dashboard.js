@@ -404,9 +404,104 @@ Object.assign(App, {
       </div>
       ${summaryPills}
       <div class="stat-grid summary-grid">${summaryCards}</div>
+      ${this.channelRankingHtml(platforms, inputDateStr, prevDateStr)}
       <div id="dash-split" class="dash-split${entryOpen ? '' : ' is-entry-collapsed'}">
         <div id="revenue-entry-panel" class="dash-split-cell dash-entry${entryOpen ? '' : ' is-collapsed'}">${revenueTableHtml}</div>
         <div class="dash-split-cell">${this.dailyLineChartHtml(platforms)}</div>
+      </div>
+    `;
+  },
+  /* 各通路營收排名（水平長條）
+     - 資料沿用 viewDashboard 同一份 platforms + 同一套算法，不另接來源
+     - 純 render、無事件綁定：日期切換與存檔都會走 this.render()，這裡自然跟著更新
+     - ⚠ 不可就地 sort(platforms)：陣列索引就是填寫表格的 data-idx，
+       打亂會讓存檔寫到錯的賣場。故用 {p, i} 保留原始索引再排序。 */
+  channelRankingHtml(platforms, inputDateStr, prevDateStr) {
+    const revOf  = (p) => +(p.daily?.[inputDateStr]) || 0;
+    const prevOf = (p) => +(p.daily?.[prevDateStr])  || 0;
+    const adsOf  = (p) => +(p.dailyAdSpend?.[inputDateStr]) || 0;
+
+    const ranked = platforms
+      .map((p, i) => ({ p, i }))
+      .sort((a, b) => revOf(b.p) - revOf(a.p));
+
+    const maxRev = Math.max(...ranked.map(r => revOf(r.p)), 0);
+    const dateDisplay = inputDateStr.replace(/-/g, '/');
+
+    const legend = `
+      <div class="rank-legend">
+        <span class="rank-legend-item"><span class="rank-legend-dot is-good"></span>ROAS ≥ 10</span>
+        <span class="rank-legend-item"><span class="rank-legend-dot is-mid"></span>5 – 10</span>
+        <span class="rank-legend-item"><span class="rank-legend-dot is-low"></span>&lt; 5</span>
+        <span class="rank-legend-item"><span class="rank-legend-dot is-none"></span>無廣告</span>
+      </div>
+    `;
+    const head = `
+      <div class="rank-card-head">
+        <h3 class="rank-card-title">各通路營收排名</h3>
+        <span class="rank-card-date">${escapeHtml(dateDisplay)}　·　依營收由高到低</span>
+        ${legend}
+      </div>
+    `;
+
+    if (maxRev <= 0) {
+      return `
+        <div class="rank-card">
+          ${head}
+          <div class="rank-empty">${escapeHtml(dateDisplay)} 還沒有營收資料 — 等各通路數字填入後，這裡會顯示排名</div>
+        </div>
+      `;
+    }
+
+    const rows = ranked.map(({ p }) => {
+      const rev = revOf(p);
+      const ads = adsOf(p);
+      const prev = prevOf(p);
+      const hasAds = PLATFORMS_WITH_AD_SPEND.has(p.name);
+
+      // ROAS 分級：沒投廣告、或當日廣告費為 0 → 灰、顯示「—」（跟填寫表格的慣例一致）
+      let roasCls = 'is-none';
+      let roasText = '—';
+      if (hasAds && ads > 0) {
+        const roas = rev / ads;
+        roasCls = roas >= 10 ? 'is-good' : (roas >= 5 ? 'is-mid' : 'is-low');
+        roasText = roas.toFixed(2);
+      }
+
+      const pct = (rev / maxRev) * 100;
+      // 長條太短時金額塞不進去 → 翻到長條外側
+      const narrow = pct < 30;
+
+      const delta = prev > 0 ? ((rev / prev) - 1) * 100 : 0;
+      const deltaCls  = prev > 0 ? (delta >= 0 ? 'up' : 'down') : 'flat';
+      const deltaText = prev > 0
+        ? `${delta >= 0 ? '↑' : '↓'} ${Math.abs(delta).toFixed(1)}%`
+        : '—';
+
+      const market = PLATFORM_MARKETPLACE[p.name] || 'shopee';
+      const logoSrc = MARKETPLACE_BADGE[market].src;
+
+      return `
+        <li class="rank-row">
+          <span class="rank-name">
+            <img class="rank-logo" src="${logoSrc}" alt="">
+            <span class="rank-name-text" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>
+          </span>
+          <span class="rank-bar-track">
+            <span class="rank-bar ${roasCls}${narrow ? ' is-narrow' : ''}" style="--bar-pct:${pct.toFixed(1)}%">
+              <span class="rank-bar-value">${fmtNTD(rev)}</span>
+            </span>
+          </span>
+          <span class="rank-roas ${roasCls}">${roasText}</span>
+          <span class="rank-delta ${deltaCls}">${deltaText}</span>
+        </li>
+      `;
+    }).join('');
+
+    return `
+      <div class="rank-card">
+        ${head}
+        <ul class="rank-list">${rows}</ul>
       </div>
     `;
   },
