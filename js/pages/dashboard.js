@@ -91,6 +91,8 @@ Object.assign(App, {
     // 4 張總覽卡：可切換「昨日 / 前日 / 本月 / 上月 / 自訂月份」
     const summaryRange = this.filter.summaryRange || 'yesterday';
     const customMonth = this.filter.summaryMonth || toDateStr(now).slice(0, 7);
+    // 每日營收填寫預設收合；狀態記在 filter，重繪後才不會被打回收合
+    const entryOpen = !!this.filter.revenueEntryOpen;
 
     // 工具：給一個範圍類型 + 月份字串，回傳該範圍要加總的日期清單 + 標籤
     const monthDates = (yyyymm) => {
@@ -172,6 +174,11 @@ Object.assign(App, {
           <input type="month" id="summary-custom-month" value="${customMonth}" max="${toDateStr(now).slice(0,7)}"
             style="padding:3px 8px;border:1px solid ${summaryRange === 'customMonth' ? 'var(--primary)' : 'var(--border)'};border-radius:999px;font-size:11px;font-family:inherit;background:${summaryRange === 'customMonth' ? 'var(--primary-soft)' : 'var(--surface)'}">
         </span>
+        <button type="button" id="toggle-revenue-entry" class="entry-toggle-btn${entryOpen ? ' is-open' : ''}"
+          aria-expanded="${entryOpen ? 'true' : 'false'}" aria-controls="revenue-entry-panel">
+          <span>✏️ 填寫每日營收</span>
+          <span class="entry-toggle-caret">▼</span>
+        </button>
       </div>
     `;
 
@@ -397,9 +404,9 @@ Object.assign(App, {
       </div>
       ${summaryPills}
       <div class="stat-grid summary-grid">${summaryCards}</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch">
-        <div style="display:flex">${revenueTableHtml}</div>
-        <div style="display:flex">${this.dailyLineChartHtml(platforms)}</div>
+      <div id="dash-split" class="dash-split${entryOpen ? '' : ' is-entry-collapsed'}">
+        <div id="revenue-entry-panel" class="dash-split-cell dash-entry${entryOpen ? '' : ' is-collapsed'}">${revenueTableHtml}</div>
+        <div class="dash-split-cell">${this.dailyLineChartHtml(platforms)}</div>
       </div>
     `;
   },
@@ -771,6 +778,21 @@ Object.assign(App, {
     `;
   },
   bindDashboardPills() {
+    // 每日營收填寫的展開 / 收合。
+    // ⚠ 只切 class，絕對不要在這裡呼叫 this.render()：
+    //   填寫表格必須一直留在 DOM（bindCardInputs 綁的 .card-rev / .card-ads 才不會失效，
+    //   總覽卡的即時加總也才讀得到值），重繪還會把使用者打到一半的輸入洗掉。
+    const entryBtn = document.getElementById('toggle-revenue-entry');
+    if (entryBtn) {
+      entryBtn.addEventListener('click', () => {
+        const open = !this.filter.revenueEntryOpen;
+        this.filter.revenueEntryOpen = open;
+        entryBtn.classList.toggle('is-open', open);
+        entryBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        document.getElementById('revenue-entry-panel')?.classList.toggle('is-collapsed', !open);
+        document.getElementById('dash-split')?.classList.toggle('is-entry-collapsed', !open);
+      });
+    }
     // 曲線圖圖例：點哪個平台就單獨顯示，點「全部」回到所有平台
     document.querySelectorAll('.line-legend').forEach(btn => {
       btn.addEventListener('click', () => {

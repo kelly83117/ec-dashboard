@@ -567,6 +567,57 @@
   }
   .summary-card-noads { color: var(--text-muted); opacity: .75; }
 
+  /* ------------- 儀表板首頁 · 每日營收填寫（可收合） -------------
+     收合只切 class、不重繪：填寫表格永遠留在 DOM，
+     否則 bindCardInputs 的 .card-rev 會消失，連帶讓總覽卡的即時加總靜默歸零。 */
+  .entry-toggle-btn {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  .entry-toggle-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  /* 展開中：用主色淺底標示狀態 */
+  .entry-toggle-btn.is-open {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .entry-toggle-caret {
+    font-size: 9px;
+    line-height: 1;
+    transition: transform .15s ease;
+  }
+  .entry-toggle-btn.is-open .entry-toggle-caret { transform: rotate(180deg); }
+
+  /* 下半部：左填寫表格 + 右折線圖 */
+  .dash-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    align-items: stretch;
+  }
+  /* 表格收合時，折線圖撐滿整列 */
+  .dash-split.is-entry-collapsed { grid-template-columns: 1fr; }
+  .dash-split-cell { display: flex; }
+  .dash-entry.is-collapsed { display: none; }
+
+  @media (max-width: 900px) {
+    .dash-split { grid-template-columns: 1fr; }
+  }
+
   /* 篩選列 */
   .filter-bar {
     display: flex;
