@@ -930,74 +930,55 @@ Object.assign(App, {
   },
 
   renderD2KpiSummaryHtml() {
-    const H = (text) => `<tr><td colspan="4" style="background:#1a7a6e;color:#fff;font-weight:700;font-size:13px;padding:8px 12px">${text}</td></tr>`;
-    const val = (v) => `<td style="background:#fffde7;color:#1565c0;font-weight:700;text-align:center;padding:6px 10px;white-space:nowrap">${v}</td>`;
-    const lbl = (v, span=1) => `<td colspan="${span}" style="padding:6px 10px;font-size:13px">${v}</td>`;
-    const score = (v) => `<td style="background:#fffde7;color:#b71c1c;font-weight:700;text-align:center;padding:6px 10px">${v}</td>`;
+    const SEC = (title) => `<div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:13px;padding:9px 14px;border-radius:0">${title}</div>`;
+    const chip = (v, color='#1565c0') => `<span style="display:inline-block;background:#fffde7;color:${color};font-weight:700;padding:3px 12px;border-radius:5px;font-size:13px;min-width:52px;text-align:center">${v}</span>`;
+    const scoreChip = (v) => chip(v, '#b71c1c');
+    const row = (cells, bg='#fff') =>
+      `<div style="display:grid;grid-template-columns:${cells.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f0f0f0">
+        ${cells.map(c=>`<div style="padding:8px 14px;font-size:13px;${c.center?'text-align:center;':''}">${c.v}</div>`).join('')}
+      </div>`;
+    const subH = (...labels) =>
+      `<div style="display:grid;grid-template-columns:${labels.map(()=>'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">
+        ${labels.map(l=>`<div style="padding:6px 14px;font-size:11px;font-weight:600;color:#388e3c;text-align:center">${l}</div>`).join('')}
+      </div>`;
+
     return `
-    <div class="table-card" style="margin-bottom:18px">
-      <div class="table-card-header"><h3>📊 採購績效 KPI</h3></div>
-      <div style="padding:12px 16px;background:#f0fdf4;border-bottom:1px solid var(--border);font-size:12px;line-height:1.9;color:#374151">
-        <div><strong>每月：</strong>選品季分÷3（季末帶入）＋ 當月議價（40）＋ 當月出錯率（10）</div>
-        <div><strong>加分：</strong>每完成一項 +10；<strong>扣分：</strong>單價未更新，上限 −15</div>
-        <div><strong>當月總分</strong>＝ 以上加總；<strong>季累計</strong>＝ 三個月當月總分合計（選品÷3 合計＝選品季分）</div>
+    <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:18px;background:#fff">
+      <div style="background:#1a7a6e;color:#fff;padding:12px 16px">
+        <div style="font-size:15px;font-weight:700;margin-bottom:6px">📊 採購績效 KPI 計分架構</div>
+        <div style="font-size:12px;opacity:.9;line-height:1.8">
+          每月：選品季分 ÷ 3（季末帶入）＋ 當月議價（40）＋ 當月出錯率（10）<br>
+          加分：每完成一項 +10　扣分：單價未更新，上限 −15<br>
+          當月總分 ＝ 以上加總；季累計 ＝ 三個月當月總分合計
+        </div>
       </div>
-      <div class="table-wrap">
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
-        <colgroup><col style="width:30%"><col style="width:20%"><col style="width:25%"><col style="width:25%"></colgroup>
-        ${H('選品 — 每季')}
-        <tr style="background:#e0f2f1">
-          <td style="padding:6px 10px;font-size:11px;color:#555"></td>
-          <td style="text-align:center;padding:6px 10px;font-weight:600;font-size:12px;color:#555">目標支數</td>
-          <td style="text-align:center;padding:6px 10px;font-weight:600;font-size:12px;color:#555">配分</td>
-          <td></td>
-        </tr>
-        <tr style="background:#fff">
-          ${lbl('管量：新品數量（季）')}${val('50')}${score('30')}<td></td>
-        </tr>
-        <tr style="background:#e0f2f1">
-          ${lbl('管質分層（三層互斥）')}
-          <td style="text-align:center;padding:6px 10px;font-weight:600;font-size:12px;color:#555">毛利門檻(≥)</td>
-          <td style="text-align:center;padding:6px 10px;font-weight:600;font-size:12px;color:#555">目標支數</td>
-          <td style="text-align:center;padding:6px 10px;font-weight:600;font-size:12px;color:#555">配分</td>
-        </tr>
-        <tr style="background:#fff">${lbl('毛利 ≥1萬')}${val('10,000')}${val('2')}${score('10')}</tr>
-        <tr style="background:#fafafa">${lbl('毛利 ≥8千（&lt;1萬）')}${val('8,000')}${val('5')}${score('6')}</tr>
-        <tr style="background:#fff">${lbl('毛利 ≥5千（&lt;8千）')}${val('5,000')}${val('5')}${score('4')}</tr>
 
-        ${H('議價 — 每月')}
-        <tr style="background:#fff">
-          ${lbl('議價數量目標（個/月）')}${val('20')}${lbl('配分')}${score('20')}
-        </tr>
-        <tr style="background:#fafafa">
-          ${lbl('議價比 平均幅度門檻（≥）')}${val('10.0%')}${lbl('配分')}${score('20')}
-        </tr>
-        <tr style="background:#fff">
-          <td colspan="4" style="padding:6px 12px;font-size:11px;color:#6b7280">
-            議價比達標：前 10 項的平均議價幅度 ≥ 門檻，給滿分 20；未達則 0（全有全無）。
-          </td>
-        </tr>
+      ${SEC('選品 — 每季')}
+      ${subH('項目', '目標支數', '配分')}
+      ${row([{v:'管量：新品數量（季）'},{v:chip('50'),center:true},{v:scoreChip('30'),center:true}])}
 
-        ${H('叫貨出錯率 — 每月')}
-        <tr style="background:#fff">
-          ${lbl('出錯率門檻（≤）')}${val('1.0%')}${lbl('配分')}${score('10')}
-        </tr>
+      <div style="background:#f0faf0;border-bottom:1px solid #c8e6c9;padding:7px 14px;font-size:12px;font-weight:600;color:#2e7d32">管質分層（三層互斥）</div>
+      ${subH('分層條件', '毛利門檻 (≥)', '目標支數', '配分')}
+      ${row([{v:'毛利 ≥ 1萬'},{v:chip('10,000'),center:true},{v:chip('2'),center:true},{v:scoreChip('10'),center:true}], '#fff')}
+      ${row([{v:'毛利 ≥ 8千（< 1萬）'},{v:chip('8,000'),center:true},{v:chip('5'),center:true},{v:scoreChip('6'),center:true}], '#fafafa')}
+      ${row([{v:'毛利 ≥ 5千（< 8千）'},{v:chip('5,000'),center:true},{v:chip('5'),center:true},{v:scoreChip('4'),center:true}], '#fff')}
 
-        ${H('加分（AI 三表寫進儀表板，每項 +10）— 每月')}
-        <tr style="background:#fff">
-          ${lbl('每完成一項配分')}${val('10')}${lbl('項目')}
-          <td style="padding:6px 10px;font-size:12px;color:#374151">訂價表／議價表／圍購表／其他工具（每項 +10）</td>
-        </tr>
+      ${SEC('議價 — 每月')}
+      ${subH('指標', '目標值', '說明', '配分')}
+      ${row([{v:'議價數量目標（個／月）'},{v:chip('20'),center:true},{v:'達標即得分'},{v:scoreChip('20'),center:true}])}
+      ${row([{v:'議價比 平均幅度門檻（≥）'},{v:chip('10.0%'),center:true},{v:'前10項平均≥門檻，全有全無'},{v:scoreChip('20'),center:true}], '#fafafa')}
 
-        ${H('扣分（單價未更新）— 每月')}
-        <tr style="background:#fff">
-          ${lbl('每次扣分')}${val('-3')}${lbl('單月上限')}${score('-15')}
-        </tr>
-        <tr style="background:#fafafa">
-          <td colspan="4" style="padding:6px 12px;font-size:11px;color:#6b7280">每未更新一筆 −3；單月扣分上限 −15。</td>
-        </tr>
-      </table>
-      </div>
+      ${SEC('叫貨出錯率 — 每月')}
+      ${subH('指標', '門檻 (≤)', '配分')}
+      ${row([{v:'出錯率'},{v:chip('1.0%'),center:true},{v:scoreChip('10'),center:true}])}
+
+      ${SEC('加分（AI 三表寫進儀表板）— 每月')}
+      ${subH('每完成一項', '項目')}
+      ${row([{v:chip('+10'),center:true},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具（每項 +10）'}])}
+
+      ${SEC('扣分（單價未更新）— 每月')}
+      ${subH('每次扣分', '單月上限')}
+      ${row([{v:scoreChip('−3'),center:true},{v:scoreChip('−15'),center:true}])}
     </div>`;
   },
 
