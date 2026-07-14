@@ -2071,26 +2071,30 @@ const App = {
       const deduped = results.filter(r => { if (seen.has(r.keyword)) return false; seen.add(r.keyword); return true; }).slice(0, 10);
       deduped.sort((a, b) => (b.sold || 0) - (a.sold || 0));
       const medals = ['🥇','🥈','🥉','4.','5.','6.','7.','8.','9.','10.'];
+      const renderCard = (r, i) => {
+        const soldStr = (r.sold||0) >= 10000 ? ((r.sold)/10000).toFixed(1)+'萬筆' : (r.sold||0) > 0 ? (r.sold)+'筆' : '';
+        return `<a href="${r.url}" target="_blank"
+          style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;text-decoration:none;color:inherit;transition:box-shadow .15s"
+          onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
+          <div style="font-size:18px;width:28px;text-align:center;flex-shrink:0;font-weight:700;color:#6b7280">${medals[i]||''}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;color:#7c3aed;font-weight:600;margin-bottom:2px">${escapeHtml(r.keyword)}</div>
+            <div style="font-size:13px;font-weight:600;line-height:1.4;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(r.name)}</div>
+            ${r.reason ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escapeHtml(r.reason)}</div>` : ''}
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:14px;font-weight:700;color:#7c3aed">NT$${(r.price||0).toLocaleString()}</div>
+            ${soldStr ? `<div style="font-size:11px;color:var(--text-muted)">${soldStr}</div>` : ''}
+          </div>
+        </a>`;
+      };
+      const left = deduped.slice(0, 5);
+      const right = deduped.slice(5, 10);
       listEl.style.display = '';
       listEl.innerHTML = `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          ${deduped.map((r, i) => {
-            const soldStr = (r.sold||0) >= 10000 ? ((r.sold)/10000).toFixed(1)+'萬筆' : (r.sold||0) > 0 ? (r.sold)+'筆' : '';
-            return `<a href="${r.url}" target="_blank"
-              style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;text-decoration:none;color:inherit;transition:box-shadow .15s"
-              onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
-              <div style="font-size:18px;width:28px;text-align:center;flex-shrink:0;font-weight:700;color:#6b7280">${medals[i]||''}</div>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:11px;color:#7c3aed;font-weight:600;margin-bottom:2px">${escapeHtml(r.keyword)}</div>
-                <div style="font-size:13px;font-weight:600;line-height:1.4;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(r.name)}</div>
-                ${r.reason ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escapeHtml(r.reason)}</div>` : ''}
-              </div>
-              <div style="text-align:right;flex-shrink:0">
-                <div style="font-size:14px;font-weight:700;color:#7c3aed">NT$${(r.price||0).toLocaleString()}</div>
-                ${soldStr ? `<div style="font-size:11px;color:var(--text-muted)">${soldStr}</div>` : ''}
-              </div>
-            </a>`;
-          }).join('')}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:start">
+          <div style="display:flex;flex-direction:column;gap:8px">${left.map((r,i) => renderCard(r,i)).join('')}</div>
+          <div style="display:flex;flex-direction:column;gap:8px">${right.map((r,i) => renderCard(r,i+5)).join('')}</div>
         </div>
         <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">🤖 Claude AI 每天早上 9 點根據節慶與季節自動推薦 · 點商品可在蝦皮搜尋</div>`;
     };
