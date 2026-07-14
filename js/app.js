@@ -1154,10 +1154,13 @@ const App = {
           <td>${escapeHtml(p.shop||'')}</td>
           <td style="color:var(--text-muted)">${escapeHtml(p.note||'')}</td>
           <td style="text-align:right">NT$${Number(p.price||0).toLocaleString()}</td>
-          <td style="text-align:center">${p.yellowTag ? '<span style="background:#fef08a;color:#713f12;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700">有</span>' : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
+          <td style="text-align:center">${p.yellowTag ? `<span style="background:#fef08a;color:#713f12;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700">NT$${Number(p.yellowTag).toLocaleString()}</span>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
           <td>${p.buyUrl ? `<a href="${escapeHtml(p.buyUrl)}" target="_blank" style="color:#3b82f6;font-size:12px;text-decoration:none">開啟 ↗</a>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
           <td>${p.refUrl ? `<a href="${escapeHtml(p.refUrl)}" target="_blank" style="color:#8b5cf6;font-size:12px;text-decoration:none">開啟 ↗</a>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
-          <td><button class="np-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button></td>
+          <td style="white-space:nowrap"><div style="display:flex;gap:5px">
+            <button class="np-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
+            <button class="np-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+          </div></td>
         </tr>`).join('');
     return `<div class="table-card">
       <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -1171,13 +1174,11 @@ const App = {
           <input id="np-shop"  placeholder="賣場" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           <input id="np-price" type="number" placeholder="原價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;margin-bottom:10px;align-items:center">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;align-items:center">
           <input id="np-buy-url" placeholder="進貨網址" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           <input id="np-ref-url" placeholder="參考網址" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           <input id="np-note"    placeholder="備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-          <label style="display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap;cursor:pointer">
-            <input id="np-yellow" type="checkbox" style="width:16px;height:16px;cursor:pointer"> 小黃標
-          </label>
+          <input id="np-yellow" type="number" placeholder="小黃標價格" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
         </div>
         <div style="display:flex;gap:8px">
           <button id="np-save" style="padding:8px 18px;background:#6366f1;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
@@ -1192,27 +1193,59 @@ const App = {
   },
   bindNewProductsTab() {
     const form = document.getElementById('np-form');
+    const saveBtn = document.getElementById('np-save');
+    let editIndex = -1;
+
+    const clearForm = () => {
+      ['np-code','np-name','np-shop','np-price','np-buy-url','np-ref-url','np-note','np-yellow'].forEach(id => {
+        document.getElementById(id).value = '';
+      });
+      editIndex = -1;
+      saveBtn.textContent = '儲存';
+      form.style.display = 'none';
+    };
+
     document.getElementById('np-add-btn')?.addEventListener('click', () => {
-      form.style.display = form.style.display === 'none' ? '' : 'none';
+      if (form.style.display !== 'none') { clearForm(); return; }
+      clearForm();
+      form.style.display = '';
     });
-    document.getElementById('np-cancel')?.addEventListener('click', () => { form.style.display = 'none'; });
-    document.getElementById('np-save')?.addEventListener('click', () => {
+    document.getElementById('np-cancel')?.addEventListener('click', clearForm);
+    saveBtn?.addEventListener('click', () => {
       const name = document.getElementById('np-name')?.value.trim();
       if (!name) { alert('請填寫商品名稱'); return; }
-      const list = Store.get('ec.d3.newProducts', []);
-      list.push({
+      const entry = {
         code: document.getElementById('np-code')?.value.trim(),
         name,
         shop: document.getElementById('np-shop')?.value.trim(),
         price: document.getElementById('np-price')?.value.trim(),
         note: document.getElementById('np-note')?.value.trim(),
-        yellowTag: document.getElementById('np-yellow')?.checked,
+        yellowTag: document.getElementById('np-yellow')?.value ? Number(document.getElementById('np-yellow').value) : 0,
         buyUrl: document.getElementById('np-buy-url')?.value.trim(),
         refUrl: document.getElementById('np-ref-url')?.value.trim(),
-      });
+      };
+      const list = Store.get('ec.d3.newProducts', []);
+      if (editIndex >= 0) { list[editIndex] = entry; } else { list.push(entry); }
       Store.set('ec.d3.newProducts', list);
       this.render();
     });
+    document.querySelectorAll('.np-edit').forEach(btn => btn.addEventListener('click', () => {
+      const list = Store.get('ec.d3.newProducts', []);
+      const p = list[+btn.dataset.i];
+      if (!p) return;
+      editIndex = +btn.dataset.i;
+      document.getElementById('np-code').value = p.code || '';
+      document.getElementById('np-name').value = p.name || '';
+      document.getElementById('np-shop').value = p.shop || '';
+      document.getElementById('np-price').value = p.price || '';
+      document.getElementById('np-note').value = p.note || '';
+      document.getElementById('np-yellow').value = p.yellowTag || '';
+      document.getElementById('np-buy-url').value = p.buyUrl || '';
+      document.getElementById('np-ref-url').value = p.refUrl || '';
+      saveBtn.textContent = '更新';
+      form.style.display = '';
+      form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }));
     document.querySelectorAll('.np-del').forEach(btn => btn.addEventListener('click', () => {
       const list = Store.get('ec.d3.newProducts', []);
       list.splice(+btn.dataset.i, 1);
