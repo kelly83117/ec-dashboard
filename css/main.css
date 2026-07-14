@@ -512,6 +512,29 @@
     font-weight: 700;
   }
 
+  /* 單日檢視 = 一顆日期 pill（原本的「昨日」按鈕已併入）＋ 一個狀態標記。
+     看昨天 → 靜態「昨日」標記；看其他天 → 可點的「↩ 回昨日」。 */
+  .day-pill-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .day-pill {
+    font-weight: 600;
+  }
+  /* 「昨日」只是狀態註記，不是按鈕 —— 不給底色，免得跟旁邊高亮的 pill 混淆 */
+  .day-tag {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--primary);
+    white-space: nowrap;
+  }
+  .day-reset {
+    padding: 3px 8px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
   /* ------------- 儀表板首頁 · 總覽卡 (summary-card) -------------
      四張一排：主卡「全通路總營收」放大，其餘三張為通路卡。
      窄螢幕由下方 @media (max-width:460px) 的 .stat-grid 規則收成 1 欄。 */

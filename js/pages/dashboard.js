@@ -160,19 +160,24 @@ Object.assign(App, {
     const sumAdsOver = (p, dates) => dates.reduce((s, d) => s + (+p.dailyAdSpend?.[d] || 0), 0);
 
     // 日期列 —— 控制「檢視範圍」（不是填寫日期）
+    // 單日 = 一顆日期 pill（原本的「昨日」按鈕已併入它）：
+    //   看昨天 → 掛個「昨日」標記；看其他天 → 標記換成可點的「↩ 回昨日」。
+    //   同一時間只有一個控制項高亮：日期 pill（單日）／本月／上月／選月份 四者擇一。
+    const isDayView = summaryRange === 'yesterday' || summaryRange === 'customDay';
+    const dayTagHtml = summaryRange === 'yesterday'
+      ? '<span class="day-tag">昨日</span>'
+      : '<button type="button" id="summary-day-reset" class="pill pill-sm day-reset" title="回到昨日">↩ 回昨日</button>';
     const summaryPills = `
       <div id="summary-pills" class="summary-pills">
         <span class="summary-pills-label">檢視</span>
-        <button class="pill pill-sm ${summaryRange === 'yesterday' ? 'active' : ''}" data-summary-range="yesterday">昨日 (${defaultInputDate.replace(/-/g, '/')})</button>
+        <span class="day-pill-group">
+          <input type="date" id="summary-custom-day" class="pill-input day-pill${isDayView ? ' is-active' : ''}"
+            value="${escapeHtml(customDay)}" max="${escapeHtml(todayStrLocal)}" title="挑一天看當日資料">
+          ${dayTagHtml}
+        </span>
         <span class="summary-pills-sep"></span>
         <button class="pill pill-sm ${summaryRange === 'thisMonth' ? 'active' : ''}" data-summary-range="thisMonth">本月</button>
         <button class="pill pill-sm ${summaryRange === 'lastMonth' ? 'active' : ''}" data-summary-range="lastMonth">上月</button>
-        <span class="summary-pills-sep"></span>
-        <span class="pill-picker">
-          <span class="pill-picker-label">選日期：</span>
-          <input type="date" id="summary-custom-day" class="pill-input${summaryRange === 'customDay' ? ' is-active' : ''}"
-            value="${escapeHtml(customDay)}" max="${escapeHtml(todayStrLocal)}">
-        </span>
         <span class="pill-picker">
           <span class="pill-picker-label">選月份：</span>
           <input type="month" id="summary-custom-month" class="pill-input${summaryRange === 'customMonth' ? ' is-active' : ''}"
@@ -1158,14 +1163,27 @@ Object.assign(App, {
         this.render();
       });
     });
-    // 檢視範圍 — 選日期（單日模式）
+    // 檢視範圍 — 日期 pill（單日模式）
     const dayPicker = document.getElementById('summary-custom-day');
     if (dayPicker) {
       dayPicker.addEventListener('change', () => {
         if (!dayPicker.value) return;
         const todayLocal2 = toDateStr(new Date());
-        this.filter.summaryDate = dayPicker.value > todayLocal2 ? todayLocal2 : dayPicker.value;
-        this.filter.summaryRange = 'customDay';
+        const yesterdayLocal = toDateStr(addDays(new Date(), -1));
+        const v = dayPicker.value > todayLocal2 ? todayLocal2 : dayPicker.value;
+        this.filter.summaryDate = v;
+        // 用日曆挑回昨天 → 正規化回「昨日」模式，
+        // 免得停在「其實就是昨天、卻還顯示『回昨日』」的尷尬狀態
+        this.filter.summaryRange = (v === yesterdayLocal) ? 'yesterday' : 'customDay';
+        this.render();
+      });
+    }
+    // 檢視範圍 — 「↩ 回昨日」（只在檢視日不是昨天時才存在，比照填寫表格的 #entry-date-reset）
+    const dayReset = document.getElementById('summary-day-reset');
+    if (dayReset) {
+      dayReset.addEventListener('click', () => {
+        this.filter.summaryRange = 'yesterday';
+        this.filter.summaryDate = null;   // 清掉 → customDay 會重新落回昨天
         this.render();
       });
     }
