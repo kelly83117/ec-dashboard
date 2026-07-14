@@ -1154,7 +1154,7 @@ const App = {
           <td style="color:var(--text-muted)">${escapeHtml(p.note||'')}</td>
           <td>${escapeHtml(p.shop||'')}</td>
           <td style="text-align:right">NT$${Number(p.price||0).toLocaleString()}</td>
-          <td style="text-align:center">${p.yellowTag ? `<span style="background:#fef08a;color:#713f12;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700">NT$${Number(p.yellowTag).toLocaleString()}</span>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
+          <td style="text-align:center">${p.yellowTag ? `<span style="color:#dc2626;font-weight:700;font-size:13px">NT$${Number(p.yellowTag).toLocaleString()}</span>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
           <td style="text-align:center">${p.noPkg === '✓' ? '<span style="color:#16a34a;font-size:16px;font-weight:700">✓</span>' : p.noPkg === '✗' ? '<span style="color:#dc2626;font-size:16px;font-weight:700">✗</span>' : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
           <td>${p.buyUrl ? `<a href="${escapeHtml(p.buyUrl)}" target="_blank" style="color:#3b82f6;font-size:12px;text-decoration:none">開啟 ↗</a>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
           <td>${p.refUrl ? `<a href="${escapeHtml(p.refUrl)}" target="_blank" style="color:#8b5cf6;font-size:12px;text-decoration:none">開啟 ↗</a>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
