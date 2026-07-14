@@ -636,23 +636,34 @@ const App = {
     const password = document.getElementById('login-password').value;
     const ulow = username.toLowerCase();
 
-    // 後門：admin / admin123 永遠可登入（不論 localStorage 狀態），同時修復資料
+    // 後門：admin / admin123 — 僅在 admin 完全不存在時建立預設帳號用（第一次 setup 或災難救援）
+    //   舊行為會強制把 admin 密碼重設回 admin123，等於 admin 改的新密碼白改。已移除。
+    //   現在：
+    //     1. admin 不存在 → 建立、發 session、登入
+    //     2. admin 存在但密碼還是預設 admin123 → 允許登入（相容第一次 setup 沒改過的情境）
+    //     3. admin 已改過密碼 → 走下面正常 login 路徑（admin123 對不上 hash → 拒絕）
     if (ulow === 'admin' && password === 'admin123') {
       const users = Store.get(Store.KEYS.users, []);
       let admin = users.find(u => u.username.toLowerCase() === 'admin');
       if (!admin) {
+        // Case 1：admin 不存在（第一次 setup / 資料被清空的災難救援）
         admin = { username: 'admin', password: hashPassword('admin123'),
                   name: '陳大明', role: 'admin', departments: [] };
         users.push(admin);
-      } else {
-        // 修復舊版錯誤雜湊
-        admin.password = hashPassword('admin123');
-        admin.role = 'admin';
+        Store.set(Store.KEYS.users, users);
+        Store.set(Store.KEYS.session, { username: admin.username });
+        this.enterApp(admin);
+        return;
       }
-      Store.set(Store.KEYS.users, users);
-      Store.set(Store.KEYS.session, { username: admin.username });
-      this.enterApp(admin);
-      return;
+      if (admin.password === hashPassword('admin123')) {
+        // Case 2：admin 存在且密碼還是預設 → 修復 role + 登入（不覆蓋密碼）
+        admin.role = 'admin';
+        Store.set(Store.KEYS.users, users);
+        Store.set(Store.KEYS.session, { username: admin.username });
+        this.enterApp(admin);
+        return;
+      }
+      // Case 3：admin 已改過密碼 → 落到下方正常 login 流程去比對真實密碼
     }
 
     const users = Store.get(Store.KEYS.users, []);
