@@ -1148,17 +1148,17 @@ const App = {
     const list = Store.get('ec.d3.newProducts', []);
     const rows = list.length === 0
       ? `<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:24px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
-      : list.map((p, i) => `<tr>
+      : list.map((p, i) => `<tr style="vertical-align:middle;text-align:center">
           <td style="font-size:12px;color:var(--text-muted);white-space:nowrap">${escapeHtml(p.code||'')}</td>
           <td style="font-weight:600">${escapeHtml(p.name||'')}</td>
-          <td style="color:var(--text);text-align:left;vertical-align:middle">${escapeHtml(p.note||'')}</td>
+          <td style="color:var(--text)">${escapeHtml(p.note||'')}</td>
           <td>${escapeHtml(p.shop||'')}</td>
-          <td style="text-align:right">NT$${Number(p.price||0).toLocaleString()}</td>
-          <td style="text-align:center">${p.yellowTag ? `<span style="color:#dc2626;font-weight:700;font-size:13px">NT$${Number(p.yellowTag).toLocaleString()}</span>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
-          <td style="text-align:center">${p.noPkg === '✓' ? '<span style="color:#16a34a;font-size:16px;font-weight:700">✓</span>' : p.noPkg === '✗' ? '<span style="color:#dc2626;font-size:16px;font-weight:700">✗</span>' : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
+          <td>NT$${Number(p.price||0).toLocaleString()}</td>
+          <td>${p.yellowTag ? `<span style="color:#dc2626;font-weight:700;font-size:13px">NT$${Number(p.yellowTag).toLocaleString()}</span>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
+          <td>${p.noPkg === '✓' ? '<span style="color:#16a34a;font-size:16px;font-weight:700">✓</span>' : p.noPkg === '✗' ? '<span style="color:#dc2626;font-size:16px;font-weight:700">✗</span>' : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
           <td>${p.buyUrl ? `<a href="${escapeHtml(p.buyUrl)}" target="_blank" style="color:#3b82f6;font-size:12px;text-decoration:none">開啟 ↗</a>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
           <td>${p.refUrl ? `<a href="${escapeHtml(p.refUrl)}" target="_blank" style="color:#8b5cf6;font-size:12px;text-decoration:none">開啟 ↗</a>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
-          <td style="white-space:nowrap"><div style="display:flex;gap:5px">
+          <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
             <button class="np-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
             <button class="np-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
           </div></td>
