@@ -14,6 +14,10 @@ Object.assign(App, {
     if (deptId === 'd1' && document.querySelector('#dp-date-picker, .dp-card')) {
       this.bindWeeklyCalendar(deptId);
     }
+    // d2 KPI 子頁：議價表
+    if (deptId === 'd2' && this.route === 'office-d2-kpi') {
+      this.bindD2KpiTab();
+    }
     // d1 insight 子頁：洞察表上傳按鈕
     if (deptId === 'd1' && this.route === 'office-d1-insight') {
       this.bindInsightTab();
@@ -926,11 +930,116 @@ Object.assign(App, {
   },
 
   renderD2KpiTabHtml() {
+    const list = Store.get('ec.d2.bargain', []);
+    const rows = list.length === 0
+      ? `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
+      : list.map((r, i) => {
+          const orig = Number(r.orig || 0);
+          const final = Number(r.final || 0);
+          const saved = orig && final ? orig - final : null;
+          const pct = orig && saved ? ((saved / orig) * 100).toFixed(1) : null;
+          return `<tr style="vertical-align:middle">
+            <td>${escapeHtml(r.date || '')}</td>
+            <td style="font-weight:600">${escapeHtml(r.item || '')}</td>
+            <td>${escapeHtml(r.supplier || '')}</td>
+            <td style="text-align:right">${orig ? 'NT$' + orig.toLocaleString() : '—'}</td>
+            <td style="text-align:right;font-weight:700;color:#059669">${final ? 'NT$' + final.toLocaleString() : '—'}</td>
+            <td style="text-align:right;color:#dc2626;font-weight:600">${saved !== null && saved > 0 ? '▼ NT$' + saved.toLocaleString() + (pct ? ' (' + pct + '%)' : '') : '—'}</td>
+            <td style="text-align:center"><span style="padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:${r.status==='完成'?'#dcfce7':r.status==='進行中'?'#fef9c3':'#f3f4f6'};color:${r.status==='完成'?'#166534':r.status==='進行中'?'#854d0e':'#374151'}">${escapeHtml(r.status||'—')}</span></td>
+            <td style="white-space:nowrap"><div style="display:flex;gap:5px">
+              <button class="bg-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
+              <button class="bg-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+            </div></td>
+          </tr>`;
+        }).join('');
     return `
       <div class="table-card">
-        <div class="table-card-header"><h3>📊 採購 KPI</h3></div>
-        <div style="padding:60px 24px;text-align:center;color:var(--text-muted);font-size:14px">尚未設定 KPI 內容</div>
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div><h3>💰 議價表</h3><p>記錄每次採購議價結果</p></div>
+          <button id="bg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+        </div>
+        <div id="bg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
+            <input id="bg-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-item" placeholder="商品名稱 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-supplier" placeholder="供應商" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <select id="bg-status" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+              <option value="進行中">進行中</option>
+              <option value="完成">完成</option>
+              <option value="取消">取消</option>
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
+            <input id="bg-orig" type="number" placeholder="原始報價 (NT$)" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-final" type="number" placeholder="議價後金額 (NT$)" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-note" placeholder="備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;grid-column:span 2">
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="bg-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+            <button id="bg-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>日期</th><th>商品名稱</th><th>供應商</th><th style="text-align:right">原始報價</th><th style="text-align:right">議價後</th><th style="text-align:right">節省金額</th><th style="text-align:center">狀態</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
       </div>`;
+  },
+  bindD2KpiTab() {
+    const form = document.getElementById('bg-form');
+    if (!form) return;
+    const saveBtn = document.getElementById('bg-save');
+    let editIndex = -1;
+    const fields = ['bg-date','bg-item','bg-supplier','bg-status','bg-orig','bg-final','bg-note'];
+    const clearForm = () => {
+      fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = id === 'bg-status' ? '進行中' : ''; });
+      editIndex = -1;
+      saveBtn.textContent = '儲存';
+      form.style.display = 'none';
+    };
+    document.getElementById('bg-add-btn')?.addEventListener('click', () => {
+      if (form.style.display !== 'none') { clearForm(); return; }
+      clearForm(); form.style.display = '';
+    });
+    document.getElementById('bg-cancel')?.addEventListener('click', clearForm);
+    saveBtn?.addEventListener('click', () => {
+      const item = document.getElementById('bg-item')?.value.trim();
+      if (!item) { alert('請填寫商品名稱'); return; }
+      const entry = {
+        date: document.getElementById('bg-date')?.value,
+        item,
+        supplier: document.getElementById('bg-supplier')?.value.trim(),
+        status: document.getElementById('bg-status')?.value,
+        orig: document.getElementById('bg-orig')?.value,
+        final: document.getElementById('bg-final')?.value,
+        note: document.getElementById('bg-note')?.value.trim(),
+      };
+      const list = Store.get('ec.d2.bargain', []);
+      if (editIndex >= 0) { list[editIndex] = entry; } else { list.push(entry); }
+      Store.set('ec.d2.bargain', list);
+      this.render();
+    });
+    document.querySelectorAll('.bg-edit').forEach(btn => btn.addEventListener('click', () => {
+      const list = Store.get('ec.d2.bargain', []);
+      const r = list[+btn.dataset.i]; if (!r) return;
+      editIndex = +btn.dataset.i;
+      document.getElementById('bg-date').value = r.date || '';
+      document.getElementById('bg-item').value = r.item || '';
+      document.getElementById('bg-supplier').value = r.supplier || '';
+      document.getElementById('bg-status').value = r.status || '進行中';
+      document.getElementById('bg-orig').value = r.orig || '';
+      document.getElementById('bg-final').value = r.final || '';
+      document.getElementById('bg-note').value = r.note || '';
+      saveBtn.textContent = '更新';
+      form.style.display = '';
+      form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }));
+    document.querySelectorAll('.bg-del').forEach(btn => btn.addEventListener('click', () => {
+      const list = Store.get('ec.d2.bargain', []);
+      list.splice(+btn.dataset.i, 1);
+      Store.set('ec.d2.bargain', list);
+      this.render();
+    }));
   },
 
   renderFestivalCalendarTab() {
