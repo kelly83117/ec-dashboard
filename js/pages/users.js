@@ -56,7 +56,8 @@ Object.assign(App, {
         <div class="field"><label>姓名</label><input id="f-uname" value="${escapeHtml(u.name)}" required></div>
         <div class="field">
           <label>帳號</label>
-          <input id="f-uusername" value="${escapeHtml(u.username)}" ${isEdit?'readonly':''} required>
+          <input id="f-uusername" value="${escapeHtml(u.username)}" required>
+          ${isEdit ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">改帳號後需要用新名字重新登入</div>' : ''}
         </div>
         <div class="field">
           <label>${isEdit ? '新密碼（留空保留原密碼）' : '初始密碼（留空預設為 123）'}</label>
@@ -160,9 +161,20 @@ Object.assign(App, {
         });
         if (!name || !usernameNew) { showToast('請填寫姓名與帳號', 'error'); return false; }
         const list = Store.get(Store.KEYS.users, []);
-        if (!isEdit && list.some(x => x.username.toLowerCase() === usernameNew.toLowerCase())) { showToast('帳號已存在（不分大小寫）', 'error'); return false; }
+        // 撞名檢查：新增時擋任何撞名；編輯時只有改成別人已有的名字才擋（改回原本自己不擋）
+        const conflict = list.some(x =>
+          x.username.toLowerCase() === usernameNew.toLowerCase() &&
+          (!isEdit || x.username !== user.username)
+        );
+        if (conflict) { showToast('帳號已存在（不分大小寫）', 'error'); return false; }
+        let usernameChanged = false;
         if (isEdit) {
           const i = list.findIndex(x => x.username === user.username);
+          const oldUsername = list[i].username;
+          if (oldUsername !== usernameNew) {
+            list[i].username = usernameNew;
+            usernameChanged = true;
+          }
           list[i].name = name;
           list[i].role = role;
           list[i].departments = selectedDepts;
@@ -188,6 +200,14 @@ Object.assign(App, {
           delete this.currentUser.crossOfficeAccess;
           this.currentUser.officeFeatures = officeFeatures;
           delete this.currentUser.canManageLineNotify;
+          // 改到自己的帳號 → session 綁的還是舊 username，強制登出讓使用者用新名字登入
+          if (usernameChanged) {
+            showToast('帳號已改為「' + usernameNew + '」，請用新帳號重新登入', 'success');
+            Store.remove(Store.KEYS.session);
+            setTimeout(() => { this.showLogin(); }, 800);
+            return true;
+          }
+          this.currentUser.username = usernameNew; // 同步更新（一般不會走到，因為 usernameChanged 上面已 return）
           this.applyUserPerms(this.currentUser);
         }
 
