@@ -209,23 +209,29 @@ Object.assign(App, {
       const deltaCls  = prev > 0 ? (d >= 0 ? 'up' : 'down') : 'flat';
       const deltaText = prev > 0 ? `${d >= 0 ? '↑' : '↓'} ${Math.abs(d).toFixed(1)}%` : '—';
 
-      // 通路卡底部：佔全通路 % + ROAS / 廣告費（主卡本身就是分母，不顯示）
-      let footHtml = '';
-      if (!isMain) {
-        const share = allChannelCur > 0 ? (cur / allChannelCur) * 100 : 0;
-        const adsMembers = members.filter(p => PLATFORMS_WITH_AD_SPEND.has(p.name));
-        const adsIdxs = adsMembers.map(p => platforms.indexOf(p)).filter(i => i >= 0);
-        const ads = adsMembers.reduce((s, p) => s + sumAdsOver(p, rangeInfo.showDates), 0);
-        const roas = (cur > 0 && ads > 0) ? (cur / ads).toFixed(2) : '—';
-        const adsLine = adsMembers.length === 0
-          ? '<span class="summary-card-noads">無廣告投放</span>'
-          : `ROAS <strong class="summary-card-roas-val">${roas}</strong>　·　廣告 <span class="summary-card-ads-val">${fmtNTD(ads)}</span>`;
-        footHtml = `
+      // 底部 ROAS / 廣告費 — 四張卡共用同一條算式（該群組有投廣告的成員加總）。
+      // 主卡的成員是全部通路，所以它算出來就是「全通路整體 ROAS」，
+      // 與填寫表格的「當日總計」列同義。
+      const adsMembers = members.filter(p => PLATFORMS_WITH_AD_SPEND.has(p.name));
+      const adsIdxs = adsMembers.map(p => platforms.indexOf(p)).filter(i => i >= 0);
+      const ads = adsMembers.reduce((s, p) => s + sumAdsOver(p, rangeInfo.showDates), 0);
+      const roas = (cur > 0 && ads > 0) ? (cur / ads).toFixed(2) : '—';
+      const adsLine = adsMembers.length === 0
+        ? '<span class="summary-card-noads">無廣告投放</span>'
+        : `ROAS <strong class="summary-card-roas-val">${roas}</strong>　·　廣告 <span class="summary-card-ads-val">${fmtNTD(ads)}</span>`;
+      const adsRowHtml = `<div class="summary-card-ads" data-ads-idxs="${adsIdxs.join(',')}">${adsLine}</div>`;
+
+      // 主卡本身就是佔比的分母，不顯示「佔全通路」，只補整體 ROAS / 廣告費
+      const footHtml = isMain
+        ? `
           <div class="summary-card-foot">
-            <div class="summary-card-share">佔全通路 <strong class="summary-card-share-val">${share.toFixed(1)}%</strong></div>
-            <div class="summary-card-ads" data-ads-idxs="${adsIdxs.join(',')}">${adsLine}</div>
+            ${adsRowHtml}
+          </div>`
+        : `
+          <div class="summary-card-foot">
+            <div class="summary-card-share">佔全通路 <strong class="summary-card-share-val">${(allChannelCur > 0 ? (cur / allChannelCur) * 100 : 0).toFixed(1)}%</strong></div>
+            ${adsRowHtml}
           </div>`;
-      }
 
       return `
         <div class="stat-card summary-card${isMain ? ' summary-card-main' : ''}" data-group-idx="${gi}" data-member-idxs="${memberIdxs.join(',')}" data-base-cur="${cur}" data-prev="${prev}" data-single-day="${isSingleDay ? '1' : '0'}">
