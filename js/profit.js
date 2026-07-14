@@ -4387,10 +4387,11 @@ function _kpiScoreViewHtml(){
       </div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
         ${metrics.map((m,mi)=>`
-          <div style="background:#f8f9fc;border-radius:8px;padding:8px 10px">
-            <div style="font-size:10.5px;color:#9ca3af;font-weight:600;margin-bottom:4px">${m.l}</div>
-            <div style="font-size:14px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums">${d[m.k][0]}%<span style="font-size:10.5px;font-weight:400;color:#b0b4c0"> / 低標 ${d[m.k][1]!=null?d[m.k][1]+'%':'—'}</span></div>
-            <div style="font-size:10px;color:#5b5fcf;font-weight:600;margin-top:2px">配分 ${d.w[mi]} 分</div>
+          <div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
+            <div style="font-size:11.5px;color:#9ca3af;font-weight:600;margin-bottom:6px">${m.l}</div>
+            <div style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15">${d[m.k][0]}%</div>
+            <div style="font-size:11.5px;color:#9ca3af;margin-top:3px">低標 ${d[m.k][1]!=null?d[m.k][1]+'%':'—'}</div>
+            <div style="margin-top:8px;display:inline-block;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:#eef0fd;color:#5b5fcf">配分 ${d.w[mi]} 分</div>
           </div>`).join('')}
       </div>
     </div>`;
@@ -4469,24 +4470,39 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
     return `<div style="padding:16px;${isLast?'':'border-bottom:1px solid #f3f4f6'};font-size:12px;color:#9ca3af">${shop}：${month}月還沒有本季目標設定</div>`;
   }
   const totCol=scoreColor(r.total);
-  const metrics=[
-    {l:'純利率',val:r.m.revA,target:r.t.rev[0],score:r.revS,weight:r.t.w[0],field:'revA'},
-    {l:'純利成長',val:r.growA,target:r.t.grow[0],score:r.growS,weight:r.t.w[1],field:null},
-    {l:'廣告合格率',val:r.m.adsA,target:r.t.ads[0],score:r.adsS,weight:r.t.w[2],field:'adsA'},
-    {l:'低效廣告率',val:r.m.badA,target:r.t.bad[0],score:r.badS,weight:r.t.w[3],field:'badA'},
-  ];
-  const cardHtml=metrics.map(m=>{
-    const col=scoreRatioColor(m.score,m.weight);
-    const valDisp=m.val==null?'—':m.val+'%';
-    const onclickAttr=m.field?`onclick="editScoreMonthlyCell('${monthKey}','${shop}','${m.field}',this)"`:'';
-    const valStyle=m.field?'cursor:pointer;border-bottom:1px dashed #d1d5db':'';
-    return `<div style="background:#f8f9fc;border-radius:8px;padding:10px 12px">
-      <div style="font-size:10.5px;color:#9ca3af;font-weight:600;margin-bottom:6px">${m.l}</div>
-      <div ${onclickAttr} style="font-size:16px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;display:inline-block;${valStyle}">${valDisp}</div>
-      <div style="font-size:10.5px;color:#b0b4c0;margin-top:2px">目標 ${m.target}%</div>
-      <div style="margin-top:6px;display:inline-block;padding:1px 8px;border-radius:6px;font-size:11px;font-weight:700;background:${col.bg};color:${col.fg}">${m.score} 分</div>
+  const editableNum=(label,field,val,fmtFn)=>`<span onclick="editScoreMonthlyCell('${monthKey}','${shop}','${field}',this)" style="cursor:pointer;border-bottom:1px dashed #d1d5db;display:inline-block">${label} <b style="color:#6b7280">${val!=null?fmtFn(val):'—'}</b></span>`;
+  const simpleMetricCard=(label,val,target,score,weight,field)=>{
+    const col=scoreRatioColor(score,weight);
+    const valDisp=val==null?'—':val+'%';
+    return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
+      <div style="font-size:11.5px;color:#9ca3af;font-weight:600;margin-bottom:6px">${label}</div>
+      <div onclick="editScoreMonthlyCell('${monthKey}','${shop}','${field}',this)" style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15;cursor:pointer;border-bottom:1px dashed #d1d5db;display:inline-block">${valDisp}</div>
+      <div style="font-size:11.5px;color:#9ca3af;margin-top:3px">目標 ${target}%</div>
+      <div style="margin-top:8px;display:inline-block;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg}">${score} 分</div>
     </div>`;
-  }).join('');
+  };
+  // 純利成長不是直接填百分比，是靠「前期純利」「本期純利」兩個數字算出來的，
+  // 所以這張卡把兩個輸入欄直接放進來，一眼看得出百分比是怎麼算出來的。
+  const growCard=(()=>{
+    const col=scoreRatioColor(r.growS,r.t.w[1]);
+    const valDisp=r.growA==null?'—':r.growA+'%';
+    return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
+      <div style="font-size:11.5px;color:#9ca3af;font-weight:600;margin-bottom:6px">純利成長</div>
+      <div style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15">${valDisp}</div>
+      <div style="font-size:11.5px;color:#9ca3af;margin-top:3px">目標 ${r.t.grow[0]}%</div>
+      <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #e5e7eb;font-size:11px;color:#9ca3af;display:flex;flex-direction:column;gap:4px">
+        ${editableNum('前期純利','prevProfit',r.m.prevProfit,fmtN)}
+        ${editableNum('本期純利','curProfit',r.m.curProfit,fmtN)}
+      </div>
+      <div style="margin-top:8px;display:inline-block;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg}">${r.growS} 分</div>
+    </div>`;
+  })();
+  const cardHtml=[
+    simpleMetricCard('純利率',r.m.revA,r.t.rev[0],r.revS,r.t.w[0],'revA'),
+    growCard,
+    simpleMetricCard('廣告合格率',r.m.adsA,r.t.ads[0],r.adsS,r.t.w[2],'adsA'),
+    simpleMetricCard('低效廣告率',r.m.badA,r.t.bad[0],r.badS,r.t.w[3],'badA'),
+  ].join('');
   return `<div style="padding:14px 16px;${isLast?'':'border-bottom:1px solid #f3f4f6'}">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <div style="display:flex;align-items:baseline;gap:8px">
@@ -4496,10 +4512,6 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
       <div style="padding:3px 10px;border-radius:7px;background:${totCol.bg};color:${totCol.fg};border:1px solid ${totCol.border};font-size:13px;font-weight:700;font-variant-numeric:tabular-nums">${r.total} 分</div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${cardHtml}</div>
-    <div style="display:flex;gap:16px;margin-top:8px;font-size:11px;color:#9ca3af">
-      <span onclick="editScoreMonthlyCell('${monthKey}','${shop}','prevProfit',this)" style="cursor:pointer;border-bottom:1px dashed #d1d5db">前期純利 <b style="color:#6b7280">${r.m.prevProfit!=null?fmtN(r.m.prevProfit):'—'}</b></span>
-      <span onclick="editScoreMonthlyCell('${monthKey}','${shop}','curProfit',this)" style="cursor:pointer;border-bottom:1px dashed #d1d5db">本期純利 <b style="color:#6b7280">${r.m.curProfit!=null?fmtN(r.m.curProfit):'—'}</b></span>
-    </div>
   </div>`;
 }
 
