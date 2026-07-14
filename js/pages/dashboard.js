@@ -124,16 +124,25 @@ Object.assign(App, {
       compareLabel: '前一日',
     });
     // 月累計範圍：showDates 是該月每一天（不超過昨日），比較對象是前一個月
+    // ⚠ 本月是「部分月」（只累計到昨日）。若拿它去比上月整月，13 天比 30 天會全面假跌 —
+    //   實測 7/1–13 比 6 月整月會算出 −59%，但比 6/1–13 其實只有 −3.1%，
+    //   且有 4 個實際成長的通路會被誤判成暴跌。故部分月一律只比上月「同期」天數。
+    //   完整月份（上月 / 選過去月份）維持整月比整月，那是正常的商業比較。
     const monthRange = (yyyymm, label, compareLabel) => {
       const [yy, mm] = yyyymm.split('-').map(Number);
       const prevMs = toDateStr(new Date(yy, mm - 2, 1)).slice(0, 7);
+      const showDates = monthDates(yyyymm);
+      const isPartial = yyyymm === toDateStr(now).slice(0, 7);   // 本月才會被昨日截斷
+      const cutDay = (isPartial && showDates.length)
+        ? +showDates[showDates.length - 1].slice(8, 10)
+        : 31;
       return {
         kind: 'month',
         label,
         dateLabel: `${yyyymm.replace('-', '/')} 月累計`,
-        showDates: monthDates(yyyymm),
-        compareDates: monthDates(prevMs),
-        compareLabel,
+        showDates,
+        compareDates: monthDates(prevMs).filter(d => +d.slice(8, 10) <= cutDay),
+        compareLabel: isPartial ? `${compareLabel}同期` : compareLabel,
       };
     };
     const buildRange = (key) => {
