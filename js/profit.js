@@ -4161,14 +4161,419 @@ function renderKpiTab(){
   const modeTabsHtml=`<div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid #e5e7eb">
     <div onclick="setKpiViewMode('month')" style="padding:8px 16px;font-size:13px;font-weight:${_kpiViewMode==='month'?700:400};color:${_kpiViewMode==='month'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='month'?'#5b5fcf':'transparent'};cursor:pointer">月結表</div>
     <div onclick="setKpiViewMode('year')" style="padding:8px 16px;font-size:13px;font-weight:${_kpiViewMode==='year'?700:400};color:${_kpiViewMode==='year'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='year'?'#5b5fcf':'transparent'};cursor:pointer">年度總表</div>
+    <div onclick="setKpiViewMode('score')" style="padding:8px 16px;font-size:13px;font-weight:${_kpiViewMode==='score'?700:400};color:${_kpiViewMode==='score'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='score'?'#5b5fcf':'transparent'};cursor:pointer">評分表</div>
   </div>`;
-  const body=_kpiViewMode==='year'?_kpiYearViewHtml():_kpiMonthViewHtml();
+  const body=_kpiViewMode==='year'?_kpiYearViewHtml():_kpiViewMode==='score'?_kpiScoreViewHtml():_kpiMonthViewHtml();
   el.innerHTML=`<div style="padding:14px 16px 16px">${modeTabsHtml}${body}</div>`;
+  if(_kpiViewMode==='score'){renderScoreComparisonTable();renderScoreDetailPanel();}
 }
 function buildKpiTabHtml(){
   return `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
     <div id="kpi-tab-content"></div>
   </div>`;
+}
+
+// ── KPI 評分表：季度 KPI 目標與權重設定 + 賣場月度評分比較 + 新品加分 ──
+const SCORE_SHOPS=[
+  {id:'好麻吉', pos:'大盤經營型｜重效率'},
+  {id:'玩樂', pos:'成長放大型｜重成長'},
+  {id:'森之旅', pos:'盤整修復型｜重體質'},
+];
+const SCORE_QUARTER_MONTHS={1:[1,2,3],2:[4,5,6],3:[7,8,9],4:[10,11,12]};
+// 歷史種子資料（來自使用者提供的 Excel，Q2/Q3 目標與 4~7月實際數字）—
+// 只在雲端/本機都還沒有對應資料時當預設值顯示，使用者一旦編輯就會改存真正的資料，不會被這裡覆蓋。
+const SCORE_DEFAULT_TARGETS={
+  2:{ 好麻吉:{rev:[24,20],grow:[12,null],ads:[70,50],bad:[10,15],w:[25,35,20,20]},
+      玩樂:{rev:[24,20],grow:[15,null],ads:[70,50],bad:[10,15],w:[30,40,15,15]},
+      森之旅:{rev:[22,18],grow:[10,null],ads:[60,40],bad:[15,20],w:[40,30,15,15]} },
+  3:{ 好麻吉:{rev:[24,20],grow:[10,5],ads:[70,50],bad:[10,15],w:[25,35,20,20]},
+      玩樂:{rev:[24,20],grow:[12,5],ads:[70,50],bad:[10,15],w:[25,30,20,25]},
+      森之旅:{rev:[22,18],grow:[5,2],ads:[60,40],bad:[15,20],w:[30,10,30,30]} },
+};
+const SCORE_DEFAULT_MONTHLY={
+  '2026-04':{ 好麻吉:{revA:24.86,prevProfit:1043332,curProfit:1243293,adsA:70,badA:8},
+              玩樂:{revA:22.96,prevProfit:341737,curProfit:332194,adsA:55,badA:17},
+              森之旅:{revA:21.14,prevProfit:111588,curProfit:108830,adsA:44,badA:25} },
+  '2026-05':{ 好麻吉:{revA:25.99,prevProfit:1243293,curProfit:1288341,adsA:75,badA:6},
+              玩樂:{revA:24.22,prevProfit:332194,curProfit:360003,adsA:65,badA:10},
+              森之旅:{revA:20.75,prevProfit:108830,curProfit:77545,adsA:54,badA:17} },
+  '2026-06':{ 好麻吉:{revA:24.83,prevProfit:1288341,curProfit:1331647,adsA:70,badA:8},
+              玩樂:{revA:23.26,prevProfit:360003,curProfit:405220,adsA:53,badA:19},
+              森之旅:{revA:18.94,prevProfit:77545,curProfit:68999,adsA:37,badA:24} },
+  '2026-07':{ 好麻吉:{revA:24.83,prevProfit:1331647,curProfit:null,adsA:70,badA:8},
+              玩樂:{revA:22.94,prevProfit:399710,curProfit:null,adsA:53,badA:19},
+              森之旅:{revA:18.43,prevProfit:77545,curProfit:67134,adsA:37,badA:24} },
+};
+
+function getScoreTargetsAll(){
+  try{
+    if(typeof Store!='undefined'&&Store._profitMem?._score_targets_v1)return Store._profitMem._score_targets_v1;
+    const s=localStorage.getItem('ec_score_targets_v1');return s?JSON.parse(s):{};
+  }catch{return {};}
+}
+function saveScoreTargetsAll(all){
+  try{localStorage.setItem('ec_score_targets_v1',JSON.stringify(all));}catch{}
+  try{if(typeof Store!=='undefined'){Store._profitMem=Store._profitMem||{};Store._profitMem._score_targets_v1=all;}}catch{}
+  if(window.__cloudProfit&&typeof window.__cloudProfit.setField==='function'){
+    window.__cloudProfit.setField('_score_targets_v1', all).catch(e=>console.warn('[評分表] 目標雲端同步失敗',e));
+  }
+}
+function getScoreTargetsForQ(year,q){
+  const all=getScoreTargetsAll();
+  const key=year+'-Q'+q;
+  if(all[key])return all[key];
+  return SCORE_DEFAULT_TARGETS[q]||null;
+}
+
+function getScoreMonthlyAll(){
+  try{
+    if(typeof Store!='undefined'&&Store._profitMem?._score_monthly_v1)return Store._profitMem._score_monthly_v1;
+    const s=localStorage.getItem('ec_score_monthly_v1');return s?JSON.parse(s):{};
+  }catch{return {};}
+}
+function saveScoreMonthlyAll(all){
+  try{localStorage.setItem('ec_score_monthly_v1',JSON.stringify(all));}catch{}
+  try{if(typeof Store!=='undefined'){Store._profitMem=Store._profitMem||{};Store._profitMem._score_monthly_v1=all;}}catch{}
+  if(window.__cloudProfit&&typeof window.__cloudProfit.setField==='function'){
+    window.__cloudProfit.setField('_score_monthly_v1', all).catch(e=>console.warn('[評分表] 月度雲端同步失敗',e));
+  }
+}
+function getScoreMonthlyForKey(monthKey){
+  const all=getScoreMonthlyAll();
+  if(all[monthKey])return all[monthKey];
+  return SCORE_DEFAULT_MONTHLY[monthKey]||{};
+}
+
+function getScoreBonusAll(){
+  try{
+    if(typeof Store!='undefined'&&Store._profitMem?._score_bonus_v1)return Store._profitMem._score_bonus_v1;
+    const s=localStorage.getItem('ec_score_bonus_v1');return s?JSON.parse(s):{};
+  }catch{return {};}
+}
+function saveScoreBonusAll(all){
+  try{localStorage.setItem('ec_score_bonus_v1',JSON.stringify(all));}catch{}
+  try{if(typeof Store!=='undefined'){Store._profitMem=Store._profitMem||{};Store._profitMem._score_bonus_v1=all;}}catch{}
+  if(window.__cloudProfit&&typeof window.__cloudProfit.setField==='function'){
+    window.__cloudProfit.setField('_score_bonus_v1', all).catch(e=>console.warn('[評分表] 加分雲端同步失敗',e));
+  }
+}
+
+// 通用計分公式：達到目標拿滿分；界於目標與低標之間按比例；低於低標不得分。
+// lowerBetter=true 時方向相反（用於低效廣告率：越低越好）。
+function scoreCalcMetric(actual,target,low,weight,lowerBetter){
+  if(actual==null||isNaN(actual)||target==null)return 0;
+  if(!lowerBetter){
+    if(actual>=target)return weight;
+    if(low==null)return 0;
+    if(actual<=low)return 0;
+    return weight*(actual-low)/(target-low);
+  }else{
+    if(actual<=target)return weight;
+    if(low==null)return 0;
+    if(actual>=low)return 0;
+    return weight*(low-actual)/(low-target);
+  }
+}
+function scoreRound(n){return Math.round(n*100)/100;}
+function computeShopMonthScore(shop,year,monthNum,q){
+  const t=getScoreTargetsForQ(year,q)?.[shop];
+  if(!t)return null;
+  const monthKey=year+'-'+String(monthNum).padStart(2,'0');
+  const m=getScoreMonthlyForKey(monthKey)[shop]||{};
+  const hasData=m.revA!=null;
+  const growA=(m.prevProfit>0&&m.curProfit!=null)?scoreRound((m.curProfit/m.prevProfit-1)*100):null;
+  const revS=scoreRound(scoreCalcMetric(m.revA,t.rev[0],t.rev[1],t.w[0],false));
+  const growS=growA==null?0:scoreRound(scoreCalcMetric(growA,t.grow[0],t.grow[1],t.w[1],false));
+  const adsS=scoreRound(scoreCalcMetric(m.adsA,t.ads[0],t.ads[1],t.w[2],false));
+  const badS=scoreRound(scoreCalcMetric(m.badA,t.bad[0],t.bad[1],t.w[3],true));
+  const total=scoreRound(revS+growS+adsS+badS);
+  return {t,m,growA,revS,growS,adsS,badS,total,hasData};
+}
+function scoreColor(s){
+  if(s>=80)return{bg:'#ecfdf5',fg:'#059669',border:'#a7f3d0'};
+  if(s>=50)return{bg:'#fffbeb',fg:'#b45309',border:'#fde68a'};
+  return{bg:'#fef2f2',fg:'#dc2626',border:'#fecaca'};
+}
+
+function _scoreDefaultQ(){return Math.ceil((_KPI_NOW.getMonth()+1)/3);}
+let _scoreCurQ=_scoreDefaultQ();
+let _scoreCurYear=_KPI_NOW.getFullYear();
+let _scoreDetail=null;
+let _scoreDefsOpen=false;
+
+function setScoreQ(q){_scoreCurQ=q;_scoreDetail=null;renderKpiTab();}
+function toggleScoreDefs(){_scoreDefsOpen=!_scoreDefsOpen;renderKpiTab();}
+
+function scoreDefsHtml(q){
+  const targets=getScoreTargetsForQ(_scoreCurYear,q);
+  const growHasLow=targets?Object.values(targets).some(d=>d.grow[1]!=null):false;
+  const defs=[
+    {l:'純利率達成',def:'實際淨利率 ÷ 目標淨利率',rule:'大於等於目標：得滿分／界於目標與低標之間：依滿分比例計算／低於低標：不得分'},
+    {l:'純利成長率',def:'(本期淨利 ÷ 前期淨利) － 1',rule:growHasLow?'大於等於目標：得滿分／界於目標與低標之間：依滿分比例計算／低於低標：不得分':'大於等於目標：得滿分／未達目標：不得分'},
+    {l:'廣告合格率',def:'投廣商品中「淨利率 ≥ 20%」的商品數 ÷ 投廣商品數',rule:'大於等於目標：得滿分／界於目標與低標之間：依滿分比例計算／低於低標：不得分'},
+    {l:'低效廣告率',def:'投廣商品中「淨利率 < 10%」的商品數 ÷ 投廣商品數',rule:'小於等於目標：得滿分／界於目標與低標之間：依滿分比例計算／大於低標：不得分（此項越低越好，方向跟其他三項相反）'},
+  ];
+  return defs.map((d,i)=>`<div style="padding:12px 16px;${i>0?'border-top:1px solid #f3f4f6':''}">
+    <div style="font-size:12.5px;font-weight:700;color:#374151;margin-bottom:3px">${d.l}</div>
+    <div style="font-size:11.5px;color:#6b7280;margin-bottom:4px">定義：${d.def}</div>
+    <div style="font-size:11.5px;color:#9ca3af;line-height:1.6">計分：${d.rule}</div>
+  </div>`).join('');
+}
+
+function scoreBonusHtml(){
+  const key=_scoreCurYear+'-Q'+_scoreCurQ;
+  const all=getScoreBonusAll();
+  const count=all[key]?.count||0;
+  const score=Math.min(count*2,10);
+  return `<div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin-bottom:8px;background:#fafafe">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div style="font-size:13px;font-weight:700;color:#374151">加分項　<span style="font-size:11px;font-weight:400;color:#9ca3af">不限賣場</span></div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button onclick="adjustScoreBonus(-1)" style="width:24px;height:24px;border:1px solid #e5e7eb;border-radius:6px;background:white;cursor:pointer;font-size:14px;line-height:1">－</button>
+        <span style="font-size:13px;font-weight:700;color:#374151;min-width:16px;text-align:center">${count}</span>
+        <button onclick="adjustScoreBonus(1)" style="width:24px;height:24px;border:1px solid #e5e7eb;border-radius:6px;background:white;cursor:pointer;font-size:14px;line-height:1">＋</button>
+        <span style="font-size:12px;font-weight:700;color:#5b5fcf;margin-left:4px">+${score} 分</span>
+      </div>
+    </div>
+    <div style="font-size:12px;color:#6b7280;line-height:1.6">新品 1 支加 2 分，上限 5 支／10 分<br>條件：附蝦皮連結，次月 5 號前填寫上月新品，需於當月底前完成上架</div>
+  </div>`;
+}
+function adjustScoreBonus(delta){
+  const key=_scoreCurYear+'-Q'+_scoreCurQ;
+  const all=getScoreBonusAll();
+  const cur=all[key]?.count||0;
+  all[key]={count:Math.max(0,Math.min(5,cur+delta))};
+  saveScoreBonusAll(all);
+  renderKpiTab();
+}
+
+function _kpiScoreViewHtml(){
+  const year=_scoreCurYear,q=_scoreCurQ;
+  const targets=getScoreTargetsForQ(year,q);
+  const qTabsHtml=[1,2,3,4].map(qq=>`<div onclick="setScoreQ(${qq})" style="padding:5px 14px;font-size:12px;font-weight:${qq===q?700:600};border-radius:16px;border:1px solid ${qq===q?'#5b5fcf':'#e5e7eb'};background:${qq===q?'#5b5fcf':''};color:${qq===q?'#fff':'#9ca3af'};cursor:pointer">Q${qq}</div>`).join('');
+
+  const targetCardHtml=targets?SCORE_SHOPS.map((s,i)=>{
+    const d=targets[s.id];
+    if(!d)return'';
+    const metrics=[{k:'rev',l:'純利率'},{k:'grow',l:'純利成長'},{k:'ads',l:'廣告合格率'},{k:'bad',l:'低效廣告率'}];
+    return `<div style="padding:14px 16px;${i>0?'border-top:1px solid #f3f4f6':''}">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+        <div style="font-size:13.5px;font-weight:700;color:#374151">${s.id}</div>
+        <div style="font-size:11px;color:#9ca3af">${s.pos}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+        ${metrics.map((m,mi)=>`
+          <div style="background:#f8f9fc;border-radius:8px;padding:8px 10px">
+            <div style="font-size:10.5px;color:#9ca3af;font-weight:600;margin-bottom:4px">${m.l}</div>
+            <div style="font-size:14px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums">${d[m.k][0]}%<span style="font-size:10.5px;font-weight:400;color:#b0b4c0"> / 低標 ${d[m.k][1]!=null?d[m.k][1]+'%':'—'}</span></div>
+            <div style="font-size:10px;color:#5b5fcf;font-weight:600;margin-top:2px">配分 ${d.w[mi]} 分</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }).join(''):`<div style="padding:24px;text-align:center;font-size:12px;color:#9ca3af">Q${q} 還沒有 KPI 目標設定，請按上面「✎ 編輯本季指標」建立</div>`;
+
+  return `
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div style="display:flex;gap:6px">${qTabsHtml}</div>
+    <div style="font-size:11px;color:#9ca3af">每季指標與權重可獨立調整</div>
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <div style="font-size:13px;font-weight:700;color:#374151">Q${q} KPI 目標與權重設定</div>
+    <div style="font-size:12px;font-weight:600;color:#5b5fcf;cursor:pointer" onclick="openEditScoreTargetsModal()">✎ 編輯本季指標</div>
+  </div>
+
+  <div onclick="toggleScoreDefs()" style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#5b5fcf;cursor:pointer;margin-bottom:10px">
+    <span style="font-size:10px;transition:transform .15s;display:inline-block;${_scoreDefsOpen?'transform:rotate(90deg)':''}">▶</span>ⓘ 指標定義與計分方式說明
+  </div>
+  <div style="display:${_scoreDefsOpen?'block':'none'};border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px">${scoreDefsHtml(q)}</div>
+
+  <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:8px">${targetCardHtml}</div>
+  <div style="font-size:11px;color:#9ca3af;margin-bottom:24px">配分欄位總和建議為 100 分；按「✎ 編輯本季指標」可調整目標／低標／配分</div>
+
+  <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
+  <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px" id="score-cmp-table"></div>
+  <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">點任一分數可展開下方明細；灰色分數代表當月還沒有資料</div>
+
+  <div id="score-detail-panel" style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:20px"></div>
+
+  ${scoreBonusHtml()}
+
+  <div style="font-size:11px;color:#9ca3af">灰底欄位為公式自動帶入（依本季目標計算），白底欄位為每月手動填寫的實際數字</div>
+  `;
+}
+
+function renderScoreComparisonTable(){
+  const container=document.getElementById('score-cmp-table');
+  if(!container)return;
+  const year=_scoreCurYear,q=_scoreCurQ;
+  const months=SCORE_QUARTER_MONTHS[q];
+  const monthHeads=months.map(m=>`<th style="text-align:center;padding:8px 6px;font-size:11px;color:#6b7280;font-weight:700;min-width:64px">${m}月</th>`).join('');
+  const rows=SCORE_SHOPS.map(s=>{
+    const cells=months.map(m=>{
+      const r=computeShopMonthScore(s.id,year,m,q);
+      if(!r||!r.hasData)return `<td style="text-align:center;padding:8px 6px"><span style="color:#d1d5db;font-size:12px">—</span></td>`;
+      const col=scoreColor(r.total);
+      const active=_scoreDetail&&_scoreDetail.shop===s.id&&_scoreDetail.month===m;
+      return `<td style="text-align:center;padding:8px 6px">
+        <span class="score-cell" onclick="setScoreDetail('${s.id}',${m})" style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer">${r.total}</span>
+      </td>`;
+    }).join('');
+    const vals=months.map(m=>{const r=computeShopMonthScore(s.id,year,m,q);return r&&r.hasData?r.total:null;}).filter(v=>v!=null);
+    const avg=vals.length?scoreRound(vals.reduce((a,b)=>a+b,0)/vals.length):null;
+    return `<tr style="border-top:1px solid #f3f4f6">
+      <td style="padding:8px 12px"><div style="font-size:13px;font-weight:700;color:#374151">${s.id}</div><div style="font-size:10.5px;color:#9ca3af">${s.pos}</div></td>
+      ${cells}
+      <td style="text-align:center;padding:8px 10px;font-size:13px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums">${avg==null?'—':avg}</td>
+    </tr>`;
+  }).join('');
+  container.innerHTML=`<table style="width:100%;border-collapse:collapse">
+    <thead><tr style="background:#f8f9fc">
+      <th style="text-align:left;padding:8px 12px;font-size:11px;color:#6b7280;font-weight:700">賣場</th>
+      ${monthHeads}
+      <th style="text-align:center;padding:8px 10px;font-size:11px;color:#6b7280;font-weight:700">本季平均</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function setScoreDetail(shop,monthNum){
+  _scoreDetail={shop,month:monthNum};
+  renderScoreComparisonTable();
+  renderScoreDetailPanel();
+}
+
+function renderScoreDetailPanel(){
+  const panel=document.getElementById('score-detail-panel');
+  if(!panel)return;
+  if(!_scoreDetail){panel.innerHTML=`<div style="padding:16px;font-size:12px;color:#9ca3af;text-align:center">點上方任一分數看該月指標明細</div>`;return;}
+  const{shop,month}=_scoreDetail;
+  const year=_scoreCurYear,q=_scoreCurQ;
+  const monthKey=year+'-'+String(month).padStart(2,'0');
+  const r=computeShopMonthScore(shop,year,month,q);
+  if(!r){panel.innerHTML=`<div style="padding:16px;font-size:12px;color:#9ca3af;text-align:center">${month}月還沒有本季目標設定</div>`;return;}
+  panel.innerHTML=`
+    <div style="padding:12px 16px;background:#f8f9fc;display:flex;align-items:baseline;gap:8px">
+      <div style="font-size:13px;font-weight:700;color:#374151">${shop}</div>
+      <div style="font-size:11px;color:#9ca3af">${month}月指標明細（白底可點擊編輯）</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:0 12px;font-size:11.5px;padding:12px 16px 14px">
+      <div style="font-size:10.5px;color:#9ca3af;font-weight:700;padding-bottom:6px">純利率</div>
+      <div style="font-size:10.5px;color:#9ca3af;font-weight:700;padding-bottom:6px">純利成長</div>
+      <div style="font-size:10.5px;color:#9ca3af;font-weight:700;padding-bottom:6px">廣告合格率</div>
+      <div style="font-size:10.5px;color:#9ca3af;font-weight:700;padding-bottom:6px">低效廣告率</div>
+
+      <div style="color:#9ca3af;padding:4px 0">目標 <b style="color:#6b7280">${r.t.rev[0]}%</b></div>
+      <div style="color:#9ca3af;padding:4px 0">目標 <b style="color:#6b7280">${r.t.grow[0]}%</b></div>
+      <div style="color:#9ca3af;padding:4px 0">目標 <b style="color:#6b7280">${r.t.ads[0]}%</b></div>
+      <div style="color:#9ca3af;padding:4px 0">目標 <b style="color:#6b7280">${r.t.bad[0]}%</b></div>
+
+      <div onclick="editScoreMonthlyCell('${monthKey}','${shop}','revA',this)" style="color:#374151;padding:2px 0;cursor:pointer;border-bottom:1px dashed #d1d5db;display:inline-block">實際 <b>${r.m.revA??'—'}${r.m.revA!=null?'%':''}</b></div>
+      <div style="color:#374151;padding:2px 0">實際 <b>${r.growA==null?'—':r.growA+'%'}</b></div>
+      <div onclick="editScoreMonthlyCell('${monthKey}','${shop}','adsA',this)" style="color:#374151;padding:2px 0;cursor:pointer;border-bottom:1px dashed #d1d5db;display:inline-block">實際 <b>${r.m.adsA??'—'}${r.m.adsA!=null?'%':''}</b></div>
+      <div onclick="editScoreMonthlyCell('${monthKey}','${shop}','badA',this)" style="color:#374151;padding:2px 0;cursor:pointer;border-bottom:1px dashed #d1d5db;display:inline-block">實際 <b>${r.m.badA??'—'}${r.m.badA!=null?'%':''}</b></div>
+
+      <div style="color:#5b5fcf;font-weight:700;padding:4px 0">${r.revS} 分</div>
+      <div style="color:#5b5fcf;font-weight:700;padding:4px 0">${r.growS} 分</div>
+      <div style="color:#5b5fcf;font-weight:700;padding:4px 0">${r.adsS} 分</div>
+      <div style="color:#5b5fcf;font-weight:700;padding:4px 0">${r.badS} 分</div>
+    </div>
+    <div style="padding:0 16px 14px;display:flex;gap:16px;font-size:11px;color:#9ca3af">
+      <span onclick="editScoreMonthlyCell('${monthKey}','${shop}','prevProfit',this)" style="cursor:pointer;border-bottom:1px dashed #d1d5db">前期純利 <b style="color:#6b7280">${r.m.prevProfit!=null?fmtN(r.m.prevProfit):'—'}</b></span>
+      <span onclick="editScoreMonthlyCell('${monthKey}','${shop}','curProfit',this)" style="cursor:pointer;border-bottom:1px dashed #d1d5db">本期純利 <b style="color:#6b7280">${r.m.curProfit!=null?fmtN(r.m.curProfit):'—'}</b></span>
+    </div>`;
+}
+
+function editScoreMonthlyCell(monthKey,shop,field,tdEl){
+  const all=getScoreMonthlyAll();
+  if(!all[monthKey])all[monthKey]=JSON.parse(JSON.stringify(SCORE_DEFAULT_MONTHLY[monthKey]||{}));
+  if(!all[monthKey][shop])all[monthKey][shop]={...(SCORE_DEFAULT_MONTHLY[monthKey]?.[shop]||{})};
+  const curVal=all[monthKey][shop][field];
+  const inp=document.createElement('input');
+  inp.type='number';inp.step='0.01';inp.value=curVal??'';
+  inp.style.cssText='width:90px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
+  tdEl.innerHTML='';tdEl.appendChild(inp);inp.focus();if(inp.value)inp.select();
+  let done=false;
+  const save=()=>{
+    if(done)return;done=true;
+    const v=parseFloat(inp.value);
+    all[monthKey][shop][field]=isNaN(v)?null:v;
+    saveScoreMonthlyAll(all);
+    renderScoreComparisonTable();
+    renderScoreDetailPanel();
+  };
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}});
+  inp.addEventListener('blur',save);
+}
+
+function openEditScoreTargetsModal(){
+  const year=_scoreCurYear,q=_scoreCurQ;
+  const cur=getScoreTargetsForQ(year,q)||{};
+  const ov=document.createElement('div');
+  ov.className='ana-overlay open';ov.style.zIndex='3000';
+  const metricRow=(shopId,label,key)=>{
+    return `<div style="display:grid;grid-template-columns:80px 1fr 1fr 1fr;gap:8px;align-items:center;margin-bottom:6px">
+      <div style="font-size:12px;color:#6b7280">${label}</div>
+      <input type="number" step="0.1" data-shop="${shopId}" data-key="${key}" data-field="target" placeholder="目標%" style="padding:5px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px">
+      <input type="number" step="0.1" data-shop="${shopId}" data-key="${key}" data-field="low" placeholder="低標%（可留空）" style="padding:5px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px">
+      <input type="number" step="1" data-shop="${shopId}" data-key="${key}" data-field="w" placeholder="配分" style="padding:5px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px">
+    </div>`;
+  };
+  const shopBlocks=SCORE_SHOPS.map(s=>{
+    return `<div style="margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #f3f4f6">
+      <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:8px">${s.id} <span style="font-size:11px;font-weight:400;color:#9ca3af">${s.pos}</span></div>
+      <div style="display:grid;grid-template-columns:80px 1fr 1fr 1fr;gap:8px;margin-bottom:4px">
+        <div></div><div style="font-size:10.5px;color:#9ca3af">目標</div><div style="font-size:10.5px;color:#9ca3af">低標</div><div style="font-size:10.5px;color:#9ca3af">配分</div>
+      </div>
+      ${metricRow(s.id,'純利率','rev')}${metricRow(s.id,'純利成長','grow')}${metricRow(s.id,'廣告合格率','ads')}${metricRow(s.id,'低效廣告率','bad')}
+    </div>`;
+  }).join('');
+  ov.innerHTML=`<div class="ana-modal" style="width:520px;max-width:96vw;max-height:85vh;overflow-y:auto">
+    <div class="ana-modal-hdr"><span>編輯 Q${q} KPI 目標與權重</span><button class="ana-close-btn" onclick="this.closest('.ana-overlay').remove()">✕</button></div>
+    <div class="ana-modal-body" style="padding:20px">
+      ${shopBlocks}
+      <div style="font-size:11px;color:#9ca3af;margin-bottom:12px">低標留空代表沒有低標（未達目標就不得分）；每個賣場的配分總和建議為 100</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="this.closest('.ana-overlay').remove()" style="padding:8px 18px;border:1.5px solid #e5e7eb;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#6b7280;cursor:pointer">取消</button>
+        <button onclick="saveScoreTargetsModal(this)" style="padding:8px 18px;border:0;border-radius:8px;background:#5b5fcf;font-size:13px;font-weight:700;color:white;cursor:pointer">儲存</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.onclick=e=>{if(e.target===ov)ov.remove();};
+  SCORE_SHOPS.forEach(s=>{
+    const d=cur[s.id]||{rev:[0,null],grow:[0,null],ads:[0,null],bad:[0,null],w:[25,25,25,25]};
+    ['rev','grow','ads','bad'].forEach((k,ki)=>{
+      ov.querySelector(`input[data-shop="${s.id}"][data-key="${k}"][data-field="target"]`).value=d[k][0]??'';
+      ov.querySelector(`input[data-shop="${s.id}"][data-key="${k}"][data-field="low"]`).value=d[k][1]??'';
+      ov.querySelector(`input[data-shop="${s.id}"][data-key="${k}"][data-field="w"]`).value=d.w[ki]??'';
+    });
+  });
+}
+function saveScoreTargetsModal(btn){
+  const ov=btn.closest('.ana-overlay');
+  const year=_scoreCurYear,q=_scoreCurQ;
+  const all=getScoreTargetsAll();
+  const key=year+'-Q'+q;
+  const data={};
+  SCORE_SHOPS.forEach(s=>{
+    const get=(k,f)=>{
+      const inp=ov.querySelector(`input[data-shop="${s.id}"][data-key="${k}"][data-field="${f}"]`);
+      const v=parseFloat(inp.value);
+      return isNaN(v)?null:v;
+    };
+    data[s.id]={
+      rev:[get('rev','target'),get('rev','low')],
+      grow:[get('grow','target'),get('grow','low')],
+      ads:[get('ads','target'),get('ads','low')],
+      bad:[get('bad','target'),get('bad','low')],
+      w:[get('rev','w')??25,get('grow','w')??25,get('ads','w')??25,get('bad','w')??25],
+    };
+  });
+  all[key]=data;
+  saveScoreTargetsAll(all);
+  ov.remove();
+  renderKpiTab();
 }
 
 // ── (legacy unused) ──
@@ -5808,4 +6213,6 @@ Object.assign(window, {
   mypColDragStart,mypColDragOver,mypColDragEnter,mypColDragLeave,mypColDrop,mypColDragEnd,
   mypPickRowDragStart,mypPickRowDragOver,mypPickRowDragEnter,mypPickRowDragLeave,mypPickRowDrop,mypPickRowDragEnd,
   mypSetSort,
+  setScoreQ,toggleScoreDefs,adjustScoreBonus,setScoreDetail,editScoreMonthlyCell,
+  openEditScoreTargetsModal,saveScoreTargetsModal,
 });
