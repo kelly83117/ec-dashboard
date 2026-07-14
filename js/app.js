@@ -421,9 +421,9 @@ const OFFICE_CONFIG = {
       { icon: '💰', label: '預估毛利率', value: '0%', meta: '目標 35%' },
     ],
     tabs: [
+      { key: 'trend-radar', title: '🔥 熱搜雷達', dynamic: 'trend-radar' },
       { key: 'new-products', title: '🆕 新品表', dynamic: 'new-products' },
       { key: 'ai-select', title: '🤖 AI 選品', dynamic: 'ai-select' },
-      { key: 'trend-radar', title: '🔥 熱搜雷達', dynamic: 'trend-radar' },
       { key: 'supplier', title: '🏭 供應商管理', dynamic: 'supplier-mgmt' },
       { key: 'profit-calc', title: '💰 毛利試算機', dynamic: 'profit-calc' },
       { key: 'competitor', title: '📈 競品追蹤', dynamic: 'competitor-track' },
