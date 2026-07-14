@@ -456,6 +456,62 @@
   .stat-card .stat-meta .up { color: var(--success); }
   .stat-card .stat-meta .down { color: var(--danger); }
 
+  /* ------------- 儀表板首頁 · 日期列（檢視範圍）-------------
+     控制 KPI 卡 / 排名長條 / 需要留意 / 圓餅圖共用的檢視範圍。
+     與填寫表格自己的「填寫日期」是兩回事，互不影響。 */
+  .summary-pills {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .summary-pills-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-right: 2px;
+  }
+  .summary-pills-sep {
+    width: 1px;
+    height: 14px;
+    background: var(--border);
+    margin: 0 2px;
+    flex-shrink: 0;
+  }
+  /* 日期列用的小尺寸 pill（.pill 的緊湊版） */
+  .pill-sm {
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .pill-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .pill-picker-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .pill-input {
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 11px;
+  }
+  /* 選中的挑選器：用主色淺底標示目前生效的模式 */
+  .pill-input.is-active {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-weight: 700;
+  }
+
   /* ------------- 儀表板首頁 · 總覽卡 (summary-card) -------------
      四張一排：主卡「全通路總營收」放大，其餘三張為通路卡。
      窄螢幕由下方 @media (max-width:460px) 的 .stat-grid 規則收成 1 欄。 */

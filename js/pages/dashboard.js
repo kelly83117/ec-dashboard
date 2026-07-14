@@ -88,9 +88,16 @@ Object.assign(App, {
       </div>
     `;
 
-    // 4 張總覽卡：可切換「昨日 / 前日 / 本月 / 上月 / 自訂月份」
+    // ── 檢視範圍（全頁共用：KPI 卡 / 排名長條 / 需要留意 / 圓餅圖）──
+    // ⚠ 這與上面的「填寫日期」(filter.entryDate) 是兩回事：
+    //   上面是「填」（只給填寫表格用）、這裡是「看」。兩者刻意分家，互不影響。
     const summaryRange = this.filter.summaryRange || 'yesterday';
     const customMonth = this.filter.summaryMonth || toDateStr(now).slice(0, 7);
+    // 選日期：不允許未來
+    if (this.filter.summaryDate && this.filter.summaryDate > todayStrLocal) {
+      this.filter.summaryDate = defaultInputDate;
+    }
+    const customDay = this.filter.summaryDate || defaultInputDate;
     // 每日營收填寫預設收合；狀態記在 filter，重繪後才不會被打回收合
     const entryOpen = !!this.filter.revenueEntryOpen;
 
@@ -107,72 +114,60 @@ Object.assign(App, {
       }
       return arr;
     };
-    const buildRange = (key) => {
-      if (key === 'yesterday') {
-        return {
-          label: '昨日',
-          showDates: [inputDateStr],
-          compareDates: [prevDateStr],
-          compareLabel: '前一日',
-        };
-      }
-      if (key === 'dayBefore') {
-        return {
-          label: '前日',
-          showDates: [prevDateStr],
-          compareDates: [toDateStr(addDays(now, -3))],
-          compareLabel: '再前一日',
-        };
-      }
-      if (key === 'thisMonth') {
-        const ms = toDateStr(now).slice(0, 7);
-        const prevMs = toDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
-        return {
-          label: `${ms.replace('-', '/')} 本月`,
-          showDates: monthDates(ms),
-          compareDates: monthDates(prevMs),
-          compareLabel: '上月',
-        };
-      }
-      if (key === 'lastMonth') {
-        const ms = toDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
-        const prevMs = toDateStr(new Date(now.getFullYear(), now.getMonth() - 2, 1)).slice(0, 7);
-        return {
-          label: `${ms.replace('-', '/')} 上月`,
-          showDates: monthDates(ms),
-          compareDates: monthDates(prevMs),
-          compareLabel: '再上一月',
-        };
-      }
-      // customMonth
-      const [yy, mm] = customMonth.split('-').map(Number);
-      const prevDate = new Date(yy, mm - 2, 1);
-      const prevMs = toDateStr(prevDate).slice(0, 7);
+    // 單日範圍：showDates 只有一天，比較對象是它的前一天
+    const dayRange = (dStr, label) => ({
+      kind: 'day',
+      label,
+      dateLabel: dStr.replace(/-/g, '/'),
+      showDates: [dStr],
+      compareDates: [toDateStr(addDays(new Date(dStr + 'T00:00:00'), -1))],
+      compareLabel: '前一日',
+    });
+    // 月累計範圍：showDates 是該月每一天（不超過昨日），比較對象是前一個月
+    const monthRange = (yyyymm, label, compareLabel) => {
+      const [yy, mm] = yyyymm.split('-').map(Number);
+      const prevMs = toDateStr(new Date(yy, mm - 2, 1)).slice(0, 7);
       return {
-        label: `${customMonth.replace('-', '/')}`,
-        showDates: monthDates(customMonth),
+        kind: 'month',
+        label,
+        dateLabel: `${yyyymm.replace('-', '/')} 月累計`,
+        showDates: monthDates(yyyymm),
         compareDates: monthDates(prevMs),
-        compareLabel: '前一月',
+        compareLabel,
       };
+    };
+    const buildRange = (key) => {
+      const thisMs = toDateStr(now).slice(0, 7);
+      const lastMs = toDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
+      if (key === 'customDay')  return dayRange(customDay, customDay.replace(/-/g, '/'));
+      if (key === 'thisMonth')  return monthRange(thisMs, `${thisMs.replace('-', '/')} 本月`, '上月');
+      if (key === 'lastMonth')  return monthRange(lastMs, `${lastMs.replace('-', '/')} 上月`, '再上一月');
+      if (key === 'customMonth') return monthRange(customMonth, customMonth.replace('-', '/'), '前一月');
+      // yesterday（預設）— 固定為真正的昨天，不再跟著填寫日期跑
+      return dayRange(defaultInputDate, '昨日');
     };
     const rangeInfo = buildRange(summaryRange);
     const sumOver = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
     const sumAdsOver = (p, dates) => dates.reduce((s, d) => s + (+p.dailyAdSpend?.[d] || 0), 0);
 
+    // 日期列 —— 控制「檢視範圍」（不是填寫日期）
     const summaryPills = `
-      <div id="summary-pills" style="display:flex;gap:5px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
-        <span style="font-size:12px;color:var(--text-muted);margin-right:2px;font-weight:600">日期</span>
-        <button class="pill ${summaryRange === 'yesterday' ? 'active' : ''}" data-summary-range="yesterday"
-          style="padding:4px 10px;font-size:11px;font-weight:600">昨日 (${inputDateStr.replace(/-/g, '/')})</button>
-        <span style="width:1px;height:14px;background:var(--border);margin:0 2px"></span>
-        <button class="pill ${summaryRange === 'thisMonth' ? 'active' : ''}" data-summary-range="thisMonth"
-          style="padding:4px 10px;font-size:11px;font-weight:600">本月</button>
-        <button class="pill ${summaryRange === 'lastMonth' ? 'active' : ''}" data-summary-range="lastMonth"
-          style="padding:4px 10px;font-size:11px;font-weight:600">上月</button>
-        <span style="display:inline-flex;align-items:center;gap:4px">
-          <span style="font-size:11px;color:var(--text-muted);font-weight:600">選月份：</span>
-          <input type="month" id="summary-custom-month" value="${customMonth}" max="${toDateStr(now).slice(0,7)}"
-            style="padding:3px 8px;border:1px solid ${summaryRange === 'customMonth' ? 'var(--primary)' : 'var(--border)'};border-radius:999px;font-size:11px;font-family:inherit;background:${summaryRange === 'customMonth' ? 'var(--primary-soft)' : 'var(--surface)'}">
+      <div id="summary-pills" class="summary-pills">
+        <span class="summary-pills-label">檢視</span>
+        <button class="pill pill-sm ${summaryRange === 'yesterday' ? 'active' : ''}" data-summary-range="yesterday">昨日 (${defaultInputDate.replace(/-/g, '/')})</button>
+        <span class="summary-pills-sep"></span>
+        <button class="pill pill-sm ${summaryRange === 'thisMonth' ? 'active' : ''}" data-summary-range="thisMonth">本月</button>
+        <button class="pill pill-sm ${summaryRange === 'lastMonth' ? 'active' : ''}" data-summary-range="lastMonth">上月</button>
+        <span class="summary-pills-sep"></span>
+        <span class="pill-picker">
+          <span class="pill-picker-label">選日期：</span>
+          <input type="date" id="summary-custom-day" class="pill-input${summaryRange === 'customDay' ? ' is-active' : ''}"
+            value="${escapeHtml(customDay)}" max="${escapeHtml(todayStrLocal)}">
+        </span>
+        <span class="pill-picker">
+          <span class="pill-picker-label">選月份：</span>
+          <input type="month" id="summary-custom-month" class="pill-input${summaryRange === 'customMonth' ? ' is-active' : ''}"
+            value="${escapeHtml(customMonth)}" max="${escapeHtml(toDateStr(now).slice(0,7))}">
         </span>
         <button type="button" id="toggle-revenue-entry" class="entry-toggle-btn${entryOpen ? ' is-open' : ''}"
           aria-expanded="${entryOpen ? 'true' : 'false'}" aria-controls="revenue-entry-panel">
@@ -406,26 +401,31 @@ Object.assign(App, {
       <div class="stat-grid summary-grid">${summaryCards}</div>
       <div id="revenue-entry-panel" class="dash-entry${entryOpen ? '' : ' is-collapsed'}">${revenueTableHtml}</div>
       <div class="dash-main">
-        ${this.channelRankingHtml(platforms, inputDateStr, prevDateStr)}
+        ${this.channelRankingHtml(platforms, rangeInfo)}
         <div class="dash-main-col">
-          ${this.channelAlertsHtml(platforms, inputDateStr, prevDateStr)}
-          ${this.channelPieHtml(platforms, inputDateStr, prevDateStr)}
+          ${this.channelAlertsHtml(platforms, rangeInfo)}
+          ${this.channelPieHtml(platforms, rangeInfo)}
         </div>
       </div>
       <div class="dash-chart-row">${this.dailyLineChartHtml(platforms)}</div>
     `;
   },
-  /* 各通路單日指標的單一計算來源 —— 排名長條與「需要留意」共用，
-     兩塊的 ROAS / 跌幅永遠不會算出不同答案。
-     - hasRoas：沒投廣告、或當日廣告費為 0 → 無法計算 ROAS（roas 為 null）
-     - hasDelta：前期營收為 0 → 沒有跌幅可言（delta 為 0，不可拿來判斷）
+  /* 各通路指標的單一計算來源 —— KPI 卡、排名長條、需要留意、圓餅圖共用，
+     四塊的營收 / ROAS / 漲跌永遠不會算出不同答案。
+     showDates / compareDates 是「日期陣列」：
+       單日模式 = 長度 1 的陣列；月累計模式 = 該月每一天。
+       所以單日只是陣列的特例，兩種模式共用同一條算式。
+     - hasRoas：沒投廣告、或該範圍廣告費為 0 → 無法計算 ROAS（roas 為 null）
+     - hasDelta：比較範圍營收為 0 → 沒有漲跌可言（delta 為 0，不可拿來判斷）
      - ⚠ 保留原始索引 i：它就是填寫表格的 data-idx，排序時絕不可就地 sort(platforms)，
        打亂會讓存檔寫到錯的賣場。 */
-  channelMetrics(platforms, inputDateStr, prevDateStr) {
+  channelMetrics(platforms, showDates, compareDates) {
+    const sumRev = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
+    const sumAds = (p, dates) => dates.reduce((s, d) => s + (+p.dailyAdSpend?.[d] || 0), 0);
     return platforms.map((p, i) => {
-      const rev  = +(p.daily?.[inputDateStr]) || 0;
-      const prev = +(p.daily?.[prevDateStr])  || 0;
-      const ads  = +(p.dailyAdSpend?.[inputDateStr]) || 0;
+      const rev  = sumRev(p, showDates);
+      const prev = sumRev(p, compareDates);
+      const ads  = sumAds(p, showDates);
       const hasRoas = PLATFORMS_WITH_AD_SPEND.has(p.name) && ads > 0;
       const hasDelta = prev > 0;
       return {
@@ -438,12 +438,12 @@ Object.assign(App, {
   /* 各通路營收排名（水平長條）
      - 資料沿用 viewDashboard 同一份 platforms，指標走 channelMetrics()，不另接來源
      - 純 render、無事件綁定：日期切換與存檔都會走 this.render()，這裡自然跟著更新 */
-  channelRankingHtml(platforms, inputDateStr, prevDateStr) {
-    const ranked = this.channelMetrics(platforms, inputDateStr, prevDateStr)
+  channelRankingHtml(platforms, rangeInfo) {
+    const ranked = this.channelMetrics(platforms, rangeInfo.showDates, rangeInfo.compareDates)
       .sort((a, b) => b.rev - a.rev);
 
     const maxRev = Math.max(...ranked.map(m => m.rev), 0);
-    const dateDisplay = inputDateStr.replace(/-/g, '/');
+    const dateDisplay = rangeInfo.dateLabel;
 
     const legend = `
       <div class="rank-legend">
@@ -456,7 +456,7 @@ Object.assign(App, {
     const head = `
       <div class="rank-card-head">
         <h3 class="rank-card-title">各通路營收排名</h3>
-        <span class="rank-card-date">${escapeHtml(dateDisplay)}　·　依營收由高到低</span>
+        <span class="rank-card-date">${escapeHtml(dateDisplay)}　·　依營收由高到低　·　漲跌較${escapeHtml(rangeInfo.compareLabel)}</span>
         ${legend}
       </div>
     `;
@@ -520,21 +520,22 @@ Object.assign(App, {
   /* 需要留意 — 自動標記表現異常的通路
      - 指標走 channelMetrics()，與排名長條同一份計算
      - 純 render、無事件綁定：跟著既有重繪路徑更新
-     門檻：跌幅 > 20%（需有前期資料）、ROAS < 5（需 ROAS 可計算）；符合任一即列出。 */
-  channelAlertsHtml(platforms, inputDateStr, prevDateStr) {
+     門檻：跌幅 > 20%（需有比較期資料）、ROAS < 5（需 ROAS 可計算）；符合任一即列出。
+     跌幅的比較基準隨檢視範圍走：單日 = 較前一日、月累計 = 較上月，原因文字會標明。 */
+  channelAlertsHtml(platforms, rangeInfo) {
     const DROP_LIMIT = -20;   // 跌幅超過 20% → 標記
     // 與排名長條的紅色門檻對齊（channelRankingHtml 的 is-low 也是 < 5），
     // 避免出現「排名長條是黃燈、卻被列入需要留意」的矛盾
     const ROAS_LIMIT = 5;     // ROAS 低於 5 → 標記
 
-    const alerts = this.channelMetrics(platforms, inputDateStr, prevDateStr)
+    const alerts = this.channelMetrics(platforms, rangeInfo.showDates, rangeInfo.compareDates)
       .map((m) => {
         const reasons = [];
-        // 前期沒資料就沒有跌幅可言 → 不判斷（hasDelta 已含此保護）
+        // 比較期沒資料就沒有跌幅可言 → 不判斷（hasDelta 已含此保護）
         if (m.hasDelta && m.delta < DROP_LIMIT) {
-          reasons.push({ kind: 'drop', text: `營收 ↓${Math.abs(m.delta).toFixed(1)}%` });
+          reasons.push({ kind: 'drop', text: `營收 ↓${Math.abs(m.delta).toFixed(1)}%（較${rangeInfo.compareLabel}）` });
         }
-        // ROAS 無法計算（無廣告投放 / 當日廣告費 0）→ 不納入此條件
+        // ROAS 無法計算（無廣告投放 / 該範圍廣告費 0）→ 不納入此條件
         if (m.hasRoas && m.roas < ROAS_LIMIT) {
           reasons.push({ kind: 'roas', text: `ROAS 偏低 ${m.roas.toFixed(2)}` });
         }
@@ -551,7 +552,7 @@ Object.assign(App, {
       return a.roas - b.roas;
     });
 
-    const dateDisplay = inputDateStr.replace(/-/g, '/');
+    const dateDisplay = rangeInfo.dateLabel;
     const head = `
       <div class="alert-card-head">
         <h3 class="alert-card-title">需要留意</h3>
@@ -561,10 +562,11 @@ Object.assign(App, {
     `;
 
     if (alerts.length === 0) {
+      const okText = rangeInfo.kind === 'month' ? '各通路表現穩定，無需特別留意' : '今日各通路表現穩定，無需特別留意';
       return `
         <div class="alert-card">
           ${head}
-          <div class="alert-ok"><span>✓</span><span>今日各通路表現穩定，無需特別留意</span></div>
+          <div class="alert-ok"><span>✓</span><span>${escapeHtml(okText)}</span></div>
         </div>
       `;
     }
@@ -597,10 +599,10 @@ Object.assign(App, {
      - 比照既有 _chartState 的做法：這裡只產生 markup + 把資料放進 _pieState，
        實際建圖在 initChannelPie()（DOM 進場後才有 canvas 可用）
      - 純 render、無事件綁定：跟著既有重繪路徑更新 */
-  channelPieHtml(platforms, inputDateStr, prevDateStr) {
-    const metrics = this.channelMetrics(platforms, inputDateStr, prevDateStr);
+  channelPieHtml(platforms, rangeInfo) {
+    const metrics = this.channelMetrics(platforms, rangeInfo.showDates, rangeInfo.compareDates);
     const total = metrics.reduce((s, m) => s + m.rev, 0);
-    const dateDisplay = inputDateStr.replace(/-/g, '/');
+    const dateDisplay = rangeInfo.dateLabel;
     const head = `
       <div class="pie-card-head">
         <h3 class="pie-card-title">各通路營收佔比</h3>
@@ -1141,7 +1143,18 @@ Object.assign(App, {
         this.render();
       });
     });
-    // 自訂月份 picker
+    // 檢視範圍 — 選日期（單日模式）
+    const dayPicker = document.getElementById('summary-custom-day');
+    if (dayPicker) {
+      dayPicker.addEventListener('change', () => {
+        if (!dayPicker.value) return;
+        const todayLocal2 = toDateStr(new Date());
+        this.filter.summaryDate = dayPicker.value > todayLocal2 ? todayLocal2 : dayPicker.value;
+        this.filter.summaryRange = 'customDay';
+        this.render();
+      });
+    }
+    // 檢視範圍 — 選月份（月累計模式）
     const monthPicker = document.getElementById('summary-custom-month');
     if (monthPicker) {
       monthPicker.addEventListener('change', () => {
