@@ -4298,10 +4298,9 @@ function scoreColor(s){
 function _scoreDefaultQ(){return Math.ceil((_KPI_NOW.getMonth()+1)/3);}
 let _scoreCurQ=_scoreDefaultQ();
 let _scoreCurYear=_KPI_NOW.getFullYear();
-let _scoreDetailMonth=null;
 let _scoreDefsOpen=false;
 
-function setScoreQ(q){_scoreCurQ=q;_scoreDetailMonth=null;renderKpiTab();}
+function setScoreQ(q){_scoreCurQ=q;renderKpiTab();}
 function toggleScoreDefs(){_scoreDefsOpen=!_scoreDefsOpen;renderKpiTab();}
 
 function scoreDefsHtml(q){
@@ -4393,9 +4392,9 @@ function _kpiScoreViewHtml(){
 
   <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
   <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px" id="score-cmp-table"></div>
-  <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">點任一分數可展開下方明細；灰色分數代表當月還沒有資料</div>
+  <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">灰色分數代表當月還沒有資料；下方列出本季每個月三個賣場的完整明細</div>
 
-  <div id="score-detail-panel" style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:20px"></div>
+  <div id="score-detail-panel" style="margin-bottom:20px"></div>
 
   ${q>=3?scoreBonusHtml():''}
 
@@ -4408,18 +4407,14 @@ function renderScoreComparisonTable(){
   if(!container)return;
   const year=_scoreCurYear,q=_scoreCurQ;
   const months=SCORE_QUARTER_MONTHS[q];
-  const monthHeads=months.map(m=>{
-    const active=_scoreDetailMonth===m;
-    return `<th onclick="setScoreDetailMonth(${m})" style="text-align:center;padding:8px 6px;font-size:11px;color:${active?'#5b5fcf':'#6b7280'};font-weight:700;min-width:64px;cursor:pointer;${active?'text-decoration:underline':''}">${m}月</th>`;
-  }).join('');
+  const monthHeads=months.map(m=>`<th style="text-align:center;padding:8px 6px;font-size:11px;color:#6b7280;font-weight:700;min-width:64px">${m}月</th>`).join('');
   const rows=SCORE_SHOPS.map(s=>{
     const cells=months.map(m=>{
       const r=computeShopMonthScore(s.id,year,m,q);
-      const active=_scoreDetailMonth===m;
-      if(!r||!r.hasData)return `<td onclick="setScoreDetailMonth(${m})" style="text-align:center;padding:8px 6px;cursor:pointer;${active?'background:#f8f9fc':''}"><span style="color:#d1d5db;font-size:12px">—</span></td>`;
+      if(!r||!r.hasData)return `<td style="text-align:center;padding:8px 6px"><span style="color:#d1d5db;font-size:12px">—</span></td>`;
       const col=scoreColor(r.total);
-      return `<td onclick="setScoreDetailMonth(${m})" style="text-align:center;padding:8px 6px;cursor:pointer;${active?'background:#f8f9fc':''}">
-        <span class="score-cell" style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums">${r.total}</span>
+      return `<td style="text-align:center;padding:8px 6px">
+        <span style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:1px solid ${col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums">${r.total}</span>
       </td>`;
     }).join('');
     const vals=months.map(m=>{const r=computeShopMonthScore(s.id,year,m,q);return r&&r.hasData?r.total:null;}).filter(v=>v!=null);
@@ -4440,26 +4435,14 @@ function renderScoreComparisonTable(){
   </table>`;
 }
 
-function setScoreDetailMonth(monthNum){
-  _scoreDetailMonth=monthNum;
-  renderScoreComparisonTable();
-  renderScoreDetailPanel();
-}
-
-function renderScoreDetailPanel(){
-  const panel=document.getElementById('score-detail-panel');
-  if(!panel)return;
-  if(_scoreDetailMonth==null){panel.innerHTML=`<div style="padding:16px;font-size:12px;color:#9ca3af;text-align:center">點上方任一月份看三個賣場的指標明細</div>`;return;}
-  const month=_scoreDetailMonth;
-  const year=_scoreCurYear,q=_scoreCurQ;
+function scoreShopMonthDetailHtml(s,year,month,q,isLast){
+  const shop=s.id;
   const monthKey=year+'-'+String(month).padStart(2,'0');
-  const blocks=SCORE_SHOPS.map((s,i)=>{
-    const shop=s.id;
-    const r=computeShopMonthScore(shop,year,month,q);
-    if(!r){
-      return `<div style="padding:16px;${i>0?'border-top:1px solid #f3f4f6':''};font-size:12px;color:#9ca3af">${shop}：${month}月還沒有本季目標設定</div>`;
-    }
-    return `<div style="${i>0?'border-top:1px solid #f3f4f6':''}">
+  const r=computeShopMonthScore(shop,year,month,q);
+  if(!r){
+    return `<div style="padding:16px;${isLast?'':'border-bottom:1px solid #f3f4f6'};font-size:12px;color:#9ca3af">${shop}：${month}月還沒有本季目標設定</div>`;
+  }
+  return `<div style="${isLast?'':'border-bottom:1px solid #f3f4f6'}">
     <div style="padding:12px 16px;background:#f8f9fc;display:flex;align-items:baseline;gap:8px">
       <div style="font-size:13px;font-weight:700;color:#374151">${shop}</div>
       <div style="font-size:11px;color:#9ca3af">${s.pos}</div>
@@ -4489,9 +4472,22 @@ function renderScoreDetailPanel(){
       <span onclick="editScoreMonthlyCell('${monthKey}','${shop}','prevProfit',this)" style="cursor:pointer;border-bottom:1px dashed #d1d5db">前期純利 <b style="color:#6b7280">${r.m.prevProfit!=null?fmtN(r.m.prevProfit):'—'}</b></span>
       <span onclick="editScoreMonthlyCell('${monthKey}','${shop}','curProfit',this)" style="cursor:pointer;border-bottom:1px dashed #d1d5db">本期純利 <b style="color:#6b7280">${r.m.curProfit!=null?fmtN(r.m.curProfit):'—'}</b></span>
     </div>
+  </div>`;
+}
+
+// 每個月份都直接攤開三個賣場的明細（不用點選），一次可以看完整季所有月份 x 所有賣場的資料。
+function renderScoreDetailPanel(){
+  const panel=document.getElementById('score-detail-panel');
+  if(!panel)return;
+  const year=_scoreCurYear,q=_scoreCurQ;
+  const months=SCORE_QUARTER_MONTHS[q];
+  panel.innerHTML=months.map(month=>{
+    const shopBlocks=SCORE_SHOPS.map((s,i)=>scoreShopMonthDetailHtml(s,year,month,q,i===SCORE_SHOPS.length-1)).join('');
+    return `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px">
+      <div style="padding:8px 16px;font-size:12px;font-weight:700;color:#374151;background:#fafafe;border-bottom:1px solid #f3f4f6">${month}月指標明細</div>
+      ${shopBlocks}
     </div>`;
   }).join('');
-  panel.innerHTML=`<div style="padding:8px 16px;font-size:11px;color:#9ca3af;background:#fafafe;border-bottom:1px solid #f3f4f6">${month}月三個賣場指標明細（白底數字可點擊編輯）</div>${blocks}`;
 }
 
 function editScoreMonthlyCell(monthKey,shop,field,tdEl){
@@ -6223,6 +6219,6 @@ Object.assign(window, {
   mypColDragStart,mypColDragOver,mypColDragEnter,mypColDragLeave,mypColDrop,mypColDragEnd,
   mypPickRowDragStart,mypPickRowDragOver,mypPickRowDragEnter,mypPickRowDragLeave,mypPickRowDrop,mypPickRowDragEnd,
   mypSetSort,
-  setScoreQ,toggleScoreDefs,adjustScoreBonus,setScoreDetailMonth,editScoreMonthlyCell,
+  setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
 });
