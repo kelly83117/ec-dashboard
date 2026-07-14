@@ -940,33 +940,50 @@ Object.assign(App, {
       const pctNum = orig && lastBid ? ((orig - lastBid) / orig) * 100 : -1;
       return { r, i, orig, lastBid, pctNum };
     });
-    const top10Indices = new Set(
-      [...withPct].filter(x => x.pctNum > 0).sort((a, b) => b.pctNum - a.pctNum).slice(0, 10).map(x => x.i)
-    );
-    const rows = list.length === 0
+    // 依議價比排序（有議價比的在前，無的在後）
+    const sorted = [...withPct].sort((a, b) => b.pctNum - a.pctNum);
+    const top10 = sorted.slice(0, 10);
+    const rest = sorted.slice(10);
+
+    const renderRow = ({ r, i, orig, lastBid, pctNum }) => {
+      const pct = pctNum > 0 ? pctNum.toFixed(1) + '%' : '—';
+      return `<tr style="vertical-align:middle;text-align:center">
+        <td>${escapeHtml(r.date || '')}</td>
+        <td style="font-weight:600;text-align:left">${escapeHtml(r.item || '')}</td>
+        <td>${priceCell(r.orig)}</td>
+        <td>${priceCell(r.b1)}</td>
+        <td>${priceCell(r.b2)}</td>
+        <td>${priceCell(r.b3)}</td>
+        <td>${priceCell(r.b4)}</td>
+        <td>${priceCell(r.b5)}</td>
+        <td style="font-weight:700;font-size:12px;color:${pctNum > 0 ? '#059669' : 'var(--text-muted)'}">
+          <span>${pct}</span>
+        </td>
+        <td style="font-size:12px">${escapeHtml(r.note || '')}</td>
+        <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
+          <button class="bg-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
+          <button class="bg-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+        </div></td>
+      </tr>`;
+    };
+
+    const top10Rows = list.length === 0
       ? `<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
-      : withPct.map(({ r, i, orig, lastBid, pctNum }) => {
-          const pct = pctNum > 0 ? pctNum.toFixed(1) + '%' : '—';
-          const isTop = top10Indices.has(i);
-          return `<tr style="vertical-align:middle;text-align:center;${isTop ? 'background:#fff0f3;' : ''}">
-            <td>${escapeHtml(r.date || '')}</td>
-            <td style="font-weight:600;text-align:left">${escapeHtml(r.item || '')}</td>
-            <td>${priceCell(r.orig)}</td>
-            <td>${priceCell(r.b1)}</td>
-            <td>${priceCell(r.b2)}</td>
-            <td>${priceCell(r.b3)}</td>
-            <td>${priceCell(r.b4)}</td>
-            <td>${priceCell(r.b5)}</td>
-            <td style="font-weight:700;font-size:12px;color:${isTop ? '#be185d' : pctNum > 0 ? '#059669' : 'var(--text-muted)'}">
-              <span style="${isTop ? 'background:#fce7f3;padding:2px 6px;border-radius:5px;' : ''}">${pct}</span>
-            </td>
-            <td style="font-size:12px">${escapeHtml(r.note || '')}</td>
-            <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
-              <button class="bg-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
-              <button class="bg-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
-            </div></td>
-          </tr>`;
-        }).join('');
+      : top10.map(renderRow).join('');
+
+    const restSection = rest.length > 0 ? `
+      <tr><td colspan="11" style="padding:0;border:0">
+        <details>
+          <summary style="cursor:pointer;padding:10px 14px;font-size:12px;color:var(--text-muted);background:#f9fafb;border-top:1px solid var(--border);list-style:none;display:flex;align-items:center;gap:6px;user-select:none">
+            <span style="font-size:10px">▶</span> 其他 ${rest.length} 筆紀錄
+          </summary>
+          <div style="max-height:280px;overflow-y:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <tbody>${rest.map(renderRow).join('')}</tbody>
+            </table>
+          </div>
+        </details>
+      </td></tr>` : '';
     // KPI 計算
     const nowYM = new Date().toISOString().slice(0, 7); // "2026-07"
     const monthList = list.filter(r => (r.date || '').startsWith(nowYM));
@@ -1025,7 +1042,7 @@ Object.assign(App, {
         </div>
         <div class="table-wrap"><table>
           <thead><tr><th>日期</th><th>品名</th><th style="text-align:center">原始成本</th><th style="text-align:center">第一次議價</th><th style="text-align:center">第二次議價</th><th style="text-align:center">第三次議價</th><th style="text-align:center">第四次議價</th><th style="text-align:center">第五次議價</th><th style="text-align:center">議價比</th><th>更改</th><th></th></tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${top10Rows}${restSection}</tbody>
         </table></div>
       </div>`;
   },
