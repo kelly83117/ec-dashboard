@@ -967,10 +967,41 @@ Object.assign(App, {
             </div></td>
           </tr>`;
         }).join('');
+    // KPI 計算
+    const nowYM = new Date().toISOString().slice(0, 7); // "2026-07"
+    const monthList = list.filter(r => (r.date || '').startsWith(nowYM));
+    const monthCount = monthList.length;
+    const top10pcts = [...withPct].filter(x => x.pctNum > 0).sort((a, b) => b.pctNum - a.pctNum).slice(0, 10).map(x => x.pctNum);
+    const avgTop10 = top10pcts.length ? (top10pcts.reduce((s, v) => s + v, 0) / top10pcts.length) : 0;
+    const scoreCount = monthCount >= 20 ? 20 : 0;
+    const scoreAvg = avgTop10 >= 10 ? 20 : 0;
+
+    const kpiCard = (icon, label, value, subLabel, score, fullScore) => {
+      const pass = score >= fullScore;
+      return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;min-width:180px;flex:1">
+        <div style="font-size:22px;margin-bottom:4px">${icon}</div>
+        <div style="font-size:24px;font-weight:700;color:var(--text)">${value}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${label}</div>
+        <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;background:${pass ? '#f0fdf4' : '#fafafa'};border-radius:7px;padding:6px 10px">
+          <span style="font-size:11px;color:${pass ? '#059669' : '#9ca3af'}">${subLabel}</span>
+          <span style="font-weight:700;font-size:15px;color:${pass ? '#059669' : '#d1d5db'}">${score}<span style="font-size:11px;font-weight:400">/${fullScore}分</span></span>
+        </div>
+      </div>`;
+    };
+
     return `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px">
+        ${kpiCard('📋', '當月議價總數（筆）', monthCount, '滿20筆得滿分', scoreCount, 20)}
+        ${kpiCard('📉', '前10名平均議價比', avgTop10 ? avgTop10.toFixed(1) + '%' : '—', '平均達10%得滿分', scoreAvg, 20)}
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;min-width:180px;flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">本月KPI得分</div>
+          <div style="font-size:36px;font-weight:800;color:${scoreCount + scoreAvg >= 40 ? '#059669' : scoreCount + scoreAvg > 0 ? '#f59e0b' : '#9ca3af'}">${scoreCount + scoreAvg}</div>
+          <div style="font-size:12px;color:var(--text-muted)">/ 40 分</div>
+        </div>
+      </div>
       <div class="table-card">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div><h3>💰 議價表</h3><p>記錄每次採購議價過程與最終議價比</p></div>
+          <div><h3>💰 議價表</h3><p>記錄每次採購議價過程與最終議價比（共 ${list.length} 筆）</p></div>
           <button id="bg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
         </div>
         <div id="bg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
