@@ -404,12 +404,15 @@ Object.assign(App, {
       </div>
       ${summaryPills}
       <div class="stat-grid summary-grid">${summaryCards}</div>
-      ${this.channelRankingHtml(platforms, inputDateStr, prevDateStr)}
-      ${this.channelAlertsHtml(platforms, inputDateStr, prevDateStr)}
-      <div id="dash-split" class="dash-split${entryOpen ? '' : ' is-entry-collapsed'}">
-        <div id="revenue-entry-panel" class="dash-split-cell dash-entry${entryOpen ? '' : ' is-collapsed'}">${revenueTableHtml}</div>
-        <div class="dash-split-cell">${this.dailyLineChartHtml(platforms)}</div>
+      <div id="revenue-entry-panel" class="dash-entry${entryOpen ? '' : ' is-collapsed'}">${revenueTableHtml}</div>
+      <div class="dash-main">
+        ${this.channelRankingHtml(platforms, inputDateStr, prevDateStr)}
+        <div class="dash-main-col">
+          ${this.channelAlertsHtml(platforms, inputDateStr, prevDateStr)}
+          ${this.channelPieHtml(platforms, inputDateStr, prevDateStr)}
+        </div>
       </div>
+      <div class="dash-chart-row">${this.dailyLineChartHtml(platforms)}</div>
     `;
   },
   /* 各通路單日指標的單一計算來源 —— 排名長條與「需要留意」共用，
@@ -588,6 +591,136 @@ Object.assign(App, {
         <ul class="alert-list">${rows}</ul>
       </div>
     `;
+  },
+  /* 各通路營收佔比（甜甜圈）— 沿用 index.html 既有的 Chart.js CDN，不引新套件
+     - 指標走 channelMetrics()，與排名長條 / 需要留意同一份計算
+     - 比照既有 _chartState 的做法：這裡只產生 markup + 把資料放進 _pieState，
+       實際建圖在 initChannelPie()（DOM 進場後才有 canvas 可用）
+     - 純 render、無事件綁定：跟著既有重繪路徑更新 */
+  channelPieHtml(platforms, inputDateStr, prevDateStr) {
+    const metrics = this.channelMetrics(platforms, inputDateStr, prevDateStr);
+    const total = metrics.reduce((s, m) => s + m.rev, 0);
+    const dateDisplay = inputDateStr.replace(/-/g, '/');
+    const head = `
+      <div class="pie-card-head">
+        <h3 class="pie-card-title">各通路營收佔比</h3>
+        <span class="pie-card-date">${escapeHtml(dateDisplay)}</span>
+      </div>
+    `;
+    // 營收 0 的通路不畫進圖，免得圖例掛一排 0.0%
+    const slices = metrics.filter(m => m.rev > 0).sort((a, b) => b.rev - a.rev);
+
+    if (total <= 0 || slices.length === 0) {
+      this._pieState = null;
+      return `<div class="pie-card">${head}<div class="pie-empty">${escapeHtml(dateDisplay)} 還沒有營收資料</div></div>`;
+    }
+    // CDN 掛掉 / 離線時不要整頁炸掉，給替代訊息（下次重繪會自己補上）
+    if (typeof window.Chart === 'undefined') {
+      this._pieState = null;
+      return `<div class="pie-card">${head}<div class="pie-empty">圖表元件尚未載入 — 重新整理後即會顯示</div></div>`;
+    }
+
+    this._pieState = {
+      labels: slices.map(m => m.p.name),
+      values: slices.map(m => m.rev),
+      colors: slices.map(m => m.p.color || '#94a3b8'),
+      total,
+    };
+
+    const legend = slices.map((m) => {
+      const pct = (m.rev / total) * 100;
+      return `
+        <span class="pie-legend-item">
+          <span class="pie-legend-dot" style="--dot:${m.p.color || '#94a3b8'}"></span>
+          ${escapeHtml(m.p.name)}
+          <span class="pie-legend-pct">${pct.toFixed(1)}%</span>
+        </span>
+      `;
+    }).join('');
+
+    return `
+      <div class="pie-card">
+        ${head}
+        <div class="pie-canvas-wrap"><canvas id="channel-pie"></canvas></div>
+        <div class="pie-legend">${legend}</div>
+      </div>
+    `;
+  },
+  /* 建立甜甜圈圖 — 由 bindDashboardPills() 在每次 render 後呼叫。
+     ⚠ 首頁每次改日期 / 存檔 / 雲端快照都會 render()，innerHTML 一換舊 canvas 就沒了，
+       Chart 實例若不 destroy 會持續洩漏並可能報「Canvas is already in use」。
+       這裡沿用 profit.js 的慣例：實例存起來、重建前先 destroy。 */
+  initChannelPie() {
+    if (this._channelPieChart) {
+      try { this._channelPieChart.destroy(); } catch {}
+      this._channelPieChart = null;
+    }
+    const canvas = document.getElementById('channel-pie');
+    if (!canvas || !this._pieState || typeof window.Chart === 'undefined') return;
+    // 保險：同一個 canvas 上若還掛著孤兒實例，一併清掉
+    const orphan = window.Chart.getChart(canvas);
+    if (orphan) { try { orphan.destroy(); } catch {} }
+
+    const { labels, values, colors, total } = this._pieState;
+    // 顏色一律讀 :root 變數，不在這裡寫死
+    const css = getComputedStyle(document.documentElement);
+    const cText    = css.getPropertyValue('--text').trim()       || '#111827';
+    const cMuted   = css.getPropertyValue('--text-muted').trim() || '#6b7280';
+    const cSurface = css.getPropertyValue('--surface').trim()    || '#ffffff';
+    // canvas 不吃 CSS，字體要自己指定（對齊全站黑體）
+    const font = '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif';
+
+    // 圓心文字：直接畫在 canvas 上，座標取自圓弧中心 → 不會跑位
+    const centerText = {
+      id: 'channelPieCenter',
+      afterDatasetsDraw(chart) {
+        const arc = chart.getDatasetMeta(0)?.data?.[0];
+        if (!arc) return;
+        const { ctx } = chart;
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = cMuted;
+        ctx.font = `600 11px ${font}`;
+        ctx.fillText('全通路', arc.x, arc.y - 11);
+        ctx.fillStyle = cText;
+        ctx.font = `700 17px ${font}`;
+        ctx.fillText(fmtNTD(total), arc.x, arc.y + 9);
+        ctx.restore();
+      },
+    };
+
+    this._channelPieChart = new window.Chart(canvas.getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          backgroundColor: colors,
+          borderColor: cSurface,
+          borderWidth: 2,
+          hoverOffset: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '62%',
+        animation: { duration: 200 },
+        plugins: {
+          legend: { display: false },   // 圖例用 HTML 自己做，才標得上百分比
+          tooltip: {
+            callbacks: {
+              label: (c) => {
+                const pct = total > 0 ? (c.parsed / total) * 100 : 0;
+                return ` ${c.label}　${fmtNTD(c.parsed)}（${pct.toFixed(1)}%）`;
+              },
+            },
+          },
+        },
+      },
+      plugins: [centerText],
+    });
   },
   dailyLineChartHtml(platforms /* days param ignored now */) {
     const now = new Date();
@@ -957,6 +1090,9 @@ Object.assign(App, {
     `;
   },
   bindDashboardPills() {
+    // 甜甜圈圖：每次 render 後重建（含銷毀舊實例），不是事件綁定
+    this.initChannelPie();
+
     // 每日營收填寫的展開 / 收合。
     // ⚠ 只切 class，絕對不要在這裡呼叫 this.render()：
     //   填寫表格必須一直留在 DOM（bindCardInputs 綁的 .card-rev / .card-ads 才不會失效，
@@ -969,7 +1105,6 @@ Object.assign(App, {
         entryBtn.classList.toggle('is-open', open);
         entryBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
         document.getElementById('revenue-entry-panel')?.classList.toggle('is-collapsed', !open);
-        document.getElementById('dash-split')?.classList.toggle('is-entry-collapsed', !open);
       });
     }
     // 曲線圖圖例：點哪個平台就單獨顯示，點「全部」回到所有平台

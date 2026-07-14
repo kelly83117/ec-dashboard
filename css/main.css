@@ -878,20 +878,113 @@
     font-weight: 600;
   }
 
-  /* 下半部：左填寫表格 + 右折線圖 */
-  .dash-split {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-    align-items: stretch;
+  /* ------------- 儀表板首頁 · 最終版面 -------------
+     pills → KPI 卡 → 填寫面板(可收合) → 主區塊(左排名 / 右上留意 + 右下圓餅) → 折線圖 */
+
+  /* 填寫面板：整條，位於 KPI 卡與主區塊之間 */
+  .dash-entry {
+    display: flex;
+    margin-bottom: 12px;
   }
-  /* 表格收合時，折線圖撐滿整列 */
-  .dash-split.is-entry-collapsed { grid-template-columns: 1fr; }
-  .dash-split-cell { display: flex; }
   .dash-entry.is-collapsed { display: none; }
 
+  /* 主區塊：左 6 右 4 */
+  .dash-main {
+    display: grid;
+    grid-template-columns: 6fr 4fr;
+    gap: 12px;
+    align-items: stretch;
+    margin-bottom: 12px;
+  }
+  /* 右欄：需要留意（自然高） + 圓餅圖（撐滿剩餘高度 → 左右兩欄等高） */
+  .dash-main-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+  .dash-main-col > .pie-card { flex: 1; }
+  /* 主區塊內的卡片間距統一由 grid / flex 的 gap 控制，避免雙重間距 */
+  .dash-main > .rank-card,
+  .dash-main .alert-card,
+  .dash-main .pie-card { margin-bottom: 0; }
+  /* 折線圖：整條獨立一列 */
+  .dash-chart-row { display: flex; }
+
   @media (max-width: 900px) {
-    .dash-split { grid-template-columns: 1fr; }
+    .dash-main { grid-template-columns: 1fr; }
+  }
+
+  /* ------------- 儀表板首頁 · 各通路營收佔比（甜甜圈） -------------
+     圓心文字由 Chart.js plugin 直接畫在 canvas 上，不用 CSS 疊字定位。
+     圖例色點以 style="--dot:顏色" 帶值，樣式仍在此。 */
+  .pie-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+  }
+  .pie-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .pie-card-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .pie-card-date {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  /* Chart.js 以 maintainAspectRatio:false 填滿這個容器 */
+  .pie-canvas-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 190px;
+  }
+  .pie-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 12px;
+    margin-top: 10px;
+  }
+  .pie-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .pie-legend-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--dot, var(--text-muted));
+    flex-shrink: 0;
+  }
+  .pie-legend-pct {
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .pie-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 12px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
   }
 
   /* 篩選列 */
