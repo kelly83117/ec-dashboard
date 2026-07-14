@@ -1147,14 +1147,15 @@ const App = {
   renderNewProductsTab() {
     const list = Store.get('ec.d3.newProducts', []);
     const rows = list.length === 0
-      ? `<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:24px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
+      ? `<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:24px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
       : list.map((p, i) => `<tr>
           <td style="font-size:12px;color:var(--text-muted);white-space:nowrap">${escapeHtml(p.code||'')}</td>
           <td style="font-weight:600">${escapeHtml(p.name||'')}</td>
-          <td>${escapeHtml(p.shop||'')}</td>
           <td style="color:var(--text-muted)">${escapeHtml(p.note||'')}</td>
+          <td>${escapeHtml(p.shop||'')}</td>
           <td style="text-align:right">NT$${Number(p.price||0).toLocaleString()}</td>
           <td style="text-align:center">${p.yellowTag ? `<span style="background:#fef08a;color:#713f12;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700">NT$${Number(p.yellowTag).toLocaleString()}</span>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
+          <td style="text-align:center">${p.noPkg === '✓' ? '<span style="color:#16a34a;font-size:16px;font-weight:700">✓</span>' : p.noPkg === '✗' ? '<span style="color:#dc2626;font-size:16px;font-weight:700">✗</span>' : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
           <td>${p.buyUrl ? `<a href="${escapeHtml(p.buyUrl)}" target="_blank" style="color:#3b82f6;font-size:12px;text-decoration:none">開啟 ↗</a>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
           <td>${p.refUrl ? `<a href="${escapeHtml(p.refUrl)}" target="_blank" style="color:#8b5cf6;font-size:12px;text-decoration:none">開啟 ↗</a>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
           <td style="white-space:nowrap"><div style="display:flex;gap:5px">
@@ -1174,11 +1175,16 @@ const App = {
           <input id="np-shop"  placeholder="賣場" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           <input id="np-price" type="number" placeholder="原價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
         </div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;align-items:center">
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:10px;align-items:center">
+          <input id="np-note"    placeholder="備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           <input id="np-buy-url" placeholder="進貨網址" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           <input id="np-ref-url" placeholder="參考網址" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-          <input id="np-note"    placeholder="備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           <input id="np-yellow" type="number" placeholder="小黃標價格" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <select id="np-nopkg" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <option value="">無包裝</option>
+            <option value="✓">✓ 是</option>
+            <option value="✗">✗ 否</option>
+          </select>
         </div>
         <div style="display:flex;gap:8px">
           <button id="np-save" style="padding:8px 18px;background:#6366f1;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
@@ -1186,7 +1192,7 @@ const App = {
         </div>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>商品編號</th><th>商品名稱</th><th>賣場</th><th>備註</th><th style="text-align:right">原價</th><th style="text-align:center">小黃標</th><th>進貨網址</th><th>參考網址</th><th></th></tr></thead>
+        <thead><tr><th>商品編號</th><th>商品名稱</th><th>備註</th><th>賣場</th><th style="text-align:right">原價</th><th style="text-align:center">小黃標</th><th style="text-align:center">無包裝</th><th>進貨網址</th><th>參考網址</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>`;
@@ -1197,7 +1203,7 @@ const App = {
     let editIndex = -1;
 
     const clearForm = () => {
-      ['np-code','np-name','np-shop','np-price','np-buy-url','np-ref-url','np-note','np-yellow'].forEach(id => {
+      ['np-code','np-name','np-shop','np-price','np-buy-url','np-ref-url','np-note','np-yellow','np-nopkg'].forEach(id => {
         document.getElementById(id).value = '';
       });
       editIndex = -1;
@@ -1221,6 +1227,7 @@ const App = {
         price: document.getElementById('np-price')?.value.trim(),
         note: document.getElementById('np-note')?.value.trim(),
         yellowTag: document.getElementById('np-yellow')?.value ? Number(document.getElementById('np-yellow').value) : 0,
+        noPkg: document.getElementById('np-nopkg')?.value || '',
         buyUrl: document.getElementById('np-buy-url')?.value.trim(),
         refUrl: document.getElementById('np-ref-url')?.value.trim(),
       };
@@ -1240,6 +1247,7 @@ const App = {
       document.getElementById('np-price').value = p.price || '';
       document.getElementById('np-note').value = p.note || '';
       document.getElementById('np-yellow').value = p.yellowTag || '';
+      document.getElementById('np-nopkg').value = p.noPkg || '';
       document.getElementById('np-buy-url').value = p.buyUrl || '';
       document.getElementById('np-ref-url').value = p.refUrl || '';
       saveBtn.textContent = '更新';
