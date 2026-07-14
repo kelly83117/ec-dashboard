@@ -932,14 +932,23 @@ Object.assign(App, {
   renderD2KpiTabHtml() {
     const list = Store.get('ec.d2.bargain', []);
     const priceCell = v => Number(v) ? 'NT$' + Number(v).toLocaleString() : '<span style="color:var(--text-muted)">—</span>';
+    // 計算每筆議價比並排序找前10名
+    const withPct = list.map((r, i) => {
+      const orig = Number(r.orig || 0);
+      const bids = [r.b1, r.b2, r.b3, r.b4, r.b5].map(Number);
+      const lastBid = [...bids].reverse().find(v => v > 0) || 0;
+      const pctNum = orig && lastBid ? ((orig - lastBid) / orig) * 100 : -1;
+      return { r, i, orig, lastBid, pctNum };
+    });
+    const top10Indices = new Set(
+      [...withPct].filter(x => x.pctNum > 0).sort((a, b) => b.pctNum - a.pctNum).slice(0, 10).map(x => x.i)
+    );
     const rows = list.length === 0
-      ? `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
-      : list.map((r, i) => {
-          const orig = Number(r.orig || 0);
-          const bids = [r.b1, r.b2, r.b3, r.b4, r.b5].map(Number);
-          const lastBid = [...bids].reverse().find(v => v > 0) || 0;
-          const pct = orig && lastBid ? (((orig - lastBid) / orig) * 100).toFixed(1) + '%' : '—';
-          return `<tr style="vertical-align:middle;text-align:center">
+      ? `<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
+      : withPct.map(({ r, i, orig, lastBid, pctNum }) => {
+          const pct = pctNum > 0 ? pctNum.toFixed(1) + '%' : '—';
+          const isTop = top10Indices.has(i);
+          return `<tr style="vertical-align:middle;text-align:center;${isTop ? 'background:#fff0f3;' : ''}">
             <td>${escapeHtml(r.date || '')}</td>
             <td style="font-weight:600;text-align:left">${escapeHtml(r.item || '')}</td>
             <td>${priceCell(r.orig)}</td>
@@ -948,8 +957,10 @@ Object.assign(App, {
             <td>${priceCell(r.b3)}</td>
             <td>${priceCell(r.b4)}</td>
             <td>${priceCell(r.b5)}</td>
-            <td style="font-weight:700;color:${lastBid && lastBid < orig ? '#059669' : 'var(--text-muted)'}">${pct}</td>
-            <td>${escapeHtml(r.note || '')}</td>
+            <td style="font-weight:700;font-size:12px;color:${isTop ? '#be185d' : pctNum > 0 ? '#059669' : 'var(--text-muted)'}">
+              <span style="${isTop ? 'background:#fce7f3;padding:2px 6px;border-radius:5px;' : ''}">${pct}</span>
+            </td>
+            <td style="font-size:12px">${escapeHtml(r.note || '')}</td>
             <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
               <button class="bg-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
               <button class="bg-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
