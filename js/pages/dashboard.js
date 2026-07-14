@@ -155,6 +155,7 @@ Object.assign(App, {
     };
     const rangeInfo = buildRange(summaryRange);
     const sumOver = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
+    const sumAdsOver = (p, dates) => dates.reduce((s, d) => s + (+p.dailyAdSpend?.[d] || 0), 0);
 
     const summaryPills = `
       <div id="summary-pills" style="display:flex;gap:5px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
@@ -174,32 +175,62 @@ Object.assign(App, {
       </div>
     `;
 
+    // 佔比分母：全通路（= 所有平台）在目前範圍的營收
+    const allChannelCur = platforms.reduce((s, p) => s + sumOver(p, rangeInfo.showDates), 0);
+
     // 用 data-* 帶 group members 索引，方便輸入時即時加上「未存欄位的差值」
+    // data-ads-idxs：該通路「有投廣告」的成員索引，供 bindCardInputs 即時算 ROAS
     const summaryCards = PLATFORM_GROUPS.map((g, gi) => {
       const members = platforms.filter(p => g.members.includes(p.name));
       const memberIdxs = members.map(p => platforms.indexOf(p)).filter(i => i >= 0);
       const cur  = members.reduce((s, p) => s + sumOver(p, rangeInfo.showDates), 0);
       const prev = members.reduce((s, p) => s + sumOver(p, rangeInfo.compareDates), 0);
       const d    = prev > 0 ? ((cur / prev) - 1) * 100 : 0;
+      const isMain = gi === 0;   // 全通路總營收 = 主卡
       const iconHtml = g.logo
-        ? `<img src="${g.logo}" alt="${escapeHtml(g.name)}" style="width:22px;height:22px;object-fit:contain;border-radius:4px;display:block">`
-        : `<span style="font-size:16px;line-height:1">${g.icon}</span>`;
+        ? `<img class="summary-card-logo" src="${g.logo}" alt="${escapeHtml(g.name)}">`
+        : `<span class="summary-card-icon">${g.icon}</span>`;
       // 是否「昨日」單日範圍 → 才需要 live 計算（多日範圍只能算已存的）
       const isSingleDay = rangeInfo.showDates && rangeInfo.showDates.length === 1
                           && rangeInfo.showDates[0] === inputDateStr;
+
+      // 右上角漲跌 pill；沒有比較基準（前期為 0）時顯示「—」，不要畫成 ↑0.0%
+      const deltaCls  = prev > 0 ? (d >= 0 ? 'up' : 'down') : 'flat';
+      const deltaText = prev > 0 ? `${d >= 0 ? '↑' : '↓'} ${Math.abs(d).toFixed(1)}%` : '—';
+
+      // 通路卡底部：佔全通路 % + ROAS / 廣告費（主卡本身就是分母，不顯示）
+      let footHtml = '';
+      if (!isMain) {
+        const share = allChannelCur > 0 ? (cur / allChannelCur) * 100 : 0;
+        const adsMembers = members.filter(p => PLATFORMS_WITH_AD_SPEND.has(p.name));
+        const adsIdxs = adsMembers.map(p => platforms.indexOf(p)).filter(i => i >= 0);
+        const ads = adsMembers.reduce((s, p) => s + sumAdsOver(p, rangeInfo.showDates), 0);
+        const roas = (cur > 0 && ads > 0) ? (cur / ads).toFixed(2) : '—';
+        const adsLine = adsMembers.length === 0
+          ? '<span class="summary-card-noads">無廣告投放</span>'
+          : `ROAS <strong class="summary-card-roas-val">${roas}</strong>　·　廣告 <span class="summary-card-ads-val">${fmtNTD(ads)}</span>`;
+        footHtml = `
+          <div class="summary-card-foot">
+            <div class="summary-card-share">佔全通路 <strong class="summary-card-share-val">${share.toFixed(1)}%</strong></div>
+            <div class="summary-card-ads" data-ads-idxs="${adsIdxs.join(',')}">${adsLine}</div>
+          </div>`;
+      }
+
       return `
-        <div class="stat-card summary-card" data-group-idx="${gi}" data-member-idxs="${memberIdxs.join(',')}" data-base-cur="${cur}" data-prev="${prev}" data-single-day="${isSingleDay ? '1' : '0'}" style="padding:14px 16px;background:white;border:1px solid var(--border);border-radius:10px;box-shadow:none">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;color:var(--text-muted)">
+        <div class="stat-card summary-card${isMain ? ' summary-card-main' : ''}" data-group-idx="${gi}" data-member-idxs="${memberIdxs.join(',')}" data-base-cur="${cur}" data-prev="${prev}" data-single-day="${isSingleDay ? '1' : '0'}">
+          <div class="summary-card-head">
             ${iconHtml}
-            <span style="font-size:12px;font-weight:600;letter-spacing:.02em">${escapeHtml(g.name)}</span>
-            <span style="margin-left:auto;font-size:10px;color:var(--text-muted);font-weight:500">${escapeHtml(rangeInfo.label)}</span>
+            <div class="summary-card-id">
+              <span class="summary-card-title">${escapeHtml(g.name)}</span>
+              <span class="summary-card-range">${escapeHtml(rangeInfo.label)}</span>
+            </div>
+            <div class="summary-card-trend">
+              <span class="summary-card-delta ${deltaCls}">${deltaText}</span>
+              <span class="summary-card-compare">較${escapeHtml(rangeInfo.compareLabel)}</span>
+            </div>
           </div>
-          <div class="summary-card-value" style="font-size:22px;color:var(--text);font-weight:700;margin:0;line-height:1.15;font-variant-numeric:tabular-nums;letter-spacing:-.01em">${fmtNTD(cur)}</div>
-          <div class="summary-card-delta" style="margin-top:6px;font-size:11px;color:var(--text-muted);font-weight:500">
-            ${d >= 0
-              ? `<span class="up">↑ ${d.toFixed(1)}%</span>`
-              : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`} 較${escapeHtml(rangeInfo.compareLabel)}
-          </div>
+          <div class="summary-card-value">${fmtNTD(cur)}</div>
+          ${footHtml}
         </div>
       `;
     }).join('');
@@ -365,7 +396,7 @@ Object.assign(App, {
         <p style="margin:2px 0 0;font-size:13px">歡迎回來，${escapeHtml(this.currentUser.name)}　·　${inputDateDisplay}</p>
       </div>
       ${summaryPills}
-      <div class="stat-grid" style="grid-template-columns:repeat(4, 1fr);margin-bottom:12px;gap:10px">${summaryCards}</div>
+      <div class="stat-grid summary-grid">${summaryCards}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch">
         <div style="display:flex">${revenueTableHtml}</div>
         <div style="display:flex">${this.dailyLineChartHtml(platforms)}</div>
@@ -1237,14 +1268,31 @@ Object.assign(App, {
         const cur = memberIdxs.reduce((s,i) => s + (revByIdx[i] || 0), 0);
         const prev = +card.dataset.prev || 0;
         const valEl = card.querySelector('.summary-card-value');
-        const deltaEl = card.querySelector('.summary-card-delta');
         if (valEl) valEl.textContent = fmtNTD2(cur);
+
+        // 漲跌 pill：只換文字 + up/down class，不重建結構
+        //（比較基準那行是獨立元素，不需要在這裡回填）
+        const deltaEl = card.querySelector('.summary-card-delta');
         if (deltaEl && prev > 0) {
           const d = (cur / prev - 1) * 100;
-          const compareLabel = deltaEl.textContent.replace(/^[↑↓]\s*[\d.]+%\s*/, '').trim() || '較前一日';
-          deltaEl.innerHTML = (d >= 0
-            ? `<span class="up">↑ ${d.toFixed(1)}%</span>`
-            : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`) + ' ' + compareLabel;
+          deltaEl.classList.remove('up', 'down', 'flat');
+          deltaEl.classList.add(d >= 0 ? 'up' : 'down');
+          deltaEl.textContent = `${d >= 0 ? '↑' : '↓'} ${Math.abs(d).toFixed(1)}%`;
+        }
+
+        // 佔全通路 %：分母用當下所有通路的即時總額
+        const shareEl = card.querySelector('.summary-card-share-val');
+        if (shareEl) shareEl.textContent = totalRev > 0 ? ((cur / totalRev) * 100).toFixed(1) + '%' : '0.0%';
+
+        // ROAS / 廣告費：只有該通路有廣告成員時才有這兩個欄位
+        const adsRow = card.querySelector('.summary-card-ads[data-ads-idxs]');
+        const adsIdxs = (adsRow?.dataset.adsIdxs || '').split(',').filter(Boolean).map(n=>+n);
+        if (adsIdxs.length) {
+          const ads = adsIdxs.reduce((s,i) => s + (adsByIdx[i] || 0), 0);
+          const roasEl = card.querySelector('.summary-card-roas-val');
+          const adsValEl = card.querySelector('.summary-card-ads-val');
+          if (roasEl) roasEl.textContent = (cur > 0 && ads > 0) ? (cur / ads).toFixed(2) : '—';
+          if (adsValEl) adsValEl.textContent = fmtNTD2(ads);
         }
       });
     };

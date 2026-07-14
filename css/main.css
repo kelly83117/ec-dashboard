@@ -456,6 +456,117 @@
   .stat-card .stat-meta .up { color: var(--success); }
   .stat-card .stat-meta .down { color: var(--danger); }
 
+  /* ------------- 儀表板首頁 · 總覽卡 (summary-card) -------------
+     四張一排：主卡「全通路總營收」放大，其餘三張為通路卡。
+     窄螢幕由下方 @media (max-width:460px) 的 .stat-grid 規則收成 1 欄。 */
+  .summary-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .summary-card {
+    display: flex;
+    flex-direction: column;
+    padding: 14px 16px;
+    box-shadow: none;
+  }
+  .summary-card-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .summary-card-logo {
+    width: 22px; height: 22px;
+    object-fit: contain;
+    border-radius: 4px;
+    display: block;
+    flex-shrink: 0;
+  }
+  .summary-card-icon { font-size: 16px; line-height: 1.35; flex-shrink: 0; }
+  .summary-card-id {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  /* 標題鎖定不換行，避免被右上角 pill 擠成兩行 */
+  .summary-card-title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .summary-card-range {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  /* 右上角：漲跌 pill + 其下的比較基準說明 */
+  .summary-card-trend {
+    margin-left: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+  .summary-card-delta {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .summary-card-delta.up   { background: var(--success-soft); color: var(--success); }
+  .summary-card-delta.down { background: var(--danger-soft);  color: var(--danger); }
+  /* flat = 沒有比較基準（前期為 0），不顯示假的 0.0% */
+  .summary-card-delta.flat { background: var(--bg); color: var(--text-muted); }
+  .summary-card-compare {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .summary-card-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.15;
+    letter-spacing: -.01em;
+    font-variant-numeric: tabular-nums;
+  }
+  /* 主卡（全通路總營收）：放大字級做出主從層級 */
+  .summary-card-main .summary-card-title { font-size: 13px; color: var(--text); }
+  .summary-card-main .summary-card-value { font-size: 30px; letter-spacing: -.02em; }
+  /* 通路卡底部：佔比 + ROAS / 廣告費，靠 margin-top:auto 對齊各卡底部 */
+  .summary-card-foot {
+    margin-top: auto;
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .summary-card-share,
+  .summary-card-ads {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .summary-card-share strong,
+  .summary-card-ads strong {
+    color: var(--text);
+    font-weight: 700;
+  }
+  .summary-card-noads { color: var(--text-muted); opacity: .75; }
+
   /* 篩選列 */
   .filter-bar {
     display: flex;
