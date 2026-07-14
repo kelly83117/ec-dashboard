@@ -405,27 +405,41 @@ Object.assign(App, {
       ${summaryPills}
       <div class="stat-grid summary-grid">${summaryCards}</div>
       ${this.channelRankingHtml(platforms, inputDateStr, prevDateStr)}
+      ${this.channelAlertsHtml(platforms, inputDateStr, prevDateStr)}
       <div id="dash-split" class="dash-split${entryOpen ? '' : ' is-entry-collapsed'}">
         <div id="revenue-entry-panel" class="dash-split-cell dash-entry${entryOpen ? '' : ' is-collapsed'}">${revenueTableHtml}</div>
         <div class="dash-split-cell">${this.dailyLineChartHtml(platforms)}</div>
       </div>
     `;
   },
+  /* 各通路單日指標的單一計算來源 —— 排名長條與「需要留意」共用，
+     兩塊的 ROAS / 跌幅永遠不會算出不同答案。
+     - hasRoas：沒投廣告、或當日廣告費為 0 → 無法計算 ROAS（roas 為 null）
+     - hasDelta：前期營收為 0 → 沒有跌幅可言（delta 為 0，不可拿來判斷）
+     - ⚠ 保留原始索引 i：它就是填寫表格的 data-idx，排序時絕不可就地 sort(platforms)，
+       打亂會讓存檔寫到錯的賣場。 */
+  channelMetrics(platforms, inputDateStr, prevDateStr) {
+    return platforms.map((p, i) => {
+      const rev  = +(p.daily?.[inputDateStr]) || 0;
+      const prev = +(p.daily?.[prevDateStr])  || 0;
+      const ads  = +(p.dailyAdSpend?.[inputDateStr]) || 0;
+      const hasRoas = PLATFORMS_WITH_AD_SPEND.has(p.name) && ads > 0;
+      const hasDelta = prev > 0;
+      return {
+        p, i, rev, prev, ads,
+        hasRoas, roas: hasRoas ? rev / ads : null,
+        hasDelta, delta: hasDelta ? ((rev / prev) - 1) * 100 : 0,
+      };
+    });
+  },
   /* 各通路營收排名（水平長條）
-     - 資料沿用 viewDashboard 同一份 platforms + 同一套算法，不另接來源
-     - 純 render、無事件綁定：日期切換與存檔都會走 this.render()，這裡自然跟著更新
-     - ⚠ 不可就地 sort(platforms)：陣列索引就是填寫表格的 data-idx，
-       打亂會讓存檔寫到錯的賣場。故用 {p, i} 保留原始索引再排序。 */
+     - 資料沿用 viewDashboard 同一份 platforms，指標走 channelMetrics()，不另接來源
+     - 純 render、無事件綁定：日期切換與存檔都會走 this.render()，這裡自然跟著更新 */
   channelRankingHtml(platforms, inputDateStr, prevDateStr) {
-    const revOf  = (p) => +(p.daily?.[inputDateStr]) || 0;
-    const prevOf = (p) => +(p.daily?.[prevDateStr])  || 0;
-    const adsOf  = (p) => +(p.dailyAdSpend?.[inputDateStr]) || 0;
+    const ranked = this.channelMetrics(platforms, inputDateStr, prevDateStr)
+      .sort((a, b) => b.rev - a.rev);
 
-    const ranked = platforms
-      .map((p, i) => ({ p, i }))
-      .sort((a, b) => revOf(b.p) - revOf(a.p));
-
-    const maxRev = Math.max(...ranked.map(r => revOf(r.p)), 0);
+    const maxRev = Math.max(...ranked.map(m => m.rev), 0);
     const dateDisplay = inputDateStr.replace(/-/g, '/');
 
     const legend = `
@@ -453,17 +467,13 @@ Object.assign(App, {
       `;
     }
 
-    const rows = ranked.map(({ p }) => {
-      const rev = revOf(p);
-      const ads = adsOf(p);
-      const prev = prevOf(p);
-      const hasAds = PLATFORMS_WITH_AD_SPEND.has(p.name);
+    const rows = ranked.map((m) => {
+      const { p, rev, hasRoas, roas, hasDelta, delta } = m;
 
       // ROAS 分級：沒投廣告、或當日廣告費為 0 → 灰、顯示「—」（跟填寫表格的慣例一致）
       let roasCls = 'is-none';
       let roasText = '—';
-      if (hasAds && ads > 0) {
-        const roas = rev / ads;
+      if (hasRoas) {
         roasCls = roas >= 10 ? 'is-good' : (roas >= 5 ? 'is-mid' : 'is-low');
         roasText = roas.toFixed(2);
       }
@@ -472,9 +482,8 @@ Object.assign(App, {
       // 長條太短時金額塞不進去 → 翻到長條外側
       const narrow = pct < 30;
 
-      const delta = prev > 0 ? ((rev / prev) - 1) * 100 : 0;
-      const deltaCls  = prev > 0 ? (delta >= 0 ? 'up' : 'down') : 'flat';
-      const deltaText = prev > 0
+      const deltaCls  = hasDelta ? (delta >= 0 ? 'up' : 'down') : 'flat';
+      const deltaText = hasDelta
         ? `${delta >= 0 ? '↑' : '↓'} ${Math.abs(delta).toFixed(1)}%`
         : '—';
 
@@ -502,6 +511,81 @@ Object.assign(App, {
       <div class="rank-card">
         ${head}
         <ul class="rank-list">${rows}</ul>
+      </div>
+    `;
+  },
+  /* 需要留意 — 自動標記表現異常的通路
+     - 指標走 channelMetrics()，與排名長條同一份計算
+     - 純 render、無事件綁定：跟著既有重繪路徑更新
+     門檻：跌幅 > 20%（需有前期資料）、ROAS < 5（需 ROAS 可計算）；符合任一即列出。 */
+  channelAlertsHtml(platforms, inputDateStr, prevDateStr) {
+    const DROP_LIMIT = -20;   // 跌幅超過 20% → 標記
+    // 與排名長條的紅色門檻對齊（channelRankingHtml 的 is-low 也是 < 5），
+    // 避免出現「排名長條是黃燈、卻被列入需要留意」的矛盾
+    const ROAS_LIMIT = 5;     // ROAS 低於 5 → 標記
+
+    const alerts = this.channelMetrics(platforms, inputDateStr, prevDateStr)
+      .map((m) => {
+        const reasons = [];
+        // 前期沒資料就沒有跌幅可言 → 不判斷（hasDelta 已含此保護）
+        if (m.hasDelta && m.delta < DROP_LIMIT) {
+          reasons.push({ kind: 'drop', text: `營收 ↓${Math.abs(m.delta).toFixed(1)}%` });
+        }
+        // ROAS 無法計算（無廣告投放 / 當日廣告費 0）→ 不納入此條件
+        if (m.hasRoas && m.roas < ROAS_LIMIT) {
+          reasons.push({ kind: 'roas', text: `ROAS 偏低 ${m.roas.toFixed(2)}` });
+        }
+        return { ...m, reasons };
+      })
+      .filter((m) => m.reasons.length > 0);
+
+    // 嚴重度優先：有跌幅的排前面（跌最多在最前），只有 ROAS 問題的排後面（ROAS 最低在前）
+    alerts.sort((a, b) => {
+      const aDrop = a.reasons.some(x => x.kind === 'drop');
+      const bDrop = b.reasons.some(x => x.kind === 'drop');
+      if (aDrop !== bDrop) return aDrop ? -1 : 1;
+      if (aDrop && bDrop) return a.delta - b.delta;
+      return a.roas - b.roas;
+    });
+
+    const dateDisplay = inputDateStr.replace(/-/g, '/');
+    const head = `
+      <div class="alert-card-head">
+        <h3 class="alert-card-title">需要留意</h3>
+        <span class="alert-card-tag">系統自動標記</span>
+        <span class="alert-card-count">${escapeHtml(dateDisplay)}${alerts.length ? `　·　${alerts.length} 個通路` : ''}</span>
+      </div>
+    `;
+
+    if (alerts.length === 0) {
+      return `
+        <div class="alert-card">
+          ${head}
+          <div class="alert-ok"><span>✓</span><span>今日各通路表現穩定，無需特別留意</span></div>
+        </div>
+      `;
+    }
+
+    const rows = alerts.map((m) => {
+      const market = PLATFORM_MARKETPLACE[m.p.name] || 'shopee';
+      const logoSrc = MARKETPLACE_BADGE[market].src;
+      const chips = m.reasons
+        .map(x => `<span class="alert-chip is-${x.kind}">${escapeHtml(x.text)}</span>`)
+        .join('');
+      return `
+        <li class="alert-row">
+          <span class="alert-icon">⚠️</span>
+          <img class="alert-logo" src="${logoSrc}" alt="">
+          <span class="alert-name">${escapeHtml(m.p.name)}</span>
+          <span class="alert-reasons">${chips}</span>
+        </li>
+      `;
+    }).join('');
+
+    return `
+      <div class="alert-card">
+        ${head}
+        <ul class="alert-list">${rows}</ul>
       </div>
     `;
   },

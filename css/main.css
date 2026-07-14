@@ -769,6 +769,115 @@
     .rank-legend { width: 100%; margin-left: 0; }
   }
 
+  /* ------------- 儀表板首頁 · 需要留意 -------------
+     警示感但不張揚：淺底 chip + 細框，不用強烈色塊。 */
+  .alert-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .alert-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .alert-card-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .alert-card-tag {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .alert-card-count {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .alert-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .alert-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+  }
+  .alert-icon {
+    font-size: 12px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .alert-logo {
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    object-fit: contain;
+    background: var(--surface);
+    padding: 1px;
+    flex-shrink: 0;
+  }
+  .alert-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .alert-reasons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-left: auto;
+  }
+  .alert-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .alert-chip.is-drop { background: var(--danger-soft); color: var(--danger); }
+  .alert-chip.is-roas { background: var(--warn-soft);   color: var(--warn); }
+  /* 空狀態：正向、綠色系 */
+  .alert-ok {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 18px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--success-soft);
+    color: var(--success);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
   /* 下半部：左填寫表格 + 右折線圖 */
   .dash-split {
     display: grid;
