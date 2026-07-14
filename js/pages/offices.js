@@ -931,22 +931,26 @@ Object.assign(App, {
 
   renderD2KpiTabHtml() {
     const list = Store.get('ec.d2.bargain', []);
+    const priceCell = v => Number(v) ? 'NT$' + Number(v).toLocaleString() : '<span style="color:var(--text-muted)">—</span>';
     const rows = list.length === 0
-      ? `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
+      ? `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
       : list.map((r, i) => {
           const orig = Number(r.orig || 0);
-          const final = Number(r.final || 0);
-          const saved = orig && final ? orig - final : null;
-          const pct = orig && saved ? ((saved / orig) * 100).toFixed(1) : null;
-          return `<tr style="vertical-align:middle">
+          const bids = [r.b1, r.b2, r.b3, r.b4, r.b5].map(Number);
+          const lastBid = [...bids].reverse().find(v => v > 0) || 0;
+          const pct = orig && lastBid ? (((orig - lastBid) / orig) * 100).toFixed(1) + '%' : '—';
+          return `<tr style="vertical-align:middle;text-align:center">
             <td>${escapeHtml(r.date || '')}</td>
-            <td style="font-weight:600">${escapeHtml(r.item || '')}</td>
-            <td>${escapeHtml(r.supplier || '')}</td>
-            <td style="text-align:right">${orig ? 'NT$' + orig.toLocaleString() : '—'}</td>
-            <td style="text-align:right;font-weight:700;color:#059669">${final ? 'NT$' + final.toLocaleString() : '—'}</td>
-            <td style="text-align:right;color:#dc2626;font-weight:600">${saved !== null && saved > 0 ? '▼ NT$' + saved.toLocaleString() + (pct ? ' (' + pct + '%)' : '') : '—'}</td>
-            <td style="text-align:center"><span style="padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:${r.status==='完成'?'#dcfce7':r.status==='進行中'?'#fef9c3':'#f3f4f6'};color:${r.status==='完成'?'#166534':r.status==='進行中'?'#854d0e':'#374151'}">${escapeHtml(r.status||'—')}</span></td>
-            <td style="white-space:nowrap"><div style="display:flex;gap:5px">
+            <td style="font-weight:600;text-align:left">${escapeHtml(r.item || '')}</td>
+            <td>${priceCell(r.orig)}</td>
+            <td>${priceCell(r.b1)}</td>
+            <td>${priceCell(r.b2)}</td>
+            <td>${priceCell(r.b3)}</td>
+            <td>${priceCell(r.b4)}</td>
+            <td>${priceCell(r.b5)}</td>
+            <td style="font-weight:700;color:${lastBid && lastBid < orig ? '#059669' : 'var(--text-muted)'}">${pct}</td>
+            <td>${escapeHtml(r.note || '')}</td>
+            <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
               <button class="bg-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
               <button class="bg-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
             </div></td>
@@ -955,24 +959,22 @@ Object.assign(App, {
     return `
       <div class="table-card">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div><h3>💰 議價表</h3><p>記錄每次採購議價結果</p></div>
+          <div><h3>💰 議價表</h3><p>記錄每次採購議價過程與最終議價比</p></div>
           <button id="bg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
         </div>
         <div id="bg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
             <input id="bg-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="bg-item" placeholder="商品名稱 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="bg-supplier" placeholder="供應商" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <select id="bg-status" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <option value="進行中">進行中</option>
-              <option value="完成">完成</option>
-              <option value="取消">取消</option>
-            </select>
+            <input id="bg-item" placeholder="品名 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-orig" type="number" placeholder="原始成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-note" placeholder="更改備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           </div>
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
-            <input id="bg-orig" type="number" placeholder="原始報價 (NT$)" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="bg-final" type="number" placeholder="議價後金額 (NT$)" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="bg-note" placeholder="備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;grid-column:span 2">
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:10px">
+            <input id="bg-b1" type="number" placeholder="第一次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-b2" type="number" placeholder="第二次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-b3" type="number" placeholder="第三次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-b4" type="number" placeholder="第四次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-b5" type="number" placeholder="第五次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           </div>
           <div style="display:flex;gap:8px">
             <button id="bg-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
@@ -980,7 +982,7 @@ Object.assign(App, {
           </div>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th>日期</th><th>商品名稱</th><th>供應商</th><th style="text-align:right">原始報價</th><th style="text-align:right">議價後</th><th style="text-align:right">節省金額</th><th style="text-align:center">狀態</th><th></th></tr></thead>
+          <thead><tr><th>日期</th><th>品名</th><th style="text-align:center">原始成本</th><th style="text-align:center">第一次議價</th><th style="text-align:center">第二次議價</th><th style="text-align:center">第三次議價</th><th style="text-align:center">第四次議價</th><th style="text-align:center">第五次議價</th><th style="text-align:center">議價比</th><th>更改</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table></div>
       </div>`;
@@ -990,9 +992,9 @@ Object.assign(App, {
     if (!form) return;
     const saveBtn = document.getElementById('bg-save');
     let editIndex = -1;
-    const fields = ['bg-date','bg-item','bg-supplier','bg-status','bg-orig','bg-final','bg-note'];
+    const fields = ['bg-date','bg-item','bg-orig','bg-note','bg-b1','bg-b2','bg-b3','bg-b4','bg-b5'];
     const clearForm = () => {
-      fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = id === 'bg-status' ? '進行中' : ''; });
+      fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
       editIndex = -1;
       saveBtn.textContent = '儲存';
       form.style.display = 'none';
@@ -1004,14 +1006,16 @@ Object.assign(App, {
     document.getElementById('bg-cancel')?.addEventListener('click', clearForm);
     saveBtn?.addEventListener('click', () => {
       const item = document.getElementById('bg-item')?.value.trim();
-      if (!item) { alert('請填寫商品名稱'); return; }
+      if (!item) { alert('請填寫品名'); return; }
       const entry = {
         date: document.getElementById('bg-date')?.value,
         item,
-        supplier: document.getElementById('bg-supplier')?.value.trim(),
-        status: document.getElementById('bg-status')?.value,
         orig: document.getElementById('bg-orig')?.value,
-        final: document.getElementById('bg-final')?.value,
+        b1: document.getElementById('bg-b1')?.value,
+        b2: document.getElementById('bg-b2')?.value,
+        b3: document.getElementById('bg-b3')?.value,
+        b4: document.getElementById('bg-b4')?.value,
+        b5: document.getElementById('bg-b5')?.value,
         note: document.getElementById('bg-note')?.value.trim(),
       };
       const list = Store.get('ec.d2.bargain', []);
@@ -1025,10 +1029,12 @@ Object.assign(App, {
       editIndex = +btn.dataset.i;
       document.getElementById('bg-date').value = r.date || '';
       document.getElementById('bg-item').value = r.item || '';
-      document.getElementById('bg-supplier').value = r.supplier || '';
-      document.getElementById('bg-status').value = r.status || '進行中';
       document.getElementById('bg-orig').value = r.orig || '';
-      document.getElementById('bg-final').value = r.final || '';
+      document.getElementById('bg-b1').value = r.b1 || '';
+      document.getElementById('bg-b2').value = r.b2 || '';
+      document.getElementById('bg-b3').value = r.b3 || '';
+      document.getElementById('bg-b4').value = r.b4 || '';
+      document.getElementById('bg-b5').value = r.b5 || '';
       document.getElementById('bg-note').value = r.note || '';
       saveBtn.textContent = '更新';
       form.style.display = '';
