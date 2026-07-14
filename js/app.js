@@ -1148,7 +1148,7 @@ const App = {
     const list = Store.get('ec.d3.newProducts', []);
     const rows = list.length === 0
       ? `<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:24px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
-      : list.map((p, i) => `<tr style="vertical-align:middle;text-align:center">
+      : list.map((p, i) => `<tr style="vertical-align:middle;text-align:left">
           <td style="font-size:12px;color:var(--text-muted);white-space:nowrap">${escapeHtml(p.code||'')}</td>
           <td style="font-weight:600">${escapeHtml(p.name||'')}</td>
           <td style="color:var(--text)">${escapeHtml(p.note||'')}</td>
