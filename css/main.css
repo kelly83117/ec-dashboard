@@ -992,66 +992,57 @@
   @keyframes calNotePopIn { to { opacity: 1; } }
   .cal-task-card:hover .cal-note-popup { display: block; }
 
-  /* ===== 商開 (d3) 專屬活潑風格 ===== */
+  /* ===== 商開 (d3) 簡約白灰風格 ===== */
   .dept-d3-view {
-    --d3-orange: #ff5722;
-    --d3-amber: #ff8a00;
-    --d3-soft: #fff3ef;
+    --d3-accent: #6b7280;
+    --d3-soft: #f9fafb;
   }
-  /* 統計卡片：四色漸層 */
-  .dept-d3-view .stat-grid .stat-card:nth-child(1) {
-    background: linear-gradient(135deg, #fff3ef 0%, #ffe0d0 100%);
-    border: 0; border-left: 4px solid #ff5722;
-    box-shadow: 0 2px 10px rgba(255,87,34,.12);
-  }
-  .dept-d3-view .stat-grid .stat-card:nth-child(2) {
-    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
-    border: 0; border-left: 4px solid #f59e0b;
-    box-shadow: 0 2px 10px rgba(245,158,11,.12);
-  }
-  .dept-d3-view .stat-grid .stat-card:nth-child(3) {
-    background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-    border: 0; border-left: 4px solid #10b981;
-    box-shadow: 0 2px 10px rgba(16,185,129,.12);
-  }
+  /* 統計卡片：白底 + 淺灰左邊條 */
+  .dept-d3-view .stat-grid .stat-card:nth-child(1),
+  .dept-d3-view .stat-grid .stat-card:nth-child(2),
+  .dept-d3-view .stat-grid .stat-card:nth-child(3),
   .dept-d3-view .stat-grid .stat-card:nth-child(4) {
-    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-    border: 0; border-left: 4px solid #3b82f6;
-    box-shadow: 0 2px 10px rgba(59,130,246,.12);
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-left: 3px solid #9ca3af;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
   }
-  .dept-d3-view .stat-card { transition: transform .15s, box-shadow .15s; }
-  .dept-d3-view .stat-card:hover { transform: translateY(-2px); }
-  .dept-d3-view .stat-card .stat-value { font-size: 30px; font-weight: 800; letter-spacing: -.02em; }
+  .dept-d3-view .stat-card { transition: box-shadow .15s; }
+  .dept-d3-view .stat-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.1); }
+  .dept-d3-view .stat-card .stat-value { font-size: 28px; font-weight: 700; color: #111827; }
   .dept-d3-view .stat-card .stat-icon {
-    background: rgba(255,255,255,.75) !important;
-    box-shadow: 0 2px 6px rgba(0,0,0,.08);
-    border-radius: 12px;
+    background: #f3f4f6 !important;
+    box-shadow: none;
+    border-radius: 10px;
   }
-  /* Tab 選中：橘色漸層 */
-  .dept-d3-view .filter-bar .pill.active {
-    background: linear-gradient(90deg, #ff5722 0%, #ff8a00 100%) !important;
-    color: white !important;
-    border-color: #ff5722 !important;
-    box-shadow: 0 2px 8px rgba(255,87,34,.35);
+  /* 側欄 tab 選中：深灰底 */
+  .dept-d3-view .pill.active {
+    background: #1f2937 !important;
+    color: #ffffff !important;
+    border-color: #1f2937 !important;
+    box-shadow: none;
   }
-  /* 表格卡片：橘色左邊條 + 漸層 header */
+  .dept-d3-view .pill:not(.active):hover {
+    background: #f3f4f6;
+    border-color: #d1d5db;
+  }
+  /* 表格卡片：白底淺灰邊框 */
   .dept-d3-view .table-card {
-    border: 0;
-    box-shadow: 0 2px 12px rgba(255,87,34,.1);
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
     transition: box-shadow .15s;
   }
-  .dept-d3-view .table-card:hover { box-shadow: 0 6px 20px rgba(255,87,34,.16); }
+  .dept-d3-view .table-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.1); }
   .dept-d3-view .table-card-header {
-    background: linear-gradient(90deg, #fff3ef 0%, #fff8f5 100%);
-    border-left: 4px solid #ff5722;
+    background: #f9fafb;
+    border-left: 3px solid #9ca3af;
   }
-  .dept-d3-view .table-card-header h3 { font-weight: 700; }
+  .dept-d3-view .table-card-header h3 { font-weight: 700; color: #111827; }
   .dept-d3-view th {
-    background: linear-gradient(90deg, #fff3ef 0%, #fff8f5 100%);
-    color: #c2410c;
+    background: #f3f4f6;
+    color: #6b7280;
     font-weight: 700;
     letter-spacing: .02em;
-    text-transform: uppercase;
     font-size: 11px;
   }
 
