@@ -49,6 +49,8 @@ Object.assign(App, {
       this.bindWeeklyCalendar(deptId);
     } else if (tab?.dynamic === 'design-kpi') {
       this.bindDesignKpi(deptId);
+    } else if (tab?.dynamic === 'new-products') {
+      this.bindNewProductsTab();
     } else if (tab?.dynamic === 'ai-select') {
       this.bindAiSelect(deptId);
     } else if (tab?.dynamic === 'trend-radar') {
@@ -780,6 +782,8 @@ Object.assign(App, {
         tabContent = this.renderDailyProgressTab(deptId, color, dept);
       } else if (activeTab.dynamic === 'design-kpi') {
         tabContent = this.renderDesignKpiTab(deptId, color, dept);
+      } else if (activeTab.dynamic === 'new-products') {
+        tabContent = this.renderNewProductsTab();
       } else if (activeTab.dynamic === 'ai-select') {
         tabContent = this.renderAiSelectTab(deptId, color, dept);
       } else if (activeTab.dynamic === 'trend-radar') {

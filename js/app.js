@@ -421,6 +421,7 @@ const OFFICE_CONFIG = {
       { icon: '💰', label: '預估毛利率', value: '0%', meta: '目標 35%' },
     ],
     tabs: [
+      { key: 'new-products', title: '🆕 新品表', dynamic: 'new-products' },
       { key: 'ai-select', title: '🤖 AI 選品', dynamic: 'ai-select' },
       { key: 'trend-radar', title: '🔥 熱搜雷達', dynamic: 'trend-radar' },
       { key: 'supplier', title: '🏭 供應商管理', dynamic: 'supplier-mgmt' },
@@ -1140,6 +1141,84 @@ const App = {
 
     load();
     document.getElementById('gt-refresh')?.addEventListener('click', load);
+  },
+
+  /* ===== 新品表 ===== */
+  renderNewProductsTab() {
+    const list = Store.get('ec.d3.newProducts', []);
+    const rows = list.length === 0
+      ? `<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:24px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
+      : list.map((p, i) => `<tr>
+          <td style="font-size:12px;color:var(--text-muted);white-space:nowrap">${escapeHtml(p.code||'')}</td>
+          <td style="font-weight:600">${escapeHtml(p.name||'')}</td>
+          <td>${escapeHtml(p.shop||'')}</td>
+          <td style="color:var(--text-muted)">${escapeHtml(p.note||'')}</td>
+          <td style="text-align:right">NT$${Number(p.price||0).toLocaleString()}</td>
+          <td style="text-align:center">${p.yellowTag ? '<span style="background:#fef08a;color:#713f12;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700">有</span>' : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
+          <td>${p.buyUrl ? `<a href="${escapeHtml(p.buyUrl)}" target="_blank" style="color:#3b82f6;font-size:12px;text-decoration:none">開啟 ↗</a>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
+          <td>${p.refUrl ? `<a href="${escapeHtml(p.refUrl)}" target="_blank" style="color:#8b5cf6;font-size:12px;text-decoration:none">開啟 ↗</a>` : '<span style="color:#9ca3af;font-size:12px">—</span>'}</td>
+          <td><button class="np-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button></td>
+        </tr>`).join('');
+    return `<div class="table-card">
+      <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div><h3>🆕 新品表</h3><p>記錄新品資訊與進貨來源</p></div>
+        <button id="np-add-btn" style="padding:7px 16px;background:#6366f1;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+      </div>
+      <div id="np-form" style="display:none;padding:16px;background:#f5f3ff;border-bottom:1px solid var(--border)">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
+          <input id="np-code"  placeholder="商品編號" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="np-name"  placeholder="商品名稱 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="np-shop"  placeholder="賣場" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="np-price" type="number" placeholder="原價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;margin-bottom:10px;align-items:center">
+          <input id="np-buy-url" placeholder="進貨網址" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="np-ref-url" placeholder="參考網址" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <input id="np-note"    placeholder="備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap;cursor:pointer">
+            <input id="np-yellow" type="checkbox" style="width:16px;height:16px;cursor:pointer"> 小黃標
+          </label>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button id="np-save" style="padding:8px 18px;background:#6366f1;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+          <button id="np-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>商品編號</th><th>商品名稱</th><th>賣場</th><th>備註</th><th style="text-align:right">原價</th><th style="text-align:center">小黃標</th><th>進貨網址</th><th>參考網址</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`;
+  },
+  bindNewProductsTab() {
+    const form = document.getElementById('np-form');
+    document.getElementById('np-add-btn')?.addEventListener('click', () => {
+      form.style.display = form.style.display === 'none' ? '' : 'none';
+    });
+    document.getElementById('np-cancel')?.addEventListener('click', () => { form.style.display = 'none'; });
+    document.getElementById('np-save')?.addEventListener('click', () => {
+      const name = document.getElementById('np-name')?.value.trim();
+      if (!name) { alert('請填寫商品名稱'); return; }
+      const list = Store.get('ec.d3.newProducts', []);
+      list.push({
+        code: document.getElementById('np-code')?.value.trim(),
+        name,
+        shop: document.getElementById('np-shop')?.value.trim(),
+        price: document.getElementById('np-price')?.value.trim(),
+        note: document.getElementById('np-note')?.value.trim(),
+        yellowTag: document.getElementById('np-yellow')?.checked,
+        buyUrl: document.getElementById('np-buy-url')?.value.trim(),
+        refUrl: document.getElementById('np-ref-url')?.value.trim(),
+      });
+      Store.set('ec.d3.newProducts', list);
+      this.render();
+    });
+    document.querySelectorAll('.np-del').forEach(btn => btn.addEventListener('click', () => {
+      const list = Store.get('ec.d3.newProducts', []);
+      list.splice(+btn.dataset.i, 1);
+      Store.set('ec.d3.newProducts', list);
+      this.render();
+    }));
   },
 
   /* ===== 供應商管理 ===== */
