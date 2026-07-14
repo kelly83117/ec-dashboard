@@ -1,49 +1,49 @@
 {
-  "updated": "2026-07-13",
+  "updated": "2026-07-14",
   "items": [
     {
-      "keyword": "夏季冰涼床單",
-      "name": "冰涼觸感床單組",
-      "price": 599,
-      "sold": 300,
-      "url": "https://shopee.tw/search?keyword=%E5%A4%8F%E5%AD%A3%E5%86%B0%E6%B6%BC%E5%BA%8A%E5%96%AE",
-      "reason": "夏季清涼居家必備",
+      "keyword": "夏季涼感床單",
+      "name": "夏季涼感床單套組",
+      "price": 799,
+      "sold": 200,
+      "url": "https://shopee.tw/search?keyword=%E5%A4%8F%E5%AD%A3%E6%B6%BC%E6%84%9F%E5%BA%8A%E5%96%AE",
+      "reason": "適合炎熱夏季使用",
       "source": "AI推薦"
     },
     {
-      "keyword": "可折疊收納箱",
-      "name": "多功能可折疊收納箱",
+      "keyword": "防潮收納箱",
+      "name": "防潮密封收納箱",
+      "price": 599,
+      "sold": 150,
+      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BD%AE%E6%94%B6%E7%B4%8D%E7%AE%B1",
+      "reason": "適合梅雨季節防潮",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "竹炭除臭包",
+      "name": "天然竹炭除臭包",
+      "price": 199,
+      "sold": 300,
+      "url": "https://shopee.tw/search?keyword=%E7%AB%B9%E7%82%AD%E9%99%A4%E8%87%AD%E5%8C%85",
+      "reason": "有效去除異味",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "多功能廚房收納架",
+      "name": "多功能廚房收納架",
       "price": 399,
       "sold": 250,
-      "url": "https://shopee.tw/search?keyword=%E5%8F%AF%E6%8A%98%E7%96%8A%E6%94%B6%E7%B4%8D%E7%AE%B1",
-      "reason": "整理空間，方便實用",
+      "url": "https://shopee.tw/search?keyword=%E5%A4%9A%E5%8A%9F%E8%83%BD%E5%BB%9A%E6%88%BF%E6%94%B6%E7%B4%8D%E6%9E%B6",
+      "reason": "提升廚房空間利用率",
       "source": "AI推薦"
     },
     {
-      "keyword": "廚房防油貼",
-      "name": "廚房防油貼紙",
-      "price": 199,
-      "sold": 500,
-      "url": "https://shopee.tw/search?keyword=%E5%BB%9A%E6%88%BF%E9%98%B2%E6%B2%B9%E8%B2%BC",
-      "reason": "清潔廚房，保持整潔",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "浴室防滑墊",
-      "name": "防滑浴室地墊",
+      "keyword": "淋浴防滑墊",
+      "name": "淋浴防滑吸水墊",
       "price": 299,
-      "sold": 400,
-      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E9%98%B2%E6%BB%91%E5%A2%8A",
-      "reason": "安全防滑，舒適使用",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "窗簾隔熱布",
-      "name": "夏季隔熱窗簾",
-      "price": 899,
-      "sold": 150,
-      "url": "https://shopee.tw/search?keyword=%E7%AA%97%E7%B0%BE%E9%9A%94%E7%86%B1%E5%B8%83",
-      "reason": "隔熱效果，提升居住舒適",
+      "sold": 180,
+      "url": "https://shopee.tw/search?keyword=%E6%B7%8B%E6%B5%B4%E9%98%B2%E6%BB%91%E5%A2%8A",
+      "reason": "增加浴室安全性",
       "source": "AI推薦"
     }
   ]
