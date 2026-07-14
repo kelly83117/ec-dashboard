@@ -4298,10 +4298,10 @@ function scoreColor(s){
 function _scoreDefaultQ(){return Math.ceil((_KPI_NOW.getMonth()+1)/3);}
 let _scoreCurQ=_scoreDefaultQ();
 let _scoreCurYear=_KPI_NOW.getFullYear();
-let _scoreDetail=null;
+let _scoreDetailMonth=null;
 let _scoreDefsOpen=false;
 
-function setScoreQ(q){_scoreCurQ=q;_scoreDetail=null;renderKpiTab();}
+function setScoreQ(q){_scoreCurQ=q;_scoreDetailMonth=null;renderKpiTab();}
 function toggleScoreDefs(){_scoreDefsOpen=!_scoreDefsOpen;renderKpiTab();}
 
 function scoreDefsHtml(q){
@@ -4397,7 +4397,7 @@ function _kpiScoreViewHtml(){
 
   <div id="score-detail-panel" style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:20px"></div>
 
-  ${scoreBonusHtml()}
+  ${q>=3?scoreBonusHtml():''}
 
   <div style="font-size:11px;color:#9ca3af">灰底欄位為公式自動帶入（依本季目標計算），白底欄位為每月手動填寫的實際數字</div>
   `;
@@ -4408,15 +4408,18 @@ function renderScoreComparisonTable(){
   if(!container)return;
   const year=_scoreCurYear,q=_scoreCurQ;
   const months=SCORE_QUARTER_MONTHS[q];
-  const monthHeads=months.map(m=>`<th style="text-align:center;padding:8px 6px;font-size:11px;color:#6b7280;font-weight:700;min-width:64px">${m}月</th>`).join('');
+  const monthHeads=months.map(m=>{
+    const active=_scoreDetailMonth===m;
+    return `<th onclick="setScoreDetailMonth(${m})" style="text-align:center;padding:8px 6px;font-size:11px;color:${active?'#5b5fcf':'#6b7280'};font-weight:700;min-width:64px;cursor:pointer;${active?'text-decoration:underline':''}">${m}月</th>`;
+  }).join('');
   const rows=SCORE_SHOPS.map(s=>{
     const cells=months.map(m=>{
       const r=computeShopMonthScore(s.id,year,m,q);
-      if(!r||!r.hasData)return `<td style="text-align:center;padding:8px 6px"><span style="color:#d1d5db;font-size:12px">—</span></td>`;
+      const active=_scoreDetailMonth===m;
+      if(!r||!r.hasData)return `<td onclick="setScoreDetailMonth(${m})" style="text-align:center;padding:8px 6px;cursor:pointer;${active?'background:#f8f9fc':''}"><span style="color:#d1d5db;font-size:12px">—</span></td>`;
       const col=scoreColor(r.total);
-      const active=_scoreDetail&&_scoreDetail.shop===s.id&&_scoreDetail.month===m;
-      return `<td style="text-align:center;padding:8px 6px">
-        <span class="score-cell" onclick="setScoreDetail('${s.id}',${m})" style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer">${r.total}</span>
+      return `<td onclick="setScoreDetailMonth(${m})" style="text-align:center;padding:8px 6px;cursor:pointer;${active?'background:#f8f9fc':''}">
+        <span class="score-cell" style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums">${r.total}</span>
       </td>`;
     }).join('');
     const vals=months.map(m=>{const r=computeShopMonthScore(s.id,year,m,q);return r&&r.hasData?r.total:null;}).filter(v=>v!=null);
@@ -4437,8 +4440,8 @@ function renderScoreComparisonTable(){
   </table>`;
 }
 
-function setScoreDetail(shop,monthNum){
-  _scoreDetail={shop,month:monthNum};
+function setScoreDetailMonth(monthNum){
+  _scoreDetailMonth=monthNum;
   renderScoreComparisonTable();
   renderScoreDetailPanel();
 }
@@ -4446,16 +4449,20 @@ function setScoreDetail(shop,monthNum){
 function renderScoreDetailPanel(){
   const panel=document.getElementById('score-detail-panel');
   if(!panel)return;
-  if(!_scoreDetail){panel.innerHTML=`<div style="padding:16px;font-size:12px;color:#9ca3af;text-align:center">點上方任一分數看該月指標明細</div>`;return;}
-  const{shop,month}=_scoreDetail;
+  if(_scoreDetailMonth==null){panel.innerHTML=`<div style="padding:16px;font-size:12px;color:#9ca3af;text-align:center">點上方任一月份看三個賣場的指標明細</div>`;return;}
+  const month=_scoreDetailMonth;
   const year=_scoreCurYear,q=_scoreCurQ;
   const monthKey=year+'-'+String(month).padStart(2,'0');
-  const r=computeShopMonthScore(shop,year,month,q);
-  if(!r){panel.innerHTML=`<div style="padding:16px;font-size:12px;color:#9ca3af;text-align:center">${month}月還沒有本季目標設定</div>`;return;}
-  panel.innerHTML=`
+  const blocks=SCORE_SHOPS.map((s,i)=>{
+    const shop=s.id;
+    const r=computeShopMonthScore(shop,year,month,q);
+    if(!r){
+      return `<div style="padding:16px;${i>0?'border-top:1px solid #f3f4f6':''};font-size:12px;color:#9ca3af">${shop}：${month}月還沒有本季目標設定</div>`;
+    }
+    return `<div style="${i>0?'border-top:1px solid #f3f4f6':''}">
     <div style="padding:12px 16px;background:#f8f9fc;display:flex;align-items:baseline;gap:8px">
       <div style="font-size:13px;font-weight:700;color:#374151">${shop}</div>
-      <div style="font-size:11px;color:#9ca3af">${month}月指標明細（白底可點擊編輯）</div>
+      <div style="font-size:11px;color:#9ca3af">${s.pos}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:0 12px;font-size:11.5px;padding:12px 16px 14px">
       <div style="font-size:10.5px;color:#9ca3af;font-weight:700;padding-bottom:6px">純利率</div>
@@ -4481,7 +4488,10 @@ function renderScoreDetailPanel(){
     <div style="padding:0 16px 14px;display:flex;gap:16px;font-size:11px;color:#9ca3af">
       <span onclick="editScoreMonthlyCell('${monthKey}','${shop}','prevProfit',this)" style="cursor:pointer;border-bottom:1px dashed #d1d5db">前期純利 <b style="color:#6b7280">${r.m.prevProfit!=null?fmtN(r.m.prevProfit):'—'}</b></span>
       <span onclick="editScoreMonthlyCell('${monthKey}','${shop}','curProfit',this)" style="cursor:pointer;border-bottom:1px dashed #d1d5db">本期純利 <b style="color:#6b7280">${r.m.curProfit!=null?fmtN(r.m.curProfit):'—'}</b></span>
+    </div>
     </div>`;
+  }).join('');
+  panel.innerHTML=`<div style="padding:8px 16px;font-size:11px;color:#9ca3af;background:#fafafe;border-bottom:1px solid #f3f4f6">${month}月三個賣場指標明細（白底數字可點擊編輯）</div>${blocks}`;
 }
 
 function editScoreMonthlyCell(monthKey,shop,field,tdEl){
@@ -6213,6 +6223,6 @@ Object.assign(window, {
   mypColDragStart,mypColDragOver,mypColDragEnter,mypColDragLeave,mypColDrop,mypColDragEnd,
   mypPickRowDragStart,mypPickRowDragOver,mypPickRowDragEnter,mypPickRowDragLeave,mypPickRowDrop,mypPickRowDragEnd,
   mypSetSort,
-  setScoreQ,toggleScoreDefs,adjustScoreBonus,setScoreDetail,editScoreMonthlyCell,
+  setScoreQ,toggleScoreDefs,adjustScoreBonus,setScoreDetailMonth,editScoreMonthlyCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
 });
