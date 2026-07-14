@@ -886,8 +886,8 @@ Object.assign(App, {
 
     // d1 行銷、d4 設計都不顯示「成員績效」表與上方統計卡片區
     //   d4 已改用個人 KPI 頁，集體季度績效不適用
-    const showMemberKpiTable = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3';
-    const showStatGrid = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3';
+    const showMemberKpiTable = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3' && !(deptId === 'd2' && subRoute === 'kpi');
+    const showStatGrid = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3' && !(deptId === 'd2' && subRoute === 'kpi');
     const inner = `
       ${showStatGrid ? `<div class="stat-grid">${statCards}</div>` : ''}
       ${deptId === 'd3' ? `<div style="margin-bottom:20px">${this.renderFestivalCalendarTab()}</div>` : ''}
