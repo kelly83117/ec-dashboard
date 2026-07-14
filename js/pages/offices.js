@@ -1061,21 +1061,31 @@ Object.assign(App, {
       </div>`;
     };
 
+    const totalScore = scoreCount + scoreAvg;
+    const scoreColor = totalScore >= 40 ? '#059669' : totalScore > 0 ? '#f59e0b' : '#9ca3af';
+    const badge = (label, value, pass) =>
+      `<div style="display:flex;flex-direction:column;align-items:center;background:${pass ? '#f0fdf4' : '#f9fafb'};border:1px solid ${pass ? '#bbf7d0' : '#e5e7eb'};border-radius:8px;padding:6px 14px;min-width:90px">
+        <span style="font-size:16px;font-weight:800;color:${pass ? '#059669' : '#6b7280'}">${value}</span>
+        <span style="font-size:10px;color:#9ca3af;margin-top:1px">${label}</span>
+      </div>`;
+
     return `
       ${this.renderD2KpiSummaryHtml()}
-      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px">
-        ${kpiCard('📋', '當月議價總數（筆）', monthCount, '滿20筆得滿分', scoreCount, 20)}
-        ${kpiCard('📉', '前10名平均議價比', avgTop10 ? avgTop10.toFixed(1) + '%' : '—', '平均達10%得滿分', scoreAvg, 20)}
-        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;min-width:180px;flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center">
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">本月KPI得分</div>
-          <div style="font-size:36px;font-weight:800;color:${scoreCount + scoreAvg >= 40 ? '#059669' : scoreCount + scoreAvg > 0 ? '#f59e0b' : '#9ca3af'}">${scoreCount + scoreAvg}</div>
-          <div style="font-size:12px;color:var(--text-muted)">/ 40 分</div>
-        </div>
-      </div>
       <div class="table-card">
-        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div><h3>💰 議價表</h3><p>記錄每次採購議價過程與最終議價比（共 ${list.length} 筆）</p></div>
-          <button id="bg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div>
+            <h3>💰 議價表</h3>
+            <p>記錄每次採購議價過程與最終議價比（共 ${list.length} 筆）</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            ${badge('當月議價數', monthCount + ' 筆', scoreCount > 0)}
+            ${badge('前10名平均議價比', avgTop10 ? avgTop10.toFixed(1) + '%' : '—', scoreAvg > 0)}
+            <div style="display:flex;flex-direction:column;align-items:center;background:#fff;border:2px solid ${scoreColor};border-radius:8px;padding:6px 14px;min-width:80px">
+              <span style="font-size:18px;font-weight:800;color:${scoreColor}">${totalScore}</span>
+              <span style="font-size:10px;color:#9ca3af">/ 40 分</span>
+            </div>
+            <button id="bg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+          </div>
         </div>
         <div id="bg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
