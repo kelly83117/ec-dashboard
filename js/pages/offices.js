@@ -926,44 +926,10 @@ Object.assign(App, {
   },
 
   renderD2KpiTabHtml() {
-    const kpiList = [
-      { label: '採購準時率', key: 'd2_kpi_ontime', unit: '%', target: 95 },
-      { label: '供應商合格率', key: 'd2_kpi_supplier', unit: '%', target: 90 },
-      { label: '庫存周轉率', key: 'd2_kpi_turnover', unit: '次', target: 6 },
-      { label: '採購成本節省率', key: 'd2_kpi_saving', unit: '%', target: 5 },
-    ];
-    const rows = kpiList.map(k => {
-      const val = Store.get(k.key, '');
-      const num = parseFloat(val);
-      const hit = !isNaN(num) && num >= k.target;
-      return `<tr>
-        <td style="font-weight:600">${escapeHtml(k.label)}</td>
-        <td style="text-align:center;color:var(--text-muted)">${k.target}${k.unit}</td>
-        <td style="text-align:center">
-          <input type="number" data-kpi-key="${k.key}" value="${escapeHtml(val)}"
-            style="width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;text-align:center;font-family:inherit">
-          <span style="margin-left:4px;font-size:12px;color:var(--text-muted)">${k.unit}</span>
-        </td>
-        <td style="text-align:center">
-          ${!isNaN(num) ? `<span style="font-weight:700;color:${hit ? '#059669' : '#dc2626'}">${hit ? '✓ 達標' : '✗ 未達'}</span>` : '<span style="color:var(--text-muted);font-size:12px">—</span>'}
-        </td>
-      </tr>`;
-    }).join('');
-    setTimeout(() => {
-      document.querySelectorAll('[data-kpi-key]').forEach(el => {
-        el.addEventListener('change', () => {
-          Store.set(el.dataset.kpiKey, el.value);
-          this.render();
-        });
-      });
-    }, 100);
     return `
       <div class="table-card">
-        <div class="table-card-header"><h3>📊 採購 KPI</h3><p>填入實際數值，系統自動判斷是否達標</p></div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>指標</th><th style="text-align:center">目標</th><th style="text-align:center">實際值</th><th style="text-align:center">達標</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table></div>
+        <div class="table-card-header"><h3>📊 採購 KPI</h3></div>
+        <div style="padding:60px 24px;text-align:center;color:var(--text-muted);font-size:14px">尚未設定 KPI 內容</div>
       </div>`;
   },
 
