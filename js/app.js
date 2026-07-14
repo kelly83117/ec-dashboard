@@ -2238,7 +2238,7 @@ const App = {
       if (error) error.style.display = 'none';
 
       const ttUrl = 'https://ads.tiktok.com/business/creativecenter/api/v1/trending/hashtags/list?period=7&page=1&limit=20&country_code=TW&language=zh-Hant';
-      _pfetch(ttUrl)
+      fetch(ttUrl)
         .then(r => r.json())
         .then(data => {
           const tags = (data?.data?.list) || [];
