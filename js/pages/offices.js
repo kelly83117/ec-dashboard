@@ -929,10 +929,13 @@ Object.assign(App, {
     return (typeof buildKpiTabHtml === 'function') ? buildKpiTabHtml() : '';
   },
 
-  renderD2KpiSummaryHtml() {
+  renderD2KpiSummaryHtml(scoreCount = 0, scoreAvg = 0) {
     const SEC = (title) => `<div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">${title}</div>`;
     const chip = (v, color='#1565c0') => `<span style="display:inline-block;background:#fffde7;color:${color};font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`;
-    const sc = (v) => chip(v, '#b71c1c');
+    const sc = (v, earned=false) => {
+      if (earned) return `<span style="display:inline-block;background:#fffde7;color:#b71c1c;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`;
+      return `<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">0</span>`;
+    };
     const subH = (cols) => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${cols.map(c=>`<div style="padding:5px 10px;font-size:11px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
     const row = (cols, bg='#fff') => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${cols.map(c=>`<div style="padding:7px 10px;font-size:12px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
 
@@ -952,8 +955,8 @@ Object.assign(App, {
       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:260px">
         ${SEC('議價 — 每月')}
         ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'}])}
-        ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:chip('20'),center:true},{v:sc('20'),center:true}])}
-        ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:chip('10.0%'),center:true},{v:sc('20'),center:true}],'#fafafa')}
+        ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:chip('20'),center:true},{v:sc('20', scoreCount > 0),center:true}])}
+        ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:chip('10.0%'),center:true},{v:sc('20', scoreAvg > 0),center:true}],'#fafafa')}
         <div style="padding:5px 10px;font-size:11px;color:#6b7280;background:#fafafa;border-bottom:1px solid #f3f4f6">前 10 項平均議價幅度 ≥ 門檻，給滿分；未達則 0（全有全無）</div>
 
         ${SEC('叫貨出錯率 — 每月')}
@@ -1070,7 +1073,7 @@ Object.assign(App, {
       </div>`;
 
     return `
-      ${this.renderD2KpiSummaryHtml()}
+      ${this.renderD2KpiSummaryHtml(scoreCount, scoreAvg)}
       <div class="table-card">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
