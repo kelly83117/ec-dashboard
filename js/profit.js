@@ -4388,10 +4388,12 @@ function _kpiScoreViewHtml(){
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
         ${metrics.map((m,mi)=>`
           <div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
-            <div style="font-size:11.5px;color:#9ca3af;font-weight:600;margin-bottom:6px">${m.l}</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px">
+              <div style="font-size:11.5px;color:#9ca3af;font-weight:600">${m.l}</div>
+              <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:#eef0fd;color:#5b5fcf;white-space:nowrap">配分 ${d.w[mi]} 分</div>
+            </div>
             <div style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15">${d[m.k][0]}%</div>
             <div style="font-size:11.5px;color:#9ca3af;margin-top:3px">低標 ${d[m.k][1]!=null?d[m.k][1]+'%':'—'}</div>
-            <div style="margin-top:8px;display:inline-block;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:#eef0fd;color:#5b5fcf">配分 ${d.w[mi]} 分</div>
           </div>`).join('')}
       </div>
     </div>`;
@@ -4475,10 +4477,12 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
     const col=scoreRatioColor(score,weight);
     const valDisp=val==null?'—':val+'%';
     return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
-      <div style="font-size:11.5px;color:#9ca3af;font-weight:600;margin-bottom:6px">${label}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px">
+        <div style="font-size:11.5px;color:#9ca3af;font-weight:600">${label}</div>
+        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${score} 分</div>
+      </div>
       <div onclick="editScoreMonthlyCell('${monthKey}','${shop}','${field}',this)" style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15;cursor:pointer;border-bottom:1px dashed #d1d5db;display:inline-block">${valDisp}</div>
       <div style="font-size:11.5px;color:#9ca3af;margin-top:3px">目標 ${target}%</div>
-      <div style="margin-top:8px;display:inline-block;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg}">${score} 分</div>
     </div>`;
   };
   // 純利成長不是直接填百分比，是靠「前期純利」「本期純利」兩個數字算出來的，
@@ -4487,14 +4491,16 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
     const col=scoreRatioColor(r.growS,r.t.w[1]);
     const valDisp=r.growA==null?'—':r.growA+'%';
     return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
-      <div style="font-size:11.5px;color:#9ca3af;font-weight:600;margin-bottom:6px">純利成長</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px">
+        <div style="font-size:11.5px;color:#9ca3af;font-weight:600">純利成長</div>
+        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${r.growS} 分</div>
+      </div>
       <div style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15">${valDisp}</div>
       <div style="font-size:11.5px;color:#9ca3af;margin-top:3px">目標 ${r.t.grow[0]}%</div>
       <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #e5e7eb;font-size:11px;color:#9ca3af;display:flex;flex-direction:column;gap:4px">
         ${editableNum('前期純利','prevProfit',r.m.prevProfit,fmtN)}
         ${editableNum('本期純利','curProfit',r.m.curProfit,fmtN)}
       </div>
-      <div style="margin-top:8px;display:inline-block;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg}">${r.growS} 分</div>
     </div>`;
   })();
   const cardHtml=[
