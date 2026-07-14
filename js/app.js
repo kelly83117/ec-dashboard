@@ -2068,26 +2068,25 @@ const App = {
     const _renderProducts = (results, listEl, isLive) => {
       if (!listEl) return;
       const seen = new Set();
-      const deduped = results.filter(r => { if (seen.has(r.keyword)) return false; seen.add(r.keyword); return true; }).slice(0, 5);
+      const deduped = results.filter(r => { if (seen.has(r.keyword)) return false; seen.add(r.keyword); return true; }).slice(0, 10);
       deduped.sort((a, b) => (b.sold || 0) - (a.sold || 0));
-      const isAI = results.some(r => r.source === 'AI推薦');
-      const medals = ['🥇','🥈','🥉','4.','5.'];
+      const medals = ['🥇','🥈','🥉','4.','5.','6.','7.','8.','9.','10.'];
       listEl.style.display = '';
       listEl.innerHTML = `
-        <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           ${deduped.map((r, i) => {
             const soldStr = (r.sold||0) >= 10000 ? ((r.sold)/10000).toFixed(1)+'萬筆' : (r.sold||0) > 0 ? (r.sold)+'筆' : '';
             return `<a href="${r.url}" target="_blank"
               style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;text-decoration:none;color:inherit;transition:box-shadow .15s"
               onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
-              <div style="font-size:20px;width:28px;text-align:center;flex-shrink:0">${medals[i]||''}</div>
+              <div style="font-size:18px;width:28px;text-align:center;flex-shrink:0;font-weight:700;color:#6b7280">${medals[i]||''}</div>
               <div style="flex:1;min-width:0">
-                <div style="font-size:12px;color:#7c3aed;font-weight:600;margin-bottom:3px">🤖 ${escapeHtml(r.keyword)}</div>
-                <div style="font-size:14px;font-weight:600;line-height:1.4;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(r.name)}</div>
-                ${r.reason ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px">${escapeHtml(r.reason)}</div>` : ''}
+                <div style="font-size:11px;color:#7c3aed;font-weight:600;margin-bottom:2px">${escapeHtml(r.keyword)}</div>
+                <div style="font-size:13px;font-weight:600;line-height:1.4;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(r.name)}</div>
+                ${r.reason ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escapeHtml(r.reason)}</div>` : ''}
               </div>
               <div style="text-align:right;flex-shrink:0">
-                <div style="font-size:16px;font-weight:700;color:#7c3aed">NT$${(r.price||0).toLocaleString()}</div>
+                <div style="font-size:14px;font-weight:700;color:#7c3aed">NT$${(r.price||0).toLocaleString()}</div>
                 ${soldStr ? `<div style="font-size:11px;color:var(--text-muted)">${soldStr}</div>` : ''}
               </div>
             </a>`;

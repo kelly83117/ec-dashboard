@@ -44,7 +44,7 @@ def parse_json(text):
 # ── 1. 產品推薦 ──────────────────────────────
 products_prompt = (
     f"今天是 {date_str}，台灣電商市場。\n\n"
-    f"請推薦 5 個目前最適合在蝦皮上架銷售的居家生活用品，每個商品給一個精準的蝦皮搜尋關鍵字。\n\n"
+    f"請推薦 10 個目前最適合在蝦皮上架銷售的居家生活用品，每個商品給一個精準的蝦皮搜尋關鍵字。\n\n"
     f"選品規則（嚴格遵守）：\n"
     f"- 只能是居家生活用品（收納、廚房、浴室、寢具、清潔、文具等）\n"
     f"- 不能有品牌名稱\n"
@@ -59,7 +59,7 @@ products_prompt = (
 print("Generating product recommendations...")
 products_raw = parse_json(call_ai(products_prompt))
 items = []
-for it in products_raw[:5]:
+for it in products_raw[:10]:
     kw = it.get("keyword", "")
     items.append({
         "keyword": kw,
