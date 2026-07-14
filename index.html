@@ -90,7 +90,13 @@
           <button class="nav-item nav-sub" data-route="office-d1-profit"><span>淨利表</span></button>
           <button class="nav-item nav-sub" data-route="office-d1-insight"><span>洞察表</span></button>
         </div>
-        <button class="nav-item" data-route="office-d2"><span class="icon">🛒</span><span>採購</span></button>
+        <button class="nav-item nav-parent" data-toggle-group="d2">
+          <span class="icon">🛒</span><span style="flex:1">採購</span><span class="nav-chevron">▾</span>
+        </button>
+        <div class="nav-sub-group" data-group="d2">
+          <button class="nav-item nav-sub" data-route="office-d2"><span>工作總覽</span></button>
+          <button class="nav-item nav-sub" data-route="office-d2-kpi"><span>KPI</span></button>
+        </div>
         <button class="nav-item" data-route="office-d3"><span class="icon">💼</span><span>商開</span></button>
         <button class="nav-item" data-route="office-d4"><span class="icon">🎨</span><span>設計</span></button>
         <div class="sidebar-group" id="admin-group" style="display:none">系統管理</div>

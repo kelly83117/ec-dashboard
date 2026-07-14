@@ -799,6 +799,8 @@ const App = {
       'office-d1-kpi':     'kpi',
       'office-d1-profit':  'profit',
       'office-d1-insight': 'insight',
+      'office-d2':         'calendar',
+      'office-d2-kpi':     'kpi',
     };
     document.querySelectorAll('[data-route^="office-"]').forEach(btn => {
       const route = btn.dataset.route;
@@ -875,6 +877,13 @@ const App = {
     if (route.startsWith('office-d1')) {
       const parent = document.querySelector('[data-toggle-group="d1"]');
       const group = document.querySelector('.nav-sub-group[data-group="d1"]');
+      if (parent) parent.classList.add('expanded');
+      if (group) group.classList.add('expanded');
+    }
+    // 若進入到 office-d2 系列任一頁，自動展開採購子項
+    if (route.startsWith('office-d2')) {
+      const parent = document.querySelector('[data-toggle-group="d2"]');
+      const group = document.querySelector('.nav-sub-group[data-group="d2"]');
       if (parent) parent.classList.add('expanded');
       if (group) group.classList.add('expanded');
     }
