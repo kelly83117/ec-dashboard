@@ -1497,7 +1497,7 @@ Object.assign(App, {
     const theadCols = cols.map(c => `<th style="white-space:nowrap;font-size:12px">${c}</th>`).join('');
     const SHOW = 50;
     const rows = filtered.slice(0, SHOW).map((r, i) => {
-      const tds = cols.map(c => `<td style="font-size:12px;padding:6px 10px">${cellVal(r, c)}</td>`).join('');
+      const tds = cols.map(c => `<td style="font-size:12px;padding:6px 10px${c==='產品名稱'?';text-align:left':''}">${cellVal(r, c)}</td>`).join('');
       return `<tr class="pr-row" style="border-bottom:1px solid #f3f4f6;cursor:pointer" data-i="${list.indexOf(r)}">${tds}</tr>`;
     }).join('');
 
