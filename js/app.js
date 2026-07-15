@@ -2498,7 +2498,7 @@ function __bootApp() {
 // 本機獨有、不可同步的鍵（session 不上雲，避免一個人登入別人也跟著登入）
 const __LOCAL_ONLY_KEYS = new Set([Store.KEYS.session]);
 // 本機獨有前綴（訂價資料體積大，不上 Firestore）
-const __LOCAL_ONLY_PREFIXES = ['ec.d2.pricing.', 'ec.d2.sp.'];
+const __LOCAL_ONLY_PREFIXES = ['ec.d2.pricing.'];
 function __isLocalOnly(key) {
   return __LOCAL_ONLY_KEYS.has(key) || __LOCAL_ONLY_PREFIXES.some(p => key.startsWith(p));
 }
