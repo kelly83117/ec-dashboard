@@ -968,8 +968,8 @@ Object.assign(App, {
         ${row([{v:chip('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'}])}
 
         ${SEC('扣分（單價未更新）— 每月')}
-        ${subH([{l:'每次扣分'},{l:'單月上限'}])}
-        ${row([{v:sc('−3'),center:true},{v:sc('−15'),center:true}])}
+        ${subH([{l:'每次扣分'},{l:'單月上限'},{l:'本月扣分'}])}
+        ${row([{v:chip('−3','#b71c1c'),center:true},{v:chip('−15','#b71c1c'),center:true},{v:sc('0'),center:true}])}
       </div>`;
 
     return `
