@@ -1157,9 +1157,9 @@ Object.assign(App, {
         </div>
         <div id="sp-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
-            <input id="sp-date" type="date" placeholder="填表時間" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="sp-date" type="text" placeholder="填表時間（如 2026/07/15）" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="sp-name" placeholder="商品名稱 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="sp-launch" type="date" placeholder="上架時間" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="sp-launch" type="text" placeholder="上架時間（如 2026/07/15）" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="sp-link" placeholder="蝦皮賣場連結" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           </div>
           <div style="display:flex;gap:8px">
