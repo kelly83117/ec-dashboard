@@ -653,8 +653,38 @@
   /* ------------- 儀表板首頁 · 每日營收填寫（可收合） -------------
      收合只切 class、不重繪：填寫表格永遠留在 DOM，
      否則 bindCardInputs 的 .card-rev 會消失，連帶讓總覽卡的即時加總靜默歸零。 */
-  .entry-toggle-btn {
+  /* 本月明細 + 填寫每日營收 兩顆一組靠右。
+     margin-left:auto 掛在這層而不是各按鈕上，否則兩顆之間會被撐開一大縫；
+     窄螢幕時（.summary-pills 有 flex-wrap）兩顆會整組一起換行，不會拆散。 */
+  .summary-pills-actions {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  /* 本月明細：唯讀檢視入口，次要層級 —— 透明底 + 灰字，
+     刻意比旁邊的「填寫每日營收」（實心 surface）輕，hover 才浮出來。 */
+  .entry-detail-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  .entry-detail-btn:hover {
+    background: var(--surface);
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .entry-toggle-btn {
     display: inline-flex;
     align-items: center;
     gap: 5px;
