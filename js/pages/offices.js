@@ -964,8 +964,8 @@ Object.assign(App, {
         ${row([{v:chip('1.0%'),center:true,w:'2fr'},{v:sc('10'),center:true}])}
 
         ${SEC('加分（AI 三表寫進儀表板）— 每月')}
-        ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'}])}
-        ${row([{v:chip('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'}])}
+        ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'},{l:'本月加分',w:'1fr'}])}
+        ${row([{v:chip('+10','#1565c0'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'},{v:sc('0'),center:true,w:'1fr'}])}
 
         ${SEC('扣分（單價未更新）— 每月')}
         ${subH([{l:'每次扣分'},{l:'單月上限'},{l:'本月扣分'}])}
