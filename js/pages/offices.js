@@ -1130,7 +1130,43 @@ Object.assign(App, {
       ${stabNames.map(t => `<button class="d2-stab" data-t="${t}" style="padding:6px 16px;border-radius:20px;border:1px solid ${activeStab===t?'#059669':'#e5e7eb'};background:${activeStab===t?'#059669':'#fff'};color:${activeStab===t?'#fff':'#374151'};font-size:13px;font-weight:${activeStab===t?'700':'400'};cursor:pointer">${t}</button>`).join('')}
     </div>`;
 
-    const stabContent = activeStab === '議價表' ? `
+    const spKey = `ec.d2.sp.${activeQ.toLowerCase()}`;
+    const spList = Store.get(spKey, []);
+    const spRows = spList.map((r, i) => `<tr>
+      <td>${escapeHtml(r.spDate || '')}</td>
+      <td style="font-weight:600">${escapeHtml(r.spName || '')}</td>
+      <td>${escapeHtml(r.spLaunch || '')}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.spLink ? `<a href="${escapeHtml(r.spLink)}" target="_blank" style="color:#2563eb;font-size:12px">${escapeHtml(r.spLink)}</a>` : '—'}</td>
+      <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
+        <button class="sp-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
+        <button class="sp-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+      </div></td>
+    </tr>`).join('');
+
+    const stabContent = activeStab === '選品' ? `
+      <div class="table-card">
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div><h3>🛍️ 選品</h3><p>記錄選品資訊（共 ${spList.length} 筆）</p></div>
+          <button id="sp-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+        </div>
+        <div id="sp-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
+            <input id="sp-date" type="date" placeholder="填表時間" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="sp-name" placeholder="商品名稱 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="sp-launch" type="date" placeholder="上架時間" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="sp-link" placeholder="蝦皮賣場連結" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="sp-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+            <button id="sp-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>填表時間</th><th>商品名稱</th><th>上架時間</th><th>蝦皮賣場連結</th><th></th></tr></thead>
+          <tbody>${spRows}</tbody>
+        </table></div>
+      </div>`
+    : activeStab === '議價表' ? `
       <div class="table-card" data-store-key="${storeKey}">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
@@ -1193,6 +1229,59 @@ Object.assign(App, {
         this.render();
       });
     });
+
+    // 選品表單
+    const spForm = document.getElementById('sp-form');
+    if (spForm) {
+      const activeQ2 = Store.get('ec.d2.kpi.quarter', 'Q3');
+      const spKey = `ec.d2.sp.${activeQ2.toLowerCase()}`;
+      const spSaveBtn = document.getElementById('sp-save');
+      let spEditIndex = -1;
+      const spFields = ['sp-date','sp-name','sp-launch','sp-link'];
+      const clearSp = () => {
+        spFields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        spEditIndex = -1;
+        spSaveBtn.textContent = '儲存';
+        spForm.style.display = 'none';
+      };
+      document.getElementById('sp-add-btn')?.addEventListener('click', () => {
+        if (spForm.style.display !== 'none') { clearSp(); return; }
+        clearSp(); spForm.style.display = '';
+      });
+      document.getElementById('sp-cancel')?.addEventListener('click', clearSp);
+      spSaveBtn?.addEventListener('click', () => {
+        const name = document.getElementById('sp-name')?.value.trim();
+        if (!name) { alert('請填寫商品名稱'); return; }
+        const entry = {
+          spDate: document.getElementById('sp-date')?.value,
+          spName: name,
+          spLaunch: document.getElementById('sp-launch')?.value,
+          spLink: document.getElementById('sp-link')?.value.trim(),
+        };
+        const list = Store.get(spKey, []);
+        if (spEditIndex >= 0) { list[spEditIndex] = entry; } else { list.push(entry); }
+        Store.set(spKey, list);
+        this.render();
+      });
+      document.querySelectorAll('.sp-edit').forEach(btn => btn.addEventListener('click', () => {
+        const list = Store.get(spKey, []);
+        const r = list[+btn.dataset.i]; if (!r) return;
+        spEditIndex = +btn.dataset.i;
+        document.getElementById('sp-date').value = r.spDate || '';
+        document.getElementById('sp-name').value = r.spName || '';
+        document.getElementById('sp-launch').value = r.spLaunch || '';
+        document.getElementById('sp-link').value = r.spLink || '';
+        spSaveBtn.textContent = '更新';
+        spForm.style.display = '';
+        spForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }));
+      document.querySelectorAll('.sp-del').forEach(btn => btn.addEventListener('click', () => {
+        const list = Store.get(spKey, []);
+        list.splice(+btn.dataset.i, 1);
+        Store.set(spKey, list);
+        this.render();
+      }));
+    }
 
     const form = document.getElementById('bg-form');
     if (!form) return;
