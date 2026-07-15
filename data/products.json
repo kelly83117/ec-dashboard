@@ -1,94 +1,94 @@
 {
-  "updated": "2026-07-14",
+  "updated": "2026-07-15",
   "items": [
     {
-      "keyword": "夏季涼感床單",
-      "name": "夏季涼感床單套組",
+      "keyword": "收納箱",
+      "name": "多功能收納箱",
+      "price": 499,
+      "sold": 300,
+      "url": "https://shopee.tw/search?keyword=%E6%94%B6%E7%B4%8D%E7%AE%B1",
+      "reason": "適合夏季整理物品",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "涼感床單",
+      "name": "冰絲涼感床單",
+      "price": 899,
+      "sold": 250,
+      "url": "https://shopee.tw/search?keyword=%E6%B6%BC%E6%84%9F%E5%BA%8A%E5%96%AE",
+      "reason": "夏季降溫必備",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "廚房收納架",
+      "name": "多層廚房收納架",
       "price": 799,
       "sold": 200,
-      "url": "https://shopee.tw/search?keyword=%E5%A4%8F%E5%AD%A3%E6%B6%BC%E6%84%9F%E5%BA%8A%E5%96%AE",
-      "reason": "適合炎熱夏季使用",
+      "url": "https://shopee.tw/search?keyword=%E5%BB%9A%E6%88%BF%E6%94%B6%E7%B4%8D%E6%9E%B6",
+      "reason": "增加廚房空間利用",
       "source": "AI推薦"
     },
     {
-      "keyword": "防潮收納箱",
-      "name": "防潮密封收納箱",
-      "price": 599,
-      "sold": 150,
-      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BD%AE%E6%94%B6%E7%B4%8D%E7%AE%B1",
-      "reason": "適合梅雨季節防潮",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "竹炭除臭包",
-      "name": "天然竹炭除臭包",
-      "price": 199,
-      "sold": 300,
-      "url": "https://shopee.tw/search?keyword=%E7%AB%B9%E7%82%AD%E9%99%A4%E8%87%AD%E5%8C%85",
-      "reason": "有效去除異味",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "多功能廚房收納架",
-      "name": "多功能廚房收納架",
+      "keyword": "浴室防滑墊",
+      "name": "浴室防滑地墊",
       "price": 399,
-      "sold": 250,
-      "url": "https://shopee.tw/search?keyword=%E5%A4%9A%E5%8A%9F%E8%83%BD%E5%BB%9A%E6%88%BF%E6%94%B6%E7%B4%8D%E6%9E%B6",
-      "reason": "提升廚房空間利用率",
+      "sold": 350,
+      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E9%98%B2%E6%BB%91%E5%A2%8A",
+      "reason": "夏季防滑安全需求",
       "source": "AI推薦"
     },
     {
-      "keyword": "淋浴防滑墊",
-      "name": "淋浴防滑吸水墊",
+      "keyword": "便攜式垃圾桶",
+      "name": "小型便攜垃圾桶",
       "price": 299,
+      "sold": 150,
+      "url": "https://shopee.tw/search?keyword=%E4%BE%BF%E6%94%9C%E5%BC%8F%E5%9E%83%E5%9C%BE%E6%A1%B6",
+      "reason": "適合戶外及居家使用",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "折疊桌",
+      "name": "多用途折疊桌",
+      "price": 1299,
       "sold": 180,
-      "url": "https://shopee.tw/search?keyword=%E6%B7%8B%E6%B5%B4%E9%98%B2%E6%BB%91%E5%A2%8A",
-      "reason": "增加浴室安全性",
+      "url": "https://shopee.tw/search?keyword=%E6%8A%98%E7%96%8A%E6%A1%8C",
+      "reason": "適合家庭聚會使用",
       "source": "AI推薦"
     },
     {
-      "keyword": "摺疊曬衣架",
-      "name": "不鏽鋼摺疊曬衣架",
-      "price": 349,
+      "keyword": "植物盆栽",
+      "name": "室內綠植盆栽",
+      "price": 400,
+      "sold": 300,
+      "url": "https://shopee.tw/search?keyword=%E6%A4%8D%E7%89%A9%E7%9B%86%E6%A0%BD",
+      "reason": "增添居家生氣",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "戶外椅子",
+      "name": "便攜式戶外椅",
+      "price": 699,
       "sold": 220,
-      "url": "https://shopee.tw/search?keyword=%E6%91%BA%E7%96%8A%E6%9B%AC%E8%A1%A3%E6%9E%B6",
-      "reason": "夏季曬衣需求旺盛",
+      "url": "https://shopee.tw/search?keyword=%E6%88%B6%E5%A4%96%E6%A4%85%E5%AD%90",
+      "reason": "夏季露營必備",
       "source": "AI推薦"
     },
     {
-      "keyword": "保冷袋",
-      "name": "大容量保冷保溫袋",
-      "price": 249,
-      "sold": 310,
-      "url": "https://shopee.tw/search?keyword=%E4%BF%9D%E5%86%B7%E8%A2%8B",
-      "reason": "夏日外出必備",
+      "keyword": "清潔海綿",
+      "name": "多用途清潔海綿",
+      "price": 99,
+      "sold": 500,
+      "url": "https://shopee.tw/search?keyword=%E6%B8%85%E6%BD%94%E6%B5%B7%E7%B6%BF",
+      "reason": "清潔力強，使用方便",
       "source": "AI推薦"
     },
     {
-      "keyword": "桌上收納盒",
-      "name": "桌面多格收納整理盒",
-      "price": 189,
-      "sold": 280,
-      "url": "https://shopee.tw/search?keyword=%E6%A1%8C%E4%B8%8A%E6%94%B6%E7%B4%8D%E7%9B%92",
-      "reason": "居家辦公整理需求高",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "電風扇防塵罩",
-      "name": "電風扇防塵保護套",
-      "price": 129,
-      "sold": 190,
-      "url": "https://shopee.tw/search?keyword=%E9%9B%BB%E9%A2%A8%E6%89%87%E9%98%B2%E5%A1%B5%E7%BD%A9",
-      "reason": "夏季電扇使用頻率高",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "冰涼枕頭",
-      "name": "夏季涼感冰絲枕頭",
-      "price": 459,
-      "sold": 165,
-      "url": "https://shopee.tw/search?keyword=%E5%86%B0%E6%B6%BC%E6%9E%95%E9%A0%AD",
-      "reason": "夏日睡眠涼爽需求",
+      "keyword": "文具收納盒",
+      "name": "創意文具收納盒",
+      "price": 199,
+      "sold": 400,
+      "url": "https://shopee.tw/search?keyword=%E6%96%87%E5%85%B7%E6%94%B6%E7%B4%8D%E7%9B%92",
+      "reason": "整理文具，提升效率",
       "source": "AI推薦"
     }
   ]
