@@ -1132,7 +1132,8 @@ Object.assign(App, {
 
     const spKey = `ec.d2.sp.${activeQ.toLowerCase()}`;
     const spList = Store.get(spKey, []);
-    const spRows = spList.map((r, i) => `<tr>
+    const spSorted = spList.map((r, i) => ({ r, i })).sort((a, b) => (a.r.spDate || '').localeCompare(b.r.spDate || ''));
+    const renderSpRow = ({ r, i }) => `<tr>
       <td>${escapeHtml(r.spDate || '')}</td>
       <td style="font-weight:600">${escapeHtml(r.spName || '')}</td>
       <td>${escapeHtml(r.spLaunch || '')}</td>
@@ -1141,7 +1142,14 @@ Object.assign(App, {
         <button class="sp-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
         <button class="sp-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
       </div></td>
-    </tr>`).join('');
+    </tr>`;
+    const spTop10Rows = spSorted.slice(0, 10).map(renderSpRow).join('');
+    const spRest = spSorted.slice(10);
+    const spRestSection = spRest.length ? `<tr><td colspan="5" style="padding:0;border:0">
+      <details><summary style="padding:8px 16px;cursor:pointer;font-size:12px;color:#6b7280;list-style:none;background:#f9fafb;border-top:1px solid #f3f4f6">▼ 顯示其餘 ${spRest.length} 筆</summary>
+      <div style="max-height:320px;overflow-y:auto"><table style="width:100%;border-collapse:collapse">
+        ${spRest.map(renderSpRow).join('')}
+      </table></div></details></td></tr>` : '';
 
     const stabContent = activeStab === '選品' ? `
       <div class="table-card">
@@ -1169,7 +1177,7 @@ Object.assign(App, {
         </div>
         <div class="table-wrap"><table>
           <thead><tr><th>填表時間</th><th>商品名稱</th><th>上架時間</th><th>蝦皮賣場連結</th><th></th></tr></thead>
-          <tbody>${spRows}</tbody>
+          <tbody>${spTop10Rows}${spRestSection}</tbody>
         </table></div>
       </div>`
     : activeStab === '議價表' ? `
