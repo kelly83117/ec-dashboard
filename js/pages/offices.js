@@ -1456,6 +1456,12 @@ Object.assign(App, {
   },
 
   renderD2PricingTabHtml() {
+    const PRICING_VER = '2026-07-14-v2';
+    if (Store.get('ec.d2.pricing.ver') !== PRICING_VER) {
+      this.PRICING_SHEETS.forEach(s => Store.set(`ec.d2.pricing.${s}`, []));
+      Store.set('ec.d2.pricing.loaded', false);
+      Store.set('ec.d2.pricing.ver', PRICING_VER);
+    }
     const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
     const q = Store.get('ec.d2.pricing.q', '');
     const loaded = Store.get('ec.d2.pricing.loaded', false);
