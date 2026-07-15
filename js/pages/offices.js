@@ -18,6 +18,10 @@ Object.assign(App, {
     if (deptId === 'd2' && this.route === 'office-d2-kpi') {
       this.bindD2KpiTab();
     }
+    // d2 訂價表
+    if (deptId === 'd2' && this.route === 'office-d2-pricing') {
+      this.bindD2PricingTab();
+    }
     // d1 insight 子頁：洞察表上傳按鈕
     if (deptId === 'd1' && this.route === 'office-d1-insight') {
       this.bindInsightTab();
@@ -896,6 +900,7 @@ Object.assign(App, {
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId === 'd2' && subRoute === 'kpi' ? this.renderD2KpiTabHtml() : ''}
+      ${deptId === 'd2' && subRoute === 'pricing' ? this.renderD2PricingTabHtml() : ''}
       ${deptId === 'd3' ? `
         <div class="d3-tab-layout">
           <div class="d3-tab-bar">${tabBar}</div>
@@ -1435,5 +1440,244 @@ Object.assign(App, {
           <div style="font-size:10px;color:${c};font-weight:600">天後</div>
         </div>
       </div>`;
+  },
+
+  // ── 訂價表 ──────────────────────────────────────────────
+  PRICING_SHEETS: ['訂價','導流品','Victor','inna','Vivian','官網','FB訂價表','運費試算表'],
+  PRICING_COLS: {
+    訂價:     ['集運','產品名稱','原始成本','實際成本','售價','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    導流品:   ['集運','產品名稱','原始成本','實際成本','售價','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    Victor:   ['集運','產品名稱','原始成本','實際成本','售價','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    inna:     ['集運','產品名稱','原始成本','實際成本','售價','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    Vivian:   ['集運','產品名稱','原始成本','實際成本','售價','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    官網:     ['集運','產品名稱','實際成本','售價','蝦皮總成本','稅金','入帳金額','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    FB訂價表: ['產品名稱','原始成本','商品成本','售價','稅金','FB廣告','實際毛利','獲利百分比','月銷量','淨利潤','賣場','備註'],
+    運費試算表:['試算名稱','數量','箱數','重量','運費','報關','平均運費'],
+  },
+
+  renderD2PricingTabHtml() {
+    const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+    const q = Store.get('ec.d2.pricing.q', '');
+    const loaded = Store.get('ec.d2.pricing.loaded', false);
+    const cols = this.PRICING_COLS[activeSheet] || [];
+    const list = Store.get(`ec.d2.pricing.${activeSheet}`, []);
+
+    const filtered = q ? list.filter(r => {
+      const name = String(r['產品名稱'] || r['試算名稱'] || '').toLowerCase();
+      return name.includes(q.toLowerCase());
+    }) : list;
+
+    const pct = v => {
+      const n = parseFloat(v);
+      if (!v && v !== 0) return '<span style="color:#d1d5db">—</span>';
+      const pv = (n < 1 && n > -1) ? (n * 100).toFixed(1) + '%' : n.toFixed(1) + '%';
+      const c = n >= 0.2 ? '#059669' : n >= 0 ? '#f59e0b' : '#dc2626';
+      return `<span style="color:${c};font-weight:700">${pv}</span>`;
+    };
+    const money = v => v === '' || v === null ? '<span style="color:#d1d5db">—</span>' : `NT$${Number(v).toLocaleString()}`;
+    const num = v => v === '' || v === null ? '<span style="color:#d1d5db">—</span>' : Number(v).toLocaleString();
+
+    const cellVal = (r, col) => {
+      const v = r[col];
+      if (v === '' || v === undefined || v === null) return '<span style="color:#d1d5db">—</span>';
+      if (col === '連結') return v ? `<a href="${escapeHtml(v)}" target="_blank" style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:5px;color:#ea580c;font-size:11px;font-weight:600;text-decoration:none">🔗 連結</a>` : '<span style="color:#d1d5db">—</span>';
+      if (col === '獲利百分比') return pct(v);
+      if (['原始成本','實際成本','售價','實際毛利','淨利潤','預估投入金額','商品成本','蝦皮總成本','稅金','入帳金額','FB廣告','運費','報關','平均運費'].includes(col)) return money(v);
+      if (['月銷量','數量','箱數'].includes(col)) return num(v);
+      if (['廣告ROAS'].includes(col)) return v !== '' ? `<span style="font-weight:600">${Number(v).toFixed(2)}</span>` : '<span style="color:#d1d5db">—</span>';
+      return `<span>${escapeHtml(String(v))}</span>`;
+    };
+
+    const sheetTabs = this.PRICING_SHEETS.map(s => {
+      const cnt = Store.get(`ec.d2.pricing.${s}`, []).length;
+      const active = s === activeSheet;
+      return `<button class="pr-stab" data-s="${s}" style="padding:6px 14px;border-radius:20px;border:1px solid ${active?'#1a7a6e':'#e5e7eb'};background:${active?'#1a7a6e':'#fff'};color:${active?'#fff':'#374151'};font-size:12px;font-weight:${active?'700':'400'};cursor:pointer;white-space:nowrap">${s} <span style="opacity:.7">${cnt}</span></button>`;
+    }).join('');
+
+    const theadCols = cols.map(c => `<th style="white-space:nowrap;font-size:12px">${c}</th>`).join('');
+    const SHOW = 50;
+    const rows = filtered.slice(0, SHOW).map((r, i) => {
+      const tds = cols.map(c => `<td style="font-size:12px;padding:6px 10px">${cellVal(r, c)}</td>`).join('');
+      return `<tr class="pr-row" style="border-bottom:1px solid #f3f4f6;cursor:pointer" data-i="${list.indexOf(r)}">${tds}</tr>`;
+    }).join('');
+
+    const moreHtml = filtered.length > SHOW
+      ? `<div style="padding:12px 16px;text-align:center;color:#6b7280;font-size:13px;background:#f9fafb;border-top:1px solid #f3f4f6">
+           顯示前 ${SHOW} 筆，共 ${filtered.length} 筆 — <button id="pr-show-all" style="color:#1a7a6e;font-weight:600;background:none;border:0;cursor:pointer">顯示全部</button>
+         </div>` : '';
+
+    const noDataHtml = !loaded
+      ? `<div style="padding:60px;text-align:center">
+           <div style="font-size:40px;margin-bottom:12px">📂</div>
+           <div style="font-size:15px;font-weight:600;margin-bottom:8px">尚未載入資料</div>
+           <div style="font-size:13px;color:#9ca3af;margin-bottom:20px">點擊下方按鈕從雲端載入訂價資料</div>
+           <button id="pr-load-btn" style="padding:10px 24px;background:#1a7a6e;color:white;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">⬇ 載入訂價資料</button>
+         </div>` : '';
+
+    return `
+      <div class="table-card">
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div><h3>💹 訂價表</h3><p>蝦皮 / FB 商品訂價與利潤分析</p></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:180px;font-family:inherit">
+            <button id="pr-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+            <button id="pr-reload-btn" title="重新從 Excel 載入原始資料" style="padding:7px 12px;background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;cursor:pointer">↻ 重載資料</button>
+          </div>
+        </div>
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">
+          ${sheetTabs}
+        </div>
+        ${noDataHtml}
+        ${loaded ? `
+        <div id="pr-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+          <div id="pr-form-fields" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:10px"></div>
+          <div style="display:flex;gap:8px">
+            <button id="pr-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+            <button id="pr-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr>${theadCols}<th></th></tr></thead>
+          <tbody id="pr-tbody">${rows}</tbody>
+        </table></div>
+        ${moreHtml}
+        <div style="padding:10px 16px;font-size:12px;color:#9ca3af;border-top:1px solid #f3f4f6">
+          ${activeSheet}：共 ${list.length} 筆，搜尋結果 ${filtered.length} 筆
+        </div>` : ''}
+      </div>`;
+  },
+
+  bindD2PricingTab() {
+    const self = this;
+
+    // 切換分頁
+    document.querySelectorAll('.pr-stab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Store.set('ec.d2.pricing.sheet', btn.dataset.s);
+        Store.set('ec.d2.pricing.q', '');
+        self.render();
+      });
+    });
+
+    // 搜尋
+    document.getElementById('pr-search')?.addEventListener('input', e => {
+      Store.set('ec.d2.pricing.q', e.target.value);
+      self.render();
+    });
+
+    // 載入資料
+    const loadData = async () => {
+      const loadBtn = document.getElementById('pr-load-btn') || document.getElementById('pr-reload-btn');
+      if (loadBtn) loadBtn.textContent = '載入中…';
+      try {
+        const res = await fetch('data/pricing.json?v=2026-07-14');
+        const data = await res.json();
+        Object.entries(data).forEach(([sheet, rows]) => {
+          Store.set(`ec.d2.pricing.${sheet}`, rows);
+        });
+        Store.set('ec.d2.pricing.loaded', true);
+        self.render();
+      } catch(e) {
+        alert('載入失敗：' + e.message);
+      }
+    };
+    document.getElementById('pr-load-btn')?.addEventListener('click', loadData);
+    document.getElementById('pr-reload-btn')?.addEventListener('click', () => {
+      if (confirm('確定重新載入原始資料？本機編輯的內容將被覆蓋。')) loadData();
+    });
+
+    // 顯示全部
+    document.getElementById('pr-show-all')?.addEventListener('click', () => {
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const q = Store.get('ec.d2.pricing.q', '');
+      const list = Store.get(`ec.d2.pricing.${activeSheet}`, []);
+      const cols = self.PRICING_COLS[activeSheet] || [];
+      const filtered = q ? list.filter(r => String(r['產品名稱'] || r['試算名稱'] || '').toLowerCase().includes(q.toLowerCase())) : list;
+      const pct = v => { const n=parseFloat(v); if(!v&&v!==0)return'—'; const pv=(n<1&&n>-1)?(n*100).toFixed(1)+'%':n.toFixed(1)+'%'; const c=n>=0.2?'#059669':n>=0?'#f59e0b':'#dc2626'; return `<span style="color:${c};font-weight:700">${pv}</span>`; };
+      const money = v => v===''||v===null?'—':`NT$${Number(v).toLocaleString()}`;
+      const num = v => v===''||v===null?'—':Number(v).toLocaleString();
+      const cellVal = (r,col) => { const v=r[col]; if(v===''||v===undefined||v===null)return'—'; if(col==='連結')return v?`<a href="${escapeHtml(v)}" target="_blank" style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:5px;color:#ea580c;font-size:11px;font-weight:600;text-decoration:none">🔗 連結</a>`:'—'; if(col==='獲利百分比')return pct(v); if(['原始成本','實際成本','售價','實際毛利','淨利潤','預估投入金額','商品成本','蝦皮總成本','稅金','入帳金額','FB廣告','運費','報關','平均運費'].includes(col))return money(v); if(['月銷量','數量','箱數'].includes(col))return num(v); if(col==='廣告ROAS')return v!==''?`<span style="font-weight:600">${Number(v).toFixed(2)}</span>`:'—'; return `<span>${escapeHtml(String(v))}</span>`; };
+      const tbody = document.getElementById('pr-tbody');
+      if (tbody) {
+        tbody.innerHTML = filtered.map((r,i) => {
+          const tds = cols.map(c=>`<td style="font-size:12px;padding:6px 10px">${cellVal(r,c)}</td>`).join('');
+          return `<tr class="pr-row" style="border-bottom:1px solid #f3f4f6;cursor:pointer" data-i="${list.indexOf(r)}">${tds}<td></td></tr>`;
+        }).join('');
+        self.bindPricingRows();
+      }
+      document.getElementById('pr-show-all')?.parentElement.remove();
+    });
+
+    this.bindPricingRows();
+
+    // 新增按鈕
+    document.getElementById('pr-add-btn')?.addEventListener('click', () => {
+      const form = document.getElementById('pr-form');
+      if (!form) return;
+      if (form.style.display !== 'none') { form.style.display = 'none'; return; }
+      this.openPricingForm(-1);
+    });
+    document.getElementById('pr-cancel')?.addEventListener('click', () => {
+      document.getElementById('pr-form').style.display = 'none';
+    });
+    document.getElementById('pr-save')?.addEventListener('click', () => {
+      this.savePricingRow();
+    });
+  },
+
+  bindPricingRows() {
+    const self = this;
+    document.querySelectorAll('.pr-row').forEach(tr => {
+      tr.addEventListener('click', e => {
+        if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') return;
+        const i = +tr.dataset.i;
+        self.openPricingForm(i);
+      });
+    });
+  },
+
+  openPricingForm(index) {
+    const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+    const cols = this.PRICING_COLS[activeSheet] || [];
+    const list = Store.get(`ec.d2.pricing.${activeSheet}`, []);
+    const row = index >= 0 ? list[index] : {};
+    const form = document.getElementById('pr-form');
+    const fieldsDiv = document.getElementById('pr-form-fields');
+    if (!form || !fieldsDiv) return;
+    const skip = ['連結'];
+    fieldsDiv.innerHTML = cols.filter(c => !skip.includes(c)).map(c => {
+      const v = row[c] !== undefined ? escapeHtml(String(row[c])) : '';
+      return `<label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#6b7280;font-weight:600">
+        ${c}
+        <input data-col="${c}" value="${v}" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+      </label>`;
+    }).join('') + (row['連結'] !== undefined || cols.includes('連結') ? `
+      <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#6b7280;font-weight:600;grid-column:1/-1">
+        連結
+        <input data-col="連結" value="${escapeHtml(String(row['連結'] || ''))}" placeholder="https://…" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+      </label>` : '');
+    form.dataset.editIndex = index;
+    form.style.display = '';
+    document.getElementById('pr-save').textContent = index >= 0 ? '更新' : '儲存';
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  },
+
+  savePricingRow() {
+    const form = document.getElementById('pr-form');
+    const index = +form.dataset.editIndex;
+    const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+    const list = Store.get(`ec.d2.pricing.${activeSheet}`, []);
+    const entry = {};
+    form.querySelectorAll('[data-col]').forEach(el => {
+      const v = el.value.trim();
+      entry[el.dataset.col] = isNaN(v) || v === '' ? v : Number(v);
+    });
+    const name = entry['產品名稱'] || entry['試算名稱'];
+    if (!name) { alert('請填寫產品名稱'); return; }
+    if (index >= 0) { list[index] = { ...list[index], ...entry }; }
+    else { list.push(entry); }
+    Store.set(`ec.d2.pricing.${activeSheet}`, list);
+    form.style.display = 'none';
+    this.render();
   },
 });
