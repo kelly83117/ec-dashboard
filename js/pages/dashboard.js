@@ -183,11 +183,16 @@ Object.assign(App, {
           <input type="month" id="summary-custom-month" class="pill-input${summaryRange === 'customMonth' ? ' is-active' : ''}"
             value="${escapeHtml(customMonth)}" max="${escapeHtml(toDateStr(now).slice(0,7))}">
         </span>
-        <button type="button" id="toggle-revenue-entry" class="entry-toggle-btn${entryOpen ? ' is-open' : ''}"
-          aria-expanded="${entryOpen ? 'true' : 'false'}" aria-controls="revenue-entry-panel">
-          <span>✏️ 填寫每日營收</span>
-          <span class="entry-toggle-caret">▼</span>
-        </button>
+        <span class="summary-pills-actions">
+          <button type="button" id="open-month-detail" class="entry-detail-btn" title="查看本月每日明細">
+            📅 本月明細
+          </button>
+          <button type="button" id="toggle-revenue-entry" class="entry-toggle-btn${entryOpen ? ' is-open' : ''}"
+            aria-expanded="${entryOpen ? 'true' : 'false'}" aria-controls="revenue-entry-panel">
+            <span>✏️ 填寫每日營收</span>
+            <span class="entry-toggle-caret">▼</span>
+          </button>
+        </span>
       </div>
     `;
 
@@ -385,10 +390,6 @@ Object.assign(App, {
               <button id="entry-date-next" title="後一天" style="padding:2px 7px;border:1px solid var(--border);border-radius:4px;background:white;color:var(--text-muted);font-size:11px;cursor:pointer;line-height:1" ${inputDateStr >= todayStrLocal ? 'disabled' : ''}>→</button>
               ${inputDateStr !== defaultInputDate ? `<button id="entry-date-reset" title="回到昨天" style="padding:2px 7px;border:0;border-radius:4px;background:var(--primary-soft);color:var(--primary);font-size:10px;font-weight:600;cursor:pointer;margin-left:2px">昨天</button>` : ''}
             </div>
-            <button id="open-month-detail" title="查看本月每日明細"
-              style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:white;color:var(--text);font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px">
-              📅 本月明細
-            </button>
           </div>
         </div>
         <div class="table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
