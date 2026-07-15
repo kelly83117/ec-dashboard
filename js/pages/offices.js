@@ -1136,7 +1136,7 @@ Object.assign(App, {
       <td>${escapeHtml(r.spDate || '')}</td>
       <td style="font-weight:600">${escapeHtml(r.spName || '')}</td>
       <td>${escapeHtml(r.spLaunch || '')}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.spLink ? `<a href="${escapeHtml(r.spLink)}" target="_blank" style="color:#2563eb;font-size:12px">${escapeHtml(r.spLink)}</a>` : '—'}</td>
+      <td>${r.spLink ? `<a href="${escapeHtml(r.spLink)}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:5px;color:#ea580c;font-size:12px;font-weight:600;text-decoration:none">🛒 前往賣場</a>` : '<span style="color:#d1d5db">—</span>'}</td>
       <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
         <button class="sp-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
         <button class="sp-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
