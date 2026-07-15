@@ -931,45 +931,46 @@ Object.assign(App, {
 
   renderD2KpiSummaryHtml(scoreCount = 0, scoreAvg = 0) {
     const SEC = (title) => `<div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">${title}</div>`;
-    const chip = (v, color='#1565c0') => `<span style="display:inline-block;background:#fffde7;color:${color};font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`;
-    const sc = (v, earned=false) => {
-      if (earned) return `<span style="display:inline-block;background:#fffde7;color:#b71c1c;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`;
-      return `<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">0</span>`;
-    };
+    // 藍字：配分（目標滿分）
+    const blue = (v) => `<span style="display:inline-block;background:#fffde7;color:#1565c0;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`;
+    // 紅字：本月得分（有得分亮紅，沒有灰零）
+    const red = (v) => v > 0
+      ? `<span style="display:inline-block;background:#fff1f2;color:#b71c1c;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`
+      : `<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">0</span>`;
     const subH = (cols) => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${cols.map(c=>`<div style="padding:5px 10px;font-size:11px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
     const row = (cols, bg='#fff') => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${cols.map(c=>`<div style="padding:7px 10px;font-size:12px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
 
     const leftPanel = `
-      <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:260px">
+      <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
         ${SEC('選品 — 每季')}
-        ${subH([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'}])}
-        ${row([{v:'管量：新品數量（季）',w:'2fr'},{v:chip('50'),center:true},{v:sc('30'),center:true}])}
+        ${subH([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'},{l:'本月得分'}])}
+        ${row([{v:'管量：新品數量（季）',w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true},{v:red(0),center:true}])}
         <div style="background:#f0faf0;padding:6px 10px;font-size:11px;font-weight:600;color:#2e7d32;border-bottom:1px solid #c8e6c9">管質分層（三層互斥）</div>
-        ${subH([{l:'分層條件',w:'2fr'},{l:'毛利門檻(≥)'},{l:'目標'},{l:'配分'}])}
-        ${row([{v:'毛利 ≥ 1萬',w:'2fr'},{v:chip('10,000'),center:true},{v:chip('2'),center:true},{v:sc('10'),center:true}])}
-        ${row([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:chip('8,000'),center:true},{v:chip('5'),center:true},{v:sc('6'),center:true}],'#fafafa')}
-        ${row([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:chip('5,000'),center:true},{v:chip('5'),center:true},{v:sc('4'),center:true}])}
+        ${subH([{l:'分層條件',w:'2fr'},{l:'毛利門檻(≥)'},{l:'目標'},{l:'配分'},{l:'本月得分'}])}
+        ${row([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true},{v:red(0),center:true}])}
+        ${row([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true},{v:red(0),center:true}],'#fafafa')}
+        ${row([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true},{v:red(0),center:true}])}
       </div>`;
 
     const rightPanel = `
-      <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:260px">
+      <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
         ${SEC('議價 — 每月')}
-        ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'}])}
-        ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:chip('20'),center:true},{v:sc('20', scoreCount > 0),center:true}])}
-        ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:chip('10.0%'),center:true},{v:sc('20', scoreAvg > 0),center:true}],'#fafafa')}
+        ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'},{l:'本月得分'}])}
+        ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:blue('20'),center:true},{v:blue('20'),center:true},{v:red(scoreCount),center:true}])}
+        ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:blue('10.0%'),center:true},{v:blue('20'),center:true},{v:red(scoreAvg),center:true}],'#fafafa')}
         <div style="padding:5px 10px;font-size:11px;color:#6b7280;background:#fafafa;border-bottom:1px solid #f3f4f6">前 10 項平均議價幅度 ≥ 門檻，給滿分；未達則 0（全有全無）</div>
 
         ${SEC('叫貨出錯率 — 每月')}
-        ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'}])}
-        ${row([{v:chip('1.0%'),center:true,w:'2fr'},{v:sc('10'),center:true}])}
+        ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'},{l:'本月得分'}])}
+        ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true},{v:red(0),center:true}])}
 
         ${SEC('加分（AI 三表寫進儀表板）— 每月')}
         ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'},{l:'本月加分',w:'1fr'}])}
-        ${row([{v:chip('+10','#1565c0'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'},{v:sc('0'),center:true,w:'1fr'}])}
+        ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'},{v:red(0),center:true,w:'1fr'}])}
 
         ${SEC('扣分（單價未更新）— 每月')}
         ${subH([{l:'每次扣分'},{l:'單月上限'},{l:'本月扣分'}])}
-        ${row([{v:chip('−3','#b71c1c'),center:true},{v:chip('−15','#b71c1c'),center:true},{v:sc('0'),center:true}])}
+        ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true},{v:red(0),center:true}])}
       </div>`;
 
     return `
