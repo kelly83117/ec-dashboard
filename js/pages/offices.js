@@ -940,6 +940,9 @@ Object.assign(App, {
     const subH = (cols) => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${cols.map(c=>`<div style="padding:5px 10px;font-size:11px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
     const row = (cols, bg='#fff') => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${cols.map(c=>`<div style="padding:7px 10px;font-size:12px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
 
+    const totalScore = scoreCount + scoreAvg; // 加分/扣分/出錯率暫未追蹤
+    const totalColor = totalScore >= 40 ? '#059669' : totalScore > 0 ? '#f59e0b' : '#9ca3af';
+
     const leftPanel = `
       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
         ${SEC('選品 — 每季')}
@@ -950,27 +953,38 @@ Object.assign(App, {
         ${row([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true},{v:red(0),center:true}])}
         ${row([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true},{v:red(0),center:true}],'#fafafa')}
         ${row([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true},{v:red(0),center:true}])}
-      </div>`;
 
-    const rightPanel = `
-      <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
         ${SEC('議價 — 每月')}
         ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'},{l:'本月得分'}])}
         ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:blue('20'),center:true},{v:blue('20'),center:true},{v:red(scoreCount),center:true}])}
         ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:blue('10.0%'),center:true},{v:blue('20'),center:true},{v:red(scoreAvg),center:true}],'#fafafa')}
         <div style="padding:5px 10px;font-size:11px;color:#6b7280;background:#fafafa;border-bottom:1px solid #f3f4f6">前 10 項平均議價幅度 ≥ 門檻，給滿分；未達則 0（全有全無）</div>
+      </div>`;
 
-        ${SEC('叫貨出錯率 — 每月')}
-        ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'},{l:'本月得分'}])}
-        ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true},{v:red(0),center:true}])}
+    const rightPanel = `
+      <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:260px;display:flex;flex-direction:column">
+        <div style="flex:1">
+          ${SEC('叫貨出錯率 — 每月')}
+          ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'},{l:'本月得分'}])}
+          ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true},{v:red(0),center:true}])}
 
-        ${SEC('加分（AI 三表寫進儀表板）— 每月')}
-        ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'},{l:'本月加分',w:'1fr'}])}
-        ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'},{v:red(0),center:true,w:'1fr'}])}
+          ${SEC('加分（AI 三表寫進儀表板）— 每月')}
+          ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'},{l:'本月加分',w:'1fr'}])}
+          ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'},{v:red(0),center:true,w:'1fr'}])}
 
-        ${SEC('扣分（單價未更新）— 每月')}
-        ${subH([{l:'每次扣分'},{l:'單月上限'},{l:'本月扣分'}])}
-        ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true},{v:red(0),center:true}])}
+          ${SEC('扣分（單價未更新）— 每月')}
+          ${subH([{l:'每次扣分'},{l:'單月上限'},{l:'本月扣分'}])}
+          ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true},{v:red(0),center:true}])}
+        </div>
+        <div style="background:#1a7a6e;color:#fff;padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px;font-weight:700">本月得分總計</span>
+          <span style="font-size:22px;font-weight:800;color:${totalColor === '#059669' ? '#a7f3d0' : totalColor === '#f59e0b' ? '#fde68a' : '#d1d5db'}">${totalScore}</span>
+        </div>
+        <div style="background:#f0fdf4;padding:6px 14px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;border-top:1px solid #bbf7d0">
+          <div style="text-align:center;font-size:11px;color:#6b7280">議價數量<br><span style="font-size:14px;font-weight:700;color:${scoreCount>0?'#b71c1c':'#9ca3af'}">${scoreCount}</span></div>
+          <div style="text-align:center;font-size:11px;color:#6b7280">議價比<br><span style="font-size:14px;font-weight:700;color:${scoreAvg>0?'#b71c1c':'#9ca3af'}">${scoreAvg}</span></div>
+          <div style="text-align:center;font-size:11px;color:#6b7280">其他項目<br><span style="font-size:14px;font-weight:700;color:#9ca3af">0</span></div>
+        </div>
       </div>`;
 
     return `
