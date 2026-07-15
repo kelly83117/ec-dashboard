@@ -999,7 +999,8 @@ Object.assign(App, {
 
   renderD2KpiTabHtml() {
     const activeQ = Store.get('ec.d2.kpi.quarter', 'Q3');
-    const storeKey = activeQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeQ.toLowerCase()}`;
+    const activeBQ = Store.get('ec.d2.bargain.quarter', 'Q3');
+    const storeKey = activeBQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeBQ.toLowerCase()}`;
     const list = Store.get(storeKey, []);
 
     const quarterTabs = ['Q1','Q2','Q3','Q4'].map(q => {
@@ -1007,47 +1008,14 @@ Object.assign(App, {
       return `<button class="d2-q-tab" data-q="${q}" style="padding:7px 22px;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;${active ? 'background:#1a7a6e;color:#fff;' : 'background:#f3f4f6;color:#6b7280;'}">${q}</button>`;
     }).join('');
 
-    // 非 Q3 季別若無資料顯示佔位（仍顯示子分頁）
-    if (activeQ !== 'Q3' && list.length === 0) {
-      const _activeStab = Store.get('ec.d2.kpi.stab', '議價表');
-      const _stabNames = ['選品','毛利計算','議價表','叫貨出錯率','加分項','扣分項'];
-      const _stabTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-        ${_stabNames.map(t => `<button class="d2-stab" data-t="${t}" style="padding:6px 16px;border-radius:20px;border:1px solid ${_activeStab===t?'#059669':'#e5e7eb'};background:${_activeStab===t?'#059669':'#fff'};color:${_activeStab===t?'#fff':'#374151'};font-size:13px;font-weight:${_activeStab===t?'700':'400'};cursor:pointer">${t}</button>`).join('')}
-      </div>`;
-      const _stabContent = _activeStab === '議價表' ? `
-        <div class="table-card">
-          <div class="table-card-header"><h3>💰 議價表</h3><p>${activeQ} 尚無資料</p></div>
-          <div style="padding:40px;text-align:center;color:var(--text-muted);font-size:13px">尚無資料，點擊「＋ 新增」開始建立</div>
-          <div style="padding:12px 16px;border-top:1px solid var(--border)">
-            <button id="bg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
-          </div>
-          <div id="bg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
-              <input id="bg-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-item" placeholder="品名 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-orig" type="number" placeholder="原始成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-note" placeholder="更改備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
-              <input id="bg-b1" type="number" placeholder="第一次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-b2" type="number" placeholder="第二次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-b3" type="number" placeholder="第三次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            </div>
-            <div style="display:flex;gap:8px">
-              <button id="bg-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
-              <button id="bg-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
-            </div>
-          </div>
-        </div>`
-      : `<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${_activeStab} — 尚無資料，開發中</div>`;
-      return `
-        <div style="display:flex;gap:8px;margin-bottom:16px">${quarterTabs}</div>
-        ${this.renderD2KpiSummaryHtml(0, 0)}
-        ${_stabTabsHtml}
-        ${_stabContent}`;
-    }
-
     const quarterTabsHtml = `<div style="display:flex;gap:8px;margin-bottom:16px">${quarterTabs}</div>`;
+    const bqLabels = {Q1:'1~3月',Q2:'4~6月',Q3:'7~9月',Q4:'10~12月'};
+    const bargainQTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      ${['Q1','Q2','Q3','Q4'].map(q => {
+        const act = q === activeBQ;
+        return `<button class="d2-bq-tab" data-q="${q}" style="padding:5px 14px;border-radius:20px;border:1px solid ${act?'#1a7a6e':'#e5e7eb'};background:${act?'#1a7a6e':'#fff'};color:${act?'#fff':'#374151'};font-size:12px;font-weight:${act?'700':'400'};cursor:pointer">${q} <span style="font-size:11px;opacity:.85">${bqLabels[q]}</span></button>`;
+      }).join('')}
+    </div>`;
     const priceCell = v => Number(v) ? 'NT$' + Number(v).toLocaleString() : '<span style="color:var(--text-muted)">—</span>';
     // 計算每筆議價比並排序找前10名
     const withPct = list.map((r, i) => {
@@ -1186,6 +1154,7 @@ Object.assign(App, {
         </table></div>
       </div>`
     : activeStab === '議價表' ? `
+      ${bargainQTabsHtml}
       <div class="table-card" data-store-key="${storeKey}">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
@@ -1302,10 +1271,18 @@ Object.assign(App, {
       }));
     }
 
+    // 議價表 Q 分頁切換
+    document.querySelectorAll('.d2-bq-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Store.set('ec.d2.bargain.quarter', btn.dataset.q);
+        this.render();
+      });
+    });
+
     const form = document.getElementById('bg-form');
     if (!form) return;
-    const activeQ = Store.get('ec.d2.kpi.quarter', 'Q3');
-    const storeKey = activeQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeQ.toLowerCase()}`;
+    const activeBQ = Store.get('ec.d2.bargain.quarter', 'Q3');
+    const storeKey = activeBQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeBQ.toLowerCase()}`;
     const saveBtn = document.getElementById('bg-save');
     let editIndex = -1;
     const fields = ['bg-date','bg-item','bg-orig','bg-note','bg-b1','bg-b2','bg-b3'];
