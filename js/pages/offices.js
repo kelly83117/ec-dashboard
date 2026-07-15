@@ -1028,12 +1028,10 @@ Object.assign(App, {
               <input id="bg-orig" type="number" placeholder="原始成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
               <input id="bg-note" placeholder="更改備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             </div>
-            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:10px">
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
               <input id="bg-b1" type="number" placeholder="第一次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
               <input id="bg-b2" type="number" placeholder="第二次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
               <input id="bg-b3" type="number" placeholder="第三次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-b4" type="number" placeholder="第四次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-b5" type="number" placeholder="第五次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             </div>
             <div style="display:flex;gap:8px">
               <button id="bg-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
@@ -1048,7 +1046,7 @@ Object.assign(App, {
     // 計算每筆議價比並排序找前10名
     const withPct = list.map((r, i) => {
       const orig = Number(r.orig || 0);
-      const bids = [r.b1, r.b2, r.b3, r.b4, r.b5].map(Number);
+      const bids = [r.b1, r.b2, r.b3].map(Number);
       const lastBid = [...bids].reverse().find(v => v > 0) || 0;
       const pctNum = orig && lastBid ? ((orig - lastBid) / orig) * 100 : -1;
       return { r, i, orig, lastBid, pctNum };
@@ -1067,8 +1065,6 @@ Object.assign(App, {
         <td>${priceCell(r.b1)}</td>
         <td>${priceCell(r.b2)}</td>
         <td>${priceCell(r.b3)}</td>
-        <td>${priceCell(r.b4)}</td>
-        <td>${priceCell(r.b5)}</td>
         <td style="font-weight:700;font-size:12px;color:${pctNum > 0 ? '#059669' : 'var(--text-muted)'}">
           <span>${pct}</span>
         </td>
@@ -1081,11 +1077,11 @@ Object.assign(App, {
     };
 
     const top10Rows = list.length === 0
-      ? `<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
+      ? `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
       : top10.map(renderRow).join('');
 
     const restSection = rest.length > 0 ? `
-      <tr><td colspan="11" style="padding:0;border:0">
+      <tr><td colspan="9" style="padding:0;border:0">
         <details>
           <summary style="cursor:pointer;padding:10px 14px;font-size:12px;color:var(--text-muted);background:#f9fafb;border-top:1px solid var(--border);list-style:none;display:flex;align-items:center;gap:6px;user-select:none">
             <span style="font-size:10px">▶</span> 其他 ${rest.length} 筆紀錄
@@ -1166,7 +1162,7 @@ Object.assign(App, {
           </div>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th>日期</th><th>品名</th><th style="text-align:center">原始成本</th><th style="text-align:center">第一次議價</th><th style="text-align:center">第二次議價</th><th style="text-align:center">第三次議價</th><th style="text-align:center">第四次議價</th><th style="text-align:center">第五次議價</th><th style="text-align:center">議價比</th><th>更改</th><th></th></tr></thead>
+          <thead><tr><th>日期</th><th>品名</th><th style="text-align:center">原始成本</th><th style="text-align:center">第一次議價</th><th style="text-align:center">第二次議價</th><th style="text-align:center">第三次議價</th><th style="text-align:center">議價比</th><th>更改</th><th></th></tr></thead>
           <tbody>${top10Rows}${restSection}</tbody>
         </table></div>
       </div>`;
@@ -1186,7 +1182,7 @@ Object.assign(App, {
     const storeKey = activeQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeQ.toLowerCase()}`;
     const saveBtn = document.getElementById('bg-save');
     let editIndex = -1;
-    const fields = ['bg-date','bg-item','bg-orig','bg-note','bg-b1','bg-b2','bg-b3','bg-b4','bg-b5'];
+    const fields = ['bg-date','bg-item','bg-orig','bg-note','bg-b1','bg-b2','bg-b3'];
     const clearForm = () => {
       fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
       editIndex = -1;
@@ -1208,8 +1204,6 @@ Object.assign(App, {
         b1: document.getElementById('bg-b1')?.value,
         b2: document.getElementById('bg-b2')?.value,
         b3: document.getElementById('bg-b3')?.value,
-        b4: document.getElementById('bg-b4')?.value,
-        b5: document.getElementById('bg-b5')?.value,
         note: document.getElementById('bg-note')?.value.trim(),
       };
       const list = Store.get(storeKey, []);
@@ -1227,8 +1221,6 @@ Object.assign(App, {
       document.getElementById('bg-b1').value = r.b1 || '';
       document.getElementById('bg-b2').value = r.b2 || '';
       document.getElementById('bg-b3').value = r.b3 || '';
-      document.getElementById('bg-b4').value = r.b4 || '';
-      document.getElementById('bg-b5').value = r.b5 || '';
       document.getElementById('bg-note').value = r.note || '';
       saveBtn.textContent = '更新';
       form.style.display = '';
