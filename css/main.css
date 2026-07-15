@@ -25,6 +25,10 @@
     --shadow-lg: 0 10px 25px -5px rgba(15,23,42,.1), 0 8px 10px -6px rgba(15,23,42,.05);
     --radius: 12px;
     --radius-sm: 8px;
+    /* 每日營收填寫面板的寬度上限。表格是 table-layout:fixed + width:100%，
+       賣場欄是唯一沒指定 width 的欄，會把剩餘寬度全部吃掉（1600px 螢幕下佔 889px），
+       把賣場名稱和輸入欄推到螢幕兩端。收住面板寬度就沒有剩餘可吃。 */
+    --entry-max-w: 760px;
   }
 
   * { box-sizing: border-box; }
@@ -960,12 +964,17 @@
   /* ------------- 儀表板首頁 · 最終版面 -------------
      pills → KPI 卡 → 填寫面板(可收合) → 主區塊(左排名 / 右上留意 + 右下圓餅) → 折線圖 */
 
-  /* 填寫面板：整條，位於 KPI 卡與主區塊之間 */
+  /* 填寫面板：位於 KPI 卡與主區塊之間，靠左收窄（父層 flex 預設 flex-start 即靠左，不需 margin）*/
   .dash-entry {
     display: flex;
     margin-bottom: 12px;
   }
   .dash-entry.is-collapsed { display: none; }
+  /* 卡片帶 inline width:100%，這裡用 max-width 收住即可（max-width 優先於 width，
+     不必 !important、也不用改 dashboard.js 的 markup）。
+     只設上限：視窗窄於上限時維持原本 100%，行為不變；再窄則交回表格既有的
+     min-width:520px + .table-wrap 的 overflow-x:auto 處理。 */
+  .dash-entry > .table-card { max-width: var(--entry-max-w); }
 
   /* 主區塊：左 6 右 4 */
   .dash-main {
