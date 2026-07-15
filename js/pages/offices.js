@@ -1115,9 +1115,13 @@ Object.assign(App, {
         <span style="font-size:10px;color:#9ca3af;margin-top:1px">${label}</span>
       </div>`;
 
-    return `
-      ${quarterTabsHtml}
-      ${this.renderD2KpiSummaryHtml(scoreCount, scoreAvg)}
+    const activeStab = Store.get('ec.d2.kpi.stab', '議價表');
+    const stabNames = ['選品','毛利計算','議價表','叫貨出錯率','加分項','扣分項'];
+    const stabTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      ${stabNames.map(t => `<button class="d2-stab" data-t="${t}" style="padding:6px 16px;border-radius:20px;border:1px solid ${activeStab===t?'#059669':'#e5e7eb'};background:${activeStab===t?'#059669':'#fff'};color:${activeStab===t?'#fff':'#374151'};font-size:13px;font-weight:${activeStab===t?'700':'400'};cursor:pointer">${t}</button>`).join('')}
+    </div>`;
+
+    const stabContent = activeStab === '議價表' ? `
       <div class="table-card" data-store-key="${storeKey}">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
@@ -1141,12 +1145,10 @@ Object.assign(App, {
             <input id="bg-orig" type="number" placeholder="原始成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="bg-note" placeholder="更改備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           </div>
-          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:10px">
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
             <input id="bg-b1" type="number" placeholder="第一次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="bg-b2" type="number" placeholder="第二次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="bg-b3" type="number" placeholder="第三次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="bg-b4" type="number" placeholder="第四次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="bg-b5" type="number" placeholder="第五次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           </div>
           <div style="display:flex;gap:8px">
             <button id="bg-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
@@ -1157,13 +1159,28 @@ Object.assign(App, {
           <thead><tr><th>日期</th><th>品名</th><th style="text-align:center">原始成本</th><th style="text-align:center">第一次議價</th><th style="text-align:center">第二次議價</th><th style="text-align:center">第三次議價</th><th style="text-align:center">議價比</th><th>更改</th><th></th></tr></thead>
           <tbody>${top10Rows}${restSection}</tbody>
         </table></div>
-      </div>`;
+      </div>`
+    : `<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${activeStab} — 尚無資料，開發中</div>`;
+
+    return `
+      ${quarterTabsHtml}
+      ${this.renderD2KpiSummaryHtml(scoreCount, scoreAvg)}
+      ${stabTabsHtml}
+      ${stabContent}`;
   },
   bindD2KpiTab() {
     // 季別切換
     document.querySelectorAll('.d2-q-tab').forEach(btn => {
       btn.addEventListener('click', () => {
         Store.set('ec.d2.kpi.quarter', btn.dataset.q);
+        this.render();
+      });
+    });
+
+    // 子分頁切換
+    document.querySelectorAll('.d2-stab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Store.set('ec.d2.kpi.stab', btn.dataset.t);
         this.render();
       });
     });
