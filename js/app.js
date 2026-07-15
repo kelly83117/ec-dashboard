@@ -2497,6 +2497,11 @@ function __bootApp() {
 
 // 本機獨有、不可同步的鍵（session 不上雲，避免一個人登入別人也跟著登入）
 const __LOCAL_ONLY_KEYS = new Set([Store.KEYS.session]);
+// 本機獨有前綴（訂價資料體積大，不上 Firestore）
+const __LOCAL_ONLY_PREFIXES = ['ec.d2.pricing.', 'ec.d2.sp.'];
+function __isLocalOnly(key) {
+  return __LOCAL_ONLY_KEYS.has(key) || __LOCAL_ONLY_PREFIXES.some(p => key.startsWith(p));
+}
 
 function __localGet(key, fallback) {
   try {
@@ -2553,7 +2558,7 @@ async function __setupCloud() {
     if (Object.keys(cloudData).length === 0) {
       const local = {};
       for (const k of Object.values(Store.KEYS)) {
-        if (__LOCAL_ONLY_KEYS.has(k)) continue;
+        if (__isLocalOnly(k)) continue;
         try {
           const raw = localStorage.getItem(k);
           if (raw !== null) local[k] = JSON.parse(raw);
@@ -2631,11 +2636,11 @@ async function __setupCloud() {
     const origSet = Store.set.bind(Store);
     const origRemove = Store.remove.bind(Store);
     Store.get = function(key, fallback) {
-      if (__LOCAL_ONLY_KEYS.has(key)) return __localGet(key, fallback);
+      if (__isLocalOnly(key)) return __localGet(key, fallback);
       return origGet(key, fallback);
     };
     Store.set = function(key, value) {
-      if (__LOCAL_ONLY_KEYS.has(key)) { __localSet(key, value); return; }
+      if (__isLocalOnly(key)) { __localSet(key, value); return; }
       // ⚠ 資料保護：擋掉可疑的「users → 1~2 個」寫入
       //   避免任何路徑（seedData bug、Firestore cache race、別的 code）
       //   把多個帳號覆蓋成只剩 admin。真的要刪除靠 users.js 手動流程（單筆刪除）。
@@ -2695,7 +2700,7 @@ async function __setupCloud() {
       }
     };
     Store.remove = function(key) {
-      if (__LOCAL_ONLY_KEYS.has(key)) { __localRemove(key); return; }
+      if (__isLocalOnly(key)) { __localRemove(key); return; }
       origRemove(key);
       const targetCloud = (typeof key === 'string' && key.startsWith('ec.insight_') && window.__cloudInsight) ? window.__cloudInsight : cs;
       try {
