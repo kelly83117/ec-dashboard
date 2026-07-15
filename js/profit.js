@@ -5750,7 +5750,7 @@ function affSetSort(shop,col){
 function affSortRows(shop,rows){
   const s=_affSort[shop];
   if(!s)return rows;
-  const numeric=new Set(['sales','cost','rateNum']);
+  const numeric=new Set(['sales','cost','rateNum','costPct']);
   return[...rows].sort((a,b)=>{
     if(numeric.has(s.col)){
       const va=Number(a[s.col])||0,vb=Number(b[s.col])||0;
@@ -5761,7 +5761,7 @@ function affSortRows(shop,rows){
   });
 }
 function renderAffRptTableBody(shop){
-  const products=((_affData[shop]&&_affData[shop].products)||[]).map(p=>({...p,rateNum:parseFloat(p.rate)||0}));
+  const products=((_affData[shop]&&_affData[shop].products)||[]).map(p=>({...p,rateNum:parseFloat(p.rate)||0,costPct:p.sales>0?p.cost/p.sales:0}));
   const rows=affSortRows(shop,products);
   const tbl=document.getElementById('aff-tbl-'+shop);
   if(!tbl)return;
@@ -5772,6 +5772,7 @@ function renderAffRptTableBody(shop){
     {k:'sales',label:'銷售額'},
     {k:'rateNum',label:'分潤率'},
     {k:'cost',label:'推廣費用'},
+    {k:'costPct',label:'推廣佔比'},
   ];
   const curSort=_affSort[shop];
   const sortIcon=(key)=>curSort&&curSort.col===key
@@ -5785,6 +5786,7 @@ function renderAffRptTableBody(shop){
       <td>$${Math.round(p.sales).toLocaleString()}</td>
       <td style="color:#5b5fcf;font-weight:700">${p.rate||'—'}</td>
       <td>$${Math.round(p.cost).toLocaleString()}</td>
+      <td style="color:#f59e0b;font-weight:700">${p.sales>0?(p.costPct*100).toFixed(1)+'%':'—'}</td>
     </tr>
   `).join('');
   tbl.innerHTML=`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;

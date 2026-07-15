@@ -1,45 +1,45 @@
 {
-  "updated": "2026-07-14",
+  "updated": "2026-07-15",
   "items": [
     {
-      "title": "夏季清涼毯",
+      "title": "夏季涼感床墊",
       "traffic": "50K+"
     },
     {
-      "title": "戶外野餐用品",
+      "title": "戶外露營用品",
       "traffic": "30K+"
-    },
-    {
-      "title": "防曬霜",
-      "traffic": "30K+"
-    },
-    {
-      "title": "家居收納盒",
-      "traffic": "20K+"
-    },
-    {
-      "title": "涼感衣物",
-      "traffic": "20K+"
-    },
-    {
-      "title": "冰箱收納",
-      "traffic": "10K+"
-    },
-    {
-      "title": "夏季香氛",
-      "traffic": "10K+"
-    },
-    {
-      "title": "廚房清潔劑",
-      "traffic": "10K+"
-    },
-    {
-      "title": "攜帶式風扇",
-      "traffic": "5K+"
     },
     {
       "title": "防蚊噴霧",
+      "traffic": "20K+"
+    },
+    {
+      "title": "清涼飲品製作器具",
+      "traffic": "20K+"
+    },
+    {
+      "title": "收納箱",
+      "traffic": "30K+"
+    },
+    {
+      "title": "夏季家居裝飾",
+      "traffic": "10K+"
+    },
+    {
+      "title": "冰箱整理架",
       "traffic": "5K+"
+    },
+    {
+      "title": "防曬乳液",
+      "traffic": "50K+"
+    },
+    {
+      "title": "清潔劑",
+      "traffic": "30K+"
+    },
+    {
+      "title": "植物盆栽",
+      "traffic": "10K+"
     }
   ]
 }

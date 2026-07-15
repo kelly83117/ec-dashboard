@@ -1,45 +1,45 @@
 {
-  "updated": "2026-07-14",
+  "updated": "2026-07-15",
   "items": [
     {
       "keyword": "收纳盒",
-      "name": "多格收納盒（台灣熱銷款）",
+      "name": "多格收纳盒（台灣熱銷款）",
       "price_range": "3-8元",
       "moq": "100個",
       "reason": "暑假整理收納旺季",
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E7%9B%92"
     },
     {
-      "keyword": "浴巾",
-      "name": "超吸水浴巾",
-      "price_range": "10-20元",
-      "moq": "50條",
-      "reason": "夏季需求增加，適合採購",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%B7%BE"
-    },
-    {
-      "keyword": "廚具收納架",
-      "name": "多層廚具收納架",
+      "keyword": "厨房用具",
+      "name": "不锈钢厨具套装",
       "price_range": "15-30元",
-      "moq": "20個",
-      "reason": "夏季烹飪需求上升",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BB%9A%E5%85%B7%E6%94%B6%E7%B4%8D%E6%9E%B6"
+      "moq": "50套",
+      "reason": "夏季烹饪需求上升",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E7%94%A8%E5%85%B7"
     },
     {
-      "keyword": "清潔拖把",
-      "name": "自動清潔拖把",
-      "price_range": "25-50元",
-      "moq": "30個",
-      "reason": "暑假家庭清潔需求旺盛",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%BD%94%E6%8B%96%E6%8A%8A"
+      "keyword": "浴室收纳",
+      "name": "浴室收纳架",
+      "price_range": "20-50元",
+      "moq": "30个",
+      "reason": "假期家居整理热潮",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%BA%B3"
     },
     {
-      "keyword": "寢具套件",
-      "name": "夏季清涼寢具套件",
-      "price_range": "50-100元",
-      "moq": "10套",
-      "reason": "夏季涼爽睡眠需求增長",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%AF%A2%E5%85%B7%E5%A5%97%E4%BB%B6"
+      "keyword": "床上用品",
+      "name": "凉感床单",
+      "price_range": "25-60元",
+      "moq": "50套",
+      "reason": "夏季睡眠舒适需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E4%B8%8A%E7%94%A8%E5%93%81"
+    },
+    {
+      "keyword": "清洁用品",
+      "name": "环保清洁布",
+      "price_range": "1-5元",
+      "moq": "200个",
+      "reason": "暑期家庭大扫除需求",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E7%94%A8%E5%93%81"
     }
   ]
 }

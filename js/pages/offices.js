@@ -18,6 +18,10 @@ Object.assign(App, {
     if (deptId === 'd2' && this.route === 'office-d2-kpi') {
       this.bindD2KpiTab();
     }
+    // d2 訂價表
+    if (deptId === 'd2' && this.route === 'office-d2-pricing') {
+      this.bindD2PricingTab();
+    }
     // d1 insight 子頁：洞察表上傳按鈕
     if (deptId === 'd1' && this.route === 'office-d1-insight') {
       this.bindInsightTab();
@@ -896,6 +900,7 @@ Object.assign(App, {
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId === 'd2' && subRoute === 'kpi' ? this.renderD2KpiTabHtml() : ''}
+      ${deptId === 'd2' && subRoute === 'pricing' ? this.renderD2PricingTabHtml() : ''}
       ${deptId === 'd3' ? `
         <div class="d3-tab-layout">
           <div class="d3-tab-bar">${tabBar}</div>
@@ -929,50 +934,285 @@ Object.assign(App, {
     return (typeof buildKpiTabHtml === 'function') ? buildKpiTabHtml() : '';
   },
 
-  renderD2KpiTabHtml() {
-    const list = Store.get('ec.d2.bargain', []);
-    const rows = list.length === 0
-      ? `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
-      : list.map((r, i) => {
-          const orig = Number(r.orig || 0);
-          const final = Number(r.final || 0);
-          const saved = orig && final ? orig - final : null;
-          const pct = orig && saved ? ((saved / orig) * 100).toFixed(1) : null;
-          return `<tr style="vertical-align:middle">
-            <td>${escapeHtml(r.date || '')}</td>
-            <td style="font-weight:600">${escapeHtml(r.item || '')}</td>
-            <td>${escapeHtml(r.supplier || '')}</td>
-            <td style="text-align:right">${orig ? 'NT$' + orig.toLocaleString() : '—'}</td>
-            <td style="text-align:right;font-weight:700;color:#059669">${final ? 'NT$' + final.toLocaleString() : '—'}</td>
-            <td style="text-align:right;color:#dc2626;font-weight:600">${saved !== null && saved > 0 ? '▼ NT$' + saved.toLocaleString() + (pct ? ' (' + pct + '%)' : '') : '—'}</td>
-            <td style="text-align:center"><span style="padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:${r.status==='完成'?'#dcfce7':r.status==='進行中'?'#fef9c3':'#f3f4f6'};color:${r.status==='完成'?'#166534':r.status==='進行中'?'#854d0e':'#374151'}">${escapeHtml(r.status||'—')}</span></td>
-            <td style="white-space:nowrap"><div style="display:flex;gap:5px">
-              <button class="bg-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
-              <button class="bg-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
-            </div></td>
-          </tr>`;
-        }).join('');
+  renderD2KpiSummaryHtml(scoreCount = 0, scoreAvg = 0) {
+    const blue = (v) => `<span style="display:inline-block;background:#fffde7;color:#1565c0;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`;
+    const red = (v) => v > 0
+      ? `<span style="display:inline-block;background:#fff1f2;color:#b71c1c;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`
+      : `<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">0</span>`;
+    const subH = (cols) => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${cols.map(c=>`<div style="padding:5px 10px;font-size:11px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
+    const row = (cols, bg='#fff') => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${cols.map(c=>`<div style="padding:7px 10px;font-size:12px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
+    const totalScore = scoreCount + scoreAvg;
+
+    const leftPanel = `
+      <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
+        <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">選品 — 每季</div>
+        ${subH([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'},{l:'本月得分'}])}
+        ${row([{v:'管量：新品數量（季）',w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true},{v:red(0),center:true}])}
+        <div style="background:#f0faf0;padding:6px 10px;font-size:11px;font-weight:600;color:#2e7d32;border-bottom:1px solid #c8e6c9">管質分層（三層互斥）</div>
+        ${subH([{l:'分層條件',w:'2fr'},{l:'毛利門檻(≥)'},{l:'目標'},{l:'配分'},{l:'本月得分'}])}
+        ${row([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true},{v:red(0),center:true}])}
+        ${row([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true},{v:red(0),center:true}],'#fafafa')}
+        ${row([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true},{v:red(0),center:true}])}
+        <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">議價 — 每月</div>
+        ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'},{l:'本月得分'}])}
+        ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:blue('20'),center:true},{v:blue('20'),center:true},{v:red(scoreCount),center:true}])}
+        ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:blue('10.0%'),center:true},{v:blue('20'),center:true},{v:red(scoreAvg),center:true}],'#fafafa')}
+        <div style="padding:5px 10px;font-size:11px;color:#6b7280;background:#fafafa;border-bottom:1px solid #f3f4f6">前 10 項平均議價幅度 ≥ 門檻，給滿分；未達則 0（全有全無）</div>
+      </div>`;
+
+    const rightPanel = `
+      <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:260px;display:flex;flex-direction:column">
+        <div style="flex:1">
+          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">叫貨出錯率 — 每月</div>
+          ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'},{l:'本月得分'}])}
+          ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true},{v:red(0),center:true}])}
+          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">加分（AI 三表寫進儀表板）— 每月</div>
+          ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'},{l:'本月加分',w:'1fr'}])}
+          ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'},{v:red(0),center:true,w:'1fr'}])}
+          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">扣分（單價未更新）— 每月</div>
+          ${subH([{l:'每次扣分'},{l:'單月上限'},{l:'本月扣分'}])}
+          ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true},{v:red(0),center:true}])}
+        </div>
+        <div style="background:linear-gradient(135deg,#1a7a6e,#0f5349);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-top:2px solid #0f5349">
+          <div>
+            <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">本月得分總計</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.5)">議價數量 ${scoreCount} ＋ 議價比 ${scoreAvg} ＋ 其他 0</div>
+          </div>
+          <div style="font-size:36px;font-weight:900;color:${totalScore>=40?'#6ee7b7':totalScore>0?'#fde68a':'#9ca3af'};line-height:1">${totalScore}<span style="font-size:14px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
+        </div>
+      </div>`;
+
     return `
+    <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:18px;background:#fff">
+      <div style="background:#1a7a6e;color:#fff;padding:12px 16px">
+        <div style="font-size:15px;font-weight:700;margin-bottom:5px">📊 採購績效 KPI 計分架構</div>
+        <div style="font-size:11px;opacity:.85;line-height:1.9">
+          每月總分 ＝ 選品季分 ÷ 3 ＋ 當月議價（40）＋ 當月出錯率（10）＋ 加分 − 扣分 &nbsp;｜&nbsp; 季累計 ＝ 三個月當月總分合計
+        </div>
+      </div>
+      <div style="display:flex;gap:14px;padding:14px;flex-wrap:wrap;background:#f9fafb">
+        ${leftPanel}
+        ${rightPanel}
+      </div>
+    </div>`;
+  },
+
+  renderD2KpiTabHtml() {
+    const activeQ = Store.get('ec.d2.kpi.quarter', 'Q3');
+    const storeKey = activeQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeQ.toLowerCase()}`;
+    const list = Store.get(storeKey, []);
+
+    const quarterTabs = ['Q1','Q2','Q3','Q4'].map(q => {
+      const active = q === activeQ;
+      return `<button class="d2-q-tab" data-q="${q}" style="padding:7px 22px;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;${active ? 'background:#1a7a6e;color:#fff;' : 'background:#f3f4f6;color:#6b7280;'}">${q}</button>`;
+    }).join('');
+
+    // 非 Q3 季別若無資料顯示佔位（仍顯示子分頁）
+    if (activeQ !== 'Q3' && list.length === 0) {
+      const _activeStab = Store.get('ec.d2.kpi.stab', '議價表');
+      const _stabNames = ['選品','毛利計算','議價表','叫貨出錯率','加分項','扣分項'];
+      const _stabTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+        ${_stabNames.map(t => `<button class="d2-stab" data-t="${t}" style="padding:6px 16px;border-radius:20px;border:1px solid ${_activeStab===t?'#059669':'#e5e7eb'};background:${_activeStab===t?'#059669':'#fff'};color:${_activeStab===t?'#fff':'#374151'};font-size:13px;font-weight:${_activeStab===t?'700':'400'};cursor:pointer">${t}</button>`).join('')}
+      </div>`;
+      const _stabContent = _activeStab === '議價表' ? `
+        <div class="table-card">
+          <div class="table-card-header"><h3>💰 議價表</h3><p>${activeQ} 尚無資料</p></div>
+          <div style="padding:40px;text-align:center;color:var(--text-muted);font-size:13px">尚無資料，點擊「＋ 新增」開始建立</div>
+          <div style="padding:12px 16px;border-top:1px solid var(--border)">
+            <button id="bg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+          </div>
+          <div id="bg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
+              <input id="bg-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+              <input id="bg-item" placeholder="品名 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+              <input id="bg-orig" type="number" placeholder="原始成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+              <input id="bg-note" placeholder="更改備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
+              <input id="bg-b1" type="number" placeholder="第一次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+              <input id="bg-b2" type="number" placeholder="第二次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+              <input id="bg-b3" type="number" placeholder="第三次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            </div>
+            <div style="display:flex;gap:8px">
+              <button id="bg-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+              <button id="bg-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+            </div>
+          </div>
+        </div>`
+      : `<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${_activeStab} — 尚無資料，開發中</div>`;
+      return `
+        <div style="display:flex;gap:8px;margin-bottom:16px">${quarterTabs}</div>
+        ${this.renderD2KpiSummaryHtml(0, 0)}
+        ${_stabTabsHtml}
+        ${_stabContent}`;
+    }
+
+    const quarterTabsHtml = `<div style="display:flex;gap:8px;margin-bottom:16px">${quarterTabs}</div>`;
+    const priceCell = v => Number(v) ? 'NT$' + Number(v).toLocaleString() : '<span style="color:var(--text-muted)">—</span>';
+    // 計算每筆議價比並排序找前10名
+    const withPct = list.map((r, i) => {
+      const orig = Number(r.orig || 0);
+      const bids = [r.b1, r.b2, r.b3].map(Number);
+      const lastBid = [...bids].reverse().find(v => v > 0) || 0;
+      const pctNum = orig && lastBid ? ((orig - lastBid) / orig) * 100 : -1;
+      return { r, i, orig, lastBid, pctNum };
+    });
+    // 依議價比排序（有議價比的在前，無的在後）
+    const sorted = [...withPct].sort((a, b) => b.pctNum - a.pctNum);
+    const top10 = sorted.slice(0, 10);
+    const rest = sorted.slice(10);
+
+    const renderRow = ({ r, i, orig, lastBid, pctNum }) => {
+      const pct = pctNum > 0 ? pctNum.toFixed(1) + '%' : '—';
+      return `<tr style="vertical-align:middle;text-align:center">
+        <td>${escapeHtml(r.date || '')}</td>
+        <td style="font-weight:600;text-align:left">${escapeHtml(r.item || '')}</td>
+        <td>${priceCell(r.orig)}</td>
+        <td>${priceCell(r.b1)}</td>
+        <td>${priceCell(r.b2)}</td>
+        <td>${priceCell(r.b3)}</td>
+        <td style="font-weight:700;font-size:12px;color:${pctNum > 0 ? '#059669' : 'var(--text-muted)'}">
+          <span>${pct}</span>
+        </td>
+        <td style="font-size:12px">${escapeHtml(r.note || '')}</td>
+        <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
+          <button class="bg-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
+          <button class="bg-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+        </div></td>
+      </tr>`;
+    };
+
+    const top10Rows = list.length === 0
+      ? `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
+      : top10.map(renderRow).join('');
+
+    const restSection = rest.length > 0 ? `
+      <tr><td colspan="9" style="padding:0;border:0">
+        <details>
+          <summary style="cursor:pointer;padding:10px 14px;font-size:12px;color:var(--text-muted);background:#f9fafb;border-top:1px solid var(--border);list-style:none;display:flex;align-items:center;gap:6px;user-select:none">
+            <span style="font-size:10px">▶</span> 其他 ${rest.length} 筆紀錄
+          </summary>
+          <div style="max-height:280px;overflow-y:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <tbody>${rest.map(renderRow).join('')}</tbody>
+            </table>
+          </div>
+        </details>
+      </td></tr>` : '';
+    // KPI 計算
+    const nowYM = new Date().toISOString().slice(0, 7); // "2026-07"
+    const monthList = list.filter(r => (r.date || '').startsWith(nowYM));
+    const monthCount = monthList.length;
+    const top10pcts = [...withPct].filter(x => x.pctNum > 0).sort((a, b) => b.pctNum - a.pctNum).slice(0, 10).map(x => x.pctNum);
+    const avgTop10 = top10pcts.length ? (top10pcts.reduce((s, v) => s + v, 0) / top10pcts.length) : 0;
+    const scoreCount = monthCount >= 20 ? 20 : 0;
+    const scoreAvg = avgTop10 >= 10 ? 20 : 0;
+
+    const kpiCard = (icon, label, value, subLabel, score, fullScore) => {
+      const pass = score >= fullScore;
+      return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;min-width:180px;flex:1">
+        <div style="font-size:22px;margin-bottom:4px">${icon}</div>
+        <div style="font-size:24px;font-weight:700;color:var(--text)">${value}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${label}</div>
+        <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;background:${pass ? '#f0fdf4' : '#fafafa'};border-radius:7px;padding:6px 10px">
+          <span style="font-size:11px;color:${pass ? '#059669' : '#9ca3af'}">${subLabel}</span>
+          <span style="font-weight:700;font-size:15px;color:${pass ? '#059669' : '#d1d5db'}">${score}<span style="font-size:11px;font-weight:400">/${fullScore}分</span></span>
+        </div>
+      </div>`;
+    };
+
+    const totalScore = scoreCount + scoreAvg;
+    const scoreColor = totalScore >= 40 ? '#059669' : totalScore > 0 ? '#f59e0b' : '#9ca3af';
+    const badge = (label, value, pass) =>
+      `<div style="display:flex;flex-direction:column;align-items:center;background:${pass ? '#f0fdf4' : '#f9fafb'};border:1px solid ${pass ? '#bbf7d0' : '#e5e7eb'};border-radius:8px;padding:6px 14px;min-width:90px">
+        <span style="font-size:16px;font-weight:800;color:${pass ? '#059669' : '#6b7280'}">${value}</span>
+        <span style="font-size:10px;color:#9ca3af;margin-top:1px">${label}</span>
+      </div>`;
+
+    const activeStab = Store.get('ec.d2.kpi.stab', '議價表');
+    const stabNames = ['選品','毛利計算','議價表','叫貨出錯率','加分項','扣分項'];
+    const stabTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      ${stabNames.map(t => `<button class="d2-stab" data-t="${t}" style="padding:6px 16px;border-radius:20px;border:1px solid ${activeStab===t?'#059669':'#e5e7eb'};background:${activeStab===t?'#059669':'#fff'};color:${activeStab===t?'#fff':'#374151'};font-size:13px;font-weight:${activeStab===t?'700':'400'};cursor:pointer">${t}</button>`).join('')}
+    </div>`;
+
+    const spKey = `ec.d2.sp.${activeQ.toLowerCase()}`;
+    const spList = Store.get(spKey, []);
+    const spSorted = spList.map((r, i) => ({ r, i })).sort((a, b) => (a.r.spDate || '').localeCompare(b.r.spDate || ''));
+    const renderSpRow = ({ r, i }) => `<tr>
+      <td>${escapeHtml(r.spDate || '')}</td>
+      <td style="font-weight:600">${escapeHtml(r.spName || '')}</td>
+      <td>${escapeHtml(r.spLaunch || '')}</td>
+      <td>${r.spLink ? `<a href="${escapeHtml(r.spLink)}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:5px;color:#ea580c;font-size:12px;font-weight:600;text-decoration:none">🛒 前往賣場</a>` : '<span style="color:#d1d5db">—</span>'}</td>
+      <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
+        <button class="sp-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
+        <button class="sp-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+      </div></td>
+    </tr>`;
+    const spTop10Rows = spSorted.slice(0, 10).map(renderSpRow).join('');
+    const spRest = spSorted.slice(10);
+    const spRestSection = spRest.length ? `<tr><td colspan="5" style="padding:0;border:0">
+      <details><summary style="padding:8px 16px;cursor:pointer;font-size:12px;color:#6b7280;list-style:none;background:#f9fafb;border-top:1px solid #f3f4f6">▼ 顯示其餘 ${spRest.length} 筆</summary>
+      <div style="max-height:320px;overflow-y:auto"><table style="width:100%;border-collapse:collapse">
+        ${spRest.map(renderSpRow).join('')}
+      </table></div></details></td></tr>` : '';
+
+    const stabContent = activeStab === '選品' ? `
       <div class="table-card">
-        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div><h3>💰 議價表</h3><p>記錄每次採購議價結果</p></div>
-          <button id="bg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div><h3>🛍️ 選品</h3><p>記錄選品資訊（共 ${spList.length} 筆）</p></div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="display:flex;flex-direction:column;align-items:center;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:6px 14px;min-width:80px">
+              <span style="font-size:16px;font-weight:800;color:#059669">${spList.filter(r=>r.spLink).length} 筆</span>
+              <span style="font-size:10px;color:#9ca3af">已上蝦皮</span>
+            </div>
+            <button id="sp-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+          </div>
+        </div>
+        <div id="sp-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
+            <input id="sp-date" type="text" placeholder="填表時間（如 2026/07/15）" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="sp-name" placeholder="商品名稱 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="sp-launch" type="text" placeholder="上架時間（如 2026/07/15）" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="sp-link" placeholder="蝦皮賣場連結" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="sp-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+            <button id="sp-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>填表時間</th><th>商品名稱</th><th>上架時間</th><th>蝦皮賣場連結</th><th></th></tr></thead>
+          <tbody>${spTop10Rows}${spRestSection}</tbody>
+        </table></div>
+      </div>`
+    : activeStab === '議價表' ? `
+      <div class="table-card" data-store-key="${storeKey}">
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div>
+            <h3>💰 議價表</h3>
+            <p>記錄每次採購議價過程與最終議價比（共 ${list.length} 筆）</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            ${badge('當月議價數', monthCount + ' 筆', scoreCount > 0)}
+            ${badge('前10名平均議價比', avgTop10 ? avgTop10.toFixed(1) + '%' : '—', scoreAvg > 0)}
+            <div style="display:flex;flex-direction:column;align-items:center;background:#fff;border:2px solid ${scoreColor};border-radius:8px;padding:6px 14px;min-width:80px">
+              <span style="font-size:18px;font-weight:800;color:${scoreColor}">${totalScore}</span>
+              <span style="font-size:10px;color:#9ca3af">/ 40 分</span>
+            </div>
+            <button id="bg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+          </div>
         </div>
         <div id="bg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
             <input id="bg-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="bg-item" placeholder="商品名稱 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="bg-supplier" placeholder="供應商" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <select id="bg-status" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <option value="進行中">進行中</option>
-              <option value="完成">完成</option>
-              <option value="取消">取消</option>
-            </select>
+            <input id="bg-item" placeholder="品名 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-orig" type="number" placeholder="原始成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-note" placeholder="更改備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           </div>
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
-            <input id="bg-orig" type="number" placeholder="原始報價 (NT$)" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="bg-final" type="number" placeholder="議價後金額 (NT$)" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="bg-note" placeholder="備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;grid-column:span 2">
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
+            <input id="bg-b1" type="number" placeholder="第一次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-b2" type="number" placeholder="第二次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="bg-b3" type="number" placeholder="第三次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           </div>
           <div style="display:flex;gap:8px">
             <button id="bg-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
@@ -980,19 +1220,97 @@ Object.assign(App, {
           </div>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th>日期</th><th>商品名稱</th><th>供應商</th><th style="text-align:right">原始報價</th><th style="text-align:right">議價後</th><th style="text-align:right">節省金額</th><th style="text-align:center">狀態</th><th></th></tr></thead>
-          <tbody>${rows}</tbody>
+          <thead><tr><th>日期</th><th>品名</th><th style="text-align:center">原始成本</th><th style="text-align:center">第一次議價</th><th style="text-align:center">第二次議價</th><th style="text-align:center">第三次議價</th><th style="text-align:center">議價比</th><th>更改</th><th></th></tr></thead>
+          <tbody>${top10Rows}${restSection}</tbody>
         </table></div>
-      </div>`;
+      </div>`
+    : `<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${activeStab} — 尚無資料，開發中</div>`;
+
+    return `
+      ${quarterTabsHtml}
+      ${this.renderD2KpiSummaryHtml(scoreCount, scoreAvg)}
+      ${stabTabsHtml}
+      ${stabContent}`;
   },
   bindD2KpiTab() {
+    // 季別切換
+    document.querySelectorAll('.d2-q-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Store.set('ec.d2.kpi.quarter', btn.dataset.q);
+        this.render();
+      });
+    });
+
+    // 子分頁切換
+    document.querySelectorAll('.d2-stab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Store.set('ec.d2.kpi.stab', btn.dataset.t);
+        this.render();
+      });
+    });
+
+    // 選品表單
+    const spForm = document.getElementById('sp-form');
+    if (spForm) {
+      const activeQ2 = Store.get('ec.d2.kpi.quarter', 'Q3');
+      const spKey = `ec.d2.sp.${activeQ2.toLowerCase()}`;
+      const spSaveBtn = document.getElementById('sp-save');
+      let spEditIndex = -1;
+      const spFields = ['sp-date','sp-name','sp-launch','sp-link'];
+      const clearSp = () => {
+        spFields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        spEditIndex = -1;
+        spSaveBtn.textContent = '儲存';
+        spForm.style.display = 'none';
+      };
+      document.getElementById('sp-add-btn')?.addEventListener('click', () => {
+        if (spForm.style.display !== 'none') { clearSp(); return; }
+        clearSp(); spForm.style.display = '';
+      });
+      document.getElementById('sp-cancel')?.addEventListener('click', clearSp);
+      spSaveBtn?.addEventListener('click', () => {
+        const name = document.getElementById('sp-name')?.value.trim();
+        if (!name) { alert('請填寫商品名稱'); return; }
+        const entry = {
+          spDate: document.getElementById('sp-date')?.value,
+          spName: name,
+          spLaunch: document.getElementById('sp-launch')?.value,
+          spLink: document.getElementById('sp-link')?.value.trim(),
+        };
+        const list = Store.get(spKey, []);
+        if (spEditIndex >= 0) { list[spEditIndex] = entry; } else { list.push(entry); }
+        Store.set(spKey, list);
+        this.render();
+      });
+      document.querySelectorAll('.sp-edit').forEach(btn => btn.addEventListener('click', () => {
+        const list = Store.get(spKey, []);
+        const r = list[+btn.dataset.i]; if (!r) return;
+        spEditIndex = +btn.dataset.i;
+        document.getElementById('sp-date').value = r.spDate || '';
+        document.getElementById('sp-name').value = r.spName || '';
+        document.getElementById('sp-launch').value = r.spLaunch || '';
+        document.getElementById('sp-link').value = r.spLink || '';
+        spSaveBtn.textContent = '更新';
+        spForm.style.display = '';
+        spForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }));
+      document.querySelectorAll('.sp-del').forEach(btn => btn.addEventListener('click', () => {
+        const list = Store.get(spKey, []);
+        list.splice(+btn.dataset.i, 1);
+        Store.set(spKey, list);
+        this.render();
+      }));
+    }
+
     const form = document.getElementById('bg-form');
     if (!form) return;
+    const activeQ = Store.get('ec.d2.kpi.quarter', 'Q3');
+    const storeKey = activeQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeQ.toLowerCase()}`;
     const saveBtn = document.getElementById('bg-save');
     let editIndex = -1;
-    const fields = ['bg-date','bg-item','bg-supplier','bg-status','bg-orig','bg-final','bg-note'];
+    const fields = ['bg-date','bg-item','bg-orig','bg-note','bg-b1','bg-b2','bg-b3'];
     const clearForm = () => {
-      fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = id === 'bg-status' ? '進行中' : ''; });
+      fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
       editIndex = -1;
       saveBtn.textContent = '儲存';
       form.style.display = 'none';
@@ -1004,40 +1322,40 @@ Object.assign(App, {
     document.getElementById('bg-cancel')?.addEventListener('click', clearForm);
     saveBtn?.addEventListener('click', () => {
       const item = document.getElementById('bg-item')?.value.trim();
-      if (!item) { alert('請填寫商品名稱'); return; }
+      if (!item) { alert('請填寫品名'); return; }
       const entry = {
         date: document.getElementById('bg-date')?.value,
         item,
-        supplier: document.getElementById('bg-supplier')?.value.trim(),
-        status: document.getElementById('bg-status')?.value,
         orig: document.getElementById('bg-orig')?.value,
-        final: document.getElementById('bg-final')?.value,
+        b1: document.getElementById('bg-b1')?.value,
+        b2: document.getElementById('bg-b2')?.value,
+        b3: document.getElementById('bg-b3')?.value,
         note: document.getElementById('bg-note')?.value.trim(),
       };
-      const list = Store.get('ec.d2.bargain', []);
+      const list = Store.get(storeKey, []);
       if (editIndex >= 0) { list[editIndex] = entry; } else { list.push(entry); }
-      Store.set('ec.d2.bargain', list);
+      Store.set(storeKey, list);
       this.render();
     });
     document.querySelectorAll('.bg-edit').forEach(btn => btn.addEventListener('click', () => {
-      const list = Store.get('ec.d2.bargain', []);
+      const list = Store.get(storeKey, []);
       const r = list[+btn.dataset.i]; if (!r) return;
       editIndex = +btn.dataset.i;
       document.getElementById('bg-date').value = r.date || '';
       document.getElementById('bg-item').value = r.item || '';
-      document.getElementById('bg-supplier').value = r.supplier || '';
-      document.getElementById('bg-status').value = r.status || '進行中';
       document.getElementById('bg-orig').value = r.orig || '';
-      document.getElementById('bg-final').value = r.final || '';
+      document.getElementById('bg-b1').value = r.b1 || '';
+      document.getElementById('bg-b2').value = r.b2 || '';
+      document.getElementById('bg-b3').value = r.b3 || '';
       document.getElementById('bg-note').value = r.note || '';
       saveBtn.textContent = '更新';
       form.style.display = '';
       form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }));
     document.querySelectorAll('.bg-del').forEach(btn => btn.addEventListener('click', () => {
-      const list = Store.get('ec.d2.bargain', []);
+      const list = Store.get(storeKey, []);
       list.splice(+btn.dataset.i, 1);
-      Store.set('ec.d2.bargain', list);
+      Store.set(storeKey, list);
       this.render();
     }));
   },
@@ -1122,5 +1440,257 @@ Object.assign(App, {
           <div style="font-size:10px;color:${c};font-weight:600">天後</div>
         </div>
       </div>`;
+  },
+
+  // ── 訂價表 ──────────────────────────────────────────────
+  PRICING_SHEETS: ['訂價','導流品','Victor','inna','Vivian','官網','FB訂價表','運費試算表'],
+  PRICING_COLS: {
+    訂價:     ['集運','產品名稱','原始成本','實際成本','售價','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    導流品:   ['集運','產品名稱','原始成本','實際成本','售價','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    Victor:   ['集運','產品名稱','原始成本','實際成本','售價','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    inna:     ['集運','產品名稱','原始成本','實際成本','售價','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    Vivian:   ['集運','產品名稱','原始成本','實際成本','售價','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    官網:     ['集運','產品名稱','實際成本','售價','蝦皮總成本','稅金','入帳金額','實際毛利','獲利百分比','廣告ROAS','月銷量','淨利潤','連結','賣場','備註'],
+    FB訂價表: ['產品名稱','原始成本','商品成本','售價','稅金','FB廣告','實際毛利','獲利百分比','月銷量','淨利潤','賣場','備註'],
+    運費試算表:['試算名稱','數量','箱數','重量','運費','報關','平均運費'],
+  },
+
+  renderD2PricingTabHtml() {
+    const PRICING_VER = '2026-07-14-v2';
+    if (Store.get('ec.d2.pricing.ver') !== PRICING_VER) {
+      this.PRICING_SHEETS.forEach(s => Store.set(`ec.d2.pricing.${s}`, []));
+      Store.set('ec.d2.pricing.loaded', false);
+      Store.set('ec.d2.pricing.ver', PRICING_VER);
+    }
+    const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+    const q = Store.get('ec.d2.pricing.q', '');
+    const loaded = Store.get('ec.d2.pricing.loaded', false);
+    const cols = this.PRICING_COLS[activeSheet] || [];
+    const list = Store.get(`ec.d2.pricing.${activeSheet}`, []);
+
+    const filtered = q ? list.filter(r => {
+      const name = String(r['產品名稱'] || r['試算名稱'] || '').toLowerCase();
+      return name.includes(q.toLowerCase());
+    }) : list;
+
+    const pct = v => {
+      const n = parseFloat(v);
+      if (!v && v !== 0) return '<span style="color:#d1d5db">—</span>';
+      const pv = (n < 1 && n > -1) ? (n * 100).toFixed(1) + '%' : n.toFixed(1) + '%';
+      const c = n >= 0.2 ? '#059669' : n >= 0 ? '#f59e0b' : '#dc2626';
+      return `<span style="color:${c};font-weight:700">${pv}</span>`;
+    };
+    const money = v => v === '' || v === null ? '<span style="color:#d1d5db">—</span>' : `NT$${Number(v).toLocaleString()}`;
+    const num = v => v === '' || v === null ? '<span style="color:#d1d5db">—</span>' : Number(v).toLocaleString();
+
+    const cellVal = (r, col) => {
+      const v = r[col];
+      if (v === '' || v === undefined || v === null) return '<span style="color:#d1d5db">—</span>';
+      if (col === '連結') return v ? `<a href="${escapeHtml(v)}" target="_blank" style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:5px;color:#ea580c;font-size:11px;font-weight:600;text-decoration:none">🔗 連結</a>` : '<span style="color:#d1d5db">—</span>';
+      if (col === '獲利百分比') return pct(v);
+      if (['原始成本','實際成本','售價','實際毛利','淨利潤','預估投入金額','商品成本','蝦皮總成本','稅金','入帳金額','FB廣告','運費','報關','平均運費'].includes(col)) return money(v);
+      if (['月銷量','數量','箱數'].includes(col)) return num(v);
+      if (['廣告ROAS'].includes(col)) return v !== '' ? `<span style="font-weight:600">${Number(v).toFixed(2)}</span>` : '<span style="color:#d1d5db">—</span>';
+      return `<span>${escapeHtml(String(v))}</span>`;
+    };
+
+    const sheetTabs = this.PRICING_SHEETS.map(s => {
+      const cnt = Store.get(`ec.d2.pricing.${s}`, []).length;
+      const active = s === activeSheet;
+      return `<button class="pr-stab" data-s="${s}" style="padding:6px 14px;border-radius:20px;border:1px solid ${active?'#1a7a6e':'#e5e7eb'};background:${active?'#1a7a6e':'#fff'};color:${active?'#fff':'#374151'};font-size:12px;font-weight:${active?'700':'400'};cursor:pointer;white-space:nowrap">${s} <span style="opacity:.7">${cnt}</span></button>`;
+    }).join('');
+
+    const theadCols = cols.map(c => `<th style="white-space:nowrap;font-size:12px">${c}</th>`).join('');
+    const SHOW = 50;
+    const rows = filtered.slice(0, SHOW).map((r, i) => {
+      const tds = cols.map(c => `<td style="font-size:12px;padding:6px 10px${c==='產品名稱'?';text-align:left':''}">${cellVal(r, c)}</td>`).join('');
+      return `<tr class="pr-row" style="border-bottom:1px solid #f3f4f6;cursor:pointer" data-i="${list.indexOf(r)}">${tds}</tr>`;
+    }).join('');
+
+    const moreHtml = filtered.length > SHOW
+      ? `<div style="padding:12px 16px;text-align:center;color:#6b7280;font-size:13px;background:#f9fafb;border-top:1px solid #f3f4f6">
+           顯示前 ${SHOW} 筆，共 ${filtered.length} 筆 — <button id="pr-show-all" style="color:#1a7a6e;font-weight:600;background:none;border:0;cursor:pointer">顯示全部</button>
+         </div>` : '';
+
+    const noDataHtml = !loaded
+      ? `<div style="padding:60px;text-align:center">
+           <div style="font-size:40px;margin-bottom:12px">📂</div>
+           <div style="font-size:15px;font-weight:600;margin-bottom:8px">尚未載入資料</div>
+           <div style="font-size:13px;color:#9ca3af;margin-bottom:20px">點擊下方按鈕從雲端載入訂價資料</div>
+           <button id="pr-load-btn" style="padding:10px 24px;background:#1a7a6e;color:white;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">⬇ 載入訂價資料</button>
+         </div>` : '';
+
+    return `
+      <div class="table-card">
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div><h3>💹 訂價表</h3><p>蝦皮 / FB 商品訂價與利潤分析</p></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:180px;font-family:inherit">
+            <button id="pr-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+            <button id="pr-reload-btn" title="重新從 Excel 載入原始資料" style="padding:7px 12px;background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;cursor:pointer">↻ 重載資料</button>
+            <button id="pr-clear-btn" style="padding:7px 12px;background:#fff5f5;color:#dc2626;border:1px solid #fecaca;border-radius:7px;font-size:13px;cursor:pointer">🗑 清空</button>
+          </div>
+        </div>
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">
+          ${sheetTabs}
+        </div>
+        ${noDataHtml}
+        ${loaded ? `
+        <div id="pr-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+          <div id="pr-form-fields" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:10px"></div>
+          <div style="display:flex;gap:8px">
+            <button id="pr-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+            <button id="pr-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr>${theadCols}<th></th></tr></thead>
+          <tbody id="pr-tbody">${rows}</tbody>
+        </table></div>
+        ${moreHtml}
+        <div style="padding:10px 16px;font-size:12px;color:#9ca3af;border-top:1px solid #f3f4f6">
+          ${activeSheet}：共 ${list.length} 筆，搜尋結果 ${filtered.length} 筆
+        </div>` : ''}
+      </div>`;
+  },
+
+  bindD2PricingTab() {
+    const self = this;
+
+    // 切換分頁
+    document.querySelectorAll('.pr-stab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Store.set('ec.d2.pricing.sheet', btn.dataset.s);
+        Store.set('ec.d2.pricing.q', '');
+        self.render();
+      });
+    });
+
+    // 搜尋
+    document.getElementById('pr-search')?.addEventListener('input', e => {
+      Store.set('ec.d2.pricing.q', e.target.value);
+      self.render();
+    });
+
+    // 載入資料
+    const loadData = async () => {
+      const loadBtn = document.getElementById('pr-load-btn') || document.getElementById('pr-reload-btn');
+      if (loadBtn) loadBtn.textContent = '載入中…';
+      try {
+        const res = await fetch('data/pricing.json?v=2026-07-14');
+        const data = await res.json();
+        Object.entries(data).forEach(([sheet, rows]) => {
+          Store.set(`ec.d2.pricing.${sheet}`, rows);
+        });
+        Store.set('ec.d2.pricing.loaded', true);
+        self.render();
+      } catch(e) {
+        alert('載入失敗：' + e.message);
+      }
+    };
+    document.getElementById('pr-load-btn')?.addEventListener('click', loadData);
+    document.getElementById('pr-reload-btn')?.addEventListener('click', () => {
+      if (confirm('確定重新載入原始資料？本機編輯的內容將被覆蓋。')) loadData();
+    });
+    document.getElementById('pr-clear-btn')?.addEventListener('click', () => {
+      if (!confirm('確定清空所有訂價資料？')) return;
+      this.PRICING_SHEETS.forEach(s => Store.set(`ec.d2.pricing.${s}`, []));
+      Store.set('ec.d2.pricing.loaded', false);
+      this.render();
+    });
+
+    // 顯示全部
+    document.getElementById('pr-show-all')?.addEventListener('click', () => {
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const q = Store.get('ec.d2.pricing.q', '');
+      const list = Store.get(`ec.d2.pricing.${activeSheet}`, []);
+      const cols = self.PRICING_COLS[activeSheet] || [];
+      const filtered = q ? list.filter(r => String(r['產品名稱'] || r['試算名稱'] || '').toLowerCase().includes(q.toLowerCase())) : list;
+      const pct = v => { const n=parseFloat(v); if(!v&&v!==0)return'—'; const pv=(n<1&&n>-1)?(n*100).toFixed(1)+'%':n.toFixed(1)+'%'; const c=n>=0.2?'#059669':n>=0?'#f59e0b':'#dc2626'; return `<span style="color:${c};font-weight:700">${pv}</span>`; };
+      const money = v => v===''||v===null?'—':`NT$${Number(v).toLocaleString()}`;
+      const num = v => v===''||v===null?'—':Number(v).toLocaleString();
+      const cellVal = (r,col) => { const v=r[col]; if(v===''||v===undefined||v===null)return'—'; if(col==='連結')return v?`<a href="${escapeHtml(v)}" target="_blank" style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:5px;color:#ea580c;font-size:11px;font-weight:600;text-decoration:none">🔗 連結</a>`:'—'; if(col==='獲利百分比')return pct(v); if(['原始成本','實際成本','售價','實際毛利','淨利潤','預估投入金額','商品成本','蝦皮總成本','稅金','入帳金額','FB廣告','運費','報關','平均運費'].includes(col))return money(v); if(['月銷量','數量','箱數'].includes(col))return num(v); if(col==='廣告ROAS')return v!==''?`<span style="font-weight:600">${Number(v).toFixed(2)}</span>`:'—'; return `<span>${escapeHtml(String(v))}</span>`; };
+      const tbody = document.getElementById('pr-tbody');
+      if (tbody) {
+        tbody.innerHTML = filtered.map((r,i) => {
+          const tds = cols.map(c=>`<td style="font-size:12px;padding:6px 10px">${cellVal(r,c)}</td>`).join('');
+          return `<tr class="pr-row" style="border-bottom:1px solid #f3f4f6;cursor:pointer" data-i="${list.indexOf(r)}">${tds}<td></td></tr>`;
+        }).join('');
+        self.bindPricingRows();
+      }
+      document.getElementById('pr-show-all')?.parentElement.remove();
+    });
+
+    this.bindPricingRows();
+
+    // 新增按鈕
+    document.getElementById('pr-add-btn')?.addEventListener('click', () => {
+      const form = document.getElementById('pr-form');
+      if (!form) return;
+      if (form.style.display !== 'none') { form.style.display = 'none'; return; }
+      this.openPricingForm(-1);
+    });
+    document.getElementById('pr-cancel')?.addEventListener('click', () => {
+      document.getElementById('pr-form').style.display = 'none';
+    });
+    document.getElementById('pr-save')?.addEventListener('click', () => {
+      this.savePricingRow();
+    });
+  },
+
+  bindPricingRows() {
+    const self = this;
+    document.querySelectorAll('.pr-row').forEach(tr => {
+      tr.addEventListener('click', e => {
+        if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') return;
+        const i = +tr.dataset.i;
+        self.openPricingForm(i);
+      });
+    });
+  },
+
+  openPricingForm(index) {
+    const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+    const cols = this.PRICING_COLS[activeSheet] || [];
+    const list = Store.get(`ec.d2.pricing.${activeSheet}`, []);
+    const row = index >= 0 ? list[index] : {};
+    const form = document.getElementById('pr-form');
+    const fieldsDiv = document.getElementById('pr-form-fields');
+    if (!form || !fieldsDiv) return;
+    const skip = ['連結'];
+    fieldsDiv.innerHTML = cols.filter(c => !skip.includes(c)).map(c => {
+      const v = row[c] !== undefined ? escapeHtml(String(row[c])) : '';
+      return `<label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#6b7280;font-weight:600">
+        ${c}
+        <input data-col="${c}" value="${v}" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+      </label>`;
+    }).join('') + (row['連結'] !== undefined || cols.includes('連結') ? `
+      <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#6b7280;font-weight:600;grid-column:1/-1">
+        連結
+        <input data-col="連結" value="${escapeHtml(String(row['連結'] || ''))}" placeholder="https://…" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+      </label>` : '');
+    form.dataset.editIndex = index;
+    form.style.display = '';
+    document.getElementById('pr-save').textContent = index >= 0 ? '更新' : '儲存';
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  },
+
+  savePricingRow() {
+    const form = document.getElementById('pr-form');
+    const index = +form.dataset.editIndex;
+    const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+    const list = Store.get(`ec.d2.pricing.${activeSheet}`, []);
+    const entry = {};
+    form.querySelectorAll('[data-col]').forEach(el => {
+      const v = el.value.trim();
+      entry[el.dataset.col] = isNaN(v) || v === '' ? v : Number(v);
+    });
+    const name = entry['產品名稱'] || entry['試算名稱'];
+    if (!name) { alert('請填寫產品名稱'); return; }
+    if (index >= 0) { list[index] = { ...list[index], ...entry }; }
+    else { list.push(entry); }
+    Store.set(`ec.d2.pricing.${activeSheet}`, list);
+    form.style.display = 'none';
+    this.render();
   },
 });

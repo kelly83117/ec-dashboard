@@ -154,6 +154,10 @@ const OFFICE_FEATURES = {
     { key: 'insight',    label: '洞察表' },
     { key: 'lineNotify', label: 'LINE 通知設定' },
   ],
+  '採購': [
+    { key: 'overview', label: '工作總覽' },
+    { key: 'kpi',      label: 'KPI' },
+  ],
 };
 function hasOfficeFeature(user, deptName, featureKey) {
   if (!user) return false;
@@ -380,36 +384,7 @@ const OFFICE_CONFIG = {
       { icon: '💵', label: '本月採購金額', value: 'NT$0', meta: '較上月 —' },
       { icon: '⏱️', label: '平均交期', value: '0 天', meta: '較上月 —' },
     ],
-    tabs: [
-      { key: 'order-suggest', title: '叫貨量建議',
-        heads: ['商品', '目前庫存', '上月銷量', '建議叫貨量', '建議下單日'],
-        rows: [
-          ['母嬰用品 A',  '120', '350', '500', '本週內'],
-          ['寢具組 B',    '45',  '180', '300', '5/24 前'],
-          ['保養品 C',    '230', '420', '400', '下週'],
-          ['家電配件 D',  '78',  '210', '350', '5/26 前'],
-        ],
-      },
-      { key: 'vendor-score', title: '廠商評分',
-        heads: ['廠商', '配合月數', '平均交期', '品質', '價格', '綜合評分'],
-        rows: [
-          ['永豐紙業',  '24', '5.2 天', '⭐⭐⭐⭐⭐', '⭐⭐⭐⭐',  '92'],
-          ['佳穩五金',  '18', '7.0 天', '⭐⭐⭐⭐',   '⭐⭐⭐⭐⭐', '88'],
-          ['達誠包材',  '36', '4.5 天', '⭐⭐⭐⭐⭐', '⭐⭐⭐',    '85'],
-          ['新詮國際',  '8',  '8.4 天', '⭐⭐⭐',     '⭐⭐⭐⭐',   '72'],
-        ],
-      },
-      { key: 'stock-warn', title: '庫存預警',
-        heads: ['商品', '當前庫存', '安全庫存', '狀態'],
-        rows: [
-          ['母嬰用品 A', '120', '300', '🔴 不足'],
-          ['寢具組 B',   '45',  '150', '🔴 不足'],
-          ['保養品 C',   '230', '200', '🟢 正常'],
-          ['玩具 D',     '580', '300', '🟡 過剩'],
-          ['家電 E',     '410', '350', '🟢 正常'],
-        ],
-      },
-    ],
+    tabs: [],
   },
   d3: {
     icon: '💼',
@@ -661,23 +636,34 @@ const App = {
     const password = document.getElementById('login-password').value;
     const ulow = username.toLowerCase();
 
-    // 後門：admin / admin123 永遠可登入（不論 localStorage 狀態），同時修復資料
+    // 後門：admin / admin123 — 僅在 admin 完全不存在時建立預設帳號用（第一次 setup 或災難救援）
+    //   舊行為會強制把 admin 密碼重設回 admin123，等於 admin 改的新密碼白改。已移除。
+    //   現在：
+    //     1. admin 不存在 → 建立、發 session、登入
+    //     2. admin 存在但密碼還是預設 admin123 → 允許登入（相容第一次 setup 沒改過的情境）
+    //     3. admin 已改過密碼 → 走下面正常 login 路徑（admin123 對不上 hash → 拒絕）
     if (ulow === 'admin' && password === 'admin123') {
       const users = Store.get(Store.KEYS.users, []);
       let admin = users.find(u => u.username.toLowerCase() === 'admin');
       if (!admin) {
+        // Case 1：admin 不存在（第一次 setup / 資料被清空的災難救援）
         admin = { username: 'admin', password: hashPassword('admin123'),
                   name: '陳大明', role: 'admin', departments: [] };
         users.push(admin);
-      } else {
-        // 修復舊版錯誤雜湊
-        admin.password = hashPassword('admin123');
-        admin.role = 'admin';
+        Store.set(Store.KEYS.users, users);
+        Store.set(Store.KEYS.session, { username: admin.username });
+        this.enterApp(admin);
+        return;
       }
-      Store.set(Store.KEYS.users, users);
-      Store.set(Store.KEYS.session, { username: admin.username });
-      this.enterApp(admin);
-      return;
+      if (admin.password === hashPassword('admin123')) {
+        // Case 2：admin 存在且密碼還是預設 → 修復 role + 登入（不覆蓋密碼）
+        admin.role = 'admin';
+        Store.set(Store.KEYS.users, users);
+        Store.set(Store.KEYS.session, { username: admin.username });
+        this.enterApp(admin);
+        return;
+      }
+      // Case 3：admin 已改過密碼 → 落到下方正常 login 流程去比對真實密碼
     }
 
     const users = Store.get(Store.KEYS.users, []);
@@ -2511,6 +2497,11 @@ function __bootApp() {
 
 // 本機獨有、不可同步的鍵（session 不上雲，避免一個人登入別人也跟著登入）
 const __LOCAL_ONLY_KEYS = new Set([Store.KEYS.session]);
+// 本機獨有前綴（訂價資料體積大，不上 Firestore）
+const __LOCAL_ONLY_PREFIXES = ['ec.d2.pricing.'];
+function __isLocalOnly(key) {
+  return __LOCAL_ONLY_KEYS.has(key) || __LOCAL_ONLY_PREFIXES.some(p => key.startsWith(p));
+}
 
 function __localGet(key, fallback) {
   try {
@@ -2567,7 +2558,7 @@ async function __setupCloud() {
     if (Object.keys(cloudData).length === 0) {
       const local = {};
       for (const k of Object.values(Store.KEYS)) {
-        if (__LOCAL_ONLY_KEYS.has(k)) continue;
+        if (__isLocalOnly(k)) continue;
         try {
           const raw = localStorage.getItem(k);
           if (raw !== null) local[k] = JSON.parse(raw);
@@ -2645,11 +2636,11 @@ async function __setupCloud() {
     const origSet = Store.set.bind(Store);
     const origRemove = Store.remove.bind(Store);
     Store.get = function(key, fallback) {
-      if (__LOCAL_ONLY_KEYS.has(key)) return __localGet(key, fallback);
+      if (__isLocalOnly(key)) return __localGet(key, fallback);
       return origGet(key, fallback);
     };
     Store.set = function(key, value) {
-      if (__LOCAL_ONLY_KEYS.has(key)) { __localSet(key, value); return; }
+      if (__isLocalOnly(key)) { __localSet(key, value); return; }
       // ⚠ 資料保護：擋掉可疑的「users → 1~2 個」寫入
       //   避免任何路徑（seedData bug、Firestore cache race、別的 code）
       //   把多個帳號覆蓋成只剩 admin。真的要刪除靠 users.js 手動流程（單筆刪除）。
@@ -2709,7 +2700,7 @@ async function __setupCloud() {
       }
     };
     Store.remove = function(key) {
-      if (__LOCAL_ONLY_KEYS.has(key)) { __localRemove(key); return; }
+      if (__isLocalOnly(key)) { __localRemove(key); return; }
       origRemove(key);
       const targetCloud = (typeof key === 'string' && key.startsWith('ec.insight_') && window.__cloudInsight) ? window.__cloudInsight : cs;
       try {
