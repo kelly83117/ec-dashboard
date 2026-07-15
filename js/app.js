@@ -219,9 +219,9 @@ function marketplaceBadgeHtml(platformName) {
 
 // 平台分組（用於儀表板上方 4 張總覽卡）
 const PLATFORM_GROUPS = [
-  { name: '全賣場總營收', icon: '🏪', color: '#0f172a', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活','MOMO','MO+','酷澎'] },
-  { name: '蝦皮總營收',   logo: 'assets/logos/shopee.png',  color: '#ee4d2d', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活'] },
-  { name: 'MOMO 總營收',  logo: 'assets/logos/momo.png',    color: '#e6007e', members: ['MOMO','MO+'] },
+  { name: '全通路總營收', icon: '🏪', color: '#0f172a', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活','MOMO','MO+','酷澎'] },
+  { name: '蝦皮營收',     logo: 'assets/logos/shopee.png',  color: '#ee4d2d', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活'] },
+  { name: 'MOMO營收',     logo: 'assets/logos/momo.png',    color: '#e6007e', members: ['MOMO','MO+'] },
   { name: '酷澎營收',     logo: 'assets/logos/coupang.png', color: '#3b82f6', members: ['酷澎'] },
 ];
 
