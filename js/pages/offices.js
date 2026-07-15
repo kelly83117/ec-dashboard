@@ -938,66 +938,57 @@ Object.assign(App, {
     const row = (cols, bg='#fff') => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${cols.map(c=>`<div style="padding:7px 10px;font-size:12px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
     const totalScore = scoreCount + scoreAvg;
 
-    const TABS = ['選品','毛利計算','議價表','叫貨出錯率','加分項','扣分項'];
-    const activeTab = Store.get('ec.d2.kpi.stab', '選品');
-
-    const tabBar = `<div style="display:flex;gap:4px;flex-wrap:wrap;padding:10px 14px;background:#f0fdf4;border-bottom:1px solid #c8e6c9">
-      ${TABS.map(t => {
-        const on = t === activeTab;
-        return `<button class="d2-stab" data-t="${t}" style="padding:5px 14px;border:0;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;${on?'background:#1a7a6e;color:#fff;':'background:#fff;color:#6b7280;border:1px solid #e5e7eb;'}">${t}</button>`;
-      }).join('')}
-    </div>`;
-
-    const scoreBar = `
-      <div style="background:linear-gradient(135deg,#1a7a6e,#0f5349);padding:12px 18px;display:flex;align-items:center;justify-content:space-between">
-        <div>
-          <div style="font-size:11px;color:rgba(255,255,255,.7);margin-bottom:2px">本月得分總計</div>
-          <div style="font-size:11px;color:rgba(255,255,255,.5)">議價數量 ${scoreCount} ＋ 議價比 ${scoreAvg} ＋ 其他 0</div>
-        </div>
-        <div style="font-size:32px;font-weight:900;color:${totalScore>=40?'#6ee7b7':totalScore>0?'#fde68a':'#9ca3af'};line-height:1">${totalScore}<span style="font-size:13px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
-      </div>`;
-
-    let content = '';
-    if (activeTab === '選品') {
-      content = `
+    const leftPanel = `
+      <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
+        <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">選品 — 每季</div>
         ${subH([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'},{l:'本月得分'}])}
         ${row([{v:'管量：新品數量（季）',w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true},{v:red(0),center:true}])}
         <div style="background:#f0faf0;padding:6px 10px;font-size:11px;font-weight:600;color:#2e7d32;border-bottom:1px solid #c8e6c9">管質分層（三層互斥）</div>
         ${subH([{l:'分層條件',w:'2fr'},{l:'毛利門檻(≥)'},{l:'目標'},{l:'配分'},{l:'本月得分'}])}
         ${row([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true},{v:red(0),center:true}])}
         ${row([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true},{v:red(0),center:true}],'#fafafa')}
-        ${row([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true},{v:red(0),center:true}])}`;
-    } else if (activeTab === '毛利計算') {
-      content = `<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:13px">🚧 毛利計算功能開發中</div>`;
-    } else if (activeTab === '議價表') {
-      content = `
+        ${row([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true},{v:red(0),center:true}])}
+        <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">議價 — 每月</div>
         ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'},{l:'本月得分'}])}
         ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:blue('20'),center:true},{v:blue('20'),center:true},{v:red(scoreCount),center:true}])}
         ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:blue('10.0%'),center:true},{v:blue('20'),center:true},{v:red(scoreAvg),center:true}],'#fafafa')}
-        <div style="padding:5px 10px;font-size:11px;color:#6b7280;background:#fafafa;border-bottom:1px solid #f3f4f6">前 10 項平均議價幅度 ≥ 門檻，給滿分；未達則 0（全有全無）</div>`;
-    } else if (activeTab === '叫貨出錯率') {
-      content = `
-        ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'},{l:'本月得分'}])}
-        ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true},{v:red(0),center:true}])}`;
-    } else if (activeTab === '加分項') {
-      content = `
-        ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'},{l:'本月加分',w:'1fr'}])}
-        ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'},{v:red(0),center:true,w:'1fr'}])}`;
-    } else if (activeTab === '扣分項') {
-      content = `
-        ${subH([{l:'每次扣分'},{l:'單月上限'},{l:'本月扣分'}])}
-        ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true},{v:red(0),center:true}])}`;
-    }
+        <div style="padding:5px 10px;font-size:11px;color:#6b7280;background:#fafafa;border-bottom:1px solid #f3f4f6">前 10 項平均議價幅度 ≥ 門檻，給滿分；未達則 0（全有全無）</div>
+      </div>`;
+
+    const rightPanel = `
+      <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:260px;display:flex;flex-direction:column">
+        <div style="flex:1">
+          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">叫貨出錯率 — 每月</div>
+          ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'},{l:'本月得分'}])}
+          ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true},{v:red(0),center:true}])}
+          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">加分（AI 三表寫進儀表板）— 每月</div>
+          ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'},{l:'本月加分',w:'1fr'}])}
+          ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'},{v:red(0),center:true,w:'1fr'}])}
+          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">扣分（單價未更新）— 每月</div>
+          ${subH([{l:'每次扣分'},{l:'單月上限'},{l:'本月扣分'}])}
+          ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true},{v:red(0),center:true}])}
+        </div>
+        <div style="background:linear-gradient(135deg,#1a7a6e,#0f5349);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-top:2px solid #0f5349">
+          <div>
+            <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">本月得分總計</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.5)">議價數量 ${scoreCount} ＋ 議價比 ${scoreAvg} ＋ 其他 0</div>
+          </div>
+          <div style="font-size:36px;font-weight:900;color:${totalScore>=40?'#6ee7b7':totalScore>0?'#fde68a':'#9ca3af'};line-height:1">${totalScore}<span style="font-size:14px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
+        </div>
+      </div>`;
 
     return `
     <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:18px;background:#fff">
       <div style="background:#1a7a6e;color:#fff;padding:12px 16px">
-        <div style="font-size:15px;font-weight:700;margin-bottom:4px">📊 採購績效 KPI 計分架構</div>
-        <div style="font-size:11px;opacity:.8">每月總分 ＝ 選品季分 ÷ 3 ＋ 當月議價（40）＋ 出錯率（10）＋ 加分 − 扣分</div>
+        <div style="font-size:15px;font-weight:700;margin-bottom:5px">📊 採購績效 KPI 計分架構</div>
+        <div style="font-size:11px;opacity:.85;line-height:1.9">
+          每月總分 ＝ 選品季分 ÷ 3 ＋ 當月議價（40）＋ 當月出錯率（10）＋ 加分 − 扣分 &nbsp;｜&nbsp; 季累計 ＝ 三個月當月總分合計
+        </div>
       </div>
-      ${tabBar}
-      ${content}
-      ${scoreBar}
+      <div style="display:flex;gap:14px;padding:14px;flex-wrap:wrap;background:#f9fafb">
+        ${leftPanel}
+        ${rightPanel}
+      </div>
     </div>`;
   },
 
@@ -1173,13 +1164,6 @@ Object.assign(App, {
     document.querySelectorAll('.d2-q-tab').forEach(btn => {
       btn.addEventListener('click', () => {
         Store.set('ec.d2.kpi.quarter', btn.dataset.q);
-        this.render();
-      });
-    });
-    // 計分架構分頁切換
-    document.querySelectorAll('.d2-stab').forEach(btn => {
-      btn.addEventListener('click', () => {
-        Store.set('ec.d2.kpi.stab', btn.dataset.t);
         this.render();
       });
     });
