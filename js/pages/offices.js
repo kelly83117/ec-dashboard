@@ -1002,11 +1002,14 @@ Object.assign(App, {
       return `<button class="d2-q-tab" data-q="${q}" style="padding:7px 22px;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;${active ? 'background:#1a7a6e;color:#fff;' : 'background:#f3f4f6;color:#6b7280;'}">${q}</button>`;
     }).join('');
 
-    // 非 Q3 季別若無資料顯示佔位
+    // 非 Q3 季別若無資料顯示佔位（仍顯示子分頁）
     if (activeQ !== 'Q3' && list.length === 0) {
-      return `
-        <div style="display:flex;gap:8px;margin-bottom:16px">${quarterTabs}</div>
-        ${this.renderD2KpiSummaryHtml(0, 0)}
+      const _activeStab = Store.get('ec.d2.kpi.stab', '議價表');
+      const _stabNames = ['選品','毛利計算','議價表','叫貨出錯率','加分項','扣分項'];
+      const _stabTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+        ${_stabNames.map(t => `<button class="d2-stab" data-t="${t}" style="padding:6px 16px;border-radius:20px;border:1px solid ${_activeStab===t?'#059669':'#e5e7eb'};background:${_activeStab===t?'#059669':'#fff'};color:${_activeStab===t?'#fff':'#374151'};font-size:13px;font-weight:${_activeStab===t?'700':'400'};cursor:pointer">${t}</button>`).join('')}
+      </div>`;
+      const _stabContent = _activeStab === '議價表' ? `
         <div class="table-card">
           <div class="table-card-header"><h3>💰 議價表</h3><p>${activeQ} 尚無資料</p></div>
           <div style="padding:40px;text-align:center;color:var(--text-muted);font-size:13px">尚無資料，點擊「＋ 新增」開始建立</div>
@@ -1030,7 +1033,13 @@ Object.assign(App, {
               <button id="bg-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
             </div>
           </div>
-        </div>`;
+        </div>`
+      : `<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${_activeStab} — 尚無資料，開發中</div>`;
+      return `
+        <div style="display:flex;gap:8px;margin-bottom:16px">${quarterTabs}</div>
+        ${this.renderD2KpiSummaryHtml(0, 0)}
+        ${_stabTabsHtml}
+        ${_stabContent}`;
     }
 
     const quarterTabsHtml = `<div style="display:flex;gap:8px;margin-bottom:16px">${quarterTabs}</div>`;
