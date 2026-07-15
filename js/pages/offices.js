@@ -1522,6 +1522,7 @@ Object.assign(App, {
             <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:180px;font-family:inherit">
             <button id="pr-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
             <button id="pr-reload-btn" title="重新從 Excel 載入原始資料" style="padding:7px 12px;background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;cursor:pointer">↻ 重載資料</button>
+            <button id="pr-clear-btn" style="padding:7px 12px;background:#fff5f5;color:#dc2626;border:1px solid #fecaca;border-radius:7px;font-size:13px;cursor:pointer">🗑 清空</button>
           </div>
         </div>
         <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">
@@ -1584,6 +1585,12 @@ Object.assign(App, {
     document.getElementById('pr-load-btn')?.addEventListener('click', loadData);
     document.getElementById('pr-reload-btn')?.addEventListener('click', () => {
       if (confirm('確定重新載入原始資料？本機編輯的內容將被覆蓋。')) loadData();
+    });
+    document.getElementById('pr-clear-btn')?.addEventListener('click', () => {
+      if (!confirm('確定清空所有訂價資料？')) return;
+      this.PRICING_SHEETS.forEach(s => Store.set(`ec.d2.pricing.${s}`, []));
+      Store.set('ec.d2.pricing.loaded', false);
+      this.render();
     });
 
     // 顯示全部
