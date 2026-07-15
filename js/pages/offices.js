@@ -976,14 +976,12 @@ Object.assign(App, {
           ${subH([{l:'每次扣分'},{l:'單月上限'},{l:'本月扣分'}])}
           ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true},{v:red(0),center:true}])}
         </div>
-        <div style="background:#1a7a6e;color:#fff;padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
-          <span style="font-size:13px;font-weight:700">本月得分總計</span>
-          <span style="font-size:22px;font-weight:800;color:${totalColor === '#059669' ? '#a7f3d0' : totalColor === '#f59e0b' ? '#fde68a' : '#d1d5db'}">${totalScore}</span>
-        </div>
-        <div style="background:#f0fdf4;padding:6px 14px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;border-top:1px solid #bbf7d0">
-          <div style="text-align:center;font-size:11px;color:#6b7280">議價數量<br><span style="font-size:14px;font-weight:700;color:${scoreCount>0?'#b71c1c':'#9ca3af'}">${scoreCount}</span></div>
-          <div style="text-align:center;font-size:11px;color:#6b7280">議價比<br><span style="font-size:14px;font-weight:700;color:${scoreAvg>0?'#b71c1c':'#9ca3af'}">${scoreAvg}</span></div>
-          <div style="text-align:center;font-size:11px;color:#6b7280">其他項目<br><span style="font-size:14px;font-weight:700;color:#9ca3af">0</span></div>
+        <div style="background:linear-gradient(135deg,#1a7a6e,#0f5349);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-top:2px solid #0f5349">
+          <div>
+            <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">本月得分總計</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.5)">議價數量 ${scoreCount} ＋ 議價比 ${scoreAvg} ＋ 其他 0</div>
+          </div>
+          <div style="font-size:36px;font-weight:900;color:${totalScore>=40?'#6ee7b7':totalScore>0?'#fde68a':'#9ca3af'};line-height:1">${totalScore}<span style="font-size:14px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
         </div>
       </div>`;
 
