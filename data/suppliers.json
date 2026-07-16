@@ -1,45 +1,45 @@
 {
-  "updated": "2026-07-15",
+  "updated": "2026-07-16",
   "items": [
     {
       "keyword": "收纳盒",
-      "name": "多格收纳盒（台灣熱銷款）",
+      "name": "多格收納盒（台灣熱銷款）",
       "price_range": "3-8元",
       "moq": "100個",
       "reason": "暑假整理收納旺季",
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E7%9B%92"
     },
     {
-      "keyword": "厨房用具",
-      "name": "不锈钢厨具套装",
-      "price_range": "15-30元",
-      "moq": "50套",
-      "reason": "夏季烹饪需求上升",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E7%94%A8%E5%85%B7"
+      "keyword": "厨房收纳架",
+      "name": "多层厨房收纳架",
+      "price_range": "10-30元",
+      "moq": "50個",
+      "reason": "夏季烹饪需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E6%94%B6%E7%BA%B3%E6%9E%B6"
     },
     {
       "keyword": "浴室收纳",
-      "name": "浴室收纳架",
-      "price_range": "20-50元",
-      "moq": "30个",
-      "reason": "假期家居整理热潮",
+      "name": "浴室置物架",
+      "price_range": "15-40元",
+      "moq": "30個",
+      "reason": "暑假家居装修热潮",
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%BA%B3"
     },
     {
-      "keyword": "床上用品",
-      "name": "凉感床单",
-      "price_range": "25-60元",
-      "moq": "50套",
-      "reason": "夏季睡眠舒适需求增加",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E4%B8%8A%E7%94%A8%E5%93%81"
+      "keyword": "清洁工具",
+      "name": "多功能清洁刷",
+      "price_range": "5-15元",
+      "moq": "100個",
+      "reason": "夏季大扫除需求提升",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E5%B7%A5%E5%85%B7"
     },
     {
-      "keyword": "清洁用品",
-      "name": "环保清洁布",
-      "price_range": "1-5元",
-      "moq": "200个",
-      "reason": "暑期家庭大扫除需求",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E7%94%A8%E5%93%81"
+      "keyword": "床上用品",
+      "name": "透气床单",
+      "price_range": "20-50元",
+      "moq": "50個",
+      "reason": "夏季凉爽寝具需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E4%B8%8A%E7%94%A8%E5%93%81"
     }
   ]
 }
