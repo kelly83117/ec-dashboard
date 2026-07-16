@@ -317,6 +317,10 @@ let openPopup=null;
 // ── Storage（本機優先、雲端手動同步） ──
 // 追蹤所有已改但還沒推雲端的 key，讓使用者按「☁ 同步雲端」時一次推
 const _pendingSyncKeys = new Set();
+// 「✓ 已同步」2 秒後還原成待同步徽章的計時器 handle。
+// 存起來讓下次 syncToCloud 一開始就 clearTimeout，避免上一次同步埋的重畫
+// 在這一次同步的進度顯示（「同步中 i/N」）中途引爆、把進度蓋掉。
+let _syncBtnRepaintTimer = null;
 function _markPending(key){
   _pendingSyncKeys.add(key);
   _showSyncBtn();
@@ -372,15 +376,14 @@ function _showSyncBtn(shop){
 //   讓 syncToCloud 不只推「本次會話新增」的，也把 localStorage 裡累積
 //   （包含前次重整前留下、pending set 已清空）的一併推上雲端。
 function _sweepAllLocalReportsIntoPending(){
-  try{
-    if(typeof Store!=='undefined'&&Store._profitMem){
-      Object.keys(Store._profitMem).forEach(k=>{ if(k.startsWith('ec|')) _pendingSyncKeys.add(k); });
-    }
-  }catch{}
+  // 塊B：拿掉原本「掃 Store._profitMem 塞進 pending」那段。它會把雲端載回的報表
+  //   也當 pending、再原封不動推回雲端 → 多人同時同步時「後按的用自己記憶體版本
+  //   蓋掉全部」（舊蓋新的併發覆蓋）。改為只掃 localStorage：只推本機親手產生/編輯過的。
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
-      if(k&&k.startsWith('ec|')){
+      // filemeta 不上雲（雲端零讀取端）→ 不塞進 pending，省下「撈進來→推送略過→收尾刪」的白工
+      if(k&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')){
         _pendingSyncKeys.add(k);
         // localStorage 有但 _profitMem 沒有 → 撈回 _profitMem 讓推送流程拿得到
         if(!(Store._profitMem&&Store._profitMem[k])){
@@ -391,71 +394,106 @@ function _sweepAllLocalReportsIntoPending(){
   }catch{}
 }
 
-function syncToCloud(shop){
+async function syncToCloud(shop){
   const btn=document.getElementById('global-sync-btn');
+  // 斷掉上一次同步埋的「2 秒後還原徽章」重畫，免得它在這次的進度顯示中途引爆蓋掉進度
+  clearTimeout(_syncBtnRepaintTimer);
   if(btn){btn.disabled=true;btn.textContent='同步中…';}
+  // 每一條出口都會覆寫 window.__lastSyncReport（含 ts），永久保留，方便日後診斷「同步怪怪的」
+  const _report=(mode,extra)=>{ window.__lastSyncReport=Object.assign({ts:Date.now(),mode,ok:[],failed:[],skippedProblem:[],skippedByDesign:[]},extra||{}); };
   if(!window.__cloudProfit||!window.__cloudProfitCol){
     if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'淨利表的雲端尚未就緒，請重新整理。',kind:'warn'});
     else if(typeof showToast==='function') showToast('雲端未連線','error');
+    _report('aborted',{reason:'雲端未連線'});
     if(btn)btn.disabled=false;return;
   }
-  // 一併把本機累積的所有 ec|* 報表塞進 pending，確保重整後遺失的也會被推
-  _sweepAllLocalReportsIntoPending();
-  const promises=[];
-  const syncedReports=[]; // 記錄有推的報表 key，方便 debug + toast
-  // 同步當前 shop 的備註 / 編輯（按期間獨立存）
-  const s=state[shop];
-  const _nk=shop+'|'+(s?.curMonth||'')+'|'+(s?.curHalf||'');
-  const notes=getNotes(_nk);
-  if(Object.keys(notes).length>0) promises.push(window.__cloudProfit.setField('ec_notes|'+_nk,notes));
-  const edits=getEdits(shop);
-  if(Object.keys(edits).length>0) promises.push(window.__cloudProfit.setField('ec_edits|'+shop,edits));
-  // 遍歷所有 pending keys：
-  //   ec|... 開頭  = 報表 key，用 setReport 推到 profits collection
-  //   __shop__|... = shop-level marker，忽略（歷史原因保留）
-  //   其他        = 設定/標籤/總表 rows 等，用 setField 推到 profit doc
-  _pendingSyncKeys.forEach(pk=>{
-    if(pk.startsWith('__shop__|')) return;
-    if(pk.startsWith('ec|')){
-      // 報表 key
-      const payload=Store._profitMem&&Store._profitMem[pk];
-      if(payload){ promises.push(window.__cloudProfitCol.setReport(pk,payload)); syncedReports.push(pk); }
-      return;
+  try{
+    // 一併把本機累積的所有 ec|* 報表塞進 pending，確保重整後遺失的也會被推
+    _sweepAllLocalReportsIntoPending();
+    const s=state[shop];
+    const isPlainObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
+    const tasks=[];                 // { key, run:()=>Promise }：延遲執行，逐一 await（佇列深度恆為 1）
+    const skippedByDesign=[];       // filemeta：故意不上雲，安靜
+    const skippedProblem=[];        // 讀不到 / 損毀 / 非物件：一定要浮上來
+    // 同步當前通路的備註 / 編輯（按期間獨立存）
+    const _nk=shop+'|'+(s?.curMonth||'')+'|'+(s?.curHalf||'');
+    const notes=getNotes(_nk);
+    if(Object.keys(notes).length>0) tasks.push({key:'ec_notes|'+_nk,run:()=>window.__cloudProfit.setField('ec_notes|'+_nk,notes)});
+    const edits=getEdits(shop);
+    if(Object.keys(edits).length>0) tasks.push({key:'ec_edits|'+shop,run:()=>window.__cloudProfit.setField('ec_edits|'+shop,edits)});
+    // 遍歷所有 pending keys 分類：
+    //   ec|filemeta|... = filemeta，故意不上雲 → skippedByDesign（安靜）
+    //   ec|... 其他      = 報表 key，payload 要是物件才推；讀不到/損毀 → skippedProblem（要講）
+    //   __shop__|...     = 歷史 marker，忽略
+    //   其他            = 設定/標籤等，用 setField 推
+    _pendingSyncKeys.forEach(pk=>{
+      if(pk.startsWith('__shop__|')) return;
+      if(pk.startsWith('ec|filemeta|')){ skippedByDesign.push(pk); return; }
+      if(pk.startsWith('ec|')){
+        const payload=Store._profitMem&&Store._profitMem[pk];
+        if(isPlainObj(payload)){ tasks.push({key:pk,run:()=>window.__cloudProfitCol.setReport(pk,payload)}); }
+        else{ skippedProblem.push({key:pk,reason:'報表資料讀不到或損毀'}); }
+        return;
+      }
+      // field key（設定類）
+      let val=null;
+      try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
+      if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} }
+      if(val!==null && val!==undefined) tasks.push({key:pk,run:()=>window.__cloudProfit.setField(pk,val)});
+      else skippedProblem.push({key:pk,reason:'設定值讀不到'});
+    });
+    console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length);
+    if(tasks.length===0){
+      // 沒有要送的 task —— 但有 skippedProblem 一定要講，不能只說「沒有需要同步」（那正是舊 bug）
+      if(skippedProblem.length>0){
+        if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:'有 '+skippedProblem.length+' 筆資料在本機讀不到、沒推上去（可能損毀）。\n請到淨利表重新產生這些報表。',detail:skippedProblem.map(x=>x.key+'：'+x.reason).join('\n'),kind:'error'});
+        else if(typeof showToast==='function') showToast('有 '+skippedProblem.length+' 筆資料讀不到','error');
+        _report('nothing',{skippedProblem,skippedByDesign});
+      }else{
+        if(typeof showToast==='function') showToast('沒有需要同步的資料','info');
+        _report('nothing',{skippedByDesign});
+      }
+      if(btn){btn.disabled=false; _showSyncBtn();} return;
     }
-    // field key（設定類）
-    let val=null;
-    try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
-    if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} }
-    if(val!==null && val!==undefined) promises.push(window.__cloudProfit.setField(pk,val));
-  });
-  // 兼容舊行為：如果 pending 沒帶當前 shop 的報表（例如舊版產生的報表），額外推一次
-  if(s&&s._built){
-    const k=lsKey(shop,s.curMonth,s.curHalf);
-    if(!syncedReports.includes(k)){
-      const payload=Store._profitMem&&Store._profitMem[k];
-      if(payload) promises.push(window.__cloudProfitCol.setReport(k,payload));
+    // 逐一 await：一次只送一筆，佇列深度恆為 1 → 不會撞 resource-exhausted；一筆炸不拖垮其他
+    const ok=[]; const failed=[];
+    for(let i=0;i<tasks.length;i++){
+      if(btn) btn.textContent='同步中 '+(i+1)+'/'+tasks.length;
+      try{ await tasks[i].run(); ok.push(tasks[i].key); }
+      catch(e){ failed.push({key:tasks[i].key,msg:(e&&e.message)||String(e)}); }
     }
-  }
-  console.log('[syncToCloud] pushing', promises.length, '筆；報表 keys:', syncedReports);
-  if(promises.length===0){
-    if(typeof showToast==='function') showToast('沒有需要同步的資料','info');
-    if(btn){btn.disabled=false; _showSyncBtn();} return;
-  }
-  Promise.all(promises).then(()=>{
-    // 同步完成 → 清 pending set
-    _pendingSyncKeys.clear();
-    if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';setTimeout(()=>{ _showSyncBtn(); },2000);}
-    if(typeof showToast==='function') showToast('✓ 已同步 '+promises.length+' 筆到雲端','success');
-    // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌
-    try { if(window.App && typeof App._updateDailyProgressFromAdjustments === 'function') App._updateDailyProgressFromAdjustments({ pushToCloud: true }); }
-    catch(e){ console.warn('[autoSummary profit]', e); }
-  }).catch(e=>{
-    const msg=(e&&e.message)||String(e);
-    if(window.App&&typeof App.showAlertModal==='function'){
-      App.showAlertModal({title:'淨利表同步失敗',message:'部分資料沒推上雲端。資料還在本機，重整前請先匯出 Excel 備份。',detail:msg,kind:'error'});
-    } else if(typeof showToast==='function') showToast('同步失敗：'+msg,'error');
+    // pending 清理：只保留 failed + skippedProblem（要重試 / 要一直提醒），其餘刪掉
+    const keep=new Set([...failed.map(f=>f.key),...skippedProblem.map(p=>p.key)]);
+    [..._pendingSyncKeys].forEach(pk=>{ if(!keep.has(pk)) _pendingSyncKeys.delete(pk); });
+    if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
+    _report('done',{ok,failed,skippedProblem,skippedByDesign});
+    // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 時出現；只要有問題就 ⚠ + 彈窗
+    const problems=failed.length+skippedProblem.length;
+    if(problems===0){
+      if(btn){btn.textContent='✓ 已同步 '+ok.length+' 筆';btn.style.background='#10b981';btn.style.color='#fff';btn.style.borderColor='#10b981';_syncBtnRepaintTimer=setTimeout(()=>{ _showSyncBtn(); },2000);}
+      if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端','success');
+      // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌（失敗只記 console，不影響同步結果判定）
+      try { if(window.App && typeof App._updateDailyProgressFromAdjustments === 'function') App._updateDailyProgressFromAdjustments({ pushToCloud: true }); }
+      catch(e){ console.warn('[autoSummary profit]', e); }
+    }else{
+      if(btn){btn.disabled=false;btn.textContent='⚠ '+ok.length+' 成功 / '+problems+' 未完成';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';}
+      const lines=[];
+      failed.forEach(f=>lines.push('［失敗］'+f.key+'：'+f.msg));
+      skippedProblem.forEach(p=>lines.push('［讀不到］'+p.key+'：'+p.reason));
+      let msg='成功 '+ok.length+' 筆。';
+      if(failed.length) msg+='\n'+failed.length+' 筆沒推上雲端，資料還在本機 → 重整前請先匯出 Excel 備份，稍後再按同步重試。';
+      if(skippedProblem.length) msg+='\n'+skippedProblem.length+' 筆在本機讀不到（可能損毀）→ 請到淨利表重新產生這些報表。';
+      if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:msg,detail:lines.join('\n'),kind:'error'});
+      else if(typeof showToast==='function') showToast('同步未完成：'+problems+' 筆有問題','error');
+    }
+  }catch(err){
+    // 安全網：任何沒預期到的 throw 也要留下 report、告訴使用者，絕不靜默
+    const msg=(err&&err.message)||String(err);
+    _report('error',{reason:msg});
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步異常',message:'同步過程發生未預期的錯誤，資料還在本機。',detail:msg,kind:'error'});
+    else if(typeof showToast==='function') showToast('同步異常：'+msg,'error');
     if(btn){btn.disabled=false; _showSyncBtn();}
-  });
+  }
 }
 function lsLoad(shop,month,half){
   const k=lsKey(shop,month,half);

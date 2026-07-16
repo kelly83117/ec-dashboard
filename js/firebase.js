@@ -160,7 +160,14 @@ try {
   try {
     const toDocId = k => k.replace(/\//g, '__');
     window.__cloudProfitCol = {
-      setReport: (key, value) => setDoc(doc(db, 'profits', toDocId(key)), value),
+      // 最後一道網：頂層非物件（陣列 / null / 損毀）→ 不 throw、不寫，回 reject 讓上層收進 failed 浮上來
+      setReport: (key, value) => {
+        if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+          console.warn('[setReport] 非物件 payload，拒絕寫入：', key);
+          return Promise.reject(new Error('payload 不是物件（陣列或損毀資料），已拒絕上雲'));
+        }
+        return setDoc(doc(db, 'profits', toDocId(key)), value);
+      },
     };
   } catch {}
 
