@@ -376,11 +376,9 @@ function _showSyncBtn(shop){
 //   讓 syncToCloud 不只推「本次會話新增」的，也把 localStorage 裡累積
 //   （包含前次重整前留下、pending set 已清空）的一併推上雲端。
 function _sweepAllLocalReportsIntoPending(){
-  try{
-    if(typeof Store!=='undefined'&&Store._profitMem){
-      Object.keys(Store._profitMem).forEach(k=>{ if(k.startsWith('ec|')) _pendingSyncKeys.add(k); });
-    }
-  }catch{}
+  // 塊B：拿掉原本「掃 Store._profitMem 塞進 pending」那段。它會把雲端載回的報表
+  //   也當 pending、再原封不動推回雲端 → 多人同時同步時「後按的用自己記憶體版本
+  //   蓋掉全部」（舊蓋新的併發覆蓋）。改為只掃 localStorage：只推本機親手產生/編輯過的。
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
