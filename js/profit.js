@@ -415,7 +415,6 @@ async function syncToCloud(shop){
     const tasks=[];                 // { key, run:()=>Promise }：延遲執行，逐一 await（佇列深度恆為 1）
     const skippedByDesign=[];       // filemeta：故意不上雲，安靜
     const skippedProblem=[];        // 讀不到 / 損毀 / 非物件：一定要浮上來
-    const syncedReports=[];
     // 同步當前通路的備註 / 編輯（按期間獨立存）
     const _nk=shop+'|'+(s?.curMonth||'')+'|'+(s?.curHalf||'');
     const notes=getNotes(_nk);
@@ -432,7 +431,7 @@ async function syncToCloud(shop){
       if(pk.startsWith('ec|filemeta|')){ skippedByDesign.push(pk); return; }
       if(pk.startsWith('ec|')){
         const payload=Store._profitMem&&Store._profitMem[pk];
-        if(isPlainObj(payload)){ tasks.push({key:pk,run:()=>window.__cloudProfitCol.setReport(pk,payload)}); syncedReports.push(pk); }
+        if(isPlainObj(payload)){ tasks.push({key:pk,run:()=>window.__cloudProfitCol.setReport(pk,payload)}); }
         else{ skippedProblem.push({key:pk,reason:'報表資料讀不到或損毀'}); }
         return;
       }
@@ -443,15 +442,6 @@ async function syncToCloud(shop){
       if(val!==null && val!==undefined) tasks.push({key:pk,run:()=>window.__cloudProfit.setField(pk,val)});
       else skippedProblem.push({key:pk,reason:'設定值讀不到'});
     });
-    // 兼容舊行為：如果 pending 沒帶當前通路的報表（例如舊版產生的報表），額外推一次
-    if(s&&s._built){
-      const k=lsKey(shop,s.curMonth,s.curHalf);
-      if(!syncedReports.includes(k)){
-        const payload=Store._profitMem&&Store._profitMem[k];
-        if(isPlainObj(payload)) tasks.push({key:k,run:()=>window.__cloudProfitCol.setReport(k,payload)});
-        else if(payload!==undefined) skippedProblem.push({key:k,reason:'報表資料損毀'});
-      }
-    }
     console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length);
     if(tasks.length===0){
       // 沒有要送的 task —— 但有 skippedProblem 一定要講，不能只說「沒有需要同步」（那正是舊 bug）
