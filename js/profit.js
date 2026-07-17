@@ -1952,17 +1952,17 @@ function buildDistHtml(shop,built){
   // pureRate sub-rows for ads
   const aPureSub=[['< 0%',aC(r=>H(r)<0)],['0% - 10%',aC(r=>H(r)>=0&&H(r)<10)],['10% - 15%',aC(r=>H(r)>=10&&H(r)<15)],['15% - 20%',aC(r=>H(r)>=15&&H(r)<20)],['20% - 30%',aC(r=>H(r)>=20&&H(r)<30)],['>30%',aC(r=>H(r)>=30)]];
   // budget sub-rows for ads
-  const aBudSub=[['< $100',aC(r=>r.dayBudget<100)],['$100 - $200',aC(r=>r.dayBudget>=100&&r.dayBudget<200)],['$200 - $300',aC(r=>r.dayBudget>=200&&r.dayBudget<300)],['$300 - $400',aC(r=>r.dayBudget>=300&&r.dayBudget<400)],['> $400',aC(r=>r.dayBudget>=400)]];
+  const aBudSub=[['< $100',aC(r=>r.dayBudget<100)],['$100 - 未滿 $200',aC(r=>r.dayBudget>=100&&r.dayBudget<200)],['$200 - 未滿 $300',aC(r=>r.dayBudget>=200&&r.dayBudget<300)],['$300 - 未滿 $400',aC(r=>r.dayBudget>=300&&r.dayBudget<400)],['≥ $400',aC(r=>r.dayBudget>=400)]];
 
   const n20p=aC(r=>H(r)>=20), n20m=aC(r=>H(r)<20);
-  const nB200p=aC(r=>r.dayBudget>200), nB200m=aC(r=>r.dayBudget<=200);
+  const nB200p=aC(r=>r.dayBudget>=200), nB200m=aC(r=>r.dayBudget<200);
 
   const adsRows=`
     <tr>${tdL('淨利率',2,BLU_HI)}${td('>20%',BLU_HI,'#fff',true)}${td(n20p,BLU_HI,'#fff',true)}${td(pct(n20p,adsTotal),BLU_HI,'#fff',true)}</tr>
     <tr>${td('<20%',BLU_HI,'#fff',true)}${td(n20m,BLU_HI,'#fff',true)}${td(pct(n20m,adsTotal),BLU_HI,'#fff',true)}</tr>
     ${aPureSub.map(([l,n],i)=>`<tr>${i===0?tdL('淨利率階層',aPureSub.length,BLU_LB,'#1a3260'):''
       }${td(l,BLU_LT,'#1a3260')}${td(n,BLU_LT,'#1a3260')}${td(pct(n,adsTotal),BLU_LT,'#1a3260')}</tr>`).join('')}
-    <tr>${tdL('日預算',2,ORG_HI)}${td('>$200',ORG_HI,'#fff',true)}${td(nB200p,ORG_HI,'#fff',true)}${td(pct(nB200p,adsTotal),ORG_HI,'#fff',true)}</tr>
+    <tr>${tdL('日預算',2,ORG_HI)}${td('≥$200',ORG_HI,'#fff',true)}${td(nB200p,ORG_HI,'#fff',true)}${td(pct(nB200p,adsTotal),ORG_HI,'#fff',true)}</tr>
     <tr>${td('<$200',ORG_HI,'#fff',true)}${td(nB200m,ORG_HI,'#fff',true)}${td(pct(nB200m,adsTotal),ORG_HI,'#fff',true)}</tr>
     ${aBudSub.map(([l,n],i)=>`<tr>${i===0?tdL('日預算階層',aBudSub.length,ORG_LB,'#5c2000'):''
       }${td(l,ORG_LT,'#5c2000')}${td(n,ORG_LT,'#5c2000')}${td(pct(n,adsTotal),ORG_LT,'#5c2000')}</tr>`).join('')}`;
