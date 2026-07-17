@@ -941,6 +941,7 @@ Object.assign(App, {
       ? `<span style="display:inline-block;background:#fff1f2;color:#b71c1c;font-weight:700;padding:2px 8px;border-radius:5px;font-size:11px;min-width:32px;text-align:center">${v}</span>`
       : `<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-weight:700;padding:2px 8px;border-radius:5px;font-size:11px;min-width:32px;text-align:center">0</span>`;
     const mCols = mLabels.map(l => ({l, w:'1fr'}));
+    // 每月版 header（議價用）
     const subH = (baseCols) => {
       const all = [...baseCols, ...mCols];
       return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${all.map(c=>`<div style="padding:5px 8px;font-size:10px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
@@ -948,6 +949,15 @@ Object.assign(App, {
     const row = (baseCols, scoreFn, bg = '#fff') => {
       const scs = monthScores.map(ms => ({v:sc(scoreFn(ms)),center:true,w:'1fr'}));
       const all = [...baseCols, ...scs];
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${all.map(c=>`<div style="padding:6px 8px;font-size:11px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
+    };
+    // 每季版 header（選品用）— 單一「本季得分」欄
+    const subHQ = (baseCols) => {
+      const all = [...baseCols, {l:'本季得分', w:'1fr'}];
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${all.map(c=>`<div style="padding:5px 8px;font-size:10px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
+    };
+    const rowQ = (baseCols, scoreVal = 0, bg = '#fff') => {
+      const all = [...baseCols, {v:sc(scoreVal),center:true,w:'1fr'}];
       return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${all.map(c=>`<div style="padding:6px 8px;font-size:11px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
     };
     const nowM = new Date().getMonth() + 1;
@@ -959,13 +969,13 @@ Object.assign(App, {
     const leftPanel = `
       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
         <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">選品 — 每季</div>
-        ${subH([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'}])}
-        ${row([{v:'管量：新品數量（季）',w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true}], () => 0)}
+        ${subHQ([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'}])}
+        ${rowQ([{v:'管量：新品數量（季）',w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true}], 0)}
         <div style="background:#f0faf0;padding:6px 10px;font-size:11px;font-weight:600;color:#2e7d32;border-bottom:1px solid #c8e6c9">管質分層（三層互斥）</div>
-        ${subH([{l:'分層條件',w:'2fr'},{l:'毛利門檻(≥)'},{l:'目標'},{l:'配分'}])}
-        ${row([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true}], () => 0)}
-        ${row([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true}], () => 0, '#fafafa')}
-        ${row([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true}], () => 0)}
+        ${subHQ([{l:'分層條件',w:'2fr'},{l:'毛利門檻(≥)'},{l:'目標'},{l:'配分'}])}
+        ${rowQ([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true}], 0)}
+        ${rowQ([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true}], 0, '#fafafa')}
+        ${rowQ([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true}], 0)}
         <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">議價 — 每月</div>
         ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'}])}
         ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:blue('20'),center:true},{v:blue('20'),center:true}], ms => ms.sc)}
