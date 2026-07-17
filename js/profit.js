@@ -1702,7 +1702,7 @@ function buildShop(shop,days){
     const clicks=clicksByCode[p.code]||0;
     const platFee=p.rev*PLATFORM;
     const pureProfit=p.gross-adsFee-platFee;
-    const pureRate=p.rev>0?pureProfit/p.rev:0;
+    const pureRate=p.rev>0?pureProfit/p.rev:null;
     const adsPct=p.rev>0?adsFee/p.rev:0;
     const denom=pureRate+adsPct-0.20;
     const targetROI=denom>0?1/denom:null;
@@ -1934,7 +1934,7 @@ function buildDistHtml(shop,built){
   const adsWithBudget=ads.filter(r=>r.dayBudget>0);
   const avgBudget=adsWithBudget.length>0?Math.round(adsWithBudget.reduce((s,r)=>s+r.dayBudget,0)/adsWithBudget.length):0;
   const pct=(n,d)=>d>0?Math.round(n/d*100)+'%':'0%';
-  const H=r=>r.pureRate*100;
+  const H=r=>!(r.rev>0)?NaN:r.pureRate*100;
   const aC=(fn)=>ads.filter(fn).length;
   const nC=(fn)=>noAds.filter(fn).length;
   // Colors
@@ -1950,15 +1950,17 @@ function buildDistHtml(shop,built){
   const rMeta=(label,val,bg='#f0f4fa')=>`<tr><td style="padding:7px 14px;font-size:12px;border:${BDR};background:${bg};text-align:left"><b>${label}</b></td><td colspan="3" style="padding:7px 14px;font-size:13px;font-weight:700;border:${BDR};background:${bg};text-align:left">${val}</td></tr>`;
 
   // pureRate sub-rows for ads
-  const aPureSub=[['< 0%',aC(r=>H(r)<0)],['0% - 10%',aC(r=>H(r)>=0&&H(r)<10)],['10% - 15%',aC(r=>H(r)>=10&&H(r)<15)],['15% - 20%',aC(r=>H(r)>=15&&H(r)<20)],['20% - 30%',aC(r=>H(r)>=20&&H(r)<30)],['>30%',aC(r=>H(r)>=30)]];
+  const aPureSub=[['零營收（無淨利率）',aC(r=>!(r.rev>0))],['< 0%',aC(r=>H(r)<0)],['0% - 10%',aC(r=>H(r)>=0&&H(r)<10)],['10% - 15%',aC(r=>H(r)>=10&&H(r)<15)],['15% - 20%',aC(r=>H(r)>=15&&H(r)<20)],['20% - 30%',aC(r=>H(r)>=20&&H(r)<30)],['>30%',aC(r=>H(r)>=30)]];
   // budget sub-rows for ads
   const aBudSub=[['< $100',aC(r=>r.dayBudget<100)],['$100 - 未滿 $200',aC(r=>r.dayBudget>=100&&r.dayBudget<200)],['$200 - 未滿 $300',aC(r=>r.dayBudget>=200&&r.dayBudget<300)],['$300 - 未滿 $400',aC(r=>r.dayBudget>=300&&r.dayBudget<400)],['≥ $400',aC(r=>r.dayBudget>=400)]];
 
   const n20p=aC(r=>H(r)>=20), n20m=aC(r=>H(r)<20);
   const nB200p=aC(r=>r.dayBudget>=200), nB200m=aC(r=>r.dayBudget<200);
+  const nZero=aC(r=>!(r.rev>0)); // ZERO-REV：零營收（rev 非正、有廣告）無淨利率。拿掉零營收兩列時連本行一起刪
 
   const adsRows=`
-    <tr>${tdL('淨利率',2,BLU_HI)}${td('>20%',BLU_HI,'#fff',true)}${td(n20p,BLU_HI,'#fff',true)}${td(pct(n20p,adsTotal),BLU_HI,'#fff',true)}</tr>
+    <tr>${tdL('淨利率',3,BLU_HI)}${td('零營收（無淨利率）',BLU_HI,'#fff',true)}${td(nZero,BLU_HI,'#fff',true)}${td(pct(nZero,adsTotal),BLU_HI,'#fff',true)}</tr>
+    <tr>${td('>20%',BLU_HI,'#fff',true)}${td(n20p,BLU_HI,'#fff',true)}${td(pct(n20p,adsTotal),BLU_HI,'#fff',true)}</tr>
     <tr>${td('<20%',BLU_HI,'#fff',true)}${td(n20m,BLU_HI,'#fff',true)}${td(pct(n20m,adsTotal),BLU_HI,'#fff',true)}</tr>
     ${aPureSub.map(([l,n],i)=>`<tr>${i===0?tdL('淨利率階層',aPureSub.length,BLU_LB,'#1a3260'):''
       }${td(l,BLU_LT,'#1a3260')}${td(n,BLU_LT,'#1a3260')}${td(pct(n,adsTotal),BLU_LT,'#1a3260')}</tr>`).join('')}
@@ -1968,7 +1970,7 @@ function buildDistHtml(shop,built){
       }${td(l,ORG_LT,'#5c2000')}${td(n,ORG_LT,'#5c2000')}${td(pct(n,adsTotal),ORG_LT,'#5c2000')}</tr>`).join('')}`;
 
   // no-ads pureRate sub-rows
-  const nPureSub=[['< 0%',nC(r=>H(r)<0)],['0% - 10%',nC(r=>H(r)>=0&&H(r)<10)],['10% - 20%',nC(r=>H(r)>=10&&H(r)<20)],['20% - 30%',nC(r=>H(r)>=20&&H(r)<30)],['30% - 40%',nC(r=>H(r)>=30&&H(r)<40)],['>40%',nC(r=>H(r)>=40)]];
+  const nPureSub=[['零營收（無淨利率）',nC(r=>!(r.rev>0))],['< 0%',nC(r=>H(r)<0)],['0% - 10%',nC(r=>H(r)>=0&&H(r)<10)],['10% - 20%',nC(r=>H(r)>=10&&H(r)<20)],['20% - 30%',nC(r=>H(r)>=20&&H(r)<30)],['30% - 40%',nC(r=>H(r)>=30&&H(r)<40)],['>40%',nC(r=>H(r)>=40)]];
   const noAdsRows=nPureSub.map(([l,n],i)=>`<tr>${i===0?tdL('淨利率',nPureSub.length,GRN_HI):''
     }${td(l,GRN_LT,'#1a3260')}${td(n,GRN_LT,'#1a3260')}${td(pct(n,noAdsTotal),GRN_LT,'#1a3260')}</tr>`).join('');
 
@@ -2780,7 +2782,7 @@ function patchRow(shop,code,ov){
   if(pureEl){pureEl.textContent='$'+fmtN(r.pureProfit);pureEl.className='td-num '+(r.pureProfit>=0?'td-pos':'td-neg');}
   // pureRate
   const rateEl=document.getElementById(`td-${shop}-${code}-pureRate`);
-  if(rateEl)rateEl.innerHTML=pill(r.pureRate*100);
+  if(rateEl)rateEl.innerHTML=pill(!(r.rev>0)?null:r.pureRate*100);
   // adsPct
   const pctEl=document.getElementById(`td-${shop}-${code}-adsPct`);
   if(pctEl)pctEl.textContent=(r.adsPct*100).toFixed(2)+'%';
@@ -2808,7 +2810,7 @@ function recalcRow(shop,code,ov){
   const rev=r.rev;const gross=r.gross;
   const platFee=rev*PLATFORM;
   const pureProfit=gross-adsFee-platFee;
-  const pureRate=rev>0?pureProfit/rev:0;
+  const pureRate=rev>0?pureProfit/rev:null;
   const adsPct=rev>0?adsFee/rev:0;
   const denom=pureRate+adsPct-0.20;
   const targetROI=denom>0?1/denom:null;
@@ -3222,7 +3224,7 @@ function renderTable(shop,list){
         rev:`<td class="td-num">$${fmtN(r.rev)}<div class="sub-rev">${r.prevRev!==null?'上期 $'+fmtN(r.prevRev):'—'}</div></td>`,
         gross:`<td class="td-num">$${fmtN(r.gross)}</td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
-        pureRate:`<td id="td-${shop}-${r.code}-pureRate">${pill(r.pureRate*100)}</td>`,
+        pureRate:`<td id="td-${shop}-${r.code}-pureRate">${pill(!(r.rev>0)?null:r.pureRate*100)}</td>`,
         adsPct:`<td id="td-${shop}-${r.code}-adsPct" class="td-num">${(r.adsPct*100).toFixed(2)}%</td>`,
         stock:`<td class="td-num">${r.stock.toLocaleString()}</td>`,
         targetROI:`<td id="td-${shop}-${r.code}-targetROI" class="td-num">${r.targetROI!==null?r.targetROI.toFixed(2):'—'}</td>`,
@@ -6175,7 +6177,7 @@ function doExport(shop){
   const d=built.map(r=>[
     !r.shopeeIds?.length?'未對應':r.shopeeIds.length===1?r.shopeeIds[0]:'多個',
     r.code,r.name,+r.adsFee.toFixed(0),+r.rev.toFixed(0),+r.gross.toFixed(0),+r.pureProfit.toFixed(0),
-    +(r.pureRate*100).toFixed(2),+(r.adsPct*100).toFixed(2),r.stock,
+    !(r.rev>0)?'-':+(r.pureRate*100).toFixed(2),+(r.adsPct*100).toFixed(2),r.stock,
     r.targetROI!==null?+r.targetROI.toFixed(2):'-',r.directROI>0?+r.directROI.toFixed(2):'-',
     r.roi>0?+r.roi.toFixed(2):'-',r.roiDiff!==null?+r.roiDiff.toFixed(2):'-',
     r.clicks>0?r.clicks:'-',r.dayBudget>0?+r.dayBudget.toFixed(0):'-',
