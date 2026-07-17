@@ -934,29 +934,52 @@ Object.assign(App, {
     return (typeof buildKpiTabHtml === 'function') ? buildKpiTabHtml() : '';
   },
 
-  renderD2KpiSummaryHtml(scoreCount = 0, scoreAvg = 0) {
-    const blue = (v) => `<span style="display:inline-block;background:#fffde7;color:#1565c0;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`;
-    const red = (v) => v > 0
-      ? `<span style="display:inline-block;background:#fff1f2;color:#b71c1c;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`
-      : `<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">0</span>`;
-    const subH = (cols) => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${cols.map(c=>`<div style="padding:5px 10px;font-size:11px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
-    const row = (cols, bg='#fff') => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${cols.map(c=>`<div style="padding:7px 10px;font-size:12px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
-    const totalScore = scoreCount + scoreAvg;
+  renderD2KpiSummaryHtml(activeQ = 'Q3', monthNums = ['07','08','09'], monthScores = [{sc:0,sa:0},{sc:0,sa:0},{sc:0,sa:0}]) {
+    const mLabels = monthNums.map(m => `${parseInt(m)}月得分`);
+    const blue = (v) => `<span style="display:inline-block;background:#fffde7;color:#1565c0;font-weight:700;padding:2px 8px;border-radius:5px;font-size:11px;min-width:36px;text-align:center">${v}</span>`;
+    const sc = (v) => v > 0
+      ? `<span style="display:inline-block;background:#fff1f2;color:#b71c1c;font-weight:700;padding:2px 8px;border-radius:5px;font-size:11px;min-width:32px;text-align:center">${v}</span>`
+      : `<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-weight:700;padding:2px 8px;border-radius:5px;font-size:11px;min-width:32px;text-align:center">0</span>`;
+    const mCols = mLabels.map(l => ({l, w:'1fr'}));
+    // 每月版 header（議價用）
+    const subH = (baseCols) => {
+      const all = [...baseCols, ...mCols];
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${all.map(c=>`<div style="padding:5px 8px;font-size:10px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
+    };
+    const row = (baseCols, scoreFn, bg = '#fff') => {
+      const scs = monthScores.map(ms => ({v:sc(scoreFn(ms)),center:true,w:'1fr'}));
+      const all = [...baseCols, ...scs];
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${all.map(c=>`<div style="padding:6px 8px;font-size:11px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
+    };
+    // 每季版 header（選品用）— 單一「本季得分」欄
+    const subHQ = (baseCols) => {
+      const all = [...baseCols, {l:'本季得分', w:'1fr'}];
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${all.map(c=>`<div style="padding:5px 8px;font-size:10px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
+    };
+    const rowQ = (baseCols, scoreVal = 0, bg = '#fff') => {
+      const all = [...baseCols, {v:sc(scoreVal),center:true,w:'1fr'}];
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${all.map(c=>`<div style="padding:6px 8px;font-size:11px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
+    };
+    const nowM = new Date().getMonth() + 1;
+    const curIdx = monthNums.findIndex(m => parseInt(m) === nowM);
+    const cur = monthScores[curIdx >= 0 ? curIdx : monthScores.length - 1] || {sc:0,sa:0};
+    const totalScore = cur.sc + cur.sa + (cur.bonus || 0);
+    const totalsStr = monthScores.map((ms, i) => `${parseInt(monthNums[i])}月 ${ms.sc+ms.sa+(ms.bonus||0)}分`).join(' ／ ');
 
     const leftPanel = `
       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
         <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">選品 — 每季</div>
-        ${subH([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'},{l:'本月得分'}])}
-        ${row([{v:'管量：新品數量（季）',w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true},{v:red(0),center:true}])}
+        ${subHQ([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'}])}
+        ${rowQ([{v:'管量：新品數量（季）',w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true}], 0)}
         <div style="background:#f0faf0;padding:6px 10px;font-size:11px;font-weight:600;color:#2e7d32;border-bottom:1px solid #c8e6c9">管質分層（三層互斥）</div>
-        ${subH([{l:'分層條件',w:'2fr'},{l:'毛利門檻(≥)'},{l:'目標'},{l:'配分'},{l:'本月得分'}])}
-        ${row([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true},{v:red(0),center:true}])}
-        ${row([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true},{v:red(0),center:true}],'#fafafa')}
-        ${row([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true},{v:red(0),center:true}])}
+        ${subHQ([{l:'分層條件',w:'2fr'},{l:'毛利門檻(≥)'},{l:'目標'},{l:'配分'}])}
+        ${rowQ([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true}], 0)}
+        ${rowQ([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true}], 0, '#fafafa')}
+        ${rowQ([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true}], 0)}
         <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">議價 — 每月</div>
-        ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'},{l:'本月得分'}])}
-        ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:blue('20'),center:true},{v:blue('20'),center:true},{v:red(scoreCount),center:true}])}
-        ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:blue('10.0%'),center:true},{v:blue('20'),center:true},{v:red(scoreAvg),center:true}],'#fafafa')}
+        ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'}])}
+        ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:blue('20'),center:true},{v:blue('20'),center:true}], ms => ms.sc)}
+        ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:blue('10.0%'),center:true},{v:blue('20'),center:true}], ms => ms.sa, '#fafafa')}
         <div style="padding:5px 10px;font-size:11px;color:#6b7280;background:#fafafa;border-bottom:1px solid #f3f4f6">前 10 項平均議價幅度 ≥ 門檻，給滿分；未達則 0（全有全無）</div>
       </div>`;
 
@@ -964,19 +987,19 @@ Object.assign(App, {
       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:260px;display:flex;flex-direction:column">
         <div style="flex:1">
           <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">叫貨出錯率 — 每月</div>
-          ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'},{l:'本月得分'}])}
-          ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true},{v:red(0),center:true}])}
-          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">加分（AI 三表寫進儀表板）— 每月</div>
-          ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'},{l:'本月加分',w:'1fr'}])}
-          ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'},{v:red(0),center:true,w:'1fr'}])}
+          ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'}])}
+          ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true}], () => 0)}
+          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">加分（訂價表／議價表／圍購表／其他工具）— 每月</div>
+          ${subH([{l:'每完成一項加分',w:'2fr'}])}
+          ${row([{v:blue('+10'),center:true,w:'2fr'}], ms => ms.bonus || 0)}
           <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">扣分（單價未更新）— 每月</div>
-          ${subH([{l:'每次扣分'},{l:'單月上限'},{l:'本月扣分'}])}
-          ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true},{v:red(0),center:true}])}
+          ${subH([{l:'每次扣分'},{l:'單月上限'}])}
+          ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true}], () => 0)}
         </div>
         <div style="background:linear-gradient(135deg,#1a7a6e,#0f5349);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-top:2px solid #0f5349">
           <div>
-            <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">本月得分總計</div>
-            <div style="font-size:11px;color:rgba(255,255,255,.5)">議價數量 ${scoreCount} ＋ 議價比 ${scoreAvg} ＋ 其他 0</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">當月得分總計</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.5)">${totalsStr}</div>
           </div>
           <div style="font-size:36px;font-weight:900;color:${totalScore>=40?'#6ee7b7':totalScore>0?'#fde68a':'#9ca3af'};line-height:1">${totalScore}<span style="font-size:14px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
         </div>
@@ -999,7 +1022,9 @@ Object.assign(App, {
 
   renderD2KpiTabHtml() {
     const activeQ = Store.get('ec.d2.kpi.quarter', 'Q3');
-    const storeKey = activeQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeQ.toLowerCase()}`;
+    // 共用子分頁季別（議價表/叫貨/加分項/扣分項共用）
+    const activeStabQ = Store.get('ec.d2.kpi.stabQ', activeQ);
+    const storeKey = activeStabQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeStabQ.toLowerCase()}`;
     const list = Store.get(storeKey, []);
 
     const quarterTabs = ['Q1','Q2','Q3','Q4'].map(q => {
@@ -1007,47 +1032,14 @@ Object.assign(App, {
       return `<button class="d2-q-tab" data-q="${q}" style="padding:7px 22px;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;${active ? 'background:#1a7a6e;color:#fff;' : 'background:#f3f4f6;color:#6b7280;'}">${q}</button>`;
     }).join('');
 
-    // 非 Q3 季別若無資料顯示佔位（仍顯示子分頁）
-    if (activeQ !== 'Q3' && list.length === 0) {
-      const _activeStab = Store.get('ec.d2.kpi.stab', '議價表');
-      const _stabNames = ['選品','毛利計算','議價表','叫貨出錯率','加分項','扣分項'];
-      const _stabTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-        ${_stabNames.map(t => `<button class="d2-stab" data-t="${t}" style="padding:6px 16px;border-radius:20px;border:1px solid ${_activeStab===t?'#059669':'#e5e7eb'};background:${_activeStab===t?'#059669':'#fff'};color:${_activeStab===t?'#fff':'#374151'};font-size:13px;font-weight:${_activeStab===t?'700':'400'};cursor:pointer">${t}</button>`).join('')}
-      </div>`;
-      const _stabContent = _activeStab === '議價表' ? `
-        <div class="table-card">
-          <div class="table-card-header"><h3>💰 議價表</h3><p>${activeQ} 尚無資料</p></div>
-          <div style="padding:40px;text-align:center;color:var(--text-muted);font-size:13px">尚無資料，點擊「＋ 新增」開始建立</div>
-          <div style="padding:12px 16px;border-top:1px solid var(--border)">
-            <button id="bg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
-          </div>
-          <div id="bg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
-              <input id="bg-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-item" placeholder="品名 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-orig" type="number" placeholder="原始成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-note" placeholder="更改備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
-              <input id="bg-b1" type="number" placeholder="第一次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-b2" type="number" placeholder="第二次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-              <input id="bg-b3" type="number" placeholder="第三次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            </div>
-            <div style="display:flex;gap:8px">
-              <button id="bg-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
-              <button id="bg-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
-            </div>
-          </div>
-        </div>`
-      : `<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${_activeStab} — 尚無資料，開發中</div>`;
-      return `
-        <div style="display:flex;gap:8px;margin-bottom:16px">${quarterTabs}</div>
-        ${this.renderD2KpiSummaryHtml(0, 0)}
-        ${_stabTabsHtml}
-        ${_stabContent}`;
-    }
-
     const quarterTabsHtml = `<div style="display:flex;gap:8px;margin-bottom:16px">${quarterTabs}</div>`;
+    const sqLabels = {Q1:'1~3月',Q2:'4~6月',Q3:'7~9月',Q4:'10~12月'};
+    const stabQTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      ${['Q1','Q2','Q3','Q4'].map(q => {
+        const act = q === activeStabQ;
+        return `<button class="d2-stabq-tab" data-q="${q}" style="padding:5px 14px;border-radius:20px;border:1px solid ${act?'#1a7a6e':'#e5e7eb'};background:${act?'#1a7a6e':'#fff'};color:${act?'#fff':'#374151'};font-size:12px;font-weight:${act?'700':'400'};cursor:pointer">${q} <span style="font-size:11px;opacity:.85">${sqLabels[q]}</span></button>`;
+      }).join('')}
+    </div>`;
     const priceCell = v => Number(v) ? 'NT$' + Number(v).toLocaleString() : '<span style="color:var(--text-muted)">—</span>';
     // 計算每筆議價比並排序找前10名
     const withPct = list.map((r, i) => {
@@ -1099,8 +1091,29 @@ Object.assign(App, {
           </div>
         </details>
       </td></tr>` : '';
-    // KPI 計算
-    const nowYM = new Date().toISOString().slice(0, 7); // "2026-07"
+    // KPI 計算 — 依 activeQ 算各月分數
+    const year = new Date().getFullYear();
+    const qMonthMap = {Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
+    const activeMonths = qMonthMap[activeQ] || ['07','08','09'];
+    const kpiStoreKey = activeQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeQ.toLowerCase()}`;
+    const kpiList = Store.get(kpiStoreKey, []);
+    const bonusKey = `ec.d2.bonus.${activeQ.toLowerCase()}`;
+    const bonusAll = Store.get(bonusKey, []);
+    const monthScores = activeMonths.map(m => {
+      const ym = `${year}-${m}`;
+      const ml = kpiList.filter(r => (r.date || '').startsWith(ym));
+      const pcts = ml.map(r => {
+        const orig = Number(r.orig || 0), bids = [r.b1, r.b2, r.b3].map(Number);
+        const last = [...bids].reverse().find(v => v > 0) || 0;
+        return orig && last ? (orig - last) / orig * 100 : -1;
+      });
+      const top10p = pcts.filter(p => p > 0).sort((a, b) => b - a).slice(0, 10);
+      const avg = top10p.length ? top10p.reduce((s, v) => s + v, 0) / top10p.length : 0;
+      const bonusCount = bonusAll.filter(r => (r.date || '').startsWith(ym)).length;
+      return { sc: ml.length >= 20 ? 20 : 0, sa: avg >= 10 ? 20 : 0, bonus: bonusCount * 10 };
+    });
+    // 當月議價徽章用（議價表 card 內顯示）
+    const nowYM = new Date().toISOString().slice(0, 7);
     const monthList = list.filter(r => (r.date || '').startsWith(nowYM));
     const monthCount = monthList.length;
     const top10pcts = [...withPct].filter(x => x.pctNum > 0).sort((a, b) => b.pctNum - a.pctNum).slice(0, 10).map(x => x.pctNum);
@@ -1186,6 +1199,7 @@ Object.assign(App, {
         </table></div>
       </div>`
     : activeStab === '議價表' ? `
+      ${stabQTabsHtml}
       <div class="table-card" data-store-key="${storeKey}">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
@@ -1224,11 +1238,67 @@ Object.assign(App, {
           <tbody>${top10Rows}${restSection}</tbody>
         </table></div>
       </div>`
-    : `<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${activeStab} — 尚無資料，開發中</div>`;
+    : activeStab === '加分項' ? (() => {
+      const bnKey = `ec.d2.bonus.${activeStabQ.toLowerCase()}`;
+      const bnList = Store.get(bnKey, []);
+      const bnSorted = bnList.map((r, i) => ({ r, i })).sort((a, b) => (b.r.date || '').localeCompare(a.r.date || ''));
+      const bnItems = ['訂價表','議價表','圍購表','其他工具'];
+      const bnTotalPts = bnList.length * 10;
+      const renderBnRow = ({ r, i }) => `<tr style="vertical-align:middle">
+        <td style="text-align:left;padding:8px 12px;font-size:13px">${escapeHtml(r.date || '')}</td>
+        <td style="font-weight:600;text-align:left;padding:8px 12px;font-size:13px">${escapeHtml(r.item || '')}</td>
+        <td style="text-align:center;padding:8px 12px"><span style="display:inline-block;background:#f0fdf4;color:#059669;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px">+10</span></td>
+        <td style="text-align:left;padding:8px 12px;color:#6b7280;font-size:12px">${escapeHtml(r.note || '')}</td>
+        <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
+          <button class="bn-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
+          <button class="bn-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+        </div></td>
+      </tr>`;
+      const bnRows = bnSorted.length === 0
+        ? `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
+        : bnSorted.map(renderBnRow).join('');
+      return `${stabQTabsHtml}<div class="table-card">
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div>
+            <h3>⭐ 加分項</h3>
+            <p>每完成一項 AI 三表寫進儀表板 +10 分（共 ${bnList.length} 筆）</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="display:flex;flex-direction:column;align-items:center;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:6px 14px;min-width:80px">
+              <span style="font-size:18px;font-weight:800;color:#059669">+${bnTotalPts}</span>
+              <span style="font-size:10px;color:#9ca3af">本季加分</span>
+            </div>
+            <button id="bn-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+          </div>
+        </div>
+        <div id="bn-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+          <div style="display:grid;grid-template-columns:1fr 2fr 2fr;gap:10px;margin-bottom:10px">
+            <input id="bn-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <select id="bn-item" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;background:#fff">
+              <option value="">選擇適用項目 *</option>
+              ${bnItems.map(it => `<option value="${it}">${it}</option>`).join('')}
+            </select>
+            <input id="bn-note" placeholder="備註（選填）" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button id="bn-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+            <button id="bn-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th style="text-align:left">日期</th><th style="text-align:left">適用項目</th><th style="text-align:center">加分</th><th style="text-align:left">備註</th><th></th></tr></thead>
+          <tbody>${bnRows}</tbody>
+        </table></div>
+      </div>`;
+    })()
+    : (() => {
+      const needStabQ = ['叫貨出錯率','扣分項'].includes(activeStab);
+      return `${needStabQ ? stabQTabsHtml : ''}<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${activeStab} — 尚無資料，開發中</div>`;
+    })();
 
     return `
       ${quarterTabsHtml}
-      ${this.renderD2KpiSummaryHtml(scoreCount, scoreAvg)}
+      ${this.renderD2KpiSummaryHtml(activeQ, activeMonths, monthScores)}
       ${stabTabsHtml}
       ${stabContent}`;
   },
@@ -1302,10 +1372,68 @@ Object.assign(App, {
       }));
     }
 
+    // 子分頁 Q 分頁切換（議價表/叫貨出錯率/加分項/扣分項共用）
+    document.querySelectorAll('.d2-stabq-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Store.set('ec.d2.kpi.stabQ', btn.dataset.q);
+        this.render();
+      });
+    });
+
+    // 加分項表單
+    const bnForm = document.getElementById('bn-form');
+    if (bnForm) {
+      const bnQ = Store.get('ec.d2.kpi.stabQ', Store.get('ec.d2.kpi.quarter', 'Q3'));
+      const bnKey = `ec.d2.bonus.${bnQ.toLowerCase()}`;
+      let bnEditIdx = -1;
+      const bnSaveBtn = document.getElementById('bn-save');
+      const clearBn = () => {
+        ['bn-date','bn-item','bn-note'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        bnEditIdx = -1;
+        if (bnSaveBtn) bnSaveBtn.textContent = '儲存';
+        bnForm.style.display = 'none';
+      };
+      document.getElementById('bn-add-btn')?.addEventListener('click', () => {
+        if (bnForm.style.display !== 'none') { clearBn(); return; }
+        clearBn(); bnForm.style.display = '';
+      });
+      document.getElementById('bn-cancel')?.addEventListener('click', clearBn);
+      bnSaveBtn?.addEventListener('click', () => {
+        const item = document.getElementById('bn-item')?.value;
+        if (!item) { alert('請選擇適用項目'); return; }
+        const entry = {
+          date: document.getElementById('bn-date')?.value,
+          item,
+          note: document.getElementById('bn-note')?.value.trim(),
+        };
+        const list = Store.get(bnKey, []);
+        if (bnEditIdx >= 0) { list[bnEditIdx] = entry; } else { list.push(entry); }
+        Store.set(bnKey, list);
+        this.render();
+      });
+      document.querySelectorAll('.bn-edit').forEach(btn => btn.addEventListener('click', () => {
+        const list = Store.get(bnKey, []);
+        const r = list[+btn.dataset.i]; if (!r) return;
+        bnEditIdx = +btn.dataset.i;
+        document.getElementById('bn-date').value = r.date || '';
+        document.getElementById('bn-item').value = r.item || '';
+        document.getElementById('bn-note').value = r.note || '';
+        if (bnSaveBtn) bnSaveBtn.textContent = '更新';
+        bnForm.style.display = '';
+        bnForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }));
+      document.querySelectorAll('.bn-del').forEach(btn => btn.addEventListener('click', () => {
+        const list = Store.get(bnKey, []);
+        list.splice(+btn.dataset.i, 1);
+        Store.set(bnKey, list);
+        this.render();
+      }));
+    }
+
     const form = document.getElementById('bg-form');
     if (!form) return;
-    const activeQ = Store.get('ec.d2.kpi.quarter', 'Q3');
-    const storeKey = activeQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeQ.toLowerCase()}`;
+    const activeBQ = Store.get('ec.d2.kpi.stabQ', Store.get('ec.d2.kpi.quarter', 'Q3'));
+    const storeKey = activeBQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeBQ.toLowerCase()}`;
     const saveBtn = document.getElementById('bg-save');
     let editIndex = -1;
     const fields = ['bg-date','bg-item','bg-orig','bg-note','bg-b1','bg-b2','bg-b3'];
