@@ -1022,8 +1022,9 @@ Object.assign(App, {
 
   renderD2KpiTabHtml() {
     const activeQ = Store.get('ec.d2.kpi.quarter', 'Q3');
-    const activeBQ = Store.get('ec.d2.bargain.quarter', 'Q3');
-    const storeKey = activeBQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeBQ.toLowerCase()}`;
+    // 共用子分頁季別（議價表/叫貨/加分項/扣分項共用）
+    const activeStabQ = Store.get('ec.d2.kpi.stabQ', activeQ);
+    const storeKey = activeStabQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeStabQ.toLowerCase()}`;
     const list = Store.get(storeKey, []);
 
     const quarterTabs = ['Q1','Q2','Q3','Q4'].map(q => {
@@ -1032,11 +1033,11 @@ Object.assign(App, {
     }).join('');
 
     const quarterTabsHtml = `<div style="display:flex;gap:8px;margin-bottom:16px">${quarterTabs}</div>`;
-    const bqLabels = {Q1:'1~3月',Q2:'4~6月',Q3:'7~9月',Q4:'10~12月'};
-    const bargainQTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+    const sqLabels = {Q1:'1~3月',Q2:'4~6月',Q3:'7~9月',Q4:'10~12月'};
+    const stabQTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
       ${['Q1','Q2','Q3','Q4'].map(q => {
-        const act = q === activeBQ;
-        return `<button class="d2-bq-tab" data-q="${q}" style="padding:5px 14px;border-radius:20px;border:1px solid ${act?'#1a7a6e':'#e5e7eb'};background:${act?'#1a7a6e':'#fff'};color:${act?'#fff':'#374151'};font-size:12px;font-weight:${act?'700':'400'};cursor:pointer">${q} <span style="font-size:11px;opacity:.85">${bqLabels[q]}</span></button>`;
+        const act = q === activeStabQ;
+        return `<button class="d2-stabq-tab" data-q="${q}" style="padding:5px 14px;border-radius:20px;border:1px solid ${act?'#1a7a6e':'#e5e7eb'};background:${act?'#1a7a6e':'#fff'};color:${act?'#fff':'#374151'};font-size:12px;font-weight:${act?'700':'400'};cursor:pointer">${q} <span style="font-size:11px;opacity:.85">${sqLabels[q]}</span></button>`;
       }).join('')}
     </div>`;
     const priceCell = v => Number(v) ? 'NT$' + Number(v).toLocaleString() : '<span style="color:var(--text-muted)">—</span>';
@@ -1198,7 +1199,7 @@ Object.assign(App, {
         </table></div>
       </div>`
     : activeStab === '議價表' ? `
-      ${bargainQTabsHtml}
+      ${stabQTabsHtml}
       <div class="table-card" data-store-key="${storeKey}">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
@@ -1238,7 +1239,7 @@ Object.assign(App, {
         </table></div>
       </div>`
     : activeStab === '加分項' ? (() => {
-      const bnKey = `ec.d2.bonus.${activeQ.toLowerCase()}`;
+      const bnKey = `ec.d2.bonus.${activeStabQ.toLowerCase()}`;
       const bnList = Store.get(bnKey, []);
       const bnSorted = bnList.map((r, i) => ({ r, i })).sort((a, b) => (b.r.date || '').localeCompare(a.r.date || ''));
       const bnItems = ['訂價表','議價表','圍購表','其他工具'];
@@ -1256,7 +1257,7 @@ Object.assign(App, {
       const bnRows = bnSorted.length === 0
         ? `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
         : bnSorted.map(renderBnRow).join('');
-      return `<div class="table-card">
+      return `${stabQTabsHtml}<div class="table-card">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
             <h3>⭐ 加分項</h3>
@@ -1290,7 +1291,10 @@ Object.assign(App, {
         </table></div>
       </div>`;
     })()
-    : `<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${activeStab} — 尚無資料，開發中</div>`;
+    : (() => {
+      const needStabQ = ['叫貨出錯率','扣分項'].includes(activeStab);
+      return `${needStabQ ? stabQTabsHtml : ''}<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${activeStab} — 尚無資料，開發中</div>`;
+    })();
 
     return `
       ${quarterTabsHtml}
@@ -1368,10 +1372,10 @@ Object.assign(App, {
       }));
     }
 
-    // 議價表 Q 分頁切換
-    document.querySelectorAll('.d2-bq-tab').forEach(btn => {
+    // 子分頁 Q 分頁切換（議價表/叫貨出錯率/加分項/扣分項共用）
+    document.querySelectorAll('.d2-stabq-tab').forEach(btn => {
       btn.addEventListener('click', () => {
-        Store.set('ec.d2.bargain.quarter', btn.dataset.q);
+        Store.set('ec.d2.kpi.stabQ', btn.dataset.q);
         this.render();
       });
     });
@@ -1379,7 +1383,7 @@ Object.assign(App, {
     // 加分項表單
     const bnForm = document.getElementById('bn-form');
     if (bnForm) {
-      const bnQ = Store.get('ec.d2.kpi.quarter', 'Q3');
+      const bnQ = Store.get('ec.d2.kpi.stabQ', Store.get('ec.d2.kpi.quarter', 'Q3'));
       const bnKey = `ec.d2.bonus.${bnQ.toLowerCase()}`;
       let bnEditIdx = -1;
       const bnSaveBtn = document.getElementById('bn-save');
@@ -1428,7 +1432,7 @@ Object.assign(App, {
 
     const form = document.getElementById('bg-form');
     if (!form) return;
-    const activeBQ = Store.get('ec.d2.bargain.quarter', 'Q3');
+    const activeBQ = Store.get('ec.d2.kpi.stabQ', Store.get('ec.d2.kpi.quarter', 'Q3'));
     const storeKey = activeBQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeBQ.toLowerCase()}`;
     const saveBtn = document.getElementById('bg-save');
     let editIndex = -1;
