@@ -989,9 +989,9 @@ Object.assign(App, {
           <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">叫貨出錯率 — 每月</div>
           ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'}])}
           ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true}], () => 0)}
-          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">加分（AI 三表寫進儀表板）— 每月</div>
-          ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'}])}
-          ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'}], ms => ms.bonus || 0)}
+          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">加分（訂價表／議價表／圍購表／其他工具）— 每月</div>
+          ${subH([{l:'每完成一項加分',w:'2fr'}])}
+          ${row([{v:blue('+10'),center:true,w:'2fr'}], ms => ms.bonus || 0)}
           <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">扣分（單價未更新）— 每月</div>
           ${subH([{l:'每次扣分'},{l:'單月上限'}])}
           ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true}], () => 0)}
