@@ -1280,7 +1280,7 @@ Object.assign(App, {
             </select>
             <input id="bn-note" placeholder="備註（選填）" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           </div>
-          <div style="display:flex;gap:8px">
+          <div style="display:flex;gap:8px;justify-content:flex-end">
             <button id="bn-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
             <button id="bn-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
           </div>
