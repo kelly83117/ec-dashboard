@@ -1990,7 +1990,27 @@ Object.assign(App, {
           <thead><tr><th style="text-align:center;width:48px">編號</th><th style="text-align:left">品名</th><th style="text-align:right">成本</th><th style="text-align:right">營收</th><th style="text-align:right">毛利</th><th style="text-align:center">毛利率</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table></div>
-      </div>`;
+      </div>
+      ${(() => {
+        const savesKey = activeQ === 'Q3' ? 'ec.d2.margin.saves' : `ec.d2.margin.saves.${activeQ.toLowerCase()}`;
+        const saves = Store.get(savesKey, []);
+        if (!saves.length) return '';
+        return `<div class="table-card" style="margin-top:12px">
+          <div class="table-card-header"><h3>📂 存檔記錄</h3><p>共 ${saves.length} 份，點擊「載入」可還原該次匯入的資料</p></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>存檔時間</th><th style="text-align:right">商品數</th><th></th></tr></thead>
+            <tbody>${saves.map((s, si) => `<tr>
+              <td>${escapeHtml(s.ts || '')}</td>
+              <td style="text-align:right">${s.data ? s.data.length : 0} 筆</td>
+              <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
+                <button class="mg-save-load" data-si="${si}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">載入</button>
+                <button class="mg-save-del" data-si="${si}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+              </div></td>
+            </tr>`).join('')}
+            </tbody>
+          </table></div>
+        </div>`;
+      })()}`;
   },
 
   bindD2MarginTab() {
@@ -2040,6 +2060,24 @@ Object.assign(App, {
       const list = Store.get(mgKey, []);
       list.splice(+btn.dataset.i, 1);
       Store.set(mgKey, list);
+      this.render();
+    }));
+
+    // 存檔記錄：載入 / 刪除
+    const savesKey = activeQ === 'Q3' ? 'ec.d2.margin.saves' : `ec.d2.margin.saves.${activeQ.toLowerCase()}`;
+    document.querySelectorAll('.mg-save-load').forEach(btn => btn.addEventListener('click', () => {
+      const saves = Store.get(savesKey, []);
+      const s = saves[+btn.dataset.si];
+      if (!s || !s.data) return;
+      if (!confirm(`載入「${s.ts}」的存檔？目前資料將被覆蓋。`)) return;
+      Store.set(mgKey, s.data);
+      showToast('已載入存檔');
+      this.render();
+    }));
+    document.querySelectorAll('.mg-save-del').forEach(btn => btn.addEventListener('click', () => {
+      const saves = Store.get(savesKey, []);
+      saves.splice(+btn.dataset.si, 1);
+      Store.set(savesKey, saves);
       this.render();
     }));
 
@@ -2093,8 +2131,15 @@ Object.assign(App, {
             cost: Math.round(r.cost * 100) / 100,
           }));
           Store.set(mgKey, merged);
+          // 自動存檔
+          const savesKey = activeQ === 'Q3' ? 'ec.d2.margin.saves' : `ec.d2.margin.saves.${activeQ.toLowerCase()}`;
+          const saves = Store.get(savesKey, []);
+          const now = new Date();
+          const ts = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+          saves.unshift({ ts, data: merged });
+          Store.set(savesKey, saves);
           importFile.value = '';
-          showToast(`匯入完成，共 ${merged.length} 個商品`);
+          showToast(`匯入完成，共 ${merged.length} 個商品，已自動存檔`);
           this.render();
         } catch (err) {
           showToast('匯入失敗：' + err.message);
