@@ -1337,7 +1337,7 @@ Object.assign(App, {
           </div>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th style="text-align:center;width:48px">編號</th><th>品名</th><th style="text-align:right">成本</th><th style="text-align:right">營收</th><th style="text-align:right">毛利</th><th style="text-align:center">毛利率</th><th></th></tr></thead>
+          <thead><tr><th style="text-align:center;width:48px">編號</th><th style="text-align:left">品名</th><th style="text-align:right">成本</th><th style="text-align:right">營收</th><th style="text-align:right">毛利</th><th style="text-align:center">毛利率</th><th></th></tr></thead>
           <tbody>${mgRows}</tbody>
         </table></div>
       </div>`;
@@ -1987,7 +1987,7 @@ Object.assign(App, {
           </div>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th style="text-align:center;width:48px">編號</th><th>品名</th><th style="text-align:right">成本</th><th style="text-align:right">營收</th><th style="text-align:right">毛利</th><th style="text-align:center">毛利率</th><th></th></tr></thead>
+          <thead><tr><th style="text-align:center;width:48px">編號</th><th style="text-align:left">品名</th><th style="text-align:right">成本</th><th style="text-align:right">營收</th><th style="text-align:right">毛利</th><th style="text-align:center">毛利率</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table></div>
       </div>`;
