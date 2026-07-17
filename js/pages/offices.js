@@ -22,6 +22,10 @@ Object.assign(App, {
     if (deptId === 'd2' && this.route === 'office-d2-pricing') {
       this.bindD2PricingTab();
     }
+    // d2 毛利率表
+    if (deptId === 'd2' && this.route === 'office-d2-margin') {
+      this.bindD2MarginTab();
+    }
     // d1 insight 子頁：洞察表上傳按鈕
     if (deptId === 'd1' && this.route === 'office-d1-insight') {
       this.bindInsightTab();
@@ -890,8 +894,8 @@ Object.assign(App, {
 
     // d1 行銷、d4 設計都不顯示「成員績效」表與上方統計卡片區
     //   d4 已改用個人 KPI 頁，集體季度績效不適用
-    const showMemberKpiTable = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3' && !(deptId === 'd2' && subRoute === 'kpi');
-    const showStatGrid = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3' && !(deptId === 'd2' && subRoute === 'kpi');
+    const showMemberKpiTable = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3' && !(deptId === 'd2' && (subRoute === 'kpi' || subRoute === 'pricing' || subRoute === 'margin'));
+    const showStatGrid = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3' && !(deptId === 'd2' && (subRoute === 'kpi' || subRoute === 'pricing' || subRoute === 'margin'));
     const inner = `
       ${showStatGrid ? `<div class="stat-grid">${statCards}</div>` : ''}
       ${deptId === 'd3' ? `<div style="margin-bottom:20px">${this.renderFestivalCalendarTab()}</div>` : ''}
@@ -901,6 +905,7 @@ Object.assign(App, {
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId === 'd2' && subRoute === 'kpi' ? this.renderD2KpiTabHtml() : ''}
       ${deptId === 'd2' && subRoute === 'pricing' ? this.renderD2PricingTabHtml() : ''}
+      ${deptId === 'd2' && subRoute === 'margin' ? this.renderD2MarginTabHtml() : ''}
       ${deptId === 'd3' ? `
         <div class="d3-tab-layout">
           <div class="d3-tab-bar">${tabBar}</div>
@@ -1924,5 +1929,113 @@ Object.assign(App, {
     Store.set(`ec.d2.pricing.${activeSheet}`, list);
     form.style.display = 'none';
     this.render();
+  },
+
+  renderD2MarginTabHtml() {
+    const activeQ = Store.get('ec.d2.margin.q', 'Q3');
+    const qKey = activeQ === 'Q3' ? 'ec.d2.margin' : `ec.d2.margin.${activeQ.toLowerCase()}`;
+    const list = Store.get(qKey, []);
+    const sqLabels = {Q1:'1~3月',Q2:'4~6月',Q3:'7~9月',Q4:'10~12月'};
+    const qTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
+      ${['Q1','Q2','Q3','Q4'].map(q => {
+        const act = q === activeQ;
+        return `<button class="mg-q-tab" data-q="${q}" style="padding:6px 16px;border-radius:20px;border:1px solid ${act?'#059669':'#e5e7eb'};background:${act?'#059669':'#fff'};color:${act?'#fff':'#374151'};font-size:13px;font-weight:${act?'700':'400'};cursor:pointer">${q} <span style="font-size:11px;opacity:.75">${sqLabels[q]}</span></button>`;
+      }).join('')}
+    </div>`;
+    const priceF = v => Number(v) ? 'NT$' + Number(v).toLocaleString() : '<span style="color:var(--text-muted)">—</span>';
+    const pctF = v => v != null ? `<span style="font-weight:700;color:${v >= 30 ? '#059669' : v >= 15 ? '#f59e0b' : '#dc2626'}">${v.toFixed(1)}%</span>` : '<span style="color:var(--text-muted)">—</span>';
+    const rows = list.length === 0
+      ? `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
+      : list.map((r, i) => {
+          const cost = Number(r.cost || 0), rev = Number(r.rev || 0);
+          const profit = rev - cost;
+          const pct = rev > 0 ? profit / rev * 100 : null;
+          return `<tr style="vertical-align:middle">
+            <td style="text-align:center;color:#9ca3af;font-size:12px">${i + 1}</td>
+            <td style="font-weight:600">${escapeHtml(r.name || '')}</td>
+            <td style="text-align:right">${priceF(r.cost)}</td>
+            <td style="text-align:right">${priceF(r.rev)}</td>
+            <td style="text-align:right">${cost || rev ? priceF(profit) : '<span style="color:var(--text-muted)">—</span>'}</td>
+            <td style="text-align:center">${pctF(pct)}</td>
+            <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
+              <button class="mg-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
+              <button class="mg-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+            </div></td>
+          </tr>`;
+        }).join('');
+    return `
+      ${qTabsHtml}
+      <div class="table-card">
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div><h3>📊 毛利率表</h3><p>記錄商品成本與營收，自動計算毛利與毛利率（共 ${list.length} 筆）</p></div>
+          <button id="mg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+        </div>
+        <div id="mg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:10px">
+            <input id="mg-name" placeholder="品名 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="mg-cost" type="number" placeholder="成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="mg-rev" type="number" placeholder="營收" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button id="mg-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+            <button id="mg-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th style="text-align:center;width:48px">編號</th><th>品名</th><th style="text-align:right">成本</th><th style="text-align:right">營收</th><th style="text-align:right">毛利</th><th style="text-align:center">毛利率</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </div>`;
+  },
+
+  bindD2MarginTab() {
+    document.querySelectorAll('.mg-q-tab').forEach(btn => btn.addEventListener('click', () => {
+      Store.set('ec.d2.margin.q', btn.dataset.q);
+      this.render();
+    }));
+    const mgForm = document.getElementById('mg-form');
+    if (!mgForm) return;
+    const activeQ = Store.get('ec.d2.margin.q', 'Q3');
+    const mgKey = activeQ === 'Q3' ? 'ec.d2.margin' : `ec.d2.margin.${activeQ.toLowerCase()}`;
+    const mgSaveBtn = document.getElementById('mg-save');
+    let mgEditIdx = -1;
+    const clearMg = () => {
+      ['mg-name','mg-cost','mg-rev'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      mgEditIdx = -1;
+      mgSaveBtn.textContent = '儲存';
+      mgForm.style.display = 'none';
+    };
+    document.getElementById('mg-add-btn')?.addEventListener('click', () => {
+      if (mgForm.style.display !== 'none') { clearMg(); return; }
+      clearMg(); mgForm.style.display = '';
+    });
+    document.getElementById('mg-cancel')?.addEventListener('click', clearMg);
+    mgSaveBtn?.addEventListener('click', () => {
+      const name = document.getElementById('mg-name')?.value.trim();
+      if (!name) { showToast('請填寫品名'); return; }
+      const entry = { name, cost: document.getElementById('mg-cost')?.value || '', rev: document.getElementById('mg-rev')?.value || '' };
+      const list = Store.get(mgKey, []);
+      if (mgEditIdx >= 0) { list[mgEditIdx] = entry; } else { list.push(entry); }
+      Store.set(mgKey, list);
+      clearMg();
+      this.render();
+    });
+    document.querySelectorAll('.mg-edit').forEach(btn => btn.addEventListener('click', () => {
+      const list = Store.get(mgKey, []);
+      const r = list[+btn.dataset.i]; if (!r) return;
+      mgEditIdx = +btn.dataset.i;
+      document.getElementById('mg-name').value = r.name || '';
+      document.getElementById('mg-cost').value = r.cost || '';
+      document.getElementById('mg-rev').value = r.rev || '';
+      mgSaveBtn.textContent = '更新';
+      mgForm.style.display = '';
+      mgForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }));
+    document.querySelectorAll('.mg-del').forEach(btn => btn.addEventListener('click', () => {
+      const list = Store.get(mgKey, []);
+      list.splice(+btn.dataset.i, 1);
+      Store.set(mgKey, list);
+      this.render();
+    }));
   },
 });
