@@ -1,44 +1,44 @@
 {
-  "updated": "2026-07-15",
+  "updated": "2026-07-17",
   "items": [
     {
-      "title": "夏季涼感床墊",
+      "title": "冷氣機",
       "traffic": "50K+"
     },
     {
-      "title": "戶外露營用品",
+      "title": "防曬乳",
       "traffic": "30K+"
-    },
-    {
-      "title": "防蚊噴霧",
-      "traffic": "20K+"
-    },
-    {
-      "title": "清涼飲品製作器具",
-      "traffic": "20K+"
     },
     {
       "title": "收納箱",
-      "traffic": "30K+"
+      "traffic": "20K+"
     },
     {
-      "title": "夏季家居裝飾",
-      "traffic": "10K+"
-    },
-    {
-      "title": "冰箱整理架",
-      "traffic": "5K+"
-    },
-    {
-      "title": "防曬乳液",
-      "traffic": "50K+"
+      "title": "戶外家具",
+      "traffic": "20K+"
     },
     {
       "title": "清潔劑",
       "traffic": "30K+"
     },
     {
-      "title": "植物盆栽",
+      "title": "寢具組",
+      "traffic": "30K+"
+    },
+    {
+      "title": "冰箱",
+      "traffic": "50K+"
+    },
+    {
+      "title": "夏季衣物",
+      "traffic": "30K+"
+    },
+    {
+      "title": "水壺",
+      "traffic": "20K+"
+    },
+    {
+      "title": "風扇",
       "traffic": "10K+"
     }
   ]

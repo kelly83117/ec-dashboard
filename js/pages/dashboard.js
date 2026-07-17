@@ -88,9 +88,18 @@ Object.assign(App, {
       </div>
     `;
 
-    // 4 張總覽卡：可切換「昨日 / 前日 / 本月 / 上月 / 自訂月份」
+    // ── 檢視範圍（全頁共用：KPI 卡 / 排名長條 / 需要留意 / 圓餅圖）──
+    // ⚠ 這與上面的「填寫日期」(filter.entryDate) 是兩回事：
+    //   上面是「填」（只給填寫表格用）、這裡是「看」。兩者刻意分家，互不影響。
     const summaryRange = this.filter.summaryRange || 'yesterday';
     const customMonth = this.filter.summaryMonth || toDateStr(now).slice(0, 7);
+    // 選日期：不允許未來
+    if (this.filter.summaryDate && this.filter.summaryDate > todayStrLocal) {
+      this.filter.summaryDate = defaultInputDate;
+    }
+    const customDay = this.filter.summaryDate || defaultInputDate;
+    // 每日營收填寫預設收合；狀態記在 filter，重繪後才不會被打回收合
+    const entryOpen = !!this.filter.revenueEntryOpen;
 
     // 工具：給一個範圍類型 + 月份字串，回傳該範圍要加總的日期清單 + 標籤
     const monthDates = (yyyymm) => {
@@ -105,101 +114,150 @@ Object.assign(App, {
       }
       return arr;
     };
-    const buildRange = (key) => {
-      if (key === 'yesterday') {
-        return {
-          label: '昨日',
-          showDates: [inputDateStr],
-          compareDates: [prevDateStr],
-          compareLabel: '前一日',
-        };
-      }
-      if (key === 'dayBefore') {
-        return {
-          label: '前日',
-          showDates: [prevDateStr],
-          compareDates: [toDateStr(addDays(now, -3))],
-          compareLabel: '再前一日',
-        };
-      }
-      if (key === 'thisMonth') {
-        const ms = toDateStr(now).slice(0, 7);
-        const prevMs = toDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
-        return {
-          label: `${ms.replace('-', '/')} 本月`,
-          showDates: monthDates(ms),
-          compareDates: monthDates(prevMs),
-          compareLabel: '上月',
-        };
-      }
-      if (key === 'lastMonth') {
-        const ms = toDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
-        const prevMs = toDateStr(new Date(now.getFullYear(), now.getMonth() - 2, 1)).slice(0, 7);
-        return {
-          label: `${ms.replace('-', '/')} 上月`,
-          showDates: monthDates(ms),
-          compareDates: monthDates(prevMs),
-          compareLabel: '再上一月',
-        };
-      }
-      // customMonth
-      const [yy, mm] = customMonth.split('-').map(Number);
-      const prevDate = new Date(yy, mm - 2, 1);
-      const prevMs = toDateStr(prevDate).slice(0, 7);
+    // 單日範圍：showDates 只有一天，比較對象是它的前一天
+    const dayRange = (dStr, label) => ({
+      kind: 'day',
+      label,
+      dateLabel: dStr.replace(/-/g, '/'),
+      showDates: [dStr],
+      compareDates: [toDateStr(addDays(new Date(dStr + 'T00:00:00'), -1))],
+      compareLabel: '前一日',
+    });
+    // 月累計範圍：showDates 是該月每一天（不超過昨日），比較對象是前一個月
+    // ⚠ 本月是「部分月」（只累計到昨日）。若拿它去比上月整月，13 天比 30 天會全面假跌 —
+    //   實測 7/1–13 比 6 月整月會算出 −59%，但比 6/1–13 其實只有 −3.1%，
+    //   且有 4 個實際成長的通路會被誤判成暴跌。故部分月一律只比上月「同期」天數。
+    //   完整月份（上月 / 選過去月份）維持整月比整月，那是正常的商業比較。
+    const monthRange = (yyyymm, label, compareLabel) => {
+      const [yy, mm] = yyyymm.split('-').map(Number);
+      const prevMs = toDateStr(new Date(yy, mm - 2, 1)).slice(0, 7);
+      const showDates = monthDates(yyyymm);
+      const isPartial = yyyymm === toDateStr(now).slice(0, 7);   // 本月才會被昨日截斷
+      const cutDay = (isPartial && showDates.length)
+        ? +showDates[showDates.length - 1].slice(8, 10)
+        : 31;
       return {
-        label: `${customMonth.replace('-', '/')}`,
-        showDates: monthDates(customMonth),
-        compareDates: monthDates(prevMs),
-        compareLabel: '前一月',
+        kind: 'month',
+        label,
+        dateLabel: `${yyyymm.replace('-', '/')} 月累計`,
+        showDates,
+        compareDates: monthDates(prevMs).filter(d => +d.slice(8, 10) <= cutDay),
+        compareLabel: isPartial ? `${compareLabel}同期` : compareLabel,
       };
+    };
+    const buildRange = (key) => {
+      const thisMs = toDateStr(now).slice(0, 7);
+      const lastMs = toDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
+      if (key === 'customDay')  return dayRange(customDay, customDay.replace(/-/g, '/'));
+      if (key === 'thisMonth')  return monthRange(thisMs, `${thisMs.replace('-', '/')} 本月`, '上月');
+      if (key === 'lastMonth')  return monthRange(lastMs, `${lastMs.replace('-', '/')} 上月`, '再上一月');
+      if (key === 'customMonth') return monthRange(customMonth, customMonth.replace('-', '/'), '前一月');
+      // yesterday（預設）— 固定為真正的昨天，不再跟著填寫日期跑
+      return dayRange(defaultInputDate, '昨日');
     };
     const rangeInfo = buildRange(summaryRange);
     const sumOver = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
+    const sumAdsOver = (p, dates) => dates.reduce((s, d) => s + (+p.dailyAdSpend?.[d] || 0), 0);
 
+    // 日期列 —— 控制「檢視範圍」（不是填寫日期）
+    // 單日 = 一顆日期 pill（原本的「昨日」按鈕已併入它）：
+    //   看昨天 → 掛個「昨日」標記；看其他天 → 標記換成可點的「↩ 回昨日」。
+    //   同一時間只有一個控制項高亮：日期 pill（單日）／本月／上月／選月份 四者擇一。
+    const isDayView = summaryRange === 'yesterday' || summaryRange === 'customDay';
+    const dayTagHtml = summaryRange === 'yesterday'
+      ? '<span class="day-tag">昨日</span>'
+      : '<button type="button" id="summary-day-reset" class="pill pill-sm day-reset" title="回到昨日">↩ 回昨日</button>';
     const summaryPills = `
-      <div id="summary-pills" style="display:flex;gap:5px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
-        <span style="font-size:12px;color:var(--text-muted);margin-right:2px;font-weight:600">日期</span>
-        <button class="pill ${summaryRange === 'yesterday' ? 'active' : ''}" data-summary-range="yesterday"
-          style="padding:4px 10px;font-size:11px;font-weight:600">昨日 (${inputDateStr.replace(/-/g, '/')})</button>
-        <span style="width:1px;height:14px;background:var(--border);margin:0 2px"></span>
-        <button class="pill ${summaryRange === 'thisMonth' ? 'active' : ''}" data-summary-range="thisMonth"
-          style="padding:4px 10px;font-size:11px;font-weight:600">本月</button>
-        <button class="pill ${summaryRange === 'lastMonth' ? 'active' : ''}" data-summary-range="lastMonth"
-          style="padding:4px 10px;font-size:11px;font-weight:600">上月</button>
-        <span style="display:inline-flex;align-items:center;gap:4px">
-          <span style="font-size:11px;color:var(--text-muted);font-weight:600">選月份：</span>
-          <input type="month" id="summary-custom-month" value="${customMonth}" max="${toDateStr(now).slice(0,7)}"
-            style="padding:3px 8px;border:1px solid ${summaryRange === 'customMonth' ? 'var(--primary)' : 'var(--border)'};border-radius:999px;font-size:11px;font-family:inherit;background:${summaryRange === 'customMonth' ? 'var(--primary-soft)' : 'var(--surface)'}">
+      <div id="summary-pills" class="summary-pills">
+        <span class="summary-pills-label">檢視</span>
+        <span class="day-pill-group">
+          <input type="date" id="summary-custom-day" class="pill-input day-pill${isDayView ? ' is-active' : ''}"
+            value="${escapeHtml(customDay)}" max="${escapeHtml(todayStrLocal)}" title="挑一天看當日資料">
+          ${dayTagHtml}
+        </span>
+        <span class="summary-pills-sep"></span>
+        <button class="pill pill-sm ${summaryRange === 'thisMonth' ? 'active' : ''}" data-summary-range="thisMonth">本月</button>
+        <button class="pill pill-sm ${summaryRange === 'lastMonth' ? 'active' : ''}" data-summary-range="lastMonth">上月</button>
+        <span class="pill-picker">
+          <span class="pill-picker-label">選月份：</span>
+          <input type="month" id="summary-custom-month" class="pill-input${summaryRange === 'customMonth' ? ' is-active' : ''}"
+            value="${escapeHtml(customMonth)}" max="${escapeHtml(toDateStr(now).slice(0,7))}">
+        </span>
+        <span class="summary-pills-actions">
+          <button type="button" id="open-month-detail" class="entry-detail-btn" title="查看本月每日明細">
+            📅 本月明細
+          </button>
+          <button type="button" id="toggle-revenue-entry" class="entry-toggle-btn${entryOpen ? ' is-open' : ''}"
+            aria-expanded="${entryOpen ? 'true' : 'false'}" aria-controls="revenue-entry-panel">
+            <span>✏️ 填寫每日營收</span>
+            <span class="entry-toggle-caret">▼</span>
+          </button>
         </span>
       </div>
     `;
 
+    // 佔比分母：全通路（= 所有平台）在目前範圍的營收
+    const allChannelCur = platforms.reduce((s, p) => s + sumOver(p, rangeInfo.showDates), 0);
+
     // 用 data-* 帶 group members 索引，方便輸入時即時加上「未存欄位的差值」
+    // data-ads-idxs：該通路「有投廣告」的成員索引，供 bindCardInputs 即時算 ROAS
     const summaryCards = PLATFORM_GROUPS.map((g, gi) => {
       const members = platforms.filter(p => g.members.includes(p.name));
       const memberIdxs = members.map(p => platforms.indexOf(p)).filter(i => i >= 0);
       const cur  = members.reduce((s, p) => s + sumOver(p, rangeInfo.showDates), 0);
       const prev = members.reduce((s, p) => s + sumOver(p, rangeInfo.compareDates), 0);
       const d    = prev > 0 ? ((cur / prev) - 1) * 100 : 0;
+      const isMain = gi === 0;   // 全通路總營收 = 主卡
       const iconHtml = g.logo
-        ? `<img src="${g.logo}" alt="${escapeHtml(g.name)}" style="width:22px;height:22px;object-fit:contain;border-radius:4px;display:block">`
-        : `<span style="font-size:16px;line-height:1">${g.icon}</span>`;
+        ? `<img class="summary-card-logo" src="${g.logo}" alt="${escapeHtml(g.name)}">`
+        : `<span class="summary-card-icon">${g.icon}</span>`;
       // 是否「昨日」單日範圍 → 才需要 live 計算（多日範圍只能算已存的）
       const isSingleDay = rangeInfo.showDates && rangeInfo.showDates.length === 1
                           && rangeInfo.showDates[0] === inputDateStr;
+
+      // 右上角漲跌 pill；沒有比較基準（前期為 0）時顯示「—」，不要畫成 ↑0.0%
+      const deltaCls  = prev > 0 ? (d >= 0 ? 'up' : 'down') : 'flat';
+      const deltaText = prev > 0 ? `${d >= 0 ? '↑' : '↓'} ${Math.abs(d).toFixed(1)}%` : '—';
+
+      // 底部 ROAS / 廣告費 — 四張卡共用同一條算式（該群組有投廣告的成員加總）。
+      // 主卡的成員是全部通路，所以它算出來就是「全通路整體 ROAS」，
+      // 與填寫表格的「當日總計」列同義。
+      const adsMembers = members.filter(p => PLATFORMS_WITH_AD_SPEND.has(p.name));
+      const adsIdxs = adsMembers.map(p => platforms.indexOf(p)).filter(i => i >= 0);
+      const ads = adsMembers.reduce((s, p) => s + sumAdsOver(p, rangeInfo.showDates), 0);
+      const roas = (cur > 0 && ads > 0) ? (cur / ads).toFixed(2) : '—';
+      const adsLine = adsMembers.length === 0
+        ? '<span class="summary-card-noads">無廣告投放</span>'
+        : `ROAS <strong class="summary-card-roas-val">${roas}</strong>　·　廣告 <span class="summary-card-ads-val">${fmtNTD(ads)}</span>`;
+      const adsRowHtml = `<div class="summary-card-ads" data-ads-idxs="${adsIdxs.join(',')}">${adsLine}</div>`;
+
+      // 主卡本身就是佔比的分母，不顯示「佔全通路」，只補整體 ROAS / 廣告費
+      const footHtml = isMain
+        ? `
+          <div class="summary-card-foot">
+            ${adsRowHtml}
+          </div>`
+        : `
+          <div class="summary-card-foot">
+            <div class="summary-card-share">佔全通路 <strong class="summary-card-share-val">${(allChannelCur > 0 ? (cur / allChannelCur) * 100 : 0).toFixed(1)}%</strong></div>
+            ${adsRowHtml}
+          </div>`;
+
       return `
-        <div class="stat-card summary-card" data-group-idx="${gi}" data-member-idxs="${memberIdxs.join(',')}" data-base-cur="${cur}" data-prev="${prev}" data-single-day="${isSingleDay ? '1' : '0'}" style="padding:14px 16px;background:white;border:1px solid var(--border);border-radius:10px;box-shadow:none">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;color:var(--text-muted)">
+        <div class="stat-card summary-card${isMain ? ' summary-card-main' : ''}" data-group-idx="${gi}" data-member-idxs="${memberIdxs.join(',')}" data-base-cur="${cur}" data-prev="${prev}" data-single-day="${isSingleDay ? '1' : '0'}">
+          <div class="summary-card-head">
             ${iconHtml}
-            <span style="font-size:12px;font-weight:600;letter-spacing:.02em">${escapeHtml(g.name)}</span>
-            <span style="margin-left:auto;font-size:10px;color:var(--text-muted);font-weight:500">${escapeHtml(rangeInfo.label)}</span>
+            <div class="summary-card-id">
+              <span class="summary-card-title">${escapeHtml(g.name)}</span>
+              <span class="summary-card-range">${escapeHtml(rangeInfo.label)}</span>
+            </div>
+            <div class="summary-card-trend">
+              <span class="summary-card-delta ${deltaCls}">${deltaText}</span>
+              <span class="summary-card-compare">較${escapeHtml(rangeInfo.compareLabel)}</span>
+            </div>
           </div>
-          <div class="summary-card-value" style="font-size:22px;color:var(--text);font-weight:700;margin:0;line-height:1.15;font-variant-numeric:tabular-nums;letter-spacing:-.01em">${fmtNTD(cur)}</div>
-          <div class="summary-card-delta" style="margin-top:6px;font-size:11px;color:var(--text-muted);font-weight:500">
-            ${d >= 0
-              ? `<span class="up">↑ ${d.toFixed(1)}%</span>`
-              : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`} 較${escapeHtml(rangeInfo.compareLabel)}
-          </div>
+          <div class="summary-card-value">${fmtNTD(cur)}</div>
+          ${footHtml}
         </div>
       `;
     }).join('');
@@ -332,10 +390,6 @@ Object.assign(App, {
               <button id="entry-date-next" title="後一天" style="padding:2px 7px;border:1px solid var(--border);border-radius:4px;background:white;color:var(--text-muted);font-size:11px;cursor:pointer;line-height:1" ${inputDateStr >= todayStrLocal ? 'disabled' : ''}>→</button>
               ${inputDateStr !== defaultInputDate ? `<button id="entry-date-reset" title="回到昨天" style="padding:2px 7px;border:0;border-radius:4px;background:var(--primary-soft);color:var(--primary);font-size:10px;font-weight:600;cursor:pointer;margin-left:2px">昨天</button>` : ''}
             </div>
-            <button id="open-month-detail" title="查看本月每日明細"
-              style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:white;color:var(--text);font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px">
-              📅 本月明細
-            </button>
           </div>
         </div>
         <div class="table-wrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
@@ -365,12 +419,331 @@ Object.assign(App, {
         <p style="margin:2px 0 0;font-size:13px">歡迎回來，${escapeHtml(this.currentUser.name)}　·　${inputDateDisplay}</p>
       </div>
       ${summaryPills}
-      <div class="stat-grid" style="grid-template-columns:repeat(4, 1fr);margin-bottom:12px;gap:10px">${summaryCards}</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch">
-        <div style="display:flex">${revenueTableHtml}</div>
-        <div style="display:flex">${this.dailyLineChartHtml(platforms)}</div>
+      <div class="stat-grid summary-grid">${summaryCards}</div>
+      <div id="revenue-entry-panel" class="dash-entry${entryOpen ? '' : ' is-collapsed'}">${revenueTableHtml}</div>
+      <div class="dash-main">
+        ${this.channelRankingHtml(platforms, rangeInfo)}
+        <div class="dash-main-col">
+          ${this.channelAlertsHtml(platforms, rangeInfo)}
+          ${this.channelPieHtml(platforms, rangeInfo)}
+        </div>
+      </div>
+      <div class="dash-chart-row">${this.dailyLineChartHtml(platforms)}</div>
+    `;
+  },
+  /* 各通路指標的單一計算來源 —— KPI 卡、排名長條、需要留意、圓餅圖共用，
+     四塊的營收 / ROAS / 漲跌永遠不會算出不同答案。
+     showDates / compareDates 是「日期陣列」：
+       單日模式 = 長度 1 的陣列；月累計模式 = 該月每一天。
+       所以單日只是陣列的特例，兩種模式共用同一條算式。
+     - hasRoas：沒投廣告、或該範圍廣告費為 0 → 無法計算 ROAS（roas 為 null）
+     - hasDelta：比較範圍營收為 0 → 沒有漲跌可言（delta 為 0，不可拿來判斷）
+     - ⚠ 保留原始索引 i：它就是填寫表格的 data-idx，排序時絕不可就地 sort(platforms)，
+       打亂會讓存檔寫到錯的賣場。 */
+  channelMetrics(platforms, showDates, compareDates) {
+    const sumRev = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
+    const sumAds = (p, dates) => dates.reduce((s, d) => s + (+p.dailyAdSpend?.[d] || 0), 0);
+    return platforms.map((p, i) => {
+      const rev  = sumRev(p, showDates);
+      const prev = sumRev(p, compareDates);
+      const ads  = sumAds(p, showDates);
+      const hasRoas = PLATFORMS_WITH_AD_SPEND.has(p.name) && ads > 0;
+      const hasDelta = prev > 0;
+      return {
+        p, i, rev, prev, ads,
+        hasRoas, roas: hasRoas ? rev / ads : null,
+        hasDelta, delta: hasDelta ? ((rev / prev) - 1) * 100 : 0,
+      };
+    });
+  },
+  /* 各通路營收排名（水平長條）
+     - 資料沿用 viewDashboard 同一份 platforms，指標走 channelMetrics()，不另接來源
+     - 純 render、無事件綁定：日期切換與存檔都會走 this.render()，這裡自然跟著更新 */
+  channelRankingHtml(platforms, rangeInfo) {
+    const ranked = this.channelMetrics(platforms, rangeInfo.showDates, rangeInfo.compareDates)
+      .sort((a, b) => b.rev - a.rev);
+
+    const maxRev = Math.max(...ranked.map(m => m.rev), 0);
+    const dateDisplay = rangeInfo.dateLabel;
+
+    const legend = `
+      <div class="rank-legend">
+        <span class="rank-legend-item"><span class="rank-legend-dot is-good"></span>ROAS ≥ 10</span>
+        <span class="rank-legend-item"><span class="rank-legend-dot is-mid"></span>5 – 10</span>
+        <span class="rank-legend-item"><span class="rank-legend-dot is-low"></span>&lt; 5</span>
+        <span class="rank-legend-item"><span class="rank-legend-dot is-none"></span>無廣告</span>
       </div>
     `;
+    const head = `
+      <div class="rank-card-head">
+        <h3 class="rank-card-title">各通路營收排名</h3>
+        <span class="rank-card-date">${escapeHtml(dateDisplay)}　·　依營收由高到低　·　漲跌較${escapeHtml(rangeInfo.compareLabel)}</span>
+        ${legend}
+      </div>
+    `;
+
+    if (maxRev <= 0) {
+      return `
+        <div class="rank-card">
+          ${head}
+          <div class="rank-empty">${escapeHtml(dateDisplay)} 還沒有營收資料 — 等各通路數字填入後，這裡會顯示排名</div>
+        </div>
+      `;
+    }
+
+    const rows = ranked.map((m) => {
+      const { p, rev, hasRoas, roas, hasDelta, delta } = m;
+
+      // ROAS 分級：沒投廣告、或當日廣告費為 0 → 灰、顯示「—」（跟填寫表格的慣例一致）
+      let roasCls = 'is-none';
+      let roasText = '—';
+      if (hasRoas) {
+        roasCls = roas >= 10 ? 'is-good' : (roas >= 5 ? 'is-mid' : 'is-low');
+        roasText = roas.toFixed(2);
+      }
+
+      const pct = (rev / maxRev) * 100;
+      // 長條太短時金額塞不進去 → 翻到長條外側
+      const narrow = pct < 30;
+
+      const deltaCls  = hasDelta ? (delta >= 0 ? 'up' : 'down') : 'flat';
+      const deltaText = hasDelta
+        ? `${delta >= 0 ? '↑' : '↓'} ${Math.abs(delta).toFixed(1)}%`
+        : '—';
+
+      const market = PLATFORM_MARKETPLACE[p.name] || 'shopee';
+      const logoSrc = MARKETPLACE_BADGE[market].src;
+
+      return `
+        <li class="rank-row">
+          <span class="rank-name">
+            <img class="rank-logo" src="${logoSrc}" alt="">
+            <span class="rank-name-text" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>
+          </span>
+          <span class="rank-bar-track">
+            <span class="rank-bar ${roasCls}${narrow ? ' is-narrow' : ''}" style="--bar-pct:${pct.toFixed(1)}%">
+              <span class="rank-bar-value">${fmtNTD(rev)}</span>
+            </span>
+          </span>
+          <span class="rank-roas ${roasCls}">${roasText}</span>
+          <span class="rank-delta ${deltaCls}">${deltaText}</span>
+        </li>
+      `;
+    }).join('');
+
+    return `
+      <div class="rank-card">
+        ${head}
+        <ul class="rank-list">${rows}</ul>
+      </div>
+    `;
+  },
+  /* 需要留意 — 自動標記表現異常的通路
+     - 指標走 channelMetrics()，與排名長條同一份計算
+     - 純 render、無事件綁定：跟著既有重繪路徑更新
+     門檻：跌幅 > 20%（需有比較期資料）、ROAS < 5（需 ROAS 可計算）；符合任一即列出。
+     跌幅的比較基準隨檢視範圍走：單日 = 較前一日、月累計 = 較上月，原因文字會標明。 */
+  channelAlertsHtml(platforms, rangeInfo) {
+    const DROP_LIMIT = -20;   // 跌幅超過 20% → 標記
+    // 與排名長條的紅色門檻對齊（channelRankingHtml 的 is-low 也是 < 5），
+    // 避免出現「排名長條是黃燈、卻被列入需要留意」的矛盾
+    const ROAS_LIMIT = 5;     // ROAS 低於 5 → 標記
+
+    const alerts = this.channelMetrics(platforms, rangeInfo.showDates, rangeInfo.compareDates)
+      .map((m) => {
+        const reasons = [];
+        // 比較期沒資料就沒有跌幅可言 → 不判斷（hasDelta 已含此保護）
+        if (m.hasDelta && m.delta < DROP_LIMIT) {
+          reasons.push({ kind: 'drop', text: `營收 ↓${Math.abs(m.delta).toFixed(1)}%（較${rangeInfo.compareLabel}）` });
+        }
+        // ROAS 無法計算（無廣告投放 / 該範圍廣告費 0）→ 不納入此條件
+        if (m.hasRoas && m.roas < ROAS_LIMIT) {
+          reasons.push({ kind: 'roas', text: `ROAS 偏低 ${m.roas.toFixed(2)}` });
+        }
+        return { ...m, reasons };
+      })
+      .filter((m) => m.reasons.length > 0);
+
+    // 嚴重度優先：有跌幅的排前面（跌最多在最前），只有 ROAS 問題的排後面（ROAS 最低在前）
+    alerts.sort((a, b) => {
+      const aDrop = a.reasons.some(x => x.kind === 'drop');
+      const bDrop = b.reasons.some(x => x.kind === 'drop');
+      if (aDrop !== bDrop) return aDrop ? -1 : 1;
+      if (aDrop && bDrop) return a.delta - b.delta;
+      return a.roas - b.roas;
+    });
+
+    const dateDisplay = rangeInfo.dateLabel;
+    const head = `
+      <div class="alert-card-head">
+        <h3 class="alert-card-title">需要留意</h3>
+        <span class="alert-card-tag">系統自動標記</span>
+        <span class="alert-card-count">${escapeHtml(dateDisplay)}${alerts.length ? `　·　${alerts.length} 個通路` : ''}</span>
+      </div>
+    `;
+
+    if (alerts.length === 0) {
+      const okText = rangeInfo.kind === 'month' ? '各通路表現穩定，無需特別留意' : '今日各通路表現穩定，無需特別留意';
+      return `
+        <div class="alert-card">
+          ${head}
+          <div class="alert-ok"><span>✓</span><span>${escapeHtml(okText)}</span></div>
+        </div>
+      `;
+    }
+
+    const rows = alerts.map((m) => {
+      const market = PLATFORM_MARKETPLACE[m.p.name] || 'shopee';
+      const logoSrc = MARKETPLACE_BADGE[market].src;
+      const chips = m.reasons
+        .map(x => `<span class="alert-chip is-${x.kind}">${escapeHtml(x.text)}</span>`)
+        .join('');
+      return `
+        <li class="alert-row">
+          <span class="alert-icon">⚠️</span>
+          <img class="alert-logo" src="${logoSrc}" alt="">
+          <span class="alert-name">${escapeHtml(m.p.name)}</span>
+          <span class="alert-reasons">${chips}</span>
+        </li>
+      `;
+    }).join('');
+
+    return `
+      <div class="alert-card">
+        ${head}
+        <ul class="alert-list">${rows}</ul>
+      </div>
+    `;
+  },
+  /* 各通路營收佔比（甜甜圈）— 沿用 index.html 既有的 Chart.js CDN，不引新套件
+     - 指標走 channelMetrics()，與排名長條 / 需要留意同一份計算
+     - 比照既有 _chartState 的做法：這裡只產生 markup + 把資料放進 _pieState，
+       實際建圖在 initChannelPie()（DOM 進場後才有 canvas 可用）
+     - 純 render、無事件綁定：跟著既有重繪路徑更新 */
+  channelPieHtml(platforms, rangeInfo) {
+    const metrics = this.channelMetrics(platforms, rangeInfo.showDates, rangeInfo.compareDates);
+    const total = metrics.reduce((s, m) => s + m.rev, 0);
+    const dateDisplay = rangeInfo.dateLabel;
+    const head = `
+      <div class="pie-card-head">
+        <h3 class="pie-card-title">各通路營收佔比</h3>
+        <span class="pie-card-date">${escapeHtml(dateDisplay)}</span>
+      </div>
+    `;
+    // 營收 0 的通路不畫進圖，免得圖例掛一排 0.0%
+    const slices = metrics.filter(m => m.rev > 0).sort((a, b) => b.rev - a.rev);
+
+    if (total <= 0 || slices.length === 0) {
+      this._pieState = null;
+      return `<div class="pie-card">${head}<div class="pie-empty">${escapeHtml(dateDisplay)} 還沒有營收資料</div></div>`;
+    }
+    // CDN 掛掉 / 離線時不要整頁炸掉，給替代訊息（下次重繪會自己補上）
+    if (typeof window.Chart === 'undefined') {
+      this._pieState = null;
+      return `<div class="pie-card">${head}<div class="pie-empty">圖表元件尚未載入 — 重新整理後即會顯示</div></div>`;
+    }
+
+    this._pieState = {
+      labels: slices.map(m => m.p.name),
+      values: slices.map(m => m.rev),
+      colors: slices.map(m => m.p.color || '#94a3b8'),
+      total,
+    };
+
+    const legend = slices.map((m) => {
+      const pct = (m.rev / total) * 100;
+      return `
+        <span class="pie-legend-item">
+          <span class="pie-legend-dot" style="--dot:${m.p.color || '#94a3b8'}"></span>
+          ${escapeHtml(m.p.name)}
+          <span class="pie-legend-pct">${pct.toFixed(1)}%</span>
+        </span>
+      `;
+    }).join('');
+
+    return `
+      <div class="pie-card">
+        ${head}
+        <div class="pie-canvas-wrap"><canvas id="channel-pie"></canvas></div>
+        <div class="pie-legend">${legend}</div>
+      </div>
+    `;
+  },
+  /* 建立甜甜圈圖 — 由 bindDashboardPills() 在每次 render 後呼叫。
+     ⚠ 首頁每次改日期 / 存檔 / 雲端快照都會 render()，innerHTML 一換舊 canvas 就沒了，
+       Chart 實例若不 destroy 會持續洩漏並可能報「Canvas is already in use」。
+       這裡沿用 profit.js 的慣例：實例存起來、重建前先 destroy。 */
+  initChannelPie() {
+    if (this._channelPieChart) {
+      try { this._channelPieChart.destroy(); } catch {}
+      this._channelPieChart = null;
+    }
+    const canvas = document.getElementById('channel-pie');
+    if (!canvas || !this._pieState || typeof window.Chart === 'undefined') return;
+    // 保險：同一個 canvas 上若還掛著孤兒實例，一併清掉
+    const orphan = window.Chart.getChart(canvas);
+    if (orphan) { try { orphan.destroy(); } catch {} }
+
+    const { labels, values, colors, total } = this._pieState;
+    // 顏色一律讀 :root 變數，不在這裡寫死
+    const css = getComputedStyle(document.documentElement);
+    const cText    = css.getPropertyValue('--text').trim()       || '#111827';
+    const cMuted   = css.getPropertyValue('--text-muted').trim() || '#6b7280';
+    const cSurface = css.getPropertyValue('--surface').trim()    || '#ffffff';
+    // canvas 不吃 CSS，字體要自己指定（對齊全站黑體）
+    const font = '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif';
+
+    // 圓心文字：直接畫在 canvas 上，座標取自圓弧中心 → 不會跑位
+    const centerText = {
+      id: 'channelPieCenter',
+      afterDatasetsDraw(chart) {
+        const arc = chart.getDatasetMeta(0)?.data?.[0];
+        if (!arc) return;
+        const { ctx } = chart;
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = cMuted;
+        ctx.font = `600 11px ${font}`;
+        ctx.fillText('全通路', arc.x, arc.y - 11);
+        ctx.fillStyle = cText;
+        ctx.font = `700 17px ${font}`;
+        ctx.fillText(fmtNTD(total), arc.x, arc.y + 9);
+        ctx.restore();
+      },
+    };
+
+    this._channelPieChart = new window.Chart(canvas.getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          backgroundColor: colors,
+          borderColor: cSurface,
+          borderWidth: 2,
+          hoverOffset: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '62%',
+        animation: { duration: 200 },
+        plugins: {
+          legend: { display: false },   // 圖例用 HTML 自己做，才標得上百分比
+          tooltip: {
+            callbacks: {
+              label: (c) => {
+                const pct = total > 0 ? (c.parsed / total) * 100 : 0;
+                return ` ${c.label}　${fmtNTD(c.parsed)}（${pct.toFixed(1)}%）`;
+              },
+            },
+          },
+        },
+      },
+      plugins: [centerText],
+    });
   },
   dailyLineChartHtml(platforms /* days param ignored now */) {
     const now = new Date();
@@ -740,6 +1113,23 @@ Object.assign(App, {
     `;
   },
   bindDashboardPills() {
+    // 甜甜圈圖：每次 render 後重建（含銷毀舊實例），不是事件綁定
+    this.initChannelPie();
+
+    // 每日營收填寫的展開 / 收合。
+    // ⚠ 只切 class，絕對不要在這裡呼叫 this.render()：
+    //   填寫表格必須一直留在 DOM（bindCardInputs 綁的 .card-rev / .card-ads 才不會失效，
+    //   總覽卡的即時加總也才讀得到值），重繪還會把使用者打到一半的輸入洗掉。
+    const entryBtn = document.getElementById('toggle-revenue-entry');
+    if (entryBtn) {
+      entryBtn.addEventListener('click', () => {
+        const open = !this.filter.revenueEntryOpen;
+        this.filter.revenueEntryOpen = open;
+        entryBtn.classList.toggle('is-open', open);
+        entryBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        document.getElementById('revenue-entry-panel')?.classList.toggle('is-collapsed', !open);
+      });
+    }
     // 曲線圖圖例：點哪個平台就單獨顯示，點「全部」回到所有平台
     document.querySelectorAll('.line-legend').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -774,7 +1164,31 @@ Object.assign(App, {
         this.render();
       });
     });
-    // 自訂月份 picker
+    // 檢視範圍 — 日期 pill（單日模式）
+    const dayPicker = document.getElementById('summary-custom-day');
+    if (dayPicker) {
+      dayPicker.addEventListener('change', () => {
+        if (!dayPicker.value) return;
+        const todayLocal2 = toDateStr(new Date());
+        const yesterdayLocal = toDateStr(addDays(new Date(), -1));
+        const v = dayPicker.value > todayLocal2 ? todayLocal2 : dayPicker.value;
+        this.filter.summaryDate = v;
+        // 用日曆挑回昨天 → 正規化回「昨日」模式，
+        // 免得停在「其實就是昨天、卻還顯示『回昨日』」的尷尬狀態
+        this.filter.summaryRange = (v === yesterdayLocal) ? 'yesterday' : 'customDay';
+        this.render();
+      });
+    }
+    // 檢視範圍 — 「↩ 回昨日」（只在檢視日不是昨天時才存在，比照填寫表格的 #entry-date-reset）
+    const dayReset = document.getElementById('summary-day-reset');
+    if (dayReset) {
+      dayReset.addEventListener('click', () => {
+        this.filter.summaryRange = 'yesterday';
+        this.filter.summaryDate = null;   // 清掉 → customDay 會重新落回昨天
+        this.render();
+      });
+    }
+    // 檢視範圍 — 選月份（月累計模式）
     const monthPicker = document.getElementById('summary-custom-month');
     if (monthPicker) {
       monthPicker.addEventListener('change', () => {
@@ -1237,14 +1651,31 @@ Object.assign(App, {
         const cur = memberIdxs.reduce((s,i) => s + (revByIdx[i] || 0), 0);
         const prev = +card.dataset.prev || 0;
         const valEl = card.querySelector('.summary-card-value');
-        const deltaEl = card.querySelector('.summary-card-delta');
         if (valEl) valEl.textContent = fmtNTD2(cur);
+
+        // 漲跌 pill：只換文字 + up/down class，不重建結構
+        //（比較基準那行是獨立元素，不需要在這裡回填）
+        const deltaEl = card.querySelector('.summary-card-delta');
         if (deltaEl && prev > 0) {
           const d = (cur / prev - 1) * 100;
-          const compareLabel = deltaEl.textContent.replace(/^[↑↓]\s*[\d.]+%\s*/, '').trim() || '較前一日';
-          deltaEl.innerHTML = (d >= 0
-            ? `<span class="up">↑ ${d.toFixed(1)}%</span>`
-            : `<span class="down">↓ ${Math.abs(d).toFixed(1)}%</span>`) + ' ' + compareLabel;
+          deltaEl.classList.remove('up', 'down', 'flat');
+          deltaEl.classList.add(d >= 0 ? 'up' : 'down');
+          deltaEl.textContent = `${d >= 0 ? '↑' : '↓'} ${Math.abs(d).toFixed(1)}%`;
+        }
+
+        // 佔全通路 %：分母用當下所有通路的即時總額
+        const shareEl = card.querySelector('.summary-card-share-val');
+        if (shareEl) shareEl.textContent = totalRev > 0 ? ((cur / totalRev) * 100).toFixed(1) + '%' : '0.0%';
+
+        // ROAS / 廣告費：只有該通路有廣告成員時才有這兩個欄位
+        const adsRow = card.querySelector('.summary-card-ads[data-ads-idxs]');
+        const adsIdxs = (adsRow?.dataset.adsIdxs || '').split(',').filter(Boolean).map(n=>+n);
+        if (adsIdxs.length) {
+          const ads = adsIdxs.reduce((s,i) => s + (adsByIdx[i] || 0), 0);
+          const roasEl = card.querySelector('.summary-card-roas-val');
+          const adsValEl = card.querySelector('.summary-card-ads-val');
+          if (roasEl) roasEl.textContent = (cur > 0 && ads > 0) ? (cur / ads).toFixed(2) : '—';
+          if (adsValEl) adsValEl.textContent = fmtNTD2(ads);
         }
       });
     };

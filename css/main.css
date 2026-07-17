@@ -25,6 +25,10 @@
     --shadow-lg: 0 10px 25px -5px rgba(15,23,42,.1), 0 8px 10px -6px rgba(15,23,42,.05);
     --radius: 12px;
     --radius-sm: 8px;
+    /* 每日營收填寫面板的寬度上限。表格是 table-layout:fixed + width:100%，
+       賣場欄是唯一沒指定 width 的欄，會把剩餘寬度全部吃掉（1600px 螢幕下佔 889px），
+       把賣場名稱和輸入欄推到螢幕兩端。收住面板寬度就沒有剩餘可吃。 */
+    --entry-max-w: 760px;
   }
 
   * { box-sizing: border-box; }
@@ -455,6 +459,651 @@
   }
   .stat-card .stat-meta .up { color: var(--success); }
   .stat-card .stat-meta .down { color: var(--danger); }
+
+  /* ------------- 儀表板首頁 · 日期列（檢視範圍）-------------
+     控制 KPI 卡 / 排名長條 / 需要留意 / 圓餅圖共用的檢視範圍。
+     與填寫表格自己的「填寫日期」是兩回事，互不影響。 */
+  .summary-pills {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .summary-pills-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-right: 2px;
+  }
+  .summary-pills-sep {
+    width: 1px;
+    height: 14px;
+    background: var(--border);
+    margin: 0 2px;
+    flex-shrink: 0;
+  }
+  /* 日期列用的小尺寸 pill（.pill 的緊湊版） */
+  .pill-sm {
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .pill-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .pill-picker-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .pill-input {
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 11px;
+  }
+  /* 選中的挑選器：用主色淺底標示目前生效的模式 */
+  .pill-input.is-active {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-weight: 700;
+  }
+
+  /* 單日檢視 = 一顆日期 pill（原本的「昨日」按鈕已併入）＋ 一個狀態標記。
+     看昨天 → 靜態「昨日」標記；看其他天 → 可點的「↩ 回昨日」。 */
+  .day-pill-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .day-pill {
+    font-weight: 600;
+  }
+  /* 「昨日」只是狀態註記，不是按鈕 —— 不給底色，免得跟旁邊高亮的 pill 混淆 */
+  .day-tag {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--primary);
+    white-space: nowrap;
+  }
+  .day-reset {
+    padding: 3px 8px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  /* ------------- 儀表板首頁 · 總覽卡 (summary-card) -------------
+     四張一排：主卡「全通路總營收」放大，其餘三張為通路卡。
+     窄螢幕由下方 @media (max-width:460px) 的 .stat-grid 規則收成 1 欄。 */
+  .summary-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .summary-card {
+    display: flex;
+    flex-direction: column;
+    padding: 14px 16px;
+    box-shadow: none;
+  }
+  .summary-card-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .summary-card-logo {
+    width: 22px; height: 22px;
+    object-fit: contain;
+    border-radius: 4px;
+    display: block;
+    flex-shrink: 0;
+  }
+  .summary-card-icon { font-size: 16px; line-height: 1.35; flex-shrink: 0; }
+  .summary-card-id {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  /* 標題鎖定不換行，避免被右上角 pill 擠成兩行 */
+  .summary-card-title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .summary-card-range {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  /* 右上角：漲跌 pill + 其下的比較基準說明 */
+  .summary-card-trend {
+    margin-left: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+  .summary-card-delta {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .summary-card-delta.up   { background: var(--success-soft); color: var(--success); }
+  .summary-card-delta.down { background: var(--danger-soft);  color: var(--danger); }
+  /* flat = 沒有比較基準（前期為 0），不顯示假的 0.0% */
+  .summary-card-delta.flat { background: var(--bg); color: var(--text-muted); }
+  .summary-card-compare {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .summary-card-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.15;
+    letter-spacing: -.01em;
+    font-variant-numeric: tabular-nums;
+  }
+  /* 主卡（全通路總營收）：放大字級做出主從層級 */
+  .summary-card-main .summary-card-title { font-size: 13px; color: var(--text); }
+  .summary-card-main .summary-card-value { font-size: 30px; letter-spacing: -.02em; }
+  /* 通路卡底部：佔比 + ROAS / 廣告費，靠 margin-top:auto 對齊各卡底部 */
+  .summary-card-foot {
+    margin-top: auto;
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .summary-card-share,
+  .summary-card-ads {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .summary-card-share strong,
+  .summary-card-ads strong {
+    color: var(--text);
+    font-weight: 700;
+  }
+  .summary-card-noads { color: var(--text-muted); opacity: .75; }
+
+  /* ------------- 儀表板首頁 · 每日營收填寫（可收合） -------------
+     收合只切 class、不重繪：填寫表格永遠留在 DOM，
+     否則 bindCardInputs 的 .card-rev 會消失，連帶讓總覽卡的即時加總靜默歸零。 */
+  /* 本月明細 + 填寫每日營收 兩顆一組靠右。
+     margin-left:auto 掛在這層而不是各按鈕上，否則兩顆之間會被撐開一大縫；
+     窄螢幕時（.summary-pills 有 flex-wrap）兩顆會整組一起換行，不會拆散。 */
+  .summary-pills-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  /* 本月明細：唯讀檢視入口，次要層級 —— 透明底 + 灰字，
+     刻意比旁邊的「填寫每日營收」（實心 surface）輕，hover 才浮出來。 */
+  .entry-detail-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  .entry-detail-btn:hover {
+    background: var(--surface);
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .entry-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  .entry-toggle-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  /* 展開中：用主色淺底標示狀態 */
+  .entry-toggle-btn.is-open {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .entry-toggle-caret {
+    font-size: 9px;
+    line-height: 1;
+    transition: transform .15s ease;
+  }
+  .entry-toggle-btn.is-open .entry-toggle-caret { transform: rotate(180deg); }
+
+  /* ------------- 儀表板首頁 · 各通路營收排名 -------------
+     長條長度由 JS 以 style="--bar-pct:NN%" 帶入（只帶數值，樣式全在這裡）。
+     顏色語意沿用 KPI 卡那套：good=success / mid=warn / low=danger / none=灰。 */
+  .rank-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .rank-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .rank-card-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .rank-card-date {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  .rank-legend {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .rank-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .rank-legend-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .rank-legend-dot.is-good { background: var(--success); }
+  .rank-legend-dot.is-mid  { background: var(--warn); }
+  .rank-legend-dot.is-low  { background: var(--danger); }
+  .rank-legend-dot.is-none { background: var(--text-muted); }
+
+  .rank-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .rank-row {
+    display: grid;
+    grid-template-columns: 132px 1fr 62px 74px;
+    align-items: center;
+    gap: 10px;
+  }
+  .rank-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .rank-logo {
+    width: 18px; height: 18px;
+    border-radius: 4px;
+    object-fit: contain;
+    background: var(--surface);
+    padding: 1px;
+    flex-shrink: 0;
+    box-shadow: var(--shadow-sm);
+  }
+  .rank-name-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* 長條軌道 */
+  .rank-bar-track {
+    position: relative;
+    height: 24px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    overflow: visible;
+  }
+  .rank-bar {
+    position: relative;
+    display: block;
+    height: 100%;
+    width: var(--bar-pct, 0%);
+    min-width: 3px;
+    border-radius: var(--radius-sm);
+    transition: width .2s ease;
+  }
+  .rank-bar.is-good { background: var(--success); }
+  .rank-bar.is-mid  { background: var(--warn); }
+  .rank-bar.is-low  { background: var(--danger); }
+  .rank-bar.is-none { background: var(--text-muted); }
+  /* 金額標在長條上；長條太短時翻到長條右側外面，避免壓字 */
+  .rank-bar-value {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--surface);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .rank-bar.is-narrow .rank-bar-value {
+    right: auto;
+    left: 100%;
+    margin-left: 8px;
+    color: var(--text);
+  }
+  /* ROAS：沿用 KPI 卡 delta pill 的 -soft 淺底樣式 */
+  .rank-roas {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .rank-roas.is-good { background: var(--success-soft); color: var(--success); }
+  .rank-roas.is-mid  { background: var(--warn-soft);    color: var(--warn); }
+  .rank-roas.is-low  { background: var(--danger-soft);  color: var(--danger); }
+  .rank-roas.is-none { background: var(--bg);           color: var(--text-muted); }
+  .rank-delta {
+    font-size: 11px;
+    font-weight: 600;
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .rank-delta.up   { color: var(--success); }
+  .rank-delta.down { color: var(--danger); }
+  .rank-delta.flat { color: var(--text-muted); }
+  .rank-empty {
+    padding: 28px 12px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  @media (max-width: 700px) {
+    .rank-row { grid-template-columns: 92px 1fr 54px 62px; gap: 6px; }
+    .rank-legend { width: 100%; margin-left: 0; }
+  }
+
+  /* ------------- 儀表板首頁 · 需要留意 -------------
+     警示感但不張揚：淺底 chip + 細框，不用強烈色塊。 */
+  .alert-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .alert-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .alert-card-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .alert-card-tag {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .alert-card-count {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .alert-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .alert-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+  }
+  .alert-icon {
+    font-size: 12px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .alert-logo {
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    object-fit: contain;
+    background: var(--surface);
+    padding: 1px;
+    flex-shrink: 0;
+  }
+  .alert-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .alert-reasons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-left: auto;
+  }
+  .alert-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .alert-chip.is-drop { background: var(--danger-soft); color: var(--danger); }
+  .alert-chip.is-roas { background: var(--warn-soft);   color: var(--warn); }
+  /* 空狀態：正向、綠色系 */
+  .alert-ok {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 18px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--success-soft);
+    color: var(--success);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  /* ------------- 儀表板首頁 · 最終版面 -------------
+     pills → KPI 卡 → 填寫面板(可收合) → 主區塊(左排名 / 右上留意 + 右下圓餅) → 折線圖 */
+
+  /* 填寫面板：位於 KPI 卡與主區塊之間，靠左收窄（父層 flex 預設 flex-start 即靠左，不需 margin）*/
+  .dash-entry {
+    display: flex;
+    margin-bottom: 12px;
+  }
+  .dash-entry.is-collapsed { display: none; }
+  /* 卡片帶 inline width:100%，這裡用 max-width 收住即可（max-width 優先於 width，
+     不必 !important、也不用改 dashboard.js 的 markup）。
+     只設上限：視窗窄於上限時維持原本 100%，行為不變；再窄則交回表格既有的
+     min-width:520px + .table-wrap 的 overflow-x:auto 處理。 */
+  .dash-entry > .table-card { max-width: var(--entry-max-w); }
+
+  /* 主區塊：左 6 右 4 */
+  .dash-main {
+    display: grid;
+    grid-template-columns: 6fr 4fr;
+    gap: 12px;
+    align-items: stretch;
+    margin-bottom: 12px;
+  }
+  /* 右欄：需要留意（自然高） + 圓餅圖（撐滿剩餘高度 → 左右兩欄等高） */
+  .dash-main-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+  .dash-main-col > .pie-card { flex: 1; }
+  /* 主區塊內的卡片間距統一由 grid / flex 的 gap 控制，避免雙重間距 */
+  .dash-main > .rank-card,
+  .dash-main .alert-card,
+  .dash-main .pie-card { margin-bottom: 0; }
+  /* 折線圖：整條獨立一列 */
+  .dash-chart-row { display: flex; }
+
+  @media (max-width: 900px) {
+    .dash-main { grid-template-columns: 1fr; }
+  }
+
+  /* ------------- 儀表板首頁 · 各通路營收佔比（甜甜圈） -------------
+     圓心文字由 Chart.js plugin 直接畫在 canvas 上，不用 CSS 疊字定位。
+     圖例色點以 style="--dot:顏色" 帶值，樣式仍在此。 */
+  .pie-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+  }
+  .pie-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .pie-card-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .pie-card-date {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  /* Chart.js 以 maintainAspectRatio:false 填滿這個容器 */
+  .pie-canvas-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 190px;
+  }
+  .pie-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 12px;
+    margin-top: 10px;
+  }
+  .pie-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .pie-legend-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--dot, var(--text-muted));
+    flex-shrink: 0;
+  }
+  .pie-legend-pct {
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .pie-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 12px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
 
   /* 篩選列 */
   .filter-bar {

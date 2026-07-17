@@ -1956,6 +1956,42 @@ Object.assign(App, {
         _origViewportOffset = eRect.top - cRect.top; // 商品原本在容器內從上算的位置
       }
     } catch {}
+    // 開 modal 前記下所有商品 row 的順序（如果排序是「調整最新日期」，剛編的
+    //   商品會被重繪推到最上方；先記順序、關 modal 後把 DOM 排回去，就不會跳位）
+    let _preEditOrder = [];
+    try {
+      _preEditOrder = Array.from(document.querySelectorAll('[data-insight-note]'))
+        .map(el => el.dataset.insightNote)
+        .filter(Boolean);
+    } catch {}
+    // 關 modal 之後恢復原順序 (只針對 tbody 內的 row)
+    const restoreRowOrder = () => {
+      if (!_preEditOrder || _preEditOrder.length === 0) return;
+      try {
+        const rows = Array.from(document.querySelectorAll('[data-insight-note]'));
+        if (rows.length === 0) return;
+        const rowMap = new Map();
+        rows.forEach(r => {
+          // 找到最接近的 <tr> 父層（每筆商品是一列）
+          const tr = r.closest('tr');
+          if (tr && !rowMap.has(r.dataset.insightNote)) rowMap.set(r.dataset.insightNote, tr);
+        });
+        // 每個 tr 在同一個 tbody 內，抓第一個 tr 的 parentElement 當基準
+        const firstTr = rowMap.values().next().value;
+        const tbody = firstTr && firstTr.parentElement;
+        if (!tbody) return;
+        // 按照原順序把 tr 逐一 appendChild → tbody 會照 append 順序重排
+        //   （appendChild 對已存在的 node 相當於「移到最後」）
+        _preEditOrder.forEach(c => {
+          const tr = rowMap.get(c);
+          if (tr && tr.parentElement === tbody) tbody.appendChild(tr);
+        });
+        // 若有新增商品不在原順序（罕見）→ 附加在最後
+        rowMap.forEach((tr, c) => {
+          if (!_preEditOrder.includes(c) && tr.parentElement === tbody) tbody.appendChild(tr);
+        });
+      } catch (e) { console.warn('[restoreRowOrder] 失敗', e); }
+    };
     // 關閉備註視窗後 → 找回商品元素，把它調回同樣的相對位置
     //   單次不夠：關 modal 後可能還有雲端 snapshot 觸發二次 render 把 scrollTop 吃掉
     //   → 用 rAF + 兩個延遲時間點各再跑一次，抵禦後續重繪
@@ -2144,6 +2180,7 @@ Object.assign(App, {
           flushPendingInput();
           autoSave();
           this.render();
+          restoreRowOrder(); // 讓剛編輯的商品保持在原本位置，不會跳到最上方
           this.closeModal();
           scrollBackToProduct();
         });

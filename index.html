@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
@@ -6,56 +6,56 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="app-version" content="2026-07-15-130">
-<title>元創 · 管理系統</title>
+<meta name="app-version" content="2026-07-17-136">
+<title>? 繚 蝞∠?蝟餌絞</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='12' fill='white'/%3E%3Ctext x='50' y='72' font-family='Helvetica,Arial,sans-serif' font-size='62' font-weight='900' text-anchor='middle' fill='%2329A89C' letter-spacing='-2'%3EYC%3C/text%3E%3C/svg%3E">
 
-<!-- PWA：加到主畫面後開起來像 App（全螢幕、不顯示網址列） -->
+<!-- PWA嚗??唬蜓?恍敺?韏瑚???App嚗?Ｗ???憿舐內蝬脣??? -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#29A89C">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="元創儀表板">
+<meta name="apple-mobile-web-app-title" content="??銵冽">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 
 <link rel="stylesheet" href="css/main.css">
 <link rel="stylesheet" href="css/profit.css">
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-<!-- 淨利表用：酷澎總表趨勢圖（js/profit.js 裡 new Chart(...)），儀表板開頁不需要所以用 defer -->
+<!-- 瘛典銵函嚗瞉蜇銵刻隅?Ｗ?嚗s/profit.js 鋆?new Chart(...)嚗??銵冽??銝?閬?隞亦 defer -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" defer></script>
 <script src="js/version.js"></script>
-<!-- ?v= 版本號要跟上面 app-version 及 js/main.js 裡各 import 的 ?v= 一起改，不然 GitHub Pages 的 10 分鐘 JS 快取會讓使用者看不到新版功能 -->
-<script type="module" src="js/main.js?v=2026-07-15-130"></script>
+<!-- ?v= ???頝???app-version ??js/main.js 鋆∪? import ???v= 銝韏瑟嚗???GitHub Pages ??10 ?? JS 敹怠???雿輻??銝?啁?? -->
+<script type="module" src="js/main.js?v=2026-07-17-136"></script>
 </head>
 <body>
 
 <div id="view-boot">
   <div class="spinner"></div>
-  <div style="font-size:13px;color:#9ca3af;font-weight:500;letter-spacing:.08em">載入中</div>
+  <div style="font-size:13px;color:#9ca3af;font-weight:500;letter-spacing:.08em">頛銝?/div>
 </div>
 
 <div id="view-login">
   <div class="login-card">
     <div class="login-logo">
-      <img class="brand-logo" src="assets/logo.png" alt="元創數位">
-      <p>元創數位 · 內部管理系統</p>
+      <img class="brand-logo" src="assets/logo.png" alt="??訾?">
+      <p>??訾? 繚 ?折蝞∠?蝟餌絞</p>
     </div>
     <div id="login-error" class="login-error"></div>
     <div id="form-login">
       <div class="field">
-        <label>帳號</label>
-        <input type="text" id="login-username" autocomplete="username" placeholder="請輸入帳號">
+        <label>撣唾?</label>
+        <input type="text" id="login-username" autocomplete="username" placeholder="隢撓?亙董??>
       </div>
       <div class="field">
-        <label>密碼</label>
-        <input type="password" id="login-password" autocomplete="current-password" placeholder="請輸入密碼">
+        <label>撖Ⅳ</label>
+        <input type="password" id="login-password" autocomplete="current-password" placeholder="隢撓?亙?蝣?>
       </div>
-      <button type="button" class="btn-primary" onclick="window.App && App.login()">登入</button>
+      <button type="button" class="btn-primary" onclick="window.App && App.login()">?餃</button>
       <div class="login-hint" id="login-hint">
-        請使用管理員建立的帳號登入。<br>
-        如忘記帳號或密碼，請聯絡系統管理員。
+        隢蝙?函恣?撱箇??董??乓?br>
+        憒?閮董??撖Ⅳ嚗??舐窗蝟餌絞蝞∠??～?
         <div id="js-status" style="margin-top:8px;color:var(--danger);font-size:11px"></div>
       </div>
     </div>
@@ -63,60 +63,60 @@
 </div>
 
 <div id="view-app">
-  <button id="sidebar-toggle-btn" class="sidebar-toggle" title="收合 / 展開側欄">‹</button>
-  <!-- PWA 專用：加到主畫面後開啟沒有網址列，靠這顆按鈕重新整理。純網頁模式隱藏 -->
-  <button id="pwa-refresh-btn" class="pwa-refresh" title="重新整理" aria-label="重新整理" onclick="location.reload()">↻</button>
+  <button id="sidebar-toggle-btn" class="sidebar-toggle" title="?嗅? / 撅??湔?">??/button>
+  <!-- PWA 撠嚗??唬蜓?恍敺????雯?????????渡???蝬脤?璅∪??梯? -->
+  <button id="pwa-refresh-btn" class="pwa-refresh" title="??渡?" aria-label="??渡?" onclick="location.reload()">??/button>
   <div class="app-layout">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <img class="brand-logo" src="assets/logo.png" alt="元創數位">
-        <p>元創數位 · 內部管理系統</p>
+        <img class="brand-logo" src="assets/logo.png" alt="??訾?">
+        <p>??訾? 繚 ?折蝞∠?蝟餌絞</p>
       </div>
       <nav class="sidebar-nav">
-        <div class="sidebar-group">總覽</div>
+        <div class="sidebar-group">蝮質汗</div>
         <button class="nav-item" data-route="dashboard">
-          <span class="icon">🏠</span><span>儀表板首頁</span>
+          <span class="icon">??</span><span>?銵冽擐?</span>
         </button>
         <button class="nav-item active" data-route="employees">
-          <span class="icon">📊</span><span>績效管理</span>
+          <span class="icon">??</span><span>蝮暹?蝞∠?</span>
         </button>
-        <div class="sidebar-group">辦公室</div>
+        <div class="sidebar-group">颲血摰?/div>
         <button class="nav-item nav-parent" data-toggle-group="d1">
-          <span class="icon">📣</span><span style="flex:1">行銷</span><span class="nav-chevron">▾</span>
+          <span class="icon">?</span><span style="flex:1">銵</span><span class="nav-chevron">??/span>
         </button>
         <div class="nav-sub-group" data-group="d1">
-          <button class="nav-item nav-sub" data-route="office-d1"><span>工作日誌</span></button>
+          <button class="nav-item nav-sub" data-route="office-d1"><span>撌乩??亥?</span></button>
           <button class="nav-item nav-sub" data-route="office-d1-kpi"><span>KPI</span></button>
-          <button class="nav-item nav-sub" data-route="office-d1-profit"><span>淨利表</span></button>
-          <button class="nav-item nav-sub" data-route="office-d1-insight"><span>洞察表</span></button>
+          <button class="nav-item nav-sub" data-route="office-d1-profit"><span>瘛典銵?/span></button>
+          <button class="nav-item nav-sub" data-route="office-d1-insight"><span>瘣?銵?/span></button>
         </div>
         <button class="nav-item nav-parent" data-toggle-group="d2">
-          <span class="icon">🛒</span><span style="flex:1">採購</span><span class="nav-chevron">▾</span>
+          <span class="icon">??</span><span style="flex:1">?∟頃</span><span class="nav-chevron">??/span>
         </button>
         <div class="nav-sub-group" data-group="d2">
-          <button class="nav-item nav-sub" data-route="office-d2"><span>工作總覽</span></button>
+          <button class="nav-item nav-sub" data-route="office-d2"><span>撌乩?蝮質汗</span></button>
           <button class="nav-item nav-sub" data-route="office-d2-kpi"><span>KPI</span></button>
-          <button class="nav-item nav-sub" data-route="office-d2-pricing"><span>訂價表</span></button>
+          <button class="nav-item nav-sub" data-route="office-d2-pricing"><span>閮銵?/span></button>
         </div>
-        <button class="nav-item" data-route="office-d3"><span class="icon">💼</span><span>商開</span></button>
-        <button class="nav-item" data-route="office-d4"><span class="icon">🎨</span><span>設計</span></button>
-        <div class="sidebar-group" id="admin-group" style="display:none">系統管理</div>
+        <button class="nav-item" data-route="office-d3"><span class="icon">?</span><span>??</span></button>
+        <button class="nav-item" data-route="office-d4"><span class="icon">?</span><span>閮剛?</span></button>
+        <div class="sidebar-group" id="admin-group" style="display:none">蝟餌絞蝞∠?</div>
         <button class="nav-item" data-route="users" id="nav-users" style="display:none">
-          <span class="icon">👥</span><span>帳號管理</span>
+          <span class="icon">?</span><span>撣唾?蝞∠?</span>
         </button>
       </nav>
       <div class="sidebar-footer">
         <div class="avatar" id="user-avatar"></div>
         <div class="info">
-          <div class="name" id="user-name">—</div>
-          <div class="role" id="user-role">—</div>
+          <div class="name" id="user-name">??/div>
+          <div class="role" id="user-role">??/div>
         </div>
-        <button title="修改密碼" onclick="App.openChangePasswordModal()"
+        <button title="靽格撖Ⅳ" onclick="App.openChangePasswordModal()"
           style="background:transparent;border:0;color:var(--sidebar-text);cursor:pointer;font-size:16px;padding:6px;border-radius:6px"
           onmouseover="this.style.background='var(--sidebar-2)'"
-          onmouseout="this.style.background='transparent'">🔑</button>
+          onmouseout="this.style.background='transparent'">??</button>
       </div>
-      <button class="logout-btn" onclick="App.logout()">登出</button>
+      <button class="logout-btn" onclick="App.logout()">?餃</button>
     </aside>
     <main class="main" id="main-content"></main>
   </div>
@@ -130,3 +130,5 @@
 
 </body>
 </html>
+
+
