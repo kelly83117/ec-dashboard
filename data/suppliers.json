@@ -1,5 +1,5 @@
 {
-  "updated": "2026-07-16",
+  "updated": "2026-07-17",
   "items": [
     {
       "keyword": "收纳盒",
@@ -10,36 +10,36 @@
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E7%9B%92"
     },
     {
-      "keyword": "厨房收纳架",
-      "name": "多层厨房收纳架",
-      "price_range": "10-30元",
+      "keyword": "浴室收纳架",
+      "name": "浴室多層收纳架",
+      "price_range": "15-30元",
       "moq": "50個",
-      "reason": "夏季烹饪需求增加",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E6%94%B6%E7%BA%B3%E6%9E%B6"
+      "reason": "夏季清潔與整理需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%BA%B3%E6%9E%B6"
     },
     {
-      "keyword": "浴室收纳",
-      "name": "浴室置物架",
-      "price_range": "15-40元",
+      "keyword": "廚房收納用品",
+      "name": "廚房置物架",
+      "price_range": "20-50元",
       "moq": "30個",
-      "reason": "暑假家居装修热潮",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%BA%B3"
+      "reason": "即將到來的中秋烹飪需求",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BB%9A%E6%88%BF%E6%94%B6%E7%B4%8D%E7%94%A8%E5%93%81"
     },
     {
       "keyword": "清洁工具",
       "name": "多功能清洁刷",
-      "price_range": "5-15元",
+      "price_range": "5-12元",
       "moq": "100個",
-      "reason": "夏季大扫除需求提升",
+      "reason": "夏季大掃除需求上升",
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E5%B7%A5%E5%85%B7"
     },
     {
-      "keyword": "床上用品",
-      "name": "透气床单",
-      "price_range": "20-50元",
-      "moq": "50個",
-      "reason": "夏季凉爽寝具需求增加",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E4%B8%8A%E7%94%A8%E5%93%81"
+      "keyword": "寢具套件",
+      "name": "夏季薄被套",
+      "price_range": "40-80元",
+      "moq": "20套",
+      "reason": "夏季涼感商品需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%AF%A2%E5%85%B7%E5%A5%97%E4%BB%B6"
     }
   ]
 }

@@ -1,45 +1,45 @@
 {
-  "updated": "2026-07-16",
+  "updated": "2026-07-17",
   "items": [
     {
-      "title": "夏季清涼用品",
+      "title": "冷氣機",
       "traffic": "50K+"
     },
     {
-      "title": "戶外露營裝備",
+      "title": "防曬乳",
       "traffic": "30K+"
     },
     {
-      "title": "防蚊喷霧",
+      "title": "收納箱",
       "traffic": "20K+"
     },
     {
-      "title": "家居整理收納",
-      "traffic": "30K+"
-    },
-    {
-      "title": "冷氣機清潔",
-      "traffic": "10K+"
-    },
-    {
-      "title": "夏季床單",
+      "title": "戶外家具",
       "traffic": "20K+"
-    },
-    {
-      "title": "自製冰品模具",
-      "traffic": "5K+"
-    },
-    {
-      "title": "防曬乳液",
-      "traffic": "50K+"
-    },
-    {
-      "title": "戶外野餐用具",
-      "traffic": "10K+"
     },
     {
       "title": "清潔劑",
       "traffic": "30K+"
+    },
+    {
+      "title": "寢具組",
+      "traffic": "30K+"
+    },
+    {
+      "title": "冰箱",
+      "traffic": "50K+"
+    },
+    {
+      "title": "夏季衣物",
+      "traffic": "30K+"
+    },
+    {
+      "title": "水壺",
+      "traffic": "20K+"
+    },
+    {
+      "title": "風扇",
+      "traffic": "10K+"
     }
   ]
 }
