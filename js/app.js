@@ -2807,14 +2807,23 @@ async function __setupCloud() {
 
     // 訂閱 app/insight：其他人改了洞察表資料，這台會收到更新
     // 合併進 _mem 但不重新賦值整個 _mem（避免蓋掉 app/main 的資料）
+    //
+    // ⚠ Bug fix：舊版直接 Object.keys(idata).forEach(k => _mem[k] = idata[k])
+    //   會覆蓋 pending 裡的本機編輯 → 同事編了多個商品但只有最後一個活下來。
+    //   現在跳過 __insightPendingNotes 裡的 key，本機版永遠贏，直到使用者按同步。
     try {
       if (window.__cloudInsight) {
         window.__cloudInsight.subscribe((idata) => {
           if (!idata) return;
           try {
+            const pending = window.__insightPendingNotes;
+            const skipped = [];
             Object.keys(idata).forEach(k => {
+              // 本機還沒同步的 key → 不覆蓋（等使用者按同步再處理）
+              if (pending && pending.has && pending.has(k)) { skipped.push(k); return; }
               if (Store._mem) Store._mem[k] = idata[k];
             });
+            if (skipped.length) console.warn('[insight subscribe] 保留本機 pending 版本，跳過雲端覆蓋:', skipped);
             // 有洞察表變動且不在編輯狀態 → 重繪
             if (window.App && App.currentUser && typeof App.render === 'function') {
               const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
