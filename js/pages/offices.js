@@ -1972,6 +1972,7 @@ Object.assign(App, {
             <button id="mg-import-btn" style="padding:7px 16px;background:#1d4ed8;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">📥 匯入 Excel</button>
             <input id="mg-import-file" type="file" accept=".xlsx,.xls" style="display:none">
             <button id="mg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+            ${list.length > 0 ? `<button id="mg-clear-btn" style="padding:7px 16px;background:#fff;color:#dc2626;border:1px solid #fca5a5;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">🗑 一鍵清除</button>` : ''}
           </div>
         </div>
         <div id="mg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
@@ -2041,6 +2042,13 @@ Object.assign(App, {
       Store.set(mgKey, list);
       this.render();
     }));
+
+    // 一鍵清除
+    document.getElementById('mg-clear-btn')?.addEventListener('click', () => {
+      if (!confirm('確定要清除所有資料？')) return;
+      Store.set(mgKey, []);
+      this.render();
+    });
 
     // 匯入 Excel
     const importBtn = document.getElementById('mg-import-btn');
