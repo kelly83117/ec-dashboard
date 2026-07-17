@@ -936,29 +936,29 @@ Object.assign(App, {
 
   renderD2KpiSummaryHtml(activeQ = 'Q3', monthNums = ['07','08','09'], monthScores = [{sc:0,sa:0},{sc:0,sa:0},{sc:0,sa:0}]) {
     const mLabels = monthNums.map(m => `${parseInt(m)}月得分`);
-    const blue = (v) => `<span style="display:inline-block;background:#fffde7;color:#1565c0;font-weight:700;padding:2px 8px;border-radius:5px;font-size:11px;min-width:36px;text-align:center">${v}</span>`;
+    const blue = (v) => `<span style="display:inline-block;background:#fffde7;color:#1565c0;font-weight:700;padding:2px 10px;border-radius:5px;font-size:13px;min-width:40px;text-align:center">${v}</span>`;
     const sc = (v) => v > 0
-      ? `<span style="display:inline-block;background:#fff1f2;color:#b71c1c;font-weight:700;padding:2px 8px;border-radius:5px;font-size:11px;min-width:32px;text-align:center">${v}</span>`
-      : `<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-weight:700;padding:2px 8px;border-radius:5px;font-size:11px;min-width:32px;text-align:center">0</span>`;
+      ? `<span style="display:inline-block;background:#fff1f2;color:#b71c1c;font-weight:700;padding:2px 10px;border-radius:5px;font-size:13px;min-width:36px;text-align:center">${v}</span>`
+      : `<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-weight:700;padding:2px 10px;border-radius:5px;font-size:13px;min-width:36px;text-align:center">0</span>`;
     const mCols = mLabels.map(l => ({l, w:'1fr'}));
     // 每月版 header（議價用）
     const subH = (baseCols) => {
       const all = [...baseCols, ...mCols];
-      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${all.map(c=>`<div style="padding:5px 8px;font-size:10px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${all.map(c=>`<div style="padding:6px 10px;font-size:12px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
     };
     const row = (baseCols, scoreFn, bg = '#fff') => {
       const scs = monthScores.map(ms => ({v:sc(scoreFn(ms)),center:true,w:'1fr'}));
       const all = [...baseCols, ...scs];
-      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${all.map(c=>`<div style="padding:6px 8px;font-size:11px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${all.map(c=>`<div style="padding:8px 10px;font-size:13px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
     };
     // 每季版 header（選品用）— 單一「本季得分」欄
     const subHQ = (baseCols) => {
       const all = [...baseCols, {l:'本季得分', w:'1fr'}];
-      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${all.map(c=>`<div style="padding:5px 8px;font-size:10px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${all.map(c=>`<div style="padding:6px 10px;font-size:12px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
     };
     const rowQ = (baseCols, scoreVal = 0, bg = '#fff') => {
       const all = [...baseCols, {v:sc(scoreVal),center:true,w:'1fr'}];
-      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${all.map(c=>`<div style="padding:6px 8px;font-size:11px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${all.map(c=>`<div style="padding:8px 10px;font-size:13px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
     };
     const nowM = new Date().getMonth() + 1;
     const curIdx = monthNums.findIndex(m => parseInt(m) === nowM);
