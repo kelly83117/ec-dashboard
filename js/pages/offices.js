@@ -1066,7 +1066,7 @@ Object.assign(App, {
         <td style="font-weight:700;font-size:12px;color:${pctNum > 0 ? '#059669' : 'var(--text-muted)'}">
           <span>${pct}</span>
         </td>
-        <td style="font-size:12px">${escapeHtml(r.note || '')}</td>
+        <td style="text-align:center"><input type="checkbox" class="bg-toggle-changed" data-i="${i}" ${r.changed ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;accent-color:#059669"></td>
         <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
           <button class="bg-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
           <button class="bg-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
@@ -1221,7 +1221,7 @@ Object.assign(App, {
             <input id="bg-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="bg-item" placeholder="品名 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="bg-orig" type="number" placeholder="原始成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="bg-note" placeholder="更改備註" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer;background:#fff"><input type="checkbox" id="bg-changed" style="width:15px;height:15px;accent-color:#059669;cursor:pointer"> 更改單價</label>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
             <input id="bg-b1" type="number" placeholder="第一次議價" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
@@ -1234,7 +1234,7 @@ Object.assign(App, {
           </div>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th>日期</th><th>品名</th><th style="text-align:center">原始成本</th><th style="text-align:center">第一次議價</th><th style="text-align:center">第二次議價</th><th style="text-align:center">第三次議價</th><th style="text-align:center">議價比</th><th>更改</th><th></th></tr></thead>
+          <thead><tr><th>日期</th><th>品名</th><th style="text-align:center">原始成本</th><th style="text-align:center">第一次議價</th><th style="text-align:center">第二次議價</th><th style="text-align:center">第三次議價</th><th style="text-align:center">議價比</th><th style="text-align:center">更改單價</th><th></th></tr></thead>
           <tbody>${top10Rows}${restSection}</tbody>
         </table></div>
       </div>`
@@ -1436,9 +1436,10 @@ Object.assign(App, {
     const storeKey = activeBQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeBQ.toLowerCase()}`;
     const saveBtn = document.getElementById('bg-save');
     let editIndex = -1;
-    const fields = ['bg-date','bg-item','bg-orig','bg-note','bg-b1','bg-b2','bg-b3'];
+    const fields = ['bg-date','bg-item','bg-orig','bg-b1','bg-b2','bg-b3'];
     const clearForm = () => {
       fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      const bgCh = document.getElementById('bg-changed'); if (bgCh) bgCh.checked = false;
       editIndex = -1;
       saveBtn.textContent = '儲存';
       form.style.display = 'none';
@@ -1458,7 +1459,7 @@ Object.assign(App, {
         b1: document.getElementById('bg-b1')?.value,
         b2: document.getElementById('bg-b2')?.value,
         b3: document.getElementById('bg-b3')?.value,
-        note: document.getElementById('bg-note')?.value.trim(),
+        changed: document.getElementById('bg-changed')?.checked || false,
       };
       const list = Store.get(storeKey, []);
       if (editIndex >= 0) { list[editIndex] = entry; } else { list.push(entry); }
@@ -1475,7 +1476,7 @@ Object.assign(App, {
       document.getElementById('bg-b1').value = r.b1 || '';
       document.getElementById('bg-b2').value = r.b2 || '';
       document.getElementById('bg-b3').value = r.b3 || '';
-      document.getElementById('bg-note').value = r.note || '';
+      const bgChanged = document.getElementById('bg-changed'); if (bgChanged) bgChanged.checked = !!r.changed;
       saveBtn.textContent = '更新';
       form.style.display = '';
       form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1485,6 +1486,10 @@ Object.assign(App, {
       list.splice(+btn.dataset.i, 1);
       Store.set(storeKey, list);
       this.render();
+    }));
+    document.querySelectorAll('.bg-toggle-changed').forEach(cb => cb.addEventListener('change', () => {
+      const list = Store.get(storeKey, []);
+      if (list[+cb.dataset.i]) { list[+cb.dataset.i].changed = cb.checked; Store.set(storeKey, list); }
     }));
   },
 
