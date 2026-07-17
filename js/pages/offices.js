@@ -1243,11 +1243,11 @@ Object.assign(App, {
       const bnSorted = bnList.map((r, i) => ({ r, i })).sort((a, b) => (b.r.date || '').localeCompare(a.r.date || ''));
       const bnItems = ['訂價表','議價表','圍購表','其他工具'];
       const bnTotalPts = bnList.length * 10;
-      const renderBnRow = ({ r, i }) => `<tr style="vertical-align:middle;text-align:center">
-        <td>${escapeHtml(r.date || '')}</td>
-        <td style="font-weight:600;text-align:left">${escapeHtml(r.item || '')}</td>
-        <td><span style="display:inline-block;background:#f0fdf4;color:#059669;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px">+10</span></td>
-        <td style="text-align:left;color:#6b7280;font-size:12px">${escapeHtml(r.note || '')}</td>
+      const renderBnRow = ({ r, i }) => `<tr style="vertical-align:middle">
+        <td style="text-align:left;padding:8px 12px;font-size:13px">${escapeHtml(r.date || '')}</td>
+        <td style="font-weight:600;text-align:left;padding:8px 12px;font-size:13px">${escapeHtml(r.item || '')}</td>
+        <td style="text-align:center;padding:8px 12px"><span style="display:inline-block;background:#f0fdf4;color:#059669;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px">+10</span></td>
+        <td style="text-align:left;padding:8px 12px;color:#6b7280;font-size:12px">${escapeHtml(r.note || '')}</td>
         <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
           <button class="bn-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
           <button class="bn-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
@@ -1285,7 +1285,7 @@ Object.assign(App, {
           </div>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th>日期</th><th>適用項目</th><th style="text-align:center">加分</th><th>備註</th><th></th></tr></thead>
+          <thead><tr><th style="text-align:left">日期</th><th style="text-align:left">適用項目</th><th style="text-align:center">加分</th><th style="text-align:left">備註</th><th></th></tr></thead>
           <tbody>${bnRows}</tbody>
         </table></div>
       </div>`;
