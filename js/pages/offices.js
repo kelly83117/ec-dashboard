@@ -1143,7 +1143,7 @@ Object.assign(App, {
       </div>`;
 
     const activeStab = Store.get('ec.d2.kpi.stab', '議價表');
-    const stabNames = ['選品','毛利計算','議價表','毛利率表','叫貨出錯率','加分項','扣分項'];
+    const stabNames = ['選品','毛利計算','議價表','叫貨出錯率','加分項','扣分項'];
     const stabTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
       ${stabNames.map(t => `<button class="d2-stab" data-t="${t}" style="padding:6px 16px;border-radius:20px;border:1px solid ${activeStab===t?'#059669':'#e5e7eb'};background:${activeStab===t?'#059669':'#fff'};color:${activeStab===t?'#fff':'#374151'};font-size:13px;font-weight:${activeStab===t?'700':'400'};cursor:pointer">${t}</button>`).join('')}
     </div>`;
