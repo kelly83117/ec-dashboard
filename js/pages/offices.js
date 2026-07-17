@@ -963,8 +963,8 @@ Object.assign(App, {
     const nowM = new Date().getMonth() + 1;
     const curIdx = monthNums.findIndex(m => parseInt(m) === nowM);
     const cur = monthScores[curIdx >= 0 ? curIdx : monthScores.length - 1] || {sc:0,sa:0};
-    const totalScore = cur.sc + cur.sa;
-    const totalsStr = monthScores.map((ms, i) => `${parseInt(monthNums[i])}月 ${ms.sc+ms.sa}分`).join(' ／ ');
+    const totalScore = cur.sc + cur.sa + (cur.bonus || 0);
+    const totalsStr = monthScores.map((ms, i) => `${parseInt(monthNums[i])}月 ${ms.sc+ms.sa+(ms.bonus||0)}分`).join(' ／ ');
 
     const leftPanel = `
       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
@@ -991,7 +991,7 @@ Object.assign(App, {
           ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true}], () => 0)}
           <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">加分（AI 三表寫進儀表板）— 每月</div>
           ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'}])}
-          ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'}], () => 0)}
+          ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'}], ms => ms.bonus || 0)}
           <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">扣分（單價未更新）— 每月</div>
           ${subH([{l:'每次扣分'},{l:'單月上限'}])}
           ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true}], () => 0)}
@@ -1096,6 +1096,8 @@ Object.assign(App, {
     const activeMonths = qMonthMap[activeQ] || ['07','08','09'];
     const kpiStoreKey = activeQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeQ.toLowerCase()}`;
     const kpiList = Store.get(kpiStoreKey, []);
+    const bonusKey = `ec.d2.bonus.${activeQ.toLowerCase()}`;
+    const bonusAll = Store.get(bonusKey, []);
     const monthScores = activeMonths.map(m => {
       const ym = `${year}-${m}`;
       const ml = kpiList.filter(r => (r.date || '').startsWith(ym));
@@ -1106,7 +1108,8 @@ Object.assign(App, {
       });
       const top10p = pcts.filter(p => p > 0).sort((a, b) => b - a).slice(0, 10);
       const avg = top10p.length ? top10p.reduce((s, v) => s + v, 0) / top10p.length : 0;
-      return { sc: ml.length >= 20 ? 20 : 0, sa: avg >= 10 ? 20 : 0 };
+      const bonusCount = bonusAll.filter(r => (r.date || '').startsWith(ym)).length;
+      return { sc: ml.length >= 20 ? 20 : 0, sa: avg >= 10 ? 20 : 0, bonus: bonusCount * 10 };
     });
     // 當月議價徽章用（議價表 card 內顯示）
     const nowYM = new Date().toISOString().slice(0, 7);
@@ -1234,6 +1237,59 @@ Object.assign(App, {
           <tbody>${top10Rows}${restSection}</tbody>
         </table></div>
       </div>`
+    : activeStab === '加分項' ? (() => {
+      const bnKey = `ec.d2.bonus.${activeQ.toLowerCase()}`;
+      const bnList = Store.get(bnKey, []);
+      const bnSorted = bnList.map((r, i) => ({ r, i })).sort((a, b) => (b.r.date || '').localeCompare(a.r.date || ''));
+      const bnItems = ['訂價表','議價表','圍購表','其他工具'];
+      const bnTotalPts = bnList.length * 10;
+      const renderBnRow = ({ r, i }) => `<tr style="vertical-align:middle;text-align:center">
+        <td>${escapeHtml(r.date || '')}</td>
+        <td style="font-weight:600;text-align:left">${escapeHtml(r.item || '')}</td>
+        <td><span style="display:inline-block;background:#f0fdf4;color:#059669;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px">+10</span></td>
+        <td style="text-align:left;color:#6b7280;font-size:12px">${escapeHtml(r.note || '')}</td>
+        <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
+          <button class="bn-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
+          <button class="bn-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+        </div></td>
+      </tr>`;
+      const bnRows = bnSorted.length === 0
+        ? `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
+        : bnSorted.map(renderBnRow).join('');
+      return `<div class="table-card">
+        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div>
+            <h3>⭐ 加分項</h3>
+            <p>每完成一項 AI 三表寫進儀表板 +10 分（共 ${bnList.length} 筆）</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="display:flex;flex-direction:column;align-items:center;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:6px 14px;min-width:80px">
+              <span style="font-size:18px;font-weight:800;color:#059669">+${bnTotalPts}</span>
+              <span style="font-size:10px;color:#9ca3af">本季加分</span>
+            </div>
+            <button id="bn-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+          </div>
+        </div>
+        <div id="bn-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+          <div style="display:grid;grid-template-columns:1fr 2fr 2fr;gap:10px;margin-bottom:10px">
+            <input id="bn-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <select id="bn-item" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;background:#fff">
+              <option value="">選擇適用項目 *</option>
+              ${bnItems.map(it => `<option value="${it}">${it}</option>`).join('')}
+            </select>
+            <input id="bn-note" placeholder="備註（選填）" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="bn-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+            <button id="bn-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>日期</th><th>適用項目</th><th style="text-align:center">加分</th><th>備註</th><th></th></tr></thead>
+          <tbody>${bnRows}</tbody>
+        </table></div>
+      </div>`;
+    })()
     : `<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${activeStab} — 尚無資料，開發中</div>`;
 
     return `
@@ -1319,6 +1375,56 @@ Object.assign(App, {
         this.render();
       });
     });
+
+    // 加分項表單
+    const bnForm = document.getElementById('bn-form');
+    if (bnForm) {
+      const bnQ = Store.get('ec.d2.kpi.quarter', 'Q3');
+      const bnKey = `ec.d2.bonus.${bnQ.toLowerCase()}`;
+      let bnEditIdx = -1;
+      const bnSaveBtn = document.getElementById('bn-save');
+      const clearBn = () => {
+        ['bn-date','bn-item','bn-note'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        bnEditIdx = -1;
+        if (bnSaveBtn) bnSaveBtn.textContent = '儲存';
+        bnForm.style.display = 'none';
+      };
+      document.getElementById('bn-add-btn')?.addEventListener('click', () => {
+        if (bnForm.style.display !== 'none') { clearBn(); return; }
+        clearBn(); bnForm.style.display = '';
+      });
+      document.getElementById('bn-cancel')?.addEventListener('click', clearBn);
+      bnSaveBtn?.addEventListener('click', () => {
+        const item = document.getElementById('bn-item')?.value;
+        if (!item) { alert('請選擇適用項目'); return; }
+        const entry = {
+          date: document.getElementById('bn-date')?.value,
+          item,
+          note: document.getElementById('bn-note')?.value.trim(),
+        };
+        const list = Store.get(bnKey, []);
+        if (bnEditIdx >= 0) { list[bnEditIdx] = entry; } else { list.push(entry); }
+        Store.set(bnKey, list);
+        this.render();
+      });
+      document.querySelectorAll('.bn-edit').forEach(btn => btn.addEventListener('click', () => {
+        const list = Store.get(bnKey, []);
+        const r = list[+btn.dataset.i]; if (!r) return;
+        bnEditIdx = +btn.dataset.i;
+        document.getElementById('bn-date').value = r.date || '';
+        document.getElementById('bn-item').value = r.item || '';
+        document.getElementById('bn-note').value = r.note || '';
+        if (bnSaveBtn) bnSaveBtn.textContent = '更新';
+        bnForm.style.display = '';
+        bnForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }));
+      document.querySelectorAll('.bn-del').forEach(btn => btn.addEventListener('click', () => {
+        const list = Store.get(bnKey, []);
+        list.splice(+btn.dataset.i, 1);
+        Store.set(bnKey, list);
+        this.render();
+      }));
+    }
 
     const form = document.getElementById('bg-form');
     if (!form) return;
