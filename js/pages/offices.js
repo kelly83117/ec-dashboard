@@ -934,29 +934,42 @@ Object.assign(App, {
     return (typeof buildKpiTabHtml === 'function') ? buildKpiTabHtml() : '';
   },
 
-  renderD2KpiSummaryHtml(scoreCount = 0, scoreAvg = 0) {
-    const blue = (v) => `<span style="display:inline-block;background:#fffde7;color:#1565c0;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`;
-    const red = (v) => v > 0
-      ? `<span style="display:inline-block;background:#fff1f2;color:#b71c1c;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">${v}</span>`
-      : `<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px;min-width:44px;text-align:center">0</span>`;
-    const subH = (cols) => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${cols.map(c=>`<div style="padding:5px 10px;font-size:11px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
-    const row = (cols, bg='#fff') => `<div style="display:grid;grid-template-columns:${cols.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${cols.map(c=>`<div style="padding:7px 10px;font-size:12px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
-    const totalScore = scoreCount + scoreAvg;
+  renderD2KpiSummaryHtml(activeQ = 'Q3', monthNums = ['07','08','09'], monthScores = [{sc:0,sa:0},{sc:0,sa:0},{sc:0,sa:0}]) {
+    const mLabels = monthNums.map(m => `${parseInt(m)}月得分`);
+    const blue = (v) => `<span style="display:inline-block;background:#fffde7;color:#1565c0;font-weight:700;padding:2px 8px;border-radius:5px;font-size:11px;min-width:36px;text-align:center">${v}</span>`;
+    const sc = (v) => v > 0
+      ? `<span style="display:inline-block;background:#fff1f2;color:#b71c1c;font-weight:700;padding:2px 8px;border-radius:5px;font-size:11px;min-width:32px;text-align:center">${v}</span>`
+      : `<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-weight:700;padding:2px 8px;border-radius:5px;font-size:11px;min-width:32px;text-align:center">0</span>`;
+    const mCols = mLabels.map(l => ({l, w:'1fr'}));
+    const subH = (baseCols) => {
+      const all = [...baseCols, ...mCols];
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};background:#e8f5e9;border-bottom:1px solid #c8e6c9">${all.map(c=>`<div style="padding:5px 8px;font-size:10px;font-weight:600;color:#388e3c;text-align:center">${c.l}</div>`).join('')}</div>`;
+    };
+    const row = (baseCols, scoreFn, bg = '#fff') => {
+      const scs = monthScores.map(ms => ({v:sc(scoreFn(ms)),center:true,w:'1fr'}));
+      const all = [...baseCols, ...scs];
+      return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${all.map(c=>`<div style="padding:6px 8px;font-size:11px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
+    };
+    const nowM = new Date().getMonth() + 1;
+    const curIdx = monthNums.findIndex(m => parseInt(m) === nowM);
+    const cur = monthScores[curIdx >= 0 ? curIdx : monthScores.length - 1] || {sc:0,sa:0};
+    const totalScore = cur.sc + cur.sa;
+    const totalsStr = monthScores.map((ms, i) => `${parseInt(monthNums[i])}月 ${ms.sc+ms.sa}分`).join(' ／ ');
 
     const leftPanel = `
       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
         <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">選品 — 每季</div>
-        ${subH([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'},{l:'本月得分'}])}
-        ${row([{v:'管量：新品數量（季）',w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true},{v:red(0),center:true}])}
+        ${subH([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'}])}
+        ${row([{v:'管量：新品數量（季）',w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true}], () => 0)}
         <div style="background:#f0faf0;padding:6px 10px;font-size:11px;font-weight:600;color:#2e7d32;border-bottom:1px solid #c8e6c9">管質分層（三層互斥）</div>
-        ${subH([{l:'分層條件',w:'2fr'},{l:'毛利門檻(≥)'},{l:'目標'},{l:'配分'},{l:'本月得分'}])}
-        ${row([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true},{v:red(0),center:true}])}
-        ${row([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true},{v:red(0),center:true}],'#fafafa')}
-        ${row([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true},{v:red(0),center:true}])}
+        ${subH([{l:'分層條件',w:'2fr'},{l:'毛利門檻(≥)'},{l:'目標'},{l:'配分'}])}
+        ${row([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true}], () => 0)}
+        ${row([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true}], () => 0, '#fafafa')}
+        ${row([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true}], () => 0)}
         <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">議價 — 每月</div>
-        ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'},{l:'本月得分'}])}
-        ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:blue('20'),center:true},{v:blue('20'),center:true},{v:red(scoreCount),center:true}])}
-        ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:blue('10.0%'),center:true},{v:blue('20'),center:true},{v:red(scoreAvg),center:true}],'#fafafa')}
+        ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'}])}
+        ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:blue('20'),center:true},{v:blue('20'),center:true}], ms => ms.sc)}
+        ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:blue('10.0%'),center:true},{v:blue('20'),center:true}], ms => ms.sa, '#fafafa')}
         <div style="padding:5px 10px;font-size:11px;color:#6b7280;background:#fafafa;border-bottom:1px solid #f3f4f6">前 10 項平均議價幅度 ≥ 門檻，給滿分；未達則 0（全有全無）</div>
       </div>`;
 
@@ -964,19 +977,19 @@ Object.assign(App, {
       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:260px;display:flex;flex-direction:column">
         <div style="flex:1">
           <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">叫貨出錯率 — 每月</div>
-          ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'},{l:'本月得分'}])}
-          ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true},{v:red(0),center:true}])}
+          ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'}])}
+          ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true}], () => 0)}
           <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">加分（AI 三表寫進儀表板）— 每月</div>
-          ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'},{l:'本月加分',w:'1fr'}])}
-          ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'},{v:red(0),center:true,w:'1fr'}])}
+          ${subH([{l:'每完成一項',w:'1fr'},{l:'適用項目',w:'3fr'}])}
+          ${row([{v:blue('+10'),center:true,w:'1fr'},{v:'訂價表 ／ 議價表 ／ 圍購表 ／ 其他工具',w:'3fr'}], () => 0)}
           <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">扣分（單價未更新）— 每月</div>
-          ${subH([{l:'每次扣分'},{l:'單月上限'},{l:'本月扣分'}])}
-          ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true},{v:red(0),center:true}])}
+          ${subH([{l:'每次扣分'},{l:'單月上限'}])}
+          ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true}], () => 0)}
         </div>
         <div style="background:linear-gradient(135deg,#1a7a6e,#0f5349);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-top:2px solid #0f5349">
           <div>
-            <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">本月得分總計</div>
-            <div style="font-size:11px;color:rgba(255,255,255,.5)">議價數量 ${scoreCount} ＋ 議價比 ${scoreAvg} ＋ 其他 0</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">當月得分總計</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.5)">${totalsStr}</div>
           </div>
           <div style="font-size:36px;font-weight:900;color:${totalScore>=40?'#6ee7b7':totalScore>0?'#fde68a':'#9ca3af'};line-height:1">${totalScore}<span style="font-size:14px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
         </div>
@@ -1067,8 +1080,26 @@ Object.assign(App, {
           </div>
         </details>
       </td></tr>` : '';
-    // KPI 計算
-    const nowYM = new Date().toISOString().slice(0, 7); // "2026-07"
+    // KPI 計算 — 依 activeQ 算各月分數
+    const year = new Date().getFullYear();
+    const qMonthMap = {Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
+    const activeMonths = qMonthMap[activeQ] || ['07','08','09'];
+    const kpiStoreKey = activeQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeQ.toLowerCase()}`;
+    const kpiList = Store.get(kpiStoreKey, []);
+    const monthScores = activeMonths.map(m => {
+      const ym = `${year}-${m}`;
+      const ml = kpiList.filter(r => (r.date || '').startsWith(ym));
+      const pcts = ml.map(r => {
+        const orig = Number(r.orig || 0), bids = [r.b1, r.b2, r.b3].map(Number);
+        const last = [...bids].reverse().find(v => v > 0) || 0;
+        return orig && last ? (orig - last) / orig * 100 : -1;
+      });
+      const top10p = pcts.filter(p => p > 0).sort((a, b) => b - a).slice(0, 10);
+      const avg = top10p.length ? top10p.reduce((s, v) => s + v, 0) / top10p.length : 0;
+      return { sc: ml.length >= 20 ? 20 : 0, sa: avg >= 10 ? 20 : 0 };
+    });
+    // 當月議價徽章用（議價表 card 內顯示）
+    const nowYM = new Date().toISOString().slice(0, 7);
     const monthList = list.filter(r => (r.date || '').startsWith(nowYM));
     const monthCount = monthList.length;
     const top10pcts = [...withPct].filter(x => x.pctNum > 0).sort((a, b) => b.pctNum - a.pctNum).slice(0, 10).map(x => x.pctNum);
@@ -1197,7 +1228,7 @@ Object.assign(App, {
 
     return `
       ${quarterTabsHtml}
-      ${this.renderD2KpiSummaryHtml(scoreCount, scoreAvg)}
+      ${this.renderD2KpiSummaryHtml(activeQ, activeMonths, monthScores)}
       ${stabTabsHtml}
       ${stabContent}`;
   },
