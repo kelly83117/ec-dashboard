@@ -1968,7 +1968,11 @@ Object.assign(App, {
       <div class="table-card">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div><h3>📊 毛利率表</h3><p>記錄商品成本與營收，自動計算毛利與毛利率（共 ${list.length} 筆）</p></div>
-          <button id="mg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button id="mg-import-btn" style="padding:7px 16px;background:#1d4ed8;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">📥 匯入 Excel</button>
+            <input id="mg-import-file" type="file" accept=".xlsx,.xls" style="display:none">
+            <button id="mg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+          </div>
         </div>
         <div id="mg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
           <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:10px">
@@ -2037,5 +2041,58 @@ Object.assign(App, {
       Store.set(mgKey, list);
       this.render();
     }));
+
+    // 匯入 Excel
+    const importBtn = document.getElementById('mg-import-btn');
+    const importFile = document.getElementById('mg-import-file');
+    importBtn?.addEventListener('click', () => importFile?.click());
+    importFile?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const XLSX = window.XLSX;
+          if (!XLSX) { showToast('Excel 解析器尚未載入，請稍後再試'); return; }
+          const wb = XLSX.read(ev.target.result, { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          if (data.length < 2) { showToast('檔案無資料'); return; }
+          const headers = data[0].map(h => String(h).trim());
+          const nameIdx = headers.findIndex(h => h === '商品名稱');
+          const revIdx  = headers.findIndex(h => h === '售價');
+          const costIdx = headers.findIndex(h => h === '成本');
+          if (nameIdx < 0 || revIdx < 0 || costIdx < 0) {
+            showToast('找不到欄位：需要「商品名稱」「售價」「成本」'); return;
+          }
+          const map = new Map();
+          for (let i = 1; i < data.length; i++) {
+            const row = data[i];
+            const name = String(row[nameIdx] || '').trim();
+            if (!name) continue;
+            const rev  = Number(row[revIdx])  || 0;
+            const cost = Number(row[costIdx]) || 0;
+            if (map.has(name)) {
+              map.get(name).rev  += rev;
+              map.get(name).cost += cost;
+            } else {
+              map.set(name, { name, rev, cost });
+            }
+          }
+          const merged = [...map.values()].map(r => ({
+            name: r.name,
+            rev:  Math.round(r.rev  * 100) / 100,
+            cost: Math.round(r.cost * 100) / 100,
+          }));
+          Store.set(mgKey, merged);
+          importFile.value = '';
+          showToast(`匯入完成，共 ${merged.length} 個商品`);
+          this.render();
+        } catch (err) {
+          showToast('匯入失敗：' + err.message);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
   },
 });
