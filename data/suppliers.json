@@ -1,5 +1,5 @@
 {
-  "updated": "2026-07-18",
+  "updated": "2026-07-19",
   "items": [
     {
       "keyword": "收纳盒",
@@ -10,36 +10,36 @@
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E7%9B%92"
     },
     {
-      "keyword": "厨房用具",
-      "name": "多功能切菜器",
-      "price_range": "10-20元",
-      "moq": "50個",
-      "reason": "夏季烹饪需求增加",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E7%94%A8%E5%85%B7"
-    },
-    {
-      "keyword": "浴室收纳",
-      "name": "浴室置物架",
-      "price_range": "15-30元",
-      "moq": "30個",
-      "reason": "提升浴室空間利用",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%BA%B3"
-    },
-    {
-      "keyword": "床上用品",
-      "name": "清爽夏季床單",
+      "keyword": "厨房收纳架",
+      "name": "多層厨房收纳架",
       "price_range": "20-50元",
-      "moq": "20套",
-      "reason": "夏季提升睡眠品質",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E4%B8%8A%E7%94%A8%E5%93%81"
+      "moq": "50個",
+      "reason": "提升厨房空间利用率",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E6%94%B6%E7%BA%B3%E6%9E%B6"
     },
     {
-      "keyword": "清洁用品",
-      "name": "环保清洁布",
-      "price_range": "2-5元",
+      "keyword": "浴室收纳篮",
+      "name": "防水浴室收纳篮",
+      "price_range": "10-25元",
+      "moq": "100個",
+      "reason": "夏季浴室整理需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%BA%B3%E7%AF%AE"
+    },
+    {
+      "keyword": "床单",
+      "name": "透气床单（夏季款）",
+      "price_range": "15-30元",
       "moq": "200個",
-      "reason": "家庭清洁需求上升",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E7%94%A8%E5%93%81"
+      "reason": "夏季需求高，舒适透气",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E5%8D%95"
+    },
+    {
+      "keyword": "清洁工具",
+      "name": "多功能清洁刷",
+      "price_range": "5-15元",
+      "moq": "100個",
+      "reason": "暑假大扫除需求旺",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E5%B7%A5%E5%85%B7"
     }
   ]
 }
