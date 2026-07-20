@@ -1764,6 +1764,7 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, 
   const D=adsFee, H=pureRate*100, K=targetROI, N=roiDiff, O=clicks, P=pureProfit, R=roi;
   if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
   if(ok('高利潤商品')&&D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
+  if(ok('低淨利')&&D===0 && (N===null||N===undefined||!isFinite(N))) return{label:'低淨利',cls:'tag-low'};
   if(ok('賠錢中')&&D>0 && P<0) return{label:'賠錢中',cls:'tag-lose'};
   if(ok('低淨利')&&D>0 && ((K!==null&&K!==undefined&&K<0)||(N===null||N===undefined||!isFinite(N)))) return{label:'低淨利',cls:'tag-low'};
   if(ok('低效廣告')&&D>0 && H>=0 && H<t.badAdsMaxH) return{label:'低效廣告',cls:'tag-bad'};
@@ -2087,7 +2088,7 @@ function renderAnaModalBody(){
     <div class="ana-sec-hdr">分析標籤</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 > ${inp('highMinH',t.highMinH,'0.1')} %</span>${trash('高利潤商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">廣告費 > 0 且 淨利 &lt; 0</span>${trash('賠錢中','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">廣告費 > 0 且 目標ROI &lt; 0<br><span style="color:#9ca3af;font-size:11px">或 廣告費 > 0 且 直接ROI差距顯示「—」</span></span>${trash('低淨利','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">廣告費 > 0 且 目標ROI &lt; 0<br><span style="color:#9ca3af;font-size:11px">或 廣告費 > 0 且 直接ROI差距顯示「—」<br>或 廣告費 = 0 且 直接ROI差距顯示「—」</span></span>${trash('低淨利','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">危險商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 0%~${inp('dangerMaxH',t.dangerMaxH,'0.1')} %</span>${trash('危險商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-bad">低效廣告</span><span class="ana-rule-desc">廣告費 > 0 且 純利率 &lt; ${inp('badAdsMaxH',t.badAdsMaxH,'0.1')} %</span>${trash('低效廣告','disableAnaTag')}</div>
     <div class="ana-sec-hdr">自訂標籤</div>
