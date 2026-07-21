@@ -1522,8 +1522,19 @@ Object.assign(App, {
     document.querySelectorAll('[data-note-month-btn]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        // 清掉舊 popup（若有）
         document.querySelectorAll('.note-month-popup').forEach(p => p.remove());
+        // 即時從當前賣場的 notes 資料收集月份（YYYY-MM），desc 排序
+        const shop = this.filter.insightShop || '玩樂';
+        const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
+        const monthSet = new Set();
+        Object.values(notes).forEach(entry => {
+          const adjs = (entry && entry.adjustments) || [];
+          adjs.forEach(a => {
+            const s = String(a.date || '').replace(/\D/g, '');
+            if (s.length >= 6) monthSet.add(s.slice(0, 4) + '-' + s.slice(4, 6));
+          });
+        });
+        const months = Array.from(monthSet).sort().reverse();
         const rect = btn.getBoundingClientRect();
         const pop = document.createElement('div');
         pop.className = 'note-month-popup';
@@ -1533,7 +1544,10 @@ Object.assign(App, {
           const isCur = val === cur;
           return `<button data-month-val="${escapeHtml(val)}" style="display:block;width:100%;text-align:left;padding:6px 12px;border:0;background:${isCur?'#eef2ff':'transparent'};color:${isCur?'#4f46e5':'#0f172a'};font-size:13px;font-weight:${isCur?'700':'500'};cursor:pointer;border-radius:5px">${escapeHtml(label)}</button>`;
         };
-        pop.innerHTML = mkItem('', '全部') + noteMonthOptions.map(m => mkItem(m, m)).join('');
+        const items = [mkItem('', '全部')];
+        if (months.length === 0) items.push(`<div style="padding:8px 12px;font-size:12px;color:#94a3b8">（尚無調整紀錄）</div>`);
+        else months.forEach(m => items.push(mkItem(m, m)));
+        pop.innerHTML = items.join('');
         document.body.appendChild(pop);
         pop.querySelectorAll('[data-month-val]').forEach(item => {
           item.addEventListener('click', (ev) => {
