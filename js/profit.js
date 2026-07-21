@@ -2540,6 +2540,7 @@ function applyFilters(shop){
     if(!f)return;
     if(f.type!=='range'&&(f.val===''||f.val===undefined))return;
     list=list.filter(r=>{
+      if(col==='pureRate'&&!(r.rev>0))return false;   // 零營收無淨利率(顯示「—」),不納入任何 pureRate 數值篩選
       const raw=r[col];
       const v=PCT_COLS.has(col)?num(raw)*100:raw;
       if(f.type==='text')return(raw+'').toLowerCase().includes(f.val.toLowerCase());
