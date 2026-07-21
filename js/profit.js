@@ -1976,6 +1976,7 @@ function buildDistHtml(shop,built){
     }${td(l,GRN_LT,'#1a3260')}${td(n,GRN_LT,'#1a3260')}${td(pct(n,noAdsTotal),GRN_LT,'#1a3260')}</tr>`).join('');
 
   return `
+  <div class="dist-note">本表統計全部 ${built.length} 筆商品,不隨表格篩選變動</div>
   <table style="${T}">
     <tbody>
       ${rMeta('總投廣商品數量',adsTotal)}
