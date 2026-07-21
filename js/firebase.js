@@ -193,37 +193,6 @@ try {
     subscribe: (cb) => onSnapshot(insightDocRef, snap => cb(snap.exists() ? snap.data() : {})),
   };
 
-  // ============== 洞察表 per-shop 拆分（避免 app/insight 撞 1MB 上限） ==============
-  // 進化：從 app/insight 一個 doc 裡塞四個賣場 → 每個賣場一個 doc，
-  //   app/insight_好麻吉 / app/insight_玩樂 / app/insight_森之旅 / app/insight_維克
-  //   每個賣場獨立 1 MiB 額度 = 總空間 4 倍。
-  //
-  // Key 路由：ec.insight_{shop}_{type} → 對應 shop 的 doc
-  //   例：ec.insight_好麻吉_master → app/insight_好麻吉 doc 內的 ec.insight_好麻吉_master field
-  const INSIGHT_SHOPS = ['好麻吉', '玩樂', '森之旅', '維克'];
-  const insightShopRefs = {};
-  INSIGHT_SHOPS.forEach(s => { insightShopRefs[s] = doc(db, 'app', 'insight_' + s); });
-  // 從 key 抽出 shop 名稱：ec.insight_{shop}_{master|weeks|notes|perf}
-  const insightShopFromKey = (key) => {
-    const m = /^ec\.insight_(.+?)_(master|weeks|notes|perf)$/.exec(key || '');
-    return m ? m[1] : null;
-  };
-  window.__cloudInsightByShop = {
-    shops: INSIGHT_SHOPS,
-    forKey: (key) => {
-      const shop = insightShopFromKey(key);
-      if (!shop || !insightShopRefs[shop]) return null;
-      return {
-        setField: (k, v) => setDoc(insightShopRefs[shop], { [k]: v }, { merge: true }),
-      };
-    },
-    getDocForShop: (shop) => insightShopRefs[shop] ? getDoc(insightShopRefs[shop]) : Promise.resolve({ exists: () => false, data: () => ({}) }),
-    subscribeShop: (shop, cb) => {
-      if (!insightShopRefs[shop]) return () => {};
-      return onSnapshot(insightShopRefs[shop], snap => cb(snap.exists() ? snap.data() : {}));
-    },
-  };
-
   window.dispatchEvent(new Event('cloudStoreReady'));
 
   // 首頁渲染完後 1.5 秒（給 dashboard / 圖表時間），背景把重量級訂閱接上
