@@ -67,6 +67,7 @@ Object.assign(App, {
       this.filter.insightCtrLow = !!saved.ctrLow;
       this.filter.insightSortKey = saved.sortKey || '';
       this.filter.insightSortDir = saved.sortDir || '';
+      this.filter.insightNoteMonth = saved.noteMonth || ''; // YYYY-MM 或空字串 (=不篩)
       this._loadedPrefsForShop = currentShop;
     }
     if (!Array.isArray(this.filter.insightHiddenCols)) this.filter.insightHiddenCols = [];
@@ -196,6 +197,34 @@ Object.assign(App, {
       stock: p => (p.stock - p.demand),
       note: p => latestAdjInt(p.note),
     };
+    // 「調整月份」篩選：只保留該月有調整紀錄的商品（其他篩選之後才 sort）
+    //   noteMonth = 'YYYY-MM'（例如 '2026-07'）；空字串 = 不篩
+    //   收集全部有調整的月份給下拉用（去重、排序 desc）
+    const collectNoteMonths = (list) => {
+      const set = new Set();
+      list.forEach(p => {
+        const adjs = p.note && p.note.adjustments;
+        if (!adjs) return;
+        adjs.forEach(a => {
+          const s = String(a.date || '').replace(/\D/g, '');
+          if (s.length >= 6) set.add(s.slice(0, 4) + '-' + s.slice(4, 6));
+        });
+      });
+      return Array.from(set).sort().reverse(); // 新月份在前
+    };
+    const noteMonthOptions = collectNoteMonths(merged);
+    const noteMonthFilter = this.filter.insightNoteMonth || '';
+    if (noteMonthFilter) {
+      const target = noteMonthFilter.replace(/\D/g, ''); // '2026-07' → '202607'
+      merged = merged.filter(p => {
+        const adjs = p.note && p.note.adjustments;
+        if (!adjs || adjs.length === 0) return false;
+        return adjs.some(a => {
+          const s = String(a.date || '').replace(/\D/g, '');
+          return s.startsWith(target);
+        });
+      });
+    }
     const getter = sortGetters[sortKey] || sortGetters.revenue;
     const sorted = merged.slice().sort((a, b) => {
       const va = getter(a), vb = getter(b);
@@ -631,7 +660,10 @@ Object.assign(App, {
                 ${visCol('group') ? `<th style="padding:10px 4px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb">大類</th>` : ''}
                 ${visCol('flow') ? `<th style="padding:10px 4px;text-align:center;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;white-space:nowrap">判斷結果</th>` : ''}
                 ${visCol('stock') ? sortableTh('stock', '可用庫存', 'center') : ''}
-                ${visCol('note') ? `<th data-sort-key="note" title="點擊依「最新調整日期」排序" style="padding:10px 6px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;min-width:130px;cursor:pointer;user-select:none">調整（最新）${arrowFor('note')}</th>` : ''}`;
+                ${visCol('note') ? `<th style="padding:10px 6px;text-align:left;font-size:13px;color:var(--text-muted);font-weight:700;border-bottom:1px solid #e5e7eb;min-width:150px;position:relative">
+                  <span data-sort-key="note" title="點擊依「最新調整日期」排序" style="cursor:pointer;user-select:none">調整（最新）${arrowFor('note')}</span>
+                  <button data-note-month-btn title="依月份篩選" style="margin-left:6px;padding:2px 8px;border:1px solid ${noteMonthFilter?'#4f46e5':'#cbd5e1'};background:${noteMonthFilter?'#eef2ff':'white'};color:${noteMonthFilter?'#4f46e5':'#64748b'};border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">${noteMonthFilter ? escapeHtml(noteMonthFilter) : '月份'} ▾</button>
+                </th>` : ''}`;
                 })()}
               </tr>
             </thead>
@@ -1486,6 +1518,56 @@ Object.assign(App, {
       });
     });
 
+    // 「調整月份」下拉篩選（點欄位標題右邊的月份按鈕跳出）
+    document.querySelectorAll('[data-note-month-btn]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.note-month-popup').forEach(p => p.remove());
+        // 即時從當前賣場的 notes 資料收集月份（YYYY-MM），desc 排序
+        const shop = this.filter.insightShop || '玩樂';
+        const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
+        const monthSet = new Set();
+        Object.values(notes).forEach(entry => {
+          const adjs = (entry && entry.adjustments) || [];
+          adjs.forEach(a => {
+            const s = String(a.date || '').replace(/\D/g, '');
+            if (s.length >= 6) monthSet.add(s.slice(0, 4) + '-' + s.slice(4, 6));
+          });
+        });
+        const months = Array.from(monthSet).sort().reverse();
+        const rect = btn.getBoundingClientRect();
+        const pop = document.createElement('div');
+        pop.className = 'note-month-popup';
+        pop.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;background:white;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.12);z-index:10000;padding:4px;min-width:140px;max-height:280px;overflow-y:auto`;
+        const cur = this.filter.insightNoteMonth || '';
+        const mkItem = (val, label) => {
+          const isCur = val === cur;
+          return `<button data-month-val="${escapeHtml(val)}" style="display:block;width:100%;text-align:left;padding:6px 12px;border:0;background:${isCur?'#eef2ff':'transparent'};color:${isCur?'#4f46e5':'#0f172a'};font-size:13px;font-weight:${isCur?'700':'500'};cursor:pointer;border-radius:5px">${escapeHtml(label)}</button>`;
+        };
+        const items = [mkItem('', '全部')];
+        if (months.length === 0) items.push(`<div style="padding:8px 12px;font-size:12px;color:#94a3b8">（尚無調整紀錄）</div>`);
+        else months.forEach(m => items.push(mkItem(m, m)));
+        pop.innerHTML = items.join('');
+        document.body.appendChild(pop);
+        pop.querySelectorAll('[data-month-val]').forEach(item => {
+          item.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            this.filter.insightNoteMonth = item.dataset.monthVal;
+            persistInsightPrefs();
+            pop.remove();
+            this.render();
+          });
+        });
+        const onOutside = (ev) => {
+          if (!pop.contains(ev.target) && ev.target !== btn) {
+            pop.remove();
+            document.removeEventListener('click', onOutside);
+          }
+        };
+        setTimeout(() => document.addEventListener('click', onOutside), 0);
+      });
+    });
+
     // 共用：把當前賣場的洞察表偏好打包寫入 localStorage（每家賣場各自獨立、每台電腦記憶）
     const persistInsightPrefs = () => {
       try {
@@ -1496,6 +1578,7 @@ Object.assign(App, {
           ctrLow: !!this.filter.insightCtrLow,
           sortKey: this.filter.insightSortKey || '',
           sortDir: this.filter.insightSortDir || '',
+          noteMonth: this.filter.insightNoteMonth || '',
         }));
         localStorage.setItem('ec.insightLastShop', shop);
       } catch {}
