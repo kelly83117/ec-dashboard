@@ -2624,56 +2624,62 @@ async function __setupCloud() {
     } catch (e) { console.warn('[insight per-shop] 例外', e); }
     Object.assign(cloudData, insightPerShopData);
 
-    // 一次性 migration A：ec.insight_* 從 app/main 搬到 per-shop doc（沒有的先搬到 app/insight fallback）
-    try {
-      const mainInsightKeys = Object.keys(cloudData).filter(k =>
-        k.startsWith('ec.insight_') && !insightData[k] && !insightPerShopData[k]
-      );
-      if (mainInsightKeys.length > 0) {
-        console.warn('[insight migration A] 搬', mainInsightKeys.length, '個 key 從 app/main → per-shop / app/insight');
-        for (const k of mainInsightKeys) {
-          try {
-            const perShop = window.__cloudInsightByShop && window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(k);
-            if (perShop) await perShop.setField(k, cloudData[k]);
-            else if (window.__cloudInsight) await window.__cloudInsight.setField(k, cloudData[k]);
-          } catch (e) { console.error('[insight migration A]', k, '失敗', e); }
-        }
-        try {
-          const cs0 = window.__cloudStore;
-          if (cs0 && typeof cs0.removeFields === 'function') {
-            await cs0.removeFields(mainInsightKeys);
-            console.warn('[insight migration A] app/main 已清掉', mainInsightKeys.length, '個');
+    // migration 改為背景執行（fire-and-forget），不 await → UI 不會卡住
+    //   之前 UI 開不出來是因為連續 await 多次 Firestore 寫入，資料大就會卡 5-30 秒
+    //   → 現在 UI 立刻可用，migration 在背景慢慢搬，跑完自然生效
+    //   註：本地 cloudData 已經包含 per-shop + app/insight 的合併結果，migration 沒跑完
+    //   也不影響顯示。真的失敗下次載入還會再嘗試（因為 keys 還在 app/main 或 app/insight）
+    (async () => {
+      // migration A：ec.insight_* 從 app/main 搬到 per-shop（沒有的先搬到 app/insight fallback）
+      try {
+        const mainInsightKeys = Object.keys(cloudData).filter(k =>
+          k.startsWith('ec.insight_') && !insightData[k] && !insightPerShopData[k]
+        );
+        if (mainInsightKeys.length > 0) {
+          console.warn('[insight migration A] 背景搬', mainInsightKeys.length, '個 key');
+          for (const k of mainInsightKeys) {
+            try {
+              const perShop = window.__cloudInsightByShop && window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(k);
+              if (perShop) await perShop.setField(k, cloudData[k]);
+              else if (window.__cloudInsight) await window.__cloudInsight.setField(k, cloudData[k]);
+            } catch (e) { console.error('[insight migration A]', k, '失敗', e); }
           }
-        } catch (e) { console.error('[insight migration A] app/main 刪除失敗', e); }
-      }
-    } catch (e) { console.warn('[insight migration A] 例外', e); }
-
-    // 一次性 migration B：ec.insight_* 從 app/insight 搬到 per-shop doc
-    // → 讓 app/insight 縮小，避免它再撞 1 MiB
-    try {
-      const oldInsightKeys = Object.keys(insightData).filter(k =>
-        k.startsWith('ec.insight_') && !insightPerShopData[k]
-      );
-      if (oldInsightKeys.length > 0 && window.__cloudInsightByShop) {
-        console.warn('[insight migration B] 搬', oldInsightKeys.length, '個 key 從 app/insight → per-shop');
-        const migrated = [];
-        for (const k of oldInsightKeys) {
           try {
-            const perShop = window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(k);
-            if (perShop) {
-              await perShop.setField(k, insightData[k]);
-              migrated.push(k);
+            const cs0 = window.__cloudStore;
+            if (cs0 && typeof cs0.removeFields === 'function') {
+              await cs0.removeFields(mainInsightKeys);
+              console.warn('[insight migration A] app/main 已清掉', mainInsightKeys.length, '個');
             }
-          } catch (e) { console.error('[insight migration B]', k, '失敗', e); }
+          } catch (e) { console.error('[insight migration A] app/main 刪除失敗', e); }
         }
-        if (migrated.length > 0 && window.__cloudInsight && window.__cloudInsight.removeFields) {
-          try {
-            await window.__cloudInsight.removeFields(migrated);
-            console.warn('[insight migration B] app/insight 已清掉', migrated.length, '個');
-          } catch (e) { console.error('[insight migration B] app/insight 刪除失敗', e); }
+      } catch (e) { console.warn('[insight migration A] 例外', e); }
+
+      // migration B：ec.insight_* 從 app/insight 搬到 per-shop → 讓 app/insight 縮小
+      try {
+        const oldInsightKeys = Object.keys(insightData).filter(k =>
+          k.startsWith('ec.insight_') && !insightPerShopData[k]
+        );
+        if (oldInsightKeys.length > 0 && window.__cloudInsightByShop) {
+          console.warn('[insight migration B] 背景搬', oldInsightKeys.length, '個 key');
+          const migrated = [];
+          for (const k of oldInsightKeys) {
+            try {
+              const perShop = window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(k);
+              if (perShop) {
+                await perShop.setField(k, insightData[k]);
+                migrated.push(k);
+              }
+            } catch (e) { console.error('[insight migration B]', k, '失敗', e); }
+          }
+          if (migrated.length > 0 && window.__cloudInsight && window.__cloudInsight.removeFields) {
+            try {
+              await window.__cloudInsight.removeFields(migrated);
+              console.warn('[insight migration B] app/insight 已清掉', migrated.length, '個');
+            } catch (e) { console.error('[insight migration B] app/insight 刪除失敗', e); }
+          }
         }
-      }
-    } catch (e) { console.warn('[insight migration B] 例外', e); }
+      } catch (e) { console.warn('[insight migration B] 例外', e); }
+    })();
 
     Store._mem = cloudData;
     Store._useMem = true;
