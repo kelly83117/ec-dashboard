@@ -2592,39 +2592,88 @@ async function __setupCloud() {
       }
     } catch {}
 
-    // ============== 洞察表資料從 app/insight 拉回，合併進 Store._mem ==============
-    // 洞察表獨立 doc 避免 app/main 撞 1 MiB 上限（events: users/departments/platforms +
-    // insight master 加起來太快超過）。首批 snapshot + 訂閱後續變動都合併進 _mem。
+    // ============== 洞察表資料：多來源合併進 Store._mem ==============
+    // 讀取優先序（後面覆蓋前面 → per-shop 最新）：
+    //   1. app/main 內殘留（v81 之前）
+    //   2. app/insight 內殘留（v81 拆到這裡）
+    //   3. app/insight_{shop} 每個賣場獨立 doc（v134 拆到這裡）→ 最權威
+    // → 舊資料自動讀得到 + 新寫入走 per-shop
     let insightData = {};
     try {
       if (window.__cloudInsight) {
         const iSnap = await window.__cloudInsight.getDoc();
         insightData = iSnap.exists() ? (iSnap.data() || {}) : {};
       }
-    } catch (e) { console.warn('[insight] 初次讀取失敗', e); }
-    Object.assign(cloudData, insightData);
+    } catch (e) { console.warn('[insight] app/insight 讀取失敗', e); }
+    Object.assign(cloudData, insightData); // 2
 
-    // 一次性 migration：把還躺在 app/main 的 ec.insight_* 搬到 app/insight，再從 main 刪掉
-    // → 讓 app/main 立刻小於 1 MiB，Kelly 才能繼續寫入 users/departments 等
+    // 3：per-shop docs（優先，覆蓋 1 & 2）
+    const insightPerShopData = {};
     try {
-      const insightKeysInMain = Object.keys(cloudData).filter(k => k.startsWith('ec.insight_') && !insightData[k]);
-      if (insightKeysInMain.length > 0 && window.__cloudInsight) {
-        console.warn('[insight migration] 搬', insightKeysInMain.length, '個 key 從 app/main → app/insight');
-        for (const k of insightKeysInMain) {
+      if (window.__cloudInsightByShop && Array.isArray(window.__cloudInsightByShop.shops)) {
+        for (const s of window.__cloudInsightByShop.shops) {
           try {
-            await window.__cloudInsight.setField(k, cloudData[k]);
-          } catch (e) { console.error('[insight migration] 搬', k, '失敗', e); }
+            const snap = await window.__cloudInsightByShop.getDocForShop(s);
+            if (snap.exists && snap.exists()) {
+              const d = snap.data() || {};
+              Object.assign(insightPerShopData, d);
+            }
+          } catch (e) { console.warn('[insight] app/insight_' + s + ' 讀取失敗', e); }
         }
-        // 全部成功後才從 app/main 刪掉（用 REST removeFields 一次刪，避免多次寫入）
+      }
+    } catch (e) { console.warn('[insight per-shop] 例外', e); }
+    Object.assign(cloudData, insightPerShopData);
+
+    // 一次性 migration A：ec.insight_* 從 app/main 搬到 per-shop doc（沒有的先搬到 app/insight fallback）
+    try {
+      const mainInsightKeys = Object.keys(cloudData).filter(k =>
+        k.startsWith('ec.insight_') && !insightData[k] && !insightPerShopData[k]
+      );
+      if (mainInsightKeys.length > 0) {
+        console.warn('[insight migration A] 搬', mainInsightKeys.length, '個 key 從 app/main → per-shop / app/insight');
+        for (const k of mainInsightKeys) {
+          try {
+            const perShop = window.__cloudInsightByShop && window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(k);
+            if (perShop) await perShop.setField(k, cloudData[k]);
+            else if (window.__cloudInsight) await window.__cloudInsight.setField(k, cloudData[k]);
+          } catch (e) { console.error('[insight migration A]', k, '失敗', e); }
+        }
         try {
           const cs0 = window.__cloudStore;
           if (cs0 && typeof cs0.removeFields === 'function') {
-            await cs0.removeFields(insightKeysInMain);
-            console.warn('[insight migration] app/main 已清掉', insightKeysInMain.length, '個 ec.insight_* key');
+            await cs0.removeFields(mainInsightKeys);
+            console.warn('[insight migration A] app/main 已清掉', mainInsightKeys.length, '個');
           }
-        } catch (e) { console.error('[insight migration] app/main 刪除失敗（但 app/insight 已備份）', e); }
+        } catch (e) { console.error('[insight migration A] app/main 刪除失敗', e); }
       }
-    } catch (e) { console.warn('[insight migration] 例外', e); }
+    } catch (e) { console.warn('[insight migration A] 例外', e); }
+
+    // 一次性 migration B：ec.insight_* 從 app/insight 搬到 per-shop doc
+    // → 讓 app/insight 縮小，避免它再撞 1 MiB
+    try {
+      const oldInsightKeys = Object.keys(insightData).filter(k =>
+        k.startsWith('ec.insight_') && !insightPerShopData[k]
+      );
+      if (oldInsightKeys.length > 0 && window.__cloudInsightByShop) {
+        console.warn('[insight migration B] 搬', oldInsightKeys.length, '個 key 從 app/insight → per-shop');
+        const migrated = [];
+        for (const k of oldInsightKeys) {
+          try {
+            const perShop = window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(k);
+            if (perShop) {
+              await perShop.setField(k, insightData[k]);
+              migrated.push(k);
+            }
+          } catch (e) { console.error('[insight migration B]', k, '失敗', e); }
+        }
+        if (migrated.length > 0 && window.__cloudInsight && window.__cloudInsight.removeFields) {
+          try {
+            await window.__cloudInsight.removeFields(migrated);
+            console.warn('[insight migration B] app/insight 已清掉', migrated.length, '個');
+          } catch (e) { console.error('[insight migration B] app/insight 刪除失敗', e); }
+        }
+      }
+    } catch (e) { console.warn('[insight migration B] 例外', e); }
 
     Store._mem = cloudData;
     Store._useMem = true;
@@ -2666,12 +2715,15 @@ async function __setupCloud() {
       // 寫入時把 key 從「最近刪除」名單移除，否則訂閱回呼會把剛上傳的資料當成 race 過濾掉
       if (window.__unmarkRecentlyDeleted) window.__unmarkRecentlyDeleted(key);
       origSet(key, value);
-      // ec.insight_* 走獨立的 app/insight 文件（避免 app/main 撞 1 MiB 上限）
-      //   洞察表的 master 資料量會隨商品數持續增長，跟 users/departments 擠在
-      //   同一份 app/main 很快就會爆。分開存 → 各自有 1 MiB 額度。
-      const targetCloud = (typeof key === 'string' && key.startsWith('ec.insight_') && window.__cloudInsight)
-        ? window.__cloudInsight
-        : cs;
+      // ec.insight_* 路由：優先走 per-shop doc（app/insight_{shop}）
+      //   → app/insight 又快撞 1 MiB 時的進化，每個賣場各自有 1 MiB 額度。
+      //   若對不到 shop（key 格式不符）→ 退回 app/insight → 再退回 app/main。
+      let targetCloud = cs;
+      if (typeof key === 'string' && key.startsWith('ec.insight_')) {
+        const perShop = window.__cloudInsightByShop && window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(key);
+        if (perShop) targetCloud = perShop;
+        else if (window.__cloudInsight) targetCloud = window.__cloudInsight;
+      }
       try {
         const p = targetCloud.setField(key, value);
         if (p && typeof p.then === 'function') {
@@ -2690,7 +2742,13 @@ async function __setupCloud() {
     };
     // 手動把指定 key 推到雲端（搭配 setLocalOnly 使用）
     Store.pushKeyToCloud = async function(key) {
-      const target = (typeof key === 'string' && key.startsWith('ec.insight_') && window.__cloudInsight) ? window.__cloudInsight : cs;
+      // 路由與 Store.set 同：ec.insight_* 走 per-shop doc → app/insight → app/main
+      let target = cs;
+      if (typeof key === 'string' && key.startsWith('ec.insight_')) {
+        const perShop = window.__cloudInsightByShop && window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(key);
+        if (perShop) target = perShop;
+        else if (window.__cloudInsight) target = window.__cloudInsight;
+      }
       try {
         await target.setField(key, Store._mem[key]);
         return true;
@@ -2805,34 +2863,38 @@ async function __setupCloud() {
       if (!inOurInput && !hasUnsavedChanges && !justSavedLocally) App.render();
     });
 
-    // 訂閱 app/insight：其他人改了洞察表資料，這台會收到更新
-    // 合併進 _mem 但不重新賦值整個 _mem（避免蓋掉 app/main 的資料）
-    //
-    // ⚠ Bug fix：舊版直接 Object.keys(idata).forEach(k => _mem[k] = idata[k])
-    //   會覆蓋 pending 裡的本機編輯 → 同事編了多個商品但只有最後一個活下來。
-    //   現在跳過 __insightPendingNotes 裡的 key，本機版永遠贏，直到使用者按同步。
+    // 訂閱洞察表 doc：其他人改了資料 → 本台合併進 _mem
+    // 兩個訂閱來源：
+    //   1. app/insight (fallback / 舊資料殘留)
+    //   2. app/insight_{shop} × 4 (per-shop 新結構，主要來源)
+    // 共用 handler：跳過 __insightPendingNotes 裡的 key（本機還沒同步的資料絕不覆蓋）
+    const insightMergeHandler = (idata) => {
+      if (!idata) return;
+      try {
+        const pending = window.__insightPendingNotes;
+        const skipped = [];
+        Object.keys(idata).forEach(k => {
+          if (pending && pending.has && pending.has(k)) { skipped.push(k); return; }
+          if (Store._mem) Store._mem[k] = idata[k];
+        });
+        if (skipped.length) console.warn('[insight subscribe] 跳過覆蓋 pending key:', skipped);
+        if (window.App && App.currentUser && typeof App.render === 'function') {
+          const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
+          if (!inputInProgress) { try { App.render(); } catch {} }
+        }
+      } catch (e) { console.warn('[insight subscribe] merge 失敗', e); }
+    };
     try {
-      if (window.__cloudInsight) {
-        window.__cloudInsight.subscribe((idata) => {
-          if (!idata) return;
-          try {
-            const pending = window.__insightPendingNotes;
-            const skipped = [];
-            Object.keys(idata).forEach(k => {
-              // 本機還沒同步的 key → 不覆蓋（等使用者按同步再處理）
-              if (pending && pending.has && pending.has(k)) { skipped.push(k); return; }
-              if (Store._mem) Store._mem[k] = idata[k];
-            });
-            if (skipped.length) console.warn('[insight subscribe] 保留本機 pending 版本，跳過雲端覆蓋:', skipped);
-            // 有洞察表變動且不在編輯狀態 → 重繪
-            if (window.App && App.currentUser && typeof App.render === 'function') {
-              const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
-              if (!inputInProgress) { try { App.render(); } catch {} }
-            }
-          } catch (e) { console.warn('[insight subscribe] merge 失敗', e); }
+      if (window.__cloudInsight) window.__cloudInsight.subscribe(insightMergeHandler);
+    } catch (e) { console.warn('[insight subscribe app/insight]', e); }
+    try {
+      if (window.__cloudInsightByShop && Array.isArray(window.__cloudInsightByShop.shops)) {
+        window.__cloudInsightByShop.shops.forEach(s => {
+          try { window.__cloudInsightByShop.subscribeShop(s, insightMergeHandler); }
+          catch (e) { console.warn('[insight subscribe app/insight_' + s + ']', e); }
         });
       }
-    } catch (e) { console.warn('[insight subscribe] 訂閱失敗', e); }
+    } catch (e) { console.warn('[insight subscribe per-shop]', e); }
   } catch (e) {
     console.error('Cloud setup failed, falling back to localStorage', e);
   }
