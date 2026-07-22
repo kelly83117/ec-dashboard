@@ -45,9 +45,25 @@ try {
     }
   };
 
+  // 共用：帶點字面欄位名（ec.users / ec.dailyProgress / ec.insight_* 等）
+  //   走 updateDoc + new FieldPath(k)，避免 setDoc merge:true 對 dotted key
+  //   靜默不覆蓋的雷（v171 per-shop 已改用同招，這邊補上 app/main）
+  const safeSetField = async (ref, key, value) => {
+    try {
+      await updateDoc(ref, new FieldPath(key), value);
+    } catch (e) {
+      if (e && (e.code === 'not-found' || String(e).includes('No document to update'))) {
+        await setDoc(ref, {});
+        await updateDoc(ref, new FieldPath(key), value);
+      } else {
+        throw e;
+      }
+    }
+  };
+
   window.__cloudStore = {
     getDoc: () => getDoc(docRef),
-    setField: (key, value) => setDoc(docRef, { [key]: value }, { merge: true }),
+    setField: (key, value) => safeSetField(docRef, key, value),
     removeField: (key) => restDeleteFields([key]),
     removeFields: (keys) => restDeleteFields(keys),
     subscribe: (cb) => onSnapshot(docRef, snap => cb(snap.exists() ? snap.data() : {})),
@@ -69,7 +85,7 @@ try {
   };
   window.__cloudProfit = {
     getDoc: () => getDoc(profitDocRef),
-    setField: (key, value) => setDoc(profitDocRef, { [key]: value }, { merge: true }),
+    setField: (key, value) => safeSetField(profitDocRef, key, value),
     removeFields: (keys) => restDeleteProfitFields(keys),
     subscribe: (cb) => onSnapshot(profitDocRef, snap => cb(snap.exists() ? snap.data() : {})),
   };
@@ -187,7 +203,7 @@ try {
   };
   window.__cloudInsight = {
     getDoc: () => getDoc(insightDocRef),
-    setField: (key, value) => setDoc(insightDocRef, { [key]: value }, { merge: true }),
+    setField: (key, value) => safeSetField(insightDocRef, key, value),
     removeField: (key) => restDeleteInsightFields([key]),
     removeFields: (keys) => restDeleteInsightFields(keys),
     subscribe: (cb) => onSnapshot(insightDocRef, snap => cb(snap.exists() ? snap.data() : {})),
