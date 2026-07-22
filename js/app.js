@@ -2913,44 +2913,34 @@ async function __setupCloud() {
       if (!inOurInput && !hasUnsavedChanges && !justSavedLocally) App.render();
     });
 
-    // 訂閱洞察表 doc：其他人改了資料 → 本台合併進 _mem
-    // 兩個訂閱來源：
-    //   1. app/insight (fallback / 舊資料殘留)
-    //   2. app/insight_{shop} × 4 (per-shop 新結構，主要來源)
-    // 共用 handler：跳過 __insightPendingNotes 裡的 key（本機還沒同步的資料絕不覆蓋）
-    // 來源優先權：per-shop 一旦寫過某 key，__insightSourcePref[k]='per-shop'，
-    //   之後 app/insight 的舊 snapshot 再帶著 stale 資料回來就會被擋掉。
-    //   （Kelly 案：刪保冰壺清倉 → 同步 → 重整後又跑回來，就是 app/insight 舊資料 race 蓋回來）
-    const makeInsightHandler = (sourceTag) => (idata) => {
+    // 訂閱洞察表 doc（v167 重整）：
+    //   - app/insight subscribe 整段停用。v154 起 ec.insight_* 資料權威源已經是
+    //     per-shop docs (app/insight_{shop})，app/insight 只留給 __setupCloud 初次讀
+    //     fallback 用。繼續訂閱只會製造 race：initial snapshot 帶著舊資料 replay 進來，
+    //     蓋掉剛儲存的變更。
+    //     （Kelly 案：刪保冰壺清倉 → 同步 → 重整後清倉又出現。v166 加 source pref、
+    //       v167 主動刪 app/insight 舊拷貝都試過，還是有 case → 直接不訂閱最乾淨。）
+    //   - per-shop subscribe：正常合併進 _mem（跳過 pending 未同步的 key）
+    const perShopMergeHandler = (idata) => {
       if (!idata) return;
       try {
         const pending = window.__insightPendingNotes;
-        window.__insightSourcePref = window.__insightSourcePref || {};
-        const pref = window.__insightSourcePref;
-        const skipPending = [];
-        const skipStale = [];
+        const skipped = [];
         Object.keys(idata).forEach(k => {
-          if (pending && pending.has && pending.has(k)) { skipPending.push(k); return; }
-          // app/insight 已被 per-shop 蓋過該 key → stale，跳過
-          if (sourceTag === 'app/insight' && pref[k] === 'per-shop') { skipStale.push(k); return; }
+          if (pending && pending.has && pending.has(k)) { skipped.push(k); return; }
           if (Store._mem) Store._mem[k] = idata[k];
-          pref[k] = sourceTag;
         });
-        if (skipPending.length) console.warn('[insight subscribe][' + sourceTag + '] 跳過 pending key:', skipPending);
-        if (skipStale.length) console.warn('[insight subscribe][' + sourceTag + '] 跳過 stale key (per-shop 為權威):', skipStale);
+        if (skipped.length) console.warn('[insight subscribe][per-shop] 跳過 pending:', skipped);
         if (window.App && App.currentUser && typeof App.render === 'function') {
           const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
           if (!inputInProgress) { try { App.render(); } catch {} }
         }
-      } catch (e) { console.warn('[insight subscribe] merge 失敗', e); }
+      } catch (e) { console.warn('[insight subscribe per-shop] merge 失敗', e); }
     };
-    try {
-      if (window.__cloudInsight) window.__cloudInsight.subscribe(makeInsightHandler('app/insight'));
-    } catch (e) { console.warn('[insight subscribe app/insight]', e); }
     try {
       if (window.__cloudInsightByShop && Array.isArray(window.__cloudInsightByShop.shops)) {
         window.__cloudInsightByShop.shops.forEach(s => {
-          try { window.__cloudInsightByShop.subscribeShop(s, makeInsightHandler('per-shop')); }
+          try { window.__cloudInsightByShop.subscribeShop(s, perShopMergeHandler); }
           catch (e) { console.warn('[insight subscribe app/insight_' + s + ']', e); }
         });
       }
