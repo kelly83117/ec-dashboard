@@ -2087,9 +2087,31 @@ Object.assign(App, {
           adjList.querySelectorAll('[data-del-date]').forEach(b => {
             b.addEventListener('click', () => {
               const targetDate = b.dataset.delDate;
+              console.warn('[DEL] click targetDate=', targetDate, 'code=', code, 'shop=', currentShop);
+              console.warn('[DEL] note.adjustments BEFORE:', JSON.stringify(note.adjustments));
+              console.warn('[DEL] _mem[k][code] BEFORE:', JSON.stringify(Store._mem[notesKey] && Store._mem[notesKey][code]));
               note.adjustments = (note.adjustments || []).filter(a => (a.date || '') !== targetDate);
+              console.warn('[DEL] note.adjustments AFTER filter:', JSON.stringify(note.adjustments));
+              // 除了 mutate 本地 `note` 也直接改 _mem[notesKey][code]（避免 subscribe 換過參照後 note 是孤兒）
+              // 這條路是保險：即使 `note` 已經跟 _mem 脫鉤，_mem 仍然反映刪除
+              try {
+                if (Store._mem[notesKey] && Store._mem[notesKey][code]) {
+                  const memAdj = Store._mem[notesKey][code].adjustments || [];
+                  const memFiltered = memAdj.filter(a => (a.date || '') !== targetDate);
+                  const memText = Store._mem[notesKey][code].text || '';
+                  if (memFiltered.length === 0 && !memText) {
+                    delete Store._mem[notesKey][code];
+                    console.warn('[DEL] _mem 直接 delete allNotes[code]');
+                  } else {
+                    Store._mem[notesKey][code].adjustments = memFiltered;
+                    console.warn('[DEL] _mem 直接 mutate adjustments =', JSON.stringify(memFiltered));
+                  }
+                }
+              } catch (e) { console.warn('[DEL] _mem 直接寫入失敗', e); }
               adjList.innerHTML = renderAdjList();
               autoSave();
+              console.warn('[DEL] _mem[k][code] AFTER autoSave:', JSON.stringify(Store._mem[notesKey] && Store._mem[notesKey][code]));
+              console.warn('[DEL] pending has notesKey?', window.__insightPendingNotes && window.__insightPendingNotes.has(notesKey));
               // 重新計算工作日誌摘要 → 該人員的「【洞察表 · 今日調整】」區塊立刻反映本次刪除
               // silent:true 不跳 toast；不直接推雲端，等使用者按「☁ 同步雲端」一次推完
               try { this._updateDailyProgressFromAdjustments({ silent: true }); } catch (e) { console.warn('[del->dp]', e); }
