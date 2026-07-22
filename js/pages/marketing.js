@@ -1798,30 +1798,24 @@ Object.assign(App, {
       } catch (e) { console.warn('[profit count]', e); }
     }
 
-    // ======== 3. 組合摘要文字 ========
-    const ORDER = ['重跌品', '衰退品', '爆發品', '成長品', '零轉換', '弱轉換', '轉換偏低'];
-    const EMOJI = { '重跌品':'🔴','衰退品':'🟥','爆發品':'🟡','成長品':'🟨','零轉換':'❎','弱轉換':'🟢','轉換偏低':'🟩' };
-    const buildInsightBlock = (counts) => {
-      if (!counts || Object.keys(counts).length === 0) return '';
-      const lines = [];
-      let idx = 1;
-      ORDER.forEach(label => {
-        if (counts[label]) lines.push(`${idx++}. ${EMOJI[label]} ${label} ${counts[label]} 個`);
-      });
-      return '【洞察表 · 今日調整】\n' + lines.join('\n');
-    };
-    const buildProfitBlock = () => {
-      if (Object.keys(profitCounts).length === 0) return '';
-      // 排序：高利潤商品 → 賠錢中 → 低淨利 → 危險商品 → 低效廣告 → 其他
-      const PROFIT_ORDER = ['高利潤商品', '賠錢中', '低淨利', '危險商品', '低效廣告'];
-      const keys = [...PROFIT_ORDER.filter(k => profitCounts[k]), ...Object.keys(profitCounts).filter(k => !PROFIT_ORDER.includes(k))];
-      const lines = [];
-      let idx = 1;
-      keys.forEach(k => { lines.push(`${idx++}. ${k} ${profitCounts[k]} 個`); });
-      return '【淨利表 · 今日調整】\n' + lines.join('\n');
+    // ======== 3. 更新工作日誌 — 寫成結構化 item（daily.js 有專用 render） ========
+    // 資料型別：day[person] 是 Array<{id,text,done}> 或 legacy 字串
+    //   自動摘要 item 特徵：kind:'insight-summary' | 'profit-summary'，攜帶 counts 物件
+    //   daily.js 看到 kind → 用 chip 卡片 render（沒 checkbox / ✕）
+    // legacy 字串裡若含【洞察表·今日調整】等段落，先剝掉留下純使用者文字
+    const stripLegacyAutoBlocks = (text) => text
+      .replace(/【洞察表 · 今日調整】[\s\S]*?(?=\n\n【|$)/g, '')
+      .replace(/【淨利表 · 今日調整】[\s\S]*?(?=\n\n【|$)/g, '')
+      .replace(/\s+$/, '');
+    const toItemsArray = (v) => {
+      if (Array.isArray(v)) return v.slice();
+      if (v && String(v).trim()) {
+        const cleaned = stripLegacyAutoBlocks(String(v).trim());
+        return cleaned ? [{ id: 'legacy', text: cleaned, done: false }] : [];
+      }
+      return [];
     };
 
-    // ======== 4. 更新工作日誌 — 迴圈掃過所有受影響的人 ========
     // 受影響 = 3 位賣場負責人（insight 一定要重算，即便今天沒調整也要跑一次，
     //   舊自動段落才會被清掉）+ 若登入者是 profit 對象也算
     const affectedPersons = new Set(Object.values(SHOP_TO_PERSON));
@@ -1832,22 +1826,35 @@ Object.assign(App, {
     let anyInsight = false;
 
     affectedPersons.forEach(person => {
-      const existing = day[person] || '';
-      // 先把該人員舊的自動摘要區塊清掉（不管是洞察表還是淨利表）
-      const cleaned = existing
-        .replace(/【洞察表 · 今日調整】[\s\S]*?(?=\n\n【|$)/g, '')
-        .replace(/【淨利表 · 今日調整】[\s\S]*?(?=\n\n【|$)/g, '')
-        .replace(/\s+$/, '');
-      const iBlock = buildInsightBlock(insightCountsByPerson[person]);
-      const pBlock = (person === profitPerson) ? buildProfitBlock() : '';
-      if (iBlock) anyInsight = true;
-      const parts = [];
-      if (cleaned) parts.push(cleaned);
-      if (iBlock) parts.push(iBlock);
-      if (pBlock) parts.push(pBlock);
-      const newText = parts.join('\n\n');
-      if (newText) day[person] = newText;
-      else delete day[person]; // 全部都沒了 → 移除該人員那天的整筆紀錄
+      // 拿出既有 items → 移除舊的自動摘要（kind 標記）
+      const existing = toItemsArray(day[person]);
+      const userItems = existing.filter(it => it && it.kind !== 'insight-summary' && it.kind !== 'profit-summary');
+
+      // 產生新的自動 item（順序：淨利表在前、洞察表在後 → 反向 push 讓洞察表在上面）
+      const iCounts = insightCountsByPerson[person] || {};
+      const iHasCount = Object.keys(iCounts).length > 0;
+      const pHasCount = (person === profitPerson) && Object.keys(profitCounts).length > 0;
+      if (iHasCount) anyInsight = true;
+
+      const autoItems = [];
+      if (iHasCount) autoItems.push({
+        id: 'auto-insight-' + person,
+        kind: 'insight-summary',
+        counts: iCounts,
+        done: false,
+        auto: true,
+      });
+      if (pHasCount) autoItems.push({
+        id: 'auto-profit-' + person,
+        kind: 'profit-summary',
+        counts: profitCounts,
+        done: false,
+        auto: true,
+      });
+
+      const merged = [...autoItems, ...userItems];
+      if (merged.length > 0) day[person] = merged;
+      else delete day[person]; // 都沒了 → 該員該日紀錄整筆刪掉
     });
 
     const next = Object.assign({}, all);

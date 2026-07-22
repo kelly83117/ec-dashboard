@@ -94,24 +94,77 @@ Object.assign(App, {
 
     const cards = personInfos.map(p => {
       const initial = p.name.slice(0, 1);
-      const doneCount = p.items.filter(it => it.done).length;
-      const statusChip = p.items.length === 0
+      // 統計「已完成 / 全部」只算使用者自己的待辦，自動摘要卡不計
+      const userItems = p.items.filter(it => it && !it.kind);
+      const doneCount = userItems.filter(it => it.done).length;
+      const statusChip = userItems.length === 0
         ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600">尚未填</span>`
-        : doneCount === p.items.length
+        : doneCount === userItems.length
           ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#d1fae5;color:#047857;font-size:11px;font-weight:600">✓ 全部完成</span>`
-          : `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#e0e7ff;color:#4338ca;font-size:11px;font-weight:600">${doneCount}/${p.items.length} 已完成</span>`;
+          : `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#e0e7ff;color:#4338ca;font-size:11px;font-weight:600">${doneCount}/${userItems.length} 已完成</span>`;
       const avatarHtml = p.avatar
         ? `<img src="${escapeHtml(p.avatar)}" alt="${escapeHtml(p.name)}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0">`
         : `<div style="width:38px;height:38px;border-radius:50%;background:${PERSON_COLORS[p.name]};color:white;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0">${escapeHtml(initial)}</div>`;
-      const itemRows = p.items.map(it => `
+      // 自動摘要 item 專用 render：分類 chips + 顏色區塊，沒 checkbox 也沒 ✕
+      // 顏色跟洞察表本身的判定標籤對齊，讓一眼就能連結上
+      const INSIGHT_ORDER = ['重跌品', '衰退品', '爆發品', '成長品', '零轉換', '弱轉換', '轉換偏低'];
+      const INSIGHT_STYLE = {
+        '重跌品':   { emoji:'🔴', bg:'#fee2e2', fg:'#991b1b' },
+        '衰退品':   { emoji:'🟥', bg:'#fecaca', fg:'#7f1d1d' },
+        '爆發品':   { emoji:'🟡', bg:'#fef9c3', fg:'#854d0e' },
+        '成長品':   { emoji:'🟨', bg:'#fef08a', fg:'#713f12' },
+        '零轉換':   { emoji:'❎', bg:'#e5e7eb', fg:'#374151' },
+        '弱轉換':   { emoji:'🟢', bg:'#dcfce7', fg:'#166534' },
+        '轉換偏低': { emoji:'🟩', bg:'#bbf7d0', fg:'#14532d' },
+      };
+      const PROFIT_ORDER = ['高利潤商品', '賠錢中', '低淨利', '危險商品', '低效廣告'];
+      const PROFIT_STYLE = {
+        '高利潤商品': { bg:'#dcfce7', fg:'#166534' },
+        '賠錢中':     { bg:'#fee2e2', fg:'#991b1b' },
+        '低淨利':     { bg:'#fef3c7', fg:'#92400e' },
+        '危險商品':   { bg:'#fecaca', fg:'#7f1d1d' },
+        '低效廣告':   { bg:'#e0e7ff', fg:'#3730a3' },
+        '其他':       { bg:'#f3f4f6', fg:'#374151' },
+      };
+      const renderSummaryCard = (opts) => {
+        const chipsHtml = opts.chips.map(c => `
+          <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:${c.bg};color:${c.fg};font-size:12px;font-weight:600;line-height:1.4;white-space:nowrap">
+            ${c.emoji ? `<span>${c.emoji}</span>` : ''}<span>${escapeHtml(c.label)}</span><span style="opacity:.7">·</span><strong>${c.count}</strong>
+          </span>`).join('');
+        return `
+          <div class="dp-summary-card" style="background:${opts.headBg};border-left:3px solid ${opts.headColor};border-radius:6px;padding:8px 10px 9px;margin:2px 0 4px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+              <span style="font-size:11px;font-weight:700;color:${opts.headColor};letter-spacing:.02em">${escapeHtml(opts.title)}</span>
+              <span style="font-size:10px;color:${opts.headColor};opacity:.7;font-weight:500">自動更新</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px">${chipsHtml}</div>
+          </div>`;
+      };
+      const renderItem = (it) => {
+        if (it && it.kind === 'insight-summary') {
+          const counts = it.counts || {};
+          const keys = INSIGHT_ORDER.filter(k => counts[k]);
+          if (keys.length === 0) return '';
+          const chips = keys.map(k => ({ label:k, count:counts[k], ...(INSIGHT_STYLE[k]||{}) }));
+          return renderSummaryCard({ title:'洞察表 · 今日調整', headBg:'#faf5ff', headColor:'#7e22ce', chips });
+        }
+        if (it && it.kind === 'profit-summary') {
+          const counts = it.counts || {};
+          const orderedKeys = [...PROFIT_ORDER.filter(k => counts[k]), ...Object.keys(counts).filter(k => !PROFIT_ORDER.includes(k))];
+          if (orderedKeys.length === 0) return '';
+          const chips = orderedKeys.map(k => ({ label:k, count:counts[k], emoji:'', ...(PROFIT_STYLE[k]||PROFIT_STYLE['其他']) }));
+          return renderSummaryCard({ title:'淨利表 · 今日調整', headBg:'#eff6ff', headColor:'#1d4ed8', chips });
+        }
+        return `
         <div class="dp-todo-row" data-item-id="${escapeHtml(it.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
           <span style="color:${PERSON_COLORS[p.name]};font-size:13px;flex-shrink:0">●</span>
           <span style="flex:1;min-width:0;font-size:13px;color:${it.done ? '#9ca3af' : 'var(--text)'};text-decoration:${it.done ? 'line-through' : 'none'};word-break:break-word">${escapeHtml(it.text)}</span>
           <input type="checkbox" class="dp-todo-check" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" ${it.done ? 'checked' : ''} ${isEditable ? '' : 'disabled'} style="width:16px;height:16px;cursor:${isEditable ? 'pointer' : 'default'};flex-shrink:0">
           ${it.done ? '<span style="font-size:10.5px;color:#10b981;font-weight:700;flex-shrink:0">已完成</span>' : ''}
           ${isEditable ? `<button class="dp-todo-del" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" title="刪除" style="border:0;background:none;color:#d1d5db;cursor:pointer;font-size:13px;flex-shrink:0">✕</button>` : ''}
-        </div>
-      `).join('');
+        </div>`;
+      };
+      const itemRows = p.items.map(renderItem).join('');
       const emptyHint = p.items.length === 0 ? `<div style="padding:10px 2px;color:var(--text-muted);font-size:12.5px">${isEditable ? '還沒有待辦事項' : '這天沒有紀錄'}</div>` : '';
       return `
         <div class="dp-card" data-dp-name="${escapeHtml(p.name)}" style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:8px;min-width:0">
@@ -151,7 +204,11 @@ Object.assign(App, {
       ALLOWED_NAMES.forEach(n => {
         const v = dayEntries[n];
         const arr = Array.isArray(v) ? v : (v && String(v).trim() ? [{ text: String(v).trim(), done: false }] : []);
-        arr.forEach(it => dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n], light: PERSON_LIGHT[n] }));
+        // 自動摘要 item (kind: 'insight-summary' | 'profit-summary') 不塞進月曆條列
+        arr.forEach(it => {
+          if (!it || it.kind) return;
+          dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n], light: PERSON_LIGHT[n] });
+        });
       });
       const shownItems = dayItems.slice(0, MAX_CAL_BARS);
       const extraCount = dayItems.length - shownItems.length;
