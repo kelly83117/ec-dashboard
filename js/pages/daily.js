@@ -141,16 +141,22 @@ Object.assign(App, {
         ? `<img src="${escapeHtml(p.avatar)}" alt="${escapeHtml(p.name)}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0">`
         : `<div style="width:38px;height:38px;border-radius:50%;background:${PERSON_COLORS[p.name]};color:white;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0">${escapeHtml(initial)}</div>`;
       // 自動摘要 item 專用 render：分類 chips + 顏色區塊，沒 checkbox 也沒 ✕
-      // 顏色跟洞察表本身的判定標籤對齊，讓一眼就能連結上
+      // 顏色跟洞察表本身 classifyMetrics 的 GROW / DROP / CONV 三大群完全對齊
+      //   下滑類（重跌品 / 衰退品）→ 橘紅
+      //   成長類（爆發品 / 成長品）→ 黃
+      //   轉換類（零轉換 / 弱轉換 / 轉換偏低）→ 綠
       const INSIGHT_ORDER = ['重跌品', '衰退品', '爆發品', '成長品', '零轉換', '弱轉換', '轉換偏低'];
+      const GROUP_DROP = { bg:'#ffedd5', fg:'#c2410c' }; // 下滑類：橘 (marketing.js:236)
+      const GROUP_GROW = { bg:'#fef9c3', fg:'#a16207' }; // 成長類：黃 (marketing.js:235)
+      const GROUP_CONV = { bg:'#dcfce7', fg:'#15803d' }; // 轉換類：綠 (marketing.js:237)
       const INSIGHT_STYLE = {
-        '重跌品':   { emoji:'🔴', bg:'#fee2e2', fg:'#991b1b' },
-        '衰退品':   { emoji:'🟥', bg:'#fecaca', fg:'#7f1d1d' },
-        '爆發品':   { emoji:'🟡', bg:'#fef9c3', fg:'#854d0e' },
-        '成長品':   { emoji:'🟨', bg:'#fef08a', fg:'#713f12' },
-        '零轉換':   { emoji:'❎', bg:'#e5e7eb', fg:'#374151' },
-        '弱轉換':   { emoji:'🟢', bg:'#dcfce7', fg:'#166534' },
-        '轉換偏低': { emoji:'🟩', bg:'#bbf7d0', fg:'#14532d' },
+        '重跌品':   { emoji:'🔴', ...GROUP_DROP },
+        '衰退品':   { emoji:'🟥', ...GROUP_DROP },
+        '爆發品':   { emoji:'🟡', ...GROUP_GROW },
+        '成長品':   { emoji:'🟨', ...GROUP_GROW },
+        '零轉換':   { emoji:'❎', ...GROUP_CONV },
+        '弱轉換':   { emoji:'🟢', ...GROUP_CONV },
+        '轉換偏低': { emoji:'🟩', ...GROUP_CONV },
       };
       const PROFIT_ORDER = ['高利潤商品', '賠錢中', '低淨利', '危險商品', '低效廣告'];
       const PROFIT_STYLE = {
