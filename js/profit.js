@@ -1976,6 +1976,7 @@ function buildDistHtml(shop,built){
     }${td(l,GRN_LT,'#1a3260')}${td(n,GRN_LT,'#1a3260')}${td(pct(n,noAdsTotal),GRN_LT,'#1a3260')}</tr>`).join('');
 
   return `
+  <div class="dist-note">本表統計全部 ${built.length} 筆商品,不隨表格篩選變動</div>
   <table style="${T}">
     <tbody>
       ${rMeta('總投廣商品數量',adsTotal)}
@@ -2074,7 +2075,7 @@ function renderAnaModalBody(){
     <div class="ana-sec-hdr">加減碼前提</div>
     <div class="ana-rule-row">
       <span class="ana-rule-tag tag-add300" style="min-width:72px">前提</span>
-      <span class="ana-rule-desc">O欄（過去7天點擊）> ${inp('clickMin',t.clickMin)}</span>
+      <span class="ana-rule-desc">O欄（過去7天點擊）≥ ${inp('clickMin',t.clickMin)}</span>
     </div>
     <div class="ana-sec-hdr">加預算</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">加300</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add300',t.add300)} (含)以上</span>${trash('加300','disableAnaTag')}</div>
