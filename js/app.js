@@ -2826,6 +2826,16 @@ async function __setupCloud() {
           });
         }
       } catch {}
+      // 保留 ec.insight_* — v154 起 insight 資料住在 app/insight_{shop} 獨立 doc，
+      //   不在 next（app/main）裡。直接 Store._mem = next 會把 insight 全部清掉，
+      //   洞察表變空白直到使用者重新整理再走一次 __setupCloud 合併三個來源才恢復。
+      try {
+        if (Store._mem) {
+          Object.keys(Store._mem).forEach(k => {
+            if (k.startsWith('ec.insight_') && next[k] === undefined) next[k] = Store._mem[k];
+          });
+        }
+      } catch {}
       Store._mem = next;
       // 首批雲端 snapshot 一定強制重繪（即便 App 尚未準備、或 dirty check 誤判）
       // 否則手機開頁時，「dashboard 先用空資料 render → 雲端到了但被 dirty 條件擋住」會看不到數字
