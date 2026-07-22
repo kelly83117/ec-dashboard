@@ -77,9 +77,44 @@ Object.assign(App, {
     const allProgress = Store.get('ec.dailyProgress', {}) || {};
     const dayProgress = allProgress[viewDate] || {};
     // 舊資料是一整段文字，第一次在新版打勾清單顯示時包成一筆項目，不會不見
+    // v163 起：舊字串裡若含「【洞察表 · 今日調整】」/「【淨利表 · 今日調整】」段落，
+    //   parse 出來包成結構化 auto item（render 才能走 chip 卡片版），剩下純使用者文字包 legacy todo
+    const INSIGHT_LINE_RE = /\d+\.\s+\S+\s+(\S+?)\s+(\d+)\s*個/g;
+    const PROFIT_LINE_RE  = /\d+\.\s+(\S+?)\s+(\d+)\s*個/g;
+    const parseLegacyAuto = (text) => {
+      let residual = text;
+      const items = [];
+      const iMatch = residual.match(/【洞察表 · 今日調整】([\s\S]*?)(?=\n\n【|$)/);
+      if (iMatch) {
+        const counts = {};
+        let m; INSIGHT_LINE_RE.lastIndex = 0;
+        while ((m = INSIGHT_LINE_RE.exec(iMatch[1])) !== null) counts[m[1]] = parseInt(m[2], 10);
+        if (Object.keys(counts).length > 0) items.push({ id: 'auto-insight-legacy', kind: 'insight-summary', counts, done: false, auto: true });
+        residual = residual.replace(iMatch[0], '');
+      }
+      const pMatch = residual.match(/【淨利表 · 今日調整】([\s\S]*?)(?=\n\n【|$)/);
+      if (pMatch) {
+        const counts = {};
+        let m; PROFIT_LINE_RE.lastIndex = 0;
+        while ((m = PROFIT_LINE_RE.exec(pMatch[1])) !== null) counts[m[1]] = parseInt(m[2], 10);
+        if (Object.keys(counts).length > 0) items.push({ id: 'auto-profit-legacy', kind: 'profit-summary', counts, done: false, auto: true });
+        residual = residual.replace(pMatch[0], '');
+      }
+      return { autoItems: items, userText: residual.trim() };
+    };
     const normItems = (v) => {
       if (Array.isArray(v)) return v;
-      if (v && String(v).trim()) return [{ id: 'legacy', text: String(v).trim(), done: false }];
+      if (v && String(v).trim()) {
+        const raw = String(v).trim();
+        // 沒含 auto 段落頭 → 老 legacy 純文字，走原路徑
+        if (raw.indexOf('【洞察表 · 今日調整】') < 0 && raw.indexOf('【淨利表 · 今日調整】') < 0) {
+          return [{ id: 'legacy', text: raw, done: false }];
+        }
+        const { autoItems, userText } = parseLegacyAuto(raw);
+        const out = autoItems.slice();
+        if (userText) out.push({ id: 'legacy', text: userText, done: false });
+        return out;
+      }
       return [];
     };
 
