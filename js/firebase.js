@@ -208,13 +208,36 @@ try {
     const m = /^ec\.insight_(.+?)_(master|weeks|notes|perf)$/.exec(key || '');
     return m ? m[1] : null;
   };
+  // ⚠ 帶點的字面欄位名（例：ec.insight_玩樂_notes）用 setDoc({[k]:v},{merge:true})
+  //   時 SDK 會靜默不覆蓋（Firestore v10 對這種 dotted key 的行為異常）。改用
+  //   updateDoc + new FieldPath(k)：FieldPath 用單一參數建構會把整個字串視為
+  //   「一個 segment（字面欄位名）」，dots 不會被拆成 nested path。
+  //   updateDoc 需要 doc 存在；不存在時 fallback 用 setDoc 建立初始 doc。
+  const perShopSetField = async (shop, k, v) => {
+    const ref = insightShopRefs[shop];
+    if (!ref) throw new Error('unknown shop: ' + shop);
+    try {
+      await updateDoc(ref, new FieldPath(k), v);
+    } catch (e) {
+      if (e && (e.code === 'not-found' || String(e).includes('No document to update'))) {
+        // 賣場 doc 還沒建立過 → 用 setDoc 建立初始 doc
+        //   注意：初始建立時 setDoc({[k]:v}) 對 dotted key 也有雷，因此改用 REST。
+        //   實務上：Kelly 的四個 per-shop doc 都已經存在，不會走這條 fallback。
+        await setDoc(ref, {}); // 先建空 doc
+        await updateDoc(ref, new FieldPath(k), v); // 再用 updateDoc 塞值
+      } else {
+        throw e;
+      }
+    }
+  };
+
   window.__cloudInsightByShop = {
     shops: INSIGHT_SHOPS,
     forKey: (key) => {
       const shop = insightShopFromKey(key);
       if (!shop || !insightShopRefs[shop]) return null;
       return {
-        setField: (k, v) => setDoc(insightShopRefs[shop], { [k]: v }, { merge: true }),
+        setField: (k, v) => perShopSetField(shop, k, v),
       };
     },
     getDocForShop: (shop) => insightShopRefs[shop] ? getDoc(insightShopRefs[shop]) : Promise.resolve({ exists: () => false, data: () => ({}) }),
