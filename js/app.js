@@ -2771,16 +2771,42 @@ async function __setupCloud() {
       // 路由與 Store.set 同：ec.insight_* 走 per-shop doc → app/insight → app/main
       let target = cs;
       let wentToPerShop = false;
+      let targetName = 'app/main';
       if (typeof key === 'string' && key.startsWith('ec.insight_')) {
         const perShop = window.__cloudInsightByShop && window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(key);
-        if (perShop) { target = perShop; wentToPerShop = true; }
-        else if (window.__cloudInsight) target = window.__cloudInsight;
+        if (perShop) { target = perShop; wentToPerShop = true; targetName = 'per-shop'; }
+        else if (window.__cloudInsight) { target = window.__cloudInsight; targetName = 'app/insight'; }
       }
+      // 診斷：送出去前先印 payload 摘要
+      const val = Store._mem[key];
+      const keys = val && typeof val === 'object' ? Object.keys(val) : [];
+      console.warn('[PUSH]', key, '→', targetName,
+        '| payload keys count:', keys.length,
+        '| F255 in payload?', keys.includes('F255'),
+        '| F255 value:', val && val['F255'] ? JSON.stringify(val['F255']) : '無');
       try {
-        await target.setField(key, Store._mem[key]);
+        await target.setField(key, val);
+        console.warn('[PUSH] setField 完成，無 throw');
+        // 立刻 readback 驗證雲端真的更新了
+        if (wentToPerShop) {
+          const shopMatch = /^ec\.insight_(.+?)_/.exec(key);
+          const shop = shopMatch ? shopMatch[1] : null;
+          if (shop && window.__cloudInsightByShop.getDocForShop) {
+            try {
+              const rb = await window.__cloudInsightByShop.getDocForShop(shop);
+              const rbNotes = rb.exists() ? rb.data()[key] : null;
+              const rbKeys = rbNotes && typeof rbNotes === 'object' ? Object.keys(rbNotes) : [];
+              console.warn('[PUSH][readback]',
+                'keys count:', rbKeys.length,
+                '| F255 in readback?', rbKeys.includes('F255'),
+                '| F255 value:', rbNotes && rbNotes['F255'] ? JSON.stringify(rbNotes['F255']) : '無');
+              if (rbKeys.includes('F255') && !keys.includes('F255')) {
+                console.error('[PUSH][readback] 🚨 送出去沒 F255，但雲端還有 F255 — Firestore 沒真的覆蓋！');
+              }
+            } catch (e) { console.warn('[PUSH][readback] 失敗', e); }
+          }
+        }
         // per-shop 寫成功 → 順手刪掉 app/insight 跟 app/main 裡的同 key 舊資料
-        //   避免下次重整 __setupCloud 讀到 app/insight 的舊拷貝（v154 起 per-shop 是權威來源）
-        //   之前這裡沒清，subscribe race 才會把刪掉的資料 replay 回來
         if (wentToPerShop) {
           window.__insightSourcePref = window.__insightSourcePref || {};
           window.__insightSourcePref[key] = 'per-shop';
@@ -2793,7 +2819,7 @@ async function __setupCloud() {
         }
         return true;
       } catch (e) {
-        console.error('[pushKeyToCloud] 失敗', key, e);
+        console.error('[PUSH] 失敗 throw', key, e);
         throw e;
       }
     };
