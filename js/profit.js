@@ -335,16 +335,60 @@ function _cloudWriteSafe(key, payload, label){
   _markPending(key);
 }
 function lsKey(shop,month,half){return`ec|${shop}|${month}|${half}`;}
+// ── lsSave 存檔失敗通報（配額滿了會靜默失敗，見 PR：lssave-quota-alert）──
+let _lsFailNotified = false;   // 同一次 session 只彈一次窗，之後只出 toast
+
+function _isQuotaErr(e){
+  if(!e) return false;
+  const n = e.name || '';
+  return n === 'QuotaExceededError'
+      || n === 'NS_ERROR_DOM_QUOTA_REACHED'
+      || e.code === 22
+      || e.code === 1014;
+}
+
+function _halfLabel(h){
+  return h === 'first' ? '上半月' : h === 'second' ? '下半月' : h === 'full' ? '整月' : String(h||'');
+}
+
+function _notifyLsSaveFail(shop, month, half, err){
+  const who = shop + ' ' + month + '｜' + _halfLabel(half);
+  const quota = _isQuotaErr(err);
+  console.error('[lsSave] 存檔到 localStorage 失敗：' + who, err);
+
+  const title = quota ? '本機空間已滿，報表沒存進電腦' : '報表沒存進電腦';
+  const message =
+    who + ' 的報表沒有存進這台電腦。\n' +
+    '資料目前只在記憶體裡，重整或關掉分頁就會消失。\n\n' +
+    '請現在按「☁ 同步雲端」把它推上去（推得上去，不受這個問題影響）。\n' +
+    '保險起見也可以先按「匯出 Excel」留一份。';
+  const detail = (err && (err.name || err.message))
+    ? ('錯誤：' + (err.name||'') + ' ' + (err.message||'')) : '';
+
+  if(!_lsFailNotified){
+    _lsFailNotified = true;
+    if(window.App && typeof App.showAlertModal === 'function'){
+      App.showAlertModal({ title:title, message:message, detail:detail, kind:'error', dedupeKey:'lsSaveFail' });
+      return;
+    }
+  }
+  if(typeof showToast === 'function'){
+    showToast('報表沒存進本機，請先按同步雲端再重整', 'error');
+  }
+}
+
 function lsSave(shop,month,half,built,period,days){
   // 只存本機；同步雲端需手動按「☁ 同步雲端」
   const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
   const k=lsKey(shop,month,half);
-  try{localStorage.setItem(k,JSON.stringify(payload));}catch(e){}
+  let saveErr=null;
+  try{localStorage.setItem(k,JSON.stringify(payload));}catch(e){saveErr=e;}
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=payload;}catch{}
   // 記完整的 lsKey 到 pending set — 這樣使用者切到別的月份/賣場再產生報表，
   //   舊的月份/賣場也還在 pending 裡，按同步時會一起推上雲端（避免只推當前顯示那份）
   _pendingSyncKeys.add(k);
   _showSyncBtn(shop);
+  if(saveErr){ try{ _notifyLsSaveFail(shop, month, half, saveErr); }catch(e2){ console.error('[lsSave] 通報失敗', e2); } }
 }
 // 真實 pending 筆數（排除 __shop__| marker 和 _summary_v1）
 //   _summary_v1 是總表資料，總表已改為自動同步（saveSummaryRows 直接推雲端），
