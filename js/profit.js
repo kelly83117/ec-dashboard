@@ -306,9 +306,14 @@ const GROWTH_TAGS=[
 ];
 const state={};
 const _initNow=new Date();const _initCurMonth=`${_initNow.getFullYear()}/${String(_initNow.getMonth()+1).padStart(2,'0')}`;
-// 讀上次使用者離開時的月份/區間；沒有就用當月/上半月（讓使用者下次回來停在原本位置）
-function _readLastMonth(shopId){try{const v=localStorage.getItem('ec_lastMonth_'+shopId);return v&&MONTHS.indexOf(v)>=0?v:_initCurMonth;}catch{return _initCurMonth;}}
-function _readLastHalf(shopId){try{const v=localStorage.getItem('ec_lastHalf_'+shopId);return v==='first'||v==='second'?v:'first';}catch{return 'first';}}
+const _initCurHalf=_initNow.getDate()<=15?'first':'second';
+// 月份/區間預設值：一律跟今天走（老闆要求，2026-07-23）。
+// localStorage 的 ec_lastMonth_/ec_lastHalf_ 仍在寫入但已不再讀取，
+// 保留是為了要改回「記住上次」時只需改這兩個函式。
+// 老闆要求：一打開就看今天的月份，不再記住上次選的（2026-07-23）
+function _readLastMonth(shopId){return MONTHS.indexOf(_initCurMonth)>=0?_initCurMonth:MONTHS[MONTHS.length-1];}
+// 老闆要求：一打開就看今天所屬的半月（1-15 上半、16-末 下半）
+function _readLastHalf(shopId){return _initCurHalf;}
 SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
 let globalMap={};
 let curShop='總表';
@@ -640,17 +645,6 @@ window.addEventListener('profitDataReady', (e)=>{
   try{
     shopsToUpdate.forEach(s=>{
       onMonthChange(s.id);
-      // 若目前月份無資料，自動切到 profits collection 裡最新有資料的月份
-      if(!state[s.id]?._built){
-        const shopKeys=Object.keys(Store._profitMem||{}).filter(k=>k.startsWith(`ec|${s.id}|`));
-        if(shopKeys.length>0){
-          const months=[...new Set(shopKeys.map(k=>k.split('|')[2]))].filter(Boolean).sort().reverse();
-          if(months[0]){
-            const sel=document.getElementById('month-sel-'+s.id);
-            if(sel&&sel.value!==months[0]){sel.value=months[0];onMonthChange(s.id);}
-          }
-        }
-      }
       if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
     });
     // 只有賣場資料（非 _summary_v1）變動時才重新渲染總表
@@ -882,7 +876,8 @@ function tryLoadSaved(shop){
   if(rep){loadIntoUI(shop,rep.built,rep.period,rep.days);}
   else{
     state[shop]._built=null;
-    document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">此區間尚無資料，請上傳報表產生</div></div>`;
+    const _hLbl=s.curHalf==='first'?'上半月':s.curHalf==='second'?'下半月':'整月';
+    document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${s.curMonth} ${_hLbl} 尚無資料，請上傳報表產生</div></div>`;
     document.getElementById('period-tag-'+shop).textContent='';
     if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;}
     setKpis(shop,0,0,0,0);
