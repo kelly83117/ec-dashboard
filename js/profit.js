@@ -5203,6 +5203,7 @@ function momoRenderSub(shop){
   if(!c) return;
   const sub=_momoSub[shop]||'profit';
   if(sub==='profit'){ c.innerHTML=momoProfitTableHTML(shop); momoRenderProfitBody(shop); return; }
+  if(sub==='batch'){ momoRenderBatch(shop); return; }
   const names={batch:'批次維護',upload:'C1105 上傳',sync:'商品資料同步',rent:'倉租費彙總'};
   c.innerHTML=`<div class="empty"><div class="empty-icon">🚧</div><div class="empty-hint">「${names[sub]||sub}」建置中（後續階段開放）</div></div>`;
 }
@@ -5285,6 +5286,177 @@ function momoRenderProfitBody(shop){
     return `<tr>${tds}</tr>`;
   }).join('');
   tbl.innerHTML=`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
+}
+
+// ── 畫面二：批次維護（編輯現有商品 / 新增商品；甲配乙配共用）──
+function momoToday(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+const _momoBatchMode={};    // shop -> 'edit' | 'add'
+const _momoBatchSel={};     // shop -> 選中商品 sku（edit 模式）
+const _momoBatchSearch={};  // shop -> 搜尋字串（edit 模式）
+const _momoAddPpOverride={}; // shop -> 進價是否被手動覆蓋（add 模式）
+const _MOMO_INP='width:100%;padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;outline:none;box-sizing:border-box';
+const _MOMO_LB='font-size:11px;color:#6b7280;font-weight:600';
+function momoDefaultShip(shop){ return shop==='乙配'?0:77; }   // §0：乙配運費+包材預設 0，甲配 77
+function momoRenderBatch(shop){
+  const c=document.getElementById('momo-sub-content-'+shop);
+  if(!c) return;
+  if(!_momoBatchMode[shop]) _momoBatchMode[shop]='edit';
+  const mode=_momoBatchMode[shop];
+  const tab=(label,m)=>{ const on=mode===m; return `<button onclick="momoBatchSetMode('${shop}','${m}')" style="padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid ${on?'#5b5fcf':'#e5e7eb'};background:${on?'#5b5fcf':'#fff'};color:${on?'#fff':'#6b7280'}">${label}</button>`; };
+  c.innerHTML=`
+    <div style="display:flex;gap:6px;margin-bottom:16px">${tab('編輯現有商品','edit')}${tab('新增商品','add')}</div>
+    <div id="momo-batch-body-${shop}"></div>`;
+  if(mode==='edit') momoRenderBatchEdit(shop); else momoRenderBatchAdd(shop);
+}
+function momoBatchSetMode(shop,m){ _momoBatchMode[shop]=m; momoRenderBatch(shop); }
+
+// 編輯模式：搜尋清單（左）+ 選中商品編輯表單與歷程（右）
+function momoRenderBatchEdit(shop){
+  const body=document.getElementById('momo-batch-body-'+shop);
+  if(!body) return;
+  const raw=_momoBatchSearch[shop]||'';
+  body.innerHTML=`
+    <div style="display:grid;grid-template-columns:300px 1fr;gap:20px;align-items:start">
+      <div>
+        <input type="text" placeholder="搜尋 品號/名稱/原廠編號" value="${raw.replace(/"/g,'&quot;')}" oninput="momoBatchSearch('${shop}',this.value)" style="${_MOMO_INP};margin-bottom:8px">
+        <div id="momo-batch-list-${shop}" style="max-height:440px;overflow-y:auto"></div>
+      </div>
+      <div id="momo-batch-form-${shop}"></div>
+    </div>`;
+  momoRenderBatchEditList(shop);
+  momoRenderBatchEditForm(shop);
+}
+function momoRenderBatchEditList(shop){
+  const el=document.getElementById('momo-batch-list-'+shop);
+  if(!el) return;
+  const raw=_momoBatchSearch[shop]||'';
+  const q=raw.trim().toLowerCase();
+  const all=momoLoadProducts(shop);
+  if(!all.length){ el.innerHTML=`<div style="font-size:13px;color:#9ca3af;padding:8px">尚無商品，請切到「新增商品」建立第一筆</div>`; return; }
+  const list=q? all.filter(p=>((p.sku||'')+' '+(p.name||'')+' '+(p.origin||'')).toLowerCase().includes(q)) : all;
+  if(!list.length){ el.innerHTML=`<div style="font-size:13px;color:#9ca3af;padding:8px">沒有符合的商品</div>`; return; }
+  const sel=_momoBatchSel[shop];
+  el.innerHTML=list.slice(0,50).map(p=>{
+    const on=p.sku===sel;
+    return `<div onclick="momoBatchSelect('${shop}','${p.sku}')" style="padding:7px 10px;border-radius:7px;cursor:pointer;font-size:13px;border:1px solid ${on?'#5b5fcf':'transparent'};background:${on?'#eef0fb':'#f9fafb'};margin-bottom:4px">
+      <b>${p.name||'—'}</b><div style="color:#9ca3af;font-size:11px;margin-top:1px">品號 ${p.sku||'—'}${p.origin?' · 原廠 '+p.origin:''}</div></div>`;
+  }).join('') + (list.length>50?`<div style="font-size:11px;color:#9ca3af;padding:4px 10px">只顯示前 50 筆，請用搜尋縮小範圍</div>`:'');
+}
+function momoRenderBatchEditForm(shop){
+  const el=document.getElementById('momo-batch-form-'+shop);
+  if(!el) return;
+  const p=momoLoadProducts(shop).find(x=>x.sku===_momoBatchSel[shop]);
+  if(!p){ el.innerHTML=`<div style="font-size:13px;color:#9ca3af;padding:20px;text-align:center">← 從左側選一個商品來編輯</div>`; return; }
+  const hist=(p.history&&p.history.length)? [...p.history].reverse().map(h=>`
+    <div style="font-size:12px;padding:6px 10px;border-left:2px solid #e5e7eb;margin-bottom:4px">
+      <span style="color:#9ca3af">${h.date}</span> 成本 ${h.cost} / 進價 ${h.purchasePrice} / 售價 ${h.salePrice}${h.note?`<span style="color:#6b7280"> — ${h.note}</span>`:''}
+    </div>`).join('') : `<div style="font-size:12px;color:#9ca3af">尚無歷程</div>`;
+  el.innerHTML=`
+    <div style="font-size:14px;font-weight:700">${p.name||'—'}</div>
+    <div style="font-size:11px;color:#9ca3af;margin-bottom:12px">品號 ${p.sku||'—'}${p.origin?' · 原廠 '+p.origin:''}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+      <div><label style="${_MOMO_LB}">成本</label><input id="momo-edit-cost-${shop}" type="number" value="${p.cost??''}" style="${_MOMO_INP}"></div>
+      <div><label style="${_MOMO_LB}">進價(含稅)</label><input id="momo-edit-pp-${shop}" type="number" value="${p.purchasePrice??''}" style="${_MOMO_INP}"></div>
+      <div><label style="${_MOMO_LB}">售價(含稅)</label><input id="momo-edit-sp-${shop}" type="number" value="${p.salePrice??''}" style="${_MOMO_INP}"></div>
+    </div>
+    <div style="margin-bottom:10px"><label style="${_MOMO_LB}">異動原因（必填）</label><input id="momo-edit-note-${shop}" type="text" placeholder="例：供應商調漲進價" style="${_MOMO_INP}"></div>
+    <button onclick="momoBatchSubmitEdit('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">送出（新增一筆歷程）</button>
+    <div style="margin-top:16px">
+      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">異動歷程（新到舊）</div>${hist}
+    </div>`;
+}
+function momoBatchSearch(shop,val){ _momoBatchSearch[shop]=val; momoRenderBatchEditList(shop); }
+function momoBatchSelect(shop,sku){ _momoBatchSel[shop]=sku; momoRenderBatchEditList(shop); momoRenderBatchEditForm(shop); }
+function momoBatchSubmitEdit(shop){
+  const products=momoLoadProducts(shop);
+  const p=products.find(x=>x.sku===_momoBatchSel[shop]);
+  if(!p) return;
+  const cost=parseFloat(document.getElementById('momo-edit-cost-'+shop).value);
+  const pp=parseFloat(document.getElementById('momo-edit-pp-'+shop).value);
+  const sp=parseFloat(document.getElementById('momo-edit-sp-'+shop).value);
+  const note=document.getElementById('momo-edit-note-'+shop).value.trim();
+  if(!(cost>=0)||!(pp>=0)||!(sp>=0)){ alert('成本 / 進價 / 售價需為 ≥0 的數字'); return; }
+  if(!note){ alert('請填異動原因'); return; }
+  p.cost=cost; p.purchasePrice=pp; p.salePrice=sp;           // 更新「目前」值
+  p.history=p.history||[];
+  p.history.push({date:momoToday(),cost,purchasePrice:pp,salePrice:sp,note});  // append 一筆，不覆蓋舊值
+  momoSaveProducts(shop,products);
+  momoRenderBatchEditForm(shop);   // 刷新歷程列表
+  if(typeof showToast==='function') showToast('已更新並記錄一筆歷程','success');
+}
+
+// 新增模式：進價預設售價×75%（可覆蓋）+ 即時毛利率預覽
+function momoRenderBatchAdd(shop){
+  const body=document.getElementById('momo-batch-body-'+shop);
+  if(!body) return;
+  _momoAddPpOverride[shop]=false;
+  body.innerHTML=`
+    <div style="max-width:600px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div><label style="${_MOMO_LB}">商品編號（選填，留空自動產生 TEMP-）</label><input id="momo-add-sku-${shop}" type="text" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">原廠編號（選填）</label><input id="momo-add-origin-${shop}" type="text" style="${_MOMO_INP}"></div>
+      </div>
+      <div style="margin-bottom:10px"><label style="${_MOMO_LB}">商品名稱（必填）</label><input id="momo-add-name-${shop}" type="text" style="${_MOMO_INP}"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:4px">
+        <div><label style="${_MOMO_LB}">成本（必填）</label><input id="momo-add-cost-${shop}" type="number" oninput="momoAddRecalc('${shop}')" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">售價含稅（必填）</label><input id="momo-add-sp-${shop}" type="number" oninput="momoAddRecalc('${shop}')" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">進價含稅（必填）</label><input id="momo-add-pp-${shop}" type="number" oninput="momoAddPpInput('${shop}')" style="${_MOMO_INP}"><a id="momo-add-revert-${shop}" onclick="momoAddRevertPp('${shop}')" style="display:none;font-size:11px;color:#5b5fcf;cursor:pointer">↺ 改回公式值(售價×75%)</a></div>
+        <div><label style="${_MOMO_LB}">運費+包材</label><input id="momo-add-ship-${shop}" type="number" value="${momoDefaultShip(shop)}" oninput="momoAddRecalc('${shop}')" style="${_MOMO_INP}"></div>
+      </div>
+      <div id="momo-add-preview-${shop}" style="font-size:13px;margin:12px 0"><span style="color:#9ca3af">成本 / 進價 / 售價填齊後即時計算毛利率</span></div>
+      <button onclick="momoBatchSubmitAdd('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">新增商品</button>
+    </div>`;
+}
+function momoAddRecalc(shop){
+  const g=id=>document.getElementById('momo-add-'+id+'-'+shop);
+  const cost=parseFloat(g('cost').value)||0;
+  const sp=parseFloat(g('sp').value)||0;
+  const shipRaw=parseFloat(g('ship').value);
+  const ship=(shipRaw>=0)?shipRaw:momoDefaultShip(shop);
+  const ppEl=g('pp');
+  if(!_momoAddPpOverride[shop]) ppEl.value= sp? Math.round(sp*0.75):'';   // 進價自動 = 售價×75%（未覆蓋時）
+  const pp=parseFloat(ppEl.value)||0;
+  const prev=g('preview');
+  if(!prev) return;
+  if(cost&&pp&&sp){
+    const {marginPct}=momoCalcMargin({cost,purchasePrice:pp,salePrice:sp,shippingPackaging:ship});
+    const ok=marginPct>=30;   // §5：新品上架把關門檻 30%（比日常嚴，刻意）
+    prev.innerHTML=`毛利率 <b style="color:${ok?'#10b981':'#f97316'};font-size:15px">${Math.round(marginPct*10)/10}%</b> <span style="color:${ok?'#10b981':'#f97316'};font-weight:600;margin-left:6px">${ok?'✓ 超過 30%':'⚠ 未達 30%'}</span>`;
+  }else{
+    prev.innerHTML=`<span style="color:#9ca3af">成本 / 進價 / 售價填齊後即時計算毛利率</span>`;
+  }
+}
+function momoAddPpInput(shop){
+  _momoAddPpOverride[shop]=true;
+  const l=document.getElementById('momo-add-revert-'+shop); if(l) l.style.display='inline';
+  momoAddRecalc(shop);
+}
+function momoAddRevertPp(shop){
+  _momoAddPpOverride[shop]=false;
+  const l=document.getElementById('momo-add-revert-'+shop); if(l) l.style.display='none';
+  momoAddRecalc(shop);
+}
+function momoBatchSubmitAdd(shop){
+  const g=id=>document.getElementById('momo-add-'+id+'-'+shop);
+  const name=g('name').value.trim();
+  const cost=parseFloat(g('cost').value);
+  const pp=parseFloat(g('pp').value);
+  const sp=parseFloat(g('sp').value);
+  let sku=g('sku').value.trim();
+  const origin=g('origin').value.trim();
+  const shipRaw=parseFloat(g('ship').value);
+  if(!name){ alert('商品名稱必填'); return; }
+  if(!(cost>=0)||!(pp>=0)||!(sp>=0)){ alert('成本 / 進價 / 售價必填且為 ≥0 的數字'); return; }
+  const products=momoLoadProducts(shop);
+  if(!sku) sku='TEMP-'+Date.now();
+  if(products.some(x=>x.sku===sku)){ alert('商品編號重複：'+sku); return; }
+  const shipping=(shipRaw>=0)?shipRaw:momoDefaultShip(shop);
+  products.push({sku,origin,name,cost,purchasePrice:pp,salePrice:sp,shippingPackaging:shipping,
+    history:[{date:momoToday(),cost,purchasePrice:pp,salePrice:sp,note:'新增商品'}], periods:{}});
+  momoSaveProducts(shop,products);
+  if(typeof showToast==='function') showToast('已新增商品 '+sku,'success');
+  _momoBatchMode[shop]='edit'; _momoBatchSel[shop]=sku; _momoBatchSearch[shop]='';   // 切到編輯模式並選中新商品
+  momoRenderBatch(shop);
 }
 
 // MOMO 甲配專用畫面：跟其他 MOMO 賣場（乙配/MO+麻吉/MO+森之旅）的報表格式不一樣（多了流量/瀏覽量等欄位、
@@ -6552,6 +6724,8 @@ Object.assign(window, {
   openMomoRptUpload,closeMomoRptUpload,onMomoRptFile,generateMomoRpt,syncMomoRptToCloud,
   onMypMonthChange,onMypHalfChange,
   momoSetSub,momoSetPeriod,momoOnSearch,momoProfitSetSort,
+  momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,
+  momoAddRecalc,momoAddPpInput,momoAddRevertPp,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   openMypColPicker,toggleMypHiddenCol,resetMypHiddenCols,resetMypColOrder,
   mypColDragStart,mypColDragOver,mypColDragEnter,mypColDragLeave,mypColDrop,mypColDragEnd,
