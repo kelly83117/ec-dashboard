@@ -194,7 +194,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <div style="font-size:12px;color:#9ca3af" id="upm-shop-hint">目前賣場：—</div>
           <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:5px 10px">
             <span style="font-size:12px;color:#6b7280;font-weight:500">平台手續費</span>
-            <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:54px">
+            <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:54px" onchange="onPlatformRateChange()">
             <span style="font-size:12px;color:#6b7280">%</span>
           </div>
         </div>
@@ -379,7 +379,7 @@ function _notifyLsSaveFail(shop, month, half, err){
 
 function lsSave(shop,month,half,built,period,days){
   // 只存本機；同步雲端需手動按「☁ 同步雲端」
-  const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
+  const payload={built,period,days,rate:getPlatformRate(shop),ts:Date.now()};
   const k=lsKey(shop,month,half);
   let saveErr=null;
   try{localStorage.setItem(k,JSON.stringify(payload));}catch(e){saveErr=e;}
@@ -1338,10 +1338,28 @@ function markCard(shop,type,icon,title,cls){
 }
 function setSpin(shop,show){const el=document.getElementById('spin-'+shop);if(el)el.classList.toggle('show',show);}
 function checkReady(shop){const s=state[shop];const g=document.getElementById('gen-'+shop);if(g)g.disabled=!(s.rawMobic&&s.rawAds);}
-function getPlatformRate(){
+// ── 通路費率對照表（費率屬於通路，不是全站共用一個值）──
+// 照 ANA_THRESH 的範式：_cloudRead/_cloudWrite + Object.assign 補預設
+const SHOP_RATE_DEF={'好麻吉':20.5,'玩樂':20.5,'森之旅':20.5,'維克':17.5};
+function getShopRates(){return Object.assign({},SHOP_RATE_DEF,_cloudRead('ec_shop_rate')||{});}
+function saveShopRates(t){_cloudWrite('ec_shop_rate',t);}
+function getPlatformRate(shop){
+  const n=parseFloat(getShopRates()[shop]);
+  return (Number.isFinite(n)&&n>=0 ? n : 20.5)/100;
+}
+function onPlatformRateChange(){
   const el=document.getElementById('platformRate');
-  if(!el) return 20.5/100; // 元素還沒渲染出來時用預設值，避免 null .value 噴錯
-  return(parseFloat(el.value)||20.5)/100;
+  if(!el) return;
+  const shop=(typeof curShop!=='undefined'&&curShop!=='總表')?curShop:SHOPS[0].id;
+  const n=parseFloat(el.value);
+  if(!Number.isFinite(n)||n<0||n>100){
+    el.value=getShopRates()[shop];
+    if(typeof showToast==='function') showToast('費率要介於 0 到 100 之間','error');
+    return;
+  }
+  const t=getShopRates(); t[shop]=n; saveShopRates(t);
+  if(typeof renderSummary==='function') try{renderSummary();}catch(e){console.error(e);}
+  if(typeof showToast==='function') showToast(shop+' 手續費已改為 '+n+'%（記得按同步雲端）','success');
 }
 
 // ── 取得對應的「上期」區間 key ──
@@ -1650,7 +1668,7 @@ function confirmUnmatched(){
 }
 
 function buildShop(shop,days){
-  const s=state[shop];const PLATFORM=getPlatformRate();
+  const s=state[shop];const PLATFORM=getPlatformRate(shop);
   const salesCol=s.rawMobic.length?Object.keys(s.rawMobic[0]).find(k=>k.startsWith('銷售數量')):null;
   const agg={};
   s.rawMobic.forEach(r=>{
@@ -1875,6 +1893,8 @@ function closeAnaSettings(){document.getElementById('ana-overlay')?.classList.re
 function openUploadModal(){
   const ov=document.getElementById('upload-modal-overlay');if(!ov)return;
   const shop=curShop==='總表'?SHOPS[0].id:curShop;
+  const _rEl=document.getElementById('platformRate');
+  if(_rEl) _rEl.value=getShopRates()[shop];
   document.getElementById('upm-shop-hint').textContent='目前賣場：'+shop;
   function getMeta(key){try{const m=localStorage.getItem(key);return m?JSON.parse(m):null;}catch{return null;}}
   function syncCard(id,ok,okIcon,defaultIcon,okLabel,defaultLabel,metaKey){
@@ -2767,7 +2787,7 @@ function updateAdsEditPreview(){
   const newAds=parseFloat(document.getElementById('ads-edit-input').value);
   const el=document.getElementById('ads-edit-preview');
   if(isNaN(newAds)){el.innerHTML='';return;}
-  const PLATFORM=getPlatformRate();
+  const PLATFORM=getPlatformRate(shop);
   const newPure=r.gross-newAds-(r.rev*PLATFORM);
   const newPureRate=r.rev>0?newPure/r.rev*100:0;
   const col=newPure>=0?'#10b981':'#ef4444';
@@ -2851,7 +2871,7 @@ function patchRow(shop,code,ov){
 
 function recalcRow(shop,code,ov){
   const built=state[shop]._built;const idx=built.findIndex(r=>r.code===code);if(idx<0)return;
-  const r=built[idx];const PLATFORM=getPlatformRate();
+  const r=built[idx];const PLATFORM=getPlatformRate(shop);
   // 只有廣告費可以編輯，重算相關衍生欄位
   const adsFee=ov.adsFee!==undefined?ov.adsFee:r.adsFee;
   const rev=r.rev;const gross=r.gross;
@@ -3453,7 +3473,7 @@ function editSummaryCell(rowId,shop,field,tdEl){
     saveSummaryRows(rows, { type:'edit', rowId, shop, field, value: isValid ? v : null, start: row.start, end: row.end });
     // patch cells without re-rendering
     const d=row.shops[shop]||{};
-    const rate=getPlatformRate();
+    const rate=getPlatformRate(shop);
     const pure=(d.gross||0)-(d.ads||0)-(d.rev||0)*rate;
     const fmt=n=>fmtN(Math.round(n||0));
     const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':'—';
@@ -3477,7 +3497,6 @@ function editSummaryCell(rowId,shop,field,tdEl){
 function renderSummary(){
   const el=document.getElementById('content-總表');
   if(!el)return;
-  const rate=getPlatformRate();
   const isFullMonth=row=>{
     const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
     if(s.getFullYear()!==e.getFullYear()||s.getMonth()!==e.getMonth())return false;
@@ -3492,14 +3511,14 @@ function renderSummary(){
   });
   const fmt=n=>fmtN(Math.round(n||0));
   const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':'—';
-  const calcPure=(d)=>(d.gross||0)-(d.ads||0)-(d.rev||0)*rate;
+  const calcPure=(d,shopId)=>(d.gross||0)-(d.ads||0)-(d.rev||0)*getPlatformRate(shopId);
 
   const shopGroupHdr=SHOPS.map(s=>`<th colspan="6" style="text-align:center;background:${s.color};color:white;font-weight:700;font-size:13px;padding:7px 4px;border-left:2px solid rgba(255,255,255,.3)">${s.id}</th>`).join('');
   const shopSubHdr=SHOPS.map(()=>`<th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">營收</th><th style="min-width:62px;font-size:11px;font-weight:600;background:#f8fafc">廣告</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">毛利</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">純利</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">純利率%</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">廣告佔比%</th>`).join('');
 
   const dataCells=(shopMap,editable,rowId)=>SHOPS.map(s=>{
     const d=shopMap?.[s.id]||{};
-    const p=calcPure(d);
+    const p=calcPure(d,s.id);
     const bl='border-left:2px solid #e5e7eb;';
     const blB='border-left:2px solid #c7d2fe;';
     const borderL=editable?bl:blB;
@@ -3643,7 +3662,7 @@ function renderSummary(){
     </table></div>
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button onclick="openAddSummaryRowModal()" style="padding:7px 18px;border:1.5px dashed #c7d2fe;border-radius:8px;background:white;color:#5b5fcf;font-size:13px;font-weight:600;cursor:pointer">＋ 新增週次</button>
-      <span style="font-size:11px;color:#9ca3af">純利 = 毛利 − 廣告 − 營收×${(rate*100).toFixed(1)}%　｜　點擊數字可編輯</span>
+      <span style="font-size:11px;color:#9ca3af">純利 = 毛利 − 廣告 − 營收×手續費　｜　點擊數字可編輯</span>
     </div>
   </div>`;
 }
@@ -6322,7 +6341,7 @@ Object.assign(window, {
   getEdits,getGrowthThresh,getHiddenCols,getNotes,getPeriodLabel,getPlatformRate,getPrevPeriodKey,
   getPrevRevMap,getSummaryRows,getTagFilters,gg,initProfitPeriodControls,initShopUI,
   loadIntoUI,lsHasAny,lsKey,lsLoad,lsSave,markCard,num,onFile,onGlobalFile,onGlobalGenerate,
-  onHalfChange,onMapFile,onMonthChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
+  onHalfChange,onMapFile,onMonthChange,onPlatformRateChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
   openTestSettings,closeTestSettings,addTestDraftCond,removeTestDraftCond,deleteTestDraftRule,addTestDraftRule,saveTestSettings,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,
