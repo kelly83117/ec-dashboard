@@ -5453,7 +5453,10 @@ function momoShopHTML(shop,platform='momo'){
 // ── §1 商品主檔（持續性資料，獨立於月份）──
 function momoProductsKey(shop){ return 'ec_momo_products|'+shop; }
 function momoLoadProducts(shop){
+  // 讀取順序照 ec_edits/ec_notes 慣例：_profitMem（雲端權威，跨裝置）→ _mem → localStorage。
+  //   ec_momo_products 是 app/profit 的 field，雲端快照回來灌進 _profitMem；只讀 _mem 會漏（換台電腦讀不到）。
   const k=momoProductsKey(shop);
+  try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]) return Store._mem[k]; }catch{}
   try{ const local=localStorage.getItem(k); if(local) return JSON.parse(local); }catch{}
   return [];
@@ -5461,7 +5464,8 @@ function momoLoadProducts(shop){
 function momoSaveProducts(shop,products){
   const k=momoProductsKey(shop);
   try{ localStorage.setItem(k,JSON.stringify(products)); }catch{}
-  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=products; }catch{}  // 權威鏡像（抗 app/main subscribe 整包覆蓋 _mem）
+  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}              // 保留：syncToCloud field 分支優先讀 _mem
   _markPending(k);   // 走既有 pending → 手動同步時 setField 上雲
 }
 
