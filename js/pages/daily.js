@@ -225,6 +225,7 @@ Object.assign(App, {
               <button class="dp-todo-add-btn" data-dp-name="${escapeHtml(p.name)}" style="padding:7px 12px;border:0;border-radius:7px;background:var(--primary-soft);color:var(--primary);font-size:13px;font-weight:600;cursor:pointer">+</button>
             </div>
           ` : ''}
+          ${buildCardAdjustmentsHtml(p.name, viewDate)}
         </div>
       `;
     }).join('');
@@ -300,9 +301,6 @@ Object.assign(App, {
       </div>
     `;
 
-    // 第二塊：右側面板底部的「淨利表調整」唯讀區塊（沿用既有 viewDate，不新增 state）
-    const adjustmentsHtml = buildAdjustmentsBlockHtml(viewDate);
-
     return `
       <div style="background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px 16px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:14px">
@@ -321,7 +319,6 @@ Object.assign(App, {
           <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
             ${bossCardHtml}
             ${cards}
-            ${adjustmentsHtml}
           </div>
         </div>
       </div>
@@ -632,6 +629,20 @@ Object.assign(App, {
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
 
+    // 第六塊：淨利表調整 pill → 開明細彈窗。用「事件委派」掛在持久容器 #main-content 上，
+    //   且只掛一次（旗標守衛，避免每次 render 重複掛而觸發多次）。放函式開頭：下方 748 行
+    //   有「過去日期唯讀」的提早 return，若把綁定放末端，看過去日期時永遠跑不到。
+    //   委派讀當下 DOM 的 dataset，所以之後每次 render 產生的新 pill 都自動生效。
+    if (!this._adjPillDelegated) {
+      this._adjPillDelegated = true;
+      const host = document.getElementById('main-content');
+      if (host) host.addEventListener('click', (e) => {
+        const pill = e.target.closest && e.target.closest('.adj-pill');
+        if (!pill) return;
+        this.openAdjustmentDetailModal(pill.dataset.adjPerson, pill.dataset.adjDate, pill.dataset.adjKind, pill.dataset.adjGroup);
+      });
+    }
+
     // 老闆任務：新增 / 編輯 / 刪除 / 切換完成 / 歷史 / LINE 設定
     const addBtn = document.getElementById('boss-task-add');
     if (addBtn) addBtn.addEventListener('click', () => this.openBossTaskModal());
@@ -905,6 +916,40 @@ Object.assign(App, {
         }
       });
     }
+  },
+  openAdjustmentDetailModal(person, viewDate, kind, group) {
+    const slashDate = String(viewDate || '').replace(/-/g, '/');
+    const recs = (getAdjIndex()[slashDate] || []).filter(r => ADJ_SHOP_TO_PERSON[r.shop] === person);
+    const list = _adjRecsForGroup(recs, kind, group);   // ← 與 pill 計數同一個函式，數字保證一致
+    const parts = String(viewDate).split('-');
+    const md = `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+
+    // 「沒有動作」沉底：反向判斷——有動作關鍵字＝action，否則 noAction（見 ADJ_ACTION_RE）
+    const action = [], noAction = [];
+    list.forEach(r => (ADJ_ACTION_RE.test(String(r.text || '')) ? action : noAction).push(r));
+
+    const itemHtml = (r, muted) => `
+      <div class="adj-modal-item${muted ? ' adj-modal-item-muted' : ''}">
+        <div class="adj-modal-item-hd">
+          <span class="adj-modal-shop">${escapeHtml(r.shop || '')}</span>
+          <span class="adj-modal-code">${escapeHtml(r.code || '')}</span>
+          <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
+        </div>
+        <div class="adj-modal-text">${escapeHtml(r.text || '')}</div>
+      </div>`;
+
+    const bodyHtml = `
+      <div class="adj-modal-sub">${escapeHtml(md)} · ${list.length} 項</div>
+      <div class="adj-modal-list">
+        ${action.map(r => itemHtml(r, false)).join('')}
+        ${noAction.length ? `
+          <div class="adj-modal-divider"></div>
+          <div class="adj-modal-noact">沒有動作 · ${noAction.length} 項</div>
+          ${noAction.map(r => itemHtml(r, true)).join('')}
+        ` : ''}
+      </div>`;
+
+    this.openModal({ title: `${person} · ${group}`, width: '520px', hideFooter: true, bodyHtml });
   },
   bindDailyProgress(deptId) {
     // 員工下拉
@@ -1494,7 +1539,21 @@ function collectAdjustments() {
                && typeof window.calcGrowthAnalysis === 'function';
   if (!hasCalc) console.warn('[collectAdjustments] window.calcAnalysis / calcGrowthAnalysis 尚未就緒（profit.js 可能還沒載完），本次不計算標籤，下次呼叫重試');
   let labelErrCount = 0;   // calc throw 的列數，迴圈後統一 warn 一次（別每列洗版）
-  Object.keys(mem).forEach(key => {
+  // 掃描順序決定去重時「誰先寫入」（去重邏輯不變：先寫入優先、後來略過）。
+  //   同一筆調整可能出現在多份報表（整月 full vs 半月 first/second），重算標籤可能不一致。
+  //   規則：半月(first/second) 排在 full 前 → 一律以半月報表為準；同 rank 再按 key 字串排，
+  //   確保跨 Firestore snapshot 的 Object.keys() 順序抖動時結果仍穩定。
+  const _periodRank = (k) => {
+    const half = k.split('|')[3];
+    if (half === 'first' || half === 'second') return 0;
+    if (half === 'full') return 1;
+    return 2;
+  };
+  const scanKeys = Object.keys(mem).sort((a, b) => {
+    const ra = _periodRank(a), rb = _periodRank(b);
+    return ra !== rb ? ra - rb : (a < b ? -1 : a > b ? 1 : 0);
+  });
+  scanKeys.forEach(key => {
     if (key.indexOf('ec|') !== 0) return;        // 只掃報表 key 'ec|...'
     if (key.indexOf('filemeta') >= 0) return;    // 排除 filemeta
     const parts = key.split('|');
@@ -1510,13 +1569,15 @@ function collectAdjustments() {
 
       // 第四塊：每列只算一次標籤（各段共用，切多段不重算）。一律重算、不讀 row.analysisLabel（避免舊規則快照）。
       //   getAdjIndex() 在月曆 render 迴圈裡跑，任何 throw 都會炸掉整頁 → 每列 try/catch，該列給空標籤並累計。
-      let anaLabel = '', growthLabel = '';
+      let anaLabel = '', anaCls = '', growthLabel = '', growthCls = '';
       if (hasCalc) {
         try {
-          anaLabel = window.calcAnalysis(row.adsFee, row.pureRate, row.targetROI, row.roiDiff, row.clicks, row.pureProfit, row.roi).label;
-          growthLabel = window.calcGrowthAnalysis(row.growthRate, row.rev, row.prevRev, row.pureRate).label;
+          const _a = window.calcAnalysis(row.adsFee, row.pureRate, row.targetROI, row.roiDiff, row.clicks, row.pureProfit, row.roi);
+          anaLabel = _a.label; anaCls = _a.cls || '';           // cls：pill 上色用（第五塊）
+          const _g = window.calcGrowthAnalysis(row.growthRate, row.rev, row.prevRev, row.pureRate);
+          growthLabel = _g.label; growthCls = _g.cls || '';
         } catch (e) {
-          anaLabel = ''; growthLabel = '';
+          anaLabel = ''; anaCls = ''; growthLabel = ''; growthCls = '';
           labelErrCount++;
         }
       }
@@ -1539,7 +1600,7 @@ function collectAdjustments() {
         const dk = shop + '␟' + (row.code || '') + '␟' + (dateStr || '') + '␟' + text;
         if (seen.has(dk)) return;
         seen.add(dk);
-        out.push({ date: dateStr, shop, code: row.code, name: (row.name || ''), text, anaLabel, growthLabel });
+        out.push({ date: dateStr, shop, code: row.code, name: (row.name || ''), text, anaLabel, anaCls, growthLabel, growthCls });
       };
 
       if (marks.length === 0) { pushSeg(null, note); return; }  // 無日期 → 整段 date=null
@@ -1569,6 +1630,36 @@ function collectAdjustments() {
 const ADJ_ALLOWED_NAMES  = ['陳君葳', '洪嘉蓮', '郭雅琪'];              // 顯示順序
 const ADJ_SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '洪嘉蓮', '森之旅': '陳君葳', '維克': '郭雅琪' };
 const ADJ_MAX_ROWS = 10;                                              // 每人預設顯示筆數
+// 人 → 通路（反查）：{ 洪嘉蓮:['好麻吉','玩樂'], 陳君葳:['森之旅'], 郭雅琪:['維克'] }
+const ADJ_PERSON_TO_SHOPS = Object.keys(ADJ_SHOP_TO_PERSON).reduce((m, shop) => {
+  const p = ADJ_SHOP_TO_PERSON[shop];
+  (m[p] = m[p] || []).push(shop);
+  return m;
+}, {});
+// 開發期檢查：同一 label 若出現不同 cls，warn 一次（cls 取「該組第一筆」是推論，這裡驗證它）
+const _adjClsWarned = new Set();
+function _warnAdjClsMismatch(label, a, b) {
+  if (_adjClsWarned.has(label)) return;
+  _adjClsWarned.add(label);
+  console.warn(`[buildCardAdjustments] 標籤「${label}」出現不一致 cls：「${a}」vs「${b}」，pill 沿用第一筆的 cls`);
+}
+
+// 第六塊：淨利 pill 排序（警訊優先）；不在清單者（自訂規則）排在建議調預算後、未分類前
+const ADJ_ANA_ORDER = ['賠錢中', '危險商品', '低效廣告', '低淨利', '高利潤商品', '建議調預算'];
+// 淨利分桶：加/減 系列（級距是設定值，用前綴判斷、不寫死字串）合併成「建議調預算」，其餘用 anaLabel
+function _adjAnaBucket(r) {
+  if (!r.anaLabel) return null;
+  return (r.anaLabel.startsWith('加') || r.anaLabel.startsWith('減')) ? '建議調預算' : r.anaLabel;
+}
+// pill 計數與 modal 明細「唯一來源」：取某人某日某 (kind, group) 的紀錄陣列
+function _adjRecsForGroup(recs, kind, group) {
+  if (kind === 'growth') return recs.filter(r => r.growthLabel === group);
+  if (group === '未分類') return recs.filter(r => !r.anaLabel && !r.growthLabel);
+  return recs.filter(r => _adjAnaBucket(r) === group);   // 含「建議調預算」合併桶
+}
+// 「有動作」關鍵字：反向判斷——text 出現任一關鍵字＝有動作，否則沉底歸「沒有動作」。
+//   「開頭是什麼」不穩（例：「清倉品先不動」開頭是清倉品），改偵測動作字眼是否出現。這條之後可能再調。
+const ADJ_ACTION_RE = /預算|廣\s*\d|ROI|roi|漲價|調漲|降價|調降|開廣告|關廣告|加速|換.{0,2}圖|標題|分類|優惠券|活動|調整售價|調價/;
 
 let _adjIndexCache = null;
 let _adjLabelsReady = false;
@@ -1593,66 +1684,80 @@ function getAdjIndex() {
 // 雲端 profit 資料有更新 → 索引 + 標籤就緒旗標一起失效，下次 render 自然重建（firebase.js 既有事件）
 window.addEventListener('profitDataReady', () => { _adjIndexCache = null; _adjLabelsReady = false; });
 
-// viewDate: 'YYYY-MM-DD'。當日三人全空回 ''（整塊不出現）。
-function buildAdjustmentsBlockHtml(viewDate) {
+// 第六塊：某人某日的「淨利表調整」區塊，注入人員卡片底部。只留標題 + 兩排 pill，明細改走彈窗。
+//   viewDate: 'YYYY-MM-DD'。回傳 HTML；非郭雅琪且當日 0 筆 → 回 ''（連分隔線都不出）。
+//   pill 為 <button>，click 由 bindWeeklyCalendar 綁 → openAdjustmentDetailModal。
+//   pill 計數一律走 _adjRecsForGroup（與 modal 明細同源，數字保證一致）。
+function buildCardAdjustmentsHtml(person, viewDate) {
   const slashDate = String(viewDate || '').replace(/-/g, '/');
-  const dayRecords = (getAdjIndex()[slashDate] || []).filter(r => ADJ_SHOP_TO_PERSON[r.shop]);
-  if (dayRecords.length === 0) return '';
+  const recs = (getAdjIndex()[slashDate] || []).filter(r => ADJ_SHOP_TO_PERSON[r.shop] === person);
+  const shops = ADJ_PERSON_TO_SHOPS[person] || [];
 
-  const parts = String(viewDate).split('-');
-  const mdLabel = `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
-
-  // 依人分組
-  const byPerson = {};
-  dayRecords.forEach(r => {
-    const person = ADJ_SHOP_TO_PERSON[r.shop];
-    (byPerson[person] = byPerson[person] || []).push(r);
-  });
-
-  const personSections = ADJ_ALLOWED_NAMES.map((person, pIdx) => {
-    const recs = byPerson[person] || [];
-    if (recs.length === 0) {
+  // 空狀態：郭雅琪（維克無淨利表）顯示提示；其他人當日 0 筆 → 不顯示整塊
+  if (recs.length === 0) {
+    if (person === '郭雅琪') {
       return `
-        <div class="adj-person">
-          <div class="adj-person-head"><span class="adj-person-name">${escapeHtml(person)}</span><span class="adj-person-count">0</span></div>
-          <div class="adj-empty">這天沒有紀錄</div>
+        <div class="adj-sec">
+          <div class="adj-sec-head"><span class="adj-sec-title">淨利表調整</span></div>
+          <div class="adj-none">${escapeHtml(shops.join('、'))}沒有淨利表資料</div>
         </div>`;
     }
-    // 該人當日跨多通路才顯示通路標籤（洪嘉蓮＝好麻吉＋玩樂）
-    const multiShop = new Set(recs.map(r => r.shop)).size > 1;
-    const rowHtml = (r) => `
-      <div class="adj-row">
-        ${multiShop ? `<span class="adj-shop">${escapeHtml(r.shop)}</span>` : ''}
-        <span class="adj-code">${escapeHtml(r.code || '')}</span>
-        <span class="adj-name">${escapeHtml(r.name || '')}</span>
-        <span class="adj-text">${escapeHtml(r.text || '')}</span>
-      </div>`;
-    const firstHtml = recs.slice(0, ADJ_MAX_ROWS).map(rowHtml).join('');
-    const extra = recs.slice(ADJ_MAX_ROWS);
-    let moreHtml = '';
-    if (extra.length > 0) {
-      const cbId = `adj-more-${pIdx}`;
-      moreHtml = `
-        <input type="checkbox" id="${cbId}" class="adj-more-cb" hidden>
-        <div class="adj-extra">${extra.map(rowHtml).join('')}</div>
-        <label for="${cbId}" class="adj-more-btn">還有 ${extra.length} 筆 ▾</label>`;
-    }
-    return `
-      <div class="adj-person">
-        <div class="adj-person-head"><span class="adj-person-name">${escapeHtml(person)}</span><span class="adj-person-count">${recs.length}</span></div>
-        <div class="adj-list">${firstHtml}</div>
-        ${moreHtml}
-      </div>`;
-  }).join('');
+    return '';
+  }
+
+  const total = recs.length;
+  const personAttr = escapeHtml(person);
+  const dateAttr = escapeHtml(viewDate);
+
+  // 蒐集各排的桶 label；cls 取「該桶第一筆」（中性桶不需要），同桶不同 cls → dev warn
+  const anaLabelSet = new Set();
+  const growthLabelSet = new Set();
+  const firstCls = {};   // key: `${kind}|${label}` → cls
+  const noteCls = (kind, label, cls) => {
+    if (!cls) return;
+    const k = kind + '|' + label;
+    if (!(k in firstCls)) firstCls[k] = cls;
+    else if (firstCls[k] !== cls) _warnAdjClsMismatch(label, firstCls[k], cls);
+  };
+  recs.forEach(r => {
+    const b = _adjAnaBucket(r);
+    if (b) { anaLabelSet.add(b); if (b !== '建議調預算') noteCls('ana', b, r.anaCls); } // 合併桶不驗 cls
+    if (r.growthLabel) { growthLabelSet.add(r.growthLabel); noteCls('growth', r.growthLabel, r.growthCls); }
+  });
+  if (recs.some(r => !r.anaLabel && !r.growthLabel)) anaLabelSet.add('未分類');
+
+  // 中性灰：加/減混合的建議調預算、無狀態的未分類（硬套顏色＝假訊號）
+  const NEUTRAL = new Set(['建議調預算', '未分類']);
+  const mkBucket = (label, kind) => ({
+    label, kind,
+    count: _adjRecsForGroup(recs, kind, label).length,                    // ← 與 modal 同源
+    cls: NEUTRAL.has(label) ? 'adj-pill-plain' : (firstCls[kind + '|' + label] || ''),
+  });
+  // 淨利排序：固定序 → 自訂規則(筆數 desc) → 未分類
+  const anaRank = (label) => {
+    if (label === '未分類') return 100;
+    const i = ADJ_ANA_ORDER.indexOf(label);
+    return i >= 0 ? i : 50;   // 自訂規則：在建議調預算(5) 後、未分類(100) 前
+  };
+  const anaBuckets = [...anaLabelSet].map(l => mkBucket(l, 'ana')).sort((a, b) => {
+    const ra = anaRank(a.label), rb = anaRank(b.label);
+    return ra !== rb ? ra - rb : b.count - a.count;
+  });
+  const growthBuckets = [...growthLabelSet].map(l => mkBucket(l, 'growth')).sort((a, b) => b.count - a.count);
+
+  const pillHtml = (g) => `<button type="button" class="adj-pill ${g.cls}" data-adj-person="${personAttr}" data-adj-date="${dateAttr}" data-adj-kind="${g.kind}" data-adj-group="${escapeHtml(g.label)}">${escapeHtml(g.label)} <b>${g.count}</b></button>`;
+  const anaPills = anaBuckets.map(pillHtml).join('');
+  const growthPills = growthBuckets.map(pillHtml).join('');
 
   return `
-    <div class="adj-block">
-      <div class="adj-block-head">
-        <span class="adj-block-title">淨利表調整 · ${escapeHtml(mdLabel)}</span>
-        <span class="adj-block-total">${dayRecords.length} 筆</span>
+    <div class="adj-sec">
+      <div class="adj-sec-head">
+        <span class="adj-sec-title">淨利表調整</span>
+        <span class="adj-sec-total">${total}</span>
       </div>
-      ${personSections}
+      ${anaPills ? `<div class="adj-pill-group"><div class="adj-pills-label">分析</div><div class="adj-pills">${anaPills}</div></div>` : ''}
+      ${growthPills ? `<div class="adj-pill-group"><div class="adj-pills-label">成長分析</div><div class="adj-pills">${growthPills}</div></div>` : ''}
     </div>`;
 }
 
-Object.assign(window, { collectAdjustments, getAdjIndex, buildAdjustmentsBlockHtml });
+Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml });
