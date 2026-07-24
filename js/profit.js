@@ -12,6 +12,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <button class="stab" style="font-size:15px" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
             <button class="stab" style="font-size:15px" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
             <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
+            <span style="width:1px;height:18px;background:#d1d5db;margin:0 2px"></span><button class="stab" style="font-size:15px" onclick="setShop('重點檢視',this)">重點檢視</button>
           </div>
         </div>
         <div style="width:1px;background:#e5e7eb;align-self:stretch"></div>
@@ -262,6 +263,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
     </div>
   </div>
   <div id="content-總表" class="shop-content active" style="padding:16px 20px;min-height:200px"></div>
+  <div id="content-重點檢視" class="shop-content" style="padding:16px 20px;min-height:200px"></div>
   <div id="content-好麻吉" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-玩樂" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-森之旅" class="shop-content" style="padding:16px 20px"></div>
@@ -3719,6 +3721,198 @@ function renderSummary(){
   </div>`;
 }
 
+// ── 重點檢視：跨四家的簡潔檢視（2026-07-24 新增）──
+// 自己一組月份/區間狀態，不碰 state[shop]，
+// 因為 onMonthChange/onHalfChange 綁死 state[shop]，非賣場頁面用不了。
+let _focusMonth=null, _focusHalf=null;
+
+function _focusInitPeriod(){
+  if(_focusMonth) return;
+  // 預設跟淨利表同一套邏輯：用「有最多資料」的那家的最新期間
+  let best=null;
+  SHOPS.forEach(s=>{
+    const p=_findLatestPeriod(s.id);
+    if(!p) return;
+    const r=(p.month||'')+'#'+(_HALF_RANK[p.half]!==undefined?_HALF_RANK[p.half]:0);
+    if(!best||r>best.rank) best={month:p.month,half:p.half,rank:r};
+  });
+  if(best){ _focusMonth=best.month; _focusHalf=best.half; }
+  else { _focusMonth=_initCurMonth; _focusHalf=_initCurHalf; }
+}
+
+function onFocusPeriodChange(){
+  const m=document.getElementById('focus-month-sel');
+  const h=document.getElementById('focus-half-sel');
+  if(m) _focusMonth=m.value;
+  if(h) _focusHalf=h.value;
+  renderFocus();
+}
+
+// 重點檢視的欄位設定 —— 【刻意】與主表的 ec_hcols_user 完全分離。
+// 主表那份是全站共用、不上雲；這份走 _cloudWrite（會進待同步清單，
+// 按同步雲端後全公司共用），因為老闆選的欄位應該在他任何一台裝置都一樣。
+const FOCUS_COLS_DEF=['rev','pureProfit','pureRate'];
+function getFocusCols(){
+  const v=_cloudRead('ec_focus_cols');
+  if(Array.isArray(v)&&v.length) return v.slice();
+  return FOCUS_COLS_DEF.slice();
+}
+function saveFocusCols(arr){ _cloudWrite('ec_focus_cols',arr); }
+function toggleFocusCol(key){
+  const cur=getFocusCols();
+  const i=cur.indexOf(key);
+  if(i>=0){
+    if(cur.length<=1){                     // 至少要留一欄，全部關掉表格會變空殼
+      if(typeof showToast==='function') showToast('至少要保留一個欄位','error');
+      return;
+    }
+    cur.splice(i,1);
+  }else{
+    cur.push(key);
+  }
+  saveFocusCols(cur);
+  renderFocus();
+  openFocusColPicker(true);                // 重繪選單，維持開啟狀態
+}
+
+function openFocusColPicker(keepOpen){
+  const old=document.getElementById('focus-col-menu');
+  if(old){ old.remove(); if(!keepOpen) return; }
+  const btn=document.getElementById('focus-col-btn');
+  if(!btn) return;
+  const cur=getFocusCols();
+  const menu=document.createElement('div');
+  menu.id='focus-col-menu';
+  menu.style.cssText='position:absolute;z-index:60;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:6px;box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:320px;overflow-y:auto;min-width:160px';
+  menu.innerHTML=PROFIT_COLS.map(c=>{
+    const on=cur.indexOf(c.key)>=0;
+    return `<div onclick="toggleFocusCol('${c.key}')" style="padding:5px 8px;cursor:pointer;font-size:13px;border-radius:5px;display:flex;align-items:center;gap:7px">
+      <span style="display:inline-block;width:13px;height:13px;border:1px solid ${on?'#4f46e5':'#d1d5db'};border-radius:3px;background:${on?'#4f46e5':'#fff'};color:#fff;font-size:10px;line-height:13px;text-align:center">${on?'✓':''}</span>
+      <span>${c.label}</span></div>`;
+  }).join('');
+  const r=btn.getBoundingClientRect();
+  menu.style.left=(r.left+window.scrollX)+'px';
+  menu.style.top=(r.bottom+window.scrollY+4)+'px';
+  document.body.appendChild(menu);
+  setTimeout(()=>{
+    const close=ev=>{
+      if(menu.contains(ev.target)||btn.contains(ev.target))return;
+      menu.remove();document.removeEventListener('click',close);
+    };
+    document.addEventListener('click',close);
+  },0);
+}
+// renderFocus 專用：fmtN 會取絕對值（Math.abs），負數會顯示成正數。
+// 主表靠 CSS class 染紅來表達負值，但這裡需要數字本身就看得出正負。
+function _fSigned(v){
+  const n=Number(v)||0;
+  return (n<0?'-$':'$')+fmtN(n);
+}
+// 依欄位型別決定顯示格式。
+// 百分比欄與金額欄的呈現方式不同，不能一律當金額。
+const _FOCUS_PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
+const _FOCUS_TEXT_COLS=new Set(['analysisLabel','note','growthAnalysis','growthNote']);
+// 所有欄位（含 note/growthNote）直接從商品列 r 取：sheet-import 連同報表把調整寫進 built[]，
+// r.note 已是純字串（不是 {adjustments} 結構）。growthAnalysis 是物件 {label,cls} → 取 .label；analysisLabel 已是字串。
+function _focusCell(r,key){
+  const v=r[key];
+  if(_FOCUS_TEXT_COLS.has(key)){
+    const t=(v==null?'':(typeof v==='object'?(v.label||''):String(v)));
+    return `<td style="font-size:12px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.replace(/"/g,'&quot;')}">${t}</td>`;
+  }
+  const n=Number(v);
+  if(!isFinite(n)) return `<td class="td-num" style="color:#9ca3af">—</td>`;
+  if(_FOCUS_PCT_COLS.has(key)){
+    return `<td class="td-num ${n<0?'td-neg':''}">${(n*100).toFixed(1)}%</td>`;
+  }
+  return `<td class="td-num ${n<0?'td-neg':''}">${_fSigned(n)}</td>`;
+}
+function renderFocus(){
+  const el=document.getElementById('content-重點檢視');
+  if(!el) return;
+  _focusInitPeriod();
+
+  const cols=getFocusCols().map(k=>PROFIT_COLS.find(c=>c.key===k)).filter(Boolean);
+
+  const halfLabel=h=>h==='first'?'上半月':h==='second'?'下半月':'整月';
+
+  // 讀四家資料（lsLoad 是純讀取、零副作用，不碰 state）
+  const data=SHOPS.map(s=>{
+    const rep=lsLoad(s.id,_focusMonth,_focusHalf);
+    const built=(rep&&Array.isArray(rep.built))?rep.built:null;
+    let rev=0,ads=0,gross=0,pure=0;
+    if(built) built.forEach(r=>{
+      rev+=Number(r.rev)||0; ads+=Number(r.adsFee)||0;
+      gross+=Number(r.gross)||0; pure+=Number(r.pureProfit)||0;
+    });
+    return {id:s.id,color:s.color,built,rev,ads,gross,pure};
+  });
+
+  // 上半：四張卡片
+  const cards=data.map(d=>{
+    if(!d.built) return `<div class="panel" style="padding:10px 12px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px">
+        <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${d.color};margin-right:5px"></span>${d.id}</div>
+      <div style="font-size:12px;color:#9ca3af;margin-top:12px">${_focusMonth} ${halfLabel(_focusHalf)}<br>尚無資料</div>
+    </div>`;
+    const pr=d.rev>0?(d.pure/d.rev*100).toFixed(1)+'%':'—';
+    return `<div class="panel" style="padding:10px 12px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px">
+        <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${d.color};margin-right:5px"></span>${d.id}</div>
+      <div style="font-size:11px;color:#9ca3af">營收</div>
+      <div style="font-size:15px;margin-bottom:4px">${_fSigned(d.rev)}</div>
+      <div style="font-size:11px;color:#9ca3af">淨利</div>
+      <div style="font-size:15px" class="${d.pure<0?'td-neg':''}">${_fSigned(d.pure)} <span style="font-size:11px">${pr}</span></div>
+    </div>`;
+  }).join('');
+
+  // 下半：四家商品混合，按淨利由低到高
+  const rows=[];
+  data.forEach(d=>{ if(d.built) d.built.forEach(r=>rows.push({shop:d.id,color:d.color,r:r})); });
+  rows.sort((a,b)=>(Number(a.r.pureProfit)||0)-(Number(b.r.pureProfit)||0));
+
+  const trs=rows.map(x=>{
+    const r=x.r;
+    const rev=Number(r.rev)||0, pure=Number(r.pureProfit)||0;
+    const pr=rev>0?(pure/rev*100).toFixed(1)+'%':'—';
+    return `<tr>
+      <td style="font-size:12px;color:#6b7280;text-align:left">
+        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${x.color};margin-right:4px"></span>${x.shop}</td>
+      <td style="font-size:12px;text-align:left">${r.code||''}</td>
+      <td style="font-size:12px;text-align:left;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.name||'').replace(/"/g,'&quot;')}">${r.name||''}</td>
+      ${cols.map(c=>_focusCell(r,c.key)).join('')}
+    </tr>`;
+  }).join('');
+
+  const monthOpts=MONTHS.map(mo=>`<option value="${mo}"${mo===_focusMonth?' selected':''}>${mo}</option>`).join('');
+  const halfOpts=['first','second','full'].map(h=>`<option value="${h}"${h===_focusHalf?' selected':''}>${halfLabel(h)}</option>`).join('');
+
+  el.innerHTML=`<div style="padding:14px 16px 16px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <span style="font-size:12px;color:#6b7280">月份</span>
+      <select id="focus-month-sel" class="setting-input" onchange="onFocusPeriodChange()" style="width:100px">${monthOpts}</select>
+      <span style="font-size:12px;color:#6b7280">區間</span>
+      <select id="focus-half-sel" class="setting-input" onchange="onFocusPeriodChange()" style="width:90px">${halfOpts}</select>
+      <button id="focus-col-btn" class="col-pick-btn" onclick="openFocusColPicker()" style="margin-left:auto">☰ 選欄位</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:18px">${cards}</div>
+    <div class="panel" style="padding:12px 14px">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
+        <span style="font-size:14px;font-weight:500">全部商品</span>
+        <span style="font-size:12px;color:#6b7280">${rows.length} 筆</span>
+        <span style="font-size:12px;color:#9ca3af;margin-left:auto">依淨利由低到高</span>
+      </div>
+      <div class="tscroll"><table style="table-layout:fixed;width:100%"><colgroup>
+        <col style="width:14%"><col style="width:12%"><col style="width:30%">
+        ${cols.map(()=>`<col style="width:${(44/Math.max(cols.length,1)).toFixed(2)}%">`).join('')}
+      </colgroup><thead><tr>
+        <th style="text-align:left">通路</th><th style="text-align:left">編號</th><th style="text-align:left">商品名</th>
+        ${cols.map(c=>`<th${_FOCUS_TEXT_COLS.has(c.key)?' style="text-align:left"':''}>${c.label}</th>`).join('')}
+      </tr></thead><tbody>${trs||`<tr><td colspan="${3+cols.length}" style="text-align:center;color:#9ca3af;padding:20px">此期間四家都沒有資料</td></tr>`}</tbody></table></div>
+    </div>
+  </div>`;
+}
+
 // ── KPI 月結表（行銷）──
 // 每組（蝦皮/酷澎/業外/官網/MOMO）欄位不同：manual = 手動輸入，formula = 依 manual 算出（唯讀）。
 // 公式是依畫面截圖回推的最佳猜測，數字對不上請直接跟我說要改哪一條公式。
@@ -4800,36 +4994,37 @@ function setShop(shop,btn){
   if(btn)btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
   document.getElementById('content-'+shop).classList.add('active');
+  const isCross=(shop==='總表'||shop==='重點檢視');   // 跨賣場頁面，不屬於任何單一賣場
   const wrap=document.getElementById('profit-period-wrap');
   const wrapRow=document.getElementById('profit-period-wrap-row');
   if(wrap){
     SHOPS.forEach(s=>{const el=document.getElementById('period-row-'+s.id);if(el)el.style.display=s.id===shop?'flex':'none';});
-    const showPeriod=shop!=='總表';
+    const showPeriod=!isCross;
     if(wrapRow)wrapRow.style.display=showPeriod?'flex':'none';
   }
-  // show/hide KPI & upload/export when on 總表
-  const isSummary=shop==='總表';
+  // show/hide KPI & upload/export when on 總表 / 重點檢視（跨賣場頁面）
   const kpiBlock=document.getElementById('header-kpi-row');
   // 好麻吉的聯盟行銷分頁有自己獨立的總覽列，切回好麻吉時要記得沿用上次停在哪個分頁
   const onAffTab=shop==='好麻吉'&&_shopViewMode[shop]==='affiliate';
-  if(kpiBlock)kpiBlock.style.display=(isSummary||onAffTab)?'none':'flex';
+  if(kpiBlock)kpiBlock.style.display=(isCross||onAffTab)?'none':'flex';
   const affHeaderEl=document.getElementById('aff-header-'+shop);
   if(affHeaderEl)affHeaderEl.style.display=onAffTab?'':'none';
   // sync global export button
   const gb=document.getElementById('global-exp-btn');
   if(gb){
-    if(shop==='總表'){gb.disabled=true;}
+    if(isCross){gb.disabled=true;}
     else{gb.disabled=!(state[shop]?._built?.length);}
   }
   // sync global sync button
   const sb=document.getElementById('global-sync-btn');
   if(sb){
-    const hasData=shop!=='總表'&&!!(state[shop]?._built?.length);
+    const hasData=!isCross&&!!(state[shop]?._built?.length);
     sb.disabled=!hasData;sb.style.opacity=hasData?'1':'0.4';sb.style.cursor=hasData?'pointer':'default';
     if(hasData){sb.style.background='#f59e0b';sb.style.color='#fff';sb.style.borderColor='#f59e0b';}
     else{sb.style.background='';sb.style.color='';sb.style.borderColor='';}
   }
   if(shop==='總表')renderSummary();
+  else if(shop==='重點檢視')renderFocus();
   else{if(state[shop]?._built?.length)applyFilters(shop);syncHeaderKpis(shop);}
 }
 
@@ -6399,7 +6594,7 @@ Object.assign(window, {
   openTestSettings,closeTestSettings,addTestDraftCond,removeTestDraftCond,deleteTestDraftRule,addTestDraftRule,saveTestSettings,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,
-  renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
+  renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,renderFocus,onFocusPeriodChange,openFocusColPicker,toggleFocusCol,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,
   deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,
