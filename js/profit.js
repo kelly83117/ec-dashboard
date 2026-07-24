@@ -307,13 +307,27 @@ const GROWTH_TAGS=[
 const state={};
 const _initNow=new Date();const _initCurMonth=`${_initNow.getFullYear()}/${String(_initNow.getMonth()+1).padStart(2,'0')}`;
 const _initCurHalf=_initNow.getDate()<=15?'first':'second';
-// 月份/區間預設值：一律跟今天走（老闆要求，2026-07-23）。
-// localStorage 的 ec_lastMonth_/ec_lastHalf_ 仍在寫入但已不再讀取，
-// 保留是為了要改回「記住上次」時只需改這兩個函式。
-// 老闆要求：一打開就看今天的月份，不再記住上次選的（2026-07-23）
-function _readLastMonth(shopId){return MONTHS.indexOf(_initCurMonth)>=0?_initCurMonth:MONTHS[MONTHS.length-1];}
-// 老闆要求：一打開就看今天所屬的半月（1-15 上半、16-末 下半）
-function _readLastHalf(shopId){return _initCurHalf;}
+// 為什麼不能直接字串排序：half 的字母序是 first < full < second，
+// 與時間語意不符（full 涵蓋整月，應排在 first 之後、second 之前）。
+// ⚠ _HALF_RANK 是 const（不會 hoist），而 _findLatestPeriod 會在下方 state 初始化時就被呼叫，
+//   故 _HALF_RANK / _periodRank 必須定義在 state 初始化之前；_findLatestPeriod 才放 lsHasAny 下方。
+const _HALF_RANK={first:0,full:1,second:2};
+function _periodRank(month,half){
+  return (month||'')+'#'+(_HALF_RANK[half]!==undefined?_HALF_RANK[half]:0);
+}
+// 預設期間：跳到該賣場「最新有資料」的期間（2026-07-24 修正）。
+// 原因：報表要等該期間結束後才產生，所以「當期」永遠沒資料，
+//       預設跟今天走會導致幾乎每天打開都是空白。
+// 找不到任何報表才 fallback 到今天（新賣場 / 全新瀏覽器）。
+function _readLastMonth(shopId){
+  const p=_findLatestPeriod(shopId);
+  if(p&&MONTHS.indexOf(p.month)>=0) return p.month;
+  return MONTHS.indexOf(_initCurMonth)>=0?_initCurMonth:MONTHS[MONTHS.length-1];
+}
+function _readLastHalf(shopId){
+  const p=_findLatestPeriod(shopId);
+  return p?p.half:_initCurHalf;
+}
 SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
 let globalMap={};
 let curShop='總表';
@@ -563,6 +577,48 @@ function lsHasAny(shop){
   for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k && k.startsWith(`ec|${shop}|`))return true;}
   return false;
 }
+// ── 找出某賣場「最新有資料」的期間（月份+區間）──
+// 用 function declaration（會 hoist），故可在上方 state 初始化(:317 附近)時就被呼叫。
+function _findLatestPeriod(shop){
+  const prefix='ec|'+shop+'|';
+  const seen=new Set();
+  const collect=k=>{
+    if(typeof k!=='string'||k.indexOf(prefix)!==0)return;
+    const p=k.split('|');
+    if(p.length<4)return;
+    const month=p[2],half=p[3];
+    if(!month||!half)return;
+    if(_HALF_RANK[half]===undefined)return;   // 不認得的 half 一律略過
+    seen.add(month+'|'+half);
+  };
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Object.keys(Store._profitMem).forEach(collect); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Object.keys(Store._mem).forEach(collect); }catch{}
+  try{ for(let i=0;i<localStorage.length;i++) collect(localStorage.key(i)); }catch{}
+  if(!seen.size) return null;
+  let best=null,bestRank='';
+  seen.forEach(v=>{
+    const [m,h]=v.split('|');
+    const r=_periodRank(m,h);
+    if(r>bestRank){bestRank=r;best={month:m,half:h};}
+  });
+  return best;
+}
+const _autoPeriodDone={};   // 每家只自動跳一次，之後尊重使用者的選擇
+// 把某賣場的下拉切到「最新有資料的期間」。
+// 回傳 true = 真的套用了（或已經在正確期間），false = 這次沒辦法套用（下拉還沒建好）。
+// 只有回傳 true 才設旗標 —— 否則會發生「下拉還沒建好就被標記完成、之後再也不修正」。
+function _applyLatestPeriod(shop){
+  if(_autoPeriodDone[shop]) return true;
+  const p=_findLatestPeriod(shop);
+  if(!p){ return false; }                       // 還沒有任何報表 → 不設旗標，之後再試
+  const sel=document.getElementById('month-sel-'+shop);
+  if(!sel) return false;                        // 下拉還沒建好 → 不設旗標，之後再試
+  if(MONTHS.indexOf(p.month)<0) return false;
+  sel.value=p.month;                            // 月份走 DOM（onMonthChange 讀 DOM 覆蓋 state）
+  state[shop].curHalf=p.half;                   // 區間走 state（updateHalfBtnLabels 依 state 重建）
+  _autoPeriodDone[shop]=true;
+  return true;
+}
 
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
@@ -644,6 +700,7 @@ window.addEventListener('profitDataReady', (e)=>{
   const shopsToUpdate = changedShops==null ? SHOPS : SHOPS.filter(s=>changedShops.includes(s.id));
   try{
     shopsToUpdate.forEach(s=>{
+      _applyLatestPeriod(s.id);
       onMonthChange(s.id);
       if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
     });
@@ -6217,6 +6274,7 @@ function initProfitPeriodControls(){
 }
 
 function initShopUI(shop){
+  _applyLatestPeriod(shop);
   onMonthChange(shop);
   if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
   if(Object.keys(globalMap).length>0){
