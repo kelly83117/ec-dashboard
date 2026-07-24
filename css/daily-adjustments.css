@@ -102,3 +102,48 @@
   user-select: none;
 }
 .adj-more-btn:hover { background: var(--primary); color: #fff; }
+
+/* 第三塊：月曆格內「當日各人調整筆數」橫條。結構鏡射既有 todo 橫條（daily.js:257-259），
+   顏色由 JS 經 --adj-cal-* CSS 變數傳入（單一來源 = PERSON_COLORS / PERSON_LIGHT）。 */
+.adj-cal-row {
+  display: flex;
+  align-items: stretch;
+  background: var(--adj-cal-bg);
+  border-radius: 4px;
+  overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
+}
+.adj-cal-stripe {
+  width: 3px;
+  flex-shrink: 0;
+  background: var(--adj-cal-c);
+}
+.adj-cal-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  font-size: 10px;
+  line-height: 1.6;
+  padding: 1px 4px;
+  color: var(--adj-cal-fg);
+  font-variant-numeric: tabular-nums;
+}
+/* 名字：要省空間先縮這邊（單字實際不會被縮），尾端 ellipsis 也只會切到名字 */
+.adj-cal-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 數字：永不截斷；· 用 ::before 掛在數字上，跟著數字走不會被切掉 */
+.adj-cal-num {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.adj-cal-num::before {
+  content: "·";
+  margin: 0 3px;
+  opacity: 0.55;
+}
