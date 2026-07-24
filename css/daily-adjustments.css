@@ -1,0 +1,136 @@
+/* css/daily-adjustments.css
+   工作日誌「淨利表調整」樣式。純新增，與這頁既有 inline style 隔離。
+   顏色走既有主題變數；pill 底色沿用 profit.css 的 .tag-*（calc 回傳的 cls）。不碰 --bg。
+   ── 第六塊：卡片內 pill（.adj-sec / .adj-pill）+ 明細彈窗（.adj-modal-*）
+   ── 第三塊：月曆格內筆數橫條（.adj-cal-*，保留在檔案下半，勿刪） */
+
+/* ---------- 第六塊：人員卡片內「淨利表調整」pill（明細改走彈窗） ---------- */
+.adj-sec {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.adj-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.adj-sec-title { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.adj-sec-total {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.adj-none { font-size: 12px; color: var(--text-muted); padding: 2px 0; }
+
+/* 兩排 pill：各排上方一個 muted 小標（表頭原詞「分析」/「成長分析」，非粗體、無框，僅分隔用）。
+   label + pills 包成 group 讓小標緊貼自己那排；group 之間由 .adj-sec 的 gap 分隔。 */
+.adj-pill-group { display: flex; flex-direction: column; gap: 4px; }
+.adj-pills-label { font-size: 12px; color: var(--text-muted); }
+.adj-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+/* pill 是 <button>：只做 reset（border:0 / font 繼承），不設 background/color，
+   讓 profit.css 的 .tag-*（calc 回傳的 cls）供色；同源同色不衝突。 */
+.adj-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+/* 建議調預算（加減混合）+ 未分類（無狀態）→ 中性灰，不套假顏色（比照既有「其他」色） */
+.adj-pill-plain { background: #f3f4f6; color: #374151; }
+.adj-pill:hover { filter: brightness(0.96); }
+.adj-pill b { font-weight: 800; }
+
+/* ---------- 明細彈窗（openAdjustmentDetailModal，走既有 openModal） ---------- */
+.adj-modal-sub { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+.adj-modal-list { max-height: 60vh; overflow-y: auto; }   /* 只有列表捲動，不撐長整頁 */
+.adj-modal-item { padding: 7px 2px; border-bottom: 1px solid var(--border); }
+.adj-modal-item-hd { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; min-width: 0; }
+.adj-modal-shop {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 0 6px;
+  border-radius: 4px;
+}
+.adj-modal-code { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.adj-modal-name {
+  color: var(--text);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.adj-modal-text { font-size: 12px; color: var(--text); padding-left: 2px; margin-top: 2px; word-break: break-word; line-height: 1.5; }
+
+/* 「沒有動作」沉底：分隔線 + 小標 + 整列文字轉 muted */
+.adj-modal-divider { border-top: 1px solid var(--border); margin: 12px 0 8px; }
+.adj-modal-noact { font-size: 11.5px; font-weight: 700; color: var(--text-muted); padding: 2px 0 6px; }
+.adj-modal-item-muted .adj-modal-name,
+.adj-modal-item-muted .adj-modal-text { color: var(--text-muted); }
+
+/* 第三塊：月曆格內「當日各人調整筆數」橫條。結構鏡射既有 todo 橫條（daily.js:257-259），
+   顏色由 JS 經 --adj-cal-* CSS 變數傳入（單一來源 = PERSON_COLORS / PERSON_LIGHT）。 */
+.adj-cal-row {
+  display: flex;
+  align-items: stretch;
+  background: var(--adj-cal-bg);
+  border-radius: 4px;
+  overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
+}
+.adj-cal-stripe {
+  width: 3px;
+  flex-shrink: 0;
+  background: var(--adj-cal-c);
+}
+.adj-cal-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  font-size: 10px;
+  line-height: 1.6;
+  padding: 1px 2px;
+  color: var(--adj-cal-fg);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;   /* 最後保險：整條放不下時裁在最右（數字端），但正常寬度不會走到這 */
+}
+/* 名字固定 1em（中文字剛好 1em）+ flex-shrink:0 + overflow:visible → 永遠不會被壓到「半個字」。
+   不用「·」分隔（名字若被裁會留孤零零殘留），改用 .adj-cal-num 的 margin 間距。
+   底線：寧可整條 bar 稍擠，也不能出現半字（半字看起來像資料壞掉，比排版差嚴重）。 */
+.adj-cal-name {
+  width: 1em;
+  flex-shrink: 0;
+  overflow: visible;
+  white-space: nowrap;
+}
+/* 數字：flex-shrink:0 永不壓縮、永不被裁；用 margin 與名字分隔（取代舊的「·」） */
+.adj-cal-num {
+  flex-shrink: 0;
+  margin-left: 3px;
+  white-space: nowrap;
+}
