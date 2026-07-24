@@ -605,6 +605,57 @@ function _findLatestPeriod(shop){
   });
   return best;
 }
+// 列出某賣場所有已存在的報表期間，由新到舊排序。
+// 掃描邏輯與 _findLatestPeriod 相同，差別是回傳全部而非只回最新。
+function _listPeriods(shop){
+  const prefix='ec|'+shop+'|';
+  const seen=new Set();
+  const collect=k=>{
+    if(typeof k!=='string'||k.indexOf(prefix)!==0)return;
+    const p=k.split('|');
+    if(p.length<4)return;
+    const month=p[2],half=p[3];
+    if(!month||!half)return;
+    if(_HALF_RANK[half]===undefined)return;
+    seen.add(month+'|'+half);
+  };
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Object.keys(Store._profitMem).forEach(collect); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Object.keys(Store._mem).forEach(collect); }catch{}
+  try{ for(let i=0;i<localStorage.length;i++) collect(localStorage.key(i)); }catch{}
+  return [...seen].map(v=>{
+    const [month,half]=v.split('|');
+    return {month,half,rank:_periodRank(month,half)};
+  }).sort((a,b)=>a.rank<b.rank?1:a.rank>b.rank?-1:0);   // 由新到舊
+}
+// 查某商品在所有期間的 note（廣告調整），由新到舊。
+// ⚠️ lsLoad 命中記憶體時回傳的是【共用參照】，這裡只讀 r.note，絕不修改那些物件。
+function _noteHistory(shop,code,skipMonth,skipHalf){
+  const out=[];
+  _listPeriods(shop).forEach(p=>{
+    if(p.month===skipMonth&&p.half===skipHalf) return;
+
+    // ① 匯入的：報表 built[] 裡的 r.note（純字串）
+    let rep=null;
+    try{ rep=lsLoad(shop,p.month,p.half); }catch{}
+    const built=rep&&rep.built;
+    if(Array.isArray(built)){
+      const r=built.find(x=>x&&x.code===code);
+      const t=r&&r.note;
+      if(t&&String(t).trim()) out.push({month:p.month,half:p.half,text:String(t)});
+    }
+
+    // ② 手打的：ec_notes|{shop}|{month}|{half} 的 adjustments
+    try{
+      const nd=(getNotes(shop+'|'+p.month+'|'+p.half)||{})[code];
+      const adjs=nd&&(typeof nd==='string'?[{date:'',text:nd}]:(nd.adjustments||[]));
+      (adjs||[]).forEach(a=>{
+        const t=a&&a.text;
+        if(t&&String(t).trim()) out.push({month:p.month,half:p.half,text:String(t)});
+      });
+    }catch{}
+  });
+  return out;
+}
 const _autoPeriodDone={};   // 每家只自動跳一次，之後尊重使用者的選擇
 // 把某賣場的下拉切到「最新有資料的期間」。
 // 回傳 true = 真的套用了（或已經在正確期間），false = 這次沒辦法套用（下拉還沒建好）。
@@ -3190,6 +3241,10 @@ function openNotePopup(shopKey,code){
         <div class="pnm-section">調整紀錄（按 Enter 或「送出」新增，自動加日期・自動儲存）</div>
         <div class="pnm-input-row"><input id="pnm-inp" class="pnm-inp" type="text" placeholder="例：調整主圖 / 加強廣告預算 +500"><button class="pnm-send" onclick="submitProfitNote()">送出</button></div>
         <div id="pnm-list" class="pnm-list"></div>
+        <div id="pnm-hist-wrap" style="display:none">
+          <div class="pnm-section" style="margin-top:14px">其他期間的調整</div>
+          <div id="pnm-hist" class="pnm-list"></div>
+        </div>
       </div>
       <div class="pnm-footer"><button class="pnm-close-btn" onclick="closeProfitNoteModal()">關閉</button></div>
     </div>`;
@@ -3202,6 +3257,7 @@ function openNotePopup(shopKey,code){
   document.getElementById('pnm-title').textContent=r?`${code}・${r.name}`:code;
   const pnmInp=document.getElementById('pnm-inp');if(pnmInp)pnmInp.value='';
   renderPnmList();
+  renderPnmHistory();
   modal.classList.add('open');
   setTimeout(()=>pnmInp?.focus(),60);
 }
@@ -3221,6 +3277,27 @@ function renderPnmList(){
     <div class="pnm-entry-text">${text.replace(/</g,'&lt;')}</div>
     <button class="pnm-entry-del" onclick="deleteProfitNote(${i})">×</button>
   </div>`).join('')).join('');
+}
+function renderPnmHistory(){
+  const wrap=document.getElementById('pnm-hist-wrap');
+  const box=document.getElementById('pnm-hist');
+  if(!wrap||!box||!_pnm) return;
+  const {shopKey,code}=_pnm;
+  // 商品調整（{shop}_growth）只有單一 key、不分期間，
+  // 它的所有紀錄已全部顯示在上方「調整紀錄」清單裡，沒有「其他期間」可言。
+  if(shopKey.indexOf('_growth')>=0){ wrap.style.display='none'; box.innerHTML=''; return; }
+  const shop=shopKey.split('|')[0];
+  const parts=shopKey.split('|');
+  const curM=parts.length>=3?parts[1]:(state[shop]?state[shop].curMonth:'');
+  const curH=parts.length>=3?parts[2]:(state[shop]?state[shop].curHalf:'');
+  let hist=[];
+  try{ hist=_noteHistory(shop,code,curM,curH); }catch(e){ console.error('[pnm] 歷史查詢失敗',e); }
+  if(!hist.length){ wrap.style.display='none'; box.innerHTML=''; return; }
+  wrap.style.display='';
+  box.innerHTML=hist.map(h=>`<div class="pnm-entry">
+    <div class="pnm-entry-date">${h.month} ${_halfLabel(h.half)}</div>
+    <div class="pnm-entry-text">${String(h.text).replace(/</g,'&lt;')}</div>
+  </div>`).join('');
 }
 function submitProfitNote(){
   if(!_pnm)return;
