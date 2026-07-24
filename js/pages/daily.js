@@ -1460,3 +1460,66 @@ Object.assign(App, {
     });
   },
 });
+
+// ============================================================================
+// collectAdjustments() — 純函式：把淨利表報表 built[]/rows[] 裡 row.note 的
+//   自由文字，依內嵌「月/日」切成一段一段的調整紀錄。不經 ec.dailyProgress
+//   摘要層、不碰任何 render / bind，只掛 window 供 Console / 日後功能取用。
+//   回傳：[{ date:'YYYY/MM/DD'|null, shop, code, name, text }]
+//   ⚠ date 為 null（note 裡沒有可辨識日期）的段一律保留，不丟。
+// ============================================================================
+function collectAdjustments() {
+  const out = [];
+  const seen = new Set();
+  const mem = (window.Store && Store._profitMem) || {};
+  Object.keys(mem).forEach(key => {
+    if (key.indexOf('ec|') !== 0) return;        // 只掃報表 key 'ec|...'
+    if (key.indexOf('filemeta') >= 0) return;    // 排除 filemeta
+    const parts = key.split('|');
+    const shop = parts[1];
+    const year = (parts[2] || '').split('/')[0]; // 'ec|好麻吉|2026/06|first' → '2026'
+    const rep = mem[key];
+    const rows = Array.isArray(rep && rep.built) ? rep.built      // built 優先
+               : Array.isArray(rep && rep.rows)  ? rep.rows       // 沒有才 rows
+               : [];
+    rows.forEach(row => {
+      const note = row && row.note;
+      if (typeof note !== 'string') return;       // 只處理字串 note
+
+      const re = /(\d{1,2})\/(\d{1,2})/g;         // 找所有「月/日」
+      const marks = [];
+      let m;
+      while ((m = re.exec(note)) !== null) {
+        const mo = parseInt(m[1], 10), da = parseInt(m[2], 10);
+        if (mo >= 1 && mo <= 12 && da >= 1 && da <= 31) {   // 月 1-12、日 1-31 才算
+          marks.push({ mo, da, start: m.index, end: m.index + m[0].length });
+        }
+      }
+
+      const trimSeg = s => s.replace(/^[\s；;，,、]+/, '').replace(/[\s；;，,、]+$/, '');
+      const pushSeg = (dateStr, rawText) => {
+        const text = trimSeg(rawText);
+        if (!text) return;                          // 空段丟掉
+        // 去重在「段」層級。分隔用 ␟ (␟) 而非 '|'，避免手打文字含 '|' 時 key 碰撞
+        const dk = shop + '␟' + (row.code || '') + '␟' + (dateStr || '') + '␟' + text;
+        if (seen.has(dk)) return;
+        seen.add(dk);
+        out.push({ date: dateStr, shop, code: row.code, name: (row.name || ''), text });
+      };
+
+      if (marks.length === 0) { pushSeg(null, note); return; }  // 無日期 → 整段 date=null
+      if (marks[0].start > 0) pushSeg(null, note.slice(0, marks[0].start)); // 首日期前 → null
+      for (let i = 0; i < marks.length; i++) {                  // 每個日期→下一個日期之間
+        const segStart = marks[i].end;                          // 段文字不含日期 token
+        const segEnd = (i + 1 < marks.length) ? marks[i + 1].start : note.length;
+        const dateStr = year + '/' + String(marks[i].mo).padStart(2, '0') + '/' + String(marks[i].da).padStart(2, '0');
+        pushSeg(dateStr, note.slice(segStart, segEnd));
+      }
+    });
+  });
+  console.log('[collectAdjustments] 總計', out.length,
+              '｜有日期', out.filter(r => r.date).length,
+              '｜無日期', out.filter(r => !r.date).length);
+  return out;
+}
+Object.assign(window, { collectAdjustments });
