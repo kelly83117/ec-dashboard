@@ -287,6 +287,9 @@ Object.assign(App, {
       </div>
     `;
 
+    // 第二塊：右側面板底部的「淨利表調整」唯讀區塊（沿用既有 viewDate，不新增 state）
+    const adjustmentsHtml = buildAdjustmentsBlockHtml(viewDate);
+
     return `
       <div style="background:#fcfcfd;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px 16px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:14px">
@@ -305,6 +308,7 @@ Object.assign(App, {
           <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
             ${bossCardHtml}
             ${cards}
+            ${adjustmentsHtml}
           </div>
         </div>
       </div>
@@ -1522,4 +1526,92 @@ function collectAdjustments() {
               '｜無日期', out.filter(r => !r.date).length);
   return out;
 }
-Object.assign(window, { collectAdjustments });
+
+// ============================================================================
+// 淨利表調整紀錄 — 工作日誌右側面板的唯讀顯示（第二塊）
+//   資料源：collectAdjustments()，依日期索引後查表。純唯讀，不寫任何 Store。
+//   通路→人 對應寫在本檔（不引 marketing.js；洞察表日後將廢除）。
+// ============================================================================
+const ADJ_ALLOWED_NAMES  = ['陳君葳', '洪嘉蓮', '郭雅琪'];              // 顯示順序
+const ADJ_SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '洪嘉蓮', '森之旅': '陳君葳', '維克': '郭雅琪' };
+const ADJ_MAX_ROWS = 10;                                              // 每人預設顯示筆數
+
+let _adjIndexCache = null;
+// collectAdjustments() 要掃 ~26000 列，只在首次呼叫時跑一次，之後查表 O(1)。
+// 只索引有日期的紀錄（無日期的無法落到特定某天）。
+function getAdjIndex() {
+  if (_adjIndexCache) return _adjIndexCache;
+  const idx = {};
+  collectAdjustments().forEach(r => {
+    if (!r.date) return;
+    (idx[r.date] = idx[r.date] || []).push(r);
+  });
+  _adjIndexCache = idx;
+  return idx;
+}
+// 雲端 profit 資料有更新 → 讓索引失效，下次 render 自然重建（firebase.js 既有事件）
+window.addEventListener('profitDataReady', () => { _adjIndexCache = null; });
+
+// viewDate: 'YYYY-MM-DD'。當日三人全空回 ''（整塊不出現）。
+function buildAdjustmentsBlockHtml(viewDate) {
+  const slashDate = String(viewDate || '').replace(/-/g, '/');
+  const dayRecords = (getAdjIndex()[slashDate] || []).filter(r => ADJ_SHOP_TO_PERSON[r.shop]);
+  if (dayRecords.length === 0) return '';
+
+  const parts = String(viewDate).split('-');
+  const mdLabel = `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+
+  // 依人分組
+  const byPerson = {};
+  dayRecords.forEach(r => {
+    const person = ADJ_SHOP_TO_PERSON[r.shop];
+    (byPerson[person] = byPerson[person] || []).push(r);
+  });
+
+  const personSections = ADJ_ALLOWED_NAMES.map((person, pIdx) => {
+    const recs = byPerson[person] || [];
+    if (recs.length === 0) {
+      return `
+        <div class="adj-person">
+          <div class="adj-person-head"><span class="adj-person-name">${escapeHtml(person)}</span><span class="adj-person-count">0</span></div>
+          <div class="adj-empty">這天沒有紀錄</div>
+        </div>`;
+    }
+    // 該人當日跨多通路才顯示通路標籤（洪嘉蓮＝好麻吉＋玩樂）
+    const multiShop = new Set(recs.map(r => r.shop)).size > 1;
+    const rowHtml = (r) => `
+      <div class="adj-row">
+        ${multiShop ? `<span class="adj-shop">${escapeHtml(r.shop)}</span>` : ''}
+        <span class="adj-code">${escapeHtml(r.code || '')}</span>
+        <span class="adj-name">${escapeHtml(r.name || '')}</span>
+        <span class="adj-text">${escapeHtml(r.text || '')}</span>
+      </div>`;
+    const firstHtml = recs.slice(0, ADJ_MAX_ROWS).map(rowHtml).join('');
+    const extra = recs.slice(ADJ_MAX_ROWS);
+    let moreHtml = '';
+    if (extra.length > 0) {
+      const cbId = `adj-more-${pIdx}`;
+      moreHtml = `
+        <input type="checkbox" id="${cbId}" class="adj-more-cb" hidden>
+        <div class="adj-extra">${extra.map(rowHtml).join('')}</div>
+        <label for="${cbId}" class="adj-more-btn">還有 ${extra.length} 筆 ▾</label>`;
+    }
+    return `
+      <div class="adj-person">
+        <div class="adj-person-head"><span class="adj-person-name">${escapeHtml(person)}</span><span class="adj-person-count">${recs.length}</span></div>
+        <div class="adj-list">${firstHtml}</div>
+        ${moreHtml}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="adj-block">
+      <div class="adj-block-head">
+        <span class="adj-block-title">淨利表調整 · ${escapeHtml(mdLabel)}</span>
+        <span class="adj-block-total">${dayRecords.length} 筆</span>
+      </div>
+      ${personSections}
+    </div>`;
+}
+
+Object.assign(window, { collectAdjustments, getAdjIndex, buildAdjustmentsBlockHtml });

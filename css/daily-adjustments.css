@@ -1,0 +1,104 @@
+/* css/daily-adjustments.css
+   工作日誌右側「淨利表調整」唯讀區塊（第二塊）。純新增，與這頁既有 inline style 隔離。
+   顏色一律走既有主題變數；卡片白底用「區塊內 scoped 變數」，不動全域 :root、不碰 --bg。 */
+
+.adj-block {
+  --adj-surface: #fff;
+  background: var(--adj-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+  padding: 12px 14px 14px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.adj-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.adj-block-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.adj-block-total {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.adj-person { display: flex; flex-direction: column; gap: 4px; }
+.adj-person + .adj-person {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.adj-person-head { display: flex; align-items: center; gap: 6px; }
+.adj-person-name { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.adj-person-count { font-size: 10.5px; color: var(--text-muted); }
+.adj-empty { font-size: 12px; color: var(--text-muted); padding: 4px 0 2px; }
+
+.adj-list, .adj-extra { display: flex; flex-direction: column; }
+.adj-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+  min-width: 0;
+}
+.adj-shop {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.adj-code {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+.adj-name {
+  flex-shrink: 0;
+  max-width: 40%;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.adj-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* 展開「還有 N 筆」：純 CSS checkbox-hack，無 JS、無 state；重繪自然回到收合 */
+.adj-more-cb { display: none; }
+.adj-extra { display: none; }
+.adj-more-cb:checked ~ .adj-extra { display: flex; }
+.adj-more-cb:checked ~ .adj-more-btn { display: none; }
+.adj-more-btn {
+  align-self: flex-start;
+  margin-top: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 4px 10px;
+  border-radius: 6px;
+  user-select: none;
+}
+.adj-more-btn:hover { background: var(--primary); color: #fff; }
