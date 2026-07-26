@@ -1,94 +1,94 @@
 {
-  "updated": "2026-07-25",
+  "updated": "2026-07-26",
   "items": [
     {
-      "keyword": "夏季收納箱",
-      "name": "防水透明夏季收納箱",
+      "keyword": "收納箱",
+      "name": "可堆疊收納箱",
       "price": 350,
-      "sold": 200,
-      "url": "https://shopee.tw/search?keyword=%E5%A4%8F%E5%AD%A3%E6%94%B6%E7%B4%8D%E7%AE%B1",
-      "reason": "適合整理夏季衣物",
+      "sold": 500,
+      "url": "https://shopee.tw/search?keyword=%E6%94%B6%E7%B4%8D%E7%AE%B1",
+      "reason": "適合整理居家雜物",
       "source": "AI推薦"
     },
     {
-      "keyword": "冰箱收納架",
-      "name": "多層可調整冰箱收納架",
-      "price": 280,
-      "sold": 150,
-      "url": "https://shopee.tw/search?keyword=%E5%86%B0%E7%AE%B1%E6%94%B6%E7%B4%8D%E6%9E%B6",
-      "reason": "提升冰箱空間利用",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "涼感床單",
-      "name": "夏季涼感床單組",
+      "keyword": "防滑浴簾",
+      "name": "防水防滑浴室簾",
       "price": 600,
       "sold": 300,
-      "url": "https://shopee.tw/search?keyword=%E6%B6%BC%E6%84%9F%E5%BA%8A%E5%96%AE",
-      "reason": "舒適透氣，適合炎熱季節",
+      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BB%91%E6%B5%B4%E7%B0%BE",
+      "reason": "夏季洗澡必備",
       "source": "AI推薦"
     },
     {
-      "keyword": "浴室防滑墊",
-      "name": "防滑浴室地墊",
-      "price": 220,
-      "sold": 180,
-      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E9%98%B2%E6%BB%91%E5%A2%8A",
-      "reason": "保障家庭安全",
+      "keyword": "廚房收納架",
+      "name": "多層廚房收納架",
+      "price": 800,
+      "sold": 400,
+      "url": "https://shopee.tw/search?keyword=%E5%BB%9A%E6%88%BF%E6%94%B6%E7%B4%8D%E6%9E%B6",
+      "reason": "提升廚房空間利用",
       "source": "AI推薦"
     },
     {
-      "keyword": "戶外野餐墊",
-      "name": "加厚防水戶外野餐墊",
-      "price": 450,
-      "sold": 120,
-      "url": "https://shopee.tw/search?keyword=%E6%88%B6%E5%A4%96%E9%87%8E%E9%A4%90%E5%A2%8A",
-      "reason": "夏季露營必備",
+      "keyword": "桌面收納盒",
+      "name": "多功能桌面收納盒",
+      "price": 250,
+      "sold": 450,
+      "url": "https://shopee.tw/search?keyword=%E6%A1%8C%E9%9D%A2%E6%94%B6%E7%B4%8D%E7%9B%92",
+      "reason": "整理書桌的好幫手",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "折疊衣架",
+      "name": "可折疊多功能衣架",
+      "price": 150,
+      "sold": 600,
+      "url": "https://shopee.tw/search?keyword=%E6%8A%98%E7%96%8A%E8%A1%A3%E6%9E%B6",
+      "reason": "節省陽台空間",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "浴室置物架",
+      "name": "浴室牆面置物架",
+      "price": 700,
+      "sold": 350,
+      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E7%BD%AE%E7%89%A9%E6%9E%B6",
+      "reason": "有效利用牆面空間",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "防水地墊",
+      "name": "防水防滑地墊",
+      "price": 400,
+      "sold": 300,
+      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%B0%B4%E5%9C%B0%E5%A2%8A",
+      "reason": "適合夏季使用",
       "source": "AI推薦"
     },
     {
       "keyword": "收納籃",
-      "name": "多用途收納籃組合",
-      "price": 400,
-      "sold": 250,
+      "name": "編織收納籃",
+      "price": 200,
+      "sold": 500,
       "url": "https://shopee.tw/search?keyword=%E6%94%B6%E7%B4%8D%E7%B1%83",
-      "reason": "居家收納好幫手",
+      "reason": "美觀又實用",
       "source": "AI推薦"
     },
     {
-      "keyword": "廚房置物架",
-      "name": "不銹鋼廚房置物架",
-      "price": 550,
-      "sold": 160,
-      "url": "https://shopee.tw/search?keyword=%E5%BB%9A%E6%88%BF%E7%BD%AE%E7%89%A9%E6%9E%B6",
-      "reason": "提升廚房整潔",
+      "keyword": "微波爐蓋",
+      "name": "微波爐防濺蓋",
+      "price": 120,
+      "sold": 700,
+      "url": "https://shopee.tw/search?keyword=%E5%BE%AE%E6%B3%A2%E7%88%90%E8%93%8B",
+      "reason": "保護微波爐清潔",
       "source": "AI推薦"
     },
     {
-      "keyword": "電子秤",
-      "name": "廚房數位電子秤",
+      "keyword": "整理箱",
+      "name": "透明收納整理箱",
       "price": 300,
-      "sold": 130,
-      "url": "https://shopee.tw/search?keyword=%E9%9B%BB%E5%AD%90%E7%A7%A4",
-      "reason": "精準計量，烹飪必備",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "涼感枕頭",
-      "name": "夏季涼感記憶枕",
-      "price": 500,
-      "sold": 200,
-      "url": "https://shopee.tw/search?keyword=%E6%B6%BC%E6%84%9F%E6%9E%95%E9%A0%AD",
-      "reason": "讓睡眠更舒適",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "清潔拖把",
-      "name": "自動清潔拖把",
-      "price": 600,
-      "sold": 110,
-      "url": "https://shopee.tw/search?keyword=%E6%B8%85%E6%BD%94%E6%8B%96%E6%8A%8A",
-      "reason": "輕鬆清潔，省時省力",
+      "sold": 550,
+      "url": "https://shopee.tw/search?keyword=%E6%95%B4%E7%90%86%E7%AE%B1",
+      "reason": "方便查看內部物品",
       "source": "AI推薦"
     }
   ]
