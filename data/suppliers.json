@@ -1,5 +1,5 @@
 {
-  "updated": "2026-07-24",
+  "updated": "2026-07-26",
   "items": [
     {
       "keyword": "收纳盒",
@@ -10,35 +10,35 @@
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E7%9B%92"
     },
     {
-      "keyword": "厨房用具",
-      "name": "不锈钢料理工具套装",
+      "keyword": "廚房用品",
+      "name": "多功能切菜板",
       "price_range": "15-30元",
       "moq": "50個",
-      "reason": "夏季烹饪需求增加",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E7%94%A8%E5%85%B7"
+      "reason": "夏季烹飪需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BB%9A%E6%88%BF%E7%94%A8%E5%93%81"
     },
     {
-      "keyword": "浴室收纳",
-      "name": "浴室多层收纳架",
+      "keyword": "浴室收納",
+      "name": "浴室置物架",
       "price_range": "20-50元",
-      "moq": "20個",
-      "reason": "即将到来的夏季家庭聚会",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%BA%B3"
+      "moq": "30個",
+      "reason": "清理浴室的好時機",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%B4%8D"
     },
     {
-      "keyword": "床上用品",
-      "name": "透气床单套装",
-      "price_range": "30-60元",
-      "moq": "30個",
-      "reason": "夏季床品更换需求高",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BA%8A%E4%B8%8A%E7%94%A8%E5%93%81"
+      "keyword": "寢具",
+      "name": "夏季透氣床單",
+      "price_range": "25-60元",
+      "moq": "20個",
+      "reason": "夏季床品需求上升",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%AF%A2%E5%85%B7"
     },
     {
       "keyword": "清洁工具",
-      "name": "环保清洁拖把",
+      "name": "可折叠拖把",
       "price_range": "10-25元",
-      "moq": "50個",
-      "reason": "清洁需求随假期上升",
+      "moq": "100個",
+      "reason": "暑假大掃除需求增加",
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E5%B7%A5%E5%85%B7"
     }
   ]
