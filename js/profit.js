@@ -6009,6 +6009,7 @@ function momoRenderUpload(shop){
       <div style="width:220px;font-size:13px;color:#374151">${label}${required?' <span style="color:#ef4444">*必要</span>':' <span style="color:#9ca3af">選填</span>'}</div>
       <input type="file" accept=".xlsx,.xls" onchange="momoUploadFile('${shop}','${type}',event)" style="font-size:12px">
       <span style="font-size:12px;color:${on?'#10b981':'#9ca3af'}">${on?'✓ '+f[type].name:'尚未選擇'}</span>
+      ${on?`<a onclick="momoUploadRemove('${shop}','${type}')" title="移除此檔" style="color:#ef4444;cursor:pointer;font-size:13px;font-weight:700">✕</a>`:''}
     </div>`;
   };
   const jiaFiles=f.jia||[];
@@ -6017,7 +6018,7 @@ function momoRenderUpload(shop){
     <div>
       <input type="file" accept=".xlsx,.xls" multiple onchange="momoUploadFile('${shop}','jia',event)" style="font-size:12px">
       <div style="font-size:12px;margin-top:3px">${jiaFiles.length
-        ? jiaFiles.map(x=>'<span style="color:#10b981">✓ '+x.name+'</span>').join('<br>')+` <a onclick="momoUploadClearJia('${shop}')" style="color:#5b5fcf;cursor:pointer;margin-left:6px">清除</a>`
+        ? jiaFiles.map((x,i)=>`<div style="margin-bottom:2px"><span style="color:#10b981">✓ ${x.name}</span> <a onclick="momoUploadRemoveJia('${shop}',${i})" title="移除此檔" style="color:#ef4444;cursor:pointer;font-weight:700;margin-left:4px">✕</a></div>`).join('')+`<a onclick="momoUploadClearJia('${shop}')" style="color:#5b5fcf;cursor:pointer">清除全部</a>`
         : '<span style="color:#9ca3af">尚未選擇（第三方/新竹 + 超商，兩份都選；可一次多選或分次加）</span>'}</div>
     </div>
   </div>`;
@@ -6030,7 +6031,7 @@ function momoRenderUpload(shop){
       ${jiaRow}
       ${fileRow('yi','乙配運費分攤明細（C1204 物流處理費·含寄倉分攤出貨運費+回收運費兩分頁）',false)}
       ${fileRow('s1105','S1105 退貨商品明細',false)}
-      <button onclick="momoUploadGenerate('${shop}')" style="margin-top:10px;padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">▶ 產生預覽</button>
+      <button onclick="momoUploadGenerate('${shop}')" ${f.c1105?'':'disabled'} style="margin-top:10px;padding:7px 18px;border-radius:7px;border:none;background:${f.c1105?'#5b5fcf':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${f.c1105?'pointer':'not-allowed'}">▶ 產生預覽</button>
       <div id="momo-up-preview-${shop}" style="margin-top:16px"></div>
     </div>`;
 }
@@ -6044,7 +6045,9 @@ function momoUploadFile(shop,type,e){
   }
   momoRenderUpload(shop);
 }
-function momoUploadClearJia(shop){ _momoUpFiles.jia=[]; momoRenderUpload(shop); }
+function momoUploadRemove(shop,type){ _momoUpFiles[type]=null; _momoUpPlan=null; momoRenderUpload(shop); }   // 清該檔 + 清預覽（避免鬼影）
+function momoUploadRemoveJia(shop,i){ if(_momoUpFiles.jia) _momoUpFiles.jia.splice(i,1); _momoUpPlan=null; momoRenderUpload(shop); }
+function momoUploadClearJia(shop){ _momoUpFiles.jia=[]; _momoUpPlan=null; momoRenderUpload(shop); }   // 修：補清 _momoUpPlan（既有鬼影）
 function momoUploadGenerate(shop){
   if(!_momoUpFiles.c1105){ alert('請先選 C1105（必要）'); return; }
   const prev=document.getElementById('momo-up-preview-'+shop);
@@ -6075,8 +6078,11 @@ function momoUploadGenerate(shop){
       const m1=momoParseUnsendYiSheet(s1,'乙配-寄倉分攤出貨運費'), m2=momoParseUnsendYiSheet(s2,'乙配-寄倉分攤回收運費');
       yi={}; [m1,m2].forEach(m=>Object.keys(m).forEach(sku=>{ yi[sku]=(yi[sku]||0)+m[sku]; }));
     }
-    const s1105=s1105wb?momoParseS1105(s1105wb.firstSheet()):null;
+    // S1105 止血：單獨 try/catch，解析失敗只讓退貨部分失效（s1105=null），不中止整份上傳（C1105/運費照常）
+    let s1105=null, s1105Error=null;
+    if(s1105wb){ try{ s1105=momoParseS1105(s1105wb.firstSheet()); }catch(err){ s1105Error=(err&&err.message)||String(err); console.warn('[momo] S1105 解析失敗，已略過（退貨率不會更新）：',s1105Error); } }
     _momoUpPlan=momoBuildUploadPlan({c1105,jia,yi,s1105});
+    _momoUpPlan.s1105Error=s1105Error;
     if(jiaInfo){ _momoUpPlan.jiaUnmatchedOrders=jiaInfo.unmatchedOrders; _momoUpPlan.badPeriod=_momoUpPlan.badPeriod.concat(jiaInfo.badPeriod); }
     if(s1105&&s1105.badPeriod&&s1105.badPeriod.length) _momoUpPlan.badPeriod=_momoUpPlan.badPeriod.concat(s1105.badPeriod);   // S1105 退貨判不出期別的訂編也浮出來
     momoRenderUploadPreview(shop);
@@ -6119,13 +6125,16 @@ function momoRenderUploadPreview(shop){
       ⚠ <b>訂編無法判斷期別，${P.badPeriod.length} 筆未寫入</b>（訂編前 6 碼非 YYMMDD、或月/日超出範圍）。請檢查是不是小計 / 頁尾 / 錯誤列：
       <div style="margin-top:4px;word-break:break-all;font-family:monospace">${shown}${more}</div></div>`;
   }
+  // S1105 止血：退貨檔解析失敗 → 橘字說明、退貨率不更新，但其餘照常寫入（同 badPeriod 風格）
+  const s1105ErrHtml=P.s1105Error?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#9a3412;line-height:1.6">
+      ⚠ <b>S1105 退貨明細解析失敗，已略過（退貨率不會更新）</b>：<div style="margin-top:4px;word-break:break-all">${P.s1105Error}</div></div>`:'';
   const skips=[];
   if(P.unknownChannel.length) skips.push(`未知配送類型 ${P.unknownChannel.length} 筆`);
   if(P.jiaUnmatchedOrders&&P.jiaUnmatchedOrders.length) skips.push(`甲配運費訂單在 C1105 找不到 ${P.jiaUnmatchedOrders.length} 筆（該運費未分攤）`);
   const skipHtml=skips.length?`<div style="font-size:12px;color:#9ca3af;margin-bottom:8px">略過（未計入）：${skips.join('、')}</div>`:'';
   el.innerHTML=`
     <div style="font-size:13px;font-weight:700;margin-bottom:8px">預覽（尚未寫入）</div>
-    ${shopBlock('甲配')}${shopBlock('乙配')}${owHtml}${badHtml}${skipHtml}
+    ${shopBlock('甲配')}${shopBlock('乙配')}${owHtml}${badHtml}${s1105ErrHtml}${skipHtml}
     <button onclick="momoUploadApply('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認寫入${P.overwrite.length?'（含覆蓋 '+P.overwrite.length+' 筆）':''}</button>
     <button onclick="momoUploadCancel('${shop}')" style="margin-left:8px;padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>`;
 }
@@ -6253,6 +6262,7 @@ function momoRenderProductSync(shop){
       <div style="width:250px;font-size:13px;color:#374151">${label} <span style="color:#ef4444">*必要</span></div>
       <input type="file" accept=".xlsx,.xls" onchange="momoSyncFile('${shop}','${type}',event)" style="font-size:12px">
       <span style="font-size:12px;color:${on?'#10b981':'#9ca3af'}">${on?'✓ '+f[type].name:'尚未選擇'}</span>
+      ${on?`<a onclick="momoSyncRemove('${shop}','${type}')" title="移除此檔" style="color:#ef4444;cursor:pointer;font-size:13px;font-weight:700">✕</a>`:''}
     </div>`;
   };
   c.innerHTML=`
@@ -6262,7 +6272,7 @@ function momoRenderProductSync(shop){
       </div>
       ${fileRow('cost','莫筆克成本（元創數位_各倉_商品列表）')}
       ${fileRow('info','MOMO商品資訊（MOMO後台商品主檔）')}
-      <button onclick="momoSyncGenerate('${shop}')" style="margin-top:10px;padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">▶ 產生差異預覽</button>
+      <button onclick="momoSyncGenerate('${shop}')" ${(f.info&&f.cost)?'':'disabled'} style="margin-top:10px;padding:7px 18px;border-radius:7px;border:none;background:${(f.info&&f.cost)?'#5b5fcf':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${(f.info&&f.cost)?'pointer':'not-allowed'}">▶ 產生差異預覽</button>
       <div id="momo-sync-preview-${shop}" style="margin-top:16px"></div>
     </div>`;
 }
@@ -6270,6 +6280,7 @@ function momoSyncFile(shop,type,e){
   const file=e.target.files[0]; if(!file) return;
   _momoSyncFiles[type]=file; momoRenderProductSync(shop);
 }
+function momoSyncRemove(shop,type){ _momoSyncFiles[type]=null; _momoSyncPlan=null; _momoSyncParsed=null; momoRenderProductSync(shop); }   // 清該檔 + 清預覽/解析結果
 function momoSyncGenerate(shop){
   if(!_momoSyncFiles.info||!_momoSyncFiles.cost){ alert('兩份檔都要選（莫筆克成本 + MOMO商品資訊）'); return; }
   const prev=document.getElementById('momo-sync-preview-'+shop);
@@ -7352,8 +7363,8 @@ Object.assign(window, {
   momoSetSub,momoSetPeriod,momoOnSearch,momoProfitSetSort,
   momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,
-  momoUploadFile,momoUploadClearJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,
-  momoSyncFile,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,
+  momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,
+  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,
   momoSetSummaryMonth,momoActionPlanSave,momoCleanDirtyPeriodKeys,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
