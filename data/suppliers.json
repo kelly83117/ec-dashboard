@@ -1,5 +1,5 @@
 {
-  "updated": "2026-07-26",
+  "updated": "2026-07-27",
   "items": [
     {
       "keyword": "收纳盒",
@@ -10,35 +10,35 @@
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E7%9B%92"
     },
     {
-      "keyword": "廚房用品",
-      "name": "多功能切菜板",
-      "price_range": "15-30元",
+      "keyword": "防潮袋",
+      "name": "真空防潮收納袋",
+      "price_range": "10-20元",
       "moq": "50個",
-      "reason": "夏季烹飪需求增加",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%BB%9A%E6%88%BF%E7%94%A8%E5%93%81"
+      "reason": "梅雨季節防潮需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E9%98%B2%E6%BD%AE%E8%A2%8B"
     },
     {
-      "keyword": "浴室收納",
-      "name": "浴室置物架",
+      "keyword": "浴室收納架",
+      "name": "多功能浴室收納架",
       "price_range": "20-50元",
       "moq": "30個",
-      "reason": "清理浴室的好時機",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%B4%8D"
+      "reason": "夏季浴室整理需求上升",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%B4%8D%E6%9E%B6"
     },
     {
-      "keyword": "寢具",
-      "name": "夏季透氣床單",
-      "price_range": "25-60元",
+      "keyword": "厨房收纳",
+      "name": "廚房多層收納架",
+      "price_range": "15-35元",
       "moq": "20個",
-      "reason": "夏季床品需求上升",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%AF%A2%E5%85%B7"
+      "reason": "家庭聚餐季節，需求上升",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E6%94%B6%E7%BA%B3"
     },
     {
       "keyword": "清洁工具",
-      "name": "可折叠拖把",
-      "price_range": "10-25元",
+      "name": "多功能清洁刷",
+      "price_range": "5-15元",
       "moq": "100個",
-      "reason": "暑假大掃除需求增加",
+      "reason": "夏季家庭大掃除需求",
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E5%B7%A5%E5%85%B7"
     }
   ]
