@@ -408,11 +408,14 @@ function _showSyncBtn(shop){
     // 有待同步：橘色亮起 + 顯示筆數
     btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent=`☁ 同步雲端 (${n})`;
   }
+  if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn();   // MOMO 頁那顆同步鈕跟著刷新（同一個 pending 來源）
 }
 // 掃出本機所有 ec|shop|month|half 報表 key 塞進 pending set
 //   讓 syncToCloud 不只推「本次會話新增」的，也把 localStorage 裡累積
 //   （包含前次重整前留下、pending set 已清空）的一併推上雲端。
 function _sweepAllLocalReportsIntoPending(){
+  // ⚠️ 這裡的白名單前綴（ec_momo_products| / ec_momo_rent_records / ec| 非 filemeta）若改動，
+  //    _momoSyncPendingCount()（本檔搜 `function _momoSyncPendingCount`）的唯讀版也要一起改，否則 MOMO 同步鈕亮暗會對不上。
   // 塊B：拿掉原本「掃 Store._profitMem 塞進 pending」那段。它會把雲端載回的報表
   //   也當 pending、再原封不動推回雲端 → 多人同時同步時「後按的用自己記憶體版本
   //   蓋掉全部」（舊蓋新的併發覆蓋）。改為只掃 localStorage：只推本機親手產生/編輯過的。
@@ -5549,9 +5552,12 @@ function momoRenderShop(shop){
     return `<button onclick="momoSetSub('${shop}','${id}')" style="padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid ${on?'#e4007f':'#e5e7eb'};background:${on?'#e4007f':'#fff'};color:${on?'#fff':'#6b7280'}">${label}</button>`;
   }).join('');
   el.innerHTML=`
-    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap">${pills}</div>
+    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center">${pills}
+      <button id="momo-sync-btn-${shop}" onclick="momoOpenSyncPreview('${shop}')" style="margin-left:auto;padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;border:1px solid #e5e7eb;background:#fff;color:#6b7280">☁ 同步雲端</button>
+    </div>
     <div id="momo-sub-content-${shop}"></div>`;
   momoRenderSub(shop);
+  momoRefreshSyncBtn(shop);   // 依 pending 筆數點亮/淡灰
 }
 function momoSetSub(shop,id){ _momoSub[shop]=id; momoRenderShop(shop); }
 function momoRenderSub(shop){
@@ -5565,6 +5571,126 @@ function momoRenderSub(shop){
   if(sub==='rent'){ momoRenderRent(shop); return; }
   const names={batch:'批次維護',upload:'C1105 上傳',sync:'商品資料同步',rent:'倉租費彙總'};
   c.innerHTML=`<div class="empty"><div class="empty-icon">🚧</div><div class="empty-hint">「${names[sub]||sub}」建置中（後續階段開放）</div></div>`;
+}
+
+// ── MOMO 同步鈕（甲配/乙配 pill 列最右）+ 同步預覽視窗 ──
+//   #header-kpi-row（全域鈕所在）在 MOMO 頁被隱藏，MOMO 需自備入口；此鈕呼叫預覽 → 確認 → 全域 syncToCloud。
+// 唯讀待同步計數（只給 MOMO 同步鈕決定亮/暗用）：只數 key，不 mutate _pendingSyncKeys、不回填 Store、不 parse value。
+// ⚠️ 這裡的白名單前綴必須跟 _sweepAllLocalReportsIntoPending()（本檔搜 `function _sweepAllLocalReportsIntoPending`）
+//    保持一致——那邊改了前綴，這邊也要一起改，否則鈕亮暗會跟實際會推的對不上。
+function _momoSyncPendingCount(){
+  const keys=new Set();
+  // (1) 這個 session 已 _markPending 的（排除 marker / _summary_v1，比照 _realPendingCount）
+  _pendingSyncKeys.forEach(k=>{ if(k.startsWith('__shop__|'))return; if(k==='_summary_v1')return; keys.add(k); });
+  // (2) localStorage 裡符合 sweep 白名單前綴的——重整後 session 標記已清空，靠這個撐起亮暗（只讀 key 名，不 parse value）
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i); if(!k) continue;
+      if(k.startsWith('ec_momo_products|') || k==='ec_momo_rent_records'
+         || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
+    }
+  }catch{}
+  return keys.size;
+}
+function momoRefreshSyncBtn(shop){
+  shop=shop||curMomoShop;
+  const btn=document.getElementById('momo-sync-btn-'+shop);
+  if(!btn) return;
+  const has=_momoSyncPendingCount()>0;   // 唯讀估算，只決定亮/暗；真正筆數在預覽視窗（真 sweep 算的）
+  if(has){ btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b'; }
+  else   { btn.disabled=true; btn.style.opacity='0.4';btn.style.cursor='default';btn.style.background='#fff';btn.style.color='#6b7280';btn.style.borderColor='#e5e7eb'; }
+  btn.textContent='☁ 同步雲端';           // 不顯示筆數（避免估算數字與預覽對不上）
+}
+function _momoCount(v){ return Array.isArray(v)?v.length : (v&&typeof v==='object')?Object.keys(v).length : (v==null?0:1); }
+// 穩定序列化（排序物件 key）→ 比對「內容是否不同」不受 Firestore 回來的 key 順序影響，零 key-order 誤報
+function _momoStableStr(v){
+  if(v===null||typeof v!=='object') return JSON.stringify(v);
+  if(Array.isArray(v)) return '['+v.map(_momoStableStr).join(',')+']';
+  return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+_momoStableStr(v[k])).join(',')+'}';
+}
+// 收集「這次同步實際會推的 key」——與 syncToCloud 同源：先跑同一個 sweep，再讀同一個 _pendingSyncKeys。
+//   絕不自己掃 localStorage（會漏掉 session 內標過、不在 sweep 白名單的 key → 預覽騙人）。
+function _momoCollectPending(shop){
+  _sweepAllLocalReportsIntoPending();          // 與 syncToCloud:458 同一個函式，冪等
+  const items=[], seen=new Set();
+  const add=(key,kind,val)=>{ if(seen.has(key))return; seen.add(key); items.push({key,kind,localVal:val,localCount:_momoCount(val)}); };
+  // syncToCloud 開頭那兩條 shop 專屬 extra（465-469）：MOMO 賣場通常為空
+  try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0) add('ec_notes|'+_nk,'其他設定',notes); }catch{}
+  try{ const edits=getEdits(shop); if(edits&&Object.keys(edits).length>0) add('ec_edits|'+shop,'其他設定',edits); }catch{}
+  _pendingSyncKeys.forEach(pk=>{
+    if(pk.startsWith('__shop__|')) return;               // marker，不推
+    if(pk.startsWith('ec|filemeta|')) return;            // 故意不上雲
+    if(pk.startsWith('ec|')){ add(pk,'蝦皮報表', Store._profitMem&&Store._profitMem[pk]); return; }   // → setReport（profits collection）
+    let val=null; try{ if(Store._mem&&Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
+    if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} }
+    const kind = pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk==='ec_momo_rent_records'?'MOMO倉租費' : '其他設定';
+    add(pk,kind,val);
+  });
+  return items;
+}
+async function momoOpenSyncPreview(shop){
+  if(!window.__cloudProfit){
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'雲端尚未就緒，請重新整理後再同步。',kind:'warn'});
+    else if(typeof showToast==='function') showToast('雲端未連線','error');
+    return;
+  }
+  const items=_momoCollectPending(shop);
+  let cloud={};
+  try{ const snap=await window.__cloudProfit.getDoc(); cloud=snap.exists()?(snap.data()||{}):{}; }
+  catch(e){ const m=(e&&e.message)||String(e); if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'讀取雲端失敗',message:'無法讀取雲端現況，請稍後再試。',detail:m,kind:'error'}); else if(typeof showToast==='function') showToast('讀取雲端失敗','error'); return; }
+  items.forEach(it=>{
+    if(it.kind==='蝦皮報表'){ it.status='uncomparable'; it.cloudCount=null; return; }   // 不同 collection（profits），app/profit 讀不到
+    const cv=cloud[it.key];
+    if(cv===undefined){ it.status='new'; it.cloudCount=0; }
+    else { it.cloudCount=_momoCount(cv); it.status=(_momoStableStr(it.localVal)===_momoStableStr(cv))?'same':'diff'; }
+  });
+  momoRenderSyncPreviewModal(shop, items);
+}
+function momoRenderSyncPreviewModal(shop, items){
+  let ov=document.getElementById('momo-sync-overlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='momo-sync-overlay'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=e=>{ if(e.target===ov) momoCloseSyncPreview(); };
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const typeColor={'MOMO商品主檔':'#5b5fcf','MOMO倉租費':'#0ea5e9','蝦皮報表':'#e4007f','其他設定':'#9ca3af'};
+  const statusCell=it=>{
+    if(it.status==='new')    return `<span style="color:#10b981;font-weight:600">新增</span>`;
+    if(it.status==='same')   return `<span style="color:#9ca3af">無變更</span>`;
+    if(it.status==='uncomparable') return `<span style="color:#9ca3af">無法比對（不同 collection）</span>`;
+    const cnt=(it.cloudCount!==it.localCount)?`（雲端 ${it.cloudCount} 筆 / 本機 ${it.localCount} 筆）`:'';
+    return `<span style="color:#9a3412;font-weight:600">⚠️ 內容不同，確認後會用本機整包覆蓋雲端${cnt}</span>`;
+  };
+  const anyDiff=items.some(it=>it.status==='diff');
+  const rows = items.length ? items.map(it=>`<tr style="border-top:1px solid #f3f4f6">
+      <td style="padding:6px 8px;font-family:monospace;word-break:break-all">${esc(it.key)}</td>
+      <td style="padding:6px 8px;color:${typeColor[it.kind]||'#6b7280'};font-weight:600;white-space:nowrap">${it.kind}</td>
+      <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.localCount}</td>
+      <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.cloudCount==null?'—':it.cloudCount}</td>
+      <td style="padding:6px 8px">${statusCell(it)}</td>
+    </tr>`).join('')
+    : `<tr><td colspan="5" style="padding:20px;text-align:center;color:#9ca3af">目前沒有待同步的資料</td></tr>`;
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;font-size:15px;font-weight:700">同步預覽 — 確認要推送到雲端的內容</div>
+    <div style="padding:12px 20px;overflow:auto">
+      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">以下是這次<b>整批</b>會推上雲端的資料（含蝦皮報表在內，全域同步會一起推）。每項都是<b>整包覆蓋、無版本比對</b>，請確認沒有不該推、或會蓋掉別人更新的項目。</div>
+      ${anyDiff?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">⚠️ 有項目<b>雲端與本機不同</b>——確認後會用本機整包覆蓋雲端。系統<b>無法判斷誰比較新</b>（資料沒有時間戳），請自行確認不會蓋掉同事的更新。</div>`:''}
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="text-align:left;color:#6b7280;font-weight:600">
+          <th style="padding:6px 8px">資料 key</th><th style="padding:6px 8px">類型</th><th style="padding:6px 8px;text-align:right">本機</th><th style="padding:6px 8px;text-align:right">雲端</th><th style="padding:6px 8px">狀態</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="padding:14px 20px;border-top:1px solid #eef0f2;display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="momoCloseSyncPreview()" style="padding:7px 16px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>
+      <button onclick="momoConfirmSync('${shop}')" ${items.length?'':'disabled'} style="padding:7px 18px;border-radius:7px;border:none;background:${items.length?'#10b981':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${items.length?'pointer':'default'}">確認同步${items.length?'（'+items.length+' 項）':''}</button>
+    </div>
+  </div>`;
+}
+function momoCloseSyncPreview(){ const ov=document.getElementById('momo-sync-overlay'); if(ov) ov.remove(); }
+function momoConfirmSync(shop){
+  momoCloseSyncPreview();
+  Promise.resolve(syncToCloud(shop)).then(()=>momoRefreshSyncBtn(shop)).catch(()=>momoRefreshSyncBtn(shop));   // 推送邏輯本身不動，只在前面加預覽
 }
 
 // ── 畫面一：商品獲利總表（甲配/乙配共用）──
@@ -5593,6 +5719,9 @@ function momoProfitTableHTML(shop){
         <select onchange="momoSetPeriod('${shop}',this.value)" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;color:#1a1a2e">${periodOpts}</select>
       </div>
       <input type="text" placeholder="搜尋 品號 / 名稱 / 原廠編號" value="${q}" oninput="momoOnSearch('${shop}',this.value)" style="flex:1;min-width:200px;max-width:340px;padding:6px 12px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;outline:none">
+    </div>
+    <div style="font-size:11px;color:#9ca3af;margin:-4px 0 12px;line-height:1.5">
+      毛利率與毛利貢獻以商品<b>目前</b>的成本／售價計算，非當期歷史成本——檢視過去月份時，數字會用現在的成本回算。
     </div>
     <div id="momo-tbl-${shop}"></div>`;
 }
@@ -7477,6 +7606,7 @@ Object.assign(window, {
   momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,
   momoSetSummaryMonth,momoActionPlanSave,momoCleanDirtyPeriodKeys,
   momoRentSubmit,momoRentDelete,momoRentSyncBtn,
+  momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
