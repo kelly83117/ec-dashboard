@@ -302,7 +302,7 @@ function _readLastHalf(shopId){
   const p=_findLatestPeriod(shopId);
   return p?p.half:_initCurHalf;
 }
-SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
+SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[],search:''};});
 let globalMap={};
 let curShop='總表';
 let openPopup=null;
@@ -843,7 +843,7 @@ function shopHTML(shop){return`
   <div id="sv-profit-${shop}">
     <div class="toolbar" id="tb-${shop}" style="position:relative">
       <span id="period-tag-${shop}" style="display:none"></span>
-      <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')" style="display:none">
+      <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋 編號 / 名稱 / ID…" oninput="setSearch('${shop}',this.value)">
       <span class="row-cnt" id="cnt-${shop}"></span>
       <span class="sugg-filter-chip" id="sugg-chip-${shop}">
         <span id="sugg-chip-text-${shop}"></span>
@@ -1026,7 +1026,6 @@ function clearPeriod(shop){
   // 重置表格 & KPI
   document.getElementById('period-tag-'+shop).textContent='';
   document.getElementById('period-tag-'+shop).style.display='none';
-  const search=document.getElementById('search-'+shop);if(search)search.style.display='none';
   document.getElementById('cnt-'+shop).textContent='';
   document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">報表已清除，請重新上傳並產生</div></div>`;
   setKpis(shop,0,0,0,0);
@@ -1046,6 +1045,8 @@ function loadIntoUI(shop,built,period,days){
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
   state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=getTagFilters();
+  // search 刻意不重置：切月份保留關鍵字（唯一清掉它的是頁面初次載入時 state 的整包初始化）
+  const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
   document.getElementById('period-tag-'+shop).textContent=period;
   const cb=document.getElementById('clear-btn-'+shop);if(cb)cb.style.display='';
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=false;}
@@ -2688,10 +2689,11 @@ document.addEventListener('click',closeTfDrop);
 
 // ── Filters & Sort ──
 function applyFilters(shop){
-  const s=state[shop];if(!s._built||!s._built.length)return;
-  const q=(document.getElementById('search-'+shop).value||'').toLowerCase();
+  const s=state[shop];if(!s)return;
+  if(!s._built||!s._built.length)return;
+  const q=(s.search||'').trim().toLowerCase();
   let list=[...s._built];
-  if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q));
+  if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
   if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l||(r.testTags||[]).some(tt=>tt.label===l)));
   if(s.suggFilterActive)list=list.filter(r=>r.testTags?.length);
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
@@ -2725,6 +2727,7 @@ function applyFilters(shop){
   updateSuggChip(shop);
 }
 function setSort(shop,col,dir){state[shop].sorts={col,dir};applyFilters(shop);}
+function setSearch(shop,val){if(state[shop])state[shop].search=val;applyFilters(shop);}
 function setColFilter(shop,col,type,val){
   if(!state[shop].filters)state[shop].filters={};
   if(val===''||val===null)delete state[shop].filters[col];
@@ -7443,7 +7446,7 @@ Object.assign(window, {
   deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
+  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
   coupangSummaryHTML,setCoupangSummaryView,syncCoupangSummaryFromKpi,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
