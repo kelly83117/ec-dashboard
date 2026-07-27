@@ -428,6 +428,14 @@ function _sweepAllLocalReportsIntoPending(){
         }
         continue;
       }
+      // MOMO 倉租費（P6）：同商品主檔走 field 分支，補進來避免「存了→重整前沒同步」漏推
+      if(k==='ec_momo_rent_records'){
+        _pendingSyncKeys.add(k);
+        if(!(Store._mem&&Store._mem[k])){
+          try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+        }
+        continue;
+      }
       // filemeta 不上雲（雲端零讀取端）→ 不塞進 pending，省下「撈進來→推送略過→收尾刪」的白工
       if(k&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')){
         _pendingSyncKeys.add(k);
@@ -5440,6 +5448,24 @@ function momoSaveProducts(shop,products){
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}              // 保留：syncToCloud field 分支優先讀 _mem
   _markPending(k);   // 走既有 pending → 手動同步時 setField 上雲
 }
+// ── P6 倉租費（僅乙配）：公司層級月度總費用，不分攤、不進毛利。key 無 shop 後綴（全域一份）──
+//   存取比照商品主檔三鏡像：load _profitMem→_mem→localStorage；save localStorage+_profitMem+_mem+_markPending。
+//   走 syncToCloud 通用 field 分支（key 不含 'ec|'）→ __cloudProfit.setField → app/profit doc。
+const MOMO_RENT_KEY='ec_momo_rent_records';
+function momoLoadRent(){
+  const k=MOMO_RENT_KEY;
+  try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]) return Store._mem[k]; }catch{}
+  try{ const local=localStorage.getItem(k); if(local) return JSON.parse(local); }catch{}
+  return [];
+}
+function momoSaveRent(records){
+  const k=MOMO_RENT_KEY;
+  try{ localStorage.setItem(k,JSON.stringify(records)); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=records; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=records; }catch{}
+  _markPending(k);
+}
 
 // ── §2 計算邏輯（甲配/乙配共用同一條公式鏈；毛利公式用實際甲配 Excel 反推驗證過）──
 function momoEffectiveAt(history,date){   // 依日期找當時生效的成本/售價版本（P1 尚未接，見規格 §199）
@@ -5527,6 +5553,7 @@ function momoRenderSub(shop){
   if(sub==='batch'){ momoRenderBatch(shop); return; }
   if(sub==='upload'){ momoRenderUpload(shop); return; }
   if(sub==='sync'){ momoRenderProductSync(shop); return; }
+  if(sub==='rent'){ momoRenderRent(shop); return; }
   const names={batch:'批次維護',upload:'C1105 上傳',sync:'商品資料同步',rent:'倉租費彙總'};
   c.innerHTML=`<div class="empty"><div class="empty-icon">🚧</div><div class="empty-hint">「${names[sub]||sub}」建置中（後續階段開放）</div></div>`;
 }
@@ -6281,6 +6308,80 @@ function momoSyncFile(shop,type,e){
   _momoSyncFiles[type]=file; momoRenderProductSync(shop);
 }
 function momoSyncRemove(shop,type){ _momoSyncFiles[type]=null; _momoSyncPlan=null; _momoSyncParsed=null; momoRenderProductSync(shop); }   // 清該檔 + 清預覽/解析結果
+
+// ── 畫面五：倉租費彙總（僅乙配）——手動輸入月度總額，不分攤、不進毛利，只做紀錄+彙總 ──
+function momoRentFmt(v){ return '$'+Number(v||0).toLocaleString('en-US'); }
+function momoRentSyncBtn(){   // 依當前選的月份是否已有紀錄，切換按鈕文字（新增/更新）
+  const mEl=document.getElementById('momo-rent-month'), bEl=document.getElementById('momo-rent-submit');
+  if(!mEl||!bEl) return;
+  const m=mEl.value;
+  const exists=m&&momoLoadRent().some(r=>r.month===m);
+  bEl.textContent=exists?('更新 '+m):'新增';
+}
+function momoRentSubmit(shop){
+  const mEl=document.getElementById('momo-rent-month'), aEl=document.getElementById('momo-rent-amount'), nEl=document.getElementById('momo-rent-note');
+  const month=((mEl&&mEl.value)||'').trim();
+  if(!/^\d{4}-\d{2}$/.test(month)){ alert('請先選擇月份'); return; }
+  const raw=((aEl&&aEl.value)||'').trim();
+  const amount=Number(raw);   // 一定轉成 number，避免月均字串相加
+  if(raw===''||!Number.isFinite(amount)||amount<0){ alert('金額必須是 0 或正數'); return; }
+  const note=((nEl&&nEl.value)||'').trim();
+  const records=momoLoadRent().slice();
+  const i=records.findIndex(r=>r.month===month);
+  const updated=i>=0;
+  if(updated) records[i]={month,amount,note};   // 同月覆蓋
+  else records.push({month,amount,note});
+  momoSaveRent(records);
+  momoRenderRent(shop);
+  if(typeof showToast==='function') showToast((updated?'已更新 ':'已新增 ')+month+' 的倉租費（記得按 ☁ 同步雲端）','success');
+}
+function momoRentDelete(shop,month){
+  const records=momoLoadRent().filter(r=>r.month!==month);
+  momoSaveRent(records);
+  momoRenderRent(shop);
+  if(typeof showToast==='function') showToast('已刪除 '+month+' 的倉租費（記得按 ☁ 同步雲端）','info');
+}
+function momoRenderRent(shop){
+  const c=document.getElementById('momo-sub-content-'+shop);
+  if(!c) return;
+  const records=momoLoadRent().slice().sort((a,b)=> a.month<b.month?1:a.month>b.month?-1:0);   // 新到舊
+  const n=records.length;
+  const total=records.reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const avg=n?Math.round(total/n):0;
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const listHtml=records.length
+    ? records.map(r=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #eef0f2;border-radius:7px;margin-bottom:6px">
+        <div style="width:80px;font-weight:600;font-size:13px">${r.month}</div>
+        <div style="width:120px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums">${momoRentFmt(r.amount)}</div>
+        <div style="flex:1;font-size:12px;color:#6b7280;word-break:break-all">${esc(r.note)}</div>
+        <a onclick="momoRentDelete('${shop}','${r.month}')" title="刪除" style="color:#ef4444;cursor:pointer;font-weight:700;font-size:13px">✕</a>
+      </div>`).join('')
+    : `<div class="empty" style="padding:28px 0;text-align:center;color:#9ca3af"><div style="font-size:26px">📦</div><div style="font-size:13px;margin-top:6px">還沒有倉租費紀錄，從上方新增第一筆</div></div>`;
+  c.innerHTML=`
+    <div style="max-width:640px">
+      <div style="font-size:12px;color:#6b7280;background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.6">
+        倉租費是乙配（寄倉）的<b>公司層級月度總費用</b>（對應對帳單「寄倉倉租費(EC)」），<b>不分攤到商品、不進毛利</b>，這裡只做紀錄與彙總。
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        <div><div style="font-size:12px;color:#6b7280;margin-bottom:3px">月份</div><input type="month" id="momo-rent-month" onchange="momoRentSyncBtn()" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px"></div>
+        <div><div style="font-size:12px;color:#6b7280;margin-bottom:3px">金額</div><input type="number" min="0" step="1" id="momo-rent-amount" placeholder="0" style="width:120px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px"></div>
+        <div style="flex:1;min-width:140px"><div style="font-size:12px;color:#6b7280;margin-bottom:3px">備註（選填）</div><input type="text" id="momo-rent-note" style="width:100%;padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px"></div>
+        <button id="momo-rent-submit" onclick="momoRentSubmit('${shop}')" style="padding:7px 16px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">新增</button>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:16px">
+        <div style="flex:1;background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:12px 14px">
+          <div style="font-size:12px;color:#6b7280">累計總計</div>
+          <div style="font-size:20px;font-weight:700;color:#1a1a2e;font-variant-numeric:tabular-nums">${momoRentFmt(total)}</div>
+        </div>
+        <div style="flex:1;background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:12px 14px">
+          <div style="font-size:12px;color:#6b7280">月均（${n} 個月）</div>
+          <div style="font-size:20px;font-weight:700;color:#1a1a2e;font-variant-numeric:tabular-nums">${momoRentFmt(avg)}</div>
+        </div>
+      </div>
+      <div>${listHtml}</div>
+    </div>`;
+  momoRentSyncBtn();
+}
 function momoSyncGenerate(shop){
   if(!_momoSyncFiles.info||!_momoSyncFiles.cost){ alert('兩份檔都要選（莫筆克成本 + MOMO商品資訊）'); return; }
   const prev=document.getElementById('momo-sync-preview-'+shop);
@@ -7366,6 +7467,7 @@ Object.assign(window, {
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,
   momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,
   momoSetSummaryMonth,momoActionPlanSave,momoCleanDirtyPeriodKeys,
+  momoRentSubmit,momoRentDelete,momoRentSyncBtn,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
