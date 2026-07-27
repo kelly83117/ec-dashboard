@@ -5585,6 +5585,9 @@ function momoProfitTableHTML(shop){
       </div>
       <input type="text" placeholder="搜尋 品號 / 名稱 / 原廠編號" value="${q}" oninput="momoOnSearch('${shop}',this.value)" style="flex:1;min-width:200px;max-width:340px;padding:6px 12px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;outline:none">
     </div>
+    <div style="font-size:11px;color:#9ca3af;margin:-4px 0 12px;line-height:1.5">
+      毛利率與毛利貢獻以商品<b>目前</b>的成本／售價計算，非當期歷史成本——檢視過去月份時，數字會用現在的成本回算。
+    </div>
     <div id="momo-tbl-${shop}"></div>`;
 }
 function momoSetPeriod(shop,val){ _momoPeriodSel[shop]=val; momoRenderProfitBody(shop); }
