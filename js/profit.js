@@ -5476,7 +5476,7 @@ function momoAggregatePeriods(product,periodKeys){   // 彙總單一商品（可
 // ── §3 期別工具 ──
 function momoAllPeriods(shop){
   const set=new Set();
-  momoLoadProducts(shop).forEach(p=>{ if(p.periods) Object.keys(p.periods).forEach(k=>set.add(k)); });
+  momoLoadProducts(shop).forEach(p=>{ if(p.periods) Object.keys(p.periods).forEach(k=>{ if(/^\d{4}-\d{2}-H[12]$/.test(k)) set.add(k); }); });   // 濾掉髒 key，免得下拉標成正常月份跟真的混淆
   return [...set].sort();   // 字串排序即時間排序（YYYY-MM-Hx）
 }
 function momoPeriodLabel(period){
@@ -5484,10 +5484,12 @@ function momoPeriodLabel(period){
   return `${Number(m)}月${half==='H1'?'上':'下'}`;
 }
 function momoOrderToPeriod(orderNo){   // 訂單編號前 6 碼 YYMMDD 判半月（拆掉 dash 後綴後取前 6，14 碼不影響）
-  const prefix=String(orderNo).split('-')[0];
-  if(prefix.length<6) return null;
-  const yy=prefix.slice(0,2), mm=prefix.slice(2,4), dd=Number(prefix.slice(4,6));
-  return `20${yy}-${mm}-${dd<=15?'H1':'H2'}`;
+  const prefix=String(orderNo).trim().split('-')[0];
+  if(!/^\d{6}/.test(prefix)) return null;                 // 前 6 碼須純數字（擋 '#6...' 等髒列，不逐段 Number 以免寬鬆轉換）
+  const yy=prefix.slice(0,2), mm=prefix.slice(2,4), dd=prefix.slice(4,6);
+  const mn=Number(mm), dn=Number(dd);
+  if(mn<1||mn>12||dn<1||dn>31) return null;                // mm 01-12、dd 01-31，明確排除 0
+  return `20${yy}-${mm}-${dn<=15?'H1':'H2'}`;              // 拼 key 用原字串（保 "06" 不變 "6"）
 }
 function momoChannelFromDeliveryType(t){
   if(t==='寄倉') return '乙配';
@@ -5900,16 +5902,17 @@ function momoParseUnsendYiSheet(rows,label){
 function momoParseS1105(rows){
   const {headerIdx,idx}=momoLocateCols(rows,{order:['訂單編號'],deliveryType:['配送類型'],sku:['品號'],qty:['退貨數量','退貨數','數量']},'S1105 退貨商品明細');
   const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
-  const returns={甲配:{},乙配:{}};
+  const returns={甲配:{},乙配:{}}, badPeriod=[];
   for(let i=headerIdx+1;i<rows.length;i++){
     const r=rows[i]; if(!r) continue;
     const sku=String(r[idx.sku]||'').trim(); if(!sku) continue;
     const channel=momoChannelFromDeliveryType(String(r[idx.deliveryType]||'').trim()); if(!channel) continue;
-    const period=momoOrderToPeriod(r[idx.order]); if(!period) continue;
+    const period=momoOrderToPeriod(r[idx.order]);
+    if(!period){ if(badPeriod.length<20) badPeriod.push({order:r[idx.order]}); continue; }   // 不靜默丟棄：收集浮出來
     returns[channel][sku]=returns[channel][sku]||{};
     returns[channel][sku][period]=(returns[channel][sku][period]||0)+num(r[idx.qty]);
   }
-  return {returns};
+  return {returns,badPeriod};
 }
 // 組更新計畫（不寫入）：算出每賣場×SKU×期別的 {qty,freightCost,returnQty}，並標出未比對/覆蓋/雲端風險
 function momoBuildUploadPlan(parsed){
@@ -5962,11 +5965,39 @@ function momoApplyUploadPlan(plan){
       const p=bySku.get(sku); if(!p) return;
       p.periods=p.periods||{};
       Object.keys(sp.updates[sku]).forEach(period=>{
+        if(!/^\d{4}-\d{2}-H[12]$/.test(period)){ console.warn('[momo] 期別 key 格式不合，拒絕寫入：',shop,sku,period); return; }   // 第二層防護：擋非法 key 進主檔
         p.periods[period]=Object.assign({}, p.periods[period]||{}, sp.updates[sku][period]);
       });
     });
     momoSaveProducts(shop,master);
   });
+}
+// ── 一次性清理工具：清掉主檔 periods 裡格式不合的髒 key ──
+//   ⚠ 用法：修碼部署 → 正式站確認新版生效 → 在 F12 Console 打 window.momoCleanDirtyPeriodKeys()
+//     → 檢視列出的明細 → 清完按「☁ 同步雲端」推上雲。不 auto-run（掛 window 供手動呼叫）。
+function momoCleanDirtyPeriodKeys(){
+  const RE=/^\d{4}-\d{2}-H[12]$/;
+  const found=[]; let removed=0; const dirtyShops=new Set();
+  ['甲配','乙配'].forEach(shop=>{
+    const master=momoLoadProducts(shop);
+    let shopChanged=false;
+    master.forEach(p=>{
+      if(!p.periods) return;
+      Object.keys(p.periods).forEach(k=>{
+        if(RE.test(k)) return;
+        const cell=p.periods[k];
+        found.push({shop, sku:p.sku, badKey:k, qty:(cell&&cell.qty)!=null?cell.qty:''});
+        delete p.periods[k];
+        removed++; shopChanged=true;
+      });
+    });
+    if(shopChanged){ momoSaveProducts(shop,master); dirtyShops.add(shop); }   // markPending → 之後按同步才上雲
+  });
+  if(!found.length){ console.log('%c[momo] 清理完成：沒有髒 key，主檔乾淨 ✓','color:#10b981;font-weight:700'); return {removed:0,shops:[]}; }
+  console.log('%c[momo] 已刪除 '+removed+' 個髒 key（下方明細）；記得按「☁ 同步雲端」推上雲','color:#ef4444;font-weight:700');
+  console.table(found);
+  if(typeof showToast==='function') showToast('已清理 '+removed+' 個髒期別 key，記得按 ☁ 同步雲端才會上雲','success');
+  return {removed, shops:[...dirtyShops], detail:found};
 }
 function momoRenderUpload(shop){
   const c=document.getElementById('momo-sub-content-'+shop);
@@ -6047,6 +6078,7 @@ function momoUploadGenerate(shop){
     const s1105=s1105wb?momoParseS1105(s1105wb.firstSheet()):null;
     _momoUpPlan=momoBuildUploadPlan({c1105,jia,yi,s1105});
     if(jiaInfo){ _momoUpPlan.jiaUnmatchedOrders=jiaInfo.unmatchedOrders; _momoUpPlan.badPeriod=_momoUpPlan.badPeriod.concat(jiaInfo.badPeriod); }
+    if(s1105&&s1105.badPeriod&&s1105.badPeriod.length) _momoUpPlan.badPeriod=_momoUpPlan.badPeriod.concat(s1105.badPeriod);   // S1105 退貨判不出期別的訂編也浮出來
     momoRenderUploadPreview(shop);
   }).catch(err=>{
     console.error(err);
@@ -6077,14 +6109,23 @@ function momoRenderUploadPreview(shop){
       ⚠ 這次會<b>覆蓋已有資料的期別：${owParts}</b>（賣場×SKU×期別），原本數字會被新數字取代。
       ${riskyShops.length?`<div style="margin-top:4px;font-weight:700">${riskyShops.join('、')} 的商品主檔目前不在待同步狀態 → 這些很可能是<u>已同步雲端、別人看過的正式數字</u>，確認你真的要改。</div>`:''}</div>`;
   }
+  // 判不出期別 = 有問題（不是單純略過）→ 橘字獨立區塊、列出實際訂編給人追查
+  let badHtml='';
+  if(P.badPeriod.length){
+    const orders=P.badPeriod.map(b=>b.order).filter(o=>o!=null&&String(o).trim()!=='').map(o=>String(o).trim());
+    const shown=orders.slice(0,20).join('、');
+    const more=P.badPeriod.length>20?` …等 ${P.badPeriod.length} 筆`:'';
+    badHtml=`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#9a3412;line-height:1.6">
+      ⚠ <b>訂編無法判斷期別，${P.badPeriod.length} 筆未寫入</b>（訂編前 6 碼非 YYMMDD、或月/日超出範圍）。請檢查是不是小計 / 頁尾 / 錯誤列：
+      <div style="margin-top:4px;word-break:break-all;font-family:monospace">${shown}${more}</div></div>`;
+  }
   const skips=[];
   if(P.unknownChannel.length) skips.push(`未知配送類型 ${P.unknownChannel.length} 筆`);
-  if(P.badPeriod.length) skips.push(`訂編無法判斷期別 ${P.badPeriod.length} 筆`);
   if(P.jiaUnmatchedOrders&&P.jiaUnmatchedOrders.length) skips.push(`甲配運費訂單在 C1105 找不到 ${P.jiaUnmatchedOrders.length} 筆（該運費未分攤）`);
   const skipHtml=skips.length?`<div style="font-size:12px;color:#9ca3af;margin-bottom:8px">略過（未計入）：${skips.join('、')}</div>`:'';
   el.innerHTML=`
     <div style="font-size:13px;font-weight:700;margin-bottom:8px">預覽（尚未寫入）</div>
-    ${shopBlock('甲配')}${shopBlock('乙配')}${owHtml}${skipHtml}
+    ${shopBlock('甲配')}${shopBlock('乙配')}${owHtml}${badHtml}${skipHtml}
     <button onclick="momoUploadApply('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認寫入${P.overwrite.length?'（含覆蓋 '+P.overwrite.length+' 筆）':''}</button>
     <button onclick="momoUploadCancel('${shop}')" style="margin-left:8px;padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>`;
 }
@@ -7313,7 +7354,7 @@ Object.assign(window, {
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,
   momoUploadFile,momoUploadClearJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,
   momoSyncFile,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,
-  momoSetSummaryMonth,momoActionPlanSave,
+  momoSetSummaryMonth,momoActionPlanSave,momoCleanDirtyPeriodKeys,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
