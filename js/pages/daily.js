@@ -1745,7 +1745,7 @@ function buildCardAdjustmentsHtml(person, viewDate) {
   });
   const growthBuckets = [...growthLabelSet].map(l => mkBucket(l, 'growth')).sort((a, b) => b.count - a.count);
 
-  const pillHtml = (g) => `<button type="button" class="adj-pill ${g.cls}" data-adj-person="${personAttr}" data-adj-date="${dateAttr}" data-adj-kind="${g.kind}" data-adj-group="${escapeHtml(g.label)}">${escapeHtml(g.label)} <b>${g.count}</b></button>`;
+  const pillHtml = (g) => `<button type="button" class="adj-pill ${g.cls}" data-adj-person="${personAttr}" data-adj-date="${dateAttr}" data-adj-kind="${g.kind}" data-adj-group="${escapeHtml(g.label)}">${escapeHtml(window.mapAnaLabel(g.label))} <b>${g.count}</b></button>`;
   const anaPills = anaBuckets.map(pillHtml).join('');
   const growthPills = growthBuckets.map(pillHtml).join('');
 
@@ -1755,7 +1755,7 @@ function buildCardAdjustmentsHtml(person, viewDate) {
         <span class="adj-sec-title">淨利表調整</span>
         <span class="adj-sec-total">${total}</span>
       </div>
-      ${anaPills ? `<div class="adj-pill-group"><div class="adj-pills-label">分析</div><div class="adj-pills">${anaPills}</div></div>` : ''}
+      ${anaPills ? `<div class="adj-pill-group"><div class="adj-pills-label">廣告分析</div><div class="adj-pills">${anaPills}</div></div>` : ''}
       ${growthPills ? `<div class="adj-pill-group"><div class="adj-pills-label">成長分析</div><div class="adj-pills">${growthPills}</div></div>` : ''}
     </div>`;
 }

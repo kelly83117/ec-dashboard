@@ -2620,7 +2620,7 @@ function updateTagFilterBar(shop){
     const total=lbls.reduce((s,l)=>s+(counts[l]||0),0);
     if(!total)return'';
     const isActive=lbls.some(l=>sel.includes(l));
-    const items=lbls.filter(l=>counts[l]).map(l=>`<div class="tfdrop-item${sel.includes(l)?' sel':''}" onclick="event.stopPropagation();setTagFilter('${shop}','${l}');closeTfDrop()">${l} <span class="tfpill-cnt">${counts[l]}</span></div>`).join('');
+    const items=lbls.filter(l=>counts[l]).map(l=>`<div class="tfdrop-item${sel.includes(l)?' sel':''}" onclick="event.stopPropagation();setTagFilter('${shop}','${l}');closeTfDrop()">${window.mapAnaLabel(l)} <span class="tfpill-cnt">${counts[l]}</span></div>`).join('');
     return`<div class="tfdrop-wrap"><span class="tfpill${isActive?' active':''}" style="width:100%" onclick="toggleTfDrop(event,'${id}')">${label} ▾</span><div class="tfdrop-menu" id="${id}">${items}</div></div><span class="tfpill-cnt-cell" onclick="event.stopPropagation();toggleTfDrop(event,'${id}')">${total}</span>`;
   };
   const total=built.length;
@@ -2961,7 +2961,7 @@ function patchRow(shop,code,ov){
   if(budEl)budEl.textContent=r.dayBudget>0?'$'+fmtN(r.dayBudget):'—';
   // analysis
   const anaEl=document.getElementById(`td-${shop}-${code}-analysis`);
-  if(anaEl){const a=r.analysis||{};anaEl.innerHTML=a.label?`<span class="tag ${a.cls}">${a.label}</span>`:'—';}
+  if(anaEl){const a=r.analysis||{};anaEl.innerHTML=a.label?`<span class="tag ${a.cls}">${window.mapAnaLabel(a.label)}</span>`:'—';}
   // KPI 小計列
   syncHeaderKpis(shop);
 }
@@ -3101,7 +3101,7 @@ const PROFIT_COLS=[
   {key:'pureProfit',label:'淨利'},{key:'pureRate',label:'淨利率%'},{key:'adsPct',label:'廣告佔比'},
   {key:'stock',label:'可用庫存'},{key:'targetROI',label:'目標ROI'},{key:'directROI',label:'直接ROI'},
   {key:'roi',label:'投入產出'},{key:'roiDiff',label:'實際-目標'},{key:'clicks',label:'點擊數'},
-  {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'分析'},{key:'note',label:'廣告調整'},
+  {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'廣告分析'},{key:'note',label:'廣告調整'},
   {key:'growthRate',label:'成長比',grow:true},{key:'growthAnalysis',label:'成長分析',grow:true},{key:'growthNote',label:'商品調整',grow:true},
 ];
 const _HCOLS_LS='ec_hcols_user';
@@ -3348,7 +3348,7 @@ function renderTable(shop,list){
     adsFee:'廣告費', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利',
     pureRate:'淨利率%', adsPct:'廣告佔比', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
     roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算',
-    analysisLabel:'分析', note:'廣告調整',
+    analysisLabel:'廣告分析', note:'廣告調整',
     growthRate:'成長比', growthAnalysis:'成長分析', growthNote:'商品調整',
   };
   const buildColHeader=(c)=>{
@@ -3373,7 +3373,7 @@ function renderTable(shop,list){
     const idStr=!r.shopeeIds?.length?'<span style="color:#d1d5db">—</span>':r.shopeeIds.length===1?r.shopeeIds[0]:'<span style="color:#f59e0b">多個</span>';
     const roiDiffStr=r.roiDiff===null?'—':`<span style="color:${r.roiDiff>=0?'#10b981':'#ef4444'};font-weight:600">${r.roiDiff.toFixed(2)}</span>`;
     const anaObj=r.analysis||{label:'',cls:''};
-    const anaHtml=anaObj.label?`<span class="tag ${anaObj.cls}">${anaObj.label}</span>`:'—';
+    const anaHtml=anaObj.label?`<span class="tag ${anaObj.cls}">${window.mapAnaLabel(anaObj.label)}</span>`:'—';
     const noteId=`note-${shop}-${r.code}`;
 
     // 可編輯數字欄 helper
