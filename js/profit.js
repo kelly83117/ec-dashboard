@@ -6388,31 +6388,31 @@ function _momoSyncAfterApply(shop,msg){
   if(typeof showToast==='function') showToast(msg+'（記得按 ☁ 同步雲端）','success');
 }
 function momoSyncApplyCost(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).costChanged||[]; if(!items.length) return;
+  const items=(_momoSyncPlan.shops[shop]||{}).costChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可套用的成本變動項目','info'); return; }
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
   items.forEach(it=>{ const p=bySku.get(it.sku); if(!p)return; p.cost=it.new; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:it.new,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品資料同步：成本更新'}); });
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已更新 '+items.length+' 筆成本');
 }
 function momoSyncApplyPrice(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).priceChanged||[]; if(!items.length) return;
+  const items=(_momoSyncPlan.shops[shop]||{}).priceChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可套用的售價/進價變動項目','info'); return; }
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
   items.forEach(it=>{ const p=bySku.get(it.sku); if(!p)return; p.purchasePrice=it.newP; p.salePrice=it.newS; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:p.cost,purchasePrice:it.newP,salePrice:it.newS,note:'商品資料同步：進價/售價更新'}); });
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已更新 '+items.length+' 筆進價/售價');
 }
 function momoSyncApplyName(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).nameChanged||[]; if(!items.length) return;
+  const items=(_momoSyncPlan.shops[shop]||{}).nameChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可套用的名稱變動項目','info'); return; }
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
   items.forEach(it=>{ const p=bySku.get(it.sku); if(p) p.name=it.new; });   // 名稱不進歷程
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已更新 '+items.length+' 筆名稱');
 }
 function momoSyncApplyDiscontinued(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).discontinued||[]; if(!items.length) return;
+  const items=(_momoSyncPlan.shops[shop]||{}).discontinued||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可標記下架的項目','info'); return; }
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
   items.forEach(it=>{ const p=bySku.get(it.sku); if(p) p.discontinued=true; });
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已標記 '+items.length+' 筆下架');
 }
 function momoSyncApplyNew(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).newItems||[]; if(!items.length) return;
+  const items=(_momoSyncPlan.shops[shop]||{}).newItems||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可一鍵新增的未建檔項目','info'); return; }
   const master=momoLoadProducts(shop), have=new Set(master.map(p=>p.sku)); let added=0;
   items.forEach(it=>{ if(have.has(it.sku))return; master.push({sku:it.sku, origin:it.origin, name:it.name, cost:it.cost, purchasePrice:it.purchasePrice, salePrice:it.salePrice, shippingPackaging:momoDefaultShip(shop), history:[{...momoNowParts(),cost:it.cost,purchasePrice:it.purchasePrice,salePrice:it.salePrice,note:'商品資料同步：新建檔'}], periods:{}}); have.add(it.sku); added++; });
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已新增 '+added+' 個商品');
@@ -6565,7 +6565,31 @@ function momoRenderSyncPreview(shop){
       ${clean?'<div style="font-size:12px;color:#10b981">無差異</div>':inner}</div>`;
   };
   const uw=P.unknownWarehouse.length?`<div style="font-size:12px;color:#9ca3af;margin-bottom:8px">未知倉別（非供應商/寄倉）${P.unknownWarehouse.length} 筆，已略過</div>`:'';
-  el.innerHTML=`<div style="font-size:13px;font-weight:700;margin-bottom:8px">差異預覽（套用後才寫入；成本/價格走歷程）</div>${shopBlock('甲配')}${shopBlock('乙配')}${uw}`;
+  // 只畫「當前賣場」那塊（cat 的按鈕綁 shop===當前，跨賣場靜默失敗的坑就此消失）；另一賣場改成一行可點提示
+  const other = shop==='甲配'?'乙配':'甲配';
+  const osp = P.shops[other];
+  let otherHint='';
+  if(osp){
+    const parts=[];
+    if(osp.newItems.length)     parts.push(osp.newItems.length+' 筆未建檔');
+    if(osp.discontinued.length) parts.push(osp.discontinued.length+' 筆待標記下架');
+    if(osp.costChanged.length)  parts.push(osp.costChanged.length+' 筆成本有變動');
+    if(osp.priceChanged.length) parts.push(osp.priceChanged.length+' 筆售價/進價有變動');
+    if(osp.nameChanged.length)  parts.push(osp.nameChanged.length+' 筆名稱有變動');
+    const extras=[];
+    if(osp.noCost.length)  extras.push(osp.noCost.length+' 筆查無成本');
+    if(osp.notSeen.length) extras.push(osp.notSeen.length+' 筆未比對到');
+    const msg = parts.length ? (other+'另有 '+parts.join('、')+' — 切換到'+other+'分頁處理')
+              : extras.length ? (other+'另有 '+extras.join('、')+'（切換到'+other+'分頁查看）')
+              : (other+'無差異');
+    otherHint=`<button onclick="momoJumpShop('${other}')" style="width:100%;text-align:left;margin-top:6px;padding:8px 12px;border-radius:8px;border:1px dashed #c7c9e6;background:#f5f6ff;color:#5b5fcf;font-size:12px;font-weight:600;cursor:pointer">↪ ${msg}</button>`;
+  }
+  el.innerHTML=`<div style="font-size:13px;font-weight:700;margin-bottom:8px">差異預覽（套用後才寫入；成本/價格走歷程）</div>${shopBlock(shop)}${otherHint}${uw}`;
+}
+// 跳到另一個 MOMO 賣場分頁：click 真 tab 才會同步高亮 pill（setMomoShop 靠 btn 設 active）
+function momoJumpShop(shop){
+  const tab=document.querySelector('.stab[onclick="setMomoShop(\''+shop+'\',this)"]');
+  if(tab) tab.click(); else setMomoShop(shop);
 }
 
 // ── 畫面六（P5）：淨利階層彙總（MOMO｜總表，甲配/乙配兩卡並排）──
@@ -7603,7 +7627,7 @@ Object.assign(window, {
   momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,
-  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,
+  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,momoJumpShop,
   momoSetSummaryMonth,momoActionPlanSave,momoCleanDirtyPeriodKeys,
   momoRentSubmit,momoRentDelete,momoRentSyncBtn,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,
