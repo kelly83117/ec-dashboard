@@ -3000,7 +3000,7 @@ function mapAnaLabel(l) { return ANA_LABEL_DISPLAY[l] || l; }  // 未列的（�
 
 /* ===================== window 匯流排 ===================== */
 Object.assign(window, {
-  App, Store, mapAnaLabel,
+  App, Store, mapAnaLabel, ANA_LABEL_DISPLAY,
   hashPassword, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
   canAccessOffice, hasOfficeFeature, trendFromQuarters,
   toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms,
