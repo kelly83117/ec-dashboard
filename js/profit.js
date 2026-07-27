@@ -302,7 +302,7 @@ function _readLastHalf(shopId){
   const p=_findLatestPeriod(shopId);
   return p?p.half:_initCurHalf;
 }
-SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
+SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[],search:''};});
 let globalMap={};
 let curShop='總表';
 let openPopup=null;
@@ -648,20 +648,19 @@ function _noteHistory(shop,code,skipMonth,skipHalf){
   });
   return out;
 }
-const _autoPeriodDone={};   // 每家只自動跳一次，之後尊重使用者的選擇
+const _userPickedPeriod={};   // 使用者主動切過月份/半月的賣場 → 之後不再自動跳，尊重其選擇
 // 把某賣場的下拉切到「最新有資料的期間」。
 // 回傳 true = 真的套用了（或已經在正確期間），false = 這次沒辦法套用（下拉還沒建好）。
-// 只有回傳 true 才設旗標 —— 否則會發生「下拉還沒建好就被標記完成、之後再也不修正」。
+// ⚠ 不設「已跳過」旗標：每次 profitDataReady 都重算跳到最新，直到使用者主動切月份為止。
+//   這樣七月報表（profits collection 延後載入）到齊時能補跳過去，不會卡在六月。
 function _applyLatestPeriod(shop){
-  if(_autoPeriodDone[shop]) return true;
+  if(_userPickedPeriod[shop]) return true;      // 使用者已介入 → 尊重其選擇，永不自動跳
   const p=_findLatestPeriod(shop);
-  if(!p){ return false; }                       // 還沒有任何報表 → 不設旗標，之後再試
+  if(!p){ return false; }                       // 還沒有任何報表 → 之後再試
   const sel=document.getElementById('month-sel-'+shop);
-  if(!sel) return false;                        // 下拉還沒建好 → 不設旗標，之後再試
+  if(!sel) return false;                        // 下拉還沒建好 → 之後再試
   if(MONTHS.indexOf(p.month)<0) return false;
-  sel.value=p.month;                            // 月份走 DOM（onMonthChange 讀 DOM 覆蓋 state）
-  state[shop].curHalf=p.half;                   // 區間走 state（updateHalfBtnLabels 依 state 重建）
-  _autoPeriodDone[shop]=true;
+  onMonthChange(shop, false, p.month, p.half);  // 直接走手動流程：byUser=false（不設旗標）、月+半月一次設好、只渲染一次
   return true;
 }
 
@@ -745,8 +744,8 @@ window.addEventListener('profitDataReady', (e)=>{
   const shopsToUpdate = changedShops==null ? SHOPS : SHOPS.filter(s=>changedShops.includes(s.id));
   try{
     shopsToUpdate.forEach(s=>{
-      _applyLatestPeriod(s.id);
-      onMonthChange(s.id);
+      if(_userPickedPeriod[s.id]) onMonthChange(s.id);   // 已介入 → 只重載當前選擇（不跳、不設旗標）顯示最新資料
+      else _applyLatestPeriod(s.id);                     // 沒介入 → 自動跳最新（內部呼叫 onMonthChange 完整渲染）
       if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
     });
     // 只有賣場資料（非 _summary_v1）變動時才重新渲染總表
@@ -846,7 +845,7 @@ function shopHTML(shop){return`
   <div id="sv-profit-${shop}">
     <div class="toolbar" id="tb-${shop}" style="position:relative">
       <span id="period-tag-${shop}" style="display:none"></span>
-      <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')" style="display:none">
+      <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋 編號 / 名稱 / ID…" oninput="setSearch('${shop}',this.value)">
       <span class="row-cnt" id="cnt-${shop}"></span>
       <span class="sugg-filter-chip" id="sugg-chip-${shop}">
         <span id="sugg-chip-text-${shop}"></span>
@@ -922,9 +921,12 @@ function getDays(month,half){
   const[y,m]=month.split('/');const last=new Date(+y,+m,0).getDate();
   if(half==='first')return 15;if(half==='second')return last-15;return last;
 }
-function onMonthChange(shop){
+function onMonthChange(shop,byUser,month,half){
   const sel=document.getElementById('month-sel-'+shop);
   if(!sel)return;
+  if(byUser) _userPickedPeriod[shop]=true; // 使用者親手切月份 → 鎖住，之後不再自動跳
+  if(month!==undefined) sel.value=month;          // 自動流程：用參數設月份下拉（程式設 value 不觸發 change、不重繪）
+  if(half!==undefined)  state[shop].curHalf=half; // 自動流程：用參數設半月（純 state 指派，不重繪）
   delete _editedAt[shop]; // 用戶主動切換月份，清除 edit 保護
   state[shop].curMonth=sel.value;
   try{localStorage.setItem('ec_lastMonth_'+shop,sel.value);}catch{} // 記住這個賣場的最後月份
@@ -932,7 +934,8 @@ function onMonthChange(shop){
   updateHalfBtnLabels(shop);
   tryLoadSaved(shop);
 }
-function onHalfChange(shop,half,btn){
+function onHalfChange(shop,half,btn,byUser){
+  if(byUser) _userPickedPeriod[shop]=true; // 使用者親手切半月 → 鎖住，之後不再自動跳
   delete _editedAt[shop]; // 用戶主動切換區間，清除 edit 保護
   state[shop].curHalf=half;
   try{localStorage.setItem('ec_lastHalf_'+shop,half);}catch{} // 記住這個賣場的最後區間
@@ -1029,7 +1032,6 @@ function clearPeriod(shop){
   // 重置表格 & KPI
   document.getElementById('period-tag-'+shop).textContent='';
   document.getElementById('period-tag-'+shop).style.display='none';
-  const search=document.getElementById('search-'+shop);if(search)search.style.display='none';
   document.getElementById('cnt-'+shop).textContent='';
   document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">報表已清除，請重新上傳並產生</div></div>`;
   setKpis(shop,0,0,0,0);
@@ -1048,7 +1050,9 @@ function loadIntoUI(shop,built,period,days){
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
-  state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=getTagFilters();
+  state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];   // 標籤篩選跟 filters/sorts 同批重置：切月份/切賽場不殘留（搜尋另行保留，見下一行）
+  // search 刻意不重置：切月份保留關鍵字（唯一清掉它的是頁面初次載入時 state 的整包初始化）
+  const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
   document.getElementById('period-tag-'+shop).textContent=period;
   const cb=document.getElementById('clear-btn-'+shop);if(cb)cb.style.display='';
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=false;}
@@ -2232,6 +2236,9 @@ function renderAnaModalBody(){
   }).join(''):`<div class="ana-custom-empty">尚無自訂標籤</div>`;
   const disabledSection=disabled.length?`<div class="ana-sec-hdr" style="margin-top:16px">已停用標籤</div>${disabled.map(l=>`<div class="ana-rule-row" style="opacity:.5"><span class="ana-rule-tag tag-low" style="min-width:auto;padding:4px 8px">${l}</span><span class="ana-rule-desc" style="font-size:12px;color:#9ca3af">已停用</span><button class="ana-rule-del" style="color:#10b981" onclick="restoreAnaTag(decodeURIComponent('${encodeURIComponent(l)}'))" title="恢復">↩</button></div>`).join('')}`:'';
 
+  // 顯示用備註：規則名旁標出「報表顯示為 ROI x」。來源用同一張 window.ANA_LABEL_DISPLAY，
+  // 沒對應的（加50 等）自動不顯示。純顯示，不動 key / 規則值 / 存檔。
+  const dispNote=(lbl)=>{const d=(window.ANA_LABEL_DISPLAY||{})[lbl];return d?`<span style="color:#9ca3af;font-size:11px;margin-left:6px">(報表顯示為 ${d})</span>`:'';};
   document.getElementById('ana-modal-body').innerHTML=`
     <div class="ana-sec-hdr">加減碼前提</div>
     <div class="ana-rule-row">
@@ -2239,14 +2246,14 @@ function renderAnaModalBody(){
       <span class="ana-rule-desc">O欄（過去7天點擊）≥ ${inp('clickMin',t.clickMin)}</span>
     </div>
     <div class="ana-sec-hdr">加預算</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">加300</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add300',t.add300)} (含)以上</span>${trash('加300','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">加200</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add200',t.add200)} (含)以上</span>${trash('加200','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">加100</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add100',t.add100)} (含)以上</span>${trash('加100','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">加300</span>${dispNote('加300')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add300',t.add300)} (含)以上</span>${trash('加300','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">加200</span>${dispNote('加200')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add200',t.add200)} (含)以上</span>${trash('加200','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">加100</span>${dispNote('加100')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add100',t.add100)} (含)以上</span>${trash('加100','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-add50">加50</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add50',t.add50)} 且 < ${inp('add50max',t.add100)}</span>${trash('加50','disableAnaTag')}</div>
     <div class="ana-sec-hdr">減預算</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub300">減300</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub300',t.sub300)}</span>${trash('減300','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub200">減200</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub200',t.sub200)}</span>${trash('減200','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub100">減100</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub100',t.sub100)}</span>${trash('減100','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub300">減300</span>${dispNote('減300')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub300',t.sub300)}</span>${trash('減300','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub200">減200</span>${dispNote('減200')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub200',t.sub200)}</span>${trash('減200','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub100">減100</span>${dispNote('減100')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub100',t.sub100)}</span>${trash('減100','disableAnaTag')}</div>
     <div class="ana-sec-hdr">分析標籤</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 > ${inp('highMinH',t.highMinH,'0.1')} %</span>${trash('高利潤商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">廣告費 > 0 且 淨利 &lt; 0</span>${trash('賠錢中','disableAnaTag')}</div>
@@ -2622,7 +2629,7 @@ function updateTagFilterBar(shop){
     const total=lbls.reduce((s,l)=>s+(counts[l]||0),0);
     if(!total)return'';
     const isActive=lbls.some(l=>sel.includes(l));
-    const items=lbls.filter(l=>counts[l]).map(l=>`<div class="tfdrop-item${sel.includes(l)?' sel':''}" onclick="event.stopPropagation();setTagFilter('${shop}','${l}');closeTfDrop()">${l} <span class="tfpill-cnt">${counts[l]}</span></div>`).join('');
+    const items=lbls.filter(l=>counts[l]).map(l=>`<div class="tfdrop-item${sel.includes(l)?' sel':''}" onclick="event.stopPropagation();setTagFilter('${shop}','${l}');closeTfDrop()">${window.mapAnaLabel(l)} <span class="tfpill-cnt">${counts[l]}</span></div>`).join('');
     return`<div class="tfdrop-wrap"><span class="tfpill${isActive?' active':''}" style="width:100%" onclick="toggleTfDrop(event,'${id}')">${label} ▾</span><div class="tfdrop-menu" id="${id}">${items}</div></div><span class="tfpill-cnt-cell" onclick="event.stopPropagation();toggleTfDrop(event,'${id}')">${total}</span>`;
   };
   const total=built.length;
@@ -2691,10 +2698,11 @@ document.addEventListener('click',closeTfDrop);
 
 // ── Filters & Sort ──
 function applyFilters(shop){
-  const s=state[shop];if(!s._built||!s._built.length)return;
-  const q=(document.getElementById('search-'+shop).value||'').toLowerCase();
+  const s=state[shop];if(!s)return;
+  if(!s._built||!s._built.length)return;
+  const q=(s.search||'').trim().toLowerCase();
   let list=[...s._built];
-  if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q));
+  if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
   if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l||(r.testTags||[]).some(tt=>tt.label===l)));
   if(s.suggFilterActive)list=list.filter(r=>r.testTags?.length);
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
@@ -2728,6 +2736,7 @@ function applyFilters(shop){
   updateSuggChip(shop);
 }
 function setSort(shop,col,dir){state[shop].sorts={col,dir};applyFilters(shop);}
+function setSearch(shop,val){if(state[shop])state[shop].search=val;applyFilters(shop);}
 function setColFilter(shop,col,type,val){
   if(!state[shop].filters)state[shop].filters={};
   if(val===''||val===null)delete state[shop].filters[col];
@@ -2937,7 +2946,7 @@ function patchRow(shop,code,ov){
   // adsFee cell
   const adsEl=document.getElementById(`td-${shop}-${code}-adsFee`);
   if(adsEl){
-    adsEl.querySelector('.cell-val').textContent=fmtAds(r.adsFee);
+    adsEl.querySelector('.cell-val').textContent='$'+fmtN(r.adsFee);
     adsEl.className=`td-num td-amber ${edited?'cell-edited':''} `.trim();
     adsEl.style.cursor='pointer';
   }
@@ -2961,7 +2970,7 @@ function patchRow(shop,code,ov){
   if(budEl)budEl.textContent=r.dayBudget>0?'$'+fmtN(r.dayBudget):'—';
   // analysis
   const anaEl=document.getElementById(`td-${shop}-${code}-analysis`);
-  if(anaEl){const a=r.analysis||{};anaEl.innerHTML=a.label?`<span class="tag ${a.cls}">${a.label}</span>`:'—';}
+  if(anaEl){const a=r.analysis||{};anaEl.innerHTML=a.label?`<span class="tag ${a.cls}">${window.mapAnaLabel(a.label)}</span>`:'—';}
   // KPI 小計列
   syncHeaderKpis(shop);
 }
@@ -3101,7 +3110,7 @@ const PROFIT_COLS=[
   {key:'pureProfit',label:'淨利'},{key:'pureRate',label:'淨利率%'},{key:'adsPct',label:'廣告佔比'},
   {key:'stock',label:'可用庫存'},{key:'targetROI',label:'目標ROI'},{key:'directROI',label:'直接ROI'},
   {key:'roi',label:'投入產出'},{key:'roiDiff',label:'實際-目標'},{key:'clicks',label:'點擊數'},
-  {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'分析'},{key:'note',label:'廣告調整'},
+  {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'廣告分析'},{key:'note',label:'廣告調整'},
   {key:'growthRate',label:'成長比',grow:true},{key:'growthAnalysis',label:'成長分析',grow:true},{key:'growthNote',label:'商品調整',grow:true},
 ];
 const _HCOLS_LS='ec_hcols_user';
@@ -3348,7 +3357,7 @@ function renderTable(shop,list){
     adsFee:'廣告費', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利',
     pureRate:'淨利率%', adsPct:'廣告佔比', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
     roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算',
-    analysisLabel:'分析', note:'廣告調整',
+    analysisLabel:'廣告分析', note:'廣告調整',
     growthRate:'成長比', growthAnalysis:'成長分析', growthNote:'商品調整',
   };
   const buildColHeader=(c)=>{
@@ -3373,7 +3382,7 @@ function renderTable(shop,list){
     const idStr=!r.shopeeIds?.length?'<span style="color:#d1d5db">—</span>':r.shopeeIds.length===1?r.shopeeIds[0]:'<span style="color:#f59e0b">多個</span>';
     const roiDiffStr=r.roiDiff===null?'—':`<span style="color:${r.roiDiff>=0?'#10b981':'#ef4444'};font-weight:600">${r.roiDiff.toFixed(2)}</span>`;
     const anaObj=r.analysis||{label:'',cls:''};
-    const anaHtml=anaObj.label?`<span class="tag ${anaObj.cls}">${anaObj.label}</span>`:'—';
+    const anaHtml=anaObj.label?`<span class="tag ${anaObj.cls}">${window.mapAnaLabel(anaObj.label)}</span>`:'—';
     const noteId=`note-${shop}-${r.code}`;
 
     // 可編輯數字欄 helper
@@ -3392,7 +3401,7 @@ function renderTable(shop,list){
       const adsId=`td-${shop}-${r.code}-adsFee`;
       const MOBIC_BLANK=new Set(['growthRate','growthAnalysis']);
       const mobicCell={
-        adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">${fmtAds(r.adsFee)}</span></td>`,
+        adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span></td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
         note:noteCellHtml,
         growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
@@ -3410,7 +3419,7 @@ function renderTable(shop,list){
       </tr>`;
     }else{
       const rowCell={
-        adsFee:editTd('adsFee',fmtAds(r.adsFee),'td-amber'),
+        adsFee:editTd('adsFee','$'+fmtN(r.adsFee),'td-amber'),
         rev:`<td class="td-num">$${fmtN(r.rev)}<div class="sub-rev">${r.prevRev!==null?'上期 $'+fmtN(r.prevRev):'—'}</div></td>`,
         gross:`<td class="td-num">$${fmtN(r.gross)}</td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
@@ -7411,7 +7420,7 @@ function updateHalfBtnLabels(shop){
   ];
   const container=document.getElementById('half-btns-'+shop);
   if(!container)return;
-  container.innerHTML=`<select onchange="onHalfChange('${shop}',this.value,null)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">${btns.map(h=>`<option value="${h.id}"${h.id===curHalf?' selected':''}>${h.label}</option>`).join('')}</select>`;
+  container.innerHTML=`<select onchange="onHalfChange('${shop}',this.value,null,true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">${btns.map(h=>`<option value="${h.id}"${h.id===curHalf?' selected':''}>${h.label}</option>`).join('')}</select>`;
 }
 
 function initProfitPeriodControls(){
@@ -7424,7 +7433,7 @@ function initProfitPeriodControls(){
     div.style.cssText='display:none;align-items:center;gap:8px;flex-wrap:wrap';
     div.innerHTML=`
       <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
-      <select id="month-sel-${s.id}" onchange="onMonthChange('${s.id}')" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+      <select id="month-sel-${s.id}" onchange="onMonthChange('${s.id}',true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
         ${MONTHS.map(mo=>`<option value="${mo}" ${mo===(state[s.id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
       </select>
       <span style="font-size:12px;color:#6b7280;font-weight:500;margin-left:4px">區間</span>
@@ -7441,8 +7450,8 @@ function initProfitPeriodControls(){
 }
 
 function initShopUI(shop){
-  _applyLatestPeriod(shop);
-  onMonthChange(shop);
+  if(_userPickedPeriod[shop]) onMonthChange(shop);   // 已介入 → 只重載當前選擇（不跳）
+  else _applyLatestPeriod(shop);                     // 沒介入 → 自動跳最新（內部完整渲染）
   if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
   if(Object.keys(globalMap).length>0){
     const uc=document.getElementById('uc-map-'+shop);
@@ -7572,7 +7581,7 @@ Object.assign(window, {
   deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
+  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
   coupangSummaryHTML,setCoupangSummaryView,syncCoupangSummaryFromKpi,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,

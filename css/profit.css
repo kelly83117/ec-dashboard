@@ -301,7 +301,7 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 /* Inline edit */
 .edit-btn{background:none;border:none;cursor:pointer;color:#d1d5db;font-size:13px;padding:0 3px;line-height:1;transition:color .12s;vertical-align:middle;}
 .edit-btn:hover{color:#5b5fcf;}
-.cell-val{display:inline;}
+.cell-val{display:inline;font-weight:700;font-family:'Noto Sans TC',sans-serif !important;color:#374151;}
 .cell-edited{color:#5b5fcf;font-weight:600;}
 .inline-input{width:80px;padding:3px 6px;border:1.5px solid #5b5fcf;border-radius:5px;font-size:12px;font-family:'DM Mono',monospace;outline:none;background:#fff;text-align:right;}
 .inline-input.text-inp{width:120px;text-align:left;font-family:'Noto Sans TC',sans-serif;}
