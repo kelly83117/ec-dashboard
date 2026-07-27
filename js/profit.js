@@ -645,20 +645,19 @@ function _noteHistory(shop,code,skipMonth,skipHalf){
   });
   return out;
 }
-const _autoPeriodDone={};   // 每家只自動跳一次，之後尊重使用者的選擇
+const _userPickedPeriod={};   // 使用者主動切過月份/半月的賣場 → 之後不再自動跳，尊重其選擇
 // 把某賣場的下拉切到「最新有資料的期間」。
 // 回傳 true = 真的套用了（或已經在正確期間），false = 這次沒辦法套用（下拉還沒建好）。
-// 只有回傳 true 才設旗標 —— 否則會發生「下拉還沒建好就被標記完成、之後再也不修正」。
+// ⚠ 不設「已跳過」旗標：每次 profitDataReady 都重算跳到最新，直到使用者主動切月份為止。
+//   這樣七月報表（profits collection 延後載入）到齊時能補跳過去，不會卡在六月。
 function _applyLatestPeriod(shop){
-  if(_autoPeriodDone[shop]) return true;
+  if(_userPickedPeriod[shop]) return true;      // 使用者已介入 → 尊重其選擇，永不自動跳
   const p=_findLatestPeriod(shop);
-  if(!p){ return false; }                       // 還沒有任何報表 → 不設旗標，之後再試
+  if(!p){ return false; }                       // 還沒有任何報表 → 之後再試
   const sel=document.getElementById('month-sel-'+shop);
-  if(!sel) return false;                        // 下拉還沒建好 → 不設旗標，之後再試
+  if(!sel) return false;                        // 下拉還沒建好 → 之後再試
   if(MONTHS.indexOf(p.month)<0) return false;
-  sel.value=p.month;                            // 月份走 DOM（onMonthChange 讀 DOM 覆蓋 state）
-  state[shop].curHalf=p.half;                   // 區間走 state（updateHalfBtnLabels 依 state 重建）
-  _autoPeriodDone[shop]=true;
+  onMonthChange(shop, false, p.month, p.half);  // 直接走手動流程：byUser=false（不設旗標）、月+半月一次設好、只渲染一次
   return true;
 }
 
@@ -742,8 +741,8 @@ window.addEventListener('profitDataReady', (e)=>{
   const shopsToUpdate = changedShops==null ? SHOPS : SHOPS.filter(s=>changedShops.includes(s.id));
   try{
     shopsToUpdate.forEach(s=>{
-      _applyLatestPeriod(s.id);
-      onMonthChange(s.id);
+      if(_userPickedPeriod[s.id]) onMonthChange(s.id);   // 已介入 → 只重載當前選擇（不跳、不設旗標）顯示最新資料
+      else _applyLatestPeriod(s.id);                     // 沒介入 → 自動跳最新（內部呼叫 onMonthChange 完整渲染）
       if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
     });
     // 只有賣場資料（非 _summary_v1）變動時才重新渲染總表
@@ -919,9 +918,12 @@ function getDays(month,half){
   const[y,m]=month.split('/');const last=new Date(+y,+m,0).getDate();
   if(half==='first')return 15;if(half==='second')return last-15;return last;
 }
-function onMonthChange(shop){
+function onMonthChange(shop,byUser,month,half){
   const sel=document.getElementById('month-sel-'+shop);
   if(!sel)return;
+  if(byUser) _userPickedPeriod[shop]=true; // 使用者親手切月份 → 鎖住，之後不再自動跳
+  if(month!==undefined) sel.value=month;          // 自動流程：用參數設月份下拉（程式設 value 不觸發 change、不重繪）
+  if(half!==undefined)  state[shop].curHalf=half; // 自動流程：用參數設半月（純 state 指派，不重繪）
   delete _editedAt[shop]; // 用戶主動切換月份，清除 edit 保護
   state[shop].curMonth=sel.value;
   try{localStorage.setItem('ec_lastMonth_'+shop,sel.value);}catch{} // 記住這個賣場的最後月份
@@ -929,7 +931,8 @@ function onMonthChange(shop){
   updateHalfBtnLabels(shop);
   tryLoadSaved(shop);
 }
-function onHalfChange(shop,half,btn){
+function onHalfChange(shop,half,btn,byUser){
+  if(byUser) _userPickedPeriod[shop]=true; // 使用者親手切半月 → 鎖住，之後不再自動跳
   delete _editedAt[shop]; // 用戶主動切換區間，清除 edit 保護
   state[shop].curHalf=half;
   try{localStorage.setItem('ec_lastHalf_'+shop,half);}catch{} // 記住這個賣場的最後區間
@@ -1044,7 +1047,7 @@ function loadIntoUI(shop,built,period,days){
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
-  state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=getTagFilters();
+  state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];   // 標籤篩選跟 filters/sorts 同批重置：切月份/切賽場不殘留（搜尋另行保留，見下一行）
   // search 刻意不重置：切月份保留關鍵字（唯一清掉它的是頁面初次載入時 state 的整包初始化）
   const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
   document.getElementById('period-tag-'+shop).textContent=period;
@@ -7288,7 +7291,7 @@ function updateHalfBtnLabels(shop){
   ];
   const container=document.getElementById('half-btns-'+shop);
   if(!container)return;
-  container.innerHTML=`<select onchange="onHalfChange('${shop}',this.value,null)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">${btns.map(h=>`<option value="${h.id}"${h.id===curHalf?' selected':''}>${h.label}</option>`).join('')}</select>`;
+  container.innerHTML=`<select onchange="onHalfChange('${shop}',this.value,null,true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">${btns.map(h=>`<option value="${h.id}"${h.id===curHalf?' selected':''}>${h.label}</option>`).join('')}</select>`;
 }
 
 function initProfitPeriodControls(){
@@ -7301,7 +7304,7 @@ function initProfitPeriodControls(){
     div.style.cssText='display:none;align-items:center;gap:8px;flex-wrap:wrap';
     div.innerHTML=`
       <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
-      <select id="month-sel-${s.id}" onchange="onMonthChange('${s.id}')" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+      <select id="month-sel-${s.id}" onchange="onMonthChange('${s.id}',true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
         ${MONTHS.map(mo=>`<option value="${mo}" ${mo===(state[s.id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
       </select>
       <span style="font-size:12px;color:#6b7280;font-weight:500;margin-left:4px">區間</span>
@@ -7318,8 +7321,8 @@ function initProfitPeriodControls(){
 }
 
 function initShopUI(shop){
-  _applyLatestPeriod(shop);
-  onMonthChange(shop);
+  if(_userPickedPeriod[shop]) onMonthChange(shop);   // 已介入 → 只重載當前選擇（不跳）
+  else _applyLatestPeriod(shop);                     // 沒介入 → 自動跳最新（內部完整渲染）
   if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
   if(Object.keys(globalMap).length>0){
     const uc=document.getElementById('uc-map-'+shop);
