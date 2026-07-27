@@ -2987,9 +2987,20 @@ if (window.__cloudStore) {
   setTimeout(() => { if (!__appBooted) __bootApp(); }, 5000);
 }
 
+/* ===================== 分析標籤顯示映射 =====================
+   純顯示改名：畫面顯示「ROI 3」等，但 calcAnalysis 回傳值、篩選比對、
+   停用 key 一律用原始「加300」。只在輸出到畫面的地方套 mapAnaLabel，
+   絕不套在 setTagFilter/disableAnaTag 參數或任何比對上。
+   放 app.js（最先載入）掛 window，profit.js 與 daily.js 共用同一份。 */
+const ANA_LABEL_DISPLAY = {
+  '加300': 'ROI 3', '加200': 'ROI 2', '加100': 'ROI 1',
+  '減300': 'ROI -3', '減200': 'ROI -2', '減100': 'ROI -1',
+};
+function mapAnaLabel(l) { return ANA_LABEL_DISPLAY[l] || l; }  // 未列的（加50、危險商品…）原樣回傳
+
 /* ===================== window 匯流排 ===================== */
 Object.assign(window, {
-  App, Store,
+  App, Store, mapAnaLabel, ANA_LABEL_DISPLAY,
   hashPassword, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
   canAccessOffice, hasOfficeFeature, trendFromQuarters,
   toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms,
