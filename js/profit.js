@@ -2937,7 +2937,7 @@ function patchRow(shop,code,ov){
   // adsFee cell
   const adsEl=document.getElementById(`td-${shop}-${code}-adsFee`);
   if(adsEl){
-    adsEl.querySelector('.cell-val').textContent=fmtAds(r.adsFee);
+    adsEl.querySelector('.cell-val').textContent='$'+fmtN(r.adsFee);
     adsEl.className=`td-num td-amber ${edited?'cell-edited':''} `.trim();
     adsEl.style.cursor='pointer';
   }
@@ -3392,7 +3392,7 @@ function renderTable(shop,list){
       const adsId=`td-${shop}-${r.code}-adsFee`;
       const MOBIC_BLANK=new Set(['growthRate','growthAnalysis']);
       const mobicCell={
-        adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">${fmtAds(r.adsFee)}</span></td>`,
+        adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span></td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
         note:noteCellHtml,
         growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
@@ -3410,7 +3410,7 @@ function renderTable(shop,list){
       </tr>`;
     }else{
       const rowCell={
-        adsFee:editTd('adsFee',fmtAds(r.adsFee),'td-amber'),
+        adsFee:editTd('adsFee','$'+fmtN(r.adsFee),'td-amber'),
         rev:`<td class="td-num">$${fmtN(r.rev)}<div class="sub-rev">${r.prevRev!==null?'上期 $'+fmtN(r.prevRev):'—'}</div></td>`,
         gross:`<td class="td-num">$${fmtN(r.gross)}</td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
