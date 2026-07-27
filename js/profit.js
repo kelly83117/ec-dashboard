@@ -5542,6 +5542,7 @@ const _momoSub={};          // shop -> 目前子分頁 id
 const _momoPeriodSel={};    // shop -> 選中的期別 key（'' = 尚無資料）
 const _momoSearch={};       // shop -> 搜尋字串
 const _momoSort={};         // shop -> {col,dir}
+const _momoShowDiscontinued={};   // shop -> 是否顯示已下架（預設 false=隱藏；模組變數，重整回預設，比照 search/sort）
 function momoRenderShop(shop){
   const el=document.getElementById('momo-content-'+shop);
   if(!el) return;
@@ -5712,6 +5713,11 @@ function momoProfitTableHTML(shop){
     ? periods.map(p=>`<option value="${p}"${p===_momoPeriodSel[shop]?' selected':''}>${momoPeriodLabel(p)}</option>`).join('')
     : `<option value="">尚無期別資料</option>`;
   const q=(_momoSearch[shop]||'').replace(/"/g,'&quot;');
+  const discCount=momoLoadProducts(shop).filter(p=>p.discontinued===true).length;   // 當前主檔已下架筆數
+  const showDisc=!!_momoShowDiscontinued[shop];
+  const discToggle=discCount>0
+    ? `<button onclick="momoToggleDiscontinued('${shop}')" style="padding:5px 12px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${showDisc?'#5b5fcf':'#e5e7eb'};background:${showDisc?'#eef0fb':'#fff'};color:${showDisc?'#5b5fcf':'#6b7280'};white-space:nowrap">${showDisc?'隱藏已下架':'顯示已下架（'+discCount+'）'}</button>`
+    : '';
   return `
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
       <div style="display:flex;align-items:center;gap:6px">
@@ -5719,6 +5725,7 @@ function momoProfitTableHTML(shop){
         <select onchange="momoSetPeriod('${shop}',this.value)" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;color:#1a1a2e">${periodOpts}</select>
       </div>
       <input type="text" placeholder="搜尋 品號 / 名稱 / 原廠編號" value="${q}" oninput="momoOnSearch('${shop}',this.value)" style="flex:1;min-width:200px;max-width:340px;padding:6px 12px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;outline:none">
+      ${discToggle}
     </div>
     <div style="font-size:11px;color:#9ca3af;margin:-4px 0 12px;line-height:1.5">
       毛利率與毛利貢獻以商品<b>目前</b>的成本／售價計算，非當期歷史成本——檢視過去月份時，數字會用現在的成本回算。
@@ -5727,6 +5734,12 @@ function momoProfitTableHTML(shop){
 }
 function momoSetPeriod(shop,val){ _momoPeriodSel[shop]=val; momoRenderProfitBody(shop); }
 function momoOnSearch(shop,val){ _momoSearch[shop]=val; momoRenderProfitBody(shop); }
+// 切換顯示/隱藏已下架：重繪整個 profit 子內容（連按鈕標籤一起更新；search/period/sort 狀態都在模組變數裡，重繪會保留）
+function momoToggleDiscontinued(shop){
+  _momoShowDiscontinued[shop]=!_momoShowDiscontinued[shop];
+  const c=document.getElementById('momo-sub-content-'+shop);
+  if(c){ c.innerHTML=momoProfitTableHTML(shop); momoRenderProfitBody(shop); }
+}
 function momoProfitSetSort(shop,col){
   const cur=_momoSort[shop];
   if(!cur||cur.col!==col)_momoSort[shop]={col,dir:'desc'};
@@ -5744,7 +5757,14 @@ function momoRenderProfitBody(shop){
     const agg=momoAggregatePeriods(p, period?[period]:[]);
     return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, discontinued:!!p.discontinued, ...agg };
   });
-  if(q) rows=rows.filter(r=>(r.sku+' '+r.name+' '+r.origin).toLowerCase().includes(q));
+  // 搜尋時忽略「已下架」篩選（搜得到已下架商品，避免以為資料掉了）；沒搜尋時預設隱藏已下架
+  let searchMatchedDisc=0;
+  if(q){
+    rows=rows.filter(r=>(r.sku+' '+r.name+' '+r.origin).toLowerCase().includes(q));
+    searchMatchedDisc=rows.filter(r=>r.discontinued).length;
+  }else if(!_momoShowDiscontinued[shop]){
+    rows=rows.filter(r=>!r.discontinued);
+  }
   const sort=_momoSort[shop];
   if(sort){
     rows.sort((a,b)=>{
@@ -5775,7 +5795,8 @@ function momoRenderProfitBody(shop){
     }).join('');
     return `<tr>${tds}</tr>`;
   }).join('');
-  tbl.innerHTML=`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
+  const discHint=(q&&searchMatchedDisc>0)?`<div style="font-size:11px;color:#9ca3af;margin-bottom:8px">搜尋結果包含已下架商品（${searchMatchedDisc} 筆）</div>`:'';
+  tbl.innerHTML=discHint+`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
 }
 
 // ── 畫面二：批次維護（編輯現有商品 / 新增商品；甲配乙配共用）──
@@ -7623,7 +7644,7 @@ Object.assign(window, {
   cupPickRowDragStart,cupPickRowDragOver,cupPickRowDragEnter,cupPickRowDragLeave,cupPickRowDrop,cupPickRowDragEnd,
   cupSetSort,
   setShopViewMode,
-  momoSetSub,momoSetPeriod,momoOnSearch,momoProfitSetSort,
+  momoSetSub,momoSetPeriod,momoOnSearch,momoProfitSetSort,momoToggleDiscontinued,
   momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,
