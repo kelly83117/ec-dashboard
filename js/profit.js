@@ -492,6 +492,13 @@ async function syncToCloud(shop){
         else{ skippedProblem.push({key:pk,reason:'報表資料讀不到或損毀'}); }
         return;
       }
+      if(pk.startsWith('ec_momo_products|')){   // MOMO 商品主檔 → momo_products collection（每賣場一 doc，避開 app/profit 1MB）
+        const shop=pk.split('|')[1];
+        const items=momoLoadProducts(shop);   // _profitMem → _mem → localStorage
+        if(window.__cloudMomo && Array.isArray(items)){ tasks.push({key:pk,run:()=>window.__cloudMomo.setShop(shop,items)}); }
+        else{ skippedProblem.push({key:pk,reason:'MOMO 商品主檔讀不到，或雲端層未就緒'}); }
+        return;
+      }
       // field key（設定類）
       let val=null;
       try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
@@ -5464,9 +5471,55 @@ function momoLoadProducts(shop){
 function momoSaveProducts(shop,products){
   const k=momoProductsKey(shop);
   try{ localStorage.setItem(k,JSON.stringify(products)); }catch{}
-  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=products; }catch{}  // 權威鏡像（抗 app/main subscribe 整包覆蓋 _mem）
-  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}              // 保留：syncToCloud field 分支優先讀 _mem
-  _markPending(k);   // 走既有 pending → 手動同步時 setField 上雲
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=products; }catch{}  // 權威鏡像（跨裝置：momo_products 訂閱也灌這裡）
+  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}              // 保留三鏡像一致
+  try{ window._momoJustSaved=Date.now(); }catch{}   // bounce-back 守衛：剛存過 5 秒內、momo_products 訂閱 echo 回來不覆蓋
+  _markPending(k);   // 走既有 pending → 手動同步時 __cloudMomo.setShop 上雲（momo_products collection，每賣場一 doc）
+}
+// bounce-back 守衛（給 firebase.js 的 momo_products 訂閱呼叫；邏輯放這裡才讀得到私有 _pendingSyncKeys）：
+//   本機有未同步變更（pending）或剛存過 → 雲端 echo 不覆蓋 _profitMem，保住本機版本。
+window.__momoShouldSkipCloudOverwrite=function(k){
+  try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
+  if(window._momoJustSaved && (Date.now()-window._momoJustSaved < 5000)) return true;
+  return false;
+};
+// momo_products 訂閱推來更新時的精準重繪（不走 App.render/renderFromCloud、不整頁重繪，避免踢人）。
+//   ⚠ 收緊守衛：① 變的是「當前 curMomoShop」② active 容器是 momo-content-*（使用者真的在 MOMO 頁，比照 v199 inShopee）
+//   ③ 停在總表子分頁（其他子分頁沒有商品表）。只重繪那一張表 body。
+window.addEventListener('momoDataReady',(e)=>{
+  const changed=(e.detail&&e.detail.changedShops)||[];
+  const shop=curMomoShop;
+  if(!shop || changed.indexOf(shop)<0) return;
+  const activeEl=document.querySelector('.shop-content.active');
+  if(!activeEl || !activeEl.id.startsWith('momo-content-')) return;
+  if((_momoSub[shop]||'profit')!=='profit') return;
+  if(document.getElementById('momo-tbl-'+shop)) momoRenderProfitBody(shop);
+});
+// ── 一次性遷移工具（手動在正式站 console 呼叫 window.momoMigrateProductsToCollection()，不 auto-run）──
+//   把 app/profit 舊欄位 ec_momo_products|<shop> 搬進 momo_products collection。先寫新+驗證，「絕不」自動刪舊欄位——
+//   刪除指令印出來給人工確認一致後再貼。順序：部署後隔 24h（快取淘汰）→ 跑此函式 → 驗證✅ → 才刪舊欄位。
+async function momoMigrateProductsToCollection(){
+  if(!window.__cloudMomo || !window.__cloudProfit){ console.error('[遷移] 雲端層未就緒，請重整'); return; }
+  const shops=['甲配','乙配','MO+麻吉','MO+森之旅'];
+  const report=[];
+  let appProfit={};
+  try{ const snap=await window.__cloudProfit.getDoc(); appProfit=snap.exists()?(snap.data()||{}):{}; }
+  catch(e){ console.error('[遷移] 讀 app/profit 失敗',e); return; }
+  for(const shop of shops){
+    const k='ec_momo_products|'+shop;
+    const oldItems=appProfit[k];
+    if(!Array.isArray(oldItems)||oldItems.length===0){ report.push({shop, 狀態:'app/profit 無此欄位或空 → 略過（不需遷移）'}); continue; }
+    try{ await window.__cloudMomo.setShop(shop, oldItems); }
+    catch(e){ report.push({shop, 狀態:'❌ 寫入 collection 失敗：'+((e&&e.message)||e)}); continue; }
+    let cloudCount='?', ok=false;
+    try{ const cs=await window.__cloudMomo.getDoc(shop); const cd=cs.exists()?(cs.data()||{}):{}; cloudCount=(cd.items||[]).length; ok=(cloudCount===oldItems.length); }
+    catch(e){ report.push({shop, 狀態:'❌ 驗證讀取失敗：'+((e&&e.message)||e)}); continue; }
+    report.push({shop, app_profit筆數:oldItems.length, collection筆數:cloudCount, 驗證:ok?'✅ 一致':'❌ 不一致（先別刪）'});
+  }
+  console.table(report);
+  console.log('%c⚠ 下一步：只對上表「驗證 ✅ 一致」的賣場，才刪 app/profit 舊欄位以回收空間。自行貼下列指令（逐賣場確認）：','color:#f59e0b;font-weight:700;font-size:13px');
+  console.log("   await window.__cloudProfit.removeFields(['ec_momo_products|乙配']);   // 只刪已驗證一致的，勿刪未驗證/不一致的");
+  return report;
 }
 // ── P6 倉租費（僅乙配）：公司層級月度總費用，不分攤、不進毛利。key 無 shop 後綴（全域一份）──
 //   存取比照商品主檔三鏡像：load _profitMem→_mem→localStorage；save localStorage+_profitMem+_mem+_markPending。
@@ -7657,7 +7710,7 @@ Object.assign(window, {
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,
   momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,momoJumpShop,
-  momoSetSummaryMonth,momoActionPlanSave,momoCleanDirtyPeriodKeys,
+  momoSetSummaryMonth,momoActionPlanSave,momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,
   momoRentSubmit,momoRentDelete,momoRentSyncBtn,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
