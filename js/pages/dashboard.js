@@ -1808,6 +1808,16 @@ Object.assign(App, {
       const platformName = platforms[idx]?.name || '此賣場';
       const dispVal = (n) => (n == null || n <= 0 ? '—' : n.toLocaleString());
 
+      // 覆蓋警告用：這一天原本是誰、什麼時候填的（時間格式與署名小灰字一致：月/日 時:分）
+      const _by = platforms[idx]?.dailyBy && platforms[idx].dailyBy[inputDateStr];
+      let byNotice = '';
+      if (_by && _by.name) {
+        const _bd = new Date(_by.at);
+        const _bpad = n => String(n).padStart(2, '0');
+        const _bwhen = `${_bpad(_bd.getMonth() + 1)}/${_bpad(_bd.getDate())} ${_bpad(_bd.getHours())}:${_bpad(_bd.getMinutes())}`;
+        byNotice = `<div style="margin-bottom:10px;padding:10px 12px;background:#f59e0b14;border-left:3px solid #f59e0b;border-radius:6px;font-size:12.5px;color:var(--text)">⚠️ 這格是 <strong>${escapeHtml(_by.name)}</strong> 於 <strong>${_bwhen}</strong> 填的，你正要覆蓋。</div>`;
+      }
+
       const revOldN = parseAmount(revEl?.dataset.original);
       const revNewN = parseAmount(revEl?.value);
       const adsOldN = parseAmount(adsEl?.dataset.original);
@@ -1835,6 +1845,7 @@ Object.assign(App, {
           <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">
             日期：<strong style="color:var(--text)">${escapeHtml(inputDateStr)}</strong>
           </div>
+          ${byNotice}
           ${diffRow('營收', revOldN, revNewN, revChanged)}
           ${diffRow('廣告費', adsOldN, adsNewN, adsChanged)}
           <div style="margin-top:14px;padding:10px 12px;background:#f59e0b14;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px;color:var(--text)">
@@ -1856,13 +1867,42 @@ Object.assign(App, {
       });
     };
 
-    // 列上的 ✓ 快速儲存按鈕：直接 commit
+    // 覆蓋警告：某格「原本有數字 && 新值≠舊值 && 不是自己填的」時，先跳 promptConfirm 讓使用者決定。
+    //   營收/廣告費分開判斷，任一格符合就攔。dailyBy 不存在（舊資料無署名）→ 不攔，直接存（不知道誰填的就吵會攔到所有舊資料）。
+    const needsOverwriteConfirm = (idx) => {
+      const platforms = Store.get(Store.KEYS.platforms, null) || [];
+      const p = platforms[idx];
+      if (!p) return false;
+      const me = this.currentUser?.name || this.currentUser?.username || '';
+      const isOverwrite = (el, dailyObj) => {
+        if (!el) return false;
+        const oldRaw = dailyObj && dailyObj[inputDateStr];
+        if (oldRaw == null) return false;                     // ① 原本沒數字 → 不攔
+        const oldN = +oldRaw;
+        const newN = parseAmount(el.value);
+        if ((oldN || 0) === (newN || 0)) return false;        // ② 值沒變 → 不攔
+        const by = p.dailyBy && p.dailyBy[inputDateStr];
+        if (!by || !by.name) return false;                    // ③ 沒署名（舊資料）→ 不攔
+        if (by.name === me) return false;                     //    是自己填的 → 不攔
+        return true;                                          // 三條件同時成立 → 攔
+      };
+      const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
+      const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
+      return isOverwrite(revEl, p.daily) || isOverwrite(adsEl, p.dailyAdSpend);
+    };
+    // commit 的統一守衛入口：要覆蓋別人的資料才先確認，否則照舊直接 commit
+    const commitGuarded = (idx) => {
+      if (needsOverwriteConfirm(idx)) promptConfirm(idx);
+      else commit(idx);
+    };
+
+    // 列上的 ✓ 快速儲存按鈕：先過覆蓋守衛
     document.querySelectorAll('.row-save-btn').forEach(btn => {
       btn.addEventListener('mousedown', (e) => e.preventDefault()); // 不要讓 input 先 blur
       btn.addEventListener('click', () => {
         const idx = +btn.dataset.idx;
         console.warn('[SAVE] ✓ 按鈕被按下', { idx, ver: document.querySelector('meta[name=app-version]')?.content });
-        commit(idx);
+        commitGuarded(idx);
       });
     });
 
@@ -1894,7 +1934,7 @@ Object.assign(App, {
         if (e.key === 'Enter') {
           // Enter 視同按 ✓：有變動就 commit
           e.preventDefault();
-          if (isDirty(idx)) commit(idx);
+          if (isDirty(idx)) commitGuarded(idx);
           else el.blur();
         } else if (e.key === 'Escape') {
           // Esc 取消編輯：還原為原值，然後失焦（blur handler 看到不 dirty 就不再動）
