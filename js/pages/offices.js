@@ -18,6 +18,10 @@ Object.assign(App, {
     if (deptId === 'd2' && this.route === 'office-d2-kpi') {
       this.bindD2KpiTab();
     }
+    // d2 訂價表
+    if (deptId === 'd2' && this.route === 'office-d2-pricing') {
+      this.bindD2PricingTab();
+    }
     // d2 毛利率表
     if (deptId === 'd2' && this.route === 'office-d2-margin') {
       this.bindD2MarginTab();
@@ -890,8 +894,8 @@ Object.assign(App, {
 
     // d1 行銷、d4 設計都不顯示「成員績效」表與上方統計卡片區
     //   d4 已改用個人 KPI 頁，集體季度績效不適用
-    const showMemberKpiTable = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3' && !(deptId === 'd2' && (subRoute === 'kpi' || subRoute === 'margin'));
-    const showStatGrid = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3' && !(deptId === 'd2' && (subRoute === 'kpi' || subRoute === 'margin'));
+    const showMemberKpiTable = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3' && !(deptId === 'd2' && (subRoute === 'kpi' || subRoute === 'pricing' || subRoute === 'margin'));
+    const showStatGrid = deptId !== 'd1' && deptId !== 'd4' && deptId !== 'd3' && !(deptId === 'd2' && (subRoute === 'kpi' || subRoute === 'pricing' || subRoute === 'margin'));
     const inner = `
       ${showStatGrid ? `<div class="stat-grid">${statCards}</div>` : ''}
       ${deptId === 'd3' ? `<div style="margin-bottom:20px">${this.renderFestivalCalendarTab()}</div>` : ''}
@@ -900,7 +904,8 @@ Object.assign(App, {
       ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId === 'd2' && subRoute === 'kpi' ? this.renderD2KpiTabHtml() : ''}
-${deptId === 'd2' && subRoute === 'margin' ? this.renderD2MarginTabHtml() : ''}
+      ${deptId === 'd2' && subRoute === 'pricing' ? this.renderD2PricingTabHtml() : ''}
+      ${deptId === 'd2' && subRoute === 'margin' ? this.renderD2MarginTabHtml() : ''}
       ${deptId === 'd3' ? `
         <div class="d3-tab-layout">
           <div class="d3-tab-bar">${tabBar}</div>
@@ -1672,6 +1677,147 @@ ${deptId === 'd2' && subRoute === 'margin' ? this.renderD2MarginTabHtml() : ''}
           <div style="font-size:10px;color:${c};font-weight:600">天後</div>
         </div>
       </div>`;
+  },
+
+  // ── 訂價表 ──────────────────────────────────────────────
+  PRICING_SHEETS_ORDER: ['訂價','導流品','Victor','inna','Vivian','官網','Doris','貨櫃商品成本','特拉拉','FB訂價表','運費試算表'],
+
+  _prColType(col) {
+    if (col.includes('ROAS')) return 'roas';
+    if (col.includes('百分比') || col === 'ROI' || col.includes('退貨率') || col.includes('以下)')) return 'pct';
+    if (/月銷量|^進貨$|^數量$|^箱數$|^重量$/.test(col)) return 'count';
+    if (col.includes('網站') || col.includes('連結')) return 'link';
+    if (['成本','售價','毛利','利潤','金額','入帳','稅金','廣告','運費','手續費','服務費','投入','報關','平均'].some(k => col.includes(k)) && !col.includes('ROAS')) return 'money';
+    return 'text';
+  },
+
+  _prFmt(val, type) {
+    if (val === null || val === undefined || val === '') return '<span style="color:#d1d5db">—</span>';
+    if (type === 'pct') {
+      const n = parseFloat(val);
+      if (isNaN(n)) return escapeHtml(String(val));
+      const pv = (Math.abs(n) < 5 ? (n * 100) : n).toFixed(1) + '%';
+      const c = n >= (Math.abs(n) < 5 ? 0.2 : 20) ? '#059669' : n >= 0 ? '#f59e0b' : '#dc2626';
+      return `<span style="color:${c};font-weight:700">${pv}</span>`;
+    }
+    if (type === 'roas') {
+      const n = parseFloat(val);
+      return isNaN(n) ? escapeHtml(String(val)) : `<span style="font-weight:600">${n.toFixed(2)}</span>`;
+    }
+    if (type === 'count') {
+      const n = Number(val);
+      return isNaN(n) ? escapeHtml(String(val)) : n.toLocaleString();
+    }
+    if (type === 'money') {
+      const n = parseFloat(val);
+      if (isNaN(n)) return escapeHtml(String(val));
+      return `NT$${n.toLocaleString(undefined, {minimumFractionDigits:0,maximumFractionDigits:2})}`;
+    }
+    if (type === 'link') {
+      const s = String(val).trim();
+      return s ? `<a href="${escapeHtml(s)}" target="_blank" rel="noopener" style="color:#ea580c;font-size:11px;font-weight:600">🔗</a>` : '<span style="color:#d1d5db">—</span>';
+    }
+    return `<span>${escapeHtml(String(val))}</span>`;
+  },
+
+  renderD2PricingTabHtml() {
+    const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+    const q = Store.get('ec.d2.pricing.q', '');
+    const loaded = !!window.__pricingData;
+
+    const sheetTabs = this.PRICING_SHEETS_ORDER.map(s => {
+      const cnt = loaded ? (window.__pricingData[s] || []).length : 0;
+      const active = s === activeSheet;
+      return `<button class="pr-stab" data-s="${s}" style="padding:5px 12px;border-radius:18px;border:1px solid ${active?'#1a7a6e':'#e5e7eb'};background:${active?'#1a7a6e':'#fff'};color:${active?'#fff':'#374151'};font-size:12px;font-weight:${active?'700':'400'};cursor:pointer;white-space:nowrap">${s}${loaded?` <span style="opacity:.7">${cnt}</span>`:''}</button>`;
+    }).join('');
+
+    if (!loaded) {
+      return `<div class="table-card">
+        <div class="table-card-header"><div><h3>💹 訂價表</h3><p>蝦皮 / FB 商品訂價與利潤分析</p></div></div>
+        <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap">${sheetTabs}</div>
+        <div style="padding:60px;text-align:center">
+          <div style="font-size:40px;margin-bottom:12px">📂</div>
+          <div style="font-size:15px;font-weight:600;margin-bottom:8px">尚未載入資料</div>
+          <div style="font-size:13px;color:#9ca3af;margin-bottom:20px">點擊下方按鈕從雲端載入訂價資料</div>
+          <button id="pr-load-btn" style="padding:10px 24px;background:#1a7a6e;color:white;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">⬇ 載入訂價資料</button>
+        </div></div>`;
+    }
+
+    const sheetData = window.__pricingData[activeSheet] || [];
+    const filtered = q ? sheetData.filter(r => String(r['產品名稱'] || r['試算名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase())) : sheetData;
+    const cols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
+    const colTypes = cols.map(c => this._prColType(c));
+    const SHOW = 60;
+    const display = filtered.slice(0, SHOW);
+
+    const theadHtml = cols.map(c => `<th style="white-space:nowrap;font-size:11px;padding:6px 8px">${escapeHtml(c)}</th>`).join('');
+    const tbodyHtml = display.map((r, ri) =>
+      `<tr style="border-bottom:1px solid #f3f4f6">${cols.map((c, ci) => `<td style="font-size:12px;padding:5px 8px;${c==='產品名稱'||ri===0&&ci===0?'text-align:left;min-width:120px':'text-align:right'}">${this._prFmt(r[c], colTypes[ci])}</td>`).join('')}</tr>`
+    ).join('');
+
+    const moreHtml = filtered.length > SHOW
+      ? `<div style="padding:12px;text-align:center;color:#6b7280;font-size:13px;background:#f9fafb;border-top:1px solid #f3f4f6">
+           顯示前 ${SHOW} 筆，共 ${filtered.length} 筆 — <button id="pr-show-all" style="color:#1a7a6e;font-weight:600;background:none;border:0;cursor:pointer">顯示全部 ${filtered.length} 筆</button>
+         </div>` : '';
+
+    return `<div class="table-card">
+      <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div><h3>💹 訂價表</h3><p>蝦皮 / FB 商品訂價與利潤分析</p></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:180px;font-family:inherit">
+        </div>
+      </div>
+      <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">${sheetTabs}</div>
+      <div style="padding:8px 16px;font-size:12px;color:#6b7280;border-bottom:1px solid #f3f4f6">${activeSheet}：共 ${sheetData.length} 筆，搜尋顯示 ${filtered.length} 筆</div>
+      <div class="table-wrap"><table>
+        <thead><tr>${theadHtml}</tr></thead>
+        <tbody id="pr-tbody">${tbodyHtml}</tbody>
+      </table></div>
+      ${moreHtml}
+    </div>`;
+  },
+
+  bindD2PricingTab() {
+    const self = this;
+
+    document.getElementById('pr-load-btn')?.addEventListener('click', async () => {
+      const btn = document.getElementById('pr-load-btn');
+      if (btn) btn.textContent = '載入中…';
+      try {
+        const ver = document.querySelector('meta[name="app-version"]')?.content || '';
+        const res = await fetch(`data/pricing.json?v=${ver}`);
+        window.__pricingData = await res.json();
+        self.render();
+      } catch(e) { alert('載入失敗：' + e.message); }
+    });
+
+    document.querySelectorAll('.pr-stab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Store.set('ec.d2.pricing.sheet', btn.dataset.s);
+        Store.set('ec.d2.pricing.q', '');
+        self.render();
+      });
+    });
+
+    document.getElementById('pr-search')?.addEventListener('input', e => {
+      Store.set('ec.d2.pricing.q', e.target.value);
+      self.render();
+    });
+
+    document.getElementById('pr-show-all')?.addEventListener('click', () => {
+      if (!window.__pricingData) return;
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const q = Store.get('ec.d2.pricing.q', '');
+      const sheetData = window.__pricingData[activeSheet] || [];
+      const cols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
+      const colTypes = cols.map(c => self._prColType(c));
+      const filtered = q ? sheetData.filter(r => String(r['產品名稱'] || '').toLowerCase().includes(q.toLowerCase())) : sheetData;
+      const tbody = document.getElementById('pr-tbody');
+      if (tbody) tbody.innerHTML = filtered.map(r =>
+        `<tr style="border-bottom:1px solid #f3f4f6">${cols.map((c,ci) => `<td style="font-size:12px;padding:5px 8px;${c==='產品名稱'?'text-align:left;min-width:120px':'text-align:right'}">${self._prFmt(r[c], colTypes[ci])}</td>`).join('')}</tr>`
+      ).join('');
+      document.getElementById('pr-show-all')?.closest('div')?.remove();
+    });
   },
 
   renderD2MarginTabHtml() {
