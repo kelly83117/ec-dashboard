@@ -305,6 +305,16 @@ Object.assign(App, {
         ? `<span class="card-roas" data-idx="${i}" style="font-weight:700;font-variant-numeric:tabular-nums;color:${p.color};font-size:13px">${roas}</span>`
         : '<span style="color:var(--text-muted);font-size:13px">—</span>';
 
+      // 署名小灰字：有署名顯示「姓名 · 月/日 時:分」，無則顯示「—」（一律顯示，維持列高一致）
+      //   截短只在顯示時做（存進去的 at 保持完整 timestamp）
+      const _sig = p.dailyBy && p.dailyBy[inputDateStr];
+      let sigText = '—';
+      if (_sig && _sig.name) {
+        const _d = new Date(_sig.at);
+        const _pad = n => String(n).padStart(2, '0');
+        sigText = `${escapeHtml(_sig.name)} · ${_pad(_d.getMonth() + 1)}/${_pad(_d.getDate())} ${_pad(_d.getHours())}:${_pad(_d.getMinutes())}`;
+      }
+
       return `
         <tr data-card-idx="${i}" style="border-top:1px solid var(--border)">
           <td style="padding:3px 6px;white-space:nowrap;overflow:hidden">
@@ -312,6 +322,7 @@ Object.assign(App, {
               <img src="${logoSrc}" alt="" style="width:18px;height:18px;border-radius:4px;object-fit:contain;background:white;padding:1px;flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,0.06)">
               <span style="font-weight:600;font-size:13px;white-space:nowrap" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>
             </div>
+            <div class="entry-sig">${sigText}</div>
           </td>
           <td style="padding:3px 8px;text-align:center">
             <input type="text" inputmode="numeric" class="card-rev" data-idx="${i}" data-original="${revValue}" value="${revValue}" placeholder="0" onfocus="this.select()"
