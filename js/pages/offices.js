@@ -1689,7 +1689,7 @@ Object.assign(App, {
     if (col.includes('網站') || col.includes('連結')) return 'link';
     // 人民幣欄位：原始成本、陸內運費、陸>台運費
     if (col.includes('原始成本') || col.includes('陸〉陸') || col.includes('陸>陸')) return 'rmb';
-    if (col.includes('陸>台')) return 'text'; // 重量(kg)，非金額
+    if (col.includes('陸>台')) return 'wtfreight'; // 單品重量(kg) × 9 = 陸>台運費
     if (['成本','售價','毛利','利潤','金額','入帳','稅金','廣告','運費','手續費','服務費','投入','報關','平均'].some(k => col.includes(k)) && !col.includes('ROAS')) return 'money';
     return 'text';
   },
@@ -1720,6 +1720,12 @@ Object.assign(App, {
       const n = parseFloat(val);
       if (isNaN(n)) return escapeHtml(String(val));
       return `¥${n.toLocaleString(undefined, {minimumFractionDigits:0,maximumFractionDigits:2})}`;
+    }
+    if (type === 'wtfreight') {
+      const n = parseFloat(val);
+      if (isNaN(n)) return escapeHtml(String(val));
+      const freight = Math.round(n * 9 * 100) / 100;
+      return `NT$${freight.toLocaleString(undefined, {minimumFractionDigits:0,maximumFractionDigits:2})}<span style="color:#9ca3af;font-size:10px;margin-left:3px">(${n}kg)</span>`;
     }
     if (type === 'link') {
       const s = String(val).trim();
