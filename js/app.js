@@ -895,6 +895,26 @@ const App = {
     }
   },
 
+  // 各資料源（雲端 doc）對應「哪些 route 顯示它、且需要推播即時重繪」的白名單。
+  // ⚠ 設計意圖（勿改）：這是白名單，不是排除法。
+  //   - 新增 route 預設「不」重繪（安全）：資料已進 Store._mem，使用者切到該 route 時 render 自然顯示最新。
+  //   - 若某頁確實需要雲端推播即時重繪，明確把它的 route 加進對應 scope 的清單。
+  //   - 絕對不要改成排除法（例如「所有 office- 但排除 profit/insight」）：排除法會讓新頁自動被納入 → 使用者在該頁時
+  //     被別的資料源推播整頁重建 → 重演 2026-07-28「在 MOMO/淨利表被踢回蝦皮」的 bug。
+  //   - office-d1-profit（淨利表）刻意不在任何清單：它走 profitDataReady 精準更新，不經整頁 App.render。
+  CLOUD_RENDER_ROUTES: {
+    insight: ['office-d1-insight'],
+    main:    ['dashboard','employees','users',
+              'office-d1','office-d1-kpi','office-d2','office-d2-kpi',
+              'office-d2-pricing','office-d2-margin','office-d3','office-d4'],
+  },
+  // 雲端推播觸發的重繪：只有「當前 route 屬於該資料源 scope」時才整頁重繪；否則跳過（資料已進 Store，切過去自然渲染）。
+  //   使用者主動觸發的 render 一律走 this.render()、不經這裡。
+  renderFromCloud(scope) {
+    const list = (this.CLOUD_RENDER_ROUTES && this.CLOUD_RENDER_ROUTES[scope]) || [];
+    if (list.includes(this.route)) this.render();
+  },
+
   /* ============================================================
    *  儀表板首頁
    * ============================================================ */
@@ -2936,7 +2956,8 @@ async function __setupCloud() {
       });
       // 剛剛在本機存過 → setTimeout 已經排好重繪了，跳過雲端 bounce-back 的重複重繪
       const justSavedLocally = window._platformJustSaved && (Date.now() - window._platformJustSaved < 2000);
-      if (!inOurInput && !hasUnsavedChanges && !justSavedLocally) App.render();
+      // 雲端推播：只在「當前 route 顯示 app/main 資料」時才重繪，避免使用者在淨利表/MOMO 等別頁時被整頁重建踢走（見 CLOUD_RENDER_ROUTES）
+      if (!inOurInput && !hasUnsavedChanges && !justSavedLocally) App.renderFromCloud('main');
     });
 
     // 訂閱洞察表 doc（v167 重整）：
@@ -2959,7 +2980,7 @@ async function __setupCloud() {
         if (skipped.length) console.warn('[insight subscribe][per-shop] 跳過 pending:', skipped);
         if (window.App && App.currentUser && typeof App.render === 'function') {
           const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
-          if (!inputInProgress) { try { App.render(); } catch {} }
+          if (!inputInProgress) { try { App.renderFromCloud('insight'); } catch {} }   // 只在洞察表頁才重繪，別頁不被踢（見 CLOUD_RENDER_ROUTES）
         }
       } catch (e) { console.warn('[insight subscribe per-shop] merge 失敗', e); }
     };
