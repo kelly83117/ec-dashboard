@@ -1628,6 +1628,8 @@ function collectAdjustments() {
 //   通路→人 對應寫在本檔（不引 marketing.js；洞察表日後將廢除）。
 // ============================================================================
 const ADJ_ALLOWED_NAMES  = ['陳君葳', '洪嘉蓮', '郭雅琪'];              // 顯示順序
+// ⚠️ 這份表在 marketing.js 的 _updateDailyProgressFromAdjustments 內
+//    有一份 SHOP_TO_PERSON，內容必須一致。改這裡一定要一起改那裡。
 const ADJ_SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '洪嘉蓮', '森之旅': '陳君葳', '維克': '郭雅琪' };
 const ADJ_MAX_ROWS = 10;                                              // 每人預設顯示筆數
 // 人 → 通路（反查）：{ 洪嘉蓮:['好麻吉','玩樂'], 陳君葳:['森之旅'], 郭雅琪:['維克'] }

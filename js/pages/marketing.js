@@ -1683,12 +1683,14 @@ Object.assign(App, {
   },
   _updateDailyProgressFromAdjustments(opts) {
     // 洞察表：每個賣場的調整動作自動連動到對應「賣場負責人」的工作日誌
-    //   玩樂 → 郭雅琪   /   好麻吉 → 洪嘉蓮   /   森之旅 → 陳君葳
+    //   好麻吉 → 洪嘉蓮 / 玩樂 → 洪嘉蓮 / 森之旅 → 陳君葳 / 維克 → 郭雅琪
     //   不管是誰做的調整（Kelly 或員工本人），一律歸給該賣場負責人
     //   調整全刪光 → 重新統計得 0 個 → 該日誌段落自動被清空
     // 淨利表：仍以「登入者」為對象（未變），只有 3 位員工登入時才寫
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
-    const SHOP_TO_PERSON = { '玩樂': '郭雅琪', '好麻吉': '洪嘉蓮', '森之旅': '陳君葳' };
+    // ⚠️ 這份表在 daily.js:1631 有一份 ADJ_SHOP_TO_PERSON，內容必須一致。
+    //    改這裡一定要一起改那裡（2026-07-28 曾因兩份分岔導致歸屬錯誤）。
+    const SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '洪嘉蓮', '森之旅': '陳君葳', '維克': '郭雅琪' };
     const userName = this.currentUser && this.currentUser.name;
     const usernameId = this.currentUser && this.currentUser.username;
     if (!userName) return;
@@ -1741,7 +1743,7 @@ Object.assign(App, {
     // ======== 1. 洞察表：per-shop 累計 → attribute 給該賣場對應的人 ========
     // 不看 `a.by`（不管誰改）：Kelly 或員工做的都算給該賣場負責人
     // 結構：insightCountsByPerson[person] = { '成長品': N, ... }
-    const INSIGHT_SHOPS = Object.keys(SHOP_TO_PERSON); // ['玩樂','好麻吉','森之旅']
+    const INSIGHT_SHOPS = Object.keys(SHOP_TO_PERSON); // ['好麻吉','玩樂','森之旅','維克']
     const insightCountsByPerson = {};
     INSIGHT_SHOPS.forEach(shop => {
       const person = SHOP_TO_PERSON[shop];
