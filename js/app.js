@@ -895,6 +895,26 @@ const App = {
     }
   },
 
+  // 各資料源（雲端 doc）對應「哪些 route 顯示它、且需要推播即時重繪」的白名單。
+  // ⚠ 設計意圖（勿改）：這是白名單，不是排除法。
+  //   - 新增 route 預設「不」重繪（安全）：資料已進 Store._mem，使用者切到該 route 時 render 自然顯示最新。
+  //   - 若某頁確實需要雲端推播即時重繪，明確把它的 route 加進對應 scope 的清單。
+  //   - 絕對不要改成排除法（例如「所有 office- 但排除 profit/insight」）：排除法會讓新頁自動被納入 → 使用者在該頁時
+  //     被別的資料源推播整頁重建 → 重演 2026-07-28「在 MOMO/淨利表被踢回蝦皮」的 bug。
+  //   - office-d1-profit（淨利表）刻意不在任何清單：它走 profitDataReady 精準更新，不經整頁 App.render。
+  CLOUD_RENDER_ROUTES: {
+    insight: ['office-d1-insight'],
+    main:    ['dashboard','employees','users',
+              'office-d1','office-d1-kpi','office-d2','office-d2-kpi',
+              'office-d2-pricing','office-d2-margin','office-d3','office-d4'],
+  },
+  // 雲端推播觸發的重繪：只有「當前 route 屬於該資料源 scope」時才整頁重繪；否則跳過（資料已進 Store，切過去自然渲染）。
+  //   使用者主動觸發的 render 一律走 this.render()、不經這裡。
+  renderFromCloud(scope) {
+    const list = (this.CLOUD_RENDER_ROUTES && this.CLOUD_RENDER_ROUTES[scope]) || [];
+    if (list.includes(this.route)) this.render();
+  },
+
   /* ============================================================
    *  儀表板首頁
    * ============================================================ */
@@ -2592,39 +2612,114 @@ async function __setupCloud() {
       }
     } catch {}
 
-    // ============== 洞察表資料從 app/insight 拉回，合併進 Store._mem ==============
-    // 洞察表獨立 doc 避免 app/main 撞 1 MiB 上限（events: users/departments/platforms +
-    // insight master 加起來太快超過）。首批 snapshot + 訂閱後續變動都合併進 _mem。
+    // ============== 洞察表資料：多來源合併進 Store._mem ==============
+    // 讀取優先序（後面覆蓋前面 → per-shop 最新）：
+    //   1. app/main 內殘留（v81 之前）
+    //   2. app/insight 內殘留（v81 拆到這裡）
+    //   3. app/insight_{shop} 每個賣場獨立 doc（v134 拆到這裡）→ 最權威
+    // → 舊資料自動讀得到 + 新寫入走 per-shop
     let insightData = {};
     try {
       if (window.__cloudInsight) {
         const iSnap = await window.__cloudInsight.getDoc();
         insightData = iSnap.exists() ? (iSnap.data() || {}) : {};
       }
-    } catch (e) { console.warn('[insight] 初次讀取失敗', e); }
-    Object.assign(cloudData, insightData);
+    } catch (e) { console.warn('[insight] app/insight 讀取失敗', e); }
+    Object.assign(cloudData, insightData); // 2
 
-    // 一次性 migration：把還躺在 app/main 的 ec.insight_* 搬到 app/insight，再從 main 刪掉
-    // → 讓 app/main 立刻小於 1 MiB，Kelly 才能繼續寫入 users/departments 等
+    // 3：per-shop docs（優先，覆蓋 1 & 2）
+    const insightPerShopData = {};
     try {
-      const insightKeysInMain = Object.keys(cloudData).filter(k => k.startsWith('ec.insight_') && !insightData[k]);
-      if (insightKeysInMain.length > 0 && window.__cloudInsight) {
-        console.warn('[insight migration] 搬', insightKeysInMain.length, '個 key 從 app/main → app/insight');
-        for (const k of insightKeysInMain) {
+      if (window.__cloudInsightByShop && Array.isArray(window.__cloudInsightByShop.shops)) {
+        for (const s of window.__cloudInsightByShop.shops) {
           try {
-            await window.__cloudInsight.setField(k, cloudData[k]);
-          } catch (e) { console.error('[insight migration] 搬', k, '失敗', e); }
+            const snap = await window.__cloudInsightByShop.getDocForShop(s);
+            if (snap.exists && snap.exists()) {
+              const d = snap.data() || {};
+              Object.assign(insightPerShopData, d);
+            }
+          } catch (e) { console.warn('[insight] app/insight_' + s + ' 讀取失敗', e); }
         }
-        // 全部成功後才從 app/main 刪掉（用 REST removeFields 一次刪，避免多次寫入）
+      }
+    } catch (e) { console.warn('[insight per-shop] 例外', e); }
+    Object.assign(cloudData, insightPerShopData);
+
+    // 標記「這些 key 目前以 per-shop 為權威來源」→ 稍後 app/insight subscribe 的
+    //   初始 snapshot 帶著舊資料回來時，會被下面 insightMergeHandler 依這個標記擋掉。
+    //   否則 race 順序不對時，剛存的刪除會被 app/insight 舊資料 replay 蓋回來
+    //   （Kelly 案：刪保冰壺清倉 → 同步 per-shop 成功 → 重整後清倉又出現）
+    window.__insightSourcePref = window.__insightSourcePref || {};
+    Object.keys(insightPerShopData).forEach(k => { window.__insightSourcePref[k] = 'per-shop'; });
+
+    // 主動清 app/insight & app/main 裡「已在 per-shop 有的」舊拷貝（fire-and-forget）
+    //   遷移 A/B 只搬「per-shop 沒有」的 key，per-shop 已有時 app/insight 舊資料一直留著。
+    //   留著的話下次重整時 app/insight subscribe fire 帶著 stale 資料，就算 pref 擋掉，
+    //   資料還在雲端就是隱患。這裡直接把它清乾淨，一了百了。
+    try {
+      const perShopKeys = Object.keys(insightPerShopData);
+      const staleInInsight = perShopKeys.filter(k => insightData[k] !== undefined);
+      if (staleInInsight.length > 0 && window.__cloudInsight && window.__cloudInsight.removeFields) {
+        console.warn('[insight cleanup] app/insight 裡已在 per-shop 的過期 key：', staleInInsight);
+        window.__cloudInsight.removeFields(staleInInsight).catch(e => console.warn('[insight cleanup app/insight]', e));
+      }
+      // app/main：cloudData 一開始就是 mainDoc，此時已被 insightData 跟 perShopData 覆蓋。
+      //   用「per-shop 有 & cloudData 一開始就有這個 key」判斷太麻煩，改用 REST 直接 remove
+      //   （安全：removeFields 只刪指定 field，其他資料不動；不存在的 field 也不會報錯）
+      if (perShopKeys.length > 0 && window.__cloudStore && window.__cloudStore.removeFields) {
+        window.__cloudStore.removeFields(perShopKeys).catch(e => console.warn('[insight cleanup app/main]', e));
+      }
+    } catch (e) { console.warn('[insight cleanup] 例外', e); }
+
+    // 一次性 migration A：ec.insight_* 從 app/main 搬到 per-shop doc（沒有的先搬到 app/insight fallback）
+    try {
+      const mainInsightKeys = Object.keys(cloudData).filter(k =>
+        k.startsWith('ec.insight_') && !insightData[k] && !insightPerShopData[k]
+      );
+      if (mainInsightKeys.length > 0) {
+        console.warn('[insight migration A] 搬', mainInsightKeys.length, '個 key 從 app/main → per-shop / app/insight');
+        for (const k of mainInsightKeys) {
+          try {
+            const perShop = window.__cloudInsightByShop && window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(k);
+            if (perShop) await perShop.setField(k, cloudData[k]);
+            else if (window.__cloudInsight) await window.__cloudInsight.setField(k, cloudData[k]);
+          } catch (e) { console.error('[insight migration A]', k, '失敗', e); }
+        }
         try {
           const cs0 = window.__cloudStore;
           if (cs0 && typeof cs0.removeFields === 'function') {
-            await cs0.removeFields(insightKeysInMain);
-            console.warn('[insight migration] app/main 已清掉', insightKeysInMain.length, '個 ec.insight_* key');
+            await cs0.removeFields(mainInsightKeys);
+            console.warn('[insight migration A] app/main 已清掉', mainInsightKeys.length, '個');
           }
-        } catch (e) { console.error('[insight migration] app/main 刪除失敗（但 app/insight 已備份）', e); }
+        } catch (e) { console.error('[insight migration A] app/main 刪除失敗', e); }
       }
-    } catch (e) { console.warn('[insight migration] 例外', e); }
+    } catch (e) { console.warn('[insight migration A] 例外', e); }
+
+    // 一次性 migration B：ec.insight_* 從 app/insight 搬到 per-shop doc
+    // → 讓 app/insight 縮小，避免它再撞 1 MiB
+    try {
+      const oldInsightKeys = Object.keys(insightData).filter(k =>
+        k.startsWith('ec.insight_') && !insightPerShopData[k]
+      );
+      if (oldInsightKeys.length > 0 && window.__cloudInsightByShop) {
+        console.warn('[insight migration B] 搬', oldInsightKeys.length, '個 key 從 app/insight → per-shop');
+        const migrated = [];
+        for (const k of oldInsightKeys) {
+          try {
+            const perShop = window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(k);
+            if (perShop) {
+              await perShop.setField(k, insightData[k]);
+              migrated.push(k);
+            }
+          } catch (e) { console.error('[insight migration B]', k, '失敗', e); }
+        }
+        if (migrated.length > 0 && window.__cloudInsight && window.__cloudInsight.removeFields) {
+          try {
+            await window.__cloudInsight.removeFields(migrated);
+            console.warn('[insight migration B] app/insight 已清掉', migrated.length, '個');
+          } catch (e) { console.error('[insight migration B] app/insight 刪除失敗', e); }
+        }
+      }
+    } catch (e) { console.warn('[insight migration B] 例外', e); }
 
     Store._mem = cloudData;
     Store._useMem = true;
@@ -2666,12 +2761,15 @@ async function __setupCloud() {
       // 寫入時把 key 從「最近刪除」名單移除，否則訂閱回呼會把剛上傳的資料當成 race 過濾掉
       if (window.__unmarkRecentlyDeleted) window.__unmarkRecentlyDeleted(key);
       origSet(key, value);
-      // ec.insight_* 走獨立的 app/insight 文件（避免 app/main 撞 1 MiB 上限）
-      //   洞察表的 master 資料量會隨商品數持續增長，跟 users/departments 擠在
-      //   同一份 app/main 很快就會爆。分開存 → 各自有 1 MiB 額度。
-      const targetCloud = (typeof key === 'string' && key.startsWith('ec.insight_') && window.__cloudInsight)
-        ? window.__cloudInsight
-        : cs;
+      // ec.insight_* 路由：優先走 per-shop doc（app/insight_{shop}）
+      //   → app/insight 又快撞 1 MiB 時的進化，每個賣場各自有 1 MiB 額度。
+      //   若對不到 shop（key 格式不符）→ 退回 app/insight → 再退回 app/main。
+      let targetCloud = cs;
+      if (typeof key === 'string' && key.startsWith('ec.insight_')) {
+        const perShop = window.__cloudInsightByShop && window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(key);
+        if (perShop) targetCloud = perShop;
+        else if (window.__cloudInsight) targetCloud = window.__cloudInsight;
+      }
       try {
         const p = targetCloud.setField(key, value);
         if (p && typeof p.then === 'function') {
@@ -2690,12 +2788,58 @@ async function __setupCloud() {
     };
     // 手動把指定 key 推到雲端（搭配 setLocalOnly 使用）
     Store.pushKeyToCloud = async function(key) {
-      const target = (typeof key === 'string' && key.startsWith('ec.insight_') && window.__cloudInsight) ? window.__cloudInsight : cs;
+      // 路由與 Store.set 同：ec.insight_* 走 per-shop doc → app/insight → app/main
+      let target = cs;
+      let wentToPerShop = false;
+      let targetName = 'app/main';
+      if (typeof key === 'string' && key.startsWith('ec.insight_')) {
+        const perShop = window.__cloudInsightByShop && window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(key);
+        if (perShop) { target = perShop; wentToPerShop = true; targetName = 'per-shop'; }
+        else if (window.__cloudInsight) { target = window.__cloudInsight; targetName = 'app/insight'; }
+      }
+      // 診斷：送出去前先印 payload 摘要
+      const val = Store._mem[key];
+      const keys = val && typeof val === 'object' ? Object.keys(val) : [];
+      console.warn('[PUSH]', key, '→', targetName,
+        '| payload keys count:', keys.length,
+        '| F255 in payload?', keys.includes('F255'),
+        '| F255 value:', val && val['F255'] ? JSON.stringify(val['F255']) : '無');
       try {
-        await target.setField(key, Store._mem[key]);
+        await target.setField(key, val);
+        console.warn('[PUSH] setField 完成，無 throw');
+        // 立刻 readback 驗證雲端真的更新了
+        if (wentToPerShop) {
+          const shopMatch = /^ec\.insight_(.+?)_/.exec(key);
+          const shop = shopMatch ? shopMatch[1] : null;
+          if (shop && window.__cloudInsightByShop.getDocForShop) {
+            try {
+              const rb = await window.__cloudInsightByShop.getDocForShop(shop);
+              const rbNotes = rb.exists() ? rb.data()[key] : null;
+              const rbKeys = rbNotes && typeof rbNotes === 'object' ? Object.keys(rbNotes) : [];
+              console.warn('[PUSH][readback]',
+                'keys count:', rbKeys.length,
+                '| F255 in readback?', rbKeys.includes('F255'),
+                '| F255 value:', rbNotes && rbNotes['F255'] ? JSON.stringify(rbNotes['F255']) : '無');
+              if (rbKeys.includes('F255') && !keys.includes('F255')) {
+                console.error('[PUSH][readback] 🚨 送出去沒 F255，但雲端還有 F255 — Firestore 沒真的覆蓋！');
+              }
+            } catch (e) { console.warn('[PUSH][readback] 失敗', e); }
+          }
+        }
+        // per-shop 寫成功 → 順手刪掉 app/insight 跟 app/main 裡的同 key 舊資料
+        if (wentToPerShop) {
+          window.__insightSourcePref = window.__insightSourcePref || {};
+          window.__insightSourcePref[key] = 'per-shop';
+          if (window.__cloudInsight && window.__cloudInsight.removeFields) {
+            window.__cloudInsight.removeFields([key]).catch(e => console.warn('[pushKeyToCloud] cleanup app/insight 失敗', key, e));
+          }
+          if (window.__cloudStore && window.__cloudStore.removeFields) {
+            window.__cloudStore.removeFields([key]).catch(e => console.warn('[pushKeyToCloud] cleanup app/main 失敗', key, e));
+          }
+        }
         return true;
       } catch (e) {
-        console.error('[pushKeyToCloud] 失敗', key, e);
+        console.error('[PUSH] 失敗 throw', key, e);
         throw e;
       }
     };
@@ -2768,6 +2912,16 @@ async function __setupCloud() {
           });
         }
       } catch {}
+      // 保留 ec.insight_* — v154 起 insight 資料住在 app/insight_{shop} 獨立 doc，
+      //   不在 next（app/main）裡。直接 Store._mem = next 會把 insight 全部清掉，
+      //   洞察表變空白直到使用者重新整理再走一次 __setupCloud 合併三個來源才恢復。
+      try {
+        if (Store._mem) {
+          Object.keys(Store._mem).forEach(k => {
+            if (k.startsWith('ec.insight_') && next[k] === undefined) next[k] = Store._mem[k];
+          });
+        }
+      } catch {}
       Store._mem = next;
       // 首批雲端 snapshot 一定強制重繪（即便 App 尚未準備、或 dirty check 誤判）
       // 否則手機開頁時，「dashboard 先用空資料 render → 雲端到了但被 dirty 條件擋住」會看不到數字
@@ -2802,37 +2956,42 @@ async function __setupCloud() {
       });
       // 剛剛在本機存過 → setTimeout 已經排好重繪了，跳過雲端 bounce-back 的重複重繪
       const justSavedLocally = window._platformJustSaved && (Date.now() - window._platformJustSaved < 2000);
-      if (!inOurInput && !hasUnsavedChanges && !justSavedLocally) App.render();
+      // 雲端推播：只在「當前 route 顯示 app/main 資料」時才重繪，避免使用者在淨利表/MOMO 等別頁時被整頁重建踢走（見 CLOUD_RENDER_ROUTES）
+      if (!inOurInput && !hasUnsavedChanges && !justSavedLocally) App.renderFromCloud('main');
     });
 
-    // 訂閱 app/insight：其他人改了洞察表資料，這台會收到更新
-    // 合併進 _mem 但不重新賦值整個 _mem（避免蓋掉 app/main 的資料）
-    //
-    // ⚠ Bug fix：舊版直接 Object.keys(idata).forEach(k => _mem[k] = idata[k])
-    //   會覆蓋 pending 裡的本機編輯 → 同事編了多個商品但只有最後一個活下來。
-    //   現在跳過 __insightPendingNotes 裡的 key，本機版永遠贏，直到使用者按同步。
+    // 訂閱洞察表 doc（v167 重整）：
+    //   - app/insight subscribe 整段停用。v154 起 ec.insight_* 資料權威源已經是
+    //     per-shop docs (app/insight_{shop})，app/insight 只留給 __setupCloud 初次讀
+    //     fallback 用。繼續訂閱只會製造 race：initial snapshot 帶著舊資料 replay 進來，
+    //     蓋掉剛儲存的變更。
+    //     （Kelly 案：刪保冰壺清倉 → 同步 → 重整後清倉又出現。v166 加 source pref、
+    //       v167 主動刪 app/insight 舊拷貝都試過，還是有 case → 直接不訂閱最乾淨。）
+    //   - per-shop subscribe：正常合併進 _mem（跳過 pending 未同步的 key）
+    const perShopMergeHandler = (idata) => {
+      if (!idata) return;
+      try {
+        const pending = window.__insightPendingNotes;
+        const skipped = [];
+        Object.keys(idata).forEach(k => {
+          if (pending && pending.has && pending.has(k)) { skipped.push(k); return; }
+          if (Store._mem) Store._mem[k] = idata[k];
+        });
+        if (skipped.length) console.warn('[insight subscribe][per-shop] 跳過 pending:', skipped);
+        if (window.App && App.currentUser && typeof App.render === 'function') {
+          const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
+          if (!inputInProgress) { try { App.renderFromCloud('insight'); } catch {} }   // 只在洞察表頁才重繪，別頁不被踢（見 CLOUD_RENDER_ROUTES）
+        }
+      } catch (e) { console.warn('[insight subscribe per-shop] merge 失敗', e); }
+    };
     try {
-      if (window.__cloudInsight) {
-        window.__cloudInsight.subscribe((idata) => {
-          if (!idata) return;
-          try {
-            const pending = window.__insightPendingNotes;
-            const skipped = [];
-            Object.keys(idata).forEach(k => {
-              // 本機還沒同步的 key → 不覆蓋（等使用者按同步再處理）
-              if (pending && pending.has && pending.has(k)) { skipped.push(k); return; }
-              if (Store._mem) Store._mem[k] = idata[k];
-            });
-            if (skipped.length) console.warn('[insight subscribe] 保留本機 pending 版本，跳過雲端覆蓋:', skipped);
-            // 有洞察表變動且不在編輯狀態 → 重繪
-            if (window.App && App.currentUser && typeof App.render === 'function') {
-              const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
-              if (!inputInProgress) { try { App.render(); } catch {} }
-            }
-          } catch (e) { console.warn('[insight subscribe] merge 失敗', e); }
+      if (window.__cloudInsightByShop && Array.isArray(window.__cloudInsightByShop.shops)) {
+        window.__cloudInsightByShop.shops.forEach(s => {
+          try { window.__cloudInsightByShop.subscribeShop(s, perShopMergeHandler); }
+          catch (e) { console.warn('[insight subscribe app/insight_' + s + ']', e); }
         });
       }
-    } catch (e) { console.warn('[insight subscribe] 訂閱失敗', e); }
+    } catch (e) { console.warn('[insight subscribe per-shop]', e); }
   } catch (e) {
     console.error('Cloud setup failed, falling back to localStorage', e);
   }
@@ -2849,9 +3008,20 @@ if (window.__cloudStore) {
   setTimeout(() => { if (!__appBooted) __bootApp(); }, 5000);
 }
 
+/* ===================== 分析標籤顯示映射 =====================
+   純顯示改名：畫面顯示「ROI 3」等，但 calcAnalysis 回傳值、篩選比對、
+   停用 key 一律用原始「加300」。只在輸出到畫面的地方套 mapAnaLabel，
+   絕不套在 setTagFilter/disableAnaTag 參數或任何比對上。
+   放 app.js（最先載入）掛 window，profit.js 與 daily.js 共用同一份。 */
+const ANA_LABEL_DISPLAY = {
+  '加300': 'ROI 3', '加200': 'ROI 2', '加100': 'ROI 1',
+  '減300': 'ROI -3', '減200': 'ROI -2', '減100': 'ROI -1',
+};
+function mapAnaLabel(l) { return ANA_LABEL_DISPLAY[l] || l; }  // 未列的（加50、危險商品…）原樣回傳
+
 /* ===================== window 匯流排 ===================== */
 Object.assign(window, {
-  App, Store,
+  App, Store, mapAnaLabel, ANA_LABEL_DISPLAY,
   hashPassword, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
   canAccessOffice, hasOfficeFeature, trendFromQuarters,
   toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms,

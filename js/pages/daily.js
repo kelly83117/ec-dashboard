@@ -77,9 +77,44 @@ Object.assign(App, {
     const allProgress = Store.get('ec.dailyProgress', {}) || {};
     const dayProgress = allProgress[viewDate] || {};
     // 舊資料是一整段文字，第一次在新版打勾清單顯示時包成一筆項目，不會不見
+    // v163 起：舊字串裡若含「【洞察表 · 今日調整】」/「【淨利表 · 今日調整】」段落，
+    //   parse 出來包成結構化 auto item（render 才能走 chip 卡片版），剩下純使用者文字包 legacy todo
+    const INSIGHT_LINE_RE = /\d+\.\s+\S+\s+(\S+?)\s+(\d+)\s*個/g;
+    const PROFIT_LINE_RE  = /\d+\.\s+(\S+?)\s+(\d+)\s*個/g;
+    const parseLegacyAuto = (text) => {
+      let residual = text;
+      const items = [];
+      const iMatch = residual.match(/【洞察表 · 今日調整】([\s\S]*?)(?=\n\n【|$)/);
+      if (iMatch) {
+        const counts = {};
+        let m; INSIGHT_LINE_RE.lastIndex = 0;
+        while ((m = INSIGHT_LINE_RE.exec(iMatch[1])) !== null) counts[m[1]] = parseInt(m[2], 10);
+        if (Object.keys(counts).length > 0) items.push({ id: 'auto-insight-legacy', kind: 'insight-summary', counts, done: false, auto: true });
+        residual = residual.replace(iMatch[0], '');
+      }
+      const pMatch = residual.match(/【淨利表 · 今日調整】([\s\S]*?)(?=\n\n【|$)/);
+      if (pMatch) {
+        const counts = {};
+        let m; PROFIT_LINE_RE.lastIndex = 0;
+        while ((m = PROFIT_LINE_RE.exec(pMatch[1])) !== null) counts[m[1]] = parseInt(m[2], 10);
+        if (Object.keys(counts).length > 0) items.push({ id: 'auto-profit-legacy', kind: 'profit-summary', counts, done: false, auto: true });
+        residual = residual.replace(pMatch[0], '');
+      }
+      return { autoItems: items, userText: residual.trim() };
+    };
     const normItems = (v) => {
       if (Array.isArray(v)) return v;
-      if (v && String(v).trim()) return [{ id: 'legacy', text: String(v).trim(), done: false }];
+      if (v && String(v).trim()) {
+        const raw = String(v).trim();
+        // 沒含 auto 段落頭 → 老 legacy 純文字，走原路徑
+        if (raw.indexOf('【洞察表 · 今日調整】') < 0 && raw.indexOf('【淨利表 · 今日調整】') < 0) {
+          return [{ id: 'legacy', text: raw, done: false }];
+        }
+        const { autoItems, userText } = parseLegacyAuto(raw);
+        const out = autoItems.slice();
+        if (userText) out.push({ id: 'legacy', text: userText, done: false });
+        return out;
+      }
       return [];
     };
 
@@ -94,24 +129,83 @@ Object.assign(App, {
 
     const cards = personInfos.map(p => {
       const initial = p.name.slice(0, 1);
-      const doneCount = p.items.filter(it => it.done).length;
-      const statusChip = p.items.length === 0
+      // 統計「已完成 / 全部」只算使用者自己的待辦，自動摘要卡不計
+      const userItems = p.items.filter(it => it && !it.kind);
+      const doneCount = userItems.filter(it => it.done).length;
+      const statusChip = userItems.length === 0
         ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600">尚未填</span>`
-        : doneCount === p.items.length
+        : doneCount === userItems.length
           ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#d1fae5;color:#047857;font-size:11px;font-weight:600">✓ 全部完成</span>`
-          : `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#e0e7ff;color:#4338ca;font-size:11px;font-weight:600">${doneCount}/${p.items.length} 已完成</span>`;
+          : `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#e0e7ff;color:#4338ca;font-size:11px;font-weight:600">${doneCount}/${userItems.length} 已完成</span>`;
       const avatarHtml = p.avatar
         ? `<img src="${escapeHtml(p.avatar)}" alt="${escapeHtml(p.name)}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0">`
         : `<div style="width:38px;height:38px;border-radius:50%;background:${PERSON_COLORS[p.name]};color:white;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0">${escapeHtml(initial)}</div>`;
-      const itemRows = p.items.map(it => `
+      // 自動摘要 item 專用 render：分類 chips + 顏色區塊，沒 checkbox 也沒 ✕
+      // 顏色跟洞察表本身 classifyMetrics 的 GROW / DROP / CONV 三大群完全對齊
+      //   下滑類（重跌品 / 衰退品）→ 橘紅
+      //   成長類（爆發品 / 成長品）→ 黃
+      //   轉換類（零轉換 / 弱轉換 / 轉換偏低）→ 綠
+      const INSIGHT_ORDER = ['重跌品', '衰退品', '爆發品', '成長品', '零轉換', '弱轉換', '轉換偏低'];
+      const GROUP_DROP = { bg:'#ffedd5', fg:'#c2410c' }; // 下滑類：橘 (marketing.js:236)
+      const GROUP_GROW = { bg:'#fef9c3', fg:'#a16207' }; // 成長類：黃 (marketing.js:235)
+      const GROUP_CONV = { bg:'#dcfce7', fg:'#15803d' }; // 轉換類：綠 (marketing.js:237)
+      const INSIGHT_STYLE = {
+        '重跌品':   { emoji:'🔴', ...GROUP_DROP },
+        '衰退品':   { emoji:'🟥', ...GROUP_DROP },
+        '爆發品':   { emoji:'🟡', ...GROUP_GROW },
+        '成長品':   { emoji:'🟨', ...GROUP_GROW },
+        '零轉換':   { emoji:'❎', ...GROUP_CONV },
+        '弱轉換':   { emoji:'🟢', ...GROUP_CONV },
+        '轉換偏低': { emoji:'🟩', ...GROUP_CONV },
+      };
+      const PROFIT_ORDER = ['高利潤商品', '賠錢中', '低淨利', '危險商品', '低效廣告'];
+      const PROFIT_STYLE = {
+        '高利潤商品': { bg:'#dcfce7', fg:'#166534' },
+        '賠錢中':     { bg:'#fee2e2', fg:'#991b1b' },
+        '低淨利':     { bg:'#fef3c7', fg:'#92400e' },
+        '危險商品':   { bg:'#fecaca', fg:'#7f1d1d' },
+        '低效廣告':   { bg:'#e0e7ff', fg:'#3730a3' },
+        '其他':       { bg:'#f3f4f6', fg:'#374151' },
+      };
+      const renderSummaryCard = (opts) => {
+        const chipsHtml = opts.chips.map(c => `
+          <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:${c.bg};color:${c.fg};font-size:12px;font-weight:600;line-height:1.4;white-space:nowrap">
+            ${c.emoji ? `<span>${c.emoji}</span>` : ''}<span>${escapeHtml(c.label)}</span><span style="opacity:.7">·</span><strong>${c.count}</strong>
+          </span>`).join('');
+        return `
+          <div class="dp-summary-card" style="background:${opts.headBg};border-left:3px solid ${opts.headColor};border-radius:6px;padding:8px 10px 9px;margin:2px 0 4px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+              <span style="font-size:11px;font-weight:700;color:${opts.headColor};letter-spacing:.02em">${escapeHtml(opts.title)}</span>
+              <span style="font-size:10px;color:${opts.headColor};opacity:.7;font-weight:500">自動更新</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px">${chipsHtml}</div>
+          </div>`;
+      };
+      const renderItem = (it) => {
+        if (it && it.kind === 'insight-summary') {
+          const counts = it.counts || {};
+          const keys = INSIGHT_ORDER.filter(k => counts[k]);
+          if (keys.length === 0) return '';
+          const chips = keys.map(k => ({ label:k, count:counts[k], ...(INSIGHT_STYLE[k]||{}) }));
+          return renderSummaryCard({ title:'洞察表 · 今日調整', headBg:'#faf5ff', headColor:'#7e22ce', chips });
+        }
+        if (it && it.kind === 'profit-summary') {
+          const counts = it.counts || {};
+          const orderedKeys = [...PROFIT_ORDER.filter(k => counts[k]), ...Object.keys(counts).filter(k => !PROFIT_ORDER.includes(k))];
+          if (orderedKeys.length === 0) return '';
+          const chips = orderedKeys.map(k => ({ label:k, count:counts[k], emoji:'', ...(PROFIT_STYLE[k]||PROFIT_STYLE['其他']) }));
+          return renderSummaryCard({ title:'淨利表 · 今日調整', headBg:'#eff6ff', headColor:'#1d4ed8', chips });
+        }
+        return `
         <div class="dp-todo-row" data-item-id="${escapeHtml(it.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
           <span style="color:${PERSON_COLORS[p.name]};font-size:13px;flex-shrink:0">●</span>
           <span style="flex:1;min-width:0;font-size:13px;color:${it.done ? '#9ca3af' : 'var(--text)'};text-decoration:${it.done ? 'line-through' : 'none'};word-break:break-word">${escapeHtml(it.text)}</span>
           <input type="checkbox" class="dp-todo-check" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" ${it.done ? 'checked' : ''} ${isEditable ? '' : 'disabled'} style="width:16px;height:16px;cursor:${isEditable ? 'pointer' : 'default'};flex-shrink:0">
           ${it.done ? '<span style="font-size:10.5px;color:#10b981;font-weight:700;flex-shrink:0">已完成</span>' : ''}
           ${isEditable ? `<button class="dp-todo-del" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" title="刪除" style="border:0;background:none;color:#d1d5db;cursor:pointer;font-size:13px;flex-shrink:0">✕</button>` : ''}
-        </div>
-      `).join('');
+        </div>`;
+      };
+      const itemRows = p.items.map(renderItem).join('');
       const emptyHint = p.items.length === 0 ? `<div style="padding:10px 2px;color:var(--text-muted);font-size:12.5px">${isEditable ? '還沒有待辦事項' : '這天沒有紀錄'}</div>` : '';
       return `
         <div class="dp-card" data-dp-name="${escapeHtml(p.name)}" style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:8px;min-width:0">
@@ -131,6 +225,7 @@ Object.assign(App, {
               <button class="dp-todo-add-btn" data-dp-name="${escapeHtml(p.name)}" style="padding:7px 12px;border:0;border-radius:7px;background:var(--primary-soft);color:var(--primary);font-size:13px;font-weight:600;cursor:pointer">+</button>
             </div>
           ` : ''}
+          ${buildCardAdjustmentsHtml(p.name, viewDate)}
         </div>
       `;
     }).join('');
@@ -151,7 +246,11 @@ Object.assign(App, {
       ALLOWED_NAMES.forEach(n => {
         const v = dayEntries[n];
         const arr = Array.isArray(v) ? v : (v && String(v).trim() ? [{ text: String(v).trim(), done: false }] : []);
-        arr.forEach(it => dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n], light: PERSON_LIGHT[n] }));
+        // 自動摘要 item (kind: 'insight-summary' | 'profit-summary') 不塞進月曆條列
+        arr.forEach(it => {
+          if (!it || it.kind) return;
+          dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n], light: PERSON_LIGHT[n] });
+        });
       });
       const shownItems = dayItems.slice(0, MAX_CAL_BARS);
       const extraCount = dayItems.length - shownItems.length;
@@ -162,13 +261,26 @@ Object.assign(App, {
         </div>
       `).join('');
       const extraHtml = extraCount > 0 ? `<div style="font-size:9.5px;color:var(--text-muted);padding-left:2px">+${extraCount}</div>` : '';
+      // 第三塊：當日淨利表調整筆數，每人一行，置於 todo 橫條上方。用既有 getAdjIndex()（不重解析），
+      //   依 ADJ_SHOP_TO_PERSON 歸人，ALLOWED_NAMES 順序，只顯示有筆數的人（天然上限 3，不與 MAX_CAL_BARS 合併）。
+      //   顏色走 PERSON_COLORS / PERSON_LIGHT，用 CSS 變數傳給 css/daily-adjustments.css 的排版規則。
+      const adjDay = getAdjIndex()[dateStr.replace(/-/g, '/')] || [];
+      const adjCountByPerson = {};
+      adjDay.forEach(r => {
+        const person = ADJ_SHOP_TO_PERSON[r.shop];
+        if (person) adjCountByPerson[person] = (adjCountByPerson[person] || 0) + 1;
+      });
+      const adjRowsHtml = ALLOWED_NAMES
+        .filter(n => adjCountByPerson[n])
+        .map(n => `<div class="adj-cal-row" style="--adj-cal-c:${PERSON_COLORS[n]};--adj-cal-bg:${PERSON_LIGHT[n].bg};--adj-cal-fg:${PERSON_LIGHT[n].text}"><span class="adj-cal-stripe"></span><span class="adj-cal-label"><span class="adj-cal-name">${escapeHtml(n.slice(0, 1))}</span><span class="adj-cal-num">${adjCountByPerson[n]}</span></span></div>`)
+        .join('');
       const numBg = isCellSelected ? 'var(--primary)' : isCellToday ? 'var(--primary-soft)' : 'transparent';
       const numColor = isCellSelected ? 'white' : isCellToday ? 'var(--primary)' : 'var(--text)';
       calCells.push(`
         <button class="dp-cal-day" data-date="${dateStr}"
           style="position:relative;min-width:0;min-height:130px;border:${isCellSelected ? '2px solid var(--primary)' : '1px solid #f1f5f9'};border-radius:10px;background:white;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:6px;gap:3px;overflow:hidden">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${numBg};color:${numColor};font-size:13px;font-weight:${isCellSelected || isCellToday ? '700' : '500'};flex-shrink:0">${d}</span>
-          <div style="display:flex;flex-direction:column;gap:2px;width:100%">${barsHtml}${extraHtml}</div>
+          <div style="display:flex;flex-direction:column;gap:2px;width:100%">${adjRowsHtml}${barsHtml}${extraHtml}</div>
         </button>
       `);
     }
@@ -517,6 +629,20 @@ Object.assign(App, {
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
 
+    // 第六塊：淨利表調整 pill → 開明細彈窗。用「事件委派」掛在持久容器 #main-content 上，
+    //   且只掛一次（旗標守衛，避免每次 render 重複掛而觸發多次）。放函式開頭：下方 748 行
+    //   有「過去日期唯讀」的提早 return，若把綁定放末端，看過去日期時永遠跑不到。
+    //   委派讀當下 DOM 的 dataset，所以之後每次 render 產生的新 pill 都自動生效。
+    if (!this._adjPillDelegated) {
+      this._adjPillDelegated = true;
+      const host = document.getElementById('main-content');
+      if (host) host.addEventListener('click', (e) => {
+        const pill = e.target.closest && e.target.closest('.adj-pill');
+        if (!pill) return;
+        this.openAdjustmentDetailModal(pill.dataset.adjPerson, pill.dataset.adjDate, pill.dataset.adjKind, pill.dataset.adjGroup);
+      });
+    }
+
     // 老闆任務：新增 / 編輯 / 刪除 / 切換完成 / 歷史 / LINE 設定
     const addBtn = document.getElementById('boss-task-add');
     if (addBtn) addBtn.addEventListener('click', () => this.openBossTaskModal());
@@ -790,6 +916,40 @@ Object.assign(App, {
         }
       });
     }
+  },
+  openAdjustmentDetailModal(person, viewDate, kind, group) {
+    const slashDate = String(viewDate || '').replace(/-/g, '/');
+    const recs = (getAdjIndex()[slashDate] || []).filter(r => ADJ_SHOP_TO_PERSON[r.shop] === person);
+    const list = _adjRecsForGroup(recs, kind, group);   // ← 與 pill 計數同一個函式，數字保證一致
+    const parts = String(viewDate).split('-');
+    const md = `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+
+    // 「沒有動作」沉底：反向判斷——有動作關鍵字＝action，否則 noAction（見 ADJ_ACTION_RE）
+    const action = [], noAction = [];
+    list.forEach(r => (ADJ_ACTION_RE.test(String(r.text || '')) ? action : noAction).push(r));
+
+    const itemHtml = (r, muted) => `
+      <div class="adj-modal-item${muted ? ' adj-modal-item-muted' : ''}">
+        <div class="adj-modal-item-hd">
+          <span class="adj-modal-shop">${escapeHtml(r.shop || '')}</span>
+          <span class="adj-modal-code">${escapeHtml(r.code || '')}</span>
+          <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
+        </div>
+        <div class="adj-modal-text">${escapeHtml(r.text || '')}</div>
+      </div>`;
+
+    const bodyHtml = `
+      <div class="adj-modal-sub">${escapeHtml(md)} · ${list.length} 項</div>
+      <div class="adj-modal-list">
+        ${action.map(r => itemHtml(r, false)).join('')}
+        ${noAction.length ? `
+          <div class="adj-modal-divider"></div>
+          <div class="adj-modal-noact">沒有動作 · ${noAction.length} 項</div>
+          ${noAction.map(r => itemHtml(r, true)).join('')}
+        ` : ''}
+      </div>`;
+
+    this.openModal({ title: `${person} · ${group}`, width: '520px', hideFooter: true, bodyHtml });
   },
   bindDailyProgress(deptId) {
     // 員工下拉
@@ -1362,3 +1522,242 @@ Object.assign(App, {
     });
   },
 });
+
+// ============================================================================
+// collectAdjustments() — 純函式：把淨利表報表 built[]/rows[] 裡 row.note 的
+//   自由文字，依內嵌「月/日」切成一段一段的調整紀錄。不經 ec.dailyProgress
+//   摘要層、不碰任何 render / bind，只掛 window 供 Console / 日後功能取用。
+//   回傳：[{ date:'YYYY/MM/DD'|null, shop, code, name, text }]
+//   ⚠ date 為 null（note 裡沒有可辨識日期）的段一律保留，不丟。
+// ============================================================================
+function collectAdjustments() {
+  const out = [];
+  const seen = new Set();
+  const mem = (window.Store && Store._profitMem) || {};
+  // 第四塊：標籤一律重算。profit.js 排在 daily.js 之後 import，calc 可能還沒掛好。
+  const hasCalc = typeof window.calcAnalysis === 'function'
+               && typeof window.calcGrowthAnalysis === 'function';
+  if (!hasCalc) console.warn('[collectAdjustments] window.calcAnalysis / calcGrowthAnalysis 尚未就緒（profit.js 可能還沒載完），本次不計算標籤，下次呼叫重試');
+  let labelErrCount = 0;   // calc throw 的列數，迴圈後統一 warn 一次（別每列洗版）
+  // 掃描順序決定去重時「誰先寫入」（去重邏輯不變：先寫入優先、後來略過）。
+  //   同一筆調整可能出現在多份報表（整月 full vs 半月 first/second），重算標籤可能不一致。
+  //   規則：半月(first/second) 排在 full 前 → 一律以半月報表為準；同 rank 再按 key 字串排，
+  //   確保跨 Firestore snapshot 的 Object.keys() 順序抖動時結果仍穩定。
+  const _periodRank = (k) => {
+    const half = k.split('|')[3];
+    if (half === 'first' || half === 'second') return 0;
+    if (half === 'full') return 1;
+    return 2;
+  };
+  const scanKeys = Object.keys(mem).sort((a, b) => {
+    const ra = _periodRank(a), rb = _periodRank(b);
+    return ra !== rb ? ra - rb : (a < b ? -1 : a > b ? 1 : 0);
+  });
+  scanKeys.forEach(key => {
+    if (key.indexOf('ec|') !== 0) return;        // 只掃報表 key 'ec|...'
+    if (key.indexOf('filemeta') >= 0) return;    // 排除 filemeta
+    const parts = key.split('|');
+    const shop = parts[1];
+    const year = (parts[2] || '').split('/')[0]; // 'ec|好麻吉|2026/06|first' → '2026'
+    const rep = mem[key];
+    const rows = Array.isArray(rep && rep.built) ? rep.built      // built 優先
+               : Array.isArray(rep && rep.rows)  ? rep.rows       // 沒有才 rows
+               : [];
+    rows.forEach(row => {
+      const note = row && row.note;
+      if (typeof note !== 'string') return;       // 只處理字串 note
+
+      // 第四塊：每列只算一次標籤（各段共用，切多段不重算）。一律重算、不讀 row.analysisLabel（避免舊規則快照）。
+      //   getAdjIndex() 在月曆 render 迴圈裡跑，任何 throw 都會炸掉整頁 → 每列 try/catch，該列給空標籤並累計。
+      let anaLabel = '', anaCls = '', growthLabel = '', growthCls = '';
+      if (hasCalc) {
+        try {
+          const _a = window.calcAnalysis(row.adsFee, row.pureRate, row.targetROI, row.roiDiff, row.clicks, row.pureProfit, row.roi);
+          anaLabel = _a.label; anaCls = _a.cls || '';           // cls：pill 上色用（第五塊）
+          const _g = window.calcGrowthAnalysis(row.growthRate, row.rev, row.prevRev, row.pureRate);
+          growthLabel = _g.label; growthCls = _g.cls || '';
+        } catch (e) {
+          anaLabel = ''; anaCls = ''; growthLabel = ''; growthCls = '';
+          labelErrCount++;
+        }
+      }
+
+      const re = /(\d{1,2})\/(\d{1,2})/g;         // 找所有「月/日」
+      const marks = [];
+      let m;
+      while ((m = re.exec(note)) !== null) {
+        const mo = parseInt(m[1], 10), da = parseInt(m[2], 10);
+        if (mo >= 1 && mo <= 12 && da >= 1 && da <= 31) {   // 月 1-12、日 1-31 才算
+          marks.push({ mo, da, start: m.index, end: m.index + m[0].length });
+        }
+      }
+
+      const trimSeg = s => s.replace(/^[\s；;，,、]+/, '').replace(/[\s；;，,、]+$/, '');
+      const pushSeg = (dateStr, rawText) => {
+        const text = trimSeg(rawText);
+        if (!text) return;                          // 空段丟掉
+        // 去重在「段」層級。分隔用 ␟ (␟) 而非 '|'，避免手打文字含 '|' 時 key 碰撞
+        const dk = shop + '␟' + (row.code || '') + '␟' + (dateStr || '') + '␟' + text;
+        if (seen.has(dk)) return;
+        seen.add(dk);
+        out.push({ date: dateStr, shop, code: row.code, name: (row.name || ''), text, anaLabel, anaCls, growthLabel, growthCls });
+      };
+
+      if (marks.length === 0) { pushSeg(null, note); return; }  // 無日期 → 整段 date=null
+      if (marks[0].start > 0) pushSeg(null, note.slice(0, marks[0].start)); // 首日期前 → null
+      for (let i = 0; i < marks.length; i++) {                  // 每個日期→下一個日期之間
+        const segStart = marks[i].end;                          // 段文字不含日期 token
+        const segEnd = (i + 1 < marks.length) ? marks[i + 1].start : note.length;
+        const dateStr = year + '/' + String(marks[i].mo).padStart(2, '0') + '/' + String(marks[i].da).padStart(2, '0');
+        pushSeg(dateStr, note.slice(segStart, segEnd));
+      }
+    });
+  });
+  if (labelErrCount > 0) console.warn('[collectAdjustments] 標籤重算有', labelErrCount, '列 throw，已給空標籤（可能是舊報表欄位異常）');
+  console.log('[collectAdjustments] 總計', out.length,
+              '｜有日期', out.filter(r => r.date).length,
+              '｜無日期', out.filter(r => !r.date).length,
+              '｜有分析標籤', out.filter(r => r.anaLabel).length,
+              '｜有成長標籤', out.filter(r => r.growthLabel).length);
+  return out;
+}
+
+// ============================================================================
+// 淨利表調整紀錄 — 工作日誌右側面板的唯讀顯示（第二塊）
+//   資料源：collectAdjustments()，依日期索引後查表。純唯讀，不寫任何 Store。
+//   通路→人 對應寫在本檔（不引 marketing.js；洞察表日後將廢除）。
+// ============================================================================
+const ADJ_ALLOWED_NAMES  = ['陳君葳', '洪嘉蓮', '郭雅琪'];              // 顯示順序
+const ADJ_SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '洪嘉蓮', '森之旅': '陳君葳', '維克': '郭雅琪' };
+const ADJ_MAX_ROWS = 10;                                              // 每人預設顯示筆數
+// 人 → 通路（反查）：{ 洪嘉蓮:['好麻吉','玩樂'], 陳君葳:['森之旅'], 郭雅琪:['維克'] }
+const ADJ_PERSON_TO_SHOPS = Object.keys(ADJ_SHOP_TO_PERSON).reduce((m, shop) => {
+  const p = ADJ_SHOP_TO_PERSON[shop];
+  (m[p] = m[p] || []).push(shop);
+  return m;
+}, {});
+// 開發期檢查：同一 label 若出現不同 cls，warn 一次（cls 取「該組第一筆」是推論，這裡驗證它）
+const _adjClsWarned = new Set();
+function _warnAdjClsMismatch(label, a, b) {
+  if (_adjClsWarned.has(label)) return;
+  _adjClsWarned.add(label);
+  console.warn(`[buildCardAdjustments] 標籤「${label}」出現不一致 cls：「${a}」vs「${b}」，pill 沿用第一筆的 cls`);
+}
+
+// 第六塊：淨利 pill 排序（警訊優先）；不在清單者（自訂規則）排在建議調預算後、未分類前
+const ADJ_ANA_ORDER = ['賠錢中', '危險商品', '低效廣告', '低淨利', '高利潤商品', '建議調預算'];
+// 淨利分桶：加/減 系列（級距是設定值，用前綴判斷、不寫死字串）合併成「建議調預算」，其餘用 anaLabel
+function _adjAnaBucket(r) {
+  if (!r.anaLabel) return null;
+  return (r.anaLabel.startsWith('加') || r.anaLabel.startsWith('減')) ? '建議調預算' : r.anaLabel;
+}
+// pill 計數與 modal 明細「唯一來源」：取某人某日某 (kind, group) 的紀錄陣列
+function _adjRecsForGroup(recs, kind, group) {
+  if (kind === 'growth') return recs.filter(r => r.growthLabel === group);
+  if (group === '未分類') return recs.filter(r => !r.anaLabel && !r.growthLabel);
+  return recs.filter(r => _adjAnaBucket(r) === group);   // 含「建議調預算」合併桶
+}
+// 「有動作」關鍵字：反向判斷——text 出現任一關鍵字＝有動作，否則沉底歸「沒有動作」。
+//   「開頭是什麼」不穩（例：「清倉品先不動」開頭是清倉品），改偵測動作字眼是否出現。這條之後可能再調。
+const ADJ_ACTION_RE = /預算|廣\s*\d|ROI|roi|漲價|調漲|降價|調降|開廣告|關廣告|加速|換.{0,2}圖|標題|分類|優惠券|活動|調整售價|調價/;
+
+let _adjIndexCache = null;
+let _adjLabelsReady = false;
+// collectAdjustments() 要掃 ~26000 列，只在首次呼叫時跑一次，之後查表 O(1)。
+// 只索引有日期的紀錄（無日期的無法落到特定某天）。
+// ⚠ 快取照建（getAdjIndex 在月曆 render 迴圈裡每格呼叫一次，不快取會 35 格 × 26k 列卡死）；
+//   但記下標籤有沒有算成功：這次 profit.js 還沒就緒（標籤全空）就標記 not ready，
+//   下次呼叫時 calc 好了才重建一次。
+function getAdjIndex() {
+  const calcOk = typeof window.calcAnalysis === 'function'
+              && typeof window.calcGrowthAnalysis === 'function';
+  if (_adjIndexCache && (_adjLabelsReady || !calcOk)) return _adjIndexCache;
+  const idx = {};
+  collectAdjustments().forEach(r => {
+    if (!r.date) return;
+    (idx[r.date] = idx[r.date] || []).push(r);
+  });
+  _adjIndexCache = idx;
+  _adjLabelsReady = calcOk;
+  return idx;
+}
+// 雲端 profit 資料有更新 → 索引 + 標籤就緒旗標一起失效，下次 render 自然重建（firebase.js 既有事件）
+window.addEventListener('profitDataReady', () => { _adjIndexCache = null; _adjLabelsReady = false; });
+
+// 第六塊：某人某日的「淨利表調整」區塊，注入人員卡片底部。只留標題 + 兩排 pill，明細改走彈窗。
+//   viewDate: 'YYYY-MM-DD'。回傳 HTML；非郭雅琪且當日 0 筆 → 回 ''（連分隔線都不出）。
+//   pill 為 <button>，click 由 bindWeeklyCalendar 綁 → openAdjustmentDetailModal。
+//   pill 計數一律走 _adjRecsForGroup（與 modal 明細同源，數字保證一致）。
+function buildCardAdjustmentsHtml(person, viewDate) {
+  const slashDate = String(viewDate || '').replace(/-/g, '/');
+  const recs = (getAdjIndex()[slashDate] || []).filter(r => ADJ_SHOP_TO_PERSON[r.shop] === person);
+  const shops = ADJ_PERSON_TO_SHOPS[person] || [];
+
+  // 空狀態：郭雅琪（維克無淨利表）顯示提示；其他人當日 0 筆 → 不顯示整塊
+  if (recs.length === 0) {
+    if (person === '郭雅琪') {
+      return `
+        <div class="adj-sec">
+          <div class="adj-sec-head"><span class="adj-sec-title">淨利表調整</span></div>
+          <div class="adj-none">${escapeHtml(shops.join('、'))}沒有淨利表資料</div>
+        </div>`;
+    }
+    return '';
+  }
+
+  const total = recs.length;
+  const personAttr = escapeHtml(person);
+  const dateAttr = escapeHtml(viewDate);
+
+  // 蒐集各排的桶 label；cls 取「該桶第一筆」（中性桶不需要），同桶不同 cls → dev warn
+  const anaLabelSet = new Set();
+  const growthLabelSet = new Set();
+  const firstCls = {};   // key: `${kind}|${label}` → cls
+  const noteCls = (kind, label, cls) => {
+    if (!cls) return;
+    const k = kind + '|' + label;
+    if (!(k in firstCls)) firstCls[k] = cls;
+    else if (firstCls[k] !== cls) _warnAdjClsMismatch(label, firstCls[k], cls);
+  };
+  recs.forEach(r => {
+    const b = _adjAnaBucket(r);
+    if (b) { anaLabelSet.add(b); if (b !== '建議調預算') noteCls('ana', b, r.anaCls); } // 合併桶不驗 cls
+    if (r.growthLabel) { growthLabelSet.add(r.growthLabel); noteCls('growth', r.growthLabel, r.growthCls); }
+  });
+  if (recs.some(r => !r.anaLabel && !r.growthLabel)) anaLabelSet.add('未分類');
+
+  // 中性灰：加/減混合的建議調預算、無狀態的未分類（硬套顏色＝假訊號）
+  const NEUTRAL = new Set(['建議調預算', '未分類']);
+  const mkBucket = (label, kind) => ({
+    label, kind,
+    count: _adjRecsForGroup(recs, kind, label).length,                    // ← 與 modal 同源
+    cls: NEUTRAL.has(label) ? 'adj-pill-plain' : (firstCls[kind + '|' + label] || ''),
+  });
+  // 淨利排序：固定序 → 自訂規則(筆數 desc) → 未分類
+  const anaRank = (label) => {
+    if (label === '未分類') return 100;
+    const i = ADJ_ANA_ORDER.indexOf(label);
+    return i >= 0 ? i : 50;   // 自訂規則：在建議調預算(5) 後、未分類(100) 前
+  };
+  const anaBuckets = [...anaLabelSet].map(l => mkBucket(l, 'ana')).sort((a, b) => {
+    const ra = anaRank(a.label), rb = anaRank(b.label);
+    return ra !== rb ? ra - rb : b.count - a.count;
+  });
+  const growthBuckets = [...growthLabelSet].map(l => mkBucket(l, 'growth')).sort((a, b) => b.count - a.count);
+
+  const pillHtml = (g) => `<button type="button" class="adj-pill ${g.cls}" data-adj-person="${personAttr}" data-adj-date="${dateAttr}" data-adj-kind="${g.kind}" data-adj-group="${escapeHtml(g.label)}">${escapeHtml(window.mapAnaLabel(g.label))} <b>${g.count}</b></button>`;
+  const anaPills = anaBuckets.map(pillHtml).join('');
+  const growthPills = growthBuckets.map(pillHtml).join('');
+
+  return `
+    <div class="adj-sec">
+      <div class="adj-sec-head">
+        <span class="adj-sec-title">淨利表調整</span>
+        <span class="adj-sec-total">${total}</span>
+      </div>
+      ${anaPills ? `<div class="adj-pill-group"><div class="adj-pills-label">廣告分析</div><div class="adj-pills">${anaPills}</div></div>` : ''}
+      ${growthPills ? `<div class="adj-pill-group"><div class="adj-pills-label">成長分析</div><div class="adj-pills">${growthPills}</div></div>` : ''}
+    </div>`;
+}
+
+Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml });

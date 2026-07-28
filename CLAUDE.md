@@ -52,6 +52,20 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
 
 漏寫驗證狀態 = 等同我宣稱「全部測過」，會誤導你。**永遠不要省略這行**。
 
+## ⚠️ 本機測試前必須先確認 TEST_NOWRITE 防護生效
+
+`js/app.js` 把 `Store.set` 換成「寫入 → 立刻推正式 Firestore」，因此**本機開起來
+測試（不只是按同步）就會寫到公司正式資料**。本機測試前務必：
+
+1. 先確認 **TEST_NOWRITE 防護碼**已經貼進 `js/firebase.js`。
+2. 在瀏覽器 F12 Console 看到紅字
+   **「[TEST_NOWRITE] 已停用雲端寫入：4 物件 / 9 方法」**，且下方 table
+   **剛好 9 條**，才能放心測。
+3. 沒看到這行紅字、或數量不是 9 → **絕對不要繼續操作，立刻關閉分頁**。
+
+**測完拆除順序（勿顛倒）：** 先關分頁 → 再停 server → 最後才刪掉
+`firebase.js` 裡的防護區塊。
+
 ## 模組與全域匯流排（本專案最重要的一條）
 
 本專案原本是單一肥大 `index.html`，已拆成上述模組並改用 **ES Modules**。
@@ -125,6 +139,15 @@ ESM 有個致命陷阱必須牢記：
 - `Store` 是 localStorage 包裝層（含 `_mem` / `_profitMem` 記憶體鏡像）。
 - 版本號 `<meta app-version>` 每次部署都要更新，`version.js` 才會清舊快取。
 
+### 版本號 bump 規則（共 12 處）
+改任何檔案（**含 CSS**）都要 bump 版本號，一次要改 **12 處**：
+- `index.html` 的 `<meta name="app-version">`（1 處）
+- `index.html` 的 `<script src="js/main.js?v=">`（1 處）
+- `js/main.js` 裡 10 個 import 的 `?v=`（10 處）
+
+新版號要**比目前檔案裡的、也比 `main` 上的都大**。`main` 有時會回退，
+**一定要當場去檔案裡搜 `app-version` 確認現在的號碼**，不要憑記憶。
+
 ### 舊版 Apps Script
 - `apps-script.gs` 的自動同步已停用，僅保留空函式避免殘留觸發報錯。新功能
   不要往這裡加；營收由行銷團隊直接在 dashboard 填寫。
@@ -144,3 +167,20 @@ npx serve .
 然後開 `http://localhost:8000`，硬重整 (Ctrl+F5) 後依「開發紀律」第 4 點
 逐條路徑實測。Firestore 連線需要網路；離線時會走 5 秒 fallback 用
 localStorage 啟動。
+
+## 資料流程（產報表與同步是斷開的）
+
+```
+上傳檔案 → 記憶體 → 產生報表 → localStorage + 記憶體 → 按「☁ 同步雲端」才推上 Firestore
+```
+
+**「產生報表」和「同步」之間是斷的，靠人手動接。** 產完報表**一定要按
+「☁ 同步雲端」**，否則資料只在本機 localStorage / 記憶體，不會上 Firestore。
+
+## 工作流程
+
+- 開工前先 `git pull`。
+- 一次只做一塊，做完驗過再做下一塊。
+- 改完**一定要在瀏覽器實際點過再 commit**（見「開發紀律」第 4 點與 self-check）。
+- push 前先 `git fetch` 確認 `main` 沒有新的推送。
+- 用 **merge**，不要 rebase。

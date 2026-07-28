@@ -12,6 +12,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <button class="stab" style="font-size:15px" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
             <button class="stab" style="font-size:15px" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
             <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
+            <span style="width:1px;height:18px;background:#d1d5db;margin:0 2px"></span><button class="stab" style="font-size:15px" onclick="setShop('重點檢視',this)">重點檢視</button>
           </div>
         </div>
         <div style="width:1px;background:#e5e7eb;align-self:stretch"></div>
@@ -77,34 +78,6 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       </div>
       <div class="ana-modal-ftr">
         <button class="gen-btn" id="cup-gen-btn" onclick="generateCoupang()" disabled>▶ 產生並儲存</button>
-      </div>
-    </div>
-  </div>
-  <div class="ana-overlay" id="momo-rpt-upload-overlay" onclick="if(event.target===this)closeMomoRptUpload()">
-    <div class="ana-modal" style="width:480px;max-width:96vw">
-      <div class="ana-modal-hdr"><span id="momo-rpt-upload-title">上傳檔案｜MOMO</span><button class="ana-close-btn" onclick="closeMomoRptUpload()">✕</button></div>
-      <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
-        <label class="ucard" id="myp-product-card" style="width:100%;box-sizing:border-box">
-          <input type="file" id="myp-product-input" accept=".xlsx,.xls" onchange="onMomoRptFile(event,'product')">
-          <div class="ucard-icon">📦</div>
-          <div style="flex:1;min-width:0">
-            <div class="ucard-title">商品分析報表</div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:2px">含瀏覽量、流量成長率、訂購數等商品明細 (.xls/.xlsx)</div>
-          </div>
-          <span id="myp-product-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
-        </label>
-        <label class="ucard" id="myp-sales-card" style="width:100%;box-sizing:border-box">
-          <input type="file" id="myp-sales-input" accept=".xlsx,.xls" onchange="onMomoRptFile(event,'sales')">
-          <div class="ucard-icon">📊</div>
-          <div style="flex:1;min-width:0">
-            <div class="ucard-title">銷售分析報表</div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:2px">含本期/前期總覽跟每日明細 (.xls/.xlsx)</div>
-          </div>
-          <span id="myp-sales-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
-        </label>
-      </div>
-      <div class="ana-modal-ftr">
-        <button class="gen-btn" id="myp-gen-btn" onclick="generateMomoRpt()" disabled>▶ 產生並儲存</button>
       </div>
     </div>
   </div>
@@ -194,7 +167,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <div style="font-size:12px;color:#9ca3af" id="upm-shop-hint">目前賣場：—</div>
           <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:5px 10px">
             <span style="font-size:12px;color:#6b7280;font-weight:500">平台手續費</span>
-            <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:54px">
+            <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:54px" onchange="onPlatformRateChange()">
             <span style="font-size:12px;color:#6b7280">%</span>
           </div>
         </div>
@@ -262,6 +235,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
     </div>
   </div>
   <div id="content-總表" class="shop-content active" style="padding:16px 20px;min-height:200px"></div>
+  <div id="content-重點檢視" class="shop-content" style="padding:16px 20px;min-height:200px"></div>
   <div id="content-好麻吉" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-玩樂" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-森之旅" class="shop-content" style="padding:16px 20px"></div>
@@ -306,10 +280,29 @@ const GROWTH_TAGS=[
 ];
 const state={};
 const _initNow=new Date();const _initCurMonth=`${_initNow.getFullYear()}/${String(_initNow.getMonth()+1).padStart(2,'0')}`;
-// 讀上次使用者離開時的月份/區間；沒有就用當月/上半月（讓使用者下次回來停在原本位置）
-function _readLastMonth(shopId){try{const v=localStorage.getItem('ec_lastMonth_'+shopId);return v&&MONTHS.indexOf(v)>=0?v:_initCurMonth;}catch{return _initCurMonth;}}
-function _readLastHalf(shopId){try{const v=localStorage.getItem('ec_lastHalf_'+shopId);return v==='first'||v==='second'?v:'first';}catch{return 'first';}}
-SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[]};});
+const _initCurHalf=_initNow.getDate()<=15?'first':'second';
+// 為什麼不能直接字串排序：half 的字母序是 first < full < second，
+// 與時間語意不符（full 涵蓋整月，應排在 first 之後、second 之前）。
+// ⚠ _HALF_RANK 是 const（不會 hoist），而 _findLatestPeriod 會在下方 state 初始化時就被呼叫，
+//   故 _HALF_RANK / _periodRank 必須定義在 state 初始化之前；_findLatestPeriod 才放 lsHasAny 下方。
+const _HALF_RANK={first:0,full:1,second:2};
+function _periodRank(month,half){
+  return (month||'')+'#'+(_HALF_RANK[half]!==undefined?_HALF_RANK[half]:0);
+}
+// 預設期間：跳到該賣場「最新有資料」的期間（2026-07-24 修正）。
+// 原因：報表要等該期間結束後才產生，所以「當期」永遠沒資料，
+//       預設跟今天走會導致幾乎每天打開都是空白。
+// 找不到任何報表才 fallback 到今天（新賣場 / 全新瀏覽器）。
+function _readLastMonth(shopId){
+  const p=_findLatestPeriod(shopId);
+  if(p&&MONTHS.indexOf(p.month)>=0) return p.month;
+  return MONTHS.indexOf(_initCurMonth)>=0?_initCurMonth:MONTHS[MONTHS.length-1];
+}
+function _readLastHalf(shopId){
+  const p=_findLatestPeriod(shopId);
+  return p?p.half:_initCurHalf;
+}
+SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[],search:''};});
 let globalMap={};
 let curShop='總表';
 let openPopup=null;
@@ -335,16 +328,60 @@ function _cloudWriteSafe(key, payload, label){
   _markPending(key);
 }
 function lsKey(shop,month,half){return`ec|${shop}|${month}|${half}`;}
+// ── lsSave 存檔失敗通報（配額滿了會靜默失敗，見 PR：lssave-quota-alert）──
+let _lsFailNotified = false;   // 同一次 session 只彈一次窗，之後只出 toast
+
+function _isQuotaErr(e){
+  if(!e) return false;
+  const n = e.name || '';
+  return n === 'QuotaExceededError'
+      || n === 'NS_ERROR_DOM_QUOTA_REACHED'
+      || e.code === 22
+      || e.code === 1014;
+}
+
+function _halfLabel(h){
+  return h === 'first' ? '上半月' : h === 'second' ? '下半月' : h === 'full' ? '整月' : String(h||'');
+}
+
+function _notifyLsSaveFail(shop, month, half, err){
+  const who = shop + ' ' + month + '｜' + _halfLabel(half);
+  const quota = _isQuotaErr(err);
+  console.error('[lsSave] 存檔到 localStorage 失敗：' + who, err);
+
+  const title = quota ? '本機空間已滿，報表沒存進電腦' : '報表沒存進電腦';
+  const message =
+    who + ' 的報表沒有存進這台電腦。\n' +
+    '資料目前只在記憶體裡，重整或關掉分頁就會消失。\n\n' +
+    '請現在按「☁ 同步雲端」把它推上去（推得上去，不受這個問題影響）。\n' +
+    '保險起見也可以先按「匯出 Excel」留一份。';
+  const detail = (err && (err.name || err.message))
+    ? ('錯誤：' + (err.name||'') + ' ' + (err.message||'')) : '';
+
+  if(!_lsFailNotified){
+    _lsFailNotified = true;
+    if(window.App && typeof App.showAlertModal === 'function'){
+      App.showAlertModal({ title:title, message:message, detail:detail, kind:'error', dedupeKey:'lsSaveFail' });
+      return;
+    }
+  }
+  if(typeof showToast === 'function'){
+    showToast('報表沒存進本機，請先按同步雲端再重整', 'error');
+  }
+}
+
 function lsSave(shop,month,half,built,period,days){
   // 只存本機；同步雲端需手動按「☁ 同步雲端」
-  const payload={built,period,days,rate:getPlatformRate(),ts:Date.now()};
+  const payload={built,period,days,rate:getPlatformRate(shop),ts:Date.now()};
   const k=lsKey(shop,month,half);
-  try{localStorage.setItem(k,JSON.stringify(payload));}catch(e){}
+  let saveErr=null;
+  try{localStorage.setItem(k,JSON.stringify(payload));}catch(e){saveErr=e;}
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=payload;}catch{}
   // 記完整的 lsKey 到 pending set — 這樣使用者切到別的月份/賣場再產生報表，
   //   舊的月份/賣場也還在 pending 裡，按同步時會一起推上雲端（避免只推當前顯示那份）
   _pendingSyncKeys.add(k);
   _showSyncBtn(shop);
+  if(saveErr){ try{ _notifyLsSaveFail(shop, month, half, saveErr); }catch(e2){ console.error('[lsSave] 通報失敗', e2); } }
 }
 // 真實 pending 筆數（排除 __shop__| marker 和 _summary_v1）
 //   _summary_v1 是總表資料，總表已改為自動同步（saveSummaryRows 直接推雲端），
@@ -371,17 +408,37 @@ function _showSyncBtn(shop){
     // 有待同步：橘色亮起 + 顯示筆數
     btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent=`☁ 同步雲端 (${n})`;
   }
+  if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn();   // MOMO 頁那顆同步鈕跟著刷新（同一個 pending 來源）
 }
 // 掃出本機所有 ec|shop|month|half 報表 key 塞進 pending set
 //   讓 syncToCloud 不只推「本次會話新增」的，也把 localStorage 裡累積
 //   （包含前次重整前留下、pending set 已清空）的一併推上雲端。
 function _sweepAllLocalReportsIntoPending(){
+  // ⚠️ 這裡的白名單前綴（ec_momo_products| / ec_momo_rent_records / ec| 非 filemeta）若改動，
+  //    _momoSyncPendingCount()（本檔搜 `function _momoSyncPendingCount`）的唯讀版也要一起改，否則 MOMO 同步鈕亮暗會對不上。
   // 塊B：拿掉原本「掃 Store._profitMem 塞進 pending」那段。它會把雲端載回的報表
   //   也當 pending、再原封不動推回雲端 → 多人同時同步時「後按的用自己記憶體版本
   //   蓋掉全部」（舊蓋新的併發覆蓋）。改為只掃 localStorage：只推本機親手產生/編輯過的。
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
+      // MOMO 商品主檔（持續性資料）：走 field 分支（setField 讀 Store._mem），
+      //   比照報表一起補掃，避免「存了商品→重整前沒同步」漏推。
+      if(k&&k.startsWith('ec_momo_products|')){
+        _pendingSyncKeys.add(k);
+        if(!(Store._mem&&Store._mem[k])){
+          try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+        }
+        continue;
+      }
+      // MOMO 倉租費（P6）：同商品主檔走 field 分支，補進來避免「存了→重整前沒同步」漏推
+      if(k==='ec_momo_rent_records'){
+        _pendingSyncKeys.add(k);
+        if(!(Store._mem&&Store._mem[k])){
+          try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+        }
+        continue;
+      }
       // filemeta 不上雲（雲端零讀取端）→ 不塞進 pending，省下「撈進來→推送略過→收尾刪」的白工
       if(k&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')){
         _pendingSyncKeys.add(k);
@@ -514,6 +571,98 @@ function lsHasAny(shop){
   for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k && k.startsWith(`ec|${shop}|`))return true;}
   return false;
 }
+// ── 找出某賣場「最新有資料」的期間（月份+區間）──
+// 用 function declaration（會 hoist），故可在上方 state 初始化(:317 附近)時就被呼叫。
+function _findLatestPeriod(shop){
+  const prefix='ec|'+shop+'|';
+  const seen=new Set();
+  const collect=k=>{
+    if(typeof k!=='string'||k.indexOf(prefix)!==0)return;
+    const p=k.split('|');
+    if(p.length<4)return;
+    const month=p[2],half=p[3];
+    if(!month||!half)return;
+    if(_HALF_RANK[half]===undefined)return;   // 不認得的 half 一律略過
+    seen.add(month+'|'+half);
+  };
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Object.keys(Store._profitMem).forEach(collect); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Object.keys(Store._mem).forEach(collect); }catch{}
+  try{ for(let i=0;i<localStorage.length;i++) collect(localStorage.key(i)); }catch{}
+  if(!seen.size) return null;
+  let best=null,bestRank='';
+  seen.forEach(v=>{
+    const [m,h]=v.split('|');
+    const r=_periodRank(m,h);
+    if(r>bestRank){bestRank=r;best={month:m,half:h};}
+  });
+  return best;
+}
+// 列出某賣場所有已存在的報表期間，由新到舊排序。
+// 掃描邏輯與 _findLatestPeriod 相同，差別是回傳全部而非只回最新。
+function _listPeriods(shop){
+  const prefix='ec|'+shop+'|';
+  const seen=new Set();
+  const collect=k=>{
+    if(typeof k!=='string'||k.indexOf(prefix)!==0)return;
+    const p=k.split('|');
+    if(p.length<4)return;
+    const month=p[2],half=p[3];
+    if(!month||!half)return;
+    if(_HALF_RANK[half]===undefined)return;
+    seen.add(month+'|'+half);
+  };
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Object.keys(Store._profitMem).forEach(collect); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Object.keys(Store._mem).forEach(collect); }catch{}
+  try{ for(let i=0;i<localStorage.length;i++) collect(localStorage.key(i)); }catch{}
+  return [...seen].map(v=>{
+    const [month,half]=v.split('|');
+    return {month,half,rank:_periodRank(month,half)};
+  }).sort((a,b)=>a.rank<b.rank?1:a.rank>b.rank?-1:0);   // 由新到舊
+}
+// 查某商品在所有期間的 note（廣告調整），由新到舊。
+// ⚠️ lsLoad 命中記憶體時回傳的是【共用參照】，這裡只讀 r.note，絕不修改那些物件。
+function _noteHistory(shop,code,skipMonth,skipHalf){
+  const out=[];
+  _listPeriods(shop).forEach(p=>{
+    if(p.month===skipMonth&&p.half===skipHalf) return;
+
+    // ① 匯入的：報表 built[] 裡的 r.note（純字串）
+    let rep=null;
+    try{ rep=lsLoad(shop,p.month,p.half); }catch{}
+    const built=rep&&rep.built;
+    if(Array.isArray(built)){
+      const r=built.find(x=>x&&x.code===code);
+      const t=r&&r.note;
+      if(t&&String(t).trim()) out.push({month:p.month,half:p.half,text:String(t)});
+    }
+
+    // ② 手打的：ec_notes|{shop}|{month}|{half} 的 adjustments
+    try{
+      const nd=(getNotes(shop+'|'+p.month+'|'+p.half)||{})[code];
+      const adjs=nd&&(typeof nd==='string'?[{date:'',text:nd}]:(nd.adjustments||[]));
+      (adjs||[]).forEach(a=>{
+        const t=a&&a.text;
+        if(t&&String(t).trim()) out.push({month:p.month,half:p.half,text:String(t)});
+      });
+    }catch{}
+  });
+  return out;
+}
+const _userPickedPeriod={};   // 使用者主動切過月份/半月的賣場 → 之後不再自動跳，尊重其選擇
+// 把某賣場的下拉切到「最新有資料的期間」。
+// 回傳 true = 真的套用了（或已經在正確期間），false = 這次沒辦法套用（下拉還沒建好）。
+// ⚠ 不設「已跳過」旗標：每次 profitDataReady 都重算跳到最新，直到使用者主動切月份為止。
+//   這樣七月報表（profits collection 延後載入）到齊時能補跳過去，不會卡在六月。
+function _applyLatestPeriod(shop){
+  if(_userPickedPeriod[shop]) return true;      // 使用者已介入 → 尊重其選擇，永不自動跳
+  const p=_findLatestPeriod(shop);
+  if(!p){ return false; }                       // 還沒有任何報表 → 之後再試
+  const sel=document.getElementById('month-sel-'+shop);
+  if(!sel) return false;                        // 下拉還沒建好 → 之後再試
+  if(MONTHS.indexOf(p.month)<0) return false;
+  onMonthChange(shop, false, p.month, p.half);  // 直接走手動流程：byUser=false（不設旗標）、月+半月一次設好、只渲染一次
+  return true;
+}
 
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
@@ -595,18 +744,8 @@ window.addEventListener('profitDataReady', (e)=>{
   const shopsToUpdate = changedShops==null ? SHOPS : SHOPS.filter(s=>changedShops.includes(s.id));
   try{
     shopsToUpdate.forEach(s=>{
-      onMonthChange(s.id);
-      // 若目前月份無資料，自動切到 profits collection 裡最新有資料的月份
-      if(!state[s.id]?._built){
-        const shopKeys=Object.keys(Store._profitMem||{}).filter(k=>k.startsWith(`ec|${s.id}|`));
-        if(shopKeys.length>0){
-          const months=[...new Set(shopKeys.map(k=>k.split('|')[2]))].filter(Boolean).sort().reverse();
-          if(months[0]){
-            const sel=document.getElementById('month-sel-'+s.id);
-            if(sel&&sel.value!==months[0]){sel.value=months[0];onMonthChange(s.id);}
-          }
-        }
-      }
+      if(_userPickedPeriod[s.id]) onMonthChange(s.id);   // 已介入 → 只重載當前選擇（不跳、不設旗標）顯示最新資料
+      else _applyLatestPeriod(s.id);                     // 沒介入 → 自動跳最新（內部呼叫 onMonthChange 完整渲染）
       if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}
     });
     // 只有賣場資料（非 _summary_v1）變動時才重新渲染總表
@@ -614,7 +753,12 @@ window.addEventListener('profitDataReady', (e)=>{
     const skipSummary=window._summaryJustSaved&&(Date.now()-window._summaryJustSaved<5000);
     if(typeof renderSummary==='function'&&hasSummaryChange&&!skipSummary) renderSummary();
     // 重載後確保當前賣場 tab 正確：只在 tab 真的跑掉時才修復
-    if(curShop&&curShop!=='總表'){
+    // ⚠ 守衛：這段是「蝦皮專屬」的 tab 修復（curShop 是蝦皮的）。只有當前顯示的是蝦皮容器（content-*）時才做；
+    //   若使用者已切到 MOMO（momo-content-*）/酷澎（coupang-content-*），強制把蝦皮設 active 會搶走 .active、
+    //   把人踢回蝦皮（甲配 pill 還亮、內容卻變蝦皮）。以 active 容器 id 前綴判斷，不列舉平台，加新平台不用改。
+    const _activeEl=document.querySelector('.shop-content.active');
+    const _inShopee=!_activeEl||_activeEl.id.startsWith('content-');
+    if(_inShopee && curShop&&curShop!=='總表'){
       const content=document.getElementById('content-'+curShop);
       if(content&&!content.classList.contains('active')){
         document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
@@ -706,7 +850,7 @@ function shopHTML(shop){return`
   <div id="sv-profit-${shop}">
     <div class="toolbar" id="tb-${shop}" style="position:relative">
       <span id="period-tag-${shop}" style="display:none"></span>
-      <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋商品…" oninput="applyFilters('${shop}')" style="display:none">
+      <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋 編號 / 名稱 / ID…" oninput="setSearch('${shop}',this.value)">
       <span class="row-cnt" id="cnt-${shop}"></span>
       <span class="sugg-filter-chip" id="sugg-chip-${shop}">
         <span id="sugg-chip-text-${shop}"></span>
@@ -782,9 +926,12 @@ function getDays(month,half){
   const[y,m]=month.split('/');const last=new Date(+y,+m,0).getDate();
   if(half==='first')return 15;if(half==='second')return last-15;return last;
 }
-function onMonthChange(shop){
+function onMonthChange(shop,byUser,month,half){
   const sel=document.getElementById('month-sel-'+shop);
   if(!sel)return;
+  if(byUser) _userPickedPeriod[shop]=true; // 使用者親手切月份 → 鎖住，之後不再自動跳
+  if(month!==undefined) sel.value=month;          // 自動流程：用參數設月份下拉（程式設 value 不觸發 change、不重繪）
+  if(half!==undefined)  state[shop].curHalf=half; // 自動流程：用參數設半月（純 state 指派，不重繪）
   delete _editedAt[shop]; // 用戶主動切換月份，清除 edit 保護
   state[shop].curMonth=sel.value;
   try{localStorage.setItem('ec_lastMonth_'+shop,sel.value);}catch{} // 記住這個賣場的最後月份
@@ -792,7 +939,8 @@ function onMonthChange(shop){
   updateHalfBtnLabels(shop);
   tryLoadSaved(shop);
 }
-function onHalfChange(shop,half,btn){
+function onHalfChange(shop,half,btn,byUser){
+  if(byUser) _userPickedPeriod[shop]=true; // 使用者親手切半月 → 鎖住，之後不再自動跳
   delete _editedAt[shop]; // 用戶主動切換區間，清除 edit 保護
   state[shop].curHalf=half;
   try{localStorage.setItem('ec_lastHalf_'+shop,half);}catch{} // 記住這個賣場的最後區間
@@ -838,7 +986,8 @@ function tryLoadSaved(shop){
   if(rep){loadIntoUI(shop,rep.built,rep.period,rep.days);}
   else{
     state[shop]._built=null;
-    document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">此區間尚無資料，請上傳報表產生</div></div>`;
+    const _hLbl=s.curHalf==='first'?'上半月':s.curHalf==='second'?'下半月':'整月';
+    document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${s.curMonth} ${_hLbl} 尚無資料，請上傳報表產生</div></div>`;
     document.getElementById('period-tag-'+shop).textContent='';
     if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;}
     setKpis(shop,0,0,0,0);
@@ -888,7 +1037,6 @@ function clearPeriod(shop){
   // 重置表格 & KPI
   document.getElementById('period-tag-'+shop).textContent='';
   document.getElementById('period-tag-'+shop).style.display='none';
-  const search=document.getElementById('search-'+shop);if(search)search.style.display='none';
   document.getElementById('cnt-'+shop).textContent='';
   document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">報表已清除，請重新上傳並產生</div></div>`;
   setKpis(shop,0,0,0,0);
@@ -907,7 +1055,9 @@ function loadIntoUI(shop,built,period,days){
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
-  state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=getTagFilters();
+  state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];   // 標籤篩選跟 filters/sorts 同批重置：切月份/切賽場不殘留（搜尋另行保留，見下一行）
+  // search 刻意不重置：切月份保留關鍵字（唯一清掉它的是頁面初次載入時 state 的整包初始化）
+  const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
   document.getElementById('period-tag-'+shop).textContent=period;
   const cb=document.getElementById('clear-btn-'+shop);if(cb)cb.style.display='';
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=false;}
@@ -1294,10 +1444,28 @@ function markCard(shop,type,icon,title,cls){
 }
 function setSpin(shop,show){const el=document.getElementById('spin-'+shop);if(el)el.classList.toggle('show',show);}
 function checkReady(shop){const s=state[shop];const g=document.getElementById('gen-'+shop);if(g)g.disabled=!(s.rawMobic&&s.rawAds);}
-function getPlatformRate(){
+// ── 通路費率對照表（費率屬於通路，不是全站共用一個值）──
+// 照 ANA_THRESH 的範式：_cloudRead/_cloudWrite + Object.assign 補預設
+const SHOP_RATE_DEF={'好麻吉':20.5,'玩樂':20.5,'森之旅':20.5,'維克':17.5};
+function getShopRates(){return Object.assign({},SHOP_RATE_DEF,_cloudRead('ec_shop_rate')||{});}
+function saveShopRates(t){_cloudWrite('ec_shop_rate',t);}
+function getPlatformRate(shop){
+  const n=parseFloat(getShopRates()[shop]);
+  return (Number.isFinite(n)&&n>=0 ? n : 20.5)/100;
+}
+function onPlatformRateChange(){
   const el=document.getElementById('platformRate');
-  if(!el) return 20.5/100; // 元素還沒渲染出來時用預設值，避免 null .value 噴錯
-  return(parseFloat(el.value)||20.5)/100;
+  if(!el) return;
+  const shop=(typeof curShop!=='undefined'&&curShop!=='總表')?curShop:SHOPS[0].id;
+  const n=parseFloat(el.value);
+  if(!Number.isFinite(n)||n<0||n>100){
+    el.value=getShopRates()[shop];
+    if(typeof showToast==='function') showToast('費率要介於 0 到 100 之間','error');
+    return;
+  }
+  const t=getShopRates(); t[shop]=n; saveShopRates(t);
+  if(typeof renderSummary==='function') try{renderSummary();}catch(e){console.error(e);}
+  if(typeof showToast==='function') showToast(shop+' 手續費已改為 '+n+'%（記得按同步雲端）','success');
 }
 
 // ── 取得對應的「上期」區間 key ──
@@ -1606,7 +1774,7 @@ function confirmUnmatched(){
 }
 
 function buildShop(shop,days){
-  const s=state[shop];const PLATFORM=getPlatformRate();
+  const s=state[shop];const PLATFORM=getPlatformRate(shop);
   const salesCol=s.rawMobic.length?Object.keys(s.rawMobic[0]).find(k=>k.startsWith('銷售數量')):null;
   const agg={};
   s.rawMobic.forEach(r=>{
@@ -1764,6 +1932,7 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, 
   const D=adsFee, H=pureRate*100, K=targetROI, N=roiDiff, O=clicks, P=pureProfit, R=roi;
   if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
   if(ok('高利潤商品')&&D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
+  if(ok('低淨利')&&D===0 && (N===null||N===undefined||!isFinite(N))) return{label:'低淨利',cls:'tag-low'};
   if(ok('賠錢中')&&D>0 && P<0) return{label:'賠錢中',cls:'tag-lose'};
   if(ok('低淨利')&&D>0 && ((K!==null&&K!==undefined&&K<0)||(N===null||N===undefined||!isFinite(N)))) return{label:'低淨利',cls:'tag-low'};
   if(ok('低效廣告')&&D>0 && H>=0 && H<t.badAdsMaxH) return{label:'低效廣告',cls:'tag-bad'};
@@ -1830,6 +1999,8 @@ function closeAnaSettings(){document.getElementById('ana-overlay')?.classList.re
 function openUploadModal(){
   const ov=document.getElementById('upload-modal-overlay');if(!ov)return;
   const shop=curShop==='總表'?SHOPS[0].id:curShop;
+  const _rEl=document.getElementById('platformRate');
+  if(_rEl) _rEl.value=getShopRates()[shop];
   document.getElementById('upm-shop-hint').textContent='目前賣場：'+shop;
   function getMeta(key){try{const m=localStorage.getItem(key);return m?JSON.parse(m):null;}catch{return null;}}
   function syncCard(id,ok,okIcon,defaultIcon,okLabel,defaultLabel,metaKey){
@@ -1975,6 +2146,7 @@ function buildDistHtml(shop,built){
     }${td(l,GRN_LT,'#1a3260')}${td(n,GRN_LT,'#1a3260')}${td(pct(n,noAdsTotal),GRN_LT,'#1a3260')}</tr>`).join('');
 
   return `
+  <div class="dist-note">本表統計全部 ${built.length} 筆商品,不隨表格篩選變動</div>
   <table style="${T}">
     <tbody>
       ${rMeta('總投廣商品數量',adsTotal)}
@@ -2069,25 +2241,28 @@ function renderAnaModalBody(){
   }).join(''):`<div class="ana-custom-empty">尚無自訂標籤</div>`;
   const disabledSection=disabled.length?`<div class="ana-sec-hdr" style="margin-top:16px">已停用標籤</div>${disabled.map(l=>`<div class="ana-rule-row" style="opacity:.5"><span class="ana-rule-tag tag-low" style="min-width:auto;padding:4px 8px">${l}</span><span class="ana-rule-desc" style="font-size:12px;color:#9ca3af">已停用</span><button class="ana-rule-del" style="color:#10b981" onclick="restoreAnaTag(decodeURIComponent('${encodeURIComponent(l)}'))" title="恢復">↩</button></div>`).join('')}`:'';
 
+  // 顯示用備註：規則名旁標出「報表顯示為 ROI x」。來源用同一張 window.ANA_LABEL_DISPLAY，
+  // 沒對應的（加50 等）自動不顯示。純顯示，不動 key / 規則值 / 存檔。
+  const dispNote=(lbl)=>{const d=(window.ANA_LABEL_DISPLAY||{})[lbl];return d?`<span style="color:#9ca3af;font-size:11px;margin-left:6px">(報表顯示為 ${d})</span>`:'';};
   document.getElementById('ana-modal-body').innerHTML=`
     <div class="ana-sec-hdr">加減碼前提</div>
     <div class="ana-rule-row">
       <span class="ana-rule-tag tag-add300" style="min-width:72px">前提</span>
-      <span class="ana-rule-desc">O欄（過去7天點擊）> ${inp('clickMin',t.clickMin)}</span>
+      <span class="ana-rule-desc">O欄（過去7天點擊）≥ ${inp('clickMin',t.clickMin)}</span>
     </div>
     <div class="ana-sec-hdr">加預算</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">加300</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add300',t.add300)} (含)以上</span>${trash('加300','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">加200</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add200',t.add200)} (含)以上</span>${trash('加200','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">加100</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add100',t.add100)} (含)以上</span>${trash('加100','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">加300</span>${dispNote('加300')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add300',t.add300)} (含)以上</span>${trash('加300','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">加200</span>${dispNote('加200')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add200',t.add200)} (含)以上</span>${trash('加200','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">加100</span>${dispNote('加100')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add100',t.add100)} (含)以上</span>${trash('加100','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-add50">加50</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≥ ${inp('add50',t.add50)} 且 < ${inp('add50max',t.add100)}</span>${trash('加50','disableAnaTag')}</div>
     <div class="ana-sec-hdr">減預算</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub300">減300</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub300',t.sub300)}</span>${trash('減300','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub200">減200</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub200',t.sub200)}</span>${trash('減200','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub100">減100</span><span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub100',t.sub100)}</span>${trash('減100','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub300">減300</span>${dispNote('減300')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub300',t.sub300)}</span>${trash('減300','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub200">減200</span>${dispNote('減200')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub200',t.sub200)}</span>${trash('減200','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-sub100">減100</span>${dispNote('減100')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub100',t.sub100)}</span>${trash('減100','disableAnaTag')}</div>
     <div class="ana-sec-hdr">分析標籤</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 > ${inp('highMinH',t.highMinH,'0.1')} %</span>${trash('高利潤商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">廣告費 > 0 且 淨利 &lt; 0</span>${trash('賠錢中','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">廣告費 > 0 且 目標ROI &lt; 0<br><span style="color:#9ca3af;font-size:11px">或 廣告費 > 0 且 直接ROI差距顯示「—」</span></span>${trash('低淨利','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">廣告費 > 0 且 目標ROI &lt; 0<br><span style="color:#9ca3af;font-size:11px">或 廣告費 > 0 且 直接ROI差距顯示「—」<br>或 廣告費 = 0 且 直接ROI差距顯示「—」</span></span>${trash('低淨利','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">危險商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 0%~${inp('dangerMaxH',t.dangerMaxH,'0.1')} %</span>${trash('危險商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-bad">低效廣告</span><span class="ana-rule-desc">廣告費 > 0 且 純利率 &lt; ${inp('badAdsMaxH',t.badAdsMaxH,'0.1')} %</span>${trash('低效廣告','disableAnaTag')}</div>
     <div class="ana-sec-hdr">自訂標籤</div>
@@ -2459,7 +2634,7 @@ function updateTagFilterBar(shop){
     const total=lbls.reduce((s,l)=>s+(counts[l]||0),0);
     if(!total)return'';
     const isActive=lbls.some(l=>sel.includes(l));
-    const items=lbls.filter(l=>counts[l]).map(l=>`<div class="tfdrop-item${sel.includes(l)?' sel':''}" onclick="event.stopPropagation();setTagFilter('${shop}','${l}');closeTfDrop()">${l} <span class="tfpill-cnt">${counts[l]}</span></div>`).join('');
+    const items=lbls.filter(l=>counts[l]).map(l=>`<div class="tfdrop-item${sel.includes(l)?' sel':''}" onclick="event.stopPropagation();setTagFilter('${shop}','${l}');closeTfDrop()">${window.mapAnaLabel(l)} <span class="tfpill-cnt">${counts[l]}</span></div>`).join('');
     return`<div class="tfdrop-wrap"><span class="tfpill${isActive?' active':''}" style="width:100%" onclick="toggleTfDrop(event,'${id}')">${label} ▾</span><div class="tfdrop-menu" id="${id}">${items}</div></div><span class="tfpill-cnt-cell" onclick="event.stopPropagation();toggleTfDrop(event,'${id}')">${total}</span>`;
   };
   const total=built.length;
@@ -2528,10 +2703,11 @@ document.addEventListener('click',closeTfDrop);
 
 // ── Filters & Sort ──
 function applyFilters(shop){
-  const s=state[shop];if(!s._built||!s._built.length)return;
-  const q=(document.getElementById('search-'+shop).value||'').toLowerCase();
+  const s=state[shop];if(!s)return;
+  if(!s._built||!s._built.length)return;
+  const q=(s.search||'').trim().toLowerCase();
   let list=[...s._built];
-  if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q));
+  if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
   if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l||(r.testTags||[]).some(tt=>tt.label===l)));
   if(s.suggFilterActive)list=list.filter(r=>r.testTags?.length);
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
@@ -2539,6 +2715,7 @@ function applyFilters(shop){
     if(!f)return;
     if(f.type!=='range'&&(f.val===''||f.val===undefined))return;
     list=list.filter(r=>{
+      if(col==='pureRate'&&!(r.rev>0))return false;   // 零營收無淨利率(顯示「—」),不納入任何 pureRate 數值篩選
       const raw=r[col];
       const v=PCT_COLS.has(col)?num(raw)*100:raw;
       if(f.type==='text')return(raw+'').toLowerCase().includes(f.val.toLowerCase());
@@ -2564,6 +2741,7 @@ function applyFilters(shop){
   updateSuggChip(shop);
 }
 function setSort(shop,col,dir){state[shop].sorts={col,dir};applyFilters(shop);}
+function setSearch(shop,val){if(state[shop])state[shop].search=val;applyFilters(shop);}
 function setColFilter(shop,col,type,val){
   if(!state[shop].filters)state[shop].filters={};
   if(val===''||val===null)delete state[shop].filters[col];
@@ -2720,7 +2898,7 @@ function updateAdsEditPreview(){
   const newAds=parseFloat(document.getElementById('ads-edit-input').value);
   const el=document.getElementById('ads-edit-preview');
   if(isNaN(newAds)){el.innerHTML='';return;}
-  const PLATFORM=getPlatformRate();
+  const PLATFORM=getPlatformRate(shop);
   const newPure=r.gross-newAds-(r.rev*PLATFORM);
   const newPureRate=r.rev>0?newPure/r.rev*100:0;
   const col=newPure>=0?'#10b981':'#ef4444';
@@ -2737,6 +2915,9 @@ function confirmAdsEdit(){
   const stayOnShop=()=>{
     const target=document.getElementById('content-'+shop);
     if(!target)return;
+    // ⚠ 同 profitDataReady 的守衛：使用者若已切到 MOMO/酷澎（active 容器非 content-*），別把蝦皮硬拉回來
+    const _activeEl=document.querySelector('.shop-content.active');
+    if(_activeEl && !_activeEl.id.startsWith('content-')) return;
     if(target.classList.contains('active')&&curShop===shop)return; // 已正確，不動
     curShop=shop;
     document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
@@ -2773,7 +2954,7 @@ function patchRow(shop,code,ov){
   // adsFee cell
   const adsEl=document.getElementById(`td-${shop}-${code}-adsFee`);
   if(adsEl){
-    adsEl.querySelector('.cell-val').textContent=fmtAds(r.adsFee);
+    adsEl.querySelector('.cell-val').textContent='$'+fmtN(r.adsFee);
     adsEl.className=`td-num td-amber ${edited?'cell-edited':''} `.trim();
     adsEl.style.cursor='pointer';
   }
@@ -2797,14 +2978,14 @@ function patchRow(shop,code,ov){
   if(budEl)budEl.textContent=r.dayBudget>0?'$'+fmtN(r.dayBudget):'—';
   // analysis
   const anaEl=document.getElementById(`td-${shop}-${code}-analysis`);
-  if(anaEl){const a=r.analysis||{};anaEl.innerHTML=a.label?`<span class="tag ${a.cls}">${a.label}</span>`:'—';}
+  if(anaEl){const a=r.analysis||{};anaEl.innerHTML=a.label?`<span class="tag ${a.cls}">${window.mapAnaLabel(a.label)}</span>`:'—';}
   // KPI 小計列
   syncHeaderKpis(shop);
 }
 
 function recalcRow(shop,code,ov){
   const built=state[shop]._built;const idx=built.findIndex(r=>r.code===code);if(idx<0)return;
-  const r=built[idx];const PLATFORM=getPlatformRate();
+  const r=built[idx];const PLATFORM=getPlatformRate(shop);
   // 只有廣告費可以編輯，重算相關衍生欄位
   const adsFee=ov.adsFee!==undefined?ov.adsFee:r.adsFee;
   const rev=r.rev;const gross=r.gross;
@@ -2937,7 +3118,7 @@ const PROFIT_COLS=[
   {key:'pureProfit',label:'淨利'},{key:'pureRate',label:'淨利率%'},{key:'adsPct',label:'廣告佔比'},
   {key:'stock',label:'可用庫存'},{key:'targetROI',label:'目標ROI'},{key:'directROI',label:'直接ROI'},
   {key:'roi',label:'投入產出'},{key:'roiDiff',label:'實際-目標'},{key:'clicks',label:'點擊數'},
-  {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'分析'},{key:'note',label:'廣告調整'},
+  {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'廣告分析'},{key:'note',label:'廣告調整'},
   {key:'growthRate',label:'成長比',grow:true},{key:'growthAnalysis',label:'成長分析',grow:true},{key:'growthNote',label:'商品調整',grow:true},
 ];
 const _HCOLS_LS='ec_hcols_user';
@@ -3069,6 +3250,10 @@ function openNotePopup(shopKey,code){
         <div class="pnm-section">調整紀錄（按 Enter 或「送出」新增，自動加日期・自動儲存）</div>
         <div class="pnm-input-row"><input id="pnm-inp" class="pnm-inp" type="text" placeholder="例：調整主圖 / 加強廣告預算 +500"><button class="pnm-send" onclick="submitProfitNote()">送出</button></div>
         <div id="pnm-list" class="pnm-list"></div>
+        <div id="pnm-hist-wrap" style="display:none">
+          <div class="pnm-section" style="margin-top:14px">其他期間的調整</div>
+          <div id="pnm-hist" class="pnm-list"></div>
+        </div>
       </div>
       <div class="pnm-footer"><button class="pnm-close-btn" onclick="closeProfitNoteModal()">關閉</button></div>
     </div>`;
@@ -3081,6 +3266,7 @@ function openNotePopup(shopKey,code){
   document.getElementById('pnm-title').textContent=r?`${code}・${r.name}`:code;
   const pnmInp=document.getElementById('pnm-inp');if(pnmInp)pnmInp.value='';
   renderPnmList();
+  renderPnmHistory();
   modal.classList.add('open');
   setTimeout(()=>pnmInp?.focus(),60);
 }
@@ -3100,6 +3286,27 @@ function renderPnmList(){
     <div class="pnm-entry-text">${text.replace(/</g,'&lt;')}</div>
     <button class="pnm-entry-del" onclick="deleteProfitNote(${i})">×</button>
   </div>`).join('')).join('');
+}
+function renderPnmHistory(){
+  const wrap=document.getElementById('pnm-hist-wrap');
+  const box=document.getElementById('pnm-hist');
+  if(!wrap||!box||!_pnm) return;
+  const {shopKey,code}=_pnm;
+  // 商品調整（{shop}_growth）只有單一 key、不分期間，
+  // 它的所有紀錄已全部顯示在上方「調整紀錄」清單裡，沒有「其他期間」可言。
+  if(shopKey.indexOf('_growth')>=0){ wrap.style.display='none'; box.innerHTML=''; return; }
+  const shop=shopKey.split('|')[0];
+  const parts=shopKey.split('|');
+  const curM=parts.length>=3?parts[1]:(state[shop]?state[shop].curMonth:'');
+  const curH=parts.length>=3?parts[2]:(state[shop]?state[shop].curHalf:'');
+  let hist=[];
+  try{ hist=_noteHistory(shop,code,curM,curH); }catch(e){ console.error('[pnm] 歷史查詢失敗',e); }
+  if(!hist.length){ wrap.style.display='none'; box.innerHTML=''; return; }
+  wrap.style.display='';
+  box.innerHTML=hist.map(h=>`<div class="pnm-entry">
+    <div class="pnm-entry-date">${h.month} ${_halfLabel(h.half)}</div>
+    <div class="pnm-entry-text">${String(h.text).replace(/</g,'&lt;')}</div>
+  </div>`).join('');
 }
 function submitProfitNote(){
   if(!_pnm)return;
@@ -3158,7 +3365,7 @@ function renderTable(shop,list){
     adsFee:'廣告費', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利',
     pureRate:'淨利率%', adsPct:'廣告佔比', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
     roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算',
-    analysisLabel:'分析', note:'廣告調整',
+    analysisLabel:'廣告分析', note:'廣告調整',
     growthRate:'成長比', growthAnalysis:'成長分析', growthNote:'商品調整',
   };
   const buildColHeader=(c)=>{
@@ -3183,7 +3390,7 @@ function renderTable(shop,list){
     const idStr=!r.shopeeIds?.length?'<span style="color:#d1d5db">—</span>':r.shopeeIds.length===1?r.shopeeIds[0]:'<span style="color:#f59e0b">多個</span>';
     const roiDiffStr=r.roiDiff===null?'—':`<span style="color:${r.roiDiff>=0?'#10b981':'#ef4444'};font-weight:600">${r.roiDiff.toFixed(2)}</span>`;
     const anaObj=r.analysis||{label:'',cls:''};
-    const anaHtml=anaObj.label?`<span class="tag ${anaObj.cls}">${anaObj.label}</span>`:'—';
+    const anaHtml=anaObj.label?`<span class="tag ${anaObj.cls}">${window.mapAnaLabel(anaObj.label)}</span>`:'—';
     const noteId=`note-${shop}-${r.code}`;
 
     // 可編輯數字欄 helper
@@ -3202,7 +3409,7 @@ function renderTable(shop,list){
       const adsId=`td-${shop}-${r.code}-adsFee`;
       const MOBIC_BLANK=new Set(['growthRate','growthAnalysis']);
       const mobicCell={
-        adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">${fmtAds(r.adsFee)}</span></td>`,
+        adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span></td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
         note:noteCellHtml,
         growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
@@ -3220,7 +3427,7 @@ function renderTable(shop,list){
       </tr>`;
     }else{
       const rowCell={
-        adsFee:editTd('adsFee',fmtAds(r.adsFee),'td-amber'),
+        adsFee:editTd('adsFee','$'+fmtN(r.adsFee),'td-amber'),
         rev:`<td class="td-num">$${fmtN(r.rev)}<div class="sub-rev">${r.prevRev!==null?'上期 $'+fmtN(r.prevRev):'—'}</div></td>`,
         gross:`<td class="td-num">$${fmtN(r.gross)}</td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
@@ -3406,7 +3613,7 @@ function editSummaryCell(rowId,shop,field,tdEl){
     saveSummaryRows(rows, { type:'edit', rowId, shop, field, value: isValid ? v : null, start: row.start, end: row.end });
     // patch cells without re-rendering
     const d=row.shops[shop]||{};
-    const rate=getPlatformRate();
+    const rate=getPlatformRate(shop);
     const pure=(d.gross||0)-(d.ads||0)-(d.rev||0)*rate;
     const fmt=n=>fmtN(Math.round(n||0));
     const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':'—';
@@ -3430,7 +3637,6 @@ function editSummaryCell(rowId,shop,field,tdEl){
 function renderSummary(){
   const el=document.getElementById('content-總表');
   if(!el)return;
-  const rate=getPlatformRate();
   const isFullMonth=row=>{
     const s=new Date(row.start+'T12:00:00'),e=new Date(row.end+'T12:00:00');
     if(s.getFullYear()!==e.getFullYear()||s.getMonth()!==e.getMonth())return false;
@@ -3445,14 +3651,14 @@ function renderSummary(){
   });
   const fmt=n=>fmtN(Math.round(n||0));
   const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':'—';
-  const calcPure=(d)=>(d.gross||0)-(d.ads||0)-(d.rev||0)*rate;
+  const calcPure=(d,shopId)=>(d.gross||0)-(d.ads||0)-(d.rev||0)*getPlatformRate(shopId);
 
   const shopGroupHdr=SHOPS.map(s=>`<th colspan="6" style="text-align:center;background:${s.color};color:white;font-weight:700;font-size:13px;padding:7px 4px;border-left:2px solid rgba(255,255,255,.3)">${s.id}</th>`).join('');
   const shopSubHdr=SHOPS.map(()=>`<th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">營收</th><th style="min-width:62px;font-size:11px;font-weight:600;background:#f8fafc">廣告</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">毛利</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">純利</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">純利率%</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">廣告佔比%</th>`).join('');
 
   const dataCells=(shopMap,editable,rowId)=>SHOPS.map(s=>{
     const d=shopMap?.[s.id]||{};
-    const p=calcPure(d);
+    const p=calcPure(d,s.id);
     const bl='border-left:2px solid #e5e7eb;';
     const blB='border-left:2px solid #c7d2fe;';
     const borderL=editable?bl:blB;
@@ -3596,7 +3802,199 @@ function renderSummary(){
     </table></div>
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button onclick="openAddSummaryRowModal()" style="padding:7px 18px;border:1.5px dashed #c7d2fe;border-radius:8px;background:white;color:#5b5fcf;font-size:13px;font-weight:600;cursor:pointer">＋ 新增週次</button>
-      <span style="font-size:11px;color:#9ca3af">純利 = 毛利 − 廣告 − 營收×${(rate*100).toFixed(1)}%　｜　點擊數字可編輯</span>
+      <span style="font-size:11px;color:#9ca3af">純利 = 毛利 − 廣告 − 營收×手續費　｜　點擊數字可編輯</span>
+    </div>
+  </div>`;
+}
+
+// ── 重點檢視：跨四家的簡潔檢視（2026-07-24 新增）──
+// 自己一組月份/區間狀態，不碰 state[shop]，
+// 因為 onMonthChange/onHalfChange 綁死 state[shop]，非賣場頁面用不了。
+let _focusMonth=null, _focusHalf=null;
+
+function _focusInitPeriod(){
+  if(_focusMonth) return;
+  // 預設跟淨利表同一套邏輯：用「有最多資料」的那家的最新期間
+  let best=null;
+  SHOPS.forEach(s=>{
+    const p=_findLatestPeriod(s.id);
+    if(!p) return;
+    const r=(p.month||'')+'#'+(_HALF_RANK[p.half]!==undefined?_HALF_RANK[p.half]:0);
+    if(!best||r>best.rank) best={month:p.month,half:p.half,rank:r};
+  });
+  if(best){ _focusMonth=best.month; _focusHalf=best.half; }
+  else { _focusMonth=_initCurMonth; _focusHalf=_initCurHalf; }
+}
+
+function onFocusPeriodChange(){
+  const m=document.getElementById('focus-month-sel');
+  const h=document.getElementById('focus-half-sel');
+  if(m) _focusMonth=m.value;
+  if(h) _focusHalf=h.value;
+  renderFocus();
+}
+
+// 重點檢視的欄位設定 —— 【刻意】與主表的 ec_hcols_user 完全分離。
+// 主表那份是全站共用、不上雲；這份走 _cloudWrite（會進待同步清單，
+// 按同步雲端後全公司共用），因為老闆選的欄位應該在他任何一台裝置都一樣。
+const FOCUS_COLS_DEF=['rev','pureProfit','pureRate'];
+function getFocusCols(){
+  const v=_cloudRead('ec_focus_cols');
+  if(Array.isArray(v)&&v.length) return v.slice();
+  return FOCUS_COLS_DEF.slice();
+}
+function saveFocusCols(arr){ _cloudWrite('ec_focus_cols',arr); }
+function toggleFocusCol(key){
+  const cur=getFocusCols();
+  const i=cur.indexOf(key);
+  if(i>=0){
+    if(cur.length<=1){                     // 至少要留一欄，全部關掉表格會變空殼
+      if(typeof showToast==='function') showToast('至少要保留一個欄位','error');
+      return;
+    }
+    cur.splice(i,1);
+  }else{
+    cur.push(key);
+  }
+  saveFocusCols(cur);
+  renderFocus();
+  openFocusColPicker(true);                // 重繪選單，維持開啟狀態
+}
+
+function openFocusColPicker(keepOpen){
+  const old=document.getElementById('focus-col-menu');
+  if(old){ old.remove(); if(!keepOpen) return; }
+  const btn=document.getElementById('focus-col-btn');
+  if(!btn) return;
+  const cur=getFocusCols();
+  const menu=document.createElement('div');
+  menu.id='focus-col-menu';
+  menu.style.cssText='position:absolute;z-index:60;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:6px;box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:320px;overflow-y:auto;min-width:160px';
+  menu.innerHTML=PROFIT_COLS.map(c=>{
+    const on=cur.indexOf(c.key)>=0;
+    return `<div onclick="toggleFocusCol('${c.key}')" style="padding:5px 8px;cursor:pointer;font-size:13px;border-radius:5px;display:flex;align-items:center;gap:7px">
+      <span style="display:inline-block;width:13px;height:13px;border:1px solid ${on?'#4f46e5':'#d1d5db'};border-radius:3px;background:${on?'#4f46e5':'#fff'};color:#fff;font-size:10px;line-height:13px;text-align:center">${on?'✓':''}</span>
+      <span>${c.label}</span></div>`;
+  }).join('');
+  const r=btn.getBoundingClientRect();
+  menu.style.left=(r.left+window.scrollX)+'px';
+  menu.style.top=(r.bottom+window.scrollY+4)+'px';
+  document.body.appendChild(menu);
+  setTimeout(()=>{
+    const close=ev=>{
+      if(menu.contains(ev.target)||btn.contains(ev.target))return;
+      menu.remove();document.removeEventListener('click',close);
+    };
+    document.addEventListener('click',close);
+  },0);
+}
+// renderFocus 專用：fmtN 會取絕對值（Math.abs），負數會顯示成正數。
+// 主表靠 CSS class 染紅來表達負值，但這裡需要數字本身就看得出正負。
+function _fSigned(v){
+  const n=Number(v)||0;
+  return (n<0?'-$':'$')+fmtN(n);
+}
+// 依欄位型別決定顯示格式。
+// 百分比欄與金額欄的呈現方式不同，不能一律當金額。
+const _FOCUS_PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
+const _FOCUS_TEXT_COLS=new Set(['analysisLabel','note','growthAnalysis','growthNote']);
+// 所有欄位（含 note/growthNote）直接從商品列 r 取：sheet-import 連同報表把調整寫進 built[]，
+// r.note 已是純字串（不是 {adjustments} 結構）。growthAnalysis 是物件 {label,cls} → 取 .label；analysisLabel 已是字串。
+function _focusCell(r,key){
+  const v=r[key];
+  if(_FOCUS_TEXT_COLS.has(key)){
+    const t=(v==null?'':(typeof v==='object'?(v.label||''):String(v)));
+    return `<td style="font-size:12px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.replace(/"/g,'&quot;')}">${t}</td>`;
+  }
+  const n=Number(v);
+  if(!isFinite(n)) return `<td class="td-num" style="color:#9ca3af">—</td>`;
+  if(_FOCUS_PCT_COLS.has(key)){
+    return `<td class="td-num ${n<0?'td-neg':''}">${(n*100).toFixed(1)}%</td>`;
+  }
+  return `<td class="td-num ${n<0?'td-neg':''}">${_fSigned(n)}</td>`;
+}
+function renderFocus(){
+  const el=document.getElementById('content-重點檢視');
+  if(!el) return;
+  _focusInitPeriod();
+
+  const cols=getFocusCols().map(k=>PROFIT_COLS.find(c=>c.key===k)).filter(Boolean);
+
+  const halfLabel=h=>h==='first'?'上半月':h==='second'?'下半月':'整月';
+
+  // 讀四家資料（lsLoad 是純讀取、零副作用，不碰 state）
+  const data=SHOPS.map(s=>{
+    const rep=lsLoad(s.id,_focusMonth,_focusHalf);
+    const built=(rep&&Array.isArray(rep.built))?rep.built:null;
+    let rev=0,ads=0,gross=0,pure=0;
+    if(built) built.forEach(r=>{
+      rev+=Number(r.rev)||0; ads+=Number(r.adsFee)||0;
+      gross+=Number(r.gross)||0; pure+=Number(r.pureProfit)||0;
+    });
+    return {id:s.id,color:s.color,built,rev,ads,gross,pure};
+  });
+
+  // 上半：四張卡片
+  const cards=data.map(d=>{
+    if(!d.built) return `<div class="panel" style="padding:10px 12px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px">
+        <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${d.color};margin-right:5px"></span>${d.id}</div>
+      <div style="font-size:12px;color:#9ca3af;margin-top:12px">${_focusMonth} ${halfLabel(_focusHalf)}<br>尚無資料</div>
+    </div>`;
+    const pr=d.rev>0?(d.pure/d.rev*100).toFixed(1)+'%':'—';
+    return `<div class="panel" style="padding:10px 12px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px">
+        <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${d.color};margin-right:5px"></span>${d.id}</div>
+      <div style="font-size:11px;color:#9ca3af">營收</div>
+      <div style="font-size:15px;margin-bottom:4px">${_fSigned(d.rev)}</div>
+      <div style="font-size:11px;color:#9ca3af">淨利</div>
+      <div style="font-size:15px" class="${d.pure<0?'td-neg':''}">${_fSigned(d.pure)} <span style="font-size:11px">${pr}</span></div>
+    </div>`;
+  }).join('');
+
+  // 下半：四家商品混合，按淨利由低到高
+  const rows=[];
+  data.forEach(d=>{ if(d.built) d.built.forEach(r=>rows.push({shop:d.id,color:d.color,r:r})); });
+  rows.sort((a,b)=>(Number(a.r.pureProfit)||0)-(Number(b.r.pureProfit)||0));
+
+  const trs=rows.map(x=>{
+    const r=x.r;
+    const rev=Number(r.rev)||0, pure=Number(r.pureProfit)||0;
+    const pr=rev>0?(pure/rev*100).toFixed(1)+'%':'—';
+    return `<tr>
+      <td style="font-size:12px;color:#6b7280;text-align:left">
+        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${x.color};margin-right:4px"></span>${x.shop}</td>
+      <td style="font-size:12px;text-align:left">${r.code||''}</td>
+      <td style="font-size:12px;text-align:left;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.name||'').replace(/"/g,'&quot;')}">${r.name||''}</td>
+      ${cols.map(c=>_focusCell(r,c.key)).join('')}
+    </tr>`;
+  }).join('');
+
+  const monthOpts=MONTHS.map(mo=>`<option value="${mo}"${mo===_focusMonth?' selected':''}>${mo}</option>`).join('');
+  const halfOpts=['first','second','full'].map(h=>`<option value="${h}"${h===_focusHalf?' selected':''}>${halfLabel(h)}</option>`).join('');
+
+  el.innerHTML=`<div style="padding:14px 16px 16px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <span style="font-size:12px;color:#6b7280">月份</span>
+      <select id="focus-month-sel" class="setting-input" onchange="onFocusPeriodChange()" style="width:100px">${monthOpts}</select>
+      <span style="font-size:12px;color:#6b7280">區間</span>
+      <select id="focus-half-sel" class="setting-input" onchange="onFocusPeriodChange()" style="width:90px">${halfOpts}</select>
+      <button id="focus-col-btn" class="col-pick-btn" onclick="openFocusColPicker()" style="margin-left:auto">☰ 選欄位</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:18px">${cards}</div>
+    <div class="panel" style="padding:12px 14px">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
+        <span style="font-size:14px;font-weight:500">全部商品</span>
+        <span style="font-size:12px;color:#6b7280">${rows.length} 筆</span>
+        <span style="font-size:12px;color:#9ca3af;margin-left:auto">依淨利由低到高</span>
+      </div>
+      <div class="tscroll"><table style="table-layout:fixed;width:100%"><colgroup>
+        <col style="width:14%"><col style="width:12%"><col style="width:30%">
+        ${cols.map(()=>`<col style="width:${(44/Math.max(cols.length,1)).toFixed(2)}%">`).join('')}
+      </colgroup><thead><tr>
+        <th style="text-align:left">通路</th><th style="text-align:left">編號</th><th style="text-align:left">商品名</th>
+        ${cols.map(c=>`<th${_FOCUS_TEXT_COLS.has(c.key)?' style="text-align:left"':''}>${c.label}</th>`).join('')}
+      </tr></thead><tbody>${trs||`<tr><td colspan="${3+cols.length}" style="text-align:center;color:#9ca3af;padding:20px">此期間四家都沒有資料</td></tr>`}</tbody></table></div>
     </div>
   </div>`;
 }
@@ -4682,36 +5080,37 @@ function setShop(shop,btn){
   if(btn)btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
   document.getElementById('content-'+shop).classList.add('active');
+  const isCross=(shop==='總表'||shop==='重點檢視');   // 跨賣場頁面，不屬於任何單一賣場
   const wrap=document.getElementById('profit-period-wrap');
   const wrapRow=document.getElementById('profit-period-wrap-row');
   if(wrap){
     SHOPS.forEach(s=>{const el=document.getElementById('period-row-'+s.id);if(el)el.style.display=s.id===shop?'flex':'none';});
-    const showPeriod=shop!=='總表';
+    const showPeriod=!isCross;
     if(wrapRow)wrapRow.style.display=showPeriod?'flex':'none';
   }
-  // show/hide KPI & upload/export when on 總表
-  const isSummary=shop==='總表';
+  // show/hide KPI & upload/export when on 總表 / 重點檢視（跨賣場頁面）
   const kpiBlock=document.getElementById('header-kpi-row');
   // 好麻吉的聯盟行銷分頁有自己獨立的總覽列，切回好麻吉時要記得沿用上次停在哪個分頁
   const onAffTab=shop==='好麻吉'&&_shopViewMode[shop]==='affiliate';
-  if(kpiBlock)kpiBlock.style.display=(isSummary||onAffTab)?'none':'flex';
+  if(kpiBlock)kpiBlock.style.display=(isCross||onAffTab)?'none':'flex';
   const affHeaderEl=document.getElementById('aff-header-'+shop);
   if(affHeaderEl)affHeaderEl.style.display=onAffTab?'':'none';
   // sync global export button
   const gb=document.getElementById('global-exp-btn');
   if(gb){
-    if(shop==='總表'){gb.disabled=true;}
+    if(isCross){gb.disabled=true;}
     else{gb.disabled=!(state[shop]?._built?.length);}
   }
   // sync global sync button
   const sb=document.getElementById('global-sync-btn');
   if(sb){
-    const hasData=shop!=='總表'&&!!(state[shop]?._built?.length);
+    const hasData=!isCross&&!!(state[shop]?._built?.length);
     sb.disabled=!hasData;sb.style.opacity=hasData?'1':'0.4';sb.style.cursor=hasData?'pointer':'default';
     if(hasData){sb.style.background='#f59e0b';sb.style.color='#fff';sb.style.borderColor='#f59e0b';}
     else{sb.style.background='';sb.style.color='';sb.style.borderColor='';}
   }
   if(shop==='總表')renderSummary();
+  else if(shop==='重點檢視')renderFocus();
   else{if(state[shop]?._built?.length)applyFilters(shop);syncHeaderKpis(shop);}
 }
 
@@ -5046,51 +5445,1332 @@ function momoShopHTML(shop,platform='momo'){
   ${tableArea}`;
 }
 
-// MOMO 甲配專用畫面：跟其他 MOMO 賣場（乙配/MO+麻吉/MO+森之旅）的報表格式不一樣（多了流量/瀏覽量等欄位、
-// 另外還有每日趨勢），所以另外做一套，不共用 momoShopHTML。
-const _mypPeriod={};
-const MYP_HALF_LABEL={first:'上半月',second:'下半月',full:'整月'};
-// 整排（KPI 數字 + 月份/區間/上傳/同步）完全比照蝦皮好麻吉的 header-kpi-row：
-// 左邊數字、右邊按鈕用 margin-left:auto 推到最右邊，同一行。
-function momoYipeiHTML(shop){
-  _mypPeriod[shop]=_mypPeriod[shop]||{month:'2026/06',half:'first'};
-  const p=_mypPeriod[shop];
-  return `
-  <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:16px">
-    <div id="myp-kpi-block-${shop}" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
-      <div style="font-size:13px;color:#9ca3af">尚未上傳報表</div>
+/* ==================== MOMO 甲配/乙配 淨利表（新設計，P1）====================
+   資料層走既有 rail：商品主檔存 'ec_momo_products|<shop>'（localStorage + Store._mem），
+   按全域「☁ 同步雲端」時經 syncToCloud 的 field 分支 setField 上 app/profit。
+   甲配/乙配共用同一組函式，靠 shop 參數區分（乙配運費+包材預設 0、多一個倉租費子分頁）。 */
+
+// ── §1 商品主檔（持續性資料，獨立於月份）──
+function momoProductsKey(shop){ return 'ec_momo_products|'+shop; }
+function momoLoadProducts(shop){
+  // 讀取順序照 ec_edits/ec_notes 慣例：_profitMem（雲端權威，跨裝置）→ _mem → localStorage。
+  //   ec_momo_products 是 app/profit 的 field，雲端快照回來灌進 _profitMem；只讀 _mem 會漏（換台電腦讀不到）。
+  const k=momoProductsKey(shop);
+  try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]) return Store._mem[k]; }catch{}
+  try{ const local=localStorage.getItem(k); if(local) return JSON.parse(local); }catch{}
+  return [];
+}
+function momoSaveProducts(shop,products){
+  const k=momoProductsKey(shop);
+  try{ localStorage.setItem(k,JSON.stringify(products)); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=products; }catch{}  // 權威鏡像（抗 app/main subscribe 整包覆蓋 _mem）
+  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}              // 保留：syncToCloud field 分支優先讀 _mem
+  _markPending(k);   // 走既有 pending → 手動同步時 setField 上雲
+}
+// ── P6 倉租費（僅乙配）：公司層級月度總費用，不分攤、不進毛利。key 無 shop 後綴（全域一份）──
+//   存取比照商品主檔三鏡像：load _profitMem→_mem→localStorage；save localStorage+_profitMem+_mem+_markPending。
+//   走 syncToCloud 通用 field 分支（key 不含 'ec|'）→ __cloudProfit.setField → app/profit doc。
+const MOMO_RENT_KEY='ec_momo_rent_records';
+function momoLoadRent(){
+  const k=MOMO_RENT_KEY;
+  try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]) return Store._mem[k]; }catch{}
+  try{ const local=localStorage.getItem(k); if(local) return JSON.parse(local); }catch{}
+  return [];
+}
+function momoSaveRent(records){
+  const k=MOMO_RENT_KEY;
+  try{ localStorage.setItem(k,JSON.stringify(records)); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=records; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=records; }catch{}
+  _markPending(k);
+}
+
+// ── §2 計算邏輯（甲配/乙配共用同一條公式鏈；毛利公式用實際甲配 Excel 反推驗證過）──
+function momoEffectiveAt(history,date){   // 依日期找當時生效的成本/售價版本（P1 尚未接，見規格 §199）
+  const sorted=[...history].filter(h=>h.date<=date).sort((a,b)=>a.date>b.date?1:-1);
+  return sorted[sorted.length-1]||history[0];
+}
+function momoCalcMargin({cost,purchasePrice,salePrice,shippingPackaging}){
+  const H=salePrice*0.25;                 // 抽成手續費
+  const J=(salePrice-H)*0.003;            // 行銷活動
+  const K=(salePrice-H)*0.06;             // 活動服務費
+  const G=(shippingPackaging||0)+J+K;     // Momo 總成本
+  const L=salePrice-G-H;                  // 入帳金額
+  const M=(purchasePrice*5)/105;          // 銷項稅金 = 進價×5%÷1.05
+  const N=L-cost-M;                       // 實際毛利
+  return { unitProfit:N, marginPct: purchasePrice?(N/purchasePrice)*100:0 };
+}
+function momoAggregatePeriods(product,periodKeys){   // 彙總單一商品（可傳一個期別或多個加總看整月）
+  const data=periodKeys.map(k=>(product.periods||{})[k]).filter(Boolean);
+  const qty=data.reduce((s,d)=>s+(d.qty||0),0);
+  const returnQty=data.reduce((s,d)=>s+(d.returnQty||0),0);
+  const freightTotal=data.reduce((s,d)=> s+(d.freightCost!=null?d.freightCost:(product.shippingPackaging||0)*(d.qty||0)),0);
+  const avgShipping=qty?freightTotal/qty:(product.shippingPackaging||0);
+  const { marginPct, unitProfit }=momoCalcMargin({
+    cost:product.cost, purchasePrice:product.purchasePrice,
+    salePrice:product.salePrice, shippingPackaging:avgShipping
+  });
+  return {
+    qty, revenue:qty*product.salePrice, profit:qty*unitProfit,
+    margin:qty?marginPct:0,
+    returnRate:qty?Math.round((returnQty/qty)*1000)/10:0
+  };
+}
+
+// ── §3 期別工具 ──
+function momoAllPeriods(shop){
+  const set=new Set();
+  momoLoadProducts(shop).forEach(p=>{ if(p.periods) Object.keys(p.periods).forEach(k=>{ if(/^\d{4}-\d{2}-H[12]$/.test(k)) set.add(k); }); });   // 濾掉髒 key，免得下拉標成正常月份跟真的混淆
+  return [...set].sort();   // 字串排序即時間排序（YYYY-MM-Hx）
+}
+function momoPeriodLabel(period){
+  const [,m,half]=period.split('-');
+  return `${Number(m)}月${half==='H1'?'上':'下'}`;
+}
+function momoOrderToPeriod(orderNo){   // 訂單編號前 6 碼 YYMMDD 判半月（拆掉 dash 後綴後取前 6，14 碼不影響）
+  const prefix=String(orderNo).trim().split('-')[0];
+  if(!/^\d{6}/.test(prefix)) return null;                 // 前 6 碼須純數字（擋 '#6...' 等髒列，不逐段 Number 以免寬鬆轉換）
+  const yy=prefix.slice(0,2), mm=prefix.slice(2,4), dd=prefix.slice(4,6);
+  const mn=Number(mm), dn=Number(dd);
+  if(mn<1||mn>12||dn<1||dn>31) return null;                // mm 01-12、dd 01-31，明確排除 0
+  return `20${yy}-${mm}-${dn<=15?'H1':'H2'}`;              // 拼 key 用原字串（保 "06" 不變 "6"）
+}
+function momoChannelFromDeliveryType(t){
+  if(t==='寄倉') return '乙配';
+  if(t==='指定貨運'||t==='超商取貨') return '甲配';
+  return null;
+}
+
+// ── 甲配/乙配 子分頁外殼（.stab 之外自帶樣式，避免干擾全域 tab active 機制）──
+const MOMO_SUBTABS_JIA=[['總表','profit'],['批次維護','batch'],['C1105上傳','upload'],['商品同步','sync']];
+const MOMO_SUBTABS_YI =[['總表','profit'],['批次維護','batch'],['C1105上傳','upload'],['商品同步','sync'],['倉租費','rent']];
+const _momoSub={};          // shop -> 目前子分頁 id
+const _momoPeriodSel={};    // shop -> 選中的期別 key（'' = 尚無資料）
+const _momoSearch={};       // shop -> 搜尋字串
+const _momoSort={};         // shop -> {col,dir}
+const _momoShowDiscontinued={};   // shop -> 是否顯示已下架（預設 false=隱藏；模組變數，重整回預設，比照 search/sort）
+function momoRenderShop(shop){
+  const el=document.getElementById('momo-content-'+shop);
+  if(!el) return;
+  const subs=shop==='乙配'?MOMO_SUBTABS_YI:MOMO_SUBTABS_JIA;
+  if(!_momoSub[shop]) _momoSub[shop]='profit';
+  const pills=subs.map(([label,id])=>{
+    const on=_momoSub[shop]===id;
+    return `<button onclick="momoSetSub('${shop}','${id}')" style="padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid ${on?'#e4007f':'#e5e7eb'};background:${on?'#e4007f':'#fff'};color:${on?'#fff':'#6b7280'}">${label}</button>`;
+  }).join('');
+  el.innerHTML=`
+    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center">${pills}
+      <button id="momo-sync-btn-${shop}" onclick="momoOpenSyncPreview('${shop}')" style="margin-left:auto;padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;border:1px solid #e5e7eb;background:#fff;color:#6b7280">☁ 同步雲端</button>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
-        <select onchange="onMypMonthChange('${shop}',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
-          ${MONTHS.map(mo=>`<option value="${mo}"${mo===p.month?' selected':''}>${mo}</option>`).join('')}
-        </select>
-        <span style="font-size:12px;color:#6b7280;font-weight:500">區間</span>
-        <select id="myp-half-sel-${shop}" onchange="onMypHalfChange('${shop}',this)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
-          ${['first','second','full'].map(h=>`<option value="${h}"${h===p.half?' selected':''}>${MYP_HALF_LABEL[h]}</option>`).join('')}
-        </select>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="export-btn" onclick="openMomoRptUpload('${shop}')" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
-        <button class="export-btn" id="myp-sync-${shop}" disabled style="opacity:0.4;cursor:default" onclick="syncMomoRptToCloud('${shop}')">☁ 同步雲端</button>
-      </div>
+    <div id="momo-sub-content-${shop}"></div>`;
+  momoRenderSub(shop);
+  momoRefreshSyncBtn(shop);   // 依 pending 筆數點亮/淡灰
+}
+function momoSetSub(shop,id){ _momoSub[shop]=id; momoRenderShop(shop); }
+function momoRenderSub(shop){
+  const c=document.getElementById('momo-sub-content-'+shop);
+  if(!c) return;
+  const sub=_momoSub[shop]||'profit';
+  if(sub==='profit'){ c.innerHTML=momoProfitTableHTML(shop); momoRenderProfitBody(shop); return; }
+  if(sub==='batch'){ momoRenderBatch(shop); return; }
+  if(sub==='upload'){ momoRenderUpload(shop); return; }
+  if(sub==='sync'){ momoRenderProductSync(shop); return; }
+  if(sub==='rent'){ momoRenderRent(shop); return; }
+  const names={batch:'批次維護',upload:'C1105 上傳',sync:'商品資料同步',rent:'倉租費彙總'};
+  c.innerHTML=`<div class="empty"><div class="empty-icon">🚧</div><div class="empty-hint">「${names[sub]||sub}」建置中（後續階段開放）</div></div>`;
+}
+
+// ── MOMO 同步鈕（甲配/乙配 pill 列最右）+ 同步預覽視窗 ──
+//   #header-kpi-row（全域鈕所在）在 MOMO 頁被隱藏，MOMO 需自備入口；此鈕呼叫預覽 → 確認 → 全域 syncToCloud。
+// 唯讀待同步計數（只給 MOMO 同步鈕決定亮/暗用）：只數 key，不 mutate _pendingSyncKeys、不回填 Store、不 parse value。
+// ⚠️ 這裡的白名單前綴必須跟 _sweepAllLocalReportsIntoPending()（本檔搜 `function _sweepAllLocalReportsIntoPending`）
+//    保持一致——那邊改了前綴，這邊也要一起改，否則鈕亮暗會跟實際會推的對不上。
+function _momoSyncPendingCount(){
+  const keys=new Set();
+  // (1) 這個 session 已 _markPending 的（排除 marker / _summary_v1，比照 _realPendingCount）
+  _pendingSyncKeys.forEach(k=>{ if(k.startsWith('__shop__|'))return; if(k==='_summary_v1')return; keys.add(k); });
+  // (2) localStorage 裡符合 sweep 白名單前綴的——重整後 session 標記已清空，靠這個撐起亮暗（只讀 key 名，不 parse value）
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i); if(!k) continue;
+      if(k.startsWith('ec_momo_products|') || k==='ec_momo_rent_records'
+         || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
+    }
+  }catch{}
+  return keys.size;
+}
+function momoRefreshSyncBtn(shop){
+  shop=shop||curMomoShop;
+  const btn=document.getElementById('momo-sync-btn-'+shop);
+  if(!btn) return;
+  const has=_momoSyncPendingCount()>0;   // 唯讀估算，只決定亮/暗；真正筆數在預覽視窗（真 sweep 算的）
+  if(has){ btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b'; }
+  else   { btn.disabled=true; btn.style.opacity='0.4';btn.style.cursor='default';btn.style.background='#fff';btn.style.color='#6b7280';btn.style.borderColor='#e5e7eb'; }
+  btn.textContent='☁ 同步雲端';           // 不顯示筆數（避免估算數字與預覽對不上）
+}
+function _momoCount(v){ return Array.isArray(v)?v.length : (v&&typeof v==='object')?Object.keys(v).length : (v==null?0:1); }
+// 穩定序列化（排序物件 key）→ 比對「內容是否不同」不受 Firestore 回來的 key 順序影響，零 key-order 誤報
+function _momoStableStr(v){
+  if(v===null||typeof v!=='object') return JSON.stringify(v);
+  if(Array.isArray(v)) return '['+v.map(_momoStableStr).join(',')+']';
+  return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+_momoStableStr(v[k])).join(',')+'}';
+}
+// 收集「這次同步實際會推的 key」——與 syncToCloud 同源：先跑同一個 sweep，再讀同一個 _pendingSyncKeys。
+//   絕不自己掃 localStorage（會漏掉 session 內標過、不在 sweep 白名單的 key → 預覽騙人）。
+function _momoCollectPending(shop){
+  _sweepAllLocalReportsIntoPending();          // 與 syncToCloud:458 同一個函式，冪等
+  const items=[], seen=new Set();
+  const add=(key,kind,val)=>{ if(seen.has(key))return; seen.add(key); items.push({key,kind,localVal:val,localCount:_momoCount(val)}); };
+  // syncToCloud 開頭那兩條 shop 專屬 extra（465-469）：MOMO 賣場通常為空
+  try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0) add('ec_notes|'+_nk,'其他設定',notes); }catch{}
+  try{ const edits=getEdits(shop); if(edits&&Object.keys(edits).length>0) add('ec_edits|'+shop,'其他設定',edits); }catch{}
+  _pendingSyncKeys.forEach(pk=>{
+    if(pk.startsWith('__shop__|')) return;               // marker，不推
+    if(pk.startsWith('ec|filemeta|')) return;            // 故意不上雲
+    if(pk.startsWith('ec|')){ add(pk,'蝦皮報表', Store._profitMem&&Store._profitMem[pk]); return; }   // → setReport（profits collection）
+    let val=null; try{ if(Store._mem&&Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
+    if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} }
+    const kind = pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk==='ec_momo_rent_records'?'MOMO倉租費' : '其他設定';
+    add(pk,kind,val);
+  });
+  return items;
+}
+async function momoOpenSyncPreview(shop){
+  if(!window.__cloudProfit){
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'雲端尚未就緒，請重新整理後再同步。',kind:'warn'});
+    else if(typeof showToast==='function') showToast('雲端未連線','error');
+    return;
+  }
+  const items=_momoCollectPending(shop);
+  let cloud={};
+  try{ const snap=await window.__cloudProfit.getDoc(); cloud=snap.exists()?(snap.data()||{}):{}; }
+  catch(e){ const m=(e&&e.message)||String(e); if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'讀取雲端失敗',message:'無法讀取雲端現況，請稍後再試。',detail:m,kind:'error'}); else if(typeof showToast==='function') showToast('讀取雲端失敗','error'); return; }
+  items.forEach(it=>{
+    if(it.kind==='蝦皮報表'){ it.status='uncomparable'; it.cloudCount=null; return; }   // 不同 collection（profits），app/profit 讀不到
+    const cv=cloud[it.key];
+    if(cv===undefined){ it.status='new'; it.cloudCount=0; }
+    else { it.cloudCount=_momoCount(cv); it.status=(_momoStableStr(it.localVal)===_momoStableStr(cv))?'same':'diff'; }
+  });
+  momoRenderSyncPreviewModal(shop, items);
+}
+function momoRenderSyncPreviewModal(shop, items){
+  let ov=document.getElementById('momo-sync-overlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='momo-sync-overlay'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=e=>{ if(e.target===ov) momoCloseSyncPreview(); };
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const typeColor={'MOMO商品主檔':'#5b5fcf','MOMO倉租費':'#0ea5e9','蝦皮報表':'#e4007f','其他設定':'#9ca3af'};
+  const statusCell=it=>{
+    if(it.status==='new')    return `<span style="color:#10b981;font-weight:600">新增</span>`;
+    if(it.status==='same')   return `<span style="color:#9ca3af">無變更</span>`;
+    if(it.status==='uncomparable') return `<span style="color:#9ca3af">無法比對（不同 collection）</span>`;
+    const cnt=(it.cloudCount!==it.localCount)?`（雲端 ${it.cloudCount} 筆 / 本機 ${it.localCount} 筆）`:'';
+    return `<span style="color:#9a3412;font-weight:600">⚠️ 內容不同，確認後會用本機整包覆蓋雲端${cnt}</span>`;
+  };
+  const anyDiff=items.some(it=>it.status==='diff');
+  const rows = items.length ? items.map(it=>`<tr style="border-top:1px solid #f3f4f6">
+      <td style="padding:6px 8px;font-family:monospace;word-break:break-all">${esc(it.key)}</td>
+      <td style="padding:6px 8px;color:${typeColor[it.kind]||'#6b7280'};font-weight:600;white-space:nowrap">${it.kind}</td>
+      <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.localCount}</td>
+      <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.cloudCount==null?'—':it.cloudCount}</td>
+      <td style="padding:6px 8px">${statusCell(it)}</td>
+    </tr>`).join('')
+    : `<tr><td colspan="5" style="padding:20px;text-align:center;color:#9ca3af">目前沒有待同步的資料</td></tr>`;
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;font-size:15px;font-weight:700">同步預覽 — 確認要推送到雲端的內容</div>
+    <div style="padding:12px 20px;overflow:auto">
+      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">以下是這次<b>整批</b>會推上雲端的資料（含蝦皮報表在內，全域同步會一起推）。每項都是<b>整包覆蓋、無版本比對</b>，請確認沒有不該推、或會蓋掉別人更新的項目。</div>
+      ${anyDiff?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">⚠️ 有項目<b>雲端與本機不同</b>——確認後會用本機整包覆蓋雲端。系統<b>無法判斷誰比較新</b>（資料沒有時間戳），請自行確認不會蓋掉同事的更新。</div>`:''}
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="text-align:left;color:#6b7280;font-weight:600">
+          <th style="padding:6px 8px">資料 key</th><th style="padding:6px 8px">類型</th><th style="padding:6px 8px;text-align:right">本機</th><th style="padding:6px 8px;text-align:right">雲端</th><th style="padding:6px 8px">狀態</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
     </div>
-  </div>
-  <div id="myp-content-${shop}">
-    <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳兩個報表後按「▶ 產生並儲存」</div></div>
+    <div style="padding:14px 20px;border-top:1px solid #eef0f2;display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="momoCloseSyncPreview()" style="padding:7px 16px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>
+      <button onclick="momoConfirmSync('${shop}')" ${items.length?'':'disabled'} style="padding:7px 18px;border-radius:7px;border:none;background:${items.length?'#10b981':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${items.length?'pointer':'default'}">確認同步${items.length?'（'+items.length+' 項）':''}</button>
+    </div>
   </div>`;
 }
-function onMypMonthChange(shop,sel){
-  _mypPeriod[shop]=_mypPeriod[shop]||{month:'2026/06',half:'first'};
-  _mypPeriod[shop].month=sel.value;
-  momoRptTryLoadSaved(shop);
+function momoCloseSyncPreview(){ const ov=document.getElementById('momo-sync-overlay'); if(ov) ov.remove(); }
+function momoConfirmSync(shop){
+  momoCloseSyncPreview();
+  Promise.resolve(syncToCloud(shop)).then(()=>momoRefreshSyncBtn(shop)).catch(()=>momoRefreshSyncBtn(shop));   // 推送邏輯本身不動，只在前面加預覽
 }
-function onMypHalfChange(shop,sel){
-  _mypPeriod[shop]=_mypPeriod[shop]||{month:'2026/06',half:'first'};
-  _mypPeriod[shop].half=sel.value;
-  momoRptTryLoadSaved(shop);
+
+// ── 畫面一：商品獲利總表（甲配/乙配共用）──
+const MOMO_PROFIT_COLS=[
+  {k:'name',label:'品號 / 商品',left:true},
+  {k:'salePrice',label:'售價',fmt:'money'},
+  {k:'revenue',label:'營收',fmt:'money'},
+  {k:'margin',label:'毛利率',fmt:'pct1'},
+  {k:'qty',label:'本期銷量',fmt:'num'},
+  {k:'returnRate',label:'退貨率',fmt:'pct1'},
+  {k:'profit',label:'毛利貢獻',fmt:'money'},
+];
+function momoProfitTableHTML(shop){
+  const periods=momoAllPeriods(shop);
+  // 只要目前選的不是「有效期別」（含 undefined / 空字串 / 已過期）就重設為最新期別，
+  //   避免先看過空總表把選值卡在 '' → 之後有資料時下拉視覺顯示第一項、變數卻還是 '' → 彙總到空期別顯示 0。
+  if(!periods.includes(_momoPeriodSel[shop])) _momoPeriodSel[shop]=periods.length?periods[periods.length-1]:'';
+  const periodOpts=periods.length
+    ? periods.map(p=>`<option value="${p}"${p===_momoPeriodSel[shop]?' selected':''}>${momoPeriodLabel(p)}</option>`).join('')
+    : `<option value="">尚無期別資料</option>`;
+  const q=(_momoSearch[shop]||'').replace(/"/g,'&quot;');
+  const discCount=momoLoadProducts(shop).filter(p=>p.discontinued===true).length;   // 當前主檔已下架筆數
+  const showDisc=!!_momoShowDiscontinued[shop];
+  const discToggle=discCount>0
+    ? `<button onclick="momoToggleDiscontinued('${shop}')" style="padding:5px 12px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${showDisc?'#5b5fcf':'#e5e7eb'};background:${showDisc?'#eef0fb':'#fff'};color:${showDisc?'#5b5fcf':'#6b7280'};white-space:nowrap">${showDisc?'隱藏已下架':'顯示已下架（'+discCount+'）'}</button>`
+    : '';
+  return `
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:12px;color:#6b7280;font-weight:500">期別</span>
+        <select onchange="momoSetPeriod('${shop}',this.value)" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;color:#1a1a2e">${periodOpts}</select>
+      </div>
+      <input type="text" placeholder="搜尋 品號 / 名稱 / 原廠編號" value="${q}" oninput="momoOnSearch('${shop}',this.value)" style="flex:1;min-width:200px;max-width:340px;padding:6px 12px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;outline:none">
+      ${discToggle}
+    </div>
+    <div style="font-size:11px;color:#9ca3af;margin:-4px 0 12px;line-height:1.5">
+      毛利率與毛利貢獻以商品<b>目前</b>的成本／售價計算，非當期歷史成本——檢視過去月份時，數字會用現在的成本回算。
+    </div>
+    <div id="momo-tbl-${shop}"></div>`;
 }
+function momoSetPeriod(shop,val){ _momoPeriodSel[shop]=val; momoRenderProfitBody(shop); }
+function momoOnSearch(shop,val){ _momoSearch[shop]=val; momoRenderProfitBody(shop); }
+// 切換顯示/隱藏已下架：重繪整個 profit 子內容（連按鈕標籤一起更新；search/period/sort 狀態都在模組變數裡，重繪會保留）
+function momoToggleDiscontinued(shop){
+  _momoShowDiscontinued[shop]=!_momoShowDiscontinued[shop];
+  const c=document.getElementById('momo-sub-content-'+shop);
+  if(c){ c.innerHTML=momoProfitTableHTML(shop); momoRenderProfitBody(shop); }
+}
+function momoProfitSetSort(shop,col){
+  const cur=_momoSort[shop];
+  if(!cur||cur.col!==col)_momoSort[shop]={col,dir:'desc'};
+  else if(cur.dir==='desc')_momoSort[shop]={col,dir:'asc'};
+  else delete _momoSort[shop];
+  momoRenderProfitBody(shop);
+}
+function momoRenderProfitBody(shop){
+  const tbl=document.getElementById('momo-tbl-'+shop);
+  if(!tbl) return;
+  const period=_momoPeriodSel[shop];
+  const q=(_momoSearch[shop]||'').trim().toLowerCase();
+  const all=momoLoadProducts(shop);
+  let rows=all.map(p=>{
+    const agg=momoAggregatePeriods(p, period?[period]:[]);
+    return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, discontinued:!!p.discontinued, ...agg };
+  });
+  // 搜尋時忽略「已下架」篩選（搜得到已下架商品，避免以為資料掉了）；沒搜尋時預設隱藏已下架
+  let searchMatchedDisc=0;
+  if(q){
+    rows=rows.filter(r=>(r.sku+' '+r.name+' '+r.origin).toLowerCase().includes(q));
+    searchMatchedDisc=rows.filter(r=>r.discontinued).length;
+  }else if(!_momoShowDiscontinued[shop]){
+    rows=rows.filter(r=>!r.discontinued);
+  }
+  const sort=_momoSort[shop];
+  if(sort){
+    rows.sort((a,b)=>{
+      const va=a[sort.col], vb=b[sort.col];
+      if(typeof va==='number'&&typeof vb==='number') return sort.dir==='asc'?va-vb:vb-va;
+      return sort.dir==='asc'?String(va).localeCompare(String(vb)):String(vb).localeCompare(String(va));
+    });
+  }
+  if(!rows.length){
+    tbl.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${all.length?'沒有符合搜尋的商品':'尚無商品資料，請到「批次維護」新增（後續階段開放）'}</div></div>`;
+    return;
+  }
+  const fmt={ money:v=>'NT$ '+Math.round(v).toLocaleString(), num:v=>Math.round(v).toLocaleString(), pct1:v=>(Math.round(v*10)/10)+'%' };
+  const arrow=c=> sort&&sort.col===c ? (sort.dir==='asc'?' ▲':' ▼') : '';
+  const thead=MOMO_PROFIT_COLS.map(c=>`<th onclick="momoProfitSetSort('${shop}','${c.k}')" style="cursor:pointer;text-align:${c.left?'left':'right'}">${c.label}${arrow(c.k)}</th>`).join('');
+  const tbody=rows.map(r=>{
+    const tds=MOMO_PROFIT_COLS.map(c=>{
+      if(c.k==='name'){
+        const discTag=r.discontinued?` <span style="display:inline-block;font-size:10px;color:#9ca3af;background:#f3f4f6;border-radius:4px;padding:1px 6px;margin-left:4px;font-weight:500;vertical-align:middle">已下架</span>`:'';
+        return `<td class="tl"><div style="font-weight:600">${r.name||'—'}${discTag}</div><div style="font-size:10px;color:#9ca3af;margin-top:1px">品號 ${r.sku||'—'}${r.origin?' · 原廠 '+r.origin:''}</div></td>`;
+      }
+      const v=r[c.k];
+      const disp=c.fmt?fmt[c.fmt](v):v;
+      let style='text-align:right';
+      if(c.k==='margin') style+=`;font-weight:700;color:${v>=25?'#10b981':'#374151'}`;          // 毛利率 ≥25% 綠
+      else if(c.k==='returnRate'&&v>6) style+=';font-weight:700;color:#f97316';                   // 退貨率 >6% 橘
+      return `<td style="${style}">${disp}</td>`;
+    }).join('');
+    return `<tr>${tds}</tr>`;
+  }).join('');
+  const discHint=(q&&searchMatchedDisc>0)?`<div style="font-size:11px;color:#9ca3af;margin-bottom:8px">搜尋結果包含已下架商品（${searchMatchedDisc} 筆）</div>`:'';
+  tbl.innerHTML=discHint+`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
+}
+
+// ── 畫面二：批次維護（編輯現有商品 / 新增商品；甲配乙配共用）──
+function momoNowParts(){
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  return {
+    date: d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()),   // 'YYYY-MM-DD'（勿改，momoEffectiveAt 靠它字串比較）
+    time: p(d.getHours())+':'+p(d.getMinutes())                       // 'HH:mm' 本機時間（非 UTC）
+  };
+}
+const _momoBatchMode={};    // shop -> 'edit' | 'add'
+const _momoBatchSel={};     // shop -> 選中商品 sku（edit 模式）
+const _momoBatchSearch={};  // shop -> 搜尋字串（edit 模式）
+const _momoAddPpOverride={}; // shop -> 進價是否被手動覆蓋（add 模式）
+const _MOMO_INP='width:100%;padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;outline:none;box-sizing:border-box';
+const _MOMO_LB='font-size:11px;color:#6b7280;font-weight:600';
+function momoDefaultShip(shop){ return shop==='乙配'?0:77; }   // §0：乙配運費+包材預設 0，甲配 77
+function momoRenderBatch(shop){
+  const c=document.getElementById('momo-sub-content-'+shop);
+  if(!c) return;
+  if(!_momoBatchMode[shop]) _momoBatchMode[shop]='edit';
+  const mode=_momoBatchMode[shop];
+  const tab=(label,m)=>{ const on=mode===m; return `<button onclick="momoBatchSetMode('${shop}','${m}')" style="padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid ${on?'#5b5fcf':'#e5e7eb'};background:${on?'#5b5fcf':'#fff'};color:${on?'#fff':'#6b7280'}">${label}</button>`; };
+  c.innerHTML=`
+    <div style="display:flex;gap:6px;margin-bottom:16px">${tab('編輯現有商品','edit')}${tab('新增商品','add')}</div>
+    <div id="momo-batch-body-${shop}"></div>`;
+  if(mode==='edit') momoRenderBatchEdit(shop); else momoRenderBatchAdd(shop);
+}
+function momoBatchSetMode(shop,m){ _momoBatchMode[shop]=m; momoRenderBatch(shop); }
+
+// 編輯模式：搜尋清單（左）+ 選中商品編輯表單與歷程（右）
+function momoRenderBatchEdit(shop){
+  const body=document.getElementById('momo-batch-body-'+shop);
+  if(!body) return;
+  const raw=_momoBatchSearch[shop]||'';
+  body.innerHTML=`
+    <div style="display:grid;grid-template-columns:300px 1fr;gap:20px;align-items:start">
+      <div>
+        <input type="text" placeholder="搜尋 品號/名稱/原廠編號" value="${raw.replace(/"/g,'&quot;')}" oninput="momoBatchSearch('${shop}',this.value)" style="${_MOMO_INP};margin-bottom:8px">
+        <div id="momo-batch-list-${shop}" style="max-height:440px;overflow-y:auto"></div>
+      </div>
+      <div id="momo-batch-form-${shop}"></div>
+    </div>`;
+  momoRenderBatchEditList(shop);
+  momoRenderBatchEditForm(shop);
+}
+function momoRenderBatchEditList(shop){
+  const el=document.getElementById('momo-batch-list-'+shop);
+  if(!el) return;
+  const raw=_momoBatchSearch[shop]||'';
+  const q=raw.trim().toLowerCase();
+  const all=momoLoadProducts(shop);
+  if(!all.length){ el.innerHTML=`<div style="font-size:13px;color:#9ca3af;padding:8px">尚無商品，請切到「新增商品」建立第一筆</div>`; return; }
+  const list=q? all.filter(p=>((p.sku||'')+' '+(p.name||'')+' '+(p.origin||'')).toLowerCase().includes(q)) : all;
+  if(!list.length){ el.innerHTML=`<div style="font-size:13px;color:#9ca3af;padding:8px">沒有符合的商品</div>`; return; }
+  const sel=_momoBatchSel[shop];
+  el.innerHTML=list.slice(0,50).map(p=>{
+    const on=p.sku===sel;
+    return `<div onclick="momoBatchSelect('${shop}','${p.sku}')" style="padding:7px 10px;border-radius:7px;cursor:pointer;font-size:13px;border:1px solid ${on?'#5b5fcf':'transparent'};background:${on?'#eef0fb':'#f9fafb'};margin-bottom:4px">
+      <b>${p.name||'—'}</b><div style="color:#9ca3af;font-size:11px;margin-top:1px">品號 ${p.sku||'—'}${p.origin?' · 原廠 '+p.origin:''}</div></div>`;
+  }).join('') + (list.length>50?`<div style="font-size:11px;color:#9ca3af;padding:4px 10px">只顯示前 50 筆，請用搜尋縮小範圍</div>`:'');
+}
+function momoRenderBatchEditForm(shop){
+  const el=document.getElementById('momo-batch-form-'+shop);
+  if(!el) return;
+  const p=momoLoadProducts(shop).find(x=>x.sku===_momoBatchSel[shop]);
+  if(!p){ el.innerHTML=`<div style="font-size:13px;color:#9ca3af;padding:20px;text-align:center">← 從左側選一個商品來編輯</div>`; return; }
+  const hist=(p.history&&p.history.length)? [...p.history].reverse().map(h=>`
+    <div style="font-size:12px;padding:6px 10px;border-left:2px solid #e5e7eb;margin-bottom:4px">
+      <span style="color:#9ca3af">${h.date}${h.time?' '+h.time:''}</span> 成本 ${h.cost} / 進價 ${h.purchasePrice} / 售價 ${h.salePrice}${h.note?`<span style="color:#6b7280"> — ${h.note}</span>`:''}
+    </div>`).join('') : `<div style="font-size:12px;color:#9ca3af">尚無歷程</div>`;
+  el.innerHTML=`
+    <div style="font-size:14px;font-weight:700">${p.name||'—'}</div>
+    <div style="font-size:11px;color:#9ca3af;margin-bottom:12px">品號 ${p.sku||'—'}${p.origin?' · 原廠 '+p.origin:''}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+      <div><label style="${_MOMO_LB}">成本</label><input id="momo-edit-cost-${shop}" type="number" value="${p.cost??''}" style="${_MOMO_INP}"></div>
+      <div><label style="${_MOMO_LB}">進價(含稅)</label><input id="momo-edit-pp-${shop}" type="number" value="${p.purchasePrice??''}" style="${_MOMO_INP}"></div>
+      <div><label style="${_MOMO_LB}">售價(含稅)</label><input id="momo-edit-sp-${shop}" type="number" value="${p.salePrice??''}" style="${_MOMO_INP}"></div>
+    </div>
+    <div style="margin-bottom:10px"><label style="${_MOMO_LB}">異動原因（必填）</label><input id="momo-edit-note-${shop}" type="text" placeholder="例：供應商調漲進價" style="${_MOMO_INP}"></div>
+    <button onclick="momoBatchSubmitEdit('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">送出（新增一筆歷程）</button>
+    <div style="margin-top:16px">
+      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">異動歷程（新到舊）</div>${hist}
+    </div>`;
+}
+function momoBatchSearch(shop,val){ _momoBatchSearch[shop]=val; momoRenderBatchEditList(shop); }
+function momoBatchSelect(shop,sku){ _momoBatchSel[shop]=sku; momoRenderBatchEditList(shop); momoRenderBatchEditForm(shop); }
+function momoBatchSubmitEdit(shop){
+  const products=momoLoadProducts(shop);
+  const p=products.find(x=>x.sku===_momoBatchSel[shop]);
+  if(!p) return;
+  const cost=parseFloat(document.getElementById('momo-edit-cost-'+shop).value);
+  const pp=parseFloat(document.getElementById('momo-edit-pp-'+shop).value);
+  const sp=parseFloat(document.getElementById('momo-edit-sp-'+shop).value);
+  const note=document.getElementById('momo-edit-note-'+shop).value.trim();
+  if(!(cost>=0)||!(pp>=0)||!(sp>=0)){ alert('成本 / 進價 / 售價需為 ≥0 的數字'); return; }
+  if(!note){ alert('請填異動原因'); return; }
+  p.cost=cost; p.purchasePrice=pp; p.salePrice=sp;           // 更新「目前」值
+  p.history=p.history||[];
+  p.history.push({...momoNowParts(),cost,purchasePrice:pp,salePrice:sp,note});  // append 一筆，不覆蓋舊值
+  momoSaveProducts(shop,products);
+  momoRenderBatchEditForm(shop);   // 刷新歷程列表
+  if(typeof showToast==='function') showToast('已更新並記錄一筆歷程','success');
+}
+
+// 新增模式：進價預設售價×75%（可覆蓋）+ 即時毛利率預覽
+function momoRenderBatchAdd(shop){
+  const body=document.getElementById('momo-batch-body-'+shop);
+  if(!body) return;
+  _momoAddPpOverride[shop]=false;
+  body.innerHTML=`
+    <div style="max-width:600px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div><label style="${_MOMO_LB}">商品編號（選填，留空自動產生 TEMP-）</label><input id="momo-add-sku-${shop}" type="text" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">原廠編號（選填）</label><input id="momo-add-origin-${shop}" type="text" style="${_MOMO_INP}"></div>
+      </div>
+      <div style="margin-bottom:10px"><label style="${_MOMO_LB}">商品名稱（必填）</label><input id="momo-add-name-${shop}" type="text" style="${_MOMO_INP}"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:4px">
+        <div><label style="${_MOMO_LB}">成本（必填）</label><input id="momo-add-cost-${shop}" type="number" oninput="momoAddRecalc('${shop}')" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">售價含稅（必填）</label><input id="momo-add-sp-${shop}" type="number" oninput="momoAddRecalc('${shop}')" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">進價含稅（必填）</label><input id="momo-add-pp-${shop}" type="number" oninput="momoAddPpInput('${shop}')" style="${_MOMO_INP}"><a id="momo-add-revert-${shop}" onclick="momoAddRevertPp('${shop}')" style="display:none;font-size:11px;color:#5b5fcf;cursor:pointer">↺ 改回公式值(售價×75%)</a></div>
+        <div><label style="${_MOMO_LB}">運費+包材</label><input id="momo-add-ship-${shop}" type="number" value="${momoDefaultShip(shop)}" oninput="momoAddRecalc('${shop}')" style="${_MOMO_INP}"></div>
+      </div>
+      <div id="momo-add-preview-${shop}" style="font-size:13px;margin:12px 0"><span style="color:#9ca3af">成本 / 進價 / 售價填齊後即時計算毛利率</span></div>
+      <button onclick="momoBatchSubmitAdd('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">新增商品</button>
+    </div>`;
+}
+function momoAddRecalc(shop){
+  const g=id=>document.getElementById('momo-add-'+id+'-'+shop);
+  const cost=parseFloat(g('cost').value)||0;
+  const sp=parseFloat(g('sp').value)||0;
+  const shipRaw=parseFloat(g('ship').value);
+  const ship=(shipRaw>=0)?shipRaw:momoDefaultShip(shop);
+  const ppEl=g('pp');
+  if(!_momoAddPpOverride[shop]) ppEl.value= sp? Math.round(sp*0.75):'';   // 進價自動 = 售價×75%（未覆蓋時）
+  const pp=parseFloat(ppEl.value)||0;
+  const prev=g('preview');
+  if(!prev) return;
+  if(cost&&pp&&sp){
+    const {marginPct}=momoCalcMargin({cost,purchasePrice:pp,salePrice:sp,shippingPackaging:ship});
+    const ok=marginPct>=30;   // §5：新品上架把關門檻 30%（比日常嚴，刻意）
+    prev.innerHTML=`毛利率 <b style="color:${ok?'#10b981':'#f97316'};font-size:15px">${Math.round(marginPct*10)/10}%</b> <span style="color:${ok?'#10b981':'#f97316'};font-weight:600;margin-left:6px">${ok?'✓ 超過 30%':'⚠ 未達 30%'}</span>`;
+  }else{
+    prev.innerHTML=`<span style="color:#9ca3af">成本 / 進價 / 售價填齊後即時計算毛利率</span>`;
+  }
+}
+function momoAddPpInput(shop){
+  _momoAddPpOverride[shop]=true;
+  const l=document.getElementById('momo-add-revert-'+shop); if(l) l.style.display='inline';
+  momoAddRecalc(shop);
+}
+function momoAddRevertPp(shop){
+  _momoAddPpOverride[shop]=false;
+  const l=document.getElementById('momo-add-revert-'+shop); if(l) l.style.display='none';
+  momoAddRecalc(shop);
+}
+function momoBatchSubmitAdd(shop){
+  const g=id=>document.getElementById('momo-add-'+id+'-'+shop);
+  const name=g('name').value.trim();
+  const cost=parseFloat(g('cost').value);
+  const pp=parseFloat(g('pp').value);
+  const sp=parseFloat(g('sp').value);
+  let sku=g('sku').value.trim();
+  const origin=g('origin').value.trim();
+  const shipRaw=parseFloat(g('ship').value);
+  if(!name){ alert('商品名稱必填'); return; }
+  if(!(cost>=0)||!(pp>=0)||!(sp>=0)){ alert('成本 / 進價 / 售價必填且為 ≥0 的數字'); return; }
+  const products=momoLoadProducts(shop);
+  if(!sku) sku='TEMP-'+Date.now();
+  if(products.some(x=>x.sku===sku)){ alert('商品編號重複：'+sku); return; }
+  const shipping=(shipRaw>=0)?shipRaw:momoDefaultShip(shop);
+  products.push({sku,origin,name,cost,purchasePrice:pp,salePrice:sp,shippingPackaging:shipping,
+    history:[{...momoNowParts(),cost,purchasePrice:pp,salePrice:sp,note:'新增商品'}], periods:{}});
+  momoSaveProducts(shop,products);
+  if(typeof showToast==='function') showToast('已新增商品 '+sku,'success');
+  _momoBatchMode[shop]='edit'; _momoBatchSel[shop]=sku; _momoBatchSearch[shop]='';   // 切到編輯模式並選中新商品
+  momoRenderBatch(shop);
+}
+
+// ── 畫面三：C1105 月度資料上傳（甲配/乙配共用一個入口，一次餵兩個主檔）──
+//  檔案：C1105(必要) / 甲配UnsendList(選填) / 乙配UnsendList雙分頁(選填) / S1105(選填,欄位待實測)
+//  期別：甲配從訂編判、乙配運費用銷量比例往下拆；欄位用表頭名定位、缺欄即報錯（不靜默算錯）。
+const _momoUpFiles={c1105:null,jia:[],yi:null,s1105:null};   // jia 可多檔（不同物流商各一份）
+let _momoUpPlan=null;
+
+// 開 workbook 一次，可依「分頁名」精準取；找不到分頁回 null（不靜默 fallback 到第一頁，避免讀錯分頁）
+function momoReadWorkbook(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        resolve({
+          names:wb.SheetNames.slice(),
+          sheet:(name)=>(name&&wb.SheetNames.includes(name))?XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,defval:''}):null,
+          firstSheet:()=>XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''}),
+        });
+      }catch(err){ reject(err); }
+    };
+    reader.onerror=reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+// 在 rows 前 30 列找「含所有必要標題」的表頭列，回 {headerIdx, idx:{field:colIndex}}；缺欄位就 throw 講明缺哪個
+function momoLocateCols(rows,fieldMap,label){
+  const fields=Object.keys(fieldMap);
+  for(let i=0;i<Math.min(rows.length,30);i++){
+    const row=(rows[i]||[]).map(c=>String(c).trim());
+    const idx={}; let allFound=true;
+    for(const f of fields){
+      let found=-1;
+      for(let c=0;c<row.length;c++){ if(fieldMap[f].includes(row[c])){ found=c; break; } }
+      if(found<0){ allFound=false; break; }
+      idx[f]=found;
+    }
+    if(allFound) return {headerIdx:i, idx};
+  }
+  throw new Error(label+'：找不到必要欄位表頭（需要：'+fields.map(f=>fieldMap[f][0]).join('、')+'）');
+}
+// C1105：依配送類型分通路、依訂編判期別、依品號加總數量 → sales[通路][sku][期別]=qty
+function momoParseC1105(rows){
+  const {headerIdx,idx}=momoLocateCols(rows,{order:['訂單編號'],deliveryType:['配送類型'],sku:['品號'],qty:['數量']},'C1105 訂單商品明細');
+  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
+  const sales={甲配:{},乙配:{}}, orderSkuQty={}, unknownChannel=[], badPeriod=[];
+  for(let i=headerIdx+1;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    const sku=String(r[idx.sku]||'').trim(); if(!sku) continue;
+    const qty=num(r[idx.qty]);
+    // 訂單組成表（拆掉行項次序後綴 → 14 碼訂編），供甲配運費按數量比例往下拆
+    const orderCore=String(r[idx.order]||'').split('-')[0].trim();
+    if(orderCore){ orderSkuQty[orderCore]=orderSkuQty[orderCore]||{}; orderSkuQty[orderCore][sku]=(orderSkuQty[orderCore][sku]||0)+qty; }
+    const channel=momoChannelFromDeliveryType(String(r[idx.deliveryType]||'').trim());
+    if(!channel){ if(unknownChannel.length<20) unknownChannel.push({order:r[idx.order],type:r[idx.deliveryType]}); continue; }
+    const period=momoOrderToPeriod(r[idx.order]);
+    if(!period){ if(badPeriod.length<20) badPeriod.push({order:r[idx.order]}); continue; }
+    sales[channel][sku]=sales[channel][sku]||{};
+    sales[channel][sku][period]=(sales[channel][sku][period]||0)+qty;
+  }
+  return {sales,orderSkuQty,unknownChannel,badPeriod};
+}
+// 甲配 UnsendList（舊式）：運費只記在每張訂單第一列（訂編/品號/運費），續列空白。
+//   → 依「訂編」收該訂單總運費（運費欄）。分攤到各 SKU 在 momoAllocateJiaFreight 用 C1105 數量比例做。
+function momoParseUnsendJia(rows){
+  const {headerIdx,idx}=momoLocateCols(rows,{order:['訂編','訂單編號'],fee:['運費'],status:['出貨單狀況']},'甲配運費分攤明細（[C1202] 超取/甲指第三方運費）');
+  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
+  const orderFreight={};
+  for(let i=headerIdx+1;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    // 只取「出貨」列：排除退貨列（退貨運費是不同名目、另走 C1201）與 None 月結小計列，
+    //   同訂編才不會混到兩個不同運費值。
+    if(String(r[idx.status]||'').trim()!=='出貨') continue;
+    const order=String(r[idx.order]||'').trim(); if(!order) continue;   // 續列訂編空白 → 略過
+    const orderCore=order.split('-')[0];
+    if(orderFreight[orderCore]===undefined) orderFreight[orderCore]=num(r[idx.fee]);   // 取該訂單（出貨列）運費
+  }
+  return {orderFreight};
+}
+// 甲配運費分攤：該訂單總運費 × 該訂單各 SKU 在 C1105 的數量比例 → freight[sku][期別]（期別由訂編判）
+function momoAllocateJiaFreight(orderFreight, orderSkuQty){
+  const freight={}, unmatchedOrders=[], badPeriod=[];
+  Object.keys(orderFreight).forEach(order=>{
+    const fee=orderFreight[order]; if(!(fee>0)) return;
+    const period=momoOrderToPeriod(order);
+    if(!period){ if(badPeriod.length<20) badPeriod.push({order}); return; }
+    const skuQty=orderSkuQty[order];
+    if(!skuQty){ if(unmatchedOrders.length<20) unmatchedOrders.push(order); return; }   // 運費單訂編在 C1105 找不到
+    const total=Object.values(skuQty).reduce((s,q)=>s+q,0);
+    if(total<=0) return;
+    Object.keys(skuQty).forEach(sku=>{
+      freight[sku]=freight[sku]||{};
+      freight[sku][period]=(freight[sku][period]||0)+fee*(skuQty[sku]/total);
+    });
+  });
+  return {freight,unmatchedOrders,badPeriod};
+}
+// 乙配 UnsendList 單分頁：依品號加總「扣款費用」（不是扣款金額/比例）→ {sku: 該分頁小計}
+function momoParseUnsendYiSheet(rows,label){
+  const {headerIdx,idx}=momoLocateCols(rows,{sku:['品號'],fee:['扣款費用']},label);
+  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
+  const out={};
+  for(let i=headerIdx+1;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    const sku=String(r[idx.sku]||'').trim(); if(!sku) continue;
+    out[sku]=(out[sku]||0)+num(r[idx.fee]);
+  }
+  return out;
+}
+// S1105 退貨（欄位待實測，先合理猜測；對不到會 throw 講明缺哪欄，測試時再校準）
+function momoParseS1105(rows){
+  const {headerIdx,idx}=momoLocateCols(rows,{order:['訂單編號'],deliveryType:['配送類型'],sku:['品號'],qty:['退貨數量','退貨數','數量']},'S1105 退貨商品明細');
+  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
+  const returns={甲配:{},乙配:{}}, badPeriod=[];
+  for(let i=headerIdx+1;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    const sku=String(r[idx.sku]||'').trim(); if(!sku) continue;
+    const channel=momoChannelFromDeliveryType(String(r[idx.deliveryType]||'').trim()); if(!channel) continue;
+    const period=momoOrderToPeriod(r[idx.order]);
+    if(!period){ if(badPeriod.length<20) badPeriod.push({order:r[idx.order]}); continue; }   // 不靜默丟棄：收集浮出來
+    returns[channel][sku]=returns[channel][sku]||{};
+    returns[channel][sku][period]=(returns[channel][sku][period]||0)+num(r[idx.qty]);
+  }
+  return {returns,badPeriod};
+}
+// 組更新計畫（不寫入）：算出每賣場×SKU×期別的 {qty,freightCost,returnQty}，並標出未比對/覆蓋/雲端風險
+function momoBuildUploadPlan(parsed){
+  const c=parsed.c1105;
+  const plan={ shops:{}, unknownChannel:c.unknownChannel, badPeriod:c.badPeriod.slice(), overwrite:[], jiaUnmatchedOrders:[],
+    filesUsed:{c1105:true,jia:!!parsed.jia,yi:!!parsed.yi,s1105:!!parsed.s1105} };
+  ['甲配','乙配'].forEach(shop=>{
+    const master=momoLoadProducts(shop);
+    const bySku=new Map(master.map(p=>[p.sku,p]));
+    const sales=c.sales[shop]||{};
+    const ret=(parsed.s1105&&parsed.s1105.returns[shop])||{};
+    const jiaFreight=(shop==='甲配'&&parsed.jia)?parsed.jia.freight:null;
+    const yiMonth=(shop==='乙配'&&parsed.yi)?parsed.yi:null;   // {sku: 當月運費總額}
+    const updates={}, matched=[], unmatched=[], anomalyNoSales=[], periods=new Set(); let totalQty=0;
+    Object.keys(sales).forEach(sku=>{
+      if(!bySku.has(sku)){ unmatched.push(sku); return; }
+      matched.push(sku);
+      const perQty=sales[sku];
+      const monthQty=Object.values(perQty).reduce((s,q)=>s+q,0);
+      updates[sku]={};
+      Object.keys(perQty).forEach(period=>{
+        periods.add(period); totalQty+=perQty[period];
+        const cell={qty:perQty[period]};
+        if(jiaFreight){ cell.freightCost=(jiaFreight[sku]&&jiaFreight[sku][period])||0; }
+        else if(yiMonth){ const mt=yiMonth[sku]||0; cell.freightCost= monthQty? mt*(perQty[period]/monthQty):0; }
+        if(parsed.s1105){ cell.returnQty=(ret[sku]&&ret[sku][period])||0; }
+        updates[sku][period]=cell;
+        const exist=bySku.get(sku).periods&&bySku.get(sku).periods[period];
+        if(exist&&exist.qty!=null){ plan.overwrite.push({shop,sku,period,oldQty:exist.qty,newQty:perQty[period]}); }
+      });
+    });
+    if(yiMonth){   // 乙配：有運費但當月無銷量 → 無法按比例拆，列異常
+      Object.keys(yiMonth).forEach(sku=>{
+        const hasSales=sales[sku]&&Object.values(sales[sku]).some(q=>q>0);
+        if(!hasSales&&yiMonth[sku]>0) anomalyNoSales.push({sku,fee:yiMonth[sku]});
+      });
+    }
+    const cloudRisk=(master.length>0)&&!_pendingSyncKeys.has(momoProductsKey(shop));  // 主檔非待同步 → 現值等於已上雲
+    plan.shops[shop]={updates,matched,unmatched,anomalyNoSales,periods:[...periods].sort(),totalQty,cloudRisk};
+  });
+  return plan;
+}
+// 寫入：只更新「已建檔」的 SKU 的 periods；欄位級 merge（這次沒帶的欄位保留舊值），覆蓋 qty/freight/return
+function momoApplyUploadPlan(plan){
+  ['甲配','乙配'].forEach(shop=>{
+    const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return;
+    const master=momoLoadProducts(shop);
+    const bySku=new Map(master.map(p=>[p.sku,p]));
+    Object.keys(sp.updates).forEach(sku=>{
+      const p=bySku.get(sku); if(!p) return;
+      p.periods=p.periods||{};
+      Object.keys(sp.updates[sku]).forEach(period=>{
+        if(!/^\d{4}-\d{2}-H[12]$/.test(period)){ console.warn('[momo] 期別 key 格式不合，拒絕寫入：',shop,sku,period); return; }   // 第二層防護：擋非法 key 進主檔
+        p.periods[period]=Object.assign({}, p.periods[period]||{}, sp.updates[sku][period]);
+      });
+    });
+    momoSaveProducts(shop,master);
+  });
+}
+// ── 一次性清理工具：清掉主檔 periods 裡格式不合的髒 key ──
+//   ⚠ 用法：修碼部署 → 正式站確認新版生效 → 在 F12 Console 打 window.momoCleanDirtyPeriodKeys()
+//     → 檢視列出的明細 → 清完按「☁ 同步雲端」推上雲。不 auto-run（掛 window 供手動呼叫）。
+function momoCleanDirtyPeriodKeys(){
+  const RE=/^\d{4}-\d{2}-H[12]$/;
+  const found=[]; let removed=0; const dirtyShops=new Set();
+  ['甲配','乙配'].forEach(shop=>{
+    const master=momoLoadProducts(shop);
+    let shopChanged=false;
+    master.forEach(p=>{
+      if(!p.periods) return;
+      Object.keys(p.periods).forEach(k=>{
+        if(RE.test(k)) return;
+        const cell=p.periods[k];
+        found.push({shop, sku:p.sku, badKey:k, qty:(cell&&cell.qty)!=null?cell.qty:''});
+        delete p.periods[k];
+        removed++; shopChanged=true;
+      });
+    });
+    if(shopChanged){ momoSaveProducts(shop,master); dirtyShops.add(shop); }   // markPending → 之後按同步才上雲
+  });
+  if(!found.length){ console.log('%c[momo] 清理完成：沒有髒 key，主檔乾淨 ✓','color:#10b981;font-weight:700'); return {removed:0,shops:[]}; }
+  console.log('%c[momo] 已刪除 '+removed+' 個髒 key（下方明細）；記得按「☁ 同步雲端」推上雲','color:#ef4444;font-weight:700');
+  console.table(found);
+  if(typeof showToast==='function') showToast('已清理 '+removed+' 個髒期別 key，記得按 ☁ 同步雲端才會上雲','success');
+  return {removed, shops:[...dirtyShops], detail:found};
+}
+function momoRenderUpload(shop){
+  const c=document.getElementById('momo-sub-content-'+shop);
+  if(!c) return;
+  const f=_momoUpFiles;
+  const fileRow=(type,label,required)=>{
+    const on=!!f[type];
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <div style="width:220px;font-size:13px;color:#374151">${label}${required?' <span style="color:#ef4444">*必要</span>':' <span style="color:#9ca3af">選填</span>'}</div>
+      <input type="file" accept=".xlsx,.xls" onchange="momoUploadFile('${shop}','${type}',event)" style="font-size:12px">
+      <span style="font-size:12px;color:${on?'#10b981':'#9ca3af'}">${on?'✓ '+f[type].name:'尚未選擇'}</span>
+      ${on?`<a onclick="momoUploadRemove('${shop}','${type}')" title="移除此檔" style="color:#ef4444;cursor:pointer;font-size:13px;font-weight:700">✕</a>`:''}
+    </div>`;
+  };
+  const jiaFiles=f.jia||[];
+  const jiaRow=`<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
+    <div style="width:220px;font-size:13px;color:#374151;padding-top:2px">甲配運費分攤明細<br><span style="color:#9ca3af;font-size:11px">[C1202] 超取/甲指(第三方)運費 · 選填·可多檔</span></div>
+    <div>
+      <input type="file" accept=".xlsx,.xls" multiple onchange="momoUploadFile('${shop}','jia',event)" style="font-size:12px">
+      <div style="font-size:12px;margin-top:3px">${jiaFiles.length
+        ? jiaFiles.map((x,i)=>`<div style="margin-bottom:2px"><span style="color:#10b981">✓ ${x.name}</span> <a onclick="momoUploadRemoveJia('${shop}',${i})" title="移除此檔" style="color:#ef4444;cursor:pointer;font-weight:700;margin-left:4px">✕</a></div>`).join('')+`<a onclick="momoUploadClearJia('${shop}')" style="color:#5b5fcf;cursor:pointer">清除全部</a>`
+        : '<span style="color:#9ca3af">尚未選擇（第三方/新竹 + 超商，兩份都選；可一次多選或分次加）</span>'}</div>
+    </div>
+  </div>`;
+  c.innerHTML=`
+    <div style="max-width:760px">
+      <div style="font-size:12px;color:#6b7280;background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.6">
+        一次上傳處理整份 C1105，依「配送類型」自動分流寫入 <b>甲配 + 乙配</b> 兩個商品主檔。<br>C1105 有密碼保護，請先自行解密再上傳。只有已建檔的商品會被寫入，未比對到的會列出來。
+      </div>
+      ${fileRow('c1105','C1105 訂單商品明細',true)}
+      ${jiaRow}
+      ${fileRow('yi','乙配運費分攤明細（C1204 物流處理費·含寄倉分攤出貨運費+回收運費兩分頁）',false)}
+      ${fileRow('s1105','S1105 退貨商品明細',false)}
+      <button onclick="momoUploadGenerate('${shop}')" ${f.c1105?'':'disabled'} style="margin-top:10px;padding:7px 18px;border-radius:7px;border:none;background:${f.c1105?'#5b5fcf':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${f.c1105?'pointer':'not-allowed'}">▶ 產生預覽</button>
+      <div id="momo-up-preview-${shop}" style="margin-top:16px"></div>
+    </div>`;
+}
+function momoUploadFile(shop,type,e){
+  const files=e.target.files; if(!files||!files.length) return;
+  if(type==='jia'){   // 可多檔：append + 依檔名/大小去重（支援一次多選或分次加）
+    _momoUpFiles.jia=_momoUpFiles.jia||[];
+    Array.from(files).forEach(fl=>{ if(!_momoUpFiles.jia.some(x=>x.name===fl.name&&x.size===fl.size)) _momoUpFiles.jia.push(fl); });
+  }else{
+    _momoUpFiles[type]=files[0];
+  }
+  momoRenderUpload(shop);
+}
+function momoUploadRemove(shop,type){ _momoUpFiles[type]=null; _momoUpPlan=null; momoRenderUpload(shop); }   // 清該檔 + 清預覽（避免鬼影）
+function momoUploadRemoveJia(shop,i){ if(_momoUpFiles.jia) _momoUpFiles.jia.splice(i,1); _momoUpPlan=null; momoRenderUpload(shop); }
+function momoUploadClearJia(shop){ _momoUpFiles.jia=[]; _momoUpPlan=null; momoRenderUpload(shop); }   // 修：補清 _momoUpPlan（既有鬼影）
+function momoUploadGenerate(shop){
+  if(!_momoUpFiles.c1105){ alert('請先選 C1105（必要）'); return; }
+  const prev=document.getElementById('momo-up-preview-'+shop);
+  if(prev) prev.innerHTML='<div style="font-size:13px;color:#9ca3af">解析中…</div>';
+  const jiaFiles=_momoUpFiles.jia||[];
+  Promise.all([
+    momoReadWorkbook(_momoUpFiles.c1105),
+    Promise.all(jiaFiles.map(fl=>momoReadWorkbook(fl))),
+    _momoUpFiles.yi?momoReadWorkbook(_momoUpFiles.yi):Promise.resolve(null),
+    _momoUpFiles.s1105?momoReadWorkbook(_momoUpFiles.s1105):Promise.resolve(null),
+  ]).then(([c1105wb,jiaWbs,yiwb,s1105wb])=>{
+    const c1105=momoParseC1105(c1105wb.firstSheet());
+    let jia=null, jiaInfo=null;
+    if(jiaWbs.length){   // 多份物流商運費檔各自解析、合併訂編→運費（不同物流商訂單不重疊）
+      const orderFreight={};
+      jiaWbs.forEach(wb=>{
+        const raw=momoParseUnsendJia(wb.firstSheet());
+        Object.keys(raw.orderFreight).forEach(o=>{ if(orderFreight[o]===undefined) orderFreight[o]=raw.orderFreight[o]; });
+      });
+      const alloc=momoAllocateJiaFreight(orderFreight, c1105.orderSkuQty);   // 用 C1105 數量比例往下拆
+      jia={freight:alloc.freight};
+      jiaInfo={unmatchedOrders:alloc.unmatchedOrders, badPeriod:alloc.badPeriod};
+    }
+    let yi=null;
+    if(yiwb){
+      const s1=yiwb.sheet('寄倉分攤出貨運費'), s2=yiwb.sheet('寄倉分攤回收運費');
+      if(!s1||!s2) throw new Error('乙配運費檔缺分頁：需要「寄倉分攤出貨運費」+「寄倉分攤回收運費」（實際分頁：'+yiwb.names.join('、')+'）');
+      const m1=momoParseUnsendYiSheet(s1,'乙配-寄倉分攤出貨運費'), m2=momoParseUnsendYiSheet(s2,'乙配-寄倉分攤回收運費');
+      yi={}; [m1,m2].forEach(m=>Object.keys(m).forEach(sku=>{ yi[sku]=(yi[sku]||0)+m[sku]; }));
+    }
+    // S1105 止血：單獨 try/catch，解析失敗只讓退貨部分失效（s1105=null），不中止整份上傳（C1105/運費照常）
+    let s1105=null, s1105Error=null;
+    if(s1105wb){ try{ s1105=momoParseS1105(s1105wb.firstSheet()); }catch(err){ s1105Error=(err&&err.message)||String(err); console.warn('[momo] S1105 解析失敗，已略過（退貨率不會更新）：',s1105Error); } }
+    _momoUpPlan=momoBuildUploadPlan({c1105,jia,yi,s1105});
+    _momoUpPlan.s1105Error=s1105Error;
+    if(jiaInfo){ _momoUpPlan.jiaUnmatchedOrders=jiaInfo.unmatchedOrders; _momoUpPlan.badPeriod=_momoUpPlan.badPeriod.concat(jiaInfo.badPeriod); }
+    if(s1105&&s1105.badPeriod&&s1105.badPeriod.length) _momoUpPlan.badPeriod=_momoUpPlan.badPeriod.concat(s1105.badPeriod);   // S1105 退貨判不出期別的訂編也浮出來
+    momoRenderUploadPreview(shop);
+  }).catch(err=>{
+    console.error(err);
+    const msg=(err&&err.message)||String(err);
+    const friendly=/password/i.test(msg)?'有檔案還沒解密（密碼保護）。C1105 請先自行解密、另存一份沒密碼的再上傳。':msg;
+    const p=document.getElementById('momo-up-preview-'+shop);
+    if(p) p.innerHTML=`<div style="color:#ef4444;font-size:13px">解析失敗：${friendly}</div>`;
+  });
+}
+function momoRenderUploadPreview(shop){
+  const el=document.getElementById('momo-up-preview-'+shop);
+  if(!el||!_momoUpPlan) return;
+  const P=_momoUpPlan;
+  const shopBlock=s=>{
+    const sp=P.shops[s]; if(!sp) return '';
+    const unm=sp.unmatched.length?`<div style="color:#f97316;font-size:12px;margin-top:4px">未比對到商品主檔 ${sp.unmatched.length} 個（不會寫入，請先到批次維護新增再重傳）：${sp.unmatched.slice(0,15).join('、')}${sp.unmatched.length>15?' …':''}</div>`:'';
+    const ano=sp.anomalyNoSales.length?`<div style="color:#f97316;font-size:12px;margin-top:4px">有運費但當月無銷量 ${sp.anomalyNoSales.length} 個（無法按比例拆，略過）：${sp.anomalyNoSales.slice(0,10).map(a=>a.sku).join('、')}</div>`:'';
+    return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px">
+      <b>${s}</b>：${sp.matched.length} 個 SKU 有更新、期別 ${sp.periods.map(momoPeriodLabel).join(' / ')||'—'}、總銷量 ${sp.totalQty}${unm}${ano}</div>`;
+  };
+  let owHtml='';
+  if(P.overwrite.length){
+    const owByShop={};
+    P.overwrite.forEach(o=>{ owByShop[o.shop]=(owByShop[o.shop]||0)+1; });
+    const owParts=Object.keys(owByShop).map(s=>`${s} ${owByShop[s]} 筆`).join('、');
+    const riskyShops=[...new Set(P.overwrite.filter(o=>P.shops[o.shop]&&P.shops[o.shop].cloudRisk).map(o=>o.shop))];
+    owHtml=`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#9a3412;line-height:1.6">
+      ⚠ 這次會<b>覆蓋已有資料的期別：${owParts}</b>（賣場×SKU×期別），原本數字會被新數字取代。
+      ${riskyShops.length?`<div style="margin-top:4px;font-weight:700">${riskyShops.join('、')} 的商品主檔目前不在待同步狀態 → 這些很可能是<u>已同步雲端、別人看過的正式數字</u>，確認你真的要改。</div>`:''}</div>`;
+  }
+  // 判不出期別 = 有問題（不是單純略過）→ 橘字獨立區塊、列出實際訂編給人追查
+  let badHtml='';
+  if(P.badPeriod.length){
+    const orders=P.badPeriod.map(b=>b.order).filter(o=>o!=null&&String(o).trim()!=='').map(o=>String(o).trim());
+    const shown=orders.slice(0,20).join('、');
+    const more=P.badPeriod.length>20?` …等 ${P.badPeriod.length} 筆`:'';
+    badHtml=`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#9a3412;line-height:1.6">
+      ⚠ <b>訂編無法判斷期別，${P.badPeriod.length} 筆未寫入</b>（訂編前 6 碼非 YYMMDD、或月/日超出範圍）。請檢查是不是小計 / 頁尾 / 錯誤列：
+      <div style="margin-top:4px;word-break:break-all;font-family:monospace">${shown}${more}</div></div>`;
+  }
+  // S1105 止血：退貨檔解析失敗 → 橘字說明、退貨率不更新，但其餘照常寫入（同 badPeriod 風格）
+  const s1105ErrHtml=P.s1105Error?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#9a3412;line-height:1.6">
+      ⚠ <b>S1105 退貨明細解析失敗，已略過（退貨率不會更新）</b>：<div style="margin-top:4px;word-break:break-all">${P.s1105Error}</div></div>`:'';
+  const skips=[];
+  if(P.unknownChannel.length) skips.push(`未知配送類型 ${P.unknownChannel.length} 筆`);
+  if(P.jiaUnmatchedOrders&&P.jiaUnmatchedOrders.length) skips.push(`甲配運費訂單在 C1105 找不到 ${P.jiaUnmatchedOrders.length} 筆（該運費未分攤）`);
+  const skipHtml=skips.length?`<div style="font-size:12px;color:#9ca3af;margin-bottom:8px">略過（未計入）：${skips.join('、')}</div>`:'';
+  el.innerHTML=`
+    <div style="font-size:13px;font-weight:700;margin-bottom:8px">預覽（尚未寫入）</div>
+    ${shopBlock('甲配')}${shopBlock('乙配')}${owHtml}${badHtml}${s1105ErrHtml}${skipHtml}
+    <button onclick="momoUploadApply('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認寫入${P.overwrite.length?'（含覆蓋 '+P.overwrite.length+' 筆）':''}</button>
+    <button onclick="momoUploadCancel('${shop}')" style="margin-left:8px;padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>`;
+}
+function momoUploadApply(shop){
+  if(!_momoUpPlan) return;
+  momoApplyUploadPlan(_momoUpPlan);
+  const total=Object.values(_momoUpPlan.shops).reduce((s,sp)=>s+sp.matched.length,0);
+  _momoUpPlan=null; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.yi=null; _momoUpFiles.s1105=null;
+  if(typeof showToast==='function') showToast('已寫入 '+total+' 個 SKU 的期別資料（記得按 ☁ 同步雲端）','success');
+  momoRenderUpload(shop);
+}
+function momoUploadCancel(shop){ _momoUpPlan=null; momoRenderUpload(shop); }
+
+// ── 畫面四：商品資料同步（莫筆克成本 各倉商品列表 + MOMO商品資訊 → 差異預覽 5 類）──
+//  莫筆克(各倉「商品資料」分頁)：品項條碼→origin、銷售成本→cost（origin 對照表）
+//  MOMO商品資訊：倉別→通路(供應商=甲配/寄倉=乙配)、商品編號=sku(合併變體取第一)、
+//    商品原廠編號=origin、商品名稱、進價、售價(含稅)、銷售狀況(進行/暫時中斷/永久中斷)
+const _momoSyncFiles={info:null,cost:null};
+let _momoSyncParsed=null, _momoSyncPlan=null;
+function momoParseProductInfo(rows){
+  const {headerIdx,idx}=momoLocateCols(rows,{
+    warehouse:['倉別'], sku:['商品編號'], origin:['商品原廠編號'], name:['商品名稱'],
+    purchase:['進價'], sale:['售價(含稅)','售價（含稅）'], status:['銷售狀況']
+  },'MOMO商品資訊');
+  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
+  const chOf=w=>{ w=String(w||'').trim(); if(w==='供應商')return '甲配'; if(w==='寄倉')return '乙配'; return null; };
+  const products={甲配:{},乙配:{}}, unknownWarehouse=[];
+  for(let i=headerIdx+1;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    const sku=String(r[idx.sku]||'').trim(); if(!sku) continue;
+    const ch=chOf(r[idx.warehouse]);
+    if(!ch){ if(unknownWarehouse.length<20) unknownWarehouse.push({sku,warehouse:r[idx.warehouse]}); continue; }
+    if(products[ch][sku]) continue;   // 合併變體：取第一個（Q1）
+    products[ch][sku]={
+      sku, origin:String(r[idx.origin]||'').trim(), name:String(r[idx.name]||'').trim(),
+      purchasePrice:num(r[idx.purchase]), salePrice:num(r[idx.sale]), status:String(r[idx.status]||'').trim()
+    };
+  }
+  return {products, unknownWarehouse};
+}
+function momoParseCostList(rows){
+  const {headerIdx,idx}=momoLocateCols(rows,{origin:['品項條碼'], cost:['銷售成本']},'莫筆克成本(各倉商品列表)');
+  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
+  const costByOrigin={};
+  for(let i=headerIdx+1;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    const origin=String(r[idx.origin]||'').trim(); if(!origin) continue;
+    if(costByOrigin[origin]===undefined) costByOrigin[origin]=num(r[idx.cost]);   // 取第一個
+  }
+  return {costByOrigin};
+}
+function momoBuildSyncPlan(parsed){
+  const plan={ shops:{}, unknownWarehouse:parsed.info.unknownWarehouse };
+  const costMap=parsed.cost.costByOrigin;
+  ['甲配','乙配'].forEach(shop=>{
+    const master=momoLoadProducts(shop);
+    const bySku=new Map(master.map(p=>[p.sku,p]));
+    const incoming=parsed.info.products[shop]||{};
+    const costChanged=[], priceChanged=[], nameChanged=[], discontinued=[], newItems=[], noCost=[];
+    const seen=new Set();
+    Object.keys(incoming).forEach(sku=>{
+      seen.add(sku);
+      const inc=incoming[sku];
+      const newCost=(inc.origin && costMap[inc.origin]!==undefined)?costMap[inc.origin]:null;
+      const p=bySku.get(sku);
+      if(!p){   // 未建檔
+        newItems.push({sku, origin:inc.origin, name:inc.name, purchasePrice:inc.purchasePrice, salePrice:inc.salePrice, cost:(newCost!=null?newCost:0), status:inc.status});
+        if(newCost===null && inc.origin) noCost.push({sku, origin:inc.origin, name:inc.name});
+        return;
+      }
+      if(newCost===null){ if(inc.origin) noCost.push({sku, origin:inc.origin, name:p.name}); }   // Q3：查無成本，成本不動
+      else if(Number(p.cost)!==Number(newCost)) costChanged.push({sku, name:p.name, old:p.cost, new:newCost});
+      if(Number(p.purchasePrice)!==Number(inc.purchasePrice)||Number(p.salePrice)!==Number(inc.salePrice))
+        priceChanged.push({sku, name:p.name, oldP:p.purchasePrice, newP:inc.purchasePrice, oldS:p.salePrice, newS:inc.salePrice});
+      if(String(p.name||'')!==String(inc.name||'')) nameChanged.push({sku, old:p.name, new:inc.name});
+      if(inc.status && inc.status!=='進行' && !p.discontinued) discontinued.push({sku, name:p.name, status:inc.status});   // Q2
+    });
+    const notSeen=master.filter(p=>!seen.has(p.sku)).map(p=>p.sku);
+    plan.shops[shop]={costChanged,priceChanged,nameChanged,discontinued,newItems,noCost,notSeen};
+  });
+  return plan;
+}
+function _momoSyncAfterApply(shop,msg){
+  _momoSyncPlan=momoBuildSyncPlan(_momoSyncParsed);   // 重新比對 → 已套用的項目自然消失
+  momoRenderSyncPreview(shop);
+  if(typeof showToast==='function') showToast(msg+'（記得按 ☁ 同步雲端）','success');
+}
+function momoSyncApplyCost(shop){
+  const items=(_momoSyncPlan.shops[shop]||{}).costChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可套用的成本變動項目','info'); return; }
+  const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
+  items.forEach(it=>{ const p=bySku.get(it.sku); if(!p)return; p.cost=it.new; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:it.new,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品資料同步：成本更新'}); });
+  momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已更新 '+items.length+' 筆成本');
+}
+function momoSyncApplyPrice(shop){
+  const items=(_momoSyncPlan.shops[shop]||{}).priceChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可套用的售價/進價變動項目','info'); return; }
+  const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
+  items.forEach(it=>{ const p=bySku.get(it.sku); if(!p)return; p.purchasePrice=it.newP; p.salePrice=it.newS; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:p.cost,purchasePrice:it.newP,salePrice:it.newS,note:'商品資料同步：進價/售價更新'}); });
+  momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已更新 '+items.length+' 筆進價/售價');
+}
+function momoSyncApplyName(shop){
+  const items=(_momoSyncPlan.shops[shop]||{}).nameChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可套用的名稱變動項目','info'); return; }
+  const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
+  items.forEach(it=>{ const p=bySku.get(it.sku); if(p) p.name=it.new; });   // 名稱不進歷程
+  momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已更新 '+items.length+' 筆名稱');
+}
+function momoSyncApplyDiscontinued(shop){
+  const items=(_momoSyncPlan.shops[shop]||{}).discontinued||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可標記下架的項目','info'); return; }
+  const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
+  items.forEach(it=>{ const p=bySku.get(it.sku); if(p) p.discontinued=true; });
+  momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已標記 '+items.length+' 筆下架');
+}
+function momoSyncApplyNew(shop){
+  const items=(_momoSyncPlan.shops[shop]||{}).newItems||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可一鍵新增的未建檔項目','info'); return; }
+  const master=momoLoadProducts(shop), have=new Set(master.map(p=>p.sku)); let added=0;
+  items.forEach(it=>{ if(have.has(it.sku))return; master.push({sku:it.sku, origin:it.origin, name:it.name, cost:it.cost, purchasePrice:it.purchasePrice, salePrice:it.salePrice, shippingPackaging:momoDefaultShip(shop), history:[{...momoNowParts(),cost:it.cost,purchasePrice:it.purchasePrice,salePrice:it.salePrice,note:'商品資料同步：新建檔'}], periods:{}}); have.add(it.sku); added++; });
+  momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已新增 '+added+' 個商品');
+}
+function momoRenderProductSync(shop){
+  const c=document.getElementById('momo-sub-content-'+shop);
+  if(!c) return;
+  const f=_momoSyncFiles;
+  const fileRow=(type,label)=>{
+    const on=!!f[type];
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <div style="width:250px;font-size:13px;color:#374151">${label} <span style="color:#ef4444">*必要</span></div>
+      <input type="file" accept=".xlsx,.xls" onchange="momoSyncFile('${shop}','${type}',event)" style="font-size:12px">
+      <span style="font-size:12px;color:${on?'#10b981':'#9ca3af'}">${on?'✓ '+f[type].name:'尚未選擇'}</span>
+      ${on?`<a onclick="momoSyncRemove('${shop}','${type}')" title="移除此檔" style="color:#ef4444;cursor:pointer;font-size:13px;font-weight:700">✕</a>`:''}
+    </div>`;
+  };
+  c.innerHTML=`
+    <div style="max-width:840px">
+      <div style="font-size:12px;color:#6b7280;background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.6">
+        兩份都上傳後產生差異預覽（同時比對 <b>甲配 + 乙配</b>）。莫筆克成本＝各倉商品列表（品項條碼→原廠編號、銷售成本→成本）；MOMO商品資訊＝MOMO後台商品主檔（倉別分通路）。套用後成本/價格走歷程（新增一筆、不覆蓋）。
+      </div>
+      ${fileRow('cost','莫筆克成本（元創數位_各倉_商品列表）')}
+      ${fileRow('info','MOMO商品資訊（MOMO後台商品主檔）')}
+      <button onclick="momoSyncGenerate('${shop}')" ${(f.info&&f.cost)?'':'disabled'} style="margin-top:10px;padding:7px 18px;border-radius:7px;border:none;background:${(f.info&&f.cost)?'#5b5fcf':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${(f.info&&f.cost)?'pointer':'not-allowed'}">▶ 產生差異預覽</button>
+      <div id="momo-sync-preview-${shop}" style="margin-top:16px"></div>
+    </div>`;
+}
+function momoSyncFile(shop,type,e){
+  const file=e.target.files[0]; if(!file) return;
+  _momoSyncFiles[type]=file; momoRenderProductSync(shop);
+}
+function momoSyncRemove(shop,type){ _momoSyncFiles[type]=null; _momoSyncPlan=null; _momoSyncParsed=null; momoRenderProductSync(shop); }   // 清該檔 + 清預覽/解析結果
+
+// ── 畫面五：倉租費彙總（僅乙配）——手動輸入月度總額，不分攤、不進毛利，只做紀錄+彙總 ──
+function momoRentFmt(v){ return '$'+Number(v||0).toLocaleString('en-US'); }
+function momoRentSyncBtn(){   // 依當前選的月份是否已有紀錄，切換按鈕文字（新增/更新）
+  const mEl=document.getElementById('momo-rent-month'), bEl=document.getElementById('momo-rent-submit');
+  if(!mEl||!bEl) return;
+  const m=mEl.value;
+  const exists=m&&momoLoadRent().some(r=>r.month===m);
+  bEl.textContent=exists?('更新 '+m):'新增';
+}
+function momoRentSubmit(shop){
+  const mEl=document.getElementById('momo-rent-month'), aEl=document.getElementById('momo-rent-amount'), nEl=document.getElementById('momo-rent-note');
+  const month=((mEl&&mEl.value)||'').trim();
+  if(!/^\d{4}-\d{2}$/.test(month)){ alert('請先選擇月份'); return; }
+  const raw=((aEl&&aEl.value)||'').trim();
+  const amount=Number(raw);   // 一定轉成 number，避免月均字串相加
+  if(raw===''||!Number.isFinite(amount)||amount<0){ alert('金額必須是 0 或正數'); return; }
+  const note=((nEl&&nEl.value)||'').trim();
+  const records=momoLoadRent().slice();
+  const i=records.findIndex(r=>r.month===month);
+  const updated=i>=0;
+  if(updated) records[i]={month,amount,note};   // 同月覆蓋
+  else records.push({month,amount,note});
+  momoSaveRent(records);
+  momoRenderRent(shop);
+  if(typeof showToast==='function') showToast((updated?'已更新 ':'已新增 ')+month+' 的倉租費（記得按 ☁ 同步雲端）','success');
+}
+function momoRentDelete(shop,month){
+  const records=momoLoadRent().filter(r=>r.month!==month);
+  momoSaveRent(records);
+  momoRenderRent(shop);
+  if(typeof showToast==='function') showToast('已刪除 '+month+' 的倉租費（記得按 ☁ 同步雲端）','info');
+}
+function momoRenderRent(shop){
+  const c=document.getElementById('momo-sub-content-'+shop);
+  if(!c) return;
+  const records=momoLoadRent().slice().sort((a,b)=> a.month<b.month?1:a.month>b.month?-1:0);   // 新到舊
+  const n=records.length;
+  const total=records.reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const avg=n?Math.round(total/n):0;
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const listHtml=records.length
+    ? records.map(r=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #eef0f2;border-radius:7px;margin-bottom:6px">
+        <div style="width:80px;font-weight:600;font-size:13px">${r.month}</div>
+        <div style="width:120px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums">${momoRentFmt(r.amount)}</div>
+        <div style="flex:1;font-size:12px;color:#6b7280;word-break:break-all">${esc(r.note)}</div>
+        <a onclick="momoRentDelete('${shop}','${r.month}')" title="刪除" style="color:#ef4444;cursor:pointer;font-weight:700;font-size:13px">✕</a>
+      </div>`).join('')
+    : `<div class="empty" style="padding:28px 0;text-align:center;color:#9ca3af"><div style="font-size:26px">📦</div><div style="font-size:13px;margin-top:6px">還沒有倉租費紀錄，從上方新增第一筆</div></div>`;
+  c.innerHTML=`
+    <div style="max-width:640px">
+      <div style="font-size:12px;color:#6b7280;background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.6">
+        倉租費是乙配（寄倉）的<b>公司層級月度總費用</b>（對應對帳單「寄倉倉租費(EC)」），<b>不分攤到商品、不進毛利</b>，這裡只做紀錄與彙總。
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        <div><div style="font-size:12px;color:#6b7280;margin-bottom:3px">月份</div><input type="month" id="momo-rent-month" onchange="momoRentSyncBtn()" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px"></div>
+        <div><div style="font-size:12px;color:#6b7280;margin-bottom:3px">金額</div><input type="number" min="0" step="1" id="momo-rent-amount" placeholder="0" style="width:120px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px"></div>
+        <div style="flex:1;min-width:140px"><div style="font-size:12px;color:#6b7280;margin-bottom:3px">備註（選填）</div><input type="text" id="momo-rent-note" style="width:100%;padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px"></div>
+        <button id="momo-rent-submit" onclick="momoRentSubmit('${shop}')" style="padding:7px 16px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">新增</button>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:16px">
+        <div style="flex:1;background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:12px 14px">
+          <div style="font-size:12px;color:#6b7280">累計總計</div>
+          <div style="font-size:20px;font-weight:700;color:#1a1a2e;font-variant-numeric:tabular-nums">${momoRentFmt(total)}</div>
+        </div>
+        <div style="flex:1;background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:12px 14px">
+          <div style="font-size:12px;color:#6b7280">月均（${n} 個月）</div>
+          <div style="font-size:20px;font-weight:700;color:#1a1a2e;font-variant-numeric:tabular-nums">${momoRentFmt(avg)}</div>
+        </div>
+      </div>
+      <div>${listHtml}</div>
+    </div>`;
+  momoRentSyncBtn();
+}
+function momoSyncGenerate(shop){
+  if(!_momoSyncFiles.info||!_momoSyncFiles.cost){ alert('兩份檔都要選（莫筆克成本 + MOMO商品資訊）'); return; }
+  const prev=document.getElementById('momo-sync-preview-'+shop);
+  if(prev) prev.innerHTML='<div style="font-size:13px;color:#9ca3af">解析中…</div>';
+  Promise.all([ momoReadWorkbook(_momoSyncFiles.cost), momoReadWorkbook(_momoSyncFiles.info) ]).then(([costWb,infoWb])=>{
+    const costRows=costWb.sheet('商品資料')||costWb.firstSheet();
+    const cost=momoParseCostList(costRows);
+    const info=momoParseProductInfo(infoWb.firstSheet());
+    _momoSyncParsed={info,cost};
+    _momoSyncPlan=momoBuildSyncPlan(_momoSyncParsed);
+    momoRenderSyncPreview(shop);
+  }).catch(err=>{
+    console.error(err);
+    const msg=(err&&err.message)||String(err);
+    const friendly=/password/i.test(msg)?'有檔案還沒解密（密碼保護），請先解密再上傳。':msg;
+    const p=document.getElementById('momo-sync-preview-'+shop);
+    if(p) p.innerHTML=`<div style="color:#ef4444;font-size:13px">解析失敗：${friendly}</div>`;
+  });
+}
+function momoRenderSyncPreview(shop){
+  const el=document.getElementById('momo-sync-preview-'+shop);
+  if(!el||!_momoSyncPlan) return;
+  const P=_momoSyncPlan;
+  const cat=(label,items,fn,txt,color)=>{
+    if(!items.length) return '';
+    const sample=items.slice(0,8).map(x=>x.name||x.sku).join('、');
+    return `<div style="display:flex;align-items:flex-start;gap:10px;padding:6px 0;border-top:1px solid #f3f4f6">
+      <div style="flex:1;font-size:12px"><b style="color:${color}">${label} ${items.length}</b><div style="color:#9ca3af;margin-top:2px">${sample}${items.length>8?' …':''}</div></div>
+      <button onclick="${fn}('${shop}')" style="padding:4px 12px;border-radius:6px;border:none;background:#10b981;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">${txt}</button></div>`;
+  };
+  const shopBlock=s=>{
+    const sp=P.shops[s]; if(!sp) return '';
+    const inner=cat('成本有變動',sp.costChanged,'momoSyncApplyCost','套用成本','#374151')
+      +cat('售價/進價有變動',sp.priceChanged,'momoSyncApplyPrice','套用價格','#374151')
+      +cat('商品名稱有變動',sp.nameChanged,'momoSyncApplyName','套用名稱','#374151')
+      +cat('已下架（銷售狀況≠進行）',sp.discontinued,'momoSyncApplyDiscontinued','標記下架','#9ca3af')
+      +cat('未建檔品項',sp.newItems,'momoSyncApplyNew','一鍵新增','#5b5fcf')
+      +(sp.noCost.length?`<div style="font-size:12px;color:#f97316;padding:6px 0;border-top:1px solid #f3f4f6">查無成本 ${sp.noCost.length}（莫筆克表沒這些原廠編號，成本不動）：${sp.noCost.slice(0,10).map(x=>x.origin).join('、')}</div>`:'')
+      +(sp.notSeen.length?`<div style="font-size:12px;color:#9ca3af;padding:6px 0;border-top:1px solid #f3f4f6">本次未比對到 ${sp.notSeen.length}（主檔有、這份 MOMO資訊沒有）</div>`:'');
+    const clean=!sp.costChanged.length&&!sp.priceChanged.length&&!sp.nameChanged.length&&!sp.discontinued.length&&!sp.newItems.length&&!sp.noCost.length&&!sp.notSeen.length;
+    return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:2px">${s}</div>
+      ${clean?'<div style="font-size:12px;color:#10b981">無差異</div>':inner}</div>`;
+  };
+  const uw=P.unknownWarehouse.length?`<div style="font-size:12px;color:#9ca3af;margin-bottom:8px">未知倉別（非供應商/寄倉）${P.unknownWarehouse.length} 筆，已略過</div>`:'';
+  // 只畫「當前賣場」那塊（cat 的按鈕綁 shop===當前，跨賣場靜默失敗的坑就此消失）；另一賣場改成一行可點提示
+  const other = shop==='甲配'?'乙配':'甲配';
+  const osp = P.shops[other];
+  let otherHint='';
+  if(osp){
+    const parts=[];
+    if(osp.newItems.length)     parts.push(osp.newItems.length+' 筆未建檔');
+    if(osp.discontinued.length) parts.push(osp.discontinued.length+' 筆待標記下架');
+    if(osp.costChanged.length)  parts.push(osp.costChanged.length+' 筆成本有變動');
+    if(osp.priceChanged.length) parts.push(osp.priceChanged.length+' 筆售價/進價有變動');
+    if(osp.nameChanged.length)  parts.push(osp.nameChanged.length+' 筆名稱有變動');
+    const extras=[];
+    if(osp.noCost.length)  extras.push(osp.noCost.length+' 筆查無成本');
+    if(osp.notSeen.length) extras.push(osp.notSeen.length+' 筆未比對到');
+    const msg = parts.length ? (other+'另有 '+parts.join('、')+' — 切換到'+other+'分頁處理')
+              : extras.length ? (other+'另有 '+extras.join('、')+'（切換到'+other+'分頁查看）')
+              : (other+'無差異');
+    otherHint=`<button onclick="momoJumpShop('${other}')" style="width:100%;text-align:left;margin-top:6px;padding:8px 12px;border-radius:8px;border:1px dashed #c7c9e6;background:#f5f6ff;color:#5b5fcf;font-size:12px;font-weight:600;cursor:pointer">↪ ${msg}</button>`;
+  }
+  el.innerHTML=`<div style="font-size:13px;font-weight:700;margin-bottom:8px">差異預覽（套用後才寫入；成本/價格走歷程）</div>${shopBlock(shop)}${otherHint}${uw}`;
+}
+// 跳到另一個 MOMO 賣場分頁：click 真 tab 才會同步高亮 pill（setMomoShop 靠 btn 設 active）
+function momoJumpShop(shop){
+  const tab=document.querySelector('.stab[onclick="setMomoShop(\''+shop+'\',this)"]');
+  if(tab) tab.click(); else setMomoShop(shop);
+}
+
+// ── 畫面六（P5）：淨利階層彙總（MOMO｜總表，甲配/乙配兩卡並排）──
+//  band 用 §2 marginPct（實際毛利÷進價含稅），沿用 §9 門檻；動銷率分母排除 discontinued；
+//  查無成本(!cost>0)不進 band 但仍算動銷；Action Plan 上雲(存檔失敗要提示)。
+let _momoSummaryMonth;   // 'YYYY-MM'（自己的月份狀態，不借 _cupPeriod）
+function momoSummaryMonths(){   // 兩賣場 periods 月份聯集（YYYY-MM），排序
+  const set=new Set();
+  ['甲配','乙配'].forEach(shop=>momoLoadProducts(shop).forEach(p=>{
+    if(p.periods) Object.keys(p.periods).forEach(k=>{ const m=String(k).slice(0,7); if(/^\d{4}-\d{2}$/.test(m)) set.add(m); });
+  }));
+  return [...set].sort();
+}
+function momoMonthHalfState(month){   // 補強①：三態半月判斷；只認合格式 key（髒 key 不影響）
+  const RE=/^(\d{4}-\d{2})-H([12])$/;
+  let h1=false, h2=false;
+  ['甲配','乙配'].forEach(shop=>momoLoadProducts(shop).forEach(p=>{
+    if(!p.periods) return;
+    Object.keys(p.periods).forEach(key=>{
+      const mm=RE.exec(key);            // 不合 ^YYYY-MM-H[12]$ 的髒 key 直接略過
+      if(!mm || mm[1]!==month) return;
+      if(mm[2]==='1') h1=true; else h2=true;
+    });
+  }));
+  if(h1&&h2) return 'both';
+  if(h1) return 'H1only';
+  if(h2) return 'H2only';
+  return 'none';
+}
+function momoHalfLabel(state){ return state==='H1only'?'（僅上半月）':state==='H2only'?'（僅下半月）':''; }
+function momoShopMonthStats(shop,month){
+  const all=momoLoadProducts(shop);
+  const active=all.filter(p=>!p.discontinued);        // 補強②：未下架＝!discontinued（含 undefined/false）
+  const discCount=all.filter(p=>p.discontinued===true).length;
+  // 驗算：未下架 + 已下架 === 主檔總數；對不上代表有第三種狀態
+  if(active.length+discCount!==all.length)
+    console.warn('[momo P5] 驗算不符（'+shop+'）：未下架 '+active.length+' + 已下架 '+discCount+' ≠ 主檔 '+all.length+' → 可能有第三種 discontinued 狀態，請停下來檢查');
+  else
+    console.log('[momo P5] '+shop+' '+month+' 驗算：未下架 '+active.length+' + 已下架 '+discCount+' = 主檔 '+all.length+' ✓');
+  const pk=[month+'-H1', month+'-H2'];
+  const sold=active.map(p=>({p, agg:momoAggregatePeriods(p, pk)})).filter(x=>x.agg.qty>0);   // 該月有銷量
+  const noCost=sold.filter(x=>!(Number(x.p.cost)>0));   // 查無成本：仍算動銷、但不進 band
+  const banded=sold.filter(x=>Number(x.p.cost)>0);
+  const bands={lt0:0,b0_10:0,b10_15:0,b15_20:0,b20_30:0,gt30:0};
+  banded.forEach(x=>{ const v=x.agg.margin;
+    if(v<0)bands.lt0++; else if(v<10)bands.b0_10++; else if(v<15)bands.b10_15++; else if(v<20)bands.b15_20++; else if(v<30)bands.b20_30++; else bands.gt30++; });
+  return {
+    activeCount:active.length, discCount, allCount:all.length,
+    soldCount:sold.length, noCostCount:noCost.length, bands,
+    ge20:bands.b20_30+bands.gt30, lt20:bands.lt0+bands.b0_10+bands.b10_15+bands.b15_20,
+    rate: active.length? sold.length/active.length : 0
+  };
+}
+// Action Plan：ec_momo_action_plans（單一物件，key `{shop}-{yyyy-mm}`），上雲走既有 field rail
+function momoLoadActionPlans(){
+  const k='ec_momo_action_plans';
+  try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]) return Store._mem[k]; }catch{}
+  try{ const l=localStorage.getItem(k); if(l) return JSON.parse(l); }catch{}
+  return {};
+}
+function momoSaveActionPlan(shop,month,text){   // 回傳 setItem 是否成功（僅此路徑加成功檢查，不動 momoSaveProducts）
+  const k='ec_momo_action_plans';
+  const all=momoLoadActionPlans(); all[shop+'-'+month]=text;
+  let ok=true;
+  try{ localStorage.setItem(k, JSON.stringify(all)); }catch(e){ ok=false; console.error('[momo action plan] localStorage 存檔失敗：', e); }
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=all; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=all; }catch{}
+  _markPending(k);
+  return ok;
+}
+function momoActionPlanSave(shop){
+  const ta=document.getElementById('momo-ap-'+shop);
+  const st=document.getElementById('momo-ap-status-'+shop);
+  if(!ta) return;
+  const ok=momoSaveActionPlan(shop, _momoSummaryMonth||'', ta.value);
+  if(st){
+    if(ok){ st.textContent='已儲存（記得按 ☁ 同步雲端）'; st.style.color='#10b981'; }
+    else { st.textContent='⚠ 儲存失敗，localStorage 可能已滿——請先匯出/清理再試'; st.style.color='#ef4444'; }
+  }
+}
+function momoSetSummaryMonth(val){ _momoSummaryMonth=val; momoRenderSummary(); }
+function momoSummaryCardHTML(shop,month){
+  const s=momoShopMonthStats(shop,month);
+  const plans=momoLoadActionPlans();
+  const apVal=(plans[shop+'-'+month]||'').replace(/</g,'&lt;');
+  const ratePct=Math.round(s.rate*1000)/10;
+  const rateColor=s.rate>=0.6?'#10b981':'#f97316';
+  const bandDen=s.soldCount;   // §9：佔比分母＝商品數量（該月有銷量）
+  const pctOf=n=>bandDen>0?(Math.round(n/bandDen*1000)/10)+'%':'—';
+  const rowSub=(label,n)=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span style="color:#6b7280">${label}</span><span style="font-variant-numeric:tabular-nums">${n} <span style="color:#9ca3af">(${pctOf(n)})</span></span></div>`;
+  const b=s.bands;
+  const soldZero=s.soldCount===0;
+  return `
+  <div style="flex:1;min-width:300px;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;background:#fff">
+    <div style="font-size:15px;font-weight:700;color:#e4007f">${shop}</div>
+    <div style="font-size:10.5px;color:#9ca3af;margin-bottom:10px">淨利率 = 實際毛利 ÷ 進價(含稅)</div>
+    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
+      <span style="font-size:12px;color:#6b7280">商品數量</span>
+      <b style="font-size:20px;font-variant-numeric:tabular-nums">${s.soldCount}</b>
+      <span style="font-size:12px;color:#9ca3af">/ 所有商品 ${s.activeCount}</span>
+    </div>
+    <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">（另有 ${s.discCount} 筆已下架，未計入）</div>
+    <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #f3f4f6">
+      <span style="font-size:12px;color:#6b7280">動銷率</span>
+      <b style="font-size:18px;color:${rateColor};font-variant-numeric:tabular-nums">${ratePct}%</b>
+      <span style="font-size:11px;color:#9ca3af">（健康值 60%）</span>
+    </div>
+    ${soldZero?`<div style="font-size:12px;color:#9ca3af;padding:8px 0">該月無銷量資料</div>`:`
+    <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">淨利階層分佈</div>
+    <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;padding:3px 0"><span style="color:#10b981">≥20%（綠）</span><span style="font-variant-numeric:tabular-nums">${s.ge20} <span style="color:#9ca3af">(${pctOf(s.ge20)})</span></span></div>
+    ${rowSub('　20% - 30%',b.b20_30)}
+    ${rowSub('　&gt;30%',b.gt30)}
+    <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;padding:3px 0;margin-top:4px"><span style="color:#f97316">&lt;20%（橘）</span><span style="font-variant-numeric:tabular-nums">${s.lt20} <span style="color:#9ca3af">(${pctOf(s.lt20)})</span></span></div>
+    ${rowSub('　&lt;0%',b.lt0)}
+    ${rowSub('　0% - 10%',b.b0_10)}
+    ${rowSub('　10% - 15%',b.b10_15)}
+    ${rowSub('　15% - 20%',b.b15_20)}
+    ${s.noCostCount>0?`<div style="font-size:12px;color:#f97316;margin-top:8px;padding-top:8px;border-top:1px dashed #fed7aa">⚠️ 成本待確認 ${s.noCostCount} 筆（未納入分佈）</div>`:''}
+    `}
+    <div style="margin-top:12px">
+      <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px">Action Plan</div>
+      <textarea id="momo-ap-${shop}" onblur="momoActionPlanSave('${shop}')" placeholder="這個月的行動計畫…（離開輸入框自動存）" style="width:100%;min-height:64px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;outline:none;box-sizing:border-box;resize:vertical">${apVal}</textarea>
+      <div id="momo-ap-status-${shop}" style="font-size:11px;margin-top:3px;min-height:14px"></div>
+    </div>
+    <div style="font-size:10px;color:#9ca3af;margin-top:10px;line-height:1.5">淨利率依商品目前成本/售價計算，非當期歷史成本（規格 §199）</div>
+  </div>`;
+}
+function momoRenderSummary(){
+  const el=document.getElementById('momo-content-總表');
+  if(!el) return;
+  const months=momoSummaryMonths();
+  if(_momoSummaryMonth===undefined || (_momoSummaryMonth && !months.includes(_momoSummaryMonth)))
+    _momoSummaryMonth = months.length?months[months.length-1]:'';
+  if(!months.length){
+    el.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">尚無期別資料，請先在甲配/乙配上傳 C1105</div></div>`;
+    return;
+  }
+  const m=_momoSummaryMonth;
+  const opts=months.map(mo=>`<option value="${mo}"${mo===m?' selected':''}>${mo}${momoHalfLabel(momoMonthHalfState(mo))}</option>`).join('');
+  el.innerHTML=`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <span style="font-size:13px;color:#6b7280;font-weight:500">月份</span>
+      <select onchange="momoSetSummaryMonth(this.value)" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;color:#1a1a2e">${opts}</select>
+      ${(()=>{const st=momoMonthHalfState(m); return (st==='H1only'||st==='H2only')?`<span style="font-size:12px;color:#f97316">⚠️ 此月${st==='H1only'?'僅上半月':'僅下半月'}資料，數字勿與完整月份直接比較</span>`:'';})()}
+    </div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch">
+      ${momoSummaryCardHTML('甲配',m)}
+      ${momoSummaryCardHTML('乙配',m)}
+    </div>`;
+}
+
 
 // ── 酷澎 資料持久化 ──
 function cupLsKey(shop,month,half){return'ec_coupang|'+shop+'|'+month+'|'+half;}
@@ -5159,11 +6839,17 @@ function setMomoShop(shop,btn){
   const el=document.getElementById('momo-content-'+shop);
   if(el){
     el.classList.add('active');
-    if(!el.dataset.init){el.innerHTML=shop==='甲配'?momoYipeiHTML(shop):momoShopHTML(shop);el.dataset.init='1';}
+    if(shop==='甲配'||shop==='乙配'){
+      momoRenderShop(shop);   // 新設計：自帶子分頁，每次進來重繪（不用 dataset.init 快取）
+    }else if(shop==='總表'){
+      momoRenderSummary();    // P5 淨利階層彙總（每次進來重繪，不快取）
+    }else if(!el.dataset.init){
+      el.innerHTML=momoShopHTML(shop);   // MO+麻吉 / MO+森之旅：維持舊佔位（momoShopHTML 酷澎共用，勿動）
+      el.dataset.init='1';
+    }
   }
   const kpiBlock=document.getElementById('header-kpi-row');
   if(kpiBlock)kpiBlock.style.display='none';
-  if(shop==='甲配')momoRptTryLoadSaved(shop);
 }
 
 function setCoupangShop(shop,btn){
@@ -5266,345 +6952,6 @@ function readXlsx(file,sheetName){
     reader.onerror=reject;
     reader.readAsArrayBuffer(file);
   });
-}
-
-// ── MOMO 甲配報表：上傳「商品分析」+「銷售分析」兩份 MOMO 後台報表，解析成 KPI 總覽 + 每日趨勢 + 商品明細表 ──
-let _mypShop='';
-const _mypFiles={product:null,sales:null};
-const _mypData={};
-function openMomoRptUpload(shop){
-  _mypShop=shop;
-  document.getElementById('momo-rpt-upload-title').textContent='上傳檔案｜MOMO · '+shop;
-  document.getElementById('momo-rpt-upload-overlay').style.display='flex';
-}
-function closeMomoRptUpload(){
-  document.getElementById('momo-rpt-upload-overlay').style.display='none';
-}
-function onMomoRptFile(e,type){
-  const file=e.target.files[0];if(!file)return;
-  _mypFiles[type]=file;
-  const statusId={product:'myp-product-status',sales:'myp-sales-status'}[type];
-  const el=document.getElementById(statusId);
-  if(el){el.textContent='✓ '+file.name;el.style.color='#10b981';}
-  const btn=document.getElementById('myp-gen-btn');
-  if(btn)btn.disabled=!(_mypFiles.product&&_mypFiles.sales);
-}
-// 商品分析報表的「銷售表現」分頁：找到含「品號」的表頭列，後面接的就是商品明細，遇到空白列結束。
-function parseMomoProductRows(rows){
-  let headerIdx=-1;
-  for(let i=0;i<rows.length;i++){if(rows[i]&&rows[i][1]==='品號'){headerIdx=i;break;}}
-  if(headerIdx<0)return[];
-  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
-  const pct=v=>parseFloat(String(v).replace('%',''))/100||0;
-  const out=[];
-  for(let i=headerIdx+1;i<rows.length;i++){
-    const r=rows[i];
-    if(!r||!r[1])break;
-    out.push({
-      code:String(r[1]).trim(),name:String(r[2]||'').trim(),price:num(r[3]),stock:num(r[4]),
-      visitors:num(r[5]),views:num(r[6]),prevViews:num(r[7]),trafficGrowth:pct(r[8]),follows:num(r[9]),
-      orderQty:num(r[10]),orderAmt:num(r[11]),convRate:pct(r[12]),cancelQty:num(r[13]),returnQty:num(r[14]),uncheckedQty:num(r[15]),
-    });
-  }
-  return out;
-}
-// 銷售分析報表的「總覽」分頁：目前/前期/去年同期比較 + 每日明細（拿來畫趨勢線）。
-function parseMomoSalesOverview(rows){
-  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
-  const findRow=prefix=>rows.find(r=>r&&String(r[0]||'').startsWith(prefix));
-  const toMetrics=r=>r?{buyers:num(r[1]),orders:num(r[2]),qty:num(r[3]),amt:num(r[4]),cost:num(r[5]),aov:num(r[6])}:null;
-  const overview={
-    current:toMetrics(findRow('目前')),
-    prev:toMetrics(findRow('前期')),
-    lastYear:toMetrics(findRow('去年同期')),
-  };
-  // 每日明細：表頭那列第一欄開頭是「日期」，接下來的列第一欄要是 MM/DD 格式，直到不是為止
-  let dailyHeaderIdx=-1;
-  for(let i=0;i<rows.length;i++){if(rows[i]&&String(rows[i][0]||'').startsWith('日期')){dailyHeaderIdx=i;break;}}
-  const dailyTrend=[];
-  if(dailyHeaderIdx>=0){
-    for(let i=dailyHeaderIdx+1;i<rows.length;i++){
-      const r=rows[i];
-      if(!r||!/^\d{2}\/\d{2}$/.test(String(r[0]||'').trim()))break;
-      dailyTrend.push({date:String(r[0]).trim(),buyers:num(r[1]),orders:num(r[2]),qty:num(r[3]),amt:num(r[4])});
-    }
-  }
-  overview.dailyTrend=dailyTrend;
-  return overview;
-}
-function generateMomoRpt(){
-  const btn=document.getElementById('myp-gen-btn');
-  if(btn){btn.disabled=true;btn.textContent='處理中…';}
-  Promise.all([
-    readXlsx(_mypFiles.product,'銷售表現'),
-    readXlsx(_mypFiles.sales,'總覽'),
-  ]).then(([productRows,salesRows])=>{
-    const products=parseMomoProductRows(productRows);
-    const overview=parseMomoSalesOverview(salesRows);
-    if(!overview.current){throw new Error('找不到「目前」總覽列，請確認銷售分析報表格式');}
-    const data={products,overview:{current:overview.current,prev:overview.prev,lastYear:overview.lastYear},dailyTrend:overview.dailyTrend,ts:Date.now()};
-    const p=_mypPeriod[_mypShop]||{month:'2026/06',half:'first'};
-    _mypData[_mypShop]=data;
-    momoRptLsSave(_mypShop,p.month,p.half,data);
-    renderMomoRptShop(_mypShop,data);
-    momoRptShowSyncBtn(_mypShop);
-    if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
-    closeMomoRptUpload();
-  }).catch(err=>{
-    console.error(err);
-    alert('解析失敗，請確認檔案格式：'+((err&&err.message)||err));
-    if(btn){btn.disabled=false;btn.textContent='▶ 產生並儲存';}
-  });
-}
-function momoRptLsKey(shop,month,half){return'ec_momo_rpt|'+shop+'|'+month+'|'+half;}
-function momoRptLsSave(shop,month,half,data){try{localStorage.setItem(momoRptLsKey(shop,month,half),JSON.stringify(data));}catch(e){}}
-function momoRptLsLoad(shop,month,half){
-  const k=momoRptLsKey(shop,month,half);
-  try{if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]!==undefined)return Store._profitMem[k];}catch{}
-  try{if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]!==undefined)return Store._mem[k];}catch{}
-  try{const d=localStorage.getItem(k);return d?JSON.parse(d):null;}catch{return null;}
-}
-function momoRptShowSyncBtn(shop){
-  const btn=document.getElementById('myp-sync-'+shop);
-  if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent='☁ 同步雲端';}
-}
-function momoRptTryLoadSaved(shop){
-  const p=_mypPeriod[shop]||{month:'2026/06',half:'first'};
-  const saved=momoRptLsLoad(shop,p.month,p.half);
-  if(saved){
-    _mypData[shop]=saved;
-    renderMomoRptShop(shop,saved);
-    momoRptShowSyncBtn(shop);
-  }else{
-    delete _mypData[shop];
-    const kpiBlock=document.getElementById('myp-kpi-block-'+shop);
-    if(kpiBlock)kpiBlock.innerHTML=`<div style="font-size:13px;color:#9ca3af">尚未上傳報表</div>`;
-    const content=document.getElementById('myp-content-'+shop);
-    if(content)content.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">這個區間還沒有資料，上傳兩個報表後按「▶ 產生並儲存」</div></div>`;
-    const btn=document.getElementById('myp-sync-'+shop);
-    if(btn){btn.disabled=true;btn.style.opacity='0.4';btn.style.cursor='default';btn.style.background='';btn.style.color='';btn.style.borderColor='';btn.textContent='☁ 同步雲端';}
-  }
-}
-function syncMomoRptToCloud(shop){
-  const btn=document.getElementById('myp-sync-'+shop);
-  if(btn){btn.disabled=true;btn.textContent='同步中…';}
-  if(!window.__cloudProfit){
-    if(window.App&&typeof App.showAlertModal==='function')App.showAlertModal({title:'雲端未連線',message:'雲端尚未就緒，請重新整理。',kind:'warn'});
-    else if(typeof showToast==='function')showToast('雲端未連線','error');
-    if(btn)momoRptShowSyncBtn(shop);
-    return;
-  }
-  const p=_mypPeriod[shop]||{month:'2026/06',half:'first'};
-  const saved=momoRptLsLoad(shop,p.month,p.half);
-  if(!saved){if(btn)btn.disabled=false;return;}
-  window.__cloudProfit.setField(momoRptLsKey(shop,p.month,p.half),saved).then(()=>{
-    if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';}
-  }).catch(e=>{
-    const msg=(e&&e.message)||String(e);
-    if(window.App&&typeof App.showAlertModal==='function'){
-      App.showAlertModal({title:'同步失敗',message:'資料還在本機，請稍後再試。',detail:msg,kind:'error'});
-    }else if(typeof showToast==='function')showToast('同步失敗：'+msg,'error');
-    momoRptShowSyncBtn(shop);
-  });
-}
-
-// KPI 數字（跟月份/按鈕同一行，塞進 myp-kpi-block）+ 每日趨勢圖 + 商品明細表（myp-content）
-function renderMomoRptShop(shop,data){
-  const kpiBlock=document.getElementById('myp-kpi-block-'+shop);
-  const content=document.getElementById('myp-content-'+shop);
-  if(!kpiBlock||!content)return;
-  const cur=data.overview.current,prev=data.overview.prev;
-  if(!cur){content.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">解析失敗，找不到總覽資料</div></div>`;return;}
-  // 純利／純利率先留空，等下面商品明細表可以算出純利後再接上來（跟蝦皮好麻吉一樣：營收/純利/純利率）
-  let revChangeHtml='';
-  if(prev&&prev.amt>0&&cur.amt>0){
-    const pct=(cur.amt-prev.amt)/prev.amt*100;
-    const sign=pct>=0?'+':'';
-    const col=pct>=0?'#10b981':'#ef4444';
-    revChangeHtml=`<span style="color:${col}">(${sign}${pct.toFixed(1)}% 較上期)</span>`;
-  }
-  kpiBlock.innerHTML=`
-    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">營收</div><div style="display:flex;align-items:baseline;gap:5px"><div style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">NT$ ${Math.round(cur.amt).toLocaleString()}</div><span style="font-size:12px;font-weight:600">${revChangeHtml}</span></div></div>
-    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">純利</div><div style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
-    <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">純利率</div><div style="font-size:20px;font-weight:700;color:#6366f1;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
-  `;
-  content.innerHTML=`
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">
-      <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openMypColPicker('${shop}',this)">☰ 欄位</button></div>
-    </div>
-    <div id="myp-tbl-${shop}"></div>
-  `;
-  renderMomoRptTableBody(shop);
-}
-
-// 商品明細表欄位（跟蝦皮好麻吉/酷澎不同的欄位集合，另外存一份順序/顯示設定）
-const MOMO_TABLE_COLS=[
-  {k:'code',label:'品號'},{k:'name',label:'商品名稱'},
-  {k:'stock',label:'可接單量',fmt:'num'},{k:'views',label:'瀏覽量',fmt:'num'},
-  {k:'trafficGrowth',label:'流量成長率',fmt:'pct'},
-  {k:'orderQty',label:'訂購數',fmt:'num'},{k:'orderAmt',label:'訂購金額',fmt:'money'},{k:'returnQty',label:'退貨數',fmt:'num'},
-  // 毛利/純利/純利率：公式還沒定案，先把欄位放上去，資料還沒算出來時顯示 —
-  {k:'gross',label:'毛利',fmt:'money'},{k:'net',label:'純利',fmt:'money'},{k:'netRate',label:'純利率',fmt:'pct'},
-];
-const MOMO_TABLE_LEFT_COLS=new Set(['code','name']);
-const _MYP_COLORDER_LS='ec_colorder_momo';
-function getMypColKeys(){
-  try{const raw=localStorage.getItem(_MYP_COLORDER_LS);const saved=raw?JSON.parse(raw):[];if(Array.isArray(saved)&&saved.length)return saved;}catch{}
-  return MOMO_TABLE_COLS.map(c=>c.k);
-}
-function saveMypColKeys(order){try{localStorage.setItem(_MYP_COLORDER_LS,JSON.stringify(order));}catch{}}
-function getMypOrderedCols(){
-  const byKey=new Map(MOMO_TABLE_COLS.map(c=>[c.k,c]));
-  const out=[];
-  getMypColKeys().forEach(k=>{if(byKey.has(k)){out.push(byKey.get(k));byKey.delete(k);}});
-  byKey.forEach(c=>out.push(c));
-  return out;
-}
-const _MYP_HCOLS_LS='ec_hcols_momo';
-function getMypHiddenCols(){try{const raw=localStorage.getItem(_MYP_HCOLS_LS);return new Set(raw?JSON.parse(raw):[]);}catch{return new Set();}}
-function toggleMypHiddenCol(shop,key){
-  const s=getMypHiddenCols();if(s.has(key))s.delete(key);else s.add(key);
-  try{localStorage.setItem(_MYP_HCOLS_LS,JSON.stringify([...s]));}catch{}
-  renderMomoRptTableBody(shop);renderMypColPicker(shop);
-}
-function resetMypHiddenCols(shop){try{localStorage.removeItem(_MYP_HCOLS_LS);}catch{}renderMomoRptTableBody(shop);renderMypColPicker(shop);}
-function resetMypColOrder(shop){try{localStorage.removeItem(_MYP_COLORDER_LS);}catch{}renderMomoRptTableBody(shop);renderMypColPicker(shop);}
-let _mypColDrag=null;
-function mypColDragStart(e,key){
-  _mypColDrag=key;
-  e.dataTransfer.effectAllowed='move';
-  try{e.dataTransfer.setData('text/plain',key);}catch{}
-  e.currentTarget.classList.add('col-dragging');
-}
-function mypColDragOver(e){e.preventDefault();e.dataTransfer.dropEffect='move';}
-function mypColDragEnter(e){e.preventDefault();e.currentTarget.classList.add('col-drag-over');}
-function mypColDragLeave(e){e.currentTarget.classList.remove('col-drag-over');}
-function mypColDrop(e,shop,targetKey){
-  e.preventDefault();
-  e.currentTarget.classList.remove('col-drag-over');
-  if(!_mypColDrag||_mypColDrag===targetKey){_mypColDrag=null;return;}
-  const rect=e.currentTarget.getBoundingClientRect();
-  const after=(e.clientX-rect.left)>rect.width/2;
-  let order=getMypColKeys().filter(k=>k!==_mypColDrag);
-  let idx=order.indexOf(targetKey);
-  if(idx<0)idx=order.length;else if(after)idx++;
-  order.splice(idx,0,_mypColDrag);
-  saveMypColKeys(order);
-  _mypColDrag=null;
-  renderMomoRptTableBody(shop);
-}
-function mypColDragEnd(e){e.currentTarget.classList.remove('col-dragging');document.querySelectorAll('.col-drag-over').forEach(el=>el.classList.remove('col-drag-over'));}
-let _mypPickRowDrag=null;
-function mypPickRowDragStart(e,shop,key){
-  _mypPickRowDrag=key;
-  e.dataTransfer.effectAllowed='move';
-  try{e.dataTransfer.setData('text/plain',key);}catch{}
-  e.currentTarget.classList.add('cp-row-dragging');
-}
-function mypPickRowDragOver(e){e.preventDefault();e.dataTransfer.dropEffect='move';}
-function mypPickRowDragEnter(e){e.preventDefault();e.currentTarget.classList.add('cp-row-drag-over');}
-function mypPickRowDragLeave(e){e.currentTarget.classList.remove('cp-row-drag-over');}
-function mypPickRowDrop(e,shop,targetKey){
-  e.preventDefault();
-  e.currentTarget.classList.remove('cp-row-drag-over');
-  if(!_mypPickRowDrag||_mypPickRowDrag===targetKey){_mypPickRowDrag=null;return;}
-  const rect=e.currentTarget.getBoundingClientRect();
-  const after=(e.clientY-rect.top)>rect.height/2;
-  let order=getMypColKeys().filter(k=>k!==_mypPickRowDrag);
-  let idx=order.indexOf(targetKey);
-  if(idx<0)idx=order.length;else if(after)idx++;
-  order.splice(idx,0,_mypPickRowDrag);
-  saveMypColKeys(order);
-  _mypPickRowDrag=null;
-  renderMomoRptTableBody(shop);renderMypColPicker(shop);
-}
-function mypPickRowDragEnd(e){e.currentTarget.classList.remove('cp-row-dragging');document.querySelectorAll('.cp-row-drag-over').forEach(el=>el.classList.remove('cp-row-drag-over'));}
-function renderMypColPicker(shop){
-  const m=document.getElementById('colpick-myp-'+shop);if(!m)return;
-  const hc=getMypHiddenCols();
-  const cols=getMypOrderedCols();
-  const vis=cols.length-hc.size;
-  m.innerHTML=`<div style="padding:6px 13px 4px;font-size:11px;color:#9ca3af;font-weight:700;display:flex;justify-content:space-between;align-items:center">欄位 <span>${vis}/${cols.length}</span></div>`
-    +cols.map(c=>`<div class="cp-row" draggable="true"
-      ondragstart="mypPickRowDragStart(event,'${shop}','${c.k}')" ondragover="mypPickRowDragOver(event)"
-      ondragenter="mypPickRowDragEnter(event)" ondragleave="mypPickRowDragLeave(event)"
-      ondrop="mypPickRowDrop(event,'${shop}','${c.k}')" ondragend="mypPickRowDragEnd(event)"
-      onclick="toggleMypHiddenCol('${shop}','${c.k}');event.stopPropagation()">
-      <span class="cp-row-handle">⠿</span>
-      <input type="checkbox" ${!hc.has(c.k)?'checked':''} style="margin:0;pointer-events:none"> ${c.label}
-    </div>`).join('')
-    +`<div style="padding:4px 13px 6px;border-top:1px solid #e5e7eb;text-align:right;display:flex;gap:10px;justify-content:flex-end">
-      <button onclick="resetMypColOrder('${shop}')" style="font-size:11px;color:#5b5fcf;background:none;border:none;cursor:pointer;font-weight:600">重設順序</button>
-      <button onclick="resetMypHiddenCols('${shop}')" style="font-size:11px;color:#5b5fcf;background:none;border:none;cursor:pointer;font-weight:600">顯示全部</button>
-    </div>`;
-}
-function openMypColPicker(shop,btn){
-  let m=document.getElementById('colpick-myp-'+shop);
-  if(m){m.remove();return;}
-  m=document.createElement('div');m.id='colpick-myp-'+shop;m.className='col-picker-menu open';
-  const wrap=btn?.closest('.col-picker-wrap');
-  (wrap||btn?.parentElement||document.body).appendChild(m);
-  renderMypColPicker(shop);
-  setTimeout(()=>document.addEventListener('click',function h(e){if(!m.contains(e.target)){m.remove();document.removeEventListener('click',h);}},{},true),0);
-}
-const _mypSort={};
-function mypSetSort(shop,col){
-  const cur=_mypSort[shop];
-  if(!cur||cur.col!==col)_mypSort[shop]={col,dir:'desc'};
-  else if(cur.dir==='desc')_mypSort[shop]={col,dir:'asc'};
-  else delete _mypSort[shop];
-  renderMomoRptTableBody(shop);
-}
-function mypSortRows(shop,rows){
-  const s=_mypSort[shop];
-  if(!s)return rows;
-  const colDef=MOMO_TABLE_COLS.find(c=>c.k===s.col);
-  const isNum=!!(colDef&&colDef.fmt);
-  return[...rows].sort((a,b)=>{
-    if(isNum){
-      const va=Number(a[s.col])||0,vb=Number(b[s.col])||0;
-      return s.dir==='asc'?va-vb:vb-va;
-    }
-    const va=String(a[s.col]||''),vb=String(b[s.col]||'');
-    return s.dir==='asc'?va.localeCompare(vb):vb.localeCompare(va);
-  });
-}
-function renderMomoRptTableBody(shop){
-  const rows=mypSortRows(shop,(_mypData[shop]&&_mypData[shop].products)||[]);
-  const tbl=document.getElementById('myp-tbl-'+shop);
-  if(!tbl)return;
-  if(!rows.length){tbl.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">沒有商品資料</div></div>`;return;}
-  const fmtFns={
-    money:n=>'NT$ '+Math.round(n).toLocaleString(),
-    num:n=>Math.round(n).toLocaleString(),
-    pct:n=>(n*100).toFixed(1)+'%',
-  };
-  const hc=getMypHiddenCols();
-  const cols=getMypOrderedCols().filter(c=>!hc.has(c.k));
-  const dragAttrs=(key)=>`draggable="true" ondragstart="mypColDragStart(event,'${key}')" ondragover="mypColDragOver(event)" ondragenter="mypColDragEnter(event)" ondragleave="mypColDragLeave(event)" ondrop="mypColDrop(event,'${shop}','${key}')" ondragend="mypColDragEnd(event)"`;
-  const curSort=_mypSort[shop];
-  const sortIcon=(key)=>curSort&&curSort.col===key
-    ?`<span style="color:#5b5fcf;font-weight:700">${curSort.dir==='asc'?'▲':'▼'}</span>`
-    :`<span style="color:#d1d5db">⇅</span>`;
-  const thead=cols.map(c=>{
-    const isLeft=MOMO_TABLE_LEFT_COLS.has(c.k);
-    return `<th class="${isLeft?'tl':''}" ${dragAttrs(c.k)}><span class="th-wrap${isLeft?' tl':''}" onclick="mypSetSort('${shop}','${c.k}')" style="cursor:pointer;gap:4px">${c.label}${sortIcon(c.k)}</span></th>`;
-  }).join('');
-  const tbody=rows.map(r=>{
-    const tds=cols.map(c=>{
-      const v=r[c.k];
-      const cls=MOMO_TABLE_LEFT_COLS.has(c.k)?'tl':'';
-      // 瀏覽量下面順便帶出前期瀏覽量（不用另外佔一欄）
-      if(c.k==='views'){
-        return`<td class="${cls}"><div>${fmtFns.num(v)}</div><div style="font-size:10px;color:#9ca3af;margin-top:2px">前期 ${fmtFns.num(r.prevViews)}</div></td>`;
-      }
-      const disp=(v===undefined||v===null)?'<span style="color:#d1d5db">—</span>':(c.fmt?fmtFns[c.fmt](v):v);
-      const style=c.k==='trafficGrowth'?`style="color:${v>=0?'#10b981':'#ef4444'};font-weight:700"`:'';
-      return`<td class="${cls}" ${style}>${disp}</td>`;
-    }).join('');
-    return`<tr>${tds}</tr>`;
-  }).join('');
-  tbl.innerHTML=`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
 }
 
 // ── 蝦皮好麻吉 聯盟行銷：上傳「推廣訂單報表」(SellerConversionReport.csv) + 「蝦皮商品清單」(.xlsx，讀好麻吉分頁)，
@@ -6126,7 +7473,7 @@ function updateHalfBtnLabels(shop){
   ];
   const container=document.getElementById('half-btns-'+shop);
   if(!container)return;
-  container.innerHTML=`<select onchange="onHalfChange('${shop}',this.value,null)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">${btns.map(h=>`<option value="${h.id}"${h.id===curHalf?' selected':''}>${h.label}</option>`).join('')}</select>`;
+  container.innerHTML=`<select onchange="onHalfChange('${shop}',this.value,null,true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">${btns.map(h=>`<option value="${h.id}"${h.id===curHalf?' selected':''}>${h.label}</option>`).join('')}</select>`;
 }
 
 function initProfitPeriodControls(){
@@ -6139,7 +7486,7 @@ function initProfitPeriodControls(){
     div.style.cssText='display:none;align-items:center;gap:8px;flex-wrap:wrap';
     div.innerHTML=`
       <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
-      <select id="month-sel-${s.id}" onchange="onMonthChange('${s.id}')" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+      <select id="month-sel-${s.id}" onchange="onMonthChange('${s.id}',true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
         ${MONTHS.map(mo=>`<option value="${mo}" ${mo===(state[s.id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
       </select>
       <span style="font-size:12px;color:#6b7280;font-weight:500;margin-left:4px">區間</span>
@@ -6156,7 +7503,8 @@ function initProfitPeriodControls(){
 }
 
 function initShopUI(shop){
-  onMonthChange(shop);
+  if(_userPickedPeriod[shop]) onMonthChange(shop);   // 已介入 → 只重載當前選擇（不跳）
+  else _applyLatestPeriod(shop);                     // 沒介入 → 自動跳最新（內部完整渲染）
   if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
   if(Object.keys(globalMap).length>0){
     const uc=document.getElementById('uc-map-'+shop);
@@ -6275,18 +7623,18 @@ Object.assign(window, {
   getEdits,getGrowthThresh,getHiddenCols,getNotes,getPeriodLabel,getPlatformRate,getPrevPeriodKey,
   getPrevRevMap,getSummaryRows,getTagFilters,gg,initProfitPeriodControls,initShopUI,
   loadIntoUI,lsHasAny,lsKey,lsLoad,lsSave,markCard,num,onFile,onGlobalFile,onGlobalGenerate,
-  onHalfChange,onMapFile,onMonthChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
+  onHalfChange,onMapFile,onMonthChange,onPlatformRateChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
   openTestSettings,closeTestSettings,addTestDraftCond,removeTestDraftCond,deleteTestDraftRule,addTestDraftRule,saveTestSettings,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,
-  renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
+  renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,renderFocus,onFocusPeriodChange,openFocusColPicker,toggleFocusCol,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,
   deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
+  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
   coupangSummaryHTML,setCoupangSummaryView,syncCoupangSummaryFromKpi,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
@@ -6304,13 +7652,15 @@ Object.assign(window, {
   cupPickRowDragStart,cupPickRowDragOver,cupPickRowDragEnter,cupPickRowDragLeave,cupPickRowDrop,cupPickRowDragEnd,
   cupSetSort,
   setShopViewMode,
-  openMomoRptUpload,closeMomoRptUpload,onMomoRptFile,generateMomoRpt,syncMomoRptToCloud,
-  onMypMonthChange,onMypHalfChange,
+  momoSetSub,momoSetPeriod,momoOnSearch,momoProfitSetSort,momoToggleDiscontinued,
+  momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,
+  momoAddRecalc,momoAddPpInput,momoAddRevertPp,
+  momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,
+  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,momoJumpShop,
+  momoSetSummaryMonth,momoActionPlanSave,momoCleanDirtyPeriodKeys,
+  momoRentSubmit,momoRentDelete,momoRentSyncBtn,
+  momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
-  openMypColPicker,toggleMypHiddenCol,resetMypHiddenCols,resetMypColOrder,
-  mypColDragStart,mypColDragOver,mypColDragEnter,mypColDragLeave,mypColDrop,mypColDragEnd,
-  mypPickRowDragStart,mypPickRowDragOver,mypPickRowDragEnter,mypPickRowDragLeave,mypPickRowDrop,mypPickRowDragEnd,
-  mypSetSort,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
 });

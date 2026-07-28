@@ -45,9 +45,25 @@ try {
     }
   };
 
+  // 共用：帶點字面欄位名（ec.users / ec.dailyProgress / ec.insight_* 等）
+  //   走 updateDoc + new FieldPath(k)，避免 setDoc merge:true 對 dotted key
+  //   靜默不覆蓋的雷（v171 per-shop 已改用同招，這邊補上 app/main）
+  const safeSetField = async (ref, key, value) => {
+    try {
+      await updateDoc(ref, new FieldPath(key), value);
+    } catch (e) {
+      if (e && (e.code === 'not-found' || String(e).includes('No document to update'))) {
+        await setDoc(ref, {});
+        await updateDoc(ref, new FieldPath(key), value);
+      } else {
+        throw e;
+      }
+    }
+  };
+
   window.__cloudStore = {
     getDoc: () => getDoc(docRef),
-    setField: (key, value) => setDoc(docRef, { [key]: value }, { merge: true }),
+    setField: (key, value) => safeSetField(docRef, key, value),
     removeField: (key) => restDeleteFields([key]),
     removeFields: (keys) => restDeleteFields(keys),
     subscribe: (cb) => onSnapshot(docRef, snap => cb(snap.exists() ? snap.data() : {})),
@@ -69,7 +85,7 @@ try {
   };
   window.__cloudProfit = {
     getDoc: () => getDoc(profitDocRef),
-    setField: (key, value) => setDoc(profitDocRef, { [key]: value }, { merge: true }),
+    setField: (key, value) => safeSetField(profitDocRef, key, value),
     removeFields: (keys) => restDeleteProfitFields(keys),
     subscribe: (cb) => onSnapshot(profitDocRef, snap => cb(snap.exists() ? snap.data() : {})),
   };
@@ -145,11 +161,11 @@ try {
           Object.assign(Store._profitMem, incoming);
           if (changedShops.size > 0) {
             console.log('[profits collection] 收到更新，影響賣場：', [...changedShops]);
+            // 只 dispatch profitDataReady（精準更新），不呼叫 App.render()（全頁重繪）——比照上面 app/profit 訂閱的做法。
+            //   profitDataReady 的監聽者已完整重繪受影響的蝦皮賣場（onMonthChange/_applyLatestPeriod + renderSummary + 修 tab），足夠。
+            //   ⚠ 不要加回 App.render()：它會 viewOffice 重建整個淨利表 HTML，把使用者當前在 MOMO/酷澎 的選擇清掉、彈回蝦皮預設；
+            //   快照頻繁時（多人同步）會不斷把人踢出 MOMO/酷澎（2026-07-28 實際發生）。兩條訂閱都不 render 是刻意一致，不是漏改。
             window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
-            const _justSaved = (window._shopJustSaved && (Date.now() - window._shopJustSaved < 5000));
-            if (!_justSaved && window.App && App.currentUser && typeof App.render === 'function') {
-              try { App.render(); } catch {}
-            }
           }
         }, err => { console.error('[profits collection subscribe 失敗]', err); });
       } catch (e) { console.warn('profits collection subscribe failed', e); }
@@ -187,10 +203,64 @@ try {
   };
   window.__cloudInsight = {
     getDoc: () => getDoc(insightDocRef),
-    setField: (key, value) => setDoc(insightDocRef, { [key]: value }, { merge: true }),
+    setField: (key, value) => safeSetField(insightDocRef, key, value),
     removeField: (key) => restDeleteInsightFields([key]),
     removeFields: (keys) => restDeleteInsightFields(keys),
     subscribe: (cb) => onSnapshot(insightDocRef, snap => cb(snap.exists() ? snap.data() : {})),
+  };
+
+  // ============== 洞察表 per-shop 拆分（避免 app/insight 撞 1MB 上限） ==============
+  // 進化：從 app/insight 一個 doc 裡塞四個賣場 → 每個賣場一個 doc，
+  //   app/insight_好麻吉 / app/insight_玩樂 / app/insight_森之旅 / app/insight_維克
+  //   每個賣場獨立 1 MiB 額度 = 總空間 4 倍。
+  //
+  // Key 路由：ec.insight_{shop}_{type} → 對應 shop 的 doc
+  //   例：ec.insight_好麻吉_master → app/insight_好麻吉 doc 內的 ec.insight_好麻吉_master field
+  const INSIGHT_SHOPS = ['好麻吉', '玩樂', '森之旅', '維克'];
+  const insightShopRefs = {};
+  INSIGHT_SHOPS.forEach(s => { insightShopRefs[s] = doc(db, 'app', 'insight_' + s); });
+  // 從 key 抽出 shop 名稱：ec.insight_{shop}_{master|weeks|notes|perf}
+  const insightShopFromKey = (key) => {
+    const m = /^ec\.insight_(.+?)_(master|weeks|notes|perf)$/.exec(key || '');
+    return m ? m[1] : null;
+  };
+  // ⚠ 帶點的字面欄位名（例：ec.insight_玩樂_notes）用 setDoc({[k]:v},{merge:true})
+  //   時 SDK 會靜默不覆蓋（Firestore v10 對這種 dotted key 的行為異常）。改用
+  //   updateDoc + new FieldPath(k)：FieldPath 用單一參數建構會把整個字串視為
+  //   「一個 segment（字面欄位名）」，dots 不會被拆成 nested path。
+  //   updateDoc 需要 doc 存在；不存在時 fallback 用 setDoc 建立初始 doc。
+  const perShopSetField = async (shop, k, v) => {
+    const ref = insightShopRefs[shop];
+    if (!ref) throw new Error('unknown shop: ' + shop);
+    try {
+      await updateDoc(ref, new FieldPath(k), v);
+    } catch (e) {
+      if (e && (e.code === 'not-found' || String(e).includes('No document to update'))) {
+        // 賣場 doc 還沒建立過 → 用 setDoc 建立初始 doc
+        //   注意：初始建立時 setDoc({[k]:v}) 對 dotted key 也有雷，因此改用 REST。
+        //   實務上：Kelly 的四個 per-shop doc 都已經存在，不會走這條 fallback。
+        await setDoc(ref, {}); // 先建空 doc
+        await updateDoc(ref, new FieldPath(k), v); // 再用 updateDoc 塞值
+      } else {
+        throw e;
+      }
+    }
+  };
+
+  window.__cloudInsightByShop = {
+    shops: INSIGHT_SHOPS,
+    forKey: (key) => {
+      const shop = insightShopFromKey(key);
+      if (!shop || !insightShopRefs[shop]) return null;
+      return {
+        setField: (k, v) => perShopSetField(shop, k, v),
+      };
+    },
+    getDocForShop: (shop) => insightShopRefs[shop] ? getDoc(insightShopRefs[shop]) : Promise.resolve({ exists: () => false, data: () => ({}) }),
+    subscribeShop: (shop, cb) => {
+      if (!insightShopRefs[shop]) return () => {};
+      return onSnapshot(insightShopRefs[shop], snap => cb(snap.exists() ? snap.data() : {}));
+    },
   };
 
   window.dispatchEvent(new Event('cloudStoreReady'));

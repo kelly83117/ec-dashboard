@@ -1,20 +1,16 @@
 {
-  "updated": "2026-07-17",
+  "updated": "2026-07-28",
   "items": [
     {
-      "title": "冷氣機",
+      "title": "冷氣",
       "traffic": "50K+"
     },
     {
-      "title": "防曬乳",
+      "title": "防蚊",
       "traffic": "30K+"
     },
     {
-      "title": "收納箱",
-      "traffic": "20K+"
-    },
-    {
-      "title": "戶外家具",
+      "title": "夏季床單",
       "traffic": "20K+"
     },
     {
@@ -22,24 +18,28 @@
       "traffic": "30K+"
     },
     {
-      "title": "寢具組",
-      "traffic": "30K+"
-    },
-    {
-      "title": "冰箱",
-      "traffic": "50K+"
-    },
-    {
-      "title": "夏季衣物",
-      "traffic": "30K+"
-    },
-    {
-      "title": "水壺",
+      "title": "收納箱",
       "traffic": "20K+"
     },
     {
-      "title": "風扇",
+      "title": "涼感衣",
+      "traffic": "30K+"
+    },
+    {
+      "title": "BBQ用品",
       "traffic": "10K+"
+    },
+    {
+      "title": "冰箱整理",
+      "traffic": "20K+"
+    },
+    {
+      "title": "戶外椅",
+      "traffic": "15K+"
+    },
+    {
+      "title": "防曬霜",
+      "traffic": "50K+"
     }
   ]
 }

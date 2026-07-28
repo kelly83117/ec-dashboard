@@ -1682,10 +1682,16 @@ Object.assign(App, {
     });
   },
   _updateDailyProgressFromAdjustments(opts) {
+    // 洞察表：每個賣場的調整動作自動連動到對應「賣場負責人」的工作日誌
+    //   玩樂 → 郭雅琪   /   好麻吉 → 洪嘉蓮   /   森之旅 → 陳君葳
+    //   不管是誰做的調整（Kelly 或員工本人），一律歸給該賣場負責人
+    //   調整全刪光 → 重新統計得 0 個 → 該日誌段落自動被清空
+    // 淨利表：仍以「登入者」為對象（未變），只有 3 位員工登入時才寫
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
+    const SHOP_TO_PERSON = { '玩樂': '郭雅琪', '好麻吉': '洪嘉蓮', '森之旅': '陳君葳' };
     const userName = this.currentUser && this.currentUser.name;
     const usernameId = this.currentUser && this.currentUser.username;
-    if (!userName || !ALLOWED_NAMES.includes(userName)) return; // 只處理 3 位員工，admin/Kelly 不寫
+    if (!userName) return;
 
     const now = new Date();
     const todayDash  = toDateStr(now);              // 2026-06-18
@@ -1732,103 +1738,125 @@ Object.assign(App, {
       return null;
     };
 
-    // ======== 1. 洞察表：跨 3 個賣場統計今天的調整，依分類 tally ========
-    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
-    const insightCounts = {};
+    // ======== 1. 洞察表：per-shop 累計 → attribute 給該賣場對應的人 ========
+    // 不看 `a.by`（不管誰改）：Kelly 或員工做的都算給該賣場負責人
+    // 結構：insightCountsByPerson[person] = { '成長品': N, ... }
+    const INSIGHT_SHOPS = Object.keys(SHOP_TO_PERSON); // ['玩樂','好麻吉','森之旅']
+    const insightCountsByPerson = {};
     INSIGHT_SHOPS.forEach(shop => {
+      const person = SHOP_TO_PERSON[shop];
+      const counts = insightCountsByPerson[person] = insightCountsByPerson[person] || {};
       const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
       Object.keys(notes).forEach(code => {
         const adjustments = (notes[code] && notes[code].adjustments) || [];
         const hit = adjustments.some(a => {
           const d = (a.date || '').slice(0, 10);
-          const dateOk = d === todayDash || d === todaySlash;
-          const byOk = !a.by || a.by === usernameId || a.by === userName;
-          return dateOk && byOk;
+          return d === todayDash || d === todaySlash;
         });
         if (hit) {
           const cls = classify(shop, code);
-          if (cls) insightCounts[cls] = (insightCounts[cls] || 0) + 1;
+          if (cls) counts[cls] = (counts[cls] || 0) + 1;
         }
       });
     });
 
     // ======== 2. 淨利表：跨所有賣場統計，依 analysisLabel tally ========
+    // 淨利表仍以「登入者」為對象；Kelly (admin) 登入時不寫（維持原行為）
+    const profitPerson = ALLOWED_NAMES.includes(userName) ? userName : null;
     const profitCounts = {};
-    try {
-      if (typeof state === 'object' && state) {
-        Object.keys(state).forEach(shopId => {
-          const s = state[shopId];
-          if (!s) return;
-          // 商品碼 → 分析標籤
-          const codeToLabel = {};
-          if (Array.isArray(s._built)) {
-            s._built.forEach(p => {
-              codeToLabel[p.code] = p.analysisLabel || (p.analysis && p.analysis.label) || '';
-            });
-          }
-          const k = 'ec_notes|' + shopId;
-          const notes = (window.Store && Store._profitMem && Store._profitMem[k])
-            || (typeof getNotes === 'function' ? getNotes(shopId) : {});
-          Object.keys(notes || {}).forEach(code => {
-            const adjustments = (notes[code] && notes[code].adjustments) || [];
-            const hit = adjustments.some(a => {
-              const d = (a.date || '').slice(0, 10);
-              const dateOk = d === todayDash || d === todaySlash;
-              const byOk = !a.by || a.by === usernameId || a.by === userName;
-              return dateOk && byOk;
-            });
-            if (hit) {
-              const lbl = codeToLabel[code] || '其他';
-              profitCounts[lbl] = (profitCounts[lbl] || 0) + 1;
+    if (profitPerson) {
+      try {
+        if (typeof state === 'object' && state) {
+          Object.keys(state).forEach(shopId => {
+            const s = state[shopId];
+            if (!s) return;
+            // 商品碼 → 分析標籤
+            const codeToLabel = {};
+            if (Array.isArray(s._built)) {
+              s._built.forEach(p => {
+                codeToLabel[p.code] = p.analysisLabel || (p.analysis && p.analysis.label) || '';
+              });
             }
+            const k = 'ec_notes|' + shopId;
+            const notes = (window.Store && Store._profitMem && Store._profitMem[k])
+              || (typeof getNotes === 'function' ? getNotes(shopId) : {});
+            Object.keys(notes || {}).forEach(code => {
+              const adjustments = (notes[code] && notes[code].adjustments) || [];
+              const hit = adjustments.some(a => {
+                const d = (a.date || '').slice(0, 10);
+                const dateOk = d === todayDash || d === todaySlash;
+                const byOk = !a.by || a.by === usernameId || a.by === userName;
+                return dateOk && byOk;
+              });
+              if (hit) {
+                const lbl = codeToLabel[code] || '其他';
+                profitCounts[lbl] = (profitCounts[lbl] || 0) + 1;
+              }
+            });
           });
-        });
-      }
-    } catch (e) { console.warn('[profit count]', e); }
+        }
+      } catch (e) { console.warn('[profit count]', e); }
+    }
 
-    // ======== 3. 組合摘要文字 ========
-    const ORDER = ['重跌品', '衰退品', '爆發品', '成長品', '零轉換', '弱轉換', '轉換偏低'];
-    const EMOJI = { '重跌品':'🔴','衰退品':'🟥','爆發品':'🟡','成長品':'🟨','零轉換':'❎','弱轉換':'🟢','轉換偏低':'🟩' };
-    const buildInsightBlock = () => {
-      if (Object.keys(insightCounts).length === 0) return '';
-      const lines = [];
-      let idx = 1;
-      ORDER.forEach(label => {
-        if (insightCounts[label]) lines.push(`${idx++}. ${EMOJI[label]} ${label} ${insightCounts[label]} 個`);
-      });
-      return '【洞察表 · 今日調整】\n' + lines.join('\n');
-    };
-    const buildProfitBlock = () => {
-      if (Object.keys(profitCounts).length === 0) return '';
-      // 排序：高利潤商品 → 賠錢中 → 低淨利 → 危險商品 → 低效廣告 → 其他
-      const PROFIT_ORDER = ['高利潤商品', '賠錢中', '低淨利', '危險商品', '低效廣告'];
-      const keys = [...PROFIT_ORDER.filter(k => profitCounts[k]), ...Object.keys(profitCounts).filter(k => !PROFIT_ORDER.includes(k))];
-      const lines = [];
-      let idx = 1;
-      keys.forEach(k => { lines.push(`${idx++}. ${k} ${profitCounts[k]} 個`); });
-      return '【淨利表 · 今日調整】\n' + lines.join('\n');
-    };
-    const insightBlock = buildInsightBlock();
-    const profitBlock = buildProfitBlock();
-
-    // ======== 4. 更新工作日誌 ========
-    const all = Store.get('ec.dailyProgress', {}) || {};
-    const day = Object.assign({}, all[todayDash] || {});
-    const existing = day[userName] || '';
-    // 先把所有舊的自動摘要區塊清掉（不管是洞察表還是淨利表）
-    let cleaned = existing
+    // ======== 3. 更新工作日誌 — 寫成結構化 item（daily.js 有專用 render） ========
+    // 資料型別：day[person] 是 Array<{id,text,done}> 或 legacy 字串
+    //   自動摘要 item 特徵：kind:'insight-summary' | 'profit-summary'，攜帶 counts 物件
+    //   daily.js 看到 kind → 用 chip 卡片 render（沒 checkbox / ✕）
+    // legacy 字串裡若含【洞察表·今日調整】等段落，先剝掉留下純使用者文字
+    const stripLegacyAutoBlocks = (text) => text
       .replace(/【洞察表 · 今日調整】[\s\S]*?(?=\n\n【|$)/g, '')
       .replace(/【淨利表 · 今日調整】[\s\S]*?(?=\n\n【|$)/g, '')
       .replace(/\s+$/, '');
-    // 再 append 新版（如果有的話）
-    const parts = [];
-    if (cleaned) parts.push(cleaned);
-    if (insightBlock) parts.push(insightBlock);
-    if (profitBlock) parts.push(profitBlock);
-    const newText = parts.join('\n\n');
+    const toItemsArray = (v) => {
+      if (Array.isArray(v)) return v.slice();
+      if (v && String(v).trim()) {
+        const cleaned = stripLegacyAutoBlocks(String(v).trim());
+        return cleaned ? [{ id: 'legacy', text: cleaned, done: false }] : [];
+      }
+      return [];
+    };
 
-    if (newText) day[userName] = newText;
-    else delete day[userName]; // 全部都沒了 → 移除該人員那天的整筆紀錄
+    // 受影響 = 3 位賣場負責人（insight 一定要重算，即便今天沒調整也要跑一次，
+    //   舊自動段落才會被清掉）+ 若登入者是 profit 對象也算
+    const affectedPersons = new Set(Object.values(SHOP_TO_PERSON));
+    if (profitPerson) affectedPersons.add(profitPerson);
+
+    const all = Store.get('ec.dailyProgress', {}) || {};
+    const day = Object.assign({}, all[todayDash] || {});
+    let anyInsight = false;
+
+    affectedPersons.forEach(person => {
+      // 拿出既有 items → 移除舊的自動摘要（kind 標記）
+      const existing = toItemsArray(day[person]);
+      const userItems = existing.filter(it => it && it.kind !== 'insight-summary' && it.kind !== 'profit-summary');
+
+      // 產生新的自動 item（順序：淨利表在前、洞察表在後 → 反向 push 讓洞察表在上面）
+      const iCounts = insightCountsByPerson[person] || {};
+      const iHasCount = Object.keys(iCounts).length > 0;
+      const pHasCount = (person === profitPerson) && Object.keys(profitCounts).length > 0;
+      if (iHasCount) anyInsight = true;
+
+      const autoItems = [];
+      if (iHasCount) autoItems.push({
+        id: 'auto-insight-' + person,
+        kind: 'insight-summary',
+        counts: iCounts,
+        done: false,
+        auto: true,
+      });
+      if (pHasCount) autoItems.push({
+        id: 'auto-profit-' + person,
+        kind: 'profit-summary',
+        counts: profitCounts,
+        done: false,
+        auto: true,
+      });
+
+      const merged = [...autoItems, ...userItems];
+      if (merged.length > 0) day[person] = merged;
+      else delete day[person]; // 都沒了 → 該員該日紀錄整筆刪掉
+    });
+
     const next = Object.assign({}, all);
     if (Object.keys(day).length === 0) delete next[todayDash];
     else next[todayDash] = day;
@@ -1839,29 +1867,31 @@ Object.assign(App, {
       Store.set('ec.dailyProgress', next);
     }
     window.__dpPendingNames = window.__dpPendingNames || new Set();
-    window.__dpPendingNames.add(userName);
+    affectedPersons.forEach(p => window.__dpPendingNames.add(p));
 
     // 若工作日誌頁的 textarea 還在畫面上，同步 UI（但別蓋掉使用者正在打字的內容）
-    const ta = document.querySelector(`.dp-textarea[data-dp-name="${userName}"]`);
-    if (ta && document.activeElement !== ta) ta.value = newText;
+    affectedPersons.forEach(person => {
+      const ta = document.querySelector(`.dp-textarea[data-dp-name="${person}"]`);
+      if (ta && document.activeElement !== ta) ta.value = day[person] || '';
+    });
     if (typeof window.__updateDpSyncBadge === 'function') window.__updateDpSyncBadge();
 
     const silent = opts && opts.silent;
     const pushToCloud = opts && opts.pushToCloud;
-    const hasContent = insightBlock || profitBlock;
+    const hasContent = anyInsight || Object.keys(profitCounts).length > 0;
 
     // 若這次是由「☁ 同步雲端」按鈕觸發的，把工作日誌也一起推到雲端
     // 避免使用者按完 sync 後切頁還是被提醒「工作日誌未同步」
     if (pushToCloud && typeof Store.pushKeyToCloud === 'function') {
       Store.pushKeyToCloud('ec.dailyProgress').then(() => {
-        window.__dpPendingNames.delete(userName);
+        affectedPersons.forEach(p => window.__dpPendingNames.delete(p));
         if (typeof window.__updateDpSyncBadge === 'function') window.__updateDpSyncBadge();
       }).catch(e => { console.warn('[autoSummary push]', e); });
     }
 
     if (hasContent && !silent) {
       const tail = pushToCloud ? '（已連同推給老闆）' : '（記得按「☁ 同步雲端」推給老闆）';
-      showToast(`已自動更新 ${userName} 的工作日誌${tail}`, 'info');
+      showToast(`已自動更新工作日誌${tail}`, 'info');
     }
   },
   openInsightNoteModal(code) {
@@ -2057,9 +2087,31 @@ Object.assign(App, {
           adjList.querySelectorAll('[data-del-date]').forEach(b => {
             b.addEventListener('click', () => {
               const targetDate = b.dataset.delDate;
+              console.warn('[DEL] click targetDate=', targetDate, 'code=', code, 'shop=', currentShop);
+              console.warn('[DEL] note.adjustments BEFORE:', JSON.stringify(note.adjustments));
+              console.warn('[DEL] _mem[k][code] BEFORE:', JSON.stringify(Store._mem[notesKey] && Store._mem[notesKey][code]));
               note.adjustments = (note.adjustments || []).filter(a => (a.date || '') !== targetDate);
+              console.warn('[DEL] note.adjustments AFTER filter:', JSON.stringify(note.adjustments));
+              // 除了 mutate 本地 `note` 也直接改 _mem[notesKey][code]（避免 subscribe 換過參照後 note 是孤兒）
+              // 這條路是保險：即使 `note` 已經跟 _mem 脫鉤，_mem 仍然反映刪除
+              try {
+                if (Store._mem[notesKey] && Store._mem[notesKey][code]) {
+                  const memAdj = Store._mem[notesKey][code].adjustments || [];
+                  const memFiltered = memAdj.filter(a => (a.date || '') !== targetDate);
+                  const memText = Store._mem[notesKey][code].text || '';
+                  if (memFiltered.length === 0 && !memText) {
+                    delete Store._mem[notesKey][code];
+                    console.warn('[DEL] _mem 直接 delete allNotes[code]');
+                  } else {
+                    Store._mem[notesKey][code].adjustments = memFiltered;
+                    console.warn('[DEL] _mem 直接 mutate adjustments =', JSON.stringify(memFiltered));
+                  }
+                }
+              } catch (e) { console.warn('[DEL] _mem 直接寫入失敗', e); }
               adjList.innerHTML = renderAdjList();
               autoSave();
+              console.warn('[DEL] _mem[k][code] AFTER autoSave:', JSON.stringify(Store._mem[notesKey] && Store._mem[notesKey][code]));
+              console.warn('[DEL] pending has notesKey?', window.__insightPendingNotes && window.__insightPendingNotes.has(notesKey));
               // 重新計算工作日誌摘要 → 該人員的「【洞察表 · 今日調整】」區塊立刻反映本次刪除
               // silent:true 不跳 toast；不直接推雲端，等使用者按「☁ 同步雲端」一次推完
               try { this._updateDailyProgressFromAdjustments({ silent: true }); } catch (e) { console.warn('[del->dp]', e); }
