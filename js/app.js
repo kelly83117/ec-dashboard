@@ -462,12 +462,12 @@ function escapeHtml(s) {
   }[c]));
 }
 
-function showToast(message, type = '') {
+function showToast(message, type = '', duration = 2200) {
   const t = document.getElementById('toast');
   t.textContent = message;
   t.className = `toast show ${type}`;
   clearTimeout(t._timer);
-  t._timer = setTimeout(() => t.classList.remove('show'), 2200);
+  t._timer = setTimeout(() => t.classList.remove('show'), duration);
 }
 
 /* ============================================================
@@ -853,7 +853,7 @@ const App = {
         if (nowTs - (this._syncNagAt || 0) >= 60000) {
           this._syncNagAt = nowTs;
           const names = reasons.map(r => r.split('（')[0]).join('、');
-          showToast(`⚠️ 有未同步內容：${names} — 記得按 ☁ 同步雲端`, 'info');
+          showToast(`⚠️ 有未同步內容：${names} — 記得按 ☁ 同步雲端`, 'info', 6000);
         }
       }
     }
