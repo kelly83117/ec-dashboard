@@ -1719,6 +1719,18 @@ Object.assign(App, {
       if (revEl) writeField('daily', parseAmount(revEl.value));
       if (adsEl) writeField('dailyAdSpend', parseAmount(adsEl.value));
 
+      // 署名：營收與廣告費共用同一筆 dailyBy（平行兄弟欄位，🔴 絕不塞進 daily 值裡，也不走 writeField 的 Math.round）
+      list[idx].dailyBy = list[idx].dailyBy || {};
+      list[idx].dailyBy[inputDateStr] = {
+        name: this.currentUser?.name || this.currentUser?.username || '',
+        at: Date.now()
+      };
+      // 這一天營收與廣告費都被清空時，署名一起刪；只清其一時保留（兩者共用同一筆署名）
+      const stillHasValue =
+        (list[idx].daily && list[idx].daily[inputDateStr] != null) ||
+        (list[idx].dailyAdSpend && list[idx].dailyAdSpend[inputDateStr] != null);
+      if (!stillHasValue) delete list[idx].dailyBy[inputDateStr];
+
       // 1) 本機 _mem 先寫好（同步）— 用 setLocalOnly 避免 Store.set 自帶的 fire-and-forget
       //    雲端寫入，那條路徑出錯時會被吃掉，使用者看不到失敗
       const hasLocalOnly = typeof Store.setLocalOnly === 'function';
@@ -1967,6 +1979,23 @@ Object.assign(App, {
         else list[idx].dailyAdSpend[entryDate] = Math.round(v);
       });
 
+      // 署名：營收與廣告費在上面兩個獨立 forEach 各自處理，dailyBy 一律等兩迴圈都跑完再統一寫/刪一次
+      const _byName = this.currentUser?.name || this.currentUser?.username || '';
+      const _touchedIdxs = new Set();
+      document.querySelectorAll('.entry-rev, .entry-ads').forEach(el => {
+        const idx = +el.dataset.idx;
+        if (list[idx]) _touchedIdxs.add(idx);
+      });
+      _touchedIdxs.forEach(idx => {
+        list[idx].dailyBy = list[idx].dailyBy || {};
+        list[idx].dailyBy[entryDate] = { name: _byName, at: Date.now() };
+        // 這一天營收與廣告費都空了才刪署名（兩者共用同一筆）
+        const stillHasValue =
+          (list[idx].daily && list[idx].daily[entryDate] != null) ||
+          (list[idx].dailyAdSpend && list[idx].dailyAdSpend[entryDate] != null);
+        if (!stillHasValue) delete list[idx].dailyBy[entryDate];
+      });
+
       Store.set(Store.KEYS.platforms, list);
       showToast(`${entryDate.replace(/-/g, '/')} 已儲存`, 'success');
       const statusEl = document.getElementById('entry-status');
@@ -2083,6 +2112,18 @@ Object.assign(App, {
           if (ads == null) delete p.dailyAdSpend[dateStr];
           else p.dailyAdSpend[dateStr] = Math.round(ads);
         }
+
+        // 署名：營收與廣告費共用同一筆 dailyBy（平行兄弟欄位，🔴 不塞進 daily 值裡）
+        p.dailyBy = p.dailyBy || {};
+        p.dailyBy[dateStr] = {
+          name: this.currentUser?.name || this.currentUser?.username || '',
+          at: Date.now()
+        };
+        // 這一天營收與廣告費都空了才刪署名（廣告費僅 hasAds 時會被寫入，dailyAdSpend 可能不存在，用 && 防呆）
+        const stillHasValue =
+          (p.daily && p.daily[dateStr] != null) ||
+          (p.dailyAdSpend && p.dailyAdSpend[dateStr] != null);
+        if (!stillHasValue) delete p.dailyBy[dateStr];
 
         // 走「await 雲端 + 失敗顯式告知」的模式，跟主要 commit() 一致，
         // 避免 Firestore reject 被靜默吃掉（先前 1MB 超限事件的根因）
