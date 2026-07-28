@@ -462,12 +462,12 @@ function escapeHtml(s) {
   }[c]));
 }
 
-function showToast(message, type = '') {
+function showToast(message, type = '', duration = 2200) {
   const t = document.getElementById('toast');
   t.textContent = message;
   t.className = `toast show ${type}`;
   clearTimeout(t._timer);
-  t._timer = setTimeout(() => t.classList.remove('show'), 2200);
+  t._timer = setTimeout(() => t.classList.remove('show'), duration);
 }
 
 /* ============================================================
@@ -846,10 +846,15 @@ const App = {
     if (this.route && this.route !== route) {
       const reasons = this._checkUnsyncedSources();
       if (reasons.length > 0) {
-        const msg = '⚠️ 你還有未同步到雲端的內容：\n\n'
-          + reasons.map(r => '• ' + r).join('\n')
-          + '\n\n請先按下對應頁面的「☁ 同步雲端」按鈕推上去，老闆和同事才看得到。\n\n仍要切換頁面嗎？（你目前打的內容不會消失，但只存在這台電腦上）';
-        if (!confirm(msg)) return;
+        // 非阻斷提醒：不再用 confirm 擋切頁（老闆抱怨「不按就不能做別的事」），改用 toast 且照常切頁。
+        //   60 秒節流：同一提醒 60 秒內只跳一次，避免每次切頁洗版。時間戳只放記憶體（this），不持久化。
+        //   詳細筆數仍在兩顆 ☁ 同步按鈕的琥珀色徽章上，這裡只列來源名稱、不帶括號裡的數量。
+        const nowTs = Date.now();
+        if (nowTs - (this._syncNagAt || 0) >= 60000) {
+          this._syncNagAt = nowTs;
+          const names = reasons.map(r => r.split('（')[0]).join('、');
+          showToast(`⚠️ 有未同步內容：${names} — 記得按 ☁ 同步雲端`, 'info', 6000);
+        }
       }
     }
     this.route = route;
