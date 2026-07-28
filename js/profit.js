@@ -6464,6 +6464,19 @@ function momoBuildUploadPlan(parsed){
 }
 // 寫入：只更新「已建檔」的 SKU 的 periods；欄位級 merge（這次沒帶的欄位保留舊值），覆蓋 qty/freight/return
 function momoApplyUploadPlan(plan){
+  // 1b-5：寫入前全掃防呆。單檔上傳的 Object.assign 會把 flat qty 混進已重建的 compact cell（有 .s）→ 資料當場髒掉。
+  //   遷移後唯一安全入口是「⟳重建」；但七月灌新資料 + 同事不知情都會走單檔上傳，約定守不住。
+  //   → 只要任一目標 cell 已是 compact，整批拒絕、一格都不寫（不部分寫、不靜默略過），要求改用重建分頁。
+  //   完整解（單檔上傳也寫 compact = 1c）留階段二；這裡先把「必爆」變「用不了」。
+  const migrated=new Set();
+  ['甲配','乙配'].forEach(shop=>{
+    const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return;
+    const bySku=new Map(momoLoadProducts(shop).map(p=>[p.sku,p]));
+    Object.keys(sp.updates).forEach(sku=>{ const p=bySku.get(sku); if(!p||!p.periods) return;
+      Object.keys(sp.updates[sku]).forEach(period=>{ const cell=p.periods[period]; if(cell&&cell.s!=null) migrated.add(shop); });
+    });
+  });
+  if(migrated.size) return {ok:false, migratedShops:[...migrated]};   // 拒絕整批
   ['甲配','乙配'].forEach(shop=>{
     const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return;
     const master=momoLoadProducts(shop);
@@ -6478,6 +6491,7 @@ function momoApplyUploadPlan(plan){
     });
     momoSaveProducts(shop,master);
   });
+  return {ok:true};
 }
 // ── 一次性清理工具：清掉主檔 periods 裡格式不合的髒 key ──
 //   ⚠ 用法：修碼部署 → 正式站確認新版生效 → 在 F12 Console 打 window.momoCleanDirtyPeriodKeys()
@@ -6672,7 +6686,13 @@ function momoRenderUploadPreview(shop){
 }
 function momoUploadApply(shop){
   if(!_momoUpPlan) return;
-  momoApplyUploadPlan(_momoUpPlan);
+  const res=momoApplyUploadPlan(_momoUpPlan);
+  if(res&&res.ok===false){   // 1b-5：目標賣場已遷移為 compact，整批被拒（一格都沒寫）
+    const msg=`「${res.migratedShops.join('、')}」已遷移為新格式（sourced 重建），單檔上傳會弄髒資料，已整批拒絕、未寫入任何一格。\n\n請改用「⟳重建」分頁：一次選齊該重建的所有 C1105 上傳。`;
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'此賣場已遷移，改用 ⟳重建 上傳',message:msg,kind:'warn'});
+    else alert(msg);
+    return;   // 不清檔、不改狀態，讓使用者原地改走重建
+  }
   const total=Object.values(_momoUpPlan.shops).reduce((s,sp)=>s+sp.matched.length,0);
   _momoUpPlan=null; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.yi=null; _momoUpFiles.s1105=null;
   if(typeof showToast==='function') showToast('已寫入 '+total+' 個 SKU 的期別資料（記得按 ☁ 同步雲端）','success');
