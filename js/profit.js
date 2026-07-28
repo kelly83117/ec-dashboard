@@ -6376,14 +6376,39 @@ function momoRenderUploadPreview(shop){
       <b>${s}</b>：${sp.matched.length} 個 SKU 有更新、期別 ${sp.periods.map(momoPeriodLabel).join(' / ')||'—'}、總銷量 ${sp.totalQty}${unm}${ano}</div>`;
   };
   let owHtml='';
+  const _shrink=P.overwrite.filter(o=>o.newQty!=null&&o.oldQty!=null&&o.newQty<o.oldQty);   // qty 變小的覆蓋（跨結算檔覆蓋的訊號）
   if(P.overwrite.length){
     const owByShop={};
     P.overwrite.forEach(o=>{ owByShop[o.shop]=(owByShop[o.shop]||0)+1; });
     const owParts=Object.keys(owByShop).map(s=>`${s} ${owByShop[s]} 筆`).join('、');
     const riskyShops=[...new Set(P.overwrite.filter(o=>P.shops[o.shop]&&P.shops[o.shop].cloudRisk).map(o=>o.shop))];
+    // 明細表：變小(縮水)排前面、標紅底 → 讓「18→2」這種跨檔覆蓋一眼現形（原本只給筆數，看不出變大變小）
+    const owSorted=P.overwrite.slice().sort((a,b)=>{
+      const da=(a.newQty<a.oldQty)?0:1, db=(b.newQty<b.oldQty)?0:1;
+      if(da!==db) return da-db;
+      return (b.oldQty-b.newQty)-(a.oldQty-a.newQty);   // 縮水多的在前
+    });
+    const owRows=owSorted.map(o=>{
+      const down=o.newQty<o.oldQty, up=o.newQty>o.oldQty;
+      const col=down?'#dc2626':(up?'#16a34a':'#9ca3af');
+      return `<tr style="border-top:1px solid #f3f4f6${down?';background:#fef2f2':''}">
+        <td style="padding:3px 8px">${o.shop}</td>
+        <td style="padding:3px 8px;font-family:monospace">${o.sku}</td>
+        <td style="padding:3px 8px">${momoPeriodLabel(o.period)}</td>
+        <td style="padding:3px 8px;text-align:right;color:${col};font-weight:${down?'700':'400'}">${o.oldQty} → ${o.newQty}${down?' ▼':(up?' ▲':'')}</td>
+      </tr>`;
+    }).join('');
     owHtml=`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#9a3412;line-height:1.6">
       ⚠ 這次會<b>覆蓋已有資料的期別：${owParts}</b>（賣場×SKU×期別），原本數字會被新數字取代。
-      ${riskyShops.length?`<div style="margin-top:4px;font-weight:700">${riskyShops.join('、')} 的商品主檔目前不在待同步狀態 → 這些很可能是<u>已同步雲端、別人看過的正式數字</u>，確認你真的要改。</div>`:''}</div>`;
+      ${_shrink.length?`<div style="margin-top:4px;font-weight:700;color:#b91c1c">其中 <b>${_shrink.length} 筆 qty 會變小</b>（下表紅底）——很可能是把別份結算檔的貢獻蓋掉，請確認不是誤覆蓋。</div>`:''}
+      ${riskyShops.length?`<div style="margin-top:4px;font-weight:700">${riskyShops.join('、')} 的商品主檔目前不在待同步狀態 → 這些很可能是<u>已同步雲端、別人看過的正式數字</u>，確認你真的要改。</div>`:''}
+      <div style="margin-top:6px;max-height:200px;overflow:auto;background:#fff;border:1px solid #fde4c8;border-radius:6px">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead><tr style="text-align:left;color:#9a3412;position:sticky;top:0;background:#fff7ed">
+            <th style="padding:3px 8px">賣場</th><th style="padding:3px 8px">SKU</th><th style="padding:3px 8px">期別</th><th style="padding:3px 8px;text-align:right">舊 → 新 qty</th>
+          </tr></thead><tbody>${owRows}</tbody>
+        </table>
+      </div></div>`;
   }
   // 判不出期別 = 有問題（不是單純略過）→ 橘字獨立區塊、列出實際訂編給人追查
   let badHtml='';
@@ -6405,7 +6430,7 @@ function momoRenderUploadPreview(shop){
   el.innerHTML=`
     <div style="font-size:13px;font-weight:700;margin-bottom:8px">預覽（尚未寫入）</div>
     ${shopBlock('甲配')}${shopBlock('乙配')}${owHtml}${badHtml}${s1105ErrHtml}${skipHtml}
-    <button onclick="momoUploadApply('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認寫入${P.overwrite.length?'（含覆蓋 '+P.overwrite.length+' 筆）':''}</button>
+    <button onclick="momoUploadApply('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:${_shrink.length?'#dc2626':'#10b981'};color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認寫入${_shrink.length?'（⚠️ '+_shrink.length+' 筆會變小）':(P.overwrite.length?'（含覆蓋 '+P.overwrite.length+' 筆）':'')}</button>
     <button onclick="momoUploadCancel('${shop}')" style="margin-left:8px;padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>`;
 }
 function momoUploadApply(shop){
