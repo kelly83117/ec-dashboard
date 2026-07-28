@@ -5840,6 +5840,36 @@ function momoSaveReconcile(shop,month,data){
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=data; }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=data; }catch{}
 }
+// 對帳單「摘要頁 PDF」文字 → 12 項費用 + A/C/E/G + 實際應付。label-based（攤平換行、靠項目名不靠行順序，容忍左右兩欄交錯 + 月份項數不固定）。
+//   自我驗收：Σ12費用==E 且 A含稅+C含稅−E+G==實際應付（A+C-E+G 用含稅欄）。任一不符 valid=false + errors。
+const MOMO_FEE_LABELS=['行銷贊助金','耗材/派工/運費','物流費用-第三方物流','活動贊助金(網路)','分攤包裝材料費','銷售獎勵金','遲延罰款','物流費用-超商取貨','寄倉分攤運費','寄倉倉租費(EC)','平台服務費','付費報表訂閱'];
+function momoParseReconcileSummary(rawText){
+  const t=String(rawText||'').replace(/\s+/g,' ');
+  const esc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const parseN=s=>(s==null||s==='')?null:parseFloat(String(s).replace(/,/g,''));
+  const numAfter=label=>{ const m=t.match(new RegExp(esc(label)+'\\s*(-?[\\d,]+)')); return m?parseN(m[1]):null; };
+  const errors=[];
+  const pm=t.match(/對帳區間\s*(\d{4})\/(\d{2})\/\d{2}/); const period=pm?pm[1]+'-'+pm[2]:null;
+  const reconNo=(t.match(/對帳號碼\s*(\d+)/)||[])[1]||null;
+  const aM=t.match(/開發票金額\(應稅\)\s*A\s*(-?[\d,]+)\s+(-?[\d,]+)\s+(-?[\d,]+)/);
+  const cM=t.match(/折讓單金額\(應稅\)\s*C\s*(-?[\d,]+)\s+(-?[\d,]+)\s+(-?[\d,]+)/);
+  const A=aM?{untax:parseN(aM[1]),tax:parseN(aM[2]),incl:parseN(aM[3])}:null;
+  const C=cM?{untax:parseN(cM[1]),tax:parseN(cM[2]),incl:parseN(cM[3])}:{untax:0,tax:0,incl:0};
+  // 其他訂單（廠訴請賠等，非每月有）：摘要頁是獨立 A 行「其他訂單 未稅 稅 含稅」（請分別開立）→ 併入 A 供 formula 驗收
+  const oM=t.match(/其他訂單\s*(-?[\d,]+)\s+(-?[\d,]+)\s+(-?[\d,]+)/);
+  const other=oM?{untax:parseN(oM[1]),tax:parseN(oM[2]),incl:parseN(oM[3])}:{untax:0,tax:0,incl:0};
+  const fees={}; let feeSum=0;
+  MOMO_FEE_LABELS.forEach(l=>{ const v=numAfter(l); if(v!=null){ fees[l]=v; feeSum+=v; } });
+  const eM=t.match(/各項費用及罰則\s*總計\s*E\s*(-?[\d,]+)/); const E=eM?parseN(eM[1]):null;
+  const holdPrev=numAfter('前期保留款(+)'), holdCur=numAfter('本期保留款(-)');
+  const gM=t.match(/保留款總計\s*G[^-\d]*(-?[\d,]+)/); const G=gM?parseN(gM[1]):null;
+  const pM=t.match(/實際應付貴公司金額\s*\(A\+C-E\+G\)\s*(-?[\d,]+)/); const payable=pM?parseN(pM[1]):null;
+  const feesSumOk = E!=null && Math.abs(feeSum-E)<=1;
+  const formulaOk = !!A && payable!=null && G!=null && Math.abs((A.incl+other.incl+(C?C.incl:0)-E+G)-payable)<=1;
+  if(!feesSumOk) errors.push('Σ12費用('+feeSum+')≠E('+E+')');
+  if(!formulaOk) errors.push('A含稅+其他+C含稅−E+G≠實際應付');
+  return {period, reconNo, A, C, other, fees, feeSum, E, hold:{prev:holdPrev,cur:holdCur,G}, payable, valid:{feesSumOk,formulaOk,all:feesSumOk&&formulaOk}, errors};
+}
 function momoSplitRevenueToPeriods(monthRevUntax, c1105RevByPeriod){
   const keys=Object.keys(c1105RevByPeriod||{});
   const total=keys.reduce((s,p)=>s+(c1105RevByPeriod[p]||0),0);
@@ -8081,7 +8111,7 @@ Object.assign(window, {
   momoRentSubmit,momoRentDelete,momoRentSyncBtn,
   momoRebuildPick,momoRebuildRemove,momoRebuildGenerate,momoRebuildDownloadReport,momoRebuildConfirm,momoTrimPreview,momoTrimBackupAndApply,
   momoRebuildDryRun,momoRebuildApply,momoTrimHistoryDryRun,momoTrimHistoryApply,
-  momoParseReconcile,momoSplitRevenueToPeriods,
+  momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
