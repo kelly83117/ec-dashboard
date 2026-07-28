@@ -5556,10 +5556,10 @@ function momoCalcMargin({cost,purchasePrice,salePrice,shippingPackaging}){
   return { unitProfit:N, marginPct: purchasePrice?(N/purchasePrice)*100:0 };
 }
 function momoAggregatePeriods(product,periodKeys){   // 彙總單一商品（可傳一個期別或多個加總看整月）
-  const data=periodKeys.map(k=>(product.periods||{})[k]).filter(Boolean);
+  const data=periodKeys.map(k=>(product.periods||{})[k]).filter(Boolean).map(c=>momoReadCell(c, product&&product.sku));   // 1b：統一讀取，相容舊 flat 與新 compact(sourced) cell
   const qty=data.reduce((s,d)=>s+(d.qty||0),0);
   const returnQty=data.reduce((s,d)=>s+(d.returnQty||0),0);
-  const freightTotal=data.reduce((s,d)=> s+(d.freightCost!=null?d.freightCost:(product.shippingPackaging||0)*(d.qty||0)),0);
+  const freightTotal=data.reduce((s,d)=> s+(d.freight!=null?d.freight:(product.shippingPackaging||0)*(d.qty||0)),0);
   const avgShipping=qty?freightTotal/qty:(product.shippingPackaging||0);
   const { marginPct, unitProfit }=momoCalcMargin({
     cost:product.cost, purchasePrice:product.purchasePrice,
@@ -5570,6 +5570,220 @@ function momoAggregatePeriods(product,periodKeys){   // 彙總單一商品（可
     margin:qty?marginPct:0,
     returnRate:qty?Math.round((returnQty/qty)*1000)/10:0
   };
+}
+
+/* ═══════════════ 1b：qty 重建（sourced 緊湊編碼）═══════════════
+   設計決定（自行拍板、記錄理由）：
+   - cell 兩種格式並存：舊 flat {qty,freightCost,returnQty}；新 compact {s:"src:qty:rev|...", f:freightCost暫留}。
+     s = qtySources 緊湊字串（來源:數量:未稅營收，| 分隔），qty/未稅營收讀取時 parse 加總、不另存欄位。
+     理由：Firestore map 每層 +32 bytes overhead，1300 SKU×多期別×多源的巢狀 map 會撞 1MB（實測 1070KB）；
+     字串編碼砍掉 map 骨架 → 甲配 602KB（見記憶 payload B案）。本 App 是整份 doc 讀進記憶體處理，不查 Firestore 欄位，故可讀性損失=0。
+   - freightCost 暫留 f 不動（階段四改吃對帳單月權威）；freightRebuilt 省略=未重建（stage1 全未重建）。
+   - 分隔符 : | ：品號純數字、來源 26MM、期別 YYYY-MM-Hx 皆不含（已掃 0 衝突），編碼時仍 assert 防未來格式變。 */
+function momoDecodeSources(s){   // "2603:812:255310|2604:72:22640" → {'2603':{qty:812,rev:255310},...}
+  const out={}; if(s==null||s==='') return out;
+  String(s).split('|').forEach(part=>{ if(!part) return; const a=part.split(':'); if(a[0]) out[a[0]]={qty:+a[1]||0, rev:+a[2]||0}; });
+  return out;
+}
+function momoEncodeSources(obj){   // {'2603':{qty,rev}} → "2603:812:255310|..."（來源排序，金額 round 整數）
+  return Object.keys(obj||{}).sort().map(src=>{
+    if(/[:|]/.test(src)) throw new Error('[MOMO] 來源鍵含分隔符 :| ，編碼會壞：'+src);
+    return src+':'+Math.round(obj[src].qty||0)+':'+Math.round(obj[src].rev||0);
+  }).join('|');
+}
+// 統一讀取一個 period cell → {qty, revUntax, freight, rebuilt}。相容舊 flat 與新 compact，並偵測舊版寫入污染。
+function momoReadCell(cell, ctx){
+  if(!cell||typeof cell!=='object') return {qty:0, revUntax:0, freight:null, rebuilt:false};
+  if(cell.s!=null){   // 新 compact（sourced）
+    const src=momoDecodeSources(cell.s); let q=0,r=0;
+    Object.keys(src).forEach(k=>{ q+=src[k].qty; r+=src[k].rev; });
+    if(cell.qty!=null || cell.qtySources!=null){   // 舊版 momoApplyUploadPlan 的 Object.assign 亂塞進 compact cell → 大聲警告、不靜默、以 sources 為準
+      try{ console.error('%c[MOMO] compact cell 疑遭舊版寫入污染（混入 flat qty/qtySources），已以 sources 為準：'+(ctx||''), 'color:#dc2626;font-weight:700', cell); }catch{}
+      cell._dirty=true;   // 供畫面標紅
+    }
+    return {qty:q, revUntax:r, freight:(cell.f!=null?cell.f:null), rebuilt:true, sources:src, dirty:!!cell._dirty};
+  }
+  return {qty:cell.qty||0, revUntax:0, freight:(cell.freightCost!=null?cell.freightCost:null), returnQty:cell.returnQty||0, rebuilt:false};
+}
+// 從多個 C1105 檔建重建計畫（每檔一個 26MM 來源）。files=[{src,parsed}]。回 plan[shop][sku][period]={sources:{src:{qty,rev}}}
+function momoBuildRebuildPlan(files){
+  const plan={甲配:{},乙配:{}};
+  files.forEach(({src,parsed})=>{
+    ['甲配','乙配'].forEach(shop=>{
+      const sales=(parsed.sales&&parsed.sales[shop])||{}, rev=(parsed.revUntax&&parsed.revUntax[shop])||{};
+      Object.keys(sales).forEach(sku=>{
+        Object.keys(sales[sku]).forEach(period=>{
+          if(!/^\d{4}-\d{2}-H[12]$/.test(period)) return;   // 防護：只收合法期別 key
+          plan[shop][sku]=plan[shop][sku]||{};
+          const cell=plan[shop][sku][period]=plan[shop][sku][period]||{sources:{}};
+          cell.sources[src]=cell.sources[src]||{qty:0,rev:0};
+          cell.sources[src].qty+=sales[sku][period];
+          cell.sources[src].rev+=(rev[sku]&&rev[sku][period])||0;
+        });
+      });
+    });
+  });
+  return plan;
+}
+// dry-run：比對重建計畫 vs 現有主檔，算逐期別 重建前/後 qty + 每件運費稀釋。不寫入。
+function momoRebuildDryRun(files){
+  const plan=momoBuildRebuildPlan(files);
+  const report={ shops:{}, generatedFiles:files.map(f=>f.src) };
+  ['甲配','乙配'].forEach(shop=>{
+    const master=momoLoadProducts(shop);
+    const bySku=new Map(master.map(p=>[p.sku,p]));
+    const perPeriod={};   // period → {beforeQty,afterQty,freight,unmatchedSku:[]}
+    const shopPlan=plan[shop]||{};
+    Object.keys(shopPlan).forEach(sku=>{
+      const prod=bySku.get(sku);
+      Object.keys(shopPlan[sku]).forEach(period=>{
+        const after=Object.values(shopPlan[sku][period].sources).reduce((s,x)=>s+x.qty,0);
+        const cur=prod&&prod.periods&&prod.periods[period];
+        const before=cur?momoReadCell(cur).qty:0;
+        const freight=cur?(momoReadCell(cur).freight):null;
+        const pp=perPeriod[period]=perPeriod[period]||{beforeQty:0,afterQty:0,freight:0,skuN:0,unmatched:0};
+        pp.afterQty+=after; pp.beforeQty+=before; pp.skuN++;
+        pp.freight+=(freight!=null?freight:(prod?(prod.shippingPackaging||0)*after:0));
+        if(!prod) pp.unmatched++;
+      });
+    });
+    const rows=Object.keys(perPeriod).sort().map(period=>{
+      const p=perPeriod[period];
+      const perUnitBefore=p.beforeQty?p.freight/p.beforeQty:0;   // 稀釋前每件運費
+      const perUnitAfter =p.afterQty ?p.freight/p.afterQty :0;   // 稀釋後每件運費（qty↑ freight不動 → 變小）
+      return {period, beforeQty:p.beforeQty, afterQty:p.afterQty, deltaQty:p.afterQty-p.beforeQty,
+              freight:Math.round(p.freight), perUnitBefore:+perUnitBefore.toFixed(2), perUnitAfter:+perUnitAfter.toFixed(2),
+              dilutionPct:perUnitBefore?+(100*(perUnitAfter-perUnitBefore)/perUnitBefore).toFixed(1):0, unmatchedSku:p.unmatched};
+    });
+    report.shops[shop]={rows, totalBefore:rows.reduce((s,r)=>s+r.beforeQty,0), totalAfter:rows.reduce((s,r)=>s+r.afterQty,0)};
+  });
+  try{ window.__momoRebuildReport=report; }catch{}
+  return report;
+}
+// apply：把重建計畫寫成 compact cell（保留 freightCost 暫留 f）。⚠️ 停在雲端確認由 UI 把關，此函式只落盤三鏡像。
+function momoRebuildApply(files){
+  const plan=momoBuildRebuildPlan(files);
+  let cellsWritten=0;
+  ['甲配','乙配'].forEach(shop=>{
+    const master=momoLoadProducts(shop);
+    const bySku=new Map(master.map(p=>[p.sku,p]));
+    const shopPlan=plan[shop]||{};
+    Object.keys(shopPlan).forEach(sku=>{
+      const prod=bySku.get(sku); if(!prod) return;   // 只寫已建檔 SKU（未比對到的略過，dry-run 已列）
+      prod.periods=prod.periods||{};
+      Object.keys(shopPlan[sku]).forEach(period=>{
+        const oldCell=prod.periods[period]||{};
+        const oldFreight=momoReadCell(oldCell).freight;   // 暫留舊 freightCost（新期別為 null → 不寫 f，讓 momoReadCell 回 null 走 shippingPackaging fallback）
+        const newCell={ s: momoEncodeSources(shopPlan[sku][period].sources) };
+        if(oldFreight!=null) newCell.f=oldFreight;   // 交付條件：新期別 freightCost 留 null 不寫 0
+        prod.periods[period]=newCell;   // 整格取代成 compact（不 Object.assign，避免殘留 flat qty）
+        cellsWritten++;
+      });
+    });
+    momoSaveProducts(shop,master);
+  });
+  return {cellsWritten};
+}
+// history 修剪：只刪自動「新建檔」佔位，保留任何實際成本/售價異動。dry-run 不寫。
+function momoTrimHistoryDryRun(){
+  const out={shops:{}};
+  ['甲配','乙配'].forEach(shop=>{
+    const master=momoLoadProducts(shop);
+    let toDelete=0, keep=0; const sample=[];
+    master.forEach(p=>{ if(!p.history) return;
+      p.history.forEach(h=>{ if(/新建檔/.test(String(h&&h.note||''))){ toDelete++; if(sample.length<3)sample.push({sku:p.sku,...h}); } else keep++; });
+    });
+    out.shops[shop]={products:master.length, toDelete, keep, sample};
+  });
+  return out;
+}
+function momoTrimHistoryApply(){
+  let removed=0;
+  ['甲配','乙配'].forEach(shop=>{
+    const master=momoLoadProducts(shop);
+    master.forEach(p=>{ if(!p.history) return; const before=p.history.length; p.history=p.history.filter(h=>!/新建檔/.test(String(h&&h.note||''))); removed+=before-p.history.length; });
+    momoSaveProducts(shop,master);
+  });
+  return {removed};
+}
+// ── 1b：重建 UI（獨立子分頁；migration 工具，遷移完可移除。獨立入口避免污染 C1105 上傳共用流程）──
+let _momoRebuildFiles=[];   // [{name, src, file}]
+let _momoRebuildLastFiles=null;   // dry-run 時暫存解析結果，供 confirm apply 用（避免重讀檔）
+const _momoEsc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function momoRebuildSrcFromName(name){ const m=String(name).match(/(\d{4})(?=\.xlsx?$)/i); return (m&&/^2\d(0[1-9]|1[0-2])$/.test(m[1]))?m[1]:null; }   // 檔名末4碼 26MM
+function momoRenderRebuild(shop){
+  const c=document.getElementById('momo-sub-content-'+shop); if(!c) return;
+  const files=_momoRebuildFiles.length?_momoRebuildFiles.map((f,i)=>`<div style="font-size:12px;margin:2px 0">${f.src?'<b style="color:#5b5fcf">'+f.src+'</b>':'<span style="color:#dc2626">來源判不出</span>'} ← ${_momoEsc(f.name)} <a onclick="momoRebuildRemove(${i},'${shop}')" style="color:#ef4444;cursor:pointer;font-weight:700">✕</a></div>`).join(''):'<div style="color:#9ca3af;font-size:12px">尚未選檔（一次選齊要重建的所有 C1105，例 2601~2606；甲配乙配都從同批檔讀）</div>';
+  c.innerHTML=`
+    <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">
+      <b>⟳ qty 全期別重建（sourced 緊湊編碼）</b>：把每月 C1105 結算檔的貢獻<b>分來源</b>存進緊湊字串，修正「跨月結算檔互相覆蓋 qty」。<br>
+      流程：選齊 C1105 → 產生預覽(dry-run) → 你確認雲端沒被別人動過 → 寫入 → 手動「☁ 同步雲端」。</div>
+    <input type="file" accept=".xlsx,.xls" multiple onchange="momoRebuildPick(event,'${shop}')" style="font-size:12px">
+    <div style="margin:8px 0;padding:8px;border:1px solid #eee;border-radius:6px">${files}</div>
+    <button onclick="momoRebuildGenerate('${shop}')" ${_momoRebuildFiles.length?'':'disabled'} style="padding:7px 16px;border-radius:7px;border:none;background:${_momoRebuildFiles.length?'#5b5fcf':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:pointer">▶ 產生重建預覽（dry-run，不寫入）</button>
+    <div id="momo-rebuild-report" style="margin-top:12px"></div>
+    <hr style="margin:18px 0;border:none;border-top:1px solid #eee">
+    <div style="font-size:13px;font-weight:700;margin-bottom:6px">history 修剪（payload B 案需要，把「新建檔」佔位清掉）</div>
+    <button onclick="momoTrimPreview('${shop}')" style="padding:6px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">預覽修剪（dry-run）</button>
+    <div id="momo-trim-report" style="margin-top:8px"></div>`;
+}
+function momoRebuildPick(e,shop){ Array.from(e.target.files||[]).forEach(file=>_momoRebuildFiles.push({name:file.name,src:momoRebuildSrcFromName(file.name),file})); e.target.value=''; momoRenderRebuild(shop); }
+function momoRebuildRemove(i,shop){ _momoRebuildFiles.splice(i,1); momoRenderRebuild(shop); }
+function momoRebuildGenerate(shop){
+  const el=document.getElementById('momo-rebuild-report'); if(el) el.innerHTML='<div style="color:#9ca3af;font-size:13px">解析中…</div>';
+  const bad=_momoRebuildFiles.filter(f=>!f.src);
+  if(bad.length){ if(el) el.innerHTML='<div style="color:#dc2626;font-size:13px">來源判不出（檔名末尾要 _26MM，例 _2603）：'+bad.map(f=>_momoEsc(f.name)).join('、')+'</div>'; return; }
+  Promise.all(_momoRebuildFiles.map(f=>momoReadWorkbook(f.file).then(wb=>({src:f.src,parsed:momoParseC1105(wb.firstSheet())}))))
+    .then(files=>{ _momoRebuildLastFiles=files; momoRenderRebuildReport(momoRebuildDryRun(files), shop); })
+    .catch(err=>{ if(el) el.innerHTML='<div style="color:#dc2626;font-size:13px">解析失敗：'+_momoEsc(err&&err.message||err)+'</div>'; });
+}
+function momoRenderRebuildReport(rep, shop){
+  const el=document.getElementById('momo-rebuild-report'); if(!el) return;
+  const shopBlock=s=>{ const sp=rep.shops[s]; if(!sp||!sp.rows.length) return `<div style="font-size:12px;color:#9ca3af">${s}：無資料</div>`;
+    const rows=sp.rows.map(r=>{ const down=r.dilutionPct<0; return `<tr style="border-top:1px solid #f3f4f6">
+      <td style="padding:3px 8px">${momoPeriodLabel(r.period)}</td>
+      <td style="padding:3px 8px;text-align:right">${r.beforeQty}</td>
+      <td style="padding:3px 8px;text-align:right;font-weight:600">${r.afterQty}</td>
+      <td style="padding:3px 8px;text-align:right;color:${r.deltaQty>0?'#16a34a':'#6b7280'}">${r.deltaQty>0?'+':''}${r.deltaQty}</td>
+      <td style="padding:3px 8px;text-align:right">${r.perUnitBefore} → <b style="color:${down?'#dc2626':'#374151'}">${r.perUnitAfter}</b> ${down?'▼'+Math.abs(r.dilutionPct)+'%':''}</td>
+      <td style="padding:3px 8px;text-align:right;color:${r.unmatchedSku?'#f97316':'#9ca3af'}">${r.unmatchedSku||''}</td></tr>`; }).join('');
+    return `<div style="font-weight:700;margin:8px 0 4px">${s}（重建前 ${sp.totalBefore} → 後 ${sp.totalAfter}）</div>
+      <div style="max-height:260px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead><tr style="text-align:right;color:#6b7280;position:sticky;top:0;background:#fafafa"><th style="padding:3px 8px;text-align:left">期別</th><th style="padding:3px 8px">重建前qty</th><th style="padding:3px 8px">重建後qty</th><th style="padding:3px 8px">Δ</th><th style="padding:3px 8px">每件運費(稀釋)</th><th style="padding:3px 8px">未建檔SKU</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`; };
+  el.innerHTML=`<div style="font-size:13px;font-weight:700;margin-bottom:4px">重建預覽（尚未寫入）</div>
+    <div style="font-size:12px;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px;margin-bottom:8px">⚠️ 每件運費「稀釋」= qty 補回但 freight 未動 → 每件變小（紅▼）。這是階段一單獨做的已知失真，階段四 freight 重建才修正。</div>
+    ${shopBlock('甲配')}${shopBlock('乙配')}
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button onclick="momoRebuildDownloadReport()" style="padding:6px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#5b5fcf;font-size:13px;cursor:pointer">⬇ 下載報告 JSON</button>
+      <button onclick="momoRebuildConfirm('${shop}')" style="padding:6px 16px;border-radius:7px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認重建寫入（會先讀雲端讓你核對）</button></div>`;
+}
+function momoRebuildDownloadReport(){ try{ const blob=new Blob([JSON.stringify(window.__momoRebuildReport||{},null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='momo_rebuild_report.json'; a.click(); }catch(e){ alert('下載失敗：'+e.message); } }
+async function momoRebuildConfirm(shop){
+  // 交付條件：apply 前讀雲端讓使用者核對 812/161（沒被別人動過）
+  let cloudMsg='（雲端讀取失敗，仍可寫本機但請自行確認）';
+  try{
+    const q=async(sh)=>{ const snap=await window.__cloudMomo.getDoc(sh); const items=(snap.exists()&&snap.data().items)||[]; let t=0,t3=0; items.forEach(p=>{ if(!p.periods)return; Object.keys(p.periods).forEach(k=>{ const rc=momoReadCell(p.periods[k]); t+=rc.qty; if(k==='2026-03-H2')t3+=rc.qty; }); }); return {t,t3}; };
+    const j=await q('甲配'), y=await q('乙配');
+    cloudMsg=`雲端現值：甲配 3月下=${j.t3}（總${j.t}）／乙配 3月下=${y.t3}（總${y.t}）\n（重建前應為 甲配3月下 812 / 乙配 161；若不同代表被別人動過）`;
+  }catch(e){}
+  if(!confirm('確認重建寫入（本機三鏡像；之後要手動「☁ 同步雲端」才上雲）？\n\n'+cloudMsg+'\n\n確定要以重建結果整格取代這些期別？')) return;
+  const res=momoRebuildApply(_momoRebuildLastFiles||[]);
+  if(typeof showToast==='function') showToast('已重建寫入 '+res.cellsWritten+' 格（記得按 ☁ 同步雲端）','success');
+  momoRenderRebuild(shop);
+}
+function momoTrimPreview(shop){
+  const r=momoTrimHistoryDryRun(); const el=document.getElementById('momo-trim-report'); if(!el) return;
+  const b=Object.keys(r.shops).map(s=>`${s}：刪 ${r.shops[s].toDelete} 筆「新建檔」佔位 / 保留 ${r.shops[s].keep} 筆實際異動`).join('　');
+  el.innerHTML=`<div style="font-size:12px;line-height:1.7">${b}<br><span style="color:#9a3412">⚠️ 目前 history 幾乎全是「新建檔」佔位（0 真實異動）→ 修剪≈清空，base 已有現值不丟真資料。</span></div>
+    <button onclick="momoTrimBackupAndApply('${shop}')" style="margin-top:6px;padding:6px 14px;border-radius:7px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer">先下載備份 → 確認修剪</button>`;
+}
+function momoTrimBackupAndApply(shop){
+  try{ ['甲配','乙配'].forEach(s=>{ const blob=new Blob([JSON.stringify({shop:s,items:momoLoadProducts(s)},null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='momo_products_backup_'+(s==='甲配'?'jia':'yi')+'.json'; a.click(); }); }catch(e){ alert('備份下載失敗，中止修剪：'+e.message); return; }
+  if(!confirm('已下載兩份備份 JSON。確認執行 history 修剪（刪除「新建檔」佔位）？此動作寫本機三鏡像，之後要手動同步。')) return;
+  const res=momoTrimHistoryApply();
+  if(typeof showToast==='function') showToast('已修剪 '+res.removed+' 筆 history 佔位（記得按 ☁ 同步雲端）','success');
+  momoTrimPreview(shop);
 }
 
 // ── §3 期別工具 ──
@@ -5590,6 +5804,15 @@ function momoOrderToPeriod(orderNo){   // 訂單編號前 6 碼 YYMMDD 判半月
   if(mn<1||mn>12||dn<1||dn>31) return null;                // mm 01-12、dd 01-31，明確排除 0
   return `20${yy}-${mm}-${dn<=15?'H1':'H2'}`;              // 拼 key 用原字串（保 "06" 不變 "6"）
 }
+// # COD 訂單的訂編非 YYMMDD 格式（momoOrderToPeriod 判不出）→ 用「訂單成立日」判期別的 fallback。
+//   已用 6 檔 11,926 筆正常訂單驗證：訂編前6碼 100% == 訂單成立日、0 筆期別跨界，故 fallback 與主規則同軌、可靠。
+function momoDateToPeriod(dateStr){
+  const m=/(\d{4})\/(\d{1,2})\/(\d{1,2})/.exec(String(dateStr||''));
+  if(!m) return null;
+  const mn=+m[2], dn=+m[3];
+  if(mn<1||mn>12||dn<1||dn>31) return null;
+  return `${m[1]}-${String(mn).padStart(2,'0')}-${dn<=15?'H1':'H2'}`;
+}
 function momoChannelFromDeliveryType(t){
   if(t==='寄倉') return '乙配';
   if(t==='指定貨運'||t==='超商取貨') return '甲配';
@@ -5597,8 +5820,8 @@ function momoChannelFromDeliveryType(t){
 }
 
 // ── 甲配/乙配 子分頁外殼（.stab 之外自帶樣式，避免干擾全域 tab active 機制）──
-const MOMO_SUBTABS_JIA=[['總表','profit'],['批次維護','batch'],['C1105上傳','upload'],['商品同步','sync']];
-const MOMO_SUBTABS_YI =[['總表','profit'],['批次維護','batch'],['C1105上傳','upload'],['商品同步','sync'],['倉租費','rent']];
+const MOMO_SUBTABS_JIA=[['總表','profit'],['批次維護','batch'],['C1105上傳','upload'],['商品同步','sync'],['⟳重建','rebuild']];
+const MOMO_SUBTABS_YI =[['總表','profit'],['批次維護','batch'],['C1105上傳','upload'],['商品同步','sync'],['倉租費','rent'],['⟳重建','rebuild']];
 const _momoSub={};          // shop -> 目前子分頁 id
 const _momoPeriodSel={};    // shop -> 選中的期別 key（'' = 尚無資料）
 const _momoSearch={};       // shop -> 搜尋字串
@@ -5631,7 +5854,8 @@ function momoRenderSub(shop){
   if(sub==='upload'){ momoRenderUpload(shop); return; }
   if(sub==='sync'){ momoRenderProductSync(shop); return; }
   if(sub==='rent'){ momoRenderRent(shop); return; }
-  const names={batch:'批次維護',upload:'C1105 上傳',sync:'商品資料同步',rent:'倉租費彙總'};
+  if(sub==='rebuild'){ momoRenderRebuild(shop); return; }
+  const names={batch:'批次維護',upload:'C1105 上傳',sync:'商品資料同步',rent:'倉租費彙總',rebuild:'全期別重建'};
   c.innerHTML=`<div class="empty"><div class="empty-icon">🚧</div><div class="empty-hint">「${names[sub]||sub}」建置中（後續階段開放）</div></div>`;
 }
 
@@ -6103,23 +6327,36 @@ function momoLocateCols(rows,fieldMap,label){
 // C1105：依配送類型分通路、依訂編判期別、依品號加總數量 → sales[通路][sku][期別]=qty
 function momoParseC1105(rows){
   const {headerIdx,idx}=momoLocateCols(rows,{order:['訂單編號'],deliveryType:['配送類型'],sku:['品號'],qty:['數量']},'C1105 訂單商品明細');
+  // 「訂單成立日」為選填欄（供 # COD 訂單 date-fallback 用）：獨立找、找不到=-1，不塞進 momoLocateCols 的必要欄，
+  //   以免某些檔缺這欄就整份 throw。缺此欄時 fallback 自動失效、退回原本的 drop 行為。
+  const iOrderDate=(rows[headerIdx]||[]).map(c=>String(c).trim()).indexOf('訂單成立日');
+  // 「進價(未稅)」為選填欄（供淨利表新模型算未稅營收=未稅進價×對帳數量的 revUntax 權重用）：
+  //   獨立找、缺欄=-1（revUntax 該筆記 0），不塞 momoLocateCols 必要欄以免舊檔缺欄整份 throw。
+  const iPriceUntax=(rows[headerIdx]||[]).map(c=>String(c).trim()).indexOf('進價(未稅)');
   const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
-  const sales={甲配:{},乙配:{}}, orderSkuQty={}, unknownChannel=[], badPeriod=[];
+  const sales={甲配:{},乙配:{}}, revUntax={甲配:{},乙配:{}}, orderSkuQty={}, unknownChannel=[], badPeriod=[], dateFallback=[];
   for(let i=headerIdx+1;i<rows.length;i++){
     const r=rows[i]; if(!r) continue;
     const sku=String(r[idx.sku]||'').trim(); if(!sku) continue;
     const qty=num(r[idx.qty]);
+    const rev=iPriceUntax>=0?Math.round(num(r[iPriceUntax])*qty):0;   // 未稅進價×數量（round整數，供 qtySources 緊湊編碼）
     // 訂單組成表（拆掉行項次序後綴 → 14 碼訂編），供甲配運費按數量比例往下拆
     const orderCore=String(r[idx.order]||'').split('-')[0].trim();
     if(orderCore){ orderSkuQty[orderCore]=orderSkuQty[orderCore]||{}; orderSkuQty[orderCore][sku]=(orderSkuQty[orderCore][sku]||0)+qty; }
     const channel=momoChannelFromDeliveryType(String(r[idx.deliveryType]||'').trim());
     if(!channel){ if(unknownChannel.length<20) unknownChannel.push({order:r[idx.order],type:r[idx.deliveryType]}); continue; }
-    const period=momoOrderToPeriod(r[idx.order]);
+    let period=momoOrderToPeriod(r[idx.order]);
+    if(!period && iOrderDate>=0){   // # COD 訂單訂編非 YYMMDD → 用訂單成立日 fallback，不再靜默 drop 真交易
+      period=momoDateToPeriod(r[iOrderDate]);
+      if(period && dateFallback.length<50) dateFallback.push({order:orderCore, date:r[iOrderDate], channel, sku, qty, period});
+    }
     if(!period){ if(badPeriod.length<20) badPeriod.push({order:r[idx.order]}); continue; }
     sales[channel][sku]=sales[channel][sku]||{};
     sales[channel][sku][period]=(sales[channel][sku][period]||0)+qty;
+    revUntax[channel][sku]=revUntax[channel][sku]||{};
+    revUntax[channel][sku][period]=(revUntax[channel][sku][period]||0)+rev;
   }
-  return {sales,orderSkuQty,unknownChannel,badPeriod};
+  return {sales,revUntax,orderSkuQty,unknownChannel,badPeriod,dateFallback};
 }
 // 甲配 UnsendList（舊式）：運費只記在每張訂單第一列（訂編/品號/運費），續列空白。
 //   → 依「訂編」收該訂單總運費（運費欄）。分攤到各 SKU 在 momoAllocateJiaFreight 用 C1105 數量比例做。
@@ -6227,6 +6464,19 @@ function momoBuildUploadPlan(parsed){
 }
 // 寫入：只更新「已建檔」的 SKU 的 periods；欄位級 merge（這次沒帶的欄位保留舊值），覆蓋 qty/freight/return
 function momoApplyUploadPlan(plan){
+  // 1b-5：寫入前全掃防呆。單檔上傳的 Object.assign 會把 flat qty 混進已重建的 compact cell（有 .s）→ 資料當場髒掉。
+  //   遷移後唯一安全入口是「⟳重建」；但七月灌新資料 + 同事不知情都會走單檔上傳，約定守不住。
+  //   → 只要任一目標 cell 已是 compact，整批拒絕、一格都不寫（不部分寫、不靜默略過），要求改用重建分頁。
+  //   完整解（單檔上傳也寫 compact = 1c）留階段二；這裡先把「必爆」變「用不了」。
+  const migrated=new Set();
+  ['甲配','乙配'].forEach(shop=>{
+    const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return;
+    const bySku=new Map(momoLoadProducts(shop).map(p=>[p.sku,p]));
+    Object.keys(sp.updates).forEach(sku=>{ const p=bySku.get(sku); if(!p||!p.periods) return;
+      Object.keys(sp.updates[sku]).forEach(period=>{ const cell=p.periods[period]; if(cell&&cell.s!=null) migrated.add(shop); });
+    });
+  });
+  if(migrated.size) return {ok:false, migratedShops:[...migrated]};   // 拒絕整批
   ['甲配','乙配'].forEach(shop=>{
     const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return;
     const master=momoLoadProducts(shop);
@@ -6241,6 +6491,7 @@ function momoApplyUploadPlan(plan){
     });
     momoSaveProducts(shop,master);
   });
+  return {ok:true};
 }
 // ── 一次性清理工具：清掉主檔 periods 裡格式不合的髒 key ──
 //   ⚠ 用法：修碼部署 → 正式站確認新版生效 → 在 F12 Console 打 window.momoCleanDirtyPeriodKeys()
@@ -6376,14 +6627,39 @@ function momoRenderUploadPreview(shop){
       <b>${s}</b>：${sp.matched.length} 個 SKU 有更新、期別 ${sp.periods.map(momoPeriodLabel).join(' / ')||'—'}、總銷量 ${sp.totalQty}${unm}${ano}</div>`;
   };
   let owHtml='';
+  const _shrink=P.overwrite.filter(o=>o.newQty!=null&&o.oldQty!=null&&o.newQty<o.oldQty);   // qty 變小的覆蓋（跨結算檔覆蓋的訊號）
   if(P.overwrite.length){
     const owByShop={};
     P.overwrite.forEach(o=>{ owByShop[o.shop]=(owByShop[o.shop]||0)+1; });
     const owParts=Object.keys(owByShop).map(s=>`${s} ${owByShop[s]} 筆`).join('、');
     const riskyShops=[...new Set(P.overwrite.filter(o=>P.shops[o.shop]&&P.shops[o.shop].cloudRisk).map(o=>o.shop))];
+    // 明細表：變小(縮水)排前面、標紅底 → 讓「18→2」這種跨檔覆蓋一眼現形（原本只給筆數，看不出變大變小）
+    const owSorted=P.overwrite.slice().sort((a,b)=>{
+      const da=(a.newQty<a.oldQty)?0:1, db=(b.newQty<b.oldQty)?0:1;
+      if(da!==db) return da-db;
+      return (b.oldQty-b.newQty)-(a.oldQty-a.newQty);   // 縮水多的在前
+    });
+    const owRows=owSorted.map(o=>{
+      const down=o.newQty<o.oldQty, up=o.newQty>o.oldQty;
+      const col=down?'#dc2626':(up?'#16a34a':'#9ca3af');
+      return `<tr style="border-top:1px solid #f3f4f6${down?';background:#fef2f2':''}">
+        <td style="padding:3px 8px">${o.shop}</td>
+        <td style="padding:3px 8px;font-family:monospace">${o.sku}</td>
+        <td style="padding:3px 8px">${momoPeriodLabel(o.period)}</td>
+        <td style="padding:3px 8px;text-align:right;color:${col};font-weight:${down?'700':'400'}">${o.oldQty} → ${o.newQty}${down?' ▼':(up?' ▲':'')}</td>
+      </tr>`;
+    }).join('');
     owHtml=`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#9a3412;line-height:1.6">
       ⚠ 這次會<b>覆蓋已有資料的期別：${owParts}</b>（賣場×SKU×期別），原本數字會被新數字取代。
-      ${riskyShops.length?`<div style="margin-top:4px;font-weight:700">${riskyShops.join('、')} 的商品主檔目前不在待同步狀態 → 這些很可能是<u>已同步雲端、別人看過的正式數字</u>，確認你真的要改。</div>`:''}</div>`;
+      ${_shrink.length?`<div style="margin-top:4px;font-weight:700;color:#b91c1c">其中 <b>${_shrink.length} 筆 qty 會變小</b>（下表紅底）——很可能是把別份結算檔的貢獻蓋掉，請確認不是誤覆蓋。</div>`:''}
+      ${riskyShops.length?`<div style="margin-top:4px;font-weight:700">${riskyShops.join('、')} 的商品主檔目前不在待同步狀態 → 這些很可能是<u>已同步雲端、別人看過的正式數字</u>，確認你真的要改。</div>`:''}
+      <div style="margin-top:6px;max-height:200px;overflow:auto;background:#fff;border:1px solid #fde4c8;border-radius:6px">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead><tr style="text-align:left;color:#9a3412;position:sticky;top:0;background:#fff7ed">
+            <th style="padding:3px 8px">賣場</th><th style="padding:3px 8px">SKU</th><th style="padding:3px 8px">期別</th><th style="padding:3px 8px;text-align:right">舊 → 新 qty</th>
+          </tr></thead><tbody>${owRows}</tbody>
+        </table>
+      </div></div>`;
   }
   // 判不出期別 = 有問題（不是單純略過）→ 橘字獨立區塊、列出實際訂編給人追查
   let badHtml='';
@@ -6405,12 +6681,18 @@ function momoRenderUploadPreview(shop){
   el.innerHTML=`
     <div style="font-size:13px;font-weight:700;margin-bottom:8px">預覽（尚未寫入）</div>
     ${shopBlock('甲配')}${shopBlock('乙配')}${owHtml}${badHtml}${s1105ErrHtml}${skipHtml}
-    <button onclick="momoUploadApply('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認寫入${P.overwrite.length?'（含覆蓋 '+P.overwrite.length+' 筆）':''}</button>
+    <button onclick="momoUploadApply('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:${_shrink.length?'#dc2626':'#10b981'};color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認寫入${_shrink.length?'（⚠️ '+_shrink.length+' 筆會變小）':(P.overwrite.length?'（含覆蓋 '+P.overwrite.length+' 筆）':'')}</button>
     <button onclick="momoUploadCancel('${shop}')" style="margin-left:8px;padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>`;
 }
 function momoUploadApply(shop){
   if(!_momoUpPlan) return;
-  momoApplyUploadPlan(_momoUpPlan);
+  const res=momoApplyUploadPlan(_momoUpPlan);
+  if(res&&res.ok===false){   // 1b-5：目標賣場已遷移為 compact，整批被拒（一格都沒寫）
+    const msg=`「${res.migratedShops.join('、')}」已遷移為新格式（sourced 重建），單檔上傳會弄髒資料，已整批拒絕、未寫入任何一格。\n\n請改用「⟳重建」分頁：一次選齊該重建的所有 C1105 上傳。`;
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'此賣場已遷移，改用 ⟳重建 上傳',message:msg,kind:'warn'});
+    else alert(msg);
+    return;   // 不清檔、不改狀態，讓使用者原地改走重建
+  }
   const total=Object.values(_momoUpPlan.shops).reduce((s,sp)=>s+sp.matched.length,0);
   _momoUpPlan=null; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.yi=null; _momoUpFiles.s1105=null;
   if(typeof showToast==='function') showToast('已寫入 '+total+' 個 SKU 的期別資料（記得按 ☁ 同步雲端）','success');
@@ -7735,6 +8017,8 @@ Object.assign(window, {
   momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,momoJumpShop,
   momoSetSummaryMonth,momoActionPlanSave,momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,
   momoRentSubmit,momoRentDelete,momoRentSyncBtn,
+  momoRebuildPick,momoRebuildRemove,momoRebuildGenerate,momoRebuildDownloadReport,momoRebuildConfirm,momoTrimPreview,momoTrimBackupAndApply,
+  momoRebuildDryRun,momoRebuildApply,momoTrimHistoryDryRun,momoTrimHistoryApply,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
