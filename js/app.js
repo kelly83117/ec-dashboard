@@ -279,7 +279,7 @@ function migratePlatforms(platforms) {
       return p; // 已是新版（不論是否為空）
     }
     changed = true;
-    return { name: p.name, icon: p.icon, color: p.color, daily: {}, dailyAdSpend: p.dailyAdSpend || {} };
+    return { name: p.name, icon: p.icon, color: p.color, daily: {}, dailyAdSpend: p.dailyAdSpend || {}, dailyBy: p.dailyBy || {} };
   });
   return changed ? out : platforms;
 }
