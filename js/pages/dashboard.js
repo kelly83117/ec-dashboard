@@ -272,7 +272,7 @@ Object.assign(App, {
       grouped[m].push({ p, i });
     });
 
-    // 單一賣場列
+    // 單一通路列
     const buildPlatformRow = (p, i) => {
       const td = inputOf(p);
       const yd = prevOf(p);
@@ -338,7 +338,7 @@ Object.assign(App, {
       `;
     };
 
-    // 通路分群分隔列 + 該通路的賣場列
+    // 通路分群分隔列 + 該通路的通路列
     const marketRowsHtml = marketOrder.map(m => {
       const items = grouped[m] || [];
       if (items.length === 0) return '';
@@ -351,7 +351,7 @@ Object.assign(App, {
               <img src="${badge.src}" alt="${escapeHtml(badge.name)}"
                 style="width:14px;height:14px;border-radius:3px;object-fit:contain;flex-shrink:0">
               <span style="font-size:11px;font-weight:600;color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase">${escapeHtml(badge.name)}</span>
-              <span style="font-size:10px;color:var(--text-muted);font-weight:500">· ${items.length} 個賣場</span>
+              <span style="font-size:10px;color:var(--text-muted);font-weight:500">· ${items.length} 個通路</span>
             </div>
           </td>
         </tr>
@@ -407,7 +407,7 @@ Object.assign(App, {
           <table style="border-collapse:separate;border-spacing:0;width:100%;min-width:520px;table-layout:fixed">
             <thead>
               <tr style="background:var(--bg)">
-                <th style="padding:5px 6px;text-align:left;font-size:11px;min-width:110px">賣場</th>
+                <th style="padding:5px 6px;text-align:left;font-size:11px;min-width:110px">通路</th>
                 <th style="padding:5px 4px;text-align:center;font-size:11px;width:115px">營收 NT$</th>
                 <th style="padding:5px 4px;text-align:center;font-size:11px;width:115px">廣告費</th>
                 <th style="padding:5px 4px;text-align:center;font-size:11px;width:58px">ROAS</th>
@@ -450,7 +450,7 @@ Object.assign(App, {
      - hasRoas：沒投廣告、或該範圍廣告費為 0 → 無法計算 ROAS（roas 為 null）
      - hasDelta：比較範圍營收為 0 → 沒有漲跌可言（delta 為 0，不可拿來判斷）
      - ⚠ 保留原始索引 i：它就是填寫表格的 data-idx，排序時絕不可就地 sort(platforms)，
-       打亂會讓存檔寫到錯的賣場。 */
+       打亂會讓存檔寫到錯的通路。 */
   channelMetrics(platforms, showDates, compareDates) {
     const sumRev = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
     const sumAds = (p, dates) => dates.reduce((s, d) => s + (+p.dailyAdSpend?.[d] || 0), 0);
@@ -786,9 +786,9 @@ Object.assign(App, {
     // 切換：null = 總計（全部加總），string = 單一平台
     const activeName = this.filter.chartPlatform || null;
 
-    // 圖例（全賣場 + 7 個平台）
+    // 圖例（全通路 + 7 個平台）
     const allPill = `
-      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:${activeName === null ? '#0f172a' : 'var(--bg)'};border:1px solid ${activeName === null ? '#0f172a' : 'var(--border)'};border-radius:999px;font-size:11px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">🏪 全賣場</button>
+      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:${activeName === null ? '#0f172a' : 'var(--bg)'};border:1px solid ${activeName === null ? '#0f172a' : 'var(--border)'};border-radius:999px;font-size:11px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">🏪 全通路</button>
     `;
     const platformPills = platforms.map(p => {
       const isActive = activeName === p.name;
@@ -805,7 +805,7 @@ Object.assign(App, {
     }).join('');
 
     // 計算每日資料
-    // 全賣場模式（activeName == null）：7 條平台曲線同時顯示
+    // 全通路模式（activeName == null）：7 條平台曲線同時顯示
     // 單一平台模式：只顯示該平台一條線
     const logoImgHtml = (platformName) => {
       const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
@@ -828,8 +828,8 @@ Object.assign(App, {
           name: pp.name, color: pp.color, icon: pp.icon,
           values: dates.map(d => +(pp.daily?.[d]) || 0),
         }));
-        lineLabel = '全賣場';
-        lineLabelHtml = '<span style="vertical-align:middle">🏪 全賣場</span>';
+        lineLabel = '全通路';
+        lineLabelHtml = '<span style="vertical-align:middle">🏪 全通路</span>';
         lineColor = '#0f172a';
         isMulti = true;
       }
@@ -838,8 +838,8 @@ Object.assign(App, {
         name: pp.name, color: pp.color, icon: pp.icon,
         values: dates.map(d => +(pp.daily?.[d]) || 0),
       }));
-      lineLabel = '全賣場';
-      lineLabelHtml = '<span style="vertical-align:middle">🏪 全賣場</span>';
+      lineLabel = '全通路';
+      lineLabelHtml = '<span style="vertical-align:middle">🏪 全通路</span>';
       lineColor = '#0f172a';
       isMulti = true;
     }
@@ -929,12 +929,12 @@ Object.assign(App, {
     // 保存 chart 狀態供 hover handler 使用
     this._chartState = { dates, dailyData, series, padL, xStep, W, H, padT, ch, maxV, lineColor, lineLabel, isMulti, activeName };
 
-    // 計算目前選中的 series 累計：全賣場 = 7 個賣場全部加總；單一賣場 = 該賣場本月加總
+    // 計算目前選中的 series 累計：全通路 = 7 個通路全部加總；單一通路 = 該通路本月加總
     const seriesTotal = series.reduce((s, ss) => s + ss.values.reduce((a, b) => a + b, 0), 0);
     const daysWithData = dates.filter(d =>
       series.some(s => s.values[dates.indexOf(d)] > 0)
     ).length;
-    const totalLabel = isMulti ? `${monthLabel}全賣場累計` : `${monthLabel}「${lineLabel}」累計`;
+    const totalLabel = isMulti ? `${monthLabel}全通路累計` : `${monthLabel}「${lineLabel}」累計`;
 
     return `
       <div class="chart-card" style="margin:0;padding:12px 14px;width:100%;display:flex;flex-direction:column">
@@ -994,10 +994,10 @@ Object.assign(App, {
       const data = dailyData[i];
       const dateStr = data.date.replace(/-/g, '/');
       if (isMulti) {
-        // 全賣場模式：顯示日期 + 總計 + 7 個平台明細
+        // 全通路模式：顯示日期 + 總計 + 7 個平台明細
         return `
           <div style="font-size:11px;opacity:0.7;margin-bottom:6px">${dateStr}</div>
-          <div style="font-size:11px;opacity:0.7">全賣場總計</div>
+          <div style="font-size:11px;opacity:0.7">全通路總計</div>
           <div style="font-size:18px;font-weight:700;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.18);font-variant-numeric:tabular-nums">NT$ ${Math.round(data.total).toLocaleString()}</div>
           <div style="font-size:12px;line-height:1.7">
             ${data.breakdown.map(p => `
@@ -1289,7 +1289,7 @@ Object.assign(App, {
       return `<th colspan="${cols}" style="padding:3px 5px;text-align:center;font-size:12px;color:var(--text);font-weight:600;border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap">${escapeHtml(p.name)}</th>`;
     }).join('');
 
-    // 子欄位列（短標籤節省空間） — 各賣場第一欄加 border-left 區隔
+    // 子欄位列（短標籤節省空間） — 各通路第一欄加 border-left 區隔
     const subHeadHtml = colSpec.map(({ hasAds }) => {
       const lb = 'border-left:1px solid #94a3b8;';
       if (hasAds) {
@@ -1316,7 +1316,7 @@ Object.assign(App, {
         dayRev += rev;
         const m = PLATFORM_MARKETPLACE[p.name] || 'shopee';
         marketSubtotals[m] += rev;
-        // 每個賣場的第一欄加 border-left 區隔
+        // 每個通路的第一欄加 border-left 區隔
         const lb = '1px solid #94a3b8';
         if (hasAds) {
           const ads = getAds(p, d);
@@ -1344,7 +1344,7 @@ Object.assign(App, {
       `;
     }).join('');
 
-    // 總計列：個別賣場 + 通路小計（整列置中對齊）
+    // 總計列：個別通路 + 通路小計（整列置中對齊）
     const totalCells = colSpec.map(({ hasAds }, idx) => {
       const t = platformTotals[idx];
       const lb = 'border-left:1px solid #94a3b8;';
@@ -1805,7 +1805,7 @@ Object.assign(App, {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
       const platforms = Store.get(Store.KEYS.platforms, null) || [];
-      const platformName = platforms[idx]?.name || '此賣場';
+      const platformName = platforms[idx]?.name || '此通路';
       const dispVal = (n) => (n == null || n <= 0 ? '—' : n.toLocaleString());
 
       // 覆蓋警告用：這一天原本是誰、什麼時候填的（時間格式與署名小灰字一致：月/日 時:分）
