@@ -5590,6 +5590,15 @@ function momoOrderToPeriod(orderNo){   // 訂單編號前 6 碼 YYMMDD 判半月
   if(mn<1||mn>12||dn<1||dn>31) return null;                // mm 01-12、dd 01-31，明確排除 0
   return `20${yy}-${mm}-${dn<=15?'H1':'H2'}`;              // 拼 key 用原字串（保 "06" 不變 "6"）
 }
+// # COD 訂單的訂編非 YYMMDD 格式（momoOrderToPeriod 判不出）→ 用「訂單成立日」判期別的 fallback。
+//   已用 6 檔 11,926 筆正常訂單驗證：訂編前6碼 100% == 訂單成立日、0 筆期別跨界，故 fallback 與主規則同軌、可靠。
+function momoDateToPeriod(dateStr){
+  const m=/(\d{4})\/(\d{1,2})\/(\d{1,2})/.exec(String(dateStr||''));
+  if(!m) return null;
+  const mn=+m[2], dn=+m[3];
+  if(mn<1||mn>12||dn<1||dn>31) return null;
+  return `${m[1]}-${String(mn).padStart(2,'0')}-${dn<=15?'H1':'H2'}`;
+}
 function momoChannelFromDeliveryType(t){
   if(t==='寄倉') return '乙配';
   if(t==='指定貨運'||t==='超商取貨') return '甲配';
@@ -6103,8 +6112,11 @@ function momoLocateCols(rows,fieldMap,label){
 // C1105：依配送類型分通路、依訂編判期別、依品號加總數量 → sales[通路][sku][期別]=qty
 function momoParseC1105(rows){
   const {headerIdx,idx}=momoLocateCols(rows,{order:['訂單編號'],deliveryType:['配送類型'],sku:['品號'],qty:['數量']},'C1105 訂單商品明細');
+  // 「訂單成立日」為選填欄（供 # COD 訂單 date-fallback 用）：獨立找、找不到=-1，不塞進 momoLocateCols 的必要欄，
+  //   以免某些檔缺這欄就整份 throw。缺此欄時 fallback 自動失效、退回原本的 drop 行為。
+  const iOrderDate=(rows[headerIdx]||[]).map(c=>String(c).trim()).indexOf('訂單成立日');
   const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
-  const sales={甲配:{},乙配:{}}, orderSkuQty={}, unknownChannel=[], badPeriod=[];
+  const sales={甲配:{},乙配:{}}, orderSkuQty={}, unknownChannel=[], badPeriod=[], dateFallback=[];
   for(let i=headerIdx+1;i<rows.length;i++){
     const r=rows[i]; if(!r) continue;
     const sku=String(r[idx.sku]||'').trim(); if(!sku) continue;
@@ -6114,12 +6126,16 @@ function momoParseC1105(rows){
     if(orderCore){ orderSkuQty[orderCore]=orderSkuQty[orderCore]||{}; orderSkuQty[orderCore][sku]=(orderSkuQty[orderCore][sku]||0)+qty; }
     const channel=momoChannelFromDeliveryType(String(r[idx.deliveryType]||'').trim());
     if(!channel){ if(unknownChannel.length<20) unknownChannel.push({order:r[idx.order],type:r[idx.deliveryType]}); continue; }
-    const period=momoOrderToPeriod(r[idx.order]);
+    let period=momoOrderToPeriod(r[idx.order]);
+    if(!period && iOrderDate>=0){   // # COD 訂單訂編非 YYMMDD → 用訂單成立日 fallback，不再靜默 drop 真交易
+      period=momoDateToPeriod(r[iOrderDate]);
+      if(period && dateFallback.length<50) dateFallback.push({order:orderCore, date:r[iOrderDate], channel, sku, qty, period});
+    }
     if(!period){ if(badPeriod.length<20) badPeriod.push({order:r[idx.order]}); continue; }
     sales[channel][sku]=sales[channel][sku]||{};
     sales[channel][sku][period]=(sales[channel][sku][period]||0)+qty;
   }
-  return {sales,orderSkuQty,unknownChannel,badPeriod};
+  return {sales,orderSkuQty,unknownChannel,badPeriod,dateFallback};
 }
 // 甲配 UnsendList（舊式）：運費只記在每張訂單第一列（訂編/品號/運費），續列空白。
 //   → 依「訂編」收該訂單總運費（運費欄）。分攤到各 SKU 在 momoAllocateJiaFreight 用 C1105 數量比例做。
