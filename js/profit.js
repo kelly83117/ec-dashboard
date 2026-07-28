@@ -5700,8 +5700,30 @@ async function momoOpenSyncPreview(shop){
   let cloud={};
   try{ const snap=await window.__cloudProfit.getDoc(); cloud=snap.exists()?(snap.data()||{}):{}; }
   catch(e){ const m=(e&&e.message)||String(e); if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'讀取雲端失敗',message:'無法讀取雲端現況，請稍後再試。',detail:m,kind:'error'}); else if(typeof showToast==='function') showToast('讀取雲端失敗','error'); return; }
+  // MOMO 商品主檔改讀 momo_products collection（每賣場一 doc），與寫入 __cloudMomo.setShop 同源；
+  //   併發 getDoc（只讀真正 pending 的賣場）→ 延遲≈一次來回；沿用已在 READ_OK 白名單的 getDoc，不動防護碼。
+  //   cloud doc 是 { shop, items:[...] }，取 .items 比對（不是整個 doc）。單一賣場讀失敗只標該列無法比對，不讓整個預覽掛掉。
+  const momoCloud={};   // 'ec_momo_products|<shop>' → { items:[...]|undefined } 或 { error:true }
+  const momoItems=items.filter(it=>it.kind==='MOMO商品主檔');
+  if(momoItems.length && window.__cloudMomo){
+    const pfx='ec_momo_products|';
+    const momoShops=[...new Set(momoItems.map(it=>it.key.slice(pfx.length)))];
+    await Promise.all(momoShops.map(async sh=>{
+      const key=pfx+sh;
+      try{ const s=await window.__cloudMomo.getDoc(sh); momoCloud[key]= s.exists()?{items:((s.data()&&s.data().items)||[])}:{items:undefined}; }
+      catch(e){ momoCloud[key]={error:true}; }
+    }));
+  }
   items.forEach(it=>{
     if(it.kind==='蝦皮報表'){ it.status='uncomparable'; it.cloudCount=null; return; }   // 不同 collection（profits），app/profit 讀不到
+    if(it.kind==='MOMO商品主檔'){
+      const mc=momoCloud[it.key];
+      if(!mc || mc.error){ it.status='readfail'; it.cloudCount=null; return; }   // __cloudMomo 缺 / 該賣場讀失敗 → 不掛掉整個預覽，單列標無法比對
+      const cItems=mc.items;
+      if(cItems===undefined){ it.status='new'; it.cloudCount=0; }
+      else { it.cloudCount=_momoCount(cItems); it.status=(_momoStableStr(it.localVal)===_momoStableStr(cItems))?'same':'diff'; }
+      return;
+    }
     const cv=cloud[it.key];
     if(cv===undefined){ it.status='new'; it.cloudCount=0; }
     else { it.cloudCount=_momoCount(cv); it.status=(_momoStableStr(it.localVal)===_momoStableStr(cv))?'same':'diff'; }
@@ -5719,6 +5741,7 @@ function momoRenderSyncPreviewModal(shop, items){
     if(it.status==='new')    return `<span style="color:#10b981;font-weight:600">新增</span>`;
     if(it.status==='same')   return `<span style="color:#9ca3af">無變更</span>`;
     if(it.status==='uncomparable') return `<span style="color:#9ca3af">無法比對（不同 collection）</span>`;
+    if(it.status==='readfail') return `<span style="color:#d97706">無法比對（雲端讀取失敗，仍會整包覆蓋）</span>`;
     const cnt=(it.cloudCount!==it.localCount)?`（雲端 ${it.cloudCount} 筆 / 本機 ${it.localCount} 筆）`:'';
     return `<span style="color:#9a3412;font-weight:600">⚠️ 內容不同，確認後會用本機整包覆蓋雲端${cnt}</span>`;
   };
