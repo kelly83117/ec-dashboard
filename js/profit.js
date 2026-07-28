@@ -6115,12 +6115,16 @@ function momoParseC1105(rows){
   // 「訂單成立日」為選填欄（供 # COD 訂單 date-fallback 用）：獨立找、找不到=-1，不塞進 momoLocateCols 的必要欄，
   //   以免某些檔缺這欄就整份 throw。缺此欄時 fallback 自動失效、退回原本的 drop 行為。
   const iOrderDate=(rows[headerIdx]||[]).map(c=>String(c).trim()).indexOf('訂單成立日');
+  // 「進價(未稅)」為選填欄（供淨利表新模型算未稅營收=未稅進價×對帳數量的 revUntax 權重用）：
+  //   獨立找、缺欄=-1（revUntax 該筆記 0），不塞 momoLocateCols 必要欄以免舊檔缺欄整份 throw。
+  const iPriceUntax=(rows[headerIdx]||[]).map(c=>String(c).trim()).indexOf('進價(未稅)');
   const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
-  const sales={甲配:{},乙配:{}}, orderSkuQty={}, unknownChannel=[], badPeriod=[], dateFallback=[];
+  const sales={甲配:{},乙配:{}}, revUntax={甲配:{},乙配:{}}, orderSkuQty={}, unknownChannel=[], badPeriod=[], dateFallback=[];
   for(let i=headerIdx+1;i<rows.length;i++){
     const r=rows[i]; if(!r) continue;
     const sku=String(r[idx.sku]||'').trim(); if(!sku) continue;
     const qty=num(r[idx.qty]);
+    const rev=iPriceUntax>=0?Math.round(num(r[iPriceUntax])*qty):0;   // 未稅進價×數量（round整數，供 qtySources 緊湊編碼）
     // 訂單組成表（拆掉行項次序後綴 → 14 碼訂編），供甲配運費按數量比例往下拆
     const orderCore=String(r[idx.order]||'').split('-')[0].trim();
     if(orderCore){ orderSkuQty[orderCore]=orderSkuQty[orderCore]||{}; orderSkuQty[orderCore][sku]=(orderSkuQty[orderCore][sku]||0)+qty; }
@@ -6134,8 +6138,10 @@ function momoParseC1105(rows){
     if(!period){ if(badPeriod.length<20) badPeriod.push({order:r[idx.order]}); continue; }
     sales[channel][sku]=sales[channel][sku]||{};
     sales[channel][sku][period]=(sales[channel][sku][period]||0)+qty;
+    revUntax[channel][sku]=revUntax[channel][sku]||{};
+    revUntax[channel][sku][period]=(revUntax[channel][sku][period]||0)+rev;
   }
-  return {sales,orderSkuQty,unknownChannel,badPeriod,dateFallback};
+  return {sales,revUntax,orderSkuQty,unknownChannel,badPeriod,dateFallback};
 }
 // 甲配 UnsendList（舊式）：運費只記在每張訂單第一列（訂編/品號/運費），續列空白。
 //   → 依「訂編」收該訂單總運費（運費欄）。分攤到各 SKU 在 momoAllocateJiaFreight 用 C1105 數量比例做。
