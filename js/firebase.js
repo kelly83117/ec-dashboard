@@ -194,6 +194,28 @@ try {
           }
         }, err => { console.error('[momo_products subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_products subscribe failed', e); }
+
+      // momo_reconcile collection（每 shop 每月一 doc）→ Store._profitMem['ec_momo_reconcile|<shop>|<YYYY-MM>']（momoLoadReconcile 讀取順序一致）
+      try {
+        onSnapshot(momoReconcileColRef, snap => {
+          const changed = [];
+          snap.forEach(d => {
+            const data = d.data() || {};
+            const shop = data.savedShop || MOMO_DOCID_SHOP[String(d.id).split('_')[0]] || null;
+            const month = data.month || String(d.id).split('_').slice(1).join('_');
+            if (!shop || !month) return;
+            const k = 'ec_momo_reconcile|' + shop + '|' + month;
+            if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;   // 本機未同步/剛存 → 不覆蓋
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) return;
+            Store._profitMem[k] = data;
+            changed.push(k);
+          });
+          if (changed.length) {
+            console.log('[momo_reconcile] 收到更新：', changed);
+            window.dispatchEvent(new CustomEvent('momoReconcileReady', { detail: { changed } }));
+          }
+        }, err => { console.error('[momo_reconcile subscribe 失敗]', err); });
+      } catch (e) { console.warn('momo_reconcile subscribe failed', e); }
     };
   } catch (e) { console.warn('profit subscribe failed', e); }
 
@@ -225,6 +247,17 @@ try {
     getDoc:    (shop) => getDoc(doc(db, 'momo_products', MOMO_SHOP_DOCID[shop] || shop)),
     setShop:   (shop, items) => setDoc(doc(db, 'momo_products', MOMO_SHOP_DOCID[shop] || shop), { shop, items: items || [] }),   // setDoc：整包取代
     subscribe: (cb) => onSnapshot(momoProductsColRef, cb),
+  };
+
+  // ============== MOMO 月對帳 momo_reconcile（每 shop 每月一 doc，不塞 momo_products） ==============
+  // 對帳單=營收/費用權威來源。doc id = shopDocId + '_' + 'YYYY-MM'（例 jia_2026-06），每份 75KB 遠低 1MB。
+  // getDoc/subscribe 命名落防護讀取白名單、自動放行；setMonth 是唯一寫入方法（整包取代，last-write-wins）。
+  const momoReconcileColRef = collection(db, 'momo_reconcile');
+  const momoReconDocId = (shop, month) => (MOMO_SHOP_DOCID[shop] || shop) + '_' + month;
+  window.__cloudReconcile = {
+    getDoc:    (shop, month) => getDoc(doc(db, 'momo_reconcile', momoReconDocId(shop, month))),
+    setMonth:  (shop, month, data) => setDoc(doc(db, 'momo_reconcile', momoReconDocId(shop, month)), data || {}),
+    subscribe: (cb) => onSnapshot(momoReconcileColRef, cb),
   };
 
   // ============== 洞察表獨立文件 app/insight（避免 app/main 撞 1MB 上限） ==============

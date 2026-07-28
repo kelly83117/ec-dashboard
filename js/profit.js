@@ -439,6 +439,14 @@ function _sweepAllLocalReportsIntoPending(){
         }
         continue;
       }
+      // MOMO 月對帳（階段二）：ec_momo_reconcile|<shop>|<YYYY-MM> → momo_reconcile collection（每 shop 每月一 doc）
+      if(k&&k.startsWith('ec_momo_reconcile|')){
+        _pendingSyncKeys.add(k);
+        if(!(Store._mem&&Store._mem[k])){
+          try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+        }
+        continue;
+      }
       // filemeta 不上雲（雲端零讀取端）→ 不塞進 pending，省下「撈進來→推送略過→收尾刪」的白工
       if(k&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')){
         _pendingSyncKeys.add(k);
@@ -497,6 +505,14 @@ async function syncToCloud(shop){
         const items=momoLoadProducts(shop);   // _profitMem → _mem → localStorage
         if(window.__cloudMomo && Array.isArray(items)){ tasks.push({key:pk,run:()=>window.__cloudMomo.setShop(shop,items)}); }
         else{ skippedProblem.push({key:pk,reason:'MOMO 商品主檔讀不到，或雲端層未就緒'}); }
+        return;
+      }
+      if(pk.startsWith('ec_momo_reconcile|')){   // MOMO 月對帳 → momo_reconcile collection（每 shop 每月一 doc）
+        const parts=pk.split('|');   // ['ec_momo_reconcile', shop, 'YYYY-MM']
+        const rShop=parts[1], rMonth=parts[2];
+        const data=momoLoadReconcile(rShop, rMonth);   // _profitMem → _mem → localStorage
+        if(window.__cloudReconcile && data && rShop && rMonth){ tasks.push({key:pk,run:()=>window.__cloudReconcile.setMonth(rShop,rMonth,data)}); }
+        else{ skippedProblem.push({key:pk,reason:'MOMO 月對帳讀不到，或雲端層未就緒'}); }
         return;
       }
       // field key（設定類）
@@ -5495,6 +5511,12 @@ window.addEventListener('momoDataReady',(e)=>{
   if((_momoSub[shop]||'profit')!=='profit') return;
   if(document.getElementById('momo-tbl-'+shop)) momoRenderProfitBody(shop);
 });
+// 月對帳雲端更新 → 清月費率快取 + 若正在看甲配/乙配總表則重繪（吃到新對帳單的權威營收/費用）
+window.addEventListener('momoReconcileReady',()=>{
+  if(typeof momoClearFeeRateCache==='function') momoClearFeeRateCache();
+  const shop=curMomoShop;
+  if((shop==='甲配'||shop==='乙配') && (_momoSub[shop]||'profit')==='profit' && document.getElementById('momo-tbl-'+shop)) momoRenderProfitBody(shop);
+});
 // ── 一次性遷移工具（手動在正式站 console 呼叫 window.momoMigrateProductsToCollection()，不 auto-run）──
 //   把 app/profit 舊欄位 ec_momo_products|<shop> 搬進 momo_products collection。先寫新+驗證，「絕不」自動刪舊欄位——
 //   刪除指令印出來給人工確認一致後再貼。順序：部署後隔 24h（快取淘汰）→ 跑此函式 → 驗證✅ → 才刪舊欄位。
@@ -5555,20 +5577,73 @@ function momoCalcMargin({cost,purchasePrice,salePrice,shippingPackaging}){
   const N=L-cost-M;                       // 實際毛利
   return { unitProfit:N, marginPct: purchasePrice?(N/purchasePrice)*100:0 };
 }
-function momoAggregatePeriods(product,periodKeys){   // 彙總單一商品（可傳一個期別或多個加總看整月）
+// ═══ 階段二：甲配/乙配 新供應商淨利模型的月費率快取 ═══
+//   feeRate = E(未稅=對帳單E÷1.05) ÷ A(未稅營收) → 每 SKU 費用 = R×feeRate，Σ全月 = E÷1.05（重現對帳單）。
+//   6.8% 是 MOMO 專屬常數（未對帳時只能估比例費用）；絕不共用蝦皮全站費率框。
+const _momoFeeRateCache={};   // 'shop|YYYY-MM' → {reconciled, feeRate, E_untax, A_untax, skus} | null(未對帳)
+function momoClearFeeRateCache(){ for(const k in _momoFeeRateCache) delete _momoFeeRateCache[k]; }
+function momoMonthFeeInfo(shop, month){
+  const ck=shop+'|'+month;
+  if(ck in _momoFeeRateCache) return _momoFeeRateCache[ck];
+  let info=null;
+  try{
+    const rec=momoLoadReconcile(shop, month);
+    if(rec && rec.summary && rec.summary.A && rec.summary.E!=null){
+      const A_untax=rec.summary.A.untax||0;
+      const E_untax=rec.summary.E/1.05;   // 對帳單 E 是含稅（A+C−E+G 用含稅欄成立）→ 未稅
+      if(A_untax>0) info={reconciled:true, feeRate:E_untax/A_untax, E_untax, A_untax, skus:rec.skus||{}};
+    }
+  }catch(e){}
+  _momoFeeRateCache[ck]=info;
+  return info;
+}
+// 彙總單一商品（可傳一個期別或多個加總看整月）。shop 決定模型：
+//   甲配/乙配 → 新供應商淨利模型（營收=未稅進價×對帳數量、費用=對帳單E攤、成本未稅、毛利率÷未稅營收）
+//   其它（MO+麻吉/MO+森之旅）→ 維持原 momoCalcMargin 路徑，byte-identical（結構隔離，行為不變）
+function momoAggregatePeriods(product,periodKeys,shop){
   const data=periodKeys.map(k=>(product.periods||{})[k]).filter(Boolean).map(c=>momoReadCell(c, product&&product.sku));   // 1b：統一讀取，相容舊 flat 與新 compact(sourced) cell
   const qty=data.reduce((s,d)=>s+(d.qty||0),0);
   const returnQty=data.reduce((s,d)=>s+(d.returnQty||0),0);
-  const freightTotal=data.reduce((s,d)=> s+(d.freight!=null?d.freight:(product.shippingPackaging||0)*(d.qty||0)),0);
-  const avgShipping=qty?freightTotal/qty:(product.shippingPackaging||0);
-  const { marginPct, unitProfit }=momoCalcMargin({
-    cost:product.cost, purchasePrice:product.purchasePrice,
-    salePrice:product.salePrice, shippingPackaging:avgShipping
-  });
+
+  if(shop!=='甲配' && shop!=='乙配'){
+    // ── MO+ 麻吉 / MO+ 森之旅（及未指定 shop 的舊呼叫）：原公式，一字不改 ──
+    const freightTotal=data.reduce((s,d)=> s+(d.freight!=null?d.freight:(product.shippingPackaging||0)*(d.qty||0)),0);
+    const avgShipping=qty?freightTotal/qty:(product.shippingPackaging||0);
+    const { marginPct, unitProfit }=momoCalcMargin({
+      cost:product.cost, purchasePrice:product.purchasePrice,
+      salePrice:product.salePrice, shippingPackaging:avgShipping
+    });
+    return {
+      qty, revenue:qty*product.salePrice, profit:qty*unitProfit,
+      margin:qty?marginPct:0,
+      returnRate:qty?Math.round((returnQty/qty)*1000)/10:0
+    };
+  }
+
+  // ── 甲配/乙配：新供應商淨利模型 ──
+  const month = periodKeys.length ? String(periodKeys[0]).slice(0,7) : '';
+  const sku = product.sku;
+  const c1105RevPeriod = data.reduce((s,d)=>s+(d.revUntax||0),0);   // 選期別的 C1105 未稅營收（gross 暫估用）
+  const fee = month ? momoMonthFeeInfo(shop, month) : null;
+  let R=0, reconciled=false, splitEstimated=false;
+  if(fee && fee.skus && fee.skus[sku] && fee.skus[sku].revUntax!=null){
+    // 已對帳：R = 該SKU月營收(對帳金額未稅,已net客退) × (選期別C1105營收 ÷ 該SKU整月C1105營收)
+    reconciled=true;
+    const skuMonthRev=fee.skus[sku].revUntax;
+    const monthKeys=[month+'-H1', month+'-H2'];
+    const c1105RevMonth=monthKeys.map(k=>(product.periods||{})[k]).filter(Boolean).map(c=>momoReadCell(c,sku)).reduce((s,d)=>s+(d.revUntax||0),0);
+    if(c1105RevMonth>0){ R=skuMonthRev*(c1105RevPeriod/c1105RevMonth); if(c1105RevPeriod!==c1105RevMonth) splitEstimated=true; }
+    else { R = (periodKeys.length>=2)?skuMonthRev:0; }   // 無 C1105 比例可拆：整月給全額、半月不亂拆給 0
+  } else {
+    R = c1105RevPeriod;   // 未對帳：C1105 gross 暫估
+  }
+  const cost=(product.cost||0)*qty;
+  const feeAmt = (reconciled&&fee) ? R*fee.feeRate : R*0.068;   // 已對帳=E攤(feeRate)；未對帳=只估比例費用6.8%
+  const profit=R-feeAmt-cost;
   return {
-    qty, revenue:qty*product.salePrice, profit:qty*unitProfit,
-    margin:qty?marginPct:0,
-    returnRate:qty?Math.round((returnQty/qty)*1000)/10:0
+    qty, revenue:R, profit, margin:R>0?(profit/R)*100:0,
+    returnRate:qty?Math.round((returnQty/qty)*1000)/10:0,
+    reconciled, estimated:!reconciled, splitEstimated
   };
 }
 
@@ -5966,6 +6041,7 @@ function momoReconStore(shop){
   const L=window.__momoReconLast; if(!L||!L.summ.valid.all){ alert('自驗未過，不存'); return; }
   // 每 shop 存該賣場的逐SKU（detail.byShop[shop]）+ 該月摘要（summ，兩賣場共用月費用）
   ['甲配','乙配'].forEach(s=>{ momoSaveReconcile(s, L.month, { month:L.month, reconNo:L.summ.reconNo, skus:L.detail.byShop[s]||{}, summary:L.summ, savedShop:s }); });
+  momoClearFeeRateCache();   // 總表下次重繪即吃到這份對帳單（該月轉「已對帳」權威）
   if(typeof showToast==='function') showToast('已存 '+L.month+' 月對帳（甲配+乙配，記得按 ☁ 同步雲端）','success');
 }
 function momoFeeExplainerHTML(){
@@ -6101,7 +6177,7 @@ function _momoSyncPendingCount(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
-      if(k.startsWith('ec_momo_products|') || k==='ec_momo_rent_records'
+      if(k.startsWith('ec_momo_products|') || k==='ec_momo_rent_records' || k.startsWith('ec_momo_reconcile|')
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
     }
   }catch{}
@@ -6138,7 +6214,7 @@ function _momoCollectPending(shop){
     if(pk.startsWith('ec|')){ add(pk,'蝦皮報表', Store._profitMem&&Store._profitMem[pk]); return; }   // → setReport（profits collection）
     let val=null; try{ if(Store._mem&&Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
     if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} }
-    const kind = pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk==='ec_momo_rent_records'?'MOMO倉租費' : '其他設定';
+    const kind = pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk==='ec_momo_rent_records'?'MOMO倉租費' : pk.startsWith('ec_momo_reconcile|')?'MOMO月對帳' : '其他設定';
     add(pk,kind,val);
   });
   return items;
@@ -6295,8 +6371,9 @@ function momoRenderProfitBody(shop){
   const period=_momoPeriodSel[shop];
   const q=(_momoSearch[shop]||'').trim().toLowerCase();
   const all=momoLoadProducts(shop);
+  momoClearFeeRateCache();   // 每次重繪清月費率快取 → 吃到最新對帳單（快取只在這一輪 1300 SKU 內共用）
   let rows=all.map(p=>{
-    const agg=momoAggregatePeriods(p, period?momoExpandPeriod(period):[]);
+    const agg=momoAggregatePeriods(p, period?momoExpandPeriod(period):[], shop);
     return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, discontinued:!!p.discontinued, ...agg };
   });
   // 搜尋時忽略「已下架」篩選（搜得到已下架商品，避免以為資料掉了）；沒搜尋時預設隱藏已下架
@@ -6338,7 +6415,18 @@ function momoRenderProfitBody(shop){
     return `<tr>${tds}</tr>`;
   }).join('');
   const discHint=(q&&searchMatchedDisc>0)?`<div style="font-size:11px;color:#9ca3af;margin-bottom:8px">搜尋結果包含已下架商品（${searchMatchedDisc} 筆）</div>`:'';
-  tbl.innerHTML=discHint+`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
+  // 交付驗收 c：甲配/乙配標示該月「已對帳（權威）」或「未對帳（C1105暫估、費用僅6.8%）」，不靜默
+  let statusBanner='';
+  if((shop==='甲配'||shop==='乙配') && period){
+    const mo=String(period).slice(0,7);
+    const fi=momoMonthFeeInfo(shop, mo);
+    if(fi&&fi.reconciled){
+      statusBanner=`<div style="font-size:12px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;border-radius:7px;padding:6px 10px;margin-bottom:8px">✓ <b>已對帳</b>（${mo}）· 營收=對帳金額(未稅,已扣退貨)、費用=對帳單各項÷1.05 按營收攤${period.endsWith('-FULL')?'':' · 半月為按 C1105 銷量比例估算'}</div>`;
+    } else {
+      statusBanner=`<div style="font-size:12px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:7px;padding:6px 10px;margin-bottom:8px">⚠ <b>未對帳</b>（${mo}）· 營收為 C1105 <b>暫估</b>、費用僅估比例 6.8%（缺物流/倉租等）→ 到「月對帳」分頁上傳當月對帳單後轉為權威值</div>`;
+    }
+  }
+  tbl.innerHTML=statusBanner+discHint+`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
 }
 
 // ── 畫面二：批次維護（編輯現有商品 / 新增商品；甲配乙配共用）──
@@ -7251,7 +7339,7 @@ function momoShopMonthStats(shop,month){
   else
     console.log('[momo P5] '+shop+' '+month+' 驗算：未下架 '+active.length+' + 已下架 '+discCount+' = 主檔 '+all.length+' ✓');
   const pk=[month+'-H1', month+'-H2'];
-  const sold=active.map(p=>({p, agg:momoAggregatePeriods(p, pk)})).filter(x=>x.agg.qty>0);   // 該月有銷量
+  const sold=active.map(p=>({p, agg:momoAggregatePeriods(p, pk, shop)})).filter(x=>x.agg.qty>0);   // 該月有銷量
   const noCost=sold.filter(x=>!(Number(x.p.cost)>0));   // 查無成本：仍算動銷、但不進 band
   const banded=sold.filter(x=>Number(x.p.cost)>0);
   const bands={lt0:0,b0_10:0,b10_15:0,b15_20:0,b20_30:0,gt30:0};
