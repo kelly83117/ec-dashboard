@@ -1687,6 +1687,8 @@ Object.assign(App, {
     if (col.includes('百分比') || col === 'ROI' || col.includes('退貨率') || col.includes('以下)')) return 'pct';
     if (/月銷量|^進貨$|^數量$|^箱數$|^重量$/.test(col)) return 'count';
     if (col.includes('網站') || col.includes('連結')) return 'link';
+    // 人民幣欄位：原始成本、陸內運費、陸>台運費
+    if (col.includes('原始成本') || col.includes('陸〉陸') || col.includes('陸>陸') || col.includes('陸>台')) return 'rmb';
     if (['成本','售價','毛利','利潤','金額','入帳','稅金','廣告','運費','手續費','服務費','投入','報關','平均'].some(k => col.includes(k)) && !col.includes('ROAS')) return 'money';
     return 'text';
   },
@@ -1712,6 +1714,11 @@ Object.assign(App, {
       const n = parseFloat(val);
       if (isNaN(n)) return escapeHtml(String(val));
       return `NT$${n.toLocaleString(undefined, {minimumFractionDigits:0,maximumFractionDigits:2})}`;
+    }
+    if (type === 'rmb') {
+      const n = parseFloat(val);
+      if (isNaN(n)) return escapeHtml(String(val));
+      return `¥${n.toLocaleString(undefined, {minimumFractionDigits:0,maximumFractionDigits:2})}`;
     }
     if (type === 'link') {
       const s = String(val).trim();
