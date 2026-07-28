@@ -1,5 +1,5 @@
 {
-  "updated": "2026-07-27",
+  "updated": "2026-07-28",
   "items": [
     {
       "keyword": "收纳盒",
@@ -10,35 +10,35 @@
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E7%9B%92"
     },
     {
-      "keyword": "防潮袋",
-      "name": "真空防潮收納袋",
+      "keyword": "浴巾",
+      "name": "超柔軟浴巾（清涼夏季）",
       "price_range": "10-20元",
-      "moq": "50個",
-      "reason": "梅雨季節防潮需求增加",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E9%98%B2%E6%BD%AE%E8%A2%8B"
+      "moq": "50條",
+      "reason": "夏季需求高，清涼舒適",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%B7%BE"
     },
     {
-      "keyword": "浴室收納架",
-      "name": "多功能浴室收納架",
+      "keyword": "餐具套装",
+      "name": "环保餐具套装（便捷使用）",
+      "price_range": "15-30元",
+      "moq": "50套",
+      "reason": "暑期聚餐需求增加",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E9%A4%90%E5%85%B7%E5%A5%97%E8%A3%85"
+    },
+    {
+      "keyword": "收纳架",
+      "name": "多功能收纳架（空间优化）",
       "price_range": "20-50元",
-      "moq": "30個",
-      "reason": "夏季浴室整理需求上升",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%B4%8D%E6%9E%B6"
-    },
-    {
-      "keyword": "厨房收纳",
-      "name": "廚房多層收納架",
-      "price_range": "15-35元",
-      "moq": "20個",
-      "reason": "家庭聚餐季節，需求上升",
-      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E5%8E%A8%E6%88%BF%E6%94%B6%E7%BA%B3"
+      "moq": "20个",
+      "reason": "整理空间，提升居家品质",
+      "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%94%B6%E7%BA%B3%E6%9E%B6"
     },
     {
       "keyword": "清洁工具",
-      "name": "多功能清洁刷",
+      "name": "多用途清洁工具（必备）",
       "price_range": "5-15元",
-      "moq": "100個",
-      "reason": "夏季家庭大掃除需求",
+      "moq": "100个",
+      "reason": "夏季清洁需求上升",
       "url": "https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=%E6%B8%85%E6%B4%81%E5%B7%A5%E5%85%B7"
     }
   ]
