@@ -1693,7 +1693,7 @@ Object.assign(App, {
   },
 
   renderD2PricingTabHtml() {
-    const PRICING_VER = '2026-07-14-v2';
+    const PRICING_VER = '2026-07-28-v3';
     if (Store.get('ec.d2.pricing.ver') !== PRICING_VER) {
       this.PRICING_SHEETS.forEach(s => Store.set(`ec.d2.pricing.${s}`, []));
       Store.set('ec.d2.pricing.loaded', false);
