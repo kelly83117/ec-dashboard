@@ -340,6 +340,16 @@
   }
   .nav-item.nav-sub .icon { display:none; }
   .nav-item .icon { font-size: 16px; line-height: 1; }
+  /* 側欄未同步圓點：該頁有待同步內容時亮起（琥珀色，比照頁內同步徽章的 --warn）。
+     margin-left:auto 靠右、nav-item 的 align-items:center 已垂直置中，小尺寸不撐開高度。 */
+  .nav-dot {
+    margin-left: auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--warn);
+    flex-shrink: 0;
+  }
   .sidebar-footer {
     padding: 16px;
     border-top: 1px solid var(--sidebar-2);

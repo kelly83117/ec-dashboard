@@ -462,12 +462,12 @@ function escapeHtml(s) {
   }[c]));
 }
 
-function showToast(message, type = '') {
+function showToast(message, type = '', duration = 2200) {
   const t = document.getElementById('toast');
   t.textContent = message;
   t.className = `toast show ${type}`;
   clearTimeout(t._timer);
-  t._timer = setTimeout(() => t.classList.remove('show'), 2200);
+  t._timer = setTimeout(() => t.classList.remove('show'), duration);
 }
 
 /* ============================================================
@@ -713,6 +713,7 @@ const App = {
       if (group) group.classList.add('expanded');
     }
     this.render();
+    this.updateSidebarSyncDots();   // enterApp 不走 navigate()，初次載入也刷一次側欄圓點
     // 4) 最後才切顯示，畫面已經是目標頁的樣子，不會閃 "?" 或首頁
     document.getElementById('view-login').style.display = 'none';
     document.getElementById('view-app').style.display = 'block';
@@ -840,16 +841,39 @@ const App = {
     return reasons;
   },
 
+  // 側欄未同步圓點：直接讀三個記憶體旗標（不呼叫 _checkUnsyncedSources，避免它連帶做 DOM 查詢）。
+  //   每項都防禦性檢查：物件/函式可能還沒定義；讀取失敗一律當「沒有待同步」，例外絕不外拋。
+  //   dashboard（每日營收）刻意不做：它靠 DOM dirty 判斷、跨頁偵測不到。
+  updateSidebarSyncDots() {
+    const setDot = (route, on) => {
+      const btn = document.querySelector(`.nav-item[data-route="${route}"]`);
+      const dot = btn && btn.querySelector('.nav-dot');
+      if (dot) dot.hidden = !on;
+    };
+    let insight = false, profit = false, dp = false;
+    try { insight = !!(window.__insightPendingNotes && window.__insightPendingNotes.size > 0); } catch {}
+    try { profit = typeof window.__profitPendingCount === 'function' && window.__profitPendingCount() > 0; } catch {}
+    try { dp = !!(window.__dpPendingNames && window.__dpPendingNames.size > 0); } catch {}
+    setDot('office-d1-insight', insight);
+    setDot('office-d1-profit', profit);
+    setDot('office-d1', dp);
+  },
+
   navigate(route) {
     if (!route) return;
     // 切換分頁前先檢查是否有未同步內容
     if (this.route && this.route !== route) {
       const reasons = this._checkUnsyncedSources();
       if (reasons.length > 0) {
-        const msg = '⚠️ 你還有未同步到雲端的內容：\n\n'
-          + reasons.map(r => '• ' + r).join('\n')
-          + '\n\n請先按下對應頁面的「☁ 同步雲端」按鈕推上去，老闆和同事才看得到。\n\n仍要切換頁面嗎？（你目前打的內容不會消失，但只存在這台電腦上）';
-        if (!confirm(msg)) return;
+        // 非阻斷提醒：不再用 confirm 擋切頁（老闆抱怨「不按就不能做別的事」），改用 toast 且照常切頁。
+        //   60 秒節流：同一提醒 60 秒內只跳一次，避免每次切頁洗版。時間戳只放記憶體（this），不持久化。
+        //   詳細筆數仍在兩顆 ☁ 同步按鈕的琥珀色徽章上，這裡只列來源名稱、不帶括號裡的數量。
+        const nowTs = Date.now();
+        if (nowTs - (this._syncNagAt || 0) >= 60000) {
+          this._syncNagAt = nowTs;
+          const names = reasons.map(r => r.split('（')[0]).join('、');
+          showToast(`⚠️ 有未同步內容：${names} — 記得按 ☁ 同步雲端`, 'info', 6000);
+        }
       }
     }
     this.route = route;
@@ -859,6 +883,7 @@ const App = {
     document.querySelectorAll('.nav-item').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.route === route);
     });
+    this.updateSidebarSyncDots();
     // 若進入到 office-d1 系列任一頁，自動展開行銷子項
     if (route.startsWith('office-d1')) {
       const parent = document.querySelector('[data-toggle-group="d1"]');
