@@ -161,11 +161,11 @@ try {
           Object.assign(Store._profitMem, incoming);
           if (changedShops.size > 0) {
             console.log('[profits collection] 收到更新，影響賣場：', [...changedShops]);
+            // 只 dispatch profitDataReady（精準更新），不呼叫 App.render()（全頁重繪）——比照上面 app/profit 訂閱的做法。
+            //   profitDataReady 的監聽者已完整重繪受影響的蝦皮賣場（onMonthChange/_applyLatestPeriod + renderSummary + 修 tab），足夠。
+            //   ⚠ 不要加回 App.render()：它會 viewOffice 重建整個淨利表 HTML，把使用者當前在 MOMO/酷澎 的選擇清掉、彈回蝦皮預設；
+            //   快照頻繁時（多人同步）會不斷把人踢出 MOMO/酷澎（2026-07-28 實際發生）。兩條訂閱都不 render 是刻意一致，不是漏改。
             window.dispatchEvent(new CustomEvent('profitDataReady', {detail:{changedShops:[...changedShops]}}));
-            const _justSaved = (window._shopJustSaved && (Date.now() - window._shopJustSaved < 5000));
-            if (!_justSaved && window.App && App.currentUser && typeof App.render === 'function') {
-              try { App.render(); } catch {}
-            }
           }
         }, err => { console.error('[profits collection subscribe 失敗]', err); });
       } catch (e) { console.warn('profits collection subscribe failed', e); }

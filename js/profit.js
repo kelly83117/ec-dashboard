@@ -753,7 +753,12 @@ window.addEventListener('profitDataReady', (e)=>{
     const skipSummary=window._summaryJustSaved&&(Date.now()-window._summaryJustSaved<5000);
     if(typeof renderSummary==='function'&&hasSummaryChange&&!skipSummary) renderSummary();
     // 重載後確保當前賣場 tab 正確：只在 tab 真的跑掉時才修復
-    if(curShop&&curShop!=='總表'){
+    // ⚠ 守衛：這段是「蝦皮專屬」的 tab 修復（curShop 是蝦皮的）。只有當前顯示的是蝦皮容器（content-*）時才做；
+    //   若使用者已切到 MOMO（momo-content-*）/酷澎（coupang-content-*），強制把蝦皮設 active 會搶走 .active、
+    //   把人踢回蝦皮（甲配 pill 還亮、內容卻變蝦皮）。以 active 容器 id 前綴判斷，不列舉平台，加新平台不用改。
+    const _activeEl=document.querySelector('.shop-content.active');
+    const _inShopee=!_activeEl||_activeEl.id.startsWith('content-');
+    if(_inShopee && curShop&&curShop!=='總表'){
       const content=document.getElementById('content-'+curShop);
       if(content&&!content.classList.contains('active')){
         document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
@@ -2910,6 +2915,9 @@ function confirmAdsEdit(){
   const stayOnShop=()=>{
     const target=document.getElementById('content-'+shop);
     if(!target)return;
+    // ⚠ 同 profitDataReady 的守衛：使用者若已切到 MOMO/酷澎（active 容器非 content-*），別把蝦皮硬拉回來
+    const _activeEl=document.querySelector('.shop-content.active');
+    if(_activeEl && !_activeEl.id.startsWith('content-')) return;
     if(target.classList.contains('active')&&curShop===shop)return; // 已正確，不動
     curShop=shop;
     document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
