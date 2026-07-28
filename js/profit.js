@@ -5907,8 +5907,8 @@ function momoRenderRecon(shop){
       <label style="font-size:12px">摘要.pdf：<input type="file" accept=".pdf" onchange="momoReconPick(event,'pdf','${shop}')" style="font-size:11px"></label> ${stat(_momoReconStage.pdfName)}
     </div>
     <button onclick="momoReconGenerate('${shop}')" ${(_momoReconStage.xls&&_momoReconStage.pdf)?'':'disabled'} style="padding:7px 16px;border-radius:7px;border:none;background:${(_momoReconStage.xls&&_momoReconStage.pdf)?'#5b5fcf':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:pointer">▶ 產生對帳（xls+pdf 解析、交叉核對、重現驗收）</button>
-    <div id="momo-recon-report" style="margin-top:12px"></div>
-    ${momoFeeExplainerHTML()}`;
+    ${momoFeeExplainerHTML()}
+    <div id="momo-recon-report" style="margin-top:12px"></div>`;
 }
 function momoReconSetMonth(m){ _momoReconMonth=m; }
 function momoReconPick(e,kind,shop){ const f=(e.target.files||[])[0]; if(f){ _momoReconStage[kind]=f; _momoReconStage[kind+'Name']=f.name; } e.target.value=''; momoRenderRecon(shop); }
@@ -5969,17 +5969,35 @@ function momoReconStore(shop){
   if(typeof showToast==='function') showToast('已存 '+L.month+' 月對帳（甲配+乙配，記得按 ☁ 同步雲端）','success');
 }
 function momoFeeExplainerHTML(){
-  return `<div style="margin-top:16px;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12px;line-height:1.8;color:#374151">
-    <div style="font-weight:700;margin-bottom:6px">💡 費用組成說明（數字怎麼來的）</div>
-    <b>營收</b>：未稅進價 × 對帳數量（MOMO 供應商模式，<u>不是售價</u>，價差不是我們的錢）。<br>
-    <b>費用（對帳單 E，約佔費率基數 25.9%，各項÷1.05 轉未稅）</b>：<br>
-    　• 比例費用 6.8%（銷售獎勵金3% + 活動贊助金3% + 平台服務費0.5% + 行銷贊助金0.3%）<br>
-    　• 物流（第三方 + 超商取貨 + 寄倉分攤運費）<br>
-    　• 寄倉倉租費(EC)、耗材/派工/運費、分攤包裝材料費（月總額按比例攤，估算）<br>
-    　• 遲延罰款（可正可負）、付費報表訂閱（月固定）— 獨立列，不攤進商品<br>
-    <b>成本</b>：商品成本（未稅）。<b>淨利</b> = 未稅營收 − 費用 − 成本。<b>毛利率</b> = 淨利 ÷ 未稅營收。<br>
-    <b>保留款</b>：本期扣、次期還的滾動結構，不是成本。<br>
-    <span style="color:#9a3412">⚠ 半月切分是估算（月權威值按 C1105 銷量比例拆）；未對帳的月份顯示 C1105 暫估值。</span></div>`;
+  const rows=[
+    ['銷售獎勵金','3%','比例'],
+    ['活動贊助金','3%','比例'],
+    ['平台服務費','0.5%','比例'],
+    ['行銷贊助金','0.3%','比例'],
+    ['物流-第三方','對帳單','分攤'],
+    ['物流-超商','對帳單','分攤'],
+    ['寄倉分攤運費','對帳單','分攤'],
+    ['寄倉倉租費','對帳單','估算'],
+    ['分攤包裝材料費','對帳單','估算'],
+    ['耗材/派工/運費','對帳單','估算'],
+    ['遲延罰款','對帳單','不分攤'],
+    ['付費報表訂閱','對帳單','不分攤'],
+  ];
+  const tone={'比例':'#2563eb','分攤':'#059669','估算':'#d97706','不分攤':'#9ca3af'};
+  const tr=rows.map(([a,b,c])=>`<tr style="border-top:1px solid #f3f4f6"><td style="padding:4px 10px">${a}</td><td style="padding:4px 10px;text-align:right;color:#374151">${b}</td><td style="padding:4px 10px;color:${tone[c]||'#374151'};font-weight:600">${c}</td></tr>`).join('');
+  return `<div style="margin-top:14px;max-width:440px">
+    <table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      <thead><tr style="background:#f9fafb;color:#6b7280;font-size:11px">
+        <th style="padding:6px 10px;text-align:left;font-weight:600">項目</th>
+        <th style="padding:6px 10px;text-align:right;font-weight:600">費率/來源</th>
+        <th style="padding:6px 10px;text-align:left;font-weight:600">處理</th></tr></thead>
+      <tbody>${tr}</tbody>
+    </table>
+    <div style="margin-top:8px;font-size:12px;color:#374151;line-height:2">
+      營收＝未稅進價 × 對帳數量<br>
+      淨利＝營收 − 費用 − 成本
+    </div>
+  </div>`;
 }
 
 // ── §3 期別工具 ──
