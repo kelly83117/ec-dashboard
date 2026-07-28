@@ -5786,6 +5786,42 @@ function momoTrimBackupAndApply(shop){
   momoTrimPreview(shop);
 }
 
+/* ═══════════════ 階段二：對帳單（月權威）解析 + 營收側 ═══════════════
+   對帳單「訂單貨款」分頁 → 逐SKU（品號層，單品彙總）。依「賣出方式」分通路：一般販售→甲配、寄倉販售→乙配。
+   營收=對帳金額(未稅) 為 SKU 月權威值（已 net 客退）；半月拆分才估算（用 C1105 revUntaxSum 比例）。 */
+function momoParseReconcile(rows){
+  let h=-1; for(let i=0;i<Math.min(rows.length,30);i++){ if((rows[i]||[]).map(c=>String(c).trim()).includes('品號')){ h=i; break; } }
+  if(h<0) throw new Error('對帳單：找不到「品號」表頭（要「訂單貨款」分頁，不是摘要頁）');
+  const hd=(rows[h]||[]).map(c=>String(c).trim()); const ix=n=>hd.indexOf(n);
+  const I={sku:ix('品號'),sell:ix('賣出方式'),rq:ix('對帳數量'),rev:ix('對帳金額(未稅)'),tx:ix('對帳稅額'),retQ:ix('客退數量'),retA:ix('客退金額'),holdQ:ix('保留數量'),holdA:ix('保留金額'),tax:ix('應稅')};
+  if(I.sku<0||I.rev<0||I.sell<0) throw new Error('對帳單：缺必要欄（需要 品號 / 賣出方式 / 對帳金額(未稅)）');
+  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
+  const byShop={甲配:{},乙配:{}}, unknownSell=[];
+  for(let i=h+1;i<rows.length;i++){ const r=rows[i]; if(!r) continue; const sku=String(r[I.sku]||'').trim(); if(!sku) continue;
+    const sell=String(r[I.sell]||'').trim();
+    const shop= sell==='一般販售'?'甲配' : sell==='寄倉販售'?'乙配' : null;
+    if(!shop){ if(unknownSell.length<20) unknownSell.push({sku,sell}); continue; }
+    const b=byShop[shop][sku]=byShop[shop][sku]||{reconQty:0,revUntax:0,tax:0,retQty:0,retAmt:0,holdQty:0,holdAmt:0,taxable:null};
+    b.reconQty+=num(r[I.rq]); b.revUntax+=num(r[I.rev]); if(I.tx>=0)b.tax+=num(r[I.tx]);
+    if(I.retQ>=0)b.retQty+=num(r[I.retQ]); if(I.retA>=0)b.retAmt+=num(r[I.retA]);
+    if(I.holdQ>=0)b.holdQty+=num(r[I.holdQ]); if(I.holdA>=0)b.holdAmt+=num(r[I.holdA]);
+    if(b.taxable===null&&I.tax>=0) b.taxable=String(r[I.tax]||'').trim();
+  }
+  // 彙總各通路 A（未稅營收）供驗收
+  const shopTotal=s=>Object.values(byShop[s]).reduce((a,x)=>a+x.revUntax,0);
+  return {byShop, unknownSell, meta:{revUntax:{甲配:Math.round(shopTotal('甲配')),乙配:Math.round(shopTotal('乙配'))}}};
+}
+// SKU 層月營收（對帳單權威、精確）→ 拆到半月期別（只這步估算，用 C1105 該 SKU 的 revUntaxSum 比例）。
+//   c1105RevByPeriod: {period: revUntaxSum}（該 SKU 該月各期別 gross）。total=0（對帳單有此 SKU 但 C1105 該月沒有）→ 回空，
+//   邊界 a（拆不出半月）由上層處理：整月列、標「無法拆半月」，不靜默丟。
+function momoSplitRevenueToPeriods(monthRevUntax, c1105RevByPeriod){
+  const keys=Object.keys(c1105RevByPeriod||{});
+  const total=keys.reduce((s,p)=>s+(c1105RevByPeriod[p]||0),0);
+  const out={};
+  if(total>0) keys.forEach(p=>{ out[p]=monthRevUntax*(c1105RevByPeriod[p]/total); });
+  return {byPeriod:out, splittable:total>0};
+}
+
 // ── §3 期別工具 ──
 function momoAllPeriods(shop){
   const set=new Set();
@@ -8019,6 +8055,7 @@ Object.assign(window, {
   momoRentSubmit,momoRentDelete,momoRentSyncBtn,
   momoRebuildPick,momoRebuildRemove,momoRebuildGenerate,momoRebuildDownloadReport,momoRebuildConfirm,momoTrimPreview,momoTrimBackupAndApply,
   momoRebuildDryRun,momoRebuildApply,momoTrimHistoryDryRun,momoTrimHistoryApply,
+  momoParseReconcile,momoSplitRevenueToPeriods,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
