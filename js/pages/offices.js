@@ -1688,7 +1688,8 @@ Object.assign(App, {
     if (/月銷量|^進貨$|^數量$|^箱數$|^重量$/.test(col)) return 'count';
     if (col.includes('網站') || col.includes('連結')) return 'link';
     // 人民幣欄位：原始成本、陸內運費、陸>台運費
-    if (col.includes('原始成本') || col.includes('陸〉陸') || col.includes('陸>陸') || col.includes('陸>台')) return 'rmb';
+    if (col.includes('原始成本') || col.includes('陸〉陸') || col.includes('陸>陸')) return 'rmb';
+    if (col.includes('陸>台')) return 'text'; // 重量(kg)，非金額
     if (['成本','售價','毛利','利潤','金額','入帳','稅金','廣告','運費','手續費','服務費','投入','報關','平均'].some(k => col.includes(k)) && !col.includes('ROAS')) return 'money';
     return 'text';
   },
