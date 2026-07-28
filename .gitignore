@@ -14,3 +14,6 @@ _backup_*.json
 # 系統垃圾
 Thumbs.db
 .DS_Store
+
+# 個人權限設定，不進 repo
+.claude/settings.local.json
