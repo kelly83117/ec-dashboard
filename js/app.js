@@ -713,6 +713,7 @@ const App = {
       if (group) group.classList.add('expanded');
     }
     this.render();
+    this.updateSidebarSyncDots();   // enterApp 不走 navigate()，初次載入也刷一次側欄圓點
     // 4) 最後才切顯示，畫面已經是目標頁的樣子，不會閃 "?" 或首頁
     document.getElementById('view-login').style.display = 'none';
     document.getElementById('view-app').style.display = 'block';
@@ -840,6 +841,24 @@ const App = {
     return reasons;
   },
 
+  // 側欄未同步圓點：直接讀三個記憶體旗標（不呼叫 _checkUnsyncedSources，避免它連帶做 DOM 查詢）。
+  //   每項都防禦性檢查：物件/函式可能還沒定義；讀取失敗一律當「沒有待同步」，例外絕不外拋。
+  //   dashboard（每日營收）刻意不做：它靠 DOM dirty 判斷、跨頁偵測不到。
+  updateSidebarSyncDots() {
+    const setDot = (route, on) => {
+      const btn = document.querySelector(`.nav-item[data-route="${route}"]`);
+      const dot = btn && btn.querySelector('.nav-dot');
+      if (dot) dot.hidden = !on;
+    };
+    let insight = false, profit = false, dp = false;
+    try { insight = !!(window.__insightPendingNotes && window.__insightPendingNotes.size > 0); } catch {}
+    try { profit = typeof window.__profitPendingCount === 'function' && window.__profitPendingCount() > 0; } catch {}
+    try { dp = !!(window.__dpPendingNames && window.__dpPendingNames.size > 0); } catch {}
+    setDot('office-d1-insight', insight);
+    setDot('office-d1-profit', profit);
+    setDot('office-d1', dp);
+  },
+
   navigate(route) {
     if (!route) return;
     // 切換分頁前先檢查是否有未同步內容
@@ -864,6 +883,7 @@ const App = {
     document.querySelectorAll('.nav-item').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.route === route);
     });
+    this.updateSidebarSyncDots();
     // 若進入到 office-d1 系列任一頁，自動展開行銷子項
     if (route.startsWith('office-d1')) {
       const parent = document.querySelector('[data-toggle-group="d1"]');
