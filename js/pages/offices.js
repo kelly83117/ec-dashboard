@@ -1682,6 +1682,78 @@ Object.assign(App, {
   // ── 訂價表 ──────────────────────────────────────────────
   PRICING_SHEETS_ORDER: ['訂價','導流品','Victor','inna','Vivian','官網','Doris','貨櫃商品成本','特拉拉','FB訂價表','運費試算表'],
 
+  // 各工作表費率常數（依 Excel row2 常數欄）
+  PRICING_SHEET_PARAMS: {
+    '訂價':    { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0.05 },
+    '導流品':  { rmb:4.5, ship:9, tax:0.05, ads:0,    fixed:0, txFee:0.08, promo:0.06, ret:0.02, incTax:0.05 },
+    'Victor':  { rmb:4.5, ship:9, tax:0,    ads:0.10, fixed:9, txFee:0.08, promo:0.07, ret:0.02, incTax:0.05 },
+    'inna':    { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0.05 },
+    'Vivian':  { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0.05 },
+    '官網':    { rmb:4.5, ship:9, tax:0.07, ads:0,    fixed:9, txFee:0.08, promo:0,    ret:0,    incTax:0.05 },
+    'Doris':   { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.07, ret:0.02, incTax:0.05 },
+    '特拉拉':  { rmb:4.5, ship:9, tax:0,    ads:0.10, fixed:9, txFee:0.06, promo:0.03, ret:0.02, incTax:0.05 },
+    'FB訂價表':{ rmb:4.5, ship:9, tax:0,    ads:0.35, fixed:9, txFee:0,    promo:0,    ret:0.02, incTax:0 },
+  },
+
+  _prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume) {
+    const p = this.PRICING_SHEET_PARAMS[sheet] || this.PRICING_SHEET_PARAMS['訂價'];
+    const r2 = v => Math.round(v * 100) / 100;
+    const 陸台運費NT = r2(weight * p.ship);
+    const 實際成本 = r2((origCost + landFreight) * p.rmb + 陸台運費NT);
+    const 稅金 = r2(price * p.tax);
+    const 廣告 = r2(price * p.ads);
+    const 固定 = p.fixed;
+    const 成交 = r2(price * p.txFee);
+    const 活動 = r2(price * p.promo);
+    const 退貨 = r2(price * p.ret);
+    const 蝦皮總成本 = r2(稅金 + 廣告 + 固定 + 成交 + 活動 + 退貨);
+    const 入帳 = r2(price - 蝦皮總成本);
+    const 銷項稅金 = r2(入帳 * p.incTax);
+    const 實際毛利 = r2(入帳 - 實際成本 - 銷項稅金);
+    const 獲利百分比 = price > 0 ? r2(實際毛利 / price * 10000) / 10000 : 0;
+    const 成本率 = price > 0 ? r2(實際成本 / price * 10000) / 10000 : 0;
+    const 淨利潤 = volume ? r2(實際毛利 * volume) : null;
+    const 預估投入 = volume ? r2(volume * price) : null;
+    return { 陸台運費NT, 實際成本, 稅金, 廣告, 固定, 成交, 活動, 退貨, 蝦皮總成本, 入帳, 銷項稅金, 實際毛利, 獲利百分比, 成本率, 淨利潤, 預估投入 };
+  },
+
+  _prBuildRow(sheet, inputs) {
+    const { logistics, name, origCost, landFreight, weight, price, roas, volume, store, website, note } = inputs;
+    const c = this._prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume);
+    const existingRows = window.__pricingData?.[sheet] || [];
+    const cols = existingRows.length > 0 ? Object.keys(existingRows[0]) : [];
+    const row = { __custom: true };
+    for (const col of cols) {
+      if (col === '集運') row[col] = logistics || '';
+      else if (col === '產品名稱' || col === '試算名稱') row[col] = name;
+      else if (col === '原始成本') row[col] = origCost;
+      else if (col.includes('陸〉陸') || col.includes('陸>陸')) row[col] = landFreight;
+      else if (col.includes('陸>台')) row[col] = weight;
+      else if (col === '實際成本' || col === '商品成本') row[col] = c.實際成本;
+      else if (col === '售價') row[col] = price;
+      else if (col.includes('蝦皮') && col.includes('成本')) row[col] = c.蝦皮總成本;
+      else if (col.startsWith('稅金') || col === '稅金') row[col] = c.稅金;
+      else if (col.includes('廣告') && !col.includes('ROAS')) row[col] = c.廣告;
+      else if (col.includes('運費+包材')) row[col] = c.固定;
+      else if (col.includes('成交手續費')) row[col] = c.成交;
+      else if (col.includes('活動服務費')) row[col] = c.活動;
+      else if (col === '退貨率') row[col] = c.退貨;
+      else if (col.includes('入帳金額')) row[col] = c.入帳;
+      else if (col.includes('銷項稅金')) row[col] = c.銷項稅金;
+      else if (col.includes('實際毛利')) row[col] = c.實際毛利;
+      else if (col.includes('獲利百分比') || col === 'ROI') row[col] = c.獲利百分比;
+      else if (col.includes('以下)') || col === '成本') row[col] = c.成本率;
+      else if (col.includes('ROAS')) row[col] = roas || null;
+      else if (col === '月銷量' || col === '進貨') row[col] = volume || null;
+      else if (col.includes('淨利潤')) row[col] = c.淨利潤;
+      else if (col.includes('預估投入')) row[col] = c.預估投入;
+      else if (col === '網站') row[col] = website || '';
+      else if (col === '賣場') row[col] = store || '';
+      else if (col === '備註' || col === '行銷方法') row[col] = note || '';
+    }
+    return row;
+  },
+
   _prColType(col) {
     if (col.includes('ROAS')) return 'roas';
     if (col.includes('百分比') || col === 'ROI' || col.includes('退貨率') || col.includes('以下)')) return 'pct';
@@ -1742,6 +1814,70 @@ Object.assign(App, {
     return core.length >= 2 ? core : cols.slice(0, 5);
   },
 
+  _prAddFormHtml(sheet) {
+    const p = this.PRICING_SHEET_PARAMS[sheet] || this.PRICING_SHEET_PARAMS['訂價'];
+    const inp = (id, label, type='number', placeholder='', unit='') =>
+      `<label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#6b7280;font-weight:600">
+        ${label}${unit?`<span style="color:#9ca3af;font-weight:400;font-size:10px">${unit}</span>`:''}
+        <input id="${id}" type="${type}" placeholder="${placeholder}"
+          style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;text-align:${type==='number'?'right':'left'}">
+      </label>`;
+    const calcRow = (label, id, style='') =>
+      `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #f3f4f6">
+        <span style="font-size:11px;color:#6b7280">${label}</span>
+        <span id="${id}" style="font-size:13px;font-weight:600${style?';'+style:''}">&nbsp;</span>
+      </div>`;
+    return `
+    <div id="pr-add-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:2px solid #059669">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#059669;margin-bottom:10px">✏️ 輸入欄位</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            ${inp('pf-name','產品名稱','text','請輸入商品名稱')}
+            ${inp('pf-logistics','集運','text','普海/特海/空運')}
+            ${inp('pf-orig','原始成本','number','0','¥ 人民幣')}
+            ${inp('pf-land','陸〉陸運費','number','0','¥ 人民幣')}
+            ${inp('pf-weight','單品重量','number','0','kg')}
+            ${inp('pf-price','售價','number','0','NT$')}
+            ${inp('pf-roas','廣告ROAS','number','','選填')}
+            ${inp('pf-volume','月銷量','number','','選填')}
+            ${inp('pf-store','賣場','text','蝦皮/官網')}
+            ${inp('pf-note','備註','text','')}
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button id="pr-form-save" style="padding:8px 20px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+            <button id="pr-form-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#1a7a6e;margin-bottom:10px">🔢 自動計算（費率：匯率${p.rmb}、陸>台運費/kg ${p.ship}元）</div>
+          <div style="background:#fff;border:1px solid #d1fae5;border-radius:8px;padding:10px 14px">
+            ${calcRow('陸>台運費（重量×'+p.ship+'）','pc-ship')}
+            ${calcRow('實際成本（台幣）','pc-cost','color:#1a7a6e')}
+            <div style="height:6px"></div>
+            ${p.tax?calcRow('稅金（'+p.tax*100+'%）','pc-tax'):''}
+            ${p.ads?calcRow('蝦皮廣告（'+p.ads*100+'%）','pc-ads'):''}
+            ${p.fixed?calcRow('運費+包材+開發票（固定'+p.fixed+'元）','pc-fixed'):''}
+            ${p.txFee?calcRow('成交手續費（'+p.txFee*100+'%）','pc-tx'):''}
+            ${p.promo?calcRow('活動服務費（'+p.promo*100+'%）','pc-promo'):''}
+            ${p.ret?calcRow('退貨率（'+p.ret*100+'%）','pc-ret'):''}
+            ${calcRow('蝦皮總成本','pc-platform')}
+            ${calcRow('入帳金額','pc-income')}
+            ${p.incTax?calcRow('銷項稅金（'+p.incTax*100+'%）','pc-inctax'):''}
+            <div style="height:6px"></div>
+            ${calcRow('實際毛利','pc-profit')}
+            ${calcRow('獲利百分比','pc-pct')}
+            ${calcRow('成本比例','pc-costratio')}
+            <div id="pc-volume-row" style="display:none">
+              ${calcRow('淨利潤（毛利×月銷量）','pc-netloss')}
+              ${calcRow('預估投入金額','pc-invest')}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  },
+
   renderD2PricingTabHtml() {
     const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
     const q = Store.get('ec.d2.pricing.q', '');
@@ -1777,13 +1913,14 @@ Object.assign(App, {
     const SHOW = 60;
     const display = filteredWithIdx.slice(0, SHOW);
 
-    const theadHtml = coreCols.map(c => `<th style="white-space:nowrap;font-size:12px;padding:8px 12px;font-weight:600">${escapeHtml(c)}</th>`).join('') + '<th style="width:28px"></th>';
+    const theadHtml = coreCols.map(c => `<th style="white-space:nowrap;font-size:12px;padding:8px 12px;font-weight:600">${escapeHtml(c)}</th>`).join('') + '<th style="width:32px"></th>';
 
-    const tbodyHtml = display.map(({ r, i }) =>
-      `<tr class="pr-row" data-i="${i}" style="border-bottom:1px solid #f3f4f6;cursor:pointer">` +
-      coreCols.map((c, ci) => `<td style="font-size:13px;padding:8px 12px;${c==='產品名稱'||c==='試算名稱'?'text-align:left':'text-align:right'}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
-      `<td style="text-align:center;color:#d1d5db;font-size:11px;padding:8px 4px">›</td></tr>`
-    ).join('');
+    const tbodyHtml = display.map(({ r, i }) => {
+      const isCustom = !!r.__custom;
+      return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#f0fdf4':''}">` +
+        coreCols.map((c, ci) => `<td style="font-size:13px;padding:8px 12px;${c==='產品名稱'||c==='試算名稱'?'text-align:left':'text-align:right'}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+        `<td style="text-align:center;padding:8px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
+    }).join('');
 
     const moreHtml = filteredWithIdx.length > SHOW
       ? `<div style="padding:12px;text-align:center;color:#6b7280;font-size:13px;background:#f9fafb;border-top:1px solid #f3f4f6">
@@ -1793,10 +1930,14 @@ Object.assign(App, {
     return `<div class="table-card">
       <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
         <div><h3>💹 訂價表</h3><p>蝦皮 / FB 商品訂價與利潤分析</p></div>
-        <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:180px;font-family:inherit">
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:160px;font-family:inherit">
+          <button id="pr-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">＋ 新增</button>
+        </div>
       </div>
       <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">${sheetTabs}</div>
-      <div style="padding:6px 16px;font-size:11px;color:#9ca3af;border-bottom:1px solid #f3f4f6">${activeSheet} · ${filteredWithIdx.length} 筆 · 點列展開全部欄位</div>
+      ${this._prAddFormHtml(activeSheet)}
+      <div style="padding:6px 16px;font-size:11px;color:#9ca3af;border-bottom:1px solid #f3f4f6">${activeSheet} · ${filteredWithIdx.length} 筆 · 點列展開全部欄位 · 綠底為手動新增</div>
       <div class="table-wrap"><table>
         <thead><tr>${theadHtml}</tr></thead>
         <tbody id="pr-tbody">${tbodyHtml}</tbody>
@@ -1894,6 +2035,132 @@ Object.assign(App, {
         `<td style="text-align:center;color:#d1d5db;font-size:11px;padding:8px 4px">›</td></tr>`
       ).join('');
       document.getElementById('pr-show-all')?.closest('div')?.remove();
+    });
+
+    // ── 新增表單 ──────────────────────────────────────────
+    // 載入 JSON 後合併 localStorage 自訂列
+    const _mergeCustomRows = () => {
+      if (!window.__pricingData) return;
+      self.PRICING_SHEETS_ORDER.forEach(sh => {
+        const custom = Store.get(`ec.d2.pricing.custom.${sh}`, []);
+        if (!custom.length) return;
+        const existing = window.__pricingData[sh] || [];
+        // 移除已存在的（避免重複），再 unshift
+        const ids = new Set(custom.map(r => r.__id));
+        window.__pricingData[sh] = [
+          ...custom,
+          ...existing.filter(r => !ids.has(r.__id))
+        ];
+      });
+    };
+
+    // 若已有 pricingData（頁面切換回來），直接合併
+    if (window.__pricingData) _mergeCustomRows();
+
+    // 攔截 fetch 完成後的合併（覆寫 pr-load-btn 的 handler）
+    document.getElementById('pr-load-btn')?.addEventListener('click', async () => {
+      // 原有 handler 已在上面綁過，這裡只需在 render 之後合併
+      // 但無法串接，所以改成：短暫輪詢 __pricingData 出現後合併
+      const wait = setInterval(() => {
+        if (window.__pricingData) { clearInterval(wait); _mergeCustomRows(); }
+      }, 100);
+      setTimeout(() => clearInterval(wait), 5000);
+    }, { once: true });
+
+    // 新增按鈕 toggle
+    document.getElementById('pr-add-btn')?.addEventListener('click', () => {
+      const form = document.getElementById('pr-add-form');
+      if (!form) return;
+      form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    });
+
+    // 取消
+    document.getElementById('pr-form-cancel')?.addEventListener('click', () => {
+      const form = document.getElementById('pr-add-form');
+      if (form) form.style.display = 'none';
+    });
+
+    // 即時試算
+    const _updatePreview = () => {
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const origCost  = parseFloat(document.getElementById('pf-orig')?.value)   || 0;
+      const landFreight = parseFloat(document.getElementById('pf-land')?.value) || 0;
+      const weight    = parseFloat(document.getElementById('pf-weight')?.value) || 0;
+      const price     = parseFloat(document.getElementById('pf-price')?.value)  || 0;
+      const roas      = parseFloat(document.getElementById('pf-roas')?.value)   || 0;
+      const volume    = parseFloat(document.getElementById('pf-volume')?.value) || 0;
+      const c = self._prCalcAll(activeSheet, origCost, landFreight, weight, price, roas, volume);
+      const nt = v => v != null ? 'NT$' + v.toLocaleString('zh-TW', {minimumFractionDigits:0}) : '—';
+      const pct = v => {
+        const p = Math.round(v * 10000) / 100;
+        const col = p >= 20 ? '#059669' : p >= 0 ? '#f59e0b' : '#dc2626';
+        return `<span style="color:${col};font-weight:700">${p.toFixed(1)}%</span>`;
+      };
+      const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+      set('pc-ship',     nt(c.陸台運費NT));
+      set('pc-cost',     nt(c.實際成本));
+      set('pc-tax',      nt(c.稅金));
+      set('pc-ads',      nt(c.廣告));
+      set('pc-fixed',    nt(c.固定));
+      set('pc-tx',       nt(c.成交));
+      set('pc-promo',    nt(c.活動));
+      set('pc-ret',      nt(c.退貨));
+      set('pc-platform', nt(c.蝦皮總成本));
+      set('pc-income',   nt(c.入帳));
+      set('pc-inctax',   nt(c.銷項稅金));
+      set('pc-profit',   `<strong>${nt(c.實際毛利)}</strong>`);
+      set('pc-pct',      price > 0 ? pct(c.獲利百分比) : '—');
+      set('pc-costratio',price > 0 ? pct(c.成本率)     : '—');
+      set('pc-netloss',  c.淨利潤  != null ? nt(c.淨利潤)  : '—');
+      set('pc-invest',   c.預估投入 != null ? nt(c.預估投入) : '—');
+    };
+
+    ['pf-orig','pf-land','pf-weight','pf-price','pf-roas','pf-volume'].forEach(id => {
+      document.getElementById(id)?.addEventListener('input', _updatePreview);
+    });
+
+    // 儲存
+    document.getElementById('pr-form-save')?.addEventListener('click', () => {
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const get = id => document.getElementById(id)?.value.trim() || '';
+      const inputs = {
+        logistics:   get('pf-logistics'),
+        name:        get('pf-name'),
+        origCost:    parseFloat(get('pf-orig'))   || 0,
+        landFreight: parseFloat(get('pf-land'))   || 0,
+        weight:      parseFloat(get('pf-weight')) || 0,
+        price:       parseFloat(get('pf-price'))  || 0,
+        roas:        parseFloat(get('pf-roas'))   || 0,
+        volume:      parseFloat(get('pf-volume')) || 0,
+        store:       get('pf-store'),
+        note:        get('pf-note'),
+      };
+      if (!inputs.name) { alert('請輸入產品名稱'); return; }
+      const newRow = self._prBuildRow(activeSheet, inputs);
+      if (!window.__pricingData) window.__pricingData = {};
+      if (!window.__pricingData[activeSheet]) window.__pricingData[activeSheet] = [];
+      window.__pricingData[activeSheet].unshift(newRow);
+      // 存 localStorage
+      const existing = Store.get(`ec.d2.pricing.custom.${activeSheet}`, []);
+      Store.set(`ec.d2.pricing.custom.${activeSheet}`, [newRow, ...existing]);
+      self.render();
+    });
+
+    // 刪除自訂列（事件委派）
+    document.getElementById('pr-tbody')?.addEventListener('click', e => {
+      const delBtn = e.target.closest('.pr-del-custom');
+      if (!delBtn) return;
+      e.stopPropagation();
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const id = delBtn.dataset.id;
+      // 從記憶體移除
+      if (window.__pricingData?.[activeSheet]) {
+        window.__pricingData[activeSheet] = window.__pricingData[activeSheet].filter(r => String(r.__id) !== String(id));
+      }
+      // 從 localStorage 移除
+      const saved = Store.get(`ec.d2.pricing.custom.${activeSheet}`, []);
+      Store.set(`ec.d2.pricing.custom.${activeSheet}`, saved.filter(r => String(r.__id) !== String(id)));
+      self.render();
     });
   },
 
