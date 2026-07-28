@@ -21,7 +21,7 @@ Object.assign(App, {
     const INSIGHT_DEFAULT_THRESHOLDS = window.INSIGHT_DEFAULT_THRESHOLDS;
 
     // ============== 賣場切換 ==============
-    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅', '維克'];
     // 還原上次選的賣場（每台電腦記憶）
     if (!this.filter.insightShop) {
       try {
@@ -731,7 +731,7 @@ Object.assign(App, {
       reader.onload = (e) => {
         try {
           const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-          const SHOPS = ['玩樂', '好麻吉', '森之旅'];
+          const SHOPS = ['玩樂', '好麻吉', '森之旅', '維克'];
 
           // 把一個分頁解析成 byCode map（各賣場 header 不一致，用 alias 比對）
           const parseSheet = (sheetName) => {
@@ -787,7 +787,7 @@ Object.assign(App, {
           }
 
           if (Object.keys(shops).length === 0) {
-            throw new Error(`找不到任何賣場分頁（預期：玩樂 / 好麻吉 / 森之旅）。實際分頁：${wb.SheetNames.join(', ')}`);
+            throw new Error(`找不到任何通路分頁（預期：玩樂 / 好麻吉 / 森之旅 / 維克）。實際分頁：${wb.SheetNames.join(', ')}`);
           }
           resolve({ shops, matched, allSheets: wb.SheetNames });
         } catch (err) { reject(err); }
@@ -893,7 +893,7 @@ Object.assign(App, {
   },
   bindInsightTab() {
     // 確定當前賣場
-    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅', '維克'];
     const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
       ? this.filter.insightShop : '玩樂';
     const sKey = (type) => `ec.insight_${currentShop}_${type}`;
@@ -1177,7 +1177,7 @@ Object.assign(App, {
         e.stopPropagation();
 
         // 重新讀當前賣場（this.filter.insightShop 即時的值）
-        const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+        const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅', '維克'];
         const curShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
           ? this.filter.insightShop : '玩樂';
         const k2 = (type) => `ec.insight_${curShop}_${type}`;
@@ -1895,7 +1895,7 @@ Object.assign(App, {
     }
   },
   openInsightNoteModal(code) {
-    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅', '維克'];
     const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
       ? this.filter.insightShop : '玩樂';
     const notesKey = `ec.insight_${currentShop}_notes`;
@@ -2244,7 +2244,7 @@ Object.assign(App, {
   },
   exportInsightExcel() {
     if (typeof XLSX === 'undefined') { showToast('XLSX 函式庫未載入', 'error'); return; }
-    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅'];
+    const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅', '維克'];
     const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
       ? this.filter.insightShop : '玩樂';
     const sKey = (type) => `ec.insight_${currentShop}_${type}`;
