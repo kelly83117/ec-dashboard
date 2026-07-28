@@ -1720,80 +1720,23 @@ Object.assign(App, {
     return `<span>${escapeHtml(String(val))}</span>`;
   },
 
-  // 找欄位群組的起訖 index（依欄名關鍵字）
-  _prGroups(cols) {
-    const g1s = cols.findIndex(c => (c.includes('蝦皮') && c.includes('成本')) || c === '蝦皮 總成本');
-    const g1e = cols.findIndex(c => c.includes('實際毛利'));
-    const g2s = cols.findIndex(c => c.includes('ROAS'));
-    const g2e = cols.findIndex(c => c.includes('預估投入'));
-    return {
-      g1: (g1s >= 0 && g1e >= g1s) ? [g1s, g1e] : null,
-      g2: (g2s >= 0 && g2e >= g2s) ? [g2s, g2e] : null,
-    };
-  },
-
-  // 建立可見欄位清單（含折疊佔位）
-  _prVisItems(cols, exp1, exp2) {
-    const { g1, g2 } = this._prGroups(cols);
-    const inG1 = i => g1 && i >= g1[0] && i <= g1[1];
-    const inG2 = i => g2 && i >= g2[0] && i <= g2[1];
-    const items = [];
-    let i = 0;
-    while (i < cols.length) {
-      if (!exp1 && g1 && i === g1[0]) {
-        items.push({ type: 'fold', g: 1, label: '蝦皮計算欄', count: g1[1]-g1[0]+1 });
-        i = g1[1] + 1;
-      } else if (!exp2 && g2 && i === g2[0]) {
-        items.push({ type: 'fold', g: 2, label: '廣告/銷量欄', count: g2[1]-g2[0]+1 });
-        i = g2[1] + 1;
-      } else if ((!exp1 && inG1(i)) || (!exp2 && inG2(i))) {
-        i++;
-      } else {
-        const isFirstOfG1 = exp1 && g1 && i === g1[0];
-        const isFirstOfG2 = exp2 && g2 && i === g2[0];
-        items.push({ type: 'col', i, col: cols[i], collapseBtn: isFirstOfG1 ? 1 : isFirstOfG2 ? 2 : 0 });
-        i++;
-      }
-    }
-    return items;
-  },
-
-  _prBuildTable(filtered, cols, colTypes, visItems, limit) {
-    const display = limit ? filtered.slice(0, limit) : filtered;
-    const FOLD_TH = `style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;white-space:nowrap;padding:4px 6px"`;
-    const FOLD_BTN = `style="background:none;border:0;cursor:pointer;color:#0284c7;font-size:11px;font-weight:700;padding:0"`;
-    const COLLAPSE_BTN = (g) => `<button class="pr-collapse-grp" data-g="${g}" style="margin-left:4px;background:none;border:0;cursor:pointer;color:#9ca3af;font-size:10px;font-weight:600;padding:0" title="折疊">◀折</button>`;
-
-    const theadHtml = visItems.map(item => {
-      if (item.type === 'fold') {
-        return `<th ${FOLD_TH}><button class="pr-expand-grp" data-g="${item.g}" ${FOLD_BTN}>▶ ${item.label} <span style="opacity:.6">(${item.count}欄)</span></button></th>`;
-      }
-      const collapseBtn = item.collapseBtn ? COLLAPSE_BTN(item.collapseBtn) : '';
-      return `<th style="white-space:nowrap;font-size:11px;padding:6px 8px">${escapeHtml(item.col)}${collapseBtn}</th>`;
-    }).join('');
-
-    const tbodyHtml = display.map(r =>
-      `<tr style="border-bottom:1px solid #f3f4f6">${visItems.map(item => {
-        if (item.type === 'fold') return `<td style="text-align:center;color:#bae6fd;background:#f0f9ff;font-size:13px;letter-spacing:2px">···</td>`;
-        const c = item.col; const ci = item.i;
-        return `<td style="font-size:12px;padding:5px 8px;${c==='產品名稱'?'text-align:left;min-width:120px':'text-align:right'}">${this._prFmt(r[c], colTypes[ci])}</td>`;
-      }).join('')}</tr>`
-    ).join('');
-
-    return { theadHtml, tbodyHtml };
+  // 核心欄位（主表顯示）
+  _prCoreCols(cols) {
+    const EXACT = new Set(['產品名稱','試算名稱','編號','實際成本','商品成本','售價','ROI','賣場','備註','行銷方法','網站']);
+    const CONTAINS = ['獲利百分比'];
+    const core = cols.filter(c => EXACT.has(c) || CONTAINS.some(k => c.includes(k)));
+    return core.length >= 2 ? core : cols.slice(0, 5);
   },
 
   renderD2PricingTabHtml() {
     const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
     const q = Store.get('ec.d2.pricing.q', '');
-    const exp1 = Store.get('ec.d2.pricing.exp1', false);
-    const exp2 = Store.get('ec.d2.pricing.exp2', false);
     const loaded = !!window.__pricingData;
 
     const sheetTabs = this.PRICING_SHEETS_ORDER.map(s => {
       const cnt = loaded ? (window.__pricingData[s] || []).length : 0;
       const active = s === activeSheet;
-      return `<button class="pr-stab" data-s="${s}" style="padding:5px 12px;border-radius:18px;border:1px solid ${active?'#1a7a6e':'#e5e7eb'};background:${active?'#1a7a6e':'#fff'};color:${active?'#fff':'#374151'};font-size:12px;font-weight:${active?'700':'400'};cursor:pointer;white-space:nowrap">${s}${loaded?` <span style="opacity:.7">${cnt}</span>`:''}</button>`;
+      return `<button class="pr-stab" data-s="${s}" style="padding:5px 14px;border-radius:20px;border:1px solid ${active?'#1a7a6e':'#e5e7eb'};background:${active?'#1a7a6e':'#fff'};color:${active?'#fff':'#374151'};font-size:12px;font-weight:${active?'700':'400'};cursor:pointer;white-space:nowrap">${s}${loaded?` <span style="opacity:.6;font-size:11px">${cnt}</span>`:''}</button>`;
     }).join('');
 
     if (!loaded) {
@@ -1809,27 +1752,37 @@ Object.assign(App, {
     }
 
     const sheetData = window.__pricingData[activeSheet] || [];
-    const filtered = q ? sheetData.filter(r => String(r['產品名稱'] || r['試算名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase())) : sheetData;
-    const cols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
-    const colTypes = cols.map(c => this._prColType(c));
-    const SHOW = 60;
-    const visItems = this._prVisItems(cols, exp1, exp2);
-    const { theadHtml, tbodyHtml } = this._prBuildTable(filtered, cols, colTypes, visItems, SHOW);
+    const allCols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
+    const coreCols = this._prCoreCols(allCols);
+    const coreTypes = coreCols.map(c => this._prColType(c));
 
-    const moreHtml = filtered.length > SHOW
+    const filteredWithIdx = q
+      ? sheetData.map((r, i) => ({ r, i })).filter(({ r }) => String(r['產品名稱'] || r['試算名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase()))
+      : sheetData.map((r, i) => ({ r, i }));
+
+    const SHOW = 60;
+    const display = filteredWithIdx.slice(0, SHOW);
+
+    const theadHtml = coreCols.map(c => `<th style="white-space:nowrap;font-size:12px;padding:8px 12px;font-weight:600">${escapeHtml(c)}</th>`).join('') + '<th style="width:28px"></th>';
+
+    const tbodyHtml = display.map(({ r, i }) =>
+      `<tr class="pr-row" data-i="${i}" style="border-bottom:1px solid #f3f4f6;cursor:pointer">` +
+      coreCols.map((c, ci) => `<td style="font-size:13px;padding:8px 12px;${c==='產品名稱'||c==='試算名稱'?'text-align:left':'text-align:right'}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+      `<td style="text-align:center;color:#d1d5db;font-size:11px;padding:8px 4px">›</td></tr>`
+    ).join('');
+
+    const moreHtml = filteredWithIdx.length > SHOW
       ? `<div style="padding:12px;text-align:center;color:#6b7280;font-size:13px;background:#f9fafb;border-top:1px solid #f3f4f6">
-           顯示前 ${SHOW} 筆，共 ${filtered.length} 筆 — <button id="pr-show-all" style="color:#1a7a6e;font-weight:600;background:none;border:0;cursor:pointer">顯示全部 ${filtered.length} 筆</button>
+           顯示前 ${SHOW} 筆，共 ${filteredWithIdx.length} 筆 — <button id="pr-show-all" style="color:#1a7a6e;font-weight:600;background:none;border:0;cursor:pointer">顯示全部</button>
          </div>` : '';
 
     return `<div class="table-card">
       <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
         <div><h3>💹 訂價表</h3><p>蝦皮 / FB 商品訂價與利潤分析</p></div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:180px;font-family:inherit">
-        </div>
+        <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:180px;font-family:inherit">
       </div>
       <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">${sheetTabs}</div>
-      <div style="padding:8px 16px;font-size:12px;color:#6b7280;border-bottom:1px solid #f3f4f6">${activeSheet}：共 ${sheetData.length} 筆，搜尋顯示 ${filtered.length} 筆</div>
+      <div style="padding:6px 16px;font-size:11px;color:#9ca3af;border-bottom:1px solid #f3f4f6">${activeSheet} · ${filteredWithIdx.length} 筆 · 點列展開全部欄位</div>
       <div class="table-wrap"><table>
         <thead><tr>${theadHtml}</tr></thead>
         <tbody id="pr-tbody">${tbodyHtml}</tbody>
@@ -1865,36 +1818,67 @@ Object.assign(App, {
       self.render();
     });
 
-    // 展開折疊欄群
-    document.querySelectorAll('.pr-expand-grp').forEach(btn => {
-      btn.addEventListener('click', () => {
-        Store.set(`ec.d2.pricing.exp${btn.dataset.g}`, true);
-        self.render();
-      });
-    });
-    document.querySelectorAll('.pr-collapse-grp').forEach(btn => {
-      btn.addEventListener('click', () => {
-        Store.set(`ec.d2.pricing.exp${btn.dataset.g}`, false);
-        self.render();
-      });
+    // 點列展開全部欄位（事件委派）
+    document.getElementById('pr-tbody')?.addEventListener('click', e => {
+      const tr = e.target.closest('tr.pr-row');
+      if (!tr) return;
+      const idx = +tr.dataset.i;
+      const detId = `pr-det-${idx}`;
+      const existing = document.getElementById(detId);
+      if (existing) {
+        existing.remove();
+        tr.style.background = '';
+        return;
+      }
+      // 關掉其他展開列
+      document.querySelectorAll('.pr-detail-row').forEach(el => el.remove());
+      document.querySelectorAll('tr.pr-row[style*="background"]').forEach(el => el.style.background = '');
+
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const sheetData = window.__pricingData?.[activeSheet] || [];
+      const r = sheetData[idx];
+      if (!r) return;
+
+      const allCols = Object.keys(r);
+      const allTypes = allCols.map(c => self._prColType(c));
+      const itemsHtml = allCols.map((c, ci) => {
+        const v = r[c];
+        if (v === null || v === undefined) return '';
+        const formatted = self._prFmt(v, allTypes[ci]);
+        return `<div style="min-width:130px;padding:6px 10px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
+          <div style="color:#9ca3af;font-size:10px;margin-bottom:3px">${escapeHtml(c)}</div>
+          <div style="font-size:13px">${formatted}</div>
+        </div>`;
+      }).filter(Boolean).join('');
+
+      const colspan = tr.querySelectorAll('td').length;
+      const detTr = document.createElement('tr');
+      detTr.id = detId;
+      detTr.className = 'pr-detail-row';
+      detTr.innerHTML = `<td colspan="${colspan}" style="padding:12px 14px;background:#f8fafc;border-bottom:2px solid #1a7a6e">
+        <div style="display:flex;flex-wrap:wrap;gap:8px">${itemsHtml}</div>
+      </td>`;
+      tr.after(detTr);
+      tr.style.background = '#f0fdf9';
     });
 
     document.getElementById('pr-show-all')?.addEventListener('click', () => {
       if (!window.__pricingData) return;
       const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
       const q = Store.get('ec.d2.pricing.q', '');
-      const exp1 = Store.get('ec.d2.pricing.exp1', false);
-      const exp2 = Store.get('ec.d2.pricing.exp2', false);
       const sheetData = window.__pricingData[activeSheet] || [];
-      const cols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
-      const colTypes = cols.map(c => self._prColType(c));
-      const visItems = self._prVisItems(cols, exp1, exp2);
-      const filtered = q ? sheetData.filter(r => String(r['產品名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase())) : sheetData;
+      const allCols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
+      const coreCols = self._prCoreCols(allCols);
+      const coreTypes = coreCols.map(c => self._prColType(c));
+      const filteredWithIdx = q
+        ? sheetData.map((r, i) => ({ r, i })).filter(({ r }) => String(r['產品名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase()))
+        : sheetData.map((r, i) => ({ r, i }));
       const tbody = document.getElementById('pr-tbody');
-      if (tbody) {
-        const { tbodyHtml } = self._prBuildTable(filtered, cols, colTypes, visItems, 0);
-        tbody.innerHTML = tbodyHtml;
-      }
+      if (tbody) tbody.innerHTML = filteredWithIdx.map(({ r, i }) =>
+        `<tr class="pr-row" data-i="${i}" style="border-bottom:1px solid #f3f4f6;cursor:pointer">` +
+        coreCols.map((c, ci) => `<td style="font-size:13px;padding:8px 12px;${c==='產品名稱'||c==='試算名稱'?'text-align:left':'text-align:right'}">${self._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+        `<td style="text-align:center;color:#d1d5db;font-size:11px;padding:8px 4px">›</td></tr>`
+      ).join('');
       document.getElementById('pr-show-all')?.closest('div')?.remove();
     });
   },
