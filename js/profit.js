@@ -6264,7 +6264,7 @@ async function momoReconGenerate(shop){
 }
 function momoRenderReconReport(shop, detail, summ){
   const el=document.getElementById('momo-recon-report'); if(!el) return;
-  const n=v=>v==null?'—':Math.round(v).toLocaleString();
+  const n=v=>v==null?'—':momoMoney(v);
   // 交叉核對：xls 的甲乙 A vs pdf 的 A；月份 vs 選的對帳月
   const xlsA=(detail.meta.revUntax.甲配||0)+(detail.meta.revUntax.乙配||0);
   const aMatch=summ.A&&Math.abs(xlsA+ (detail.meta.otherUntax||0) - summ.A.untax)<=2;
@@ -6403,6 +6403,9 @@ function momoPeriodLabel(period){
   const [,m,half]=period.split('-');
   return `${Number(m)}月${half==='FULL'?'整月':half==='H1'?'上':'下'}`;
 }
+// MOMO 共用金額格式：$ 緊貼數字、千分位逗號、四捨五入到元、負數用 -$。我們只有台幣，去掉多餘的 NT；保留 $ 好跟數量欄位（銷量/瀏覽量）並排時分得出哪個是錢。
+//   全站設計統一時可沿用（見記憶 dashboard-design-unify）。⚠ 只用在整數金額（營收/毛利/費用/淨利）；成本等要保留小數的欄位不套（會被 round 掉）。
+function momoMoney(v){ const n=Math.round(Number(v)||0); return (n<0?'-$':'$')+Math.abs(n).toLocaleString(); }
 function momoOrderToPeriod(orderNo){   // 訂單編號前 6 碼 YYMMDD 判半月（拆掉 dash 後綴後取前 6，14 碼不影響）
   const prefix=String(orderNo).trim().split('-')[0];
   if(!/^\d{6}/.test(prefix)) return null;                 // 前 6 碼須純數字（擋 '#6...' 等髒列，不逐段 Number 以免寬鬆轉換）
@@ -6869,7 +6872,7 @@ function momoRenderProfitBody(shop){
     tbl.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${all.length?'沒有符合搜尋的商品':'尚無商品資料，請到「批次維護」新增（後續階段開放）'}</div></div>`;
     return;
   }
-  const fmt={ money:v=>'NT$ '+Math.round(v).toLocaleString(), num:v=>Math.round(v).toLocaleString(), pct1:v=>(Math.round(v*10)/10)+'%' };
+  const fmt={ money:v=>momoMoney(v), num:v=>Math.round(v).toLocaleString(), pct1:v=>(Math.round(v*10)/10)+'%' };
   const arrow=c=> sort&&sort.col===c ? (sort.dir==='asc'?' ▲':' ▼') : '';
   // 欄寬拖曳：colgroup 定寬（table-layout:fixed）+ 每個 th 右緣把手；寬度存 sessionStorage
   const colgroup=`<colgroup>${MOMO_PROFIT_COLS.map(c=>`<col style="width:${momoColW(shop,c.k,c.w)}px">`).join('')}</colgroup>`;
@@ -6890,7 +6893,7 @@ function momoRenderProfitBody(shop){
         // 對帳單來源：未對帳=「—」；有值標退貨數/金額於 tooltip、月顆粒；>6% 橘
         if(r.returnRate==null) return `<td style="text-align:right;color:#c7cad1" title="此月未對帳，無退貨資料">—</td>`;
         const rr=r.returnRate;
-        const tip=`退貨 ${Math.round(r.retQty||0)} 件 / NT$ ${Math.round(r.retAmt||0).toLocaleString()}（對帳單月值${(period&&!period.endsWith('-FULL'))?'，半月沿用月值':''}）\n退貨的商品成本已回沖（貨退回倉、之後再賣才認成本），故高退貨率不再被誇大成大賠；但出貨運費已付(不回沖)+可能耗損/重新入庫，高退貨率仍是警訊。`;
+        const tip=`退貨 ${Math.round(r.retQty||0)} 件 / ${momoMoney(r.retAmt||0)}（對帳單月值${(period&&!period.endsWith('-FULL'))?'，半月沿用月值':''}）\n退貨的商品成本已回沖（貨退回倉、之後再賣才認成本），故高退貨率不再被誇大成大賠；但出貨運費已付(不回沖)+可能耗損/重新入庫，高退貨率仍是警訊。`;
         let st='text-align:right;overflow:hidden;text-overflow:ellipsis'; if(rr>6) st+=';font-weight:700;color:#f97316';
         return `<td style="${st}" title="${tip}">${(Math.round(rr*10)/10)}%</td>`;
       }
@@ -6962,8 +6965,8 @@ function momoRenderProfitBody(shop){
     const diff=curT.rev - expect;
     const ok=Math.abs(diff)<=Math.max(50, expect*0.001);
     verifyTxt = ok
-      ? `<span style="color:#059669">✓ 整月 Σ營收 = 對帳單該店金額 ${Math.round(expect).toLocaleString()}</span>`
-      : `<span style="color:#dc2626;font-weight:700">⚠ 整月 Σ營收 ${Math.round(curT.rev).toLocaleString()} ≠ 對帳單該店金額 ${Math.round(expect).toLocaleString()}（差 ${Math.round(diff).toLocaleString()}，主檔可能缺對帳單裡的品號）</span>`;
+      ? `<span style="color:#059669">✓ 整月 Σ營收 = 對帳單該店金額 ${momoMoney(expect)}</span>`
+      : `<span style="color:#dc2626;font-weight:700">⚠ 整月 Σ營收 ${momoMoney(curT.rev)} ≠ 對帳單該店金額 ${momoMoney(expect)}（差 ${momoMoney(diff)}，主檔可能缺對帳單裡的品號）</span>`;
   }
   const overview=momoOverviewHTML(shop, period, curT, prevT, prevKey, verifyTxt);
   const tblMinW=MOMO_PROFIT_COLS.reduce((s,c)=>s+momoColW(shop,c.k,c.w),0);
@@ -7176,7 +7179,7 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
   if(!period) return '';
   const hasPrev=!!prev.hasData;
   const prevLbl=prevKey?momoPeriodLabel(prevKey):'上期';
-  const money=v=>'NT$ '+Math.round(v).toLocaleString();
+  const money=v=>momoMoney(v);
   const marginColor=m=> m>=25?'#059669':m>=15?'#d97706':'#dc2626';   // 毛利率看絕對值：≥25綠 / ≥15橘 / <15紅
   const marginDelta=hasPrev?((cur.margin-prev.margin>=0?'+':'')+(cur.margin-prev.margin).toFixed(1)+'pp'):'—';
   const cards=[
@@ -9372,7 +9375,7 @@ Object.assign(window, {
   cupPickRowDragStart,cupPickRowDragOver,cupPickRowDragEnter,cupPickRowDragLeave,cupPickRowDrop,cupPickRowDragEnd,
   cupSetSort,
   setShopViewMode,
-  momoSetSub,momoSetPeriod,momoSetPeriodMonth,momoSetPeriodHalf,momoOnSearch,momoProfitSetSort,momoToggleDiscontinued,
+  momoSetSub,momoSetPeriod,momoSetPeriodMonth,momoSetPeriodHalf,momoOnSearch,momoProfitSetSort,momoToggleDiscontinued,momoMoney,
   momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,
