@@ -1705,7 +1705,8 @@ Object.assign(App, {
     const 實際成本 = r2((origCost + landFreight + 陸台運費RMB) * p.rmb);
     const 稅金 = r2(price * p.tax);
     const 廣告 = r2(price * p.ads);
-    const 固定 = p.fixed;
+    // 導流品：售價 ≥ 100 才加固定費用 9
+    const 固定 = (sheet === '導流品' && price < 100) ? 0 : p.fixed;
     const 成交 = r2(price * p.txFee);
     const 活動 = r2(price * p.promo);
     const 退貨 = r2(price * p.ret);
