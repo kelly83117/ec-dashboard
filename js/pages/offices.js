@@ -1969,6 +1969,11 @@ Object.assign(App, {
     });
 
     document.getElementById('pr-search')?.addEventListener('input', e => {
+      if (e.isComposing) return; // 注音/倉頡組字中，等確認後再搜尋
+      Store.set('ec.d2.pricing.q', e.target.value);
+      self.render();
+    });
+    document.getElementById('pr-search')?.addEventListener('compositionend', e => {
       Store.set('ec.d2.pricing.q', e.target.value);
       self.render();
     });
