@@ -139,11 +139,19 @@ ESM 有個致命陷阱必須牢記：
 - `Store` 是 localStorage 包裝層（含 `_mem` / `_profitMem` 記憶體鏡像）。
 - 版本號 `<meta app-version>` 每次部署都要更新，`version.js` 才會清舊快取。
 
-### 版本號 bump 規則（共 12 處）
-改任何檔案（**含 CSS**）都要 bump 版本號，一次要改 **12 處**：
+### 版本號 bump 規則（共 15 處）
+改任何檔案（**含 CSS**）都要 bump 版本號，一次要改 **15 處**：
 - `index.html` 的 `<meta name="app-version">`（1 處）
 - `index.html` 的 `<script src="js/main.js?v=">`（1 處）
+- `index.html` 的 3 個 `<link rel="stylesheet" href="css/*.css?v=">`（3 處，
+  main.css / profit.css / daily-adjustments.css）
 - `js/main.js` 裡 10 個 import 的 `?v=`（10 處）
+
+⚠️ **CSS 的 `?v=` 一定要一起改（2026-07-29 血淚教訓 v226→227）**：CSS `<link>`
+沒有 `?v=` 時，`version.js` 只清 Cache API（Service Worker）、碰不到瀏覽器
+HTTP 磁碟快取，`location.reload()` 又是同一個 URL → 改了 CSS 卻餵回舊的，
+使用者（尤其不清快取的同事）整批 `.mm-*` 樣式看不到、版面全跑掉。CSS 帶
+`?v=` 後才跟 JS 一樣改版即刷新。
 
 新版號要**比目前檔案裡的、也比 `main` 上的都大**。`main` 有時會回退，
 **一定要當場去檔案裡搜 `app-version` 確認現在的號碼**，不要憑記憶。
