@@ -1918,7 +1918,8 @@ Object.assign(App, {
     const SHOW = 60;
     const display = filteredWithIdx.slice(0, SHOW);
 
-    const theadHtml = coreCols.map(c => `<th style="white-space:nowrap;font-size:12px;padding:8px 12px;font-weight:600">${escapeHtml(c)}</th>`).join('') + '<th style="width:32px"></th>';
+    const NAME_COLS = new Set(['產品名稱','試算名稱','編號']);
+    const theadHtml = coreCols.map(c => `<th style="white-space:nowrap;font-size:12px;padding:8px 12px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'}">${escapeHtml(c)}</th>`).join('') + '<th style="width:32px"></th>';
 
     const tbodyHtml = display.map(({ r, i }) => {
       const isCustom = !!r.__custom;
