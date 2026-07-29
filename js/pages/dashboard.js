@@ -272,7 +272,7 @@ Object.assign(App, {
       grouped[m].push({ p, i });
     });
 
-    // 單一賣場列
+    // 單一通路列
     const buildPlatformRow = (p, i) => {
       const td = inputOf(p);
       const yd = prevOf(p);
@@ -305,6 +305,16 @@ Object.assign(App, {
         ? `<span class="card-roas" data-idx="${i}" style="font-weight:700;font-variant-numeric:tabular-nums;color:${p.color};font-size:13px">${roas}</span>`
         : '<span style="color:var(--text-muted);font-size:13px">—</span>';
 
+      // 署名小灰字：有署名顯示「姓名 · 月/日 時:分」，無則顯示「—」（一律顯示，維持列高一致）
+      //   截短只在顯示時做（存進去的 at 保持完整 timestamp）
+      const _sig = p.dailyBy && p.dailyBy[inputDateStr];
+      let sigText = '—';
+      if (_sig && _sig.name) {
+        const _d = new Date(_sig.at);
+        const _pad = n => String(n).padStart(2, '0');
+        sigText = `${escapeHtml(_sig.name)} · ${_pad(_d.getMonth() + 1)}/${_pad(_d.getDate())} ${_pad(_d.getHours())}:${_pad(_d.getMinutes())}`;
+      }
+
       return `
         <tr data-card-idx="${i}" style="border-top:1px solid var(--border)">
           <td style="padding:3px 6px;white-space:nowrap;overflow:hidden">
@@ -312,6 +322,7 @@ Object.assign(App, {
               <img src="${logoSrc}" alt="" style="width:18px;height:18px;border-radius:4px;object-fit:contain;background:white;padding:1px;flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,0.06)">
               <span style="font-weight:600;font-size:13px;white-space:nowrap" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>
             </div>
+            <div class="entry-sig">${sigText}</div>
           </td>
           <td style="padding:3px 8px;text-align:center">
             <input type="text" inputmode="numeric" class="card-rev" data-idx="${i}" data-original="${revValue}" value="${revValue}" placeholder="0" onfocus="this.select()"
@@ -327,7 +338,7 @@ Object.assign(App, {
       `;
     };
 
-    // 通路分群分隔列 + 該通路的賣場列
+    // 通路分群分隔列 + 該通路的通路列
     const marketRowsHtml = marketOrder.map(m => {
       const items = grouped[m] || [];
       if (items.length === 0) return '';
@@ -340,7 +351,7 @@ Object.assign(App, {
               <img src="${badge.src}" alt="${escapeHtml(badge.name)}"
                 style="width:14px;height:14px;border-radius:3px;object-fit:contain;flex-shrink:0">
               <span style="font-size:11px;font-weight:600;color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase">${escapeHtml(badge.name)}</span>
-              <span style="font-size:10px;color:var(--text-muted);font-weight:500">· ${items.length} 個賣場</span>
+              <span style="font-size:10px;color:var(--text-muted);font-weight:500">· ${items.length} 個通路</span>
             </div>
           </td>
         </tr>
@@ -396,7 +407,7 @@ Object.assign(App, {
           <table style="border-collapse:separate;border-spacing:0;width:100%;min-width:520px;table-layout:fixed">
             <thead>
               <tr style="background:var(--bg)">
-                <th style="padding:5px 6px;text-align:left;font-size:11px;min-width:110px">賣場</th>
+                <th style="padding:5px 6px;text-align:left;font-size:11px;min-width:110px">通路</th>
                 <th style="padding:5px 4px;text-align:center;font-size:11px;width:115px">營收 NT$</th>
                 <th style="padding:5px 4px;text-align:center;font-size:11px;width:115px">廣告費</th>
                 <th style="padding:5px 4px;text-align:center;font-size:11px;width:58px">ROAS</th>
@@ -439,7 +450,7 @@ Object.assign(App, {
      - hasRoas：沒投廣告、或該範圍廣告費為 0 → 無法計算 ROAS（roas 為 null）
      - hasDelta：比較範圍營收為 0 → 沒有漲跌可言（delta 為 0，不可拿來判斷）
      - ⚠ 保留原始索引 i：它就是填寫表格的 data-idx，排序時絕不可就地 sort(platforms)，
-       打亂會讓存檔寫到錯的賣場。 */
+       打亂會讓存檔寫到錯的通路。 */
   channelMetrics(platforms, showDates, compareDates) {
     const sumRev = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
     const sumAds = (p, dates) => dates.reduce((s, d) => s + (+p.dailyAdSpend?.[d] || 0), 0);
@@ -775,9 +786,9 @@ Object.assign(App, {
     // 切換：null = 總計（全部加總），string = 單一平台
     const activeName = this.filter.chartPlatform || null;
 
-    // 圖例（全賣場 + 7 個平台）
+    // 圖例（全通路 + 7 個平台）
     const allPill = `
-      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:${activeName === null ? '#0f172a' : 'var(--bg)'};border:1px solid ${activeName === null ? '#0f172a' : 'var(--border)'};border-radius:999px;font-size:11px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">🏪 全賣場</button>
+      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:${activeName === null ? '#0f172a' : 'var(--bg)'};border:1px solid ${activeName === null ? '#0f172a' : 'var(--border)'};border-radius:999px;font-size:11px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">🏪 全通路</button>
     `;
     const platformPills = platforms.map(p => {
       const isActive = activeName === p.name;
@@ -794,7 +805,7 @@ Object.assign(App, {
     }).join('');
 
     // 計算每日資料
-    // 全賣場模式（activeName == null）：7 條平台曲線同時顯示
+    // 全通路模式（activeName == null）：7 條平台曲線同時顯示
     // 單一平台模式：只顯示該平台一條線
     const logoImgHtml = (platformName) => {
       const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
@@ -817,8 +828,8 @@ Object.assign(App, {
           name: pp.name, color: pp.color, icon: pp.icon,
           values: dates.map(d => +(pp.daily?.[d]) || 0),
         }));
-        lineLabel = '全賣場';
-        lineLabelHtml = '<span style="vertical-align:middle">🏪 全賣場</span>';
+        lineLabel = '全通路';
+        lineLabelHtml = '<span style="vertical-align:middle">🏪 全通路</span>';
         lineColor = '#0f172a';
         isMulti = true;
       }
@@ -827,8 +838,8 @@ Object.assign(App, {
         name: pp.name, color: pp.color, icon: pp.icon,
         values: dates.map(d => +(pp.daily?.[d]) || 0),
       }));
-      lineLabel = '全賣場';
-      lineLabelHtml = '<span style="vertical-align:middle">🏪 全賣場</span>';
+      lineLabel = '全通路';
+      lineLabelHtml = '<span style="vertical-align:middle">🏪 全通路</span>';
       lineColor = '#0f172a';
       isMulti = true;
     }
@@ -918,12 +929,12 @@ Object.assign(App, {
     // 保存 chart 狀態供 hover handler 使用
     this._chartState = { dates, dailyData, series, padL, xStep, W, H, padT, ch, maxV, lineColor, lineLabel, isMulti, activeName };
 
-    // 計算目前選中的 series 累計：全賣場 = 7 個賣場全部加總；單一賣場 = 該賣場本月加總
+    // 計算目前選中的 series 累計：全通路 = 7 個通路全部加總；單一通路 = 該通路本月加總
     const seriesTotal = series.reduce((s, ss) => s + ss.values.reduce((a, b) => a + b, 0), 0);
     const daysWithData = dates.filter(d =>
       series.some(s => s.values[dates.indexOf(d)] > 0)
     ).length;
-    const totalLabel = isMulti ? `${monthLabel}全賣場累計` : `${monthLabel}「${lineLabel}」累計`;
+    const totalLabel = isMulti ? `${monthLabel}全通路累計` : `${monthLabel}「${lineLabel}」累計`;
 
     return `
       <div class="chart-card" style="margin:0;padding:12px 14px;width:100%;display:flex;flex-direction:column">
@@ -983,10 +994,10 @@ Object.assign(App, {
       const data = dailyData[i];
       const dateStr = data.date.replace(/-/g, '/');
       if (isMulti) {
-        // 全賣場模式：顯示日期 + 總計 + 7 個平台明細
+        // 全通路模式：顯示日期 + 總計 + 7 個平台明細
         return `
           <div style="font-size:11px;opacity:0.7;margin-bottom:6px">${dateStr}</div>
-          <div style="font-size:11px;opacity:0.7">全賣場總計</div>
+          <div style="font-size:11px;opacity:0.7">全通路總計</div>
           <div style="font-size:18px;font-weight:700;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.18);font-variant-numeric:tabular-nums">NT$ ${Math.round(data.total).toLocaleString()}</div>
           <div style="font-size:12px;line-height:1.7">
             ${data.breakdown.map(p => `
@@ -1278,7 +1289,7 @@ Object.assign(App, {
       return `<th colspan="${cols}" style="padding:3px 5px;text-align:center;font-size:12px;color:var(--text);font-weight:600;border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap">${escapeHtml(p.name)}</th>`;
     }).join('');
 
-    // 子欄位列（短標籤節省空間） — 各賣場第一欄加 border-left 區隔
+    // 子欄位列（短標籤節省空間） — 各通路第一欄加 border-left 區隔
     const subHeadHtml = colSpec.map(({ hasAds }) => {
       const lb = 'border-left:1px solid #94a3b8;';
       if (hasAds) {
@@ -1305,7 +1316,7 @@ Object.assign(App, {
         dayRev += rev;
         const m = PLATFORM_MARKETPLACE[p.name] || 'shopee';
         marketSubtotals[m] += rev;
-        // 每個賣場的第一欄加 border-left 區隔
+        // 每個通路的第一欄加 border-left 區隔
         const lb = '1px solid #94a3b8';
         if (hasAds) {
           const ads = getAds(p, d);
@@ -1333,7 +1344,7 @@ Object.assign(App, {
       `;
     }).join('');
 
-    // 總計列：個別賣場 + 通路小計（整列置中對齊）
+    // 總計列：個別通路 + 通路小計（整列置中對齊）
     const totalCells = colSpec.map(({ hasAds }, idx) => {
       const t = platformTotals[idx];
       const lb = 'border-left:1px solid #94a3b8;';
@@ -1719,6 +1730,18 @@ Object.assign(App, {
       if (revEl) writeField('daily', parseAmount(revEl.value));
       if (adsEl) writeField('dailyAdSpend', parseAmount(adsEl.value));
 
+      // 署名：營收與廣告費共用同一筆 dailyBy（平行兄弟欄位，🔴 絕不塞進 daily 值裡，也不走 writeField 的 Math.round）
+      list[idx].dailyBy = list[idx].dailyBy || {};
+      list[idx].dailyBy[inputDateStr] = {
+        name: this.currentUser?.name || this.currentUser?.username || '',
+        at: Date.now()
+      };
+      // 這一天營收與廣告費都被清空時，署名一起刪；只清其一時保留（兩者共用同一筆署名）
+      const stillHasValue =
+        (list[idx].daily && list[idx].daily[inputDateStr] != null) ||
+        (list[idx].dailyAdSpend && list[idx].dailyAdSpend[inputDateStr] != null);
+      if (!stillHasValue) delete list[idx].dailyBy[inputDateStr];
+
       // 1) 本機 _mem 先寫好（同步）— 用 setLocalOnly 避免 Store.set 自帶的 fire-and-forget
       //    雲端寫入，那條路徑出錯時會被吃掉，使用者看不到失敗
       const hasLocalOnly = typeof Store.setLocalOnly === 'function';
@@ -1782,8 +1805,18 @@ Object.assign(App, {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
       const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
       const platforms = Store.get(Store.KEYS.platforms, null) || [];
-      const platformName = platforms[idx]?.name || '此賣場';
+      const platformName = platforms[idx]?.name || '此通路';
       const dispVal = (n) => (n == null || n <= 0 ? '—' : n.toLocaleString());
+
+      // 覆蓋警告用：這一天原本是誰、什麼時候填的（時間格式與署名小灰字一致：月/日 時:分）
+      const _by = platforms[idx]?.dailyBy && platforms[idx].dailyBy[inputDateStr];
+      let byNotice = '';
+      if (_by && _by.name) {
+        const _bd = new Date(_by.at);
+        const _bpad = n => String(n).padStart(2, '0');
+        const _bwhen = `${_bpad(_bd.getMonth() + 1)}/${_bpad(_bd.getDate())} ${_bpad(_bd.getHours())}:${_bpad(_bd.getMinutes())}`;
+        byNotice = `<div style="margin-bottom:10px;padding:10px 12px;background:#f59e0b14;border-left:3px solid #f59e0b;border-radius:6px;font-size:12.5px;color:var(--text)">⚠️ 這格是 <strong>${escapeHtml(_by.name)}</strong> 於 <strong>${_bwhen}</strong> 填的，你正要覆蓋。</div>`;
+      }
 
       const revOldN = parseAmount(revEl?.dataset.original);
       const revNewN = parseAmount(revEl?.value);
@@ -1812,6 +1845,7 @@ Object.assign(App, {
           <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">
             日期：<strong style="color:var(--text)">${escapeHtml(inputDateStr)}</strong>
           </div>
+          ${byNotice}
           ${diffRow('營收', revOldN, revNewN, revChanged)}
           ${diffRow('廣告費', adsOldN, adsNewN, adsChanged)}
           <div style="margin-top:14px;padding:10px 12px;background:#f59e0b14;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px;color:var(--text)">
@@ -1833,13 +1867,42 @@ Object.assign(App, {
       });
     };
 
-    // 列上的 ✓ 快速儲存按鈕：直接 commit
+    // 覆蓋警告：某格「原本有數字 && 新值≠舊值 && 不是自己填的」時，先跳 promptConfirm 讓使用者決定。
+    //   營收/廣告費分開判斷，任一格符合就攔。dailyBy 不存在（舊資料無署名）→ 不攔，直接存（不知道誰填的就吵會攔到所有舊資料）。
+    const needsOverwriteConfirm = (idx) => {
+      const platforms = Store.get(Store.KEYS.platforms, null) || [];
+      const p = platforms[idx];
+      if (!p) return false;
+      const me = this.currentUser?.name || this.currentUser?.username || '';
+      const isOverwrite = (el, dailyObj) => {
+        if (!el) return false;
+        const oldRaw = dailyObj && dailyObj[inputDateStr];
+        if (oldRaw == null) return false;                     // ① 原本沒數字 → 不攔
+        const oldN = +oldRaw;
+        const newN = parseAmount(el.value);
+        if ((oldN || 0) === (newN || 0)) return false;        // ② 值沒變 → 不攔
+        const by = p.dailyBy && p.dailyBy[inputDateStr];
+        if (!by || !by.name) return false;                    // ③ 沒署名（舊資料）→ 不攔
+        if (by.name === me) return false;                     //    是自己填的 → 不攔
+        return true;                                          // 三條件同時成立 → 攔
+      };
+      const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
+      const adsEl = document.querySelector(`.card-ads[data-idx="${idx}"]`);
+      return isOverwrite(revEl, p.daily) || isOverwrite(adsEl, p.dailyAdSpend);
+    };
+    // commit 的統一守衛入口：要覆蓋別人的資料才先確認，否則照舊直接 commit
+    const commitGuarded = (idx) => {
+      if (needsOverwriteConfirm(idx)) promptConfirm(idx);
+      else commit(idx);
+    };
+
+    // 列上的 ✓ 快速儲存按鈕：先過覆蓋守衛
     document.querySelectorAll('.row-save-btn').forEach(btn => {
       btn.addEventListener('mousedown', (e) => e.preventDefault()); // 不要讓 input 先 blur
       btn.addEventListener('click', () => {
         const idx = +btn.dataset.idx;
         console.warn('[SAVE] ✓ 按鈕被按下', { idx, ver: document.querySelector('meta[name=app-version]')?.content });
-        commit(idx);
+        commitGuarded(idx);
       });
     });
 
@@ -1871,7 +1934,7 @@ Object.assign(App, {
         if (e.key === 'Enter') {
           // Enter 視同按 ✓：有變動就 commit
           e.preventDefault();
-          if (isDirty(idx)) commit(idx);
+          if (isDirty(idx)) commitGuarded(idx);
           else el.blur();
         } else if (e.key === 'Escape') {
           // Esc 取消編輯：還原為原值，然後失焦（blur handler 看到不 dirty 就不再動）
@@ -1965,6 +2028,23 @@ Object.assign(App, {
         list[idx].dailyAdSpend = list[idx].dailyAdSpend || {};
         if (v == null || isNaN(v)) delete list[idx].dailyAdSpend[entryDate];
         else list[idx].dailyAdSpend[entryDate] = Math.round(v);
+      });
+
+      // 署名：營收與廣告費在上面兩個獨立 forEach 各自處理，dailyBy 一律等兩迴圈都跑完再統一寫/刪一次
+      const _byName = this.currentUser?.name || this.currentUser?.username || '';
+      const _touchedIdxs = new Set();
+      document.querySelectorAll('.entry-rev, .entry-ads').forEach(el => {
+        const idx = +el.dataset.idx;
+        if (list[idx]) _touchedIdxs.add(idx);
+      });
+      _touchedIdxs.forEach(idx => {
+        list[idx].dailyBy = list[idx].dailyBy || {};
+        list[idx].dailyBy[entryDate] = { name: _byName, at: Date.now() };
+        // 這一天營收與廣告費都空了才刪署名（兩者共用同一筆）
+        const stillHasValue =
+          (list[idx].daily && list[idx].daily[entryDate] != null) ||
+          (list[idx].dailyAdSpend && list[idx].dailyAdSpend[entryDate] != null);
+        if (!stillHasValue) delete list[idx].dailyBy[entryDate];
       });
 
       Store.set(Store.KEYS.platforms, list);
@@ -2083,6 +2163,18 @@ Object.assign(App, {
           if (ads == null) delete p.dailyAdSpend[dateStr];
           else p.dailyAdSpend[dateStr] = Math.round(ads);
         }
+
+        // 署名：營收與廣告費共用同一筆 dailyBy（平行兄弟欄位，🔴 不塞進 daily 值裡）
+        p.dailyBy = p.dailyBy || {};
+        p.dailyBy[dateStr] = {
+          name: this.currentUser?.name || this.currentUser?.username || '',
+          at: Date.now()
+        };
+        // 這一天營收與廣告費都空了才刪署名（廣告費僅 hasAds 時會被寫入，dailyAdSpend 可能不存在，用 && 防呆）
+        const stillHasValue =
+          (p.daily && p.daily[dateStr] != null) ||
+          (p.dailyAdSpend && p.dailyAdSpend[dateStr] != null);
+        if (!stillHasValue) delete p.dailyBy[dateStr];
 
         // 走「await 雲端 + 失敗顯式告知」的模式，跟主要 commit() 一致，
         // 避免 Firestore reject 被靜默吃掉（先前 1MB 超限事件的根因）

@@ -104,14 +104,16 @@ try {
       // ec|shop|month|half 格式是舊版遺留在 profitDoc 的報表資料，以 profits collection 為準，不比對
       Object.keys(data).forEach(k => {
         if (k.startsWith('ec|')) return; // 舊版報表殘留 key，跳過
+        if (k.startsWith('ec_momo_products|')) return; // MOMO 商品主檔以 momo_products collection 為準，不在此比對（遷移過渡）
         if (JSON.stringify(data[k]) !== JSON.stringify(oldData[k])) {
           const shop = k.split('|')[1];
           if (shop) changedShops.add(shop);
         }
       });
-      // 非報表 key（notes/edits 等）直接覆蓋；報表 key（ec|shop|month|half）只在 profits collection 尚未有該 key 時才填入（新資料優先）
+      // 非報表 key（notes/edits 等）直接覆蓋；報表 key（ec|shop|month|half）與 MOMO 商品主檔（ec_momo_products|）
+      //   只在 collection 尚未填該 key 時才填入（collection 權威、app/profit 舊欄位只當遷移過渡的 fallback）
       Object.keys(data).forEach(k => {
-        if (k.startsWith('ec|')) {
+        if (k.startsWith('ec|') || k.startsWith('ec_momo_products|')) {
           if (Store._profitMem[k] === undefined) Store._profitMem[k] = data[k];
         } else {
           Store._profitMem[k] = data[k];
@@ -169,6 +171,51 @@ try {
           }
         }, err => { console.error('[profits collection subscribe 失敗]', err); });
       } catch (e) { console.warn('profits collection subscribe failed', e); }
+
+      // momo_products collection（每賣場一 doc）→ 併回 Store._profitMem['ec_momo_products|<shop>']（維持 momoLoadProducts 讀取順序）
+      try {
+        onSnapshot(momoProductsColRef, snap => {
+          const changed = [];
+          snap.forEach(d => {
+            const data = d.data() || {};
+            const shop = data.shop || MOMO_DOCID_SHOP[d.id] || d.id;   // 反查優先讀 doc.shop，fallback 對照表
+            const k = 'ec_momo_products|' + shop;
+            const items = data.items || [];
+            // ⚠ bounce-back 守衛：本機有未同步變更（pending）或剛存過 → 不覆蓋，保住本機版本（守衛邏輯在 profit.js，避免讀私有 _pendingSyncKeys）
+            if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(items)) return;   // 無變化不動、不觸發重繪
+            Store._profitMem[k] = items;
+            changed.push(shop);
+          });
+          if (changed.length) {
+            console.log('[momo_products] 收到更新，影響賣場：', changed);
+            // 精準更新（不走 App.render/renderFromCloud，避免整頁重繪踢人）：只重繪當前正在看的那個 MOMO 賣場總表
+            window.dispatchEvent(new CustomEvent('momoDataReady', { detail: { changedShops: changed } }));
+          }
+        }, err => { console.error('[momo_products subscribe 失敗]', err); });
+      } catch (e) { console.warn('momo_products subscribe failed', e); }
+
+      // momo_reconcile collection（每 shop 每月一 doc）→ Store._profitMem['ec_momo_reconcile|<shop>|<YYYY-MM>']（momoLoadReconcile 讀取順序一致）
+      try {
+        onSnapshot(momoReconcileColRef, snap => {
+          const changed = [];
+          snap.forEach(d => {
+            const data = d.data() || {};
+            const shop = data.savedShop || MOMO_DOCID_SHOP[String(d.id).split('_')[0]] || null;
+            const month = data.month || String(d.id).split('_').slice(1).join('_');
+            if (!shop || !month) return;
+            const k = 'ec_momo_reconcile|' + shop + '|' + month;
+            if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;   // 本機未同步/剛存 → 不覆蓋
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) return;
+            Store._profitMem[k] = data;
+            changed.push(k);
+          });
+          if (changed.length) {
+            console.log('[momo_reconcile] 收到更新：', changed);
+            window.dispatchEvent(new CustomEvent('momoReconcileReady', { detail: { changed } }));
+          }
+        }, err => { console.error('[momo_reconcile subscribe 失敗]', err); });
+      } catch (e) { console.warn('momo_reconcile subscribe failed', e); }
     };
   } catch (e) { console.warn('profit subscribe failed', e); }
 
@@ -186,6 +233,32 @@ try {
       },
     };
   } catch {}
+
+  // ============== MOMO 商品主檔：每賣場一個獨立 doc（momo_products collection） ==============
+  // 為什麼獨立 collection：商品主檔一個賣場就 500KB+，塞 app/profit 欄位會撞 1MB 上限（甲配 1300 筆推不進去）；
+  //   每賣場一 doc 各自 1MB 額度，也把「整包 last-write-wins」的覆蓋範圍縮小到單一賣場。
+  // doc id 用 ASCII 代號（中文/+ 在 URL/REST/Console 難查）；doc 內存 { shop:'甲配', items:[...] }（保留原名、反查用）。
+  // payload 包 {items}：Firestore 一份 doc 是 map、不能頂層存陣列（同 setReport 對陣列 reject 的原因）。
+  const MOMO_SHOP_DOCID = { '甲配':'jia', '乙配':'yi', 'MO+麻吉':'mo_maji', 'MO+森之旅':'mo_senzhilu' };
+  const MOMO_DOCID_SHOP = Object.fromEntries(Object.entries(MOMO_SHOP_DOCID).map(([k,v]) => [v, k]));   // 反查 fallback
+  const momoProductsColRef = collection(db, 'momo_products');
+  window.__cloudMomo = {
+    // 讀取方法命名成 getDoc/subscribe → 落在本機測試防護的讀取白名單(READ_OK)、自動放行（不可改名，否則會被誤 no-op）
+    getDoc:    (shop) => getDoc(doc(db, 'momo_products', MOMO_SHOP_DOCID[shop] || shop)),
+    setShop:   (shop, items) => setDoc(doc(db, 'momo_products', MOMO_SHOP_DOCID[shop] || shop), { shop, items: items || [] }),   // setDoc：整包取代
+    subscribe: (cb) => onSnapshot(momoProductsColRef, cb),
+  };
+
+  // ============== MOMO 月對帳 momo_reconcile（每 shop 每月一 doc，不塞 momo_products） ==============
+  // 對帳單=營收/費用權威來源。doc id = shopDocId + '_' + 'YYYY-MM'（例 jia_2026-06），每份 75KB 遠低 1MB。
+  // getDoc/subscribe 命名落防護讀取白名單、自動放行；setMonth 是唯一寫入方法（整包取代，last-write-wins）。
+  const momoReconcileColRef = collection(db, 'momo_reconcile');
+  const momoReconDocId = (shop, month) => (MOMO_SHOP_DOCID[shop] || shop) + '_' + month;
+  window.__cloudReconcile = {
+    getDoc:    (shop, month) => getDoc(doc(db, 'momo_reconcile', momoReconDocId(shop, month))),
+    setMonth:  (shop, month, data) => setDoc(doc(db, 'momo_reconcile', momoReconDocId(shop, month)), data || {}),
+    subscribe: (cb) => onSnapshot(momoReconcileColRef, cb),
+  };
 
   // ============== 洞察表獨立文件 app/insight（避免 app/main 撞 1MB 上限） ==============
   // 洞察表的 ec.insight_{shop}_master 資料量會隨著商品累積變大，
