@@ -1722,7 +1722,7 @@ Object.assign(App, {
     const c = this._prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume);
     const existingRows = window.__pricingData?.[sheet] || [];
     const cols = existingRows.length > 0 ? Object.keys(existingRows[0]) : [];
-    const row = { __custom: true };
+    const row = { __custom: true, __id: Date.now() };
     for (const col of cols) {
       if (col === '集運') row[col] = logistics || '';
       else if (col === '產品名稱' || col === '試算名稱') row[col] = name;
@@ -2053,11 +2053,10 @@ Object.assign(App, {
         const custom = Store.get(`ec.d2.pricing.custom.${sh}`, []);
         if (!custom.length) return;
         const existing = window.__pricingData[sh] || [];
-        // 移除已存在的（避免重複），再 unshift
-        const ids = new Set(custom.map(r => r.__id));
+        // 只移除已是自訂列的項目（r.__custom === true），保留所有 Excel 列
         window.__pricingData[sh] = [
           ...custom,
-          ...existing.filter(r => !ids.has(r.__id))
+          ...existing.filter(r => !r.__custom)
         ];
       });
     };
