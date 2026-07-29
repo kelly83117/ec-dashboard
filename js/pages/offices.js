@@ -1905,7 +1905,9 @@ Object.assign(App, {
     }
 
     const sheetData = window.__pricingData[activeSheet] || [];
-    const allCols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
+    // 優先從非自訂的 Excel 列取欄位順序，避免自訂列 key 順序不一致
+    const refRow = sheetData.find(r => !r.__custom) || sheetData[0];
+    const allCols = refRow ? Object.keys(refRow).filter(k => !k.startsWith('__')) : [];
     const coreCols = this._prCoreCols(allCols);
     const coreTypes = coreCols.map(c => this._prColType(c));
 
