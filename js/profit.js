@@ -6526,6 +6526,19 @@ async function momoOpenSyncPreview(shop){
       catch(e){ momoCloud[key]={error:true}; }
     }));
   }
+  // 🔴 月對帳讀 momo_reconcile collection（與寫入 __cloudReconcile.setMonth 同源）——舊碼讀 app/profit doc（那裡根本沒有）→ 雲端永遠 0/「新」。
+  const reconCloud={};   // 'ec_momo_reconcile|shop|month' → docData|undefined 或 {__error:true}
+  const reconItems=items.filter(it=>it.kind==='MOMO月對帳');
+  if(reconItems.length && window.__cloudReconcile){
+    await Promise.all(reconItems.map(async it=>{
+      const parts=it.key.split('|');   // ['ec_momo_reconcile', shop, 'YYYY-MM']
+      try{ const s=await window.__cloudReconcile.getDoc(parts[1], parts[2]); reconCloud[it.key]= s.exists()?(s.data()||{}):undefined; }
+      catch(e){ reconCloud[it.key]={__error:true}; }
+    }));
+  }
+  // 內容比對：兩邊都先過 JSON round-trip 正規化（strip undefined、統一型別）→ 消除 Firestore 回來與本機的假差異（undefined 被丟、數字/字串）。
+  const _norm=v=>{ try{ return JSON.parse(JSON.stringify(v===undefined?null:v)); }catch(e){ return v; } };
+  const _eq=(a,b)=>_momoStableStr(_norm(a))===_momoStableStr(_norm(b));
   items.forEach(it=>{
     if(it.kind==='蝦皮報表'){ it.status='uncomparable'; it.cloudCount=null; return; }   // 不同 collection（profits），app/profit 讀不到
     if(it.kind==='MOMO商品主檔'){
@@ -6533,13 +6546,22 @@ async function momoOpenSyncPreview(shop){
       if(!mc || mc.error){ it.status='readfail'; it.cloudCount=null; return; }   // __cloudMomo 缺 / 該賣場讀失敗 → 不掛掉整個預覽，單列標無法比對
       const cItems=mc.items;
       if(cItems===undefined){ it.status='new'; it.cloudCount=0; }
-      else { it.cloudCount=_momoCount(cItems); it.status=(_momoStableStr(it.localVal)===_momoStableStr(cItems))?'same':'diff'; }
+      else { it.cloudCount=_momoCount(cItems); it.status=_eq(it.localVal,cItems)?'same':'diff'; }
+      return;
+    }
+    if(it.kind==='MOMO月對帳'){
+      const rc=reconCloud[it.key];
+      if(rc&&rc.__error){ it.status='readfail'; it.cloudCount=null; return; }
+      if(rc===undefined){ it.status='new'; it.cloudCount=0; return; }
+      it.cloudCount=_momoCount(rc); it.status=_eq(it.localVal,rc)?'same':'diff';
       return;
     }
     const cv=cloud[it.key];
     if(cv===undefined){ it.status='new'; it.cloudCount=0; }
-    else { it.cloudCount=_momoCount(cv); it.status=(_momoStableStr(it.localVal)===_momoStableStr(cv))?'same':'diff'; }
+    else { it.cloudCount=_momoCount(cv); it.status=_eq(it.localVal,cv)?'same':'diff'; }
   });
+  // #3：把這次預覽的比對快照寫進 __lastSyncReport（比照蝦皮那顆；MOMO 同步先前完全沒診斷輸出）。confirm 後 syncToCloud 會再覆寫成 'done'。
+  try{ window.__lastSyncReport={ ts:Date.now(), mode:'momo-preview', shop, items:items.map(it=>({key:it.key,kind:it.kind,localCount:it.localCount,cloudCount:it.cloudCount,status:it.status})) }; }catch(e){}
   momoRenderSyncPreviewModal(shop, items);
 }
 function momoRenderSyncPreviewModal(shop, items){
