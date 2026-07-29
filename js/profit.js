@@ -2725,7 +2725,7 @@ function closeTfDrop(){document.querySelectorAll('.tfdrop-menu.open').forEach(el
 document.addEventListener('click',closeTfDrop);
 
 // ── Filters & Sort ──
-function applyFilters(shop){
+function applyFilters(shop,opts){
   const s=state[shop];if(!s)return;
   if(!s._built||!s._built.length)return;
   const q=(s.search||'').trim().toLowerCase();
@@ -2759,7 +2759,7 @@ function applyFilters(shop){
       return dir==='asc'?va-vb:vb-va;
     });
   }
-  renderTable(shop,list);
+  renderTable(shop,list,opts);
   updateTagFilterBar(shop);
   updateSuggChip(shop);
 }
@@ -3344,7 +3344,7 @@ function submitProfitNote(){
   saveNotes(shopKey,notes);
   closeProfitNoteModal();
   const shop=shopKey.split('|')[0].replace('_growth','');
-  applyFilters(shop);
+  applyFilters(shop,{keepScroll:true});
 }
 function deleteProfitNote(origIdx){
   if(!_pnm)return;
@@ -3353,14 +3353,14 @@ function deleteProfitNote(origIdx){
   if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
   notes[code].adjustments.splice(origIdx,1);
   if(!notes[code].adjustments.length)delete notes[code];
-  saveNotes(shopKey,notes);renderPnmList();applyFilters(shopKey.split('|')[0].replace('_growth',''));
+  saveNotes(shopKey,notes);renderPnmList();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
 }
 function closeProfitNoteModal(){document.getElementById('profit-note-modal')?.classList.remove('open');_pnm=null;}
 function startNote(shop,code){openNotePopup(shop,code);}
 function commitNote(){}
 
 // ── Render Table ──
-function renderTable(shop,list){
+function renderTable(shop,list,opts){
   const s=state[shop];const built=s._built;
   const edits=getEdits(shop);
   const noteKey=shop+'|'+s.curMonth+'|'+s.curHalf;
@@ -3496,7 +3496,18 @@ function renderTable(shop,list){
     ${orderedCols.map(c=>totalCell[c.key]||'<td></td>').join('')}
     <td></td>
   </tr></tbody></table></div>`;
-  document.getElementById('tbl-'+shop).innerHTML=html;
+  const _tblHost=document.getElementById('tbl-'+shop);
+  // keepScroll：覆蓋 innerHTML 會重建 .tscroll，捲動位置歸零。先存舊值、重繪後還原（含 scrollLeft，商品調整欄在最右）。
+  let _prevScTop=null,_prevScLeft=null;
+  if(opts&&opts.keepScroll){
+    const _oldSc=_tblHost&&_tblHost.querySelector('.tscroll');
+    if(_oldSc){_prevScTop=_oldSc.scrollTop;_prevScLeft=_oldSc.scrollLeft;}
+  }
+  _tblHost.innerHTML=html;
+  if(opts&&opts.keepScroll&&_prevScTop!==null){
+    const _newSc=_tblHost&&_tblHost.querySelector('.tscroll');
+    if(_newSc){_newSc.scrollTop=_prevScTop;_newSc.scrollLeft=_prevScLeft;}
+  }
 }
 
 // ── Summary ──
