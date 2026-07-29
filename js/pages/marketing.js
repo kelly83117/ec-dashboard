@@ -1688,9 +1688,15 @@ Object.assign(App, {
     //   調整全刪光 → 重新統計得 0 個 → 該日誌段落自動被清空
     // 淨利表：仍以「登入者」為對象（未變），只有 3 位員工登入時才寫
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
-    // ⚠️ 這份表在 daily.js:1631 有一份 ADJ_SHOP_TO_PERSON，內容必須一致。
-    //    改這裡一定要一起改那裡（2026-07-28 曾因兩份分岔導致歸屬錯誤）。
-    const SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '洪嘉蓮', '森之旅': '陳君葳', '維克': '郭雅琪' };
+    // ⚠️ 這份表在 daily.js:1639 有一份 ADJ_SHOP_TO_PERSON，內容必須一致。改這裡一定要一起改那裡。
+    // ⚠️ 2026-07-29 更正：玩樂是郭雅琪 2026/04 起接手，先前寫成洪嘉蓮是錯的。
+    // ⚠️ 維克目前無人負責，值填 '未指派'。這個通路是老闆指定要保留的，不可以從表裡移除 ——
+    //    marketing.js 的 INSIGHT_SHOPS = Object.keys(SHOP_TO_PERSON) 由本表 key 推導，
+    //    少一個通路 = 該通路的洞察活動完全不被統計，而且不報錯。
+    // ⚠️ 已知限制：'未指派' 不在硬寫的 ALLOWED_NAMES 裡，工作日誌月曆/卡片目前不會顯示它
+    //    （daily.js 約 273 行的 filter 會濾掉）。這是已知的顯示缺口，另排處理。
+    //    有人接手維克時把名字填進來即可自動正確。
+    const SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '郭雅琪', '森之旅': '陳君葳', '維克': '未指派' };
     const userName = this.currentUser && this.currentUser.name;
     const usernameId = this.currentUser && this.currentUser.username;
     if (!userName) return;
