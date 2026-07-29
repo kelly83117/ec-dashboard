@@ -23,9 +23,6 @@ Object.assign(App, {
       this.bindD2PricingTab();
     }
     // d2 新品毛利表
-    if (deptId === 'd2' && this.route === 'office-d2-margin') {
-      this.bindD2MarginTab();
-    }
     // d1 insight 子頁：洞察表上傳按鈕
     if (deptId === 'd1' && this.route === 'office-d1-insight') {
       this.bindInsightTab();
@@ -905,7 +902,6 @@ Object.assign(App, {
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId === 'd2' && subRoute === 'kpi' ? this.renderD2KpiTabHtml() : ''}
       ${deptId === 'd2' && subRoute === 'pricing' ? this.renderD2PricingTabHtml() : ''}
-      ${deptId === 'd2' && subRoute === 'margin' ? this.renderD2MarginTabHtml() : ''}
       ${deptId === 'd3' ? `
         <div class="d3-tab-layout">
           <div class="d3-tab-bar">${tabBar}</div>
@@ -1141,7 +1137,7 @@ Object.assign(App, {
       </div>`;
 
     const activeStab = Store.get('ec.d2.kpi.stab', '議價表');
-    const stabNames = ['選品','議價表','叫貨出錯率','加分項','扣分項'];
+    const stabNames = ['選品','新品毛利表','議價表','叫貨出錯率','加分項','扣分項'];
     const stabTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
       ${stabNames.map(t => `<button class="d2-stab" data-t="${t}" style="padding:6px 16px;border-radius:20px;border:1px solid ${activeStab===t?'#059669':'#e5e7eb'};background:${activeStab===t?'#059669':'#fff'};color:${activeStab===t?'#fff':'#374151'};font-size:13px;font-weight:${activeStab===t?'700':'400'};cursor:pointer">${t}</button>`).join('')}
     </div>`;
@@ -1289,6 +1285,7 @@ Object.assign(App, {
         </table></div>
       </div>`;
     })()
+    : activeStab === '新品毛利表' ? this.renderD2MarginTabHtml()
     : (() => {
       const needStabQ = ['叫貨出錯率','扣分項'].includes(activeStab);
       return `${needStabQ ? stabQTabsHtml : ''}<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${activeStab} — 尚無資料，開發中</div>`;
@@ -1512,58 +1509,8 @@ Object.assign(App, {
       if (list[+cb.dataset.i]) { list[+cb.dataset.i].changed = cb.checked; Store.set(storeKey, list); }
     }));
 
-    // 新品毛利表
-    const mgForm = document.getElementById('mg-form');
-    if (mgForm) {
-      const mgQ = Store.get('ec.d2.kpi.stabQ', Store.get('ec.d2.kpi.quarter', 'Q3'));
-      const mgKey = mgQ === 'Q3' ? 'ec.d2.margin' : `ec.d2.margin.${mgQ.toLowerCase()}`;
-      const mgSaveBtn = document.getElementById('mg-save');
-      let mgEditIdx = -1;
-      const mgFields = ['mg-name','mg-cost','mg-rev'];
-      const clearMg = () => {
-        mgFields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-        mgEditIdx = -1;
-        mgSaveBtn.textContent = '儲存';
-        mgForm.style.display = 'none';
-      };
-      document.getElementById('mg-add-btn')?.addEventListener('click', () => {
-        if (mgForm.style.display !== 'none') { clearMg(); return; }
-        clearMg(); mgForm.style.display = '';
-      });
-      document.getElementById('mg-cancel')?.addEventListener('click', clearMg);
-      mgSaveBtn?.addEventListener('click', () => {
-        const name = document.getElementById('mg-name')?.value.trim();
-        if (!name) { showToast('請填寫品名'); return; }
-        const entry = {
-          name,
-          cost: document.getElementById('mg-cost')?.value || '',
-          rev: document.getElementById('mg-rev')?.value || '',
-        };
-        const list = Store.get(mgKey, []);
-        if (mgEditIdx >= 0) { list[mgEditIdx] = entry; } else { list.push(entry); }
-        Store.set(mgKey, list);
-        clearMg();
-        this.render();
-      });
-      document.querySelectorAll('.mg-edit').forEach(btn => btn.addEventListener('click', () => {
-        const list = Store.get(mgKey, []);
-        const r = list[+btn.dataset.i];
-        if (!r) return;
-        mgEditIdx = +btn.dataset.i;
-        document.getElementById('mg-name').value = r.name || '';
-        document.getElementById('mg-cost').value = r.cost || '';
-        document.getElementById('mg-rev').value = r.rev || '';
-        mgSaveBtn.textContent = '更新';
-        mgForm.style.display = '';
-        mgForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }));
-      document.querySelectorAll('.mg-del').forEach(btn => btn.addEventListener('click', () => {
-        const list = Store.get(mgKey, []);
-        list.splice(+btn.dataset.i, 1);
-        Store.set(mgKey, list);
-        this.render();
-      }));
-    }
+    // 新品毛利表（委派給 bindD2MarginTab）
+    this.bindD2MarginTab();
   },
 
   renderFestivalCalendarTab() {
