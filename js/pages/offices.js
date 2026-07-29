@@ -1779,7 +1779,11 @@ Object.assign(App, {
     const { logistics, name, origCost, landFreight, weight, price, roas, volume, store, website, note } = inputs;
     const c = this._prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume);
     const existingRows = window.__pricingData?.[sheet] || [];
-    const cols = existingRows.length > 0 ? Object.keys(existingRows[0]) : [];
+    const baseCols = existingRows.length > 0 ? Object.keys(existingRows[0]) : [];
+    // Victor 的 Y 欄「進貨」是 URL，JSON 未匯出時手動補上
+    const cols = (sheet === 'Victor' && !baseCols.includes('進貨'))
+      ? [...baseCols, '進貨']
+      : baseCols;
     const row = { __custom: true, __id: Date.now() };
     for (const col of cols) {
       if (col === '集運') row[col] = logistics || '';
@@ -1804,6 +1808,7 @@ Object.assign(App, {
       else if (col.includes('ROAS')) row[col] = roas || null;
       else if (col === '月銷量') row[col] = volume || null;
       else if (col === '進貨') row[col] = (sheet === 'Victor') ? (website || '') : (volume || null);
+      else if (col === '網站') row[col] = website || '';
       else if (col.includes('淨利潤')) row[col] = c.淨利潤;
       else if (col.includes('預估投入')) row[col] = c.預估投入;
       else if (col === '網站') row[col] = website || '';
@@ -1956,7 +1961,10 @@ Object.assign(App, {
     const sheetData = window.__pricingData[activeSheet] || [];
     // 優先從非自訂的 Excel 列取欄位順序，避免自訂列 key 順序不一致
     const refRow = sheetData.find(r => !r.__custom) || sheetData[0];
-    const allCols = refRow ? Object.keys(refRow).filter(k => !k.startsWith('__')) : [];
+    const baseCols = refRow ? Object.keys(refRow).filter(k => !k.startsWith('__')) : [];
+    // 合併自訂列可能新增的欄（例如 Victor 的「進貨」URL 欄）
+    const customExtraCols = sheetData.filter(r => r.__custom).flatMap(r => Object.keys(r).filter(k => !k.startsWith('__') && !baseCols.includes(k)));
+    const allCols = [...baseCols, ...new Set(customExtraCols)];
     const coreCols = this._prCoreCols(allCols);
     const coreTypes = coreCols.map(c => this._prColType(c, activeSheet));
 
