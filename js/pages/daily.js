@@ -1628,11 +1628,17 @@ function collectAdjustments() {
 //   通路→人 對應寫在本檔（不引 marketing.js；洞察表日後將廢除）。
 // ============================================================================
 const ADJ_ALLOWED_NAMES  = ['陳君葳', '洪嘉蓮', '郭雅琪'];              // 顯示順序
-// ⚠️ 這份表在 marketing.js 的 _updateDailyProgressFromAdjustments 內
-//    有一份 SHOP_TO_PERSON，內容必須一致。改這裡一定要一起改那裡。
-const ADJ_SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '洪嘉蓮', '森之旅': '陳君葳', '維克': '郭雅琪' };
+// ⚠️ 這份表在 marketing.js:1699 有一份 SHOP_TO_PERSON，內容必須一致。改這裡一定要一起改那裡。
+// ⚠️ 2026-07-29 更正：玩樂是郭雅琪 2026/04 起接手，先前寫成洪嘉蓮是錯的。
+// ⚠️ 維克目前無人負責，值填 '未指派'。這個通路是老闆指定要保留的，不可以從表裡移除 ——
+//    marketing.js 的 INSIGHT_SHOPS = Object.keys(SHOP_TO_PERSON) 由本表 key 推導，
+//    少一個通路 = 該通路的洞察活動完全不被統計，而且不報錯。
+// ⚠️ 已知限制：'未指派' 不在硬寫的 ALLOWED_NAMES 裡，工作日誌月曆/卡片目前不會顯示它
+//    （daily.js 約 273 行的 filter 會濾掉）。這是已知的顯示缺口，另排處理。
+//    有人接手維克時把名字填進來即可自動正確。
+const ADJ_SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '郭雅琪', '森之旅': '陳君葳', '維克': '未指派' };
 const ADJ_MAX_ROWS = 10;                                              // 每人預設顯示筆數
-// 人 → 通路（反查）：{ 洪嘉蓮:['好麻吉','玩樂'], 陳君葳:['森之旅'], 郭雅琪:['維克'] }
+// 人 → 通路（反查）：{ 洪嘉蓮:['好麻吉'], 郭雅琪:['玩樂'], 陳君葳:['森之旅'], 未指派:['維克'] }
 const ADJ_PERSON_TO_SHOPS = Object.keys(ADJ_SHOP_TO_PERSON).reduce((m, shop) => {
   const p = ADJ_SHOP_TO_PERSON[shop];
   (m[p] = m[p] || []).push(shop);
