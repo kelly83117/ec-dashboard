@@ -1825,59 +1825,50 @@ Object.assign(App, {
         <input id="${id}" type="${type}" placeholder="${placeholder}"
           style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;text-align:${type==='number'?'right':'left'}">
       </label>`;
-    const calcRow = (label, id, style='') =>
-      `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #f3f4f6">
-        <span style="font-size:11px;color:#6b7280">${label}</span>
-        <span id="${id}" style="font-size:13px;font-weight:600${style?';'+style:''}">&nbsp;</span>
-      </div>`;
+    const readOnly = (id, label, color='#1a7a6e') =>
+      `<label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#6b7280;font-weight:600">
+        ${label}
+        <div id="${id}" style="padding:7px 10px;border:1px solid #d1fae5;border-radius:6px;font-size:13px;font-weight:700;color:${color};background:#f0fdf4;text-align:right;min-height:34px">—</div>
+      </label>`;
     return `
     <div id="pr-add-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:2px solid #059669">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
-        <div>
-          <div style="font-size:12px;font-weight:700;color:#059669;margin-bottom:10px">✏️ 輸入欄位</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            ${inp('pf-name','產品名稱','text','請輸入商品名稱')}
-            ${inp('pf-logistics','集運','text','普海/特海/空運')}
-            ${inp('pf-orig','原始成本','number','0','¥ 人民幣')}
-            ${inp('pf-land','陸〉陸運費','number','0','¥ 人民幣')}
-            ${inp('pf-weight','單品重量','number','0','kg')}
-            ${inp('pf-price','售價','number','0','NT$')}
-            ${inp('pf-roas','廣告ROAS','number','','選填')}
-            ${inp('pf-volume','月銷量','number','','選填')}
-            ${inp('pf-store','賣場','text','蝦皮/官網')}
-            ${inp('pf-note','備註','text','')}
-          </div>
-          <div style="display:flex;gap:8px;margin-top:12px">
-            <button id="pr-form-save" style="padding:8px 20px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
-            <button id="pr-form-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
-          </div>
-        </div>
-        <div>
-          <div style="font-size:12px;font-weight:700;color:#1a7a6e;margin-bottom:10px">🔢 自動計算（費率：匯率${p.rmb}、陸>台運費/kg ${p.ship}元）</div>
-          <div style="background:#fff;border:1px solid #d1fae5;border-radius:8px;padding:10px 14px">
-            ${calcRow('陸>台運費（重量×'+p.ship+'）','pc-ship')}
-            ${calcRow('實際成本（台幣）','pc-cost','color:#1a7a6e')}
-            <div style="height:6px"></div>
-            ${p.tax?calcRow('稅金（'+p.tax*100+'%）','pc-tax'):''}
-            ${p.ads?calcRow('蝦皮廣告（'+p.ads*100+'%）','pc-ads'):''}
-            ${p.fixed?calcRow('運費+包材+開發票（固定'+p.fixed+'元）','pc-fixed'):''}
-            ${p.txFee?calcRow('成交手續費（'+p.txFee*100+'%）','pc-tx'):''}
-            ${p.promo?calcRow('活動服務費（'+p.promo*100+'%）','pc-promo'):''}
-            ${p.ret?calcRow('退貨率（'+p.ret*100+'%）','pc-ret'):''}
-            ${calcRow('蝦皮總成本','pc-platform')}
-            ${calcRow('入帳金額','pc-income')}
-            ${p.incTax?calcRow('銷項稅金（'+p.incTax*100+'%）','pc-inctax'):''}
-            <div style="height:6px"></div>
-            ${calcRow('實際毛利','pc-profit')}
-            ${calcRow('獲利百分比','pc-pct')}
-            ${calcRow('成本比例','pc-costratio')}
-            <div id="pc-volume-row" style="display:none">
-              ${calcRow('淨利潤（毛利×月銷量）','pc-netloss')}
-              ${calcRow('預估投入金額','pc-invest')}
-            </div>
-          </div>
-        </div>
+      <div style="font-size:11px;color:#6b7280;margin-bottom:10px">費率：匯率 ${p.rmb}、陸>台運費 ${p.ship}元/kg${p.ads?'、廣告 '+p.ads*100+'%':''}${p.tax?'、稅 '+p.tax*100+'%':''}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:start">
+        ${inp('pf-name','產品名稱','text','請輸入商品名稱')}
+        ${inp('pf-logistics','集運','text','普海/特海/空運')}
+        ${inp('pf-store','賣場','text','蝦皮/官網')}
+        ${inp('pf-note','備註','text','')}
+
+        ${inp('pf-orig','原始成本','number','0','¥ 人民幣')}
+        ${inp('pf-land','陸〉陸運費','number','0','¥ 人民幣')}
+        ${inp('pf-weight','單品重量','number','0','kg')}
+        ${readOnly('pc-cost','▶ 實際成本（自動）')}
+
+        ${inp('pf-price','售價','number','0','NT$')}
+        ${readOnly('pc-pct','▶ 獲利百分比（自動）','#059669')}
+        ${readOnly('pc-profit','▶ 實際毛利（自動）')}
+        ${readOnly('pc-income','▶ 入帳金額（自動）','#374151')}
+
+        ${inp('pf-roas','廣告ROAS','number','','選填')}
+        ${inp('pf-volume','月銷量','number','','選填')}
+        ${readOnly('pc-netloss','▶ 淨利潤（自動）','#374151')}
+        ${readOnly('pc-invest','▶ 預估投入（自動）','#374151')}
       </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button id="pr-form-save" style="padding:8px 20px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+        <button id="pr-form-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+      </div>
+      <!-- 隱藏欄位供 _updatePreview 使用（不顯示但存值） -->
+      <span id="pc-ship" style="display:none"></span>
+      <span id="pc-tax" style="display:none"></span>
+      <span id="pc-ads" style="display:none"></span>
+      <span id="pc-fixed" style="display:none"></span>
+      <span id="pc-tx" style="display:none"></span>
+      <span id="pc-promo" style="display:none"></span>
+      <span id="pc-ret" style="display:none"></span>
+      <span id="pc-platform" style="display:none"></span>
+      <span id="pc-inctax" style="display:none"></span>
+      <span id="pc-costratio" style="display:none"></span>
     </div>`;
   },
 
