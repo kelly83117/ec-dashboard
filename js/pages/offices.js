@@ -1680,7 +1680,7 @@ Object.assign(App, {
   },
 
   // ── 訂價表 ──────────────────────────────────────────────
-  PRICING_SHEETS_ORDER: ['訂價','導流品','Victor','inna','Vivian','官網','Doris'],
+  PRICING_SHEETS_ORDER: ['訂價','導流品','Victor','inna','Vivian'],
 
   // 各工作表費率常數（依 Excel $C$1 匯率、G欄 運費/kg¥、row2 各費率）
   // ship = 陸>台運費 ¥/kg（與原始成本同樣換匯，故實際成本 = (C+D+E×ship)×rmb）
