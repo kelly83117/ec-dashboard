@@ -7112,7 +7112,7 @@ function momoRenderOptlogSection(shop,sku){
     <div style="margin-bottom:8px">${rows}</div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <select id="momo-optlog-type" class="mm-sel" style="font-size:12px;padding:5px 8px;border:1px solid #e5e7eb;border-radius:7px">${MOMO_OPTLOG_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select>
-      <input id="momo-optlog-note" type="text" placeholder="做了什麼、為什麼" style="flex:1;min-width:160px;font-size:12px;padding:6px 9px;border:1px solid #e5e7eb;border-radius:7px" onkeydown="if(event.key==='Enter')momoAddOptlog('${shop}','${sku}')">
+      <input id="momo-optlog-note" type="text" placeholder="例：調降售價 15%" style="flex:1;min-width:160px;font-size:12px;padding:6px 9px;border:1px solid #e5e7eb;border-radius:7px" onkeydown="if(event.key==='Enter')momoAddOptlog('${shop}','${sku}')">
       <button onclick="momoAddOptlog('${shop}','${sku}')" class="mm-btn-primary" style="font-size:12px;padding:6px 14px">＋ 新增</button>
     </div>`;
 }
@@ -7201,7 +7201,27 @@ function momoBatchSplitDrag(ev, shop){
 const _momoAddPpOverride={}; // shop -> 進價是否被手動覆蓋（add 模式）
 const _MOMO_INP='width:100%;padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;outline:none;box-sizing:border-box';
 const _MOMO_LB='font-size:11px;color:#6b7280;font-weight:600';
-function momoDefaultShip(shop){ return shop==='乙配'?0:77; }   // §0：乙配運費+包材預設 0，甲配 77
+function momoDefaultShip(shop){ return shop==='乙配'?0:77; }   // fallback：無對帳資料可估時退回的寫死值（甲77/乙0）
+const MOMO_PACKAGING_COST=3;   // 固定包材（具名常數，勿散落魔術數字）
+// 新增商品「運費+包材」預設值 = 近3月每件平均運費 + 包材。甲配=對帳單物流費(第三方+超商)、乙配=寄倉分攤運費，÷該月出貨件數(reconQty+retQty)。
+//   回 {ok, value, freightAvg, n, months}。ok=false → 無足夠資料，value 退 momoDefaultShip（上層標示，不靜默）。MO+ 不動。
+function momoAvgShip(shop){
+  if(shop!=='甲配'&&shop!=='乙配') return {ok:false, value:momoDefaultShip(shop), n:0};
+  const seen={};   // month → {freight(未稅), qty(出貨件數)}
+  const take=(m,rec)=>{ if((m in seen)||!rec||!rec.summary||!rec.skus) return; const f=rec.summary.fees||{};
+    const freight = shop==='甲配' ? ((f['物流費用-第三方物流']||0)+(f['物流費用-超商取貨']||0))/1.05 : (f['寄倉分攤運費']||0)/1.05;
+    let qty=0; Object.keys(rec.skus).forEach(sku=>{ const s=rec.skus[sku]; qty+=(s.reconQty||0)+(s.retQty||0); });
+    if(qty>0 && freight>0) seen[m]={freight, qty}; };
+  const scan=store=>{ if(!store) return; const pf='ec_momo_reconcile|'+shop+'|'; Object.keys(store).forEach(k=>{ if(k.indexOf(pf)===0) take(k.slice(pf.length), store[k]); }); };
+  try{ scan(Store._profitMem); scan(Store._mem);
+    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); const pf='ec_momo_reconcile|'+shop+'|'; if(k&&k.indexOf(pf)===0&&!(k.slice(pf.length) in seen)){ try{ take(k.slice(pf.length), JSON.parse(localStorage.getItem(k))); }catch(e){} } }
+  }catch(e){}
+  const months=Object.keys(seen).sort().slice(-3);   // 最近3月
+  if(!months.length) return {ok:false, value:momoDefaultShip(shop), n:0};
+  const tf=months.reduce((s,m)=>s+seen[m].freight,0), tq=months.reduce((s,m)=>s+seen[m].qty,0);
+  const freightAvg = tq>0 ? tf/tq : 0;
+  return { ok:freightAvg>0, freightAvg, n:months.length, months, value: freightAvg>0 ? (Math.round(freightAvg)+MOMO_PACKAGING_COST) : momoDefaultShip(shop) };
+}
 function momoRenderBatch(shop){
   const c=document.getElementById('momo-sub-content-'+shop);
   if(!c) return;
@@ -7340,18 +7360,22 @@ function momoRenderBatchAdd(shop){
   const body=document.getElementById('momo-batch-body-'+shop);
   if(!body) return;
   _momoAddPpOverride[shop]=false;
+  const shipInfo=momoAvgShip(shop);   // 運費+包材預設 = 近3月每件平均運費 + 包材
+  const shipSrc = shipInfo.ok
+    ? `<span class="mm-cost-src-ok">近 ${shipInfo.n} 月平均運費 ${Math.round(shipInfo.freightAvg)} + 包材 ${MOMO_PACKAGING_COST}</span>`
+    : `<span class="mm-cost-src-warn">無足夠對帳資料可估運費，暫用預設 ${shipInfo.value}，請自行確認</span>`;
   body.innerHTML=`
     <div style="max-width:600px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
         <div><label style="${_MOMO_LB}">商品編號（選填，留空自動產生 TEMP-）</label><input id="momo-add-sku-${shop}" type="text" style="${_MOMO_INP}"></div>
-        <div><label style="${_MOMO_LB}">原廠編號（必填）</label><input id="momo-add-origin-${shop}" type="text" oninput="momoAddOriginLookup('${shop}')" placeholder="跨通路關聯與成本比對的 key" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">原廠編號（必填）</label><input id="momo-add-origin-${shop}" type="text" oninput="momoAddOriginLookup('${shop}')" placeholder="例：E192-02" style="${_MOMO_INP}"></div>
       </div>
       <div style="margin-bottom:10px"><label style="${_MOMO_LB}">商品名稱（必填）</label><input id="momo-add-name-${shop}" type="text" style="${_MOMO_INP}"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:4px">
         <div><label style="${_MOMO_LB}">成本（必填）</label><input id="momo-add-cost-${shop}" type="number" oninput="momoAddRecalc('${shop}')" style="${_MOMO_INP}"><div id="momo-add-cost-src-${shop}" style="font-size:11px;margin-top:2px;line-height:1.4"></div></div>
         <div><label style="${_MOMO_LB}">售價含稅（必填）</label><input id="momo-add-sp-${shop}" type="number" oninput="momoAddRecalc('${shop}')" style="${_MOMO_INP}"></div>
         <div><label style="${_MOMO_LB}">進價含稅（必填）</label><input id="momo-add-pp-${shop}" type="number" oninput="momoAddPpInput('${shop}')" style="${_MOMO_INP}"><a id="momo-add-revert-${shop}" onclick="momoAddRevertPp('${shop}')" style="display:none;font-size:11px;color:#5b5fcf;cursor:pointer">↺ 改回公式值(售價×75%)</a></div>
-        <div><label style="${_MOMO_LB}">運費+包材</label><input id="momo-add-ship-${shop}" type="number" value="${momoDefaultShip(shop)}" oninput="momoAddRecalc('${shop}')" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">運費+包材</label><input id="momo-add-ship-${shop}" type="number" value="${shipInfo.value}" oninput="momoAddRecalc('${shop}')" style="${_MOMO_INP}"><div style="font-size:11px;margin-top:2px;line-height:1.4">${shipSrc}</div></div>
       </div>
       <div id="momo-add-preview-${shop}" style="font-size:13px;margin:12px 0"><span style="color:#9ca3af">成本 / 進價 / 售價填齊後即時計算毛利率</span></div>
       <button onclick="momoBatchSubmitAdd('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">新增商品</button>
@@ -7425,7 +7449,7 @@ function momoBatchSubmitAdd(shop){
   const origin=g('origin').value.trim();
   const shipRaw=parseFloat(g('ship').value);
   if(!name){ alert('商品名稱必填'); return; }
-  if(!origin){ alert('原廠編號必填（跨通路關聯與成本比對的 key）'); return; }   // 只約束新增；編輯現有商品不擋（舊品空值率甲7.1%/乙15.4%）
+  if(!origin){ alert('原廠編號必填（用來跨通路對應、帶出成本）'); return; }   // 只約束新增；編輯現有商品不擋（舊品空值率甲7.1%/乙15.4%）
   if(!(cost>=0)||!(pp>=0)||!(sp>=0)){ alert('成本 / 進價 / 售價必填且為 ≥0 的數字'); return; }
   const products=momoLoadProducts(shop);
   if(!sku) sku='TEMP-'+Date.now();
@@ -8384,7 +8408,7 @@ function momoSummaryCardHTML(shop,month){
     `}
     <div style="margin-top:12px">
       <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px">Action Plan</div>
-      <textarea id="momo-ap-${shop}" onblur="momoActionPlanSave('${shop}')" placeholder="這個月的行動計畫…（離開輸入框自動存）" style="width:100%;min-height:64px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;outline:none;box-sizing:border-box;resize:vertical">${apVal}</textarea>
+      <textarea id="momo-ap-${shop}" onblur="momoActionPlanSave('${shop}')" placeholder="這個月的行動計畫…" style="width:100%;min-height:64px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;outline:none;box-sizing:border-box;resize:vertical">${apVal}</textarea>
       <div id="momo-ap-status-${shop}" style="font-size:11px;margin-top:3px;min-height:14px"></div>
     </div>
     <div style="font-size:10px;color:#9ca3af;margin-top:10px;line-height:1.5">淨利率依商品目前成本/售價計算，非當期歷史成本（規格 §199）</div>
