@@ -1758,20 +1758,19 @@ Object.assign(App, {
     const 成交 = r2(price * p.txFee);
     const 活動 = r2(price * p.promo);
     const 退貨 = r2(price * p.ret);
-    // 導流品：售價 < 100 不加固定費；其他分頁一律 +9
-    const 固定 = (sheet === '導流品' && price < 100) ? 0 : p.fixed;
-    // Excel: 蝦皮總成本 = 稅金+成交+活動+退貨+固定費
-    const 蝦皮總成本 = r2(稅金 + 成交 + 活動 + 退貨 + 固定);
-    // Excel: 入帳 = 售價 - 蝦皮總成本
-    const 入帳 = r2(price - 蝦皮總成本);
-    // Excel: 實際毛利 = 入帳 - 實際成本
+    // Excel: 入帳 = 售價-(稅金+成交+活動+退貨)，即 I-(K+SUM(L:N))
+    const 平台費 = r2(稅金 + 成交 + 活動 + 退貨);
+    const 入帳 = r2(price - 平台費);
+    // Excel: 蝦皮總成本 = SUM(K:P) = 平台費+入帳+銷項 = 售價
+    const 蝦皮總成本 = r2(price);
+    // Excel: 實際毛利 = 入帳 - 實際成本 (O-H)
     const 實際毛利 = r2(入帳 - 實際成本);
-    // Excel: 獲利% = 實際毛利 / 售價
+    // Excel: 獲利% = 實際毛利 / 售價 (Q/I)
     const 獲利百分比 = price > 0 ? r2(實際毛利 / price * 10000) / 10000 : 0;
     const 成本率 = price > 0 ? r2(實際成本 / price * 10000) / 10000 : 0;
     const 淨利潤 = volume ? r2(實際毛利 * volume) : null;
     const 預估投入 = volume ? r2(volume * price) : null;
-    return { 陸台運費NT, 實際成本, 稅金, 固定, 成交, 活動, 退貨, 蝦皮總成本, 入帳, 實際毛利, 獲利百分比, 成本率, 淨利潤, 預估投入 };
+    return { 陸台運費NT, 實際成本, 稅金, 成交, 活動, 退貨, 蝦皮總成本, 入帳, 實際毛利, 獲利百分比, 成本率, 淨利潤, 預估投入 };
   },
 
   _prBuildRow(sheet, inputs) {
