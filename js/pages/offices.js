@@ -2113,6 +2113,7 @@ Object.assign(App, {
       if (!r) return;
 
       const cols = Object.keys(r).filter(c => !c.startsWith('__'));
+      const nameCol2 = cols.find(c => c === '產品名稱' || c === '試算名稱') || null;
       const origCostCol = cols.find(c => c === '原始成本') || null;
       const landCol = cols.find(c => c.includes('陸〉陸') || c.includes('陸>陸')) || null;
       const weightCol = cols.find(c => c.includes('陸>台') || c.includes('陸〉台')) || null;
@@ -2137,6 +2138,10 @@ Object.assign(App, {
       detTr.className = 'pr-detail-row';
       detTr.innerHTML = `<td colspan="${colspan}" style="padding:14px;background:#f8fafc;border-bottom:2px solid #2563eb">
         <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
+          ${nameCol2 ? `<label style="display:flex;flex-direction:column;gap:3px">
+            <span style="font-size:10px;color:#6b7280;font-weight:600">產品名稱</span>
+            <input id="pe-name" type="text" value="${escapeHtml(String(r[nameCol2]||''))}" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:200px">
+          </label>` : ''}
           ${origCostCol ? numInp('orig','原始成本', r[origCostCol],'¥') : ''}
           ${landCol     ? numInp('land','陸〉陸運費',r[landCol],'¥') : ''}
           ${weightCol   ? numInp('wt',  '重量',      r[weightCol],'kg') : ''}
@@ -2186,6 +2191,7 @@ Object.assign(App, {
         const lf = parseFloat(document.getElementById('pe-land')?.value)  || (landCol     ? +r[landCol]     : 0);
         const wt = parseFloat(document.getElementById('pe-wt')?.value)    || (weightCol   ? +r[weightCol]   : 0);
         const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol    ? +r[priceCol]    : 0);
+        const name2   = document.getElementById('pe-name')?.value  ?? (nameCol2   ? r[nameCol2]   : '');
         const note    = document.getElementById('pe-note')?.value ?? (noteCol    ? r[noteCol]    : '');
         const website = document.getElementById('pe-web')?.value  ?? (websiteCol ? r[websiteCol] : '');
         const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, +(r['廣告ROAS']||0), +(r['月銷量']||0));
@@ -2210,6 +2216,7 @@ Object.assign(App, {
           else if (col.includes('以下)') || col === '成本') newRow[col] = c.成本率;
           else if (col.includes('淨利潤')) newRow[col] = c.淨利潤;
           else if (col.includes('預估投入')) newRow[col] = c.預估投入;
+          else if (col === '產品名稱' || col === '試算名稱') newRow[col] = name2;
           else if (col === '備註' || col === '行銷方法') newRow[col] = note;
           else if (col === '網站' || (col === '進貨' && activeSheet === 'Victor')) newRow[col] = website;
         }
