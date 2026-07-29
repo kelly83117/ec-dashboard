@@ -1680,7 +1680,7 @@ Object.assign(App, {
   },
 
   // ── 訂價表 ──────────────────────────────────────────────
-  PRICING_SHEETS_ORDER: ['訂價','導流品','Victor','inna','Vivian','官網','Doris','貨櫃商品成本','特拉拉','FB訂價表','運費試算表'],
+  PRICING_SHEETS_ORDER: ['訂價','導流品','Victor','inna','Vivian','官網','Doris'],
 
   // 各工作表費率常數（依 Excel row2 常數欄）
   PRICING_SHEET_PARAMS: {
