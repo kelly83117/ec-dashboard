@@ -2043,13 +2043,15 @@ Object.assign(App, {
         <div><h3>💹 訂價表</h3><p>蝦皮 / FB 商品訂價與利潤分析</p></div>
         <div style="display:flex;gap:8px;align-items:center">
           <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:160px;font-family:inherit">
-          <button id="pr-col-btn" style="padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:7px;font-size:13px;cursor:pointer;color:var(--text)">☰ 欄位</button>
-          <button id="pr-filter-btn" style="padding:7px 14px;background:${Object.keys(numFilters).length?'#dbeafe':'var(--bg)'};border:1px solid ${Object.keys(numFilters).length?'#2563eb':'var(--border)'};border-radius:7px;font-size:13px;cursor:pointer;color:${Object.keys(numFilters).length?'#2563eb':'var(--text)'}">⊟ 範圍${sort?.col?` · ⇅`:''}${Object.keys(numFilters).length?` (${Object.keys(numFilters).length})`:''}</button>
           <button id="pr-rates-btn" style="padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:7px;font-size:13px;cursor:pointer;color:var(--text)">⚙ 費率</button>
           <button id="pr-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">＋ 新增</button>
         </div>
       </div>
       <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">${sheetTabs}</div>
+      <div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center">
+        <button id="pr-col-btn" style="padding:5px 14px;background:var(--bg);border:1px solid var(--border);border-radius:7px;font-size:13px;cursor:pointer;color:var(--text)">☰ 欄位</button>
+        <button id="pr-filter-btn" style="padding:5px 14px;background:${Object.keys(numFilters).length?'#dbeafe':'var(--bg)'};border:1px solid ${Object.keys(numFilters).length?'#2563eb':'var(--border)'};border-radius:7px;font-size:13px;cursor:pointer;color:${Object.keys(numFilters).length?'#2563eb':'var(--text)'}">⊟ 範圍${sort?.col?` · ⇅`:''}${Object.keys(numFilters).length?` (${Object.keys(numFilters).length})`:''}</button>
+      </div>
       ${this._prRatesFormHtml()}
       ${this._prColPanelHtml(allCols, activeSheet)}
       ${this._prNumFilterPanelHtml(coreCols, coreTypes, activeSheet)}
