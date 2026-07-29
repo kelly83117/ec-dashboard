@@ -386,6 +386,14 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-kpi-d{font-size:11px;font-weight:600;}
 .mm-kpi-d .base{color:#c7cad1;font-weight:400;}
 .mm-verify{font-size:11px;margin-bottom:6px;}
+/* 自驗：通過→收合小標記（點開看完整）；失敗→展開警示、不可收 */
+.mm-verify-fold{font-size:11px;margin:6px 0;}
+.mm-verify-fold summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:4px;font-weight:600;user-select:none;}
+.mm-verify-fold summary::-webkit-details-marker{display:none;}
+.mm-verify-fold summary::before{content:'▸';color:#9ca3af;font-size:9px;}
+.mm-verify-fold[open] summary::before{content:'▾';}
+.mm-verify-body{margin-top:3px;padding-left:13px;}
+.mm-verify-err{font-size:12px;font-weight:700;margin:6px 0;padding:6px 10px;border-radius:7px;background:#fef2f2;border:1px solid #fecaca;color:#dc2626;}
 /* 商品數統計 總/上架/下架 */
 .mm-stat{font-size:12px;color:#9ca3af;font-weight:600;white-space:nowrap;}
 .mm-stat b{color:#374151;}
