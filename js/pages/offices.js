@@ -1866,7 +1866,7 @@ Object.assign(App, {
   // 核心欄位（主表顯示）— 名稱欄固定排第一
   _prCoreCols(cols) {
     const NAME_FIRST = ['產品名稱','試算名稱','編號'];
-    const OTHERS = new Set(['實際成本','商品成本','售價','ROI','賣場','備註','行銷方法','網站']);
+    const OTHERS = new Set(['實際成本','商品成本','售價','賣場','備註','行銷方法','網站']);
     const CONTAINS = ['獲利百分比'];
     const nameCol = NAME_FIRST.find(n => cols.includes(n));
     const rest = cols.filter(c => (OTHERS.has(c) || CONTAINS.some(k => c.includes(k))) && !NAME_FIRST.includes(c));
@@ -1893,6 +1893,8 @@ Object.assign(App, {
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:start">
         ${inp('pf-name','產品名稱','text','請輸入商品名稱')}
         ${inp('pf-note','備註','text','')}
+        ${inp('pf-website','網站連結','text','https://...')}
+        <div></div>
 
         ${inp('pf-orig','原始成本','number','0','¥ 人民幣')}
         ${inp('pf-land','陸〉陸運費','number','0','¥ 人民幣')}
@@ -2242,6 +2244,7 @@ Object.assign(App, {
         roas:        parseFloat(document.getElementById('pc-roas')?.innerText) || 0,
         volume:      0,
         store:       get('pf-store'),
+        website:     get('pf-website'),
         note:        get('pf-note'),
       };
       if (!inputs.name) { alert('請輸入產品名稱'); return; }
