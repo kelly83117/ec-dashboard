@@ -1349,7 +1349,15 @@ Object.assign(App, {
 
     return `
       ${quarterTabsHtml}
-      ${this.renderD2KpiSummaryHtml(activeQ, activeMonths, monthScores)}
+      <details id="kpi-summary-details" style="margin-bottom:18px;border:1px solid #d1fae5;border-radius:10px;overflow:hidden">
+        <summary style="cursor:pointer;padding:10px 16px;background:#f0fdf4;color:#1a7a6e;font-size:13px;font-weight:700;list-style:none;display:flex;align-items:center;justify-content:space-between;user-select:none">
+          <span>📊 計分架構（點擊展開）</span>
+          <span style="font-size:11px;opacity:.7">▼</span>
+        </summary>
+        <div style="padding:14px;background:#fff">
+          ${this.renderD2KpiSummaryHtml(activeQ, activeMonths, monthScores)}
+        </div>
+      </details>
       ${stabTabsHtml}
       ${stabContent}`;
   },
@@ -1680,23 +1688,74 @@ Object.assign(App, {
   },
 
   // ── 訂價表 ──────────────────────────────────────────────
-  PRICING_SHEETS_ORDER: ['訂價','導流品','Victor','inna','Vivian','官網','Doris'],
+  PRICING_SHEETS_ORDER: ['訂價','導流品','Victor','inna','Vivian'],
 
   // 各工作表費率常數（依 Excel $C$1 匯率、G欄 運費/kg¥、row2 各費率）
   // ship = 陸>台運費 ¥/kg（與原始成本同樣換匯，故實際成本 = (C+D+E×ship)×rmb）
   // incTax = 銷項稅金率（訂價表 Excel 顯示 None = 0，不含銷項稅）
   PRICING_SHEET_PARAMS: {
-    '訂價':    { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
-    '導流品':  { rmb:4.5, ship:9, tax:0.05, ads:0,    fixed:0, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
-    'Victor':  { rmb:4.5, ship:9, tax:0,    ads:0.10, fixed:9, txFee:0.08, promo:0.07, ret:0.02, incTax:0 },
-    'inna':    { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
-    'Vivian':  { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
-    '官網':    { rmb:4.5, ship:9, tax:0.07, ads:0,    fixed:9, txFee:0.08, promo:0,    ret:0,    incTax:0 },
-    'Doris':   { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.07, ret:0.02, incTax:0 },
+    '訂價':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '導流品':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'Victor':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'inna':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'Vivian':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '官網':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'Doris':   { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+  },
+
+  // 讀取費率：優先用 localStorage 儲存值，否則用預設
+  _prGetRates(sheet) {
+    const def = this.PRICING_SHEET_PARAMS[sheet] || this.PRICING_SHEET_PARAMS['訂價'];
+    const saved = Store.get('ec.pricing.rates', {});
+    return { ...def, ...(saved[sheet] || {}) };
+  },
+
+  // 費率設定面板 HTML
+  _prRatesFormHtml() {
+    const saved = Store.get('ec.pricing.rates', {});
+    const rows = this.PRICING_SHEETS_ORDER.map(sh => {
+      const d = this.PRICING_SHEET_PARAMS[sh];
+      const r = { ...d, ...(saved[sh] || {}) };
+      const inp = (field, val) =>
+        `<input data-sh="${sh}" data-field="${field}" type="number" step="0.01" value="${val}"
+          style="width:64px;padding:4px 6px;border:1px solid var(--border);border-radius:5px;font-size:12px;text-align:right;font-family:inherit">`;
+      return `<tr>
+        <td style="padding:6px 10px;font-weight:600;font-size:12px;white-space:nowrap">${sh}</td>
+        <td style="padding:4px 6px;text-align:center">${inp('tax',   (r.tax*100).toFixed(1))}</td>
+        <td style="padding:4px 6px;text-align:center">${inp('txFee',(r.txFee*100).toFixed(1))}</td>
+        <td style="padding:4px 6px;text-align:center">${inp('promo',(r.promo*100).toFixed(1))}</td>
+        <td style="padding:4px 6px;text-align:center">${inp('ret',  (r.ret*100).toFixed(1))}</td>
+        <td style="padding:4px 6px;text-align:center">${inp('fixed', r.fixed)}</td>
+      </tr>`;
+    }).join('');
+    return `<div id="pr-rates-panel" style="display:none;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--bg-secondary,#f9fafb)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-size:13px;font-weight:700;color:var(--text)">費率設定</span>
+        <div style="display:flex;gap:6px">
+          <button id="pr-rates-reset" style="padding:5px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;color:var(--text)">還原預設</button>
+          <button id="pr-rates-save"  style="padding:5px 12px;background:#059669;color:white;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">儲存</button>
+          <button id="pr-rates-close" style="padding:5px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;color:var(--text)">✕</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="border-collapse:collapse">
+          <thead><tr style="color:#6b7280;border-bottom:1px solid var(--border)">
+            <th style="padding:4px 10px;text-align:left;font-weight:600;font-size:12px">分頁</th>
+            <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">稅金%</th>
+            <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">成交%</th>
+            <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">活動%</th>
+            <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">退貨%</th>
+            <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">固定費(NT$)</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p style="font-size:10px;color:#9ca3af;margin:8px 0 0">※ 導流品售價 ≥ 100 時自動 +9（運費包材+開發票）</p>
+    </div>`;
   },
 
   _prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume) {
-    const p = this.PRICING_SHEET_PARAMS[sheet] || this.PRICING_SHEET_PARAMS['訂價'];
+    const p = this._prGetRates(sheet);
     const r2 = v => Math.round(v * 100) / 100;
     // Excel 公式：=(C+D+(E×G))*$C$1，G=運費/kg(¥)，$C$1=匯率
     // 陸>台運費也是人民幣，全部一起換匯
@@ -1704,28 +1763,35 @@ Object.assign(App, {
     const 陸台運費NT = r2(陸台運費RMB * p.rmb);
     const 實際成本 = r2((origCost + landFreight + 陸台運費RMB) * p.rmb);
     const 稅金 = r2(price * p.tax);
-    const 廣告 = r2(price * p.ads);
-    // 導流品：售價 ≥ 100 才加固定費用 9
-    const 固定 = (sheet === '導流品' && price < 100) ? 0 : p.fixed;
     const 成交 = r2(price * p.txFee);
     const 活動 = r2(price * p.promo);
     const 退貨 = r2(price * p.ret);
-    const 蝦皮總成本 = r2(稅金 + 廣告 + 固定 + 成交 + 活動 + 退貨);
-    const 入帳 = r2(price - 蝦皮總成本);
-    const 銷項稅金 = r2(入帳 * p.incTax);
-    const 實際毛利 = r2(入帳 - 實際成本 - 銷項稅金);
+    // Excel: 入帳 = 售價-(稅金+成交+活動+退貨)，即 I-(K+SUM(L:N))
+    const 平台費 = r2(稅金 + 成交 + 活動 + 退貨);
+    // 導流品售價 ≥ 100：固定費 +9（運費包材+開發票）
+    const 固定 = (sheet === '導流品' && price >= 100) ? 9 : 0;
+    const 入帳 = r2(price - 平台費 - 固定);
+    // Excel: 蝦皮總成本 = SUM(K:P) = 平台費+入帳+銷項 = 售價
+    const 蝦皮總成本 = r2(price);
+    // Excel: 實際毛利 = 入帳 - 實際成本 (O-H)
+    const 實際毛利 = r2(入帳 - 實際成本);
+    // Excel: 獲利% = 實際毛利 / 售價 (Q/I)
     const 獲利百分比 = price > 0 ? r2(實際毛利 / price * 10000) / 10000 : 0;
     const 成本率 = price > 0 ? r2(實際成本 / price * 10000) / 10000 : 0;
     const 淨利潤 = volume ? r2(實際毛利 * volume) : null;
     const 預估投入 = volume ? r2(volume * price) : null;
-    return { 陸台運費NT, 實際成本, 稅金, 廣告, 固定, 成交, 活動, 退貨, 蝦皮總成本, 入帳, 銷項稅金, 實際毛利, 獲利百分比, 成本率, 淨利潤, 預估投入 };
+    return { 陸台運費NT, 實際成本, 稅金, 成交, 活動, 退貨, 蝦皮總成本, 入帳, 實際毛利, 獲利百分比, 成本率, 淨利潤, 預估投入 };
   },
 
   _prBuildRow(sheet, inputs) {
     const { logistics, name, origCost, landFreight, weight, price, roas, volume, store, website, note } = inputs;
     const c = this._prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume);
     const existingRows = window.__pricingData?.[sheet] || [];
-    const cols = existingRows.length > 0 ? Object.keys(existingRows[0]) : [];
+    const baseCols = existingRows.length > 0 ? Object.keys(existingRows[0]) : [];
+    // Victor 的 Y 欄「進貨」是 URL，JSON 未匯出時手動補上
+    const cols = (sheet === 'Victor' && !baseCols.includes('進貨'))
+      ? [...baseCols, '進貨']
+      : baseCols;
     const row = { __custom: true, __id: Date.now() };
     for (const col of cols) {
       if (col === '集運') row[col] = logistics || '';
@@ -1748,7 +1814,9 @@ Object.assign(App, {
       else if (col.includes('獲利百分比') || col === 'ROI') row[col] = c.獲利百分比;
       else if (col.includes('以下)') || col === '成本') row[col] = c.成本率;
       else if (col.includes('ROAS')) row[col] = roas || null;
-      else if (col === '月銷量' || col === '進貨') row[col] = volume || null;
+      else if (col === '月銷量') row[col] = volume || null;
+      else if (col === '進貨') row[col] = (sheet === 'Victor') ? (website || '') : (volume || null);
+      else if (col === '網站') row[col] = website || '';
       else if (col.includes('淨利潤')) row[col] = c.淨利潤;
       else if (col.includes('預估投入')) row[col] = c.預估投入;
       else if (col === '網站') row[col] = website || '';
@@ -1758,9 +1826,10 @@ Object.assign(App, {
     return row;
   },
 
-  _prColType(col) {
+  _prColType(col, sheet) {
     if (col.includes('ROAS')) return 'roas';
     if (col.includes('百分比') || col === 'ROI' || col.includes('退貨率') || col.includes('以下)')) return 'pct';
+    if (col === '進貨' && sheet === 'Victor') return 'link';
     if (/月銷量|^進貨$|^數量$|^箱數$|^重量$/.test(col)) return 'count';
     if (col.includes('網站') || col.includes('連結')) return 'link';
     // 人民幣欄位：原始成本、陸內運費、陸>台運費
@@ -1814,7 +1883,7 @@ Object.assign(App, {
   // 核心欄位（主表顯示）— 名稱欄固定排第一
   _prCoreCols(cols) {
     const NAME_FIRST = ['產品名稱','試算名稱','編號'];
-    const OTHERS = new Set(['實際成本','商品成本','售價','ROI','賣場','備註','行銷方法','網站']);
+    const OTHERS = new Set(['實際成本','商品成本','售價','賣場','備註','行銷方法','網站']);
     const CONTAINS = ['獲利百分比'];
     const nameCol = NAME_FIRST.find(n => cols.includes(n));
     const rest = cols.filter(c => (OTHERS.has(c) || CONTAINS.some(k => c.includes(k))) && !NAME_FIRST.includes(c));
@@ -1841,6 +1910,8 @@ Object.assign(App, {
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:start">
         ${inp('pf-name','產品名稱','text','請輸入商品名稱')}
         ${inp('pf-note','備註','text','')}
+        ${inp('pf-website','網站連結','text','https://...')}
+        <div></div>
 
         ${inp('pf-orig','原始成本','number','0','¥ 人民幣')}
         ${inp('pf-land','陸〉陸運費','number','0','¥ 人民幣')}
@@ -1853,9 +1924,6 @@ Object.assign(App, {
         ${readOnly('pc-income','▶ 入帳金額（自動）','#374151')}
 
         ${readOnly('pc-roas','▶ 廣告ROAS（自動）')}
-        ${inp('pf-volume','月銷量','number','','選填')}
-        ${readOnly('pc-netloss','▶ 淨利潤（自動）','#374151')}
-        ${readOnly('pc-invest','▶ 預估投入（自動）','#374151')}
       </div>
       <div style="display:flex;gap:8px;margin-top:12px">
         <button id="pr-form-save" style="padding:8px 20px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
@@ -1901,9 +1969,12 @@ Object.assign(App, {
     const sheetData = window.__pricingData[activeSheet] || [];
     // 優先從非自訂的 Excel 列取欄位順序，避免自訂列 key 順序不一致
     const refRow = sheetData.find(r => !r.__custom) || sheetData[0];
-    const allCols = refRow ? Object.keys(refRow).filter(k => !k.startsWith('__')) : [];
+    const baseCols = refRow ? Object.keys(refRow).filter(k => !k.startsWith('__')) : [];
+    // 合併自訂列可能新增的欄（例如 Victor 的「進貨」URL 欄）
+    const customExtraCols = sheetData.filter(r => r.__custom).flatMap(r => Object.keys(r).filter(k => !k.startsWith('__') && !baseCols.includes(k)));
+    const allCols = [...baseCols, ...new Set(customExtraCols)];
     const coreCols = this._prCoreCols(allCols);
-    const coreTypes = coreCols.map(c => this._prColType(c));
+    const coreTypes = coreCols.map(c => this._prColType(c, activeSheet));
 
     const filteredWithIdx = q
       ? sheetData.map((r, i) => ({ r, i })).filter(({ r }) => String(r['產品名稱'] || r['試算名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase()))
@@ -1948,10 +2019,12 @@ Object.assign(App, {
         <div><h3>💹 訂價表</h3><p>蝦皮 / FB 商品訂價與利潤分析</p></div>
         <div style="display:flex;gap:8px;align-items:center">
           <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:160px;font-family:inherit">
+          <button id="pr-rates-btn" style="padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:7px;font-size:13px;cursor:pointer;color:var(--text)">⚙ 費率</button>
           <button id="pr-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">＋ 新增</button>
         </div>
       </div>
       <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">${sheetTabs}</div>
+      ${this._prRatesFormHtml()}
       ${this._prAddFormHtml(activeSheet)}
       <div style="padding:6px 16px;font-size:11px;color:#9ca3af;border-bottom:1px solid #f3f4f6">${activeSheet} · ${filteredWithIdx.length} 筆 · 點列展開全部欄位 · 綠底為手動新增</div>
       <div class="table-wrap"><table style="table-layout:fixed;width:100%">
@@ -2016,7 +2089,7 @@ Object.assign(App, {
       if (!r) return;
 
       const allCols = Object.keys(r);
-      const allTypes = allCols.map(c => self._prColType(c));
+      const allTypes = allCols.map(c => self._prColType(c, activeSheet));
       const itemsHtml = allCols.map((c, ci) => {
         const v = r[c];
         if (v === null || v === undefined) return '';
@@ -2045,7 +2118,7 @@ Object.assign(App, {
       const sheetData = window.__pricingData[activeSheet] || [];
       const allCols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
       const coreCols = self._prCoreCols(allCols);
-      const coreTypes = coreCols.map(c => self._prColType(c));
+      const coreTypes = coreCols.map(c => self._prColType(c, activeSheet));
       const filteredWithIdx = q
         ? sheetData.map((r, i) => ({ r, i })).filter(({ r }) => String(r['產品名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase()))
         : sheetData.map((r, i) => ({ r, i }));
@@ -2087,6 +2160,44 @@ Object.assign(App, {
       setTimeout(() => clearInterval(wait), 5000);
     }, { once: true });
 
+    // 費率設定按鈕
+    document.getElementById('pr-rates-btn')?.addEventListener('click', () => {
+      const panel = document.getElementById('pr-rates-panel');
+      if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
+    document.getElementById('pr-rates-close')?.addEventListener('click', () => {
+      const panel = document.getElementById('pr-rates-panel');
+      if (panel) panel.style.display = 'none';
+    });
+    document.getElementById('pr-rates-save')?.addEventListener('click', () => {
+      const saved = Store.get('ec.pricing.rates', {});
+      document.querySelectorAll('#pr-rates-panel input[data-sh]').forEach(el => {
+        const sh = el.dataset.sh;
+        const field = el.dataset.field;
+        if (!saved[sh]) saved[sh] = {};
+        const val = parseFloat(el.value) || 0;
+        // 稅金/成交/活動/退貨 存為小數（%/100）；固定費存 NT$
+        saved[sh][field] = ['tax','txFee','promo','ret'].includes(field) ? val / 100 : val;
+      });
+      Store.set('ec.pricing.rates', saved);
+      document.getElementById('pr-rates-panel').style.display = 'none';
+      alert('費率已儲存');
+    });
+    document.getElementById('pr-rates-reset')?.addEventListener('click', () => {
+      if (!confirm('確定還原所有分頁為預設費率？')) return;
+      Store.set('ec.pricing.rates', {});
+      // 重填輸入框
+      document.querySelectorAll('#pr-rates-panel input[data-sh]').forEach(el => {
+        const sh = el.dataset.sh;
+        const field = el.dataset.field;
+        const def = self.PRICING_SHEET_PARAMS[sh];
+        if (!def) return;
+        el.value = ['tax','txFee','promo','ret'].includes(field)
+          ? (def[field] * 100).toFixed(1)
+          : def[field];
+      });
+    });
+
     // 新增按鈕 toggle
     document.getElementById('pr-add-btn')?.addEventListener('click', () => {
       const form = document.getElementById('pr-add-form');
@@ -2107,8 +2218,7 @@ Object.assign(App, {
       const landFreight = parseFloat(document.getElementById('pf-land')?.value) || 0;
       const weight    = parseFloat(document.getElementById('pf-weight')?.value) || 0;
       const price     = parseFloat(document.getElementById('pf-price')?.value)  || 0;
-      const volume    = parseFloat(document.getElementById('pf-volume')?.value) || 0;
-      const c = self._prCalcAll(activeSheet, origCost, landFreight, weight, price, 0, volume);
+      const c = self._prCalcAll(activeSheet, origCost, landFreight, weight, price, 0, 0);
       const nt = v => v != null ? 'NT$' + v.toLocaleString('zh-TW', {minimumFractionDigits:0}) : '—';
       const pct = v => {
         const p = Math.round(v * 10000) / 100;
@@ -2136,7 +2246,7 @@ Object.assign(App, {
       set('pc-roas', roasVal != null ? roasVal.toFixed(2) : '—');
     };
 
-    ['pf-orig','pf-land','pf-weight','pf-price','pf-volume'].forEach(id => {
+    ['pf-orig','pf-land','pf-weight','pf-price'].forEach(id => {
       document.getElementById(id)?.addEventListener('input', _updatePreview);
     });
 
@@ -2152,8 +2262,9 @@ Object.assign(App, {
         weight:      parseFloat(get('pf-weight')) || 0,
         price:       parseFloat(get('pf-price'))  || 0,
         roas:        parseFloat(document.getElementById('pc-roas')?.innerText) || 0,
-        volume:      parseFloat(get('pf-volume')) || 0,
+        volume:      0,
         store:       get('pf-store'),
+        website:     get('pf-website'),
         note:        get('pf-note'),
       };
       if (!inputs.name) { alert('請輸入產品名稱'); return; }
