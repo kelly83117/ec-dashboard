@@ -1789,6 +1789,42 @@ Object.assign(App, {
   },
 
   // 核心欄位（主表顯示）— 名稱欄固定排第一
+  _prGetVisibleCols(allCols, sheet) {
+    const cleanCols = allCols.filter(c => !c.startsWith('__'));
+    const saved = Store.get(`ec.d2.pricing.cols.${sheet}`, null);
+    if (!saved) return cleanCols;
+    const allSet = new Set(cleanCols);
+    const savedOrder = (saved.order || []).filter(c => allSet.has(c));
+    const newCols = cleanCols.filter(c => !savedOrder.includes(c));
+    const fullOrder = [...savedOrder, ...newCols];
+    const hiddenSet = new Set(saved.hidden || []);
+    return fullOrder.filter(c => !hiddenSet.has(c));
+  },
+
+  _prColPanelHtml(allCols, sheet) {
+    const cleanCols = allCols.filter(c => !c.startsWith('__'));
+    const saved = Store.get(`ec.d2.pricing.cols.${sheet}`, null);
+    const savedOrder = (saved?.order || []).filter(c => cleanCols.includes(c));
+    const newCols = cleanCols.filter(c => !savedOrder.includes(c));
+    const fullOrder = [...savedOrder, ...newCols];
+    const hiddenSet = new Set(saved?.hidden || []);
+    const panelOpen = Store.get('ec.d2.pricing.colpanel', false);
+    return `<div id="pr-col-panel" style="display:${panelOpen?'block':'none'};padding:12px 16px;background:#f8fafc;border-bottom:1px solid var(--border)">
+      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px">欄位顯示與排序 <span style="font-weight:400;color:#9ca3af">拖曳排序・勾選顯示</span></div>
+      <div id="pr-col-list" style="display:flex;flex-wrap:wrap;gap:6px">
+        ${fullOrder.map(c => `<div class="pr-col-item" data-col="${escapeHtml(c)}" draggable="true"
+          style="display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;border:1px solid ${hiddenSet.has(c)?'#e5e7eb':'#1a7a6e'};background:${hiddenSet.has(c)?'#fff':'#f0fdf4'};color:${hiddenSet.has(c)?'#9ca3af':'#1a7a6e'};font-size:12px;cursor:grab;user-select:none">
+          <input type="checkbox" class="pr-col-check" data-col="${escapeHtml(c)}" ${hiddenSet.has(c)?'':'checked'} style="cursor:pointer;accent-color:#1a7a6e;width:13px;height:13px">
+          <span>${escapeHtml(c)}</span><span style="color:#d1d5db;font-size:10px;margin-left:2px">⠿</span>
+        </div>`).join('')}
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+        <button id="pr-col-reset" style="padding:4px 12px;border:1px solid #e5e7eb;border-radius:5px;font-size:12px;cursor:pointer;background:#fff">重置預設</button>
+        <span style="font-size:11px;color:#9ca3af">變更即時生效</span>
+      </div>
+    </div>`;
+  },
+
   _prCoreCols(cols) {
     const NAME_FIRST = ['產品名稱','試算名稱','編號'];
     const OTHERS = new Set(['實際成本','商品成本','售價','賣場','備註','行銷方法','網站']);
@@ -1881,7 +1917,7 @@ Object.assign(App, {
     // 合併自訂列可能新增的欄（例如 Victor 的「進貨」URL 欄）
     const customExtraCols = sheetData.filter(r => r.__custom).flatMap(r => Object.keys(r).filter(k => !k.startsWith('__') && !baseCols.includes(k)));
     const allCols = [...baseCols, ...new Set(customExtraCols)];
-    const coreCols = this._prCoreCols(allCols);
+    const coreCols = this._prGetVisibleCols(allCols, activeSheet);
     const coreTypes = coreCols.map(c => this._prColType(c, activeSheet));
 
     const filteredWithIdx = q
@@ -1906,9 +1942,10 @@ Object.assign(App, {
       if (c.includes('獲利百分比') || c === 'ROI') return '10%';
       return '11%';
     };
+    const colMinWidth = c => NAME_COLS.has(c) ? '180px' : '90px';
     const theadHtml = coreCols.map(c =>
-      `<th style="font-size:12px;padding:6px 10px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'};width:${colWidth(c)}">${escapeHtml(shortLabel(c))}</th>`
-    ).join('') + '<th style="width:32px"></th>';
+      `<th style="font-size:12px;padding:6px 10px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'};min-width:${colMinWidth(c)};white-space:nowrap">${escapeHtml(shortLabel(c))}</th>`
+    ).join('') + '<th style="min-width:32px"></th>';
 
     const tbodyHtml = display.map(({ r, i }) => {
       const isCustom = !!r.__custom;
@@ -1927,15 +1964,17 @@ Object.assign(App, {
         <div><h3>💹 訂價表</h3><p>蝦皮 / FB 商品訂價與利潤分析</p></div>
         <div style="display:flex;gap:8px;align-items:center">
           <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:160px;font-family:inherit">
+          <button id="pr-col-btn" style="padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:7px;font-size:13px;cursor:pointer;color:var(--text)">☰ 欄位</button>
           <button id="pr-rates-btn" style="padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:7px;font-size:13px;cursor:pointer;color:var(--text)">⚙ 費率</button>
           <button id="pr-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">＋ 新增</button>
         </div>
       </div>
       <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">${sheetTabs}</div>
       ${this._prRatesFormHtml()}
+      ${this._prColPanelHtml(allCols, activeSheet)}
       ${this._prAddFormHtml(activeSheet)}
       <div style="padding:6px 16px;font-size:11px;color:#9ca3af;border-bottom:1px solid #f3f4f6">${activeSheet} · ${filteredWithIdx.length} 筆 · 點列展開全部欄位 · 綠底為手動新增</div>
-      <div class="table-wrap"><table style="table-layout:fixed;width:100%">
+      <div class="table-wrap"><table style="width:100%">
         <thead><tr>${theadHtml}</tr></thead>
         <tbody id="pr-tbody">${tbodyHtml}</tbody>
       </table></div>
@@ -2025,7 +2064,7 @@ Object.assign(App, {
       const q = Store.get('ec.d2.pricing.q', '');
       const sheetData = window.__pricingData[activeSheet] || [];
       const allCols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
-      const coreCols = self._prCoreCols(allCols);
+      const coreCols = self._prGetVisibleCols(allCols, activeSheet);
       const coreTypes = coreCols.map(c => self._prColType(c, activeSheet));
       const filteredWithIdx = q
         ? sheetData.map((r, i) => ({ r, i })).filter(({ r }) => String(r['產品名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase()))
@@ -2067,6 +2106,57 @@ Object.assign(App, {
       }, 100);
       setTimeout(() => clearInterval(wait), 5000);
     }, { once: true });
+
+    // 欄位顯示/排序面板
+    document.getElementById('pr-col-btn')?.addEventListener('click', () => {
+      const panel = document.getElementById('pr-col-panel');
+      if (!panel) return;
+      const nowOpen = panel.style.display !== 'none';
+      panel.style.display = nowOpen ? 'none' : 'block';
+      Store.set('ec.d2.pricing.colpanel', !nowOpen);
+    });
+
+    const _saveColPrefs = () => {
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const items = [...document.querySelectorAll('.pr-col-item')];
+      const order = items.map(el => el.dataset.col);
+      const hidden = items.filter(el => !el.querySelector('.pr-col-check').checked).map(el => el.dataset.col);
+      Store.set(`ec.d2.pricing.cols.${activeSheet}`, { order, hidden });
+      self.render();
+    };
+
+    document.querySelectorAll('.pr-col-check').forEach(cb => {
+      cb.addEventListener('change', _saveColPrefs);
+    });
+
+    document.getElementById('pr-col-reset')?.addEventListener('click', () => {
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      Store.set(`ec.d2.pricing.cols.${activeSheet}`, null);
+      self.render();
+    });
+
+    // 欄位拖曳排序
+    let _dragColSrc = null;
+    const colList = document.getElementById('pr-col-list');
+    document.querySelectorAll('.pr-col-item').forEach(item => {
+      item.addEventListener('dragstart', e => {
+        _dragColSrc = item;
+        setTimeout(() => { item.style.opacity = '0.4'; }, 0);
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      item.addEventListener('dragend', () => { item.style.opacity = '1'; _dragColSrc = null; });
+      item.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+      item.addEventListener('drop', e => {
+        e.preventDefault();
+        if (!_dragColSrc || _dragColSrc === item) return;
+        const items = [...colList.querySelectorAll('.pr-col-item')];
+        const srcIdx = items.indexOf(_dragColSrc);
+        const tgtIdx = items.indexOf(item);
+        if (srcIdx < tgtIdx) colList.insertBefore(_dragColSrc, item.nextSibling);
+        else colList.insertBefore(_dragColSrc, item);
+        _saveColPrefs();
+      });
+    });
 
     // 費率設定按鈕
     document.getElementById('pr-rates-btn')?.addEventListener('click', () => {
