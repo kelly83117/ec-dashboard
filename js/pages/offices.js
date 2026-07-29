@@ -1835,6 +1835,43 @@ Object.assign(App, {
     return core.length >= 2 ? core : cols.filter(c => !c.startsWith('__')).slice(0, 5);
   },
 
+  _prNumFilterPanelHtml(coreCols, coreTypes, sheet) {
+    const NUMERIC_TYPES = new Set(['pct','money','count','roas','rmb','wtfreight']);
+    const numCols = coreCols.filter((c, i) => NUMERIC_TYPES.has(coreTypes[i]));
+    if (!numCols.length) return '';
+    const filters = Store.get(`ec.d2.pricing.numfilters.${sheet}`, {});
+    const panelOpen = Store.get('ec.d2.pricing.filterpanel', false);
+    const shortLabel = c => {
+      if (c.includes('獲利百分比')) return '獲利%';
+      if (c.includes('實際成本') || c === '商品成本') return '實際成本';
+      return c;
+    };
+    const activeCount = Object.keys(filters).length;
+    return `<div id="pr-filter-panel" style="display:${panelOpen?'block':'none'};padding:12px 16px;background:#f8fafc;border-bottom:1px solid var(--border)">
+      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:10px">數值範圍篩選 <span style="font-weight:400;color:#9ca3af">留空 = 不篩選・% 欄輸入數字如 20</span>${activeCount?`<span style="margin-left:8px;background:#dbeafe;color:#2563eb;font-size:11px;padding:2px 8px;border-radius:10px">${activeCount} 條件啟用中</span>`:''}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center">
+        ${numCols.map(c => {
+          const idx = coreCols.indexOf(c);
+          const type = coreTypes[idx];
+          const f = filters[c] || {};
+          const unit = type === 'pct' ? '%' : type === 'money' ? 'NT$' : type === 'rmb' ? '¥' : '';
+          const hasFilter = f.min !== undefined && f.min !== null && f.min !== '' || f.max !== undefined && f.max !== null && f.max !== '';
+          return `<div style="display:flex;align-items:center;gap:5px">
+            <span style="font-size:11px;font-weight:600;color:${hasFilter?'#2563eb':'#374151'}">${escapeHtml(shortLabel(c))}</span>
+            <input class="pr-nf-min" data-col="${escapeHtml(c)}" value="${f.min??''}" placeholder="最小" style="width:64px;padding:3px 7px;border:1px solid ${hasFilter?'#2563eb':'#e5e7eb'};border-radius:5px;font-size:12px;text-align:right;font-family:inherit">
+            <span style="font-size:11px;color:#9ca3af">～</span>
+            <input class="pr-nf-max" data-col="${escapeHtml(c)}" value="${f.max??''}" placeholder="最大" style="width:64px;padding:3px 7px;border:1px solid ${hasFilter?'#2563eb':'#e5e7eb'};border-radius:5px;font-size:12px;text-align:right;font-family:inherit">
+            ${unit?`<span style="font-size:11px;color:#9ca3af">${unit}</span>`:''}
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+        <button id="pr-nf-reset" style="padding:4px 12px;border:1px solid #e5e7eb;border-radius:5px;font-size:12px;cursor:pointer;background:#fff">清除全部</button>
+        <span style="font-size:11px;color:#9ca3af">變更即時生效</span>
+      </div>
+    </div>`;
+  },
+
   _prAddFormHtml(sheet) {
     const p = this.PRICING_SHEET_PARAMS[sheet] || this.PRICING_SHEET_PARAMS['訂價'];
     const inp = (id, label, type='number', placeholder='', unit='') =>
@@ -1920,9 +1957,42 @@ Object.assign(App, {
     const coreCols = this._prGetVisibleCols(allCols, activeSheet);
     const coreTypes = coreCols.map(c => this._prColType(c, activeSheet));
 
-    const filteredWithIdx = q
+    const sort = Store.get(`ec.d2.pricing.sort.${activeSheet}`, null);
+    const numFilters = Store.get(`ec.d2.pricing.numfilters.${activeSheet}`, {});
+    const _numVal = (val, type) => {
+      if (val === null || val === undefined || val === '') return null;
+      const n = parseFloat(val);
+      if (isNaN(n)) return null;
+      return type === 'pct' ? (Math.abs(n) < 5 ? n * 100 : n) : n;
+    };
+
+    let filteredWithIdx = q
       ? sheetData.map((r, i) => ({ r, i })).filter(({ r }) => String(r['產品名稱'] || r['試算名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase()))
       : sheetData.map((r, i) => ({ r, i }));
+
+    // 套用數值範圍篩選
+    const activeNumFilters = Object.entries(numFilters).filter(([, f]) =>
+      (f.min !== '' && f.min !== null && f.min !== undefined) || (f.max !== '' && f.max !== null && f.max !== undefined));
+    if (activeNumFilters.length) {
+      filteredWithIdx = filteredWithIdx.filter(({ r }) =>
+        activeNumFilters.every(([c, f]) => {
+          const v = _numVal(r[c], this._prColType(c, activeSheet));
+          if (v === null) return false;
+          if (f.min !== '' && f.min !== null && f.min !== undefined && v < +f.min) return false;
+          if (f.max !== '' && f.max !== null && f.max !== undefined && v > +f.max) return false;
+          return true;
+        })
+      );
+    }
+    // 套用排序
+    if (sort?.col) {
+      const sortType = this._prColType(sort.col, activeSheet);
+      filteredWithIdx = [...filteredWithIdx].sort((a, b) => {
+        const av = _numVal(a.r[sort.col], sortType) ?? (sort.dir === 'asc' ? Infinity : -Infinity);
+        const bv = _numVal(b.r[sort.col], sortType) ?? (sort.dir === 'asc' ? Infinity : -Infinity);
+        return sort.dir === 'asc' ? av - bv : bv - av;
+      });
+    }
 
     const SHOW = 60;
     const display = filteredWithIdx.slice(0, SHOW);
@@ -1943,9 +2013,18 @@ Object.assign(App, {
       return '11%';
     };
     const colMinWidth = c => NAME_COLS.has(c) ? '180px' : '90px';
-    const theadHtml = coreCols.map(c =>
-      `<th style="font-size:12px;padding:6px 10px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'};min-width:${colMinWidth(c)};white-space:nowrap">${escapeHtml(shortLabel(c))}</th>`
-    ).join('') + '<th style="min-width:32px"></th>';
+    const SORTABLE_TYPES = new Set(['pct','money','count','roas','rmb','wtfreight']);
+    const theadHtml = coreCols.map((c, ci) => {
+      const isSortable = SORTABLE_TYPES.has(coreTypes[ci]);
+      const isActive = sort?.col === c;
+      const arrow = isActive ? (sort.dir === 'asc' ? '↑' : '↓') : '';
+      const sortAttr = isSortable ? ` data-sort-col="${escapeHtml(c)}"` : '';
+      const activeBg = isActive ? 'background:#eff6ff;color:#2563eb;' : '';
+      const indicator = arrow
+        ? `<span style="color:#2563eb;margin-left:3px">${arrow}</span>`
+        : isSortable ? `<span style="color:#d1d5db;margin-left:2px;font-size:10px">⇅</span>` : '';
+      return `<th${sortAttr} style="${activeBg}${isSortable?'cursor:pointer;':''}font-size:12px;padding:6px 10px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'};min-width:${colMinWidth(c)};white-space:nowrap">${escapeHtml(shortLabel(c))}${indicator}</th>`;
+    }).join('') + '<th style="min-width:32px"></th>';
 
     const tbodyHtml = display.map(({ r, i }) => {
       const isCustom = !!r.__custom;
@@ -1965,6 +2044,7 @@ Object.assign(App, {
         <div style="display:flex;gap:8px;align-items:center">
           <input id="pr-search" value="${escapeHtml(q)}" placeholder="搜尋商品名稱…" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:160px;font-family:inherit">
           <button id="pr-col-btn" style="padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:7px;font-size:13px;cursor:pointer;color:var(--text)">☰ 欄位</button>
+          <button id="pr-filter-btn" style="padding:7px 14px;background:${Object.keys(numFilters).length?'#dbeafe':'var(--bg)'};border:1px solid ${Object.keys(numFilters).length?'#2563eb':'var(--border)'};border-radius:7px;font-size:13px;cursor:pointer;color:${Object.keys(numFilters).length?'#2563eb':'var(--text)'}">⊟ 範圍${sort?.col?` · ⇅`:''}${Object.keys(numFilters).length?` (${Object.keys(numFilters).length})`:''}</button>
           <button id="pr-rates-btn" style="padding:7px 14px;background:var(--bg);border:1px solid var(--border);border-radius:7px;font-size:13px;cursor:pointer;color:var(--text)">⚙ 費率</button>
           <button id="pr-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">＋ 新增</button>
         </div>
@@ -1972,6 +2052,7 @@ Object.assign(App, {
       <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">${sheetTabs}</div>
       ${this._prRatesFormHtml()}
       ${this._prColPanelHtml(allCols, activeSheet)}
+      ${this._prNumFilterPanelHtml(coreCols, coreTypes, activeSheet)}
       ${this._prAddFormHtml(activeSheet)}
       <div style="padding:6px 16px;font-size:11px;color:#9ca3af;border-bottom:1px solid #f3f4f6">${activeSheet} · ${filteredWithIdx.length} 筆 · 點列展開全部欄位 · 綠底為手動新增</div>
       <div class="table-wrap"><table style="width:100%">
@@ -2178,6 +2259,50 @@ Object.assign(App, {
         if (e.clientX < mid) colList.insertBefore(_dragColSrc, item);
         else colList.insertBefore(_dragColSrc, item.nextSibling);
         _saveColPrefs();
+      });
+    });
+
+    // 數值範圍篩選面板
+    document.getElementById('pr-filter-btn')?.addEventListener('click', () => {
+      const panel = document.getElementById('pr-filter-panel');
+      if (!panel) return;
+      const nowOpen = panel.style.display !== 'none';
+      panel.style.display = nowOpen ? 'none' : 'block';
+      Store.set('ec.d2.pricing.filterpanel', !nowOpen);
+    });
+    const _saveNumFilters = () => {
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const filters = {};
+      document.querySelectorAll('.pr-nf-min').forEach(inp => {
+        const col = inp.dataset.col;
+        const maxInp = document.querySelector(`.pr-nf-max[data-col="${CSS.escape(col)}"]`);
+        const min = inp.value.trim();
+        const max = maxInp?.value.trim() ?? '';
+        if (min !== '' || max !== '')
+          filters[col] = { min: min !== '' ? +min : null, max: max !== '' ? +max : null };
+      });
+      Store.set(`ec.d2.pricing.numfilters.${activeSheet}`, filters);
+      self.render();
+    };
+    document.querySelectorAll('.pr-nf-min,.pr-nf-max').forEach(inp => inp.addEventListener('change', _saveNumFilters));
+    document.getElementById('pr-nf-reset')?.addEventListener('click', () => {
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      Store.set(`ec.d2.pricing.numfilters.${activeSheet}`, {});
+      self.render();
+    });
+
+    // 排序（點欄位標題）
+    document.querySelectorAll('th[data-sort-col]').forEach(th => {
+      th.addEventListener('click', () => {
+        const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+        const col = th.dataset.sortCol;
+        const cur = Store.get(`ec.d2.pricing.sort.${activeSheet}`, null);
+        if (cur?.col === col) {
+          Store.set(`ec.d2.pricing.sort.${activeSheet}`, cur.dir === 'asc' ? {col, dir:'desc'} : null);
+        } else {
+          Store.set(`ec.d2.pricing.sort.${activeSheet}`, {col, dir:'asc'});
+        }
+        self.render();
       });
     });
 
