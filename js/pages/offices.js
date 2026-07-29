@@ -969,7 +969,7 @@ Object.assign(App, {
 
     const leftPanel = `
       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
-        <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">選品 — 每季</div>
+        <div style="background:#2563eb;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">選品 — 每季</div>
         ${subHQ([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'}])}
         ${rowQ([{v:'管量：新品數量（季）',w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true}], 0)}
         <div style="background:#f0faf0;padding:6px 10px;font-size:11px;font-weight:600;color:#2e7d32;border-bottom:1px solid #c8e6c9">管質分層（三層互斥）</div>
@@ -977,7 +977,7 @@ Object.assign(App, {
         ${rowQ([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true}], 0)}
         ${rowQ([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true}], 0, '#fafafa')}
         ${rowQ([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true}], 0)}
-        <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">議價 — 每月</div>
+        <div style="background:#2563eb;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">議價 — 每月</div>
         ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'}])}
         ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:blue('20'),center:true},{v:blue('20'),center:true}], ms => ms.sc)}
         ${row([{v:'議價比 平均幅度門檻（≥）',w:'2fr'},{v:blue('10.0%'),center:true},{v:blue('20'),center:true}], ms => ms.sa, '#fafafa')}
@@ -987,13 +987,13 @@ Object.assign(App, {
     const rightPanel = `
       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:260px;display:flex;flex-direction:column">
         <div style="flex:1">
-          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">叫貨出錯率 — 每月</div>
+          <div style="background:#2563eb;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">叫貨出錯率 — 每月</div>
           ${subH([{l:'出錯率門檻 (≤)',w:'2fr'},{l:'配分'}])}
           ${row([{v:blue('1.0%'),center:true,w:'2fr'},{v:blue('10'),center:true}], () => 0)}
-          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">加分（訂價表／議價表／圍購表／其他工具）— 每月</div>
+          <div style="background:#2563eb;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">加分（訂價表／議價表／圍購表／其他工具）— 每月</div>
           ${subH([{l:'每完成一項加分',w:'2fr'}])}
           ${row([{v:blue('+10'),center:true,w:'2fr'}], ms => ms.bonus || 0)}
-          <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">扣分（單價未更新）— 每月</div>
+          <div style="background:#2563eb;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">扣分（單價未更新）— 每月</div>
           ${subH([{l:'每次扣分'},{l:'單月上限'}])}
           ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true}], () => 0)}
         </div>
@@ -1001,7 +1001,7 @@ Object.assign(App, {
 
     return `
     <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:18px;background:#fff">
-      <div style="background:#1a7a6e;color:#fff;padding:12px 16px">
+      <div style="background:#2563eb;color:#fff;padding:12px 16px">
         <div style="font-size:15px;font-weight:700;margin-bottom:5px">📊 採購績效 KPI 計分架構</div>
         <div style="font-size:11px;opacity:.85;line-height:1.9">
           每月總分 ＝ 選品季分 ÷ 3 ＋ 當月議價（40）＋ 當月出錯率（10）＋ 加分 − 扣分 &nbsp;｜&nbsp; 季累計 ＝ 三個月當月總分合計
@@ -1023,7 +1023,7 @@ Object.assign(App, {
 
     const quarterTabs = ['Q1','Q2','Q3','Q4'].map(q => {
       const active = q === activeQ;
-      return `<button class="d2-q-tab" data-q="${q}" style="padding:7px 22px;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;${active ? 'background:#1a7a6e;color:#fff;' : 'background:#f3f4f6;color:#6b7280;'}">${q}</button>`;
+      return `<button class="d2-q-tab" data-q="${q}" style="padding:7px 22px;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;${active ? 'background:#2563eb;color:#fff;' : 'background:#f3f4f6;color:#6b7280;'}">${q}</button>`;
     }).join('');
 
     const quarterTabsHtml = `<div style="display:flex;gap:8px;margin-bottom:16px">${quarterTabs}</div>`;
@@ -1031,7 +1031,7 @@ Object.assign(App, {
     const stabQTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
       ${['Q1','Q2','Q3','Q4'].map(q => {
         const act = q === activeStabQ;
-        return `<button class="d2-stabq-tab" data-q="${q}" style="padding:5px 14px;border-radius:20px;border:1px solid ${act?'#1a7a6e':'#e5e7eb'};background:${act?'#1a7a6e':'#fff'};color:${act?'#fff':'#374151'};font-size:12px;font-weight:${act?'700':'400'};cursor:pointer">${q} <span style="font-size:11px;opacity:.85">${sqLabels[q]}</span></button>`;
+        return `<button class="d2-stabq-tab" data-q="${q}" style="padding:5px 14px;border-radius:20px;border:1px solid ${act?'#2563eb':'#e5e7eb'};background:${act?'#2563eb':'#fff'};color:${act?'#fff':'#374151'};font-size:12px;font-weight:${act?'700':'400'};cursor:pointer">${q} <span style="font-size:11px;opacity:.85">${sqLabels[q]}</span></button>`;
       }).join('')}
     </div>`;
     const priceCell = v => Number(v) ? 'NT$' + Number(v).toLocaleString() : '<span style="color:var(--text-muted)">—</span>';
@@ -1121,7 +1121,7 @@ Object.assign(App, {
         <div style="font-size:22px;margin-bottom:4px">${icon}</div>
         <div style="font-size:24px;font-weight:700;color:var(--text)">${value}</div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${label}</div>
-        <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;background:${pass ? '#f0fdf4' : '#fafafa'};border-radius:7px;padding:6px 10px">
+        <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;background:${pass ? '#eff6ff' : '#fafafa'};border-radius:7px;padding:6px 10px">
           <span style="font-size:11px;color:${pass ? '#059669' : '#9ca3af'}">${subLabel}</span>
           <span style="font-weight:700;font-size:15px;color:${pass ? '#059669' : '#d1d5db'}">${score}<span style="font-size:11px;font-weight:400">/${fullScore}分</span></span>
         </div>
@@ -1131,7 +1131,7 @@ Object.assign(App, {
     const totalScore = scoreCount + scoreAvg;
     const scoreColor = totalScore >= 40 ? '#059669' : totalScore > 0 ? '#f59e0b' : '#9ca3af';
     const badge = (label, value, pass) =>
-      `<div style="display:flex;flex-direction:column;align-items:center;background:${pass ? '#f0fdf4' : '#f9fafb'};border:1px solid ${pass ? '#bbf7d0' : '#e5e7eb'};border-radius:8px;padding:6px 14px;min-width:90px">
+      `<div style="display:flex;flex-direction:column;align-items:center;background:${pass ? '#eff6ff' : '#f9fafb'};border:1px solid ${pass ? '#bbf7d0' : '#e5e7eb'};border-radius:8px;padding:6px 14px;min-width:90px">
         <span style="font-size:16px;font-weight:800;color:${pass ? '#059669' : '#6b7280'}">${value}</span>
         <span style="font-size:10px;color:#9ca3af;margin-top:1px">${label}</span>
       </div>`;
@@ -1168,14 +1168,14 @@ Object.assign(App, {
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div><h3>🛍️ 選品</h3><p>記錄選品資訊（共 ${spList.length} 筆）</p></div>
           <div style="display:flex;align-items:center;gap:8px">
-            <div style="display:flex;flex-direction:column;align-items:center;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:6px 14px;min-width:80px">
+            <div style="display:flex;flex-direction:column;align-items:center;background:#eff6ff;border:1px solid #bbf7d0;border-radius:8px;padding:6px 14px;min-width:80px">
               <span style="font-size:16px;font-weight:800;color:#059669">${spList.filter(r=>r.spLink).length} 筆</span>
               <span style="font-size:10px;color:#9ca3af">已上蝦皮</span>
             </div>
             <button id="sp-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
           </div>
         </div>
-        <div id="sp-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+        <div id="sp-form" style="display:none;padding:16px;background:#eff6ff;border-bottom:1px solid var(--border)">
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
             <input id="sp-date" type="text" placeholder="填表時間（如 2026/07/15）" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="sp-name" placeholder="商品名稱 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
@@ -1210,7 +1210,7 @@ Object.assign(App, {
             <button id="bg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
           </div>
         </div>
-        <div id="bg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+        <div id="bg-form" style="display:none;padding:16px;background:#eff6ff;border-bottom:1px solid var(--border)">
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
             <input id="bg-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="bg-item" placeholder="品名 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
@@ -1241,7 +1241,7 @@ Object.assign(App, {
       const renderBnRow = ({ r, i }) => `<tr style="vertical-align:middle">
         <td style="text-align:left;padding:8px 12px;font-size:13px">${escapeHtml(r.date || '')}</td>
         <td style="font-weight:600;text-align:left;padding:8px 12px;font-size:13px">${escapeHtml(r.item || '')}</td>
-        <td style="text-align:center;padding:8px 12px"><span style="display:inline-block;background:#f0fdf4;color:#059669;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px">+10</span></td>
+        <td style="text-align:center;padding:8px 12px"><span style="display:inline-block;background:#eff6ff;color:#059669;font-weight:700;padding:2px 10px;border-radius:5px;font-size:12px">+10</span></td>
         <td style="text-align:left;padding:8px 12px;color:#6b7280;font-size:12px">${escapeHtml(r.note || '')}</td>
         <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
           <button class="bn-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
@@ -1258,14 +1258,14 @@ Object.assign(App, {
             <p>每完成一項 AI 三表寫進儀表板 +10 分（共 ${bnList.length} 筆）</p>
           </div>
           <div style="display:flex;align-items:center;gap:8px">
-            <div style="display:flex;flex-direction:column;align-items:center;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:6px 14px;min-width:80px">
+            <div style="display:flex;flex-direction:column;align-items:center;background:#eff6ff;border:1px solid #bbf7d0;border-radius:8px;padding:6px 14px;min-width:80px">
               <span style="font-size:18px;font-weight:800;color:#059669">+${bnTotalPts}</span>
               <span style="font-size:10px;color:#9ca3af">本季加分</span>
             </div>
             <button id="bn-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
           </div>
         </div>
-        <div id="bn-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+        <div id="bn-form" style="display:none;padding:16px;background:#eff6ff;border-bottom:1px solid var(--border)">
           <div style="display:grid;grid-template-columns:1fr 2fr 2fr;gap:10px;margin-bottom:10px">
             <input id="bn-date" type="date" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <select id="bn-item" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;background:#fff">
@@ -1296,19 +1296,19 @@ Object.assign(App, {
     const cur = monthScores[curIdx >= 0 ? curIdx : monthScores.length - 1] || {sc:0,sa:0};
     const kpiTotal = cur.sc + cur.sa + (cur.bonus || 0);
     const kpiTotalsStr = monthScores.map((ms, i) => `${parseInt(activeMonths[i])}月 ${ms.sc+ms.sa+(ms.bonus||0)}分`).join(' ／ ');
-    const totalBarHtml = `<div style="background:linear-gradient(135deg,#1a7a6e,#0f5349);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-radius:10px;margin-bottom:14px">
+    const totalBarHtml = `<div style="background:linear-gradient(135deg,#2563eb,#1e40af);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-radius:10px;margin-bottom:14px">
       <div>
         <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">當月得分總計</div>
         <div style="font-size:11px;color:rgba(255,255,255,.5)">${kpiTotalsStr}</div>
       </div>
-      <div style="font-size:36px;font-weight:900;color:${kpiTotal>=40?'#6ee7b7':kpiTotal>0?'#fde68a':'#9ca3af'};line-height:1">${kpiTotal}<span style="font-size:14px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
+      <div style="font-size:36px;font-weight:900;color:${kpiTotal>=40?'#93c5fd':kpiTotal>0?'#fde68a':'#9ca3af'};line-height:1">${kpiTotal}<span style="font-size:14px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
     </div>`;
 
     return `
       ${quarterTabsHtml}
       ${totalBarHtml}
-      <details id="kpi-summary-details" style="margin-bottom:18px;border:1px solid #d1fae5;border-radius:10px;overflow:hidden">
-        <summary style="cursor:pointer;padding:10px 16px;background:#f0fdf4;color:#1a7a6e;font-size:13px;font-weight:700;list-style:none;display:flex;align-items:center;justify-content:space-between;user-select:none">
+      <details id="kpi-summary-details" style="margin-bottom:18px;border:1px solid #dbeafe;border-radius:10px;overflow:hidden">
+        <summary style="cursor:pointer;padding:10px 16px;background:#eff6ff;color:#2563eb;font-size:13px;font-weight:700;list-style:none;display:flex;align-items:center;justify-content:space-between;user-select:none">
           <span>📊 計分架構（點擊展開）</span>
           <span style="font-size:11px;opacity:.7">▼</span>
         </summary>
@@ -1559,7 +1559,7 @@ Object.assign(App, {
       .sort((a, b) => a.days - b.days);
 
     const urgColor = (days) => days <= 30 ? '#ef4444' : days <= 60 ? '#f97316' : '#22c55e';
-    const urgBg   = (days) => days <= 30 ? '#fef2f2' : days <= 60 ? '#fff7ed' : '#f0fdf4';
+    const urgBg   = (days) => days <= 30 ? '#fef2f2' : days <= 60 ? '#fff7ed' : '#eff6ff';
     const urgLabel = (days) => days <= 30 ? '緊急' : days <= 60 ? '準備中' : '規劃中';
 
     const f = rows[0];
@@ -1813,8 +1813,8 @@ Object.assign(App, {
       <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px">欄位顯示與排序 <span style="font-weight:400;color:#9ca3af">拖曳排序・勾選顯示</span></div>
       <div id="pr-col-list" style="display:flex;flex-wrap:wrap;gap:6px">
         ${fullOrder.map(c => `<div class="pr-col-item" data-col="${escapeHtml(c)}" draggable="true"
-          style="display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;border:1px solid ${hiddenSet.has(c)?'#e5e7eb':'#1a7a6e'};background:${hiddenSet.has(c)?'#fff':'#f0fdf4'};color:${hiddenSet.has(c)?'#9ca3af':'#1a7a6e'};font-size:12px;cursor:grab;user-select:none">
-          <input type="checkbox" class="pr-col-check" data-col="${escapeHtml(c)}" ${hiddenSet.has(c)?'':'checked'} style="cursor:pointer;accent-color:#1a7a6e;width:13px;height:13px">
+          style="display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;border:1px solid ${hiddenSet.has(c)?'#e5e7eb':'#2563eb'};background:${hiddenSet.has(c)?'#fff':'#eff6ff'};color:${hiddenSet.has(c)?'#9ca3af':'#2563eb'};font-size:12px;cursor:grab;user-select:none">
+          <input type="checkbox" class="pr-col-check" data-col="${escapeHtml(c)}" ${hiddenSet.has(c)?'':'checked'} style="cursor:pointer;accent-color:#2563eb;width:13px;height:13px">
           <span>${escapeHtml(c)}</span><span style="color:#d1d5db;font-size:10px;margin-left:2px">⠿</span>
         </div>`).join('')}
       </div>
@@ -1843,13 +1843,13 @@ Object.assign(App, {
         <input id="${id}" type="${type}" placeholder="${placeholder}"
           style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;text-align:${type==='number'?'right':'left'}">
       </label>`;
-    const readOnly = (id, label, color='#1a7a6e') =>
+    const readOnly = (id, label, color='#2563eb') =>
       `<label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#6b7280;font-weight:600">
         ${label}
-        <div id="${id}" style="padding:7px 10px;border:1px solid #d1fae5;border-radius:6px;font-size:13px;font-weight:700;color:${color};background:#f0fdf4;text-align:right;min-height:34px">—</div>
+        <div id="${id}" style="padding:7px 10px;border:1px solid #dbeafe;border-radius:6px;font-size:13px;font-weight:700;color:${color};background:#eff6ff;text-align:right;min-height:34px">—</div>
       </label>`;
     return `
-    <div id="pr-add-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:2px solid #059669">
+    <div id="pr-add-form" style="display:none;padding:16px;background:#eff6ff;border-bottom:2px solid #059669">
       <div style="font-size:11px;color:#6b7280;margin-bottom:10px">費率：匯率 ${p.rmb}、陸>台運費 ${p.ship}¥/kg（≈NT$${p.ship*p.rmb}/kg）${p.ads?'、廣告 '+p.ads*100+'%':''}${p.tax?'、稅 '+p.tax*100+'%':''}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:start">
         ${inp('pf-name','產品名稱','text','請輸入商品名稱')}
@@ -1895,7 +1895,7 @@ Object.assign(App, {
     const sheetTabs = this.PRICING_SHEETS_ORDER.map(s => {
       const cnt = loaded ? (window.__pricingData[s] || []).length : 0;
       const active = s === activeSheet;
-      return `<button class="pr-stab" data-s="${s}" style="padding:5px 14px;border-radius:20px;border:1px solid ${active?'#1a7a6e':'#e5e7eb'};background:${active?'#1a7a6e':'#fff'};color:${active?'#fff':'#374151'};font-size:12px;font-weight:${active?'700':'400'};cursor:pointer;white-space:nowrap">${s}${loaded?` <span style="opacity:.6;font-size:11px">${cnt}</span>`:''}</button>`;
+      return `<button class="pr-stab" data-s="${s}" style="padding:5px 14px;border-radius:20px;border:1px solid ${active?'#2563eb':'#e5e7eb'};background:${active?'#2563eb':'#fff'};color:${active?'#fff':'#374151'};font-size:12px;font-weight:${active?'700':'400'};cursor:pointer;white-space:nowrap">${s}${loaded?` <span style="opacity:.6;font-size:11px">${cnt}</span>`:''}</button>`;
     }).join('');
 
     if (!loaded) {
@@ -1906,7 +1906,7 @@ Object.assign(App, {
           <div style="font-size:40px;margin-bottom:12px">📂</div>
           <div style="font-size:15px;font-weight:600;margin-bottom:8px">尚未載入資料</div>
           <div style="font-size:13px;color:#9ca3af;margin-bottom:20px">點擊下方按鈕從雲端載入訂價資料</div>
-          <button id="pr-load-btn" style="padding:10px 24px;background:#1a7a6e;color:white;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">⬇ 載入訂價資料</button>
+          <button id="pr-load-btn" style="padding:10px 24px;background:#2563eb;color:white;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">⬇ 載入訂價資料</button>
         </div></div>`;
     }
 
@@ -1949,14 +1949,14 @@ Object.assign(App, {
 
     const tbodyHtml = display.map(({ r, i }) => {
       const isCustom = !!r.__custom;
-      return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#f0fdf4':''}">` +
+      return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
         coreCols.map((c, ci) => `<td style="font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
         `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
     }).join('');
 
     const moreHtml = filteredWithIdx.length > SHOW
       ? `<div style="padding:12px;text-align:center;color:#6b7280;font-size:13px;background:#f9fafb;border-top:1px solid #f3f4f6">
-           顯示前 ${SHOW} 筆，共 ${filteredWithIdx.length} 筆 — <button id="pr-show-all" style="color:#1a7a6e;font-weight:600;background:none;border:0;cursor:pointer">顯示全部</button>
+           顯示前 ${SHOW} 筆，共 ${filteredWithIdx.length} 筆 — <button id="pr-show-all" style="color:#2563eb;font-weight:600;background:none;border:0;cursor:pointer">顯示全部</button>
          </div>` : '';
 
     return `<div class="table-card">
@@ -2051,7 +2051,7 @@ Object.assign(App, {
       const detTr = document.createElement('tr');
       detTr.id = detId;
       detTr.className = 'pr-detail-row';
-      detTr.innerHTML = `<td colspan="${colspan}" style="padding:12px 14px;background:#f8fafc;border-bottom:2px solid #1a7a6e">
+      detTr.innerHTML = `<td colspan="${colspan}" style="padding:12px 14px;background:#f8fafc;border-bottom:2px solid #2563eb">
         <div style="display:flex;flex-wrap:wrap;gap:8px">${itemsHtml}</div>
       </td>`;
       tr.after(detTr);
@@ -2338,7 +2338,7 @@ Object.assign(App, {
             ${list.length > 0 ? `<button id="mg-clear-btn" style="padding:7px 16px;background:#fff;color:#dc2626;border:1px solid #fca5a5;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">🗑 一鍵清除</button>` : ''}
           </div>
         </div>
-        <div id="mg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+        <div id="mg-form" style="display:none;padding:16px;background:#eff6ff;border-bottom:1px solid var(--border)">
           <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:10px">
             <input id="mg-name" placeholder="品名 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="mg-cost" type="number" placeholder="成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
