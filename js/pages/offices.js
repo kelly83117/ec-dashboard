@@ -1806,12 +1806,15 @@ Object.assign(App, {
     return `<span>${escapeHtml(String(val))}</span>`;
   },
 
-  // 核心欄位（主表顯示）
+  // 核心欄位（主表顯示）— 名稱欄固定排第一
   _prCoreCols(cols) {
-    const EXACT = new Set(['產品名稱','試算名稱','編號','實際成本','商品成本','售價','ROI','賣場','備註','行銷方法','網站']);
+    const NAME_FIRST = ['產品名稱','試算名稱','編號'];
+    const OTHERS = new Set(['實際成本','商品成本','售價','ROI','賣場','備註','行銷方法','網站']);
     const CONTAINS = ['獲利百分比'];
-    const core = cols.filter(c => EXACT.has(c) || CONTAINS.some(k => c.includes(k)));
-    return core.length >= 2 ? core : cols.slice(0, 5);
+    const nameCol = NAME_FIRST.find(n => cols.includes(n));
+    const rest = cols.filter(c => (OTHERS.has(c) || CONTAINS.some(k => c.includes(k))) && !NAME_FIRST.includes(c));
+    const core = nameCol ? [nameCol, ...rest] : rest;
+    return core.length >= 2 ? core : cols.filter(c => !c.startsWith('__')).slice(0, 5);
   },
 
   _prAddFormHtml(sheet) {
