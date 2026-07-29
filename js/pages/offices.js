@@ -1710,10 +1710,13 @@ Object.assign(App, {
     const 成交 = r2(price * p.txFee);
     const 活動 = r2(price * p.promo);
     const 退貨 = r2(price * p.ret);
-    const 蝦皮總成本 = r2(稅金 + 廣告 + 固定 + 成交 + 活動 + 退貨);
+    // Excel公式：蝦皮總成本 = 稅金+成交+活動+退貨（不含廣告/固定）
+    const 蝦皮總成本 = r2(稅金 + 成交 + 活動 + 退貨);
+    // Excel: 入帳 = 售價-(稅金+成交+活動+退貨)
     const 入帳 = r2(price - 蝦皮總成本);
-    const 銷項稅金 = r2(入帳 * p.incTax);
-    const 實際毛利 = r2(入帳 - 實際成本 - 銷項稅金);
+    const 銷項稅金 = 0;
+    // Excel: 実際毛利 = 入帳-実際成本
+    const 實際毛利 = r2(入帳 - 實際成本);
     const 獲利百分比 = price > 0 ? r2(實際毛利 / price * 10000) / 10000 : 0;
     const 成本率 = price > 0 ? r2(實際成本 / price * 10000) / 10000 : 0;
     const 淨利潤 = volume ? r2(實際毛利 * volume) : null;
