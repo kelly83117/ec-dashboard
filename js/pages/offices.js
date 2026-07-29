@@ -1686,13 +1686,13 @@ Object.assign(App, {
   // ship = 陸>台運費 ¥/kg（與原始成本同樣換匯，故實際成本 = (C+D+E×ship)×rmb）
   // incTax = 銷項稅金率（訂價表 Excel 顯示 None = 0，不含銷項稅）
   PRICING_SHEET_PARAMS: {
-    '訂價':    { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
-    '導流品':  { rmb:4.5, ship:9, tax:0.05, ads:0,    fixed:0, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
-    'Victor':  { rmb:4.5, ship:9, tax:0,    ads:0.10, fixed:9, txFee:0.08, promo:0.07, ret:0.02, incTax:0 },
-    'inna':    { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
-    'Vivian':  { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
-    '官網':    { rmb:4.5, ship:9, tax:0.07, ads:0,    fixed:9, txFee:0.08, promo:0,    ret:0,    incTax:0 },
-    'Doris':   { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.07, ret:0.02, incTax:0 },
+    '訂價':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '導流品':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'Victor':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'inna':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'Vivian':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '官網':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'Doris':   { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
   },
 
   _prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume) {
@@ -1704,24 +1704,23 @@ Object.assign(App, {
     const 陸台運費NT = r2(陸台運費RMB * p.rmb);
     const 實際成本 = r2((origCost + landFreight + 陸台運費RMB) * p.rmb);
     const 稅金 = r2(price * p.tax);
-    const 廣告 = r2(price * p.ads);
-    // 導流品：售價 ≥ 100 才加固定費用 9
-    const 固定 = (sheet === '導流品' && price < 100) ? 0 : p.fixed;
     const 成交 = r2(price * p.txFee);
     const 活動 = r2(price * p.promo);
     const 退貨 = r2(price * p.ret);
-    // Excel公式：蝦皮總成本 = 稅金+成交+活動+退貨（不含廣告/固定）
-    const 蝦皮總成本 = r2(稅金 + 成交 + 活動 + 退貨);
-    // Excel: 入帳 = 售價-(稅金+成交+活動+退貨)
+    // 導流品：售價 < 100 不加固定費；其他分頁一律 +9
+    const 固定 = (sheet === '導流品' && price < 100) ? 0 : p.fixed;
+    // Excel: 蝦皮總成本 = 稅金+成交+活動+退貨+固定費
+    const 蝦皮總成本 = r2(稅金 + 成交 + 活動 + 退貨 + 固定);
+    // Excel: 入帳 = 售價 - 蝦皮總成本
     const 入帳 = r2(price - 蝦皮總成本);
-    const 銷項稅金 = 0;
-    // Excel: 実際毛利 = 入帳-実際成本
+    // Excel: 實際毛利 = 入帳 - 實際成本
     const 實際毛利 = r2(入帳 - 實際成本);
+    // Excel: 獲利% = 實際毛利 / 售價
     const 獲利百分比 = price > 0 ? r2(實際毛利 / price * 10000) / 10000 : 0;
     const 成本率 = price > 0 ? r2(實際成本 / price * 10000) / 10000 : 0;
     const 淨利潤 = volume ? r2(實際毛利 * volume) : null;
     const 預估投入 = volume ? r2(volume * price) : null;
-    return { 陸台運費NT, 實際成本, 稅金, 廣告, 固定, 成交, 活動, 退貨, 蝦皮總成本, 入帳, 銷項稅金, 實際毛利, 獲利百分比, 成本率, 淨利潤, 預估投入 };
+    return { 陸台運費NT, 實際成本, 稅金, 固定, 成交, 活動, 退貨, 蝦皮總成本, 入帳, 實際毛利, 獲利百分比, 成本率, 淨利潤, 預估投入 };
   },
 
   _prBuildRow(sheet, inputs) {
