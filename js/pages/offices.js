@@ -1906,9 +1906,6 @@ Object.assign(App, {
         ${readOnly('pc-income','▶ 入帳金額（自動）','#374151')}
 
         ${readOnly('pc-roas','▶ 廣告ROAS（自動）')}
-        ${inp('pf-volume','月銷量','number','','選填')}
-        ${readOnly('pc-netloss','▶ 淨利潤（自動）','#374151')}
-        ${readOnly('pc-invest','▶ 預估投入（自動）','#374151')}
       </div>
       <div style="display:flex;gap:8px;margin-top:12px">
         <button id="pr-form-save" style="padding:8px 20px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
@@ -2200,8 +2197,7 @@ Object.assign(App, {
       const landFreight = parseFloat(document.getElementById('pf-land')?.value) || 0;
       const weight    = parseFloat(document.getElementById('pf-weight')?.value) || 0;
       const price     = parseFloat(document.getElementById('pf-price')?.value)  || 0;
-      const volume    = parseFloat(document.getElementById('pf-volume')?.value) || 0;
-      const c = self._prCalcAll(activeSheet, origCost, landFreight, weight, price, 0, volume);
+      const c = self._prCalcAll(activeSheet, origCost, landFreight, weight, price, 0, 0);
       const nt = v => v != null ? 'NT$' + v.toLocaleString('zh-TW', {minimumFractionDigits:0}) : '—';
       const pct = v => {
         const p = Math.round(v * 10000) / 100;
@@ -2229,7 +2225,7 @@ Object.assign(App, {
       set('pc-roas', roasVal != null ? roasVal.toFixed(2) : '—');
     };
 
-    ['pf-orig','pf-land','pf-weight','pf-price','pf-volume'].forEach(id => {
+    ['pf-orig','pf-land','pf-weight','pf-price'].forEach(id => {
       document.getElementById(id)?.addEventListener('input', _updatePreview);
     });
 
@@ -2245,7 +2241,7 @@ Object.assign(App, {
         weight:      parseFloat(get('pf-weight')) || 0,
         price:       parseFloat(get('pf-price'))  || 0,
         roas:        parseFloat(document.getElementById('pc-roas')?.innerText) || 0,
-        volume:      parseFloat(get('pf-volume')) || 0,
+        volume:      0,
         store:       get('pf-store'),
         note:        get('pf-note'),
       };
