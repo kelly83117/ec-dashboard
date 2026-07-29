@@ -350,6 +350,12 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-sync-diff[open]>summary::before{content:'▾ ';}
 .mm-sync-diff[open]>summary{margin-bottom:3px;}
 .mm-sync-diff-row{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:360px;}
+/* 同步預覽：無變更項收合區 */
+.mm-sync-unchanged{margin-top:10px;border-top:1px dashed #eef0f2;padding-top:8px;}
+.mm-sync-unchanged>summary{cursor:pointer;color:#9ca3af;font-size:12px;user-select:none;list-style:none;}
+.mm-sync-unchanged>summary::-webkit-details-marker{display:none;}
+.mm-sync-unchanged>summary::before{content:'▸ ';}
+.mm-sync-unchanged[open]>summary::before{content:'▾ ';}
 /* 商品同步：產生差異預覽按鈕旁的提示（缺什麼 / 會比什麼） */
 .mm-gen-hint{font-size:12px;color:#9ca3af;margin-left:10px;}
 .mm-atleast{color:#6b7280;font-size:12px;}

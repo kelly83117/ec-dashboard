@@ -6618,39 +6618,46 @@ function momoRenderSyncPreviewModal(shop, items){
   const diffHtml=it=>{ const d=it.diff; if(!d||!d.samples||!d.samples.length) return it.diffErr?`<div class="mm-sync-diff">差異明細計算失敗：${esc(it.diffErr)}</div>`:'';
     const ss=d.samples.map(s=>`<div class="mm-sync-diff-row"${(s.local!=null||s.cloud!=null)?` title="本機：${esc(String(s.local))}　|　雲端：${esc(String(s.cloud))}"`:''}>· <b>${esc(String(s.item))}</b>${(s.field&&s.field!=='(整筆)')?' · '+esc(s.field):''}：${esc(s.desc||'')}</div>`).join('');
     return `<details class="mm-sync-diff"><summary>${d.total} 筆不同 · 展開</summary>${ss}${d.total>d.samples.length?`<div style="color:#9ca3af;margin-top:2px">（僅列前 ${d.samples.length}）</div>`:''}</details>`; };
-  const rows = items.length ? items.map(it=>`<tr style="border-top:1px solid #f3f4f6">
-      <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}" checked onchange="momoSyncUpdateCount()"></td>
+  // 逐列 HTML；checked=預設是否勾選（有變更→勾、無變更→不勾）
+  const rowHtml=(it,checked)=>`<tr style="border-top:1px solid #f3f4f6">
+      <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}" ${checked?'checked':''} onchange="momoSyncUpdateCount()"></td>
       <td style="padding:6px 8px;font-family:monospace;word-break:break-all">${esc(it.key)}</td>
       <td style="padding:6px 8px;color:${typeColor[it.kind]||'#6b7280'};font-weight:600;white-space:nowrap">${it.kind}</td>
       <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.localCount}</td>
       <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.cloudCount==null?'—':it.cloudCount}</td>
       <td style="padding:6px 8px">${statusCell(it)}${it.status==='diff'?diffHtml(it):''}</td>
-    </tr>`).join('')
-    : `<tr><td colspan="6" style="padding:20px;text-align:center;color:#9ca3af">目前沒有待同步的資料</td></tr>`;
+    </tr>`;
+  const changed=items.filter(it=>it.status!=='same'), unchanged=items.filter(it=>it.status==='same');   // 只有 changed 需要你決定
+  const theadHtml=`<thead><tr style="text-align:left;color:#6b7280;font-weight:600">
+      <th style="padding:6px 4px;text-align:center"><input type="checkbox" id="mm-sync-all" checked onchange="momoSyncToggleAll(this.checked)"></th>
+      <th style="padding:6px 8px">資料 key</th><th style="padding:6px 8px">類型</th><th style="padding:6px 8px;text-align:right">本機</th><th style="padding:6px 8px;text-align:right">雲端</th><th style="padding:6px 8px">狀態 / 差異</th>
+    </tr></thead>`;
+  const mainHtml = changed.length
+    ? `<table style="width:100%;border-collapse:collapse;font-size:12px">${theadHtml}<tbody id="mm-sync-main-body">${changed.map(it=>rowHtml(it,true)).join('')}</tbody></table>`
+    : `<div style="padding:18px;text-align:center;color:#9ca3af;font-size:13px">目前沒有需要同步的項目${unchanged.length?`（另有 ${unchanged.length} 項無變更）`:''}</div>`;
+  const unchangedHtml = unchanged.length
+    ? `<details class="mm-sync-unchanged"><summary>另有 ${unchanged.length} 項無變更 · 展開（預設不推，可個別勾）</summary><table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px"><tbody>${unchanged.map(it=>rowHtml(it,false)).join('')}</tbody></table></details>`
+    : '';
   ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:820px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;font-size:15px;font-weight:700">同步預覽 — 勾選要推送到雲端的項目</div>
     <div style="padding:12px 20px;overflow:auto">
-      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">預設<b>全選</b>，可個別取消：狀態存疑的先取消不推、其餘照推。<b>勾選推送的項目會用本機整包覆蓋雲端（無版本比對、系統無法判斷誰新）</b>，請確認不會蓋掉同事的更新。</div>
-      ${anyDiff?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">⚠️ 有項目<b>內容不同</b>——點該列的「展開」看差在哪個 SKU/欄位，確認是你要覆蓋的再保持勾選。</div>`:''}
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="text-align:left;color:#6b7280;font-weight:600">
-          <th style="padding:6px 4px;text-align:center"><input type="checkbox" id="mm-sync-all" checked onchange="momoSyncToggleAll(this.checked)"></th>
-          <th style="padding:6px 8px">資料 key</th><th style="padding:6px 8px">類型</th><th style="padding:6px 8px;text-align:right">本機</th><th style="padding:6px 8px;text-align:right">雲端</th><th style="padding:6px 8px">狀態 / 差異</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">只列出<b>有變更</b>（新增／內容不同）的項目，預設全勾；無變更的收在下方。<b>勾選推送的會用本機整包覆蓋雲端（無版本比對、系統無法判斷誰新）</b>，請確認不會蓋掉同事的更新。</div>
+      ${anyDiff?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">⚠️ 有項目<b>內容不同</b>——點該列「展開」看差在哪個 SKU/欄位，確認是你要覆蓋的再保持勾選。</div>`:''}
+      ${mainHtml}
+      ${unchangedHtml}
     </div>
     <div style="padding:14px 20px;border-top:1px solid #eef0f2;display:flex;gap:10px;justify-content:flex-end">
       <button onclick="momoCloseSyncPreview()" style="padding:7px 16px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>
-      <button id="mm-sync-confirm-btn" onclick="momoConfirmSync('${shop}')" ${items.length?'':'disabled'} style="padding:7px 18px;border-radius:7px;border:none;background:${items.length?'#10b981':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${items.length?'pointer':'default'}">確認同步${items.length?'（'+items.length+' 項）':''}</button>
+      <button id="mm-sync-confirm-btn" onclick="momoConfirmSync('${shop}')" ${changed.length?'':'disabled'} style="padding:7px 18px;border-radius:7px;border:none;background:${changed.length?'#10b981':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${changed.length?'pointer':'default'}">確認同步${changed.length?'（'+changed.length+' 項）':''}</button>
     </div>
   </div>`;
 }
-function momoSyncToggleAll(checked){ document.querySelectorAll('.mm-sync-chk').forEach(c=>{c.checked=checked;}); momoSyncUpdateCount(); }
+function momoSyncToggleAll(checked){ document.querySelectorAll('#mm-sync-main-body .mm-sync-chk').forEach(c=>{c.checked=checked;}); momoSyncUpdateCount(); }   // 全選只作用在「有變更」主表
 function momoSyncUpdateCount(){
-  const chks=[...document.querySelectorAll('.mm-sync-chk')]; const n=chks.filter(c=>c.checked).length, total=chks.length;
+  const n=[...document.querySelectorAll('.mm-sync-chk')].filter(c=>c.checked).length;   // 按鈕計數=實際會推的（含展開後手勾的無變更項）
   const btn=document.getElementById('mm-sync-confirm-btn'); if(btn){ btn.disabled=(n===0); btn.textContent='確認同步'+(n?'（'+n+' 項）':''); btn.style.background=n?'#10b981':'#c7c9e6'; btn.style.cursor=n?'pointer':'default'; }
-  const all=document.getElementById('mm-sync-all'); if(all){ all.checked=(n===total&&total>0); all.indeterminate=(n>0&&n<total); }
+  const main=[...document.querySelectorAll('#mm-sync-main-body .mm-sync-chk')], mn=main.filter(c=>c.checked).length;
+  const all=document.getElementById('mm-sync-all'); if(all){ all.checked=(main.length>0&&mn===main.length); all.indeterminate=(mn>0&&mn<main.length); }
 }
 function momoCloseSyncPreview(){ const ov=document.getElementById('momo-sync-overlay'); if(ov) ov.remove(); }
 function momoConfirmSync(shop){
