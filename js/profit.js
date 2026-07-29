@@ -5685,6 +5685,19 @@ function momoCalcMargin({cost,purchasePrice,salePrice,shippingPackaging}){
   const N=L-cost-M;                       // 實際毛利
   return { unitProfit:N, marginPct: purchasePrice?(N/purchasePrice)*100:0 };
 }
+// 甲配/乙配 新增表單即時毛利率預覽——「供應商模式」口徑，與淨利表 momoAggregatePeriods 甲乙分支同一套（不是上面售價基準的 momoCalcMargin）：
+//   營收 R = 未稅進價(= 含稅進價/1.05)；費用 = R×feeRate；毛利 = R − R×feeRate − cost；毛利率 = 毛利/R = 1 − feeRate − cost/未稅進價。
+//   feeRate 取近3月已對帳均費率（可靠時，與 aggregate 未對帳分支 line~5800 同源）、否則退 MOMO 專屬 6.8%。售價/運費/包材在此口徑不參與（運費已含在對帳單費率）。
+//   ⇒ 建檔看到的毛利率 == 商品建好、對帳後在總表看到的毛利率（口徑一致，數量會約分掉）；§5 30% 內部獲利目標把關才掛在真淨利率上。
+function momoCalcMarginSupplier(shop, {cost, purchasePrice}){
+  const ppUntax=(purchasePrice||0)/1.05;   // 含稅進價 → 未稅（對帳金額口徑）
+  let feeRate=0.068, feeMode='6.8%';
+  const h=momoHistoricalFeeRate(shop);
+  if(h && h.reliable){ feeRate=h.rate; feeMode='hist'; }
+  if(!(ppUntax>0)) return { unitProfit:0, marginPct:0, feeRate, feeMode };
+  const unitProfit=ppUntax*(1-feeRate)-(cost||0);
+  return { unitProfit, marginPct:(unitProfit/ppUntax)*100, feeRate, feeMode };
+}
 // ═══ 階段二：甲配/乙配 新供應商淨利模型的月費率快取 ═══
 //   feeRate = E(未稅=對帳單E÷1.05) ÷ A(未稅營收) → 每 SKU 費用 = R×feeRate，Σ全月 = E÷1.05（重現對帳單）。
 //   6.8% 是 MOMO 專屬常數（未對帳時只能估比例費用）；絕不共用蝦皮全站費率框。
@@ -6724,7 +6737,7 @@ function momoProfitTableHTML(shop){
   // 分段期別控制：月下拉 + 上/下/整月 三段按鈕（取代原本每月三項、越長越長的單一長下拉）。
   //   年份併進月標籤（目前只有 2026，不另開單選年下拉徒增點擊）。某半月無資料→該段 disabled。
   const monthOpts=months.length
-    ? months.map(mo=>`<option value="${mo}"${mo===curMo?' selected':''}>${mo.slice(0,4)}/${+mo.slice(5,7)}月</option>`).join('')
+    ? months.map(mo=>`<option value="${mo}"${mo===curMo?' selected':''}>${mo.slice(0,4)}/${+mo.slice(5,7)}</option>`).join('')
     : `<option value="">尚無期別資料</option>`;
   const segBtns=months.length
     ? [['上','H1'],['下','H2'],['整月','FULL']].map(([lbl,h])=>{
@@ -7429,9 +7442,13 @@ function momoAddRecalc(shop){
   const prev=g('preview');
   if(!prev) return;
   if(cost&&pp&&sp){
-    const {marginPct}=momoCalcMargin({cost,purchasePrice:pp,salePrice:sp,shippingPackaging:ship});
-    const ok=marginPct>=30;   // §5：新品上架把關門檻 30%（比日常嚴，刻意）
-    prev.innerHTML=`毛利率 <b style="color:${ok?'#10b981':'#f97316'};font-size:15px">${Math.round(marginPct*10)/10}%</b> <span style="color:${ok?'#10b981':'#f97316'};font-weight:600;margin-left:6px">${ok?'✓ 超過 30%':'⚠ 未達 30%'}</span>`;
+    // 甲配/乙配 走供應商模式口徑（與總表淨利表一致）；MO+ 等維持原售價基準 momoCalcMargin（byte-identical）
+    const isJiaYi=(shop==='甲配'||shop==='乙配');
+    const r=isJiaYi ? momoCalcMarginSupplier(shop,{cost,purchasePrice:pp}) : momoCalcMargin({cost,purchasePrice:pp,salePrice:sp,shippingPackaging:ship});
+    const marginPct=r.marginPct;
+    const ok=marginPct>=30;   // §5：新品上架我們自己訂的獲利目標 30%（非 MOMO 規定；掛在供應商口徑真淨利率上才有意義）
+    const feeNote=isJiaYi ? ` <span style="color:#9ca3af;font-weight:400;font-size:11px">· 供應商口徑（費率 ${(r.feeRate*100).toFixed(0)}% ${r.feeMode==='hist'?'近3月估':'預設'}）</span>` : '';
+    prev.innerHTML=`毛利率 <b style="color:${ok?'#10b981':'#f97316'};font-size:15px">${Math.round(marginPct*10)/10}%</b> <span style="color:${ok?'#10b981':'#f97316'};font-weight:600;margin-left:6px">${ok?'✓ 超過 30%':'⚠ 未達 30%'}</span>${feeNote}`;
   }else{
     prev.innerHTML=`<span style="color:#9ca3af">成本 / 進價 / 售價填齊後即時計算毛利率</span>`;
   }
