@@ -2135,25 +2135,48 @@ Object.assign(App, {
       self.render();
     });
 
-    // 欄位拖曳排序
+    // 欄位拖曳排序（含插入位置指示）
     let _dragColSrc = null;
     const colList = document.getElementById('pr-col-list');
+    // 建立插入指示線
+    const _dragIndicator = document.createElement('div');
+    _dragIndicator.id = 'pr-drag-indicator';
+    _dragIndicator.style.cssText = 'width:3px;border-radius:3px;background:#2563eb;align-self:stretch;display:none;flex-shrink:0';
+    const _clearIndicator = () => {
+      _dragIndicator.style.display = 'none';
+      if (_dragIndicator.parentNode) _dragIndicator.parentNode.removeChild(_dragIndicator);
+    };
     document.querySelectorAll('.pr-col-item').forEach(item => {
       item.addEventListener('dragstart', e => {
         _dragColSrc = item;
-        setTimeout(() => { item.style.opacity = '0.4'; }, 0);
+        setTimeout(() => { item.style.opacity = '0.35'; item.style.transform = 'scale(0.97)'; }, 0);
         e.dataTransfer.effectAllowed = 'move';
       });
-      item.addEventListener('dragend', () => { item.style.opacity = '1'; _dragColSrc = null; });
-      item.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+      item.addEventListener('dragend', () => {
+        item.style.opacity = '1'; item.style.transform = '';
+        _clearIndicator();
+        _dragColSrc = null;
+      });
+      item.addEventListener('dragover', e => {
+        e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+        if (!_dragColSrc || _dragColSrc === item) return;
+        const rect = item.getBoundingClientRect();
+        const mid = rect.left + rect.width / 2;
+        _dragIndicator.style.display = 'block';
+        if (e.clientX < mid) colList.insertBefore(_dragIndicator, item);
+        else colList.insertBefore(_dragIndicator, item.nextSibling);
+      });
+      item.addEventListener('dragleave', e => {
+        if (!item.contains(e.relatedTarget)) { /* indicator stays until next dragover */ }
+      });
       item.addEventListener('drop', e => {
         e.preventDefault();
+        _clearIndicator();
         if (!_dragColSrc || _dragColSrc === item) return;
-        const items = [...colList.querySelectorAll('.pr-col-item')];
-        const srcIdx = items.indexOf(_dragColSrc);
-        const tgtIdx = items.indexOf(item);
-        if (srcIdx < tgtIdx) colList.insertBefore(_dragColSrc, item.nextSibling);
-        else colList.insertBefore(_dragColSrc, item);
+        const rect = item.getBoundingClientRect();
+        const mid = rect.left + rect.width / 2;
+        if (e.clientX < mid) colList.insertBefore(_dragColSrc, item);
+        else colList.insertBefore(_dragColSrc, item.nextSibling);
         _saveColPrefs();
       });
     });
