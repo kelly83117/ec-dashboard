@@ -1742,7 +1742,7 @@ Object.assign(App, {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p style="font-size:10px;color:#9ca3af;margin:8px 0 0">※ 導流品售價 &lt; 100 時固定費自動歸零</p>
+      <p style="font-size:10px;color:#9ca3af;margin:8px 0 0">※ 導流品售價 ≥ 100 時自動 +9（運費包材+開發票）</p>
     </div>`;
   },
 
@@ -1760,7 +1760,9 @@ Object.assign(App, {
     const 退貨 = r2(price * p.ret);
     // Excel: 入帳 = 售價-(稅金+成交+活動+退貨)，即 I-(K+SUM(L:N))
     const 平台費 = r2(稅金 + 成交 + 活動 + 退貨);
-    const 入帳 = r2(price - 平台費);
+    // 導流品售價 ≥ 100：固定費 +9（運費包材+開發票）
+    const 固定 = (sheet === '導流品' && price >= 100) ? 9 : 0;
+    const 入帳 = r2(price - 平台費 - 固定);
     // Excel: 蝦皮總成本 = SUM(K:P) = 平台費+入帳+銷項 = 售價
     const 蝦皮總成本 = r2(price);
     // Excel: 實際毛利 = 入帳 - 實際成本 (O-H)
