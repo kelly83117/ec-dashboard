@@ -1800,7 +1800,8 @@ Object.assign(App, {
       else if (col.includes('獲利百分比') || col === 'ROI') row[col] = c.獲利百分比;
       else if (col.includes('以下)') || col === '成本') row[col] = c.成本率;
       else if (col.includes('ROAS')) row[col] = roas || null;
-      else if (col === '月銷量' || col === '進貨') row[col] = volume || null;
+      else if (col === '月銷量') row[col] = volume || null;
+      else if (col === '進貨') row[col] = (sheet === 'Victor') ? (website || '') : (volume || null);
       else if (col.includes('淨利潤')) row[col] = c.淨利潤;
       else if (col.includes('預估投入')) row[col] = c.預估投入;
       else if (col === '網站') row[col] = website || '';
@@ -1810,9 +1811,10 @@ Object.assign(App, {
     return row;
   },
 
-  _prColType(col) {
+  _prColType(col, sheet) {
     if (col.includes('ROAS')) return 'roas';
     if (col.includes('百分比') || col === 'ROI' || col.includes('退貨率') || col.includes('以下)')) return 'pct';
+    if (col === '進貨' && sheet === 'Victor') return 'link';
     if (/月銷量|^進貨$|^數量$|^箱數$|^重量$/.test(col)) return 'count';
     if (col.includes('網站') || col.includes('連結')) return 'link';
     // 人民幣欄位：原始成本、陸內運費、陸>台運費
@@ -1954,7 +1956,7 @@ Object.assign(App, {
     const refRow = sheetData.find(r => !r.__custom) || sheetData[0];
     const allCols = refRow ? Object.keys(refRow).filter(k => !k.startsWith('__')) : [];
     const coreCols = this._prCoreCols(allCols);
-    const coreTypes = coreCols.map(c => this._prColType(c));
+    const coreTypes = coreCols.map(c => this._prColType(c, activeSheet));
 
     const filteredWithIdx = q
       ? sheetData.map((r, i) => ({ r, i })).filter(({ r }) => String(r['產品名稱'] || r['試算名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase()))
@@ -2069,7 +2071,7 @@ Object.assign(App, {
       if (!r) return;
 
       const allCols = Object.keys(r);
-      const allTypes = allCols.map(c => self._prColType(c));
+      const allTypes = allCols.map(c => self._prColType(c, activeSheet));
       const itemsHtml = allCols.map((c, ci) => {
         const v = r[c];
         if (v === null || v === undefined) return '';
@@ -2098,7 +2100,7 @@ Object.assign(App, {
       const sheetData = window.__pricingData[activeSheet] || [];
       const allCols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
       const coreCols = self._prCoreCols(allCols);
-      const coreTypes = coreCols.map(c => self._prColType(c));
+      const coreTypes = coreCols.map(c => self._prColType(c, activeSheet));
       const filteredWithIdx = q
         ? sheetData.map((r, i) => ({ r, i })).filter(({ r }) => String(r['產品名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase()))
         : sheetData.map((r, i) => ({ r, i }));
