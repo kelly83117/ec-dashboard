@@ -547,7 +547,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       }
       if(pk.startsWith('ec_momo_products|')){   // MOMO 商品主檔 → momo_products collection（每賣場一 doc，避開 app/profit 1MB）
         const shop=pk.split('|')[1];
-        const items=momoLoadProducts(shop);   // _profitMem → _mem → localStorage
+        const items=momoPendingProducts(pk);   // ⚠ 讀待同步本機值(_mem→localStorage)，非 momoLoadProducts(_profitMem 優先，會 stale)→ 推的==預覽看的
         if(window.__cloudMomo && Array.isArray(items)){ tasks.push({key:pk,run:()=>window.__cloudMomo.setShop(shop,items)}); }
         else{ skippedProblem.push({key:pk,reason:'MOMO 商品主檔讀不到，或雲端層未就緒'}); }
         return;
@@ -5592,6 +5592,14 @@ function momoSaveProducts(shop,products){
   try{ window._momoJustSaved=Date.now(); }catch{}   // bounce-back 守衛：剛存過 5 秒內、momo_products 訂閱 echo 回來不覆蓋
   _markPending(k);   // 走既有 pending → 手動同步時 __cloudMomo.setShop 上雲（momo_products collection，每賣場一 doc）
 }
+// 「待同步的本機值」：_mem → localStorage（保留使用者編輯）。⚠ 不讀 _profitMem——它會被 momo_products 雲端 snapshot 洗回舊值，
+//   若同步/預覽讀它就會拿到 stale。同步推送(syncToCloud)與預覽比對(_momoCollectPending)都走這個 → 保證「看到的==推的」。
+function momoPendingProducts(pk){
+  try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[pk]!==undefined) return Store._mem[pk]; }catch{}
+  try{ const raw=localStorage.getItem(pk); if(raw) return JSON.parse(raw); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[pk]) return Store._profitMem[pk]; }catch{}   // 最後退回（無 pending 編輯時＝雲端值）
+  return null;
+}
 // bounce-back 守衛（給 firebase.js 的 momo_products 訂閱呼叫；邏輯放這裡才讀得到私有 _pendingSyncKeys）：
 //   本機有未同步變更（pending）或剛存過 → 雲端 echo 不覆蓋 _profitMem，保住本機版本。
 window.__momoShouldSkipCloudOverwrite=function(k){
@@ -6527,8 +6535,10 @@ function _momoCollectPending(shop){
     if(pk.startsWith('__shop__|')) return;               // marker，不推
     if(pk.startsWith('ec|filemeta|')) return;            // 故意不上雲
     if(pk.startsWith('ec|')){ add(pk,'蝦皮報表', Store._profitMem&&Store._profitMem[pk]); return; }   // → setReport（profits collection）
-    let val=null; try{ if(Store._mem&&Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
-    if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} }
+    let val=null;
+    if(pk.startsWith('ec_momo_products|')){ val=momoPendingProducts(pk); }   // 與同步推送同源（_mem→localStorage），保證預覽比對的==推的
+    else { try{ if(Store._mem&&Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
+      if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} } }
     const kind = pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk==='ec_momo_rent_records'?'MOMO倉租費' : pk.startsWith('ec_momo_reconcile|')?'MOMO月對帳' : pk.startsWith('ec_momo_freight|')?'MOMO運費' : pk.startsWith('ec_momo_s1103|')?'MOMO排行榜' : pk==='ec_momo_cost_by_origin'?'MOMO成本表' : '其他設定';
     add(pk,kind,val);
   });
