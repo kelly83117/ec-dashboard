@@ -6373,6 +6373,13 @@ function momoAllPeriods(shop){
     return ord(a)-ord(b);
   });
 }
+// 上線首月：更早的月份只有零星跨月訂單、資料不完整 → 不列入期別下拉（純隱藏選項）。
+//   ⚠ 底層資料原樣保留、momoAllPeriods 仍回傳、彙總/整月照算；只有下拉選項與環比基準受此邊界影響。
+const MOMO_FIRST_PERIOD='2026-01';
+// 下拉可見的月份清單（YYYY-MM，>= 上線首月，去重排序）。給分段期別控制的「月」選單與預設期別用。
+function momoVisibleMonths(shop){
+  return [...new Set(momoAllPeriods(shop).filter(k=>k.slice(0,7)>=MOMO_FIRST_PERIOD).map(k=>k.slice(0,7)))].sort();
+}
 // FULL → 該月的 H1+H2 期別鍵（給彙總展開用）；非 FULL 原樣單鍵回傳
 function momoExpandPeriod(period){
   if(!period) return [];
@@ -6703,18 +6710,28 @@ function momoColResizeDrag(ev, shop, colKey){
 }
 try{ localStorage.removeItem('ec_momo_hint_colw'); }catch(e){}   // 一次性提示已移除，清掉舊 flag 不留在 localStorage
 function momoProfitTableHTML(shop){
-  const periods=momoAllPeriods(shop);
-  // 只要目前選的不是「有效期別」（含 undefined / 空字串 / 已過期）就重設為最新期別，
-  //   避免先看過空總表把選值卡在 '' → 之後有資料時下拉視覺顯示第一項、變數卻還是 '' → 彙總到空期別顯示 0。
-  //   預設固定落「最新半月」（H1/H2），不落整月——整月是新增選項，不該改變同事/老闆看到的預設畫面
-  //   （整月數字是半月的兩倍，預設一變會被當成資料出錯）。
-  if(!periods.includes(_momoPeriodSel[shop])){
-    const halves=periods.filter(p=>!p.endsWith('-FULL'));
-    _momoPeriodSel[shop]=halves.length?halves[halves.length-1]:(periods.length?periods[periods.length-1]:'');
+  const allP=momoAllPeriods(shop);
+  const months=momoVisibleMonths(shop);   // >= 上線首月的月份（下拉只列這些；更早的跨月零星訂單隱藏但仍計入計算）
+  // 預設期別＝最新「有資料」月份的整月（即使尚未對帳也照顯示，未對帳由 statusBanner 標🟡估算）。
+  //   只要目前選值不在「可見期別」集合（含 undefined/空/已過期/被邊界隱藏的舊月）就重設，避免卡在空期別顯示 0。
+  //   例：七月完全沒傳→落 6月整月；七月只傳 C1105（對帳單未到）→落 7月整月並標估算。
+  const visibleKeys=new Set(allP.filter(k=>k.slice(0,7)>=MOMO_FIRST_PERIOD));
+  if(!visibleKeys.has(_momoPeriodSel[shop])){
+    _momoPeriodSel[shop]= months.length ? months[months.length-1]+'-FULL' : '';
   }
-  const periodOpts=periods.length
-    ? periods.map(p=>`<option value="${p}"${p===_momoPeriodSel[shop]?' selected':''}>${momoPeriodLabel(p)}</option>`).join('')
+  const curMo=(_momoPeriodSel[shop]||'').slice(0,7);
+  const curHalf=(/-(H1|H2|FULL)$/.exec(_momoPeriodSel[shop]||'')||[])[1]||'FULL';
+  // 分段期別控制：月下拉 + 上/下/整月 三段按鈕（取代原本每月三項、越長越長的單一長下拉）。
+  //   年份併進月標籤（目前只有 2026，不另開單選年下拉徒增點擊）。某半月無資料→該段 disabled。
+  const monthOpts=months.length
+    ? months.map(mo=>`<option value="${mo}"${mo===curMo?' selected':''}>${mo.slice(0,4)}/${+mo.slice(5,7)}月</option>`).join('')
     : `<option value="">尚無期別資料</option>`;
+  const segBtns=months.length
+    ? [['上','H1'],['下','H2'],['整月','FULL']].map(([lbl,h])=>{
+        const exists = h==='FULL' || allP.includes(curMo+'-'+h);   // FULL 恆有（有半月就補）；H1/H2 視資料
+        return `<button class="mm-seg${curHalf===h?' on':''}"${exists?'':' disabled'} onclick="momoSetPeriodHalf('${shop}','${h}')">${lbl}</button>`;
+      }).join('')
+    : '';
   const q=(_momoSearch[shop]||'').replace(/"/g,'&quot;');
   const total=momoLoadProducts(shop).length;
   const discCount=momoLoadProducts(shop).filter(p=>p.discontinued===true).length;   // 當前主檔已下架筆數
@@ -6725,7 +6742,7 @@ function momoProfitTableHTML(shop){
     : '';
   return `
     <div class="mm-row" style="margin-bottom:10px">
-      <span class="mm-field"><span class="mm-lbl">期別</span><select class="mm-sel" onchange="momoSetPeriod('${shop}',this.value)">${periodOpts}</select></span>
+      <span class="mm-field"><span class="mm-lbl">期別</span><select class="mm-sel" onchange="momoSetPeriodMonth('${shop}',this.value)">${monthOpts}</select><span class="mm-seg-grp">${segBtns}</span></span>
       <span id="momo-status-${shop}" class="mm-field"></span>
       ${momoSearchBox(shop, 'momo-search-'+shop, _momoSearch[shop]||'', '搜尋 品號 / 名稱 / 原廠編號', 'momoOnSearch', 'flex:1;min-width:180px;max-width:320px')}
       <span class="mm-stat">總 <b>${total}</b>·上架 <b>${activeCount}</b>·下架 <b>${discCount}</b></span>
@@ -6734,6 +6751,22 @@ function momoProfitTableHTML(shop){
     <div id="momo-tbl-${shop}"></div>`;
 }
 function momoSetPeriod(shop,val){ _momoPeriodSel[shop]=val; momoRenderProfitBody(shop); }
+// 分段控制：換月保留目前的 上/下/整月 段；若新月沒那個半月則退回整月。重繪整個 profit 子內容以更新下拉+段高亮+段 disabled。
+function momoSetPeriodMonth(shop,mo){
+  if(!mo) return;
+  const half=(/-(H1|H2|FULL)$/.exec(_momoPeriodSel[shop]||'')||[])[1]||'FULL';
+  const use = (half!=='FULL' && !momoAllPeriods(shop).includes(mo+'-'+half)) ? 'FULL' : half;
+  _momoPeriodSel[shop]=mo+'-'+use;
+  const c=document.getElementById('momo-sub-content-'+shop);
+  if(c){ c.innerHTML=momoProfitTableHTML(shop); momoRenderProfitBody(shop); }
+}
+function momoSetPeriodHalf(shop,half){
+  const mo=(_momoPeriodSel[shop]||'').slice(0,7);
+  if(!/^\d{4}-\d{2}$/.test(mo)) return;
+  _momoPeriodSel[shop]=mo+'-'+half;
+  const c=document.getElementById('momo-sub-content-'+shop);
+  if(c){ c.innerHTML=momoProfitTableHTML(shop); momoRenderProfitBody(shop); }
+}
 function momoOnSearch(shop,val){ _momoSearch[shop]=val; momoRenderProfitBody(shop); }
 // 切換顯示/隱藏已下架：重繪整個 profit 子內容（連按鈕標籤一起更新；search/period/sort 狀態都在模組變數裡，重繪會保留）
 function momoToggleDiscontinued(shop){
@@ -6905,7 +6938,10 @@ function momoRenderProfitBody(shop){
   const stEl=document.getElementById('momo-status-'+shop); if(stEl) stEl.innerHTML=statusChip;
   // 總覽（d）+ 環比（e）+ 已對帳整月自驗 Σ營收==對帳單A（f）
   const curT=momoPeriodTotals(shop, period);
-  const prevKey=momoPrevPeriodKey(period);
+  let prevKey=momoPrevPeriodKey(period);
+  // 上線首月（含）之前的月份只有零星跨月訂單、明顯不完整 → 不拿來當環比基準：清空 prevKey 使環比顯示「—」而非誤導的百分比。
+  //   例：1月上的上一期是 2025/12，只有零星資料 → 顯示「— vs 上期」。（2025/12 底層資料仍保留、不刪。）
+  if(prevKey && prevKey.slice(0,7) < MOMO_FIRST_PERIOD) prevKey='';
   const prevT=momoPeriodTotals(shop, prevKey);
   let verifyTxt='';
   if(isJiaYi && fi && fi.reconciled && period.endsWith('-FULL')){
@@ -9319,7 +9355,7 @@ Object.assign(window, {
   cupPickRowDragStart,cupPickRowDragOver,cupPickRowDragEnter,cupPickRowDragLeave,cupPickRowDrop,cupPickRowDragEnd,
   cupSetSort,
   setShopViewMode,
-  momoSetSub,momoSetPeriod,momoOnSearch,momoProfitSetSort,momoToggleDiscontinued,
+  momoSetSub,momoSetPeriod,momoSetPeriodMonth,momoSetPeriodHalf,momoOnSearch,momoProfitSetSort,momoToggleDiscontinued,
   momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,

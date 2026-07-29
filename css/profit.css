@@ -333,6 +333,13 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-chip{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-family:'Noto Sans TC',sans-serif;}
 .mm-chip:hover{border-color:#9ca3af;}
 .mm-chip.on{color:#fff;}
+/* 分段期別控制：上/下/整月 連體按鈕組（月下拉右側） */
+.mm-seg-grp{display:inline-flex;border:1px solid #e5e7eb;border-radius:7px;overflow:hidden;}
+.mm-seg{padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;border:none;border-left:1px solid #e5e7eb;background:#fff;color:#6b7280;font-family:'Noto Sans TC',sans-serif;}
+.mm-seg:first-child{border-left:none;}
+.mm-seg:hover:not(:disabled):not(.on){background:#f9fafb;}
+.mm-seg.on{background:#e4007f;color:#fff;}
+.mm-seg:disabled{color:#d1d5db;cursor:not-allowed;background:#fafafa;}
 /* 狀態橫幅 */
 .mm-banner{font-size:12px;border-radius:7px;padding:6px 10px;margin-bottom:8px;line-height:1.6;}
 .mm-banner-ok{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;}
