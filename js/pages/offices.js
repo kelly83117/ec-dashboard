@@ -1682,24 +1682,27 @@ Object.assign(App, {
   // ── 訂價表 ──────────────────────────────────────────────
   PRICING_SHEETS_ORDER: ['訂價','導流品','Victor','inna','Vivian','官網','Doris'],
 
-  // 各工作表費率常數（依 Excel row2 常數欄）
+  // 各工作表費率常數（依 Excel $C$1 匯率、G欄 運費/kg¥、row2 各費率）
+  // ship = 陸>台運費 ¥/kg（與原始成本同樣換匯，故實際成本 = (C+D+E×ship)×rmb）
+  // incTax = 銷項稅金率（訂價表 Excel 顯示 None = 0，不含銷項稅）
   PRICING_SHEET_PARAMS: {
-    '訂價':    { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0.05 },
-    '導流品':  { rmb:4.5, ship:9, tax:0.05, ads:0,    fixed:0, txFee:0.08, promo:0.06, ret:0.02, incTax:0.05 },
-    'Victor':  { rmb:4.5, ship:9, tax:0,    ads:0.10, fixed:9, txFee:0.08, promo:0.07, ret:0.02, incTax:0.05 },
-    'inna':    { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0.05 },
-    'Vivian':  { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0.05 },
-    '官網':    { rmb:4.5, ship:9, tax:0.07, ads:0,    fixed:9, txFee:0.08, promo:0,    ret:0,    incTax:0.05 },
-    'Doris':   { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.07, ret:0.02, incTax:0.05 },
-    '特拉拉':  { rmb:4.5, ship:9, tax:0,    ads:0.10, fixed:9, txFee:0.06, promo:0.03, ret:0.02, incTax:0.05 },
-    'FB訂價表':{ rmb:4.5, ship:9, tax:0,    ads:0.35, fixed:9, txFee:0,    promo:0,    ret:0.02, incTax:0 },
+    '訂價':    { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
+    '導流品':  { rmb:4.5, ship:9, tax:0.05, ads:0,    fixed:0, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
+    'Victor':  { rmb:4.5, ship:9, tax:0,    ads:0.10, fixed:9, txFee:0.08, promo:0.07, ret:0.02, incTax:0 },
+    'inna':    { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
+    'Vivian':  { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.06, ret:0.02, incTax:0 },
+    '官網':    { rmb:4.5, ship:9, tax:0.07, ads:0,    fixed:9, txFee:0.08, promo:0,    ret:0,    incTax:0 },
+    'Doris':   { rmb:4.5, ship:9, tax:0.05, ads:0.10, fixed:9, txFee:0.08, promo:0.07, ret:0.02, incTax:0 },
   },
 
   _prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume) {
     const p = this.PRICING_SHEET_PARAMS[sheet] || this.PRICING_SHEET_PARAMS['訂價'];
     const r2 = v => Math.round(v * 100) / 100;
-    const 陸台運費NT = r2(weight * p.ship);
-    const 實際成本 = r2((origCost + landFreight) * p.rmb + 陸台運費NT);
+    // Excel 公式：=(C+D+(E×G))*$C$1，G=運費/kg(¥)，$C$1=匯率
+    // 陸>台運費也是人民幣，全部一起換匯
+    const 陸台運費RMB = r2(weight * p.ship);
+    const 陸台運費NT = r2(陸台運費RMB * p.rmb);
+    const 實際成本 = r2((origCost + landFreight + 陸台運費RMB) * p.rmb);
     const 稅金 = r2(price * p.tax);
     const 廣告 = r2(price * p.ads);
     const 固定 = p.fixed;
@@ -1796,7 +1799,8 @@ Object.assign(App, {
     if (type === 'wtfreight') {
       const n = parseFloat(val);
       if (isNaN(n)) return escapeHtml(String(val));
-      const freight = Math.round(n * 9 * 100) / 100;
+      // 陸>台運費 ¥/kg × 匯率 = NT$/kg；預設 9¥/kg × 4.5 = 40.5 NT$/kg
+      const freight = Math.round(n * 9 * 4.5 * 100) / 100;
       return `NT$${freight.toLocaleString(undefined, {minimumFractionDigits:0,maximumFractionDigits:2})}<span style="color:#9ca3af;font-size:10px;margin-left:3px">(${n}kg)</span>`;
     }
     if (type === 'link') {
@@ -1832,7 +1836,7 @@ Object.assign(App, {
       </label>`;
     return `
     <div id="pr-add-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:2px solid #059669">
-      <div style="font-size:11px;color:#6b7280;margin-bottom:10px">費率：匯率 ${p.rmb}、陸>台運費 ${p.ship}元/kg${p.ads?'、廣告 '+p.ads*100+'%':''}${p.tax?'、稅 '+p.tax*100+'%':''}</div>
+      <div style="font-size:11px;color:#6b7280;margin-bottom:10px">費率：匯率 ${p.rmb}、陸>台運費 ${p.ship}¥/kg（≈NT$${p.ship*p.rmb}/kg）${p.ads?'、廣告 '+p.ads*100+'%':''}${p.tax?'、稅 '+p.tax*100+'%':''}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:start">
         ${inp('pf-name','產品名稱','text','請輸入商品名稱')}
         ${inp('pf-logistics','集運','text','普海/特海/空運')}
