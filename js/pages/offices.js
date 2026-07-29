@@ -1343,14 +1343,14 @@ Object.assign(App, {
     const nowM = new Date().getMonth() + 1;
     const curIdx = activeMonths.findIndex(m => parseInt(m) === nowM);
     const cur = monthScores[curIdx >= 0 ? curIdx : monthScores.length - 1] || {sc:0,sa:0};
-    const totalScore = cur.sc + cur.sa + (cur.bonus || 0);
-    const totalsStr = monthScores.map((ms, i) => `${parseInt(activeMonths[i])}月 ${ms.sc+ms.sa+(ms.bonus||0)}分`).join(' ／ ');
+    const kpiTotal = cur.sc + cur.sa + (cur.bonus || 0);
+    const kpiTotalsStr = monthScores.map((ms, i) => `${parseInt(activeMonths[i])}月 ${ms.sc+ms.sa+(ms.bonus||0)}分`).join(' ／ ');
     const totalBarHtml = `<div style="background:linear-gradient(135deg,#1a7a6e,#0f5349);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-radius:10px;margin-bottom:14px">
       <div>
         <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">當月得分總計</div>
-        <div style="font-size:11px;color:rgba(255,255,255,.5)">${totalsStr}</div>
+        <div style="font-size:11px;color:rgba(255,255,255,.5)">${kpiTotalsStr}</div>
       </div>
-      <div style="font-size:36px;font-weight:900;color:${totalScore>=40?'#6ee7b7':totalScore>0?'#fde68a':'#9ca3af'};line-height:1">${totalScore}<span style="font-size:14px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
+      <div style="font-size:36px;font-weight:900;color:${kpiTotal>=40?'#6ee7b7':kpiTotal>0?'#fde68a':'#9ca3af'};line-height:1">${kpiTotal}<span style="font-size:14px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
     </div>`;
 
     return `
