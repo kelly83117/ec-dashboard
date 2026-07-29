@@ -1852,7 +1852,7 @@ Object.assign(App, {
         ${readOnly('pc-profit','▶ 實際毛利（自動）')}
         ${readOnly('pc-income','▶ 入帳金額（自動）','#374151')}
 
-        ${inp('pf-roas','廣告ROAS','number','','選填')}
+        ${readOnly('pc-roas','▶ 廣告ROAS（自動）')}
         ${inp('pf-volume','月銷量','number','','選填')}
         ${readOnly('pc-netloss','▶ 淨利潤（自動）','#374151')}
         ${readOnly('pc-invest','▶ 預估投入（自動）','#374151')}
@@ -2107,9 +2107,8 @@ Object.assign(App, {
       const landFreight = parseFloat(document.getElementById('pf-land')?.value) || 0;
       const weight    = parseFloat(document.getElementById('pf-weight')?.value) || 0;
       const price     = parseFloat(document.getElementById('pf-price')?.value)  || 0;
-      const roas      = parseFloat(document.getElementById('pf-roas')?.value)   || 0;
       const volume    = parseFloat(document.getElementById('pf-volume')?.value) || 0;
-      const c = self._prCalcAll(activeSheet, origCost, landFreight, weight, price, roas, volume);
+      const c = self._prCalcAll(activeSheet, origCost, landFreight, weight, price, 0, volume);
       const nt = v => v != null ? 'NT$' + v.toLocaleString('zh-TW', {minimumFractionDigits:0}) : '—';
       const pct = v => {
         const p = Math.round(v * 10000) / 100;
@@ -2133,9 +2132,11 @@ Object.assign(App, {
       set('pc-costratio',price > 0 ? pct(c.成本率)     : '—');
       set('pc-netloss',  c.淨利潤  != null ? nt(c.淨利潤)  : '—');
       set('pc-invest',   c.預估投入 != null ? nt(c.預估投入) : '—');
+      const roasVal = c.獲利百分比 > 0.20 ? Math.round(1 / (c.獲利百分比 - 0.20) * 100) / 100 : null;
+      set('pc-roas', roasVal != null ? roasVal.toFixed(2) : '—');
     };
 
-    ['pf-orig','pf-land','pf-weight','pf-price','pf-roas','pf-volume'].forEach(id => {
+    ['pf-orig','pf-land','pf-weight','pf-price','pf-volume'].forEach(id => {
       document.getElementById(id)?.addEventListener('input', _updatePreview);
     });
 
@@ -2150,7 +2151,7 @@ Object.assign(App, {
         landFreight: parseFloat(get('pf-land'))   || 0,
         weight:      parseFloat(get('pf-weight')) || 0,
         price:       parseFloat(get('pf-price'))  || 0,
-        roas:        parseFloat(get('pf-roas'))   || 0,
+        roas:        parseFloat(document.getElementById('pc-roas')?.innerText) || 0,
         volume:      parseFloat(get('pf-volume')) || 0,
         store:       get('pf-store'),
         note:        get('pf-note'),

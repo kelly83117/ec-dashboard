@@ -1,0 +1,63 @@
+name: Update Trends Data
+
+on:
+  schedule:
+    - cron: '0 1 * * *'   # 每天台灣時間 09:00 (UTC 01:00)
+  workflow_dispatch:        # 允許手動觸發
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch Google Trends Taiwan
+        run: |
+          curl -s --max-time 15 \
+            -H "User-Agent: Mozilla/5.0 (compatible; Googlebot/2.1)" \
+            "https://trends.google.com/trends/trendingsearches/daily/rss?geo=TW" \
+            -o /tmp/trends.xml
+
+          python3 - <<'PYEOF'
+          import xml.etree.ElementTree as ET
+          import json, datetime
+
+          ns = {'ht': 'https://trends.google.com/trends/trendingsearches/daily'}
+
+          try:
+              tree = ET.parse('/tmp/trends.xml')
+              root = tree.getroot()
+              items = []
+              for item in root.iter('item'):
+                  title = item.find('title')
+                  traffic = item.find('ht:approx_traffic', ns)
+                  if title is not None and title.text:
+                      items.append({
+                          'title': title.text.strip(),
+                          'traffic': traffic.text.strip() if traffic is not None else ''
+                      })
+              print(f'Parsed {len(items)} trends')
+          except Exception as e:
+              print(f'Parse error: {e}')
+              items = []
+
+          import os
+          os.makedirs('data', exist_ok=True)
+          result = {
+              'updated': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+              'items': items[:20]
+          }
+          with open('data/trends.json', 'w', encoding='utf-8') as f:
+              json.dump(result, f, ensure_ascii=False, indent=2)
+          print(f'Saved {len(items)} items')
+          PYEOF
+
+      - name: Commit and push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add data/trends.json
+          git diff --staged --quiet && echo "No changes" || (git commit -m "chore: 更新 Google 台灣熱搜資料 [skip ci]" && git push)
