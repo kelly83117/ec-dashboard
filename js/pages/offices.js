@@ -1840,8 +1840,6 @@ Object.assign(App, {
       <div style="font-size:11px;color:#6b7280;margin-bottom:10px">費率：匯率 ${p.rmb}、陸>台運費 ${p.ship}¥/kg（≈NT$${p.ship*p.rmb}/kg）${p.ads?'、廣告 '+p.ads*100+'%':''}${p.tax?'、稅 '+p.tax*100+'%':''}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:start">
         ${inp('pf-name','產品名稱','text','請輸入商品名稱')}
-        ${inp('pf-logistics','集運','text','普海/特海/空運')}
-        ${inp('pf-store','賣場','text','蝦皮/官網')}
         ${inp('pf-note','備註','text','')}
 
         ${inp('pf-orig','原始成本','number','0','¥ 人民幣')}
