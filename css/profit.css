@@ -342,6 +342,24 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 /* 總覽 KPI 卡片 */
 .mm-kpis{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
 .mm-kpi{flex:1;min-width:132px;background:#fff;border:1px solid #eef0f4;border-radius:9px;padding:9px 12px;}
+/* 商品同步：產生差異預覽按鈕旁的提示（缺什麼 / 會比什麼） */
+.mm-gen-hint{font-size:12px;color:#9ca3af;margin-left:10px;}
+.mm-atleast{color:#6b7280;font-size:12px;}
+/* 新增商品：原廠編號帶成本的來源標示 */
+.mm-cost-src-ok{color:#059669;}
+.mm-cost-src-warn{color:#d97706;}
+.mm-cost-src-err{color:#dc2626;font-weight:600;}
+.mm-cost-pick{display:inline-block;margin:2px 4px 0 0;padding:2px 8px;border:1px solid #f59e0b;border-radius:6px;color:#b45309;cursor:pointer;}
+.mm-cost-pick:hover{background:#fffbeb;}
+/* 共用搜尋框（input + 右側絕對定位清除 ✕，有值才顯示）。MOMO 框架用；設計統一那輪推廣全站 */
+.mm-search-wrap{position:relative;display:inline-flex;align-items:center;}
+.mm-search-inp{width:100%;padding:6px 28px 6px 12px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;outline:none;font-family:'Noto Sans TC',sans-serif;box-sizing:border-box;}
+.mm-search-inp:focus{border-color:#5b5fcf;}
+.mm-search-clear{position:absolute;right:7px;width:16px;height:16px;border-radius:50%;background:#cbd5e1;color:#fff;font-size:10px;line-height:16px;text-align:center;cursor:pointer;display:none;user-select:none;flex-shrink:0;}
+.mm-search-clear:hover{background:#94a3b8;}
+/* 單品分析 modal 區塊 */
+.mm-ana-sec{margin-bottom:18px;}
+.mm-ana-h{font-size:13px;font-weight:700;color:#334155;margin-bottom:8px;border-left:3px solid #5b5fcf;padding-left:8px;line-height:1.35;}
 .mm-kpi-l{font-size:11px;color:#9ca3af;font-weight:600;}
 .mm-kpi-v{font-size:18px;font-weight:800;color:#1a1a2e;margin:2px 0 1px;font-variant-numeric:tabular-nums;}
 .mm-kpi-d{font-size:11px;font-weight:600;}
