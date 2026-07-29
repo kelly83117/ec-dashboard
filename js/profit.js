@@ -344,6 +344,19 @@ function _halfLabel(h){
   return h === 'first' ? '上半月' : h === 'second' ? '下半月' : h === 'full' ? '整月' : String(h||'');
 }
 
+// 判斷一筆調整日期是否屬於某期間。未知一律 false（date 格式錯、跨月、half 值不認得）。
+// dateStr='2026/07/09'、month='2026/07'（來自 state[shop].curMonth）、half='first'|'second'|'full'
+function _inPeriod(dateStr,month,half){
+  if(!/^\d{4}\/\d{2}\/\d{2}$/.test(dateStr))return false;
+  if(dateStr.slice(0,7)!==month)return false;
+  if(half==='full')return true;
+  const day=+dateStr.slice(8,10);
+  if(half==='first')return day<=15;
+  if(half==='second')return day>=16;
+  return false;
+}
+window._inPeriod=_inPeriod;
+
 function _notifyLsSaveFail(shop, month, half, err){
   const who = shop + ' ' + month + '｜' + _halfLabel(half);
   const quota = _isQuotaErr(err);
@@ -2725,7 +2738,7 @@ function closeTfDrop(){document.querySelectorAll('.tfdrop-menu.open').forEach(el
 document.addEventListener('click',closeTfDrop);
 
 // ── Filters & Sort ──
-function applyFilters(shop){
+function applyFilters(shop,opts){
   const s=state[shop];if(!s)return;
   if(!s._built||!s._built.length)return;
   const q=(s.search||'').trim().toLowerCase();
@@ -2759,7 +2772,7 @@ function applyFilters(shop){
       return dir==='asc'?va-vb:vb-va;
     });
   }
-  renderTable(shop,list);
+  renderTable(shop,list,opts);
   updateTagFilterBar(shop);
   updateSuggChip(shop);
 }
@@ -2875,12 +2888,21 @@ function saveNotes(shop,notes){
 function buildNoteCell(shopKey,code,noteId,noteData){
   let adjList=[];
   if(noteData){if(typeof noteData==='string')adjList=[{date:'',text:noteData}];else adjList=noteData.adjustments||[];}
+  // 商品調整（_growth）：只取當期算顯示，其他期間僅計數（供「歷史 N」）。非 _growth 時 histCount 恆 0、adjList 不動 → 行為完全不變。
+  let histCount=0;
+  if(shopKey.indexOf('_growth')>=0){
+    const bs=state[shopKey.replace('_growth','')];
+    const cur=[];
+    adjList.forEach(a=>{ if(bs&&_inPeriod(a.date,bs.curMonth,bs.curHalf))cur.push(a); else histCount++; });
+    adjList=cur;
+  }
   const adjMap=new Map();
   adjList.forEach(a=>{const d=a.date||'';if(!adjMap.has(d))adjMap.set(d,[]);adjMap.get(d).push(a.text||'');});
   const sorted=[...adjMap.keys()].filter(d=>d).sort((a,b)=>b.localeCompare(a));
   const noDateItems=adjMap.get('')||[];
   const hoverLines=sorted.map(d=>`${d}　${adjMap.get(d).join('、')}`);
   if(noDateItems.length)hoverLines.push(...noDateItems);
+  if(histCount>0)hoverLines.push(`其他期間 ${histCount} 筆（點開查看）`);
   const hoverText=hoverLines.join('\n');
   const latestDate=sorted[0]||'';
   const latestText=latestDate?adjMap.get(latestDate).join('、'):(noDateItems[0]||'');
@@ -2888,6 +2910,8 @@ function buildNoteCell(shopKey,code,noteId,noteData){
   const bg=hasNote?'#fef3c7':'';const hBg=hasNote?'#fde68a':'#f3f4f6';
   const ce=code.replace(/'/g,"\\'");
   const ht=hoverText.replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  // 商品調整不另加視覺元件（如「歷史 N」小標）：廣告調整欄當期無紀錄時也只顯示「點此新增」，
+  // 歷史一律藏在彈窗裡；兩欄行為保持一致。其他期間的筆數僅走上面 hover 提示。
   return`<td class="tl" style="padding:4px 8px;vertical-align:top">
     <div class="note-adj-cell" id="${noteId}" title="${ht}" style="background:${bg}"
       onmouseover="this.style.background='${hBg}'" onmouseout="this.style.background='${bg}'"
@@ -3300,9 +3324,15 @@ function renderPnmList(){
   let adj=[];
   if(nd){if(typeof nd==='string')adj=[{date:'',text:nd}];else adj=nd.adjustments||[];}
   const el=document.getElementById('pnm-list');if(!el)return;
-  if(!adj.length){el.innerHTML='<div style="padding:14px;text-align:center;color:#9ca3af;font-size:12px">尚無調整紀錄</div>';return;}
+  // 商品調整（_growth）：只列當期。⚠ forEach 照跑保留原始索引 i（刪除鈕吃原始陣列索引），不符當期就 skip，不可先 filter 再重編。
+  const isGrowth=shopKey.indexOf('_growth')>=0;
+  const gS=isGrowth?state[shopKey.replace('_growth','')]:null;
   const map=new Map();
-  adj.forEach((a,i)=>{const d=a.date||'—';if(!map.has(d))map.set(d,[]);map.get(d).push({text:a.text,i});});
+  adj.forEach((a,i)=>{
+    if(isGrowth&&!(gS&&_inPeriod(a.date,gS.curMonth,gS.curHalf)))return;
+    const d=a.date||'—';if(!map.has(d))map.set(d,[]);map.get(d).push({text:a.text,i});
+  });
+  if(!map.size){el.innerHTML=`<div style="padding:14px;text-align:center;color:#9ca3af;font-size:12px">${isGrowth?'本期尚無調整紀錄':'尚無調整紀錄'}</div>`;return;}
   const sorted=[...map.keys()].sort((a,b)=>b.localeCompare(a));
   el.innerHTML=sorted.map(d=>map.get(d).map(({text,i})=>`<div class="pnm-entry">
     <div class="pnm-entry-date">${d}</div>
@@ -3315,9 +3345,25 @@ function renderPnmHistory(){
   const box=document.getElementById('pnm-hist');
   if(!wrap||!box||!_pnm) return;
   const {shopKey,code}=_pnm;
-  // 商品調整（{shop}_growth）只有單一 key、不分期間，
-  // 它的所有紀錄已全部顯示在上方「調整紀錄」清單裡，沒有「其他期間」可言。
-  if(shopKey.indexOf('_growth')>=0){ wrap.style.display='none'; box.innerHTML=''; return; }
+  // 商品調整（{shop}_growth）：資料是同一個 adjustments 陣列，這裡列出「不屬於當期」的紀錄。
+  // ⚠ 不能走下方 _noteHistory：它會 shopKey.split('|')[0]，_growth 沒有 '|' → 拿到不存在的通路 → 靜默空白。
+  if(shopKey.indexOf('_growth')>=0){
+    const gs=state[shopKey.replace('_growth','')];
+    const gnd=getNotes(shopKey)[code];
+    let gadj=[];
+    if(gnd){if(typeof gnd==='string')gadj=[{date:'',text:gnd}];else gadj=gnd.adjustments||[];}
+    const others=[];
+    gadj.forEach((a,i)=>{ if(!(gs&&_inPeriod(a.date,gs.curMonth,gs.curHalf))) others.push({date:a.date,text:a.text,i}); });   // 保留原始索引 i
+    if(!others.length){ wrap.style.display='none'; box.innerHTML=''; return; }
+    others.sort((x,y)=>String(y.date||'').localeCompare(String(x.date||'')));   // 日期新到舊
+    wrap.style.display='';
+    box.innerHTML=others.map(o=>`<div class="pnm-entry">
+      <div class="pnm-entry-date">${/^\d{4}\/\d{2}\/\d{2}$/.test(o.date||'')?o.date:'未記日期'}</div>
+      <div class="pnm-entry-text">${String(o.text||'').replace(/</g,'&lt;')}</div>
+      <button class="pnm-entry-del" onclick="deleteProfitNote(${o.i})">×</button>
+    </div>`).join('');
+    return;
+  }
   const shop=shopKey.split('|')[0];
   const parts=shopKey.split('|');
   const curM=parts.length>=3?parts[1]:(state[shop]?state[shop].curMonth:'');
@@ -3342,9 +3388,18 @@ function submitProfitNote(){
   if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
   notes[code].adjustments.push({date:today,text:v});
   saveNotes(shopKey,notes);
-  closeProfitNoteModal();
   const shop=shopKey.split('|')[0].replace('_growth','');
-  applyFilters(shop);
+  // 商品調整：新紀錄的日期（今天）不屬於目前檢視期間 → 提示去「其他期間」找，但絕不竄改日期
+  if(shopKey.indexOf('_growth')>=0){
+    const ss=state[shop];
+    if(ss&&!_inPeriod(today,ss.curMonth,ss.curHalf)){
+      const noteHalf=(+today.slice(8,10))<=15?'first':'second';
+      const msg=`已記錄到 ${today.slice(0,7)} ${_halfLabel(noteHalf)}（目前檢視 ${ss.curMonth} ${_halfLabel(ss.curHalf)}），再點開這格可在下方「其他期間」看到`;
+      if(typeof showToast==='function')showToast(msg,'info',5000);
+    }
+  }
+  closeProfitNoteModal();
+  applyFilters(shop,{keepScroll:true});
 }
 function deleteProfitNote(origIdx){
   if(!_pnm)return;
@@ -3353,14 +3408,14 @@ function deleteProfitNote(origIdx){
   if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
   notes[code].adjustments.splice(origIdx,1);
   if(!notes[code].adjustments.length)delete notes[code];
-  saveNotes(shopKey,notes);renderPnmList();applyFilters(shopKey.split('|')[0].replace('_growth',''));
+  saveNotes(shopKey,notes);renderPnmList();renderPnmHistory();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
 }
 function closeProfitNoteModal(){document.getElementById('profit-note-modal')?.classList.remove('open');_pnm=null;}
 function startNote(shop,code){openNotePopup(shop,code);}
 function commitNote(){}
 
 // ── Render Table ──
-function renderTable(shop,list){
+function renderTable(shop,list,opts){
   const s=state[shop];const built=s._built;
   const edits=getEdits(shop);
   const noteKey=shop+'|'+s.curMonth+'|'+s.curHalf;
@@ -3496,7 +3551,18 @@ function renderTable(shop,list){
     ${orderedCols.map(c=>totalCell[c.key]||'<td></td>').join('')}
     <td></td>
   </tr></tbody></table></div>`;
-  document.getElementById('tbl-'+shop).innerHTML=html;
+  const _tblHost=document.getElementById('tbl-'+shop);
+  // keepScroll：覆蓋 innerHTML 會重建 .tscroll，捲動位置歸零。先存舊值、重繪後還原（含 scrollLeft，商品調整欄在最右）。
+  let _prevScTop=null,_prevScLeft=null;
+  if(opts&&opts.keepScroll){
+    const _oldSc=_tblHost&&_tblHost.querySelector('.tscroll');
+    if(_oldSc){_prevScTop=_oldSc.scrollTop;_prevScLeft=_oldSc.scrollLeft;}
+  }
+  _tblHost.innerHTML=html;
+  if(opts&&opts.keepScroll&&_prevScTop!==null){
+    const _newSc=_tblHost&&_tblHost.querySelector('.tscroll');
+    if(_newSc){_newSc.scrollTop=_prevScTop;_newSc.scrollLeft=_prevScLeft;}
+  }
 }
 
 // ── Summary ──
