@@ -1001,13 +1001,6 @@ Object.assign(App, {
           ${subH([{l:'每次扣分'},{l:'單月上限'}])}
           ${row([{v:blue('−3'),center:true},{v:blue('−15'),center:true}], () => 0)}
         </div>
-        <div style="background:linear-gradient(135deg,#1a7a6e,#0f5349);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-top:2px solid #0f5349">
-          <div>
-            <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">當月得分總計</div>
-            <div style="font-size:11px;color:rgba(255,255,255,.5)">${totalsStr}</div>
-          </div>
-          <div style="font-size:36px;font-weight:900;color:${totalScore>=40?'#6ee7b7':totalScore>0?'#fde68a':'#9ca3af'};line-height:1">${totalScore}<span style="font-size:14px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
-        </div>
       </div>`;
 
     return `
@@ -1347,8 +1340,22 @@ Object.assign(App, {
       return `${needStabQ ? stabQTabsHtml : ''}<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${activeStab} — 尚無資料，開發中</div>`;
     })();
 
+    const nowM = new Date().getMonth() + 1;
+    const curIdx = activeMonths.findIndex(m => parseInt(m) === nowM);
+    const cur = monthScores[curIdx >= 0 ? curIdx : monthScores.length - 1] || {sc:0,sa:0};
+    const totalScore = cur.sc + cur.sa + (cur.bonus || 0);
+    const totalsStr = monthScores.map((ms, i) => `${parseInt(activeMonths[i])}月 ${ms.sc+ms.sa+(ms.bonus||0)}分`).join(' ／ ');
+    const totalBarHtml = `<div style="background:linear-gradient(135deg,#1a7a6e,#0f5349);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-radius:10px;margin-bottom:14px">
+      <div>
+        <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">當月得分總計</div>
+        <div style="font-size:11px;color:rgba(255,255,255,.5)">${totalsStr}</div>
+      </div>
+      <div style="font-size:36px;font-weight:900;color:${totalScore>=40?'#6ee7b7':totalScore>0?'#fde68a':'#9ca3af'};line-height:1">${totalScore}<span style="font-size:14px;font-weight:400;color:rgba(255,255,255,.5);margin-left:4px">分</span></div>
+    </div>`;
+
     return `
       ${quarterTabsHtml}
+      ${totalBarHtml}
       <details id="kpi-summary-details" style="margin-bottom:18px;border:1px solid #d1fae5;border-radius:10px;overflow:hidden">
         <summary style="cursor:pointer;padding:10px 16px;background:#f0fdf4;color:#1a7a6e;font-size:13px;font-weight:700;list-style:none;display:flex;align-items:center;justify-content:space-between;user-select:none">
           <span>📊 計分架構（點擊展開）</span>
