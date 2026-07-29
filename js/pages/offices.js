@@ -2095,48 +2095,136 @@ Object.assign(App, {
       self.render();
     });
 
-    // 點列展開全部欄位（事件委派）
+    // 點列展開內聯編輯（事件委派）
     document.getElementById('pr-tbody')?.addEventListener('click', e => {
+      if (e.target.closest('button.pr-del-custom') || e.target.closest('a')) return;
       const tr = e.target.closest('tr.pr-row');
       if (!tr) return;
       const idx = +tr.dataset.i;
       const detId = `pr-det-${idx}`;
       const existing = document.getElementById(detId);
-      if (existing) {
-        existing.remove();
-        tr.style.background = '';
-        return;
-      }
-      // 關掉其他展開列
+      if (existing) { existing.remove(); tr.style.background = tr.dataset.custom==='1'?'#eff6ff':''; return; }
       document.querySelectorAll('.pr-detail-row').forEach(el => el.remove());
-      document.querySelectorAll('tr.pr-row[style*="background"]').forEach(el => el.style.background = '');
+      document.querySelectorAll('tr.pr-row').forEach(el => el.style.background = el.dataset.custom==='1'?'#eff6ff':'');
 
       const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
       const sheetData = window.__pricingData?.[activeSheet] || [];
       const r = sheetData[idx];
       if (!r) return;
 
-      const allCols = Object.keys(r);
-      const allTypes = allCols.map(c => self._prColType(c, activeSheet));
-      const itemsHtml = allCols.map((c, ci) => {
-        const v = r[c];
-        if (v === null || v === undefined) return '';
-        const formatted = self._prFmt(v, allTypes[ci]);
-        return `<div style="min-width:130px;padding:6px 10px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
-          <div style="color:#9ca3af;font-size:10px;margin-bottom:3px">${escapeHtml(c)}</div>
-          <div style="font-size:13px">${formatted}</div>
+      const cols = Object.keys(r).filter(c => !c.startsWith('__'));
+      const origCostCol = cols.find(c => c === '原始成本') || null;
+      const landCol = cols.find(c => c.includes('陸〉陸') || c.includes('陸>陸')) || null;
+      const weightCol = cols.find(c => c.includes('陸>台') || c.includes('陸〉台')) || null;
+      const priceCol = cols.find(c => c === '售價') || null;
+      const noteCol = cols.find(c => c === '備註' || c === '行銷方法') || null;
+      const websiteCol = cols.find(c => c === '網站' || (c === '進貨' && activeSheet === 'Victor')) || null;
+
+      const numInp = (id, label, val, unit) =>
+        `<label style="display:flex;flex-direction:column;gap:3px">
+          <span style="font-size:10px;color:#6b7280;font-weight:600">${label}${unit?` <span style="color:#9ca3af;font-weight:400">${unit}</span>`:''}</span>
+          <input id="pe-${id}" type="number" value="${val??''}" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;text-align:right;width:110px">
+        </label>`;
+      const calcBox = (id, label) =>
+        `<div style="display:flex;flex-direction:column;gap:3px">
+          <span style="font-size:10px;color:#6b7280;font-weight:600">${label}</span>
+          <div id="pe-c-${id}" style="padding:7px 10px;border:1px solid #dbeafe;border-radius:6px;font-size:13px;font-weight:700;color:#2563eb;background:#eff6ff;text-align:right;min-width:90px;min-height:34px">—</div>
         </div>`;
-      }).filter(Boolean).join('');
 
       const colspan = tr.querySelectorAll('td').length;
       const detTr = document.createElement('tr');
       detTr.id = detId;
       detTr.className = 'pr-detail-row';
-      detTr.innerHTML = `<td colspan="${colspan}" style="padding:12px 14px;background:#f8fafc;border-bottom:2px solid #2563eb">
-        <div style="display:flex;flex-wrap:wrap;gap:8px">${itemsHtml}</div>
+      detTr.innerHTML = `<td colspan="${colspan}" style="padding:14px;background:#f8fafc;border-bottom:2px solid #2563eb">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
+          ${origCostCol ? numInp('orig','原始成本', r[origCostCol],'¥') : ''}
+          ${landCol     ? numInp('land','陸〉陸運費',r[landCol],'¥') : ''}
+          ${weightCol   ? numInp('wt',  '重量',      r[weightCol],'kg') : ''}
+          ${priceCol    ? numInp('price','售價',      r[priceCol],'NT$') : ''}
+          <div style="width:1px;background:#e5e7eb;align-self:stretch;margin:0 4px"></div>
+          ${calcBox('cost','▶ 實際成本')}
+          ${calcBox('total','▶ 蝦皮總成本')}
+          ${calcBox('income','▶ 入帳')}
+          ${calcBox('pct','▶ 獲利%')}
+          ${calcBox('cr','▶ 成本%')}
+          ${websiteCol ? `<label style="display:flex;flex-direction:column;gap:3px">
+            <span style="font-size:10px;color:#6b7280;font-weight:600">網站</span>
+            <input id="pe-web" type="text" value="${escapeHtml(String(r[websiteCol]||''))}" placeholder="https://..." style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:180px">
+          </label>` : ''}
+          ${noteCol ? `<label style="display:flex;flex-direction:column;gap:3px">
+            <span style="font-size:10px;color:#6b7280;font-weight:600">備註</span>
+            <input id="pe-note" type="text" value="${escapeHtml(String(r[noteCol]||''))}" placeholder="備註" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:150px">
+          </label>` : ''}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+          <button id="pe-save-${idx}" style="padding:7px 20px;background:#2563eb;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
+          <button id="pe-cancel-${idx}" style="padding:7px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+          <span style="font-size:11px;color:#9ca3af">輸入後自動試算</span>
+        </div>
       </td>`;
       tr.after(detTr);
-      tr.style.background = '#f0fdf9';
+      tr.style.background = '#e0eaff';
+
+      const _calcPreview = () => {
+        const oc = parseFloat(document.getElementById('pe-orig')?.value)  || (origCostCol ? +r[origCostCol] : 0);
+        const lf = parseFloat(document.getElementById('pe-land')?.value)  || (landCol     ? +r[landCol]     : 0);
+        const wt = parseFloat(document.getElementById('pe-wt')?.value)    || (weightCol   ? +r[weightCol]   : 0);
+        const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol    ? +r[priceCol]    : 0);
+        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, 0, 0);
+        const nt = v => v != null ? 'NT$'+v.toLocaleString('zh-TW',{maximumFractionDigits:2}) : '—';
+        const pf = v => { const p=Math.round(v*10000)/100; const col=p>=20?'#059669':p>=0?'#f59e0b':'#dc2626'; return `<span style="color:${col}">${p.toFixed(1)}%</span>`; };
+        const s = (id,h) => { const el=document.getElementById(`pe-c-${id}`); if(el) el.innerHTML=h; };
+        s('cost', nt(c.實際成本)); s('total', nt(c.蝦皮總成本)); s('income', nt(c.入帳));
+        s('pct', pr>0?pf(c.獲利百分比):'—'); s('cr', pr>0?pf(c.成本率):'—');
+      };
+      _calcPreview();
+      ['pe-orig','pe-land','pe-wt','pe-price'].forEach(id =>
+        document.getElementById(id)?.addEventListener('input', _calcPreview));
+
+      document.getElementById(`pe-save-${idx}`)?.addEventListener('click', () => {
+        const oc = parseFloat(document.getElementById('pe-orig')?.value)  || (origCostCol ? +r[origCostCol] : 0);
+        const lf = parseFloat(document.getElementById('pe-land')?.value)  || (landCol     ? +r[landCol]     : 0);
+        const wt = parseFloat(document.getElementById('pe-wt')?.value)    || (weightCol   ? +r[weightCol]   : 0);
+        const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol    ? +r[priceCol]    : 0);
+        const note    = document.getElementById('pe-note')?.value ?? (noteCol    ? r[noteCol]    : '');
+        const website = document.getElementById('pe-web')?.value  ?? (websiteCol ? r[websiteCol] : '');
+        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, +(r['廣告ROAS']||0), +(r['月銷量']||0));
+        const newRow = { ...r };
+        for (const col of cols) {
+          if (col === '原始成本') newRow[col] = oc;
+          else if (col.includes('陸〉陸') || col.includes('陸>陸')) newRow[col] = lf;
+          else if (col.includes('陸>台') || col.includes('陸〉台')) newRow[col] = wt;
+          else if (col === '售價') newRow[col] = pr;
+          else if (col === '實際成本' || col === '商品成本') newRow[col] = c.實際成本;
+          else if (col.includes('蝦皮') && col.includes('成本')) newRow[col] = c.蝦皮總成本;
+          else if (col.startsWith('稅金') || col === '稅金') newRow[col] = c.稅金;
+          else if (col.includes('廣告') && !col.includes('ROAS')) newRow[col] = c.廣告;
+          else if (col.includes('運費+包材')) newRow[col] = c.固定;
+          else if (col.includes('成交手續費')) newRow[col] = c.成交;
+          else if (col.includes('活動服務費')) newRow[col] = c.活動;
+          else if (col === '退貨率') newRow[col] = c.退貨;
+          else if (col.includes('入帳金額') || col === '入帳') newRow[col] = c.入帳;
+          else if (col.includes('銷項稅金')) newRow[col] = c.銷項稅金;
+          else if (col.includes('實際毛利')) newRow[col] = c.實際毛利;
+          else if (col.includes('獲利百分比') || col === 'ROI') newRow[col] = c.獲利百分比;
+          else if (col.includes('以下)') || col === '成本') newRow[col] = c.成本率;
+          else if (col.includes('淨利潤')) newRow[col] = c.淨利潤;
+          else if (col.includes('預估投入')) newRow[col] = c.預估投入;
+          else if (col === '備註' || col === '行銷方法') newRow[col] = note;
+          else if (col === '網站' || (col === '進貨' && activeSheet === 'Victor')) newRow[col] = website;
+        }
+        window.__pricingData[activeSheet][idx] = newRow;
+        if (r.__custom) {
+          const custom = Store.get(`ec.d2.pricing.custom.${activeSheet}`, []);
+          const ci2 = custom.findIndex(cx => cx.__id === r.__id);
+          if (ci2 >= 0) custom[ci2] = newRow; else custom.unshift(newRow);
+          Store.set(`ec.d2.pricing.custom.${activeSheet}`, custom);
+        }
+        self.render();
+      });
+      document.getElementById(`pe-cancel-${idx}`)?.addEventListener('click', () => {
+        detTr.remove(); tr.style.background = r.__custom?'#eff6ff':'';
+      });
     });
 
     document.getElementById('pr-show-all')?.addEventListener('click', () => {
