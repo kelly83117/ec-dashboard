@@ -6708,8 +6708,8 @@ const MOMO_PROFIT_COLS=[
   {k:'ppUntax',label:'進價',fmt:'money',w:100,info:'未稅進價（＝含稅進價 ÷ 1.05）。淨利表營收＝未稅進價 × 對帳數量，是所有毛利/淨利計算的基準。'},
   {k:'salePrice',label:'售價',fmt:'money',w:100},
   {k:'view',label:'瀏覽量',fmt:'num',w:96,info:'S1103 銷售排行榜（熱銷）當期瀏覽量。沒進榜的商品顯示空白（無資料）。'},
-  {k:'convRate',label:'成交率',fmt:'pct1',w:96,info:'訂購數 ÷ 瀏覽量（S1103）。進榜但瀏覽量=0 顯示「—」；沒進榜顯示空白。低成交率＝看了不買。'},
   {k:'qty',label:'本期銷量',fmt:'num',w:100},
+  {k:'convRate',label:'成交率',fmt:'pct1',w:96,info:'訂購數 ÷ 瀏覽量（S1103）。進榜但瀏覽量=0 顯示「—」；沒進榜顯示空白。低成交率＝看了不買。'},
   {k:'revenue',label:'營收',fmt:'money',w:120},
   {k:'margin',label:'毛利率',fmt:'pct1',w:100,info:'用商品「目前」成本計算，非當期歷史成本；檢視過去月份時用現在成本回算。'},
   {k:'profit',label:'毛利貢獻',fmt:'money',w:120,info:'用商品「目前」成本計算，非當期歷史成本；檢視過去月份時用現在成本回算。'},
@@ -6843,9 +6843,9 @@ function momoProfitTableHTML(shop){
       <span id="momo-status-${shop}" class="mm-field"></span>
     </div>
     <div id="momo-ov-${shop}"></div>
-    <div class="mm-row" id="momo-toolbar-${shop}" style="margin:14px 0 8px">
+    <div class="mm-row" id="momo-toolbar-${shop}" style="margin:14px 0 8px;gap:18px">
       ${momoSearchBox(shop, 'momo-search-'+shop, _momoSearch[shop]||'', '搜尋 品號 / 名稱 / 原廠編號', 'momoOnSearch', 'flex:1;min-width:180px;max-width:320px')}
-      <span class="mm-stat">總 <b>${total}</b>·上架 <b>${activeCount}</b>·下架 <b>${discCount}</b></span>
+      <span class="mm-stat"><span class="mm-stat-item">總<b>${total}</b></span><span class="mm-stat-item">上架<b>${activeCount}</b></span><span class="mm-stat-item">下架<b>${discCount}</b></span></span>
       ${discToggle}
       <span class="col-picker-wrap" style="position:relative;margin-left:auto">
         <button class="mm-chip" onclick="momoOpenColPicker('${shop}',this)">☰ 欄位</button>
@@ -7046,15 +7046,13 @@ function momoRenderProfitBody(shop, tableOnly){
     // 上線首月（含）之前只有零星跨月訂單、明顯不完整 → 不當環比基準：清空 prevKey 使環比顯示「—」而非誤導百分比。（2025/12 底層資料仍保留、不刪。）
     if(prevKey && prevKey.slice(0,7) < MOMO_FIRST_PERIOD) prevKey='';
     const prevT=momoPeriodTotals(shop, prevKey);
-    // 自驗：成功→收合小標記「✓ 已驗證」、點開才看完整（通過時不佔版面）；失敗→預設展開 + 警示色 + 不可收（不能藏起來）
+    // 自驗：驗證邏輯保留，但通過時「完全不顯示」（不留標記，省版面）；只有對不上才警示。
     let verifyBlock='';
     if(isJiaYi && fi && fi.reconciled && period.endsWith('-FULL')){
       const expect=fi.shopRev;   // 該店對帳金額未稅合計（非整帳號 A：甲配 521,538 / 乙配 65,101）
       const diff=curT.rev - expect;
       const ok=Math.abs(diff)<=Math.max(50, expect*0.001);
-      verifyBlock = ok
-        ? `<details class="mm-verify-fold"><summary><span style="color:#059669">✓ 已驗證</span></summary><div class="mm-verify-body" style="color:#059669">整月 Σ營收 = 對帳單該店金額 ${momoMoney(expect)}</div></details>`
-        : `<div class="mm-verify-err">⚠ 整月 Σ營收 ${momoMoney(curT.rev)} ≠ 對帳單該店金額 ${momoMoney(expect)}（差 ${momoMoney(diff)}，主檔可能缺對帳單裡的品號）</div>`;
+      verifyBlock = ok ? '' : `<div class="mm-verify-err">⚠ 整月 Σ營收 ${momoMoney(curT.rev)} ≠ 對帳單該店金額 ${momoMoney(expect)}（差 ${momoMoney(diff)}，主檔可能缺對帳單裡的品號）</div>`;
     }
     const overview=momoOverviewHTML(shop, period, curT, prevT, prevKey, verifyBlock);
     const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=overview+statusBanner;
