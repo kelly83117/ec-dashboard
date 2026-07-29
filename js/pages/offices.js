@@ -1919,13 +1919,29 @@ Object.assign(App, {
     const display = filteredWithIdx.slice(0, SHOW);
 
     const NAME_COLS = new Set(['產品名稱','試算名稱','編號']);
-    const theadHtml = coreCols.map(c => `<th style="white-space:nowrap;font-size:12px;padding:8px 12px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'}">${escapeHtml(c)}</th>`).join('') + '<th style="width:32px"></th>';
+    // 縮短過長的欄位標題顯示
+    const shortLabel = c => {
+      if (c.includes('獲利百分比')) return '獲利%';
+      if (c.includes('實際成本') || c === '商品成本') return '實際成本';
+      return c;
+    };
+    // 欄位寬度（固定佈局用）
+    const colWidth = c => {
+      if (NAME_COLS.has(c)) return '35%';
+      if (c === '售價') return '10%';
+      if (c.includes('實際成本') || c === '商品成本') return '12%';
+      if (c.includes('獲利百分比') || c === 'ROI') return '10%';
+      return '11%';
+    };
+    const theadHtml = coreCols.map(c =>
+      `<th style="font-size:12px;padding:6px 10px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'};width:${colWidth(c)}">${escapeHtml(shortLabel(c))}</th>`
+    ).join('') + '<th style="width:32px"></th>';
 
     const tbodyHtml = display.map(({ r, i }) => {
       const isCustom = !!r.__custom;
       return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#f0fdf4':''}">` +
-        coreCols.map((c, ci) => `<td style="font-size:13px;padding:8px 12px;${c==='產品名稱'||c==='試算名稱'?'text-align:left':'text-align:right'}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
-        `<td style="text-align:center;padding:8px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
+        coreCols.map((c, ci) => `<td style="font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+        `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
     }).join('');
 
     const moreHtml = filteredWithIdx.length > SHOW
@@ -1944,7 +1960,7 @@ Object.assign(App, {
       <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">${sheetTabs}</div>
       ${this._prAddFormHtml(activeSheet)}
       <div style="padding:6px 16px;font-size:11px;color:#9ca3af;border-bottom:1px solid #f3f4f6">${activeSheet} · ${filteredWithIdx.length} 筆 · 點列展開全部欄位 · 綠底為手動新增</div>
-      <div class="table-wrap"><table>
+      <div class="table-wrap"><table style="table-layout:fixed;width:100%">
         <thead><tr>${theadHtml}</tr></thead>
         <tbody id="pr-tbody">${tbodyHtml}</tbody>
       </table></div>
