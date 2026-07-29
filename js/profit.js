@@ -6847,7 +6847,8 @@ function momoProfitTableHTML(shop){
       ${momoSearchBox(shop, 'momo-search-'+shop, _momoSearch[shop]||'', '搜尋 品號 / 名稱 / 原廠編號', 'momoOnSearch', 'flex:1;min-width:180px;max-width:320px')}
       <span class="mm-stat"><span class="mm-stat-item">總<b>${total}</b></span><span class="mm-stat-item">上架<b>${activeCount}</b></span><span class="mm-stat-item">下架<b>${discCount}</b></span></span>
       ${discToggle}
-      <span class="col-picker-wrap" style="position:relative;margin-left:auto">
+      <button class="mm-chip" style="margin-left:auto" onclick="momoOpenHierarchy('${shop}')">📊 階層圖</button>
+      <span class="col-picker-wrap" style="position:relative">
         <button class="mm-chip" onclick="momoOpenColPicker('${shop}',this)">☰ 欄位</button>
       </span>
     </div>
@@ -6892,16 +6893,38 @@ function momoPrevPeriodKey(periodKey){
 }
 // 某期別的總覽合計（全商品、含已下架，反映該期實際生意；加權毛利率=Σ淨利÷Σ營收）
 function momoPeriodTotals(shop, periodKey){
-  if(!periodKey) return {hasData:false, rev:0, profit:0, qty:0, margin:0, missCost:0};
+  if(!periodKey) return {hasData:false, rev:0, profit:0, qty:0, margin:0, missCost:0, missCostDisc:0, soldActive:0, activeTotal:0};
   const keys=momoExpandPeriod(periodKey);
   let rev=0, profit=0, qty=0, any=false, missCost=0, missCostDisc=0;   // missCost：該期有營收但缺成本 → 淨利虛高；Disc=其中已下架
+  let soldActive=0, activeTotal=0;   // 動銷率用：soldActive=上架且該期有銷售、activeTotal=上架總數（下架不計，跟「上架 516」對得起來）
   momoLoadProducts(shop).forEach(p=>{
+    const isActive = p.discontinued!==true;   // 上架
+    if(isActive) activeTotal++;
     const a=momoAggregatePeriods(p, keys, shop);
     // 有營收就計入（含 qty=0 但對帳有金額的跨月結算 SKU；與總表逐列一致 → Σ營收=對帳單該店金額）
     const active = a.qty>0 || Math.abs(a.revenue)>0.5;
-    if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; if(!(Number(p.cost)>0)){ missCost++; if(p.discontinued===true) missCostDisc++; } }
+    if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; if(!(Number(p.cost)>0)){ missCost++; if(p.discontinued===true) missCostDisc++; } if(isActive) soldActive++; }
   });
-  return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc };
+  return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc, soldActive, activeTotal };
+}
+// 逐列「與上一期比較」小字：每欄個別定義好壞方向。
+//   good：1=升為好(瀏覽量/成交率/本期銷量/營收/毛利貢獻)、-1=降為好(退貨率)、0=中性不著色(毛利率——低毛利率升仍不算好，比照總覽卡的中性 pp)。
+//   絕對量→%變化、比率(成交率/毛利率/退貨率)→pp 差。上期無資料/本期非數字→顯示「—」或不顯示，絕不顯示誤導的 0%/-100%。
+const _MOMO_CMP_GOOD={view:1, convRate:1, qty:1, revenue:1, profit:1, returnRate:-1, margin:0};
+function momoRowCmp(colKey, cur, prev){
+  const good=_MOMO_CMP_GOOD[colKey];
+  if(good===undefined) return '';                 // 進價/售價/品號 不做環比
+  const num=x=>(typeof x==='number' && isFinite(x));
+  const cv=cur[colKey];
+  if(!num(cv)) return '';                          // 本期該值非數字(未進榜/零營收/未對帳)→不畫環比小字
+  if(!prev || !num(prev[colKey])) return `<div class="mm-c-cmp" style="color:#c7cad1">—</div>`;   // 上期無資料→—
+  const pv=prev[colKey];
+  const rateMetric=(colKey==='convRate'||colKey==='margin'||colKey==='returnRate');
+  let txt, up;
+  if(rateMetric){ const d=cv-pv; up=d>=0; txt=(up?'▲':'▼')+Math.abs(d).toFixed(1)+'pp'; }
+  else { if(pv===0) return `<div class="mm-c-cmp" style="color:#c7cad1">—</div>`; const d=(cv-pv)/Math.abs(pv)*100; up=d>=0; txt=(up?'▲':'▼')+Math.abs(d).toFixed(1)+'%'; }
+  const color = good===0 ? '#9ca3af' : (((good===1)===up)?'#059669':'#dc2626');
+  return `<div class="mm-c-cmp" style="color:${color}">${txt}</div>`;
 }
 function momoRenderProfitBody(shop, tableOnly){
   const tbl=document.getElementById('momo-tbl-'+shop);
@@ -6910,10 +6933,14 @@ function momoRenderProfitBody(shop, tableOnly){
   const q=(_momoSearch[shop]||'').trim().toLowerCase();
   const all=momoLoadProducts(shop);
   momoClearFeeRateCache();   // 每次重繪清月費率快取 → 吃到最新對帳單（快取只在這一輪 1300 SKU 內共用）
+  // 逐列環比要用的「上一期同期別」keys（gated：上線首月之前不完整→不比）。甲配 margin/profit 當期已物流重分配、上期用純 aggregate，方向正確、微小差異可接受。
+  let prevKeysForRows=null;
+  { const pk=momoPrevPeriodKey(period); if(pk && pk.slice(0,7)>=MOMO_FIRST_PERIOD) prevKeysForRows=momoExpandPeriod(pk); }
   let rows=all.map(p=>{
     const agg=momoAggregatePeriods(p, period?momoExpandPeriod(period):[], shop);
-    // ppUntax=未稅進價（含稅進價÷1.05）：進價欄顯示用、也可排序；淨利表營收基準口徑
-    return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, ...agg };
+    const prev= prevKeysForRows ? momoAggregatePeriods(p, prevKeysForRows, shop) : null;
+    // ppUntax=未稅進價（含稅進價÷1.05）：進價欄顯示用、也可排序；淨利表營收基準口徑。_prev=上期 aggregate（逐列環比用）
+    return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, ...agg, _prev:prev };
   });
   // ═══ 階段四：甲配物流按 C1202 出貨形狀重分配（此時 rows=全商品，period 總和才正確）═══
   //   period 內錨定 物流total=logiTotal×(R_period/月R)、再按形狀分 → Σ甲配fee=甲配R×feeRate 不變（月總/期別總不動、逐SKU重分配）。
@@ -6980,38 +7007,38 @@ function momoRenderProfitBody(shop, tableOnly){
         const rr=r.returnRate;
         const tip=`退貨 ${Math.round(r.retQty||0)} 件 / ${momoMoney(r.retAmt||0)}（對帳單月值${(period&&!period.endsWith('-FULL'))?'，半月沿用月值':''}）\n退貨的商品成本已回沖（貨退回倉、之後再賣才認成本），故高退貨率不再被誇大成大賠；但出貨運費已付(不回沖)+可能耗損/重新入庫，高退貨率仍是警訊。`;
         let st='text-align:right;overflow:hidden;text-overflow:ellipsis'; if(rr>6) st+=';font-weight:700;color:#f97316';
-        return `<td style="${st}" title="${tip}">${(Math.round(rr*10)/10)}%</td>`;
+        return `<td style="${st}" title="${tip}">${(Math.round(rr*10)/10)}%${momoRowCmp('returnRate',r,r._prev)}</td>`;
       }
       if(c.k==='view'){
         // S1103 瀏覽量：沒進榜=空白（無資料）；在榜但瀏覽0=「—」（S1103 缺漏，非 0 曝光——有銷量不可能 0 人看，跟退貨率當初全 0 同類誤導）；有值顯示
         if(r.view==null) return `<td style="text-align:right;color:#e5e7eb" title="此商品未進 S1103 熱銷榜（無瀏覽資料）"></td>`;
         if(r.view===0) return `<td style="text-align:right;color:#c7cad1" title="在榜但 S1103 未提供瀏覽量（資料缺漏，非 0 曝光）">—</td>`;
-        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis"${r.viewEstimated?' title="半月未下載，沿用整月 S1103 值（估算）"':''}>${Math.round(r.view).toLocaleString()}${r.viewEstimated?' <span style="color:#d97706;font-size:10px">估</span>':''}</td>`;
+        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis"${r.viewEstimated?' title="半月未下載，沿用整月 S1103 值（估算）"':''}>${Math.round(r.view).toLocaleString()}${r.viewEstimated?' <span style="color:#d97706;font-size:10px">估</span>':''}${momoRowCmp('view',r,r._prev)}</td>`;
       }
       if(c.k==='convRate'){
         // 成交率：沒進榜=空白；進榜瀏覽0=「—」；否則 %。低成交(<2%)橘標(看了不買)
         if(r.convRate==null) return `<td style="text-align:right;color:#e5e7eb" title="未進 S1103 熱銷榜（無資料）"></td>`;
         if(r.convRate==='zerodiv') return `<td style="text-align:right;color:#c7cad1" title="進榜但瀏覽量=0，無法算成交率">—</td>`;
         const cr=r.convRate; let st='text-align:right;overflow:hidden;text-overflow:ellipsis'; if(cr<2) st+=';font-weight:700;color:#f97316';
-        return `<td style="${st}" title="訂購 ${Math.round(r.s1103Ord||0)} ÷ 瀏覽 ${Math.round(r.view||0)}${r.viewEstimated?'（半月沿用整月·估算）':''}">${(Math.round(cr*10)/10)}%</td>`;
+        return `<td style="${st}" title="訂購 ${Math.round(r.s1103Ord||0)} ÷ 瀏覽 ${Math.round(r.view||0)}${r.viewEstimated?'（半月沿用整月·估算）':''}">${(Math.round(cr*10)/10)}%${momoRowCmp('convRate',r,r._prev)}</td>`;
       }
       if(c.k==='margin'){
         // 營收0但有毛利（整批退貨）→ margin=null → 「—」，不顯示誤導的 0%；負毛利標紅（是負值，不是 0）
         if(r.margin==null) return `<td style="text-align:right;color:#c7cad1;font-weight:700" title="營收為 0（此期可能整批退貨）→ 毛利率無法計算">—</td>`;
         const m=r.margin;
-        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:${m>=25?'#10b981':(m<0?'#dc2626':'#374151')}">${(Math.round(m*10)/10)}%</td>`;
+        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:${m>=25?'#10b981':(m<0?'#dc2626':'#374151')}">${(Math.round(m*10)/10)}%${momoRowCmp('margin',r,r._prev)}</td>`;
       }
       const v=r[c.k];
       const disp=c.fmt?fmt[c.fmt](v):v;
       let style='text-align:right;overflow:hidden;text-overflow:ellipsis';   // fixed layout：窄欄時裁切不外溢
-      return `<td style="${style}">${disp}</td>`;
+      return `<td style="${style}">${disp}${momoRowCmp(c.k,r,r._prev)}</td>`;   // qty/營收/毛利貢獻 得環比；進價/售價 momoRowCmp 回空
     }).join('');
     return `<tr onclick="momoOpenAnalysis('${shop}','${r.sku}')" style="cursor:pointer">${tds}</tr>`;   // 點列 → 單品分析 modal
   }).join('');
   const discHint=(q&&searchMatchedDisc>0)?`<div style="font-size:11px;color:#9ca3af;margin-bottom:8px">搜尋結果包含已下架商品（${searchMatchedDisc} 筆）</div>`:'';
   const tblMinW=cols.reduce((s,c)=>s+momoColW(shop,c.k,c.w),0);
   const tableHTML = rows.length
-    ? `<div class="tscroll"><table style="table-layout:fixed;min-width:${tblMinW}px">${colgroup}<thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`
+    ? `<div class="tscroll"><table class="mm-ptbl" style="table-layout:fixed;min-width:${tblMinW}px">${colgroup}<thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`
     : `<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${all.length?'沒有符合搜尋的商品':'尚無商品資料，請到「批次維護」新增（後續階段開放）'}</div></div>`;
   // 總覽卡片 / 對帳狀態 / 自驗 只在「完整重繪」時算+注入 momo-ov（搜尋/排序 tableOnly 時不動 → 省算、也保住自驗收合狀態、搜尋框不掉焦點）
   if(!tableOnly){
@@ -7145,7 +7172,17 @@ function momoRenderAnalysis(shop,p){
   const otherShop = shop==='甲配'?'乙配':'甲配';
   const partialMonths=series.filter(s=>s.active && s.half!=='both').map(s=>s.label);   // 只警告「此商品真的有生意」且該月僅半月資料的月份
   const viewPts=series.filter(s=>s.view!=null).length;    // 有效瀏覽量月數
-  const pricePts=series.filter(s=>s.avgPrice!=null).length; // 有效成交均價月數
+  const priceVals=series.filter(s=>s.avgPrice!=null).map(s=>s.avgPrice);   // 有值月份的成交均價（按月序）
+  const pricePts=priceVals.length;
+  // 成交均價：有值月>=2 才談變動。spread(最高-最低)<=1元＝小數浮動＝未變動→不畫圖、顯示單一數字；spread>1→畫折線。
+  //   ⚠ 有值月<2 是「資料缺漏」（走 s1103Empty），跟「未變動」分開處理，不可混。
+  const priceSpread = pricePts>=2 ? (Math.max.apply(null,priceVals)-Math.min.apply(null,priceVals)) : 0;
+  const priceVaries = pricePts>=2 && priceSpread>1;
+  const priceFlatVal = pricePts ? Math.round(priceVals[priceVals.length-1]) : null;   // 未變動時顯示的值（取最近一個有值月）
+  // 資料完整度：有值月是否涵蓋「該商品有做生意的月份」。未涵蓋＝部分月缺 S1103 → 不敢斷言「期間未變動」（跟真缺漏分開）。
+  //   只算上線首月起的活躍月（2025/12 等上線前的零星跨月不列入完整度母數，否則長壽商品都會被誤標 partial）。avgPrice 本就無 2025/12（沒 S1103）。
+  const priceActiveMonths = series.filter(s=>s.active && s.mo>=MOMO_FIRST_PERIOD).length;
+  const priceComplete = pricePts>=2 && pricePts>=priceActiveMonths;
   const s1103Empty=`<div style="font-size:12px;color:#94a3b8;padding:16px;text-align:center;background:#f8fafc;border-radius:8px">僅 ${Math.max(viewPts,pricePts)} 個月有 S1103 資料，補上其他月份才看得出趨勢（回溯上傳各月 S1103 後自動出圖）。</div>`;
   ov.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:900px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden">
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
@@ -7167,7 +7204,10 @@ function momoRenderAnalysis(shop,p){
       </div>
 
       <div class="mm-ana-sec"><div class="mm-ana-h">成交均價（訂購金額 ÷ 訂購數）</div>
-        ${pricePts>=2?`<div style="position:relative;height:150px"><canvas id="mm-ana-price"></canvas></div>`:s1103Empty}</div>
+        ${pricePts<2 ? s1103Empty
+          : priceVaries ? `<div style="position:relative;height:150px"><canvas id="mm-ana-price"></canvas></div>`
+          : `<div style="font-size:13px;color:#334155;padding:8px 2px">成交均價 <b style="font-size:15px">$${priceFlatVal.toLocaleString()}</b> <span style="color:#94a3b8;font-size:12px">（${priceComplete?`${pricePts} 個月期間未變動`:`僅 ${pricePts} 個月有 S1103 值、未變動；其餘活躍月缺資料`}）</span></div>`
+        }</div>
 
       <div class="mm-ana-sec"><div class="mm-ana-h">毛利率（%）　<span style="font-size:11px;font-weight:400;color:#94a3b8"><span style="color:${_MOMO_CY}">■</span> 青=已對帳(系統計算)　<span style="color:${_MOMO_GY}">■</span> 灰=未對帳(估算)</span></div>
         <div style="position:relative;height:160px"><canvas id="mm-ana-margin"></canvas></div>
@@ -7269,11 +7309,21 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
   const money=v=>momoMoney(v);
   const marginColor=m=> m>=25?'#059669':m>=15?'#d97706':'#dc2626';   // 毛利率看絕對值：≥25綠 / ≥15橘 / <15紅
   const marginDelta=hasPrev?((cur.margin-prev.margin>=0?'+':'')+(cur.margin-prev.margin).toFixed(1)+'pp'):'—';
+  // 動銷率＝上架且有銷售 ÷ 上架總數（分母不含下架）；環比用 pp 差、上升=好(綠)
+  const rate = cur.activeTotal>0 ? cur.soldActive/cur.activeTotal*100 : null;
+  const prevRate = (hasPrev && prev.activeTotal>0) ? prev.soldActive/prev.activeTotal*100 : null;
+  const rateD = (rate!=null && prevRate!=null)
+    ? {txt:(rate-prevRate>=0?'▲ ':'▼ ')+Math.abs(rate-prevRate).toFixed(1)+'pp', color:(rate-prevRate>=0?'#059669':'#dc2626')}
+    : {txt:'—', color:'#9ca3af'};
+  const rateVal = rate!=null
+    ? `${rate.toFixed(1)}% <span style="font-size:12px;color:#9ca3af;font-weight:400">(${cur.soldActive} / ${cur.activeTotal})</span>`
+    : '—';
   const cards=[
     {label:'總營收', val:money(cur.rev), d:momoKpiDelta(cur.rev,prev.rev,hasPrev)},
     {label:'總淨利', val:money(cur.profit), d:momoKpiDelta(cur.profit,prev.profit,hasPrev)},
     {label:'加權毛利率', info:'總淨利 ÷ 總營收', val:cur.margin.toFixed(1)+'%', valColor:marginColor(cur.margin), d:{txt:marginDelta,color:'#9ca3af'}},
     {label:'總銷量', val:Math.round(cur.qty).toLocaleString()+' 件', d:momoKpiDelta(cur.qty,prev.qty,hasPrev)},
+    {label:'動銷率', info:'該期別「有銷售的上架商品數 ÷ 上架商品總數」。分母＝上架總數（不含已下架，跟工具列「上架 N」一致）；看有多少比例的上架品真的動起來。', val:rateVal, d:rateD},
   ];
   const cardHTML=cards.map(c=>`<div class="mm-kpi">
     <div class="mm-kpi-l">${c.label}${c.info?` <span class="mm-info" title="${c.info}">?</span>`:''}</div>
@@ -7286,6 +7336,78 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
     ? `<div class="mm-banner mm-banner-err click" onclick="momoJumpBatchFilter('${shop}','nocostP')" title="點擊跳到批次維護、自動篩出「本期有營收的缺成本」這幾個（含已下架）">⚠ <b>${cur.missCost}</b> 個有營收的商品缺成本${discNote}，總淨利可能高估 → <u>點此修正</u></div>`
     : '';
   return `<div class="mm-kpis">${cardHTML}</div>${verifyTxt||''}${missWarn}`;   // verifyTxt 已是完整區塊（收合<details>或警示<div>），不再外包 .mm-verify
+}
+
+// ── 階層圖（毛利率分佈）：MOMO 自己一套，不碰蝦皮。用「毛利率」(= 總表口徑 profit/營收)，跟總表欄位一致。
+//   母體＝總表當前篩選集（同 search + 上架/下架顯示），隨期別重算。零營收(毛利率 null)不列入分佈、獨立一列。開啟時取當下狀態快照。
+function momoHierarchyStats(shop){
+  const period=_momoPeriodSel[shop];
+  const q=(_momoSearch[shop]||'').trim().toLowerCase();
+  const showDisc=!!_momoShowDiscontinued[shop];
+  const all=momoLoadProducts(shop);
+  momoClearFeeRateCache();
+  const keys = period?momoExpandPeriod(period):[];
+  const filtered=all.filter(p=>{   // 跟總表同一套篩選：有搜尋→比對品號/名稱/原廠(含下架)；否則預設隱藏下架
+    if(q) return ((p.sku||'')+' '+(p.name||'')+' '+(p.origin||'')).toLowerCase().includes(q);
+    return showDisc || p.discontinued!==true;
+  });
+  const bins={lt0:0,b0_10:0,b10_15:0,b15_20:0,b20_30:0,gt30:0};
+  let withMargin=0, zeroRev=0;
+  filtered.forEach(p=>{
+    const a=momoAggregatePeriods(p, keys, shop);
+    // ⚠ 該期無業績（零營收/無銷售）→ margin 其實是 0（aggregate 對 R=0 回 0），不可被當成 0% 撈進「0-10%」。
+    //   只把「真的有做生意」且毛利率可算的列入分佈；無業績/整批退貨(margin null) 一律獨立計數、不進 buckets。
+    const hasBiz = a.qty>0 || Math.abs(a.revenue)>0.5;
+    if(!hasBiz || a.margin==null){ zeroRev++; return; }
+    const m=a.margin; withMargin++;
+    if(m<0) bins.lt0++; else if(m<10) bins.b0_10++; else if(m<15) bins.b10_15++;
+    else if(m<20) bins.b15_20++; else if(m<30) bins.b20_30++; else bins.gt30++;
+  });
+  const ge20=bins.b20_30+bins.gt30, lt20=bins.lt0+bins.b0_10+bins.b10_15+bins.b15_20;
+  return {period, filtered:filtered.length, total:all.length, withMargin, zeroRev, bins, ge20, lt20};
+}
+function momoCloseHierarchy(){ const ov=document.getElementById('momo-hier-ov'); if(ov) ov.remove(); }
+function momoOpenHierarchy(shop){
+  const s=momoHierarchyStats(shop);
+  momoCloseHierarchy();
+  const ov=document.createElement('div');
+  ov.id='momo-hier-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=e=>{ if(e.target===ov) momoCloseHierarchy(); };
+  const den=s.withMargin;
+  const pct=n=> den>0?(Math.round(n/den*1000)/10)+'%':'—';
+  const bar=(label,n,color)=>`<div style="display:flex;align-items:center;gap:10px;font-size:12px;padding:3px 0">
+    <span style="width:56px;color:#6b7280">${label}</span>
+    <span style="width:44px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums">${n}</span>
+    <span style="width:50px;text-align:right;color:#9ca3af">${pct(n)}</span>
+    <span style="flex:1;height:10px;background:#f1f5f9;border-radius:5px;overflow:hidden"><span style="display:block;height:100%;width:${den>0?(n/den*100):0}%;background:${color}"></span></span>
+  </div>`;
+  const periodLbl=s.period?momoPeriodLabel(s.period):'';
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:560px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden">
+    <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+      <div>
+        <div style="font-size:16px;font-weight:800;color:#1e293b">毛利率分佈 · ${shop}${periodLbl?' · '+periodLbl:''}</div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:3px">已篩選 <b>${s.filtered}</b> / 總 ${s.total} · 有毛利率 <b>${s.withMargin}</b>${s.zeroRev?` · 零營收 ${s.zeroRev}（不列入）`:''}</div>
+      </div>
+      <button onclick="momoCloseHierarchy()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:18px;cursor:pointer;line-height:1">✕</button>
+    </div>
+    <div style="padding:16px 20px;max-height:calc(100vh - 180px);overflow:auto">
+      ${s.withMargin===0?`<div style="font-size:13px;color:#94a3b8;text-align:center;padding:20px">此期別／篩選下沒有可計算毛利率的商品。</div>`:`
+      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:4px">粗分（達標線 20%）</div>
+      ${bar('≥20%', s.ge20, '#10b981')}
+      ${bar('<20%', s.lt20, '#f97316')}
+      <div style="font-size:12px;font-weight:700;color:#374151;margin:14px 0 4px;padding-top:12px;border-top:1px solid #f1f5f9">細分（同一批資料的另一種切法，加總＝上面兩段）</div>
+      ${bar('<0%', s.bins.lt0, '#dc2626')}
+      ${bar('0-10%', s.bins.b0_10, '#f97316')}
+      ${bar('10-15%', s.bins.b10_15, '#fb923c')}
+      ${bar('15-20%', s.bins.b15_20, '#fbbf24')}
+      ${bar('20-30%', s.bins.b20_30, '#34d399')}
+      ${bar('>30%', s.bins.gt30, '#10b981')}
+      <div style="font-size:10.5px;color:#9ca3af;margin-top:12px;line-height:1.6">毛利率＝總表同口徑（淨利 ÷ 營收）。佔比分母＝有毛利率的 ${s.withMargin} 筆；零營收（毛利率「—」）不列入、不被當成 0%。${shop==='甲配'?'甲配物流重分配後個別 SKU 可能在邊界微移。':''}</div>
+      `}
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
 }
 
 // ── 畫面二：批次維護（編輯現有商品 / 新增商品；甲配乙配共用）──
@@ -9463,6 +9585,7 @@ Object.assign(window, {
   setShopViewMode,
   momoSetSub,momoSetPeriod,momoSetPeriodMonth,momoSetPeriodHalf,momoOnSearch,momoProfitSetSort,momoToggleDiscontinued,momoMoney,
   momoOpenColPicker,momoColToggle,momoColDragStart,momoColDragOver,momoColDragEnter,momoColDragLeave,momoColDrop,momoColDragEnd,momoColResetOrder,momoColShowAll,
+  momoOpenHierarchy,momoCloseHierarchy,
   momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,

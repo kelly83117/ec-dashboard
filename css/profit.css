@@ -418,6 +418,9 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-upctl{flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:#6b7280;}
 .mm-upctl input[type=file]{font-size:12px;max-width:210px;font-family:'Noto Sans TC',sans-serif;}
 /* 商品名截斷：跟著欄寬走（CSS 處理，非 JS 切字）。父層 min-width:0 + flex:1 才能在 fixed table 裡 ellipsis */
+/* MOMO 總表逐列環比：主值在上、環比小字在下（放進品號那行的空間，與其基線對齊、不增行高）。只作用於 MOMO 表，不碰蝦皮/酷澎共用的 .tscroll */
+.mm-ptbl td{vertical-align:top;}
+.mm-c-cmp{font-size:10px;font-weight:600;line-height:1.3;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .mm-name-wrap{display:flex;align-items:center;overflow:hidden;min-width:0;}
 .mm-name-clip{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .mm-sub-line{font-size:10px;color:#9ca3af;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
