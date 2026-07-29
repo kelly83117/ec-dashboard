@@ -6910,7 +6910,7 @@ function momoPeriodTotals(shop, periodKey){
 // 逐列「與上一期比較」小字：每欄個別定義好壞方向。
 //   good：1=升為好(瀏覽量/成交率/本期銷量/營收/毛利貢獻)、-1=降為好(退貨率)、0=中性不著色(毛利率——低毛利率升仍不算好，比照總覽卡的中性 pp)。
 //   絕對量→%變化、比率(成交率/毛利率/退貨率)→pp 差。上期無資料/本期非數字→顯示「—」或不顯示，絕不顯示誤導的 0%/-100%。
-const _MOMO_CMP_GOOD={view:1, convRate:1, qty:1, revenue:1, profit:1, returnRate:-1, margin:0};
+const _MOMO_CMP_GOOD={view:1, convRate:1, qty:1, returnRate:-1};   // 只保留：瀏覽量/成交率/本期銷量/退貨率（營收/毛利率/毛利貢獻 不做環比）
 function momoRowCmp(colKey, cur, prev){
   const good=_MOMO_CMP_GOOD[colKey];
   if(good===undefined) return '';                 // 進價/售價/品號 不做環比
@@ -7203,15 +7203,15 @@ function momoRenderAnalysis(shop,p){
         ${viewPts>=2&&series.some(s=>s.viewEst)?`<div style="font-size:11px;color:#d97706;margin-top:4px">部分月份瀏覽量為半月沿用整月的估算值（標「估」）。</div>`:''}
       </div>
 
+      <div class="mm-ana-sec"><div class="mm-ana-h">毛利率（%）　<span style="font-size:11px;font-weight:400;color:#94a3b8"><span style="color:${_MOMO_CY}">■</span> 青=已對帳(系統計算)　<span style="color:${_MOMO_GY}">■</span> 灰=未對帳(估算)</span></div>
+        <div style="position:relative;height:160px"><canvas id="mm-ana-margin"></canvas></div>
+        <div style="font-size:11px;color:#d97706;margin-top:4px">註：各月毛利率一律用商品「目前」成本回算（歷史成本尚未接 momoEffectiveAt）→ 不反映當月真實成本，看趨勢別看絕對值。</div></div>
+
       <div class="mm-ana-sec"><div class="mm-ana-h">成交均價（訂購金額 ÷ 訂購數）</div>
         ${pricePts<2 ? s1103Empty
           : priceVaries ? `<div style="position:relative;height:150px"><canvas id="mm-ana-price"></canvas></div>`
           : `<div style="font-size:13px;color:#334155;padding:8px 2px">成交均價 <b style="font-size:15px">$${priceFlatVal.toLocaleString()}</b> <span style="color:#94a3b8;font-size:12px">（${priceComplete?`${pricePts} 個月期間未變動`:`僅 ${pricePts} 個月有 S1103 值、未變動；其餘活躍月缺資料`}）</span></div>`
         }</div>
-
-      <div class="mm-ana-sec"><div class="mm-ana-h">毛利率（%）　<span style="font-size:11px;font-weight:400;color:#94a3b8"><span style="color:${_MOMO_CY}">■</span> 青=已對帳(系統計算)　<span style="color:${_MOMO_GY}">■</span> 灰=未對帳(估算)</span></div>
-        <div style="position:relative;height:160px"><canvas id="mm-ana-margin"></canvas></div>
-        <div style="font-size:11px;color:#d97706;margin-top:4px">註：各月毛利率一律用商品「目前」成本回算（歷史成本尚未接 momoEffectiveAt）→ 不反映當月真實成本，看趨勢別看絕對值。</div></div>
 
       <div class="mm-ana-sec"><div class="mm-ana-h">成本 / 售價異動時間軸</div>${momoHistoryTimelineHTML(p)}</div>
 
@@ -8555,14 +8555,6 @@ function momoJumpShop(shop){
 // ── 畫面六（P5）：淨利階層彙總（MOMO｜總表，甲配/乙配兩卡並排）──
 //  band 用 §2 marginPct（實際毛利÷進價含稅），沿用 §9 門檻；動銷率分母排除 discontinued；
 //  查無成本(!cost>0)不進 band 但仍算動銷；Action Plan 上雲(存檔失敗要提示)。
-let _momoSummaryMonth;   // 'YYYY-MM'（自己的月份狀態，不借 _cupPeriod）
-function momoSummaryMonths(){   // 兩賣場 periods 月份聯集（YYYY-MM），排序
-  const set=new Set();
-  ['甲配','乙配'].forEach(shop=>momoLoadProducts(shop).forEach(p=>{
-    if(p.periods) Object.keys(p.periods).forEach(k=>{ const m=String(k).slice(0,7); if(/^\d{4}-\d{2}$/.test(m)) set.add(m); });
-  }));
-  return [...set].sort();
-}
 function momoMonthHalfState(month){   // 補強①：三態半月判斷；只認合格式 key（髒 key 不影響）
   const RE=/^(\d{4}-\d{2})-H([12])$/;
   let h1=false, h2=false;
@@ -8579,127 +8571,15 @@ function momoMonthHalfState(month){   // 補強①：三態半月判斷；只認
   if(h2) return 'H2only';
   return 'none';
 }
-function momoHalfLabel(state){ return state==='H1only'?'（僅上半月）':state==='H2only'?'（僅下半月）':''; }
-function momoShopMonthStats(shop,month){
-  const all=momoLoadProducts(shop);
-  const active=all.filter(p=>!p.discontinued);        // 補強②：未下架＝!discontinued（含 undefined/false）
-  const discCount=all.filter(p=>p.discontinued===true).length;
-  // 驗算：未下架 + 已下架 === 主檔總數；對不上代表有第三種狀態
-  if(active.length+discCount!==all.length)
-    console.warn('[momo P5] 驗算不符（'+shop+'）：未下架 '+active.length+' + 已下架 '+discCount+' ≠ 主檔 '+all.length+' → 可能有第三種 discontinued 狀態，請停下來檢查');
-  else
-    console.log('[momo P5] '+shop+' '+month+' 驗算：未下架 '+active.length+' + 已下架 '+discCount+' = 主檔 '+all.length+' ✓');
-  const pk=[month+'-H1', month+'-H2'];
-  const sold=active.map(p=>({p, agg:momoAggregatePeriods(p, pk, shop)})).filter(x=>x.agg.qty>0);   // 該月有銷量
-  const noCost=sold.filter(x=>!(Number(x.p.cost)>0));   // 查無成本：仍算動銷、但不進 band
-  const banded=sold.filter(x=>Number(x.p.cost)>0);
-  const bands={lt0:0,b0_10:0,b10_15:0,b15_20:0,b20_30:0,gt30:0};
-  banded.forEach(x=>{ const v=x.agg.margin;
-    if(v<0)bands.lt0++; else if(v<10)bands.b0_10++; else if(v<15)bands.b10_15++; else if(v<20)bands.b15_20++; else if(v<30)bands.b20_30++; else bands.gt30++; });
-  return {
-    activeCount:active.length, discCount, allCount:all.length,
-    soldCount:sold.length, noCostCount:noCost.length, bands,
-    ge20:bands.b20_30+bands.gt30, lt20:bands.lt0+bands.b0_10+bands.b10_15+bands.b15_20,
-    rate: active.length? sold.length/active.length : 0
-  };
-}
-// Action Plan：ec_momo_action_plans（單一物件，key `{shop}-{yyyy-mm}`），上雲走既有 field rail
-function momoLoadActionPlans(){
-  const k='ec_momo_action_plans';
-  try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch{}
-  try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]) return Store._mem[k]; }catch{}
-  try{ const l=localStorage.getItem(k); if(l) return JSON.parse(l); }catch{}
-  return {};
-}
-function momoSaveActionPlan(shop,month,text){   // 回傳 setItem 是否成功（僅此路徑加成功檢查，不動 momoSaveProducts）
-  const k='ec_momo_action_plans';
-  const all=momoLoadActionPlans(); all[shop+'-'+month]=text;
-  let ok=true;
-  try{ localStorage.setItem(k, JSON.stringify(all)); }catch(e){ ok=false; console.error('[momo action plan] localStorage 存檔失敗：', e); }
-  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=all; }catch{}
-  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=all; }catch{}
-  _markPending(k);
-  return ok;
-}
-function momoActionPlanSave(shop){
-  const ta=document.getElementById('momo-ap-'+shop);
-  const st=document.getElementById('momo-ap-status-'+shop);
-  if(!ta) return;
-  const ok=momoSaveActionPlan(shop, _momoSummaryMonth||'', ta.value);
-  if(st){
-    if(ok){ st.textContent='已儲存（記得按 ☁ 同步雲端）'; st.style.color='#10b981'; }
-    else { st.textContent='⚠ 儲存失敗，localStorage 可能已滿——請先匯出/清理再試'; st.style.color='#ef4444'; }
-  }
-}
-function momoSetSummaryMonth(val){ _momoSummaryMonth=val; momoRenderSummary(); }
-function momoSummaryCardHTML(shop,month){
-  const s=momoShopMonthStats(shop,month);
-  const plans=momoLoadActionPlans();
-  const apVal=(plans[shop+'-'+month]||'').replace(/</g,'&lt;');
-  const ratePct=Math.round(s.rate*1000)/10;
-  const rateColor=s.rate>=0.6?'#10b981':'#f97316';
-  const bandDen=s.soldCount;   // §9：佔比分母＝商品數量（該月有銷量）
-  const pctOf=n=>bandDen>0?(Math.round(n/bandDen*1000)/10)+'%':'—';
-  const rowSub=(label,n)=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span style="color:#6b7280">${label}</span><span style="font-variant-numeric:tabular-nums">${n} <span style="color:#9ca3af">(${pctOf(n)})</span></span></div>`;
-  const b=s.bands;
-  const soldZero=s.soldCount===0;
-  return `
-  <div style="flex:1;min-width:300px;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;background:#fff">
-    <div style="font-size:15px;font-weight:700;color:#e4007f">${shop}</div>
-    <div style="font-size:10.5px;color:#9ca3af;margin-bottom:10px">淨利率 = 實際毛利 ÷ 進價(含稅)</div>
-    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
-      <span style="font-size:12px;color:#6b7280">商品數量</span>
-      <b style="font-size:20px;font-variant-numeric:tabular-nums">${s.soldCount}</b>
-      <span style="font-size:12px;color:#9ca3af">/ 所有商品 ${s.activeCount}</span>
-    </div>
-    <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">（另有 ${s.discCount} 筆已下架，未計入）</div>
-    <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #f3f4f6">
-      <span style="font-size:12px;color:#6b7280">動銷率</span>
-      <b style="font-size:18px;color:${rateColor};font-variant-numeric:tabular-nums">${ratePct}%</b>
-      <span style="font-size:11px;color:#9ca3af">（健康值 60%）</span>
-    </div>
-    ${soldZero?`<div style="font-size:12px;color:#9ca3af;padding:8px 0">該月無銷量資料</div>`:`
-    <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">淨利階層分佈</div>
-    <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;padding:3px 0"><span style="color:#10b981">≥20%（綠）</span><span style="font-variant-numeric:tabular-nums">${s.ge20} <span style="color:#9ca3af">(${pctOf(s.ge20)})</span></span></div>
-    ${rowSub('　20% - 30%',b.b20_30)}
-    ${rowSub('　&gt;30%',b.gt30)}
-    <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;padding:3px 0;margin-top:4px"><span style="color:#f97316">&lt;20%（橘）</span><span style="font-variant-numeric:tabular-nums">${s.lt20} <span style="color:#9ca3af">(${pctOf(s.lt20)})</span></span></div>
-    ${rowSub('　&lt;0%',b.lt0)}
-    ${rowSub('　0% - 10%',b.b0_10)}
-    ${rowSub('　10% - 15%',b.b10_15)}
-    ${rowSub('　15% - 20%',b.b15_20)}
-    ${s.noCostCount>0?`<div style="font-size:12px;color:#f97316;margin-top:8px;padding-top:8px;border-top:1px dashed #fed7aa">⚠️ 成本待確認 ${s.noCostCount} 筆（未納入分佈）</div>`:''}
-    `}
-    <div style="margin-top:12px">
-      <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px">Action Plan</div>
-      <textarea id="momo-ap-${shop}" onblur="momoActionPlanSave('${shop}')" placeholder="這個月的行動計畫…" style="width:100%;min-height:64px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;outline:none;box-sizing:border-box;resize:vertical">${apVal}</textarea>
-      <div id="momo-ap-status-${shop}" style="font-size:11px;margin-top:3px;min-height:14px"></div>
-    </div>
-    <div style="font-size:10px;color:#9ca3af;margin-top:10px;line-height:1.5">淨利率依商品目前成本/售價計算，非當期歷史成本（規格 §199）</div>
-  </div>`;
-}
 function momoRenderSummary(){
   const el=document.getElementById('momo-content-總表');
   if(!el) return;
-  const months=momoSummaryMonths();
-  if(_momoSummaryMonth===undefined || (_momoSummaryMonth && !months.includes(_momoSummaryMonth)))
-    _momoSummaryMonth = months.length?months[months.length-1]:'';
-  if(!months.length){
-    el.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">尚無期別資料，請先在甲配/乙配上傳 C1105</div></div>`;
-    return;
-  }
-  const m=_momoSummaryMonth;
-  const opts=months.map(mo=>`<option value="${mo}"${mo===m?' selected':''}>${mo}${momoHalfLabel(momoMonthHalfState(mo))}</option>`).join('');
-  el.innerHTML=`
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-      <span style="font-size:13px;color:#6b7280;font-weight:500">月份</span>
-      <select onchange="momoSetSummaryMonth(this.value)" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;color:#1a1a2e">${opts}</select>
-      ${(()=>{const st=momoMonthHalfState(m); return (st==='H1only'||st==='H2only')?`<span style="font-size:12px;color:#f97316">⚠️ 此月${st==='H1only'?'僅上半月':'僅下半月'}資料，數字勿與完整月份直接比較</span>`:'';})()}
-    </div>
-    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch">
-      ${momoSummaryCardHTML('甲配',m)}
-      ${momoSummaryCardHTML('乙配',m)}
-    </div>`;
+  // 舊「MOMO｜總表」聚合區塊（動銷率/淨利階層/Action Plan）已於 v258 移除——各賣場數字改看甲配/乙配 各自的總覽（已含動銷率、毛利率階層圖、逐列與上期比較）。
+  //   ⚠ Action Plan 舊資料仍保留在 localStorage『ec_momo_action_plans』（刻意不清除，日後要找得回來）；讀寫這份的 UI 已一併移除。
+  el.innerHTML=`<div class="empty" style="padding:48px 20px">
+    <div class="empty-icon">📊</div>
+    <div class="empty-hint">MOMO 各賣場的數字請看左側「甲配 / 乙配」各自的總覽<br>（已含動銷率、毛利率階層圖、逐列與上期比較）。</div>
+  </div>`;
 }
 
 
@@ -9590,7 +9470,7 @@ Object.assign(window, {
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,
   momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,momoJumpShop,
-  momoSetSummaryMonth,momoActionPlanSave,momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,
+  momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,
   momoRentSubmit,momoRentDelete,momoRentSyncBtn,
   momoRebuildPick,momoRebuildRemove,momoRebuildGenerate,momoRebuildDownloadReport,momoRebuildConfirm,momoTrimPreview,momoTrimBackupAndApply,
   momoRebuildDryRun,momoRebuildApply,momoTrimHistoryDryRun,momoTrimHistoryApply,
