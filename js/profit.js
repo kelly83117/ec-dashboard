@@ -567,8 +567,8 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       if(val!==null && val!==undefined) tasks.push({key:pk,run:()=>window.__cloudProfit.setField(pk,val)});
       else skippedProblem.push({key:pk,reason:'設定值讀不到'});
     });
-    if(allowKeys instanceof Set){ for(let i=tasks.length-1;i>=0;i--){ if(!allowKeys.has(tasks[i].key)) tasks.splice(i,1); } }   // 逐項勾選：只推選中的 key
-    console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length);
+    if(allowKeys instanceof Set){ const before=tasks.length; for(let i=tasks.length-1;i>=0;i--){ if(!allowKeys.has(tasks[i].key)) tasks.splice(i,1); } console.log('[syncToCloud] allowKeys 過濾:',before,'→',tasks.length,'｜選中:',[...allowKeys]); }   // 逐項勾選：只推選中的 key
+    console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length,'｜要推 keys:',tasks.map(t=>t.key));
     if(tasks.length===0){
       // 沒有要送的 task —— 但有 skippedProblem 一定要講，不能只說「沒有需要同步」（那正是舊 bug）
       if(skippedProblem.length>0){
@@ -585,8 +585,9 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     const ok=[]; const failed=[];
     for(let i=0;i<tasks.length;i++){
       if(btn) btn.textContent='同步中 '+(i+1)+'/'+tasks.length;
-      try{ await tasks[i].run(); ok.push(tasks[i].key); }
-      catch(e){ failed.push({key:tasks[i].key,msg:(e&&e.message)||String(e)}); }
+      const _k=tasks[i].key;
+      try{ await tasks[i].run(); ok.push(_k); console.log('[PUSH] ✓',_k); }   // collection(momo_products/reconcile)寫入分支現在也有 log，路徑不再是黑的
+      catch(e){ failed.push({key:_k,msg:(e&&e.message)||String(e)}); console.error('[PUSH] ✗',_k,e); }
     }
     // pending 清理：只保留 failed + skippedProblem（要重試 / 要一直提醒），其餘刪掉
     // 只清掉「這次真的推成功」的 key（ok）；失敗/讀不到/逐項勾選未選的一律留在 pending 下次再推
@@ -6486,16 +6487,27 @@ function _momoStableStr(v){
 // 差異明細（本機 vs 雲端）：陣列(products)按 sku、物件(reconcile)按欄位。回 {total, samples:[{item,field,local,cloud}] 前20}。
 //   通用診斷——任何一筆 diff 都能直接看出「哪個 SKU/欄位、本機值 vs 雲端值」，不用再猜。
 function _momoNorm(v){ try{ return JSON.parse(JSON.stringify(v===undefined?null:v)); }catch(e){ return v; } }
-function _momoRepr(v){ const s=(v!==null&&typeof v==='object')?JSON.stringify(v):String(v); return s.length>70?s.slice(0,70)+'…':s; }
+function _momoRepr(v){ const s=(v!==null&&typeof v==='object')?JSON.stringify(v):String(v); return s.length>120?s.slice(0,120)+'…':s; }   // tooltip 全值（截 120）
+// 人話描述變化：陣列講筆數差(+多出的 date)、物件講「內容不同」、純值講「X → Y」（截短）；不倒整串 raw JSON
+function _momoDescChange(a,b){
+  if(Array.isArray(a)||Array.isArray(b)){
+    const A=Array.isArray(a)?a:[], B=Array.isArray(b)?b:[];
+    if(A.length!==B.length){ const key=x=>(x&&x.date)||_momoStableStr(_momoNorm(x)); const more=A.length>B.length?A:B, lessSet=new Set((A.length>B.length?B:A).map(key)); const dates=more.filter(x=>!lessSet.has(key(x))).map(x=>x&&x.date).filter(Boolean); const who=A.length>B.length?'本機':'雲端'; return `本機 ${A.length} 筆 / 雲端 ${B.length} 筆（${who}多 ${Math.abs(A.length-B.length)} 筆${dates.length?'：'+dates.slice(0,3).join('、'):''}）`; }
+    return `各 ${A.length} 筆、內容不同`;
+  }
+  if((a&&typeof a==='object')||(b&&typeof b==='object')) return '物件內容不同';
+  const sv=v=>{ const s=String(v); return s.length>24?s.slice(0,24)+'…':s; };
+  return `${sv(a)} → ${sv(b)}`;
+}
 function momoDiffDetail(local, cloud){
   const eqF=(a,b)=>_momoStableStr(_momoNorm(a))===_momoStableStr(_momoNorm(b));
-  const fieldDiffs=(a,b,label,cap)=>{ const out=[]; const keys=[...new Set([...Object.keys(a||{}),...Object.keys(b||{})])]; for(const k of keys){ if(!eqF(a?a[k]:undefined, b?b[k]:undefined)){ out.push({item:label, field:k, local:_momoRepr(a?a[k]:undefined), cloud:_momoRepr(b?b[k]:undefined)}); if(out.length>=cap) break; } } return out; };
+  const fieldDiffs=(a,b,label,cap)=>{ const out=[]; const keys=[...new Set([...Object.keys(a||{}),...Object.keys(b||{})])]; for(const k of keys){ const av=a?a[k]:undefined, bv=b?b[k]:undefined; if(!eqF(av,bv)){ out.push({item:label, field:k, desc:_momoDescChange(av,bv), local:_momoRepr(av), cloud:_momoRepr(bv)}); if(out.length>=cap) break; } } return out; };
   const samples=[]; let total=0;
   if(Array.isArray(local)||Array.isArray(cloud)){
     const idx=arr=>{ const m=new Map(); (arr||[]).forEach(x=>{ if(x&&x.sku!=null) m.set(String(x.sku),x); }); return m; };
     const lm=idx(local), cm=idx(cloud); const allSku=[...new Set([...lm.keys(),...cm.keys()])];
     for(const sku of allSku){ const a=lm.get(sku), b=cm.get(sku); if(eqF(a,b)) continue; total++;
-      if(samples.length<20){ if(!a) samples.push({item:sku,field:'(整筆)',local:'缺',cloud:'有'}); else if(!b) samples.push({item:sku,field:'(整筆)',local:'有',cloud:'缺'}); else fieldDiffs(a,b,sku,3).forEach(d=>{ if(samples.length<20)samples.push(d); }); }
+      if(samples.length<20){ if(!a) samples.push({item:sku,field:'(整筆)',desc:'雲端有、本機缺'}); else if(!b) samples.push({item:sku,field:'(整筆)',desc:'本機有、雲端缺'}); else fieldDiffs(a,b,sku,3).forEach(d=>{ if(samples.length<20)samples.push(d); }); }
     }
   } else {
     const fd=fieldDiffs(local,cloud,'(欄位)',999); total=fd.length; samples.push(...fd.slice(0,20));
@@ -6598,14 +6610,14 @@ function momoRenderSyncPreviewModal(shop, items){
     if(it.status==='same')   return `<span style="color:#9ca3af">無變更</span>`;
     if(it.status==='uncomparable') return `<span style="color:#9ca3af">無法比對（不同 collection）</span>`;
     if(it.status==='readfail') return `<span style="color:#d97706">無法比對（雲端讀取失敗，仍會整包覆蓋）</span>`;
-    const cnt=(it.cloudCount!==it.localCount)?`（雲端 ${it.cloudCount} 筆 / 本機 ${it.localCount} 筆）`:'';
-    return `<span style="color:#9a3412;font-weight:600">⚠️ 內容不同，確認後會用本機整包覆蓋雲端${cnt}</span>`;
+    const cnt=(it.cloudCount!==it.localCount)?`（雲端 ${it.cloudCount} / 本機 ${it.localCount} 筆）`:'';
+    return `<span style="color:#9a3412;font-weight:600" title="推了會用本機整包覆蓋雲端${cnt}">內容不同</span>`;
   };
   const anyDiff=items.some(it=>it.status==='diff');
-  // 差異明細（diff item）：SKU/欄位 本機值→雲端值，前 20 筆
+  // 差異明細（diff item）：預設收合，摘要一行「N 筆不同 · 展開」；明細講變化(陣列講筆數)不倒 JSON；全值在 title tooltip
   const diffHtml=it=>{ const d=it.diff; if(!d||!d.samples||!d.samples.length) return it.diffErr?`<div class="mm-sync-diff">差異明細計算失敗：${esc(it.diffErr)}</div>`:'';
-    const ss=d.samples.map(s=>`<div>· <b>${esc(String(s.item))}</b> · ${esc(s.field)}：本機 <span style="color:#059669">${esc(s.local)}</span> → 雲端 <span style="color:#dc2626">${esc(s.cloud)}</span></div>`).join('');
-    return `<div class="mm-sync-diff">差異明細（${d.total} 筆不同${d.total>d.samples.length?'，列前 '+d.samples.length:''}）：${ss}</div>`; };
+    const ss=d.samples.map(s=>`<div class="mm-sync-diff-row"${(s.local!=null||s.cloud!=null)?` title="本機：${esc(String(s.local))}　|　雲端：${esc(String(s.cloud))}"`:''}>· <b>${esc(String(s.item))}</b>${(s.field&&s.field!=='(整筆)')?' · '+esc(s.field):''}：${esc(s.desc||'')}</div>`).join('');
+    return `<details class="mm-sync-diff"><summary>${d.total} 筆不同 · 展開</summary>${ss}${d.total>d.samples.length?`<div style="color:#9ca3af;margin-top:2px">（僅列前 ${d.samples.length}）</div>`:''}</details>`; };
   const rows = items.length ? items.map(it=>`<tr style="border-top:1px solid #f3f4f6">
       <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}" checked onchange="momoSyncUpdateCount()"></td>
       <td style="padding:6px 8px;font-family:monospace;word-break:break-all">${esc(it.key)}</td>
@@ -6618,8 +6630,8 @@ function momoRenderSyncPreviewModal(shop, items){
   ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:820px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;font-size:15px;font-weight:700">同步預覽 — 勾選要推送到雲端的項目</div>
     <div style="padding:12px 20px;overflow:auto">
-      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">預設<b>全選</b>，可個別取消。每項都是<b>整包覆蓋、無版本比對</b>；狀態存疑的（內容不同）可先取消不推、其餘照推。</div>
-      ${anyDiff?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">⚠️ 有項目<b>雲端與本機不同</b>——推了會用本機整包覆蓋雲端。系統<b>無法判斷誰比較新</b>（沒有時間戳），下方差異明細列出哪個 SKU/欄位不同，請自行確認不會蓋掉同事的更新。</div>`:''}
+      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">預設<b>全選</b>，可個別取消：狀態存疑的先取消不推、其餘照推。<b>勾選推送的項目會用本機整包覆蓋雲端（無版本比對、系統無法判斷誰新）</b>，請確認不會蓋掉同事的更新。</div>
+      ${anyDiff?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">⚠️ 有項目<b>內容不同</b>——點該列的「展開」看差在哪個 SKU/欄位，確認是你要覆蓋的再保持勾選。</div>`:''}
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead><tr style="text-align:left;color:#6b7280;font-weight:600">
           <th style="padding:6px 4px;text-align:center"><input type="checkbox" id="mm-sync-all" checked onchange="momoSyncToggleAll(this.checked)"></th>
