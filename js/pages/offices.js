@@ -1349,7 +1349,15 @@ Object.assign(App, {
 
     return `
       ${quarterTabsHtml}
-      ${this.renderD2KpiSummaryHtml(activeQ, activeMonths, monthScores)}
+      <details id="kpi-summary-details" style="margin-bottom:18px;border:1px solid #d1fae5;border-radius:10px;overflow:hidden">
+        <summary style="cursor:pointer;padding:10px 16px;background:#f0fdf4;color:#1a7a6e;font-size:13px;font-weight:700;list-style:none;display:flex;align-items:center;justify-content:space-between;user-select:none">
+          <span>📊 計分架構（點擊展開）</span>
+          <span style="font-size:11px;opacity:.7">▼</span>
+        </summary>
+        <div style="padding:14px;background:#fff">
+          ${this.renderD2KpiSummaryHtml(activeQ, activeMonths, monthScores)}
+        </div>
+      </details>
       ${stabTabsHtml}
       ${stabContent}`;
   },
