@@ -22,7 +22,7 @@ Object.assign(App, {
     if (deptId === 'd2' && this.route === 'office-d2-pricing') {
       this.bindD2PricingTab();
     }
-    // d2 毛利率表
+    // d2 新品毛利表
     if (deptId === 'd2' && this.route === 'office-d2-margin') {
       this.bindD2MarginTab();
     }
@@ -1141,7 +1141,7 @@ Object.assign(App, {
       </div>`;
 
     const activeStab = Store.get('ec.d2.kpi.stab', '議價表');
-    const stabNames = ['選品','毛利計算','議價表','叫貨出錯率','加分項','扣分項'];
+    const stabNames = ['選品','議價表','叫貨出錯率','加分項','扣分項'];
     const stabTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
       ${stabNames.map(t => `<button class="d2-stab" data-t="${t}" style="padding:6px 16px;border-radius:20px;border:1px solid ${activeStab===t?'#059669':'#e5e7eb'};background:${activeStab===t?'#059669':'#fff'};color:${activeStab===t?'#fff':'#374151'};font-size:13px;font-weight:${activeStab===t?'700':'400'};cursor:pointer">${t}</button>`).join('')}
     </div>`;
@@ -1286,52 +1286,6 @@ Object.assign(App, {
         <div class="table-wrap"><table>
           <thead><tr><th style="text-align:left">日期</th><th style="text-align:left">適用項目</th><th style="text-align:center">加分</th><th style="text-align:left">備註</th><th></th></tr></thead>
           <tbody>${bnRows}</tbody>
-        </table></div>
-      </div>`;
-    })()
-    : activeStab === '毛利率表' ? (() => {
-      const mgKey = activeStabQ === 'Q3' ? 'ec.d2.margin' : `ec.d2.margin.${activeStabQ.toLowerCase()}`;
-      const mgList = Store.get(mgKey, []);
-      const priceF = v => Number(v) ? 'NT$' + Number(v).toLocaleString() : '<span style="color:var(--text-muted)">—</span>';
-      const pctF = v => v != null ? `<span style="font-weight:700;color:${v >= 30 ? '#059669' : v >= 15 ? '#f59e0b' : '#dc2626'}">${v.toFixed(1)}%</span>` : '<span style="color:var(--text-muted)">—</span>';
-      const mgRows = mgList.length === 0
-        ? `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
-        : mgList.map((r, i) => {
-            const cost = Number(r.cost || 0), rev = Number(r.rev || 0);
-            const profit = rev - cost;
-            const pct = rev > 0 ? profit / rev * 100 : null;
-            return `<tr style="vertical-align:middle">
-              <td style="text-align:center;color:#9ca3af;font-size:12px">${i + 1}</td>
-              <td style="font-weight:600">${escapeHtml(r.name || '')}</td>
-              <td style="text-align:right">${priceF(r.cost)}</td>
-              <td style="text-align:right">${priceF(r.rev)}</td>
-              <td style="text-align:right">${cost || rev ? priceF(profit) : '<span style="color:var(--text-muted)">—</span>'}</td>
-              <td style="text-align:center">${pctF(pct)}</td>
-              <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
-                <button class="mg-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #dbeafe;background:#eff6ff;color:#2563eb;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
-                <button class="mg-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
-              </div></td>
-            </tr>`;
-          }).join('');
-      return `${stabQTabsHtml}<div class="table-card" data-store-key="${mgKey}">
-        <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-          <div><h3>📊 毛利率表</h3><p>記錄商品成本與營收，自動計算毛利與毛利率（共 ${mgList.length} 筆）</p></div>
-          <button id="mg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
-        </div>
-        <div id="mg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
-          <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:10px">
-            <input id="mg-name" placeholder="品名 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="mg-cost" type="number" placeholder="成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-            <input id="mg-rev" type="number" placeholder="營收" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
-          </div>
-          <div style="display:flex;gap:8px;justify-content:flex-end">
-            <button id="mg-save" style="padding:8px 18px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
-            <button id="mg-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
-          </div>
-        </div>
-        <div class="table-wrap"><table>
-          <thead><tr><th style="text-align:center;width:48px">編號</th><th style="text-align:left">品名</th><th style="text-align:right">成本</th><th style="text-align:right">營收</th><th style="text-align:right">毛利</th><th style="text-align:center">毛利率</th><th></th></tr></thead>
-          <tbody>${mgRows}</tbody>
         </table></div>
       </div>`;
     })()
@@ -1558,7 +1512,7 @@ Object.assign(App, {
       if (list[+cb.dataset.i]) { list[+cb.dataset.i].changed = cb.checked; Store.set(storeKey, list); }
     }));
 
-    // 毛利率表
+    // 新品毛利表
     const mgForm = document.getElementById('mg-form');
     if (mgForm) {
       const mgQ = Store.get('ec.d2.kpi.stabQ', Store.get('ec.d2.kpi.quarter', 'Q3'));
@@ -2339,7 +2293,7 @@ Object.assign(App, {
       ${qTabsHtml}
       <div class="table-card">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-          <div><h3>📊 毛利率表</h3><p>記錄商品成本與營收，自動計算毛利與毛利率（共 ${list.length} 筆）</p></div>
+          <div><h3>📊 新品毛利表</h3><p>記錄商品成本與營收，自動計算毛利與毛利率（共 ${list.length} 筆）</p></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button id="mg-import-btn" style="padding:7px 16px;background:#1d4ed8;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">📥 匯入 Excel</button>
             <input id="mg-import-file" type="file" accept=".xlsx,.xls" style="display:none">
