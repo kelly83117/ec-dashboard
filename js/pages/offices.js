@@ -2082,14 +2082,14 @@ Object.assign(App, {
         const kE = escapeHtml(k);
         const count = items.length;
         const isCustomGroup = items.every(({r}) => r.__custom);
-        // 群組標題：整列 colspan，左邊名稱，右邊摘要
-        const _smryParts = [];
-        if (_priceCol)  { const vals = items.map(({r})=>parseFloat(r[_priceCol])).filter(v=>!isNaN(v)); if(vals.length){const mn=Math.min(...vals),mx=Math.max(...vals),ci=coreCols.indexOf(_priceCol);_smryParts.push('售價 '+( mn===mx?this._prFmt(mn,coreTypes[ci]):this._prFmt(mn,coreTypes[ci])+'～'+this._prFmt(mx,coreTypes[ci])));} }
-        if (_marginCol) { const vals = items.map(({r})=>parseFloat(r[_marginCol])).filter(v=>!isNaN(v)); if(vals.length){const mn=Math.min(...vals),mx=Math.max(...vals),ci=coreCols.indexOf(_marginCol);_smryParts.push('毛利 '+(mn===mx?this._prFmt(mn,coreTypes[ci]):this._prFmt(mn,coreTypes[ci])+'～'+this._prFmt(mx,coreTypes[ci])));} }
-        if (_pctCol)    { const vals = items.map(({r})=>parseFloat(r[_pctCol])).filter(v=>!isNaN(v)); if(vals.length){const mn=Math.min(...vals),mx=Math.max(...vals),ci=coreCols.indexOf(_pctCol);const p=v=>{const pv=Math.round(v*10000)/100;const col=pv>=20?'#059669':pv>=0?'#f59e0b':'#dc2626';return `<span style="color:${col}">${pv.toFixed(1)}%</span>`;};_smryParts.push('獲利 '+(mn===mx?p(mn):p(mn)+'～'+p(mx)));} }
-        const smryHtml = _smryParts.length ? `<span style="font-size:12px;color:#6b7280;margin-left:auto;padding-left:20px;display:flex;gap:16px;flex-shrink:0">${_smryParts.map(s=>`<span>${s}</span>`).join('')}</span>` : '';
-        const colspan = coreCols.length + 1;
-        const hdr = `<tr class="pr-group-hdr" data-grp="${kA}" style="border-bottom:1px solid #e5e7eb;cursor:pointer${isCustomGroup?';background:#eff6ff':''}"><td colspan="${colspan}" style="padding:8px 12px"><div style="display:flex;align-items:center"><span class="pr-grp-arr" style="display:inline-block;margin-right:8px;font-size:10px;color:#6b7280;transition:transform .15s;flex-shrink:0">▶</span><strong style="font-weight:600;font-size:13px">${kE}</strong>${count>1?`<span style="font-size:11px;color:#9ca3af;margin-left:8px;font-weight:400;flex-shrink:0">${count} 種規格</span>`:''}</span>${smryHtml}</div></td></tr>`;
+        // 群組標題：個別 td，商品名稱欄顯示 ▶ + 名稱，其餘欄顯示摘要數值
+        const hdr = `<tr class="pr-group-hdr" data-grp="${kA}" style="border-bottom:1px solid #e5e7eb;cursor:pointer${isCustomGroup?';background:#eff6ff':''}">` +
+          coreCols.map((c, ci) => {
+            const s = _td(c);
+            if (c === _nc) return `<td style="${s}"><span class="pr-grp-arr" style="display:inline-block;margin-right:6px;font-size:10px;color:#6b7280;transition:transform .15s">▶</span><strong style="font-weight:600">${kE}</strong>${count>1?`<span style="font-size:11px;color:#9ca3af;margin-left:8px;font-weight:400">${count} 種規格</span>`:''}</td>`;
+            if (c === _priceCol || c === _costCol || c === _marginCol || c === _pctCol) return _summaryTd(c, items, s);
+            return `<td style="${s}"></td>`;
+          }).join('') + `<td></td></tr>`;
         const rows = items.map(({ r, i }) => {
           const isCustom = !!r.__custom;
           return `<tr class="pr-row pr-child" data-grp="${kA}" data-i="${i}" data-id="${r.__id||''}" hidden style="border-bottom:1px solid #f3f4f6;cursor:pointer;background:${isCustom?'#eff6ff':'#f8fafc'}">` +
@@ -2125,6 +2125,7 @@ Object.assign(App, {
         <thead style="position:sticky;top:0;z-index:2;background:#f9fafb"><tr>${theadHtml}</tr></thead>
         <tbody id="pr-tbody">${tbodyHtml}</tbody>
       </table></div>
+      <style>#pr-tbody tr.pr-group-hdr td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }</style>
       ${moreHtml}
     </div>`;
   },
