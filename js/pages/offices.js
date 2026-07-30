@@ -2014,8 +2014,7 @@ Object.assign(App, {
       });
     }
 
-    const SHOW = 60;
-    const display = filteredWithIdx.slice(0, SHOW);
+    const display = filteredWithIdx;
 
     const NAME_COLS = new Set(['產品名稱','試算名稱','編號']);
     // 縮短過長的欄位標題顯示
@@ -2047,17 +2046,61 @@ Object.assign(App, {
     }).join('') + '<th style="min-width:32px"></th>';
 
     const _td = (c) => `font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}`;
-    const tbodyHtml = display.map(({ r, i }) => {
-      const isCustom = !!r.__custom;
-      return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
-        coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
-        `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
-    }).join('');
+    const useGrouping = activeSheet !== '商品母表' && display.length > 0 && display[0].r['商品名稱'] !== undefined;
+    let tbodyHtml;
+    if (!useGrouping) {
+      tbodyHtml = display.map(({ r, i }) => {
+        const isCustom = !!r.__custom;
+        return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
+          coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
+      }).join('');
+    } else {
+      // 所有商品統一為群組標題列，標題顯示售價/毛利摘要，版面整齊一致
+      const _nc = '商品名稱';
+      const _grps = []; const _gm = new Map();
+      for (const item of display) {
+        const k = item.r[_nc] || ('__' + item.i);
+        if (!_gm.has(k)) { const g = { k, items:[] }; _grps.push(g); _gm.set(k, g); }
+        _gm.get(k).items.push(item);
+      }
+      const _priceCol  = coreCols.find(c => c === '單品售價');
+      const _costCol   = coreCols.find(c => c === '成本');
+      const _marginCol = coreCols.find(c => c === '實際毛利');
+      const _pctCol    = coreCols.find(c => c === '獲利百分比');
+      const _summaryTd = (col, items, style) => {
+        if (!col) return `<td style="${style}"></td>`;
+        const ci = coreCols.indexOf(col);
+        const vals = items.map(({r}) => parseFloat(r[col])).filter(v => !isNaN(v));
+        if (!vals.length) return `<td style="${style}"></td>`;
+        const mn = Math.min(...vals), mx = Math.max(...vals);
+        const fmt = v => this._prFmt(v, coreTypes[ci]);
+        return `<td style="${style};color:#6b7280">${mn === mx ? fmt(mn) : fmt(mn)+'～'+fmt(mx)}</td>`;
+      };
+      tbodyHtml = _grps.map(({ k, items }) => {
+        const kA = k.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+        const kE = escapeHtml(k);
+        const count = items.length;
+        const isCustomGroup = items.every(({r}) => r.__custom);
+        // 群組標題：整列 colspan，左邊名稱，右邊摘要
+        const _smryParts = [];
+        if (_priceCol)  { const vals = items.map(({r})=>parseFloat(r[_priceCol])).filter(v=>!isNaN(v)); if(vals.length){const mn=Math.min(...vals),mx=Math.max(...vals),ci=coreCols.indexOf(_priceCol);_smryParts.push('售價 '+( mn===mx?this._prFmt(mn,coreTypes[ci]):this._prFmt(mn,coreTypes[ci])+'～'+this._prFmt(mx,coreTypes[ci])));} }
+        if (_marginCol) { const vals = items.map(({r})=>parseFloat(r[_marginCol])).filter(v=>!isNaN(v)); if(vals.length){const mn=Math.min(...vals),mx=Math.max(...vals),ci=coreCols.indexOf(_marginCol);_smryParts.push('毛利 '+(mn===mx?this._prFmt(mn,coreTypes[ci]):this._prFmt(mn,coreTypes[ci])+'～'+this._prFmt(mx,coreTypes[ci])));} }
+        if (_pctCol)    { const vals = items.map(({r})=>parseFloat(r[_pctCol])).filter(v=>!isNaN(v)); if(vals.length){const mn=Math.min(...vals),mx=Math.max(...vals),ci=coreCols.indexOf(_pctCol);const p=v=>{const pv=Math.round(v*10000)/100;const col=pv>=20?'#059669':pv>=0?'#f59e0b':'#dc2626';return `<span style="color:${col}">${pv.toFixed(1)}%</span>`;};_smryParts.push('獲利 '+(mn===mx?p(mn):p(mn)+'～'+p(mx)));} }
+        const smryHtml = _smryParts.length ? `<span style="font-size:12px;color:#6b7280;margin-left:auto;padding-left:20px;display:flex;gap:16px;flex-shrink:0">${_smryParts.map(s=>`<span>${s}</span>`).join('')}</span>` : '';
+        const colspan = coreCols.length + 1;
+        const hdr = `<tr class="pr-group-hdr" data-grp="${kA}" style="border-bottom:1px solid #e5e7eb;cursor:pointer${isCustomGroup?';background:#eff6ff':''}"><td colspan="${colspan}" style="padding:8px 12px"><div style="display:flex;align-items:center"><span class="pr-grp-arr" style="display:inline-block;margin-right:8px;font-size:10px;color:#6b7280;transition:transform .15s;flex-shrink:0">▶</span><strong style="font-weight:600;font-size:13px">${kE}</strong>${count>1?`<span style="font-size:11px;color:#9ca3af;margin-left:8px;font-weight:400;flex-shrink:0">${count} 種規格</span>`:''}</span>${smryHtml}</div></td></tr>`;
+        const rows = items.map(({ r, i }) => {
+          const isCustom = !!r.__custom;
+          return `<tr class="pr-row pr-child" data-grp="${kA}" data-i="${i}" data-id="${r.__id||''}" hidden style="border-bottom:1px solid #f3f4f6;cursor:pointer;background:${isCustom?'#eff6ff':'#f8fafc'}">` +
+            coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+            `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
+        }).join('');
+        return hdr + rows;
+      }).join('');
+    }
 
-    const moreHtml = filteredWithIdx.length > SHOW
-      ? `<div style="padding:12px;text-align:center;color:#6b7280;font-size:13px;background:#f9fafb;border-top:1px solid #f3f4f6">
-           顯示前 ${SHOW} 筆，共 ${filteredWithIdx.length} 筆 — <button id="pr-show-all" style="color:#2563eb;font-weight:600;background:none;border:0;cursor:pointer">顯示全部</button>
-         </div>` : '';
+    const moreHtml = '';
 
     return `<div class="table-card">
       <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
@@ -2129,6 +2172,21 @@ Object.assign(App, {
     document.getElementById('pr-search')?.addEventListener('compositionend', e => {
       Store.set('ec.d2.pricing.q', e.target.value);
       self.render();
+    });
+
+    // 展開/收合群組（生活好麻吉等分頁）
+    document.getElementById('pr-tbody')?.addEventListener('click', e => {
+      const hdr = e.target.closest('tr.pr-group-hdr');
+      if (!hdr) return;
+      e.stopPropagation();
+      const grp = hdr.getAttribute('data-grp');
+      const tbody = document.getElementById('pr-tbody');
+      const kids = Array.from(tbody.rows).filter(tr => tr.classList.contains('pr-child') && tr.getAttribute('data-grp') === grp);
+      const open = hdr.dataset.open !== '1';
+      hdr.dataset.open = open ? '1' : '0';
+      const arr = hdr.querySelector('.pr-grp-arr');
+      if (arr) arr.style.transform = open ? 'rotate(90deg)' : '';
+      kids.forEach(tr => open ? tr.removeAttribute('hidden') : tr.setAttribute('hidden',''));
     });
 
     // 點列展開內聯編輯（事件委派）
