@@ -2068,6 +2068,18 @@ Object.assign(App, {
   bindD2PricingTab() {
     const self = this;
 
+    // 自動載入：進入定價表時若尚未載入則立即 fetch
+    if (!window.__pricingData) {
+      (async () => {
+        try {
+          const ver = document.querySelector('meta[name="app-version"]')?.content || '';
+          const res = await fetch(`data/pricing.json?v=${ver}`);
+          window.__pricingData = await res.json();
+          self.render();
+        } catch(e) { console.error('pricing.json 載入失敗：', e); }
+      })();
+    }
+
     document.getElementById('pr-load-btn')?.addEventListener('click', async () => {
       const btn = document.getElementById('pr-load-btn');
       if (btn) btn.textContent = '載入中…';
