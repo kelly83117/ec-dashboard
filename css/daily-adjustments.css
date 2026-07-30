@@ -153,13 +153,13 @@
 /* 人員卡片：本期優化進度（依通路負責人歸屬）。進度條 fill 的 width 是動態百分比，只能 inline；
    其餘一律走既有 :root 變數，不寫死色碼、不碰 --bg 底色。 */
 .adj-prog{margin-top:8px;padding-top:8px;border-top:1px solid var(--border,#e5e7eb);}
-.adj-prog-title{font-size:11px;font-weight:700;color:var(--text-muted,#6b7280);margin-bottom:4px;}
+.adj-prog-title{font-size:12px;font-weight:700;color:var(--text-muted,#6b7280);margin-bottom:4px;}
 .adj-prog-row{display:flex;align-items:center;gap:6px;margin:3px 0;}
-.adj-prog-shop{font-size:12px;min-width:44px;}
-.adj-prog-num{font-size:11px;color:var(--text-muted,#6b7280);font-variant-numeric:tabular-nums;}
+.adj-prog-shop{font-size:13px;min-width:44px;}   /* 通路列（grp/sub 各自有覆蓋，層級靠這個拉開） */
+.adj-prog-num{font-size:12px;color:var(--text-muted,#6b7280);font-variant-numeric:tabular-nums;}
 .adj-prog-bar{flex:1;height:6px;border-radius:3px;background:#f3f4f6;overflow:hidden;}
 .adj-prog-fill{display:block;height:100%;border-radius:3px;background:#6366f1;}
-.adj-prog-pct{font-size:11px;font-weight:700;min-width:32px;text-align:right;font-variant-numeric:tabular-nums;}
+.adj-prog-pct{font-size:12px;font-weight:500;min-width:32px;text-align:right;font-variant-numeric:tabular-nums;}   /* p0 仍 700（172 行），唯一跳出來的 */
 .adj-prog-na{font-size:12px;color:#9ca3af;}
 .adj-prog-note{font-size:10px;color:#9ca3af;margin-top:4px;}
 .adj-prog-toggle{display:flex;align-items:center;gap:6px;margin:3px 0;width:100%;background:none;border:none;padding:0;cursor:pointer;font:inherit;text-align:left;}
@@ -167,13 +167,64 @@
 .adj-prog-detail{padding:2px 0 4px 8px;border-left:2px solid #f3f4f6;margin:0 0 4px 4px;}
 .adj-prog-grp .adj-prog-shop{font-size:11px;font-weight:700;color:#6b7280;}
 .adj-prog-sub .adj-prog-shop{font-size:11px;min-width:64px;color:#6b7280;padding-left:8px;}
-.adj-prog-p100{color:#10b981;}
-.adj-prog-p50{color:#6366f1;}
-.adj-prog-p0{color:#d97706;font-weight:700;}
+.adj-prog-p100{color:var(--prog-done);}
+.adj-prog-p50{color:var(--prog-doing);}
+.adj-prog-p0{color:var(--prog-low);font-weight:700;}
 .adj-prog-sub{justify-content:flex-end;}
 .adj-prog-sub .adj-prog-shop{margin-right:auto;}
 .adj-prog-sub .adj-prog-pct{min-width:52px;}
 .adj-prog-note .adj-prog-p0{font-weight:700;}
+/* 標題列：標題靠左、顏色圖例靠右（從底部 note 移上來）；窄卡片時 wrap 換行 */
+.adj-prog-head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;}
+.adj-prog-legend{font-size:10px;color:#9ca3af;white-space:nowrap;}
+/* 展開明細：單欄；未完成直接列、已完成收進 <details class="adj-prog-done">（原生收折，無 JS 事件）。
+   細項列改固定網格對齊（標籤/數字/百分比），覆蓋 .adj-prog-sub 的 flex 靠右——
+   那兩條既有規則（justify-content:flex-end、margin-right:auto）保留不刪，其他地方可能用到。 */
+.adj-prog-subs .adj-prog-sub{
+  display:grid;
+  grid-template-columns:1fr 60px 46px;   /* 標籤 / 數字 / 百分比 */
+  column-gap:10px;
+  align-items:center;
+}
+.adj-prog-subs .adj-prog-num,
+.adj-prog-subs .adj-prog-pct{text-align:right;}
+/* 進度條 fill 依完成度變色（門檻由 daily.js bar() 判，與 flat() 同一組） */
+.adj-prog-fill-p100{background:var(--prog-done);}
+.adj-prog-fill-p50{background:var(--prog-doing);}
+.adj-prog-fill-p0{background:var(--prog-low);}
+/* 字級統一：num/pct 基準已是 12px（上方 .adj-prog-num / .adj-prog-pct），三個層級的數字同大可直接比較；
+   這裡只剩 shop 要蓋掉 168/169 行的 11px。層級改由標籤字級承擔：通路 13px > 分組/細項 12px。 */
+.adj-prog-subs .adj-prog-shop{font-size:12px;}
+.adj-prog-grp .adj-prog-shop{font-size:12px;}   /* 顏色維持 168 行既有的 muted #6b7280 */
+/* 進度條只留通路列（分組列不畫條:分母是標籤數、與通路列的商品數不可比）：通路列 7px > 基準 6px */
+.adj-prog-toggle .adj-prog-bar{height:7px;}
+/* 通路列展開箭頭：整區唯一的「可點」提示，放大加深；hover 再加深。色碼皆為本檔既有
+   （#6b7280 同 .adj-prog-grp .adj-prog-shop、#374151 同 .adj-pill-plain），不改既有 .adj-prog-caret。 */
+.adj-prog-toggle .adj-prog-caret{font-size:13px;color:#6b7280;}
+.adj-prog-toggle:hover .adj-prog-caret{color:#374151;}
+/* 分組小結列：改網格，欄寬與 .adj-prog-subs .adj-prog-sub 完全一致（1fr 60px 46px），
+   分組列與細項列的數字連成同一條直線 */
+.adj-prog-grp{display:grid;grid-template-columns:1fr 60px 46px;column-gap:10px;align-items:center;}
+.adj-prog-grp .adj-prog-num,
+.adj-prog-grp .adj-prog-pct{text-align:right;}
+/* 網格內 min-width 交還欄寬：既有 flex 用的 .adj-prog-pct min-width(32/52px) 會把 pct
+   撐出 46px 欄外，分組列和細項列的 % 對不齊（實測差 6px）。覆蓋為 0，不刪既有規則。 */
+.adj-prog-grp .adj-prog-pct,
+.adj-prog-subs .adj-prog-pct{min-width:0;}
+/* 已完成收折內的列淡化：用 opacity，不改文字色（綠/靛/琥珀語意色保留） */
+.adj-prog-done .adj-prog-sub{opacity:.6;}
+/* 已完成收折行 */
+.adj-prog-done{margin:2px 0 4px;}
+.adj-prog-done > summary{
+  font-size:12px;
+  color:var(--text-muted,#9ca3af);
+  cursor:pointer;
+  list-style:none;
+  padding:2px 0;
+}
+.adj-prog-done > summary::-webkit-details-marker{display:none;}
+.adj-prog-done > summary::before{content:'▸ ';}
+.adj-prog-done[open] > summary::before{content:'▾ ';}
 
 /* 人員卡片：洞察表「今日調整」chip（<button>，點開明細彈窗）。視覺沿用 .adj-pill 的語彙，
    顏色由 JS 經 --chip-bg / --chip-fg CSS 變數傳入（單一來源 = daily.js INSIGHT_STYLE）。不碰 --bg。 */
@@ -207,6 +258,10 @@
   --x-profit: #b45309;     /* 琥珀：同洞察表彈窗「淨利表紀錄」區塊 */
   --x-profit-bg: #fffbeb;
   --x-profit-fg: #78350f;
+  /* 本期優化進度的完成度三色（.adj-prog-p* 與進度條 fill 共用，色碼與抽變數前完全相同） */
+  --prog-done: #10b981;    /* 綠：100% 完成，沿用既有 .adj-prog-p100 */
+  --prog-doing: #6366f1;   /* 靛：進行中，沿用既有 .adj-prog-p50 與 .adj-prog-fill */
+  --prog-low: #d97706;     /* 琥珀：低於 50%，沿用既有 .adj-prog-p0；刻意不用紅：期中偏低是常態不是過錯 */
 }
 .adj-x { margin-top: 4px; }
 .adj-x summary {
