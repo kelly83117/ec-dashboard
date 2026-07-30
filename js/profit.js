@@ -752,6 +752,25 @@ function _noteHistory(shop,code,skipMonth,skipHalf){
   });
   return out;
 }
+// 洞察表商品備註彈窗用的唯讀出口：查某商品在淨利表的所有調整紀錄。
+// period = 各期間廣告調整／報表 note（_noteHistory 全期間，skip 傳 null 不跳過任何期間）；
+// growth = 商品調整（{shop}_growth）的 adjustments。純讀，絕不寫入。
+function profitNoteHistoryFor(shop, code){
+  let period=[];
+  try{ period=_noteHistory(shop, code, null, null); }catch(e){ console.warn('[profitNoteHistoryFor] period 查詢失敗', e); }
+  let growth=[];
+  try{
+    const gnd=getNotes(shop+'_growth')[code];
+    let gadj=[];
+    if(gnd){ if(typeof gnd==='string')gadj=[{date:'',text:gnd}]; else gadj=gnd.adjustments||[]; }
+    growth=gadj
+      .filter(a=>a&&a.text&&String(a.text).trim())
+      .map(a=>({date:a.date||'',text:String(a.text)}))
+      .sort((x,y)=>String(y.date).localeCompare(String(x.date)));   // 日期新到舊
+  }catch(e){ console.warn('[profitNoteHistoryFor] growth 查詢失敗', e); }
+  return {period, growth};
+}
+window.profitNoteHistoryFor = profitNoteHistoryFor;
 const _userPickedPeriod={};   // 使用者主動切過月份/半月的賣場 → 之後不再自動跳，尊重其選擇
 // 把某賣場的下拉切到「最新有資料的期間」。
 // 回傳 true = 真的套用了（或已經在正確期間），false = 這次沒辦法套用（下拉還沒建好）。
