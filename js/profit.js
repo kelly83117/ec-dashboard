@@ -5856,6 +5856,34 @@ function momoCalcMarginSupplier(shop, {cost, purchasePrice}){
 //   6.8% 是 MOMO 專屬常數（未對帳時只能估比例費用）；絕不共用蝦皮全站費率框。
 const _momoFeeRateCache={};   // 'shop|YYYY-MM' → {reconciled, feeRate, E_untax, A_untax, skus} | null(未對帳)
 function momoClearFeeRateCache(){ for(const k in _momoFeeRateCache) delete _momoFeeRateCache[k]; }
+// 帳號級費用分解（Piece 2 費用重分核心）：把「甲物流(C1202)/乙物流(C1204寄倉)/乙倉租」各自歸屬到店，其餘 shared 按營收攤。
+//   → 每店專屬 feeRate：甲=甲物流/甲R + shared/A；乙=(乙物流+乙倉租)/乙R + shared/A。守恆：Σ甲+Σ乙費用 = E（因 A=甲R+乙R）。
+//   修正跨店補貼：原本 feeRate=E/A 讓甲配吃掉乙的寄倉費(甲R佔~89%)、也讓乙配吃甲物流~11%；歸正後兩邊各自吃自己的。
+function momoMonthFeeSplit(month){
+  const ck='__split|'+month;
+  if(ck in _momoFeeRateCache) return _momoFeeRateCache[ck];
+  let split=null;
+  try{
+    const recJ=momoLoadReconcile('甲配',month), recY=momoLoadReconcile('乙配',month);
+    const sum=(recJ&&recJ.summary)||(recY&&recY.summary);   // E/A/fees 帳號級、兩店對帳單相同
+    if(sum && sum.E!=null && sum.A){
+      const E=sum.E/1.05, A_inv=sum.A.untax||0, f=sum.fees||{};
+      const 甲物流=((f['物流費用-第三方物流']||0)+(f['物流費用-超商取貨']||0))/1.05;
+      const 乙物流=(f['寄倉分攤運費']||0)/1.05;
+      const 乙倉租=(f['寄倉倉租費(EC)']||0)/1.05;
+      const 甲R=(recJ&&recJ.skus)?Object.keys(recJ.skus).reduce((s,k)=>s+(recJ.skus[k].revUntax||0),0):0;
+      const 乙R=(recY&&recY.skus)?Object.keys(recY.skus).reduce((s,k)=>s+(recY.skus[k].revUntax||0),0):0;
+      const A=(甲R+乙R)>0?(甲R+乙R):A_inv;   // 分母用 甲R+乙R（與 aggregate 逐SKU R 加總一致，Σ剛好=E）；退回發票A
+      const shared=E-甲物流-乙物流-乙倉租;
+      if(A>0) split={ E, A, A_inv, 甲R, 乙R, 甲物流, 乙物流, 乙倉租, shared, sharedRate:shared/A,
+        feeRate甲: 甲R>0?(甲物流/甲R+shared/A):(E/A),
+        feeRate乙: 乙R>0?((乙物流+乙倉租)/乙R+shared/A):(E/A),
+        yiZucuRate: 乙R>0?乙倉租/乙R:0 };   // 乙倉租按乙配店內營收攤（per-SKU 待 C1212）
+    }
+  }catch(e){}
+  _momoFeeRateCache[ck]=split;
+  return split;
+}
 function momoMonthFeeInfo(shop, month){
   const ck=shop+'|'+month;
   if(ck in _momoFeeRateCache) return _momoFeeRateCache[ck];
@@ -5863,11 +5891,14 @@ function momoMonthFeeInfo(shop, month){
   try{
     const rec=momoLoadReconcile(shop, month);
     if(rec && rec.summary && rec.summary.A && rec.summary.E!=null){
-      const A_untax=rec.summary.A.untax||0;   // 整個帳號(甲+乙)發票未稅額 → feeRate 分母（跨兩店攤，Σ甲+Σ乙費用=E）
-      const E_untax=rec.summary.E/1.05;   // 對帳單 E 是含稅（A+C−E+G 用含稅欄成立）→ 未稅
+      const A_untax=rec.summary.A.untax||0;   // 整個帳號(甲+乙)發票未稅額
+      const E_untax=rec.summary.E/1.05;   // 對帳單 E 是含稅 → 未稅
       const skus=rec.skus||{};
       const shopRev=Object.keys(skus).reduce((s,k)=>s+(skus[k].revUntax||0),0);   // 「該店」對帳金額未稅合計（自驗用；甲配≠整帳號A）
-      if(A_untax>0) info={reconciled:true, feeRate:E_untax/A_untax, E_untax, A_untax, shopRev, skus};
+      const split=momoMonthFeeSplit(month);
+      // 每店專屬 feeRate（Piece 2）：甲/乙各自的；split 缺（無對帳單）才退回舊 E/A
+      const feeRate = (split&&shop==='甲配')?split.feeRate甲 : (split&&shop==='乙配')?split.feeRate乙 : (A_untax>0?E_untax/A_untax:0);
+      if(A_untax>0) info={reconciled:true, feeRate, E_untax, A_untax, shopRev, skus, split};
     }
   }catch(e){}
   _momoFeeRateCache[ck]=info;
@@ -5880,9 +5911,9 @@ function momoHistoricalFeeRate(shop){
   const ck='__hist|'+shop;
   if(ck in _momoFeeRateCache) return _momoFeeRateCache[ck];
   const seen={};   // month → feeRate
-  const scan=(store)=>{ if(!store) return; const pf='ec_momo_reconcile|'+shop+'|'; Object.keys(store).forEach(k=>{ if(k.indexOf(pf)!==0) return; const m=k.slice(pf.length); if(m in seen) return; const rec=store[k]; if(rec&&rec.summary&&rec.summary.A&&rec.summary.E!=null){ const A=rec.summary.A.untax||0; if(A>0) seen[m]=(rec.summary.E/1.05)/A; } }); };
+  const scan=(store)=>{ if(!store) return; const pf='ec_momo_reconcile|'+shop+'|'; Object.keys(store).forEach(k=>{ if(k.indexOf(pf)!==0) return; const m=k.slice(pf.length); if(m in seen) return; const rec=store[k]; if(rec&&rec.summary&&rec.summary.A&&rec.summary.E!=null){ const A=rec.summary.A.untax||0; if(A>0){ const sp=momoMonthFeeSplit(m); seen[m]= sp?(shop==='甲配'?sp.feeRate甲:sp.feeRate乙):((rec.summary.E/1.05)/A); } } }); };
   try{ scan(Store._profitMem); scan(Store._mem);
-    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); const pf='ec_momo_reconcile|'+shop+'|'; if(k&&k.indexOf(pf)===0){ const m=k.slice(pf.length); if(!(m in seen)){ try{ const rec=JSON.parse(localStorage.getItem(k)); if(rec&&rec.summary&&rec.summary.A&&rec.summary.E!=null){ const A=rec.summary.A.untax||0; if(A>0) seen[m]=(rec.summary.E/1.05)/A; } }catch(e){} } } }
+    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); const pf='ec_momo_reconcile|'+shop+'|'; if(k&&k.indexOf(pf)===0){ const m=k.slice(pf.length); if(!(m in seen)){ try{ const rec=JSON.parse(localStorage.getItem(k)); if(rec&&rec.summary&&rec.summary.A&&rec.summary.E!=null){ const A=rec.summary.A.untax||0; if(A>0){ const sp=momoMonthFeeSplit(m); seen[m]= sp?(shop==='甲配'?sp.feeRate甲:sp.feeRate乙):((rec.summary.E/1.05)/A); } } }catch(e){} } } }
   }catch(e){}
   const months=Object.keys(seen).sort();
   const recent=months.slice(-3);   // 最近 3 個月
@@ -5975,8 +6006,22 @@ function momoAggregatePeriods(product,periodKeys,shop){
   const feeAmt = (reconciled&&fee) ? R*fee.feeRate : R*estFeeRate;
   const profit=R-feeAmt-cost;
   // 階段四：該SKU該期別出貨運費（供總表兩pass物流重分配；已對帳且有運費資料才有值，否則 null）
+  //   甲配：C1202 已逐期別，直接取；乙配：C1204 月總 → 按「選期別C1105訂購量 ÷ 整月C1105訂購量」拆(半月按銷量、跟營收拆同軌)。
   let skuFreightPeriod=null;
-  if(reconciled){ const frt=momoMonthFreightInfo(shop, month); if(frt){ skuFreightPeriod=periodKeys.reduce((s,pk)=>s+((frt.freight[sku]&&frt.freight[sku][pk])||0),0); } }
+  if(reconciled){ const frt=momoMonthFreightInfo(shop, month);
+    if(frt){
+      if(frt.splitByQty && frt.yiMonthly){
+        const monthYi=frt.yiMonthly[sku]||0;
+        if(monthYi>0){
+          const monthKeys=[month+'-H1', month+'-H2'];
+          const gMonth=monthKeys.map(k=>(product.periods||{})[k]).filter(Boolean).map(c=>momoReadCell(c,sku)).reduce((s,d)=>s+(d.qty||0),0);
+          skuFreightPeriod = gMonth>0 ? monthYi*(qty/gMonth) : ((periodKeys.length>=2)?monthYi:0);   // 無C1105比例可拆：整月給全額、半月不亂拆給0
+        } else skuFreightPeriod=0;
+      } else {
+        skuFreightPeriod=periodKeys.reduce((s,pk)=>s+((frt.freight[sku]&&frt.freight[sku][pk])||0),0);
+      }
+    }
+  }
   // 退貨率改吃對帳單（cell 的 returnQty 欄根本不存在、S1105 未寫→原本全 0）。對帳單有逐 SKU 客退數量/金額（月顆粒）。
   //   退貨率 = 客退數量 ÷ 賣出數量（賣出=對帳數量+客退數量）。未對帳→null（畫面顯示「—」）。半月也顯示月值（對帳單月顆粒、標示）。
   let retRate=null, retQty=0, retAmt=0;
@@ -6485,20 +6530,32 @@ function momoSaveFreight(shop,month,data){ const k=momoFreightKey(shop,month);
 // 從 C1105 + C1202(第三方+超商) 建甲配逐SKU逐期別出貨運費（reuse 既有解析：訂編 join、排除非「出貨」列）
 // 對帳單甲配物流總額(第三方+超商)未稅（÷1.05）
 function momoLogisticsJiaTotalUntax(month){ const rec=momoLoadReconcile('甲配',month); const f=(rec&&rec.summary&&rec.summary.fees)||{}; return ((f['物流費用-第三方物流']||0)+(f['物流費用-超商取貨']||0))/1.05; }
-// 甲配物流分攤 context（月級）：logiTotal + feeRate + shopRev + otherRate + freight。無對帳單或無運費 → null（總表退回營收攤）。
+// 物流分攤 context（月級）。甲配：C1202 逐SKU(已逐期別)；乙配：C1204 逐SKU(月總、半月於 aggregate 按銷量拆 splitByQty)。
+//   otherRate＝該店「非物流」部分的每元營收費率：甲=shared/A；乙=乙倉租/乙R + shared/A（倉租+shared 都按乙配店內營收攤）。
+//   無對帳單/無運費源 → null（總表退回營收攤估算，banner 標示）。
 function momoMonthFreightInfo(shop, month){
-  if(shop!=='甲配') return null;   // 乙配後做（寄倉分攤含回收，另設計）
   const ck='__frt|'+shop+'|'+month;
   if(ck in _momoFeeRateCache) return _momoFeeRateCache[ck];
   let info=null;
   try{
     const fi=momoMonthFeeInfo(shop, month);
-    const fr=momoLoadFreight(shop, month);
-    if(fi && fi.reconciled && fi.shopRev>0 && fr && fr.freight && Object.keys(fr.freight).length){
-      const logi=momoLogisticsJiaTotalUntax(month);
-      const 甲配總費用=fi.shopRev*fi.feeRate;
-      info={ reconciled:true, logiTotal:logi, feeRate:fi.feeRate, shopRev:fi.shopRev,
-             otherRate:(甲配總費用-logi)/fi.shopRev, freight:fr.freight, unmatched:fr.unmatched||0 };
+    const split=fi&&fi.split;
+    if(shop==='甲配'){
+      const fr=momoLoadFreight(shop, month);
+      if(fi && fi.reconciled && fi.shopRev>0 && fr && fr.freight && Object.keys(fr.freight).length){
+        const logi=momoLogisticsJiaTotalUntax(month);
+        const 甲配總費用=fi.shopRev*fi.feeRate;   // = 甲物流 + 甲R×shared/A（新 feeRate甲）
+        info={ reconciled:true, logiTotal:logi, feeRate:fi.feeRate, shopRev:fi.shopRev,
+               otherRate:(甲配總費用-logi)/fi.shopRev, freight:fr.freight, unmatched:fr.unmatched||0, splitByQty:false };
+      }
+    } else if(shop==='乙配'){
+      const fr=momoLoadFreight(shop, month);
+      if(fi && fi.reconciled && fi.shopRev>0 && split && fr && fr.yiSku && Object.keys(fr.yiSku).length){
+        // C1204 逐SKU月總(半月於 aggregate 按 C1105 訂購量拆)；乙倉租+shared 併進 otherRate 按乙配店內營收攤
+        info={ reconciled:true, logiTotal:split.乙物流, feeRate:fi.feeRate, shopRev:fi.shopRev,
+               otherRate:(split.yiZucuRate+split.sharedRate), yiMonthly:fr.yiSku, yiTotal:fr.total, splitByQty:true };
+      }
+      // 無 C1204 → null：aggregate 用 feeRate乙 全營收攤(估算)、stage-4 不重分乙配（banner 標「無 C1204·維持營收攤估算」）
     }
   }catch(e){}
   _momoFeeRateCache[ck]=info;
@@ -6527,7 +6584,7 @@ function momoFeeExplainerHTML(){
       <tbody>${tr}</tbody>
     </table>
     <div class="mm-note" style="margin-top:8px;line-height:2">
-      12 項全部按營收比例攤入單品（月加總 = 對帳單 E）<br>
+      物流各歸該店（甲配 C1202／乙配 C1204 逐SKU）、乙倉租歸乙配、其餘按營收攤；月加總 = 對帳單 E。<br>
       營收＝未稅進價 × 對帳數量　淨利＝營收 − 費用 − 成本
     </div>
   </div>`;
@@ -7128,10 +7185,11 @@ function momoRenderProfitBody(shop, tableOnly){
   const tagsRes=momoTagsFor(shop, !tableOnly);
   const _periodIsHalf=/-(H1|H2)$/.test(String(period||''));   // 半月：流量標「估」、成長類本來就沒算
   rows.forEach(r=>{ r._tags=(tagsRes.bySku&&tagsRes.bySku[r.sku])||[]; });
-  // ═══ 階段四：甲配物流按 C1202 出貨形狀重分配（此時 rows=全商品，period 總和才正確）═══
-  //   period 內錨定 物流total=logiTotal×(R_period/月R)、再按形狀分 → Σ甲配fee=甲配R×feeRate 不變（月總/期別總不動、逐SKU重分配）。
-  let _freightMode='none';   // none=非甲配已對帳｜proportional=甲配已對帳但無運費(營收攤)｜precise=甲配訂編精算
-  if(shop==='甲配' && period){
+  // ═══ 階段四：物流按逐SKU出貨形狀重分配（甲配=C1202訂編／乙配=C1204寄倉；此時 rows=全商品，period 總和才正確）═══
+  //   period 內錨定 物流total=logiTotal×(R_period/月R)、再按形狀分 → Σ該店fee=該店R×feeRate 不變（月總/期別總不動、逐SKU重分配）。
+  //   乙配無 C1204 → frt=null → 維持營收攤(aggregate 的 feeRate乙 已含全部物流+倉租，estimated)。
+  let _freightMode='none';   // none=無逐SKU源(營收攤估算)｜proportional=有對帳單但無運費形狀｜precise=逐SKU精算
+  if((shop==='甲配'||shop==='乙配') && period){
     const mo=String(period).slice(0,7);
     const frt=momoMonthFreightInfo(shop, mo);
     if(frt){
@@ -7257,7 +7315,8 @@ function momoRenderProfitBody(shop, tableOnly){
           if(_freightMode==='precise') statusChip+=` <span class="mm-status ok" title="物流按 C1202 訂編逐SKU精算歸戶（退貨率高的商品吃到自己的運費）">🟢 物流精算</span>`;
           else statusChip+=` <span class="mm-status no" title="此月無 C1202 運費資料，物流仍按營收比例攤（估算）→ 到訂單明細上傳 C1202 升級">🟡 物流估算</span>`;
         } else if(shop==='乙配'){
-          statusChip+=` <span class="mm-status no" title="乙配物流精算（C1204）為階段四待做項；目前物流併在對帳單 feeRate 按營收比例攤，SKU 歸屬不精確">🟡 物流估算</span>`;
+          if(_freightMode==='precise') statusChip+=` <span class="mm-status ok" title="寄倉物流按 C1204 逐SKU精算歸戶；乙物流已全額歸乙配(不再由甲配補貼)、倉租+其他按乙配店內營收攤">🟢 物流精算</span>`;
+          else statusChip+=` <span class="mm-status no" title="此月無 C1204 寄倉運費逐SKU資料，乙物流仍按乙配店內營收比例攤（估算）→ 到訂單明細上傳 C1204 升級">🟡 無 C1204·營收攤估算</span>`;
         }
       } else {
         const h=momoHistoricalFeeRate(shop);
@@ -7289,12 +7348,21 @@ function momoRenderProfitBody(shop, tableOnly){
     const filterInfo= _filterOn
       ? `<div class="mm-filter-info">🏷 已篩選 <b>${_filteredCount}</b> / ${_baseCount} 項${tagsRes.estimated?' · <span style="color:#d97706">🟡 含未對帳估算</span>':''} <button class="mm-linkbtn" onclick="momoClearFilters('${shop}')">清除篩選</button></div>`
       : '';
+    // 乙配口徑變更一次性說明（Piece 2 費用重分上線）：寄倉運費歸正 → 乙配毛利率下修、跟改版前不可對照。可關(localStorage)。
+    let yiCaveat='';
+    if(shop==='乙配' && !_filterOn){ let dismissed=false; try{ dismissed=localStorage.getItem('ec_momo_yi_caveat')==='1'; }catch(e){}
+      if(!dismissed) yiCaveat=`<div class="mm-banner mm-banner-warn" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px">
+        <span>📢 <b>乙配費用口徑已變更（寄倉運費歸正）</b>：寄倉物流(C1204)與倉租已<b>全額歸乙配</b>、不再由甲配按營收補貼；乙配毛利率因此<b>下修（約 −14pp）</b>。這是修正後的真實數字，<b>跟改版前的乙配毛利率不可直接對照</b>。有 C1204 的月逐SKU精算、沒 C1204 的月按乙配店內營收攤估算（狀態列標示）。</span>
+        <button class="mm-linkbtn" style="flex-shrink:0" onclick="momoDismissYiCaveat('${shop}')">知道了</button>
+      </div>`;
+    }
     const overview=momoOverviewHTML(shop, period, curT, prevT, prevKey, verifyBlock);
-    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+overview+statusBanner;
+    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+yiCaveat+overview+statusBanner;
   }
   tbl.innerHTML=discHint+tableHTML;
   momoSyncFilterChip(shop);   // 篩選變動後同步工具列 🏷 按鈕作用中狀態（殼不重繪）
 }
+function momoDismissYiCaveat(shop){ try{ localStorage.setItem('ec_momo_yi_caveat','1'); }catch(e){} momoRenderProfitBody(shop,false); }   // 關閉乙配口徑變更說明（一次性）
 
 /* ═══════════════ 單品分析 modal（待辦B）+ optimizationLog（待辦C）═══════════════
    點總表列 → 大 modal（總表不卸載，overlay 覆蓋；關閉即移除 overlay，期別/捲動自動保留）。
@@ -10039,7 +10107,7 @@ Object.assign(window, {
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
   momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,
-  momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,
+  momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoDismissYiCaveat,
   momoSearchClear,momoSearchClearToggle,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,momoSyncToggleAll,momoSyncUpdateCount,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
