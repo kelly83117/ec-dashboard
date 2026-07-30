@@ -357,6 +357,33 @@ function _inPeriod(dateStr,month,half){
 }
 window._inPeriod=_inPeriod;
 
+// 商品調整專用：判斷一筆調整屬於哪一期。
+// 優先用 period 欄位（本次起存入，格式 '2026/07|first'）。
+// 舊資料沒有 period → 用「寫入日期往前推一期」回推工作流：
+//   16~月底寫的 → 同月上半月報表；1~15 寫的 → 上個月下半月報表。
+// 日期格式壞掉 → 回 null，呼叫端一律當「非當期」，讓資料掉進
+// 「其他期間」被看見，而不是消失。
+function _growthPeriodOf(a){
+  const p=a&&a.period;
+  if(typeof p==='string'&&/^\d{4}\/\d{2}\|(first|second|full)$/.test(p))return p;
+  const d=(a&&a.date)||'';
+  if(!/^\d{4}\/\d{2}\/\d{2}$/.test(d))return null;
+  const y=+d.slice(0,4),m=+d.slice(5,7),day=+d.slice(8,10);
+  if(day>=16)return `${d.slice(0,7)}|first`;
+  const pm=m===1?12:m-1, py=m===1?y-1:y;
+  return `${py}/${String(pm).padStart(2,'0')}|second`;
+}
+function _inGrowthPeriod(a,month,half){
+  const p=_growthPeriodOf(a);
+  if(!p)return false;
+  // 存的時候在看「整月」→ 該月任何期間都顯示（不讓它消失）
+  if(p.slice(8)==='full')return p.slice(0,7)===month;
+  if(half==='full')return p.slice(0,7)===month;
+  return p===`${month}|${half}`;
+}
+window._growthPeriodOf=_growthPeriodOf;
+window._inGrowthPeriod=_inGrowthPeriod;
+
 function _notifyLsSaveFail(shop, month, half, err){
   const who = shop + ' ' + month + '｜' + _halfLabel(half);
   const quota = _isQuotaErr(err);
@@ -2927,7 +2954,7 @@ function buildNoteCell(shopKey,code,noteId,noteData){
   if(shopKey.indexOf('_growth')>=0){
     const bs=state[shopKey.replace('_growth','')];
     const cur=[];
-    adjList.forEach(a=>{ if(bs&&_inPeriod(a.date,bs.curMonth,bs.curHalf))cur.push(a); else histCount++; });
+    adjList.forEach(a=>{ if(bs&&_inGrowthPeriod(a,bs.curMonth,bs.curHalf))cur.push(a); else histCount++; });
     adjList=cur;
   }
   const adjMap=new Map();
@@ -3363,7 +3390,7 @@ function renderPnmList(){
   const gS=isGrowth?state[shopKey.replace('_growth','')]:null;
   const map=new Map();
   adj.forEach((a,i)=>{
-    if(isGrowth&&!(gS&&_inPeriod(a.date,gS.curMonth,gS.curHalf)))return;
+    if(isGrowth&&!(gS&&_inGrowthPeriod(a,gS.curMonth,gS.curHalf)))return;
     const d=a.date||'—';if(!map.has(d))map.set(d,[]);map.get(d).push({text:a.text,i});
   });
   if(!map.size){el.innerHTML=`<div style="padding:14px;text-align:center;color:#9ca3af;font-size:12px">${isGrowth?'本期尚無調整紀錄':'尚無調整紀錄'}</div>`;return;}
@@ -3387,7 +3414,7 @@ function renderPnmHistory(){
     let gadj=[];
     if(gnd){if(typeof gnd==='string')gadj=[{date:'',text:gnd}];else gadj=gnd.adjustments||[];}
     const others=[];
-    gadj.forEach((a,i)=>{ if(!(gs&&_inPeriod(a.date,gs.curMonth,gs.curHalf))) others.push({date:a.date,text:a.text,i}); });   // 保留原始索引 i
+    gadj.forEach((a,i)=>{ if(!(gs&&_inGrowthPeriod(a,gs.curMonth,gs.curHalf))) others.push({date:a.date,text:a.text,i}); });   // 保留原始索引 i
     if(!others.length){ wrap.style.display='none'; box.innerHTML=''; return; }
     others.sort((x,y)=>String(y.date||'').localeCompare(String(x.date||'')));   // 日期新到舊
     wrap.style.display='';
@@ -3420,18 +3447,13 @@ function submitProfitNote(){
   const notes=getNotes(shopKey);
   if(!notes[code])notes[code]={adjustments:[]};
   if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
-  notes[code].adjustments.push({date:today,text:v});
-  saveNotes(shopKey,notes);
   const shop=shopKey.split('|')[0].replace('_growth','');
-  // 商品調整：新紀錄的日期（今天）不屬於目前檢視期間 → 提示去「其他期間」找，但絕不竄改日期
-  if(shopKey.indexOf('_growth')>=0){
-    const ss=state[shop];
-    if(ss&&!_inPeriod(today,ss.curMonth,ss.curHalf)){
-      const noteHalf=(+today.slice(8,10))<=15?'first':'second';
-      const msg=`已記錄到 ${today.slice(0,7)} ${_halfLabel(noteHalf)}（目前檢視 ${ss.curMonth} ${_halfLabel(ss.curHalf)}），再點開這格可在下方「其他期間」看到`;
-      if(typeof showToast==='function')showToast(msg,'info',5000);
-    }
-  }
+  const _isG=shopKey.indexOf('_growth')>=0;
+  const _st=state[shop];
+  const _entry={date:today,text:v};
+  if(_isG&&_st&&_st.curMonth&&_st.curHalf)_entry.period=`${_st.curMonth}|${_st.curHalf}`;
+  notes[code].adjustments.push(_entry);
+  saveNotes(shopKey,notes);
   closeProfitNoteModal();
   applyFilters(shop,{keepScroll:true});
 }
