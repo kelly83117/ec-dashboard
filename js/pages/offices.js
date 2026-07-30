@@ -2026,49 +2026,58 @@ Object.assign(App, {
       return `<th${sortAttr} style="${activeBg}${isSortable?'cursor:pointer;':''}font-size:12px;padding:6px 10px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'};min-width:${colMinWidth(c)};white-space:nowrap">${escapeHtml(shortLabel(c))}${indicator}</th>`;
     }).join('') + '<th style="min-width:32px"></th>';
 
-    // 以商品名稱分組（折疊）— 從原始資料取 key，不受欄位顯示設定影響
+    // 以商品名稱分組（折疊）
     const rawKeys = display.length ? Object.keys(display[0].r) : [];
-    const nameCol = rawKeys.find(c => c === '商品名稱') || null;
-    const styleCol = rawKeys.find(c => c === '樣式') || null;
-    const sizeCol  = rawKeys.find(c => c === '尺寸')  || null;
+    const nameCol  = rawKeys.includes('商品名稱') ? '商品名稱' : null;
+    const styleCol = rawKeys.includes('樣式') ? '樣式' : null;
+    const sizeCol  = rawKeys.includes('尺寸')  ? '尺寸'  : null;
+
+    // 建立群組：相同商品名稱 → 同一群
     const groups = [];
     const groupMap = new Map();
     for (const item of display) {
-      const key = nameCol ? (item.r[nameCol] || '') : null;
-      const mapKey = key ?? `__row_${item.i}`;
-      if (!groupMap.has(mapKey)) { const g = { key, mapKey, items:[] }; groups.push(g); groupMap.set(mapKey, g); }
-      groupMap.get(mapKey).items.push(item);
+      const gk = nameCol && item.r[nameCol] ? item.r[nameCol] : `__single_${item.i}`;
+      if (!groupMap.has(gk)) { const g = { gk, items: [] }; groups.push(g); groupMap.set(gk, g); }
+      groupMap.get(gk).items.push(item);
     }
+
     const cellStyle = (c) => `font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}`;
+
     const tbodyHtml = groups.map(g => {
-      const { key, items } = g;
-      const isGroup = key !== null && items.length > 1;
-      if (!isGroup) {
+      const { gk, items } = g;
+      const isSingle = items.length === 1 || gk.startsWith('__single_');
+
+      // 單規格：直接顯示
+      if (isSingle) {
         const { r, i } = items[0];
         const isCustom = !!r.__custom;
         return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
           coreCols.map((c, ci) => `<td style="${cellStyle(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
-          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
+          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
       }
-      const grpKey = escapeHtml(key);
-      const hdr = `<tr class="pr-group-hdr" data-grp="${grpKey}" style="background:#f8fafc;border-bottom:1px solid #e5e7eb;cursor:pointer">` +
+
+      // 多規格：群組 header + 隱藏子列
+      const gkE = escapeHtml(gk);
+      const gkAttr = gk.replace(/"/g, '&quot;');
+      const hdr = `<tr class="pr-group-hdr" data-grp="${gkAttr}" style="background:#f0f4ff;border-bottom:2px solid #c7d7fb;cursor:pointer">` +
         coreCols.map((c) => {
-          if (c === nameCol) return `<td style="${cellStyle(c)}"><span class="pr-grp-arrow" style="display:inline-block;margin-right:5px;color:#6b7280;transition:transform .15s">▶</span>${grpKey} <span style="font-size:11px;color:#9ca3af;margin-left:4px">× ${items.length} 規格</span></td>`;
-          return `<td style="text-align:right;font-size:12px;padding:6px 10px;color:#d1d5db">—</td>`;
+          if (c === nameCol) return `<td style="${cellStyle(c)}"><span class="pr-grp-arrow" style="display:inline-block;margin-right:6px;color:#2563eb;font-size:11px;transition:transform .15s">▶</span><strong>${gkE}</strong> <span style="font-size:11px;color:#6b7280;font-weight:400;margin-left:4px">${items.length} 種規格</span></td>`;
+          return `<td style="padding:6px 10px"></td>`;
         }).join('') +
         `<td></td></tr>`;
+
       const children = items.map(({ r, i }) => {
         const isCustom = !!r.__custom;
-        const styleLabel = styleCol ? escapeHtml(r[styleCol]||'') : '';
-        const sizeLabel  = sizeCol && r[sizeCol] && r[sizeCol] !== r[styleCol] ? ` <span style="color:#9ca3af">${escapeHtml(r[sizeCol])}</span>` : '';
-        return `<tr class="pr-row pr-child" data-grp="${grpKey}" data-i="${i}" data-id="${r.__id||''}" style="display:none;border-bottom:1px solid #f3f4f6;cursor:pointer;background:#fafbff${isCustom?';outline:2px solid #bfdbfe inset':''}">` +
+        const styleVal = styleCol ? escapeHtml(r[styleCol] || '') : '';
+        const sizeVal  = (sizeCol && r[sizeCol] && r[sizeCol] !== r[styleCol]) ? ` · ${escapeHtml(r[sizeCol])}` : '';
+        return `<tr class="pr-row pr-child" data-grp="${gkAttr}" data-i="${i}" data-id="${r.__id||''}" hidden>` +
           coreCols.map((c, ci) => {
-            const v = (c === nameCol) ? `${styleLabel}${sizeLabel}` : this._prFmt(r[c], coreTypes[ci]);
-            const pl = (c === nameCol) ? '28px' : '10px';
-            return `<td style="${cellStyle(c)};padding-left:${pl}">${v}</td>`;
+            if (c === nameCol) return `<td style="${cellStyle(c)};padding-left:26px;color:#374151">${styleVal}<span style="color:#9ca3af">${sizeVal}</span></td>`;
+            return `<td style="${cellStyle(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`;
           }).join('') +
-          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
+          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
       }).join('');
+
       return hdr + children;
     }).join('');
 
@@ -2130,18 +2139,20 @@ Object.assign(App, {
       } catch(e) { alert('載入失敗：' + e.message); }
     });
 
-    // 群組折疊展開
+    // 群組折疊展開（用 hidden 屬性，比 inline display 更可靠）
     document.getElementById('pr-tbody')?.addEventListener('click', e => {
       const hdr = e.target.closest('tr.pr-group-hdr');
       if (!hdr) return;
-      const grp = hdr.dataset.grp;
-      const children = document.querySelectorAll(`tr.pr-child[data-grp="${CSS.escape(grp)}"]`);
+      e.stopPropagation();
+      const grp = hdr.getAttribute('data-grp');
+      const tbody = hdr.closest('tbody');
+      const children = tbody ? Array.from(tbody.querySelectorAll('tr.pr-child')).filter(tr => tr.getAttribute('data-grp') === grp) : [];
       const isOpen = hdr.dataset.open === '1';
       hdr.dataset.open = isOpen ? '0' : '1';
       const arrow = hdr.querySelector('.pr-grp-arrow');
       if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(90deg)';
-      children.forEach(tr => { tr.style.display = isOpen ? 'none' : ''; });
-    }, true);
+      children.forEach(tr => { if (isOpen) tr.setAttribute('hidden',''); else tr.removeAttribute('hidden'); });
+    });
 
     document.querySelectorAll('.pr-stab').forEach(btn => {
       btn.addEventListener('click', () => {
