@@ -5911,6 +5911,10 @@ function momoAggregatePeriods(product,periodKeys,shop){
     const hr=momoHistoricalReturnRate(shop);   // 用近3月平均退貨率估 net = gross×(1−退貨率)，讓成本基準與已對帳月一致（否則環比混 gross/net 基準）
     if(hr && hr.rate>=0){ costQty = qty*(1-hr.rate); costNetBasis='est'; }
   }
+  // 顯示銷量口徑：已對帳月＝對帳數量(net=賣出−客退，=costQty)、未對帳月＝qty(gross)——都與該月營收同基準，滿足「未稅進價×顯示銷量=顯示營收」。
+  //   grossQty(=C1105訂單數)另留給「動銷判定」：賣出後全退(reconQty=0)的商品仍算有動、動銷率不因此變動；退貨率分母另吃對帳單 reconQty+retQty，不受此影響。
+  const grossQty = qty;
+  const salesQty = reconciled ? costQty : qty;
   const cost=(product.cost||0)*costQty;
   // 未對帳費率（方案C）：近3月已對帳均 feeRate（可靠時）→ 否則退 6.8%
   let estFeeRate=0.068, estMode='6.8%';
@@ -5924,14 +5928,14 @@ function momoAggregatePeriods(product,periodKeys,shop){
   //   退貨率 = 客退數量 ÷ 賣出數量（賣出=對帳數量+客退數量）。未對帳→null（畫面顯示「—」）。半月也顯示月值（對帳單月顆粒、標示）。
   let retRate=null, retQty=0, retAmt=0;
   if(reconciled && fee.skus[sku]){ const sk=fee.skus[sku]; retQty=sk.retQty||0; retAmt=sk.retAmt||0; const sold=(sk.reconQty||0)+retQty; retRate=sold>0?Math.round((retQty/sold)*1000)/10:0; }
-  // S1103 瀏覽量 + 成交率（訂購數÷瀏覽量）。成交率除零：進榜瀏覽0→'zerodiv'(顯示—)；沒進榜→null(空白)。avgPrice 給單品分析用。
+  // S1103 瀏覽量 + 成交率（對帳數量÷瀏覽量，跟顯示銷量同基準）。成交率除零：進榜瀏覽0→'zerodiv'(顯示—)；沒進榜→null(空白)。avgPrice 給單品分析用。
   const s1103Period = month ? (periodKeys.length>=2 ? month+'-FULL' : periodKeys[0]) : '';
   const sv = s1103Period ? momoS1103ForPeriod(sku, s1103Period) : null;
   let view=null, convRate=null, s1103Ord=null, avgPrice=null, viewEstimated=false;
-  if(sv && sv.inReport){ view=sv.view; s1103Ord=sv.ord; viewEstimated=!!sv.estimated; avgPrice=sv.ord>0?sv.amt/sv.ord:null; convRate = view>0 ? Math.round((sv.ord/view)*1000)/10 : 'zerodiv'; }
+  if(sv && sv.inReport){ view=sv.view; s1103Ord=sv.ord; viewEstimated=!!sv.estimated; avgPrice=sv.ord>0?sv.amt/sv.ord:null; convRate = view>0 ? Math.round((salesQty/view)*1000)/10 : 'zerodiv'; }   // 分子改用對帳數量(salesQty)
   return {
-    // 毛利率：R>0 才有意義；R=0 但有毛利（整批退貨 net 營收 0、成本仍在）→ null（畫面「—」，不是誤導的 0%）；R=0 且毛利≈0 → 0
-    qty, revenue:R, profit, cost, costQty, costNetBasis, margin:R>0?(profit/R)*100:(Math.abs(profit)>0.5?null:0),
+    // qty=顯示銷量(對帳數量/未對帳gross)；grossQty=C1105訂單數(動銷判定用)。毛利率：R>0 才有意義；R=0 但有毛利（整批退貨 net 營收 0、成本仍在）→ null（畫面「—」）；R=0 且毛利≈0 → 0
+    qty:salesQty, grossQty, revenue:R, profit, cost, costQty, costNetBasis, margin:R>0?(profit/R)*100:(Math.abs(profit)>0.5?null:0),
     returnRate:retRate, retQty, retAmt,
     view, convRate, s1103Ord, avgPrice, viewEstimated,
     reconciled, estimated:!reconciled, splitEstimated, estMode, skuFreightPeriod
@@ -6809,14 +6813,14 @@ function momoConfirmSync(shop){
 //   欄寬存 sessionStorage、綁「欄位名(k)」不綁索引 → 重排不錯位（見 momoColW / momoColResizeDrag）。
 const MOMO_PROFIT_COLS=[
   {k:'name',label:'品號 / 商品',left:true,w:320,fixed:true},
-  {k:'ppUntax',label:'進價',fmt:'money',w:100,info:'未稅進價（＝含稅進價 ÷ 1.05）。淨利表營收＝未稅進價 × 對帳數量，是所有毛利/淨利計算的基準。'},
-  {k:'salePrice',label:'售價',fmt:'money',w:100},
+  {k:'ppUntax',label:'進價（未稅）',fmt:'money',w:110,info:'你賣給 MOMO 的單價，也是營收基準。'},
+  {k:'salePrice',label:'售價（含稅）',fmt:'money',w:110,info:'MOMO 賣給消費者的單價，此金額不進帳，僅供參考。'},
   {k:'view',label:'瀏覽量',fmt:'num',w:96,info:'S1103 銷售排行榜（熱銷）當期瀏覽量。沒進榜的商品顯示空白（無資料）。'},
-  {k:'qty',label:'本期銷量',fmt:'num',w:100},
-  {k:'convRate',label:'成交率',fmt:'pct1',w:96,info:'訂購數 ÷ 瀏覽量（S1103）。進榜但瀏覽量=0 顯示「—」；沒進榜顯示空白。低成交率＝看了不買。'},
-  {k:'revenue',label:'營收',fmt:'money',w:120},
-  {k:'margin',label:'毛利率',fmt:'pct1',w:100,info:'用商品「目前」成本計算，非當期歷史成本；檢視過去月份時用現在成本回算。'},
-  {k:'profit',label:'毛利貢獻',fmt:'money',w:120,info:'用商品「目前」成本計算，非當期歷史成本；檢視過去月份時用現在成本回算。'},
+  {k:'qty',label:'本期銷量',fmt:'num',w:100,info:'對帳數量＝賣出−客退。進價×銷量即為營收。'},
+  {k:'convRate',label:'成交率',fmt:'pct1',w:96,info:'對帳數量 ÷ 瀏覽量。'},
+  {k:'revenue',label:'營收（未稅）',fmt:'money',w:130,info:'未稅進價 × 對帳數量。已扣客退。'},
+  {k:'margin',label:'毛利率',fmt:'pct1',w:100,info:'淨利 ÷ 未稅營收。淨利已扣 MOMO 費用與商品成本。'},
+  {k:'profit',label:'毛利貢獻（未稅）',fmt:'money',w:130,info:'該商品貢獻的淨利金額。'},
   {k:'returnRate',label:'退貨率',fmt:'pct1',w:96,info:'客退數量 ÷ 賣出數量（賣出=對帳數量+客退數量），來源=對帳單逐SKU、月顆粒。未對帳月顯示「—」。hover 看退貨件數/金額。'},
 ];
 // 總表欄寬：sessionStorage 記憶（撐過 F5、不佔 localStorage）；拖曳 th 右緣把手調整
@@ -7006,10 +7010,11 @@ function momoPeriodTotals(shop, periodKey){
     const isActive = p.discontinued!==true;   // 上架
     if(isActive) activeTotal++;
     const a=momoAggregatePeriods(p, keys, shop);
-    // 有營收就計入（含 qty=0 但對帳有金額的跨月結算 SKU；與總表逐列一致 → Σ營收=對帳單該店金額）
-    const active = a.qty>0 || Math.abs(a.revenue)>0.5;
+    // 動銷/計入判定用 grossQty(C1105訂單數，賣出後全退仍算有動)：讓動銷率不因「銷量改用對帳數量」而變動；qty 總和才是顯示銷量(對帳數量)
+    const g=(a.grossQty!=null?a.grossQty:a.qty);
+    const active = g>0 || Math.abs(a.revenue)>0.5;
     if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; if(!(Number(p.cost)>0)){ missCost++; if(p.discontinued===true) missCostDisc++; } if(isActive) soldActive++;
-      if(a.qty>0 && Math.abs(a.revenue)<0.5){ revMiss++; revMissQty+=a.qty; } }
+      if(g>0 && Math.abs(a.revenue)<0.5){ revMiss++; revMissQty+=g; } }
   });
   return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty };
 }
@@ -7126,7 +7131,7 @@ function momoRenderProfitBody(shop, tableOnly){
         if(r.convRate==null) return `<td style="text-align:right;color:#e5e7eb" title="未進 S1103 熱銷榜（無資料）"></td>`;
         if(r.convRate==='zerodiv') return `<td style="text-align:right;color:#c7cad1" title="進榜但瀏覽量=0，無法算成交率">—</td>`;
         const cr=r.convRate; let st='text-align:right;overflow:hidden;text-overflow:ellipsis'; if(cr<2) st+=';font-weight:700;color:#f97316';
-        return `<td style="${st}" title="訂購 ${Math.round(r.s1103Ord||0)} ÷ 瀏覽 ${Math.round(r.view||0)}${r.viewEstimated?'（半月沿用整月·估算）':''}">${(Math.round(cr*10)/10)}%${momoRowCmp('convRate',r,r._prev)}</td>`;
+        return `<td style="${st}" title="對帳數量 ${Math.round(r.qty||0)} ÷ 瀏覽 ${Math.round(r.view||0)}${r.viewEstimated?'（半月沿用整月·估算）':''}">${(Math.round(cr*10)/10)}%${momoRowCmp('convRate',r,r._prev)}</td>`;
       }
       if(c.k==='margin'){
         // 營收0但有毛利（整批退貨）→ margin=null → 「—」，不顯示誤導的 0%；負毛利標紅（是負值，不是 0）
@@ -7425,9 +7430,9 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
     ? `${rate.toFixed(1)}% <span style="font-size:12px;color:#9ca3af;font-weight:400">(${cur.soldActive} / ${cur.activeTotal})</span>`
     : '—';
   const cards=[
-    {label:'總營收', val:money(cur.rev), d:momoKpiDelta(cur.rev,prev.rev,hasPrev)},
-    {label:'總淨利', val:money(cur.profit), d:momoKpiDelta(cur.profit,prev.profit,hasPrev)},
-    {label:'加權毛利率', info:'總淨利 ÷ 總營收', val:cur.margin.toFixed(1)+'%', valColor:marginColor(cur.margin), d:{txt:marginDelta,color:'#9ca3af'}},
+    {label:'總營收（未稅）', val:money(cur.rev), d:momoKpiDelta(cur.rev,prev.rev,hasPrev)},
+    {label:'總淨利（未稅）', val:money(cur.profit), d:momoKpiDelta(cur.profit,prev.profit,hasPrev)},
+    {label:'加權毛利率', info:'總淨利 ÷ 總營收。', val:cur.margin.toFixed(1)+'%', valColor:marginColor(cur.margin), d:{txt:marginDelta,color:'#9ca3af'}},
     {label:'總銷量', val:Math.round(cur.qty).toLocaleString()+' 件', d:momoKpiDelta(cur.qty,prev.qty,hasPrev)},
     {label:'動銷率', info:'該期別「有銷售的上架商品數 ÷ 上架商品總數」。分母＝上架總數（不含已下架，跟工具列「上架 N」一致）；看有多少比例的上架品真的動起來。', val:rateVal, d:rateD},
   ];
