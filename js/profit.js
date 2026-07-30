@@ -587,6 +587,13 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         else{ skippedProblem.push({key:pk,reason:'MOMO 月對帳讀不到，或雲端層未就緒'}); }
         return;
       }
+      if(pk.startsWith('ec_momo_s1103|')){   // MOMO S1103 排行榜 → momo_s1103 collection（每期別一 doc）。搬離 app/profit，避 Firestore 單文件 40000 索引項上限
+        const period=pk.slice('ec_momo_s1103|'.length);
+        const data=momoLoadS1103(period);   // _profitMem → _mem → localStorage
+        if(window.__cloudS1103 && data && period){ tasks.push({key:pk,run:()=>window.__cloudS1103.setPeriod(period,data)}); }
+        else{ skippedProblem.push({key:pk,reason:'MOMO 排行榜讀不到，或雲端層未就緒'}); }
+        return;
+      }
       // field key（設定類）
       let val=null;
       try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
@@ -5714,6 +5721,36 @@ async function momoMigrateProductsToCollection(){
   console.log("   await window.__cloudProfit.removeFields(['ec_momo_products|乙配']);   // 只刪已驗證一致的，勿刪未驗證/不一致的");
   return report;
 }
+// ── 一次性：把舊 app/profit 裡的 S1103（ec_momo_s1103|period）搬到 momo_s1103 collection，釋放 app/profit 的 40000 索引項額度 ──
+//   ⚠ 用法：正式站確認新版生效 → F12 打 window.momoMigrateS1103ToCollection() → 看 console.table 每期別「✅ 一致」→
+//     只對一致的、自行貼最後一行的 removeFields 刪 app/profit 舊欄位（回收索引）。複製+驗證，不自動刪（比照商品主檔遷移，舊資料保命）。
+async function momoMigrateS1103ToCollection(){
+  if(!window.__cloudS1103 || !window.__cloudProfit){ console.error('[S1103 遷移] 雲端層未就緒，請重整'); return; }
+  let appProfit={};
+  try{ const snap=await window.__cloudProfit.getDoc(); appProfit=snap.exists()?(snap.data()||{}):{}; }
+  catch(e){ console.error('[S1103 遷移] 讀 app/profit 失敗',e); return; }
+  const keys=Object.keys(appProfit).filter(k=>k.startsWith('ec_momo_s1103|'));
+  if(!keys.length){ console.log('[S1103 遷移] app/profit 沒有 S1103 欄位（可能已搬過或本來就沒有）'); return {moved:0}; }
+  const report=[]; const okKeys=[];
+  for(const k of keys){
+    const period=k.slice('ec_momo_s1103|'.length);
+    const data=appProfit[k];
+    const srcCount=(data&&data.skus)?Object.keys(data.skus).length:0;
+    try{ await window.__cloudS1103.setPeriod(period, data); }
+    catch(e){ report.push({period, 狀態:'❌ 寫入 momo_s1103 失敗：'+((e&&e.message)||e)}); continue; }
+    let cloudCount='?', ok=false;
+    try{ const cs=await window.__cloudS1103.getDoc(period); const cd=cs.exists()?(cs.data()||{}):{}; cloudCount=(cd.skus?Object.keys(cd.skus).length:0); ok=(cloudCount===srcCount); }
+    catch(e){ report.push({period, 狀態:'❌ 驗證讀取失敗：'+((e&&e.message)||e)}); continue; }
+    report.push({period, app_profit筆數:srcCount, collection筆數:cloudCount, 驗證:ok?'✅ 一致':'❌ 不一致（先別刪）'});
+    if(ok) okKeys.push(k);
+  }
+  console.table(report);
+  if(okKeys.length){
+    console.log('%c⚠ 下一步：上表「✅ 一致」的期別已寫入 momo_s1103。回收 app/profit 索引請貼下列（只刪已驗證一致的）：','color:#f59e0b;font-weight:700;font-size:13px');
+    console.log('   await window.__cloudProfit.removeFields('+JSON.stringify(okKeys)+');');
+  }
+  return report;
+}
 // ── P6 倉租費（僅乙配）：公司層級月度總費用，不分攤、不進毛利。key 無 shop 後綴（全域一份）──
 //   存取比照商品主檔三鏡像：load _profitMem→_mem→localStorage；save localStorage+_profitMem+_mem+_markPending。
 //   走 syncToCloud 通用 field 分支（key 不含 'ec|'）→ __cloudProfit.setField → app/profit doc。
@@ -5866,7 +5903,11 @@ function momoAggregatePeriods(product,periodKeys,shop){
     // 退貨成本回沖：成本用「對帳數量(net,已扣退貨)」而非出貨數量(gross)。退貨的貨回倉、成本延到再賣才認 → 與 net 營收同基準。半月按同比例拆。
     if(fs.reconQty!=null){ costQty = fs.reconQty*ratio; costNetBasis=true; }
   } else {
-    R = c1105RevPeriod;   // 未對帳：無對帳數量
+    // 未對帳月營收估算：供應商口徑「未稅進價 × C1105 qty」（與已對帳月的 未稅進價×對帳數量 同軌）。
+    //   ⚠ 單檔上傳寫的是 flat cell（只有 qty、沒有 revUntax）→ c1105RevPeriod=0 → 舊碼 R=0、淨利假性大虧。改用主檔進價算。
+    //   進價缺(0)才退回 cell 自帶未稅營收(c1105RevPeriod)；兩者都無 → R=0（真的缺營收，畫面另標）。
+    const ppUntax=(Number(product.purchasePrice)||0)/1.05;
+    R = ppUntax>0 ? ppUntax*qty : c1105RevPeriod;
     const hr=momoHistoricalReturnRate(shop);   // 用近3月平均退貨率估 net = gross×(1−退貨率)，讓成本基準與已對帳月一致（否則環比混 gross/net 基準）
     if(hr && hr.rate>=0){ costQty = qty*(1-hr.rate); costNetBasis='est'; }
   }
@@ -6956,19 +6997,21 @@ function momoPrevPeriodKey(periodKey){
 }
 // 某期別的總覽合計（全商品、含已下架，反映該期實際生意；加權毛利率=Σ淨利÷Σ營收）
 function momoPeriodTotals(shop, periodKey){
-  if(!periodKey) return {hasData:false, rev:0, profit:0, qty:0, margin:0, missCost:0, missCostDisc:0, soldActive:0, activeTotal:0};
+  if(!periodKey) return {hasData:false, rev:0, profit:0, qty:0, margin:0, missCost:0, missCostDisc:0, soldActive:0, activeTotal:0, revMiss:0, revMissQty:0};
   const keys=momoExpandPeriod(periodKey);
   let rev=0, profit=0, qty=0, any=false, missCost=0, missCostDisc=0;   // missCost：該期有營收但缺成本 → 淨利虛高；Disc=其中已下架
   let soldActive=0, activeTotal=0;   // 動銷率用：soldActive=上架且該期有銷售、activeTotal=上架總數（下架不計，跟「上架 516」對得起來）
+  let revMiss=0, revMissQty=0;   // 有銷量(qty>0)但營收≈0 → 缺營收（多半缺進價，估不出未稅進價×qty）→ 淨利假性大虧，畫面要標
   momoLoadProducts(shop).forEach(p=>{
     const isActive = p.discontinued!==true;   // 上架
     if(isActive) activeTotal++;
     const a=momoAggregatePeriods(p, keys, shop);
     // 有營收就計入（含 qty=0 但對帳有金額的跨月結算 SKU；與總表逐列一致 → Σ營收=對帳單該店金額）
     const active = a.qty>0 || Math.abs(a.revenue)>0.5;
-    if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; if(!(Number(p.cost)>0)){ missCost++; if(p.discontinued===true) missCostDisc++; } if(isActive) soldActive++; }
+    if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; if(!(Number(p.cost)>0)){ missCost++; if(p.discontinued===true) missCostDisc++; } if(isActive) soldActive++;
+      if(a.qty>0 && Math.abs(a.revenue)<0.5){ revMiss++; revMissQty+=a.qty; } }
   });
-  return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc, soldActive, activeTotal };
+  return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty };
 }
 // 逐列「與上一期比較」小字：每欄個別定義好壞方向。
 //   good：1=升為好(瀏覽量/成交率/本期銷量/營收/毛利貢獻)、-1=降為好(退貨率)、0=中性不著色(毛利率——低毛利率升仍不算好，比照總覽卡的中性 pp)。
@@ -7398,7 +7441,11 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
   const missWarn=cur.missCost>0
     ? `<div class="mm-banner mm-banner-err click" onclick="momoJumpBatchFilter('${shop}','nocostP')" title="點擊跳到批次維護、自動篩出「本期有營收的缺成本」這幾個（含已下架）">⚠ <b>${cur.missCost}</b> 個有營收的商品缺成本${discNote}，總淨利可能高估 → <u>點此修正</u></div>`
     : '';
-  return `<div class="mm-kpis">${cardHTML}</div>${verifyTxt||''}${missWarn}`;   // verifyTxt 已是完整區塊（收合<details>或警示<div>），不再外包 .mm-verify
+  // 缺營收警示：有銷量但營收估不出（多半缺進價）→ 淨利假性大虧。明確標出，不讓「營收=0、淨利負」只靠間接徵兆
+  const revMissWarn=(cur.revMiss>0)
+    ? `<div class="mm-banner mm-banner-err click" onclick="momoJumpBatchFilter('${shop}','nopp')" title="點擊跳到批次維護、自動篩出缺進價的商品">⚠ <b>${cur.revMiss}</b> 個商品有銷量（${Math.round(cur.revMissQty)} 件）但<b>估不出營收</b>（多半缺進價）→ 營收/淨利被低估、可能假性大虧 → <u>點此補進價</u></div>`
+    : '';
+  return `<div class="mm-kpis">${cardHTML}</div>${verifyTxt||''}${revMissWarn}${missWarn}`;   // verifyTxt 已是完整區塊（收合<details>或警示<div>），不再外包 .mm-verify
 }
 
 // ── 階層圖（毛利率分佈）：MOMO 自己一套，不碰蝦皮。用「毛利率」(= 總表口徑 profit/營收)，跟總表欄位一致。
@@ -7970,34 +8017,31 @@ function momoBuildUploadPlan(parsed){
 }
 // 寫入：只更新「已建檔」的 SKU 的 periods；欄位級 merge（這次沒帶的欄位保留舊值），覆蓋 qty/freight/return
 function momoApplyUploadPlan(plan){
-  // 1b-5：寫入前全掃防呆。單檔上傳的 Object.assign 會把 flat qty 混進已重建的 compact cell（有 .s）→ 資料當場髒掉。
-  //   遷移後唯一安全入口是「⟳重建」；但七月灌新資料 + 同事不知情都會走單檔上傳，約定守不住。
-  //   → 只要任一目標 cell 已是 compact，整批拒絕、一格都不寫（不部分寫、不靜默略過），要求改用重建分頁。
-  //   完整解（單檔上傳也寫 compact = 1c）留階段二；這裡先把「必爆」變「用不了」。
-  const migrated=new Set();
-  ['甲配','乙配'].forEach(shop=>{
-    const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return;
-    const bySku=new Map(momoLoadProducts(shop).map(p=>[p.sku,p]));
-    Object.keys(sp.updates).forEach(sku=>{ const p=bySku.get(sku); if(!p||!p.periods) return;
-      Object.keys(sp.updates[sku]).forEach(period=>{ const cell=p.periods[period]; if(cell&&cell.s!=null) migrated.add(shop); });
-    });
-  });
-  if(migrated.size) return {ok:false, migratedShops:[...migrated]};   // 拒絕整批
+  // 1b-5 防呆（逐格版）：flat qty 若寫進已是 compact(.s) 的 cell，Object.assign 會污染 sourced 資料 → 只「跳過」compact cell、不整批拒絕。
+  //   ⚠ 舊版是「任一目標 cell 是 compact 就整批拒」——但一份新月份 C1105（如七月，cell 全空）常夾帶幾筆跨月訂單落在上個月(已 compact)的期別，
+  //     舊邏輯因此把整批（含合法的空月寫入）全擋掉，還誤稱「本月已對帳」。改逐格：空/flat cell 照寫、compact cell 跳過並回報。
+  //   回 {ok, wrote, skippedCount, skippedPeriods}。skipped 多為跨月訂單落在已重建期別，要更新那些期別請用重建分頁。
+  let wrote=0; const skippedPeriods={};   // period → 跳過筆數
   ['甲配','乙配'].forEach(shop=>{
     const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return;
     const master=momoLoadProducts(shop);
     const bySku=new Map(master.map(p=>[p.sku,p]));
+    let shopChanged=false;
     Object.keys(sp.updates).forEach(sku=>{
       const p=bySku.get(sku); if(!p) return;
       p.periods=p.periods||{};
       Object.keys(sp.updates[sku]).forEach(period=>{
         if(!/^\d{4}-\d{2}-H[12]$/.test(period)){ console.warn('[momo] 期別 key 格式不合，拒絕寫入：',shop,sku,period); return; }   // 第二層防護：擋非法 key 進主檔
-        p.periods[period]=Object.assign({}, p.periods[period]||{}, sp.updates[sku][period]);
+        const cell=p.periods[period];
+        if(cell&&cell.s!=null){ skippedPeriods[period]=(skippedPeriods[period]||0)+1; return; }   // compact cell → 跳過（不 flat-write 污染），改用重建更新
+        p.periods[period]=Object.assign({}, cell||{}, sp.updates[sku][period]);
+        wrote++; shopChanged=true;
       });
     });
-    momoSaveProducts(shop,master);
+    if(shopChanged) momoSaveProducts(shop,master);
   });
-  return {ok:true};
+  const skippedCount=Object.values(skippedPeriods).reduce((s,n)=>s+n,0);
+  return {ok:true, wrote, skippedCount, skippedPeriods:Object.keys(skippedPeriods).sort()};
 }
 // ── 一次性清理工具：清掉主檔 periods 裡格式不合的髒 key ──
 //   ⚠ 用法：修碼部署 → 正式站確認新版生效 → 在 F12 Console 打 window.momoCleanDirtyPeriodKeys()
@@ -8272,24 +8316,37 @@ function momoUploadApply(shop){
     Object.keys(byMonth).forEach(mo=>{ momoSaveFreight('甲配', mo, { month:mo, freight:byMonth[mo] }); freightMonths.push(mo); });
     if(freightMonths.length) momoClearFeeRateCache();
   }
-  // ② qty 寫 cell（已對帳/compact 月份會被 1b-5 防呆整批拒 → 那是預期，qty 本就正確；運費已在 ① 存好）
+  // ② qty 寫 cell（逐格：空/flat cell 照寫；落在已重建期別(compact)的—多為跨月訂單—跳過並回報，不再整批拒、不再誤稱「已對帳」）
   const res=momoApplyUploadPlan(_momoUpPlan);
-  if(res&&res.ok===false){
-    // 白話文案（給使用者看、不是給開發看）
-    const title=freightMonths.length?'運費已存，銷量未更新':'銷量未更新（本月數字已正確）';
-    const msg=freightMonths.length
-      ? `本月銷量已對帳、數字正確，不需要重傳。\n運費已存入 ${freightMonths.join('、')}，物流精算生效。\n若要更新銷量，請用「⟳重建」分頁。`
-      : `本月銷量已對帳、數字正確，不需要重傳。\n若要更新銷量，請用「⟳重建」分頁。`;
-    const s1103msg=s1103Month?`\n排行榜（瀏覽量/成交率）已存入 ${s1103Month}。`:'';
-    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title,message:msg+s1103msg,kind:(freightMonths.length||s1103Month)?'info':'warn'});
-    else alert(title+'\n\n'+msg+s1103msg);
+  const wrote=res.wrote||0, skipped=res.skippedCount||0, skPeriods=(res.skippedPeriods||[]);
+  const s1103msg=s1103Month?`\n排行榜（瀏覽量/成交率）已存入 ${s1103Month}。`:'';
+  const frtmsg=freightMonths.length?`\n運費已存入 ${freightMonths.join('、')}。`:'';
+  if(wrote===0){
+    // 完全沒寫入 qty：全落在已重建期別，或沒有相符的已建檔商品
+    let title, msg;
+    if(skipped>0){
+      title='銷量未寫入（目標期別已是重建格式）';
+      msg=`這批 ${skipped} 筆銷量都落在已用「⟳重建」建立的期別（${skPeriods.join('、')}）——為保護既有來源資料，未以單檔覆蓋。\n要更新這些期別，請到「⟳重建」分頁一次選齊該月所有 C1105。`;
+    }else{
+      title='沒有可寫入的銷量';
+      msg='這批沒有相符的已建檔商品（或 C1105 無銷量資料）。請確認檔案內容，或先到「批次維護」把商品建檔。';
+    }
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title,message:msg+frtmsg+s1103msg,kind:(freightMonths.length||s1103Month)?'info':'warn'});
+    else alert(title+'\n\n'+msg+frtmsg+s1103msg);
     _momoUpPlan=null; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.s1103=null;
     momoRenderUpload(shop);
     return;
   }
-  const total=Object.values(_momoUpPlan.shops).reduce((s,sp)=>s+sp.matched.length,0);
+  // 有寫入（可能部分跳過跨月已重建期別）
   _momoUpPlan=null; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.s1103=null;
-  if(typeof showToast==='function') showToast('已寫入 '+total+' 個 SKU 的 qty'+(freightMonths.length?' + 運費 '+freightMonths.join('、'):'')+(s1103Month?' + 排行榜 '+s1103Month:'')+'（記得按 ☁ 同步雲端）','success');
+  if(skipped>0 && window.App && typeof App.showAlertModal==='function'){
+    App.showAlertModal({title:'已寫入銷量（部分跨月未覆蓋）', message:`已寫入 ${wrote} 筆銷量。\n另有 ${skipped} 筆落在已重建的期別（${skPeriods.join('、')}，多為跨月訂單），為保護既有來源未覆蓋——那些期別要更新請用「⟳重建」。${frtmsg}${s1103msg}\n\n記得按 ☁ 同步雲端。`, kind:'info'});
+  } else {
+    let toast='已寫入 '+wrote+' 筆銷量'+(freightMonths.length?' + 運費 '+freightMonths.join('、'):'')+(s1103Month?' + 排行榜 '+s1103Month:'');
+    if(skipped>0) toast+='；另 '+skipped+' 筆跨月已重建期別未覆蓋';
+    toast+='（記得按 ☁ 同步雲端）';
+    if(typeof showToast==='function') showToast(toast, skipped>0?'info':'success');
+  }
   momoRenderUpload(shop);
 }
 function momoUploadCancel(shop){ _momoUpPlan=null; momoRenderUpload(shop); }
@@ -9533,7 +9590,7 @@ Object.assign(window, {
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,
   momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,momoJumpShop,
-  momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,
+  momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,momoMigrateS1103ToCollection,
   momoRentSubmit,momoRentDelete,momoRentSyncBtn,
   momoRebuildPick,momoRebuildRemove,momoRebuildGenerate,momoRebuildDownloadReport,momoRebuildConfirm,momoTrimPreview,momoTrimBackupAndApply,
   momoRebuildDryRun,momoRebuildApply,momoTrimHistoryDryRun,momoTrimHistoryApply,
