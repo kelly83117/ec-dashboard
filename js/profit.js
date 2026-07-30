@@ -6567,6 +6567,8 @@ function momoPeriodLabel(period){
 // MOMO 共用金額格式：$ 緊貼數字、千分位逗號、四捨五入到元、負數用 -$。我們只有台幣，去掉多餘的 NT；保留 $ 好跟數量欄位（銷量/瀏覽量）並排時分得出哪個是錢。
 //   全站設計統一時可沿用（見記憶 dashboard-design-unify）。⚠ 只用在整數金額（營收/毛利/費用/淨利）；成本等要保留小數的欄位不套（會被 round 掉）。
 function momoMoney(v){ const n=Math.round(Number(v)||0); return (n<0?'-$':'$')+Math.abs(n).toLocaleString(); }
+// MOMO 百分比統一：一律小數第一位（0%→0.0%、100%→100.0%，整數不再參差）。非數字回原樣（'—'/'zerodiv' 等照顯示）。比照 momoMoney，全站設計統一會沿用。
+function momoPct(v){ return (typeof v==='number'&&isFinite(v)) ? v.toFixed(1)+'%' : (v==null?'—':String(v)); }
 function momoOrderToPeriod(orderNo){   // 訂單編號前 6 碼 YYMMDD 判半月（拆掉 dash 後綴後取前 6，14 碼不影響）
   const prefix=String(orderNo).trim().split('-')[0];
   if(!/^\d{6}/.test(prefix)) return null;                 // 前 6 碼須純數字（擋 '#6...' 等髒列，不逐段 Number 以免寬鬆轉換）
@@ -6866,15 +6868,16 @@ function momoConfirmSync(shop){
 //   欄寬存 sessionStorage、綁「欄位名(k)」不綁索引 → 重排不錯位（見 momoColW / momoColResizeDrag）。
 const MOMO_PROFIT_COLS=[
   {k:'name',label:'品號 / 商品',left:true,w:320,fixed:true},
-  {k:'ppUntax',label:'進價',sub:'未稅',fmt:'money',w:110,info:'你賣給 MOMO 的單價，也是營收基準。'},
-  {k:'salePrice',label:'售價',sub:'含稅',fmt:'money',w:110,info:'MOMO 賣給消費者的單價，此金額不進帳，僅供參考。'},
+  {k:'ppUntax',label:'進價',fmt:'money',w:110,info:'你賣給 MOMO 的單價，也是營收基準。（未稅）'},
+  {k:'salePrice',label:'售價',fmt:'money',w:110,info:'MOMO 賣給消費者的單價，此金額不進帳，僅供參考。（含稅）'},
   {k:'view',label:'瀏覽量',fmt:'num',w:96,info:'S1103 銷售排行榜（熱銷）當期瀏覽量。沒進榜的商品顯示空白（無資料）。'},
   {k:'qty',label:'本期銷量',fmt:'num',w:100,info:'對帳數量＝賣出−客退。進價×銷量即為營收。'},
   {k:'convRate',label:'成交率',fmt:'pct1',w:96,info:'對帳數量 ÷ 瀏覽量。'},
-  {k:'revenue',label:'營收',sub:'未稅',fmt:'money',w:130,info:'未稅進價 × 對帳數量。已扣客退。'},
+  {k:'revenue',label:'營收',fmt:'money',w:130,info:'未稅進價 × 對帳數量。已扣客退。（未稅）'},
   {k:'margin',label:'毛利率',fmt:'pct1',w:100,info:'淨利 ÷ 未稅營收。淨利已扣 MOMO 費用與商品成本。'},
-  {k:'profit',label:'毛利貢獻',sub:'未稅',fmt:'money',w:130,info:'該商品貢獻的淨利金額。'},
+  {k:'profit',label:'毛利貢獻',fmt:'money',w:130,info:'該商品貢獻的淨利金額。（未稅）'},
   {k:'returnRate',label:'退貨率',fmt:'pct1',w:96,info:'客退數量 ÷ 賣出數量（賣出=對帳數量+客退數量），來源=對帳單逐SKU、月顆粒。未對帳月顯示「—」。hover 看退貨件數/金額。'},
+  {k:'tags',label:'標籤',left:true,w:140,info:'依嚴重度顯示最該注意的一個標籤（缺成本>重跌>退貨警示>低利>高營收>其他），其餘收成 +N、hover 看全部。只在整月計算，半月顯示「—」。用上方「🏷 標籤 / 篩選」可依標籤篩選。'},
 ];
 // 總表欄寬：sessionStorage 記憶（撐過 F5、不佔 localStorage）；拖曳 th 右緣把手調整
 function momoColW(shop, colKey, def){ return momoUiW('col|'+shop+'|'+colKey, def); }
@@ -7008,7 +7011,8 @@ function momoProfitTableHTML(shop){
       ${momoSearchBox(shop, 'momo-search-'+shop, _momoSearch[shop]||'', '搜尋 品號 / 名稱 / 原廠編號', 'momoOnSearch', 'flex:1;min-width:180px;max-width:320px')}
       <span class="mm-stat"><span class="mm-stat-item">總<b>${total}</b></span><span class="mm-stat-item">上架<b>${activeCount}</b></span><span class="mm-stat-item">下架<b>${discCount}</b></span></span>
       ${discToggle}
-      <button class="mm-chip" style="margin-left:auto" onclick="momoOpenHierarchy('${shop}')">📊 階層圖</button>
+      <span class="col-picker-wrap" style="position:relative;margin-left:auto"><button id="momo-filter-chip-${shop}" class="mm-chip${momoFilterActiveCount(shop)?' on':''}" style="${momoFilterActiveCount(shop)?'background:#5b5fcf;border-color:#5b5fcf;color:#fff':''}" onclick="momoOpenFilterPanel('${shop}',this)">🏷 標籤 / 篩選${momoFilterActiveCount(shop)?'（'+momoFilterActiveCount(shop)+'）':''}</button></span>
+      <button class="mm-chip" onclick="momoOpenHierarchy('${shop}')">📊 階層圖</button>
       <span class="col-picker-wrap" style="position:relative">
         <button class="mm-chip" onclick="momoOpenColPicker('${shop}',this)">☰ 欄位</button>
       </span>
@@ -7071,6 +7075,20 @@ function momoPeriodTotals(shop, periodKey){
   });
   return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty };
 }
+// 從「已篩選後的顯示列」算總覽（口徑與 momoPeriodTotals 完全一致，只是母體換成 rows）→ 篩選時卡片跟著變。
+//   rows 已帶 revenue/profit/qty/grossQty/cost/discontinued（cost=未稅前的商品成本欄，缺成本判定同總覽）。
+function momoTotalsFromRows(rows){
+  let rev=0, profit=0, qty=0, any=false, missCost=0, missCostDisc=0, soldActive=0, activeTotal=0, revMiss=0, revMissQty=0;
+  rows.forEach(r=>{
+    const isActive=r.discontinued!==true;
+    if(isActive) activeTotal++;
+    const g=(r.grossQty!=null?r.grossQty:r.qty);
+    const active=g>0 || Math.abs(r.revenue)>0.5;
+    if(active){ any=true; rev+=r.revenue||0; profit+=r.profit||0; qty+=r.qty||0; if(!(Number(r.cost)>0)){ missCost++; if(r.discontinued===true) missCostDisc++; } if(isActive) soldActive++;
+      if(g>0 && Math.abs(r.revenue)<0.5){ revMiss++; revMissQty+=g; } }
+  });
+  return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty };
+}
 // 逐列「與上一期比較」小字：每欄個別定義好壞方向。
 //   good：1=升為好(瀏覽量/成交率/本期銷量/營收/毛利貢獻)、-1=降為好(退貨率)、0=中性不著色(毛利率——低毛利率升仍不算好，比照總覽卡的中性 pp)。
 //   絕對量→%變化、比率(成交率/毛利率/退貨率)→pp 差。上期無資料/本期非數字→顯示「—」或不顯示，絕不顯示誤導的 0%/-100%。
@@ -7104,8 +7122,12 @@ function momoRenderProfitBody(shop, tableOnly){
     const agg=momoAggregatePeriods(p, period?momoExpandPeriod(period):[], shop);
     const prev= prevKeysForRows ? momoAggregatePeriods(p, prevKeysForRows, shop) : null;
     // ppUntax=未稅進價（含稅進價÷1.05）：進價欄顯示用、也可排序；淨利表營收基準口徑。_prev=上期 aggregate（逐列環比用）
-    return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, ...agg, _prev:prev };
+    return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, _prev:prev };
   });
+  // 標籤：整月＋半月都算（半月只少成長類）；tableOnly(搜尋/排序) 吃快取免重算，完整重繪重算。「標籤」欄顯示 + 篩選共用同一份。
+  const tagsRes=momoTagsFor(shop, !tableOnly);
+  const _periodIsHalf=/-(H1|H2)$/.test(String(period||''));   // 半月：流量標「估」、成長類本來就沒算
+  rows.forEach(r=>{ r._tags=(tagsRes.bySku&&tagsRes.bySku[r.sku])||[]; });
   // ═══ 階段四：甲配物流按 C1202 出貨形狀重分配（此時 rows=全商品，period 總和才正確）═══
   //   period 內錨定 物流total=logiTotal×(R_period/月R)、再按形狀分 → Σ甲配fee=甲配R×feeRate 不變（月總/期別總不動、逐SKU重分配）。
   let _freightMode='none';   // none=非甲配已對帳｜proportional=甲配已對帳但無運費(營收攤)｜precise=甲配訂編精算
@@ -7139,6 +7161,11 @@ function momoRenderProfitBody(shop, tableOnly){
   }else if(!_momoShowDiscontinued[shop]){
     rows=rows.filter(r=>!r.discontinued);
   }
+  // 共用篩選（標籤 OR + 數值 AND）疊加在搜尋/上下架之後。基數=篩選前可見數、N=篩選後 → 總覽標「已篩選 N / 基數」。
+  const _filterOn=momoFilterActiveCount(shop)>0;
+  const _baseCount=rows.length;
+  if(_filterOn) rows=rows.filter(r=>momoRowPassesFilter(shop,r,r._tags));
+  const _filteredCount=rows.length;
   const sort=_momoSort[shop]||{col:'revenue',dir:'desc'};   // 預設營收高→低（使用者點欄位可改；清除排序也回到這個預設）
   if(sort){
     rows.sort((a,b)=>{
@@ -7148,15 +7175,21 @@ function momoRenderProfitBody(shop, tableOnly){
     });
   }
   const cols=momoDisplayCols(shop);   // 目前顯示的欄（含使用者排序/隱藏）；colgroup/thead/tbody/欄寬拖曳一律用這份
-  const fmt={ money:v=>momoMoney(v), num:v=>Math.round(v).toLocaleString(), pct1:v=>(Math.round(v*10)/10)+'%' };
+  const fmt={ money:v=>momoMoney(v), num:v=>Math.round(v).toLocaleString(), pct1:v=>momoPct(v) };
   const arrow=c=> sort&&sort.col===c ? (sort.dir==='asc'?' ▲':' ▼') : '';
   // 欄寬拖曳：colgroup 定寬（table-layout:fixed）+ 每個 th 右緣把手；寬度存 sessionStorage、綁欄名不綁索引
   const colgroup=`<colgroup>${cols.map(c=>`<col style="width:${momoColW(shop,c.k,c.w)}px">`).join('')}</colgroup>`;
   const thead=cols.map(c=>{
-    const info=c.info?`<span class="mm-info" title="${c.info}" onclick="event.stopPropagation()">?</span>`:'';
-    // 稅別註記(未稅/含稅)排到第二行小字淺色；? 與排序箭頭留在第一行。表頭總高靠 .mm-ptbl th 收窄上下 padding 維持不變。
-    const sub=c.sub?`<div class="mm-th-sub">${c.sub}</div>`:'';
-    return `<th class="mm-th${c.left?' tl':''}" onclick="momoProfitSetSort('${shop}','${c.k}')" style="cursor:pointer;text-align:${c.left?'left':'right'}"><div class="mm-th-l1">${c.label}${info}${arrow(c.k)}</div>${sub}<span class="mm-col-grip" onmousedown="momoColResizeDrag(event,'${shop}','${c.k}')" onclick="event.stopPropagation()"></span></th>`;
+    // 單行表頭：欄名 → 問號 → 箭頭，整組靠右(左欄靠左)。問號固定寬 slot、箭頭固定寬 slot(未排序留同寬空白) →
+    //   每欄「問號+箭頭」佔位一致 → 所有欄名右邊界落在同一條垂直線(比數字右線往左一個 問號+箭頭 的距離)。稅別已移進問號提示、無第二行。
+    const info=c.info
+      ? `<span class="mm-th-q"><span class="mm-info" title="${c.info}" onclick="event.stopPropagation()">?</span></span>`
+      : `<span class="mm-th-q"></span>`;   // 無提示也留同寬 slot，欄名右界仍一致
+    const ar=`<span class="mm-th-arrow">${(arrow(c.k)||'').trim()}</span>`;   // 未排序留同寬空白，有箭頭的欄不會較窄
+    const name=`<span class="mm-th-name">${c.label}</span>`;
+    return `<th class="mm-th${c.left?' tl':''}" onclick="momoProfitSetSort('${shop}','${c.k}')" style="cursor:pointer;text-align:${c.left?'left':'right'}">`
+      +`<span class="mm-th-wrap">${name}${info}${ar}</span>`
+      +`<span class="mm-col-grip" onmousedown="momoColResizeDrag(event,'${shop}','${c.k}')" onclick="event.stopPropagation()"></span></th>`;
   }).join('');
   const tbody=rows.map(r=>{
     const tds=cols.map(c=>{
@@ -7167,13 +7200,17 @@ function momoRenderProfitBody(shop, tableOnly){
         const discTag=r.discontinued?` · <span style="color:#9ca3af;font-weight:600">已下架</span>`:'';
         return `<td class="tl"><div class="mm-name-wrap"><span class="mm-name-clip" title="${nmEsc}">${r.name||'—'}</span></div><div class="mm-sub-line">品號 ${r.sku||'—'}${r.origin?' · 原廠 '+r.origin:''}${discTag}</div></td>`;
       }
+      if(c.k==='tags'){
+        // 整月/半月都顯示算得出的標籤（半月：成長類不計、流量類標「估」）。無標籤→空白（正常品）。overflow:hidden 防窄欄溢出、預設 140px 夠放「⚠️退貨高 +2」。
+        return `<td class="tl" style="overflow:hidden">${momoTagChipHTML(r._tags, _periodIsHalf)}</td>`;
+      }
       if(c.k==='returnRate'){
         // 對帳單來源：未對帳=「—」；有值標退貨數/金額於 tooltip、月顆粒；>6% 橘
         if(r.returnRate==null) return `<td style="text-align:right;color:#c7cad1" title="此月未對帳，無退貨資料">—</td>`;
         const rr=r.returnRate;
         const tip=`退貨 ${Math.round(r.retQty||0)} 件 / ${momoMoney(r.retAmt||0)}（對帳單月值${(period&&!period.endsWith('-FULL'))?'，半月沿用月值':''}）\n退貨的商品成本已回沖（貨退回倉、之後再賣才認成本），故高退貨率不再被誇大成大賠；但出貨運費已付(不回沖)+可能耗損/重新入庫，高退貨率仍是警訊。`;
         let st='text-align:right;overflow:hidden;text-overflow:ellipsis'; if(rr>6) st+=';font-weight:700;color:#f97316';
-        return `<td style="${st}" title="${tip}">${(Math.round(rr*10)/10)}%${momoRowCmp('returnRate',r,r._prev)}</td>`;
+        return `<td style="${st}" title="${tip}">${momoPct(rr)}${momoRowCmp('returnRate',r,r._prev)}</td>`;
       }
       if(c.k==='view'){
         // S1103 瀏覽量：沒進榜=空白（無資料）；在榜但瀏覽0=「—」（S1103 缺漏，非 0 曝光——有銷量不可能 0 人看，跟退貨率當初全 0 同類誤導）；有值顯示
@@ -7186,13 +7223,13 @@ function momoRenderProfitBody(shop, tableOnly){
         if(r.convRate==null) return `<td style="text-align:right;color:#e5e7eb" title="未進 S1103 熱銷榜（無資料）"></td>`;
         if(r.convRate==='zerodiv') return `<td style="text-align:right;color:#c7cad1" title="進榜但瀏覽量=0，無法算成交率">—</td>`;
         const cr=r.convRate; let st='text-align:right;overflow:hidden;text-overflow:ellipsis'; if(cr<2) st+=';font-weight:700;color:#f97316';
-        return `<td style="${st}" title="對帳數量 ${Math.round(r.qty||0)} ÷ 瀏覽 ${Math.round(r.view||0)}${r.viewEstimated?'（半月沿用整月·估算）':''}">${(Math.round(cr*10)/10)}%${momoRowCmp('convRate',r,r._prev)}</td>`;
+        return `<td style="${st}" title="對帳數量 ${Math.round(r.qty||0)} ÷ 瀏覽 ${Math.round(r.view||0)}${r.viewEstimated?'（半月沿用整月·估算）':''}">${momoPct(cr)}${momoRowCmp('convRate',r,r._prev)}</td>`;
       }
       if(c.k==='margin'){
         // 營收0但有毛利（整批退貨）→ margin=null → 「—」，不顯示誤導的 0%；負毛利標紅（是負值，不是 0）
         if(r.margin==null) return `<td style="text-align:right;color:#c7cad1;font-weight:700" title="營收為 0（此期可能整批退貨）→ 毛利率無法計算">—</td>`;
         const m=r.margin;
-        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:${m>=25?'#10b981':(m<0?'#dc2626':'#374151')}">${(Math.round(m*10)/10)}%${momoRowCmp('margin',r,r._prev)}</td>`;
+        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:${m>=25?'#10b981':(m<0?'#dc2626':'#374151')}">${momoPct(m)}${momoRowCmp('margin',r,r._prev)}</td>`;
       }
       const v=r[c.k];
       const disp=c.fmt?fmt[c.fmt](v):v;
@@ -7205,7 +7242,7 @@ function momoRenderProfitBody(shop, tableOnly){
   const tblMinW=cols.reduce((s,c)=>s+momoColW(shop,c.k,c.w),0);
   const tableHTML = rows.length
     ? `<div class="tscroll"><table class="mm-ptbl" style="table-layout:fixed;min-width:${tblMinW}px">${colgroup}<thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`
-    : `<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${all.length?'沒有符合搜尋的商品':'尚無商品資料，請到「批次維護」新增（後續階段開放）'}</div></div>`;
+    : `<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${all.length?(_filterOn?'沒有符合篩選條件的商品':'沒有符合搜尋的商品'):'尚無商品資料，請到「批次維護」新增（後續階段開放）'}</div>${_filterOn?`<button class="mm-linkbtn" onclick="momoClearFilters('${shop}')">清除篩選</button>`:''}</div>`;
   // 總覽卡片 / 對帳狀態 / 自驗 只在「完整重繪」時算+注入 momo-ov（搜尋/排序 tableOnly 時不動 → 省算、也保住自驗收合狀態、搜尋框不掉焦點）
   if(!tableOnly){
     const isJiaYi=(shop==='甲配'||shop==='乙配');
@@ -7234,23 +7271,29 @@ function momoRenderProfitBody(shop, tableOnly){
       }
     }
     const stEl=document.getElementById('momo-status-'+shop); if(stEl) stEl.innerHTML=statusChip;
-    const curT=momoPeriodTotals(shop, period);
+    // 篩選啟用時：總覽卡片＝篩選後子集（口徑同全量），環比不比（子集跨期噪音大、標「—」），自驗只對全量整月有意義故略過。
+    const curT= _filterOn ? momoTotalsFromRows(rows) : momoPeriodTotals(shop, period);
     let prevKey=momoPrevPeriodKey(period);
     // 上線首月（含）之前只有零星跨月訂單、明顯不完整 → 不當環比基準：清空 prevKey 使環比顯示「—」而非誤導百分比。（2025/12 底層資料仍保留、不刪。）
     if(prevKey && prevKey.slice(0,7) < MOMO_FIRST_PERIOD) prevKey='';
-    const prevT=momoPeriodTotals(shop, prevKey);
-    // 自驗：驗證邏輯保留，但通過時「完全不顯示」（不留標記，省版面）；只有對不上才警示。
+    const prevT= _filterOn ? {hasData:false, rev:0, profit:0, qty:0, margin:0, soldActive:0, activeTotal:0} : momoPeriodTotals(shop, prevKey);
+    // 自驗：驗證邏輯保留，但通過時「完全不顯示」（不留標記，省版面）；只有對不上才警示。篩選中不驗（母體非全量）。
     let verifyBlock='';
-    if(isJiaYi && fi && fi.reconciled && period.endsWith('-FULL')){
+    if(!_filterOn && isJiaYi && fi && fi.reconciled && period.endsWith('-FULL')){
       const expect=fi.shopRev;   // 該店對帳金額未稅合計（非整帳號 A：甲配 521,538 / 乙配 65,101）
       const diff=curT.rev - expect;
       const ok=Math.abs(diff)<=Math.max(50, expect*0.001);
       verifyBlock = ok ? '' : `<div class="mm-verify-err">⚠ 整月 Σ營收 ${momoMoney(curT.rev)} ≠ 對帳單該店金額 ${momoMoney(expect)}（差 ${momoMoney(diff)}，主檔可能缺對帳單裡的品號）</div>`;
     }
+    // 已篩選 N / 基數（旁附估算標）：只有啟用篩選時顯示，一鍵清除。
+    const filterInfo= _filterOn
+      ? `<div class="mm-filter-info">🏷 已篩選 <b>${_filteredCount}</b> / ${_baseCount} 項${tagsRes.estimated?' · <span style="color:#d97706">🟡 含未對帳估算</span>':''} <button class="mm-linkbtn" onclick="momoClearFilters('${shop}')">清除篩選</button></div>`
+      : '';
     const overview=momoOverviewHTML(shop, period, curT, prevT, prevKey, verifyBlock);
-    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=overview+statusBanner;
+    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+overview+statusBanner;
   }
   tbl.innerHTML=discHint+tableHTML;
+  momoSyncFilterChip(shop);   // 篩選變動後同步工具列 🏷 按鈕作用中狀態（殼不重繪）
 }
 
 /* ═══════════════ 單品分析 modal（待辦B）+ optimizationLog（待辦C）═══════════════
@@ -7482,12 +7525,12 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
     ? {txt:(rate-prevRate>=0?'▲ ':'▼ ')+Math.abs(rate-prevRate).toFixed(1)+'pp', color:(rate-prevRate>=0?'#059669':'#dc2626')}
     : {txt:'—', color:'#9ca3af'};
   const rateVal = rate!=null
-    ? `${rate.toFixed(1)}% <span style="font-size:12px;color:#9ca3af;font-weight:400">(${cur.soldActive} / ${cur.activeTotal})</span>`
+    ? `${momoPct(rate)} <span style="font-size:12px;color:#9ca3af;font-weight:400">(${cur.soldActive} / ${cur.activeTotal})</span>`
     : '—';
   const cards=[
-    {label:'總營收（未稅）', val:money(cur.rev), d:momoKpiDelta(cur.rev,prev.rev,hasPrev)},
-    {label:'總淨利（未稅）', val:money(cur.profit), d:momoKpiDelta(cur.profit,prev.profit,hasPrev)},
-    {label:'加權毛利率', info:'總淨利 ÷ 總營收。', val:cur.margin.toFixed(1)+'%', valColor:marginColor(cur.margin), d:{txt:marginDelta,color:'#9ca3af'}},
+    {label:'總營收', info:'該期所有商品營收合計。（未稅）', val:money(cur.rev), d:momoKpiDelta(cur.rev,prev.rev,hasPrev)},
+    {label:'總淨利', info:'該期所有商品淨利合計。已扣 MOMO 費用與商品成本。（未稅）', val:money(cur.profit), d:momoKpiDelta(cur.profit,prev.profit,hasPrev)},
+    {label:'加權毛利率', info:'總淨利 ÷ 總營收。', val:momoPct(cur.margin), valColor:marginColor(cur.margin), d:{txt:marginDelta,color:'#9ca3af'}},
     {label:'總銷量', val:Math.round(cur.qty).toLocaleString()+' 件', d:momoKpiDelta(cur.qty,prev.qty,hasPrev)},
     {label:'動銷率', info:'該期別「有銷售的上架商品數 ÷ 上架商品總數」。分母＝上架總數（不含已下架，跟工具列「上架 N」一致）；看有多少比例的上架品真的動起來。', val:rateVal, d:rateD},
   ];
@@ -7510,6 +7553,274 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
 
 // ── 階層圖（毛利率分佈）：MOMO 自己一套，不碰蝦皮。用「毛利率」(= 總表口徑 profit/營收)，跟總表欄位一致。
 //   母體＝總表當前篩選集（同 search + 上架/下架顯示），隨期別重算。零營收(毛利率 null)不列入分佈、獨立一列。開啟時取當下狀態快照。
+// ══════════ MOMO 商品標籤分類（甲乙配各自獨立排名；只在整月期別算；隨期別重算）══════════
+//   蝦皮的標籤在同事檔案、不碰；這是 MOMO 自己一套（相對排名，不用絕對金額）。emoji+短字，面板/逐列共用。
+const MOMO_TAG_GROUPS=[
+  {group:'流量', tags:[
+    {k:'traffic_hilo', emoji:'🔵', label:'高流量低轉換', short:'高流低轉', desc:'瀏覽量前 20% 且成交率後 30%'},
+    {k:'traffic_lohi', emoji:'🟣', label:'高轉換低流量', short:'高轉低流', desc:'成交率前 20% 且瀏覽量後 30%'},
+    {k:'dead_new',     emoji:'🆕', label:'首次零動銷',  short:'首次滯銷', desc:'上架、本期零銷量、上一期有賣 → 需立刻反應（半月＝前一個半月）'},
+    {k:'dead_long',    emoji:'⚫', label:'連續零動銷',  short:'連續滯銷', desc:'上架、本期+上一期都零銷量 → 滯銷（半月＝連續兩個半月）'},
+  ]},
+  {group:'成長', tags:[
+    {k:'surge', emoji:'🟢', label:'爆發品', short:'爆發', desc:'營收環比 > +30%（上期需 ≥5 件才計，濾掉小基期假訊號）。僅整月計算（半月環比雜訊大）'},
+    {k:'drop',  emoji:'🔴', label:'重跌品', short:'重跌', desc:'營收環比 < −30%（上期需 ≥5 件才計）。僅整月計算（半月環比雜訊大）'},
+  ]},
+  {group:'營收', tags:[
+    {k:'rev_top', emoji:'👑', label:'高營收', short:'高營收', desc:'毛利貢獻前 10%（分母=該期有銷售）'},
+    {k:'rev_mid', emoji:'🟠', label:'中營收', short:'中營收', desc:'毛利貢獻前 10~30%'},
+    {k:'rev_dev', emoji:'🟡', label:'發展品', short:'發展品', desc:'毛利貢獻前 30~50%'},
+  ]},
+  {group:'利潤', tags:[
+    {k:'profit_low',  emoji:'🔻', label:'低利品',   short:'低利',   desc:'毛利率 < 20%'},
+    {k:'return_warn', emoji:'⚠️', label:'退貨警示', short:'退貨高', desc:'退貨率 > 該期平均兩倍'},
+    {k:'no_cost',     emoji:'❌', label:'缺成本',   short:'缺成本', desc:'有營收但無成本'},
+  ]},
+];
+// 逐列「主標籤」嚴重度優先序（最該注意排前面）：缺成本 > 重跌 > 退貨警示 > 低利 > 高營收 > 其他。
+//   同一商品多標籤時，逐列只顯示這份清單裡最前面那個當主標籤，其餘收成「+N」。
+const MOMO_TAG_PRIORITY=['no_cost','drop','return_warn','profit_low','rev_top','dead_new','dead_long','traffic_hilo','surge','rev_mid','rev_dev','traffic_lohi'];
+function momoPrimaryTag(tagKeys){ for(const k of MOMO_TAG_PRIORITY){ if(tagKeys.indexOf(k)>=0) return k; } return tagKeys&&tagKeys[0]||null; }
+// 「標籤」欄的 chip：主標籤(emoji+短字) + 其餘收「+N」，hover title 列全部。行高不變靠 CSS height:16px。
+//   half=半月：流量類(🔵🟣)瀏覽量為 S1103 月值拆分估算 → 主標籤是流量類時掛「估」小標；hover 全清單也逐一標。
+function momoTagChipHTML(tags, half){
+  if(!tags||!tags.length) return '';
+  const isTraf=k=>(k==='traffic_hilo'||k==='traffic_lohi');
+  const pk=momoPrimaryTag(tags), pt=MOMO_TAG_BY_KEY[pk]; if(!pt) return '';
+  const more=tags.length-1;
+  const allTxt=tags.map(k=>{const t=MOMO_TAG_BY_KEY[k];return t?t.emoji+' '+t.label+(half&&isTraf(k)?'（估）':''):'';}).filter(Boolean).join('｜')
+    +(half?'　·　半月：成長類不計、流量類為估算':'');
+  const est=(half&&isTraf(pk))?`<span class="mm-rtag-est" title="半月流量為 S1103 月值拆分估算">估</span>`:'';
+  return `<span class="mm-rtag-chip" title="全部標籤：${allTxt}">${pt.emoji}<span class="mm-rtag-t">${pt.short}</span>${est}${more>0?`<span class="mm-rtag-more">+${more}</span>`:''}</span>`;
+}
+const MOMO_TAG_BY_KEY={}; MOMO_TAG_GROUPS.forEach(g=>g.tags.forEach(t=>{ MOMO_TAG_BY_KEY[t.k]=Object.assign({group:g.group},t); }));
+const MOMO_GROWTH_MIN_QTY=5;   // 成長類最低基期訂購量：上期 <5 件不算成長率（見 momoComputeTags 成長段說明）
+// 「緊鄰的前一期別」：半月→前一個半月(H2→同月H1、H1→上月H2)、整月→上月整月。用於零動銷「連續」判定，配合每半月上傳一次的優化節奏。
+//   （與 momoPrevPeriodKey 不同：那個是環比用的「半月比上月同半月」；這裡要的是時間序上真正的前一期。整月時兩者相同。）
+function momoPrevSeqPeriodKey(periodKey){
+  const m=/^(\d{4})-(\d{2})-(H1|H2|FULL)$/.exec(periodKey||''); if(!m) return '';
+  let y=+m[1], mo=+m[2], half=m[3];
+  const prevMonth=()=>{ mo--; if(mo<1){ mo=12; y--; } };
+  if(half==='H2') return `${y}-${String(mo).padStart(2,'0')}-H1`;
+  if(half==='H1'){ prevMonth(); return `${y}-${String(mo).padStart(2,'0')}-H2`; }
+  prevMonth(); return `${y}-${String(mo).padStart(2,'0')}-FULL`;   // FULL → 上月整月（= momoPrevPeriodKey）
+}
+// 計算某賣場某期別的逐商品標籤。整月＋半月都算，只有「成長類(爆發/重跌)」僅整月（半月環比一個大單就 ±50%、雜訊大）。
+//   半月是實際優化節奏(每半月傳一次 C1105)，故流量/營收/利潤/零動銷都要能在半月看。
+//   「連續零動銷」的連續＝緊鄰的前一期別(半月＝連續兩個半月、整月＝連續兩個整月，見 momoPrevSeqPeriodKey)；上期有賣本期停＝首次(需立刻反應)。
+//   ⚠ 半月的流量來自 S1103 月值拆分＝估算(顯示層標「估」)；退貨率來自對帳單月值，半月取不到就不標(不當 0)。
+function momoComputeTags(shop, periodKey){
+  const isFullMonth = !!(periodKey && String(periodKey).endsWith('-FULL'));
+  const isHalf = /-(H1|H2)$/.test(String(periodKey||''));
+  const bySku={}, counts={}; MOMO_TAG_GROUPS.forEach(g=>g.tags.forEach(t=>counts[t.k]=0));
+  if(!(isFullMonth||isHalf)) return {isFullMonth:false, isHalf:false, bySku, counts};
+  const keys=momoExpandPeriod(periodKey);
+  const priorKey=momoPrevSeqPeriodKey(periodKey);   // 緊鄰前一期(半月→前一半月)，配合每半月上傳的優化節奏
+  const priorOk = !!(priorKey && priorKey.slice(0,7)>=MOMO_FIRST_PERIOD);   // 上線首月前(2025/12)資料不完整→不當上期
+  const priorKeys = priorOk ? momoExpandPeriod(priorKey) : null;
+  // ⚠ 只算「上架」商品：總表預設也只顯示上架，下架品進排名會扭曲百分位、且讓「上架＝有銷+零動銷」對不上。
+  //   下架品一律不給標籤（隱藏中，標了看不到；顯示已下架時無標籤＝已退場，合理）。
+  const all=momoLoadProducts(shop).filter(p=>p.discontinued!==true);
+  const num=x=>(typeof x==='number' && isFinite(x));
+  const R=all.map(p=>{
+    const a=momoAggregatePeriods(p, keys, shop);
+    const prev=priorKeys?momoAggregatePeriods(p, priorKeys, shop):null;
+    return {sku:p.sku, p, a, prev, active:p.discontinued!==true, sold:(a.grossQty>0||Math.abs(a.revenue)>0.5)};
+  });
+  const add=(sku,k)=>{ if(!sku) return; (bySku[sku]=bySku[sku]||[]).push(k); counts[k]++; };
+  // 流量類：母體=有 S1103 瀏覽量且成交率可算的商品。相對排名 pctile。
+  const traf=R.filter(r=>num(r.a.view)&&num(r.a.convRate));
+  if(traf.length>=5){
+    const vs=traf.map(r=>r.a.view).sort((x,y)=>x-y), cs=traf.map(r=>r.a.convRate).sort((x,y)=>x-y);
+    const pv=f=>vs[Math.min(vs.length-1,Math.floor(f*vs.length))], pc=f=>cs[Math.min(cs.length-1,Math.floor(f*cs.length))];
+    const vHi=pv(0.8), vLo=pv(0.3), cHi=pc(0.8), cLo=pc(0.3);
+    traf.forEach(r=>{ if(r.a.view>=vHi&&r.a.convRate<=cLo) add(r.sku,'traffic_hilo'); if(r.a.convRate>=cHi&&r.a.view<=vLo) add(r.sku,'traffic_lohi'); });
+  }
+  // 零動銷（上架、本期零銷量）→ 首次 vs 連續
+  R.forEach(r=>{ if(!r.active||r.sold) return;
+    if(priorOk && r.prev && (r.prev.grossQty>0||Math.abs(r.prev.revenue)>0.5)) add(r.sku,'dead_new'); else add(r.sku,'dead_long'); });
+  // 成長類（需上期有營收，否則不標——避免把新品標成爆發/把停售標成重跌）
+  //   ⚠ 僅整月計算：半月環比雜訊大（一個大單就 ±50%）→ 半月不標爆發/重跌。
+  //   ⚠ 最低基期門檻 MOMO_GROWTH_MIN_QTY：上期實際訂購量 < 5 件不算成長率。
+  //     理由：小基期讓百分比失真（賣 1→0＝−100%、3→5＝+67% 全是雜訊）——六月甲配未設門檻時 surge67/drop90 有 78% 來自上期<5件的品，
+  //     設 ≥5 後降到 surge15/drop20（35/234≈15%），才是真的「量放大/量萎縮」而非小數字跳動。用訂購量(grossQty)不用淨量，避免退貨把基期壓掉。
+  if(isFullMonth && priorOk){ R.forEach(r=>{ if(!r.prev) return; const pr=r.prev.revenue; if(!(pr>0.5)) return;
+    const base=(r.prev.grossQty!=null?r.prev.grossQty:r.prev.qty);
+    if(!(base>=MOMO_GROWTH_MIN_QTY)) return;
+    const g=(r.a.revenue-pr)/Math.abs(pr); if(g>0.3) add(r.sku,'surge'); else if(g<-0.3) add(r.sku,'drop'); }); }
+  // 營收類：毛利貢獻(profit)排名，分母=該期有銷售
+  const soldR=R.filter(r=>r.sold).slice().sort((x,y)=>(y.a.profit||0)-(x.a.profit||0));
+  const n=soldR.length;
+  soldR.forEach((r,i)=>{ const f=n?i/n:1; if(f<0.1) add(r.sku,'rev_top'); else if(f<0.3) add(r.sku,'rev_mid'); else if(f<0.5) add(r.sku,'rev_dev'); });
+  // 利潤類（只看有銷售）
+  const retVals=R.filter(r=>r.sold&&num(r.a.returnRate)).map(r=>r.a.returnRate);
+  const avgRet=retVals.length?retVals.reduce((a,b)=>a+b,0)/retVals.length:null;
+  R.forEach(r=>{ if(!r.sold) return;
+    if(num(r.a.margin)&&r.a.margin<20) add(r.sku,'profit_low');
+    if(avgRet!=null&&num(r.a.returnRate)&&r.a.returnRate>avgRet*2&&r.a.returnRate>0) add(r.sku,'return_warn');
+    if(!(Number(r.p.cost)>0)) add(r.sku,'no_cost'); });
+  const anyRecon=R.some(r=>r.a.reconciled);
+  return {isFullMonth, isHalf, bySku, counts, priorOk, estimated:!anyRecon, soldCount:n, avgRet};
+}
+// ── 共用篩選狀態（標籤 + 數值 + 搜尋 都疊加、共用一套；階層圖也吃這套）──
+const _momoTagFilter={};   // shop → Set(tagKey)（勾選的標籤，OR）
+const _momoNumFilter={};   // shop → [{k,op:'gt'|'lt'|'between',a,b}]（數值條件，AND）
+const _momoTagsCache={};   // shop → {period, result}（整月標籤快取，避免每次搜尋重算 2×N aggregate）
+// 可做數值篩選的欄（總表所有數值欄）；value 直接讀 aggregate 回傳的 row 欄位
+const MOMO_NUM_COLS=[
+  {k:'ppUntax',label:'進價',unit:'$'},{k:'salePrice',label:'售價',unit:'$'},{k:'view',label:'瀏覽量',unit:''},
+  {k:'convRate',label:'成交率',unit:'%'},{k:'qty',label:'本期銷量',unit:''},{k:'revenue',label:'營收',unit:'$'},
+  {k:'margin',label:'毛利率',unit:'%'},{k:'profit',label:'毛利貢獻',unit:'$'},{k:'returnRate',label:'退貨率',unit:'%'},
+];
+function momoTagsFor(shop, recompute){
+  const period=_momoPeriodSel[shop]||'';
+  const c=_momoTagsCache[shop];
+  if(!recompute && c && c.period===period) return c.result;
+  const result=momoComputeTags(shop, period);
+  _momoTagsCache[shop]={period, result};
+  return result;
+}
+function momoFilterActiveCount(shop){ return (_momoTagFilter[shop]?_momoTagFilter[shop].size:0)+(_momoNumFilter[shop]?_momoNumFilter[shop].length:0); }
+// 逐商品是否通過「標籤 + 數值」篩選（搜尋/上下架在總表既有篩選處理）。r=aggregate 回傳的 row、rowTags=該商品標籤陣列。
+function momoRowPassesFilter(shop, r, rowTags){
+  const tf=_momoTagFilter[shop];
+  if(tf && tf.size){ if(!(rowTags && rowTags.some(t=>tf.has(t)))) return false; }   // 標籤 OR
+  const nf=_momoNumFilter[shop];
+  if(nf && nf.length){
+    const noBiz = Math.abs(r.revenue||0)<0.5 && !((r.grossQty!=null?r.grossQty:r.qty)>0);   // 本期零營收且零銷量＝無業績
+    for(const c of nf){
+      // ⚠ 毛利率是比率：無業績時 aggregate 給的 margin=0 是「無法計算」不是真 0%（同零營收「—」的坑）→ 排除，不撈進「<20」。
+      //    絕對量欄（營收/銷量/毛利貢獻/進價/售價）的 0 是真值，照常比較（可查「營收=0」「銷量<5」）。
+      if(c.k==='margin' && noBiz) return false;
+      const v=r[c.k];
+      if(typeof v!=='number' || !isFinite(v)) return false;   // ⚠ 無值(零營收毛利率—/未進榜)不參與比較→排除，不會被當 0 撈進「<20」或「0~X」
+      if(c.op==='gt' && !(v>c.a)) return false;
+      if(c.op==='lt' && !(v<c.a)) return false;
+      if(c.op==='between' && !(v>=c.a && v<=c.b)) return false;
+    }
+  }
+  return true;
+}
+// ── 標籤 / 篩選 面板（沿用 col-picker-menu 外殼；MOMO 自有 JS）──
+function momoOpenFilterPanel(shop,btn){
+  let m=document.getElementById('momo-filter-'+shop);
+  if(m){ m.remove(); return; }   // 再點一次關閉
+  m=document.createElement('div'); m.id='momo-filter-'+shop; m.className='col-picker-menu open mm-filter-panel';
+  const wrap=btn&&btn.closest('.col-picker-wrap');
+  (wrap||(btn&&btn.parentElement)||document.body).appendChild(m);
+  momoRenderFilterPanel(shop);
+  setTimeout(()=>document.addEventListener('click',function h(e){
+    const cur=document.getElementById('momo-filter-'+shop);
+    if(!cur){ document.removeEventListener('click',h); return; }
+    if(!cur.contains(e.target)){ cur.remove(); document.removeEventListener('click',h); }
+  }),0);   // 點面板外關閉（延後掛，避免這次點擊立刻觸發）
+}
+function momoCloseFilterPanel(shop){ const m=document.getElementById('momo-filter-'+shop); if(m) m.remove(); }
+function momoTagToggle(shop,key){
+  const s=(_momoTagFilter[shop]=_momoTagFilter[shop]||new Set());
+  if(s.has(key)) s.delete(key); else s.add(key);
+  momoRenderProfitBody(shop,false); momoRenderFilterPanel(shop);
+}
+function momoNumAdd(shop){
+  const col=document.getElementById('momo-nf-col-'+shop), op=document.getElementById('momo-nf-op-'+shop);
+  const ai=document.getElementById('momo-nf-a-'+shop), bi=document.getElementById('momo-nf-b-'+shop);
+  if(!col||!op) return;
+  const a=parseFloat(ai&&ai.value);
+  if(!isFinite(a)){ if(ai){ ai.style.borderColor='#dc2626'; ai.focus(); } return; }
+  const cond={k:col.value, op:op.value, a};
+  if(op.value==='between'){
+    const b=parseFloat(bi&&bi.value);
+    if(!isFinite(b)){ if(bi){ bi.style.borderColor='#dc2626'; bi.focus(); } return; }
+    cond.a=Math.min(a,b); cond.b=Math.max(a,b);
+  }
+  (_momoNumFilter[shop]=_momoNumFilter[shop]||[]).push(cond);
+  momoRenderProfitBody(shop,false); momoRenderFilterPanel(shop);
+  const nai=document.getElementById('momo-nf-a-'+shop); if(nai) nai.focus();   // 加入後聚焦回值格，方便連續加多條
+}
+// 輸入框有值但未加入時，把「加入」鈕點亮成主色 + 顯示「↵ 套用」提示 → 讓人看得出條件尚未生效（不重繪、避免掉焦點）。
+function momoNumPendingSync(shop){
+  const ai=document.getElementById('momo-nf-a-'+shop), bi=document.getElementById('momo-nf-b-'+shop);
+  const btn=document.getElementById('momo-nf-addbtn-'+shop), hint=document.getElementById('momo-nf-pending-'+shop);
+  const has=!!((ai&&ai.value.trim())||(bi&&bi.value.trim()));
+  if(ai) ai.style.borderColor='';   // 清掉之前驗證失敗的紅框
+  if(btn) btn.classList.toggle('pending', has);
+  if(hint) hint.style.display=has?'inline':'none';
+}
+function momoNumRemove(shop,idx){
+  const nf=_momoNumFilter[shop]; if(!nf) return; nf.splice(idx,1);
+  momoRenderProfitBody(shop,false); momoRenderFilterPanel(shop);
+}
+function momoClearFilters(shop){
+  if(_momoTagFilter[shop]) _momoTagFilter[shop].clear();
+  _momoNumFilter[shop]=[];
+  momoRenderProfitBody(shop,false); momoRenderFilterPanel(shop);   // 面板沒開→momoRenderFilterPanel no-op，只重繪表格
+}
+function momoRenderFilterPanel(shop){
+  const m=document.getElementById('momo-filter-'+shop); if(!m) return;
+  const tagsRes=momoTagsFor(shop);
+  const counts=tagsRes.counts||{};
+  const tf=_momoTagFilter[shop]||new Set();
+  const full=!!tagsRes.isFullMonth;
+  const total=momoLoadProducts(shop).length;
+  const active=momoFilterActiveCount(shop);
+  // 半月：只有「成長類」停用(標僅整月、disable)，其餘照常可選；流量類另標「半月估算」。
+  const tagHTML=MOMO_TAG_GROUPS.map(g=>{
+    const growthOff = !full && g.group==='成長';
+    const gHead = g.group
+      + (growthOff?' <span class="mm-fp-gp-note">· 僅整月</span>':'')
+      + ((!full && g.group==='流量')?' <span class="mm-fp-gp-note">· 半月估算</span>':'');
+    const tagsHtml = g.tags.map(t=>{
+      if(growthOff){
+        return `<button class="mm-fp-tag dis" disabled title="${t.emoji} ${t.label}｜半月環比雜訊大（一個大單就 ±50%），僅整月計算">${t.emoji} ${t.label} <span class="mm-fp-cnt">僅整月</span></button>`;
+      }
+      const c=counts[t.k]||0; const on=tf.has(t.k); const dis=(c===0&&!on);
+      return `<button class="mm-fp-tag${on?' on':''}${dis?' dis':''}"${dis?' disabled':''} title="${t.emoji} ${t.label}｜${t.desc}" onclick="momoTagToggle('${shop}','${t.k}')">${t.emoji} ${t.label} <span class="mm-fp-cnt">${c}</span></button>`;
+    }).join('');
+    return `<div class="mm-fp-gp"><div class="mm-fp-gp-h">${gHead}</div><div class="mm-fp-tags">${tagsHtml}</div></div>`;
+  }).join('');
+  const nf=_momoNumFilter[shop]||[];
+  const colByK=Object.fromEntries(MOMO_NUM_COLS.map(c=>[c.k,c]));
+  const opLbl={gt:'>',lt:'<',between:'區間'};
+  const unitTxt=u=> u==='%'?'%':(u==='$'?' 元':'');
+  const condHTML=nf.length? nf.map((c,i)=>{
+    const col=colByK[c.k]||{label:c.k,unit:''};
+    const txt=c.op==='between'?`${c.a} ~ ${c.b}${unitTxt(col.unit)}`:`${opLbl[c.op]} ${c.a}${unitTxt(col.unit)}`;
+    return `<div class="mm-fp-cond"><span>${col.label} ${txt}</span><button class="mm-fp-x" onclick="momoNumRemove('${shop}',${i})" title="移除此條件">✕</button></div>`;
+  }).join('') : `<div class="mm-fp-note" style="margin:2px 0">尚無數值條件</div>`;
+  const colOpts=MOMO_NUM_COLS.map(c=>`<option value="${c.k}">${c.label}</option>`).join('');
+  // 值格支援 Enter＝點「加入」；有值未加入時把「加入」點亮成主色＋顯示「↵ 套用」提示（momoNumPendingSync）→ 讓人看得出尚未生效。
+  const kd=`onkeydown="if(event.key==='Enter'){event.preventDefault();momoNumAdd('${shop}')}" oninput="momoNumPendingSync('${shop}')"`;
+  const addRow=`<div class="mm-fp-add">
+    <select id="momo-nf-col-${shop}" class="mm-sel mm-fp-sel">${colOpts}</select>
+    <select id="momo-nf-op-${shop}" class="mm-sel mm-fp-sel" style="width:64px" onchange="momoNumPendingSync('${shop}')"><option value="gt">&gt;</option><option value="lt">&lt;</option><option value="between">區間</option></select>
+    <input id="momo-nf-a-${shop}" class="mm-fp-inp" type="number" step="any" placeholder="值" ${kd}>
+    <input id="momo-nf-b-${shop}" class="mm-fp-inp" type="number" step="any" placeholder="上限" ${kd}>
+    <button id="momo-nf-addbtn-${shop}" class="mm-fp-addbtn" onclick="momoNumAdd('${shop}')">加入</button>
+    <span id="momo-nf-pending-${shop}" class="mm-fp-pending" style="display:none">↵ 按 Enter 或「加入」才套用</span>
+  </div>
+  <div class="mm-fp-hint">值格可直接按 Enter 套用。「區間」需填兩格（左＝下限、右＝上限）；&gt; / &lt; 只用左格。⚠ 無值（零營收毛利率「—」）不會被撈進條件。</div>`;
+  m.innerHTML=`
+    <div class="mm-fp-top"><b>🏷 標籤 / 篩選</b><span class="mm-fp-total">共 ${total} 項${active?` · 已套用 ${active} 條`:''}${tagsRes.estimated?' · 🟡估算月':''}</span></div>
+    <div class="mm-fp-body">
+      <div class="mm-fp-sec-h">標籤（甲乙各自排名／可多選 OR${full?'':'；半月：成長類停用、流量類估算'}）</div>
+      ${tagHTML}
+      <div class="mm-fp-sec-h" style="margin-top:12px">數值條件（多條 AND）</div>
+      <div class="mm-fp-conds">${condHTML}</div>
+      ${addRow}
+    </div>
+    <div class="mm-fp-foot">
+      <button class="mm-linkbtn" onclick="momoClearFilters('${shop}')"${active?'':' disabled'}>清除全部</button>
+      <button class="mm-fp-done" onclick="momoCloseFilterPanel('${shop}')">完成</button>
+    </div>`;
+}
+// 工具列 🏷 標籤/篩選 按鈕的作用中狀態（殼不重繪，篩選變動後手動同步）
+function momoSyncFilterChip(shop){
+  const b=document.getElementById('momo-filter-chip-'+shop); if(!b) return;
+  const n=momoFilterActiveCount(shop);
+  b.className='mm-chip'+(n?' on':'');
+  b.style.cssText=n?'background:#5b5fcf;border-color:#5b5fcf;color:#fff':'';
+  b.innerHTML='🏷 標籤 / 篩選'+(n?'（'+n+'）':'');
+}
 function momoHierarchyStats(shop){
   const period=_momoPeriodSel[shop];
   const q=(_momoSearch[shop]||'').trim().toLowerCase();
@@ -7521,10 +7832,19 @@ function momoHierarchyStats(shop){
     if(q) return ((p.sku||'')+' '+(p.name||'')+' '+(p.origin||'')).toLowerCase().includes(q);
     return showDisc || p.discontinued!==true;
   });
+  // 疊加共用篩選（標籤 + 數值）：階層圖母體跟總表一致
+  const tfOn=momoFilterActiveCount(shop)>0;
+  const tags=tfOn?momoTagsFor(shop):null;
   const bins={lt0:0,b0_10:0,b10_15:0,b15_20:0,b20_30:0,gt30:0};
-  let withMargin=0, zeroRev=0;
+  let withMargin=0, zeroRev=0, passCount=0;
   filtered.forEach(p=>{
     const a=momoAggregatePeriods(p, keys, shop);
+    if(tfOn){
+      const rowTags=(tags.bySku&&tags.bySku[p.sku])||[];
+      const rowObj={...a, ppUntax:(Number(p.purchasePrice)||0)/1.05, salePrice:p.salePrice||0, cost:Number(p.cost)||0, discontinued:!!p.discontinued};
+      if(!momoRowPassesFilter(shop, rowObj, rowTags)) return;
+    }
+    passCount++;
     // ⚠ 該期無業績（零營收/無銷售）→ margin 其實是 0（aggregate 對 R=0 回 0），不可被當成 0% 撈進「0-10%」。
     //   只把「真的有做生意」且毛利率可算的列入分佈；無業績/整批退貨(margin null) 一律獨立計數、不進 buckets。
     const hasBiz = a.qty>0 || Math.abs(a.revenue)>0.5;
@@ -7534,7 +7854,7 @@ function momoHierarchyStats(shop){
     else if(m<20) bins.b15_20++; else if(m<30) bins.b20_30++; else bins.gt30++;
   });
   const ge20=bins.b20_30+bins.gt30, lt20=bins.lt0+bins.b0_10+bins.b10_15+bins.b15_20;
-  return {period, filtered:filtered.length, total:all.length, withMargin, zeroRev, bins, ge20, lt20};
+  return {period, filtered:(tfOn?passCount:filtered.length), total:all.length, withMargin, zeroRev, bins, ge20, lt20};
 }
 function momoCloseHierarchy(){ const ov=document.getElementById('momo-hier-ov'); if(ov) ov.remove(); }
 function momoOpenHierarchy(shop){
@@ -7545,7 +7865,7 @@ function momoOpenHierarchy(shop){
   ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.onclick=e=>{ if(e.target===ov) momoCloseHierarchy(); };
   const den=s.withMargin;
-  const pct=n=> den>0?(Math.round(n/den*1000)/10)+'%':'—';
+  const pct=n=> den>0?momoPct(n/den*100):'—';
   const bar=(label,n,color)=>`<div style="display:flex;align-items:center;gap:10px;font-size:12px;padding:3px 0">
     <span style="width:56px;color:#6b7280">${label}</span>
     <span style="width:44px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums">${n}</span>
@@ -7829,7 +8149,7 @@ function momoAddRecalc(shop){
     const r=isJiaYi ? momoCalcMarginSupplier(shop,{cost,purchasePrice:pp}) : momoCalcMargin({cost,purchasePrice:pp,salePrice:sp,shippingPackaging:ship});
     const marginPct=r.marginPct;
     const ok=marginPct>=30;   // §5：新品上架我們自己訂的獲利目標 30%（非 MOMO 規定；掛在供應商口徑真淨利率上才有意義）
-    prev.innerHTML=`毛利率 <b style="color:${ok?'#10b981':'#f97316'};font-size:15px">${Math.round(marginPct*10)/10}%</b> <span style="color:${ok?'#10b981':'#f97316'};font-weight:600;margin-left:6px">${ok?'✓ 超過 30%':'⚠ 未達 30%'}</span>`;
+    prev.innerHTML=`毛利率 <b style="color:${ok?'#10b981':'#f97316'};font-size:15px">${momoPct(marginPct)}</b> <span style="color:${ok?'#10b981':'#f97316'};font-weight:600;margin-left:6px">${ok?'✓ 超過 30%':'⚠ 未達 30%'}</span>`;
   }else{
     prev.innerHTML=`<span style="color:#9ca3af">成本 / 進價 / 售價填齊後即時計算毛利率</span>`;
   }
@@ -9658,6 +9978,7 @@ Object.assign(window, {
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
   momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,
+  momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,
   momoSearchClear,momoSearchClearToggle,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,momoSyncToggleAll,momoSyncUpdateCount,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
