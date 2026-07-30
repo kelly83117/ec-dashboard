@@ -1772,6 +1772,23 @@ window.addEventListener('profitDataReady', () => {
   if (window.App && window.App.route === 'office-d1' && typeof window.App.render === 'function') window.App.render();
 });
 
+// 進度明細的嚴重度排序:要處理的在上、好消息在下。不在清單的排中間(rank 50)。
+// ROI 負數(label 含 ROI 且含 '-')視為嚴重,排在具名警訊之後、加減預算之前。
+const _PROG_ANA_RANK=['賠錢中','危險商品','低淨利','低效廣告'];
+const _PROG_GROWTH_RANK=['重跌品','衰退品','低利品','弱轉換','發展品','成長品','中營收','高營收','爆發品'];
+function _progRank(label,kind){
+  if(kind==='growth'){
+    const i=_PROG_GROWTH_RANK.indexOf(label);
+    return i>=0?i:50;
+  }
+  const i=_PROG_ANA_RANK.indexOf(label);
+  if(i>=0)return i;
+  if(/ROI/.test(label)&&label.indexOf('-')>=0)return 10;   // ROI 負數
+  if(/^[加減]/.test(label))return 20;                       // 加/減預算
+  if(/ROI/.test(label))return 30;                           // ROI 正數
+  if(label==='高利潤商品')return 90;                        // 好事墊底
+  return 50;
+}
 function buildProgressHtml(person){
   const shops=ADJ_PERSON_TO_SHOPS[person]||[];
   if(!shops.length)return'';
@@ -1790,8 +1807,11 @@ function buildProgressHtml(person){
     return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-pct ${cls}">${mark}${pct}%</span>`;};
   const rows=results.map(({shop,p})=>{
     if(!p)return`<div class="adj-prog-row"><span class="adj-prog-shop">${escapeHtml(shop)}</span><span class="adj-prog-na">—</span></div>`;
-    const grp=(title,obj)=>{
-      const keys=Object.keys(obj).sort((a,b)=>obj[b].t-obj[a].t);
+    const grp=(title,obj,kind)=>{
+      const keys=Object.keys(obj).sort((a,b)=>{
+        const ra=_progRank(a,kind),rb=_progRank(b,kind);
+        return ra!==rb?ra-rb:obj[b].t-obj[a].t;
+      });
       if(!keys.length)return'';
       let gd=0,gt=0;keys.forEach(l=>{gd+=obj[l].d;gt+=obj[l].t;});
       // 分組小總結:該組所有標籤桶的加總(一商品雙標籤會重複計,語意為「標籤完成度」)
@@ -1804,7 +1824,7 @@ function buildProgressHtml(person){
         <span class="adj-prog-shop">${escapeHtml(shop)}</span>${bar(p.doneTotal,p.total)}<span class="adj-prog-caret">▾</span>
       </button>
       <div class="adj-prog-detail" data-prog-detail="${escapeHtml(shop)}" hidden>
-        ${grp('廣告分析',p.ana)}${grp('成長分析',p.growth)}
+        ${grp('廣告分析',p.ana,'ana')}${grp('成長分析',p.growth,'growth')}
       </div>`;
   }).join('');
   return`<div class="adj-prog">
