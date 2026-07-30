@@ -1695,7 +1695,11 @@ Object.assign(App, {
     const { logistics, name, origCost, landFreight, weight, price, roas, volume, store, website, note } = inputs;
     const c = this._prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume);
     const existingRows = window.__pricingData?.[sheet] || [];
-    const baseCols = existingRows.length > 0 ? Object.keys(existingRows[0]) : [];
+    // 商品母表（或其他空白 RMB 工作表）的預設欄位結構
+    const RMB_DEFAULT_COLS = ['產品名稱','原始成本','陸〉陸運費','陸>台運費(kg)','售價','實際成本','蝦皮總成本','入帳金額','實際毛利','獲利百分比','成本率','備註'];
+    const baseCols = existingRows.length > 0
+      ? Object.keys(existingRows[0])
+      : (sheet === '商品母表' ? RMB_DEFAULT_COLS : []);
     // Victor 的 Y 欄「進貨」是 URL，JSON 未匯出時手動補上
     const cols = (sheet === 'Victor' && !baseCols.includes('進貨'))
       ? [...baseCols, '進貨']
