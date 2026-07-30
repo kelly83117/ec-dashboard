@@ -955,6 +955,22 @@ Object.assign(App, {
     const action = [], noAction = [];
     list.forEach(r => (ADJ_ACTION_RE.test(String(r.text || '')) ? action : noAction).push(r));
 
+    // 交叉紀錄：這個商品在洞察表的調整（唯讀、預設收折；原生 <details>，不掛任何事件）。
+    // muted（沒有動作沉底列）也照樣顯示。
+    const crossInsightHtml = (r) => {
+      const entries = _crossInsightFor(r.shop, r.code);
+      if (entries.length === 0) return '';
+      return `
+        <details class="adj-x adj-x-ins">
+          <summary>洞察表另有 ${entries.length} 筆</summary>
+          ${entries.map(x => `
+          <div class="adj-x-row">
+            <span class="adj-x-date">${escapeHtml(x.date || '未記日期')}</span>
+            <span class="adj-x-text">${escapeHtml(x.text || '')}</span>
+          </div>`).join('')}
+        </details>`;
+    };
+
     const itemHtml = (r, muted) => `
       <div class="adj-modal-item${muted ? ' adj-modal-item-muted' : ''}">
         <div class="adj-modal-item-hd">
@@ -964,6 +980,7 @@ Object.assign(App, {
           <span class="adj-src adj-src-${r.src||'report'}">${r.src==='ads'?'廣告調整':r.src==='growth'?'商品調整':r.src==='import'?'舊版匯入':'報表匯入'}</span>
         </div>
         <div class="adj-modal-text">${escapeHtml(r.text || '')}</div>
+        ${crossInsightHtml(r)}
       </div>`;
 
     const bodyHtml = `
@@ -1010,6 +1027,25 @@ Object.assign(App, {
     const parts = String(viewDate).split('-');
     const md = `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
 
+    // 交叉紀錄：這個商品在淨利表的調整（唯讀、預設收折；原生 <details>，不掛任何事件）
+    const HALF_ZH = { first: '上半月', second: '下半月', full: '整月' };
+    const crossProfitHtml = (r) => {
+      const h = _crossProfitFor(r.shop, r.code);
+      const nP = (h && h.period) || [], nG = (h && h.growth) || [];
+      if (nP.length === 0 && nG.length === 0) return '';
+      const row = (left, text) => `
+        <div class="adj-x-row">
+          <span class="adj-x-date">${escapeHtml(left)}</span>
+          <span class="adj-x-text">${escapeHtml(text)}</span>
+        </div>`;
+      return `
+        <details class="adj-x adj-x-profit">
+          <summary>淨利表另有 ${nP.length + nG.length} 筆</summary>
+          ${nG.length ? `<div class="adj-x-grp">商品調整</div>` + nG.map(g => row(g.date || '未記日期', g.text || '')).join('') : ''}
+          ${nP.length ? `<div class="adj-x-grp">廣告調整／報表</div>` + nP.map(p => row(`${p.month} ${HALF_ZH[p.half] || p.half || ''}`, p.text || '')).join('') : ''}
+        </details>`;
+    };
+
     const itemHtml = (r) => `
       <div class="adj-modal-item">
         <div class="adj-modal-item-hd">
@@ -1018,6 +1054,7 @@ Object.assign(App, {
           <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
         </div>
         ${r.texts.map(t => `<div class="adj-modal-text">${escapeHtml(t)}</div>`).join('')}
+        ${crossProfitHtml(r)}
       </div>`;
 
     const bodyHtml = rows.length > 0 ? `
@@ -1808,6 +1845,39 @@ function _adjRecsForGroup(recs, kind, group) {
 // 「有動作」關鍵字：反向判斷——text 出現任一關鍵字＝有動作，否則沉底歸「沒有動作」。
 //   「開頭是什麼」不穩（例：「清倉品先不動」開頭是清倉品），改偵測動作字眼是否出現。這條之後可能再調。
 const ADJ_ACTION_RE = /預算|廣\s*\d|ROI|roi|漲價|調漲|降價|調降|開廣告|關廣告|加速|換.{0,2}圖|標題|分類|優惠券|活動|調整售價|調價/;
+
+// ── 交叉紀錄查詢（兩個明細彈窗互相補上對方的資料）────────────────────────
+// 兩支都純唯讀、只在點開彈窗時呼叫。注意：模組層無法物理上放在 openAdjustmentDetailModal
+// 之前（該方法在上方 Object.assign(App,{...}) 區塊內），function 宣告有 hoisting，行為等價。
+// 查某商品在洞察表的調整：依 date 分組、同日多筆用「、」串成一列（跟洞察表彈窗一致），新到舊。
+function _crossInsightFor(shop, code) {
+  const nd = (Store.get(`ec.insight_${shop}_notes`, {}) || {})[code];
+  if (!nd) return [];
+  let adj;
+  if (typeof nd === 'string') adj = [{ date: '', text: nd }];                       // 舊版：整筆是字串
+  else if (typeof nd.adjustments === 'string') adj = [{ date: '', text: nd.adjustments }];
+  else adj = nd.adjustments || [];
+  const map = new Map();
+  adj.forEach(a => {
+    if (!a || !a.text || !String(a.text).trim()) return;   // 只留 text 非空的
+    const d = a.date || '';
+    if (!map.has(d)) map.set(d, []);
+    map.get(d).push(String(a.text));
+  });
+  return [...map.keys()]
+    .sort((a, b) => String(b).localeCompare(String(a)))    // 日期新到舊
+    .map(d => ({ date: d, text: map.get(d).join('、') }));
+}
+// 查某商品在淨利表的調整：走 profit.js 掛在 window 的唯讀出口。
+// profit.js 比 daily.js 後載入，但這是點擊時才呼叫，執行期守衛就夠。
+function _crossProfitFor(shop, code) {
+  if (typeof window.profitNoteHistoryFor !== 'function') {
+    console.warn('[daily] profitNoteHistoryFor 尚未就緒，淨利表紀錄這次不顯示');
+    return { period: [], growth: [] };
+  }
+  try { return window.profitNoteHistoryFor(shop, code) || { period: [], growth: [] }; }
+  catch (e) { console.warn('[daily] 淨利表紀錄查詢失敗', e); return { period: [], growth: [] }; }
+}
 
 let _adjIndexCache = null;
 let _adjLabelsReady = false;

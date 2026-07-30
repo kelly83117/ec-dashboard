@@ -195,3 +195,47 @@
   color: var(--chip-fg);
 }
 .ins-chip:hover { filter: brightness(0.96); }
+
+/* 明細彈窗交叉紀錄收折區（原生 <details class="adj-x">，無 JS 事件）：
+   洞察彈窗內顯示淨利表紀錄（琥珀 .adj-x-profit）、淨利彈窗內顯示洞察紀錄（紫 .adj-x-ins）。
+   main.css 的 :root 沒有紫／琥珀現成變數（--warn 色階不符），故在此補 --x-* 變數，
+   規則裡一律引用變數不寫死 hex。列版型沿用 .adj-modal-* 的語彙（baseline flex、同字級）。不碰 --bg。 */
+:root {
+  --x-ins: #7e22ce;        /* 紫：同工作日誌洞察卡片 headColor */
+  --x-ins-bg: #faf5ff;
+  --x-ins-fg: #581c87;
+  --x-profit: #b45309;     /* 琥珀：同洞察表彈窗「淨利表紀錄」區塊 */
+  --x-profit-bg: #fffbeb;
+  --x-profit-fg: #78350f;
+}
+.adj-x { margin-top: 4px; }
+.adj-x summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.adj-x[open] summary { margin-bottom: 4px; }
+.adj-x-grp { font-size: 10.5px; font-weight: 700; margin: 4px 0 2px; }
+.adj-x-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 3px 6px;
+  border-left: 3px solid;
+  border-radius: 0 4px 4px 0;
+  margin-bottom: 3px;
+  min-width: 0;
+}
+.adj-x-date { flex-shrink: 0; font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 68px; }
+.adj-x-text { flex: 1; min-width: 0; word-break: break-word; }
+/* 紫：洞察表紀錄 */
+.adj-x-ins .adj-x-row { background: var(--x-ins-bg); border-left-color: var(--x-ins); }
+.adj-x-ins .adj-x-date, .adj-x-ins .adj-x-grp { color: var(--x-ins); }
+.adj-x-ins .adj-x-text { color: var(--x-ins-fg); }
+/* 琥珀：淨利表紀錄 */
+.adj-x-profit .adj-x-row { background: var(--x-profit-bg); border-left-color: var(--x-profit); }
+.adj-x-profit .adj-x-date, .adj-x-profit .adj-x-grp { color: var(--x-profit); }
+.adj-x-profit .adj-x-text { color: var(--x-profit-fg); }
