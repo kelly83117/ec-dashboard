@@ -2056,6 +2056,7 @@ Object.assign(App, {
           `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
       }).join('');
     } else {
+      // 所有商品統一為群組標題列，標題顯示售價/毛利摘要，版面整齊一致
       const _nc = '商品名稱';
       const _grps = []; const _gm = new Map();
       for (const item of display) {
@@ -2063,23 +2064,35 @@ Object.assign(App, {
         if (!_gm.has(k)) { const g = { k, items:[] }; _grps.push(g); _gm.set(k, g); }
         _gm.get(k).items.push(item);
       }
+      const _priceCol  = coreCols.find(c => c === '單品售價');
+      const _costCol   = coreCols.find(c => c === '成本');
+      const _marginCol = coreCols.find(c => c === '實際毛利');
+      const _pctCol    = coreCols.find(c => c === '獲利百分比');
+      const _summaryTd = (col, items, style) => {
+        if (!col) return `<td style="${style}"></td>`;
+        const ci = coreCols.indexOf(col);
+        const vals = items.map(({r}) => parseFloat(r[col])).filter(v => !isNaN(v));
+        if (!vals.length) return `<td style="${style}"></td>`;
+        const mn = Math.min(...vals), mx = Math.max(...vals);
+        const fmt = v => this._prFmt(v, coreTypes[ci]);
+        return `<td style="${style};color:#6b7280">${mn === mx ? fmt(mn) : fmt(mn)+'～'+fmt(mx)}</td>`;
+      };
       tbodyHtml = _grps.map(({ k, items }) => {
         const kA = k.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
         const kE = escapeHtml(k);
-        if (k.startsWith('__') || items.length === 1) {
-          const { r, i } = items[0];
-          const isCustom = !!r.__custom;
-          return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
-            coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
-            `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
-        }
-        const hdr = `<tr class="pr-group-hdr" data-grp="${kA}" style="border-bottom:1px solid #e5e7eb;cursor:pointer">` +
-          coreCols.map(c => c === _nc
-            ? `<td style="${_td(c)}"><span class="pr-grp-arr" style="display:inline-block;margin-right:6px;font-size:10px;color:#6b7280;transition:transform .15s">▶</span>${kE}<span style="font-size:11px;color:#9ca3af;margin-left:8px">${items.length} 種規格</span></td>`
-            : `<td style="${_td(c)}"></td>`).join('') + `<td></td></tr>`;
+        const count = items.length;
+        const isCustomGroup = items.every(({r}) => r.__custom);
+        const hdr = `<tr class="pr-group-hdr" data-grp="${kA}" style="border-bottom:1px solid #e5e7eb;cursor:pointer${isCustomGroup?';background:#eff6ff':''}">` +
+          coreCols.map((c, ci) => {
+            const s = _td(c);
+            if (c === _nc) return `<td style="${s}"><span class="pr-grp-arr" style="display:inline-block;margin-right:6px;font-size:10px;color:#6b7280;transition:transform .15s">▶</span><strong style="font-weight:600">${kE}</strong>${count>1?`<span style="font-size:11px;color:#9ca3af;margin-left:8px;font-weight:400">${count} 種規格</span>`:''}</td>`;
+            if (c === _priceCol || c === _costCol)  return _summaryTd(c, items, s);
+            if (c === _marginCol || c === _pctCol)  return _summaryTd(c, items, s);
+            return `<td style="${s}"></td>`;
+          }).join('') + `<td></td></tr>`;
         const rows = items.map(({ r, i }) => {
           const isCustom = !!r.__custom;
-          return `<tr class="pr-row pr-child" data-grp="${kA}" data-i="${i}" data-id="${r.__id||''}" hidden style="border-bottom:1px solid #f3f4f6;cursor:pointer;background:#fafafa${isCustom?';outline:1px solid #bfdbfe inset':''}">` +
+          return `<tr class="pr-row pr-child" data-grp="${kA}" data-i="${i}" data-id="${r.__id||''}" hidden style="border-bottom:1px solid #f3f4f6;cursor:pointer;background:${isCustom?'#eff6ff':'#f8fafc'}">` +
             coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
             `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
         }).join('');
