@@ -2088,7 +2088,7 @@ Object.assign(App, {
           coreCols.map((c, ci) => {
             const s = _td(c);
             if (c === _nc) return `<td style="${s}"><span class="pr-grp-arr" style="display:inline-block;margin-right:6px;font-size:10px;color:#6b7280;transition:transform .15s">▶</span><strong style="font-weight:600">${kE}</strong>${count>1?`<span style="font-size:11px;color:#9ca3af;margin-left:8px;font-weight:400">${count} 種規格</span>`:''}</td>`;
-            if (c === _priceCol || c === _costCol || c === _marginCol || c === _pctCol) return _summaryTd(c, items, s);
+            if (c === _priceCol || c === _costCol || c === _marginCol || c === _pctCol) return `<td style="${s}"></td>`;
             return `<td style="${s}"></td>`;
           }).join('') + `<td></td></tr>`;
         const rows = items.map(({ r, i }) => {
