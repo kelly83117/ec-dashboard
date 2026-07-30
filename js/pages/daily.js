@@ -242,6 +242,9 @@ Object.assign(App, {
     const firstWeekday = new Date(calY, calM - 1, 1).getDay();
     const daysInMonth = new Date(calY, calM, 0).getDate();
     const MAX_CAL_BARS = 5;
+    // 第三塊資料源之二：洞察表索引。🔴 只在月曆迴圈外建一次（迴圈內會重跑 31 次）；
+    // getAdjIndex() 自帶快取，維持在格子內呼叫的既有寫法。
+    const insIndexForCal = getInsIndex();
     const calCells = [];
     for (let i = 0; i < firstWeekday; i++) calCells.push('<div></div>');
     for (let d = 1; d <= daysInMonth; d++) {
@@ -268,18 +271,26 @@ Object.assign(App, {
         </div>
       `).join('');
       const extraHtml = extraCount > 0 ? `<div style="font-size:9.5px;color:var(--text-muted);padding-left:2px">+${extraCount}</div>` : '';
-      // 第三塊：當日淨利表調整筆數，每人一行，置於 todo 橫條上方。用既有 getAdjIndex()（不重解析），
-      //   依 ADJ_SHOP_TO_PERSON 歸人，ALLOWED_NAMES 順序，只顯示有筆數的人（天然上限 3，不與 MAX_CAL_BARS 合併）。
+      // 第三塊：當日「處理的商品數」，每人一行，置於 todo 橫條上方。來源 = 淨利表(getAdjIndex，
+      //   自帶快取) + 洞察表(insIndexForCal，迴圈外建一次)，同商品跨來源去重（key = shop|code；
+      //   code 空時用「來源前綴+#index」保筆數，不讓多筆塌成一筆、也不讓兩來源的無碼列互撞）。
+      //   依 ADJ_SHOP_TO_PERSON 歸人，ALLOWED_NAMES 順序，只顯示有數字的人（天然上限 3，不與 MAX_CAL_BARS 合併）。
       //   顏色走 PERSON_COLORS / PERSON_LIGHT，用 CSS 變數傳給 css/daily-adjustments.css 的排版規則。
-      const adjDay = getAdjIndex()[dateStr.replace(/-/g, '/')] || [];
-      const adjCountByPerson = {};
-      adjDay.forEach(r => {
+      const slash = dateStr.replace(/-/g, '/');
+      const keySet = {};   // person -> Set(商品 key)
+      const addRecs = (recs, srcTag) => recs.forEach((r, i) => {
         const person = ADJ_SHOP_TO_PERSON[r.shop];
-        if (person) adjCountByPerson[person] = (adjCountByPerson[person] || 0) + 1;
+        if (!person) return;
+        const key = r.code ? (r.shop + '|' + r.code) : (r.shop + '|#' + srcTag + i);
+        (keySet[person] = keySet[person] || new Set()).add(key);
       });
+      addRecs(getAdjIndex()[slash] || [], 'p');
+      addRecs(insIndexForCal[slash] || [], 'i');
+      const adjCountByPerson = {};
+      Object.keys(keySet).forEach(n => { adjCountByPerson[n] = keySet[n].size; });
       const adjRowsHtml = ALLOWED_NAMES
         .filter(n => adjCountByPerson[n])
-        .map(n => `<div class="adj-cal-row" style="--adj-cal-c:${PERSON_COLORS[n]};--adj-cal-bg:${PERSON_LIGHT[n].bg};--adj-cal-fg:${PERSON_LIGHT[n].text}"><span class="adj-cal-stripe"></span><span class="adj-cal-label"><span class="adj-cal-name">${escapeHtml(n.slice(0, 1))}</span><span class="adj-cal-num">${adjCountByPerson[n]}</span></span></div>`)
+        .map(n => `<div class="adj-cal-row" title="${escapeHtml(n)} · ${adjCountByPerson[n]} 個商品（含洞察表調整）" style="--adj-cal-c:${PERSON_COLORS[n]};--adj-cal-bg:${PERSON_LIGHT[n].bg};--adj-cal-fg:${PERSON_LIGHT[n].text}"><span class="adj-cal-stripe"></span><span class="adj-cal-label"><span class="adj-cal-name">${escapeHtml(n.slice(0, 1))}</span><span class="adj-cal-num">${adjCountByPerson[n]}</span></span></div>`)
         .join('');
       const numBg = isCellSelected ? 'var(--primary)' : isCellToday ? 'var(--primary-soft)' : 'transparent';
       const numColor = isCellSelected ? 'white' : isCellToday ? 'var(--primary)' : 'var(--text)';
@@ -1907,6 +1918,29 @@ window.addEventListener('profitDataReady', () => {
   //   其他頁不動（資料已進 Store，切過去自然渲染）。route 判斷沿用 app.js 既有慣例（App.render 重繪當前 route）。
   if (window.App && window.App.route === 'office-d1' && typeof window.App.render === 'function') window.App.render();
 });
+// 洞察表調整索引：{ 'YYYY/MM/DD': [{shop, code}] }。來源 = ADJ_SHOP_TO_PERSON 各通路的
+// ec.insight_{shop}_notes；日期同時支援 dash/slash，一律正規化成斜線（與 getAdjIndex 一致）；
+// date 空的跳過。純唯讀。
+// 🔴 刻意不做模組層快取：getAdjIndex 的快取靠 profitDataReady 事件失效，洞察資料沒有對應事件，
+//    做了快取就會有「資料更新但月曆沒跟著變」的靜默失敗。一趟約兩千次迴圈，每次呼叫重建可接受。
+function getInsIndex() {
+  const idx = {};
+  try {
+    Object.keys(ADJ_SHOP_TO_PERSON).forEach(shop => {
+      const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
+      Object.keys(notes).forEach(code => {
+        const adjustments = (notes[code] && notes[code].adjustments) || [];
+        (Array.isArray(adjustments) ? adjustments : []).forEach(a => {
+          const d = ((a && a.date) || '').slice(0, 10);
+          if (!d) return;
+          const slash = d.replace(/-/g, '/');
+          (idx[slash] = idx[slash] || []).push({ shop, code });
+        });
+      });
+    });
+  } catch (e) { console.warn('[getInsIndex] 讀取失敗', e); return {}; }
+  return idx;
+}
 
 // 進度明細的嚴重度排序:要處理的在上、好消息在下。
 // 🔴 比對用「顯示名」(mapAnaLabel 之後)且先剝掉開頭 emoji——
