@@ -1772,21 +1772,31 @@ window.addEventListener('profitDataReady', () => {
   if (window.App && window.App.route === 'office-d1' && typeof window.App.render === 'function') window.App.render();
 });
 
-// 進度明細的嚴重度排序:要處理的在上、好消息在下。不在清單的排中間(rank 50)。
-// ROI 負數(label 含 ROI 且含 '-')視為嚴重,排在具名警訊之後、加減預算之前。
+// 進度明細的嚴重度排序:要處理的在上、好消息在下。
+// 🔴 比對用「顯示名」(mapAnaLabel 之後)且先剝掉開頭 emoji——
+//    資料層原始標籤與畫面顯示名不同(mapAnaLabel 翻譯),成長標籤帶 emoji 前綴。
 const _PROG_ANA_RANK=['賠錢中','危險商品','低淨利','低效廣告'];
 const _PROG_GROWTH_RANK=['重跌品','衰退品','低利品','弱轉換','發展品','成長品','中營收','高營收','爆發品'];
+function _progDisplayName(label){
+  const shown=(window.mapAnaLabel?window.mapAnaLabel(label):label)||'';
+  return shown.replace(/^[^\u4e00-\u9fffA-Za-z0-9]+/,'');   // 剝掉開頭 emoji/符號
+}
 function _progRank(label,kind){
+  const n=_progDisplayName(label);
   if(kind==='growth'){
-    const i=_PROG_GROWTH_RANK.indexOf(label);
+    const i=_PROG_GROWTH_RANK.indexOf(n);
     return i>=0?i:50;
   }
-  const i=_PROG_ANA_RANK.indexOf(label);
+  const i=_PROG_ANA_RANK.indexOf(n);
   if(i>=0)return i;
-  if(/ROI/.test(label)&&label.indexOf('-')>=0)return 10;   // ROI 負數
-  if(/^[加減]/.test(label))return 20;                       // 加/減預算
-  if(/ROI/.test(label))return 30;                           // ROI 正數
-  if(label==='高利潤商品')return 90;                        // 好事墊底
+  let m;
+  if((m=n.match(/^ROI\s*-(\d+)/)))return 10+Math.max(0,9-(+m[1]));  // ROI 負數:越負越前(-3→16,-1→18)
+  if((m=n.match(/^減(\d+)/)))return 20+Math.max(0,9-(+m[1])/100);   // 減預算:金額大在前
+  if((m=n.match(/^加(\d+)/)))return 25+Math.max(0,9-(+m[1])/100);   // 加預算:金額大在前
+  if((m=n.match(/^ROI\s*(\d+)/)))return 30+(+m[1]);                 // ROI 正數:數字小在前(離目標近)
+  if(/^[加減]/.test(n))return 28;      // 無數字的加減(保底)
+  if(/^ROI/.test(n))return 40;         // 無數字的 ROI(保底)
+  if(n==='高利潤商品')return 90;       // 好事墊底
   return 50;
 }
 function buildProgressHtml(person){
