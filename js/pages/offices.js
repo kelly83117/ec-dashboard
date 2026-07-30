@@ -2026,48 +2026,11 @@ Object.assign(App, {
       return `<th${sortAttr} style="${activeBg}${isSortable?'cursor:pointer;':''}font-size:12px;padding:6px 10px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'};min-width:${colMinWidth(c)};white-space:nowrap">${escapeHtml(shortLabel(c))}${indicator}</th>`;
     }).join('') + '<th style="min-width:32px"></th>';
 
-    // 分組：同商品名稱合併
-    const _nameCol  = display.length && display[0].r['商品名稱'] !== undefined ? '商品名稱' : null;
-    const _styleCol = display.length && display[0].r['樣式'] !== undefined ? '樣式' : null;
-    const _sizeCol  = display.length && display[0].r['尺寸'] !== undefined ? '尺寸' : null;
-    const _groups = [];
-    const _gmap = new Map();
-    for (const item of display) {
-      const gk = (_nameCol && item.r[_nameCol]) ? item.r[_nameCol] : null;
-      const mk = gk || ('__row' + item.i);
-      if (!_gmap.has(mk)) { const g = { gk, mk, items:[] }; _groups.push(g); _gmap.set(mk, g); }
-      _gmap.get(mk).items.push(item);
-    }
-    const _cs = (c) => `font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}`;
-    const tbodyHtml = _groups.map(({ gk, mk, items }) => {
-      // 單規格或無名稱欄：直接渲染
-      if (!gk || items.length === 1) {
-        const { r, i } = items[0];
-        const isCustom = !!r.__custom;
-        return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
-          coreCols.map((c, ci) => `<td style="${_cs(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
-          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
-      }
-      // 多規格：header 列 + 子列（hidden）
-      const gkE = escapeHtml(gk);
-      const gkA = gk.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-      const hdr = `<tr class="pr-group-hdr" data-grp="${gkA}" style="background:#eff6ff;border-bottom:2px solid #bfdbfe;cursor:pointer">` +
-        coreCols.map((c) => {
-          if (c === _nameCol) return `<td style="${_cs(c)}"><span class="pr-grp-arrow" style="display:inline-block;margin-right:6px;color:#2563eb;font-size:11px">▶</span><strong>${gkE}</strong><span style="font-size:11px;color:#9ca3af;margin-left:6px">${items.length} 種規格</span></td>`;
-          return `<td style="padding:6px 10px"></td>`;
-        }).join('') + `<td></td></tr>`;
-      const rows = items.map(({ r, i }) => {
-        const isCustom = !!r.__custom;
-        const sv = _styleCol ? escapeHtml(r[_styleCol] || '') : '';
-        const sz = (_sizeCol && r[_sizeCol] && r[_sizeCol] !== r[_styleCol]) ? ` · ${escapeHtml(r[_sizeCol])}` : '';
-        return `<tr class="pr-row pr-child" data-grp="${gkA}" data-i="${i}" data-id="${r.__id||''}" hidden style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
-          coreCols.map((c, ci) => {
-            if (c === _nameCol) return `<td style="${_cs(c)};padding-left:24px">${sv}<span style="color:#9ca3af">${sz}</span></td>`;
-            return `<td style="${_cs(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`;
-          }).join('') +
-          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
-      }).join('');
-      return hdr + rows;
+    const tbodyHtml = display.map(({ r, i }) => {
+      const isCustom = !!r.__custom;
+      return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
+        coreCols.map((c, ci) => `<td style="font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+        `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
     }).join('');
 
     const moreHtml = filteredWithIdx.length > SHOW
@@ -2126,21 +2089,6 @@ Object.assign(App, {
         window.__pricingData = await res.json();
         self.render();
       } catch(e) { alert('載入失敗：' + e.message); }
-    });
-
-    // 群組展開/收合
-    document.getElementById('pr-tbody')?.addEventListener('click', e => {
-      const hdr = e.target.closest('tr.pr-group-hdr');
-      if (!hdr) return;
-      e.stopPropagation();
-      const grp = hdr.getAttribute('data-grp');
-      const tbody = document.getElementById('pr-tbody');
-      const children = Array.from(tbody.rows).filter(tr => tr.classList.contains('pr-child') && tr.getAttribute('data-grp') === grp);
-      const opening = hdr.dataset.open !== '1';
-      hdr.dataset.open = opening ? '1' : '0';
-      const arrow = hdr.querySelector('.pr-grp-arrow');
-      if (arrow) arrow.style.transform = opening ? 'rotate(90deg)' : '';
-      children.forEach(tr => { if (opening) tr.removeAttribute('hidden'); else tr.setAttribute('hidden', ''); });
     });
 
     document.querySelectorAll('.pr-stab').forEach(btn => {
