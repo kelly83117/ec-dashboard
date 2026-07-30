@@ -1686,9 +1686,10 @@ Object.assign(App, {
     // Excel: 獲利% = 實際毛利 / 售價 (Q/I)
     const 獲利百分比 = price > 0 ? r2(實際毛利 / price * 10000) / 10000 : 0;
     const 成本率 = price > 0 ? r2(實際成本 / price * 10000) / 10000 : 0;
-    const 淨利潤 = volume ? r2(實際毛利 * volume) : null;
+    const 廣告 = (roas > 0 && price > 0) ? r2(price / roas) : null;
+    const 淨利潤 = volume ? r2(實際毛利 * volume - (廣告 || 0) * volume) : null;
     const 預估投入 = volume ? r2(volume * price) : null;
-    return { 陸台運費NT, 實際成本, 稅金, 成交, 活動, 退貨, 蝦皮總成本, 入帳, 實際毛利, 獲利百分比, 成本率, 淨利潤, 預估投入 };
+    return { 陸台運費NT, 實際成本, 稅金, 成交, 活動, 退貨, 蝦皮總成本, 入帳, 實際毛利, 獲利百分比, 成本率, 廣告, 淨利潤, 預估投入 };
   },
 
   _prBuildRow(sheet, inputs) {
@@ -1740,7 +1741,7 @@ Object.assign(App, {
 
   _prColType(col, sheet) {
     if (col.includes('ROAS')) return 'roas';
-    if (col.includes('百分比') || col === 'ROI' || col.includes('退貨率') || col.includes('以下)')) return 'pct';
+    if (col.includes('百分比') || col === 'ROI' || col.includes('退貨率') || col.includes('以下)') || col === '成本率') return 'pct';
     if (col === '進貨' && sheet === 'Victor') return 'link';
     if (/月銷量|^進貨$|^數量$|^箱數$|^重量$/.test(col)) return 'count';
     if (col.includes('網站') || col.includes('連結')) return 'link';
@@ -2056,6 +2057,7 @@ Object.assign(App, {
           `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
       }).join('');
     } else {
+      // 所有商品統一為群組標題列，標題顯示售價/毛利摘要，版面整齊一致
       const _nc = '商品名稱';
       const _grps = []; const _gm = new Map();
       for (const item of display) {
@@ -2063,23 +2065,35 @@ Object.assign(App, {
         if (!_gm.has(k)) { const g = { k, items:[] }; _grps.push(g); _gm.set(k, g); }
         _gm.get(k).items.push(item);
       }
+      const _priceCol  = coreCols.find(c => c === '單品售價');
+      const _costCol   = coreCols.find(c => c === '成本');
+      const _marginCol = coreCols.find(c => c === '實際毛利');
+      const _pctCol    = coreCols.find(c => c === '獲利百分比');
+      const _summaryTd = (col, items, style) => {
+        if (!col) return `<td style="${style}"></td>`;
+        const ci = coreCols.indexOf(col);
+        const vals = items.map(({r}) => parseFloat(r[col])).filter(v => !isNaN(v));
+        if (!vals.length) return `<td style="${style}"></td>`;
+        const mn = Math.min(...vals), mx = Math.max(...vals);
+        const fmt = v => this._prFmt(v, coreTypes[ci]);
+        return `<td style="${style};color:#6b7280">${mn === mx ? fmt(mn) : fmt(mn)+'～'+fmt(mx)}</td>`;
+      };
       tbodyHtml = _grps.map(({ k, items }) => {
         const kA = k.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
         const kE = escapeHtml(k);
-        if (k.startsWith('__') || items.length === 1) {
-          const { r, i } = items[0];
-          const isCustom = !!r.__custom;
-          return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
-            coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
-            `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
-        }
-        const hdr = `<tr class="pr-group-hdr" data-grp="${kA}" style="border-bottom:1px solid #e5e7eb;cursor:pointer">` +
-          coreCols.map(c => c === _nc
-            ? `<td style="${_td(c)}"><span class="pr-grp-arr" style="display:inline-block;margin-right:6px;font-size:10px;color:#6b7280;transition:transform .15s">▶</span>${kE}<span style="font-size:11px;color:#9ca3af;margin-left:8px">${items.length} 種規格</span></td>`
-            : `<td style="${_td(c)}"></td>`).join('') + `<td></td></tr>`;
+        const count = items.length;
+        const isCustomGroup = items.every(({r}) => r.__custom);
+        // 群組標題：個別 td，商品名稱欄顯示 ▶ + 名稱，其餘欄顯示摘要數值
+        const hdr = `<tr class="pr-group-hdr" data-grp="${kA}" style="border-bottom:1px solid #e5e7eb;cursor:pointer${isCustomGroup?';background:#eff6ff':''}">` +
+          coreCols.map((c, ci) => {
+            const s = _td(c);
+            if (c === _nc) return `<td style="${s}"><span class="pr-grp-arr" style="display:inline-block;margin-right:6px;font-size:10px;color:#6b7280;transition:transform .15s">▶</span><strong style="font-weight:600">${kE}</strong>${count>1?`<span style="font-size:11px;color:#9ca3af;margin-left:8px;font-weight:400">${count} 種規格</span>`:''}</td>`;
+            if (c === _priceCol || c === _costCol || c === _marginCol || c === _pctCol) return `<td style="${s}"></td>`;
+            return `<td style="${s}"></td>`;
+          }).join('') + `<td></td></tr>`;
         const rows = items.map(({ r, i }) => {
           const isCustom = !!r.__custom;
-          return `<tr class="pr-row pr-child" data-grp="${kA}" data-i="${i}" data-id="${r.__id||''}" hidden style="border-bottom:1px solid #f3f4f6;cursor:pointer;background:#fafafa${isCustom?';outline:1px solid #bfdbfe inset':''}">` +
+          return `<tr class="pr-row pr-child" data-grp="${kA}" data-i="${i}" data-id="${r.__id||''}" hidden style="border-bottom:1px solid #f3f4f6;cursor:pointer;background:${isCustom?'#eff6ff':'#f8fafc'}">` +
             coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
             `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
         }).join('');
@@ -2112,6 +2126,7 @@ Object.assign(App, {
         <thead style="position:sticky;top:0;z-index:2;background:#f9fafb"><tr>${theadHtml}</tr></thead>
         <tbody id="pr-tbody">${tbodyHtml}</tbody>
       </table></div>
+      <style>#pr-tbody tr.pr-group-hdr td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }</style>
       ${moreHtml}
     </div>`;
   },
@@ -2161,7 +2176,24 @@ Object.assign(App, {
       self.render();
     });
 
-    // 展開/收合群組（生活好麻吉等分頁）
+    // 展開/收合群組（生活好麻吉等分頁）— 狀態存入 window.__prOpenGrps 跨 render 保留
+    if (!window.__prOpenGrps) window.__prOpenGrps = new Set();
+    // 重繪後恢復已展開的群組
+    const tbody0 = document.getElementById('pr-tbody');
+    if (tbody0) {
+      Array.from(tbody0.rows).forEach(tr => {
+        if (!tr.classList.contains('pr-group-hdr')) return;
+        const grp = tr.getAttribute('data-grp');
+        if (window.__prOpenGrps.has(grp)) {
+          tr.dataset.open = '1';
+          tr.style.background = '#eff6ff';
+          const arr = tr.querySelector('.pr-grp-arr');
+          if (arr) arr.style.transform = 'rotate(90deg)';
+          Array.from(tbody0.rows).filter(r => r.classList.contains('pr-child') && r.getAttribute('data-grp') === grp)
+            .forEach(r => r.removeAttribute('hidden'));
+        }
+      });
+    }
     document.getElementById('pr-tbody')?.addEventListener('click', e => {
       const hdr = e.target.closest('tr.pr-group-hdr');
       if (!hdr) return;
@@ -2171,9 +2203,11 @@ Object.assign(App, {
       const kids = Array.from(tbody.rows).filter(tr => tr.classList.contains('pr-child') && tr.getAttribute('data-grp') === grp);
       const open = hdr.dataset.open !== '1';
       hdr.dataset.open = open ? '1' : '0';
+      hdr.style.background = open ? '#eff6ff' : '';
       const arr = hdr.querySelector('.pr-grp-arr');
       if (arr) arr.style.transform = open ? 'rotate(90deg)' : '';
       kids.forEach(tr => open ? tr.removeAttribute('hidden') : tr.setAttribute('hidden',''));
+      if (open) window.__prOpenGrps.add(grp); else window.__prOpenGrps.delete(grp);
     });
 
     // 點列展開內聯編輯（事件委派）
@@ -2245,7 +2279,6 @@ Object.assign(App, {
           ${landCol     ? numInp('land','陸〉陸運費',  r[landCol],'¥') : ''}
           ${weightCol   ? numInp('wt',  '重量',        r[weightCol],'kg') : ''}
           ${priceCol    ? numInp('price','售價',        r[priceCol],'NT$') : ''}
-          ${roasCol     ? numInp('roas','ROAS',         r[roasCol],'') : numInp('roas','ROAS','','')}
           ${volCol      ? numInp('vol', '月銷量',       r[volCol],'件') : numInp('vol','月銷量','','件')}
           <div style="width:1px;background:#e5e7eb;align-self:stretch;margin:0 4px"></div>
           ${calcBox('cost','▶ 實際成本')}
@@ -2254,6 +2287,7 @@ Object.assign(App, {
           ${calcBox('margin','▶ 實際毛利')}
           ${calcBox('pct','▶ 獲利%')}
           ${calcBox('cr','▶ 成本%')}
+          ${calcBox('roas','▶ 廣告ROAS')}
           ${calcBox('adcost','▶ 廣告費')}
           ${calcBox('net','▶ 淨利潤')}
           ${websiteCol ? `<label style="display:flex;flex-direction:column;gap:3px">
@@ -2297,9 +2331,10 @@ Object.assign(App, {
           wt = parseFloat(document.getElementById('pe-wt')?.value)   || (weightCol ? +r[weightCol] : 0);
         }
         const pr   = parseFloat(document.getElementById('pe-price')?.value) || (priceCol ? +r[priceCol] : 0);
-        const roas = parseFloat(document.getElementById('pe-roas')?.value)  || (roasCol ? +r[roasCol] : 0);
         const vol  = parseFloat(document.getElementById('pe-vol')?.value)   || (volCol ? +r[volCol] : 0);
-        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, roas, vol);
+        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, 0, vol);
+        const roasAuto = c.獲利百分比 > 0.20 ? Math.round(1 / (c.獲利百分比 - 0.20) * 100) / 100 : null;
+        const 廣告Auto = (roasAuto && pr > 0) ? Math.round(pr / roasAuto * 100) / 100 : null;
         const nt = v => v != null ? 'NT$'+v.toLocaleString('zh-TW',{maximumFractionDigits:1}) : '—';
         const pf = v => { const p=Math.round(v*10000)/100; const col=p>=20?'#059669':p>=0?'#f59e0b':'#dc2626'; return `<span style="color:${col}">${p.toFixed(1)}%</span>`; };
         const s = (id,h) => { const el=document.getElementById(`pe-c-${id}`); if(el) el.innerHTML=h; };
@@ -2309,11 +2344,12 @@ Object.assign(App, {
         s('margin', nt(c.實際毛利));
         s('pct',    pr>0 ? pf(c.獲利百分比) : '—');
         s('cr',     pr>0 ? pf(c.成本率) : '—');
-        s('adcost', roas>0 ? nt(c.廣告) : '—');
-        s('net',    vol>0 ? nt(c.淨利潤) : '—');
+        s('roas',   roasAuto != null ? `<span style="font-weight:600">${roasAuto.toFixed(2)}</span>` : '—');
+        s('adcost', 廣告Auto != null ? nt(廣告Auto) : '—');
+        s('net',    vol>0 && c.實際毛利!=null ? nt(Math.round((c.實際毛利 - (廣告Auto||0)) * vol * 100)/100) : '—');
       };
       _calcPreview();
-      ['pe-ntcost','pe-orig','pe-land','pe-wt','pe-price','pe-roas','pe-vol'].forEach(id =>
+      ['pe-ntcost','pe-orig','pe-land','pe-wt','pe-price','pe-vol'].forEach(id =>
         document.getElementById(id)?.addEventListener('input', _calcPreview));
 
       document.getElementById(`pe-save-${idx}`)?.addEventListener('click', () => {
@@ -2606,7 +2642,9 @@ Object.assign(App, {
       });
       Store.set('ec.pricing.rates', saved);
       document.getElementById('pr-rates-panel').style.display = 'none';
-      alert('費率已儲存');
+      self.render();
+      const t = document.getElementById('toast');
+      if (t) { t.textContent = '費率已儲存'; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2000); }
     });
     document.getElementById('pr-rates-reset')?.addEventListener('click', () => {
       if (!confirm('確定還原所有分頁為預設費率？')) return;
