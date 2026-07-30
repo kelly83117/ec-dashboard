@@ -2194,8 +2194,12 @@ Object.assign(App, {
           ${activeSheet === '商品母表' ? `
           <div style="width:1px;background:#e5e7eb;align-self:stretch;margin:0 4px"></div>
           <span style="font-size:11px;color:#6b7280">加入分頁：</span>
-          <button id="pe-copy-haomaji-${idx}" style="padding:7px 14px;background:#f0fdf4;color:#059669;border:1px solid #bbf7d0;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 生活好麻吉</button>
-          <button id="pe-copy-wanlebox-${idx}" style="padding:7px 14px;background:#fef9c3;color:#b45309;border:1px solid #fde68a;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 玩樂盒子</button>
+          <button data-copy-sheet="生活好麻吉" id="pe-copy-s0-${idx}" style="padding:7px 14px;background:#f0fdf4;color:#059669;border:1px solid #bbf7d0;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 生活好麻吉</button>
+          <button data-copy-sheet="玩樂盒子"  id="pe-copy-s1-${idx}" style="padding:7px 14px;background:#fef9c3;color:#b45309;border:1px solid #fde68a;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 玩樂盒子</button>
+          <button data-copy-sheet="森之旅"    id="pe-copy-s2-${idx}" style="padding:7px 14px;background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 森之旅</button>
+          <button data-copy-sheet="維克生活館" id="pe-copy-s3-${idx}" style="padding:7px 14px;background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 維克生活館</button>
+          <button data-copy-sheet="MOMO"      id="pe-copy-s4-${idx}" style="padding:7px 14px;background:#fff1f2;color:#be123c;border:1px solid #fecdd3;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ MOMO</button>
+          <button data-copy-sheet="FRIDAY"    id="pe-copy-s5-${idx}" style="padding:7px 14px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ FRIDAY</button>
           ` : ''}
         </div>
       </td>`;
@@ -2291,8 +2295,7 @@ Object.assign(App, {
       });
 
       if (activeSheet === '商品母表') {
-        const _copyToSheet = (targetSheet) => {
-          const _rates = self._prGetRates(activeSheet);
+        const _copyToSheet = (targetSheet, btn) => {
           const oc = parseFloat(document.getElementById('pe-orig')?.value) || (origCostCol ? +r[origCostCol] : 0);
           const lf = parseFloat(document.getElementById('pe-land')?.value) || (landCol ? +r[landCol] : 0);
           const wt = parseFloat(document.getElementById('pe-wt')?.value)   || (weightCol ? +r[weightCol] : 0);
@@ -2316,11 +2319,11 @@ Object.assign(App, {
           const custom = Store.get(`ec.d2.pricing.custom.${targetSheet}`, []);
           custom.unshift(newRow);
           Store.set(`ec.d2.pricing.custom.${targetSheet}`, custom);
-          const btn = document.getElementById(`pe-copy-${targetSheet === '生活好麻吉' ? 'haomaji' : 'wanlebox'}-${idx}`);
           if (btn) { btn.textContent = '✓ 已加入'; btn.disabled = true; btn.style.opacity = '0.6'; }
         };
-        document.getElementById(`pe-copy-haomaji-${idx}`)?.addEventListener('click', () => _copyToSheet('生活好麻吉'));
-        document.getElementById(`pe-copy-wanlebox-${idx}`)?.addEventListener('click', () => _copyToSheet('玩樂盒子'));
+        detTr.querySelectorAll('[data-copy-sheet]').forEach(btn => {
+          btn.addEventListener('click', () => _copyToSheet(btn.getAttribute('data-copy-sheet'), btn));
+        });
       }
     });
 
