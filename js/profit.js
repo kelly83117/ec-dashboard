@@ -6813,14 +6813,14 @@ function momoConfirmSync(shop){
 //   欄寬存 sessionStorage、綁「欄位名(k)」不綁索引 → 重排不錯位（見 momoColW / momoColResizeDrag）。
 const MOMO_PROFIT_COLS=[
   {k:'name',label:'品號 / 商品',left:true,w:320,fixed:true},
-  {k:'ppUntax',label:'進價（未稅）',fmt:'money',w:110,info:'你賣給 MOMO 的單價，也是營收基準。'},
-  {k:'salePrice',label:'售價（含稅）',fmt:'money',w:110,info:'MOMO 賣給消費者的單價，此金額不進帳，僅供參考。'},
+  {k:'ppUntax',label:'進價',sub:'未稅',fmt:'money',w:110,info:'你賣給 MOMO 的單價，也是營收基準。'},
+  {k:'salePrice',label:'售價',sub:'含稅',fmt:'money',w:110,info:'MOMO 賣給消費者的單價，此金額不進帳，僅供參考。'},
   {k:'view',label:'瀏覽量',fmt:'num',w:96,info:'S1103 銷售排行榜（熱銷）當期瀏覽量。沒進榜的商品顯示空白（無資料）。'},
   {k:'qty',label:'本期銷量',fmt:'num',w:100,info:'對帳數量＝賣出−客退。進價×銷量即為營收。'},
   {k:'convRate',label:'成交率',fmt:'pct1',w:96,info:'對帳數量 ÷ 瀏覽量。'},
-  {k:'revenue',label:'營收（未稅）',fmt:'money',w:130,info:'未稅進價 × 對帳數量。已扣客退。'},
+  {k:'revenue',label:'營收',sub:'未稅',fmt:'money',w:130,info:'未稅進價 × 對帳數量。已扣客退。'},
   {k:'margin',label:'毛利率',fmt:'pct1',w:100,info:'淨利 ÷ 未稅營收。淨利已扣 MOMO 費用與商品成本。'},
-  {k:'profit',label:'毛利貢獻（未稅）',fmt:'money',w:130,info:'該商品貢獻的淨利金額。'},
+  {k:'profit',label:'毛利貢獻',sub:'未稅',fmt:'money',w:130,info:'該商品貢獻的淨利金額。'},
   {k:'returnRate',label:'退貨率',fmt:'pct1',w:96,info:'客退數量 ÷ 賣出數量（賣出=對帳數量+客退數量），來源=對帳單逐SKU、月顆粒。未對帳月顯示「—」。hover 看退貨件數/金額。'},
 ];
 // 總表欄寬：sessionStorage 記憶（撐過 F5、不佔 localStorage）；拖曳 th 右緣把手調整
@@ -7101,7 +7101,9 @@ function momoRenderProfitBody(shop, tableOnly){
   const colgroup=`<colgroup>${cols.map(c=>`<col style="width:${momoColW(shop,c.k,c.w)}px">`).join('')}</colgroup>`;
   const thead=cols.map(c=>{
     const info=c.info?`<span class="mm-info" title="${c.info}" onclick="event.stopPropagation()">?</span>`:'';
-    return `<th class="mm-th${c.left?' tl':''}" onclick="momoProfitSetSort('${shop}','${c.k}')" style="cursor:pointer;text-align:${c.left?'left':'right'}">${c.label}${info}${arrow(c.k)}<span class="mm-col-grip" onmousedown="momoColResizeDrag(event,'${shop}','${c.k}')" onclick="event.stopPropagation()"></span></th>`;
+    // 稅別註記(未稅/含稅)排到第二行小字淺色；? 與排序箭頭留在第一行。表頭總高靠 .mm-ptbl th 收窄上下 padding 維持不變。
+    const sub=c.sub?`<div class="mm-th-sub">${c.sub}</div>`:'';
+    return `<th class="mm-th${c.left?' tl':''}" onclick="momoProfitSetSort('${shop}','${c.k}')" style="cursor:pointer;text-align:${c.left?'left':'right'}"><div class="mm-th-l1">${c.label}${info}${arrow(c.k)}</div>${sub}<span class="mm-col-grip" onmousedown="momoColResizeDrag(event,'${shop}','${c.k}')" onclick="event.stopPropagation()"></span></th>`;
   }).join('');
   const tbody=rows.map(r=>{
     const tds=cols.map(c=>{

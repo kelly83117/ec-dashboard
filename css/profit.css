@@ -437,4 +437,8 @@ th.mm-th{position:relative;}
 th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px;background:#e2e6ee;pointer-events:none;}
 .mm-col-grip{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;user-select:none;z-index:5;}
 .mm-col-grip:hover::after{content:"";position:absolute;top:0;right:3px;height:100%;width:2px;background:#5b5fcf;}
+/* MOMO 表頭稅別註記排到第二行小字（淺色）；th 上下 padding 收窄 + 兩行行高壓緊 → 表頭總高維持單行時的高度、不長高。只作用 .mm-ptbl（不碰蝦皮共用 th） */
+.mm-ptbl th{padding-top:4px;padding-bottom:4px;vertical-align:middle;}
+.mm-ptbl .mm-th-l1{line-height:1.3;}
+.mm-th-sub{font-size:9px;font-weight:400;color:#c3c7cf;line-height:1;letter-spacing:0;text-transform:none;margin-top:1px;}
 
