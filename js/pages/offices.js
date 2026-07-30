@@ -1997,7 +1997,7 @@ Object.assign(App, {
     const SHOW = 60;
     const display = filteredWithIdx.slice(0, SHOW);
 
-    const NAME_COLS = new Set(['產品名稱','試算名稱','編號']);
+    const NAME_COLS = new Set(['產品名稱','試算名稱','編號','商品名稱']);
     // 縮短過長的欄位標題顯示
     const shortLabel = c => {
       if (c.includes('獲利百分比')) return '獲利%';
@@ -2026,19 +2026,24 @@ Object.assign(App, {
       return `<th${sortAttr} style="${activeBg}${isSortable?'cursor:pointer;':''}font-size:12px;padding:6px 10px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'};min-width:${colMinWidth(c)};white-space:nowrap">${escapeHtml(shortLabel(c))}${indicator}</th>`;
     }).join('') + '<th style="min-width:32px"></th>';
 
-    // 以商品名稱分組（折疊）
-    const nameCol = coreCols.find(c => c === '商品名稱') || null;
+    // 以商品名稱分組（折疊）— 從原始資料取 key，不受欄位顯示設定影響
+    const rawKeys = display.length ? Object.keys(display[0].r) : [];
+    const nameCol = rawKeys.find(c => c === '商品名稱') || null;
+    const styleCol = rawKeys.find(c => c === '樣式') || null;
+    const sizeCol  = rawKeys.find(c => c === '尺寸')  || null;
     const groups = [];
     const groupMap = new Map();
     for (const item of display) {
-      const key = nameCol ? (item.r[nameCol] || '') : '__single__';
-      if (!groupMap.has(key)) { const g = { key, items:[] }; groups.push(g); groupMap.set(key, g); }
-      groupMap.get(key).items.push(item);
+      const key = nameCol ? (item.r[nameCol] || '') : null;
+      const mapKey = key ?? `__row_${item.i}`;
+      if (!groupMap.has(mapKey)) { const g = { key, mapKey, items:[] }; groups.push(g); groupMap.set(mapKey, g); }
+      groupMap.get(mapKey).items.push(item);
     }
     const cellStyle = (c) => `font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}`;
     const tbodyHtml = groups.map(g => {
       const { key, items } = g;
-      if (!nameCol || items.length === 1) {
+      const isGroup = key !== null && items.length > 1;
+      if (!isGroup) {
         const { r, i } = items[0];
         const isCustom = !!r.__custom;
         return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
@@ -2047,17 +2052,20 @@ Object.assign(App, {
       }
       const grpKey = escapeHtml(key);
       const hdr = `<tr class="pr-group-hdr" data-grp="${grpKey}" style="background:#f8fafc;border-bottom:1px solid #e5e7eb;cursor:pointer">` +
-        coreCols.map((c, ci) => {
-          if (NAME_COLS.has(c)) return `<td style="${cellStyle(c)}"><span class="pr-grp-arrow" style="display:inline-block;margin-right:5px;color:#6b7280;transition:transform .15s">▶</span>${grpKey} <span style="font-size:11px;color:#9ca3af;margin-left:4px">× ${items.length} 規格</span></td>`;
+        coreCols.map((c) => {
+          if (c === nameCol) return `<td style="${cellStyle(c)}"><span class="pr-grp-arrow" style="display:inline-block;margin-right:5px;color:#6b7280;transition:transform .15s">▶</span>${grpKey} <span style="font-size:11px;color:#9ca3af;margin-left:4px">× ${items.length} 規格</span></td>`;
           return `<td style="text-align:right;font-size:12px;padding:6px 10px;color:#d1d5db">—</td>`;
         }).join('') +
         `<td></td></tr>`;
       const children = items.map(({ r, i }) => {
         const isCustom = !!r.__custom;
+        const styleLabel = styleCol ? escapeHtml(r[styleCol]||'') : '';
+        const sizeLabel  = sizeCol && r[sizeCol] && r[sizeCol] !== r[styleCol] ? ` <span style="color:#9ca3af">${escapeHtml(r[sizeCol])}</span>` : '';
         return `<tr class="pr-row pr-child" data-grp="${grpKey}" data-i="${i}" data-id="${r.__id||''}" style="display:none;border-bottom:1px solid #f3f4f6;cursor:pointer;background:#fafbff${isCustom?';outline:2px solid #bfdbfe inset':''}">` +
           coreCols.map((c, ci) => {
-            const v = NAME_COLS.has(c) ? (this._prFmt(r['樣式']||'','text') + (r['尺寸']&&r['尺寸']!==r['樣式'] ? ` <span style="color:#9ca3af">${this._prFmt(r['尺寸'],'text')}</span>` : '')) : this._prFmt(r[c], coreTypes[ci]);
-            return `<td style="${cellStyle(c)};padding-left:${NAME_COLS.has(c)?'28px':'10px'}">${v}</td>`;
+            const v = (c === nameCol) ? `${styleLabel}${sizeLabel}` : this._prFmt(r[c], coreTypes[ci]);
+            const pl = (c === nameCol) ? '28px' : '10px';
+            return `<td style="${cellStyle(c)};padding-left:${pl}">${v}</td>`;
           }).join('') +
           `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
       }).join('');
