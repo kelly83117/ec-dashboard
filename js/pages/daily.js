@@ -1943,7 +1943,12 @@ function buildProgressHtml(person){
   const anyP=results.find(r=>r.p);
   const pt=anyP?`本期優化進度（${anyP.p.month} ${anyP.p.half==='first'?'上半月':'下半月'}）`:'本期優化進度';
   const bar=(d,t)=>{const pct=Math.round(d/t*100);
-    return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-bar"><span class="adj-prog-fill" style="width:${pct}%"></span></span><span class="adj-prog-pct">${pct}%</span>`;};
+    // 門檻/符號與 flat() 完全一致（p100/p50/p0、✓/!），bar 只是補上它缺的那半。
+    // class 用完整字面（不動態拼字串），grep 才找得到、也跟 flat() 寫法一致。
+    const cls=pct>=100?'adj-prog-p100':pct>=50?'adj-prog-p50':'adj-prog-p0';
+    const fillCls=pct>=100?'adj-prog-fill-p100':pct>=50?'adj-prog-fill-p50':'adj-prog-fill-p0';
+    const mark=pct>=100?'✓ ':pct<50?'! ':'';
+    return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-bar"><span class="adj-prog-fill ${fillCls}" style="width:${pct}%"></span></span><span class="adj-prog-pct ${cls}">${mark}${pct}%</span>`;};
   // 明細列(小標籤)不畫條:數字 + 符號 + %。
   // ✓=100% 完成(綠)、無符號=進行中(藍)、!=低於50%(琥珀)。
   // 符號是主判讀(不依賴色覺)、顏色是輔助;刻意不用紅——期中偏低是常態不是過錯。
@@ -1960,11 +1965,20 @@ function buildProgressHtml(person){
       });
       if(!keys.length)return'';
       let gd=0,gt=0;keys.forEach(l=>{gd+=obj[l].d;gt+=obj[l].t;});
-      // 分組小總結:該組所有標籤桶的加總(一商品雙標籤會重複計,語意為「標籤完成度」)
-      return`<div class="adj-prog-row adj-prog-grp"><span class="adj-prog-shop">${escapeHtml(title)}</span>${bar(gd,gt)}</div>`+keys.map(l=>{
+      // 未完成直接列、已完成收進 <details>（原生收折，無 JS 事件、預設收折）。
+      // pct 算法與 flat() 一致（Math.round(d/t*100)、>=100 為完成）；排序沿用上面 _progRank 的結果。
+      const pending=keys.filter(l=>Math.round(obj[l].d/obj[l].t*100)<100);
+      const done=keys.filter(l=>Math.round(obj[l].d/obj[l].t*100)>=100);
+      const sub=l=>{
         const{t,d}=obj[l];
         return`<div class="adj-prog-row adj-prog-sub"><span class="adj-prog-shop">${escapeHtml(window.mapAnaLabel?window.mapAnaLabel(l):l)}</span>${flat(d,t)}</div>`;
-      }).join('');
+      };
+      // 分組小總結:該組所有標籤桶的加總(一商品雙標籤會重複計,語意為「標籤完成度」)。
+      // 不畫條:分組分母是「標籤數」、通路列分母是「商品數」，兩者不可比，
+      // 並排長條會誘導無效比較（例:好麻吉 826，廣告 563+成長 570=1133 > 總數）。
+      return`<div class="adj-prog-row adj-prog-grp"><span class="adj-prog-shop">${escapeHtml(title)}</span>${flat(gd,gt)}</div>`
+        +(pending.length?`<div class="adj-prog-subs">`+pending.map(sub).join('')+`</div>`:'')
+        +(done.length?`<details class="adj-prog-done"><summary>已完成 ${done.length} 項</summary><div class="adj-prog-subs">`+done.map(sub).join('')+`</div></details>`:'');
     };
     return`<button type="button" class="adj-prog-row adj-prog-toggle" data-prog-shop="${escapeHtml(shop)}">
         <span class="adj-prog-shop">${escapeHtml(shop)}</span>${bar(p.doneTotal,p.total)}<span class="adj-prog-caret">▾</span>
@@ -1974,10 +1988,12 @@ function buildProgressHtml(person){
       </div>`;
   }).join('');
   return`<div class="adj-prog">
-    <div class="adj-prog-title">${pt}</div>
+    <div class="adj-prog-head">
+      <div class="adj-prog-title">${pt}</div>
+      <span class="adj-prog-legend"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span></span>
+    </div>
     ${rows}
-    <div class="adj-prog-note">依通路負責人歸屬，非個人操作紀錄；點通路列展開明細</div>
-    <div class="adj-prog-note"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span>　·　各標籤分母為帶該標籤的商品數</div>
+    <div class="adj-prog-note">依通路負責人歸屬，非個人操作紀錄；點通路列展開明細；各標籤分母為帶該標籤的商品數</div>
   </div>`;
 }
 // 第六塊：某人某日的「淨利表調整」區塊，注入人員卡片底部。只留標題 + 兩排 pill，明細改走彈窗。
