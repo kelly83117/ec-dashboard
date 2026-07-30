@@ -2279,7 +2279,6 @@ Object.assign(App, {
           ${landCol     ? numInp('land','陸〉陸運費',  r[landCol],'¥') : ''}
           ${weightCol   ? numInp('wt',  '重量',        r[weightCol],'kg') : ''}
           ${priceCol    ? numInp('price','售價',        r[priceCol],'NT$') : ''}
-          ${roasCol     ? numInp('roas','ROAS',         r[roasCol],'') : numInp('roas','ROAS','','')}
           ${volCol      ? numInp('vol', '月銷量',       r[volCol],'件') : numInp('vol','月銷量','','件')}
           <div style="width:1px;background:#e5e7eb;align-self:stretch;margin:0 4px"></div>
           ${calcBox('cost','▶ 實際成本')}
@@ -2288,6 +2287,7 @@ Object.assign(App, {
           ${calcBox('margin','▶ 實際毛利')}
           ${calcBox('pct','▶ 獲利%')}
           ${calcBox('cr','▶ 成本%')}
+          ${calcBox('roas','▶ 廣告ROAS')}
           ${calcBox('adcost','▶ 廣告費')}
           ${calcBox('net','▶ 淨利潤')}
           ${websiteCol ? `<label style="display:flex;flex-direction:column;gap:3px">
@@ -2331,9 +2331,10 @@ Object.assign(App, {
           wt = parseFloat(document.getElementById('pe-wt')?.value)   || (weightCol ? +r[weightCol] : 0);
         }
         const pr   = parseFloat(document.getElementById('pe-price')?.value) || (priceCol ? +r[priceCol] : 0);
-        const roas = parseFloat(document.getElementById('pe-roas')?.value)  || (roasCol ? +r[roasCol] : 0);
         const vol  = parseFloat(document.getElementById('pe-vol')?.value)   || (volCol ? +r[volCol] : 0);
-        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, roas, vol);
+        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, 0, vol);
+        const roasAuto = c.獲利百分比 > 0.20 ? Math.round(1 / (c.獲利百分比 - 0.20) * 100) / 100 : null;
+        const 廣告Auto = (roasAuto && pr > 0) ? Math.round(pr / roasAuto * 100) / 100 : null;
         const nt = v => v != null ? 'NT$'+v.toLocaleString('zh-TW',{maximumFractionDigits:1}) : '—';
         const pf = v => { const p=Math.round(v*10000)/100; const col=p>=20?'#059669':p>=0?'#f59e0b':'#dc2626'; return `<span style="color:${col}">${p.toFixed(1)}%</span>`; };
         const s = (id,h) => { const el=document.getElementById(`pe-c-${id}`); if(el) el.innerHTML=h; };
@@ -2343,11 +2344,12 @@ Object.assign(App, {
         s('margin', nt(c.實際毛利));
         s('pct',    pr>0 ? pf(c.獲利百分比) : '—');
         s('cr',     pr>0 ? pf(c.成本率) : '—');
-        s('adcost', roas>0 ? nt(c.廣告) : '—');
-        s('net',    vol>0 ? nt(c.淨利潤) : '—');
+        s('roas',   roasAuto != null ? `<span style="font-weight:600">${roasAuto.toFixed(2)}</span>` : '—');
+        s('adcost', 廣告Auto != null ? nt(廣告Auto) : '—');
+        s('net',    vol>0 && c.實際毛利!=null ? nt(Math.round((c.實際毛利 - (廣告Auto||0)) * vol * 100)/100) : '—');
       };
       _calcPreview();
-      ['pe-ntcost','pe-orig','pe-land','pe-wt','pe-price','pe-roas','pe-vol'].forEach(id =>
+      ['pe-ntcost','pe-orig','pe-land','pe-wt','pe-price','pe-vol'].forEach(id =>
         document.getElementById(id)?.addEventListener('input', _calcPreview));
 
       document.getElementById(`pe-save-${idx}`)?.addEventListener('click', () => {
