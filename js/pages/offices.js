@@ -1629,6 +1629,8 @@ Object.assign(App, {
           style="width:64px;padding:4px 6px;border:1px solid var(--border);border-radius:5px;font-size:12px;text-align:right;font-family:inherit">`;
       return `<tr>
         <td style="padding:6px 10px;font-weight:600;font-size:12px;white-space:nowrap">${sh}</td>
+        <td style="padding:4px 6px;text-align:center">${inp('rmb',   r.rmb)}</td>
+        <td style="padding:4px 6px;text-align:center">${inp('ship',  r.ship)}</td>
         <td style="padding:4px 6px;text-align:center">${inp('tax',   (r.tax*100).toFixed(1))}</td>
         <td style="padding:4px 6px;text-align:center">${inp('txFee',(r.txFee*100).toFixed(1))}</td>
         <td style="padding:4px 6px;text-align:center">${inp('promo',(r.promo*100).toFixed(1))}</td>
@@ -1649,6 +1651,8 @@ Object.assign(App, {
         <table style="border-collapse:collapse">
           <thead><tr style="color:#6b7280;border-bottom:1px solid var(--border)">
             <th style="padding:4px 10px;text-align:left;font-weight:600;font-size:12px">分頁</th>
+            <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">人民幣匯率</th>
+            <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">陸陸運費(¥/kg)</th>
             <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">稅金%</th>
             <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">成交%</th>
             <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">活動%</th>
