@@ -1907,6 +1907,39 @@ Object.assign(App, {
       }).join('');
     };
 
+    // 淨利表紀錄（唯讀）：同商品在淨利表打的調整，洞察表這邊也看得到（v307 的反方向）。
+    // 資料走 profit.js 的 window.profitNoteHistoryFor 唯讀出口；琥珀色系區隔、無任何可點元素。
+    // 樣式刻意寫 inline 跟隨本彈窗既有慣例（整份 bodyHtml 都是 inline style），已記入技術債。
+    const renderProfitHistory = () => {
+      if (typeof window.profitNoteHistoryFor !== 'function') {
+        console.warn('[insight] profitNoteHistoryFor 尚未就緒，淨利表紀錄這次不顯示');
+        return '';
+      }
+      let h; try { h = window.profitNoteHistoryFor(currentShop, code); }
+      catch (e) { console.warn('[insight] 淨利表紀錄查詢失敗', e); return ''; }
+      const nP = (h && h.period) || [], nG = (h && h.growth) || [];
+      if (nP.length === 0 && nG.length === 0) return '';   // 整塊不顯示（維克沒有淨利表 → 這裡會是空）
+      const HALF_ZH = { first: '上半月', second: '下半月', full: '整月' };
+      const row = (left, text) => `
+        <div style="padding:7px 11px;background:#fffbeb;border-left:3px solid #b45309;border-radius:5px;margin-bottom:5px;font-size:12px;display:flex;gap:8px;align-items:flex-start">
+          <span style="color:#b45309;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;min-width:80px">${escapeHtml(left)}</span>
+          <span style="flex:1;line-height:1.4;color:#78350f;font-weight:500">${escapeHtml(text)}</span>
+        </div>`;
+      const section = (title, rowsHtml) => rowsHtml ? `
+        <div style="margin-top:10px">
+          <div style="font-size:11px;font-weight:700;color:#b45309;margin-bottom:6px">${title}</div>
+          ${rowsHtml}
+        </div>` : '';
+      const gRows = nG.map(g => row(g.date || '未記日期', g.text || '')).join('');
+      const pRows = nP.map(p => row(`${p.month} ${HALF_ZH[p.half] || p.half || ''}`, p.text || '')).join('');
+      return `
+        <div class="field">
+          <label style="font-size:12px">淨利表紀錄<span style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:4px">（唯讀，來自淨利表的調整）</span></label>
+          ${section('淨利表・商品調整', gRows)}
+          ${section('淨利表・廣告調整／報表', pRows)}
+        </div>`;
+    };
+
     // 多人協作策略：先 local-only 儲存，不直接推雲端
     // 使用者按 header 的「☁ 同步雲端」鈕才一次推上去，避免多人同時編輯互蓋
     const autoSave = () => {
@@ -2039,6 +2072,7 @@ Object.assign(App, {
           <label style="font-size:12px">長期備註<span style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:4px">（商品特性、注意事項，自動儲存）</span></label>
           <textarea id="note-text" rows="2" placeholder="例：主圖偏暗需重拍 / 競品有 PD 認證" style="font-family:inherit;resize:vertical;font-size:12px;padding:6px 8px;min-height:50px">${escapeHtml(note.text || '')}</textarea>
         </div>
+        ${renderProfitHistory()}
         <div style="display:flex;justify-content:flex-end;margin-top:16px">
           <button id="note-close-btn" type="button" style="padding:9px 22px;border:1px solid var(--border);border-radius:6px;background:white;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">關閉</button>
         </div>
