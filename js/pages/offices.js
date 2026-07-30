@@ -2175,7 +2175,23 @@ Object.assign(App, {
       self.render();
     });
 
-    // 展開/收合群組（生活好麻吉等分頁）
+    // 展開/收合群組（生活好麻吉等分頁）— 狀態存入 window.__prOpenGrps 跨 render 保留
+    if (!window.__prOpenGrps) window.__prOpenGrps = new Set();
+    // 重繪後恢復已展開的群組
+    const tbody0 = document.getElementById('pr-tbody');
+    if (tbody0) {
+      Array.from(tbody0.rows).forEach(tr => {
+        if (!tr.classList.contains('pr-group-hdr')) return;
+        const grp = tr.getAttribute('data-grp');
+        if (window.__prOpenGrps.has(grp)) {
+          tr.dataset.open = '1';
+          const arr = tr.querySelector('.pr-grp-arr');
+          if (arr) arr.style.transform = 'rotate(90deg)';
+          Array.from(tbody0.rows).filter(r => r.classList.contains('pr-child') && r.getAttribute('data-grp') === grp)
+            .forEach(r => r.removeAttribute('hidden'));
+        }
+      });
+    }
     document.getElementById('pr-tbody')?.addEventListener('click', e => {
       const hdr = e.target.closest('tr.pr-group-hdr');
       if (!hdr) return;
@@ -2188,6 +2204,7 @@ Object.assign(App, {
       const arr = hdr.querySelector('.pr-grp-arr');
       if (arr) arr.style.transform = open ? 'rotate(90deg)' : '';
       kids.forEach(tr => open ? tr.removeAttribute('hidden') : tr.setAttribute('hidden',''));
+      if (open) window.__prOpenGrps.add(grp); else window.__prOpenGrps.delete(grp);
     });
 
     // 點列展開內聯編輯（事件委派）
