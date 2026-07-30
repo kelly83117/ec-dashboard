@@ -1925,7 +1925,7 @@ Object.assign(App, {
   },
 
   renderD2PricingTabHtml() {
-    const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+    const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
     const q = Store.get('ec.d2.pricing.q', '');
     const loaded = !!window.__pricingData;
 
@@ -2109,7 +2109,7 @@ Object.assign(App, {
       document.querySelectorAll('.pr-detail-row').forEach(el => el.remove());
       document.querySelectorAll('tr.pr-row').forEach(el => el.style.background = el.dataset.custom==='1'?'#eff6ff':'');
 
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const sheetData = window.__pricingData?.[activeSheet] || [];
       const r = sheetData[idx];
       if (!r) return;
@@ -2238,7 +2238,7 @@ Object.assign(App, {
 
     document.getElementById('pr-show-all')?.addEventListener('click', () => {
       if (!window.__pricingData) return;
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const q = Store.get('ec.d2.pricing.q', '');
       const sheetData = window.__pricingData[activeSheet] || [];
       const allCols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
@@ -2295,7 +2295,7 @@ Object.assign(App, {
     });
 
     const _saveColPrefs = () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const items = [...document.querySelectorAll('.pr-col-item')];
       const order = items.map(el => el.dataset.col);
       const hidden = items.filter(el => !el.querySelector('.pr-col-check').checked).map(el => el.dataset.col);
@@ -2308,7 +2308,7 @@ Object.assign(App, {
     });
 
     document.getElementById('pr-col-reset')?.addEventListener('click', () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       Store.set(`ec.d2.pricing.cols.${activeSheet}`, null);
       self.render();
     });
@@ -2368,7 +2368,7 @@ Object.assign(App, {
       Store.set('ec.d2.pricing.filterpanel', !nowOpen);
     });
     const _saveNumFilters = () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const filters = {};
       document.querySelectorAll('.pr-nf-min').forEach(inp => {
         const col = inp.dataset.col;
@@ -2383,7 +2383,7 @@ Object.assign(App, {
     };
     document.querySelectorAll('.pr-nf-min,.pr-nf-max').forEach(inp => inp.addEventListener('change', _saveNumFilters));
     document.getElementById('pr-nf-reset')?.addEventListener('click', () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       Store.set(`ec.d2.pricing.numfilters.${activeSheet}`, {});
       self.render();
     });
@@ -2391,7 +2391,7 @@ Object.assign(App, {
     // 排序（點欄位標題）
     document.querySelectorAll('th[data-sort-col]').forEach(th => {
       th.addEventListener('click', () => {
-        const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+        const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
         const col = th.dataset.sortCol;
         const cur = Store.get(`ec.d2.pricing.sort.${activeSheet}`, null);
         if (cur?.col === col) {
@@ -2456,7 +2456,7 @@ Object.assign(App, {
 
     // 即時試算
     const _updatePreview = () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const origCost  = parseFloat(document.getElementById('pf-orig')?.value)   || 0;
       const landFreight = parseFloat(document.getElementById('pf-land')?.value) || 0;
       const weight    = parseFloat(document.getElementById('pf-weight')?.value) || 0;
@@ -2495,7 +2495,7 @@ Object.assign(App, {
 
     // 儲存
     document.getElementById('pr-form-save')?.addEventListener('click', () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const get = id => document.getElementById(id)?.value.trim() || '';
       const inputs = {
         logistics:   get('pf-logistics'),
@@ -2526,7 +2526,7 @@ Object.assign(App, {
       const delBtn = e.target.closest('.pr-del-custom');
       if (!delBtn) return;
       e.stopPropagation();
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const id = delBtn.dataset.id;
       // 從記憶體移除
       if (window.__pricingData?.[activeSheet]) {
