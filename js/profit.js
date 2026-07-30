@@ -5862,7 +5862,11 @@ function momoAggregatePeriods(product,periodKeys,shop){
     // 退貨成本回沖：成本用「對帳數量(net,已扣退貨)」而非出貨數量(gross)。退貨的貨回倉、成本延到再賣才認 → 與 net 營收同基準。半月按同比例拆。
     if(fs.reconQty!=null){ costQty = fs.reconQty*ratio; costNetBasis=true; }
   } else {
-    R = c1105RevPeriod;   // 未對帳：無對帳數量
+    // 未對帳月營收估算：供應商口徑「未稅進價 × C1105 qty」（與已對帳月的 未稅進價×對帳數量 同軌）。
+    //   ⚠ 單檔上傳寫的是 flat cell（只有 qty、沒有 revUntax）→ c1105RevPeriod=0 → 舊碼 R=0、淨利假性大虧。改用主檔進價算。
+    //   進價缺(0)才退回 cell 自帶未稅營收(c1105RevPeriod)；兩者都無 → R=0（真的缺營收，畫面另標）。
+    const ppUntax=(Number(product.purchasePrice)||0)/1.05;
+    R = ppUntax>0 ? ppUntax*qty : c1105RevPeriod;
     const hr=momoHistoricalReturnRate(shop);   // 用近3月平均退貨率估 net = gross×(1−退貨率)，讓成本基準與已對帳月一致（否則環比混 gross/net 基準）
     if(hr && hr.rate>=0){ costQty = qty*(1-hr.rate); costNetBasis='est'; }
   }
@@ -6952,19 +6956,21 @@ function momoPrevPeriodKey(periodKey){
 }
 // 某期別的總覽合計（全商品、含已下架，反映該期實際生意；加權毛利率=Σ淨利÷Σ營收）
 function momoPeriodTotals(shop, periodKey){
-  if(!periodKey) return {hasData:false, rev:0, profit:0, qty:0, margin:0, missCost:0, missCostDisc:0, soldActive:0, activeTotal:0};
+  if(!periodKey) return {hasData:false, rev:0, profit:0, qty:0, margin:0, missCost:0, missCostDisc:0, soldActive:0, activeTotal:0, revMiss:0, revMissQty:0};
   const keys=momoExpandPeriod(periodKey);
   let rev=0, profit=0, qty=0, any=false, missCost=0, missCostDisc=0;   // missCost：該期有營收但缺成本 → 淨利虛高；Disc=其中已下架
   let soldActive=0, activeTotal=0;   // 動銷率用：soldActive=上架且該期有銷售、activeTotal=上架總數（下架不計，跟「上架 516」對得起來）
+  let revMiss=0, revMissQty=0;   // 有銷量(qty>0)但營收≈0 → 缺營收（多半缺進價，估不出未稅進價×qty）→ 淨利假性大虧，畫面要標
   momoLoadProducts(shop).forEach(p=>{
     const isActive = p.discontinued!==true;   // 上架
     if(isActive) activeTotal++;
     const a=momoAggregatePeriods(p, keys, shop);
     // 有營收就計入（含 qty=0 但對帳有金額的跨月結算 SKU；與總表逐列一致 → Σ營收=對帳單該店金額）
     const active = a.qty>0 || Math.abs(a.revenue)>0.5;
-    if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; if(!(Number(p.cost)>0)){ missCost++; if(p.discontinued===true) missCostDisc++; } if(isActive) soldActive++; }
+    if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; if(!(Number(p.cost)>0)){ missCost++; if(p.discontinued===true) missCostDisc++; } if(isActive) soldActive++;
+      if(a.qty>0 && Math.abs(a.revenue)<0.5){ revMiss++; revMissQty+=a.qty; } }
   });
-  return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc, soldActive, activeTotal };
+  return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty };
 }
 // 逐列「與上一期比較」小字：每欄個別定義好壞方向。
 //   good：1=升為好(瀏覽量/成交率/本期銷量/營收/毛利貢獻)、-1=降為好(退貨率)、0=中性不著色(毛利率——低毛利率升仍不算好，比照總覽卡的中性 pp)。
@@ -7394,7 +7400,11 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
   const missWarn=cur.missCost>0
     ? `<div class="mm-banner mm-banner-err click" onclick="momoJumpBatchFilter('${shop}','nocostP')" title="點擊跳到批次維護、自動篩出「本期有營收的缺成本」這幾個（含已下架）">⚠ <b>${cur.missCost}</b> 個有營收的商品缺成本${discNote}，總淨利可能高估 → <u>點此修正</u></div>`
     : '';
-  return `<div class="mm-kpis">${cardHTML}</div>${verifyTxt||''}${missWarn}`;   // verifyTxt 已是完整區塊（收合<details>或警示<div>），不再外包 .mm-verify
+  // 缺營收警示：有銷量但營收估不出（多半缺進價）→ 淨利假性大虧。明確標出，不讓「營收=0、淨利負」只靠間接徵兆
+  const revMissWarn=(cur.revMiss>0)
+    ? `<div class="mm-banner mm-banner-err click" onclick="momoJumpBatchFilter('${shop}','nopp')" title="點擊跳到批次維護、自動篩出缺進價的商品">⚠ <b>${cur.revMiss}</b> 個商品有銷量（${Math.round(cur.revMissQty)} 件）但<b>估不出營收</b>（多半缺進價）→ 營收/淨利被低估、可能假性大虧 → <u>點此補進價</u></div>`
+    : '';
+  return `<div class="mm-kpis">${cardHTML}</div>${verifyTxt||''}${revMissWarn}${missWarn}`;   // verifyTxt 已是完整區塊（收合<details>或警示<div>），不再外包 .mm-verify
 }
 
 // ── 階層圖（毛利率分佈）：MOMO 自己一套，不碰蝦皮。用「毛利率」(= 總表口徑 profit/營收)，跟總表欄位一致。
