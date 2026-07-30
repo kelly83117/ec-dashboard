@@ -1939,12 +1939,7 @@ Object.assign(App, {
       return `<div class="table-card">
         <div class="table-card-header"><div><h3>💹 訂價表</h3><p>蝦皮 / FB 商品訂價與利潤分析</p></div></div>
         <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap">${sheetTabs}</div>
-        <div style="padding:60px;text-align:center">
-          <div style="font-size:40px;margin-bottom:12px">📂</div>
-          <div style="font-size:15px;font-weight:600;margin-bottom:8px">尚未載入資料</div>
-          <div style="font-size:13px;color:#9ca3af;margin-bottom:20px">點擊下方按鈕從雲端載入訂價資料</div>
-          <button id="pr-load-btn" style="padding:10px 24px;background:#2563eb;color:white;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">⬇ 載入訂價資料</button>
-        </div></div>`;
+        <div style="padding:40px;text-align:center;color:#9ca3af;font-size:13px">載入中…</div></div>`;
     }
 
     const sheetData = window.__pricingData[activeSheet] || [];
