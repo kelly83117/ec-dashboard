@@ -479,6 +479,12 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 /* 已篩選 N / 基數 提示條（總覽上方） */
 .mm-filter-info{display:flex;align-items:center;gap:8px;font-size:12px;color:#4b5563;background:#eef0fb;border:1px solid #dfe3f7;border-radius:8px;padding:6px 12px;margin-bottom:10px;}
 .mm-filter-info b{color:#5b5fcf;}
+/* MOMO｜總表 通路總覽：圖表卡片格線（auto-fit 自動換行、不外溢） */
+.mm-ov-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:16px;}
+.mm-ov-grid3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr));}
+.mm-ov-card{background:#fff;border:1px solid #eef0f2;border-radius:10px;padding:12px 14px;min-width:0;}
+.mm-ov-h{font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;}
+.mm-ov-canvas{height:240px;position:relative;}
 /* 欄寬拖曳：豎線「單一來源」= th::after（每欄右緣 1px、粗細一致，不用 border 免得 fixed+collapse 相鄰疊加）。
    grip 是透明拖曳熱區，hover 時另畫一條紫線覆蓋。 */
 th.mm-th{position:relative;}
