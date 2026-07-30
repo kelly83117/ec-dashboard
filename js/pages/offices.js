@@ -1696,7 +1696,7 @@ Object.assign(App, {
     const c = this._prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume);
     const existingRows = window.__pricingData?.[sheet] || [];
     // 商品母表（或其他空白 RMB 工作表）的預設欄位結構
-    const RMB_DEFAULT_COLS = ['產品名稱','原始成本','陸〉陸運費','陸>台運費(kg)','售價','實際成本','蝦皮總成本','入帳金額','實際毛利','獲利百分比','成本率','備註'];
+    const RMB_DEFAULT_COLS = ['商品編號','產品名稱','品項條碼','樣式','尺寸','原始成本','陸〉陸運費','陸>台運費(kg)','售價','實際成本','蝦皮總成本','入帳金額','實際毛利','獲利百分比','成本率','備註'];
     const baseCols = existingRows.length > 0
       ? Object.keys(existingRows[0])
       : (sheet === '商品母表' ? RMB_DEFAULT_COLS : []);
@@ -2128,7 +2128,12 @@ Object.assign(App, {
       if (!r) return;
 
       const cols = Object.keys(r).filter(c => !c.startsWith('__'));
+      const isMotherSheet = activeSheet === '商品母表';
       const nameCol2 = cols.find(c => c === '產品名稱' || c === '試算名稱') || null;
+      const skuCol   = (isMotherSheet || cols.includes('商品編號')) ? '商品編號' : null;
+      const barcodeCol = (isMotherSheet || cols.includes('品項條碼')) ? '品項條碼' : null;
+      const styleCol = (isMotherSheet || cols.includes('樣式')) ? '樣式' : null;
+      const sizeCol  = (isMotherSheet || cols.includes('尺寸')) ? '尺寸' : null;
       const origCostCol = cols.find(c => c === '原始成本') || null;
       const ntCostCol = cols.find(c => c === '成本') || null;          // NT$ 成本（新格式）
       const landCol = cols.find(c => c.includes('陸〉陸') || c.includes('陸>陸')) || null;
@@ -2141,6 +2146,11 @@ Object.assign(App, {
       // 是否為 NT$ 直接成本格式（無原始成本欄）
       const isNTCost = !origCostCol && !!ntCostCol;
 
+      const txtInp = (id, label, val, w) =>
+        `<label style="display:flex;flex-direction:column;gap:3px">
+          <span style="font-size:10px;color:#6b7280;font-weight:600">${label}</span>
+          <input id="pe-${id}" type="text" value="${escapeHtml(String(val??''))}" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;width:${w||'110px'}">
+        </label>`;
       const numInp = (id, label, val, unit) =>
         `<label style="display:flex;flex-direction:column;gap:3px">
           <span style="font-size:10px;color:#6b7280;font-weight:600">${label}${unit?` <span style="color:#9ca3af;font-weight:400">${unit}</span>`:''}</span>
@@ -2158,10 +2168,12 @@ Object.assign(App, {
       detTr.className = 'pr-detail-row';
       detTr.innerHTML = `<td colspan="${colspan}" style="padding:14px;background:#f8fafc;border-bottom:2px solid #2563eb">
         <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
-          ${nameCol2 ? `<label style="display:flex;flex-direction:column;gap:3px">
-            <span style="font-size:10px;color:#6b7280;font-weight:600">產品名稱</span>
-            <input id="pe-name" type="text" value="${escapeHtml(String(r[nameCol2]||''))}" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:200px">
-          </label>` : ''}
+          ${skuCol    ? txtInp('sku',     '商品編號', r[skuCol],    '120px') : ''}
+          ${nameCol2  ? txtInp('name',    '產品名稱', r[nameCol2],  '200px') : ''}
+          ${barcodeCol? txtInp('barcode', '品項條碼', r[barcodeCol],'130px') : ''}
+          ${styleCol  ? txtInp('style',   '樣式',     r[styleCol],  '100px') : ''}
+          ${sizeCol   ? txtInp('size',    '尺寸',     r[sizeCol],   '100px') : ''}
+          ${(skuCol||nameCol2||barcodeCol||styleCol||sizeCol) ? `<div style="width:1px;background:#e5e7eb;align-self:stretch;margin:0 4px"></div>` : ''}
           ${isNTCost  ? numInp('ntcost','成本',        r[ntCostCol], 'NT$') : ''}
           ${origCostCol ? numInp('orig','原始成本',    r[origCostCol],'¥') : ''}
           ${landCol     ? numInp('land','陸〉陸運費',  r[landCol],'¥') : ''}
@@ -2187,10 +2199,20 @@ Object.assign(App, {
             <input id="pe-note" type="text" value="${escapeHtml(String(r[noteCol]||''))}" placeholder="備註" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:150px">
           </label>` : ''}
         </div>
-        <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+        <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
           <button id="pe-save-${idx}" style="padding:7px 20px;background:#2563eb;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
           <button id="pe-cancel-${idx}" style="padding:7px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
           <span style="font-size:11px;color:#9ca3af">輸入後自動試算</span>
+          ${activeSheet === '商品母表' ? `
+          <div style="width:1px;background:#e5e7eb;align-self:stretch;margin:0 4px"></div>
+          <span style="font-size:11px;color:#6b7280">加入分頁：</span>
+          <button data-copy-sheet="生活好麻吉" id="pe-copy-s0-${idx}" style="padding:7px 14px;background:#f0fdf4;color:#059669;border:1px solid #bbf7d0;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 生活好麻吉</button>
+          <button data-copy-sheet="玩樂盒子"  id="pe-copy-s1-${idx}" style="padding:7px 14px;background:#fef9c3;color:#b45309;border:1px solid #fde68a;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 玩樂盒子</button>
+          <button data-copy-sheet="森之旅"    id="pe-copy-s2-${idx}" style="padding:7px 14px;background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 森之旅</button>
+          <button data-copy-sheet="維克生活館" id="pe-copy-s3-${idx}" style="padding:7px 14px;background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 維克生活館</button>
+          <button data-copy-sheet="MOMO"      id="pe-copy-s4-${idx}" style="padding:7px 14px;background:#fff1f2;color:#be123c;border:1px solid #fecdd3;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ MOMO</button>
+          <button data-copy-sheet="FRIDAY"    id="pe-copy-s5-${idx}" style="padding:7px 14px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ FRIDAY</button>
+          ` : ''}
         </div>
       </td>`;
       tr.after(detTr);
@@ -2240,13 +2262,22 @@ Object.assign(App, {
           wt = parseFloat(document.getElementById('pe-wt')?.value)   || (weightCol ? +r[weightCol] : 0);
         }
         const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol ? +r[priceCol] : 0);
-        const name2   = document.getElementById('pe-name')?.value  ?? (nameCol2   ? r[nameCol2]   : '');
-        const note    = document.getElementById('pe-note')?.value ?? (noteCol    ? r[noteCol]    : '');
-        const website = document.getElementById('pe-web')?.value  ?? (websiteCol ? r[websiteCol] : '');
+        const name2   = document.getElementById('pe-name')?.value    ?? (nameCol2   ? r[nameCol2]   : '');
+        const note    = document.getElementById('pe-note')?.value    ?? (noteCol    ? r[noteCol]    : '');
+        const website = document.getElementById('pe-web')?.value     ?? (websiteCol ? r[websiteCol] : '');
+        const sku2    = document.getElementById('pe-sku')?.value     ?? (skuCol     ? r[skuCol]     : '');
+        const barcode2= document.getElementById('pe-barcode')?.value ?? (barcodeCol ? r[barcodeCol] : '');
+        const style2  = document.getElementById('pe-style')?.value   ?? (styleCol   ? r[styleCol]   : '');
+        const size2   = document.getElementById('pe-size')?.value    ?? (sizeCol    ? r[sizeCol]    : '');
         const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, +(r['廣告ROAS']||0), +(r['月銷量']||0));
+        const allSaveCols = skuCol ? [...new Set([...cols, '商品編號','品項條碼','樣式','尺寸'])] : cols;
         const newRow = { ...r };
-        for (const col of cols) {
-          if (col === '成本' && isNTCost) newRow[col] = parseFloat(document.getElementById('pe-ntcost')?.value) || +r[ntCostCol] || 0;
+        for (const col of allSaveCols) {
+          if (col === '商品編號') newRow[col] = sku2;
+          else if (col === '品項條碼') newRow[col] = barcode2;
+          else if (col === '樣式') newRow[col] = style2;
+          else if (col === '尺寸') newRow[col] = size2;
+          else if (col === '成本' && isNTCost) newRow[col] = parseFloat(document.getElementById('pe-ntcost')?.value) || +r[ntCostCol] || 0;
           else if (col === '單品售價') newRow[col] = pr;
           else if (col === '原始成本') newRow[col] = oc;
           else if (col.includes('陸〉陸') || col.includes('陸>陸')) newRow[col] = lf;
@@ -2283,6 +2314,42 @@ Object.assign(App, {
       document.getElementById(`pe-cancel-${idx}`)?.addEventListener('click', () => {
         detTr.remove(); tr.style.background = r.__custom?'#eff6ff':'';
       });
+
+      if (activeSheet === '商品母表') {
+        const _copyToSheet = (targetSheet, btn) => {
+          const oc = parseFloat(document.getElementById('pe-orig')?.value) || (origCostCol ? +r[origCostCol] : 0);
+          const lf = parseFloat(document.getElementById('pe-land')?.value) || (landCol ? +r[landCol] : 0);
+          const wt = parseFloat(document.getElementById('pe-wt')?.value)   || (weightCol ? +r[weightCol] : 0);
+          const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol ? +r[priceCol] : 0);
+          const c  = self._prCalcAll(activeSheet, oc, lf, wt, pr, 0, 0);
+          const name2    = document.getElementById('pe-name')?.value    || (nameCol2   ? String(r[nameCol2]||'')   : '');
+          const sku2_    = document.getElementById('pe-sku')?.value     || (skuCol     ? String(r[skuCol]||'')     : '');
+          const barcode_ = document.getElementById('pe-barcode')?.value || (barcodeCol ? String(r[barcodeCol]||'') : '');
+          const style_   = document.getElementById('pe-style')?.value   || (styleCol   ? String(r[styleCol]||'')   : '');
+          const size_    = document.getElementById('pe-size')?.value    || (sizeCol    ? String(r[sizeCol]||'')    : '');
+          const ntCost = Math.round(c.實際成本 * 10) / 10;
+          const newRow = {
+            __custom: true,
+            __id: 'cpy_' + Date.now(),
+            商品編號: sku2_,
+            商品名稱: name2,
+            品項條碼: barcode_,
+            樣式: style_,
+            尺寸: size_,
+            成本: ntCost,
+            單品售價: pr,
+          };
+          if (!window.__pricingData[targetSheet]) window.__pricingData[targetSheet] = [];
+          window.__pricingData[targetSheet].unshift(newRow);
+          const custom = Store.get(`ec.d2.pricing.custom.${targetSheet}`, []);
+          custom.unshift(newRow);
+          Store.set(`ec.d2.pricing.custom.${targetSheet}`, custom);
+          if (btn) { btn.textContent = '✓ 已加入'; btn.disabled = true; btn.style.opacity = '0.6'; }
+        };
+        detTr.querySelectorAll('[data-copy-sheet]').forEach(btn => {
+          btn.addEventListener('click', () => _copyToSheet(btn.getAttribute('data-copy-sheet'), btn));
+        });
+      }
     });
 
     document.getElementById('pr-show-all')?.addEventListener('click', () => {

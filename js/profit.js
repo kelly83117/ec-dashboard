@@ -3142,6 +3142,47 @@ function testRuleStats(shop,rule){
   const done=matched.filter(r=>isSuggDone(shop,r.code)).length;
   return{total,done};
 }
+// 通路的「工作流本期」逐標籤優化進度。回 null = 該期報表不存在。
+// 分母:該期報表列重算標籤(不讀快照標籤,與工作日誌同法);
+// 分子:報表 note / 該期廣告調整手打 / 歸屬該期的商品調整,任一 → 已優化。
+function shopLabelProgress(shop){
+  const now=new Date();
+  const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
+  const period=_growthPeriodOf({date:today});
+  if(!period)return null;
+  const [month,half]=period.split('|');
+  const mem=(typeof Store!=='undefined'&&Store._profitMem)||{};
+  const rep=mem['ec|'+shop+'|'+month+'|'+half];
+  const rows=Array.isArray(rep&&rep.built)?rep.built:(Array.isArray(rep&&rep.rows)?rep.rows:null);
+  if(!rows||!rows.length)return null;
+  const adNotes=mem['ec_notes|'+shop+'|'+month+'|'+half]||{};
+  const gNotes=mem['ec_notes|'+shop+'_growth']||{};
+  const done=new Set();
+  Object.keys(adNotes).forEach(code=>{
+    const nd=adNotes[code];
+    const has=(typeof nd==='string')?!!nd.trim():!!((nd&&nd.adjustments)||[]).length;
+    if(has)done.add(code);
+  });
+  Object.keys(gNotes).forEach(code=>{
+    if(done.has(code))return;
+    const nd=gNotes[code];if(!nd||typeof nd==='string')return;
+    if((nd.adjustments||[]).some(a=>_growthPeriodOf(a)===period))done.add(code);
+  });
+  const ana={},growth={};let doneTotal=0;
+  rows.forEach(r=>{
+    const isDone=done.has(r.code)||!!(r.note&&String(r.note).trim());
+    if(isDone)doneTotal++;
+    let al='',gl='';
+    try{
+      al=calcAnalysis(r.adsFee,r.pureRate,r.targetROI,r.roiDiff,r.clicks,r.pureProfit,r.roi).label||'';
+      gl=calcGrowthAnalysis(r.growthRate,r.rev,r.prevRev,r.pureRate).label||'';
+    }catch(e){}
+    if(al){(ana[al]=ana[al]||{t:0,d:0}).t++;if(isDone)ana[al].d++;}
+    if(gl){(growth[gl]=growth[gl]||{t:0,d:0}).t++;if(isDone)growth[gl].d++;}
+  });
+  return{month,half,total:rows.length,doneTotal,ana,growth};
+}
+window.shopLabelProgress=shopLabelProgress;
 function buildSuggCell(shop,r){
   if(!r.testTags?.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
   const codeEsc=r.code.replace(/'/g,"\\'");

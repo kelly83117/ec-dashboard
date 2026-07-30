@@ -637,6 +637,20 @@ Object.assign(App, {
       this._adjPillDelegated = true;
       const host = document.getElementById('main-content');
       if (host) host.addEventListener('click', (e) => {
+        // 本期優化進度：點通路列 → 展開/收折同卡片內對應明細（同委派，讀當下 DOM）
+        const toggle = e.target.closest && e.target.closest('.adj-prog-toggle');
+        if (toggle) {
+          const shop = toggle.dataset.progShop || '';
+          const card = toggle.closest('.dp-card') || document;
+          const sel = (window.CSS && CSS.escape) ? CSS.escape(shop) : shop;
+          const detail = card.querySelector(`[data-prog-detail="${sel}"]`);
+          if (detail) {
+            detail.hidden = !detail.hidden;
+            const caret = toggle.querySelector('.adj-prog-caret');
+            if (caret) caret.textContent = detail.hidden ? '▾' : '▴';
+          }
+          return;
+        }
         const pill = e.target.closest && e.target.closest('.adj-pill');
         if (!pill) return;
         this.openAdjustmentDetailModal(pill.dataset.adjPerson, pill.dataset.adjDate, pill.dataset.adjKind, pill.dataset.adjGroup);
@@ -1751,8 +1765,75 @@ function getAdjIndex() {
   return idx;
 }
 // 雲端 profit 資料有更新 → 索引 + 標籤就緒旗標一起失效，下次 render 自然重建（firebase.js 既有事件）
-window.addEventListener('profitDataReady', () => { _adjIndexCache = null; _adjLabelsReady = false; });
+window.addEventListener('profitDataReady', () => {
+  _adjIndexCache = null; _adjLabelsReady = false;
+  // 報表資料（window.state._built）更新 → 若正在工作日誌頁(office-d1)，重繪一次讓卡片本期進度即時反映；
+  //   其他頁不動（資料已進 Store，切過去自然渲染）。route 判斷沿用 app.js 既有慣例（App.render 重繪當前 route）。
+  if (window.App && window.App.route === 'office-d1' && typeof window.App.render === 'function') window.App.render();
+});
 
+// 進度明細的嚴重度排序:要處理的在上、好消息在下。不在清單的排中間(rank 50)。
+// ROI 負數(label 含 ROI 且含 '-')視為嚴重,排在具名警訊之後、加減預算之前。
+const _PROG_ANA_RANK=['賠錢中','危險商品','低淨利','低效廣告'];
+const _PROG_GROWTH_RANK=['重跌品','衰退品','低利品','弱轉換','發展品','成長品','中營收','高營收','爆發品'];
+function _progRank(label,kind){
+  if(kind==='growth'){
+    const i=_PROG_GROWTH_RANK.indexOf(label);
+    return i>=0?i:50;
+  }
+  const i=_PROG_ANA_RANK.indexOf(label);
+  if(i>=0)return i;
+  if(/ROI/.test(label)&&label.indexOf('-')>=0)return 10;   // ROI 負數
+  if(/^[加減]/.test(label))return 20;                       // 加/減預算
+  if(/ROI/.test(label))return 30;                           // ROI 正數
+  if(label==='高利潤商品')return 90;                        // 好事墊底
+  return 50;
+}
+function buildProgressHtml(person){
+  const shops=ADJ_PERSON_TO_SHOPS[person]||[];
+  if(!shops.length)return'';
+  const hasSLP=typeof window.shopLabelProgress==='function';
+  const results=shops.map(shop=>({shop,p:hasSLP?window.shopLabelProgress(shop):null}));
+  const anyP=results.find(r=>r.p);
+  const pt=anyP?`本期優化進度（${anyP.p.month} ${anyP.p.half==='first'?'上半月':'下半月'}）`:'本期優化進度';
+  const bar=(d,t)=>{const pct=Math.round(d/t*100);
+    return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-bar"><span class="adj-prog-fill" style="width:${pct}%"></span></span><span class="adj-prog-pct">${pct}%</span>`;};
+  // 明細列(小標籤)不畫條:數字 + 符號 + %。
+  // ✓=100% 完成(綠)、無符號=進行中(藍)、!=低於50%(琥珀)。
+  // 符號是主判讀(不依賴色覺)、顏色是輔助;刻意不用紅——期中偏低是常態不是過錯。
+  const flat=(d,t)=>{const pct=Math.round(d/t*100);
+    const cls=pct>=100?'adj-prog-p100':pct>=50?'adj-prog-p50':'adj-prog-p0';
+    const mark=pct>=100?'✓ ':pct<50?'! ':'';
+    return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-pct ${cls}">${mark}${pct}%</span>`;};
+  const rows=results.map(({shop,p})=>{
+    if(!p)return`<div class="adj-prog-row"><span class="adj-prog-shop">${escapeHtml(shop)}</span><span class="adj-prog-na">—</span></div>`;
+    const grp=(title,obj,kind)=>{
+      const keys=Object.keys(obj).sort((a,b)=>{
+        const ra=_progRank(a,kind),rb=_progRank(b,kind);
+        return ra!==rb?ra-rb:obj[b].t-obj[a].t;
+      });
+      if(!keys.length)return'';
+      let gd=0,gt=0;keys.forEach(l=>{gd+=obj[l].d;gt+=obj[l].t;});
+      // 分組小總結:該組所有標籤桶的加總(一商品雙標籤會重複計,語意為「標籤完成度」)
+      return`<div class="adj-prog-row adj-prog-grp"><span class="adj-prog-shop">${escapeHtml(title)}</span>${bar(gd,gt)}</div>`+keys.map(l=>{
+        const{t,d}=obj[l];
+        return`<div class="adj-prog-row adj-prog-sub"><span class="adj-prog-shop">${escapeHtml(window.mapAnaLabel?window.mapAnaLabel(l):l)}</span>${flat(d,t)}</div>`;
+      }).join('');
+    };
+    return`<button type="button" class="adj-prog-row adj-prog-toggle" data-prog-shop="${escapeHtml(shop)}">
+        <span class="adj-prog-shop">${escapeHtml(shop)}</span>${bar(p.doneTotal,p.total)}<span class="adj-prog-caret">▾</span>
+      </button>
+      <div class="adj-prog-detail" data-prog-detail="${escapeHtml(shop)}" hidden>
+        ${grp('廣告分析',p.ana,'ana')}${grp('成長分析',p.growth,'growth')}
+      </div>`;
+  }).join('');
+  return`<div class="adj-prog">
+    <div class="adj-prog-title">${pt}</div>
+    ${rows}
+    <div class="adj-prog-note">依通路負責人歸屬，非個人操作紀錄；點通路列展開明細</div>
+    <div class="adj-prog-note"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span>　·　各標籤分母為帶該標籤的商品數</div>
+  </div>`;
+}
 // 第六塊：某人某日的「淨利表調整」區塊，注入人員卡片底部。只留標題 + 兩排 pill，明細改走彈窗。
 //   viewDate: 'YYYY-MM-DD'。回傳 HTML；非郭雅琪且當日 0 筆 → 回 ''（連分隔線都不出）。
 //   pill 為 <button>，click 由 bindWeeklyCalendar 綁 → openAdjustmentDetailModal。
@@ -1769,9 +1850,10 @@ function buildCardAdjustmentsHtml(person, viewDate) {
         <div class="adj-sec">
           <div class="adj-sec-head"><span class="adj-sec-title">淨利表調整</span></div>
           <div class="adj-none">${escapeHtml(shops.join('、'))}沒有淨利表資料</div>
+          ${buildProgressHtml(person)}
         </div>`;
     }
-    return '';
+    return buildProgressHtml(person)?`<div class="adj-sec">${buildProgressHtml(person)}</div>`:'';
   }
 
   const total = recs.length;
@@ -1826,6 +1908,7 @@ function buildCardAdjustmentsHtml(person, viewDate) {
       </div>
       ${anaPills ? `<div class="adj-pill-group"><div class="adj-pills-label">廣告分析</div><div class="adj-pills">${anaPills}</div></div>` : ''}
       ${growthPills ? `<div class="adj-pill-group"><div class="adj-pills-label">成長分析</div><div class="adj-pills">${growthPills}</div></div>` : ''}
+      ${buildProgressHtml(person)}
     </div>`;
 }
 
