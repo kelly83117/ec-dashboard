@@ -1741,7 +1741,7 @@ Object.assign(App, {
 
   _prColType(col, sheet) {
     if (col.includes('ROAS')) return 'roas';
-    if (col.includes('百分比') || col === 'ROI' || col.includes('退貨率') || col.includes('以下)')) return 'pct';
+    if (col.includes('百分比') || col === 'ROI' || col.includes('退貨率') || col.includes('以下)') || col === '成本率') return 'pct';
     if (col === '進貨' && sheet === 'Victor') return 'link';
     if (/月銷量|^進貨$|^數量$|^箱數$|^重量$/.test(col)) return 'count';
     if (col.includes('網站') || col.includes('連結')) return 'link';
