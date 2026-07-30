@@ -1686,9 +1686,10 @@ Object.assign(App, {
     // Excel: 獲利% = 實際毛利 / 售價 (Q/I)
     const 獲利百分比 = price > 0 ? r2(實際毛利 / price * 10000) / 10000 : 0;
     const 成本率 = price > 0 ? r2(實際成本 / price * 10000) / 10000 : 0;
-    const 淨利潤 = volume ? r2(實際毛利 * volume) : null;
+    const 廣告 = (roas > 0 && price > 0) ? r2(price / roas) : null;
+    const 淨利潤 = volume ? r2(實際毛利 * volume - (廣告 || 0) * volume) : null;
     const 預估投入 = volume ? r2(volume * price) : null;
-    return { 陸台運費NT, 實際成本, 稅金, 成交, 活動, 退貨, 蝦皮總成本, 入帳, 實際毛利, 獲利百分比, 成本率, 淨利潤, 預估投入 };
+    return { 陸台運費NT, 實際成本, 稅金, 成交, 活動, 退貨, 蝦皮總成本, 入帳, 實際毛利, 獲利百分比, 成本率, 廣告, 淨利潤, 預估投入 };
   },
 
   _prBuildRow(sheet, inputs) {
