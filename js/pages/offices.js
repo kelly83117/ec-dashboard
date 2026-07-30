@@ -1596,19 +1596,19 @@ Object.assign(App, {
   },
 
   // ── 訂價表 ──────────────────────────────────────────────
-  PRICING_SHEETS_ORDER: ['訂價','導流品','Victor','inna','Vivian'],
+  PRICING_SHEETS_ORDER: ['商品母表','生活好麻吉','玩樂盒子','森之旅','維克生活館','MOMO','FRIDAY'],
 
   // 各工作表費率常數（依 Excel $C$1 匯率、G欄 運費/kg¥、row2 各費率）
   // ship = 陸>台運費 ¥/kg（與原始成本同樣換匯，故實際成本 = (C+D+E×ship)×rmb）
   // incTax = 銷項稅金率（訂價表 Excel 顯示 None = 0，不含銷項稅）
   PRICING_SHEET_PARAMS: {
-    '訂價':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    '導流品':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    'Victor':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    'inna':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    'Vivian':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    '官網':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    'Doris':   { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '商品母表':   { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '生活好麻吉': { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '玩樂盒子':   { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '森之旅':     { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '維克生活館': { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'MOMO':       { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'FRIDAY':     { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
   },
 
   // 讀取費率：優先用 localStorage 儲存值，否則用預設
