@@ -934,6 +934,7 @@ Object.assign(App, {
           <span class="adj-modal-shop">${escapeHtml(r.shop || '')}</span>
           <span class="adj-modal-code">${escapeHtml(r.code || '')}</span>
           <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
+          <span class="adj-src adj-src-${r.src||'report'}">${r.src==='ads'?'廣告調整':r.src==='growth'?'商品調整':r.src==='import'?'舊版匯入':'報表匯入'}</span>
         </div>
         <div class="adj-modal-text">${escapeHtml(r.text || '')}</div>
       </div>`;
@@ -1539,6 +1540,28 @@ function collectAdjustments() {
                && typeof window.calcGrowthAnalysis === 'function';
   if (!hasCalc) console.warn('[collectAdjustments] window.calcAnalysis / calcGrowthAnalysis 尚未就緒（profit.js 可能還沒載完），本次不計算標籤，下次呼叫重試');
   let labelErrCount = 0;   // calc throw 的列數，迴圈後統一 warn 一次（別每列洗版）
+  const repIdx = {};   // 第二趟用：{ 'shop|month|half': { code: row } }，第一趟順手建、不重掃
+  const nameIdx = {};  // 通路級：'通路' → {code: 商品名}。名字與期間無關，所有來源共用
+  // 所有來源的唯一出口：統一去重 + push。dk 公式與原本完全相同。
+  const _pushRec = (rec) => {
+    if (!rec.text) return;
+    const dk = rec.shop + '␟' + (rec.code || '') + '␟' + (rec.date || '') + '␟' + rec.text;
+    if (seen.has(dk)) return;
+    seen.add(dk);
+    out.push(rec);
+  };
+  // 標籤計算抽成共用：報表列 row → {anaLabel,anaCls,growthLabel,growthCls}；無 row / calc 未就緒 → 全空
+  const _labelsOf = (row) => {
+    const r = { anaLabel:'', anaCls:'', growthLabel:'', growthCls:'' };
+    if (!hasCalc || !row) return r;
+    try {
+      const _a = window.calcAnalysis(row.adsFee, row.pureRate, row.targetROI, row.roiDiff, row.clicks, row.pureProfit, row.roi);
+      r.anaLabel = _a.label; r.anaCls = _a.cls || '';
+      const _g = window.calcGrowthAnalysis(row.growthRate, row.rev, row.prevRev, row.pureRate);
+      r.growthLabel = _g.label; r.growthCls = _g.cls || '';
+    } catch (e) { labelErrCount++; }
+    return r;
+  };
   // 掃描順序決定去重時「誰先寫入」（去重邏輯不變：先寫入優先、後來略過）。
   //   同一筆調整可能出現在多份報表（整月 full vs 半月 first/second），重算標籤可能不一致。
   //   規則：半月(first/second) 排在 full 前 → 一律以半月報表為準；同 rank 再按 key 字串排，
@@ -1564,23 +1587,15 @@ function collectAdjustments() {
                : Array.isArray(rep && rep.rows)  ? rep.rows       // 沒有才 rows
                : [];
     rows.forEach(row => {
+      const pk = shop + '|' + parts[2] + '|' + parts[3];
+      (repIdx[pk] = repIdx[pk] || {})[row.code] = row;
+      if (row.name) (nameIdx[shop] = nameIdx[shop] || {})[row.code] = row.name;
       const note = row && row.note;
       if (typeof note !== 'string') return;       // 只處理字串 note
 
       // 第四塊：每列只算一次標籤（各段共用，切多段不重算）。一律重算、不讀 row.analysisLabel（避免舊規則快照）。
       //   getAdjIndex() 在月曆 render 迴圈裡跑，任何 throw 都會炸掉整頁 → 每列 try/catch，該列給空標籤並累計。
-      let anaLabel = '', anaCls = '', growthLabel = '', growthCls = '';
-      if (hasCalc) {
-        try {
-          const _a = window.calcAnalysis(row.adsFee, row.pureRate, row.targetROI, row.roiDiff, row.clicks, row.pureProfit, row.roi);
-          anaLabel = _a.label; anaCls = _a.cls || '';           // cls：pill 上色用（第五塊）
-          const _g = window.calcGrowthAnalysis(row.growthRate, row.rev, row.prevRev, row.pureRate);
-          growthLabel = _g.label; growthCls = _g.cls || '';
-        } catch (e) {
-          anaLabel = ''; anaCls = ''; growthLabel = ''; growthCls = '';
-          labelErrCount++;
-        }
-      }
+      const { anaLabel, anaCls, growthLabel, growthCls } = _labelsOf(row);
 
       const re = /(\d{1,2})\/(\d{1,2})/g;         // 找所有「月/日」
       const marks = [];
@@ -1596,11 +1611,7 @@ function collectAdjustments() {
       const pushSeg = (dateStr, rawText) => {
         const text = trimSeg(rawText);
         if (!text) return;                          // 空段丟掉
-        // 去重在「段」層級。分隔用 ␟ (␟) 而非 '|'，避免手打文字含 '|' 時 key 碰撞
-        const dk = shop + '␟' + (row.code || '') + '␟' + (dateStr || '') + '␟' + text;
-        if (seen.has(dk)) return;
-        seen.add(dk);
-        out.push({ date: dateStr, shop, code: row.code, name: (row.name || ''), text, anaLabel, anaCls, growthLabel, growthCls });
+        _pushRec({ date: dateStr, shop, code: row.code, name: (row.name || ''), text, anaLabel, anaCls, growthLabel, growthCls, period: parts[2] + '|' + parts[3], src: 'report' });
       };
 
       if (marks.length === 0) { pushSeg(null, note); return; }  // 無日期 → 整段 date=null
@@ -1613,12 +1624,61 @@ function collectAdjustments() {
       }
     });
   });
+  // 第二趟：掃同事手打的 ec_notes|（廣告調整 / 商品調整）。一定放在第一趟之後（要用 repIdx）。
+  // _growthPeriodOf 由 profit.js 掛在 window，而 daily.js 先載入 → 執行期守衛
+  const hasGP = typeof window._growthPeriodOf === 'function';
+  if (!hasGP) console.warn('[collectAdjustments] window._growthPeriodOf 尚未就緒，商品調整這次不納入，下次呼叫重試');
+
+  scanKeys.forEach(key => {
+    if (key.indexOf('ec_notes|') !== 0) return;
+    const isGrowth = /_growth$/.test(key);
+    const p = key.split('|');
+    let shop, fixedPeriod = null, src;
+    if (isGrowth) {
+      if (!hasGP) return;
+      shop = key.slice('ec_notes|'.length).replace(/_growth$/, '');
+      src = 'growth';
+    } else if (p.length >= 4 && p[2] && p[3]) {
+      shop = p[1];
+      fixedPeriod = p[2] + '|' + p[3];
+      src = 'ads';
+    } else {
+      shop = key.slice('ec_notes|'.length);   // 舊版 key（無期間），例 ec_notes|玩樂
+      src = 'import';
+    }
+    if (!shop || shop.indexOf('|') >= 0) return;
+    const notes = mem[key] || {};
+    Object.keys(notes).forEach(code => {
+      const v = notes[code];
+      const arr = (typeof v === 'string') ? [{ date:'', text:v }] : ((v && v.adjustments) || []);
+      arr.forEach(a => {
+        const text = String((a && a.text) || '').trim();
+        if (!text) return;
+        const d = String((a && a.date) || '');
+        const date = /^\d{4}\/\d{2}\/\d{2}$/.test(d) ? d : null;
+        const period = isGrowth ? window._growthPeriodOf(a) : fixedPeriod;
+        const row = (period && repIdx[shop + '|' + period]) ? repIdx[shop + '|' + period][code] : null;
+        const L = _labelsOf(row);
+        _pushRec({
+          date, shop, code, name: (row && row.name) || (nameIdx[shop] && nameIdx[shop][code]) || '', text,
+          anaLabel: L.anaLabel, anaCls: L.anaCls,
+          growthLabel: L.growthLabel, growthCls: L.growthCls,
+          period: period || '', src
+        });
+      });
+    });
+  });
   if (labelErrCount > 0) console.warn('[collectAdjustments] 標籤重算有', labelErrCount, '列 throw，已給空標籤（可能是舊報表欄位異常）');
   console.log('[collectAdjustments] 總計', out.length,
               '｜有日期', out.filter(r => r.date).length,
               '｜無日期', out.filter(r => !r.date).length,
               '｜有分析標籤', out.filter(r => r.anaLabel).length,
               '｜有成長標籤', out.filter(r => r.growthLabel).length);
+  console.log('[collectAdjustments] 來源拆解 ｜報表 note',
+    out.filter(r=>r.src==='report').length,
+    '｜廣告調整', out.filter(r=>r.src==='ads').length,
+    '｜商品調整', out.filter(r=>r.src==='growth').length,
+    '｜舊版匯入', out.filter(r=>r.src==='import').length);
   return out;
 }
 
@@ -1678,7 +1738,8 @@ let _adjLabelsReady = false;
 //   下次呼叫時 calc 好了才重建一次。
 function getAdjIndex() {
   const calcOk = typeof window.calcAnalysis === 'function'
-              && typeof window.calcGrowthAnalysis === 'function';
+              && typeof window.calcGrowthAnalysis === 'function'
+              && typeof window._growthPeriodOf === 'function';   // 第二趟的商品調整也依賴它
   if (_adjIndexCache && (_adjLabelsReady || !calcOk)) return _adjIndexCache;
   const idx = {};
   collectAdjustments().forEach(r => {

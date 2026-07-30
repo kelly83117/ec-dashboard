@@ -134,3 +134,18 @@
   margin-left: 3px;
   white-space: nowrap;
 }
+
+/* 明細彈窗：來源小標記（報表匯入 / 廣告調整 / 商品調整）。刻意做小、灰、淡底，
+   不搶商品名稱的視覺。顏色一律走既有 :root 變數，不寫死色碼、不碰 --bg 底色。 */
+.adj-src {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--primary-soft);
+  padding: 0 5px;
+  border-radius: 4px;
+  align-self: center;
+  white-space: nowrap;
+}
