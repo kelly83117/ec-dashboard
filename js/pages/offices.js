@@ -2637,7 +2637,9 @@ Object.assign(App, {
       });
       Store.set('ec.pricing.rates', saved);
       document.getElementById('pr-rates-panel').style.display = 'none';
-      alert('費率已儲存');
+      self.render();
+      const t = document.getElementById('toast');
+      if (t) { t.textContent = '費率已儲存'; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2000); }
     });
     document.getElementById('pr-rates-reset')?.addEventListener('click', () => {
       if (!confirm('確定還原所有分頁為預設費率？')) return;
