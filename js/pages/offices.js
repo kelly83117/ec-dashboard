@@ -1629,6 +1629,8 @@ Object.assign(App, {
           style="width:64px;padding:4px 6px;border:1px solid var(--border);border-radius:5px;font-size:12px;text-align:right;font-family:inherit">`;
       return `<tr>
         <td style="padding:6px 10px;font-weight:600;font-size:12px;white-space:nowrap">${sh}</td>
+        <td style="padding:4px 6px;text-align:center">${inp('rmb',   r.rmb)}</td>
+        <td style="padding:4px 6px;text-align:center">${inp('ship',  r.ship)}</td>
         <td style="padding:4px 6px;text-align:center">${inp('tax',   (r.tax*100).toFixed(1))}</td>
         <td style="padding:4px 6px;text-align:center">${inp('txFee',(r.txFee*100).toFixed(1))}</td>
         <td style="padding:4px 6px;text-align:center">${inp('promo',(r.promo*100).toFixed(1))}</td>
@@ -1649,6 +1651,8 @@ Object.assign(App, {
         <table style="border-collapse:collapse">
           <thead><tr style="color:#6b7280;border-bottom:1px solid var(--border)">
             <th style="padding:4px 10px;text-align:left;font-weight:600;font-size:12px">分頁</th>
+            <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">人民幣匯率</th>
+            <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">陸陸運費(¥/kg)</th>
             <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">稅金%</th>
             <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">成交%</th>
             <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">活動%</th>
@@ -1804,6 +1808,45 @@ Object.assign(App, {
     const fullOrder = [...savedOrder, ...newCols];
     const hiddenSet = new Set(saved.hidden || []);
     return fullOrder.filter(c => !hiddenSet.has(c));
+  },
+
+  _prStatsHtml(data) {
+    const pcts = data.map(r => parseFloat(r['獲利百分比'])).filter(v => !isNaN(v) && isFinite(v));
+    if (!pcts.length) return '';
+    const total = pcts.length;
+    const avg = pcts.reduce((a,b)=>a+b,0) / total;
+    const max = Math.max(...pcts);
+    const buckets = [0,0,0,0];
+    pcts.forEach(p => { if(p<0.10) buckets[0]++; else if(p<0.20) buckets[1]++; else if(p<0.30) buckets[2]++; else buckets[3]++; });
+    const colors = ['#ef4444','#f59e0b','#10b981','#059669'];
+    const labels = ['< 10%','10~20%','20~30%','> 30%'];
+    // donut SVG
+    const cx=44,cy=44,ro=36,ri=22;
+    let ang = -Math.PI/2, segs='';
+    buckets.forEach((n,i)=>{
+      if(!n) return;
+      const sweep = n/total*Math.PI*2;
+      const ea = ang+sweep;
+      const lg = sweep>Math.PI?1:0;
+      const p=`M${(cx+ro*Math.cos(ang)).toFixed(2)},${(cy+ro*Math.sin(ang)).toFixed(2)} A${ro},${ro},0,${lg},1,${(cx+ro*Math.cos(ea)).toFixed(2)},${(cy+ro*Math.sin(ea)).toFixed(2)} L${(cx+ri*Math.cos(ea)).toFixed(2)},${(cy+ri*Math.sin(ea)).toFixed(2)} A${ri},${ri},0,${lg},0,${(cx+ri*Math.cos(ang)).toFixed(2)},${(cy+ri*Math.sin(ang)).toFixed(2)} Z`;
+      segs+=`<path d="${p}" fill="${colors[i]}"/>`;
+      ang=ea;
+    });
+    const avgColor = avg>=0.2?'#059669':avg>=0.1?'#f59e0b':'#ef4444';
+    const donut=`<svg width="88" height="88" viewBox="0 0 88 88" style="flex-shrink:0">${segs}<text x="44" y="41" text-anchor="middle" font-size="10" fill="#6b7280">平均</text><text x="44" y="54" text-anchor="middle" font-size="13" font-weight="700" fill="${avgColor}">${(avg*100).toFixed(0)}%</text></svg>`;
+    const legend = buckets.map((n,i)=>n?`<div style="display:flex;align-items:center;gap:5px"><span style="width:9px;height:9px;border-radius:50%;background:${colors[i]};flex-shrink:0;display:inline-block"></span><span style="font-size:11px;color:#6b7280">${labels[i]}</span><span style="font-size:11px;font-weight:700;color:var(--text)">${n}</span></div>`:'').filter(Boolean).join('');
+    const stat=(label,val,color='var(--text)')=>`<div style="display:flex;flex-direction:column;gap:2px;min-width:72px"><span style="font-size:10px;color:#9ca3af;white-space:nowrap">${label}</span><span style="font-size:20px;font-weight:700;color:${color};line-height:1">${val}</span></div>`;
+    const goodCount = buckets[2]+buckets[3];
+    return `<div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:16px;align-items:center;flex-wrap:wrap;background:var(--surface)">
+      <div style="display:flex;align-items:center;gap:8px">${donut}<div style="display:flex;flex-direction:column;gap:5px">${legend}</div></div>
+      <div style="width:1px;background:var(--border);align-self:stretch;margin:0 4px"></div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+        ${stat('總商品數', total)}
+        ${stat('平均獲利', (avg*100).toFixed(1)+'%', avgColor)}
+        ${stat('最高獲利', (max*100).toFixed(1)+'%', '#059669')}
+        ${stat('≥20% 商品', goodCount+' / '+total, '#2563eb')}
+      </div>
+    </div>`;
   },
 
   _prColPanelHtml(allCols, sheet) {
@@ -2113,6 +2156,7 @@ Object.assign(App, {
         </div>
       </div>
       <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;overflow-x:auto">${sheetTabs}</div>
+      ${this._prStatsHtml(displayData)}
       <div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center">
         <button id="pr-col-btn" style="padding:5px 14px;background:var(--bg);border:1px solid var(--border);border-radius:7px;font-size:13px;cursor:pointer;color:var(--text)">☰ 欄位</button>
         <button id="pr-filter-btn" style="padding:5px 14px;background:${Object.keys(numFilters).length?'#dbeafe':'var(--bg)'};border:1px solid ${Object.keys(numFilters).length?'#2563eb':'var(--border)'};border-radius:7px;font-size:13px;cursor:pointer;color:${Object.keys(numFilters).length?'#2563eb':'var(--text)'}">⊟ 範圍${sort?.col?` · ⇅`:''}${Object.keys(numFilters).length?` (${Object.keys(numFilters).length})`:''}</button>
