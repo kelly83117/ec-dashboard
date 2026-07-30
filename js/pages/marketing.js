@@ -1705,46 +1705,8 @@ Object.assign(App, {
     const todayDash  = toDateStr(now);              // 2026-06-18
     const todaySlash = todayDash.replace(/-/g, '/'); // 2026/06/18
 
-    // 共用門檻
-    const T = Object.assign({}, window.INSIGHT_DEFAULT_THRESHOLDS || {
-      explosion: 50, growth: 10, drop: -10, heavyDrop: -50,
-      ctrMin: 3, weakConvMin: 1, weakConvMax: 3, lowConvMin: 3, lowConvMax: 6,
-    }, Store.get('ec.insightThresholds', {}) || {});
-
-    // 對某商品判定分類
-    const classify = (shop, code) => {
-      const weeks = Store.get(`ec.insight_${shop}_weeks`, []) || [];
-      const sales = (weeks[0] && weeks[0].products) || [];
-      const salesPrev = (weeks[1] && weeks[1].products) || [];
-      const master = Store.get(`ec.insight_${shop}_master`, null);
-      const perf = Store.get(`ec.insight_${shop}_perf`, null);
-      const p = sales.find(x => x.code === code);
-      if (!p) return null;
-      const prev = salesPrev.find(x => x.code === code);
-      const growthRate = (prev && prev.revenue > 0)
-        ? (p.revenue - prev.revenue) / prev.revenue
-        : null;
-      const m = master && master.byCode && master.byCode[code];
-      const shopeeId = (m && m.id) || '';
-      const perfEntry = (shopeeId && perf && perf.byShopeeId) ? perf.byShopeeId[shopeeId] : null;
-      const convRate = (perfEntry && perfEntry.convRate) || 0;
-      const ctr = (perfEntry && perfEntry.ctr) || 0;
-      if (growthRate !== null && growthRate !== undefined) {
-        const g = growthRate * 100;
-        if (g > T.explosion) return '爆發品';
-        if (g >= T.growth)   return '成長品';
-        if (g < T.heavyDrop) return '重跌品';
-        if (g <= T.drop)     return '衰退品';
-      }
-      const ctrPct = ctr * 100;
-      const convPct = convRate * 100;
-      if (ctrPct > T.ctrMin) {
-        if (convRate === 0) return '零轉換';
-        if (convPct >= T.weakConvMin && convPct < T.weakConvMax) return '弱轉換';
-        if (convPct >= T.lowConvMin && convPct <= T.lowConvMax)  return '轉換偏低';
-      }
-      return null;
-    };
+    // 對某商品判定分類（門檻計算 + 判定邏輯已抽到模組層 window.__insightClassify 共用）
+    const classify = (shop, code) => window.__insightClassify(shop, code);
 
     // ======== 1. 洞察表：per-shop 累計 → attribute 給該賣場對應的人 ========
     // 不看 `a.by`（不管誰改）：Kelly 或員工做的都算給該賣場負責人
@@ -2378,3 +2340,44 @@ Object.assign(App, {
     showToast(`已匯出 ${fname}（${rows.length} 筆）`, 'success');
   },
 });
+
+// 洞察表分類判定：原本內嵌在 _updateDailyProgressFromAdjustments，抽到模組層
+// 讓 daily.js 的洞察 chip 明細彈窗共用（判定邏輯逐字保留；門檻 T 改為每次呼叫現算）
+window.__insightClassify = function (shop, code) {
+  // 共用門檻
+  const T = Object.assign({}, window.INSIGHT_DEFAULT_THRESHOLDS || {
+    explosion: 50, growth: 10, drop: -10, heavyDrop: -50,
+    ctrMin: 3, weakConvMin: 1, weakConvMax: 3, lowConvMin: 3, lowConvMax: 6,
+  }, Store.get('ec.insightThresholds', {}) || {});
+  const weeks = Store.get(`ec.insight_${shop}_weeks`, []) || [];
+  const sales = (weeks[0] && weeks[0].products) || [];
+  const salesPrev = (weeks[1] && weeks[1].products) || [];
+  const master = Store.get(`ec.insight_${shop}_master`, null);
+  const perf = Store.get(`ec.insight_${shop}_perf`, null);
+  const p = sales.find(x => x.code === code);
+  if (!p) return null;
+  const prev = salesPrev.find(x => x.code === code);
+  const growthRate = (prev && prev.revenue > 0)
+    ? (p.revenue - prev.revenue) / prev.revenue
+    : null;
+  const m = master && master.byCode && master.byCode[code];
+  const shopeeId = (m && m.id) || '';
+  const perfEntry = (shopeeId && perf && perf.byShopeeId) ? perf.byShopeeId[shopeeId] : null;
+  const convRate = (perfEntry && perfEntry.convRate) || 0;
+  const ctr = (perfEntry && perfEntry.ctr) || 0;
+  if (growthRate !== null && growthRate !== undefined) {
+    const g = growthRate * 100;
+    if (g > T.explosion) return '爆發品';
+    if (g >= T.growth)   return '成長品';
+    if (g < T.heavyDrop) return '重跌品';
+    if (g <= T.drop)     return '衰退品';
+  }
+  const ctrPct = ctr * 100;
+  const convPct = convRate * 100;
+  if (ctrPct > T.ctrMin) {
+    if (convRate === 0) return '零轉換';
+    if (convPct >= T.weakConvMin && convPct < T.weakConvMax) return '弱轉換';
+    if (convPct >= T.lowConvMin && convPct <= T.lowConvMax)  return '轉換偏低';
+  }
+  return null;
+};

@@ -174,3 +174,24 @@
 .adj-prog-sub .adj-prog-shop{margin-right:auto;}
 .adj-prog-sub .adj-prog-pct{min-width:52px;}
 .adj-prog-note .adj-prog-p0{font-weight:700;}
+
+/* 人員卡片：洞察表「今日調整」chip（<button>，點開明細彈窗）。視覺沿用 .adj-pill 的語彙，
+   顏色由 JS 經 --chip-bg / --chip-fg CSS 變數傳入（單一來源 = daily.js INSIGHT_STYLE）。不碰 --bg。 */
+.ins-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  background: var(--chip-bg);
+  color: var(--chip-fg);
+}
+.ins-chip:hover { filter: brightness(0.96); }
