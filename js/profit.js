@@ -3410,6 +3410,10 @@ function openNotePopup(shopKey,code){
           <div class="pnm-section" style="margin-top:14px">其他期間的調整</div>
           <div id="pnm-hist" class="pnm-list"></div>
         </div>
+        <div id="pnm-ins-wrap" style="display:none">
+          <div class="pnm-section" style="margin-top:14px">洞察表紀錄（唯讀）</div>
+          <div id="pnm-ins" class="pnm-list"></div>
+        </div>
       </div>
       <div class="pnm-footer"><button class="pnm-close-btn" onclick="closeProfitNoteModal()">關閉</button></div>
     </div>`;
@@ -3423,6 +3427,7 @@ function openNotePopup(shopKey,code){
   const pnmInp=document.getElementById('pnm-inp');if(pnmInp)pnmInp.value='';
   renderPnmList();
   renderPnmHistory();
+  renderPnmInsight();
   modal.classList.add('open');
   setTimeout(()=>pnmInp?.focus(),60);
 }
@@ -3486,6 +3491,35 @@ function renderPnmHistory(){
     <div class="pnm-entry-text">${String(h.text).replace(/</g,'&lt;')}</div>
   </div>`).join('');
 }
+function renderPnmInsight(){
+  // 洞察表紀錄（唯讀）：同商品在洞察表打過的調整，淨利表彈窗也看得到。
+  // 純讀 ec.insight_{shop}_notes，絕不提供刪除鈕（資料屬洞察表模組）、不顯示 by。
+  const wrap=document.getElementById('pnm-ins-wrap');
+  const box=document.getElementById('pnm-ins');
+  if(!wrap||!box||!_pnm) return;
+  const {shopKey,code}=_pnm;
+  // 廣告調整 shopKey='好麻吉|2026/07|first'、商品調整='好麻吉_growth' → 都取 '好麻吉'
+  const baseShop=shopKey.split('|')[0].replace('_growth','');
+  const notes=Store.get('ec.insight_'+baseShop+'_notes',{})||{};
+  const nd=notes[code];
+  const adj=(nd&&nd.adjustments)||[];
+  const noteText=String((nd&&nd.text)||'').trim();
+  if(!adj.length&&!noteText){ wrap.style.display='none'; box.innerHTML=''; return; }
+  // 同一天多筆用 '、' 串成一列（跟洞察表彈窗一致），日期新到舊
+  const map=new Map();
+  adj.forEach(a=>{ const d=a.date||'—'; if(!map.has(d))map.set(d,[]); map.get(d).push(a.text||''); });
+  const sorted=[...map.keys()].sort((a,b)=>String(b).localeCompare(String(a)));
+  const rows=sorted.map(d=>`<div class="pnm-entry pnm-entry-ins">
+    <div class="pnm-entry-date">${String(d).replace(/</g,'&lt;')}</div>
+    <div class="pnm-entry-text">${map.get(d).join('、').replace(/</g,'&lt;')}</div>
+  </div>`);
+  if(noteText)rows.push(`<div class="pnm-entry pnm-entry-ins">
+    <div class="pnm-entry-date">備註</div>
+    <div class="pnm-entry-text">${noteText.replace(/</g,'&lt;')}</div>
+  </div>`);
+  wrap.style.display='';
+  box.innerHTML=rows.join('');
+}
 function submitProfitNote(){
   if(!_pnm)return;
   const inp=document.getElementById('pnm-inp');const v=inp?.value.trim();if(!v)return;
@@ -3512,7 +3546,7 @@ function deleteProfitNote(origIdx){
   if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
   notes[code].adjustments.splice(origIdx,1);
   if(!notes[code].adjustments.length)delete notes[code];
-  saveNotes(shopKey,notes);renderPnmList();renderPnmHistory();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
+  saveNotes(shopKey,notes);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
 }
 function closeProfitNoteModal(){document.getElementById('profit-note-modal')?.classList.remove('open');_pnm=null;}
 function startNote(shop,code){openNotePopup(shop,code);}

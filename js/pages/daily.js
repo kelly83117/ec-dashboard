@@ -999,9 +999,10 @@ Object.assign(App, {
         if (hits.length === 0) return;
         const cls = window.__insightClassify ? window.__insightClassify(shop, code) : null;
         if (cls !== label) return;
-        // 品名 fallback：玩樂主檔的 name 是空字串、品名在 mocbicName（實測 C150/E142/H333）
+        // 品名 fallback：mocbicName 優先，順序對齊洞察表 marketing.js 彈窗的取名邏輯
+        //（玩樂主檔的 name 是空字串、品名在 mocbicName，實測 C150/E142/H333）
         const m = (master && master.byCode) ? master.byCode[code] : null;
-        const prodName = m ? (m.name || m.mocbicName || '') : '';
+        const prodName = m ? (m.mocbicName || m.name || '') : '';
         rows.push({ shop, code, name: prodName, texts: hits.map(a => a.text || '') });
       });
     });
