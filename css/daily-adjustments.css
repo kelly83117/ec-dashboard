@@ -149,3 +149,28 @@
   align-self: center;
   white-space: nowrap;
 }
+
+/* 人員卡片：本期優化進度（依通路負責人歸屬）。進度條 fill 的 width 是動態百分比，只能 inline；
+   其餘一律走既有 :root 變數，不寫死色碼、不碰 --bg 底色。 */
+.adj-prog{margin-top:8px;padding-top:8px;border-top:1px solid var(--border,#e5e7eb);}
+.adj-prog-title{font-size:11px;font-weight:700;color:var(--text-muted,#6b7280);margin-bottom:4px;}
+.adj-prog-row{display:flex;align-items:center;gap:6px;margin:3px 0;}
+.adj-prog-shop{font-size:12px;min-width:44px;}
+.adj-prog-num{font-size:11px;color:var(--text-muted,#6b7280);font-variant-numeric:tabular-nums;}
+.adj-prog-bar{flex:1;height:6px;border-radius:3px;background:#f3f4f6;overflow:hidden;}
+.adj-prog-fill{display:block;height:100%;border-radius:3px;background:#6366f1;}
+.adj-prog-pct{font-size:11px;font-weight:700;min-width:32px;text-align:right;font-variant-numeric:tabular-nums;}
+.adj-prog-na{font-size:12px;color:#9ca3af;}
+.adj-prog-note{font-size:10px;color:#9ca3af;margin-top:4px;}
+.adj-prog-toggle{display:flex;align-items:center;gap:6px;margin:3px 0;width:100%;background:none;border:none;padding:0;cursor:pointer;font:inherit;text-align:left;}
+.adj-prog-caret{font-size:10px;color:#9ca3af;flex-shrink:0;}
+.adj-prog-detail{padding:2px 0 4px 8px;border-left:2px solid #f3f4f6;margin:0 0 4px 4px;}
+.adj-prog-grp .adj-prog-shop{font-size:11px;font-weight:700;color:#6b7280;}
+.adj-prog-sub .adj-prog-shop{font-size:11px;min-width:64px;color:#6b7280;padding-left:8px;}
+.adj-prog-p100{color:#10b981;}
+.adj-prog-p50{color:#6366f1;}
+.adj-prog-p0{color:#d97706;font-weight:700;}
+.adj-prog-sub{justify-content:flex-end;}
+.adj-prog-sub .adj-prog-shop{margin-right:auto;}
+.adj-prog-sub .adj-prog-pct{min-width:52px;}
+.adj-prog-note .adj-prog-p0{font-weight:700;}
