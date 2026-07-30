@@ -2017,7 +2017,7 @@ Object.assign(App, {
 
     const display = filteredWithIdx;
 
-    const NAME_COLS = new Set(['產品名稱','試算名稱','編號']);
+    const NAME_COLS = new Set(['產品名稱','試算名稱','編號','商品名稱']);
     // 縮短過長的欄位標題顯示
     const shortLabel = c => {
       if (c.includes('獲利百分比')) return '獲利%';
