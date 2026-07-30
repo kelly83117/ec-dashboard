@@ -2026,11 +2026,42 @@ Object.assign(App, {
       return `<th${sortAttr} style="${activeBg}${isSortable?'cursor:pointer;':''}font-size:12px;padding:6px 10px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'};min-width:${colMinWidth(c)};white-space:nowrap">${escapeHtml(shortLabel(c))}${indicator}</th>`;
     }).join('') + '<th style="min-width:32px"></th>';
 
-    const tbodyHtml = display.map(({ r, i }) => {
-      const isCustom = !!r.__custom;
-      return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
-        coreCols.map((c, ci) => `<td style="font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
-        `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
+    // 以商品名稱分組（折疊）
+    const nameCol = coreCols.find(c => c === '商品名稱') || null;
+    const groups = [];
+    const groupMap = new Map();
+    for (const item of display) {
+      const key = nameCol ? (item.r[nameCol] || '') : '__single__';
+      if (!groupMap.has(key)) { const g = { key, items:[] }; groups.push(g); groupMap.set(key, g); }
+      groupMap.get(key).items.push(item);
+    }
+    const cellStyle = (c) => `font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}`;
+    const tbodyHtml = groups.map(g => {
+      const { key, items } = g;
+      if (!nameCol || items.length === 1) {
+        const { r, i } = items[0];
+        const isCustom = !!r.__custom;
+        return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
+          coreCols.map((c, ci) => `<td style="${cellStyle(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
+      }
+      const grpKey = escapeHtml(key);
+      const hdr = `<tr class="pr-group-hdr" data-grp="${grpKey}" style="background:#f8fafc;border-bottom:1px solid #e5e7eb;cursor:pointer">` +
+        coreCols.map((c, ci) => {
+          if (NAME_COLS.has(c)) return `<td style="${cellStyle(c)}"><span class="pr-grp-arrow" style="display:inline-block;margin-right:5px;color:#6b7280;transition:transform .15s">▶</span>${grpKey} <span style="font-size:11px;color:#9ca3af;margin-left:4px">× ${items.length} 規格</span></td>`;
+          return `<td style="text-align:right;font-size:12px;padding:6px 10px;color:#d1d5db">—</td>`;
+        }).join('') +
+        `<td></td></tr>`;
+      const children = items.map(({ r, i }) => {
+        const isCustom = !!r.__custom;
+        return `<tr class="pr-row pr-child" data-grp="${grpKey}" data-i="${i}" data-id="${r.__id||''}" style="display:none;border-bottom:1px solid #f3f4f6;cursor:pointer;background:#fafbff${isCustom?';outline:2px solid #bfdbfe inset':''}">` +
+          coreCols.map((c, ci) => {
+            const v = NAME_COLS.has(c) ? (this._prFmt(r['樣式']||'','text') + (r['尺寸']&&r['尺寸']!==r['樣式'] ? ` <span style="color:#9ca3af">${this._prFmt(r['尺寸'],'text')}</span>` : '')) : this._prFmt(r[c], coreTypes[ci]);
+            return `<td style="${cellStyle(c)};padding-left:${NAME_COLS.has(c)?'28px':'10px'}">${v}</td>`;
+          }).join('') +
+          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
+      }).join('');
+      return hdr + children;
     }).join('');
 
     const moreHtml = filteredWithIdx.length > SHOW
@@ -2057,8 +2088,8 @@ Object.assign(App, {
       ${this._prNumFilterPanelHtml(coreCols, coreTypes, activeSheet)}
       ${this._prAddFormHtml(activeSheet)}
       <div style="padding:6px 16px;font-size:11px;color:#9ca3af;border-bottom:1px solid #f3f4f6">${activeSheet} · ${filteredWithIdx.length} 筆 · 點列展開全部欄位 · 綠底為手動新增</div>
-      <div class="table-wrap"><table style="width:100%">
-        <thead><tr>${theadHtml}</tr></thead>
+      <div class="table-wrap" style="max-height:calc(100vh - 380px);overflow-y:auto;overflow-x:auto"><table style="width:100%">
+        <thead style="position:sticky;top:0;z-index:2;background:#f9fafb"><tr>${theadHtml}</tr></thead>
         <tbody id="pr-tbody">${tbodyHtml}</tbody>
       </table></div>
       ${moreHtml}
@@ -2090,6 +2121,19 @@ Object.assign(App, {
         self.render();
       } catch(e) { alert('載入失敗：' + e.message); }
     });
+
+    // 群組折疊展開
+    document.getElementById('pr-tbody')?.addEventListener('click', e => {
+      const hdr = e.target.closest('tr.pr-group-hdr');
+      if (!hdr) return;
+      const grp = hdr.dataset.grp;
+      const children = document.querySelectorAll(`tr.pr-child[data-grp="${CSS.escape(grp)}"]`);
+      const isOpen = hdr.dataset.open === '1';
+      hdr.dataset.open = isOpen ? '0' : '1';
+      const arrow = hdr.querySelector('.pr-grp-arrow');
+      if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(90deg)';
+      children.forEach(tr => { tr.style.display = isOpen ? 'none' : ''; });
+    }, true);
 
     document.querySelectorAll('.pr-stab').forEach(btn => {
       btn.addEventListener('click', () => {
