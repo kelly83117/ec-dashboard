@@ -2014,8 +2014,7 @@ Object.assign(App, {
       });
     }
 
-    const SHOW = 60;
-    const display = filteredWithIdx.slice(0, SHOW);
+    const display = filteredWithIdx;
 
     const NAME_COLS = new Set(['產品名稱','試算名稱','編號']);
     // 縮短過長的欄位標題顯示
@@ -2088,10 +2087,7 @@ Object.assign(App, {
       }).join('');
     }
 
-    const moreHtml = filteredWithIdx.length > SHOW
-      ? `<div style="padding:12px;text-align:center;color:#6b7280;font-size:13px;background:#f9fafb;border-top:1px solid #f3f4f6">
-           顯示前 ${SHOW} 筆，共 ${filteredWithIdx.length} 筆 — <button id="pr-show-all" style="color:#2563eb;font-weight:600;background:none;border:0;cursor:pointer">顯示全部</button>
-         </div>` : '';
+    const moreHtml = '';
 
     return `<div class="table-card">
       <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
