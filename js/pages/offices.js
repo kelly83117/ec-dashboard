@@ -1815,7 +1815,7 @@ Object.assign(App, {
     const panelOpen = Store.get('ec.d2.pricing.colpanel', false);
     return `<div id="pr-col-panel" style="display:${panelOpen?'block':'none'};padding:12px 16px;background:#f8fafc;border-bottom:1px solid var(--border)">
       <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px">欄位顯示與排序 <span style="font-weight:400;color:#9ca3af">拖曳排序・勾選顯示</span></div>
-      <div id="pr-col-list" style="display:flex;flex-wrap:wrap;gap:6px">
+      <div id="pr-col-list" style="display:flex;flex-wrap:wrap;gap:6px;max-width:900px">
         ${fullOrder.map(c => `<div class="pr-col-item" data-col="${escapeHtml(c)}" draggable="true"
           style="display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;border:1px solid ${hiddenSet.has(c)?'#e5e7eb':'#2563eb'};background:${hiddenSet.has(c)?'#fff':'#eff6ff'};color:${hiddenSet.has(c)?'#9ca3af':'#2563eb'};font-size:12px;cursor:grab;user-select:none">
           <input type="checkbox" class="pr-col-check" data-col="${escapeHtml(c)}" ${hiddenSet.has(c)?'':'checked'} style="cursor:pointer;accent-color:#2563eb;width:13px;height:13px">
