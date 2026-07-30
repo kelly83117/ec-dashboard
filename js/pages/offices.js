@@ -2186,6 +2186,7 @@ Object.assign(App, {
         const grp = tr.getAttribute('data-grp');
         if (window.__prOpenGrps.has(grp)) {
           tr.dataset.open = '1';
+          tr.style.background = '#eff6ff';
           const arr = tr.querySelector('.pr-grp-arr');
           if (arr) arr.style.transform = 'rotate(90deg)';
           Array.from(tbody0.rows).filter(r => r.classList.contains('pr-child') && r.getAttribute('data-grp') === grp)
@@ -2202,6 +2203,7 @@ Object.assign(App, {
       const kids = Array.from(tbody.rows).filter(tr => tr.classList.contains('pr-child') && tr.getAttribute('data-grp') === grp);
       const open = hdr.dataset.open !== '1';
       hdr.dataset.open = open ? '1' : '0';
+      hdr.style.background = open ? '#eff6ff' : '';
       const arr = hdr.querySelector('.pr-grp-arr');
       if (arr) arr.style.transform = open ? 'rotate(90deg)' : '';
       kids.forEach(tr => open ? tr.removeAttribute('hidden') : tr.setAttribute('hidden',''));
