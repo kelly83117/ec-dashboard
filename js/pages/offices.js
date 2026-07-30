@@ -1947,11 +1947,29 @@ Object.assign(App, {
     }
 
     const sheetData = window.__pricingData[activeSheet] || [];
+    // NT$ 成本分頁（非商品母表）自動補算展示欄，不修改原始資料
+    const NT_SHEETS = ['生活好麻吉','玩樂盒子','森之旅','維克生活館','MOMO','FRIDAY'];
+    const _needsCalc = NT_SHEETS.includes(activeSheet);
+    let displayData = sheetData;
+    if (_needsCalc) {
+      const _rates0 = this._prGetRates(activeSheet);
+      const CALC_EXTRA = ['實際成本','蝦皮總成本','入帳金額','實際毛利','獲利百分比','成本率'];
+      const _refHasCalc = sheetData.find(r => !r.__custom && r['實際成本'] !== undefined);
+      if (!_refHasCalc) {
+        displayData = sheetData.map(r => {
+          const ntc = +r['成本'] || 0;
+          const pr  = +r['單品售價'] || 0;
+          const oc  = ntc / (_rates0.rmb || 32);
+          const c   = this._prCalcAll(activeSheet, oc, 0, 0, pr, 0, 0);
+          return { ...r, 實際成本: c.實際成本, 蝦皮總成本: c.蝦皮總成本, 入帳金額: c.入帳, 實際毛利: c.實際毛利, 獲利百分比: c.獲利百分比, 成本率: c.成本率 };
+        });
+      }
+    }
     // 優先從非自訂的 Excel 列取欄位順序，避免自訂列 key 順序不一致
-    const refRow = sheetData.find(r => !r.__custom) || sheetData[0];
+    const refRow = displayData.find(r => !r.__custom) || displayData[0];
     const baseCols = refRow ? Object.keys(refRow).filter(k => !k.startsWith('__')) : [];
     // 合併自訂列可能新增的欄（例如 Victor 的「進貨」URL 欄）
-    const customExtraCols = sheetData.filter(r => r.__custom).flatMap(r => Object.keys(r).filter(k => !k.startsWith('__') && !baseCols.includes(k)));
+    const customExtraCols = displayData.filter(r => r.__custom).flatMap(r => Object.keys(r).filter(k => !k.startsWith('__') && !baseCols.includes(k)));
     const allCols = [...baseCols, ...new Set(customExtraCols)];
     const coreCols = this._prGetVisibleCols(allCols, activeSheet);
     const coreTypes = coreCols.map(c => this._prColType(c, activeSheet));
@@ -1966,8 +1984,8 @@ Object.assign(App, {
     };
 
     let filteredWithIdx = q
-      ? sheetData.map((r, i) => ({ r, i })).filter(({ r }) => String(r['產品名稱'] || r['試算名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase()))
-      : sheetData.map((r, i) => ({ r, i }));
+      ? displayData.map((r, i) => ({ r, i })).filter(({ r }) => String(r['產品名稱'] || r['試算名稱'] || r['商品名稱'] || Object.values(r)[0] || '').toLowerCase().includes(q.toLowerCase()))
+      : displayData.map((r, i) => ({ r, i }));
 
     // 套用數值範圍篩選
     const activeNumFilters = Object.entries(numFilters).filter(([, f]) =>
