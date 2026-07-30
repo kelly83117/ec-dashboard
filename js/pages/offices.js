@@ -2187,10 +2187,16 @@ Object.assign(App, {
             <input id="pe-note" type="text" value="${escapeHtml(String(r[noteCol]||''))}" placeholder="備註" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:150px">
           </label>` : ''}
         </div>
-        <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+        <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
           <button id="pe-save-${idx}" style="padding:7px 20px;background:#2563eb;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
           <button id="pe-cancel-${idx}" style="padding:7px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
           <span style="font-size:11px;color:#9ca3af">輸入後自動試算</span>
+          ${activeSheet === '商品母表' ? `
+          <div style="width:1px;background:#e5e7eb;align-self:stretch;margin:0 4px"></div>
+          <span style="font-size:11px;color:#6b7280">加入分頁：</span>
+          <button id="pe-copy-haomaji-${idx}" style="padding:7px 14px;background:#f0fdf4;color:#059669;border:1px solid #bbf7d0;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 生活好麻吉</button>
+          <button id="pe-copy-wanlebox-${idx}" style="padding:7px 14px;background:#fef9c3;color:#b45309;border:1px solid #fde68a;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">＋ 玩樂盒子</button>
+          ` : ''}
         </div>
       </td>`;
       tr.after(detTr);
@@ -2283,6 +2289,39 @@ Object.assign(App, {
       document.getElementById(`pe-cancel-${idx}`)?.addEventListener('click', () => {
         detTr.remove(); tr.style.background = r.__custom?'#eff6ff':'';
       });
+
+      if (activeSheet === '商品母表') {
+        const _copyToSheet = (targetSheet) => {
+          const _rates = self._prGetRates(activeSheet);
+          const oc = parseFloat(document.getElementById('pe-orig')?.value) || (origCostCol ? +r[origCostCol] : 0);
+          const lf = parseFloat(document.getElementById('pe-land')?.value) || (landCol ? +r[landCol] : 0);
+          const wt = parseFloat(document.getElementById('pe-wt')?.value)   || (weightCol ? +r[weightCol] : 0);
+          const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol ? +r[priceCol] : 0);
+          const c  = self._prCalcAll(activeSheet, oc, lf, wt, pr, 0, 0);
+          const name2 = document.getElementById('pe-name')?.value || (nameCol2 ? String(r[nameCol2]||'') : '');
+          const ntCost = Math.round(c.實際成本 * 10) / 10;
+          const newRow = {
+            __custom: true,
+            __id: 'cpy_' + Date.now(),
+            商品編號: '',
+            商品名稱: name2,
+            品項條碼: '',
+            樣式: '',
+            尺寸: '',
+            成本: ntCost,
+            單品售價: pr,
+          };
+          if (!window.__pricingData[targetSheet]) window.__pricingData[targetSheet] = [];
+          window.__pricingData[targetSheet].unshift(newRow);
+          const custom = Store.get(`ec.d2.pricing.custom.${targetSheet}`, []);
+          custom.unshift(newRow);
+          Store.set(`ec.d2.pricing.custom.${targetSheet}`, custom);
+          const btn = document.getElementById(`pe-copy-${targetSheet === '生活好麻吉' ? 'haomaji' : 'wanlebox'}-${idx}`);
+          if (btn) { btn.textContent = '✓ 已加入'; btn.disabled = true; btn.style.opacity = '0.6'; }
+        };
+        document.getElementById(`pe-copy-haomaji-${idx}`)?.addEventListener('click', () => _copyToSheet('生活好麻吉'));
+        document.getElementById(`pe-copy-wanlebox-${idx}`)?.addEventListener('click', () => _copyToSheet('玩樂盒子'));
+      }
     });
 
     document.getElementById('pr-show-all')?.addEventListener('click', () => {
