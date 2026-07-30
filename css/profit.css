@@ -333,6 +333,13 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-chip{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-family:'Noto Sans TC',sans-serif;}
 .mm-chip:hover{border-color:#9ca3af;}
 .mm-chip.on{color:#fff;}
+/* 分段期別控制：上/下/整月 連體按鈕組（月下拉右側） */
+.mm-seg-grp{display:inline-flex;border:1px solid #e5e7eb;border-radius:7px;overflow:hidden;}
+.mm-seg{padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;border:none;border-left:1px solid #e5e7eb;background:#fff;color:#6b7280;font-family:'Noto Sans TC',sans-serif;}
+.mm-seg:first-child{border-left:none;}
+.mm-seg:hover:not(:disabled):not(.on){background:#f9fafb;}
+.mm-seg.on{background:#e4007f;color:#fff;}
+.mm-seg:disabled{color:#d1d5db;cursor:not-allowed;background:#fafafa;}
 /* 狀態橫幅 */
 .mm-banner{font-size:12px;border-radius:7px;padding:6px 10px;margin-bottom:8px;line-height:1.6;}
 .mm-banner-ok{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;}
@@ -342,14 +349,49 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 /* 總覽 KPI 卡片 */
 .mm-kpis{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
 .mm-kpi{flex:1;min-width:132px;background:#fff;border:1px solid #eef0f4;border-radius:9px;padding:9px 12px;}
+/* 同步預覽：diff 差異明細（預設收合 details，展開才看；row 截斷+tooltip） */
+.mm-sync-diff{font-size:11px;color:#6b7280;background:#fafafa;border:1px solid #f0f0f0;border-radius:6px;padding:4px 8px;margin-top:4px;line-height:1.6;}
+.mm-sync-diff>summary{cursor:pointer;color:#9a3412;font-weight:600;list-style:none;user-select:none;}
+.mm-sync-diff>summary::-webkit-details-marker{display:none;}
+.mm-sync-diff>summary::before{content:'▸ ';}
+.mm-sync-diff[open]>summary::before{content:'▾ ';}
+.mm-sync-diff[open]>summary{margin-bottom:3px;}
+.mm-sync-diff-row{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:360px;}
+/* 同步預覽：無變更項收合區 */
+.mm-sync-unchanged{margin-top:10px;border-top:1px dashed #eef0f2;padding-top:8px;}
+.mm-sync-unchanged>summary{cursor:pointer;color:#9ca3af;font-size:12px;user-select:none;list-style:none;}
+.mm-sync-unchanged>summary::-webkit-details-marker{display:none;}
+.mm-sync-unchanged>summary::before{content:'▸ ';}
+.mm-sync-unchanged[open]>summary::before{content:'▾ ';}
+/* 商品同步：產生差異預覽按鈕旁的提示（缺什麼 / 會比什麼） */
+.mm-gen-hint{font-size:12px;color:#9ca3af;margin-left:10px;}
+.mm-atleast{color:#6b7280;font-size:12px;}
+/* 新增商品：原廠編號帶成本的來源標示 */
+.mm-cost-src-ok{color:#059669;}
+.mm-cost-src-warn{color:#d97706;}
+.mm-cost-src-err{color:#dc2626;font-weight:600;}
+.mm-cost-pick{display:inline-block;margin:2px 4px 0 0;padding:2px 8px;border:1px solid #f59e0b;border-radius:6px;color:#b45309;cursor:pointer;}
+.mm-cost-pick:hover{background:#fffbeb;}
+/* 共用搜尋框（input + 右側絕對定位清除 ✕，有值才顯示）。MOMO 框架用；設計統一那輪推廣全站 */
+.mm-search-wrap{position:relative;display:inline-flex;align-items:center;}
+.mm-search-inp{width:100%;padding:6px 28px 6px 12px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;outline:none;font-family:'Noto Sans TC',sans-serif;box-sizing:border-box;}
+.mm-search-inp:focus{border-color:#5b5fcf;}
+.mm-search-clear{position:absolute;right:7px;width:16px;height:16px;border-radius:50%;background:#cbd5e1;color:#fff;font-size:10px;line-height:16px;text-align:center;cursor:pointer;display:none;user-select:none;flex-shrink:0;}
+.mm-search-clear:hover{background:#94a3b8;}
+/* 單品分析 modal 區塊 */
+.mm-ana-sec{margin-bottom:18px;}
+.mm-ana-h{font-size:13px;font-weight:700;color:#334155;margin-bottom:8px;border-left:3px solid #5b5fcf;padding-left:8px;line-height:1.35;}
 .mm-kpi-l{font-size:11px;color:#9ca3af;font-weight:600;}
 .mm-kpi-v{font-size:18px;font-weight:800;color:#1a1a2e;margin:2px 0 1px;font-variant-numeric:tabular-nums;}
 .mm-kpi-d{font-size:11px;font-weight:600;}
 .mm-kpi-d .base{color:#c7cad1;font-weight:400;}
 .mm-verify{font-size:11px;margin-bottom:6px;}
-/* 商品數統計 總/上架/下架 */
-.mm-stat{font-size:12px;color:#9ca3af;font-weight:600;white-space:nowrap;}
-.mm-stat b{color:#374151;}
+/* 自驗：通過完全不顯示；只有對不上才警示（展開警示、不可收） */
+.mm-verify-err{font-size:12px;font-weight:700;margin:6px 0;padding:6px 10px;border-radius:7px;background:#fef2f2;border:1px solid #fecaca;color:#dc2626;}
+/* 商品數統計 總/上架/下架：標籤淺色小字、數字粗深、彼此拉開間距 */
+.mm-stat{display:inline-flex;gap:16px;align-items:baseline;white-space:nowrap;}
+.mm-stat-item{font-size:11px;color:#9ca3af;font-weight:400;}
+.mm-stat-item b{font-size:14px;color:#374151;font-weight:700;margin-left:4px;}
 /* 對帳結果 */
 .mm-recon-h{font-size:13px;font-weight:700;margin-bottom:6px;color:#1a1a2e;}
 .mm-recon-box{font-size:12px;line-height:1.9;background:#f9fafb;border:1px solid #eee;border-radius:8px;padding:10px;margin-bottom:8px;color:#374151;}
@@ -376,6 +418,9 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-upctl{flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:#6b7280;}
 .mm-upctl input[type=file]{font-size:12px;max-width:210px;font-family:'Noto Sans TC',sans-serif;}
 /* 商品名截斷：跟著欄寬走（CSS 處理，非 JS 切字）。父層 min-width:0 + flex:1 才能在 fixed table 裡 ellipsis */
+/* MOMO 總表逐列環比：主值在上、環比小字在下（放進品號那行的空間，與其基線對齊、不增行高）。只作用於 MOMO 表，不碰蝦皮/酷澎共用的 .tscroll */
+.mm-ptbl td{vertical-align:top;}
+.mm-c-cmp{font-size:10px;font-weight:600;line-height:1.3;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .mm-name-wrap{display:flex;align-items:center;overflow:hidden;min-width:0;}
 .mm-name-clip{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .mm-sub-line{font-size:10px;color:#9ca3af;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}

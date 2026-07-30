@@ -1,94 +1,94 @@
 {
-  "updated": "2026-07-29",
+  "updated": "2026-07-30",
   "items": [
     {
       "keyword": "防潮收納箱",
-      "name": "透明防潮收納箱",
+      "name": "防潮密封收納箱",
       "price": 600,
-      "sold": 200,
+      "sold": 1500,
       "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BD%AE%E6%94%B6%E7%B4%8D%E7%AE%B1",
-      "reason": "適合梅雨季節使用",
+      "reason": "適合潮濕季節使用",
       "source": "AI推薦"
     },
     {
-      "keyword": "浴室防滑墊",
-      "name": "浴室防滑地墊",
-      "price": 350,
-      "sold": 300,
-      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E9%98%B2%E6%BB%91%E5%A2%8A",
-      "reason": "避免滑倒安全必備",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "多功能廚房收納架",
-      "name": "廚房多層收納架",
-      "price": 800,
-      "sold": 150,
-      "url": "https://shopee.tw/search?keyword=%E5%A4%9A%E5%8A%9F%E8%83%BD%E5%BB%9A%E6%88%BF%E6%94%B6%E7%B4%8D%E6%9E%B6",
-      "reason": "提升廚房空間利用",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "寢具套組",
-      "name": "四件式寢具套組",
-      "price": 1200,
-      "sold": 250,
-      "url": "https://shopee.tw/search?keyword=%E5%AF%A2%E5%85%B7%E5%A5%97%E7%B5%84",
-      "reason": "舒適睡眠提升需求",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "環保餐具組",
-      "name": "可重複使用環保餐具",
-      "price": 400,
-      "sold": 180,
-      "url": "https://shopee.tw/search?keyword=%E7%92%B0%E4%BF%9D%E9%A4%90%E5%85%B7%E7%B5%84",
-      "reason": "環保意識提升下的需求",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "便攜式洗衣籃",
-      "name": "摺疊便攜洗衣籃",
+      "keyword": "竹製砧板",
+      "name": "天然竹製切菜板",
       "price": 300,
-      "sold": 220,
-      "url": "https://shopee.tw/search?keyword=%E4%BE%BF%E6%94%9C%E5%BC%8F%E6%B4%97%E8%A1%A3%E7%B1%83",
-      "reason": "夏季出遊洗衣方便",
+      "sold": 1200,
+      "url": "https://shopee.tw/search?keyword=%E7%AB%B9%E8%A3%BD%E7%A0%A7%E6%9D%BF",
+      "reason": "環保材質，健康選擇",
       "source": "AI推薦"
     },
     {
-      "keyword": "塑膠收納盒",
-      "name": "透明塑膠收納盒",
-      "price": 200,
-      "sold": 350,
-      "url": "https://shopee.tw/search?keyword=%E5%A1%91%E8%86%A0%E6%94%B6%E7%B4%8D%E7%9B%92",
-      "reason": "提升居家收納效率",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "清潔海綿",
-      "name": "強力清潔海綿",
-      "price": 150,
-      "sold": 400,
-      "url": "https://shopee.tw/search?keyword=%E6%B8%85%E6%BD%94%E6%B5%B7%E7%B6%BF",
-      "reason": "夏季清潔需求增加",
-      "source": "AI推薦"
-    },
-    {
-      "keyword": "防水浴簾",
-      "name": "防水浴室簾",
+      "keyword": "浴室收納架",
+      "name": "多層浴室收納架",
       "price": 500,
-      "sold": 200,
-      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%B0%B4%E6%B5%B4%E7%B0%BE",
-      "reason": "改善浴室環境",
+      "sold": 800,
+      "url": "https://shopee.tw/search?keyword=%E6%B5%B4%E5%AE%A4%E6%94%B6%E7%B4%8D%E6%9E%B6",
+      "reason": "增加浴室收納空間",
       "source": "AI推薦"
     },
     {
-      "keyword": "桌上文具收納盒",
-      "name": "多層文具收納盒",
+      "keyword": "防滑浴簾",
+      "name": "防水防滑浴簾",
+      "price": 400,
+      "sold": 900,
+      "url": "https://shopee.tw/search?keyword=%E9%98%B2%E6%BB%91%E6%B5%B4%E7%B0%BE",
+      "reason": "夏季防潮需求",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "冷氣罩",
+      "name": "冷氣機防塵罩",
       "price": 250,
-      "sold": 180,
-      "url": "https://shopee.tw/search?keyword=%E6%A1%8C%E4%B8%8A%E6%96%87%E5%85%B7%E6%94%B6%E7%B4%8D%E7%9B%92",
-      "reason": "提升書桌整潔度",
+      "sold": 700,
+      "url": "https://shopee.tw/search?keyword=%E5%86%B7%E6%B0%A3%E7%BD%A9",
+      "reason": "保護冷氣，延長壽命",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "多用途清潔布",
+      "name": "超吸水清潔布",
+      "price": 150,
+      "sold": 2000,
+      "url": "https://shopee.tw/search?keyword=%E5%A4%9A%E7%94%A8%E9%80%94%E6%B8%85%E6%BD%94%E5%B8%83",
+      "reason": "清潔必備，吸水性強",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "廚房收納盒",
+      "name": "多功能廚房收納盒",
+      "price": 350,
+      "sold": 1100,
+      "url": "https://shopee.tw/search?keyword=%E5%BB%9A%E6%88%BF%E6%94%B6%E7%B4%8D%E7%9B%92",
+      "reason": "整理廚房，提高效率",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "寢具收納袋",
+      "name": "真空寢具收納袋",
+      "price": 400,
+      "sold": 600,
+      "url": "https://shopee.tw/search?keyword=%E5%AF%A2%E5%85%B7%E6%94%B6%E7%B4%8D%E8%A2%8B",
+      "reason": "節省空間，保持整潔",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "環保餐具",
+      "name": "可重複使用環保餐具",
+      "price": 200,
+      "sold": 1300,
+      "url": "https://shopee.tw/search?keyword=%E7%92%B0%E4%BF%9D%E9%A4%90%E5%85%B7",
+      "reason": "適合夏季戶外用餐",
+      "source": "AI推薦"
+    },
+    {
+      "keyword": "洗碗手套",
+      "name": "耐熱洗碗手套",
+      "price": 180,
+      "sold": 1000,
+      "url": "https://shopee.tw/search?keyword=%E6%B4%97%E7%A2%97%E6%89%8B%E5%A5%97",
+      "reason": "夏季清潔必備工具",
       "source": "AI推薦"
     }
   ]
