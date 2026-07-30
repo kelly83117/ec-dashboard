@@ -168,9 +168,16 @@ Object.assign(App, {
         '其他':       { bg:'#f3f4f6', fg:'#374151' },
       };
       const renderSummaryCard = (opts) => {
-        const chipsHtml = opts.chips.map(c => `
+        // clickable（預設 false）：chip 改成 <button class="ins-chip">，點擊由 bindWeeklyCalendar
+        //   的既有委派接手開 openInsightDetailModal；顏色只經 --chip-bg / --chip-fg CSS 變數傳
+        const chipInner = (c) => `${c.emoji ? `<span>${c.emoji}</span>` : ''}<span>${escapeHtml(c.label)}</span><span style="opacity:.7">·</span><strong>${c.count}</strong>`;
+        const chipsHtml = opts.chips.map(c => opts.clickable ? `
+          <button type="button" class="ins-chip" style="--chip-bg:${c.bg};--chip-fg:${c.fg}"
+                  data-ins-person="${escapeHtml(p.name)}" data-ins-date="${escapeHtml(viewDate)}" data-ins-label="${escapeHtml(c.label)}">
+            ${chipInner(c)}
+          </button>` : `
           <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:${c.bg};color:${c.fg};font-size:12px;font-weight:600;line-height:1.4;white-space:nowrap">
-            ${c.emoji ? `<span>${c.emoji}</span>` : ''}<span>${escapeHtml(c.label)}</span><span style="opacity:.7">·</span><strong>${c.count}</strong>
+            ${chipInner(c)}
           </span>`).join('');
         return `
           <div class="dp-summary-card" style="background:${opts.headBg};border-left:3px solid ${opts.headColor};border-radius:6px;padding:8px 10px 9px;margin:2px 0 4px">
@@ -187,7 +194,7 @@ Object.assign(App, {
           const keys = INSIGHT_ORDER.filter(k => counts[k]);
           if (keys.length === 0) return '';
           const chips = keys.map(k => ({ label:k, count:counts[k], ...(INSIGHT_STYLE[k]||{}) }));
-          return renderSummaryCard({ title:'洞察表 · 今日調整', headBg:'#faf5ff', headColor:'#7e22ce', chips });
+          return renderSummaryCard({ title:'洞察表 · 今日調整', headBg:'#faf5ff', headColor:'#7e22ce', chips, clickable:true });
         }
         if (it && it.kind === 'profit-summary') {
           const counts = it.counts || {};
@@ -651,6 +658,12 @@ Object.assign(App, {
           }
           return;
         }
+        // 洞察表「今日調整」chip → 開洞察明細彈窗（同委派，讀當下 DOM 的 dataset）
+        const insChip = e.target.closest && e.target.closest('.ins-chip');
+        if (insChip) {
+          this.openInsightDetailModal(insChip.dataset.insPerson, insChip.dataset.insDate, insChip.dataset.insLabel);
+          return;
+        }
         const pill = e.target.closest && e.target.closest('.adj-pill');
         if (!pill) return;
         this.openAdjustmentDetailModal(pill.dataset.adjPerson, pill.dataset.adjDate, pill.dataset.adjKind, pill.dataset.adjGroup);
@@ -965,6 +978,58 @@ Object.assign(App, {
       </div>`;
 
     this.openModal({ title: `${person} · ${group}`, width: '520px', hideFooter: true, bodyHtml });
+  },
+  openInsightDetailModal(person, viewDate, label) {
+    // 洞察表「今日調整」chip 明細：純唯讀，只讀 Store，不寫任何東西。
+    //   通路歸屬用模組層 ADJ_PERSON_TO_SHOPS（由 ADJ_SHOP_TO_PERSON 反查，單一來源）；
+    //   分類用 window.__insightClassify（marketing.js 抽出的共用判定）＝「依目前資料重算」，
+    //   所以歷史日期若門檻 / 銷售資料已變動，明細可能與當日 chip 數字不同。
+    const slashDate = String(viewDate || '').replace(/-/g, '/');
+    const shops = ADJ_PERSON_TO_SHOPS[person] || [];
+    const rows = [];
+    shops.forEach(shop => {
+      const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
+      const master = Store.get(`ec.insight_${shop}_master`, null);
+      Object.keys(notes).forEach(code => {
+        const adjustments = (notes[code] && notes[code].adjustments) || [];
+        const hits = adjustments.filter(a => {
+          const d = (a.date || '').slice(0, 10);
+          return d === viewDate || d === slashDate;
+        });
+        if (hits.length === 0) return;
+        const cls = window.__insightClassify ? window.__insightClassify(shop, code) : null;
+        if (cls !== label) return;
+        // 品名 fallback：玩樂主檔的 name 是空字串、品名在 mocbicName（實測 C150/E142/H333）
+        const m = (master && master.byCode) ? master.byCode[code] : null;
+        const prodName = m ? (m.name || m.mocbicName || '') : '';
+        rows.push({ shop, code, name: prodName, texts: hits.map(a => a.text || '') });
+      });
+    });
+
+    const parts = String(viewDate).split('-');
+    const md = `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+
+    const itemHtml = (r) => `
+      <div class="adj-modal-item">
+        <div class="adj-modal-item-hd">
+          <span class="adj-modal-shop">${escapeHtml(r.shop || '')}</span>
+          <span class="adj-modal-code">${escapeHtml(r.code || '')}</span>
+          <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
+        </div>
+        ${r.texts.map(t => `<div class="adj-modal-text">${escapeHtml(t)}</div>`).join('')}
+      </div>`;
+
+    const bodyHtml = rows.length > 0 ? `
+      <div class="adj-modal-sub">${escapeHtml(md)} · ${rows.length} 項 · 依目前資料重算</div>
+      <div class="adj-modal-list">${rows.map(itemHtml).join('')}</div>` : `
+      <div class="adj-modal-sub">${escapeHtml(md)} · 0 項 · 依目前資料重算</div>
+      <div class="adj-modal-list">
+        <div class="adj-modal-item">
+          <div class="adj-modal-text">這個期間查不到洞察調整紀錄（可能是該通路沒有紀錄，或分類門檻已變動）</div>
+        </div>
+      </div>`;
+
+    this.openModal({ title: `${person} · ${label}`, width: '520px', hideFooter: true, bodyHtml });
   },
   bindDailyProgress(deptId) {
     // 員工下拉
