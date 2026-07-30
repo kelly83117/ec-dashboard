@@ -1997,7 +1997,7 @@ Object.assign(App, {
     const SHOW = 60;
     const display = filteredWithIdx.slice(0, SHOW);
 
-    const NAME_COLS = new Set(['產品名稱','試算名稱','編號','商品名稱']);
+    const NAME_COLS = new Set(['產品名稱','試算名稱','編號']);
     // 縮短過長的欄位標題顯示
     const shortLabel = c => {
       if (c.includes('獲利百分比')) return '獲利%';
@@ -2026,59 +2026,48 @@ Object.assign(App, {
       return `<th${sortAttr} style="${activeBg}${isSortable?'cursor:pointer;':''}font-size:12px;padding:6px 10px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'};min-width:${colMinWidth(c)};white-space:nowrap">${escapeHtml(shortLabel(c))}${indicator}</th>`;
     }).join('') + '<th style="min-width:32px"></th>';
 
-    // 以商品名稱分組（折疊）
-    const rawKeys = display.length ? Object.keys(display[0].r) : [];
-    const nameCol  = rawKeys.includes('商品名稱') ? '商品名稱' : null;
-    const styleCol = rawKeys.includes('樣式') ? '樣式' : null;
-    const sizeCol  = rawKeys.includes('尺寸')  ? '尺寸'  : null;
-
-    // 建立群組：相同商品名稱 → 同一群
-    const groups = [];
-    const groupMap = new Map();
+    // 分組：同商品名稱合併
+    const _nameCol  = display.length && display[0].r['商品名稱'] !== undefined ? '商品名稱' : null;
+    const _styleCol = display.length && display[0].r['樣式'] !== undefined ? '樣式' : null;
+    const _sizeCol  = display.length && display[0].r['尺寸'] !== undefined ? '尺寸' : null;
+    const _groups = [];
+    const _gmap = new Map();
     for (const item of display) {
-      const gk = nameCol && item.r[nameCol] ? item.r[nameCol] : `__single_${item.i}`;
-      if (!groupMap.has(gk)) { const g = { gk, items: [] }; groups.push(g); groupMap.set(gk, g); }
-      groupMap.get(gk).items.push(item);
+      const gk = (_nameCol && item.r[_nameCol]) ? item.r[_nameCol] : null;
+      const mk = gk || ('__row' + item.i);
+      if (!_gmap.has(mk)) { const g = { gk, mk, items:[] }; _groups.push(g); _gmap.set(mk, g); }
+      _gmap.get(mk).items.push(item);
     }
-
-    const cellStyle = (c) => `font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}`;
-
-    const tbodyHtml = groups.map(g => {
-      const { gk, items } = g;
-      const isSingle = items.length === 1 || gk.startsWith('__single_');
-
-      // 單規格：直接顯示
-      if (isSingle) {
+    const _cs = (c) => `font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}`;
+    const tbodyHtml = _groups.map(({ gk, mk, items }) => {
+      // 單規格或無名稱欄：直接渲染
+      if (!gk || items.length === 1) {
         const { r, i } = items[0];
         const isCustom = !!r.__custom;
         return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
-          coreCols.map((c, ci) => `<td style="${cellStyle(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
-          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
+          coreCols.map((c, ci) => `<td style="${_cs(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
       }
-
-      // 多規格：群組 header + 隱藏子列
+      // 多規格：header 列 + 子列（hidden）
       const gkE = escapeHtml(gk);
-      const gkAttr = gk.replace(/"/g, '&quot;');
-      const hdr = `<tr class="pr-group-hdr" data-grp="${gkAttr}" style="background:#f0f4ff;border-bottom:2px solid #c7d7fb;cursor:pointer">` +
+      const gkA = gk.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+      const hdr = `<tr class="pr-group-hdr" data-grp="${gkA}" style="background:#eff6ff;border-bottom:2px solid #bfdbfe;cursor:pointer">` +
         coreCols.map((c) => {
-          if (c === nameCol) return `<td style="${cellStyle(c)}"><span class="pr-grp-arrow" style="display:inline-block;margin-right:6px;color:#2563eb;font-size:11px;transition:transform .15s">▶</span><strong>${gkE}</strong> <span style="font-size:11px;color:#6b7280;font-weight:400;margin-left:4px">${items.length} 種規格</span></td>`;
+          if (c === _nameCol) return `<td style="${_cs(c)}"><span class="pr-grp-arrow" style="display:inline-block;margin-right:6px;color:#2563eb;font-size:11px">▶</span><strong>${gkE}</strong><span style="font-size:11px;color:#9ca3af;margin-left:6px">${items.length} 種規格</span></td>`;
           return `<td style="padding:6px 10px"></td>`;
-        }).join('') +
-        `<td></td></tr>`;
-
-      const children = items.map(({ r, i }) => {
+        }).join('') + `<td></td></tr>`;
+      const rows = items.map(({ r, i }) => {
         const isCustom = !!r.__custom;
-        const styleVal = styleCol ? escapeHtml(r[styleCol] || '') : '';
-        const sizeVal  = (sizeCol && r[sizeCol] && r[sizeCol] !== r[styleCol]) ? ` · ${escapeHtml(r[sizeCol])}` : '';
-        return `<tr class="pr-row pr-child" data-grp="${gkAttr}" data-i="${i}" data-id="${r.__id||''}" hidden>` +
+        const sv = _styleCol ? escapeHtml(r[_styleCol] || '') : '';
+        const sz = (_sizeCol && r[_sizeCol] && r[_sizeCol] !== r[_styleCol]) ? ` · ${escapeHtml(r[_sizeCol])}` : '';
+        return `<tr class="pr-row pr-child" data-grp="${gkA}" data-i="${i}" data-id="${r.__id||''}" hidden style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
           coreCols.map((c, ci) => {
-            if (c === nameCol) return `<td style="${cellStyle(c)};padding-left:26px;color:#374151">${styleVal}<span style="color:#9ca3af">${sizeVal}</span></td>`;
-            return `<td style="${cellStyle(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`;
+            if (c === _nameCol) return `<td style="${_cs(c)};padding-left:24px">${sv}<span style="color:#9ca3af">${sz}</span></td>`;
+            return `<td style="${_cs(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`;
           }).join('') +
-          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
+          `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
       }).join('');
-
-      return hdr + children;
+      return hdr + rows;
     }).join('');
 
     const moreHtml = filteredWithIdx.length > SHOW
@@ -2116,7 +2105,7 @@ Object.assign(App, {
   bindD2PricingTab() {
     const self = this;
 
-    // 自動載入：進入定價表時若尚未載入則立即 fetch
+    // 自動載入
     if (!window.__pricingData) {
       (async () => {
         try {
@@ -2139,19 +2128,19 @@ Object.assign(App, {
       } catch(e) { alert('載入失敗：' + e.message); }
     });
 
-    // 群組折疊展開（用 hidden 屬性，比 inline display 更可靠）
+    // 群組展開/收合
     document.getElementById('pr-tbody')?.addEventListener('click', e => {
       const hdr = e.target.closest('tr.pr-group-hdr');
       if (!hdr) return;
       e.stopPropagation();
       const grp = hdr.getAttribute('data-grp');
-      const tbody = hdr.closest('tbody');
-      const children = tbody ? Array.from(tbody.querySelectorAll('tr.pr-child')).filter(tr => tr.getAttribute('data-grp') === grp) : [];
-      const isOpen = hdr.dataset.open === '1';
-      hdr.dataset.open = isOpen ? '0' : '1';
+      const tbody = document.getElementById('pr-tbody');
+      const children = Array.from(tbody.rows).filter(tr => tr.classList.contains('pr-child') && tr.getAttribute('data-grp') === grp);
+      const opening = hdr.dataset.open !== '1';
+      hdr.dataset.open = opening ? '1' : '0';
       const arrow = hdr.querySelector('.pr-grp-arrow');
-      if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(90deg)';
-      children.forEach(tr => { if (isOpen) tr.setAttribute('hidden',''); else tr.removeAttribute('hidden'); });
+      if (arrow) arrow.style.transform = opening ? 'rotate(90deg)' : '';
+      children.forEach(tr => { if (opening) tr.removeAttribute('hidden'); else tr.setAttribute('hidden', ''); });
     });
 
     document.querySelectorAll('.pr-stab').forEach(btn => {
