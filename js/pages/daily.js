@@ -1738,7 +1738,8 @@ let _adjLabelsReady = false;
 //   下次呼叫時 calc 好了才重建一次。
 function getAdjIndex() {
   const calcOk = typeof window.calcAnalysis === 'function'
-              && typeof window.calcGrowthAnalysis === 'function';
+              && typeof window.calcGrowthAnalysis === 'function'
+              && typeof window._growthPeriodOf === 'function';   // 第二趟的商品調整也依賴它
   if (_adjIndexCache && (_adjLabelsReady || !calcOk)) return _adjIndexCache;
   const idx = {};
   collectAdjustments().forEach(r => {
