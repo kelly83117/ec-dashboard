@@ -2171,11 +2171,16 @@ Object.assign(App, {
       const cols = Object.keys(r).filter(c => !c.startsWith('__'));
       const nameCol2 = cols.find(c => c === '產品名稱' || c === '試算名稱') || null;
       const origCostCol = cols.find(c => c === '原始成本') || null;
+      const ntCostCol = cols.find(c => c === '成本') || null;          // NT$ 成本（新格式）
       const landCol = cols.find(c => c.includes('陸〉陸') || c.includes('陸>陸')) || null;
       const weightCol = cols.find(c => c.includes('陸>台') || c.includes('陸〉台')) || null;
-      const priceCol = cols.find(c => c === '售價') || null;
+      const priceCol = cols.find(c => c === '售價' || c === '單品售價') || null;
+      const roasCol = cols.find(c => c.includes('ROAS')) || null;
+      const volCol = cols.find(c => c === '月銷量') || null;
       const noteCol = cols.find(c => c === '備註' || c === '行銷方法') || null;
       const websiteCol = cols.find(c => c === '網站' || (c === '進貨' && activeSheet === 'Victor')) || null;
+      // 是否為 NT$ 直接成本格式（無原始成本欄）
+      const isNTCost = !origCostCol && !!ntCostCol;
 
       const numInp = (id, label, val, unit) =>
         `<label style="display:flex;flex-direction:column;gap:3px">
@@ -2198,16 +2203,22 @@ Object.assign(App, {
             <span style="font-size:10px;color:#6b7280;font-weight:600">產品名稱</span>
             <input id="pe-name" type="text" value="${escapeHtml(String(r[nameCol2]||''))}" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:200px">
           </label>` : ''}
-          ${origCostCol ? numInp('orig','原始成本', r[origCostCol],'¥') : ''}
-          ${landCol     ? numInp('land','陸〉陸運費',r[landCol],'¥') : ''}
-          ${weightCol   ? numInp('wt',  '重量',      r[weightCol],'kg') : ''}
-          ${priceCol    ? numInp('price','售價',      r[priceCol],'NT$') : ''}
+          ${isNTCost  ? numInp('ntcost','成本',        r[ntCostCol], 'NT$') : ''}
+          ${origCostCol ? numInp('orig','原始成本',    r[origCostCol],'¥') : ''}
+          ${landCol     ? numInp('land','陸〉陸運費',  r[landCol],'¥') : ''}
+          ${weightCol   ? numInp('wt',  '重量',        r[weightCol],'kg') : ''}
+          ${priceCol    ? numInp('price','售價',        r[priceCol],'NT$') : ''}
+          ${roasCol     ? numInp('roas','ROAS',         r[roasCol],'') : numInp('roas','ROAS','','')}
+          ${volCol      ? numInp('vol', '月銷量',       r[volCol],'件') : numInp('vol','月銷量','','件')}
           <div style="width:1px;background:#e5e7eb;align-self:stretch;margin:0 4px"></div>
           ${calcBox('cost','▶ 實際成本')}
           ${calcBox('total','▶ 蝦皮總成本')}
           ${calcBox('income','▶ 入帳')}
+          ${calcBox('margin','▶ 實際毛利')}
           ${calcBox('pct','▶ 獲利%')}
           ${calcBox('cr','▶ 成本%')}
+          ${calcBox('adcost','▶ 廣告費')}
+          ${calcBox('net','▶ 淨利潤')}
           ${websiteCol ? `<label style="display:flex;flex-direction:column;gap:3px">
             <span style="font-size:10px;color:#6b7280;font-weight:600">網站</span>
             <input id="pe-web" type="text" value="${escapeHtml(String(r[websiteCol]||''))}" placeholder="https://..." style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:180px">
@@ -2227,33 +2238,58 @@ Object.assign(App, {
       tr.style.background = '#e0eaff';
 
       const _calcPreview = () => {
-        const oc = parseFloat(document.getElementById('pe-orig')?.value)  || (origCostCol ? +r[origCostCol] : 0);
-        const lf = parseFloat(document.getElementById('pe-land')?.value)  || (landCol     ? +r[landCol]     : 0);
-        const wt = parseFloat(document.getElementById('pe-wt')?.value)    || (weightCol   ? +r[weightCol]   : 0);
-        const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol    ? +r[priceCol]    : 0);
-        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, 0, 0);
-        const nt = v => v != null ? 'NT$'+v.toLocaleString('zh-TW',{maximumFractionDigits:2}) : '—';
+        const rates = self._prGetRates(activeSheet);
+        let oc, lf = 0, wt = 0;
+        if (isNTCost) {
+          // NT$ 成本欄：反推 RMB origCost（陸運費、重量為 0）
+          const ntc = parseFloat(document.getElementById('pe-ntcost')?.value) || +r[ntCostCol] || 0;
+          oc = ntc / rates.rmb;
+        } else {
+          oc = parseFloat(document.getElementById('pe-orig')?.value) || (origCostCol ? +r[origCostCol] : 0);
+          lf = parseFloat(document.getElementById('pe-land')?.value) || (landCol ? +r[landCol] : 0);
+          wt = parseFloat(document.getElementById('pe-wt')?.value)   || (weightCol ? +r[weightCol] : 0);
+        }
+        const pr   = parseFloat(document.getElementById('pe-price')?.value) || (priceCol ? +r[priceCol] : 0);
+        const roas = parseFloat(document.getElementById('pe-roas')?.value)  || (roasCol ? +r[roasCol] : 0);
+        const vol  = parseFloat(document.getElementById('pe-vol')?.value)   || (volCol ? +r[volCol] : 0);
+        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, roas, vol);
+        const nt = v => v != null ? 'NT$'+v.toLocaleString('zh-TW',{maximumFractionDigits:1}) : '—';
         const pf = v => { const p=Math.round(v*10000)/100; const col=p>=20?'#059669':p>=0?'#f59e0b':'#dc2626'; return `<span style="color:${col}">${p.toFixed(1)}%</span>`; };
         const s = (id,h) => { const el=document.getElementById(`pe-c-${id}`); if(el) el.innerHTML=h; };
-        s('cost', nt(c.實際成本)); s('total', nt(c.蝦皮總成本)); s('income', nt(c.入帳));
-        s('pct', pr>0?pf(c.獲利百分比):'—'); s('cr', pr>0?pf(c.成本率):'—');
+        s('cost',   nt(c.實際成本));
+        s('total',  nt(c.蝦皮總成本));
+        s('income', nt(c.入帳));
+        s('margin', nt(c.實際毛利));
+        s('pct',    pr>0 ? pf(c.獲利百分比) : '—');
+        s('cr',     pr>0 ? pf(c.成本率) : '—');
+        s('adcost', roas>0 ? nt(c.廣告) : '—');
+        s('net',    vol>0 ? nt(c.淨利潤) : '—');
       };
       _calcPreview();
-      ['pe-orig','pe-land','pe-wt','pe-price'].forEach(id =>
+      ['pe-ntcost','pe-orig','pe-land','pe-wt','pe-price','pe-roas','pe-vol'].forEach(id =>
         document.getElementById(id)?.addEventListener('input', _calcPreview));
 
       document.getElementById(`pe-save-${idx}`)?.addEventListener('click', () => {
-        const oc = parseFloat(document.getElementById('pe-orig')?.value)  || (origCostCol ? +r[origCostCol] : 0);
-        const lf = parseFloat(document.getElementById('pe-land')?.value)  || (landCol     ? +r[landCol]     : 0);
-        const wt = parseFloat(document.getElementById('pe-wt')?.value)    || (weightCol   ? +r[weightCol]   : 0);
-        const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol    ? +r[priceCol]    : 0);
+        const _rates2 = self._prGetRates(activeSheet);
+        let oc, lf = 0, wt = 0;
+        if (isNTCost) {
+          const ntc = parseFloat(document.getElementById('pe-ntcost')?.value) || +r[ntCostCol] || 0;
+          oc = ntc / _rates2.rmb;
+        } else {
+          oc = parseFloat(document.getElementById('pe-orig')?.value) || (origCostCol ? +r[origCostCol] : 0);
+          lf = parseFloat(document.getElementById('pe-land')?.value) || (landCol ? +r[landCol] : 0);
+          wt = parseFloat(document.getElementById('pe-wt')?.value)   || (weightCol ? +r[weightCol] : 0);
+        }
+        const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol ? +r[priceCol] : 0);
         const name2   = document.getElementById('pe-name')?.value  ?? (nameCol2   ? r[nameCol2]   : '');
         const note    = document.getElementById('pe-note')?.value ?? (noteCol    ? r[noteCol]    : '');
         const website = document.getElementById('pe-web')?.value  ?? (websiteCol ? r[websiteCol] : '');
         const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, +(r['廣告ROAS']||0), +(r['月銷量']||0));
         const newRow = { ...r };
         for (const col of cols) {
-          if (col === '原始成本') newRow[col] = oc;
+          if (col === '成本' && isNTCost) newRow[col] = parseFloat(document.getElementById('pe-ntcost')?.value) || +r[ntCostCol] || 0;
+          else if (col === '單品售價') newRow[col] = pr;
+          else if (col === '原始成本') newRow[col] = oc;
           else if (col.includes('陸〉陸') || col.includes('陸>陸')) newRow[col] = lf;
           else if (col.includes('陸>台') || col.includes('陸〉台')) newRow[col] = wt;
           else if (col === '售價') newRow[col] = pr;
