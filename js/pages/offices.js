@@ -1596,19 +1596,19 @@ Object.assign(App, {
   },
 
   // ── 訂價表 ──────────────────────────────────────────────
-  PRICING_SHEETS_ORDER: ['訂價','導流品','Victor','inna','Vivian'],
+  PRICING_SHEETS_ORDER: ['商品母表','生活好麻吉','玩樂盒子','森之旅','維克生活館','MOMO','FRIDAY'],
 
   // 各工作表費率常數（依 Excel $C$1 匯率、G欄 運費/kg¥、row2 各費率）
   // ship = 陸>台運費 ¥/kg（與原始成本同樣換匯，故實際成本 = (C+D+E×ship)×rmb）
   // incTax = 銷項稅金率（訂價表 Excel 顯示 None = 0，不含銷項稅）
   PRICING_SHEET_PARAMS: {
-    '訂價':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    '導流品':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    'Victor':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    'inna':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    'Vivian':  { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    '官網':    { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
-    'Doris':   { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '商品母表':   { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '生活好麻吉': { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '玩樂盒子':   { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '森之旅':     { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    '維克生活館': { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'MOMO':       { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
+    'FRIDAY':     { rmb:4.5, ship:9, tax:0.05, txFee:0.08, promo:0.06, ret:0.02, fixed:9 },
   },
 
   // 讀取費率：優先用 localStorage 儲存值，否則用預設
@@ -1695,7 +1695,11 @@ Object.assign(App, {
     const { logistics, name, origCost, landFreight, weight, price, roas, volume, store, website, note } = inputs;
     const c = this._prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume);
     const existingRows = window.__pricingData?.[sheet] || [];
-    const baseCols = existingRows.length > 0 ? Object.keys(existingRows[0]) : [];
+    // 商品母表（或其他空白 RMB 工作表）的預設欄位結構
+    const RMB_DEFAULT_COLS = ['產品名稱','原始成本','陸〉陸運費','陸>台運費(kg)','售價','實際成本','蝦皮總成本','入帳金額','實際毛利','獲利百分比','成本率','備註'];
+    const baseCols = existingRows.length > 0
+      ? Object.keys(existingRows[0])
+      : (sheet === '商品母表' ? RMB_DEFAULT_COLS : []);
     // Victor 的 Y 欄「進貨」是 URL，JSON 未匯出時手動補上
     const cols = (sheet === 'Victor' && !baseCols.includes('進貨'))
       ? [...baseCols, '進貨']
@@ -1925,7 +1929,7 @@ Object.assign(App, {
   },
 
   renderD2PricingTabHtml() {
-    const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+    const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
     const q = Store.get('ec.d2.pricing.q', '');
     const loaded = !!window.__pricingData;
 
@@ -1939,12 +1943,7 @@ Object.assign(App, {
       return `<div class="table-card">
         <div class="table-card-header"><div><h3>💹 訂價表</h3><p>蝦皮 / FB 商品訂價與利潤分析</p></div></div>
         <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap">${sheetTabs}</div>
-        <div style="padding:60px;text-align:center">
-          <div style="font-size:40px;margin-bottom:12px">📂</div>
-          <div style="font-size:15px;font-weight:600;margin-bottom:8px">尚未載入資料</div>
-          <div style="font-size:13px;color:#9ca3af;margin-bottom:20px">點擊下方按鈕從雲端載入訂價資料</div>
-          <button id="pr-load-btn" style="padding:10px 24px;background:#2563eb;color:white;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">⬇ 載入訂價資料</button>
-        </div></div>`;
+        <div style="padding:40px;text-align:center;color:#9ca3af;font-size:13px">載入中…</div></div>`;
     }
 
     const sheetData = window.__pricingData[activeSheet] || [];
@@ -2026,10 +2025,11 @@ Object.assign(App, {
       return `<th${sortAttr} style="${activeBg}${isSortable?'cursor:pointer;':''}font-size:12px;padding:6px 10px;font-weight:600;text-align:${NAME_COLS.has(c)?'left':'right'};min-width:${colMinWidth(c)};white-space:nowrap">${escapeHtml(shortLabel(c))}${indicator}</th>`;
     }).join('') + '<th style="min-width:32px"></th>';
 
+    const _td = (c) => `font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}`;
     const tbodyHtml = display.map(({ r, i }) => {
       const isCustom = !!r.__custom;
       return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
-        coreCols.map((c, ci) => `<td style="font-size:13px;padding:6px 10px;${NAME_COLS.has(c)?'text-align:left;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap':'text-align:right'}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+        coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
         `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
     }).join('');
 
@@ -2057,8 +2057,8 @@ Object.assign(App, {
       ${this._prNumFilterPanelHtml(coreCols, coreTypes, activeSheet)}
       ${this._prAddFormHtml(activeSheet)}
       <div style="padding:6px 16px;font-size:11px;color:#9ca3af;border-bottom:1px solid #f3f4f6">${activeSheet} · ${filteredWithIdx.length} 筆 · 點列展開全部欄位 · 綠底為手動新增</div>
-      <div class="table-wrap"><table style="width:100%">
-        <thead><tr>${theadHtml}</tr></thead>
+      <div class="table-wrap" style="max-height:calc(100vh - 380px);overflow-y:auto;overflow-x:auto"><table style="width:100%">
+        <thead style="position:sticky;top:0;z-index:2;background:#f9fafb"><tr>${theadHtml}</tr></thead>
         <tbody id="pr-tbody">${tbodyHtml}</tbody>
       </table></div>
       ${moreHtml}
@@ -2067,6 +2067,18 @@ Object.assign(App, {
 
   bindD2PricingTab() {
     const self = this;
+
+    // 自動載入
+    if (!window.__pricingData) {
+      (async () => {
+        try {
+          const ver = document.querySelector('meta[name="app-version"]')?.content || '';
+          const res = await fetch(`data/pricing.json?v=${ver}`);
+          window.__pricingData = await res.json();
+          self.render();
+        } catch(e) { console.error('pricing.json 載入失敗：', e); }
+      })();
+    }
 
     document.getElementById('pr-load-btn')?.addEventListener('click', async () => {
       const btn = document.getElementById('pr-load-btn');
@@ -2078,6 +2090,7 @@ Object.assign(App, {
         self.render();
       } catch(e) { alert('載入失敗：' + e.message); }
     });
+
 
     document.querySelectorAll('.pr-stab').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -2109,7 +2122,7 @@ Object.assign(App, {
       document.querySelectorAll('.pr-detail-row').forEach(el => el.remove());
       document.querySelectorAll('tr.pr-row').forEach(el => el.style.background = el.dataset.custom==='1'?'#eff6ff':'');
 
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const sheetData = window.__pricingData?.[activeSheet] || [];
       const r = sheetData[idx];
       if (!r) return;
@@ -2117,11 +2130,16 @@ Object.assign(App, {
       const cols = Object.keys(r).filter(c => !c.startsWith('__'));
       const nameCol2 = cols.find(c => c === '產品名稱' || c === '試算名稱') || null;
       const origCostCol = cols.find(c => c === '原始成本') || null;
+      const ntCostCol = cols.find(c => c === '成本') || null;          // NT$ 成本（新格式）
       const landCol = cols.find(c => c.includes('陸〉陸') || c.includes('陸>陸')) || null;
       const weightCol = cols.find(c => c.includes('陸>台') || c.includes('陸〉台')) || null;
-      const priceCol = cols.find(c => c === '售價') || null;
+      const priceCol = cols.find(c => c === '售價' || c === '單品售價') || null;
+      const roasCol = cols.find(c => c.includes('ROAS')) || null;
+      const volCol = cols.find(c => c === '月銷量') || null;
       const noteCol = cols.find(c => c === '備註' || c === '行銷方法') || null;
       const websiteCol = cols.find(c => c === '網站' || (c === '進貨' && activeSheet === 'Victor')) || null;
+      // 是否為 NT$ 直接成本格式（無原始成本欄）
+      const isNTCost = !origCostCol && !!ntCostCol;
 
       const numInp = (id, label, val, unit) =>
         `<label style="display:flex;flex-direction:column;gap:3px">
@@ -2144,16 +2162,22 @@ Object.assign(App, {
             <span style="font-size:10px;color:#6b7280;font-weight:600">產品名稱</span>
             <input id="pe-name" type="text" value="${escapeHtml(String(r[nameCol2]||''))}" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:200px">
           </label>` : ''}
-          ${origCostCol ? numInp('orig','原始成本', r[origCostCol],'¥') : ''}
-          ${landCol     ? numInp('land','陸〉陸運費',r[landCol],'¥') : ''}
-          ${weightCol   ? numInp('wt',  '重量',      r[weightCol],'kg') : ''}
-          ${priceCol    ? numInp('price','售價',      r[priceCol],'NT$') : ''}
+          ${isNTCost  ? numInp('ntcost','成本',        r[ntCostCol], 'NT$') : ''}
+          ${origCostCol ? numInp('orig','原始成本',    r[origCostCol],'¥') : ''}
+          ${landCol     ? numInp('land','陸〉陸運費',  r[landCol],'¥') : ''}
+          ${weightCol   ? numInp('wt',  '重量',        r[weightCol],'kg') : ''}
+          ${priceCol    ? numInp('price','售價',        r[priceCol],'NT$') : ''}
+          ${roasCol     ? numInp('roas','ROAS',         r[roasCol],'') : numInp('roas','ROAS','','')}
+          ${volCol      ? numInp('vol', '月銷量',       r[volCol],'件') : numInp('vol','月銷量','','件')}
           <div style="width:1px;background:#e5e7eb;align-self:stretch;margin:0 4px"></div>
           ${calcBox('cost','▶ 實際成本')}
           ${calcBox('total','▶ 蝦皮總成本')}
           ${calcBox('income','▶ 入帳')}
+          ${calcBox('margin','▶ 實際毛利')}
           ${calcBox('pct','▶ 獲利%')}
           ${calcBox('cr','▶ 成本%')}
+          ${calcBox('adcost','▶ 廣告費')}
+          ${calcBox('net','▶ 淨利潤')}
           ${websiteCol ? `<label style="display:flex;flex-direction:column;gap:3px">
             <span style="font-size:10px;color:#6b7280;font-weight:600">網站</span>
             <input id="pe-web" type="text" value="${escapeHtml(String(r[websiteCol]||''))}" placeholder="https://..." style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:180px">
@@ -2173,33 +2197,58 @@ Object.assign(App, {
       tr.style.background = '#e0eaff';
 
       const _calcPreview = () => {
-        const oc = parseFloat(document.getElementById('pe-orig')?.value)  || (origCostCol ? +r[origCostCol] : 0);
-        const lf = parseFloat(document.getElementById('pe-land')?.value)  || (landCol     ? +r[landCol]     : 0);
-        const wt = parseFloat(document.getElementById('pe-wt')?.value)    || (weightCol   ? +r[weightCol]   : 0);
-        const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol    ? +r[priceCol]    : 0);
-        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, 0, 0);
-        const nt = v => v != null ? 'NT$'+v.toLocaleString('zh-TW',{maximumFractionDigits:2}) : '—';
+        const rates = self._prGetRates(activeSheet);
+        let oc, lf = 0, wt = 0;
+        if (isNTCost) {
+          // NT$ 成本欄：反推 RMB origCost（陸運費、重量為 0）
+          const ntc = parseFloat(document.getElementById('pe-ntcost')?.value) || +r[ntCostCol] || 0;
+          oc = ntc / rates.rmb;
+        } else {
+          oc = parseFloat(document.getElementById('pe-orig')?.value) || (origCostCol ? +r[origCostCol] : 0);
+          lf = parseFloat(document.getElementById('pe-land')?.value) || (landCol ? +r[landCol] : 0);
+          wt = parseFloat(document.getElementById('pe-wt')?.value)   || (weightCol ? +r[weightCol] : 0);
+        }
+        const pr   = parseFloat(document.getElementById('pe-price')?.value) || (priceCol ? +r[priceCol] : 0);
+        const roas = parseFloat(document.getElementById('pe-roas')?.value)  || (roasCol ? +r[roasCol] : 0);
+        const vol  = parseFloat(document.getElementById('pe-vol')?.value)   || (volCol ? +r[volCol] : 0);
+        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, roas, vol);
+        const nt = v => v != null ? 'NT$'+v.toLocaleString('zh-TW',{maximumFractionDigits:1}) : '—';
         const pf = v => { const p=Math.round(v*10000)/100; const col=p>=20?'#059669':p>=0?'#f59e0b':'#dc2626'; return `<span style="color:${col}">${p.toFixed(1)}%</span>`; };
         const s = (id,h) => { const el=document.getElementById(`pe-c-${id}`); if(el) el.innerHTML=h; };
-        s('cost', nt(c.實際成本)); s('total', nt(c.蝦皮總成本)); s('income', nt(c.入帳));
-        s('pct', pr>0?pf(c.獲利百分比):'—'); s('cr', pr>0?pf(c.成本率):'—');
+        s('cost',   nt(c.實際成本));
+        s('total',  nt(c.蝦皮總成本));
+        s('income', nt(c.入帳));
+        s('margin', nt(c.實際毛利));
+        s('pct',    pr>0 ? pf(c.獲利百分比) : '—');
+        s('cr',     pr>0 ? pf(c.成本率) : '—');
+        s('adcost', roas>0 ? nt(c.廣告) : '—');
+        s('net',    vol>0 ? nt(c.淨利潤) : '—');
       };
       _calcPreview();
-      ['pe-orig','pe-land','pe-wt','pe-price'].forEach(id =>
+      ['pe-ntcost','pe-orig','pe-land','pe-wt','pe-price','pe-roas','pe-vol'].forEach(id =>
         document.getElementById(id)?.addEventListener('input', _calcPreview));
 
       document.getElementById(`pe-save-${idx}`)?.addEventListener('click', () => {
-        const oc = parseFloat(document.getElementById('pe-orig')?.value)  || (origCostCol ? +r[origCostCol] : 0);
-        const lf = parseFloat(document.getElementById('pe-land')?.value)  || (landCol     ? +r[landCol]     : 0);
-        const wt = parseFloat(document.getElementById('pe-wt')?.value)    || (weightCol   ? +r[weightCol]   : 0);
-        const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol    ? +r[priceCol]    : 0);
+        const _rates2 = self._prGetRates(activeSheet);
+        let oc, lf = 0, wt = 0;
+        if (isNTCost) {
+          const ntc = parseFloat(document.getElementById('pe-ntcost')?.value) || +r[ntCostCol] || 0;
+          oc = ntc / _rates2.rmb;
+        } else {
+          oc = parseFloat(document.getElementById('pe-orig')?.value) || (origCostCol ? +r[origCostCol] : 0);
+          lf = parseFloat(document.getElementById('pe-land')?.value) || (landCol ? +r[landCol] : 0);
+          wt = parseFloat(document.getElementById('pe-wt')?.value)   || (weightCol ? +r[weightCol] : 0);
+        }
+        const pr = parseFloat(document.getElementById('pe-price')?.value) || (priceCol ? +r[priceCol] : 0);
         const name2   = document.getElementById('pe-name')?.value  ?? (nameCol2   ? r[nameCol2]   : '');
         const note    = document.getElementById('pe-note')?.value ?? (noteCol    ? r[noteCol]    : '');
         const website = document.getElementById('pe-web')?.value  ?? (websiteCol ? r[websiteCol] : '');
         const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, +(r['廣告ROAS']||0), +(r['月銷量']||0));
         const newRow = { ...r };
         for (const col of cols) {
-          if (col === '原始成本') newRow[col] = oc;
+          if (col === '成本' && isNTCost) newRow[col] = parseFloat(document.getElementById('pe-ntcost')?.value) || +r[ntCostCol] || 0;
+          else if (col === '單品售價') newRow[col] = pr;
+          else if (col === '原始成本') newRow[col] = oc;
           else if (col.includes('陸〉陸') || col.includes('陸>陸')) newRow[col] = lf;
           else if (col.includes('陸>台') || col.includes('陸〉台')) newRow[col] = wt;
           else if (col === '售價') newRow[col] = pr;
@@ -2238,7 +2287,7 @@ Object.assign(App, {
 
     document.getElementById('pr-show-all')?.addEventListener('click', () => {
       if (!window.__pricingData) return;
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const q = Store.get('ec.d2.pricing.q', '');
       const sheetData = window.__pricingData[activeSheet] || [];
       const allCols = sheetData.length > 0 ? Object.keys(sheetData[0]) : [];
@@ -2295,7 +2344,7 @@ Object.assign(App, {
     });
 
     const _saveColPrefs = () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const items = [...document.querySelectorAll('.pr-col-item')];
       const order = items.map(el => el.dataset.col);
       const hidden = items.filter(el => !el.querySelector('.pr-col-check').checked).map(el => el.dataset.col);
@@ -2308,7 +2357,7 @@ Object.assign(App, {
     });
 
     document.getElementById('pr-col-reset')?.addEventListener('click', () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       Store.set(`ec.d2.pricing.cols.${activeSheet}`, null);
       self.render();
     });
@@ -2368,7 +2417,7 @@ Object.assign(App, {
       Store.set('ec.d2.pricing.filterpanel', !nowOpen);
     });
     const _saveNumFilters = () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const filters = {};
       document.querySelectorAll('.pr-nf-min').forEach(inp => {
         const col = inp.dataset.col;
@@ -2383,7 +2432,7 @@ Object.assign(App, {
     };
     document.querySelectorAll('.pr-nf-min,.pr-nf-max').forEach(inp => inp.addEventListener('change', _saveNumFilters));
     document.getElementById('pr-nf-reset')?.addEventListener('click', () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       Store.set(`ec.d2.pricing.numfilters.${activeSheet}`, {});
       self.render();
     });
@@ -2391,7 +2440,7 @@ Object.assign(App, {
     // 排序（點欄位標題）
     document.querySelectorAll('th[data-sort-col]').forEach(th => {
       th.addEventListener('click', () => {
-        const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+        const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
         const col = th.dataset.sortCol;
         const cur = Store.get(`ec.d2.pricing.sort.${activeSheet}`, null);
         if (cur?.col === col) {
@@ -2456,7 +2505,7 @@ Object.assign(App, {
 
     // 即時試算
     const _updatePreview = () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const origCost  = parseFloat(document.getElementById('pf-orig')?.value)   || 0;
       const landFreight = parseFloat(document.getElementById('pf-land')?.value) || 0;
       const weight    = parseFloat(document.getElementById('pf-weight')?.value) || 0;
@@ -2495,7 +2544,7 @@ Object.assign(App, {
 
     // 儲存
     document.getElementById('pr-form-save')?.addEventListener('click', () => {
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const get = id => document.getElementById(id)?.value.trim() || '';
       const inputs = {
         logistics:   get('pf-logistics'),
@@ -2526,7 +2575,7 @@ Object.assign(App, {
       const delBtn = e.target.closest('.pr-del-custom');
       if (!delBtn) return;
       e.stopPropagation();
-      const activeSheet = Store.get('ec.d2.pricing.sheet', '訂價');
+      const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const id = delBtn.dataset.id;
       // 從記憶體移除
       if (window.__pricingData?.[activeSheet]) {
