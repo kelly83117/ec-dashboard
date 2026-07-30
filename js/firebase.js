@@ -216,6 +216,27 @@ try {
           }
         }, err => { console.error('[momo_reconcile subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_reconcile subscribe failed', e); }
+
+      // momo_s1103 collection（每期別一 doc）→ Store._profitMem['ec_momo_s1103|<period>']（momoLoadS1103 讀取順序一致；搬離 app/profit）
+      try {
+        onSnapshot(momoS1103ColRef, snap => {
+          const changed = [];
+          snap.forEach(d => {
+            const data = d.data() || {};
+            const period = data.period || d.id;
+            if (!period) return;
+            const k = 'ec_momo_s1103|' + period;
+            if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;   // 本機未同步/剛存 → 不覆蓋
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) return;
+            Store._profitMem[k] = data;
+            changed.push(period);
+          });
+          if (changed.length) {
+            console.log('[momo_s1103] 收到更新：', changed);
+            window.dispatchEvent(new CustomEvent('momoS1103Ready', { detail: { changed } }));
+          }
+        }, err => { console.error('[momo_s1103 subscribe 失敗]', err); });
+      } catch (e) { console.warn('momo_s1103 subscribe failed', e); }
     };
   } catch (e) { console.warn('profit subscribe failed', e); }
 
@@ -258,6 +279,17 @@ try {
     getDoc:    (shop, month) => getDoc(doc(db, 'momo_reconcile', momoReconDocId(shop, month))),
     setMonth:  (shop, month, data) => setDoc(doc(db, 'momo_reconcile', momoReconDocId(shop, month)), data || {}),
     subscribe: (cb) => onSnapshot(momoReconcileColRef, cb),
+  };
+
+  // ============== MOMO S1103 銷售排行榜 momo_s1103（每「期別」一 doc，帳號級） ==============
+  // 為什麼獨立 collection：S1103 是逐 SKU 的月報表（數百筆 × 多欄），塞 app/profit 欄位會讓該 doc 的「索引項目」暴增，
+  //   撞 Firestore 單文件 40000 索引項硬上限（跟 1MB 大小是兩個不同限制）→ 寫入報 too many index entries。搬出來各期別各自一 doc、額度獨立。
+  // doc id = 期別字串（2026-07-FULL / 2026-01-H1…，只含數字與 '-'，可直接當 doc id）。getDoc/subscribe 命名落防護讀取白名單；setPeriod 唯一寫入（整包取代）。
+  const momoS1103ColRef = collection(db, 'momo_s1103');
+  window.__cloudS1103 = {
+    getDoc:    (period) => getDoc(doc(db, 'momo_s1103', period)),
+    setPeriod: (period, data) => setDoc(doc(db, 'momo_s1103', period), data || {}),
+    subscribe: (cb) => onSnapshot(momoS1103ColRef, cb),
   };
 
   // ============== 洞察表獨立文件 app/insight（避免 app/main 撞 1MB 上限） ==============
