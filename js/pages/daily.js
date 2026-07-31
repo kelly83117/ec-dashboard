@@ -2074,24 +2074,17 @@ function buildProgressHtml(person){
   </div>`;
 }
 // 第六塊：某人某日的「淨利表調整」區塊，注入人員卡片底部。只留標題 + 兩排 pill，明細改走彈窗。
-//   viewDate: 'YYYY-MM-DD'。回傳 HTML；非郭雅琪且當日 0 筆 → 回 ''（連分隔線都不出）。
+//   viewDate: 'YYYY-MM-DD'。回傳 HTML；當日 0 筆 → 回 ''（連分隔線都不出）。
 //   pill 為 <button>，click 由 bindWeeklyCalendar 綁 → openAdjustmentDetailModal。
 //   pill 計數一律走 _adjRecsForGroup（與 modal 明細同源，數字保證一致）。
 function buildCardAdjustmentsHtml(person, viewDate) {
   const slashDate = String(viewDate || '').replace(/-/g, '/');
   const recs = (getAdjIndex()[slashDate] || []).filter(r => ADJ_SHOP_TO_PERSON[r.shop] === person);
-  const shops = ADJ_PERSON_TO_SHOPS[person] || [];
 
-  // 空狀態：郭雅琪（維克無淨利表）顯示提示；其他人當日 0 筆 → 不顯示整塊
+  // 空狀態：當日 0 筆 → 只留進度區塊，沒有進度就整塊不顯示
+  // （原 person === '郭雅琪' 的「無淨利表」特例已移除：那是郭雅琪負責維克時期寫的，
+  //   2026/07/29 改為負責玩樂後該提示變成事實錯誤，且與下方進度區塊矛盾）
   if (recs.length === 0) {
-    if (person === '郭雅琪') {
-      return `
-        <div class="adj-sec">
-          <div class="adj-sec-head"><span class="adj-sec-title">淨利表調整</span></div>
-          <div class="adj-none">${escapeHtml(shops.join('、'))}沒有淨利表資料</div>
-          ${buildProgressHtml(person)}
-        </div>`;
-    }
     return buildProgressHtml(person)?`<div class="adj-sec">${buildProgressHtml(person)}</div>`:'';
   }
 
