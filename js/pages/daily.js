@@ -262,6 +262,7 @@ Object.assign(App, {
     // getAdjIndex() 自帶快取，維持在格子內呼叫的既有寫法。
     const insIndexForCal = getInsIndex();
     const calCells = [];
+    const calExtraPeople = new Set();   // 月曆/圖例出現過的非名單人（例如 MOMO by-login 操作者）→ 圖例帶到他們、色用 fallback
     for (let i = 0; i < firstWeekday; i++) calCells.push('<div></div>');
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${calY}-${String(calM).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -279,7 +280,7 @@ Object.assign(App, {
         // 自動摘要 item (kind: 'insight-summary' | 'profit-summary' | 'momo-summary') 不塞進月曆條列
         arr.forEach(it => {
           if (!it || it.kind) return;
-          dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n] || '#6b7280', light: PERSON_LIGHT[n] || '#e5e7eb' });
+          dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n] || '#6b7280', light: PERSON_LIGHT[n] || { bg: '#eef0f2', text: '#6b7280' } });
         });
       });
       const shownItems = dayItems.slice(0, MAX_CAL_BARS);
@@ -308,9 +309,30 @@ Object.assign(App, {
       addRecs(insIndexForCal[slash] || [], 'i');
       const adjCountByPerson = {};
       Object.keys(keySet).forEach(n => { adjCountByPerson[n] = keySet[n].size; });
-      const adjRowsHtml = ALLOWED_NAMES
-        .filter(n => adjCountByPerson[n])
-        .map(n => `<div class="adj-cal-row" title="${escapeHtml(n)} · ${adjCountByPerson[n]} 個商品（含洞察表調整）" style="--adj-cal-c:${PERSON_COLORS[n]};--adj-cal-bg:${PERSON_LIGHT[n].bg};--adj-cal-fg:${PERSON_LIGHT[n].text}"><span class="adj-cal-stripe"></span><span class="adj-cal-label"><span class="adj-cal-name">${escapeHtml(n.slice(0, 1))}</span><span class="adj-cal-num">${adjCountByPerson[n]}</span></span></div>`)
+      // MOMO 優化紀錄計數：口徑跟卡片一致＝該人 momo-summary 的 counts「總和」（不是 item 數）。歸屬用 by(登入者)、非蝦皮 ADJ_SHOP_TO_PERSON。
+      const momoCountByPerson = {};
+      Object.keys(dayEntries).forEach(n => {
+        const v = dayEntries[n]; if (!Array.isArray(v)) return;
+        const ms = v.find(it => it && it.kind === 'momo-summary');
+        if (ms && ms.counts) { const s = Object.values(ms.counts).reduce((a, b) => a + (b || 0), 0); if (s > 0) momoCountByPerson[n] = s; }
+      });
+      // 合併計數 + 名單聯集（同 personInfos：3 人在前不變、其餘穩定排序）。3 人無 MOMO → totalCalCount=adjCount、色/標題/數字一字不變。
+      const totalCalCount = {};
+      [...Object.keys(adjCountByPerson), ...Object.keys(momoCountByPerson)].forEach(n => { totalCalCount[n] = (adjCountByPerson[n] || 0) + (momoCountByPerson[n] || 0); });
+      const calCountRoster = ALLOWED_NAMES.concat(
+        Object.keys(totalCalCount).filter(n => n && ALLOWED_NAMES.indexOf(n) < 0).sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+      );
+      const adjRowsHtml = calCountRoster
+        .filter(n => totalCalCount[n])
+        .map(n => {
+          if (ALLOWED_NAMES.indexOf(n) < 0) calExtraPeople.add(n);
+          const c = PERSON_COLORS[n] || '#6b7280';                          // 非名單人用 fallback 灰（跟頭像一致）
+          const lt = PERSON_LIGHT[n] || { bg: '#eef0f2', text: '#6b7280' };
+          const title = momoCountByPerson[n]
+            ? `${escapeHtml(n)} · ${adjCountByPerson[n] ? adjCountByPerson[n] + ' 個商品（含洞察表調整）、' : ''}${momoCountByPerson[n]} 筆 MOMO 優化`
+            : `${escapeHtml(n)} · ${adjCountByPerson[n]} 個商品（含洞察表調整）`;   // 3 人(無 MOMO)：標題與原本逐字相同
+          return `<div class="adj-cal-row" title="${title}" style="--adj-cal-c:${c};--adj-cal-bg:${lt.bg};--adj-cal-fg:${lt.text}"><span class="adj-cal-stripe"></span><span class="adj-cal-label"><span class="adj-cal-name">${escapeHtml(n.slice(0, 1))}</span><span class="adj-cal-num">${totalCalCount[n]}</span></span></div>`;
+        })
         .join('');
       const numBg = isCellSelected ? 'var(--primary)' : isCellToday ? 'var(--primary-soft)' : 'transparent';
       const numColor = isCellSelected ? 'white' : isCellToday ? 'var(--primary)' : 'var(--text)';
@@ -322,7 +344,8 @@ Object.assign(App, {
         </button>
       `);
     }
-    const legendHtml = ALLOWED_NAMES.map(n => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted)"><span style="width:7px;height:7px;border-radius:50%;background:${PERSON_COLORS[n]}"></span>${escapeHtml(n)}</span>`).join('');
+    const legendHtml = ALLOWED_NAMES.concat([...calExtraPeople].sort((a, b) => a.localeCompare(b, 'zh-Hant')))
+      .map(n => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted)"><span style="width:7px;height:7px;border-radius:50%;background:${PERSON_COLORS[n] || '#6b7280'}"></span>${escapeHtml(n)}</span>`).join('');
     const calendarHtml = `
       <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:20px;min-width:0">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
