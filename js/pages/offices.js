@@ -1598,6 +1598,11 @@ Object.assign(App, {
   // ── 訂價表 ──────────────────────────────────────────────
   PRICING_SHEETS_ORDER: ['商品母表','生活好麻吉','玩樂盒子','森之旅','維克生活館','MOMO','FRIDAY'],
 
+  _prAllSheets() {
+    const extras = Store.get('ec.pricing.extra_sheets', []);
+    return [...this.PRICING_SHEETS_ORDER, ...extras];
+  },
+
   // 各工作表費率常數（依 Excel $C$1 匯率、G欄 運費/kg¥、row2 各費率）
   // ship = 陸>台運費 ¥/kg（與原始成本同樣換匯，故實際成本 = (C+D+E×ship)×rmb）
   // incTax = 銷項稅金率（訂價表 Excel 顯示 None = 0，不含銷項稅）
@@ -1613,7 +1618,7 @@ Object.assign(App, {
 
   // 讀取費率：優先用 localStorage 儲存值，否則用預設
   _prGetRates(sheet) {
-    const def = this.PRICING_SHEET_PARAMS[sheet] || this.PRICING_SHEET_PARAMS['訂價'];
+    const def = this.PRICING_SHEET_PARAMS[sheet] || this.PRICING_SHEET_PARAMS['商品母表'];
     const saved = Store.get('ec.pricing.rates', {});
     return { ...def, ...(saved[sheet] || {}) };
   },
@@ -1621,14 +1626,17 @@ Object.assign(App, {
   // 費率設定面板 HTML
   _prRatesFormHtml() {
     const saved = Store.get('ec.pricing.rates', {});
-    const rows = this.PRICING_SHEETS_ORDER.map(sh => {
-      const d = this.PRICING_SHEET_PARAMS[sh];
+    const extras = Store.get('ec.pricing.extra_sheets', []);
+    const defRow = this.PRICING_SHEET_PARAMS['商品母表'];
+    const mkRow = (sh, isExtra) => {
+      const d = this.PRICING_SHEET_PARAMS[sh] || defRow;
       const r = { ...d, ...(saved[sh] || {}) };
       const inp = (field, val) =>
         `<input data-sh="${sh}" data-field="${field}" type="number" step="0.01" value="${val}"
           style="width:64px;padding:4px 6px;border:1px solid var(--border);border-radius:5px;font-size:12px;text-align:right;font-family:inherit">`;
       return `<tr>
-        <td style="padding:6px 10px;font-weight:600;font-size:12px;white-space:nowrap">${sh}</td>
+        <td style="padding:6px 10px;font-weight:600;font-size:12px;white-space:nowrap">
+          ${isExtra ? `<button data-del-extra="${sh}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:12px;margin-right:4px;padding:0" title="刪除">🗑</button>` : ''}${sh}</td>
         <td style="padding:4px 6px;text-align:center">${inp('rmb',   r.rmb)}</td>
         <td style="padding:4px 6px;text-align:center">${inp('ship',  r.ship)}</td>
         <td style="padding:4px 6px;text-align:center">${inp('tax',   (r.tax*100).toFixed(1))}</td>
@@ -1637,7 +1645,11 @@ Object.assign(App, {
         <td style="padding:4px 6px;text-align:center">${inp('ret',  (r.ret*100).toFixed(1))}</td>
         <td style="padding:4px 6px;text-align:center">${inp('fixed', r.fixed)}</td>
       </tr>`;
-    }).join('');
+    };
+    const rows = [
+      ...this.PRICING_SHEETS_ORDER.map(sh => mkRow(sh, false)),
+      ...extras.map(sh => mkRow(sh, true)),
+    ].join('');
     return `<div id="pr-rates-panel" style="display:none;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--bg-secondary,#f9fafb)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <span style="font-size:13px;font-weight:700;color:var(--text)">費率設定</span>
@@ -1659,8 +1671,16 @@ Object.assign(App, {
             <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">退貨%</th>
             <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">固定費(NT$)</th>
           </tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody id="pr-rates-tbody">${rows}</tbody>
         </table>
+      </div>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+        <button id="pr-rates-add-btn" style="padding:5px 14px;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">＋ 新增分頁</button>
+        <span id="pr-rates-add-area" style="display:none;display:flex;gap:6px;align-items:center">
+          <input id="pr-rates-new-name" type="text" placeholder="分頁名稱（如：露天）" style="padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-family:inherit;width:140px">
+          <button id="pr-rates-confirm-add" style="padding:4px 12px;background:#2563eb;color:white;border:0;border-radius:5px;font-size:12px;cursor:pointer;font-weight:600">確認加入</button>
+          <button id="pr-rates-cancel-add" style="padding:4px 10px;background:none;border:1px solid var(--border);border-radius:5px;font-size:12px;cursor:pointer">取消</button>
+        </span>
       </div>
       <p style="font-size:10px;color:#9ca3af;margin:8px 0 0">※ 導流品售價 ≥ 100 時自動 +9（運費包材+開發票）</p>
     </div>`;
@@ -1991,7 +2011,7 @@ Object.assign(App, {
     const q = Store.get('ec.d2.pricing.q', '');
     const loaded = !!window.__pricingData;
 
-    const sheetTabs = this.PRICING_SHEETS_ORDER.map(s => {
+    const sheetTabs = this._prAllSheets().map(s => {
       const cnt = loaded ? (window.__pricingData[s] || []).length : 0;
       const active = s === activeSheet;
       return `<button class="pr-stab" data-s="${s}" style="padding:5px 14px;border-radius:20px;border:1px solid ${active?'#2563eb':'#e5e7eb'};background:${active?'#2563eb':'#fff'};color:${active?'#fff':'#374151'};font-size:12px;font-weight:${active?'700':'400'};cursor:pointer;white-space:nowrap">${s}${loaded?` <span style="opacity:.6;font-size:11px">${cnt}</span>`:''}</button>`;
@@ -2742,6 +2762,42 @@ Object.assign(App, {
         el.value = ['tax','txFee','promo','ret'].includes(field)
           ? (def[field] * 100).toFixed(1)
           : def[field];
+      });
+    });
+
+    // 費率面板：新增分頁
+    document.getElementById('pr-rates-add-btn')?.addEventListener('click', () => {
+      const area = document.getElementById('pr-rates-add-area');
+      if (area) { area.style.display = 'flex'; document.getElementById('pr-rates-new-name')?.focus(); }
+    });
+    document.getElementById('pr-rates-cancel-add')?.addEventListener('click', () => {
+      const area = document.getElementById('pr-rates-add-area');
+      if (area) area.style.display = 'none';
+    });
+    document.getElementById('pr-rates-confirm-add')?.addEventListener('click', () => {
+      const nameEl = document.getElementById('pr-rates-new-name');
+      const name = (nameEl?.value || '').trim();
+      if (!name) { alert('請輸入分頁名稱'); return; }
+      const all = self._prAllSheets();
+      if (all.includes(name)) { alert('此名稱已存在'); return; }
+      const extras = Store.get('ec.pricing.extra_sheets', []);
+      extras.push(name);
+      Store.set('ec.pricing.extra_sheets', extras);
+      self.render();
+    });
+    // 費率面板：刪除自訂分頁
+    document.querySelectorAll('#pr-rates-panel [data-del-extra]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const name = btn.dataset.delExtra;
+        if (!confirm(`確定刪除「${name}」分頁？`)) return;
+        let extras = Store.get('ec.pricing.extra_sheets', []);
+        extras = extras.filter(s => s !== name);
+        Store.set('ec.pricing.extra_sheets', extras);
+        // 也清除該分頁的費率設定
+        const rates = Store.get('ec.pricing.rates', {});
+        delete rates[name];
+        Store.set('ec.pricing.rates', rates);
+        self.render();
       });
     });
 
