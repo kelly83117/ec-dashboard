@@ -1811,6 +1811,7 @@ Object.assign(App, {
       else if (col === '賣場') row[col] = store || '';
       else if (col === '備註' || col === '行銷方法') row[col] = note || '';
     }
+    if (diversion) row.__diversion = true;
     return row;
   },
 
@@ -2039,9 +2040,14 @@ Object.assign(App, {
 
         ${readOnly('pc-roas','▶ 廣告ROAS（自動）')}
       </div>
-      <div style="display:flex;gap:8px;margin-top:12px">
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
         <button id="pr-form-save" style="padding:8px 20px;background:#059669;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
         <button id="pr-form-cancel" style="padding:8px 14px;background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer">取消</button>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);white-space:nowrap" id="pf-diversion-label">
+          <input id="pf-diversion" type="checkbox" style="width:15px;height:15px;cursor:pointer">
+          <span style="font-size:12px;font-weight:600">導流品</span>
+          <span style="font-size:10px;color:#9ca3af">≥100+9固定費 / &lt;100成本-9</span>
+        </label>
       </div>
       <!-- 隱藏欄位供 _updatePreview 使用（不顯示但存值） -->
       <span id="pc-ship" style="display:none"></span>
@@ -2935,7 +2941,8 @@ Object.assign(App, {
       const landFreight = parseFloat(document.getElementById('pf-land')?.value) || 0;
       const weight    = parseFloat(document.getElementById('pf-weight')?.value) || 0;
       const price     = parseFloat(document.getElementById('pf-price')?.value)  || 0;
-      const c = self._prCalcAll(activeSheet, origCost, landFreight, weight, price, 0, 0);
+      const div = document.getElementById('pf-diversion')?.checked || false;
+      const c = self._prCalcAll(activeSheet, origCost, landFreight, weight, price, 0, 0, div);
       const nt = v => v != null ? 'NT$' + v.toLocaleString('zh-TW', {minimumFractionDigits:0}) : '—';
       const pct = v => {
         const p = Math.round(v * 10000) / 100;
@@ -2966,6 +2973,7 @@ Object.assign(App, {
     ['pf-orig','pf-land','pf-weight','pf-price'].forEach(id => {
       document.getElementById(id)?.addEventListener('input', _updatePreview);
     });
+    document.getElementById('pf-diversion')?.addEventListener('change', _updatePreview);
 
     // 儲存
     document.getElementById('pr-form-save')?.addEventListener('click', () => {
@@ -2983,6 +2991,7 @@ Object.assign(App, {
         store:       get('pf-store'),
         website:     get('pf-website'),
         note:        get('pf-note'),
+        diversion:   document.getElementById('pf-diversion')?.checked || false,
       };
       if (!inputs.name) { alert('請輸入產品名稱'); return; }
       const newRow = self._prBuildRow(activeSheet, inputs);
