@@ -1,6 +1,6 @@
 /* ===================== Firebase Firestore 雲端同步層 ===================== */
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
-import { getFirestore, doc, collection, getDoc, setDoc, updateDoc, deleteField, onSnapshot, FieldPath } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import { getFirestore, doc, collection, getDoc, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
@@ -366,6 +366,19 @@ try {
       if (!insightShopRefs[shop]) return () => {};
       return onSnapshot(insightShopRefs[shop], snap => cb(snap.exists() ? snap.data() : {}));
     },
+  };
+
+  // ============== 任務附圖獨立 collection task_images（避免 app/main 撞 1MB 上限） ==============
+  // 一張圖一個 doc（task_images/{imgId}）。base64 截圖動輒數百 KB，
+  // 塞進 app/main 會直接撐爆 1MB，連帶 users / departments / platforms 全部寫不進去。
+  // doc 內容：{ taskId, data(base64), mime, bytes, createdAt, createdBy }
+  //   taskId 是反向索引，將來要清查沒有任務指向的孤兒圖片時用得到。
+  // 命名注意：讀取方法一定要叫 getDoc。TEST_NOWRITE 的 READ_OK 白名單是完全字串比對，
+  //   改叫 getImage 之類會被當成寫入換成 no-op，本機測試時圖片讀不出來而且不會報錯。
+  window.__cloudTaskImage = {
+    getDoc:      (imgId) => getDoc(doc(db, 'task_images', imgId)),
+    setImage:    (imgId, data) => setDoc(doc(db, 'task_images', imgId), data || {}),
+    removeImage: (imgId) => deleteDoc(doc(db, 'task_images', imgId)),
   };
 
   window.dispatchEvent(new Event('cloudStoreReady'));
