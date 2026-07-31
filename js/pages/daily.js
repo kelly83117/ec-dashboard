@@ -52,6 +52,7 @@ Object.assign(App, {
           <span style="color:${assigneeColor};font-size:13px;flex-shrink:0">●</span>
           <span style="flex:1;min-width:0;font-size:13px;color:var(--text);word-break:break-word">${escapeHtml(t.desc || '')}</span>
           <span style="font-size:10px;color:var(--text-muted);flex-shrink:0;white-space:nowrap">${escapeHtml(t.assignee || '')}</span>
+          ${(t.images && t.images.length) ? `<button class="boss-task-imgs" data-task-id="${escapeHtml(t.id)}" title="查看附圖">圖 ${t.images.length}</button>` : ''}
           <input type="checkbox" class="boss-task-toggle" data-task-id="${escapeHtml(t.id)}" ${canToggle ? '' : 'disabled'} style="width:16px;height:16px;cursor:${canToggle ? 'pointer' : 'not-allowed'};flex-shrink:0">
           ${isAdmin ? `
             <button class="boss-task-edit" data-task-id="${escapeHtml(t.id)}" title="編輯" style="border:0;background:none;color:#94a3b8;cursor:pointer;font-size:12px;flex-shrink:0">✎</button>
@@ -195,6 +196,12 @@ Object.assign(App, {
             <div style="display:flex;flex-wrap:wrap;gap:5px">${chipsHtml}</div>
           </div>`;
       };
+      // 老闆任務的附圖：個人待辦這筆只存 text 與 bossTaskId，images 在原任務上，需反查。
+      // 同事實際會看的是自己這張卡片，若這裡沒有入口，等於看不到老闆附的截圖。
+      const _btImageCount = {};
+      (Store.get('ec.bossTasks', []) || []).forEach(t => {
+        if (t && t.id && Array.isArray(t.images) && t.images.length) _btImageCount[t.id] = t.images.length;
+      });
       const renderItem = (it) => {
         if (it && it.kind === 'insight-summary') {
           const counts = it.counts || {};
@@ -223,6 +230,7 @@ Object.assign(App, {
         <div class="dp-todo-row" data-item-id="${escapeHtml(it.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
           <span style="color:${PERSON_COLORS[p.name] || '#6b7280'};font-size:13px;flex-shrink:0">●</span>
           <span style="flex:1;min-width:0;font-size:13px;color:${it.done ? '#9ca3af' : 'var(--text)'};text-decoration:${it.done ? 'line-through' : 'none'};word-break:break-word">${escapeHtml(it.text)}</span>
+          ${(it.bossTaskId && _btImageCount[it.bossTaskId]) ? `<button class="boss-task-imgs" data-task-id="${escapeHtml(it.bossTaskId)}" title="查看附圖">圖 ${_btImageCount[it.bossTaskId]}</button>` : ''}
           <input type="checkbox" class="dp-todo-check" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" ${it.done ? 'checked' : ''} ${isEditable ? '' : 'disabled'} style="width:16px;height:16px;cursor:${isEditable ? 'pointer' : 'default'};flex-shrink:0">
           ${it.done ? '<span style="font-size:10.5px;color:#10b981;font-weight:700;flex-shrink:0">已完成</span>' : ''}
           ${isEditable ? `<button class="dp-todo-del" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" title="刪除" style="border:0;background:none;color:#d1d5db;cursor:pointer;font-size:13px;flex-shrink:0">✕</button>` : ''}
@@ -576,8 +584,7 @@ Object.assign(App, {
         document.querySelectorAll('.boss-task-history-del').forEach(b => {
           b.addEventListener('click', () => {
             if (!confirm('從歷史中刪除這筆？無法復原。')) return;
-            const list = (Store.get('ec.bossTasks', []) || []).filter(t => t.id !== b.dataset.taskId);
-            Store.set('ec.bossTasks', list);
+            this._deleteBossTask(b.dataset.taskId);
             showToast('已刪除', 'success');
             this.closeModal();
             this.openBossTaskHistoryModal();
@@ -599,9 +606,19 @@ Object.assign(App, {
     const assignee = existing ? existing.assignee : '全體';
     const due = existing ? (existing.due || '') : '';
 
+    // 附圖狀態。圖片在貼上當下就上傳（原因見下方 onSave 註解），
+    // 因此需要分別追蹤「目前顯示的」「這次新傳的」「這次標記移除的」三組，
+    // 才能在按取消時正確回收、按儲存時正確刪除。
+    const taskUid = existing ? existing.id : ('bt-' + Math.random().toString(36).slice(2, 10));
+    let tiItems   = [];   // 目前顯示中的圖：{ id, dataUrl, bytes, note }
+    let tiAdded   = [];   // 這次 modal 開啟後新上傳的 imgId（按取消要刪掉）
+    let tiRemoved = [];   // 這次標記移除的既有 imgId（按儲存才真的刪）
+    let tiBusy    = false;
+    let tiPasteHandler = null;
+
     this.openModal({
       title: existing ? '編輯任務' : '新增任務',
-      width: '480px',
+      width: '560px',
       bodyHtml: `
         <div class="field">
           <label>任務內容</label>
@@ -619,10 +636,153 @@ Object.assign(App, {
             <input type="date" id="bt-due" value="${escapeHtml(due)}" min="${todayStr}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
           </div>
         </div>
+        <div class="field">
+          <label>附加截圖（最多 ${TI_MAX_IMAGES} 張）</label>
+          <div class="ti-zone">
+            <div class="ti-hint">在這個視窗裡按 Ctrl+V 貼上截圖，或 <button type="button" id="ti-pick" class="ti-pick">選擇檔案</button></div>
+            <div id="ti-list" class="ti-list"></div>
+            <div id="ti-status" class="ti-status" hidden></div>
+          </div>
+        </div>
       `,
       saveLabel: existing ? '儲存' : '指派',
       cancelLabel: '取消',
+      onMount: () => {
+        const listEl   = document.getElementById('ti-list');
+        const statusEl = document.getElementById('ti-status');
+        const pickBtn  = document.getElementById('ti-pick');
+
+        const setStatus = (msg, isErr) => {
+          if (!statusEl) return;
+          statusEl.textContent = msg || '';
+          statusEl.hidden = !msg;
+          statusEl.classList.toggle('is-err', !!isErr);
+        };
+
+        const render = () => {
+          if (!listEl) return;
+          listEl.innerHTML = tiItems.map(it => `
+            <div class="ti-thumb" data-img-id="${escapeHtml(it.id)}">
+              <img src="${it.dataUrl}" alt="附圖">
+              <button type="button" class="ti-del" data-img-id="${escapeHtml(it.id)}" title="移除">✕</button>
+              <span class="ti-size">${(it.bytes / 1024).toFixed(0)} KB</span>
+            </div>
+          `).join('');
+        };
+
+        // 貼上與選檔的共用主幹：兩個入口都產出 File 物件，之後處理完全相同
+        const addFile = async (file) => {
+          if (tiBusy) return;
+          if (tiItems.length >= TI_MAX_IMAGES) {
+            setStatus('最多 ' + TI_MAX_IMAGES + ' 張，請先移除幾張', true);
+            return;
+          }
+          tiBusy = true;
+          setStatus('處理中…');
+          try {
+            const c = await _tiCompress(file);
+            if (!c) { setStatus('這張圖太大，壓縮後仍超過上限，請先裁切', true); return; }
+            const imgId = await _tiUpload(taskUid, c, (this.currentUser && this.currentUser.username) || '');
+            const dataUrl = await new Promise((res, rej) => {
+              const r = new FileReader();
+              r.onload = () => res(r.result);
+              r.onerror = () => rej(new Error('預覽失敗'));
+              r.readAsDataURL(c.blob);
+            });
+            tiItems.push({ id: imgId, dataUrl, bytes: c.bytes, note: c.note });
+            tiAdded.push(imgId);
+            render();
+            setStatus('已加入（' + c.note + '）');
+            setTimeout(() => setStatus(''), 2000);
+          } catch (e) {
+            setStatus('上傳失敗：' + (e && e.message || '未知錯誤'), true);
+          } finally {
+            tiBusy = false;
+          }
+        };
+
+        // 貼上綁在 document：modal 內沒有輸入焦點時也要能貼。
+        // 務必在 onSave 與 onCancel 兩邊都解綁，否則關閉後在其他頁面按 Ctrl+V 會誤觸發。
+        tiPasteHandler = (e) => {
+          const items = (e.clipboardData && e.clipboardData.items) || [];
+          for (const it of items) {
+            if (it.type && it.type.startsWith('image/')) {
+              const f = it.getAsFile();
+              if (f) { e.preventDefault(); addFile(f); }
+              return;
+            }
+          }
+        };
+        document.addEventListener('paste', tiPasteHandler);
+
+        if (pickBtn) pickBtn.addEventListener('click', () => {
+          const inp = document.createElement('input');
+          inp.type = 'file';
+          inp.accept = 'image/*';
+          inp.multiple = true;
+          inp.onchange = async () => {
+            for (const f of Array.from(inp.files || [])) await addFile(f);
+          };
+          inp.click();
+        });
+
+        if (listEl) listEl.addEventListener('click', (e) => {
+          const btn = e.target.closest && e.target.closest('.ti-del');
+          if (!btn) return;
+          const id = btn.dataset.imgId;
+          const idx = tiItems.findIndex(x => x.id === id);
+          if (idx < 0) return;
+          tiItems.splice(idx, 1);
+          // 這次新傳的直接刪掉；既有的只標記，等按儲存才真的刪
+          const ai = tiAdded.indexOf(id);
+          if (ai >= 0) {
+            tiAdded.splice(ai, 1);
+            window.__cloudTaskImage.removeImage(id).catch(() => {});
+          } else {
+            tiRemoved.push(id);
+          }
+          render();
+        });
+
+        render();
+
+        // 編輯既有任務時，把已存的圖片讀回來顯示。
+        // 這些是「既有圖」不是「這次新傳的」，所以不進 tiAdded——
+        // 按取消時不該被刪掉，點 ✕ 也只標記進 tiRemoved、等按儲存才真的刪。
+        // 逐張讀而非一次讀完：任何一張失敗都不該讓其他張跟著不顯示。
+        const existingIds = (existing && Array.isArray(existing.images)) ? existing.images : [];
+        if (existingIds.length) {
+          setStatus('載入已附圖片…');
+          Promise.all(existingIds.map(id =>
+            window.__cloudTaskImage.getDoc(id)
+              .then(snap => {
+                if (!snap || !snap.exists()) return null;
+                const d = snap.data() || {};
+                if (!d.data) return null;
+                return { id, dataUrl: d.data, bytes: d.bytes || 0, note: '' };
+              })
+              .catch(() => null)
+          )).then(results => {
+            const ok = results.filter(Boolean);
+            // unshift 保持既有圖排在這次新貼的前面（雖然載入期間通常還沒新貼）
+            tiItems = ok.concat(tiItems);
+            render();
+            const missing = existingIds.length - ok.length;
+            if (missing) setStatus('有 ' + missing + ' 張圖片讀取失敗或已不存在', true);
+            else setStatus('');
+          });
+        }
+      },
+
+      onCancel: () => {
+        if (tiPasteHandler) { document.removeEventListener('paste', tiPasteHandler); tiPasteHandler = null; }
+        // 取消 = 這次新傳的都不算數，從雲端回收，避免留下沒有任務指向的孤兒圖片
+        tiAdded.forEach(id => { window.__cloudTaskImage.removeImage(id).catch(() => {}); });
+      },
+
       onSave: () => {
+        if (tiBusy) { showToast('圖片還在處理中，請稍候', 'error'); return false; }
+        if (tiPasteHandler) { document.removeEventListener('paste', tiPasteHandler); tiPasteHandler = null; }
         const descEl = document.getElementById('bt-desc');
         const assigneeEl = document.getElementById('bt-assignee');
         const dueEl = document.getElementById('bt-due');
@@ -635,19 +795,22 @@ Object.assign(App, {
         if (existing) {
           const idx = list.findIndex(t => t.id === existing.id);
           if (idx >= 0) {
-            list[idx] = { ...list[idx], desc: text, assignee: assigneeVal, due: dueVal };
+            list[idx] = { ...list[idx], desc: text, assignee: assigneeVal, due: dueVal, images: tiItems.map(x => x.id) };
           }
         } else {
           list.push({
-            id: 'bt-' + Math.random().toString(36).slice(2, 10),
+            id: taskUid,
             desc: text,
             assignee: assigneeVal,
             due: dueVal,
             status: 'todo',
             createdBy: (this.currentUser && this.currentUser.username) || '',
             createdAt: Date.now(),
+            images: tiItems.map(x => x.id),
           });
         }
+        // 標記移除的既有圖片，到這裡才真的從雲端刪除（按取消則不刪）
+        tiRemoved.forEach(id => { window.__cloudTaskImage.removeImage(id).catch(() => {}); });
         Store.set('ec.bossTasks', list);
         showToast(existing ? '已更新' : '已指派', 'success');
         this.render();
@@ -681,6 +844,92 @@ Object.assign(App, {
         return true;
       },
     });
+  },
+  // 任務附圖檢視：所有人都能開（不做 admin 檢查）。
+  // openBossTaskModal 有 admin 權限擋，被指派的同事進不去，
+  // 若不另開這個入口，老闆附的截圖收件人就看不到，功能等於無效。
+  openTaskImagesModal(taskId) {
+    const all = Store.get('ec.bossTasks', []) || [];
+    const task = all.find(t => t.id === taskId);
+    const ids = (task && Array.isArray(task.images)) ? task.images : [];
+    if (!ids.length) { showToast('這筆任務沒有附圖', 'info'); return; }
+
+    this.openModal({
+      title: '任務附圖 · ' + ((task && task.desc) || ''),
+      width: 'min(1400px, 94vw)',
+      hideFooter: true,
+      bodyHtml: `<div id="tiv-body" class="tiv-body"><div class="tiv-loading">載入中…</div></div>`,
+      onMount: () => {
+        const box = document.getElementById('tiv-body');
+        if (!box) return;
+        Promise.all(ids.map(id =>
+          window.__cloudTaskImage.getDoc(id)
+            .then(snap => (snap && snap.exists() && (snap.data() || {}).data) ? { id, data: snap.data().data } : null)
+            .catch(() => null)
+        )).then(results => {
+          const ok = results.filter(Boolean);
+          if (!ok.length) {
+            box.innerHTML = `<div class="tiv-loading">圖片讀取失敗，或已被刪除</div>`;
+            return;
+          }
+          const missing = ids.length - ok.length;
+          box.innerHTML =
+            (missing ? `<div class="tiv-warn">有 ${missing} 張圖片讀取失敗或已不存在</div>` : '') +
+            ok.map((it, i) => `
+              <figure class="tiv-item">
+                <img src="${it.data}" alt="附圖 ${i + 1}" class="tiv-img" title="點圖切換原始尺寸">
+                <figcaption class="tiv-cap">${i + 1} / ${ok.length} · 點圖切換原始尺寸</figcaption>
+              </figure>
+            `).join('');
+          box.querySelectorAll('.tiv-img').forEach(im => {
+            im.addEventListener('click', () => im.classList.toggle('is-full'));
+          });
+        });
+      },
+    });
+  },
+  // 刪除老闆任務的共用善後。有兩個刪除入口（列表的 ✕、歷史彈窗），
+  // 邏輯相同，抽出來避免日後新增入口時漏掉其中一項善後。
+  // 兩件善後缺一不可：
+  //   1. images 指向的圖片 doc 要刪，否則變成沒有任務指向的孤兒，永遠佔空間又無從追溯
+  //   2. ec.dailyProgress 裡 bossTaskId 對應的那筆要清，否則同事待辦清單會留下
+  //      永遠對不到原任務的殘留項目
+  _deleteBossTask(taskId) {
+    if (!taskId) return;
+    const all = Store.get('ec.bossTasks', []) || [];
+    const task = all.find(t => t.id === taskId);
+
+    // 1. 先刪圖片（用任務上的 images 記錄，所以必須在移除任務之前取出）
+    const imgIds = (task && Array.isArray(task.images)) ? task.images : [];
+    imgIds.forEach(id => {
+      window.__cloudTaskImage.removeImage(id).catch(e => console.warn('[task image cleanup]', id, e));
+    });
+
+    // 2. 清掉個人待辦裡對應的那筆
+    const prog = Store.get('ec.dailyProgress', {}) || {};
+    const nextProg = { ...prog };
+    let removedItems = 0;
+    Object.keys(nextProg).forEach(date => {
+      const day = { ...(nextProg[date] || {}) };
+      let dayChanged = false;
+      Object.keys(day).forEach(name => {
+        if (!Array.isArray(day[name])) return;
+        const before = day[name].length;
+        const kept = day[name].filter(it => it.bossTaskId !== taskId);
+        if (kept.length !== before) {
+          day[name] = kept;
+          removedItems += before - kept.length;
+          dayChanged = true;
+        }
+      });
+      if (dayChanged) nextProg[date] = day;
+    });
+    if (removedItems > 0) Store.set('ec.dailyProgress', nextProg);
+
+    // 3. 最後才移除任務本身
+    Store.set('ec.bossTasks', all.filter(t => t.id !== taskId));
+
+    console.log('[task delete]', taskId, '圖片', imgIds.length, '張、個人待辦', removedItems, '筆');
   },
   bindWeeklyCalendar(deptId) {
     const ensureFilter = () => {
@@ -731,6 +980,10 @@ Object.assign(App, {
     if (historyBtn) historyBtn.addEventListener('click', () => this.openBossTaskHistoryModal());
     const lineCfgBtn = document.getElementById('boss-task-line-cfg');
     if (lineCfgBtn) lineCfgBtn.addEventListener('click', () => this.openBossLineConfigModal());
+    // 附圖檢視：所有人都能點（不像 edit / del 只綁給 admin）
+    document.querySelectorAll('.boss-task-imgs').forEach(b => {
+      b.addEventListener('click', () => this.openTaskImagesModal(b.dataset.taskId));
+    });
     document.querySelectorAll('.boss-task-edit').forEach(b => {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -741,8 +994,7 @@ Object.assign(App, {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         if (!confirm('確定刪除這個任務？')) return;
-        const list = (Store.get('ec.bossTasks', []) || []).filter(t => t.id !== b.dataset.taskId);
-        Store.set('ec.bossTasks', list);
+        this._deleteBossTask(b.dataset.taskId);
         showToast('已刪除', 'success');
         this.render();
       });
@@ -2144,4 +2396,202 @@ function buildCardAdjustmentsHtml(person, viewDate) {
     </div>`;
 }
 
-Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml });
+/* ===================== 任務附圖：壓縮與上傳（Commit A，尚未接 UI） =====================
+ * Firestore 單 doc 上限 1MB，圖片以 base64 dataURL 存放會膨脹約 37%，
+ * 因此壓縮後二進位需 <= 500KB（→ dataURL 約 685KB）。
+ * 附件是螢幕截圖（多為文字內容），一律轉 JPEG 或盲目縮小會讓小字糊掉，
+ * 所以採階梯降級：先原樣、再逐級縮尺寸、最後才轉 JPEG。
+ */
+const TI_MAX_IMAGES   = 10;          // 單一任務最多幾張
+const TI_TARGET_BYTES = 500 * 1024;  // 壓縮目標（二進位）
+
+// imgId 格式注意：Firestore 的 document ID 不可符合 __.*__（雙底線開頭且雙底線結尾），
+// 因此這裡固定用 img- 前綴，不要改成底線開頭。
+function _tiGenId() {
+  return 'img-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+// 把 Image 畫到 canvas 並輸出 Blob。maxEdge 是長邊上限（等比縮放，不放大）。
+function _tiDraw(img, maxEdge, type, quality) {
+  return new Promise(resolve => {
+    const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth  * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    // 截圖多為淺色底，轉 JPEG 時透明區域預設會變黑，先鋪白底
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    cv.toBlob(b => resolve(b), type, quality);
+  });
+}
+
+// 階梯降級壓縮。回傳 { blob, mime, bytes, note } ；壓不下來回傳 null。
+async function _tiCompress(file) {
+  if (!file || !String(file.type || '').startsWith('image/')) {
+    throw new Error('不是圖片檔');
+  }
+  if (file.size <= TI_TARGET_BYTES) {
+    return { blob: file, mime: file.type, bytes: file.size, note: '原檔未壓縮' };
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload  = () => res(i);
+      i.onerror = () => rej(new Error('圖片解碼失敗'));
+      i.src = url;
+    });
+    // 依原檔格式選階梯，兩條都只輸出 JPEG。
+    // PNG 多半是螢幕截圖（內容是文字）：先降品質、保住原尺寸，撐不住才縮。
+    // 非 PNG 多半是照片：本來就是有損格式，直接從縮尺寸開始，省掉沒必要的嘗試。
+    const isPng = String(file.type || '').includes('png');
+    const steps = isPng ? [
+      // 螢幕截圖：文字可讀性取決於尺寸，所以先犧牲品質、最後才縮尺寸。
+      // 不輸出 PNG——實測縮小後的 PNG 比原圖更大且更糊（截圖縮放會破壞 PNG 的壓縮率）。
+      { maxEdge: Infinity, type: 'image/jpeg', q: 0.85, note: '原尺寸 JPEG 85' },
+      { maxEdge: Infinity, type: 'image/jpeg', q: 0.7,  note: '原尺寸 JPEG 70' },
+      { maxEdge: 1600,     type: 'image/jpeg', q: 0.8,  note: '長邊 1600 JPEG 80' },
+      { maxEdge: 1280,     type: 'image/jpeg', q: 0.75, note: '長邊 1280 JPEG 75' },
+    ] : [
+      { maxEdge: 1600, type: 'image/jpeg', q: 0.9,       note: '長邊 1600 JPEG 90' },
+      { maxEdge: 1280, type: 'image/jpeg', q: 0.9,       note: '長邊 1280 JPEG 90' },
+      { maxEdge: 1280, type: 'image/jpeg', q: 0.75,      note: '長邊 1280 JPEG 75' },
+    ];
+    for (const s of steps) {
+      const blob = await _tiDraw(img, s.maxEdge, s.type, s.q);
+      if (blob && blob.size <= TI_TARGET_BYTES) {
+        return { blob, mime: s.type, bytes: blob.size, note: s.note };
+      }
+    }
+    return null;   // 每一級都壓不下來
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// 壓好的 Blob 轉 dataURL 後存進 task_images，回傳 imgId。
+async function _tiUpload(taskId, compressed, createdBy) {
+  const dataUrl = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload  = () => res(r.result);
+    r.onerror = () => rej(new Error('轉檔失敗'));
+    r.readAsDataURL(compressed.blob);
+  });
+  const imgId = _tiGenId();
+  await window.__cloudTaskImage.setImage(imgId, {
+    taskId:    taskId || '',
+    data:      dataUrl,
+    mime:      compressed.mime || '',
+    bytes:     compressed.bytes || 0,
+    createdAt: Date.now(),
+    createdBy: createdBy || '',
+  });
+  return imgId;
+}
+
+/* ===================== 任務附圖：維運用稽核與清理 =====================
+ * 這兩個函式不接 UI，供維運人員在瀏覽器 Console 手動執行。
+ *
+ * 什麼時候該跑：每月一次，或覺得工作日誌變慢時。
+ *   在任何頁面按 F12 開 Console，輸入 __taskImageAudit() 即可。
+ *
+ * 為什麼稽核與清理分開：判斷「孤兒」的邏輯只要有偏差，刪掉的就是還在使用的圖，
+ *   而且無法復原。所以一定要由人看過報告再決定，不要自動清理。
+ *
+ * 孤兒是怎麼產生的：刪除任務時已會連帶刪圖（見 _deleteBossTask），
+ *   但使用者在 modal 貼圖後直接關閉分頁時，onCancel 沒機會執行；
+ *   removeImage 也可能因網路問題失敗。
+ *
+ * 數字到多少要處理：Firestore 免費額度為 1 GiB，且由所有 collection 共用
+ *   （app/main、profits、momo_* 等都算在內）。
+ *   task_images 超過 300 MB 就建議清理孤兒；超過 600 MB 要認真考慮
+ *   改用 Firebase Storage 或定期封存。
+ *   注意前端拿不到 Firestore 的總用量，那只有 Firebase Console 看得到，
+ *   這裡算的僅是 task_images 這一個 collection。
+ */
+const TI_REST_BASE = 'https://firestore.googleapis.com/v1/projects/yc-dashboard-9aa6c/databases/(default)/documents/task_images';
+
+// 列出 task_images 全部文件（自動翻頁）
+async function _tiListAll() {
+  const out = [];
+  let token = '';
+  for (let page = 0; page < 50; page++) {
+    const url = TI_REST_BASE + '?pageSize=300' + (token ? '&pageToken=' + encodeURIComponent(token) : '');
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('REST 讀取失敗：' + resp.status);
+    const j = await resp.json();
+    (j.documents || []).forEach(d => {
+      const f = d.fields || {};
+      out.push({
+        id:        String(d.name || '').split('/').pop(),
+        taskId:    (f.taskId && f.taskId.stringValue) || '',
+        bytes:     Number((f.bytes && (f.bytes.integerValue || f.bytes.doubleValue)) || 0),
+        createdAt: Number((f.createdAt && (f.createdAt.integerValue || f.createdAt.doubleValue)) || 0),
+        createdBy: (f.createdBy && f.createdBy.stringValue) || '',
+      });
+    });
+    token = j.nextPageToken || '';
+    if (!token) break;
+  }
+  return out;
+}
+
+// 稽核：只報告，不刪除任何東西
+window.__taskImageAudit = async function () {
+  console.log('掃描 task_images 中…');
+  const imgs = await _tiListAll();
+  const tasks = Store.get('ec.bossTasks', []) || [];
+  const referenced = new Set();
+  tasks.forEach(t => { (Array.isArray(t.images) ? t.images : []).forEach(id => referenced.add(id)); });
+
+  const orphans = imgs.filter(im => !referenced.has(im.id));
+  const totalMB   = imgs.reduce((s, i) => s + i.bytes, 0) / 1048576;
+  const orphanMB  = orphans.reduce((s, i) => s + i.bytes, 0) / 1048576;
+
+  console.log('─────────── task_images 稽核 ───────────');
+  console.log('總計       ' + imgs.length + ' 張、' + totalMB.toFixed(1) + ' MB');
+  console.log('使用中     ' + (imgs.length - orphans.length) + ' 張');
+  console.log('孤兒       ' + orphans.length + ' 張、' + orphanMB.toFixed(1) + ' MB');
+  console.log('參考基準：超過 300 MB 建議清理孤兒；超過 600 MB 需重新評估儲存方式');
+  if (orphans.length) {
+    console.table(orphans.map(o => ({
+      id: o.id,
+      指向任務: o.taskId || '(無)',
+      KB: +(o.bytes / 1024).toFixed(0),
+      建立時間: o.createdAt ? new Date(o.createdAt).toLocaleString() : '',
+      建立者: o.createdBy,
+    })));
+    console.log('確認上表無誤後，執行 __taskImageCleanup() 才會實際刪除');
+  } else {
+    console.log('沒有孤兒，不需要清理');
+  }
+  window.__tiAuditResult = orphans;
+  return { total: imgs.length, totalMB: +totalMB.toFixed(1), orphans: orphans.length };
+};
+
+// 清理：實際刪除孤兒，必須先跑過 __taskImageAudit()
+window.__taskImageCleanup = async function () {
+  const orphans = window.__tiAuditResult;
+  if (!Array.isArray(orphans)) {
+    console.log('請先執行 __taskImageAudit() 檢視要刪什麼，再執行本函式');
+    return;
+  }
+  if (!orphans.length) { console.log('沒有孤兒需要清理'); return; }
+  if (!confirm('即將永久刪除 ' + orphans.length + ' 張孤兒圖片，無法復原。確定嗎？')) {
+    console.log('已取消');
+    return;
+  }
+  let ok = 0, fail = 0;
+  for (const o of orphans) {
+    try { await window.__cloudTaskImage.removeImage(o.id); ok++; }
+    catch (e) { fail++; console.warn('刪除失敗', o.id, e); }
+  }
+  console.log('清理完成：成功 ' + ok + ' 張、失敗 ' + fail + ' 張');
+  window.__tiAuditResult = null;
+  console.log('建議再跑一次 __taskImageAudit() 確認結果');
+};
+
+Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES, _tiListAll });

@@ -43,7 +43,9 @@ Object.assign(App, {
           SHOPS.forEach(s => {
             if (typeof initShopUI === 'function') initShopUI(s.id);
           });
-          try{const _sv=localStorage.getItem('ec_curShop');if(_sv&&_sv!=='總表'&&typeof setShop==='function'){const _sb=document.querySelector("button[onclick*=\"setShop('"+_sv+"'\"]");setShop(_sv,_sb||null);}}catch{}
+          // 重建後還原「當前檢視」：改用平台感知的 restoreProfitView(profit.js)，讓 MOMO/酷澎 也還原得回、不再一律彈回蝦皮好麻吉。
+          //   ⚠ fallback：helper 未載到(profit.js 沒載/未定義)時退回原本只認 ec_curShop 的蝦皮 inline 還原，不讓還原直接壞掉。
+          try{ if(typeof window.restoreProfitView==='function'){ window.restoreProfitView(); } else { const _sv=localStorage.getItem('ec_curShop');if(_sv&&_sv!=='總表'&&typeof setShop==='function'){const _sb=document.querySelector("button[onclick*=\"setShop('"+_sv+"'\"]");setShop(_sv,_sb||null);} } }catch{}
         } catch (e) { console.error('profit init failed', e); }
       }, 200);
     }
@@ -829,8 +831,9 @@ Object.assign(App, {
                 if (typeof initShopUI === 'function') initShopUI(s.id);
               });
               if(typeof renderSummary==='function') renderSummary();
-              // 重渲染後恢復正在操作的 tab
-              try{const _sv=localStorage.getItem('ec_curShop')||(typeof curShop!=='undefined'&&curShop!=='總表'?curShop:null);if(_sv&&_sv!=='總表'&&typeof setShop==='function'){var _rb=document.querySelector("button[onclick*=\"setShop('"+_sv+"'\"]");setShop(_sv,_rb||null);}}catch{}
+              // 重渲染後恢復正在操作的檢視：改用平台感知的 restoreProfitView(profit.js)，讓 MOMO/酷澎 也還原、不再一律彈回蝦皮好麻吉。
+              //   ⚠ fallback：helper 未載到時退回原本只認 ec_curShop 的蝦皮 inline 還原，不讓還原直接壞掉。蝦皮行為(platform=shopee)逐字不變。
+              try{ if(typeof window.restoreProfitView==='function'){ window.restoreProfitView(); } else { const _sv=localStorage.getItem('ec_curShop')||(typeof curShop!=='undefined'&&curShop!=='總表'?curShop:null);if(_sv&&_sv!=='總表'&&typeof setShop==='function'){var _rb=document.querySelector("button[onclick*=\"setShop('"+_sv+"'\"]");setShop(_sv,_rb||null);} } }catch{}
             } catch(e) { console.log(e); }
           }
         }, 200);

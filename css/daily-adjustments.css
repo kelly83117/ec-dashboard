@@ -294,3 +294,47 @@
 .adj-x-profit .adj-x-row { background: var(--x-profit-bg); border-left-color: var(--x-profit); }
 .adj-x-profit .adj-x-date, .adj-x-profit .adj-x-grp { color: var(--x-profit); }
 .adj-x-profit .adj-x-text { color: var(--x-profit-fg); }
+
+/* 老闆指派任務：附加截圖。顏色一律走既有 :root 變數，不寫死色碼、不碰 --bg 底色。 */
+.ti-zone{border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;}
+.ti-hint{font-size:12px;color:var(--text-muted);line-height:1.6;}
+.ti-pick{border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--primary);font-size:12px;font-family:inherit;padding:2px 8px;cursor:pointer;}
+.ti-pick:hover{background:var(--primary-soft);}
+.ti-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+.ti-list:empty{margin-top:0;}
+.ti-thumb{position:relative;width:96px;height:72px;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--surface);}
+.ti-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.ti-del{position:absolute;top:2px;right:2px;width:18px;height:18px;line-height:1;border:0;border-radius:50%;background:rgba(17,24,39,.6);color:#fff;font-size:11px;cursor:pointer;padding:0;}
+.ti-del:hover{background:var(--danger);}
+.ti-size{position:absolute;left:0;bottom:0;padding:1px 4px;font-size:10px;color:#fff;background:rgba(17,24,39,.55);border-top-right-radius:4px;}
+.ti-status{margin-top:6px;font-size:12px;color:var(--text-muted);}
+.ti-status.is-err{color:var(--danger);}
+
+/* 任務附圖檢視彈窗。顏色一律走既有 :root 變數，不寫死色碼、不碰 --bg 底色。 */
+.tiv-body{display:flex;flex-direction:column;gap:14px;max-height:70vh;overflow-y:auto;}
+.tiv-loading{padding:24px 0;text-align:center;font-size:13px;color:var(--text-muted);}
+.tiv-warn{padding:6px 8px;border-radius:6px;background:var(--warn-soft);color:#92400e;font-size:12px;}
+.tiv-item{margin:0;flex-shrink:0;}   /* flex 容器中不可被壓縮，否則圖片會被擠扁 */
+.tiv-item img{width:100%;height:auto;display:block;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:zoom-in;}
+.tiv-item img.is-full{width:auto;max-width:none;cursor:zoom-out;}
+.tiv-cap{margin-top:4px;font-size:11px;color:var(--text-muted);text-align:right;}
+
+/* 任務附圖入口按鈕。是該行唯一可點擊元素，需要比純文字更顯眼。
+   顏色一律走既有 :root 變數，不寫死色碼、不碰 --bg 底色。 */
+.boss-task-imgs{
+  flex-shrink:0;
+  display:inline-flex;
+  align-items:center;
+  gap:3px;
+  padding:2px 7px;
+  border:1px solid var(--primary);
+  border-radius:999px;
+  background:var(--primary-soft);
+  color:var(--primary);
+  font-size:11.5px;
+  font-weight:700;
+  font-family:inherit;
+  line-height:1.5;
+  cursor:pointer;
+}
+.boss-task-imgs:hover{background:var(--primary);color:#fff;}
