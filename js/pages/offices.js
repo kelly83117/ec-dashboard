@@ -2275,11 +2275,21 @@ Object.assign(App, {
       const tr = e.target.closest('tr.pr-row');
       if (!tr) return;
       const idx = +tr.dataset.i;
-      const detId = `pr-det-${idx}`;
-      const existing = document.getElementById(detId);
-      if (existing) { existing.remove(); tr.style.background = tr.dataset.custom==='1'?'#eff6ff':''; return; }
+      // 已在編輯中 → 取消並還原
+      if (tr.classList.contains('pr-editing')) {
+        tr.innerHTML = tr._origHtml || '';
+        tr.classList.remove('pr-editing');
+        tr.style.background = tr.dataset.custom==='1'?'#eff6ff':'';
+        return;
+      }
+      // 關閉其他正在編輯的列
+      document.querySelectorAll('tr.pr-row.pr-editing').forEach(el => {
+        el.innerHTML = el._origHtml || '';
+        el.classList.remove('pr-editing');
+        el.style.background = el.dataset.custom==='1'?'#eff6ff':'';
+      });
       document.querySelectorAll('.pr-detail-row').forEach(el => el.remove());
-      document.querySelectorAll('tr.pr-row').forEach(el => el.style.background = el.dataset.custom==='1'?'#eff6ff':'');
+      document.querySelectorAll('tr.pr-row').forEach(el => { if(!el.classList.contains('pr-editing')) el.style.background = el.dataset.custom==='1'?'#eff6ff':''; });
 
       const activeSheet = Store.get('ec.d2.pricing.sheet', '商品母表');
       const sheetData = window.__pricingData?.[activeSheet] || [];
@@ -2322,10 +2332,10 @@ Object.assign(App, {
         </div>`;
 
       const colspan = tr.querySelectorAll('td').length;
-      const detTr = document.createElement('tr');
-      detTr.id = detId;
-      detTr.className = 'pr-detail-row';
-      detTr.innerHTML = `<td colspan="${colspan}" style="padding:14px;background:#f8fafc;border-bottom:2px solid #2563eb">
+      // 儲存原始 HTML 以便取消時還原
+      tr._origHtml = tr.innerHTML;
+      tr.classList.add('pr-editing');
+      tr.innerHTML = `<td colspan="${colspan}" style="padding:14px;background:#f8fafc;border-bottom:2px solid #2563eb">
         <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
           ${skuCol    ? txtInp('sku',     '商品編號', r[skuCol],    '120px') : ''}
           ${nameCol2  ? txtInp('name',    '產品名稱', r[nameCol2],  '200px') : ''}
@@ -2372,7 +2382,6 @@ Object.assign(App, {
           ` : ''}
         </div>
       </td>`;
-      tr.after(detTr);
       tr.style.background = '#e0eaff';
 
       const _calcPreview = () => {
@@ -2469,7 +2478,9 @@ Object.assign(App, {
         self.render();
       });
       document.getElementById(`pe-cancel-${idx}`)?.addEventListener('click', () => {
-        detTr.remove(); tr.style.background = r.__custom?'#eff6ff':'';
+        tr.innerHTML = tr._origHtml || '';
+        tr.classList.remove('pr-editing');
+        tr.style.background = r.__custom?'#eff6ff':'';
       });
 
       if (activeSheet === '商品母表') {
