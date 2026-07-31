@@ -2260,6 +2260,17 @@ Object.assign(App, {
       const grp = hdr.getAttribute('data-grp');
       const tbody = document.getElementById('pr-tbody');
       const kids = Array.from(tbody.rows).filter(tr => tr.classList.contains('pr-child') && tr.getAttribute('data-grp') === grp);
+      // 單規格：直接觸發子列 edit，不做展開/收合
+      if (kids.length === 1) {
+        kids[0].removeAttribute('hidden');
+        hdr.dataset.open = '1';
+        hdr.style.background = '#eff6ff';
+        const arr = hdr.querySelector('.pr-grp-arr');
+        if (arr) arr.style.transform = 'rotate(90deg)';
+        window.__prOpenGrps.add(grp);
+        kids[0].click();
+        return;
+      }
       const open = hdr.dataset.open !== '1';
       hdr.dataset.open = open ? '1' : '0';
       hdr.style.background = open ? '#eff6ff' : '';
@@ -2383,6 +2394,11 @@ Object.assign(App, {
         </div>
       </td>`;
       tr.style.background = '#e0eaff';
+      // 捲動讓編輯列靠近頂部，讓其他子列仍可見
+      setTimeout(() => {
+        const wrap = tr.closest('.table-wrap');
+        if (wrap) wrap.scrollTop = Math.max(0, tr.offsetTop - wrap.offsetTop - 8);
+      }, 0);
 
       const _calcPreview = () => {
         const rates = self._prGetRates(activeSheet);
