@@ -1818,7 +1818,7 @@ Object.assign(App, {
     if (!pcts.length) return '';
     const total = pcts.length;
     const avg = pcts.reduce((a,b)=>a+b,0) / total;
-    const max = Math.max(...pcts);
+    const max = pcts.reduce((a,b)=>b>a?b:a, -Infinity);
     const buckets = [0,0,0,0];
     pcts.forEach(p => { if(p<0.10) buckets[0]++; else if(p<0.20) buckets[1]++; else if(p<0.30) buckets[2]++; else buckets[3]++; });
     const colors = ['#ef4444','#f59e0b','#10b981','#059669'];
