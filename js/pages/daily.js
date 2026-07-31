@@ -2192,14 +2192,17 @@ async function _tiCompress(file) {
       i.onerror = () => rej(new Error('圖片解碼失敗'));
       i.src = url;
     });
-    // 依原檔格式選階梯。PNG 多半是螢幕截圖（內容是文字，要保清晰度），先試 PNG 再降 JPEG；
-    // 非 PNG 本來就是有損格式，跳過註定失敗又最慢的 PNG 編碼，直接走 JPEG。
+    // 依原檔格式選階梯，兩條都只輸出 JPEG。
+    // PNG 多半是螢幕截圖（內容是文字）：先降品質、保住原尺寸，撐不住才縮。
+    // 非 PNG 多半是照片：本來就是有損格式，直接從縮尺寸開始，省掉沒必要的嘗試。
     const isPng = String(file.type || '').includes('png');
     const steps = isPng ? [
-      { maxEdge: 1600, type: 'image/png',  q: undefined, note: '縮至長邊 1600 PNG' },
-      { maxEdge: 1280, type: 'image/png',  q: undefined, note: '縮至長邊 1280 PNG' },
-      { maxEdge: 1280, type: 'image/jpeg', q: 0.9,       note: '長邊 1280 JPEG 90' },
-      { maxEdge: 1280, type: 'image/jpeg', q: 0.75,      note: '長邊 1280 JPEG 75' },
+      // 螢幕截圖：文字可讀性取決於尺寸，所以先犧牲品質、最後才縮尺寸。
+      // 不輸出 PNG——實測縮小後的 PNG 比原圖更大且更糊（截圖縮放會破壞 PNG 的壓縮率）。
+      { maxEdge: Infinity, type: 'image/jpeg', q: 0.85, note: '原尺寸 JPEG 85' },
+      { maxEdge: Infinity, type: 'image/jpeg', q: 0.7,  note: '原尺寸 JPEG 70' },
+      { maxEdge: 1600,     type: 'image/jpeg', q: 0.8,  note: '長邊 1600 JPEG 80' },
+      { maxEdge: 1280,     type: 'image/jpeg', q: 0.75, note: '長邊 1280 JPEG 75' },
     ] : [
       { maxEdge: 1600, type: 'image/jpeg', q: 0.9,       note: '長邊 1600 JPEG 90' },
       { maxEdge: 1280, type: 'image/jpeg', q: 0.9,       note: '長邊 1280 JPEG 90' },
