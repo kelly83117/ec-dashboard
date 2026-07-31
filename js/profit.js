@@ -6892,7 +6892,7 @@ function momoConfirmSync(shop){
   const keys=[...document.querySelectorAll('.mm-sync-chk')].filter(c=>c.checked).map(c=>c.getAttribute('data-key'));
   momoCloseSyncPreview();
   if(!keys.length){ if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop); return; }
-  Promise.resolve(syncToCloud(shop, new Set(keys))).then(()=>momoRefreshSyncBtn(shop)).catch(()=>momoRefreshSyncBtn(shop));   // 只推選中的 key
+  Promise.resolve(syncToCloud(shop, new Set(keys))).then(()=>{ momoRefreshSyncBtn(shop); momoUpdateDailyProgress({pushToCloud:true}); }).catch(()=>momoRefreshSyncBtn(shop));   // 只推選中的 key；同步成功後把工作日誌 momo-summary 一起推給老闆
 }
 
 // ── 畫面一：商品獲利總表（甲配/乙配共用）──
@@ -7395,6 +7395,7 @@ function momoAddOptlog(shop,sku){
   map[sku].push({ id:'opt_'+Date.now()+'_'+Math.floor(Math.random()*100000), ...momoNowParts(), shop, sku, by, type, note:txt });
   momoSaveOptlog(shop,map);
   if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop);
+  momoUpdateDailyProgress({silent:true});   // optlog 新增 → 同步工作日誌摘要（silent 不跳 toast）
   momoRenderOptlogSection(shop,sku);   // 只重繪紀錄區塊，不動圖表
 }
 function momoDeleteOptlog(shop,sku,idx){
@@ -7402,8 +7403,101 @@ function momoDeleteOptlog(shop,sku,idx){
   map[sku].splice(idx,1); if(!map[sku].length) delete map[sku];
   momoSaveOptlog(shop,map);
   if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop);
+  momoUpdateDailyProgress({silent:true});   // optlog 刪除 → 同步工作日誌摘要（silent 不跳 toast）
   momoRenderOptlogSection(shop,sku);
 }
+
+// ══════════ MOMO optlog → 工作日誌（軟連結；比照蝦皮 _updateDailyProgressFromAdjustments，但歸屬用 optlog 每筆的 by(登入 username)，不建 shop→person 對照表）══════════
+//   掃當天 ec_momo_optlog|甲配/乙配 → 依 by 分人、依「賣場·type」動態計數 → 寫 {kind:'momo-summary',counts} 進 ec.dailyProgress。
+//   只存 counts、不存原文/refId；點 chip 明細時用 (人+日期+賣場·type) 回 optlog 現算。type 依實際出現的動態產生（新增/未知 type 不會漏、不報錯）；type 清單單一來源仍是 MOMO_OPTLOG_TYPES。
+//   ⚠ 蝦皮/洞察那套(marketing.js/daily.js render)不改；這段是 MOMO 自己的。日後若要全站改用 username 歸屬(C 案)另立一輪。
+const MOMO_OPTLOG_DP_SHOPS=['甲配','乙配'];   // 目前有 optlog 的 MOMO 賣場（MO+ 尚無資料）
+const MOMO_OPTLOG_DP_SEP='·';                 // 賣場與 type 的組合分隔（顯示與明細比對共用；賣場名不含此字元）
+function momoOptlogUserToName(by){   // optlog 存 username → 工作日誌以人名為 key；查無對應時退回 username 本身（不靜默丟、配合 personInfos 聯集仍會顯示）
+  if(!by) return '';
+  try{ const users=(window.Store&&Store.get)?(Store.get('users',[])||[]):[]; const u=users.find(x=>x&&x.username===by); if(u&&u.name) return u.name; }catch(e){}
+  return by;
+}
+// 掃當天 optlog → { 人名: { '甲配·調價':N, ... } }（type 動態、不寫死）
+function momoOptlogTodayCounts(){
+  const today=momoNowParts().date;
+  const byPerson={};
+  MOMO_OPTLOG_DP_SHOPS.forEach(shop=>{
+    const map=momoLoadOptlog(shop)||{};
+    Object.keys(map).forEach(sku=>{ (map[sku]||[]).forEach(e=>{
+      if(!e || (e.date||'')!==today) return;
+      const person=momoOptlogUserToName(e.by); if(!person) return;
+      const key=shop+MOMO_OPTLOG_DP_SEP+(e.type||'其他');
+      const c=byPerson[person]=byPerson[person]||{};
+      c[key]=(c[key]||0)+1;
+    }); });
+  });
+  return byPerson;
+}
+function momoUpdateDailyProgress(opts){
+  opts=opts||{};
+  if(!(window.Store&&Store.get)) return;
+  const today=momoNowParts().date;
+  const countsByPerson=momoOptlogTodayCounts();
+  const all=Store.get('ec.dailyProgress',{})||{};
+  const day=Object.assign({}, all[today]||{});
+  // 受影響 = 今天有新 counts 的人 ∪ 今天已有 momo-summary 的人（後者要能在刪光後被清掉）
+  const affected=new Set(Object.keys(countsByPerson));
+  Object.keys(day).forEach(person=>{ const v=day[person]; if(Array.isArray(v)&&v.some(it=>it&&it.kind==='momo-summary')) affected.add(person); });
+  if(affected.size===0){ if(opts.pushToCloud) return; return; }
+  const toItems=v=>Array.isArray(v)?v.slice():(v&&String(v).trim()?[{id:'legacy',text:String(v).trim(),done:false}]:[]);
+  let anyContent=false;
+  affected.forEach(person=>{
+    const kept=toItems(day[person]).filter(it=>it&&it.kind!=='momo-summary');   // 保留其他 item（蝦皮 insight/profit 摘要、待辦）只換掉 momo-summary
+    const c=countsByPerson[person];
+    if(c&&Object.keys(c).length){ kept.unshift({id:'auto-momo-'+person, kind:'momo-summary', counts:c, done:false, auto:true}); anyContent=true; }
+    if(kept.length) day[person]=kept; else delete day[person];
+  });
+  const next=Object.assign({}, all);
+  if(Object.keys(day).length===0) delete next[today]; else next[today]=day;
+  if(typeof Store.setLocalOnly==='function') Store.setLocalOnly('ec.dailyProgress', next); else Store.set('ec.dailyProgress', next);   // 本機寫入；silent 時不立刻推雲（比照蝦皮）
+  try{ window.__dpPendingNames=window.__dpPendingNames||new Set(); affected.forEach(p=>window.__dpPendingNames.add(p)); if(typeof window.__updateDpSyncBadge==='function') window.__updateDpSyncBadge(); }catch(e){}
+  if(opts.pushToCloud && typeof Store.pushKeyToCloud==='function'){   // 按「☁ 同步雲端」成功時：連同 ec.dailyProgress 推上雲
+    Store.pushKeyToCloud('ec.dailyProgress').then(()=>{ try{ if(window.__dpPendingNames) affected.forEach(p=>window.__dpPendingNames.delete(p)); if(typeof window.__updateDpSyncBadge==='function') window.__updateDpSyncBadge(); }catch(e){} }).catch(e=>console.warn('[momo dp push]',e));
+  }
+  if(anyContent && !opts.silent){
+    const tail=opts.pushToCloud?'（已連同推給老闆）':'（記得按「☁ 同步雲端」推給老闆）';
+    if(typeof showToast==='function') showToast('已自動更新工作日誌'+tail,'info');
+  }
+}
+// 工作日誌 momo-summary chip 明細：用 (人+日期+賣場·type) 回 optlog 現算原文（不存 refId、比照蝦皮回源頭）
+function momoOpenDpDetailFromEl(el){ if(!el||!el.getAttribute) return; momoOpenDpDetail(el.getAttribute('data-mm-person')||'', el.getAttribute('data-mm-date')||'', el.getAttribute('data-mm-combo')||''); }
+function momoOpenDpDetail(person, date, combo){
+  const rows=[];
+  MOMO_OPTLOG_DP_SHOPS.forEach(shop=>{
+    const master=momoLoadProducts(shop)||[]; const nameBySku=new Map(master.map(p=>[p.sku,p.name||'']));
+    const map=momoLoadOptlog(shop)||{};
+    Object.keys(map).forEach(sku=>{ (map[sku]||[]).forEach(e=>{
+      if(!e || (e.date||'')!==date) return;
+      if(momoOptlogUserToName(e.by)!==person) return;
+      if((shop+MOMO_OPTLOG_DP_SEP+(e.type||'其他'))!==combo) return;
+      rows.push({shop, sku, name:nameBySku.get(sku)||'', type:e.type||'其他', note:e.note||'', time:e.time||''});
+    }); });
+  });
+  rows.sort((a,b)=>String(a.time).localeCompare(String(b.time)));
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const body = rows.length ? rows.map(r=>`<div style="border-top:1px solid #eef0f2;padding:7px 2px;display:flex;gap:10px;align-items:flex-start">
+      <span style="font-size:11px;color:#9ca3af;flex-shrink:0;width:38px">${esc(r.time)}</span>
+      <div style="min-width:0;flex:1"><div style="font-size:12px;color:#111827"><b>${esc(r.name||r.sku)}</b> <span style="color:#9ca3af;font-family:monospace">${esc(r.sku)}</span></div>${r.note?`<div style="font-size:12px;color:#374151;margin-top:1px;word-break:break-word">${esc(r.note)}</div>`:''}</div>
+    </div>`).join('') : '<div style="padding:14px 2px;color:#9ca3af;font-size:12px">找不到對應紀錄（可能已刪除或改期）</div>';
+  let ov=document.getElementById('momo-dp-detail-ov');
+  if(!ov){ ov=document.createElement('div'); ov.id='momo-dp-detail-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=e=>{ if(e.target===ov) momoCloseDpDetail(); };
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.2)">
+    <div style="padding:12px 16px;border-bottom:1px solid #eef0f2;display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div><div style="font-size:14px;font-weight:700;color:#4338ca">${esc(combo)}　${rows.length} 筆</div><div style="font-size:11px;color:#9ca3af;margin-top:1px">${esc(person)}　${esc(date)}　·　MOMO 優化紀錄</div></div>
+      <button onclick="momoCloseDpDetail()" style="border:0;background:none;color:#9ca3af;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0">×</button>
+    </div>
+    <div style="padding:6px 16px 14px;overflow:auto">${body}</div>
+  </div>`;
+}
+function momoCloseDpDetail(){ const ov=document.getElementById('momo-dp-detail-ov'); if(ov) ov.remove(); }
 
 // 逐月序列（13 個月上限，實際由 momoAllPeriods 決定）：qty/margin/reconciled + S1103 瀏覽/成交均價 + 半月完整度。
 function momoSkuMonthly(shop,product){
@@ -7639,7 +7733,7 @@ const MOMO_TAG_GROUPS=[
     {k:'rev_dev', emoji:'🟡', label:'發展品', short:'發展品', desc:'毛利貢獻前 30~50%'},
   ]},
   {group:'利潤', tags:[
-    {k:'profit_low',  emoji:'🔻', label:'低利品',   short:'低利',   desc:'毛利率 < 20%'},
+    {k:'profit_low',  emoji:'🔻', label:'低利品',   short:'低利品', desc:'毛利率 < 20%'},
     {k:'return_warn', emoji:'⚠️', label:'退貨警示', short:'退貨高', desc:'退貨率 > 該期平均兩倍'},
     {k:'no_cost',     emoji:'❌', label:'缺成本',   short:'缺成本', desc:'有營收但無成本'},
   ]},
@@ -10217,7 +10311,7 @@ Object.assign(window, {
   momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
-  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,
+  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoOpenDpDetailFromEl,momoCloseDpDetail,
   momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoDismissYiCaveat,momoOvSetMonth,
   momoSearchClear,momoSearchClearToggle,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,momoSyncToggleAll,momoSyncUpdateCount,
