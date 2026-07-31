@@ -1855,7 +1855,7 @@ Object.assign(App, {
     const savedOrder = (saved?.order || []).filter(c => cleanCols.includes(c));
     const newCols = cleanCols.filter(c => !savedOrder.includes(c));
     const fullOrder = [...savedOrder, ...newCols];
-    const hiddenSet = new Set(saved?.hidden || []);
+    const hiddenSet = new Set(saved?.hidden || ['退貨率','實際成本','入帳金額']);
     const panelOpen = Store.get('ec.d2.pricing.colpanel', false);
     return `<div id="pr-col-panel" style="display:${panelOpen?'block':'none'};padding:12px 16px;background:#f8fafc;border-bottom:1px solid var(--border)">
       <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px">欄位顯示與排序 <span style="font-weight:400;color:#9ca3af">拖曳排序・勾選顯示</span></div>
