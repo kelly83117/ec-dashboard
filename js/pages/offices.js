@@ -1620,15 +1620,20 @@ Object.assign(App, {
   _prGetRates(sheet) {
     const def = this.PRICING_SHEET_PARAMS[sheet] || this.PRICING_SHEET_PARAMS['商品母表'];
     const saved = Store.get('ec.pricing.rates', {});
-    return { ...def, ...(saved[sheet] || {}) };
+    const global = Store.get('ec.pricing.global', {});
+    // rmb/ship 全域共用，覆蓋分頁預設
+    return { ...def, ...(saved[sheet] || {}), ...( global.rmb  != null ? {rmb:  global.rmb}  : {} ), ...( global.ship != null ? {ship: global.ship} : {} ) };
   },
 
   // 費率設定面板 HTML
   _prRatesFormHtml() {
     const saved = Store.get('ec.pricing.rates', {});
+    const global = Store.get('ec.pricing.global', {});
     const extraSheets = Store.get('ec.pricing.extra_sheets', []);
     const extraCols   = Store.get('ec.pricing.extra_cols',   []);
     const defRow = this.PRICING_SHEET_PARAMS['商品母表'];
+    const globalRmb  = global.rmb  ?? defRow.rmb;
+    const globalShip = global.ship ?? defRow.ship;
     const mkRow = (sh, isExtra) => {
       const d = this.PRICING_SHEET_PARAMS[sh] || defRow;
       const r = { ...d, ...(saved[sh] || {}) };
@@ -1646,8 +1651,6 @@ Object.assign(App, {
       return `<tr>
         <td style="padding:6px 10px;font-weight:600;font-size:12px;white-space:nowrap">
           ${isExtra ? `<button data-del-extra="${sh}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:12px;margin-right:4px;padding:0" title="刪除">🗑</button>` : ''}${sh}</td>
-        <td style="padding:4px 6px;text-align:center">${inp('rmb',   r.rmb)}</td>
-        <td style="padding:4px 6px;text-align:center">${inp('ship',  r.ship)}</td>
         <td style="padding:4px 6px;text-align:center">${inp('tax',   (r.tax*100).toFixed(1))}</td>
         <td style="padding:4px 6px;text-align:center">${inp('txFee',(r.txFee*100).toFixed(1))}</td>
         <td style="padding:4px 6px;text-align:center">${inp('promo',(r.promo*100).toFixed(1))}</td>
@@ -1674,12 +1677,23 @@ Object.assign(App, {
           <button id="pr-rates-close" style="padding:5px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;color:var(--text)">✕</button>
         </div>
       </div>
+      <div style="display:flex;gap:20px;align-items:center;margin-bottom:12px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+        <span style="font-size:12px;font-weight:700;color:var(--text);white-space:nowrap">全域設定（所有分頁共用）</span>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280;white-space:nowrap">
+          人民幣匯率
+          <input id="pr-global-rmb" type="number" step="0.01" value="${globalRmb}"
+            style="width:72px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-weight:600;text-align:right;font-family:inherit">
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280;white-space:nowrap">
+          陸陸運費(¥/kg)
+          <input id="pr-global-ship" type="number" step="0.01" value="${globalShip}"
+            style="width:72px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;font-size:13px;font-weight:600;text-align:right;font-family:inherit">
+        </label>
+      </div>
       <div style="overflow-x:auto">
         <table style="border-collapse:collapse">
           <thead><tr style="color:#6b7280;border-bottom:1px solid var(--border)">
             <th style="padding:4px 10px;text-align:left;font-weight:600;font-size:12px">分頁</th>
-            <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">人民幣匯率</th>
-            <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">陸陸運費(¥/kg)</th>
             <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">稅金%</th>
             <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">成交%</th>
             <th style="padding:4px 6px;text-align:center;font-weight:600;font-size:12px">活動%</th>
@@ -2779,6 +2793,13 @@ Object.assign(App, {
       if (panel) panel.style.display = 'none';
     });
     document.getElementById('pr-rates-save')?.addEventListener('click', () => {
+      // 儲存全域 rmb/ship
+      const globalRmb  = parseFloat(document.getElementById('pr-global-rmb')?.value);
+      const globalShip = parseFloat(document.getElementById('pr-global-ship')?.value);
+      const global = Store.get('ec.pricing.global', {});
+      if (!isNaN(globalRmb))  global.rmb  = globalRmb;
+      if (!isNaN(globalShip)) global.ship = globalShip;
+      Store.set('ec.pricing.global', global);
       const saved = Store.get('ec.pricing.rates', {});
       document.querySelectorAll('#pr-rates-panel input[data-sh]').forEach(el => {
         const sh = el.dataset.sh;
