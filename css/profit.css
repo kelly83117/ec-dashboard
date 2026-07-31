@@ -174,6 +174,10 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .pnm-entry-text{flex:1;font-size:13px;color:#312e81;font-weight:600;line-height:1.4;}
 .pnm-entry-del{background:none;border:none;cursor:pointer;color:#d1d5db;font-size:16px;padding:0 2px;line-height:1;}
 .pnm-entry-del:hover{color:#ef4444;}
+/* 洞察表紀錄（唯讀）紫色變體：紫沿用工作日誌洞察卡片的 #7e22ce */
+.pnm-entry-ins{background:#faf5ff;border-left-color:#7e22ce;}
+.pnm-entry-ins .pnm-entry-date{color:#7e22ce;}
+.pnm-entry-ins .pnm-entry-text{color:#581c87;}
 .pnm-footer{padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;}
 .pnm-close-btn{padding:7px 22px;border:1px solid #e4e6ef;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;}
 /* Column picker */
@@ -388,6 +392,11 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-verify{font-size:11px;margin-bottom:6px;}
 /* 自驗：通過完全不顯示；只有對不上才警示（展開警示、不可收） */
 .mm-verify-err{font-size:12px;font-weight:700;margin:6px 0;padding:6px 10px;border-radius:7px;background:#fef2f2;border:1px solid #fecaca;color:#dc2626;}
+/* 漏品提示（中性）：有銷量但不在對帳單的品號 → 獨立於自驗錯誤、不用紅色暗示 */
+.mm-verify-note{font-size:12px;margin:6px 0;padding:6px 10px;border-radius:7px;background:#f8fafc;border:1px solid #e5e7eb;color:#475569;}
+.mm-verify-note summary{cursor:pointer;font-weight:600;color:#475569;list-style:revert;}
+.mm-verify-note ul{margin:6px 0 0;padding-left:18px;color:#64748b;max-height:160px;overflow:auto;}
+.mm-verify-note li{margin:1px 0;}
 /* 商品數統計 總/上架/下架：標籤淺色小字、數字粗深、彼此拉開間距 */
 .mm-stat{display:inline-flex;gap:16px;align-items:baseline;white-space:nowrap;}
 .mm-stat-item{font-size:11px;color:#9ca3af;font-weight:400;}
@@ -431,14 +440,70 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-status{font-size:12px;font-weight:600;border-radius:6px;padding:2px 8px;white-space:nowrap;}
 .mm-status.ok{color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;}
 .mm-status.no{color:#92400e;background:#fffbeb;border:1px solid #fde68a;}
+/* 🏷 標籤/篩選 面板（沿用 col-picker-menu 外殼、加寬；MOMO 自有樣式，不碰蝦皮） */
+.mm-filter-panel{min-width:322px;max-width:362px;padding:0;max-height:min(72vh,560px);overflow-y:auto;font-family:'Noto Sans TC',sans-serif;}
+.mm-fp-top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 13px;border-bottom:1px solid #eef0f2;font-size:13px;color:#1e293b;position:sticky;top:0;background:#fff;z-index:1;}
+.mm-fp-total{font-size:11px;color:#9ca3af;font-weight:600;white-space:nowrap;}
+.mm-fp-body{padding:8px 13px 4px;}
+.mm-fp-sec-h{font-size:11px;font-weight:700;color:#6b7280;margin:4px 0 6px;}
+.mm-fp-gp{margin-bottom:8px;}
+.mm-fp-gp-h{font-size:10px;color:#9ca3af;font-weight:700;margin-bottom:3px;}
+.mm-fp-tags{display:flex;flex-wrap:wrap;gap:5px;}
+.mm-fp-tag{display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:14px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid #e5e7eb;background:#fff;color:#4b5563;font-family:inherit;line-height:1.4;}
+.mm-fp-tag:hover{border-color:#9ca3af;}
+.mm-fp-tag.on{background:#5b5fcf;border-color:#5b5fcf;color:#fff;}
+.mm-fp-tag.dis{opacity:.38;cursor:not-allowed;}
+.mm-fp-cnt{font-size:10px;color:#9ca3af;font-weight:700;}
+.mm-fp-tag.on .mm-fp-cnt{color:#dbe0ff;}
+.mm-fp-note{font-size:11px;color:#9ca3af;line-height:1.5;background:#f8f9fb;border-radius:6px;padding:6px 8px;}
+.mm-fp-conds{display:flex;flex-direction:column;gap:4px;margin-bottom:6px;}
+.mm-fp-cond{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#374151;background:#f1f3f9;border-radius:6px;padding:4px 8px;}
+.mm-fp-x{border:none;background:none;color:#9ca3af;cursor:pointer;font-size:12px;padding:0 2px;line-height:1;}
+.mm-fp-x:hover{color:#dc2626;}
+.mm-fp-add{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:2px;}
+.mm-fp-sel{font-size:11px;padding:3px 4px;height:27px;border:1px solid #d1d5db;border-radius:6px;background:#fff;font-family:inherit;}
+.mm-fp-inp{width:58px;font-size:12px;padding:3px 5px;border:1px solid #d1d5db;border-radius:6px;height:27px;font-family:inherit;}
+/* 加入鈕：閒置時中性(灰)、輸入框有未加入的值時 .pending 點亮成主色+光暈 → 一眼看出條件尚未生效 */
+.mm-fp-addbtn{padding:3px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #d1d5db;background:#fff;color:#6b7280;font-family:inherit;height:27px;transition:border-color .12s,background .12s,box-shadow .12s;}
+.mm-fp-addbtn:hover{border-color:#5b5fcf;color:#5b5fcf;}
+.mm-fp-addbtn.pending{border-color:#5b5fcf;background:#5b5fcf;color:#fff;box-shadow:0 0 0 3px rgba(91,95,207,.18);}
+.mm-fp-pending{margin-left:2px;font-size:10.5px;color:#5b5fcf;font-weight:700;white-space:nowrap;flex-basis:100%;}
+.mm-fp-hint{font-size:10px;color:#b0b4bd;line-height:1.5;margin-top:5px;}
+.mm-fp-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 13px;border-top:1px solid #eef0f2;position:sticky;bottom:0;background:#fff;}
+.mm-fp-done{padding:4px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid #5b5fcf;background:#5b5fcf;color:#fff;font-family:inherit;}
+.mm-fp-done:hover{background:#4a4fc0;}
+.mm-linkbtn{border:none;background:none;color:#5b5fcf;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;padding:2px 4px;}
+.mm-linkbtn:hover{text-decoration:underline;}
+.mm-linkbtn:disabled{color:#c7cad1;cursor:default;text-decoration:none;}
+/* 「標籤」欄的主標籤 chip（height:16px 不撐行高、nowrap 不換行） */
+.mm-rtag-chip{display:inline-flex;align-items:center;gap:2px;padding:0 6px;height:16px;line-height:16px;border-radius:8px;background:#f1f3f9;border:1px solid #e4e7f0;font-size:10.5px;font-weight:600;color:#4b5563;white-space:nowrap;cursor:help;}
+.mm-rtag-t{font-size:10.5px;}
+.mm-rtag-more{margin-left:1px;font-size:9.5px;font-weight:700;color:#8b90a0;}
+.mm-rtag-est{margin-left:2px;font-size:9px;font-weight:700;color:#d97706;}   /* 半月流量估算標記 */
+.mm-fp-gp-note{font-size:9.5px;font-weight:600;color:#c3924a;}   /* 面板分組標題旁「僅整月／半月估算」 */
+/* 已篩選 N / 基數 提示條（總覽上方） */
+.mm-filter-info{display:flex;align-items:center;gap:8px;font-size:12px;color:#4b5563;background:#eef0fb;border:1px solid #dfe3f7;border-radius:8px;padding:6px 12px;margin-bottom:10px;}
+.mm-filter-info b{color:#5b5fcf;}
+/* MOMO｜總表 通路總覽：圖表卡片格線（auto-fit 自動換行、不外溢） */
+.mm-ov-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:16px;}
+.mm-ov-grid3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr));}
+.mm-ov-card{background:#fff;border:1px solid #eef0f2;border-radius:10px;padding:12px 14px;min-width:0;}
+.mm-ov-h{font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;}
+.mm-ov-canvas{height:240px;position:relative;}
 /* 欄寬拖曳：豎線「單一來源」= th::after（每欄右緣 1px、粗細一致，不用 border 免得 fixed+collapse 相鄰疊加）。
    grip 是透明拖曳熱區，hover 時另畫一條紫線覆蓋。 */
 th.mm-th{position:relative;}
 th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px;background:#e2e6ee;pointer-events:none;}
 .mm-col-grip{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;user-select:none;z-index:5;}
 .mm-col-grip:hover::after{content:"";position:absolute;top:0;right:3px;height:100%;width:2px;background:#5b5fcf;}
-/* MOMO 表頭稅別註記排到第二行小字（淺色）；th 上下 padding 收窄 + 兩行行高壓緊 → 表頭總高維持單行時的高度、不長高。只作用 .mm-ptbl（不碰蝦皮共用 th） */
-.mm-ptbl th{padding-top:4px;padding-bottom:4px;vertical-align:middle;}
-.mm-ptbl .mm-th-l1{line-height:1.3;}
-.mm-th-sub{font-size:9px;font-weight:400;color:#c3c7cf;line-height:1;letter-spacing:0;text-transform:none;margin-top:1px;}
+/* MOMO 表頭單行：稅別已移進問號提示、無第二行 → padding 還原成基準 9px（不再壓縮，上下平衡）。只作用 .mm-ptbl（不碰蝦皮共用 th）。 */
+.mm-ptbl th{vertical-align:middle;}
+/* 對齊：wrap=inline-flex(隨 th text-align 靠左/右)。右對齊欄＝[箭頭][問號]欄名，欄名最右→右邊界＝數字右邊界；箭頭固定寬(未排序留白)不推歪；問號小字淺色放左側不搶欄名。 */
+/* block flex 填滿欄寬 + justify-content:flex-end → 欄名(最後一項)右邊界貼欄內容右緣＝數字右線；窄欄溢出往左(進自身左 padding)，欄名不被擠右 */
+.mm-th-wrap{display:flex;align-items:center;gap:3px;justify-content:flex-end;min-width:0;}
+.mm-th.tl .mm-th-wrap{justify-content:flex-start;}
+.mm-th-name{white-space:nowrap;}
+.mm-th-q{flex:0 0 auto;width:15px;display:inline-flex;align-items:center;justify-content:center;}   /* 問號固定寬 slot(有無提示都佔位)→ 各欄名右界一致 */
+.mm-th-wrap .mm-info{margin-left:0;flex:0 0 auto;}
+.mm-th-arrow{flex:0 0 auto;width:10px;text-align:center;font-size:10px;line-height:1;color:#5b5fcf;}
 

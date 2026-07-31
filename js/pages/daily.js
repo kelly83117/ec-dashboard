@@ -242,6 +242,9 @@ Object.assign(App, {
     const firstWeekday = new Date(calY, calM - 1, 1).getDay();
     const daysInMonth = new Date(calY, calM, 0).getDate();
     const MAX_CAL_BARS = 5;
+    // 第三塊資料源之二：洞察表索引。🔴 只在月曆迴圈外建一次（迴圈內會重跑 31 次）；
+    // getAdjIndex() 自帶快取，維持在格子內呼叫的既有寫法。
+    const insIndexForCal = getInsIndex();
     const calCells = [];
     for (let i = 0; i < firstWeekday; i++) calCells.push('<div></div>');
     for (let d = 1; d <= daysInMonth; d++) {
@@ -268,18 +271,26 @@ Object.assign(App, {
         </div>
       `).join('');
       const extraHtml = extraCount > 0 ? `<div style="font-size:9.5px;color:var(--text-muted);padding-left:2px">+${extraCount}</div>` : '';
-      // 第三塊：當日淨利表調整筆數，每人一行，置於 todo 橫條上方。用既有 getAdjIndex()（不重解析），
-      //   依 ADJ_SHOP_TO_PERSON 歸人，ALLOWED_NAMES 順序，只顯示有筆數的人（天然上限 3，不與 MAX_CAL_BARS 合併）。
+      // 第三塊：當日「處理的商品數」，每人一行，置於 todo 橫條上方。來源 = 淨利表(getAdjIndex，
+      //   自帶快取) + 洞察表(insIndexForCal，迴圈外建一次)，同商品跨來源去重（key = shop|code；
+      //   code 空時用「來源前綴+#index」保筆數，不讓多筆塌成一筆、也不讓兩來源的無碼列互撞）。
+      //   依 ADJ_SHOP_TO_PERSON 歸人，ALLOWED_NAMES 順序，只顯示有數字的人（天然上限 3，不與 MAX_CAL_BARS 合併）。
       //   顏色走 PERSON_COLORS / PERSON_LIGHT，用 CSS 變數傳給 css/daily-adjustments.css 的排版規則。
-      const adjDay = getAdjIndex()[dateStr.replace(/-/g, '/')] || [];
-      const adjCountByPerson = {};
-      adjDay.forEach(r => {
+      const slash = dateStr.replace(/-/g, '/');
+      const keySet = {};   // person -> Set(商品 key)
+      const addRecs = (recs, srcTag) => recs.forEach((r, i) => {
         const person = ADJ_SHOP_TO_PERSON[r.shop];
-        if (person) adjCountByPerson[person] = (adjCountByPerson[person] || 0) + 1;
+        if (!person) return;
+        const key = r.code ? (r.shop + '|' + r.code) : (r.shop + '|#' + srcTag + i);
+        (keySet[person] = keySet[person] || new Set()).add(key);
       });
+      addRecs(getAdjIndex()[slash] || [], 'p');
+      addRecs(insIndexForCal[slash] || [], 'i');
+      const adjCountByPerson = {};
+      Object.keys(keySet).forEach(n => { adjCountByPerson[n] = keySet[n].size; });
       const adjRowsHtml = ALLOWED_NAMES
         .filter(n => adjCountByPerson[n])
-        .map(n => `<div class="adj-cal-row" style="--adj-cal-c:${PERSON_COLORS[n]};--adj-cal-bg:${PERSON_LIGHT[n].bg};--adj-cal-fg:${PERSON_LIGHT[n].text}"><span class="adj-cal-stripe"></span><span class="adj-cal-label"><span class="adj-cal-name">${escapeHtml(n.slice(0, 1))}</span><span class="adj-cal-num">${adjCountByPerson[n]}</span></span></div>`)
+        .map(n => `<div class="adj-cal-row" title="${escapeHtml(n)} · ${adjCountByPerson[n]} 個商品（含洞察表調整）" style="--adj-cal-c:${PERSON_COLORS[n]};--adj-cal-bg:${PERSON_LIGHT[n].bg};--adj-cal-fg:${PERSON_LIGHT[n].text}"><span class="adj-cal-stripe"></span><span class="adj-cal-label"><span class="adj-cal-name">${escapeHtml(n.slice(0, 1))}</span><span class="adj-cal-num">${adjCountByPerson[n]}</span></span></div>`)
         .join('');
       const numBg = isCellSelected ? 'var(--primary)' : isCellToday ? 'var(--primary-soft)' : 'transparent';
       const numColor = isCellSelected ? 'white' : isCellToday ? 'var(--primary)' : 'var(--text)';
@@ -955,6 +966,22 @@ Object.assign(App, {
     const action = [], noAction = [];
     list.forEach(r => (ADJ_ACTION_RE.test(String(r.text || '')) ? action : noAction).push(r));
 
+    // 交叉紀錄：這個商品在洞察表的調整（唯讀、預設收折；原生 <details>，不掛任何事件）。
+    // muted（沒有動作沉底列）也照樣顯示。
+    const crossInsightHtml = (r) => {
+      const entries = _crossInsightFor(r.shop, r.code);
+      if (entries.length === 0) return '';
+      return `
+        <details class="adj-x adj-x-ins">
+          <summary>洞察表另有 ${entries.length} 筆</summary>
+          ${entries.map(x => `
+          <div class="adj-x-row">
+            <span class="adj-x-date">${escapeHtml(x.date || '未記日期')}</span>
+            <span class="adj-x-text">${escapeHtml(x.text || '')}</span>
+          </div>`).join('')}
+        </details>`;
+    };
+
     const itemHtml = (r, muted) => `
       <div class="adj-modal-item${muted ? ' adj-modal-item-muted' : ''}">
         <div class="adj-modal-item-hd">
@@ -964,6 +991,7 @@ Object.assign(App, {
           <span class="adj-src adj-src-${r.src||'report'}">${r.src==='ads'?'廣告調整':r.src==='growth'?'商品調整':r.src==='import'?'舊版匯入':'報表匯入'}</span>
         </div>
         <div class="adj-modal-text">${escapeHtml(r.text || '')}</div>
+        ${crossInsightHtml(r)}
       </div>`;
 
     const bodyHtml = `
@@ -999,15 +1027,35 @@ Object.assign(App, {
         if (hits.length === 0) return;
         const cls = window.__insightClassify ? window.__insightClassify(shop, code) : null;
         if (cls !== label) return;
-        // 品名 fallback：玩樂主檔的 name 是空字串、品名在 mocbicName（實測 C150/E142/H333）
+        // 品名 fallback：mocbicName 優先，順序對齊洞察表 marketing.js 彈窗的取名邏輯
+        //（玩樂主檔的 name 是空字串、品名在 mocbicName，實測 C150/E142/H333）
         const m = (master && master.byCode) ? master.byCode[code] : null;
-        const prodName = m ? (m.name || m.mocbicName || '') : '';
+        const prodName = m ? (m.mocbicName || m.name || '') : '';
         rows.push({ shop, code, name: prodName, texts: hits.map(a => a.text || '') });
       });
     });
 
     const parts = String(viewDate).split('-');
     const md = `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+
+    // 交叉紀錄：這個商品在淨利表的調整（唯讀、預設收折；原生 <details>，不掛任何事件）
+    const HALF_ZH = { first: '上半月', second: '下半月', full: '整月' };
+    const crossProfitHtml = (r) => {
+      const h = _crossProfitFor(r.shop, r.code);
+      const nP = (h && h.period) || [], nG = (h && h.growth) || [];
+      if (nP.length === 0 && nG.length === 0) return '';
+      const row = (left, text) => `
+        <div class="adj-x-row">
+          <span class="adj-x-date">${escapeHtml(left)}</span>
+          <span class="adj-x-text">${escapeHtml(text)}</span>
+        </div>`;
+      return `
+        <details class="adj-x adj-x-profit">
+          <summary>淨利表另有 ${nP.length + nG.length} 筆</summary>
+          ${nG.length ? `<div class="adj-x-grp">商品調整</div>` + nG.map(g => row(g.date || '未記日期', g.text || '')).join('') : ''}
+          ${nP.length ? `<div class="adj-x-grp">廣告調整／報表</div>` + nP.map(p => row(`${p.month} ${HALF_ZH[p.half] || p.half || ''}`, p.text || '')).join('') : ''}
+        </details>`;
+    };
 
     const itemHtml = (r) => `
       <div class="adj-modal-item">
@@ -1017,6 +1065,7 @@ Object.assign(App, {
           <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
         </div>
         ${r.texts.map(t => `<div class="adj-modal-text">${escapeHtml(t)}</div>`).join('')}
+        ${crossProfitHtml(r)}
       </div>`;
 
     const bodyHtml = rows.length > 0 ? `
@@ -1808,6 +1857,39 @@ function _adjRecsForGroup(recs, kind, group) {
 //   「開頭是什麼」不穩（例：「清倉品先不動」開頭是清倉品），改偵測動作字眼是否出現。這條之後可能再調。
 const ADJ_ACTION_RE = /預算|廣\s*\d|ROI|roi|漲價|調漲|降價|調降|開廣告|關廣告|加速|換.{0,2}圖|標題|分類|優惠券|活動|調整售價|調價/;
 
+// ── 交叉紀錄查詢（兩個明細彈窗互相補上對方的資料）────────────────────────
+// 兩支都純唯讀、只在點開彈窗時呼叫。注意：模組層無法物理上放在 openAdjustmentDetailModal
+// 之前（該方法在上方 Object.assign(App,{...}) 區塊內），function 宣告有 hoisting，行為等價。
+// 查某商品在洞察表的調整：依 date 分組、同日多筆用「、」串成一列（跟洞察表彈窗一致），新到舊。
+function _crossInsightFor(shop, code) {
+  const nd = (Store.get(`ec.insight_${shop}_notes`, {}) || {})[code];
+  if (!nd) return [];
+  let adj;
+  if (typeof nd === 'string') adj = [{ date: '', text: nd }];                       // 舊版：整筆是字串
+  else if (typeof nd.adjustments === 'string') adj = [{ date: '', text: nd.adjustments }];
+  else adj = nd.adjustments || [];
+  const map = new Map();
+  adj.forEach(a => {
+    if (!a || !a.text || !String(a.text).trim()) return;   // 只留 text 非空的
+    const d = a.date || '';
+    if (!map.has(d)) map.set(d, []);
+    map.get(d).push(String(a.text));
+  });
+  return [...map.keys()]
+    .sort((a, b) => String(b).localeCompare(String(a)))    // 日期新到舊
+    .map(d => ({ date: d, text: map.get(d).join('、') }));
+}
+// 查某商品在淨利表的調整：走 profit.js 掛在 window 的唯讀出口。
+// profit.js 比 daily.js 後載入，但這是點擊時才呼叫，執行期守衛就夠。
+function _crossProfitFor(shop, code) {
+  if (typeof window.profitNoteHistoryFor !== 'function') {
+    console.warn('[daily] profitNoteHistoryFor 尚未就緒，淨利表紀錄這次不顯示');
+    return { period: [], growth: [] };
+  }
+  try { return window.profitNoteHistoryFor(shop, code) || { period: [], growth: [] }; }
+  catch (e) { console.warn('[daily] 淨利表紀錄查詢失敗', e); return { period: [], growth: [] }; }
+}
+
 let _adjIndexCache = null;
 let _adjLabelsReady = false;
 // collectAdjustments() 要掃 ~26000 列，只在首次呼叫時跑一次，之後查表 O(1)。
@@ -1836,6 +1918,29 @@ window.addEventListener('profitDataReady', () => {
   //   其他頁不動（資料已進 Store，切過去自然渲染）。route 判斷沿用 app.js 既有慣例（App.render 重繪當前 route）。
   if (window.App && window.App.route === 'office-d1' && typeof window.App.render === 'function') window.App.render();
 });
+// 洞察表調整索引：{ 'YYYY/MM/DD': [{shop, code}] }。來源 = ADJ_SHOP_TO_PERSON 各通路的
+// ec.insight_{shop}_notes；日期同時支援 dash/slash，一律正規化成斜線（與 getAdjIndex 一致）；
+// date 空的跳過。純唯讀。
+// 🔴 刻意不做模組層快取：getAdjIndex 的快取靠 profitDataReady 事件失效，洞察資料沒有對應事件，
+//    做了快取就會有「資料更新但月曆沒跟著變」的靜默失敗。一趟約兩千次迴圈，每次呼叫重建可接受。
+function getInsIndex() {
+  const idx = {};
+  try {
+    Object.keys(ADJ_SHOP_TO_PERSON).forEach(shop => {
+      const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
+      Object.keys(notes).forEach(code => {
+        const adjustments = (notes[code] && notes[code].adjustments) || [];
+        (Array.isArray(adjustments) ? adjustments : []).forEach(a => {
+          const d = ((a && a.date) || '').slice(0, 10);
+          if (!d) return;
+          const slash = d.replace(/-/g, '/');
+          (idx[slash] = idx[slash] || []).push({ shop, code });
+        });
+      });
+    });
+  } catch (e) { console.warn('[getInsIndex] 讀取失敗', e); return {}; }
+  return idx;
+}
 
 // 進度明細的嚴重度排序:要處理的在上、好消息在下。
 // 🔴 比對用「顯示名」(mapAnaLabel 之後)且先剝掉開頭 emoji——
@@ -1872,7 +1977,12 @@ function buildProgressHtml(person){
   const anyP=results.find(r=>r.p);
   const pt=anyP?`本期優化進度（${anyP.p.month} ${anyP.p.half==='first'?'上半月':'下半月'}）`:'本期優化進度';
   const bar=(d,t)=>{const pct=Math.round(d/t*100);
-    return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-bar"><span class="adj-prog-fill" style="width:${pct}%"></span></span><span class="adj-prog-pct">${pct}%</span>`;};
+    // 門檻/符號與 flat() 完全一致（p100/p50/p0、✓/!），bar 只是補上它缺的那半。
+    // class 用完整字面（不動態拼字串），grep 才找得到、也跟 flat() 寫法一致。
+    const cls=pct>=100?'adj-prog-p100':pct>=50?'adj-prog-p50':'adj-prog-p0';
+    const fillCls=pct>=100?'adj-prog-fill-p100':pct>=50?'adj-prog-fill-p50':'adj-prog-fill-p0';
+    const mark=pct>=100?'✓ ':pct<50?'! ':'';
+    return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-bar"><span class="adj-prog-fill ${fillCls}" style="width:${pct}%"></span></span><span class="adj-prog-pct ${cls}">${mark}${pct}%</span>`;};
   // 明細列(小標籤)不畫條:數字 + 符號 + %。
   // ✓=100% 完成(綠)、無符號=進行中(藍)、!=低於50%(琥珀)。
   // 符號是主判讀(不依賴色覺)、顏色是輔助;刻意不用紅——期中偏低是常態不是過錯。
@@ -1889,11 +1999,20 @@ function buildProgressHtml(person){
       });
       if(!keys.length)return'';
       let gd=0,gt=0;keys.forEach(l=>{gd+=obj[l].d;gt+=obj[l].t;});
-      // 分組小總結:該組所有標籤桶的加總(一商品雙標籤會重複計,語意為「標籤完成度」)
-      return`<div class="adj-prog-row adj-prog-grp"><span class="adj-prog-shop">${escapeHtml(title)}</span>${bar(gd,gt)}</div>`+keys.map(l=>{
+      // 未完成直接列、已完成收進 <details>（原生收折，無 JS 事件、預設收折）。
+      // pct 算法與 flat() 一致（Math.round(d/t*100)、>=100 為完成）；排序沿用上面 _progRank 的結果。
+      const pending=keys.filter(l=>Math.round(obj[l].d/obj[l].t*100)<100);
+      const done=keys.filter(l=>Math.round(obj[l].d/obj[l].t*100)>=100);
+      const sub=l=>{
         const{t,d}=obj[l];
         return`<div class="adj-prog-row adj-prog-sub"><span class="adj-prog-shop">${escapeHtml(window.mapAnaLabel?window.mapAnaLabel(l):l)}</span>${flat(d,t)}</div>`;
-      }).join('');
+      };
+      // 分組小總結:該組所有標籤桶的加總(一商品雙標籤會重複計,語意為「標籤完成度」)。
+      // 不畫條:分組分母是「標籤數」、通路列分母是「商品數」，兩者不可比，
+      // 並排長條會誘導無效比較（例:好麻吉 826，廣告 563+成長 570=1133 > 總數）。
+      return`<div class="adj-prog-row adj-prog-grp"><span class="adj-prog-shop">${escapeHtml(title)}</span>${flat(gd,gt)}</div>`
+        +(pending.length?`<div class="adj-prog-subs">`+pending.map(sub).join('')+`</div>`:'')
+        +(done.length?`<details class="adj-prog-done"><summary>已完成 ${done.length} 項</summary><div class="adj-prog-subs">`+done.map(sub).join('')+`</div></details>`:'');
     };
     return`<button type="button" class="adj-prog-row adj-prog-toggle" data-prog-shop="${escapeHtml(shop)}">
         <span class="adj-prog-shop">${escapeHtml(shop)}</span>${bar(p.doneTotal,p.total)}<span class="adj-prog-caret">▾</span>
@@ -1903,10 +2022,12 @@ function buildProgressHtml(person){
       </div>`;
   }).join('');
   return`<div class="adj-prog">
-    <div class="adj-prog-title">${pt}</div>
+    <div class="adj-prog-head">
+      <div class="adj-prog-title">${pt}</div>
+      <span class="adj-prog-legend"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span></span>
+    </div>
     ${rows}
-    <div class="adj-prog-note">依通路負責人歸屬，非個人操作紀錄；點通路列展開明細</div>
-    <div class="adj-prog-note"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span>　·　各標籤分母為帶該標籤的商品數</div>
+    <div class="adj-prog-note">依通路負責人歸屬，非個人操作紀錄；點通路列展開明細；各標籤分母為帶該標籤的商品數</div>
   </div>`;
 }
 // 第六塊：某人某日的「淨利表調整」區塊，注入人員卡片底部。只留標題 + 兩排 pill，明細改走彈窗。
