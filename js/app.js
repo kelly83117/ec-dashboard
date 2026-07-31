@@ -155,8 +155,8 @@ const OFFICE_FEATURES = {
     { key: 'lineNotify', label: 'LINE 通知設定' },
   ],
   '採購': [
-    { key: 'overview', label: '工作總覽' },
     { key: 'kpi',      label: 'KPI' },
+    { key: 'pricing',  label: '訂價表' },
   ],
 };
 function hasOfficeFeature(user, deptName, featureKey) {
