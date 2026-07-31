@@ -2007,7 +2007,7 @@ Object.assign(App, {
   },
 
   _prAddFormHtml(sheet) {
-    const p = this.PRICING_SHEET_PARAMS[sheet] || this.PRICING_SHEET_PARAMS['訂價'];
+    const p = this.PRICING_SHEET_PARAMS[sheet] || this.PRICING_SHEET_PARAMS['商品母表'];
     const inp = (id, label, type='number', placeholder='', unit='') =>
       `<label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#6b7280;font-weight:600">
         ${label}${unit?`<span style="color:#9ca3af;font-weight:400;font-size:10px">${unit}</span>`:''}
