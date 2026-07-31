@@ -1848,8 +1848,8 @@ Object.assign(App, {
       <div style="width:1px;background:var(--border);align-self:stretch;margin:0 4px"></div>
       <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
         ${stat('總商品數', total)}
-        ${stat('平均純利', (avg*100).toFixed(1)+'%', avgColor)}
-        ${stat('最高純利', (max*100).toFixed(1)+'%', '#059669')}
+        ${stat('平均獲利%', (avg*100).toFixed(1)+'%', avgColor)}
+        ${stat('最高獲利%', (max*100).toFixed(1)+'%', '#059669')}
         ${stat('≥20% 商品', goodCount+' / '+total, '#2563eb')}
       </div>
     </div>`;
@@ -1903,7 +1903,7 @@ Object.assign(App, {
     const filters = Store.get(`ec.d2.pricing.numfilters.${sheet}`, {});
     const panelOpen = Store.get('ec.d2.pricing.filterpanel', false);
     const shortLabel = c => {
-      if (c.includes('獲利百分比')) return '純利';
+      if (c.includes('獲利百分比')) return '獲利%';
       if (c === '成本率') return '毛利率';
       if (c.includes('實際成本') || c === '商品成本') return '實際成本';
       return c;
@@ -1962,7 +1962,7 @@ Object.assign(App, {
         ${readOnly('pc-cost','▶ 實際成本（自動）')}
 
         ${inp('pf-price','售價','number','0','NT$')}
-        ${readOnly('pc-pct','▶ 純利（自動）','#059669')}
+        ${readOnly('pc-pct','▶ 獲利%（自動）','#059669')}
         ${readOnly('pc-profit','▶ 實際毛利（自動）')}
         ${readOnly('pc-income','▶ 入帳金額（自動）','#374151')}
 
@@ -2077,7 +2077,7 @@ Object.assign(App, {
     const NAME_COLS = new Set(['產品名稱','試算名稱','編號','商品名稱']);
     // 縮短過長的欄位標題顯示
     const shortLabel = c => {
-      if (c.includes('獲利百分比')) return '純利';
+      if (c.includes('獲利百分比')) return '獲利%';
       if (c === '成本率') return '毛利率';
       if (c.includes('實際成本') || c === '商品成本') return '實際成本';
       return c;
@@ -2343,7 +2343,7 @@ Object.assign(App, {
           ${calcBox('total','▶ 蝦皮總成本')}
           ${calcBox('income','▶ 入帳')}
           ${calcBox('margin','▶ 實際毛利')}
-          ${calcBox('pct','▶ 純利')}
+          ${calcBox('pct','▶ 獲利%')}
           ${calcBox('cr','▶ 毛利率')}
           ${calcBox('roas','▶ 廣告ROAS')}
           ${calcBox('adcost','▶ 廣告費')}
