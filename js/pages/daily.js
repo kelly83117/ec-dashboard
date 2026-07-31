@@ -118,7 +118,14 @@ Object.assign(App, {
       return [];
     };
 
-    const personInfos = ALLOWED_NAMES.map(name => {
+    // 聯集：固定 3 人 ∪ 當天有資料的其他人（例如 MOMO by-login 操作者不在 ALLOWED_NAMES）→ 解「寫入卻不顯示」的靜默失效。
+    //   ALLOWED_NAMES 在前、順序不變（蝦皮那 3 人顯示一字不變）；其餘按 localeCompare 穩定排序（不因誰先有資料就跳動）；沒人有資料的日子＝原行為。
+    //   （by DP-worklog 這輪：只擴充 personInfos + 下方月曆那圈，其餘 ALLOWED_NAMES 用途[老闆任務指派/LINE設定/調整面板]不動。）
+    const _dpExtraNames = Object.keys(dayProgress || {})
+      .filter(name => name && ALLOWED_NAMES.indexOf(name) < 0)
+      .filter(name => { const v = dayProgress[name]; return Array.isArray(v) ? v.length > 0 : !!(v && String(v).trim()); })
+      .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    const personInfos = ALLOWED_NAMES.concat(_dpExtraNames).map(name => {
       const u = users.find(uu => uu.name === name || uu.username === name);
       return {
         name,
@@ -139,7 +146,7 @@ Object.assign(App, {
           : `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#e0e7ff;color:#4338ca;font-size:11px;font-weight:600">${doneCount}/${userItems.length} 已完成</span>`;
       const avatarHtml = p.avatar
         ? `<img src="${escapeHtml(p.avatar)}" alt="${escapeHtml(p.name)}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0">`
-        : `<div style="width:38px;height:38px;border-radius:50%;background:${PERSON_COLORS[p.name]};color:white;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0">${escapeHtml(initial)}</div>`;
+        : `<div style="width:38px;height:38px;border-radius:50%;background:${PERSON_COLORS[p.name] || '#6b7280'};color:white;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0">${escapeHtml(initial)}</div>`;
       // 自動摘要 item 專用 render：分類 chips + 顏色區塊，沒 checkbox 也沒 ✕
       // 顏色跟洞察表本身 classifyMetrics 的 GROW / DROP / CONV 三大群完全對齊
       //   下滑類（重跌品 / 衰退品）→ 橘紅
@@ -203,9 +210,18 @@ Object.assign(App, {
           const chips = orderedKeys.map(k => ({ label:k, count:counts[k], emoji:'', ...(PROFIT_STYLE[k]||PROFIT_STYLE['其他']) }));
           return renderSummaryCard({ title:'淨利表 · 今日調整', headBg:'#eff6ff', headColor:'#1d4ed8', chips });
         }
+        // MOMO optlog 今日調整（by-login 歸屬）。additive：跟上面 insight/profit 兩支並列，不改它們的邏輯。
+        //   counts 依實際出現的 type 動態渲染、容忍未知 type（不寫死、不當掉）；chip 點擊回 optlog 現算明細，處理函式在 profit.js（momoOpenDpDetailFromEl）。
+        if (it && it.kind === 'momo-summary') {
+          const counts = it.counts || {};
+          const keys = Object.keys(counts).filter(k => counts[k]);
+          if (keys.length === 0) return '';
+          const chips = keys.map(k => `<button type="button" class="mm-dp-chip" data-mm-person="${escapeHtml(p.name)}" data-mm-date="${escapeHtml(viewDate)}" data-mm-combo="${escapeHtml(k)}" onclick="momoOpenDpDetailFromEl(this)"><span>${escapeHtml(k)}</span><span style="opacity:.6">·</span><b>${counts[k]}</b></button>`).join('');
+          return `<div class="mm-dp-card"><div class="mm-dp-card-h"><span class="mm-dp-card-t">MOMO · 今日調整</span><span class="mm-dp-card-auto">自動更新</span></div><div class="mm-dp-chips">${chips}</div></div>`;
+        }
         return `
         <div class="dp-todo-row" data-item-id="${escapeHtml(it.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
-          <span style="color:${PERSON_COLORS[p.name]};font-size:13px;flex-shrink:0">●</span>
+          <span style="color:${PERSON_COLORS[p.name] || '#6b7280'};font-size:13px;flex-shrink:0">●</span>
           <span style="flex:1;min-width:0;font-size:13px;color:${it.done ? '#9ca3af' : 'var(--text)'};text-decoration:${it.done ? 'line-through' : 'none'};word-break:break-word">${escapeHtml(it.text)}</span>
           <input type="checkbox" class="dp-todo-check" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" ${it.done ? 'checked' : ''} ${isEditable ? '' : 'disabled'} style="width:16px;height:16px;cursor:${isEditable ? 'pointer' : 'default'};flex-shrink:0">
           ${it.done ? '<span style="font-size:10.5px;color:#10b981;font-weight:700;flex-shrink:0">已完成</span>' : ''}
@@ -253,13 +269,17 @@ Object.assign(App, {
       const isCellSelected = dateStr === viewDate;
       const dayEntries = allProgressForCal[dateStr] || {};
       const dayItems = [];
-      ALLOWED_NAMES.forEach(n => {
+      // 月曆同 personInfos 聯集：固定 3 人 ∪ 該格有資料的其他人（穩定排序）；未在色表的人給預設灰。
+      const _calRoster = ALLOWED_NAMES.concat(
+        Object.keys(dayEntries).filter(n => n && ALLOWED_NAMES.indexOf(n) < 0).sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+      );
+      _calRoster.forEach(n => {
         const v = dayEntries[n];
         const arr = Array.isArray(v) ? v : (v && String(v).trim() ? [{ text: String(v).trim(), done: false }] : []);
-        // 自動摘要 item (kind: 'insight-summary' | 'profit-summary') 不塞進月曆條列
+        // 自動摘要 item (kind: 'insight-summary' | 'profit-summary' | 'momo-summary') 不塞進月曆條列
         arr.forEach(it => {
           if (!it || it.kind) return;
-          dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n], light: PERSON_LIGHT[n] });
+          dayItems.push({ text: it.text, done: !!it.done, color: PERSON_COLORS[n] || '#6b7280', light: PERSON_LIGHT[n] || '#e5e7eb' });
         });
       });
       const shownItems = dayItems.slice(0, MAX_CAL_BARS);
