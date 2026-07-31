@@ -1801,12 +1801,15 @@ Object.assign(App, {
   _prGetVisibleCols(allCols, sheet) {
     const cleanCols = allCols.filter(c => !c.startsWith('__'));
     const saved = Store.get(`ec.d2.pricing.cols.${sheet}`, null);
-    if (!saved) return cleanCols;
+    const FORCE_HIDDEN = ['退貨率','實際成本','入帳金額'];
+    const shownExplicit = new Set(saved?.shownExplicit || []);
+    const hiddenSet = new Set(saved?.hidden || []);
+    FORCE_HIDDEN.forEach(c => { if (!shownExplicit.has(c)) hiddenSet.add(c); });
+    if (!saved) return cleanCols.filter(c => !hiddenSet.has(c));
     const allSet = new Set(cleanCols);
     const savedOrder = (saved.order || []).filter(c => allSet.has(c));
     const newCols = cleanCols.filter(c => !savedOrder.includes(c));
     const fullOrder = [...savedOrder, ...newCols];
-    const hiddenSet = new Set(saved.hidden || []);
     return fullOrder.filter(c => !hiddenSet.has(c));
   },
 
@@ -1855,7 +1858,10 @@ Object.assign(App, {
     const savedOrder = (saved?.order || []).filter(c => cleanCols.includes(c));
     const newCols = cleanCols.filter(c => !savedOrder.includes(c));
     const fullOrder = [...savedOrder, ...newCols];
-    const hiddenSet = new Set(saved?.hidden || ['退貨率','實際成本','入帳金額']);
+    const FORCE_HIDDEN = ['退貨率','實際成本','入帳金額'];
+    const shownExplicit = new Set(saved?.shownExplicit || []);
+    const hiddenSet = new Set(saved?.hidden || []);
+    FORCE_HIDDEN.forEach(c => { if (!shownExplicit.has(c)) hiddenSet.add(c); });
     const panelOpen = Store.get('ec.d2.pricing.colpanel', false);
     return `<div id="pr-col-panel" style="display:${panelOpen?'block':'none'};padding:12px 16px;background:#f8fafc;border-bottom:1px solid var(--border)">
       <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px">欄位顯示與排序 <span style="font-weight:400;color:#9ca3af">拖曳排序・勾選顯示</span></div>
@@ -2557,7 +2563,9 @@ Object.assign(App, {
       const items = [...document.querySelectorAll('.pr-col-item')];
       const order = items.map(el => el.dataset.col);
       const hidden = items.filter(el => !el.querySelector('.pr-col-check').checked).map(el => el.dataset.col);
-      Store.set(`ec.d2.pricing.cols.${activeSheet}`, { order, hidden });
+      const _fh = ['退貨率','實際成本','入帳金額'];
+      const shownExplicit = _fh.filter(c => !hidden.includes(c));
+      Store.set(`ec.d2.pricing.cols.${activeSheet}`, { order, hidden, shownExplicit });
       self.render();
     };
 
