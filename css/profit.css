@@ -392,6 +392,11 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-verify{font-size:11px;margin-bottom:6px;}
 /* 自驗：通過完全不顯示；只有對不上才警示（展開警示、不可收） */
 .mm-verify-err{font-size:12px;font-weight:700;margin:6px 0;padding:6px 10px;border-radius:7px;background:#fef2f2;border:1px solid #fecaca;color:#dc2626;}
+/* 漏品提示（中性）：有銷量但不在對帳單的品號 → 獨立於自驗錯誤、不用紅色暗示 */
+.mm-verify-note{font-size:12px;margin:6px 0;padding:6px 10px;border-radius:7px;background:#f8fafc;border:1px solid #e5e7eb;color:#475569;}
+.mm-verify-note summary{cursor:pointer;font-weight:600;color:#475569;list-style:revert;}
+.mm-verify-note ul{margin:6px 0 0;padding-left:18px;color:#64748b;max-height:160px;overflow:auto;}
+.mm-verify-note li{margin:1px 0;}
 /* 商品數統計 總/上架/下架：標籤淺色小字、數字粗深、彼此拉開間距 */
 .mm-stat{display:inline-flex;gap:16px;align-items:baseline;white-space:nowrap;}
 .mm-stat-item{font-size:11px;color:#9ca3af;font-weight:400;}
