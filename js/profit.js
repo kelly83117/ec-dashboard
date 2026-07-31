@@ -7867,8 +7867,7 @@ function momoOpenFilterPanel(shop,btn){
   let m=document.getElementById('momo-filter-'+shop);
   if(m){ m.remove(); return; }   // 再點一次關閉
   m=document.createElement('div'); m.id='momo-filter-'+shop; m.className='col-picker-menu open mm-filter-panel';
-  const wrap=btn&&btn.closest('.col-picker-wrap');
-  (wrap||(btn&&btn.parentElement)||document.body).appendChild(m);
+  document.body.appendChild(m);   // 掛 body：脫離 .main 的 zoom hack 與 .tscroll overflow 裁切，position:fixed(見 css .mm-filter-panel)才能穩定框在視窗內、按鈕不落視窗外
   momoRenderFilterPanel(shop);
   setTimeout(()=>document.addEventListener('click',function h(e){
     const cur=document.getElementById('momo-filter-'+shop);
