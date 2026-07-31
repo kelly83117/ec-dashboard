@@ -584,8 +584,7 @@ Object.assign(App, {
         document.querySelectorAll('.boss-task-history-del').forEach(b => {
           b.addEventListener('click', () => {
             if (!confirm('從歷史中刪除這筆？無法復原。')) return;
-            const list = (Store.get('ec.bossTasks', []) || []).filter(t => t.id !== b.dataset.taskId);
-            Store.set('ec.bossTasks', list);
+            this._deleteBossTask(b.dataset.taskId);
             showToast('已刪除', 'success');
             this.closeModal();
             this.openBossTaskHistoryModal();
@@ -889,6 +888,49 @@ Object.assign(App, {
       },
     });
   },
+  // 刪除老闆任務的共用善後。有兩個刪除入口（列表的 ✕、歷史彈窗），
+  // 邏輯相同，抽出來避免日後新增入口時漏掉其中一項善後。
+  // 兩件善後缺一不可：
+  //   1. images 指向的圖片 doc 要刪，否則變成沒有任務指向的孤兒，永遠佔空間又無從追溯
+  //   2. ec.dailyProgress 裡 bossTaskId 對應的那筆要清，否則同事待辦清單會留下
+  //      永遠對不到原任務的殘留項目
+  _deleteBossTask(taskId) {
+    if (!taskId) return;
+    const all = Store.get('ec.bossTasks', []) || [];
+    const task = all.find(t => t.id === taskId);
+
+    // 1. 先刪圖片（用任務上的 images 記錄，所以必須在移除任務之前取出）
+    const imgIds = (task && Array.isArray(task.images)) ? task.images : [];
+    imgIds.forEach(id => {
+      window.__cloudTaskImage.removeImage(id).catch(e => console.warn('[task image cleanup]', id, e));
+    });
+
+    // 2. 清掉個人待辦裡對應的那筆
+    const prog = Store.get('ec.dailyProgress', {}) || {};
+    const nextProg = { ...prog };
+    let removedItems = 0;
+    Object.keys(nextProg).forEach(date => {
+      const day = { ...(nextProg[date] || {}) };
+      let dayChanged = false;
+      Object.keys(day).forEach(name => {
+        if (!Array.isArray(day[name])) return;
+        const before = day[name].length;
+        const kept = day[name].filter(it => it.bossTaskId !== taskId);
+        if (kept.length !== before) {
+          day[name] = kept;
+          removedItems += before - kept.length;
+          dayChanged = true;
+        }
+      });
+      if (dayChanged) nextProg[date] = day;
+    });
+    if (removedItems > 0) Store.set('ec.dailyProgress', nextProg);
+
+    // 3. 最後才移除任務本身
+    Store.set('ec.bossTasks', all.filter(t => t.id !== taskId));
+
+    console.log('[task delete]', taskId, '圖片', imgIds.length, '張、個人待辦', removedItems, '筆');
+  },
   bindWeeklyCalendar(deptId) {
     const ensureFilter = () => {
       if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
@@ -952,8 +994,7 @@ Object.assign(App, {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         if (!confirm('確定刪除這個任務？')) return;
-        const list = (Store.get('ec.bossTasks', []) || []).filter(t => t.id !== b.dataset.taskId);
-        Store.set('ec.bossTasks', list);
+        this._deleteBossTask(b.dataset.taskId);
         showToast('已刪除', 'success');
         this.render();
       });
@@ -2451,4 +2492,106 @@ async function _tiUpload(taskId, compressed, createdBy) {
   return imgId;
 }
 
-Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES });
+/* ===================== 任務附圖：維運用稽核與清理 =====================
+ * 這兩個函式不接 UI，供維運人員在瀏覽器 Console 手動執行。
+ *
+ * 什麼時候該跑：每月一次，或覺得工作日誌變慢時。
+ *   在任何頁面按 F12 開 Console，輸入 __taskImageAudit() 即可。
+ *
+ * 為什麼稽核與清理分開：判斷「孤兒」的邏輯只要有偏差，刪掉的就是還在使用的圖，
+ *   而且無法復原。所以一定要由人看過報告再決定，不要自動清理。
+ *
+ * 孤兒是怎麼產生的：刪除任務時已會連帶刪圖（見 _deleteBossTask），
+ *   但使用者在 modal 貼圖後直接關閉分頁時，onCancel 沒機會執行；
+ *   removeImage 也可能因網路問題失敗。
+ *
+ * 數字到多少要處理：Firestore 免費額度為 1 GiB，且由所有 collection 共用
+ *   （app/main、profits、momo_* 等都算在內）。
+ *   task_images 超過 300 MB 就建議清理孤兒；超過 600 MB 要認真考慮
+ *   改用 Firebase Storage 或定期封存。
+ *   注意前端拿不到 Firestore 的總用量，那只有 Firebase Console 看得到，
+ *   這裡算的僅是 task_images 這一個 collection。
+ */
+const TI_REST_BASE = 'https://firestore.googleapis.com/v1/projects/yc-dashboard-9aa6c/databases/(default)/documents/task_images';
+
+// 列出 task_images 全部文件（自動翻頁）
+async function _tiListAll() {
+  const out = [];
+  let token = '';
+  for (let page = 0; page < 50; page++) {
+    const url = TI_REST_BASE + '?pageSize=300' + (token ? '&pageToken=' + encodeURIComponent(token) : '');
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('REST 讀取失敗：' + resp.status);
+    const j = await resp.json();
+    (j.documents || []).forEach(d => {
+      const f = d.fields || {};
+      out.push({
+        id:        String(d.name || '').split('/').pop(),
+        taskId:    (f.taskId && f.taskId.stringValue) || '',
+        bytes:     Number((f.bytes && (f.bytes.integerValue || f.bytes.doubleValue)) || 0),
+        createdAt: Number((f.createdAt && (f.createdAt.integerValue || f.createdAt.doubleValue)) || 0),
+        createdBy: (f.createdBy && f.createdBy.stringValue) || '',
+      });
+    });
+    token = j.nextPageToken || '';
+    if (!token) break;
+  }
+  return out;
+}
+
+// 稽核：只報告，不刪除任何東西
+window.__taskImageAudit = async function () {
+  console.log('掃描 task_images 中…');
+  const imgs = await _tiListAll();
+  const tasks = Store.get('ec.bossTasks', []) || [];
+  const referenced = new Set();
+  tasks.forEach(t => { (Array.isArray(t.images) ? t.images : []).forEach(id => referenced.add(id)); });
+
+  const orphans = imgs.filter(im => !referenced.has(im.id));
+  const totalMB   = imgs.reduce((s, i) => s + i.bytes, 0) / 1048576;
+  const orphanMB  = orphans.reduce((s, i) => s + i.bytes, 0) / 1048576;
+
+  console.log('─────────── task_images 稽核 ───────────');
+  console.log('總計       ' + imgs.length + ' 張、' + totalMB.toFixed(1) + ' MB');
+  console.log('使用中     ' + (imgs.length - orphans.length) + ' 張');
+  console.log('孤兒       ' + orphans.length + ' 張、' + orphanMB.toFixed(1) + ' MB');
+  console.log('參考基準：超過 300 MB 建議清理孤兒；超過 600 MB 需重新評估儲存方式');
+  if (orphans.length) {
+    console.table(orphans.map(o => ({
+      id: o.id,
+      指向任務: o.taskId || '(無)',
+      KB: +(o.bytes / 1024).toFixed(0),
+      建立時間: o.createdAt ? new Date(o.createdAt).toLocaleString() : '',
+      建立者: o.createdBy,
+    })));
+    console.log('確認上表無誤後，執行 __taskImageCleanup() 才會實際刪除');
+  } else {
+    console.log('沒有孤兒，不需要清理');
+  }
+  window.__tiAuditResult = orphans;
+  return { total: imgs.length, totalMB: +totalMB.toFixed(1), orphans: orphans.length };
+};
+
+// 清理：實際刪除孤兒，必須先跑過 __taskImageAudit()
+window.__taskImageCleanup = async function () {
+  const orphans = window.__tiAuditResult;
+  if (!Array.isArray(orphans)) {
+    console.log('請先執行 __taskImageAudit() 檢視要刪什麼，再執行本函式');
+    return;
+  }
+  if (!orphans.length) { console.log('沒有孤兒需要清理'); return; }
+  if (!confirm('即將永久刪除 ' + orphans.length + ' 張孤兒圖片，無法復原。確定嗎？')) {
+    console.log('已取消');
+    return;
+  }
+  let ok = 0, fail = 0;
+  for (const o of orphans) {
+    try { await window.__cloudTaskImage.removeImage(o.id); ok++; }
+    catch (e) { fail++; console.warn('刪除失敗', o.id, e); }
+  }
+  console.log('清理完成：成功 ' + ok + ' 張、失敗 ' + fail + ' 張');
+  window.__tiAuditResult = null;
+  console.log('建議再跑一次 __taskImageAudit() 確認結果');
+};
+
+Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES, _tiListAll });
