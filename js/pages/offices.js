@@ -1903,7 +1903,7 @@ Object.assign(App, {
     const filters = Store.get(`ec.d2.pricing.numfilters.${sheet}`, {});
     const panelOpen = Store.get('ec.d2.pricing.filterpanel', false);
     const shortLabel = c => {
-      if (c.includes('獲利百分比')) return '獲利%';
+      if (c.includes('獲利百分比')) return '獲利%(20%以上可做)';
       if (c === '成本率') return '毛利率';
       if (c.includes('實際成本') || c === '商品成本') return '實際成本';
       return c;
@@ -2077,7 +2077,7 @@ Object.assign(App, {
     const NAME_COLS = new Set(['產品名稱','試算名稱','編號','商品名稱']);
     // 縮短過長的欄位標題顯示
     const shortLabel = c => {
-      if (c.includes('獲利百分比')) return '獲利%';
+      if (c.includes('獲利百分比')) return '獲利%(20%以上可做)';
       if (c === '成本率') return '毛利率';
       if (c.includes('實際成本') || c === '商品成本') return '實際成本';
       return c;
