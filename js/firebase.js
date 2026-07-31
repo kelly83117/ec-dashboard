@@ -373,7 +373,7 @@ try {
   // 塞進 app/main 會直接撐爆 1MB，連帶 users / departments / platforms 全部寫不進去。
   // doc 內容：{ taskId, data(base64), mime, bytes, createdAt, createdBy }
   //   taskId 是反向索引，將來要清查沒有任務指向的孤兒圖片時用得到。
-  // 命名注意：讀取方法一定要叫 getDoc。TEST_NOWRITE 的 READ_OK 白名單是完全字串比對，
+  // 命名注意：讀取方法一定要叫 getDoc。本機防護碼工具的讀取白名單是完全字串比對，
   //   改叫 getImage 之類會被當成寫入換成 no-op，本機測試時圖片讀不出來而且不會報錯。
   window.__cloudTaskImage = {
     getDoc:      (imgId) => getDoc(doc(db, 'task_images', imgId)),
