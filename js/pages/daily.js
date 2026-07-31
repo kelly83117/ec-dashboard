@@ -2144,4 +2144,90 @@ function buildCardAdjustmentsHtml(person, viewDate) {
     </div>`;
 }
 
-Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml });
+/* ===================== 任務附圖：壓縮與上傳（Commit A，尚未接 UI） =====================
+ * Firestore 單 doc 上限 1MB，圖片以 base64 dataURL 存放會膨脹約 37%，
+ * 因此壓縮後二進位需 <= 500KB（→ dataURL 約 685KB）。
+ * 附件是螢幕截圖（多為文字內容），一律轉 JPEG 或盲目縮小會讓小字糊掉，
+ * 所以採階梯降級：先原樣、再逐級縮尺寸、最後才轉 JPEG。
+ */
+const TI_MAX_IMAGES   = 10;          // 單一任務最多幾張
+const TI_TARGET_BYTES = 500 * 1024;  // 壓縮目標（二進位）
+
+// imgId 格式注意：Firestore 的 document ID 不可符合 __.*__（雙底線開頭且雙底線結尾），
+// 因此這裡固定用 img- 前綴，不要改成底線開頭。
+function _tiGenId() {
+  return 'img-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+// 把 Image 畫到 canvas 並輸出 Blob。maxEdge 是長邊上限（等比縮放，不放大）。
+function _tiDraw(img, maxEdge, type, quality) {
+  return new Promise(resolve => {
+    const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth  * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    // 截圖多為淺色底，轉 JPEG 時透明區域預設會變黑，先鋪白底
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    cv.toBlob(b => resolve(b), type, quality);
+  });
+}
+
+// 階梯降級壓縮。回傳 { blob, mime, bytes, note } ；壓不下來回傳 null。
+async function _tiCompress(file) {
+  if (!file || !String(file.type || '').startsWith('image/')) {
+    throw new Error('不是圖片檔');
+  }
+  if (file.size <= TI_TARGET_BYTES) {
+    return { blob: file, mime: file.type, bytes: file.size, note: '原檔未壓縮' };
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload  = () => res(i);
+      i.onerror = () => rej(new Error('圖片解碼失敗'));
+      i.src = url;
+    });
+    const steps = [
+      { maxEdge: 1600, type: 'image/png',  q: undefined, note: '縮至長邊 1600 PNG' },
+      { maxEdge: 1280, type: 'image/png',  q: undefined, note: '縮至長邊 1280 PNG' },
+      { maxEdge: 1280, type: 'image/jpeg', q: 0.9,       note: '長邊 1280 JPEG 90' },
+      { maxEdge: 1280, type: 'image/jpeg', q: 0.75,      note: '長邊 1280 JPEG 75' },
+    ];
+    for (const s of steps) {
+      const blob = await _tiDraw(img, s.maxEdge, s.type, s.q);
+      if (blob && blob.size <= TI_TARGET_BYTES) {
+        return { blob, mime: s.type, bytes: blob.size, note: s.note };
+      }
+    }
+    return null;   // 每一級都壓不下來
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// 壓好的 Blob 轉 dataURL 後存進 task_images，回傳 imgId。
+async function _tiUpload(taskId, compressed, createdBy) {
+  const dataUrl = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload  = () => res(r.result);
+    r.onerror = () => rej(new Error('轉檔失敗'));
+    r.readAsDataURL(compressed.blob);
+  });
+  const imgId = _tiGenId();
+  await window.__cloudTaskImage.setImage(imgId, {
+    taskId:    taskId || '',
+    data:      dataUrl,
+    mime:      compressed.mime || '',
+    bytes:     compressed.bytes || 0,
+    createdAt: Date.now(),
+    createdBy: createdBy || '',
+  });
+  return imgId;
+}
+
+Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES });
