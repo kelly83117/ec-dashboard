@@ -52,6 +52,7 @@ Object.assign(App, {
           <span style="color:${assigneeColor};font-size:13px;flex-shrink:0">●</span>
           <span style="flex:1;min-width:0;font-size:13px;color:var(--text);word-break:break-word">${escapeHtml(t.desc || '')}</span>
           <span style="font-size:10px;color:var(--text-muted);flex-shrink:0;white-space:nowrap">${escapeHtml(t.assignee || '')}</span>
+          ${(t.images && t.images.length) ? `<button class="boss-task-imgs" data-task-id="${escapeHtml(t.id)}" title="查看附圖">圖 ${t.images.length}</button>` : ''}
           <input type="checkbox" class="boss-task-toggle" data-task-id="${escapeHtml(t.id)}" ${canToggle ? '' : 'disabled'} style="width:16px;height:16px;cursor:${canToggle ? 'pointer' : 'not-allowed'};flex-shrink:0">
           ${isAdmin ? `
             <button class="boss-task-edit" data-task-id="${escapeHtml(t.id)}" title="編輯" style="border:0;background:none;color:#94a3b8;cursor:pointer;font-size:12px;flex-shrink:0">✎</button>
@@ -195,6 +196,12 @@ Object.assign(App, {
             <div style="display:flex;flex-wrap:wrap;gap:5px">${chipsHtml}</div>
           </div>`;
       };
+      // 老闆任務的附圖：個人待辦這筆只存 text 與 bossTaskId，images 在原任務上，需反查。
+      // 同事實際會看的是自己這張卡片，若這裡沒有入口，等於看不到老闆附的截圖。
+      const _btImageCount = {};
+      (Store.get('ec.bossTasks', []) || []).forEach(t => {
+        if (t && t.id && Array.isArray(t.images) && t.images.length) _btImageCount[t.id] = t.images.length;
+      });
       const renderItem = (it) => {
         if (it && it.kind === 'insight-summary') {
           const counts = it.counts || {};
@@ -223,6 +230,7 @@ Object.assign(App, {
         <div class="dp-todo-row" data-item-id="${escapeHtml(it.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
           <span style="color:${PERSON_COLORS[p.name] || '#6b7280'};font-size:13px;flex-shrink:0">●</span>
           <span style="flex:1;min-width:0;font-size:13px;color:${it.done ? '#9ca3af' : 'var(--text)'};text-decoration:${it.done ? 'line-through' : 'none'};word-break:break-word">${escapeHtml(it.text)}</span>
+          ${(it.bossTaskId && _btImageCount[it.bossTaskId]) ? `<button class="boss-task-imgs" data-task-id="${escapeHtml(it.bossTaskId)}" title="查看附圖">圖 ${_btImageCount[it.bossTaskId]}</button>` : ''}
           <input type="checkbox" class="dp-todo-check" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" ${it.done ? 'checked' : ''} ${isEditable ? '' : 'disabled'} style="width:16px;height:16px;cursor:${isEditable ? 'pointer' : 'default'};flex-shrink:0">
           ${it.done ? '<span style="font-size:10.5px;color:#10b981;font-weight:700;flex-shrink:0">已完成</span>' : ''}
           ${isEditable ? `<button class="dp-todo-del" data-item-id="${escapeHtml(it.id)}" data-dp-name="${escapeHtml(p.name)}" title="刪除" style="border:0;background:none;color:#d1d5db;cursor:pointer;font-size:13px;flex-shrink:0">✕</button>` : ''}
@@ -838,6 +846,49 @@ Object.assign(App, {
       },
     });
   },
+  // 任務附圖檢視：所有人都能開（不做 admin 檢查）。
+  // openBossTaskModal 有 admin 權限擋，被指派的同事進不去，
+  // 若不另開這個入口，老闆附的截圖收件人就看不到，功能等於無效。
+  openTaskImagesModal(taskId) {
+    const all = Store.get('ec.bossTasks', []) || [];
+    const task = all.find(t => t.id === taskId);
+    const ids = (task && Array.isArray(task.images)) ? task.images : [];
+    if (!ids.length) { showToast('這筆任務沒有附圖', 'info'); return; }
+
+    this.openModal({
+      title: '任務附圖 · ' + ((task && task.desc) || ''),
+      width: 'min(1400px, 94vw)',
+      hideFooter: true,
+      bodyHtml: `<div id="tiv-body" class="tiv-body"><div class="tiv-loading">載入中…</div></div>`,
+      onMount: () => {
+        const box = document.getElementById('tiv-body');
+        if (!box) return;
+        Promise.all(ids.map(id =>
+          window.__cloudTaskImage.getDoc(id)
+            .then(snap => (snap && snap.exists() && (snap.data() || {}).data) ? { id, data: snap.data().data } : null)
+            .catch(() => null)
+        )).then(results => {
+          const ok = results.filter(Boolean);
+          if (!ok.length) {
+            box.innerHTML = `<div class="tiv-loading">圖片讀取失敗，或已被刪除</div>`;
+            return;
+          }
+          const missing = ids.length - ok.length;
+          box.innerHTML =
+            (missing ? `<div class="tiv-warn">有 ${missing} 張圖片讀取失敗或已不存在</div>` : '') +
+            ok.map((it, i) => `
+              <figure class="tiv-item">
+                <img src="${it.data}" alt="附圖 ${i + 1}" class="tiv-img" title="點圖切換原始尺寸">
+                <figcaption class="tiv-cap">${i + 1} / ${ok.length} · 點圖切換原始尺寸</figcaption>
+              </figure>
+            `).join('');
+          box.querySelectorAll('.tiv-img').forEach(im => {
+            im.addEventListener('click', () => im.classList.toggle('is-full'));
+          });
+        });
+      },
+    });
+  },
   bindWeeklyCalendar(deptId) {
     const ensureFilter = () => {
       if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
@@ -887,6 +938,10 @@ Object.assign(App, {
     if (historyBtn) historyBtn.addEventListener('click', () => this.openBossTaskHistoryModal());
     const lineCfgBtn = document.getElementById('boss-task-line-cfg');
     if (lineCfgBtn) lineCfgBtn.addEventListener('click', () => this.openBossLineConfigModal());
+    // 附圖檢視：所有人都能點（不像 edit / del 只綁給 admin）
+    document.querySelectorAll('.boss-task-imgs').forEach(b => {
+      b.addEventListener('click', () => this.openTaskImagesModal(b.dataset.taskId));
+    });
     document.querySelectorAll('.boss-task-edit').forEach(b => {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
