@@ -1878,7 +1878,7 @@ Object.assign(App, {
     const raw = Store.get(`ec.d2.pricing.cols.${sheet}`, null);
     const saved = (raw?.v === 2) ? raw : null; // 舊版存檔視為未設定
     const NT_SHEETS = ['生活好麻吉','玩樂盒子','森之旅','維克生活館','MOMO','FRIDAY'];
-    const NT_DEFAULT_VISIBLE = new Set(['商品名稱','商品編號','品項條碼','樣式','尺寸','成本','單品售價','獲利百分比']);
+    const NT_DEFAULT_VISIBLE = new Set(['商品名稱','品項條碼','樣式','尺寸','成本','單品售價','獲利百分比']);
     if (!saved) {
       if (NT_SHEETS.includes(sheet)) return cleanCols.filter(c => NT_DEFAULT_VISIBLE.has(c));
       return cleanCols;
@@ -1938,7 +1938,7 @@ Object.assign(App, {
     const newCols = cleanCols.filter(c => !savedOrder.includes(c));
     const fullOrder = [...savedOrder, ...newCols];
     const NT_SHEETS = ['生活好麻吉','玩樂盒子','森之旅','維克生活館','MOMO','FRIDAY'];
-    const NT_DEFAULT_VISIBLE = new Set(['商品名稱','商品編號','品項條碼','樣式','尺寸','成本','單品售價','獲利百分比']);
+    const NT_DEFAULT_VISIBLE = new Set(['商品名稱','品項條碼','樣式','尺寸','成本','單品售價','獲利百分比']);
     const shownExplicit = new Set(saved?.shownExplicit || []);
     const hiddenSet = new Set(saved?.hidden || []);
     if (!saved && NT_SHEETS.includes(sheet)) {
