@@ -1800,7 +1800,8 @@ Object.assign(App, {
   // 核心欄位（主表顯示）— 名稱欄固定排第一
   _prGetVisibleCols(allCols, sheet) {
     const cleanCols = allCols.filter(c => !c.startsWith('__'));
-    const saved = Store.get(`ec.d2.pricing.cols.${sheet}`, null);
+    const raw = Store.get(`ec.d2.pricing.cols.${sheet}`, null);
+    const saved = (raw?.v === 2) ? raw : null; // 舊版存檔視為未設定
     const NT_SHEETS = ['生活好麻吉','玩樂盒子','森之旅','維克生活館','MOMO','FRIDAY'];
     const NT_DEFAULT_VISIBLE = new Set(['商品名稱','商品編號','品項條碼','樣式','尺寸','成本','單品售價','獲利百分比']);
     if (!saved) {
@@ -1856,7 +1857,8 @@ Object.assign(App, {
 
   _prColPanelHtml(allCols, sheet) {
     const cleanCols = allCols.filter(c => !c.startsWith('__'));
-    const saved = Store.get(`ec.d2.pricing.cols.${sheet}`, null);
+    const raw = Store.get(`ec.d2.pricing.cols.${sheet}`, null);
+    const saved = (raw?.v === 2) ? raw : null;
     const savedOrder = (saved?.order || []).filter(c => cleanCols.includes(c));
     const newCols = cleanCols.filter(c => !savedOrder.includes(c));
     const fullOrder = [...savedOrder, ...newCols];
@@ -2572,7 +2574,7 @@ Object.assign(App, {
       const hidden = items.filter(el => !el.querySelector('.pr-col-check').checked).map(el => el.dataset.col);
       const _fh = ['退貨率','實際成本','入帳金額'];
       const shownExplicit = _fh.filter(c => !hidden.includes(c));
-      Store.set(`ec.d2.pricing.cols.${activeSheet}`, { order, hidden, shownExplicit });
+      Store.set(`ec.d2.pricing.cols.${activeSheet}`, { v:2, order, hidden, shownExplicit });
       self.render();
     };
 
