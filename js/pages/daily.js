@@ -599,9 +599,19 @@ Object.assign(App, {
     const assignee = existing ? existing.assignee : '全體';
     const due = existing ? (existing.due || '') : '';
 
+    // 附圖狀態。圖片在貼上當下就上傳（原因見下方 onSave 註解），
+    // 因此需要分別追蹤「目前顯示的」「這次新傳的」「這次標記移除的」三組，
+    // 才能在按取消時正確回收、按儲存時正確刪除。
+    const taskUid = existing ? existing.id : ('bt-' + Math.random().toString(36).slice(2, 10));
+    let tiItems   = [];   // 目前顯示中的圖：{ id, dataUrl, bytes, note }
+    let tiAdded   = [];   // 這次 modal 開啟後新上傳的 imgId（按取消要刪掉）
+    let tiRemoved = [];   // 這次標記移除的既有 imgId（按儲存才真的刪）
+    let tiBusy    = false;
+    let tiPasteHandler = null;
+
     this.openModal({
       title: existing ? '編輯任務' : '新增任務',
-      width: '480px',
+      width: '560px',
       bodyHtml: `
         <div class="field">
           <label>任務內容</label>
@@ -619,10 +629,153 @@ Object.assign(App, {
             <input type="date" id="bt-due" value="${escapeHtml(due)}" min="${todayStr}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit">
           </div>
         </div>
+        <div class="field">
+          <label>附加截圖（最多 ${TI_MAX_IMAGES} 張）</label>
+          <div class="ti-zone">
+            <div class="ti-hint">在這個視窗裡按 Ctrl+V 貼上截圖，或 <button type="button" id="ti-pick" class="ti-pick">選擇檔案</button></div>
+            <div id="ti-list" class="ti-list"></div>
+            <div id="ti-status" class="ti-status" hidden></div>
+          </div>
+        </div>
       `,
       saveLabel: existing ? '儲存' : '指派',
       cancelLabel: '取消',
+      onMount: () => {
+        const listEl   = document.getElementById('ti-list');
+        const statusEl = document.getElementById('ti-status');
+        const pickBtn  = document.getElementById('ti-pick');
+
+        const setStatus = (msg, isErr) => {
+          if (!statusEl) return;
+          statusEl.textContent = msg || '';
+          statusEl.hidden = !msg;
+          statusEl.classList.toggle('is-err', !!isErr);
+        };
+
+        const render = () => {
+          if (!listEl) return;
+          listEl.innerHTML = tiItems.map(it => `
+            <div class="ti-thumb" data-img-id="${escapeHtml(it.id)}">
+              <img src="${it.dataUrl}" alt="附圖">
+              <button type="button" class="ti-del" data-img-id="${escapeHtml(it.id)}" title="移除">✕</button>
+              <span class="ti-size">${(it.bytes / 1024).toFixed(0)} KB</span>
+            </div>
+          `).join('');
+        };
+
+        // 貼上與選檔的共用主幹：兩個入口都產出 File 物件，之後處理完全相同
+        const addFile = async (file) => {
+          if (tiBusy) return;
+          if (tiItems.length >= TI_MAX_IMAGES) {
+            setStatus('最多 ' + TI_MAX_IMAGES + ' 張，請先移除幾張', true);
+            return;
+          }
+          tiBusy = true;
+          setStatus('處理中…');
+          try {
+            const c = await _tiCompress(file);
+            if (!c) { setStatus('這張圖太大，壓縮後仍超過上限，請先裁切', true); return; }
+            const imgId = await _tiUpload(taskUid, c, (this.currentUser && this.currentUser.username) || '');
+            const dataUrl = await new Promise((res, rej) => {
+              const r = new FileReader();
+              r.onload = () => res(r.result);
+              r.onerror = () => rej(new Error('預覽失敗'));
+              r.readAsDataURL(c.blob);
+            });
+            tiItems.push({ id: imgId, dataUrl, bytes: c.bytes, note: c.note });
+            tiAdded.push(imgId);
+            render();
+            setStatus('已加入（' + c.note + '）');
+            setTimeout(() => setStatus(''), 2000);
+          } catch (e) {
+            setStatus('上傳失敗：' + (e && e.message || '未知錯誤'), true);
+          } finally {
+            tiBusy = false;
+          }
+        };
+
+        // 貼上綁在 document：modal 內沒有輸入焦點時也要能貼。
+        // 務必在 onSave 與 onCancel 兩邊都解綁，否則關閉後在其他頁面按 Ctrl+V 會誤觸發。
+        tiPasteHandler = (e) => {
+          const items = (e.clipboardData && e.clipboardData.items) || [];
+          for (const it of items) {
+            if (it.type && it.type.startsWith('image/')) {
+              const f = it.getAsFile();
+              if (f) { e.preventDefault(); addFile(f); }
+              return;
+            }
+          }
+        };
+        document.addEventListener('paste', tiPasteHandler);
+
+        if (pickBtn) pickBtn.addEventListener('click', () => {
+          const inp = document.createElement('input');
+          inp.type = 'file';
+          inp.accept = 'image/*';
+          inp.multiple = true;
+          inp.onchange = async () => {
+            for (const f of Array.from(inp.files || [])) await addFile(f);
+          };
+          inp.click();
+        });
+
+        if (listEl) listEl.addEventListener('click', (e) => {
+          const btn = e.target.closest && e.target.closest('.ti-del');
+          if (!btn) return;
+          const id = btn.dataset.imgId;
+          const idx = tiItems.findIndex(x => x.id === id);
+          if (idx < 0) return;
+          tiItems.splice(idx, 1);
+          // 這次新傳的直接刪掉；既有的只標記，等按儲存才真的刪
+          const ai = tiAdded.indexOf(id);
+          if (ai >= 0) {
+            tiAdded.splice(ai, 1);
+            window.__cloudTaskImage.removeImage(id).catch(() => {});
+          } else {
+            tiRemoved.push(id);
+          }
+          render();
+        });
+
+        render();
+
+        // 編輯既有任務時，把已存的圖片讀回來顯示。
+        // 這些是「既有圖」不是「這次新傳的」，所以不進 tiAdded——
+        // 按取消時不該被刪掉，點 ✕ 也只標記進 tiRemoved、等按儲存才真的刪。
+        // 逐張讀而非一次讀完：任何一張失敗都不該讓其他張跟著不顯示。
+        const existingIds = (existing && Array.isArray(existing.images)) ? existing.images : [];
+        if (existingIds.length) {
+          setStatus('載入已附圖片…');
+          Promise.all(existingIds.map(id =>
+            window.__cloudTaskImage.getDoc(id)
+              .then(snap => {
+                if (!snap || !snap.exists()) return null;
+                const d = snap.data() || {};
+                if (!d.data) return null;
+                return { id, dataUrl: d.data, bytes: d.bytes || 0, note: '' };
+              })
+              .catch(() => null)
+          )).then(results => {
+            const ok = results.filter(Boolean);
+            // unshift 保持既有圖排在這次新貼的前面（雖然載入期間通常還沒新貼）
+            tiItems = ok.concat(tiItems);
+            render();
+            const missing = existingIds.length - ok.length;
+            if (missing) setStatus('有 ' + missing + ' 張圖片讀取失敗或已不存在', true);
+            else setStatus('');
+          });
+        }
+      },
+
+      onCancel: () => {
+        if (tiPasteHandler) { document.removeEventListener('paste', tiPasteHandler); tiPasteHandler = null; }
+        // 取消 = 這次新傳的都不算數，從雲端回收，避免留下沒有任務指向的孤兒圖片
+        tiAdded.forEach(id => { window.__cloudTaskImage.removeImage(id).catch(() => {}); });
+      },
+
       onSave: () => {
+        if (tiBusy) { showToast('圖片還在處理中，請稍候', 'error'); return false; }
+        if (tiPasteHandler) { document.removeEventListener('paste', tiPasteHandler); tiPasteHandler = null; }
         const descEl = document.getElementById('bt-desc');
         const assigneeEl = document.getElementById('bt-assignee');
         const dueEl = document.getElementById('bt-due');
@@ -635,19 +788,22 @@ Object.assign(App, {
         if (existing) {
           const idx = list.findIndex(t => t.id === existing.id);
           if (idx >= 0) {
-            list[idx] = { ...list[idx], desc: text, assignee: assigneeVal, due: dueVal };
+            list[idx] = { ...list[idx], desc: text, assignee: assigneeVal, due: dueVal, images: tiItems.map(x => x.id) };
           }
         } else {
           list.push({
-            id: 'bt-' + Math.random().toString(36).slice(2, 10),
+            id: taskUid,
             desc: text,
             assignee: assigneeVal,
             due: dueVal,
             status: 'todo',
             createdBy: (this.currentUser && this.currentUser.username) || '',
             createdAt: Date.now(),
+            images: tiItems.map(x => x.id),
           });
         }
+        // 標記移除的既有圖片，到這裡才真的從雲端刪除（按取消則不刪）
+        tiRemoved.forEach(id => { window.__cloudTaskImage.removeImage(id).catch(() => {}); });
         Store.set('ec.bossTasks', list);
         showToast(existing ? '已更新' : '已指派', 'success');
         this.render();
@@ -2144,4 +2300,100 @@ function buildCardAdjustmentsHtml(person, viewDate) {
     </div>`;
 }
 
-Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml });
+/* ===================== 任務附圖：壓縮與上傳（Commit A，尚未接 UI） =====================
+ * Firestore 單 doc 上限 1MB，圖片以 base64 dataURL 存放會膨脹約 37%，
+ * 因此壓縮後二進位需 <= 500KB（→ dataURL 約 685KB）。
+ * 附件是螢幕截圖（多為文字內容），一律轉 JPEG 或盲目縮小會讓小字糊掉，
+ * 所以採階梯降級：先原樣、再逐級縮尺寸、最後才轉 JPEG。
+ */
+const TI_MAX_IMAGES   = 10;          // 單一任務最多幾張
+const TI_TARGET_BYTES = 500 * 1024;  // 壓縮目標（二進位）
+
+// imgId 格式注意：Firestore 的 document ID 不可符合 __.*__（雙底線開頭且雙底線結尾），
+// 因此這裡固定用 img- 前綴，不要改成底線開頭。
+function _tiGenId() {
+  return 'img-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+// 把 Image 畫到 canvas 並輸出 Blob。maxEdge 是長邊上限（等比縮放，不放大）。
+function _tiDraw(img, maxEdge, type, quality) {
+  return new Promise(resolve => {
+    const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth  * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    // 截圖多為淺色底，轉 JPEG 時透明區域預設會變黑，先鋪白底
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    cv.toBlob(b => resolve(b), type, quality);
+  });
+}
+
+// 階梯降級壓縮。回傳 { blob, mime, bytes, note } ；壓不下來回傳 null。
+async function _tiCompress(file) {
+  if (!file || !String(file.type || '').startsWith('image/')) {
+    throw new Error('不是圖片檔');
+  }
+  if (file.size <= TI_TARGET_BYTES) {
+    return { blob: file, mime: file.type, bytes: file.size, note: '原檔未壓縮' };
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload  = () => res(i);
+      i.onerror = () => rej(new Error('圖片解碼失敗'));
+      i.src = url;
+    });
+    // 依原檔格式選階梯，兩條都只輸出 JPEG。
+    // PNG 多半是螢幕截圖（內容是文字）：先降品質、保住原尺寸，撐不住才縮。
+    // 非 PNG 多半是照片：本來就是有損格式，直接從縮尺寸開始，省掉沒必要的嘗試。
+    const isPng = String(file.type || '').includes('png');
+    const steps = isPng ? [
+      // 螢幕截圖：文字可讀性取決於尺寸，所以先犧牲品質、最後才縮尺寸。
+      // 不輸出 PNG——實測縮小後的 PNG 比原圖更大且更糊（截圖縮放會破壞 PNG 的壓縮率）。
+      { maxEdge: Infinity, type: 'image/jpeg', q: 0.85, note: '原尺寸 JPEG 85' },
+      { maxEdge: Infinity, type: 'image/jpeg', q: 0.7,  note: '原尺寸 JPEG 70' },
+      { maxEdge: 1600,     type: 'image/jpeg', q: 0.8,  note: '長邊 1600 JPEG 80' },
+      { maxEdge: 1280,     type: 'image/jpeg', q: 0.75, note: '長邊 1280 JPEG 75' },
+    ] : [
+      { maxEdge: 1600, type: 'image/jpeg', q: 0.9,       note: '長邊 1600 JPEG 90' },
+      { maxEdge: 1280, type: 'image/jpeg', q: 0.9,       note: '長邊 1280 JPEG 90' },
+      { maxEdge: 1280, type: 'image/jpeg', q: 0.75,      note: '長邊 1280 JPEG 75' },
+    ];
+    for (const s of steps) {
+      const blob = await _tiDraw(img, s.maxEdge, s.type, s.q);
+      if (blob && blob.size <= TI_TARGET_BYTES) {
+        return { blob, mime: s.type, bytes: blob.size, note: s.note };
+      }
+    }
+    return null;   // 每一級都壓不下來
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// 壓好的 Blob 轉 dataURL 後存進 task_images，回傳 imgId。
+async function _tiUpload(taskId, compressed, createdBy) {
+  const dataUrl = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload  = () => res(r.result);
+    r.onerror = () => rej(new Error('轉檔失敗'));
+    r.readAsDataURL(compressed.blob);
+  });
+  const imgId = _tiGenId();
+  await window.__cloudTaskImage.setImage(imgId, {
+    taskId:    taskId || '',
+    data:      dataUrl,
+    mime:      compressed.mime || '',
+    bytes:     compressed.bytes || 0,
+    createdAt: Date.now(),
+    createdBy: createdBy || '',
+  });
+  return imgId;
+}
+
+Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES });
