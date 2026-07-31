@@ -584,8 +584,7 @@ Object.assign(App, {
         document.querySelectorAll('.boss-task-history-del').forEach(b => {
           b.addEventListener('click', () => {
             if (!confirm('從歷史中刪除這筆？無法復原。')) return;
-            const list = (Store.get('ec.bossTasks', []) || []).filter(t => t.id !== b.dataset.taskId);
-            Store.set('ec.bossTasks', list);
+            this._deleteBossTask(b.dataset.taskId);
             showToast('已刪除', 'success');
             this.closeModal();
             this.openBossTaskHistoryModal();
@@ -889,6 +888,49 @@ Object.assign(App, {
       },
     });
   },
+  // 刪除老闆任務的共用善後。有兩個刪除入口（列表的 ✕、歷史彈窗），
+  // 邏輯相同，抽出來避免日後新增入口時漏掉其中一項善後。
+  // 兩件善後缺一不可：
+  //   1. images 指向的圖片 doc 要刪，否則變成沒有任務指向的孤兒，永遠佔空間又無從追溯
+  //   2. ec.dailyProgress 裡 bossTaskId 對應的那筆要清，否則同事待辦清單會留下
+  //      永遠對不到原任務的殘留項目
+  _deleteBossTask(taskId) {
+    if (!taskId) return;
+    const all = Store.get('ec.bossTasks', []) || [];
+    const task = all.find(t => t.id === taskId);
+
+    // 1. 先刪圖片（用任務上的 images 記錄，所以必須在移除任務之前取出）
+    const imgIds = (task && Array.isArray(task.images)) ? task.images : [];
+    imgIds.forEach(id => {
+      window.__cloudTaskImage.removeImage(id).catch(e => console.warn('[task image cleanup]', id, e));
+    });
+
+    // 2. 清掉個人待辦裡對應的那筆
+    const prog = Store.get('ec.dailyProgress', {}) || {};
+    const nextProg = { ...prog };
+    let removedItems = 0;
+    Object.keys(nextProg).forEach(date => {
+      const day = { ...(nextProg[date] || {}) };
+      let dayChanged = false;
+      Object.keys(day).forEach(name => {
+        if (!Array.isArray(day[name])) return;
+        const before = day[name].length;
+        const kept = day[name].filter(it => it.bossTaskId !== taskId);
+        if (kept.length !== before) {
+          day[name] = kept;
+          removedItems += before - kept.length;
+          dayChanged = true;
+        }
+      });
+      if (dayChanged) nextProg[date] = day;
+    });
+    if (removedItems > 0) Store.set('ec.dailyProgress', nextProg);
+
+    // 3. 最後才移除任務本身
+    Store.set('ec.bossTasks', all.filter(t => t.id !== taskId));
+
+    console.log('[task delete]', taskId, '圖片', imgIds.length, '張、個人待辦', removedItems, '筆');
+  },
   bindWeeklyCalendar(deptId) {
     const ensureFilter = () => {
       if (!this.filter.dashboardMarketing) this.filter.dashboardMarketing = {};
@@ -952,8 +994,7 @@ Object.assign(App, {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         if (!confirm('確定刪除這個任務？')) return;
-        const list = (Store.get('ec.bossTasks', []) || []).filter(t => t.id !== b.dataset.taskId);
-        Store.set('ec.bossTasks', list);
+        this._deleteBossTask(b.dataset.taskId);
         showToast('已刪除', 'success');
         this.render();
       });
