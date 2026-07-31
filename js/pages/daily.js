@@ -2192,9 +2192,16 @@ async function _tiCompress(file) {
       i.onerror = () => rej(new Error('圖片解碼失敗'));
       i.src = url;
     });
-    const steps = [
+    // 依原檔格式選階梯。PNG 多半是螢幕截圖（內容是文字，要保清晰度），先試 PNG 再降 JPEG；
+    // 非 PNG 本來就是有損格式，跳過註定失敗又最慢的 PNG 編碼，直接走 JPEG。
+    const isPng = String(file.type || '').includes('png');
+    const steps = isPng ? [
       { maxEdge: 1600, type: 'image/png',  q: undefined, note: '縮至長邊 1600 PNG' },
       { maxEdge: 1280, type: 'image/png',  q: undefined, note: '縮至長邊 1280 PNG' },
+      { maxEdge: 1280, type: 'image/jpeg', q: 0.9,       note: '長邊 1280 JPEG 90' },
+      { maxEdge: 1280, type: 'image/jpeg', q: 0.75,      note: '長邊 1280 JPEG 75' },
+    ] : [
+      { maxEdge: 1600, type: 'image/jpeg', q: 0.9,       note: '長邊 1600 JPEG 90' },
       { maxEdge: 1280, type: 'image/jpeg', q: 0.9,       note: '長邊 1280 JPEG 90' },
       { maxEdge: 1280, type: 'image/jpeg', q: 0.75,      note: '長邊 1280 JPEG 75' },
     ];
