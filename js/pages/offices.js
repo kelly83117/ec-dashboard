@@ -1726,14 +1726,16 @@ Object.assign(App, {
     </div>`;
   },
 
-  _prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume) {
+  _prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume, diversion = false) {
     const p = this._prGetRates(sheet);
     const r2 = v => Math.round(v * 100) / 100;
     // Excel 公式：=(C+D+(E×G))*$C$1，G=運費/kg(¥)，$C$1=匯率
     // 陸>台運費也是人民幣，全部一起換匯
     const 陸台運費RMB = r2(weight * p.ship);
     const 陸台運費NT = r2(陸台運費RMB * p.rmb);
-    const 實際成本 = r2((origCost + landFreight + 陸台運費RMB) * p.rmb);
+    let 實際成本 = r2((origCost + landFreight + 陸台運費RMB) * p.rmb);
+    // 導流品 + 售價 < 100：成本扣 9（吸收固定費）
+    if (diversion && price < 100) 實際成本 = r2(實際成本 - 9);
     const 稅金 = r2(price * p.tax);
     const 成交 = r2(price * p.txFee);
     const 活動 = r2(price * p.promo);
@@ -1748,8 +1750,9 @@ Object.assign(App, {
     });
     // Excel: 入帳 = 售價-(稅金+成交+活動+退貨)，即 I-(K+SUM(L:N))
     const 平台費 = r2(稅金 + 成交 + 活動 + 退貨 + extraPct);
-    // 導流品售價 ≥ 100：固定費 +9（運費包材+開發票）
-    const 固定 = r2(((sheet === '導流品' && price >= 100) ? 9 : 0) + extraNT);
+    // 導流品 + 售價 ≥ 100：固定費 +9
+    const isDiv = diversion || sheet === '導流品';
+    const 固定 = r2((isDiv && price >= 100 ? 9 : 0) + extraNT);
     const 入帳 = r2(price - 平台費 - 固定);
     // Excel: 蝦皮總成本 = SUM(K:P) = 平台費+入帳+銷項 = 售價
     const 蝦皮總成本 = r2(price);
@@ -1765,8 +1768,8 @@ Object.assign(App, {
   },
 
   _prBuildRow(sheet, inputs) {
-    const { logistics, name, origCost, landFreight, weight, price, roas, volume, store, website, note } = inputs;
-    const c = this._prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume);
+    const { logistics, name, origCost, landFreight, weight, price, roas, volume, store, website, note, diversion } = inputs;
+    const c = this._prCalcAll(sheet, origCost, landFreight, weight, price, roas, volume, !!diversion);
     const existingRows = window.__pricingData?.[sheet] || [];
     // 商品母表（或其他空白 RMB 工作表）的預設欄位結構
     const RMB_DEFAULT_COLS = ['商品編號','產品名稱','品項條碼','樣式','尺寸','原始成本','陸〉陸運費','陸>台運費(kg)','售價','實際成本','蝦皮總成本','入帳金額','實際毛利','獲利百分比','成本率','備註'];
@@ -2086,7 +2089,7 @@ Object.assign(App, {
           const ntc = +r['成本'] || 0;
           const pr  = +r['單品售價'] || 0;
           const oc  = ntc / (_rates0.rmb || 32);
-          const c   = this._prCalcAll(activeSheet, oc, 0, 0, pr, 0, 0);
+          const c   = this._prCalcAll(activeSheet, oc, 0, 0, pr, 0, 0, !!r.__diversion);
           return { ...r,
             稅金: c.稅金, 成交手續費: c.成交, 活動服務費: c.活動, 退貨率: c.退貨,
             實際成本: c.實際成本, 蝦皮總成本: c.蝦皮總成本, 入帳金額: c.入帳,
@@ -2178,8 +2181,9 @@ Object.assign(App, {
     if (!useGrouping) {
       tbodyHtml = display.map(({ r, i }) => {
         const isCustom = !!r.__custom;
+        const divTag = r.__diversion ? `<span style="font-size:9px;background:#fef3c7;color:#d97706;border:1px solid #fcd34d;border-radius:3px;padding:1px 4px;margin-left:4px;vertical-align:middle;font-weight:700">導流</span>` : '';
         return `<tr class="pr-row" data-i="${i}" data-id="${r.__id||''}" style="border-bottom:1px solid #f3f4f6;cursor:pointer${isCustom?';background:#eff6ff':''}">` +
-          coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+          coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}${NAME_COLS.has(c)?divTag:''}</td>`).join('') +
           `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
       }).join('');
     } else {
@@ -2219,8 +2223,9 @@ Object.assign(App, {
           }).join('') + `<td></td></tr>`;
         const rows = items.map(({ r, i }) => {
           const isCustom = !!r.__custom;
+          const divTagC = r.__diversion ? `<span style="font-size:9px;background:#fef3c7;color:#d97706;border:1px solid #fcd34d;border-radius:3px;padding:1px 4px;margin-left:4px;vertical-align:middle;font-weight:700">導流</span>` : '';
           return `<tr class="pr-row pr-child" data-grp="${kA}" data-i="${i}" data-id="${r.__id||''}" hidden style="border-bottom:1px solid #f3f4f6;cursor:pointer;background:${isCustom?'#eff6ff':'#f8fafc'}">` +
-            coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}</td>`).join('') +
+            coreCols.map((c, ci) => `<td style="${_td(c)}">${this._prFmt(r[c], coreTypes[ci])}${NAME_COLS.has(c)?divTagC:''}</td>`).join('') +
             `<td style="text-align:center;padding:6px 4px">${isCustom?`<button class="pr-del-custom" data-id="${r.__id||''}" data-i="${i}" style="background:none;border:0;cursor:pointer;color:#f87171;font-size:13px;padding:0" title="刪除">🗑</button>`:'<span style="color:#d1d5db;font-size:11px">›</span>'}</td></tr>`;
         }).join('');
         return hdr + rows;
@@ -2444,6 +2449,11 @@ Object.assign(App, {
             <span style="font-size:10px;color:#6b7280;font-weight:600">備註</span>
             <input id="pe-note" type="text" value="${escapeHtml(String(r[noteCol]||''))}" placeholder="備註" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:150px">
           </label>` : ''}
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 10px;border:1px solid ${r.__diversion?'#f59e0b':'var(--border)'};border-radius:6px;background:${r.__diversion?'#fffbeb':'var(--bg)'};white-space:nowrap">
+            <input id="pe-diversion" type="checkbox" ${r.__diversion?'checked':''} style="width:15px;height:15px;cursor:pointer">
+            <span style="font-size:12px;font-weight:600;color:${r.__diversion?'#d97706':'var(--text)'}">導流品</span>
+            <span style="font-size:10px;color:#9ca3af">≥100+9固定費 / &lt;100成本-9</span>
+          </label>
         </div>
         <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
           <button id="pe-save-${idx}" style="padding:7px 20px;background:#2563eb;color:white;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">儲存</button>
@@ -2481,7 +2491,8 @@ Object.assign(App, {
           wt = parseFloat(document.getElementById('pe-wt')?.value)   || (weightCol ? +r[weightCol] : 0);
         }
         const pr   = parseFloat(document.getElementById('pe-price')?.value) || (priceCol ? +r[priceCol] : 0);
-        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, 0, 0);
+        const div = document.getElementById('pe-diversion')?.checked || false;
+        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, 0, 0, div);
         // 若費率裡有自訂廣告費% 欄，直接用 price×rate；否則從利潤反推 ROAS
         const _extraCols = Store.get('ec.pricing.extra_cols', []);
         const _adsCol = _extraCols.find(col => col.type === 'pct' && col.label && col.label.includes('廣告'));
@@ -2509,6 +2520,7 @@ Object.assign(App, {
       _calcPreview();
       ['pe-ntcost','pe-orig','pe-land','pe-wt','pe-price'].forEach(id =>
         document.getElementById(id)?.addEventListener('input', _calcPreview));
+      document.getElementById('pe-diversion')?.addEventListener('change', _calcPreview);
 
       document.getElementById(`pe-save-${idx}`)?.addEventListener('click', () => {
         const _rates2 = self._prGetRates(activeSheet);
@@ -2529,9 +2541,10 @@ Object.assign(App, {
         const barcode2= document.getElementById('pe-barcode')?.value ?? (barcodeCol ? r[barcodeCol] : '');
         const style2  = document.getElementById('pe-style')?.value   ?? (styleCol   ? r[styleCol]   : '');
         const size2   = document.getElementById('pe-size')?.value    ?? (sizeCol    ? r[sizeCol]    : '');
-        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, +(r['廣告ROAS']||0), +(r['月銷量']||0));
+        const div2 = document.getElementById('pe-diversion')?.checked || false;
+        const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, +(r['廣告ROAS']||0), +(r['月銷量']||0), div2);
         const allSaveCols = skuCol ? [...new Set([...cols, '商品編號','品項條碼','樣式','尺寸'])] : cols;
-        const newRow = { ...r };
+        const newRow = { ...r, __diversion: div2 || undefined };
         for (const col of allSaveCols) {
           if (col === '商品編號') newRow[col] = sku2;
           else if (col === '品項條碼') newRow[col] = barcode2;
