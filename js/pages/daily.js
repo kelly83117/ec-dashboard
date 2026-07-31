@@ -738,6 +738,33 @@ Object.assign(App, {
         });
 
         render();
+
+        // 編輯既有任務時，把已存的圖片讀回來顯示。
+        // 這些是「既有圖」不是「這次新傳的」，所以不進 tiAdded——
+        // 按取消時不該被刪掉，點 ✕ 也只標記進 tiRemoved、等按儲存才真的刪。
+        // 逐張讀而非一次讀完：任何一張失敗都不該讓其他張跟著不顯示。
+        const existingIds = (existing && Array.isArray(existing.images)) ? existing.images : [];
+        if (existingIds.length) {
+          setStatus('載入已附圖片…');
+          Promise.all(existingIds.map(id =>
+            window.__cloudTaskImage.getDoc(id)
+              .then(snap => {
+                if (!snap || !snap.exists()) return null;
+                const d = snap.data() || {};
+                if (!d.data) return null;
+                return { id, dataUrl: d.data, bytes: d.bytes || 0, note: '' };
+              })
+              .catch(() => null)
+          )).then(results => {
+            const ok = results.filter(Boolean);
+            // unshift 保持既有圖排在這次新貼的前面（雖然載入期間通常還沒新貼）
+            tiItems = ok.concat(tiItems);
+            render();
+            const missing = existingIds.length - ok.length;
+            if (missing) setStatus('有 ' + missing + ' 張圖片讀取失敗或已不存在', true);
+            else setStatus('');
+          });
+        }
       },
 
       onCancel: () => {
