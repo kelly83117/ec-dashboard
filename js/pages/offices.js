@@ -2468,8 +2468,18 @@ Object.assign(App, {
         }
         const pr   = parseFloat(document.getElementById('pe-price')?.value) || (priceCol ? +r[priceCol] : 0);
         const c = self._prCalcAll(activeSheet, oc, lf, wt, pr, 0, 0);
-        const roasAuto = c.獲利百分比 > 0.20 ? Math.round(1 / (c.獲利百分比 - 0.20) * 100) / 100 : null;
-        const 廣告Auto = (roasAuto && pr > 0) ? Math.round(pr / roasAuto * 100) / 100 : null;
+        // 若費率裡有自訂廣告費% 欄，直接用 price×rate；否則從利潤反推 ROAS
+        const _extraCols = Store.get('ec.pricing.extra_cols', []);
+        const _adsCol = _extraCols.find(col => col.type === 'pct' && col.label && col.label.includes('廣告'));
+        let roasAuto, 廣告Auto;
+        if (_adsCol) {
+          const adsRate = rates[_adsCol.key] || 0;
+          roasAuto = adsRate > 0 ? Math.round(1 / adsRate * 100) / 100 : null;
+          廣告Auto = adsRate > 0 && pr > 0 ? Math.round(pr * adsRate * 100) / 100 : null;
+        } else {
+          roasAuto = c.獲利百分比 > 0.20 ? Math.round(1 / (c.獲利百分比 - 0.20) * 100) / 100 : null;
+          廣告Auto = (roasAuto && pr > 0) ? Math.round(pr / roasAuto * 100) / 100 : null;
+        }
         const nt = v => v != null ? 'NT$'+v.toLocaleString('zh-TW',{maximumFractionDigits:1}) : '—';
         const pf = v => { const p=Math.round(v*10000)/100; const col=p>=20?'#059669':p>=0?'#f59e0b':'#dc2626'; return `<span style="color:${col}">${p.toFixed(1)}%</span>`; };
         const s = (id,h) => { const el=document.getElementById(`pe-c-${id}`); if(el) el.innerHTML=h; };
