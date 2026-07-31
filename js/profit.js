@@ -7384,7 +7384,7 @@ function momoSaveOptlog(shop,map){ const k=momoOptlogKey(shop);
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=map; }catch{}
   try{ _markPending(k); }catch{}   // 走既有 pending → 同步時 __cloudProfit.setField（field 分支）
 }
-const MOMO_OPTLOG_TYPES=['調價','調成本','下架','補貨','改運費','其他'];
+const MOMO_OPTLOG_TYPES=['商品內容優化','調價','上下架','相關商品','影片','五星好評','做活動','其他'];   // 單一來源：只餵新增下拉；歷史紀錄存的是當時字串、不受影響（工作日誌 counts 動態產生，舊 type 如 調成本/補貨/改運費/下架 照樣計數顯示、不遷移不合併）
 function momoAddOptlog(shop,sku){
   const sel=document.getElementById('momo-optlog-type'), note=document.getElementById('momo-optlog-note');
   const type=sel?sel.value:'其他', txt=note?note.value.trim():'';
@@ -8647,7 +8647,7 @@ function momoRenderUpload(shop){
   // 統一版型：標籤欄固定 250px，第一行「名稱 + 代號 + 必要/選填」，第二行灰字補充；控制欄同基準線
   const fileRow=(type,name,code,required,sub)=>{
     const on=!!f[type];
-    const tag = required===true?'<span class="req">*必要</span>' : required==='any'?'<span class="mm-atleast">（至少擇一）</span>' : '<span class="opt">選填</span>';
+    const tag = required===true?'<span class="req">*必要</span>' : required==='any'?'' : '<span class="opt">選填</span>';   // 'any'(C1105)：只留欄名、不標「至少擇一」；行為不變(按鈕仍任一有檔即可、灰時 genHint 才提示)
     return `<div class="mm-uprow">
       <div class="mm-uplbl">${name}${code?' <span class="mm-code">'+code+'</span>':''}${tag}${sub?`<div class="mm-hint">${sub}</div>`:''}</div>
       <div class="mm-upctl"><input type="file" accept=".xlsx,.xls" onchange="momoUploadFile('${shop}','${type}',event)"><span class="${on?'mm-ok':'mm-muted'}">${on?'✓ '+_momoEsc(f[type].name):'未選'}</span>${on?`<a onclick="momoUploadRemove('${shop}','${type}')" title="移除此檔" style="color:#ef4444;cursor:pointer;font-weight:700">✕</a>`:''}</div>
@@ -9186,7 +9186,7 @@ function momoRenderProductSync(shop){
   const fileRow=(type,label)=>{
     const on=!!f[type];
     return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-      <div style="width:250px;font-size:13px;color:#374151">${label} <span class="mm-atleast">（至少擇一）</span></div>
+      <div style="width:250px;font-size:13px;color:#374151">${label}</div>
       <input type="file" accept=".xlsx,.xls" onchange="momoSyncFile('${shop}','${type}',event)" style="font-size:12px">
       <span style="font-size:12px;color:${on?'#10b981':'#9ca3af'}">${on?'✓ '+f[type].name:'尚未選擇'}</span>
       ${on?`<a onclick="momoSyncRemove('${shop}','${type}')" title="移除此檔" style="color:#ef4444;cursor:pointer;font-size:13px;font-weight:700">✕</a>`:''}
