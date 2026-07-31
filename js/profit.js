@@ -7121,6 +7121,21 @@ function momoTotalsFromRows(rows){
   });
   return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty };
 }
+// 自驗用：把該期別「有銷量」的品號分成「在對帳單」(reconRev，嚴格=E) 與「不在對帳單」(漏品，營收供應商口徑估算)。
+//   自驗只比對帳品號 Σ 是否 = 對帳單該店金額；漏品獨立列出（有銷量卻沒進對帳單、營收估算），避免估算品把自驗誤判成不一致。
+function momoReconciledSplit(shop, period){
+  const keys=momoExpandPeriod(period);
+  let reconRev=0, missRev=0; const missSkus=[];
+  momoLoadProducts(shop).forEach(p=>{
+    const a=momoAggregatePeriods(p, keys, shop);
+    const g=(a.grossQty!=null?a.grossQty:a.qty);
+    if(!(g>0 || Math.abs(a.revenue)>0.5)) return;   // 該期別無動 → 不計
+    if(a.reconciled) reconRev+=a.revenue;
+    else { missRev+=a.revenue; missSkus.push({sku:p.sku, name:p.name||'', rev:a.revenue}); }
+  });
+  missSkus.sort((x,y)=>y.rev-x.rev);
+  return { reconRev, missRev, missSkus };
+}
 // 逐列「與上一期比較」小字：每欄個別定義好壞方向。
 //   good：1=升為好(瀏覽量/成交率/本期銷量/營收/毛利貢獻)、-1=降為好(退貨率)、0=中性不著色(毛利率——低毛利率升仍不算好，比照總覽卡的中性 pp)。
 //   絕對量→%變化、比率(成交率/毛利率/退貨率)→pp 差。上期無資料/本期非數字→顯示「—」或不顯示，絕不顯示誤導的 0%/-100%。
@@ -7311,13 +7326,22 @@ function momoRenderProfitBody(shop, tableOnly){
     // 上線首月（含）之前只有零星跨月訂單、明顯不完整 → 不當環比基準：清空 prevKey 使環比顯示「—」而非誤導百分比。（2025/12 底層資料仍保留、不刪。）
     if(prevKey && prevKey.slice(0,7) < MOMO_FIRST_PERIOD) prevKey='';
     const prevT= _filterOn ? {hasData:false, rev:0, profit:0, qty:0, margin:0, soldActive:0, activeTotal:0} : momoPeriodTotals(shop, prevKey);
-    // 自驗：驗證邏輯保留，但通過時「完全不顯示」（不留標記，省版面）；只有對不上才警示。篩選中不驗（母體非全量）。
+    // 自驗（reconciled-only）：只拿「在對帳單」的品號 Σ營收 比對對帳單該店金額（嚴格=E、diff≈0）；通過時完全不顯示。
+    //   「有銷量但不在對帳單」的品號＝漏品，營收供應商口徑估算、不納入自驗 → 獨立中性提示（不用紅色暗示、可展開查品號）。篩選中不驗（母體非全量）。
     let verifyBlock='';
     if(!_filterOn && isJiaYi && fi && fi.reconciled && period.endsWith('-FULL')){
       const expect=fi.shopRev;   // 該店對帳金額未稅合計（非整帳號 A：甲配 521,538 / 乙配 65,101）
-      const diff=curT.rev - expect;
+      const sp=momoReconciledSplit(shop, period);
+      const diff=sp.reconRev - expect;
       const ok=Math.abs(diff)<=Math.max(50, expect*0.001);
-      verifyBlock = ok ? '' : `<div class="mm-verify-err">⚠ 整月 Σ營收 ${momoMoney(curT.rev)} ≠ 對帳單該店金額 ${momoMoney(expect)}（差 ${momoMoney(diff)}，主檔可能缺對帳單裡的品號）</div>`;
+      const errHTML = ok ? '' : `<div class="mm-verify-err">⚠ 對帳品號 Σ營收 ${momoMoney(sp.reconRev)} ≠ 對帳單該店金額 ${momoMoney(expect)}（差 ${momoMoney(diff)}，主檔對帳品號的營收兜不攏）</div>`;
+      let noteHTML='';
+      if(sp.missSkus.length){
+        const lis=sp.missSkus.slice(0,50).map(m=>`<li><span style="font-family:monospace">${_momoEsc(m.sku)}</span> ${_momoEsc(m.name)}　${momoMoney(m.rev)}</li>`).join('');
+        const more=sp.missSkus.length>50?`<li>…共 ${sp.missSkus.length} 項</li>`:'';
+        noteHTML=`<details class="mm-verify-note"><summary>ℹ️ ${sp.missSkus.length} 個品號有銷量但不在對帳單（營收估算 ${momoMoney(sp.missRev)}，未納入對帳驗證）</summary><ul>${lis}${more}</ul></details>`;
+      }
+      verifyBlock = errHTML + noteHTML;
     }
     // 已篩選 N / 基數（旁附估算標）：只有啟用篩選時顯示，一鍵清除。
     const filterInfo= _filterOn
@@ -8695,22 +8719,30 @@ function momoUploadGenerate(shop){
 function momoJiaPreviewHTML(P){
   if(!P.jiaMonths || !Object.keys(P.jiaMonths).length) return '';
   const months=Object.keys(P.jiaMonths).filter(m=>m!=='?').sort();
+  // 部分月份不完整偵測：某月 C1202 總額 < 對帳單該月甲配物流的一半 → 多半是「別月檔案的跨月零頭」（例：只傳 2606，4/5 月拿到零星跨月訂單）。
+  //   以此零頭覆蓋該月甲配運費會用不完整資料蓋掉真值 → 標紅警示、不建議覆蓋（要更新該月請傳該月自己的 C1202）。
+  const fragOf=mo=>{ const recLogi=momoLogisticsJiaTotalUntax(mo); const m=P.jiaMonths[mo]; return (recLogi>0 && (m.total||0) < recLogi*0.5) ? {recLogi, pct:Math.round((m.total||0)/recLogi*100)} : null; };
+  let anyFrag=false;
   const rows=months.map(mo=>{
     const m=P.jiaMonths[mo];
     const modeTxt=m.mode==='precise'?'<span style="color:#059669;font-weight:700">🟢 精算</span>':'<span style="color:#d97706;font-weight:700">🟡 估算</span>';
     const ex=momoLoadFreight('甲配',mo);
     const downgrade=(m.mode==='est' && ex && ex.source==='C1202');   // 原為訂編精算、將被估算覆蓋
+    const frag=fragOf(mo); if(frag) anyFrag=true;
     const notes=[];
+    if(frag) notes.push(`<b style="color:#b91c1c">⚠ 資料不完整：只有對帳單物流的 ${frag.pct}%（對帳 $${Math.round(frag.recLogi).toLocaleString()}）— 多半是別月檔案的跨月零頭，不建議以此覆蓋本月</b>`);
     if(m.unmatchedN) notes.push(m.unmatchedN+' 筆訂編無 C1105 對照（該筆估算）');
     if(m.noQty) notes.push('$'+m.noQty.toLocaleString()+' 該期別主檔無銷量、未分攤');
-    return `<tr style="border-top:1px solid #e5e7eb${downgrade?';background:#fef2f2':''}">
-      <td style="padding:3px 8px">${mo.slice(0,4)}/${+mo.slice(5,7)}</td>
+    const rowBg = frag?';background:#fef2f2' : (downgrade?';background:#fff7ed':'');
+    return `<tr style="border-top:1px solid #e5e7eb${rowBg}">
+      <td style="padding:3px 8px">${mo.slice(0,4)}/${+mo.slice(5,7)}${frag?' <span style="color:#dc2626">⚠</span>':''}</td>
       <td style="padding:3px 8px">${modeTxt}</td>
       <td style="padding:3px 8px;text-align:right">${m.skuN}</td>
       <td style="padding:3px 8px;text-align:right">$${(m.total||0).toLocaleString()}</td>
       <td style="padding:3px 8px;color:#9a3412;font-size:11px">${downgrade?'<b style="color:#b91c1c">⚠ 原為精算、將被估算覆蓋</b>　':''}${notes.join('；')}</td>
     </tr>`;
   }).join('');
+  const fragBanner=anyFrag?`<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:11px;color:#991b1b;line-height:1.5"><b>⚠ 有月份只拿到跨月零頭</b>（金額遠小於對帳單物流）：這通常是<b>只傳某月的 C1202、卻夾帶幾筆落在別月的訂單</b>。寫入會以零頭覆蓋該月甲配運費（用不完整資料蓋真值）。要更新那些月請<b>傳該月自己的 C1202</b>；只想更新主要月份的話，先移除其他月的檔再產生預覽。</div>`:'';
   const fileRows=(P.jiaFiles||[]).map(f=>{
     const ms=Object.keys(f.months).sort().map(mo=>`${mo==='?'?'<span style="color:#dc2626">無法判月</span>':mo.slice(0,4)+'/'+(+mo.slice(5,7))}（${f.months[mo].n} 筆·$${Math.round(f.months[mo].total).toLocaleString()}）`).join('、');
     return `<div style="font-size:11px;color:#3b82f6">📄 ${_momoEsc(f.name)} → ${ms||'—'}</div>`;
@@ -8723,6 +8755,7 @@ function momoJiaPreviewHTML(P){
         <tbody>${rows}</tbody>
       </table>
     </div>
+    ${fragBanner}
     ${fileRows?`<div style="margin-top:6px">${fileRows}</div>`:''}
     <div style="font-size:11px;color:#2563eb;margin-top:4px">🟢 精算＝同批有該月 C1105、逐 SKU 按訂編分攤；🟡 估算＝無 C1105，該月運費按主檔已存銷量分攤（<b>總額不變</b>、SKU 間為估算）。甲配月總已由對帳單錨定，此處只決定 SKU 間分佈。</div>
   </div>`;
