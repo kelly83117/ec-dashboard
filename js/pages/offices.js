@@ -2307,12 +2307,8 @@ Object.assign(App, {
       });
     });
 
-    document.getElementById('pr-search')?.addEventListener('input', e => {
-      if (e.isComposing) return; // 注音/倉頡組字中，等確認後再搜尋
-      Store.set('ec.d2.pricing.q', e.target.value);
-      self.render();
-    });
-    document.getElementById('pr-search')?.addEventListener('compositionend', e => {
+    document.getElementById('pr-search')?.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' || e.isComposing) return; // 注音/倉頡組字確認中跳過，打完按 Enter 才搜尋
       Store.set('ec.d2.pricing.q', e.target.value);
       self.render();
     });
