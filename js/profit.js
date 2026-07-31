@@ -5315,6 +5315,7 @@ function saveScoreTargetsModal(btn){
 function setShop(shop,btn){
   curShop=shop;
   try{localStorage.setItem('ec_curShop',shop);}catch{}
+  _saveProfitView('shopee',shop);   // 記錄當前檢視＝蝦皮+此賣場（供 App.render 重建後還原；不影響蝦皮切換行為）
   document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
@@ -5351,6 +5352,32 @@ function setShop(shop,btn){
   if(shop==='總表')renderSummary();
   else if(shop==='重點檢視')renderFocus();
   else{if(state[shop]?._built?.length)applyFilters(shop);syncHeaderKpis(shop);}
+}
+
+// ── 淨利表「當前檢視」(平台+賣場) 持久化 & 還原 ──────────────────────────────
+//   根因：App.render() 走 viewOffice 重建整個淨利表 HTML，__profitTabHtml 硬寫「蝦皮｜總表 active」；
+//   重建後的還原（offices.js 的 viewOffice/bindOfficeTabs + 本檔 tab-click）原本只認 ec_curShop（蝦皮）
+//   → 不管使用者在 MOMO/酷澎，一律彈回好麻吉。改成記錄 platform+shop、還原時依平台叫對應 setter。
+//   ⚠ platform==='shopee' 或未設定時，走 _restoreShopeeInline()＝與改動前 inline 邏輯逐字相同，蝦皮行為不變。
+function _saveProfitView(platform,shop){ try{ localStorage.setItem('ec_profitView', JSON.stringify({platform,shop})); }catch{} }
+function _restoreShopeeInline(){   // 蝦皮還原：與改動前 offices.js viewOffice 的 inline 還原逐字相同（ec_curShop || curShop、非總表才 setShop）
+  try{ const _sv=localStorage.getItem('ec_curShop')||(typeof curShop!=='undefined'&&curShop!=='總表'?curShop:null);
+    if(_sv&&_sv!=='總表'&&typeof setShop==='function'){ const _rb=document.querySelector("button[onclick*=\"setShop('"+_sv+"'\"]"); setShop(_sv,_rb||null); } }catch{}
+}
+function restoreProfitView(){
+  let v=null; try{ const raw=localStorage.getItem('ec_profitView'); if(raw) v=JSON.parse(raw); }catch{}
+  const platform=v&&v.platform, shop=v&&v.shop;
+  if(platform==='momo' && shop){
+    const btn=document.querySelector("button[onclick*=\"setMomoShop('"+shop+"'\"]");
+    if(typeof setMomoShop==='function') setMomoShop(shop, btn||null);
+    return;
+  }
+  if(platform==='coupang' && shop){
+    const btn=document.querySelector("button[onclick*=\"setCoupangShop('"+shop+"'\"]");
+    if(typeof setCoupangShop==='function') setCoupangShop(shop, btn||null);
+    return;
+  }
+  _restoreShopeeInline();   // shopee 或未設定 → 蝦皮還原（逐字不變）
 }
 
 const MOMO_SHOPS=['總表','甲配','乙配','MO+麻吉','MO+森之旅'];
@@ -9478,6 +9505,7 @@ function syncCoupangToCloud(shop){
 
 function setMomoShop(shop,btn){
   curMomoShop=shop;
+  _saveProfitView('momo',shop);   // 記錄當前檢視＝MOMO+此賣場（App.render 重建後 restoreProfitView 才還原得回來，不再彈回蝦皮）
   document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
@@ -9498,6 +9526,7 @@ function setMomoShop(shop,btn){
 }
 
 function setCoupangShop(shop,btn){
+  _saveProfitView('coupang',shop);   // 記錄當前檢視＝酷澎+此賣場（同上，供重建後還原）
   document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
@@ -10241,7 +10270,7 @@ document.addEventListener('click', function(e) {
           });
           if(typeof initProfitPeriodControls==='function') initProfitPeriodControls();
           SHOPS.forEach(function(s) { if (typeof initShopUI === 'function') initShopUI(s.id); });
-          try{var _sv=localStorage.getItem('ec_curShop');if(_sv&&_sv!=='總表'&&typeof setShop==='function'){var _sb=document.querySelector("button[onclick*=\"setShop('"+_sv+"'\"]");setShop(_sv,_sb||null);}}catch{}
+          try{ if(typeof restoreProfitView==='function') restoreProfitView(); }catch{}   // 平台感知還原（MOMO/酷澎/蝦皮）；取代原本只認 ec_curShop 的蝦皮還原
         } catch(e) { console.log(e); }
       }
     }, 150);
@@ -10279,7 +10308,7 @@ Object.assign(window, {
   deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
+  closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
   coupangSummaryHTML,setCoupangSummaryView,syncCoupangSummaryFromKpi,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
