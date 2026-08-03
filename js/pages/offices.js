@@ -1021,7 +1021,22 @@ Object.assign(App, {
     const activeQ = Store.get('ec.d2.kpi.quarter', 'Q3');
     // 共用子分頁季別（議價表/叫貨/加分項/扣分項共用）
     const activeStabQ = Store.get('ec.d2.kpi.stabQ', activeQ);
-    const storeKey = activeStabQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeStabQ.toLowerCase()}`;
+    // 議價表月份分頁：每季各月有獨立資料
+    const qFirstM = {Q1:'01',Q2:'04',Q3:'07',Q4:'10'};
+    const qAllMonths = {Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
+    const getBargainKey = (q, m) => {
+      const fm = qFirstM[q];
+      if (m === fm) return q === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${q.toLowerCase()}`;
+      return `ec.d2.bargain.${m}`;
+    };
+    const stabQMonths = qAllMonths[activeStabQ] || ['07','08','09'];
+    const nowMonthStr = String(new Date().getMonth() + 1).padStart(2, '0');
+    const defaultBgMonth = stabQMonths.includes(nowMonthStr) ? nowMonthStr : stabQMonths[0];
+    const activeBgMonth = (() => {
+      const m = Store.get('ec.d2.kpi.bargainMonth', defaultBgMonth);
+      return stabQMonths.includes(m) ? m : stabQMonths[0];
+    })();
+    const storeKey = getBargainKey(activeStabQ, activeBgMonth);
     const list = Store.get(storeKey, []);
 
     const quarterTabs = ['Q1','Q2','Q3','Q4'].map(q => {
@@ -1035,6 +1050,12 @@ Object.assign(App, {
       ${['Q1','Q2','Q3','Q4'].map(q => {
         const act = q === activeStabQ;
         return `<button class="d2-stabq-tab" data-q="${q}" style="padding:5px 14px;border-radius:20px;border:1px solid ${act?'#1a7a6e':'#e5e7eb'};background:${act?'#1a7a6e':'#fff'};color:${act?'#fff':'#374151'};font-size:12px;font-weight:${act?'700':'400'};cursor:pointer">${q} <span style="font-size:11px;opacity:.85">${sqLabels[q]}</span></button>`;
+      }).join('')}
+    </div>`;
+    const monthTabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      ${stabQMonths.map(m => {
+        const act = m === activeBgMonth;
+        return `<button class="d2-month-tab" data-m="${m}" style="padding:5px 14px;border-radius:20px;border:1px solid ${act?'#059669':'#e5e7eb'};background:${act?'#059669':'#fff'};color:${act?'#fff':'#374151'};font-size:12px;font-weight:${act?'700':'400'};cursor:pointer">${parseInt(m)}月</button>`;
       }).join('')}
     </div>`;
     const priceCell = v => Number(v) ? 'NT$' + Number(v).toLocaleString() : '<span style="color:var(--text-muted)">—</span>';
@@ -1092,8 +1113,7 @@ Object.assign(App, {
     const year = new Date().getFullYear();
     const qMonthMap = {Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']};
     const activeMonths = qMonthMap[activeQ] || ['07','08','09'];
-    const kpiStoreKey = activeQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeQ.toLowerCase()}`;
-    const kpiList = Store.get(kpiStoreKey, []);
+    const kpiList = (qAllMonths[activeQ] || ['07','08','09']).flatMap(m => Store.get(getBargainKey(activeQ, m), []));
     const bonusKey = `ec.d2.bonus.${activeQ.toLowerCase()}`;
     const bonusAll = Store.get(bonusKey, []);
     const monthScores = activeMonths.map(m => {
@@ -1109,13 +1129,10 @@ Object.assign(App, {
       const bonusCount = bonusAll.filter(r => (r.date || '').startsWith(ym)).length;
       return { sc: ml.length >= 20 ? 20 : 0, sa: avg >= 10 ? 20 : 0, bonus: bonusCount * 10 };
     });
-    // 當月議價徽章用（議價表 card 內顯示）
-    const nowYM = new Date().toISOString().slice(0, 7);
-    const monthList = list.filter(r => (r.date || '').startsWith(nowYM));
-    const monthCount = monthList.length;
+    // 議價表月份徽章（以選取月份的資料計分）
     const top10pcts = [...withPct].filter(x => x.pctNum > 0).sort((a, b) => b.pctNum - a.pctNum).slice(0, 10).map(x => x.pctNum);
     const avgTop10 = top10pcts.length ? (top10pcts.reduce((s, v) => s + v, 0) / top10pcts.length) : 0;
-    const scoreCount = monthCount >= 20 ? 20 : 0;
+    const scoreCount = list.length >= 20 ? 20 : 0;
     const scoreAvg = avgTop10 >= 10 ? 20 : 0;
 
     const kpiCard = (icon, label, value, subLabel, score, fullScore) => {
@@ -1197,6 +1214,7 @@ Object.assign(App, {
       </div>`
     : activeStab === '議價表' ? `
       ${stabQTabsHtml}
+      ${monthTabsHtml}
       <div class="table-card" data-store-key="${storeKey}">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div>
@@ -1204,7 +1222,7 @@ Object.assign(App, {
             <p>記錄每次採購議價過程與最終議價比（共 ${list.length} 筆）</p>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            ${badge('當月議價數', monthCount + ' 筆', scoreCount > 0)}
+            ${badge(parseInt(activeBgMonth)+'月議價數', list.length + ' 筆', scoreCount > 0)}
             ${badge('前10名平均議價比', avgTop10 ? avgTop10.toFixed(1) + '%' : '—', scoreAvg > 0)}
             <div style="display:flex;flex-direction:column;align-items:center;background:#fff;border:2px solid ${scoreColor};border-radius:8px;padding:6px 14px;min-width:80px">
               <span style="font-size:18px;font-weight:800;color:${scoreColor}">${totalScore}</span>
@@ -1450,10 +1468,23 @@ Object.assign(App, {
       }));
     }
 
+    // 月份分頁切換（議價表）
+    document.querySelectorAll('.d2-month-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Store.set('ec.d2.kpi.bargainMonth', btn.dataset.m);
+        this.render();
+      });
+    });
+
     const form = document.getElementById('bg-form');
     if (!form) return;
     const activeBQ = Store.get('ec.d2.kpi.stabQ', Store.get('ec.d2.kpi.quarter', 'Q3'));
-    const storeKey = activeBQ === 'Q3' ? 'ec.d2.bargain' : `ec.d2.bargain.${activeBQ.toLowerCase()}`;
+    const _bqFirstM = {Q1:'01',Q2:'04',Q3:'07',Q4:'10'};
+    const _bqMonths = {Q1:['01','02','03'],Q2:['04','05','06'],Q3:['07','08','09'],Q4:['10','11','12']}[activeBQ] || ['07','08','09'];
+    const _nowM = String(new Date().getMonth()+1).padStart(2,'0');
+    const _defM = _bqMonths.includes(_nowM) ? _nowM : _bqMonths[0];
+    const _activeM = (() => { const m = Store.get('ec.d2.kpi.bargainMonth', _defM); return _bqMonths.includes(m) ? m : _bqMonths[0]; })();
+    const storeKey = (() => { const fm = _bqFirstM[activeBQ]; return (_activeM===fm) ? (activeBQ==='Q3'?'ec.d2.bargain':`ec.d2.bargain.${activeBQ.toLowerCase()}`) : `ec.d2.bargain.${_activeM}`; })();
     const saveBtn = document.getElementById('bg-save');
     let editIndex = -1;
     const fields = ['bg-date','bg-item','bg-orig','bg-b1','bg-b2','bg-b3'];
