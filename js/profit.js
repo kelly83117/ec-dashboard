@@ -801,6 +801,14 @@ function _applyLatestPeriod(shop){
   return true;
 }
 
+// 雲端快照觸發的重繪期間為 true。用途：讓 renderTable 保留捲動位置、
+//   讓 loadIntoUI 不要清掉使用者的篩選／排序。
+//   ⚠ 只在 profitDataReady listener 內同步存活（try/finally 保證歸位），
+//   使用者自己切月份／切通路的行為完全不受影響。
+//   ⚠ 宣告刻意放在 Init 之前（不是放在 listener 旁）：下方 SHOPS.forEach(onMonthChange) 在模組
+//     頂層就會走到 loadIntoUI/renderTable 讀這個旗標，宣告若在後面會落入 let 的 TDZ、整檔崩潰。
+let _cloudRefreshing = false;
+
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
@@ -874,9 +882,10 @@ function deleteUpload(shop,type){
 // ── 雲端資料到達時自動重載 ──
 window.addEventListener('profitDataReady', (e)=>{
   const changedShops = e.detail?.changedShops;
+  _cloudRefreshing = true;   // ⚠ 一定要在最前面設，且與下方 finally 成對，不可只設不清
   // 剛儲存過（備註/編輯）→ Firestore echo 回來，不重新 render 避免閃爍
   const justSaved = window._shopJustSaved && (Date.now()-window._shopJustSaved < 5000);
-  if(justSaved) return;
+  if(justSaved){ _cloudRefreshing = false; return; }
   // null/undefined = 初次載入，更新全部；空陣列 = 只有非賣場資料（如_summary_v1）變動，跳過
   const shopsToUpdate = changedShops==null ? SHOPS : SHOPS.filter(s=>changedShops.includes(s.id));
   try{
@@ -905,6 +914,7 @@ window.addEventListener('profitDataReady', (e)=>{
       if(typeof syncHeaderKpis==='function')syncHeaderKpis(curShop);
     }
   }catch(e){ console.warn('[淨利表] 重載失敗', e); }
+  finally{ _cloudRefreshing = false; }
 });
 
 // ── v3 一次性遷移：把淨利表資料從 app/main 搬到 app/profit、本地推上去、清掉 app/main 的舊欄位 ──
@@ -1192,7 +1202,9 @@ function loadIntoUI(shop,built,period,days){
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
-  state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];   // 標籤篩選跟 filters/sorts 同批重置：切月份/切賽場不殘留（搜尋另行保留，見下一行）
+  // 雲端刷新（別人按同步）不重置：使用者設好的篩選/排序不該被別人的動作清掉。
+  //   只有使用者自己切月份/切通路時才重置（那時 _cloudRefreshing 為 false）。
+  if(!_cloudRefreshing){ state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[]; }   // 標籤篩選跟 filters/sorts 同批重置：切月份/切通路不殘留（搜尋另行保留，見下一行）
   // search 刻意不重置：切月份保留關鍵字（唯一清掉它的是頁面初次載入時 state 的整包初始化）
   const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
   document.getElementById('period-tag-'+shop).textContent=period;
@@ -3727,12 +3739,13 @@ function renderTable(shop,list,opts){
   const _tblHost=document.getElementById('tbl-'+shop);
   // keepScroll：覆蓋 innerHTML 會重建 .tscroll，捲動位置歸零。先存舊值、重繪後還原（含 scrollLeft，商品調整欄在最右）。
   let _prevScTop=null,_prevScLeft=null;
-  if(opts&&opts.keepScroll){
+  const _keepSc = (opts&&opts.keepScroll) || _cloudRefreshing;   // 雲端刷新視同 keepScroll
+  if(_keepSc){
     const _oldSc=_tblHost&&_tblHost.querySelector('.tscroll');
     if(_oldSc){_prevScTop=_oldSc.scrollTop;_prevScLeft=_oldSc.scrollLeft;}
   }
   _tblHost.innerHTML=html;
-  if(opts&&opts.keepScroll&&_prevScTop!==null){
+  if(_keepSc&&_prevScTop!==null){
     const _newSc=_tblHost&&_tblHost.querySelector('.tscroll');
     if(_newSc){_newSc.scrollTop=_prevScTop;_newSc.scrollLeft=_prevScLeft;}
   }
