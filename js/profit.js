@@ -1592,7 +1592,9 @@ function markCard(shop,type,icon,title,cls){
   if(del)del.style.display=cls==='ok'?'':'none';
 }
 function setSpin(shop,show){const el=document.getElementById('spin-'+shop);if(el)el.classList.toggle('show',show);}
-function checkReady(shop){const s=state[shop];const g=document.getElementById('gen-'+shop);if(g)g.disabled=!(s.rawMobic&&s.rawAds);}
+// ⚠ 這顆 gen-{shop} 是舊版按鈕，被 shopHTML 的 <div style="display:none"> 藏住、使用者點不到。
+//   畫面上實際那顆是 upm-gen-btn（openUploadModal / onGlobalFile 各自控制）。這裡放寬只是保持條件一致。
+function checkReady(shop){const s=state[shop];const g=document.getElementById('gen-'+shop);if(g)g.disabled=!s.rawMobic;}
 // ── 通路費率對照表（費率屬於通路，不是全站共用一個值）──
 // 照 ANA_THRESH 的範式：_cloudRead/_cloudWrite + Object.assign 補預設
 const SHOP_RATE_DEF={'好麻吉':20.5,'玩樂':20.5,'森之旅':20.5,'維克':17.5};
@@ -1716,6 +1718,13 @@ function findUnmatchedAds(shop){
 }
 
 function generate(shop){
+  // 沒有任何廣告資料時提醒（維克通路本來就沒廣告；其他通路多半是忘了傳廣告檔）。
+  //   三種廣告來源都要檢查，只傳選品廣告或廣告群組的人不該被誤攔。
+  const _s=state[shop]||{};
+  const _noAds=!(_s.rawAds&&_s.rawAds.length)
+            && !(_s.rawSelAds&&_s.rawSelAds.length)
+            && !(_s.rawGroupAdsList&&_s.rawGroupAdsList.length);
+  if(_noAds&&!confirm(`「${shop}」沒有上傳任何廣告資料。\n\n產生的報表廣告費、ROI、點擊數會全部是 0，\n跟廣告有關的標籤（賠錢中、低效廣告、ROI 加減碼）也不會出現。\n\n確定要繼續嗎？`))return;
   setSpin(shop,true);
   const unmatched=findUnmatchedAds(shop);
   if(unmatched.length){
@@ -2197,7 +2206,7 @@ function openUploadModal(){
   document.getElementById('upm-selads-status').style.color=seladsOk?'#10b981':'#9ca3af';
   document.getElementById('upm-selads-del').style.opacity=seladsOk?'1':'0.35';
   document.getElementById('upm-selads-del').style.pointerEvents=seladsOk?'':'none';
-  document.getElementById('upm-gen-btn').disabled=!(mobicOk&&adsOk);
+  document.getElementById('upm-gen-btn').disabled=!mobicOk;   // 只要有莫筆克就能按；沒廣告時由 generate() 的 confirm 提醒
   // 若三大檔中有任何一個是 wasLoaded 狀態（有 meta 但無 raw），提示使用者需要重新上傳
   const anyWasLoaded=(!mapOk&&!!getMeta('ec|filemeta|globalMap'))||(!mobicOk&&!!getMeta(fmKey(shop,'mobic')))||(!adsOk&&!!getMeta(fmKey(shop,'ads')));
   const hintEl=document.getElementById('upm-gen-hint');
@@ -2206,7 +2215,7 @@ function openUploadModal(){
       hintEl.innerHTML='⚠️ <b style="color:#b45309">頁面重整後解析的資料會清空</b>，請點 🔄 卡片重新上傳原檔案';
       hintEl.style.color='#b45309';
     } else {
-      hintEl.textContent='上傳莫筆克＋廣告報表後可產生';
+      hintEl.textContent='上傳莫筆克後即可產生；沒有廣告報表時廣告費會是 0';
       hintEl.style.color='#9ca3af';
     }
   }
@@ -2366,7 +2375,7 @@ function onGlobalFile(event,type){
         try{document.getElementById('upm-groupads-input').value='';}catch{}
       }
       const s2=state[shop];
-      document.getElementById('upm-gen-btn').disabled=!(s2.rawMobic&&s2.rawAds);
+      document.getElementById('upm-gen-btn').disabled=!s2.rawMobic;   // 只要有莫筆克就能按；沒廣告時由 generate() 的 confirm 提醒
     },800);
   }
 }
