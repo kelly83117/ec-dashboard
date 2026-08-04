@@ -116,6 +116,10 @@ try {
         if (k.startsWith('ec|') || k.startsWith('ec_momo_products|')) {
           if (Store._profitMem[k] === undefined) Store._profitMem[k] = data[k];
         } else {
+          // 本機有未同步變更 / 剛存過 → 不讓雲端快照覆蓋，保住使用者正在編輯的內容
+          //   （守衛定義在 js/profit.js，那裡才讀得到私有的 _pendingSyncKeys）
+          //   對照組：本檔 momo_products / momo_reconcile / momo_s1103 三處訂閱早有同型別守衛
+          if (window.__profitShouldSkipCloudOverwrite && window.__profitShouldSkipCloudOverwrite(k)) return;
           Store._profitMem[k] = data[k];
         }
       });
