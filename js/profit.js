@@ -378,11 +378,22 @@ function _inGrowthPeriod(a,month,half){
   if(!p)return false;
   // 存的時候在看「整月」→ 該月任何期間都顯示（不讓它消失）
   if(p.slice(8)==='full')return p.slice(0,7)===month;
-  if(half==='full')return p.slice(0,7)===month;
   return p===`${month}|${half}`;
 }
 window._growthPeriodOf=_growthPeriodOf;
 window._inGrowthPeriod=_inGrowthPeriod;
+// 「其他期間的調整」每筆前面的標籤：優先顯示期間（例：2026/07 上半月），
+//   期間算不出來就退回顯示日期，日期也沒有才顯示「未記日期」。
+//   絕不顯示空白——空白會讓人以為壞掉。
+function _growthPeriodLabel(o){
+  const p=o&&o.period;
+  if(typeof p==='string'&&p.indexOf('|')>0){
+    const m=p.slice(0,7), h=p.slice(8);
+    return m+' '+_halfLabel(h);
+  }
+  if(/^\d{4}\/\d{2}\/\d{2}$/.test((o&&o.date)||'')) return o.date;
+  return '未記日期';
+}
 
 function _notifyLsSaveFail(shop, month, half, err){
   const who = shop + ' ' + month + '｜' + _halfLabel(half);
@@ -3491,12 +3502,12 @@ function renderPnmHistory(){
     let gadj=[];
     if(gnd){if(typeof gnd==='string')gadj=[{date:'',text:gnd}];else gadj=gnd.adjustments||[];}
     const others=[];
-    gadj.forEach((a,i)=>{ if(!(gs&&_inGrowthPeriod(a,gs.curMonth,gs.curHalf))) others.push({date:a.date,text:a.text,i}); });   // 保留原始索引 i
+    gadj.forEach((a,i)=>{ if(!(gs&&_inGrowthPeriod(a,gs.curMonth,gs.curHalf))) others.push({date:a.date,text:a.text,i,period:_growthPeriodOf(a)}); });   // 保留原始索引 i；period 供顯示期間標籤用
     if(!others.length){ wrap.style.display='none'; box.innerHTML=''; return; }
     others.sort((x,y)=>String(y.date||'').localeCompare(String(x.date||'')));   // 日期新到舊
     wrap.style.display='';
     box.innerHTML=others.map(o=>`<div class="pnm-entry">
-      <div class="pnm-entry-date">${/^\d{4}\/\d{2}\/\d{2}$/.test(o.date||'')?o.date:'未記日期'}</div>
+      <div class="pnm-entry-date">${_growthPeriodLabel(o)}</div>
       <div class="pnm-entry-text">${String(o.text||'').replace(/</g,'&lt;')}</div>
       <button class="pnm-entry-del" onclick="deleteProfitNote(${o.i})">×</button>
     </div>`).join('');
