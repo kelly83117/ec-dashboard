@@ -540,9 +540,10 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .ptp-hint{margin-top:14px;font-size:12px;color:var(--text-muted);line-height:1.5;}
 
 /* 管理標籤區（第三區，可收合）。列樣式與上方 .ptp-row 同源，只是欄位不同。 */
-.ptp-def-hdr{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;}
-.ptp-def-hdr:hover{color:var(--primary);}
-.ptp-caret{font-size:10px;line-height:1;}
+/* 可收合區的標題列（⚙ 管理標籤 / ❓ 這個怎麼用 共用） */
+.ptp-sec-toggle{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;}
+.ptp-sec-toggle:hover{color:var(--primary);}
+.ptp-caret{font-size:12px;line-height:1;}
 .ptp-def-list{margin-bottom:10px;}
 .ptp-def-row{display:flex;align-items:center;gap:10px;padding:7px 2px;font-size:13px;color:#374151;border-bottom:1px solid var(--border);}
 .ptp-def-row:last-child{border-bottom:none;}
@@ -556,4 +557,11 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .ptp-add-btn{flex:0 0 auto;padding:6px 14px;background:var(--primary);color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Noto Sans TC',sans-serif;}
 .ptp-add-btn:hover{filter:brightness(.92);}
 .ptp-def-note{margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.5;}
+
+/* 「❓ 這個怎麼用」說明區（第四區，可收合） */
+.ptp-help{padding:2px 0 4px;}
+.ptp-help-q{font-size:13px;font-weight:700;color:#374151;margin-top:12px;}
+.ptp-help-q:first-child{margin-top:2px;}
+.ptp-help-a{font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:3px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.ptp-help-a:last-child{border-bottom:none;padding-bottom:0;}
 
