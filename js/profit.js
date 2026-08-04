@@ -3110,7 +3110,7 @@ function patchRow(shop,code,ov){
   }
   // pureProfit
   const pureEl=document.getElementById(`td-${shop}-${code}-pureProfit`);
-  if(pureEl){pureEl.textContent='$'+fmtN(r.pureProfit);pureEl.className='td-num '+(r.pureProfit>=0?'td-pos':'td-neg');}
+  if(pureEl){pureEl.textContent=_fSigned(r.pureProfit);pureEl.className='td-num '+(r.pureProfit>=0?'td-pos':'td-neg');}
   // pureRate
   const rateEl=document.getElementById(`td-${shop}-${code}-pureRate`);
   if(rateEl)rateEl.innerHTML=pill(!(r.rev>0)?null:r.pureRate*100);
@@ -3661,7 +3661,7 @@ function renderTable(shop,list,opts){
       const MOBIC_BLANK=new Set(['growthRate','growthAnalysis']);
       const mobicCell={
         adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span></td>`,
-        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
+        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
         note:noteCellHtml,
         growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
       };
@@ -3680,8 +3680,8 @@ function renderTable(shop,list,opts){
       const rowCell={
         adsFee:editTd('adsFee','$'+fmtN(r.adsFee),'td-amber'),
         rev:`<td class="td-num">$${fmtN(r.rev)}<div class="sub-rev">${r.prevRev!==null?'上期 $'+fmtN(r.prevRev):'—'}</div></td>`,
-        gross:`<td class="td-num">$${fmtN(r.gross)}</td>`,
-        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
+        gross:`<td class="td-num">${_fSigned(r.gross)}</td>`,
+        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
         pureRate:`<td id="td-${shop}-${r.code}-pureRate">${pill(!(r.rev>0)?null:r.pureRate*100)}</td>`,
         adsPct:`<td id="td-${shop}-${r.code}-adsPct" class="td-num">${(r.adsPct*100).toFixed(2)}%</td>`,
         stock:`<td class="td-num">${r.stock.toLocaleString()}</td>`,
@@ -3714,8 +3714,8 @@ function renderTable(shop,list,opts){
   const totalCell={
     adsFee:`<td class="td-num td-amber">$${fmtN(fAds)}</td>`,
     rev:`<td class="td-num">$${fmtN(fRev)}<div class="sub-rev">$${fmtN(fPrevRev)}</div></td>`,
-    gross:`<td class="td-num">$${fmtN(fGross)}</td>`,
-    pureProfit:`<td class="td-num ${fPure>=0?'td-pos':'td-neg'}">$${fmtN(fPure)}</td>`,
+    gross:`<td class="td-num">${_fSigned(fGross)}</td>`,
+    pureProfit:`<td class="td-num ${fPure>=0?'td-pos':'td-neg'}">${_fSigned(fPure)}</td>`,
     pureRate:`<td>${fRev>0?pill(fPure/fRev*100):'—'}</td>`,
     growthRate:`<td class="td-num" style="text-align:center">${fGrowth===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${fGrowth>=0?'#10b981':'#ef4444'};font-weight:700">${fGrowth>=0?'↑':'↓'} ${Math.abs(fGrowth*100).toFixed(0)}%</span>`}</td>`,
   };
@@ -4150,8 +4150,11 @@ function openFocusColPicker(keepOpen){
     document.addEventListener('click',close);
   },0);
 }
-// renderFocus 專用：fmtN 會取絕對值（Math.abs），負數會顯示成正數。
-// 主表靠 CSS class 染紅來表達負值，但這裡需要數字本身就看得出正負。
+// 帶正負號的金額格式（-$133）。fmtN 會取絕對值（Math.abs），負數會顯示成正數。
+// 原本主表只靠 CSS class 染紅來表達負值，使用者回報「淨利 $669 / 淨利率 -132.5%」
+// 自相矛盾看不懂，2026-08-04 起主表的「淨利」「毛利」也改用這個函式。
+// ⚠ 只有 pureProfit / gross 會出現負值（實測 55 份報表 30769 列），
+//   rev / adsFee / dayBudget / prevRev / directROI / roi 皆 0 筆負數，維持用 fmtN。
 function _fSigned(v){
   const n=Number(v)||0;
   return (n<0?'-$':'$')+fmtN(n);
