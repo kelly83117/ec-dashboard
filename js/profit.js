@@ -2082,12 +2082,15 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, 
   if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
   if(ok('高利潤商品')&&D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
   if(ok('賠錢中')&&D>0 && P<0) return{label:'賠錢中',cls:'tag-lose'};
-  // 低淨利（2026-08-04 修正）：回歸老闆 Excel 原意 =IF(K<=0,"-",L-K)。
-  //   K（目標ROI）算不出來 = 分母(淨利率+廣告佔比-20%) <= 0 = 就算廣告全砍也達不到 20% 淨利率。
-  //   ⚠ 舊版是看 N（實際-目標）是不是 null，但 N 為 null 有兩個成因：K 算不出來、或沒開廣告
+  // 低淨利（2026-08-04 修正）：回歸老闆原始定義 =IF(K<=0,"-",L-K)，K=目標ROI、L=直接投入產出。
+  //   K = 1/(淨利率% + 廣告佔比 - 20%)。K<=0 ⇔ 分母<=0 ⇔ 就算廣告全砍也達不到 20% 淨利率。
+  //   ⚠ 本檔實作是「分母>0 才算，否則存 null」（見 buildShop / recalcRow 的 targetROI），
+  //     所以 Excel 的「K 是負數」在這裡表現為 K===null、畫面顯示「—」。
+  //     因此判斷式要同時涵蓋 null 與負數，兩者是同一件事的兩種表示法。
+  //   ⚠ 舊版看的是 N（實際-目標）是不是 null，但 N 為 null 有兩個成因：K<=0、或沒開廣告
   //     （directROI=0）。後者跟淨利率無關，害沒廣告的健康商品（淨利率 25%、K=19）被誤標。
-  //   ⚠ 舊版另一條「D>0 且 K<0」漏掉 K=null 的情況，害有廣告又真的達不到 20% 的商品完全沒標籤。
-  //   K<0 這個條件必須保留：舊報表存過負值（實測有 -365.85），不是死碼。
+  //   ⚠ 舊版另一條「D>0 且 K<0」漏掉 K===null 的情況，害有廣告又真的達不到 20% 的商品完全沒標籤。
+  //   K<0 必須保留：舊報表存過負值（實測有 -365.85），不是死碼。
   if(ok('低淨利')&&(K===null||K===undefined||!isFinite(K)||K<0)) return{label:'低淨利',cls:'tag-low'};
   if(ok('低效廣告')&&D>0 && H>=0 && H<t.badAdsMaxH) return{label:'低效廣告',cls:'tag-bad'};
   for(const ct of getCustomAnaRules()){
@@ -2416,7 +2419,7 @@ function renderAnaModalBody(){
     <div class="ana-sec-hdr">分析標籤</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 > ${inp('highMinH',t.highMinH,'0.1')} %</span>${trash('高利潤商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">廣告費 > 0 且 淨利 &lt; 0</span>${trash('賠錢中','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">目標ROI 顯示「—」或為負<br><span style="color:#9ca3af;font-size:11px">＝ 淨利率＋廣告佔比 &lt; 20%，就算廣告全砍也達不到 20% 淨利率（不分有無廣告）</span></span>${trash('低淨利','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">就算廣告全砍掉，淨利率也到不了 20%<br><span style="color:#9ca3af;font-size:11px">判定：目標ROI ≤ 0，即 1/(淨利率% ＋ 廣告佔比 − 20%) 的分母 ≤ 0（該欄顯示「—」）</span></span>${trash('低淨利','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">危險商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 0%~${inp('dangerMaxH',t.dangerMaxH,'0.1')} %</span>${trash('危險商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-bad">低效廣告</span><span class="ana-rule-desc">廣告費 > 0 且 純利率 &lt; ${inp('badAdsMaxH',t.badAdsMaxH,'0.1')} %</span>${trash('低效廣告','disableAnaTag')}</div>
     <div class="ana-sec-hdr">自訂標籤</div>
