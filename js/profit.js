@@ -436,6 +436,14 @@ function _realPendingCount(){
   return n;
 }
 window.__profitPendingCount = _realPendingCount;
+// bounce-back 守衛（給 firebase.js 的 app/profit 訂閱呼叫；邏輯放這裡才讀得到私有 _pendingSyncKeys）：
+//   本機有未同步變更（pending）或剛存過 → 雲端快照不覆蓋 _profitMem，保住本機版本。
+//   對照組：MOMO 已有同型別的 __momoShouldSkipCloudOverwrite（本檔搜得到），這是蝦皮淨利表缺的那一份。
+window.__profitShouldSkipCloudOverwrite=function(k){
+  try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
+  if(window._shopJustSaved && (Date.now()-window._shopJustSaved < 5000)) return true;
+  return false;
+};
 
 function _showSyncBtn(shop){
   const btn=document.getElementById('global-sync-btn');
@@ -543,20 +551,22 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     const s=state[shop];
     const isPlainObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
     const tasks=[];                 // { key, run:()=>Promise }：延遲執行，逐一 await（佇列深度恆為 1）
+    const taskKeys=new Set();       // 已排入推送的 key，避免同一個 key 排兩次（見下方 pending 迴圈開頭）
     const skippedByDesign=[];       // filemeta：故意不上雲，安靜
     const skippedProblem=[];        // 讀不到 / 損毀 / 非物件：一定要浮上來
     // 同步當前通路的備註 / 編輯（按期間獨立存）
     const _nk=shop+'|'+(s?.curMonth||'')+'|'+(s?.curHalf||'');
     const notes=getNotes(_nk);
-    if(Object.keys(notes).length>0) tasks.push({key:'ec_notes|'+_nk,run:()=>window.__cloudProfit.setField('ec_notes|'+_nk,notes)});
+    if(Object.keys(notes).length>0){ taskKeys.add('ec_notes|'+_nk); tasks.push({key:'ec_notes|'+_nk,run:()=>window.__cloudProfit.setField('ec_notes|'+_nk,notes)}); }
     const edits=getEdits(shop);
-    if(Object.keys(edits).length>0) tasks.push({key:'ec_edits|'+shop,run:()=>window.__cloudProfit.setField('ec_edits|'+shop,edits)});
+    if(Object.keys(edits).length>0){ taskKeys.add('ec_edits|'+shop); tasks.push({key:'ec_edits|'+shop,run:()=>window.__cloudProfit.setField('ec_edits|'+shop,edits)}); }
     // 遍歷所有 pending keys 分類：
     //   ec|filemeta|... = filemeta，故意不上雲 → skippedByDesign（安靜）
     //   ec|... 其他      = 報表 key，payload 要是物件才推；讀不到/損毀 → skippedProblem（要講）
     //   __shop__|...     = 歷史 marker，忽略
     //   其他            = 設定/標籤等，用 setField 推
     _pendingSyncKeys.forEach(pk=>{
+      if(taskKeys.has(pk)) return;                          // 上面已經排進去了，不要推第二次
       if(pk.startsWith('__shop__|')) return;
       if(pk.startsWith('ec|filemeta|')){ skippedByDesign.push(pk); return; }
       if(pk.startsWith('ec|')){
@@ -2961,6 +2971,8 @@ function saveNotes(shop,notes){
   const k='ec_notes|'+shop;
   try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=notes;}catch{}
+  // 掛進待同步集合，讓「☁ 同步雲端」推得到（商品調整 _growth 原本完全沒有上雲的路）
+  _pendingSyncKeys.add(k);
   _showSyncBtn(shop);
   // 立即同步工作日誌摘要（不必等按 ☁ 同步雲端；silent 不顯示 toast 避免太吵）
   try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}
