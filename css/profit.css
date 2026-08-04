@@ -519,3 +519,23 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .mm-th-wrap .mm-info{margin-left:0;flex:0 0 auto;}
 .mm-th-arrow{flex:0 0 auto;width:10px;text-align:center;font-size:10px;line-height:1;color:#5b5fcf;}
 
+/* 測試標籤編輯面板（外殼沿用 .ana-overlay / .ana-modal，這裡只補面板內部）
+   z-index 3000 與 .pnm-overlay 同層：兩者都是「從表格點格子開出來」的編輯視窗，
+   要蓋過 .tag-filter-bar(400) / .col-picker-menu(300) / .ana-overlay(2000)。 */
+.ptp-overlay{z-index:3000;}
+.ptp-modal{width:460px;}
+.ptp-list{margin-bottom:2px;}
+/* 列樣式參考 .cp-row（同樣是「一列一個可操作項目」） */
+.ptp-row{display:flex;align-items:center;gap:10px;padding:7px 2px;font-size:13px;color:#374151;border-bottom:1px solid var(--border);}
+.ptp-row:last-child{border-bottom:none;}
+.ptp-row .tag{flex:0 0 auto;min-width:82px;text-align:center;}
+.ptp-date{flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;font-family:'Noto Sans TC',monospace;background:#fff;}
+.ptp-date:focus{border-color:var(--primary);}
+.ptp-del{background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;padding:4px 6px;border-radius:4px;flex-shrink:0;}
+.ptp-del:hover{color:#ef4444;background:#fef2f2;}
+.ptp-picks{display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;}
+.ptp-pick{cursor:pointer;user-select:none;}
+.ptp-pick:hover{filter:brightness(.94);}
+.ptp-empty{color:var(--text-muted);font-size:13px;font-style:italic;padding:8px 2px;}
+.ptp-hint{margin-top:14px;font-size:12px;color:var(--text-muted);line-height:1.5;}
+
