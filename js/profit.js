@@ -815,6 +815,15 @@ let _cloudRefreshing = false;
 //     整個 profit.js 模組評估中斷、淨利表白畫面。理由同上面的 _cloudRefreshing，勿搬動。
 let _tagPanelCtx = null;
 let _tagDraft = null;
+// 管理標籤（ec_tag_defs）的草稿與展開狀態。_tagDefsSnapshot 是開啟面板時的 JSON 快照，
+//   儲存時拿來比對「有沒有真的動過」，沒動就不多打一次雲端。
+//   _tagDefsOpen 用模組變數記收合狀態（不用 DOM class）：面板整段 innerHTML 重繪會把 class 洗掉。
+//   ⚠ 同樣必須留在 Init 之前，理由同上，勿搬動。
+let _tagDefsDraft = null;
+let _tagDefsSnapshot = '';
+let _tagDefsOpen = false;
+let _tagDefsNewLabel = '';
+let _tagDefsNewCls = 'tag-add300';
 
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
@@ -3312,7 +3321,7 @@ function shopLabelProgress(shop){
   return{month,half,total:rows.length,doneTotal,ana,growth};
 }
 window.shopLabelProgress=shopLabelProgress;
-// 測試標籤那一格（唯讀版；點擊編輯在下一個 PR）
+// 測試標籤那一格。點一下開編輯面板（改標記日期 / 新增移除標籤 / 管理標籤清單）。
 //   只顯示「本期間結束日 >= 標記日」的標籤 —— 測試開始前的期間不該掛著未來才貼的標籤，
 //   否則「測試前 vs 測試後」的成效比較會分不出來。
 //   點擊開編輯面板（openProdTagPanel）。兩個 return 都必須帶 id + onclick：
@@ -3369,6 +3378,11 @@ function openProdTagPanel(shop,code){
   _tagPanelCtx={shop,code};
   // 深拷貝，且刻意不傳 opts：面板要顯示「全部」標籤，含因期間規則在表格上被藏起來的
   _tagDraft=getProdTagsFor(shop,code).map(o=>({tag:o.tag,date:o.date||''}));
+  // 管理標籤草稿：同樣深拷貝，並存一份 JSON 快照供儲存時比對「有沒有動過」
+  _tagDefsDraft=getTagDefs().map(d=>({label:d.label,cls:d.cls||'tag-add100'}));
+  _tagDefsSnapshot=JSON.stringify(_tagDefsDraft);
+  _tagDefsOpen=false;   // 每次重開都收合，避免上次展開的狀態殘留
+  _tagDefsNewLabel='';_tagDefsNewCls='tag-add300';
   const r=state[shop]?._built?.find(x=>x.code===code);
   const nm=r&&r.name?`${code}・${r.name}`:String(code);
   document.getElementById('ptp-title').textContent=nm;
@@ -3378,15 +3392,30 @@ function openProdTagPanel(shop,code){
 function closeProdTagPanel(){
   document.getElementById('ptp-overlay')?.classList.remove('open');
   _tagDraft=null;_tagPanelCtx=null;
+  _tagDefsDraft=null;_tagDefsSnapshot='';_tagDefsOpen=false;
 }
-// 重繪前把使用者已改的日期撈回草稿，否則整段 innerHTML 重繪會把輸入蓋掉（比照 syncTestDraftFromDOM）
+// 重繪前把使用者已改的內容撈回草稿，否則整段 innerHTML 重繪會把輸入蓋掉（比照 syncTestDraftFromDOM）。
+//   涵蓋三處：已標記列的日期、管理區每列的顏色下拉、新增區的名稱與顏色。
 function syncProdTagDraftFromDOM(){
-  if(!_tagDraft)return;
-  document.querySelectorAll('#ptp-body .ptp-row').forEach(row=>{
-    const i=parseInt(row.dataset.i);const o=_tagDraft[i];if(!o)return;
-    const inp=row.querySelector('.ptp-date');
-    if(inp)o.date=_ptpFromInput(inp.value);
-  });
+  if(_tagDraft){
+    document.querySelectorAll('#ptp-body .ptp-row').forEach(row=>{
+      const i=parseInt(row.dataset.i);const o=_tagDraft[i];if(!o)return;
+      const inp=row.querySelector('.ptp-date');
+      if(inp)o.date=_ptpFromInput(inp.value);
+    });
+  }
+  if(_tagDefsDraft){
+    document.querySelectorAll('#ptp-body .ptp-def-row').forEach(row=>{
+      const i=parseInt(row.dataset.i);const d=_tagDefsDraft[i];if(!d)return;
+      const sel=row.querySelector('.ptp-def-cls');
+      if(sel)d.cls=sel.value;
+    });
+  }
+  // 新增區的輸入暫存在模組變數，重繪後回填（不然打到一半按「＋ 新增條件以外的任何鈕」就消失）
+  const nEl=document.getElementById('ptp-new-label');
+  if(nEl)_tagDefsNewLabel=nEl.value;
+  const cEl=document.getElementById('ptp-new-cls');
+  if(cEl)_tagDefsNewCls=cEl.value;
 }
 function renderProdTagPanelBody(){
   const body=document.getElementById('ptp-body');if(!body||!_tagDraft)return;
@@ -3398,16 +3427,138 @@ function renderProdTagPanelBody(){
       <button class="ptp-del" onclick="removeProdTagFromDraft(${i})" title="移除這個標籤">🗑</button>
     </div>`).join(''):`<div class="ptp-empty">尚未標記任何標籤</div>`;
   const marked=new Set(_tagDraft.map(o=>o.tag));
-  const avail=getTagDefs().filter(d=>!marked.has(d.label));
+  // 讀草稿而非 getTagDefs()：在管理區新增的標籤要能立刻拿來標記，不必先存檔再重開面板。
+  //   _tagDefsDraft 理論上面板開著時不會是 null，保險起見 fallback 回已存檔的定義。
+  const defs=_tagDefsDraft||getTagDefs();
+  const avail=defs.filter(d=>!marked.has(d.label));
   // ⚠ encodeURIComponent 不編碼單引號（' 是它的保留不編碼字元），標籤名含 ' 會把 onclick 字串切斷
   //   → 補一道 %27 手動編碼；decodeURIComponent 解得回來，行為不變。
   const encLabel=(t)=>encodeURIComponent(t).replace(/'/g,'%27');
   const pick=avail.length?avail.map(d=>`<span class="tag ptp-pick ${d.cls||'tag-add100'}" onclick="addProdTagToDraft(decodeURIComponent('${encLabel(d.label)}'))">＋ ${esc(d.label)}</span>`).join(' '):`<div class="ptp-empty">所有標籤都已標記</div>`;
+  // 第三區「⚙ 管理標籤」：預設收合，展開狀態記在 _tagDefsOpen（模組變數，撐得過 innerHTML 重繪）
+  const clsOpts=(cur)=>ANA_CLS_OPTS.map(o=>`<option value="${o.v}"${o.v===cur?' selected':''}>${o.l}</option>`).join('');
+  let manage='';
+  if(_tagDefsOpen){
+    const defRows=defs.length?defs.map((d,i)=>`<div class="ptp-def-row" data-i="${i}">
+        <span class="tag ${d.cls||'tag-add100'}">${esc(d.label)}</span>
+        <select class="ptp-def-cls">${clsOpts(d.cls||'tag-add100')}</select>
+        <button class="ptp-del" onclick="removeTagDef(${i})" title="刪除這個標籤">🗑</button>
+      </div>`).join(''):`<div class="ptp-empty">尚無標籤</div>`;
+    manage=`<div class="ptp-def-list">${defRows}</div>
+      <div class="ptp-def-add">
+        <input type="text" id="ptp-new-label" placeholder="新標籤名稱" value="${String(_tagDefsNewLabel).replace(/"/g,'&quot;')}">
+        <select id="ptp-new-cls">${clsOpts(_tagDefsNewCls)}</select>
+        <button class="ptp-add-btn" onclick="addTagDef()">＋ 新增</button>
+      </div>
+      <div class="ptp-def-note">標籤清單四個通路共用；改完按下方「儲存」才生效。標籤名不能修改，取錯名請刪掉重建。</div>`;
+  }
   body.innerHTML=`<div class="ana-sec-hdr">已標記</div>
     <div class="ptp-list">${rows}</div>
     <div class="ana-sec-hdr">加上標籤</div>
     <div class="ptp-picks">${pick}</div>
+    <div class="ana-sec-hdr ptp-def-hdr" onclick="toggleTagDefsSection()">⚙ 管理標籤 <span class="ptp-caret">${_tagDefsOpen?'▾':'▸'}</span></div>
+    ${manage}
     <div class="ptp-hint">標記日之後的期間才會在報表上顯示；日期留空代表所有期間都顯示。</div>`;
+}
+function toggleTagDefsSection(){
+  syncProdTagDraftFromDOM();
+  _tagDefsOpen=!_tagDefsOpen;
+  renderProdTagPanelBody();
+}
+// 某個標籤在【四個通路】各被幾個商品用到，只回筆數 > 0 的。
+//   ⚠ 一定要掃 SHOPS 全部通路：標籤定義全站共用、標記每通路獨立，
+//     只數當前通路會讓別的通路產生指向不存在定義的孤兒標籤。
+//   ⚠ 用 getProdTags（整包原始資料）不用 getProdTagsFor：後者會做期間過濾，
+//     被藏起來的標記也是真的在用，漏數就會誤刪。
+function countTagUsage(label){
+  const out={};
+  SHOPS.forEach(s=>{
+    const all=getProdTags(s.id)||{};
+    let n=0;
+    Object.keys(all).forEach(code=>{
+      const arr=all[code];
+      if(!Array.isArray(arr))return;
+      if(arr.some(x=>((x&&typeof x==='object')?x.tag:x)===label))n++;
+    });
+    if(n>0)out[s.id]=n;
+  });
+  return out;
+}
+function addTagDef(){
+  if(!_tagDefsDraft)return;
+  syncProdTagDraftFromDOM();
+  const label=String(_tagDefsNewLabel||'').trim();
+  if(!label){alert('請輸入標籤名稱');return;}
+  if(_tagDefsDraft.some(d=>d.label===label)){alert('已有同名標籤');return;}
+  _tagDefsDraft.push({label,cls:_tagDefsNewCls||'tag-add300'});
+  _tagDefsNewLabel='';   // 清空輸入框（顏色保留，連續新增同色比較順）
+  renderProdTagPanelBody();
+}
+// 刪除標籤定義。兩層保護，(ii) 先檢查（使用者當場就能處理）：
+//   (i)  countTagUsage：四個通路【已存檔】的標記還有沒有人在用
+//   (ii) _tagDraft：這次面板開著、還沒存的草稿有沒有掛著它
+//   ⚠ (i) 的計數是對「已存檔資料」算的。若使用者在同一次操作裡先把這個商品的標記移掉、
+//     又要刪定義，計數仍會算到那筆（因為還沒存）。這是刻意保守 —— 寧可擋下來讓他先存檔，
+//     也不要留下指向不存在定義的孤兒標籤。
+function removeTagDef(i){
+  if(!_tagDefsDraft)return;
+  syncProdTagDraftFromDOM();
+  const d=_tagDefsDraft[i];if(!d)return;
+  if(_tagDraft&&_tagDraft.some(o=>o.tag===d.label)){
+    alert(`這個商品目前標著「${d.label}」，請先在上方「已標記」移除它。`);
+    return;
+  }
+  const used=countTagUsage(d.label);
+  const shops=Object.keys(used);
+  if(shops.length){
+    const txt=shops.map(s=>`${s} ${used[s]} 個商品`).join('、');
+    alert(`還有 ${txt}正在使用「${d.label}」，請先到那些商品取消標記。`);
+    return;
+  }
+  _tagDefsDraft.splice(i,1);
+  renderProdTagPanelBody();
+}
+// 寫入 ec_tag_defs。骨架完全比照本檔的 saveProdTags（fetch-merge-write + 即時推送、
+//   失敗完全不寫本機也不寫雲端、成功才寫本機三處），差別只有一處：
+//   ⚠ ec_tag_defs 是全站共用的【單一陣列】，沒有「只改某一格」的概念 → 讀完雲端是【整包取代】。
+//     這代表兩個人同時管理標籤會後蓋前。已知限制，不處理（標籤清單極少變動，衝突機率低）。
+//   ⚠ 另一個已知行為（commit 1 既有、這輪不動）：getTagDefs 的判斷是 Array.isArray(v)&&v.length，
+//     所以存進去一個空陣列時，讀回來會 fallback 回 TAG_DEFS_DEFAULT、預設標籤又冒出來。
+//     removeTagDef 的兩層保護讓「全刪光」很難發生，故不改 getTagDefs。
+async function saveTagDefs(list){
+  const k='ec_tag_defs';
+  const writeLocal=(v)=>{
+    try{localStorage.setItem(k,JSON.stringify(v));}catch{}
+    try{
+      if(typeof Store!=='undefined'){
+        if(Store._mem) Store._mem[k]=v;
+        if(Store._profitMem) Store._profitMem[k]=v;
+      }
+    }catch{}
+  };
+  if(!window.__cloudProfit||typeof window.__cloudProfit.getDoc!=='function'){
+    if(typeof showToast==='function')showToast('⚠ 雲端未連線，標籤清單未儲存，請稍後重試','error');
+    return false;
+  }
+  try{
+    await window.__cloudProfit.getDoc();   // 確認讀得到雲端；整包取代不需要用到回傳內容
+    window._shopJustSaved=Date.now();
+    writeLocal(list);
+  }catch(e){
+    console.warn('[saveTagDefs] 讀雲端失敗，本機與雲端都不寫（避免寫了卻無法同步、之後被快照無聲蓋掉）',e);
+    if(typeof showToast==='function')showToast('⚠ 雲端讀取失敗，標籤清單未儲存，請重試','error');
+    return false;
+  }
+  try{
+    const p=window.__cloudProfit.setField(k,list);
+    if(p&&typeof p.then==='function'){
+      p.catch(e=>{
+        console.error('[saveTagDefs] 雲端寫入失敗',e);
+        if(typeof showToast==='function')showToast('❌ 標籤清單雲端寫入失敗','error');
+      });
+    }
+  }catch(e){ console.error('[saveTagDefs] 雲端寫入異常',e); }
+  return true;
 }
 function addProdTagToDraft(label){
   if(!_tagDraft)return;
@@ -3422,10 +3573,19 @@ function removeProdTagFromDraft(i){
   _tagDraft.splice(i,1);
   renderProdTagPanelBody();
 }
+// 存兩個 key，順序固定：先標籤定義（ec_tag_defs）、後商品標記（ec_tags|{通路}）。
+//   ⚠ 定義沒存成功就【中止、不存標記】：標記存進去但定義沒存上去的話，那個標籤會指向不存在的定義，
+//     tagDefCls 找不到會回預設的 tag-add100（紫色），畫面上顏色莫名其妙變掉。
+//   ⚠ 只有草稿與開啟時的快照不同才呼叫 saveTagDefs，避免每次存標記都多打一次雲端。
 async function saveProdTagPanel(){
   if(!_tagPanelCtx||!_tagDraft)return;
   syncProdTagDraftFromDOM();
   const {shop,code}=_tagPanelCtx;
+  if(_tagDefsDraft&&JSON.stringify(_tagDefsDraft)!==_tagDefsSnapshot){
+    const defsOk=await saveTagDefs(_tagDefsDraft);
+    if(!defsOk)return;   // 面板留著、草稿不丟，讓使用者能重試
+    _tagDefsSnapshot=JSON.stringify(_tagDefsDraft);   // 存過了，同一次面板內不重複推
+  }
   const list=_tagDraft.map(o=>({tag:o.tag,date:o.date||''}));
   const ok=await saveProdTags(shop,code,list);
   if(!ok)return;                       // 寫入失敗 → 面板留著，草稿不丟，讓使用者能重試
@@ -10722,4 +10882,5 @@ Object.assign(window, {
   openEditScoreTargetsModal,saveScoreTargetsModal,
   openProdTagPanel,closeProdTagPanel,saveProdTagPanel,addProdTagToDraft,removeProdTagFromDraft,
   saveProdTags,patchProdTagCell,renderProdTagPanelBody,syncProdTagDraftFromDOM,
+  toggleTagDefsSection,addTagDef,removeTagDef,saveTagDefs,countTagUsage,
 });
