@@ -809,6 +809,22 @@ function _applyLatestPeriod(shop){
 //     頂層就會走到 loadIntoUI/renderTable 讀這個旗標，宣告若在後面會落入 let 的 TDZ、整檔崩潰。
 let _cloudRefreshing = false;
 
+// 測試標籤編輯面板的狀態：_tagPanelCtx={shop,code} 目前編輯哪一格、_tagDraft=[{tag,date}] 未存檔草稿。
+//   ⚠ 宣告刻意放在 Init 之前（不是放在 openProdTagPanel 旁）：下方 SHOPS.forEach(onMonthChange) 在模組
+//     頂層就會走到 loadIntoUI/renderTable → buildProdTagCell，宣告若在後面會落入 let 的 TDZ、
+//     整個 profit.js 模組評估中斷、淨利表白畫面。理由同上面的 _cloudRefreshing，勿搬動。
+let _tagPanelCtx = null;
+let _tagDraft = null;
+// 管理標籤（ec_tag_defs）的草稿與展開狀態。_tagDefsSnapshot 是開啟面板時的 JSON 快照，
+//   儲存時拿來比對「有沒有真的動過」，沒動就不多打一次雲端。
+//   _tagDefsOpen 用模組變數記收合狀態（不用 DOM class）：面板整段 innerHTML 重繪會把 class 洗掉。
+//   ⚠ 同樣必須留在 Init 之前，理由同上，勿搬動。
+let _tagDefsDraft = null;
+let _tagDefsSnapshot = '';
+let _tagDefsOpen = false;
+let _tagDefsNewLabel = '';
+let _tagDefsNewCls = 'tag-add300';
+
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
@@ -3305,13 +3321,20 @@ function shopLabelProgress(shop){
   return{month,half,total:rows.length,doneTotal,ana,growth};
 }
 window.shopLabelProgress=shopLabelProgress;
-// 測試標籤那一格（唯讀版；點擊編輯在下一個 PR）
+// 測試標籤那一格。點一下開編輯面板（改標記日期 / 新增移除標籤 / 管理標籤清單）。
 //   只顯示「本期間結束日 >= 標記日」的標籤 —— 測試開始前的期間不該掛著未來才貼的標籤，
 //   否則「測試前 vs 測試後」的成效比較會分不出來。
+//   點擊開編輯面板（openProdTagPanel）。兩個 return 都必須帶 id + onclick：
+//   id 供 patchProdTagCell 用 getElementById 找到這格（用「原始 code」，比照 td-${shop}-${r.code}-adsFee）；
+//   onclick 裡的 code 走 escape（比照 buildSuggCell 的 codeEsc），避免編號含單引號時把字串切斷。
+//   ⚠ patchProdTagCell 是 outerHTML 整格替換 → 新的 <td> 必須自己帶著 id 與 onclick，
+//     否則存檔一次後那格就再也點不開、也再也 patch 不到。
 function buildProdTagCell(shop,code){
   const s=state[shop];
   const items=getProdTagsFor(shop,code,{month:s&&s.curMonth,half:s&&s.curHalf});
-  if(!items.length)return `<td class="tl" style="color:#d1d5db;text-align:center;font-size:12px">—</td>`;
+  const codeEsc=String(code).replace(/'/g,"\\'");
+  const tdAttrs=`id="td-${shop}-${code}-prodTags" onclick="openProdTagPanel('${shop}','${codeEsc}')" title="點擊編輯測試標籤"`;
+  if(!items.length)return `<td class="tl" ${tdAttrs} style="color:#d1d5db;text-align:center;font-size:12px;cursor:pointer">—</td>`;
   const curY=(s&&s.curMonth||'').slice(0,4);
   const dateTxt=(d)=>{
     if(!/^\d{4}\/\d{2}\/\d{2}$/.test(d||''))return '';
@@ -3322,7 +3345,320 @@ function buildProdTagCell(shop,code){
     const esc=String(o.tag).replace(/</g,'&lt;');
     return `<span class="tag ${tagDefCls(o.tag)}">${esc}${dt?`<span style="font-weight:400;opacity:.7;margin-left:4px">${dt}</span>`:''}</span>`;
   }).join(' ');
-  return `<td class="tl">${html}</td>`;
+  return `<td class="tl" ${tdAttrs} style="cursor:pointer">${html}</td>`;
+}
+
+// ── 測試標籤編輯面板（點格子開啟）──
+//   資料流：開啟 → _tagDraft 深拷貝（不傳 opts，要看得到被期間規則藏起來的標籤，
+//   否則使用者會誤刪看不見的資料）→ 改草稿 → 儲存才寫入 → 只 patch 那一格。
+//   面板掛 document.body：renderTable 是 innerHTML 整包換掉表格，掛表格裡會被摧毀。
+function _ptpToday(){
+  const n=new Date();
+  return `${n.getFullYear()}/${String(n.getMonth()+1).padStart(2,'0')}/${String(n.getDate()).padStart(2,'0')}`;
+}
+// 內部一律用 YYYY/MM/DD（與 _periodEndDate、既有 adjustments 的 date 同格式）；
+// <input type="date"> 只吃 YYYY-MM-DD → 進出各轉一次。
+function _ptpToInput(d){return /^\d{4}\/\d{2}\/\d{2}$/.test(d||'')?d.replace(/\//g,'-'):'';}
+function _ptpFromInput(v){return /^\d{4}-\d{2}-\d{2}$/.test(v||'')?v.replace(/-/g,'/'):'';}
+function openProdTagPanel(shop,code){
+  let ov=document.getElementById('ptp-overlay');
+  if(!ov){
+    ov=document.createElement('div');ov.id='ptp-overlay';ov.className='ana-overlay ptp-overlay';
+    ov.innerHTML=`<div class="ana-modal ptp-modal" onclick="event.stopPropagation()">
+      <div class="ana-modal-hdr"><span class="ana-modal-title" id="ptp-title">測試標籤</span><button class="ana-modal-x" onclick="closeProdTagPanel()">✕</button></div>
+      <div class="ana-modal-body" id="ptp-body"></div>
+      <div class="ana-modal-ftr">
+        <button class="ana-cancel-btn" onclick="closeProdTagPanel()">取消</button>
+        <button class="ana-save-btn" onclick="saveProdTagPanel()">儲存</button>
+      </div>
+    </div>`;
+    ov.onclick=closeProdTagPanel;
+    document.body.appendChild(ov);
+  }
+  _tagPanelCtx={shop,code};
+  // 深拷貝，且刻意不傳 opts：面板要顯示「全部」標籤，含因期間規則在表格上被藏起來的
+  _tagDraft=getProdTagsFor(shop,code).map(o=>({tag:o.tag,date:o.date||''}));
+  // 管理標籤草稿：同樣深拷貝，並存一份 JSON 快照供儲存時比對「有沒有動過」
+  _tagDefsDraft=getTagDefs().map(d=>({label:d.label,cls:d.cls||'tag-add100'}));
+  _tagDefsSnapshot=JSON.stringify(_tagDefsDraft);
+  _tagDefsOpen=false;   // 每次重開都收合，避免上次展開的狀態殘留
+  _tagDefsNewLabel='';_tagDefsNewCls='tag-add300';
+  const r=state[shop]?._built?.find(x=>x.code===code);
+  const nm=r&&r.name?`${code}・${r.name}`:String(code);
+  document.getElementById('ptp-title').textContent=nm;
+  renderProdTagPanelBody();
+  ov.classList.add('open');
+}
+function closeProdTagPanel(){
+  document.getElementById('ptp-overlay')?.classList.remove('open');
+  _tagDraft=null;_tagPanelCtx=null;
+  _tagDefsDraft=null;_tagDefsSnapshot='';_tagDefsOpen=false;
+}
+// 重繪前把使用者已改的內容撈回草稿，否則整段 innerHTML 重繪會把輸入蓋掉（比照 syncTestDraftFromDOM）。
+//   涵蓋三處：已標記列的日期、管理區每列的顏色下拉、新增區的名稱與顏色。
+function syncProdTagDraftFromDOM(){
+  if(_tagDraft){
+    document.querySelectorAll('#ptp-body .ptp-row').forEach(row=>{
+      const i=parseInt(row.dataset.i);const o=_tagDraft[i];if(!o)return;
+      const inp=row.querySelector('.ptp-date');
+      if(inp)o.date=_ptpFromInput(inp.value);
+    });
+  }
+  if(_tagDefsDraft){
+    document.querySelectorAll('#ptp-body .ptp-def-row').forEach(row=>{
+      const i=parseInt(row.dataset.i);const d=_tagDefsDraft[i];if(!d)return;
+      const sel=row.querySelector('.ptp-def-cls');
+      if(sel)d.cls=sel.value;
+    });
+  }
+  // 新增區的輸入暫存在模組變數，重繪後回填（不然打到一半按「＋ 新增條件以外的任何鈕」就消失）
+  const nEl=document.getElementById('ptp-new-label');
+  if(nEl)_tagDefsNewLabel=nEl.value;
+  const cEl=document.getElementById('ptp-new-cls');
+  if(cEl)_tagDefsNewCls=cEl.value;
+}
+function renderProdTagPanelBody(){
+  const body=document.getElementById('ptp-body');if(!body||!_tagDraft)return;
+  const esc=(t)=>String(t).replace(/</g,'&lt;');
+  const today=_ptpToday().replace(/\//g,'-');
+  const rows=_tagDraft.length?_tagDraft.map((o,i)=>`<div class="ptp-row" data-i="${i}">
+      <span class="tag ${tagDefCls(o.tag)}">${esc(o.tag)}</span>
+      <input type="date" class="ptp-date" value="${_ptpToInput(o.date)}" max="${today}">
+      <button class="ptp-del" onclick="removeProdTagFromDraft(${i})" title="移除這個標籤">🗑</button>
+    </div>`).join(''):`<div class="ptp-empty">尚未標記任何標籤</div>`;
+  const marked=new Set(_tagDraft.map(o=>o.tag));
+  // 讀草稿而非 getTagDefs()：在管理區新增的標籤要能立刻拿來標記，不必先存檔再重開面板。
+  //   _tagDefsDraft 理論上面板開著時不會是 null，保險起見 fallback 回已存檔的定義。
+  const defs=_tagDefsDraft||getTagDefs();
+  const avail=defs.filter(d=>!marked.has(d.label));
+  // ⚠ encodeURIComponent 不編碼單引號（' 是它的保留不編碼字元），標籤名含 ' 會把 onclick 字串切斷
+  //   → 補一道 %27 手動編碼；decodeURIComponent 解得回來，行為不變。
+  const encLabel=(t)=>encodeURIComponent(t).replace(/'/g,'%27');
+  const pick=avail.length?avail.map(d=>`<span class="tag ptp-pick ${d.cls||'tag-add100'}" onclick="addProdTagToDraft(decodeURIComponent('${encLabel(d.label)}'))">＋ ${esc(d.label)}</span>`).join(' '):`<div class="ptp-empty">所有標籤都已標記</div>`;
+  // 第三區「⚙ 管理標籤」：預設收合，展開狀態記在 _tagDefsOpen（模組變數，撐得過 innerHTML 重繪）
+  const clsOpts=(cur)=>ANA_CLS_OPTS.map(o=>`<option value="${o.v}"${o.v===cur?' selected':''}>${o.l}</option>`).join('');
+  let manage='';
+  if(_tagDefsOpen){
+    const defRows=defs.length?defs.map((d,i)=>`<div class="ptp-def-row" data-i="${i}">
+        <span class="tag ${d.cls||'tag-add100'}">${esc(d.label)}</span>
+        <select class="ptp-def-cls">${clsOpts(d.cls||'tag-add100')}</select>
+        <button class="ptp-del" onclick="removeTagDef(${i})" title="刪除這個標籤">🗑</button>
+      </div>`).join(''):`<div class="ptp-empty">尚無標籤</div>`;
+    manage=`<div class="ptp-def-list">${defRows}</div>
+      <div class="ptp-def-add">
+        <input type="text" id="ptp-new-label" placeholder="新標籤名稱" value="${String(_tagDefsNewLabel).replace(/"/g,'&quot;')}">
+        <select id="ptp-new-cls">${clsOpts(_tagDefsNewCls)}</select>
+        <button class="ptp-add-btn" onclick="addTagDef()">＋ 新增</button>
+      </div>
+      <div class="ptp-def-note">標籤清單四個通路共用；改完按下方「儲存」才生效。標籤名不能修改，取錯名請刪掉重建。</div>`;
+  }
+  body.innerHTML=`<div class="ana-sec-hdr">已標記</div>
+    <div class="ptp-list">${rows}</div>
+    <div class="ana-sec-hdr">加上標籤</div>
+    <div class="ptp-picks">${pick}</div>
+    <div class="ana-sec-hdr ptp-def-hdr" onclick="toggleTagDefsSection()">⚙ 管理標籤 <span class="ptp-caret">${_tagDefsOpen?'▾':'▸'}</span></div>
+    ${manage}
+    <div class="ptp-hint">標記日之後的期間才會在報表上顯示；日期留空代表所有期間都顯示。</div>`;
+}
+function toggleTagDefsSection(){
+  syncProdTagDraftFromDOM();
+  _tagDefsOpen=!_tagDefsOpen;
+  renderProdTagPanelBody();
+}
+// 某個標籤在【四個通路】各被幾個商品用到，只回筆數 > 0 的。
+//   ⚠ 一定要掃 SHOPS 全部通路：標籤定義全站共用、標記每通路獨立，
+//     只數當前通路會讓別的通路產生指向不存在定義的孤兒標籤。
+//   ⚠ 用 getProdTags（整包原始資料）不用 getProdTagsFor：後者會做期間過濾，
+//     被藏起來的標記也是真的在用，漏數就會誤刪。
+function countTagUsage(label){
+  const out={};
+  SHOPS.forEach(s=>{
+    const all=getProdTags(s.id)||{};
+    let n=0;
+    Object.keys(all).forEach(code=>{
+      const arr=all[code];
+      if(!Array.isArray(arr))return;
+      if(arr.some(x=>((x&&typeof x==='object')?x.tag:x)===label))n++;
+    });
+    if(n>0)out[s.id]=n;
+  });
+  return out;
+}
+function addTagDef(){
+  if(!_tagDefsDraft)return;
+  syncProdTagDraftFromDOM();
+  const label=String(_tagDefsNewLabel||'').trim();
+  if(!label){alert('請輸入標籤名稱');return;}
+  if(_tagDefsDraft.some(d=>d.label===label)){alert('已有同名標籤');return;}
+  _tagDefsDraft.push({label,cls:_tagDefsNewCls||'tag-add300'});
+  _tagDefsNewLabel='';   // 清空輸入框（顏色保留，連續新增同色比較順）
+  renderProdTagPanelBody();
+}
+// 刪除標籤定義。兩層保護，(ii) 先檢查（使用者當場就能處理）：
+//   (i)  countTagUsage：四個通路【已存檔】的標記還有沒有人在用
+//   (ii) _tagDraft：這次面板開著、還沒存的草稿有沒有掛著它
+//   ⚠ (i) 的計數是對「已存檔資料」算的。若使用者在同一次操作裡先把這個商品的標記移掉、
+//     又要刪定義，計數仍會算到那筆（因為還沒存）。這是刻意保守 —— 寧可擋下來讓他先存檔，
+//     也不要留下指向不存在定義的孤兒標籤。
+function removeTagDef(i){
+  if(!_tagDefsDraft)return;
+  syncProdTagDraftFromDOM();
+  const d=_tagDefsDraft[i];if(!d)return;
+  if(_tagDraft&&_tagDraft.some(o=>o.tag===d.label)){
+    alert(`這個商品目前標著「${d.label}」，請先在上方「已標記」移除它。`);
+    return;
+  }
+  const used=countTagUsage(d.label);
+  const shops=Object.keys(used);
+  if(shops.length){
+    const txt=shops.map(s=>`${s} ${used[s]} 個商品`).join('、');
+    alert(`還有 ${txt}正在使用「${d.label}」，請先到那些商品取消標記。`);
+    return;
+  }
+  _tagDefsDraft.splice(i,1);
+  renderProdTagPanelBody();
+}
+// 寫入 ec_tag_defs。骨架完全比照本檔的 saveProdTags（fetch-merge-write + 即時推送、
+//   失敗完全不寫本機也不寫雲端、成功才寫本機三處），差別只有一處：
+//   ⚠ ec_tag_defs 是全站共用的【單一陣列】，沒有「只改某一格」的概念 → 讀完雲端是【整包取代】。
+//     這代表兩個人同時管理標籤會後蓋前。已知限制，不處理（標籤清單極少變動，衝突機率低）。
+//   ⚠ 另一個已知行為（commit 1 既有、這輪不動）：getTagDefs 的判斷是 Array.isArray(v)&&v.length，
+//     所以存進去一個空陣列時，讀回來會 fallback 回 TAG_DEFS_DEFAULT、預設標籤又冒出來。
+//     removeTagDef 的兩層保護讓「全刪光」很難發生，故不改 getTagDefs。
+async function saveTagDefs(list){
+  const k='ec_tag_defs';
+  const writeLocal=(v)=>{
+    try{localStorage.setItem(k,JSON.stringify(v));}catch{}
+    try{
+      if(typeof Store!=='undefined'){
+        if(Store._mem) Store._mem[k]=v;
+        if(Store._profitMem) Store._profitMem[k]=v;
+      }
+    }catch{}
+  };
+  if(!window.__cloudProfit||typeof window.__cloudProfit.getDoc!=='function'){
+    if(typeof showToast==='function')showToast('⚠ 雲端未連線，標籤清單未儲存，請稍後重試','error');
+    return false;
+  }
+  try{
+    await window.__cloudProfit.getDoc();   // 確認讀得到雲端；整包取代不需要用到回傳內容
+    window._shopJustSaved=Date.now();
+    writeLocal(list);
+  }catch(e){
+    console.warn('[saveTagDefs] 讀雲端失敗，本機與雲端都不寫（避免寫了卻無法同步、之後被快照無聲蓋掉）',e);
+    if(typeof showToast==='function')showToast('⚠ 雲端讀取失敗，標籤清單未儲存，請重試','error');
+    return false;
+  }
+  try{
+    const p=window.__cloudProfit.setField(k,list);
+    if(p&&typeof p.then==='function'){
+      p.catch(e=>{
+        console.error('[saveTagDefs] 雲端寫入失敗',e);
+        if(typeof showToast==='function')showToast('❌ 標籤清單雲端寫入失敗','error');
+      });
+    }
+  }catch(e){ console.error('[saveTagDefs] 雲端寫入異常',e); }
+  return true;
+}
+function addProdTagToDraft(label){
+  if(!_tagDraft)return;
+  syncProdTagDraftFromDOM();
+  if(_tagDraft.some(o=>o.tag===label))return;
+  _tagDraft.push({tag:label,date:_ptpToday()});
+  renderProdTagPanelBody();
+}
+function removeProdTagFromDraft(i){
+  if(!_tagDraft)return;
+  syncProdTagDraftFromDOM();
+  _tagDraft.splice(i,1);
+  renderProdTagPanelBody();
+}
+// 存兩個 key，順序固定：先標籤定義（ec_tag_defs）、後商品標記（ec_tags|{通路}）。
+//   ⚠ 定義沒存成功就【中止、不存標記】：標記存進去但定義沒存上去的話，那個標籤會指向不存在的定義，
+//     tagDefCls 找不到會回預設的 tag-add100（紫色），畫面上顏色莫名其妙變掉。
+//   ⚠ 只有草稿與開啟時的快照不同才呼叫 saveTagDefs，避免每次存標記都多打一次雲端。
+async function saveProdTagPanel(){
+  if(!_tagPanelCtx||!_tagDraft)return;
+  syncProdTagDraftFromDOM();
+  const {shop,code}=_tagPanelCtx;
+  if(_tagDefsDraft&&JSON.stringify(_tagDefsDraft)!==_tagDefsSnapshot){
+    const defsOk=await saveTagDefs(_tagDefsDraft);
+    if(!defsOk)return;   // 面板留著、草稿不丟，讓使用者能重試
+    _tagDefsSnapshot=JSON.stringify(_tagDefsDraft);   // 存過了，同一次面板內不重複推
+  }
+  const list=_tagDraft.map(o=>({tag:o.tag,date:o.date||''}));
+  const ok=await saveProdTags(shop,code,list);
+  if(!ok)return;                       // 寫入失敗 → 面板留著，草稿不丟，讓使用者能重試
+  closeProdTagPanel();
+  patchProdTagCell(shop,code);
+  // 標記日晚於當期結束日 → 這期看不到，講清楚免得以為沒存成功
+  const s=state[shop];
+  const end=s?_periodEndDate(s.curMonth,s.curHalf):null;
+  if(end){
+    const later=list.filter(o=>o.date&&o.date>end).length;
+    if(later&&typeof showToast==='function')showToast(`已儲存；其中 ${later} 個標籤的標記日晚於本期，下一期才會顯示`,'info');
+    else if(typeof showToast==='function')showToast('✓ 已儲存測試標籤','success');
+  }else if(typeof showToast==='function')showToast('✓ 已儲存測試標籤','success');
+}
+// 寫入 ec_tags|{通路}。骨架比照 saveSummaryRows（fetch-merge-write + 即時推送），三處刻意不同：
+//   (a) 資料是物件 {商品編號:[{tag,date}]} 不是陣列 → 預設 {}、套改動是 cloud[code]=list
+//   (b) 讀雲端失敗【完全不寫本機、也不寫雲端】，直接回 false：
+//       這個 key 走即時推送、刻意不進 _pendingSyncKeys，所以只寫本機的話沒有任何重試路徑
+//       —— 那筆標籤只活在本機記憶體，下次雲端快照回來就被蓋掉、無聲消失，
+//       按「☁ 同步雲端」也推不上去。寧可整筆不存、叫使用者重按一次（草稿還在面板上）。
+//   (c) 合併成功後本機寫三處（localStorage + _mem + _profitMem）：_cloudRead 優先讀 _profitMem，
+//       少寫它會被雲端舊值遮蔽剛存的新值。這是全函式唯一的本機寫入點。
+//   ⚠ 刻意不走 _cloudWrite / _cloudWriteSafe / _markPending：那條路不上雲、要按同步鈕才推。
+async function saveProdTags(shop,code,list){
+  const k=tagsKey(shop);
+  const writeLocal=(obj)=>{
+    try{localStorage.setItem(k,JSON.stringify(obj));}catch{}
+    try{
+      if(typeof Store!=='undefined'){
+        if(Store._mem) Store._mem[k]=obj;
+        if(Store._profitMem) Store._profitMem[k]=obj;
+      }
+    }catch{}
+  };
+  if(!window.__cloudProfit||typeof window.__cloudProfit.getDoc!=='function'){
+    if(typeof showToast==='function')showToast('⚠ 雲端未連線，未儲存，請稍後重試','error');
+    return false;
+  }
+  let merged;
+  try{
+    const snap=await window.__cloudProfit.getDoc();
+    const cloud=Object.assign({},((snap.exists()?snap.data():{})||{})[k]||{});
+    if(list&&list.length)cloud[code]=list; else delete cloud[code];
+    merged=cloud;
+    // 時間戳只在「真的寫了本機」時才打：它的用途是「剛存過 → 5 秒內不讓雲端快照覆蓋」，
+    //   失敗時什麼都沒寫卻擋掉 5 秒的雲端更新是純副作用。
+    window._shopJustSaved=Date.now();
+    writeLocal(merged);   // 本機同步成合併後版本，避免下次讀本機拿到舊資料
+  }catch(e){
+    console.warn('[saveProdTags] 讀雲端失敗，本機與雲端都不寫（避免寫了卻無法同步、之後被快照無聲蓋掉）',e);
+    if(typeof showToast==='function')showToast('⚠ 雲端讀取失敗，未儲存，請重試','error');
+    return false;
+  }
+  // 推雲端（fire-and-forget，錯了跳 toast）
+  try{
+    const p=window.__cloudProfit.setField(k,merged);
+    if(p&&typeof p.then==='function'){
+      p.catch(e=>{
+        console.error('[saveProdTags] 雲端寫入失敗',e);
+        if(typeof showToast==='function')showToast('❌ 測試標籤雲端寫入失敗','error');
+      });
+    }
+  }catch(e){ console.error('[saveProdTags] 雲端寫入異常',e); }
+  return true;
+}
+// 只換那一格，不走 applyFilters（整表重繪會閃、會清掉捲動位置）。
+//   用 outerHTML 整格替換：buildProdTagCell 的兩個 return 帶著不同的 <td> 屬性
+//   （有無灰字 style），只換 innerHTML 會留下上一種狀態的樣式。
+//   新 <td> 自帶 id + onclick，所以替換後還點得開、下次也 patch 得到。
+function patchProdTagCell(shop,code){
+  const el=document.getElementById('td-'+shop+'-'+code+'-prodTags');
+  if(!el)return;   // 欄位被隱藏 / 該列不在畫面上 → 什麼都不做
+  el.outerHTML=buildProdTagCell(shop,code);
 }
 function buildSuggCell(shop,r){
   if(!r.testTags?.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
@@ -10544,4 +10880,7 @@ Object.assign(window, {
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
+  openProdTagPanel,closeProdTagPanel,saveProdTagPanel,addProdTagToDraft,removeProdTagFromDraft,
+  saveProdTags,patchProdTagCell,renderProdTagPanelBody,syncProdTagDraftFromDOM,
+  toggleTagDefsSection,addTagDef,removeTagDef,saveTagDefs,countTagUsage,
 });
