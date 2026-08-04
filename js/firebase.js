@@ -164,7 +164,16 @@ try {
               if (shop) changedShops.add(shop);
             }
           });
-          Object.assign(Store._profitMem, incoming);
+          // 本機有未同步變更 / 剛存過 → 不讓雲端快照覆蓋，保住使用者的報表
+          //   （守衛定義在 js/profit.js，那裡才讀得到私有的 _pendingSyncKeys）
+          //   ⚠ 這裡不能用 Object.assign 整批覆蓋，必須逐 key 過守衛。
+          //   對照組：本檔 app/profit doc 與 momo_products / momo_reconcile / momo_s1103 都已有同型別守衛。
+          const _skipped = [];
+          Object.keys(incoming).forEach(k => {
+            if (window.__profitShouldSkipCloudOverwrite && window.__profitShouldSkipCloudOverwrite(k)) { _skipped.push(k); return; }
+            Store._profitMem[k] = incoming[k];
+          });
+          if (_skipped.length) console.warn('[profits collection] 本機未同步，跳過覆蓋：', _skipped);
           if (changedShops.size > 0) {
             console.log('[profits collection] 收到更新，影響賣場：', [...changedShops]);
             // 只 dispatch profitDataReady（精準更新），不呼叫 App.render()（全頁重繪）——比照上面 app/profit 訂閱的做法。
