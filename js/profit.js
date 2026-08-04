@@ -3007,12 +3007,35 @@ function getProdTags(shop){
   try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
   try{ return JSON.parse(localStorage.getItem(k)||'{}'); }catch{ return {}; }
 }
-// 取某商品的標籤名稱陣列（唯讀，給渲染用）
-function getProdTagsFor(shop,code){
+// 某個報表期間的最後一天（YYYY/MM/DD）。用來判斷測試標籤該不該顯示。
+//   first  → 該月 15 日
+//   second → 該月最後一天
+//   full   → 該月最後一天
+//   ⚠ 認不得的 half 值回 null，呼叫端一律當「顯示」（保守，寧可多顯示也不要讓資料消失）
+function _periodEndDate(month,half){
+  if(!/^\d{4}\/\d{2}$/.test(month||''))return null;
+  const y=+month.slice(0,4), m=+month.slice(5,7);
+  if(half==='first')return `${month}/15`;
+  if(half==='second'||half==='full'){
+    const last=new Date(y,m,0).getDate();
+    return `${month}/${String(last).padStart(2,'0')}`;
+  }
+  return null;
+}
+// 取某商品的標籤（唯讀，給渲染與匯出用），回傳 [{tag,date}]
+//   opts.month / opts.half 有給 → 只回傳「該期間結束日 >= 標記日」的標籤
+//   不給 → 全部回傳（匯出用，不做期間過濾）
+//   沒有 date 的標籤一律回傳（舊資料保守處理）
+function getProdTagsFor(shop,code,opts){
   const all=getProdTags(shop);
   const arr=all&&all[code];
   if(!Array.isArray(arr))return[];
-  return arr.map(x=>(x&&typeof x==='object')?x.tag:x).filter(Boolean);
+  const out=arr.map(x=>(x&&typeof x==='object')?{tag:x.tag,date:x.date||''}:{tag:x,date:''})
+               .filter(o=>o.tag);
+  if(!opts||!opts.month)return out;
+  const end=_periodEndDate(opts.month,opts.half);
+  if(!end)return out;
+  return out.filter(o=>!o.date||o.date<=end);
 }
 
 // ── Edit overrides: edits[shop][code][col] = value, notes[shop][code] = text ──
@@ -3283,10 +3306,22 @@ function shopLabelProgress(shop){
 }
 window.shopLabelProgress=shopLabelProgress;
 // 測試標籤那一格（唯讀版；點擊編輯在下一個 PR）
+//   只顯示「本期間結束日 >= 標記日」的標籤 —— 測試開始前的期間不該掛著未來才貼的標籤，
+//   否則「測試前 vs 測試後」的成效比較會分不出來。
 function buildProdTagCell(shop,code){
-  const labels=getProdTagsFor(shop,code);
-  if(!labels.length)return `<td class="tl" style="color:#d1d5db;text-align:center;font-size:12px">—</td>`;
-  const html=labels.map(l=>`<span class="tag ${tagDefCls(l)}">${String(l).replace(/</g,'&lt;')}</span>`).join(' ');
+  const s=state[shop];
+  const items=getProdTagsFor(shop,code,{month:s&&s.curMonth,half:s&&s.curHalf});
+  if(!items.length)return `<td class="tl" style="color:#d1d5db;text-align:center;font-size:12px">—</td>`;
+  const curY=(s&&s.curMonth||'').slice(0,4);
+  const dateTxt=(d)=>{
+    if(!/^\d{4}\/\d{2}\/\d{2}$/.test(d||''))return '';
+    return d.slice(0,4)===curY ? d.slice(5) : d;   // 同年只顯示 月/日，跨年顯示完整日期
+  };
+  const html=items.map(o=>{
+    const dt=dateTxt(o.date);
+    const esc=String(o.tag).replace(/</g,'&lt;');
+    return `<span class="tag ${tagDefCls(o.tag)}">${esc}${dt?`<span style="font-weight:400;opacity:.7;margin-left:4px">${dt}</span>`:''}</span>`;
+  }).join(' ');
   return `<td class="tl">${html}</td>`;
 }
 function buildSuggCell(shop,r){
@@ -10370,7 +10405,7 @@ function doExport(shop){
     r.growthRate!==null?+((r.growthRate*100).toFixed(2)):'-',
     r.growthAnalysis?.label||'',
     exportGrowthNotes[r.code]?.adjustments?.map(a=>a.text).join('; ')||'',
-    getProdTagsFor(shop,r.code).join('、')
+    getProdTagsFor(shop,r.code).map(o=>o.date?`${o.tag}(${o.date})`:o.tag).join('、')
   ]);
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([h,...d]),shop);
   XLSX.writeFile(wb,`淨利表_${shop}_${state[shop]._period||''}.xlsx`);
