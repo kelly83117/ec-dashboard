@@ -2980,6 +2980,64 @@ function openFilter(shop,col,isNum,el){
 function outsideClick(e){if(openPopup&&!openPopup.contains(e.target)){closePopup();}}
 function closePopup(){if(openPopup){openPopup.remove();openPopup=null;document.removeEventListener('mousedown',outsideClick);}}
 
+// ── 測試標籤（手動標記，2026-08-04 新增）──
+//   ⚠ 與「建議」欄的 r.testTags 是兩個不同的東西：
+//     r.testTags  = 條件式自動計算（calcTestTags），跟著報表走、每期重算
+//     本區塊      = 人工挑商品標記，跟著商品走、不分期間
+//   ec_tag_defs    標籤清單，全站共用一份：[{label,cls}]
+//   ec_tags|{通路} 該通路的標記：{商品編號:[{tag,date}]}
+//   寫入採 fetch-merge-write + 即時推送（比照 saveSummaryRows），
+//   因為多人會同時標記，整包覆蓋會互蓋。
+const TAG_DEFS_DEFAULT=[
+  {label:'開加速',cls:'tag-add300'},
+  {label:'ROI +1',cls:'tag-high'},
+];
+function getTagDefs(){
+  const v=_cloudRead('ec_tag_defs');
+  return (Array.isArray(v)&&v.length)?v:TAG_DEFS_DEFAULT.map(d=>({...d}));
+}
+function tagDefCls(label){
+  const d=getTagDefs().find(x=>x.label===label);
+  return (d&&d.cls)||'tag-add100';
+}
+function tagsKey(shop){return 'ec_tags|'+shop;}
+function getProdTags(shop){
+  const k=tagsKey(shop);
+  try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[k]) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
+  try{ return JSON.parse(localStorage.getItem(k)||'{}'); }catch{ return {}; }
+}
+// 某個報表期間的最後一天（YYYY/MM/DD）。用來判斷測試標籤該不該顯示。
+//   first  → 該月 15 日
+//   second → 該月最後一天
+//   full   → 該月最後一天
+//   ⚠ 認不得的 half 值回 null，呼叫端一律當「顯示」（保守，寧可多顯示也不要讓資料消失）
+function _periodEndDate(month,half){
+  if(!/^\d{4}\/\d{2}$/.test(month||''))return null;
+  const y=+month.slice(0,4), m=+month.slice(5,7);
+  if(half==='first')return `${month}/15`;
+  if(half==='second'||half==='full'){
+    const last=new Date(y,m,0).getDate();
+    return `${month}/${String(last).padStart(2,'0')}`;
+  }
+  return null;
+}
+// 取某商品的標籤（唯讀，給渲染與匯出用），回傳 [{tag,date}]
+//   opts.month / opts.half 有給 → 只回傳「該期間結束日 >= 標記日」的標籤
+//   不給 → 全部回傳（匯出用，不做期間過濾）
+//   沒有 date 的標籤一律回傳（舊資料保守處理）
+function getProdTagsFor(shop,code,opts){
+  const all=getProdTags(shop);
+  const arr=all&&all[code];
+  if(!Array.isArray(arr))return[];
+  const out=arr.map(x=>(x&&typeof x==='object')?{tag:x.tag,date:x.date||''}:{tag:x,date:''})
+               .filter(o=>o.tag);
+  if(!opts||!opts.month)return out;
+  const end=_periodEndDate(opts.month,opts.half);
+  if(!end)return out;
+  return out.filter(o=>!o.date||o.date<=end);
+}
+
 // ── Edit overrides: edits[shop][code][col] = value, notes[shop][code] = text ──
 // 雲端優先：寫入時同時存本地與雲端；讀取時優先用雲端 Store._mem
 function getEdits(shop){
@@ -3247,6 +3305,25 @@ function shopLabelProgress(shop){
   return{month,half,total:rows.length,doneTotal,ana,growth};
 }
 window.shopLabelProgress=shopLabelProgress;
+// 測試標籤那一格（唯讀版；點擊編輯在下一個 PR）
+//   只顯示「本期間結束日 >= 標記日」的標籤 —— 測試開始前的期間不該掛著未來才貼的標籤，
+//   否則「測試前 vs 測試後」的成效比較會分不出來。
+function buildProdTagCell(shop,code){
+  const s=state[shop];
+  const items=getProdTagsFor(shop,code,{month:s&&s.curMonth,half:s&&s.curHalf});
+  if(!items.length)return `<td class="tl" style="color:#d1d5db;text-align:center;font-size:12px">—</td>`;
+  const curY=(s&&s.curMonth||'').slice(0,4);
+  const dateTxt=(d)=>{
+    if(!/^\d{4}\/\d{2}\/\d{2}$/.test(d||''))return '';
+    return d.slice(0,4)===curY ? d.slice(5) : d;   // 同年只顯示 月/日，跨年顯示完整日期
+  };
+  const html=items.map(o=>{
+    const dt=dateTxt(o.date);
+    const esc=String(o.tag).replace(/</g,'&lt;');
+    return `<span class="tag ${tagDefCls(o.tag)}">${esc}${dt?`<span style="font-weight:400;opacity:.7;margin-left:4px">${dt}</span>`:''}</span>`;
+  }).join(' ');
+  return `<td class="tl">${html}</td>`;
+}
 function buildSuggCell(shop,r){
   if(!r.testTags?.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
   const codeEsc=r.code.replace(/'/g,"\\'");
@@ -3340,6 +3417,7 @@ const PROFIT_COLS=[
   {key:'roi',label:'投入產出'},{key:'roiDiff',label:'實際-目標'},{key:'clicks',label:'點擊數'},
   {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'廣告分析'},{key:'note',label:'廣告調整'},
   {key:'growthRate',label:'成長比',grow:true},{key:'growthAnalysis',label:'成長分析',grow:true},{key:'growthNote',label:'商品調整',grow:true},
+  {key:'prodTags',label:'測試標籤'},
 ];
 const _HCOLS_LS='ec_hcols_user';
 function getHiddenCols(shop){
@@ -3647,10 +3725,11 @@ function renderTable(shop,list,opts){
     roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算',
     analysisLabel:'廣告分析', note:'廣告調整',
     growthRate:'成長比', growthAnalysis:'成長分析', growthNote:'商品調整',
+    prodTags:'測試標籤',
   };
   const buildColHeader=(c)=>{
     const attrs=dragAttrs(c.key);
-    if(c.key==='note'||c.key==='growthNote')return `<th class="tl" ${attrs}>${HEADER_LABEL[c.key]}</th>`;
+    if(c.key==='note'||c.key==='growthNote'||c.key==='prodTags')return `<th class="tl" ${attrs}>${HEADER_LABEL[c.key]}</th>`;
     if(c.key==='analysisLabel')return thT('analysisLabel',HEADER_LABEL.analysisLabel,'',attrs);
     if(c.key==='growthAnalysis')return thT('growthAnalysisLabel',HEADER_LABEL.growthAnalysis,'',attrs);
     return thN(c.key,HEADER_LABEL[c.key],attrs);
@@ -3693,6 +3772,7 @@ function renderTable(shop,list,opts){
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
         note:noteCellHtml,
         growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
+        prodTags:buildProdTagCell(shop,r.code),
       };
       const bodyCells=orderedCols.map(c=>{
         if(mobicCell[c.key]!==undefined)return mobicCell[c.key];
@@ -3725,6 +3805,7 @@ function renderTable(shop,list,opts){
         growthRate:`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`,
         growthAnalysis:`<td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`,
         growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
+        prodTags:buildProdTagCell(shop,r.code),
       };
       html+=`<tr>
         <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
@@ -10309,7 +10390,7 @@ function doExport(shop){
   const built=state[shop]._built;if(!built?.length)return;
   const wb=XLSX.utils.book_new();
   const h=['商品ID','編號','商品名稱','廣告費','營收','毛利','淨利','淨利率%','廣告佔比%','可用庫存','目標ROI','直接投入產出','投入產出','實際-目標','點擊數','日預算','分析','調整備註',
-    '上期營收','成長比','成長分析','成長調整'];
+    '上期營收','成長比','成長分析','成長調整','測試標籤'];
   const exportNotes=getNotes(shop);
   const exportGrowthNotes=getNotes(shop+'_growth');
   const d=built.map(r=>[
@@ -10323,7 +10404,8 @@ function doExport(shop){
     r.prevRev!==null?+r.prevRev.toFixed(0):'-',
     r.growthRate!==null?+((r.growthRate*100).toFixed(2)):'-',
     r.growthAnalysis?.label||'',
-    exportGrowthNotes[r.code]?.adjustments?.map(a=>a.text).join('; ')||''
+    exportGrowthNotes[r.code]?.adjustments?.map(a=>a.text).join('; ')||'',
+    getProdTagsFor(shop,r.code).map(o=>o.date?`${o.tag}(${o.date})`:o.tag).join('、')
   ]);
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([h,...d]),shop);
   XLSX.writeFile(wb,`淨利表_${shop}_${state[shop]._period||''}.xlsx`);
