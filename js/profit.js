@@ -378,11 +378,22 @@ function _inGrowthPeriod(a,month,half){
   if(!p)return false;
   // 存的時候在看「整月」→ 該月任何期間都顯示（不讓它消失）
   if(p.slice(8)==='full')return p.slice(0,7)===month;
-  if(half==='full')return p.slice(0,7)===month;
   return p===`${month}|${half}`;
 }
 window._growthPeriodOf=_growthPeriodOf;
 window._inGrowthPeriod=_inGrowthPeriod;
+// 「其他期間的調整」每筆前面的標籤：優先顯示期間（例：2026/07 上半月），
+//   期間算不出來就退回顯示日期，日期也沒有才顯示「未記日期」。
+//   絕不顯示空白——空白會讓人以為壞掉。
+function _growthPeriodLabel(o){
+  const p=o&&o.period;
+  if(typeof p==='string'&&p.indexOf('|')>0){
+    const m=p.slice(0,7), h=p.slice(8);
+    return m+' '+_halfLabel(h);
+  }
+  if(/^\d{4}\/\d{2}\/\d{2}$/.test((o&&o.date)||'')) return o.date;
+  return '未記日期';
+}
 
 function _notifyLsSaveFail(shop, month, half, err){
   const who = shop + ' ' + month + '｜' + _halfLabel(half);
@@ -436,6 +447,14 @@ function _realPendingCount(){
   return n;
 }
 window.__profitPendingCount = _realPendingCount;
+// bounce-back 守衛（給 firebase.js 的 app/profit 訂閱呼叫；邏輯放這裡才讀得到私有 _pendingSyncKeys）：
+//   本機有未同步變更（pending）或剛存過 → 雲端快照不覆蓋 _profitMem，保住本機版本。
+//   對照組：MOMO 已有同型別的 __momoShouldSkipCloudOverwrite（本檔搜得到），這是蝦皮淨利表缺的那一份。
+window.__profitShouldSkipCloudOverwrite=function(k){
+  try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
+  if(window._shopJustSaved && (Date.now()-window._shopJustSaved < 5000)) return true;
+  return false;
+};
 
 function _showSyncBtn(shop){
   const btn=document.getElementById('global-sync-btn');
@@ -543,20 +562,22 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     const s=state[shop];
     const isPlainObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
     const tasks=[];                 // { key, run:()=>Promise }：延遲執行，逐一 await（佇列深度恆為 1）
+    const taskKeys=new Set();       // 已排入推送的 key，避免同一個 key 排兩次（見下方 pending 迴圈開頭）
     const skippedByDesign=[];       // filemeta：故意不上雲，安靜
     const skippedProblem=[];        // 讀不到 / 損毀 / 非物件：一定要浮上來
     // 同步當前通路的備註 / 編輯（按期間獨立存）
     const _nk=shop+'|'+(s?.curMonth||'')+'|'+(s?.curHalf||'');
     const notes=getNotes(_nk);
-    if(Object.keys(notes).length>0) tasks.push({key:'ec_notes|'+_nk,run:()=>window.__cloudProfit.setField('ec_notes|'+_nk,notes)});
+    if(Object.keys(notes).length>0){ taskKeys.add('ec_notes|'+_nk); tasks.push({key:'ec_notes|'+_nk,run:()=>window.__cloudProfit.setField('ec_notes|'+_nk,notes)}); }
     const edits=getEdits(shop);
-    if(Object.keys(edits).length>0) tasks.push({key:'ec_edits|'+shop,run:()=>window.__cloudProfit.setField('ec_edits|'+shop,edits)});
+    if(Object.keys(edits).length>0){ taskKeys.add('ec_edits|'+shop); tasks.push({key:'ec_edits|'+shop,run:()=>window.__cloudProfit.setField('ec_edits|'+shop,edits)}); }
     // 遍歷所有 pending keys 分類：
     //   ec|filemeta|... = filemeta，故意不上雲 → skippedByDesign（安靜）
     //   ec|... 其他      = 報表 key，payload 要是物件才推；讀不到/損毀 → skippedProblem（要講）
     //   __shop__|...     = 歷史 marker，忽略
     //   其他            = 設定/標籤等，用 setField 推
     _pendingSyncKeys.forEach(pk=>{
+      if(taskKeys.has(pk)) return;                          // 上面已經排進去了，不要推第二次
       if(pk.startsWith('__shop__|')) return;
       if(pk.startsWith('ec|filemeta|')){ skippedByDesign.push(pk); return; }
       if(pk.startsWith('ec|')){
@@ -780,6 +801,33 @@ function _applyLatestPeriod(shop){
   return true;
 }
 
+// 雲端快照觸發的重繪期間為 true。用途：讓 renderTable 保留捲動位置、
+//   讓 loadIntoUI 不要清掉使用者的篩選／排序。
+//   ⚠ 只在 profitDataReady listener 內同步存活（try/finally 保證歸位），
+//   使用者自己切月份／切通路的行為完全不受影響。
+//   ⚠ 宣告刻意放在 Init 之前（不是放在 listener 旁）：下方 SHOPS.forEach(onMonthChange) 在模組
+//     頂層就會走到 loadIntoUI/renderTable 讀這個旗標，宣告若在後面會落入 let 的 TDZ、整檔崩潰。
+let _cloudRefreshing = false;
+
+// 測試標籤編輯面板的狀態：_tagPanelCtx={shop,code} 目前編輯哪一格、_tagDraft=[{tag,date}] 未存檔草稿。
+//   ⚠ 宣告刻意放在 Init 之前（不是放在 openProdTagPanel 旁）：下方 SHOPS.forEach(onMonthChange) 在模組
+//     頂層就會走到 loadIntoUI/renderTable → buildProdTagCell，宣告若在後面會落入 let 的 TDZ、
+//     整個 profit.js 模組評估中斷、淨利表白畫面。理由同上面的 _cloudRefreshing，勿搬動。
+let _tagPanelCtx = null;
+let _tagDraft = null;
+// 管理標籤（ec_tag_defs）的草稿與展開狀態。_tagDefsSnapshot 是開啟面板時的 JSON 快照，
+//   儲存時拿來比對「有沒有真的動過」，沒動就不多打一次雲端。
+//   _tagDefsOpen 用模組變數記收合狀態（不用 DOM class）：面板整段 innerHTML 重繪會把 class 洗掉。
+//   ⚠ 同樣必須留在 Init 之前，理由同上，勿搬動。
+let _tagDefsDraft = null;
+let _tagDefsSnapshot = '';
+let _tagDefsOpen = false;
+let _tagDefsNewLabel = '';
+let _tagDefsNewCls = 'tag-add300';
+// 「❓ 這個怎麼用」說明區的展開狀態。同樣用模組變數記（不用 DOM class）：面板整段 innerHTML 重繪會把 class 洗掉。
+//   ⚠ 同樣必須留在 Init 之前，理由同上，勿搬動。
+let _tagHelpOpen = false;
+
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
@@ -853,9 +901,10 @@ function deleteUpload(shop,type){
 // ── 雲端資料到達時自動重載 ──
 window.addEventListener('profitDataReady', (e)=>{
   const changedShops = e.detail?.changedShops;
+  _cloudRefreshing = true;   // ⚠ 一定要在最前面設，且與下方 finally 成對，不可只設不清
   // 剛儲存過（備註/編輯）→ Firestore echo 回來，不重新 render 避免閃爍
   const justSaved = window._shopJustSaved && (Date.now()-window._shopJustSaved < 5000);
-  if(justSaved) return;
+  if(justSaved){ _cloudRefreshing = false; return; }
   // null/undefined = 初次載入，更新全部；空陣列 = 只有非賣場資料（如_summary_v1）變動，跳過
   const shopsToUpdate = changedShops==null ? SHOPS : SHOPS.filter(s=>changedShops.includes(s.id));
   try{
@@ -884,6 +933,7 @@ window.addEventListener('profitDataReady', (e)=>{
       if(typeof syncHeaderKpis==='function')syncHeaderKpis(curShop);
     }
   }catch(e){ console.warn('[淨利表] 重載失敗', e); }
+  finally{ _cloudRefreshing = false; }
 });
 
 // ── v3 一次性遷移：把淨利表資料從 app/main 搬到 app/profit、本地推上去、清掉 app/main 的舊欄位 ──
@@ -1171,7 +1221,9 @@ function loadIntoUI(shop,built,period,days){
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
-  state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];   // 標籤篩選跟 filters/sorts 同批重置：切月份/切賽場不殘留（搜尋另行保留，見下一行）
+  // 雲端刷新（別人按同步）不重置：使用者設好的篩選/排序不該被別人的動作清掉。
+  //   只有使用者自己切月份/切通路時才重置（那時 _cloudRefreshing 為 false）。
+  if(!_cloudRefreshing){ state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[]; }   // 標籤篩選跟 filters/sorts 同批重置：切月份/切通路不殘留（搜尋另行保留，見下一行）
   // search 刻意不重置：切月份保留關鍵字（唯一清掉它的是頁面初次載入時 state 的整包初始化）
   const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
   document.getElementById('period-tag-'+shop).textContent=period;
@@ -1559,7 +1611,9 @@ function markCard(shop,type,icon,title,cls){
   if(del)del.style.display=cls==='ok'?'':'none';
 }
 function setSpin(shop,show){const el=document.getElementById('spin-'+shop);if(el)el.classList.toggle('show',show);}
-function checkReady(shop){const s=state[shop];const g=document.getElementById('gen-'+shop);if(g)g.disabled=!(s.rawMobic&&s.rawAds);}
+// ⚠ 這顆 gen-{shop} 是舊版按鈕，被 shopHTML 的 <div style="display:none"> 藏住、使用者點不到。
+//   畫面上實際那顆是 upm-gen-btn（openUploadModal / onGlobalFile 各自控制）。這裡放寬只是保持條件一致。
+function checkReady(shop){const s=state[shop];const g=document.getElementById('gen-'+shop);if(g)g.disabled=!s.rawMobic;}
 // ── 通路費率對照表（費率屬於通路，不是全站共用一個值）──
 // 照 ANA_THRESH 的範式：_cloudRead/_cloudWrite + Object.assign 補預設
 const SHOP_RATE_DEF={'好麻吉':20.5,'玩樂':20.5,'森之旅':20.5,'維克':17.5};
@@ -1683,6 +1737,13 @@ function findUnmatchedAds(shop){
 }
 
 function generate(shop){
+  // 沒有任何廣告資料時提醒（維克通路本來就沒廣告；其他通路多半是忘了傳廣告檔）。
+  //   三種廣告來源都要檢查，只傳選品廣告或廣告群組的人不該被誤攔。
+  const _s=state[shop]||{};
+  const _noAds=!(_s.rawAds&&_s.rawAds.length)
+            && !(_s.rawSelAds&&_s.rawSelAds.length)
+            && !(_s.rawGroupAdsList&&_s.rawGroupAdsList.length);
+  if(_noAds&&!confirm(`「${shop}」沒有上傳任何廣告資料。\n\n產生的報表廣告費、ROI、點擊數會全部是 0，\n跟廣告有關的標籤（賠錢中、低效廣告、ROI 加減碼）也不會出現。\n\n確定要繼續嗎？`))return;
   setSpin(shop,true);
   const unmatched=findUnmatchedAds(shop);
   if(unmatched.length){
@@ -2048,9 +2109,17 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, 
   const D=adsFee, H=pureRate*100, K=targetROI, N=roiDiff, O=clicks, P=pureProfit, R=roi;
   if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
   if(ok('高利潤商品')&&D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
-  if(ok('低淨利')&&D===0 && (N===null||N===undefined||!isFinite(N))) return{label:'低淨利',cls:'tag-low'};
   if(ok('賠錢中')&&D>0 && P<0) return{label:'賠錢中',cls:'tag-lose'};
-  if(ok('低淨利')&&D>0 && ((K!==null&&K!==undefined&&K<0)||(N===null||N===undefined||!isFinite(N)))) return{label:'低淨利',cls:'tag-low'};
+  // 低淨利（2026-08-04 修正）：回歸老闆原始定義 =IF(K<=0,"-",L-K)，K=目標ROI、L=直接投入產出。
+  //   K = 1/(淨利率% + 廣告佔比 - 20%)。K<=0 ⇔ 分母<=0 ⇔ 就算廣告全砍也達不到 20% 淨利率。
+  //   ⚠ 本檔實作是「分母>0 才算，否則存 null」（見 buildShop / recalcRow 的 targetROI），
+  //     所以 Excel 的「K 是負數」在這裡表現為 K===null、畫面顯示「—」。
+  //     因此判斷式要同時涵蓋 null 與負數，兩者是同一件事的兩種表示法。
+  //   ⚠ 舊版看的是 N（實際-目標）是不是 null，但 N 為 null 有兩個成因：K<=0、或沒開廣告
+  //     （directROI=0）。後者跟淨利率無關，害沒廣告的健康商品（淨利率 25%、K=19）被誤標。
+  //   ⚠ 舊版另一條「D>0 且 K<0」漏掉 K===null 的情況，害有廣告又真的達不到 20% 的商品完全沒標籤。
+  //   K<0 必須保留：舊報表存過負值（實測有 -365.85），不是死碼。
+  if(ok('低淨利')&&(K===null||K===undefined||!isFinite(K)||K<0)) return{label:'低淨利',cls:'tag-low'};
   if(ok('低效廣告')&&D>0 && H>=0 && H<t.badAdsMaxH) return{label:'低效廣告',cls:'tag-bad'};
   for(const ct of getCustomAnaRules()){
     if(evalAnaConds(ct.conds,{D,H,K,N,O,P,R}))return{label:ct.label,cls:ct.cls||'tag-add100'};
@@ -2156,7 +2225,7 @@ function openUploadModal(){
   document.getElementById('upm-selads-status').style.color=seladsOk?'#10b981':'#9ca3af';
   document.getElementById('upm-selads-del').style.opacity=seladsOk?'1':'0.35';
   document.getElementById('upm-selads-del').style.pointerEvents=seladsOk?'':'none';
-  document.getElementById('upm-gen-btn').disabled=!(mobicOk&&adsOk);
+  document.getElementById('upm-gen-btn').disabled=!mobicOk;   // 只要有莫筆克就能按；沒廣告時由 generate() 的 confirm 提醒
   // 若三大檔中有任何一個是 wasLoaded 狀態（有 meta 但無 raw），提示使用者需要重新上傳
   const anyWasLoaded=(!mapOk&&!!getMeta('ec|filemeta|globalMap'))||(!mobicOk&&!!getMeta(fmKey(shop,'mobic')))||(!adsOk&&!!getMeta(fmKey(shop,'ads')));
   const hintEl=document.getElementById('upm-gen-hint');
@@ -2165,7 +2234,7 @@ function openUploadModal(){
       hintEl.innerHTML='⚠️ <b style="color:#b45309">頁面重整後解析的資料會清空</b>，請點 🔄 卡片重新上傳原檔案';
       hintEl.style.color='#b45309';
     } else {
-      hintEl.textContent='上傳莫筆克＋廣告報表後可產生';
+      hintEl.textContent='上傳莫筆克後即可產生；沒有廣告報表時廣告費會是 0';
       hintEl.style.color='#9ca3af';
     }
   }
@@ -2325,7 +2394,7 @@ function onGlobalFile(event,type){
         try{document.getElementById('upm-groupads-input').value='';}catch{}
       }
       const s2=state[shop];
-      document.getElementById('upm-gen-btn').disabled=!(s2.rawMobic&&s2.rawAds);
+      document.getElementById('upm-gen-btn').disabled=!s2.rawMobic;   // 只要有莫筆克就能按；沒廣告時由 generate() 的 confirm 提醒
     },800);
   }
 }
@@ -2378,7 +2447,7 @@ function renderAnaModalBody(){
     <div class="ana-sec-hdr">分析標籤</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 > ${inp('highMinH',t.highMinH,'0.1')} %</span>${trash('高利潤商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">廣告費 > 0 且 淨利 &lt; 0</span>${trash('賠錢中','disableAnaTag')}</div>
-    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">廣告費 > 0 且 目標ROI &lt; 0<br><span style="color:#9ca3af;font-size:11px">或 廣告費 > 0 且 直接ROI差距顯示「—」<br>或 廣告費 = 0 且 直接ROI差距顯示「—」</span></span>${trash('低淨利','disableAnaTag')}</div>
+    <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">就算廣告全砍掉，淨利率也到不了 20%<br><span style="color:#9ca3af;font-size:11px">判定：目標ROI ≤ 0，即 1/(淨利率% ＋ 廣告佔比 − 20%) 的分母 ≤ 0（該欄顯示「—」）</span></span>${trash('低淨利','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">危險商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 0%~${inp('dangerMaxH',t.dangerMaxH,'0.1')} %</span>${trash('危險商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-bad">低效廣告</span><span class="ana-rule-desc">廣告費 > 0 且 純利率 &lt; ${inp('badAdsMaxH',t.badAdsMaxH,'0.1')} %</span>${trash('低效廣告','disableAnaTag')}</div>
     <div class="ana-sec-hdr">自訂標籤</div>
@@ -2930,6 +2999,64 @@ function openFilter(shop,col,isNum,el){
 function outsideClick(e){if(openPopup&&!openPopup.contains(e.target)){closePopup();}}
 function closePopup(){if(openPopup){openPopup.remove();openPopup=null;document.removeEventListener('mousedown',outsideClick);}}
 
+// ── 測試標籤（手動標記，2026-08-04 新增）──
+//   ⚠ 與「建議」欄的 r.testTags 是兩個不同的東西：
+//     r.testTags  = 條件式自動計算（calcTestTags），跟著報表走、每期重算
+//     本區塊      = 人工挑商品標記，跟著商品走、不分期間
+//   ec_tag_defs    標籤清單，全站共用一份：[{label,cls}]
+//   ec_tags|{通路} 該通路的標記：{商品編號:[{tag,date}]}
+//   寫入採 fetch-merge-write + 即時推送（比照 saveSummaryRows），
+//   因為多人會同時標記，整包覆蓋會互蓋。
+const TAG_DEFS_DEFAULT=[
+  {label:'開加速',cls:'tag-add300'},
+  {label:'ROI +1',cls:'tag-high'},
+];
+function getTagDefs(){
+  const v=_cloudRead('ec_tag_defs');
+  return (Array.isArray(v)&&v.length)?v:TAG_DEFS_DEFAULT.map(d=>({...d}));
+}
+function tagDefCls(label){
+  const d=getTagDefs().find(x=>x.label===label);
+  return (d&&d.cls)||'tag-add100';
+}
+function tagsKey(shop){return 'ec_tags|'+shop;}
+function getProdTags(shop){
+  const k=tagsKey(shop);
+  try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[k]) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
+  try{ return JSON.parse(localStorage.getItem(k)||'{}'); }catch{ return {}; }
+}
+// 某個報表期間的最後一天（YYYY/MM/DD）。用來判斷測試標籤該不該顯示。
+//   first  → 該月 15 日
+//   second → 該月最後一天
+//   full   → 該月最後一天
+//   ⚠ 認不得的 half 值回 null，呼叫端一律當「顯示」（保守，寧可多顯示也不要讓資料消失）
+function _periodEndDate(month,half){
+  if(!/^\d{4}\/\d{2}$/.test(month||''))return null;
+  const y=+month.slice(0,4), m=+month.slice(5,7);
+  if(half==='first')return `${month}/15`;
+  if(half==='second'||half==='full'){
+    const last=new Date(y,m,0).getDate();
+    return `${month}/${String(last).padStart(2,'0')}`;
+  }
+  return null;
+}
+// 取某商品的標籤（唯讀，給渲染與匯出用），回傳 [{tag,date}]
+//   opts.month / opts.half 有給 → 只回傳「該期間結束日 >= 標記日」的標籤
+//   不給 → 全部回傳（匯出用，不做期間過濾）
+//   沒有 date 的標籤一律回傳（舊資料保守處理）
+function getProdTagsFor(shop,code,opts){
+  const all=getProdTags(shop);
+  const arr=all&&all[code];
+  if(!Array.isArray(arr))return[];
+  const out=arr.map(x=>(x&&typeof x==='object')?{tag:x.tag,date:x.date||''}:{tag:x,date:''})
+               .filter(o=>o.tag);
+  if(!opts||!opts.month)return out;
+  const end=_periodEndDate(opts.month,opts.half);
+  if(!end)return out;
+  return out.filter(o=>!o.date||o.date<=end);
+}
+
 // ── Edit overrides: edits[shop][code][col] = value, notes[shop][code] = text ──
 // 雲端優先：寫入時同時存本地與雲端；讀取時優先用雲端 Store._mem
 function getEdits(shop){
@@ -2961,6 +3088,8 @@ function saveNotes(shop,notes){
   const k='ec_notes|'+shop;
   try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=notes;}catch{}
+  // 掛進待同步集合，讓「☁ 同步雲端」推得到（商品調整 _growth 原本完全沒有上雲的路）
+  _pendingSyncKeys.add(k);
   _showSyncBtn(shop);
   // 立即同步工作日誌摘要（不必等按 ☁ 同步雲端；silent 不顯示 toast 避免太吵）
   try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}
@@ -3087,7 +3216,7 @@ function patchRow(shop,code,ov){
   }
   // pureProfit
   const pureEl=document.getElementById(`td-${shop}-${code}-pureProfit`);
-  if(pureEl){pureEl.textContent='$'+fmtN(r.pureProfit);pureEl.className='td-num '+(r.pureProfit>=0?'td-pos':'td-neg');}
+  if(pureEl){pureEl.textContent=_fSigned(r.pureProfit);pureEl.className='td-num '+(r.pureProfit>=0?'td-pos':'td-neg');}
   // pureRate
   const rateEl=document.getElementById(`td-${shop}-${code}-pureRate`);
   if(rateEl)rateEl.innerHTML=pill(!(r.rev>0)?null:r.pureRate*100);
@@ -3195,6 +3324,363 @@ function shopLabelProgress(shop){
   return{month,half,total:rows.length,doneTotal,ana,growth};
 }
 window.shopLabelProgress=shopLabelProgress;
+// 測試標籤那一格。點一下開編輯面板（改標記日期 / 新增移除標籤 / 管理標籤清單）。
+//   只顯示「本期間結束日 >= 標記日」的標籤 —— 測試開始前的期間不該掛著未來才貼的標籤，
+//   否則「測試前 vs 測試後」的成效比較會分不出來。
+//   點擊開編輯面板（openProdTagPanel）。兩個 return 都必須帶 id + onclick：
+//   id 供 patchProdTagCell 用 getElementById 找到這格（用「原始 code」，比照 td-${shop}-${r.code}-adsFee）；
+//   onclick 裡的 code 走 escape（比照 buildSuggCell 的 codeEsc），避免編號含單引號時把字串切斷。
+//   ⚠ patchProdTagCell 是 outerHTML 整格替換 → 新的 <td> 必須自己帶著 id 與 onclick，
+//     否則存檔一次後那格就再也點不開、也再也 patch 不到。
+function buildProdTagCell(shop,code){
+  const s=state[shop];
+  const items=getProdTagsFor(shop,code,{month:s&&s.curMonth,half:s&&s.curHalf});
+  const codeEsc=String(code).replace(/'/g,"\\'");
+  const tdAttrs=`id="td-${shop}-${code}-prodTags" onclick="openProdTagPanel('${shop}','${codeEsc}')" title="點擊編輯測試標籤"`;
+  if(!items.length)return `<td class="tl" ${tdAttrs} style="color:#d1d5db;text-align:center;font-size:12px;cursor:pointer">—</td>`;
+  const curY=(s&&s.curMonth||'').slice(0,4);
+  const dateTxt=(d)=>{
+    if(!/^\d{4}\/\d{2}\/\d{2}$/.test(d||''))return '';
+    return d.slice(0,4)===curY ? d.slice(5) : d;   // 同年只顯示 月/日，跨年顯示完整日期
+  };
+  const html=items.map(o=>{
+    const dt=dateTxt(o.date);
+    const esc=String(o.tag).replace(/</g,'&lt;');
+    return `<span class="tag ${tagDefCls(o.tag)}">${esc}${dt?`<span style="font-weight:400;opacity:.7;margin-left:4px">${dt}</span>`:''}</span>`;
+  }).join(' ');
+  return `<td class="tl" ${tdAttrs} style="cursor:pointer">${html}</td>`;
+}
+
+// ── 測試標籤編輯面板（點格子開啟）──
+//   資料流：開啟 → _tagDraft 深拷貝（不傳 opts，要看得到被期間規則藏起來的標籤，
+//   否則使用者會誤刪看不見的資料）→ 改草稿 → 儲存才寫入 → 只 patch 那一格。
+//   面板掛 document.body：renderTable 是 innerHTML 整包換掉表格，掛表格裡會被摧毀。
+function _ptpToday(){
+  const n=new Date();
+  return `${n.getFullYear()}/${String(n.getMonth()+1).padStart(2,'0')}/${String(n.getDate()).padStart(2,'0')}`;
+}
+// 內部一律用 YYYY/MM/DD（與 _periodEndDate、既有 adjustments 的 date 同格式）；
+// <input type="date"> 只吃 YYYY-MM-DD → 進出各轉一次。
+function _ptpToInput(d){return /^\d{4}\/\d{2}\/\d{2}$/.test(d||'')?d.replace(/\//g,'-'):'';}
+function _ptpFromInput(v){return /^\d{4}-\d{2}-\d{2}$/.test(v||'')?v.replace(/-/g,'/'):'';}
+function openProdTagPanel(shop,code){
+  let ov=document.getElementById('ptp-overlay');
+  if(!ov){
+    ov=document.createElement('div');ov.id='ptp-overlay';ov.className='ana-overlay ptp-overlay';
+    ov.innerHTML=`<div class="ana-modal ptp-modal" onclick="event.stopPropagation()">
+      <div class="ana-modal-hdr"><span class="ana-modal-title" id="ptp-title">測試標籤</span><button class="ana-modal-x" onclick="closeProdTagPanel()">✕</button></div>
+      <div class="ana-modal-body" id="ptp-body"></div>
+      <div class="ana-modal-ftr">
+        <button class="ana-cancel-btn" onclick="closeProdTagPanel()">取消</button>
+        <button class="ana-save-btn" onclick="saveProdTagPanel()">儲存</button>
+      </div>
+    </div>`;
+    ov.onclick=closeProdTagPanel;
+    document.body.appendChild(ov);
+  }
+  _tagPanelCtx={shop,code};
+  // 深拷貝，且刻意不傳 opts：面板要顯示「全部」標籤，含因期間規則在表格上被藏起來的
+  _tagDraft=getProdTagsFor(shop,code).map(o=>({tag:o.tag,date:o.date||''}));
+  // 管理標籤草稿：同樣深拷貝，並存一份 JSON 快照供儲存時比對「有沒有動過」
+  _tagDefsDraft=getTagDefs().map(d=>({label:d.label,cls:d.cls||'tag-add100'}));
+  _tagDefsSnapshot=JSON.stringify(_tagDefsDraft);
+  _tagDefsOpen=false;   // 每次重開都收合，避免上次展開的狀態殘留
+  _tagDefsNewLabel='';_tagDefsNewCls='tag-add300';
+  const r=state[shop]?._built?.find(x=>x.code===code);
+  const nm=r&&r.name?`${code}・${r.name}`:String(code);
+  document.getElementById('ptp-title').textContent=nm;
+  renderProdTagPanelBody();
+  ov.classList.add('open');
+}
+function closeProdTagPanel(){
+  document.getElementById('ptp-overlay')?.classList.remove('open');
+  _tagDraft=null;_tagPanelCtx=null;
+  _tagDefsDraft=null;_tagDefsSnapshot='';_tagDefsOpen=false;
+}
+// 重繪前把使用者已改的內容撈回草稿，否則整段 innerHTML 重繪會把輸入蓋掉（比照 syncTestDraftFromDOM）。
+//   涵蓋三處：已標記列的日期、管理區每列的顏色下拉、新增區的名稱與顏色。
+function syncProdTagDraftFromDOM(){
+  if(_tagDraft){
+    document.querySelectorAll('#ptp-body .ptp-row').forEach(row=>{
+      const i=parseInt(row.dataset.i);const o=_tagDraft[i];if(!o)return;
+      const inp=row.querySelector('.ptp-date');
+      if(inp)o.date=_ptpFromInput(inp.value);
+    });
+  }
+  if(_tagDefsDraft){
+    document.querySelectorAll('#ptp-body .ptp-def-row').forEach(row=>{
+      const i=parseInt(row.dataset.i);const d=_tagDefsDraft[i];if(!d)return;
+      const sel=row.querySelector('.ptp-def-cls');
+      if(sel)d.cls=sel.value;
+    });
+  }
+  // 新增區的輸入暫存在模組變數，重繪後回填（不然打到一半按「＋ 新增條件以外的任何鈕」就消失）
+  const nEl=document.getElementById('ptp-new-label');
+  if(nEl)_tagDefsNewLabel=nEl.value;
+  const cEl=document.getElementById('ptp-new-cls');
+  if(cEl)_tagDefsNewCls=cEl.value;
+}
+function renderProdTagPanelBody(){
+  const body=document.getElementById('ptp-body');if(!body||!_tagDraft)return;
+  const esc=(t)=>String(t).replace(/</g,'&lt;');
+  const today=_ptpToday().replace(/\//g,'-');
+  const rows=_tagDraft.length?_tagDraft.map((o,i)=>`<div class="ptp-row" data-i="${i}">
+      <span class="tag ${tagDefCls(o.tag)}">${esc(o.tag)}</span>
+      <input type="date" class="ptp-date" value="${_ptpToInput(o.date)}" max="${today}">
+      <button class="ptp-del" onclick="removeProdTagFromDraft(${i})" title="移除這個標籤">🗑</button>
+    </div>`).join(''):`<div class="ptp-empty">尚未標記任何標籤</div>`;
+  const marked=new Set(_tagDraft.map(o=>o.tag));
+  // 讀草稿而非 getTagDefs()：在管理區新增的標籤要能立刻拿來標記，不必先存檔再重開面板。
+  //   _tagDefsDraft 理論上面板開著時不會是 null，保險起見 fallback 回已存檔的定義。
+  const defs=_tagDefsDraft||getTagDefs();
+  const avail=defs.filter(d=>!marked.has(d.label));
+  // ⚠ encodeURIComponent 不編碼單引號（' 是它的保留不編碼字元），標籤名含 ' 會把 onclick 字串切斷
+  //   → 補一道 %27 手動編碼；decodeURIComponent 解得回來，行為不變。
+  const encLabel=(t)=>encodeURIComponent(t).replace(/'/g,'%27');
+  const pick=avail.length?avail.map(d=>`<span class="tag ptp-pick ${d.cls||'tag-add100'}" onclick="addProdTagToDraft(decodeURIComponent('${encLabel(d.label)}'))">＋ ${esc(d.label)}</span>`).join(' '):`<div class="ptp-empty">所有標籤都已標記</div>`;
+  // 第三區「⚙ 管理標籤」：預設收合，展開狀態記在 _tagDefsOpen（模組變數，撐得過 innerHTML 重繪）
+  const clsOpts=(cur)=>ANA_CLS_OPTS.map(o=>`<option value="${o.v}"${o.v===cur?' selected':''}>${o.l}</option>`).join('');
+  let manage='';
+  if(_tagDefsOpen){
+    const defRows=defs.length?defs.map((d,i)=>`<div class="ptp-def-row" data-i="${i}">
+        <span class="tag ${d.cls||'tag-add100'}">${esc(d.label)}</span>
+        <select class="ptp-def-cls">${clsOpts(d.cls||'tag-add100')}</select>
+        <button class="ptp-del" onclick="removeTagDef(${i})" title="刪除這個標籤">🗑</button>
+      </div>`).join(''):`<div class="ptp-empty">尚無標籤</div>`;
+    manage=`<div class="ptp-def-list">${defRows}</div>
+      <div class="ptp-def-add">
+        <input type="text" id="ptp-new-label" placeholder="新標籤名稱" value="${String(_tagDefsNewLabel).replace(/"/g,'&quot;')}">
+        <select id="ptp-new-cls">${clsOpts(_tagDefsNewCls)}</select>
+        <button class="ptp-add-btn" onclick="addTagDef()">＋ 新增</button>
+      </div>
+      <div class="ptp-def-note">標籤清單四個通路共用；改完按下方「儲存」才生效。標籤名不能修改，取錯名請刪掉重建。</div>`;
+  }
+  // 第四區「❓ 這個怎麼用」：同樣預設收合，展開狀態記在 _tagHelpOpen（模組變數，撐得過 innerHTML 重繪）
+  let help='';
+  if(_tagHelpOpen){
+    const qa=(q,a)=>`<div class="ptp-help-q">${q}</div><div class="ptp-help-a">${a}</div>`;
+    help=`<div class="ptp-help">
+      ${qa('測試標籤是什麼','手動挑幾個商品做投放測試（例如開加速、提高目標 ROI），標記起來方便之後比較成效。跟「建議」欄不一樣，那欄是系統自動算的。')}
+      ${qa('日期要填什麼','填測試實際開始的那一天，不是你標記的那天。系統預設今天，補記以前的測試記得改。')}
+      ${qa('為什麼標了卻看不到','標籤只會出現在「標記日之後」的期間。例如填 8/05，7 月的報表就看不到它，8 月上半月才會出現。這是為了讓「測試前 vs 測試後」的數字分得開。想讓某一期看得到，就把日期改到那期結束日之前。')}
+      ${qa('標籤清單是大家共用的','新增或刪除標籤，四個通路都會變。哪個商品被標則各通路獨立。標籤名不能改，取錯名要刪掉重建；還有商品在用的標籤刪不掉。')}
+    </div>`;
+  }
+  body.innerHTML=`<div class="ana-sec-hdr">已標記</div>
+    <div class="ptp-list">${rows}</div>
+    <div class="ana-sec-hdr">加上標籤</div>
+    <div class="ptp-picks">${pick}</div>
+    <div class="ana-sec-hdr ptp-sec-toggle" onclick="toggleTagDefsSection()">⚙ 管理標籤 <span class="ptp-caret">${_tagDefsOpen?'－':'＋'}</span></div>
+    ${manage}
+    <div class="ana-sec-hdr ptp-sec-toggle" onclick="toggleTagHelpSection()">❓ 這個怎麼用 <span class="ptp-caret">${_tagHelpOpen?'－':'＋'}</span></div>
+    ${help}
+    <div class="ptp-hint">標記日之後的期間才會在報表上顯示；日期留空代表所有期間都顯示。</div>`;
+}
+function toggleTagDefsSection(){
+  syncProdTagDraftFromDOM();
+  _tagDefsOpen=!_tagDefsOpen;
+  renderProdTagPanelBody();
+}
+function toggleTagHelpSection(){
+  syncProdTagDraftFromDOM();
+  _tagHelpOpen=!_tagHelpOpen;
+  renderProdTagPanelBody();
+}
+// 某個標籤在【四個通路】各被幾個商品用到，只回筆數 > 0 的。
+//   ⚠ 一定要掃 SHOPS 全部通路：標籤定義全站共用、標記每通路獨立，
+//     只數當前通路會讓別的通路產生指向不存在定義的孤兒標籤。
+//   ⚠ 用 getProdTags（整包原始資料）不用 getProdTagsFor：後者會做期間過濾，
+//     被藏起來的標記也是真的在用，漏數就會誤刪。
+function countTagUsage(label){
+  const out={};
+  SHOPS.forEach(s=>{
+    const all=getProdTags(s.id)||{};
+    let n=0;
+    Object.keys(all).forEach(code=>{
+      const arr=all[code];
+      if(!Array.isArray(arr))return;
+      if(arr.some(x=>((x&&typeof x==='object')?x.tag:x)===label))n++;
+    });
+    if(n>0)out[s.id]=n;
+  });
+  return out;
+}
+function addTagDef(){
+  if(!_tagDefsDraft)return;
+  syncProdTagDraftFromDOM();
+  const label=String(_tagDefsNewLabel||'').trim();
+  if(!label){alert('請輸入標籤名稱');return;}
+  if(_tagDefsDraft.some(d=>d.label===label)){alert('已有同名標籤');return;}
+  _tagDefsDraft.push({label,cls:_tagDefsNewCls||'tag-add300'});
+  _tagDefsNewLabel='';   // 清空輸入框（顏色保留，連續新增同色比較順）
+  renderProdTagPanelBody();
+}
+// 刪除標籤定義。兩層保護，(ii) 先檢查（使用者當場就能處理）：
+//   (i)  countTagUsage：四個通路【已存檔】的標記還有沒有人在用
+//   (ii) _tagDraft：這次面板開著、還沒存的草稿有沒有掛著它
+//   ⚠ (i) 的計數是對「已存檔資料」算的。若使用者在同一次操作裡先把這個商品的標記移掉、
+//     又要刪定義，計數仍會算到那筆（因為還沒存）。這是刻意保守 —— 寧可擋下來讓他先存檔，
+//     也不要留下指向不存在定義的孤兒標籤。
+function removeTagDef(i){
+  if(!_tagDefsDraft)return;
+  syncProdTagDraftFromDOM();
+  const d=_tagDefsDraft[i];if(!d)return;
+  if(_tagDraft&&_tagDraft.some(o=>o.tag===d.label)){
+    alert(`這個商品目前標著「${d.label}」，請先在上方「已標記」移除它。`);
+    return;
+  }
+  const used=countTagUsage(d.label);
+  const shops=Object.keys(used);
+  if(shops.length){
+    const txt=shops.map(s=>`${s} ${used[s]} 個商品`).join('、');
+    alert(`還有 ${txt}正在使用「${d.label}」，請先到那些商品取消標記。`);
+    return;
+  }
+  _tagDefsDraft.splice(i,1);
+  renderProdTagPanelBody();
+}
+// 寫入 ec_tag_defs。骨架完全比照本檔的 saveProdTags（fetch-merge-write + 即時推送、
+//   失敗完全不寫本機也不寫雲端、成功才寫本機三處），差別只有一處：
+//   ⚠ ec_tag_defs 是全站共用的【單一陣列】，沒有「只改某一格」的概念 → 讀完雲端是【整包取代】。
+//     這代表兩個人同時管理標籤會後蓋前。已知限制，不處理（標籤清單極少變動，衝突機率低）。
+//   ⚠ 另一個已知行為（commit 1 既有、這輪不動）：getTagDefs 的判斷是 Array.isArray(v)&&v.length，
+//     所以存進去一個空陣列時，讀回來會 fallback 回 TAG_DEFS_DEFAULT、預設標籤又冒出來。
+//     removeTagDef 的兩層保護讓「全刪光」很難發生，故不改 getTagDefs。
+async function saveTagDefs(list){
+  const k='ec_tag_defs';
+  const writeLocal=(v)=>{
+    try{localStorage.setItem(k,JSON.stringify(v));}catch{}
+    try{
+      if(typeof Store!=='undefined'){
+        if(Store._mem) Store._mem[k]=v;
+        if(Store._profitMem) Store._profitMem[k]=v;
+      }
+    }catch{}
+  };
+  if(!window.__cloudProfit||typeof window.__cloudProfit.getDoc!=='function'){
+    if(typeof showToast==='function')showToast('⚠ 雲端未連線，標籤清單未儲存，請稍後重試','error');
+    return false;
+  }
+  try{
+    await window.__cloudProfit.getDoc();   // 確認讀得到雲端；整包取代不需要用到回傳內容
+    window._shopJustSaved=Date.now();
+    writeLocal(list);
+  }catch(e){
+    console.warn('[saveTagDefs] 讀雲端失敗，本機與雲端都不寫（避免寫了卻無法同步、之後被快照無聲蓋掉）',e);
+    if(typeof showToast==='function')showToast('⚠ 雲端讀取失敗，標籤清單未儲存，請重試','error');
+    return false;
+  }
+  try{
+    const p=window.__cloudProfit.setField(k,list);
+    if(p&&typeof p.then==='function'){
+      p.catch(e=>{
+        console.error('[saveTagDefs] 雲端寫入失敗',e);
+        if(typeof showToast==='function')showToast('❌ 標籤清單雲端寫入失敗','error');
+      });
+    }
+  }catch(e){ console.error('[saveTagDefs] 雲端寫入異常',e); }
+  return true;
+}
+function addProdTagToDraft(label){
+  if(!_tagDraft)return;
+  syncProdTagDraftFromDOM();
+  if(_tagDraft.some(o=>o.tag===label))return;
+  _tagDraft.push({tag:label,date:_ptpToday()});
+  renderProdTagPanelBody();
+}
+function removeProdTagFromDraft(i){
+  if(!_tagDraft)return;
+  syncProdTagDraftFromDOM();
+  _tagDraft.splice(i,1);
+  renderProdTagPanelBody();
+}
+// 存兩個 key，順序固定：先標籤定義（ec_tag_defs）、後商品標記（ec_tags|{通路}）。
+//   ⚠ 定義沒存成功就【中止、不存標記】：標記存進去但定義沒存上去的話，那個標籤會指向不存在的定義，
+//     tagDefCls 找不到會回預設的 tag-add100（紫色），畫面上顏色莫名其妙變掉。
+//   ⚠ 只有草稿與開啟時的快照不同才呼叫 saveTagDefs，避免每次存標記都多打一次雲端。
+async function saveProdTagPanel(){
+  if(!_tagPanelCtx||!_tagDraft)return;
+  syncProdTagDraftFromDOM();
+  const {shop,code}=_tagPanelCtx;
+  if(_tagDefsDraft&&JSON.stringify(_tagDefsDraft)!==_tagDefsSnapshot){
+    const defsOk=await saveTagDefs(_tagDefsDraft);
+    if(!defsOk)return;   // 面板留著、草稿不丟，讓使用者能重試
+    _tagDefsSnapshot=JSON.stringify(_tagDefsDraft);   // 存過了，同一次面板內不重複推
+  }
+  const list=_tagDraft.map(o=>({tag:o.tag,date:o.date||''}));
+  const ok=await saveProdTags(shop,code,list);
+  if(!ok)return;                       // 寫入失敗 → 面板留著，草稿不丟，讓使用者能重試
+  closeProdTagPanel();
+  patchProdTagCell(shop,code);
+  // 標記日晚於當期結束日 → 這期看不到，講清楚免得以為沒存成功
+  const s=state[shop];
+  const end=s?_periodEndDate(s.curMonth,s.curHalf):null;
+  if(end){
+    const later=list.filter(o=>o.date&&o.date>end).length;
+    if(later&&typeof showToast==='function')showToast(`已儲存；其中 ${later} 個標籤的標記日晚於本期，下一期才會顯示`,'info');
+    else if(typeof showToast==='function')showToast('✓ 已儲存測試標籤','success');
+  }else if(typeof showToast==='function')showToast('✓ 已儲存測試標籤','success');
+}
+// 寫入 ec_tags|{通路}。骨架比照 saveSummaryRows（fetch-merge-write + 即時推送），三處刻意不同：
+//   (a) 資料是物件 {商品編號:[{tag,date}]} 不是陣列 → 預設 {}、套改動是 cloud[code]=list
+//   (b) 讀雲端失敗【完全不寫本機、也不寫雲端】，直接回 false：
+//       這個 key 走即時推送、刻意不進 _pendingSyncKeys，所以只寫本機的話沒有任何重試路徑
+//       —— 那筆標籤只活在本機記憶體，下次雲端快照回來就被蓋掉、無聲消失，
+//       按「☁ 同步雲端」也推不上去。寧可整筆不存、叫使用者重按一次（草稿還在面板上）。
+//   (c) 合併成功後本機寫三處（localStorage + _mem + _profitMem）：_cloudRead 優先讀 _profitMem，
+//       少寫它會被雲端舊值遮蔽剛存的新值。這是全函式唯一的本機寫入點。
+//   ⚠ 刻意不走 _cloudWrite / _cloudWriteSafe / _markPending：那條路不上雲、要按同步鈕才推。
+async function saveProdTags(shop,code,list){
+  const k=tagsKey(shop);
+  const writeLocal=(obj)=>{
+    try{localStorage.setItem(k,JSON.stringify(obj));}catch{}
+    try{
+      if(typeof Store!=='undefined'){
+        if(Store._mem) Store._mem[k]=obj;
+        if(Store._profitMem) Store._profitMem[k]=obj;
+      }
+    }catch{}
+  };
+  if(!window.__cloudProfit||typeof window.__cloudProfit.getDoc!=='function'){
+    if(typeof showToast==='function')showToast('⚠ 雲端未連線，未儲存，請稍後重試','error');
+    return false;
+  }
+  let merged;
+  try{
+    const snap=await window.__cloudProfit.getDoc();
+    const cloud=Object.assign({},((snap.exists()?snap.data():{})||{})[k]||{});
+    if(list&&list.length)cloud[code]=list; else delete cloud[code];
+    merged=cloud;
+    // 時間戳只在「真的寫了本機」時才打：它的用途是「剛存過 → 5 秒內不讓雲端快照覆蓋」，
+    //   失敗時什麼都沒寫卻擋掉 5 秒的雲端更新是純副作用。
+    window._shopJustSaved=Date.now();
+    writeLocal(merged);   // 本機同步成合併後版本，避免下次讀本機拿到舊資料
+  }catch(e){
+    console.warn('[saveProdTags] 讀雲端失敗，本機與雲端都不寫（避免寫了卻無法同步、之後被快照無聲蓋掉）',e);
+    if(typeof showToast==='function')showToast('⚠ 雲端讀取失敗，未儲存，請重試','error');
+    return false;
+  }
+  // 推雲端（fire-and-forget，錯了跳 toast）
+  try{
+    const p=window.__cloudProfit.setField(k,merged);
+    if(p&&typeof p.then==='function'){
+      p.catch(e=>{
+        console.error('[saveProdTags] 雲端寫入失敗',e);
+        if(typeof showToast==='function')showToast('❌ 測試標籤雲端寫入失敗','error');
+      });
+    }
+  }catch(e){ console.error('[saveProdTags] 雲端寫入異常',e); }
+  return true;
+}
+// 只換那一格，不走 applyFilters（整表重繪會閃、會清掉捲動位置）。
+//   用 outerHTML 整格替換：buildProdTagCell 的兩個 return 帶著不同的 <td> 屬性
+//   （有無灰字 style），只換 innerHTML 會留下上一種狀態的樣式。
+//   新 <td> 自帶 id + onclick，所以替換後還點得開、下次也 patch 得到。
+function patchProdTagCell(shop,code){
+  const el=document.getElementById('td-'+shop+'-'+code+'-prodTags');
+  if(!el)return;   // 欄位被隱藏 / 該列不在畫面上 → 什麼都不做
+  el.outerHTML=buildProdTagCell(shop,code);
+}
 function buildSuggCell(shop,r){
   if(!r.testTags?.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
   const codeEsc=r.code.replace(/'/g,"\\'");
@@ -3288,6 +3774,7 @@ const PROFIT_COLS=[
   {key:'roi',label:'投入產出'},{key:'roiDiff',label:'實際-目標'},{key:'clicks',label:'點擊數'},
   {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'廣告分析'},{key:'note',label:'廣告調整'},
   {key:'growthRate',label:'成長比',grow:true},{key:'growthAnalysis',label:'成長分析',grow:true},{key:'growthNote',label:'商品調整',grow:true},
+  {key:'prodTags',label:'測試標籤'},
 ];
 const _HCOLS_LS='ec_hcols_user';
 function getHiddenCols(shop){
@@ -3479,12 +3966,12 @@ function renderPnmHistory(){
     let gadj=[];
     if(gnd){if(typeof gnd==='string')gadj=[{date:'',text:gnd}];else gadj=gnd.adjustments||[];}
     const others=[];
-    gadj.forEach((a,i)=>{ if(!(gs&&_inGrowthPeriod(a,gs.curMonth,gs.curHalf))) others.push({date:a.date,text:a.text,i}); });   // 保留原始索引 i
+    gadj.forEach((a,i)=>{ if(!(gs&&_inGrowthPeriod(a,gs.curMonth,gs.curHalf))) others.push({date:a.date,text:a.text,i,period:_growthPeriodOf(a)}); });   // 保留原始索引 i；period 供顯示期間標籤用
     if(!others.length){ wrap.style.display='none'; box.innerHTML=''; return; }
     others.sort((x,y)=>String(y.date||'').localeCompare(String(x.date||'')));   // 日期新到舊
     wrap.style.display='';
     box.innerHTML=others.map(o=>`<div class="pnm-entry">
-      <div class="pnm-entry-date">${/^\d{4}\/\d{2}\/\d{2}$/.test(o.date||'')?o.date:'未記日期'}</div>
+      <div class="pnm-entry-date">${_growthPeriodLabel(o)}</div>
       <div class="pnm-entry-text">${String(o.text||'').replace(/</g,'&lt;')}</div>
       <button class="pnm-entry-del" onclick="deleteProfitNote(${o.i})">×</button>
     </div>`).join('');
@@ -3595,10 +4082,11 @@ function renderTable(shop,list,opts){
     roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算',
     analysisLabel:'廣告分析', note:'廣告調整',
     growthRate:'成長比', growthAnalysis:'成長分析', growthNote:'商品調整',
+    prodTags:'測試標籤',
   };
   const buildColHeader=(c)=>{
     const attrs=dragAttrs(c.key);
-    if(c.key==='note'||c.key==='growthNote')return `<th class="tl" ${attrs}>${HEADER_LABEL[c.key]}</th>`;
+    if(c.key==='note'||c.key==='growthNote'||c.key==='prodTags')return `<th class="tl" ${attrs}>${HEADER_LABEL[c.key]}</th>`;
     if(c.key==='analysisLabel')return thT('analysisLabel',HEADER_LABEL.analysisLabel,'',attrs);
     if(c.key==='growthAnalysis')return thT('growthAnalysisLabel',HEADER_LABEL.growthAnalysis,'',attrs);
     return thN(c.key,HEADER_LABEL[c.key],attrs);
@@ -3638,9 +4126,10 @@ function renderTable(shop,list,opts){
       const MOBIC_BLANK=new Set(['growthRate','growthAnalysis']);
       const mobicCell={
         adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span></td>`,
-        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
+        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
         note:noteCellHtml,
         growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
+        prodTags:buildProdTagCell(shop,r.code),
       };
       const bodyCells=orderedCols.map(c=>{
         if(mobicCell[c.key]!==undefined)return mobicCell[c.key];
@@ -3657,8 +4146,8 @@ function renderTable(shop,list,opts){
       const rowCell={
         adsFee:editTd('adsFee','$'+fmtN(r.adsFee),'td-amber'),
         rev:`<td class="td-num">$${fmtN(r.rev)}<div class="sub-rev">${r.prevRev!==null?'上期 $'+fmtN(r.prevRev):'—'}</div></td>`,
-        gross:`<td class="td-num">$${fmtN(r.gross)}</td>`,
-        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">$${fmtN(r.pureProfit)}</td>`,
+        gross:`<td class="td-num">${_fSigned(r.gross)}</td>`,
+        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
         pureRate:`<td id="td-${shop}-${r.code}-pureRate">${pill(!(r.rev>0)?null:r.pureRate*100)}</td>`,
         adsPct:`<td id="td-${shop}-${r.code}-adsPct" class="td-num">${(r.adsPct*100).toFixed(2)}%</td>`,
         stock:`<td class="td-num">${r.stock.toLocaleString()}</td>`,
@@ -3673,6 +4162,7 @@ function renderTable(shop,list,opts){
         growthRate:`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`,
         growthAnalysis:`<td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`,
         growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
+        prodTags:buildProdTagCell(shop,r.code),
       };
       html+=`<tr>
         <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
@@ -3691,8 +4181,8 @@ function renderTable(shop,list,opts){
   const totalCell={
     adsFee:`<td class="td-num td-amber">$${fmtN(fAds)}</td>`,
     rev:`<td class="td-num">$${fmtN(fRev)}<div class="sub-rev">$${fmtN(fPrevRev)}</div></td>`,
-    gross:`<td class="td-num">$${fmtN(fGross)}</td>`,
-    pureProfit:`<td class="td-num ${fPure>=0?'td-pos':'td-neg'}">$${fmtN(fPure)}</td>`,
+    gross:`<td class="td-num">${_fSigned(fGross)}</td>`,
+    pureProfit:`<td class="td-num ${fPure>=0?'td-pos':'td-neg'}">${_fSigned(fPure)}</td>`,
     pureRate:`<td>${fRev>0?pill(fPure/fRev*100):'—'}</td>`,
     growthRate:`<td class="td-num" style="text-align:center">${fGrowth===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${fGrowth>=0?'#10b981':'#ef4444'};font-weight:700">${fGrowth>=0?'↑':'↓'} ${Math.abs(fGrowth*100).toFixed(0)}%</span>`}</td>`,
   };
@@ -3704,12 +4194,13 @@ function renderTable(shop,list,opts){
   const _tblHost=document.getElementById('tbl-'+shop);
   // keepScroll：覆蓋 innerHTML 會重建 .tscroll，捲動位置歸零。先存舊值、重繪後還原（含 scrollLeft，商品調整欄在最右）。
   let _prevScTop=null,_prevScLeft=null;
-  if(opts&&opts.keepScroll){
+  const _keepSc = (opts&&opts.keepScroll) || _cloudRefreshing;   // 雲端刷新視同 keepScroll
+  if(_keepSc){
     const _oldSc=_tblHost&&_tblHost.querySelector('.tscroll');
     if(_oldSc){_prevScTop=_oldSc.scrollTop;_prevScLeft=_oldSc.scrollLeft;}
   }
   _tblHost.innerHTML=html;
-  if(opts&&opts.keepScroll&&_prevScTop!==null){
+  if(_keepSc&&_prevScTop!==null){
     const _newSc=_tblHost&&_tblHost.querySelector('.tscroll');
     if(_newSc){_newSc.scrollTop=_prevScTop;_newSc.scrollLeft=_prevScLeft;}
   }
@@ -4127,8 +4618,11 @@ function openFocusColPicker(keepOpen){
     document.addEventListener('click',close);
   },0);
 }
-// renderFocus 專用：fmtN 會取絕對值（Math.abs），負數會顯示成正數。
-// 主表靠 CSS class 染紅來表達負值，但這裡需要數字本身就看得出正負。
+// 帶正負號的金額格式（-$133）。fmtN 會取絕對值（Math.abs），負數會顯示成正數。
+// 原本主表只靠 CSS class 染紅來表達負值，使用者回報「淨利 $669 / 淨利率 -132.5%」
+// 自相矛盾看不懂，2026-08-04 起主表的「淨利」「毛利」也改用這個函式。
+// ⚠ 只有 pureProfit / gross 會出現負值（實測 55 份報表 30769 列），
+//   rev / adsFee / dayBudget / prevRev / directROI / roi 皆 0 筆負數，維持用 fmtN。
 function _fSigned(v){
   const n=Number(v)||0;
   return (n<0?'-$':'$')+fmtN(n);
@@ -10253,7 +10747,7 @@ function doExport(shop){
   const built=state[shop]._built;if(!built?.length)return;
   const wb=XLSX.utils.book_new();
   const h=['商品ID','編號','商品名稱','廣告費','營收','毛利','淨利','淨利率%','廣告佔比%','可用庫存','目標ROI','直接投入產出','投入產出','實際-目標','點擊數','日預算','分析','調整備註',
-    '上期營收','成長比','成長分析','成長調整'];
+    '上期營收','成長比','成長分析','成長調整','測試標籤'];
   const exportNotes=getNotes(shop);
   const exportGrowthNotes=getNotes(shop+'_growth');
   const d=built.map(r=>[
@@ -10267,7 +10761,8 @@ function doExport(shop){
     r.prevRev!==null?+r.prevRev.toFixed(0):'-',
     r.growthRate!==null?+((r.growthRate*100).toFixed(2)):'-',
     r.growthAnalysis?.label||'',
-    exportGrowthNotes[r.code]?.adjustments?.map(a=>a.text).join('; ')||''
+    exportGrowthNotes[r.code]?.adjustments?.map(a=>a.text).join('; ')||'',
+    getProdTagsFor(shop,r.code).map(o=>o.date?`${o.tag}(${o.date})`:o.tag).join('、')
   ]);
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([h,...d]),shop);
   XLSX.writeFile(wb,`淨利表_${shop}_${state[shop]._period||''}.xlsx`);
@@ -10406,4 +10901,8 @@ Object.assign(window, {
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
+  openProdTagPanel,closeProdTagPanel,saveProdTagPanel,addProdTagToDraft,removeProdTagFromDraft,
+  saveProdTags,patchProdTagCell,renderProdTagPanelBody,syncProdTagDraftFromDOM,
+  toggleTagDefsSection,addTagDef,removeTagDef,saveTagDefs,countTagUsage,
+  toggleTagHelpSection,
 });
