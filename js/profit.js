@@ -10929,7 +10929,13 @@ function doExport(shop){
     r.targetROI!==null?+r.targetROI.toFixed(2):'-',r.directROI>0?+r.directROI.toFixed(2):'-',
     r.roi>0?+r.roi.toFixed(2):'-',r.roiDiff!==null?+r.roiDiff.toFixed(2):'-',
     r.clicks>0?r.clicks:'-',r.dayBudget>0?+r.dayBudget.toFixed(0):'-',
-    r.analysis?.label||'', exportNotes[r.code]||'',
+    // 廣告分析欄：多標籤化之後這裡是【頓號串接的字串】（例：「低效廣告、減300」），
+    //   不再是單一標籤。⚠ 若有人拿這一欄做 Excel 的 COUNTIF / 樞紐分析，
+    //   用「低效廣告」去比對【不會】命中「低效廣告、減300」——
+    //   要精確計數請改用萬用字元（COUNTIF(範圍,"*低效廣告*")）或先用分欄把頓號拆開。
+    //   ⚠ analysisLabel 由 _anaDerive 保證是字串；`||''` 是給舊快照那種還沒經過
+    //     loadIntoUI、欄位是 undefined 的列兜底，確保這一格永遠是字串不是 undefined。
+    r.analysisLabel||'', exportNotes[r.code]||'',
     r.prevRev!==null?+r.prevRev.toFixed(0):'-',
     r.growthRate!==null?+((r.growthRate*100).toFixed(2)):'-',
     r.growthAnalysis?.label||'',
