@@ -2361,7 +2361,7 @@ function buildProgressHtml(person){
       <span class="adj-prog-legend"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span></span>
     </div>
     ${rows}
-    <div class="adj-prog-note">依通路負責人歸屬，非個人操作紀錄；點通路列展開明細<br>一個商品可能同時有多個標籤，各標籤分別計算，加總會大於商品數；完成看「該商品有沒有調整紀錄」、不分標籤 —— 打一筆調整，該商品的所有標籤都算完成</div>
+    <details class="adj-prog-note"><summary>說明</summary><div class="adj-prog-note-body">依通路負責人歸屬，非個人操作紀錄；點通路列展開明細<br>一個商品可能同時有多個標籤，各標籤分別計算，加總會大於商品數；完成看「該商品有沒有調整紀錄」、不分標籤 —— 打一筆調整，該商品的所有標籤都算完成</div></details>
   </div>`;
 }
 // 第六塊：某人某日的「淨利表調整」區塊，注入人員卡片底部。只留標題 + 兩排 pill，明細改走彈窗。
