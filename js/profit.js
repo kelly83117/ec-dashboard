@@ -2171,7 +2171,7 @@ function openAnaSettings(shop){
   if(!ov){
     ov=document.createElement('div');ov.id='ana-overlay';ov.className='ana-overlay';
     ov.innerHTML=`<div class="ana-modal" onclick="event.stopPropagation()">
-      <div class="ana-modal-hdr"><span class="ana-modal-title">⚙ 分析標籤設定</span><button class="ana-modal-x" onclick="closeAnaSettings()">✕</button></div>
+      <div class="ana-modal-hdr"><span class="ana-modal-title">⚙ 廣告分析設定</span><button class="ana-modal-x" onclick="closeAnaSettings()">✕</button></div>
       <div class="ana-modal-body" id="ana-modal-body"></div>
       <div class="ana-modal-ftr">
         <button class="ana-cancel-btn" onclick="closeAnaSettings()">取消</button>
@@ -2451,7 +2451,7 @@ function renderAnaModalBody(){
     <div class="ana-rule-row"><span class="ana-rule-tag tag-sub300">減300</span>${dispNote('減300')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub300',t.sub300)}</span>${trash('減300','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-sub200">減200</span>${dispNote('減200')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub200',t.sub200)}</span>${trash('減200','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-sub100">減100</span>${dispNote('減100')}<span class="ana-rule-desc">直接ROI差距（實際-目標）≤ ${inp('sub100',t.sub100)}</span>${trash('減100','disableAnaTag')}</div>
-    <div class="ana-sec-hdr">分析標籤</div>
+    <div class="ana-sec-hdr">廣告分析</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-high">高利潤商品</span><span class="ana-rule-desc">廣告費=0 且 純利率 > ${inp('highMinH',t.highMinH,'0.1')} %</span>${trash('高利潤商品','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">賠錢中</span><span class="ana-rule-desc">廣告費 > 0 且 淨利 &lt; 0</span>${trash('賠錢中','disableAnaTag')}</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-low">低淨利</span><span class="ana-rule-desc">就算廣告全砍掉，淨利率也到不了 20%<br><span style="color:#9ca3af;font-size:11px">判定：目標ROI ≤ 0，即 1/(淨利率% ＋ 廣告佔比 − 20%) 的分母 ≤ 0（該欄顯示「—」）</span></span>${trash('低淨利','disableAnaTag')}</div>
@@ -2527,11 +2527,21 @@ function reapplyAnaToAll(){
   });
 }
 
-// ── 測試標籤（純自訂規則，沿用分析標籤同一套條件引擎，但獨立存放） ──
+// ── 測試標籤（純自訂規則，沿用廣告分析同一套條件引擎，但獨立存放） ──
 // 預設帶一筆規則進來：原本獨立「建議」功能唯一的規則（廣告效率過低，
 // 點擊數>100 且 投入產出<10），併入測試標籤後就不用再維護獨立的建議規則系統。
+//
+// 🔴 這個常數只是「使用者從沒存過設定時」的回落值，不是唯一真相來源。
+//   getCustomTestRules() 是 `_cloudRead('ec_test_custom') || TEST_DEFAULT_RULES` —
+//   只要有人在測試標籤 Modal 按過一次「儲存並套用」，saveTestSettings() 就會把整份
+//   草稿（含這條預設規則）寫進 ec_test_custom（localStorage + Firestore），
+//   之後 _cloudRead 一律讀得到雲端那份，**本常數再也不會被讀到**。
+//   ⇒ 在這裡改 label（例如「建議關閉廣告」→「關閉廣告」）對「已經存過設定」的環境
+//     完全無效，畫面上還是舊名字。那種環境必須另外開測試標籤 Modal（⚙），
+//     把名稱欄位手動改掉再按「儲存並套用」，才會真的改到 ec_test_custom。
+//   ⇒ 只有全新的、從沒存過 ec_test_custom 的環境才吃得到這裡的預設值。
 const TEST_DEFAULT_RULES=[
-  {label:'建議關閉廣告',cls:'tag-bad',conds:[{f:'O',op:'>',v:'100'},{f:'R',op:'<',v:'10'}]},
+  {label:'關閉廣告',cls:'tag-bad',conds:[{f:'O',op:'>',v:'100'},{f:'R',op:'<',v:'10'}]},
 ];
 function getCustomTestRules(){
   const v=_cloudRead('ec_test_custom');
@@ -2873,7 +2883,7 @@ function updateTagFilterBar(shop){
     <div class="tfrow-pills">${testPills||'<span style="font-size:11px;color:#9ca3af;padding:5px 0">尚無測試標籤，點 ⚙ 新增</span>'}</div>
   </div>`;
   const row1=`<div class="tfrow">
-    <div><span class="tfrow-lbl">分析標籤</span><button class="ana-gear-btn" onclick="openAnaSettings('${shop}')" title="設定分析規則">⚙</button></div>
+    <div><span class="tfrow-lbl">廣告分析</span><button class="ana-gear-btn" onclick="openAnaSettings('${shop}')" title="設定分析規則">⚙</button></div>
     <div class="tfrow-pills">${fixedPills}${addDrop}${subDrop}${customPills}</div>
   </div>`;
   let row2='';
@@ -10771,7 +10781,7 @@ function initShopUI(shop){
 function doExport(shop){
   const built=state[shop]._built;if(!built?.length)return;
   const wb=XLSX.utils.book_new();
-  const h=['商品ID','編號','商品名稱','廣告費','營收','毛利','淨利','淨利率%','廣告佔比%','可用庫存','目標ROI','直接投入產出','投入產出','實際-目標','點擊數','日預算','分析','調整備註',
+  const h=['商品ID','編號','商品名稱','廣告費','營收','毛利','淨利','淨利率%','廣告佔比%','可用庫存','目標ROI','直接投入產出','投入產出','實際-目標','點擊數','日預算','廣告分析','調整備註',
     '上期營收','成長比','成長分析','成長調整','測試標籤'];
   const exportNotes=getNotes(shop);
   const exportGrowthNotes=getNotes(shop+'_growth');
