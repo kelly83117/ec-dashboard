@@ -1215,7 +1215,7 @@ function loadIntoUI(shop,built,period,days){
     built.forEach(r=>{
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.analysisLabel=r.analysis?.label||'';
-      r.testTags=calcTestTags(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
+      r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
     });
@@ -2106,6 +2106,13 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, 
   const t=getAnaThresh();
   const dis=new Set(getDisabledAnaTags());
   const ok=l=>!dis.has(l);
+  // 🔴 H=pureRate*100：把資料層的【小數】0.238 轉成【百分數】23.8。
+  //   下面所有門檻（t.dangerMaxH / t.highMinH / t.badAdsMaxH）以及自訂規則的比對值
+  //   都是百分數 —— ANA_FIELD_OPTS 把欄位標成「淨利率%(H)」，使用者填的就是 20 不是 0.2。
+  //   ⚠ calcTestTags 用【同一套】正規化（那邊叫 Hpct），共用 ANA_FIELD_OPTS 與 evalAnaConds。
+  //     改這一行 = 兩邊都要改，只改一邊會讓兩套規則的 H 單位不一致。
+  //     （2026-08-05 就是因為 calcTestTags 漏了 *100，「淨利率%(H) <= 20」恆為 true。）
+  //   ⚠ 別拿這裡去比照修 calcGrowthAnalysis 的 G：那邊 G 是小數、方向相反，另案。
   const D=adsFee, H=pureRate*100, K=targetROI, N=roiDiff, O=clicks, P=pureProfit, R=roi;
   if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
   if(ok('高利潤商品')&&D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
@@ -2512,7 +2519,7 @@ function reapplyAnaToAll(){
     built.forEach(r=>{
       r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.analysisLabel=r.analysis?.label||'';
-      r.testTags=calcTestTags(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
+      r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
     });
@@ -2534,9 +2541,27 @@ function saveCustomTestRules(r){_cloudWrite('ec_test_custom',r);}
 // 回傳「全部」符合條件的規則（不是只回傳第一個命中的），
 // 讓同一列可以同時掛多個測試標籤。
 function calcTestTags(D,H,K,N,O,P,R){
+  // ── H 正規化（2026-08-05 修）：與 calcAnalysis 的同名處理是同一套，改一邊一定要改另一邊 ──
+  //   🔴 evalAnaConds 收到的 H 必須是【百分數】23.8，不是【小數】0.238。
+  //      進來的參數 H 是資料層的 pureRate = pureProfit/rev，存的是小數（見 buildShop 的
+  //      `const pureRate=p.rev>0?pureProfit/p.rev:null`）；但 ANA_FIELD_OPTS 把這個欄位標成
+  //      「淨利率%(H)」，使用者在設定 Modal 填的是 20 而不是 0.2，所以這裡一定要 *100 才對得上。
+  //      本函式原本漏了這步 → 「淨利率%(H) <= 20」恆為 true（pureRate 上限就是 1.0）、
+  //      該條件完全失效，篩出來的商品混進一堆淨利率遠大於 20% 的。
+  //   ⚠ 不要拿這裡去比照修 calcGrowthAnalysis 的 G：那邊的 G 目前是【小數】，內建門檻靠
+  //      t.risePct/100 反向對齊，方向跟這裡相反。雖然 GROWTH_FIELD_OPTS 也標成「成長率%(G)」，
+  //      但那是同性質的另一個 bug，要另案處理，別順手改成 G*100。
+  //   ⚠ 零營收(rev=0)的列 pureRate 是 null，這裡刻意保留 null、不讓它塌成 0。
+  //      JS 的 null*100 === 0，直接寫 H*100 會把零營收列變成「淨利率 0%」而被誤標。
+  //      保留 null 後由 evalAnaConds 開頭的 null guard 擋掉，而且是【逐條件】擋：
+  //      規則裡有用到 H 的 → 該條件不成立 → 整條規則不成立；規則裡沒有 H 條件的 →
+  //      完全不受影響，零營收列照舊參與判斷。語義同欄位篩選 applyFilters 的
+  //      「零營收無淨利率，不納入任何 pureRate 數值篩選」。
+  //      ⚠ 呼叫端要配合傳 `r.pureRate??null`（不能是 `||0`，那會先把 null 變成 0）。
+  const Hpct=(H===null||H===undefined||!isFinite(H))?null:H*100;
   const out=[];
   for(const ct of getCustomTestRules()){
-    if(evalAnaConds(ct.conds,{D,H,K,N,O,P,R}))out.push({label:ct.label,cls:ct.cls||'tag-add100'});
+    if(evalAnaConds(ct.conds,{D,H:Hpct,K,N,O,P,R}))out.push({label:ct.label,cls:ct.cls||'tag-add100'});
   }
   return out;
 }
@@ -2544,7 +2569,7 @@ function reapplyTestTagToAll(){
   SHOPS.forEach(s=>{
     const built=state[s.id]._built;if(!built)return;
     built.forEach(r=>{
-      r.testTags=calcTestTags(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
+      r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
     });
     applyFilters(s.id);
   });
