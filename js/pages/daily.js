@@ -2338,9 +2338,12 @@ function buildProgressHtml(person){
         const{t,d}=obj[l];
         return`<div class="adj-prog-row adj-prog-sub"><span class="adj-prog-shop">${escapeHtml(window.mapAnaLabel?window.mapAnaLabel(l):l)}</span>${flat(d,t)}</div>`;
       };
-      // 分組小總結:該組所有標籤桶的加總(一商品雙標籤會重複計,語意為「標籤完成度」)。
+      // 分組小總結:該組所有標籤桶的加總(一商品多標籤會重複計,語意為「標籤完成度」)。
+      //   ⚠ 多標籤化(calcAnalysisAll)之後,重複計【不只發生在跨組】(廣告標籤+成長標籤):
+      //     廣告分析【組內部也會】——一個商品同時有「低效廣告」和「減300」,gt 就 +2。
       // 不畫條:分組分母是「標籤數」、通路列分母是「商品數」，兩者不可比，
-      // 並排長條會誘導無效比較（例:好麻吉 826，廣告 563+成長 570=1133 > 總數）。
+      // 並排長條會誘導無效比較（例:好麻吉 822 列，廣告分析標籤 483 個（多標籤化前 403））。
+      //   ⚠ 這組數字是 2026-08-06 多標籤化當天量的，之後報表更新會變，拿來對帳前先自己重量一次。
       return`<div class="adj-prog-row adj-prog-grp"><span class="adj-prog-shop">${escapeHtml(title)}</span>${flat(gd,gt)}</div>`
         +(pending.length?`<div class="adj-prog-subs">`+pending.map(sub).join('')+`</div>`:'')
         +(done.length?`<details class="adj-prog-done"><summary>已完成 ${done.length} 項</summary><div class="adj-prog-subs">`+done.map(sub).join('')+`</div></details>`:'');
@@ -2358,7 +2361,7 @@ function buildProgressHtml(person){
       <span class="adj-prog-legend"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span></span>
     </div>
     ${rows}
-    <div class="adj-prog-note">依通路負責人歸屬，非個人操作紀錄；點通路列展開明細；各標籤分母為帶該標籤的商品數</div>
+    <div class="adj-prog-note">依通路負責人歸屬，非個人操作紀錄；點通路列展開明細<br>一個商品可能同時有多個標籤，各標籤分別計算，加總會大於商品數；完成看「該商品有沒有調整紀錄」、不分標籤 —— 打一筆調整，該商品的所有標籤都算完成</div>
   </div>`;
 }
 // 第六塊：某人某日的「淨利表調整」區塊，注入人員卡片底部。只留標題 + 兩排 pill，明細改走彈窗。

@@ -3487,12 +3487,26 @@ function shopLabelProgress(shop){
   rows.forEach(r=>{
     const isDone=done.has(r.code)||!!(r.note&&String(r.note).trim());
     if(isDone)doneTotal++;
-    let al='',gl='';
+    // ⚠ alAll 初值必須是 []（不是 '' 也不是 null）：calcAnalysisAll 若 throw，catch 吃掉之後
+    //   alAll 仍是空陣列 → 該列不計入任何廣告標籤，與舊版「throw → al 維持 '' → 不計入」
+    //   的行為完全一致。初值若非陣列，下方 forEach 會二次 throw 且沒有 catch 保護。
+    let alAll=[],gl='';
     try{
-      al=calcAnalysis(r.adsFee,r.pureRate,r.targetROI,r.roiDiff,r.clicks,r.pureProfit,r.roi).label||'';
+      alAll=calcAnalysisAll(r.adsFee,r.pureRate,r.targetROI,r.roiDiff,r.clicks,r.pureProfit,r.roi)||[];
       gl=calcGrowthAnalysis(r.growthRate,r.rev,r.prevRev,r.pureRate).label||'';
     }catch(e){}
-    if(al){(ana[al]=ana[al]||{t:0,d:0}).t++;if(isDone)ana[al].d++;}
+    // 多標籤：陣列裡每個標籤各自累計一次 t / d。
+    //   🔴 同列去重（seen）：ana[label].t 的語義是「帶該標籤的【商品數】」，而畫面上的
+    //     .adj-prog-note 就是這樣對使用者宣告的。自訂規則若跟內建標籤同名（或兩條自訂規則
+    //     同名），同一列會產生兩個同名元素、把分母灌成 2 —— 那句話就成了假的。
+    //     （同 daily.js 的 _adjAnaBucket，為同一個撞名情境去重。）
+    //   ⚠ 分子 isDone 是「這個商品有沒有調整紀錄」，不分標籤 —— 一個商品兩個標籤、只打一筆
+    //     調整，兩個標籤都算完成。這是已知且刻意接受的限制，畫面上的 .adj-prog-note 有講。
+    const seen=new Set();
+    alAll.forEach(a=>{
+      const l=a&&a.label;if(!l||seen.has(l))return;seen.add(l);
+      (ana[l]=ana[l]||{t:0,d:0}).t++;if(isDone)ana[l].d++;
+    });
     if(gl){(growth[gl]=growth[gl]||{t:0,d:0}).t++;if(isDone)growth[gl].d++;}
   });
   return{month,half,total:rows.length,doneTotal,ana,growth};
