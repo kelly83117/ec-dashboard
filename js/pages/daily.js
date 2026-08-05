@@ -1960,6 +1960,7 @@ function collectAdjustments() {
   const mem = (window.Store && Store._profitMem) || {};
   // 第四塊：標籤一律重算。profit.js 排在 daily.js 之後 import，calc 可能還沒掛好。
   const hasCalc = typeof window.calcAnalysis === 'function'
+               && typeof window.calcAnalysisAll === 'function'
                && typeof window.calcGrowthAnalysis === 'function';
   if (!hasCalc) console.warn('[collectAdjustments] window.calcAnalysis / calcGrowthAnalysis 尚未就緒（profit.js 可能還沒載完），本次不計算標籤，下次呼叫重試');
   let labelErrCount = 0;   // calc throw 的列數，迴圈後統一 warn 一次（別每列洗版）
@@ -1973,13 +1974,19 @@ function collectAdjustments() {
     seen.add(dk);
     out.push(rec);
   };
-  // 標籤計算抽成共用：報表列 row → {anaLabel,anaCls,growthLabel,growthCls}；無 row / calc 未就緒 → 全空
+  // 標籤計算抽成共用：報表列 row → {anaAll,anaLabel,anaCls,growthLabel,growthCls}；無 row / calc 未就緒 → 全空
   const _labelsOf = (row) => {
-    const r = { anaLabel:'', anaCls:'', growthLabel:'', growthCls:'' };
+    const r = { anaAll: [], anaLabel:'', anaCls:'', growthLabel:'', growthCls:'' };
     if (!hasCalc || !row) return r;
     try {
-      const _a = window.calcAnalysis(row.adsFee, row.pureRate, row.targetROI, row.roiDiff, row.clicks, row.pureProfit, row.roi);
-      r.anaLabel = _a.label; r.anaCls = _a.cls || '';
+      // 多標籤：改讀 calcAnalysisAll 的陣列（anaAll）。anaLabel / anaCls 仍取 [0]、【維持字串型別】——
+      //   🔴 _adjRecsForGroup 與 buildCardAdjustments 的「未分類」判定是 `!r.anaLabel && !r.growthLabel`，
+      //     而 JS 的空陣列 [] 是 truthy。把 anaLabel 改成陣列會讓「未分類」永遠判定成「有標籤」、
+      //     那個桶靜默消失。所以這裡刻意【新增】anaAll 而不是改 anaLabel 的型別。
+      //     （與 profit.js 同一套做法：保留 analysis，另外新增 analysisAll。）
+      const _a = window.calcAnalysisAll(row.adsFee, row.pureRate, row.targetROI, row.roiDiff, row.clicks, row.pureProfit, row.roi);
+      r.anaAll = Array.isArray(_a) ? _a : [];
+      r.anaLabel = r.anaAll[0]?.label || ''; r.anaCls = r.anaAll[0]?.cls || '';
       const _g = window.calcGrowthAnalysis(row.growthRate, row.rev, row.prevRev, row.pureRate);
       r.growthLabel = _g.label; r.growthCls = _g.cls || '';
     } catch (e) { labelErrCount++; }
@@ -2018,7 +2025,7 @@ function collectAdjustments() {
 
       // 第四塊：每列只算一次標籤（各段共用，切多段不重算）。一律重算、不讀 row.analysisLabel（避免舊規則快照）。
       //   getAdjIndex() 在月曆 render 迴圈裡跑，任何 throw 都會炸掉整頁 → 每列 try/catch，該列給空標籤並累計。
-      const { anaLabel, anaCls, growthLabel, growthCls } = _labelsOf(row);
+      const { anaAll, anaLabel, anaCls, growthLabel, growthCls } = _labelsOf(row);
 
       const re = /(\d{1,2})\/(\d{1,2})/g;         // 找所有「月/日」
       const marks = [];
@@ -2034,7 +2041,7 @@ function collectAdjustments() {
       const pushSeg = (dateStr, rawText) => {
         const text = trimSeg(rawText);
         if (!text) return;                          // 空段丟掉
-        _pushRec({ date: dateStr, shop, code: row.code, name: (row.name || ''), text, anaLabel, anaCls, growthLabel, growthCls, period: parts[2] + '|' + parts[3], src: 'report' });
+        _pushRec({ date: dateStr, shop, code: row.code, name: (row.name || ''), text, anaAll, anaLabel, anaCls, growthLabel, growthCls, period: parts[2] + '|' + parts[3], src: 'report' });
       };
 
       if (marks.length === 0) { pushSeg(null, note); return; }  // 無日期 → 整段 date=null
@@ -2084,7 +2091,7 @@ function collectAdjustments() {
         const L = _labelsOf(row);
         _pushRec({
           date, shop, code, name: (row && row.name) || (nameIdx[shop] && nameIdx[shop][code]) || '', text,
-          anaLabel: L.anaLabel, anaCls: L.anaCls,
+          anaAll: L.anaAll, anaLabel: L.anaLabel, anaCls: L.anaCls,
           growthLabel: L.growthLabel, growthCls: L.growthCls,
           period: period || '', src
         });
@@ -2137,16 +2144,44 @@ function _warnAdjClsMismatch(label, a, b) {
 
 // 第六塊：淨利 pill 排序（警訊優先）；不在清單者（自訂規則）排在建議調預算後、未分類前
 const ADJ_ANA_ORDER = ['賠錢中', '危險商品', '低效廣告', '低淨利', '高利潤商品', '建議調預算'];
-// 淨利分桶：加/減 系列（級距是設定值，用前綴判斷、不寫死字串）合併成「建議調預算」，其餘用 anaLabel
+// 淨利分桶：加/減 系列（級距是設定值，用前綴判斷、不寫死字串）合併成「建議調預算」，其餘用 label 本身。
+// 單一 label → 桶名。空 label → null。
+//   ⚠ 這是「label → 桶」規則的【唯一一份】：_adjAnaBucket（給 _adjRecsForGroup 用）與
+//     buildCardAdjustments 的 cls 對應都走它。不要在任一邊另外複製一份前綴判斷，
+//     否則日後改級距前綴時兩邊會走鐘。
+function _adjAnaBucketOf(label) {
+  if (!label) return null;
+  return (label.startsWith('加') || label.startsWith('減')) ? '建議調預算' : label;
+}
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║ 🔴🔴 破壞性變更（多標籤化）：回傳型別已從「字串 | null」改成【陣列】 🔴🔴 ║
+// ║                                                                          ║
+// ║   呼叫端一律用 .includes(桶名) 判斷，【絕對不要】用 === 比對。            ║
+// ║   `_adjAnaBucket(r) === '低效廣告'` 會【永遠是 false 且不報錯】——         ║
+// ║   陣列跟字串比對恆不相等，靜默失效、症狀是該桶整個消失。                  ║
+// ║   函式名稱沒變、語義變了，照舊印象寫的程式碼看起來完全正確。              ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+// 一筆 rec 屬於哪些淨利桶 →【去重後的桶名陣列】；沒有任何標籤 → 空陣列 []。
+//   🔴 去重是必要的：多個階梯標籤都會映到同一個「建議調預算」。calcAnalysisAll 的階梯是
+//     if / else if 鏈、理論上一列最多命中一個階梯標籤，但自訂規則的名稱也可能以「加」「減」
+//     開頭，所以不能假設不會撞；撞了會讓同一筆在同一個桶裡被計兩次。
+//   ⚠ 順序沿用 anaAll（= calcAnalysisAll 的 push 順序：內建 → 自訂 → 階梯），這裡不排序；
+//     pill 的顯示順序由 buildCardAdjustments 的 anaRank / ADJ_ANA_ORDER 負責。
+//   ⚠ 沒有「有 anaLabel 但沒 anaAll」的回退：兩者同源、由 _labelsOf 同時寫入，
+//     而 rec 只活在 _adjIndexCache（模組層記憶體、不落地、不跨版本存活）。
 function _adjAnaBucket(r) {
-  if (!r.anaLabel) return null;
-  return (r.anaLabel.startsWith('加') || r.anaLabel.startsWith('減')) ? '建議調預算' : r.anaLabel;
+  const out = [];
+  (r.anaAll || []).forEach(a => {
+    const b = _adjAnaBucketOf(a && a.label);
+    if (b && !out.includes(b)) out.push(b);
+  });
+  return out;
 }
 // pill 計數與 modal 明細「唯一來源」：取某人某日某 (kind, group) 的紀錄陣列
 function _adjRecsForGroup(recs, kind, group) {
   if (kind === 'growth') return recs.filter(r => r.growthLabel === group);
   if (group === '未分類') return recs.filter(r => !r.anaLabel && !r.growthLabel);
-  return recs.filter(r => _adjAnaBucket(r) === group);   // 含「建議調預算」合併桶
+  return recs.filter(r => _adjAnaBucket(r).includes(group));   // 含「建議調預算」合併桶；多標籤 → 一筆可命中多個桶
 }
 // 「有動作」關鍵字：反向判斷——text 出現任一關鍵字＝有動作，否則沉底歸「沒有動作」。
 //   「開頭是什麼」不穩（例：「清倉品先不動」開頭是清倉品），改偵測動作字眼是否出現。這條之後可能再調。
@@ -2194,6 +2229,7 @@ let _adjLabelsReady = false;
 //   下次呼叫時 calc 好了才重建一次。
 function getAdjIndex() {
   const calcOk = typeof window.calcAnalysis === 'function'
+              && typeof window.calcAnalysisAll === 'function'
               && typeof window.calcGrowthAnalysis === 'function'
               && typeof window._growthPeriodOf === 'function';   // 第二趟的商品調整也依賴它
   if (_adjIndexCache && (_adjLabelsReady || !calcOk)) return _adjIndexCache;
@@ -2355,8 +2391,20 @@ function buildCardAdjustmentsHtml(person, viewDate) {
     else if (firstCls[k] !== cls) _warnAdjClsMismatch(label, firstCls[k], cls);
   };
   recs.forEach(r => {
-    const b = _adjAnaBucket(r);
-    if (b) { anaLabelSet.add(b); if (b !== '建議調預算') noteCls('ana', b, r.anaCls); } // 合併桶不驗 cls
+    // 多標籤：走訪 anaAll，每個標籤各自映射成桶（桶名規則走共用的 _adjAnaBucketOf）。
+    //   🔴 cls 餵的是【該標籤自己的 a.cls】，不是 r.anaCls —— r.anaCls 是 anaAll[0] 的 cls，
+    //     一筆有多個標籤時拿它去驗別的桶會讓 _warnAdjClsMismatch 誤報
+    //     （例：[0] 是「低效廣告」棕色，卻拿去驗「低淨利」桶該不該是橘色）。
+    //   ⚠ 這裡刻意不呼叫 _adjAnaBucket：那支只回桶名、丟掉了 label→cls 的對應關係。
+    //     兩邊桶名規則同源（都是 _adjAnaBucketOf），所以 pill 清單與 _adjRecsForGroup
+    //     算出來的計數一定對得上，不會出現「有 pill 但計數 0」。
+    //   anaLabelSet 是 Set：同一筆的多個階梯標籤都映到「建議調預算」時天然去重。
+    (r.anaAll || []).forEach(a => {
+      const b = _adjAnaBucketOf(a && a.label);
+      if (!b) return;
+      anaLabelSet.add(b);
+      if (b !== '建議調預算') noteCls('ana', b, a.cls);   // 合併桶不驗 cls
+    });
     if (r.growthLabel) { growthLabelSet.add(r.growthLabel); noteCls('growth', r.growthLabel, r.growthCls); }
   });
   if (recs.some(r => !r.anaLabel && !r.growthLabel)) anaLabelSet.add('未分類');
