@@ -2948,8 +2948,24 @@ function updateTagFilterBar(shop){
   const built=state[shop]._built;if(!built||!built.length){bar.innerHTML='';return;}
   const sel=state[shop].tagFilters||[];
   const counts={};
+  // ⚠ 廣告分析改多標籤（calcAnalysisAll）後的計數行為，三件事要分清楚：
+  //
+  //   ① 各 pill 的計數【加總會大於總列數】—— 一列可以同時掛「低效廣告」和「減300」，
+  //      兩個 pill 各 +1。這是預期行為。
+  //
+  //   ② 加預算 / 減預算下拉的小計（下方 mkDrop 的 lbls.reduce）【沒有重複計數】，
+  //      因為 calcAnalysisAll 的加減階梯是 if / else if 鏈、一列最多只命中一個階梯標籤，
+  //      所以小計恰好等於「有該類階梯標籤的列數」。
+  //
+  //   ③ 🔴 但小計的【數值會比多標籤化之前大】—— 這不是算錯，別往別的地方找原因。
+  //      以前同時符合「低效廣告」和「減300」的列，first-match 只給得到「低效廣告」，
+  //      那些列現在才拿得到階梯標籤，於是被算進小計。
+  //      實測好麻吉 2026/07 下半月：加預算 70→71、減預算 154→177
+  //      （同一列出現 2 個以上階梯標籤的：0 筆，佐證 ②）。
+  //
+  //   「全部」那顆 pill 用的是 built.length，不是 counts 加總，不受以上任何一點影響。
   built.forEach(r=>{
-    const a=r.analysis?.label;if(a)counts[a]=(counts[a]||0)+1;
+    (r.analysisAll||[]).forEach(a=>{if(a.label)counts[a.label]=(counts[a.label]||0)+1;});
     const g=r.growthAnalysis?.label;if(g)counts[g]=(counts[g]||0)+1;
     (r.testTags||[]).forEach(tt=>{counts[tt.label]=(counts[tt.label]||0)+1;});
   });
@@ -3044,7 +3060,7 @@ function applyFilters(shop,opts){
   const q=(s.search||'').trim().toLowerCase();
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
-  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l||(r.testTags||[]).some(tt=>tt.label===l)));
+  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l||(r.testTags||[]).some(tt=>tt.label===l)));
   if(s.suggFilterActive)list=list.filter(r=>r.testTags?.length);
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
