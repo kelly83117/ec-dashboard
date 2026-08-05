@@ -2102,7 +2102,22 @@ function evalAnaConds(conds,vals){
 
 // ── 分析公式 ──
 // $D=廣告費, $H=淨利率%, $K=目標ROI, $N=實際-目標, $O=點擊數, $P=純利
-function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, roi){
+//
+// 🔴 相容性契約（動這段之前務必讀完）
+//   calcAnalysisAll 是唯一的判定邏輯；calcAnalysis 只是取 [0] 的薄包裝。
+//   所以 push 的順序【必須】等於舊版 first-match-wins 的 return 順序：
+//     危險商品 → 高利潤商品 → 賠錢中 → 低淨利 → 低效廣告
+//       → 自訂規則（依 getCustomAnaRules() 的陣列序）→ 加減階梯（最多 1 個）
+//   任何重排都會改變 calcAnalysis 的回傳值，連帶影響表格標籤格、標籤篩選、
+//   Excel 匯出、以及 daily.js 工作日誌的 pill 分桶。要加新標籤請接在
+//   對應區段的尾端，不要插隊。
+//
+// 本次（first-match → 多標籤）只改控制流，判斷條件一字未動：
+//   ① 五條內建的 return → push，push 完繼續往下跑
+//   ② 自訂規則迴圈的 return → push，不 break，多條命中就都收
+//   ③ 階梯前的早退 return → ladderOk 閘門（見下方說明）
+//   ④ 階梯七條改 if / else if 鏈維持互斥（見下方說明）
+function calcAnalysisAll(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, roi){
   const t=getAnaThresh();
   const dis=new Set(getDisabledAnaTags());
   const ok=l=>!dis.has(l);
@@ -2114,9 +2129,10 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, 
   //     （2026-08-05 就是因為 calcTestTags 漏了 *100，「淨利率%(H) <= 20」恆為 true。）
   //   ⚠ 別拿這裡去比照修 calcGrowthAnalysis 的 G：那邊 G 是小數、方向相反，另案。
   const D=adsFee, H=pureRate*100, K=targetROI, N=roiDiff, O=clicks, P=pureProfit, R=roi;
-  if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
-  if(ok('高利潤商品')&&D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
-  if(ok('賠錢中')&&D>0 && P<0) return{label:'賠錢中',cls:'tag-lose'};
+  const out=[];
+  if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) out.push({label:'危險商品',cls:'tag-danger'});
+  if(ok('高利潤商品')&&D===0 && H>t.highMinH) out.push({label:'高利潤商品',cls:'tag-high'});
+  if(ok('賠錢中')&&D>0 && P<0) out.push({label:'賠錢中',cls:'tag-lose'});
   // 低淨利（2026-08-04 修正）：回歸老闆原始定義 =IF(K<=0,"-",L-K)，K=目標ROI、L=直接投入產出。
   //   K = 1/(淨利率% + 廣告佔比 - 20%)。K<=0 ⇔ 分母<=0 ⇔ 就算廣告全砍也達不到 20% 淨利率。
   //   ⚠ 本檔實作是「分母>0 才算，否則存 null」（見 buildShop / recalcRow 的 targetROI），
@@ -2126,20 +2142,48 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, 
   //     （directROI=0）。後者跟淨利率無關，害沒廣告的健康商品（淨利率 25%、K=19）被誤標。
   //   ⚠ 舊版另一條「D>0 且 K<0」漏掉 K===null 的情況，害有廣告又真的達不到 20% 的商品完全沒標籤。
   //   K<0 必須保留：舊報表存過負值（實測有 -365.85），不是死碼。
-  if(ok('低淨利')&&(K===null||K===undefined||!isFinite(K)||K<0)) return{label:'低淨利',cls:'tag-low'};
-  if(ok('低效廣告')&&D>0 && H>=0 && H<t.badAdsMaxH) return{label:'低效廣告',cls:'tag-bad'};
+  if(ok('低淨利')&&(K===null||K===undefined||!isFinite(K)||K<0)) out.push({label:'低淨利',cls:'tag-low'});
+  if(ok('低效廣告')&&D>0 && H>=0 && H<t.badAdsMaxH) out.push({label:'低效廣告',cls:'tag-bad'});
+  // 自訂規則：舊版命中第一條就 return，這裡改成【全收】，多條都命中就都掛上。
+  //   calcAnalysis 取 [0]，拿到的仍是第一條命中的 → 與舊行為一致。
+  //   ⚠ 這裡刻意不套 ok()：停用清單（ec_ana_disabled）只管內建標籤，自訂規則沒有停用
+  //     機制（要移除只能在設定 Modal 刪掉整條）。維持原樣，舊版這個迴圈也沒有 ok()。
+  //   ⚠ 效能：舊版命中內建標籤就 return、根本不會跑到這裡；現在每一列都會跑完整個迴圈，
+  //     evalAnaConds 呼叫次數 = 列數 × 自訂規則數。這是刻意接受的成本（換單一真相來源），
+  //     不要為此在 calcAnalysis 裡另開一條 early-return 快速路徑（兩套邏輯會走鐘）。
   for(const ct of getCustomAnaRules()){
-    if(evalAnaConds(ct.conds,{D,H,K,N,O,P,R}))return{label:ct.label,cls:ct.cls||'tag-add100'};
+    if(evalAnaConds(ct.conds,{D,H,K,N,O,P,R}))out.push({label:ct.label,cls:ct.cls||'tag-add100'});
   }
-  if(N===null||N===undefined||!isFinite(N)||O<t.clickMin) return{label:'',cls:''};
-  if(ok('加300')&&N>=t.add300) return{label:'加300',cls:'tag-add300'};
-  if(ok('加200')&&N>=t.add200) return{label:'加200',cls:'tag-add200'};
-  if(ok('加100')&&N>=t.add100) return{label:'加100',cls:'tag-add100'};
-  if(ok('加50')&&N>=t.add50&&N<t.add100) return{label:'加50',cls:'tag-add50'};
-  if(ok('減300')&&N<=t.sub300) return{label:'減300',cls:'tag-sub300'};
-  if(ok('減200')&&N<=t.sub200) return{label:'減200',cls:'tag-sub200'};
-  if(ok('減100')&&N<=t.sub100) return{label:'減100',cls:'tag-sub100'};
-  return{label:'',cls:''};
+  // 加減階梯的前提。舊版是 `if(...) return{label:'',cls:''};` 直接出場 ——
+  //   陣列版不能 return，否則前面 push 進來的內建標籤 / 自訂規則會被一起丟掉。
+  //   語意只有一個：前提不成立就【跳過階梯】，已收集的結果照樣回傳。
+  //   ⚠ 這不影響舊行為：舊版能執行到這行，代表前面五條內建 + 自訂規則全沒命中
+  //     （命中就 return 了），亦即 out 必為空 —— 單標籤語意下兩者等價。
+  //     差異只在多標籤語意下才浮現，那正是本次要的。
+  const ladderOk=!(N===null||N===undefined||!isFinite(N)||O<t.clickMin);
+  if(ladderOk){
+    // 🔴 階梯【必須互斥】：條件在數值上是重疊的（N=5 同時滿足 >=3 / >=2 / >=1），
+    //   舊版靠 first-match 的 return 壓成互斥。這裡改用 if / else if 鏈維持同樣效果，
+    //   階梯最多只會貢獻 1 個標籤。順序與條件式一字未改 —— 包含「加50」那條看似
+    //   冗餘的 `N<t.add100`（走得到加50 就代表加100 沒中，本來就成立）。刻意留著：
+    //   本次契約是行為零變化，任何「看起來更乾淨」的改寫都是風險。
+    if(ok('加300')&&N>=t.add300) out.push({label:'加300',cls:'tag-add300'});
+    else if(ok('加200')&&N>=t.add200) out.push({label:'加200',cls:'tag-add200'});
+    else if(ok('加100')&&N>=t.add100) out.push({label:'加100',cls:'tag-add100'});
+    else if(ok('加50')&&N>=t.add50&&N<t.add100) out.push({label:'加50',cls:'tag-add50'});
+    else if(ok('減300')&&N<=t.sub300) out.push({label:'減300',cls:'tag-sub300'});
+    else if(ok('減200')&&N<=t.sub200) out.push({label:'減200',cls:'tag-sub200'});
+    else if(ok('減100')&&N<=t.sub100) out.push({label:'減100',cls:'tag-sub100'});
+  }
+  return out;
+}
+// 薄包裝：簽名與回傳型別 {label,cls} 都跟改動前完全相同，取第一個命中的標籤。
+//   全 repo 既有呼叫端（buildShop / loadIntoUI / reapplyAnaToAll / recalcRow /
+//   shopLabelProgress，以及 daily.js 的 _labelsOf）都吃這個單一物件型別，
+//   在多標籤 UI 接上去之前不要改它的回傳型別。
+function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, roi){
+  const all=calcAnalysisAll(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, roi);
+  return all.length?all[0]:{label:'',cls:''};
 }
 
 // 新增自訂標籤表單共用：新增/刪除條件會整段重繪表單，重繪前先把使用者
@@ -10876,7 +10920,7 @@ Object.defineProperty(window, 'curShop', { get: () => curShop, configurable: tru
 
 Object.assign(window, {
   _cloudRead,_cloudWrite,_cloudWriteSafe,_doGenerate,_showSyncBtn,addGrowthCond,addNewAnaCond,
-  applyFilters,applyFpNum,applyFpTxt,buildDistHtml,buildNoteCell,buildShop,calcAnalysis,
+  applyFilters,applyFpNum,applyFpTxt,buildDistHtml,buildNoteCell,buildShop,calcAnalysis,calcAnalysisAll,
   calcGrowthAnalysis,checkAdsReconcile,checkReady,clearColFilter,clearPeriod,clearPeriodFromModal,closeAdsEditModal,
   closeAnaSettings,closeDeleteFileModal,closeDistModal,closeGrowthSettings,closePopup,
   closeProfitNoteModal,closeTfDrop,closeUploadModal,commitEdit,commitNote,confirmAddSummaryRow,
