@@ -1476,6 +1476,9 @@ Object.assign(App, {
       });
     });
 
+    // 新品毛利表（必須在 bg-form 判斷前執行，否則非議價表分頁時 return 會跳過）
+    this.bindD2MarginTab();
+
     const form = document.getElementById('bg-form');
     if (!form) return;
     const activeBQ = Store.get('ec.d2.kpi.stabQ', Store.get('ec.d2.kpi.quarter', 'Q3'));
@@ -1542,9 +1545,6 @@ Object.assign(App, {
       const list = Store.get(storeKey, []);
       if (list[+cb.dataset.i]) { list[+cb.dataset.i].changed = cb.checked; Store.set(storeKey, list); }
     }));
-
-    // 新品毛利表（委派給 bindD2MarginTab）
-    this.bindD2MarginTab();
   },
 
   renderFestivalCalendarTab() {
