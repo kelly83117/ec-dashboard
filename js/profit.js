@@ -421,9 +421,43 @@ function _notifyLsSaveFail(shop, month, half, err){
   }
 }
 
+// 序列化前剝掉「純衍生欄位」。目前只有一個：analysisAll（廣告分析的多標籤陣列）。
+//
+// 🔴 為什麼 analysisAll 不能落地
+//   (a) 它是純衍生值 —— loadIntoUI / reapplyAnaToAll / recalcRow 每次都用【當下的規則】重算。
+//       存進 DB 等於把「當下規則的結果」凍成快照：日後規則一改，舊報表裡留著舊規則算出來的
+//       標籤，畫面上卻看不出那是舊的。
+//   (b) app/profit 曾經撐到 Firestore 1MB 上限的 85.5%，不能再塞衍生資料進去。
+//
+// 🔴 為什麼【兩個地方】都要剝（只剝一個會擋錯邊）
+//   lsSave 有兩個出口：① localStorage（JSON.stringify）② Store._profitMem[k]=payload。
+//   ② 存進去的是【活的 built 陣列參照】，而 syncToCloud 推雲端時讀的正是 _profitMem，
+//   不是 localStorage（見 syncToCloud 裡 `const payload=Store._profitMem[pk]` → setReport）。
+//   所以只剝 lsSave 的話：localStorage 乾淨了，Firestore 照樣收到 analysisAll ——
+//   而 1MB 上限就在 Firestore 那一側，等於白做。兩處都要剝。
+//
+// ⚠ 日後若新增任何「把 built 序列化出去」的出口（新的同步路徑、匯出 JSON、備份…），
+//   記得一併走這個函式，否則 analysisAll 又會漏出去。
+//
+// ⚠ 已知且【刻意接受、不處理】的取捨：loadIntoUI 會就地在列物件上寫 analysisAll，
+//   而 tryLoadSaved 走的 lsLoad 是直接回傳 Store._profitMem[k] 本身（不複製），
+//   所以切月份 / 切通路之後，_profitMem 裡的列會重新帶上 analysisAll。
+//   這【不是漏的】：推送前在 syncToCloud 已經剝掉，真正落地的東西是乾淨的，
+//   _profitMem 髒只是記憶體多佔一點。不要為了「看起來乾淨」去改 lsLoad 的回傳語義或
+//   loadIntoUI 的就地改寫 —— 那會動到畫面正在渲染的物件身分，風險遠大於收益。
+//
+// 淺拷貝就夠：只是移除每列的一個 top-level 欄位 → 新陣列 + 每列一個新物件。
+//   ⚠ 不要改成 JSON.parse(JSON.stringify(...))：它會把 NaN / Infinity 靜默變成 null、
+//     把值為 undefined 的欄位整個吃掉，等於偷偷改動即將上雲的數字；而且成本貴一到兩個
+//     數量級（recalcRow 每編輯一格就 lsSave 一次）。
+//   ⚠ 絕不可就地改 built 本身 —— 那是畫面正在渲染的活陣列，剝掉欄位標籤會當場消失。
+function _stripDerived(built){
+  if(!Array.isArray(built))return built;
+  return built.map(({analysisAll:_omit,...rest})=>rest);
+}
 function lsSave(shop,month,half,built,period,days){
   // 只存本機；同步雲端需手動按「☁ 同步雲端」
-  const payload={built,period,days,rate:getPlatformRate(shop),ts:Date.now()};
+  const payload={built:_stripDerived(built),period,days,rate:getPlatformRate(shop),ts:Date.now()};
   const k=lsKey(shop,month,half);
   let saveErr=null;
   try{localStorage.setItem(k,JSON.stringify(payload));}catch(e){saveErr=e;}
@@ -582,7 +616,15 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       if(pk.startsWith('ec|filemeta|')){ skippedByDesign.push(pk); return; }
       if(pk.startsWith('ec|')){
         const payload=Store._profitMem&&Store._profitMem[pk];
-        if(isPlainObj(payload)){ tasks.push({key:pk,run:()=>window.__cloudProfitCol.setReport(pk,payload)}); }
+        // 🔴 推上去的必須是【剝掉衍生欄位】的拷貝，理由見 _stripDerived 的註解：
+        //   這裡讀的是 _profitMem 而不是 localStorage，所以只在 lsSave 剝擋不住雲端。
+        //   ⚠ 只產一份新物件給 setReport，【不可】改寫 Store._profitMem[pk] 本身 ——
+        //     那是活的、畫面正在用它渲染（lsLoad 直接回傳它，tryLoadSaved 拿去 loadIntoUI）。
+        //   isPlainObj 仍然驗原始 payload（判斷「讀不到 / 損毀」要看原件，不是拷貝）。
+        if(isPlainObj(payload)){
+          const outbound=Object.assign({},payload,{built:_stripDerived(payload.built)});
+          tasks.push({key:pk,run:()=>window.__cloudProfitCol.setReport(pk,outbound)});
+        }
         else{ skippedProblem.push({key:pk,reason:'報表資料讀不到或損毀'}); }
         return;
       }
@@ -1213,8 +1255,7 @@ function clearPeriod(shop){
 function loadIntoUI(shop,built,period,days){
   if(built&&Array.isArray(built)){
     built.forEach(r=>{
-      r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      r.analysisLabel=r.analysis?.label||'';
+      Object.assign(r,_anaDerive(calcAnalysisAll(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0)));
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
@@ -2053,7 +2094,8 @@ function buildShop(shop,days){
     const targetROI=denom>0?1/denom:null;
     const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
     const dayBudget=days>0?adsFee/days:0;
-    const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit,roi);
+    // 算一次陣列、由 _anaDerive 一併導出 analysis / analysisLabel（不重複呼叫 calcAnalysis）
+    const ana=_anaDerive(calcAnalysisAll(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit,roi));
     const testTags=calcTestTags(adsFee,pureRate,targetROI,roiDiff,clicks,pureProfit,roi);
     // 上期營收 & 成長比（所有賣場都算：整月賣場比對上個月整月，好麻吉上/下半月比對同月/上月對應半月）
     const prevRev = prevRevMap[p.code] ?? null;
@@ -2061,7 +2103,7 @@ function buildShop(shop,days){
     const growthAnalysis = calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate);
     return{code:p.code,name:p.name,shopeeIds:p.shopeeIds,qty:p.qty,rev:p.rev,gross:p.gross,
       adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,directROI,roi,roiDiff,
-      dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,analysis,testTags,
+      dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,...ana,testTags,
       prevRev, growthRate, growthAnalysis};
   });
   built.sort((a,b)=>{if(!a.fromMobic&&b.fromMobic)return 1;if(a.fromMobic&&!b.fromMobic)return -1;return b.pureProfit-a.pureProfit;});
@@ -2102,7 +2144,22 @@ function evalAnaConds(conds,vals){
 
 // ── 分析公式 ──
 // $D=廣告費, $H=淨利率%, $K=目標ROI, $N=實際-目標, $O=點擊數, $P=純利
-function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, roi){
+//
+// 🔴 相容性契約（動這段之前務必讀完）
+//   calcAnalysisAll 是唯一的判定邏輯；calcAnalysis 只是取 [0] 的薄包裝。
+//   所以 push 的順序【必須】等於舊版 first-match-wins 的 return 順序：
+//     危險商品 → 高利潤商品 → 賠錢中 → 低淨利 → 低效廣告
+//       → 自訂規則（依 getCustomAnaRules() 的陣列序）→ 加減階梯（最多 1 個）
+//   任何重排都會改變 calcAnalysis 的回傳值，連帶影響表格標籤格、標籤篩選、
+//   Excel 匯出、以及 daily.js 工作日誌的 pill 分桶。要加新標籤請接在
+//   對應區段的尾端，不要插隊。
+//
+// 本次（first-match → 多標籤）只改控制流，判斷條件一字未動：
+//   ① 五條內建的 return → push，push 完繼續往下跑
+//   ② 自訂規則迴圈的 return → push，不 break，多條命中就都收
+//   ③ 階梯前的早退 return → ladderOk 閘門（見下方說明）
+//   ④ 階梯七條改 if / else if 鏈維持互斥（見下方說明）
+function calcAnalysisAll(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, roi){
   const t=getAnaThresh();
   const dis=new Set(getDisabledAnaTags());
   const ok=l=>!dis.has(l);
@@ -2114,9 +2171,10 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, 
   //     （2026-08-05 就是因為 calcTestTags 漏了 *100，「淨利率%(H) <= 20」恆為 true。）
   //   ⚠ 別拿這裡去比照修 calcGrowthAnalysis 的 G：那邊 G 是小數、方向相反，另案。
   const D=adsFee, H=pureRate*100, K=targetROI, N=roiDiff, O=clicks, P=pureProfit, R=roi;
-  if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) return{label:'危險商品',cls:'tag-danger'};
-  if(ok('高利潤商品')&&D===0 && H>t.highMinH) return{label:'高利潤商品',cls:'tag-high'};
-  if(ok('賠錢中')&&D>0 && P<0) return{label:'賠錢中',cls:'tag-lose'};
+  const out=[];
+  if(ok('危險商品')&&D===0 && H>=0 && H<t.dangerMaxH) out.push({label:'危險商品',cls:'tag-danger'});
+  if(ok('高利潤商品')&&D===0 && H>t.highMinH) out.push({label:'高利潤商品',cls:'tag-high'});
+  if(ok('賠錢中')&&D>0 && P<0) out.push({label:'賠錢中',cls:'tag-lose'});
   // 低淨利（2026-08-04 修正）：回歸老闆原始定義 =IF(K<=0,"-",L-K)，K=目標ROI、L=直接投入產出。
   //   K = 1/(淨利率% + 廣告佔比 - 20%)。K<=0 ⇔ 分母<=0 ⇔ 就算廣告全砍也達不到 20% 淨利率。
   //   ⚠ 本檔實作是「分母>0 才算，否則存 null」（見 buildShop / recalcRow 的 targetROI），
@@ -2126,20 +2184,79 @@ function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, 
   //     （directROI=0）。後者跟淨利率無關，害沒廣告的健康商品（淨利率 25%、K=19）被誤標。
   //   ⚠ 舊版另一條「D>0 且 K<0」漏掉 K===null 的情況，害有廣告又真的達不到 20% 的商品完全沒標籤。
   //   K<0 必須保留：舊報表存過負值（實測有 -365.85），不是死碼。
-  if(ok('低淨利')&&(K===null||K===undefined||!isFinite(K)||K<0)) return{label:'低淨利',cls:'tag-low'};
-  if(ok('低效廣告')&&D>0 && H>=0 && H<t.badAdsMaxH) return{label:'低效廣告',cls:'tag-bad'};
+  if(ok('低淨利')&&(K===null||K===undefined||!isFinite(K)||K<0)) out.push({label:'低淨利',cls:'tag-low'});
+  if(ok('低效廣告')&&D>0 && H>=0 && H<t.badAdsMaxH) out.push({label:'低效廣告',cls:'tag-bad'});
+  // 自訂規則：舊版命中第一條就 return，這裡改成【全收】，多條都命中就都掛上。
+  //   calcAnalysis 取 [0]，拿到的仍是第一條命中的 → 與舊行為一致。
+  //   ⚠ 這裡刻意不套 ok()：停用清單（ec_ana_disabled）只管內建標籤，自訂規則沒有停用
+  //     機制（要移除只能在設定 Modal 刪掉整條）。維持原樣，舊版這個迴圈也沒有 ok()。
+  //   ⚠ 效能：舊版命中內建標籤就 return、根本不會跑到這裡；現在每一列都會跑完整個迴圈，
+  //     evalAnaConds 呼叫次數 = 列數 × 自訂規則數。這是刻意接受的成本（換單一真相來源），
+  //     不要為此在 calcAnalysis 裡另開一條 early-return 快速路徑（兩套邏輯會走鐘）。
   for(const ct of getCustomAnaRules()){
-    if(evalAnaConds(ct.conds,{D,H,K,N,O,P,R}))return{label:ct.label,cls:ct.cls||'tag-add100'};
+    if(evalAnaConds(ct.conds,{D,H,K,N,O,P,R}))out.push({label:ct.label,cls:ct.cls||'tag-add100'});
   }
-  if(N===null||N===undefined||!isFinite(N)||O<t.clickMin) return{label:'',cls:''};
-  if(ok('加300')&&N>=t.add300) return{label:'加300',cls:'tag-add300'};
-  if(ok('加200')&&N>=t.add200) return{label:'加200',cls:'tag-add200'};
-  if(ok('加100')&&N>=t.add100) return{label:'加100',cls:'tag-add100'};
-  if(ok('加50')&&N>=t.add50&&N<t.add100) return{label:'加50',cls:'tag-add50'};
-  if(ok('減300')&&N<=t.sub300) return{label:'減300',cls:'tag-sub300'};
-  if(ok('減200')&&N<=t.sub200) return{label:'減200',cls:'tag-sub200'};
-  if(ok('減100')&&N<=t.sub100) return{label:'減100',cls:'tag-sub100'};
-  return{label:'',cls:''};
+  // 加減階梯的前提。舊版是 `if(...) return{label:'',cls:''};` 直接出場 ——
+  //   陣列版不能 return，否則前面 push 進來的內建標籤 / 自訂規則會被一起丟掉。
+  //   語意只有一個：前提不成立就【跳過階梯】，已收集的結果照樣回傳。
+  //   ⚠ 這不影響舊行為：舊版能執行到這行，代表前面五條內建 + 自訂規則全沒命中
+  //     （命中就 return 了），亦即 out 必為空 —— 單標籤語意下兩者等價。
+  //     差異只在多標籤語意下才浮現，那正是本次要的。
+  const ladderOk=!(N===null||N===undefined||!isFinite(N)||O<t.clickMin);
+  if(ladderOk){
+    // 🔴 階梯【必須互斥】：條件在數值上是重疊的（N=5 同時滿足 >=3 / >=2 / >=1），
+    //   舊版靠 first-match 的 return 壓成互斥。這裡改用 if / else if 鏈維持同樣效果，
+    //   階梯最多只會貢獻 1 個標籤。順序與條件式一字未改 —— 包含「加50」那條看似
+    //   冗餘的 `N<t.add100`（走得到加50 就代表加100 沒中，本來就成立）。刻意留著：
+    //   本次契約是行為零變化，任何「看起來更乾淨」的改寫都是風險。
+    if(ok('加300')&&N>=t.add300) out.push({label:'加300',cls:'tag-add300'});
+    else if(ok('加200')&&N>=t.add200) out.push({label:'加200',cls:'tag-add200'});
+    else if(ok('加100')&&N>=t.add100) out.push({label:'加100',cls:'tag-add100'});
+    else if(ok('加50')&&N>=t.add50&&N<t.add100) out.push({label:'加50',cls:'tag-add50'});
+    else if(ok('減300')&&N<=t.sub300) out.push({label:'減300',cls:'tag-sub300'});
+    else if(ok('減200')&&N<=t.sub200) out.push({label:'減200',cls:'tag-sub200'});
+    else if(ok('減100')&&N<=t.sub100) out.push({label:'減100',cls:'tag-sub100'});
+  }
+  return out;
+}
+// 薄包裝：簽名與回傳型別 {label,cls} 都跟改動前完全相同，取第一個命中的標籤。
+//   全 repo 既有呼叫端（buildShop / loadIntoUI / reapplyAnaToAll / recalcRow /
+//   shopLabelProgress，以及 daily.js 的 _labelsOf）都吃這個單一物件型別，
+//   在多標籤 UI 接上去之前不要改它的回傳型別。
+function calcAnalysis(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, roi){
+  const all=calcAnalysisAll(adsFee, pureRate, targetROI, roiDiff, clicks, pureProfit, roi);
+  return all.length?all[0]:{label:'',cls:''};
+}
+// 廣告分析的三個衍生欄位一次算齊。四個寫入點（loadIntoUI / buildShop / reapplyAnaToAll /
+// recalcRow）共用同一份，避免日後改串接符號或空值處理時漏改其中一處。
+//   analysisAll   —— 多標籤陣列，畫面用（_anaCellHtml）。⚠ 純衍生、不可落地，見 _stripDerived。
+//   analysis      —— 相容欄位，等同舊 calcAnalysis 的回傳值（陣列的 [0]）。
+//                    updateTagFilterBar / applyFilters / patchRow / doExport 都還在讀，不要拿掉。
+//   analysisLabel —— 🔴【必須是字串】，多標籤用頓號串接（例：「低效廣告、減300」）、無標籤為 ''。
+//                    它是欄位排序引擎的 key：applyFilters 的 sort 是
+//                    `typeof va==='string' ? localeCompare : va-vb`，寫成陣列會掉進減法、
+//                    得到 NaN、排序結果隨機而且完全不報錯。文字篩選 `(raw+'').toLowerCase()`
+//                    也依賴它是字串。
+function _anaDerive(list){
+  const arr=Array.isArray(list)?list:[];
+  return{
+    analysisAll:arr,
+    analysis:arr[0]||{label:'',cls:''},
+    analysisLabel:arr.map(a=>a.label).join('、'),
+  };
+}
+// 廣告分析格（多標籤）：renderTable 與 patchRow 共用同一份，連 <td> 的 id / class 一起共用。
+//   ⚠ id 必須留著 —— patchRow 靠 `td-${shop}-${code}-analysis` 找到這格做局部更新。
+//     外殼若在兩邊各寫一次，哪天漏了 id，patchRow 會靜默失效（找不到就什麼都不做、不報錯）。
+//   ⚠ list 可能是 undefined：舊快照沒有 analysisAll 欄位、或該列還沒經過 loadIntoUI ——
+//     非陣列一律當空陣列處理，顯示「—」。
+//   多個標籤之間的間距走 CSS（.ana-cell .tag+.tag），不要用 inline style 或 &nbsp;。
+function _anaCellHtml(shop,code,list){
+  const arr=Array.isArray(list)?list:[];
+  const inner=arr.length
+    ? arr.map(a=>`<span class="tag ${a.cls}">${window.mapAnaLabel(a.label)}</span>`).join('')
+    : '—';
+  return `<td id="td-${shop}-${code}-analysis" class="tl ana-cell">${inner}</td>`;
 }
 
 // 新增自訂標籤表單共用：新增/刪除條件會整段重繪表單，重繪前先把使用者
@@ -2517,8 +2634,7 @@ function reapplyAnaToAll(){
   SHOPS.forEach(s=>{
     const built=state[s.id]._built;if(!built)return;
     built.forEach(r=>{
-      r.analysis=calcAnalysis(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      r.analysisLabel=r.analysis?.label||'';
+      Object.assign(r,_anaDerive(calcAnalysisAll(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0)));
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
@@ -2832,8 +2948,24 @@ function updateTagFilterBar(shop){
   const built=state[shop]._built;if(!built||!built.length){bar.innerHTML='';return;}
   const sel=state[shop].tagFilters||[];
   const counts={};
+  // ⚠ 廣告分析改多標籤（calcAnalysisAll）後的計數行為，三件事要分清楚：
+  //
+  //   ① 各 pill 的計數【加總會大於總列數】—— 一列可以同時掛「低效廣告」和「減300」，
+  //      兩個 pill 各 +1。這是預期行為。
+  //
+  //   ② 加預算 / 減預算下拉的小計（下方 mkDrop 的 lbls.reduce）【沒有重複計數】，
+  //      因為 calcAnalysisAll 的加減階梯是 if / else if 鏈、一列最多只命中一個階梯標籤，
+  //      所以小計恰好等於「有該類階梯標籤的列數」。
+  //
+  //   ③ 🔴 但小計的【數值會比多標籤化之前大】—— 這不是算錯，別往別的地方找原因。
+  //      以前同時符合「低效廣告」和「減300」的列，first-match 只給得到「低效廣告」，
+  //      那些列現在才拿得到階梯標籤，於是被算進小計。
+  //      實測好麻吉 2026/07 下半月：加預算 70→71、減預算 154→177
+  //      （同一列出現 2 個以上階梯標籤的：0 筆，佐證 ②）。
+  //
+  //   「全部」那顆 pill 用的是 built.length，不是 counts 加總，不受以上任何一點影響。
   built.forEach(r=>{
-    const a=r.analysis?.label;if(a)counts[a]=(counts[a]||0)+1;
+    (r.analysisAll||[]).forEach(a=>{if(a.label)counts[a.label]=(counts[a.label]||0)+1;});
     const g=r.growthAnalysis?.label;if(g)counts[g]=(counts[g]||0)+1;
     (r.testTags||[]).forEach(tt=>{counts[tt.label]=(counts[tt.label]||0)+1;});
   });
@@ -2928,7 +3060,7 @@ function applyFilters(shop,opts){
   const q=(s.search||'').trim().toLowerCase();
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
-  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>r.analysis?.label===l||r.growthAnalysis?.label===l||(r.testTags||[]).some(tt=>tt.label===l)));
+  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l||(r.testTags||[]).some(tt=>tt.label===l)));
   if(s.suggFilterActive)list=list.filter(r=>r.testTags?.length);
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
@@ -3267,9 +3399,15 @@ function patchRow(shop,code,ov){
   // dayBudget
   const budEl=document.getElementById(`td-${shop}-${code}-dayBudget`);
   if(budEl)budEl.textContent=r.dayBudget>0?'$'+fmtN(r.dayBudget):'—';
-  // analysis
+  // analysis（多標籤）：整格 outerHTML 換掉，不是 innerHTML。
+  //   有標籤 / 無標籤兩種 <td> 的屬性可能不同，只換內層會留下上一個狀態的樣式殘留。
+  //   ⚠ outerHTML 會把節點整個換成新節點 → anaEl 這個參照【當場失效】，之後不可再用。
+  //     本函式在這行之後只剩 syncHeaderKpis(shop)，沒有再碰 anaEl；
+  //     若日後要在中間插程式碼，記得重新 getElementById。
+  //   ⚠ 新的 <td> 必須自己帶著 id 與 class，否則下次 patchRow 找不到這格且靜默失效 ——
+  //     所以外殼統一由 _anaCellHtml 產出，不在這裡手寫。
   const anaEl=document.getElementById(`td-${shop}-${code}-analysis`);
-  if(anaEl){const a=r.analysis||{};anaEl.innerHTML=a.label?`<span class="tag ${a.cls}">${window.mapAnaLabel(a.label)}</span>`:'—';}
+  if(anaEl)anaEl.outerHTML=_anaCellHtml(shop,code,r.analysisAll);
   // KPI 小計列
   syncHeaderKpis(shop);
 }
@@ -3290,11 +3428,12 @@ function recalcRow(shop,code,ov){
   const days=state[shop]._days||1;
   const dayBudget=adsFee/days;
   const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
-  const analysis=calcAnalysis(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
+  // 算一次陣列、由 _anaDerive 一併導出 analysis / analysisLabel（不重複呼叫 calcAnalysis）
+  const ana=_anaDerive(calcAnalysisAll(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi));
   const testTags=calcTestTags(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
   const growthRate=r.growthRate;
   const growthAnalysis=calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate);
-  Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,roiDiff,dayBudget,analysis,testTags,growthAnalysis});
+  Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,roiDiff,dayBudget,...ana,testTags,growthAnalysis});
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
 
@@ -3348,12 +3487,26 @@ function shopLabelProgress(shop){
   rows.forEach(r=>{
     const isDone=done.has(r.code)||!!(r.note&&String(r.note).trim());
     if(isDone)doneTotal++;
-    let al='',gl='';
+    // ⚠ alAll 初值必須是 []（不是 '' 也不是 null）：calcAnalysisAll 若 throw，catch 吃掉之後
+    //   alAll 仍是空陣列 → 該列不計入任何廣告標籤，與舊版「throw → al 維持 '' → 不計入」
+    //   的行為完全一致。初值若非陣列，下方 forEach 會二次 throw 且沒有 catch 保護。
+    let alAll=[],gl='';
     try{
-      al=calcAnalysis(r.adsFee,r.pureRate,r.targetROI,r.roiDiff,r.clicks,r.pureProfit,r.roi).label||'';
+      alAll=calcAnalysisAll(r.adsFee,r.pureRate,r.targetROI,r.roiDiff,r.clicks,r.pureProfit,r.roi)||[];
       gl=calcGrowthAnalysis(r.growthRate,r.rev,r.prevRev,r.pureRate).label||'';
     }catch(e){}
-    if(al){(ana[al]=ana[al]||{t:0,d:0}).t++;if(isDone)ana[al].d++;}
+    // 多標籤：陣列裡每個標籤各自累計一次 t / d。
+    //   🔴 同列去重（seen）：ana[label].t 的語義是「帶該標籤的【商品數】」，而畫面上的
+    //     .adj-prog-note 就是這樣對使用者宣告的。自訂規則若跟內建標籤同名（或兩條自訂規則
+    //     同名），同一列會產生兩個同名元素、把分母灌成 2 —— 那句話就成了假的。
+    //     （同 daily.js 的 _adjAnaBucket，為同一個撞名情境去重。）
+    //   ⚠ 分子 isDone 是「這個商品有沒有調整紀錄」，不分標籤 —— 一個商品兩個標籤、只打一筆
+    //     調整，兩個標籤都算完成。這是已知且刻意接受的限制，畫面上的 .adj-prog-note 有講。
+    const seen=new Set();
+    alAll.forEach(a=>{
+      const l=a&&a.label;if(!l||seen.has(l))return;seen.add(l);
+      (ana[l]=ana[l]||{t:0,d:0}).t++;if(isDone)ana[l].d++;
+    });
     if(gl){(growth[gl]=growth[gl]||{t:0,d:0}).t++;if(isDone)growth[gl].d++;}
   });
   return{month,half,total:rows.length,doneTotal,ana,growth};
@@ -4140,8 +4293,6 @@ function renderTable(shop,list,opts){
     const isEdited=(col)=>ov[col]!==undefined;
     const idStr=!r.shopeeIds?.length?'<span style="color:#d1d5db">—</span>':r.shopeeIds.length===1?r.shopeeIds[0]:'<span style="color:#f59e0b">多個</span>';
     const roiDiffStr=r.roiDiff===null?'—':`<span style="color:${r.roiDiff>=0?'#10b981':'#ef4444'};font-weight:600">${r.roiDiff.toFixed(2)}</span>`;
-    const anaObj=r.analysis||{label:'',cls:''};
-    const anaHtml=anaObj.label?`<span class="tag ${anaObj.cls}">${window.mapAnaLabel(anaObj.label)}</span>`:'—';
     const noteId=`note-${shop}-${r.code}`;
 
     // 可編輯數字欄 helper
@@ -4192,7 +4343,7 @@ function renderTable(shop,list,opts){
         roiDiff:`<td id="td-${shop}-${r.code}-roiDiff" class="td-num">${roiDiffStr}</td>`,
         clicks:`<td class="td-num">${r.clicks>0?r.clicks.toLocaleString():'—'}</td>`,
         dayBudget:`<td id="td-${shop}-${r.code}-dayBudget" class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>`,
-        analysisLabel:`<td id="td-${shop}-${r.code}-analysis" class="tl">${anaHtml}</td>`,
+        analysisLabel:_anaCellHtml(shop,r.code,r.analysisAll),
         note:noteCellHtml,
         growthRate:`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`,
         growthAnalysis:`<td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`,
@@ -10792,7 +10943,13 @@ function doExport(shop){
     r.targetROI!==null?+r.targetROI.toFixed(2):'-',r.directROI>0?+r.directROI.toFixed(2):'-',
     r.roi>0?+r.roi.toFixed(2):'-',r.roiDiff!==null?+r.roiDiff.toFixed(2):'-',
     r.clicks>0?r.clicks:'-',r.dayBudget>0?+r.dayBudget.toFixed(0):'-',
-    r.analysis?.label||'', exportNotes[r.code]||'',
+    // 廣告分析欄：多標籤化之後這裡是【頓號串接的字串】（例：「低效廣告、減300」），
+    //   不再是單一標籤。⚠ 若有人拿這一欄做 Excel 的 COUNTIF / 樞紐分析，
+    //   用「低效廣告」去比對【不會】命中「低效廣告、減300」——
+    //   要精確計數請改用萬用字元（COUNTIF(範圍,"*低效廣告*")）或先用分欄把頓號拆開。
+    //   ⚠ analysisLabel 由 _anaDerive 保證是字串；`||''` 是給舊快照那種還沒經過
+    //     loadIntoUI、欄位是 undefined 的列兜底，確保這一格永遠是字串不是 undefined。
+    r.analysisLabel||'', exportNotes[r.code]||'',
     r.prevRev!==null?+r.prevRev.toFixed(0):'-',
     r.growthRate!==null?+((r.growthRate*100).toFixed(2)):'-',
     r.growthAnalysis?.label||'',
@@ -10876,7 +11033,7 @@ Object.defineProperty(window, 'curShop', { get: () => curShop, configurable: tru
 
 Object.assign(window, {
   _cloudRead,_cloudWrite,_cloudWriteSafe,_doGenerate,_showSyncBtn,addGrowthCond,addNewAnaCond,
-  applyFilters,applyFpNum,applyFpTxt,buildDistHtml,buildNoteCell,buildShop,calcAnalysis,
+  applyFilters,applyFpNum,applyFpTxt,buildDistHtml,buildNoteCell,buildShop,calcAnalysis,calcAnalysisAll,
   calcGrowthAnalysis,checkAdsReconcile,checkReady,clearColFilter,clearPeriod,clearPeriodFromModal,closeAdsEditModal,
   closeAnaSettings,closeDeleteFileModal,closeDistModal,closeGrowthSettings,closePopup,
   closeProfitNoteModal,closeTfDrop,closeUploadModal,commitEdit,commitNote,confirmAddSummaryRow,

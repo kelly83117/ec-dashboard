@@ -114,6 +114,9 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 
 /* Analysis tags */
 .tag{display:inline-block;padding:3px 9px;border-radius:6px;font-size:12px;font-weight:700;white-space:nowrap;}
+/* 廣告分析格（_anaCellHtml）可能同時掛多個標籤 —— 相鄰標籤之間留間距。
+   只掛在 .ana-cell 上：td.tl 也用在測試標籤格與成長分析格，不要波及那兩處。 */
+.ana-cell .tag+.tag{margin-left:4px;}
 .tag-danger{background:#fee2e2;color:#991b1b;}
 .tag-high{background:#d1fae5;color:#065f46;}
 .tag-low{background:#fef3c7;color:#92400e;}
