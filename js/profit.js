@@ -1060,10 +1060,6 @@ function shopHTML(shop){return`
       <span id="period-tag-${shop}" style="display:none"></span>
       <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋 編號 / 名稱 / ID…" oninput="setSearch('${shop}',this.value)">
       <span class="row-cnt" id="cnt-${shop}"></span>
-      <span class="sugg-filter-chip" id="sugg-chip-${shop}">
-        <span id="sugg-chip-text-${shop}"></span>
-        <button onclick="clearSuggFilter('${shop}')">清除篩選</button>
-      </span>
       <div style="margin-left:auto;display:flex;align-items:center;gap:4px;position:relative">
         <button class="col-pick-btn" id="tag-btn-${shop}" onclick="toggleTagPopup('${shop}',this)">🏷 標籤</button>
         <div class="tag-filter-bar" id="tfbar-${shop}"></div>
@@ -1807,7 +1803,6 @@ function _doGenerate(shop){
       loadIntoUI(shop,built,period,days);
       if(curShop==='總表')renderSummary();
       checkAdsReconcile(shop,built);
-      checkSuggAlert(shop,built);
     }catch(err){alert('['+shop+'] 產生失敗：'+err.message+'\n\n'+err.stack);}
     setSpin(shop,false);
   },80);
@@ -2967,7 +2962,6 @@ function updateTagFilterBar(shop){
   built.forEach(r=>{
     (r.analysisAll||[]).forEach(a=>{if(a.label)counts[a.label]=(counts[a.label]||0)+1;});
     const g=r.growthAnalysis?.label;if(g)counts[g]=(counts[g]||0)+1;
-    (r.testTags||[]).forEach(tt=>{counts[tt.label]=(counts[tt.label]||0)+1;});
   });
   const mkPill=(t)=>{
     const active=sel.includes(t.label)?' active':'';
@@ -3002,18 +2996,6 @@ function updateTagFilterBar(shop){
     const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
     return`<span class="tfpill${active}" ${ca}>${ct.label}</span><span class="tfpill-cnt-cell" ${ca}>${cnt}</span>`;
   }).join('');
-  const testPills=getCustomTestRules().map(ct=>{
-    const{total,done}=testRuleStats(shop,ct);
-    if(!total)return'';
-    const active=sel.includes(ct.label)?' active':'';
-    const lbl=ct.label.replace(/'/g,"\\'");
-    const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
-    return`<span class="tfpill${active}" ${ca}>${ct.label}</span><span class="tfpill-cnt-cell" ${ca}>${done}/${total}</span>`;
-  }).join('');
-  const row0=`<div class="tfrow">
-    <div><span class="tfrow-lbl">測試標籤</span><button class="ana-gear-btn" onclick="openTestSettings('${shop}')" title="設定測試標籤">⚙</button></div>
-    <div class="tfrow-pills">${testPills||'<span style="font-size:11px;color:#9ca3af;padding:5px 0">尚無測試標籤，點 ⚙ 新增</span>'}</div>
-  </div>`;
   const row1=`<div class="tfrow">
     <div><span class="tfrow-lbl">廣告分析</span><button class="ana-gear-btn" onclick="openAnaSettings('${shop}')" title="設定分析規則">⚙</button></div>
     <div class="tfrow-pills">${fixedPills}${addDrop}${subDrop}${customPills}</div>
@@ -3030,7 +3012,7 @@ function updateTagFilterBar(shop){
     <div><span class="tfrow-lbl">成長分析</span><button class="ana-gear-btn" onclick="openGrowthSettings('${shop}')" title="設定成長分析規則">⚙</button></div>
     <div class="tfrow-pills">${gp}</div>
   </div>`;
-  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row0}${row1}${row2}</div>`;
+  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row1}${row2}</div>`;
 }
 function toggleTagPopup(shop,btn){
   const bar=document.getElementById('tfbar-'+shop);if(!bar)return;
@@ -3060,8 +3042,7 @@ function applyFilters(shop,opts){
   const q=(s.search||'').trim().toLowerCase();
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
-  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l||(r.testTags||[]).some(tt=>tt.label===l)));
-  if(s.suggFilterActive)list=list.filter(r=>r.testTags?.length);
+  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l));
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
     if(!f)return;
@@ -3090,7 +3071,6 @@ function applyFilters(shop,opts){
   }
   renderTable(shop,list,opts);
   updateTagFilterBar(shop);
-  updateSuggChip(shop);
 }
 function setSort(shop,col,dir){state[shop].sorts={col,dir};applyFilters(shop);}
 function setSearch(shop,val){if(state[shop])state[shop].search=val;applyFilters(shop);}
@@ -3879,80 +3859,7 @@ function buildSuggCell(shop,r){
   const tagsHtml=r.testTags.map(tt=>`<span class="tag sugg-tag ${tt.cls}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${tt.label}</span>`).join(' ');
   return`<td class="tl">${tagsHtml}</td>`;
 }
-function updateSuggChip(shop){
-  const s=state[shop];const chip=document.getElementById('sugg-chip-'+shop);if(!chip)return;
-  if(s?.suggFilterActive){
-    chip.style.display='flex';
-    const n=(s._built||[]).filter(r=>r.testTags?.length).length;
-    document.getElementById('sugg-chip-text-'+shop).textContent='已篩選：僅顯示 '+n+' 項符合建議規則的商品';
-  }else{chip.style.display='none';}
-}
-function applySuggFilter(shop){
-  const s=state[shop];if(!s)return;
-  s.suggFilterActive=!s.suggFilterActive;
-  applyFilters(shop);
-}
-function clearSuggFilter(shop){
-  const s=state[shop];if(!s)return;
-  s.suggFilterActive=false;
-  applyFilters(shop);
-}
 
-// ── Suggestion alert popup（產生報表後跳出）──
-let _suggAlertRows=null;
-let _suggAlertShop=null;
-function checkSuggAlert(shop,built){
-  const matched=(built||[]).filter(r=>r.testTags?.length);
-  const unresolved=matched.filter(r=>!isSuggDone(shop,r.code));
-  if(!unresolved.length)return;
-  _suggAlertRows=matched;_suggAlertShop=shop;
-  let ov=document.getElementById('sugg-alert-overlay');
-  if(!ov){
-    ov=document.createElement('div');ov.id='sugg-alert-overlay';ov.className='ana-overlay';
-    ov.innerHTML=`<div class="ana-modal" style="width:420px" onclick="event.stopPropagation()">
-      <div class="ana-modal-hdr"><span class="ana-modal-title">⚠ 廣告效率提醒</span><button class="ana-modal-x" onclick="closeSuggAlert()">✕</button></div>
-      <div style="padding:14px 22px;font-size:12.5px;color:#6b7280" id="sugg-alert-sub"></div>
-      <div style="max-height:260px;overflow-y:auto;padding:0 22px" id="sugg-alert-list"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 22px;border-top:1px solid #e4e6ef">
-        <button class="ana-cancel-btn" onclick="closeSuggAlert()">略過</button>
-        <button class="ana-save-btn" onclick="gotoSuggFiltered()">前往查看</button>
-      </div>
-    </div>`;
-    ov.onclick=closeSuggAlert;
-    document.body.appendChild(ov);
-  }
-  renderSuggAlertList();
-  ov.classList.add('open');
-}
-function closeSuggAlert(){document.getElementById('sugg-alert-overlay')?.classList.remove('open');}
-function renderSuggAlertList(){
-  const shop=_suggAlertShop;const rows=_suggAlertRows||[];
-  const sub=document.getElementById('sugg-alert-sub');if(sub)sub.textContent=`「${shop}」有 ${rows.length} 項商品符合建議規則`;
-  const list=document.getElementById('sugg-alert-list');if(!list)return;
-  const s=state[shop];const noteKey=s?shop+'|'+s.curMonth+'|'+s.curHalf:shop;
-  list.innerHTML=rows.map(r=>{
-    const codeEsc=r.code.replace(/'/g,"\\'");
-    const done=isSuggDone(shop,r.code);
-    const tagsHtml=done
-      ?`<span class="tag sugg-tag sugg-done" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊查看/編輯廣告調整">✓ 已優化</span>`
-      :r.testTags.map(tt=>`<span class="tag sugg-tag ${tt.cls}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${tt.label}</span>`).join(' ');
-    return`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid #f3f4f6">
-      <span style="font-size:13px">${r.name}</span>
-      <span style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:12px;color:#6b7280;font-family:monospace">點擊 ${r.clicks||0} · ROI ${(r.roi||0).toFixed(1)}</span>
-        ${tagsHtml}
-      </span>
-    </div>`;
-  }).join('');
-}
-function gotoSuggFiltered(){
-  const shop=_suggAlertShop;
-  closeSuggAlert();
-  if(!shop)return;
-  state[shop].suggFilterActive=true;
-  applyFilters(shop);
-  document.getElementById('tbl-'+shop)?.scrollIntoView({behavior:'smooth',block:'start'});
-}
 
 // ── Note modal ──
 const PROFIT_COLS=[
@@ -4283,7 +4190,6 @@ function renderTable(shop,list,opts){
     ${thT('code','編號','position:sticky;left:0;z-index:4;background:#f8f9fc')}
     ${thT('name','名稱 / ID','position:sticky;left:60px;z-index:4;background:#f8f9fc')}
     ${orderedCols.map(buildColHeader).join('')}
-    <th class="tl">建議</th>
   </tr></thead><tbody>`;
 
   let rowIdx=0;
@@ -4326,7 +4232,6 @@ function renderTable(shop,list,opts){
         <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
         <td class="tl td-name" style="position:sticky;left:60px;background:#fff;z-index:2;color:#9ca3af">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         ${bodyCells}
-        ${buildSuggCell(shop,r)}
       </tr>`;
     }else{
       const rowCell={
@@ -4354,7 +4259,6 @@ function renderTable(shop,list,opts){
         <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
         <td class="tl td-name" style="position:sticky;left:60px;background:#fff;z-index:2">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         ${orderedCols.map(c=>rowCell[c.key]||'').join('')}
-        ${buildSuggCell(shop,r)}
       </tr>`;
     }
     rowIdx++;
@@ -4375,7 +4279,6 @@ function renderTable(shop,list,opts){
   html+=`<tr class="tr-total">
     <td class="tl" colspan="2">小計（${list.length}筆）</td>
     ${orderedCols.map(c=>totalCell[c.key]||'<td></td>').join('')}
-    <td></td>
   </tr></tbody></table></div>`;
   const _tblHost=document.getElementById('tbl-'+shop);
   // keepScroll：覆蓋 innerHTML 會重建 .tscroll，捲動位置歸零。先存舊值、重繪後還原（含 scrollLeft，商品調整欄在最右）。
@@ -11062,9 +10965,7 @@ Object.assign(window, {
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   ignoreAllUnmatched,umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
   updateTagFilterBar,validateMapWarnings,
-  applySuggFilter,clearSuggFilter,
-  closeSuggAlert,gotoSuggFiltered,checkSuggAlert,
-  updateSuggChip,buildSuggCell,
+  buildSuggCell,
   colDragStart,colDragOver,colDrop,colDragEnd,colDragEnter,colDragLeave,resetColOrder,
   cpRowDragStart,cpRowDragOver,cpRowDragEnter,cpRowDragLeave,cpRowDrop,cpRowDragEnd,
   cupColDragStart,cupColDragOver,cupColDragEnter,cupColDragLeave,cupColDrop,cupColDragEnd,
