@@ -3381,6 +3381,9 @@ function patchRow(shop,code,ov){
   // adsPct
   const pctEl=document.getElementById(`td-${shop}-${code}-adsPct`);
   if(pctEl)pctEl.textContent=(r.adsPct*100).toFixed(2)+'%';
+  // profitPct
+  const ppEl=document.getElementById(`td-${shop}-${code}-profitPct`);
+  if(ppEl)ppEl.textContent=!(r.rev>0)?'—':(r.profitPct*100).toFixed(2)+'%';
   // targetROI
   const roiEl=document.getElementById(`td-${shop}-${code}-targetROI`);
   if(roiEl)roiEl.textContent=r.targetROI!==null?r.targetROI.toFixed(2):'—';
@@ -3876,7 +3879,7 @@ function buildSuggCell(shop,r){
 // ── Note modal ──
 const PROFIT_COLS=[
   {key:'adsFee',label:'廣告費'},{key:'rev',label:'營收'},{key:'gross',label:'毛利'},
-  {key:'pureProfit',label:'淨利'},{key:'pureRate',label:'淨利率%'},{key:'adsPct',label:'廣告佔比'},
+  {key:'pureProfit',label:'淨利'},{key:'pureRate',label:'淨利率%'},{key:'adsPct',label:'廣告佔比'},{key:'profitPct',label:'利潤 (純利率+廣告佔比)'},
   {key:'stock',label:'可用庫存'},{key:'targetROI',label:'目標ROI'},{key:'directROI',label:'直接ROI'},
   {key:'roi',label:'投入產出'},{key:'roiDiff',label:'實際-目標'},{key:'clicks',label:'點擊數'},
   {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'廣告分析'},{key:'note',label:'廣告調整'},
@@ -4185,7 +4188,7 @@ function renderTable(shop,list,opts){
   const dragAttrs=(key)=>`draggable="true" ondragstart="colDragStart(event,'${shop}','${key}')" ondragover="colDragOver(event)" ondragenter="colDragEnter(event)" ondragleave="colDragLeave(event)" ondrop="colDrop(event,'${shop}','${key}')" ondragend="colDragEnd(event)"`;
   const HEADER_LABEL={
     adsFee:'廣告費', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利',
-    pureRate:'淨利率%', adsPct:'廣告佔比', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
+    pureRate:'淨利率%', adsPct:'廣告佔比', profitPct:'利潤%', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
     roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算',
     analysisLabel:'廣告分析', note:'廣告調整',
     growthRate:'成長比', growthAnalysis:'成長分析', growthNote:'商品調整',
@@ -4253,6 +4256,7 @@ function renderTable(shop,list,opts){
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
         pureRate:`<td id="td-${shop}-${r.code}-pureRate">${pill(!(r.rev>0)?null:r.pureRate*100)}</td>`,
         adsPct:`<td id="td-${shop}-${r.code}-adsPct" class="td-num">${(r.adsPct*100).toFixed(2)}%</td>`,
+        profitPct:`<td id="td-${shop}-${r.code}-profitPct" class="td-num">${!(r.rev>0)?'—':(r.profitPct*100).toFixed(2)+'%'}</td>`,
         stock:`<td class="td-num">${r.stock.toLocaleString()}</td>`,
         targetROI:`<td id="td-${shop}-${r.code}-targetROI" class="td-num">${r.targetROI!==null?r.targetROI.toFixed(2):'—'}</td>`,
         directROI:`<td class="td-num">${r.directROI>0?r.directROI.toFixed(2):'—'}</td>`,
