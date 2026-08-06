@@ -3208,8 +3208,9 @@ function _periodEndDate(month,half){
 //   opts.month / opts.half 有給 → 只回傳「該期間結束日 >= 標記日」的標籤
 //   不給 → 全部回傳（匯出用，不做期間過濾）
 //   沒有 date 的標籤一律回傳（舊資料保守處理）
-function getProdTagsFor(shop,code,opts){
-  const all=getProdTags(shop);
+//   preloaded 有給 → 直接用那包（呼叫端已整包預讀過，見 _prodTagsReaderFor），沒給就照舊自己讀
+function getProdTagsFor(shop,code,opts,preloaded){
+  const all=preloaded||getProdTags(shop);
   const arr=all&&all[code];
   if(!Array.isArray(arr))return[];
   const out=arr.map(x=>(x&&typeof x==='object')?{tag:x.tag,date:x.date||''}:{tag:x,date:''})
@@ -3218,6 +3219,21 @@ function getProdTagsFor(shop,code,opts){
   const end=_periodEndDate(opts.month,opts.half);
   if(!end)return out;
   return out.filter(o=>!o.date||o.date<=end);
+}
+// 手動標籤（ec_tags|{通路}）的「整包只讀一次」版讀取器。回傳 (code)=>[{tag,date}]。
+//   ⚠ 為什麼不讓呼叫端逐列呼叫 getProdTagsFor：它每次都會呼叫 getProdTags(shop)，
+//     而 getProdTags 的第三層 fallback 是 JSON.parse 整包 localStorage。
+//     好麻吉 800+ 列，逐列呼叫 = 整包 parse 800+ 次（計數一次、篩選再一次）。
+//     這裡整包預讀一次，之後每列只做陣列 map/filter。
+//   期間規則不在這裡複製 —— 唯一實作仍然只有 getProdTagsFor 一份，
+//   整包資料用第四參數 preloaded 餵進去。
+//   ⚠ 回傳的 reader 綁著預讀當下的那包資料（getProdTags 前兩層回傳的是活物件參照，
+//     saveProdTags 存檔時會整個換掉）→ 只在同一次同步 render 內使用，不要跨 render 快取。
+function _prodTagsReaderFor(shop,opts){
+  const all=getProdTags(shop)||{};
+  return function(code){
+    return getProdTagsFor(shop,code,opts,all);
+  };
 }
 
 // ── Edit overrides: edits[shop][code][col] = value, notes[shop][code] = text ──
