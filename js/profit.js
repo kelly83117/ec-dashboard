@@ -451,9 +451,18 @@ function _notifyLsSaveFail(shop, month, half, err){
 //     把值為 undefined 的欄位整個吃掉，等於偷偷改動即將上雲的數字；而且成本貴一到兩個
 //     數量級（recalcRow 每編輯一格就 lsSave 一次）。
 //   ⚠ 絕不可就地改 built 本身 —— 那是畫面正在渲染的活陣列，剝掉欄位標籤會當場消失。
+// 🔴 為什麼 profitPct 也不能落地（理由跟 analysisAll 不同，別混為一談）
+//   analysisAll 是怕「規則改了、舊快照卻凍著舊規則算出來的答案」；
+//   profitPct 沒有這個問題 —— 它不吃任何設定，是 pureRate + adsPct 的純函數，
+//   而這【兩個來源欄位都有落地】，所以任何時候都能無損重建，剝掉零風險。
+//   剝它純粹是為了體積：每列多一個 float 約 30 bytes，一份 800 列的報表就多 ~25KB，
+//   而 app/profit 曾撐到 Firestore 1MB 上限的 85.5%（見上方 (b)）。
+//   ⚠ 重建點在 loadIntoUI 的 forEach（跟 analysisAll 同一個地方）。日後若把補算從那裡拿掉，
+//     切月份 / 切通路讀回被剝過的快照時，這一欄會變 undefined —— 而且排序與篩選是
+//     直接讀 r[col] 的，會【靜默失效不報錯】（排序全相等、篩選 0 筆）。
 function _stripDerived(built){
   if(!Array.isArray(built))return built;
-  return built.map(({analysisAll:_omit,...rest})=>rest);
+  return built.map(({analysisAll:_omit,profitPct:_omit2,...rest})=>rest);
 }
 function lsSave(shop,month,half,built,period,days){
   // 只存本機；同步雲端需手動按「☁ 同步雲端」
@@ -1255,6 +1264,7 @@ function loadIntoUI(shop,built,period,days){
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
+      r.profitPct=(r.rev>0)?(r.pureRate+r.adsPct):null;
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
@@ -2085,6 +2095,7 @@ function buildShop(shop,days){
     const pureProfit=p.gross-adsFee-platFee;
     const pureRate=p.rev>0?pureProfit/p.rev:null;
     const adsPct=p.rev>0?adsFee/p.rev:0;
+    const profitPct=p.rev>0?pureRate+adsPct:null;
     const denom=pureRate+adsPct-0.20;
     const targetROI=denom>0?1/denom:null;
     const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
@@ -2097,7 +2108,7 @@ function buildShop(shop,days){
     const growthRate = (prevRev!==null && prevRev>0) ? (p.rev - prevRev) / prevRev : null;
     const growthAnalysis = calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate);
     return{code:p.code,name:p.name,shopeeIds:p.shopeeIds,qty:p.qty,rev:p.rev,gross:p.gross,
-      adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,directROI,roi,roiDiff,
+      adsFee,platFee,pureProfit,pureRate,adsPct,profitPct,targetROI,directROI,roi,roiDiff,
       dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,...ana,testTags,
       prevRev, growthRate, growthAnalysis};
   });
@@ -3043,12 +3054,17 @@ function applyFilters(shop,opts){
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
   if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l));
-  const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
+  const PCT_COLS=new Set(['pureRate','adsPct','growthRate','profitPct']);
+  // 零營收(rev=0)時值為 null 的欄位（畫面顯示「—」）。num(null) 會塌成 0，不擋的話
+  //   「淨利率 <= 10」這類條件會把一整批零營收列誤撈進來。
+  //   ⚠ 不可併進 PCT_COLS：兩者語義不同、成員也不重合 —— adsPct 零營收是 0 不是 null，
+  //     併進來會讓零營收列在篩「廣告佔比」時被整批誤濾掉。
+  const NULL_WHEN_NO_REV=new Set(['pureRate','profitPct']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
     if(!f)return;
     if(f.type!=='range'&&(f.val===''||f.val===undefined))return;
     list=list.filter(r=>{
-      if(col==='pureRate'&&!(r.rev>0))return false;   // 零營收無淨利率(顯示「—」),不納入任何 pureRate 數值篩選
+      if(NULL_WHEN_NO_REV.has(col)&&!(r.rev>0))return false;
       const raw=r[col];
       const v=PCT_COLS.has(col)?num(raw)*100:raw;
       if(f.type==='text')return(raw+'').toLowerCase().includes(f.val.toLowerCase());
@@ -3370,6 +3386,9 @@ function patchRow(shop,code,ov){
   // adsPct
   const pctEl=document.getElementById(`td-${shop}-${code}-adsPct`);
   if(pctEl)pctEl.textContent=(r.adsPct*100).toFixed(2)+'%';
+  // profitPct
+  const ppEl=document.getElementById(`td-${shop}-${code}-profitPct`);
+  if(ppEl)ppEl.textContent=!(r.rev>0)?'—':(r.profitPct*100).toFixed(2)+'%';
   // targetROI
   const roiEl=document.getElementById(`td-${shop}-${code}-targetROI`);
   if(roiEl)roiEl.textContent=r.targetROI!==null?r.targetROI.toFixed(2):'—';
@@ -3402,6 +3421,7 @@ function recalcRow(shop,code,ov){
   const pureProfit=gross-adsFee-platFee;
   const pureRate=rev>0?pureProfit/rev:null;
   const adsPct=rev>0?adsFee/rev:0;
+  const profitPct=rev>0?pureRate+adsPct:null;
   const denom=pureRate+adsPct-0.20;
   const targetROI=denom>0?1/denom:null;
   const directROI=r.directROI;
@@ -3413,7 +3433,7 @@ function recalcRow(shop,code,ov){
   const testTags=calcTestTags(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
   const growthRate=r.growthRate;
   const growthAnalysis=calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate);
-  Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,roiDiff,dayBudget,...ana,testTags,growthAnalysis});
+  Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,profitPct,targetROI,roiDiff,dayBudget,...ana,testTags,growthAnalysis});
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
 
@@ -3864,7 +3884,7 @@ function buildSuggCell(shop,r){
 // ── Note modal ──
 const PROFIT_COLS=[
   {key:'adsFee',label:'廣告費'},{key:'rev',label:'營收'},{key:'gross',label:'毛利'},
-  {key:'pureProfit',label:'淨利'},{key:'pureRate',label:'淨利率%'},{key:'adsPct',label:'廣告佔比'},
+  {key:'pureProfit',label:'淨利'},{key:'pureRate',label:'淨利率%'},{key:'adsPct',label:'廣告佔比'},{key:'profitPct',label:'利潤 (純利率+廣告佔比)'},
   {key:'stock',label:'可用庫存'},{key:'targetROI',label:'目標ROI'},{key:'directROI',label:'直接ROI'},
   {key:'roi',label:'投入產出'},{key:'roiDiff',label:'實際-目標'},{key:'clicks',label:'點擊數'},
   {key:'dayBudget',label:'日預算'},{key:'analysisLabel',label:'廣告分析'},{key:'note',label:'廣告調整'},
@@ -4173,7 +4193,7 @@ function renderTable(shop,list,opts){
   const dragAttrs=(key)=>`draggable="true" ondragstart="colDragStart(event,'${shop}','${key}')" ondragover="colDragOver(event)" ondragenter="colDragEnter(event)" ondragleave="colDragLeave(event)" ondrop="colDrop(event,'${shop}','${key}')" ondragend="colDragEnd(event)"`;
   const HEADER_LABEL={
     adsFee:'廣告費', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利',
-    pureRate:'淨利率%', adsPct:'廣告佔比', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
+    pureRate:'淨利率%', adsPct:'廣告佔比', profitPct:'利潤%', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
     roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算',
     analysisLabel:'廣告分析', note:'廣告調整',
     growthRate:'成長比', growthAnalysis:'成長分析', growthNote:'商品調整',
@@ -4241,6 +4261,7 @@ function renderTable(shop,list,opts){
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
         pureRate:`<td id="td-${shop}-${r.code}-pureRate">${pill(!(r.rev>0)?null:r.pureRate*100)}</td>`,
         adsPct:`<td id="td-${shop}-${r.code}-adsPct" class="td-num">${(r.adsPct*100).toFixed(2)}%</td>`,
+        profitPct:`<td id="td-${shop}-${r.code}-profitPct" class="td-num">${!(r.rev>0)?'—':(r.profitPct*100).toFixed(2)+'%'}</td>`,
         stock:`<td class="td-num">${r.stock.toLocaleString()}</td>`,
         targetROI:`<td id="td-${shop}-${r.code}-targetROI" class="td-num">${r.targetROI!==null?r.targetROI.toFixed(2):'—'}</td>`,
         directROI:`<td class="td-num">${r.directROI>0?r.directROI.toFixed(2):'—'}</td>`,
@@ -4718,11 +4739,24 @@ function _fSigned(v){
 }
 // 依欄位型別決定顯示格式。
 // 百分比欄與金額欄的呈現方式不同，不能一律當金額。
-const _FOCUS_PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
+const _FOCUS_PCT_COLS=new Set(['pureRate','adsPct','growthRate','profitPct']);
 const _FOCUS_TEXT_COLS=new Set(['analysisLabel','note','growthAnalysis','growthNote']);
 // 所有欄位（含 note/growthNote）直接從商品列 r 取：sheet-import 連同報表把調整寫進 built[]，
 // r.note 已是純字串（不是 {adjustments} 結構）。growthAnalysis 是物件 {label,cls} → 取 .label；analysisLabel 已是字串。
 function _focusCell(r,key){
+  // 🔴 profitPct 一定要【現算】，不可以讀 r.profitPct：
+  //   renderFocus 走 lsLoad 讀的是快照，而 profitPct 被 _stripDerived 剝掉了 → 通常是 undefined。
+  //   ⚠ 更危險的是它會【間歇性碰巧有值】：若該通路剛好被 loadIntoUI 就地污染過 _profitMem
+  //     （lsLoad 直接回傳 _profitMem[k] 本身、不複製，見 _stripDerived 上方註解），
+  //     那些列身上就會帶著 profitPct。於是「切過該通路就看得到數字、重整後又變—」，
+  //     看起來像隨機故障。現算不是多餘的防禦，是唯一穩定的做法。
+  //   來源的 pureRate / adsPct 都有落地，所以任何時候都算得出來。
+  if(key==='profitPct'){
+    if(!(r.rev>0))return `<td class="td-num" style="color:#9ca3af">—</td>`;
+    const p=(Number(r.pureRate)+Number(r.adsPct))*100;
+    if(!isFinite(p))return `<td class="td-num" style="color:#9ca3af">—</td>`;
+    return `<td class="td-num ${p<0?'td-neg':''}">${p.toFixed(1)}%</td>`;
+  }
   const v=r[key];
   if(_FOCUS_TEXT_COLS.has(key)){
     const t=(v==null?'':(typeof v==='object'?(v.label||''):String(v)));
@@ -10836,7 +10870,7 @@ function doExport(shop){
   const built=state[shop]._built;if(!built?.length)return;
   const wb=XLSX.utils.book_new();
   const h=['商品ID','編號','商品名稱','廣告費','營收','毛利','淨利','淨利率%','廣告佔比%','可用庫存','目標ROI','直接投入產出','投入產出','實際-目標','點擊數','日預算','廣告分析','調整備註',
-    '上期營收','成長比','成長分析','成長調整','測試標籤'];
+    '上期營收','成長比','成長分析','成長調整','測試標籤','利潤%'];
   const exportNotes=getNotes(shop);
   const exportGrowthNotes=getNotes(shop+'_growth');
   const d=built.map(r=>[
@@ -10857,7 +10891,8 @@ function doExport(shop){
     r.growthRate!==null?+((r.growthRate*100).toFixed(2)):'-',
     r.growthAnalysis?.label||'',
     exportGrowthNotes[r.code]?.adjustments?.map(a=>a.text).join('; ')||'',
-    getProdTagsFor(shop,r.code).map(o=>o.date?`${o.tag}(${o.date})`:o.tag).join('、')
+    getProdTagsFor(shop,r.code).map(o=>o.date?`${o.tag}(${o.date})`:o.tag).join('、'),
+    !(r.rev>0)?'-':+(r.profitPct*100).toFixed(2)
   ]);
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([h,...d]),shop);
   XLSX.writeFile(wb,`淨利表_${shop}_${state[shop]._period||''}.xlsx`);
