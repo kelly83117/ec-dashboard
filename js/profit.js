@@ -1807,7 +1807,6 @@ function _doGenerate(shop){
       loadIntoUI(shop,built,period,days);
       if(curShop==='總表')renderSummary();
       checkAdsReconcile(shop,built);
-      checkSuggAlert(shop,built);
     }catch(err){alert('['+shop+'] 產生失敗：'+err.message+'\n\n'+err.stack);}
     setSpin(shop,false);
   },80);
@@ -3885,61 +3884,6 @@ function clearSuggFilter(shop){
   applyFilters(shop);
 }
 
-// ── Suggestion alert popup（產生報表後跳出）──
-let _suggAlertRows=null;
-let _suggAlertShop=null;
-function checkSuggAlert(shop,built){
-  const matched=(built||[]).filter(r=>r.testTags?.length);
-  const unresolved=matched.filter(r=>!isSuggDone(shop,r.code));
-  if(!unresolved.length)return;
-  _suggAlertRows=matched;_suggAlertShop=shop;
-  let ov=document.getElementById('sugg-alert-overlay');
-  if(!ov){
-    ov=document.createElement('div');ov.id='sugg-alert-overlay';ov.className='ana-overlay';
-    ov.innerHTML=`<div class="ana-modal" style="width:420px" onclick="event.stopPropagation()">
-      <div class="ana-modal-hdr"><span class="ana-modal-title">⚠ 廣告效率提醒</span><button class="ana-modal-x" onclick="closeSuggAlert()">✕</button></div>
-      <div style="padding:14px 22px;font-size:12.5px;color:#6b7280" id="sugg-alert-sub"></div>
-      <div style="max-height:260px;overflow-y:auto;padding:0 22px" id="sugg-alert-list"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 22px;border-top:1px solid #e4e6ef">
-        <button class="ana-cancel-btn" onclick="closeSuggAlert()">略過</button>
-        <button class="ana-save-btn" onclick="gotoSuggFiltered()">前往查看</button>
-      </div>
-    </div>`;
-    ov.onclick=closeSuggAlert;
-    document.body.appendChild(ov);
-  }
-  renderSuggAlertList();
-  ov.classList.add('open');
-}
-function closeSuggAlert(){document.getElementById('sugg-alert-overlay')?.classList.remove('open');}
-function renderSuggAlertList(){
-  const shop=_suggAlertShop;const rows=_suggAlertRows||[];
-  const sub=document.getElementById('sugg-alert-sub');if(sub)sub.textContent=`「${shop}」有 ${rows.length} 項商品符合建議規則`;
-  const list=document.getElementById('sugg-alert-list');if(!list)return;
-  const s=state[shop];const noteKey=s?shop+'|'+s.curMonth+'|'+s.curHalf:shop;
-  list.innerHTML=rows.map(r=>{
-    const codeEsc=r.code.replace(/'/g,"\\'");
-    const done=isSuggDone(shop,r.code);
-    const tagsHtml=done
-      ?`<span class="tag sugg-tag sugg-done" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊查看/編輯廣告調整">✓ 已優化</span>`
-      :r.testTags.map(tt=>`<span class="tag sugg-tag ${tt.cls}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${tt.label}</span>`).join(' ');
-    return`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid #f3f4f6">
-      <span style="font-size:13px">${r.name}</span>
-      <span style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:12px;color:#6b7280;font-family:monospace">點擊 ${r.clicks||0} · ROI ${(r.roi||0).toFixed(1)}</span>
-        ${tagsHtml}
-      </span>
-    </div>`;
-  }).join('');
-}
-function gotoSuggFiltered(){
-  const shop=_suggAlertShop;
-  closeSuggAlert();
-  if(!shop)return;
-  state[shop].suggFilterActive=true;
-  applyFilters(shop);
-  document.getElementById('tbl-'+shop)?.scrollIntoView({behavior:'smooth',block:'start'});
-}
 
 // ── Note modal ──
 const PROFIT_COLS=[
@@ -11046,7 +10990,6 @@ Object.assign(window, {
   ignoreAllUnmatched,umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
   updateTagFilterBar,validateMapWarnings,
   applySuggFilter,clearSuggFilter,
-  closeSuggAlert,gotoSuggFiltered,checkSuggAlert,
   updateSuggChip,buildSuggCell,
   colDragStart,colDragOver,colDrop,colDragEnd,colDragEnter,colDragLeave,resetColOrder,
   cpRowDragStart,cpRowDragOver,cpRowDragEnter,cpRowDragLeave,cpRowDrop,cpRowDragEnd,
