@@ -4283,7 +4283,6 @@ function renderTable(shop,list,opts){
     ${thT('code','編號','position:sticky;left:0;z-index:4;background:#f8f9fc')}
     ${thT('name','名稱 / ID','position:sticky;left:60px;z-index:4;background:#f8f9fc')}
     ${orderedCols.map(buildColHeader).join('')}
-    <th class="tl">建議</th>
   </tr></thead><tbody>`;
 
   let rowIdx=0;
@@ -4326,7 +4325,6 @@ function renderTable(shop,list,opts){
         <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
         <td class="tl td-name" style="position:sticky;left:60px;background:#fff;z-index:2;color:#9ca3af">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         ${bodyCells}
-        ${buildSuggCell(shop,r)}
       </tr>`;
     }else{
       const rowCell={
@@ -4354,7 +4352,6 @@ function renderTable(shop,list,opts){
         <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
         <td class="tl td-name" style="position:sticky;left:60px;background:#fff;z-index:2">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         ${orderedCols.map(c=>rowCell[c.key]||'').join('')}
-        ${buildSuggCell(shop,r)}
       </tr>`;
     }
     rowIdx++;
@@ -4375,7 +4372,6 @@ function renderTable(shop,list,opts){
   html+=`<tr class="tr-total">
     <td class="tl" colspan="2">小計（${list.length}筆）</td>
     ${orderedCols.map(c=>totalCell[c.key]||'<td></td>').join('')}
-    <td></td>
   </tr></tbody></table></div>`;
   const _tblHost=document.getElementById('tbl-'+shop);
   // keepScroll：覆蓋 innerHTML 會重建 .tscroll，捲動位置歸零。先存舊值、重繪後還原（含 scrollLeft，商品調整欄在最右）。
