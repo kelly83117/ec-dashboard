@@ -141,6 +141,13 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .tfpill{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;border:1.5px solid transparent;background:#f3f4f6;cursor:pointer;font-size:14px;font-weight:600;color:#374151;transition:all .15s;user-select:none;width:100%;box-sizing:border-box;}
 .tfpill:hover{border-color:#9ca3af;background:#e9eaec;}
 .tfpill.active{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
+/* 測試標籤本期 0 筆：顯示但不可點（JS 不輸出 onclick，這裡只負責看起來就點不下去） */
+.tfpill-disabled{opacity:.45;cursor:default;}
+.tfpill-disabled:hover{border-color:transparent;background:#f3f4f6;}
+.tfcnt-disabled{cursor:default;opacity:.4;}
+/* 該排一顆 pill 都沒有時的提示。.tfrow-pills 是 1fr 38px 1fr 38px 的 grid，
+   不橫跨整列文字會被擠進第一個 1fr 那格。 */
+.tfrow-empty{font-size:11px;color:var(--text-muted);padding:5px 0;grid-column:1/-1;}
 .tfpill-all{background:#1a1a2e;color:#fff;border-color:#1a1a2e;font-size:15px;padding:6px 18px;}
 .tfpill-all:hover{opacity:.85;}
 .tfpill-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}

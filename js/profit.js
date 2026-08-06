@@ -3023,7 +3023,35 @@ function updateTagFilterBar(shop){
     <div><span class="tfrow-lbl">成長分析</span><button class="ana-gear-btn" onclick="openGrowthSettings('${shop}')" title="設定成長分析規則">⚙</button></div>
     <div class="tfrow-pills">${gp}</div>
   </div>`;
-  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row1}${row2}</div>`;
+  // ── row3 測試標籤（ec_tags|{通路}，人工挑商品標記）──
+  //   🔴 用獨立的 prodCounts，【絕對不要】併進上面的 counts：
+  //     counts 是「同一個 key 被多個來源累加」的結構，PR #81 就是因為測試標籤規則與
+  //     廣告分析自訂規則同名，「關閉廣告」被兩邊各 +1 一次、變成 130（實際 65）。
+  //     手動標籤是使用者自己取名的，跟廣告分析撞名（例如「低效廣告」）完全可能，
+  //     所以計數從一開始就分開存，不留這個坑。
+  //   計數用的期間 opts 必須跟 buildProdTagCell（同樣是 curMonth/curHalf）一致 ——
+  //     pill 寫 3、表格就要看得到那 3 個，否則使用者無從判斷誰對。
+  //   ⚠ prodRead 建在 forEach 外面：建在裡面等於每列重讀一次整包（見 _prodTagsReaderFor）。
+  const prodRead=_prodTagsReaderFor(shop,{month:state[shop].curMonth,half:state[shop].curHalf});
+  const prodCounts={};
+  built.forEach(r=>{prodRead(r.code).forEach(o=>{prodCounts[o.tag]=(prodCounts[o.tag]||0)+1;});});
+  //   0 筆的標籤【仍然顯示】（跟廣告分析那排相反）：手動標籤是使用者自己建的，
+  //     藏起來會讓人以為標籤不見了。但 0 筆不可點、也不輸出 onclick（只靠 CSS 擋不夠可靠）。
+  //   ⚠ clickable 的 isSel 分支是給 Commit 3 用的：先勾了標籤、再切到看不到它的期間時，
+  //     pill 必須維持可點，否則使用者取消不了篩選、表格會一直是空的。
+  //     本輪 pill 還沒接篩選（不輸出 onclick），isSel 恆為 false，結構先留好。
+  const prodPills=getTagDefs().map(d=>{
+    const cnt=prodCounts[d.label]||0;
+    const isSel=false;                    // Commit 3 會改成 sel.includes('prod|'+d.label)
+    const clickable=cnt>0||isSel;
+    return`<span class="tfpill${isSel?' active':''}${clickable?'':' tfpill-disabled'}" title="${d.label}">${d.label}</span><span class="tfpill-cnt-cell${clickable?'':' tfcnt-disabled'}">${cnt}</span>`;
+  }).join('');
+  // 空狀態：getTagDefs() 讀不到雲端時會 fallback 回 TAG_DEFS_DEFAULT，所以實務上幾乎不會出現。
+  const row3=`<div class="tfrow">
+    <div><span class="tfrow-lbl">測試標籤</span></div>
+    <div class="tfrow-pills">${prodPills||'<span class="tfrow-empty">尚無標籤，點表格「測試標籤」欄新增</span>'}</div>
+  </div>`;
+  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row1}${row2}${row3}</div>`;
 }
 function toggleTagPopup(shop,btn){
   const bar=document.getElementById('tfbar-'+shop);if(!bar)return;
