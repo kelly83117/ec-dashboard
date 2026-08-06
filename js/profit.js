@@ -3023,7 +3023,38 @@ function updateTagFilterBar(shop){
     <div><span class="tfrow-lbl">成長分析</span><button class="ana-gear-btn" onclick="openGrowthSettings('${shop}')" title="設定成長分析規則">⚙</button></div>
     <div class="tfrow-pills">${gp}</div>
   </div>`;
-  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row1}${row2}</div>`;
+  // ── row3 測試標籤（ec_tags|{通路}，人工挑商品標記）──
+  //   🔴 用獨立的 prodCounts，【絕對不要】併進上面的 counts：
+  //     counts 是「同一個 key 被多個來源累加」的結構，PR #81 就是因為測試標籤規則與
+  //     廣告分析自訂規則同名，「關閉廣告」被兩邊各 +1 一次、變成 130（實際 65）。
+  //     手動標籤是使用者自己取名的，跟廣告分析撞名（例如「低效廣告」）完全可能，
+  //     所以計數從一開始就分開存，不留這個坑。
+  //   計數用的期間 opts 必須跟 buildProdTagCell（同樣是 curMonth/curHalf）一致 ——
+  //     pill 寫 3、表格就要看得到那 3 個，否則使用者無從判斷誰對。
+  //   ⚠ prodRead 建在 forEach 外面：建在裡面等於每列重讀一次整包（見 _prodTagsReaderFor）。
+  const prodRead=_prodTagsReaderFor(shop,{month:state[shop].curMonth,half:state[shop].curHalf});
+  const prodCounts={};
+  built.forEach(r=>{prodRead(r.code).forEach(o=>{prodCounts[o.tag]=(prodCounts[o.tag]||0)+1;});});
+  //   0 筆的標籤【仍然顯示】（跟廣告分析那排相反）：手動標籤是使用者自己建的，
+  //     藏起來會讓人以為標籤不見了。但 0 筆不可點、也不輸出 onclick（只靠 CSS 擋不夠可靠）。
+  //   ⚠ 例外：已勾選卻在本期 0 筆時（例如標記日被改到未來）必須維持可點，
+  //     否則使用者取消不了這個篩選、表格會一直是空的。
+  //   勾選狀態存進 tagFilters 時一律帶 'prod|' 前綴，理由見 applyFilters 那段註解。
+  const prodPills=getTagDefs().map(d=>{
+    const cnt=prodCounts[d.label]||0;
+    const key='prod|'+d.label;
+    const isSel=sel.includes(key);
+    const clickable=cnt>0||isSel;
+    const lbl=key.replace(/'/g,"\\'");   // 標籤名可能含單引號，會把 onclick 字串切斷（同 mkPill）
+    const ca=clickable?`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`:'';
+    return`<span class="tfpill${isSel?' active':''}${clickable?'':' tfpill-disabled'}" ${ca} title="${d.label}">${d.label}</span><span class="tfpill-cnt-cell${clickable?'':' tfcnt-disabled'}" ${ca}>${cnt}</span>`;
+  }).join('');
+  // 空狀態：getTagDefs() 讀不到雲端時會 fallback 回 TAG_DEFS_DEFAULT，所以實務上幾乎不會出現。
+  const row3=`<div class="tfrow">
+    <div><span class="tfrow-lbl">測試標籤</span></div>
+    <div class="tfrow-pills">${prodPills||'<span class="tfrow-empty">尚無標籤，點表格「測試標籤」欄新增</span>'}</div>
+  </div>`;
+  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row1}${row2}${row3}</div>`;
 }
 function toggleTagPopup(shop,btn){
   const bar=document.getElementById('tfbar-'+shop);if(!bar)return;
@@ -3053,7 +3084,24 @@ function applyFilters(shop,opts){
   const q=(s.search||'').trim().toLowerCase();
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
-  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l));
+  // tagFilters 是扁平字串陣列、多個來源共用，手動標籤（第三排）一律帶 'prod|' 前綴 ——
+  //   它的 label 是使用者自己取的，跟廣告分析／成長分析撞名（例如「低效廣告」）完全可能，
+  //   靠前綴才分得開。這裡拆成兩組各自比對，兩組之間是 OR（勾越多列越多）。
+  //   🔴 otherSel 這組必須用 r.analysisAll（多標籤陣列），不可退回 r.analysis（PR #80 之前的
+  //     單標籤模型，只等於陣列的 [0]）—— 用 r.analysis 篩「減300」時，第一個標籤是
+  //     「低效廣告」的列會全部漏掉，而且不報錯。
+  //   🔴 手動標籤一定要套期間規則，opts 必須跟 updateTagFilterBar 的 prodCounts 與
+  //     buildProdTagCell 三者完全一致，否則會出現「pill 寫 3、篩出 5、表格那格是空的」。
+  //   ⚠ prodRead 建在 filter 外面：建在 callback 裡等於每列重讀一次整包（見 _prodTagsReaderFor）。
+  if(s.tagFilters?.length){
+    const prodSel=s.tagFilters.filter(l=>l.startsWith('prod|')).map(l=>l.slice(5));
+    const otherSel=s.tagFilters.filter(l=>!l.startsWith('prod|'));
+    const prodRead=prodSel.length?_prodTagsReaderFor(shop,{month:s.curMonth,half:s.curHalf}):null;
+    list=list.filter(r=>
+      otherSel.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l)
+      ||(prodRead?prodRead(r.code).some(o=>prodSel.includes(o.tag)):false)
+    );
+  }
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate','profitPct']);
   // 零營收(rev=0)時值為 null 的欄位（畫面顯示「—」）。num(null) 會塌成 0，不擋的話
   //   「淨利率 <= 10」這類條件會把一整批零營收列誤撈進來。
@@ -3208,8 +3256,9 @@ function _periodEndDate(month,half){
 //   opts.month / opts.half 有給 → 只回傳「該期間結束日 >= 標記日」的標籤
 //   不給 → 全部回傳（匯出用，不做期間過濾）
 //   沒有 date 的標籤一律回傳（舊資料保守處理）
-function getProdTagsFor(shop,code,opts){
-  const all=getProdTags(shop);
+//   preloaded 有給 → 直接用那包（呼叫端已整包預讀過，見 _prodTagsReaderFor），沒給就照舊自己讀
+function getProdTagsFor(shop,code,opts,preloaded){
+  const all=preloaded||getProdTags(shop);
   const arr=all&&all[code];
   if(!Array.isArray(arr))return[];
   const out=arr.map(x=>(x&&typeof x==='object')?{tag:x.tag,date:x.date||''}:{tag:x,date:''})
@@ -3218,6 +3267,21 @@ function getProdTagsFor(shop,code,opts){
   const end=_periodEndDate(opts.month,opts.half);
   if(!end)return out;
   return out.filter(o=>!o.date||o.date<=end);
+}
+// 手動標籤（ec_tags|{通路}）的「整包只讀一次」版讀取器。回傳 (code)=>[{tag,date}]。
+//   ⚠ 為什麼不讓呼叫端逐列呼叫 getProdTagsFor：它每次都會呼叫 getProdTags(shop)，
+//     而 getProdTags 的第三層 fallback 是 JSON.parse 整包 localStorage。
+//     好麻吉 800+ 列，逐列呼叫 = 整包 parse 800+ 次（計數一次、篩選再一次）。
+//     這裡整包預讀一次，之後每列只做陣列 map/filter。
+//   期間規則不在這裡複製 —— 唯一實作仍然只有 getProdTagsFor 一份，
+//   整包資料用第四參數 preloaded 餵進去。
+//   ⚠ 回傳的 reader 綁著預讀當下的那包資料（getProdTags 前兩層回傳的是活物件參照，
+//     saveProdTags 存檔時會整個換掉）→ 只在同一次同步 render 內使用，不要跨 render 快取。
+function _prodTagsReaderFor(shop,opts){
+  const all=getProdTags(shop)||{};
+  return function(code){
+    return getProdTagsFor(shop,code,opts,all);
+  };
 }
 
 // ── Edit overrides: edits[shop][code][col] = value, notes[shop][code] = text ──
