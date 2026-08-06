@@ -2967,7 +2967,6 @@ function updateTagFilterBar(shop){
   built.forEach(r=>{
     (r.analysisAll||[]).forEach(a=>{if(a.label)counts[a.label]=(counts[a.label]||0)+1;});
     const g=r.growthAnalysis?.label;if(g)counts[g]=(counts[g]||0)+1;
-    (r.testTags||[]).forEach(tt=>{counts[tt.label]=(counts[tt.label]||0)+1;});
   });
   const mkPill=(t)=>{
     const active=sel.includes(t.label)?' active':'';
@@ -3002,18 +3001,6 @@ function updateTagFilterBar(shop){
     const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
     return`<span class="tfpill${active}" ${ca}>${ct.label}</span><span class="tfpill-cnt-cell" ${ca}>${cnt}</span>`;
   }).join('');
-  const testPills=getCustomTestRules().map(ct=>{
-    const{total,done}=testRuleStats(shop,ct);
-    if(!total)return'';
-    const active=sel.includes(ct.label)?' active':'';
-    const lbl=ct.label.replace(/'/g,"\\'");
-    const ca=`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`;
-    return`<span class="tfpill${active}" ${ca}>${ct.label}</span><span class="tfpill-cnt-cell" ${ca}>${done}/${total}</span>`;
-  }).join('');
-  const row0=`<div class="tfrow">
-    <div><span class="tfrow-lbl">測試標籤</span><button class="ana-gear-btn" onclick="openTestSettings('${shop}')" title="設定測試標籤">⚙</button></div>
-    <div class="tfrow-pills">${testPills||'<span style="font-size:11px;color:#9ca3af;padding:5px 0">尚無測試標籤，點 ⚙ 新增</span>'}</div>
-  </div>`;
   const row1=`<div class="tfrow">
     <div><span class="tfrow-lbl">廣告分析</span><button class="ana-gear-btn" onclick="openAnaSettings('${shop}')" title="設定分析規則">⚙</button></div>
     <div class="tfrow-pills">${fixedPills}${addDrop}${subDrop}${customPills}</div>
@@ -3030,7 +3017,7 @@ function updateTagFilterBar(shop){
     <div><span class="tfrow-lbl">成長分析</span><button class="ana-gear-btn" onclick="openGrowthSettings('${shop}')" title="設定成長分析規則">⚙</button></div>
     <div class="tfrow-pills">${gp}</div>
   </div>`;
-  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row0}${row1}${row2}</div>`;
+  bar.innerHTML=`<div class="tf-all-wrap">${allPill}</div><div class="tf-rows">${row1}${row2}</div>`;
 }
 function toggleTagPopup(shop,btn){
   const bar=document.getElementById('tfbar-'+shop);if(!bar)return;
