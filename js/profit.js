@@ -3037,14 +3037,17 @@ function updateTagFilterBar(shop){
   built.forEach(r=>{prodRead(r.code).forEach(o=>{prodCounts[o.tag]=(prodCounts[o.tag]||0)+1;});});
   //   0 筆的標籤【仍然顯示】（跟廣告分析那排相反）：手動標籤是使用者自己建的，
   //     藏起來會讓人以為標籤不見了。但 0 筆不可點、也不輸出 onclick（只靠 CSS 擋不夠可靠）。
-  //   ⚠ clickable 的 isSel 分支是給 Commit 3 用的：先勾了標籤、再切到看不到它的期間時，
-  //     pill 必須維持可點，否則使用者取消不了篩選、表格會一直是空的。
-  //     本輪 pill 還沒接篩選（不輸出 onclick），isSel 恆為 false，結構先留好。
+  //   ⚠ 例外：已勾選卻在本期 0 筆時（例如標記日被改到未來）必須維持可點，
+  //     否則使用者取消不了這個篩選、表格會一直是空的。
+  //   勾選狀態存進 tagFilters 時一律帶 'prod|' 前綴，理由見 applyFilters 那段註解。
   const prodPills=getTagDefs().map(d=>{
     const cnt=prodCounts[d.label]||0;
-    const isSel=false;                    // Commit 3 會改成 sel.includes('prod|'+d.label)
+    const key='prod|'+d.label;
+    const isSel=sel.includes(key);
     const clickable=cnt>0||isSel;
-    return`<span class="tfpill${isSel?' active':''}${clickable?'':' tfpill-disabled'}" title="${d.label}">${d.label}</span><span class="tfpill-cnt-cell${clickable?'':' tfcnt-disabled'}">${cnt}</span>`;
+    const lbl=key.replace(/'/g,"\\'");   // 標籤名可能含單引號，會把 onclick 字串切斷（同 mkPill）
+    const ca=clickable?`onclick="event.stopPropagation();setTagFilter('${shop}','${lbl}')"`:'';
+    return`<span class="tfpill${isSel?' active':''}${clickable?'':' tfpill-disabled'}" ${ca} title="${d.label}">${d.label}</span><span class="tfpill-cnt-cell${clickable?'':' tfcnt-disabled'}" ${ca}>${cnt}</span>`;
   }).join('');
   // 空狀態：getTagDefs() 讀不到雲端時會 fallback 回 TAG_DEFS_DEFAULT，所以實務上幾乎不會出現。
   const row3=`<div class="tfrow">
@@ -3081,7 +3084,24 @@ function applyFilters(shop,opts){
   const q=(s.search||'').trim().toLowerCase();
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
-  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l));
+  // tagFilters 是扁平字串陣列、多個來源共用，手動標籤（第三排）一律帶 'prod|' 前綴 ——
+  //   它的 label 是使用者自己取的，跟廣告分析／成長分析撞名（例如「低效廣告」）完全可能，
+  //   靠前綴才分得開。這裡拆成兩組各自比對，兩組之間是 OR（勾越多列越多）。
+  //   🔴 otherSel 這組必須用 r.analysisAll（多標籤陣列），不可退回 r.analysis（PR #80 之前的
+  //     單標籤模型，只等於陣列的 [0]）—— 用 r.analysis 篩「減300」時，第一個標籤是
+  //     「低效廣告」的列會全部漏掉，而且不報錯。
+  //   🔴 手動標籤一定要套期間規則，opts 必須跟 updateTagFilterBar 的 prodCounts 與
+  //     buildProdTagCell 三者完全一致，否則會出現「pill 寫 3、篩出 5、表格那格是空的」。
+  //   ⚠ prodRead 建在 filter 外面：建在 callback 裡等於每列重讀一次整包（見 _prodTagsReaderFor）。
+  if(s.tagFilters?.length){
+    const prodSel=s.tagFilters.filter(l=>l.startsWith('prod|')).map(l=>l.slice(5));
+    const otherSel=s.tagFilters.filter(l=>!l.startsWith('prod|'));
+    const prodRead=prodSel.length?_prodTagsReaderFor(shop,{month:s.curMonth,half:s.curHalf}):null;
+    list=list.filter(r=>
+      otherSel.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l)
+      ||(prodRead?prodRead(r.code).some(o=>prodSel.includes(o.tag)):false)
+    );
+  }
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate','profitPct']);
   // 零營收(rev=0)時值為 null 的欄位（畫面顯示「—」）。num(null) 會塌成 0，不擋的話
   //   「淨利率 <= 10」這類條件會把一整批零營收列誤撈進來。
