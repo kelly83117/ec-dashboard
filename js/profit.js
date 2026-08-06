@@ -3054,12 +3054,17 @@ function applyFilters(shop,opts){
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
   if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l));
-  const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
+  const PCT_COLS=new Set(['pureRate','adsPct','growthRate','profitPct']);
+  // 零營收(rev=0)時值為 null 的欄位（畫面顯示「—」）。num(null) 會塌成 0，不擋的話
+  //   「淨利率 <= 10」這類條件會把一整批零營收列誤撈進來。
+  //   ⚠ 不可併進 PCT_COLS：兩者語義不同、成員也不重合 —— adsPct 零營收是 0 不是 null，
+  //     併進來會讓零營收列在篩「廣告佔比」時被整批誤濾掉。
+  const NULL_WHEN_NO_REV=new Set(['pureRate','profitPct']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
     if(!f)return;
     if(f.type!=='range'&&(f.val===''||f.val===undefined))return;
     list=list.filter(r=>{
-      if(col==='pureRate'&&!(r.rev>0))return false;   // 零營收無淨利率(顯示「—」),不納入任何 pureRate 數值篩選
+      if(NULL_WHEN_NO_REV.has(col)&&!(r.rev>0))return false;
       const raw=r[col];
       const v=PCT_COLS.has(col)?num(raw)*100:raw;
       if(f.type==='text')return(raw+'').toLowerCase().includes(f.val.toLowerCase());
@@ -4734,11 +4739,24 @@ function _fSigned(v){
 }
 // 依欄位型別決定顯示格式。
 // 百分比欄與金額欄的呈現方式不同，不能一律當金額。
-const _FOCUS_PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
+const _FOCUS_PCT_COLS=new Set(['pureRate','adsPct','growthRate','profitPct']);
 const _FOCUS_TEXT_COLS=new Set(['analysisLabel','note','growthAnalysis','growthNote']);
 // 所有欄位（含 note/growthNote）直接從商品列 r 取：sheet-import 連同報表把調整寫進 built[]，
 // r.note 已是純字串（不是 {adjustments} 結構）。growthAnalysis 是物件 {label,cls} → 取 .label；analysisLabel 已是字串。
 function _focusCell(r,key){
+  // 🔴 profitPct 一定要【現算】，不可以讀 r.profitPct：
+  //   renderFocus 走 lsLoad 讀的是快照，而 profitPct 被 _stripDerived 剝掉了 → 通常是 undefined。
+  //   ⚠ 更危險的是它會【間歇性碰巧有值】：若該通路剛好被 loadIntoUI 就地污染過 _profitMem
+  //     （lsLoad 直接回傳 _profitMem[k] 本身、不複製，見 _stripDerived 上方註解），
+  //     那些列身上就會帶著 profitPct。於是「切過該通路就看得到數字、重整後又變—」，
+  //     看起來像隨機故障。現算不是多餘的防禦，是唯一穩定的做法。
+  //   來源的 pureRate / adsPct 都有落地，所以任何時候都算得出來。
+  if(key==='profitPct'){
+    if(!(r.rev>0))return `<td class="td-num" style="color:#9ca3af">—</td>`;
+    const p=(Number(r.pureRate)+Number(r.adsPct))*100;
+    if(!isFinite(p))return `<td class="td-num" style="color:#9ca3af">—</td>`;
+    return `<td class="td-num ${p<0?'td-neg':''}">${p.toFixed(1)}%</td>`;
+  }
   const v=r[key];
   if(_FOCUS_TEXT_COLS.has(key)){
     const t=(v==null?'':(typeof v==='object'?(v.label||''):String(v)));
@@ -10852,7 +10870,7 @@ function doExport(shop){
   const built=state[shop]._built;if(!built?.length)return;
   const wb=XLSX.utils.book_new();
   const h=['商品ID','編號','商品名稱','廣告費','營收','毛利','淨利','淨利率%','廣告佔比%','可用庫存','目標ROI','直接投入產出','投入產出','實際-目標','點擊數','日預算','廣告分析','調整備註',
-    '上期營收','成長比','成長分析','成長調整','測試標籤'];
+    '上期營收','成長比','成長分析','成長調整','測試標籤','利潤%'];
   const exportNotes=getNotes(shop);
   const exportGrowthNotes=getNotes(shop+'_growth');
   const d=built.map(r=>[
@@ -10873,7 +10891,8 @@ function doExport(shop){
     r.growthRate!==null?+((r.growthRate*100).toFixed(2)):'-',
     r.growthAnalysis?.label||'',
     exportGrowthNotes[r.code]?.adjustments?.map(a=>a.text).join('; ')||'',
-    getProdTagsFor(shop,r.code).map(o=>o.date?`${o.tag}(${o.date})`:o.tag).join('、')
+    getProdTagsFor(shop,r.code).map(o=>o.date?`${o.tag}(${o.date})`:o.tag).join('、'),
+    !(r.rev>0)?'-':+(r.profitPct*100).toFixed(2)
   ]);
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([h,...d]),shop);
   XLSX.writeFile(wb,`淨利表_${shop}_${state[shop]._period||''}.xlsx`);
