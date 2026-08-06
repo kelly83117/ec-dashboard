@@ -451,9 +451,18 @@ function _notifyLsSaveFail(shop, month, half, err){
 //     把值為 undefined 的欄位整個吃掉，等於偷偷改動即將上雲的數字；而且成本貴一到兩個
 //     數量級（recalcRow 每編輯一格就 lsSave 一次）。
 //   ⚠ 絕不可就地改 built 本身 —— 那是畫面正在渲染的活陣列，剝掉欄位標籤會當場消失。
+// 🔴 為什麼 profitPct 也不能落地（理由跟 analysisAll 不同，別混為一談）
+//   analysisAll 是怕「規則改了、舊快照卻凍著舊規則算出來的答案」；
+//   profitPct 沒有這個問題 —— 它不吃任何設定，是 pureRate + adsPct 的純函數，
+//   而這【兩個來源欄位都有落地】，所以任何時候都能無損重建，剝掉零風險。
+//   剝它純粹是為了體積：每列多一個 float 約 30 bytes，一份 800 列的報表就多 ~25KB，
+//   而 app/profit 曾撐到 Firestore 1MB 上限的 85.5%（見上方 (b)）。
+//   ⚠ 重建點在 loadIntoUI 的 forEach（跟 analysisAll 同一個地方）。日後若把補算從那裡拿掉，
+//     切月份 / 切通路讀回被剝過的快照時，這一欄會變 undefined —— 而且排序與篩選是
+//     直接讀 r[col] 的，會【靜默失效不報錯】（排序全相等、篩選 0 筆）。
 function _stripDerived(built){
   if(!Array.isArray(built))return built;
-  return built.map(({analysisAll:_omit,...rest})=>rest);
+  return built.map(({analysisAll:_omit,profitPct:_omit2,...rest})=>rest);
 }
 function lsSave(shop,month,half,built,period,days){
   // 只存本機；同步雲端需手動按「☁ 同步雲端」
@@ -1255,6 +1264,7 @@ function loadIntoUI(shop,built,period,days){
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
       r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
+      r.profitPct=(r.rev>0)?(r.pureRate+r.adsPct):null;
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
@@ -2085,6 +2095,7 @@ function buildShop(shop,days){
     const pureProfit=p.gross-adsFee-platFee;
     const pureRate=p.rev>0?pureProfit/p.rev:null;
     const adsPct=p.rev>0?adsFee/p.rev:0;
+    const profitPct=p.rev>0?pureRate+adsPct:null;
     const denom=pureRate+adsPct-0.20;
     const targetROI=denom>0?1/denom:null;
     const roiDiff=(targetROI!==null&&directROI>0)?directROI-targetROI:null;
@@ -2097,7 +2108,7 @@ function buildShop(shop,days){
     const growthRate = (prevRev!==null && prevRev>0) ? (p.rev - prevRev) / prevRev : null;
     const growthAnalysis = calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate);
     return{code:p.code,name:p.name,shopeeIds:p.shopeeIds,qty:p.qty,rev:p.rev,gross:p.gross,
-      adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,directROI,roi,roiDiff,
+      adsFee,platFee,pureProfit,pureRate,adsPct,profitPct,targetROI,directROI,roi,roiDiff,
       dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,...ana,testTags,
       prevRev, growthRate, growthAnalysis};
   });
@@ -3402,6 +3413,7 @@ function recalcRow(shop,code,ov){
   const pureProfit=gross-adsFee-platFee;
   const pureRate=rev>0?pureProfit/rev:null;
   const adsPct=rev>0?adsFee/rev:0;
+  const profitPct=rev>0?pureRate+adsPct:null;
   const denom=pureRate+adsPct-0.20;
   const targetROI=denom>0?1/denom:null;
   const directROI=r.directROI;
@@ -3413,7 +3425,7 @@ function recalcRow(shop,code,ov){
   const testTags=calcTestTags(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
   const growthRate=r.growthRate;
   const growthAnalysis=calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate);
-  Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,targetROI,roiDiff,dayBudget,...ana,testTags,growthAnalysis});
+  Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,profitPct,targetROI,roiDiff,dayBudget,...ana,testTags,growthAnalysis});
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
 
