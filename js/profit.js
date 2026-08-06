@@ -1060,10 +1060,6 @@ function shopHTML(shop){return`
       <span id="period-tag-${shop}" style="display:none"></span>
       <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋 編號 / 名稱 / ID…" oninput="setSearch('${shop}',this.value)">
       <span class="row-cnt" id="cnt-${shop}"></span>
-      <span class="sugg-filter-chip" id="sugg-chip-${shop}">
-        <span id="sugg-chip-text-${shop}"></span>
-        <button onclick="clearSuggFilter('${shop}')">清除篩選</button>
-      </span>
       <div style="margin-left:auto;display:flex;align-items:center;gap:4px;position:relative">
         <button class="col-pick-btn" id="tag-btn-${shop}" onclick="toggleTagPopup('${shop}',this)">🏷 標籤</button>
         <div class="tag-filter-bar" id="tfbar-${shop}"></div>
@@ -3046,8 +3042,7 @@ function applyFilters(shop,opts){
   const q=(s.search||'').trim().toLowerCase();
   let list=[...s._built];
   if(q)list=list.filter(r=>r.name.toLowerCase().includes(q)||r.code.toLowerCase().includes(q)||(r.shopeeIds||[]).some(id=>String(id).toLowerCase().includes(q)));
-  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l||(r.testTags||[]).some(tt=>tt.label===l)));
-  if(s.suggFilterActive)list=list.filter(r=>r.testTags?.length);
+  if(s.tagFilters?.length)list=list.filter(r=>s.tagFilters.some(l=>(r.analysisAll||[]).some(a=>a.label===l)||r.growthAnalysis?.label===l));
   const PCT_COLS=new Set(['pureRate','adsPct','growthRate']);
   Object.entries(s.filters||{}).forEach(([col,f])=>{
     if(!f)return;
@@ -3076,7 +3071,6 @@ function applyFilters(shop,opts){
   }
   renderTable(shop,list,opts);
   updateTagFilterBar(shop);
-  updateSuggChip(shop);
 }
 function setSort(shop,col,dir){state[shop].sorts={col,dir};applyFilters(shop);}
 function setSearch(shop,val){if(state[shop])state[shop].search=val;applyFilters(shop);}
@@ -3864,24 +3858,6 @@ function buildSuggCell(shop,r){
   }
   const tagsHtml=r.testTags.map(tt=>`<span class="tag sugg-tag ${tt.cls}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${tt.label}</span>`).join(' ');
   return`<td class="tl">${tagsHtml}</td>`;
-}
-function updateSuggChip(shop){
-  const s=state[shop];const chip=document.getElementById('sugg-chip-'+shop);if(!chip)return;
-  if(s?.suggFilterActive){
-    chip.style.display='flex';
-    const n=(s._built||[]).filter(r=>r.testTags?.length).length;
-    document.getElementById('sugg-chip-text-'+shop).textContent='已篩選：僅顯示 '+n+' 項符合建議規則的商品';
-  }else{chip.style.display='none';}
-}
-function applySuggFilter(shop){
-  const s=state[shop];if(!s)return;
-  s.suggFilterActive=!s.suggFilterActive;
-  applyFilters(shop);
-}
-function clearSuggFilter(shop){
-  const s=state[shop];if(!s)return;
-  s.suggFilterActive=false;
-  applyFilters(shop);
 }
 
 
@@ -10989,8 +10965,7 @@ Object.assign(window, {
   syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   ignoreAllUnmatched,umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
   updateTagFilterBar,validateMapWarnings,
-  applySuggFilter,clearSuggFilter,
-  updateSuggChip,buildSuggCell,
+  buildSuggCell,
   colDragStart,colDragOver,colDrop,colDragEnd,colDragEnter,colDragLeave,resetColOrder,
   cpRowDragStart,cpRowDragOver,cpRowDragEnter,cpRowDragLeave,cpRowDrop,cpRowDragEnd,
   cupColDragStart,cupColDragOver,cupColDragEnter,cupColDragLeave,cupColDrop,cupColDragEnd,
