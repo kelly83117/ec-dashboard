@@ -534,6 +534,20 @@ function _testSaveFailed(k,msg){
     App.showAlertModal({title:'測試通路寫入失敗',message:'報表【沒有】寫進雲端，而且測試通路不存本機，重整後就會消失。\n請確認網路後重新產生報表。',detail:k+'\n'+msg,kind:'error'});
   else if(typeof showToast==='function') showToast('測試通路寫入失敗：'+msg,'error');
 }
+// 「🗑 清除重傳」的雲端刪除失敗一定要出聲 —— 靜默失敗＝本機清了、雲端那份還在，
+//   下次快照回來報表就復活（Kelly 2026/07/30 回報的原始 bug）。沿用 _testSaveFailed 的通報範式。
+//   ⚠ app.js 的 __notifyCloudFail 沒有掛上 window，這裡拿不到，故自行翻譯常見錯誤。
+function _clearPeriodFailed(k,msg){
+  console.error('[clearPeriod] 雲端刪除失敗',k,msg);
+  const friendly=/permission|PERMISSION_DENIED/i.test(msg)
+      ? '雲端拒絕：沒有刪除權限，請聯絡管理員調整 Firestore 規則。'
+    : /network|fetch|offline|unavailable/i.test(msg)
+      ? '雲端連線失敗（網路 / 離線），請恢復連線後再試。'
+    : msg;
+  if(window.App&&typeof App.showAlertModal==='function')
+    App.showAlertModal({title:'清除失敗',message:'雲端那份報表【沒有】刪掉，所以本機這份也保留不動（避免只清一半、下次同步又復活）。\n'+friendly+'\n\n可以直接再按一次重試。',detail:k+'\n'+msg,kind:'error'});
+  else if(typeof showToast==='function') showToast('清除失敗：'+friendly,'error');
+}
 // 真實 pending 筆數（排除 __shop__| marker 和 _summary_v1）
 //   _summary_v1 是總表資料，總表已改為自動同步（saveSummaryRows 直接推雲端），
 //   不會經過 pending set；但舊版可能已把它塞進 set → 保險排除掉，避免離開頁面誤跳「未同步」。
@@ -1271,12 +1285,35 @@ function tryLoadSaved(shop){
 }
 function clearPeriodFromModal(){
   const shop=curShop==='總表'?SHOPS[0].id:curShop;
-  clearPeriod(shop);
+  return clearPeriod(shop);   // 回傳 Promise（clearPeriod 已是 async）；inline onclick 對回傳值無感，行為不變
 }
-function clearPeriod(shop){
+async function clearPeriod(shop){
   const s=state[shop];
   const periodLabel=getPeriodLabel(s.curMonth,s.curHalf);
-  if(!confirm(`確定要清除「${shop}」${periodLabel}的報表與已上傳的檔案嗎？`))return;
+  const k=lsKey(shop,s.curMonth,s.curHalf);
+  if(!confirm(`即將永久刪除「${shop}」${periodLabel}的報表。\n\n⚠ 本機與雲端【兩邊都會刪掉，無法復原】，其他同事也會看不到這份報表。\n已上傳的檔案紀錄也會一併清除。\n\n確定嗎？`))return;
+  // 🔴 順序【不可對調】：先刪雲端 doc，成功後才清本機。
+  //   profits collection 的訂閱只加不刪（firebase.js 搜 `onSnapshot(profitsColRef`：
+  //   只走 Object.keys(incoming) 逐 key 賦值，被刪的 doc 不會進迴圈、也沒有 docChanges 處理）。
+  //   先清記憶體、後刪雲端的話，中間任何一個快照回來都會把 Store._profitMem[k] 填回去，
+  //   而且再也沒有東西會清掉它 —— 那就是「清除重傳後報表又復活」的原貌（Kelly 2026/07/30 森之旅）。
+  //   先刪 doc：doc 不存在後，後續快照的 incoming 就沒有這個 key，填不回來。
+  const _clrBtn=document.getElementById('upm-clear-btn');
+  const _clrTxt=_clrBtn?_clrBtn.textContent:'';
+  if(_clrBtn){_clrBtn.disabled=true;_clrBtn.textContent='清除中…';}   // 擋連點觸發第二次刪除
+  try{
+    if(!window.__cloudProfitCol||typeof window.__cloudProfitCol.removeReport!=='function')
+      throw new Error('雲端層尚未就緒（__cloudProfitCol.removeReport 未建立）');
+    await window.__cloudProfitCol.removeReport(k);
+  }catch(e){
+    // 🔴 不可空 catch：報表比任務附圖重要（對照 daily.js 的 .catch(()=>{}) 是反面教材）。
+    //   刪不掉就【整個中止、本機一個字都不動】，讓使用者可以重試 ——
+    //   半清狀態（本機沒了、雲端還在）就是這次要修的 bug。deleteDoc 冪等，重按安全。
+    _clearPeriodFailed(k,(e&&e.message)||String(e));
+    return;
+  }finally{
+    if(_clrBtn){_clrBtn.disabled=false;_clrBtn.textContent=_clrTxt;}
+  }
   // 清除報表
   try{localStorage.removeItem(lsKey(shop,s.curMonth,s.curHalf));}catch(e){}
   try{if(typeof Store!=='undefined'&&Store._profitMem)delete Store._profitMem[lsKey(shop,s.curMonth,s.curHalf)];}catch{}
@@ -1318,6 +1355,14 @@ function clearPeriod(shop){
   const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;
   // 重置廣告群組卡片
   const groupList=document.getElementById('upm-groupads-list');if(groupList)groupList.innerHTML='';
+  // 報表已刪，這個 key 不該再留在待同步佇列 —— 否則按同步時 syncToCloud 讀 _profitMem 讀不到，
+  //   會進 skippedProblem「報表資料讀不到或損毀」，而 skippedProblem 不會被移出 pending
+  //   （syncToCloud 只刪 ok 的 key）→ 每次同步都誤報一次，同步鈕徽章也一直亮著（重整後才會消）。
+  // ⚠ 刻意放在最後：在此之前 _pendingSyncKeys 還含有這個 key，
+  //   __profitShouldSkipCloudOverwrite()（本檔搜 `window.__profitShouldSkipCloudOverwrite`）會回 true，
+  //   剛好在整段清除過程中擋掉任何 in-flight 舊快照的回填，當一層免費的保險。
+  try{_pendingSyncKeys.delete(k);}catch{}
+  _showSyncBtn(shop);
 }
 function loadIntoUI(shop,built,period,days){
   if(built&&Array.isArray(built)){

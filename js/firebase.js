@@ -275,6 +275,15 @@ try {
         }
         return setDoc(doc(db, 'profits', toDocId(key)), value);
       },
+      // 刪除單份報表 doc（淨利表「🗑 清除重傳」用）。
+      // ⚠ doc id 轉換必須跟 setReport 共用同一個 toDocId：自己另寫一份遲早分岔，
+      //   而 deleteDoc 刪一份不存在的 doc 是【靜默成功、不報錯】的 —— 轉換一錯就變成
+      //   「畫面說清掉了、雲端那份還在」，正好是這次要修的 bug 本身。
+      // ⚠ 命名刻意用 remove* 前綴（對稱 __cloudTaskImage.removeImage / __cloudStore.removeFields）。
+      //   【絕對不能】叫 getDoc / subscribe —— 那兩個名字在本機測試防護碼的讀取白名單(READ_OK)裡會被
+      //   自動放行，本機一按「清除重傳」就會真的刪掉公司正式 Firestore 的報表。remove* 不在白名單
+      //   → 會被換成 no-op，本機測試安全。
+      removeReport: (key) => deleteDoc(doc(db, 'profits', toDocId(key))),
     };
   } catch {}
 
