@@ -584,9 +584,13 @@ function _sweepAllLocalReportsIntoPending(){
       // MOMO 商品主檔（持續性資料）：走 field 分支（setField 讀 Store._mem），
       //   比照報表一起補掃，避免「存了商品→重整前沒同步」漏推。
       if(k&&k.startsWith('ec_momo_products|')){
-        _pendingSyncKeys.add(k);
-        if(!(Store._mem&&Store._mem[k])){
-          try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+        // ⚠ 只有「真正編輯過還沒推」(dirty) 的商品主檔才進 pending。舊碼用「localStorage 存在」當 pending →
+        //   幾天前載入的 stale 快照被誤判成 pending、擋住雲端訂閱覆蓋 → 永遠 stale。改看 dirty 註冊表根治。
+        if(_momoIsDirty(k)){
+          _pendingSyncKeys.add(k);
+          if(!(Store._mem&&Store._mem[k])){
+            try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+          }
         }
         continue;
       }
@@ -748,6 +752,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     // pending 清理：只保留 failed + skippedProblem（要重試 / 要一直提醒），其餘刪掉
     // 只清掉「這次真的推成功」的 key（ok）；失敗/讀不到/逐項勾選未選的一律留在 pending 下次再推
     ok.forEach(k=>_pendingSyncKeys.delete(k));
+    ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
     if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
     _report('done',{ok,failed,skippedProblem,skippedByDesign});
     // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 時出現；只要有問題就 ⚠ + 彈窗
@@ -6321,6 +6326,7 @@ function momoSaveProducts(shop,products){
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}              // 保留三鏡像一致
   try{ window._momoJustSaved=Date.now(); }catch{}   // bounce-back 守衛：剛存過 5 秒內、momo_products 訂閱 echo 回來不覆蓋
   _markPending(k);   // 走既有 pending → 手動同步時 __cloudMomo.setShop 上雲（momo_products collection，每賣場一 doc）
+  try{ _momoDirtyAdd(k); }catch{}   // 真正編輯過 → 進 dirty 註冊表（persisted）；雲端訂閱不再覆蓋、直到成功推雲端才清（見 syncToCloud 成功分支）
 }
 // 「待同步的本機值」：_mem → localStorage（保留使用者編輯）。⚠ 不讀 _profitMem——它會被 momo_products 雲端 snapshot 洗回舊值，
 //   若同步/預覽讀它就會拿到 stale。同步推送(syncToCloud)與預覽比對(_momoCollectPending)都走這個 → 保證「看到的==推的」。
@@ -6337,6 +6343,26 @@ window.__momoShouldSkipCloudOverwrite=function(k){
   if(window._momoJustSaved && (Date.now()-window._momoJustSaved < 5000)) return true;
   return false;
 };
+// ══════ 多人共用衝突防護（2026-08-07）：products 主檔的「真正本機編輯」註冊表 + 雲端版本基準 ══════
+//  背景：momo_products 是 ~1300 筆共用主檔，多人（使用者/Keani）都會編輯後同步。舊碼整包 last-write-wins、
+//        無版本比對 → 曾兩次靜默用舊本機蓋掉較新雲端（07-28 乙配、08-07 甲配）。
+//  ── dirty 註冊表（persisted，跨重整）：只有真正經 momoSaveProducts 編輯、且還沒成功推雲端的 key 在裡面。
+//     這是「stale 舊快照 vs 我改了還沒推」的唯一判準：not dirty → 雲端訂閱可覆蓋本機（stale 自動跟上雲端）；
+//     dirty → 保護不被覆蓋。⚠ 部署前既有的 localStorage 沒有 dirty 記錄＝視為 not-dirty（跟雲端）——符合
+//     「本機是幾天前 stale 快照、要跟雲端」的實情；若真有未推編輯，改動內容會與雲端不同 → 由 base 版本比對（【2】）在推送前擋下。
+//  ── base 版本表（persisted）：本機這份 products 目前「基於哪個雲端版本(updatedAt ms)」。推送前 getDoc 到的
+//     雲端 updatedAt 若 > base → 雲端在我載入後又被人更新過 → 衝突，預覽標紅、預設不推。
+const _MOMO_PDIRTY_LS='ec_momo_products_dirty';   // JSON array：真正編輯過還沒推的 full key
+const _MOMO_PBASE_LS ='ec_momo_products_base';    // JSON map：full key → 雲端 updatedAt(ms)
+function _momoReadJson(lsKey, fallback){ try{ const raw=localStorage.getItem(lsKey); return raw?JSON.parse(raw):fallback; }catch{ return fallback; } }
+function _momoDirtyAdd(k){ try{ const a=_momoReadJson(_MOMO_PDIRTY_LS,[]); if(Array.isArray(a)&&!a.includes(k)){ a.push(k); localStorage.setItem(_MOMO_PDIRTY_LS,JSON.stringify(a)); } }catch{} }
+function _momoDirtyDel(k){ try{ let a=_momoReadJson(_MOMO_PDIRTY_LS,[]); if(Array.isArray(a)&&a.includes(k)){ a=a.filter(x=>x!==k); localStorage.setItem(_MOMO_PDIRTY_LS,JSON.stringify(a)); } }catch{} }
+function _momoIsDirty(k){ try{ const a=_momoReadJson(_MOMO_PDIRTY_LS,[]); return Array.isArray(a)&&a.includes(k); }catch{ return false; } }
+function _momoBaseGet(k){ try{ const m=_momoReadJson(_MOMO_PBASE_LS,{}); return (m&&m[k])||0; }catch{ return 0; } }
+function _momoBaseSet(k, ts){ try{ const m=_momoReadJson(_MOMO_PBASE_LS,{})||{}; m[k]=ts||0; localStorage.setItem(_MOMO_PBASE_LS,JSON.stringify(m)); }catch{} }
+window.__momoIsProductsDirty=function(k){ return _momoIsDirty(k); };          // firebase.js 訂閱：dirty 守衛
+window.__momoNoteCloudBase =function(k, ts){ if(ts) _momoBaseSet(k, ts); };   // firebase.js 訂閱：接受雲端後記錄基準
+window.__momoProductsBaseGet=function(k){ return _momoBaseGet(k); };          // 預覽【2】：讀本機基準版本
 // momo_products 訂閱推來更新時的精準重繪（不走 App.render/renderFromCloud、不整頁重繪，避免踢人）。
 //   ⚠ 收緊守衛：① 變的是「當前 curMomoShop」② active 容器是 momo-content-*（使用者真的在 MOMO 頁，比照 v199 inShopee）
 //   ③ 停在總表子分頁（其他子分頁沒有商品表）。只重繪那一張表 body。
@@ -7396,7 +7422,7 @@ async function momoOpenSyncPreview(shop){
     const momoShops=[...new Set(momoItems.map(it=>it.key.slice(pfx.length)))];
     await Promise.all(momoShops.map(async sh=>{
       const key=pfx+sh;
-      try{ const s=await window.__cloudMomo.getDoc(sh); momoCloud[key]= s.exists()?{items:((s.data()&&s.data().items)||[])}:{items:undefined}; }
+      try{ const s=await window.__cloudMomo.getDoc(sh); const dd=s.exists()?(s.data()||{}):null; momoCloud[key]= dd?{items:(dd.items||[]), updatedAt:(dd.updatedAt&&dd.updatedAt.toMillis)?dd.updatedAt.toMillis():0}:{items:undefined}; }
       catch(e){ momoCloud[key]={error:true}; }
     }));
   }
@@ -7433,6 +7459,9 @@ async function momoOpenSyncPreview(shop){
       const cItems=mc.items; it._cloudVal=cItems;
       if(cItems===undefined){ it.status='new'; it.cloudCount=0; }
       else { it.cloudCount=_momoCount(cItems); it.status=_eq(it.localVal,cItems)?'same':'diff'; }
+      // 【2】版本比對：內容不同、且雲端 updatedAt > 本機基準（我載入後雲端又被人推過）→ 標衝突（推了會蓋掉同事較新版本）。
+      //   base 讀不到（0）時採保守：只要雲端有版本戳且內容不同就當衝突（無從證明本機是最新）。
+      if(it.status==='diff'){ const base=(window.__momoProductsBaseGet?window.__momoProductsBaseGet(it.key):0); const cts=mc.updatedAt||0; if(cts && (!base || cts>base)) it.conflict=true; }
       return;
     }
     if(it.kind==='MOMO月對帳'){
@@ -7472,16 +7501,18 @@ function momoRenderSyncPreviewModal(shop, items){
     if(it.status==='uncomparable') return `<span style="color:#9ca3af">無法比對（不同 collection）</span>`;
     if(it.status==='readfail') return `<span style="color:#d97706">無法比對（雲端讀取失敗，仍會整包覆蓋）</span>`;
     const cnt=(it.cloudCount!==it.localCount)?`（雲端 ${it.cloudCount} / 本機 ${it.localCount} 筆）`:'';
+    if(it.conflict) return `<span style="color:#dc2626;font-weight:700" title="雲端在你載入後又被更新過（可能是同事推的），推了會用你的舊資料整包蓋掉雲端較新版本${cnt}">⚠ 雲端較新，預設不推</span>`;   // 【2】版本比對命中
     return `<span style="color:#9a3412;font-weight:600" title="推了會用本機整包覆蓋雲端${cnt}">內容不同</span>`;
   };
   const anyDiff=items.some(it=>it.status==='diff');
+  const anyConflict=items.some(it=>it.conflict);   // 【2】：有「雲端較新」衝突項
   // 差異明細（diff item）：預設收合，摘要一行「N 筆不同 · 展開」；明細講變化(陣列講筆數)不倒 JSON；全值在 title tooltip
   const diffHtml=it=>{ const d=it.diff; if(!d||!d.samples||!d.samples.length) return it.diffErr?`<div class="mm-sync-diff">差異明細計算失敗：${esc(it.diffErr)}</div>`:'';
     const ss=d.samples.map(s=>`<div class="mm-sync-diff-row"${(s.local!=null||s.cloud!=null)?` title="本機：${esc(String(s.local))}　|　雲端：${esc(String(s.cloud))}"`:''}>· <b>${esc(String(s.item))}</b>${(s.field&&s.field!=='(整筆)')?' · '+esc(s.field):''}：${esc(s.desc||'')}</div>`).join('');
     return `<details class="mm-sync-diff"><summary>${d.total} 筆不同 · 展開</summary>${ss}${d.total>d.samples.length?`<div style="color:#9ca3af;margin-top:2px">（僅列前 ${d.samples.length}）</div>`:''}</details>`; };
-  // 逐列 HTML；checked=預設是否勾選（有變更→勾、無變更→不勾）
-  const rowHtml=(it,checked)=>`<tr style="border-top:1px solid #f3f4f6">
-      <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}" ${checked?'checked':''} onchange="momoSyncUpdateCount()"></td>
+  // 逐列 HTML；checked=預設是否勾選（有變更→勾、無變更→不勾、衝突→不勾）；data-conflict 供確認時二次攔截
+  const rowHtml=(it,checked)=>`<tr style="border-top:1px solid #f3f4f6${it.conflict?';background:#fef2f2':''}">
+      <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}"${it.conflict?' data-conflict="1"':''} ${checked?'checked':''} onchange="momoSyncUpdateCount()"></td>
       <td style="padding:6px 8px;font-family:monospace;word-break:break-all">${esc(it.key)}</td>
       <td style="padding:6px 8px;color:${typeColor[it.kind]||'#6b7280'};font-weight:600;white-space:nowrap">${it.kind}</td>
       <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.localCount}</td>
@@ -7490,11 +7521,11 @@ function momoRenderSyncPreviewModal(shop, items){
     </tr>`;
   const changed=items.filter(it=>it.status!=='same'), unchanged=items.filter(it=>it.status==='same');   // 只有 changed 需要你決定
   const theadHtml=`<thead><tr style="text-align:left;color:#6b7280;font-weight:600">
-      <th style="padding:6px 4px;text-align:center"><input type="checkbox" id="mm-sync-all" checked onchange="momoSyncToggleAll(this.checked)"></th>
+      <th style="padding:6px 4px;text-align:center"><input type="checkbox" id="mm-sync-all" ${anyConflict?'':'checked'} onchange="momoSyncToggleAll(this.checked)"></th>
       <th style="padding:6px 8px">資料 key</th><th style="padding:6px 8px">類型</th><th style="padding:6px 8px;text-align:right">本機</th><th style="padding:6px 8px;text-align:right">雲端</th><th style="padding:6px 8px">狀態 / 差異</th>
     </tr></thead>`;
   const mainHtml = changed.length
-    ? `<table style="width:100%;border-collapse:collapse;font-size:12px">${theadHtml}<tbody id="mm-sync-main-body">${changed.map(it=>rowHtml(it,true)).join('')}</tbody></table>`
+    ? `<table style="width:100%;border-collapse:collapse;font-size:12px">${theadHtml}<tbody id="mm-sync-main-body">${changed.map(it=>rowHtml(it,!it.conflict)).join('')}</tbody></table>`
     : `<div style="padding:18px;text-align:center;color:#9ca3af;font-size:13px">目前沒有需要同步的項目${unchanged.length?`（另有 ${unchanged.length} 項無變更）`:''}</div>`;
   const unchangedHtml = unchanged.length
     ? `<details class="mm-sync-unchanged"><summary>另有 ${unchanged.length} 項無變更 · 展開（預設不推，可個別勾）</summary><table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px"><tbody>${unchanged.map(it=>rowHtml(it,false)).join('')}</tbody></table></details>`
@@ -7503,6 +7534,7 @@ function momoRenderSyncPreviewModal(shop, items){
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;font-size:15px;font-weight:700">同步預覽 — 勾選要推送到雲端的項目</div>
     <div style="padding:12px 20px;overflow:auto">
       <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">只列出<b>有變更</b>（新增／內容不同）的項目，預設全勾；無變更的收在下方。<b>勾選推送的會用本機整包覆蓋雲端（無版本比對、系統無法判斷誰新）</b>，請確認不會蓋掉同事的更新。</div>
+      ${anyConflict?`<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;line-height:1.6">🚫 有項目<b>雲端較新</b>（你載入後雲端又被人更新過，可能是同事推的）——這些列<b>預設不勾</b>、避免用你的舊資料蓋掉同事的更新。建議<b>重新整理</b>拿到最新雲端後再改。若你確定要覆蓋，需手動勾選並二次確認。</div>`:''}
       ${anyDiff?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">⚠️ 有項目<b>內容不同</b>——點該列「展開」看差在哪個 SKU/欄位，確認是你要覆蓋的再保持勾選。</div>`:''}
       ${mainHtml}
       ${unchangedHtml}
@@ -7512,6 +7544,7 @@ function momoRenderSyncPreviewModal(shop, items){
       <button id="mm-sync-confirm-btn" onclick="momoConfirmSync('${shop}')" ${changed.length?'':'disabled'} style="padding:7px 18px;border-radius:7px;border:none;background:${changed.length?'#10b981':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${changed.length?'pointer':'default'}">確認同步${changed.length?'（'+changed.length+' 項）':''}</button>
     </div>
   </div>`;
+  try{ momoSyncUpdateCount(); }catch{}   // 衝突項預設不勾 → 首次渲染就同步「確認同步(N)」按鈕與全選框狀態
 }
 function momoSyncToggleAll(checked){ document.querySelectorAll('#mm-sync-main-body .mm-sync-chk').forEach(c=>{c.checked=checked;}); momoSyncUpdateCount(); }   // 全選只作用在「有變更」主表
 function momoSyncUpdateCount(){
@@ -7522,7 +7555,11 @@ function momoSyncUpdateCount(){
 }
 function momoCloseSyncPreview(){ const ov=document.getElementById('momo-sync-overlay'); if(ov) ov.remove(); }
 function momoConfirmSync(shop){
-  const keys=[...document.querySelectorAll('.mm-sync-chk')].filter(c=>c.checked).map(c=>c.getAttribute('data-key'));
+  const checkedEls=[...document.querySelectorAll('.mm-sync-chk')].filter(c=>c.checked);
+  // 【2】二次攔截：使用者手動勾回「雲端較新」的衝突項 → 明確再確認一次（避免手滑覆蓋同事更新）
+  const conflictKeys=checkedEls.filter(c=>c.getAttribute('data-conflict')==='1').map(c=>c.getAttribute('data-key'));
+  if(conflictKeys.length && !confirm('你勾選了 '+conflictKeys.length+' 項「雲端較新」的資料：\n'+conflictKeys.join('\n')+'\n\n推送會用你的本機（較舊）版本整包蓋掉雲端較新的版本，可能丟失同事的更新。\n\n確定要覆蓋嗎？（建議先重新整理拿最新雲端）')) return;
+  const keys=checkedEls.map(c=>c.getAttribute('data-key'));
   momoCloseSyncPreview();
   if(!keys.length){ if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop); return; }
   Promise.resolve(syncToCloud(shop, new Set(keys))).then(()=>{ momoRefreshSyncBtn(shop); momoUpdateDailyProgress({pushToCloud:true}); }).catch(()=>momoRefreshSyncBtn(shop));   // 只推選中的 key；同步成功後把工作日誌 momo-summary 一起推給老闆

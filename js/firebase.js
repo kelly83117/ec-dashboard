@@ -1,6 +1,6 @@
 /* ===================== Firebase Firestore 雲端同步層 ===================== */
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
-import { getFirestore, doc, collection, getDoc, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import { getFirestore, doc, collection, getDoc, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
@@ -194,10 +194,20 @@ try {
             const shop = data.shop || MOMO_DOCID_SHOP[d.id] || d.id;   // 反查優先讀 doc.shop，fallback 對照表
             const k = 'ec_momo_products|' + shop;
             const items = data.items || [];
-            // ⚠ bounce-back 守衛：本機有未同步變更（pending）或剛存過 → 不覆蓋，保住本機版本（守衛邏輯在 profit.js，避免讀私有 _pendingSyncKeys）
+            const ts = (data.updatedAt && data.updatedAt.toMillis) ? data.updatedAt.toMillis() : 0;   // 雲端版本戳（【2】基準）
+            // ⚠ bounce-back 守衛：剛存過（echo）→ 不覆蓋（守衛邏輯在 profit.js）
             if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;
-            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(items)) return;   // 無變化不動、不觸發重繪
+            // ⚠ dirty 守衛：真正編輯過還沒推的 key → 保護，不被雲端覆蓋（persisted，跨重整；區分「stale 舊快照 vs 我改了還沒推」）
+            if (window.__momoIsProductsDirty && window.__momoIsProductsDirty(k)) return;
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(items)) {   // 內容相同：不覆蓋、不重繪，但記錄雲端版本基準
+              if (ts && window.__momoNoteCloudBase) window.__momoNoteCloudBase(k, ts);
+              return;
+            }
+            // 【1】 stale 修正：not-dirty → 本機三鏡像一起跟上雲端（預覽/推送讀 _mem→localStorage，只更 _profitMem 會 stale）
             Store._profitMem[k] = items;
+            try { localStorage.setItem(k, JSON.stringify(items)); } catch (e) {}
+            try { if (Store._mem) Store._mem[k] = items; } catch (e) {}
+            if (ts && window.__momoNoteCloudBase) window.__momoNoteCloudBase(k, ts);
             changed.push(shop);
           });
           if (changed.length) {
@@ -279,7 +289,7 @@ try {
   window.__cloudMomo = {
     // 讀取方法命名成 getDoc/subscribe → 落在本機測試防護的讀取白名單(READ_OK)、自動放行（不可改名，否則會被誤 no-op）
     getDoc:    (shop) => getDoc(doc(db, 'momo_products', MOMO_SHOP_DOCID[shop] || shop)),
-    setShop:   (shop, items) => setDoc(doc(db, 'momo_products', MOMO_SHOP_DOCID[shop] || shop), { shop, items: items || [] }),   // setDoc：整包取代
+    setShop:   (shop, items) => setDoc(doc(db, 'momo_products', MOMO_SHOP_DOCID[shop] || shop), { shop, items: items || [], updatedAt: serverTimestamp() }),   // setDoc：整包取代；updatedAt 供推送前版本比對（【2】）
     subscribe: (cb) => onSnapshot(momoProductsColRef, cb),
   };
 
