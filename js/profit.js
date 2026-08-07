@@ -5887,6 +5887,22 @@ function saveScoreTargetsModal(btn){
 // ── (legacy unused) ──
 // ── Tab switch ──
 function setShop(shop,btn){
+  // 🔴 不在淨利表頁面 → 直接 return，什麼都不做（2026-08-07 新增）
+  //   「不在淨利表頁還會呼叫 setShop」乍看很莫名，成因在 offices.js：
+  //   - offices.js:820 那顆 200ms 計時器（內含 restoreProfitView）的排程條件是 activeTab.key==='profit'，
+  //     而 d1 的 this.filter.officeTab.d1 永遠是 undefined（d1 走 offices.js:913 不渲染 tabBar，
+  //     頁面上沒有任何 .pill[data-office-tab] 可寫入它）→ activeTab 恆等於 tabs[0]＝profit
+  //     → 進 d1 的【任何一頁】（工作日誌 / KPI / 洞察表 / 淨利表）都會排這顆計時器。
+  //   - 但注入 __profitTabHtml 的 offices.js:904 條件是 subRoute==='profit'，只有淨利表頁會注入 content-*。
+  //   兩邊條件不一致 → 停在洞察表時，200ms 後照樣 restoreProfitView → setShop('森之旅')，
+  //   而整份淨利表 DOM 早就被 main.innerHTML 換掉了。
+  //   ⚠ 必須擋在下面那道「失效分頁防護」【之前】：那道防護會把 shop 改寫成 '總表' 並落地
+  //     localStorage（ec_curShop / ec_profitView），把使用者「停在森之旅」就地抹掉 → 切回淨利表再也還原不回去。
+  //   ⚠ 判準用 .shop-content（淨利表 DOM 在不在）而不是 content-<shop>（這個分頁還在不在）——
+  //     兩件事不同，混用就是上面那個誤判的根因。.shop-content 只由 __profitTabHtml 的 15 個 div 產生，全有或全無。
+  //   ⚠ 刻意不印 warn：d1 每頁 render 都會來一次，印了只會洗版。
+  //   結構問題（計時器在 d1 每頁都排）留在 offices.js，今天不動；只在 setShop 這個共同出口收斂。
+  if(!document.querySelector('.shop-content')) return;
   // 🔴 失效分頁防護（2026-08-07 移除「重點檢視」後新增）
   //   ec_curShop 是 localStorage，同事上次若停在已移除的分頁，_restoreShopeeInline / offices.js:48
   //   / offices.js:836 三條還原路徑都只擋 '總表'，會照樣把舊值餵進來。
