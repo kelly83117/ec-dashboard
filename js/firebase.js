@@ -260,6 +260,22 @@ try {
           }
         }, err => { console.error('[momo_s1103 subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_s1103 subscribe failed', e); }
+
+      // momo_stock collection（單一快照 doc 'current'）→ Store._profitMem['ec_momo_stock_by_origin']（總表「自家庫存」欄；獨立 collection 避 app/profit 索引爆）
+      try {
+        onSnapshot(momoStockColRef, snap => {
+          let changed = false;
+          snap.forEach(d => {
+            if (d.id !== MOMO_STOCK_DOCID) return;
+            const data = d.data() || {};
+            const k = 'ec_momo_stock_by_origin';
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) return;
+            Store._profitMem[k] = data;
+            changed = true;
+          });
+          if (changed) { console.log('[momo_stock] 收到更新'); window.dispatchEvent(new CustomEvent('momoStockReady')); }
+        }, err => { console.error('[momo_stock subscribe 失敗]', err); });
+      } catch (e) { console.warn('momo_stock subscribe failed', e); }
     };
   } catch (e) { console.warn('profit subscribe failed', e); }
 
@@ -313,6 +329,18 @@ try {
     getDoc:    (period) => getDoc(doc(db, 'momo_s1103', period)),
     setPeriod: (period, data) => setDoc(doc(db, 'momo_s1103', period), data || {}),
     subscribe: (cb) => onSnapshot(momoS1103ColRef, cb),
+  };
+
+  // ============== MOMO 自家庫存 momo_stock（帳號級單一快照 doc） ==============
+  // 為什麼獨立 collection：庫存是 6500+ 原廠編號的 map，塞 app/profit 欄位會逐 key 建索引、
+  //   撞 app/profit 的 40000 索引項上限（S1103 同款理由）。單一 doc 從 0 起算、額度獨立、日後不用再搬。
+  // 值＝ { uploadedAt, byOrigin:{origin:qty} }（整包快照取代）。getDoc/subscribe 命名落防護讀取白名單；setSnapshot 唯一寫入。
+  const momoStockColRef = collection(db, 'momo_stock');
+  const MOMO_STOCK_DOCID = 'current';
+  window.__cloudStock = {
+    getDoc:      () => getDoc(doc(db, 'momo_stock', MOMO_STOCK_DOCID)),
+    setSnapshot: (obj) => setDoc(doc(db, 'momo_stock', MOMO_STOCK_DOCID), obj || {}),
+    subscribe:   (cb) => onSnapshot(momoStockColRef, cb),
   };
 
   // ============== 洞察表獨立文件 app/insight（避免 app/main 撞 1MB 上限） ==============
