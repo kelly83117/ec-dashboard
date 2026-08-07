@@ -17,7 +17,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <button class="stab" style="font-size:15px" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
             <button class="stab" style="font-size:15px" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
             <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
-            <button class="stab" style="font-size:15px" onclick="setShop('${TEST_SHOP_ID}',this)"><span class="sdot" style="background:#8b5cf6"></span>${TEST_SHOP_ID}</button>
+            <span class="stab-sep"></span><button class="stab" style="font-size:15px" onclick="setShop('${TEST_SHOP_ID}',this)"><span class="sdot" style="background:#8b5cf6"></span>${TEST_SHOP_ID}</button>
             <span style="width:1px;height:18px;background:#d1d5db;margin:0 2px"></span><button class="stab" style="font-size:15px" onclick="setShop('重點檢視',this)">重點檢視</button>
           </div>
         </div>
@@ -314,7 +314,10 @@ function _readLastHalf(shopId){
   const p=_findLatestPeriod(shopId);
   return p?p.half:_initCurHalf;
 }
-SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[],search:''};});
+// curStart/curEnd：測試通路專用（YYYY-MM-DD 起訖日）。其餘四家永遠是 ''、沒有任何程式碼會讀。
+//   ⚠ curMonth/curHalf 對測試通路無意義但【刻意保留】：全檔數十處在讀（updateHalfBtnLabels、
+//     getPrevPeriodKey、syncHeaderKpis…），拿掉會連鎖 throw。讓它們留著當無害的殘值。
+SHOPS.forEach(s=>{state[s.id]={rawMobic:null,rawAds:null,rawSelAds:null,rawGroupAdsList:[],rawMap:{},curMonth:_readLastMonth(s.id),curHalf:_readLastHalf(s.id),curStart:'',curEnd:'',days:15,_built:null,_period:'',filters:{},sorts:{},tagFilters:[],search:''};});
 let globalMap={};
 let curShop='總表';
 let openPopup=null;
@@ -488,6 +491,50 @@ function lsSave(shop,month,half,built,period,days){
   _pendingSyncKeys.add(k);
   _showSyncBtn(shop);
   if(saveErr){ try{ _notifyLsSaveFail(shop, month, half, saveErr); }catch(e2){ console.error('[lsSave] 通報失敗', e2); } }
+}
+
+// ══════ 測試通路：日期區間期間模型 + 雲端直寫 ══════
+// 🔴 為什麼【絕對不能】走 lsSave / _pendingSyncKeys：
+//    lsSave 會 _pendingSyncKeys.add(k)，而 syncToCloud 推送時的報表分支條件是
+//    pk.startsWith('ec|') —— 'ectest|' 不符合，會一路掉到最後「設定類 field key」的
+//    fallback，用 __cloudProfit.setField(pk,val) 把整份報表寫進 app/profit 文件的一個【欄位】。
+//    那份文件曾撐到 Firestore 單文件 1MB 上限的 85.5%，一份數百 KB 的報表塞進去會安靜推爆它。
+// 🔴 因此這條路徑：只寫 Store._profitMem（給畫面讀）+ 產生當下直接 setReport 到 profits
+//    collection。不寫 localStorage、不進 pending、不出現在「☁ 同步雲端」的任何清單裡。
+// ⚠ doc id：firebase.js 的 toDocId 只把 '/' 換成 '__'。起訖日用連字號（YYYY-MM-DD）不含 '/'，
+//    故 key 原樣當 doc id。'|' 在 doc id 合法（既有 'ec|好麻吉|2026__07|first' 已在用）。
+function testKey(shop,start,end){return`ectest|${shop}|${start}|${end}`;}
+function testDays(start,end){
+  const a=new Date(start+'T12:00:00'),b=new Date(end+'T12:00:00');
+  const n=Math.round((b-a)/86400000)+1;
+  return Number.isFinite(n)&&n>0?n:1;
+}
+function testHasPeriod(shop){const s=state[shop]||{};return !!(s.curStart&&s.curEnd&&s.curStart<=s.curEnd);}
+// 只讀 _profitMem —— 這條路徑從不寫 localStorage，讀它只會拿到 null 白費工。
+function testLoad(shop,start,end){
+  if(!start||!end)return null;
+  try{ return (Store._profitMem&&Store._profitMem[testKey(shop,start,end)])||null; }catch{return null;}
+}
+function testSave(shop,start,end,built,period,days){
+  const k=testKey(shop,start,end);
+  // ⚠ 只剝一次就夠：payload.built 是 _stripDerived 產出的【全新乾淨物件】，
+  //   而 loadIntoUI 事後加回衍生欄位的對象是原始的 built 陣列、不是這份拷貝。
+  //   （syncToCloud 那邊要再剝一次，是因為它讀的是被 loadIntoUI 就地污染過的 _profitMem。）
+  const payload={built:_stripDerived(built),period,days,rate:getPlatformRate(shop),ts:Date.now()};
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=payload; }catch{}
+  const col=window.__cloudProfitCol;
+  if(!col||typeof col.setReport!=='function'){ _testSaveFailed(k,'雲端層尚未就緒（__cloudProfitCol 未建立）'); return; }
+  col.setReport(k,payload)
+     .then(()=>{ if(typeof showToast==='function') showToast('測試通路報表已寫入雲端','success'); })
+     .catch(e=>{ _testSaveFailed(k,(e&&e.message)||String(e)); });
+}
+// 寫入失敗一定要出聲 —— 這條路徑【沒有 localStorage 兜底、也沒有待同步佇列可重試】，
+//   靜默失敗＝資料直接消失。沿用 syncToCloud 的 showAlertModal / showToast 通報範式。
+function _testSaveFailed(k,msg){
+  console.error('[testSave] 雲端寫入失敗',k,msg);
+  if(window.App&&typeof App.showAlertModal==='function')
+    App.showAlertModal({title:'測試通路寫入失敗',message:'報表【沒有】寫進雲端，而且測試通路不存本機，重整後就會消失。\n請確認網路後重新產生報表。',detail:k+'\n'+msg,kind:'error'});
+  else if(typeof showToast==='function') showToast('測試通路寫入失敗：'+msg,'error');
 }
 // 真實 pending 筆數（排除 __shop__| marker 和 _summary_v1）
 //   _summary_v1 是總表資料，總表已改為自動同步（saveSummaryRows 直接推雲端），
@@ -1796,6 +1843,13 @@ function findUnmatchedAds(shop){
 }
 
 function generate(shop){
+  // 測試通路的期間是手填起訖日，可能留白或填反 —— 其他四家的下拉永遠有合法值，故只擋這一家。
+  //   刻意用「開頭 return」而不去動 upm-gen-btn 的 disabled：那顆的條件散在 openUploadModal
+  //   與 onGlobalFile 兩處 inline 計算，改它要碰既有四家的路徑，風險不對稱。
+  if(shop===TEST_SHOP_ID&&!testHasPeriod(shop)){
+    if(typeof showToast==='function') showToast('請先選擇測試通路的起訖日（結束日不得早於開始日）','error');
+    return;
+  }
   // 沒有任何廣告資料時提醒（維克通路本來就沒廣告；其他通路多半是忘了傳廣告檔）。
   //   三種廣告來源都要檢查，只傳選品廣告或廣告群組的人不該被誤攔。
   const _s=state[shop]||{};
@@ -1813,6 +1867,7 @@ function generate(shop){
   _doGenerate(shop);
 }
 function _doGenerate(shop){
+  if(shop===TEST_SHOP_ID) return _doGenerateTest(shop);   // 測試通路：日期區間 + 雲端直寫，見下方
   setSpin(shop,true);
   setTimeout(()=>{
     try{
@@ -1824,6 +1879,26 @@ function _doGenerate(shop){
       const dotEl=document.getElementById('dot-'+shop);if(dotEl)dotEl.classList.add('on');
       loadIntoUI(shop,built,period,days);
       if(curShop==='總表')renderSummary();
+      checkAdsReconcile(shop,built);
+    }catch(err){alert('['+shop+'] 產生失敗：'+err.message+'\n\n'+err.stack);}
+    setSpin(shop,false);
+  },80);
+}
+// 測試通路版：結構逐項對照 _doGenerate，只有三處不同 ——
+//   期間標籤用起訖日、天數由日期差算、存檔走 testSave（雲端直寫）而非 lsSave（本機+pending）。
+//   不呼叫 renderSummary：測試通路已被 SUMMARY_SHOPS 排除在總表之外（commit 1）。
+function _doGenerateTest(shop){
+  setSpin(shop,true);
+  setTimeout(()=>{
+    try{
+      const s=state[shop];
+      const period=`${s.curStart} ～ ${s.curEnd}`;
+      const days=testDays(s.curStart,s.curEnd);
+      s.days=days;
+      const built=buildShop(shop,days);
+      testSave(shop,s.curStart,s.curEnd,built,period,days);
+      const dotEl=document.getElementById('dot-'+shop);if(dotEl)dotEl.classList.add('on');
+      loadIntoUI(shop,built,period,days);
       checkAdsReconcile(shop,built);
     }catch(err){alert('['+shop+'] 產生失敗：'+err.message+'\n\n'+err.stack);}
     setSpin(shop,false);
@@ -2329,6 +2404,11 @@ function openUploadModal(){
   const _rEl=document.getElementById('platformRate');
   if(_rEl) _rEl.value=getShopRates()[shop];
   document.getElementById('upm-shop-hint').textContent='目前賣場：'+shop;
+  // 測試通路不給「🗑 清除重傳」：clearPeriod 組的是 ec| key，對 ectest| 刪不到東西；
+  //   雲端那份也刪不掉（技術債 #22，卡在 Firebase 權限）。留一顆按了沒用的按鈕比沒有更糟。
+  //   ⚠ else 分支要明確寫回 ''，否則切回其他四家時按鈕會留在隱藏狀態（這顆是全站共用一顆）。
+  const _clr=document.getElementById('upm-clear-btn');
+  if(_clr) _clr.style.display=(shop===TEST_SHOP_ID)?'none':'';
   function getMeta(key){try{const m=localStorage.getItem(key);return m?JSON.parse(m):null;}catch{return null;}}
   function syncCard(id,ok,okIcon,defaultIcon,okLabel,defaultLabel,metaKey){
     const meta=getMeta(metaKey);
@@ -10903,6 +10983,90 @@ function updateHalfBtnLabels(shop){
   container.innerHTML=`<select onchange="onHalfChange('${shop}',this.value,null,true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">${btns.map(h=>`<option value="${h.id}"${h.id===curHalf?' selected':''}>${h.label}</option>`).join('')}</select>`;
 }
 
+// ── 期間列 HTML（照 shopHTML / momoShopHTML / coupangSummaryHTML 的範式：傳 shop 回字串）──
+//   分流只發生在 periodRowHTML 這一支，initProfitPeriodControls 的 forEach 維持零分支。
+//   ⚠ periodRowShopeeHTML 的內容與抽出前【逐字相同】（只把 s.id 改成參數 id），
+//     蝦皮四家產生的 DOM 一個字元都沒變 —— 有 node 腳本做 byte 級比對佐證。
+function periodRowShopeeHTML(id){return`
+      <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
+      <select id="month-sel-${id}" onchange="onMonthChange('${id}',true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
+        ${MONTHS.map(mo=>`<option value="${mo}" ${mo===(state[id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
+      </select>
+      <span style="font-size:12px;color:#6b7280;font-weight:500;margin-left:4px">區間</span>
+      <div id="half-btns-${id}" style="display:flex;gap:4px"></div>`;}
+// 測試通路：期間是任意起訖日，不是月份+半月。費率輸入也掛在這一列
+//   （不是上傳 modal 裡那顆 platformRate，理由見 onTestRateChange）。
+//   樣式走 css/profit.css 的 .tp-* class，不寫 inline style。
+function periodRowTestHTML(id){return`
+      <span class="tp-lbl">期間</span>
+      <input type="date" class="tp-date" id="test-start-${id}" onchange="onTestPeriodChange('${id}')">
+      <span class="tp-sep">–</span>
+      <input type="date" class="tp-date" id="test-end-${id}" onchange="onTestPeriodChange('${id}')">
+      <span class="tp-lbl tp-lbl-gap">手續費</span>
+      <input type="number" class="tp-rate" id="test-rate-${id}" min="0" max="100" step="0.1" onchange="onTestRateChange('${id}')">
+      <span class="tp-lbl">%</span>`;}
+function periodRowHTML(id){return id===TEST_SHOP_ID?periodRowTestHTML(id):periodRowShopeeHTML(id);}
+
+// ── 測試通路：期間切換 / 自動載入 / 費率 ──
+function onTestPeriodChange(shop){
+  const a=document.getElementById('test-start-'+shop),b=document.getElementById('test-end-'+shop);
+  state[shop].curStart=a?a.value:'';
+  state[shop].curEnd  =b?b.value:'';
+  state[shop].days=testHasPeriod(shop)?testDays(state[shop].curStart,state[shop].curEnd):1;
+  testTryLoadSaved(shop);
+}
+// 對照組是 tryLoadSaved —— 行為刻意一致：有存檔就載入、沒有就空狀態等上傳。
+// 🔴 不沿用 _applyLatestPeriod / _findLatestPeriod：它們掃的 prefix 是 'ec|'+shop+'|'，
+//    而且會檢查 _HALF_RANK[half]，對 ectest| 的 key 永遠回 null。
+function testTryLoadSaved(shop){
+  resetUploadCards(shop);
+  const s=state[shop];
+  if(!testHasPeriod(shop)){ _testEmpty(shop,'請先選擇起訖日'); return; }
+  const rep=testLoad(shop,s.curStart,s.curEnd);
+  if(rep){ loadIntoUI(shop,rep.built,rep.period,rep.days); return; }
+  _testEmpty(shop,`${s.curStart} ～ ${s.curEnd} 尚無資料，請上傳報表產生`);
+}
+// 對照組是 tryLoadSaved 的 else 分支。差別：那邊對 tbl-/period-tag- 是裸取值（那些 id 一定
+//   存在才敢那樣寫），這裡一律加 if 判空 —— 測試通路的 DOM 生命週期還沒有實戰驗證過。
+function _testEmpty(shop,hint){
+  state[shop]._built=null;
+  const t=document.getElementById('tbl-'+shop);
+  if(t)t.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${hint}</div></div>`;
+  const p=document.getElementById('period-tag-'+shop); if(p)p.textContent='';
+  if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;}
+  setKpis(shop,0,0,0,0);
+  updateTagFilterBar(shop);
+}
+// App.render() 會重建整個淨利表 HTML → 日期/費率輸入框是全新的空 element，
+//   得從 state 把值寫回去，否則使用者選好的期間會在每次重繪後消失。
+function testInitShopUI(shop){
+  const a=document.getElementById('test-start-'+shop),b=document.getElementById('test-end-'+shop);
+  if(a)a.value=state[shop].curStart||'';
+  if(b)b.value=state[shop].curEnd||'';
+  const r=document.getElementById('test-rate-'+shop);
+  if(r)r.value=getShopRates()[shop];
+  testTryLoadSaved(shop);
+}
+// 🔴 刻意不改 onPlatformRateChange：它寫死 getElementById('platformRate')，改成「找兩個 id」
+//    等於讓既有四家的路徑多一個分支，風險不對稱。這裡整支對稱重寫，驗證規則（0–100）與
+//    寫入路徑（getShopRates → t[shop]=n → saveShopRates）逐字比照原版。
+// ⚠ 費率存的是 ec_shop_rate 這個【整包 map】，走既有 _cloudWrite → _markPending，
+//    所以費率設定仍要按「☁ 同步雲端」才會上雲 —— 跟報表直寫是兩條不同的路，toast 要講清楚，
+//    不然使用者會以為改完費率關掉瀏覽器也還在。
+function onTestRateChange(shop){
+  const el=document.getElementById('test-rate-'+shop);
+  if(!el) return;
+  const n=parseFloat(el.value);
+  if(!Number.isFinite(n)||n<0||n>100){
+    el.value=getShopRates()[shop];
+    if(typeof showToast==='function') showToast('費率要介於 0 到 100 之間','error');
+    return;
+  }
+  const t=getShopRates(); t[shop]=n; saveShopRates(t);
+  if(state[shop]?._built?.length) testTryLoadSaved(shop);   // 重算純利（對照 onPlatformRateChange 的 renderSummary）
+  if(typeof showToast==='function') showToast(shop+' 手續費已改為 '+n+'%（報表已自動存雲端，費率設定要按「☁ 同步雲端」）','success');
+}
+
 function initProfitPeriodControls(){
   const wrap=document.getElementById('profit-period-wrap');
   if(!wrap||wrap.dataset.init)return;
@@ -10911,14 +11075,10 @@ function initProfitPeriodControls(){
     const div=document.createElement('div');
     div.id='period-row-'+s.id;
     div.style.cssText='display:none;align-items:center;gap:8px;flex-wrap:wrap';
-    div.innerHTML=`
-      <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
-      <select id="month-sel-${s.id}" onchange="onMonthChange('${s.id}',true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
-        ${MONTHS.map(mo=>`<option value="${mo}" ${mo===(state[s.id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
-      </select>
-      <span style="font-size:12px;color:#6b7280;font-weight:500;margin-left:4px">區間</span>
-      <div id="half-btns-${s.id}" style="display:flex;gap:4px"></div>`;
+    div.innerHTML=periodRowHTML(s.id);
     wrap.appendChild(div);
+    // ⚠ 測試通路刻意不分流：updateHalfBtnLabels 內部有 if(!container)return —— 沒有
+    //   half-btns-測試通路 這個容器時天然 no-op、不會 throw。少改一行少一個風險點。
     updateHalfBtnLabels(s.id);
   });
   if(curShop&&curShop!=='總表'){
@@ -10930,6 +11090,10 @@ function initProfitPeriodControls(){
 }
 
 function initShopUI(shop){
+  // 測試通路：onMonthChange 會在「找不到 month-sel-測試通路」時早退、_applyLatestPeriod 也一定
+  //   回 false（_findLatestPeriod 的 prefix 是 'ec|'+shop+'|'），兩條都是 no-op → 必須自己接管，
+  //   否則切進來永遠是空的。
+  if(shop===TEST_SHOP_ID){ testInitShopUI(shop); return; }
   if(_userPickedPeriod[shop]) onMonthChange(shop);   // 已介入 → 只重載當前選擇（不跳）
   else _applyLatestPeriod(shop);                     // 沒介入 → 自動跳最新（內部完整渲染）
   if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
@@ -11059,6 +11223,7 @@ Object.assign(window, {
   getPrevRevMap,getSummaryRows,getTagFilters,gg,initProfitPeriodControls,initShopUI,
   loadIntoUI,lsHasAny,lsKey,lsLoad,lsSave,markCard,num,onFile,onGlobalFile,onGlobalGenerate,
   onHalfChange,onMapFile,onMonthChange,onPlatformRateChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
+  onTestPeriodChange,onTestRateChange,   // 測試通路期間列的 inline onchange 用，缺了會 ReferenceError、輸入框靜默失效
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
   openTestSettings,closeTestSettings,addTestDraftCond,removeTestDraftCond,deleteTestDraftRule,addTestDraftRule,saveTestSettings,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,

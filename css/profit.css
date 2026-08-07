@@ -573,3 +573,28 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .ptp-help-a{font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:3px;padding-bottom:8px;border-bottom:1px solid var(--border);}
 .ptp-help-a:last-child{border-bottom:none;padding-bottom:0;}
 
+
+/* ── 測試通路期間列：日期起訖 + 專屬費率輸入 ──
+   顏色一律走 css/main.css:2 的 :root 變數，不寫死色碼、不碰 --bg。
+   ⚠ 這一列只有測試通路會用到（periodRowTestHTML）；其他四家仍是 initProfitPeriodControls
+     原本那段寫死 inline style 的月份/區間下拉，刻意不動、不改寫成 class。 */
+.tp-lbl{font-size:12px;color:var(--text-muted);font-weight:500;}
+.tp-lbl-gap{margin-left:8px;}
+.tp-sep{font-size:12px;color:var(--text-muted);}
+.tp-date,.tp-rate{
+  padding:4px 10px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:7px;
+  font-size:12px;
+  font-weight:600;
+  font-family:inherit;
+  font-variant-numeric:tabular-nums;
+  color:var(--text);
+  outline:none;
+  cursor:pointer;
+}
+.tp-rate{width:60px;}
+/* 分頁分隔線（維克｜測試通路）。__profitTabHtml 裡既有那條（測試通路｜重點檢視）
+   是寫死 inline 的，屬「不得更動既有」範圍，故只有新增這條走 class；渲染結果相同。 */
+.stab-sep{display:inline-block;width:1px;height:18px;background:var(--border);margin:0 2px;}
