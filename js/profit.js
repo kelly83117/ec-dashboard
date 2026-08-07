@@ -1,6 +1,11 @@
 /* ===================== 淨利表 ===================== */
 const Store = window.Store;
 
+// ⚠ 暫時性通路：將來可能改名或整個移除。所有判斷一律引用這個常數，不要散落字面字串。
+//   ⚠ 必須宣告在 __profitTabHtml(:9) 之前 —— 該模板字串在模組頂層立刻求值，
+//     常數放後面會撞 TDZ、整個模組載入失敗。
+const TEST_SHOP_ID='測試通路';
+
 window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
   <div style="padding:10px 14px;border-bottom:1px solid #e5e7eb">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
@@ -12,6 +17,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <button class="stab" style="font-size:15px" onclick="setShop('玩樂',this)"><span class="sdot" style="background:#10b981"></span>玩樂</button>
             <button class="stab" style="font-size:15px" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
             <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
+            <button class="stab" style="font-size:15px" onclick="setShop('${TEST_SHOP_ID}',this)"><span class="sdot" style="background:#8b5cf6"></span>${TEST_SHOP_ID}</button>
             <span style="width:1px;height:18px;background:#d1d5db;margin:0 2px"></span><button class="stab" style="font-size:15px" onclick="setShop('重點檢視',this)">重點檢視</button>
           </div>
         </div>
@@ -240,6 +246,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div id="content-玩樂" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-森之旅" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-維克" class="shop-content" style="padding:16px 20px"></div>
+  <div id="content-${TEST_SHOP_ID}" class="shop-content" style="padding:16px 20px"></div>
   <div id="content-酷澎" class="shop-content" style="padding:16px 20px"></div>
   <div id="momo-content-總表" class="shop-content" style="padding:16px 20px"></div>
   <div id="momo-content-甲配" class="shop-content" style="padding:16px 20px"></div>
@@ -251,7 +258,12 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div id="coupang-content-露營館" class="shop-content" style="padding:16px 20px"></div>
 </div>`;
 
-const SHOPS=[{id:'好麻吉',color:'#5b5fcf'},{id:'玩樂',color:'#10b981'},{id:'森之旅',color:'#f59e0b'},{id:'維克',color:'#14b8a6'}];
+const SHOPS=[{id:'好麻吉',color:'#5b5fcf'},{id:'玩樂',color:'#10b981'},{id:'森之旅',color:'#f59e0b'},{id:'維克',color:'#14b8a6'},{id:TEST_SHOP_ID,color:'#8b5cf6'}];
+// 總表刻意排除測試通路：總表是人工逐格輸入的正式數字（歷史明細已累積數十筆），
+//   多一組可編輯空欄位會被誤填，而誤填值會進 calcPure 的純利計算。
+//   ⚠ SHOPS 全檔從不被 mutate（無 push/splice/排序/重新指派，已 grep 全 repo 確認），
+//     故可在模組層 filter 一次，不必每次 render 重算。
+const SUMMARY_SHOPS=SHOPS.filter(s=>s.id!==TEST_SHOP_ID);
 const MONTHS=['2026/01','2026/02','2026/03','2026/04','2026/05','2026/06','2026/07','2026/08','2026/09','2026/10','2026/11','2026/12'];
 const HALVES=[{id:'first',label:'上半（1-15）'},{id:'second',label:'下半（16-末）'},{id:'full',label:'整月（1-末）'}];
 
@@ -1663,7 +1675,7 @@ function setSpin(shop,show){const el=document.getElementById('spin-'+shop);if(el
 function checkReady(shop){const s=state[shop];const g=document.getElementById('gen-'+shop);if(g)g.disabled=!s.rawMobic;}
 // ── 通路費率對照表（費率屬於通路，不是全站共用一個值）──
 // 照 ANA_THRESH 的範式：_cloudRead/_cloudWrite + Object.assign 補預設
-const SHOP_RATE_DEF={'好麻吉':20.5,'玩樂':20.5,'森之旅':20.5,'維克':17.5};
+const SHOP_RATE_DEF={'好麻吉':20.5,'玩樂':20.5,'森之旅':20.5,'維克':17.5,[TEST_SHOP_ID]:20.5};
 function getShopRates(){return Object.assign({},SHOP_RATE_DEF,_cloudRead('ec_shop_rate')||{});}
 function saveShopRates(t){_cloudWrite('ec_shop_rate',t);}
 function getPlatformRate(shop){
@@ -4557,10 +4569,10 @@ function renderSummary(){
   const pct=(a,b)=>b>0?(a/b*100).toFixed(2)+'%':'—';
   const calcPure=(d,shopId)=>(d.gross||0)-(d.ads||0)-(d.rev||0)*getPlatformRate(shopId);
 
-  const shopGroupHdr=SHOPS.map(s=>`<th colspan="6" style="text-align:center;background:${s.color};color:white;font-weight:700;font-size:13px;padding:7px 4px;border-left:2px solid rgba(255,255,255,.3)">${s.id}</th>`).join('');
-  const shopSubHdr=SHOPS.map(()=>`<th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">營收</th><th style="min-width:62px;font-size:11px;font-weight:600;background:#f8fafc">廣告</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">毛利</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">純利</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">純利率%</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">廣告佔比%</th>`).join('');
+  const shopGroupHdr=SUMMARY_SHOPS.map(s=>`<th colspan="6" style="text-align:center;background:${s.color};color:white;font-weight:700;font-size:13px;padding:7px 4px;border-left:2px solid rgba(255,255,255,.3)">${s.id}</th>`).join('');
+  const shopSubHdr=SUMMARY_SHOPS.map(()=>`<th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">營收</th><th style="min-width:62px;font-size:11px;font-weight:600;background:#f8fafc">廣告</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">毛利</th><th style="min-width:75px;font-size:11px;font-weight:600;background:#f8fafc">純利</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">純利率%</th><th style="min-width:58px;font-size:11px;font-weight:600;background:#f8fafc">廣告佔比%</th>`).join('');
 
-  const dataCells=(shopMap,editable,rowId)=>SHOPS.map(s=>{
+  const dataCells=(shopMap,editable,rowId)=>SUMMARY_SHOPS.map(s=>{
     const d=shopMap?.[s.id]||{};
     const p=calcPure(d,s.id);
     const bl='border-left:2px solid #e5e7eb;';
@@ -4625,7 +4637,7 @@ function renderSummary(){
       <td style="padding:4px 10px 4px 8px;font-size:12px;white-space:nowrap;color:#374151;font-variant-numeric:tabular-nums;position:sticky;left:0;background:${bg2};z-index:1;text-align:left">${hideBtn}${label}</td>${dataTds}</tr>`;
   };
 
-  const tbody=recentRows.map(r=>buildMainRow(r)).join('')||`<tr><td colspan="${1+SHOPS.length*6}" style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">尚無資料，點下方「＋ 新增週次」開始輸入</td></tr>`;
+  const tbody=recentRows.map(r=>buildMainRow(r)).join('')||`<tr><td colspan="${1+SUMMARY_SHOPS.length*6}" style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">尚無資料，點下方「＋ 新增週次」開始輸入</td></tr>`;
 
   // 彈窗：歷史（淡綠）在上，近兩個月（白）在下
   const modalTbody=[
@@ -4901,7 +4913,7 @@ function renderFocus(){
       <select id="focus-half-sel" class="setting-input" onchange="onFocusPeriodChange()" style="width:90px">${halfOpts}</select>
       <button id="focus-col-btn" class="col-pick-btn" onclick="openFocusColPicker()" style="margin-left:auto">☰ 選欄位</button>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:18px">${cards}</div>
+    <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:18px">${cards}</div>
     <div class="panel" style="padding:12px 14px">
       <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
         <span style="font-size:14px;font-weight:500">全部商品</span>
