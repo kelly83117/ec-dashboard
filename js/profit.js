@@ -534,6 +534,20 @@ function _testSaveFailed(k,msg){
     App.showAlertModal({title:'測試通路寫入失敗',message:'報表【沒有】寫進雲端，而且測試通路不存本機，重整後就會消失。\n請確認網路後重新產生報表。',detail:k+'\n'+msg,kind:'error'});
   else if(typeof showToast==='function') showToast('測試通路寫入失敗：'+msg,'error');
 }
+// 「🗑 清除重傳」的雲端刪除失敗一定要出聲 —— 靜默失敗＝本機清了、雲端那份還在，
+//   下次快照回來報表就復活（Kelly 2026/07/30 回報的原始 bug）。沿用 _testSaveFailed 的通報範式。
+//   ⚠ app.js 的 __notifyCloudFail 沒有掛上 window，這裡拿不到，故自行翻譯常見錯誤。
+function _clearPeriodFailed(k,msg){
+  console.error('[clearPeriod] 雲端刪除失敗',k,msg);
+  const friendly=/permission|PERMISSION_DENIED/i.test(msg)
+      ? '雲端拒絕：沒有刪除權限，請聯絡管理員調整 Firestore 規則。'
+    : /network|fetch|offline|unavailable/i.test(msg)
+      ? '雲端連線失敗（網路 / 離線），請恢復連線後再試。'
+    : msg;
+  if(window.App&&typeof App.showAlertModal==='function')
+    App.showAlertModal({title:'清除失敗',message:'雲端那份報表【沒有】刪掉，所以本機這份也保留不動（避免只清一半、下次同步又復活）。\n'+friendly+'\n\n可以直接再按一次重試。',detail:k+'\n'+msg,kind:'error'});
+  else if(typeof showToast==='function') showToast('清除失敗：'+friendly,'error');
+}
 // 真實 pending 筆數（排除 __shop__| marker 和 _summary_v1）
 //   _summary_v1 是總表資料，總表已改為自動同步（saveSummaryRows 直接推雲端），
 //   不會經過 pending set；但舊版可能已把它塞進 set → 保險排除掉，避免離開頁面誤跳「未同步」。
@@ -1272,12 +1286,35 @@ function tryLoadSaved(shop){
 }
 function clearPeriodFromModal(){
   const shop=curShop==='總表'?SHOPS[0].id:curShop;
-  clearPeriod(shop);
+  return clearPeriod(shop);   // 回傳 Promise（clearPeriod 已是 async）；inline onclick 對回傳值無感，行為不變
 }
-function clearPeriod(shop){
+async function clearPeriod(shop){
   const s=state[shop];
   const periodLabel=getPeriodLabel(s.curMonth,s.curHalf);
-  if(!confirm(`確定要清除「${shop}」${periodLabel}的報表與已上傳的檔案嗎？`))return;
+  const k=lsKey(shop,s.curMonth,s.curHalf);
+  if(!confirm(`即將永久刪除「${shop}」${periodLabel}的報表。\n\n⚠ 本機與雲端【兩邊都會刪掉，無法復原】，其他同事也會看不到這份報表。\n已上傳的檔案紀錄也會一併清除。\n\n確定嗎？`))return;
+  // 🔴 順序【不可對調】：先刪雲端 doc，成功後才清本機。
+  //   profits collection 的訂閱只加不刪（firebase.js 搜 `onSnapshot(profitsColRef`：
+  //   只走 Object.keys(incoming) 逐 key 賦值，被刪的 doc 不會進迴圈、也沒有 docChanges 處理）。
+  //   先清記憶體、後刪雲端的話，中間任何一個快照回來都會把 Store._profitMem[k] 填回去，
+  //   而且再也沒有東西會清掉它 —— 那就是「清除重傳後報表又復活」的原貌（Kelly 2026/07/30 森之旅）。
+  //   先刪 doc：doc 不存在後，後續快照的 incoming 就沒有這個 key，填不回來。
+  const _clrBtn=document.getElementById('upm-clear-btn');
+  const _clrTxt=_clrBtn?_clrBtn.textContent:'';
+  if(_clrBtn){_clrBtn.disabled=true;_clrBtn.textContent='清除中…';}   // 擋連點觸發第二次刪除
+  try{
+    if(!window.__cloudProfitCol||typeof window.__cloudProfitCol.removeReport!=='function')
+      throw new Error('雲端層尚未就緒（__cloudProfitCol.removeReport 未建立）');
+    await window.__cloudProfitCol.removeReport(k);
+  }catch(e){
+    // 🔴 不可空 catch：報表比任務附圖重要（對照 daily.js 的 .catch(()=>{}) 是反面教材）。
+    //   刪不掉就【整個中止、本機一個字都不動】，讓使用者可以重試 ——
+    //   半清狀態（本機沒了、雲端還在）就是這次要修的 bug。deleteDoc 冪等，重按安全。
+    _clearPeriodFailed(k,(e&&e.message)||String(e));
+    return;
+  }finally{
+    if(_clrBtn){_clrBtn.disabled=false;_clrBtn.textContent=_clrTxt;}
+  }
   // 清除報表
   try{localStorage.removeItem(lsKey(shop,s.curMonth,s.curHalf));}catch(e){}
   try{if(typeof Store!=='undefined'&&Store._profitMem)delete Store._profitMem[lsKey(shop,s.curMonth,s.curHalf)];}catch{}
@@ -1319,6 +1356,14 @@ function clearPeriod(shop){
   const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;
   // 重置廣告群組卡片
   const groupList=document.getElementById('upm-groupads-list');if(groupList)groupList.innerHTML='';
+  // 報表已刪，這個 key 不該再留在待同步佇列 —— 否則按同步時 syncToCloud 讀 _profitMem 讀不到，
+  //   會進 skippedProblem「報表資料讀不到或損毀」，而 skippedProblem 不會被移出 pending
+  //   （syncToCloud 只刪 ok 的 key）→ 每次同步都誤報一次，同步鈕徽章也一直亮著（重整後才會消）。
+  // ⚠ 刻意放在最後：在此之前 _pendingSyncKeys 還含有這個 key，
+  //   __profitShouldSkipCloudOverwrite()（本檔搜 `window.__profitShouldSkipCloudOverwrite`）會回 true，
+  //   剛好在整段清除過程中擋掉任何 in-flight 舊快照的回填，當一層免費的保險。
+  try{_pendingSyncKeys.delete(k);}catch{}
+  _showSyncBtn(shop);
 }
 function loadIntoUI(shop,built,period,days){
   if(built&&Array.isArray(built)){
@@ -3619,7 +3664,13 @@ function testRuleStats(shop,rule){
 }
 // 通路的「工作流本期」逐標籤優化進度。回 null = 該期報表不存在。
 // 分母:該期報表列重算標籤(不讀快照標籤,與工作日誌同法);
-// 分子:報表 note / 該期廣告調整手打 / 歸屬該期的商品調整,任一 → 已優化。
+// 分子【2026-08-07 拆成兩個獨立來源,不再共用一個 isDone】:
+//   廣告分析的標籤 → 只認該期「廣告調整」ec_notes|{shop}|{month}|{half};
+//   成長分析的標籤 → 只認歸屬該期的「商品調整」ec_notes|{shop}_growth;
+//   通路列 doneTotal → 兩者【聯集】,語意仍是「這個商品本期被碰過沒有」,不分來源。
+// 為什麼要拆:舊版單一 done Set 同時餵給兩組。實測好麻吉 2026/07 下半月 822 列中
+//   638 個商品有廣告調整(78%),那 638 個身上的成長標籤就被一併算成完成 ——
+//   「爆發品 180/232」是假的,實際有本期商品調整的只有 39 個商品。
 function shopLabelProgress(shop){
   const now=new Date();
   const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
@@ -3632,20 +3683,38 @@ function shopLabelProgress(shop){
   if(!rows||!rows.length)return null;
   const adNotes=mem['ec_notes|'+shop+'|'+month+'|'+half]||{};
   const gNotes=mem['ec_notes|'+shop+'_growth']||{};
-  const done=new Set();
+  // 廣告調整【刻意不做逐筆 date 過濾】:key 本身就是期間分區(submitProfitNote 以
+  //   curMonth/curHalf 組 shopKey),能寫進來的必然屬於該期。而 entry.date 是「打字當下
+  //   的系統日期」、不是「這筆調整屬於哪一期」—— 同事的實際工作流是下半月報表在次月
+  //   1~15 才優化,用 date 過濾會把那些當期補登的紀錄整批誤殺。
+  // 商品調整【必須】逐筆過濾:所有期間共用單一 key ec_notes|{shop}_growth,不過濾會跨期汙染。
+  const doneAds=new Set();      // 該期廣告調整有紀錄的商品
+  const doneGrowth=new Set();   // 有【歸屬本期】商品調整的商品
   Object.keys(adNotes).forEach(code=>{
     const nd=adNotes[code];
     const has=(typeof nd==='string')?!!nd.trim():!!((nd&&nd.adjustments)||[]).length;
-    if(has)done.add(code);
+    if(has)doneAds.add(code);
   });
+  // 🔴 這裡【沒有】舊版那行 `if(done.has(code))return;` 跨來源短路,是刻意移除的。
+  //   在單一 done Set 的年代它只是省事(有廣告調整就不必再看商品調整,反正落同一個桶);
+  //   拆開之後它會讓「同時有廣告調整和商品調整」的商品進不了 doneGrowth,
+  //   成長分析永遠少算 —— 而那正是 638 個有廣告調整的商品,幾乎涵蓋全部。
   Object.keys(gNotes).forEach(code=>{
-    if(done.has(code))return;
     const nd=gNotes[code];if(!nd||typeof nd==='string')return;
-    if((nd.adjustments||[]).some(a=>_growthPeriodOf(a)===period))done.add(code);
+    if((nd.adjustments||[]).some(a=>_growthPeriodOf(a)===period))doneGrowth.add(code);
   });
   const ana={},growth={};let doneTotal=0;
   rows.forEach(r=>{
-    const isDone=done.has(r.code)||!!(r.note&&String(r.note).trim());
+    // r.note(報表列的「廣告調整」欄)【2026-08-07 移出判定】:現行程式碼沒有任何地方
+    //   會寫入蝦皮 built 列的 r.note —— 全庫 `\.note\b` 只有讀,唯二的賦值(onCupNoteChange /
+    //   renderCoupangTable)都在酷澎表格;buildShop 的 agg 沒有這欄,getEdits 只吃數字
+    //   (存檔前 isNaN 擋掉文字)。它是舊版 sheet-import 凍結在已存 built[] 裡的死資料。
+    //   實測 2026-08-07 好麻吉 2026/07 下半月:822 列中 r.note 有值者【0 筆】,本期拿掉零影響。
+    //   ⚠ 更早的期間(好麻吉 2026/04 以前)仍有資料,拿掉後那些歷史期間的完成數會下降。
+    //     那是修正不是退步 —— 一段跨期累積的舊文字會讓同一個商品在【每一期】都算完成。
+    const isAdsDone=doneAds.has(r.code);
+    const isGrowthDone=doneGrowth.has(r.code);
+    const isDone=isAdsDone||isGrowthDone;   // 只給 doneTotal 用,聯集語意與拆分前相同
     if(isDone)doneTotal++;
     // ⚠ alAll 初值必須是 []（不是 '' 也不是 null）：calcAnalysisAll 若 throw，catch 吃掉之後
     //   alAll 仍是空陣列 → 該列不計入任何廣告標籤，與舊版「throw → al 維持 '' → 不計入」
@@ -3660,14 +3729,15 @@ function shopLabelProgress(shop){
     //     .adj-prog-note 就是這樣對使用者宣告的。自訂規則若跟內建標籤同名（或兩條自訂規則
     //     同名），同一列會產生兩個同名元素、把分母灌成 2 —— 那句話就成了假的。
     //     （同 daily.js 的 _adjAnaBucket，為同一個撞名情境去重。）
-    //   ⚠ 分子 isDone 是「這個商品有沒有調整紀錄」，不分標籤 —— 一個商品兩個標籤、只打一筆
-    //     調整，兩個標籤都算完成。這是已知且刻意接受的限制，畫面上的 .adj-prog-note 有講。
+    //   ⚠ 分子現在【分來源、但仍不分標籤】——一個商品有兩個廣告標籤、只打一筆廣告調整,
+    //     那兩個廣告標籤都算完成(但它的成長標籤不會)。這是刻意接受的限制:調整紀錄綁的是
+    //     商品編號,資料層沒有「這筆調整是為了哪個標籤打的」。畫面 .adj-prog-note 有講。
     const seen=new Set();
     alAll.forEach(a=>{
       const l=a&&a.label;if(!l||seen.has(l))return;seen.add(l);
-      (ana[l]=ana[l]||{t:0,d:0}).t++;if(isDone)ana[l].d++;
+      (ana[l]=ana[l]||{t:0,d:0}).t++;if(isAdsDone)ana[l].d++;
     });
-    if(gl){(growth[gl]=growth[gl]||{t:0,d:0}).t++;if(isDone)growth[gl].d++;}
+    if(gl){(growth[gl]=growth[gl]||{t:0,d:0}).t++;if(isGrowthDone)growth[gl].d++;}
   });
   return{month,half,total:rows.length,doneTotal,ana,growth};
 }
