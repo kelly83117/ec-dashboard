@@ -7596,6 +7596,18 @@ async function momoOpenSyncPreview(shop){
       catch(e){ reconCloud[it.key]={__error:true}; }
     }));
   }
+  // 🔴 排行榜 S1103 讀 momo_s1103 collection（與寫入 __cloudS1103.setPeriod 同源）——舊碼掉進下面 app/profit fallthrough，
+  //   但 S1103 早已搬進 collection、app/profit 的舊欄位被 removeFields 清空 → 雲端永遠讀到 0、永遠顯示「新增」。
+  //   這是「讀寫來源不一致」病的第三例（momo_reconcile、momo_products 之後）。
+  const s1103Cloud={};   // 'ec_momo_s1103|<period>' → docData|undefined 或 {__error:true}
+  const s1103Items=items.filter(it=>it.kind==='MOMO排行榜');
+  if(s1103Items.length && window.__cloudS1103){
+    await Promise.all(s1103Items.map(async it=>{
+      const period=it.key.slice('ec_momo_s1103|'.length);
+      try{ const s=await window.__cloudS1103.getDoc(period); s1103Cloud[it.key]= s.exists()?(s.data()||{}):undefined; }
+      catch(e){ s1103Cloud[it.key]={__error:true}; }
+    }));
+  }
   // 內容比對：兩邊都先過 JSON round-trip 正規化（strip undefined、統一型別）→ 消除 Firestore 回來與本機的假差異（undefined 被丟、數字/字串）。
   const _norm=v=>{ try{ return JSON.parse(JSON.stringify(v===undefined?null:v)); }catch(e){ return v; } };
   const _eq=(a,b)=>_momoStableStr(_norm(a))===_momoStableStr(_norm(b));
@@ -7614,6 +7626,13 @@ async function momoOpenSyncPreview(shop){
       if(rc&&rc.__error){ it.status='readfail'; it.cloudCount=null; return; }
       if(rc===undefined){ it.status='new'; it.cloudCount=0; return; }
       it._cloudVal=rc; it.cloudCount=_momoCount(rc); it.status=_eq(it.localVal,rc)?'same':'diff';
+      return;
+    }
+    if(it.kind==='MOMO排行榜'){
+      const sc=s1103Cloud[it.key];
+      if(sc&&sc.__error){ it.status='readfail'; it.cloudCount=null; return; }
+      if(sc===undefined){ it.status='new'; it.cloudCount=0; return; }
+      it._cloudVal=sc; it.cloudCount=_momoCount(sc); it.status=_eq(it.localVal,sc)?'same':'diff';
       return;
     }
     const cv=cloud[it.key]; it._cloudVal=cv;
