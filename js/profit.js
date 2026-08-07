@@ -3663,7 +3663,13 @@ function testRuleStats(shop,rule){
 }
 // 通路的「工作流本期」逐標籤優化進度。回 null = 該期報表不存在。
 // 分母:該期報表列重算標籤(不讀快照標籤,與工作日誌同法);
-// 分子:報表 note / 該期廣告調整手打 / 歸屬該期的商品調整,任一 → 已優化。
+// 分子【2026-08-07 拆成兩個獨立來源,不再共用一個 isDone】:
+//   廣告分析的標籤 → 只認該期「廣告調整」ec_notes|{shop}|{month}|{half};
+//   成長分析的標籤 → 只認歸屬該期的「商品調整」ec_notes|{shop}_growth;
+//   通路列 doneTotal → 兩者【聯集】,語意仍是「這個商品本期被碰過沒有」,不分來源。
+// 為什麼要拆:舊版單一 done Set 同時餵給兩組。實測好麻吉 2026/07 下半月 822 列中
+//   638 個商品有廣告調整(78%),那 638 個身上的成長標籤就被一併算成完成 ——
+//   「爆發品 180/232」是假的,實際有本期商品調整的只有 39 個商品。
 function shopLabelProgress(shop){
   const now=new Date();
   const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
@@ -3676,20 +3682,38 @@ function shopLabelProgress(shop){
   if(!rows||!rows.length)return null;
   const adNotes=mem['ec_notes|'+shop+'|'+month+'|'+half]||{};
   const gNotes=mem['ec_notes|'+shop+'_growth']||{};
-  const done=new Set();
+  // 廣告調整【刻意不做逐筆 date 過濾】:key 本身就是期間分區(submitProfitNote 以
+  //   curMonth/curHalf 組 shopKey),能寫進來的必然屬於該期。而 entry.date 是「打字當下
+  //   的系統日期」、不是「這筆調整屬於哪一期」—— 同事的實際工作流是下半月報表在次月
+  //   1~15 才優化,用 date 過濾會把那些當期補登的紀錄整批誤殺。
+  // 商品調整【必須】逐筆過濾:所有期間共用單一 key ec_notes|{shop}_growth,不過濾會跨期汙染。
+  const doneAds=new Set();      // 該期廣告調整有紀錄的商品
+  const doneGrowth=new Set();   // 有【歸屬本期】商品調整的商品
   Object.keys(adNotes).forEach(code=>{
     const nd=adNotes[code];
     const has=(typeof nd==='string')?!!nd.trim():!!((nd&&nd.adjustments)||[]).length;
-    if(has)done.add(code);
+    if(has)doneAds.add(code);
   });
+  // 🔴 這裡【沒有】舊版那行 `if(done.has(code))return;` 跨來源短路,是刻意移除的。
+  //   在單一 done Set 的年代它只是省事(有廣告調整就不必再看商品調整,反正落同一個桶);
+  //   拆開之後它會讓「同時有廣告調整和商品調整」的商品進不了 doneGrowth,
+  //   成長分析永遠少算 —— 而那正是 638 個有廣告調整的商品,幾乎涵蓋全部。
   Object.keys(gNotes).forEach(code=>{
-    if(done.has(code))return;
     const nd=gNotes[code];if(!nd||typeof nd==='string')return;
-    if((nd.adjustments||[]).some(a=>_growthPeriodOf(a)===period))done.add(code);
+    if((nd.adjustments||[]).some(a=>_growthPeriodOf(a)===period))doneGrowth.add(code);
   });
   const ana={},growth={};let doneTotal=0;
   rows.forEach(r=>{
-    const isDone=done.has(r.code)||!!(r.note&&String(r.note).trim());
+    // r.note(報表列的「廣告調整」欄)【2026-08-07 移出判定】:現行程式碼沒有任何地方
+    //   會寫入蝦皮 built 列的 r.note —— 全庫 `\.note\b` 只有讀,唯二的賦值(onCupNoteChange /
+    //   renderCoupangTable)都在酷澎表格;buildShop 的 agg 沒有這欄,getEdits 只吃數字
+    //   (存檔前 isNaN 擋掉文字)。它是舊版 sheet-import 凍結在已存 built[] 裡的死資料。
+    //   實測 2026-08-07 好麻吉 2026/07 下半月:822 列中 r.note 有值者【0 筆】,本期拿掉零影響。
+    //   ⚠ 更早的期間(好麻吉 2026/04 以前)仍有資料,拿掉後那些歷史期間的完成數會下降。
+    //     那是修正不是退步 —— 一段跨期累積的舊文字會讓同一個商品在【每一期】都算完成。
+    const isAdsDone=doneAds.has(r.code);
+    const isGrowthDone=doneGrowth.has(r.code);
+    const isDone=isAdsDone||isGrowthDone;   // 只給 doneTotal 用,聯集語意與拆分前相同
     if(isDone)doneTotal++;
     // ⚠ alAll 初值必須是 []（不是 '' 也不是 null）：calcAnalysisAll 若 throw，catch 吃掉之後
     //   alAll 仍是空陣列 → 該列不計入任何廣告標籤，與舊版「throw → al 維持 '' → 不計入」
@@ -3704,14 +3728,15 @@ function shopLabelProgress(shop){
     //     .adj-prog-note 就是這樣對使用者宣告的。自訂規則若跟內建標籤同名（或兩條自訂規則
     //     同名），同一列會產生兩個同名元素、把分母灌成 2 —— 那句話就成了假的。
     //     （同 daily.js 的 _adjAnaBucket，為同一個撞名情境去重。）
-    //   ⚠ 分子 isDone 是「這個商品有沒有調整紀錄」，不分標籤 —— 一個商品兩個標籤、只打一筆
-    //     調整，兩個標籤都算完成。這是已知且刻意接受的限制，畫面上的 .adj-prog-note 有講。
+    //   ⚠ 分子現在【分來源、但仍不分標籤】——一個商品有兩個廣告標籤、只打一筆廣告調整,
+    //     那兩個廣告標籤都算完成(但它的成長標籤不會)。這是刻意接受的限制:調整紀錄綁的是
+    //     商品編號,資料層沒有「這筆調整是為了哪個標籤打的」。畫面 .adj-prog-note 有講。
     const seen=new Set();
     alAll.forEach(a=>{
       const l=a&&a.label;if(!l||seen.has(l))return;seen.add(l);
-      (ana[l]=ana[l]||{t:0,d:0}).t++;if(isDone)ana[l].d++;
+      (ana[l]=ana[l]||{t:0,d:0}).t++;if(isAdsDone)ana[l].d++;
     });
-    if(gl){(growth[gl]=growth[gl]||{t:0,d:0}).t++;if(isDone)growth[gl].d++;}
+    if(gl){(growth[gl]=growth[gl]||{t:0,d:0}).t++;if(isGrowthDone)growth[gl].d++;}
   });
   return{month,half,total:rows.length,doneTotal,ana,growth};
 }
