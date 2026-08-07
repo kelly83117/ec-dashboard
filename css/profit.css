@@ -595,6 +595,6 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   cursor:pointer;
 }
 .tp-rate{width:60px;}
-/* 分頁分隔線（維克｜測試通路）。__profitTabHtml 裡既有那條（測試通路｜重點檢視）
-   是寫死 inline 的，屬「不得更動既有」範圍，故只有新增這條走 class；渲染結果相同。 */
+/* 分頁分隔線（維克｜測試通路）。原本 __profitTabHtml 裡還有一條 inline 寫死的
+   （測試通路｜重點檢視），已隨重點檢視分頁於 2026-08-07 一併移除。 */
 .stab-sep{display:inline-block;width:1px;height:18px;background:var(--border);margin:0 2px;}
