@@ -641,15 +641,10 @@ function _sweepAllLocalReportsIntoPending(){
         }
         continue;
       }
-      // MOMO 莫筆克 origin→cost 持久表（帳號級單一 key）→ 同上 field 分支。
-      //   ⚠ stock（ec_momo_stock_by_origin）不在此：它走獨立 momo_stock collection 自動推，不進 app/profit 手動同步。
-      if(k==='ec_momo_cost_by_origin'){
-        _pendingSyncKeys.add(k);
-        if(!(Store._mem&&Store._mem[k])){
-          try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
-        }
-        continue;
-      }
+      // ⚠ ec_momo_cost_by_origin（成本對照表）＝本機輔助表、非同步項：只服務「新增商品輸原廠自動帶成本」；
+      //   權威成本在商品主檔 product.cost（隨 momo_products 上雲）。這張表雲端本來就沒有（推 6683 key 進 app/profit 會撞大小/索引），
+      //   刻意不進 pending/待推清單（避免永遠假顯示「新增/雲端0」）。預覽仍會另外以「本機輔助表·不同步」資訊列顯示它。
+      //   ⚠ stock（ec_momo_stock_by_origin）同理不在此：走獨立 momo_stock collection 自動推。
       // filemeta 不上雲（雲端零讀取端）→ 不塞進 pending，省下「撈進來→推送略過→收尾刪」的白工
       if(k&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')){
         _pendingSyncKeys.add(k);
@@ -735,6 +730,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         else{ skippedProblem.push({key:pk,reason:'MOMO 排行榜讀不到，或雲端層未就緒'}); }
         return;
       }
+      if(pk==='ec_momo_cost_by_origin') return;   // 防呆：成本對照表＝本機輔助表、非同步項，絕不推 app/profit（6683 key 會撞大小/索引；且本就不該同步）
       // field key（設定類）
       let val=null;
       try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
@@ -7458,7 +7454,7 @@ function _momoSyncPendingCount(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
-      if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k==='ec_momo_cost_by_origin'
+      if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|')   /* cost_by_origin 移除：本機輔助表、非同步項，不計入待推數 */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
     }
   }catch{}
@@ -7527,9 +7523,11 @@ function _momoCollectPending(shop){
     if(pk.startsWith('ec_momo_products|')){ val=momoPendingProducts(pk); }   // 與同步推送同源（_mem→localStorage），保證預覽比對的==推的
     else { try{ if(Store._mem&&Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
       if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} } }
-    const kind = pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk.startsWith('ec_momo_reconcile|')?'MOMO月對帳' : pk.startsWith('ec_momo_freight|')?'MOMO運費' : pk.startsWith('ec_momo_s1103|')?'MOMO排行榜' : pk==='ec_momo_cost_by_origin'?'MOMO成本表' : '其他設定';
+    const kind = pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk.startsWith('ec_momo_reconcile|')?'MOMO月對帳' : pk.startsWith('ec_momo_freight|')?'MOMO運費' : pk.startsWith('ec_momo_s1103|')?'MOMO排行榜' : '其他設定';
     add(pk,kind,val);
   });
+  // cost_by_origin＝本機輔助表、非同步項：不進待推，但以資訊列顯示（讓人知道它在本機、刻意不上雲，權威成本在 product.cost）
+  try{ const cm=momoLoadCostByOrigin(); if(cm && Object.keys(cm).length && !seen.has('ec_momo_cost_by_origin')){ seen.add('ec_momo_cost_by_origin'); items.push({key:'ec_momo_cost_by_origin', kind:'MOMO成本表', localVal:cm, localCount:Object.keys(cm).length, _localonly:true}); } }catch{}
   return items;
 }
 async function momoOpenSyncPreview(shop){
@@ -7582,6 +7580,7 @@ async function momoOpenSyncPreview(shop){
   const _norm=v=>{ try{ return JSON.parse(JSON.stringify(v===undefined?null:v)); }catch(e){ return v; } };
   const _eq=(a,b)=>_momoStableStr(_norm(a))===_momoStableStr(_norm(b));
   items.forEach(it=>{
+    if(it._localonly){ it.status='localonly'; it.cloudCount=null; return; }   // 本機輔助表（cost_by_origin）：非同步項，不比對雲端
     if(it.kind==='蝦皮報表'){ it.status='uncomparable'; it.cloudCount=null; return; }   // 不同 collection（profits），app/profit 讀不到
     if(it.kind==='MOMO商品主檔'){
       const mc=momoCloud[it.key];
@@ -7612,6 +7611,9 @@ async function momoOpenSyncPreview(shop){
     if(cv===undefined){ it.status='new'; it.cloudCount=0; }
     else { it.cloudCount=_momoCount(cv); it.status=_eq(it.localVal,cv)?'same':'diff'; }
   });
+  // P3(1) 通用防呆：顯示「雲端 0 / 新增」但本機筆數 > 500 → 很可能是雲端讀取失敗（不是真的新增），標可疑、預設不勾。
+  //   防的是未來又有 key 搬走、預覽讀取端沒跟上（第 5 次）→ 整包覆蓋 + 雲端誤判 0 = 靜默資料損失。cost_by_origin 已是 localonly、不套此規則。
+  items.forEach(it=>{ if(it.status==='new' && (it.localCount||0)>500) it.suspicious=true; });
   // 差異明細掛到每筆 diff item（modal 顯示 + 報告都用）
   items.forEach(it=>{ if(it.status==='diff'){ try{ it.diff=momoDiffDetail(it.localVal, it._cloudVal); }catch(e){ it.diffErr=String(e&&e.message||e); } } });
   // #3：把這次預覽的比對快照 + 差異明細寫進 __lastSyncReport（MOMO 同步先前完全沒診斷輸出）。confirm 後 syncToCloud 會再覆寫成 'done'。
@@ -7626,7 +7628,11 @@ function momoRenderSyncPreviewModal(shop, items){
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const typeColor={'MOMO商品主檔':'#5b5fcf','蝦皮報表':'#e4007f','其他設定':'#9ca3af'};
   const statusCell=it=>{
-    if(it.status==='new')    return `<span style="color:#10b981;font-weight:600">新增</span>`;
+    if(it.status==='localonly') return `<span style="color:#9ca3af" title="本機輔助表（新增商品輸原廠自動帶成本用），刻意不同步雲端；權威成本在商品主檔 product.cost（隨主檔上雲）。要匯出備份用下方「⬇ 匯出成本表」。">本機輔助表·不同步</span>`;
+    if(it.status==='new'){
+      if(it.suspicious) return `<span style="color:#dc2626;font-weight:700" title="本機 ${it.localCount} 筆、但雲端讀到 0——筆數這麼多卻雲端全空，很可能是雲端讀取失敗、不是真的新增。整包推上去會清空雲端 → 確認前請勿推送（已預設不勾）。">⚠ 雲端讀取可疑，預設不推</span>`;
+      return `<span style="color:#10b981;font-weight:600">新增</span>`;
+    }
     if(it.status==='same')   return `<span style="color:#9ca3af">無變更</span>`;
     if(it.status==='uncomparable') return `<span style="color:#9ca3af">無法比對（不同 collection）</span>`;
     if(it.status==='readfail') return `<span style="color:#d97706">無法比對（雲端讀取失敗，仍會整包覆蓋）</span>`;
@@ -7641,21 +7647,22 @@ function momoRenderSyncPreviewModal(shop, items){
     const ss=d.samples.map(s=>`<div class="mm-sync-diff-row"${(s.local!=null||s.cloud!=null)?` title="本機：${esc(String(s.local))}　|　雲端：${esc(String(s.cloud))}"`:''}>· <b>${esc(String(s.item))}</b>${(s.field&&s.field!=='(整筆)')?' · '+esc(s.field):''}：${esc(s.desc||'')}</div>`).join('');
     return `<details class="mm-sync-diff"><summary>${d.total} 筆不同 · 展開</summary>${ss}${d.total>d.samples.length?`<div style="color:#9ca3af;margin-top:2px">（僅列前 ${d.samples.length}）</div>`:''}</details>`; };
   // 逐列 HTML；checked=預設是否勾選（有變更→勾、無變更→不勾、衝突→不勾）；data-conflict 供確認時二次攔截
-  const rowHtml=(it,checked)=>`<tr style="border-top:1px solid #f3f4f6${it.conflict?';background:#fef2f2':''}">
-      <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}"${it.conflict?' data-conflict="1"':''} ${checked?'checked':''} onchange="momoSyncUpdateCount()"></td>
+  const rowHtml=(it,checked)=>`<tr style="border-top:1px solid #f3f4f6${(it.conflict||it.suspicious)?';background:#fef2f2':(it.status==='localonly'?';opacity:.7':'')}">
+      <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}"${it.conflict?' data-conflict="1"':''}${it.suspicious?' data-suspicious="1"':''}${it.status==='localonly'?' disabled title="本機輔助表，不同步"':''} ${checked?'checked':''} onchange="momoSyncUpdateCount()"></td>
       <td style="padding:6px 8px;font-family:monospace;word-break:break-all">${esc(it.key)}</td>
       <td style="padding:6px 8px;color:${typeColor[it.kind]||'#6b7280'};font-weight:600;white-space:nowrap">${it.kind}</td>
       <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.localCount}</td>
       <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.cloudCount==null?'—':it.cloudCount}</td>
       <td style="padding:6px 8px">${statusCell(it)}${it.status==='diff'?diffHtml(it):''}</td>
     </tr>`;
-  const changed=items.filter(it=>it.status!=='same'), unchanged=items.filter(it=>it.status==='same');   // 只有 changed 需要你決定
+  const anySuspicious=items.some(it=>it.suspicious);   // P3(1)：雲端0但本機>500
+  const changed=items.filter(it=>it.status!=='same' && it.status!=='localonly'), unchanged=items.filter(it=>it.status==='same' || it.status==='localonly');   // localonly 收進無變更區、不進待推
   const theadHtml=`<thead><tr style="text-align:left;color:#6b7280;font-weight:600">
-      <th style="padding:6px 4px;text-align:center"><input type="checkbox" id="mm-sync-all" ${anyConflict?'':'checked'} onchange="momoSyncToggleAll(this.checked)"></th>
+      <th style="padding:6px 4px;text-align:center"><input type="checkbox" id="mm-sync-all" ${(anyConflict||anySuspicious)?'':'checked'} onchange="momoSyncToggleAll(this.checked)"></th>
       <th style="padding:6px 8px">資料 key</th><th style="padding:6px 8px">類型</th><th style="padding:6px 8px;text-align:right">本機</th><th style="padding:6px 8px;text-align:right">雲端</th><th style="padding:6px 8px">狀態 / 差異</th>
     </tr></thead>`;
   const mainHtml = changed.length
-    ? `<table style="width:100%;border-collapse:collapse;font-size:12px">${theadHtml}<tbody id="mm-sync-main-body">${changed.map(it=>rowHtml(it,!it.conflict)).join('')}</tbody></table>`
+    ? `<table style="width:100%;border-collapse:collapse;font-size:12px">${theadHtml}<tbody id="mm-sync-main-body">${changed.map(it=>rowHtml(it,!it.conflict && !it.suspicious)).join('')}</tbody></table>`
     : `<div style="padding:18px;text-align:center;color:#9ca3af;font-size:13px">目前沒有需要同步的項目${unchanged.length?`（另有 ${unchanged.length} 項無變更）`:''}</div>`;
   const unchangedHtml = unchanged.length
     ? `<details class="mm-sync-unchanged"><summary>另有 ${unchanged.length} 項無變更 · 展開（預設不推，可個別勾）</summary><table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px"><tbody>${unchanged.map(it=>rowHtml(it,false)).join('')}</tbody></table></details>`
@@ -7663,15 +7670,19 @@ function momoRenderSyncPreviewModal(shop, items){
   ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:820px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;font-size:15px;font-weight:700">同步預覽 — 勾選要推送到雲端的項目</div>
     <div style="padding:12px 20px;overflow:auto">
-      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">只列出<b>有變更</b>（新增／內容不同）的項目，預設全勾；無變更的收在下方。<b>勾選推送的會用本機整包覆蓋雲端（無版本比對、系統無法判斷誰新）</b>，請確認不會蓋掉同事的更新。</div>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">只列出<b>有變更</b>（新增／內容不同）的項目，預設全勾；無變更／本機輔助表收在下方。<b>商品主檔</b>有版本比對（雲端較新會標紅、預設不勾）；<b>其他項目（月對帳／排行榜／運費…）為整包覆蓋、無版本比對</b>，請確認不會蓋掉同事的更新。</div>
       ${anyConflict?`<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;line-height:1.6">🚫 有項目<b>雲端較新</b>（你載入後雲端又被人更新過，可能是同事推的）——這些列<b>預設不勾</b>、避免用你的舊資料蓋掉同事的更新。建議<b>重新整理</b>拿到最新雲端後再改。若你確定要覆蓋，需手動勾選並二次確認。</div>`:''}
+      ${anySuspicious?`<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;line-height:1.6">🚨 有項目<b>本機筆數很多、雲端卻讀到 0</b>——很可能是<b>雲端讀取失敗</b>（不是真的新增）。整包推上去會<b>清空雲端</b> → 這些列<b>預設不勾</b>，請先確認雲端真的沒有、或重新整理後再推。</div>`:''}
       ${anyDiff?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">⚠️ 有項目<b>內容不同</b>——點該列「展開」看差在哪個 SKU/欄位，確認是你要覆蓋的再保持勾選。</div>`:''}
       ${mainHtml}
       ${unchangedHtml}
     </div>
-    <div style="padding:14px 20px;border-top:1px solid #eef0f2;display:flex;gap:10px;justify-content:flex-end">
-      <button onclick="momoCloseSyncPreview()" style="padding:7px 16px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>
-      <button id="mm-sync-confirm-btn" onclick="momoConfirmSync('${shop}')" ${changed.length?'':'disabled'} style="padding:7px 18px;border-radius:7px;border:none;background:${changed.length?'#10b981':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${changed.length?'pointer':'default'}">確認同步${changed.length?'（'+changed.length+' 項）':''}</button>
+    <div style="padding:14px 20px;border-top:1px solid #eef0f2;display:flex;gap:10px;justify-content:space-between;align-items:center">
+      <div>${items.some(it=>it.status==='localonly')?`<button onclick="momoExportCostByOrigin()" style="padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#5b5fcf;font-size:12px;cursor:pointer" title="成本對照表是本機孤本、不同步雲端 → 匯出 CSV 存機器外副本">⬇ 匯出成本表 CSV</button>`:''}</div>
+      <div style="display:flex;gap:10px">
+        <button onclick="momoCloseSyncPreview()" style="padding:7px 16px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>
+        <button id="mm-sync-confirm-btn" onclick="momoConfirmSync('${shop}')" ${changed.length?'':'disabled'} style="padding:7px 18px;border-radius:7px;border:none;background:${changed.length?'#10b981':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${changed.length?'pointer':'default'}">確認同步${changed.length?'（'+changed.length+' 項）':''}</button>
+      </div>
     </div>
   </div>`;
   try{ momoSyncUpdateCount(); }catch{}   // 衝突項預設不勾 → 首次渲染就同步「確認同步(N)」按鈕與全選框狀態
@@ -7689,6 +7700,9 @@ function momoConfirmSync(shop){
   // 【2】二次攔截：使用者手動勾回「雲端較新」的衝突項 → 明確再確認一次（避免手滑覆蓋同事更新）
   const conflictKeys=checkedEls.filter(c=>c.getAttribute('data-conflict')==='1').map(c=>c.getAttribute('data-key'));
   if(conflictKeys.length && !confirm('你勾選了 '+conflictKeys.length+' 項「雲端較新」的資料：\n'+conflictKeys.join('\n')+'\n\n推送會用你的本機（較舊）版本整包蓋掉雲端較新的版本，可能丟失同事的更新。\n\n確定要覆蓋嗎？（建議先重新整理拿最新雲端）')) return;
+  // P3(1) 二次攔截：手動勾回「雲端讀取可疑（本機多/雲端0）」→ 明確再確認（整包推會清空雲端）
+  const suspiciousKeys=checkedEls.filter(c=>c.getAttribute('data-suspicious')==='1').map(c=>c.getAttribute('data-key'));
+  if(suspiciousKeys.length && !confirm('你勾選了 '+suspiciousKeys.length+' 項「雲端讀取可疑」（本機很多筆、雲端卻讀到 0）：\n'+suspiciousKeys.join('\n')+'\n\n若雲端其實有資料、只是這次沒讀到，整包推會把它清空。\n\n確定要推嗎？（建議先重新整理確認雲端真的沒有）')) return;
   const keys=checkedEls.map(c=>c.getAttribute('data-key'));
   momoCloseSyncPreview();
   if(!keys.length){ if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop); return; }
@@ -10238,6 +10252,18 @@ function momoPersistCostByOrigin(costByOrigin){   // 併入持久表（新值覆
   momoSaveCostByOrigin(map);
   return {added,updated,total:Object.keys(map).length};
 }
+// P5：成本對照表匯出 CSV。這張表是本機孤本（非同步項）→ 提供機器外副本，避免 localStorage 存不下/清快取就永久消失。匯入本輪不做。
+function momoExportCostByOrigin(){
+  const map=momoLoadCostByOrigin(); const keys=Object.keys(map||{});
+  if(!keys.length){ alert('目前沒有成本對照表（ec_momo_cost_by_origin）資料可匯出'); return; }
+  const esc=v=>{ const s=String(v==null?'':v); return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
+  const lines=['原廠編號,成本']; keys.sort().forEach(o=>lines.push(esc(o)+','+esc(map[o])));
+  const csv='﻿'+lines.join('\r\n');   // BOM → Excel 正確辨識 UTF-8
+  try{ const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='MOMO_成本對照表_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+    if(typeof showToast==='function') showToast('已匯出成本對照表 '+keys.length+' 筆 CSV','success');
+  }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
+}
 // ══════ 莫筆克「可用庫存」（各倉商品列表 T 欄）：帳號級快照 origin→數量 + 上傳日期 ══════
 //  ⚠ 是「自家各倉可用庫存」快照、非 MOMO 平台可售量（乙配已進 MOMO 倉的不算）。按原廠編號（品項條碼）→ 甲乙同 origin 共用同一批。
 //  值＝ { uploadedAt:<ms>, byOrigin:{origin:qty} }。庫存是快照 → 每次上傳整份覆蓋（不像 cost 累積），uploadedAt 供「資料日期/過期」提示。
@@ -11582,7 +11608,7 @@ Object.assign(window, {
   momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoDismissYiCaveat,momoOvSetMonth,
   momoSearchClear,momoSearchClearToggle,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,momoSyncToggleAll,momoSyncUpdateCount,momoExportExcel,
-  momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,
+  momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
