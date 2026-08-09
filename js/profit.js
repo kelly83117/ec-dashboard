@@ -7498,6 +7498,7 @@ function momoChannelFromDeliveryType(t){
 // ── 甲配/乙配 子分頁外殼（.stab 之外自帶樣式，避免干擾全域 tab active 機制）──
 const MOMO_SUBTABS_JIA=[['總表','profit'],['批次維護','batch'],['商品同步','sync'],['訂單明細','upload'],['月對帳','recon'],['⟳重建','rebuild']];
 const MOMO_SUBTABS_YI =[['總表','profit'],['批次維護','batch'],['商品同步','sync'],['訂單明細','upload'],['月對帳','recon'],['⟳重建','rebuild']];   // 「倉租費」分頁已移除(v315)：手動月總從沒進計算、已被對帳單「寄倉倉租費(EC)」取代；ec_momo_rent_records 舊資料保留不清
+const MOMO_SUBTABS_MOPLUS=[['總表','profit'],['批次維護','batch'],['商品同步','sync'],['訂單明細','upload']];   // MO+ 代收代付：對帳明細即主源，無獨立月對帳/重建
 const _momoSub={};          // shop -> 目前子分頁 id
 const _momoPeriodSel={};    // shop -> 選中的期別 key（'' = 尚無資料）
 const _momoSearch={};       // shop -> 搜尋字串
@@ -7516,7 +7517,7 @@ function momoSearchClear(id,handler,shop){ const i=document.getElementById(id); 
 function momoRenderShop(shop){
   const el=document.getElementById('momo-content-'+shop);
   if(!el) return;
-  const subs=shop==='乙配'?MOMO_SUBTABS_YI:MOMO_SUBTABS_JIA;
+  const subs=momoIsMoPlus(shop)?MOMO_SUBTABS_MOPLUS:(shop==='乙配'?MOMO_SUBTABS_YI:MOMO_SUBTABS_JIA);
   if(!_momoSub[shop]) _momoSub[shop]='profit';
   const pills=subs.map(([label,id])=>{
     const on=_momoSub[shop]===id;
@@ -7538,7 +7539,7 @@ function momoRenderSub(shop){
   const sub=_momoSub[shop]||'profit';
   if(sub==='profit'){ c.innerHTML=momoProfitTableHTML(shop); momoRenderProfitBody(shop); return; }
   if(sub==='batch'){ momoRenderBatch(shop); return; }
-  if(sub==='upload'){ momoRenderUpload(shop); return; }
+  if(sub==='upload'){ (momoIsMoPlus(shop)?momoRenderMoPlusUpload:momoRenderUpload)(shop); return; }
   if(sub==='sync'){ momoRenderProductSync(shop); return; }
   if(sub==='recon'){ momoRenderRecon(shop); return; }
   if(sub==='rebuild'){ momoRenderRebuild(shop); return; }
@@ -9927,8 +9928,8 @@ function momoUploadDryRun(plan){
 }
 window.__momoUploadDryRun = momoUploadDryRun;   // Console 測試/除錯（純函式，讀 master 不寫）
 // Dry-run 報表 modal：讀 _momoUpPlan → momoUploadDryRun → 逐賣場逐期別前/後 qty+rev、新/累加、來源數、變小標紅 + 下載 CSV。
-function momoUploadShowDryRun(shop){
-  const P=_momoUpPlan; if(!P){ alert('請先按「產生預覽」'); return; }
+function momoUploadShowDryRun(shop, planOverride){
+  const P=planOverride||_momoUpPlan; if(!P){ alert('請先按「產生預覽」'); return; }
   const dr=momoUploadDryRun(P); window.__momoLastDryRun=dr;
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const kindLabel={ 'new':'<span style="color:#059669;font-weight:700">新期別→compact</span>', 'accumulate':'<span style="color:#d97706;font-weight:700">累加到既有</span>', 'flat-migrate':'<span style="color:#6b7280">flat→compact 遷移</span>' };
@@ -9948,7 +9949,7 @@ function momoUploadShowDryRun(shop){
       <thead><tr style="text-align:left;color:#6b7280;position:sticky;top:0;background:#fafafa">
         <th style="padding:4px 8px">期別</th><th style="padding:4px 8px">類型</th><th style="padding:4px 8px;text-align:right">qty 前→後</th><th style="padding:4px 8px;text-align:right">rev 前→後</th><th style="padding:4px 8px;text-align:center">來源數</th><th style="padding:4px 8px">註</th>
       </tr></thead><tbody>${body}</tbody></table></div>`; };
-  const t甲=shopTbl('甲配'), t乙=shopTbl('乙配');
+  const allTbls=Object.keys(dr.shops).map(shopTbl).join('');   // 通用：甲乙配 / MO+（dr.shops 的賣場鍵）
   const shrinkHtml = shrinkAll.length ? `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:12px;color:#dc2626;line-height:1.6">⚠ <b>${shrinkAll.length} 個期別合計會變小</b>（累加下通常不會 → 多半是同一來源檔重傳且值更小＝更正，或誤判，請確認）：${shrinkAll.map(x=>esc(momoPeriodLabel(x.period))+'（'+x.shop+' '+x.beforeQty+'→'+x.afterQty+'）').join('、')}</div>` : '';
   let ov=document.getElementById('momo-dryrun-overlay'); if(!ov){ov=document.createElement('div');ov.id='momo-dryrun-overlay';document.body.appendChild(ov);}
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -9957,7 +9958,7 @@ function momoUploadShowDryRun(shop){
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;font-size:15px;font-weight:700">Dry-run 預期結果（不寫入）· 本檔月份 ${esc(dr.srcCode||'(判不出→退期別自身月份)')}</div>
     <div style="padding:12px 20px;overflow:auto">
       <div style="font-size:12px;color:#6b7280;margin-bottom:6px;line-height:1.6">「若照目前檔案寫入」的預期 qty/rev 前→後。對過數字再實際執行，執行後把回報跟這份比對是否一致。⚠ 這裡列<b>全部期別</b>（含期別 modal 會擋掉的舊期別）；實際寫入以你在期別 modal 的勾選為準。</div>
-      ${shrinkHtml}${t甲}${t乙}${(!t甲&&!t乙)?'<div style="color:#9ca3af">此檔無銷量可寫入</div>':''}
+      ${shrinkHtml}${allTbls||'<div style="color:#9ca3af">此檔無銷量可寫入</div>'}
     </div>
     <div style="padding:14px 20px;border-top:1px solid #eef0f2;display:flex;justify-content:space-between;align-items:center">
       <button onclick="momoUploadDryRunCSV()" style="padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#5b5fcf;font-size:12px;cursor:pointer">⬇ 下載 dry-run CSV</button>
@@ -10007,6 +10008,115 @@ function momoCleanDirtyPeriodKeys(){
   console.table(found);
   if(typeof showToast==='function') showToast('已清理 '+removed+' 個髒期別 key，記得按 ☁ 同步雲端才會上雲','success');
   return {removed, shops:[...dirtyShops], detail:found};
+}
+/* ═══════════════ MO+ 對帳明細上傳入口（P3a）═══════════════
+   與甲乙分開的獨立狀態/流程：單一「對帳明細.xls」→ momoParseMoPlus → momoBuildMoPlusPlan
+   → 期別 modal(moPlus 預設全勾) → momoApplyUploadPlan（增量 compact，跨月累加）。
+   兩道 guard：① 檔名 YYMM→srcCode 判不出 fail loud（不猜當月，否則來源鍵錯、冪等失效）；
+              ② 擋 E001／傳錯檔——需有「訂單明細」分頁 + 第 3 列 header 為對帳明細格式。*/
+let _moPlusUpFile=null, _moPlusUpParsed=null, _moPlusUpPlan=null;
+function momoIsMoPlus(shop){ return shop==='MO+麻吉'||shop==='MO+森之旅'; }
+function momoMoPlusErrHtml(title,msg){ return `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:14px 16px"><div style="font-weight:700;color:#dc2626;margin-bottom:6px">⛔ ${title}</div><div style="font-size:12px;color:#7f1d1d;line-height:1.7">${msg}</div></div>`; }
+function momoRenderMoPlusUpload(shop){
+  const c=document.getElementById('momo-sub-content-'+shop); if(!c) return;
+  const f=_moPlusUpFile;
+  c.innerHTML=`
+    <div style="max-width:820px">
+      <div class="mm-note" style="background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.7">
+        上傳 <b>mo+${shop==='MO+麻吉'?'好麻吉':'森之旅'}對帳明細_YYMM.xls</b>（「訂單明細」分頁）。<br>
+        <span class="mm-muted">代收代付逐筆精算：期別依<b>訂單號碼下單日</b>（一份檔會跨多個期別，跨月尾巴以本檔月份為來源<b>累加</b>不覆蓋）。逐列 A+B−C−D 對<b>實際入帳金額</b>驗證。⚠ 對帳明細與 E001 副檔名相同——選錯檔會被擋下。</span>
+      </div>
+      <div class="mm-uprow">
+        <div class="mm-uplbl">對帳明細 <span class="mm-code">主資料源</span><span class="req">*必要</span><div class="mm-hint">檔名需含月份 YYMM（例：…_2606.xls）</div></div>
+        <div class="mm-upctl"><input type="file" accept=".xlsx,.xls" onchange="momoMoPlusUploadFile('${shop}',event)"><span class="${f?'mm-ok':'mm-muted'}">${f?'✓ '+_momoEsc(f.name):'未選'}</span>${f?`<a onclick="momoMoPlusUploadRemove('${shop}')" title="移除" style="color:#ef4444;cursor:pointer;font-weight:700">✕</a>`:''}</div>
+      </div>
+      <button class="mm-btn-primary" style="margin-top:10px" onclick="momoMoPlusUploadGenerate('${shop}')" ${f?'':'disabled'}>▶ 產生預覽</button>
+      <span class="mm-gen-hint">${f?'解析對帳明細、逐列驗證、顯示期別分布與總額（先看數字再決定寫入）':'請選對帳明細檔'}</span>
+      <div id="moplus-up-preview-${shop}" style="margin-top:16px"></div>
+    </div>`;
+}
+function momoMoPlusUploadFile(shop,e){ const files=e.target.files; if(!files||!files.length) return; _moPlusUpFile=files[0]; _moPlusUpParsed=null; _moPlusUpPlan=null; momoRenderMoPlusUpload(shop); }
+function momoMoPlusUploadRemove(shop){ _moPlusUpFile=null; _moPlusUpParsed=null; _moPlusUpPlan=null; momoRenderMoPlusUpload(shop); }
+async function momoMoPlusUploadGenerate(shop){
+  const prev=document.getElementById('moplus-up-preview-'+shop); if(prev) prev.innerHTML='<div style="font-size:13px;color:#9ca3af">解析中…</div>';
+  const file=_moPlusUpFile; if(!file){ return; }
+  const srcCode=momoRebuildSrcFromName(file.name);   // guard ①：檔名 YYMM
+  if(!srcCode){ if(prev)prev.innerHTML=momoMoPlusErrHtml('檔名判不出月份（YYMM）','檔名需含 4 碼月份，例：mo+好麻吉對帳明細_<b>2606</b>.xls。<br>判不出來源鍵會讓「同檔重傳冪等」失效、跨月累加錯亂——請改檔名後重傳，<b>不會預設成當月</b>（猜錯造成錯誤來源鍵）。'); return; }
+  let wb; try{ wb=await momoReadWorkbook(file); }catch(err){ if(prev)prev.innerHTML=momoMoPlusErrHtml('讀檔失敗',_momoEsc(String(err&&err.message||err))); return; }
+  if(!wb.names || wb.names.indexOf('訂單明細')<0){   // guard ②a：分頁
+    if(prev)prev.innerHTML=momoMoPlusErrHtml('這不是對帳明細','找不到「訂單明細」分頁（此檔分頁：'+_momoEsc((wb.names||[]).join('、')||'無')+'）。<br>對帳明細與 E001 副檔名相同——你可能傳成 E001 或別的檔。請上傳「mo+…對帳明細_YYMM.xls」。'); return; }
+  const rows=wb.sheet('訂單明細');
+  const parsed=momoParseMoPlus(rows, srcCode);
+  if(parsed.errors && parsed.errors.length && /找不到必需欄位/.test(parsed.errors[0])){   // guard ②b：header 格式（擋 E001）
+    if(prev)prev.innerHTML=momoMoPlusErrHtml('這不是對帳明細（或格式不符）', _momoEsc(parsed.errors[0])+'<br><br>對帳明細與 E001 副檔名相同——請確認上傳的是對帳明細（第 3 列 header 應含 訂單號碼／實際入帳金額／貨款…）。'); return; }
+  _moPlusUpParsed=parsed;
+  if(!parsed.ok){ _moPlusUpPlan=null; momoRenderMoPlusPreview(shop); return; }   // 逐列驗證不過 → 不建 plan、不可寫（fail loud）
+  const plan=momoBuildMoPlusPlan(parsed, shop);
+  plan._guard=momoMoPlusComputeGuard(plan, shop);
+  _moPlusUpPlan=plan;
+  momoRenderMoPlusPreview(shop);
+}
+function momoMoPlusComputeGuard(plan, shop){
+  const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return {merged:{periods:[],notCovered:[]}, hasDanger:false};
+  const inc={}; Object.keys(sp.updates).forEach(sku=>{ inc[sku]={}; Object.keys(sp.updates[sku]).forEach(pd=>{ inc[sku][pd]={qty:sp.updates[sku][pd].qty}; }); });
+  const cls=momoClassifyPeriods(momoLoadProducts(shop), inc, {mode:'upload', moPlus:true, mainMonth:null});
+  return { merged:cls, hasDanger:cls.periods.some(p=>p.danger) };   // moPlus → danger 恆 false
+}
+function momoRenderMoPlusPreview(shop){
+  const prev=document.getElementById('moplus-up-preview-'+shop); if(!prev) return;
+  const p=_moPlusUpParsed; if(!p){ prev.innerHTML=''; return; }
+  const esc=_momoEsc;
+  if(!p.ok && p.lineErrors && p.lineErrors.length){   // 逐列驗證失敗 → fail loud、擋寫入
+    const rowsHtml=p.lineErrors.slice(0,20).map(e=>`<tr style="border-top:1px solid #f3f4f6"><td style="padding:2px 6px;font-family:monospace">${esc(e.orderNo)}</td><td style="padding:2px 6px;text-align:right">${e.A}</td><td style="padding:2px 6px;text-align:right">${e.B}</td><td style="padding:2px 6px;text-align:right">${e.C}</td><td style="padding:2px 6px;text-align:right">${e.D}</td><td style="padding:2px 6px;text-align:right">${e.expect}</td><td style="padding:2px 6px;text-align:right">${e.net}</td><td style="padding:2px 6px;text-align:right;color:#dc2626;font-weight:700">${e.diff>0?'+':''}${e.diff}</td></tr>`).join('');
+    prev.innerHTML=momoMoPlusErrHtml('逐列驗證未通過（不寫入）',
+      p.lineErrors.length+' 列 A+B−C−D ≠ 實際入帳金額。多半是費用欄漏列（換月新增欄）或檔案異常。'
+      +(p.unresolvedFee&&p.unresolvedFee.length?'<br>⚠ 有費用欄未對到 header：'+esc(p.unresolvedFee.join('、')):'')
+      +`<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:8px"><thead><tr style="color:#9ca3af;text-align:left"><th style="padding:2px 6px">訂單號碼</th><th style="padding:2px 6px;text-align:right">A</th><th style="padding:2px 6px;text-align:right">B</th><th style="padding:2px 6px;text-align:right">C</th><th style="padding:2px 6px;text-align:right">D</th><th style="padding:2px 6px;text-align:right">應=A+B−C−D</th><th style="padding:2px 6px;text-align:right">實際入帳</th><th style="padding:2px 6px;text-align:right">差</th></tr></thead><tbody>${rowsHtml}</tbody></table>${p.lineErrors.length>20?'<div style="color:#9ca3af;font-size:10px">（僅列前 20）</div>':''}`);
+    return;
+  }
+  const periods=Object.keys(p.periods).sort();
+  const distRows=periods.map(k=>`<tr style="border-top:1px solid #f3f4f6"><td style="padding:4px 8px;font-weight:600">${esc(momoPeriodLabel(k))}</td><td style="padding:4px 8px;text-align:right">${p.periods[k]} 筆</td><td style="padding:4px 8px;text-align:right">${(p.periodsQty[k]||0).toLocaleString()} 件</td></tr>`).join('');
+  const plan=_moPlusUpPlan, sp=plan&&plan.shops[shop];
+  const matchedN=sp?sp.matched.length:0, unmatchedN=sp?sp.unmatched.length:0, missN=(p.missingOrigin||[]).length;
+  prev.innerHTML=`
+    <div style="border:1px solid #eef0f2;border-radius:10px;padding:14px 16px">
+      <div style="font-weight:700;margin-bottom:8px">解析結果 · 來源鍵 ${esc(p.srcCode)}</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin-bottom:10px">
+        <div>總筆數 <b>${p.totals.matched}</b></div>
+        <div>檔案總額（Σ實際入帳）<b>$${p.totals.net.toLocaleString()}</b></div>
+        <div>已建檔 SKU <b>${matchedN}</b>${unmatchedN?` · <span style="color:#d97706">未建檔 ${unmatchedN}</span>`:''}</div>
+        <div>缺原廠編號 <b style="color:${missN?'#d97706':'#6b7280'}">${missN}</b></div>
+      </div>
+      <div style="font-weight:600;font-size:12px;color:#6b7280;margin:6px 0 2px">期別分布（筆數 = 驗收 #2）</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;max-width:420px"><thead><tr style="color:#9ca3af;text-align:left"><th style="padding:4px 8px">期別</th><th style="padding:4px 8px;text-align:right">筆數</th><th style="padding:4px 8px;text-align:right">件數</th></tr></thead><tbody>${distRows}</tbody></table>
+      <div style="font-size:11px;color:#9ca3af;margin-top:6px">對帳單「實際應付商店金額」若與檔案總額 $${p.totals.net.toLocaleString()} 不符 → 解析漏費用欄或檔案異常。</div>
+      ${unmatchedN?`<div style="font-size:11px;color:#d97706;margin-top:6px">未建檔 ${unmatchedN} 個 SKU 不會寫入（先到批次維護建檔）：${esc(sp.unmatched.slice(0,10).join('、'))}${unmatchedN>10?' …':''}</div>`:''}
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button onclick="momoMoPlusShowDryRun('${shop}')" style="padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#5b5fcf;font-size:12px;cursor:pointer">🔎 Dry-run 明細（不寫入）</button>
+        <button class="mm-btn-primary" onclick="momoMoPlusUploadOpenGuard('${shop}')" ${matchedN?'':'disabled'}>▶ 寫入（逐期別確認）</button>
+        <button onclick="momoMoPlusUploadRemove('${shop}')" style="padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:12px;cursor:pointer">取消</button>
+      </div>
+    </div>`;
+}
+function momoMoPlusShowDryRun(shop){ if(!_moPlusUpPlan){ alert('請先產生預覽'); return; } momoUploadShowDryRun(shop, _moPlusUpPlan); }
+function momoMoPlusUploadOpenGuard(shop){
+  const P=_moPlusUpPlan, g=P&&P._guard; if(!P||!g){ alert('請先產生預覽'); return; }
+  momoShowPeriodGuard({ title:'MO+ 對帳明細寫入預覽（逐期別）', mode:'upload',
+    cancelNote:'取消＝這批完全不寫入。MO+ 跨月尾巴以來源標記累加、不覆蓋既有。',
+    subtitle:`本檔來源鍵：<b>${_momoEsc(P.srcCode)}</b>。對帳明細依入帳日編製、下單日落後約一個月——一份檔會跨多個期別、舊期別以本檔月份為來源<b>累加</b>（不覆蓋、不會變小），故<b>預設全勾</b>。`,
+    cls:g.merged, onConfirm:(allowed)=>momoMoPlusUploadApply(shop, allowed) });
+}
+function momoMoPlusUploadApply(shop, allowedPeriods){
+  const P=_moPlusUpPlan; if(!P) return;
+  const res=momoApplyUploadPlan(P, allowedPeriods||null);
+  _moPlusUpFile=null; _moPlusUpParsed=null; _moPlusUpPlan=null;
+  const lines=[momoPeriodReportLine('已寫入', res.wroteBy), momoPeriodReportLine('　其中累加到既有期別', res.accumBy), momoPeriodReportLine('已跳過（你未勾選）', res.gatedBy)].filter(Boolean);
+  const detail=lines.join('\n');
+  if(res.wrote===0){ const msg=res.gatedCount?('這批都落在你未勾選的期別，未寫入。\n\n'+detail):'沒有相符的已建檔 SKU（先到批次維護建檔）。';
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'未寫入',message:msg,kind:'warn'}); else alert(msg); }
+  else if(window.App&&typeof App.showAlertModal==='function'){ App.showAlertModal({title:'已寫入（逐期別）', message:detail+'\n\n記得按 ☁ 同步雲端。', kind:'info'}); }
+  else if(typeof showToast==='function'){ showToast('已寫入 '+res.wrote+' 筆（記得按 ☁ 同步雲端）','success'); }
+  momoRenderMoPlusUpload(shop);
 }
 function momoRenderUpload(shop){
   const c=document.getElementById('momo-sub-content-'+shop);
@@ -10925,8 +11035,8 @@ function setMomoShop(shop,btn){
   const el=document.getElementById('momo-content-'+shop);
   if(el){
     el.classList.add('active');
-    if(shop==='甲配'||shop==='乙配'){
-      momoRenderShop(shop);   // 新設計：自帶子分頁，每次進來重繪（不用 dataset.init 快取）
+    if(shop==='甲配'||shop==='乙配'||momoIsMoPlus(shop)){
+      momoRenderShop(shop);   // 甲乙 + MO+：自帶子分頁，每次進來重繪（不用 dataset.init 快取）
     }else if(shop==='總表'){
       momoRenderSummary();    // P5 淨利階層彙總（每次進來重繪，不快取）
     }else if(!el.dataset.init){
@@ -11842,6 +11952,7 @@ Object.assign(window, {
   momoRebuildDryRun,momoRebuildApply,momoTrimHistoryDryRun,momoTrimHistoryApply,
   momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
   momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,momoBuildMoPlusPlan,
+  momoIsMoPlus,momoRenderMoPlusUpload,momoMoPlusUploadFile,momoMoPlusUploadRemove,momoMoPlusUploadGenerate,momoMoPlusShowDryRun,momoMoPlusUploadOpenGuard,momoMoPlusUploadApply,
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
   momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoOpenDpDetailFromEl,momoCloseDpDetail,
