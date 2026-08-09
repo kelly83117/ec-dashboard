@@ -9604,6 +9604,7 @@ function momoCellQtySources(cell){
 // 回 { periods:[{period,kind,checked,disabled,danger,oldQty,newQty,count,skus:[{sku,name,oldQty,newQty,flat,oldSources}]}], notCovered:[{period,oldQty,count}] }
 function momoClassifyPeriods(master, incoming, opts){
   opts=opts||{}; const mode=opts.mode||'upload'; const guard=opts.guard||REBUILD_GUARD;
+  const moPlus=!!opts.moPlus;   // MO+：跨月累加為常態（來源標記防覆蓋）→ 舊期別預設全勾、不標 danger（甲乙配維持預設不勾）
   const mainMonth=opts.mainMonth||null; const mainCode=mainMonth?momoMonthToCode(mainMonth):null; const selected=new Set(opts.selectedCodes||[]);
   const bySku=new Map((master||[]).map(p=>[p.sku,p]));
   const periodsMap=new Map();
@@ -9625,6 +9626,9 @@ function momoClassifyPeriods(master, incoming, opts){
     if(mode==='upload'){
       if(mainMonth && pm===mainMonth){ kind='main'; }
       else if(mainMonth && pm>mainMonth){ kind='newer'; }   // 比主月新（罕見）→ 前進資料，寫
+      else if(moPlus){   // MO+ 舊期別：跨月尾巴累加為常態、來源標記防覆蓋 → 一律預設勾、不標 danger（grow=已有值累加、newadd=純新增）
+        kind = pe.skus.some(s=>s.hasOld && s.oldQty>0) ? 'grow' : 'newadd';
+      }
       else {   // 舊期別（早於主月）
         const dangerSkus=shrink.filter(s=> s.flat ? true : (s.oldSources||[]).some(c=>c!==mainCode) );   // flat 無來源→變小即危險；compact→既有來源含非本檔 code
         if(!pe.skus.some(s=>s.hasOld && s.oldQty>0)){ kind='newadd'; }   // 該期別完全無既有 → 純新增
@@ -9812,6 +9816,26 @@ function momoBuildUploadPlan(parsed){
   plan.jiaFreight=(parsed.jia&&parsed.jia.freight)||null;
   return plan;
 }
+// MO+ 上傳計畫：momoParseMoPlus 輸出（sku:{period:{qty,rev=A貨款}}）→ 增量 writer 吃的 plan 形狀（單一 MO+ 賣場）。
+//   只寫已建檔 SKU；未比對到列 unmatched。srcCode=對帳明細月份（重上傳幂等的來源鍵）。moPlus 旗標供期別 modal 預設全勾。
+function momoBuildMoPlusPlan(parsed, shop){
+  const master=momoLoadProducts(shop);
+  const bySku=new Map(master.map(p=>[p.sku,p]));
+  const updates={}, matched=[], unmatched=[], periods=new Set(); let totalQty=0;
+  Object.keys(parsed.sku||{}).forEach(sku=>{
+    if(!bySku.has(sku)){ unmatched.push(sku); return; }
+    matched.push(sku); updates[sku]={};
+    Object.keys(parsed.sku[sku]).forEach(period=>{
+      if(!/^\d{4}-\d{2}-H[12]$/.test(period)) return;   // 只收合法期別 key（防護）
+      const c=parsed.sku[sku][period]||{};
+      periods.add(period); totalQty+=Number(c.qty)||0;
+      updates[sku][period]={qty:Number(c.qty)||0, rev:Math.round(Number(c.rev)||0)};   // rev=A 貨款（代收代付實收）
+    });
+  });
+  const cloudRisk=(master.length>0)&&!_pendingSyncKeys.has(momoProductsKey(shop));
+  return { shops:{[shop]:{updates, matched, unmatched, anomalyNoSales:[], periods:[...periods].sort(), totalQty, cloudRisk}},
+    srcCode:parsed.srcCode||null, moPlus:true, missingOrigin:parsed.missingOrigin||[] };
+}
 // 寫入：只更新「已建檔」的 SKU 的 periods；欄位級 merge（這次沒帶的欄位保留舊值），覆蓋 qty/freight/return
 // 通用增量 compact writer（2026-08，甲乙配 + MO+ 共用；分歧只在期別閘門 modal 的預設勾選，writer 只認 allowedPeriods）。
 //   舊版：新期別寫 flat、compact 期別直接跳過 → (a) 每月重生 flat、(b) 跨月尾巴落在 compact 期別靜默不收。
@@ -9824,7 +9848,7 @@ function momoApplyUploadPlan(plan, allowedPeriods){
   let wrote=0; const wrotePeriods={}, gatedPeriods={}, accumPeriods={};   // period → {shop:筆數}
   const bump=(m,period,shop)=>{ (m[period]=m[period]||{})[shop]=(m[period][shop]||0)+1; };
   const fileCode=plan.srcCode||null;   // 本檔月份代號（2608）；null→writer 退回各期別自身月份當來源鍵
-  ['甲配','乙配'].forEach(shop=>{
+  Object.keys(plan.shops||{}).forEach(shop=>{   // 通用：甲乙配 plan.shops={甲配,乙配}；MO+ plan.shops={MO+麻吉|MO+森之旅} → 同一套 compact upsert
     const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return;
     const master=momoLoadProducts(shop);
     const bySku=new Map(master.map(p=>[p.sku,p]));
@@ -9862,7 +9886,7 @@ function momoApplyUploadPlan(plan, allowedPeriods){
 function momoUploadDryRun(plan){
   const fileCode=plan.srcCode||null;
   const out={ srcCode:fileCode, shops:{} };
-  ['甲配','乙配'].forEach(shop=>{
+  Object.keys(plan.shops||{}).forEach(shop=>{   // 通用：甲乙配 / MO+ 共用（dry-run 鏡射 writer）
     const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return;
     const master=momoLoadProducts(shop);
     const bySku=new Map(master.map(p=>[p.sku,p]));
@@ -11817,7 +11841,7 @@ Object.assign(window, {
   momoRebuildPick,momoRebuildRemove,momoRebuildGenerate,momoRebuildDownloadReport,momoRebuildConfirm,momoTrimPreview,momoTrimBackupAndApply,
   momoRebuildDryRun,momoRebuildApply,momoTrimHistoryDryRun,momoTrimHistoryApply,
   momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
-  momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,
+  momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,momoBuildMoPlusPlan,
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
   momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoOpenDpDetailFromEl,momoCloseDpDetail,
