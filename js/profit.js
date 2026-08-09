@@ -10104,7 +10104,7 @@ function momoRenderUploadPreview(shop){
     const unm=sp.unmatched.length?`<div style="color:#f97316;font-size:12px;margin-top:4px">未比對到商品主檔 ${sp.unmatched.length} 個（不會寫入，請先到批次維護新增再重傳）：${sp.unmatched.slice(0,15).join('、')}${sp.unmatched.length>15?' …':''}</div>`:'';
     const ano=sp.anomalyNoSales.length?`<div style="color:#f97316;font-size:12px;margin-top:4px">有運費但當月無銷量 ${sp.anomalyNoSales.length} 個（無法按比例拆，略過）：${sp.anomalyNoSales.slice(0,10).map(a=>a.sku).join('、')}</div>`:'';
     return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px">
-      <b>${s}</b>：${sp.matched.length} 個 SKU 有更新、期別 ${sp.periods.map(momoPeriodLabel).join(' / ')||'—'}、總銷量 ${sp.totalQty}${unm}${ano}</div>`;
+      <b>${s}</b>：本檔含 ${sp.matched.length} 個已建檔 SKU、期別 ${sp.periods.map(momoPeriodLabel).join(' / ')||'—'}、總銷量 ${sp.totalQty}<span style="color:#9ca3af">（「含」不等於「會變更」；實際變更的期別/數字看下方「🔎 Dry-run 明細」）</span>${unm}${ano}</div>`;
   };
   let owHtml='';
   const _shrink=P.overwrite.filter(o=>o.newQty!=null&&o.oldQty!=null&&o.newQty<o.oldQty);   // qty 變小的覆蓋（跨結算檔覆蓋的訊號）
