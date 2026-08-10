@@ -986,6 +986,29 @@ let _tagDefsNewCls = 'tag-add300';
 // 「❓ 這個怎麼用」說明區的展開狀態。同樣用模組變數記（不用 DOM class）：面板整段 innerHTML 重繪會把 class 洗掉。
 //   ⚠ 同樣必須留在 Init 之前，理由同上，勿搬動。
 let _tagHelpOpen = false;
+// 批次選取（測試標籤批次標記用）的勾選狀態：{ [通路]: Set<商品編號> }。
+//   🔴 刻意存在模組層、【絕對不要掛在 row 物件上】：_filtered 與 _built 共用同一批 row
+//     參照，而 lsSave / syncToCloud 序列化的就是那些 row，_stripDerived 只剝 analysisAll /
+//     profitPct 兩個、擋不住新欄位 —— 掛上去會跟著報表寫進 Firestore。
+//   Set 是 per-shop：A 通路的選取跟 B 無關，切去 B 的當下【不會】動到 A 那把。
+//   ⚠ 但這【不等於】「切通路能保住選取」—— 切回 A 時 setShop 會再跑一次 applyFilters(A)，
+//     A 自己那把就在那裡被清掉。這是刻意的，完整理由見 applyFilters 裡 _batchSelClear 那段。
+//   ⚠ 宣告必須留在 Init 之前：下方 SHOPS.forEach(onMonthChange) 在模組頂層就會走到
+//     loadIntoUI → applyFilters → renderTable，那裡會讀這幾個符號。宣告放後面會落入
+//     const 的 TDZ、整個 profit.js 模組評估中斷。理由同上面的 _cloudRefreshing / _tagPanelCtx。
+const _batchSel = {};
+function _batchSelOf(shop){ if(!_batchSel[shop]) _batchSel[shop]=new Set(); return _batchSel[shop]; }
+function _batchSelClear(shop){ const s=_batchSel[shop]; if(s&&s.size) s.clear(); }
+// 工具列的「已選 N 筆」。N=0 整個隱藏（靠 CSS class，不寫 inline style）。
+//   這個元素在 shopHTML 產生、住在 .toolbar 裡，【不會被 renderTable 的 innerHTML 洗掉】
+//   （那只覆蓋 #tbl-{shop}），所以更新它不需要跟表格重繪搶時序。
+function _renderBatchSelInfo(shop){
+  const el=document.getElementById('batchsel-'+shop);
+  if(!el)return;                                  // 總表 / DOM 未建立 → 天然 no-op
+  const n=(_batchSel[shop]&&_batchSel[shop].size)||0;
+  el.textContent=n?('已選 '+n+' 筆'):'';
+  el.classList.toggle('on',n>0);
+}
 
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
@@ -1177,6 +1200,7 @@ function shopHTML(shop){return`
       <span id="period-tag-${shop}" style="display:none"></span>
       <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋 編號 / 名稱 / ID…" oninput="setSearch('${shop}',this.value)">
       <span class="row-cnt" id="cnt-${shop}"></span>
+      <span class="batch-sel-info" id="batchsel-${shop}"></span>
       <div style="margin-left:auto;display:flex;align-items:center;gap:4px;position:relative">
         <button class="col-pick-btn" id="tag-btn-${shop}" onclick="toggleTagPopup('${shop}',this)">🏷 標籤</button>
         <div class="tag-filter-bar" id="tfbar-${shop}"></div>
@@ -1307,6 +1331,11 @@ function tryLoadSaved(shop){
   if(rep){loadIntoUI(shop,rep.built,rep.period,rep.days);}
   else{
     state[shop]._built=null;
+    // 🔴 _built 被清掉就必須連 _filtered 與批次選取一起清。這條路【不會】走 loadIntoUI，
+    //   而 applyFilters 開頭 `if(!s._built||!s._built.length)return;` 也會早退 ——
+    //   不在這裡清，_filtered 會一直指著上一期那批 row：畫面是空狀態、全選鈕卻亮著，
+    //   按下去就選到看不見的 800 筆。同樣的三行也出現在 clearPeriod 與 _testEmpty。
+    state[shop]._filtered=null;_batchSelClear(shop);_renderBatchSelInfo(shop);
     const _hLbl=s.curHalf==='first'?'上半月':s.curHalf==='second'?'下半月':'整月';
     document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${s.curMonth} ${_hLbl} 尚無資料，請上傳報表產生</div></div>`;
     document.getElementById('period-tag-'+shop).textContent='';
@@ -1355,6 +1384,7 @@ async function clearPeriod(shop){
   state[shop].rawSelAds=null;
   state[shop].rawGroupAdsList=[];
   state[shop]._built=null;state[shop]._period='';state[shop]._extraAdsFee=0;
+  state[shop]._filtered=null;_batchSelClear(shop);_renderBatchSelInfo(shop);   // 理由同 tryLoadSaved 的 else 分支
   // 刪除所有此賣場的 filemeta（不限月份/區間）
   const keysToRemove=[];
   for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith(`ec|filemeta|${shop}|`))keysToRemove.push(k);}
@@ -1413,7 +1443,10 @@ function loadIntoUI(shop,built,period,days){
   //     _filtered 不是設定，是衍生物 —— 上一行 _built 已經無條件被換掉，衍生物就必須
   //     無條件失效，否則它會指向一批已經不在畫面上的舊 row。
   //     兩者放同一批只是「看起來一致」，語意其實相反。
-  state[shop]._filtered=null;
+  //   批次選取跟著一起清，維持「_filtered 為 null ⟹ Set 是空的」這個 invariant。
+  //   ⚠ 正常路徑走到底會呼叫 applyFilters（那裡也會清），但下方 _editedAt 早退那條 return
+  //     會跳過它 —— 不在這裡清的話，Set 會留著上一期的編號，「已選 N 筆」停在舊數字。
+  state[shop]._filtered=null;_batchSelClear(shop);_renderBatchSelInfo(shop);
   // 雲端刷新（別人按同步）不重置：使用者設好的篩選/排序不該被別人的動作清掉。
   //   只有使用者自己切月份/切通路時才重置（那時 _cloudRefreshing 為 false）。
   if(!_cloudRefreshing){ state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[]; }   // 標籤篩選跟 filters/sorts 同批重置：切月份/切通路不殘留（搜尋另行保留，見下一行）
@@ -3325,6 +3358,22 @@ function applyFilters(shop,opts){
   //     row 參照，而 lsSave / syncToCloud 序列化的就是那些 row，_stripDerived 只剝
   //     analysisAll / profitPct 兩個、擋不住新欄位 —— 掛上去就會跟著報表寫進 Firestore。
   s._filtered=list;
+  // 可見集合一變，批次選取就作廢。清在這裡而不是六個進入點（切期間/切通路/改篩選/改排序/
+  //   改搜尋/點標籤 pill），因為那六條路【全部匯流到這裡】—— 掛一點結構上不可能漏，
+  //   掛六點則是六份重複程式碼、日後新增第七條路一定會忘。
+  //   代價：改欄位順序 / 存備註 / 編輯數字這類「非改變可見集合」的呼叫端也會被清掉。
+  //   接受 —— 那些操作本來就整表重繪、DOM checkbox 已經歸零，清 Set 只是讓數字跟畫面一致。
+  //
+  //   🔴 切通路也會清 —— 這【不是 bug，不要「修好」它】（2026-08-10 實測後確認保留）。
+  //     現象：好麻吉勾 3 個 → 切到玩樂 → 切回好麻吉，那 3 個不見了。
+  //     成因：Set 雖然是 per-shop（切去玩樂的當下【沒有】動到好麻吉那把），但切【回來】時
+  //       setShop 會再跑一次 applyFilters('好麻吉') → 走到這一行，清掉的是好麻吉自己那把。
+  //     為什麼刻意保留：使用者在好麻吉勾了 3 個、去玩樂做別的事、十分鐘後切回來，畫面上有
+  //       3 個打著勾但他早就忘了那是什麼 —— 這時按批次標記就是「標到自己不記得選了什麼」。
+  //       清空的代價只是重勾一次。【忘記自己選了什麼，比重勾危險得多。】
+  //     而且這跟其他已驗過的行為一致（改排序清、改篩選清、切期間清），規則單一好記：
+  //       **畫面重畫一次，選取就重來。** 寧可多清，不可少清。
+  _batchSelClear(shop);
   renderTable(shop,list,opts);
   updateTagFilterBar(shop);
 }
@@ -4466,7 +4515,8 @@ function renderTable(shop,list,opts){
   const si=(col)=>ss.col===col?(ss.dir==='asc'?' ▲':' ▼'):'';
   const hasF=(col)=>!!(s.filters?.[col])||ss.col===col;
   const thN=(col,label,attrs='')=>`<th ${attrs}><div class="th-wrap"><span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',true,this)">▾</button></div></th>`;
-  const thT=(col,label,sticky='',attrs='')=>`<th class="tl" style="${sticky}" ${attrs}><div class="th-wrap tl"><span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',false,this)">▾</button></div></th>`;
+  // pre：塞在欄名之前的額外內容（目前只有編號欄的全選框在用）。預設空字串 → 其餘欄位輸出逐字不變。
+  const thT=(col,label,sticky='',attrs='',pre='')=>`<th class="tl" style="${sticky}" ${attrs}><div class="th-wrap tl">${pre}<span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',false,this)">▾</button></div></th>`;
 
   const hc=getHiddenCols(shop);const vc=k=>!hc.has(k);
   const orderedCols=getOrderedCols(shop).filter(c=>vc(c.key));
@@ -4487,8 +4537,21 @@ function renderTable(shop,list,opts){
     if(c.key==='growthAnalysis')return thT('growthAnalysisLabel',HEADER_LABEL.growthAnalysis,'',attrs);
     return thN(c.key,HEADER_LABEL[c.key],attrs);
   };
+  // ── 批次選取：編號欄的勾選框（不新增欄位 → 欄位順序/隱藏/拖曳全部不用動）──
+  //   🔴 全選框只在 _filtered 是陣列時才可按。_filtered 為 null（loadIntoUI 清掉後、
+  //     _editedAt 早退那條路會停在這個狀態）時【停用，絕對不 fallback 回 _built】——
+  //     使用者篩出 80 筆按全選、系統卻選了看不見的 822 筆，他不會發現。
+  //     「什麼都不選」是安全的失敗，「選了全部」是危險的失敗。使用者動一下篩選/排序即恢復。
+  //   ⚠ 本塊【不】為那條罕見路徑加畫面提示：「已選 N 筆」那一列只承擔一種語意。
+  const _bsel=_batchSelOf(shop);
+  const _bselCanAll=Array.isArray(s._filtered);
+  const _bselAllOn=_bselCanAll&&s._filtered.length>0&&s._filtered.every(r=>_bsel.has(r.code));
+  const _bselAllHtml=`<input type="checkbox" class="bsel-all"${_bselCanAll?'':' disabled'}${_bselAllOn?' checked':''} title="${_bselCanAll?'全選目前篩選出來的列':'請先套用一次篩選或排序'}">`;
+  // 不給 id、只用 data-code + class：同一份 DOM 裡多個通路的表格同時活著（各自 display:none），
+  //   給 id 會撞名。走事件委派也順帶避開「編號含單引號要 escape」與「listener 隨重繪累積」。
+  const _bselCb=(code)=>`<input type="checkbox" class="bsel-cb" data-code="${String(code).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"${_bsel.has(code)?' checked':''}>`;
   let html=`<div class="tscroll"><table><thead><tr>
-    ${thT('code','編號','position:sticky;left:0;z-index:4;background:#f8f9fc')}
+    ${thT('code','編號','position:sticky;left:0;z-index:4;background:#f8f9fc','',_bselAllHtml)}
     ${thT('name','名稱 / ID','position:sticky;left:60px;z-index:4;background:#f8f9fc')}
     ${orderedCols.map(buildColHeader).join('')}
   </tr></thead><tbody>`;
@@ -4530,7 +4593,7 @@ function renderTable(shop,list,opts){
         return '<td style="color:#d1d5db;text-align:center;font-size:12px">—</td>';
       }).join('');
       html+=`<tr class="tr-no-rev">
-        <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
+        <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${_bselCb(r.code)}${r.code}</td>
         <td class="tl td-name" style="position:sticky;left:60px;background:#fff;z-index:2;color:#9ca3af">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         ${bodyCells}
       </tr>`;
@@ -4558,7 +4621,7 @@ function renderTable(shop,list,opts){
         prodTags:buildProdTagCell(shop,r.code),
       };
       html+=`<tr>
-        <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${r.code}</td>
+        <td class="tl td-code" style="position:sticky;left:0;background:#fff;z-index:2">${_bselCb(r.code)}${r.code}</td>
         <td class="tl td-name" style="position:sticky;left:60px;background:#fff;z-index:2">${r.name}<div class="sub-id">ID: ${idStr}</div></td>
         ${orderedCols.map(c=>rowCell[c.key]||'').join('')}
       </tr>`;
@@ -4595,6 +4658,42 @@ function renderTable(shop,list,opts){
     const _newSc=_tblHost&&_tblHost.querySelector('.tscroll');
     if(_newSc){_newSc.scrollTop=_prevScTop;_newSc.scrollLeft=_prevScLeft;}
   }
+  _bindBatchSel(shop);          // listener 掛在 #tbl-{shop} 容器上，內部有旗標保證只掛一次
+  _renderBatchSelInfo(shop);
+}
+
+// ── 批次選取的事件委派 ──
+//   🔴 掛在 #tbl-{shop} 這個【容器】上，不是掛 document：實測正式站 DOM 裡有上千個 .td-code
+//     ——至少兩個通路的完整表格同時活著（各自 display:none）。任何全域查詢都會抓到別的通路。
+//     本函式與 handler 內的 DOM 查詢【一律從 host 出發】，不做任何 document 級的全域查詢。
+//   🔴 只掛一次：renderTable 每次都會呼叫本函式，但 innerHTML 只清空 host 的【子節點】、
+//     host 本身還在，所以旗標記在 host.dataset 上撐得過重繪；不擋的話 listener 會逐次累積。
+//   用 change 事件（不是 click）：鍵盤空白鍵切換 checkbox 也會觸發，click 不一定。
+function _bindBatchSel(shop){
+  const host=document.getElementById('tbl-'+shop);
+  if(!host||host.dataset.bselBound)return;
+  host.dataset.bselBound='1';
+  host.addEventListener('change',(e)=>{
+    const t=e.target;
+    if(!t||t.tagName!=='INPUT'||t.type!=='checkbox')return;
+    const sel=_batchSelOf(shop);
+    if(t.classList.contains('bsel-cb')){
+      const code=t.dataset.code;
+      if(code===undefined)return;
+      if(t.checked)sel.add(code); else sel.delete(code);
+      // 單列改動會讓「全選」不再成立（或剛好湊滿）→ 同步表頭那顆的勾選狀態
+      const all=host.querySelector('.bsel-all');
+      const f=state[shop]&&state[shop]._filtered;
+      if(all&&Array.isArray(f))all.checked=f.length>0&&f.every(r=>sel.has(r.code));
+    }else if(t.classList.contains('bsel-all')){
+      const f=state[shop]&&state[shop]._filtered;
+      // 防呆：_filtered 不是陣列時 input 已經 disabled，這裡再擋一次（絕不 fallback 回 _built）
+      if(!Array.isArray(f)){t.checked=false;return;}
+      if(t.checked)f.forEach(r=>sel.add(r.code)); else f.forEach(r=>sel.delete(r.code));
+      host.querySelectorAll('.bsel-cb').forEach(cb=>{ cb.checked=sel.has(cb.dataset.code); });
+    }else return;
+    _renderBatchSelInfo(shop);
+  });
 }
 
 // ── Summary ──
@@ -6082,6 +6181,12 @@ function setShop(shop,btn){
   }
   if(shop==='總表')renderSummary();
   else{if(state[shop]?._built?.length)applyFilters(shop);syncHeaderKpis(shop);}
+  // 🔴 無條件重畫「已選 N 筆」：上一行的 applyFilters 只有在該通路【有資料】時才會跑，
+  //   切到一個沒有報表的通路時不會被呼叫 —— 若那個通路的 Set 有殘留，數字就會停在舊值。
+  //   這裡只重畫、不清空：切去別的通路不該動到當前這把。
+  //   ⚠ 但「切回來」時上一行的 applyFilters 會把它清掉（刻意的，見那裡的註解）——
+  //     所以實際體感是「切通路＝選取重來」，不要以為這行保住了什麼。
+  _renderBatchSelInfo(shop);
 }
 
 // ── 淨利表「當前檢視」(平台+賣場) 持久化 & 還原 ──────────────────────────────
@@ -12301,6 +12406,7 @@ function testTryLoadSaved(shop){
 //   存在才敢那樣寫），這裡一律加 if 判空 —— 測試通路的 DOM 生命週期還沒有實戰驗證過。
 function _testEmpty(shop,hint){
   state[shop]._built=null;
+  state[shop]._filtered=null;_batchSelClear(shop);_renderBatchSelInfo(shop);   // 理由同 tryLoadSaved 的 else 分支
   const t=document.getElementById('tbl-'+shop);
   if(t)t.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${hint}</div></div>`;
   const p=document.getElementById('period-tag-'+shop); if(p)p.textContent='';
@@ -12552,4 +12658,8 @@ Object.assign(window, {
   saveProdTags,patchProdTagCell,renderProdTagPanelBody,syncProdTagDraftFromDOM,
   toggleTagDefsSection,addTagDef,removeTagDef,saveTagDefs,countTagUsage,
   toggleTagHelpSection,
+  // 批次選取。本塊【沒有】任何 inline handler（勾選走 #tbl-{shop} 上的事件委派），
+  //   所以嚴格說不匯出也能運作；仍然掛上去是因為下一塊的批次標記面板會用 onclick 呼叫，
+  //   而且在 Console 查「目前選了哪些編號」時用得到。
+  _batchSelOf,_batchSelClear,_renderBatchSelInfo,_bindBatchSel,
 });
