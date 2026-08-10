@@ -7518,6 +7518,9 @@ function momoParseMoPlus(rows, srcCode){
   }
   if(cols.unresolvedFee.length){ try{ console.warn('%c[MO+] 有費用欄未在 header 對到（當 0 計；逐列 A+B−C−D 驗證會抓出不平衡）：'+cols.unresolvedFee.join('、'),'color:#d97706;font-weight:700'); }catch{} }
   const sumGrp=(row,g)=>cols.grp[g].reduce((s,c)=>s+(c.i>=0?momoMoPlusNum(row[c.i]):0),0);
+  // 月對帳用：逐費用項的檔案級（全列，含運費列）月彙總。先把 4 組全部 item 名鋪成 0（含 header 對不到的欄 i<0）→ §1「本月為 0 的項目也要顯示」不會漏。
+  const feeBreakdown={A:{},B:{},C:{},D:{}};
+  ['A','B','C','D'].forEach(g=>cols.grp[g].forEach(c=>{ feeBreakdown[g][c.name]=0; }));
   const sku={}, periods={}, periodsQty={}, lines=[], statusCounts={}; const missingOrigin=new Set();
   const freightIn={}, freightOut={}, freeShipByPeriod={}, freightMismatch=[];   // In＝運費假SKU B（收入）；Out＝商品列 C 代扣運費（成本）；freeShip＝商品列免運活動服務費（D 內、運費補貼）
   let totNet=0, totRev=0, matched=0, badRows=0, freightRows=0, skuRows=0;
@@ -7538,6 +7541,7 @@ function momoParseMoPlus(rows, srcCode){
     const net=momoMoPlusNum(row[cols.idx.net]);
     const status=String(row[cols.idx.status]==null?'':row[cols.idx.status]).trim();
     const A=sumGrp(row,'A'), B=sumGrp(row,'B'), C=sumGrp(row,'C'), D=sumGrp(row,'D');
+    ['A','B','C','D'].forEach(g=>cols.grp[g].forEach(c=>{ if(c.i>=0) feeBreakdown[g][c.name]+=momoMoPlusNum(row[c.i]); }));   // 逐項累加（全列）
     const expect=A+B-C-D, diff=Math.round((expect-net)*100)/100;
     if(Math.abs(diff)>0.5) lineErrors.push({row:r+1, orderNo, A,B,C,D, expect:Math.round(expect*100)/100, net, diff}); // 逐列不符 → fail loud（不靜默）
     if(status) statusCounts[status]=(statusCounts[status]||0)+1;
@@ -7564,11 +7568,46 @@ function momoParseMoPlus(rows, srcCode){
   }
   const totalIn=Math.round(Object.values(freightIn).reduce((s,x)=>s+x.B,0));   // Σ B 運費收入
   const totalOut=Math.round(Object.values(freightOut).reduce((s,x)=>s+x,0));   // Σ C 運費成本（在商品列）
+  // 月對帳費用組成：逐項四捨五入 + 組總（Atot/Btot/Ctot/Dtot）+ 恆等式 E=A+B−C−D（應==totNet）
+  ['A','B','C','D'].forEach(g=>Object.keys(feeBreakdown[g]).forEach(k=>{ feeBreakdown[g][k]=Math.round(feeBreakdown[g][k]); }));
+  const grpTot=g=>Object.values(feeBreakdown[g]).reduce((s,v)=>s+v,0);
+  const feeTotals={A:grpTot('A'), B:grpTot('B'), C:grpTot('C'), D:grpTot('D')};
+  feeTotals.E = feeTotals.A + feeTotals.B - feeTotals.C - feeTotals.D;
   const ok = errors.length===0 && lineErrors.length===0 && freightMismatch.length===0;   // 解析錯誤／逐列不符／運費判準衝突 → 不 ok（不得寫入）
   return {ok, srcCode, header, sku, periods, periodsQty, lines, lineErrors, errors, statusCounts, unresolvedFee:cols.unresolvedFee,
     freight:{ inByPeriod:freightIn, outByPeriod:freightOut, freeShipByPeriod, totalIn, totalOut, rows:freightRows }, freightMismatch,
     totals:{net:Math.round(totNet), rev:Math.round(totRev), matched, skuRows, freightRows, badRows, lineErrorCount:lineErrors.length},
+    feeBreakdown, feeTotals,   // 月對帳：逐項（4 組全列含 0）+ 組總 + E
     missingOrigin:[...missingOrigin]};
+}
+// 月對帳 §3：讀「已提領明細」分頁的 AoA，找「申請提領金額」欄合計。已提領＝預先領走的貨款（非費用），要進總額驗證：
+//   檔案總額 == 對帳單實際應付 + 已提領合計。分頁不存在（舊檔）或找不到欄 → 回 {total:0, found:false}（不 fail、視為當月未動用平日請領）。
+function momoParseMoPlusWithdrawn(rows){
+  if(!Array.isArray(rows) || !rows.length) return {total:0, found:false, rows:0};
+  // header 可能不在固定列（比照訂單明細在第 3 列），掃前 5 列找含「申請提領金額」的列
+  let hdrRow=-1, col=-1;
+  for(let r=0;r<Math.min(rows.length,6);r++){
+    const row=rows[r]||[];
+    for(let c=0;c<row.length;c++){ if(momoMoPlusNorm(row[c]).includes(momoMoPlusNorm('申請提領金額'))){ hdrRow=r; col=c; break; } }
+    if(col>=0) break;
+  }
+  if(col<0) return {total:0, found:false, rows:0};   // 分頁在但無此欄 → 當 0（防呆，不猜）
+  let total=0, n=0;
+  for(let r=hdrRow+1;r<rows.length;r++){
+    const row=rows[r]; if(!row) continue;
+    const v=momoMoPlusNum(row[col]);
+    if(v){ total+=v; n++; }
+  }
+  return {total:Math.round(total), found:true, rows:n};
+}
+// srcCode YYMM → 對帳月 'YYYY-MM'（2606→2026-06）。非 4 碼回 null。
+function momoMoPlusSrcToMonth(srcCode){ const s=String(srcCode||''); if(!/^\d{4}$/.test(s)) return null; return '20'+s.slice(0,2)+'-'+s.slice(2,4); }
+// 月對帳 sys（系統計算側）：從 parsed（feeBreakdown/feeTotals）+ 已提領合計 組出。純函式、Node 可驗。
+function momoBuildMoPlusReconSys(parsed, withdrawnTotal){
+  const fb=(parsed&&parsed.feeBreakdown)||{A:{},B:{},C:{},D:{}}, ft=(parsed&&parsed.feeTotals)||{};
+  return { A:{...fb.A}, B:{...fb.B}, C:{...fb.C}, D:{...fb.D},
+    Atot:ft.A||0, Btot:ft.B||0, Ctot:ft.C||0, Dtot:ft.D||0, E:(ft.E!=null?ft.E:0),
+    withdrawn:Math.round(Number(withdrawnTotal)||0), srcCode:(parsed&&parsed.srcCode)||null };
 }
 // 總額對帳：Σ實際入帳金額 應 == 對帳單 PDF「實際應付商店金額」。相符回 {ok:true}；不符回 {ok:false, diff}（呼叫端擋下）。
 function momoMoPlusReconcileTotal(parsed, pdfPayable){
@@ -10482,6 +10521,9 @@ async function momoMoPlusUploadGenerate(shop){
     if(prev)prev.innerHTML=momoMoPlusErrHtml('這不是對帳明細','找不到「訂單明細」分頁（此檔分頁：'+_momoEsc((wb.names||[]).join('、')||'無')+'）。<br>對帳明細與 E001 副檔名相同——你可能傳成 E001 或別的檔。請上傳「mo+…對帳明細_YYMM.xls」。'); return; }
   const rows=wb.sheet('訂單明細');
   const parsed=momoParseMoPlus(rows, srcCode);
+  // 月對帳 §3：讀「已提領明細」分頁（容錯找名；舊檔無此頁→total 0）→ 附 parsed 供寫入時建 recon doc
+  try{ const wName=(wb.names||[]).find(n=>momoMoPlusNorm(n).includes(momoMoPlusNorm('已提領')));
+    parsed._withdrawn = wName ? momoParseMoPlusWithdrawn(wb.sheet(wName)) : {total:0, found:false, rows:0}; }catch(e){ parsed._withdrawn={total:0, found:false, rows:0}; }
   if(parsed.errors && parsed.errors.length && /找不到必需欄位/.test(parsed.errors[0])){   // guard ②b：header 格式（擋 E001）
     if(prev)prev.innerHTML=momoMoPlusErrHtml('這不是對帳明細（或格式不符）', _momoEsc(parsed.errors[0])+'<br><br>對帳明細與 E001 副檔名相同——請確認上傳的是對帳明細（第 3 列 header 應含 訂單號碼／實際入帳金額／貨款…）。'); return; }
   _moPlusUpParsed=parsed;
@@ -10558,6 +10600,18 @@ function momoMoPlusUploadApply(shop, allowedPeriods){
   const res=momoApplyUploadPlan(P, allowedPeriods||null);                 // ① 寫 momo_products（qty/revA，compact 累加）
   const built=momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods||null);   // ② 雙寫 origins doc（同一期別閘門）
   const lsOk=momoSaveMoPlusOriginsDoc(shop, parsed.srcCode, built.doc);
+  // ③ 月對帳：本月費用組成 + 已提領 → recon doc（重用 momo_reconcile；月級、不受期別閘門限制＝整檔月總）。load→merge sys→save+markPending。
+  //   保留既有 pdf（事後手動填的對帳單值）不覆蓋；只更新 sys/updatedAt。
+  try{
+    const rmonth=momoMoPlusSrcToMonth(parsed.srcCode);
+    if(rmonth){
+      const sys=momoBuildMoPlusReconSys(parsed, (parsed._withdrawn&&parsed._withdrawn.total)||0);
+      const rdoc=momoLoadReconcile(shop, rmonth) || {};
+      rdoc.shop=shop; rdoc.month=rmonth; rdoc.moPlus=true; rdoc.sys=sys; rdoc.updatedAt=Date.now();
+      momoSaveReconcile(shop, rmonth, rdoc);
+      _markPending(momoReconcileKey(shop, rmonth));
+    }
+  }catch(e){ try{ console.error('[MO+ recon] 寫入月對帳 doc 失敗（不影響上傳主流程）', e); }catch{} }
   _moPlusUpFile=null; _moPlusUpParsed=null; _moPlusUpPlan=null;
   const mm=momoMoPlusConsistency(shop);                                   // ① 寫後互查：cell qty vs Σorigins
   const lines=[momoPeriodReportLine('已寫入', res.wroteBy), momoPeriodReportLine('　其中累加到既有期別', res.accumBy), momoPeriodReportLine('已跳過（你未勾選）', res.gatedBy)].filter(Boolean);
