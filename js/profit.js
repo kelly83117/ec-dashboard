@@ -7687,18 +7687,29 @@ function momoMoPlusScanDirty(shop){
   const products=momoLoadProducts(shop);
   const hasData=p=>Object.keys((p&&p.periods)||{}).length>0;
   const norm=s=>String(s==null?'':s);
+  // 隱形字元集：零寬/方向控制/BOM/不斷行空格/全形空格等（不含一般 ASCII 空格 0x20、Tab → 那類歸「格式異常」）。
+  const INVIS=new RegExp('[\u00a0\u1680\u2000-\u200f\u2028\u2029\u202a-\u202f\u205f\u2060\u3000\ufeff]');   // 隱形字：零寬/方向控制/BOM/nbsp/全形空格（不含一般空格0x20、Tab→歸格式異常其他）
+  const cleanOf=s=>norm(s).replace(new RegExp('[\\s'+"\\u00a0\\u1680\\u2000-\\u200f\\u2028\\u2029\\u202a-\\u202f\\u205f\\u2060\\u3000\\ufeff]", 'g'),'');   // 去所有空白+隱形字
   const bySku={}; products.forEach((p,i)=>{ (bySku[norm(p.sku)]=bySku[norm(p.sku)]||[]).push({idx:i,p}); });
   const duplicates=Object.keys(bySku).filter(k=>bySku[k].length>1).map(k=>({sku:k, count:bySku[k].length,
     entries:bySku[k].map(e=>({idx:e.idx, name:e.p.name||'', origin:e.p.origin||'', hasData:hasData(e.p), master:!!e.p.masterAt, skuLen:norm(e.p.sku).length}))}));
-  const emptyName=[], malformed=[], temp=[];
-  products.forEach((p,i)=>{ const sku=norm(p.sku), nm=norm(p.name).trim();
+  const byClean={}; products.forEach((p,i)=>{ const c=cleanOf(p.sku); (byClean[c]=byClean[c]||[]).push(i); });   // 清乾淨後同 sku＝看不見的重複
+  const emptyName=[], invisible=[], malformed=[], temp=[];
+  products.forEach((p,i)=>{ const sku=norm(p.sku), nm=norm(p.name).trim(), clean=cleanOf(sku);
     if(nm===''||nm==='—'||nm==='-') emptyName.push({idx:i, sku, hasData:hasData(p), origin:p.origin||'', master:!!p.masterAt});
-    if(!/^[A-Za-z0-9\-]+$/.test(sku)) malformed.push({idx:i, sku:sku.length>40?sku.slice(0,40)+'…':sku, skuLen:sku.length, hasData:hasData(p)});
+    if(INVIS.test(sku)){   // ⚠ 含隱形字元（畫面看不出來、名稱可能正常）→ 單獨一類；標出逐字碼 + 清乾淨後與誰撞（看不見的重複）
+      const codes=[...sku].map(ch=>/[ -~]/.test(ch)?ch:'⟨U+'+ch.codePointAt(0).toString(16).toUpperCase().padStart(4,'0')+'⟩').join('');
+      const dupIdx=(byClean[clean]||[]).filter(x=>x!==i);
+      invisible.push({idx:i, sku, name:p.name||'', cleanSku:clean, visualized:codes, hasData:hasData(p), master:!!p.masterAt,
+        looksIdenticalTo:dupIdx.map(x=>({idx:x, sku:norm(products[x].sku), name:products[x].name||'', master:!!products[x].masterAt, hasData:hasData(products[x])}))});
+    } else if(!/^[A-Za-z0-9\-]+$/.test(sku)){   // 可見的非法字元（一般空格/中文/符號，如空格分隔貼上）→ 另一類
+      malformed.push({idx:i, sku:sku.length>40?sku.slice(0,40)+'…':sku, skuLen:sku.length, name:p.name||'', hasData:hasData(p)});
+    }
     if(/^TEMP-/i.test(sku)) temp.push({idx:i, sku, hasData:hasData(p), master:!!p.masterAt});
   });
   return { shop, total:products.length,
-    summary:{品號重複:duplicates.length, 空名稱:emptyName.length, 品號格式異常:malformed.length, TEMP測試:temp.length},
-    duplicates, emptyName, malformed, temp };
+    summary:{品號重複:duplicates.length, 空名稱:emptyName.length, 含隱形字元:invisible.length, 品號格式異常其他:malformed.length, TEMP測試:temp.length},
+    duplicates, emptyName, invisible, malformed, temp };
 }
 // 清理（本機+雲端、只限本賣場、只刪 hasData=false 的安全筆）。idxList＝要刪的 product 陣列 index（由 scan 挑）。
 //  ⚠ 任一筆 hasData=true（掛 periods）→ 整批擋下、一筆都不刪（先處理資料合併）。回報步驟：本機 momoSaveProducts → 雲端 __cloudMomo.setShop 整包取代（不留殘留）。
