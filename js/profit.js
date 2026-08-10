@@ -7494,8 +7494,9 @@ function momoParseMoPlus(rows, srcCode){
     periods[period]=(periods[period]||0)+1;                  // 分布用「筆數」含運費列（驗收 #2：5上15/5下789/6上927/6下66＝全列筆數，不因抽運費而變）
     periodsQty[period]=(periodsQty[period]||0)+qty;
     totNet+=net; matched++;                                  // 總筆數/總額含運費列（＝檔案總額 75,590）
-    // 運費判準：結構特徵為主（A==0 且 B>0 且 C==0 且 D==0）、商品名稱=='運費' 為輔；兩者不一致 → fail loud（不自選）
-    const freightStruct=(A===0 && B>0 && C===0 && D===0), freightName=(name==='運費');
+    // 運費判準：結構特徵為主（A==0 且 C==0 且 D==0 且「有運費收入 B>0 或 有運費折扣」）、商品名稱=='運費' 為輔；兩者不一致 → fail loud（不自選）
+    //   ⚠「運費全免」列 B=0（免運券/活動全額折抵），靠 總折扣金額>0 收進來（2606：202 筆 B>0 + 30 筆全免 discount=售價）。
+    const freightStruct=(A===0 && C===0 && D===0 && (B>0 || discount>0)), freightName=(name==='運費');
     if(freightStruct!==freightName){ freightMismatch.push({row:r+1, orderNo, name, A,B,C,D, byStruct:freightStruct, byName:freightName}); }
     lines.push({row:r+1, orderNo, period, sku:skuId, origin, name, spec1, spec2, qty, price, discount, net, status, A,B,C,D, freight:freightStruct});
     if(freightStruct){                                       // 運費假 SKU：抽離、不進 SKU 維度、不進 missingOrigin
