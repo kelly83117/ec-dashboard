@@ -276,6 +276,24 @@ try {
           if (changed) { console.log('[momo_stock] 收到更新'); window.dispatchEvent(new CustomEvent('momoStockReady')); }
         }, err => { console.error('[momo_stock subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_stock subscribe failed', e); }
+
+      // momo_moplus_origins collection（MO+ 每賣場每來源月一 doc）→ Store._profitMem['ec_momo_moplus_origins|<shop>|<src>']
+      //   MO+ 逐列成本用：per(SKU,期別) origin→qty + D手續費 + C代扣運費 + 每期別運費收入 B。分片到來源月＝重上傳整 doc 覆蓋(天然冪等)、大小有界。
+      try {
+        onSnapshot(momoMoPlusOriginsColRef, snap => {
+          const changed = [];
+          snap.forEach(d => {
+            const data = d.data() || {};
+            if (!data.shop || !data.src) return;
+            const k = 'ec_momo_moplus_origins|' + data.shop + '|' + data.src;
+            if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) return;
+            Store._profitMem[k] = data;
+            changed.push(data.shop + '|' + data.src);
+          });
+          if (changed.length) { console.log('[momo_moplus_origins] 收到更新：', changed); window.dispatchEvent(new CustomEvent('momoMoPlusOriginsReady', { detail: { changed } })); }
+        }, err => { console.error('[momo_moplus_origins subscribe 失敗]', err); });
+      } catch (e) { console.warn('momo_moplus_origins subscribe failed', e); }
     };
   } catch (e) { console.warn('profit subscribe failed', e); }
 
@@ -350,6 +368,20 @@ try {
     getDoc:      () => getDoc(doc(db, 'momo_stock', MOMO_STOCK_DOCID)),
     setSnapshot: (obj) => setDoc(doc(db, 'momo_stock', MOMO_STOCK_DOCID), obj || {}),
     subscribe:   (cb) => onSnapshot(momoStockColRef, cb),
+  };
+
+  // ============== MO+ 逐列成本 momo_moplus_origins（每賣場每來源月一 doc） ==============
+  // 為什麼獨立 collection：per(SKU,期別,原廠編號) 的 qty 是持續成長維度（原廠編號隨商品增、期別只增不減），
+  //   塞進 momo_products 的 cell 會把成長維度綁進 1MB 硬上限容器。分片到「來源月」→ 重上傳整 doc 覆蓋(天然冪等、
+  //   momo 補發修正版列數變少也不留幽靈列)、單 doc 只裝一個月大小有界、成長靠增加 doc 數。比照 momo_reconcile 分片。
+  // doc id = shopDocId + '_' + srcCode（例 mo_maji_2606）；doc 內 { shop, src, skus:{sku:{period:{o:{origin:qty},d,c}}}, freight:{period:{b,rows}} }。
+  // getDoc/subscribe 命名落防護讀取白名單；setSrc 唯一寫入（整包取代）。
+  const momoMoPlusOriginsColRef = collection(db, 'momo_moplus_origins');
+  const momoMoPlusOriginsDocId = (shop, src) => (MOMO_SHOP_DOCID[shop] || shop) + '_' + src;
+  window.__cloudMoPlusOrigins = {
+    getDoc:  (shop, src) => getDoc(doc(db, 'momo_moplus_origins', momoMoPlusOriginsDocId(shop, src))),
+    setSrc:  (shop, src, data) => setDoc(doc(db, 'momo_moplus_origins', momoMoPlusOriginsDocId(shop, src)), data || {}),
+    subscribe: (cb) => onSnapshot(momoMoPlusOriginsColRef, cb),
   };
 
   // ============== 洞察表獨立文件 app/insight（避免 app/main 撞 1MB 上限） ==============
