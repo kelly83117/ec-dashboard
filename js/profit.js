@@ -9777,9 +9777,9 @@ function momoMonthFromCode(code){ const m=String(code||'').match(/^(2\d)(0[1-9]|
 function momoMonthToCode(mo){ const m=String(mo||'').match(/^20(\d\d)-(\d\d)$/); return m?(m[1]+m[2]):null; }   // '2026-08'→'2608'
 // 讀既有 cell 的 qty + 來源集合：compact(有 .s)→回來源 codes；flat(只有 qty)→sources=null（無來源資訊）
 function momoCellQtySources(cell){
-  if(!cell) return {qty:0, sources:null, flat:false, has:false};
-  if(cell.s!=null){ const src=momoDecodeSources(cell.s); return {qty:momoReadCell(cell).qty||0, sources:Object.keys(src), flat:false, has:true}; }
-  const q=momoReadCell(cell).qty; return {qty:(q||0), sources:null, flat:true, has:(q!=null)};
+  if(!cell) return {qty:0, sources:null, srcQty:null, flat:false, has:false};
+  if(cell.s!=null){ const src=momoDecodeSources(cell.s); const srcQty={}; Object.keys(src).forEach(k=>srcQty[k]=src[k].qty); return {qty:momoReadCell(cell).qty||0, sources:Object.keys(src), srcQty, flat:false, has:true}; }
+  const q=momoReadCell(cell).qty; return {qty:(q||0), sources:null, srcQty:null, flat:true, has:(q!=null)};
 }
 // 核心分類器。incoming: { sku:{ period:{ qty, sources?:{code:qty} } } }。opts:{ mode:'upload'|'rebuild', mainMonth, selectedCodes[], guard }。
 // 回 { periods:[{period,kind,checked,disabled,danger,oldQty,newQty,count,skus:[{sku,name,oldQty,newQty,flat,oldSources}]}], notCovered:[{period,oldQty,count}] }
@@ -9787,6 +9787,7 @@ function momoClassifyPeriods(master, incoming, opts){
   opts=opts||{}; const mode=opts.mode||'upload'; const guard=opts.guard||REBUILD_GUARD;
   const moPlus=!!opts.moPlus;   // MO+：跨月累加為常態（來源標記防覆蓋）→ 舊期別預設全勾、不標 danger（甲乙配維持預設不勾）
   const mainMonth=opts.mainMonth||null; const mainCode=mainMonth?momoMonthToCode(mainMonth):null; const selected=new Set(opts.selectedCodes||[]);
+  const srcCode=opts.srcCode||null;   // 本次上傳的來源鍵（對帳明細/C1105 月份代號）→ 「會變小」顯示只比同來源（累加語意下，本檔貢獻 vs 既有他來源不是變小）
   const bySku=new Map((master||[]).map(p=>[p.sku,p]));
   const periodsMap=new Map();
   Object.keys(incoming||{}).forEach(sku=>{
@@ -9794,9 +9795,16 @@ function momoClassifyPeriods(master, incoming, opts){
     Object.keys(incoming[sku]||{}).forEach(period=>{
       const inc=incoming[sku][period]||{}; const newQ=Number(inc.qty)||0;
       const old=momoCellQtySources(prod&&prod.periods&&prod.periods[period]);
+      // 同來源既有量：本檔來源鍵在既有 cell 的 qty（沒有→新來源→純新增、非變小）
+      const sameSrcHas=(srcCode!=null && old.srcQty && Object.prototype.hasOwnProperty.call(old.srcQty,srcCode));
+      const oldSameSrcQty=sameSrcHas?(old.srcQty[srcCode]||0):0;
+      const srcShrink=sameSrcHas && newQ<oldSameSrcQty;   // 同來源重傳且值更小＝真的變小（更正）；跨來源累加不算
+      // 「會變小」顯示用：rebuild 整格取代→比總量；upload 累加→只比同來源
+      const shrinkShown=(mode==='rebuild') ? (old.has && old.qty>0 && newQ<old.qty) : srcShrink;
+      const shownOld=(mode==='rebuild') ? old.qty : oldSameSrcQty;
       let pe=periodsMap.get(period); if(!pe){ pe={skus:[], newQty:0, oldQty:0}; periodsMap.set(period,pe); }
       pe.newQty+=newQ; pe.oldQty+=old.qty;
-      pe.skus.push({ sku, name:(prod&&prod.name)||'', newQty:newQ, oldQty:old.qty, flat:old.flat, hasOld:old.has, oldSources:old.sources });
+      pe.skus.push({ sku, name:(prod&&prod.name)||'', newQty:newQ, oldQty:old.qty, oldSameSrcQty, srcShrink, shrinkShown, shownOld, flat:old.flat, hasOld:old.has, oldSources:old.sources });
     });
   });
   const periods=[];
@@ -9863,7 +9871,7 @@ function momoPeriodKindMeta(kind){
 // 期別一列的短句文案（明細收展開區）。flat 不得講「來自完整結算檔」，只能說「舊格式，來源不明」。
 function momoPeriodNote(p, mode, selectedCodes){
   const lbl=momoPeriodLabel(p.period);
-  const dsk=p.skus.filter(s=>s.hasOld && s.oldQty>0 && s.newQty<s.oldQty);   // 縮水的
+  const dsk=p.skus.filter(s=>s.shrinkShown);   // 縮水的（upload 只比同來源、rebuild 比總量；跨月累加不算變小）
   if(mode==='rebuild' && p.kind==='sourceloss'){
     const had=[...new Set(p.skus.flatMap(s=>s.oldSources||[]))].sort();
     return `${lbl} 原本含來源 ${had.join('、')}，本次只選了 ${(selectedCodes||[]).join('、')}——重建會丟掉 ${(p.lossCodes||[]).join('、')} 的部分。`;
@@ -9889,13 +9897,13 @@ function momoShowPeriodGuard(opts){
   if(!ov){ ov=document.createElement('div'); ov.id='momo-pg-overlay'; document.body.appendChild(ov); }
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.onclick=e=>{ if(e.target===ov) momoPeriodGuardClose(); };
-  const row=(p,idx)=>{ const m=momoPeriodKindMeta(p.kind); const dsk=p.skus.filter(s=>s.hasOld&&s.oldQty>0&&s.newQty<s.oldQty);
+  const row=(p,idx)=>{ const m=momoPeriodKindMeta(p.kind); const dsk=p.skus.filter(s=>s.shrinkShown);
     const note=momoPeriodNote(p, opts.mode, _momoPG.selectedCodes);
     const flatJudged=p.danger && dsk.length>0 && dsk.every(s=>s.flat);   // 危險判定純靠數量（既有 cell 是舊 flat 格式、無來源可比）
     const flatTag=flatJudged?` <span style="font-size:10px;color:#92400e;background:#fef3c7;border-radius:4px;padding:0 5px" title="此期別既有值是舊格式(flat)、沒有來源檔資訊，只能用數量變化判斷——不是通過來源比對">舊格式·僅比數量</span>`:'';
     const detail=dsk.length?`<details style="margin-top:2px"><summary style="cursor:pointer;color:#6b7280;font-size:11px">${dsk.length} 個 SKU 會變小 · 展開明細</summary>`
       + `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:3px"><thead><tr style="color:#9ca3af;text-align:left"><th style="padding:2px 6px">品號</th><th style="padding:2px 6px">品名</th><th style="padding:2px 6px;text-align:right">既有</th><th style="padding:2px 6px;text-align:right">本檔</th><th style="padding:2px 6px">來源</th></tr></thead><tbody>`
-      + dsk.slice(0,50).map(s=>`<tr><td style="padding:2px 6px;font-family:monospace">${esc(s.sku)}</td><td style="padding:2px 6px">${esc(s.name||'')}</td><td style="padding:2px 6px;text-align:right">${s.oldQty}</td><td style="padding:2px 6px;text-align:right;color:#dc2626;font-weight:700">${s.newQty}</td><td style="padding:2px 6px">${s.flat?'<span style="color:#9ca3af">舊格式(不明)</span>':esc((s.oldSources||[]).join('、'))}</td></tr>`).join('')
+      + dsk.slice(0,50).map(s=>`<tr><td style="padding:2px 6px;font-family:monospace">${esc(s.sku)}</td><td style="padding:2px 6px">${esc(s.name||'')}</td><td style="padding:2px 6px;text-align:right">${s.shownOld}</td><td style="padding:2px 6px;text-align:right;color:#dc2626;font-weight:700">${s.newQty}</td><td style="padding:2px 6px">${s.flat?'<span style="color:#9ca3af">舊格式(不明)</span>':esc((s.oldSources||[]).join('、'))}</td></tr>`).join('')
       + `</tbody></table>${dsk.length>50?`<div style="color:#9ca3af;font-size:10px">（僅列前 50）</div>`:''}</details>`:'';
     return `<tr style="border-top:1px solid #f3f4f6${p.danger?';background:#fef2f2':''}">
       <td style="padding:6px 4px;text-align:center;vertical-align:top"><input type="checkbox" class="mm-pg-chk" data-period="${esc(p.period)}"${p.danger?' data-danger="1"':''} ${p.checked?'checked':''} onchange="momoPeriodGuardUpdateCount()"></td>
@@ -9912,7 +9920,7 @@ function momoShowPeriodGuard(opts){
   const periods=_momoPG.cls.periods||[], nc=_momoPG.cls.notCovered||[];
   const anyDanger=periods.some(p=>p.danger);
   // 走 flat 判定（無來源可比、僅以數量變化判斷）的期別 → 明講，避免以為全都過了來源檢查
-  const flatPeriods=periods.filter(p=>{ const d=p.skus.filter(s=>s.hasOld&&s.oldQty>0&&s.newQty<s.oldQty); return p.danger && d.length>0 && d.every(s=>s.flat); }).map(p=>momoPeriodLabel(p.period));
+  const flatPeriods=periods.filter(p=>{ const d=p.skus.filter(s=>s.shrinkShown); return p.danger && d.length>0 && d.every(s=>s.flat); }).map(p=>momoPeriodLabel(p.period));
   ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;font-size:15px;font-weight:700">${esc(opts.title||'寫入預覽（逐期別）')}</div>
     <div style="padding:12px 20px;overflow:auto">
@@ -10239,7 +10247,7 @@ async function momoMoPlusUploadGenerate(shop){
 function momoMoPlusComputeGuard(plan, shop){
   const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return {merged:{periods:[],notCovered:[]}, hasDanger:false};
   const inc={}; Object.keys(sp.updates).forEach(sku=>{ inc[sku]={}; Object.keys(sp.updates[sku]).forEach(pd=>{ inc[sku][pd]={qty:sp.updates[sku][pd].qty}; }); });
-  const cls=momoClassifyPeriods(momoLoadProducts(shop), inc, {mode:'upload', moPlus:true, mainMonth:null});
+  const cls=momoClassifyPeriods(momoLoadProducts(shop), inc, {mode:'upload', moPlus:true, mainMonth:null, srcCode:plan.srcCode||null});   // srcCode→「會變小」只比同來源
   return { merged:cls, hasDanger:cls.periods.some(p=>p.danger) };   // moPlus → danger 恆 false
 }
 function momoRenderMoPlusPreview(shop){
@@ -10722,7 +10730,7 @@ function momoComputeUploadGuard(P){
   const byPeriod=new Map();
   ['甲配','乙配'].forEach(s=>{ const sp=P.shops[s]; if(!sp||!Object.keys(sp.updates).length) return;
     const inc={}; Object.keys(sp.updates).forEach(sku=>{ inc[sku]={}; Object.keys(sp.updates[sku]).forEach(pd=>{ const q=sp.updates[sku][pd].qty; inc[sku][pd]={qty:q, sources:mainCode?{[mainCode]:q}:null}; }); });
-    momoClassifyPeriods(momoLoadProducts(s), inc, {mode:'upload', mainMonth}).periods.forEach(p=>{ let e=byPeriod.get(p.period); const skus=p.skus.map(x=>({...x, shop:s}));
+    momoClassifyPeriods(momoLoadProducts(s), inc, {mode:'upload', mainMonth, srcCode:mainCode||null}).periods.forEach(p=>{ let e=byPeriod.get(p.period); const skus=p.skus.map(x=>({...x, shop:s}));
       if(!e){ byPeriod.set(p.period,{...p, skus:skus.slice()}); } else { e.danger=e.danger||p.danger; e.checked=e.checked&&p.checked; e.count+=p.count; e.oldQty+=p.oldQty; e.newQty+=p.newQty; e.skus.push(...skus); if(p.danger) e.kind='danger'; } });
   });
   const merged={ periods:[...byPeriod.values()].sort((a,b)=>a.period<b.period?1:-1), notCovered:[] };
