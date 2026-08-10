@@ -7590,6 +7590,40 @@ function momoMoPlusCompleteness(shop){
   master.forEach(p=>{ if(!p.periods) return; Object.keys(p.periods).forEach(pd=>{ const cell=p.periods[pd]; if(!cell||cell.s==null) return; const miss=Object.keys(momoDecodeSources(cell.s)).filter(sc=>!haveSrc.has(sc)); if(miss.length) incomplete.push({sku:p.sku, period:pd, missingSrc:miss}); }); });
   return incomplete;
 }
+/* ═══════════════ MO+ 毛利模型（第三種算法：逐列 live 成本）P3b-2a-1 ═══════════════
+   每 SKU 毛利 = A(rev，momo_products cell) − COGS(Σ 該期別各原廠編號 qty × cost_by_origin live) − D(手續費，origins doc)。
+   缺成本＝原廠編號查不到成本表：顯示「已知部分毛利 + 成本涵蓋率」（涵蓋<100% 呼叫端不計入彙總加權分母）。
+   ⚠ 負值安全：qty/revA 可為負（退貨/折讓），marginPct 只在 revA>0 才算、否則 null（畫面「—」），不假設恆正。*/
+function momoMoPlusOriginsForSku(shop, sku, period){   // 聚合某 (sku,period) 跨所有來源月 doc 的 origin→qty 與 D
+  const docs=momoListMoPlusOriginsDocs(shop); const originsQty={}; let feeD=0;
+  Object.values(docs).forEach(d=>{ const c=d&&d.skus&&d.skus[sku]&&d.skus[sku][period]; if(!c) return;
+    Object.keys(c.o||{}).forEach(o=>{ originsQty[o]=(originsQty[o]||0)+(Number(c.o[o])||0); });
+    feeD+=Number(c.d)||0;
+  });
+  return {originsQty, feeD};
+}
+function momoMoPlusMarginCalc(inp){   // 純函式：{qty, revA, originsQty:{origin:qty}, feeD, costMap:{origin:cost}} → 毛利 + 涵蓋率
+  const revA=Number(inp.revA)||0, feeD=Number(inp.feeD)||0, originsQty=inp.originsQty||{}, costMap=inp.costMap||{};
+  let costedAbs=0, allAbs=0, cogs=0; const missingOrigins=[];
+  Object.keys(originsQty).forEach(o=>{
+    const q=Number(originsQty[o])||0, aq=Math.abs(q); allAbs+=aq;
+    const c=(o!=='' && costMap[o]!=null && costMap[o]!=='') ? Number(costMap[o]) : null;   // 空原廠編號或查不到 → 無成本
+    if(c==null){ if(aq>0) missingOrigins.push(o||'(空原廠編號)'); }
+    else { costedAbs+=aq; cogs+=q*c; }   // cogs 用帶號 qty（退貨→負→自動抵）
+  });
+  const coverage = allAbs>0 ? costedAbs/allAbs : 1;            // 涵蓋率用絕對量（避免退貨負量把比例弄壞）；無量→視為完整
+  const covered = coverage>=0.9999 && missingOrigins.length===0;
+  const margin = revA - cogs - feeD;                          // 已知部分毛利（未涵蓋單位有營收無成本→偏高，靠 coverage 標示）
+  const marginPct = revA>0 ? (margin/revA)*100 : null;        // 負/零營收 → null（畫面「—」），不假設正
+  return { qty:Number(inp.qty)||0, revA, cogs:Math.round(cogs), feeD, margin:Math.round(margin), marginPct,
+    coverage, covered, costedQty:costedAbs, uncostedQty:allAbs-costedAbs, missingOrigins };
+}
+function momoMoPlusMargin(shop, sku, period){   // 包裝：讀 cell(qty/revA) + origins(origin/D) + cost_by_origin(live)
+  const prod=momoLoadProducts(shop).find(p=>p.sku===sku);
+  const rc=momoReadCell(prod&&prod.periods&&prod.periods[period]);
+  const {originsQty, feeD}=momoMoPlusOriginsForSku(shop, sku, period);
+  return momoMoPlusMarginCalc({qty:rc.qty, revA:rc.revUntax, originsQty, feeD, costMap:momoLoadCostByOrigin()});
+}
 function momoChannelFromDeliveryType(t){
   if(t==='寄倉') return '乙配';
   if(t==='指定貨運'||t==='超商取貨') return '甲配';
@@ -12161,6 +12195,7 @@ Object.assign(window, {
   momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,momoBuildMoPlusPlan,
   momoIsMoPlus,momoRenderMoPlusUpload,momoMoPlusUploadFile,momoMoPlusUploadRemove,momoMoPlusUploadGenerate,momoMoPlusShowDryRun,momoMoPlusUploadOpenGuard,momoMoPlusUploadApply,
   momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusConsistency,momoMoPlusCompleteness,
+  momoMoPlusOriginsForSku,momoMoPlusMarginCalc,momoMoPlusMargin,
   momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusBatchPaste,
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
