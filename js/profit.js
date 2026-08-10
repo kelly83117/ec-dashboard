@@ -8636,8 +8636,21 @@ function momoRenderProfitBody(shop, tableOnly){
       if(inc.length){ const srcs=[...new Set(inc.flatMap(x=>x.missingSrc))].sort(); parts.push(`⚠ <b>資料不完整</b>：${inc.length} 個 SKU×期別 缺來源 ${_momoEsc(srcs.join('、'))} 的逐列成本 → 該期別毛利不可信，補上傳對應對帳明細`); }
       const mm=momoMoPlusConsistency(shop);
       if(mm.length){ parts.push(`⚠ <b>雙寫不一致</b>：${mm.length} 個 SKU×期別 商品數量與逐列成本(origins)對不上 → 請回報`); }
-      if(curT && curT.missCost>0){ parts.push(`🟠 本期 <b>${curT.missCost}</b> 個商品缺成本（成本涵蓋<100%）→ 不計入加權毛利率；看「成本涵蓋」欄、到批次維護補成本表`); }
       if(parts.length) moPlusBanner=`<div class="mm-banner mm-banner-warn" style="line-height:1.9">${parts.join('<br>')}</div>`;
+    }
+    // ④ 缺成本 chip（取代原「🟠 本期 N 個商品缺成本」純計數）：去重原廠編號、按影響營收排序、可查清單/匯出 CSV 拿去補 cost_by_origin。
+    let moPlusMissCostChip='';
+    if(momoIsMoPlus(shop) && period){
+      const mc=momoMoPlusMissingCostSummary(shop);
+      if(mc.originN>0){
+        moPlusMissCostChip=`<div class="mm-banner" style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412">
+          <span>🏷️ <b>缺成本 ${mc.originN} 個原廠編號</b>（影響 ${mc.skuN} 項商品 · 影響營收 <b>${momoMoney(mc.totalRev)}</b>）→ 補齊即計入加權毛利率</span>
+          <span style="display:flex;gap:8px;flex-shrink:0">
+            <button class="mm-linkbtn" onclick="momoOpenMissingCostPanel('${shop}')">查看清單</button>
+            <button class="mm-linkbtn" onclick="momoExportMissingCost('${shop}')">⬇ 匯出 CSV</button>
+          </span>
+        </div>`;
+      }
     }
     // ③ 售價需重傳提示：latestSale 是 additive、既有 doc 無此欄 → 售價欄全「—」。多數為空且未關閉 → 一次性可關閉橫幅（免得以為壞了/空幾個月沒發現）。
     let moPlusPriceBanner='';
@@ -8652,8 +8665,8 @@ function momoRenderProfitBody(shop, tableOnly){
       }
     }
     const overview=momoOverviewHTML(shop, period, curT, prevT, prevKey, verifyBlock);
-    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+yiCaveat+moPlusBanner+moPlusPriceBanner+overview+statusBanner;
-  }
+    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+yiCaveat+moPlusBanner+moPlusMissCostChip+moPlusPriceBanner+overview+statusBanner;
+  }
   tbl.innerHTML=discHint+tableHTML;
   momoSyncFilterChip(shop);   // 篩選變動後同步工具列 🏷 按鈕作用中狀態（殼不重繪）
 }
@@ -11023,6 +11036,73 @@ function momoExportCostByOrigin(){
     if(typeof showToast==='function') showToast('已匯出成本對照表 '+keys.length+' 筆 CSV','success');
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
+// ══════ ④ 缺成本 chip：一鍵撈當前期別缺成本的原廠編號、去重、按影響營收排序、匯出 CSV 供補 cost_by_origin ══════
+//   資料源＝完整重繪存下的基準列（_momoBaseRows[shop].rows，全商品當前期別、未經搜尋/篩選）；每列 missingOrigins 由 momoMoPlusMarginCalc 產出（該原廠編號查不到成本且有量）。
+//   影響營收：每原廠編號＝其涉及商品此期別營收合計；totalRev＝去重後受影響 SKU 營收（一 SKU 缺多個原廠編號時只計一次，避免灌大）。
+function momoMoPlusMissingCostSummary(shop){
+  const base=(_momoBaseRows[shop]&&_momoBaseRows[shop].rows)||[];
+  const byOrigin={};            // origin → {origin, rev, skus:[{sku,name,rev}]}
+  const affectedSku={};         // sku → rev（去重算 totalRev）
+  base.forEach(r=>{
+    const miss=r.missingOrigins||[];
+    if(!miss.length) return;
+    const rev=Number(r.revenue)||0;
+    affectedSku[r.sku]=rev;
+    miss.forEach(o=>{
+      const key=o||'(空原廠編號)';
+      const e=byOrigin[key]||(byOrigin[key]={origin:key, rev:0, skus:[]});
+      e.rev+=rev; e.skus.push({sku:r.sku, name:r.name||'', rev});
+    });
+  });
+  const list=Object.values(byOrigin).sort((a,b)=> b.rev-a.rev || String(a.origin).localeCompare(String(b.origin)));
+  const totalRev=Object.values(affectedSku).reduce((s,v)=>s+v,0);
+  return { list, originN:list.length, skuN:Object.keys(affectedSku).length, totalRev, period:_momoPeriodSel[shop]||'' };
+}
+function momoExportMissingCost(shop){
+  const s=momoMoPlusMissingCostSummary(shop);
+  if(!s.originN){ alert('目前沒有缺成本的原廠編號（此期別）'); return; }
+  const esc=v=>{ const t=String(v==null?'':v); return /[",\n\r]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t; };
+  const lines=['原廠編號,影響營收,影響SKU數,SKU清單,成本(待填)'];
+  s.list.forEach(e=>{
+    const skuList=e.skus.map(x=>x.sku+(x.name?'('+x.name+')':'')).join('、');
+    lines.push([esc(e.origin), Math.round(e.rev), e.skus.length, esc(skuList), ''].join(','));
+  });
+  const csv='﻿'+lines.join('\r\n');   // BOM → Excel 正確辨識 UTF-8
+  try{ const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='MOMO_'+String(shop).replace(/[\\/:*?"<>|]/g,'')+'_缺成本清單_'+(s.period||'')+'.csv'; a.click();
+    if(typeof showToast==='function') showToast('已匯出缺成本清單 '+s.originN+' 筆 CSV','success');
+  }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
+}
+function momoOpenMissingCostPanel(shop){
+  const s=momoMoPlusMissingCostSummary(shop);
+  let ov=document.getElementById('momo-misscost-overlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='momo-misscost-overlay'; document.body.appendChild(ov); }
+  ov.className='ana-overlay open'; ov.style.cssText='position:fixed;inset:0;z-index:4000;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  const rowsHtml = s.list.length ? s.list.map((e,i)=>{
+    const skuList=e.skus.map(x=>_momoEsc(x.sku+(x.name?'（'+x.name+'）':''))).join('、');
+    return `<tr><td style="text-align:right;color:#9ca3af">${i+1}</td><td style="font-weight:700">${_momoEsc(e.origin)}</td><td style="text-align:right;font-weight:700">${momoMoney(e.rev)}</td><td style="text-align:right">${e.skus.length}</td><td style="color:#6b7280;font-size:12px">${skuList}</td></tr>`;
+  }).join('') : `<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:20px">此期別沒有缺成本的原廠編號 🎉</td></tr>`;
+  ov.innerHTML=`<div class="ana-modal" style="width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:16px 20px;border-bottom:1px solid #eef0f3">
+      <div><div style="font-size:16px;font-weight:800">缺成本原廠編號清單</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:3px">${_momoEsc(shop)}｜期別 ${_momoEsc(s.period||'—')}｜<b>${s.originN}</b> 個原廠編號 · 影響 ${s.skuN} 項商品 · 影響營收 <b>${momoMoney(s.totalRev)}</b></div></div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button class="mm-linkbtn" onclick="momoExportMissingCost('${shop}')">⬇ 匯出 CSV</button>
+        <button class="mm-linkbtn" onclick="document.getElementById('momo-misscost-overlay').remove()">關閉</button>
+      </div>
+    </div>
+    <div style="overflow:auto;padding:4px 20px 16px">
+      <table class="mm-ptbl" style="width:100%;margin-top:8px;border-collapse:collapse">
+        <thead><tr style="text-align:left;border-bottom:2px solid #eef0f3;color:#6b7280;font-size:12px">
+          <th style="text-align:right;width:36px;padding:6px 4px">#</th><th style="padding:6px 4px">原廠編號</th><th style="text-align:right;padding:6px 4px">影響營收</th><th style="text-align:right;padding:6px 4px">SKU數</th><th style="padding:6px 4px">影響商品</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <div style="font-size:12px;color:#9ca3af;margin-top:10px;line-height:1.7">補好成本後到「批次維護」上傳成本表（或補 cost_by_origin），重繪即消失。<br>影響營收＝該原廠編號涉及商品在此期別的營收合計；同一商品缺多個原廠編號時各列都計，故各列合計可能大於總影響營收。</div>
+    </div>
+  </div>`;
+}
 // ══════ 莫筆克「可用庫存」（各倉商品列表 T 欄）：帳號級快照 origin→數量 + 上傳日期 ══════
 //  ⚠ 是「自家各倉可用庫存」快照、非 MOMO 平台可售量（乙配已進 MOMO 倉的不算）。按原廠編號（品項條碼）→ 甲乙同 origin 共用同一批。
 //  值＝ { uploadedAt:<ms>, byOrigin:{origin:qty} }。庫存是快照 → 每次上傳整份覆蓋（不像 cost 累積），uploadedAt 供「資料日期/過期」提示。
@@ -12372,7 +12452,7 @@ Object.assign(window, {
   momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoDismissYiCaveat,momoOvSetMonth,
   momoSearchClear,momoSearchClearToggle,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,momoSyncToggleAll,momoSyncUpdateCount,momoExportExcel,
-  momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoUploadShowDryRun,momoUploadDryRunCSV,
+  momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoOpenMissingCostPanel,momoExportMissingCost,momoUploadShowDryRun,momoUploadDryRunCSV,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
