@@ -76,6 +76,97 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .search-input{background:#f8f9fc;border:1px solid #e4e6ef;color:#374151;border-radius:7px;padding:7px 11px;font-size:13px;font-family:'Noto Sans TC',sans-serif;outline:none;width:180px;}
 .search-input:focus{border-color:#5b5fcf;}
 .row-cnt{font-size:13px;color:#9ca3af;flex:1;}
+/* 批次選取（測試標籤批次標記）的「已選 N 筆」。N=0 時整個隱藏 —— 用 class 切換而不是
+   JS 寫 inline style。顏色一律走 :root 變數，不寫死色碼、不碰 --bg。
+   ⚠ 位置在 .row-cnt（flex:1）之後 → 會被推到工具列右側、緊鄰「🏷 標籤 / ☰ 欄位」那組，
+     下一塊的批次標記按鈕也會放這一區，視覺上成組。 */
+.batch-sel-info{display:none;}
+.batch-sel-info.on{
+  display:inline-flex;
+  align-items:center;
+  padding:3px 11px;
+  border:1px solid var(--primary);
+  border-radius:20px;
+  background:var(--primary-soft);
+  color:var(--primary);
+  font-size:12px;
+  font-weight:700;
+  white-space:nowrap;
+}
+/* 編號欄的勾選框（列）與表頭的全選框。放在編號欄【內部】，不新增欄位 →
+   欄位順序 / 隱藏 / 拖曳全部不受影響，小計列（colspan="2"、沒有 td-code）天然不會有。
+   ⚠ 刻意不動任何 sticky 的 left 值：td-code 實際寬 160px 而 td-name 寫死 left:60px 的
+     重疊是【既有問題】（已記技術債），不在本塊修，也不為了閃避它去改。 */
+.bsel-cb,.bsel-all{
+  margin-right:6px;
+  vertical-align:middle;
+  cursor:pointer;
+  accent-color:var(--primary);
+  flex:0 0 auto;
+}
+.bsel-all:disabled{cursor:not-allowed;opacity:.4;}
+/* 「＋ 加標籤 / － 移除標籤」兩顆鈕：跟「已選 N 筆」同進退（N=0 整組隱藏）。
+   刻意放在另一個兄弟 span，因為 _renderBatchSelInfo 對 chip 用 textContent、會洗掉子節點。 */
+.batch-sel-acts{display:none;}
+.batch-sel-acts.on{display:inline-flex;align-items:center;gap:6px;margin-left:6px;}
+.bsel-act{
+  padding:4px 11px;
+  background:var(--surface);
+  border:1px solid var(--primary);
+  border-radius:7px;
+  color:var(--primary);
+  font-size:12px;
+  font-weight:700;
+  font-family:inherit;
+  line-height:1.5;
+  cursor:pointer;
+  white-space:nowrap;
+  transition:background .15s,color .15s;
+}
+.bsel-act:hover{background:var(--primary-soft);}
+.bsel-act-rm{border-color:var(--danger);color:var(--danger);}
+.bsel-act-rm:hover{background:var(--danger-soft);}
+/* 批次標籤彈窗（沿用 .ana-overlay / .ana-modal 外殼，這裡只調內容排版與寬度） */
+.btp-modal{width:460px;}
+.btp-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.btp-lbl{font-size:12px;color:var(--text-muted);font-weight:600;min-width:48px;}
+.btp-sel,.btp-date{
+  padding:5px 10px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:7px;
+  font-size:13px;
+  font-family:inherit;
+  color:var(--text);
+  outline:none;
+  cursor:pointer;
+}
+.btp-sel{min-width:180px;}
+.btp-confirm{font-size:13px;color:var(--text);line-height:1.7;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
+.btp-skip{font-size:12px;color:var(--text-muted);margin-top:4px;}
+.btp-size{font-size:11.5px;color:var(--text-muted);margin-top:8px;}
+.btp-warn{
+  font-size:12px;
+  color:var(--warn);
+  background:var(--warn-soft);
+  border-radius:7px;
+  padding:8px 11px;
+  margin-top:10px;
+  line-height:1.7;
+}
+.btp-fixbtn{
+  margin-left:6px;
+  padding:2px 9px;
+  background:var(--surface);
+  border:1px solid var(--warn);
+  border-radius:6px;
+  color:var(--warn);
+  font-size:11.5px;
+  font-weight:700;
+  font-family:inherit;
+  cursor:pointer;
+}
+.btp-fixbtn:hover{background:var(--warn-soft);}
 .period-tag{font-size:12px;color:#6b7280;background:#f3f4f6;padding:3px 10px;border-radius:6px;font-family:'DM Mono',monospace;}
 
 /* Table */
