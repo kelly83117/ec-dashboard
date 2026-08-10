@@ -9431,6 +9431,7 @@ function momoBatchSubmitEdit(shop){
 
 // 新增模式：進價預設售價×75%（可覆蓋）+ 即時毛利率預覽
 function momoRenderBatchAdd(shop){
+  if(momoIsMoPlus(shop)) return momoRenderMoPlusBatchAdd(shop);   // MO+：只需品號+名稱、支援批次貼上（成本靠原廠編號自動帶，不手填）
   const body=document.getElementById('momo-batch-body-'+shop);
   if(!body) return;
   _momoAddPpOverride[shop]=false;
@@ -9538,6 +9539,66 @@ function momoBatchSubmitAdd(shop){
   if(typeof showToast==='function') showToast('已新增商品 '+sku,'success');
   _momoBatchMode[shop]='edit'; _momoBatchSel[shop]=sku; _momoBatchSearch[shop]='';   // 切到編輯模式並選中新商品
   momoRenderBatch(shop);
+}
+// ── MO+ 建檔（只需 商品編號 + 商品名稱；成本靠原廠編號從 ec_momo_cost_by_origin 自動帶、手填會與自動值衝突）──
+//   單筆 + 批次貼上（247 筆一次建）。建的是最小 product {sku,name,periods:{}}：無 cost/售價/進價 → P3b-2 顯示「缺成本」非 0。
+function momoRenderMoPlusBatchAdd(shop){
+  const body=document.getElementById('momo-batch-body-'+shop); if(!body) return;
+  const esc=_momoEsc;
+  body.innerHTML=`
+    <div style="max-width:680px">
+      <div class="mm-note" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.7;color:#075985">
+        MO+ 建檔只需 <b>商品編號 + 商品名稱</b>。<b>成本不必手填</b>——毛利階段用該列<b>原廠編號</b>自動查成本表（ec_momo_cost_by_origin），查不到才標「缺成本」；手填成本反而會與自動值衝突。商品編號＝對帳明細的比對 key，必須正確。
+      </div>
+      <div style="font-weight:700;margin:4px 0 6px">單筆新增</div>
+      <div style="display:grid;grid-template-columns:1fr 1.6fr auto;gap:10px;align-items:end;margin-bottom:18px">
+        <div><label style="${_MOMO_LB}">商品編號（必填）</label><input id="momo-mpadd-sku-${shop}" type="text" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">商品名稱（必填）</label><input id="momo-mpadd-name-${shop}" type="text" style="${_MOMO_INP}"></div>
+        <button onclick="momoMoPlusAddOne('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer;height:38px">新增</button>
+      </div>
+      <div style="font-weight:700;margin:4px 0 6px">批次貼上建檔 <span style="font-weight:400;color:#6b7280;font-size:12px">（推薦，一次 247 筆）</span></div>
+      <div class="mm-note" style="font-size:12px;color:#6b7280;margin-bottom:6px;line-height:1.7">
+        每行一筆，格式：<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">商品編號 [Tab或逗號] 商品名稱</code>（名稱可省略）。可直接從 Excel 兩欄（商品編號、商品名稱）框選複製貼上。<b>重複的商品編號會略過</b>、不覆蓋既有。
+      </div>
+      <textarea id="momo-mppaste-${shop}" rows="8" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;border:1px solid #e5e7eb;border-radius:6px;padding:8px" placeholder="TP0001234567890&#9;商品A&#10;TP0001234567891&#9;商品B"></textarea>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
+        <button onclick="momoMoPlusBatchPaste('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">批次建檔</button>
+        <span id="momo-mppaste-result-${shop}" style="font-size:12px"></span>
+      </div>
+    </div>`;
+}
+function momoMoPlusAddOne(shop){
+  const sku=(document.getElementById('momo-mpadd-sku-'+shop).value||'').trim();
+  const name=(document.getElementById('momo-mpadd-name-'+shop).value||'').trim();
+  if(!sku){ alert('商品編號必填'); return; }
+  if(!name){ alert('商品名稱必填'); return; }
+  const products=momoLoadProducts(shop);
+  if(products.some(x=>x.sku===sku)){ alert('商品編號重複：'+sku); return; }
+  products.push({sku, name, history:[{...momoNowParts(), note:'新增商品(MO+，成本待原廠編號自動帶)'}], periods:{}});
+  momoSaveProducts(shop,products);
+  if(typeof showToast==='function') showToast('已新增 '+sku,'success');
+  _momoBatchMode[shop]='edit'; _momoBatchSel[shop]=sku; _momoBatchSearch[shop]='';
+  momoRenderBatch(shop);
+}
+function momoMoPlusBatchPaste(shop){
+  const ta=document.getElementById('momo-mppaste-'+shop); if(!ta) return;
+  const lines=(ta.value||'').split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const products=momoLoadProducts(shop);
+  const existing=new Set(products.map(x=>x.sku)), seen=new Set();
+  let added=0, dup=0, bad=0;
+  lines.forEach(line=>{
+    const parts=line.split(/[\t,]/).map(s=>s.trim());   // Tab 或逗號分隔（Excel 兩欄貼上＝Tab）
+    const sku=parts[0], name=parts.slice(1).join(' ').trim();
+    if(!sku){ bad++; return; }
+    if(existing.has(sku)||seen.has(sku)){ dup++; return; }
+    seen.add(sku);
+    products.push({sku, name:name||'', history:[{...momoNowParts(), note:'批次建檔(MO+)'}], periods:{}});
+    added++;
+  });
+  if(added) momoSaveProducts(shop,products);
+  const res=document.getElementById('momo-mppaste-result-'+shop);
+  if(res) res.innerHTML=`<span style="color:#10b981;font-weight:700">已建 ${added} 筆</span>｜略過重複 ${dup}｜空行/格式異常 ${bad}${added?'　·　記得按 ☁ 同步雲端':''}`;
+  if(added){ ta.value=''; if(typeof showToast==='function') showToast('批次建檔 '+added+' 筆','success'); }
 }
 
 // ── 畫面三：C1105 月度資料上傳（甲配/乙配共用一個入口，一次餵兩個主檔）──
@@ -12092,6 +12153,7 @@ Object.assign(window, {
   momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,momoBuildMoPlusPlan,
   momoIsMoPlus,momoRenderMoPlusUpload,momoMoPlusUploadFile,momoMoPlusUploadRemove,momoMoPlusUploadGenerate,momoMoPlusShowDryRun,momoMoPlusUploadOpenGuard,momoMoPlusUploadApply,
   momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusConsistency,momoMoPlusCompleteness,
+  momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusBatchPaste,
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
   momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoOpenDpDetailFromEl,momoCloseDpDetail,
