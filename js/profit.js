@@ -1008,6 +1008,10 @@ function _renderBatchSelInfo(shop){
   const n=(_batchSel[shop]&&_batchSel[shop].size)||0;
   el.textContent=n?('已選 '+n+' 筆'):'';
   el.classList.toggle('on',n>0);
+  // 兩顆批次鈕跟著同一個 n 顯示/隱藏。刻意放在【另一個兄弟 span】而不是塞進 el ——
+  //   上一行的 textContent 會把 el 的子節點整個洗掉，按鈕放進去會被清掉。
+  const acts=document.getElementById('batchacts-'+shop);
+  if(acts)acts.classList.toggle('on',n>0);
 }
 
 // ── Init ──
@@ -1201,6 +1205,7 @@ function shopHTML(shop){return`
       <input type="text" class="search-input" id="search-${shop}" placeholder="🔍 搜尋 編號 / 名稱 / ID…" oninput="setSearch('${shop}',this.value)">
       <span class="row-cnt" id="cnt-${shop}"></span>
       <span class="batch-sel-info" id="batchsel-${shop}"></span>
+      <span class="batch-sel-acts" id="batchacts-${shop}"><button class="bsel-act" onclick="openBatchTagPanel('${shop}','add')">＋ 加標籤</button><button class="bsel-act bsel-act-rm" onclick="openBatchTagPanel('${shop}','remove')">－ 移除標籤</button></span>
       <div style="margin-left:auto;display:flex;align-items:center;gap:4px;position:relative">
         <button class="col-pick-btn" id="tag-btn-${shop}" onclick="toggleTagPopup('${shop}',this)">🏷 標籤</button>
         <div class="tag-filter-bar" id="tfbar-${shop}"></div>
@@ -4148,7 +4153,15 @@ async function saveProdTagPanel(){
 //   (c) 合併成功後本機寫三處（localStorage + _mem + _profitMem）：_cloudRead 優先讀 _profitMem，
 //       少寫它會被雲端舊值遮蔽剛存的新值。這是全函式唯一的本機寫入點。
 //   ⚠ 刻意不走 _cloudWrite / _cloudWriteSafe / _markPending：那條路不上雲、要按同步鈕才推。
-async function saveProdTags(shop,code,list){
+//
+// 2026-08-10 批次化：原本的 saveProdTags(shop,code,list) 整支改名成 saveProdTagsBatch(shop,entries)，
+//   entries=[{code,list}]。【只動了合併那一行】（cloud[code]=list → forEach），其餘逐字未改，
+//   所以上面三條紀律天然保住。單筆版保留成薄包裝，面板存檔那條既有路徑行為零變化。
+//   效益：66 支商品從「66 次 getDoc + 66 次 setField」變成【1 次 + 1 次】。
+//   ⚠ 已知限制（不改，只記錄）：4174 那個 window._shopJustSaved 的用途是「剛存過 → 5 秒內
+//     不讓雲端快照覆蓋」。批次的 payload 比單筆大得多，若 setField 上傳超過 5 秒，快照回來
+//     可能蓋掉剛寫的本機值。實際耗時未實測；改那個常數會影響既有的所有寫入路徑，故不動。
+async function saveProdTagsBatch(shop,entries){
   const k=tagsKey(shop);
   const writeLocal=(obj)=>{
     try{localStorage.setItem(k,JSON.stringify(obj));}catch{}
@@ -4167,14 +4180,14 @@ async function saveProdTags(shop,code,list){
   try{
     const snap=await window.__cloudProfit.getDoc();
     const cloud=Object.assign({},((snap.exists()?snap.data():{})||{})[k]||{});
-    if(list&&list.length)cloud[code]=list; else delete cloud[code];
+    entries.forEach(({code,list})=>{ if(list&&list.length)cloud[code]=list; else delete cloud[code]; });   // ← 唯一與單筆版不同的一行
     merged=cloud;
     // 時間戳只在「真的寫了本機」時才打：它的用途是「剛存過 → 5 秒內不讓雲端快照覆蓋」，
     //   失敗時什麼都沒寫卻擋掉 5 秒的雲端更新是純副作用。
     window._shopJustSaved=Date.now();
     writeLocal(merged);   // 本機同步成合併後版本，避免下次讀本機拿到舊資料
   }catch(e){
-    console.warn('[saveProdTags] 讀雲端失敗，本機與雲端都不寫（避免寫了卻無法同步、之後被快照無聲蓋掉）',e);
+    console.warn('[saveProdTagsBatch] 讀雲端失敗，本機與雲端都不寫（避免寫了卻無法同步、之後被快照無聲蓋掉）',e);
     if(typeof showToast==='function')showToast('⚠ 雲端讀取失敗，未儲存，請重試','error');
     return false;
   }
@@ -4183,13 +4196,16 @@ async function saveProdTags(shop,code,list){
     const p=window.__cloudProfit.setField(k,merged);
     if(p&&typeof p.then==='function'){
       p.catch(e=>{
-        console.error('[saveProdTags] 雲端寫入失敗',e);
+        console.error('[saveProdTagsBatch] 雲端寫入失敗',e);
         if(typeof showToast==='function')showToast('❌ 測試標籤雲端寫入失敗','error');
       });
     }
-  }catch(e){ console.error('[saveProdTags] 雲端寫入異常',e); }
+  }catch(e){ console.error('[saveProdTagsBatch] 雲端寫入異常',e); }
   return true;
 }
+// 單筆版薄包裝（測試標籤面板存檔用）。用 function 宣告而非 const 箭頭：會 hoist，
+//   不受擺放順序影響；保留 async 讓呼叫端的 await 行為與批次化之前完全一致。
+async function saveProdTags(shop,code,list){ return saveProdTagsBatch(shop,[{code,list}]); }
 // 只換那一格，不走 applyFilters（整表重繪會閃、會清掉捲動位置）。
 //   用 outerHTML 整格替換：buildProdTagCell 的兩個 return 帶著不同的 <td> 屬性
 //   （有無灰字 style），只換 innerHTML 會留下上一種狀態的樣式。
@@ -4199,6 +4215,205 @@ function patchProdTagCell(shop,code){
   if(!el)return;   // 欄位被隱藏 / 該列不在畫面上 → 什麼都不做
   el.outerHTML=buildProdTagCell(shop,code);
 }
+
+// ══════ 測試標籤：批次加 / 移除 ══════
+// 容量估算。Firestore 的 1MB 上限算的不是 JSON —— 依官方計費規則：
+//   字串值 = UTF-8 bytes + 1；map = Σ(key 大小 + value 大小) + 32；array = Σ(元素) + 32。
+//   那些 32 byte 固定開銷 JSON.stringify 完全看不到，實測 822 支 × 1 標籤時光是它們就 51 KB。
+//   ⚠ 刻意用這把尺而不是 JSON.stringify：寧可高估，低估會讓人以為還有空間。
+//   ⚠ 依文件規則計算，未對線上文件實測校準。
+function _fsStrSize(s){ return (new TextEncoder().encode(String(s))).length + 1; }
+function _fsTagsMapSize(obj){
+  let n=32;                                                   // map 本身
+  Object.keys(obj||{}).forEach(code=>{
+    n+=_fsStrSize(code);
+    const arr=obj[code];
+    n+=32;                                                    // array 本身
+    (Array.isArray(arr)?arr:[]).forEach(e=>{
+      n+=32+_fsStrSize('tag')+_fsStrSize((e&&e.tag)||'')      // {tag,date} 這個 map
+          +_fsStrSize('date')+_fsStrSize((e&&e.date)||'');
+    });
+  });
+  return n;
+}
+function _fmtKB(bytes){ return (bytes/1024).toFixed(1)+' KB'; }
+
+// 面板狀態。比照 _tagPanelCtx / _tagDraft 的既有範式（模組變數，撐得過 innerHTML 重繪）。
+//   _batchCtx={shop,mode:'add'|'remove',codes:[...]}；codes 是【開窗當下的快照】。
+let _batchCtx=null;
+let _batchBusy=false;
+function openBatchTagPanel(shop,mode){
+  const sel=_batchSelOf(shop);
+  if(!sel.size)return;                                        // 沒選東西 → 鈕本來就不該出現
+  let ov=document.getElementById('btp-overlay');
+  if(!ov){
+    ov=document.createElement('div');ov.id='btp-overlay';ov.className='ana-overlay';
+    ov.innerHTML=`<div class="ana-modal btp-modal" onclick="event.stopPropagation()">
+      <div class="ana-modal-hdr"><span class="ana-modal-title" id="btp-title">批次標籤</span><button class="ana-modal-x" onclick="closeBatchTagPanel()">✕</button></div>
+      <div class="ana-modal-body" id="btp-body"></div>
+      <div class="ana-modal-ftr">
+        <button class="ana-cancel-btn" id="btp-cancel" onclick="closeBatchTagPanel()">取消</button>
+        <button class="ana-save-btn" id="btp-ok" onclick="confirmBatchTag()">確認</button>
+      </div>
+    </div>`;
+    ov.onclick=closeBatchTagPanel;
+    document.body.appendChild(ov);
+  }
+  // 🔴 codes 在【開窗當下】就定版：寫入期間使用者可能改篩選，applyFilters 會把 Set 清空。
+  //   完成後 patch 畫面也用這份快照，不再回頭讀 Set（那時它可能已經空了）。
+  _batchCtx={shop,mode,codes:[...sel]};
+  _batchBusy=false;
+  document.getElementById('btp-title').textContent=(mode==='add'?'批次加標籤':'批次移除標籤')+'｜'+shop;
+  renderBatchTagPanelBody();
+  ov.classList.add('open');
+}
+function closeBatchTagPanel(){
+  if(_batchBusy)return;                                       // 儲存中不給關（避免關掉後以為沒寫）
+  document.getElementById('btp-overlay')?.classList.remove('open');
+  _batchCtx=null;
+}
+// 重繪前先把使用者改過的值撈回來（比照 syncProdTagDraftFromDOM 的既有範式）
+function _batchReadForm(){
+  const selEl=document.getElementById('btp-tag');
+  const dtEl=document.getElementById('btp-date');
+  return {
+    tag: selEl?selEl.value:'',
+    date: dtEl?_ptpFromInput(dtEl.value):'',
+  };
+}
+function renderBatchTagPanelBody(){
+  const body=document.getElementById('btp-body');
+  if(!body||!_batchCtx)return;
+  const {shop,mode,codes}=_batchCtx;
+  const defs=getTagDefs();
+  const cur=_batchReadForm();
+  const tag=cur.tag||(defs[0]&&defs[0].label)||'';
+  const today=_ptpToday();
+  const date=mode==='add'?(cur.date||today):'';
+  const esc=(t)=>String(t).replace(/</g,'&lt;');
+  // 標籤下拉：只列既有標籤。🔴 刻意【不提供「在這裡新增標籤」】——
+  //   標籤的建立/刪除有兩層保護在測試標籤面板裡（countTagUsage 掃全通路 + 草稿比對），
+  //   複製過來會變成兩份、日後改一邊忘一邊。要新標籤請去那邊建。
+  const opts=defs.length?defs.map(d=>`<option value="${esc(d.label)}"${d.label===tag?' selected':''}>${esc(d.label)}</option>`).join('')
+                        :'<option value="">（尚無標籤）</option>';
+  // 跳過判斷：用【不傳 opts】的 getProdTagsFor —— 要看得到被期間規則藏起來的標籤，
+  //   否則標記日在未來的同名標籤會被當成「沒有」而重複加一筆，那格就出現兩個一樣的。
+  //   理由與 openProdTagPanel 深拷貝時不傳 opts 完全相同。
+  let willDo=0,willSkip=0;
+  codes.forEach(code=>{
+    const has=getProdTagsFor(shop,code).some(o=>o.tag===tag);
+    if(mode==='add'){ if(has)willSkip++; else willDo++; }
+    else{ if(has)willDo++; else willSkip++; }
+  });
+  // 容量：只有「加」才會長大。移除不顯示增量（顯示了等於說謊）。
+  let sizeLine='';
+  const all=getProdTags(shop)||{};
+  const curSize=_fsTagsMapSize(all);
+  if(mode==='add'&&tag){
+    const after=JSON.parse(JSON.stringify(all));
+    codes.forEach(code=>{
+      if(getProdTagsFor(shop,code).some(o=>o.tag===tag))return;
+      if(!Array.isArray(after[code]))after[code]=[];
+      after[code].push({tag,date});
+    });
+    const delta=_fsTagsMapSize(after)-curSize;
+    sizeLine=`<div class="btp-size">這批約增加 ${_fmtKB(delta)}（${tagsKey(shop)} 將約 ${_fmtKB(curSize+delta)}）</div>`;
+  }else{
+    sizeLine=`<div class="btp-size">移除不會增加雲端空間（${tagsKey(shop)} 目前約 ${_fmtKB(curSize)}）</div>`;
+  }
+  // 期間提示：🔴 期間結束日一律用 state[shop].curMonth / curHalf 丟進 _periodEndDate ——
+  //   跟 buildProdTagCell 完全同一組輸入，保證提示與表格實際顯示行為一致。
+  //   測試通路的 curMonth/curHalf 是殘值、期間規則本身就怪，但來源相同就會「一致地怪」，不會說謊。
+  let periodWarn='';
+  const s=state[shop];
+  const end=s?_periodEndDate(s.curMonth,s.curHalf):null;
+  const tooLate=mode==='add'&&end&&date&&date>end;
+  if(tooLate){
+    periodWarn=`<div class="btp-warn">⚠ 這期報表到 ${end.slice(5)} 結束，標記日 ${date.slice(5)} 標完不會顯示。
+      <button class="btp-fixbtn" onclick="_batchUseEnd()">改成 ${end.slice(5)}</button></div>`;
+  }
+  const dateRow=mode==='add'
+    ? `<div class="btp-row"><span class="btp-lbl">標記日</span><input type="date" class="btp-date" id="btp-date" value="${_ptpToInput(date)}" max="${_ptpToInput(today)}" onchange="renderBatchTagPanelBody()"></div>`
+    : '';
+  const verb=mode==='add'?'加上':'移除';
+  const confirmLine=tag
+    ? `<div class="btp-confirm">即將為 <b>${willDo}</b> 個商品${verb}「${esc(tag)}」${mode==='add'&&date?`，標記日 ${date}`:''}</div>`
+    : `<div class="btp-confirm">尚無可用標籤，請先到表格「測試標籤」欄的面板建立</div>`;
+  const skipLine=willSkip?`<div class="btp-skip">另有 ${willSkip} 筆會跳過（${mode==='add'?'原本就有這個標籤':'原本就沒有這個標籤'}）</div>`:'';
+  body.innerHTML=`<div class="btp-row"><span class="btp-lbl">標籤</span>
+      <select class="btp-sel" id="btp-tag" onchange="renderBatchTagPanelBody()">${opts}</select></div>
+    ${dateRow}
+    ${confirmLine}${skipLine}${periodWarn}${sizeLine}
+    ${mode==='remove'?'<div class="btp-warn">⚠ 移除後無法復原</div>':''}`;
+  // 確認鈕的停用條件：沒標籤 / 沒有任何一筆會被動到 / 標記日晚於本期（擋下來，先叫他改日期）
+  const ok=document.getElementById('btp-ok');
+  if(ok){
+    ok.disabled=!tag||willDo===0||!!tooLate;
+    ok.textContent=_batchBusy?'儲存中…':(mode==='add'?'確認加上':'確認移除');
+  }
+}
+// 「改成 7/31」那顆：把標記日設成本期結束日後重繪
+function _batchUseEnd(){
+  if(!_batchCtx)return;
+  const s=state[_batchCtx.shop];
+  const end=s?_periodEndDate(s.curMonth,s.curHalf):null;
+  if(!end)return;
+  const dt=document.getElementById('btp-date');
+  if(dt)dt.value=_ptpToInput(end);
+  renderBatchTagPanelBody();
+}
+async function confirmBatchTag(){
+  if(!_batchCtx||_batchBusy)return;
+  const {shop,mode,codes}=_batchCtx;
+  const {tag,date}=_batchReadForm();
+  if(!tag)return;
+  // (b) 只有「加」才跳數量警告：那個警告的理由是「佔用較多雲端空間」，
+  //   移除是減少空間，對移除跳這個等於說謊。移除只走下面的「無法復原」二次確認。
+  if(mode==='add'&&codes.length>200&&!confirm(`一次標記 ${codes.length} 筆會佔用較多雲端空間，確定嗎？`))return;
+  if(mode==='remove'&&!confirm(`將從 ${codes.length} 個商品移除「${tag}」，無法復原。確定嗎？`))return;
+  // 組 entries：一次算完整包，跳過不需要動的。列表用【不傳 opts】的 getProdTagsFor（見上）。
+  const entries=[];let done=0,skip=0;
+  codes.forEach(code=>{
+    const cur=getProdTagsFor(shop,code);
+    const has=cur.some(o=>o.tag===tag);
+    if(mode==='add'){
+      if(has){skip++;return;}
+      entries.push({code,list:[...cur.map(o=>({tag:o.tag,date:o.date||''})),{tag,date:date||''}]});
+    }else{
+      if(!has){skip++;return;}
+      entries.push({code,list:cur.filter(o=>o.tag!==tag).map(o=>({tag:o.tag,date:o.date||''}))});
+    }
+    done++;
+  });
+  if(!entries.length)return;
+  // 儲存中鎖住：兩顆鈕 disable、標題改「儲存中…」、不給關窗
+  _batchBusy=true;
+  const okBtn=document.getElementById('btp-ok'),cancelBtn=document.getElementById('btp-cancel');
+  if(okBtn){okBtn.disabled=true;okBtn.textContent='儲存中…';}
+  if(cancelBtn)cancelBtn.disabled=true;
+  const wrote=await saveProdTagsBatch(shop,entries);
+  _batchBusy=false;
+  if(cancelBtn)cancelBtn.disabled=false;
+  if(!wrote){
+    // (e) 寫入失敗 → 整批沒寫（saveProdTagsBatch 內部保證），彈窗留著、勾選保留，讓他重按
+    if(okBtn){okBtn.disabled=false;okBtn.textContent=(mode==='add'?'確認加上':'確認移除');}
+    if(typeof showToast==='function')showToast('未儲存，請重試','error');
+    return;
+  }
+  closeBatchTagPanel();
+  // 🔴 用開窗當下的 codes 快照去 patch，【不要重新讀 Set】——
+  //   寫入期間使用者可能改了篩選，那時 applyFilters 已經把 Set 清空了。
+  //   逐格 patch + 迴圈外呼叫一次 updateTagFilterBar；【不用 applyFilters】：
+  //   它會整表重建、清掉勾選，而且標籤篩選正開著時被移除標籤的列會直接從表上消失。
+  entries.forEach(({code})=>patchProdTagCell(shop,code));
+  updateTagFilterBar(shop);
+  if(typeof showToast==='function'){
+    const verb=mode==='add'?'已標記':'已移除';
+    const why=mode==='add'?'原本就有這個標籤':'原本就沒有這個標籤';
+    showToast(skip?`${verb} ${done} 筆，跳過 ${skip} 筆（${why}）`:`${verb} ${done} 筆`,'success');
+  }
+}
+
 function buildSuggCell(shop,r){
   if(!r.testTags?.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
   const codeEsc=r.code.replace(/'/g,"\\'");
@@ -12662,4 +12877,7 @@ Object.assign(window, {
   //   所以嚴格說不匯出也能運作；仍然掛上去是因為下一塊的批次標記面板會用 onclick 呼叫，
   //   而且在 Console 查「目前選了哪些編號」時用得到。
   _batchSelOf,_batchSelClear,_renderBatchSelInfo,_bindBatchSel,
+  // 批次加/移除標籤。前四個是工具列與彈窗的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效。
+  openBatchTagPanel,closeBatchTagPanel,renderBatchTagPanelBody,confirmBatchTag,_batchUseEnd,
+  saveProdTagsBatch,
 });
