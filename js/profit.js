@@ -7680,6 +7680,42 @@ function momoMoPlusApplyMaster(shop, parsed){
   const masterOk=momoSaveMoPlusMaster(shop, { shop, src:'master', masterAt:Date.now(), products:masterProducts });
   return { added, updated, total:products.length, masterOk, masterSkuN:Object.keys(masterProducts).length };
 }
+// ══════ MO+ 商品髒資料掃描/清理（只限指定賣場，不碰別的）══════
+//  掃描（唯讀）：品號重複 / 名稱空或「—」/ 品號含空格中文隱形字（批次貼上解析錯誤殘留）/ TEMP- 測試品。
+//  每筆標 hasData（periods 非空＝有銷售，刪會掉值）＋ master（是否主檔匯入的正確版本）。
+function momoMoPlusScanDirty(shop){
+  const products=momoLoadProducts(shop);
+  const hasData=p=>Object.keys((p&&p.periods)||{}).length>0;
+  const norm=s=>String(s==null?'':s);
+  const bySku={}; products.forEach((p,i)=>{ (bySku[norm(p.sku)]=bySku[norm(p.sku)]||[]).push({idx:i,p}); });
+  const duplicates=Object.keys(bySku).filter(k=>bySku[k].length>1).map(k=>({sku:k, count:bySku[k].length,
+    entries:bySku[k].map(e=>({idx:e.idx, name:e.p.name||'', origin:e.p.origin||'', hasData:hasData(e.p), master:!!e.p.masterAt, skuLen:norm(e.p.sku).length}))}));
+  const emptyName=[], malformed=[], temp=[];
+  products.forEach((p,i)=>{ const sku=norm(p.sku), nm=norm(p.name).trim();
+    if(nm===''||nm==='—'||nm==='-') emptyName.push({idx:i, sku, hasData:hasData(p), origin:p.origin||'', master:!!p.masterAt});
+    if(!/^[A-Za-z0-9\-]+$/.test(sku)) malformed.push({idx:i, sku:sku.length>40?sku.slice(0,40)+'…':sku, skuLen:sku.length, hasData:hasData(p)});
+    if(/^TEMP-/i.test(sku)) temp.push({idx:i, sku, hasData:hasData(p), master:!!p.masterAt});
+  });
+  return { shop, total:products.length,
+    summary:{品號重複:duplicates.length, 空名稱:emptyName.length, 品號格式異常:malformed.length, TEMP測試:temp.length},
+    duplicates, emptyName, malformed, temp };
+}
+// 清理（本機+雲端、只限本賣場、只刪 hasData=false 的安全筆）。idxList＝要刪的 product 陣列 index（由 scan 挑）。
+//  ⚠ 任一筆 hasData=true（掛 periods）→ 整批擋下、一筆都不刪（先處理資料合併）。回報步驟：本機 momoSaveProducts → 雲端 __cloudMomo.setShop 整包取代（不留殘留）。
+function momoMoPlusCleanDirty(shop, idxList){
+  if(!momoIsMoPlus(shop)) return { ok:false, note:'此工具只限 MO+ 賣場' };
+  const products=momoLoadProducts(shop);
+  const hasData=p=>Object.keys((p&&p.periods)||{}).length>0;
+  const toRemove=new Set(), blocked=[];
+  (idxList||[]).forEach(i=>{ const p=products[i]; if(!p) return; if(hasData(p)){ blocked.push({idx:i, sku:p.sku, periods:Object.keys(p.periods)}); return; } toRemove.add(i); });
+  if(blocked.length) return { ok:false, blocked, removed:0, note:'有掛 periods 的筆被擋下 → 一筆都沒刪（先確認資料能否併到正確那筆）' };
+  if(!toRemove.size) return { ok:true, removed:0, note:'沒有可刪的筆' };
+  const cleaned=products.filter((_,i)=>!toRemove.has(i));
+  momoSaveProducts(shop, cleaned);   // ① 本機（localStorage + _profitMem + _mem + _markPending）
+  let cloud='(未推)';                 // ② 雲端整包取代：momo_products 每賣場一 doc、setDoc 全取代 → 刪掉的不會下次載入 sync 回來
+  try{ if(window.__cloudMomo && typeof window.__cloudMomo.setShop==='function'){ window.__cloudMomo.setShop(shop, cleaned); cloud='已推雲端（整包取代）'; } else cloud='__cloudMomo 未就緒（雲端未清，重載會 sync 回來）'; }catch(e){ cloud='雲端推送失敗：'+(e&&e.message||e); }
+  return { ok:true, removed:toRemove.size, remaining:cleaned.length, cloud, scope:shop };
+}
 /* ═══════════════ MO+ 逐列成本資料層（momo_moplus_origins collection）P3b-1 ═══════════════
    每賣場每來源月一 doc：{ shop, src, skus:{sku:{period:{o:{原廠編號:qty}, d:手續費D}}}, freight:{period:{b:運費收入B, c:代扣運費C, rows}} }。
    momo_products 的 cell 只放 qty/revA（甲乙格式，不污染）；origin/D/運費 B/C 放這裡。毛利(P3b-2)兩邊 join。
@@ -10000,10 +10036,15 @@ function momoMoPlusBatchPaste(shop){
   const products=momoLoadProducts(shop);
   const existing=new Set(products.map(x=>x.sku)), seen=new Set();
   let added=0, dup=0, bad=0;
+  const badRows=[];
   lines.forEach(line=>{
     const parts=line.split(/[\t,]/).map(s=>s.trim());   // Tab 或逗號分隔（Excel 兩欄貼上＝Tab）
-    const sku=parts[0], name=parts.slice(1).join(' ').trim();
+    // ⚠ sku 正規化 + 驗證：清掉零寬/全形空格等隱形字，並要求 sku 形如 [A-Za-z0-9-]（TP+數字 / TEMP-…）。
+    //   否則「用空格分隔」會把整行（含中文、空格）當成品號、或隱形字造成同 sku 兩筆（髒資料）——一律擋下報 bad，不建。
+    const sku=(parts[0]||'').replace(/[\s​-‏‪-‮　﻿]/g,'');
+    const name=parts.slice(1).join(' ').trim();
     if(!sku){ bad++; return; }
+    if(!/^[A-Za-z0-9\-]+$/.test(sku)){ bad++; if(badRows.length<8) badRows.push(line.length>30?line.slice(0,30)+'…':line); return; }   // 含空格/中文/隱形字＝解析錯誤 → 不建、列出供修
     if(existing.has(sku)||seen.has(sku)){ dup++; return; }
     seen.add(sku);
     products.push({sku, name:name||'', history:[{...momoNowParts(), note:'批次建檔(MO+)'}], periods:{}});
@@ -10011,7 +10052,7 @@ function momoMoPlusBatchPaste(shop){
   });
   if(added) momoSaveProducts(shop,products);
   const res=document.getElementById('momo-mppaste-result-'+shop);
-  if(res) res.innerHTML=`<span style="color:#10b981;font-weight:700">已建 ${added} 筆</span>｜略過重複 ${dup}｜空行/格式異常 ${bad}${added?'　·　記得按 ☁ 同步雲端':''}`;
+  if(res) res.innerHTML=`<span style="color:#10b981;font-weight:700">已建 ${added} 筆</span>｜略過重複 ${dup}｜格式異常 ${bad}${badRows.length?'（擋下：'+badRows.map(_momoEsc).join('、')+(bad>badRows.length?' …':'')+'）':''}${added?'　·　記得按 ☁ 同步雲端':''}`;
   if(added){ ta.value=''; if(typeof showToast==='function') showToast('批次建檔 '+added+' 筆','success'); }
 }
 
@@ -12866,7 +12907,7 @@ Object.assign(window, {
   momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
   momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,momoBuildMoPlusPlan,
   momoIsMoPlus,momoRenderMoPlusUpload,momoMoPlusUploadFile,momoMoPlusUploadRemove,momoMoPlusUploadGenerate,momoMoPlusShowDryRun,momoMoPlusUploadOpenGuard,momoMoPlusUploadApply,
-  momoMoPlusMasterFile,momoMoPlusMasterRemove,momoMoPlusMasterGenerate,momoMoPlusMasterApply,momoParseMoPlusMaster,momoMoPlusApplyMaster,momoOpenSpecPrices,
+  momoMoPlusMasterFile,momoMoPlusMasterRemove,momoMoPlusMasterGenerate,momoMoPlusMasterApply,momoParseMoPlusMaster,momoMoPlusApplyMaster,momoOpenSpecPrices,momoMoPlusScanDirty,momoMoPlusCleanDirty,
   momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusConsistency,momoMoPlusCompleteness,
   momoMoPlusOriginsForSku,momoMoPlusMarginCalc,momoMoPlusMargin,momoMoPlusOrderDate,momoMoPlusLatestSaleForSku,momoDismissMoPlusPriceHint,
   momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusBatchPaste,
