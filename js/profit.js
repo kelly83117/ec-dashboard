@@ -7067,7 +7067,7 @@ function momoAggregatePeriods(product,periodKeys,shop){
       returnRate:qty?Math.round((returnQty/qty)*1000)/10:0,
       coverage:m.coverage, covered:m.covered, missingOrigins:m.missingOrigins,
       latestSale:(ls?ls.sp:null), latestSaleDate:(ls?ls.d:null),
-      listPrice:lp.listPrice, listSpec:lp.listSpec, listByBest:lp.byBestSeller, listSpecs:lp.specs, listDivergence:lp.divergence, moPlus:true
+      listPrice:lp.listPrice, listSpec:lp.listSpec, listByBest:lp.byBestSeller, listSpecs:lp.specs, listDivergence:lp.divergence, listMasterStale:lp.masterStale, moPlus:true
     };
   }
   if(shop!=='甲配' && shop!=='乙配'){
@@ -8020,6 +8020,53 @@ function momoMoPlusApplyMaster(shop, parsed){
   const masterOk=momoSaveMoPlusMaster(shop, { shop, src:'master', masterAt:Date.now(), products:masterProducts });
   return { added, updated, total:products.length, masterOk, masterSkuN:Object.keys(masterProducts).length };
 }
+// ══════ MO+ 商品髒資料掃描/清理（只限指定賣場，不碰別的）══════
+//  掃描（唯讀）：品號重複 / 名稱空或「—」/ 品號含空格中文隱形字（批次貼上解析錯誤殘留）/ TEMP- 測試品。
+//  每筆標 hasData（periods 非空＝有銷售，刪會掉值）＋ master（是否主檔匯入的正確版本）。
+function momoMoPlusScanDirty(shop){
+  const products=momoLoadProducts(shop);
+  const hasData=p=>Object.keys((p&&p.periods)||{}).length>0;
+  const norm=s=>String(s==null?'':s);
+  // 隱形字元集：零寬/方向控制/BOM/不斷行空格/全形空格等（不含一般 ASCII 空格 0x20、Tab → 那類歸「格式異常」）。
+  const INVIS=new RegExp('[\u00a0\u1680\u2000-\u200f\u2028\u2029\u202a-\u202f\u205f\u2060\u3000\ufeff]');   // 隱形字：零寬/方向控制/BOM/nbsp/全形空格（不含一般空格0x20、Tab→歸格式異常其他）
+  const cleanOf=s=>norm(s).replace(new RegExp('[\\s'+"\\u00a0\\u1680\\u2000-\\u200f\\u2028\\u2029\\u202a-\\u202f\\u205f\\u2060\\u3000\\ufeff]", 'g'),'');   // 去所有空白+隱形字
+  const bySku={}; products.forEach((p,i)=>{ (bySku[norm(p.sku)]=bySku[norm(p.sku)]||[]).push({idx:i,p}); });
+  const duplicates=Object.keys(bySku).filter(k=>bySku[k].length>1).map(k=>({sku:k, count:bySku[k].length,
+    entries:bySku[k].map(e=>({idx:e.idx, name:e.p.name||'', origin:e.p.origin||'', hasData:hasData(e.p), master:!!e.p.masterAt, skuLen:norm(e.p.sku).length}))}));
+  const byClean={}; products.forEach((p,i)=>{ const c=cleanOf(p.sku); (byClean[c]=byClean[c]||[]).push(i); });   // 清乾淨後同 sku＝看不見的重複
+  const emptyName=[], invisible=[], malformed=[], temp=[];
+  products.forEach((p,i)=>{ const sku=norm(p.sku), nm=norm(p.name).trim(), clean=cleanOf(sku);
+    if(nm===''||nm==='—'||nm==='-') emptyName.push({idx:i, sku, hasData:hasData(p), origin:p.origin||'', master:!!p.masterAt});
+    if(INVIS.test(sku)){   // ⚠ 含隱形字元（畫面看不出來、名稱可能正常）→ 單獨一類；標出逐字碼 + 清乾淨後與誰撞（看不見的重複）
+      const codes=[...sku].map(ch=>/[ -~]/.test(ch)?ch:'⟨U+'+ch.codePointAt(0).toString(16).toUpperCase().padStart(4,'0')+'⟩').join('');
+      const dupIdx=(byClean[clean]||[]).filter(x=>x!==i);
+      invisible.push({idx:i, sku, name:p.name||'', cleanSku:clean, visualized:codes, hasData:hasData(p), master:!!p.masterAt,
+        looksIdenticalTo:dupIdx.map(x=>({idx:x, sku:norm(products[x].sku), name:products[x].name||'', master:!!products[x].masterAt, hasData:hasData(products[x])}))});
+    } else if(!/^[A-Za-z0-9\-]+$/.test(sku)){   // 可見的非法字元（一般空格/中文/符號，如空格分隔貼上）→ 另一類
+      malformed.push({idx:i, sku:sku.length>40?sku.slice(0,40)+'…':sku, skuLen:sku.length, name:p.name||'', hasData:hasData(p)});
+    }
+    if(/^TEMP-/i.test(sku)) temp.push({idx:i, sku, hasData:hasData(p), master:!!p.masterAt});
+  });
+  return { shop, total:products.length,
+    summary:{品號重複:duplicates.length, 空名稱:emptyName.length, 含隱形字元:invisible.length, 品號格式異常其他:malformed.length, TEMP測試:temp.length},
+    duplicates, emptyName, invisible, malformed, temp };
+}
+// 清理（本機+雲端、只限本賣場、只刪 hasData=false 的安全筆）。idxList＝要刪的 product 陣列 index（由 scan 挑）。
+//  ⚠ 任一筆 hasData=true（掛 periods）→ 整批擋下、一筆都不刪（先處理資料合併）。回報步驟：本機 momoSaveProducts → 雲端 __cloudMomo.setShop 整包取代（不留殘留）。
+function momoMoPlusCleanDirty(shop, idxList){
+  if(!momoIsMoPlus(shop)) return { ok:false, note:'此工具只限 MO+ 賣場' };
+  const products=momoLoadProducts(shop);
+  const hasData=p=>Object.keys((p&&p.periods)||{}).length>0;
+  const toRemove=new Set(), blocked=[];
+  (idxList||[]).forEach(i=>{ const p=products[i]; if(!p) return; if(hasData(p)){ blocked.push({idx:i, sku:p.sku, periods:Object.keys(p.periods)}); return; } toRemove.add(i); });
+  if(blocked.length) return { ok:false, blocked, removed:0, note:'有掛 periods 的筆被擋下 → 一筆都沒刪（先確認資料能否併到正確那筆）' };
+  if(!toRemove.size) return { ok:true, removed:0, note:'沒有可刪的筆' };
+  const cleaned=products.filter((_,i)=>!toRemove.has(i));
+  momoSaveProducts(shop, cleaned);   // ① 本機（localStorage + _profitMem + _mem + _markPending）
+  let cloud='(未推)';                 // ② 雲端整包取代：momo_products 每賣場一 doc、setDoc 全取代 → 刪掉的不會下次載入 sync 回來
+  try{ if(window.__cloudMomo && typeof window.__cloudMomo.setShop==='function'){ window.__cloudMomo.setShop(shop, cleaned); cloud='已推雲端（整包取代）'; } else cloud='__cloudMomo 未就緒（雲端未清，重載會 sync 回來）'; }catch(e){ cloud='雲端推送失敗：'+(e&&e.message||e); }
+  return { ok:true, removed:toRemove.size, remaining:cleaned.length, cloud, scope:shop };
+}
 /* ═══════════════ MO+ 逐列成本資料層（momo_moplus_origins collection）P3b-1 ═══════════════
    每賣場每來源月一 doc：{ shop, src, skus:{sku:{period:{o:{原廠編號:qty}, d:手續費D}}}, freight:{period:{b:運費收入B, c:代扣運費C, rows}} }。
    momo_products 的 cell 只放 qty/revA（甲乙格式，不污染）；origin/D/運費 B/C 放這裡。毛利(P3b-2)兩邊 join。
@@ -8067,14 +8114,12 @@ function momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods){
     if(!has.has(ln.sku)) return;                                  // 只收已建檔（與 momoBuildMoPlusPlan 一致）
     if(!/^\d{4}-\d{2}-H[12]$/.test(ln.period)) return;
     if(gated(ln.period)) return;                                  // 期別閘門：與 products 同步
-    const cell=(skus[ln.sku]=skus[ln.sku]||{})[ln.period]=(skus[ln.sku][ln.period])||{o:{}, d:0, sq:{}};
+    const cell=(skus[ln.sku]=skus[ln.sku]||{})[ln.period]=(skus[ln.sku][ln.period])||{o:{}, d:0};
     const origin=ln.origin||'';                                   // 空 origin 記 key ''（COGS 標缺成本）
-    cell.o[origin]=(cell.o[origin]||0)+(Number(ln.qty)||0);
+    cell.o[origin]=(cell.o[origin]||0)+(Number(ln.qty)||0);       // per-原廠編號 銷量（售價欄「銷售最多規格」＝銷量最多的原廠編號 → 主檔按 origin 對應規格）
     cell.d+=Number(ln.D)||0;                                      // 手續費 D（逐列實際）
-    const _sk=(ln.spec1||'')+'▽'+(ln.spec2||'');                  // 規格 key（售價欄「銷售最多規格」用）
-    cell.sq[_sk]=(cell.sq[_sk]||0)+(Number(ln.qty)||0);
   });
-  Object.keys(skus).forEach(s=>Object.keys(skus[s]).forEach(pd=>{ const c=skus[s][pd]; c.d=Math.round(c.d); Object.keys(c.o).forEach(o=>c.o[o]=Math.round(c.o[o])); if(c.sq) Object.keys(c.sq).forEach(k=>c.sq[k]=Math.round(c.sq[k])); }));
+  Object.keys(skus).forEach(s=>Object.keys(skus[s]).forEach(pd=>{ const c=skus[s][pd]; c.d=Math.round(c.d); Object.keys(c.o).forEach(o=>c.o[o]=Math.round(c.o[o])); }));
   const freight={}, fin=(parsed.freight&&parsed.freight.inByPeriod)||{}, fout=(parsed.freight&&parsed.freight.outByPeriod)||{}, ffs=(parsed.freight&&parsed.freight.freeShipByPeriod)||{};
   new Set([...Object.keys(fin),...Object.keys(fout),...Object.keys(ffs)]).forEach(pd=>{ if(gated(pd)) return; freight[pd]={ b:Math.round((fin[pd]&&fin[pd].B)||0), c:Math.round(fout[pd]||0), freeShip:Math.round(ffs[pd]||0), rows:(fin[pd]&&fin[pd].rows)||0 }; });
   // 最新售價（每 SKU 該來源月內下單日最晚那筆的單筆售價）。⚠ ①不受期別閘門限制（跨期別全域顯示值、不進金額計算；受閘門會讓未勾期別的最新價永遠進不來）；
@@ -8115,18 +8160,17 @@ function momoMoPlusCompleteness(shop){
 let _moDataEpoch=0, _moIdxCache={}, _moCostCache=null, _moCostEpoch=-1;
 function momoBumpMoPlusEpoch(){ _moDataEpoch++; }   // origins/cost 寫入或雲端更新時呼叫 → 索引與成本快取下次查表自動重建
 function momoBuildMoPlusOriginsIndex(shop){
-  const docs=momoListMoPlusOriginsDocs(shop), idx={}, latest={}, specQty={};   // specQty: sku→{specKey:跨來源月跨期別總銷量}（售價欄「銷售最多規格」用）
+  const docs=momoListMoPlusOriginsDocs(shop), idx={}, latest={}, originTot={};   // originTot: sku→{origin:跨來源月跨期別總銷量}（售價欄「銷售最多規格」＝銷量最多原廠編號）
   Object.values(docs).forEach(d=>{
-    const sk=(d&&d.skus)||{}; Object.keys(sk).forEach(s=>{ const byP=idx[s]||(idx[s]={}); Object.keys(sk[s]).forEach(pd=>{ const c=sk[s][pd]; const e=byP[pd]||(byP[pd]={originsQty:{},feeD:0}); Object.keys(c.o||{}).forEach(o=>{ e.originsQty[o]=(e.originsQty[o]||0)+(Number(c.o[o])||0); }); e.feeD+=Number(c.d)||0;
-      const sq=c.sq||{}; const bySq=specQty[s]||(specQty[s]={}); Object.keys(sq).forEach(k=>{ bySq[k]=(bySq[k]||0)+(Number(sq[k])||0); }); }); });
+    const sk=(d&&d.skus)||{}; Object.keys(sk).forEach(s=>{ const byP=idx[s]||(idx[s]={}); const bySku=originTot[s]||(originTot[s]={}); Object.keys(sk[s]).forEach(pd=>{ const c=sk[s][pd]; const e=byP[pd]||(byP[pd]={originsQty:{},feeD:0}); Object.keys(c.o||{}).forEach(o=>{ const q=Number(c.o[o])||0; e.originsQty[o]=(e.originsQty[o]||0)+q; bySku[o]=(bySku[o]||0)+q; }); e.feeD+=Number(c.d)||0; }); });
     const ls=(d&&d.latestSale)||{}; Object.keys(ls).forEach(s=>{ const cur=latest[s]; const v=ls[s]; if(v&&v.d && (!cur || v.d>=cur.d)) latest[s]={sp:v.sp, d:v.d}; });   // 跨來源月：下單日較晚勝；同日打平取後掃到的（來源月排序後較晚者）
   });
-  return {idx, latest, specQty};
+  return {idx, latest, originTot};
 }
-// 某 SKU「銷售最多的規格」key（跨全部來源月/期別總銷量最大）→ specKey|null。售價欄預設顯示這個規格的掛牌價。
-function momoMoPlusBestSpecForSku(shop, sku){
-  const sq=momoMoPlusIndexCached(shop).specQty[sku]; if(!sq) return null;
-  let best=null, max=-1; Object.keys(sq).forEach(k=>{ if(sq[k]>max){ max=sq[k]; best=k; } });
+// 某 SKU「銷售最多的原廠編號」（跨全部來源月/期別總銷量最大；空 origin 不算）→ origin|null。售價欄預設顯示這個原廠編號對應規格的掛牌價。
+function momoMoPlusBestOriginForSku(shop, sku){
+  const ot=momoMoPlusIndexCached(shop).originTot[sku]; if(!ot) return null;
+  let best=null, max=-1; Object.keys(ot).forEach(o=>{ if(o && ot[o]>max){ max=ot[o]; best=o; } });   // 空 origin('')跳過
   return best;
 }
 function momoMoPlusIndexCached(shop){
@@ -8155,31 +8199,31 @@ function momoMoPlusMasterCached(shop){   // 商品主檔 doc（掛牌價/市價/
 function momoMoPlusListPriceForSku(shop, sku, latestSp){
   const specs=((momoMoPlusMasterCached(shop)||{})[sku]||{}).specs||[];
   if(!specs.length) return { listPrice:null, listSpec:null, specs:[], divergence:null };
-  const bestKey=momoMoPlusBestSpecForSku(shop, sku);
-  const specKey=s=>((s.spec1||'')+'▽'+(s.spec2||''));
+  const bestOrigin=momoMoPlusBestOriginForSku(shop, sku);   // 銷量最多的原廠編號（精確、100% 涵蓋；非規格字串）
   const specLabel=s=>[s.spec1,s.spec2].filter(x=>x&&x!=='無').join('/')||'（無規格）';
   const priced=specs.filter(s=>Number(s.listPrice)>0);
-  let chosen=null;
-  if(bestKey) chosen=priced.find(s=>specKey(s)===bestKey);
-  if(!chosen) chosen=priced[0];   // 無銷量→第一個有掛牌價的規格（標「預設」）
+  let chosen=null, masterStale=false;
+  if(bestOrigin){
+    chosen=priced.find(s=>s.origin===bestOrigin);
+    if(!chosen){ masterStale=true; chosen=priced[0]; }   // ⚠ fail-loud：銷量最多的原廠編號不在商品主檔＝主檔過期（新品/新規格未重傳）→ 標示、不默默回退
+  } else { chosen=priced[0]; }                            // 無銷量 → 第一個有掛牌價的規格（標「預設」）
   const listPrice=chosen?Number(chosen.listPrice):null;
   const divergence=(listPrice!=null && latestSp!=null && Math.round(listPrice)!==Math.round(latestSp))?(latestSp-listPrice):null;
-  return { listPrice, listSpec:chosen?specLabel(chosen):null, byBestSeller:!!(bestKey&&chosen&&specKey(chosen)===bestKey),
-    specs:priced.map(s=>({label:specLabel(s), price:Number(s.listPrice), best:specKey(s)===bestKey})), divergence, latestSp };
+  return { listPrice, listSpec:chosen?specLabel(chosen):null, byBestSeller:!!(bestOrigin&&chosen&&chosen.origin===bestOrigin),
+    specs:priced.map(s=>({label:specLabel(s), price:Number(s.listPrice), best:!!(bestOrigin&&s.origin===bestOrigin)})), divergence, latestSp, masterStale, bestOrigin };
 }
 // 售價欄 ⊕ 展開：某 SKU 各規格掛牌價 + 市價 + 累計銷量（★=銷售最多＝售價欄預設）
 function momoOpenSpecPrices(shop, sku){
   const specs=((momoMoPlusMasterCached(shop)||{})[sku]||{}).specs||[];
-  const bestKey=momoMoPlusBestSpecForSku(shop, sku);
-  const specKey=s=>((s.spec1||'')+'▽'+(s.spec2||''));
+  const bestOrigin=momoMoPlusBestOriginForSku(shop, sku);
   const specLabel=s=>[s.spec1,s.spec2].filter(x=>x&&x!=='無').join('/')||'（無規格）';
-  const sales=(momoMoPlusIndexCached(shop).specQty||{})[sku]||{};
+  const sales=(momoMoPlusIndexCached(shop).originTot||{})[sku]||{};   // 按原廠編號的累計銷量
   let ov=document.getElementById('momo-specprice-overlay');
   if(!ov){ ov=document.createElement('div'); ov.id='momo-specprice-overlay'; document.body.appendChild(ov); }
   ov.className='ana-overlay open'; ov.style.cssText='position:fixed;inset:0;z-index:4000;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';
   ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
-  const rows=specs.length?specs.map(s=>{ const best=specKey(s)===bestKey, q=sales[specKey(s)]||0;
-    return `<tr${best?' style="background:#fff7ed"':''}><td style="padding:5px 10px">${best?'★ ':''}${_momoEsc(specLabel(s))}</td><td style="padding:5px 10px;text-align:right;font-weight:${best?'700':'400'}">${Number(s.listPrice)>0?momoMoney(s.listPrice):'—'}</td><td style="padding:5px 10px;text-align:right;color:#9ca3af">${Number(s.msrp)>0?momoMoney(s.msrp):'—'}</td><td style="padding:5px 10px;text-align:right;color:#9ca3af">${q||'—'}</td></tr>`; }).join('')
+  const rows=specs.length?specs.map(s=>{ const best=(bestOrigin&&s.origin===bestOrigin), q=sales[s.origin]||0;
+    return `<tr${best?' style="background:#fff7ed"':''}><td style="padding:5px 10px">${best?'★ ':''}${_momoEsc(specLabel(s))}<span style="color:#c7cad1;font-size:11px"> ${_momoEsc(s.origin||'')}</span></td><td style="padding:5px 10px;text-align:right;font-weight:${best?'700':'400'}">${Number(s.listPrice)>0?momoMoney(s.listPrice):'—'}</td><td style="padding:5px 10px;text-align:right;color:#9ca3af">${Number(s.msrp)>0?momoMoney(s.msrp):'—'}</td><td style="padding:5px 10px;text-align:right;color:#9ca3af">${q||'—'}</td></tr>`; }).join('')
     :`<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:16px">此商品主檔無規格資料</td></tr>`;
   ov.innerHTML=`<div class="ana-modal" style="width:min(560px,96vw);max-height:85vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #eef0f3">
@@ -9073,8 +9117,9 @@ function momoRenderProfitBody(shop, tableOnly){
           + (div!=null?`\n\n最新成交價 ${momoMoney(sp)}（差 ${div>0?'+':''}${momoMoney(div)}）＝消費者實付、含折扣/活動`:(sp!=null?`\n\n最新成交價 ${momoMoney(sp)}（與掛牌相同）`:''))
           + `\n\n⚠ 掛牌價＝最近一次上傳商品主檔的值（快照）；成交價是累積歷史。落差可能是折扣、也可能是資料新舊不同步。`;
         const mark=div!=null?` <span style="color:#f97316;font-size:10px" title="與最新成交價有落差">▲</span>`:'';
+        const stale=r.listMasterStale?` <span style="color:#dc2626;font-weight:700;font-size:11px" title="銷量最多的原廠編號不在商品主檔＝主檔過期（有新品/新規格尚未重傳）→ 請重新上傳商品主檔。目前暫顯示其他規格掛牌價。">⚠主檔</span>`:'';
         const exp=multi?` <span onclick="event.stopPropagation();momoOpenSpecPrices('${shop}','${_momoEsc(r.sku)}')" style="color:#5b5fcf;cursor:pointer;font-size:11px" title="展開各規格掛牌價">⊕${r.listSpecs.length}</span>`:'';
-        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis" title="${String(tip).replace(/"/g,'&quot;')}">${momoMoney(lp)}${mark}${exp}</td>`;
+        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis" title="${String(tip).replace(/"/g,'&quot;')}">${momoMoney(lp)}${mark}${stale}${exp}</td>`;
       }
       const v=r[c.k];
       const disp=c.fmt?fmt[c.fmt](v):v;
@@ -10342,10 +10387,15 @@ function momoMoPlusBatchPaste(shop){
   const products=momoLoadProducts(shop);
   const existing=new Set(products.map(x=>x.sku)), seen=new Set();
   let added=0, dup=0, bad=0;
+  const badRows=[];
   lines.forEach(line=>{
     const parts=line.split(/[\t,]/).map(s=>s.trim());   // Tab 或逗號分隔（Excel 兩欄貼上＝Tab）
-    const sku=parts[0], name=parts.slice(1).join(' ').trim();
+    // ⚠ sku 正規化 + 驗證：清掉零寬/全形空格等隱形字，並要求 sku 形如 [A-Za-z0-9-]（TP+數字 / TEMP-…）。
+    //   否則「用空格分隔」會把整行（含中文、空格）當成品號、或隱形字造成同 sku 兩筆（髒資料）——一律擋下報 bad，不建。
+    const sku=(parts[0]||'').replace(/[\s​-‏‪-‮　﻿]/g,'');
+    const name=parts.slice(1).join(' ').trim();
     if(!sku){ bad++; return; }
+    if(!/^[A-Za-z0-9\-]+$/.test(sku)){ bad++; if(badRows.length<8) badRows.push(line.length>30?line.slice(0,30)+'…':line); return; }   // 含空格/中文/隱形字＝解析錯誤 → 不建、列出供修
     if(existing.has(sku)||seen.has(sku)){ dup++; return; }
     seen.add(sku);
     products.push({sku, name:name||'', history:[{...momoNowParts(), note:'批次建檔(MO+)'}], periods:{}});
@@ -10353,7 +10403,7 @@ function momoMoPlusBatchPaste(shop){
   });
   if(added) momoSaveProducts(shop,products);
   const res=document.getElementById('momo-mppaste-result-'+shop);
-  if(res) res.innerHTML=`<span style="color:#10b981;font-weight:700">已建 ${added} 筆</span>｜略過重複 ${dup}｜空行/格式異常 ${bad}${added?'　·　記得按 ☁ 同步雲端':''}`;
+  if(res) res.innerHTML=`<span style="color:#10b981;font-weight:700">已建 ${added} 筆</span>｜略過重複 ${dup}｜格式異常 ${bad}${badRows.length?'（擋下：'+badRows.map(_momoEsc).join('、')+(bad>badRows.length?' …':'')+'）':''}${added?'　·　記得按 ☁ 同步雲端':''}`;
   if(added){ ta.value=''; if(typeof showToast==='function') showToast('批次建檔 '+added+' 筆','success'); }
 }
 
@@ -13209,7 +13259,7 @@ Object.assign(window, {
   momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
   momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,momoBuildMoPlusPlan,
   momoIsMoPlus,momoRenderMoPlusUpload,momoMoPlusUploadFile,momoMoPlusUploadRemove,momoMoPlusUploadGenerate,momoMoPlusShowDryRun,momoMoPlusUploadOpenGuard,momoMoPlusUploadApply,
-  momoMoPlusMasterFile,momoMoPlusMasterRemove,momoMoPlusMasterGenerate,momoMoPlusMasterApply,momoParseMoPlusMaster,momoMoPlusApplyMaster,momoOpenSpecPrices,
+  momoMoPlusMasterFile,momoMoPlusMasterRemove,momoMoPlusMasterGenerate,momoMoPlusMasterApply,momoParseMoPlusMaster,momoMoPlusApplyMaster,momoOpenSpecPrices,momoMoPlusScanDirty,momoMoPlusCleanDirty,
   momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusConsistency,momoMoPlusCompleteness,
   momoMoPlusOriginsForSku,momoMoPlusMarginCalc,momoMoPlusMargin,momoMoPlusOrderDate,momoMoPlusLatestSaleForSku,momoDismissMoPlusPriceHint,
   momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusBatchPaste,
