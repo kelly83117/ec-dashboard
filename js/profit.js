@@ -8356,6 +8356,10 @@ function momoRowCmp(colKey, cur, prev){
   return `<div class="mm-c-cmp" style="color:${color}">${txt}</div>`;
 }
 let _momoRenderedRows={};   // shop → { period, rows, cols }：最近一次總表渲染結果，供「匯出 Excel」讀（匯出==畫面看到的）
+// ⚡ 排序/搜尋/欄位切換的「聚合免重算」快取：完整重繪時存下「已烘焙 agg×2N + 甲乙物流重分配 + 標籤」的基準列（搜尋/篩選/排序之前）。
+//   tableOnly 呼叫（排序 8255 / 搜尋 8243 / 欄位切換 8125…）重用此份、只重跑 filter+sort+HTML → 排序不再退化成「≥完整重繪」。
+//   period 為 key；所有「資料變更」路徑都走完整重繪（tableOnly falsy）→ 快取自然重建，無 stale（比照 momoTagsFor 既有 tableOnly 快取準則）。
+let _momoBaseRows={};   // shop → { period, rows, stock:{at,stale,dateStr,ageDays} }
 // 總表匯出 Excel：用最近渲染的那份（已套當前期別/搜尋/篩選/排序），欄位＝畫面顯示欄；另補 品號/原廠編號 兩欄。
 function momoExportExcel(shop){
   const snap=_momoRenderedRows[shop];
@@ -8388,54 +8392,64 @@ function momoRenderProfitBody(shop, tableOnly){
   const period=_momoPeriodSel[shop];
   const q=(_momoSearch[shop]||'').trim().toLowerCase();
   const all=momoLoadProducts(shop);
-  momoClearFeeRateCache();   // 每次重繪清月費率快取 → 吃到最新對帳單（快取只在這一輪 1300 SKU 內共用）
-  // 「自家庫存」快照（帳號級、按原廠編號；甲乙共用同一批）：載一次供整表用，避免逐 cell 讀 localStorage
-  const _stockObj=momoLoadStockByOrigin(); const _stockMap=(_stockObj&&_stockObj.byOrigin)||{}; const _stockAt=(_stockObj&&_stockObj.uploadedAt)||0;
-  const _stockAgeDays=_stockAt?Math.floor((Date.now()-_stockAt)/86400000):null;
-  const _stockStale=(_stockAgeDays!=null && _stockAgeDays>MOMO_STOCK_STALE_DAYS);
-  const _stockDateStr=_stockAt?(()=>{const d=new Date(_stockAt);return (d.getMonth()+1)+'/'+d.getDate();})():'';   // 短格式 8/8（去前導0），省欄寬
-  // 新欄位一次性提示（每 session 一次，直到使用者開過欄位面板）：讓人知道總表多了欄，位置維持補在最尾、不強制插入
-  if(!tableOnly){ try{ const nc=MOMO_PROFIT_COLS.filter(c=>momoColIsNew(c.k)); if(nc.length && !window.__momoNewColToasted){ window.__momoNewColToasted=true; if(typeof showToast==='function') showToast('總表新增欄位：'+nc.map(c=>c.label).join('、')+'（在右上「欄位」可調整位置/顯示）','info'); } }catch(e){} }
-  // 逐列環比要用的「上一期同期別」keys（gated：上線首月之前不完整→不比）。甲配 margin/profit 當期已物流重分配、上期用純 aggregate，方向正確、微小差異可接受。
-  let prevKeysForRows=null;
-  { const pk=momoPrevPeriodKey(period); if(pk && pk.slice(0,7)>=MOMO_FIRST_PERIOD) prevKeysForRows=momoExpandPeriod(pk); }
-  let rows=all.map(p=>{
-    const agg=momoAggregatePeriods(p, period?momoExpandPeriod(period):[], shop);
-    const prev= prevKeysForRows ? momoAggregatePeriods(p, prevKeysForRows, shop) : null;
-    // ppUntax=未稅進價（含稅進價÷1.05）：進價欄顯示用、也可排序；淨利表營收基準口徑。_prev=上期 aggregate（逐列環比用）
-    const _st=(p.origin && _stockMap[p.origin]!=null)?_stockMap[p.origin]:null;   // 自家庫存：按原廠編號查快照，查無=null（畫面「—」）
-    return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, coveragePct:(agg.coverage!=null?Math.round(agg.coverage*1000)/10:null), stock:_st, _prev:prev };
-  });
-  // 標籤：整月＋半月都算（半月只少成長類）；tableOnly(搜尋/排序) 吃快取免重算，完整重繪重算。「標籤」欄顯示 + 篩選共用同一份。
-  const tagsRes=momoTagsFor(shop, !tableOnly);
-  const _periodIsHalf=/-(H1|H2)$/.test(String(period||''));   // 半月：流量標「估」、成長類本來就沒算
-  rows.forEach(r=>{ r._tags=(tagsRes.bySku&&tagsRes.bySku[r.sku])||[]; });
-  // ═══ 階段四：物流按逐SKU出貨形狀重分配（甲配=C1202訂編／乙配=C1204寄倉；此時 rows=全商品，period 總和才正確）═══
-  //   period 內錨定 物流total=logiTotal×(R_period/月R)、再按形狀分 → Σ該店fee=該店R×feeRate 不變（月總/期別總不動、逐SKU重分配）。
-  //   乙配無 C1204 → frt=null → 維持營收攤(aggregate 的 feeRate乙 已含全部物流+倉租，estimated)。
-  let _freightMode='none';   // none=無逐SKU源(營收攤估算)｜proportional=有對帳單但無運費形狀｜precise=逐SKU精算
-  if((shop==='甲配'||shop==='乙配') && period){
-    const mo=String(period).slice(0,7);
-    const frt=momoMonthFreightInfo(shop, mo);
-    if(frt){
-      _freightMode='proportional';
-      const involved=rows.filter(r=>(r.revenue>0.5||r.qty>0));
-      const R_period=involved.reduce((s,r)=>s+(r.revenue||0),0);
-      const shape_period=involved.reduce((s,r)=>s+(r.skuFreightPeriod||0),0);
-      const logiPeriod=frt.shopRev>0 ? frt.logiTotal*(R_period/frt.shopRev) : 0;
-      if(shape_period>0){
-        _freightMode='precise';
-        involved.forEach(r=>{
-          const 物流_i=logiPeriod*((r.skuFreightPeriod||0)/shape_period);
-          const 其他_i=(r.revenue||0)*frt.otherRate;
-          r.profit=(r.revenue||0)-物流_i-其他_i-(r.cost||0);
-          // ⚠ 與 momoAggregatePeriods 的 margin 同款判斷：營收0但有毛利（整批退貨仍扣運費/成本）→ null（畫面「—」），不可回 0（會蓋掉 aggregate 算對的 null → 顯示誤導的 0%）。
-          r.margin=r.revenue>0?(r.profit/r.revenue)*100:(Math.abs(r.profit)>0.5?null:0);
-        });
+  const _periodIsHalf=/-(H1|H2)$/.test(String(period||''));   // 半月：流量標「估」、成長類本來就沒算（always，便宜）
+  // ⚡ 聚合免重算：tableOnly（排序/搜尋/欄位切換）且同 period → 重用上次完整重繪烘焙好的基準列（agg×2N + 甲乙物流重分配 + 標籤）。
+  //   只有「完整重繪」才跑下面 else 的昂貴段並存快取；資料變更一律走完整重繪 → 快取自然新鮮。
+  let rows, _stockAt, _stockStale, _stockDateStr, _stockAgeDays, _freightMode='none';
+  const _base=_momoBaseRows[shop];
+  if(tableOnly && _base && _base.period===period){
+    rows=_base.rows.slice();   // slice：排序 reorder / 搜尋 filter 都在副本上，不動快取原序、不改 row 欄位
+    _stockAt=_base.stock.at; _stockStale=_base.stock.stale; _stockDateStr=_base.stock.dateStr; _stockAgeDays=_base.stock.ageDays;
+  } else {
+    momoClearFeeRateCache();   // 每次完整重繪清月費率快取 → 吃到最新對帳單（快取只在這一輪 1300 SKU 內共用）
+    // 「自家庫存」快照（帳號級、按原廠編號；甲乙共用同一批）：載一次供整表用，避免逐 cell 讀 localStorage
+    const _stockObj=momoLoadStockByOrigin(); const _stockMap=(_stockObj&&_stockObj.byOrigin)||{}; _stockAt=(_stockObj&&_stockObj.uploadedAt)||0;
+    _stockAgeDays=_stockAt?Math.floor((Date.now()-_stockAt)/86400000):null;
+    _stockStale=(_stockAgeDays!=null && _stockAgeDays>MOMO_STOCK_STALE_DAYS);
+    _stockDateStr=_stockAt?(()=>{const d=new Date(_stockAt);return (d.getMonth()+1)+'/'+d.getDate();})():'';   // 短格式 8/8（去前導0），省欄寬
+    // 新欄位一次性提示（每 session 一次，直到使用者開過欄位面板）：讓人知道總表多了欄，位置維持補在最尾、不強制插入
+    if(!tableOnly){ try{ const nc=MOMO_PROFIT_COLS.filter(c=>momoColIsNew(c.k)); if(nc.length && !window.__momoNewColToasted){ window.__momoNewColToasted=true; if(typeof showToast==='function') showToast('總表新增欄位：'+nc.map(c=>c.label).join('、')+'（在右上「欄位」可調整位置/顯示）','info'); } }catch(e){} }
+    // 逐列環比要用的「上一期同期別」keys（gated：上線首月之前不完整→不比）。甲配 margin/profit 當期已物流重分配、上期用純 aggregate，方向正確、微小差異可接受。
+    let prevKeysForRows=null;
+    { const pk=momoPrevPeriodKey(period); if(pk && pk.slice(0,7)>=MOMO_FIRST_PERIOD) prevKeysForRows=momoExpandPeriod(pk); }
+    rows=all.map(p=>{
+      const agg=momoAggregatePeriods(p, period?momoExpandPeriod(period):[], shop);
+      const prev= prevKeysForRows ? momoAggregatePeriods(p, prevKeysForRows, shop) : null;
+      // ppUntax=未稅進價（含稅進價÷1.05）：進價欄顯示用、也可排序；淨利表營收基準口徑。_prev=上期 aggregate（逐列環比用）
+      const _st=(p.origin && _stockMap[p.origin]!=null)?_stockMap[p.origin]:null;   // 自家庫存：按原廠編號查快照，查無=null（畫面「—」）
+      return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, coveragePct:(agg.coverage!=null?Math.round(agg.coverage*1000)/10:null), stock:_st, _prev:prev };
+    });
+    // 標籤：整月＋半月都算（半月只少成長類）；完整重繪重算並烘焙進 row（tableOnly 直接吃 row._tags）。「標籤」欄顯示 + 篩選共用同一份。
+    const tagsRes=momoTagsFor(shop, !tableOnly);
+    rows.forEach(r=>{ r._tags=(tagsRes.bySku&&tagsRes.bySku[r.sku])||[]; });
+    // ═══ 階段四：物流按逐SKU出貨形狀重分配（甲配=C1202訂編／乙配=C1204寄倉；此時 rows=全商品，period 總和才正確）═══
+    //   period 內錨定 物流total=logiTotal×(R_period/月R)、再按形狀分 → Σ該店fee=該店R×feeRate 不變（月總/期別總不動、逐SKU重分配）。
+    //   乙配無 C1204 → frt=null → 維持營收攤(aggregate 的 feeRate乙 已含全部物流+倉租，estimated)。
+    if((shop==='甲配'||shop==='乙配') && period){
+      const mo=String(period).slice(0,7);
+      const frt=momoMonthFreightInfo(shop, mo);
+      if(frt){
+        _freightMode='proportional';
+        const involved=rows.filter(r=>(r.revenue>0.5||r.qty>0));
+        const R_period=involved.reduce((s,r)=>s+(r.revenue||0),0);
+        const shape_period=involved.reduce((s,r)=>s+(r.skuFreightPeriod||0),0);
+        const logiPeriod=frt.shopRev>0 ? frt.logiTotal*(R_period/frt.shopRev) : 0;
+        if(shape_period>0){
+          _freightMode='precise';
+          involved.forEach(r=>{
+            const 物流_i=logiPeriod*((r.skuFreightPeriod||0)/shape_period);
+            const 其他_i=(r.revenue||0)*frt.otherRate;
+            r.profit=(r.revenue||0)-物流_i-其他_i-(r.cost||0);
+            // ⚠ 與 momoAggregatePeriods 的 margin 同款判斷：營收0但有毛利（整批退貨仍扣運費/成本）→ null（畫面「—」），不可回 0（會蓋掉 aggregate 算對的 null → 顯示誤導的 0%）。
+            r.margin=r.revenue>0?(r.profit/r.revenue)*100:(Math.abs(r.profit)>0.5?null:0);
+          });
+        }
       }
     }
+    window.__momoFreightMode=_freightMode;   // 供 banner 用（僅完整重繪；tableOnly 不重繪總覽）
+    // 存基準列快取（搜尋/篩選/排序之前的原序）供之後 tableOnly 重用
+    _momoBaseRows[shop]={ period, rows:rows.slice(), stock:{at:_stockAt, stale:_stockStale, dateStr:_stockDateStr, ageDays:_stockAgeDays} };
   }
-  window.__momoFreightMode=_freightMode;   // 供 banner 用
   // 搜尋時忽略「已下架」篩選（搜得到已下架商品，避免以為資料掉了）；沒搜尋時預設隱藏已下架
   let searchMatchedDisc=0;
   if(q){
@@ -8478,7 +8492,7 @@ function momoRenderProfitBody(shop, tableOnly){
       +`<span class="mm-th-wrap">${name}${info}${ar}</span>`
       +`<span class="mm-col-grip" onmousedown="momoColResizeDrag(event,'${shop}','${c.k}')" onclick="event.stopPropagation()"></span></th>`;
   }).join('');
-  const tbody=rows.map(r=>{
+  const buildRowHtml=r=>{
     const tds=cols.map(c=>{
       if(c.k==='name'){
         const nmEsc=String(r.name||'').replace(/"/g,'&quot;');
@@ -8546,7 +8560,21 @@ function momoRenderProfitBody(shop, tableOnly){
       return `<td style="${style}">${disp}${momoRowCmp(c.k,r,r._prev)}</td>`;   // qty/營收/毛利貢獻 得環比；進價/售價 momoRowCmp 回空
     }).join('');
     return `<tr onclick="momoOpenAnalysis('${shop}','${r.sku}')" style="cursor:pointer">${tds}</tr>`;   // 點列 → 單品分析 modal
-  }).join('');
+  };
+  // ⚡ per-row HTML 快取：排序/搜尋不改 row 內容（只換順序/子集）→ 重用；欄位集變動（colSig 變）或資料變更（完整重繪重置 _momoBaseRows）才重建。
+  //   colSig 只看欄位鍵＋順序：td 不含寬度（寬度在 colgroup），故拖曳欄寬不必重建 row HTML。真正熱點（8000 格字串生成）於排序時降為「查表＋重排 join」。
+  const colSig=cols.map(c=>c.k).join(',');
+  const _bcache=_momoBaseRows[shop];
+  let rowHtmlBySku;
+  if(_bcache && _bcache.period===period && _bcache.rowHtmlBySku && _bcache.colSig===colSig){
+    rowHtmlBySku=_bcache.rowHtmlBySku;   // 同 period + 同欄位集 → 重用（排序/搜尋）
+  } else {
+    rowHtmlBySku={};
+    const baseRows=(_bcache && _bcache.rows) || rows;   // 用「基準全集」建（搜尋子集也查得到）；完整重繪時 _bcache.rows 剛存好
+    baseRows.forEach(r=>{ rowHtmlBySku[r.sku]=buildRowHtml(r); });
+    if(_bcache){ _bcache.rowHtmlBySku=rowHtmlBySku; _bcache.colSig=colSig; }
+  }
+  const tbody=rows.map(r=>{ const h=rowHtmlBySku[r.sku]; return h!==undefined?h:buildRowHtml(r); }).join('');   // 顯示子集依序查表；理論上都命中，未命中則現算（安全網）
   const discHint=(q&&searchMatchedDisc>0)?`<div style="font-size:11px;color:#9ca3af;margin-bottom:8px">搜尋結果包含已下架商品（${searchMatchedDisc} 筆）</div>`:'';
   const tblMinW=cols.reduce((s,c)=>s+momoColW(shop,c.k,c.w),0);
   // （運費淨額改為第 6 張 KPI 卡片，見 momoOverviewHTML；不再放表尾 tfoot）
@@ -8627,8 +8655,21 @@ function momoRenderProfitBody(shop, tableOnly){
       if(inc.length){ const srcs=[...new Set(inc.flatMap(x=>x.missingSrc))].sort(); parts.push(`⚠ <b>資料不完整</b>：${inc.length} 個 SKU×期別 缺來源 ${_momoEsc(srcs.join('、'))} 的逐列成本 → 該期別毛利不可信，補上傳對應對帳明細`); }
       const mm=momoMoPlusConsistency(shop);
       if(mm.length){ parts.push(`⚠ <b>雙寫不一致</b>：${mm.length} 個 SKU×期別 商品數量與逐列成本(origins)對不上 → 請回報`); }
-      if(curT && curT.missCost>0){ parts.push(`🟠 本期 <b>${curT.missCost}</b> 個商品缺成本（成本涵蓋<100%）→ 不計入加權毛利率；看「成本涵蓋」欄、到批次維護補成本表`); }
       if(parts.length) moPlusBanner=`<div class="mm-banner mm-banner-warn" style="line-height:1.9">${parts.join('<br>')}</div>`;
+    }
+    // ④ 缺成本 chip（取代原「🟠 本期 N 個商品缺成本」純計數）：去重原廠編號、按影響營收排序、可查清單/匯出 CSV 拿去補 cost_by_origin。
+    let moPlusMissCostChip='';
+    if(momoIsMoPlus(shop) && period){
+      const mc=momoMoPlusMissingCostSummary(shop);
+      if(mc.originN>0){
+        moPlusMissCostChip=`<div class="mm-banner" style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412">
+          <span>🏷️ <b>缺成本 ${mc.originN} 個原廠編號</b>（影響 ${mc.skuN} 項商品 · 影響營收 <b>${momoMoney(mc.totalRev)}</b>）→ 補齊即計入加權毛利率</span>
+          <span style="display:flex;gap:8px;flex-shrink:0">
+            <button class="mm-linkbtn" onclick="momoOpenMissingCostPanel('${shop}')">查看清單</button>
+            <button class="mm-linkbtn" onclick="momoExportMissingCost('${shop}')">⬇ 匯出 CSV</button>
+          </span>
+        </div>`;
+      }
     }
     // ③ 售價需重傳提示：latestSale 是 additive、既有 doc 無此欄 → 售價欄全「—」。多數為空且未關閉 → 一次性可關閉橫幅（免得以為壞了/空幾個月沒發現）。
     let moPlusPriceBanner='';
@@ -8643,7 +8684,7 @@ function momoRenderProfitBody(shop, tableOnly){
       }
     }
     const overview=momoOverviewHTML(shop, period, curT, prevT, prevKey, verifyBlock);
-    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+yiCaveat+moPlusBanner+moPlusPriceBanner+overview+statusBanner;
+    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+yiCaveat+moPlusBanner+moPlusMissCostChip+moPlusPriceBanner+overview+statusBanner;
   }
   tbl.innerHTML=discHint+tableHTML;
   momoSyncFilterChip(shop);   // 篩選變動後同步工具列 🏷 按鈕作用中狀態（殼不重繪）
@@ -11027,6 +11068,73 @@ function momoExportCostByOrigin(){
     if(typeof showToast==='function') showToast('已匯出成本對照表 '+keys.length+' 筆 CSV','success');
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
+// ══════ ④ 缺成本 chip：一鍵撈當前期別缺成本的原廠編號、去重、按影響營收排序、匯出 CSV 供補 cost_by_origin ══════
+//   資料源＝完整重繪存下的基準列（_momoBaseRows[shop].rows，全商品當前期別、未經搜尋/篩選）；每列 missingOrigins 由 momoMoPlusMarginCalc 產出（該原廠編號查不到成本且有量）。
+//   影響營收：每原廠編號＝其涉及商品此期別營收合計；totalRev＝去重後受影響 SKU 營收（一 SKU 缺多個原廠編號時只計一次，避免灌大）。
+function momoMoPlusMissingCostSummary(shop){
+  const base=(_momoBaseRows[shop]&&_momoBaseRows[shop].rows)||[];
+  const byOrigin={};            // origin → {origin, rev, skus:[{sku,name,rev}]}
+  const affectedSku={};         // sku → rev（去重算 totalRev）
+  base.forEach(r=>{
+    const miss=r.missingOrigins||[];
+    if(!miss.length) return;
+    const rev=Number(r.revenue)||0;
+    affectedSku[r.sku]=rev;
+    miss.forEach(o=>{
+      const key=o||'(空原廠編號)';
+      const e=byOrigin[key]||(byOrigin[key]={origin:key, rev:0, skus:[]});
+      e.rev+=rev; e.skus.push({sku:r.sku, name:r.name||'', rev});
+    });
+  });
+  const list=Object.values(byOrigin).sort((a,b)=> b.rev-a.rev || String(a.origin).localeCompare(String(b.origin)));
+  const totalRev=Object.values(affectedSku).reduce((s,v)=>s+v,0);
+  return { list, originN:list.length, skuN:Object.keys(affectedSku).length, totalRev, period:_momoPeriodSel[shop]||'' };
+}
+function momoExportMissingCost(shop){
+  const s=momoMoPlusMissingCostSummary(shop);
+  if(!s.originN){ alert('目前沒有缺成本的原廠編號（此期別）'); return; }
+  const esc=v=>{ const t=String(v==null?'':v); return /[",\n\r]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t; };
+  const lines=['原廠編號,影響營收,影響SKU數,SKU清單,成本(待填)'];
+  s.list.forEach(e=>{
+    const skuList=e.skus.map(x=>x.sku+(x.name?'('+x.name+')':'')).join('、');
+    lines.push([esc(e.origin), Math.round(e.rev), e.skus.length, esc(skuList), ''].join(','));
+  });
+  const csv='﻿'+lines.join('\r\n');   // BOM → Excel 正確辨識 UTF-8
+  try{ const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='MOMO_'+String(shop).replace(/[\\/:*?"<>|]/g,'')+'_缺成本清單_'+(s.period||'')+'.csv'; a.click();
+    if(typeof showToast==='function') showToast('已匯出缺成本清單 '+s.originN+' 筆 CSV','success');
+  }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
+}
+function momoOpenMissingCostPanel(shop){
+  const s=momoMoPlusMissingCostSummary(shop);
+  let ov=document.getElementById('momo-misscost-overlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='momo-misscost-overlay'; document.body.appendChild(ov); }
+  ov.className='ana-overlay open'; ov.style.cssText='position:fixed;inset:0;z-index:4000;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  const rowsHtml = s.list.length ? s.list.map((e,i)=>{
+    const skuList=e.skus.map(x=>_momoEsc(x.sku+(x.name?'（'+x.name+'）':''))).join('、');
+    return `<tr><td style="text-align:right;color:#9ca3af">${i+1}</td><td style="font-weight:700">${_momoEsc(e.origin)}</td><td style="text-align:right;font-weight:700">${momoMoney(e.rev)}</td><td style="text-align:right">${e.skus.length}</td><td style="color:#6b7280;font-size:12px">${skuList}</td></tr>`;
+  }).join('') : `<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:20px">此期別沒有缺成本的原廠編號 🎉</td></tr>`;
+  ov.innerHTML=`<div class="ana-modal" style="width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:16px 20px;border-bottom:1px solid #eef0f3">
+      <div><div style="font-size:16px;font-weight:800">缺成本原廠編號清單</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:3px">${_momoEsc(shop)}｜期別 ${_momoEsc(s.period||'—')}｜<b>${s.originN}</b> 個原廠編號 · 影響 ${s.skuN} 項商品 · 影響營收 <b>${momoMoney(s.totalRev)}</b></div></div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button class="mm-linkbtn" onclick="momoExportMissingCost('${shop}')">⬇ 匯出 CSV</button>
+        <button class="mm-linkbtn" onclick="document.getElementById('momo-misscost-overlay').remove()">關閉</button>
+      </div>
+    </div>
+    <div style="overflow:auto;padding:4px 20px 16px">
+      <table class="mm-ptbl" style="width:100%;margin-top:8px;border-collapse:collapse">
+        <thead><tr style="text-align:left;border-bottom:2px solid #eef0f3;color:#6b7280;font-size:12px">
+          <th style="text-align:right;width:36px;padding:6px 4px">#</th><th style="padding:6px 4px">原廠編號</th><th style="text-align:right;padding:6px 4px">影響營收</th><th style="text-align:right;padding:6px 4px">SKU數</th><th style="padding:6px 4px">影響商品</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <div style="font-size:12px;color:#9ca3af;margin-top:10px;line-height:1.7">補好成本後到「批次維護」上傳成本表（或補 cost_by_origin），重繪即消失。<br>影響營收＝該原廠編號涉及商品在此期別的營收合計；同一商品缺多個原廠編號時各列都計，故各列合計可能大於總影響營收。</div>
+    </div>
+  </div>`;
+}
 // ══════ 莫筆克「可用庫存」（各倉商品列表 T 欄）：帳號級快照 origin→數量 + 上傳日期 ══════
 //  ⚠ 是「自家各倉可用庫存」快照、非 MOMO 平台可售量（乙配已進 MOMO 倉的不算）。按原廠編號（品項條碼）→ 甲乙同 origin 共用同一批。
 //  值＝ { uploadedAt:<ms>, byOrigin:{origin:qty} }。庫存是快照 → 每次上傳整份覆蓋（不像 cost 累積），uploadedAt 供「資料日期/過期」提示。
@@ -12416,7 +12524,7 @@ Object.assign(window, {
   momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoDismissYiCaveat,momoOvSetMonth,
   momoSearchClear,momoSearchClearToggle,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,momoSyncToggleAll,momoSyncUpdateCount,momoExportExcel,
-  momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoUploadShowDryRun,momoUploadDryRunCSV,
+  momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoOpenMissingCostPanel,momoExportMissingCost,momoUploadShowDryRun,momoUploadDryRunCSV,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
