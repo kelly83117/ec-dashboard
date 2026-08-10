@@ -1407,6 +1407,13 @@ function loadIntoUI(shop,built,period,days){
     });
   }
   state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
+  // _filtered 是 _built 的衍生快取（見 applyFilters），跟著 _built 無條件失效。
+  //   🔴 刻意放在下面那個 if(!_cloudRefreshing) 的【外面】，跟 filters/sorts 不同批：
+  //     filters/sorts/tagFilters 是【使用者的設定】，不該被別人按同步清掉，所以有條件重置；
+  //     _filtered 不是設定，是衍生物 —— 上一行 _built 已經無條件被換掉，衍生物就必須
+  //     無條件失效，否則它會指向一批已經不在畫面上的舊 row。
+  //     兩者放同一批只是「看起來一致」，語意其實相反。
+  state[shop]._filtered=null;
   // 雲端刷新（別人按同步）不重置：使用者設好的篩選/排序不該被別人的動作清掉。
   //   只有使用者自己切月份/切通路時才重置（那時 _cloudRefreshing 為 false）。
   if(!_cloudRefreshing){ state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[]; }   // 標籤篩選跟 filters/sorts 同批重置：切月份/切通路不殘留（搜尋另行保留，見下一行）
@@ -3305,6 +3312,19 @@ function applyFilters(shop,opts){
       return dir==='asc'?va-vb:vb-va;
     });
   }
+  // _filtered ＝「這次篩完、正要畫上去的那批列」。批次操作（全選/批次標記）要的是
+  //   「目前畫面上看得到的那 80 筆」，而不是 _built 全量 —— 那個範圍只有這裡知道。
+  //   刻意存【同一個陣列參照】不做拷貝：renderTable 拿到的就是這一份，兩者永遠一致。
+  //   ⚠ 只在同一次 render 週期內使用，不要跨 render 快取 —— 裡面裝的是 _built 那批 row
+  //     物件的參照，_built 一被換掉（loadIntoUI）就全部懸空。理由同 _prodTagsReaderFor。
+  //   ⚠ 它可能是 null（loadIntoUI 清掉後、下一次 applyFilters 之前；_editedAt 早退那條路
+  //     會停在這個狀態）。讀它的人【必須自己處理 null，絕對不可以 fallback 回 _built】——
+  //     使用者篩出 80 筆按全選、系統卻選了看不見的 822 筆，他不會發現。
+  //     「什麼都不選」是安全的失敗，「選了全部」是危險的失敗。正確作法是把全選鈕停用。
+  //   ⚠ 勾選狀態要另外存 Set<code>，【不要掛在 row 物件上】：_filtered 與 _built 共用同一批
+  //     row 參照，而 lsSave / syncToCloud 序列化的就是那些 row，_stripDerived 只剝
+  //     analysisAll / profitPct 兩個、擋不住新欄位 —— 掛上去就會跟著報表寫進 Firestore。
+  s._filtered=list;
   renderTable(shop,list,opts);
   updateTagFilterBar(shop);
 }
