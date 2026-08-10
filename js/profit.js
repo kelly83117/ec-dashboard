@@ -26,7 +26,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setMomoShop('甲配',this)"><span class="sdot" style="background:#d4380d"></span>甲配</button>
             <button class="stab" style="font-size:15px" onclick="setMomoShop('乙配',this)"><span class="sdot" style="background:#fa541c"></span>乙配</button>
-            <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+麻吉',this)"><span class="sdot" style="background:#ff7a45"></span>MO+麻吉</button>
+            <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+麻吉',this)"><span class="sdot" style="background:#ff7a45"></span>MO+好麻吉</button>
             <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+森之旅',this)"><span class="sdot" style="background:#ffa940"></span>MO+森之旅</button>
           </div>
         </div>
@@ -8006,7 +8006,7 @@ function momoRenderSyncPreviewModal(shop, items){
   // 逐列 HTML；checked=預設是否勾選（有變更→勾、無變更→不勾、衝突→不勾）；data-conflict 供確認時二次攔截
   const rowHtml=(it,checked)=>`<tr style="border-top:1px solid #f3f4f6${(it.conflict||it.suspicious)?';background:#fef2f2':(it.status==='localonly'?';opacity:.7':'')}">
       <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}"${it.conflict?' data-conflict="1"':''}${it.suspicious?' data-suspicious="1"':''}${it.status==='localonly'?' disabled title="本機輔助表，不同步"':''} ${checked?'checked':''} onchange="momoSyncUpdateCount()"></td>
-      <td style="padding:6px 8px;font-family:monospace;word-break:break-all">${esc(it.key)}</td>
+      <td style="padding:6px 8px;font-family:monospace;word-break:break-all" title="底層 key（未變）：${esc(it.key)}">${esc(momoKeyDisplay(it.key))}</td>
       <td style="padding:6px 8px;color:${typeColor[it.kind]||'#6b7280'};font-weight:600;white-space:nowrap">${it.kind}</td>
       <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.localCount}</td>
       <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.cloudCount==null?'—':it.cloudCount}</td>
@@ -8887,7 +8887,7 @@ function momoRenderAnalysis(shop,p){
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
       <div style="min-width:0">
         <div style="font-size:16px;font-weight:800;color:#1e293b;line-height:1.35">${nmEsc}${disc}</div>
-        <div style="font-size:12px;color:#94a3b8;margin-top:2px">品號 ${_momoEsc(p.sku)}${p.origin?' · 原廠 '+_momoEsc(p.origin):''} · ${shop}</div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:2px">品號 ${_momoEsc(p.sku)}${p.origin?' · 原廠 '+_momoEsc(p.origin):''} · ${momoShopDisplay(shop)}</div>
       </div>
       <button onclick="momoCloseAnalysis()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:18px;cursor:pointer;line-height:1">✕</button>
     </div>
@@ -8970,11 +8970,11 @@ function momoHistoryTimelineHTML(p){
 function momoCrossChannelHTML(shop,otherShop,p){
   if(!p.origin) return `<div style="font-size:12px;color:#94a3b8">此商品無原廠編號（origin 空），無法跨通路關聯。</div>`;
   const others=momoLoadProducts(otherShop).filter(x=>x.origin===p.origin);
-  if(!others.length) return `<div style="font-size:12px;color:#64748b">原廠 ${_momoEsc(p.origin)} 只在 <b>${shop}</b> 上架（本通路獨有，${otherShop} 無對應商品）。</div>`;
-  return `<div style="font-size:12px;color:#64748b;margin-bottom:6px">原廠 ${_momoEsc(p.origin)} 在 <b>${otherShop}</b> 的對應商品（點可切換分析）：</div>
+  if(!others.length) return `<div style="font-size:12px;color:#64748b">原廠 ${_momoEsc(p.origin)} 只在 <b>${momoShopDisplay(shop)}</b> 上架（本通路獨有，${momoShopDisplay(otherShop)} 無對應商品）。</div>`;
+  return `<div style="font-size:12px;color:#64748b;margin-bottom:6px">原廠 ${_momoEsc(p.origin)} 在 <b>${momoShopDisplay(otherShop)}</b> 的對應商品（點可切換分析）：</div>
     ${others.map(x=>`<div onclick="momoOpenAnalysis('${otherShop}','${x.sku}')" style="padding:7px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:5px;cursor:pointer;background:#f8fafc">
       <b>${_momoEsc(x.name||'—')}</b>${x.discontinued?' <span style="color:#9ca3af;font-size:11px">已下架</span>':''}
-      <div style="color:#94a3b8;font-size:11px;margin-top:1px">品號 ${_momoEsc(x.sku)} · ${otherShop} · 成本 ${x.cost!=null?Math.round(x.cost*100)/100:'—'} / 售價 ${x.salePrice!=null?Math.round(x.salePrice):'—'}</div></div>`).join('')}`;
+      <div style="color:#94a3b8;font-size:11px;margin-top:1px">品號 ${_momoEsc(x.sku)} · ${momoShopDisplay(otherShop)} · 成本 ${x.cost!=null?Math.round(x.cost*100)/100:'—'} / 售價 ${x.salePrice!=null?Math.round(x.salePrice):'—'}</div></div>`).join('')}`;
 }
 // 優化紀錄區塊（只重繪這塊，不動圖表）
 function momoRenderOptlogSection(shop,sku){
@@ -10438,6 +10438,19 @@ function momoCleanDirtyPeriodKeys(){
               ② 擋 E001／傳錯檔——需有「訂單明細」分頁 + 第 3 列 header 為對帳明細格式。*/
 let _moPlusUpFile=null, _moPlusUpParsed=null, _moPlusUpPlan=null;
 function momoIsMoPlus(shop){ return shop==='MO+麻吉'||shop==='MO+森之旅'; }
+// ⚠ 顯示名間接層（勿把內部 key 一起改）：'MO+麻吉' 這個字串「同時是資料 key」——散在 localStorage key
+//   (ec_momo_products|MO+麻吉 / ec_momo_moplus_origins|MO+麻吉|src)、firebase.js MOMO_SHOP_DOCID 的鍵
+//   (值 mo_maji 才是雲端 docid)、DOM id (momo-content-/momo-tbl-MO+麻吉)、MOMO_SHOPS/_MOMO_OV_* 與
+//   momoIsMoPlus 的比對。直接把 shop 改成 'MO+好麻吉' 會讓既有 2606/2607 origins + products 全部孤兒化
+//   （新 key 讀不到舊資料、docid fallback 會寫錯 doc）。因此**只改顯示名**：內部一律沿用 'MO+麻吉'，
+//   僅在 user-facing 文字經過本函式轉成 'MO+好麻吉'。日後若要真正改 key，必須連 localStorage + 雲端 doc
+//   一起 migration，不能只改這裡的字串。（森之旅名稱本來就對、不轉。）
+const MOMO_SHOP_DISPLAY={ 'MO+麻吉':'MO+好麻吉' };
+function momoShopDisplay(shop){ return MOMO_SHOP_DISPLAY[shop] || shop; }
+// 同步預覽等處顯示「含賣場名的 key」時用：把 key 裡的內部賣場段換成顯示名（ec_momo_products|MO+麻吉 →
+//   ec_momo_products|MO+好麻吉）。⚠ 只換「顯示」，底層 key 一字未變；呼叫端務必把原始 key 放進 title（hover）
+//   讓人看得出雲端/localStorage 實際 key 沒動，避免「畫面寫好麻吉、雲端是麻吉」的排查困惑。
+function momoKeyDisplay(key){ return String(key).split('|').map(seg=>momoShopDisplay(seg)).join('|'); }
 function momoMoPlusErrHtml(title,msg){ return `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:14px 16px"><div style="font-weight:700;color:#dc2626;margin-bottom:6px">⛔ ${title}</div><div style="font-size:12px;color:#7f1d1d;line-height:1.7">${msg}</div></div>`; }
 function momoRenderMoPlusUpload(shop){
   const c=document.getElementById('momo-sub-content-'+shop); if(!c) return;
