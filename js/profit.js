@@ -7406,6 +7406,9 @@ const MOPLUS_COLS = {
   discount:['總折扣金額'],        // 定價分析用（非 rev）
   net:     ['實際入帳金額'],      // 逐列驗證右邊（必需）
   status:  ['訂單狀態'],          // 必需（對帳明細僅已送達/回收確認、無取消 → 不過濾，僅計數）
+  name:    ['商品名稱'],          // 必需（運費假 SKU 名稱「運費」→ 運費判準的輔助）
+  spec1:   ['規格1'],             // 選填（規格維度，C 模型顯示；運費列恆「無規格」）
+  spec2:   ['規格2'],             // 選填（規格維度，C 模型顯示；運費列空）
   A: ['貨款 - 代收金額','貨款 - mo點支付','貨款 -  全站抵用券支付'],                       // A 貨款（3；rev 基準）
   B: ['運費代收 - 消費者支付金額','運費代收 - 消費者支付mo點','運費補貼 - 商店免運券支付'], // B 運費代收（3）
   C: ['超商取貨運費 - 出貨','超商取貨運費 - 退貨','第三方物流運費 - 出貨','第三方物流運費 - 退貨'], // C 代扣運費（4）
@@ -7430,7 +7433,7 @@ function momoMoPlusResolveCols(header){
   const norm=header.map(momoMoPlusNorm);
   const find=cands=>{ for(const c of cands){ const i=norm.indexOf(momoMoPlusNorm(c)); if(i>=0) return i; } return -1; };
   const idx={}, missing=[];
-  [['order',true],['sku',true],['origin',true],['qty',true],['price',true],['discount',true],['net',true],['status',true]]
+  [['order',true],['sku',true],['origin',true],['qty',true],['price',true],['discount',true],['net',true],['status',true],['name',true],['spec1',false],['spec2',false]]
    .forEach(([k,req])=>{ const c=MOPLUS_COLS[k]; idx[k]=find(c); if(req&&idx[k]<0) missing.push(k+'('+c.join('/')+')'); });
   const grp={}, unresolvedFee=[];
   ['A','B','C','D'].forEach(g=>{ grp[g]=MOPLUS_COLS[g].map(name=>{ const i=find([name]); if(i<0) unresolvedFee.push(g+':'+name); return {name,i}; }); });
@@ -7450,7 +7453,8 @@ function momoParseMoPlus(rows, srcCode){
   if(cols.unresolvedFee.length){ try{ console.warn('%c[MO+] 有費用欄未在 header 對到（當 0 計；逐列 A+B−C−D 驗證會抓出不平衡）：'+cols.unresolvedFee.join('、'),'color:#d97706;font-weight:700'); }catch{} }
   const sumGrp=(row,g)=>cols.grp[g].reduce((s,c)=>s+(c.i>=0?momoMoPlusNum(row[c.i]):0),0);
   const sku={}, periods={}, periodsQty={}, lines=[], statusCounts={}; const missingOrigin=new Set();
-  let totNet=0, totRev=0, matched=0, badRows=0;
+  const freightIn={}, freightOut={}, freightMismatch=[];     // 運費：In＝運費假SKU 的 B（收入，per period）；Out＝商品列的 C 代扣運費（成本，per period）
+  let totNet=0, totRev=0, matched=0, badRows=0, freightRows=0, skuRows=0;
   for(let r=3;r<rows.length;r++){                            // 從 index 3 起（index 1 合計列、index 2 header 皆跳過）
     const row=rows[r]; if(!row || row.every(c=>c===''||c==null)) continue;
     const orderNo=String(row[cols.idx.order]==null?'':row[cols.idx.order]).trim();
@@ -7459,6 +7463,9 @@ function momoParseMoPlus(rows, srcCode){
     if(!period){ errors.push('第 '+(r+1)+' 列訂單號碼無法解析期別：'+orderNo); badRows++; continue; }
     const skuId=String(row[cols.idx.sku]==null?'':row[cols.idx.sku]).trim();
     const origin=String(row[cols.idx.origin]==null?'':row[cols.idx.origin]).trim();
+    const name=String(row[cols.idx.name]==null?'':row[cols.idx.name]).trim();
+    const spec1=cols.idx.spec1>=0?String(row[cols.idx.spec1]==null?'':row[cols.idx.spec1]).trim():'';
+    const spec2=cols.idx.spec2>=0?String(row[cols.idx.spec2]==null?'':row[cols.idx.spec2]).trim():'';
     const qty=momoMoPlusNum(row[cols.idx.qty]);
     const price=momoMoPlusNum(row[cols.idx.price]);
     const discount=momoMoPlusNum(row[cols.idx.discount]);
@@ -7467,19 +7474,32 @@ function momoParseMoPlus(rows, srcCode){
     const A=sumGrp(row,'A'), B=sumGrp(row,'B'), C=sumGrp(row,'C'), D=sumGrp(row,'D');
     const expect=A+B-C-D, diff=Math.round((expect-net)*100)/100;
     if(Math.abs(diff)>0.5) lineErrors.push({row:r+1, orderNo, A,B,C,D, expect:Math.round(expect*100)/100, net, diff}); // 逐列不符 → fail loud（不靜默）
-    if(!origin && skuId) missingOrigin.add(skuId);
     if(status) statusCounts[status]=(statusCounts[status]||0)+1;
-    const bySku=sku[skuId]=sku[skuId]||{};
-    const cell=bySku[period]=bySku[period]||{qty:0, rev:0, net:0, listPrice:0, discount:0, lines:0};
-    cell.qty+=qty; cell.rev+=A; cell.net+=net; cell.listPrice+=price*qty; cell.discount+=discount; cell.lines++;   // rev＝A 貨款；售價/折扣另存做定價分析
-    periods[period]=(periods[period]||0)+1;                  // 分布用「筆數」（驗收 #2：5月上15/5月下789/6月上927/6月下66＝逐列筆數）
+    periods[period]=(periods[period]||0)+1;                  // 分布用「筆數」含運費列（驗收 #2：5上15/5下789/6上927/6下66＝全列筆數，不因抽運費而變）
     periodsQty[period]=(periodsQty[period]||0)+qty;
-    totNet+=net; totRev+=A; matched++;
-    lines.push({row:r+1, orderNo, period, sku:skuId, origin, qty, price, discount, net, status, A,B,C,D});
+    totNet+=net; matched++;                                  // 總筆數/總額含運費列（＝檔案總額 75,590）
+    // 運費判準：結構特徵為主（A==0 且 B>0 且 C==0 且 D==0）、商品名稱=='運費' 為輔；兩者不一致 → fail loud（不自選）
+    const freightStruct=(A===0 && B>0 && C===0 && D===0), freightName=(name==='運費');
+    if(freightStruct!==freightName){ freightMismatch.push({row:r+1, orderNo, name, A,B,C,D, byStruct:freightStruct, byName:freightName}); }
+    lines.push({row:r+1, orderNo, period, sku:skuId, origin, name, spec1, spec2, qty, price, discount, net, status, A,B,C,D, freight:freightStruct});
+    if(freightStruct){                                       // 運費假 SKU：抽離、不進 SKU 維度、不進 missingOrigin
+      const fi=freightIn[period]=freightIn[period]||{qty:0, B:0, net:0, rows:0};
+      fi.qty+=qty; fi.B+=B; fi.net+=net; fi.rows++; freightRows++;
+    } else {                                                 // 商品列
+      if(!origin && skuId) missingOrigin.add(skuId);
+      const bySku=sku[skuId]=sku[skuId]||{};
+      const cell=bySku[period]=bySku[period]||{qty:0, rev:0, net:0, listPrice:0, discount:0, lines:0};
+      cell.qty+=qty; cell.rev+=A; cell.net+=net; cell.listPrice+=price*qty; cell.discount+=discount; cell.lines++;   // rev＝A 貨款；售價/折扣另存做定價分析
+      freightOut[period]=(freightOut[period]||0)+C;          // 運費成本(C 代扣運費)掛商品列 → P3b「成對抽離」要用
+      totRev+=A; skuRows++;
+    }
   }
-  const ok = errors.length===0 && lineErrors.length===0;    // 任何解析錯誤或逐列不符 → 不 ok（P2 不得寫入）
+  const totalIn=Math.round(Object.values(freightIn).reduce((s,x)=>s+x.B,0));   // Σ B 運費收入
+  const totalOut=Math.round(Object.values(freightOut).reduce((s,x)=>s+x,0));   // Σ C 運費成本（在商品列）
+  const ok = errors.length===0 && lineErrors.length===0 && freightMismatch.length===0;   // 解析錯誤／逐列不符／運費判準衝突 → 不 ok（不得寫入）
   return {ok, srcCode, header, sku, periods, periodsQty, lines, lineErrors, errors, statusCounts, unresolvedFee:cols.unresolvedFee,
-    totals:{net:Math.round(totNet), rev:Math.round(totRev), matched, badRows, lineErrorCount:lineErrors.length},
+    freight:{ inByPeriod:freightIn, outByPeriod:freightOut, totalIn, totalOut, rows:freightRows }, freightMismatch,
+    totals:{net:Math.round(totNet), rev:Math.round(totRev), matched, skuRows, freightRows, badRows, lineErrorCount:lineErrors.length},
     missingOrigin:[...missingOrigin]};
 }
 // 總額對帳：Σ實際入帳金額 應 == 對帳單 PDF「實際應付商店金額」。相符回 {ok:true}；不符回 {ok:false, diff}（呼叫端擋下）。
@@ -10074,20 +10094,32 @@ function momoRenderMoPlusPreview(shop){
       +`<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:8px"><thead><tr style="color:#9ca3af;text-align:left"><th style="padding:2px 6px">訂單號碼</th><th style="padding:2px 6px;text-align:right">A</th><th style="padding:2px 6px;text-align:right">B</th><th style="padding:2px 6px;text-align:right">C</th><th style="padding:2px 6px;text-align:right">D</th><th style="padding:2px 6px;text-align:right">應=A+B−C−D</th><th style="padding:2px 6px;text-align:right">實際入帳</th><th style="padding:2px 6px;text-align:right">差</th></tr></thead><tbody>${rowsHtml}</tbody></table>${p.lineErrors.length>20?'<div style="color:#9ca3af;font-size:10px">（僅列前 20）</div>':''}`);
     return;
   }
+  if(!p.ok && p.freightMismatch && p.freightMismatch.length){   // 運費判準衝突（結構 vs 名稱）→ fail loud、擋寫入
+    const mm=p.freightMismatch.slice(0,20).map(e=>`<tr style="border-top:1px solid #f3f4f6"><td style="padding:2px 6px;font-family:monospace">${esc(e.orderNo)}</td><td style="padding:2px 6px">${esc(e.name||'(空)')}</td><td style="padding:2px 6px;text-align:right">${e.A}</td><td style="padding:2px 6px;text-align:right">${e.B}</td><td style="padding:2px 6px;text-align:right">${e.C}</td><td style="padding:2px 6px;text-align:right">${e.D}</td><td style="padding:2px 6px">結構=${e.byStruct?'運費':'商品'}／名稱=${e.byName?'運費':'非運費'}</td></tr>`).join('');
+    prev.innerHTML=momoMoPlusErrHtml('運費判準衝突（不寫入）',
+      p.freightMismatch.length+' 列的「結構特徵(A==0&B>0&C==0&D==0)」與「商品名稱==運費」不一致。可能是 momo 改了運費列的商品名稱（如改叫「配送費」）或某商品結構恰似運費。**兩判準不一致一律擋下、不自動選一個**，請人工確認後再決定調整判準或修檔。'
+      +`<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:8px"><thead><tr style="color:#9ca3af;text-align:left"><th style="padding:2px 6px">訂單號碼</th><th style="padding:2px 6px">商品名稱</th><th style="padding:2px 6px;text-align:right">A</th><th style="padding:2px 6px;text-align:right">B</th><th style="padding:2px 6px;text-align:right">C</th><th style="padding:2px 6px;text-align:right">D</th><th style="padding:2px 6px">判定</th></tr></thead><tbody>${mm}</tbody></table>${p.freightMismatch.length>20?'<div style="color:#9ca3af;font-size:10px">（僅列前 20）</div>':''}`);
+    return;
+  }
   const periods=Object.keys(p.periods).sort();
   const distRows=periods.map(k=>`<tr style="border-top:1px solid #f3f4f6"><td style="padding:4px 8px;font-weight:600">${esc(momoPeriodLabel(k))}</td><td style="padding:4px 8px;text-align:right">${p.periods[k]} 筆</td><td style="padding:4px 8px;text-align:right">${(p.periodsQty[k]||0).toLocaleString()} 件</td></tr>`).join('');
   const plan=_moPlusUpPlan, sp=plan&&plan.shops[shop];
   const matchedN=sp?sp.matched.length:0, unmatchedN=sp?sp.unmatched.length:0, missN=(p.missingOrigin||[]).length;
+  const fr=p.freight||{totalIn:0,totalOut:0,rows:0};
   prev.innerHTML=`
     <div style="border:1px solid #eef0f2;border-radius:10px;padding:14px 16px">
       <div style="font-weight:700;margin-bottom:8px">解析結果 · 來源鍵 ${esc(p.srcCode)}</div>
       <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin-bottom:10px">
-        <div>總筆數 <b>${p.totals.matched}</b></div>
+        <div>總筆數 <b>${p.totals.matched}</b>（商品 ${p.totals.skuRows||0} · 運費 ${p.totals.freightRows||0}）</div>
         <div>檔案總額（Σ實際入帳）<b>$${p.totals.net.toLocaleString()}</b></div>
-        <div>已建檔 SKU <b>${matchedN}</b>${unmatchedN?` · <span style="color:#d97706">未建檔 ${unmatchedN}</span>`:''}</div>
-        <div>缺原廠編號 <b style="color:${missN?'#d97706':'#6b7280'}">${missN}</b></div>
+        <div>已建檔商品 SKU <b>${matchedN}</b>${unmatchedN?` · <span style="color:#d97706">未建檔 ${unmatchedN}</span>`:''}</div>
+        <div title="商品列本身缺原廠編號的 distinct 商品編號（不是 P4「缺成本」；缺成本＝原廠編號查不到成本表，P4 另算）">商品列缺原廠編號 <b style="color:${missN?'#d97706':'#6b7280'}">${missN}</b></div>
       </div>
-      <div style="font-weight:600;font-size:12px;color:#6b7280;margin:6px 0 2px">期別分布（筆數 = 驗收 #2）</div>
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#075985;line-height:1.6">
+        🚚 <b>運費已獨立</b>（不進 SKU 維度、不標缺成本）：收入 B <b>$${fr.totalIn.toLocaleString()}</b>（${fr.rows} 筆運費列）／成本 C <b>$${fr.totalOut.toLocaleString()}</b>（掛在商品列）／淨 <b>$${(fr.totalIn-fr.totalOut).toLocaleString()}</b>。
+        <span style="color:#0c4a6e">⚠ 收入(B)與成本(C)分屬不同列——P3b 毛利會「成對抽離」，不會只抽收入把商品毛利做低。</span>
+      </div>
+      <div style="font-weight:600;font-size:12px;color:#6b7280;margin:6px 0 2px">期別分布（筆數 = 驗收 #2，含運費列）</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px;max-width:420px"><thead><tr style="color:#9ca3af;text-align:left"><th style="padding:4px 8px">期別</th><th style="padding:4px 8px;text-align:right">筆數</th><th style="padding:4px 8px;text-align:right">件數</th></tr></thead><tbody>${distRows}</tbody></table>
       <div style="font-size:11px;color:#9ca3af;margin-top:6px">對帳單「實際應付商店金額」若與檔案總額 $${p.totals.net.toLocaleString()} 不符 → 解析漏費用欄或檔案異常。</div>
       ${unmatchedN?`<div style="font-size:11px;color:#d97706;margin-top:6px">未建檔 ${unmatchedN} 個 SKU 不會寫入（先到批次維護建檔）：${esc(sp.unmatched.slice(0,10).join('、'))}${unmatchedN>10?' …':''}</div>`:''}
