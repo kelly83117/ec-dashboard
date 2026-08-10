@@ -534,6 +534,25 @@ function _testSaveFailed(k,msg){
     App.showAlertModal({title:'測試通路寫入失敗',message:'報表【沒有】寫進雲端，而且測試通路不存本機，重整後就會消失。\n請確認網路後重新產生報表。',detail:k+'\n'+msg,kind:'error'});
   else if(typeof showToast==='function') showToast('測試通路寫入失敗：'+msg,'error');
 }
+// 測試通路「ⓘ 使用注意事項」的文字。放模組頂層常數，不內嵌在函式裡。
+//   ⚠ 宣告刻意放在下方 `// ── Init ──` 之前：目前 periodRowTestHTML 只會被
+//     initProfitPeriodControls 呼叫，而它全 repo 只有三個呼叫點（本檔的 document click
+//     listener、pages/offices.js 兩處），三個都在 setTimeout 回呼裡、模組頂層走不到 ——
+//     但那是「現在」。放在 Init 之前就不必賭「將來沒人在 Init 加一行
+//     initProfitPeriodControls()」，理由同本檔 _cloudRefreshing / _tagPanelCtx /
+//     _tagDefsOpen 三處的既有註解（放 Init 之後會落入 const 的 TDZ、整個模組評估中斷）。
+//   ⚠ 第 ⑦ 點引用的成功提示「測試通路報表已寫入雲端」與失敗標題「測試通路寫入失敗」，
+//     都是上方 testSave / _testSaveFailed 的逐字原文。改那兩處的字串時，這裡要一起改，
+//     否則說明書會叫使用者去等一則不存在的提示。
+const TEST_SHOP_HELP=[
+  {q:'① 用法',a:'切到「測試通路」→ 選開始日和結束日 → 上傳檔案 → 產生報表 → 匯出 Excel。\n跟好麻吉完全一樣，只是期間從「月份＋上下半月」變成兩個日期。'},
+  {q:'② 手續費要自己設',a:'期間旁邊有「手續費 __%」，預設 20.5%。這是這個通路專用的，改它不會影響其他通路。'},
+  {q:'③ 報表自動存雲端，不用按同步',a:'跟其他四個通路不一樣。所以在辦公室跑完，回家用筆電選同一組日期就看得到。\n⚠️ 但「手續費設定」不會自動上雲，要按「☁ 同步雲端」才會跨電腦。\n改完費率沒按同步就換電腦，報表叫得出來、費率卻是預設值，淨利會跟辦公室看到的不一樣。'},
+  {q:'④ 跑過的區間會自動叫出來',a:'選了日期，如果那個區間跑過，會把存的報表叫出來。沒跑過就顯示空白等你上傳。'},
+  {q:'⑤ 不做跨期間比較',a:'沒有上期營收／成長比／成長分析／成長調整，那幾欄會是空的。\n要比較兩個區間的話，分別跑、看 Excel。'},
+  {q:'⑥ 沒有「清除重傳」按鈕',a:'丟錯檔案的話，用同一組日期重新上傳一次覆蓋掉就好。'},
+  {q:'⑦ 產生報表後要看到「測試通路報表已寫入雲端」才算成功',a:'這個通路的報表【只存在雲端，不存在你的電腦裡】。按「▶ 產生報表」之後如果沒跳出那則提示、或跳出「測試通路寫入失敗」的彈窗，那份報表重新整理頁面就會消失。遇到這種情況，先按一次「▶ 產生報表」重試（檔案還在，不用重傳）；如果已經重新整理過頁面，才需要重新上傳檔案再產生一次。'},
+];
 // 「🗑 清除重傳」的雲端刪除失敗一定要出聲 —— 靜默失敗＝本機清了、雲端那份還在，
 //   下次快照回來報表就復活（Kelly 2026/07/30 回報的原始 bug）。沿用 _testSaveFailed 的通報範式。
 //   ⚠ app.js 的 __notifyCloudFail 沒有掛上 window，這裡拿不到，故自行翻譯常見錯誤。
@@ -12026,8 +12045,47 @@ function periodRowTestHTML(id){return`
       <input type="date" class="tp-date" id="test-end-${id}" onchange="onTestPeriodChange('${id}')">
       <span class="tp-lbl tp-lbl-gap">手續費</span>
       <input type="number" class="tp-rate" id="test-rate-${id}" min="0" max="100" step="0.1" onchange="onTestRateChange('${id}')">
-      <span class="tp-lbl">%</span>`;}
+      <span class="tp-lbl">%</span>
+      <button type="button" class="tp-info" onclick="openTestShopHelp()" title="測試通路使用注意事項：期間怎麼選、手續費要自己設、報表只存雲端不存本機">ⓘ 使用說明</button>`;}
 function periodRowHTML(id){return id===TEST_SHOP_ID?periodRowTestHTML(id):periodRowShopeeHTML(id);}
+// ── 測試通路「使用注意事項」彈窗（期間列尾端的 ⓘ 點開）──
+//   文字在模組頂層的 TEST_SHOP_HELP（宣告於 testSave 那一區，理由見該處註解）。
+//   ⚠ 這一列只有測試通路會產生（periodRowHTML 分流），顯示/隱藏由既有的 period-row-{id}
+//     機制管 —— 所以這裡【不需要、也不要】寫任何 curShop 判斷。
+//   ⚠ 刻意不做 position:absolute / fixed 的小浮層，改用既有的置中彈窗殼：期間列的祖先
+//     （__profitTabHtml 最外層那張卡片）有 overflow:hidden，.main 在側欄收合時還有
+//     zoom:1.12，而 css/profit.css 既有註解已記載「不靠 JS 量測高度（上一批那樣做在
+//     不同 zoom/螢幕會歪）」。置中彈窗把這三個不確定一次消掉。
+function _testShopHelpHtml(){
+  // \n 是文案裡刻意的分行（不是排版空白）→ 轉 <br>。文字是本檔靜態常數、不含使用者輸入，
+  //   故比照 renderProdTagPanelBody 的說明區不做 HTML escape。
+  return TEST_SHOP_HELP.map(it=>`<div class="tsh-q">${it.q}</div><div class="tsh-a">${it.a.replace(/\n/g,'<br>')}</div>`).join('');
+}
+// 骨架逐字比照 openProdTagPanel：懶建立 → 掛 document.body → 外層 onclick 關閉 →
+//   內層 .ana-modal 上 event.stopPropagation → 開關只切 .open class、DOM 不重建。
+//   內容是靜態的，所以只在建立那次算一遍 innerHTML，之後開關不重算。
+function openTestShopHelp(){
+  let ov=document.getElementById('tsh-overlay');
+  if(!ov){
+    // 只掛 .ana-overlay / .ana-modal，不另開 tsh-overlay / tsh-modal 這種空 class ——
+    //   對照組 .ptp-overlay(z-index) / .ptp-modal(width) 都有實際覆寫，這裡預設值就夠用：
+    //   z-index 2000 沒有其他浮層要疊，寬度 640px 對七段說明剛好。
+    ov=document.createElement('div');ov.id='tsh-overlay';ov.className='ana-overlay';
+    ov.innerHTML=`<div class="ana-modal" onclick="event.stopPropagation()">
+      <div class="ana-modal-hdr"><span class="ana-modal-title">測試通路 使用注意事項</span><button class="ana-modal-x" onclick="closeTestShopHelp()">✕</button></div>
+      <div class="ana-modal-body">${_testShopHelpHtml()}</div>
+      <div class="ana-modal-ftr">
+        <button class="ana-cancel-btn" onclick="closeTestShopHelp()">關閉</button>
+      </div>
+    </div>`;
+    ov.onclick=closeTestShopHelp;
+    document.body.appendChild(ov);
+  }
+  ov.classList.add('open');
+}
+function closeTestShopHelp(){
+  document.getElementById('tsh-overlay')?.classList.remove('open');
+}
 
 // ── 測試通路：期間切換 / 自動載入 / 費率 ──
 function onTestPeriodChange(shop){
@@ -12246,6 +12304,7 @@ Object.assign(window, {
   loadIntoUI,lsHasAny,lsKey,lsLoad,lsSave,markCard,num,onFile,onGlobalFile,onGlobalGenerate,
   onHalfChange,onMapFile,onMonthChange,onPlatformRateChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
   onTestPeriodChange,onTestRateChange,   // 測試通路期間列的 inline onchange 用，缺了會 ReferenceError、輸入框靜默失效
+  openTestShopHelp,closeTestShopHelp,    // 測試通路期間列 ⓘ 與彈窗關閉鈕的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
   openTestSettings,closeTestSettings,addTestDraftCond,removeTestDraftCond,deleteTestDraftRule,addTestDraftRule,saveTestSettings,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,

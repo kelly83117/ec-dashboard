@@ -595,6 +595,44 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   cursor:pointer;
 }
 .tp-rate{width:60px;}
+/* 期間列尾端的「ⓘ 使用說明」入口。用 <button> 不用 <span>：Tab 走得到、Enter 按得下去。
+   視覺語言跟 .export-btn（⬆ 上傳檔案那排）同一套：白底 + 邊框 + 圓角，一眼看得出可點。
+   但刻意小一號 —— padding / 字級 / 圓角直接抄同一列的 .tp-date / .tp-rate，
+   高度與日期框對齊、不喧賓奪主：它是輔助入口，不是主要動作。
+   ⚠ 只有文字沒有邊框的話沒人會注意到（2026-08-10 實機看下來 14px 灰圓圈完全被忽略）。
+   ⚠ 這顆按鈕讓期間列多佔約 99px，視窗寬 966–1061px 時會把按鈕列擠到 KPI 下一行
+     （header 80→147px）。已知且接受 —— 不是壞掉是重排，只影響測試通路這一列。
+     不要為了閃過這個區間去縮字（實測「說明」兩字只省 24px、臨界值仍在 1037px），
+     也不要動按鈕列的 flex-wrap（那是全站共用 DOM，會影響 MOMO / 酷澎）。
+     補充數據（2026-08-10 實測，5px 步進掃 1280→600）：無按鈕臨界卡片寬 665px、
+     有按鈕 765px；966px 以下本來就換行，這顆只是把臨界點從 960 推到 1061。
+     測試通路期間列 546px，其他四家只有 245px —— 本來就是最緊的一列。
+   ⚠ 這一列的祖先有 overflow:hidden（__profitTabHtml 最外層卡片），所以彈窗走置中的
+     .ana-overlay 殼、不在這裡長浮層 —— 這個 class 只負責按鈕本身。 */
+.tp-info{
+  display:inline-flex;
+  align-items:center;
+  padding:4px 10px;
+  margin-left:6px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:7px;
+  font-size:12px;
+  font-weight:600;
+  font-family:inherit;
+  line-height:1.5;   /* 12px × 1.5 = 18px → 加上 padding/border 後總高 28px，與同列 .tp-date 齊高 */
+  color:var(--text-muted);
+  cursor:pointer;
+  white-space:nowrap;
+  transition:border-color .15s,color .15s,background .15s;
+}
+.tp-info:hover,.tp-info:focus-visible{border-color:var(--primary);color:var(--primary);background:var(--primary-soft);}
+/* 使用注意事項彈窗的問答排版。刻意不重用 .ptp-help-*（那是測試標籤面板的）——
+   跨功能共用會讓其中一邊調樣式時另一邊跟著變。 */
+.tsh-q{font-size:13px;font-weight:700;color:var(--text);margin-top:14px;}
+.tsh-q:first-child{margin-top:0;}
+.tsh-a{font-size:12.5px;color:var(--text-muted);line-height:1.8;margin-top:4px;padding-bottom:10px;border-bottom:1px solid var(--border);}
+.tsh-a:last-child{border-bottom:none;padding-bottom:0;}
 /* 分頁分隔線（維克｜測試通路）。原本 __profitTabHtml 裡還有一條 inline 寫死的
    （測試通路｜重點檢視），已隨重點檢視分頁於 2026-08-07 一併移除。 */
 .stab-sep{display:inline-block;width:1px;height:18px;background:var(--border);margin:0 2px;}
