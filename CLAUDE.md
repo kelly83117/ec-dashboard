@@ -52,19 +52,24 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
 
 漏寫驗證狀態 = 等同我宣稱「全部測過」，會誤導你。**永遠不要省略這行**。
 
-## ⚠️ 本機測試前必須先確認 TEST_NOWRITE 防護生效
+## ✅ 本機測試連 dev Firebase（TEST_NOWRITE 已退場）
 
-`js/app.js` 把 `Store.set` 換成「寫入 → 立刻推正式 Firestore」，因此**本機開起來
-測試（不只是按同步）就會寫到公司正式資料**。本機測試前務必：
+`js/app.js` 把 `Store.set` 換成「寫入 → 立刻推 Firestore」。**現在 localhost 自動連
+獨立 dev 專案 `yc-dashboard-dev`**（`js/firebase.js` 的 `pickFirebaseConfig`：
+localhost/127.0.0.1/::1 → `DEV_CONFIG`；其餘 github.io 正式站 → `PROD_CONFIG`），
+所以**本機測試寫入天然安全、不碰正式庫**。開站後 F12 Console 會看到綠字
+**「[firebase] ✅ localhost → DEV（yc-dashboard-dev）」**。
 
-1. 先確認 **TEST_NOWRITE 防護碼**已經貼進 `js/firebase.js`。
-2. 在瀏覽器 F12 Console 看到紅字
-   **「[TEST_NOWRITE] 已停用雲端寫入：4 物件 / 9 方法」**，且下方 table
-   **剛好 9 條**，才能放心測。
-3. 沒看到這行紅字、或數量不是 9 → **絕對不要繼續操作，立刻關閉分頁**。
-
-**測完拆除順序（勿顛倒）：** 先關分頁 → 再停 server → 最後才刪掉
-`firebase.js` 裡的防護區塊。
+- 舊的 **TEST_NOWRITE 插拔式防護碼已退場**——不要再貼 `canon_guard.js`、不要再走
+  「貼→測→剝→驗零殘留」那套。localhost 連 dev 就是安全的。
+- **永久安全斷言**（`firebase.js` 已內建、in-repo）：localhost 若因 DEV_CONFIG 缺失
+  / hostname 判斷失效而落到正式庫 projectId（`yc-dashboard-9aa6c`）→ **全屏紅字
+  + throw、拒絕初始化 Firebase**（不連正式庫、退回 localStorage）。看到紅屏＝config
+  壞了，修好再測，別硬跑。
+- dev 是拋棄式資料；要真實資料就把真檔（對帳明細等）上傳到 dev。web config 六欄非機密
+  （設計上嵌前端、安全靠 Firestore 規則），公開無妨。
+- ⚠ 正式站（github.io）行為零變更：`pickFirebaseConfig` 對非 localhost 一律回
+  `PROD_CONFIG`（config 物件同一份、byte-identical）。
 
 ## 模組與全域匯流排（本專案最重要的一條）
 
