@@ -6437,9 +6437,19 @@ function momoLoadProducts(shop){
   try{ const local=localStorage.getItem(k); if(local) return JSON.parse(local); }catch{}
   return [];
 }
+const MOMO_DOC_WARN_KB=700;   // Firestore 單 doc 1MB 上限；此 doc 每月長 periods → 700KB 畫面預警（撞牆前遷移比撞牆後便宜）
 function momoSaveProducts(shop,products){
   const k=momoProductsKey(shop);
-  try{ localStorage.setItem(k,JSON.stringify(products)); }catch{}
+  const _json=JSON.stringify(products);
+  // ⚠ 寫入前大小監控（畫面警告、非只 console）：超 700KB 即提醒精簡/分片，別再塞非必要欄位
+  try{ const _kb=(new TextEncoder().encode(_json).length)/1024; if(_kb>MOMO_DOC_WARN_KB){
+    const msg='⚠ '+shop+' 商品資料 '+_kb.toFixed(0)+'KB，已過 '+MOMO_DOC_WARN_KB+'KB 警戒（Firestore 單 doc 上限 1MB、每月還會長）→ 需精簡欄位或分片，勿再塞非必要資料。';
+    try{ console.error('%c[MOMO size] '+msg,'color:#dc2626;font-weight:700'); }catch{}
+    try{ if(typeof showToast==='function') showToast(msg,'error'); }catch{}
+    try{ if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品資料接近容量上限',message:msg+'\n\n（此警告在每次寫入超過 '+MOMO_DOC_WARN_KB+'KB 時出現）',kind:'error'}); }catch{}
+    try{ window.__momoSizeWarn={shop, kb:Math.round(_kb), at:Date.now()}; }catch{}
+  } else { try{ if(window.__momoSizeWarn&&window.__momoSizeWarn.shop===shop) delete window.__momoSizeWarn; }catch{} } }catch(e){}
+  try{ localStorage.setItem(k,_json); }catch{}
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=products; }catch{}  // 權威鏡像（跨裝置：momo_products 訂閱也灌這裡）
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}              // 保留三鏡像一致
   try{ window._momoJustSaved=Date.now(); }catch{}   // bounce-back 守衛：剛存過 5 秒內、momo_products 訂閱 echo 回來不覆蓋
@@ -7615,6 +7625,54 @@ function momoMoPlusReconcileTotal(parsed, pdfPayable){
   if(pdfPayable==null || pdfPayable==='') return {ok:null, fileTotal:parsed.totals.net, note:'未提供 PDF 實際應付，僅回檔案總額'};
   const p=momoMoPlusNum(pdfPayable), diff=Math.round((parsed.totals.net-p)*100)/100;
   return {ok:Math.abs(diff)<=0.5, fileTotal:parsed.totals.net, pdfPayable:p, diff};
+}
+/* ═══════════════ MO+ 商品主檔（mo+○○商品資訊.xls）═══════════════
+   分頁「匯出商品價格資料」，header 在第 2 列(index 1)，第 1 列說明跳過。
+   欄：商品編號/商品名稱/單品編號/規格一/規格二/商品原廠編號/生效日期/售價/市價。
+   售價掛規格層 → 逐商品編號 group、保留 specs[]；商品編號→原廠編號完整對照(含零銷量)。生效日期全空＝當前快照、重傳取代。*/
+const MOMO_MASTER_COLS={ sku:['商品編號'], name:['商品名稱'], itemNo:['單品編號'], spec1:['規格一','規格1'], spec2:['規格二','規格2'], origin:['商品原廠編號'], effDate:['生效日期'], listPrice:['售價'], msrp:['市價'] };
+function momoParseMoPlusMaster(rows){
+  if(!Array.isArray(rows) || rows.length<2) return {ok:false, errors:['「匯出商品價格資料」列數不足（header 應在第 2 列 / index 1）']};
+  const header=(rows[1]||[]).map(x=>String(x==null?'':x));
+  const norm=header.map(momoMoPlusNorm);
+  const find=cands=>{ for(const c of cands){ const i=norm.indexOf(momoMoPlusNorm(c)); if(i>=0) return i; } return -1; };
+  const idx={}, missing=[];
+  [['sku',true],['name',true],['origin',true],['itemNo',false],['spec1',false],['spec2',false],['listPrice',false],['msrp',false]]
+    .forEach(([k,req])=>{ idx[k]=find(MOMO_MASTER_COLS[k]); if(req&&idx[k]<0) missing.push(k+'('+MOMO_MASTER_COLS[k].join('/')+')'); });
+  if(missing.length) return {ok:false, header, errors:['找不到必需欄位：'+missing.join('、')+'。實際 header（第 2 列）：'+header.filter(Boolean).join(' | ')+'。這可能不是商品主檔（或分頁/格式不符）。']};
+  const groups={}; const allOrigins=new Set(); let rowN=0;
+  for(let r=2;r<rows.length;r++){
+    const row=rows[r]; if(!row || row.every(c=>c===''||c==null)) continue;
+    const sku=String(row[idx.sku]==null?'':row[idx.sku]).trim(); if(!sku) continue;
+    const name=String(row[idx.name]==null?'':row[idx.name]).trim();
+    const origin=idx.origin>=0?String(row[idx.origin]==null?'':row[idx.origin]).trim():'';
+    const g=groups[sku]||(groups[sku]={sku, name, specs:[], origins:new Set()});
+    if(!g.name && name) g.name=name;
+    g.specs.push({ itemNo:idx.itemNo>=0?String(row[idx.itemNo]||'').trim():'', spec1:idx.spec1>=0?String(row[idx.spec1]||'').trim():'', spec2:idx.spec2>=0?String(row[idx.spec2]||'').trim():'',
+      origin, listPrice:idx.listPrice>=0?momoMoPlusNum(row[idx.listPrice]):null, msrp:idx.msrp>=0?momoMoPlusNum(row[idx.msrp]):null });
+    if(origin){ g.origins.add(origin); allOrigins.add(origin); }
+    rowN++;
+  }
+  const products=Object.keys(groups).map(k=>{ const g=groups[k]; return { sku:g.sku, name:g.name, specs:g.specs, origins:[...g.origins] }; });
+  return { ok:true, products, rowN, skuN:products.length, originN:allOrigins.size };
+}
+// 批次 upsert 主檔：新商品 create、既有補「原廠對照」（origin 主 + origins[]），**不覆蓋** periods/history/feeRateExpected。
+//   ⚠ specs/掛牌價/市價（~370KB、含中文規格名）**不進 momo_products**（該 doc 已 ~432KB 且每月長 periods、逼近 1MB）→
+//     規格層資料留給 P2 專門的精簡儲存（獨立 doc/localStorage，見計畫）。P1 只做原廠對照 + 批次建檔（自動帶成本/缺成本用）。
+function momoMoPlusApplyMaster(shop, parsed){
+  const products=momoLoadProducts(shop);
+  const bySku=new Map(products.map(p=>[p.sku,p]));
+  let added=0, updated=0;
+  (parsed.products||[]).forEach(m=>{
+    let p=bySku.get(m.sku);
+    if(!p){ p={sku:m.sku, name:m.name||'', history:[{...momoNowParts(), note:'商品主檔匯入'}], periods:{}}; products.push(p); bySku.set(m.sku,p); added++; }
+    else { updated++; if((p.history||[]).length===0) p.history=[]; }
+    if(!p.name && m.name) p.name=m.name;
+    p.origins=(m.origins||[]).slice();               // 該商品編號所有原廠編號（缺成本/多原廠用）
+    p.origin=(m.origins&&m.origins[0])||p.origin||''; // 主原廠編號（自動帶成本）；P2 再按銷售最多規格精算
+  });
+  momoSaveProducts(shop, products);
+  return { added, updated, total:products.length };
 }
 /* ═══════════════ MO+ 逐列成本資料層（momo_moplus_origins collection）P3b-1 ═══════════════
    每賣場每來源月一 doc：{ shop, src, skus:{sku:{period:{o:{原廠編號:qty}, d:手續費D}}}, freight:{period:{b:運費收入B, c:代扣運費C, rows}} }。
@@ -10507,7 +10565,54 @@ function momoRenderMoPlusUpload(shop){
       <button class="mm-btn-primary" style="margin-top:10px" onclick="momoMoPlusUploadGenerate('${shop}')" ${f?'':'disabled'}>▶ 產生預覽</button>
       <span class="mm-gen-hint">${f?'解析對帳明細、逐列驗證、顯示期別分布與總額（先看數字再決定寫入）':'請選對帳明細檔'}</span>
       <div id="moplus-up-preview-${shop}" style="margin-top:16px"></div>
+
+      <div style="border-top:1px solid #eef0f2;margin:22px 0 14px"></div>
+      <div class="mm-note" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-bottom:12px;line-height:1.7;color:#065f46">
+        上傳 <b>mo+${shop==='MO+麻吉'?'好麻吉':'森之旅'}商品資訊.xls</b>（「匯出商品價格資料」分頁）＝商品主檔。<br>
+        <span class="mm-muted">補齊<b>商品編號→原廠編號完整對照</b>（含零銷量商品）+ <b>掛牌售價/市價</b>。可一次批次建檔（新品自動帶成本靠這個）。當前快照、重傳取代主檔欄位，<b>不動</b>既有銷售/期別資料。</span>
+      </div>
+      <div class="mm-uprow">
+        <div class="mm-uplbl">商品主檔 <span class="mm-code">商品資訊</span><div class="mm-hint">分頁「匯出商品價格資料」</div></div>
+        <div class="mm-upctl"><input type="file" accept=".xlsx,.xls" onchange="momoMoPlusMasterFile('${shop}',event)"><span class="${_moPlusMasterFile?'mm-ok':'mm-muted'}">${_moPlusMasterFile?'✓ '+_momoEsc(_moPlusMasterFile.name):'未選'}</span>${_moPlusMasterFile?`<a onclick="momoMoPlusMasterRemove('${shop}')" title="移除" style="color:#ef4444;cursor:pointer;font-weight:700">✕</a>`:''}</div>
+      </div>
+      <button class="mm-btn-primary" style="margin-top:10px" onclick="momoMoPlusMasterGenerate('${shop}')" ${_moPlusMasterFile?'':'disabled'}>▶ 產生主檔預覽</button>
+      <span class="mm-gen-hint">${_moPlusMasterFile?'解析商品主檔、顯示新增/更新筆數與原廠對照數（確認再寫入）':'請選商品主檔'}</span>
+      <div id="moplus-master-preview-${shop}" style="margin-top:16px"></div>
     </div>`;
+}
+let _moPlusMasterFile=null, _moPlusMasterParsed=null;
+function momoMoPlusMasterFile(shop,e){ const files=e.target.files; if(!files||!files.length) return; _moPlusMasterFile=files[0]; _moPlusMasterParsed=null; momoRenderMoPlusUpload(shop); }
+function momoMoPlusMasterRemove(shop){ _moPlusMasterFile=null; _moPlusMasterParsed=null; momoRenderMoPlusUpload(shop); }
+async function momoMoPlusMasterGenerate(shop){
+  const prev=document.getElementById('moplus-master-preview-'+shop); if(prev) prev.innerHTML='<div style="font-size:13px;color:#9ca3af">解析中…</div>';
+  const file=_moPlusMasterFile; if(!file) return;
+  let wb; try{ wb=await momoReadWorkbook(file); }catch(err){ if(prev)prev.innerHTML=momoMoPlusErrHtml('讀檔失敗',_momoEsc(String(err&&err.message||err))); return; }
+  const sheetName=(wb.names||[]).find(n=>momoMoPlusNorm(n).includes(momoMoPlusNorm('匯出商品價格資料')))||(wb.names||[]).find(n=>momoMoPlusNorm(n).includes(momoMoPlusNorm('商品價格')));
+  if(!sheetName){ if(prev)prev.innerHTML=momoMoPlusErrHtml('這不是商品主檔','找不到「匯出商品價格資料」分頁（此檔分頁：'+_momoEsc((wb.names||[]).join('、')||'無')+'）。請上傳「mo+…商品資訊.xls」。'); return; }
+  const parsed=momoParseMoPlusMaster(wb.sheet(sheetName));
+  if(!parsed.ok){ if(prev)prev.innerHTML=momoMoPlusErrHtml('商品主檔格式不符', _momoEsc((parsed.errors||[]).join('；'))); return; }
+  _moPlusMasterParsed=parsed;
+  // 預覽：新增 / 更新
+  const existing=new Set(momoLoadProducts(shop).map(p=>p.sku));
+  let willAdd=0, willUpd=0; parsed.products.forEach(m=>{ existing.has(m.sku)?willUpd++:willAdd++; });
+  const multi=parsed.products.filter(p=>p.origins.length>1).length;
+  if(prev) prev.innerHTML=`<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;background:#fff">
+    <div style="font-size:14px;font-weight:700;margin-bottom:8px">商品主檔預覽</div>
+    <div style="font-size:13px;line-height:1.9">
+      解析 <b>${parsed.rowN.toLocaleString()}</b> 列 → <b>${parsed.skuN.toLocaleString()}</b> 個商品編號、<b>${parsed.originN.toLocaleString()}</b> 個原廠編號（${multi} 個商品有多原廠編號）。<br>
+      將 <b style="color:#10b981">新增 ${willAdd.toLocaleString()}</b> 個商品、<b style="color:#5b5fcf">更新 ${willUpd.toLocaleString()}</b> 個既有商品的主檔欄位（原廠對照/掛牌價/市價）。<br>
+      <span class="mm-muted">⚠ 只補主檔欄位，<b>不覆蓋</b>既有銷售/期別/歷程。生效日期全空＝當前快照、可重傳取代。</span>
+    </div>
+    <button class="mm-btn-primary" style="margin-top:10px" onclick="momoMoPlusMasterApply('${shop}')">✔ 確認寫入</button>
+  </div>`;
+}
+function momoMoPlusMasterApply(shop){
+  const parsed=_moPlusMasterParsed; if(!parsed){ return; }
+  const res=momoMoPlusApplyMaster(shop, parsed);
+  _moPlusMasterFile=null; _moPlusMasterParsed=null;
+  const msg='商品主檔已寫入：新增 '+res.added+' 個、更新 '+res.updated+' 個（共 '+res.total+' 個商品）。原廠對照 '+parsed.originN+' 個。記得按 ☁ 同步雲端。';
+  if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品主檔已寫入', message:msg, kind:'info'}); else if(typeof showToast==='function') showToast('主檔已寫入 '+res.total+' 個商品（記得同步）','success');
+  momoRenderMoPlusUpload(shop);
 }
 function momoMoPlusUploadFile(shop,e){ const files=e.target.files; if(!files||!files.length) return; _moPlusUpFile=files[0]; _moPlusUpParsed=null; _moPlusUpPlan=null; momoRenderMoPlusUpload(shop); }
 function momoMoPlusUploadRemove(shop){ _moPlusUpFile=null; _moPlusUpParsed=null; _moPlusUpPlan=null; momoRenderMoPlusUpload(shop); }
@@ -12678,6 +12783,7 @@ Object.assign(window, {
   momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
   momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,momoBuildMoPlusPlan,
   momoIsMoPlus,momoRenderMoPlusUpload,momoMoPlusUploadFile,momoMoPlusUploadRemove,momoMoPlusUploadGenerate,momoMoPlusShowDryRun,momoMoPlusUploadOpenGuard,momoMoPlusUploadApply,
+  momoMoPlusMasterFile,momoMoPlusMasterRemove,momoMoPlusMasterGenerate,momoMoPlusMasterApply,momoParseMoPlusMaster,momoMoPlusApplyMaster,
   momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusConsistency,momoMoPlusCompleteness,
   momoMoPlusOriginsForSku,momoMoPlusMarginCalc,momoMoPlusMargin,momoMoPlusOrderDate,momoMoPlusLatestSaleForSku,momoDismissMoPlusPriceHint,
   momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusBatchPaste,
