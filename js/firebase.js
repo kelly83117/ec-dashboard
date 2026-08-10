@@ -2,7 +2,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
 import { getFirestore, doc, collection, getDoc, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
-const firebaseConfig = {
+const PROD_CONFIG = {
   apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
   authDomain: "yc-dashboard-9aa6c.firebaseapp.com",
   projectId: "yc-dashboard-9aa6c",
@@ -10,6 +10,36 @@ const firebaseConfig = {
   messagingSenderId: "788748560432",
   appId: "1:788748560432:web:aaa65e2d253a77eb7425f5"
 };
+// 本機開發用獨立 dev 專案（asia-east1 / Spark / 規則全開）——localhost 自動連此，本機測試寫入不碰正式庫。
+//   ⚠ web config 非機密（設計上就嵌在前端、安全靠 Firestore 規則不是靠 apiKey）；dev 為拋棄式資料，公開無妨。
+const DEV_CONFIG = {
+  apiKey: "AIzaSyD6FXc9N3q2yLheWJLsUyB0Nh7lbtD8b6M",
+  authDomain: "yc-dashboard-dev.firebaseapp.com",
+  projectId: "yc-dashboard-dev",
+  storageBucket: "yc-dashboard-dev.firebasestorage.app",
+  messagingSenderId: "484367171627",
+  appId: "1:484367171627:web:49a4c31733ca71f798ea6e"
+};
+const PROD_PROJECT_ID = 'yc-dashboard-9aa6c';
+// hostname 切換：localhost/127.0.0.1/::1 →（DEV_CONFIG 齊全時）dev；其餘（github.io 正式站）→ prod。
+//   ★ 取代舊 TEST_NOWRITE 插拔式防護：localhost 自動連 dev → 本機測試寫入天然安全、不再需要貼/剝 canon_guard。
+function pickFirebaseConfig(hostname, dev, prod){
+  const isLocal = hostname==='localhost' || hostname==='127.0.0.1' || hostname==='::1';
+  if(isLocal && dev && dev.projectId) return { config:dev, env:'dev', isLocal:true };
+  return { config:prod, env:'prod', isLocal };
+}
+const _fbPick = pickFirebaseConfig(location.hostname, DEV_CONFIG, PROD_CONFIG);
+const firebaseConfig = _fbPick.config;
+try{ window.__FB_ENV = _fbPick.env; window.__FB_PROJECT = firebaseConfig.projectId; }catch{}
+// ⛔ 永久 in-repo 安全斷言（取代 TEST_NOWRITE 插拔）：localhost 絕不可連到正式庫。
+//   dev config 缺失 / hostname 判斷失效 → 全屏紅字 + throw，拒絕初始化 Firebase，避免本機測試寫壞正式資料。
+if(_fbPick.isLocal && firebaseConfig.projectId === PROD_PROJECT_ID){
+  const _m = '[firebase] ⛔ localhost 連到正式庫 ' + PROD_PROJECT_ID + '！(DEV_CONFIG 缺失或 hostname 判斷失效) 已拒絕連線——本機請連 dev、勿寫正式庫。';
+  try{ console.error('%c'+_m, 'color:#fff;background:#dc2626;font-size:16px;font-weight:800;padding:6px 12px'); }catch{}
+  try{ window.addEventListener('DOMContentLoaded', ()=>{ const d=document.createElement('div'); d.style.cssText='position:fixed;inset:0;z-index:2147483647;background:#dc2626;color:#fff;font:700 20px/1.8 sans-serif;display:flex;align-items:center;justify-content:center;padding:40px;text-align:center'; d.textContent=_m; document.body.appendChild(d); }); }catch{}
+  throw new Error(_m);   // 阻斷 Firebase 初始化 → 本機退回 localStorage、不連正式庫
+}
+try{ if(_fbPick.env==='dev') console.log('%c[firebase] ✅ localhost → DEV（'+firebaseConfig.projectId+'）：本機寫入安全、不影響正式站','color:#059669;font-weight:700;font-size:14px'); }catch{}
 
 try {
   const app = initializeApp(firebaseConfig);
