@@ -6437,9 +6437,19 @@ function momoLoadProducts(shop){
   try{ const local=localStorage.getItem(k); if(local) return JSON.parse(local); }catch{}
   return [];
 }
+const MOMO_DOC_WARN_KB=700;   // Firestore 單 doc 1MB 上限；此 doc 每月長 periods → 700KB 畫面預警（撞牆前遷移比撞牆後便宜）
 function momoSaveProducts(shop,products){
   const k=momoProductsKey(shop);
-  try{ localStorage.setItem(k,JSON.stringify(products)); }catch{}
+  const _json=JSON.stringify(products);
+  // ⚠ 寫入前大小監控（畫面警告、非只 console）：超 700KB 即提醒精簡/分片，別再塞非必要欄位
+  try{ const _kb=(new TextEncoder().encode(_json).length)/1024; if(_kb>MOMO_DOC_WARN_KB){
+    const msg='⚠ '+shop+' 商品資料 '+_kb.toFixed(0)+'KB，已過 '+MOMO_DOC_WARN_KB+'KB 警戒（Firestore 單 doc 上限 1MB、每月還會長）→ 需精簡欄位或分片，勿再塞非必要資料。';
+    try{ console.error('%c[MOMO size] '+msg,'color:#dc2626;font-weight:700'); }catch{}
+    try{ if(typeof showToast==='function') showToast(msg,'error'); }catch{}
+    try{ if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品資料接近容量上限',message:msg+'\n\n（此警告在每次寫入超過 '+MOMO_DOC_WARN_KB+'KB 時出現）',kind:'error'}); }catch{}
+    try{ window.__momoSizeWarn={shop, kb:Math.round(_kb), at:Date.now()}; }catch{}
+  } else { try{ if(window.__momoSizeWarn&&window.__momoSizeWarn.shop===shop) delete window.__momoSizeWarn; }catch{} } }catch(e){}
+  try{ localStorage.setItem(k,_json); }catch{}
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=products; }catch{}  // 權威鏡像（跨裝置：momo_products 訂閱也灌這裡）
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}              // 保留三鏡像一致
   try{ window._momoJustSaved=Date.now(); }catch{}   // bounce-back 守衛：剛存過 5 秒內、momo_products 訂閱 echo 回來不覆蓋
@@ -7646,8 +7656,9 @@ function momoParseMoPlusMaster(rows){
   const products=Object.keys(groups).map(k=>{ const g=groups[k]; return { sku:g.sku, name:g.name, specs:g.specs, origins:[...g.origins] }; });
   return { ok:true, products, rowN, skuN:products.length, originN:allOrigins.size };
 }
-// 批次 upsert 主檔：新商品 create、既有商品補主檔欄（origin/origins/specs/掛牌價/市價），**不覆蓋** periods/history/feeRateExpected。
-//   主 origin/listPriceDefault：P1 先取「第一個有值的規格」；P2 再按「銷售最多規格」精算。
+// 批次 upsert 主檔：新商品 create、既有補「原廠對照」（origin 主 + origins[]），**不覆蓋** periods/history/feeRateExpected。
+//   ⚠ specs/掛牌價/市價（~370KB、含中文規格名）**不進 momo_products**（該 doc 已 ~432KB 且每月長 periods、逼近 1MB）→
+//     規格層資料留給 P2 專門的精簡儲存（獨立 doc/localStorage，見計畫）。P1 只做原廠對照 + 批次建檔（自動帶成本/缺成本用）。
 function momoMoPlusApplyMaster(shop, parsed){
   const products=momoLoadProducts(shop);
   const bySku=new Map(products.map(p=>[p.sku,p]));
@@ -7657,12 +7668,8 @@ function momoMoPlusApplyMaster(shop, parsed){
     if(!p){ p={sku:m.sku, name:m.name||'', history:[{...momoNowParts(), note:'商品主檔匯入'}], periods:{}}; products.push(p); bySku.set(m.sku,p); added++; }
     else { updated++; if((p.history||[]).length===0) p.history=[]; }
     if(!p.name && m.name) p.name=m.name;
-    p.origins=(m.origins||[]).slice();
-    p.origin=(m.origins&&m.origins[0])||p.origin||'';
-    p.specs=(m.specs||[]).slice();
-    const _def=(m.specs||[]).find(s=>Number(s.listPrice)>0);
-    p.listPriceDefault=_def?Number(_def.listPrice):null;
-    p.masterAt=Date.now();
+    p.origins=(m.origins||[]).slice();               // 該商品編號所有原廠編號（缺成本/多原廠用）
+    p.origin=(m.origins&&m.origins[0])||p.origin||''; // 主原廠編號（自動帶成本）；P2 再按銷售最多規格精算
   });
   momoSaveProducts(shop, products);
   return { added, updated, total:products.length };
