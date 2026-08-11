@@ -13347,6 +13347,42 @@ function initShopUI(shop){
   if(shop===TEST_SHOP_ID){ testInitShopUI(shop); return; }
   if(_userPickedPeriod[shop]) onMonthChange(shop);   // 已介入 → 只重載當前選擇（不跳）
   else _applyLatestPeriod(shop);                     // 沒介入 → 自動跳最新（內部完整渲染）
+  // 還原上次離開時的篩選狀態（只走「進入淨利表分頁」這一條路）。
+  //   🔴 刻意做在這裡、不做進 loadIntoUI：那是全站共用路徑（切月份/切半月/產生報表/雲端刷新
+  //     都會經過），在那裡還原等於連「切月份」也不重置，超出需求範圍。
+  //   上面兩行（onMonthChange / _applyLatestPeriod）整條鏈都是同步的（無 async/await/Promise），
+  //     走到這裡時 loadIntoUI 已經跑完、四個欄位已被重置成預設值 —— 所以這裡是覆寫，
+  //     不是被覆寫。順序不可對調。
+  //   讀不到（首次使用 / 資料損毀）→ _loadFilterState 回 null → 整段跳過，行為與現在完全相同。
+  //
+  //   ⚠ 該期沒有報表時（tryLoadSaved 走 else 分支、或 _applyLatestPeriod 提前 return false），
+  //     這段照跑不特判，兩層理由：
+  //     ① 那兩條路徑【根本沒走到 loadIntoUI】，四個欄位壓根沒被重置 —— 還原只是把相同的值
+  //        寫回去，是 no-op，不會覆蓋掉任何東西。
+  //     ② 就算 ① 的推理哪天因別人改動而不成立，真正的保險是下面 applyFilters 開頭那句
+  //        `if(!s._built||!s._built.length)return;` —— 沒有報表資料就直接早退，畫面不會動。
+  //     兩層各自獨立成立，特判反而多一個分支要維護。
+  const _fs=_loadFilterState(shop);
+  if(_fs){
+    state[shop].filters=_fs.filters;
+    state[shop].sorts=_fs.sorts;
+    state[shop].tagFilters=_fs.tagFilters;
+    state[shop].search=_fs.search;
+    // 搜尋框不在 #tbl-{shop} 裡（它在 toolbar #tb-{shop}），renderTable 碰不到它 → 自己回填。
+    //   ⚠ programmatic 的 .value= 不會觸發 oninput，所以不會回頭呼叫 setSearch → 不會回寫。
+    //   這一行逐字照抄 loadIntoUI 裡的既有範本。
+    const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
+    // 讓畫面跟上：applyFilters → renderTable（表格本體＋表頭排序箭頭＋欄位篩選鈕 on 狀態，
+    //   三者都由 s.sorts / s.filters 現算）＋ updateTagFilterBar（pill 的選取狀態由 s.tagFilters 現算）。
+    //   兩者只「產生」onclick 字串、不執行，所以不會繞回 setSort/setTagFilter 等六支 → 不會回寫。
+    //
+    //   🔴 這裡【刻意】讓整表多重繪一次：loadIntoUI 內部已經跑過一次 applyFilters，這是第二次。
+    //     好麻吉 800+ 列在進頁時會重繪兩次 —— 這是【刻意接受的代價，不是 bug，不要「修」掉它】。
+    //     唯一的替代方案是把還原塞進 loadIntoUI（讓它一次就用正確的篩選渲染），但那條路
+    //     是全站共用路徑（切月份/切半月/產生報表/雲端刷新都經過），改它會連帶改變那四種
+    //     操作的重置行為 —— 已在設計階段評估後否決。寧可多繪一次，不動共用路徑。
+    applyFilters(shop);
+  }
   if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
   if(Object.keys(globalMap).length>0){
     const uc=document.getElementById('uc-map-'+shop);
