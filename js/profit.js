@@ -9988,26 +9988,30 @@ const _momoBatchFilter={};  // shop -> ''|'nocost'|'nopp'|'nosp'（異常篩選�
 const _momoBatchShowDisc={}; // shop -> 批次維護是否顯示已下架（預設 false，比照總表）
 // 商品異常判定：缺成本/進價/售價（0/null/負都算缺）。
 //   甲乙配＝進價供應商模式：cost/purchasePrice/salePrice 為手填欄位（不帶 shop → 走下方原路徑，行為不變）。
-//   MO+（代收代付）＝無「進價」概念；成本靠原廠編號查莫筆克成本表、售價取自商品主檔掛牌價 → 缺料判定改走那兩個來源。
-//   ctx（可選）＝momoBatchAnomalyCtx 預算好的 {costMap,masterMap}，供 render 迴圈 1,276× 共用免逐筆重讀。
+//   MO+（代收代付）＝無「進價」概念；成本靠原廠編號查莫筆克成本表、售價＝總表售價欄同源 → 缺料判定改走那兩條路。
+//   ctx（可選）＝momoBatchAnomalyCtx 預算好的 {costMap}，供 render 迴圈共用免逐筆重讀。
 function momoProductAnomalies(p, shop, ctx){
   const miss=v=>!(Number(v)>0);
   if(shop && momoIsMoPlus(shop)){
     const costMap=(ctx&&ctx.costMap)||momoMoPlusCostMapCached();
-    const masterMap=(ctx&&ctx.masterMap)||momoMoPlusMasterCached(shop);
     const origs=(p.origins&&p.origins.length)?p.origins:(p.origin?[p.origin]:[]);
     const cost = origs.length===0 || origs.some(o=>!(Number(costMap[o])>0));   // 無原廠編號 or 任一原廠查無成本
-    const m=masterMap&&masterMap[p.sku];
-    const sp = !(m && (m.specs||[]).some(s=>Number(s.listPrice)>0));            // 商品主檔查無掛牌價（含手動 TEMP- 未在主檔）
+    // ⚠ 缺售價＝與總表「售價」欄完全同源同邏輯（single source）：掛牌價(主檔 momoMoPlusListPriceForSku)
+    //   或 最新成交價(對帳明細 momoMoPlusLatestSaleForSku) 任一有值即「有售價」；兩者皆無、總表顯示「—」才算缺。
+    //   （不可只看主檔——總表無主檔掛牌時會回退顯示成交價；只看主檔會把「已有成交價」的商品全誤標缺售價）
+    const lp = momoMoPlusListPriceForSku(shop, p.sku, null).listPrice;
+    const ls = momoMoPlusLatestSaleForSku(shop, p.sku);
+    const sp = (lp==null) && !(ls && ls.sp!=null);
     return { cost, pp:false, sp, any:cost||sp };                               // MO+ 無進價：pp 恆 false（缺進價 chip/badge 因此不出現）
   }
   const cost=miss(p.cost), pp=miss(p.purchasePrice), sp=miss(p.salePrice);
   return { cost, pp, sp, any:cost||pp||sp };
 }
-// 批次維護異常判定的共用預算：MO+ 一次讀好 costMap+masterMap（render 迴圈共用）；甲乙 = null（走手填欄位、無需預算）
+// 批次維護異常判定的共用預算：MO+ 一次讀好 costMap（render 迴圈共用）；甲乙 = null（走手填欄位、無需預算）。
+//   售價改走 momoMoPlusListPriceForSku/LatestSaleForSku（各自 epoch 快取），故 ctx 不再需要 masterMap。
 function momoBatchAnomalyCtx(shop){
   if(!momoIsMoPlus(shop)) return null;
-  return { costMap: momoMoPlusCostMapCached(), masterMap: momoMoPlusMasterCached(shop) };
+  return { costMap: momoMoPlusCostMapCached() };
 }
 // 該商品在「總表目前選的期別」有沒有營收（缺成本·本期有營收 篩選用；跟總覽警示同口徑）
 function momoHasPeriodRevenue(p, shop, period){
