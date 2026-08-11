@@ -9973,11 +9973,14 @@ const _momoTagFilter={};   // shop → Set(tagKey)（勾選的標籤，OR）
 const _momoNumFilter={};   // shop → [{k,op:'gt'|'lt'|'between',a,b}]（數值條件，AND）
 const _momoTagsCache={};   // shop → {period, result}（整月標籤快取，避免每次搜尋重算 2×N aggregate）
 // 可做數值篩選的欄（總表所有數值欄）；value 直接讀 aggregate 回傳的 row 欄位
-const MOMO_NUM_COLS=[
-  {k:'ppUntax',label:'進價',unit:'$'},{k:'salePrice',label:'售價',unit:'$'},{k:'view',label:'瀏覽量',unit:''},
-  {k:'convRate',label:'成交率',unit:'%'},{k:'qty',label:'本期銷量',unit:''},{k:'revenue',label:'營收',unit:'$'},
-  {k:'margin',label:'毛利率',unit:'%'},{k:'profit',label:'毛利貢獻',unit:'$'},{k:'returnRate',label:'退貨率',unit:'%'},
-];
+// 數值篩選可選欄＝從單一權威 MOMO_PROFIT_COLS（經 momoColAvail 賣場條件）**動態產生**：凡數值格式欄且非固定標籤欄即可篩。
+//   賣場沒有的欄自動不出現（MO+ 無進價/瀏覽量/成交率、改有掛牌價/成本涵蓋）。**新增/移除欄位只改 MOMO_PROFIT_COLS 一處，篩選器自動跟上**、不再各寫一份清單。
+const MOMO_NUM_FMTS=new Set(['money','num','pct','pct1']);
+function momoNumCols(shop){
+  return momoColAvail(shop)
+    .filter(c=>MOMO_NUM_FMTS.has(c.fmt) && !c.fixed && !c.left)   // 數值格式、非固定/標籤欄
+    .map(c=>({ k:c.k, label:c.label, unit:(c.fmt==='money'?'$':((c.fmt==='pct'||c.fmt==='pct1')?'%':'')) }));
+}
 function momoTagsFor(shop, recompute){
   const period=_momoPeriodSel[shop]||'';
   const c=_momoTagsCache[shop];
@@ -10084,7 +10087,8 @@ function momoRenderFilterPanel(shop){
     return `<div class="mm-fp-gp"><div class="mm-fp-gp-h">${gHead}</div><div class="mm-fp-tags">${tagsHtml}</div></div>`;
   }).join('');
   const nf=_momoNumFilter[shop]||[];
-  const colByK=Object.fromEntries(MOMO_NUM_COLS.map(c=>[c.k,c]));
+  const numCols=momoNumCols(shop);   // 動態、賣場條件（單一權威 MOMO_PROFIT_COLS 導出）
+  const colByK=Object.fromEntries(numCols.map(c=>[c.k,c]));
   const opLbl={gt:'>',lt:'<',between:'區間'};
   const unitTxt=u=> u==='%'?'%':(u==='$'?' 元':'');
   const condHTML=nf.length? nf.map((c,i)=>{
@@ -10092,7 +10096,7 @@ function momoRenderFilterPanel(shop){
     const txt=c.op==='between'?`${c.a} ~ ${c.b}${unitTxt(col.unit)}`:`${opLbl[c.op]} ${c.a}${unitTxt(col.unit)}`;
     return `<div class="mm-fp-cond"><span>${col.label} ${txt}</span><button class="mm-fp-x" onclick="momoNumRemove('${shop}',${i})" title="移除此條件">✕</button></div>`;
   }).join('') : `<div class="mm-fp-note" style="margin:2px 0">尚無數值條件</div>`;
-  const colOpts=MOMO_NUM_COLS.filter(c=>!(momoIsMoPlus(shop)&&(c.k==='ppUntax'||c.k==='salePrice'))).map(c=>`<option value="${c.k}">${c.label}</option>`).join('');   // MO+ 無進價、售價欄為掛牌價(不在此列)→ 不列入數值篩選下拉
+  const colOpts=numCols.map(c=>`<option value="${c.k}">${c.label}</option>`).join('');   // 動態賣場欄（無寫死清單、無 MO+ 特例）
   // 值格支援 Enter＝點「加入」；有值未加入時把「加入」點亮成主色＋顯示「↵ 套用」提示（momoNumPendingSync）→ 讓人看得出尚未生效。
   const kd=`onkeydown="if(event.key==='Enter'){event.preventDefault();momoNumAdd('${shop}')}" oninput="momoNumPendingSync('${shop}')"`;
   const addRow=`<div class="mm-fp-add">
