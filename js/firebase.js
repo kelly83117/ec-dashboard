@@ -294,6 +294,18 @@ try {
           if (changed.length) { console.log('[momo_moplus_origins] 收到更新：', changed); window.dispatchEvent(new CustomEvent('momoMoPlusOriginsReady', { detail: { changed } })); }
         }, err => { console.error('[momo_moplus_origins subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_moplus_origins subscribe failed', e); }
+
+      // momo_cost_by_origin（帳號級單一 doc）→ Store._profitMem['ec_momo_cost_by_origin'] + '..._meta'。原廠編號→成本，MO+ 毛利依賴、需跨人跨機。
+      try {
+        onSnapshot(costByOriginDocRef, snap => {
+          const data = (snap && snap.data && snap.data()) || null; if (!data) return;
+          if (window._momoCostJustSaved && (Date.now() - window._momoCostJustSaved < 5000)) return;   // 剛本機存過 → 不被 echo 覆蓋
+          let changed = false;
+          if (data.costMap && JSON.stringify(Store._profitMem['ec_momo_cost_by_origin']) !== JSON.stringify(data.costMap)) { Store._profitMem['ec_momo_cost_by_origin'] = data.costMap; changed = true; }
+          if (data.meta && JSON.stringify(Store._profitMem['ec_momo_cost_by_origin_meta']) !== JSON.stringify(data.meta)) { Store._profitMem['ec_momo_cost_by_origin_meta'] = data.meta; changed = true; }
+          if (changed) { console.log('[momo_cost_by_origin] 收到更新'); window.dispatchEvent(new CustomEvent('momoCostByOriginReady')); }
+        }, err => { console.error('[momo_cost_by_origin subscribe 失敗]', err); });
+      } catch (e) { console.warn('momo_cost_by_origin subscribe failed', e); }
     };
   } catch (e) { console.warn('profit subscribe failed', e); }
 
@@ -382,6 +394,16 @@ try {
     getDoc:  (shop, src) => getDoc(doc(db, 'momo_moplus_origins', momoMoPlusOriginsDocId(shop, src))),
     setSrc:  (shop, src, data) => setDoc(doc(db, 'momo_moplus_origins', momoMoPlusOriginsDocId(shop, src)), data || {}),
     subscribe: (cb) => onSnapshot(momoMoPlusOriginsColRef, cb),
+  };
+
+  // ============== 成本對照表 momo_cost_by_origin（帳號級單一 doc；原廠編號→成本 + meta 人工旗標/異動紀錄） ==============
+  //   為什麼上雲：MO+ 毛利＝逐原廠 live 查此表；原本 local-only 導致同事開 MO+ 整片缺成本、換裝置亦然。~88KB 遠低 1MB。
+  //   多人共編：呼叫端做 read-merge-write（讀雲端→只覆蓋本機 dirty 的原廠編號→寫回），避免整包覆蓋蓋掉同事剛補的成本。
+  const costByOriginDocRef = doc(db, 'momo_cost_by_origin', 'account');
+  window.__cloudCostByOrigin = {
+    getDoc: () => getDoc(costByOriginDocRef),
+    set:    (data) => setDoc(costByOriginDocRef, data || {}),
+    subscribe: (cb) => onSnapshot(costByOriginDocRef, cb),
   };
 
   // ============== 洞察表獨立文件 app/insight（避免 app/main 撞 1MB 上限） ==============
