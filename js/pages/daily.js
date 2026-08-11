@@ -223,7 +223,9 @@ Object.assign(App, {
           const counts = it.counts || {};
           const keys = Object.keys(counts).filter(k => counts[k]);
           if (keys.length === 0) return '';
-          const chips = keys.map(k => `<button type="button" class="mm-dp-chip" data-mm-person="${escapeHtml(p.name)}" data-mm-date="${escapeHtml(viewDate)}" data-mm-combo="${escapeHtml(k)}" onclick="momoOpenDpDetailFromEl(this)"><span>${escapeHtml(k)}</span><span style="opacity:.6">·</span><b>${counts[k]}</b></button>`).join('');
+          // 顯示用友善賣場名（MO+麻吉→MO+好麻吉）：只轉「賣場·type」的賣場段；data-mm-combo 仍用原始 key（明細回查靠它）
+          const dispCombo = k => k.replace(/^([^·]+)·/, (m, sh) => ((window.momoShopDisplay ? window.momoShopDisplay(sh) : sh) + '·'));
+          const chips = keys.map(k => `<button type="button" class="mm-dp-chip" data-mm-person="${escapeHtml(p.name)}" data-mm-date="${escapeHtml(viewDate)}" data-mm-combo="${escapeHtml(k)}" onclick="momoOpenDpDetailFromEl(this)"><span>${escapeHtml(dispCombo(k))}</span><span style="opacity:.6">·</span><b>${counts[k]}</b></button>`).join('');
           return `<div class="mm-dp-card"><div class="mm-dp-card-h"><span class="mm-dp-card-t">MOMO · 今日調整</span><span class="mm-dp-card-auto">自動更新</span></div><div class="mm-dp-chips">${chips}</div></div>`;
         }
         return `

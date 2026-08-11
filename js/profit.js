@@ -9547,7 +9547,9 @@ function momoDeleteOptlog(shop,sku,idx){
 //   掃當天 ec_momo_optlog|甲配/乙配 → 依 by 分人、依「賣場·type」動態計數 → 寫 {kind:'momo-summary',counts} 進 ec.dailyProgress。
 //   只存 counts、不存原文/refId；點 chip 明細時用 (人+日期+賣場·type) 回 optlog 現算。type 依實際出現的動態產生（新增/未知 type 不會漏、不報錯）；type 清單單一來源仍是 MOMO_OPTLOG_TYPES。
 //   ⚠ 蝦皮/洞察那套(marketing.js/daily.js render)不改；這段是 MOMO 自己的。日後若要全站改用 username 歸屬(C 案)另立一輪。
-const MOMO_OPTLOG_DP_SHOPS=['甲配','乙配'];   // 目前有 optlog 的 MOMO 賣場（MO+ 尚無資料）
+// ⚠ 迭代「實際 MOMO 賣場」（單一來源 MOMO_SHOPS，去總表），不寫死 ['甲配','乙配']：無 optlog 的賣場 momoLoadOptlog 回 {} 自然貢獻 0、
+//   MO+ 有優化紀錄就自動納入、日後新增賣場也自動跟上。（舊值 ['甲配','乙配']＋註「MO+尚無資料」是資料可用性閘門，MO+ 一有 optlog 就過期漏接。）
+const MOMO_OPTLOG_DP_SHOPS=MOMO_SHOPS.filter(s=>s!=='總表');
 const MOMO_OPTLOG_DP_SEP='·';                 // 賣場與 type 的組合分隔（顯示與明細比對共用；賣場名不含此字元）
 function momoOptlogUserToName(by){   // optlog 存 username → 工作日誌以人名為 key；查無對應時退回 username 本身（不靜默丟、配合 personInfos 聯集仍會顯示）
   if(!by) return '';
@@ -9636,15 +9638,28 @@ function momoOpenDpDetail(person, date, combo){
 function momoCloseDpDetail(){ const ov=document.getElementById('momo-dp-detail-ov'); if(ov) ov.remove(); }
 
 // 逐月序列（13 個月上限，實際由 momoAllPeriods 決定）：qty/margin/reconciled + S1103 瀏覽/成交均價 + 半月完整度。
+// 商品欄位模型（商品軸單一權威）：甲乙＝進價供應商、MO+＝代收代付。所有「依賣場的商品欄位假設」讀這裡，
+//   不要各處散寫 momoIsMoPlus 分支 → 新增賣場模型只改這一處。
+function momoProductFieldModel(shop){
+  const mp=momoIsMoPlus(shop);
+  return {
+    isMoPlus: mp,
+    hasPurchasePrice: !mp,              // 進價：甲乙有、MO+ 無（代收代付）
+    costEditable: !mp,                  // 成本：甲乙手填、MO+ 唯讀（逐原廠自動查 cost_by_origin）
+    costSource: mp?'origin':'manual',
+    priceSource: mp?'master':'salePrice',
+    hasS1103: !mp,                      // 瀏覽量/成交率/成交均價（S1103 熱銷榜）：甲乙有、MO+ 無此報表
+  };
+}
 function momoSkuMonthly(shop,product){
   const months=[...new Set(momoAllPeriods(shop).map(k=>k.slice(0,7)))].sort();
-  return months.map(mo=>{
+  const rows=months.map(mo=>{
     const agg=momoAggregatePeriods(product,[mo+'-H1',mo+'-H2'],shop);
     const sv=momoS1103ForPeriod(product.sku, mo+'-FULL');
     const inR=sv&&sv.inReport;
     const active = agg.qty>0 || Math.abs(agg.revenue)>0.5;   // 該月此商品有無生意
     return {
-      mo, label:Number(mo.slice(5,7))+'月',
+      mo, label: mo.slice(2,4)+'/'+mo.slice(5,7),   // YY/MM 含年份，跨年不誤讀（例 25/11、26/01）；不再只「11月」
       qty:agg.qty, active,
       margin: active ? agg.margin : null,   // 沒生意的月份 → 毛利率不畫點（同總表「營收0顯示—」原則）
       reconciled:!!agg.reconciled,
@@ -9654,6 +9669,7 @@ function momoSkuMonthly(shop,product){
       half: momoMonthHalfState(mo)   // both / H1only / H2only（全站該月完整度）
     };
   });
+  return rows.filter(r=>r.active);   // ⭐ 只留「此商品有資料」的月份（空月不畫、不占版面）；2025 延遲結算期別若有資料仍保留、不當異常過濾
 }
 
 function momoOpenAnalysis(shop,sku){
@@ -9673,6 +9689,7 @@ function momoCloseAnalysis(){
 function momoRenderAnalysis(shop,p){
   const ov=document.getElementById('momo-analysis-overlay'); if(!ov) return;
   const series=momoSkuMonthly(shop,p);
+  const fm=momoProductFieldModel(shop);   // 商品軸單一權威：MO+ 無 S1103（瀏覽量/成交均價）、成本 live 查非 product 層
   const nmEsc=_momoEsc(p.name||p.sku);
   const disc=p.discontinued?` <span style="font-size:12px;color:#9ca3af;font-weight:600">· 已下架</span>`:'';
   const otherShop = shop==='甲配'?'乙配':'甲配';
@@ -9704,20 +9721,20 @@ function momoRenderAnalysis(shop,p){
       <div class="mm-ana-sec"><div class="mm-ana-h">月銷量（件）</div>
         <div style="position:relative;height:180px"><canvas id="mm-ana-qty"></canvas></div></div>
 
-      <div class="mm-ana-sec"><div class="mm-ana-h">瀏覽量 ‖ 銷量</div>
+      ${fm.hasS1103?`<div class="mm-ana-sec"><div class="mm-ana-h">瀏覽量 ‖ 銷量</div>
         ${viewPts>=2?`<div style="position:relative;height:180px"><canvas id="mm-ana-view"></canvas></div>`:s1103Empty}
         ${viewPts>=2&&series.some(s=>s.viewEst)?`<div style="font-size:11px;color:#d97706;margin-top:4px">部分月份瀏覽量為半月沿用整月的估算值（標「估」）。</div>`:''}
-      </div>
+      </div>`:''}
 
       <div class="mm-ana-sec"><div class="mm-ana-h">毛利率（%）　<span style="font-size:11px;font-weight:400;color:#94a3b8"><span style="color:${_MOMO_CY}">■</span> 青=已對帳(系統計算)　<span style="color:${_MOMO_GY}">■</span> 灰=未對帳(估算)</span></div>
         <div style="position:relative;height:160px"><canvas id="mm-ana-margin"></canvas></div>
-        <div style="font-size:11px;color:#d97706;margin-top:4px">註：各月毛利率一律用商品「目前」成本回算（歷史成本尚未接 momoEffectiveAt）→ 不反映當月真實成本，看趨勢別看絕對值。</div></div>
+        <div style="font-size:11px;color:#d97706;margin-top:4px">${fm.isMoPlus?'註：各月毛利率用該商品原廠編號的成本表（cost_by_origin）<b>目前值</b> live 回算（成本非存在商品層、無歷史版本）→ 成本表更新後歷史月會一起變、不反映當月真實成本，看趨勢別看絕對值。':'註：各月毛利率一律用商品「目前」成本回算（歷史成本尚未接 momoEffectiveAt）→ 不反映當月真實成本，看趨勢別看絕對值。'}</div></div>
 
-      <div class="mm-ana-sec"><div class="mm-ana-h">成交均價（訂購金額 ÷ 訂購數）</div>
+      ${fm.hasS1103?`<div class="mm-ana-sec"><div class="mm-ana-h">成交均價（訂購金額 ÷ 訂購數）</div>
         ${pricePts<2 ? s1103Empty
           : priceVaries ? `<div style="position:relative;height:150px"><canvas id="mm-ana-price"></canvas></div>`
           : `<div style="font-size:13px;color:#334155;padding:8px 2px">成交均價 <b style="font-size:15px">$${priceFlatVal.toLocaleString()}</b> <span style="color:#94a3b8;font-size:12px">（${priceComplete?`${pricePts} 個月期間未變動`:`僅 ${pricePts} 個月有 S1103 值、未變動；其餘活躍月缺資料`}）</span></div>`
-        }</div>
+        }</div>`:''}
 
       <div class="mm-ana-sec"><div class="mm-ana-h">商品異動時間軸</div>${momoHistoryTimelineHTML(p)}</div>
 
