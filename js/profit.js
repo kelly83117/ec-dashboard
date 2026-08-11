@@ -10456,20 +10456,61 @@ function momoBatchSubmitAdd(shop){
 }
 // ── MO+ 建檔（只需 商品編號 + 商品名稱；成本靠原廠編號從 ec_momo_cost_by_origin 自動帶、手填會與自動值衝突）──
 //   單筆 + 批次貼上（247 筆一次建）。建的是最小 product {sku,name,periods:{}}：無 cost/售價/進價 → P3b-2 顯示「缺成本」非 0。
+// 其他平台費用率（毛利率(b)用）：預設取最近完整結算月 2606好麻吉＝9.41%（其他D 5.97%＋運費淨 3.44%），可人工覆寫存 localStorage。
+//   ⚠ 自動從 recon doc 逐月推導＝延後到成交費率完整版；此簡化版用固定預設 + 可調 + 標月份。
+const MOMO_MOPLUS_OTHERFEE_DEFAULT=9.41, MOMO_MOPLUS_OTHERFEE_MONTH='2606 好麻吉結算';
+function momoMoPlusOtherFeeRate(){
+  try{ const v=localStorage.getItem('ec_momo_moplus_otherfee'); if(v!=null && Number(v)>=0) return {pct:Number(v), month:MOMO_MOPLUS_OTHERFEE_MONTH+'（已調整）'}; }catch(e){}
+  return {pct:MOMO_MOPLUS_OTHERFEE_DEFAULT, month:MOMO_MOPLUS_OTHERFEE_MONTH};
+}
+function momoMoPlusSetOtherFee(shop,val){ const v=parseFloat(val); try{ if(v>=0) localStorage.setItem('ec_momo_moplus_otherfee', String(v)); }catch(e){} momoMoPlusAddPreview(shop); }
+function momoMoPlusNextTempSku(products){   // 商品編號留空 → 自動遞增 TEMP-####（之後對到真編號再改）
+  let max=0; (products||[]).forEach(p=>{ const m=/^TEMP-(\d+)$/i.exec(p&&p.sku||''); if(m) max=Math.max(max,+m[1]); });
+  return 'TEMP-'+String(max+1).padStart(4,'0');
+}
+// 新增表單即時試算：原廠編號→自動帶成本（查無標「查無成本」）+ 兩數毛利率（(a)商品層 / (b)預估實際=再扣其他平台費用率）
+function momoMoPlusAddPreview(shop){
+  const g=id=>document.getElementById('momo-mpadd-'+id+'-'+shop);
+  const box=document.getElementById('momo-mpadd-preview-'+shop); if(!box) return;
+  const origin=(g('origin')?g('origin').value:'').trim();
+  const sp=parseFloat(g('sp')?g('sp').value:''), fee=parseFloat(g('fee')?g('fee').value:'');
+  const costMap=momoMoPlusCostMapCached();
+  let cost=null, costHtml;
+  if(!origin) costHtml='<span style="color:#9ca3af">輸入原廠編號自動帶成本</span>';
+  else if(Number(costMap[origin])>0){ cost=Number(costMap[origin]); costHtml='成本 <b>$'+cost+'</b> <span style="color:#9ca3af">（原廠 '+_momoEsc(origin)+' 自動帶入）</span>'; }
+  else costHtml='<span style="color:#dc2626;font-weight:700">查無成本</span> <span style="color:#9ca3af">（原廠 '+_momoEsc(origin)+' 不在莫筆克成本表 → 補表後才可試算）</span>';
+  const other=momoMoPlusOtherFeeRate();
+  const col=v=>v>=20?'#10b981':(v>=0?'#d97706':'#dc2626');
+  let mHtml;
+  if(cost!=null && sp>0 && fee>=0){
+    const feeAmt=sp*fee/100, a=(sp-cost-feeAmt)/sp*100, b=a-other.pct;
+    mHtml=`<div style="display:flex;gap:24px;margin-top:8px">
+      <div><div style="${_MOMO_LB}">(a) 商品層毛利率 <span title="(售價−成本−成交手續費)/售價；未含其他平台費用" style="color:#9ca3af;cursor:help">ⓘ</span></div><div style="font-size:20px;font-weight:800;color:${col(a)}">${a.toFixed(1)}%</div></div>
+      <div><div style="${_MOMO_LB}">(b) 預估實際毛利率 <span title="(a) 再扣其他平台費用率（運費淨＋其他手續費）" style="color:#9ca3af;cursor:help">ⓘ</span></div><div style="font-size:20px;font-weight:800;color:${col(b)}">${b.toFixed(1)}%</div></div>
+    </div>
+    <div style="font-size:11px;color:#9ca3af;margin-top:6px;line-height:1.7">成交手續費 $${feeAmt.toFixed(0)}（售價 ${sp}×${fee}%）｜(b) 再扣其他平台費用率 <input type="number" value="${other.pct}" onchange="momoMoPlusSetOtherFee('${shop}',this.value)" style="width:58px;padding:1px 5px;border:1px solid #e5e7eb;border-radius:5px;font-size:11px"> %，取自 <b>${_momoEsc(other.month)}</b>（可調）</div>`;
+  } else if(origin && cost==null) mHtml='<div style="color:#dc2626;font-size:12px;margin-top:8px">查無成本 → 無法試算毛利（先補該原廠編號成本表）</div>';
+  else mHtml='<div style="color:#9ca3af;font-size:12px;margin-top:8px">填 原廠編號＋售價＋成交費率 即時試算兩數毛利率</div>';
+  box.innerHTML=costHtml+mHtml;
+}
 function momoRenderMoPlusBatchAdd(shop){
   const body=document.getElementById('momo-batch-body-'+shop); if(!body) return;
   const esc=_momoEsc;
   body.innerHTML=`
     <div style="max-width:680px">
       <div class="mm-note" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.7;color:#075985">
-        MO+ 建檔只需 <b>商品編號 + 商品名稱</b>。<b>成本不必手填</b>——毛利階段用該列<b>原廠編號</b>自動查成本表（ec_momo_cost_by_origin），查不到才標「缺成本」；手填成本反而會與自動值衝突。商品編號＝對帳明細的比對 key，必須正確。
+        MO+ 建檔：填 <b>商品名稱</b> 即可；<b>原廠編號</b>會自動帶出成本（查不到標「查無成本」）並即時試算毛利率。<b>無進價、無運費包材</b>（代收代付，成本靠原廠編號查莫筆克成本表）。商品編號留空會自動產生 <code>TEMP-</code>（之後對到真編號再改）。
       </div>
-      <div style="font-weight:700;margin:4px 0 6px">單筆新增</div>
-      <div style="display:grid;grid-template-columns:1fr 1.6fr auto;gap:10px;align-items:end;margin-bottom:18px">
-        <div><label style="${_MOMO_LB}">商品編號（必填）</label><input id="momo-mpadd-sku-${shop}" type="text" style="${_MOMO_INP}"></div>
+      <div style="font-weight:700;margin:4px 0 6px">單筆新增（即時試算毛利）</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
         <div><label style="${_MOMO_LB}">商品名稱（必填）</label><input id="momo-mpadd-name-${shop}" type="text" style="${_MOMO_INP}"></div>
-        <button onclick="momoMoPlusAddOne('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer;height:38px">新增</button>
+        <div><label style="${_MOMO_LB}">原廠編號（自動帶成本）</label><input id="momo-mpadd-origin-${shop}" type="text" oninput="momoMoPlusAddPreview('${shop}')" placeholder="例：H236-01" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">售價（試算用）</label><input id="momo-mpadd-sp-${shop}" type="number" oninput="momoMoPlusAddPreview('${shop}')" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">成交費率 %（試算用，手填）</label><input id="momo-mpadd-fee-${shop}" type="number" oninput="momoMoPlusAddPreview('${shop}')" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">商品編號（選填，留空自動 TEMP-）</label><input id="momo-mpadd-sku-${shop}" type="text" style="${_MOMO_INP}"></div>
       </div>
+      <div id="momo-mpadd-preview-${shop}" style="background:#f9fafb;border:1px solid #eef0f4;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:13px;min-height:24px"></div>
+      <button onclick="momoMoPlusAddOne('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:20px">新增</button>
       <div style="font-weight:700;margin:4px 0 6px">批次貼上建檔 <span style="font-weight:400;color:#6b7280;font-size:12px">（推薦，一次 247 筆）</span></div>
       <div class="mm-note" style="font-size:12px;color:#6b7280;margin-bottom:6px;line-height:1.7">
         每行一筆，格式：<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">商品編號 [Tab或逗號] 商品名稱</code>（名稱可省略）。可直接從 Excel 兩欄（商品編號、商品名稱）框選複製貼上。<b>重複的商品編號會略過</b>、不覆蓋既有。
@@ -10480,15 +10521,21 @@ function momoRenderMoPlusBatchAdd(shop){
         <span id="momo-mppaste-result-${shop}" style="font-size:12px"></span>
       </div>
     </div>`;
+  momoMoPlusAddPreview(shop);   // 初始化預覽提示文字
 }
 function momoMoPlusAddOne(shop){
-  const sku=(document.getElementById('momo-mpadd-sku-'+shop).value||'').trim();
-  const name=(document.getElementById('momo-mpadd-name-'+shop).value||'').trim();
-  if(!sku){ alert('商品編號必填'); return; }
+  const g=id=>document.getElementById('momo-mpadd-'+id+'-'+shop);
+  const name=(g('name')?g('name').value:'').trim();
+  let sku=(g('sku')?g('sku').value:'').trim();
+  const origin=(g('origin')?g('origin').value:'').trim();
   if(!name){ alert('商品名稱必填'); return; }
   const products=momoLoadProducts(shop);
+  if(!sku) sku=momoMoPlusNextTempSku(products);                                   // 留空 → 自動 TEMP-####
+  else if(!/^[A-Za-z0-9\-]+$/.test(sku)){ alert('商品編號格式：僅英數與「-」（例 TP…／TEMP-…）'); return; }
   if(products.some(x=>x.sku===sku)){ alert('商品編號重複：'+sku); return; }
-  products.push({sku, name, history:[{...momoNowParts(), note:'新增商品(MO+，成本待原廠編號自動帶)'}], periods:{}});
+  const p={sku, name, history:[{...momoNowParts(), note:'新增商品(MO+)'+(origin?'':'，待補原廠編號')}], periods:{}};
+  if(origin){ p.origin=origin; p.origins=[origin]; }                              // 原廠編號→自動帶成本（毛利階段查 cost_by_origin）
+  products.push(p);                                                               // 售價/成交費率為試算用、不落地（MO+ 售價權威＝主檔掛牌/成交）
   momoSaveProducts(shop,products);
   if(typeof showToast==='function') showToast('已新增 '+sku,'success');
   _momoBatchMode[shop]='edit'; _momoBatchSel[shop]=sku; _momoBatchSearch[shop]='';
@@ -13384,7 +13431,7 @@ Object.assign(window, {
   momoMoPlusMasterFile,momoMoPlusMasterRemove,momoMoPlusMasterGenerate,momoMoPlusMasterApply,momoParseMoPlusMaster,momoMoPlusApplyMaster,momoOpenSpecPrices,momoMoPlusScanDirty,momoMoPlusCleanDirty,
   momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusConsistency,momoMoPlusCompleteness,
   momoMoPlusOriginsForSku,momoMoPlusMarginCalc,momoMoPlusMargin,momoMoPlusOrderDate,momoMoPlusLatestSaleForSku,momoDismissMoPlusPriceHint,
-  momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusBatchPaste,
+  momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusBatchPaste,momoMoPlusAddPreview,momoMoPlusSetOtherFee,
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
   momoRenderMoPlusRecon,momoMoPlusReconSetMonth,momoMoPlusReconToggle,momoMoPlusReconSavePdf,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
