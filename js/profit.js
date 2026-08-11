@@ -8599,8 +8599,10 @@ function _momoDescChange(a,b){
     return `各 ${A.length} 筆、內容不同`;
   }
   if((a&&typeof a==='object')||(b&&typeof b==='object')) return '物件內容不同';
-  const sv=v=>{ const s=String(v); return s.length>24?s.slice(0,24)+'…':s; };
-  return `${sv(a)} → ${sv(b)}`;
+  const sv=v=>{ if(v==null||v==='') return '（空）'; const s=String(v); return s.length>24?s.slice(0,24)+'…':s; };
+  // ⚠ 不用「本機值 → 雲端值」箭頭：一般人會讀成「將變成右邊」，但實際方向相反（推送＝雲端變成本機值）。
+  //   整包覆蓋無版本比對，誤讀＝資料損失。改標明「本機 X ｜ 雲端 Y」，不帶方向暗示。
+  return `本機 ${sv(a)} ｜ 雲端 ${sv(b)}`;
 }
 function momoDiffDetail(local, cloud){
   const eqF=(a,b)=>_momoStableStr(_momoNorm(a))===_momoStableStr(_momoNorm(b));
@@ -8799,7 +8801,7 @@ function momoRenderSyncPreviewModal(shop, items){
   ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:820px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;font-size:15px;font-weight:700">同步預覽 — 勾選要推送到雲端的項目</div>
     <div style="padding:12px 20px;overflow:auto">
-      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">只列出<b>有變更</b>（新增／內容不同）的項目，預設全勾；無變更／本機輔助表收在下方。<b>商品主檔</b>有版本比對（雲端較新會標紅、預設不勾）；<b>其他項目（月對帳／排行榜／運費…）為整包覆蓋、無版本比對</b>，請確認不會蓋掉同事的更新。</div>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">只列出<b>有變更</b>（新增／內容不同）的項目，預設全勾；無變更／本機輔助表收在下方。<b>商品主檔</b>有版本比對（雲端較新會標紅、預設不勾）；<b>其他項目（月對帳／排行榜／運費…）為整包覆蓋、無版本比對</b>，請確認不會蓋掉同事的更新。<br>⚠ 差異明細顯示的是<b>「本機現值 ｜ 雲端現值」</b>（非「將變成」）；<b>勾選推送＝該筆雲端整包覆蓋成本機的值</b>。</div>
       ${anyConflict?`<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;line-height:1.6">🚫 有項目<b>雲端較新</b>（你載入後雲端又被人更新過，可能是同事推的）——這些列<b>預設不勾</b>、避免用你的舊資料蓋掉同事的更新。建議<b>重新整理</b>拿到最新雲端後再改。若你確定要覆蓋，需手動勾選並二次確認。</div>`:''}
       ${anySuspicious?`<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;line-height:1.6">🚨 有項目<b>本機筆數很多、雲端卻讀到 0</b>——很可能是<b>雲端讀取失敗</b>（不是真的新增）。整包推上去會<b>清空雲端</b> → 這些列<b>預設不勾</b>，請先確認雲端真的沒有、或重新整理後再推。</div>`:''}
       ${anyDiff?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">⚠️ 有項目<b>內容不同</b>——點該列「展開」看差在哪個 SKU/欄位，確認是你要覆蓋的再保持勾選。</div>`:''}
