@@ -761,7 +761,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         const parts=pk.split('|');   // ['ec_momo_moplus_origins', shop, src]
         const oShop=parts[1], oSrc=parts[2];
         const data=momoLoadMoPlusOriginsDoc(oShop, oSrc);   // 與預覽同源
-        if(window.__cloudMoPlusOrigins && data && oShop && oSrc){ tasks.push({key:pk,run:()=>window.__cloudMoPlusOrigins.setSrc(oShop,oSrc,data)}); }
+        if(window.__cloudMoPlusOrigins && data && oShop && oSrc){ tasks.push({key:pk,run:()=>window.__cloudMoPlusOrigins.setSrc(oShop,oSrc,momoSanitizeMoPlusDoc(data))}); }   // 寫前把 '' origin key 改哨兵 → 舊 doc 不必重傳
         else{ skippedProblem.push({key:pk,reason:'MO+ 逐列成本讀不到，或雲端層未就緒'}); }
         return;
       }
@@ -8080,6 +8080,18 @@ function momoMoPlusCleanDirty(shop, idxList){
    momo_products 的 cell 只放 qty/revA（甲乙格式，不污染）；origin/D/運費 B/C 放這裡。毛利(P3b-2)兩邊 join。
    ⚠ 分片到來源月＝重上傳整 doc 覆蓋(天然冪等、修正版列數變少不留幽靈)。origin 空('')也記→COGS 標缺成本、不靜默當 0。*/
 function momoMoPlusOriginsKey(shop, src){ return 'ec_momo_moplus_origins|'+shop+'|'+src; }
+// ⚠ Firestore 不接受空字串 map key（"Document fields must not be empty"）。空原廠編號的列一律歸到此哨兵 key，
+//   不用 ''、也不靜默丟：該量仍計入期別總量，但查不到成本＝缺成本（costMap 無此 key 天然成立）。
+const MOMO_NO_ORIGIN='__no_origin__';
+// 寫雲端前把既有 doc 內的空字串 origin key（'')改成哨兵（clone、不動本機鏡像）→ 舊資料不必重傳、重按同步即可補上。
+function momoSanitizeMoPlusDoc(doc){
+  if(!doc || typeof doc!=='object') return doc;
+  try{
+    const d=JSON.parse(JSON.stringify(doc));
+    if(d.skus) Object.keys(d.skus).forEach(sku=>{ const byP=d.skus[sku]||{}; Object.keys(byP).forEach(pd=>{ const cell=byP[pd]; if(cell && cell.o && Object.prototype.hasOwnProperty.call(cell.o,'')){ const q=cell.o['']; delete cell.o['']; cell.o[MOMO_NO_ORIGIN]=(Number(cell.o[MOMO_NO_ORIGIN])||0)+(Number(q)||0); } }); });
+    return d;
+  }catch(e){ return doc; }
+}
 function momoLoadMoPlusOriginsDoc(shop, src){   // _profitMem → _mem → localStorage
   const k=momoMoPlusOriginsKey(shop, src);
   try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch{}
@@ -8123,7 +8135,7 @@ function momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods){
     if(!/^\d{4}-\d{2}-H[12]$/.test(ln.period)) return;
     if(gated(ln.period)) return;                                  // 期別閘門：與 products 同步
     const cell=(skus[ln.sku]=skus[ln.sku]||{})[ln.period]=(skus[ln.sku][ln.period])||{o:{}, d:0};
-    const origin=ln.origin||'';                                   // 空 origin 記 key ''（COGS 標缺成本）
+    const origin=ln.origin||MOMO_NO_ORIGIN;                        // 空 origin 歸哨兵 key（Firestore 不接受 '' key）→ 量計入、查無成本＝缺成本
     cell.o[origin]=(cell.o[origin]||0)+(Number(ln.qty)||0);       // per-原廠編號 銷量（售價欄「銷售最多規格」＝銷量最多的原廠編號 → 主檔按 origin 對應規格）
     cell.d+=Number(ln.D)||0;                                      // 手續費 D（逐列實際）
   });
@@ -8178,7 +8190,7 @@ function momoBuildMoPlusOriginsIndex(shop){
 // 某 SKU「銷售最多的原廠編號」（跨全部來源月/期別總銷量最大；空 origin 不算）→ origin|null。售價欄預設顯示這個原廠編號對應規格的掛牌價。
 function momoMoPlusBestOriginForSku(shop, sku){
   const ot=momoMoPlusIndexCached(shop).originTot[sku]; if(!ot) return null;
-  let best=null, max=-1; Object.keys(ot).forEach(o=>{ if(o && ot[o]>max){ max=ot[o]; best=o; } });   // 空 origin('')跳過
+  let best=null, max=-1; Object.keys(ot).forEach(o=>{ if(o && o!==MOMO_NO_ORIGIN && ot[o]>max){ max=ot[o]; best=o; } });   // 空 origin / 哨兵不當「銷售最多規格」
   return best;
 }
 function momoMoPlusIndexCached(shop){
@@ -11254,8 +11266,29 @@ function momoMoPlusMasterApply(shop){
   const parsed=_moPlusMasterParsed; if(!parsed){ return; }
   const res=momoMoPlusApplyMaster(shop, parsed);
   _moPlusMasterFile=null; _moPlusMasterParsed=null;
-  const msg='商品主檔已寫入：新增 '+res.added+' 個、更新 '+res.updated+' 個（共 '+res.total+' 個商品）。原廠對照 '+parsed.originN+' 個。記得按 ☁ 同步雲端。';
-  if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品主檔已寫入', message:msg, kind:'info'}); else if(typeof showToast==='function') showToast('主檔已寫入 '+res.total+' 個商品（記得同步）','success');
+  // ⚠ 主檔曾整份沒存進 master doc（2606→952 缺售價真因）。**不假設原因**（localStorage 沒滿，非配額）：
+  //   ① 讀回驗證真的落地了嗎；② 匯入即刻直推雲端保命（不等手動同步，主檔太重要且曾靜默丟）；③ 失敗印真實錯誤、要求截圖，不再自信報成功。
+  const check=momoLoadMoPlusMaster(shop);
+  const persistedN=(check&&check.products)?Object.keys(check.products).length:0;
+  try{ console.log('%c[MO+ master] localStorage lsOk='+res.masterOk+'｜讀回商品數='+persistedN+'（期望 '+res.masterSkuN+'）','color:#2563eb;font-weight:700'); }catch{}
+  if(persistedN===0){
+    const warn='商品主檔寫入後「讀回為 0」——寫入路徑異常（localStorage 沒滿、非空間問題）。lsOk='+res.masterOk+'。請把 F12 Console 藍字「[MO+ master]」那行截圖回報，這能定位失敗點。';
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'⚠ 商品主檔未寫入（讀回為 0）', message:warn, kind:'error'}); else alert('⚠ '+warn);
+    momoRenderMoPlusProductSync(shop); return;
+  }
+  // 即刻直推雲端（sanitize 後）——主檔就算 localStorage 失敗也能在雲端存活；成功/失敗都以真實結果回報。
+  let cloudNote='';
+  try{
+    if(window.__cloudMoPlusOrigins && typeof window.__cloudMoPlusOrigins.setSrc==='function'){
+      cloudNote='（同時直推雲端保存中…）';
+      Promise.resolve(window.__cloudMoPlusOrigins.setSrc(shop,'master',momoSanitizeMoPlusDoc(check)))
+        .then(()=>{ try{ if(typeof showToast==='function') showToast('商品主檔已存雲端（'+persistedN+' 個商品）','success'); }catch{} },
+              e=>{ const em=(e&&e.message)||String(e); try{ console.error('[MO+ master] 雲端寫入失敗：',em); }catch{} try{ if(window.App&&App.showAlertModal) App.showAlertModal({title:'⚠ 商品主檔雲端寫入失敗',message:'主檔推雲端被拒：\n'+em+'\n\n（本機 lsOk='+res.masterOk+'、讀回 '+persistedN+' 個）。請截圖此訊息回報 —— 這就是先前靜默失敗的真因。',kind:'error'}); }catch{} });
+    } else { cloudNote='（雲端層未就緒，請稍後按 ☁ 同步雲端）'; }
+  }catch(e){ cloudNote='（雲端直推發生例外：'+((e&&e.message)||e)+'）'; }
+  const lsNote=res.masterOk?'':'⚠ 本機 localStorage 寫入回失敗，但已直推雲端；重整後應仍在。';
+  const msg='商品主檔已寫入：新增 '+res.added+' 個、更新 '+res.updated+' 個（共 '+res.total+' 個商品，讀回 '+persistedN+'）。原廠對照 '+parsed.originN+' 個。'+cloudNote+(lsNote?'\n'+lsNote:'');
+  if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品主檔已寫入', message:msg, kind:'info'}); else if(typeof showToast==='function') showToast('主檔已寫入 '+res.total+' 個商品','success');
   momoRenderMoPlusProductSync(shop);
 }
 function momoMoPlusUploadFile(shop,e){ const files=e.target.files; if(!files||!files.length) return; _moPlusUpFile=files[0]; _moPlusUpParsed=null; _moPlusUpPlan=null; momoRenderMoPlusUpload(shop); }
