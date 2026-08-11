@@ -8334,7 +8334,7 @@ function momoRenderSub(shop){
   if(sub==='profit'){ c.innerHTML=momoProfitTableHTML(shop); momoRenderProfitBody(shop); return; }
   if(sub==='batch'){ momoRenderBatch(shop); return; }
   if(sub==='upload'){ (momoIsMoPlus(shop)?momoRenderMoPlusUpload:momoRenderUpload)(shop); return; }
-  if(sub==='sync'){ momoRenderProductSync(shop); return; }
+  if(sub==='sync'){ (momoIsMoPlus(shop)?momoRenderMoPlusProductSync:momoRenderProductSync)(shop); return; }   // MO+ 走商品主檔上傳（格式與甲乙 momoParseProductInfo 全不同）
   if(sub==='recon'){ (momoIsMoPlus(shop)?momoRenderMoPlusRecon:momoRenderRecon)(shop); return; }   // MO+ 走專屬 renderer（內容全新、非甲乙費率）
   if(sub==='rebuild'){ momoRenderRebuild(shop); return; }
   const names={batch:'批次維護',upload:'訂單明細',sync:'商品資料同步',rent:'倉租費彙總',recon:'月對帳',rebuild:'全期別重建'};
@@ -9988,26 +9988,30 @@ const _momoBatchFilter={};  // shop -> ''|'nocost'|'nopp'|'nosp'（異常篩選�
 const _momoBatchShowDisc={}; // shop -> 批次維護是否顯示已下架（預設 false，比照總表）
 // 商品異常判定：缺成本/進價/售價（0/null/負都算缺）。
 //   甲乙配＝進價供應商模式：cost/purchasePrice/salePrice 為手填欄位（不帶 shop → 走下方原路徑，行為不變）。
-//   MO+（代收代付）＝無「進價」概念；成本靠原廠編號查莫筆克成本表、售價取自商品主檔掛牌價 → 缺料判定改走那兩個來源。
-//   ctx（可選）＝momoBatchAnomalyCtx 預算好的 {costMap,masterMap}，供 render 迴圈 1,276× 共用免逐筆重讀。
+//   MO+（代收代付）＝無「進價」概念；成本靠原廠編號查莫筆克成本表、售價＝總表售價欄同源 → 缺料判定改走那兩條路。
+//   ctx（可選）＝momoBatchAnomalyCtx 預算好的 {costMap}，供 render 迴圈共用免逐筆重讀。
 function momoProductAnomalies(p, shop, ctx){
   const miss=v=>!(Number(v)>0);
   if(shop && momoIsMoPlus(shop)){
     const costMap=(ctx&&ctx.costMap)||momoMoPlusCostMapCached();
-    const masterMap=(ctx&&ctx.masterMap)||momoMoPlusMasterCached(shop);
     const origs=(p.origins&&p.origins.length)?p.origins:(p.origin?[p.origin]:[]);
     const cost = origs.length===0 || origs.some(o=>!(Number(costMap[o])>0));   // 無原廠編號 or 任一原廠查無成本
-    const m=masterMap&&masterMap[p.sku];
-    const sp = !(m && (m.specs||[]).some(s=>Number(s.listPrice)>0));            // 商品主檔查無掛牌價（含手動 TEMP- 未在主檔）
+    // ⚠ 缺售價＝與總表「售價」欄完全同源同邏輯（single source）：掛牌價(主檔 momoMoPlusListPriceForSku)
+    //   或 最新成交價(對帳明細 momoMoPlusLatestSaleForSku) 任一有值即「有售價」；兩者皆無、總表顯示「—」才算缺。
+    //   （不可只看主檔——總表無主檔掛牌時會回退顯示成交價；只看主檔會把「已有成交價」的商品全誤標缺售價）
+    const lp = momoMoPlusListPriceForSku(shop, p.sku, null).listPrice;
+    const ls = momoMoPlusLatestSaleForSku(shop, p.sku);
+    const sp = (lp==null) && !(ls && ls.sp!=null);
     return { cost, pp:false, sp, any:cost||sp };                               // MO+ 無進價：pp 恆 false（缺進價 chip/badge 因此不出現）
   }
   const cost=miss(p.cost), pp=miss(p.purchasePrice), sp=miss(p.salePrice);
   return { cost, pp, sp, any:cost||pp||sp };
 }
-// 批次維護異常判定的共用預算：MO+ 一次讀好 costMap+masterMap（render 迴圈共用）；甲乙 = null（走手填欄位、無需預算）
+// 批次維護異常判定的共用預算：MO+ 一次讀好 costMap（render 迴圈共用）；甲乙 = null（走手填欄位、無需預算）。
+//   售價改走 momoMoPlusListPriceForSku/LatestSaleForSku（各自 epoch 快取），故 ctx 不再需要 masterMap。
 function momoBatchAnomalyCtx(shop){
   if(!momoIsMoPlus(shop)) return null;
-  return { costMap: momoMoPlusCostMapCached(), masterMap: momoMoPlusMasterCached(shop) };
+  return { costMap: momoMoPlusCostMapCached() };
 }
 // 該商品在「總表目前選的期別」有沒有營收（缺成本·本期有營收 篩選用；跟總覽警示同口徑）
 function momoHasPeriodRevenue(p, shop, period){
@@ -11149,8 +11153,14 @@ function momoRenderMoPlusUpload(shop){
       <button class="mm-btn-primary" style="margin-top:10px" onclick="momoMoPlusUploadGenerate('${shop}')" ${f?'':'disabled'}>▶ 產生預覽</button>
       <span class="mm-gen-hint">${f?'解析對帳明細、逐列驗證、顯示期別分布與總額（先看數字再決定寫入）':'請選對帳明細檔'}</span>
       <div id="moplus-up-preview-${shop}" style="margin-top:16px"></div>
-
-      <div style="border-top:1px solid #eef0f2;margin:22px 0 14px"></div>
+    </div>`;
+}
+// MO+「商品同步」子分頁：商品主檔（mo+○○商品資訊.xls）上傳。與甲乙的商品同步（莫筆克成本+MOMO商品資訊、momoParseProductInfo）
+//   格式完全不同 → 賣場條件分支（見 momoRenderShop sub==='sync'），不取代甲乙 momoRenderProductSync。
+function momoRenderMoPlusProductSync(shop){
+  const c=document.getElementById('momo-sub-content-'+shop); if(!c) return;
+  c.innerHTML=`
+    <div style="max-width:820px">
       <div class="mm-note" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-bottom:12px;line-height:1.7;color:#065f46">
         上傳 <b>mo+${shop==='MO+麻吉'?'好麻吉':'森之旅'}商品資訊.xls</b>（「匯出商品價格資料」分頁）＝商品主檔。<br>
         <span class="mm-muted">補齊<b>商品編號→原廠編號完整對照</b>（含零銷量商品）+ <b>掛牌售價/市價</b>。可一次批次建檔（新品自動帶成本靠這個）。當前快照、重傳取代主檔欄位，<b>不動</b>既有銷售/期別資料。</span>
@@ -11162,11 +11172,14 @@ function momoRenderMoPlusUpload(shop){
       <button class="mm-btn-primary" style="margin-top:10px" onclick="momoMoPlusMasterGenerate('${shop}')" ${_moPlusMasterFile?'':'disabled'}>▶ 產生主檔預覽</button>
       <span class="mm-gen-hint">${_moPlusMasterFile?'解析商品主檔、顯示新增/更新筆數與原廠對照數（確認再寫入）':'請選商品主檔'}</span>
       <div id="moplus-master-preview-${shop}" style="margin-top:16px"></div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:16px;line-height:1.7;border-top:1px solid #f1f5f9;padding-top:10px">
+        ⚠ 成本不在此上傳——MO+ 成本靠<b>原廠編號</b>查莫筆克成本表（<code>ec_momo_cost_by_origin</code>，與甲乙共用、由甲配「商品同步」匯入莫筆克成本檔時一併寫入）。此頁只上傳商品主檔（原廠對照＋掛牌價）。
+      </div>
     </div>`;
 }
 let _moPlusMasterFile=null, _moPlusMasterParsed=null;
-function momoMoPlusMasterFile(shop,e){ const files=e.target.files; if(!files||!files.length) return; _moPlusMasterFile=files[0]; _moPlusMasterParsed=null; momoRenderMoPlusUpload(shop); }
-function momoMoPlusMasterRemove(shop){ _moPlusMasterFile=null; _moPlusMasterParsed=null; momoRenderMoPlusUpload(shop); }
+function momoMoPlusMasterFile(shop,e){ const files=e.target.files; if(!files||!files.length) return; _moPlusMasterFile=files[0]; _moPlusMasterParsed=null; momoRenderMoPlusProductSync(shop); }
+function momoMoPlusMasterRemove(shop){ _moPlusMasterFile=null; _moPlusMasterParsed=null; momoRenderMoPlusProductSync(shop); }
 async function momoMoPlusMasterGenerate(shop){
   const prev=document.getElementById('moplus-master-preview-'+shop); if(prev) prev.innerHTML='<div style="font-size:13px;color:#9ca3af">解析中…</div>';
   const file=_moPlusMasterFile; if(!file) return;
@@ -11196,7 +11209,7 @@ function momoMoPlusMasterApply(shop){
   _moPlusMasterFile=null; _moPlusMasterParsed=null;
   const msg='商品主檔已寫入：新增 '+res.added+' 個、更新 '+res.updated+' 個（共 '+res.total+' 個商品）。原廠對照 '+parsed.originN+' 個。記得按 ☁ 同步雲端。';
   if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品主檔已寫入', message:msg, kind:'info'}); else if(typeof showToast==='function') showToast('主檔已寫入 '+res.total+' 個商品（記得同步）','success');
-  momoRenderMoPlusUpload(shop);
+  momoRenderMoPlusProductSync(shop);
 }
 function momoMoPlusUploadFile(shop,e){ const files=e.target.files; if(!files||!files.length) return; _moPlusUpFile=files[0]; _moPlusUpParsed=null; _moPlusUpPlan=null; momoRenderMoPlusUpload(shop); }
 function momoMoPlusUploadRemove(shop){ _moPlusUpFile=null; _moPlusUpParsed=null; _moPlusUpPlan=null; momoRenderMoPlusUpload(shop); }
