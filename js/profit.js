@@ -4664,6 +4664,7 @@ function renderPnmList(){
   el.innerHTML=sorted.map(d=>map.get(d).map(({text,i})=>`<div class="pnm-entry">
     <div class="pnm-entry-date">${d}</div>
     <div class="pnm-entry-text">${text.replace(/</g,'&lt;')}</div>
+    <button class="pnm-entry-edit" onclick="_pnmEditNote(${i},this)" title="編輯這筆文字（保留原日期）">✎</button>
     <button class="pnm-entry-del" onclick="deleteProfitNote(${i})">×</button>
   </div>`).join('')).join('');
 }
@@ -4687,6 +4688,7 @@ function renderPnmHistory(){
     box.innerHTML=others.map(o=>`<div class="pnm-entry">
       <div class="pnm-entry-date">${_growthPeriodLabel(o)}</div>
       <div class="pnm-entry-text">${String(o.text||'').replace(/</g,'&lt;')}</div>
+      <button class="pnm-entry-edit" onclick="_pnmEditNote(${o.i},this)" title="編輯這筆文字（保留原日期）">✎</button>
       <button class="pnm-entry-del" onclick="deleteProfitNote(${o.i})">×</button>
     </div>`).join('');
     return;
@@ -4751,6 +4753,80 @@ function submitProfitNote(){
   saveNotes(shopKey,notes);
   closeProfitNoteModal();
   applyFilters(shop,{keepScroll:true});
+}
+// 就地編輯一筆調整紀錄的文字。origIdx 是【原始陣列索引】—— renderPnmList / renderPnmHistory
+//   都刻意保留原始索引（不 filter 重編），已實測驗證：E150 同日三筆各自拿到 1/2/3、
+//   跳著點四次順序全對。btn 是被點的 ✎ 鈕本身（inline onclick 傳 this），用它
+//   .closest('.pnm-entry') 找到所屬那一列 → 兩個模板（本期 / 商品調整的其他期間）共用
+//   這一支，不需要分支，也不做任何 document 級查詢。
+//
+//   🔴 儲存是【就地改第 origIdx 筆的 text】，date 與（_growth 才有的）period 原封不動。
+//     絕對【不可以】抄洞察表 bindEditChips 那套「filter 掉同日全部 + push 一筆新的」
+//     （marketing.js 搜 bindEditChips）：洞察表同日多筆在畫面上是用「、」合併成一列顯示的
+//     （顯示模型＝資料模型），淨利表不是 —— renderPnmList 對同日的【每一筆各產生一列】、
+//     各帶自己的索引。照抄會靜默吃掉同日的其他紀錄。
+//
+//   ⚠ blur 的行為【刻意與洞察表相反】：洞察表是「失焦即存」
+//     （marketing.js 的 input.addEventListener('blur', () => finish(true))），
+//     這裡是【失焦＝取消，不儲存】。理由：這個彈窗裡可點的東西比洞察表多得多
+//     （上方新增輸入框、送出鈕、本期列表、其他期間列表、洞察表紀錄區、關閉鈕），
+//     失焦即存太容易誤觸而寫入非預期的內容。明確按 Enter 才存，ESC 或點到別處一律當放棄。
+function _pnmEditNote(origIdx,btn){
+  if(!_pnm||!btn)return;
+  const row=btn.closest('.pnm-entry');if(!row)return;
+  const span=row.querySelector('.pnm-entry-text');if(!span)return;   // 已在編輯中 → span 已被換掉 → 早退，不重複開
+  const {shopKey,code}=_pnm;
+  const _readAdj=()=>{const nd=getNotes(shopKey)[code];if(!nd)return[];return(typeof nd==='string')?[{date:'',text:nd}]:(nd.adjustments||[]);};
+  const cur=_readAdj()[origIdx];if(!cur)return;
+  const orig=String(cur.text||'');
+  const inp=document.createElement('input');
+  inp.type='text';inp.className='pnm-entry-inp';inp.value=orig;
+  row.replaceChild(inp,span);
+  inp.focus();inp.select();
+  let done=false;
+  // 取消：把【原本那個 span 節點】換回去，【刻意不呼叫 renderPnmList()】。
+  //   🔴 這裡是後人最容易「順手改成重繪比較乾淨」而改壞的地方，理由如下，動之前先讀完：
+  //     使用者編輯到一半跑去按【別列的 ×】時，瀏覽器的事件順序是
+  //       ① mousedown 落在那顆 ×  → 焦點離開本 input → 本 input 的 blur 觸發 → 跑到這個 cancel
+  //       ② mouseup   落在那顆 ×
+  //       ③ click 只有在 mousedown 與 mouseup 落在【同一個元素】時才成立 → 才呼叫 deleteProfitNote
+  //     若 cancel 在步驟 ① 重繪整個 #pnm-list，那顆剛被按下的 × 會在 mouseup 之前就被銷毀
+  //     → 步驟 ③ 的 click 永遠不成立 → 使用者按了 × 卻【什麼都沒發生】，要按第二次才有反應。
+  //     這種 bug 不會報錯、也不會留下任何痕跡，極難查。
+  //     只換回這一列的節點就完全不會動到別列的鈕，步驟 ②③ 照常成立。
+  //   順帶一個好處：span 是【原本那個節點】，換回去不需要重新做 HTML escape，
+  //     省掉「取消一次就少一層跳脫」這類錯誤的可能。
+  const cancel=()=>{if(done)return;done=true;try{if(inp.parentNode===row)row.replaceChild(span,inp);}catch{}};
+  const save=()=>{
+    if(done)return;
+    const v=inp.value.trim();
+    if(!v||v===orig){cancel();return;}   // 空＝視同取消（要刪請用 ×）；沒改＝不寫入，避免無意義的寫入與同步徽章
+    const notes=getNotes(shopKey);if(!notes[code]){cancel();return;}
+    if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
+    const t=notes[code].adjustments[origIdx];
+    // 🔴 寫入前再驗一次「這個索引還是不是原來那一筆」：彈窗開著的期間，別人的雲端快照可能
+    //   整包換掉 Store._profitMem['ec_notes|…']，而 renderPnmList 不會因此重繪（它只從
+    //   openNotePopup / deleteProfitNote / 本函式呼叫）→ 輸入框還在、origIdx 卻已對到別筆。
+    //   date 與原文字兩者都相符才寫；不符就放棄本次編輯並重繪，讓使用者看到最新內容再決定。
+    //   ⚠ 既有的 deleteProfitNote 沒有這道防線（同樣的暴露，只是按一下 × 的時間窗短得多）。
+    //     回頭補它【不在本 PR 範圍】，另案處理 —— 新增功能和修既有問題綁同一個 PR，出事分不清哪邊。
+    if(!t||String(t.text||'')!==orig||String(t.date||'')!==String(cur.date||'')){
+      done=true;
+      console.warn('[pnmEdit] 資料在編輯期間變動過，本次編輯放棄。origIdx=',origIdx);
+      renderPnmList();renderPnmHistory();return;
+    }
+    done=true;
+    t.text=v;   // 就地改 text —— date 不動、_growth 的 period 不動
+    // 收尾逐字比照 deleteProfitNote 的最後一行（不關彈窗、帶 keepScroll）。
+    //   兩處差異：那邊是 splice、這邊是改 text；那邊刪光後會 delete notes[code]，
+    //   編輯不會改變陣列長度，所以這裡沒有那一行。
+    saveNotes(shopKey,notes);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
+  };
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();save();}
+    else if(e.key==='Escape'){e.preventDefault();cancel();}
+  });
+  inp.addEventListener('blur',cancel);   // 失焦＝取消（與洞察表相反，理由見函式上方註解）
 }
 function deleteProfitNote(origIdx){
   if(!_pnm)return;
@@ -13497,7 +13573,7 @@ Object.assign(window, { SHOPS, MONTHS, HALVES, state, globalMap });
 Object.defineProperty(window, 'curShop', { get: () => curShop, configurable: true });
 
 Object.assign(window, {
-  _cloudRead,_cloudWrite,_cloudWriteSafe,_doGenerate,_showSyncBtn,addGrowthCond,addNewAnaCond,
+  _cloudRead,_cloudWrite,_cloudWriteSafe,_doGenerate,_pnmEditNote,_showSyncBtn,addGrowthCond,addNewAnaCond,
   applyFilters,applyFpNum,applyFpTxt,buildDistHtml,buildNoteCell,buildShop,calcAnalysis,calcAnalysisAll,
   calcGrowthAnalysis,checkAdsReconcile,checkReady,clearColFilter,clearPeriod,clearPeriodFromModal,closeAdsEditModal,
   closeAnaSettings,closeDeleteFileModal,closeDistModal,closeGrowthSettings,closePopup,
