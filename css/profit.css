@@ -25,7 +25,11 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 
 .shop-content{display:none;}
 .shop-content.active{display:block;}
-.sub-rev{font-size:11px;color:#9ca3af;font-weight:400;font-family:'Noto Sans TC',sans-serif;margin-top:2px;line-height:1.3;}
+/* 主數字下方的副標小字。.sub-rev＝營收欄的「上期 $X」，.sub-ads＝廣告費欄的「上期 $X」。
+   併在同一條規則：兩者的視覺層級刻意完全一致（同樣是「本期主數字 + 上期參照」）。
+   ⚠ 廣告費格的排版【只能靠這個 class】，不可加在 <td> 上 —— patchRow 會整個覆寫該格的
+     className（見 js/profit.js 搜 `adsEl.className`），加在那裡編輯一次就消失。 */
+.sub-rev,.sub-ads{font-size:11px;color:#9ca3af;font-weight:400;font-family:'Noto Sans TC',sans-serif;margin-top:2px;line-height:1.3;}
 
 /* Period */
 .period-bar{background:#f8f9fc;border-radius:10px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
@@ -275,6 +279,21 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .pnm-entry-text{flex:1;font-size:13px;color:#312e81;font-weight:600;line-height:1.4;}
 .pnm-entry-del{background:none;border:none;cursor:pointer;color:#d1d5db;font-size:16px;padding:0 2px;line-height:1;}
 .pnm-entry-del:hover{color:#ef4444;}
+/* 編輯鈕：跟上面的 .pnm-entry-del 是同一組操作（.pnm-entry 右側的兩顆鈕），
+   在 HTML 裡刻意排在 del 之前 → 視覺順序「✎ ×」，破壞性的 × 留在最外側、位置不變。
+   ⚠ 這兩行【刻意跟隔壁 .pnm-entry-del 對齊、寫死 hex，不用 :root 變數】：
+     .pnm-* 全區（本檔 .pnm-overlay 起）26 行既有樣式全是寫死的 hex，且用的紫是
+     #6366f1/#5b5fcf、跟 :root 的 --primary(#4f46e5) 不同色。只在這裡插兩行變數
+     不會讓全站更統一，只會讓這兩顆鈕跟旁邊的 × 有肉眼可見的色差 —— 使用者眼裡
+     它們是同一組操作，一顆灰一顆藍灰會看起來像壞掉。
+     .pnm-* 全區改用變數是另一件事，要改就整區一起改，不要只改這兩行。 */
+.pnm-entry-edit{background:none;border:none;cursor:pointer;color:#d1d5db;font-size:13px;padding:0 2px;line-height:1;}
+.pnm-entry-edit:hover{color:#5b5fcf;}
+/* 點 ✎ 後就地取代 .pnm-entry-text 的輸入框。字級/字色/字重/行高刻意跟 .pnm-entry-text 一致，
+   讓文字在「顯示 ↔ 編輯」之間不會跳動；只多加 input 需要的框線與內距。
+   邊框紫沿用本區既有的 #5b5fcf（同 .pnm-inp:focus），理由同上：整區寫死 hex，不用 :root 變數。
+   min-width:0 是 flex 子元素的必要防護 —— 沒有它，input 的預設 size 會撐破 .pnm-entry 的版面。 */
+.pnm-entry-inp{flex:1;min-width:0;font-size:13px;color:#312e81;font-weight:600;line-height:1.4;padding:2px 6px;border:1px solid #5b5fcf;border-radius:5px;outline:none;font-family:'Noto Sans TC',sans-serif;}
 /* 洞察表紀錄（唯讀）紫色變體：紫沿用工作日誌洞察卡片的 #7e22ce */
 .pnm-entry-ins{background:#faf5ff;border-left-color:#7e22ce;}
 .pnm-entry-ins .pnm-entry-date{color:#7e22ce;}

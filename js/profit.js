@@ -44,7 +44,12 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       <div id="header-kpi-block" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-change-header" style="font-size:12px;font-weight:600"></span></div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
+        <!-- 廣告費：flex 包裝＋副標「上期 NT$ …」，結構逐字比照上面「本期總營收」那格。
+             ⚠ 本區（#header-kpi-row）全部是 inline style、零 CSS class，兩個 css 檔都沒有
+                kv-* / header-kpi-* 的規則。刻意跟隨既有慣例不新增 class（在一片 inline 裡
+                插一個 class，下一個人會不知道該去哪找樣式），此為【既有技術債】，
+                要清就整區一起搬進 css/，不要只搬這一格。 -->
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-ads-prev-header" style="font-size:12px;font-weight:600;color:#6b7280"></span></div></div>
       </div>
       <div id="header-btn-block" style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto">
         <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
@@ -1890,8 +1895,22 @@ function getPrevPeriodKey(shop, month, half) {
   }
 }
 
-// 取得上期報表的 code→rev map（雲端優先，過渡期看 main，最後 fallback 本地）
-function getPrevRevMap(shop, month, half) {
+// 上一期報表的兩張對照表：{rev:{code→營收}, ads:{code→廣告費}}（雲端優先，過渡期看 main，最後 fallback 本地）。
+//   （本函式原名 getPrevRevMap、只回傳 rev 一張表，為了加上期廣告費而擴充。）
+//   buildShop 是唯一呼叫端（全檔 grep 確認），一次讀出兩個值 —— 刻意不新寫第二支：
+//   那等於把同一份上期報表讀兩次、跑兩次 800 列迴圈。
+//
+//   🔴 兩張表的建立條件【刻意不同，不是漏寫】：
+//     rev 逐字保留原本 getPrevRevMap 的 `if (r.code && r.rev)` —— 上期營收為 0 的商品
+//       不進表，畫面顯示「—」。這是既有行為，本次【刻意原樣保留、不修】：prevRev 還餵給
+//       buildShop 的 growthRate 與 calcGrowthAnalysis，改它會連帶改變成長比／成長分析，
+//       是另一件事。
+//     ads 只看 `if (r.code)` —— 金額 0 照樣進表。
+//       為什麼要不一樣：營收為 0 的商品很少，rev 那個瑕疵不明顯；但【廣告費為 0 的商品
+//       非常多】（沒下廣告的都是），照抄會讓「上期沒投廣告（$0）」和「上期根本沒這個商品（—）」
+//       在畫面上長得一模一樣。需求方要這個數字是為了判斷有沒有越花越多，
+//       那兩種情況對她是完全不同的判斷。
+function getPrevPeriodMap(shop, month, half) {
   const key = getPrevPeriodKey(shop, month, half);
   let rep = null;
   try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[key]) rep = Store._profitMem[key]; }catch{}
@@ -1899,10 +1918,13 @@ function getPrevRevMap(shop, month, half) {
   if(!rep){
     try { rep = JSON.parse(localStorage.getItem(key) || 'null'); } catch {}
   }
-  if (!rep || !rep.built) return {};
-  const map = {};
-  rep.built.forEach(r => { if (r.code && r.rev) map[r.code] = r.rev; });
-  return map;
+  if (!rep || !rep.built) return {rev:{}, ads:{}};
+  const rev = {}, ads = {};
+  rep.built.forEach(r => {
+    if (r.code && r.rev) rev[r.code] = r.rev;   // 條件逐字沿用原本的 getPrevRevMap，勿改（見上方註解）
+    if (r.code) ads[r.code] = r.adsFee || 0;    // 金額 0 也要進表，理由見上方註解
+  });
+  return {rev, ads};
 }
 
 // ── Generate ──
@@ -2296,7 +2318,9 @@ function buildShop(shop,days){
     }
   });
 
-  const prevRevMap = getPrevRevMap(shop, s.curMonth, s.curHalf);
+  const _prevMap = getPrevPeriodMap(shop, s.curMonth, s.curHalf);
+  const prevRevMap = _prevMap.rev;
+  const prevAdsMap = _prevMap.ads;
 
   const built=Object.values(agg).map(p=>{
     const adsFee=adsByCode[p.code]||0;
@@ -2319,10 +2343,17 @@ function buildShop(shop,days){
     const prevRev = prevRevMap[p.code] ?? null;
     const growthRate = (prevRev!==null && prevRev>0) ? (p.rev - prevRev) / prevRev : null;
     const growthAnalysis = calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate);
+    // 上期廣告費。`?? null` 只會在【上期沒有這個商品】時給 null —— prevAdsMap 的建立條件
+    //   只看 code、金額 0 照樣有值（見 getPrevPeriodMap），所以畫面分得出「上期投了 $0」
+    //   與「上期沒這商品」。這一點與 prevRev 刻意不同。
+    // ⚠ 跟 prevRev 一樣【會落地】（寫進 localStorage 與 Firestore）：它不吃任何使用者設定
+    //   （不會過期），也無法從本期的欄位重建（來源是另一份報表），兩條剝除理由都不符合
+    //   → 刻意【不】加進 _stripDerived。體積代價約每列 30 bytes、800 列 ≈ 25KB。
+    const prevAdsFee = prevAdsMap[p.code] ?? null;
     return{code:p.code,name:p.name,shopeeIds:p.shopeeIds,qty:p.qty,rev:p.rev,gross:p.gross,
       adsFee,platFee,pureProfit,pureRate,adsPct,profitPct,targetROI,directROI,roi,roiDiff,
       dayBudget,clicks,stock:p.stock,fromMobic:p.fromMobic,...ana,testTags,
-      prevRev, growthRate, growthAnalysis};
+      prevRev, prevAdsFee, growthRate, growthAnalysis};
   });
   built.sort((a,b)=>{if(!a.fromMobic&&b.fromMobic)return 1;if(a.fromMobic&&!b.fromMobic)return -1;return b.pureProfit-a.pureProfit;});
   return built;
@@ -3161,6 +3192,7 @@ function setTagFilter(shop,label){
     if(idx>=0)arr.splice(idx,1);else arr.push(label);
     state[shop].tagFilters=arr;saveTagFilters(arr);
   }
+  _saveFilterState(shop);
   applyFilters(shop);
   // 重新開啟彈窗（innerHTML 更新後 open class 需補回）
   const bar=document.getElementById('tfbar-'+shop);
@@ -3294,6 +3326,37 @@ function toggleTfDrop(e,id){
 function closeTfDrop(){document.querySelectorAll('.tfdrop-menu.open').forEach(el=>el.classList.remove('open'));}
 document.addEventListener('click',closeTfDrop);
 
+// ── 篩選狀態持久化（per-shop）──
+// 只處理 state[shop] 裡的四個【使用者設定】欄位：filters / sorts / tagFilters / search。
+//   🔴 絕對不存 _filtered —— 它是 _built 的衍生快取（理由見 applyFilters 尾端那段註解），
+//     存下來還原時會指向一批早就不在畫面上的舊 row 物件，批次選取會選到看不見的列。
+//     同理 _built / _period / curMonth / curHalf 也不存：那些是資料與期間，不是篩選設定。
+//   ⚠ key 刻意 per-shop（'ec_filterstate|{shop}'）：跟既有的 ec_tagfilters_user
+//     （全站單一 key、且是沒人呼叫的死碼）語意不同，兩者無關、不共用、不互相覆蓋。
+function _saveFilterState(shop){
+  const s=state[shop];if(!s)return;
+  try{localStorage.setItem('ec_filterstate|'+shop,JSON.stringify({filters:s.filters||{},sorts:s.sorts||{},tagFilters:s.tagFilters||[],search:s.search||''}));}catch{}
+}
+// 回傳 {filters,sorts,tagFilters,search}；讀不到 / parse 失敗 / 整包形狀不對 → 回 null。
+//   🔴 逐欄型別防呆而非整包丟掉：舊格式或半壞的資料只要有一欄還能用就該救回來。
+//     typeof null 與 typeof [] 都是 'object'，物件欄位必須額外擋掉這兩種，否則
+//     applyFilters 的 Object.entries(s.filters) 會拿到陣列、篩出一片空白且不報錯。
+function _loadFilterState(shop){
+  try{
+    const r=localStorage.getItem('ec_filterstate|'+shop);
+    if(!r)return null;
+    const o=JSON.parse(r);
+    const isObj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
+    if(!isObj(o))return null;
+    return{
+      filters:isObj(o.filters)?o.filters:{},
+      sorts:isObj(o.sorts)?o.sorts:{},
+      tagFilters:Array.isArray(o.tagFilters)?o.tagFilters:[],
+      search:typeof o.search==='string'?o.search:'',
+    };
+  }catch{return null;}
+}
+
 // ── Filters & Sort ──
 function applyFilters(shop,opts){
   const s=state[shop];if(!s)return;
@@ -3382,15 +3445,35 @@ function applyFilters(shop,opts){
   renderTable(shop,list,opts);
   updateTagFilterBar(shop);
 }
-function setSort(shop,col,dir){state[shop].sorts={col,dir};applyFilters(shop);}
-function setSearch(shop,val){if(state[shop])state[shop].search=val;applyFilters(shop);}
+function setSort(shop,col,dir){
+  state[shop].sorts={col,dir};
+  _saveFilterState(shop);
+  applyFilters(shop);
+}
+function setSearch(shop,val){
+  if(state[shop])state[shop].search=val;
+  _saveFilterState(shop);
+  applyFilters(shop);
+}
+// ⚠ 目前【零呼叫點】：全 js/ 與 index.html 掃過，只有這個定義與 window 匯流排匯出，
+//   沒有任何 inline handler / addEventListener 會觸發它。實際在用的是下方的
+//   applyFpNum / applyFpTxt（欄位篩選彈窗的「確定」鈕）。
+//   因為是死碼，刻意【不加】_saveFilterState —— 加了會讓讀 code 的人誤以為它是活的。
+//   哪天接回來變成活的，記得補上那一行。
 function setColFilter(shop,col,type,val){
   if(!state[shop].filters)state[shop].filters={};
   if(val===''||val===null)delete state[shop].filters[col];
   else state[shop].filters[col]={type,val};
   applyFilters(shop);
 }
-function clearColFilter(shop,col){delete(state[shop].filters||{})[col];state[shop].sorts={};applyFilters(shop);}
+function clearColFilter(shop,col){
+  delete(state[shop].filters||{})[col];
+  state[shop].sorts={};
+  _saveFilterState(shop);
+  applyFilters(shop);
+}
+// ⚠ 內有三行遺留 console.log（'[applyFpNum]' 開頭），正式站每次用數值篩選都會印。
+//   非本 PR 範圍，待另案清理。
 function applyFpNum(shop,col,sid){
   const minEl=document.getElementById('fp-min-'+sid);
   const maxEl=document.getElementById('fp-max-'+sid);
@@ -3402,6 +3485,7 @@ function applyFpNum(shop,col,sid){
   if(min===''&&max===''){delete state[shop].filters[col];}
   else state[shop].filters[col]={type:'range',min:min===''?null:parseFloat(min),max:max===''?null:parseFloat(max)};
   console.log('[applyFpNum] filter set=',JSON.stringify(state[shop].filters[col]));
+  _saveFilterState(shop);
   applyFilters(shop);
 }
 function applyFpTxt(shop,col,sid){
@@ -3409,6 +3493,7 @@ function applyFpTxt(shop,col,sid){
   if(!state[shop].filters)state[shop].filters={};
   if(val==='')delete state[shop].filters[col];
   else state[shop].filters[col]={type:'text',val};
+  _saveFilterState(shop);
   applyFilters(shop);
 }
 
@@ -4610,6 +4695,7 @@ function renderPnmList(){
   el.innerHTML=sorted.map(d=>map.get(d).map(({text,i})=>`<div class="pnm-entry">
     <div class="pnm-entry-date">${d}</div>
     <div class="pnm-entry-text">${text.replace(/</g,'&lt;')}</div>
+    <button class="pnm-entry-edit" onclick="_pnmEditNote(${i},this)" title="編輯這筆文字（保留原日期）">✎</button>
     <button class="pnm-entry-del" onclick="deleteProfitNote(${i})">×</button>
   </div>`).join('')).join('');
 }
@@ -4633,6 +4719,7 @@ function renderPnmHistory(){
     box.innerHTML=others.map(o=>`<div class="pnm-entry">
       <div class="pnm-entry-date">${_growthPeriodLabel(o)}</div>
       <div class="pnm-entry-text">${String(o.text||'').replace(/</g,'&lt;')}</div>
+      <button class="pnm-entry-edit" onclick="_pnmEditNote(${o.i},this)" title="編輯這筆文字（保留原日期）">✎</button>
       <button class="pnm-entry-del" onclick="deleteProfitNote(${o.i})">×</button>
     </div>`).join('');
     return;
@@ -4698,6 +4785,80 @@ function submitProfitNote(){
   closeProfitNoteModal();
   applyFilters(shop,{keepScroll:true});
 }
+// 就地編輯一筆調整紀錄的文字。origIdx 是【原始陣列索引】—— renderPnmList / renderPnmHistory
+//   都刻意保留原始索引（不 filter 重編），已實測驗證：E150 同日三筆各自拿到 1/2/3、
+//   跳著點四次順序全對。btn 是被點的 ✎ 鈕本身（inline onclick 傳 this），用它
+//   .closest('.pnm-entry') 找到所屬那一列 → 兩個模板（本期 / 商品調整的其他期間）共用
+//   這一支，不需要分支，也不做任何 document 級查詢。
+//
+//   🔴 儲存是【就地改第 origIdx 筆的 text】，date 與（_growth 才有的）period 原封不動。
+//     絕對【不可以】抄洞察表 bindEditChips 那套「filter 掉同日全部 + push 一筆新的」
+//     （marketing.js 搜 bindEditChips）：洞察表同日多筆在畫面上是用「、」合併成一列顯示的
+//     （顯示模型＝資料模型），淨利表不是 —— renderPnmList 對同日的【每一筆各產生一列】、
+//     各帶自己的索引。照抄會靜默吃掉同日的其他紀錄。
+//
+//   ⚠ blur 的行為【刻意與洞察表相反】：洞察表是「失焦即存」
+//     （marketing.js 的 input.addEventListener('blur', () => finish(true))），
+//     這裡是【失焦＝取消，不儲存】。理由：這個彈窗裡可點的東西比洞察表多得多
+//     （上方新增輸入框、送出鈕、本期列表、其他期間列表、洞察表紀錄區、關閉鈕），
+//     失焦即存太容易誤觸而寫入非預期的內容。明確按 Enter 才存，ESC 或點到別處一律當放棄。
+function _pnmEditNote(origIdx,btn){
+  if(!_pnm||!btn)return;
+  const row=btn.closest('.pnm-entry');if(!row)return;
+  const span=row.querySelector('.pnm-entry-text');if(!span)return;   // 已在編輯中 → span 已被換掉 → 早退，不重複開
+  const {shopKey,code}=_pnm;
+  const _readAdj=()=>{const nd=getNotes(shopKey)[code];if(!nd)return[];return(typeof nd==='string')?[{date:'',text:nd}]:(nd.adjustments||[]);};
+  const cur=_readAdj()[origIdx];if(!cur)return;
+  const orig=String(cur.text||'');
+  const inp=document.createElement('input');
+  inp.type='text';inp.className='pnm-entry-inp';inp.value=orig;
+  row.replaceChild(inp,span);
+  inp.focus();inp.select();
+  let done=false;
+  // 取消：把【原本那個 span 節點】換回去，【刻意不呼叫 renderPnmList()】。
+  //   🔴 這裡是後人最容易「順手改成重繪比較乾淨」而改壞的地方，理由如下，動之前先讀完：
+  //     使用者編輯到一半跑去按【別列的 ×】時，瀏覽器的事件順序是
+  //       ① mousedown 落在那顆 ×  → 焦點離開本 input → 本 input 的 blur 觸發 → 跑到這個 cancel
+  //       ② mouseup   落在那顆 ×
+  //       ③ click 只有在 mousedown 與 mouseup 落在【同一個元素】時才成立 → 才呼叫 deleteProfitNote
+  //     若 cancel 在步驟 ① 重繪整個 #pnm-list，那顆剛被按下的 × 會在 mouseup 之前就被銷毀
+  //     → 步驟 ③ 的 click 永遠不成立 → 使用者按了 × 卻【什麼都沒發生】，要按第二次才有反應。
+  //     這種 bug 不會報錯、也不會留下任何痕跡，極難查。
+  //     只換回這一列的節點就完全不會動到別列的鈕，步驟 ②③ 照常成立。
+  //   順帶一個好處：span 是【原本那個節點】，換回去不需要重新做 HTML escape，
+  //     省掉「取消一次就少一層跳脫」這類錯誤的可能。
+  const cancel=()=>{if(done)return;done=true;try{if(inp.parentNode===row)row.replaceChild(span,inp);}catch{}};
+  const save=()=>{
+    if(done)return;
+    const v=inp.value.trim();
+    if(!v||v===orig){cancel();return;}   // 空＝視同取消（要刪請用 ×）；沒改＝不寫入，避免無意義的寫入與同步徽章
+    const notes=getNotes(shopKey);if(!notes[code]){cancel();return;}
+    if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
+    const t=notes[code].adjustments[origIdx];
+    // 🔴 寫入前再驗一次「這個索引還是不是原來那一筆」：彈窗開著的期間，別人的雲端快照可能
+    //   整包換掉 Store._profitMem['ec_notes|…']，而 renderPnmList 不會因此重繪（它只從
+    //   openNotePopup / deleteProfitNote / 本函式呼叫）→ 輸入框還在、origIdx 卻已對到別筆。
+    //   date 與原文字兩者都相符才寫；不符就放棄本次編輯並重繪，讓使用者看到最新內容再決定。
+    //   ⚠ 既有的 deleteProfitNote 沒有這道防線（同樣的暴露，只是按一下 × 的時間窗短得多）。
+    //     回頭補它【不在本 PR 範圍】，另案處理 —— 新增功能和修既有問題綁同一個 PR，出事分不清哪邊。
+    if(!t||String(t.text||'')!==orig||String(t.date||'')!==String(cur.date||'')){
+      done=true;
+      console.warn('[pnmEdit] 資料在編輯期間變動過，本次編輯放棄。origIdx=',origIdx);
+      renderPnmList();renderPnmHistory();return;
+    }
+    done=true;
+    t.text=v;   // 就地改 text —— date 不動、_growth 的 period 不動
+    // 收尾逐字比照 deleteProfitNote 的最後一行（不關彈窗、帶 keepScroll）。
+    //   兩處差異：那邊是 splice、這邊是改 text；那邊刪光後會 delete notes[code]，
+    //   編輯不會改變陣列長度，所以這裡沒有那一行。
+    saveNotes(shopKey,notes);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
+  };
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();save();}
+    else if(e.key==='Escape'){e.preventDefault();cancel();}
+  });
+  inp.addEventListener('blur',cancel);   // 失焦＝取消（與洞察表相反，理由見函式上方註解）
+}
 function deleteProfitNote(origIdx){
   if(!_pnm)return;
   const {shopKey,code}=_pnm;
@@ -4712,6 +4873,24 @@ function startNote(shop,code){openNotePopup(shop,code);}
 function commitNote(){}
 
 // ── Render Table ──
+// 廣告費格下方的副標「上期 $X」。兩個渲染分支（有營收的一般列 / tr-no-rev 列）共用同一份。
+//   🔴 排版一律靠 .sub-ads 自己，【不可依賴 <td> 上的任何額外 class】——
+//     patchRow 更新廣告費格時有一行 `adsEl.className=\`td-num td-amber …\`.trim()`，
+//     會把 <td> 的 class 整個覆寫掉；加在那裡的 class 使用者編輯一次廣告費就消失，
+//     而且不報錯，只會表現成「副標排版突然跑掉」。
+//   🔴 三種值要分清楚：
+//     數字（含 0）→「上期 $0」：上期【有】這個商品，只是沒投廣告。
+//     null        →「—」      ：上期【沒有】這個商品。
+//     undefined   →「—」      ：本次改動【之前】產生的舊快照沒有 prevAdsFee 這個欄位。
+//                               舊報表不會自己長出這一欄，要重新「產生並儲存」才會有。
+//   ⚠ 目前【沒有】任何畫面說明文字告訴使用者「$0」與「—」的差別 —— 這是刻意的取捨：
+//     表頭已經有排序箭頭＋篩選鈕，再塞一個 ⓘ 會讓那格太擠，而且沒人會注意到的小圖示
+//     等於沒做。若使用者實際用過之後問起「為什麼有的是 $0 有的是破折號」，那才是真的
+//     需要說明的訊號，屆時再決定放哪裡。設計意圖記在這裡，日後要加的人看得到。
+function _subAdsHtml(r){
+  const v=r.prevAdsFee;
+  return `<div class="sub-ads">${(v!==null&&v!==undefined)?'上期 $'+fmtN(v):'—'}</div>`;
+}
 function renderTable(shop,list,opts){
   const s=state[shop];const built=s._built;
   const edits=getEdits(shop);
@@ -4722,7 +4901,12 @@ function renderTable(shop,list,opts){
   kpiSrc.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
   const extra=state[shop]?._extraAdsFee||0;
   tAds+=extra;tPure-=extra;
-  setKpis(shop,tRev,tGross,tAds,tPure);
+  // 第 6 參數 prevRev 刻意維持 undefined ——「(+X% 較上期)」在這條路徑上不顯示。
+  //   ⚠ 這是【既有行為】（本行原本就只傳 5 個參數），本 PR 刻意不修：它現在的表現碰巧是
+  //     對的（篩選後本期是子集、上期是全量，比出來的百分比會騙人，不顯示反而正確），
+  //     但那是「漏傳參數」意外達成的、不是設計。要修得先重新想一遍語意 → 另案處理。
+  //   第 7 參數走 _prevAdsTotal，它自己會在有篩選時回 null（理由見該函式）。
+  setKpis(shop,tRev,tGross,tAds,tPure,undefined,_prevAdsTotal(shop));
   document.getElementById('period-tag-'+shop).textContent=s._period||'';
   document.getElementById('cnt-'+shop).textContent=list.length+' 筆';
 
@@ -4738,7 +4922,7 @@ function renderTable(shop,list,opts){
   // 拖曳表頭調整欄位順序：拖曳來源/目標都用 data-colkey 標記的欄位鍵
   const dragAttrs=(key)=>`draggable="true" ondragstart="colDragStart(event,'${shop}','${key}')" ondragover="colDragOver(event)" ondragenter="colDragEnter(event)" ondragleave="colDragLeave(event)" ondrop="colDrop(event,'${shop}','${key}')" ondragend="colDragEnd(event)"`;
   const HEADER_LABEL={
-    adsFee:'廣告費', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利',
+    adsFee:'廣告費 / 上期', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利',
     pureRate:'淨利率%', adsPct:'廣告佔比', profitPct:'利潤%', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
     roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算',
     analysisLabel:'廣告分析', note:'廣告調整',
@@ -4781,11 +4965,15 @@ function renderTable(shop,list,opts){
     const noteId=`note-${shop}-${r.code}`;
 
     // 可編輯數字欄 helper
-    const editTd=(col,display,cls='')=>{
+    // sub：接在 .cell-val【後面】的副標，預設空字串（其餘欄位輸出逐字不變）。
+    //   🔴 副標【一定要放在 span 外面】：patchRow 更新廣告費格是
+    //     `adsEl.querySelector('.cell-val').textContent = …`，塞進 span 裡的東西
+    //     使用者編輯一次廣告費就會被 textContent 覆寫掉、當場消失。
+    const editTd=(col,display,cls='',sub='')=>{
       const tid=`td-${shop}-${r.code}-${col}`;
       const edited=isEdited(col);
       return `<td class="td-num ${cls} ${edited?'cell-edited':''}" id="${tid}" onclick="startEdit('${shop}','${r.code}','${col}','${tid}')" style="cursor:pointer" title="點擊編輯">
-        <span class="cell-val">${display}</span>
+        <span class="cell-val">${display}</span>${sub}
       </td>`;
     };
 
@@ -4796,7 +4984,7 @@ function renderTable(shop,list,opts){
       const adsId=`td-${shop}-${r.code}-adsFee`;
       const MOBIC_BLANK=new Set(['growthRate','growthAnalysis']);
       const mobicCell={
-        adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span></td>`,
+        adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span>${_subAdsHtml(r)}</td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
         note:noteCellHtml,
         growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
@@ -4814,7 +5002,7 @@ function renderTable(shop,list,opts){
       </tr>`;
     }else{
       const rowCell={
-        adsFee:editTd('adsFee','$'+fmtN(r.adsFee),'td-amber'),
+        adsFee:editTd('adsFee','$'+fmtN(r.adsFee),'td-amber',_subAdsHtml(r)),
         rev:`<td class="td-num">$${fmtN(r.rev)}<div class="sub-rev">${r.prevRev!==null?'上期 $'+fmtN(r.prevRev):'—'}</div></td>`,
         gross:`<td class="td-num">${_fSigned(r.gross)}</td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
@@ -4847,9 +5035,20 @@ function renderTable(shop,list,opts){
   let fRev=0,fGross=0,fAds=0,fPure=0,fQty=0;
   list.forEach(r=>{fRev+=r.rev;fGross+=r.gross;fAds+=r.adsFee;fPure+=r.pureProfit;fQty+=r.qty;});
   let fPrevRev=0; list.forEach(r=>{if(r.prevRev)fPrevRev+=r.prevRev;});
+  // 上期廣告費小計。條件刻意寫成顯式的「有值就加（含 0）」，不照抄上一行 fPrevRev 的
+  //   `if(r.prevRev)`（那個會連 0 一起跳過）—— 跟本檔逐列的 prevAdsFee 處理保持同一套語意。
+  //   ⚠ 誠實說明：對【加總】而言兩種寫法結果完全相同（加 0 不改變總和），
+  //     真正有差別的是逐列顯示（$0 vs —）。這裡寫成顯式判斷是為了語意一致，
+  //     以及日後若有人把它改成「筆數」統計時不會靜默算錯。
+  let fPrevAds=0; list.forEach(r=>{const v=r.prevAdsFee; if(v!==null&&v!==undefined)fPrevAds+=v;});
   const fGrowth=(fPrevRev>0)?(fRev-fPrevRev)/fPrevRev:null;
   const totalCell={
-    adsFee:`<td class="td-num td-amber">$${fmtN(fAds)}</td>`,
+    // ⚠ 小計列的副標寫法與商品列【刻意不同，是跟隨既有的不一致、不是疏漏】：
+    //   商品列是「上期 $X」、且區分 null 顯示「—」（見 _subAdsHtml）；
+    //   小計列沿用隔壁 rev 那格的既有寫法 —— 不寫「上期」兩個字、不做 null 處理、
+    //   0 就直接顯示 $0。兩者要一致的話應該【整組一起改】（含 rev 那格），
+    //   不要只改廣告費這一格，否則同一列裡兩個副標又長得不一樣。
+    adsFee:`<td class="td-num td-amber">$${fmtN(fAds)}<div class="sub-ads">$${fmtN(fPrevAds)}</div></td>`,
     rev:`<td class="td-num">$${fmtN(fRev)}<div class="sub-rev">$${fmtN(fPrevRev)}</div></td>`,
     gross:`<td class="td-num">${_fSigned(fGross)}</td>`,
     pureProfit:`<td class="td-num ${fPure>=0?'td-pos':'td-neg'}">${_fSigned(fPure)}</td>`,
@@ -13312,6 +13511,42 @@ function initShopUI(shop){
   if(shop===TEST_SHOP_ID){ testInitShopUI(shop); return; }
   if(_userPickedPeriod[shop]) onMonthChange(shop);   // 已介入 → 只重載當前選擇（不跳）
   else _applyLatestPeriod(shop);                     // 沒介入 → 自動跳最新（內部完整渲染）
+  // 還原上次離開時的篩選狀態（只走「進入淨利表分頁」這一條路）。
+  //   🔴 刻意做在這裡、不做進 loadIntoUI：那是全站共用路徑（切月份/切半月/產生報表/雲端刷新
+  //     都會經過），在那裡還原等於連「切月份」也不重置，超出需求範圍。
+  //   上面兩行（onMonthChange / _applyLatestPeriod）整條鏈都是同步的（無 async/await/Promise），
+  //     走到這裡時 loadIntoUI 已經跑完、四個欄位已被重置成預設值 —— 所以這裡是覆寫，
+  //     不是被覆寫。順序不可對調。
+  //   讀不到（首次使用 / 資料損毀）→ _loadFilterState 回 null → 整段跳過，行為與現在完全相同。
+  //
+  //   ⚠ 該期沒有報表時（tryLoadSaved 走 else 分支、或 _applyLatestPeriod 提前 return false），
+  //     這段照跑不特判，兩層理由：
+  //     ① 那兩條路徑【根本沒走到 loadIntoUI】，四個欄位壓根沒被重置 —— 還原只是把相同的值
+  //        寫回去，是 no-op，不會覆蓋掉任何東西。
+  //     ② 就算 ① 的推理哪天因別人改動而不成立，真正的保險是下面 applyFilters 開頭那句
+  //        `if(!s._built||!s._built.length)return;` —— 沒有報表資料就直接早退，畫面不會動。
+  //     兩層各自獨立成立，特判反而多一個分支要維護。
+  const _fs=_loadFilterState(shop);
+  if(_fs){
+    state[shop].filters=_fs.filters;
+    state[shop].sorts=_fs.sorts;
+    state[shop].tagFilters=_fs.tagFilters;
+    state[shop].search=_fs.search;
+    // 搜尋框不在 #tbl-{shop} 裡（它在 toolbar #tb-{shop}），renderTable 碰不到它 → 自己回填。
+    //   ⚠ programmatic 的 .value= 不會觸發 oninput，所以不會回頭呼叫 setSearch → 不會回寫。
+    //   這一行逐字照抄 loadIntoUI 裡的既有範本。
+    const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
+    // 讓畫面跟上：applyFilters → renderTable（表格本體＋表頭排序箭頭＋欄位篩選鈕 on 狀態，
+    //   三者都由 s.sorts / s.filters 現算）＋ updateTagFilterBar（pill 的選取狀態由 s.tagFilters 現算）。
+    //   兩者只「產生」onclick 字串、不執行，所以不會繞回 setSort/setTagFilter 等六支 → 不會回寫。
+    //
+    //   🔴 這裡【刻意】讓整表多重繪一次：loadIntoUI 內部已經跑過一次 applyFilters，這是第二次。
+    //     好麻吉 800+ 列在進頁時會重繪兩次 —— 這是【刻意接受的代價，不是 bug，不要「修」掉它】。
+    //     唯一的替代方案是把還原塞進 loadIntoUI（讓它一次就用正確的篩選渲染），但那條路
+    //     是全站共用路徑（切月份/切半月/產生報表/雲端刷新都經過），改它會連帶改變那四種
+    //     操作的重置行為 —— 已在設計階段評估後否決。寧可多繪一次，不動共用路徑。
+    applyFilters(shop);
+  }
   if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
   if(Object.keys(globalMap).length>0){
     const uc=document.getElementById('uc-map-'+shop);
@@ -13355,7 +13590,39 @@ function doExport(shop){
 }
 
 // ── Helpers ──
-function setKpis(shop,rev,gross,ads,pure,prevRev){
+// 上一期的廣告費總額（供 header 的「上期 NT$ …」副標用）。取不到 / 不該顯示時一律回 null。
+//
+//   🔴 有任何篩選條件時回 null（＝副標留空）—— 不是因為算不出來，是因為算出來會騙人：
+//     本期的廣告費在 renderTable 裡是【篩選後那批列】的加總（見該函式的 kpiSrc=list），
+//     而上一期永遠只能是【全量】—— 沒有辦法把本期的篩選條件套到上一期的報表上。
+//     使用者篩了「低效廣告」那批，就會看到本期廣告費暴跌、上期不變，得出「廣告花少了」
+//     的結論。那是假訊號。
+//     【沒有數字，使用者會去清掉篩選再看一次；有錯的數字，使用者會直接相信它。】
+//     sorts 不影響加總，但一併納入判斷：規則單純成「動過篩選列就不顯示」，日後才不會有人改錯。
+//
+//   ⚠ 期間推算刻意走 getPrevPeriodKey（本檔搜該函式），不自己再寫一份：同樣的
+//     「上半→上月下半 / 下半→同月上半 / 整月→上月整月」邏輯，全檔已經有兩份
+//     （getPrevPeriodKey 與 syncHeaderKpis 內聯那段），不要再增加第三份。
+//     它回傳的是 lsKey 格式 'ec|{shop}|{month}|{half}'，拆出 month/half 餵給 lsLoad。
+//
+//   ⚠ 刻意【不加】state[shop]._extraAdsFee（未對應廣告費，見 ignoreAllUnmatched）：
+//     它只活在記憶體、沒有任何持久化路徑（全檔三處都是 state[shop]._extraAdsFee，
+//     built 陣列裡沒這個欄位），重整就歸零，更不可能從上一期的報表讀回來；
+//     而且它是 per-shop 不是 per-period（切半月不會清），拿來代表上一期在語意上就是錯的。
+//     所以「本期含 extra、上期不含」這個不對稱是刻意的，不是漏掉。
+function _prevAdsTotal(shop){
+  const s=state[shop];if(!s)return null;
+  if(s.search||(s.tagFilters&&s.tagFilters.length)||(s.filters&&Object.keys(s.filters).length)||(s.sorts&&s.sorts.col))return null;
+  try{
+    const parts=getPrevPeriodKey(shop,s.curMonth,s.curHalf).split('|');
+    if(parts.length<4)return null;
+    const rep=lsLoad(shop,parts[2],parts[3]);
+    if(!rep||!rep.built||!rep.built.length)return null;
+    let t=0;rep.built.forEach(r=>{t+=r.adsFee||0;});
+    return t>0?t:null;
+  }catch{return null;}
+}
+function setKpis(shop,rev,gross,ads,pure,prevRev,prevAds){
   const revEl=document.getElementById('kv-rev-'+shop);if(revEl)revEl.textContent='NT$ '+fmtN(rev);
   const pureEl=document.getElementById('kv-net-'+shop);
   const pureHtml='NT$ '+fmtN(pure)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(pure/rev*100).toFixed(1)}%)</span>`:'');
@@ -13374,6 +13641,15 @@ function setKpis(shop,rev,gross,ads,pure,prevRev){
   }
   if(hNet){hNet.innerHTML=pureHtml;hNet.style.color=pure>=0?'#10b981':'#ef4444';}
   if(hAds)hAds.innerHTML=adsHtml;
+  // 廣告費副標「上期 NT$ …」。放在【同一行右側】而不是數字下方：#header-kpi-row 是
+  //   align-items:center 的橫向 flex，任一格長高會把整列撐高、另外兩格垂直錯位；
+  //   而且隔壁「本期總營收」的副標(kv-rev-change-header)本來就是同一行右側，放下方反而不一致。
+  // ⚠ 中性灰、【刻意不上綠紅】：廣告費變多不必然是壞事（營收可能同步變多），
+  //   用漲跌色暗示好壞會誤導判斷。這一點與隔壁營收副標刻意不同，不是漏做。
+  // 取不到上一期（最早那一期 / 新賣場 / 剛清除報表）或使用者有篩選 → 一律留空。
+  //   不顯示「上期 —」：永遠是破折號的欄位只會讓人以為壞掉。比照上方 chEl 的 else 分支。
+  const apEl=document.getElementById('kv-ads-prev-header');
+  if(apEl)apEl.innerHTML=(prevAds&&prevAds>0)?`上期 NT$ ${fmtN(prevAds)}`:'';
 }
 function syncHeaderKpis(shop){
   if(shop==='總表'||!state[shop]){return;}
@@ -13393,7 +13669,10 @@ function syncHeaderKpis(shop){
     const prevRep=lsLoad(shop,prevM,prevH);
     if(prevRep&&prevRep.built&&prevRep.built.length){let t=0;prevRep.built.forEach(r=>{t+=r.rev||0;});if(t>0)prevTotalRev=t;}
   }catch{}
-  setKpis(shop,tRev,tGross,tAds,tPure,prevTotalRev);
+  // 上期廣告費：另外走 _prevAdsTotal（有篩選時回 null → 副標留空，理由見該函式）。
+  //   ⚠ 上面 prevTotalRev 那段【一字未動】—— 兩者的取法本來就一致（同一套期間推算），
+  //     但刻意不合併：合併等於改寫既有那條已驗證的路徑，風險不對稱。
+  setKpis(shop,tRev,tGross,tAds,tPure,prevTotalRev,_prevAdsTotal(shop));
 }
 function num(v){return parseFloat((v+'').replace(/[,$%]/g,'').trim())||0;}
 function fmtN(v){return Math.abs(Math.round(v)).toLocaleString();}
@@ -13426,7 +13705,7 @@ Object.assign(window, { SHOPS, MONTHS, HALVES, state, globalMap });
 Object.defineProperty(window, 'curShop', { get: () => curShop, configurable: true });
 
 Object.assign(window, {
-  _cloudRead,_cloudWrite,_cloudWriteSafe,_doGenerate,_showSyncBtn,addGrowthCond,addNewAnaCond,
+  _cloudRead,_cloudWrite,_cloudWriteSafe,_doGenerate,_pnmEditNote,_showSyncBtn,addGrowthCond,addNewAnaCond,
   applyFilters,applyFpNum,applyFpTxt,buildDistHtml,buildNoteCell,buildShop,calcAnalysis,calcAnalysisAll,
   calcGrowthAnalysis,checkAdsReconcile,checkReady,clearColFilter,clearPeriod,clearPeriodFromModal,closeAdsEditModal,
   closeAnaSettings,closeDeleteFileModal,closeDistModal,closeGrowthSettings,closePopup,
@@ -13436,7 +13715,7 @@ Object.assign(window, {
   editSummaryCell,evalAnaConds,findUnmatchedAds,fmKey,fmtAds,fmtN,g,generate,getAnaThresh,
   getCustomAnaRules,getCustomGrowthRules,getDays,getDisabledAnaTags,getDisabledGrowthTags,
   getEdits,getGrowthThresh,getHiddenCols,getNotes,getPeriodLabel,getPlatformRate,getPrevPeriodKey,
-  getPrevRevMap,getSummaryRows,getTagFilters,gg,initProfitPeriodControls,initShopUI,
+  getPrevPeriodMap,getSummaryRows,getTagFilters,gg,initProfitPeriodControls,initShopUI,
   loadIntoUI,lsHasAny,lsKey,lsLoad,lsSave,markCard,num,onFile,onGlobalFile,onGlobalGenerate,
   onHalfChange,onMapFile,onMonthChange,onPlatformRateChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
   onTestPeriodChange,onTestRateChange,   // 測試通路期間列的 inline onchange 用，缺了會 ReferenceError、輸入框靜默失效
