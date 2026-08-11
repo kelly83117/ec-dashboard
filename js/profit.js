@@ -3161,6 +3161,7 @@ function setTagFilter(shop,label){
     if(idx>=0)arr.splice(idx,1);else arr.push(label);
     state[shop].tagFilters=arr;saveTagFilters(arr);
   }
+  _saveFilterState(shop);
   applyFilters(shop);
   // 重新開啟彈窗（innerHTML 更新後 open class 需補回）
   const bar=document.getElementById('tfbar-'+shop);
@@ -3294,6 +3295,37 @@ function toggleTfDrop(e,id){
 function closeTfDrop(){document.querySelectorAll('.tfdrop-menu.open').forEach(el=>el.classList.remove('open'));}
 document.addEventListener('click',closeTfDrop);
 
+// ── 篩選狀態持久化（per-shop）──
+// 只處理 state[shop] 裡的四個【使用者設定】欄位：filters / sorts / tagFilters / search。
+//   🔴 絕對不存 _filtered —— 它是 _built 的衍生快取（理由見 applyFilters 尾端那段註解），
+//     存下來還原時會指向一批早就不在畫面上的舊 row 物件，批次選取會選到看不見的列。
+//     同理 _built / _period / curMonth / curHalf 也不存：那些是資料與期間，不是篩選設定。
+//   ⚠ key 刻意 per-shop（'ec_filterstate|{shop}'）：跟既有的 ec_tagfilters_user
+//     （全站單一 key、且是沒人呼叫的死碼）語意不同，兩者無關、不共用、不互相覆蓋。
+function _saveFilterState(shop){
+  const s=state[shop];if(!s)return;
+  try{localStorage.setItem('ec_filterstate|'+shop,JSON.stringify({filters:s.filters||{},sorts:s.sorts||{},tagFilters:s.tagFilters||[],search:s.search||''}));}catch{}
+}
+// 回傳 {filters,sorts,tagFilters,search}；讀不到 / parse 失敗 / 整包形狀不對 → 回 null。
+//   🔴 逐欄型別防呆而非整包丟掉：舊格式或半壞的資料只要有一欄還能用就該救回來。
+//     typeof null 與 typeof [] 都是 'object'，物件欄位必須額外擋掉這兩種，否則
+//     applyFilters 的 Object.entries(s.filters) 會拿到陣列、篩出一片空白且不報錯。
+function _loadFilterState(shop){
+  try{
+    const r=localStorage.getItem('ec_filterstate|'+shop);
+    if(!r)return null;
+    const o=JSON.parse(r);
+    const isObj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
+    if(!isObj(o))return null;
+    return{
+      filters:isObj(o.filters)?o.filters:{},
+      sorts:isObj(o.sorts)?o.sorts:{},
+      tagFilters:Array.isArray(o.tagFilters)?o.tagFilters:[],
+      search:typeof o.search==='string'?o.search:'',
+    };
+  }catch{return null;}
+}
+
 // ── Filters & Sort ──
 function applyFilters(shop,opts){
   const s=state[shop];if(!s)return;
@@ -3382,15 +3414,35 @@ function applyFilters(shop,opts){
   renderTable(shop,list,opts);
   updateTagFilterBar(shop);
 }
-function setSort(shop,col,dir){state[shop].sorts={col,dir};applyFilters(shop);}
-function setSearch(shop,val){if(state[shop])state[shop].search=val;applyFilters(shop);}
+function setSort(shop,col,dir){
+  state[shop].sorts={col,dir};
+  _saveFilterState(shop);
+  applyFilters(shop);
+}
+function setSearch(shop,val){
+  if(state[shop])state[shop].search=val;
+  _saveFilterState(shop);
+  applyFilters(shop);
+}
+// ⚠ 目前【零呼叫點】：全 js/ 與 index.html 掃過，只有這個定義與 window 匯流排匯出，
+//   沒有任何 inline handler / addEventListener 會觸發它。實際在用的是下方的
+//   applyFpNum / applyFpTxt（欄位篩選彈窗的「確定」鈕）。
+//   因為是死碼，刻意【不加】_saveFilterState —— 加了會讓讀 code 的人誤以為它是活的。
+//   哪天接回來變成活的，記得補上那一行。
 function setColFilter(shop,col,type,val){
   if(!state[shop].filters)state[shop].filters={};
   if(val===''||val===null)delete state[shop].filters[col];
   else state[shop].filters[col]={type,val};
   applyFilters(shop);
 }
-function clearColFilter(shop,col){delete(state[shop].filters||{})[col];state[shop].sorts={};applyFilters(shop);}
+function clearColFilter(shop,col){
+  delete(state[shop].filters||{})[col];
+  state[shop].sorts={};
+  _saveFilterState(shop);
+  applyFilters(shop);
+}
+// ⚠ 內有三行遺留 console.log（'[applyFpNum]' 開頭），正式站每次用數值篩選都會印。
+//   非本 PR 範圍，待另案清理。
 function applyFpNum(shop,col,sid){
   const minEl=document.getElementById('fp-min-'+sid);
   const maxEl=document.getElementById('fp-max-'+sid);
@@ -3402,6 +3454,7 @@ function applyFpNum(shop,col,sid){
   if(min===''&&max===''){delete state[shop].filters[col];}
   else state[shop].filters[col]={type:'range',min:min===''?null:parseFloat(min),max:max===''?null:parseFloat(max)};
   console.log('[applyFpNum] filter set=',JSON.stringify(state[shop].filters[col]));
+  _saveFilterState(shop);
   applyFilters(shop);
 }
 function applyFpTxt(shop,col,sid){
@@ -3409,6 +3462,7 @@ function applyFpTxt(shop,col,sid){
   if(!state[shop].filters)state[shop].filters={};
   if(val==='')delete state[shop].filters[col];
   else state[shop].filters[col]={type:'text',val};
+  _saveFilterState(shop);
   applyFilters(shop);
 }
 
@@ -13293,6 +13347,42 @@ function initShopUI(shop){
   if(shop===TEST_SHOP_ID){ testInitShopUI(shop); return; }
   if(_userPickedPeriod[shop]) onMonthChange(shop);   // 已介入 → 只重載當前選擇（不跳）
   else _applyLatestPeriod(shop);                     // 沒介入 → 自動跳最新（內部完整渲染）
+  // 還原上次離開時的篩選狀態（只走「進入淨利表分頁」這一條路）。
+  //   🔴 刻意做在這裡、不做進 loadIntoUI：那是全站共用路徑（切月份/切半月/產生報表/雲端刷新
+  //     都會經過），在那裡還原等於連「切月份」也不重置，超出需求範圍。
+  //   上面兩行（onMonthChange / _applyLatestPeriod）整條鏈都是同步的（無 async/await/Promise），
+  //     走到這裡時 loadIntoUI 已經跑完、四個欄位已被重置成預設值 —— 所以這裡是覆寫，
+  //     不是被覆寫。順序不可對調。
+  //   讀不到（首次使用 / 資料損毀）→ _loadFilterState 回 null → 整段跳過，行為與現在完全相同。
+  //
+  //   ⚠ 該期沒有報表時（tryLoadSaved 走 else 分支、或 _applyLatestPeriod 提前 return false），
+  //     這段照跑不特判，兩層理由：
+  //     ① 那兩條路徑【根本沒走到 loadIntoUI】，四個欄位壓根沒被重置 —— 還原只是把相同的值
+  //        寫回去，是 no-op，不會覆蓋掉任何東西。
+  //     ② 就算 ① 的推理哪天因別人改動而不成立，真正的保險是下面 applyFilters 開頭那句
+  //        `if(!s._built||!s._built.length)return;` —— 沒有報表資料就直接早退，畫面不會動。
+  //     兩層各自獨立成立，特判反而多一個分支要維護。
+  const _fs=_loadFilterState(shop);
+  if(_fs){
+    state[shop].filters=_fs.filters;
+    state[shop].sorts=_fs.sorts;
+    state[shop].tagFilters=_fs.tagFilters;
+    state[shop].search=_fs.search;
+    // 搜尋框不在 #tbl-{shop} 裡（它在 toolbar #tb-{shop}），renderTable 碰不到它 → 自己回填。
+    //   ⚠ programmatic 的 .value= 不會觸發 oninput，所以不會回頭呼叫 setSearch → 不會回寫。
+    //   這一行逐字照抄 loadIntoUI 裡的既有範本。
+    const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
+    // 讓畫面跟上：applyFilters → renderTable（表格本體＋表頭排序箭頭＋欄位篩選鈕 on 狀態，
+    //   三者都由 s.sorts / s.filters 現算）＋ updateTagFilterBar（pill 的選取狀態由 s.tagFilters 現算）。
+    //   兩者只「產生」onclick 字串、不執行，所以不會繞回 setSort/setTagFilter 等六支 → 不會回寫。
+    //
+    //   🔴 這裡【刻意】讓整表多重繪一次：loadIntoUI 內部已經跑過一次 applyFilters，這是第二次。
+    //     好麻吉 800+ 列在進頁時會重繪兩次 —— 這是【刻意接受的代價，不是 bug，不要「修」掉它】。
+    //     唯一的替代方案是把還原塞進 loadIntoUI（讓它一次就用正確的篩選渲染），但那條路
+    //     是全站共用路徑（切月份/切半月/產生報表/雲端刷新都經過），改它會連帶改變那四種
+    //     操作的重置行為 —— 已在設計階段評估後否決。寧可多繪一次，不動共用路徑。
+    applyFilters(shop);
+  }
   if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
   if(Object.keys(globalMap).length>0){
     const uc=document.getElementById('uc-map-'+shop);
