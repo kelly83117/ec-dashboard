@@ -3161,6 +3161,7 @@ function setTagFilter(shop,label){
     if(idx>=0)arr.splice(idx,1);else arr.push(label);
     state[shop].tagFilters=arr;saveTagFilters(arr);
   }
+  _saveFilterState(shop);
   applyFilters(shop);
   // 重新開啟彈窗（innerHTML 更新後 open class 需補回）
   const bar=document.getElementById('tfbar-'+shop);
@@ -3413,15 +3414,35 @@ function applyFilters(shop,opts){
   renderTable(shop,list,opts);
   updateTagFilterBar(shop);
 }
-function setSort(shop,col,dir){state[shop].sorts={col,dir};applyFilters(shop);}
-function setSearch(shop,val){if(state[shop])state[shop].search=val;applyFilters(shop);}
+function setSort(shop,col,dir){
+  state[shop].sorts={col,dir};
+  _saveFilterState(shop);
+  applyFilters(shop);
+}
+function setSearch(shop,val){
+  if(state[shop])state[shop].search=val;
+  _saveFilterState(shop);
+  applyFilters(shop);
+}
+// ⚠ 目前【零呼叫點】：全 js/ 與 index.html 掃過，只有這個定義與 window 匯流排匯出，
+//   沒有任何 inline handler / addEventListener 會觸發它。實際在用的是下方的
+//   applyFpNum / applyFpTxt（欄位篩選彈窗的「確定」鈕）。
+//   因為是死碼，刻意【不加】_saveFilterState —— 加了會讓讀 code 的人誤以為它是活的。
+//   哪天接回來變成活的，記得補上那一行。
 function setColFilter(shop,col,type,val){
   if(!state[shop].filters)state[shop].filters={};
   if(val===''||val===null)delete state[shop].filters[col];
   else state[shop].filters[col]={type,val};
   applyFilters(shop);
 }
-function clearColFilter(shop,col){delete(state[shop].filters||{})[col];state[shop].sorts={};applyFilters(shop);}
+function clearColFilter(shop,col){
+  delete(state[shop].filters||{})[col];
+  state[shop].sorts={};
+  _saveFilterState(shop);
+  applyFilters(shop);
+}
+// ⚠ 內有三行遺留 console.log（'[applyFpNum]' 開頭），正式站每次用數值篩選都會印。
+//   非本 PR 範圍，待另案清理。
 function applyFpNum(shop,col,sid){
   const minEl=document.getElementById('fp-min-'+sid);
   const maxEl=document.getElementById('fp-max-'+sid);
@@ -3433,6 +3454,7 @@ function applyFpNum(shop,col,sid){
   if(min===''&&max===''){delete state[shop].filters[col];}
   else state[shop].filters[col]={type:'range',min:min===''?null:parseFloat(min),max:max===''?null:parseFloat(max)};
   console.log('[applyFpNum] filter set=',JSON.stringify(state[shop].filters[col]));
+  _saveFilterState(shop);
   applyFilters(shop);
 }
 function applyFpTxt(shop,col,sid){
@@ -3440,6 +3462,7 @@ function applyFpTxt(shop,col,sid){
   if(!state[shop].filters)state[shop].filters={};
   if(val==='')delete state[shop].filters[col];
   else state[shop].filters[col]={type:'text',val};
+  _saveFilterState(shop);
   applyFilters(shop);
 }
 
