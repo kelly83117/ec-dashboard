@@ -673,10 +673,16 @@ function _sweepAllLocalReportsIntoPending(){
         }
         continue;
       }
-      // ⚠ ec_momo_cost_by_origin（成本對照表）＝本機輔助表、非同步項：只服務「新增商品輸原廠自動帶成本」；
-      //   權威成本在商品主檔 product.cost（隨 momo_products 上雲）。這張表雲端本來就沒有（推 6683 key 進 app/profit 會撞大小/索引），
-      //   刻意不進 pending/待推清單（避免永遠假顯示「新增/雲端0」）。預覽仍會另外以「本機輔助表·不同步」資訊列顯示它。
-      //   ⚠ stock（ec_momo_stock_by_origin）同理不在此：走獨立 momo_stock collection 自動推。
+      // 成本表 ec_momo_cost_by_origin → momo_cost_by_origin collection（PR #127 起上雲、逐 key merge）。
+      //   ⚠ #93 的「本機輔助表·不同步」排除已移除、改回正常同步項——sweep（這裡）與計數端 _momoSyncPendingCount 白名單**兩處都要含它**
+      //   （PR #93 血淚：只改一處會「邏輯對但東西不見／亮暗對不上」）。meta（…_meta）不進 pending：隨 cost 那筆一起 read-merge-write。
+      if(k==='ec_momo_cost_by_origin'){
+        _pendingSyncKeys.add(k);
+        if(!(Store._mem&&Store._mem[k])){ try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{} }
+        if(!(Store._profitMem&&Store._profitMem[k])){ try{ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=JSON.parse(localStorage.getItem(k)); }catch{} }
+        continue;
+      }
+      // ⚠ stock（ec_momo_stock_by_origin）仍不在此：走獨立 momo_stock collection 自動推。
       // filemeta 不上雲（雲端零讀取端）→ 不塞進 pending，省下「撈進來→推送略過→收尾刪」的白工
       if(k&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')){
         _pendingSyncKeys.add(k);
@@ -8741,7 +8747,7 @@ async function momoOpenSyncPreview(shop){
   const _norm=v=>{ try{ return JSON.parse(JSON.stringify(v===undefined?null:v)); }catch(e){ return v; } };
   const _eq=(a,b)=>_momoStableStr(_norm(a))===_momoStableStr(_norm(b));
   items.forEach(it=>{
-    if(it._localonly){ it.status='localonly'; it.cloudCount=null; return; }   // 本機輔助表（cost_by_origin）：非同步項，不比對雲端
+    // （#93 的 localonly 排除已移除：cost_by_origin 現為正常同步項，走下方 MOMO成本表 分支比對雲端）
     if(it.kind==='蝦皮報表'){ it.status='uncomparable'; it.cloudCount=null; return; }   // 不同 collection（profits），app/profit 讀不到
     if(it.kind==='MOMO商品主檔'){
       const mc=momoCloud[it.key];
@@ -12339,7 +12345,9 @@ function momoCostEditorRender(){
   ov.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:820px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden;max-height:88vh;display:flex;flex-direction:column">
     <div style="padding:14px 20px;border-bottom:1px solid #eef0f2;display:flex;justify-content:space-between;align-items:center">
       <div style="font-size:15px;font-weight:800">成本表維護　<span style="font-size:12px;font-weight:400;color:#94a3b8">原廠編號 → 成本</span></div>
-      <button onclick="document.getElementById('momo-cost-ed-ov').remove()" style="width:30px;height:30px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:17px;cursor:pointer">✕</button></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="momoExportCostByOrigin()" style="padding:6px 12px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#5b5fcf;font-size:12px;cursor:pointer" title="匯出成本表 CSV 存機器外副本">⬇ 匯出 CSV</button>
+        <button onclick="document.getElementById('momo-cost-ed-ov').remove()" style="width:30px;height:30px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:17px;cursor:pointer">✕</button></div></div>
     <div style="padding:14px 20px;overflow:auto">
       <div style="font-size:12px;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.6">⚠ 這張表 <b>甲配／乙配／MO+ 共用</b>：在此修改會同時影響<b>甲配毛利計算</b>。已上雲、跨人跨機共用（按 ☁ 同步雲端才推）。人工填的值標「人工」、莫筆克匯入時<b>不會被覆蓋</b>（衝突會提示）。</div>
       <div style="font-weight:700;margin-bottom:4px;font-size:13px">單筆新增／修改</div>
