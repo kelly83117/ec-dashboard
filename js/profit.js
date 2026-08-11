@@ -8202,7 +8202,7 @@ function momoParseMoPlusMaster(rows){
   const groups={}; const allOrigins=new Set(); let rowN=0;
   for(let r=2;r<rows.length;r++){
     const row=rows[r]; if(!row || row.every(c=>c===''||c==null)) continue;
-    const sku=String(row[idx.sku]==null?'':row[idx.sku]).trim(); if(!sku) continue;
+    const sku=momoCleanSku(row[idx.sku]); if(!sku || !momoSkuValid(sku)) continue;   // 共用 sku 防護：清隱形字 + 白名單（髒 sku 不建）
     const name=String(row[idx.name]==null?'':row[idx.name]).trim();
     const origin=idx.origin>=0?String(row[idx.origin]==null?'':row[idx.origin]).trim():'';
     const g=groups[sku]||(groups[sku]={sku, name, specs:[], origins:new Set()});
@@ -8809,7 +8809,6 @@ function momoRenderSyncPreviewModal(shop, items){
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const typeColor={'MOMO商品主檔':'#5b5fcf','蝦皮報表':'#e4007f','其他設定':'#9ca3af'};
   const statusCell=it=>{
-    if(it.status==='localonly') return `<span style="color:#9ca3af" title="本機輔助表（新增商品輸原廠自動帶成本用），刻意不同步雲端；權威成本在商品主檔 product.cost（隨主檔上雲）。要匯出備份用下方「⬇ 匯出成本表」。">本機輔助表·不同步</span>`;
     if(it.status==='new'){
       if(it.suspicious) return `<span style="color:#dc2626;font-weight:700" title="本機 ${it.localCount} 筆、但雲端讀到 0——筆數這麼多卻雲端全空，很可能是雲端讀取失敗、不是真的新增。整包推上去會清空雲端 → 確認前請勿推送（已預設不勾）。">⚠ 雲端讀取可疑，預設不推</span>`;
       return `<span style="color:#10b981;font-weight:600">新增</span>`;
@@ -8828,8 +8827,8 @@ function momoRenderSyncPreviewModal(shop, items){
     const ss=d.samples.map(s=>`<div class="mm-sync-diff-row"${(s.local!=null||s.cloud!=null)?` title="本機：${esc(String(s.local))}　|　雲端：${esc(String(s.cloud))}"`:''}>· <b>${esc(String(s.item))}</b>${(s.field&&s.field!=='(整筆)')?' · '+esc(s.field):''}：${esc(s.desc||'')}</div>`).join('');
     return `<details class="mm-sync-diff"><summary>${d.total} 筆不同 · 展開</summary>${ss}${d.total>d.samples.length?`<div style="color:#9ca3af;margin-top:2px">（僅列前 ${d.samples.length}）</div>`:''}</details>`; };
   // 逐列 HTML；checked=預設是否勾選（有變更→勾、無變更→不勾、衝突→不勾）；data-conflict 供確認時二次攔截
-  const rowHtml=(it,checked)=>`<tr style="border-top:1px solid #f3f4f6${(it.conflict||it.suspicious)?';background:#fef2f2':(it.status==='localonly'?';opacity:.7':'')}">
-      <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}"${it.conflict?' data-conflict="1"':''}${it.suspicious?' data-suspicious="1"':''}${it.status==='localonly'?' disabled title="本機輔助表，不同步"':''} ${checked?'checked':''} onchange="momoSyncUpdateCount()"></td>
+  const rowHtml=(it,checked)=>`<tr style="border-top:1px solid #f3f4f6${(it.conflict||it.suspicious)?';background:#fef2f2':''}">
+      <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}"${it.conflict?' data-conflict="1"':''}${it.suspicious?' data-suspicious="1"':''} ${checked?'checked':''} onchange="momoSyncUpdateCount()"></td>
       <td style="padding:6px 8px;font-family:monospace;word-break:break-all" title="底層 key（未變）：${esc(it.key)}">${esc(momoKeyDisplay(it.key))}</td>
       <td style="padding:6px 8px;color:${typeColor[it.kind]||'#6b7280'};font-weight:600;white-space:nowrap">${it.kind}</td>
       <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.localCount}</td>
@@ -8837,7 +8836,7 @@ function momoRenderSyncPreviewModal(shop, items){
       <td style="padding:6px 8px">${statusCell(it)}${it.status==='diff'?diffHtml(it):''}</td>
     </tr>`;
   const anySuspicious=items.some(it=>it.suspicious);   // P3(1)：雲端0但本機>500
-  const changed=items.filter(it=>it.status!=='same' && it.status!=='localonly'), unchanged=items.filter(it=>it.status==='same' || it.status==='localonly');   // localonly 收進無變更區、不進待推
+  const changed=items.filter(it=>it.status!=='same'), unchanged=items.filter(it=>it.status==='same');   // localonly 收進無變更區、不進待推
   const theadHtml=`<thead><tr style="text-align:left;color:#6b7280;font-weight:600">
       <th style="padding:6px 4px;text-align:center"><input type="checkbox" id="mm-sync-all" ${(anyConflict||anySuspicious)?'':'checked'} onchange="momoSyncToggleAll(this.checked)"></th>
       <th style="padding:6px 8px">資料 key</th><th style="padding:6px 8px">類型</th><th style="padding:6px 8px;text-align:right">本機</th><th style="padding:6px 8px;text-align:right">雲端</th><th style="padding:6px 8px">狀態 / 差異</th>
@@ -8859,7 +8858,7 @@ function momoRenderSyncPreviewModal(shop, items){
       ${unchangedHtml}
     </div>
     <div style="padding:14px 20px;border-top:1px solid #eef0f2;display:flex;gap:10px;justify-content:space-between;align-items:center">
-      <div>${items.some(it=>it.status==='localonly')?`<button onclick="momoExportCostByOrigin()" style="padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#5b5fcf;font-size:12px;cursor:pointer" title="成本對照表是本機孤本、不同步雲端 → 匯出 CSV 存機器外副本">⬇ 匯出成本表 CSV</button>`:''}</div>
+      <div><button onclick="momoExportCostByOrigin()" style="padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#5b5fcf;font-size:12px;cursor:pointer" title="推送前備份：成本表 6683 筆首次上雲、逐 key merge 尚未經真檔驗證 → 先匯出 CSV 存可還原副本再推">⬇ 匯出成本表 CSV（推送前備份）</button></div>
       <div style="display:flex;gap:10px">
         <button onclick="momoCloseSyncPreview()" style="padding:7px 16px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>
         <button id="mm-sync-confirm-btn" onclick="momoConfirmSync('${shop}')" ${changed.length?'':'disabled'} style="padding:7px 18px;border-radius:7px;border:none;background:${changed.length?'#10b981':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${changed.length?'pointer':'default'}">確認同步${changed.length?'（'+changed.length+' 項）':''}</button>
@@ -10394,6 +10393,7 @@ function momoRenderBatchEdit(shop){
       <span style="margin-left:auto">${discBtn}</span>
     </div>
     ${filt==='nocostP'?`<div class="mm-row" style="margin-bottom:6px"><span class="mm-status no" style="font-size:11px">缺成本·本期有營收 = <b>${perLbl}</b> 該期別有營收、正在讓淨利失真的商品（跟總表警示同一批）</span></div>`:''}
+    ${(momoIsMoPlus(shop)&&(filt==='nocost'||filt==='nocostP'))?momoRenderMissingCostPanel(shop):''}
     <div class="mm-row" style="margin-bottom:10px">
       <span class="mm-stat">商品 總 <b>${total}</b>　上架 <b>${activeCount}</b>　下架 <b>${cnt.disc}</b></span>
     </div>
@@ -10555,7 +10555,17 @@ function momoRenderMoPlusBatchEditForm(shop, p){
   const costMap=momoMoPlusCostMapCached();
   const origs=(p.origins&&p.origins.length)?p.origins:(p.origin?[p.origin]:[]);
   const costLines=origs.length
-    ? origs.map(o=>{ const c=costMap[o]; return `<div style="font-size:12px;color:${Number(c)>0?'#374151':'#dc2626'}">原廠 ${_momoEsc(o)}：${Number(c)>0?'成本 $'+c:'查無成本'}</div>`; }).join('')
+    ? origs.map(o=>{ const c=costMap[o]; const oesc=_momoEsc(o);
+        if(Number(c)>0) return `<div style="font-size:12px;color:#374151">原廠 ${oesc}：成本 $${c}</div>`;
+        const oid=String(o).replace(/[^A-Za-z0-9]/g,'_');   // 查無成本 → 就地補（不切別頁）
+        return `<div style="font-size:12px;color:#dc2626">原廠 ${oesc}：查無成本 <a onclick="momoCostInlineToggle('${oesc}')" style="color:#5b5fcf;cursor:pointer;font-weight:600">＋補成本</a>
+          <div id="mm-cost-inline-${oid}" style="display:none;margin-top:4px;padding:6px 8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px">
+            <input id="mm-cost-inline-c-${oid}" type="number" placeholder="成本" style="width:70px;padding:2px 6px;border:1px solid #e5e7eb;border-radius:5px;font-size:12px">
+            <input id="mm-cost-inline-n-${oid}" type="text" placeholder="異動原因（必填）" style="width:160px;padding:2px 6px;border:1px solid #e5e7eb;border-radius:5px;font-size:12px" onkeydown="if(event.key==='Enter')momoMoPlusCostInlineSave('${shop}','${_momoEsc(p.sku)}','${oesc}')">
+            <button onclick="momoMoPlusCostInlineSave('${shop}','${_momoEsc(p.sku)}','${oesc}')" style="padding:2px 12px;border:none;border-radius:5px;background:#10b981;color:#fff;font-size:12px;font-weight:600;cursor:pointer">存</button>
+            <div style="font-size:10px;color:#9a3412;margin-top:3px">⚠ 甲乙+MO+ 共用此成本表：補一次會連動所有用到此原廠編號的 MO+ 商品毛利、各記一筆歷程。已上雲、記得同步。</div>
+          </div></div>`;
+      }).join('')
     : `<div style="font-size:12px;color:#dc2626">尚無原廠編號 → 無法帶成本</div>`;
   const lp=momoMoPlusListPriceForSku(shop, p.sku, null);
   const spLine = lp.listPrice!=null
@@ -10580,7 +10590,6 @@ function momoRenderMoPlusBatchEditForm(shop, p){
     <div style="margin-bottom:10px">${skuField}</div>
     <div style="background:#f9fafb;border:1px solid #eef0f4;border-radius:8px;padding:8px 10px;margin-bottom:10px">
       <div style="${_MOMO_LB};margin-bottom:4px">成本（原廠編號帶入 · 唯讀）</div>${costLines}
-      <div style="font-size:11px;margin-top:3px"><a onclick="momoOpenCostEditor()" style="color:#5b5fcf;cursor:pointer">查無成本？到「成本表維護」補這個原廠編號 →</a></div>
       <div style="${_MOMO_LB};margin:6px 0 2px">售價（商品主檔掛牌價 · 唯讀）</div><div style="font-size:12px;color:#374151">${spLine}</div>
     </div>
     <div style="margin-bottom:10px"><label style="${_MOMO_LB}">異動原因（必填）</label><input id="momo-edit-note-${shop}" type="text" placeholder="例：修正商品名稱 / 更換原廠編號" style="${_MOMO_INP}"></div>
@@ -10749,6 +10758,10 @@ function momoMoPlusOtherFeeRate(){
   return {pct:MOMO_MOPLUS_OTHERFEE_DEFAULT, month:MOMO_MOPLUS_OTHERFEE_MONTH};
 }
 function momoMoPlusSetOtherFee(shop,val){ const v=parseFloat(val); try{ if(v>=0) localStorage.setItem('ec_momo_moplus_otherfee', String(v)); }catch(e){} momoMoPlusAddPreview(shop); }
+// 共用 sku 防護（原批次貼上的正規化，抽出給單筆新增 + 主檔匯入用）：清隱形字/空白，再驗 ^[A-Za-z0-9-]+$。
+//   當初 bug：空格分隔把整行吃進 sku → 「TP00011830001244 恆溫暖腳墊…」46 字元髒資料。RegExp 建構子避免 literal 隱形字。
+function momoCleanSku(raw){ return String(raw==null?'':raw).replace(new RegExp('[\\s\\u00a0\\u200b-\\u200f\\u202a-\\u202e\\u2060\\u3000\\ufeff]','g'),''); }
+function momoSkuValid(sku){ return /^[A-Za-z0-9\-]+$/.test(sku); }
 function momoMoPlusNextTempSku(products){   // 商品編號留空 → 自動遞增 TEMP-####（之後對到真編號再改）
   let max=0; (products||[]).forEach(p=>{ const m=/^TEMP-(\d+)$/i.exec(p&&p.sku||''); if(m) max=Math.max(max,+m[1]); });
   return 'TEMP-'+String(max+1).padStart(4,'0');
@@ -10796,27 +10809,19 @@ function momoRenderMoPlusBatchAdd(shop){
       </div>
       <div id="momo-mpadd-preview-${shop}" style="background:#f9fafb;border:1px solid #eef0f4;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:13px;min-height:24px"></div>
       <button onclick="momoMoPlusAddOne('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:20px">新增</button>
-      <div style="font-weight:700;margin:4px 0 6px">批次貼上建檔 <span style="font-weight:400;color:#6b7280;font-size:12px">（推薦，一次 247 筆）</span></div>
-      <div class="mm-note" style="font-size:12px;color:#6b7280;margin-bottom:6px;line-height:1.7">
-        每行一筆，格式：<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">商品編號 [Tab或逗號] 商品名稱</code>（名稱可省略）。可直接從 Excel 兩欄（商品編號、商品名稱）框選複製貼上。<b>重複的商品編號會略過</b>、不覆蓋既有。
-      </div>
-      <textarea id="momo-mppaste-${shop}" rows="8" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;border:1px solid #e5e7eb;border-radius:6px;padding:8px" placeholder="TP0001234567890&#9;商品A&#10;TP0001234567891&#9;商品B"></textarea>
-      <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
-        <button onclick="momoMoPlusBatchPaste('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">批次建檔</button>
-        <span id="momo-mppaste-result-${shop}" style="font-size:12px"></span>
-      </div>
+      
     </div>`;
   momoMoPlusAddPreview(shop);   // 初始化預覽提示文字
 }
 function momoMoPlusAddOne(shop){
   const g=id=>document.getElementById('momo-mpadd-'+id+'-'+shop);
   const name=(g('name')?g('name').value:'').trim();
-  let sku=(g('sku')?g('sku').value:'').trim();
+  let sku=momoCleanSku(g('sku')?g('sku').value:'');                               // 清隱形字/空白（共用防護）
   const origin=(g('origin')?g('origin').value:'').trim();
   if(!name){ alert('商品名稱必填'); return; }
   const products=momoLoadProducts(shop);
   if(!sku) sku=momoMoPlusNextTempSku(products);                                   // 留空 → 自動 TEMP-####
-  else if(!/^[A-Za-z0-9\-]+$/.test(sku)){ alert('商品編號格式：僅英數與「-」（例 TP…／TEMP-…）'); return; }
+  else if(!momoSkuValid(sku)){ alert('商品編號格式：僅英數與「-」（例 TP…／TEMP-…）；含空格/中文/隱形字會被擋（防髒資料）'); return; }
   if(products.some(x=>x.sku===sku)){ alert('商品編號重複：'+sku); return; }
   const p={sku, name, history:[{...momoNowParts(), note:'新增商品(MO+)'+(origin?'':'，待補原廠編號')}], periods:{}};
   if(origin){ p.origin=origin; p.origins=[origin]; }                              // 原廠編號→自動帶成本（毛利階段查 cost_by_origin）
@@ -10826,32 +10831,6 @@ function momoMoPlusAddOne(shop){
   _momoBatchMode[shop]='edit'; _momoBatchSel[shop]=sku; _momoBatchSearch[shop]='';
   momoRenderBatch(shop);
 }
-function momoMoPlusBatchPaste(shop){
-  const ta=document.getElementById('momo-mppaste-'+shop); if(!ta) return;
-  const lines=(ta.value||'').split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  const products=momoLoadProducts(shop);
-  const existing=new Set(products.map(x=>x.sku)), seen=new Set();
-  let added=0, dup=0, bad=0;
-  const badRows=[];
-  lines.forEach(line=>{
-    const parts=line.split(/[\t,]/).map(s=>s.trim());   // Tab 或逗號分隔（Excel 兩欄貼上＝Tab）
-    // ⚠ sku 正規化 + 驗證：清掉零寬/全形空格等隱形字，並要求 sku 形如 [A-Za-z0-9-]（TP+數字 / TEMP-…）。
-    //   否則「用空格分隔」會把整行（含中文、空格）當成品號、或隱形字造成同 sku 兩筆（髒資料）——一律擋下報 bad，不建。
-    const sku=(parts[0]||'').replace(/[\s​-‏‪-‮　﻿]/g,'');
-    const name=parts.slice(1).join(' ').trim();
-    if(!sku){ bad++; return; }
-    if(!/^[A-Za-z0-9\-]+$/.test(sku)){ bad++; if(badRows.length<8) badRows.push(line.length>30?line.slice(0,30)+'…':line); return; }   // 含空格/中文/隱形字＝解析錯誤 → 不建、列出供修
-    if(existing.has(sku)||seen.has(sku)){ dup++; return; }
-    seen.add(sku);
-    products.push({sku, name:name||'', history:[{...momoNowParts(), note:'批次建檔(MO+)'}], periods:{}});
-    added++;
-  });
-  if(added) momoSaveProducts(shop,products);
-  const res=document.getElementById('momo-mppaste-result-'+shop);
-  if(res) res.innerHTML=`<span style="color:#10b981;font-weight:700">已建 ${added} 筆</span>｜略過重複 ${dup}｜格式異常 ${bad}${badRows.length?'（擋下：'+badRows.map(_momoEsc).join('、')+(bad>badRows.length?' …':'')+'）':''}${added?'　·　記得按 ☁ 同步雲端':''}`;
-  if(added){ ta.value=''; if(typeof showToast==='function') showToast('批次建檔 '+added+' 筆','success'); }
-}
-
 // ── 畫面三：C1105 月度資料上傳（甲配/乙配共用一個入口，一次餵兩個主檔）──
 //  檔案：C1105(必要) / 甲配UnsendList(選填) / 乙配UnsendList雙分頁(選填) / S1105(選填,欄位待實測)
 //  期別：甲配從訂編判、乙配運費用銷量比例往下拆；欄位用表頭名定位、缺欄即報錯（不靜默算錯）。
@@ -11504,12 +11483,7 @@ function momoRenderMoPlusProductSync(shop){
       <button class="mm-btn-primary" style="margin-top:10px" onclick="momoMoPlusMasterGenerate('${shop}')" ${_moPlusMasterFile?'':'disabled'}>▶ 產生主檔預覽</button>
       <span class="mm-gen-hint">${_moPlusMasterFile?'解析商品主檔、顯示新增/更新筆數與原廠對照數（確認再寫入）':'請選商品主檔'}</span>
       <div id="moplus-master-preview-${shop}" style="margin-top:16px"></div>
-      <div style="border-top:1px solid #f1f5f9;margin-top:16px;padding-top:12px">
-        <button onclick="momoOpenCostEditor()" style="padding:7px 16px;border:1px solid #5b5fcf;border-radius:7px;background:#fff;color:#5b5fcf;font-size:13px;font-weight:600;cursor:pointer">⚙ 維護成本表（補原廠編號成本）</button>
-        <div style="font-size:11px;color:#9ca3af;margin-top:8px;line-height:1.7">
-          ⚠ 成本靠<b>原廠編號</b>查共用成本表（<code>ec_momo_cost_by_origin</code>，甲乙+MO+ 共用；甲配匯入莫筆克成本檔時一併寫入）。莫筆克沒有的原廠編號，用上面「維護成本表」直接補。此頁只上傳商品主檔（原廠對照＋掛牌價）。
-        </div>
-      </div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:16px;line-height:1.7;border-top:1px solid #f1f5f9;padding-top:10px">⚠ 成本靠<b>原廠編號</b>查共用成本表（甲乙+MO+ 共用；甲配每週匯入莫筆克成本檔）。莫筆克沒有的零星原廠編號，到<b>批次維護→編輯商品</b>該原廠「查無成本」列<b>就地補</b>。此頁只上傳商品主檔。</div></div>
     </div>`;
 }
 let _moPlusMasterFile=null, _moPlusMasterParsed=null;
@@ -12316,100 +12290,6 @@ function momoCostOriginUsage(origin){
   });
   return out;
 }
-const _costEdSearch={v:''};
-function momoOpenCostEditor(){
-  let ov=document.getElementById('momo-cost-ed-ov');
-  if(!ov){ ov=document.createElement('div'); ov.id='momo-cost-ed-ov'; document.body.appendChild(ov); }
-  ov.className='ana-overlay open'; ov.style.cssText='position:fixed;inset:0;z-index:4200;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';
-  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
-  momoCostEditorRender();
-}
-function momoCostEditorRender(){
-  const ov=document.getElementById('momo-cost-ed-ov'); if(!ov) return;
-  const map=momoLoadCostByOrigin()||{}, meta=momoLoadCostMeta()||{};
-  const q=(_costEdSearch.v||'').trim().toLowerCase();
-  const all=Object.keys(map).sort();
-  const list=(q?all.filter(o=>o.toLowerCase().includes(q)):all).slice(0,200);
-  const esc=_momoEsc;
-  const rows=list.map(o=>{ const m=meta[o]||{}; const src=m.manual?'<span style="color:#7c3aed;font-weight:700">人工</span>':'莫筆克';
-    const use=momoCostOriginUsage(o); const useTxt=use.length?use.map(u=>momoShopDisplay(u.shop)+'·'+u.n).join('，'):'<span style="color:#cbd5e1">未使用</span>';
-    const chg=(m.changes&&m.changes.length)?m.changes[m.changes.length-1]:null;
-    const chgTxt=chg?`${chg.at} ${chg.by?esc(chg.by):''} ${chg.from==null?'新增':chg.from+'→'+chg.to}${chg.note?'（'+esc(chg.note)+'）':''}`:'';
-    return `<tr style="border-top:1px solid #f1f5f9">
-      <td style="padding:4px 8px;font-family:monospace">${esc(o)}</td>
-      <td style="padding:4px 8px;text-align:right"><input type="number" value="${map[o]}" data-o="${esc(o)}" style="width:80px;padding:2px 6px;border:1px solid #e5e7eb;border-radius:5px;text-align:right" onchange="momoCostEditInline(this)"></td>
-      <td style="padding:4px 8px;font-size:11px">${src}</td>
-      <td style="padding:4px 8px;font-size:11px;color:#64748b">${useTxt}</td>
-      <td style="padding:4px 8px;font-size:10px;color:#94a3b8" title="${esc(chgTxt)}">${chgTxt.length>28?esc(chgTxt.slice(0,28))+'…':esc(chgTxt)}</td>
-    </tr>`; }).join('');
-  ov.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:820px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden;max-height:88vh;display:flex;flex-direction:column">
-    <div style="padding:14px 20px;border-bottom:1px solid #eef0f2;display:flex;justify-content:space-between;align-items:center">
-      <div style="font-size:15px;font-weight:800">成本表維護　<span style="font-size:12px;font-weight:400;color:#94a3b8">原廠編號 → 成本</span></div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button onclick="momoExportCostByOrigin()" style="padding:6px 12px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#5b5fcf;font-size:12px;cursor:pointer" title="匯出成本表 CSV 存機器外副本">⬇ 匯出 CSV</button>
-        <button onclick="document.getElementById('momo-cost-ed-ov').remove()" style="width:30px;height:30px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:17px;cursor:pointer">✕</button></div></div>
-    <div style="padding:14px 20px;overflow:auto">
-      <div style="font-size:12px;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.6">⚠ 這張表 <b>甲配／乙配／MO+ 共用</b>：在此修改會同時影響<b>甲配毛利計算</b>。已上雲、跨人跨機共用（按 ☁ 同步雲端才推）。人工填的值標「人工」、莫筆克匯入時<b>不會被覆蓋</b>（衝突會提示）。</div>
-      <div style="font-weight:700;margin-bottom:4px;font-size:13px">單筆新增／修改</div>
-      <div style="display:grid;grid-template-columns:1.4fr 1fr 1.6fr auto;gap:8px;align-items:end;margin-bottom:14px">
-        <div><label style="${_MOMO_LB}">原廠編號</label><input id="momo-cost-o" type="text" placeholder="例：A19-01" style="${_MOMO_INP}"></div>
-        <div><label style="${_MOMO_LB}">成本</label><input id="momo-cost-c" type="number" style="${_MOMO_INP}"></div>
-        <div><label style="${_MOMO_LB}">異動原因（必填）</label><input id="momo-cost-note" type="text" placeholder="例：莫筆克查無、供應商報價" style="${_MOMO_INP}"></div>
-        <button onclick="momoCostEditSubmit()" style="padding:7px 16px;border:none;border-radius:7px;background:#10b981;color:#fff;font-weight:600;cursor:pointer;height:38px">儲存</button>
-      </div>
-      <div style="font-weight:700;margin-bottom:4px;font-size:13px">批次貼上 <span style="font-weight:400;color:#94a3b8;font-size:11px">（每行：原廠編號 [Tab或逗號] 成本）</span></div>
-      <textarea id="momo-cost-batch" rows="4" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;border:1px solid #e5e7eb;border-radius:6px;padding:8px" placeholder="A19-01&#9;65.2&#10;H236-01&#9;199"></textarea>
-      <div style="display:flex;gap:10px;align-items:center;margin:6px 0 16px"><button onclick="momoCostBatchPaste()" style="padding:6px 16px;border:none;border-radius:7px;background:#5b5fcf;color:#fff;font-weight:600;cursor:pointer">批次匯入</button><span id="momo-cost-batch-res" style="font-size:12px"></span></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <div style="font-weight:700;font-size:13px">現有（${all.length} 筆）</div>
-        ${momoSearchBox?momoSearchBox('cost','momo-cost-search',_costEdSearch.v,'搜尋原廠編號','momoCostSearch','display:flex;width:240px'):`<input id="momo-cost-search" value="${esc(_costEdSearch.v)}" oninput="momoCostSearch('cost',this.value)" placeholder="搜尋原廠編號" style="${_MOMO_INP};width:240px">`}
-      </div>
-      <div style="max-height:340px;overflow:auto;border:1px solid #eef0f2;border-radius:8px">
-        <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#6b7280;text-align:left;background:#f8fafc;position:sticky;top:0"><th style="padding:5px 8px">原廠編號</th><th style="padding:5px 8px;text-align:right">成本</th><th style="padding:5px 8px">來源</th><th style="padding:5px 8px">使用賣場·商品數</th><th style="padding:5px 8px">最近異動</th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="5" style="padding:20px;text-align:center;color:#9ca3af">${q?'查無符合':'尚無成本資料'}</td></tr>`}</tbody></table>
-      </div>
-      <div style="font-size:11px;color:#94a3b8;margin-top:8px">改完記得按 <b>☁ 同步雲端</b> 讓同事看到（逐 key 合併、不會蓋掉別人剛補的）。${q&&all.length>200?'':''}${all.length>200?'（表格只顯示前 200 筆，用搜尋縮小）':''}</div>
-    </div></div>`;
-}
-function momoCostSearch(_, v){ _costEdSearch.v=v; const ov=document.getElementById('momo-cost-ed-ov'); if(ov){ momoCostEditorRender(); const el=document.getElementById('momo-cost-search'); if(el){ el.focus(); el.setSelectionRange(el.value.length,el.value.length); } } }
-function momoCostEditSubmit(){
-  const o=(document.getElementById('momo-cost-o').value||'').trim();
-  const c=document.getElementById('momo-cost-c').value;
-  const note=(document.getElementById('momo-cost-note').value||'').trim();
-  if(!o){ alert('原廠編號必填'); return; }
-  if(!note){ alert('請填異動原因'); return; }
-  const r=momoSetCostByOrigin(o, c, {by:momoCurrentUserName(), note, manual:true, src:'人工'});
-  if(!r.ok){ alert(r.note||'儲存失敗'); return; }
-  if(typeof showToast==='function') showToast('已儲存 '+o+'＝'+r.to+'（記得同步）','success');
-  document.getElementById('momo-cost-o').value=''; document.getElementById('momo-cost-c').value=''; document.getElementById('momo-cost-note').value='';
-  momoCostEditorRender();
-}
-function momoCostEditInline(el){   // 表格內直接改成本
-  const o=el.getAttribute('data-o'); const c=el.value;
-  const r=momoSetCostByOrigin(o, c, {by:momoCurrentUserName(), note:'表格直接修改', manual:true, src:'人工'});
-  if(!r.ok){ alert(r.note||'儲存失敗'); momoCostEditorRender(); return; }
-  if(typeof showToast==='function') showToast('已改 '+o+'＝'+r.to,'success');
-  momoCostEditorRender();
-}
-function momoCostBatchPaste(){
-  const ta=document.getElementById('momo-cost-batch'); if(!ta) return;
-  const lines=(ta.value||'').split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  let ok=0, bad=0; const badRows=[]; const by=momoCurrentUserName();
-  lines.forEach(line=>{ const parts=line.split(/[\t,]/).map(s=>s.trim()); const o=parts[0]; const c=parts[1];
-    if(!o || !(Number(c)>=0)){ bad++; if(badRows.length<8) badRows.push(line.length>28?line.slice(0,28)+'…':line); return; }
-    const r=momoSetCostByOrigin(o, c, {by, note:'批次匯入', manual:true, src:'人工'}); if(r.ok) ok++; else bad++;
-  });
-  const res=document.getElementById('momo-cost-batch-res');
-  if(res) res.innerHTML=`<span style="color:#10b981;font-weight:700">已存 ${ok} 筆</span>｜格式異常 ${bad}${badRows.length?'（'+badRows.map(_momoEsc).join('、')+'）':''}${ok?'　·　記得同步雲端':''}`;
-  if(ok){ ta.value=''; momoCostEditorRender(); if(typeof showToast==='function') showToast('批次存 '+ok+' 筆','success'); }
-}
-// ── dirty 追蹤：這台真的改過的原廠編號（逐 key merge 用）。持久化撐過重整。──
-function momoCostDirtyKey(){ return 'ec_momo_cost_dirty'; }
-function momoCostDirtyGet(){ try{ const l=localStorage.getItem(momoCostDirtyKey()); const a=l?JSON.parse(l):[]; return Array.isArray(a)?a:[]; }catch{ return []; } }
-function momoCostDirtyAdd(origin){ try{ const s=new Set(momoCostDirtyGet()); s.add(origin); localStorage.setItem(momoCostDirtyKey(),JSON.stringify([...s])); }catch{} }
-function momoCostDirtyClear(keys){ try{ if(!keys){ localStorage.removeItem(momoCostDirtyKey()); return; } const rm=new Set(keys); const left=momoCostDirtyGet().filter(k=>!rm.has(k)); localStorage.setItem(momoCostDirtyKey(),JSON.stringify(left)); }catch{} }
-// ── 通用逐 key 合併（read-merge-write 核心）：以 cloud 為底，只有 dirtyKeys 用 local 覆蓋（local 無該 key＝該筆已刪）。──
-//   cloud/local 皆為 {key:item} map。products 之類的陣列由呼叫端先 array→map(by keyOf) 再套、回寫時 map→array（本輪不做，先給 cost 用）。
 function momoMergeByKey(cloud, local, dirtyKeys){
   const out=Object.assign({}, cloud||{});
   (dirtyKeys||[]).forEach(k=>{ if(local && Object.prototype.hasOwnProperty.call(local,k)) out[k]=local[k]; else delete out[k]; });
@@ -12430,6 +12310,68 @@ function momoSetCostByOrigin(origin, cost, opts){
   if(m.changes.length>50) m.changes=m.changes.slice(-50);   // 只留最近 50 筆
   const ok=momoSaveCostByOrigin(map); momoSaveCostMeta(meta); momoCostDirtyAdd(origin);
   return {ok, from:(from==null?null:Number(from)), to:c};
+}
+// 手動補成本 → 在「毛利真的依賴此表的 MO+ 商品」的異動時間軸各記一筆（甲乙用 product.cost、不記＝不誤導）。
+//   ⚠ 標明「因共用成本表變動」、每個受影響商品各一筆（非灌爆單一時間軸），文字註「同時影響 N 個 MO+ 商品」。
+function momoCostAddHistoryToMoPlusProducts(origin, cost, from, note){
+  const affected=[]; ['MO+麻吉','MO+森之旅'].forEach(shop=>{ momoLoadProducts(shop).forEach(p=>{ const os=(p.origins&&p.origins.length)?p.origins:(p.origin?[p.origin]:[]); if(os.indexOf(origin)>=0) affected.push({shop,sku:p.sku}); }); });
+  const n=affected.length; const np=momoNowParts();
+  const byShop={}; affected.forEach(a=>{ (byShop[a.shop]=byShop[a.shop]||[]).push(a.sku); });
+  Object.keys(byShop).forEach(shop=>{ const set=new Set(byShop[shop]); const products=momoLoadProducts(shop); let ch=false;
+    products.forEach(p=>{ if(!set.has(p.sku)) return; p.history=p.history||[];
+      p.history.push({ ...np, kind:'cost-shared', note:'因共用成本表變動：原廠 '+origin+' 成本 '+(from==null?'—':from)+'→'+cost+(n>1?'（同時影響 '+n+' 個 MO+ 商品）':'')+(note?' · '+note:''), costOrigin:origin, costVal:cost });
+      ch=true;
+    });
+    if(ch) momoSaveProducts(shop, products);
+  });
+  return n;
+}
+function momoCostInlineToggle(origin){ const oid=String(origin).replace(/[^A-Za-z0-9]/g,'_'); const el=document.getElementById('mm-cost-inline-'+oid); if(el){ el.style.display=(el.style.display==='none'?'block':'none'); if(el.style.display==='block'){ const c=document.getElementById('mm-cost-inline-c-'+oid); if(c) c.focus(); } } }
+function momoMoPlusCostInlineSave(shop, sku, origin){
+  const oid=String(origin).replace(/[^A-Za-z0-9]/g,'_');
+  const cEl=document.getElementById('mm-cost-inline-c-'+oid), nEl=document.getElementById('mm-cost-inline-n-'+oid);
+  const c=cEl?cEl.value:'', note=(nEl?nEl.value:'').trim();
+  if(!(Number(c)>=0)){ alert('成本需為 ≥0 的數字'); return; }
+  if(!note){ alert('請填異動原因'); return; }
+  const r=momoSetCostByOrigin(origin, c, {by:momoCurrentUserName(), note, manual:true, src:'人工'});
+  if(!r.ok){ alert(r.note||'儲存失敗'); return; }
+  const n=momoCostAddHistoryToMoPlusProducts(origin, Number(c), r.from, note);   // MO+ 商品各記一筆
+  try{ momoBumpMoPlusEpoch(); }catch{}   // 涵蓋率/毛利快取失效 → 就地重繪即更新
+  if(typeof showToast==='function') showToast('已補 '+origin+'＝'+r.to+'（'+n+' 個 MO+ 商品已記歷程，記得同步）','success');
+  const p=momoLoadProducts(shop).find(x=>x.sku===sku); if(p) momoRenderMoPlusBatchEditForm(shop, p);   // 就地更新 costLines＋涵蓋率＋歷程
+  try{ if((_momoSub[shop]||'')==='batch') momoRenderBatchEditList(shop); }catch(e){}
+}
+// 缺成本一次補：列出所有「毛利依賴此表卻查無成本」的 distinct 原廠編號（含影響商品數）→ 就地補、不必逐商品點進去。
+function momoMoPlusMissingOrigins(shop){
+  const costMap=momoMoPlusCostMapCached(); const m={};
+  momoLoadProducts(shop).forEach(p=>{ const os=(p.origins&&p.origins.length)?p.origins:(p.origin?[p.origin]:[]); os.forEach(o=>{ if(o && !(Number(costMap[o])>0)) m[o]=(m[o]||0)+1; }); });
+  return Object.keys(m).sort().map(o=>({origin:o, n:m[o]}));
+}
+function momoRenderMissingCostPanel(shop){
+  const list=momoMoPlusMissingOrigins(shop);
+  if(!list.length) return `<div style="color:#10b981;font-size:12px;padding:8px 2px">🎉 目前沒有缺成本的原廠編號</div>`;
+  const rows=list.map(x=>{ const oid=String(x.origin).replace(/[^A-Za-z0-9]/g,'_'); return `<div style="display:flex;gap:6px;align-items:center;padding:3px 0;font-size:12px">
+    <span style="font-family:monospace;width:110px">${_momoEsc(x.origin)}</span><span style="color:#9ca3af;width:64px">${x.n} 商品</span>
+    <input id="mm-mc-c-${oid}" type="number" placeholder="成本" style="width:70px;padding:2px 6px;border:1px solid #e5e7eb;border-radius:5px" onkeydown="if(event.key==='Enter')momoMissingCostSave('${shop}','${_momoEsc(x.origin)}')">
+    <input id="mm-mc-n-${oid}" type="text" placeholder="異動原因（必填）" style="width:150px;padding:2px 6px;border:1px solid #e5e7eb;border-radius:5px">
+    <button onclick="momoMissingCostSave('${shop}','${_momoEsc(x.origin)}')" style="padding:2px 12px;border:none;border-radius:5px;background:#10b981;color:#fff;cursor:pointer">存</button>
+  </div>`; }).join('');
+  return `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+    <div style="font-weight:700;font-size:13px;margin-bottom:4px">缺成本原廠編號（${list.length} 個）— 一次補完</div>
+    <div style="font-size:10px;color:#9a3412;margin-bottom:6px">⚠ 甲乙+MO+ 共用成本表；補一次連動所有用到的 MO+ 商品毛利、各記歷程。已上雲、記得同步。存完該筆從清單消失、涵蓋率即更新。</div>
+    ${rows}</div>`;
+}
+function momoMissingCostSave(shop, origin){
+  const oid=String(origin).replace(/[^A-Za-z0-9]/g,'_');
+  const c=(document.getElementById('mm-mc-c-'+oid)||{}).value, note=((document.getElementById('mm-mc-n-'+oid)||{}).value||'').trim();
+  if(!(Number(c)>=0)){ alert('成本需為 ≥0 的數字'); return; }
+  if(!note){ alert('請填異動原因'); return; }
+  const r=momoSetCostByOrigin(origin, c, {by:momoCurrentUserName(), note, manual:true, src:'人工'});
+  if(!r.ok){ alert(r.note||'儲存失敗'); return; }
+  const n=momoCostAddHistoryToMoPlusProducts(origin, Number(c), r.from, note);
+  try{ momoBumpMoPlusEpoch(); }catch{}
+  if(typeof showToast==='function') showToast('已補 '+origin+'＝'+r.to+'（'+n+' 個 MO+ 商品已記歷程）','success');
+  momoRenderBatchEdit(shop);   // 重繪：該原廠從清單消失 + 商品涵蓋率/badge 更新
 }
 function momoPersistCostByOrigin(costByOrigin){   // 莫筆克匯入併入：**人工維護(manual)的原廠編號不覆蓋**、其餘新值蓋舊值；回 {added,updated,protected}
   const map=momoLoadCostByOrigin(); const meta=momoLoadCostMeta()||{}; let added=0,updated=0; const protectedList=[];
@@ -12662,10 +12604,7 @@ function momoRenderProductSync(shop){
       <button onclick="momoSyncGenerate('${shop}')" ${canGen?'':'disabled'} style="margin-top:10px;padding:7px 18px;border-radius:7px;border:none;background:${canGen?'#5b5fcf':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${canGen?'pointer':'not-allowed'}">▶ 產生差異預覽</button>
       <span class="mm-gen-hint">${genHint}</span>
       <div id="momo-sync-preview-${shop}" style="margin-top:16px"></div>
-      <div style="border-top:1px solid #f1f5f9;margin-top:16px;padding-top:12px">
-        <button onclick="momoOpenCostEditor()" style="padding:7px 16px;border:1px solid #5b5fcf;border-radius:7px;background:#fff;color:#5b5fcf;font-size:13px;font-weight:600;cursor:pointer">⚙ 維護成本表</button>
-        <span style="font-size:11px;color:#9ca3af;margin-left:8px">直接補/改單一原廠編號成本（莫筆克沒有的、或要人工覆寫的）。甲乙+MO+ 共用、已上雲。</span>
-      </div>
+      
     </div>`;
 }
 function momoSyncFile(shop,type,e){
@@ -13988,7 +13927,7 @@ Object.assign(window, {
   momoMoPlusMasterFile,momoMoPlusMasterRemove,momoMoPlusMasterGenerate,momoMoPlusMasterApply,momoParseMoPlusMaster,momoMoPlusApplyMaster,momoOpenSpecPrices,momoMoPlusScanDirty,momoMoPlusCleanDirty,
   momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusConsistency,momoMoPlusCompleteness,
   momoMoPlusOriginsForSku,momoMoPlusMarginCalc,momoMoPlusMargin,momoMoPlusOrderDate,momoMoPlusLatestSaleForSku,momoDismissMoPlusPriceHint,
-  momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusBatchPaste,momoMoPlusAddPreview,momoMoPlusSetOtherFee,
+  momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusAddPreview,momoMoPlusSetOtherFee,
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
   momoRenderMoPlusRecon,momoMoPlusReconSetMonth,momoMoPlusReconToggle,momoMoPlusReconSavePdf,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
@@ -13996,7 +13935,7 @@ Object.assign(window, {
   momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoDismissYiCaveat,momoOvSetMonth,
   momoSearchClear,momoSearchClearToggle,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,momoSyncToggleAll,momoSyncUpdateCount,momoExportExcel,
-  momoOpenCostEditor,momoCostEditSubmit,momoCostEditInline,momoCostBatchPaste,momoCostSearch,momoBumpMoPlusEpoch,
+  momoCostInlineToggle,momoMoPlusCostInlineSave,momoMissingCostSave,momoExportCostByOrigin,momoBumpMoPlusEpoch,
   momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoOpenMissingCostPanel,momoExportMissingCost,momoUploadShowDryRun,momoUploadDryRunCSV,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
