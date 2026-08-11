@@ -12290,6 +12290,11 @@ function momoCostOriginUsage(origin){
   });
   return out;
 }
+// ── dirty 追蹤：這台真的改過的原廠編號（逐 key merge 用）。持久化撐過重整。──
+function momoCostDirtyKey(){ return 'ec_momo_cost_dirty'; }
+function momoCostDirtyGet(){ try{ const l=localStorage.getItem(momoCostDirtyKey()); const a=l?JSON.parse(l):[]; return Array.isArray(a)?a:[]; }catch{ return []; } }
+function momoCostDirtyAdd(origin){ try{ const s=new Set(momoCostDirtyGet()); s.add(origin); localStorage.setItem(momoCostDirtyKey(),JSON.stringify([...s])); }catch{} }
+function momoCostDirtyClear(keys){ try{ if(!keys){ localStorage.removeItem(momoCostDirtyKey()); return; } const rm=new Set(keys); const left=momoCostDirtyGet().filter(k=>!rm.has(k)); localStorage.setItem(momoCostDirtyKey(),JSON.stringify(left)); }catch{} }
 function momoMergeByKey(cloud, local, dirtyKeys){
   const out=Object.assign({}, cloud||{});
   (dirtyKeys||[]).forEach(k=>{ if(local && Object.prototype.hasOwnProperty.call(local,k)) out[k]=local[k]; else delete out[k]; });
