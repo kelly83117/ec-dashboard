@@ -11207,6 +11207,18 @@ function momoMoPlusMasterApply(shop){
   const parsed=_moPlusMasterParsed; if(!parsed){ return; }
   const res=momoMoPlusApplyMaster(shop, parsed);
   _moPlusMasterFile=null; _moPlusMasterParsed=null;
+  // ⚠ 主檔 doc ~370KB，localStorage 常因空間不足寫入失敗（momoSaveMoPlusOriginsDoc 回 lsOk=false）。
+  //   舊碼**不檢查 masterOk、一律報成功** → 主檔只在記憶體、重整即失（正是 2606→952 缺售價的真因）。
+  //   修：masterOk=false → 立即直推雲端保命（cloud persist 不吃 localStorage）＋明顯警告，絕不靜默報成功。
+  if(!res.masterOk){
+    let pushed=false;
+    try{ const mdoc=momoLoadMoPlusMaster(shop); if(window.__cloudMoPlusOrigins && typeof window.__cloudMoPlusOrigins.setSrc==='function' && mdoc){ window.__cloudMoPlusOrigins.setSrc(shop,'master',mdoc); pushed=true; } }catch(e){}
+    const warn=pushed
+      ? '商品主檔本機儲存失敗（多半是瀏覽器空間不足）。已改為直接推雲端保存 —— 請稍候重整此頁、確認售價欄出現掛牌價；若仍是空的，請清理瀏覽器空間後重新匯入。'
+      : '商品主檔本機儲存失敗（瀏覽器空間不足），且雲端推送也未成功 —— 主檔目前只在記憶體、重整就會遺失。請清理瀏覽器空間後重新匯入（或先按 ☁ 同步雲端）。';
+    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'⚠ 商品主檔未安全保存', message:warn, kind:'warn'}); else alert('⚠ '+warn);
+    momoRenderMoPlusProductSync(shop); return;
+  }
   const msg='商品主檔已寫入：新增 '+res.added+' 個、更新 '+res.updated+' 個（共 '+res.total+' 個商品）。原廠對照 '+parsed.originN+' 個。記得按 ☁ 同步雲端。';
   if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品主檔已寫入', message:msg, kind:'info'}); else if(typeof showToast==='function') showToast('主檔已寫入 '+res.total+' 個商品（記得同步）','success');
   momoRenderMoPlusProductSync(shop);
