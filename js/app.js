@@ -908,7 +908,38 @@ const App = {
       const firstDash = rest.indexOf('-');
       const deptId = firstDash > 0 ? rest.slice(0, firstDash) : rest;
       const subRoute = firstDash > 0 ? rest.slice(firstDash + 1) : null;
+      // 洞察表：保留表格捲動位置。整頁重建（下一行的 innerHTML 賦值）會把表格容器連根換掉、
+      //   捲動位置歸零 —— 使用者捲到第 500 列去點「調整」開彈窗，彈窗裡任何一個動作都會
+      //   觸發 this.render()（openInsightNoteModal 裡有 7 處），背景表格就彈回最頂端。
+      //   雲端推播（renderFromCloud('insight')）也走同一條，那條跟彈窗無關、只能在這裡收。
+      //   ⚠ 收斂在 render() 這個【唯一入口】而不是那 7 個呼叫點：掛一點不可能漏，
+      //     掛七點是七份重複程式碼、日後新增第八條路一定會忘。
+      //   🔴 route 必須用【精確比對】=== 'office-d1-insight'，不可用 startsWith('office-d1')：
+      //     那會掃到淨利表 office-d1-profit，而它自有一套 .tscroll 的 keepScroll 機制
+      //     （profit.js 搜 `keepScroll`），兩套疊上去會打架。
+      //   ⚠ 前提：洞察表頁【目前只有一個 .table-wrap】（viewOffice 在這條路徑上只渲染
+      //     renderInsightTabHtml() 一塊，成員績效表被 showMemberKpiTable 的 deptId!=='d1' 擋掉）。
+      //     若日後有人在表格【上方】再加一個 .table-wrap，這裡會【靜默抓錯】那一個 ——
+      //     不報錯，只表現成「捲動還原失效」。加東西前先看這裡。
+      //   🔴 這一版【刻意只還原內層 .table-wrap、不碰外層 <main>】，不是漏掉：
+      //     openInsightNoteModal 裡的 scrollBackToProduct 用的是【相對偏移法】
+      //     （mainEl.scrollTop += currentOffset - _origViewportOffset），若這裡再用絕對法
+      //     去設外層 scrollTop，兩種座標系會疊加；而且它是 rAF + 120ms + 400ms 三連發，
+      //     會疊三次、結果無法預測。只動內層則兩者操作不同容器、零重疊，自然收斂。
+      //     下一個人若想「順手把外層也還原」，先看懂上面這段再動。
+      const _keepIns = (this.route === 'office-d1-insight');
+      let _insScTop = null;
+      if (_keepIns) {
+        try { const _old = main.querySelector('.table-wrap'); if (_old) _insScTop = _old.scrollTop; } catch {}
+      }
       main.innerHTML = this.viewOffice(deptId, subRoute);
+      // 還原：innerHTML 賦值後新的 .table-wrap 在【同一個 tick】內就已存在（viewOffice 是純字串
+      //   組裝、render() 的 office- 分支完全同步），所以不需要 rAF、也看不到中間狀態。
+      //   ⚠ 整段包 try/catch：render() 是全站唯一渲染入口，這裡一拋錯就是整頁白畫面。
+      //     「絕不中斷渲染」比「錯誤要被看見」優先，理由同 offices.js 的 restoreProfitView。
+      if (_keepIns && _insScTop !== null) {
+        try { const _new = main.querySelector('.table-wrap'); if (_new) _new.scrollTop = _insScTop; } catch {}
+      }
       this.bindOfficeTabs(deptId);
       return;
     }
