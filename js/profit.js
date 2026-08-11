@@ -743,7 +743,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       if(pk.startsWith('ec_momo_products|')){   // MOMO 商品主檔 → momo_products collection（每賣場一 doc，避開 app/profit 1MB）
         const shop=pk.split('|')[1];
         const items=momoPendingProducts(pk);   // ⚠ 讀待同步本機值(_mem→localStorage)，非 momoLoadProducts(_profitMem 優先，會 stale)→ 推的==預覽看的
-        if(window.__cloudMomo && Array.isArray(items)){ tasks.push({key:pk,run:()=>window.__cloudMomo.setShop(shop,items)}); }
+        if(window.__cloudMomo && Array.isArray(items)){ tasks.push({key:pk,run:()=>window.__cloudMomo.setShop(shop,momoFsSanitizeDeep(items))}); }   // 統一 key 檢核
         else{ skippedProblem.push({key:pk,reason:'MOMO 商品主檔讀不到，或雲端層未就緒'}); }
         return;
       }
@@ -751,14 +751,14 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         const parts=pk.split('|');   // ['ec_momo_reconcile', shop, 'YYYY-MM']
         const rShop=parts[1], rMonth=parts[2];
         const data=momoLoadReconcile(rShop, rMonth);   // _profitMem → _mem → localStorage
-        if(window.__cloudReconcile && data && rShop && rMonth){ tasks.push({key:pk,run:()=>window.__cloudReconcile.setMonth(rShop,rMonth,data)}); }
+        if(window.__cloudReconcile && data && rShop && rMonth){ tasks.push({key:pk,run:()=>window.__cloudReconcile.setMonth(rShop,rMonth,momoFsSanitizeDeep(data))}); }   // 統一 key 檢核
         else{ skippedProblem.push({key:pk,reason:'MOMO 月對帳讀不到，或雲端層未就緒'}); }
         return;
       }
       if(pk.startsWith('ec_momo_s1103|')){   // MOMO S1103 排行榜 → momo_s1103 collection（每期別一 doc）。搬離 app/profit，避 Firestore 單文件 40000 索引項上限
         const period=pk.slice('ec_momo_s1103|'.length);
         const data=momoLoadS1103(period);   // _profitMem → _mem → localStorage
-        if(window.__cloudS1103 && data && period){ tasks.push({key:pk,run:()=>window.__cloudS1103.setPeriod(period,data)}); }
+        if(window.__cloudS1103 && data && period){ tasks.push({key:pk,run:()=>window.__cloudS1103.setPeriod(period,momoFsSanitizeDeep(data))}); }   // 統一 key 檢核
         else{ skippedProblem.push({key:pk,reason:'MOMO 排行榜讀不到，或雲端層未就緒'}); }
         return;
       }
@@ -7079,7 +7079,7 @@ async function momoMigrateProductsToCollection(){
     const k='ec_momo_products|'+shop;
     const oldItems=appProfit[k];
     if(!Array.isArray(oldItems)||oldItems.length===0){ report.push({shop, 狀態:'app/profit 無此欄位或空 → 略過（不需遷移）'}); continue; }
-    try{ await window.__cloudMomo.setShop(shop, oldItems); }
+    try{ await window.__cloudMomo.setShop(shop, momoFsSanitizeDeep(oldItems)); }
     catch(e){ report.push({shop, 狀態:'❌ 寫入 collection 失敗：'+((e&&e.message)||e)}); continue; }
     let cloudCount='?', ok=false;
     try{ const cs=await window.__cloudMomo.getDoc(shop); const cd=cs.exists()?(cs.data()||{}):{}; cloudCount=(cd.items||[]).length; ok=(cloudCount===oldItems.length); }
@@ -7106,7 +7106,7 @@ async function momoMigrateS1103ToCollection(){
     const period=k.slice('ec_momo_s1103|'.length);
     const data=appProfit[k];
     const srcCount=(data&&data.skus)?Object.keys(data.skus).length:0;
-    try{ await window.__cloudS1103.setPeriod(period, data); }
+    try{ await window.__cloudS1103.setPeriod(period, momoFsSanitizeDeep(data)); }
     catch(e){ report.push({period, 狀態:'❌ 寫入 momo_s1103 失敗：'+((e&&e.message)||e)}); continue; }
     let cloudCount='?', ok=false;
     try{ const cs=await window.__cloudS1103.getDoc(period); const cd=cs.exists()?(cs.data()||{}):{}; cloudCount=(cd.skus?Object.keys(cd.skus).length:0); ok=(cloudCount===srcCount); }
@@ -8271,7 +8271,7 @@ function momoMoPlusCleanDirty(shop, idxList){
   const cleaned=products.filter((_,i)=>!toRemove.has(i));
   momoSaveProducts(shop, cleaned);   // ① 本機（localStorage + _profitMem + _mem + _markPending）
   let cloud='(未推)';                 // ② 雲端整包取代：momo_products 每賣場一 doc、setDoc 全取代 → 刪掉的不會下次載入 sync 回來
-  try{ if(window.__cloudMomo && typeof window.__cloudMomo.setShop==='function'){ window.__cloudMomo.setShop(shop, cleaned); cloud='已推雲端（整包取代）'; } else cloud='__cloudMomo 未就緒（雲端未清，重載會 sync 回來）'; }catch(e){ cloud='雲端推送失敗：'+(e&&e.message||e); }
+  try{ if(window.__cloudMomo && typeof window.__cloudMomo.setShop==='function'){ window.__cloudMomo.setShop(shop, momoFsSanitizeDeep(cleaned)); cloud='已推雲端（整包取代）'; } else cloud='__cloudMomo 未就緒（雲端未清，重載會 sync 回來）'; }catch(e){ cloud='雲端推送失敗：'+(e&&e.message||e); }
   return { ok:true, removed:toRemove.size, remaining:cleaned.length, cloud, scope:shop };
 }
 /* ═══════════════ MO+ 逐列成本資料層（momo_moplus_origins collection）P3b-1 ═══════════════
@@ -8279,16 +8279,35 @@ function momoMoPlusCleanDirty(shop, idxList){
    momo_products 的 cell 只放 qty/revA（甲乙格式，不污染）；origin/D/運費 B/C 放這裡。毛利(P3b-2)兩邊 join。
    ⚠ 分片到來源月＝重上傳整 doc 覆蓋(天然冪等、修正版列數變少不留幽靈)。origin 空('')也記→COGS 標缺成本、不靜默當 0。*/
 function momoMoPlusOriginsKey(shop, src){ return 'ec_momo_moplus_origins|'+shop+'|'+src; }
-// ⚠ Firestore 不接受空字串 map key（"Document fields must not be empty"）。空原廠編號的列一律歸到此哨兵 key，
-//   不用 ''、也不靜默丟：該量仍計入期別總量，但查不到成本＝缺成本（costMap 無此 key 天然成立）。
-const MOMO_NO_ORIGIN='__no_origin__';
-// 寫雲端前把既有 doc 內的空字串 origin key（'')改成哨兵（clone、不動本機鏡像）→ 舊資料不必重傳、重按同步即可補上。
+// ⚠ 空原廠編號的列一律歸此哨兵 key（不用 ''、不靜默丟）：量仍計入期別總量，查無成本＝缺成本。
+//   名稱需過 Firestore 全部 key 規則：非空、非前後雙底線、無保留字元、不撞真實編號格式(H###-##)。→ 'NO_ORIGIN'。
+const MOMO_NO_ORIGIN='NO_ORIGIN';
+// ══════ 單一權威：Firestore map-key(field name) 檢核/修正。所有寫 Firestore 的路徑寫入前都走它，杜絕「key 被拒」再發生 ══════
+//   已查官方文件（firebase.google.com/docs/firestore/quotas「Constraints on field names」）：map-key 規則**只有**
+//     ①有效 UTF-8 ②不可 match /^__.*__$/（前後雙底線＝內部保留）③≤1500 bytes；SDK 另拒空欄位名（實測 "must not be empty"）。
+//   ⚠ 「. / [ ] * `」是 field-**path** 規則、**非 map-key 規則**——用巢狀物件 setDoc 時 map key 可含這些字元，故此處**不替換**
+//     （替換=過度限制、可能 desync 雲端/本機）。合法 key（真實原廠/商品編號/期別）原樣通過＝no-op。
+function momoFsSafeKey(raw){
+  let s=String(raw==null?'':raw);
+  if(s==='') return '_empty_';                                        // SDK 拒空欄位名 → 安全佔位（origin 的空另在 doc sanitize 先歸 NO_ORIGIN）
+  if(/^__[\s\S]*__$/.test(s)) s='k_'+s;                               // 官方：不可 match __.*__（前後雙底線）→ 加前綴破壞
+  try{ if(new TextEncoder().encode(s).length>1500) s=s.slice(0,300); }catch(e){ if(s.length>300) s=s.slice(0,300); }   // ≤1500 bytes（300 char × 4B/char 上限＝安全；真實 key 永不觸及）
+  return s;
+}
+// 遞迴把 object 的所有 key 過 momoFsSafeKey（陣列索引不動）。任何要 setDoc 的資料先走這個。
+function momoFsSanitizeDeep(v){
+  if(Array.isArray(v)) return v.map(momoFsSanitizeDeep);
+  if(v && typeof v==='object'){ const o={}; Object.keys(v).forEach(k=>{ o[momoFsSafeKey(k)]=momoFsSanitizeDeep(v[k]); }); return o; }
+  return v;
+}
+// MO+ origins/master doc 專用：先把 o map 的空 origin key（''）歸 NO_ORIGIN（origin 語意 + 量合併），再通用檢核全部 key。
+//   clone、不動本機鏡像 → 既有 doc 不必重傳、重按同步就補上。
 function momoSanitizeMoPlusDoc(doc){
   if(!doc || typeof doc!=='object') return doc;
   try{
     const d=JSON.parse(JSON.stringify(doc));
     if(d.skus) Object.keys(d.skus).forEach(sku=>{ const byP=d.skus[sku]||{}; Object.keys(byP).forEach(pd=>{ const cell=byP[pd]; if(cell && cell.o && Object.prototype.hasOwnProperty.call(cell.o,'')){ const q=cell.o['']; delete cell.o['']; cell.o[MOMO_NO_ORIGIN]=(Number(cell.o[MOMO_NO_ORIGIN])||0)+(Number(q)||0); } }); });
-    return d;
+    return momoFsSanitizeDeep(d);
   }catch(e){ return doc; }
 }
 function momoLoadMoPlusOriginsDoc(shop, src){   // _profitMem → _mem → localStorage
@@ -8599,8 +8618,10 @@ function _momoDescChange(a,b){
     return `各 ${A.length} 筆、內容不同`;
   }
   if((a&&typeof a==='object')||(b&&typeof b==='object')) return '物件內容不同';
-  const sv=v=>{ const s=String(v); return s.length>24?s.slice(0,24)+'…':s; };
-  return `${sv(a)} → ${sv(b)}`;
+  const sv=v=>{ if(v==null||v==='') return '（空）'; const s=String(v); return s.length>24?s.slice(0,24)+'…':s; };
+  // ⚠ 不用「本機值 → 雲端值」箭頭：一般人會讀成「將變成右邊」，但實際方向相反（推送＝雲端變成本機值）。
+  //   整包覆蓋無版本比對，誤讀＝資料損失。改標明「本機 X ｜ 雲端 Y」，不帶方向暗示。
+  return `本機 ${sv(a)} ｜ 雲端 ${sv(b)}`;
 }
 function momoDiffDetail(local, cloud){
   const eqF=(a,b)=>_momoStableStr(_momoNorm(a))===_momoStableStr(_momoNorm(b));
@@ -8799,7 +8820,7 @@ function momoRenderSyncPreviewModal(shop, items){
   ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:820px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;font-size:15px;font-weight:700">同步預覽 — 勾選要推送到雲端的項目</div>
     <div style="padding:12px 20px;overflow:auto">
-      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">只列出<b>有變更</b>（新增／內容不同）的項目，預設全勾；無變更／本機輔助表收在下方。<b>商品主檔</b>有版本比對（雲端較新會標紅、預設不勾）；<b>其他項目（月對帳／排行榜／運費…）為整包覆蓋、無版本比對</b>，請確認不會蓋掉同事的更新。</div>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">只列出<b>有變更</b>（新增／內容不同）的項目，預設全勾；無變更／本機輔助表收在下方。<b>商品主檔</b>有版本比對（雲端較新會標紅、預設不勾）；<b>其他項目（月對帳／排行榜／運費…）為整包覆蓋、無版本比對</b>，請確認不會蓋掉同事的更新。<br>⚠ 差異明細顯示的是<b>「本機現值 ｜ 雲端現值」</b>（非「將變成」）；<b>勾選推送＝該筆雲端整包覆蓋成本機的值</b>。</div>
       ${anyConflict?`<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;line-height:1.6">🚫 有項目<b>雲端較新</b>（你載入後雲端又被人更新過，可能是同事推的）——這些列<b>預設不勾</b>、避免用你的舊資料蓋掉同事的更新。建議<b>重新整理</b>拿到最新雲端後再改。若你確定要覆蓋，需手動勾選並二次確認。</div>`:''}
       ${anySuspicious?`<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;line-height:1.6">🚨 有項目<b>本機筆數很多、雲端卻讀到 0</b>——很可能是<b>雲端讀取失敗</b>（不是真的新增）。整包推上去會<b>清空雲端</b> → 這些列<b>預設不勾</b>，請先確認雲端真的沒有、或重新整理後再推。</div>`:''}
       ${anyDiff?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">⚠️ 有項目<b>內容不同</b>——點該列「展開」看差在哪個 SKU/欄位，確認是你要覆蓋的再保持勾選。</div>`:''}
