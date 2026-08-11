@@ -3294,6 +3294,37 @@ function toggleTfDrop(e,id){
 function closeTfDrop(){document.querySelectorAll('.tfdrop-menu.open').forEach(el=>el.classList.remove('open'));}
 document.addEventListener('click',closeTfDrop);
 
+// ── 篩選狀態持久化（per-shop）──
+// 只處理 state[shop] 裡的四個【使用者設定】欄位：filters / sorts / tagFilters / search。
+//   🔴 絕對不存 _filtered —— 它是 _built 的衍生快取（理由見 applyFilters 尾端那段註解），
+//     存下來還原時會指向一批早就不在畫面上的舊 row 物件，批次選取會選到看不見的列。
+//     同理 _built / _period / curMonth / curHalf 也不存：那些是資料與期間，不是篩選設定。
+//   ⚠ key 刻意 per-shop（'ec_filterstate|{shop}'）：跟既有的 ec_tagfilters_user
+//     （全站單一 key、且是沒人呼叫的死碼）語意不同，兩者無關、不共用、不互相覆蓋。
+function _saveFilterState(shop){
+  const s=state[shop];if(!s)return;
+  try{localStorage.setItem('ec_filterstate|'+shop,JSON.stringify({filters:s.filters||{},sorts:s.sorts||{},tagFilters:s.tagFilters||[],search:s.search||''}));}catch{}
+}
+// 回傳 {filters,sorts,tagFilters,search}；讀不到 / parse 失敗 / 整包形狀不對 → 回 null。
+//   🔴 逐欄型別防呆而非整包丟掉：舊格式或半壞的資料只要有一欄還能用就該救回來。
+//     typeof null 與 typeof [] 都是 'object'，物件欄位必須額外擋掉這兩種，否則
+//     applyFilters 的 Object.entries(s.filters) 會拿到陣列、篩出一片空白且不報錯。
+function _loadFilterState(shop){
+  try{
+    const r=localStorage.getItem('ec_filterstate|'+shop);
+    if(!r)return null;
+    const o=JSON.parse(r);
+    const isObj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
+    if(!isObj(o))return null;
+    return{
+      filters:isObj(o.filters)?o.filters:{},
+      sorts:isObj(o.sorts)?o.sorts:{},
+      tagFilters:Array.isArray(o.tagFilters)?o.tagFilters:[],
+      search:typeof o.search==='string'?o.search:'',
+    };
+  }catch{return null;}
+}
+
 // ── Filters & Sort ──
 function applyFilters(shop,opts){
   const s=state[shop];if(!s)return;
