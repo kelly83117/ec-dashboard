@@ -8169,6 +8169,59 @@ function momoParseMoPlusWithdrawn(rows){
 }
 // srcCode YYMM → 對帳月 'YYYY-MM'（2606→2026-06）。非 4 碼回 null。
 function momoMoPlusSrcToMonth(srcCode){ const s=String(srcCode||''); if(!/^\d{4}$/.test(s)) return null; return '20'+s.slice(0,2)+'-'+s.slice(2,4); }
+/* ═══════════════ E001 未結算銷量（每週更新用；純邏輯）═══════════════
+   E001 訂單明細（表頭在第 1 列 / index 0；對帳明細表頭在 index 2 → 餵錯檔在此 fail-loud）。
+   ⚠ 架構底線（使用者定案）：只做「銷量」，不碰金額（售價/成交手續費/進帳等財務欄一律不讀不存）；
+     絕不寫入 momo_moplus_origins、不進 compact；獨立本機儲存、先不上雲；
+     某期別一旦有對帳明細 → 該期別 E001 不顯示、不加總（取代非相加）。
+   ⚠ 只取 5 欄：訂單編號 / 訂單狀態 / 商品編號 / 商品原廠編號 / 數量。期別＝訂編 chars[1:6]（複用 momoMoPlusOrderToPeriod）。*/
+// 狀態白名單（可維護常數；momo 若新增狀態名，未在名單者計「其他」並附註列出、不靜默丟）：
+const MOMO_E001_SOLD_STATUS=['配送結束'];                                    // ✅ 計入未結算銷量（與對帳明細「已完成單」口徑一致）
+const MOMO_E001_INTRANSIT_STATUS=['已印單待寄件','商品配達物流中心','待客戶取件'];   // 🚚 在途：不計銷量、顯示附註筆數/數量
+const MOMO_E001_EXCLUDED_STATUS=['取消訂單','已回收','退貨中','取消退貨'];        // ✋ 取消/退貨：不計、不附註
+const MOMO_E001_COLS={ order:['訂單編號'], status:['訂單狀態'], sku:['商品編號'], origin:['商品原廠編號'], qty:['數量'] };
+function momoParseE001(rows){
+  if(!Array.isArray(rows)||rows.length<2) return {ok:false, errors:['E001「訂單明細」列數不足']};
+  const header=(rows[0]||[]).map(x=>String(x==null?'':x).trim());
+  const idx={}, missing=[];
+  Object.keys(MOMO_E001_COLS).forEach(k=>{ const i=header.findIndex(h=>MOMO_E001_COLS[k].includes(h)); idx[k]=i; if(i<0) missing.push(k+'('+MOMO_E001_COLS[k][0]+')'); });
+  if(missing.length) return {ok:false, errors:['E001 找不到必要欄位：'+missing.join('、')+'。（表頭應在第 1 列；若這是「對帳明細」請改用上方對帳明細入口。）'], header:header.filter(Boolean).slice(0,12)};
+  const bySku={}, skuOrigin={}, byPeriodSold={};
+  const intransit={n:0,qty:0}, excluded={n:0}, unknown={};
+  let soldRows=0, soldQty=0, minDate=null, maxDate=null;
+  for(let r=1;r<rows.length;r++){
+    const row=rows[r]; if(!row||row.every(c=>c===''||c==null)) continue;
+    const order=String(row[idx.order]==null?'':row[idx.order]).trim(); if(!order) continue;
+    const od=momoMoPlusOrderDate(order); if(od){ if(!minDate||od<minDate)minDate=od; if(!maxDate||od>maxDate)maxDate=od; }
+    const status=String(row[idx.status]==null?'':row[idx.status]).trim();
+    if(MOMO_E001_SOLD_STATUS.includes(status)){
+      const sku=String(row[idx.sku]==null?'':row[idx.sku]).trim(); const period=momoMoPlusOrderToPeriod(order);
+      if(!sku || !period) continue;
+      const qty=momoMoPlusNum(row[idx.qty]), origin=String(row[idx.origin]==null?'':row[idx.origin]).trim();
+      (bySku[sku]=bySku[sku]||{})[period]=(bySku[sku][period]||0)+qty;
+      if(origin && origin!=='無' && !skuOrigin[sku]) skuOrigin[sku]=origin;
+      byPeriodSold[period]=(byPeriodSold[period]||0)+qty; soldRows++; soldQty+=qty;
+    } else if(MOMO_E001_INTRANSIT_STATUS.includes(status)){ intransit.n++; intransit.qty+=momoMoPlusNum(row[idx.qty]); }
+    else if(MOMO_E001_EXCLUDED_STATUS.includes(status)){ excluded.n++; }
+    else { const key=status||'(空白)'; unknown[key]=(unknown[key]||0)+1; }   // ⚠ 白名單外未知狀態：不靜默丟、計「其他」並附註
+  }
+  return { ok:true, bySku, skuOrigin, byPeriodSold, soldRows, soldQty, intransit, excluded, unknown,
+    cutoff:maxDate, srcRange:{from:minDate,to:maxDate}, skuN:Object.keys(bySku).length };
+}
+// ── E001 本機儲存（獨立、不上雲）：直接 localStorage，不走 Store.set（避免自動推 app/main）、不 _markPending、無 cloud 物件。整份取代＝冪等。──
+function momoE001Key(shop){ return 'ec_momo_e001|'+shop; }
+function momoLoadE001(shop){ try{ const l=localStorage.getItem(momoE001Key(shop)); return l?JSON.parse(l):null; }catch(e){ return null; } }
+function momoSaveE001(shop, doc){ try{ localStorage.setItem(momoE001Key(shop), JSON.stringify(doc)); return true; }catch(e){ try{ console.error('%c[E001] 本機儲存失敗（配額？）','color:#dc2626', e); }catch{} return false; } }
+function momoClearE001(shop){ try{ localStorage.removeItem(momoE001Key(shop)); }catch(e){} }
+// 已結算期別集合（有對帳明細）＝ E001 這些期別要被取代、不顯示。
+//   ⚠ MO+ 的對帳明細資料權威在**來源月 origins docs**（momo_moplus_origins；products.periods 本機常為空、不可靠）→ 主取 origins docs 的期別，
+//     再 union products.periods（若某路徑有寫）當保險。任一來源出現該期別即視為已結算。
+function momoSettledPeriods(shop){
+  const s=new Set();
+  try{ const docs=momoListMoPlusOriginsDocs(shop); Object.values(docs).forEach(d=>{ const sk=(d&&d.skus)||{}; Object.keys(sk).forEach(sku=>Object.keys(sk[sku]||{}).forEach(pd=>s.add(pd))); }); }catch(e){}
+  try{ (momoLoadProducts(shop)||[]).forEach(p=>{ if(p&&p.periods) Object.keys(p.periods).forEach(pd=>s.add(pd)); }); }catch(e){}
+  return s;
+}
 // 月對帳 sys（系統計算側）：從 parsed（feeBreakdown/feeTotals）+ 已提領合計 組出。純函式、Node 可驗。
 function momoBuildMoPlusReconSys(parsed, withdrawnTotal){
   const fb=(parsed&&parsed.feeBreakdown)||{A:{},B:{},C:{},D:{}}, ft=(parsed&&parsed.feeTotals)||{};
@@ -11688,7 +11741,89 @@ function momoRenderMoPlusUpload(shop){
       <button class="mm-btn-primary" style="margin-top:10px" onclick="momoMoPlusUploadGenerate('${shop}')" ${f?'':'disabled'}>▶ 產生預覽</button>
       <span class="mm-gen-hint">${f?'解析對帳明細、逐列驗證、顯示期別分布與總額（先看數字再決定寫入）':'請選對帳明細檔'}</span>
       <div id="moplus-up-preview-${shop}" style="margin-top:16px"></div>
+
+      <div style="border-top:1px dashed #e5e7eb;margin:22px 0 14px"></div>
+      <div class="mm-note" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:12px;line-height:1.7;color:#92400e">
+        上傳 <b>E001_mo+${shop==='MO+麻吉'?'好麻吉':'森之旅'}訂單_YYMM.xls</b> ＝<b>未結算銷量</b>（每週更新用）。<br>
+        <span class="mm-muted">只取「配送結束」列的<b>銷量</b>，不碰金額（營收/毛利權威一律對帳明細）。<b>某期別一旦有對帳明細就自動由結算取代、不再顯示。</b>期別依訂編下單日、與對帳明細同基準。</span>
+      </div>
+      <div class="mm-uprow">
+        <div class="mm-uplbl">E001 訂單 <span class="mm-code">未結算銷量</span><div class="mm-hint">表頭在第 1 列；勿選對帳明細</div></div>
+        <div class="mm-upctl"><input type="file" accept=".xlsx,.xls" onchange="momoE001File('${shop}',event)"><span class="${_e001File?'mm-ok':'mm-muted'}">${_e001File?'✓ '+_momoEsc(_e001File.name):'未選'}</span>${_e001File?`<a onclick="momoE001Remove('${shop}')" title="移除" style="color:#ef4444;cursor:pointer;font-weight:700">✕</a>`:''}</div>
+      </div>
+      <button class="mm-btn-primary" style="margin-top:10px" onclick="momoE001Generate('${shop}')" ${_e001File?'':'disabled'}>▶ 解析 E001 預覽</button>
+      <span class="mm-gen-hint">${_e001File?'解析、顯示未結算銷量與在途/未知狀態（確認再存；只存本機、不上雲）':'請選 E001 檔'}</span>
+      <div id="e001-preview-${shop}" style="margin-top:14px"></div>
+      <div id="e001-block-${shop}" style="margin-top:16px">${momoE001BlockHTML(shop)}</div>
     </div>`;
+}
+let _e001File=null, _e001Parsed=null;
+function momoE001File(shop,e){ const files=e.target.files; if(!files||!files.length) return; _e001File=files[0]; _e001Parsed=null; momoRenderMoPlusUpload(shop); }
+function momoE001Remove(shop){ _e001File=null; _e001Parsed=null; momoRenderMoPlusUpload(shop); }
+async function momoE001Generate(shop){
+  if(!_e001File) return;
+  const box=document.getElementById('e001-preview-'+shop); if(box) box.innerHTML='<span class="mm-muted">解析中…</span>';
+  try{
+    const wb=await momoReadWorkbook(_e001File);
+    const rows=wb.sheet('訂單明細')||wb.firstSheet();
+    const parsed=momoParseE001(rows);
+    if(!parsed.ok){ if(box) box.innerHTML=`<div style="color:#dc2626;font-size:13px">解析失敗：${_momoEsc((parsed.errors||[]).join('；'))}${parsed.header?`<div class="mm-muted" style="margin-top:4px">實際表頭前幾欄：${_momoEsc(parsed.header.join(' | '))}</div>`:''}</div>`; return; }
+    _e001Parsed=parsed;
+    const settled=momoSettledPeriods(shop);
+    const shownP=Object.keys(parsed.byPeriodSold).filter(p=>!settled.has(p)).sort();
+    const replacedP=Object.keys(parsed.byPeriodSold).filter(p=>settled.has(p)).sort();
+    const cutoff=parsed.cutoff&&/^\d{8}$/.test(parsed.cutoff)?(parsed.cutoff.slice(0,4)+'/'+parsed.cutoff.slice(4,6)+'/'+parsed.cutoff.slice(6,8)):'—';
+    if(box) box.innerHTML=`<div style="background:#f9fafb;border:1px solid #eef0f4;border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.8">
+      <b>解析結果</b>（截至 ${cutoff}）：配送結束 <b>${parsed.soldRows}</b> 列 / 數量 <b>${parsed.soldQty}</b>、SKU <b>${parsed.skuN}</b> 個。<br>
+      期別分布：${Object.keys(parsed.byPeriodSold).sort().map(p=>momoPeriodLabel(p)+' '+parsed.byPeriodSold[p]).join('、')||'—'}<br>
+      ${replacedP.length?`<span style="color:#d97706">已有對帳明細（將被取代、不列入）：${replacedP.map(momoPeriodLabel).join('、')}</span><br>`:''}
+      ${shownP.length?`<span style="color:#059669">未結算（將顯示）：${shownP.map(momoPeriodLabel).join('、')}</span>`:'<span class="mm-muted">目前所有期別都已有對帳明細 → 存了也不會顯示（全被取代）</span>'}<br>
+      在途 ${parsed.intransit.n} 筆、取消/退貨 ${parsed.excluded.n} 筆${Object.keys(parsed.unknown).length?`、<span style="color:#dc2626">未知狀態：${Object.entries(parsed.unknown).map(([s,n])=>_momoEsc(s)+' '+n).join('、')}</span>`:''}
+      <div style="margin-top:8px"><button class="mm-btn-primary" onclick="momoE001Apply('${shop}')">✓ 存入本機（未結算銷量）</button> <span class="mm-muted" style="font-size:11px">只存本機、不上雲；重傳整份取代</span></div>
+    </div>`;
+  }catch(e){ if(box) box.innerHTML='<div style="color:#dc2626">讀取失敗：'+_momoEsc(String(e&&e.message||e))+'</div>'; }
+}
+function momoE001Apply(shop){
+  if(!_e001Parsed||!_e001Parsed.ok) return;
+  const p=_e001Parsed;
+  const doc={ shop, bySku:p.bySku, skuOrigin:p.skuOrigin, byPeriodSold:p.byPeriodSold,
+    intransit:p.intransit, excluded:p.excluded, unknown:p.unknown, cutoff:p.cutoff, srcRange:p.srcRange,
+    soldRows:p.soldRows, soldQty:p.soldQty, uploadedAt:momoNowParts().date+' '+momoNowParts().time };
+  const ok=momoSaveE001(shop, doc);
+  _e001File=null; _e001Parsed=null;
+  if(typeof showToast==='function') showToast(ok?'已存入 E001 未結算銷量（本機）':'E001 儲存失敗','success');
+  momoRenderMoPlusUpload(shop);
+}
+function momoE001Clear(shop){ if(!confirm('清除本機 E001 未結算銷量資料？（不影響對帳明細）')) return; momoClearE001(shop); momoRenderMoPlusUpload(shop); }
+// 未結算銷量顯示區塊：只列「無對帳明細」的期別（有對帳明細＝已結算、取代不顯示）；標未含平台費用/未扣退貨；在途/未知附註。
+function momoE001BlockHTML(shop){
+  const doc=momoLoadE001(shop);
+  if(!doc||!doc.bySku||!Object.keys(doc.bySku).length) return `<div class="mm-muted" style="font-size:12px;border-top:1px solid #f1f5f9;padding-top:12px">尚未有 E001 未結算銷量資料。</div>`;
+  const settled=momoSettledPeriods(shop);
+  const allP=[...new Set(Object.keys(doc.byPeriodSold||{}))].sort();
+  const shownP=allP.filter(p=>!settled.has(p)), replacedP=allP.filter(p=>settled.has(p));
+  const cutoff=doc.cutoff&&/^\d{8}$/.test(doc.cutoff)?(doc.cutoff.slice(4,6)+'/'+doc.cutoff.slice(6,8)):'—';
+  const rows=[];
+  Object.keys(doc.bySku).forEach(sku=>{ let q=0; shownP.forEach(p=>{ q+=doc.bySku[sku][p]||0; }); if(q!==0) rows.push({sku, qty:q, origin:(doc.skuOrigin&&doc.skuOrigin[sku])||''}); });
+  rows.sort((a,b)=>b.qty-a.qty);
+  const notes=[];
+  if(doc.intransit&&doc.intransit.n) notes.push(`🚚 另有在途 <b>${doc.intransit.n}</b> 筆（數量 ${doc.intransit.qty}，尚未配送結束、<b>不計入銷量</b>）`);
+  if(doc.unknown&&Object.keys(doc.unknown).length) notes.push(`⚠ 白名單外未知狀態（未計入）：${Object.entries(doc.unknown).map(([s,n])=>_momoEsc(s)+' '+n+' 筆').join('、')}`);
+  if(replacedP.length) notes.push(`已有對帳明細的期別 <b>${replacedP.map(momoPeriodLabel).join('、')}</b> 已由結算取代、不列入未結算`);
+  const head=`<div style="border-top:1px solid #f1f5f9;padding-top:12px">
+    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+      <span style="font-weight:800;font-size:14px">未結算銷量（E001，截至 ${cutoff}）</span>
+      <span style="font-size:11px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:4px;padding:1px 6px">未含平台費用</span>
+      <span style="font-size:11px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:4px;padding:1px 6px">未扣除退貨</span>
+      <a onclick="momoE001Clear('${shop}')" style="margin-left:auto;font-size:11px;color:#9ca3af;cursor:pointer">清除</a>
+    </div>`;
+  if(!shownP.length) return head+`<div class="mm-muted" style="font-size:12px;margin-top:8px">所有期別皆已有對帳明細 → 全數由結算取代，無未結算銷量可顯示。</div>${notes.length?`<div style="font-size:11px;color:#6b7280;margin-top:8px;line-height:1.8">${notes.map(n=>'· '+n).join('<br>')}</div>`:''}</div>`;
+  const body=rows.slice(0,300).map(r=>`<tr><td style="padding:3px 8px;font-family:monospace">${_momoEsc(r.sku)}</td><td style="padding:3px 8px;color:#9ca3af">${_momoEsc(r.origin)}</td><td style="padding:3px 8px;text-align:right;font-weight:600">${r.qty}</td></tr>`).join('');
+  return head+`<div style="font-size:11px;color:#6b7280;margin:4px 0 8px">顯示期別：${shownP.map(momoPeriodLabel).join('、')}｜共 ${rows.length} 個 SKU、數量合計 ${rows.reduce((s,r)=>s+r.qty,0)}</div>
+    <div style="max-height:340px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="text-align:left;color:#6b7280;position:sticky;top:0;background:#fafafa"><th style="padding:4px 8px">商品編號</th><th style="padding:4px 8px">原廠編號</th><th style="padding:4px 8px;text-align:right">未結算銷量</th></tr></thead>
+      <tbody>${body}</tbody></table></div>
+    ${notes.length?`<div style="font-size:11px;color:#6b7280;margin-top:8px;line-height:1.8">${notes.map(n=>'· '+n).join('<br>')}</div>`:''}</div>`;
 }
 // MO+「商品同步」子分頁：商品主檔（mo+○○商品資訊.xls）上傳。與甲乙的商品同步（莫筆克成本+MOMO商品資訊、momoParseProductInfo）
 //   格式完全不同 → 賣場條件分支（見 momoRenderShop sub==='sync'），不取代甲乙 momoRenderProductSync。
@@ -14205,6 +14340,7 @@ Object.assign(window, {
   momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
   momoMoPlusOrderToPeriod,momoParseMoPlus,momoMoPlusReconcileTotal,momoMoPlusResolveCols,momoBuildMoPlusPlan,
   momoIsMoPlus,momoRenderMoPlusUpload,momoMoPlusUploadFile,momoMoPlusUploadRemove,momoMoPlusUploadGenerate,momoMoPlusShowDryRun,momoMoPlusUploadOpenGuard,momoMoPlusUploadApply,
+  momoParseE001,momoLoadE001,momoSaveE001,momoClearE001,momoSettledPeriods,momoE001File,momoE001Remove,momoE001Generate,momoE001Apply,momoE001Clear,momoE001BlockHTML,
   momoMoPlusMasterFile,momoMoPlusMasterRemove,momoMoPlusMasterGenerate,momoMoPlusMasterApply,momoParseMoPlusMaster,momoMoPlusApplyMaster,momoOpenSpecPrices,momoMoPlusScanDirty,momoMoPlusCleanDirty,
   momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusConsistency,momoMoPlusCompleteness,
   momoFeeRateCandidates,momoIsPromoDate,momoPromoUncoveredMonths,momoBuildFeeCandidates,momoFeeRateAccumulate,momoFeeRateForSku,momoFeeRateSummary,MOMO_FEE_RATES,MOMO_PROMO_TABLE,
