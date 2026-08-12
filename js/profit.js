@@ -9752,6 +9752,11 @@ function momoRenderProfitBody(shop, tableOnly){
         const costTxt=hr?`、成本按近 ${hr.n} 月均退貨率 <b>${(hr.rate*100).toFixed(1)}%</b> 估回沖（與已對帳月同基準）`:'、成本暫用出貨數量（無退貨率樣本可估）';
         statusBanner=`<div class="mm-banner mm-banner-warn">⚠ <b>未對帳</b>（${mo}）· 營收 C1105 暫估、${feeTxt}${costTxt} → 到「月對帳」上傳當月對帳單轉權威值</div>`;
       }
+    } else if(momoIsMoPlus(shop) && period && _e001Est){
+      // MO+ 未結算（E001）：沿用甲配未對帳狀態晶片「⚠ 未對帳」（同 mm-status no 樣式、同容器）；估算費率與來源月放 tooltip、不佔版面、不另做橫幅。
+      const _efr=momoMoPlusE001Ctx(shop).estFee;
+      const _tip=('未結算估算（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑）；毛利率用估算平台費率 '+(_efr?(_efr.rate*100).toFixed(1)+'%（'+_efr.mode+(_efr.months?' '+_efr.months.join('/'):'')+'、含成交手續費+其他D+運費淨）':'—')+'。待該期別對帳明細上傳後由結算值完全取代（不並存不相加）。').replace(/"/g,'&quot;');
+      statusChip=`<span class="mm-status no" title="${_tip}">⚠ 未對帳</span>`;
     }
     const stEl=document.getElementById('momo-status-'+shop); if(stEl) stEl.innerHTML=statusChip;
     // 篩選啟用時：總覽卡片＝篩選後子集（口徑同全量），環比不比（子集跨期噪音大、標「—」），自驗只對全量整月有意義故略過。
@@ -9789,15 +9794,7 @@ function momoRenderProfitBody(shop, tableOnly){
         <button class="mm-linkbtn" style="flex-shrink:0" onclick="momoDismissYiCaveat('${shop}')">知道了</button>
       </div>`;
     }
-    // E001 未結算橫幅：選到「無對帳明細」且 E001 有資料的期別 → 標明估算 + 取代規則。
-    let e001Banner='';
-    if(momoIsMoPlus(shop) && period){
-      const _ctx=momoMoPlusE001Ctx(shop), _pk=momoExpandPeriod(period);
-      if(_pk.length && _pk.every(k=>!_ctx.settled.has(k)) && _ctx.doc && _ctx.doc.hasPrice && _pk.some(k=>_ctx.doc.byPeriodSold&&_ctx.doc.byPeriodSold[k])){
-        const _fr=_ctx.estFee;
-        e001Banner=`<div class="mm-banner mm-banner-warn" style="margin-bottom:8px">📢 <b>${momoPeriodLabel(period)} 為未結算估算值（E001）</b>：<b>銷量為實數</b>；<b>營收</b>＝售價×數量（實測＝對帳明細 A 貨款口徑）；<b>毛利率</b>用估算平台費率 ${_fr?(_fr.rate*100).toFixed(1)+'%':'—'}（${_fr?_fr.mode:'無 recon'}${_fr&&_fr.months?' '+_fr.months.join('/'):''}、含成交手續費+其他D+運費淨）。營收/毛利率旁的 <span style="color:#d97706">估</span> 標記即此。<b>待該期別對帳明細上傳後，自動由結算值完全取代（不並存、不相加）。</b></div>`;
-      }
-    }
+    // E001 未結算：改用甲配狀態晶片「⚠ 未對帳」（見 statusChip MO+ 分支），不另做橫幅。
     // MO+ 狀態橫幅：結算中(+12天未到) / 資料不完整(缺 origins 來源) / 雙寫不一致 / 缺成本彙總
     let moPlusBanner='';
     if(momoIsMoPlus(shop) && period){
@@ -9837,7 +9834,7 @@ function momoRenderProfitBody(shop, tableOnly){
       }
     }
     const overview=momoOverviewHTML(shop, period, curT, prevT, prevKey, verifyBlock);
-    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+yiCaveat+e001Banner+moPlusBanner+moPlusMissCostChip+moPlusPriceBanner+overview+statusBanner;
+    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+yiCaveat+moPlusBanner+moPlusMissCostChip+moPlusPriceBanner+overview+statusBanner;
   }
   tbl.innerHTML=discHint+tableHTML;
   momoSyncFilterChip(shop);   // 篩選變動後同步工具列 🏷 按鈕作用中狀態（殼不重繪）
@@ -10173,7 +10170,7 @@ function momoKpiDelta(cur, prev, hasPrev){
 // 總覽 KPI 區塊：總營收/總淨利/加權毛利率/總銷量 + 環比。毛利率按絕對值門檻著色（非方向），環比 pp 差中性色。
 function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
   if(!period) return '';
-  // ⚠ 未結算估算（E001）：數字比照甲配未對帳月照常顯示、不加卡片標記；估算僅由頂端橫幅（e001Banner）標示（含估算費率與來源月）。
+  // ⚠ 未結算估算（E001）：數字比照甲配未對帳月照常顯示、不加卡片標記；估算僅由工具列「⚠ 未對帳」狀態晶片標示（費率/來源月在晶片 tooltip）。
   const hasPrev=!!prev.hasData;
   const prevLbl=prevKey?momoPeriodLabel(prevKey):'上期';
   const money=v=>momoMoney(v);
