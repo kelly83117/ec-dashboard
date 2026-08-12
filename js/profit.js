@@ -7286,7 +7286,7 @@ function momoAggregatePeriods(product,periodKeys,shop){
       coverage:m.coverage, covered:m.covered, missingOrigins:m.missingOrigins,
       latestSale:(ls?ls.sp:null), latestSaleDate:(ls?ls.d:null),
       listPrice:lp.listPrice, listSpec:lp.listSpec, listByBest:lp.byBestSeller, listSpecs:lp.specs, listDivergence:lp.divergence, listMasterStale:lp.masterStale,
-      feeRate:momoFeeSortKey(fr), _feeStatus:fr.status, _feeCand:(fr.cand||[]), _feeReason:(fr.reason||null), _feeCur:(fr.cur||null), moPlus:true
+      feeRate:momoFeeLowerBound(fr), _feeStatus:fr.status, _feeCand:(fr.cand||[]), _feeReason:(fr.reason||null), _feeCur:(fr.cur||null), moPlus:true
     };
   }
   if(shop!=='甲配' && shop!=='乙配'){
@@ -8521,12 +8521,11 @@ function momoFeeRateSummary(shop){
 }
 /* 成交費率欄（P2）顯示/排序 helper。
    ⚠ 多解是常態（重傳七月：唯一98 / 多解213）——範圍呈現要能好好處理大多數，不是邊緣塞角落。 */
-// 排序鍵：主＝候選「下界」（高→低撈高費率、以「能保證的最低費率」排、不讓寬範圍冒充高）；
-//   同下界內用 bonus 分：唯一(寬0→+0.4，最確定排最前) > 窄範圍 > 寬範圍；bonus<0.5 恆不跨費率桶（最小費率間距 0.5）。無資料/無候選→ -1 沉底。
-function momoFeeSortKey(fr){
+// 排序＋篩選鍵：候選「下界」＝能保證的最低費率（高→低撈高費率、寬範圍不冒充高）。無資料/無候選→ -1（排序沉底；篩選另以 v>=0 排除）。
+//   ⚠ 單一數值同供排序與「>X%」篩選：不加 bonus（bonus 會讓下界=10 的唯一列在「>10%」誤判通過），故不做同下界細分、以原順序穩定排。
+function momoFeeLowerBound(fr){
   const c=fr&&fr.cand; if(!c||!c.length) return -1;
-  const lo=Math.min(...c), hi=Math.max(...c);
-  return lo + 0.4/(1+(hi-lo));
+  return Math.min(...c);
 }
 // 純文字（匯出 / tooltip 用）：唯一「7.5%」；多解「5.5–6.5%（待收斂）」；異常「…（異常）」；無資料 ''。
 function momoFeeText(fr){
@@ -9017,7 +9016,7 @@ const MOMO_PROFIT_COLS=[
   {k:'margin',label:'毛利率',fmt:'pct1',w:100,info:'淨利 ÷ 未稅營收。淨利已扣 MOMO 費用與商品成本。'},
   {k:'profit',label:'毛利貢獻',fmt:'money',w:130,info:'該商品貢獻的淨利金額。（未稅）'},
   {k:'coveragePct',label:'成本涵蓋',fmt:'pct1',w:104,info:'該商品各原廠編號查到成本的比例（按件數）。<100% 表示部分原廠編號缺成本 → 毛利偏高、且該商品不計入加權毛利率。到批次維護補成本表。',moPlusOnly:true},
-  {k:'feeRate',label:'成交費率',fmt:'feerate',w:128,info:'MO+ 成交手續費反推的費率（非檔期）。逐列 round(售價×數量×費率%)=手續費、跨月取交集。唯一解=粗體實心；多解=淡色範圍+「待收斂」（月份越多越收斂）；異常=紅（跨月候選互斥）；無成交手續費資料=「—」。排序依「範圍下界」高→低（撈高費率商品）：以能保證的最低費率排、唯一解排同下界最前。⚠ 僅供顯示與異常偵測，毛利一律走逐筆實際手續費、不用反推值。',moPlusOnly:true},
+  {k:'feeRate',label:'成交費率',fmt:'pct1',w:128,info:'MO+ 成交手續費反推的費率（非檔期）。逐列 round(售價×數量×費率%)=手續費、跨月取交集。唯一解=粗體深色；多解=淡色範圍+「待收斂」（月份越多越收斂）；異常=紅（跨月候選互斥、代表有問題）；無成交手續費資料=「—」。排序與篩選皆依「範圍下界」＝能保證的最低費率（撈高費率商品）：篩「>10%」＝下界都 >10% 才算。多解列的下界即篩選/排序值。⚠ 僅供顯示與異常偵測，毛利一律走逐筆實際手續費、不用反推值。',moPlusOnly:true},
   {k:'returnRate',label:'退貨率',fmt:'pct1',w:96,info:'客退數量 ÷ 賣出數量（賣出=對帳數量+客退數量），來源=對帳單逐SKU、月顆粒。未對帳月顯示「—」。hover 看退貨件數/金額。'},
   {k:'stock',label:'庫存',fmt:'num',w:112,info:'莫筆克庫存；資料上傳日期。'},
   {k:'tags',label:'標籤',left:true,w:140,info:'依嚴重度顯示最該注意的一個標籤（缺成本>重跌>退貨警示>低利>高營收>其他），其餘收成 +N、hover 看全部。只在整月計算，半月顯示「—」。用上方「🏷 標籤 / 篩選」可依標籤篩選。'},
@@ -9514,9 +9513,8 @@ function momoRenderProfitBody(shop, tableOnly){
           const tip=`跨月候選互斥（費率可能被調整／分類變更／資料異常）→ 保留新舊供人工判斷：\n舊累積：${cand.map(x=>x+'%').join('、')||'（空）'}\n本月新：${(r._feeCur||[]).map(x=>x+'%').join('、')||'（空）'}`;
           return `<td style="text-align:right;font-weight:700;color:#dc2626" title="${String(tip).replace(/"/g,'&quot;')}">${lo===hi?lo:lo+'–'+hi}% <span style="font-size:10px">⚠異常</span></td>`;
         }
-        if(cand.length===1){   // 唯一解：粗體實心；高費率(≥10%)紅標（撈高費率一眼可見）
-          const hot=lo>=10;
-          return `<td style="text-align:right;font-weight:700;color:${hot?'#dc2626':'#374151'}" title="已收斂唯一費率 ${lo}%（非檔期）">${lo}%</td>`;
+        if(cand.length===1){   // 唯一解：粗體深色（與多解用粗細/深淺區分；不用紅——紅在本系統代表有問題，費率階層不是問題）
+          return `<td style="text-align:right;font-weight:700;color:#1f2937" title="已收斂唯一費率 ${lo}%（非檔期）">${lo}%</td>`;
         }
         // 多解（常態）：淡色範圍 + 「待收斂」小標；tooltip 列全部候選 + 排序依下界說明
         const tip=`尚未收斂，可能費率：${cand.map(x=>x+'%').join('、')}\n（跨月交集後仍多解；更多月份資料會收斂。此欄排序依下界 ${lo}%。）`;
@@ -10180,6 +10178,7 @@ function momoRowPassesFilter(shop, r, rowTags){
       //    絕對量欄（營收/銷量/毛利貢獻/進價/售價）的 0 是真值，照常比較（可查「營收=0」「銷量<5」）。
       if(c.k==='margin' && noBiz) return false;
       const v=r[c.k];
+      if(c.k==='feeRate' && !(v>=0)) return false;   // ⚠ 成交費率無資料(none, v=-1) 不參與費率篩選（否則「<5%」會把無資料列當 -1 撈進來）
       if(typeof v!=='number' || !isFinite(v)) return false;   // ⚠ 無值(零營收毛利率—/未進榜)不參與比較→排除，不會被當 0 撈進「<20」或「0~X」
       if(c.op==='gt' && !(v>c.a)) return false;
       if(c.op==='lt' && !(v<c.a)) return false;
