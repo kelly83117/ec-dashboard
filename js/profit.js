@@ -8121,7 +8121,9 @@ function momoParseMoPlus(rows, srcCode){
     //   ⚠「運費全免」列 B=0（免運券/活動全額折抵），靠 總折扣金額>0 收進來（2606：202 筆 B>0 + 30 筆全免 discount=售價）。
     const freightStruct=(A===0 && C===0 && D===0 && (B>0 || discount>0)), freightName=(name==='運費');
     if(freightStruct!==freightName){ freightMismatch.push({row:r+1, orderNo, name, A,B,C,D, byStruct:freightStruct, byName:freightName}); }
-    lines.push({row:r+1, orderNo, period, orderDate:momoMoPlusOrderDate(orderNo), sku:skuId, origin, name, spec1, spec2, qty, price, discount, net, status, A,B,C,D, freight:freightStruct});
+    const _dcDeal=cols.grp['D'].find(c=>c.name==='成交手續費');   // 成交費率反推用：逐列「成交手續費」單項（非 D 總和）
+    const feeDeal=(_dcDeal&&_dcDeal.i>=0)?momoMoPlusNum(row[_dcDeal.i]):0;
+    lines.push({row:r+1, orderNo, period, orderDate:momoMoPlusOrderDate(orderNo), sku:skuId, origin, name, spec1, spec2, qty, price, discount, net, status, A,B,C,D, feeDeal, freight:freightStruct});
     if(freightStruct){                                       // 運費假 SKU：抽離、不進 SKU 維度、不進 missingOrigin
       const fi=freightIn[period]=freightIn[period]||{qty:0, B:0, net:0, rows:0};
       fi.qty+=qty; fi.B+=B; fi.net+=net; fi.rows++; freightRows++;
@@ -8361,6 +8363,68 @@ function momoLoadMoPlusMaster(shop){ return momoLoadMoPlusOriginsDoc(shop, 'mast
 function momoSaveMoPlusMaster(shop, doc){ return momoSaveMoPlusOriginsDoc(shop, 'master', doc); }
 // 寫入器：parsed（momoParseMoPlus 輸出，已抽運費）→ 該來源月 origins doc（整包，重上傳覆蓋＝冪等）。只收已建檔 SKU。
 //   allowedPeriods：與 momoApplyUploadPlan 同一期別閘門（未勾的期別不寫）→ 保證 cell 與 origins 的期別集合一致（①互查才不誤報）。
+/* ═══════════════ MO+ 成交費率反推引擎（P1；純邏輯）═══════════════
+   公式（真檔驗 1309/1309）：round(單筆售價 × 數量 × 費率%) == 成交手續費（元以下四捨五入；分母＝售價×數量、非A貨款）。
+   ⚠ 反推僅供顯示/異常偵測，毛利一律走逐筆實際值（見 spec 界線）。*/
+const MOMO_FEE_RATES=[3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,10,12,13,13.5];   // 公告費率集合（rules.momo.com.tw/payment/00002）
+// 逐列候選費率：使 round(price×qty×r%)==fee 的所有公告費率。base<=0 或 fee<=0 → []（呼叫端另判「無資料」vs「無解」）。
+function momoFeeRateCandidates(price, qty, fee){
+  const base=Number(price)*Number(qty), f=Number(fee);
+  if(!(base>0) || !(f>0)) return [];
+  return MOMO_FEE_RATES.filter(r=>Math.round(base*r/100)===f);
+}
+// ── 檔期日清單（可維護；記更新日、畫面顯示）。orderDate＝訂編 chars[1:6] 解出的 'YYYYMMDD'。──
+const MOMO_PROMO_TABLE={
+  updated:'2026-08-11',
+  dates:{ '2026-05':[1,5,10,22], '2026-06':[1,6,18,22], '2026-07':[1,7,15,22], '2026-08':[1,8,15,22], '2026-09':[1,9,15,22] },
+};
+let _momoPromoSet=null, _momoPromoSetKey=null;
+function momoPromoDateSet(){ const key=MOMO_PROMO_TABLE.updated; if(_momoPromoSet&&_momoPromoSetKey===key) return _momoPromoSet;
+  const s=new Set(); Object.keys(MOMO_PROMO_TABLE.dates).forEach(mo=>{ const [y,m]=mo.split('-'); MOMO_PROMO_TABLE.dates[mo].forEach(d=>s.add(y+m+String(d).padStart(2,'0'))); });
+  _momoPromoSet=s; _momoPromoSetKey=key; return s; }
+function momoIsPromoDate(orderDate){ return momoPromoDateSet().has(String(orderDate||'')); }
+function momoPromoCoveredMonths(){ return new Set(Object.keys(MOMO_PROMO_TABLE.dates)); }   // 'YYYY-MM'
+// ⚠ 主風險：資料月份超出檔期清單涵蓋 → 回未涵蓋月份清單（呼叫端**標提醒去更新清單**、不可默默把該月全當非檔期）。
+function momoPromoUncoveredMonths(orderDates){
+  const covered=momoPromoCoveredMonths(), miss=new Set();
+  (orderDates||[]).forEach(od=>{ const s=String(od||''); if(s.length>=6){ const mo=s.slice(0,4)+'-'+s.slice(4,6); if(!covered.has(mo)) miss.add(mo); } });
+  return [...miss].sort();
+}
+// 逐列反推 → 該來源月 per-SKU 候選集（只用非檔期、有成交手續費的正常商品列；月內取交集）。
+//   回 { cand:{sku:[rates]}, nosol:{sku:true}, uncoveredMonths:[..] }。cand[sku]＝月內交集(非空)；nosol[sku]＝該 SKU 有非檔期成交列但某列反推出空(無費率可還原)。
+function momoBuildFeeCandidates(lines){
+  const cand={}, nosol={}, seenFee={}, orderDates=[];
+  (lines||[]).forEach(ln=>{
+    if(ln.freight) return;                                  // 運費列不算
+    if(ln.orderDate) orderDates.push(ln.orderDate);
+    const fee=Number(ln.feeDeal); if(!(fee>0)) return;      // 無成交手續費 → 不貢獻（顯示層另判「—」）
+    if(momoIsPromoDate(ln.orderDate)) return;               // 檔期列排除、不進反推
+    const sku=ln.sku; if(!sku) return;
+    seenFee[sku]=true;
+    const c=momoFeeRateCandidates(ln.price, ln.qty, fee);
+    if(!c.length){ nosol[sku]=true; return; }               // 該列無費率可還原 → 標無解（公式已驗無例外→資料/公告有變）
+    if(!(sku in cand)) cand[sku]=c.slice();
+    else cand[sku]=cand[sku].filter(r=>c.indexOf(r)>=0);    // 月內交集
+  });
+  // seenFee 但 cand 收成空(月內互斥) 也算無解
+  Object.keys(seenFee).forEach(sku=>{ if((sku in cand) && !cand[sku].length){ nosol[sku]=true; delete cand[sku]; } });
+  return { cand, nosol, uncoveredMonths:momoPromoUncoveredMonths(orderDates) };
+}
+// 跨月交集累積（單調縮小、不覆蓋）：monthsData＝按月序 [{cand:[rates]|null, nosol:bool}]（該 SKU 每月一項；月內無非檔期成交列＝null 跳過）。
+//   回 {status:'unique'|'multi'|'anomaly'|'none', cand:[..], reason?, cur?}。空集(disjoint)或某月 nosol → anomaly、保留累積、附衝突月供人工判斷、不自動選邊。
+function momoFeeRateAccumulate(monthsData){
+  const present=(monthsData||[]).filter(m=>m && (m.nosol || (m.cand && m.cand.length)));
+  if(!present.length) return { status:'none', cand:[] };
+  let acc=null;
+  for(const m of present){
+    if(m.nosol) return { status:'anomaly', reason:'nosolution', cand:acc||[] };      // 某月無解
+    if(acc==null){ acc=m.cand.slice(); continue; }
+    const inter=acc.filter(r=>m.cand.indexOf(r)>=0);
+    if(!inter.length) return { status:'anomaly', reason:'disjoint', cand:acc.slice(), cur:m.cand.slice() };   // 跨月不重疊 → 保留新舊
+    acc=inter;
+  }
+  return { status: acc.length===1?'unique':'multi', cand:acc };
+}
 function momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods){
   const has=new Set(momoLoadProducts(shop).map(p=>p.sku));
   const gated=pd=>allowedPeriods && !allowedPeriods.has(pd);
@@ -8389,7 +8453,8 @@ function momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods){
     const cur=latestSale[ln.sku];
     if(!cur || ln.orderDate>cur.d) latestSale[ln.sku]={ sp:Math.round(Number(ln.price)||0), d:ln.orderDate };   // 下單日較晚 → 更新
   });
-  return { doc:{ shop, src:parsed.srcCode, skus, freight, latestSale }, skuN:Object.keys(skus).length };
+  const fc=momoBuildFeeCandidates(parsed.lines);   // 成交費率：該來源月 per-SKU 候選集（非檔期反推、月內交集）+ 無解 + 未涵蓋月份
+  return { doc:{ shop, src:parsed.srcCode, skus, freight, latestSale, feeCand:fc.cand, feeNosol:fc.nosol, feeUncovered:fc.uncoveredMonths }, skuN:Object.keys(skus).length };
 }
 // ① 雙寫互查：momo_products cell qty(Σsources) vs origins Σo，逐(sku,period)。回 mismatches[]（呼叫端出可見警告、標該期別）。
 function momoMoPlusConsistency(shop){
@@ -8417,11 +8482,28 @@ let _moDataEpoch=0, _moIdxCache={}, _moCostCache=null, _moCostEpoch=-1;
 function momoBumpMoPlusEpoch(){ _moDataEpoch++; }   // origins/cost 寫入或雲端更新時呼叫 → 索引與成本快取下次查表自動重建
 function momoBuildMoPlusOriginsIndex(shop){
   const docs=momoListMoPlusOriginsDocs(shop), idx={}, latest={}, originTot={};   // originTot: sku→{origin:跨來源月跨期別總銷量}（售價欄「銷售最多規格」＝銷量最多原廠編號）
-  Object.values(docs).forEach(d=>{
+  const feeMonths={}, feeUncovered=new Set();   // 成交費率：sku→[{src,cand,nosol}]（按來源月序，供跨月交集）；未涵蓋檔期清單的月份（union）
+  const srcs=Object.keys(docs).sort();          // 來源月字典序＝時間序（YYYY-MM 前綴）→ 交集累積的「舊→新」次序
+  srcs.forEach(src=>{ const d=docs[src];
     const sk=(d&&d.skus)||{}; Object.keys(sk).forEach(s=>{ const byP=idx[s]||(idx[s]={}); const bySku=originTot[s]||(originTot[s]={}); Object.keys(sk[s]).forEach(pd=>{ const c=sk[s][pd]; const e=byP[pd]||(byP[pd]={originsQty:{},feeD:0}); Object.keys(c.o||{}).forEach(o=>{ const q=Number(c.o[o])||0; e.originsQty[o]=(e.originsQty[o]||0)+q; bySku[o]=(bySku[o]||0)+q; }); e.feeD+=Number(c.d)||0; }); });
     const ls=(d&&d.latestSale)||{}; Object.keys(ls).forEach(s=>{ const cur=latest[s]; const v=ls[s]; if(v&&v.d && (!cur || v.d>=cur.d)) latest[s]={sp:v.sp, d:v.d}; });   // 跨來源月：下單日較晚勝；同日打平取後掃到的（來源月排序後較晚者）
+    const fcand=(d&&d.feeCand)||{}, fnos=(d&&d.feeNosol)||{};   // 逐 SKU：該來源月候選集 / 無解
+    new Set([...Object.keys(fcand),...Object.keys(fnos)]).forEach(s=>{ (feeMonths[s]=feeMonths[s]||[]).push({src, cand:(fcand[s]||[]).slice(), nosol:!!fnos[s]}); });
+    ((d&&d.feeUncovered)||[]).forEach(mo=>feeUncovered.add(mo));
   });
-  return {idx, latest, originTot};
+  return {idx, latest, originTot, feeMonths, feeUncovered:[...feeUncovered].sort()};
+}
+// 某 SKU 跨全部已上傳來源月的成交費率結論（唯一/多解/異常/無資料）。純顯示與異常偵測，不進毛利計算。
+function momoFeeRateForSku(shop, sku){
+  const fm=momoMoPlusIndexCached(shop).feeMonths[sku];
+  if(!fm || !fm.length) return { status:'none', cand:[] };
+  return momoFeeRateAccumulate(fm);
+}
+// 全賣場成交費率彙總（P1 回報 + P2 排序/異常用）：{unique,multi,anomaly,none,uncoveredMonths,rows:[{sku,status,cand,...}]}
+function momoFeeRateSummary(shop){
+  const ix=momoMoPlusIndexCached(shop), fm=ix.feeMonths, out={unique:0,multi:0,anomaly:0,none:0,uncoveredMonths:ix.feeUncovered,rows:[]};
+  Object.keys(fm).forEach(sku=>{ const r=momoFeeRateAccumulate(fm[sku]); out[r.status==='none'?'none':r.status]++; out.rows.push({sku, status:r.status, cand:r.cand, reason:r.reason||null, cur:r.cur||null}); });
+  return out;
 }
 // 某 SKU「銷售最多的原廠編號」（跨全部來源月/期別總銷量最大；空 origin 不算）→ origin|null。售價欄預設顯示這個原廠編號對應規格的掛牌價。
 function momoMoPlusBestOriginForSku(shop, sku){
@@ -13931,6 +14013,7 @@ Object.assign(window, {
   momoIsMoPlus,momoRenderMoPlusUpload,momoMoPlusUploadFile,momoMoPlusUploadRemove,momoMoPlusUploadGenerate,momoMoPlusShowDryRun,momoMoPlusUploadOpenGuard,momoMoPlusUploadApply,
   momoMoPlusMasterFile,momoMoPlusMasterRemove,momoMoPlusMasterGenerate,momoMoPlusMasterApply,momoParseMoPlusMaster,momoMoPlusApplyMaster,momoOpenSpecPrices,momoMoPlusScanDirty,momoMoPlusCleanDirty,
   momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusConsistency,momoMoPlusCompleteness,
+  momoFeeRateCandidates,momoIsPromoDate,momoPromoUncoveredMonths,momoBuildFeeCandidates,momoFeeRateAccumulate,momoFeeRateForSku,momoFeeRateSummary,MOMO_FEE_RATES,MOMO_PROMO_TABLE,
   momoMoPlusOriginsForSku,momoMoPlusMarginCalc,momoMoPlusMargin,momoMoPlusOrderDate,momoMoPlusLatestSaleForSku,momoDismissMoPlusPriceHint,
   momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusAddPreview,momoMoPlusSetOtherFee,
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
