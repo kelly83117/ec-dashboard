@@ -7279,12 +7279,14 @@ function momoAggregatePeriods(product,periodKeys,shop){
     const m=momoMoPlusMarginCalc({qty, revA, originsQty, feeD, costMap:momoMoPlusCostMapCached()});
     const ls=momoMoPlusLatestSaleForSku(shop, product.sku);   // 最新成交價（跨全部資料、不受本期別限制）
     const lp=momoMoPlusListPriceForSku(shop, product.sku, ls?ls.sp:null);   // 掛牌價（商品主檔、銷售最多規格）+ 各規格 + 落差
+    const fr=momoFeeRateForSku(shop, product.sku);   // 成交費率反推結論（跨月交集，純顯示/排序、不進毛利）
     return {
       qty, revenue:revA, profit:m.margin, margin:m.marginPct, cost:m.cogs, feeD:m.feeD,
       returnRate:qty?Math.round((returnQty/qty)*1000)/10:0,
       coverage:m.coverage, covered:m.covered, missingOrigins:m.missingOrigins,
       latestSale:(ls?ls.sp:null), latestSaleDate:(ls?ls.d:null),
-      listPrice:lp.listPrice, listSpec:lp.listSpec, listByBest:lp.byBestSeller, listSpecs:lp.specs, listDivergence:lp.divergence, listMasterStale:lp.masterStale, moPlus:true
+      listPrice:lp.listPrice, listSpec:lp.listSpec, listByBest:lp.byBestSeller, listSpecs:lp.specs, listDivergence:lp.divergence, listMasterStale:lp.masterStale,
+      feeRate:momoFeeSortKey(fr), _feeStatus:fr.status, _feeCand:(fr.cand||[]), _feeReason:(fr.reason||null), _feeCur:(fr.cur||null), moPlus:true
     };
   }
   if(shop!=='甲配' && shop!=='乙配'){
@@ -8384,10 +8386,13 @@ function momoPromoDateSet(){ const key=MOMO_PROMO_TABLE.updated; if(_momoPromoSe
   _momoPromoSet=s; _momoPromoSetKey=key; return s; }
 function momoIsPromoDate(orderDate){ return momoPromoDateSet().has(String(orderDate||'')); }
 function momoPromoCoveredMonths(){ return new Set(Object.keys(MOMO_PROMO_TABLE.dates)); }   // 'YYYY-MM'
-// ⚠ 主風險：資料月份超出檔期清單涵蓋 → 回未涵蓋月份清單（呼叫端**標提醒去更新清單**、不可默默把該月全當非檔期）。
+// ⚠ 只警告「檔期清單涵蓋範圍**之後**新出現的月份」（清單到 2026-09、資料出現 2026-10 才提醒去更新清單）。
+//   早於清單起始月的歷史尾巴（2025 各月）＝靜靜跳過、不進警告：使用者不需其費率，且每次跳警告＝雜訊、久了訓練人忽略警告（假警報）。
+//   ⚠ 反推仍會跳過**所有**未涵蓋月（見 momoBuildFeeCandidates 的 covered 判斷、避免檔期列污染）；本函式只決定「要不要提醒」，兩者分離。
 function momoPromoUncoveredMonths(orderDates){
-  const covered=momoPromoCoveredMonths(), miss=new Set();
-  (orderDates||[]).forEach(od=>{ const s=String(od||''); if(s.length>=6){ const mo=s.slice(0,4)+'-'+s.slice(4,6); if(!covered.has(mo)) miss.add(mo); } });
+  const covered=[...momoPromoCoveredMonths()].sort(); if(!covered.length) return [];
+  const maxCovered=covered[covered.length-1], miss=new Set();
+  (orderDates||[]).forEach(od=>{ const s=String(od||''); if(s.length>=6){ const mo=s.slice(0,4)+'-'+s.slice(4,6); if(mo>maxCovered) miss.add(mo); } });   // 只收 > 清單最後涵蓋月的新月份
   return [...miss].sort();
 }
 // 逐列反推 → 該來源月 per-SKU 候選集（只用非檔期、有成交手續費的正常商品列；月內取交集）。
@@ -8495,7 +8500,10 @@ function momoBuildMoPlusOriginsIndex(shop){
     new Set([...Object.keys(fcand),...Object.keys(fnos)]).forEach(s=>{ (feeMonths[s]=feeMonths[s]||[]).push({src, cand:(fcand[s]||[]).slice(), nosol:!!fnos[s]}); });
     ((d&&d.feeUncovered)||[]).forEach(mo=>feeUncovered.add(mo));
   });
-  return {idx, latest, originTot, feeMonths, feeUncovered:[...feeUncovered].sort()};
+  // ⚠ 讀時再過一次「只留清單涵蓋範圍之後的月份」：既有 doc.feeUncovered 是舊語意（含早於清單的歷史尾巴）產物，
+  //   在此濾掉 → 不必重傳即生效、歷史尾巴不再觸發警告（見 momoPromoUncoveredMonths 註解）。
+  const _cov=[...momoPromoCoveredMonths()].sort(), _maxCov=_cov.length?_cov[_cov.length-1]:'';
+  return {idx, latest, originTot, feeMonths, feeUncovered:[...feeUncovered].filter(mo=>mo>_maxCov).sort()};
 }
 // 某 SKU 跨全部已上傳來源月的成交費率結論（唯一/多解/異常/無資料）。純顯示與異常偵測，不進毛利計算。
 function momoFeeRateForSku(shop, sku){
@@ -8510,6 +8518,23 @@ function momoFeeRateSummary(shop){
   const ix=momoMoPlusIndexCached(shop), fm=ix.feeMonths, out={unique:0,multi:0,anomaly:0,none:0,uncoveredMonths:ix.feeUncovered,rows:[]};
   Object.keys(fm).forEach(sku=>{ const r=momoFeeRateAccumulate(fm[sku]); out[r.status==='none'?'none':r.status]++; out.rows.push({sku, status:r.status, cand:r.cand, reason:r.reason||null, cur:r.cur||null}); });
   return out;
+}
+/* 成交費率欄（P2）顯示/排序 helper。
+   ⚠ 多解是常態（重傳七月：唯一98 / 多解213）——範圍呈現要能好好處理大多數，不是邊緣塞角落。 */
+// 排序鍵：主＝候選「下界」（高→低撈高費率、以「能保證的最低費率」排、不讓寬範圍冒充高）；
+//   同下界內用 bonus 分：唯一(寬0→+0.4，最確定排最前) > 窄範圍 > 寬範圍；bonus<0.5 恆不跨費率桶（最小費率間距 0.5）。無資料/無候選→ -1 沉底。
+function momoFeeSortKey(fr){
+  const c=fr&&fr.cand; if(!c||!c.length) return -1;
+  const lo=Math.min(...c), hi=Math.max(...c);
+  return lo + 0.4/(1+(hi-lo));
+}
+// 純文字（匯出 / tooltip 用）：唯一「7.5%」；多解「5.5–6.5%（待收斂）」；異常「…（異常）」；無資料 ''。
+function momoFeeText(fr){
+  const st=fr&&fr.status, c=(fr&&fr.cand)||[];
+  if(!c.length) return '';
+  if(c.length===1 && st!=='anomaly') return c[0]+'%';
+  const lo=Math.min(...c), hi=Math.max(...c);
+  return lo+'–'+hi+'%'+(st==='anomaly'?'（異常）':'（待收斂）');
 }
 // 某 SKU「銷售最多的原廠編號」（跨全部來源月/期別總銷量最大；空 origin 不算）→ origin|null。售價欄預設顯示這個原廠編號對應規格的掛牌價。
 function momoMoPlusBestOriginForSku(shop, sku){
@@ -8992,6 +9017,7 @@ const MOMO_PROFIT_COLS=[
   {k:'margin',label:'毛利率',fmt:'pct1',w:100,info:'淨利 ÷ 未稅營收。淨利已扣 MOMO 費用與商品成本。'},
   {k:'profit',label:'毛利貢獻',fmt:'money',w:130,info:'該商品貢獻的淨利金額。（未稅）'},
   {k:'coveragePct',label:'成本涵蓋',fmt:'pct1',w:104,info:'該商品各原廠編號查到成本的比例（按件數）。<100% 表示部分原廠編號缺成本 → 毛利偏高、且該商品不計入加權毛利率。到批次維護補成本表。',moPlusOnly:true},
+  {k:'feeRate',label:'成交費率',fmt:'feerate',w:128,info:'MO+ 成交手續費反推的費率（非檔期）。逐列 round(售價×數量×費率%)=手續費、跨月取交集。唯一解=粗體實心；多解=淡色範圍+「待收斂」（月份越多越收斂）；異常=紅（跨月候選互斥）；無成交手續費資料=「—」。排序依「範圍下界」高→低（撈高費率商品）：以能保證的最低費率排、唯一解排同下界最前。⚠ 僅供顯示與異常偵測，毛利一律走逐筆實際手續費、不用反推值。',moPlusOnly:true},
   {k:'returnRate',label:'退貨率',fmt:'pct1',w:96,info:'客退數量 ÷ 賣出數量（賣出=對帳數量+客退數量），來源=對帳單逐SKU、月顆粒。未對帳月顯示「—」。hover 看退貨件數/金額。'},
   {k:'stock',label:'庫存',fmt:'num',w:112,info:'莫筆克庫存；資料上傳日期。'},
   {k:'tags',label:'標籤',left:true,w:140,info:'依嚴重度顯示最該注意的一個標籤（缺成本>重跌>退貨警示>低利>高營收>其他），其餘收成 +N、hover 看全部。只在整月計算，半月顯示「—」。用上方「🏷 標籤 / 篩選」可依標籤篩選。'},
@@ -9017,7 +9043,7 @@ function momoColDefKeys(shop){ return momoColAvail(shop).filter(c=>!c.fixed).map
 // 「新欄位」提示：既有使用者的欄位順序是自己拖過的（不強制插入），但要讓人知道多了一欄。
 //   作法：記已看過的欄 key；本次釋出新增的欄（_MOMO_NEW_COLS）對既有使用者標「新」+ 首次一次性 toast；開過欄位面板即視為看過、之後不再提示。
 const _MOMO_COLS_SEEN_LS='momo_cols_seen';
-const _MOMO_NEW_COLS=['stock'];   // 本次釋出新增的欄；下次釋出把新 key 加進來、把不再算新的移走
+const _MOMO_NEW_COLS=['feeRate'];   // 本次釋出新增的欄；下次釋出把新 key 加進來、把不再算新的移走
 function momoColsSeenSet(){
   try{ const raw=localStorage.getItem(_MOMO_COLS_SEEN_LS); if(raw){ const a=JSON.parse(raw); if(Array.isArray(a)) return new Set(a); } }catch{}
   // 首次：把「非本次新增」的欄都當已看過 → 既有使用者只會對新欄跳提示，不會整排標新
@@ -9284,6 +9310,7 @@ function momoExportExcel(shop){
     const line=[r.sku||'', r.origin||'', r.name||''];
     dispCols.forEach(c=>{
       if(c.k==='tags'){ line.push((r._tags||[]).map(t=>(t&&t.tag)||t).join('、')); return; }
+      if(c.k==='feeRate'){ line.push(momoFeeText({status:r._feeStatus, cand:r._feeCand})); return; }   // 匯出可讀字串（非排序鍵 r.feeRate）
       const v=r[c.k];
       line.push(v==null?'':(typeof v==='number'?v:String(v)));   // 數字保持數字型別（Excel 可再運算/格式化），null→空
     });
@@ -9478,6 +9505,22 @@ function momoRenderProfitBody(shop, tableOnly){
         const stale=r.listMasterStale?` <span style="color:#dc2626;font-weight:700;font-size:11px" title="銷量最多的原廠編號不在商品主檔＝主檔過期（有新品/新規格尚未重傳）→ 請重新上傳商品主檔。目前暫顯示其他規格掛牌價。">⚠主檔</span>`:'';
         const exp=multi?` <span onclick="event.stopPropagation();momoOpenSpecPrices('${shop}','${_momoEsc(r.sku)}')" style="color:#5b5fcf;cursor:pointer;font-size:11px" title="展開各規格掛牌價">⊕${r.listSpecs.length}</span>`:'';
         return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis" title="${String(tip).replace(/"/g,'&quot;')}">${momoMoney(lp)}${mark}${stale}${exp}</td>`;
+      }
+      if(c.k==='feeRate'){   // MO+ 成交費率（反推）：唯一=粗體實心；多解(常態)=淡色範圍+待收斂；異常=紅；無資料=—。排序鍵在 r.feeRate（下界+bonus）
+        const st=r._feeStatus, cand=r._feeCand||[];
+        if(!cand.length) return `<td style="text-align:right;color:#c7cad1" title="此商品無非檔期成交手續費資料，無法反推費率">—</td>`;
+        const lo=Math.min(...cand), hi=Math.max(...cand);
+        if(st==='anomaly'){
+          const tip=`跨月候選互斥（費率可能被調整／分類變更／資料異常）→ 保留新舊供人工判斷：\n舊累積：${cand.map(x=>x+'%').join('、')||'（空）'}\n本月新：${(r._feeCur||[]).map(x=>x+'%').join('、')||'（空）'}`;
+          return `<td style="text-align:right;font-weight:700;color:#dc2626" title="${String(tip).replace(/"/g,'&quot;')}">${lo===hi?lo:lo+'–'+hi}% <span style="font-size:10px">⚠異常</span></td>`;
+        }
+        if(cand.length===1){   // 唯一解：粗體實心；高費率(≥10%)紅標（撈高費率一眼可見）
+          const hot=lo>=10;
+          return `<td style="text-align:right;font-weight:700;color:${hot?'#dc2626':'#374151'}" title="已收斂唯一費率 ${lo}%（非檔期）">${lo}%</td>`;
+        }
+        // 多解（常態）：淡色範圍 + 「待收斂」小標；tooltip 列全部候選 + 排序依下界說明
+        const tip=`尚未收斂，可能費率：${cand.map(x=>x+'%').join('、')}\n（跨月交集後仍多解；更多月份資料會收斂。此欄排序依下界 ${lo}%。）`;
+        return `<td style="text-align:right;color:#6b7280" title="${String(tip).replace(/"/g,'&quot;')}">${lo}–${hi}% <span style="font-size:10px;color:#9ca3af;background:#f3f4f6;border-radius:3px;padding:0 4px">待收斂</span></td>`;
       }
       const v=r[c.k];
       const disp=c.fmt?fmt[c.fmt](v):v;
