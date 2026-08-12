@@ -1994,7 +1994,6 @@ function findUnmatchedAds(shop){
   });
   // TypeB（有廣告無銷售）由 buildShop 自動處理（建立零銷售列），不需要用戶介入
   const mapSidCount=mapped.size;
-  console.log(`[${shop}] rawMap codes:${Object.keys(pm).length}, mapped SIDs:${mapSidCount}, adsById SIDs:${Object.keys(adsById).length}, TypeA:${typeA.length}, TypeB:${typeB.length}`);
   // 把診斷資訊附在 typeA 陣列上，供 modal 顯示
   typeA._debug={mapSidCount,adsSidCount:Object.keys(adsById).length};
   return typeA;
@@ -3483,19 +3482,14 @@ function clearColFilter(shop,col){
   _saveFilterState(shop);
   applyFilters(shop);
 }
-// ⚠ 內有三行遺留 console.log（'[applyFpNum]' 開頭），正式站每次用數值篩選都會印。
-//   非本 PR 範圍，待另案清理。
 function applyFpNum(shop,col,sid){
   const minEl=document.getElementById('fp-min-'+sid);
   const maxEl=document.getElementById('fp-max-'+sid);
-  console.log('[applyFpNum]',shop,col,sid,'minEl=',minEl,'maxEl=',maxEl);
   const min=minEl?.value??'';
   const max=maxEl?.value??'';
-  console.log('[applyFpNum] min=',min,'max=',max);
   if(!state[shop].filters)state[shop].filters={};
   if(min===''&&max===''){delete state[shop].filters[col];}
   else state[shop].filters[col]={type:'range',min:min===''?null:parseFloat(min),max:max===''?null:parseFloat(max)};
-  console.log('[applyFpNum] filter set=',JSON.stringify(state[shop].filters[col]));
   _saveFilterState(shop);
   applyFilters(shop);
 }
