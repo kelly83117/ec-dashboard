@@ -4066,7 +4066,7 @@ function renderProdTagPanelBody(){
         <select id="ptp-new-cls">${clsOpts(_tagDefsNewCls)}</select>
         <button class="ptp-add-btn" onclick="addTagDef()">＋ 新增</button>
       </div>
-      <div class="ptp-def-note">標籤清單四個通路共用；改完按下方「儲存」才生效。標籤名不能修改，取錯名請刪掉重建。</div>`;
+      <div class="ptp-def-note">標籤清單所有通路共用；改完按下方「儲存」才生效。標籤名不能修改，取錯名請刪掉重建。</div>`;
   }
   // 第四區「❓ 這個怎麼用」：同樣預設收合，展開狀態記在 _tagHelpOpen（模組變數，撐得過 innerHTML 重繪）
   let help='';
@@ -4076,7 +4076,7 @@ function renderProdTagPanelBody(){
       ${qa('測試標籤是什麼','手動挑幾個商品做投放測試（例如開加速、提高目標 ROI），標記起來方便之後比較成效。跟「建議」欄不一樣，那欄是系統自動算的。')}
       ${qa('日期要填什麼','填測試實際開始的那一天，不是你標記的那天。系統預設今天，補記以前的測試記得改。')}
       ${qa('為什麼標了卻看不到','標籤只會出現在「標記日之後」的期間。例如填 8/05，7 月的報表就看不到它，8 月上半月才會出現。這是為了讓「測試前 vs 測試後」的數字分得開。想讓某一期看得到，就把日期改到那期結束日之前。')}
-      ${qa('標籤清單是大家共用的','新增或刪除標籤，四個通路都會變。哪個商品被標則各通路獨立。標籤名不能改，取錯名要刪掉重建；還有商品在用的標籤刪不掉。')}
+      ${qa('標籤清單是大家共用的','新增或刪除標籤，所有通路都會變。哪個商品被標則各通路獨立。標籤名不能改，取錯名要刪掉重建；還有商品在用的標籤刪不掉。')}
     </div>`;
   }
   body.innerHTML=`<div class="ana-sec-hdr">已標記</div>
@@ -4099,7 +4099,7 @@ function toggleTagHelpSection(){
   _tagHelpOpen=!_tagHelpOpen;
   renderProdTagPanelBody();
 }
-// 某個標籤在【四個通路】各被幾個商品用到，只回筆數 > 0 的。
+// 某個標籤在【SHOPS 全部通路】各被幾個商品用到，只回筆數 > 0 的。
 //   ⚠ 一定要掃 SHOPS 全部通路：標籤定義全站共用、標記每通路獨立，
 //     只數當前通路會讓別的通路產生指向不存在定義的孤兒標籤。
 //   ⚠ 用 getProdTags（整包原始資料）不用 getProdTagsFor：後者會做期間過濾，
@@ -4129,7 +4129,7 @@ function addTagDef(){
   renderProdTagPanelBody();
 }
 // 刪除標籤定義。兩層保護，(ii) 先檢查（使用者當場就能處理）：
-//   (i)  countTagUsage：四個通路【已存檔】的標記還有沒有人在用
+//   (i)  countTagUsage：SHOPS 全部通路【已存檔】的標記還有沒有人在用
 //   (ii) _tagDraft：這次面板開著、還沒存的草稿有沒有掛著它
 //   ⚠ (i) 的計數是對「已存檔資料」算的。若使用者在同一次操作裡先把這個商品的標記移掉、
 //     又要刪定義，計數仍會算到那筆（因為還沒存）。這是刻意保守 —— 寧可擋下來讓他先存檔，
