@@ -616,6 +616,7 @@ function _sweepAllLocalReportsIntoPending(){
   // 塊B：拿掉原本「掃 Store._profitMem 塞進 pending」那段。它會把雲端載回的報表
   //   也當 pending、再原封不動推回雲端 → 多人同時同步時「後按的用自己記憶體版本
   //   蓋掉全部」（舊蓋新的併發覆蓋）。改為只掃 localStorage：只推本機親手產生/編輯過的。
+  try{ momoCleanLegacyE001Keys(); }catch{}   // 掃描前先清掉 #139/#140 E001 無分片殘留（否則會被掃進待推、預覽出現無 src 空殼列）
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
@@ -675,7 +676,8 @@ function _sweepAllLocalReportsIntoPending(){
       }
       // MO+ E001 未結算銷量：ec_momo_e001|<shop>|<src> → momo_e001 collection（每賣場每來源月一 doc）。
       //   ⚠ 計數端 _momoSyncPendingCount 白名單也要含它（兩處一起改，否則鈕亮暗與實際會推對不上）。
-      if(k&&k.startsWith('ec_momo_e001|')){
+      //   ⚠ 一律用 momoIsShardedE001Key（3 段+4 碼 src）：擋掉 #139/#140 無分片 2 段殘留，否則會掃出無 src 空殼列。
+      if(k&&momoIsShardedE001Key(k)){
         _pendingSyncKeys.add(k);
         if(!(Store._mem&&Store._mem[k])){
           try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
@@ -8355,6 +8357,38 @@ function momoClearE001(shop){   // 清所有來源月 doc（本機三鏡像；�
   ks.forEach(kk=>{ try{ localStorage.removeItem(kk); }catch{} try{ if(Store._profitMem) delete Store._profitMem[kk]; }catch{} try{ if(Store._mem) delete Store._mem[kk]; }catch{} });
   try{ momoBumpMoPlusEpoch(); }catch(e){}
 }
+// 有效待同步 E001 key 判準：一律 3 段且來源月為 4 碼（ec_momo_e001|<shop>|<YYMM>）。
+//   ⚠ #139/#140 舊版無分片存 2 段 `ec_momo_e001|<shop>`；上雲改動只換了 writer、沒動舊 localStorage 殘留。
+//   sweep/計數/收集若用寬鬆 startsWith 會把 2 段殘留也掃進預覽（顯示無 src、本機 0）→ 此判準擋掉。
+function momoIsShardedE001Key(k){ return /^ec_momo_e001\|[^|]+\|\d{4}$/.test(String(k||'')); }
+// 一次性清掉 #139/#140 舊版 2 段殘留 `ec_momo_e001|<shop>`（**無任何讀取路徑在用**：momoListE001Docs 要求 4 碼 src、
+//   momoLoadE001Doc 需 (shop,src)→ 都讀不到 2 段 key）。不遷移＝避免用來源不明的舊資料覆蓋剛重傳的分片；使用者重傳即補。
+let _e001LegacyCleaned=false;
+function momoCleanLegacyE001Keys(){
+  if(_e001LegacyCleaned) return; _e001LegacyCleaned=true;
+  const bad=[];
+  const is2seg=k=>/^ec_momo_e001\|[^|]+$/.test(String(k||''));   // 剛好 2 段、無 src
+  try{ for(let i=0;i<localStorage.length;i++){ const kk=localStorage.key(i); if(is2seg(kk)) bad.push(kk); } }catch{}
+  try{ if(Store._profitMem) Object.keys(Store._profitMem).forEach(kk=>{ if(is2seg(kk)&&bad.indexOf(kk)<0) bad.push(kk); }); }catch{}
+  try{ if(Store._mem) Object.keys(Store._mem).forEach(kk=>{ if(is2seg(kk)&&bad.indexOf(kk)<0) bad.push(kk); }); }catch{}
+  if(!bad.length) return;
+  bad.forEach(kk=>{ try{ localStorage.removeItem(kk); }catch{} try{ if(Store._profitMem) delete Store._profitMem[kk]; }catch{} try{ if(Store._mem) delete Store._mem[kk]; }catch{} try{ _pendingSyncKeys.delete(kk); }catch{} });
+  try{ console.warn('%c[E001] 已自動清理 '+bad.length+' 筆「升級前的舊格式 E001 暫存」（升級為分月份儲存後這格式早已無程式在讀）。\n'
+    +'　✅ 你目前的未結算銷量資料（按月份分片存的 ec_momo_e001|賣場|月份）完全不受影響、沒有被刪。\n'
+    +'　ℹ️ 這只是把用不到的舊暫存從瀏覽器移除，避免同步預覽跑出一列沒有月份、數字 0 的空殼。若你仍需要這筆舊資料，重新上傳該月 E001 即可。\n'
+    +'　（被清理的 key：'+bad.join('、')+'）','color:#d97706;font-weight:700'); }catch{}
+}
+// E001 doc 的「未結算·本 src 主掌」統計（給同步預覽顯示對使用者有意義的數字，取代 _momoCount 的 top-level 欄位數）：
+//   qty=Σ 本 src 主掌且未結算期別的銷量、skuN=涉及 SKU 數。＝使用者在總表看到的未結算銷量口徑（例 2608→8月 203 件/59 SKU）。
+function momoE001OwnedUnsettledStat(shop, doc){
+  if(!doc || !doc.bySku) return {qty:0, skuN:0};
+  let settled; try{ settled=momoSettledPeriods(shop); }catch(e){ settled=new Set(); }
+  const src=doc.src, bs=doc.bySku; let qty=0; const skus=new Set();
+  Object.keys(bs).forEach(sku=>{ Object.keys(bs[sku]||{}).forEach(p=>{
+    if(momoPeriodSrcCode(p)===src && !settled.has(p)){ qty+=(bs[sku][p]||0); skus.add(sku); }
+  }); });
+  return {qty, skuN:skus.size};
+}
 // 期別 → 來源月代號（'2026-08-H1' → '2608'）：決定該期別由哪個 E001 doc 主掌。
 function momoPeriodSrcCode(period){ const m=/^(\d{4})-(\d{2})-H[12]$/.exec(String(period||'')); return m?(m[1].slice(2)+m[2]):null; }
 // 合併多個來源月 E001 doc → 單一 pseudo-doc（形狀同單檔 parse 結果，覆蓋/顯示/相容舊呼叫沿用）。
@@ -8969,7 +9003,7 @@ function _momoSyncPendingCount(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
-      if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || k.startsWith('ec_momo_e001|') || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）*/
+      if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留 */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
     }
   }catch{}
@@ -9028,7 +9062,7 @@ function momoDiffDetail(local, cloud){
 function _momoCollectPending(shop){
   _sweepAllLocalReportsIntoPending();          // 與 syncToCloud:458 同一個函式，冪等
   const items=[], seen=new Set();
-  const add=(key,kind,val)=>{ if(seen.has(key))return; seen.add(key); items.push({key,kind,localVal:val,localCount:_momoCount(val)}); };
+  const add=(key,kind,val,over)=>{ if(seen.has(key))return; seen.add(key); const it={key,kind,localVal:val,localCount:(over&&over.count!=null?over.count:_momoCount(val))}; if(over&&over.stat) it.e001Stat=over.stat; items.push(it); };
   // syncToCloud 開頭那兩條 shop 專屬 extra（465-469）：MOMO 賣場通常為空
   try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0) add('ec_notes|'+_nk,'其他設定',notes); }catch{}
   try{ const edits=getEdits(shop); if(edits&&Object.keys(edits).length>0) add('ec_edits|'+shop,'其他設定',edits); }catch{}
@@ -9043,7 +9077,10 @@ function _momoCollectPending(shop){
     else { try{ if(Store._mem&&Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
       if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} } }
     const kind = pk==='ec_momo_cost_by_origin'?'MOMO成本表' : pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk.startsWith('ec_momo_reconcile|')?'MOMO月對帳' : pk.startsWith('ec_momo_freight|')?'MOMO運費' : pk.startsWith('ec_momo_s1103|')?'MOMO排行榜' : pk.startsWith('ec_momo_moplus_origins|')?'MO+逐列成本' : pk.startsWith('ec_momo_e001|')?'MO+未結算銷量' : '其他設定';
-    add(pk,kind,val);
+    // E001「本機/雲端」欄改顯示「未結算銷量件數」（本 src 主掌+未結算）而非 _momoCount 的 17 個 top-level 欄位（對使用者無意義）。
+    let over=null;
+    if(momoIsShardedE001Key(pk)){ try{ const st=momoE001OwnedUnsettledStat(pk.split('|')[1], val); over={count:st.qty, stat:st}; }catch(e){} }
+    add(pk,kind,val,over);
   });
   // cost_by_origin 現已上雲（momo_cost_by_origin collection）→ 走上面 pending 流程當正常同步項（不再 localonly）。meta 隨 cost 一起 read-merge-write、不單列。
   return items;
@@ -9163,7 +9200,8 @@ async function momoOpenSyncPreview(shop){
       const ec=e001Cloud[it.key];
       if(ec&&ec.__error){ it.status='readfail'; it.cloudCount=null; return; }
       if(ec===undefined){ it.status='new'; it.cloudCount=0; return; }
-      it._cloudVal=ec; it.cloudCount=_momoCount(ec); it.status=_eq(it.localVal,ec)?'same':'diff';
+      it._cloudVal=ec; it.cloudCount=momoE001OwnedUnsettledStat(it.key.split('|')[1], ec).qty;   // 與本機同口徑：未結算銷量件數（非 top-level 欄位數）
+      it.status=_eq(it.localVal,ec)?'same':'diff';
       return;
     }
     if(it.kind==='MOMO成本表'){
@@ -9212,12 +9250,15 @@ function momoRenderSyncPreviewModal(shop, items){
     const ss=d.samples.map(s=>`<div class="mm-sync-diff-row"${(s.local!=null||s.cloud!=null)?` title="本機：${esc(String(s.local))}　|　雲端：${esc(String(s.cloud))}"`:''}>· <b>${esc(String(s.item))}</b>${(s.field&&s.field!=='(整筆)')?' · '+esc(s.field):''}：${esc(s.desc||'')}</div>`).join('');
     return `<details class="mm-sync-diff"><summary>${d.total} 筆不同 · 展開</summary>${ss}${d.total>d.samples.length?`<div style="color:#9ca3af;margin-top:2px">（僅列前 ${d.samples.length}）</div>`:''}</details>`; };
   // 逐列 HTML；checked=預設是否勾選（有變更→勾、無變更→不勾、衝突→不勾）；data-conflict 供確認時二次攔截
+  const _e001Row=it=>it.kind==='MO+未結算銷量';
+  const _cntCell=(it,v)=>{ if(v==null) return '—'; if(_e001Row(it)) return v+' 件'; return v; };   // E001「本機/雲端」欄改顯示未結算銷量件數＋單位（非 top-level 欄位數）
+  const _cntTitle=it=>_e001Row(it)&&it.e001Stat?` title="未結算銷量 ${it.e001Stat.qty} 件 / ${it.e001Stat.skuN} SKU（本 src 主掌且未結算；＝總表看到的未結算銷量口徑）"`:'';
   const rowHtml=(it,checked)=>`<tr style="border-top:1px solid #f3f4f6${(it.conflict||it.suspicious)?';background:#fef2f2':''}">
       <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}"${it.conflict?' data-conflict="1"':''}${it.suspicious?' data-suspicious="1"':''} ${checked?'checked':''} onchange="momoSyncUpdateCount()"></td>
-      <td style="padding:6px 8px;font-family:monospace;word-break:break-all" title="底層 key（未變）：${esc(it.key)}">${esc(momoKeyDisplay(it.key))}${it.kind==='MO+未結算銷量'?'<div style="font-family:inherit;color:#d97706;font-size:11px;margin-top:2px">⚠ 未結算估算值·會被對帳明細取代</div>':''}</td>
+      <td style="padding:6px 8px;font-family:monospace;word-break:break-all" title="底層 key（未變）：${esc(it.key)}">${esc(momoKeyDisplay(it.key))}${_e001Row(it)?`<div style="font-family:inherit;color:#d97706;font-size:11px;margin-top:2px">⚠ 未結算估算值·會被對帳明細取代${it.e001Stat?`（${it.e001Stat.skuN} SKU）`:''}</div>`:''}</td>
       <td style="padding:6px 8px;color:${typeColor[it.kind]||'#6b7280'};font-weight:600;white-space:nowrap">${it.kind}</td>
-      <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.localCount}</td>
-      <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${it.cloudCount==null?'—':it.cloudCount}</td>
+      <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums"${_cntTitle(it)}>${_cntCell(it,it.localCount)}</td>
+      <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${_cntCell(it,it.cloudCount)}</td>
       <td style="padding:6px 8px">${statusCell(it)}${it.status==='diff'?diffHtml(it):''}</td>
     </tr>`;
   const anySuspicious=items.some(it=>it.suspicious);   // P3(1)：雲端0但本機>500
