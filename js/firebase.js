@@ -306,6 +306,25 @@ try {
           if (changed) { console.log('[momo_cost_by_origin] 收到更新'); window.dispatchEvent(new CustomEvent('momoCostByOriginReady')); }
         }, err => { console.error('[momo_cost_by_origin subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_cost_by_origin subscribe failed', e); }
+
+      // aff_rpt collection（每通路一 doc）→ Store._profitMem['ec_aff_rpt|<shop>']。
+      //   為什麼掛在 __loadHeavyProfitSubs 裡而不是開站就訂：聯盟行銷分頁位在「淨利表 → 好麻吉賣場」內，
+      //   使用者一定要先進淨利表才看得到，180KB 的 doc 不該在開站瞬間跟首頁搶頻寬。
+      //   ⚠ 下面讀的 window._affJustSaved 是由 js/profit.js 的 affRptLsSave 設定的（塊 2 才會加）。
+      //     在塊 2 落地之前這個守衛恆為 falsy＝永遠不跳過，這是分塊施工的中間狀態，不是漏寫。
+      AFF_SHOPS.forEach(shop => {
+        const k = 'ec_aff_rpt|' + shop;
+        try {
+          onSnapshot(affDocRef(shop), snap => {
+            const data = (snap && snap.exists && snap.exists()) ? (snap.data() || null) : null; if (!data) return;
+            if (window._affJustSaved && (Date.now() - window._affJustSaved < 5000)) return;   // 剛本機存過 → 不被自己寫的 echo 繞一圈回來蓋掉畫面
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) return;         // 內容沒變就不寫、不 dispatch，避免無謂重繪
+            Store._profitMem[k] = data;
+            console.log('[aff_rpt] 收到更新：', shop);
+            window.dispatchEvent(new CustomEvent('affRptReady', { detail: { shop } }));
+          }, err => { console.error('[aff_rpt subscribe 失敗]', shop, err); });
+        } catch (e) { console.warn('aff_rpt subscribe failed', shop, e); }
+      });
     };
   } catch (e) { console.warn('profit subscribe failed', e); }
 
@@ -404,6 +423,30 @@ try {
     getDoc: () => getDoc(costByOriginDocRef),
     set:    (data) => setDoc(costByOriginDocRef, data || {}),
     subscribe: (cb) => onSnapshot(costByOriginDocRef, cb),
+  };
+
+  // ============== 聯盟行銷報表 aff_rpt（每通路一 doc；doc id = 通路名） ==============
+  //   為什麼搬出 app/profit：`ec_aff_rpt|好麻吉` 這**單一欄位**就佔約 180KB（662 個商品），
+  //   而 app/profit 已經 ~758KB / 上限 1MB 且只增不減。搬走它等於一次還回約四分之一額度。
+  //   為什麼不照抄上面 __cloudCostByOrigin 的 dirty 追蹤 + 逐 key merge：那套是為了
+  //   「6683 筆成本、多人各自補不同的原廠編號、不能互相覆蓋」而設計的。聯盟行銷三點都相反——
+  //     (1) 整份重生：每次都是重跑兩份報表檔算出全新的 products 陣列，沒有「只改其中一列」的入口；
+  //     (2) 單一寫入者：一個賣場、一顆專屬同步鈕，不存在兩人各改一列再合併的情境；
+  //     (3) products 是**陣列**不是 map，momoMergeByKey 走 Object.assign 逐 key 覆蓋，套上去會壞掉。
+  //   所以這裡用整包 setDoc 取代（重傳天然冪等、不留幽靈列），形狀比照 __cloudS1103 / __cloudMoPlusOrigins。
+  //   doc 內容 = affRptLsSave 存進 localStorage 的那包原文 {products, totalSales, totalCost, ts}，
+  //   刻意不另外包 wrapper：寫入端與訂閱端兩邊對稱，將來要比對本機/雲端差異可以直接 JSON.stringify 比；
+  //   payload 自帶 ts（Date.now()）所以也不缺時間戳，不必再加 updatedAt。
+  // 命名注意：讀取方法一定要叫 getDoc / subscribe。本機防護碼工具的讀取白名單是完全字串比對
+  //   （同 __cloudTaskImage 下方那條註解），寫入/刪除**絕對不能**用這兩個名字，
+  //   否則會被當成讀取放行、本機測試時直接寫進公司正式庫。
+  const AFF_SHOPS = ['好麻吉'];   // 目前只有好麻吉有聯盟行銷分頁（js/profit.js 以 shop==='好麻吉' 硬閘住 UI）。將來加通路只要在這裡加一個字串，doc ref 與訂閱都會自動涵蓋，不會發生「加了 ref 卻忘了加訂閱」。
+  const affDocRef = (shop) => doc(db, 'aff_rpt', shop);   // doc id 直接用通路名；中文 doc id 本專案已有前例（app/insight_好麻吉、profits/ec|好麻吉|2026-07|H1）
+  window.__cloudAff = {
+    getDoc:    (shop) => getDoc(affDocRef(shop)),
+    subscribe: (shop, cb) => onSnapshot(affDocRef(shop), cb),
+    set:       (shop, data) => setDoc(affDocRef(shop), data || {}),   // 整包取代：資料整份重生，不做 merge（理由見上）
+    removeDoc: (shop) => deleteDoc(affDocRef(shop)),                  // 「🗑 清除」要連雲端一起刪，否則只清本機、雲端殘留
   };
 
   // ============== 洞察表獨立文件 app/insight（避免 app/main 撞 1MB 上限） ==============
