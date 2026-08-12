@@ -8394,10 +8394,14 @@ function momoPromoUncoveredMonths(orderDates){
 //   回 { cand:{sku:[rates]}, nosol:{sku:true}, uncoveredMonths:[..] }。cand[sku]＝月內交集(非空)；nosol[sku]＝該 SKU 有非檔期成交列但某列反推出空(無費率可還原)。
 function momoBuildFeeCandidates(lines){
   const cand={}, nosol={}, seenFee={}, orderDates=[];
+  const covered=momoPromoCoveredMonths();
+  const monthOf=od=>{ const s=String(od||''); return s.length>=6 ? s.slice(0,4)+'-'+s.slice(4,6) : null; };
   (lines||[]).forEach(ln=>{
     if(ln.freight) return;                                  // 運費列不算
     if(ln.orderDate) orderDates.push(ln.orderDate);
     const fee=Number(ln.feeDeal); if(!(fee>0)) return;      // 無成交手續費 → 不貢獻（顯示層另判「—」）
+    const mo=monthOf(ln.orderDate);
+    if(!mo || !covered.has(mo)) return;                     // ⚠ 檔期清單未涵蓋的月份：無法判定該列是否檔期 → 不反推（否則檔期列被當非檔期、反推出高費率污染跨月交集→假異常）。僅計入 uncoveredMonths 警告
     if(momoIsPromoDate(ln.orderDate)) return;               // 檔期列排除、不進反推
     const sku=ln.sku; if(!sku) return;
     seenFee[sku]=true;
@@ -8495,12 +8499,14 @@ function momoBuildMoPlusOriginsIndex(shop){
 }
 // 某 SKU 跨全部已上傳來源月的成交費率結論（唯一/多解/異常/無資料）。純顯示與異常偵測，不進毛利計算。
 function momoFeeRateForSku(shop, sku){
+  shop=momoShopCanon(shop);   // 容錯：顯示名 'MO+好麻吉' → 內部 key 'MO+麻吉'
   const fm=momoMoPlusIndexCached(shop).feeMonths[sku];
   if(!fm || !fm.length) return { status:'none', cand:[] };
   return momoFeeRateAccumulate(fm);
 }
 // 全賣場成交費率彙總（P1 回報 + P2 排序/異常用）：{unique,multi,anomaly,none,uncoveredMonths,rows:[{sku,status,cand,...}]}
 function momoFeeRateSummary(shop){
+  shop=momoShopCanon(shop);   // 容錯：顯示名 'MO+好麻吉' → 內部 key 'MO+麻吉'
   const ix=momoMoPlusIndexCached(shop), fm=ix.feeMonths, out={unique:0,multi:0,anomaly:0,none:0,uncoveredMonths:ix.feeUncovered,rows:[]};
   Object.keys(fm).forEach(sku=>{ const r=momoFeeRateAccumulate(fm[sku]); out[r.status==='none'?'none':r.status]++; out.rows.push({sku, status:r.status, cand:r.cand, reason:r.reason||null, cur:r.cur||null}); });
   return out;
@@ -10314,7 +10320,7 @@ function momoOpenHierarchy(shop){
   ov.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:560px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden">
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
       <div>
-        <div style="font-size:16px;font-weight:800;color:#1e293b">毛利率分佈 · ${shop}${periodLbl?' · '+periodLbl:''}</div>
+        <div style="font-size:16px;font-weight:800;color:#1e293b">毛利率分佈 · ${momoShopDisplay(shop)}${periodLbl?' · '+periodLbl:''}</div>
         <div style="font-size:12px;color:#94a3b8;margin-top:3px">已篩選 <b>${s.filtered}</b> / 總 ${s.total} · 有毛利率 <b>${s.withMargin}</b>${s.zeroRev?` · 零營收 ${s.zeroRev}（不列入）`:''}</div>
       </div>
       <button onclick="momoCloseHierarchy()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:18px;cursor:pointer;line-height:1">✕</button>
@@ -11444,13 +11450,13 @@ function momoUploadShowDryRun(shop, planOverride){
         <td style="padding:4px 8px;text-align:center">${r.srcBefore} → ${r.srcAfter}</td>
         <td style="padding:4px 8px">${r.shrink?`<span style="color:#dc2626;font-weight:700" title="${esc((r.shrinkSkus||[]).map(x=>x.sku+' '+x.beforeQty+'→'+x.afterQty).join('、'))}">⚠ 變小${r.shrinkSkus&&r.shrinkSkus.length?'（'+r.shrinkSkus.length+' 筆SKU）':''}</span>`:(r.kind==='accumulate'?'累加':'')}</td>
       </tr>`; }).join('');
-    return `<div style="font-weight:700;margin:10px 0 4px">${s}（${rows.length} 個期別）</div>
+    return `<div style="font-weight:700;margin:10px 0 4px">${momoShopDisplay(s)}（${rows.length} 個期別）</div>
       <div style="max-height:300px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11px">
       <thead><tr style="text-align:left;color:#6b7280;position:sticky;top:0;background:#fafafa">
         <th style="padding:4px 8px">期別</th><th style="padding:4px 8px">類型</th><th style="padding:4px 8px;text-align:right">qty 前→後</th><th style="padding:4px 8px;text-align:right">rev 前→後</th><th style="padding:4px 8px;text-align:center">來源數</th><th style="padding:4px 8px">註</th>
       </tr></thead><tbody>${body}</tbody></table></div>`; };
   const allTbls=Object.keys(dr.shops).map(shopTbl).join('');   // 通用：甲乙配 / MO+（dr.shops 的賣場鍵）
-  const shrinkHtml = shrinkAll.length ? `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:12px;color:#dc2626;line-height:1.6">⚠ <b>${shrinkAll.length} 個期別合計會變小</b>（累加下通常不會 → 多半是同一來源檔重傳且值更小＝更正，或誤判，請確認）：${shrinkAll.map(x=>esc(momoPeriodLabel(x.period))+'（'+x.shop+' '+x.beforeQty+'→'+x.afterQty+'）').join('、')}</div>` : '';
+  const shrinkHtml = shrinkAll.length ? `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:12px;color:#dc2626;line-height:1.6">⚠ <b>${shrinkAll.length} 個期別合計會變小</b>（累加下通常不會 → 多半是同一來源檔重傳且值更小＝更正，或誤判，請確認）：${shrinkAll.map(x=>esc(momoPeriodLabel(x.period))+'（'+momoShopDisplay(x.shop)+' '+x.beforeQty+'→'+x.afterQty+'）').join('、')}</div>` : '';
   let ov=document.getElementById('momo-dryrun-overlay'); if(!ov){ov=document.createElement('div');ov.id='momo-dryrun-overlay';document.body.appendChild(ov);}
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
@@ -11525,6 +11531,10 @@ function momoIsMoPlus(shop){ return shop==='MO+麻吉'||shop==='MO+森之旅'; }
 //   一起 migration，不能只改這裡的字串。（森之旅名稱本來就對、不轉。）
 const MOMO_SHOP_DISPLAY={ 'MO+麻吉':'MO+好麻吉' };
 function momoShopDisplay(shop){ return MOMO_SHOP_DISPLAY[shop] || shop; }
+// 反向：顯示名 → 內部資料 key。debug/報表 helper（momoFeeRateSummary 等）容錯用，讓使用者傳顯示名 'MO+好麻吉' 也能對到內部 key 'MO+麻吉'。
+//   ⚠ 只在「入口容錯」用，內部一律沿用 canon key（見上方 migration 警告）。
+const MOMO_SHOP_CANON=(()=>{ const m={}; Object.keys(MOMO_SHOP_DISPLAY).forEach(k=>{ m[MOMO_SHOP_DISPLAY[k]]=k; }); return m; })();
+function momoShopCanon(shop){ return MOMO_SHOP_CANON[shop] || shop; }
 // 同步預覽等處顯示「含賣場名的 key」時用：把 key 裡的內部賣場段換成顯示名（ec_momo_products|MO+麻吉 →
 //   ec_momo_products|MO+好麻吉）。⚠ 只換「顯示」，底層 key 一字未變；呼叫端務必把原始 key 放進 title（hover）
 //   讓人看得出雲端/localStorage 實際 key 沒動，避免「畫面寫好麻吉、雲端是麻吉」的排查困惑。
@@ -12532,7 +12542,7 @@ function momoOpenMissingCostPanel(shop){
   ov.innerHTML=`<div class="ana-modal" style="width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:16px 20px;border-bottom:1px solid #eef0f3">
       <div><div style="font-size:16px;font-weight:800">缺成本原廠編號清單</div>
-        <div style="font-size:12px;color:#6b7280;margin-top:3px">${_momoEsc(shop)}｜期別 ${_momoEsc(s.period||'—')}｜<b>${s.originN}</b> 個原廠編號 · 影響 ${s.skuN} 項商品 · 影響營收 <b>${momoMoney(s.totalRev)}</b></div></div>
+        <div style="font-size:12px;color:#6b7280;margin-top:3px">${_momoEsc(momoShopDisplay(shop))}｜期別 ${_momoEsc(s.period||'—')}｜<b>${s.originN}</b> 個原廠編號 · 影響 ${s.skuN} 項商品 · 影響營收 <b>${momoMoney(s.totalRev)}</b></div></div>
       <div style="display:flex;gap:8px;flex-shrink:0">
         <button class="mm-linkbtn" onclick="momoExportMissingCost('${shop}')">⬇ 匯出 CSV</button>
         <button class="mm-linkbtn" onclick="document.getElementById('momo-misscost-overlay').remove()">關閉</button>
@@ -12864,7 +12874,7 @@ function momoRenderSummary(){
       <div class="mm-ov-card"><div class="mm-ov-h">營收佔比（${momoPeriodLabel(period)}）</div><div class="mm-ov-canvas"><canvas id="momo-ov-pie"></canvas></div></div>
       <div class="mm-ov-card"><div class="mm-ov-h">賣場比較：毛利率／動銷率</div><div class="mm-ov-canvas"><canvas id="momo-ov-cmp"></canvas></div></div>
     </div>
-    <div class="mm-ov-grid">${_MOMO_OV_SHOPS.filter(s=>momoLoadProducts(s).length>0).map(s=>`<div class="mm-ov-card"><div class="mm-ov-h">${s} 銷量 Top 10（${momoPeriodLabel(period)}）</div><div class="mm-ov-canvas"><canvas id="momo-ov-top10-${s}"></canvas></div></div>`).join('')}</div>`;
+    <div class="mm-ov-grid">${_MOMO_OV_SHOPS.filter(s=>momoLoadProducts(s).length>0).map(s=>`<div class="mm-ov-card"><div class="mm-ov-h">${momoShopDisplay(s)} 銷量 Top 10（${momoPeriodLabel(period)}）</div><div class="mm-ov-canvas"><canvas id="momo-ov-top10-${s}"></canvas></div></div>`).join('')}</div>`;
   momoOvBuildCharts(period, perShop);
 }
 function momoOvBuildCharts(period, perShop){
