@@ -8535,6 +8535,39 @@ function momoFeeText(fr){
   const lo=Math.min(...c), hi=Math.max(...c);
   return lo+'–'+hi+'%'+(st==='anomaly'?'（異常）':'（待收斂）');
 }
+/* ═══════════════ MO+ 新品成交費率建議（P3 layer①）═══════════════
+   方案二（資料定案）：分類與費率解耦。費率來源三層＋來源標記（P4 回頭比對用）：
+     ① 前綴收斂（前 3 碼、無 12% 前例、唯一解一致）→ 自動填、source＝prefix_same(=7.5)/prefix_diff(≠7.5)
+     ② 前綴含 12% 前例 → 不自動填、warn12（引導例外快選）、走預設
+     ③ 前綴僅多解 / 不一致(不收斂) / 無前綴前例 → 不自動填、走 7.5% 預設、source＝default（附前例供參考）
+   ⚠ 前綴一致率實測 79%（拆掉 12% 污染 92%），故 12% 前例的組一律不自動填、交例外鈕。
+   ⚠ 近似不一致（如 6/7.5、7.5/8）視為不收斂、不四捨五入、走預設＋顯示前例供參考。 */
+const MOMO_MOPLUS_DEFAULT_FEE=7.5;          // 帳號實測眾數（12 類 10 類眾數皆此）
+const MOMO_MOPLUS_FEE_PREFIX_LEN=3;         // 前綴長度＝前 3 碼（掃描實測：唯一有意義 pooling 長度、一致率峰值）
+const MOMO_MOPLUS_HIGH_FEE=12;              // 高費率例外（美妝保養/精品）；預設 7.5 若實際 12 → 毛利高估（危險方向）
+const MOMO_MOPLUS_LOW_FEE=4.5;             // 偏低例外（汽機車百貨）；預設 7.5 若實際 4~5 → 毛利低估（安全方向、僅提示）
+// 給新品原廠編號 → 建議費率 + 來源。純邏輯（讀 products + 反推 index）。回：
+//   {rate, source:'prefix_diff'|'prefix_same'|'default', autofill:bool, label, warn12:bool, refNote, prefN, pref}
+function momoMoPlusPrefixFee(shop, origin){
+  const DEF=MOMO_MOPLUS_DEFAULT_FEE, pref=String(origin||'').slice(0,MOMO_MOPLUS_FEE_PREFIX_LEN);
+  const base={rate:DEF, source:'default', autofill:false, label:'帳號預設值', warn12:false, refNote:'', prefN:0, pref};
+  if(pref.length<MOMO_MOPLUS_FEE_PREFIX_LEN) return base;
+  const uniq=[], multiLo=[];
+  momoLoadProducts(shop).forEach(p=>{ const o=p.origin||''; if(o.slice(0,MOMO_MOPLUS_FEE_PREFIX_LEN)!==pref) return;
+    const fr=momoFeeRateForSku(shop, p.sku);
+    if(fr.status==='unique') uniq.push(fr.cand[0]);
+    else if(fr.status==='multi') multiLo.push(Math.min(...fr.cand));
+  });
+  if(uniq.length){
+    const has12=uniq.some(r=>r>=MOMO_MOPLUS_HIGH_FEE);   // 12% 例外污染 → 不自動填、交例外鈕
+    const set=[...new Set(uniq)].sort((a,b)=>a-b);
+    if(has12) return {...base, warn12:true, prefN:uniq.length, refNote:'此前綴有 12% 前例（'+set.join('/')+'%）'};
+    if(set.length===1){ const r=set[0]; return {rate:r, source:(r===DEF?'prefix_same':'prefix_diff'), autofill:true, label:'同前綴前例 '+uniq.length+' 筆', warn12:false, refNote:'', prefN:uniq.length, pref}; }
+    return {...base, refNote:'同前綴前例不一致（'+set.join('/')+'%）→ 視為不收斂、走預設，前例僅供參考', prefN:uniq.length};   // 近似不一致
+  }
+  if(multiLo.length) return {...base, refNote:'同前綴僅多解（下界約 '+Math.min(...multiLo)+'%）→ 不自動填，僅供參考', prefN:multiLo.length};
+  return base;   // 無前綴前例
+}
 // 某 SKU「銷售最多的原廠編號」（跨全部來源月/期別總銷量最大；空 origin 不算）→ origin|null。售價欄預設顯示這個原廠編號對應規格的掛牌價。
 function momoMoPlusBestOriginForSku(shop, sku){
   const ot=momoMoPlusIndexCached(shop).originTot[sku]; if(!ot) return null;
@@ -10701,6 +10734,14 @@ function momoRenderMoPlusBatchEditForm(shop, p){
   const spLine = lp.listPrice!=null
     ? `掛牌價 $${lp.listPrice}${lp.masterStale?' <span style="color:#d97706">⚠ 主檔可能過期</span>':''}${(lp.specs&&lp.specs.length>1)?'（'+lp.specs.length+' 規格）':''}`
     : '<span style="color:#dc2626">商品主檔查無掛牌價</span>';
+  // 成交費率三態（反推、唯讀顯示）：唯一／多解(顯示候選下界範圍、不顯示確定值)／無資料
+  const fr=momoFeeRateForSku(shop, p.sku);
+  let feeLine;
+  if(fr.status==='unique') feeLine=`<b>${fr.cand[0]}%</b> <span style="color:#9ca3af">（反推·唯一解）</span>`;
+  else if(fr.status==='multi'){ const lo=Math.min(...fr.cand), hi=Math.max(...fr.cand); feeLine=`<span style="color:#6b7280">${lo}–${hi}%（多解未收斂，下界 ${lo}%）</span>`; }
+  else if(fr.status==='anomaly') feeLine=`<span style="color:#dc2626;font-weight:700">${Math.min(...fr.cand)}–${Math.max(...fr.cand)}%（異常）</span>`;
+  else feeLine='<span style="color:#c7cad1">—（無非檔期成交手續費資料）</span>';
+  const predLine=(p.feeRatePredicted&&p.feeRatePredicted.rate!=null)?`<div style="font-size:11px;color:#9ca3af;margin-top:2px">建檔預測 ${p.feeRatePredicted.rate}%（來源 ${_momoEsc(p.feeRatePredicted.source||'')}${p.feeRatePredicted.at?'，'+_momoEsc(p.feeRatePredicted.at):''}）</div>`:'';
   const _chTxt=h=>(h.changes&&h.changes.length)?h.changes.map(c=>c.field+' '+(c.from||'—')+'→'+(c.to||'—')).join('；'):'';
   const hist=(p.history&&p.history.length)? [...p.history].reverse().map(h=>{ const ch=_chTxt(h); return `
     <div style="font-size:12px;padding:6px 10px;border-left:2px solid #e5e7eb;margin-bottom:4px">
@@ -10721,6 +10762,7 @@ function momoRenderMoPlusBatchEditForm(shop, p){
     <div style="background:#f9fafb;border:1px solid #eef0f4;border-radius:8px;padding:8px 10px;margin-bottom:10px">
       <div style="${_MOMO_LB};margin-bottom:4px">成本（原廠編號帶入 · 唯讀）</div>${costLines}
       <div style="${_MOMO_LB};margin:6px 0 2px">售價（商品主檔掛牌價 · 唯讀）</div><div style="font-size:12px;color:#374151">${spLine}</div>
+      <div style="${_MOMO_LB};margin:6px 0 2px">成交費率（反推 · 唯讀）</div><div style="font-size:12px;color:#374151">${feeLine}</div>${predLine}
     </div>
     <div style="margin-bottom:10px"><label style="${_MOMO_LB}">異動原因（必填）</label><input id="momo-edit-note-${shop}" type="text" placeholder="例：修正商品名稱 / 更換原廠編號" style="${_MOMO_INP}"></div>
     <button onclick="momoBatchSubmitEdit('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">送出（新增一筆歷程）</button>
@@ -10919,29 +10961,78 @@ function momoMoPlusAddPreview(shop){
     <div style="font-size:11px;color:#9ca3af;margin-top:6px;line-height:1.7">成交手續費 $${feeAmt.toFixed(0)}（售價 ${sp}×${fee}%）｜(b) 再扣其他平台費用率 <input type="number" value="${other.pct}" onchange="momoMoPlusSetOtherFee('${shop}',this.value)" style="width:58px;padding:1px 5px;border:1px solid #e5e7eb;border-radius:5px;font-size:11px"> %，取自 <b>${_momoEsc(other.month)}</b>（可調）</div>`;
   } else if(origin && cost==null) mHtml='<div style="color:#dc2626;font-size:12px;margin-top:8px">查無成本 → 無法試算毛利（先補該原廠編號成本表）</div>';
   else mHtml='<div style="color:#9ca3af;font-size:12px;margin-top:8px">填 原廠編號＋售價＋成交費率 即時試算兩數毛利率</div>';
+  const costFld=document.getElementById('momo-mpadd-cost-'+shop);   // 唯讀成本欄（欄位順序用）同步
+  if(costFld) costFld.innerHTML = cost!=null?('$'+cost) : (origin?'<span style="color:#dc2626">查無成本</span>':'輸入原廠編號自動帶');
   box.innerHTML=costHtml+mHtml;
 }
+// 新增表單費率來源暫存（shop → {source, autofillRate}）；送出時寫入 product 供 P4 回頭比對
+const _moPlusAddFee={};
 function momoRenderMoPlusBatchAdd(shop){
   const body=document.getElementById('momo-batch-body-'+shop); if(!body) return;
-  const esc=_momoEsc;
+  _moPlusAddFee[shop]={source:'default', autofillRate:MOMO_MOPLUS_DEFAULT_FEE};
+  // 欄位順序對齊甲乙配（僅移除、不重排）：商品編號／原廠編號／商品名稱／成本(唯讀)／售價／成交費率。無進價、無運費包材。
   body.innerHTML=`
-    <div style="max-width:680px">
+    <div style="max-width:700px">
       <div class="mm-note" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.7;color:#075985">
-        MO+ 建檔：填 <b>商品名稱</b> 即可；<b>原廠編號</b>會自動帶出成本（查不到標「查無成本」）並即時試算毛利率。<b>無進價、無運費包材</b>（代收代付，成本靠原廠編號查莫筆克成本表）。商品編號留空會自動產生 <code>TEMP-</code>（之後對到真編號再改）。
+        MO+ 建檔：填 <b>商品名稱</b> 即可；<b>原廠編號</b>自動帶成本＋依同前綴前例建議<b>成交費率</b>（見來源標記）。<b>無進價、無運費包材</b>（代收代付）。商品編號留空自動產生 <code>TEMP-</code>。
       </div>
-      <div style="font-weight:700;margin:4px 0 6px">單筆新增（即時試算毛利）</div>
+      <div style="font-weight:700;margin:4px 0 6px">單筆新增（即時試算兩數毛利率）</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
-        <div><label style="${_MOMO_LB}">商品名稱（必填）</label><input id="momo-mpadd-name-${shop}" type="text" style="${_MOMO_INP}"></div>
-        <div><label style="${_MOMO_LB}">原廠編號（自動帶成本）</label><input id="momo-mpadd-origin-${shop}" type="text" oninput="momoMoPlusAddPreview('${shop}')" placeholder="例：H236-01" style="${_MOMO_INP}"></div>
-        <div><label style="${_MOMO_LB}">售價（試算用）</label><input id="momo-mpadd-sp-${shop}" type="number" oninput="momoMoPlusAddPreview('${shop}')" style="${_MOMO_INP}"></div>
-        <div><label style="${_MOMO_LB}">成交費率 %（試算用，手填）</label><input id="momo-mpadd-fee-${shop}" type="number" oninput="momoMoPlusAddPreview('${shop}')" style="${_MOMO_INP}"></div>
         <div><label style="${_MOMO_LB}">商品編號（選填，留空自動 TEMP-）</label><input id="momo-mpadd-sku-${shop}" type="text" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">原廠編號（自動帶成本＋建議費率）</label><input id="momo-mpadd-origin-${shop}" type="text" oninput="momoMoPlusAddOriginChanged('${shop}')" placeholder="例：H236-01" style="${_MOMO_INP}"></div>
+        <div style="grid-column:1/3"><label style="${_MOMO_LB}">商品名稱（必填）</label><input id="momo-mpadd-name-${shop}" type="text" style="${_MOMO_INP}"></div>
+        <div><label style="${_MOMO_LB}">成本（原廠編號自動帶入 · 唯讀）</label><div id="momo-mpadd-cost-${shop}" style="${_MOMO_INP};background:#f8fafc;color:#64748b;display:flex;align-items:center;font-size:12px">輸入原廠編號自動帶</div></div>
+        <div><label style="${_MOMO_LB}">售價（試算用）</label><input id="momo-mpadd-sp-${shop}" type="number" oninput="momoMoPlusAddPreview('${shop}')" style="${_MOMO_INP}"></div>
+        <div style="grid-column:1/3">
+          <label style="${_MOMO_LB}">成交費率 %</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="momo-mpadd-fee-${shop}" type="number" value="${MOMO_MOPLUS_DEFAULT_FEE}" oninput="momoMoPlusAddFeeInput('${shop}')" style="${_MOMO_INP};width:90px">
+            <button type="button" onclick="momoMoPlusAddFeeExc('${shop}','high')" title="美妝保養、精品類請確認：預設 7.5% 若實際 12% 會高估毛利（危險方向）" style="padding:5px 10px;border:1px solid #fca5a5;background:#fef2f2;color:#dc2626;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">美妝/精品 12%</button>
+            <button type="button" onclick="momoMoPlusAddFeeExc('${shop}','low')" title="汽機車百貨常為 4~5%；預設 7.5% 只會低估毛利（安全方向），提示用" style="padding:5px 10px;border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;font-size:12px;cursor:pointer">汽機車 ~4.5%</button>
+          </div>
+          <div id="momo-mpadd-feebadge-${shop}" style="font-size:11px;margin-top:4px;min-height:16px"></div>
+        </div>
       </div>
       <div id="momo-mpadd-preview-${shop}" style="background:#f9fafb;border:1px solid #eef0f4;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:13px;min-height:24px"></div>
       <button onclick="momoMoPlusAddOne('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:20px">新增</button>
-      
     </div>`;
-  momoMoPlusAddPreview(shop);   // 初始化預覽提示文字
+  momoMoPlusAddFeeBadge(shop);   // 初始徽章＝帳號預設值
+  momoMoPlusAddPreview(shop);
+}
+// 費率來源徽章：依 _moPlusAddFee[shop].source 顯示；warn12 另掛紅字提示
+function momoMoPlusAddFeeBadge(shop, extra){
+  const el=document.getElementById('momo-mpadd-feebadge-'+shop); if(!el) return;
+  const st=(_moPlusAddFee[shop]||{}).source||'default';
+  const map={ prefix_diff:['#5b5fcf','同前綴前例（收斂）'], prefix_same:['#5b5fcf','同前綴前例（=帳號預設 7.5%）'], default:['#9ca3af','帳號預設值 7.5%'], manual:['#d97706','手動指定'] };
+  const lbl=(_moPlusAddFee[shop]||{}).label || (map[st]?map[st][1]:st);
+  const col=map[st]?map[st][0]:'#9ca3af';
+  el.innerHTML=`<span style="color:${col}">來源：${_momoEsc(lbl)}</span>`+(extra?` <span style="color:#dc2626;font-weight:700">${extra}</span>`:'');
+}
+// 原廠編號變更 → 自動帶成本 + 依前綴建議費率（layer①）
+function momoMoPlusAddOriginChanged(shop){
+  const g=id=>document.getElementById('momo-mpadd-'+id+'-'+shop);
+  const origin=(g('origin')?g('origin').value:'').trim();
+  const feeEl=g('fee');
+  const sug=origin?momoMoPlusPrefixFee(shop, origin):{rate:MOMO_MOPLUS_DEFAULT_FEE,source:'default',autofill:false,label:'帳號預設值',warn12:false,refNote:''};
+  const prevManual=(_moPlusAddFee[shop]||{}).source==='manual';   // 使用者已手動指定 → 換原廠不覆蓋其費率
+  if(!prevManual){
+    _moPlusAddFee[shop]={source:sug.source, autofillRate:sug.rate, label:sug.label};
+    if(feeEl) feeEl.value = sug.autofill ? sug.rate : MOMO_MOPLUS_DEFAULT_FEE;   // 收斂→填建議；未收斂/含12%/無前例→回預設 7.5（不留前一個原廠的殘值）
+  }
+  const extra=sug.warn12?'⚠ 此前綴有 12% 前例，請確認是否為美妝/精品（用左側 12% 鈕）':'';
+  momoMoPlusAddFeeBadge(shop, extra);
+  if(sug.refNote){ const el=document.getElementById('momo-mpadd-feebadge-'+shop); if(el) el.innerHTML+=` <span style="color:#9ca3af">· ${_momoEsc(sug.refNote)}</span>`; }
+  momoMoPlusAddPreview(shop);
+}
+// 使用者手改費率 → 標手動
+function momoMoPlusAddFeeInput(shop){ _moPlusAddFee[shop]={source:'manual', autofillRate:(_moPlusAddFee[shop]||{}).autofillRate}; momoMoPlusAddFeeBadge(shop); momoMoPlusAddPreview(shop); }
+// 例外快選鈕
+function momoMoPlusAddFeeExc(shop, kind){
+  const feeEl=document.getElementById('momo-mpadd-fee-'+shop); if(!feeEl) return;
+  feeEl.value = kind==='high'?MOMO_MOPLUS_HIGH_FEE:MOMO_MOPLUS_LOW_FEE;
+  _moPlusAddFee[shop]={source:'manual', autofillRate:(_moPlusAddFee[shop]||{}).autofillRate};
+  momoMoPlusAddFeeBadge(shop, kind==='high'?'已套用高費率例外 12%（美妝/精品）':'已套用汽機車 ~4.5%（僅低估風險）');
+  momoMoPlusAddPreview(shop);
 }
 function momoMoPlusAddOne(shop){
   const g=id=>document.getElementById('momo-mpadd-'+id+'-'+shop);
@@ -10955,7 +11046,12 @@ function momoMoPlusAddOne(shop){
   if(products.some(x=>x.sku===sku)){ alert('商品編號重複：'+sku); return; }
   const p={sku, name, history:[{...momoNowParts(), note:'新增商品(MO+)'+(origin?'':'，待補原廠編號')}], periods:{}};
   if(origin){ p.origin=origin; p.origins=[origin]; }                              // 原廠編號→自動帶成本（毛利階段查 cost_by_origin）
-  products.push(p);                                                               // 售價/成交費率為試算用、不落地（MO+ 售價權威＝主檔掛牌/成交）
+  // 成交費率 + 來源標記落地（P4 前提）：售價仍不落地（權威＝主檔掛牌/成交），但費率是「新品當下的預測」，
+  //   要連同來源(prefix_diff/prefix_same/default/manual)+時間存下，第一個月結算後才能按來源分組比對「預測 vs 實際」。
+  const feeVal=parseFloat((g('fee')?g('fee').value:''));
+  if(feeVal>=0){ const st=(_moPlusAddFee[shop]||{}).source||'default';
+    p.feeRatePredicted={rate:feeVal, source:st, at:momoNowParts().date+' '+momoNowParts().time}; }
+  products.push(p);
   momoSaveProducts(shop,products);
   if(typeof showToast==='function') showToast('已新增 '+sku,'success');
   _momoBatchMode[shop]='edit'; _momoBatchSel[shop]=sku; _momoBatchSearch[shop]='';
@@ -14120,6 +14216,7 @@ Object.assign(window, {
   momoFeeRateCandidates,momoIsPromoDate,momoPromoUncoveredMonths,momoBuildFeeCandidates,momoFeeRateAccumulate,momoFeeRateForSku,momoFeeRateSummary,MOMO_FEE_RATES,MOMO_PROMO_TABLE,
   momoMoPlusOriginsForSku,momoMoPlusMarginCalc,momoMoPlusMargin,momoMoPlusOrderDate,momoMoPlusLatestSaleForSku,momoDismissMoPlusPriceHint,
   momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusAddPreview,momoMoPlusSetOtherFee,
+  momoMoPlusPrefixFee,momoMoPlusAddOriginChanged,momoMoPlusAddFeeInput,momoMoPlusAddFeeExc,momoMoPlusAddFeeBadge,
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
   momoRenderMoPlusRecon,momoMoPlusReconSetMonth,momoMoPlusReconToggle,momoMoPlusReconSavePdf,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
