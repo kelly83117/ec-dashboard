@@ -4701,7 +4701,7 @@ function renderPnmList(){
     <div class="pnm-entry-date">${d}</div>
     <div class="pnm-entry-text">${text.replace(/</g,'&lt;')}</div>
     <button class="pnm-entry-edit" onclick="_pnmEditNote(${i},this)" title="編輯這筆文字（保留原日期）">✎</button>
-    <button class="pnm-entry-del" onclick="deleteProfitNote(${i})">×</button>
+    <button class="pnm-entry-del" onclick="deleteProfitNote(${i},this)" data-text="${escapeHtmlLike(text)}" data-date="${escapeHtmlLike(d)}">×</button>
   </div>`).join('')).join('');
 }
 function renderPnmHistory(){
@@ -4725,7 +4725,7 @@ function renderPnmHistory(){
       <div class="pnm-entry-date">${_growthPeriodLabel(o)}</div>
       <div class="pnm-entry-text">${String(o.text||'').replace(/</g,'&lt;')}</div>
       <button class="pnm-entry-edit" onclick="_pnmEditNote(${o.i},this)" title="編輯這筆文字（保留原日期）">✎</button>
-      <button class="pnm-entry-del" onclick="deleteProfitNote(${o.i})">×</button>
+      <button class="pnm-entry-del" onclick="deleteProfitNote(${o.i},this)" data-text="${escapeHtmlLike(o.text)}" data-date="${escapeHtmlLike(o.date||'—')}">×</button>
     </div>`).join('');
     return;
   }
@@ -4864,11 +4864,46 @@ function _pnmEditNote(origIdx,btn){
   });
   inp.addEventListener('blur',cancel);   // 失焦＝取消（與洞察表相反，理由見函式上方註解）
 }
-function deleteProfitNote(origIdx){
+// 刪除一筆調整紀錄。origIdx 是【原始陣列索引】，在 renderPnmList / renderPnmHistory 產生
+//   HTML 那一刻就烘進 onclick 字串裡；btn 是被點的那顆 × 本身（inline onclick 傳 this）。
+//
+//   🔴 寫入前必須驗「這個索引還是不是當初渲染的那一筆」——與 _pnmEditNote 4843 那段同源：
+//     彈窗開著的期間，雲端快照（別人的、或使用者自己另一個分頁的）可能整包換掉
+//     Store._profitMem['ec_notes|…']，而 renderPnmList 不會因此重繪（它只從 openNotePopup /
+//     _pnmEditNote / 本函式呼叫）→ 畫面還是舊清單、origIdx 卻已對到別筆 → splice 刪掉不相干
+//     的紀錄，而且不報錯。
+//
+//   🔴 比對值取自 × 鈕的 data-text / data-date（渲染當下寫進去的）。【不要】改成讀
+//     .pnm-entry-text 的 textContent：那兩個模板只把 '<' 跳成 '&lt;'、【沒有】跳脫 '&'，
+//     'A&B'、'&lt;' 這類字串經瀏覽器解碼後與原始資料不相等 → 會誤擋正常刪除。
+//     data-* 由 escapeHtmlLike 寫入、dataset 讀出，瀏覽器自己解碼，兩端永遠一致。
+//
+//   🔴 date 兩個模板都存【正規化後的 a.date||'—'】，不是畫面上那個標籤——renderPnmHistory
+//     的日期欄顯示的是 _growthPeriodLabel(o)（如 '2026/07 上半月'），拿它比會對不上。
+//     因此這裡不需要判斷列在哪個容器，沒有分支。
+//
+//   ⚠ 已知缺口：不比對 _growth 專有的 period 欄。同一天、同樣文字、卻分屬兩個期別的兩筆
+//     分不出來。要補得改 renderPnmList 內層 map 的資料組裝（4696 只帶 {text,i}）；且
+//     _pnmEditNote 的既有防護有同樣缺口，維持兩者對稱。
+//
+//   🔴 驗不到一律【擋下】，不得改成「驗不到就照刪」：這道防護的意義就是在資料已經不可信時
+//     攔住寫入，靜默放行等於在最需要它的時候把它關掉。
+function deleteProfitNote(origIdx,btn){
   if(!_pnm)return;
   const {shopKey,code}=_pnm;
   const notes=getNotes(shopKey);if(!notes[code])return;
   if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
+  // 擋下：不寫入、重繪成最新內容、明確告訴使用者這次沒有刪掉
+  const _abort=(why)=>{
+    console.warn('[pnmDel] '+why+'，本次刪除放棄。origIdx=',origIdx);
+    renderPnmList();renderPnmHistory();
+    const msg='這筆紀錄剛剛被更新過，清單已重新整理，請再確認一次';
+    if(window.App&&typeof App.showAlertModal==='function')App.showAlertModal({title:'沒有刪除',message:msg,kind:'warn',dedupeKey:'pnmDelStale'});
+    else if(typeof showToast==='function')showToast(msg,'error',4000);   // 退路：toast 的 z-index(200) 蓋不過 .pnm-overlay(3000)，看得不清楚，但總比沒訊息好
+  };
+  if(!btn||!btn.dataset||btn.dataset.text===undefined){_abort('拿不到來源 × 鈕或它的比對屬性');return;}
+  const t=notes[code].adjustments[origIdx];
+  if(!t||String(t.text||'')!==btn.dataset.text||String(t.date||'—')!==btn.dataset.date){_abort('資料在彈窗開啟期間變動過');return;}
   notes[code].adjustments.splice(origIdx,1);
   if(!notes[code].adjustments.length)delete notes[code];
   saveNotes(shopKey,notes);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
