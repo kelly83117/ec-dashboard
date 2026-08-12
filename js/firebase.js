@@ -295,6 +295,24 @@ try {
         }, err => { console.error('[momo_moplus_origins subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_moplus_origins subscribe failed', e); }
 
+      // momo_e001 collection（MO+ 每賣場每來源月一 doc）→ Store._profitMem['ec_momo_e001|<shop>|<src>']
+      //   未結算銷量估算值：某期別一旦有對帳明細即被結算取代、不再顯示。分片到來源月＝重上傳整 doc 覆蓋(天然冪等)。
+      try {
+        onSnapshot(momoE001ColRef, snap => {
+          const changed = [];
+          snap.forEach(d => {
+            const data = d.data() || {};
+            if (!data.shop || !data.src) return;
+            const k = 'ec_momo_e001|' + data.shop + '|' + data.src;
+            if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) return;
+            Store._profitMem[k] = data;
+            changed.push(data.shop + '|' + data.src);
+          });
+          if (changed.length) { console.log('[momo_e001] 收到更新：', changed); window.dispatchEvent(new CustomEvent('momoE001Ready', { detail: { changed } })); }
+        }, err => { console.error('[momo_e001 subscribe 失敗]', err); });
+      } catch (e) { console.warn('momo_e001 subscribe failed', e); }
+
       // momo_cost_by_origin（帳號級單一 doc）→ Store._profitMem['ec_momo_cost_by_origin'] + '..._meta'。原廠編號→成本，MO+ 毛利依賴、需跨人跨機。
       try {
         onSnapshot(costByOriginDocRef, snap => {
@@ -413,6 +431,19 @@ try {
     getDoc:  (shop, src) => getDoc(doc(db, 'momo_moplus_origins', momoMoPlusOriginsDocId(shop, src))),
     setSrc:  (shop, src, data) => setDoc(doc(db, 'momo_moplus_origins', momoMoPlusOriginsDocId(shop, src)), data || {}),
     subscribe: (cb) => onSnapshot(momoMoPlusOriginsColRef, cb),
+  };
+
+  // ============== MO+ E001 未結算銷量 momo_e001（每賣場每來源月一 doc） ==============
+  // 為什麼獨立 collection：E001 是「每週更新的未結算銷量估算值」，某期別一旦有對帳明細就整段被結算取代、不再顯示。
+  //   分片到「來源月」＝重上傳同一份檔案整 doc 覆蓋(天然冪等、不累加)、單 doc 只裝一個月大小有界。比照 momo_moplus_origins 分片。
+  //   doc id = shopDocId + '_' + srcCode（例 mo_maji_2608）；doc 內 { shop, src, bySku, bySkuRev, skuOrigin, byPeriodSold, ... }。
+  //   getDoc/subscribe 命名落防護讀取白名單；setSrc 唯一寫入（整包取代）。
+  const momoE001ColRef = collection(db, 'momo_e001');
+  const momoE001DocId = (shop, src) => (MOMO_SHOP_DOCID[shop] || shop) + '_' + src;
+  window.__cloudE001 = {
+    getDoc:  (shop, src) => getDoc(doc(db, 'momo_e001', momoE001DocId(shop, src))),
+    setSrc:  (shop, src, data) => setDoc(doc(db, 'momo_e001', momoE001DocId(shop, src)), data || {}),
+    subscribe: (cb) => onSnapshot(momoE001ColRef, cb),
   };
 
   // ============== 成本對照表 momo_cost_by_origin（帳號級單一 doc；原廠編號→成本 + meta 人工旗標/異動紀錄） ==============
