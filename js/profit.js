@@ -13198,7 +13198,21 @@ function generateAffRpt(){
   });
 }
 function affRptLsKey(shop){return'ec_aff_rpt|'+shop;}
-function affRptLsSave(shop,data){try{localStorage.setItem(affRptLsKey(shop),JSON.stringify(data));}catch(e){}}
+// ⚠ 這裡一定要「同時」寫 Store._profitMem，不能只寫 localStorage——
+//   affRptLsLoad 的讀取順序是 _profitMem → _mem → localStorage（_profitMem 優先、localStorage 墊底）。
+//   自從 aff_rpt 改走獨立 collection、firebase.js 加上雲端訂閱之後，雲端快照會主動把資料灌進 _profitMem；
+//   若這裡只寫 localStorage，就會變成「產完報表 → 沒按同步 → 重整 → 雲端舊版灌進 _profitMem →
+//   affRptLsLoad 優先讀到舊版」，而 localStorage 裡剛產的新版明明還在、卻永遠讀不到（靜默資料回退）。
+//   這個破口在還沒有訂閱之前就存在（只是要雲端剛好有舊版才會踩到），加了訂閱之後會從偶發變成穩定重現，
+//   所以跟搬家一起修，不另外開一輪。
+// window._affJustSaved：給 firebase.js 的 aff_rpt 訂閱當 bounce-back 守衛——剛本機存過就跳過那一次快照，
+//   免得自己寫上去的東西繞一圈 echo 回來，在使用者眼前把剛畫好的畫面重繪一次。比照 _momoCostJustSaved 的寫法。
+function affRptLsSave(shop,data){
+  const k=affRptLsKey(shop);
+  try{localStorage.setItem(k,JSON.stringify(data));}catch(e){}
+  try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=data;}catch{}
+  try{window._affJustSaved=Date.now();}catch{}
+}
 function affRptLsLoad(shop){
   const k=affRptLsKey(shop);
   try{if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]!==undefined)return Store._profitMem[k];}catch{}
@@ -13220,6 +13234,11 @@ function clearAffRpt(shop){
   if(!confirm('確定要清除目前的聯盟行銷資料？清掉之後要重新上傳才會有資料。'))return;
   delete _affData[shop];
   try{localStorage.removeItem(affRptLsKey(shop));}catch{}
+  // ⚠ localStorage 刪掉還不夠：affRptLsLoad 是 _profitMem → _mem → localStorage 的順序，
+  //   記憶體鏡像沒清的話，清除完再切回這個分頁 affRptTryLoadSaved 會從 _profitMem 把舊資料撈回來，
+  //   使用者看到的是「按了清除卻沒清掉」。_mem 目前沒有任何寫入端會填這把 key，一起刪是防未來多一條寫入路徑。
+  try{if(typeof Store!=='undefined'&&Store._profitMem)delete Store._profitMem[affRptLsKey(shop)];}catch{}
+  try{if(typeof Store!=='undefined'&&Store._mem)delete Store._mem[affRptLsKey(shop)];}catch{}
   const kpiBlock=document.getElementById('aff-kpi-block-'+shop);
   if(kpiBlock)kpiBlock.innerHTML=`<div style="font-size:13px;color:#9ca3af">尚未上傳報表</div>`;
   const content=document.getElementById('aff-content-'+shop);
@@ -13228,15 +13247,18 @@ function clearAffRpt(shop){
   if(syncBtn){syncBtn.disabled=true;syncBtn.style.opacity='0.4';syncBtn.style.cursor='default';syncBtn.style.background='';syncBtn.style.color='';syncBtn.style.borderColor='';syncBtn.textContent='☁ 同步雲端';}
   const clearBtn=document.getElementById('aff-clear-'+shop);
   if(clearBtn){clearBtn.disabled=true;clearBtn.style.opacity='0.4';clearBtn.style.cursor='default';}
-  if(window.__cloudProfit&&typeof window.__cloudProfit.removeFields==='function'){
-    window.__cloudProfit.removeFields([affRptLsKey(shop)]).catch(e=>console.warn('[聯盟行銷] 雲端清除失敗',e));
+  // 清雲端：aff_rpt 是「每通路一份獨立 doc」，整份刪掉即可，不再是 app/profit 裡的一個欄位。
+  if(window.__cloudAff&&typeof window.__cloudAff.removeDoc==='function'){
+    window.__cloudAff.removeDoc(shop).catch(e=>console.warn('[聯盟行銷] 雲端清除失敗',e));
   }
   showToast('已清除，可以重新上傳','success');
 }
 function syncAffRptToCloud(shop){
   const btn=document.getElementById('aff-sync-'+shop);
   if(btn){btn.disabled=true;btn.textContent='同步中…';}
-  if(!window.__cloudProfit){
+  // 守衛要檢查 __cloudAff（我們真正要用的那顆），不是 __cloudProfit：
+  //   兩者建立時機不同，檢查 A 卻呼叫 B 的話，A 就緒 B 未就緒時會直接 TypeError、而且不會走到下面的 catch。
+  if(!window.__cloudAff||typeof window.__cloudAff.set!=='function'){
     if(window.App&&typeof App.showAlertModal==='function')App.showAlertModal({title:'雲端未連線',message:'雲端尚未就緒，請重新整理。',kind:'warn'});
     else if(typeof showToast==='function')showToast('雲端未連線','error');
     if(btn)affRptShowSyncBtn(shop);
@@ -13244,7 +13266,8 @@ function syncAffRptToCloud(shop){
   }
   const saved=affRptLsLoad(shop);
   if(!saved){if(btn)btn.disabled=false;return;}
-  window.__cloudProfit.setField(affRptLsKey(shop),saved).then(()=>{
+  // 整包取代（不 merge）：報表每次都是重跑兩份檔整份重生、單一寫入者，詳見 firebase.js 的 __cloudAff 註解。
+  window.__cloudAff.set(shop,saved).then(()=>{
     if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';}
   }).catch(e=>{
     const msg=(e&&e.message)||String(e);
@@ -13323,6 +13346,35 @@ function renderAffRptTableBody(shop){
   tbl.innerHTML=`<div class="tscroll"><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`;
 }
 function escapeHtmlAff(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+// aff_rpt 雲端更新（同事在別台按了同步，firebase.js 的 aff_rpt 訂閱推來）→ 更新記憶體那份 + 只在真的看得到時重繪。
+//   掛在模組頂層：profit.js 是 ES Module、只被 main.js import 一次，頂層註冊天然不會重複疊加
+//   （反例是掛進 shopHTML / setShopViewMode 那種每次進頁都會跑的函式，那才會一次比一次多）。
+//   結構比照 momoCostByOriginReady（本檔搜 `momoCostByOriginReady`）：先更新資料，再查「人在不在」才重繪。
+// ⚠ 一定要更新 _affData：renderAffRptTableBody 不吃參數，它讀的是模組變數 _affData[shop]。
+//   只呼叫 render 而不更新 _affData 的話，畫面會拿舊資料重畫一次，等於什麼都沒更新。
+// 使用者「還沒點過聯盟行銷分頁」的情況不必特別處理：setShopViewMode 的 dataset.loaded 一次性旗標還沒設，
+//   第一次點進去時會走 affRptTryLoadSaved 從 _profitMem 讀，訂閱寫進去的新資料自然就吃到了。
+// 刪除的情況也不必防：doc 被刪時 snap.exists() 為 false → firebase.js 那邊 data 為 null → 直接 return 不 dispatch，
+//   所以「按了清除卻被事件把資料塞回來」不會發生。
+window.addEventListener('affRptReady',(e)=>{
+  const shop=(e.detail&&e.detail.shop)||'';
+  if(!shop) return;
+  const fresh=affRptLsLoad(shop);   // 訂閱已把資料寫進 Store._profitMem，這裡走同一條讀取路徑，保持與畫面同源
+  if(!fresh) return;
+  _affData[shop]=fresh;
+  // 只在使用者真的停在這個賣場的聯盟行銷分頁時才重繪：DOM 就算存在也可能是 display:none 的隱藏分頁
+  //   （shopHTML 是一次 render、切分頁只切 display），對隱藏分頁重繪 662 列是純白工。
+  //   _affData 上面已經更新了，之後切回來會被 affRptTryLoadSaved / 任何重繪動作帶到最新。
+  if(_shopViewMode[shop]!=='affiliate') return;
+  if(!document.getElementById('aff-kpi-block-'+shop)) return;
+  renderAffRptShop(shop,fresh);
+  // ⚠ 這一行的作用是「把兩顆鈕從 disabled 解除」，不是「標記本機有東西還沒同步」——別看名字就把它拿掉。
+  //   要防的情境：這台從沒產過報表（☁ 同步雲端 / 🗑 清除 兩顆都是 disabled 灰色）→ 同事在別台按了同步 →
+  //   雲端資料進來、畫面有表格了，但兩顆鈕還是灰的，連「🗑 清除」都按不動。
+  //   反向的疑慮（剛按過同步、鈕是綠色 ✓，被 echo 打回橘色）不會發生：那是自己寫的 echo，
+  //   會先被 firebase.js 訂閱裡 _affJustSaved 的 5 秒守衛擋掉，根本走不到 dispatch。
+  affRptShowSyncBtn(shop);
+});
 
 function mergeCoupangRows(rows){
   const map=new Map();
