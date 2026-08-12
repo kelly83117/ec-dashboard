@@ -9640,18 +9640,11 @@ function momoRenderProfitBody(shop, tableOnly){
         const cr=r.convRate; let st='text-align:right;overflow:hidden;text-overflow:ellipsis'; if(cr<2) st+=';font-weight:700;color:#f97316';
         return `<td style="${st}" title="對帳數量 ${Math.round(r.qty||0)} ÷ 瀏覽 ${Math.round(r.view||0)}${r.viewEstimated?'（半月沿用整月·估算）':''}">${momoPct(cr)}${momoRowCmp('convRate',r,r._prev)}</td>`;
       }
-      if(c.k==='revenue' && r.e001Estimated){   // 未結算估算營收：~ 前綴 + 淡色斜體 + 估
-        return `<td style="text-align:right;color:#6b7280;font-style:italic;overflow:hidden;text-overflow:ellipsis" title="未結算估算營收＝E001 售價×數量（實測＝對帳明細 A 貨款口徑）。待該期別對帳明細上傳後由結算值完全取代。">~${momoMoney(r.revenue)} <span style="font-size:10px;color:#d97706">估</span></td>`;
-      }
       if(c.k==='margin'){
         // 營收0但有毛利（整批退貨）→ margin=null → 「—」，不顯示誤導的 0%；負毛利標紅（是負值，不是 0）
+        // ⚠ 未結算估算列（e001Estimated）比照甲配未對帳月：數字照常顯示（一般樣式、無 ~/估/斜體）；估算僅由頂端橫幅標示。
         if(r.margin==null) return `<td style="text-align:right;color:#c7cad1;font-weight:700" title="營收為 0（此期可能整批退貨）→ 毛利率無法計算">—</td>`;
         const m=r.margin;
-        if(r.e001Estimated){   // 未結算估算毛利率：費率用 MO+ 自己近3月實際總費率（非甲乙 6.8%）；標估
-          const fp=r.e001FeeRate!=null?(r.e001FeeRate*100).toFixed(1)+'%':'—';
-          const tip=`未結算估算毛利率。營收＝售價×數量(＝A貨款)、成本查原廠編號、平台費用用估算費率 ${fp}（${r.e001FeeMode||''}${r.e001FeeMonths&&r.e001FeeMonths.length?' '+r.e001FeeMonths.join('/'):''}、含成交手續費+其他D+運費淨）。待對帳明細上傳後由結算值取代。`;
-          return `<td style="text-align:right;color:#6b7280;font-style:italic;overflow:hidden;text-overflow:ellipsis" title="${String(tip).replace(/"/g,'&quot;')}">~${momoPct(m)} <span style="font-size:10px;color:#d97706">估</span></td>`;
-        }
         return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:${m>=25?'#10b981':(m<0?'#dc2626':'#374151')}">${momoPct(m)}${momoRowCmp('margin',r,r._prev)}</td>`;
       }
       if(c.k==='stock'){
@@ -10180,11 +10173,7 @@ function momoKpiDelta(cur, prev, hasPrev){
 // 總覽 KPI 區塊：總營收/總淨利/加權毛利率/總銷量 + 環比。毛利率按絕對值門檻著色（非方向），環比 pp 差中性色。
 function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
   if(!period) return '';
-  // E001 未結算估算期別：總營收/總淨利/加權毛利率三卡加「估」徽章（沿用列內 ~+淡色+估+tooltip 樣式）。總銷量卡不加（實數）。結算期別不加。
-  const _ctx=(momoIsMoPlus(shop)&&period)?momoMoPlusE001Ctx(shop):null;
-  const _e001Est = _ctx ? (()=>{ try{ const pk=momoExpandPeriod(period); return !!(pk.length && pk.every(k=>!_ctx.settled.has(k)) && _ctx.doc && _ctx.doc.hasPrice && pk.some(k=>_ctx.doc.byPeriodSold&&_ctx.doc.byPeriodSold[k])); }catch(e){ return false; } })() : false;
-  const _estFr=_e001Est&&_ctx?_ctx.estFee:null;
-  const _estTip=('未結算估算值（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑）；毛利率用估算平台費率 '+(_estFr?(_estFr.rate*100).toFixed(1)+'%（'+_estFr.mode+(_estFr.months?' '+_estFr.months.join('/'):'')+'）':'—')+'。待該期別對帳明細上傳後由結算值完全取代。').replace(/"/g,'&quot;');
+  // ⚠ 未結算估算（E001）：數字比照甲配未對帳月照常顯示、不加卡片標記；估算僅由頂端橫幅（e001Banner）標示（含估算費率與來源月）。
   const hasPrev=!!prev.hasData;
   const prevLbl=prevKey?momoPeriodLabel(prevKey):'上期';
   const money=v=>momoMoney(v);
@@ -10200,10 +10189,10 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
     ? `${momoPct(rate)} <span style="font-size:12px;color:#9ca3af;font-weight:400">(${cur.soldActive} / ${cur.activeTotal})</span>`
     : '—';
   const cards=[
-    {label:'總營收', info:'該期所有商品營收合計。（未稅）', val:money(cur.rev), d:momoKpiDelta(cur.rev,prev.rev,hasPrev), est:_e001Est},
-    {label:'總淨利', info:'該期所有商品淨利合計。已扣 MOMO 費用與商品成本。（未稅）', val:money(cur.profit), d:momoKpiDelta(cur.profit,prev.profit,hasPrev), est:_e001Est},
-    {label:'加權毛利率', info:'總淨利 ÷ 總營收。', val:momoPct(cur.margin), valColor:marginColor(cur.margin), d:{txt:marginDelta,color:'#9ca3af'}, est:_e001Est},
-    {label:'總銷量', val:Math.round(cur.qty).toLocaleString()+' 件', d:momoKpiDelta(cur.qty,prev.qty,hasPrev)},   // ⚠ 未結算銷量為實數、不加估徽章
+    {label:'總營收', info:'該期所有商品營收合計。（未稅）', val:money(cur.rev), d:momoKpiDelta(cur.rev,prev.rev,hasPrev)},
+    {label:'總淨利', info:'該期所有商品淨利合計。已扣 MOMO 費用與商品成本。（未稅）', val:money(cur.profit), d:momoKpiDelta(cur.profit,prev.profit,hasPrev)},
+    {label:'加權毛利率', info:'總淨利 ÷ 總營收。', val:momoPct(cur.margin), valColor:marginColor(cur.margin), d:{txt:marginDelta,color:'#9ca3af'}},
+    {label:'總銷量', val:Math.round(cur.qty).toLocaleString()+' 件', d:momoKpiDelta(cur.qty,prev.qty,hasPrev)},
     {label:'動銷率', info:'該期別「有銷售的上架商品數 ÷ 上架商品總數」。分母＝上架總數（不含已下架，跟工具列「上架 N」一致）；看有多少比例的上架品真的動起來。', val:rateVal, d:rateD},
   ];
   // 第 6 張卡片：運費淨額（僅 MO+；通路層損益、與總營收/淨利同級並排）。甲乙配不加（運費模型不同）。
@@ -10214,14 +10203,12 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
     const info='運費收入 '+money(fr.b)+' − 代扣運費 '+money(fr.c)+'（'+fr.rows+' 筆運費列 · 通路層、不進任何 SKU 毛利）'+(fr.freeShip>0?'｜⚠ 未含免運活動服務費 '+money(fr.freeShip)+'（在各商品 D 手續費內），實際運費負擔更高':'');
     cards.push({label:'運費淨額', info, val:money(fr.net), valColor:netColor, d:{txt:(pctOfProfit!=null?'佔淨利 '+pctOfProfit+'%':'通路層'), color:'#9ca3af'}});
   }
-  const cardHTML=cards.map(c=>{
-    const valStyle = c.est ? 'color:#6b7280;font-style:italic' : (c.valColor?`color:${c.valColor}`:'');
-    const valTxt = (c.est ? '~'+c.val : c.val) + (c.est ? ` <span style="font-size:11px;color:#d97706;font-weight:600" title="${_estTip}">估</span>` : '');
-    return `<div class="mm-kpi">
+  // ⚠ 未結算估算期別：數字照常顯示（一般樣式、無 ~/估/斜體）＝比照甲配未對帳月；估算僅由頂端橫幅標示。
+  const cardHTML=cards.map(c=>`<div class="mm-kpi">
     <div class="mm-kpi-l">${c.label}${c.info?` <span class="mm-info" title="${c.info}">?</span>`:''}</div>
-    <div class="mm-kpi-v"${valStyle?` style="${valStyle}"`:''}>${valTxt}</div>
+    <div class="mm-kpi-v"${c.valColor?` style="color:${c.valColor}"`:''}>${c.val}</div>
     <div class="mm-kpi-d" style="color:${c.d.color}">${c.d.txt}<span class="base"> vs ${prevLbl}</span></div>
-  </div>`;}).join('');
+  </div>`).join('');
   // 缺成本警示（可點 → 跳批次維護 + 自動套「缺成本」篩選 + 開顯示已下架，確保兩邊看到同一批）
   const discNote=cur.missCostDisc>0?`（其中 ${cur.missCostDisc} 已下架）`:'';
   const missWarn=cur.missCost>0
