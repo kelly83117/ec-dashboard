@@ -10890,11 +10890,11 @@ function momoRenderMoPlusBatchEditForm(shop, p){
   // 成交費率三態（反推、唯讀顯示）：唯一／多解(顯示候選下界範圍、不顯示確定值)／無資料
   const fr=momoFeeRateForSku(shop, p.sku);
   let feeLine;
-  if(fr.status==='unique') feeLine=`<b>${fr.cand[0]}%</b> <span style="color:#9ca3af">（反推·唯一解）</span>`;
-  else if(fr.status==='multi'){ const lo=Math.min(...fr.cand), hi=Math.max(...fr.cand); feeLine=`<span style="color:#6b7280">${lo}–${hi}%（多解未收斂，下界 ${lo}%）</span>`; }
-  else if(fr.status==='anomaly') feeLine=`<span style="color:#dc2626;font-weight:700">${Math.min(...fr.cand)}–${Math.max(...fr.cand)}%（異常）</span>`;
-  else feeLine='<span style="color:#c7cad1">—（無非檔期成交手續費資料）</span>';
-  const predLine=(p.feeRatePredicted&&p.feeRatePredicted.rate!=null)?`<div style="font-size:11px;color:#9ca3af;margin-top:2px">建檔預測 ${p.feeRatePredicted.rate}%（來源 ${_momoEsc(p.feeRatePredicted.source||'')}${p.feeRatePredicted.at?'，'+_momoEsc(p.feeRatePredicted.at):''}）</div>`:'';
+  if(fr.status==='unique') feeLine=`<span class="mm-fee-uni">${fr.cand[0]}%</span> <span class="mm-fee-note">（反推·唯一解）</span>`;   // 唯一解：一般字重（樣式在 css/profit.css）
+  else if(fr.status==='multi'){ const lo=Math.min(...fr.cand), hi=Math.max(...fr.cand); feeLine=`<span class="mm-fee-multi">${lo}–${hi}%（多解未收斂，下界 ${lo}%）</span>`; }
+  else if(fr.status==='anomaly') feeLine=`<span class="mm-fee-anom">${Math.min(...fr.cand)}–${Math.max(...fr.cand)}%（異常）</span>`;
+  else feeLine='<span class="mm-fee-none">—（無非檔期成交手續費資料）</span>';
+  const predLine=(p.feeRatePredicted&&p.feeRatePredicted.rate!=null)?`<div class="mm-fee-pred">建檔預測 ${p.feeRatePredicted.rate}%（來源 ${_momoEsc(p.feeRatePredicted.source||'')}${p.feeRatePredicted.at?'，'+_momoEsc(p.feeRatePredicted.at):''}）</div>`:'';
   const _chTxt=h=>(h.changes&&h.changes.length)?h.changes.map(c=>c.field+' '+(c.from||'—')+'→'+(c.to||'—')).join('；'):'';
   const hist=(p.history&&p.history.length)? [...p.history].reverse().map(h=>{ const ch=_chTxt(h); return `
     <div style="font-size:12px;padding:6px 10px;border-left:2px solid #e5e7eb;margin-bottom:4px">
