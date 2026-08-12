@@ -9359,7 +9359,7 @@ function momoRenderProfitBody(shop, tableOnly){
   const _periodIsHalf=/-(H1|H2)$/.test(String(period||''));   // 半月：流量標「估」、成長類本來就沒算（always，便宜）
   // ⚡ 聚合免重算：tableOnly（排序/搜尋/欄位切換）且同 period → 重用上次完整重繪烘焙好的基準列（agg×2N + 甲乙物流重分配 + 標籤）。
   //   只有「完整重繪」才跑下面 else 的昂貴段並存快取；資料變更一律走完整重繪 → 快取自然新鮮。
-  let rows, _stockAt, _stockStale, _stockDateStr, _stockAgeDays, _freightMode='none';
+  let rows, _stockAt, _stockStale, _stockDateStr, _stockAgeDays, _freightMode='none', tagsRes;   // ⚠ tagsRes 提到函式作用域：於重建區塊指派、於下方 !tableOnly 區塊(已篩選標記 9631)讀取。原 const 綁在重建區塊 → 套任一數值/標籤篩選時該行 ReferenceError → render 中斷 → 表格不更新＝篩選完全失效（三賣場皆然，8487c57f「兩層快取」重構引入）
   const _base=_momoBaseRows[shop];
   if(tableOnly && _base && _base.period===period){
     rows=_base.rows.slice();   // slice：排序 reorder / 搜尋 filter 都在副本上，不動快取原序、不改 row 欄位
@@ -9384,7 +9384,7 @@ function momoRenderProfitBody(shop, tableOnly){
       return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, coveragePct:(agg.coverage!=null?Math.round(agg.coverage*1000)/10:null), stock:_st, _prev:prev };
     });
     // 標籤：整月＋半月都算（半月只少成長類）；完整重繪重算並烘焙進 row（tableOnly 直接吃 row._tags）。「標籤」欄顯示 + 篩選共用同一份。
-    const tagsRes=momoTagsFor(shop, !tableOnly);
+    tagsRes=momoTagsFor(shop, !tableOnly);   // 指派到上方 function-scope 的 tagsRes（非 const，供 9631 讀取）
     rows.forEach(r=>{ r._tags=(tagsRes.bySku&&tagsRes.bySku[r.sku])||[]; });
     // ═══ 階段四：物流按逐SKU出貨形狀重分配（甲配=C1202訂編／乙配=C1204寄倉；此時 rows=全商品，period 總和才正確）═══
     //   period 內錨定 物流total=logiTotal×(R_period/月R)、再按形狀分 → Σ該店fee=該店R×feeRate 不變（月總/期別總不動、逐SKU重分配）。
