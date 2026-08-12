@@ -746,3 +746,12 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 /* 分頁分隔線（維克｜測試通路）。原本 __profitTabHtml 裡還有一條 inline 寫死的
    （測試通路｜重點檢視），已隨重點檢視分頁於 2026-08-07 一併移除。 */
 .stab-sep{display:inline-block;width:1px;height:18px;background:var(--border);margin:0 2px;}
+
+/* MO+ 成交費率三態顯示（批次維護「編輯現有商品」）——樣式集中此處、不寫 inline。
+   唯一解一般字重（與同表其他數值一致、不再粗體）；多解淡色範圍；無資料極淡；異常紅粗。 */
+.mm-fee-uni{color:#374151;font-weight:400;}
+.mm-fee-multi{color:#6b7280;}
+.mm-fee-none{color:#c7cad1;}
+.mm-fee-anom{color:#dc2626;font-weight:700;}
+.mm-fee-note{color:#9ca3af;}
+.mm-fee-pred{font-size:11px;color:#9ca3af;margin-top:2px;}
