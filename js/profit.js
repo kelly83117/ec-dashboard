@@ -9562,7 +9562,6 @@ const MOMO_PROFIT_COLS=[
   {k:'revenue',label:'營收',fmt:'money',w:130,info:'未稅進價 × 對帳數量。已扣客退。（未稅）',infoMoPlus:'A 貨款合計（代收金額＋mo點支付＋全站抵用券支付）。代收代付平台代收，非進價×銷量。'},
   {k:'margin',label:'毛利率',fmt:'pct1',w:100,info:'淨利 ÷ 未稅營收。淨利已扣 MOMO 費用與商品成本。',infoMoPlus:'淨利 ÷ 營收。淨利＝營收 − 成本 − D手續費(逐列15項) − C代扣運費 + B運費代收(同訂單營收攤估)。'},
   {k:'profit',label:'毛利貢獻',fmt:'money',w:130,info:'該商品貢獻的淨利金額。（未稅）',infoMoPlus:'該商品淨利金額＝營收 − 成本 − D手續費 − C代扣運費 + B運費代收。'},
-  {k:'coveragePct',label:'成本涵蓋',fmt:'pct1',w:104,info:'該商品各原廠編號查到成本的比例（按件數）。<100% 表示部分原廠編號缺成本 → 毛利偏高、且該商品不計入加權毛利率。到批次維護補成本表。',moPlusOnly:true},
   {k:'feeRate',label:'成交費率',fmt:'pct1',w:128,info:'MO+ 成交手續費反推的費率（非檔期）。逐列 round(售價×數量×費率%)=手續費、跨月取交集。唯一解=粗體深色；多解=淡色範圍+「待收斂」（月份越多越收斂）；異常=紅（跨月候選互斥、代表有問題）；無成交手續費資料=「—」。排序與篩選皆依「範圍下界」＝能保證的最低費率（撈高費率商品）：篩「>10%」＝下界都 >10% 才算。多解列的下界即篩選/排序值。⚠ 僅供顯示與異常偵測，毛利一律走逐筆實際手續費、不用反推值。',moPlusOnly:true},
   {k:'returnRate',label:'退貨率',fmt:'pct1',w:96,info:'客退數量 ÷ 賣出數量（賣出=對帳數量+客退數量），來源=對帳單逐SKU、月顆粒。未對帳月顯示「—」。hover 看退貨件數/金額。',infoMoPlus:'回收確認件數 ÷（已送達+回收確認），來源=對帳明細逐列、月顆粒。未結算/舊資料顯「—」（需重傳對帳明細）。hover 看退貨件數。'},
   {k:'stock',label:'庫存',fmt:'num',w:112,info:'莫筆克庫存；資料上傳日期。'},
@@ -9903,7 +9902,7 @@ function momoRenderProfitBody(shop, tableOnly){
       const prev= prevKeysForRows ? momoAggregatePeriods(p, prevKeysForRows, shop) : null;
       // ppUntax=未稅進價（含稅進價÷1.05）：進價欄顯示用、也可排序；淨利表營收基準口徑。_prev=上期 aggregate（逐列環比用）
       const _st=(p.origin && _stockMap[p.origin]!=null)?_stockMap[p.origin]:null;   // 自家庫存：按原廠編號查快照，查無=null（畫面「—」）
-      return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, coveragePct:(agg.coverage!=null?Math.round(agg.coverage*1000)/10:null), stock:_st, _prev:prev };
+      return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, stock:_st, _prev:prev };   // coverage/covered/missingOrigins 仍在 agg（缺成本橫幅/加權毛利率/no_cost 標籤用）；成本涵蓋「欄」已移除
     });
     // 標籤：整月＋半月都算（半月只少成長類）；完整重繪重算並烘焙進 row（tableOnly 直接吃 row._tags）。「標籤」欄顯示 + 篩選共用同一份。
     tagsRes=momoTagsFor(shop, !tableOnly);   // 指派到上方 function-scope 的 tagsRes（非 const，供 9631 讀取）
@@ -10039,13 +10038,6 @@ function momoRenderProfitBody(shop, tableOnly){
         const tip=`原廠編號 ${oesc} · 自家各倉可用庫存 ${Math.round(r.stock).toLocaleString()}\n⚠ 甲配／乙配同原廠編號共用同一批（此為共用庫存，非本賣場各自的量）\n⚠ 自家倉庫存，不是 MOMO 平台可售量（乙配已進 MOMO 倉的不算）\n資料日期 ${_stockDateStr}${_stockStale?`（已 ${_stockAgeDays} 天未更新，可能過期）`:''}`;
         const st='text-align:right;overflow:hidden;text-overflow:ellipsis'+(_stockStale?';color:#f97316':'');
         return `<td style="${st}" title="${tip}">${Math.round(r.stock).toLocaleString()}${_stockStale?' <span style="color:#f97316;font-size:10px">⚠</span>':''}</td>`;
-      }
-      if(c.k==='coveragePct'){   // MO+ 成本涵蓋率：<100% 橘標 + tooltip 列缺成本原廠編號
-        if(r.coveragePct==null) return `<td style="text-align:right;color:#c7cad1">—</td>`;
-        const cv=r.coveragePct, miss=(r.missingOrigins||[]);
-        const tip=cv>=100?'所有原廠編號都查到成本':('缺成本原廠編號：'+(miss.slice(0,20).join('、')||'（空）')+(miss.length>20?' …':'')+'\n→ 到批次維護補成本表（此商品不計入加權毛利率）');
-        const st='text-align:right;overflow:hidden;text-overflow:ellipsis'+(cv<100?';font-weight:700;color:#f97316':'');
-        return `<td style="${st}" title="${String(tip).replace(/"/g,'&quot;')}">${momoPct(cv)}</td>`;
       }
       if(c.k==='listPrice'){   // MO+ 售價：主顯掛牌價（銷售最多規格）+ 多規格 ⊕ 展開 + 掛牌vs成交落差；無主檔→回退最新成交
         const lp=r.listPrice, sp=r.latestSale;
