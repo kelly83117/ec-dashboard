@@ -8395,8 +8395,9 @@ function momoPeriodSrcCode(period){ const m=/^(\d{4})-(\d{2})-H[12]$/.exec(Strin
 //   ⚠ 每期別只採「來源月 src==該期別月份」的 doc（owned period）→ 跨檔同期別不雙計；intransit/unknown/cutoff 為附註用、跨檔彙總。
 function momoMergeE001Docs(docs){
   const out={bySku:{}, bySkuRev:{}, skuOrigin:{}, byPeriodSold:{}, byPeriodRev:{}, hasPrice:false, srcs:[],
-    intransit:{n:0,qty:0}, excluded:{n:0}, unknown:{}, cutoff:null};
+    intransit:{n:0,qty:0}, excluded:{n:0}, unknown:{}, cutoff:null, e001FeeRate:null, e001FeeMonths:null, e001FeeMode:null};
   Object.keys(docs||{}).sort().forEach(src=>{ const d=docs[src]; if(!d) return; out.srcs.push(src); if(d.hasPrice) out.hasPrice=true;
+    if(d.e001FeeRate!=null){ out.e001FeeRate=d.e001FeeRate; out.e001FeeMonths=d.e001FeeMonths||null; out.e001FeeMode=d.e001FeeMode||null; }   // 內嵌估算費率（src 由小到大 → 取最新來源月的值）
     const so=d.skuOrigin||{}; Object.keys(so).forEach(sku=>{ if(!out.skuOrigin[sku]) out.skuOrigin[sku]=so[sku]; });
     const own=p=>momoPeriodSrcCode(p)===src;
     const bp=d.byPeriodSold||{}; Object.keys(bp).forEach(p=>{ if(own(p)) out.byPeriodSold[p]=(out.byPeriodSold[p]||0)+bp[p]; });
@@ -8413,13 +8414,16 @@ function momoMergeE001Docs(docs){
 // compat：合併後單一 doc（顯示/相容舊呼叫）；無來源月資料回 null。
 function momoLoadE001(shop){ const m=momoMergeE001Docs(momoListE001Docs(shop)); return m.srcs.length?m:null; }
 // E001 覆蓋 context（每 epoch 算一次；render 迴圈 619× 共用）：{docs, doc:合併 pseudo-doc, settled:Set, estFee}。
+//   ⚠ estFee 的「唯一費率來源」＝ E001 doc 內嵌 e001FeeRate（上傳當下算好、隨 doc 上雲）→ 本機/雲端讀取路徑共用同一值、結果一致。
+//     內嵌值缺（升級前存的舊 doc）才 fallback 現算 momoMoPlusEstFeeRate（兩條路徑同樣 fallback，不各寫一次）。
 let _moE001Cache={};
 function momoMoPlusE001Ctx(shop){
   let c=_moE001Cache[shop];
   if(c && c.epoch===_moDataEpoch) return c;
   const docs=momoListE001Docs(shop);
   const merged=momoMergeE001Docs(docs);
-  c=_moE001Cache[shop]={ epoch:_moDataEpoch, docs, doc:(merged.srcs.length?merged:null), settled:momoSettledPeriods(shop), estFee:momoMoPlusEstFeeRate(shop) };
+  const embedded=(merged.srcs.length && merged.e001FeeRate!=null) ? { rate:merged.e001FeeRate, months:merged.e001FeeMonths, mode:merged.e001FeeMode } : null;
+  c=_moE001Cache[shop]={ epoch:_moDataEpoch, docs, doc:(merged.srcs.length?merged:null), settled:momoSettledPeriods(shop), estFee:(embedded || momoMoPlusEstFeeRate(shop)) };
   return c;
 }
 // 已結算期別集合（有對帳明細）＝ E001 這些期別要被取代、不顯示。
@@ -12036,12 +12040,18 @@ function momoE001Apply(shop){
   const p=_e001Parsed;
   const src=p.srcCode;
   if(!src){ if(typeof showToast==='function') showToast('E001 檔名判不出月份（需 …_YYMM.xls）→ 無法分片，未儲存','error'); return; }
+  // ⚠ 估算費率「上傳當下」就算好、內嵌進 doc → 隨 E001 一起上雲。讀取端（本機/雲端）一律用 doc 內嵌值，
+  //   不再各自向 momo_reconcile 反算（雲端 reconcile 常讀不到 → 反算得 null → 平台費沒扣 → 高估毛利率）。
+  //   估算費用扣除的「唯一費率來源」＝這個內嵌欄位，兩條讀取路徑共用。
+  const efr=momoMoPlusEstFeeRate(shop);   // 上傳者本機有對帳資料 → 算得出（16.7% 量級）
+  if(!efr){ if(typeof showToast==='function') showToast('⚠ 抓不到 MO+ 對帳費率（缺月對帳資料）→ 未結算毛利無法扣平台費，請先上傳/同步對帳明細再存 E001','error'); return; }
   const doc={ shop, src, bySku:p.bySku, bySkuRev:p.bySkuRev, skuOrigin:p.skuOrigin, byPeriodSold:p.byPeriodSold, byPeriodRev:p.byPeriodRev, hasPrice:p.hasPrice,
     intransit:p.intransit, excluded:p.excluded, unknown:p.unknown, cutoff:p.cutoff, srcRange:p.srcRange,
-    soldRows:p.soldRows, soldQty:p.soldQty, soldRev:p.soldRev, uploadedAt:momoNowParts().date+' '+momoNowParts().time };
+    soldRows:p.soldRows, soldQty:p.soldQty, soldRev:p.soldRev, uploadedAt:momoNowParts().date+' '+momoNowParts().time,
+    e001FeeRate:efr.rate, e001FeeMonths:efr.months, e001FeeMode:efr.mode };   // 內嵌估算費率（隨 doc 上雲；讀取端唯一費率來源）
   const ok=momoSaveE001Doc(shop, src, doc);
   _e001File=null; _e001Parsed=null;
-  if(typeof showToast==='function') showToast(ok?('已存入 E001 未結算銷量（來源月 '+src+'）→ 記得按同步雲端'):'E001 儲存失敗','success');
+  if(typeof showToast==='function') showToast(ok?('已存入 E001 未結算銷量（來源月 '+src+'，估算費率 '+(Math.round(efr.rate*1000)/10)+'%）→ 記得按同步雲端'):'E001 儲存失敗','success');
   momoRenderMoPlusUpload(shop);
 }
 function momoE001Clear(shop){ if(!confirm('清除本機 E001 未結算銷量資料？（不影響對帳明細）')) return; momoClearE001(shop); momoRenderMoPlusUpload(shop); }
