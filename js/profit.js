@@ -7482,9 +7482,9 @@ function momoAggregatePeriods(product,periodKeys,shop){
     const fr=momoFeeRateForSku(shop, product.sku);   // 成交費率反推結論（跨月交集，純顯示/排序、不進毛利）
     return {
       qty, revenue:revA, profit:m.margin, margin:m.marginPct, cost:m.cogs, feeD:m.feeD, feeC:m.feeC, feeB:m.feeB, freightNet:m.freightNet,
-      // 退貨率＝回收確認 qty ÷ (已送達+回收確認)。分母＝本期銷量 qty（目前含回收確認）＝已送達+回收確認 → 分母正確。
-      //   ⚠ 若日後把回收確認移出本期銷量（順帶修正），此分母改成 qty+retQty（值不變）。舊 doc 無 ret 欄→retKnown false→null(「—」需重傳)。
-      returnRate: retKnown ? (qty>0?Math.round((retQty/qty)*1000)/10:0) : null, retQty, retKnown,
+      // 退貨率＝回收確認 qty ÷ (已送達+回收確認)。本期銷量 qty 已排除回收確認（＝已送達）→ 分母＝qty+retQty（值與含回收確認時相同、語意正確）。
+      //   舊 doc 無 ret 欄→retKnown false→null(「—」需重傳)。
+      returnRate: retKnown ? ((qty+retQty)>0?Math.round((retQty/(qty+retQty))*1000)/10:0) : null, retQty, retKnown,
       coverage:m.coverage, covered:m.covered, missingOrigins:m.missingOrigins,
       latestSale:(ls?ls.sp:null), latestSaleDate:(ls?ls.d:null),
       listPrice:lp.listPrice, listSpec:lp.listSpec, listByBest:lp.byBestSeller, listSpecs:lp.specs, listDivergence:lp.divergence, listMasterStale:lp.masterStale,
@@ -8339,9 +8339,11 @@ function momoParseMoPlus(rows, srcCode){
     } else {                                                 // 商品列
       if(!origin && skuId) missingOrigin.add(skuId);
       const bySku=sku[skuId]=sku[skuId]||{};
-      const cell=bySku[period]=bySku[period]||{qty:0, rev:0, net:0, listPrice:0, discount:0, lines:0};
-      cell.qty+=qty; cell.rev+=A; cell.net+=net; cell.listPrice+=price*qty; cell.discount+=discount; cell.lines++;   // rev＝A 貨款；售價/折扣另存做定價分析
-      freightOut[period]=(freightOut[period]||0)+C;          // 運費成本(C 代扣運費)掛商品列 → P3b「成對抽離」要用
+      const cell=bySku[period]=bySku[period]||{qty:0, rev:0, net:0, listPrice:0, discount:0, lines:0};   // ⚠ 一律建 cell（純回收確認也建、qty 保持 0）→ 寫入器把該期舊值（曾含回收確認）覆蓋成 0，否則舊產品值不被更正、與 origins 永久不一致
+      if(status!=='回收確認'){   // 回收確認（退貨）不進本期銷量/營收——退掉的貨不算賣出（「賣100退12」＝留88，非100）；退貨量記於 origins cell.ret、退貨率分母另加回
+        cell.qty+=qty; cell.rev+=A; cell.net+=net; cell.listPrice+=price*qty; cell.discount+=discount; cell.lines++;   // rev＝A 貨款；售價/折扣另存做定價分析
+      }
+      freightOut[period]=(freightOut[period]||0)+C;          // 運費成本(C 代扣運費)掛商品列（含回收確認的退貨運費，仍是該期成本）→ P3b「成對抽離」要用
       freeShipByPeriod[period]=(freeShipByPeriod[period]||0)+(cols.idx.freeShip>=0?momoMoPlusNum(row[cols.idx.freeShip]):0);   // 免運活動服務費（運費行註記用）
       totRev+=A; skuRows++;
     }
@@ -8920,8 +8922,8 @@ function momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods){
     if(gated(ln.period)) return;                                  // 期別閘門：與 products 同步
     const cell=(skus[ln.sku]=skus[ln.sku]||{})[ln.period]=(skus[ln.sku][ln.period])||{o:{}, d:0, c:0, b:0, ret:0};
     const origin=ln.origin||MOMO_NO_ORIGIN;                        // 空 origin 歸哨兵 key（Firestore 不接受 '' key）→ 量計入、查無成本＝缺成本
-    cell.o[origin]=(cell.o[origin]||0)+(Number(ln.qty)||0);       // per-原廠編號 銷量（售價欄「銷售最多規格」＝銷量最多的原廠編號 → 主檔按 origin 對應規格）
-    cell.d+=Number(ln.D)||0;                                      // 手續費 D（逐列實際）
+    if(ln.status!=='回收確認') cell.o[origin]=(cell.o[origin]||0)+(Number(ln.qty)||0);   // per-原廠編號 銷量（退貨不進 → COGS/本期銷量＝已送達；與 products cell 一致）
+    cell.d+=Number(ln.D)||0;                                      // 手續費 D（逐列實際，含回收確認的手續費反轉/退貨運費相關）
     cell.c+=Number(ln.C)||0;                                      // 代扣運費 C（逐列精算、掛商品列，比照 D）
     cell.b+=Number(ln.bAlloc)||0;                                 // 運費代收 B（按同訂單商品營收攤到本列，攤估）
     if(ln.status==='回收確認') cell.ret+=(Number(ln.qty)||0);     // 退貨件數（選項A：status=回收確認 逐列 qty）→ 退貨率分子；比照 feeC/feeB 存 per-SKU
