@@ -5032,6 +5032,35 @@ function _subAdsHtml(r){
   return `<div class="sub-ads">${(v!==null&&v!==undefined)?'上期 $'+fmtN(v):'—'}</div>`;
 }
 function renderTable(shop,list,opts){
+  // 🔴 淨利表 DOM 已被拆除就直接早退。這【不是預防性的防禦，是修一個正式站 v444 實測可重現的 bug】：
+  //   重現步驟：淨利表任一通路做過篩選（搜尋框打字即可）→ 立刻切到洞察表。
+  //   成因：js/pages/offices.js 的 viewOffice（約 820 行）那個 200ms setTimeout 在使用者切走【之後】
+  //     照樣會執行。此時 App.render() 已經把整個淨利表 DOM 換掉，但 state 是模組層變數、_built 還活著
+  //     → applyFilters 開頭的 `if(!s._built||!s._built.length)return;` 擋不住 → 一路走到下面那兩行
+  //     對 null 設 textContent → TypeError（再被 offices.js 的 catch 用 console.log 吞成一行白字）。
+  //   ⚠ 只有「做過篩選」才觸發：initShopUI 先讀 _loadFilterState()，讀得到才會呼叫 applyFilters。
+  //
+  // 🔴 判準為什麼是 #tbl-{shop} —— 三個候選只有它對，不要換掉：
+  //   ✅ #tbl-{shop}       與 #period-tag-{shop} / #cnt-{shop} 由【同一個模板 shopHTML(shop) 產生】
+  //                        （本檔搜 `function shopHTML`，六個 id 在同一個字串裡）→ 存在與否完全同步。
+  //                        而且它正是本函式最後要寫入的那個宿主（下方 _tblHost）。
+  //                        它測的是【單一一件事】：本函式要寫入的 DOM 還在不在。
+  //   ❌ #content-{shop}   分頁容器，【可以存在但內容為空】—— offices.js 那行
+  //                        `if (el && !el.innerHTML.trim())` 就是在測這個狀態。用它等於一個判準
+  //                        同時測「分頁在不在」和「內容建好沒」，兩件事，會誤判。
+  //   ❌ #month-sel-{shop} 它【不在 shopHTML 裡】，是由 periodRowShopeeHTML 產生、經
+  //                        initProfitPeriodControls 注入 #profit-period-wrap —— 另一個容器、
+  //                        另一條生命週期。onMonthChange / _applyLatestPeriod 的 `if(!sel)return`
+  //                        測的正是它，【這就是那兩道既有守衛擋不住這個 bug 的原因】：
+  //                        它們測的元素跟會爆的元素根本不在同一個容器裡。
+  //
+  // 🔴 為什麼擋在這裡（共同出口），而不是去 offices.js 擋那個計時器：
+  //   renderTable 全專案【只有一個呼叫點】（applyFilters 尾端那一行），而 applyFilters 有 22 個
+  //   呼叫點全部匯流到它 → 擋這一處等於擋住 22 條路；去擋計時器只擋得住其中 1 條。
+  //   同型先例：本檔 setShop 開頭的 `if(!document.querySelector('.shop-content')) return;`，
+  //   那裡的註解寫了同一套判準推理（「判準用 .shop-content 而不是 content-<shop>，兩件事不同」）。
+  //   ⚠ 刻意不印 warn、不拋錯：切頁時五個通路各來一次，印了只會洗版（理由同 setShop 那句）。
+  if(!document.getElementById('tbl-'+shop)) return;
   const s=state[shop];const built=s._built;
   const edits=getEdits(shop);
   const noteKey=shop+'|'+s.curMonth+'|'+s.curHalf;
@@ -5207,7 +5236,12 @@ function renderTable(shop,list,opts){
     const _oldSc=_tblHost&&_tblHost.querySelector('.tscroll');
     if(_oldSc){_prevScTop=_oldSc.scrollTop;_prevScLeft=_oldSc.scrollLeft;}
   }
-  _tblHost.innerHTML=html;
+  // ⚠ 這個判空是【防禦性的對稱補齊，不是因為現在會 null】——函式開頭已經對同一個 id 早退過，
+  //   走到這裡 _tblHost 必然存在。補它的兩個理由：
+  //   ① 上面取值（`const _tblHost=…`）到這裡中間隔了 8 行，日後有人在中間插入東西
+  //      （尤其是 await 這種會讓 DOM 在期間被換掉的）就會重新暴露這一行。
+  //   ② 相鄰的 _oldSc / _newSc 兩行本來就寫成 `_tblHost&&…`，只有這一行沒判，不對稱。
+  if(_tblHost) _tblHost.innerHTML=html;
   if(_keepSc&&_prevScTop!==null){
     const _newSc=_tblHost&&_tblHost.querySelector('.tscroll');
     if(_newSc){_newSc.scrollTop=_prevScTop;_newSc.scrollLeft=_prevScLeft;}
