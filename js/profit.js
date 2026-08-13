@@ -8646,6 +8646,36 @@ const MOMO_PROMO_TABLE={
   updated:'2026-08-11',
   dates:{ '2026-05':[1,5,10,22], '2026-06':[1,6,18,22], '2026-07':[1,7,15,22], '2026-08':[1,8,15,22], '2026-09':[1,9,15,22] },
 };
+// ── 公告成交費率表（靜態資料存檔，供 P4 交叉校驗）。⚠ 使用者定案：只存資料、不接任何 UI、不做分類下拉。──
+//   來源 https://rules.momo.com.tw/payment/00002/，抓取日 2026-08-11（與 MOMO_PROMO_TABLE 同批人工核對）。
+//   ⚠ 只收「已人工核對」的分類子集（公告表數百類；此處記主力 + 實際有賣到的），非完整表；實際費率以店家後台為準。
+//   rows：{cat1 第一分類, cat2 第二分類, cat3 第三分類, np 非檔期%, pr 檔期%(≈np+1), note?}。保健小物有 7.5 與 12/13 兩種可能。
+//   放 window（供 P4/console 取用）但不進任何 render；檔期日共用 MOMO_PROMO_TABLE.dates。
+const MOMO_ANNOUNCED_FEE_TABLE={
+  source:'https://rules.momo.com.tw/payment/00002/', fetchedAt:'2026-08-11',
+  note:'已人工核對子集、非完整公告表；實際以店家+後台為準。保健用品部分品項為 12%/13%（有兩種可能值、不可預設單一值）。',
+  promoDates:MOMO_PROMO_TABLE.dates,
+  rows:[
+    {cat1:'寵物',        cat2:'',              cat3:'',              np:7.5, pr:8.5},
+    {cat1:'餐廚用品',    cat2:'',              cat3:'',              np:7.5, pr:8.5},
+    {cat1:'鞋/包/箱',    cat2:'',              cat3:'',              np:7.5, pr:8.5},
+    {cat1:'寢具傢飾',    cat2:'',              cat3:'',              np:7.5, pr:8.5},
+    {cat1:'飾品配件',    cat2:'',              cat3:'',              np:7.5, pr:8.5},
+    {cat1:'運動',        cat2:'運動用品/器材', cat3:'',              np:7.5, pr:8.5},
+    {cat1:'傢俱',        cat2:'',              cat3:'',              np:7.5, pr:8.5},
+    {cat1:'家庭清潔/紙品',cat2:'',             cat3:'',              np:7.5, pr:8.5},
+    {cat1:'按摩器材',    cat2:'',              cat3:'',              np:7.5, pr:8.5},
+    {cat1:'戶外用品',    cat2:'',              cat3:'',              np:7.5, pr:8.5},
+    {cat1:'彩妝保養',    cat2:'',              cat3:'',              np:12,  pr:13.5},
+    {cat1:'個人清潔',    cat2:'',              cat3:'',              np:12,  pr:13.5},
+    {cat1:'旅遊',        cat2:'旅行用品',      cat3:'旅行舒壓/衛生品', np:12,  pr:13.5},
+    {cat1:'車類',        cat2:'汽車百貨',      cat3:'',              np:4,   pr:4.5},
+    {cat1:'車類',        cat2:'GPS/行車紀錄器',cat3:'',              np:4,   pr:4.5},
+    {cat1:'車類',        cat2:'機車',          cat3:'',              np:4,   pr:4.5},
+    {cat1:'車類',        cat2:'汽車',          cat3:'',              np:4,   pr:4.5},
+    {cat1:'保健',        cat2:'',              cat3:'',              np:7.5, pr:8.5, note:'部分品項 12%/13%（家庭計畫/情趣用品/保健用品）'},
+  ],
+};
 let _momoPromoSet=null, _momoPromoSetKey=null;
 function momoPromoDateSet(){ const key=MOMO_PROMO_TABLE.updated; if(_momoPromoSet&&_momoPromoSetKey===key) return _momoPromoSet;
   const s=new Set(); Object.keys(MOMO_PROMO_TABLE.dates).forEach(mo=>{ const [y,m]=mo.split('-'); MOMO_PROMO_TABLE.dates[mo].forEach(d=>s.add(y+m+String(d).padStart(2,'0'))); });
@@ -8855,13 +8885,13 @@ function momoFeeText(fr){
    ⚠ 近似不一致（如 6/7.5、7.5/8）視為不收斂、不四捨五入、走預設＋顯示前例供參考。 */
 const MOMO_MOPLUS_DEFAULT_FEE=7.5;          // 帳號實測眾數（12 類 10 類眾數皆此）
 const MOMO_MOPLUS_FEE_PREFIX_LEN=3;         // 前綴長度＝前 3 碼（掃描實測：唯一有意義 pooling 長度、一致率峰值）
-const MOMO_MOPLUS_HIGH_FEE=12;              // 高費率例外（美妝保養/精品）；預設 7.5 若實際 12 → 毛利高估（危險方向）
-const MOMO_MOPLUS_LOW_FEE=4.5;             // 偏低例外（汽機車百貨）；預設 7.5 若實際 4~5 → 毛利低估（安全方向、僅提示）
+const MOMO_MOPLUS_HIGH_FEE=12;              // 高費率例外非檔期值（彩妝保養/個人清潔/旅行衛生品；檔期 13.5%）；預設 7.5 若實際 12 → 毛利高估（危險方向）
+const MOMO_MOPLUS_LOW_FEE=4;               // 偏低例外非檔期值（車類：汽車百貨/機車；檔期 4.5%）；預設 7.5 若實際 4 → 毛利低估（安全方向、僅提示）。顯示層一律非檔期值。
 // 給新品原廠編號 → 建議費率 + 來源。純邏輯（讀 products + 反推 index）。回：
 //   {rate, source:'prefix_diff'|'prefix_same'|'default', autofill:bool, label, warn12:bool, refNote, prefN, pref}
 function momoMoPlusPrefixFee(shop, origin){
   const DEF=MOMO_MOPLUS_DEFAULT_FEE, pref=String(origin||'').slice(0,MOMO_MOPLUS_FEE_PREFIX_LEN);
-  const base={rate:DEF, source:'default', autofill:false, label:'帳號預設值', warn12:false, refNote:'', prefN:0, pref};
+  const base={rate:DEF, source:'default', autofill:false, label:'帳號預設值（公告表：寵物／餐廚／寢具傢飾／戶外／鞋包箱／家庭清潔皆為非檔期 7.5%）', warn12:false, refNote:'', prefN:0, pref};
   if(pref.length<MOMO_MOPLUS_FEE_PREFIX_LEN) return base;
   const uniq=[], multiLo=[];
   momoLoadProducts(shop).forEach(p=>{ const o=p.origin||''; if(o.slice(0,MOMO_MOPLUS_FEE_PREFIX_LEN)!==pref) return;
@@ -11348,8 +11378,8 @@ function momoRenderMoPlusBatchAdd(shop){
           <label style="${_MOMO_LB}">成交費率 %</label>
           <div style="display:flex;gap:8px;align-items:center">
             <input id="momo-mpadd-fee-${shop}" type="number" value="${MOMO_MOPLUS_DEFAULT_FEE}" oninput="momoMoPlusAddFeeInput('${shop}')" style="${_MOMO_INP};width:90px">
-            <button type="button" onclick="momoMoPlusAddFeeExc('${shop}','high')" title="美妝保養、精品類請確認：預設 7.5% 若實際 12% 會高估毛利（危險方向）" style="padding:5px 10px;border:1px solid #fca5a5;background:#fef2f2;color:#dc2626;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">美妝/精品 12%</button>
-            <button type="button" onclick="momoMoPlusAddFeeExc('${shop}','low')" title="汽機車百貨常為 4~5%；預設 7.5% 只會低估毛利（安全方向），提示用" style="padding:5px 10px;border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;font-size:12px;cursor:pointer">汽機車 ~4.5%</button>
+            <button type="button" onclick="momoMoPlusAddFeeExc('${shop}','high')" title="公告表 12%（檔期日 13.5%）。⚠ 保健用品部分品項亦為 12%，請確認。預設 7.5% 若實際 12% 會高估毛利（危險方向）" style="padding:5px 10px;border:1px solid #fca5a5;background:#fef2f2;color:#dc2626;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">彩妝保養／個人清潔／旅行衛生品 12%</button>
+            <button type="button" onclick="momoMoPlusAddFeeExc('${shop}','low')" title="公告表 4%（檔期日 4.5%）。預設 7.5% 只會低估毛利（安全方向），提示用" style="padding:5px 10px;border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;font-size:12px;cursor:pointer">車類（汽車百貨／機車）4%</button>
           </div>
           <div id="momo-mpadd-feebadge-${shop}" style="font-size:11px;margin-top:4px;min-height:16px"></div>
         </div>
@@ -11364,7 +11394,7 @@ function momoRenderMoPlusBatchAdd(shop){
 function momoMoPlusAddFeeBadge(shop, extra){
   const el=document.getElementById('momo-mpadd-feebadge-'+shop); if(!el) return;
   const st=(_moPlusAddFee[shop]||{}).source||'default';
-  const map={ prefix_diff:['#5b5fcf','同前綴前例（收斂）'], prefix_same:['#5b5fcf','同前綴前例（=帳號預設 7.5%）'], default:['#9ca3af','帳號預設值 7.5%'], manual:['#d97706','手動指定'] };
+  const map={ prefix_diff:['#5b5fcf','同前綴前例（收斂）'], prefix_same:['#5b5fcf','同前綴前例（=帳號預設 7.5%）'], default:['#9ca3af','帳號預設值（公告表：寵物／餐廚／寢具傢飾／戶外／鞋包箱／家庭清潔皆為非檔期 7.5%）'], manual:['#d97706','手動指定'] };
   const lbl=(_moPlusAddFee[shop]||{}).label || (map[st]?map[st][1]:st);
   const col=map[st]?map[st][0]:'#9ca3af';
   el.innerHTML=`<span style="color:${col}">來源：${_momoEsc(lbl)}</span>`+(extra?` <span style="color:#dc2626;font-weight:700">${extra}</span>`:'');
@@ -11392,7 +11422,7 @@ function momoMoPlusAddFeeExc(shop, kind){
   const feeEl=document.getElementById('momo-mpadd-fee-'+shop); if(!feeEl) return;
   feeEl.value = kind==='high'?MOMO_MOPLUS_HIGH_FEE:MOMO_MOPLUS_LOW_FEE;
   _moPlusAddFee[shop]={source:'manual', autofillRate:(_moPlusAddFee[shop]||{}).autofillRate};
-  momoMoPlusAddFeeBadge(shop, kind==='high'?'已套用高費率例外 12%（美妝/精品）':'已套用汽機車 ~4.5%（僅低估風險）');
+  momoMoPlusAddFeeBadge(shop, kind==='high'?'已套用 12%（彩妝保養/個人清潔/旅行衛生品；檔期 13.5%）':'已套用 4%（車類：汽車百貨/機車；檔期 4.5%）');
   momoMoPlusAddPreview(shop);
 }
 function momoMoPlusAddOne(shop){
@@ -14733,7 +14763,7 @@ Object.assign(window, {
   momoParseE001,momoLoadE001,momoLoadE001Doc,momoSaveE001Doc,momoListE001Docs,momoClearE001,momoSettledPeriods,momoE001File,momoE001Remove,momoE001Generate,momoE001Apply,momoE001Clear,momoE001BlockHTML,momoMoPlusEstFeeRate,momoMoPlusE001Ctx,momoAllPeriods,
   momoMoPlusMasterFile,momoMoPlusMasterRemove,momoMoPlusMasterGenerate,momoMoPlusMasterApply,momoParseMoPlusMaster,momoMoPlusApplyMaster,momoOpenSpecPrices,momoMoPlusScanDirty,momoMoPlusCleanDirty,
   momoMoPlusOriginsKey,momoLoadMoPlusOriginsDoc,momoSaveMoPlusOriginsDoc,momoListMoPlusOriginsDocs,momoBuildMoPlusOriginsDoc,momoMoPlusConsistency,momoMoPlusCompleteness,
-  momoFeeRateCandidates,momoIsPromoDate,momoPromoUncoveredMonths,momoBuildFeeCandidates,momoFeeRateAccumulate,momoFeeRateForSku,momoFeeRateSummary,MOMO_FEE_RATES,MOMO_PROMO_TABLE,
+  momoFeeRateCandidates,momoIsPromoDate,momoPromoUncoveredMonths,momoBuildFeeCandidates,momoFeeRateAccumulate,momoFeeRateForSku,momoFeeRateSummary,MOMO_FEE_RATES,MOMO_PROMO_TABLE,MOMO_FEE_PAIRS,MOMO_ANNOUNCED_FEE_TABLE,momoMoPlusFeeAnomalySummary,
   momoMoPlusOriginsForSku,momoMoPlusMarginCalc,momoMoPlusMargin,momoMoPlusOrderDate,momoMoPlusLatestSaleForSku,momoDismissMoPlusPriceHint,
   momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusAddPreview,momoMoPlusSetOtherFee,
   momoMoPlusPrefixFee,momoMoPlusAddOriginChanged,momoMoPlusAddFeeInput,momoMoPlusAddFeeExc,momoMoPlusAddFeeBadge,
