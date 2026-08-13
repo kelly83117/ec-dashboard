@@ -10133,6 +10133,17 @@ function momoDeleteOptlog(shop,sku,idx){
   momoUpdateDailyProgress({silent:true});   // optlog 刪除 → 同步工作日誌摘要（silent 不跳 toast）
   momoRenderOptlogSection(shop,sku);
 }
+// 新增商品 → 寫一筆 optlog（工作日誌連動；比照 momoAddOptlog 的 by/欄位/pipeline，但不需 DOM 選單、不重繪紀錄區塊）。
+//   賣場無關（甲乙/MO+ 共用）；rich 資料在 product.history、此 optlog 只做工作日誌計數指標（靠 sku 軟連結回商品）。
+function momoLogProductAddOptlog(shop, sku, type, note){
+  try{
+    const now=momoNowParts(), by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
+    const om=momoLoadOptlog(shop); om[sku]=om[sku]||[];
+    om[sku].push({ id:'opt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:now.date, time:now.time, shop, sku, by, type:type||'新增商品', note:note||'' });
+    momoSaveOptlog(shop, om);
+    momoUpdateDailyProgress({silent:true});
+  }catch(e){ try{ console.warn('[momo product-add optlog]', e); }catch{} }
+}
 
 // ══════════ MOMO optlog → 工作日誌（軟連結；比照蝦皮 _updateDailyProgressFromAdjustments，但歸屬用 optlog 每筆的 by(登入 username)，不建 shop→person 對照表）══════════
 //   掃當天 ec_momo_optlog|甲配/乙配 → 依 by 分人、依「賣場·type」動態計數 → 寫 {kind:'momo-summary',counts} 進 ec.dailyProgress。
@@ -11315,8 +11326,9 @@ function momoBatchSubmitAdd(shop){
   if(products.some(x=>x.sku===sku)){ alert('商品編號重複：'+sku); return; }
   const shipping=(shipRaw>=0)?shipRaw:momoDefaultShip(shop);
   products.push({sku,origin,name,cost,purchasePrice:pp,salePrice:sp,shippingPackaging:shipping,
-    history:[{...momoNowParts(),cost,purchasePrice:pp,salePrice:sp,note:'新增商品'}], periods:{}});
+    history:[{...momoNowParts(),cost,purchasePrice:pp,salePrice:sp,note:'新增商品'}], periods:{}});   // ⚠ 甲乙 history 結構/畫面不動（cost/進價/售價已齊全；無 feeRatePredicted＝固定費率、不適用）
   momoSaveProducts(shop,products);
+  momoLogProductAddOptlog(shop, sku, '新增商品', '新增商品：'+name+'（'+sku+'）'+(origin?'／原廠 '+origin:''));   // 工作日誌連動（比照 MO+；只新增 optlog、不改 history）
   if(typeof showToast==='function') showToast('已新增商品 '+sku,'success');
   _momoBatchMode[shop]='edit'; _momoBatchSel[shop]=sku; _momoBatchSearch[shop]='';   // 切到編輯模式並選中新商品
   momoRenderBatch(shop);
@@ -13385,7 +13397,9 @@ function momoSyncApplyNew(shop){
   const items=(_momoSyncPlan.shops[shop]||{}).newItems||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可一鍵新增的未建檔項目','info'); return; }
   const master=momoLoadProducts(shop), have=new Set(master.map(p=>p.sku)); let added=0;
   items.forEach(it=>{ if(have.has(it.sku))return; master.push({sku:it.sku, origin:it.origin, name:it.name, cost:it.cost, purchasePrice:it.purchasePrice, salePrice:it.salePrice, shippingPackaging:momoDefaultShip(shop), history:[{...momoNowParts(),cost:it.cost,purchasePrice:it.purchasePrice,salePrice:it.salePrice,note:'商品資料同步：新建檔'}], periods:{}}); have.add(it.sku); added++; });
-  momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已新增 '+added+' 個商品');
+  momoSaveProducts(shop,master);
+  if(added>0) momoLogProductAddOptlog(shop, '__sync_new__', '同步新建', '商品資料同步·一鍵新建 '+added+' 筆');   // 批次新建＝一筆彙總 optlog（非逐筆、不洗版；比照主檔匯入）
+  _momoSyncAfterApply(shop, shop+' 已新增 '+added+' 個商品');
 }
 function momoRenderProductSync(shop){
   const c=document.getElementById('momo-sub-content-'+shop);
