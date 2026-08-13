@@ -70,9 +70,11 @@ try {
   };
 
   // ============== 淨利表獨立文件 app/profit（避免 app/main 撞 1MB 上限） ==============
-  // app/profit 只放「當期」資料；舊月份各自獨立 doc（app/profit_YYYY_MM）避免單檔過大
+  // app/profit 只放「當期」資料，舊月份分片出去避免單檔過大。分片名依資料種類分成兩式：
+  //   舊月份報表         → app/profit_YYYY_MM  （例 app/profit_2026_05）
+  //   舊月份的廣告調整   → app/profit_notes_YYYY（例 app/profit_notes_2026，ec_notes|通路|月|半月）
   const profitDocRef = doc(db, 'app', 'profit');
-  const PROFIT_ARCHIVE_DOCS = ['profit_2026_05'];
+  const PROFIT_ARCHIVE_DOCS = ['profit_2026_05', 'profit_notes_2026'];
   const profitArchiveRefs = PROFIT_ARCHIVE_DOCS.map(name => doc(db, 'app', name));
   const PROFIT_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId
     + '/databases/(default)/documents/app/profit';
@@ -133,9 +135,18 @@ try {
       mergeAndNotify();
     }, err => { console.error('[profit subscribe] 訂閱失敗：', err); });
 
-    // 重量：app/profit_2026_05 (2.4MB) 跟 profits collection 延後訂閱
+    // 重量：archive 分片（PROFIT_ARCHIVE_DOCS，見上方常數）跟 profits collection 延後訂閱
     // 等首頁渲染完成 + 使用者第一次切換到淨利表 才載入
     // 在那之前，淨利表頁面如果有人開啟，會看到 loading 狀態
+    //
+    // 目前的分片與各自的用途：
+    //   app/profit_2026_05     2026/05 的報表封存。那批資料【只有這一份副本】，不能刪。
+    //   app/profit_notes_2026  2026 年舊月份的廣告調整（ec_notes|通路|月|半月）封存。
+    //                          doc 名刻意帶 notes 是護欄：這片只放 ec_notes，不要把報表塞進來。
+    // ⚠ 各分片的 key 命名空間【必須互不相交】。這是正確性要求，不是分類習慣——
+    //   mergeAndNotify 合併 archive 用的 Object.values(profitParts.archives)，順序等於哪個
+    //   onSnapshot 先回來，是【非決定性】的。兩片若出現同名 key，誰蓋掉誰每次載入都可能不同，
+    //   而且不會報錯、不會有任何徵兆。新增分片前先確認它的 key 前綴與既有各片都不重疊。
     window.__heavyProfitSubsLoaded = false;
     window.__loadHeavyProfitSubs = () => {
       if (window.__heavyProfitSubsLoaded) return;
