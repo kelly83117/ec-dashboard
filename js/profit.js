@@ -8499,6 +8499,16 @@ function momoMoPlusApplyMaster(shop, parsed){
   const masterProducts={};
   (parsed.products||[]).forEach(m=>{ masterProducts[m.sku]={ name:m.name||'', origins:(m.origins||[]).slice(), specs:(m.specs||[]).slice() }; });
   const masterOk=momoSaveMoPlusMaster(shop, { shop, src:'master', masterAt:Date.now(), products:masterProducts });
+  // 工作日誌連動：批次主檔匯入＝有意義的工作事件，但**一筆彙總**（非逐筆，避免 N 筆洗版；比照補成本 momoPersistCostByOrigin 只回 {added,updated,total}）。
+  //   存合成 sku key（不撞真商品、不進任一商品的優化紀錄區塊）；type '主檔匯入' → momoUpdateDailyProgress 當日 counts +1。product.history 維持每新品各一筆（8491，不動）。
+  try{
+    const now=momoNowParts(), by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
+    const om=momoLoadOptlog(shop); const K='__master_import__'; om[K]=om[K]||[];
+    om[K].push({ id:'opt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:now.date, time:now.time, shop, sku:K, by, type:'主檔匯入',
+      note:'商品主檔匯入：新增 '+added+' 筆／更新 '+updated+' 筆（總計 '+products.length+' 筆）' });
+    momoSaveOptlog(shop, om);
+    momoUpdateDailyProgress({silent:true});
+  }catch(e){ try{ console.warn('[MO+ master import optlog]', e); }catch{} }
   return { added, updated, total:products.length, masterOk, masterSkuN:Object.keys(masterProducts).length };
 }
 // ══════ MO+ 商品髒資料掃描/清理（只限指定賣場，不碰別的）══════
@@ -11435,15 +11445,33 @@ function momoMoPlusAddOne(shop){
   if(!sku) sku=momoMoPlusNextTempSku(products);                                   // 留空 → 自動 TEMP-####
   else if(!momoSkuValid(sku)){ alert('商品編號格式：僅英數與「-」（例 TP…／TEMP-…）；含空格/中文/隱形字會被擋（防髒資料）'); return; }
   if(products.some(x=>x.sku===sku)){ alert('商品編號重複：'+sku); return; }
-  const p={sku, name, history:[{...momoNowParts(), note:'新增商品(MO+)'+(origin?'':'，待補原廠編號')}], periods:{}};
+  const now=momoNowParts(), at=now.date+' '+now.time;
+  const feeVal=parseFloat((g('fee')?g('fee').value:''));
+  const feeSrc=(_moPlusAddFee[shop]||{}).source||'default';           // prefix_diff/prefix_same/default/manual（P4 命中率量測依據）
+  const spVal=parseFloat((g('sp')?g('sp').value:''));                 // 售價（表單試算值，不落地到 product、但記進時間軸這筆）
+  let costV=null; try{ if(origin){ const cm=momoMoPlusCostMapCached(); if(Number(cm[origin])>0) costV=Number(cm[origin]); } }catch(e){}
+  // 時間軸（唯一 rich 來源）：新增這筆 history entry 帶齊欄位；feeSource 寫進 note（事由欄）→ 時間軸看得到、不改共用表格欄（甲乙不受影響）
+  const feeNote=(feeVal>=0)?('｜成交費率 '+feeVal+'%（來源 '+feeSrc+'）'):'';
+  const hist={ date:now.date, time:now.time,
+    note:'新增商品(MO+)'+(origin?'':'，待補原廠編號')+feeNote,
+    cost:costV, salePrice:(spVal>=0?spVal:null),                      // → 時間軸「成本/售價」欄
+    origin:origin||'', name, feeRate:(feeVal>=0?feeVal:null), feeSource:(feeVal>=0?feeSrc:null), feeAt:(feeVal>=0?at:null) };
+  const p={sku, name, history:[hist], periods:{}};
   if(origin){ p.origin=origin; p.origins=[origin]; }                              // 原廠編號→自動帶成本（毛利階段查 cost_by_origin）
   // 成交費率 + 來源標記落地（P4 前提）：售價仍不落地（權威＝主檔掛牌/成交），但費率是「新品當下的預測」，
   //   要連同來源(prefix_diff/prefix_same/default/manual)+時間存下，第一個月結算後才能按來源分組比對「預測 vs 實際」。
-  const feeVal=parseFloat((g('fee')?g('fee').value:''));
-  if(feeVal>=0){ const st=(_moPlusAddFee[shop]||{}).source||'default';
-    p.feeRatePredicted={rate:feeVal, source:st, at:momoNowParts().date+' '+momoNowParts().time}; }
+  if(feeVal>=0){ p.feeRatePredicted={rate:feeVal, source:feeSrc, at}; }
   products.push(p);
   momoSaveProducts(shop,products);
+  // 工作日誌連動（比照 momoAddOptlog：一筆 optlog、type '新增商品'、by=登入者 → 走既有 momoUpdateDailyProgress 進當日 counts）。
+  //   rich 欄位只存 history 一份；此 optlog 只當工作日誌計數指標，靠 sku 軟連結回商品（不各存一份）。
+  try{
+    const by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
+    const om=momoLoadOptlog(shop); om[sku]=om[sku]||[];
+    om[sku].push({ id:'opt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:now.date, time:now.time, shop, sku, by, type:'新增商品', note:'新增商品：'+name+'（'+sku+'）'+(origin?'／原廠 '+origin:'') });
+    momoSaveOptlog(shop, om);
+    momoUpdateDailyProgress({silent:true});
+  }catch(e){ try{ console.warn('[MO+ add optlog]', e); }catch{} }
   if(typeof showToast==='function') showToast('已新增 '+sku,'success');
   _momoBatchMode[shop]='edit'; _momoBatchSel[shop]=sku; _momoBatchSearch[shop]='';
   momoRenderBatch(shop);
