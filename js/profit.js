@@ -8629,12 +8629,18 @@ function momoSaveMoPlusMaster(shop, doc){ return momoSaveMoPlusOriginsDoc(shop, 
    公式（真檔驗 1309/1309）：round(單筆售價 × 數量 × 費率%) == 成交手續費（元以下四捨五入；分母＝售價×數量、非A貨款）。
    ⚠ 反推僅供顯示/異常偵測，毛利一律走逐筆實際值（見 spec 界線）。*/
 const MOMO_FEE_RATES=[3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,10,12,13,13.5];   // 公告費率集合（rules.momo.com.tw/payment/00002）
-// 逐列候選費率：使 round(price×qty×r%)==fee 的所有公告費率。base<=0 或 fee<=0 → []（呼叫端另判「無資料」vs「無解」）。
-function momoFeeRateCandidates(price, qty, fee){
+// 公告表「非檔期/檔期」配對（rules.momo.com.tw/payment/00002）。反推配對模型：非檔期列須解到某配對的 np、檔期列須解到同配對的 pr。
+//   ⚠ 刻意不含 8/8.x 配對：實測有 SKU 非檔期實收 8%（不在任何配對）→ 標異常人工確認（使用者定案：不猜配對填補、保留「公告配對與帳單有出入」訊號）。
+const MOMO_FEE_PAIRS=[[3,3.5],[4,4.5],[5,5.5],[5.5,6.5],[6,6.5],[6,7],[6.5,7.5],[7,7.5],[7.5,8.5],[9,10],[12,13],[12,13.5]];
+const MOMO_FEE_NP=[...new Set(MOMO_FEE_PAIRS.map(p=>p[0]))];   // 非檔期配對值 {3,4,5,5.5,6,6.5,7,7.5,9,12}
+const MOMO_FEE_PR=[...new Set(MOMO_FEE_PAIRS.map(p=>p[1]))];   // 檔期配對值   {3.5,4.5,5.5,6.5,7,7.5,8.5,10,13,13.5}
+// 逐列候選費率（限指定費率集）：使 round(price×qty×r%)==fee 的所有費率。base<=0 或 fee<=0 → []（呼叫端另判「無資料」vs「無解」）。
+function momoFeeRateCandidatesIn(price, qty, fee, rates){
   const base=Number(price)*Number(qty), f=Number(fee);
   if(!(base>0) || !(f>0)) return [];
-  return MOMO_FEE_RATES.filter(r=>Math.round(base*r/100)===f);
+  return (rates||MOMO_FEE_RATES).filter(r=>Math.round(base*r/100)===f);
 }
+function momoFeeRateCandidates(price, qty, fee){ return momoFeeRateCandidatesIn(price, qty, fee, MOMO_FEE_RATES); }   // 相容：17 費率
 // ── 檔期日清單（可維護；記更新日、畫面顯示）。orderDate＝訂編 chars[1:6] 解出的 'YYYYMMDD'。──
 const MOMO_PROMO_TABLE={
   updated:'2026-08-11',
@@ -8658,7 +8664,8 @@ function momoPromoUncoveredMonths(orderDates){
 // 逐列反推 → 該來源月 per-SKU 候選集（只用非檔期、有成交手續費的正常商品列；月內取交集）。
 //   回 { cand:{sku:[rates]}, nosol:{sku:true}, uncoveredMonths:[..] }。cand[sku]＝月內交集(非空)；nosol[sku]＝該 SKU 有非檔期成交列但某列反推出空(無費率可還原)。
 function momoBuildFeeCandidates(lines){
-  const cand={}, nosol={}, seenFee={}, orderDates=[];
+  const cand={}, nosol={}, seenFee={}, orderDates=[];       // 舊 17-費率非檔期（保留：相容 + rollback；讀取端配對欄缺時 fallback）
+  const np={}, npNosol={}, pr={}, prNosol={};               // 配對模型：非檔期列解 NP（配對左值）、檔期列解 PR（配對右值）→ 月內交集
   const covered=momoPromoCoveredMonths();
   const monthOf=od=>{ const s=String(od||''); return s.length>=6 ? s.slice(0,4)+'-'+s.slice(4,6) : null; };
   (lines||[]).forEach(ln=>{
@@ -8666,33 +8673,70 @@ function momoBuildFeeCandidates(lines){
     if(ln.orderDate) orderDates.push(ln.orderDate);
     const fee=Number(ln.feeDeal); if(!(fee>0)) return;      // 無成交手續費 → 不貢獻（顯示層另判「—」）
     const mo=monthOf(ln.orderDate);
-    if(!mo || !covered.has(mo)) return;                     // ⚠ 檔期清單未涵蓋的月份：無法判定該列是否檔期 → 不反推（否則檔期列被當非檔期、反推出高費率污染跨月交集→假異常）。僅計入 uncoveredMonths 警告
-    if(momoIsPromoDate(ln.orderDate)) return;               // 檔期列排除、不進反推
+    if(!mo || !covered.has(mo)) return;                     // ⚠ 檔期清單未涵蓋的月份：無法判定該列是否檔期 → 不反推（否則污染）。僅計入 uncoveredMonths 警告
     const sku=ln.sku; if(!sku) return;
     seenFee[sku]=true;
-    const c=momoFeeRateCandidates(ln.price, ln.qty, fee);
-    if(!c.length){ nosol[sku]=true; return; }               // 該列無費率可還原 → 標無解（公式已驗無例外→資料/公告有變）
-    if(!(sku in cand)) cand[sku]=c.slice();
-    else cand[sku]=cand[sku].filter(r=>c.indexOf(r)>=0);    // 月內交集
+    if(momoIsPromoDate(ln.orderDate)){
+      // 檔期列：解檔期配對值 PR（納入反推、不再排除；這是 22 個純檔期 SKU 能被解出的關鍵）
+      const cp=momoFeeRateCandidatesIn(ln.price, ln.qty, fee, MOMO_FEE_PR);
+      if(!cp.length){ prNosol[sku]=true; }
+      else if(!(sku in pr)) pr[sku]=cp.slice();
+      else pr[sku]=pr[sku].filter(r=>cp.indexOf(r)>=0);     // 月內交集
+    } else {
+      // 非檔期列：解非檔期配對值 NP（配對模型）+ 舊 17-費率（相容/rollback）
+      const c17=momoFeeRateCandidates(ln.price, ln.qty, fee);
+      if(!c17.length){ nosol[sku]=true; } else if(!(sku in cand)) cand[sku]=c17.slice(); else cand[sku]=cand[sku].filter(r=>c17.indexOf(r)>=0);
+      const cnp=momoFeeRateCandidatesIn(ln.price, ln.qty, fee, MOMO_FEE_NP);
+      if(!cnp.length){ npNosol[sku]=true; } else if(!(sku in np)) np[sku]=cnp.slice(); else np[sku]=np[sku].filter(r=>cnp.indexOf(r)>=0);
+    }
   });
-  // seenFee 但 cand 收成空(月內互斥) 也算無解
-  Object.keys(seenFee).forEach(sku=>{ if((sku in cand) && !cand[sku].length){ nosol[sku]=true; delete cand[sku]; } });
-  return { cand, nosol, uncoveredMonths:momoPromoUncoveredMonths(orderDates) };
+  // 月內互斥收空 → 無解（舊 17 / NP / PR 各自判）
+  Object.keys(seenFee).forEach(sku=>{
+    if((sku in cand) && !cand[sku].length){ nosol[sku]=true; delete cand[sku]; }
+    if((sku in np) && !np[sku].length){ npNosol[sku]=true; delete np[sku]; }
+    if((sku in pr) && !pr[sku].length){ prNosol[sku]=true; delete pr[sku]; }
+  });
+  return { cand, nosol, np, npNosol, pr, prNosol, uncoveredMonths:momoPromoUncoveredMonths(orderDates) };
 }
 // 跨月交集累積（單調縮小、不覆蓋）：monthsData＝按月序 [{cand:[rates]|null, nosol:bool}]（該 SKU 每月一項；月內無非檔期成交列＝null 跳過）。
 //   回 {status:'unique'|'multi'|'anomaly'|'none', cand:[..], reason?, cur?}。空集(disjoint)或某月 nosol → anomaly、保留累積、附衝突月供人工判斷、不自動選邊。
 function momoFeeRateAccumulate(monthsData){
+  const md=(monthsData||[]).filter(Boolean);
+  // 配對模型（重傳後 doc 有 np/pr 欄）→ 走配對版；舊 doc（僅 17-費率 cand）→ fallback 17 版（不破、重傳後自動切）。
+  if(md.some(m=>m.np!=null || m.pr!=null || m.npNosol || m.prNosol)) return momoFeeRateAccumulatePairs(md);
+  return momoFeeRateAccumulate17(md);
+}
+// 舊 17-費率跨月交集（相容 fallback；配對欄缺時用）。
+function momoFeeRateAccumulate17(monthsData){
   const present=(monthsData||[]).filter(m=>m && (m.nosol || (m.cand && m.cand.length)));
   if(!present.length) return { status:'none', cand:[] };
   let acc=null;
   for(const m of present){
-    if(m.nosol) return { status:'anomaly', reason:'nosolution', cand:acc||[] };      // 某月無解
+    if(m.nosol) return { status:'anomaly', reason:'nosolution', cand:acc||[] };
     if(acc==null){ acc=m.cand.slice(); continue; }
     const inter=acc.filter(r=>m.cand.indexOf(r)>=0);
-    if(!inter.length) return { status:'anomaly', reason:'disjoint', cand:acc.slice(), cur:m.cand.slice() };   // 跨月不重疊 → 保留新舊
+    if(!inter.length) return { status:'anomaly', reason:'disjoint', cand:acc.slice(), cur:m.cand.slice() };
     acc=inter;
   }
   return { status: acc.length===1?'unique':'multi', cand:acc };
+}
+// 配對模型跨月累積：非檔期列跨月交集 NP、檔期列跨月交集 PR → 過濾出一致配對 → distinct 非檔期值。
+//   status/cand 語意與 17 版相容（cand＝**非檔期費率**，顯示層/排序沿用、只顯非檔期值）。異常另帶 cur（觀測檔期值）供清單。
+//   ⚠ 不鎖定：每次讀都重算交集，新月矛盾（交集空/無解/無一致配對）即 anomaly、不默默回多解。
+function momoFeeRateAccumulatePairs(monthsData){
+  const npMonths=(monthsData||[]).filter(m=>m && (m.npNosol || (m.np && m.np.length)));
+  const prMonths=(monthsData||[]).filter(m=>m && (m.prNosol || (m.pr && m.pr.length)));
+  if(!npMonths.length && !prMonths.length) return { status:'none', cand:[] };
+  let accNp=null;
+  for(const m of npMonths){ if(m.npNosol) return { status:'anomaly', reason:'np-nosolution', cand:(accNp||[]).slice() };
+    if(accNp==null){ accNp=m.np.slice(); continue; } const it=accNp.filter(r=>m.np.indexOf(r)>=0); if(!it.length) return { status:'anomaly', reason:'np-disjoint', cand:accNp.slice(), cur:m.np.slice() }; accNp=it; }
+  let accPr=null;
+  for(const m of prMonths){ if(m.prNosol) return { status:'anomaly', reason:'pr-nosolution', cand:(accNp||[]).slice(), cur:(accPr||[]).slice() };
+    if(accPr==null){ accPr=m.pr.slice(); continue; } const it=accPr.filter(r=>m.pr.indexOf(r)>=0); if(!it.length) return { status:'anomaly', reason:'pr-disjoint', cand:(accNp||[]).slice(), cur:accPr.slice() }; accPr=it; }
+  const pairs=MOMO_FEE_PAIRS.filter(([np,pr])=>(accNp==null||accNp.indexOf(np)>=0) && (accPr==null||accPr.indexOf(pr)>=0));
+  if(!pairs.length) return { status:'anomaly', reason:'nopair', cand:(accNp||[]).slice(), cur:(accPr||[]).slice() };   // 非檔期/檔期各有解但配不成一組 → 帳單與公告配對出入
+  const nps=[...new Set(pairs.map(p=>p[0]))].sort((a,b)=>a-b);
+  return { status: nps.length===1?'unique':'multi', cand:nps };
 }
 function momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods){
   const has=new Set(momoLoadProducts(shop).map(p=>p.sku));
@@ -8722,8 +8766,11 @@ function momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods){
     const cur=latestSale[ln.sku];
     if(!cur || ln.orderDate>cur.d) latestSale[ln.sku]={ sp:Math.round(Number(ln.price)||0), d:ln.orderDate };   // 下單日較晚 → 更新
   });
-  const fc=momoBuildFeeCandidates(parsed.lines);   // 成交費率：該來源月 per-SKU 候選集（非檔期反推、月內交集）+ 無解 + 未涵蓋月份
-  return { doc:{ shop, src:parsed.srcCode, skus, freight, latestSale, feeCand:fc.cand, feeNosol:fc.nosol, feeUncovered:fc.uncoveredMonths }, skuN:Object.keys(skus).length };
+  const fc=momoBuildFeeCandidates(parsed.lines);   // 成交費率：該來源月 per-SKU 候選集（配對模型 NP/PR + 舊 17 相容）+ 無解 + 未涵蓋月份
+  return { doc:{ shop, src:parsed.srcCode, skus, freight, latestSale,
+    feeCand:fc.cand, feeNosol:fc.nosol,                                    // 舊 17-費率（相容/rollback）
+    feeNp:fc.np, feeNpNosol:fc.npNosol, feePr:fc.pr, feePrNosol:fc.prNosol, // 配對模型（重傳後啟用）
+    feeUncovered:fc.uncoveredMonths }, skuN:Object.keys(skus).length };
 }
 // ① 雙寫互查：momo_products cell qty(Σsources) vs origins Σo，逐(sku,period)。回 mismatches[]（呼叫端出可見警告、標該期別）。
 function momoMoPlusConsistency(shop){
@@ -8756,8 +8803,12 @@ function momoBuildMoPlusOriginsIndex(shop){
   srcs.forEach(src=>{ const d=docs[src];
     const sk=(d&&d.skus)||{}; Object.keys(sk).forEach(s=>{ const byP=idx[s]||(idx[s]={}); const bySku=originTot[s]||(originTot[s]={}); Object.keys(sk[s]).forEach(pd=>{ const c=sk[s][pd]; const e=byP[pd]||(byP[pd]={originsQty:{},feeD:0}); Object.keys(c.o||{}).forEach(o=>{ const q=Number(c.o[o])||0; e.originsQty[o]=(e.originsQty[o]||0)+q; bySku[o]=(bySku[o]||0)+q; }); e.feeD+=Number(c.d)||0; }); });
     const ls=(d&&d.latestSale)||{}; Object.keys(ls).forEach(s=>{ const cur=latest[s]; const v=ls[s]; if(v&&v.d && (!cur || v.d>=cur.d)) latest[s]={sp:v.sp, d:v.d}; });   // 跨來源月：下單日較晚勝；同日打平取後掃到的（來源月排序後較晚者）
-    const fcand=(d&&d.feeCand)||{}, fnos=(d&&d.feeNosol)||{};   // 逐 SKU：該來源月候選集 / 無解
-    new Set([...Object.keys(fcand),...Object.keys(fnos)]).forEach(s=>{ (feeMonths[s]=feeMonths[s]||[]).push({src, cand:(fcand[s]||[]).slice(), nosol:!!fnos[s]}); });
+    const fcand=(d&&d.feeCand)||{}, fnos=(d&&d.feeNosol)||{};   // 逐 SKU：該來源月候選集 / 無解（舊 17-費率）
+    const fnp=(d&&d.feeNp)||{}, fnpn=(d&&d.feeNpNosol)||{}, fpr=(d&&d.feePr)||{}, fprn=(d&&d.feePrNosol)||{};   // 配對模型 NP/PR
+    new Set([...Object.keys(fcand),...Object.keys(fnos),...Object.keys(fnp),...Object.keys(fnpn),...Object.keys(fpr),...Object.keys(fprn)]).forEach(s=>{
+      (feeMonths[s]=feeMonths[s]||[]).push({ src, cand:(fcand[s]||[]).slice(), nosol:!!fnos[s],
+        np:(fnp[s]?fnp[s].slice():null), npNosol:!!fnpn[s], pr:(fpr[s]?fpr[s].slice():null), prNosol:!!fprn[s] });
+    });
     ((d&&d.feeUncovered)||[]).forEach(mo=>feeUncovered.add(mo));
   });
   // ⚠ 讀時再過一次「只留清單涵蓋範圍之後的月份」：既有 doc.feeUncovered 是舊語意（含早於清單的歷史尾巴）產物，
@@ -9977,7 +10028,21 @@ function momoRenderProfitBody(shop, tableOnly){
       }
     }
     const overview=momoOverviewHTML(shop, period, curT, prevT, prevKey, verifyBlock);
-    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+yiCaveat+moPlusBanner+moPlusMissCostChip+moPlusPriceBanner+overview+statusBanner;
+    // ⑤ 成交費率異常 chip（比照缺成本；反推配對模型異常＝需人工確認，不可只在 console）
+    let moPlusFeeAnomChip='';
+    if(momoIsMoPlus(shop) && period){
+      const fa=momoMoPlusFeeAnomalySummary(shop);
+      if(fa.n>0){
+        moPlusFeeAnomChip=`<div class="mm-banner" style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c">
+          <span>⚠ <b>成交費率異常 ${fa.n} 項</b>（反推與公告配對對不上／跨月矛盾）→ 需人工確認分類與實收費率</span>
+          <span style="display:flex;gap:8px;flex-shrink:0">
+            <button class="mm-linkbtn" onclick="momoOpenFeeAnomalyPanel('${shop}')">查看清單</button>
+            <button class="mm-linkbtn" onclick="momoExportFeeAnomaly('${shop}')">⬇ 匯出 CSV</button>
+          </span>
+        </div>`;
+      }
+    }
+    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+yiCaveat+moPlusBanner+moPlusMissCostChip+moPlusFeeAnomChip+moPlusPriceBanner+overview+statusBanner;
   }
   tbl.innerHTML=discHint+tableHTML;
   momoSyncFilterChip(shop);   // 篩選變動後同步工具列 🏷 按鈕作用中狀態（殼不重繪）
@@ -13086,6 +13151,71 @@ function momoOpenMissingCostPanel(shop){
     </div>
   </div>`;
 }
+// ══════ 成交費率異常清單（比照缺成本 chip）：反推與公告配對對不上／跨月矛盾的 SKU，需人工確認 ══════
+//   ⚠ 異常必須被看見：總表頂端 chip + 可查清單/CSV，不可只留 console/內部狀態。
+function momoFeeAnomReason(reason){
+  return ({ 'np-nosolution':'非檔期實收費率不在公告配對值（如 8%）',
+    'np-disjoint':'非檔期費率跨月不一致（可能改過費率/被重分類）',
+    'pr-nosolution':'檔期實收費率不在公告配對值',
+    'pr-disjoint':'檔期費率跨月不一致',
+    'nopair':'非檔期/檔期各有解、但配不成任一公告配對',
+    'nosolution':'某月無法還原費率', 'disjoint':'跨月費率不重疊' })[reason] || reason || '—';
+}
+function momoMoPlusFeeAnomalySummary(shop){
+  shop=momoShopCanon(shop);
+  const fm=(momoMoPlusIndexCached(shop).feeMonths)||{};
+  const nameBy={}; try{ (momoLoadProducts(shop)||[]).forEach(p=>{ nameBy[p.sku]=p.name||''; }); }catch(e){}
+  const list=[];
+  Object.keys(fm).forEach(sku=>{ const r=momoFeeRateAccumulate(fm[sku]); if(r.status!=='anomaly') return;
+    const obs17=momoFeeRateAccumulate17(fm[sku]);   // 舊 17-費率非檔期觀測（給人看實際落在哪個費率）
+    list.push({ sku, name:nameBy[sku]||'', reason:r.reason||'', np:(r.cand||[]), pr:(r.cur||[]), obs17:(obs17.cand||[]) });
+  });
+  list.sort((a,b)=>String(a.sku).localeCompare(String(b.sku)));
+  return { list, n:list.length, period:(_momoPeriodSel[shop]||'') };
+}
+function momoExportFeeAnomaly(shop){
+  const s=momoMoPlusFeeAnomalySummary(shop);
+  if(!s.n){ alert('目前沒有成交費率異常'); return; }
+  const esc=v=>{ const t=String(v==null?'':v); return /[",\n\r]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t; };
+  const fmt=a=>a&&a.length?a.map(x=>x+'%').join('/'):'';
+  const lines=['商品編號,商品名稱,非檔期實收費率,檔期實收費率,異常原因'];
+  s.list.forEach(e=>lines.push([esc(e.sku), esc(e.name), esc(fmt(e.obs17)), esc(fmt(e.pr)), esc(momoFeeAnomReason(e.reason))].join(',')));
+  const csv='﻿'+lines.join('\r\n');
+  try{ const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='MOMO_'+String(shop).replace(/[\\/:*?"<>|]/g,'')+'_成交費率異常_'+(s.period||'')+'.csv'; a.click();
+    if(typeof showToast==='function') showToast('已匯出成交費率異常 '+s.n+' 筆 CSV','success');
+  }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
+}
+function momoOpenFeeAnomalyPanel(shop){
+  const s=momoMoPlusFeeAnomalySummary(shop);
+  let ov=document.getElementById('momo-feeanom-overlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='momo-feeanom-overlay'; document.body.appendChild(ov); }
+  ov.className='ana-overlay open'; ov.style.cssText='position:fixed;inset:0;z-index:4000;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  const fmt=a=>a&&a.length?a.map(x=>x+'%').join('/'):'—';
+  const rowsHtml = s.list.length ? s.list.map((e,i)=>
+    `<tr><td style="text-align:right;color:#9ca3af">${i+1}</td><td style="font-weight:700">${_momoEsc(e.sku)}</td><td style="color:#6b7280;font-size:12px">${_momoEsc(e.name)}</td><td style="text-align:right;font-weight:700">${fmt(e.obs17)}</td><td style="text-align:right">${fmt(e.pr)}</td><td style="color:#b91c1c;font-size:12px">${_momoEsc(momoFeeAnomReason(e.reason))}</td></tr>`
+  ).join('') : `<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:20px">目前沒有成交費率異常 🎉</td></tr>`;
+  ov.innerHTML=`<div class="ana-modal" style="width:min(820px,96vw);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:16px 20px;border-bottom:1px solid #eef0f3">
+      <div><div style="font-size:16px;font-weight:800">成交費率異常清單</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:3px">${_momoEsc(momoShopDisplay(shop))}｜<b>${s.n}</b> 項需人工確認（反推與公告配對對不上／跨月矛盾）</div></div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button class="mm-linkbtn" onclick="momoExportFeeAnomaly('${shop}')">⬇ 匯出 CSV</button>
+        <button class="mm-linkbtn" onclick="document.getElementById('momo-feeanom-overlay').remove()">關閉</button>
+      </div>
+    </div>
+    <div style="overflow:auto;padding:4px 20px 16px">
+      <table class="mm-ptbl" style="width:100%;margin-top:8px;border-collapse:collapse">
+        <thead><tr style="text-align:left;border-bottom:2px solid #eef0f3;color:#6b7280;font-size:12px">
+          <th style="text-align:right;width:36px;padding:6px 4px">#</th><th style="padding:6px 4px">商品編號</th><th style="padding:6px 4px">商品名稱</th><th style="text-align:right;padding:6px 4px">非檔期實收</th><th style="text-align:right;padding:6px 4px">檔期實收</th><th style="padding:6px 4px">異常原因</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <div style="font-size:12px;color:#9ca3af;margin-top:10px;line-height:1.7">這些商品反推費率與公告配對對不上、或跨月矛盾 → 請到 momo 後台人工確認分類與實收費率。<br>「非檔期實收」是逐筆帳單還原的公告費率（可能落在配對清單外，如 8%）。8% 等不在配對清單的費率屬「公告配對與帳單有出入」的訊號，系統<b>不自動補配對</b>；確認分類後再決定是否補。</div>
+    </div>
+  </div>`;
+}
 // ══════ 莫筆克「可用庫存」（各倉商品列表 T 欄）：帳號級快照 origin→數量 + 上傳日期 ══════
 //  ⚠ 是「自家各倉可用庫存」快照、非 MOMO 平台可售量（乙配已進 MOMO 倉的不算）。按原廠編號（品項條碼）→ 甲乙同 origin 共用同一批。
 //  值＝ { uploadedAt:<ms>, byOrigin:{origin:qty} }。庫存是快照 → 每次上傳整份覆蓋（不像 cost 累積），uploadedAt 供「資料日期/過期」提示。
@@ -14615,7 +14745,7 @@ Object.assign(window, {
   momoSearchClear,momoSearchClearToggle,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,momoSyncToggleAll,momoSyncUpdateCount,momoExportExcel,
   momoCostInlineToggle,momoMoPlusCostInlineSave,momoMissingCostSave,momoExportCostByOrigin,momoBumpMoPlusEpoch,
-  momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoOpenMissingCostPanel,momoExportMissingCost,momoUploadShowDryRun,momoUploadDryRunCSV,
+  momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoOpenMissingCostPanel,momoExportMissingCost,momoOpenFeeAnomalyPanel,momoExportFeeAnomaly,momoUploadShowDryRun,momoUploadDryRunCSV,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
