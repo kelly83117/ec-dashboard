@@ -12427,10 +12427,48 @@ function momoMoPlusReconMonths(shop){
   return [...set].filter(Boolean).sort().reverse();
 }
 function momoMoPlusReconSetMonth(shop,m){ _momoMoPlusReconMonth[shop]=m; momoRenderMoPlusRecon(shop); }
-function momoMoPlusReconToggle(shop,g){ const e=_momoMoPlusReconExpand[shop]=_momoMoPlusReconExpand[shop]||{}; e[g]=!e[g]; momoRenderMoPlusRecon(shop); }
+// 預設展開（費用組成一打開就看得到逐項）：state 未設＝展開；toggle 從當前有效狀態翻轉。
+function momoMoPlusReconToggle(shop,g){ const e=_momoMoPlusReconExpand[shop]=_momoMoPlusReconExpand[shop]||{}; const cur=(e[g]!==false); e[g]=!cur; momoRenderMoPlusRecon(shop); }
+// ── 對帳差異兩級判定（使用者定案）：差額佔 A 貨款 < MOMO_RECON_WARN_PCT ＝「輕微差異」(黃、幾元折讓尾差)，≥ ＝「不符」(紅、可能漏抓)。
+//   tol=0：任何非零差額都顯示金額+%，不掩蓋、不自動修正（對帳頁硬性規則）。cmpV==null＝尚未有對帳單值。
+const MOMO_RECON_WARN_PCT=0.1;   // 可調門檻（%）
+function momoReconDiffInfo(sysV, cmpV, denomA){
+  if(cmpV==null||cmpV==='') return { level:'na', color:'#9ca3af', text:'—', diff:null, pct:null };
+  const diff=Math.round((Number(sysV)-Number(cmpV))*100)/100;
+  const pct=(denomA>0)?(Math.abs(diff)/denomA*100):null;
+  if(diff===0) return { level:'ok', color:'#10b981', text:'✓ 相符', diff:0, pct:0 };
+  const warn=(pct!=null && pct<MOMO_RECON_WARN_PCT);
+  const amt=(diff>0?'+':'')+diff.toLocaleString('en-US');
+  return { level:warn?'warn':'bad', color:warn?'#d97706':'#dc2626',
+    text:(warn?'⚠ 輕微差異 ':'✗ 不符 ')+amt+(pct!=null?'（'+pct.toFixed(2)+'%）':''), diff, pct };
+}
+// ── MO+ 對帳單 PDF 解析（版面與甲乙不同、專屬）。回 {invoiceB,feeF,deductI,payable,iNote,errors[]}。
+//   ⚠ B（商店開立發票金額）有應稅+免稅兩列 → 取兩列「總計(含稅)」相加。抓不到 B 或 F ＝ errors（呼叫端不填、明確報錯，絕不靜默填 0）。
+//   折讓 I 可能不存在（該月無扣款折讓單）＝合法 0（iNote 標「無折讓列」）；有列但解析失敗才算問題。
+function momoParseMoPlusReconPdf(text){
+  const t=String(text||'').replace(/\s+/g,' ');
+  const nums=s=>((s.match(/-?[\d,]+(?:\.\d+)?/g))||[]).map(x=>Number(x.replace(/,/g,'')));
+  const numAfter=(label,nth)=>{ const i=t.indexOf(label); if(i<0) return null; const a=nums(t.slice(i+label.length)); return a.length>=nth?a[nth-1]:null; };
+  // B：商店開立發票金額B 後 6 個數字＝[應稅未稅,營業稅,含稅, 免稅未稅,營業稅,含稅]→含稅相加＝ a[2]+a[5]
+  let invoiceB=null, bErr=null; const bi=t.indexOf('商店開立發票金額');
+  if(bi<0) bErr='找不到「商店開立發票金額B」'; else { const a=nums(t.slice(bi+'商店開立發票金額'.length)); if(a.length>=6) invoiceB=a[2]+a[5]; else bErr='「商店開立發票金額B」兩列數字不足（應稅+免稅）'; }
+  const feeF=numAfter('momo已開立發票金額',1);   // "momo已開立發票金額F 22,398"
+  // I 折讓：⚠ momo 對帳單用**括號表負數**（例「(5)」＝ −5）。錨定總額列「商店開立折讓單金額」（非區塊標題「扣款折讓單」，後者接項次表會誤抓）。
+  //   該列不存在＝該月無折讓＝合法 0（非「抓不到」）。有列但取不到數字才算 error。
+  let deductI=0, iNote='無折讓列'; const im=t.indexOf('商店開立折讓單金額');
+  if(im>=0){ const seg=t.slice(im+'商店開立折讓單金額'.length, im+'商店開立折讓單金額'.length+30);
+    const paren=seg.match(/\(\s*([\d,]+(?:\.\d+)?)\s*\)/);   // (5) → −5
+    if(paren){ deductI=-Number(paren[1].replace(/,/g,'')); iNote='已解析（折讓 −'+paren[1]+'）'; }
+    else { const m2=seg.match(/-?[\d,]+(?:\.\d+)?/); if(m2){ deductI=Number(m2[0].replace(/,/g,'')); iNote='已解析'; } else iNote='折讓列在但解析失敗'; }
+  }
+  const payable=numAfter('實際應付商店金額',1);
+  const errors=[]; if(invoiceB==null) errors.push(bErr||'B 解析失敗'); if(feeF==null) errors.push('找不到「momo已開立發票金額F」');
+  if(iNote==='折讓列在但解析失敗') errors.push('扣款折讓單金額解析失敗');
+  return { invoiceB, feeF, deductI, payable, iNote, errors };
+}
 // 費用組成一組（可展開）：組總 + 逐項（含本月為 0 者、不隱藏）+ §4「本月實際佔比」（佔 A 貨款 %，只對 C/D 有意義；一律逐筆實算）
 function momoMoPlusReconGroupHTML(shop, gLabel, gKey, items, groupTot, denomA, sign, showPct){
-  const e=(_momoMoPlusReconExpand[shop]||{})[gKey];
+  const e=(_momoMoPlusReconExpand[shop]||{})[gKey]!==false;   // 預設展開（未設＝展開；只有明確收合才 false）
   const rows=Object.keys(items).map(name=>{
     const v=items[name];
     const pct=(showPct&&denomA>0)?(Math.abs(v)/denomA*100):null;
@@ -12461,47 +12499,60 @@ function momoRenderMoPlusRecon(shop){
     const yymm=month.slice(2,4)+month.slice(5,7);
     c.innerHTML=hdr+`<div class="empty"><div class="empty-icon">🧾</div><div class="empty-hint">${_momoEsc(month)} 尚無對帳明細資料——請到「訂單明細」上傳 <b>mo+…對帳明細_${yymm}.xls</b>（含「訂單明細」分頁）。上傳後這裡會出現費用組成與對帳核對。</div></div>`; return;
   }
-  const sys=doc.sys, pdf=doc.pdf||{}, denomA=sys.Atot||0, okColor=b=>b?'#10b981':'#dc2626', tol=2;
-  // ① 費用組成
-  const g1=momoMoPlusReconGroupHTML(shop,'A 貨款','A',sys.A,sys.Atot,denomA,'',false)
-    +momoMoPlusReconGroupHTML(shop,'B 運費代收','B',sys.B,sys.Btot,denomA,'+',false)
+  const sys=doc.sys, pdf=doc.pdf||{}, denomA=sys.Atot||0;
+  // ① 費用組成（四類逐項都顯「本月實際佔比·非費率」showPct 全開；預設展開）
+  const g1=momoMoPlusReconGroupHTML(shop,'A 貨款','A',sys.A,sys.Atot,denomA,'',true)
+    +momoMoPlusReconGroupHTML(shop,'B 運費代收','B',sys.B,sys.Btot,denomA,'+',true)
     +momoMoPlusReconGroupHTML(shop,'C 代扣運費','C',sys.C,sys.Ctot,denomA,'−',true)
     +momoMoPlusReconGroupHTML(shop,'D 手續費','D',sys.D,sys.Dtot,denomA,'−',true);
-  const idOk=Math.abs((sys.Atot+sys.Btot-sys.Ctot-sys.Dtot)-sys.E)<=tol;
+  const idInfo=momoReconDiffInfo(sys.Atot+sys.Btot-sys.Ctot-sys.Dtot, sys.E, denomA);   // 恆等式：tol=0、如實顯示差額+%（兩級）
   const g1id=`<div style="padding:8px 10px;background:#f8fafc;border-radius:8px;font-size:13px;margin-top:2px">
     A ${momoMoney(sys.Atot)} + B ${momoMoney(sys.Btot)} − C ${momoMoney(sys.Ctot)} − D ${momoMoney(sys.Dtot)} = <b>${momoMoney(sys.E)}</b> 實際入帳
-    <span style="color:${okColor(idOk)};font-weight:700;margin-left:6px">${idOk?'✓ 恆等式成立':'✗ 恆等式不符'}</span>
-    <div style="font-size:12px;color:#9ca3af;margin-top:2px">D 手續費 15 項全列（含本月為 0 者）；點各組展開看逐項＋本月實際佔比。D 合計佔 A 貨款 ${denomA>0?momoPct(sys.Dtot/denomA*100):'—'}（此為<b>本月實際佔比</b>、非費率；只供跨月比較、一律逐筆實算）。</div>
+    <span style="color:${idInfo.color};font-weight:700;margin-left:6px">恆等式 ${idInfo.text}</span>
+    <div style="font-size:12px;color:#9ca3af;margin-top:2px">D 手續費 15 項全列（含本月為 0 者）；四類逐項＋本月實際佔比。D 合計佔 A 貨款 ${denomA>0?momoPct(sys.Dtot/denomA*100):'—'}（此為<b>本月實際佔比</b>、非費率；只供跨月比較、一律逐筆實算）。</div>
   </div>`;
-  // ②③ 對帳單並列
+  // ②③ 對帳單並列（tol=0；兩級差異 momoReconDiffInfo：<0.1%A 輕微(黃)、≥不符(紅)，都顯金額+%）
   const num=v=>(v==null||v===''||isNaN(v))?null:Number(v);
   const iB=num(pdf.invoiceB), iF=num(pdf.feeF), iI=num(pdf.deductI);
   const hasPdf=iB!=null&&iF!=null;
   const payable=hasPdf?(iB-iF-(iI||0)):null;
   const invBSys=sys.Atot+sys.Btot, cdSys=sys.Ctot+sys.Dtot;
-  const chkB=hasPdf?Math.abs(invBSys-iB)<=tol:null;
-  const chkF=hasPdf?Math.abs(cdSys-(iF+(iI||0)))<=tol:null;
+  const infoB=hasPdf?momoReconDiffInfo(invBSys,iB,denomA):null;
+  const infoF=hasPdf?momoReconDiffInfo(cdSys,iF+(iI||0),denomA):null;
   const totalTarget=hasPdf?(payable+(sys.withdrawn||0)):null;
-  const chkTotal=hasPdf?Math.abs(sys.E-totalTarget)<=tol:null;
-  const cmpRow=(label,sysV,pdfV,okB)=>`<tr style="border-top:1px solid #f0f2f5"><td style="padding:5px 10px">${label}</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">${momoMoney(sysV)}</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">${pdfV==null?'—':momoMoney(pdfV)}</td><td style="padding:5px 10px;text-align:center;font-weight:700;color:${okB==null?'#9ca3af':okColor(okB)}">${okB==null?'—':(okB?'✓':'✗ 不符')}</td></tr>`;
+  const infoTotal=hasPdf?momoReconDiffInfo(sys.E,totalTarget,denomA):null;
+  const cmpRow=(label,sysV,pdfV,info)=>`<tr style="border-top:1px solid #f0f2f5"><td style="padding:5px 10px">${label}</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">${momoMoney(sysV)}</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">${pdfV==null?'—':momoMoney(pdfV)}</td><td style="padding:5px 10px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:${info?info.color:'#9ca3af'}">${info?info.text:'（填對帳單值後核對）'}</td></tr>`;
   const g2=`<table style="width:100%;border-collapse:collapse;font-size:13px">
-    <thead><tr style="color:#6b7280;font-size:12px"><th style="text-align:left;padding:4px 10px">核對項</th><th style="text-align:right;padding:4px 10px">系統計算</th><th style="text-align:right;padding:4px 10px">對帳單</th><th style="text-align:center;padding:4px 10px">結果</th></tr></thead>
+    <thead><tr style="color:#6b7280;font-size:12px"><th style="text-align:left;padding:4px 10px">核對項</th><th style="text-align:right;padding:4px 10px">系統計算</th><th style="text-align:right;padding:4px 10px">對帳單</th><th style="text-align:right;padding:4px 10px">差額 / 結果</th></tr></thead>
     <tbody>
-      ${cmpRow('發票金額 B 總（ΣA+ΣB）',invBSys,iB,chkB)}
-      ${cmpRow('手續費 F + 折讓 I（ΣC+ΣD）',cdSys,hasPdf?(iF+(iI||0)):null,chkF)}
-      <tr style="border-top:2px solid #e5e7eb;font-weight:700;background:#fafbfc"><td style="padding:6px 10px">實際應付 = B − F − I${sys.withdrawn?` + 已提領 ${momoMoney(sys.withdrawn)}`:''}<div style="font-size:11px;color:#9ca3af;font-weight:400">＝ momo 該付你的（vs 檔案實收 E）</div></td><td style="padding:6px 10px;text-align:right">${momoMoney(sys.E)}</td><td style="padding:6px 10px;text-align:right">${totalTarget==null?'—':momoMoney(totalTarget)}</td><td style="padding:6px 10px;text-align:center;color:${chkTotal==null?'#9ca3af':okColor(chkTotal)}">${chkTotal==null?'（填對帳單值後核對）':(chkTotal?'✓ momo 收款相符':'✗ 不符，查明細')}</td></tr>
+      ${cmpRow('發票金額 B 總（ΣA+ΣB）',invBSys,iB,infoB)}
+      ${cmpRow('手續費 F + 折讓 I（ΣC+ΣD）',cdSys,hasPdf?(iF+(iI||0)):null,infoF)}
+      <tr style="border-top:2px solid #e5e7eb;font-weight:700;background:#fafbfc"><td style="padding:6px 10px">實際應付 = B − F − I${sys.withdrawn?` + 已提領 ${momoMoney(sys.withdrawn)}`:''}<div style="font-size:11px;color:#9ca3af;font-weight:400">＝ momo 該付你的（vs 檔案實收 E）</div></td><td style="padding:6px 10px;text-align:right">${momoMoney(sys.E)}</td><td style="padding:6px 10px;text-align:right">${totalTarget==null?'—':momoMoney(totalTarget)}</td><td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;color:${infoTotal?infoTotal.color:'#9ca3af'}">${infoTotal?infoTotal.text:'（填對帳單值後核對）'}</td></tr>
     </tbody>
   </table>
   ${sys.withdrawn?`<div style="font-size:12px;color:#92400e;margin-top:6px;padding:6px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px">💰 本月已提領（平日請領貨款）<b>${momoMoney(sys.withdrawn)}</b>——預先領走的貨款、非費用；已納入總額驗證（檔案實收 = 實際應付 + 已提領），不計入上方費用組成。</div>`:''}
   <div style="font-size:12px;color:#9ca3af;margin-top:6px">信用卡等逐項若與對帳單差幾元，多半是「扣款折讓單 I」造成（ΣC+ΣD == F + I 已吸收）；只要「momo 收款相符」為綠即無問題。<b>I 折讓請填負數</b>（例 2606 填 −5）。</div>`;
   const inp=(id,val,ph)=>`<input id="${id}" type="number" step="any" value="${val==null?'':val}" placeholder="${ph}" style="width:130px;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;text-align:right">`;
+  const hasVals=(pdf.invoiceB!=null||pdf.feeF!=null||pdf.deductI!=null);
+  const srcBadge=!hasVals?'<span style="color:#9ca3af">尚無對帳單值</span>'
+    :(pdf.source==='auto'?`<span style="color:#5b5fcf;font-weight:700">🅐 自動解析 PDF</span>${pdf.at?`<span style="color:#9ca3af">（${_momoEsc(pdf.at)}）</span>`:''}`
+      :`<span style="color:#d97706;font-weight:700">✍ 手動輸入</span>${pdf.at?`<span style="color:#9ca3af">（${_momoEsc(pdf.at)}）</span>`:''}`);
   const form=`<div style="border:1px dashed #d1d5db;border-radius:8px;padding:10px 12px;margin-top:12px">
-    <div style="font-size:13px;font-weight:700;margin-bottom:6px">對帳單 PDF 手動輸入（一月一次；存雲端跨裝置）</div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <span style="font-size:13px;font-weight:700">對帳單 PDF（自動解析；存雲端跨裝置）</span>
+      <span style="font-size:12px">目前值來源：${srcBadge}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <input type="file" accept=".pdf" onchange="momoMoPlusReconPdfFile('${shop}',event)" style="font-size:12px">
+      <span style="font-size:11px;color:#9ca3af">上傳 mo+…對帳單_${month.slice(2,4)+month.slice(5,7)}.pdf → 自動帶入 B（應稅+免稅含稅相加）/F/折讓 I；抓不到會明確報錯、不填 0</span>
+    </div>
+    <div id="moplus-recon-pdferr-${shop}" style="font-size:12px;color:#dc2626;margin-bottom:6px"></div>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:4px">或手動輸入/覆寫（存後標示轉「手動」）：</div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;font-size:12px;color:#4b5563">
-      <label>商店開立發票金額 B 總<br>${inp('moplus-recon-b-'+shop,pdf.invoiceB,'100829')}</label>
-      <label>手續費用 F<br>${inp('moplus-recon-f-'+shop,pdf.feeF,'25244')}</label>
+      <label>商店開立發票金額 B 總<br>${inp('moplus-recon-b-'+shop,pdf.invoiceB,'86049')}</label>
+      <label>手續費用 F<br>${inp('moplus-recon-f-'+shop,pdf.feeF,'22398')}</label>
       <label>扣款折讓單 I（折讓填負）<br>${inp('moplus-recon-i-'+shop,pdf.deductI,'-5')}</label>
-      <button class="mm-btn" style="background:#5b5fcf;color:#fff;border:none;padding:6px 16px;border-radius:7px;cursor:pointer;font-weight:600" onclick="momoMoPlusReconSavePdf('${shop}')">儲存對帳單值</button>
+      <button class="mm-btn" style="background:#5b5fcf;color:#fff;border:none;padding:6px 16px;border-radius:7px;cursor:pointer;font-weight:600" onclick="momoMoPlusReconSavePdf('${shop}')">儲存（手動）</button>
     </div>
   </div>`;
   c.innerHTML=hdr
@@ -12514,12 +12565,33 @@ function momoMoPlusReconSavePdf(shop){
   const g=id=>{ const el=document.getElementById(id); const v=el?String(el.value).trim():''; return v===''?null:Number(v); };
   const doc=momoLoadReconcile(shop, month)||{};
   doc.shop=shop; doc.month=month; doc.moPlus=true;
-  doc.pdf={ invoiceB:g('moplus-recon-b-'+shop), feeF:g('moplus-recon-f-'+shop), deductI:g('moplus-recon-i-'+shop) };
+  const now=momoNowParts();
+  doc.pdf={ invoiceB:g('moplus-recon-b-'+shop), feeF:g('moplus-recon-f-'+shop), deductI:g('moplus-recon-i-'+shop), source:'manual', at:now.date+' '+now.time };
   doc.updatedAt=Date.now();
   momoSaveReconcile(shop, month, doc);
   _markPending(momoReconcileKey(shop, month));
-  if(typeof showToast==='function') showToast('已儲存對帳單值（記得按 ☁ 同步雲端）','success');
+  if(typeof showToast==='function') showToast('已儲存對帳單值（手動；記得按 ☁ 同步雲端）','success');
   momoRenderMoPlusRecon(shop);
+}
+// 對帳單 PDF 自動解析 → 帶入 B/F/I（source:'auto'）。⚠ 抓不到 B 或 F ＝明確報錯、不填、不覆蓋既有值（絕不靜默填 0 讓比對假通過）。
+async function momoMoPlusReconPdfFile(shop, e){
+  const month=_momoMoPlusReconMonth[shop]; if(!month) return;
+  const file=(e&&e.target&&e.target.files&&e.target.files[0]); if(!file) return;
+  const errEl=document.getElementById('moplus-recon-pdferr-'+shop); if(errEl) errEl.textContent='解析中…';
+  try{
+    const text=await momoReadPdfText(file);
+    const r=momoParseMoPlusReconPdf(text);
+    if(r.errors && r.errors.length){ if(errEl) errEl.innerHTML='⛔ PDF 解析失敗，未帶入（請確認是 mo+ 對帳單 PDF，或改用手動輸入）：<br>'+r.errors.map(_momoEsc).join('；'); if(e.target) e.target.value=''; return; }
+    const now=momoNowParts();
+    const doc=momoLoadReconcile(shop, month)||{};
+    doc.shop=shop; doc.month=month; doc.moPlus=true;
+    doc.pdf={ invoiceB:r.invoiceB, feeF:r.feeF, deductI:r.deductI, source:'auto', at:now.date+' '+now.time, iNote:r.iNote, payablePdf:r.payable };
+    doc.updatedAt=Date.now();
+    momoSaveReconcile(shop, month, doc);
+    _markPending(momoReconcileKey(shop, month));
+    if(typeof showToast==='function') showToast('已自動解析對帳單 PDF（B '+Number(r.invoiceB).toLocaleString('en-US')+'／F '+Number(r.feeF).toLocaleString('en-US')+'／I '+Number(r.deductI).toLocaleString('en-US')+'；記得按 ☁ 同步雲端）','success');
+    momoRenderMoPlusRecon(shop);
+  }catch(err){ if(errEl) errEl.textContent='⛔ 讀取 PDF 失敗：'+(err&&err.message||err)+'（可改用手動輸入）'; if(e.target) e.target.value=''; }
 }
 function momoRenderUpload(shop){
   const c=document.getElementById('momo-sub-content-'+shop);
@@ -14810,7 +14882,7 @@ Object.assign(window, {
   momoRenderMoPlusBatchAdd,momoMoPlusAddOne,momoMoPlusAddPreview,momoMoPlusSetOtherFee,
   momoMoPlusPrefixFee,momoMoPlusAddOriginChanged,momoMoPlusAddFeeInput,momoMoPlusAddFeeExc,momoMoPlusAddFeeBadge,
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
-  momoRenderMoPlusRecon,momoMoPlusReconSetMonth,momoMoPlusReconToggle,momoMoPlusReconSavePdf,
+  momoRenderMoPlusRecon,momoMoPlusReconSetMonth,momoMoPlusReconToggle,momoMoPlusReconSavePdf,momoMoPlusReconPdfFile,momoParseMoPlusReconPdf,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
   momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoOpenDpDetailFromEl,momoCloseDpDetail,
   momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoDismissYiCaveat,momoOvSetMonth,
