@@ -336,6 +336,63 @@ function _markPending(key){
   _pendingSyncKeys.add(key);
   _showSyncBtn();
 }
+// ══════ 廣告調整（ec_notes）的「真正本機編輯」註冊表（persisted，跨重整）══════
+//  為什麼需要：syncToCloud 開頭那條 ec_notes 推送讀的是 getNotes()，而 getNotes 第一層讀
+//    Store._profitMem —— 那是 app/profit 與封存分片（app/profit_notes_YYYY）的【合併結果】。
+//    沒有這道閘門的話，使用者只要把月份下拉切到已封存的月份、按一下「☁ 同步雲端」，那個月的
+//    ec_notes 就會被從封存分片讀出來、原封不動寫回 app/profit —— 封存省下的額度當場吐回去，
+//    而且完全無聲。只有真正經 saveNotes 編輯、且還沒成功推上雲的 key 會進這個註冊表。
+//  ⚠ 這三支刻意【不呼叫】同檔既有的 _momoReadJson（搜 `function _momoReadJson`）。
+//    這【不是】沒注意到重複，是兩個明確理由，不要為了「消除重複」改回去：
+//    (1) 語意不相容：_momoReadJson 把「key 不存在」與「內容損毀」吞成同一個 fallback 值。
+//        本註冊表必須把這兩種狀態分開（理由見下方 _notesIsDirty），用它就分不開，
+//        而且失敗方向會反過來變成「不推」＝丟資料。
+//    (2) 它位在 MOMO 區（本檔約 6900 行以後），那一區改動頻繁；不依賴它就不會被那邊波及。
+const _NOTES_DIRTY_LS='ec_notes_dirty';   // JSON array：真正編輯過還沒推的 full key（ec_notes|…）
+function _notesDirtyAdd(k){
+  // ⚠ 兩條失敗路徑都【不吞】：註冊表出事就等於這道救援網出事，必須留下訊號，不可安靜失敗。
+  try{
+    const raw=localStorage.getItem(_NOTES_DIRTY_LS);
+    let arr=[];
+    if(raw!==null){   // raw===null ＝ 從沒人編輯過的正常空狀態（判準與 _notesIsDirty 逐字一致，兩支對「不存在」的認定不能分歧）
+      let a, ok=true;
+      try{ a=JSON.parse(raw); }catch{ ok=false; }
+      if(ok && Array.isArray(a)) arr=a;
+      // 🔴 raw 存在但讀不出陣列 ＝ 損毀。這裡的重建【是有代價的，不是「順手修復」】：
+      //   損毀期間 _notesIsDirty 一律回 true（全部照推）＝ 安全狀態；一旦這裡把它重建成
+      //   ["剛編的這一把"]，註冊表又變回合法陣列，_notesIsDirty 對【其他所有 key】立刻回 false ——
+      //   損毀之前那些還沒推上去的編輯就被靜默跳過了。也就是重建會把 fail-safe 轉成 fail-unsafe，
+      //   而這正是本閘門存在的理由要防的事。
+      //   仍然選擇重建，是因為不重建的話註冊表永遠損毀、_notesIsDirty 永遠回 true ＝ 這道閘門等於沒做
+      //   （每次同步都把封存分片的內容寫回 app/profit）。兩害相權取重建。
+      //   代價換成下面這行【刺眼的 console.error】：看到它就代表要人工確認有沒有調整漏上雲，不能當雜訊略過。
+      else console.error('[notesDirty] 註冊表內容損毀，已重建成只含這一把。先前未推送的調整標記可能已遺失 —— 請人工比對 app/profit 確認舊的調整有沒有漏上雲。原始內容：',raw);
+    }
+    if(!arr.includes(k)){ arr.push(k); localStorage.setItem(_NOTES_DIRTY_LS,JSON.stringify(arr)); }
+  }catch(e){ console.error('[notesDirty] 寫入註冊表失敗，這把 key 的待同步標記沒存下來：',k,e); }   // localStorage 被擋 / 配額滿：重整後 _notesIsDirty 會回 false、syncToCloud 就不推它 ＝ 使用者打的調整上不了雲
+}
+function _notesDirtyDel(k){
+  try{
+    const raw=localStorage.getItem(_NOTES_DIRTY_LS);
+    const a=raw?JSON.parse(raw):[];
+    if(Array.isArray(a)&&a.includes(k)) localStorage.setItem(_NOTES_DIRTY_LS,JSON.stringify(a.filter(x=>x!==k)));
+  }catch{}   // 刪不掉只是下次多推一次（安全方向），不必吵
+}
+// 🔴 讀取失敗一律回 true（＝照推），與 _momoIsDirty 的 false 【刻意相反】。失效後果不對稱：
+//   momo 那邊回 false 只是少擋一次雲端覆蓋；這邊回 false 是「不推」＝可能永久丟掉使用者打的調整。
+//   回 true 最壞只是封存的額度長回來，而且 app/profit 的欄位數看得到 —— 是可觀測的失敗。
+//   ⚠ 三種狀態必須分開判、不可合併成一個 fallback：
+//     raw===null      註冊表根本不存在 ＝ 從沒人編輯過，是正常空狀態、不是失敗 → false（否則每次都推，本閘門等於沒做）
+//     非陣列 / throw  內容損毀或 localStorage 被擋 → true
+function _notesIsDirty(k){
+  try{
+    const raw=localStorage.getItem(_NOTES_DIRTY_LS);
+    if(raw===null) return false;
+    const a=JSON.parse(raw);
+    if(!Array.isArray(a)) return true;
+    return a.includes(k);
+  }catch{ return true; }
+}
 // 本機儲存（不推雲端），加到 pending 集合等使用者手動同步
 function _cloudWriteSafe(key, payload, label){
   // 存 localStorage
@@ -712,7 +769,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
   clearTimeout(_syncBtnRepaintTimer);
   if(btn){btn.disabled=true;btn.textContent='同步中…';}
   // 每一條出口都會覆寫 window.__lastSyncReport（含 ts），永久保留，方便日後診斷「同步怪怪的」
-  const _report=(mode,extra)=>{ window.__lastSyncReport=Object.assign({ts:Date.now(),mode,ok:[],failed:[],skippedProblem:[],skippedByDesign:[]},extra||{}); };
+  const _report=(mode,extra)=>{ window.__lastSyncReport=Object.assign({ts:Date.now(),mode,ok:[],failed:[],skippedProblem:[],skippedByDesign:[],skippedNotDirty:[]},extra||{}); };
   if(!window.__cloudProfit||!window.__cloudProfitCol){
     if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'淨利表的雲端尚未就緒，請重新整理。',kind:'warn'});
     else if(typeof showToast==='function') showToast('雲端未連線','error');
@@ -728,10 +785,22 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     const taskKeys=new Set();       // 已排入推送的 key，避免同一個 key 排兩次（見下方 pending 迴圈開頭）
     const skippedByDesign=[];       // filemeta：故意不上雲，安靜
     const skippedProblem=[];        // 讀不到 / 損毀 / 非物件：一定要浮上來
+    // ec_notes 這次沒被編輯過 → by design 的安靜跳過（性質同 skippedByDesign，不彈窗、不出 toast）。
+    //   ⚠ 刻意不彈窗：封存搬家之後，只要當期有調整、而使用者這次沒編輯過，每一次同步都會觸發這條，
+    //     跳出來就變成雜訊。診斷靠下面的 console.log 與 window.__lastSyncReport.skippedNotDirty 就夠。
+    const skippedNotDirty=[];
     // 同步當前通路的備註 / 編輯（按期間獨立存）
     const _nk=shop+'|'+(s?.curMonth||'')+'|'+(s?.curHalf||'');
     const notes=getNotes(_nk);
-    if(Object.keys(notes).length>0){ taskKeys.add('ec_notes|'+_nk); tasks.push({key:'ec_notes|'+_nk,run:()=>window.__cloudProfit.setField('ec_notes|'+_nk,notes)}); }
+    // 🔴 閘門：只推「真的被 saveNotes 編輯過、還沒推成功」的。沒有它的話，getNotes 讀到的封存分片內容
+    //   會被原封不動寫回 app/profit（理由見 _NOTES_DIRTY_LS 那段註解）。
+    //   ⚠ 條件字串與 _momoCollectPending 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`，全檔只有兩處）：
+    //     兩處不一致 ＝ 預覽說要推 N 筆、實際推 N±1 筆，而且不報錯。本檔已因「兩處只改一處」出過事（PR #93、預覽騙人那條）。
+    //   ⚠ 跳過一定要留下可查紀錄，否則跟「資料靜默消失」分不出來。
+    if(Object.keys(notes).length>0){
+      if(_notesIsDirty('ec_notes|'+_nk)){ taskKeys.add('ec_notes|'+_nk); tasks.push({key:'ec_notes|'+_nk,run:()=>window.__cloudProfit.setField('ec_notes|'+_nk,notes)}); }
+      else { skippedNotDirty.push('ec_notes|'+_nk); console.log('[syncToCloud] ec_notes 未編輯過、跳過推送（避免把封存分片的內容寫回 app/profit）：','ec_notes|'+_nk); }
+    }
     const edits=getEdits(shop);
     if(Object.keys(edits).length>0){ taskKeys.add('ec_edits|'+shop); tasks.push({key:'ec_edits|'+shop,run:()=>window.__cloudProfit.setField('ec_edits|'+shop,edits)}); }
     // 遍歷所有 pending keys 分類：
@@ -815,10 +884,14 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       if(skippedProblem.length>0){
         if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:'有 '+skippedProblem.length+' 筆資料在本機讀不到、沒推上去（可能損毀）。\n請到淨利表重新產生這些報表。',detail:skippedProblem.map(x=>x.key+'：'+x.reason).join('\n'),kind:'error'});
         else if(typeof showToast==='function') showToast('有 '+skippedProblem.length+' 筆資料讀不到','error');
-        _report('nothing',{skippedProblem,skippedByDesign});
+        _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty});
       }else{
+        // ⚠ toast 文案刻意不動（不提「跳過 N 筆」）：skippedNotDirty 是 by design 的安靜跳過。
+        //   但 _report 一定要帶上它 —— 「切到已封存月份、沒有別的待同步、按同步」正是本閘門最典型的
+        //   情境，而它 100% 走這條出口（tasks.length===0）。不帶就會被 _report 的預設 [] 蓋掉，
+        //   跳過紀錄剛好在最需要它的那一次消失。
         if(typeof showToast==='function') showToast('沒有需要同步的資料','info');
-        _report('nothing',{skippedByDesign});
+        _report('nothing',{skippedByDesign,skippedNotDirty});
       }
       if(btn){btn.disabled=false; _showSyncBtn();} return;
     }
@@ -833,9 +906,10 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     // pending 清理：只保留 failed + skippedProblem（要重試 / 要一直提醒），其餘刪掉
     // 只清掉「這次真的推成功」的 key（ok）；失敗/讀不到/逐項勾選未選的一律留在 pending 下次再推
     ok.forEach(k=>_pendingSyncKeys.delete(k));
+    ok.forEach(k=>{ if(k.startsWith('ec_notes|')){ try{ _notesDirtyDel(k); }catch{} } });          // 真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
     if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
-    _report('done',{ok,failed,skippedProblem,skippedByDesign});
+    _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty});
     // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 時出現；只要有問題就 ⚠ + 彈窗
     const problems=failed.length+skippedProblem.length;
     if(problems===0){
@@ -3672,6 +3746,13 @@ function saveNotes(shop,notes){
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=notes;}catch{}
   // 掛進待同步集合，讓「☁ 同步雲端」推得到（商品調整 _growth 原本完全沒有上雲的路）
   _pendingSyncKeys.add(k);
+  // persisted 待同步標記（跨重整）→ syncToCloud 的 ec_notes 閘門只認這個。
+  //   ⚠ 這裡【刻意不判斷 key 形狀】：saveNotes 一旦開始分流 key 形狀，就是下一個 bug 的位置。
+  //   因此 ec_notes|{通路}_growth 也會被登記，而且它【永遠不會被清掉】—— 清除只發生在「推送成功」，
+  //   而能走那道閘門的 key 一律是 ec_notes|{通路}|{月}|{半月} 格式，不可能命中 _growth
+  //   （_growth 走的是下方泛用 field 分支，不經閘門）。這是【已知且無害】的殘留：
+  //   看到 localStorage['ec_notes_dirty'] 裡有清不掉的 _growth，不是壞了，不要去「修」它。
+  _notesDirtyAdd(k);
   _showSyncBtn(shop);
   // 立即同步工作日誌摘要（不必等按 ☁ 同步雲端；silent 不顯示 toast 避免太吵）
   try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}
@@ -9159,7 +9240,9 @@ function _momoCollectPending(shop){
   const items=[], seen=new Set();
   const add=(key,kind,val,over)=>{ if(seen.has(key))return; seen.add(key); const it={key,kind,localVal:val,localCount:(over&&over.count!=null?over.count:_momoCount(val))}; if(over&&over.stat) it.e001Stat=over.stat; items.push(it); };
   // syncToCloud 開頭那兩條 shop 專屬 extra（465-469）：MOMO 賣場通常為空
-  try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0) add('ec_notes|'+_nk,'其他設定',notes); }catch{}
+  //   ⚠ ec_notes 的閘門條件與 syncToCloud 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`，全檔只有兩處）：
+  //     兩處不一致 ＝ 預覽說要推 N 筆、實際推 N±1 筆，而且不報錯。改一處就必須同時改另一處。
+  try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0&&_notesIsDirty('ec_notes|'+_nk)) add('ec_notes|'+_nk,'其他設定',notes); }catch{}
   try{ const edits=getEdits(shop); if(edits&&Object.keys(edits).length>0) add('ec_edits|'+shop,'其他設定',edits); }catch{}
   _pendingSyncKeys.forEach(pk=>{
     if(pk.startsWith('__shop__|')) return;               // marker，不推
