@@ -224,8 +224,14 @@ try {
           const changed = [];
           snap.forEach(d => {
             const data = d.data() || {};
-            const shop = data.savedShop || MOMO_DOCID_SHOP[String(d.id).split('_')[0]] || null;
-            const month = data.month || String(d.id).split('_').slice(1).join('_');
+            // docId = shopDocId + '_' + 'YYYY-MM'。月份含 '-' 不含 '_'，故最後一個 '_' 必為賣場/月份分隔。
+            //   ⚠ 舊碼用 split('_')[0] 取賣場代號，對多底線代號（mo_maji / mo_senzhilu）只取到 'mo' → 反查失敗 → 整份被丟棄
+            //     （MO+ 麻吉/森之旅月對帳永遠不從雲端載入）。單底線的 jia/yi 不受影響、行為完全不變。改用 lastIndexOf('_') 切。
+            const idStr = String(d.id);
+            const cut = idStr.lastIndexOf('_');
+            const docPrefix = cut >= 0 ? idStr.slice(0, cut) : idStr;
+            const shop = data.savedShop || MOMO_DOCID_SHOP[docPrefix] || null;
+            const month = data.month || (cut >= 0 ? idStr.slice(cut + 1) : '');
             if (!shop || !month) return;
             const k = 'ec_momo_reconcile|' + shop + '|' + month;
             if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;   // 本機未同步/剛存 → 不覆蓋
