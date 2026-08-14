@@ -6033,6 +6033,22 @@ function _kpiGroupTableHtml(row,group){
 }
 // ── 檢視狀態：月結表／年度總表 切換、目前選的年月（預設今天所在的年月）──
 let _kpiViewMode='month';
+// 年度月營收堆疊圖的資料（由 _kpiYearViewHtml 產生、renderKpiYearChart 消費）。
+//   ⚠ 全年無資料時必須明確設成 null，不能留著上一個年份的值——否則切到空年份後
+//     若建圖函式仍被呼叫，會畫出前一年的圖，這種狀態殘留極難查。
+let _kpiYearChartData=null;
+// 唯讀觀測點（同 window.__profitPendingCount / window.__lastSyncReport 的用途）：
+//   F12 Console 打 __kpiYearChartData() 就能看到堆疊圖當下吃到的資料。
+//   ⚠ 必須是函式，【不能】直接 Object.assign(window,{_kpiYearChartData})——
+//     module 頂層的 let 不是 live binding，掛上去複製的是 module 求值當下的 null，
+//     之後 _kpiYearViewHtml 再怎麼重新賦值，window 上那份都會永遠停在 null。
+//   只有 getter，沒有 setter：這是觀測點，不是外部改狀態的入口。
+window.__kpiYearChartData=()=>_kpiYearChartData;
+// 年度總表的 Chart 實例（①全站折線 + ②五張小折線，共六張）。
+//   寫法比照本檔的 momoOv 那組（搜 _momoOvCharts / momoOvDestroyCharts）：
+//   陣列 + 單一清理函式；建圖一律走 renderKpiYearChart 裡的 mk()，才不會漏 push。
+let _kpiYearCharts=[];
+function kpiYearDestroyCharts(){ _kpiYearCharts.forEach(c=>{try{c.destroy();}catch(e){}}); _kpiYearCharts=[]; }
 const _KPI_NOW=new Date();
 let _kpiCurYear=_KPI_NOW.getFullYear();
 let _kpiCurMonthNum=_KPI_NOW.getMonth()+1;
@@ -6133,6 +6149,9 @@ function _kpiYearViewHtml(){
   const groupBlocks=KPI_GROUPS.map(g=>{
     const pureKey=g.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))?.k;
     let groupRev=0,groupPure=0,groupPrevRev=0,groupPrevPure=0;
+    // 堆疊圖用：這一組在每個【可見月份】的營收。索引對應 visibleMonths[i]，不是第 i+1 月。
+    //   掛在下面既有的月份迴圈上，不新增迴圈、不多呼叫一次 _kpiCalcAll。
+    const gMonthRev=Array(monthCount).fill(0);
     const shopTrs=g.shops.map(shop=>{
       let annualRev=0,annualPure=0;
       const monthRevTds=[],monthPureTds=[];
@@ -6159,7 +6178,7 @@ function _kpiYearViewHtml(){
         const d=_kpiCalcAll(rawForCalc,g);
         const pureV=d[pureKey]||0,revV=d.rev||0;
         annualRev+=revV;annualPure+=pureV;
-        monthGrandRev[i]+=revV;monthGrandPure[i]+=pureV;
+        monthGrandRev[i]+=revV;monthGrandPure[i]+=pureV;gMonthRev[i]+=revV;
         monthRevTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:#6b7280">${revV?fmtN(Math.round(revV)):'—'}</td>`);
         monthPureTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:${pureV<0?'#dc2626':'#374151'}">${pureV?fmtN(Math.round(pureV)):'—'}</td>`);
       }
@@ -6195,10 +6214,11 @@ function _kpiYearViewHtml(){
       }
     }
     const groupRate=groupRev>0?groupPure/groupRev*100:null;
-    // 摘要表用：把這一組已經算完的既有變數收集起來，不重算、不新增加總。
+    // 摘要表與堆疊圖用：把這一組已經算完的既有變數收集起來，不重算、不新增加總。
     //   ⚠ 必須放在共同費用扣除（上面的 g.commonCostLabel 區塊）與 groupRate 之後，
     //     放前面會拿到還沒扣共同費用的中途值，跟下方群組表頭印出來的數字對不起來。
-    groupSummaries.push({title:g.title,color:g.color,rev:groupRev,pure:groupPure,rate:groupRate});
+    //   monthRev 是給堆疊圖的，摘要表不讀它。
+    groupSummaries.push({title:g.title,color:g.color,rev:groupRev,pure:groupPure,rate:groupRate,monthRev:gMonthRev});
     const headerRow=`<tr style="background:#f8f9fc;border-top:1px solid #e5e7eb">
       <td colspan="${monthCount+5}" style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#1e293b;border-left:3px solid ${g.color};text-align:left;white-space:nowrap">${g.title}
         <span style="font-weight:400;color:#9ca3af;margin-left:10px">全年純利 <b style="font-weight:700;color:${groupPure>=0?'#374151':'#dc2626'}">${fmtN(Math.round(groupPure))}</b>${_kpiYoyHtml(groupPure,groupPrevPure)}${groupRate!==null?`　純利率 ${groupRate.toFixed(2)}%`:''}</span>
@@ -6206,6 +6226,20 @@ function _kpiYearViewHtml(){
     </tr>`;
     return headerRow+shopTrs;
   }).join('');
+  // 月營收圖的資料：只在有可見月份時才產生；空狀態一律設 null，避免留著上一個年份的資料。
+  //   ⚠ 只放營收。純利刻意不放——monthGrandPure 不扣共同費用、grandPure 有扣，
+  //     混進同一張圖會跟上方大卡對不上。
+  //   ⚠ datasets 這個欄位名沿用 Chart.js 術語，但它【不會】原封不動餵給 Chart.js——
+  //     renderKpiYearChart 會自己組 dataset：①五組相加成一條全站折線、②五組各畫一張小圖。
+  //   ⚠ backgroundColor（通路識別色）目前是【閒置欄位】：①用 #5b5fcf、②統一 #2a78d6，
+  //     兩張圖都不讀它，只有觀測點 __kpiYearChartData() 看得到。
+  //     保留是為了日後若改回按通路上色不用再加回來，不是漏刪。
+  //   ⚠ 各通路的「全年營收」不放這裡：那是卡片標題的 HTML，直接用 groupSummaries 的 rev
+  //     （與通路摘要表那一格逐字相同的運算式），要顯示同一個數字就用同一個變數，不另存副本。
+  _kpiYearChartData=monthCount===0?null:{
+    labels:visibleMonths.map(m=>m+'月'),
+    datasets:groupSummaries.map(s=>({label:s.title,data:s.monthRev,backgroundColor:s.color})),
+  };
   const grandRate=grandRev>0?grandPure/grandRev*100:null;
   // 沒累加過的月份在這兩個陣列裡是 fill(0) 的初始值，不是「算出來的零」。
   //   印 0 等於宣稱量過、結果是零；改成 — 與上方賣場列一致（判斷寫法刻意逐字相同）。
@@ -6279,7 +6313,20 @@ function _kpiYearViewHtml(){
   //     兩個條件必須永遠同步，日後只改一邊就會變成「摘要表沒了但大表還在」，而且不會報錯。
   const bodyBlock=monthCount===0
     ? `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:28px 16px;text-align:center;font-size:12.5px;color:#9ca3af">本年度尚無資料</div>`
-    : `${groupSummaryHtml}
+    : `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:16px">
+    <div style="height:200px;position:relative"><canvas id="kpi-year-total-chart"></canvas></div>
+  </div>
+  ${groupSummaryHtml}
+  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:16px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+      ${groupSummaries.map((s,i)=>`<div>
+        <div style="font-size:12px;color:#9ca3af;font-weight:600">${s.title}</div>
+        <div style="font-size:15px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;margin-bottom:4px">${fmtN(Math.round(s.rev))}</div>
+        <div style="height:70px;position:relative"><canvas id="kpi-year-g${i}"></canvas></div>
+      </div>`).join('')}
+    </div>
+    <div style="font-size:11px;color:#9ca3af;margin-top:8px">每張圖各自縮放，只看形狀不能互相比高度；規模看上方數字</div>
+  </div>
   <details style="margin-bottom:4px">
     <summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:#5b5fcf;padding:6px 2px;user-select:none">查看完整明細</summary>
     <div style="margin-top:10px">
@@ -6308,6 +6355,11 @@ function _kpiYearViewHtml(){
 function renderKpiTab(){
   const el=document.getElementById('kpi-tab-content');
   if(!el)return;
+  // 🔴 destroy 必須在這裡【無條件】執行，不能只放在 renderKpiYearChart 裡：
+  //   下面那行 innerHTML 會把整區 DOM 換掉，舊 canvas 直接脫離文件樹；
+  //   而切到月結表／評分表時 renderKpiYearChart 根本不會被呼叫，
+  //   實例就會一直握著一個已經不存在的 canvas。
+  kpiYearDestroyCharts();
   const modeTabsHtml=`<div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid #e5e7eb">
     <div onclick="setKpiViewMode('month')" style="padding:8px 16px;font-size:13px;font-weight:${_kpiViewMode==='month'?700:400};color:${_kpiViewMode==='month'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='month'?'#5b5fcf':'transparent'};cursor:pointer">月結表</div>
     <div onclick="setKpiViewMode('year')" style="padding:8px 16px;font-size:13px;font-weight:${_kpiViewMode==='year'?700:400};color:${_kpiViewMode==='year'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='year'?'#5b5fcf':'transparent'};cursor:pointer">年度總表</div>
@@ -6316,6 +6368,63 @@ function renderKpiTab(){
   const body=_kpiViewMode==='year'?_kpiYearViewHtml():_kpiViewMode==='score'?_kpiScoreViewHtml():_kpiMonthViewHtml();
   el.innerHTML=`<div style="padding:14px 16px 16px">${modeTabsHtml}${body}</div>`;
   if(_kpiViewMode==='score'){renderScoreComparisonTable();renderScoreDetailPanel();}
+  if(_kpiViewMode==='year'){renderKpiYearChart();}
+}
+// 年度總表的兩組折線圖：
+//   ① 全站月營收（一條線＝五個通路相加），緊接三張大卡，補充大卡的全年數字。
+//   ② 五個通路各一張小折線，緊接通路摘要表，補充摘要表的各通路數字。
+//   ⚠ ② 五張圖【各自獨立 Y 軸】，這是整個設計的重點：蝦皮全年 3800 萬、官網 21,574，
+//     差約 1700 倍，共用刻度就是官網永遠貼著 0、看不見。代價是五張圖不能互相比高度，
+//     所以圖下方那行「每張圖各自縮放…」的小字【不能拿掉】。
+//   ⚠ 2026-08-14 前後試過兩種都退場，不要再繞回去：
+//     堆疊長條 → 蝦皮 89.5%、官網 0.05%，畫面上只看得到蝦皮與 MOMO 兩色，legend 卻列著五個顏色。
+//     單色長條 + tooltip 拆分 → 「還要滑過去看」。tooltip 是查詢不是顯示。
+//     也不要把小通路併成「其他」：官網與業外是有人在看的。
+//   只畫營收。純利刻意不畫——monthGrandPure 不扣共同費用、grandPure 有扣，
+//   混進同一張圖會跟上方三張大卡對不上。
+//   ⚠ 這裡【不做】destroy 舊實例：那是 renderKpiTab 開頭 kpiYearDestroyCharts() 的責任。
+//     在這裡也做會變成兩個地方各管一半，日後改一邊就漏。
+function renderKpiYearChart(){
+  const d=_kpiYearChartData;
+  if(!d)return;                                  // 空狀態：bodyBlock 本來就沒輸出 canvas
+  if(typeof Chart==='undefined')return;          // CDN 掛掉（寫法比照 momoOvBuildCharts / momoRenderAnalysis）
+  // 建圖統一走這裡：撈 canvas → 孤兒清理 → push 進 _kpiYearCharts。
+  //   ⚠ new Chart 只出現在這一個地方，才不會有哪張圖忘記 push、destroy 時漏掉。
+  //   ⚠ Chart.getChart 必須在上面 typeof Chart 檢查之後——Chart 不存在時它本身就會炸。
+  const mk=(id,cfg)=>{
+    const c=document.getElementById(id);
+    if(!c)return;
+    const o=Chart.getChart(c);
+    if(o){try{o.destroy();}catch{}}
+    _kpiYearCharts.push(new Chart(c.getContext('2d'),cfg));
+  };
+  const tip={callbacks:{label:c=>fmtN(Math.round(c.parsed.y))}};
+  // ① 五組逐月相加＝當月總營收。與表格「全年總計」列的每月營收同源同值。
+  const totals=d.labels.map((_,i)=>d.datasets.reduce((a,s)=>a+(s.data[i]||0),0));
+  mk('kpi-year-total-chart',{
+    type:'line',
+    data:{labels:d.labels,datasets:[{label:'月營收',data:totals,borderColor:'#5b5fcf',backgroundColor:'rgba(91,95,207,.1)',fill:true,tension:.3}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:tip},
+      scales:{y:{ticks:{callback:v=>fmtN(v)}}},
+    },
+  });
+  // ② 每個通路一張。y 軸整條隱藏、格線關掉，只留形狀與 x 軸月份。
+  d.datasets.forEach((s,i)=>{
+    mk('kpi-year-g'+i,{
+      type:'line',
+      data:{labels:d.labels,datasets:[{label:s.label,data:s.data,borderColor:'#2a78d6',backgroundColor:'rgba(42,120,214,.1)',fill:true,tension:.3,pointRadius:2.5}]},
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:tip},
+        scales:{
+          x:{grid:{display:false},ticks:{font:{size:10}}},
+          y:{display:false,grid:{display:false}},
+        },
+      },
+    });
+  });
 }
 function buildKpiTabHtml(){
   return `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
