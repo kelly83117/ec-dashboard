@@ -10592,14 +10592,8 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
     {label:'總銷量', val:Math.round(cur.qty).toLocaleString()+' 件', d:momoKpiDelta(cur.qty,prev.qty,hasPrev)},
     {label:'動銷率', info:'該期別「有銷售的上架商品數 ÷ 上架商品總數」。分母＝上架總數（不含已下架，跟工具列「上架 N」一致）；看有多少比例的上架品真的動起來。', val:rateVal, d:rateD},
   ];
-  // 第 6 張卡片：運費淨額（僅 MO+；運費淨 B−C 已逐 SKU 攤入毛利，此卡為通路層加總檢視）。甲乙配不加（運費模型不同）。
-  if(momoIsMoPlus(shop) && period){
-    const fr=momoMoPlusFreightForPeriod(shop, momoExpandPeriod(period));
-    const netColor=fr.net>=0?'#059669':'#dc2626';
-    const pctOfProfit=(cur.profit && Math.abs(cur.profit)>0.5)?Math.round(Math.abs(fr.net)/Math.abs(cur.profit)*100):null;
-    const info='運費收入 '+money(fr.b)+' − 代扣運費 '+money(fr.c)+'（'+fr.rows+' 筆運費列）｜C 逐筆掛列、B 按同訂單商品營收攤 → 運費淨已計入各 SKU 毛利'+(fr.freeShip>0?'｜⚠ 未含免運活動服務費 '+money(fr.freeShip)+'（在各商品 D 手續費內），實際運費負擔更高':'');
-    cards.push({label:'運費淨額', info, val:money(fr.net), valColor:netColor, d:{txt:(pctOfProfit!=null?'佔淨利 '+pctOfProfit+'%':'已攤入毛利'), color:'#9ca3af'}});
-  }
+  // 運費淨額卡片已移除（Vanessa 不需要此數字）。運費淨 B−C 已逐 SKU 攤入毛利（cell.c/cell.b→feeC/feeB），
+  //   底層計算保留於 momoMoPlusMarginCalc，此處只移除通路層加總卡片的顯示。→ MO+ KPI 卡由六張變五張。
   // ⚠ 未結算估算期別：數字照常顯示（一般樣式、無 ~/估/斜體）＝比照甲配未對帳月；估算僅由頂端橫幅標示。
   const cardHTML=cards.map(c=>`<div class="mm-kpi">
     <div class="mm-kpi-l">${c.label}${c.info?` <span class="mm-info" title="${c.info}">?</span>`:''}</div>
