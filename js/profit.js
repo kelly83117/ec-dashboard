@@ -6111,6 +6111,8 @@ function _kpiYearViewHtml(){
   const prevYear=_kpiCurYear-1;
   const monthGrandRev=Array(12).fill(0),monthGrandPure=Array(12).fill(0);
   let grandRev=0,grandPure=0,grandPrevRev=0,grandPrevPure=0;
+  // 通路摘要表用：只裝下面那個 map 已經算完的既有變數，不在這裡做任何新的加總。
+  const groupSummaries=[];
   const groupBlocks=KPI_GROUPS.map(g=>{
     const pureKey=g.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))?.k;
     let groupRev=0,groupPure=0,groupPrevRev=0,groupPrevPure=0;
@@ -6173,6 +6175,10 @@ function _kpiYearViewHtml(){
       }
     }
     const groupRate=groupRev>0?groupPure/groupRev*100:null;
+    // 摘要表用：把這一組已經算完的既有變數收集起來，不重算、不新增加總。
+    //   ⚠ 必須放在共同費用扣除（上面的 g.commonCostLabel 區塊）與 groupRate 之後，
+    //     放前面會拿到還沒扣共同費用的中途值，跟下方群組表頭印出來的數字對不起來。
+    groupSummaries.push({title:g.title,color:g.color,rev:groupRev,pure:groupPure,rate:groupRate});
     const headerRow=`<tr style="background:#f8f9fc;border-top:1px solid #e5e7eb">
       <td colspan="17" style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#1e293b;border-left:3px solid ${g.color};text-align:left;white-space:nowrap">${g.title}
         <span style="font-weight:400;color:#9ca3af;margin-left:10px">全年純利 <b style="font-weight:700;color:${groupPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(groupPure))}</b>${_kpiYoyHtml(groupPure,groupPrevPure)}${groupRate!==null?`　純利率 ${groupRate.toFixed(2)}%`:''}</span>
@@ -6196,9 +6202,60 @@ function _kpiYearViewHtml(){
     ${monthGrandPureTds}
   </tr>`;
   const monthHeaders=Array.from({length:12},(_,i)=>`<th style="padding:7px 6px;color:#6b7280;font-size:11px;font-weight:700;text-align:left;white-space:nowrap">${i+1}月</th>`).join('');
+  // ── 年度摘要卡＋通路摘要表（純版面重組：數字全部沿用上面已算完的既有變數，不重算）──
+  //   ⚠ grandRate / groupRate 已經是百分比數值（19.25），直接 toFixed，不要再乘 100。
+  //     （_kpiSummaryCardsHtml 的 pureRateAgg 是小數 0.1925、口徑相反，不要照抄那邊的 *100 寫法。）
+  //   ⚠ 設計意圖：本卡的「全年純利」取自 grandPure —— 那是【已扣共同費用】的數字
+  //     （共同費用在上面 g.commonCostLabel 區塊逐月從 grandPure 減掉）。
+  //     下方大表 12 個月的 monthGrandPure 則【未扣共同費用】，所以「12 個月純利橫向加總」
+  //     跟本卡的全年純利對不起來，差額就是全年的共同費用。這是既有差異，
+  //     2026-08-14 判定不在本次改版範圍內修正，這裡刻意不加任何畫面說明文字。
+  const bigCard=(label,valueHtml,color)=>`<div style="flex:1;min-width:180px;background:#f8f9fc;border-radius:10px;padding:18px 20px">
+    <div style="font-size:12px;color:#9ca3af;font-weight:600;letter-spacing:.03em">${label}</div>
+    <div style="font-size:30px;font-weight:700;margin-top:6px;line-height:1.15;font-variant-numeric:tabular-nums;color:${color}">${valueHtml}</div>
+  </div>`;
+  const summaryCardsHtml=`<div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+    ${bigCard('全年營收','NT$'+fmtN(Math.round(grandRev)),'#1f2937')}
+    ${bigCard('全年純利','NT$'+fmtN(Math.round(grandPure)),grandPure>=0?'#059669':'#dc2626')}
+    ${bigCard('純利率',grandRate!==null?grandRate.toFixed(2)+'%':'—','#1f2937')}
+  </div>`;
+  const groupSummaryRows=groupSummaries.map(s=>{
+    // 本次唯一的新計算：該組全年營收 ÷ 全年總營收。兩個數字都是既有變數，沒有重新加總。
+    const share=grandRev>0?s.rev/grandRev*100:null;
+    // 橫條一律中性灰：五條不同顏色並排會讓人去比顏色而不是比長度。通路識別交給左邊的圓點。
+    return `<tr style="border-top:1px solid #f0f0f0">
+      <td style="padding:9px 12px;font-size:12.5px;font-weight:600;color:#374151;text-align:left;white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${s.color};margin-right:7px"></span>${s.title}</td>
+      <td style="padding:9px 10px;text-align:right;font-size:12.5px;color:#6b7280;font-variant-numeric:tabular-nums">${fmtN(Math.round(s.rev))}</td>
+      <td style="padding:9px 10px;text-align:right;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;color:${s.pure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(s.pure))}</td>
+      <td style="padding:9px 10px;text-align:right;font-size:12.5px;color:#374151;font-variant-numeric:tabular-nums">${s.rate!==null?s.rate.toFixed(2)+'%':'—'}</td>
+      <td style="padding:9px 12px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;min-width:60px;height:6px;border-radius:3px;background:#eef0f4;overflow:hidden"><div style="width:${share!==null?share.toFixed(2):0}%;height:100%;background:#9ca3af;border-radius:3px"></div></div>
+          <span style="font-size:11.5px;color:#6b7280;font-variant-numeric:tabular-nums;min-width:44px;text-align:right">${share!==null?share.toFixed(1)+'%':'—'}</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  const groupSummaryHtml=`<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="background:#f8f9fc">
+        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700">通路</th>
+        <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">全年營收</th>
+        <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">全年純利</th>
+        <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">純利率</th>
+        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;width:200px">佔全年營收</th>
+      </tr></thead>
+      <tbody>${groupSummaryRows}</tbody>
+    </table>
+  </div>`;
   return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
     <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
   </div>
+  ${summaryCardsHtml}
+  ${groupSummaryHtml}
+  <details style="margin-bottom:4px">
+    <summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:#5b5fcf;padding:6px 2px;user-select:none">查看完整明細</summary>
+    <div style="margin-top:10px">
   <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto">
     <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:1250px">
       <colgroup><col style="width:110px"><col style="width:44px">${Array.from({length:12}).map(()=>'<col style="width:52px">').join('')}<col style="width:100px"><col style="width:100px"><col style="width:70px"></colgroup>
@@ -6212,7 +6269,9 @@ function _kpiYearViewHtml(){
       </tr></thead>
       <tbody>${groupBlocks}${grandRow}</tbody>
     </table>
-  </div>`;
+  </div>
+    </div>
+  </details>`;
 }
 function renderKpiTab(){
   const el=document.getElementById('kpi-tab-content');
