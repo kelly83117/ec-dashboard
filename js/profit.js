@@ -6084,6 +6084,11 @@ function _kpiShopAnnualTotal(rows,year,group,shop,pureKey){
   }
   return{rev,pure};
 }
+// 年增率（年度總表專用）。
+//   ⚠ 2026-08-14 起，年度總表那張 12 個月大表的純利一律使用中性深灰 #374151
+//     （負值紅 #dc2626），綠色 #059669 刻意只保留給本函式輸出的年增率。
+//     判準：絕對值不上色，變化率才上色 —— 顏色只用來標示訊號，不標示常態。
+//     若日後看到「純利深灰、年增率綠」，那是刻意的，不是漏改。
 function _kpiYoyHtml(cur,prev){
   if(!prev)return '';
   const pct=(cur-prev)/prev*100;
@@ -6123,8 +6128,8 @@ function _kpiYearViewHtml(){
         const month=`${_kpiCurYear}-${String(i+1).padStart(2,'0')}`;
         const row=rows.find(r=>r.month===month);
         if(!row){
-          monthRevTds.push(`<td style="padding:5px 6px;text-align:left;font-size:11.5px;color:#d1d5db">—</td>`);
-          monthPureTds.push(`<td style="padding:5px 6px;text-align:left;font-size:11.5px;color:#d1d5db">—</td>`);
+          monthRevTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:#d1d5db">—</td>`);
+          monthPureTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:#d1d5db">—</td>`);
           continue;
         }
         const raw=row[g.key]?.[shop]||{};
@@ -6140,8 +6145,8 @@ function _kpiYearViewHtml(){
         const pureV=d[pureKey]||0,revV=d.rev||0;
         annualRev+=revV;annualPure+=pureV;
         monthGrandRev[i]+=revV;monthGrandPure[i]+=pureV;
-        monthRevTds.push(`<td style="padding:5px 6px;text-align:left;font-size:11.5px;color:#6b7280">${revV?fmtN(Math.round(revV)):'—'}</td>`);
-        monthPureTds.push(`<td style="padding:5px 6px;text-align:left;font-size:11.5px;color:${pureV<0?'#dc2626':'#374151'}">${pureV?fmtN(Math.round(pureV)):'—'}</td>`);
+        monthRevTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:#6b7280">${revV?fmtN(Math.round(revV)):'—'}</td>`);
+        monthPureTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:${pureV<0?'#dc2626':'#374151'}">${pureV?fmtN(Math.round(pureV)):'—'}</td>`);
       }
       groupRev+=annualRev;groupPure+=annualPure;grandRev+=annualRev;grandPure+=annualPure;
       const prev=_kpiShopAnnualTotal(rows,prevYear,g,shop,pureKey);
@@ -6150,14 +6155,14 @@ function _kpiYearViewHtml(){
       const bg=_kpiShopBgColor(shop);
       return `<tr style="border-top:1px solid #f0f0f0;background:${bg}">
         <td rowspan="2" style="padding:6px 12px 6px 20px;font-size:12.5px;font-weight:600;color:#374151;text-align:left;white-space:nowrap;vertical-align:middle">${shop}</td>
-        <td style="padding:5px 8px;font-size:10.5px;color:#9ca3af;white-space:nowrap">營收</td>
+        <td style="padding:5px 8px;text-align:left;font-size:10.5px;color:#9ca3af;white-space:nowrap">營收</td>
         ${monthRevTds.join('')}
-        <td rowspan="2" style="padding:6px 8px;text-align:left;font-size:11.5px;color:#6b7280;vertical-align:middle">${annualRev?fmtN(Math.round(annualRev)):'—'}${_kpiYoyHtml(annualRev,prev.rev)}</td>
-        <td rowspan="2" style="padding:6px 8px;text-align:left;font-size:11.5px;font-weight:700;color:${annualPure<0?'#dc2626':'#059669'};vertical-align:middle">${annualRev||annualPure?fmtN(Math.round(annualPure)):'—'}${_kpiYoyHtml(annualPure,prev.pure)}</td>
-        <td rowspan="2" style="padding:6px 8px;text-align:left;font-size:11.5px;vertical-align:middle">${rate!==null?rate.toFixed(2)+'%':'—'}</td>
+        <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;color:#6b7280;vertical-align:middle">${annualRev?fmtN(Math.round(annualRev)):'—'}${_kpiYoyHtml(annualRev,prev.rev)}</td>
+        <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;font-weight:700;color:${annualPure<0?'#dc2626':'#374151'};vertical-align:middle">${annualRev||annualPure?fmtN(Math.round(annualPure)):'—'}${_kpiYoyHtml(annualPure,prev.pure)}</td>
+        <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;vertical-align:middle">${rate!==null?rate.toFixed(2)+'%':'—'}</td>
       </tr>
       <tr style="background:${bg}">
-        <td style="padding:5px 8px;font-size:10.5px;color:#9ca3af;white-space:nowrap">純利</td>
+        <td style="padding:5px 8px;text-align:left;font-size:10.5px;color:#9ca3af;white-space:nowrap">純利</td>
         ${monthPureTds.join('')}
       </tr>`;
     }).join('');
@@ -6181,27 +6186,27 @@ function _kpiYearViewHtml(){
     groupSummaries.push({title:g.title,color:g.color,rev:groupRev,pure:groupPure,rate:groupRate});
     const headerRow=`<tr style="background:#f8f9fc;border-top:1px solid #e5e7eb">
       <td colspan="17" style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#1e293b;border-left:3px solid ${g.color};text-align:left;white-space:nowrap">${g.title}
-        <span style="font-weight:400;color:#9ca3af;margin-left:10px">全年純利 <b style="font-weight:700;color:${groupPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(groupPure))}</b>${_kpiYoyHtml(groupPure,groupPrevPure)}${groupRate!==null?`　純利率 ${groupRate.toFixed(2)}%`:''}</span>
+        <span style="font-weight:400;color:#9ca3af;margin-left:10px">全年純利 <b style="font-weight:700;color:${groupPure>=0?'#374151':'#dc2626'}">${fmtN(Math.round(groupPure))}</b>${_kpiYoyHtml(groupPure,groupPrevPure)}${groupRate!==null?`　純利率 ${groupRate.toFixed(2)}%`:''}</span>
       </td>
     </tr>`;
     return headerRow+shopTrs;
   }).join('');
   const grandRate=grandRev>0?grandPure/grandRev*100:null;
-  const monthGrandRevTds=monthGrandRev.map(v=>`<td style="padding:6px 6px;text-align:left;font-size:11.5px;font-weight:700;color:#6b7280">${fmtN(Math.round(v))}</td>`).join('');
-  const monthGrandPureTds=monthGrandPure.map(v=>`<td style="padding:6px 6px;text-align:left;font-size:11.5px;font-weight:700;color:${v<0?'#dc2626':'#374151'}">${fmtN(Math.round(v))}</td>`).join('');
+  const monthGrandRevTds=monthGrandRev.map(v=>`<td style="padding:6px 6px;text-align:right;font-size:11.5px;font-weight:700;color:#6b7280">${fmtN(Math.round(v))}</td>`).join('');
+  const monthGrandPureTds=monthGrandPure.map(v=>`<td style="padding:6px 6px;text-align:right;font-size:11.5px;font-weight:700;color:${v<0?'#dc2626':'#374151'}">${fmtN(Math.round(v))}</td>`).join('');
   const grandRow=`<tr style="border-top:2px solid #e5e7eb;background:#f8f9fc">
-    <td rowspan="2" style="padding:7px 12px;font-size:12.5px;font-weight:700;vertical-align:middle">全年總計</td>
-    <td style="padding:5px 8px;font-size:10.5px;color:#9ca3af">營收</td>
+    <td rowspan="2" style="padding:7px 12px;text-align:left;font-size:12.5px;font-weight:700;vertical-align:middle">全年總計</td>
+    <td style="padding:5px 8px;text-align:left;font-size:10.5px;color:#9ca3af">營收</td>
     ${monthGrandRevTds}
-    <td rowspan="2" style="padding:6px 8px;text-align:left;font-size:11.5px;font-weight:700;vertical-align:middle">${fmtN(Math.round(grandRev))}${_kpiYoyHtml(grandRev,grandPrevRev)}</td>
-    <td rowspan="2" style="padding:6px 8px;text-align:left;font-size:11.5px;font-weight:700;color:${grandPure>=0?'#059669':'#dc2626'};vertical-align:middle">${fmtN(Math.round(grandPure))}${_kpiYoyHtml(grandPure,grandPrevPure)}</td>
-    <td rowspan="2" style="padding:6px 8px;text-align:left;font-size:11.5px;font-weight:700;vertical-align:middle">${grandRate!==null?grandRate.toFixed(2)+'%':'—'}</td>
+    <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;font-weight:700;vertical-align:middle">${fmtN(Math.round(grandRev))}${_kpiYoyHtml(grandRev,grandPrevRev)}</td>
+    <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;font-weight:700;color:${grandPure>=0?'#374151':'#dc2626'};vertical-align:middle">${fmtN(Math.round(grandPure))}${_kpiYoyHtml(grandPure,grandPrevPure)}</td>
+    <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;font-weight:700;vertical-align:middle">${grandRate!==null?grandRate.toFixed(2)+'%':'—'}</td>
   </tr>
   <tr style="background:#f8f9fc">
-    <td style="padding:5px 8px;font-size:10.5px;color:#9ca3af">純利</td>
+    <td style="padding:5px 8px;text-align:left;font-size:10.5px;color:#9ca3af">純利</td>
     ${monthGrandPureTds}
   </tr>`;
-  const monthHeaders=Array.from({length:12},(_,i)=>`<th style="padding:7px 6px;color:#6b7280;font-size:11px;font-weight:700;text-align:left;white-space:nowrap">${i+1}月</th>`).join('');
+  const monthHeaders=Array.from({length:12},(_,i)=>`<th style="padding:7px 6px;color:#6b7280;font-size:11px;font-weight:700;text-align:right;white-space:nowrap;cursor:default">${i+1}月</th>`).join('');
   // ── 年度摘要卡＋通路摘要表（純版面重組：數字全部沿用上面已算完的既有變數，不重算）──
   //   ⚠ grandRate / groupRate 已經是百分比數值（19.25），直接 toFixed，不要再乘 100。
   //     （_kpiSummaryCardsHtml 的 pureRateAgg 是小數 0.1925、口徑相反，不要照抄那邊的 *100 寫法。）
@@ -6260,12 +6265,12 @@ function _kpiYearViewHtml(){
     <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:1250px">
       <colgroup><col style="width:110px"><col style="width:44px">${Array.from({length:12}).map(()=>'<col style="width:52px">').join('')}<col style="width:100px"><col style="width:100px"><col style="width:70px"></colgroup>
       <thead><tr style="background:#f8f9fc">
-        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700">賣場</th>
+        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;cursor:default">賣場</th>
         <th></th>
         ${monthHeaders}
-        <th style="text-align:left;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700">全年營收</th>
-        <th style="text-align:left;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700">全年純利</th>
-        <th style="text-align:left;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700">純利率</th>
+        <th style="text-align:right;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700;cursor:default">全年營收</th>
+        <th style="text-align:right;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700;cursor:default">全年純利</th>
+        <th style="text-align:right;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700;cursor:default">純利率</th>
       </tr></thead>
       <tbody>${groupBlocks}${grandRow}</tbody>
     </table>
