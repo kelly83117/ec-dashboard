@@ -6114,7 +6114,19 @@ function _kpiYearViewHtml(){
   const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===_kpiCurYear?' selected':''}>${y}年</option>`).join('');
   const rows=getKpiRows();
   const prevYear=_kpiCurYear-1;
-  const monthGrandRev=Array(12).fill(0),monthGrandPure=Array(12).fill(0);
+  // 只顯示「該月份的 row 存在」的月份。判準刻意用 row 存不存在、不是數字是否全為 0——
+  //   0 元營收跟根本沒填是兩回事，而且這樣不必為了判斷先把 16 個賣場全算一遍。
+  //   ⚠ visibleMonths 只影響「顯示幾欄」。全年金額（共同費用扣除、_kpiShopAnnualTotal 的
+  //     去年同期基準）一律仍掃滿 12 個月，不可跟著縮，否則會跟上方大卡／摘要表對不上。
+  //   ⚠ monthGrandRev / monthGrandPure 的索引從此對應 visibleMonths[i]，【不是】第 i+1 月。
+  //     下游要用這兩個陣列（例如日後的圖表）必須一起取得 visibleMonths，否則會把 7 月的
+  //     數字畫到 1 月的位置。
+  const visibleMonths=[];
+  for(let m=1;m<=12;m++){
+    if(rows.some(r=>r.month===`${_kpiCurYear}-${String(m).padStart(2,'0')}`))visibleMonths.push(m);
+  }
+  const monthCount=visibleMonths.length;
+  const monthGrandRev=Array(monthCount).fill(0),monthGrandPure=Array(monthCount).fill(0);
   let grandRev=0,grandPure=0,grandPrevRev=0,grandPrevPure=0;
   // 通路摘要表用：只裝下面那個 map 已經算完的既有變數，不在這裡做任何新的加總。
   const groupSummaries=[];
@@ -6124,9 +6136,12 @@ function _kpiYearViewHtml(){
     const shopTrs=g.shops.map(shop=>{
       let annualRev=0,annualPure=0;
       const monthRevTds=[],monthPureTds=[];
-      for(let i=0;i<12;i++){
-        const month=`${_kpiCurYear}-${String(i+1).padStart(2,'0')}`;
+      for(let i=0;i<monthCount;i++){
+        const month=`${_kpiCurYear}-${String(visibleMonths[i]).padStart(2,'0')}`;
         const row=rows.find(r=>r.month===month);
+        // ⚠ 這個分支在目前的判準下【不可達】：visibleMonths 只收錄 row 存在的月份。
+        //   刻意保留不刪——若日後判準改成「數字全為 0 也隱藏」，它會立刻重新有用。
+        //   不是死碼，請勿清理。
         if(!row){
           monthRevTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:#d1d5db">—</td>`);
           monthPureTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:#d1d5db">—</td>`);
@@ -6185,15 +6200,17 @@ function _kpiYearViewHtml(){
     //     放前面會拿到還沒扣共同費用的中途值，跟下方群組表頭印出來的數字對不起來。
     groupSummaries.push({title:g.title,color:g.color,rev:groupRev,pure:groupPure,rate:groupRate});
     const headerRow=`<tr style="background:#f8f9fc;border-top:1px solid #e5e7eb">
-      <td colspan="17" style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#1e293b;border-left:3px solid ${g.color};text-align:left;white-space:nowrap">${g.title}
+      <td colspan="${monthCount+5}" style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#1e293b;border-left:3px solid ${g.color};text-align:left;white-space:nowrap">${g.title}
         <span style="font-weight:400;color:#9ca3af;margin-left:10px">全年純利 <b style="font-weight:700;color:${groupPure>=0?'#374151':'#dc2626'}">${fmtN(Math.round(groupPure))}</b>${_kpiYoyHtml(groupPure,groupPrevPure)}${groupRate!==null?`　純利率 ${groupRate.toFixed(2)}%`:''}</span>
       </td>
     </tr>`;
     return headerRow+shopTrs;
   }).join('');
   const grandRate=grandRev>0?grandPure/grandRev*100:null;
-  const monthGrandRevTds=monthGrandRev.map(v=>`<td style="padding:6px 6px;text-align:right;font-size:11.5px;font-weight:700;color:#6b7280">${fmtN(Math.round(v))}</td>`).join('');
-  const monthGrandPureTds=monthGrandPure.map(v=>`<td style="padding:6px 6px;text-align:right;font-size:11.5px;font-weight:700;color:${v<0?'#dc2626':'#374151'}">${fmtN(Math.round(v))}</td>`).join('');
+  // 沒累加過的月份在這兩個陣列裡是 fill(0) 的初始值，不是「算出來的零」。
+  //   印 0 等於宣稱量過、結果是零；改成 — 與上方賣場列一致（判斷寫法刻意逐字相同）。
+  const monthGrandRevTds=monthGrandRev.map(v=>`<td style="padding:6px 6px;text-align:right;font-size:11.5px;font-weight:700;color:#6b7280">${v?fmtN(Math.round(v)):'—'}</td>`).join('');
+  const monthGrandPureTds=monthGrandPure.map(v=>`<td style="padding:6px 6px;text-align:right;font-size:11.5px;font-weight:700;color:${v<0?'#dc2626':'#374151'}">${v?fmtN(Math.round(v)):'—'}</td>`).join('');
   const grandRow=`<tr style="border-top:2px solid #e5e7eb;background:#f8f9fc">
     <td rowspan="2" style="padding:7px 12px;text-align:left;font-size:12.5px;font-weight:700;vertical-align:middle">全年總計</td>
     <td style="padding:5px 8px;text-align:left;font-size:10.5px;color:#9ca3af">營收</td>
@@ -6206,7 +6223,7 @@ function _kpiYearViewHtml(){
     <td style="padding:5px 8px;text-align:left;font-size:10.5px;color:#9ca3af">純利</td>
     ${monthGrandPureTds}
   </tr>`;
-  const monthHeaders=Array.from({length:12},(_,i)=>`<th style="padding:7px 6px;color:#6b7280;font-size:11px;font-weight:700;text-align:right;white-space:nowrap;cursor:default">${i+1}月</th>`).join('');
+  const monthHeaders=visibleMonths.map(m=>`<th style="padding:7px 6px;color:#6b7280;font-size:11px;font-weight:700;text-align:right;white-space:nowrap;cursor:default">${m}月</th>`).join('');
   // ── 年度摘要卡＋通路摘要表（純版面重組：數字全部沿用上面已算完的既有變數，不重算）──
   //   ⚠ grandRate / groupRate 已經是百分比數值（19.25），直接 toFixed，不要再乘 100。
   //     （_kpiSummaryCardsHtml 的 pureRateAgg 是小數 0.1925、口徑相反，不要照抄那邊的 *100 寫法。）
@@ -6253,17 +6270,22 @@ function _kpiYearViewHtml(){
       <tbody>${groupSummaryRows}</tbody>
     </table>
   </div>`;
-  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
-    <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
-  </div>
-  ${summaryCardsHtml}
-  ${groupSummaryHtml}
+  // 全年一個月都沒有資料時，通路摘要表與 12 個月大表【一起】換成一行訊息：
+  //   五列全 0 的摘要表提供零資訊；而三張大卡留著維持版面骨架，
+  //   讓人知道「這裡本來有東西」，不至於整個畫面空掉。
+  //   不輸出 <details> 的理由：它預設收合，包在裡面等於要使用者點一下才知道「沒有」，
+  //   而且點開前分不出「這一年沒資料」和「有資料但我還沒展開」。
+  //   ⚠ 刻意用單一變數承載「摘要表 + 大表」兩塊，不寫成兩個各自判斷 monthCount 的三元——
+  //     兩個條件必須永遠同步，日後只改一邊就會變成「摘要表沒了但大表還在」，而且不會報錯。
+  const bodyBlock=monthCount===0
+    ? `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:28px 16px;text-align:center;font-size:12.5px;color:#9ca3af">本年度尚無資料</div>`
+    : `${groupSummaryHtml}
   <details style="margin-bottom:4px">
     <summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:#5b5fcf;padding:6px 2px;user-select:none">查看完整明細</summary>
     <div style="margin-top:10px">
   <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto">
-    <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:1250px">
-      <colgroup><col style="width:110px"><col style="width:44px">${Array.from({length:12}).map(()=>'<col style="width:52px">').join('')}<col style="width:100px"><col style="width:100px"><col style="width:70px"></colgroup>
+    <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:${424+52*monthCount}px">
+      <colgroup><col style="width:110px"><col style="width:44px">${visibleMonths.map(()=>'<col style="width:52px">').join('')}<col style="width:100px"><col style="width:100px"><col style="width:70px"></colgroup>
       <thead><tr style="background:#f8f9fc">
         <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;cursor:default">賣場</th>
         <th></th>
@@ -6277,6 +6299,11 @@ function _kpiYearViewHtml(){
   </div>
     </div>
   </details>`;
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+    <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
+  </div>
+  ${summaryCardsHtml}
+  ${bodyBlock}`;
 }
 function renderKpiTab(){
   const el=document.getElementById('kpi-tab-content');
