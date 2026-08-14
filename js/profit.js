@@ -6698,7 +6698,11 @@ function renderScoreComparisonTable(){
   const rows=SCORE_SHOPS.map(s=>{
     const cells=months.map(m=>{
       const r=computeShopMonthScore(s.id,year,m,q);
-      if(!r||!r.hasData)return `<td style="text-align:center;padding:8px 6px"><span style="color:#d1d5db;font-size:12px">—</span></td>`;
+      // 2026-08-14 修正。原本「—」沒有 onclick，導致沒有資料的月份點不開明細、
+      //   也就沒有任何入口可以填第一筆資料。種子 SCORE_DEFAULT_MONTHLY 只涵蓋
+      //   2026-04～07，種子用完之後這張表就再也無法新增資料（實測確認）。
+      //   ⚠ 這個 onclick 不可移除。
+      if(!r||!r.hasData)return `<td style="text-align:center;padding:8px 6px"><span onclick="toggleScoreDetailCell('${s.id}',${m})" style="color:#d1d5db;font-size:12px;cursor:pointer">—</span></td>`;
       const col=scoreColor(r.total);
       const active=_scoreDetailCells.has(s.id+'|'+m);
       return `<td style="text-align:center;padding:8px 6px">
