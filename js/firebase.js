@@ -303,9 +303,15 @@ try {
             const data = d.data() || {};
             if (!data.shop || !data.src) return;
             const k = 'ec_momo_moplus_origins|' + data.shop + '|' + data.src;
-            if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;
-            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) return;
-            Store._profitMem[k] = data;
+            const ts = (data.updatedAt && data.updatedAt.toMillis) ? data.updatedAt.toMillis() : 0;   // 雲端版本戳（base 基準）
+            if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;   // in-memory pending / 剛存 5 秒
+            if (window.__momoIsOriginsDirty && window.__momoIsOriginsDirty(k)) {   // 持久化 dirty：本機有未推重傳 → 不覆蓋（跨重整有效，修本次回退根因）
+              if (window.__momoNotifyOriginsSkip) window.__momoNotifyOriginsSkip(k);   // 不靜默：通知使用者本機較新未推
+              return;
+            }
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) { if (window.__momoNoteOriginsCloudBase) window.__momoNoteOriginsCloudBase(k, ts); return; }
+            Store._profitMem[k] = data;   // not dirty → 接受雲端（stale 跟上；舊 doc 無 updatedAt 也走這條、正常跟上不卡住）
+            if (window.__momoNoteOriginsCloudBase) window.__momoNoteOriginsCloudBase(k, ts);   // 記錄基準：我現在基於這個雲端版本
             changed.push(data.shop + '|' + data.src);
           });
           if (changed.length) { console.log('[momo_moplus_origins] 收到更新：', changed); window.dispatchEvent(new CustomEvent('momoMoPlusOriginsReady', { detail: { changed } })); }
@@ -446,7 +452,7 @@ try {
   const momoMoPlusOriginsDocId = (shop, src) => (MOMO_SHOP_DOCID[shop] || shop) + '_' + src;
   window.__cloudMoPlusOrigins = {
     getDoc:  (shop, src) => getDoc(doc(db, 'momo_moplus_origins', momoMoPlusOriginsDocId(shop, src))),
-    setSrc:  (shop, src, data) => setDoc(doc(db, 'momo_moplus_origins', momoMoPlusOriginsDocId(shop, src)), data || {}),
+    setSrc:  (shop, src, data) => { const { updatedAt: _drop, ...clean } = (data || {}); return setDoc(doc(db, 'momo_moplus_origins', momoMoPlusOriginsDocId(shop, src)), { ...clean, updatedAt: serverTimestamp() }); },   // updatedAt 供推送前版本比對（比照 momo_products）；剝掉來源舊 updatedAt、寫入伺服器時間戳
     subscribe: (cb) => onSnapshot(momoMoPlusOriginsColRef, cb),
   };
 
