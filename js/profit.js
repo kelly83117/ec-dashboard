@@ -10608,7 +10608,7 @@ function momoRenderProfitBody(shop, tableOnly){
         const lo=Math.min(...cand), hi=Math.max(...cand);
         if(st==='anomaly'){
           const tip=`跨月候選互斥（費率可能被調整／分類變更／資料異常）→ 保留新舊供人工判斷：\n舊累積：${cand.map(x=>x+'%').join('、')||'（空）'}\n本月新：${(r._feeCur||[]).map(x=>x+'%').join('、')||'（空）'}`;
-          return `<td style="text-align:right;font-weight:700;color:#dc2626" title="${String(tip).replace(/"/g,'&quot;')}">${lo===hi?lo:lo+'–'+hi}%<div class="mm-cell-tag">⚠異常</div></td>`;   // ⚠異常 降第二行（.mm-cell-tag）→ 數字右緣對齊；數字仍紅粗（異常警示，非「唯一解去粗體」對象）
+          return `<td style="text-align:right;font-weight:700;color:#dc2626" title="${String(tip).replace(/"/g,'&quot;')}">${lo===hi?lo:lo+'–'+hi}%<div class="mm-cell-tag warn">⚠異常</div></td>`;   // ⚠異常 降第二行（.mm-cell-tag warn＝紅字警示，同「成交費率異常 N 項」chip 色 #b91c1c，Vanessa 待辦訊號不與灰字混）→ 數字右緣對齊；數字仍紅粗
         }
         if(cand.length===1){   // 唯一解：一般字重（取消 PR#132 的 font-weight:700，與同表其他數值一致；仍深色實心，不加標籤故本就右對齊）
           return `<td style="text-align:right;color:#1f2937" title="已收斂唯一費率 ${lo}%（非檔期）">${lo}%</td>`;
