@@ -10424,11 +10424,13 @@ function momoRenderProfitBody(shop, tableOnly){
     let prevKeysForRows=null;
     if(!_e001Est){ const pk=momoPrevPeriodKey(period); if(pk && pk.slice(0,7)>=MOMO_FIRST_PERIOD) prevKeysForRows=momoExpandPeriod(pk); }   // 未結算估算期別不環比（口徑不同）
     const _mp=momoIsMoPlus(shop), _cm=_mp?momoMoPlusCostMapCached():null;   // 成本欄：MO+ 查莫筆克成本表（cost_by_origin）；甲乙用 product.cost
+    const _stRatio=momoStockRatio(shop);   // 庫存欄分配比例（甲配/MO+=0.2、乙配=1）；ratio=1 完全不動（乙配數字與改動前相同）
     rows=all.map(p=>{
       const agg=momoAggregatePeriods(p, period?momoExpandPeriod(period):[], shop);
       const prev= prevKeysForRows ? momoAggregatePeriods(p, prevKeysForRows, shop) : null;
       // ppUntax=未稅進價（含稅進價÷1.05）：進價欄顯示用、也可排序；淨利表營收基準口徑。_prev=上期 aggregate（逐列環比用）
-      const _st=(p.origin && _stockMap[p.origin]!=null)?_stockMap[p.origin]:null;   // 自家庫存：按原廠編號查快照，查無=null（畫面「—」）
+      const _stRaw=(p.origin && _stockMap[p.origin]!=null)?_stockMap[p.origin]:null;   // 莫筆克原始庫存（tooltip 對照用）：按原廠編號查快照，查無=null（畫面「—」）
+      const _st=(_stRaw==null)?null:(_stRatio===1?_stRaw:Math.floor(_stRaw*_stRatio));   // 顯示/排序/篩選/匯出值＝分配估算（比例×原始，無條件捨去，保守不高估）；乙配 ratio=1 原封不動
       // 成本欄「單位成本」r.unitCost（缺=null→顯示「—」）：口徑與該賣場既有缺成本判定完全一致（momoProductAnomalies）。
       //   甲乙＝product.cost（>0 才有值）；MO+＝依原廠查 cost_by_origin，任一原廠缺成本→null（決策①），有值→主原廠 p.origin 成本、多原廠成本不同標 unitCostMulti。
       let unitCost=null, unitCostMulti=false;
@@ -10440,7 +10442,7 @@ function momoRenderProfitBody(shop, tableOnly){
           unitCostMulti=(origs.length>1 && new Set(origs.map(o=>Number(_cm[o]))).size>1);   // 多原廠且成本不同→cell 加 tooltip 註明
         }
       } else if(Number(p.cost)>0){ unitCost=Number(p.cost); }
-      return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, unitCost, unitCostMulti, stock:_st, _prev:prev };   // coverage/covered/missingOrigins 仍在 agg（缺成本橫幅/加權毛利率/no_cost 標籤用）；成本涵蓋「欄」已移除
+      return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, unitCost, unitCostMulti, stock:_st, stockRaw:_stRaw, _prev:prev };   // coverage/covered/missingOrigins 仍在 agg（缺成本橫幅/加權毛利率/no_cost 標籤用）；成本涵蓋「欄」已移除。stockRaw=莫筆克原始（tooltip 對照）
     });
     // 標籤：整月＋半月都算（半月只少成長類）；完整重繪重算並烘焙進 row（tableOnly 直接吃 row._tags）。「標籤」欄顯示 + 篩選共用同一份。
     tagsRes=momoTagsFor(shop, !tableOnly);   // 指派到上方 function-scope 的 tagsRes（非 const，供 9631 讀取）
@@ -10573,7 +10575,11 @@ function momoRenderProfitBody(shop, tableOnly){
         if(!r.origin) return `<td style="text-align:right;color:#e5e7eb" title="此商品無原廠編號，無法對應自家庫存"></td>`;
         if(r.stock==null) return `<td style="text-align:right;color:#c7cad1" title="莫筆克庫存表無此原廠編號（${String(r.origin).replace(/"/g,'&quot;')}）：可能未上傳或不在表內">—</td>`;
         const oesc=String(r.origin).replace(/"/g,'&quot;');
-        const tip=`原廠編號 ${oesc} · 自家各倉可用庫存 ${Math.round(r.stock).toLocaleString()}\n⚠ 甲配／乙配同原廠編號共用同一批（此為共用庫存，非本賣場各自的量）\n⚠ 自家倉庫存，不是 MOMO 平台可售量（乙配已進 MOMO 倉的不算）\n資料日期 ${_stockDateStr}${_stockStale?`（已 ${_stockAgeDays} 天未更新，可能過期）`:''}`;
+        const _dateTip=`資料日期 ${_stockDateStr}${_stockStale?`（已 ${_stockAgeDays} 天未更新，可能過期）`:''}`;
+        const _ratio=momoStockRatio(shop);
+        const tip = _ratio!==1
+          ? `原廠編號 ${oesc} · 分配估算 ${Math.round(r.stock).toLocaleString()}（＝莫筆克總庫存 ${Math.round(r.stockRaw!=null?r.stockRaw:0).toLocaleString()} × 該賣場分配比例 ${Math.round(_ratio*100)}%，無條件捨去）\n⚠ 這是分配估算、非該賣場實際庫存：莫筆克為甲乙＋MO+ 共用總量，此欄按比例估各賣場可用\n⚠ 自家倉庫存，不是 MOMO 平台可售量\n${_dateTip}`
+          : `原廠編號 ${oesc} · 自家各倉可用庫存 ${Math.round(r.stock).toLocaleString()}\n⚠ 甲配／乙配同原廠編號共用同一批（此為共用庫存，非本賣場各自的量）\n⚠ 自家倉庫存，不是 MOMO 平台可售量（乙配已進 MOMO 倉的不算）\n${_dateTip}`;
         const st='text-align:right;overflow:hidden;text-overflow:ellipsis'+(_stockStale?';color:#f97316':'');
         return `<td style="${st}" title="${tip}">${Math.round(r.stock).toLocaleString()}${_stockStale?' <span style="color:#f97316;font-size:10px">⚠</span>':''}</td>`;
       }
@@ -14257,6 +14263,10 @@ function momoOpenFeeAnomalyPanel(shop){
 //  值＝ { uploadedAt:<ms>, byOrigin:{origin:qty} }。庫存是快照 → 每次上傳整份覆蓋（不像 cost 累積），uploadedAt 供「資料日期/過期」提示。
 const _MOMO_STOCK_LS='ec_momo_stock_by_origin';
 const MOMO_STOCK_STALE_DAYS=14;   // 超過視為過期（莫筆克不定期上傳）→ 畫面橘字提示
+// 庫存欄各賣場「分配比例」：莫筆克是甲乙+MO+ 共用總庫存，此欄按比例估各賣場可用（分配估算、非實際庫存）。
+//   ⚠ 可調設定、集中一處，勿寫死在渲染邏輯：之後比例會調、乙配會改用 F1102 寄倉即時庫存的實際數字（屆時把乙配從這裡拿掉/改資料源）。
+const MOMO_STOCK_RATIO={ '甲配':0.2, 'MO+麻吉':0.2, 'MO+森之旅':0.2, '乙配':1 };   // 乙配暫維持 100%（待換 F1102，勿為求一致順手給比例）
+function momoStockRatio(shop){ const r=MOMO_STOCK_RATIO[shop]; return (typeof r==='number' && r>=0)?r:1; }   // 未設定的賣場預設 1（不縮放、安全）
 function momoStockByOriginKey(){ return _MOMO_STOCK_LS; }
 function momoLoadStockByOrigin(){ const k=_MOMO_STOCK_LS;
   try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch{}
