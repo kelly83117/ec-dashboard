@@ -674,6 +674,7 @@ function _sweepAllLocalReportsIntoPending(){
   //   也當 pending、再原封不動推回雲端 → 多人同時同步時「後按的用自己記憶體版本
   //   蓋掉全部」（舊蓋新的併發覆蓋）。改為只掃 localStorage：只推本機親手產生/編輯過的。
   try{ momoCleanLegacyE001Keys(); }catch{}   // 掃描前先清掉 #139/#140 E001 無分片殘留（否則會被掃進待推、預覽出現無 src 空殼列）
+  try{ momoMigrateOptlogBadKeys(); }catch{}   // 推送前把 optlog 的前後雙底線舊 key 遷移成合法形式（否則同步該賣場 optlog 會炸）
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
@@ -874,7 +875,11 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       let val=null;
       try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
       if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} }
-      if(val!==null && val!==undefined) tasks.push({key:pk,run:()=>window.__cloudProfit.setField(pk,val)});
+      if(val!==null && val!==undefined){
+        const badKeys=momoFsInvalidFieldKeys(val);   // 推送前欄位名檢核：不合法明確報出是哪個 key，不等 updateDoc 才炸（例：optlog 的 __master_import__）
+        if(badKeys.length){ skippedProblem.push({key:pk, reason:'Firestore 欄位名不合法 → '+badKeys.slice(0,3).map(b=>'`'+b.key+'`（'+b.reason+'）').join('、')+(badKeys.length>3?' …共 '+badKeys.length+' 個':'')}); }
+        else tasks.push({key:pk,run:()=>window.__cloudProfit.setField(pk,val)});
+      }
       else skippedProblem.push({key:pk,reason:'設定值讀不到'});
     });
     if(allowKeys instanceof Set){ const before=tasks.length; for(let i=tasks.length-1;i>=0;i--){ if(!allowKeys.has(tasks[i].key)) tasks.splice(i,1); } console.log('[syncToCloud] allowKeys 過濾:',before,'→',tasks.length,'｜選中:',[...allowKeys]); }   // 逐項勾選：只推選中的 key
@@ -8966,7 +8971,7 @@ function momoMoPlusApplyMaster(shop, parsed){
   //   存合成 sku key（不撞真商品、不進任一商品的優化紀錄區塊）；type '主檔匯入' → momoUpdateDailyProgress 當日 counts +1。product.history 維持每新品各一筆（8491，不動）。
   try{
     const now=momoNowParts(), by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
-    const om=momoLoadOptlog(shop); const K='__master_import__'; om[K]=om[K]||[];
+    const om=momoLoadOptlog(shop); const K='master-import'; om[K]=om[K]||[];   // ⚠ 不可用前後雙底線（__master_import__）當 key：optlog map 的 key 會變 Firestore 欄位名，Firestore 拒 `__..__` → 同步炸；改連字號形式
     om[K].push({ id:'opt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:now.date, time:now.time, shop, sku:K, by, type:'主檔匯入',
       note:'商品主檔匯入：新增 '+added+' 筆／更新 '+updated+' 筆（總計 '+products.length+' 筆）' });
     momoSaveOptlog(shop, om);
@@ -9037,6 +9042,7 @@ function momoMoPlusOriginsKey(shop, src){ return 'ec_momo_moplus_origins|'+shop+
 // ⚠ 空原廠編號的列一律歸此哨兵 key（不用 ''、不靜默丟）：量仍計入期別總量，查無成本＝缺成本。
 //   名稱需過 Firestore 全部 key 規則：非空、非前後雙底線、無保留字元、不撞真實編號格式(H###-##)。→ 'NO_ORIGIN'。
 const MOMO_NO_ORIGIN='NO_ORIGIN';
+const MOMO_UNMATCHED_BLOCK_RATIO=0.5;   // MO+ 對帳明細未建檔防呆門檻：未建檔 SKU 佔比 > 此值 → 擋下（多半是「先傳對帳明細、後匯商品主檔」的順序錯，會半殘）
 // ══════ 單一權威：Firestore map-key(field name) 檢核/修正。所有寫 Firestore 的路徑寫入前都走它，杜絕「key 被拒」再發生 ══════
 //   已查官方文件（firebase.google.com/docs/firestore/quotas「Constraints on field names」）：map-key 規則**只有**
 //     ①有效 UTF-8 ②不可 match /^__.*__$/（前後雙底線＝內部保留）③≤1500 bytes；SDK 另拒空欄位名（實測 "must not be empty"）。
@@ -9054,6 +9060,25 @@ function momoFsSanitizeDeep(v){
   if(Array.isArray(v)) return v.map(momoFsSanitizeDeep);
   if(v && typeof v==='object'){ const o={}; Object.keys(v).forEach(k=>{ o[momoFsSafeKey(k)]=momoFsSanitizeDeep(v[k]); }); return o; }
   return v;
+}
+// 推送前欄位名檢核（共用）：遞迴找出「map key」違反 Firestore 欄位名限制者，回 [{path,key,reason}]。
+//   規則同 momoFsSafeKey：①非空 ②非 /^__.*__$/（前後雙底線＝Firestore 保留）③≤1500 bytes。
+//   ⚠ 只驗 map key（陣列索引不是欄位名、不驗；`. / [ ] *` 是 field-PATH 規則、非巢狀 map-key 規則，不驗）。
+//   用途：__cloudProfit.setField 等推送前呼叫 → 不合法「明確報出是哪個 key」，不等 updateDoc 才炸。
+function momoFsInvalidFieldKeys(v, path){
+  path=path||''; const bad=[];
+  if(Array.isArray(v)){ v.forEach((x,i)=>bad.push(...momoFsInvalidFieldKeys(x, path+'['+i+']'))); return bad; }
+  if(v && typeof v==='object'){
+    Object.keys(v).forEach(k=>{
+      let reason=null;
+      if(k==='') reason='空欄位名';
+      else if(/^__[\s\S]*__$/.test(k)) reason='前後雙底線（__..__ 為 Firestore 保留）';
+      else { try{ if(new TextEncoder().encode(k).length>1500) reason='超過 1500 bytes'; }catch(e){ if(k.length>1500) reason='過長'; } }
+      if(reason) bad.push({ path:(path?path+'.':'')+k, key:k, reason });
+      bad.push(...momoFsInvalidFieldKeys(v[k], (path?path+'.':'')+k));
+    });
+  }
+  return bad;
 }
 // MO+ origins/master doc 專用：先把 o map 的空 origin key（''）歸 NO_ORIGIN（origin 語意 + 量合併），再通用檢核全部 key。
 //   clone、不動本機鏡像 → 既有 doc 不必重傳、重按同步就補上。
@@ -10587,6 +10612,25 @@ function momoSaveOptlog(shop,map){ const k=momoOptlogKey(shop);
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=map; }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=map; }catch{}
   try{ _markPending(k); }catch{}   // 走既有 pending → 同步時 __cloudProfit.setField（field 分支）
+}
+// 一次性遷移：把前後雙底線的舊合成 key（__master_import__/__sync_new__）改成合法形式（Firestore 拒 __..__ → 同步炸）。
+//   併到目標 key（若已存在）、entry.sku 一併改；idempotent（無壞 key 就 no-op）；改到就 momoSaveOptlog（標 pending → 下次同步推乾淨版）。回遷移筆數。
+const _MOMO_OPTLOG_KEY_RENAME={ '__master_import__':'master-import', '__sync_new__':'sync-new' };
+function momoMigrateOptlogBadKeys(){
+  let migrated=0;
+  MOMO_SHOPS.filter(s=>s!=='總表').forEach(shop=>{
+    try{ const om=momoLoadOptlog(shop); let changed=false;
+      Object.keys(_MOMO_OPTLOG_KEY_RENAME).forEach(bad=>{ if(om && om[bad]){ const good=_MOMO_OPTLOG_KEY_RENAME[bad];
+        const arr=Array.isArray(om[bad])?om[bad]:[]; arr.forEach(e=>{ if(e&&e.sku===bad) e.sku=good; });   // entry.sku 一併改（明細不再顯示 __..__）
+        om[good]=(Array.isArray(om[good])?om[good]:[]).concat(arr);   // 併到合法 key（若已存在）
+        delete om[bad]; changed=true; migrated++;
+      }});
+      if(changed) momoSaveOptlog(shop, om);
+    }catch(e){}
+  });
+  if(migrated){ try{ console.warn('[optlog 遷移] 修正 '+migrated+' 個前後雙底線舊 key（__master_import__/__sync_new__ → master-import/sync-new）'); }catch{} }
+  try{ window.__momoOptlogMigrated=migrated; }catch{}
+  return migrated;
 }
 const MOMO_OPTLOG_TYPES=['商品內容優化','調價','上下架','相關商品','影片','五星好評','做活動','其他'];   // 單一來源：只餵新增下拉；歷史紀錄存的是當時字串、不受影響（工作日誌 counts 動態產生，舊 type 如 調成本/補貨/改運費/下架 照樣計數顯示、不遷移不合併）
 function momoAddOptlog(shop,sku){
@@ -12800,7 +12844,12 @@ async function momoMoPlusPrepareFile(file, shop){
   }
   const plan=momoBuildMoPlusPlan(parsed, shop);
   plan._guard=momoMoPlusComputeGuard(plan, shop);
-  return {ok:true, srcCode, parsed, plan};
+  // 未建檔防呆：統計 SKU 已建檔/未建檔比例。比例過高＝多半是「先傳對帳明細、後匯商品主檔」的順序錯 → SKU 全被 skip、products 無 periods、origins 空、只寫 reconcile → 半殘（畫面顯示未對帳但看不出原因，森之旅實例）。
+  const sp=plan.shops[shop]||{matched:[],unmatched:[]};
+  const matchedN=(sp.matched||[]).length, unmatchedN=(sp.unmatched||[]).length, totalSku=matchedN+unmatchedN;
+  const unmatchedRatio=totalSku>0?unmatchedN/totalSku:0;
+  const blockUnmatched=totalSku>0 && unmatchedRatio>MOMO_UNMATCHED_BLOCK_RATIO;   // >門檻 → 擋下（matchedN===0 亦落在此，ratio=1）
+  return {ok:true, srcCode, parsed, plan, matchedN, unmatchedN, totalSku, unmatchedRatio, blockUnmatched};
 }
 async function momoMoPlusUploadGenerate(shop){
   const prev=document.getElementById('moplus-up-preview-'+shop); if(prev) prev.innerHTML='<div style="font-size:13px;color:#9ca3af">解析中…</div>';
@@ -12809,6 +12858,13 @@ async function momoMoPlusUploadGenerate(shop){
   if(r.errTitle){ if(prev)prev.innerHTML=momoMoPlusErrHtml(r.errTitle, r.errBody); return; }   // 硬守衛（檔名/分頁/header）→ 富預覽錯誤框
   _moPlusUpParsed=r.parsed;
   if(!r.ok){ _moPlusUpPlan=null; momoRenderMoPlusPreview(shop); return; }   // 逐列/運費 fail → 富預覽 fail-loud（列出不符列）
+  if(r.blockUnmatched){   // 未建檔防呆：多數商品尚未建檔 → 擋下（多半是「先傳對帳明細、後匯商品主檔」的順序錯）
+    _moPlusUpPlan=null;
+    if(prev)prev.innerHTML=momoMoPlusErrHtml('多數商品尚未建檔（不寫入）',
+      r.unmatchedN+'/'+r.totalSku+' 個商品尚未建檔，請先到「商品同步」匯入商品主檔，再上傳對帳明細。'
+      +'<br>否則對帳明細會被大量跳過、只寫月對帳、per-SKU 銷量與營收全空（畫面顯示「未對帳」卻看不出原因）。');
+    return;
+  }
   _moPlusUpPlan=r.plan;
   momoRenderMoPlusPreview(shop);
 }
@@ -12901,6 +12957,8 @@ function momoMoPlusUploadApply(shop, allowedPeriods){
   const {res, built, lsOk, mm}=momoMoPlusApplyPrepared(shop, parsed, P, allowedPeriods);   // ①寫products ②origins ③recon +寫後互查（單檔/批次共用）
   _moPlusUpFile=null; _moPlusUpParsed=null; _moPlusUpPlan=null;
   const lines=[momoPeriodReportLine('已寫入', res.wroteBy), momoPeriodReportLine('　其中累加到既有期別', res.accumBy), momoPeriodReportLine('已跳過（你未勾選）', res.gatedBy)].filter(Boolean);
+  const unmatchedN=(P.shops[shop]&&P.shops[shop].unmatched||[]).length;   // 未建檔數（少數新品照舊寫入，但摘要不靜默）
+  if(unmatchedN) lines.push('已跳過 '+unmatchedN+' 個未建檔商品（不寫入；先到商品同步匯入商品主檔）');
   let extra='';
   if(!lsOk) extra+='\n\n⚠ 逐列成本（origins）寫入本機失敗（可能配額不足）——請截圖回報、先不要按同步（避免只推一半造成雲端不一致）。';
   if(mm.length) extra+='\n\n⚠ 雙寫不一致：'+mm.length+' 個期別 cell qty≠Σorigins（'+mm.slice(0,5).map(x=>x.sku+' '+momoPeriodLabel(x.period)+' '+x.cellQty+'≠'+x.sumOrigins).join('、')+(mm.length>5?' …':'')+'）。毛利會標紅、該期別不算數字，請回報。';
@@ -12944,12 +13002,14 @@ async function momoMoPlusBatchRun(shop){
     try{
       const r=await momoMoPlusPrepareFile(it.file, shop);   // 守衛全保留：檔名/分頁/header/逐列驗證/運費判準
       if(!r.ok){ it.status='失敗'; it.detail=r.reason||'解析失敗（未寫入）'; }
+      else if(r.blockUnmatched){ it.status='失敗'; it.detail=r.unmatchedN+'/'+r.totalSku+' 個商品尚未建檔，請先到商品同步匯入商品主檔再上傳（未寫入）'; }   // 未建檔防呆：多數未建檔＝順序錯，擋下不寫
       else{
         const {res, built, lsOk, mm}=momoMoPlusApplyPrepared(shop, r.parsed, r.plan, null, {deferConsistency:true});   // null=全期別；批次跳過逐檔一致性（跨檔相依、寫完再一次跑）
         if(!lsOk){ it.status='失敗'; it.detail='origins 寫入本機失敗（配額？）— 資料未寫入'; }   // 真正的寫入失敗（非一致性）
         else{
           const periods=(res.wrotePeriods||[]).map(momoPeriodLabel).join('/')||'—';
           let d='寫入 '+res.wrote+' 筆 · '+built.skuN+' SKU · 期別 '+periods;
+          if(r.unmatchedN) d+=' · 已跳過 '+r.unmatchedN+' 個未建檔商品';   // 少數未建檔照舊寫入，但不靜默：摘要標明跳過數
           if(momoMoPlusPlanHasShrink(r.plan)) d+=' · ⚠同來源變小';   // 數量變小警示保留（提示、不阻擋）
           it.status='成功'; it.detail=d;
         }
@@ -14061,7 +14121,7 @@ function momoSyncApplyNew(shop){
   const master=momoLoadProducts(shop), have=new Set(master.map(p=>p.sku)); let added=0;
   items.forEach(it=>{ if(have.has(it.sku))return; master.push({sku:it.sku, origin:it.origin, name:it.name, cost:it.cost, purchasePrice:it.purchasePrice, salePrice:it.salePrice, shippingPackaging:momoDefaultShip(shop), history:[{...momoNowParts(),cost:it.cost,purchasePrice:it.purchasePrice,salePrice:it.salePrice,note:'商品資料同步：新建檔'}], periods:{}}); have.add(it.sku); added++; });
   momoSaveProducts(shop,master);
-  if(added>0) momoLogProductAddOptlog(shop, '__sync_new__', '同步新建', '商品資料同步·一鍵新建 '+added+' 筆');   // 批次新建＝一筆彙總 optlog（非逐筆、不洗版；比照主檔匯入）
+  if(added>0) momoLogProductAddOptlog(shop, 'sync-new', '同步新建', '商品資料同步·一鍵新建 '+added+' 筆');   // 批次新建＝一筆彙總 optlog（非逐筆、不洗版；比照主檔匯入）。⚠ key 不可用 __sync_new__（前後雙底線→Firestore 欄位名拒收→同步炸）
   _momoSyncAfterApply(shop, shop+' 已新增 '+added+' 個商品');
 }
 function momoRenderProductSync(shop){
