@@ -201,7 +201,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
               <div class="ucard-title" id="upm-mobic-title">莫筆克銷售分析</div>
               <span id="upm-mobic-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
             </div>
-            <div class="ucard-sub">.xlsx</div>
+            <div class="ucard-sub" id="upm-mobic-sub">.xlsx</div>
           </div>
         </label>
         <label class="ucard" id="upm-ads" style="width:100%;box-sizing:border-box">
@@ -213,7 +213,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
               <div class="ucard-title" id="upm-ads-title">蝦皮廣告報表</div>
               <span id="upm-ads-status" style="font-size:11px;font-weight:600;color:#ef4444">✗ 未載入</span>
             </div>
-            <div class="ucard-sub">.csv</div>
+            <div class="ucard-sub" id="upm-ads-sub">.csv</div>
           </div>
         </label>
         <label class="ucard" id="upm-selads" style="width:100%;box-sizing:border-box">
@@ -236,6 +236,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         </div>
       </div>
       <div class="ana-modal-ftr" style="flex-direction:column;align-items:stretch;gap:10px">
+        <span id="upm-overwrite-note" style="font-size:12px;color:#9ca3af">要換掉已經產生的報表：在同一個通路、同一組期間重新上傳檔案再產生一次，就會直接覆蓋舊的那份。</span>
         <span id="upm-gen-hint" style="font-size:12px;color:#9ca3af">上傳莫筆克＋廣告報表後可產生</span>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
           <button id="upm-clear-btn" onclick="clearPeriodFromModal()" style="padding:8px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;color:#6b7280;font-size:13px;font-weight:600;cursor:pointer">🗑 清除上傳紀錄</button>
@@ -1497,6 +1498,9 @@ function clearPeriod(shop){
   const selT=document.getElementById('upm-selads-title');if(selT)selT.textContent='選品廣告清單';
   const selD=document.getElementById('upm-selads-del');if(selD){selD.style.opacity='0.35';selD.style.pointerEvents='none';}
   const genBtn=document.getElementById('upm-gen-btn');if(genBtn)genBtn.disabled=true;
+  // raw 已清空 → 副標回到副檔名。⚠ 這裡一定要自己呼叫：clearPeriod 刻意不重開 modal
+  //   （見上方「不靠 openUploadModal 重開」那行），少了這行副標會留著已清掉檔案的期間。
+  _updateFilePeriodSubs(shop);
   // ⚠ 刻意【不動】表格 / KPI / 期間標籤 / 匯出鈕：報表還在，畫面就該照原樣顯示。
   //   舊版在這裡把表格換成「報表已清除，請重新上傳並產生」、KPI 歸零、停用匯出鈕 ——
   //   改成不刪報表之後那段就是在說謊，而且會擋掉匯出（昨天資料能救回來正是靠匯出過的 Excel）。
@@ -1920,6 +1924,10 @@ function onFile(e,shop,type){
         const wb=XLSX.read(ev.target.result,{type:'binary'});
         const sName=wb.SheetNames.find(s=>s==='銷售統計'||s.includes('銷售'))||wb.SheetNames[0];
         state[shop].rawMobic=XLSX.utils.sheet_to_json(wb.Sheets[sName],{defval:''});
+        // 檔名與檔案自己的期間掛在 raw 上（唯讀、不持久化、raw 沒了就沒了；理由見 _mobicPeriod 上方註解）。
+        //   ⚠ 刻意放在 raw 賦值【之後】而不是包住它：這一行整個爆掉也只是少顯示一個期間，
+        //     上傳流程（markCard / checkReady）照跑，不會因為衍生資料壞掉而讓人傳不了檔。
+        try{ state[shop].rawMobic._name=file.name; state[shop].rawMobic._period=_mobicPeriod(state[shop].rawMobic); }catch{}
         try{localStorage.setItem(fmKey(shop,'mobic'),JSON.stringify({name:file.name}));}catch(e){}
         markCard(shop,'mobic','✅',file.name,'ok');
       }catch(err){markCard(shop,'mobic','❌','讀取失敗','err');}
@@ -1931,6 +1939,8 @@ function onFile(e,shop,type){
       try{
         const text=new TextDecoder('utf-8').decode(ev.target.result);
         state[shop].rawAds=parseAdsCsv(text);
+        // 同 mobic：期間取自 CSV 前言（parseAdsCsv 會把前言丟掉，故另外讀一次同一份 text）。
+        try{ state[shop].rawAds._name=file.name; state[shop].rawAds._period=_adsCsvPeriod(text); }catch{}
         const spend=state[shop].rawAds.reduce((s,r)=>s+num(r['花費']||0),0);
         try{localStorage.setItem(fmKey(shop,'ads'),JSON.stringify({name:file.name}));}catch(e){}
         markCard(shop,'ads','✅',file.name,'ok');
@@ -2016,6 +2026,131 @@ function parseAdsCsv(text){
   }).filter(r=>{const sid=(r['商品 ID']||r['商品ID']||'').trim();return sid&&sid!=='-';});
 }
 function splitCSV(line){const res=[];let cur='';let q=false;for(let c of line){if(c==='"'){q=!q;}else if(c===','&&!q){res.push(cur);cur='';}else{cur+=c;}}res.push(cur);return res;}
+
+// ══════ 檔案自己帶的期間（唯讀衍生資料，只給畫面看）══════
+// 為什麼要有：2026/08/17 事故 —— 在 2026/08 上半月上傳檔案、把區間切到 2026/07 下半月之後，
+//   記憶體裡的 raw 不會被清（onMonthChange / onHalfChange 全文都不碰 raw），卡片仍顯示
+//   「✅ 已載入」，按下產生就用 8 月的資料算出 7 月的報表，全程沒有任何警告。
+//   對策是把「檔案自己宣告的期間」顯示在卡片上，跟標題列的「選定期間」並排，讓人自己看出不對。
+// ⚠ 這一版【刻意只做被動顯示，不做產生前攔截】：判定「什麼叫不符」有一堆坑（整月 vs 上下半月、
+//   結束時間戳、部分重疊、刻意用整月檔案跑整月），判錯的代價比漏抓高；而且 generate() 已經有一個
+//   confirm（沒廣告時，本檔搜 `_noAds&&!confirm`），維克通路對那顆是常態跳出，再疊一個會訓練出
+//   無腦按確定的反射（同理見 checkAdsReconcile 裡「多一個會狼來了的警告」那段註解）。
+// ⚠ 值一律掛在 raw 陣列【自己身上】（arr._period / arr._name），不另開 state 欄位：
+//   把 raw 設成 null 的地方有三處（clearPeriod / deleteUpload / confirmDeleteFile），平行欄位就有
+//   六個「要記得一起清」的機會，掛在陣列上是零個 —— raw 沒了它必然一起沒，重整也一起沒。
+//   也因此它天然不持久化：raw 從不上雲（上雲的是 built），陣列的非索引屬性也不會被 JSON.stringify 帶走。
+// ⚠ 掛在陣列上安全：全檔對 raw 的用法只有 .length / .forEach / .reduce / Object.keys(arr[0])
+//   （逐條查過），四種都看不到額外的自有屬性；全檔唯一的 for...in 跑的是 _momoFeeRateCache、無關。
+// ⚠ 下面四個函式都用 function 宣告（會 hoist），所以放在 onFile 後面也叫得到，
+//   不會踩本檔那幾處 const 的 TDZ 坑（理由同 _batchSel / _cloudRefreshing 的既有註解）。
+
+// 莫筆克：期間藏在「銷售數量」欄位標題裡，例：銷售數量(202607010000~202607150000)
+//   （欄位標題就是 rawMobic[0] 的 key —— sheet_to_json 預設 header 模式，見 onFile 的 mobic 分支）
+//   ⚠ 2026-08-17 用真實檔案（商品銷售排行_*.xlsx）驗過：分頁「銷售統計」標題列 20 欄，
+//     第 19 欄（S）就是上面那個格式，結束時間戳是 0000 不是 2359（所以 regex 用 \d* 吃掉時分秒）。
+//   🔴 刻意【不】用 buildShop 那種「第一個 銷售數量* 欄位」的找法，而是「第一個抓得到日期的」：
+//     同一份檔案裡還有一個「銷售數量合計」，它在【另一個分頁「商品銷量排行」的標題列第 4 欄】，
+//     目前不在「銷售統計」裡。萬一哪天莫筆克在「銷售統計」也加一欄合計，first-match 就會撈到
+//     沒有日期的那個、期間安靜消失。這是防未來加欄，不是修現在的 bug。
+//     ⚠ buildShop:salesCol 那行【刻意不動】：那是既有的取數行為，改它會動到報表數字。
+//   ⚠ 這條 regex 與格式範例跟 js/pages/marketing.js 的 parseInsightExcel 同源（那裡搜「抓出期間」）。
+//     刻意各自實作、不共用：那邊拿的是 header:1 的字串陣列、這邊拿的是物件 key，取值路徑不同，
+//     能共用的只有 regex 本身；跨檔共用要改 marketing.js 並掛 window（main.js 裡 marketing 比 profit
+//     先載入）。為兩行 regex 動一個這次不會測到的頁面不值得。【莫筆克改匯出格式時，兩處要一起改。】
+function _mobicPeriod(rows){
+  try{
+    if(!rows||!rows.length) return '';
+    const hits=Object.keys(rows[0]).filter(k=>k.startsWith('銷售數量'));
+    for(const k of hits){
+      const m=k.match(/(\d{8})\d*~(\d{8})/);
+      if(m) return _fmtPeriodRange(m[1],m[2]);
+    }
+    // 有「銷售數量*」欄位卻沒有一個抓得到日期 ⇒ 這確實是莫筆克檔、但格式變了 → 出聲。
+    //   完全沒有「銷售數量*」欄位就【不】出聲：那可能根本不是這種表、或舊版沒這欄，不是格式變更。
+    if(hits.length) _warnPeriodFormat('mobic',hits);
+    return '';
+  }catch{ return ''; }
+}
+
+// 蝦皮廣告 CSV：期間在表頭【之前】的前言區。2026-08-17 取樣的真實檔案（UTF-8 with BOM + CRLF）：
+//   行1  所有CPC成效報告 - Shopee台灣
+//   行2  使用者名稱,up1116
+//   行5  報表匯出時間,2026/08/07 11:35
+//   行6  期間,2026/07/01 - 2026/07/31
+//   行8  順序,廣告名稱,…,商品 ID,…,花費,…        ← parseAdsCsv 從這行之後開始，前言整段丟棄
+// ⚠ 刻意【不改 parseAdsCsv 的回傳形狀】：它有三個呼叫端（mobic 那支之外還有 selads / groupads），
+//   而且掛在 window 匯流排上，改形狀的影響面遠大於這個需求。這裡只是多讀一次同一份 text。
+// ⚠ 不寫死行號（蝦皮改版就會位移）：用「第一格剛好等於 期間」找。
+//   用 === 不用 includes 是刻意的 —— 資料列與表頭第一格都是「順序」不會誤中，
+//   而「報表匯出時間」也不等於「期間」，用 includes 反而多一個誤中的可能。
+// ⚠ 容忍 BOM(﻿) 與 CRLF(\r)：TextDecoder / readAsText 預設已吃掉 BOM，但這裡不賭、自己再剝一次。
+//   只掃前 30 行：前言實際 7 行，餘裕夠又不必掃完幾千列資料。
+function _adsCsvPeriod(text){
+  try{
+    const lines=String(text||'').replace(/^﻿/,'').split('\n');
+    const scan=Math.min(lines.length,30);
+    const firstCells=[];
+    let looksLikePreamble=false;
+    for(let i=0;i<scan;i++){
+      const cells=splitCSV(lines[i].replace(/\r$/,'')).map(c=>c.replace(/^"|"$/g,'').trim());
+      if(firstCells.length<8) firstCells.push(cells[0]||'');
+      // 「看起來有前言」的啟發式（heuristic，不是規格）：前言是 key,value 兩格、第一格是中文欄名。
+      //   ⚠ 這是啟發式，會有誤判空間，只用來決定「要不要 console.warn」，不影響任何顯示或數字。
+      //   2026-08-17 對真實檔案逐行驗過：
+      //     『所有CPC成效報告 - Shopee台灣』1 格 → 不算（沒有逗號）
+      //     『使用者名稱,up1116』『報表匯出時間,2026/08/07 11:35』2 格且第一格非數字 → 算 ✅
+      //     表頭『順序,廣告名稱,…』13 格 → 不算；資料列 13 格且第一格是數字 → 不算
+      //     舊版無前言檔『順序,商品 ID,花費』3 格 → 不算 ⇒ 舊檔不會誤 warn ✅
+      //   若店名裡有逗號，那一行會變 3 格而不算 —— 沒差，只要前言裡任一行滿足即可。
+      if(cells.length===2&&cells[0]&&!/^\d+$/.test(cells[0])) looksLikePreamble=true;
+      if(cells[0]!=='期間') continue;
+      const m=(cells[1]||'').match(/(\d{4})\/(\d{2})\/(\d{2})\s*[-–~]\s*(\d{4})\/(\d{2})\/(\d{2})/);
+      if(m) return _fmtPeriodRange(m[1]+m[2]+m[3],m[4]+m[5]+m[6]);
+      // 找到「期間」那一列卻認不得日期 ⇒ 蝦皮改了日期格式 → 出聲，並把實際值印出來。
+      _warnPeriodFormat('ads',firstCells,cells[1]||'');
+      return '';
+    }
+    // 有前言卻整段掃不到「期間」那一列 ⇒ 蝦皮改了列名 → 出聲。沒有前言就安靜（舊版檔案）。
+    if(looksLikePreamble) _warnPeriodFormat('ads',firstCells);
+    return '';
+  }catch{ return ''; }
+}
+
+// 格式變更時出聲 —— 不出聲的話這個功能會【安靜失效】：蝦皮或莫筆克改一個字，
+//   卡片副標就默默回到副檔名，沒有人會知道防線已經沒了。
+// ⚠ 刻意只走 console.warn，【不】用 showToast / alert：這是給維護者診斷用的，
+//   操作人員不需要知道（他們什麼都不用做，數字照算），彈窗只會製造噪音。
+// ⚠ 整個包在 try/catch：印 log 失敗不可以影響上傳。
+function _warnPeriodFormat(kind,found,badValue){
+  try{
+    if(kind==='ads'){
+      console.warn('[檔案期間] 蝦皮廣告 CSV '+(badValue?'的「期間」那一列認不得日期格式':'有前言、但抓不到「期間」那一列')+' —— 蝦皮可能改了匯出格式。\n'
+        +'　影響：上傳卡片不會顯示檔案期間。上傳與產生報表【不受影響】，數字照算。\n'
+        +'　要修：用純文字編輯器開那份 CSV 看前 10 行，確認期間那一列現在叫什麼、日期長什麼樣，\n'
+        +'　　　　再改 js/profit.js 的 _adsCsvPeriod（搜 `cells[0]!==\'期間\'`）。\n'
+        +(badValue?'　認不得的值：'+badValue+'\n':'')
+        +'　現場掃到的前幾行第一格：', found);
+    }else{
+      console.warn('[檔案期間] 莫筆克檔案有「銷售數量…」欄位、但括號裡抓不到期間 —— 匯出格式可能變了。\n'
+        +'　影響：上傳卡片不會顯示檔案期間。上傳與產生報表【不受影響】，數字照算。\n'
+        +'　要修：看下面印出的欄位標題實際長什麼樣，再改 js/profit.js 的 _mobicPeriod 的 regex\n'
+        +'　　　　（/(\\d{8})\\d*~(\\d{8})/，與 js/pages/marketing.js 的 parseInsightExcel 同源、兩處要一起改）。\n'
+        +'　現場的「銷售數量」欄位標題：', found);
+    }
+  }catch{}
+}
+
+// YYYYMMDD ×2 → 顯示字串。
+// ⚠ 產出格式【刻意與 getPeriodLabel 逐字元相同】（`YYYY/MM/DD – YYYY/MM/DD`，半形空格 + en dash），
+//   因為卡片上這個值存在的唯一目的就是跟標題列的選定期間並排比對 —— 兩邊格式不一樣會讓人
+//   多花一秒換算，而那一秒就是這個功能的全部價值。【改 getPeriodLabel 的格式要一起改這裡。】
+function _fmtPeriodRange(s,e){
+  if(!/^\d{8}$/.test(s)||!/^\d{8}$/.test(e)) return '';
+  const p=x=>[x.slice(0,4),x.slice(4,6),x.slice(6,8)];
+  const [sy,sm,sd]=p(s),[ey,em,ed]=p(e);
+  return `${sy}/${sm}/${sd} – ${ey}/${em}/${ed}`;
+}
 function markCard(shop,type,icon,title,cls){
   document.getElementById('uc-'+type+'-'+shop).className='ucard '+(cls||'');
   document.getElementById('ui-'+type+'-'+shop).textContent=icon;
@@ -2752,6 +2887,26 @@ function _updateUploadModalPeriod(shop){
   const gen=document.getElementById('upm-gen-btn');
   if(gen)gen.textContent=shortP?`▶ 產生 ${shortP} 報表`:'▶ 產生報表';
 }
+// 卡片副標：解析得出檔案期間就顯示，否則回到原本的副檔名提示。
+// ⚠ 刻意【不用警告色】：沿用 .ucard-sub 的灰字（css/profit.css 搜 `.ucard-sub`）。理由同
+//   checkAdsReconcile 裡「多一個會狼來了的警告，會連真資訊一起被略過」那段既有註解 ——
+//   這裡要的是兩個日期並排、使用者自己看出不對，不是再多一個紅字。
+// ⚠ 取不到期間一律安靜回到副檔名，【不顯示「未知」也不留空白】：顯示不出來的東西寫成「未知」
+//   只會製造焦慮；格式真的變了會有 console.warn 給維護者（見 _warnPeriodFormat）。
+// ⚠ 有期間時【取代】副檔名而不並存：副檔名只在上傳前有用（input 的 accept 本來就會過濾）。
+// ⚠ 這兩個元素全 repo 只有這裡會寫（加 id 之前它們是純靜態），所以不會有「被誰蓋掉」的問題 ——
+//   對照組是 #upm-gen-hint，那顆在 openUploadModal 有兩條分支各自整段覆寫，不能往裡面塞靜態句子。
+function _updateFilePeriodSubs(shop){
+  const s=state[shop]||{};
+  const put=(id,raw,dflt)=>{
+    const el=document.getElementById('upm-'+id+'-sub');
+    if(!el)return;                                   // 元素不存在（例如商品清單卡沒有副標列）→ 天然 no-op
+    const p=raw&&raw._period;
+    el.textContent=p?('檔案期間 '+p):dflt;
+  };
+  put('mobic',s.rawMobic,'.xlsx');
+  put('ads',s.rawAds,'.csv');
+}
 function openUploadModal(){
   const ov=document.getElementById('upload-modal-overlay');if(!ov)return;
   const shop=curShop==='總表'?SHOPS[0].id:curShop;
@@ -2770,7 +2925,7 @@ function openUploadModal(){
   const _clr=document.getElementById('upm-clear-btn');
   if(_clr) _clr.style.display=(shop===TEST_SHOP_ID)?'none':'';
   function getMeta(key){try{const m=localStorage.getItem(key);return m?JSON.parse(m):null;}catch{return null;}}
-  function syncCard(id,ok,okIcon,defaultIcon,okLabel,defaultLabel,metaKey){
+  function syncCard(id,ok,okIcon,defaultIcon,okLabel,defaultLabel,metaKey,memName){
     const meta=getMeta(metaKey);
     const wasLoaded=!ok&&!!meta; // 刷新後有紀錄但無資料
     const card=document.getElementById('upm-'+id);
@@ -2778,7 +2933,15 @@ function openUploadModal(){
     card.className='ucard'+(ok?' ok':(wasLoaded?' warn':''));
     // icon 分三態：ok=綠✅、wasLoaded=🔄（提醒需重上傳）、未載入=預設 icon
     document.getElementById('upm-'+id+'-icon').textContent=ok?okIcon:(wasLoaded?'🔄':defaultIcon);
-    document.getElementById('upm-'+id+'-title').textContent=(ok||wasLoaded)?(meta?.name||okLabel).slice(0,22):defaultLabel;
+    // 標題優先用【記憶體裡那份資料自己的檔名】，meta.name 只當重整後（wasLoaded）的 fallback。
+    //   ⚠ 為什麼要多這一層：meta 走的是 fmKey（＝當期那把 key），所以「在 8 月上傳、切到 7 月」時
+    //     meta 是 null、標題會 fallback 成通用名稱，8 月那個檔名【被吞掉】—— 唯一的線索剛好在最
+    //     需要它的情況下消失，這是 2026/08/17 事故能發生的機制之一。檔名本來就是記憶體那份資料的
+    //     屬性，跟著 raw 走才對（memName 來自 raw._name，見 _mobicPeriod 上方那段註解）。
+    //   ⚠ memName 沒有值時傳 ''，`''||meta?.name||okLabel` 與原本的 `meta?.name||okLabel` 求值
+    //     結果完全相同 —— 三態下的標題行為不變，只有「有 raw 但 meta 為 null」這個原本會退成
+    //     通用名稱的情況才變（那正是要修的）。
+    document.getElementById('upm-'+id+'-title').textContent=(ok||wasLoaded)?(memName||meta?.name||okLabel).slice(0,22):defaultLabel;
     document.getElementById('upm-'+id+'-status').textContent=ok?'✅ 已載入':wasLoaded?'🔄 點此重新上傳':'✗ 未載入';
     document.getElementById('upm-'+id+'-status').style.color=ok?'#10b981':wasLoaded?'#f59e0b':'#ef4444';
     // ok=true：禁用 input（需透過垃圾桶刪除後才能換檔），wasLoaded：啟用 input（點卡片直接重傳）
@@ -2791,13 +2954,14 @@ function openUploadModal(){
   }
   // sync map card state
   const mapOk=!!globalMap&&Object.keys(globalMap).length>0;
-  syncCard('map',mapOk,'✅','🗂','蝦皮商品清單','蝦皮商品清單','ec|filemeta|globalMap');
+  syncCard('map',mapOk,'✅','🗂','蝦皮商品清單','蝦皮商品清單','ec|filemeta|globalMap','');
   // sync mobic/ads
   const s=state[shop];
   const mobicOk=!!s.rawMobic;
-  syncCard('mobic',mobicOk,'✅','📦','莫筆克銷售分析','莫筆克銷售分析',fmKey(shop,'mobic'));
+  syncCard('mobic',mobicOk,'✅','📦','莫筆克銷售分析','莫筆克銷售分析',fmKey(shop,'mobic'),(s.rawMobic&&s.rawMobic._name)||'');
   const adsOk=!!s.rawAds;
-  syncCard('ads',adsOk,'✅','📣','蝦皮廣告報表','蝦皮廣告報表',fmKey(shop,'ads'));
+  syncCard('ads',adsOk,'✅','📣','蝦皮廣告報表','蝦皮廣告報表',fmKey(shop,'ads'),(s.rawAds&&s.rawAds._name)||'');
+  _updateFilePeriodSubs(shop);   // 卡片副標顯示「檔案期間」，與標題列的選定期間並排對照
   const seladsOk=!!s.rawSelAds;
   const seladsMeta=getMeta(fmKey(shop,'selads'));
   document.getElementById('upm-selads').className='ucard'+(seladsOk?' ok':'');
@@ -2977,6 +3141,7 @@ function onGlobalFile(event,type){
       }
       const s2=state[shop];
       document.getElementById('upm-gen-btn').disabled=!s2.rawMobic;   // 只要有莫筆克就能按；沒廣告時由 generate() 的 confirm 提醒
+      _updateFilePeriodSubs(shop);   // 剛上傳完就看得到檔案期間，不必關掉再開 modal
     },800);
   }
 }
