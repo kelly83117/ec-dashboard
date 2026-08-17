@@ -10481,7 +10481,9 @@ function momoRenderProfitBody(shop, tableOnly){
       //   ⚠ MO+ 無 C1202/C1204 物流精算概念（代收代付，運費已含在對帳單）→ 不加物流晶片（不硬湊）。判定與 _e001Est 同源 c.settled（YYYY-MM-H1/H2），一致。
       const _moSettled=(()=>{ try{ const c=momoMoPlusE001Ctx(shop), pk=momoExpandPeriod(period); return pk.length>0 && pk.some(k=>c.settled.has(k)); }catch(e){ return false; } })();
       if(_moSettled){
-        statusChip=`<span class="mm-status ok">✓ 已對帳</span>`;   // 沿用甲乙配晶片值/樣式/容器；MO+ 計算口徑與甲乙不同，不套甲乙 tooltip（避免誤導），亦不自創文案
+        // 沿用甲乙配晶片值/樣式/容器；tooltip 用 MO+ 自己的口徑（不沿用甲乙的「÷1.05 按營收攤」，套 MO+ 會誤導）。
+        const _okTip=('資料來源＝對帳明細（逐訂單逐 SKU）。營收＝A 貨款合計；費用＝D 手續費逐列 + C 代扣運費逐列 − B 運費代收（同訂單營收攤）。').replace(/"/g,'&quot;');
+        statusChip=`<span class="mm-status ok" title="${_okTip}">✓ 已對帳</span>`;
       } else if(_e001Est){
         // MO+ 未結算（E001）：沿用甲配未對帳狀態晶片「⚠ 未對帳」（同 mm-status no 樣式、同容器）；估算費率與來源月放 tooltip、不佔版面、不另做橫幅。
         const _efr=momoMoPlusE001Ctx(shop).estFee;
