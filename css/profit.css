@@ -651,6 +651,33 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-ov-card{background:#fff;border:1px solid #eef0f2;border-radius:10px;padding:12px 14px;min-width:0;}
 .mm-ov-h{font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;}
 .mm-ov-canvas{height:240px;position:relative;}
+/* ── 各賣場分析區塊（通路總覽，KPI 下方 / 趨勢圖上方）：2×2 等高卡、按鈕永遠貼底、色點沿用圖表 legend 色 ──
+   ⚠ 用固定 2 欄（非 auto-fit minmax(280)）：本頁內容寬常 >840px，auto-fit 會排成 3 欄→4 張變 3+1（正是要修的 Top10 問題）；
+   固定 2 欄才保證四賣場 2×2、奇數(蝦皮5)時最後一張跨兩欄。窄螢幕(<720px)降 1 欄。 */
+.mm-anlz-wrap{margin-bottom:16px;}
+.mm-anlz-title{font-size:13px;font-weight:700;color:#374151;margin-bottom:8px;}
+.mm-anlz-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:stretch;margin-bottom:16px;}
+@media (max-width:720px){ .mm-anlz-grid{grid-template-columns:1fr;} }
+.mm-anlz-grid>.mm-anlz-span{grid-column:1 / -1;}   /* 賣場數為奇數→最後一張跨滿兩欄，不留半格空白 */
+.mm-anlz-card{display:flex;flex-direction:column;background:#fff;border:1px solid #eef0f2;border-radius:10px;padding:12px 14px;min-width:0;}
+.mm-anlz-card.empty{background:#f8fafc;border-style:dashed;}
+.mm-anlz-head{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
+.mm-anlz-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.mm-anlz-name{font-weight:700;font-size:13px;color:#1a1a2e;}
+.mm-anlz-name.muted{color:#9ca3af;font-weight:600;}
+.mm-anlz-metrics{font-size:12px;color:#4b5563;margin-bottom:8px;}
+.mm-anlz-metrics b{color:#1a1a2e;}
+.mm-anlz-pt{margin-left:6px;font-size:11px;font-weight:700;}
+.mm-anlz-pt.muted{color:#9ca3af;font-weight:400;}
+.mm-anlz-sugg{flex:1;display:flex;flex-direction:column;gap:6px;}   /* flex:1 → 建議區撐開、按鈕永遠貼卡片底部（等高關鍵，勿改成內容撐高） */
+.mm-anlz-sg{font-size:12px;line-height:1.5;color:#374151;background:#fef2f2;border:1px solid #fee2e2;border-radius:7px;padding:6px 8px;}
+.mm-anlz-sg b{color:#b91c1c;}
+.mm-anlz-d{display:block;color:#6b7280;font-size:11px;margin-top:2px;}
+.mm-anlz-ok{font-size:12px;color:#059669;background:#ecfdf5;border:1px solid #d1fae5;border-radius:7px;padding:6px 8px;}
+.mm-anlz-empty-hint{font-size:12px;color:#9ca3af;}
+.mm-anlz-btn{margin-top:10px;align-self:stretch;padding:6px 10px;border-radius:7px;font-size:12px;font-weight:600;border:1px solid #e5e7eb;background:#fff;color:#4b5563;cursor:pointer;}
+.mm-anlz-btn:hover{background:#f9fafb;}
+.mm-anlz-foot{font-size:11px;color:#9ca3af;}
 /* 欄寬拖曳：豎線「單一來源」= th::after（每欄右緣 1px、粗細一致，不用 border 免得 fixed+collapse 相鄰疊加）。
    grip 是透明拖曳熱區，hover 時另畫一條紫線覆蓋。 */
 th.mm-th{position:relative;}
