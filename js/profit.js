@@ -10476,11 +10476,18 @@ function momoRenderProfitBody(shop, tableOnly){
         const costTxt=hr?`、成本按近 ${hr.n} 月均退貨率 <b>${(hr.rate*100).toFixed(1)}%</b> 估回沖（與已對帳月同基準）`:'、成本暫用出貨數量（無退貨率樣本可估）';
         statusBanner=`<div class="mm-banner mm-banner-warn">⚠ <b>未對帳</b>（${mo}）· 營收 C1105 暫估、${feeTxt}${costTxt} → 到「月對帳」上傳當月對帳單轉權威值</div>`;
       }
-    } else if(momoIsMoPlus(shop) && period && _e001Est){
-      // MO+ 未結算（E001）：沿用甲配未對帳狀態晶片「⚠ 未對帳」（同 mm-status no 樣式、同容器）；估算費率與來源月放 tooltip、不佔版面、不另做橫幅。
-      const _efr=momoMoPlusE001Ctx(shop).estFee;
-      const _tip=('未結算估算（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑）；毛利率用估算平台費率 '+(_efr?(_efr.rate*100).toFixed(1)+'%（'+_efr.mode+(_efr.months?' '+_efr.months.join('/'):'')+'、含成交手續費+其他D+運費淨）':'—')+'。待該期別對帳明細上傳後由結算值完全取代（不並存不相加）。').replace(/"/g,'&quot;');
-      statusChip=`<span class="mm-status no" title="${_tip}">⚠ 未對帳</span>`;
+    } else if(momoIsMoPlus(shop) && period){
+      // MO+ 狀態晶片：已對帳→沿用甲乙配綠標「✓ 已對帳」（同 mm-status ok 值/樣式/容器）；未結算(E001)→沿用甲配「⚠ 未對帳」。二態互斥（_e001Est 需該期別全未結算）。
+      //   ⚠ MO+ 無 C1202/C1204 物流精算概念（代收代付，運費已含在對帳單）→ 不加物流晶片（不硬湊）。判定與 _e001Est 同源 c.settled（YYYY-MM-H1/H2），一致。
+      const _moSettled=(()=>{ try{ const c=momoMoPlusE001Ctx(shop), pk=momoExpandPeriod(period); return pk.length>0 && pk.some(k=>c.settled.has(k)); }catch(e){ return false; } })();
+      if(_moSettled){
+        statusChip=`<span class="mm-status ok">✓ 已對帳</span>`;   // 沿用甲乙配晶片值/樣式/容器；MO+ 計算口徑與甲乙不同，不套甲乙 tooltip（避免誤導），亦不自創文案
+      } else if(_e001Est){
+        // MO+ 未結算（E001）：沿用甲配未對帳狀態晶片「⚠ 未對帳」（同 mm-status no 樣式、同容器）；估算費率與來源月放 tooltip、不佔版面、不另做橫幅。
+        const _efr=momoMoPlusE001Ctx(shop).estFee;
+        const _tip=('未結算估算（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑）；毛利率用估算平台費率 '+(_efr?(_efr.rate*100).toFixed(1)+'%（'+_efr.mode+(_efr.months?' '+_efr.months.join('/'):'')+'、含成交手續費+其他D+運費淨）':'—')+'。待該期別對帳明細上傳後由結算值完全取代（不並存不相加）。').replace(/"/g,'&quot;');
+        statusChip=`<span class="mm-status no" title="${_tip}">⚠ 未對帳</span>`;
+      }
     }
     const stEl=document.getElementById('momo-status-'+shop); if(stEl) stEl.innerHTML=statusChip;
     // 篩選啟用時：總覽卡片＝篩選後子集（口徑同全量），環比不比（子集跨期噪音大、標「—」），自驗只對全量整月有意義故略過。
