@@ -12813,7 +12813,7 @@ async function momoMoPlusUploadGenerate(shop){
   momoRenderMoPlusPreview(shop);
 }
 // 逐檔實寫（單檔與批次共用；不碰全域、不彈 modal）→ {res, built, lsOk, mm}。allowedPeriods=null＝全期別（預設全勾）。
-function momoMoPlusApplyPrepared(shop, parsed, plan, allowedPeriods){
+function momoMoPlusApplyPrepared(shop, parsed, plan, allowedPeriods, opts){
   const res=momoApplyUploadPlan(plan, allowedPeriods||null);                 // ① 寫 momo_products（qty/revA，compact 累加）
   const built=momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods||null);   // ② 雙寫 origins doc（同一期別閘門）
   const lsOk=momoSaveMoPlusOriginsDoc(shop, parsed.srcCode, built.doc);
@@ -12827,7 +12827,11 @@ function momoMoPlusApplyPrepared(shop, parsed, plan, allowedPeriods){
       _markPending(momoReconcileKey(shop, rmonth));
     }
   }catch(e){ try{ console.error('[MO+ recon] 寫入月對帳 doc 失敗（不影響上傳主流程）', e); }catch{} }
-  const mm=momoMoPlusConsistency(shop);                                   // ① 寫後互查：cell qty vs Σorigins
+  // 寫後互查（cell qty vs Σorigins）＝全域檢查（讀全部 products+全部 origins docs）。
+  //   ⚠ 批次多檔時傳 opts.deferConsistency=true 跳過逐檔跑：一致性是「跨來源檔」的（一個期別的量來自多檔），
+  //     寫到一半後面的檔還沒補、全域本來就不一致 → 逐檔跑會誤判成失敗。改由批次全部寫完後跑一次（見 momoMoPlusBatchRun）。
+  //     單檔上傳不傳此旗標 → 照舊立刻檢查（單檔無跨檔相依、本來就該即時抓）。
+  const mm=(opts&&opts.deferConsistency)?null:momoMoPlusConsistency(shop);
   return {res, built, lsOk, mm};
 }
 function momoMoPlusComputeGuard(plan, shop){
@@ -12939,11 +12943,10 @@ async function momoMoPlusBatchRun(shop){
     it.status='處理中'; it.detail=''; momoMoPlusBatchUpdate(shop); await momoYield();
     try{
       const r=await momoMoPlusPrepareFile(it.file, shop);   // 守衛全保留：檔名/分頁/header/逐列驗證/運費判準
-      if(!r.ok){ it.status='失敗'; it.detail=r.reason||'解析失敗'; }
+      if(!r.ok){ it.status='失敗'; it.detail=r.reason||'解析失敗（未寫入）'; }
       else{
-        const {res, built, lsOk, mm}=momoMoPlusApplyPrepared(shop, r.parsed, r.plan, null);   // null=全期別（預設全勾）
-        if(!lsOk){ it.status='失敗'; it.detail='origins 落地失敗（配額？）'; }
-        else if(mm.length){ it.status='失敗'; it.detail='雙寫不一致 '+mm.length+' 期別'; }
+        const {res, built, lsOk, mm}=momoMoPlusApplyPrepared(shop, r.parsed, r.plan, null, {deferConsistency:true});   // null=全期別；批次跳過逐檔一致性（跨檔相依、寫完再一次跑）
+        if(!lsOk){ it.status='失敗'; it.detail='origins 寫入本機失敗（配額？）— 資料未寫入'; }   // 真正的寫入失敗（非一致性）
         else{
           const periods=(res.wrotePeriods||[]).map(momoPeriodLabel).join('/')||'—';
           let d='寫入 '+res.wrote+' 筆 · '+built.skuN+' SKU · 期別 '+periods;
@@ -12951,10 +12954,17 @@ async function momoMoPlusBatchRun(shop){
           it.status='成功'; it.detail=d;
         }
       }
-    }catch(e){ it.status='失敗'; it.detail=String(e&&e.message||e).slice(0,80); }
+    }catch(e){ it.status='失敗'; it.detail=String(e&&e.message||e).slice(0,80)+'（未寫入）'; }
     momoMoPlusBatchUpdate(shop); await momoYield();
   }
-  b.running=false; b.done=true; momoMoPlusBatchUpdate(shop);
+  b.running=false;
+  // ⚠ 全部檔寫完「才」跑一次全域一致性檢查——一致性是跨來源檔的（一期別的量來自多檔），逐檔跑會把中途暫時不一致誤判成失敗。
+  //   這裡若仍不符＝真的不一致（例：某 SKU 在 origins 有、products 沒有），資料已寫入本機、但商品數與逐列成本對不上，要明確報出、不放寬。
+  try{ const fm=(b.items.some(it=>it.status==='成功'))?momoMoPlusConsistency(shop):[];
+    b.finalMismatch=fm.length;
+    b.finalMismatchSample=fm.slice(0,5).map(x=>String(x.sku).slice(-8)+' '+momoPeriodLabel(x.period)+' 商品數 '+x.cellQty+'≠源 '+x.sumOrigins);
+  }catch(e){ b.finalMismatch=0; b.finalMismatchSample=[]; }
+  b.done=true; momoMoPlusBatchUpdate(shop);
 }
 function momoMoPlusBatchQueueHTML(shop){
   const b=_moPlusBatch; if(!b||b.shop!==shop) return '';
@@ -12972,8 +12982,13 @@ function momoMoPlusBatchQueueHTML(shop){
   let summary='';
   if(b.done){
     const failList=b.items.filter(it=>it.status==='失敗').map(it=>it.name+'（'+it.detail+'）');
-    summary=`<div class="mm-banner" style="margin-top:10px;${failN?'background:#fffbeb;border:1px solid #fde68a;color:#92400e':'background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46'}">
-      ✅ 完成：成功 <b>${okN}</b> 檔／失敗 <b>${failN}</b> 檔${failN?'<br>失敗：'+esc(failList.join('；')):''}<br>記得按 <b>☁ 同步雲端</b> 才會上雲。</div>`;
+    // 全部寫完後跑一次的全域一致性結果（跨檔相依 → 寫完才驗）：>0＝真的不一致（資料已寫入本機、但商品數與逐列成本對不上）
+    const cons=(b.finalMismatch>0)
+      ? `<br><span style="color:#dc2626;font-weight:700">⚠ 一致性檢查：${b.finalMismatch} 筆 商品數與逐列成本(origins)不符（資料<b>已寫入本機</b>、非寫入失敗；請回報）</span>${(b.finalMismatchSample&&b.finalMismatchSample.length)?'<br><span style="color:#9ca3af;font-size:11px">例：'+esc(b.finalMismatchSample.join('、'))+'</span>':''}`
+      : `<br><span style="color:#065f46">一致性檢查：✓ 商品數與逐列成本一致（0 筆不符）</span>`;
+    const hasIssue=failN>0 || b.finalMismatch>0;
+    summary=`<div class="mm-banner" style="margin-top:10px;${hasIssue?'background:#fffbeb;border:1px solid #fde68a;color:#92400e':'background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46'}">
+      ✅ 完成：成功 <b>${okN}</b> 檔／失敗 <b>${failN}</b> 檔${failN?'<br>失敗（未寫入）：'+esc(failList.join('；')):''}${cons}<br>記得按 <b>☁ 同步雲端</b> 才會上雲。</div>`;
   }
   const canRun = !b.blocked && !b.running && !b.done;
   return `<div style="border:1px solid #eef0f2;border-radius:10px;padding:14px 16px">
@@ -14270,15 +14285,15 @@ function momoOvBuildCharts(period, perShop){
     {label:'淨利',data:profitArr,borderColor:'#10b981',backgroundColor:'#10b981',tension:.3}]},
     options:baseOpt({plugins:{legend:{position:'top'}},scales:{y:{ticks:{callback:v=>momoMoney(v)}}}})});
   // 2. 各賣場毛利率折線
-  mk('momo-ov-margin',{type:'line',data:{labels,datasets:_MOMO_OV_SHOPS.filter(s=>marginByShop[s].some(v=>v!=null)).map(s=>({label:s,data:marginByShop[s],borderColor:_MOMO_OV_COLOR[s],backgroundColor:_MOMO_OV_COLOR[s],tension:.3,spanGaps:true}))},
+  mk('momo-ov-margin',{type:'line',data:{labels,datasets:_MOMO_OV_SHOPS.filter(s=>marginByShop[s].some(v=>v!=null)).map(s=>({label:momoShopDisplay(s),data:marginByShop[s],borderColor:_MOMO_OV_COLOR[s],backgroundColor:_MOMO_OV_COLOR[s],tension:.3,spanGaps:true}))},
     options:baseOpt({plugins:{legend:{position:'top'}},scales:{y:{ticks:{callback:v=>v+'%'}}}})});
   // 3. 營收佔比 doughnut
   const pieShops=_MOMO_OV_SHOPS.filter(s=>perShop[s].rev>0.5);
-  mk('momo-ov-pie',{type:'doughnut',data:{labels:pieShops,datasets:[{data:pieShops.map(s=>Math.round(perShop[s].rev)),backgroundColor:pieShops.map(s=>_MOMO_OV_COLOR[s])}]},
+  mk('momo-ov-pie',{type:'doughnut',data:{labels:pieShops.map(momoShopDisplay),datasets:[{data:pieShops.map(s=>Math.round(perShop[s].rev)),backgroundColor:pieShops.map(s=>_MOMO_OV_COLOR[s])}]},
     options:baseOpt({plugins:{legend:{position:'right'},tooltip:{callbacks:{label:c=>c.label+' '+momoMoney(c.parsed)}}}})});
   // 4. 賣場比較橫條：毛利率 + 動銷率（各賣場各自）
   const cmp=_MOMO_OV_SHOPS.filter(s=>perShop[s].rev>0.5);
-  mk('momo-ov-cmp',{type:'bar',data:{labels:cmp,datasets:[
+  mk('momo-ov-cmp',{type:'bar',data:{labels:cmp.map(momoShopDisplay),datasets:[
     {label:'毛利率%',data:cmp.map(s=>+(perShop[s].margin).toFixed(1)),backgroundColor:'#5b5fcf'},
     {label:'動銷率%',data:cmp.map(s=>perShop[s].activeTotal>0?+(perShop[s].soldActive/perShop[s].activeTotal*100).toFixed(1):0),backgroundColor:'#10b981'}]},
     options:baseOpt({indexAxis:'y',plugins:{legend:{position:'top'}},scales:{x:{ticks:{callback:v=>v+'%'}}}})});
