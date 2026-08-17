@@ -305,12 +305,13 @@ try {
             const k = 'ec_momo_moplus_origins|' + data.shop + '|' + data.src;
             const ts = (data.updatedAt && data.updatedAt.toMillis) ? data.updatedAt.toMillis() : 0;   // 雲端版本戳（base 基準）
             if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;   // in-memory pending / 剛存 5 秒
-            if (window.__momoIsOriginsDirty && window.__momoIsOriginsDirty(k)) {   // 持久化 dirty：本機有未推重傳 → 不覆蓋（跨重整有效，修本次回退根因）
-              if (window.__momoNotifyOriginsSkip) window.__momoNotifyOriginsSkip(k);   // 不靜默：通知使用者本機較新未推
-              return;
-            }
-            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) { if (window.__momoNoteOriginsCloudBase) window.__momoNoteOriginsCloudBase(k, ts); return; }
-            Store._profitMem[k] = data;   // not dirty → 接受雲端（stale 跟上；舊 doc 無 updatedAt 也走這條、正常跟上不卡住）
+            // #169 dirty 守衛：決策集中在 profit.js 的 momoOriginsCloudDecision（自癒：雲端已追上/本機不存在→清 dirty 接受；本機較新未推→跳過保護）。
+            //   fallback（決策函式尚未載到）＝維持 #169 原行為（dirty 就跳過），不放寬防護。
+            const _dec = window.__momoOriginsCloudDecision ? window.__momoOriginsCloudDecision(k, data)
+              : ((window.__momoIsOriginsDirty && window.__momoIsOriginsDirty(k)) ? { action: 'skip' } : { action: 'accept' });
+            if (_dec.action === 'skip') { if (window.__momoNotifyOriginsSkip) window.__momoNotifyOriginsSkip(k); return; }   // 本機較新未推 → 不覆蓋、通知
+            if (_dec.action === 'noop') { if (window.__momoNoteOriginsCloudBase) window.__momoNoteOriginsCloudBase(k, ts); return; }   // 已等值 → 只記基準
+            Store._profitMem[k] = data;   // accept（含 healed：dirty 過期已清）→ 接受雲端（stale 跟上；orphan 補回；舊 doc 無 updatedAt 也走這條）
             if (window.__momoNoteOriginsCloudBase) window.__momoNoteOriginsCloudBase(k, ts);   // 記錄基準：我現在基於這個雲端版本
             changed.push(data.shop + '|' + data.src);
           });
