@@ -10862,6 +10862,20 @@ function momoLogProductAddOptlog(shop, sku, type, note){
     momoUpdateDailyProgress({silent:true});
   }catch(e){ try{ console.warn('[momo product-add optlog]', e); }catch{} }
 }
+// 品號改名遷移 optlog（方案A：可改名商品只有 optlog/history，其餘結構皆用真實編號當 key、TEMP- 對不到，故遷移只需搬 optlog）。
+//   om[oldSku]→om[newSku]（已存在則合併陣列、不覆蓋）、每筆 entry.sku 改新值、再記一筆「改品號」optlog；存檔標 pending + 刷工作日誌。回搬移筆數。
+function momoRenameSkuOptlog(shop, oldSku, newSku){
+  const om=momoLoadOptlog(shop)||{};
+  const moved=Array.isArray(om[oldSku])?om[oldSku]:[];
+  moved.forEach(e=>{ if(e && e.sku===oldSku) e.sku=newSku; });   // 明細 sku 一併改（工作日誌顯示對到新編號）
+  const now=momoNowParts(), by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
+  const renameEntry={ id:'opt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:now.date, time:now.time, shop, sku:newSku, by, type:'改品號', note:'品號 '+oldSku+' → '+newSku };
+  om[newSku]=(Array.isArray(om[newSku])?om[newSku]:[]).concat(moved, [renameEntry]);   // 合併不覆蓋（若 newSku 已有 optlog）
+  if(Object.prototype.hasOwnProperty.call(om, oldSku)) delete om[oldSku];   // 清舊 key → 無孤兒（整份 field 覆蓋上雲）
+  momoSaveOptlog(shop, om);
+  try{ momoUpdateDailyProgress({silent:true}); }catch(e){}
+  return moved.length;
+}
 
 // ══════════ MOMO optlog → 工作日誌（軟連結；比照蝦皮 _updateDailyProgressFromAdjustments，但歸屬用 optlog 每筆的 by(登入 username)，不建 shop→person 對照表）══════════
 //   掃當天 ec_momo_optlog|甲配/乙配 → 依 by 分人、依「賣場·type」動態計數 → 寫 {kind:'momo-summary',counts} 進 ec.dailyProgress。
@@ -11742,7 +11756,10 @@ function momoSkuHistoryInfo(shop, sku){
   try{ scanRec(Store._profitMem); scanRec(Store._mem); }catch(e){}
   try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.indexOf(rf)===0){ try{ const rec=JSON.parse(localStorage.getItem(k)); if(rec&&rec.skus&&rec.skus[sku]) recSet.add(k.slice(rf.length)); }catch(e){} } } }catch(e){}
   if(recSet.size) reasons.push(recSet.size+' 個月對帳單');
-  try{ const opt=momoLoadOptlog(shop); if(opt&&opt[sku]&&opt[sku].length) reasons.push(opt[sku].length+' 筆優化紀錄'); }catch(e){}
+  // ⚠ optlog（優化紀錄）刻意「不」列入鎖定：新增商品即寫一筆 optlog，會誤鎖 TEMP-（方案A）。optlog 隨品號改名一起遷移、不斷鏈。
+  //   MO+ 專屬：逐列成本(moplus_origins)、未結算銷量(e001) 都是實際上傳資料 → 列入鎖定（甲乙這兩個清單為空、no-op）。
+  try{ const od=momoListMoPlusOriginsDocs(shop); if(od && Object.values(od).some(d=>d&&d.skus&&d.skus[sku])) reasons.push('逐列成本資料'); }catch(e){}
+  try{ const ed=momoListE001Docs(shop); if(ed && Object.values(ed).some(d=>d&&d.bySku&&d.bySku[sku])) reasons.push('未結算銷量'); }catch(e){}
   let hasFrt=false, ff='ec_momo_freight|';
   const scanFrt=st=>{ if(!st) return; try{ Object.keys(st).forEach(k=>{ if(k.indexOf(ff)===0){ const fr=st[k]; if(fr&&((fr.freight&&fr.freight[sku])||(fr.yiSku&&fr.yiSku[sku]))) hasFrt=true; } }); }catch(e){} };
   try{ scanFrt(Store._profitMem); }catch(e){}
@@ -11765,10 +11782,10 @@ function momoRenderBatchEditForm(shop){
     <div style="font-size:12px;padding:6px 10px;border-left:2px solid #e5e7eb;margin-bottom:4px">
       <span style="color:#9ca3af">${h.date}${h.time?' '+h.time:''}</span> 成本 ${h.cost} / 進價 ${h.purchasePrice} / 售價 ${h.salePrice}${ch?`<span style="color:#7c3aed"> · ${_momoEsc(ch)}</span>`:''}${h.note?`<span style="color:#6b7280"> — ${_momoEsc(h.note)}</span>`:''}
     </div>`; }).join('') : `<div style="font-size:12px;color:#9ca3af">尚無歷程</div>`;
-  // 品號折衷：完全無歷史(periods/對帳/optlog/運費/S1103)才可改；有歷史唯讀並說明原因
+  // 品號折衷：無實際交易資料(periods/對帳/運費/S1103/逐列成本/未結算)才可改；optlog 不列入(隨改名遷移)；有交易資料唯讀並說明原因
   const skuInfo=momoSkuHistoryInfo(shop, p.sku);
   const skuField=skuInfo.has
-    ? `<label style="${_MOMO_LB}">品號（主鍵）</label><div style="${_MOMO_INP};background:#f8fafc;color:#64748b;display:flex;align-items:center">${_momoEsc(p.sku||'—')}</div><div style="font-size:11px;color:#9a3412;margin-top:3px">已有 ${_momoEsc(skuInfo.reasons.join('、'))}，品號不可變更（改主鍵會讓對帳單/運費/優化紀錄斷鏈）。需更換請刪除後重建。</div>`
+    ? `<label style="${_MOMO_LB}">品號（主鍵）</label><div style="${_MOMO_INP};background:#f8fafc;color:#64748b;display:flex;align-items:center">${_momoEsc(p.sku||'—')}</div><div style="font-size:11px;color:#9a3412;margin-top:3px">已有 ${_momoEsc(skuInfo.reasons.join('、'))}，品號不可變更（避免與已上傳的對帳/運費/銷售資料斷鏈）。需更換請刪除後重建。</div>`
     : `<label style="${_MOMO_LB}">品號 <span style="color:#059669">可改（此商品無歷史）</span></label><input id="momo-edit-sku-${shop}" type="text" value="${_momoEsc(p.sku||'')}" style="${_MOMO_INP}">`;
   el.innerHTML=`
     <div style="font-size:14px;font-weight:700;margin-bottom:10px">編輯商品</div>
@@ -11826,7 +11843,7 @@ function momoBatchSubmitEdit(shop){
     const info=momoSkuHistoryInfo(shop, p.sku);   // 送出前再驗一次無歷史（防呆）
     if(info.has){ alert('此商品已有 '+info.reasons.join('、')+'，品號不可變更。'); momoRenderBatchEditForm(shop); return; }
     if(products.some(x=>x!==p && x.sku===newSku)){ alert('品號「'+newSku+'」已被其他商品使用，請換一個。'); return; }
-    if(!confirm('確定把品號從「'+p.sku+'」改成「'+newSku+'」？\n此商品目前無任何歷史/關聯資料，改動安全（不會斷鏈）。')) return;
+    if(!confirm('確定把品號從「'+p.sku+'」改成「'+newSku+'」？\n此商品無實際交易資料（僅有新增/編輯紀錄，會一併遷移優化紀錄），改動安全、不會斷鏈。')) return;
   }
   const changes=[];
   if(newName!==(p.name||'')) changes.push({field:'商品名稱',from:p.name||'',to:newName});
@@ -11840,6 +11857,7 @@ function momoBatchSubmitEdit(shop){
   if(changes.length) entry.changes=changes;   // 名稱/原廠/品號 from→to（向後相容：舊 entry 無此欄）
   p.history.push(entry);
   momoSaveProducts(shop,products);
+  { const _skuChg=changes.find(c=>c.field==='品號'); if(_skuChg){ try{ momoRenameSkuOptlog(shop,_skuChg.from,_skuChg.to); }catch(e){ try{ console.warn('[改品號 optlog 遷移]',e); }catch{} } } }   // 品號改名一併遷移 optlog（否則 om[oldSku] 變孤兒）
   if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop);
   // 改原廠 → 莫筆克成本「只提示不自動改」（成本是稽核數字、要走成本欄+異動原因，不因改編號悄悄變動）
   let costHint='';
@@ -11887,7 +11905,7 @@ function momoRenderMoPlusBatchEditForm(shop, p){
     </div>`; }).join('') : `<div style="font-size:12px;color:#9ca3af">尚無歷程</div>`;
   const skuInfo=momoSkuHistoryInfo(shop, p.sku);
   const skuField=skuInfo.has
-    ? `<label style="${_MOMO_LB}">品號（主鍵）</label><div style="${_MOMO_INP};background:#f8fafc;color:#64748b;display:flex;align-items:center">${_momoEsc(p.sku||'—')}</div><div style="font-size:11px;color:#9a3412;margin-top:3px">已有 ${_momoEsc(skuInfo.reasons.join('、'))}，品號不可變更（改主鍵會讓對帳單/運費/優化紀錄斷鏈）。需更換請刪除後重建。</div>`
+    ? `<label style="${_MOMO_LB}">品號（主鍵）</label><div style="${_MOMO_INP};background:#f8fafc;color:#64748b;display:flex;align-items:center">${_momoEsc(p.sku||'—')}</div><div style="font-size:11px;color:#9a3412;margin-top:3px">已有 ${_momoEsc(skuInfo.reasons.join('、'))}，品號不可變更（避免與已上傳的對帳/運費/銷售資料斷鏈）。需更換請刪除後重建。</div>`
     : `<label style="${_MOMO_LB}">品號 <span style="color:#059669">可改（此商品無歷史）</span></label><input id="momo-edit-sku-${shop}" type="text" value="${_momoEsc(p.sku||'')}" style="${_MOMO_INP}">`;
   el.innerHTML=`
     <div style="font-size:14px;font-weight:700;margin-bottom:4px">編輯商品（MO+）</div>
@@ -11962,7 +11980,7 @@ function momoMoPlusBatchSubmitEdit(shop){
     const info=momoSkuHistoryInfo(shop, p.sku);   // 送出前再驗一次無歷史（防呆）
     if(info.has){ alert('此商品已有 '+info.reasons.join('、')+'，品號不可變更。'); momoRenderBatchEditForm(shop); return; }
     if(products.some(x=>x!==p && x.sku===newSku)){ alert('品號「'+newSku+'」已被其他商品使用，請換一個。'); return; }
-    if(!confirm('確定把品號從「'+p.sku+'」改成「'+newSku+'」？\n此商品目前無任何歷史/關聯資料，改動安全（不會斷鏈）。')) return;
+    if(!confirm('確定把品號從「'+p.sku+'」改成「'+newSku+'」？\n此商品無實際交易資料（僅有新增/編輯紀錄，會一併遷移優化紀錄），改動安全、不會斷鏈。')) return;
   }
   const changes=[];
   if(newName!==(p.name||'')) changes.push({field:'商品名稱',from:p.name||'',to:newName});
@@ -11979,6 +11997,7 @@ function momoMoPlusBatchSubmitEdit(shop){
   if(changes.length) entry.changes=changes;
   p.history.push(entry);
   momoSaveProducts(shop,products);
+  { const _skuChg=changes.find(c=>c.field==='品號'); if(_skuChg){ try{ momoRenameSkuOptlog(shop,_skuChg.from,_skuChg.to); }catch(e){ try{ console.warn('[改品號 optlog 遷移]',e); }catch{} } } }   // 品號改名一併遷移 optlog（否則 om[oldSku] 變孤兒）
   if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop);
   momoRenderBatchEditList(shop); momoRenderBatchEditForm(shop);   // 名稱/品號改動 → 左側清單也刷新
   if(typeof showToast==='function') showToast('已更新並記錄一筆歷程','success');
