@@ -4163,8 +4163,18 @@ function patchRow(shop,code,ov){
   const diffEl=document.getElementById(`td-${shop}-${code}-roiDiff`);
   if(diffEl)diffEl.innerHTML=r.roiDiff===null?'—':`<span style="color:${r.roiDiff>=0?'#10b981':'#ef4444'};font-weight:600">${r.roiDiff.toFixed(2)}</span>`;
   // dayBudget
+  //   🔴 只寫內層 .bud-val，【絕對不可】對 <td> 直接設 textContent ——
+  //     那會把同格的「上期 $X」副標（.sub-ads）一起抹掉，而且不報錯、不留痕跡：
+  //     使用者編輯一次廣告費，那一列的副標就消失到下一次整表重繪為止。
+  //     這與本函式上方廣告費格（adsEl 那段）是同一個坑、同一套解法。
+  //   ⚠ 副標【不需要也不可以】跟著更新：它是上一期的數字，編輯本期廣告費不會改變它。
+  //   ⚠ 兩層都判空（刻意不照抄 adsEl 那行的無防護 querySelector）：
+  //     tr-no-rev 的列沒有這一格（走 renderTable 的通用「—」佔位、連 id 都沒有），
+  //     getElementById 回 null；日後若有人把結構改回沒有 span，querySelector 回 null。
+  //     兩種情況都應該靜默不更新，而不是 throw 打斷 patchRow 後面的分析標籤與 KPI 更新。
   const budEl=document.getElementById(`td-${shop}-${code}-dayBudget`);
-  if(budEl)budEl.textContent=r.dayBudget>0?'$'+fmtN(r.dayBudget):'—';
+  const budVal=budEl&&budEl.querySelector('.bud-val');
+  if(budVal)budVal.textContent=r.dayBudget>0?'$'+fmtN(r.dayBudget):'—';
   // analysis（多標籤）：整格 outerHTML 換掉，不是 innerHTML。
   //   有標籤 / 無標籤兩種 <td> 的屬性可能不同，只換內層會留下上一個狀態的樣式殘留。
   //   ⚠ outerHTML 會把節點整個換成新節點 → anaEl 這個參照【當場失效】，之後不可再用。
@@ -5298,6 +5308,71 @@ function _subAdsHtml(r){
   const v=r.prevAdsFee;
   return `<div class="sub-ads">${(v!==null&&v!==undefined)?'上期 $'+fmtN(v):'—'}</div>`;
 }
+// 日預算格下方的副標「上期 $X」。與 _subAdsHtml 是同一族，差別只在值的來源：
+//   廣告費走 r.prevAdsFee（產生報表時算好、落地在 built[]）；
+//   日預算【不落地】，值由 renderTable 現查的 prevBudRead(code) 傳進來。
+//   → 所以參數是【值】不是【整列 r】，這個差異是刻意的：簽名長得不一樣，
+//     日後不會有人誤以為可以直接 r.prevDayBudget 而去找一個不存在的欄位。
+//
+//   🔴 class 刻意共用 .sub-ads，【不另開新 class】——
+//     理由見 css/profit.css 裡 .sub-rev,.sub-ads 那條規則上方的註解：那條規則定義的
+//     分類是「本期主數字 + 上期參照」，兩者的視覺層級刻意完全一致。日預算副標就是
+//     那個分類的第三個實例，視覺本來就該一模一樣。新開一個 class 只會複製出一條
+//     逐字相同的規則，日後改字級要改兩處 —— 正是那段註解在防的事。
+//     ⚠ 代價：.sub-ads 這個名字會出現在不是廣告費的欄位裡，語意比名字通用一點。
+//       這是已知且接受的取捨（名字不夠通用，但行為完全一致）。
+//
+//   🔴 三態判斷逐字比照 _subAdsHtml，不要簡化成 `v!=null` 或 `v?`：
+//     數字（含 0）→「上期 $0」：上期【有】這個商品，只是沒投廣告。
+//     null / undefined →「—」 ：上期沒有這個商品（或整份上期報表還沒載到）。
+//     （`v?` 會把 0 也判成假 → 「上期沒投廣告」被錯誤顯示成「上期沒這商品」。）
+function _subDayBudgetHtml(v){
+  return `<div class="sub-ads">${(v!==null&&v!==undefined)?'上期 $'+fmtN(v):'—'}</div>`;
+}
+// 上一期報表的「每列日預算」對照表，整包只讀一次的讀取器。回傳 (code)=>number|undefined。
+//   ⚠ 為什麼不逐列查：逐列呼叫等於每列跑一次 getPrevPeriodKey + lsLoad，而 lsLoad 的
+//     第三層 fallback 是 JSON.parse 整包 localStorage（見本檔 lsLoad）。好麻吉 800+ 列，
+//     逐列 = 整包 parse 800+ 次。這裡整包預讀一次、之後每列只做一次物件查表。
+//     （形狀與理由完全比照本檔的 _prodTagsReaderFor，那裡的註解是同一套推理。）
+//
+//   🔴 這個值【刻意不寫進 built[]】—— 它只活在這一次 render。
+//     理由是 prevAdsFee 的教訓：那個值存進 built[] 之後，在它之前產生的舊報表都沒有
+//     該欄位、畫面永遠是「—」，每個同事都得重新產生一次報表才看得到。
+//     現查沒有這個問題（dayBudget 從 2026-06-04 起就存在於每一份報表），而且上一期
+//     報表若被人重新產生（數字修正過），本期畫面會跟著更新 —— 那才是對的。
+//     ⚠ 代價：首次載入時 profits collection 是延後訂閱（見 js/firebase.js 的
+//       __loadHeavyProfitSubs），快照回來之前這一欄會先顯示「—」，之後由 profitDataReady
+//       觸發的重繪補上。這是已知且已接受的取捨。
+//     ⚠ 因為不落地，_stripDerived 不需要也不可以動。日後若有人改成存進 built[]，
+//       務必同步在 _stripDerived 加上剝除，否則它會跟著報表寫進 Firestore。
+//
+//   🔴 建表條件【只看 r.code】，與 getPrevPeriodMap 的 ads 那份同一套，不是 rev 那套：
+//     日預算 = 廣告費 / 天數，沒投廣告的商品日預算就是 0，而那種商品非常多。
+//     若照抄 rev 的 `if (r.code && r.rev)`，「上期沒投廣告（$0）」與「上期根本沒這個商品（—）」
+//     會長得一模一樣。三態的呈現交給 _subDayBudgetHtml，這裡【不做任何 || 0 的塌陷】——
+//     塌成 0 等於把「查不到」謊報成「上期花 $0」。
+//
+//   ⚠ 期間推算走 getPrevPeriodKey、讀報表走 lsLoad，都不自己再寫一份（全檔已有兩份
+//     期間推算，見 getPrevPeriodKey 上方註解）。同型先例是 _prevAdsTotal。
+//   ⚠ 回傳的 reader 綁著預讀當下的那份上期報表快照 → 只在同一次同步 render 內使用，
+//     不要跨 render 快取（理由同 _prodTagsReaderFor）。
+function _prevDayBudgetReaderFor(shop){
+  const s=state[shop];
+  // Object.create(null) 而不是 {}：商品編號是外部資料，萬一有人取名 constructor /
+  //   __proto__ / toString，普通物件會從 Object.prototype 拿到東西、渲染成「上期 $NaN」。
+  //   （getPrevPeriodMap 用的是 {}，有同一個理論缺陷；那邊不在本次範圍，這裡先做對。）
+  const map=Object.create(null);
+  try{
+    const parts=getPrevPeriodKey(shop,s.curMonth,s.curHalf).split('|');
+    if(parts.length>=4){
+      const rep=lsLoad(shop,parts[2],parts[3]);
+      if(rep&&Array.isArray(rep.built)){
+        rep.built.forEach(r=>{ if(r.code)map[r.code]=r.dayBudget; });
+      }
+    }
+  }catch{}
+  return function(code){ return map[code]; };
+}
 function renderTable(shop,list,opts){
   // 🔴 淨利表 DOM 已被拆除就直接早退。這【不是預防性的防禦，是修一個正式站 v444 實測可重現的 bug】：
   //   重現步驟：淨利表任一通路做過篩選（搜尋框打字即可）→ 立刻切到洞察表。
@@ -5360,7 +5435,7 @@ function renderTable(shop,list,opts){
   const HEADER_LABEL={
     adsFee:'廣告費 / 上期', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利',
     pureRate:'淨利率%', adsPct:'廣告佔比', profitPct:'利潤%', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
-    roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算',
+    roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算 / 上期',
     analysisLabel:'廣告分析', note:'廣告調整',
     growthRate:'成長比', growthAnalysis:'成長分析', growthNote:'商品調整',
     prodTags:'測試標籤',
@@ -5391,6 +5466,10 @@ function renderTable(shop,list,opts){
     ${orderedCols.map(buildColHeader).join('')}
   </tr></thead><tbody>`;
 
+  // 🔴 建在 forEach 【外面】。建在裡面等於每列重讀一次上期報表（見 _prevDayBudgetReaderFor
+  //   上方註解），800 列就是 800 次。同一個坑本檔已經踩過兩次，兩處都留了同樣的警告：
+  //   updateTagFilterBar 與 applyFilters 裡的 prodRead。
+  const prevBudRead=_prevDayBudgetReaderFor(shop);
   let rowIdx=0;
   list.forEach(r=>{
     const pc=r.pureProfit>=0?'td-pos':'td-neg';
@@ -5451,7 +5530,14 @@ function renderTable(shop,list,opts){
         roi:`<td class="td-num">${r.roi>0?r.roi.toFixed(2):'—'}</td>`,
         roiDiff:`<td id="td-${shop}-${r.code}-roiDiff" class="td-num">${roiDiffStr}</td>`,
         clicks:`<td class="td-num">${r.clicks>0?r.clicks.toLocaleString():'—'}</td>`,
-        dayBudget:`<td id="td-${shop}-${r.code}-dayBudget" class="td-num">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</td>`,
+        // 🔴 主數字包在 .bud-val 這個內層 span 裡，副標放在 span【外面】——
+        //   patchRow 更新這格時只寫 .bud-val，才不會把副標一起抹掉（見該函式 dayBudget 那段）。
+        //   ⚠ 刻意【不】沿用廣告費格的 .cell-val：那個 class 目前的語意是「可編輯格的主值」，
+        //     日預算格不可編輯（沒有 onclick / startEdit / cursor:pointer），共用會讓
+        //     日後有人拿 .cell-val 當「這格可編輯」的判準時寫出靜默錯誤的程式碼。
+        //   ⚠ .bud-val 刻意【沒有任何 CSS】：span 預設 display:inline、完全繼承父層 td 的
+        //     字級/字重/顏色 → 數字外觀與加 span 之前一模一樣。它純粹是 patchRow 的定位錨點。
+        dayBudget:`<td id="td-${shop}-${r.code}-dayBudget" class="td-num"><span class="bud-val">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</span>${_subDayBudgetHtml(prevBudRead(r.code))}</td>`,
         analysisLabel:_anaCellHtml(shop,r.code,r.analysisAll),
         note:noteCellHtml,
         growthRate:`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`,
