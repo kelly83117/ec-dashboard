@@ -7779,6 +7779,30 @@ window.__momoNotifyOriginsSkip=function(k){   // 訂閱因 dirty 跳過覆蓋 �
   try{ console.warn('[momo_moplus_origins] 本機較新未推，暫不接受雲端這份（保護本機）：', k); }catch{}
   try{ if(Date.now()-_momoOSkipToastAt>4000){ _momoOSkipToastAt=Date.now(); if(typeof showToast==='function') showToast('MO+ 逐列成本：本機較新未推、暫不接受雲端這份，請確認並按 ☁ 同步','warn'); } }catch{}
 };
+// ══════ 快照觸發重繪的 debounce（2026-08-17）：載入期多個雲端快照（products/stock/origins/E001/cost/recon）
+//   會各自觸發一次整表重繪；MO+ 好麻吉 1300+ 列 × 十幾個快照＝主執行緒卡到「網頁無回應」。
+//   對策：把「快照觸發」的重繪併進 200ms 固定窗口，一批只重繪一次（含 index 只在那一次重建，不失效 15 次）。
+//   ⚠ 只節流「快照觸發」；使用者操作（切期別/切賣場/套篩選/排序）一律走 momoRenderProfitBody 直呼、立即執行，不進這裡。
+const MOMO_SNAP_RERENDER_DEBOUNCE_MS=200;   // 可調：快照重繪合併窗口（首個快照起算的固定窗口，非 trailing，載入延遲有上界）
+let _momoSnapTimer=null;                     // 窗口計時器（null＝目前無排程）
+const _momoSnapPending={};                    // shop -> {tableOnly}；窗口內只要有一次「完整重繪」(false)就以完整為準
+function momoScheduleSnapshotRerender(shop, tableOnly){
+  if(!shop) return;
+  const prev=_momoSnapPending[shop];
+  // 合併規則：完整重繪(tableOnly=false)優先——只要窗口內任一次要求完整，flush 就完整重繪
+  _momoSnapPending[shop]={ tableOnly: prev ? (prev.tableOnly && tableOnly) : !!tableOnly };
+  if(_momoSnapTimer) return;   // 已在窗口內 → 併入，不重設計時器（固定窗口、載入延遲有上界）
+  _momoSnapTimer=setTimeout(()=>{
+    _momoSnapTimer=null;
+    const batch=Object.assign({}, _momoSnapPending);
+    for(const k in _momoSnapPending) delete _momoSnapPending[k];
+    for(const s in batch){
+      // flush 時重驗守衛：200ms 內使用者可能已切走賣場/子分頁 → 該表不在就跳過（比照原各 handler 的終端守衛）
+      if((_momoSub[s]||'profit')!=='profit') continue;
+      if(document.getElementById('momo-tbl-'+s)) momoRenderProfitBody(s, batch[s].tableOnly);
+    }
+  }, MOMO_SNAP_RERENDER_DEBOUNCE_MS);
+}
 // momo_products 訂閱推來更新時的精準重繪（不走 App.render/renderFromCloud、不整頁重繪，避免踢人）。
 //   ⚠ 收緊守衛：① 變的是「當前 curMomoShop」② active 容器是 momo-content-*（使用者真的在 MOMO 頁，比照 v199 inShopee）
 //   ③ 停在總表子分頁（其他子分頁沒有商品表）。只重繪那一張表 body。
@@ -7789,7 +7813,7 @@ window.addEventListener('momoDataReady',(e)=>{
   const activeEl=document.querySelector('.shop-content.active');
   if(!activeEl || !activeEl.id.startsWith('momo-content-')) return;
   if((_momoSub[shop]||'profit')!=='profit') return;
-  if(document.getElementById('momo-tbl-'+shop)) momoRenderProfitBody(shop);
+  if(document.getElementById('momo-tbl-'+shop)) momoScheduleSnapshotRerender(shop, false);
 });
 // 自家庫存雲端更新（同事上傳莫筆克後 momo_stock 推來）→ 若正在看任一 MOMO 總表則重繪，讓庫存欄跟上
 window.addEventListener('momoStockReady',()=>{
@@ -7798,15 +7822,15 @@ window.addEventListener('momoStockReady',()=>{
   const activeEl=document.querySelector('.shop-content.active');
   if(!activeEl || !activeEl.id.startsWith('momo-content-')) return;
   if((_momoSub[shop]||'profit')!=='profit') return;
-  if(document.getElementById('momo-tbl-'+shop)) momoRenderProfitBody(shop, true);
+  if(document.getElementById('momo-tbl-'+shop)) momoScheduleSnapshotRerender(shop, true);
 });
 // MO+ 逐列成本雲端更新（momo_moplus_origins 推來）→ 若正在看 MO+ 總表則重繪（毛利/涵蓋率/運費行跟上）
 window.addEventListener('momoMoPlusOriginsReady',()=>{
-  try{ momoBumpMoPlusEpoch(); }catch{}   // 雲端 origins 更新 → 快取失效
+  try{ momoBumpMoPlusEpoch(); }catch{}   // 雲端 origins 更新 → 快取失效（bump 便宜；index 只在 debounce 那一次重繪重建）
   const shop=curMomoShop;
   if(!momoIsMoPlus(shop)) return;
   if((_momoSub[shop]||'profit')!=='profit') return;
-  if(document.getElementById('momo-tbl-'+shop)) momoRenderProfitBody(shop, true);
+  if(document.getElementById('momo-tbl-'+shop)) momoScheduleSnapshotRerender(shop, true);
 });
 // E001 未結算銷量雲端更新（同事推來）→ 快取失效 + 若正在看 MO+ 總表就重繪（未結算期別的估算數字與「未對帳」晶片跟上）
 window.addEventListener('momoE001Ready',()=>{
@@ -7814,20 +7838,20 @@ window.addEventListener('momoE001Ready',()=>{
   const shop=curMomoShop;
   if(!momoIsMoPlus(shop)) return;
   if((_momoSub[shop]||'profit')!=='profit') return;
-  if(document.getElementById('momo-tbl-'+shop)) momoRenderProfitBody(shop, true);
+  if(document.getElementById('momo-tbl-'+shop)) momoScheduleSnapshotRerender(shop, true);
 });
 // 成本表雲端更新（同事補了成本）→ 快取失效 + 若正在看 MOMO 總表就重繪（甲乙 auto-fill 用、MO+ 毛利依賴）
 window.addEventListener('momoCostByOriginReady',()=>{
   try{ momoBumpMoPlusEpoch(); }catch{}
   const shop=curMomoShop;
-  if((_momoSub[shop]||'profit')==='profit' && document.getElementById('momo-tbl-'+shop)) momoRenderProfitBody(shop, true);
+  if((_momoSub[shop]||'profit')==='profit' && document.getElementById('momo-tbl-'+shop)) momoScheduleSnapshotRerender(shop, true);
   const ov=document.getElementById('momo-cost-ed-ov'); if(ov && typeof momoCostEditorRender==='function') momoCostEditorRender();   // 編輯器開著就刷新
 });
 // 月對帳雲端更新 → 清月費率快取 + 若正在看甲配/乙配總表則重繪（吃到新對帳單的權威營收/費用）
 window.addEventListener('momoReconcileReady',()=>{
   if(typeof momoClearFeeRateCache==='function') momoClearFeeRateCache();
   const shop=curMomoShop;
-  if((shop==='甲配'||shop==='乙配') && (_momoSub[shop]||'profit')==='profit' && document.getElementById('momo-tbl-'+shop)) momoRenderProfitBody(shop);
+  if((shop==='甲配'||shop==='乙配') && (_momoSub[shop]||'profit')==='profit' && document.getElementById('momo-tbl-'+shop)) momoScheduleSnapshotRerender(shop, false);
 });
 // ── 一次性遷移工具（手動在正式站 console 呼叫 window.momoMigrateProductsToCollection()，不 auto-run）──
 //   把 app/profit 舊欄位 ec_momo_products|<shop> 搬進 momo_products collection。先寫新+驗證，「絕不」自動刪舊欄位——
