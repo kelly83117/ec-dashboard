@@ -10602,20 +10602,20 @@ function momoRenderProfitBody(shop, tableOnly){
         const exp=multi?` <span onclick="event.stopPropagation();momoOpenSpecPrices('${shop}','${_momoEsc(r.sku)}')" style="color:#5b5fcf;cursor:pointer;font-size:11px" title="展開各規格掛牌價">⊕${r.listSpecs.length}</span>`:'';
         return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis" title="${String(tip).replace(/"/g,'&quot;')}">${momoMoney(lp)}${(mark||stale||exp)?`<div class="mm-cell-tag">${mark}${stale}${exp}</div>`:''}</td>`;   // ⊕/▲/⚠主檔 降到第二行 block → 掛牌價右緣對齊，不被標籤推歪
       }
-      if(c.k==='feeRate'){   // MO+ 成交費率（反推）：唯一=粗體實心；多解(常態)=淡色範圍+待收斂；異常=紅；無資料=—。排序鍵在 r.feeRate（下界+bonus）
+      if(c.k==='feeRate'){   // MO+ 成交費率（反推）：唯一=一般字重深色；多解(常態)=淡色範圍+待收斂(第二行)；異常=紅粗+⚠異常(第二行)；無資料=—。標籤一律 .mm-cell-tag 降行→數字右緣對齊。排序鍵在 r.feeRate（下界+bonus）
         const st=r._feeStatus, cand=r._feeCand||[];
         if(!cand.length) return `<td style="text-align:right;color:#c7cad1" title="此商品無非檔期成交手續費資料，無法反推費率">—</td>`;
         const lo=Math.min(...cand), hi=Math.max(...cand);
         if(st==='anomaly'){
           const tip=`跨月候選互斥（費率可能被調整／分類變更／資料異常）→ 保留新舊供人工判斷：\n舊累積：${cand.map(x=>x+'%').join('、')||'（空）'}\n本月新：${(r._feeCur||[]).map(x=>x+'%').join('、')||'（空）'}`;
-          return `<td style="text-align:right;font-weight:700;color:#dc2626" title="${String(tip).replace(/"/g,'&quot;')}">${lo===hi?lo:lo+'–'+hi}% <span style="font-size:10px">⚠異常</span></td>`;
+          return `<td style="text-align:right;font-weight:700;color:#dc2626" title="${String(tip).replace(/"/g,'&quot;')}">${lo===hi?lo:lo+'–'+hi}%<div class="mm-cell-tag">⚠異常</div></td>`;   // ⚠異常 降第二行（.mm-cell-tag）→ 數字右緣對齊；數字仍紅粗（異常警示，非「唯一解去粗體」對象）
         }
-        if(cand.length===1){   // 唯一解：粗體深色（與多解用粗細/深淺區分；不用紅——紅在本系統代表有問題，費率階層不是問題）
-          return `<td style="text-align:right;font-weight:700;color:#1f2937" title="已收斂唯一費率 ${lo}%（非檔期）">${lo}%</td>`;
+        if(cand.length===1){   // 唯一解：一般字重（取消 PR#132 的 font-weight:700，與同表其他數值一致；仍深色實心，不加標籤故本就右對齊）
+          return `<td style="text-align:right;color:#1f2937" title="已收斂唯一費率 ${lo}%（非檔期）">${lo}%</td>`;
         }
         // 多解（常態）：淡色範圍 + 「待收斂」小標；tooltip 列全部候選 + 排序依下界說明
         const tip=`尚未收斂，可能費率：${cand.map(x=>x+'%').join('、')}\n（跨月交集後仍多解；更多月份資料會收斂。此欄排序依下界 ${lo}%。）`;
-        return `<td style="text-align:right;color:#6b7280" title="${String(tip).replace(/"/g,'&quot;')}">${lo}–${hi}% <span style="font-size:10px;color:#9ca3af;background:#f3f4f6;border-radius:3px;padding:0 4px">待收斂</span></td>`;
+        return `<td style="text-align:right;color:#6b7280" title="${String(tip).replace(/"/g,'&quot;')}">${lo}–${hi}%<div class="mm-cell-tag">待收斂</div></td>`;   // 「待收斂」降第二行（.mm-cell-tag，沿用 #179）→ 費率數字獨佔第一行右緣對齊
       }
       if(c.k==='unitCost'){   // 成本欄：缺=null→「—」（口徑同缺成本警示、非 0）；MO+ 多原廠成本不同→tooltip 註明顯示主原廠
         if(r.unitCost==null) return `<td style="text-align:right;color:#c7cad1" title="${r.moPlus?'原廠編號查無莫筆克成本表':'尚未填成本'}（缺成本，口徑同缺成本警示）">—</td>`;
