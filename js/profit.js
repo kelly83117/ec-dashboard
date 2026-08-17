@@ -7663,6 +7663,17 @@ function momoCalcMarginSupplier(shop, {cost, purchasePrice}){
   const unitProfit=ppUntax*(1-feeRate)-(cost||0);
   return { unitProfit, marginPct:(unitProfit/ppUntax)*100, feeRate, feeMode };
 }
+// MO+（代收代付）雙毛利率純函式——新增表單與編輯表單共用（決策③：公式一致，相同輸入→相同輸出）。
+//   (a) 商品層毛利率 = (售價 − 成本 − 成交手續費) / 售價；成交手續費 = 售價 × fee%。
+//   (b) 預估實際毛利率 = (a) − 其他平台費用率(otherPct，百分點)。
+//   輸入不足（售價≤0 / 成本非數字 / fee 非數字）→ 回 {a:null,b:null}（呼叫端顯示「—」，不硬算）。
+function momoMoPlusDualMargin({cost, salePrice, fee, otherPct}){
+  const sp=Number(salePrice), c=Number(cost), f=Number(fee), op=Number(otherPct)||0;
+  if(!(sp>0) || !(c>=0) || !(f>=0)) return {a:null, b:null};
+  const feeAmt=sp*f/100;
+  const a=(sp-c-feeAmt)/sp*100;
+  return { a, b:a-op };
+}
 // ═══ 階段二：甲配/乙配 新供應商淨利模型的月費率快取 ═══
 //   feeRate = E(未稅=對帳單E÷1.05) ÷ A(未稅營收) → 每 SKU 費用 = R×feeRate，Σ全月 = E÷1.05（重現對帳單）。
 //   6.8% 是 MOMO 專屬常數（未對帳時只能估比例費用）；絕不共用蝦皮全站費率框。
@@ -9902,6 +9913,7 @@ function momoConfirmSync(shop){
 //   欄寬存 sessionStorage、綁「欄位名(k)」不綁索引 → 重排不錯位（見 momoColW / momoColResizeDrag）。
 const MOMO_PROFIT_COLS=[
   {k:'name',label:'品號 / 商品',left:true,w:320,fixed:true},
+  {k:'unitCost',label:'成本',fmt:'money',w:100,info:'買斷商品成本（付給供應商的單價），依原廠編號查莫筆克成本表帶入，也是新增/編輯表單試算毛利的成本基準。缺成本顯示「—」（口徑同缺成本警示，非 0）。',infoMoPlus:'依原廠編號查莫筆克成本表（cost_by_origin，四賣場共用同一張）。多原廠時顯示主原廠成本、各原廠成本不同會在 hover 標註。任一原廠缺成本顯示「—」（口徑同缺成本警示，非 0）。'},
   {k:'ppUntax',label:'進價',fmt:'money',w:110,info:'你賣給 MOMO 的單價，也是營收基準。（未稅）',noMoPlus:true},
   {k:'salePrice',label:'售價',fmt:'money',w:110,info:'MOMO 賣給消費者的單價，此金額不進帳，僅供參考。（含稅）',noMoPlus:true},
   {k:'listPrice',label:'售價',fmt:'money',w:118,info:'主顯示＝掛牌價（商品主檔、涵蓋全商品含零銷量、預設顯示銷售最多規格）。多規格點 ⊕ 展開看全部。與「最新成交價」（對帳明細、消費者實付含折扣）不同→標落差。⚠ 掛牌價＝最近一次上傳商品主檔的值（快照、無生效日）、成交價是累積歷史，時間基準不同；落差可能是折扣、也可能只是資料新舊。無主檔→回退顯示最新成交價。',moPlusOnly:true},
@@ -9937,7 +9949,7 @@ function momoColDefKeys(shop){ return momoColAvail(shop).filter(c=>!c.fixed).map
 // 「新欄位」提示：既有使用者的欄位順序是自己拖過的（不強制插入），但要讓人知道多了一欄。
 //   作法：記已看過的欄 key；本次釋出新增的欄（_MOMO_NEW_COLS）對既有使用者標「新」+ 首次一次性 toast；開過欄位面板即視為看過、之後不再提示。
 const _MOMO_COLS_SEEN_LS='momo_cols_seen';
-const _MOMO_NEW_COLS=['feeRate'];   // 本次釋出新增的欄；下次釋出把新 key 加進來、把不再算新的移走
+const _MOMO_NEW_COLS=['feeRate','unitCost'];   // 本次釋出新增的欄；下次釋出把新 key 加進來、把不再算新的移走
 function momoColsSeenSet(){
   try{ const raw=localStorage.getItem(_MOMO_COLS_SEEN_LS); if(raw){ const a=JSON.parse(raw); if(Array.isArray(a)) return new Set(a); } }catch{}
   // 首次：把「非本次新增」的欄都當已看過 → 既有使用者只會對新欄跳提示，不會整排標新
@@ -9955,7 +9967,7 @@ function momoLoadColCfg(shop){
   } }catch(e){}
   const defk=momoColDefKeys(shop);
   cfg.order=cfg.order.filter(k=>defk.includes(k));               // 濾掉已不存在的殘鍵
-  defk.forEach(k=>{ if(!cfg.order.includes(k)) cfg.order.push(k); });   // 新增的欄（如「進價」）補到尾端，舊 cfg 不會漏
+  defk.forEach(k=>{ if(!cfg.order.includes(k)){ if(k==='unitCost') cfg.order.unshift(k); else cfg.order.push(k); } });   // 新增的欄補位：unitCost 補到最前(品號 fixed 之後第一欄，符合驗收位置)，其餘（如「進價」）補到尾端；舊 cfg 不會漏
   return cfg;
 }
 function momoSaveColCfg(shop,cfg){ try{ localStorage.setItem(_MOMO_COLCFG_LS+shop, JSON.stringify({order:cfg.order, hidden:cfg.hidden})); }catch(e){} }
@@ -10246,12 +10258,24 @@ function momoRenderProfitBody(shop, tableOnly){
     // 逐列環比要用的「上一期同期別」keys（gated：上線首月之前不完整→不比）。甲配 margin/profit 當期已物流重分配、上期用純 aggregate，方向正確、微小差異可接受。
     let prevKeysForRows=null;
     if(!_e001Est){ const pk=momoPrevPeriodKey(period); if(pk && pk.slice(0,7)>=MOMO_FIRST_PERIOD) prevKeysForRows=momoExpandPeriod(pk); }   // 未結算估算期別不環比（口徑不同）
+    const _mp=momoIsMoPlus(shop), _cm=_mp?momoMoPlusCostMapCached():null;   // 成本欄：MO+ 查莫筆克成本表（cost_by_origin）；甲乙用 product.cost
     rows=all.map(p=>{
       const agg=momoAggregatePeriods(p, period?momoExpandPeriod(period):[], shop);
       const prev= prevKeysForRows ? momoAggregatePeriods(p, prevKeysForRows, shop) : null;
       // ppUntax=未稅進價（含稅進價÷1.05）：進價欄顯示用、也可排序；淨利表營收基準口徑。_prev=上期 aggregate（逐列環比用）
       const _st=(p.origin && _stockMap[p.origin]!=null)?_stockMap[p.origin]:null;   // 自家庫存：按原廠編號查快照，查無=null（畫面「—」）
-      return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, stock:_st, _prev:prev };   // coverage/covered/missingOrigins 仍在 agg（缺成本橫幅/加權毛利率/no_cost 標籤用）；成本涵蓋「欄」已移除
+      // 成本欄「單位成本」r.unitCost（缺=null→顯示「—」）：口徑與該賣場既有缺成本判定完全一致（momoProductAnomalies）。
+      //   甲乙＝product.cost（>0 才有值）；MO+＝依原廠查 cost_by_origin，任一原廠缺成本→null（決策①），有值→主原廠 p.origin 成本、多原廠成本不同標 unitCostMulti。
+      let unitCost=null, unitCostMulti=false;
+      if(_mp){
+        const origs=(p.origins&&p.origins.length)?p.origins:(p.origin?[p.origin]:[]);
+        if(origs.length>0 && origs.every(o=>Number(_cm[o])>0)){   // 全原廠都有成本（＝非缺成本）才給值
+          const prim=(p.origin && Number(_cm[p.origin])>0)?p.origin:origs[0];
+          unitCost=Number(_cm[prim]);
+          unitCostMulti=(origs.length>1 && new Set(origs.map(o=>Number(_cm[o]))).size>1);   // 多原廠且成本不同→cell 加 tooltip 註明
+        }
+      } else if(Number(p.cost)>0){ unitCost=Number(p.cost); }
+      return { sku:p.sku||'', origin:p.origin||'', name:p.name||'', salePrice:p.salePrice||0, ppUntax:(Number(p.purchasePrice)||0)/1.05, discontinued:!!p.discontinued, cost:Number(p.cost)||0, ...agg, unitCost, unitCostMulti, stock:_st, _prev:prev };   // coverage/covered/missingOrigins 仍在 agg（缺成本橫幅/加權毛利率/no_cost 標籤用）；成本涵蓋「欄」已移除
     });
     // 標籤：整月＋半月都算（半月只少成長類）；完整重繪重算並烘焙進 row（tableOnly 直接吃 row._tags）。「標籤」欄顯示 + 篩選共用同一份。
     tagsRes=momoTagsFor(shop, !tableOnly);   // 指派到上方 function-scope 的 tagsRes（非 const，供 9631 讀取）
@@ -10421,6 +10445,11 @@ function momoRenderProfitBody(shop, tableOnly){
         // 多解（常態）：淡色範圍 + 「待收斂」小標；tooltip 列全部候選 + 排序依下界說明
         const tip=`尚未收斂，可能費率：${cand.map(x=>x+'%').join('、')}\n（跨月交集後仍多解；更多月份資料會收斂。此欄排序依下界 ${lo}%。）`;
         return `<td style="text-align:right;color:#6b7280" title="${String(tip).replace(/"/g,'&quot;')}">${lo}–${hi}% <span style="font-size:10px;color:#9ca3af;background:#f3f4f6;border-radius:3px;padding:0 4px">待收斂</span></td>`;
+      }
+      if(c.k==='unitCost'){   // 成本欄：缺=null→「—」（口徑同缺成本警示、非 0）；MO+ 多原廠成本不同→tooltip 註明顯示主原廠
+        if(r.unitCost==null) return `<td style="text-align:right;color:#c7cad1" title="${r.moPlus?'原廠編號查無莫筆克成本表':'尚未填成本'}（缺成本，口徑同缺成本警示）">—</td>`;
+        const multiTip=r.unitCostMulti?` title="此商品多原廠、各原廠成本不同 → 顯示主原廠 ${String(r.origin||'').replace(/"/g,'&quot;')} 的成本"`:'';
+        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis"${multiTip}>${momoMoney(r.unitCost)}${r.unitCostMulti?' <span style="color:#9ca3af;font-size:10px">多原廠</span>':''}</td>`;
       }
       const v=r[c.k];
       const disp=c.fmt?fmt[c.fmt](v):v;
@@ -11577,16 +11606,30 @@ function momoRenderBatchEditForm(shop){
       <div><label style="${_MOMO_LB}">原廠編號</label><input id="momo-edit-origin-${shop}" type="text" value="${_momoEsc(p.origin||'')}" style="${_MOMO_INP}"><div style="font-size:11px;color:#9ca3af;margin-top:3px">改原廠編號會重新關聯甲乙配跨通路</div></div>
     </div>
     <div style="margin-bottom:10px">${skuField}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
-      <div><label style="${_MOMO_LB}">成本</label><input id="momo-edit-cost-${shop}" type="number" value="${p.cost??''}" style="${_MOMO_INP}"></div>
-      <div><label style="${_MOMO_LB}">進價(含稅)</label><input id="momo-edit-pp-${shop}" type="number" value="${p.purchasePrice??''}" style="${_MOMO_INP}"></div>
-      <div><label style="${_MOMO_LB}">售價(含稅)</label><input id="momo-edit-sp-${shop}" type="number" value="${p.salePrice??''}" style="${_MOMO_INP}"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px">
+      <div><label style="${_MOMO_LB}">成本</label><input id="momo-edit-cost-${shop}" type="number" oninput="momoEditRecalc('${shop}')" value="${p.cost??''}" style="${_MOMO_INP}"></div>
+      <div><label style="${_MOMO_LB}">進價(含稅)</label><input id="momo-edit-pp-${shop}" type="number" oninput="momoEditRecalc('${shop}')" value="${p.purchasePrice??''}" style="${_MOMO_INP}"></div>
+      <div><label style="${_MOMO_LB}">售價(含稅)</label><input id="momo-edit-sp-${shop}" type="number" oninput="momoEditRecalc('${shop}')" value="${p.salePrice??''}" style="${_MOMO_INP}"></div>
     </div>
+    <div id="momo-edit-preview-${shop}" style="min-height:22px;margin-bottom:4px"></div>
+    <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">毛利率＝供應商口徑（1 − 費率 − 成本÷未稅進價），與「新增商品」同一支算式。<b>只隨成本／進價變動；改售價不影響此毛利率</b>（售價不進帳、非營收基準——這是預期行為，非故障）。</div>
     <div style="margin-bottom:10px"><label style="${_MOMO_LB}">異動原因（必填）</label><input id="momo-edit-note-${shop}" type="text" placeholder="例：供應商調漲進價 / 修正商品名稱" style="${_MOMO_INP}"></div>
     <button onclick="momoBatchSubmitEdit('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">送出（新增一筆歷程）</button>
     <div style="margin-top:16px">
       <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">異動歷程（新到舊）</div>${hist}
     </div>`;
+  momoEditRecalc(shop);   // 初次渲染即顯示當前毛利率（甲乙供應商口徑）
+}
+// 甲乙配「編輯現有商品」即時毛利率：與新增表單同一支純函式 momoCalcMarginSupplier（決策③公式一致）。只吃成本+進價；售價不影響（口徑如此）。
+function momoEditRecalc(shop){
+  const prev=document.getElementById('momo-edit-preview-'+shop); if(!prev) return;
+  const cost=parseFloat((document.getElementById('momo-edit-cost-'+shop)||{}).value)||0;
+  const pp=parseFloat((document.getElementById('momo-edit-pp-'+shop)||{}).value)||0;
+  if(cost>0 && pp>0){
+    const r=momoCalcMarginSupplier(shop,{cost,purchasePrice:pp});
+    const ok=r.marginPct>=30;
+    prev.innerHTML=`毛利率 <b style="color:${ok?'#10b981':'#f97316'};font-size:15px">${momoPct(r.marginPct)}</b> <span style="color:${ok?'#10b981':'#f97316'};font-weight:600;margin-left:6px">${ok?'✓ 超過 30%':'⚠ 未達 30%'}</span> <span style="color:#9ca3af;font-size:11px">（費率 ${(r.feeRate*100).toFixed(1)}%${r.feeMode==='hist'?'·近月對帳':'·預設'}）</span>`;
+  } else prev.innerHTML=`<span style="color:#9ca3af;font-size:12px">成本 / 進價 填齊即時計算毛利率</span>`;
 }
 function momoBatchSearch(shop,val){ _momoBatchSearch[shop]=val; momoRenderBatchEditList(shop); }
 function momoBatchSelect(shop,sku){ _momoBatchSel[shop]=sku; momoRenderBatchEditList(shop); momoRenderBatchEditForm(shop); }
@@ -11680,19 +11723,56 @@ function momoRenderMoPlusBatchEditForm(shop, p){
     <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">代收代付：無進價；成本依原廠編號自莫筆克成本表帶入、售價取自商品主檔掛牌價，皆不在此手填。</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
       <div><label style="${_MOMO_LB}">商品名稱</label><input id="momo-edit-name-${shop}" type="text" value="${_momoEsc(p.name||'')}" style="${_MOMO_INP}"></div>
-      <div><label style="${_MOMO_LB}">原廠編號（主）</label><input id="momo-edit-origin-${shop}" type="text" value="${_momoEsc(p.origin||'')}" style="${_MOMO_INP}"><div style="font-size:11px;color:#9ca3af;margin-top:3px">改原廠編號會改變帶入的成本</div></div>
+      <div><label style="${_MOMO_LB}">原廠編號（主）</label><input id="momo-edit-origin-${shop}" type="text" oninput="momoMoPlusEditRecalc('${shop}')" value="${_momoEsc(p.origin||'')}" style="${_MOMO_INP}"><div style="font-size:11px;color:#9ca3af;margin-top:3px">改原廠編號會改變帶入的成本→即時重算毛利率</div></div>
     </div>
     <div style="margin-bottom:10px">${skuField}</div>
     <div style="background:#f9fafb;border:1px solid #eef0f4;border-radius:8px;padding:8px 10px;margin-bottom:10px">
       <div style="${_MOMO_LB};margin-bottom:4px">成本（原廠編號帶入 · 唯讀）</div>${costLines}
       <div style="${_MOMO_LB};margin:6px 0 2px">售價（商品主檔掛牌價 · 唯讀）</div><div style="font-size:12px;color:#374151">${spLine}</div>
       <div style="${_MOMO_LB};margin:6px 0 2px">成交費率（反推 · 唯讀）</div><div style="font-size:12px;color:#374151">${feeLine}</div>${predLine}
+      <div style="border-top:1px dashed #e5e7eb;margin:8px 0 6px"></div>
+      <div style="${_MOMO_LB};margin-bottom:2px">即時毛利率（雙數並列）</div>
+      <div id="momo-mpedit-margin-${shop}"></div>
     </div>
     <div style="margin-bottom:10px"><label style="${_MOMO_LB}">異動原因（必填）</label><input id="momo-edit-note-${shop}" type="text" placeholder="例：修正商品名稱 / 更換原廠編號" style="${_MOMO_INP}"></div>
     <button onclick="momoBatchSubmitEdit('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">送出（新增一筆歷程）</button>
     <div style="margin-top:16px">
       <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">異動歷程（新到舊）</div>${hist}
     </div>`;
+  momoMoPlusEditRecalc(shop);   // 初次渲染即算雙毛利率（依當前原廠成本＋主檔掛牌價＋反推費率）
+}
+// MO+ 編輯表單「即時雙毛利率」HTML：與新增表單共用純函式 momoMoPlusDualMargin（決策③公式一致）。
+//   成本＝依 origin 查莫筆克成本表；售價＝商品主檔掛牌價；費率＝實際「反推」三態（決策②，非建檔預測 feeRatePredicted）：
+//     唯一→用該值；多解→用候選「上界」最保守估（標未收斂）；無資料/異常→不算、顯「—」+「尚無實際費率」（不硬用預設 7.5%）。
+function momoMoPlusEditMarginHTML(shop, p, origin){
+  const cm=momoMoPlusCostMapCached();
+  const cost=(origin && Number(cm[origin])>0)?Number(cm[origin]):null;
+  const sp=momoMoPlusListPriceForSku(shop, p.sku, null).listPrice;
+  const fr=momoFeeRateForSku(shop, p.sku);
+  let fee=null, feeNote='';
+  if(fr.status==='unique'){ fee=fr.cand[0]; feeNote='實際反推費率 '+fee+'%（唯一解）'; }
+  else if(fr.status==='multi'){ fee=Math.max(...fr.cand); feeNote='費率未收斂，取候選上界 '+fee+'% 估算（最保守·實際反推）'; }
+  // anomaly / none → fee 留 null（不硬算）
+  if(cost==null) return `<div style="font-size:12px;color:#dc2626">查無成本（原廠編號不在莫筆克成本表）→ 無法試算毛利率</div>`;
+  if(fee==null){
+    const why=(fr.status==='anomaly')?'成交費率反推異常（跨月候選互斥）':'尚無實際反推費率（無非檔期成交手續費資料）';
+    return `<div style="font-size:13px;color:#c7cad1;font-weight:700">— <span style="font-size:11px;font-weight:400;color:#9ca3af">${why}，不估算毛利率</span></div>`;
+  }
+  if(!(sp>0)) return `<div style="font-size:12px;color:#dc2626">商品主檔查無掛牌價 → 無法試算毛利率</div>`;
+  const other=momoMoPlusOtherFeeRate();
+  const {a,b}=momoMoPlusDualMargin({cost, salePrice:sp, fee, otherPct:other.pct});
+  const col=v=>v>=20?'#10b981':(v>=0?'#d97706':'#dc2626');
+  return `<div style="display:flex;gap:24px">
+      <div><div style="${_MOMO_LB}">(a) 商品層毛利率 <span title="(售價−成本−成交手續費)/售價；未含其他平台費用" style="color:#9ca3af;cursor:help">ⓘ</span></div><div style="font-size:20px;font-weight:800;color:${col(a)}">${a.toFixed(1)}%</div></div>
+      <div><div style="${_MOMO_LB}">(b) 預估實際毛利率 <span title="(a) 再扣其他平台費用率（運費淨＋其他手續費）" style="color:#9ca3af;cursor:help">ⓘ</span></div><div style="font-size:20px;font-weight:800;color:${col(b)}">${b.toFixed(1)}%</div></div>
+    </div>
+    <div style="font-size:11px;color:#9ca3af;margin-top:6px;line-height:1.7">成本 $${cost}｜掛牌價 $${sp}｜${feeNote}｜(b) 再扣其他平台費用率 <b>${other.pct}%</b>（取自 ${_momoEsc(other.month)}）</div>`;
+}
+function momoMoPlusEditRecalc(shop){
+  const box=document.getElementById('momo-mpedit-margin-'+shop); if(!box) return;
+  const p=momoLoadProducts(shop).find(x=>x.sku===_momoBatchSel[shop]); if(!p) return;
+  const origin=((document.getElementById('momo-edit-origin-'+shop)||{}).value||'').trim();
+  box.innerHTML=momoMoPlusEditMarginHTML(shop, p, origin);
 }
 function momoMoPlusBatchSubmitEdit(shop){
   const products=momoLoadProducts(shop);
@@ -11878,7 +11958,8 @@ function momoMoPlusAddPreview(shop){
   const col=v=>v>=20?'#10b981':(v>=0?'#d97706':'#dc2626');
   let mHtml;
   if(cost!=null && sp>0 && fee>=0){
-    const feeAmt=sp*fee/100, a=(sp-cost-feeAmt)/sp*100, b=a-other.pct;
+    const feeAmt=sp*fee/100;
+    const {a,b}=momoMoPlusDualMargin({cost,salePrice:sp,fee,otherPct:other.pct});   // 抽出的純函式（與編輯表單共用）
     mHtml=`<div style="display:flex;gap:24px;margin-top:8px">
       <div><div style="${_MOMO_LB}">(a) 商品層毛利率 <span title="(售價−成本−成交手續費)/售價；未含其他平台費用" style="color:#9ca3af;cursor:help">ⓘ</span></div><div style="font-size:20px;font-weight:800;color:${col(a)}">${a.toFixed(1)}%</div></div>
       <div><div style="${_MOMO_LB}">(b) 預估實際毛利率 <span title="(a) 再扣其他平台費用率（運費淨＋其他手續費）" style="color:#9ca3af;cursor:help">ⓘ</span></div><div style="font-size:20px;font-weight:800;color:${col(b)}">${b.toFixed(1)}%</div></div>
@@ -15514,6 +15595,7 @@ Object.assign(window, {
   momoOpenHierarchy,momoCloseHierarchy,
   momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
+  momoEditRecalc,momoMoPlusEditRecalc,momoMoPlusDualMargin,
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,momoUploadYiMonth,
   momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,momoJumpShop,
   momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,momoMigrateS1103ToCollection,momoMigrateOptlogBadKeys,momoFsInvalidFieldKeys,
