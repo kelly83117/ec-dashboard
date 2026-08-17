@@ -908,6 +908,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     ok.forEach(k=>_pendingSyncKeys.delete(k));
     ok.forEach(k=>{ if(k.startsWith('ec_notes|')){ try{ _notesDirtyDel(k); }catch{} } });          // 真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
+    ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
     _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty});
     // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 時出現；只要有問題就 ⚠ + 彈窗
@@ -7515,6 +7516,24 @@ function _momoBaseSet(k, ts){ try{ const m=_momoReadJson(_MOMO_PBASE_LS,{})||{};
 window.__momoIsProductsDirty=function(k){ return _momoIsDirty(k); };          // firebase.js 訂閱：dirty 守衛
 window.__momoNoteCloudBase =function(k, ts){ if(ts) _momoBaseSet(k, ts); };   // firebase.js 訂閱：接受雲端後記錄基準
 window.__momoProductsBaseGet=function(k){ return _momoBaseGet(k); };          // 預覽【2】：讀本機基準版本
+// ══════ origins（momo_moplus_origins）衝突防護（2026-08-14）：比照 products 的持久化 dirty + updatedAt base ══════
+//  根因：origins 原本只有 in-memory _pendingSyncKeys，重整就空 → 訂閱無版本比對、舊雲端灌回本機（Vanessa 同步後回退實例）。
+//  改：① 持久化 dirty 註冊表（跨重整）＝「本機有未推重傳」的權威訊號；② updatedAt base ＝推送前擋「雲端較新」。
+const _MOMO_ODIRTY_LS='ec_momo_origins_dirty';   // JSON array：真正重傳過還沒成功推的 origins full key
+const _MOMO_OBASE_LS ='ec_momo_origins_base';     // JSON map：full key → 雲端 updatedAt(ms)
+function _momoODirtyAdd(k){ try{ const a=_momoReadJson(_MOMO_ODIRTY_LS,[]); if(Array.isArray(a)&&!a.includes(k)){ a.push(k); localStorage.setItem(_MOMO_ODIRTY_LS,JSON.stringify(a)); } }catch{} }
+function _momoODirtyDel(k){ try{ let a=_momoReadJson(_MOMO_ODIRTY_LS,[]); if(Array.isArray(a)&&a.includes(k)){ a=a.filter(x=>x!==k); localStorage.setItem(_MOMO_ODIRTY_LS,JSON.stringify(a)); } }catch{} }
+function _momoOIsDirty(k){ try{ const a=_momoReadJson(_MOMO_ODIRTY_LS,[]); return Array.isArray(a)&&a.includes(k); }catch{ return false; } }
+function _momoOBaseGet(k){ try{ const m=_momoReadJson(_MOMO_OBASE_LS,{}); return (m&&m[k])||0; }catch{ return 0; } }
+function _momoOBaseSet(k, ts){ try{ const m=_momoReadJson(_MOMO_OBASE_LS,{})||{}; m[k]=ts||0; localStorage.setItem(_MOMO_OBASE_LS,JSON.stringify(m)); }catch{} }
+window.__momoIsOriginsDirty=function(k){ return _momoOIsDirty(k); };              // firebase.js 訂閱：dirty 守衛（持久化、跨重整）
+window.__momoNoteOriginsCloudBase=function(k, ts){ if(ts) _momoOBaseSet(k, ts); }; // firebase.js 訂閱：接受雲端後記錄基準
+window.__momoOriginsBaseGet=function(k){ return _momoOBaseGet(k); };              // 預覽：讀本機基準版本
+let _momoOSkipToastAt=0;   // 非阻斷提示節流（7 個 doc 不洗版）
+window.__momoNotifyOriginsSkip=function(k){   // 訂閱因 dirty 跳過覆蓋 → 不靜默、通知使用者
+  try{ console.warn('[momo_moplus_origins] 本機較新未推，暫不接受雲端這份（保護本機）：', k); }catch{}
+  try{ if(Date.now()-_momoOSkipToastAt>4000){ _momoOSkipToastAt=Date.now(); if(typeof showToast==='function') showToast('MO+ 逐列成本：本機較新未推、暫不接受雲端這份，請確認並按 ☁ 同步','warn'); } }catch{}
+};
 // momo_products 訂閱推來更新時的精準重繪（不走 App.render/renderFromCloud、不整頁重繪，避免踢人）。
 //   ⚠ 收緊守衛：① 變的是「當前 curMomoShop」② active 容器是 momo-content-*（使用者真的在 MOMO 頁，比照 v199 inShopee）
 //   ③ 停在總表子分頁（其他子分頁沒有商品表）。只重繪那一張表 body。
@@ -9059,6 +9078,7 @@ function momoSaveMoPlusOriginsDoc(shop, src, docObj){
   try{ if(Store._profitMem) Store._profitMem[k]=docObj; }catch{}
   try{ if(Store._mem) Store._mem[k]=docObj; }catch{}
   _markPending(k);
+  try{ _momoODirtyAdd(k); }catch{}   // 持久化 dirty（跨重整）→ 訂閱不覆蓋、直到成功推雲端才清；防「重整後 in-memory pending 消失、舊雲端灌回」
   momoBumpMoPlusEpoch();   // origins 改變 → 索引/成本快取失效
   return lsOk;   // false → 不靜默吞配額，呼叫端要出可見警告
 }
@@ -9737,7 +9757,12 @@ async function momoOpenSyncPreview(shop){
       const oc=moOrigCloud[it.key];
       if(oc&&oc.__error){ it.status='readfail'; it.cloudCount=null; return; }
       if(oc===undefined){ it.status='new'; it.cloudCount=0; return; }
-      it._cloudVal=oc; it.cloudCount=_momoCount(oc); it.status=_eq(it.localVal,oc)?'same':'diff';
+      const _cts=(oc.updatedAt&&oc.updatedAt.toMillis)?oc.updatedAt.toMillis():0;   // 雲端版本戳（updatedAt→ms）
+      const _stripU=o=>{ if(!o||typeof o!=='object')return o; const c={...o}; delete c.updatedAt; return c; };   // 比對排除 updatedAt（本機那份不一定有此欄）
+      const ocCmp=_stripU(oc), lvCmp=_stripU(it.localVal);
+      it._cloudVal=ocCmp; it.cloudCount=_momoCount(ocCmp); it.status=_eq(lvCmp,ocCmp)?'same':'diff';
+      // 版本比對：內容不同、且雲端 updatedAt > 本機基準（我載入後雲端又被人推過）→ 標衝突、預設不推。base=0（舊雲端無 updatedAt）→ 不擋、允許升級舊→新。
+      if(it.status==='diff'){ const base=(window.__momoOriginsBaseGet?window.__momoOriginsBaseGet(it.key):0); if(_cts && (!base||_cts>base)) it.conflict=true; }
       return;
     }
     if(it.kind==='MO+未結算銷量'){
