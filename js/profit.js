@@ -7772,12 +7772,32 @@ function _momoOIsDirty(k){ try{ const a=_momoReadJson(_MOMO_ODIRTY_LS,[]); retur
 function _momoOBaseGet(k){ try{ const m=_momoReadJson(_MOMO_OBASE_LS,{}); return (m&&m[k])||0; }catch{ return 0; } }
 function _momoOBaseSet(k, ts){ try{ const m=_momoReadJson(_MOMO_OBASE_LS,{})||{}; m[k]=ts||0; localStorage.setItem(_MOMO_OBASE_LS,JSON.stringify(m)); }catch{} }
 window.__momoIsOriginsDirty=function(k){ return _momoOIsDirty(k); };              // firebase.js 訂閱：dirty 守衛（持久化、跨重整）
+window.__momoClearOriginsDirty=function(k){ try{ _momoODirtyDel(k); }catch{} };    // firebase.js 訂閱自癒用：dirty 過期時清掉
 window.__momoNoteOriginsCloudBase=function(k, ts){ if(ts) _momoOBaseSet(k, ts); }; // firebase.js 訂閱：接受雲端後記錄基準
 window.__momoOriginsBaseGet=function(k){ return _momoOBaseGet(k); };              // 預覽：讀本機基準版本
-let _momoOSkipToastAt=0;   // 非阻斷提示節流（7 個 doc 不洗版）
+// ── #169 origins 衝突守衛的「單一決策點」（2026-08-17 自癒修）：subscription 收到雲端 doc 時呼叫，回傳該怎麼處理 ──
+//   根因：原本 subscription 對 dirty key 只會「跳過」、從不清 dirty；dirty 只在 syncToCloud 的 ok-loop 清（限本 session 推的 key）。
+//     → 推已落地（前一 session／他台裝置）或本機 doc 已被逐出(orphan) 的 dirty key 永遠留著 → 每次快照都跳「本機較新未推」提示，永不消失。
+//   ⚠ 不放寬防護：只有「雲端已等於本機(推已落地) 或 本機根本不存在(orphan)」才判定 dirty 過期並清掉；
+//     「dirty 且雲端≠本機且本機存在」＝本機確實較新未推 → 仍照舊跳過覆蓋、保護本機（與 #169 原行為完全相同）。
+function momoOriginsCloudDecision(k, cloudData){
+  const local = (typeof Store!=='undefined' && Store._profitMem) ? Store._profitMem[k] : undefined;
+  const localMissing = (local==null);
+  let equal=false; try{ equal = !localMissing && JSON.stringify(local)===JSON.stringify(cloudData); }catch{ equal=false; }
+  if(_momoOIsDirty(k)){
+    if(equal || localMissing){ _momoODirtyDel(k); return {action:'accept', healed:true}; }   // 自癒：雲端已追上／本機不存在 → dirty 過期，清掉並接受雲端
+    return {action:'skip'};                                                                    // 保護：本機較新未推、雲端較舊 → 不覆蓋（不放寬）
+  }
+  return equal ? {action:'noop'} : {action:'accept'};                                          // 非 dirty：等值 noop / 不等接受
+}
+window.__momoOriginsCloudDecision=momoOriginsCloudDecision;
+const _momoOSkipShown={};   // 本機較新提示：同一 key 一個 session 只跳一次（key -> 1）
+function _momoLoggedIn(){ try{ return !!(window.App && window.App.currentUser); }catch{ return false; } }
 window.__momoNotifyOriginsSkip=function(k){   // 訂閱因 dirty 跳過覆蓋 → 不靜默、通知使用者
-  try{ console.warn('[momo_moplus_origins] 本機較新未推，暫不接受雲端這份（保護本機）：', k); }catch{}
-  try{ if(Date.now()-_momoOSkipToastAt>4000){ _momoOSkipToastAt=Date.now(); if(typeof showToast==='function') showToast('MO+ 逐列成本：本機較新未推、暫不接受雲端這份，請確認並按 ☁ 同步','warn'); } }catch{}
+  try{ console.warn('[momo_moplus_origins] 本機較新未推，暫不接受雲端這份（保護本機）：', k); }catch{}   // console 一律留（診斷用）
+  if(!_momoLoggedIn()) return;              // 登入前不跳 toast（使用者還沒進系統、也沒有同步鈕可按）
+  if(_momoOSkipShown[k]) return; _momoOSkipShown[k]=1;   // 同一 key 一 session 只跳一次，不洗版
+  try{ if(typeof showToast==='function') showToast('MO+ 逐列成本：本機較新未推、暫不接受雲端這份，請確認並按 ☁ 同步','warn'); }catch{}
 };
 // ══════ 快照觸發重繪的 debounce（2026-08-17）：載入期多個雲端快照（products/stock/origins/E001/cost/recon）
 //   會各自觸發一次整表重繪；MO+ 好麻吉 1300+ 列 × 十幾個快照＝主執行緒卡到「網頁無回應」。
