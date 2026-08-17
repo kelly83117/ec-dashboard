@@ -8594,7 +8594,7 @@ function momoReconMonthOptions(){ const out=[]; for(let y=2026,m=1;(y<2026)||(m<
 function momoRenderRecon(shop){
   const c=document.getElementById('momo-sub-content-'+shop); if(!c) return;
   if(!_momoReconMonth) _momoReconMonth='2026-06';
-  const opts=momoReconMonthOptions().map(m=>`<option value="${m}"${m===_momoReconMonth?' selected':''}>${m}</option>`).join('');
+  const opts=[...momoReconMonthOptions()].reverse().map(m=>`<option value="${m}"${m===_momoReconMonth?' selected':''}>${m}</option>`).join('');   // 新在上（reverse 只翻顯示；預設用值 m===_momoReconMonth 選、不動、不用位置）
   const stat=f=>f?'<span class="mm-ok">✓ '+_momoEsc(f)+'</span>':'<span class="mm-muted">未選</span>';
   const ready=_momoReconStage.xls&&_momoReconStage.pdf;
   c.innerHTML=`
