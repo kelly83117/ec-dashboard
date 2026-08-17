@@ -10876,6 +10876,42 @@ function momoRenameSkuOptlog(shop, oldSku, newSku){
   try{ momoUpdateDailyProgress({silent:true}); }catch(e){}
   return moved.length;
 }
+// 刪除商品（四賣場共用；由編輯表單「刪除商品」鈕觸發）。可刪 ⟺ 可改品號（momoSkuHistoryInfo.has=false＝無任何上傳資料）。
+//   ⚠ 只清 products 物件 + optlog；有交易資料者按鈕本就 disabled，這裡再驗一次防呆。products 整份覆蓋上雲 → 雲端該商品自動消失、無孤兒。
+//   ⚠ 商品 history 隨物件消失 → 刪除 optlog 是唯一軌跡：om[sku] 清掉舊優化紀錄、只留一筆「刪除商品」tombstone（工作日誌計數看得到）。
+function momoDeleteProduct(shop){
+  const products=momoLoadProducts(shop);
+  const p=products.find(x=>x.sku===_momoBatchSel[shop]);
+  if(!p) return;
+  const info=momoSkuHistoryInfo(shop, p.sku);
+  if(info.has){ alert('此商品已有 '+info.reasons.join('、')+'，不可刪除。'); return; }   // 防呆再驗（按鈕已 disabled，雙保險）
+  const nm=p.name||'(未命名)', oldSku=p.sku;
+  if(!confirm('確定刪除商品？\n\n商品編號：'+oldSku+'\n商品名稱：'+nm+'\n\n⚠ 此操作無法復原，商品與其優化/異動紀錄將一併移除。')) return;
+  const idx=products.indexOf(p); if(idx<0) return;
+  products.splice(idx,1);
+  momoSaveProducts(shop, products);   // products dirty + pending → 整份覆蓋上雲，雲端該商品消失
+  try{   // 刪除 optlog tombstone：清舊優化紀錄、只留一筆刪除軌跡（product.history 已隨物件消失、此為唯一紀錄）
+    const om=momoLoadOptlog(shop)||{};
+    const now=momoNowParts(), by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
+    om[oldSku]=[{ id:'opt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:now.date, time:now.time, shop, sku:oldSku, by, type:'刪除商品', note:'刪除商品：'+nm+'（'+oldSku+'）' }];
+    momoSaveOptlog(shop, om);
+    momoUpdateDailyProgress({silent:true});
+  }catch(e){ try{ console.warn('[刪除商品 optlog]',e); }catch{} }
+  _momoBatchSel[shop]='';   // 回商品清單
+  if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop);
+  momoRenderBatchEditList(shop); momoRenderBatchEditForm(shop);
+  if(typeof showToast==='function') showToast('已刪除 '+nm,'success');
+}
+// 編輯表單底部「危險操作」刪除區（甲乙/MO+ 共用）：可刪＝無上傳資料時啟用；有資料則 disabled + hover 顯示原因（用 span 包才吃得到 title）。
+function momoDeleteZoneHTML(shop, skuInfo){
+  const locked=!!(skuInfo&&skuInfo.has);
+  const reason=locked?('已有 '+skuInfo.reasons.join('、')+'，不可刪除（避免與已上傳的對帳/運費/銷售資料斷鏈）'):'';
+  const hint=locked?reason:'僅有新增/編輯紀錄，可刪除。⚠ 此操作無法復原。';
+  const btn=locked
+    ? `<span title="${_momoEsc(reason)}"><button class="mm-btn-danger" disabled>🗑 刪除商品</button></span>`
+    : `<button class="mm-btn-danger" onclick="momoDeleteProduct('${shop}')">🗑 刪除商品</button>`;
+  return `<div class="mm-danger-zone"><div class="mm-danger-h">危險操作</div><div class="mm-danger-row">${btn}<span class="mm-danger-hint">${_momoEsc(hint)}</span></div></div>`;
+}
 
 // ══════════ MOMO optlog → 工作日誌（軟連結；比照蝦皮 _updateDailyProgressFromAdjustments，但歸屬用 optlog 每筆的 by(登入 username)，不建 shop→person 對照表）══════════
 //   掃當天 ec_momo_optlog|甲配/乙配 → 依 by 分人、依「賣場·type」動態計數 → 寫 {kind:'momo-summary',counts} 進 ec.dailyProgress。
@@ -11805,7 +11841,8 @@ function momoRenderBatchEditForm(shop){
     <button onclick="momoBatchSubmitEdit('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">送出（新增一筆歷程）</button>
     <div style="margin-top:16px">
       <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">異動歷程（新到舊）</div>${hist}
-    </div>`;
+    </div>
+    ${momoDeleteZoneHTML(shop, skuInfo)}`;
   momoEditRecalc(shop);   // 初次渲染即顯示當前毛利率（甲乙供應商口徑）
 }
 // 甲乙配「編輯現有商品」即時毛利率：與新增表單同一支純函式 momoCalcMarginSupplier（決策③公式一致）。只吃成本+進價；售價不影響（口徑如此）。
@@ -11927,7 +11964,8 @@ function momoRenderMoPlusBatchEditForm(shop, p){
     <button onclick="momoBatchSubmitEdit('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">送出（新增一筆歷程）</button>
     <div style="margin-top:16px">
       <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">異動歷程（新到舊）</div>${hist}
-    </div>`;
+    </div>
+    ${momoDeleteZoneHTML(shop, skuInfo)}`;
   momoMoPlusEditRecalc(shop);   // 初次渲染即算雙毛利率（依當前原廠成本＋主檔掛牌價＋反推費率）
 }
 // MO+ 編輯表單「即時雙毛利率」HTML：與新增表單共用純函式 momoMoPlusDualMargin（決策③公式一致）。
@@ -15787,7 +15825,7 @@ Object.assign(window, {
   momoSetSub,momoSetPeriod,momoSetPeriodMonth,momoSetPeriodHalf,momoOnSearch,momoProfitSetSort,momoToggleDiscontinued,momoMoney,
   momoOpenColPicker,momoColToggle,momoColDragStart,momoColDragOver,momoColDragEnter,momoColDragLeave,momoColDrop,momoColDragEnd,momoColResetOrder,momoColShowAll,
   momoOpenHierarchy,momoCloseHierarchy,
-  momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,
+  momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,momoDeleteProduct,
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
   momoEditRecalc,momoMoPlusEditRecalc,momoMoPlusDualMargin,
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,momoUploadYiMonth,
