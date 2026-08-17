@@ -1702,36 +1702,138 @@ function checkAdsReconcile(shop,built){
   const reportTotal=built.reduce((acc,r)=>acc+(r.adsFee||0),0);
   const diff=Math.round((reportTotal-csvTotal)*100)/100;
   if(Math.abs(diff)<0.5)return;
-  // 找出未對應的 SID
-  const mapped=new Set();
-  Object.values(s.rawMap||{}).forEach(e=>{(Array.isArray(e)?e:(e.sids||[])).forEach(sid=>mapped.add(String(sid)));});
+  // 找出未對應的 SID，並在【同一趟】建立 sid→codes 反向索引（供下方「重複對應」用）。
+  //   刻意從 Object.values 換成 Object.entries：多拿一個 code 就能順手建 sidToCodes，
+  //   不必為了重複對應再遍歷一次 rawMap。mapped 的內容與行為完全不變。
+  const mapped=new Set();const sidToCodes={};const codeName={};
+  Object.entries(s.rawMap||{}).forEach(([code,e])=>{
+    const sids=Array.isArray(e)?e:(e.sids||[]);   // 相容舊格式（純陣列）與新格式 {sids,name}
+    if(!Array.isArray(e)&&e.name)codeName[code]=e.name;
+    sids.forEach(sid=>{
+      const k=String(sid);
+      mapped.add(k);
+      (sidToCodes[k]=sidToCodes[k]||[]).push(code);
+    });
+  });
   const unmapped=Object.entries(adsById).filter(([sid])=>!mapped.has(String(sid))).map(([sid,spend])=>({sid,spend,name:sidNames[sid]||''})).sort((a,b)=>b.spend-a.spend);
-  const sign=diff>0?'+':'';
-  const msg=`[${shop}] 廣告費對帳差異：CSV 總計 ${fmtAds(csvTotal)}，報表合計 ${fmtAds(reportTotal)}（差 ${sign}${fmtAds(diff)}）`;
-  showMapWarnBanner(msg,()=>showReconcileDetail(shop,unmapped,diff));
+  // 重複對應：同一個 SID 落在 2 個以上商品編號。buildShop 的 adsByCode 是用 sids.forEach
+  //   對【每個 code 各加一次】，所以多算金額 = 該 SID 花費 ×（對應到的編號數 − 1）。
+  //   ⚠ 公式已於 2026-08-17 由操作人員實測驗證：森之旅 2026/08 上半月抓到 3 筆、
+  //     多算合計 +24.33，與橫幅上的差額完全相符。
+  //   ⚠ 只顯示、不自動修正 —— 該併到哪個商品編號是業務判斷，程式無從得知。
+  //   篩選條件 adsById[sid] 的 truthy 判斷刻意比照 buildShop（0 花費不計入）。
+  const dups=Object.entries(sidToCodes)
+    .filter(([sid,codes])=>codes.length>1&&adsById[sid])
+    .map(([sid,codes])=>({
+      sid,codes,
+      codeNames:codes.map(c=>codeName[c]||''),
+      name:sidNames[sid]||'',
+      spend:adsById[sid],
+      over:Math.round(adsById[sid]*(codes.length-1)*100)/100
+    }))
+    .sort((a,b)=>b.over-a.over);
+  // 三個廣告來源的筆數 —— 讓使用者一眼看出有沒有漏傳。
+  //   2026-08-17 實例：操作人員重傳時漏了「廣告群組」，CSV 總計少 666.57、
+  //   差額方向從 +24.33 翻成 −34.63，但畫面上完全看不出少了哪個來源。
+  //   ⚠ 0 筆【不等於】漏傳（有些賣場/期間本來就沒有選品廣告或廣告群組），故用中性的
+  //     灰字「未上傳」而不是警告色 —— 多一個會狼來了的警告，會連真資訊一起被略過。
+  //   ⚠ 「蝦皮廣告 0 筆」這裡永遠顯示不到：本函式開頭 !s.rawAds.length 就已經 return。
+  const src={
+    ads:(s.rawAds||[]).length,
+    sel:(s.rawSelAds||[]).length,
+    groupFiles:(s.rawGroupAdsList||[]).length,
+    groupRows:(s.rawGroupAdsList||[]).reduce((a,g)=>a+(g.rows||[]).length,0),
+    groupNames:(s.rawGroupAdsList||[]).map(g=>({name:g.name||'',rows:(g.rows||[]).length}))
+  };
+  const nf=n=>n.toLocaleString();
+  // msg 走 innerHTML（見 showMapWarnBanner 結尾），所以這裡可以嵌樣式。
+  //   ⚠ 但同理【不可以】把使用者資料（檔名、商品名、廣告名）直接塞進 msg ——
+  //     那些一律走 modal 並過 escapeHtmlLike。這裡只嵌固定字串「未上傳」。
+  const gray=t=>`<span style="color:#a8a29e">${t}</span>`;
+  const srcLine=`資料來源：蝦皮廣告 ${nf(src.ads)} 筆／選品廣告 ${src.sel?nf(src.sel)+' 筆':gray('未上傳')}／廣告群組 ${src.groupFiles?src.groupFiles+' 檔 '+nf(src.groupRows)+' 筆':gray('未上傳')}`;
+  // 🔴 fmtAds 內部是 Math.abs（見檔尾定義），會把負號吃掉，符號一定要自己補。
+  //   原本只補 '+'，負差會印成「差 14.57」看不出方向；明細 modal 補了負號之後
+  //   同一個數字兩邊會長得不一樣，故一併補上 '−'（U+2212，與 modal 一致）。
+  //   ⚠ 只改顯示的符號，上方 csvTotal / reportTotal / diff 的計算一個字不動。
+  const sign=diff>0?'+':diff<0?'−':'';
+  const msg=`[${shop}] 廣告費對帳差異：CSV 總計 ${fmtAds(csvTotal)}，報表合計 ${fmtAds(reportTotal)}（差 ${sign}${fmtAds(diff)}）\n${srcLine}`;
+  showMapWarnBanner(msg,()=>showReconcileDetail(shop,{diff,unmapped,dups,src}));
 }
-function showReconcileDetail(shop,unmapped,diff){
+// 2026-08-17 擴充：明細改成兩張表（重複對應 / 未對應）＋ 結算列 ＋ 三個來源筆數。
+//   簽章改成物件參數 detail={diff,unmapped,dups,src}：全檔唯一呼叫點是 checkAdsReconcile
+//   （window 匯流排上那筆沒有任何 inline handler 直接呼叫），改簽章成本趨近於零；
+//   之後要再加欄位也不必一直追加位置參數。
+// 🔴 fmtAds / fmtN 內部都是 Math.abs（見檔尾定義），會把負號吃掉。所有可能為負的金額
+//    一律走下方 signed()，不要直接用 fmtAds，否則 −38.90 會印成 38.90，方向完全看反。
+function showReconcileDetail(shop,detail){
+  const {diff=0,unmapped=[],dups=[],src=null}=detail||{};
   let old=document.getElementById('reconcile-detail-ov');if(old)old.remove();
   const ov=document.createElement('div');
   ov.className='ana-overlay open';ov.id='reconcile-detail-ov';ov.style.zIndex='3100';
-  const rows=unmapped.length?unmapped.map(u=>`<tr><td style="padding:5px 10px;color:#6b7280;font-size:12px">${u.sid}</td><td style="padding:5px 10px;font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.name||'—'}</td><td style="padding:5px 10px;text-align:right;font-weight:600;color:#b45309;font-size:12px">$${fmtN(Math.round(u.spend))}</td></tr>`).join(''):`<tr><td colspan="3" style="padding:16px;text-align:center;color:#9ca3af;font-size:12px">無未對應的 SID（差異可能來自重複對應）</td></tr>`;
-  ov.innerHTML=`<div class="ana-modal" style="width:min(680px,95vw);max-height:85vh;display:flex;flex-direction:column">
+  const esc=escapeHtmlLike;
+  const amt=v=>'$'+fmtAds(v);                                   // 絕對值金額（表格用）
+  const signed=v=>(v>0?'+':v<0?'−':'')+'$'+fmtAds(v);           // 帶號金額 —— 符號自己補
+  const over=Math.round(dups.reduce((a,d)=>a+d.over,0)*100)/100;
+  const under=Math.round(unmapped.reduce((a,u)=>a+u.spend,0)*100)/100;
+  const net=Math.round((over-under)*100)/100;
+  // 淨差（重複多算 − 未對應少算）理論上等於對帳差額。對不上就代表還有第三種成因
+  //   —— 2026-08-17 挖到的實例是「漏傳廣告群組」。這行提示讓使用者知道要往別處查，
+  //   不必懂公式，看到「不符」就知道該找人。門檻沿用對帳本身的 0.5。
+  const mismatch=Math.abs(net-diff)>=0.5;
+  const TH='padding:7px 10px;font-size:11px;color:#6b7280;font-weight:600';
+  const TD='padding:5px 10px;font-size:12px';
+  const GRAY='<span style="color:#a8a29e">未上傳</span>';
+  const srcLine=src?`資料來源：蝦皮廣告 ${src.ads.toLocaleString()} 筆／選品廣告 ${src.sel?src.sel.toLocaleString()+' 筆':GRAY}／廣告群組 ${src.groupFiles?src.groupFiles+' 檔 '+src.groupRows.toLocaleString()+' 筆':GRAY}`:'';
+  const groupList=src&&src.groupNames&&src.groupNames.length
+    ?`<div style="margin-top:3px;font-size:11px;color:#a16207">${src.groupNames.map(g=>`・${esc(g.name)}（${g.rows.toLocaleString()} 筆）`).join('<br>')}</div>`:'';
+  // title 的商品名稱是 bonus：觸控裝置沒有 hover，主要資訊（商品編號）本身就在欄位裡。
+  const dupRows=dups.length?dups.map(d=>`<tr>
+      <td style="${TD};color:#6b7280">${esc(d.sid)}</td>
+      <td style="${TD};max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d.name)}">${esc(d.name)||'—'}</td>
+      <td style="${TD};text-align:center;color:#b45309;font-weight:600">${d.codes.length}</td>
+      <td style="${TD};max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d.codeNames.filter(Boolean).join(' / '))}">${esc(d.codes.join(' / '))}</td>
+      <td style="${TD};text-align:right">${amt(d.spend)}</td>
+      <td style="${TD};text-align:right;font-weight:600;color:#b45309">${signed(d.over)}</td>
+    </tr>`).join(''):`<tr><td colspan="6" style="padding:16px;text-align:center;color:#9ca3af;font-size:12px">無重複對應的 SID</td></tr>`;
+  const unRows=unmapped.length?unmapped.map(u=>`<tr>
+      <td style="${TD};color:#6b7280">${esc(u.sid)}</td>
+      <td style="${TD};max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(u.name)}">${esc(u.name)||'—'}</td>
+      <td style="${TD};text-align:right;font-weight:600;color:#b45309">${amt(u.spend)}</td>
+    </tr>`).join(''):`<tr><td colspan="3" style="padding:16px;text-align:center;color:#9ca3af;font-size:12px">無未對應的 SID（差異可能來自重複對應）</td></tr>`;
+  ov.innerHTML=`<div class="ana-modal" style="width:min(860px,95vw);max-height:85vh;display:flex;flex-direction:column">
     <div class="ana-modal-hdr"><span>廣告費對帳明細｜${shop}</span><button class="ana-close-btn" onclick="document.getElementById('reconcile-detail-ov').remove()">✕</button></div>
     <div style="padding:12px 20px;background:#fff8e6;border-bottom:1px solid #fde68a;font-size:12px;color:#92400e">
-      差異 <b>${diff>0?'+':''}${fmtAds(diff)}</b>，下列 <b>${unmapped.length}</b> 個商品 SID 有廣告費但不在商品對照表中（廣告費無法分攤到商品）
+      <div style="font-size:13px">重複多算 <b>${signed(over)}</b>　／　未對應少算 <b>${signed(-under)}</b>　／　淨差 <b>${signed(net)}</b></div>
+      <div style="margin-top:3px">對帳差額（橫幅）<b>${signed(diff)}</b></div>
+      ${mismatch?`<div style="margin-top:3px;color:#a8a29e">⚠ 淨差與對帳差額不符 —— 可能還有其他成因（例如漏傳了某個廣告來源，請對照下方筆數）</div>`:''}
+      ${srcLine?`<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #fde68a">${srcLine}</div>${groupList}`:''}
     </div>
     <div style="overflow-y:auto;flex:1">
+      <div style="padding:10px 20px 4px;font-size:12px;font-weight:600;color:#b45309">▼ 重複對應（${dups.length} 筆，多算 ${signed(over)}）</div>
       <table style="width:100%;border-collapse:collapse">
         <thead><tr style="background:#f9fafb;position:sticky;top:0">
-          <th style="padding:7px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600">商品 SID</th>
-          <th style="padding:7px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600">廣告名稱</th>
-          <th style="padding:7px 10px;text-align:right;font-size:11px;color:#6b7280;font-weight:600">廣告費</th>
+          <th style="${TH};text-align:left">商品 SID</th>
+          <th style="${TH};text-align:left">廣告名稱</th>
+          <th style="${TH};text-align:center">重複幾次</th>
+          <th style="${TH};text-align:left">商品編號</th>
+          <th style="${TH};text-align:right">該 SID 廣告費</th>
+          <th style="${TH};text-align:right">多算金額</th>
         </tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${dupRows}</tbody>
+      </table>
+      <div style="padding:14px 20px 4px;margin-top:6px;border-top:1px solid #f3f4f6;font-size:12px;font-weight:600;color:#6b7280">▼ 未對應（${unmapped.length} 筆，少算 ${signed(-under)}）</div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:#f9fafb;position:sticky;top:0">
+          <th style="${TH};text-align:left">商品 SID</th>
+          <th style="${TH};text-align:left">廣告名稱</th>
+          <th style="${TH};text-align:right">廣告費</th>
+        </tr></thead>
+        <tbody>${unRows}</tbody>
       </table>
     </div>
-    <div style="padding:10px 20px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af">
-      解決方法：到「商品對照表」為這些 SID 加入對應的商品編號
+    <div style="padding:10px 20px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;line-height:1.6">
+      ・重複對應：到「商品對照表」讓同一個 SID 只留在一個商品編號下（該併到哪個是業務判斷，系統不自動處理）<br>
+      ・未對應：到「商品對照表」為這些 SID 加入對應的商品編號
     </div>
   </div>`;
   ov.onclick=e=>{if(e.target===ov)ov.remove();};
