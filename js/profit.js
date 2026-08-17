@@ -1738,9 +1738,14 @@ function showReconcileDetail(shop,unmapped,diff){
   document.body.appendChild(ov);
 }
 
-let _warnDetailCb=null;
 function showMapWarnBanner(msg,onDetail){
-  _warnDetailCb=onDetail||null;
+  // 2026-08-17 修正（bug 由 fe15692 於 2026-07-01 引入）。
+  // 這個 callback 被 inline onclick（下方 detailBtn）讀取，必須掛在 window 上。
+  // module 頂層的 let 對 inline handler 而言不存在，會噴
+  // ReferenceError: _warnDetailCb is not defined（已由操作人員實測確認）。
+  // ⚠ 不可改用 Object.assign(window,{_warnDetailCb}) —— 那複製的是當下的值（null），
+  //   之後重新賦值不會同步，看起來修了其實沒修。
+  window._warnDetailCb=onDetail||null;
   let el=document.getElementById('map-warn-banner');
   if(!el){
     el=document.createElement('div');
