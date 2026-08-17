@@ -10582,7 +10582,7 @@ function momoRenderProfitBody(shop, tableOnly){
         if(lp==null && sp==null) return `<td style="text-align:right;color:#c7cad1" title="尚無售價（上傳商品主檔取得掛牌價、或上傳對帳明細取得成交價）">—</td>`;
         if(lp==null){   // 無主檔掛牌 → 回退顯示最新成交價
           const d=r.latestSaleDate, dfmt=(d&&/^\d{8}$/.test(d))?(d.slice(0,4)+'/'+d.slice(4,6)+'/'+d.slice(6,8)):'';
-          return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;color:#6b7280" title="尚無商品主檔掛牌價，顯示最新成交價（下單日 ${dfmt}）。上傳商品主檔後改顯掛牌價。">${momoMoney(sp)}<span style="font-size:10px;color:#9ca3af"> 成交</span></td>`;
+          return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;color:#6b7280" title="尚無商品主檔掛牌價，顯示最新成交價（下單日 ${dfmt}）。上傳商品主檔後改顯掛牌價。">${momoMoney(sp)}<div class="mm-cell-tag">成交</div></td>`;   // 「成交」標籤降第二行 → 金額右緣對齊
         }
         const multi=(r.listSpecs||[]).length>1;
         const div=r.listDivergence;   // 成交 − 掛牌（≠0 才有值）
@@ -10594,7 +10594,7 @@ function momoRenderProfitBody(shop, tableOnly){
         const mark=div!=null?` <span style="color:#f97316;font-size:10px" title="與最新成交價有落差">▲</span>`:'';
         const stale=r.listMasterStale?` <span style="color:#dc2626;font-weight:700;font-size:11px" title="銷量最多的原廠編號不在商品主檔＝主檔過期（有新品/新規格尚未重傳）→ 請重新上傳商品主檔。目前暫顯示其他規格掛牌價。">⚠主檔</span>`:'';
         const exp=multi?` <span onclick="event.stopPropagation();momoOpenSpecPrices('${shop}','${_momoEsc(r.sku)}')" style="color:#5b5fcf;cursor:pointer;font-size:11px" title="展開各規格掛牌價">⊕${r.listSpecs.length}</span>`:'';
-        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis" title="${String(tip).replace(/"/g,'&quot;')}">${momoMoney(lp)}${mark}${stale}${exp}</td>`;
+        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis" title="${String(tip).replace(/"/g,'&quot;')}">${momoMoney(lp)}${(mark||stale||exp)?`<div class="mm-cell-tag">${mark}${stale}${exp}</div>`:''}</td>`;   // ⊕/▲/⚠主檔 降到第二行 block → 掛牌價右緣對齊，不被標籤推歪
       }
       if(c.k==='feeRate'){   // MO+ 成交費率（反推）：唯一=粗體實心；多解(常態)=淡色範圍+待收斂；異常=紅；無資料=—。排序鍵在 r.feeRate（下界+bonus）
         const st=r._feeStatus, cand=r._feeCand||[];
@@ -10614,7 +10614,7 @@ function momoRenderProfitBody(shop, tableOnly){
       if(c.k==='unitCost'){   // 成本欄：缺=null→「—」（口徑同缺成本警示、非 0）；MO+ 多原廠成本不同→tooltip 註明顯示主原廠
         if(r.unitCost==null) return `<td style="text-align:right;color:#c7cad1" title="${r.moPlus?'原廠編號查無莫筆克成本表':'尚未填成本'}（缺成本，口徑同缺成本警示）">—</td>`;
         const multiTip=r.unitCostMulti?` title="此商品多原廠、各原廠成本不同 → 顯示主原廠 ${String(r.origin||'').replace(/"/g,'&quot;')} 的成本"`:'';
-        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis"${multiTip}>${momoMoney(r.unitCost)}${r.unitCostMulti?' <span style="color:#9ca3af;font-size:10px">多原廠</span>':''}</td>`;
+        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis"${multiTip}>${momoMoney(r.unitCost)}${r.unitCostMulti?'<div class="mm-cell-tag">多原廠</div>':''}</td>`;   // 「多原廠」降到第二行 block（.mm-cell-tag）→ 金額右緣對齊，不被標籤推歪
       }
       const v=r[c.k];
       const disp=c.fmt?fmt[c.fmt](v):v;

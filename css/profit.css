@@ -557,6 +557,8 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 /* MOMO 總表逐列環比：主值在上、環比小字在下（放進品號那行的空間，與其基線對齊、不增行高）。只作用於 MOMO 表，不碰蝦皮/酷澎共用的 .tscroll */
 .mm-ptbl td{vertical-align:top;}
 .mm-c-cmp{font-size:10px;font-weight:600;line-height:1.3;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* MO+ 成本/售價欄的附加標籤（多原廠 / ⊕規格 / ▲落差 / ⚠主檔 / 成交）：比照環比小字，數字在上獨佔一行、標籤降到下一行 block → 金額右緣不被標籤推歪。只作用 MOMO 表。 */
+.mm-cell-tag{display:block;font-size:10px;line-height:1.3;margin-top:1px;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .mm-name-wrap{display:flex;align-items:center;overflow:hidden;min-width:0;}
 .mm-name-clip{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .mm-sub-line{font-size:10px;color:#9ca3af;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
