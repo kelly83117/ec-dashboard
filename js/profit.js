@@ -171,10 +171,10 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   </div>
   <div class="ana-overlay" id="upload-modal-overlay" onclick="if(event.target===this)closeUploadModal()">
     <div class="ana-modal" style="width:520px;max-width:96vw">
-      <div class="ana-modal-hdr"><span>上傳檔案</span><button class="ana-close-btn" onclick="closeUploadModal()">✕</button></div>
+      <div class="ana-modal-hdr"><span>上傳檔案<span id="upm-hdr-period" style="font-size:12px;color:#9ca3af;font-weight:500"></span></span><button class="ana-close-btn" onclick="closeUploadModal()">✕</button></div>
       <div class="ana-modal-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-          <div style="font-size:12px;color:#9ca3af" id="upm-shop-hint">目前賣場：—</div>
+          <div style="font-size:12px;color:#9ca3af" id="upm-shop-hint">目前通路：—</div>
           <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:7px;padding:5px 10px">
             <span style="font-size:12px;color:#6b7280;font-weight:500">平台手續費</span>
             <input type="number" class="setting-input" id="platformRate" value="20.5" min="0" max="100" step="0.1" style="width:54px" onchange="onPlatformRateChange()">
@@ -235,10 +235,10 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <button onclick="document.getElementById('upm-groupads-input').click()" style="margin-top:6px;width:100%;border:1.5px dashed #d1d5db;border-radius:9px;padding:8px;background:#fff;color:#6b7280;cursor:pointer;font-size:13px;font-weight:600" onmouseover="this.style.borderColor='#5b5fcf';this.style.color='#5b5fcf'" onmouseout="this.style.borderColor='#d1d5db';this.style.color='#6b7280'">＋ 新增廣告群組</button>
         </div>
       </div>
-      <div class="ana-modal-ftr" style="justify-content:space-between;align-items:center">
+      <div class="ana-modal-ftr" style="flex-direction:column;align-items:stretch;gap:10px">
         <span id="upm-gen-hint" style="font-size:12px;color:#9ca3af">上傳莫筆克＋廣告報表後可產生</span>
-        <div style="display:flex;gap:8px;align-items:center">
-          <button id="upm-clear-btn" onclick="clearPeriodFromModal()" style="padding:8px 16px;border:1.5px solid #fca5a5;border-radius:8px;background:#fff;color:#ef4444;font-size:13px;font-weight:600;cursor:pointer">🗑 清除重傳</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <button id="upm-clear-btn" onclick="clearPeriodFromModal()" style="padding:8px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;color:#6b7280;font-size:13px;font-weight:600;cursor:pointer">🗑 清除上傳紀錄</button>
           <button class="gen-btn" id="upm-gen-btn" onclick="onGlobalGenerate()" disabled>▶ 產生報表</button>
         </div>
       </div>
@@ -612,23 +612,9 @@ const TEST_SHOP_HELP=[
   {q:'③ 報表自動存雲端，不用按同步',a:'跟其他四個通路不一樣。所以在辦公室跑完，回家用筆電選同一組日期就看得到。\n⚠️ 但「手續費設定」不會自動上雲，要按「☁ 同步雲端」才會跨電腦。\n改完費率沒按同步就換電腦，報表叫得出來、費率卻是預設值，淨利會跟辦公室看到的不一樣。'},
   {q:'④ 跑過的區間會自動叫出來',a:'選了日期，如果那個區間跑過，會把存的報表叫出來。沒跑過就顯示空白等你上傳。'},
   {q:'⑤ 不做跨期間比較',a:'沒有上期營收／成長比／成長分析／成長調整，那幾欄會是空的。\n要比較兩個區間的話，分別跑、看 Excel。'},
-  {q:'⑥ 沒有「清除重傳」按鈕',a:'丟錯檔案的話，用同一組日期重新上傳一次覆蓋掉就好。'},
+  {q:'⑥ 丟錯檔案就重新上傳覆蓋',a:'這個通路沒有清除用的按鈕。丟錯檔案的話，用同一組日期重新上傳、再產生一次報表，就會覆蓋掉舊的那份。\n（其他通路的上傳視窗有一顆清除鈕，但它只清掉「上傳的檔案紀錄」、不會刪報表 —— 要換掉一份報表一律是重傳覆蓋。）'},
   {q:'⑦ 產生報表後要看到「測試通路報表已寫入雲端」才算成功',a:'這個通路的報表【只存在雲端，不存在你的電腦裡】。按「▶ 產生報表」之後如果沒跳出那則提示、或跳出「測試通路寫入失敗」的彈窗，那份報表重新整理頁面就會消失。遇到這種情況，先按一次「▶ 產生報表」重試（檔案還在，不用重傳）；如果已經重新整理過頁面，才需要重新上傳檔案再產生一次。'},
 ];
-// 「🗑 清除重傳」的雲端刪除失敗一定要出聲 —— 靜默失敗＝本機清了、雲端那份還在，
-//   下次快照回來報表就復活（Kelly 2026/07/30 回報的原始 bug）。沿用 _testSaveFailed 的通報範式。
-//   ⚠ app.js 的 __notifyCloudFail 沒有掛上 window，這裡拿不到，故自行翻譯常見錯誤。
-function _clearPeriodFailed(k,msg){
-  console.error('[clearPeriod] 雲端刪除失敗',k,msg);
-  const friendly=/permission|PERMISSION_DENIED/i.test(msg)
-      ? '雲端拒絕：沒有刪除權限，請聯絡管理員調整 Firestore 規則。'
-    : /network|fetch|offline|unavailable/i.test(msg)
-      ? '雲端連線失敗（網路 / 離線），請恢復連線後再試。'
-    : msg;
-  if(window.App&&typeof App.showAlertModal==='function')
-    App.showAlertModal({title:'清除失敗',message:'雲端那份報表【沒有】刪掉，所以本機這份也保留不動（避免只清一半、下次同步又復活）。\n'+friendly+'\n\n可以直接再按一次重試。',detail:k+'\n'+msg,kind:'error'});
-  else if(typeof showToast==='function') showToast('清除失敗：'+friendly,'error');
-}
 // 真實 pending 筆數（排除 __shop__| marker 和 _summary_v1）
 //   _summary_v1 是總表資料，總表已改為自動同步（saveSummaryRows 直接推雲端），
 //   不會經過 pending set；但舊版可能已把它塞進 set → 保險排除掉，避免離開頁面誤跳「未同步」。
@@ -1449,7 +1435,9 @@ function tryLoadSaved(shop){
     // 🔴 _built 被清掉就必須連 _filtered 與批次選取一起清。這條路【不會】走 loadIntoUI，
     //   而 applyFilters 開頭 `if(!s._built||!s._built.length)return;` 也會早退 ——
     //   不在這裡清，_filtered 會一直指著上一期那批 row：畫面是空狀態、全選鈕卻亮著，
-    //   按下去就選到看不見的 800 筆。同樣的三行也出現在 clearPeriod 與 _testEmpty。
+    //   按下去就選到看不見的 800 筆。同樣的三行也出現在 _testEmpty（那條路一樣會把 _built 清掉）。
+    //   ⚠ clearPeriod 曾經也有這三行，2026-08-17 一起移除了：它改成【只清上傳紀錄、不刪報表】之後
+    //     不再動 _built，前提就消失了 —— 報表還在，_filtered 與批次選取本來就該原封不動留著。
     state[shop]._filtered=null;_batchSelClear(shop);_renderBatchSelInfo(shop);
     const _hLbl=s.curHalf==='first'?'上半月':s.curHalf==='second'?'下半月':'整月';
     document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${s.curMonth} ${_hLbl} 尚無資料，請上傳報表產生</div></div>`;
@@ -1461,45 +1449,26 @@ function tryLoadSaved(shop){
 }
 function clearPeriodFromModal(){
   const shop=curShop==='總表'?SHOPS[0].id:curShop;
-  return clearPeriod(shop);   // 回傳 Promise（clearPeriod 已是 async）；inline onclick 對回傳值無感，行為不變
+  clearPeriod(shop);
 }
-async function clearPeriod(shop){
-  const s=state[shop];
-  const periodLabel=getPeriodLabel(s.curMonth,s.curHalf);
-  const k=lsKey(shop,s.curMonth,s.curHalf);
-  if(!confirm(`即將永久刪除「${shop}」${periodLabel}的報表。\n\n⚠ 本機與雲端【兩邊都會刪掉，無法復原】，其他同事也會看不到這份報表。\n已上傳的檔案紀錄也會一併清除。\n\n確定嗎？`))return;
-  // 🔴 順序【不可對調】：先刪雲端 doc，成功後才清本機。
-  //   profits collection 的訂閱只加不刪（firebase.js 搜 `onSnapshot(profitsColRef`：
-  //   只走 Object.keys(incoming) 逐 key 賦值，被刪的 doc 不會進迴圈、也沒有 docChanges 處理）。
-  //   先清記憶體、後刪雲端的話，中間任何一個快照回來都會把 Store._profitMem[k] 填回去，
-  //   而且再也沒有東西會清掉它 —— 那就是「清除重傳後報表又復活」的原貌（Kelly 2026/07/30 森之旅）。
-  //   先刪 doc：doc 不存在後，後續快照的 incoming 就沒有這個 key，填不回來。
-  const _clrBtn=document.getElementById('upm-clear-btn');
-  const _clrTxt=_clrBtn?_clrBtn.textContent:'';
-  if(_clrBtn){_clrBtn.disabled=true;_clrBtn.textContent='清除中…';}   // 擋連點觸發第二次刪除
-  try{
-    if(!window.__cloudProfitCol||typeof window.__cloudProfitCol.removeReport!=='function')
-      throw new Error('雲端層尚未就緒（__cloudProfitCol.removeReport 未建立）');
-    await window.__cloudProfitCol.removeReport(k);
-  }catch(e){
-    // 🔴 不可空 catch：報表比任務附圖重要（對照 daily.js 的 .catch(()=>{}) 是反面教材）。
-    //   刪不掉就【整個中止、本機一個字都不動】，讓使用者可以重試 ——
-    //   半清狀態（本機沒了、雲端還在）就是這次要修的 bug。deleteDoc 冪等，重按安全。
-    _clearPeriodFailed(k,(e&&e.message)||String(e));
-    return;
-  }finally{
-    if(_clrBtn){_clrBtn.disabled=false;_clrBtn.textContent=_clrTxt;}
-  }
-  // 清除報表
-  try{localStorage.removeItem(lsKey(shop,s.curMonth,s.curHalf));}catch(e){}
-  try{if(typeof Store!=='undefined'&&Store._profitMem)delete Store._profitMem[lsKey(shop,s.curMonth,s.curHalf)];}catch{}
+// 🔴 這顆按鈕【只清除上傳的檔案紀錄，不刪報表】（2026-08-17 改）。
+//   原本它會 deleteDoc 掉 profits collection 的報表 doc、也刪 localStorage 的 ec|通路|月|半月，
+//   而它的位置緊貼「▶ 產生報表」、名字又叫「清除重傳」——2026/08/17 有人因此誤刪整份報表，
+//   只能靠她剛好匯出過的 Excel 手動還原。所以刪除報表的能力整條拿掉：
+//   要修一份錯報表就重新上傳、重新產生（同一個 lsKey 覆蓋，見 _doGenerate → lsSave）。
+//   ⚠ 不要再把雲端刪除接回來。若真的需要移除某一期報表（例如選錯期間產生的幽靈報表），
+//     那是另一個題目，要有明確的入口與防呆，不是靠這顆按鈕順手做掉。
+function clearPeriod(shop){
+  if(!confirm(`即將清除「${shop}」已上傳的檔案紀錄。\n\n範圍是這個通路【所有月份】的上傳紀錄，不只目前這一期。\n\n✅ 已經產生的報表不會被刪除，雲端和同事看到的報表都不受影響。\n\n清除後上傳卡片會回到「✗ 未載入」，要重新產生報表就再上傳一次檔案。\n\n確定嗎？`))return;
   // 清除上傳的檔案資料（全部 localStorage filemeta key，不管哪個區間）
   state[shop].rawMobic=null;
   state[shop].rawAds=null;
   state[shop].rawSelAds=null;
   state[shop].rawGroupAdsList=[];
-  state[shop]._built=null;state[shop]._period='';state[shop]._extraAdsFee=0;
-  state[shop]._filtered=null;_batchSelClear(shop);_renderBatchSelInfo(shop);   // 理由同 tryLoadSaved 的 else 分支
+  // ⚠ 刻意【不動】_built / _period / _extraAdsFee / _filtered：那四個屬於「已經產生的那份報表」，
+  //   而報表沒有被刪。特別是 _extraAdsFee（未對應廣告費）會被 renderTable 加進 KPI
+  //   （本檔搜 `tAds+=extra`）—— 歸零會讓畫面上的廣告費變少、純利變多，
+  //   等於按一顆「清除上傳紀錄」卻偷偷改掉報表數字，正是這次要修掉的那種錯誤。
   // 刪除所有此賣場的 filemeta（不限月份/區間）
   const keysToRemove=[];
   for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith(`ec|filemeta|${shop}|`))keysToRemove.push(k);}
@@ -1523,22 +1492,13 @@ async function clearPeriod(shop){
   const selT=document.getElementById('upm-selads-title');if(selT)selT.textContent='選品廣告清單';
   const selD=document.getElementById('upm-selads-del');if(selD){selD.style.opacity='0.35';selD.style.pointerEvents='none';}
   const genBtn=document.getElementById('upm-gen-btn');if(genBtn)genBtn.disabled=true;
-  // 重置表格 & KPI
-  document.getElementById('period-tag-'+shop).textContent='';
-  document.getElementById('period-tag-'+shop).style.display='none';
-  document.getElementById('cnt-'+shop).textContent='';
-  document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">報表已清除，請重新上傳並產生</div></div>`;
-  setKpis(shop,0,0,0,0);
-  const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;
+  // ⚠ 刻意【不動】表格 / KPI / 期間標籤 / 匯出鈕：報表還在，畫面就該照原樣顯示。
+  //   舊版在這裡把表格換成「報表已清除，請重新上傳並產生」、KPI 歸零、停用匯出鈕 ——
+  //   改成不刪報表之後那段就是在說謊，而且會擋掉匯出（昨天資料能救回來正是靠匯出過的 Excel）。
+  // ⚠ 也刻意【不動】_pendingSyncKeys：報表沒被刪，若它還沒推上雲端就【應該】留在待同步佇列裡
+  //   等使用者按「☁ 同步雲端」。把它移出佇列＝報表永遠停在本機、徽章不亮、同事看不到。
   // 重置廣告群組卡片
   const groupList=document.getElementById('upm-groupads-list');if(groupList)groupList.innerHTML='';
-  // 報表已刪，這個 key 不該再留在待同步佇列 —— 否則按同步時 syncToCloud 讀 _profitMem 讀不到，
-  //   會進 skippedProblem「報表資料讀不到或損毀」，而 skippedProblem 不會被移出 pending
-  //   （syncToCloud 只刪 ok 的 key）→ 每次同步都誤報一次，同步鈕徽章也一直亮著（重整後才會消）。
-  // ⚠ 刻意放在最後：在此之前 _pendingSyncKeys 還含有這個 key，
-  //   __profitShouldSkipCloudOverwrite()（本檔搜 `window.__profitShouldSkipCloudOverwrite`）會回 true，
-  //   剛好在整段清除過程中擋掉任何 in-flight 舊快照的回填，當一層免費的保險。
-  try{_pendingSyncKeys.delete(k);}catch{}
   _showSyncBtn(shop);
 }
 function loadIntoUI(shop,built,period,days){
@@ -2765,14 +2725,42 @@ function openAnaSettings(shop){
 function closeAnaSettings(){document.getElementById('ana-overlay')?.classList.remove('open');}
 
 // ── Global Upload Modal ──
+// 上傳 modal 的「目前期間」顯示：標題列帶完整日期範圍、「▶ 產生報表」鈕帶短格式期間。
+//   目的是讓人在按下「產生」或「清除」之前就看得見自己正在操作哪一期
+//   —— 2026/08/17 誤刪事故的根因之一就是期間只寫在 confirm 文字裡、平時看不到。
+// ⚠ 只在 openUploadModal 呼叫一次就夠，【不要】另外去 onMonthChange / onHalfChange 補呼叫：
+//   .ana-overlay 是全螢幕遮罩（css/profit.css 搜 `.ana-overlay{`：position:fixed;inset:0;z-index:2000），
+//   modal 開著時月份 / 區間下拉在遮罩底下點不到 → 期間不可能在開啟期間改變。
+//   confirmDeleteFile 結尾也是走 openUploadModal 重開，所以那條路徑自動涵蓋。
+// ⚠ 期間文字一律走既有 helper：完整格式用 getPeriodLabel，短格式用 curMonth+' '+_halfLabel(curHalf)
+//   （後者是本檔既有慣用法，見 _growthPeriodLabel 與 _notifyLsSaveFail），不要自己拼日期。
+// ⚠ 測試通路的期間是任意起訖日（curStart/curEnd），月份+半月對它沒有意義 ——
+//   直接餵 getPeriodLabel 會顯示一個與實際期間無關的月份，比不顯示更糟，故分流。
+function _updateUploadModalPeriod(shop){
+  const s=state[shop]||{};
+  const isTest=shop===TEST_SHOP_ID;
+  const shortP=isTest?(testHasPeriod(shop)?`${s.curStart} ～ ${s.curEnd}`:'')
+                     :`${s.curMonth} ${_halfLabel(s.curHalf)}`;
+  const fullP=isTest?shortP:getPeriodLabel(s.curMonth,s.curHalf);
+  const hdr=document.getElementById('upm-hdr-period');
+  if(hdr)hdr.textContent=fullP?`　${fullP}`:'';
+  const gen=document.getElementById('upm-gen-btn');
+  if(gen)gen.textContent=shortP?`▶ 產生 ${shortP} 報表`:'▶ 產生報表';
+}
 function openUploadModal(){
   const ov=document.getElementById('upload-modal-overlay');if(!ov)return;
   const shop=curShop==='總表'?SHOPS[0].id:curShop;
   const _rEl=document.getElementById('platformRate');
   if(_rEl) _rEl.value=getShopRates()[shop];
-  document.getElementById('upm-shop-hint').textContent='目前賣場：'+shop;
-  // 測試通路不給「🗑 清除重傳」：clearPeriod 組的是 ec| key，對 ectest| 刪不到東西；
-  //   雲端那份也刪不掉（技術債 #22，卡在 Firebase 權限）。留一顆按了沒用的按鈕比沒有更糟。
+  document.getElementById('upm-shop-hint').textContent='目前通路：'+shop;
+  _updateUploadModalPeriod(shop);   // 標題列 + 產生鈕都帶上目前期間（理由見該函式上方註解）
+  // 測試通路刻意不給那顆清除鈕（2026-08-17 更新理由）。
+  //   ⚠ 舊理由（「clearPeriod 組的是 ec| key，對 ectest| 刪不到東西、雲端那份也刪不掉」）已經失效：
+  //     clearPeriod 改成【只清上傳紀錄、不刪報表】之後，它掃的是 `ec|filemeta|{shop}|` 前綴，
+  //     而 fmKey 用的就是 shop id → 對測試通路技術上【會】生效，不再是一顆按了沒用的按鈕。
+  //   現在不開放的理由是產品一致性：測試通路的使用說明（本檔 TEST_SHOP_HELP 第 ⑥ 點）
+  //   教的是「丟錯檔案就用同一組日期重新上傳覆蓋」，多一顆清除鈕只會多一條分岔路。
+  //   要開放的話請連同第 ⑥ 點的說明一起改，不要只改這裡。
   //   ⚠ else 分支要明確寫回 ''，否則切回其他四家時按鈕會留在隱藏狀態（這顆是全站共用一顆）。
   const _clr=document.getElementById('upm-clear-btn');
   if(_clr) _clr.style.display=(shop===TEST_SHOP_ID)?'none':'';
