@@ -13624,7 +13624,7 @@ function momoMoPlusReconGroupHTML(shop, gLabel, gKey, items, groupTot, denomA, s
     const pct=(showPct&&denomA>0)?(Math.abs(v)/denomA*100):null;
     return `<tr class="mm-recon-item"><td>${_momoEsc(name)}</td><td class="mm-recon-amt${v===0?' z':''}">${momoMoney(v)}</td><td class="mm-recon-pct">${pct==null?'':momoPct(pct)}</td></tr>`;
   }).join('');
-  return `<div class="mm-recon-box"><table class="mm-recon-tbl"><colgroup><col><col class="c-amt"><col class="c-pct"></colgroup><tbody>
+  return `<div class="mm-recon-box"><table class="mm-recon-tbl mm-recon-mo"><colgroup><col><col class="c-amt"><col class="c-pct"></colgroup><tbody>
     <tr class="mm-recon-head" onclick="momoMoPlusReconToggle('${shop}','${gKey}')"><td>${e?'▾':'▸'} ${gLabel}</td><td class="mm-recon-amt">${sign}${momoMoney(groupTot)}</td><td></td></tr>
     ${e?`<tr class="mm-recon-colhead"><td>項目</td><td class="mm-recon-amt">金額</td><td class="mm-recon-pct">本月實際佔比</td></tr>${rows}`:''}
   </tbody></table></div>`;
