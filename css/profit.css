@@ -574,6 +574,10 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-recon-tbl{table-layout:fixed;width:100%;border-collapse:collapse;font-size:12.5px;}
 .mm-recon-tbl col.c-amt{width:130px;}
 .mm-recon-tbl col.c-pct{width:118px;}
+/* 收窄整體閱讀寬度：整組三欄靠左、右側留白，項目↔金額水平距離縮短（原本項目欄吃滿整塊寬 → 眼睛要橫跨整寬才對得起來）。
+   ⚠ 只作用 MO+ 三欄費用組成表（.mm-recon-mo）；甲乙配對帳的 .mm-recon-tbl（2 欄 td.l/td.num、在 .mm-recon-cols 內）不帶此 class → 不受影響。
+   四區塊(A/B/C/D)共用同一 max-width＋同一組固定欄寬(c-amt/c-pct) → 金額/佔比欄右緣跨四塊仍對齊、標題總額仍與金額欄對齊。 */
+.mm-recon-mo{max-width:460px;}
 .mm-recon-tbl td{padding:3px 10px;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;}
 .mm-recon-tbl .mm-recon-amt{text-align:right;}
 .mm-recon-tbl .mm-recon-amt.z{color:#c7cad1;}
