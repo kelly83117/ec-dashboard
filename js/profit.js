@@ -16055,7 +16055,7 @@ function updateHalfBtnLabels(shop){
 function periodRowShopeeHTML(id){return`
       <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
       <select id="month-sel-${id}" onchange="onMonthChange('${id}',true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
-        ${MONTHS.map(mo=>`<option value="${mo}" ${mo===(state[id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
+        ${[...MONTHS].reverse().map(mo=>`<option value="${mo}" ${mo===(state[id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
       </select>
       <div id="half-btns-${id}"></div>`;}
 // 測試通路：期間是任意起訖日，不是月份+半月。費率輸入也掛在這一列
