@@ -42,14 +42,26 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
     </div>
     <div id="header-kpi-row" style="display:none;align-items:center;gap:18px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid #f3f4f6">
       <div id="header-kpi-block" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-change-header" style="font-size:12px;font-weight:600"></span></div></div>
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div></div>
-        <!-- 廣告費：flex 包裝＋副標「上期 NT$ …」，結構逐字比照上面「本期總營收」那格。
+        <!-- 三格【共用同一個骨架】，這是本區的核心規則，新增第四格請照抄：
+               第一行 標題
+               第二行 主數字 ＋【具名】比率（kv-*-rate-header）
+               第三行 較上月同期 ±X% ＋ (期間) ＋ 金額（kv-*-cmp-header）
+             改版前三格的括號位置各放各的（營收放比較幅度、純利放純利率、廣告費放佔營收比），
+             同一個位置三種語意 —— 老闆 2026-08-18 指出「沒有規則」，這次收斂成上面那三行。
+
+             ⚠ 營收沒有比率，#kv-rev-rate-header 永遠是空的（setKpis 刻意不寫入它）。
+               佔位元素仍必須存在：三格結構一致，日後有人改第二行的樣式才不會只改到兩格。
+               （那一行不會因為 span 是空的就塌掉 —— 行高由 20px 主數字撐著，2026-08-18 實測
+                 三格皆 48.5px。真正需要地板的是第三行，見下方 min-height。）
+             ⚠ 第三行的 min-height:18px 是【實測值】（量 12px 字的行框得 18.0px），不是估的。
+               cmp 取不到時整行是空字串、高度會塌成 0 → 沒有這道地板，三格底部會差一整行。
              ⚠ 本區（#header-kpi-row）全部是 inline style、零 CSS class，兩個 css 檔都沒有
                 kv-* / header-kpi-* 的規則。刻意跟隨既有慣例不新增 class（在一片 inline 裡
                 插一個 class，下一個人會不知道該去哪找樣式），此為【既有技術債】，
                 要清就整區一起搬進 css/，不要只搬這一格。 -->
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-ads-prev-header" style="font-size:12px;font-weight:600;color:#6b7280"></span></div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-rev-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-net-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-net-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-ads-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-ads-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
       </div>
       <div id="header-btn-block" style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto">
         <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
@@ -1525,7 +1537,10 @@ function tryLoadSaved(shop){
     document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${s.curMonth} ${_hLbl} 尚無資料，請上傳報表產生</div></div>`;
     document.getElementById('period-tag-'+shop).textContent='';
     if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;}
-    setKpis(shop,0,0,0,0);
+    // 第 6 參數 cmp 顯式傳 null（＝三格第三行留空）。改版前這裡只傳 5 個參數、靠 undefined
+    //   達成同樣效果，但 syncHeaderKpis 的早退分支傳的是 null —— 三個空狀態呼叫點兩種寫法。
+    //   統一成 null，並要求 setKpis 用 !cmp 判斷（見該函式註解），漏傳才不會變成 TypeError。
+    setKpis(shop,0,0,0,0,null);
     updateTagFilterBar(shop);
   }
 }
@@ -5427,8 +5442,9 @@ function _subDayBudgetHtml(v){
 //     會長得一模一樣。三態的呈現交給 _subDayBudgetHtml，這裡【不做任何 || 0 的塌陷】——
 //     塌成 0 等於把「查不到」謊報成「上期花 $0」。
 //
-//   ⚠ 期間推算走 getPrevPeriodKey、讀報表走 lsLoad，都不自己再寫一份（全檔已有兩份
-//     期間推算，見 getPrevPeriodKey 上方註解）。同型先例是 _prevAdsTotal。
+//   ⚠ 期間推算走 getPrevPeriodKey（【滾動】基準）、讀報表走 lsLoad，都不自己再寫一份。
+//     🔴 不要誤用 _lastMonthSameTotals 那一族（lm 前綴）：那是 2026-08-18 為【頂端三格 KPI】
+//       新增的「上月同期」基準，與本函式要的滾動基準不同。表格逐列的「上期」一律走這一套。
 //   ⚠ 回傳的 reader 綁著預讀當下的那份上期報表快照 → 只在同一次同步 render 內使用，
 //     不要跨 render 快取（理由同 _prodTagsReaderFor）。
 function _prevDayBudgetReaderFor(shop){
@@ -5487,12 +5503,18 @@ function renderTable(shop,list,opts){
   kpiSrc.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
   const extra=state[shop]?._extraAdsFee||0;
   tAds+=extra;tPure-=extra;
-  // 第 6 參數 prevRev 刻意維持 undefined ——「(+X% 較上期)」在這條路徑上不顯示。
-  //   ⚠ 這是【既有行為】（本行原本就只傳 5 個參數），本 PR 刻意不修：它現在的表現碰巧是
-  //     對的（篩選後本期是子集、上期是全量，比出來的百分比會騙人，不顯示反而正確），
-  //     但那是「漏傳參數」意外達成的、不是設計。要修得先重新想一遍語意 → 另案處理。
-  //   第 7 參數走 _prevAdsTotal，它自己會在有篩選時回 null（理由見該函式）。
-  setKpis(shop,tRev,tGross,tAds,tPure,undefined,_prevAdsTotal(shop));
+  // 第 6 參數 cmp 走 _lastMonthSameTotals，【和 syncHeaderKpis 傳的是同一支】。
+  //   這一行以前寫的是 setKpis(...,undefined,_prevAdsTotal(shop)) —— 靠「不傳第 6 參數」
+  //   來讓營收的比較段在篩選時不顯示。那個做法【已於 2026-08-18 移除】，因為它是隱式的：
+  //   2026-08-18 實測到兩條繞過路徑（setShop 切通路再切回來、patchRow 在篩選中編輯任一格），
+  //   兩條都會讓 syncHeaderKpis 變成最後寫入者 → 表格還是子集、頂端卻變全量而且比較段跑回來。
+  //   同一時間廣告費那格沒被繞過，因為它的守衛寫在取數函式【裡面】。
+  //   ⇒ 現在三格共用一道顯式守衛（_lastMonthSameTotals 開頭那行篩選判斷），
+  //     不論誰是最後寫入者，行為都一致。這條路徑因此【不再需要】特別傳什麼。
+  //   ⚠ 順帶修掉的既有 bug：改版前這條路徑永遠不顯示營收的比較段，而它是切月份 / 切區間 /
+  //     產生報表 / 載入存檔的共同出口 —— 使用者只要點一下區間按鈕，「較上期」就消失，
+  //     要重整或切通路才回來（2026-08-18 實測重現）。現在兩條路徑供的是同一份 cmp。
+  setKpis(shop,tRev,tGross,tAds,tPure,_lastMonthSameTotals(shop));
   document.getElementById('period-tag-'+shop).textContent=s._period||'';
   document.getElementById('cnt-'+shop).textContent=list.length+' 筆';
 
@@ -10566,7 +10588,12 @@ function momoProfitSetSort(shop,col){
   else delete _momoSort[shop];
   momoRenderProfitBody(shop,true);   // 排序只動表格，總覽不變
 }
-// 環比：整月比上月整月、半月比上月同半月（跟蝦皮邏輯一致）
+// 環比：整月比上月整月、半月比上月同半月。
+//   ⚠ 這句話以前寫「（跟蝦皮邏輯一致）」，那是【失實的】—— 蝦皮的 getPrevPeriodKey 一直是
+//     滾動基準（下半月比同月上半月）。2026-08-18 蝦皮頂端三格 KPI 改用「上月同期」後，
+//     才真的與本函式同一套（見 _lmSamePeriodParts，形狀就是照這裡抄的）。
+//     但蝦皮【表格逐列】的「上期」仍是滾動的，所以「蝦皮一致」這種說法不要再寫回來 ——
+//     要講清楚是「蝦皮頂端 KPI 一致」。
 function momoPrevPeriodKey(periodKey){
   const m=/^(\d{4})-(\d{2})-(H1|H2|FULL)$/.exec(periodKey||''); if(!m) return '';
   let y=+m[1], mo=+m[2]-1; if(mo<1){ mo=12; y--; }
@@ -16330,7 +16357,7 @@ function _testEmpty(shop,hint){
   if(t)t.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${hint}</div></div>`;
   const p=document.getElementById('period-tag-'+shop); if(p)p.textContent='';
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;}
-  setKpis(shop,0,0,0,0);
+  setKpis(shop,0,0,0,0,null);   // cmp 顯式傳 null，理由同 tryLoadSaved 的 else 分支
   updateTagFilterBar(shop);
 }
 // App.render() 會重建整個淨利表 HTML → 日期/費率輸入框是全新的空 element，
@@ -16477,66 +16504,176 @@ function doExport(shop){
 }
 
 // ── Helpers ──
-// 上一期的廣告費總額（供 header 的「上期 NT$ …」副標用）。取不到 / 不該顯示時一律回 null。
+// ══════ 頂端三格 KPI 的「上月同期」比較基準（2026-08-18 新增）══════
 //
-//   🔴 有任何篩選條件時回 null（＝副標留空）—— 不是因為算不出來，是因為算出來會騙人：
-//     本期的廣告費在 renderTable 裡是【篩選後那批列】的加總（見該函式的 kpiSrc=list），
-//     而上一期永遠只能是【全量】—— 沒有辦法把本期的篩選條件套到上一期的報表上。
-//     使用者篩了「低效廣告」那批，就會看到本期廣告費暴跌、上期不變，得出「廣告花少了」
+// 🔴 命名規則：這一族一律用 lm（last-month）前綴 —— lmRev / lmAds / lmPure / lmLabel。
+//   本檔已經有一族叫 prevRev / prevAdsFee / fPrevRev 的變數，那些走的是【滾動】基準
+//   （getPrevPeriodKey：下半月比同月上半月），與這裡的【上月同一段期間】不是同一回事。
+//   兩者在 renderTable 裡相隔不到 200 行、會在同一次渲染中各算一個成長率 ——
+//   使用者靠文案分得開（「上月同期」vs「上期」），維護者只能靠變數名分。別混用前綴。
+//
+// ── 為什麼要有第二套基準（不要合併回 getPrevPeriodKey）──
+//   老闆 2026-08-18 指定「上半月比上半月、下半月比下半月」＝跟上個月的同一段期間比。
+//   既有的 getPrevPeriodKey 是滾動的（下半→同月上半、上半→上月下半、整月→上月整月），
+//   表格逐列與小計列的「上期」欄【繼續用它、本次完全不動】。兩套基準會同時出現在畫面上，
+//   這是刻意的取捨，靠 cmp.label 那段期間字串讓使用者分辨（實測：同一畫面頂端 +7.2%、
+//   小計列成長比 +0.2%，差 7 個百分點，沒有期間字串沒有人分得出來）。
+//
+// ── 形狀照抄 MOMO 的 momoPrevPeriodKey（本檔搜該函式）──
+//   那支早就是「整月比上月整月、半月比上月同半月」，跟這裡要的完全一樣，只差 key 格式
+//   （MOMO 是 'YYYY-MM-H1'，蝦皮是 lsKey 的 'ec|{shop}|{month}|{half}'）。
+//   刻意不共用：兩邊的 month 字串格式不同（'2026/07' vs '2026-07'），硬共用要先做格式轉換，
+//   轉換層比這五行還長。
+//
+//   ⚠ 半月不做日曆天數校正：蝦皮的上/下半月是純日曆切分（見 getDays / getPeriodLabel），
+//     上半月固定 15 天、下半月 13～16 天。2 月下半只有 13 天，比 1 月下半的 16 天少 3 天，
+//     成長率會天生偏低約 19%。這是【已知且接受】的 —— 老闆要的就是「同一段期間」的直接
+//     對比，不是日均。要改成日均是另一個需求，不要在這裡偷偷除天數。
+function _lmSamePeriodParts(month,half){
+  const m=/^(\d{4})\/(\d{2})$/.exec(month||''); if(!m) return null;
+  let y=+m[1], mo=+m[2]-1; if(mo<1){ mo=12; y--; }
+  return { month:`${y}/${String(mo).padStart(2,'0')}`, half };
+}
+
+// 把 getPeriodLabel 的 'YYYY/MM/DD – YYYY/MM/DD' 壓成 'YYYY/MM/DD–MM/DD'。
+//   🔴 刻意【不新寫一支日期格式函式】：唯一的日期來源仍是 getPeriodLabel(:1388 附近)，
+//     這裡只做顯示層的截字。原樣輸出會把同一個年月印兩次，實測每格第三行多約 45px、
+//     整個 #header-kpi-block 多約 180px —— 那些像素純粹花在重複的 '2026/07'。
+//   🔴 這段【依賴 getPeriodLabel 目前的輸出格式】（en-dash 前後有空格、兩段同為 YYYY/MM/DD）。
+//     格式一旦對不上就【原樣回傳】，不做任何猜測 —— 最壞情況只是字變長，
+//     絕不會壞掉、也不會吐出半截日期。改 getPeriodLabel 的人不必回來改這裡。
+function _lmCompactLabel(full){
+  const s=String(full==null?'':full);
+  const p=s.split('–');                       // en-dash，非 hyphen
+  if(p.length!==2) return s;
+  const a=p[0].trim(), b=p[1].trim();
+  const pre=a.slice(0,8);                     // 'YYYY/MM/'
+  if(!/^\d{4}\/\d{2}\/$/.test(pre)) return s;
+  return b.startsWith(pre) ? `${a}–${b.slice(8)}` : s;
+}
+
+// 上月同期的三個總額 + 期間字串。取不到 / 不該顯示時一律回 null（＝三格第三行全部留空）。
+//
+//   🔴 有任何篩選條件時回 null —— 不是因為算不出來，是因為算出來會騙人：
+//     本期的三個數字在 renderTable 裡是【篩選後那批列】的加總（見該函式的 kpiSrc=list），
+//     而上月同期永遠只能是【全量】—— 沒有辦法把本期的篩選條件套到另一份報表上。
+//     使用者篩了「低效廣告」那批，就會看到本期廣告費暴跌、基期不變，得出「廣告花少了」
 //     的結論。那是假訊號。
 //     【沒有數字，使用者會去清掉篩選再看一次；有錯的數字，使用者會直接相信它。】
 //     sorts 不影響加總，但一併納入判斷：規則單純成「動過篩選列就不顯示」，日後才不會有人改錯。
 //
-//   ⚠ 期間推算刻意走 getPrevPeriodKey（本檔搜該函式），不自己再寫一份：同樣的
-//     「上半→上月下半 / 下半→同月上半 / 整月→上月整月」邏輯，全檔已經有兩份
-//     （getPrevPeriodKey 與 syncHeaderKpis 內聯那段），不要再增加第三份。
-//     它回傳的是 lsKey 格式 'ec|{shop}|{month}|{half}'，拆出 month/half 餵給 lsLoad。
+//   🔴 這道守衛【必須寫在本函式裡面】，不可以靠呼叫端漏傳參數達成。這不是風格潔癖，是實證：
+//     改版前營收那格靠 renderTable「不傳第 6 參數」來隱藏比較段，結果 2026-08-18 實測出
+//     兩條繞過路徑 —— setShop（切通路再切回來：表格 22 筆、頂端卻是全量 805 筆的總額，
+//     「較上期」還跑回來了）與 patchRow（篩選中編輯任一格，頂端跳成全量）。
+//     同一時間廣告費那格【沒有】被繞過，因為它的守衛就寫在取數函式裡。
+//     ⇒ 顯式守衛擋得住、隱式擋不住。三格現在共用這一道。
 //
 //   ⚠ 刻意【不加】state[shop]._extraAdsFee（未對應廣告費，見 ignoreAllUnmatched）：
 //     它只活在記憶體、沒有任何持久化路徑（全檔三處都是 state[shop]._extraAdsFee，
-//     built 陣列裡沒這個欄位），重整就歸零，更不可能從上一期的報表讀回來；
-//     而且它是 per-shop 不是 per-period（切半月不會清），拿來代表上一期在語意上就是錯的。
-//     所以「本期含 extra、上期不含」這個不對稱是刻意的，不是漏掉。
-function _prevAdsTotal(shop){
+//     built 陣列裡沒這個欄位），重整就歸零，更不可能從另一期的報表讀回來；
+//     而且它是 per-shop 不是 per-period（切半月不會清），拿來代表基期在語意上就是錯的。
+//     所以「本期含 extra、基期不含」這個不對稱是刻意的，不是漏掉。
+//     （2026-08-18 實測：正常瀏覽時 _extraAdsFee 這個 key 根本不存在，只有「產生報表 →
+//       按了『忽略全部未對應』→ 還沒重整」那個窗口內才非零。）
+//
+//   ⚠ 三個總額一次算完、共用同一次 forEach：它們來自同一份報表，要嘛整份在要嘛整份不在，
+//     拆成三支等於把同一份 800 列的報表讀三次、跑三次迴圈（理由同 getPrevPeriodMap 的註解）。
+//   ⚠ 回傳的是【原始值，含 0 與負數】，不在這裡做 >0 過濾。要不要顯示百分比是 setKpis
+//     的顯示決策，不是取數的決策 —— 混在一起就會重演舊版把「上月同期沒投廣告($0)」
+//     整條藏掉的錯（見 setKpis 內的說明）。
+function _lastMonthSameTotals(shop){
   const s=state[shop];if(!s)return null;
   if(s.search||(s.tagFilters&&s.tagFilters.length)||(s.filters&&Object.keys(s.filters).length)||(s.sorts&&s.sorts.col))return null;
   try{
-    const parts=getPrevPeriodKey(shop,s.curMonth,s.curHalf).split('|');
-    if(parts.length<4)return null;
-    const rep=lsLoad(shop,parts[2],parts[3]);
+    const p=_lmSamePeriodParts(s.curMonth,s.curHalf);
+    if(!p)return null;
+    const rep=lsLoad(shop,p.month,p.half);
     if(!rep||!rep.built||!rep.built.length)return null;
-    let t=0;rep.built.forEach(r=>{t+=r.adsFee||0;});
-    return t>0?t:null;
+    let lmRev=0,lmAds=0,lmPure=0;
+    rep.built.forEach(r=>{lmRev+=r.rev||0;lmAds+=r.adsFee||0;lmPure+=r.pureProfit||0;});
+    return {rev:lmRev,ads:lmAds,pure:lmPure,
+            label:_lmCompactLabel(getPeriodLabel(p.month,p.half)),
+            month:p.month,half:p.half};
   }catch{return null;}
 }
-function setKpis(shop,rev,gross,ads,pure,prevRev,prevAds){
+// 第 6 參數 cmp = _lastMonthSameTotals(shop) 的回傳值：
+//   {rev, ads, pure, label, month, half} | null，null＝不顯示比較段。
+//   🔴 判斷一律寫 !cmp，【絕對不要】寫 cmp===null：三個空狀態呼叫點雖然已經統一成顯式
+//     傳 null（tryLoadSaved 的 else 分支 / _testEmpty / syncHeaderKpis 的早退），但只要
+//     日後有人新增呼叫點漏傳第 6 參數，===null 會放行 undefined、接著在讀 cmp.rev 時
+//     拋 TypeError。!cmp 對 null 與 undefined 都安全。
+//   🔴 cmp 裡【刻意不放算好的百分比】：百分比的分子是本期值，而本期值是本函式的參數 ——
+//     renderTable 傳的是【篩選子集】、syncHeaderKpis 傳的是【全量】，同一個 cmp 會對應到
+//     兩個不同的百分比。取數只管基期，算百分比是這裡的事。
+function setKpis(shop,rev,gross,ads,pure,cmp){
+  // ── 死節點：#kpi-{shop} 整包 display:none（見 shopHTML），畫面上看不到 ──
+  //   ⚠ 這三行維持【舊格式】的 (22.7%) / (10.41%)，與下方 header 的具名版
+  //     「純利率 22.7%」/「佔營收 10.41%」刻意【拆成兩份字串、不再共用】。
+  //     改版前 header 直接重用 pureHtml / adsHtml，共用一份等於逼著死節點跟著改版；
+  //     本次範圍只有看得見的 header，死節點不動也不刪 → 在此斷開。變數名加 dead 前綴，
+  //     避免下一個人以為它還餵給 header。
   const revEl=document.getElementById('kv-rev-'+shop);if(revEl)revEl.textContent='NT$ '+fmtN(rev);
   const pureEl=document.getElementById('kv-net-'+shop);
-  const pureHtml='NT$ '+fmtN(pure)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(pure/rev*100).toFixed(1)}%)</span>`:'');
-  if(pureEl)pureEl.innerHTML=pureHtml;
-  const adsHtml='NT$ '+fmtN(ads)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(ads/rev*100).toFixed(2)}%)</span>`:'');
-  const adsEl=document.getElementById('kv-ads-'+shop);if(adsEl)adsEl.innerHTML=adsHtml;
+  const deadPureHtml='NT$ '+fmtN(pure)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(pure/rev*100).toFixed(1)}%)</span>`:'');
+  if(pureEl)pureEl.innerHTML=deadPureHtml;
+  const deadAdsHtml='NT$ '+fmtN(ads)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(ads/rev*100).toFixed(2)}%)</span>`:'');
+  const adsEl=document.getElementById('kv-ads-'+shop);if(adsEl)adsEl.innerHTML=deadAdsHtml;
   if(shop!==curShop)return;
+
+  // ── 第二行：主數字 ＋【具名】比率 ──
+  //   具名是這次改版的核心：改版前純利那格是裸的「(22.7%)」、廣告費是裸的「(10.41%)」，
+  //   跟營收那格的「(+0.2% 較上期)」佔同一個位置卻是完全不同性質的東西。
+  //   加上名字之後，位置決定語意：第二行永遠是「本期的某個比率」，第三行永遠是「跟基期比」。
   const hRev=document.getElementById('kv-rev-header');
   const hNet=document.getElementById('kv-net-header');
   const hAds=document.getElementById('kv-ads-header');
   if(hRev)hRev.textContent='NT$ '+fmtN(rev);
-  const chEl=document.getElementById('kv-rev-change-header');
-  if(chEl){
-    if(prevRev&&prevRev>0&&rev>0){const pct=(rev-prevRev)/prevRev*100;const sign=pct>=0?'+':'';const col=pct>=0?'#10b981':'#ef4444';chEl.innerHTML=`<span style="color:${col}">(${sign}${pct.toFixed(1)}% 較上期)</span>`;}
-    else{chEl.innerHTML='';}
-  }
-  if(hNet){hNet.innerHTML=pureHtml;hNet.style.color=pure>=0?'#10b981':'#ef4444';}
-  if(hAds)hAds.innerHTML=adsHtml;
-  // 廣告費副標「上期 NT$ …」。放在【同一行右側】而不是數字下方：#header-kpi-row 是
-  //   align-items:center 的橫向 flex，任一格長高會把整列撐高、另外兩格垂直錯位；
-  //   而且隔壁「本期總營收」的副標(kv-rev-change-header)本來就是同一行右側，放下方反而不一致。
-  // ⚠ 中性灰、【刻意不上綠紅】：廣告費變多不必然是壞事（營收可能同步變多），
-  //   用漲跌色暗示好壞會誤導判斷。這一點與隔壁營收副標刻意不同，不是漏做。
-  // 取不到上一期（最早那一期 / 新賣場 / 剛清除報表）或使用者有篩選 → 一律留空。
-  //   不顯示「上期 —」：永遠是破折號的欄位只會讓人以為壞掉。比照上方 chEl 的 else 分支。
-  const apEl=document.getElementById('kv-ads-prev-header');
-  if(apEl)apEl.innerHTML=(prevAds&&prevAds>0)?`上期 NT$ ${fmtN(prevAds)}`:'';
+  if(hNet){hNet.textContent='NT$ '+fmtN(pure);hNet.style.color=pure>=0?'#10b981':'#ef4444';}
+  if(hAds)hAds.textContent='NT$ '+fmtN(ads);
+  // ⚠ #kv-rev-rate-header（營收的比率位）【刻意不寫入】：營收沒有比率，該位置留白。
+  //   佔位元素仍在模板裡，理由見 __profitTabHtml 的註解。
+  const nRate=document.getElementById('kv-net-rate-header');
+  if(nRate)nRate.textContent=rev?`純利率 ${(pure/rev*100).toFixed(1)}%`:'';
+  const aRate=document.getElementById('kv-ads-rate-header');
+  if(aRate)aRate.textContent=rev?`佔營收 ${(ads/rev*100).toFixed(2)}%`:'';
+
+  // ── 第三行：較上月同期 ──
+  // 🔴 文案一律「上月同期」，【絕對不要】出現「上期」兩個字：表格逐列與小計列的「上期」
+  //   走 getPrevPeriodKey 的【滾動】基準，跟這裡的【上月同一段期間】不是同一個東西，
+  //   而且兩者會同時出現在同一個畫面上。期間字串 (cmp.label) 是使用者唯一的辨識線索。
+  //
+  // 顯示規則（三格一致）：
+  //   · !cmp（取不到報表 / 有篩選）→ 三格第三行【全部】留空。不顯示「上月同期 —」：
+  //     永遠是破折號的欄位只會讓人以為壞掉（沿用改版前的既有決定）。
+  //   · cmp 存在 → 金額【一律顯示，含 NT$ 0】；百分比【只在基期 > 0 時】顯示。
+  //     🔴 改版前寫的是 (prevAds&&prevAds>0)，會把「上月同期沒投廣告($0)」整條藏掉 ——
+  //        而「上月同期 0、本期 24 萬」正是最該被看見的情況。這次刻意改掉。
+  //     🔴 基期 <= 0 不算百分比還有第二個理由（純利專屬）：分母為負時 (本期−基期)/基期
+  //        的符號會翻轉，「本期虧更多」會顯示成正成長。寧可只給金額，
+  //        也不要給一個方向相反的百分比。三格共用 base>0 這一條就同時涵蓋兩種情況。
+  //
+  // ⚠ 廣告費的漲跌【維持中性灰、不上綠紅】（改版前既有決定，逐字保留）：廣告費變多不必然
+  //   是壞事（營收可能同步變多），用漲跌色暗示好壞會誤導判斷。營收與純利才上綠紅。
+  // ⚠ 金額用 fmtN，而 fmtN 會吃掉負號（Math.abs）。基期純利可能為負且這一行沒有顏色可以
+  //   暗示正負 → 自己補上 '−'。本期主數字不必補：它有紅色可辨（見上方 hNet）。
+  const lmLine=(cur,base,colored)=>{
+    if(!cmp)return'';
+    let pct='';
+    if(base>0){
+      const d=(cur-base)/base*100;
+      const col=colored?(d>=0?'#10b981':'#ef4444'):'inherit';
+      pct=`<span style="color:${col}">較上月同期 ${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%</span>`;
+    }
+    const amt=`上月同期 (${cmp.label}) ${base<0?'−':''}NT$ ${fmtN(base)}`;
+    return `${pct}<span style="margin-left:${pct?10:0}px;font-weight:500">${amt}</span>`;
+  };
+  const cRev=document.getElementById('kv-rev-cmp-header');
+  if(cRev)cRev.innerHTML=lmLine(rev,cmp&&cmp.rev,true);
+  const cNet=document.getElementById('kv-net-cmp-header');
+  if(cNet)cNet.innerHTML=lmLine(pure,cmp&&cmp.pure,true);
+  const cAds=document.getElementById('kv-ads-cmp-header');
+  if(cAds)cAds.innerHTML=lmLine(ads,cmp&&cmp.ads,false);
 }
 function syncHeaderKpis(shop){
   if(shop==='總表'||!state[shop]){return;}
@@ -16544,22 +16681,13 @@ function syncHeaderKpis(shop){
   if(!s._built||!s._built.length){setKpis(shop,0,0,0,0,null);return;}
   let tRev=0,tGross=0,tAds=0,tPure=0;
   s._built.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
-  // 直接讀取上期儲存報表算總營收
-  let prevTotalRev=null;
-  try{
-    const m=s.curMonth,h=s.curHalf;
-    const [y,mo]=m.split('/').map(Number);
-    let prevM,prevH;
-    if(h==='second'){prevM=m;prevH='first';}
-    else if(h==='first'){prevM=mo===1?`${y-1}/12`:`${y}/${String(mo-1).padStart(2,'0')}`;prevH='second';}
-    else{prevM=mo===1?`${y-1}/12`:`${y}/${String(mo-1).padStart(2,'0')}`;prevH='full';}
-    const prevRep=lsLoad(shop,prevM,prevH);
-    if(prevRep&&prevRep.built&&prevRep.built.length){let t=0;prevRep.built.forEach(r=>{t+=r.rev||0;});if(t>0)prevTotalRev=t;}
-  }catch{}
-  // 上期廣告費：另外走 _prevAdsTotal（有篩選時回 null → 副標留空，理由見該函式）。
-  //   ⚠ 上面 prevTotalRev 那段【一字未動】—— 兩者的取法本來就一致（同一套期間推算），
-  //     但刻意不合併：合併等於改寫既有那條已驗證的路徑，風險不對稱。
-  setKpis(shop,tRev,tGross,tAds,tPure,prevTotalRev,_prevAdsTotal(shop));
+  // 🔴 這裡原本有一段【內聯的滾動期間推算】（算 prevTotalRev 餵給舊的第 6 參數 prevRev），
+  //   2026-08-18 隨頂端三格改版一併移除 —— 不是因為它有錯，是因為它算出來的值【已經沒有
+  //   任何人讀】：頂端的比較基準改成「上月同期」後由 _lastMonthSameTotals 一次供三個總額。
+  //   留著等於一段每次 render 都跑一次 800 列迴圈、結果丟掉的死碼。
+  //   ⚠ 表格逐列與小計列的「上期」【完全沒有被動到】，它們走的是 getPrevPeriodKey /
+  //     getPrevPeriodMap，本次一行未改，滾動基準原樣保留。
+  setKpis(shop,tRev,tGross,tAds,tPure,_lastMonthSameTotals(shop));
 }
 function num(v){return parseFloat((v+'').replace(/[,$%]/g,'').trim())||0;}
 function fmtN(v){return Math.abs(Math.round(v)).toLocaleString();}
