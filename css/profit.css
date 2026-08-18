@@ -814,20 +814,58 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
          真正把臨界值推爆的是 #header-kpi-block 長到 710.8px（廣告費那格單獨就 280.7px），
          不是這顆 ⓘ 按鈕。要縮寬度該從 KPI 區下手，不是繼續在這顆按鈕上省字。
 
-     2026-08-18 頂端三格 KPI 改成三行骨架（標題／主數字＋具名比率／較上月同期）之後的預估：
-       ├ #header-kpi-block   約 753px（+42px；廣告費那格反而變窄，因為副標移到第三行）
-       └ #header-kpi-row     已斷行的螢幕上 146.5 → 約 166.5px（+20px，第三行 18px + 2px gap）
-       未斷行的寬螢幕上高度不變 —— 68.5px 的 KPI 區仍小於 71.3px 的按鈕區，列高由後者決定。
+     🔴 PR #206（三行骨架）當時在這裡寫的預估【是錯的，已於 2026-08-18 更正】：
+       寫「#header-kpi-block 約 753px」→ 實測 1037.2px（差 284px）
+       寫「146.5 → 約 166.5px」      → 1600px 螢幕實測 164.8px（這個對）
+       753 是用 canvas measureText 估的，而【估的當下第三行還沒有期間那一段】，
+       那一段是同一輪稍後才定案的 → 每格多約 95px × 3 格。教訓：預估值要標明它涵蓋的版本。
 
-     不要為了閃過換行去縮字（實測「說明」兩字只省 24px，離 111px 的缺口差得遠），
+     ── 期別改短寫法之前（🟢 實測 innerWidth 1600，第三行還是「上月同期 (2026/07/01–15)」）──
+       ├ #header-kpi-row      1255.2 × 164.8px   ← 斷行狀態
+       ├ #header-kpi-block    1037.2 × 68.5px
+       ├ #header-btn-block     318.6 × 69.5px
+       └ 三格                 338.5 / 326.9 / 335.9px（合計 1001.1）
+       當時推算：1280px 螢幕（列寬 ≈ 935px）上 #header-kpi-block【自己也有 flex-wrap:wrap】，
+       1037.2 > 935 → 三格會排成 2+1、整列漲到約 251px。
+
+     ── 🟢 現況實測（2026-08-18，innerWidth 1263、側欄展開、好麻吉 2026/08 上半）
+        第三行改成「vs 7月上半 NT$ …」＋ 加入 .kpi-info 按鈕之後 ──
+       ├ #header-kpi-row      922.0 × 166.5px    ← 仍是斷行狀態（列層級）
+       ├ #header-kpi-block    878.8 × 68.5px     ← 🔴【單行，三格沒有內部換行】
+       ├ #header-btn-block    319.6 × 71.0px
+       └ 三格 251.3 / 239.7 / 248.7px ＋ ⓘ 85.0 × 28.0px（估 84.7，誤差 0.3px）
+       不斷行需要列寬 878.8 + 18 + 319.6 = 1216.4px，實際 922px → 缺口 294.4px。
+
+       淨效果：期別短寫法讓三格從 1001.1 → 739.7px（−261.4），ⓘ 按鈕 +103.0px
+       ⇒ block 1037.2 → 878.8px（【淨減 158.4px】）。
+       🔴 上面那個「1280px 上三格會排成 2+1」的推算【因此不再成立】：878.8px 已經塞得進
+         1280px 級距的列寬（實測 1263px→922px 就是單行）。同事筆電的那個壞情況被順手消掉了。
+       ⚠ 列層級的換行【沒有】被消掉，也不打算消：要讓 878.8+18+319.6 塞進一行需要
+         約 1560px 的列寬（≈1900px 視窗）。那不是這個 PR 的目標。
+
+     不要為了閃過換行去縮字（實測「說明」兩字只省 24px，離 118.7px 的缺口差得遠），
      也不要動按鈕列的 flex-wrap（那是全站共用 DOM，會影響 MOMO / 酷澎）。
+     要真的消掉換行，唯一有效的方向是縮 #header-kpi-block —— 那三格佔了 1037.2px。
    ⚠ 這一列的祖先有 overflow:hidden（__profitTabHtml 最外層卡片），所以彈窗走置中的
      .ana-overlay 殼、不在這裡長浮層 —— 這個 class 只負責按鈕本身。 */
-.tp-info{
+/* 卡片內的小型 ⓘ 輔助入口，兩個位置【共用同一套視覺語言】：
+     .tp-info  測試通路期間列的「ⓘ 使用說明」
+     .kpi-info 頂端 KPI 區的「ⓘ 比較基準」（2026-08-18 新增）
+
+   🔴 為什麼這次【共用選擇器清單】，而不是照 .sp-seg 的先例複製一份：
+     .sp-seg 不共用 .mm-seg 有兩條理由（見本檔上方那段註解）—— ①mm- 前綴的命名暗示錯誤、
+     ②.mm-seg.on 綁死 MOMO 品牌色，是【實質差異】。這裡只有①成立（tp- 前綴不該出現在 KPI 區），
+     ②不成立：這兩顆就是同一類東西，視覺要求本來就是「長得一模一樣」。
+     複製一份 16 行逐字相同的規則，日後調其中一顆就會讓兩者默默分岔 —— 那正是不想要的結果。
+     ⇒ 命名各自獨立、樣式共用一份。
+
+   🔴 margin-left【只給 .tp-info】，這是兩者唯一的實質差異，不要順手併進上面那份：
+     期間列的容器 gap 是 8px，再加 6px 才跟「手續費 __%」拉得開；
+     而 #header-kpi-block 的 gap 已經是 18px，再加 margin 會變 24px、跟三格之間的間距不一致。 */
+.tp-info,.kpi-info{
   display:inline-flex;
   align-items:center;
   padding:4px 10px;
-  margin-left:6px;
   background:var(--surface);
   border:1px solid var(--border);
   border-radius:7px;
@@ -840,7 +878,39 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   white-space:nowrap;
   transition:border-color .15s,color .15s,background .15s;
 }
-.tp-info:hover,.tp-info:focus-visible{border-color:var(--primary);color:var(--primary);background:var(--primary-soft);}
+.tp-info{margin-left:6px;}   /* 只有期間列要，理由見上方註解 */
+.tp-info:hover,.tp-info:focus-visible,
+.kpi-info:hover,.kpi-info:focus-visible{border-color:var(--primary);color:var(--primary);background:var(--primary-soft);}
+
+/* 表頭「營收 / 上期」「廣告費 / 上期」「日預算 / 上期」三欄的 ?，點開同一個比較基準彈窗。
+   🔴 這裡【是】圓的，跟上面兩顆帶文字的不衝突：表頭沒有橫向空間放「ⓘ 比較基準」五個字
+     （欄寬最窄的日預算只有 100px 級距），而且這三顆是【補充入口】——主入口是頂端那顆帶文字的。
+     PR #108「灰圓圈會被忽略」的結論適用於【主入口】，不適用於貼在被問對象旁邊的補充入口。
+   🔴 刻意不沿用 MOMO 的 .mm-info：那是 <span> + 原生 title tooltip，這裡是真的 <button>
+     開彈窗。機制不同、元素不同 → 各自一份（判準同 .sp-seg：有實質差異就不共用）。
+   ⚠ 尺寸與 .filter-btn（同一個 .th-wrap 裡的鄰居）對齊，不要單獨長高把表頭撐開。 */
+.hdr-help{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:14px;
+  height:14px;
+  padding:0;
+  margin-left:4px;
+  flex:0 0 auto;
+  background:#e5e7eb;
+  border:none;
+  border-radius:50%;
+  font-size:10px;
+  font-weight:700;
+  font-family:inherit;
+  line-height:1;
+  color:#6b7280;
+  cursor:pointer;
+  text-transform:none;
+  transition:background .15s,color .15s;
+}
+.hdr-help:hover,.hdr-help:focus-visible{background:#5b5fcf;color:#fff;}
 /* 使用注意事項彈窗的問答排版。刻意不重用 .ptp-help-*（那是測試標籤面板的）——
    跨功能共用會讓其中一邊調樣式時另一邊跟著變。 */
 .tsh-q{font-size:13px;font-weight:700;color:var(--text);margin-top:14px;}

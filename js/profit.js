@@ -45,7 +45,9 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <!-- 三格【共用同一個骨架】，這是本區的核心規則，新增第四格請照抄：
                第一行 標題
                第二行 主數字 ＋【具名】比率（kv-*-rate-header）
-               第三行 較上月同期 ±X% ＋ (期間) ＋ 金額（kv-*-cmp-header）
+               第三行 較上月同期 ±X% ＋ vs 期別 ＋ 金額（kv-*-cmp-header）
+             ⚠ 三格【之後】那顆「ⓘ 比較基準」按鈕【不是第四格】，不要照這個骨架長 ——
+               它是本區的說明入口，扁的一顆 button，樣式走 .kpi-info。加新 KPI 才照三行骨架。
              改版前三格的括號位置各放各的（營收放比較幅度、純利放純利率、廣告費放佔營收比），
              同一個位置三種語意 —— 老闆 2026-08-18 指出「沒有規則」，這次收斂成上面那三行。
 
@@ -62,6 +64,13 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-rev-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-net-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-net-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-ads-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-ads-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
+        <!-- 比較基準說明入口。放在三格【之後】、#header-kpi-block 之內：這裡到 #header-btn-block
+             之間是彈性空白（後者 margin-left:auto），加它不會擠到任何人。
+             實測（2026-08-18，innerWidth 1600）：本區 1037.2px、這顆 +102.7px（84.7 按鈕 + 18 gap），
+             改前改後都是斷行狀態、列高不變（按鈕 28px < 本區 68.5px，align-items:center 吃得下）。
+             ⚠ 帶文字、不做純圓圈：PR #108 實測 14px 灰圓圈在期間列完全被忽略（見 css 的 .tp-info 註解）。
+                表頭那三顆 .hdr-help 才是圓的 —— 那裡沒有橫向空間，而且它們是這顆的補充入口、不是主入口。 -->
+        <button type="button" class="kpi-info" onclick="openKpiCmpHelp()" title="上面三格跟「上個月同一段期間」比，表格每一列的「上期」跟「上一期」比 —— 點開看完整說明">ⓘ 比較基準</button>
       </div>
       <div id="header-btn-block" style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto">
         <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
@@ -5521,7 +5530,14 @@ function renderTable(shop,list,opts){
   const ss=s.sorts||{};
   const si=(col)=>ss.col===col?(ss.dir==='asc'?' ▲':' ▼'):'';
   const hasF=(col)=>!!(s.filters?.[col])||ss.col===col;
-  const thN=(col,label,attrs='')=>`<th ${attrs}><div class="th-wrap"><span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',true,this)">▾</button></div></th>`;
+  // help：欄名與 ▾ 之間的一顆 ?，點開「比較基準說明」彈窗。預設空字串 → 其餘欄位輸出逐字不變。
+  //   🔴 只有帶「/ 上期」副標的三欄會傳（adsFee / rev / dayBudget，見 buildColHeader）。
+  //   🔴 【不用】MOMO 的 .mm-info：那套是原生 title tooltip —— hover 才出現、手機完全看不到、
+  //     不能分段。這裡要講的是兩套基準的差別，一句話塞不下。改成真的 <button> 開既有彈窗。
+  //   ⚠ event.stopPropagation()：<th> 帶 draggable + 拖曳 handler（見 dragAttrs），
+  //     不擋的話點問號會被當成拖曳起手式。排序 onclick 在隔壁的 <span> 上、不會冒泡到這裡，
+  //     但兩個理由都成立，一起擋掉。
+  const thN=(col,label,attrs='',help='')=>`<th ${attrs}><div class="th-wrap"><span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span>${help}<button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',true,this)">▾</button></div></th>`;
   // pre：塞在欄名之前的額外內容（目前只有編號欄的全選框在用）。預設空字串 → 其餘欄位輸出逐字不變。
   const thT=(col,label,sticky='',attrs='',pre='')=>`<th class="tl" style="${sticky}" ${attrs}><div class="th-wrap tl">${pre}<span onclick="setSort('${shop}','${col}',ss.col==='${col}'&&ss.dir==='asc'?'desc':'asc')" style="cursor:pointer">${label}${si(col)}</span><button class="filter-btn ${hasF(col)?'on':''}" onclick="event.stopPropagation();openFilter('${shop}','${col}',false,this)">▾</button></div></th>`;
 
@@ -5537,12 +5553,27 @@ function renderTable(shop,list,opts){
     growthRate:'成長比', growthAnalysis:'成長分析', growthNote:'商品調整',
     prodTags:'測試標籤',
   };
+  // 「/ 上期」三欄的說明入口。開的是【短版】彈窗（只講那一欄自己的事），不是頂端 ⓘ 的完整五段 ——
+  //   點表頭問號的人在問「這一欄的上期是什麼」，範圍就是那一欄。入口的位置決定問題的範圍，
+  //   完整判準見 openKpiCmpHelp 上方那段。
+  //   🔴 日預算走【專屬的 'col-budget'】，多一段講「副標是上一期的日預算、不是廣告費總額」與
+  //     $340 / $0 / — 三種顯示的差別。這欄最容易誤解，也是三欄裡唯一需要額外解釋的。
+  //     （老闆的示意圖只畫了營收與廣告費兩欄，日預算是補上的 —— 同一種副標不該有的有、有的沒有。）
+  const _CMP_HELP_MODE={adsFee:'col', rev:'col', dayBudget:'col-budget'};
+  const _CMP_HELP_TIP={
+    adsFee:'這一欄的「上期」是跟上一期比，跟頂端三格的「上月同期」不是同一套 —— 點開看說明',
+    rev:'這一欄的「上期」是跟上一期比，跟頂端三格的「上月同期」不是同一套 —— 點開看說明',
+    dayBudget:'副標是【上一期的日預算】、不是上一期的廣告費總額 —— 點開看說明',
+  };
+  const _hdrQ=(key)=>_CMP_HELP_MODE[key]
+    ? `<button type="button" class="hdr-help" onclick="event.stopPropagation();openKpiCmpHelp('${_CMP_HELP_MODE[key]}')" title="${_CMP_HELP_TIP[key]}">?</button>`
+    : '';
   const buildColHeader=(c)=>{
     const attrs=dragAttrs(c.key);
     if(c.key==='note'||c.key==='growthNote'||c.key==='prodTags')return `<th class="tl" ${attrs}>${HEADER_LABEL[c.key]}</th>`;
     if(c.key==='analysisLabel')return thT('analysisLabel',HEADER_LABEL.analysisLabel,'',attrs);
     if(c.key==='growthAnalysis')return thT('growthAnalysisLabel',HEADER_LABEL.growthAnalysis,'',attrs);
-    return thN(c.key,HEADER_LABEL[c.key],attrs);
+    return thN(c.key,HEADER_LABEL[c.key],attrs,_hdrQ(c.key));
   };
   // ── 批次選取：編號欄的勾選框（不新增欄位 → 欄位順序/隱藏/拖曳全部不用動）──
   //   🔴 全選框只在 _filtered 是陣列時才可按。_filtered 為 null（loadIntoUI 清掉後、
@@ -16307,11 +16338,16 @@ function _testShopHelpHtml(){
 //   內層 .ana-modal 上 event.stopPropagation → 開關只切 .open class、DOM 不重建。
 //   內容是靜態的，所以只在建立那次算一遍 innerHTML，之後開關不重算。
 function openTestShopHelp(){
+  closeKpiCmpHelp();   // 對稱處理，理由見下方 z-index 註解與 openKpiCmpHelp（function 宣告會 hoist，順序無妨）
   let ov=document.getElementById('tsh-overlay');
   if(!ov){
     // 只掛 .ana-overlay / .ana-modal，不另開 tsh-overlay / tsh-modal 這種空 class ——
     //   對照組 .ptp-overlay(z-index) / .ptp-modal(width) 都有實際覆寫，這裡預設值就夠用：
-    //   z-index 2000 沒有其他浮層要疊，寬度 640px 對七段說明剛好。
+    //   寬度 640px 對七段說明剛好。
+    //   ⚠ z-index 2000 這句原本寫「沒有其他浮層要疊」，2026-08-18 起【失實】：
+    //     KPI 區的 openKpiCmpHelp 也是同一個殼、同 z-index，而測試通路頁面上兩顆 ⓘ 同時存在。
+    //     兩邊都在 add('open') 之前先關掉對方（見 openKpiCmpHelp），所以不會疊 —— 但那是
+    //     靠互相關閉維持的，不是靠 z-index。再加第三個彈窗時要沿用同一套。
     ov=document.createElement('div');ov.id='tsh-overlay';ov.className='ana-overlay';
     ov.innerHTML=`<div class="ana-modal" onclick="event.stopPropagation()">
       <div class="ana-modal-hdr"><span class="ana-modal-title">測試通路 使用注意事項</span><button class="ana-modal-x" onclick="closeTestShopHelp()">✕</button></div>
@@ -16327,6 +16363,113 @@ function openTestShopHelp(){
 }
 function closeTestShopHelp(){
   document.getElementById('tsh-overlay')?.classList.remove('open');
+}
+
+// ══════ 「比較基準」說明彈窗（頂端 ⓘ 比較基準 + 表頭三顆 ? 共用同一個）══════
+//
+// 為什麼需要它：頂端三格用【上月同期】、表格逐列的「上期」用【滾動】基準，兩套同時在畫面上。
+//   實測同一畫面頂端寫 +7.2%、小計列成長比寫 +0.2%，差 7 個百分點 —— 沒有說明沒有人分得出來。
+//
+// 🔴 三顆表頭 ? 與頂端那顆【共用同一個 overlay，但內容不同】（openKpiCmpHelp 的 mode 參數）：
+//   ① 頂端 ⓘ → 'full'：完整五段。點它的人在問「這個畫面的比較是怎麼回事」，範圍是整頁。
+//   ② 表頭 ? → 'col' / 'col-budget'：只講那一欄自己的事。點它的人在問「這一欄的上期是什麼」，
+//      範圍就是那一欄 —— 丟五段給他等於要他自己在裡面找答案。
+//   ⇒ 【入口的位置決定問題的範圍】。這是本區的設計原則，日後加新入口請照這條判斷要傳什麼 mode。
+//   短版結尾都留一句「完整說明請點上方的『ⓘ 比較基準』」，需要全貌的人有路可走。
+//
+//   ⚠ 刻意【不做段落定位】（開 full 再捲到某一段）：那等於還是丟五段給他、只是幫他捲一下，
+//     而且 .ana-overlay 在 .open 之前 display:none、沒有 layout，scrollIntoView 要等一個 rAF
+//     才可靠。換內容比換捲軸位置直接。
+//
+// 🔴 內容【隨 mode 變，所以每次 open 都要重算標題與 body】。
+//   前一版是照抄 openTestShopHelp 的「只在建立那次算一遍 innerHTML」快取 —— 加了 mode 之後
+//   那個快取會讓第二次以後永遠顯示第一次開啟的那個 mode，不報錯、不留痕跡。
+//   現在只有【外殼】（overlay 元素本身、footer 的關閉鈕）是建立一次，標題與 body 每次 open 重寫。
+//   ⇒ 附帶效果：文案裡現在【可以】放隨期別/通路變的動態句子了（前一版不行）。但真要加之前
+//     先想清楚 —— 說明文件的價值來自穩定，動態句子會讓兩個人看到不同的說明、對不上話。
+//
+// ⚠ overlay 掛在 document.body，與淨利表 DOM 的生命週期【脫鉤】：App.render() 重建淨利表時
+//   這個節點會留著。所以【不要在彈窗裡放任何操作淨利表的按鈕】（例如「幫我清掉篩選」）——
+//   重繪後那些參照會指向已經被換掉的節點，靜默失效。純文字說明才安全。
+const KPI_CMP_HELP=[
+  {q:'① 上面三個大數字：跟上個月的同一段期間比',
+   a:'7 月下半 → 比 6 月下半\n7 月上半 → 比 6 月上半\n整月 → 比上個月整月'},
+  {q:'② 下面表格每一列的「上期」：跟上一期比',
+   a:'7 月下半 → 比 7 月上半\n7 月上半 → 比 6 月下半\n整月 → 比上個月整月\n營收、廣告費、日預算三欄的副標都是這一套。'},
+  {q:'③ 兩者不同是刻意的',
+   a:'上面看的是月對月的整體趨勢，下面看的是單一商品上一次的表現。\n整月的時候兩套剛好是同一段期間，數字會一樣；只有上半月／下半月才會分岔。'},
+  {q:'④ 有篩選的時候，上面三格的比較會整個消失',
+   a:'本期是篩選後的子集、基期只能是全量，比出來的數字會騙人。\n要看比較，先把搜尋和篩選清掉。'},
+  {q:'⑤ 基期沒有報表的時候也不顯示',
+   a:'例如通路剛開始經營的第一個月，或那一期沒有產生過報表。'},
+];
+// 表頭 ? 的短版（'col'）。營收 / 廣告費那兩顆用這個。
+const KPI_CMP_HELP_COL=[
+  {q:'這一欄的「上期」',
+   a:'跟上一期比：7 月下半比 7 月上半、7 月上半比 6 月下半、整月比上個月整月。\n營收、廣告費、日預算三欄都是這一套。'},
+  {q:'⚠ 跟上面三個大數字的「上月同期」不是同一套',
+   a:'完整說明請點上方的「ⓘ 比較基準」。'},
+];
+// 日預算專屬的追加段（'col-budget' = KPI_CMP_HELP_COL + 這兩段）。
+//
+//   🔴 第二段那三種顯示狀態【是 PR #187 刻意設計的，不是巧合】，改 _subDayBudgetHtml /
+//     _prevDayBudgetReaderFor 之前務必先讀懂：沒投廣告的商品非常多，若把「查不到」也塌成 0，
+//     「上一期沒投廣告($0)」與「上一期根本沒這個商品(—)」在畫面上會長得一模一樣。
+//     所以那條路徑刻意【不做任何 || 0 的塌陷】、建表條件只看 r.code（金額 0 照樣進 map）。
+//     這段文案就是那個設計的使用者面說法，兩邊要一起維護。
+//
+//   ⚠ 【技術債 #41，刻意不寫進文案】：隔壁「營收 / 上期」那一欄的「—」語意【不同】——
+//     getPrevPeriodMap 的 rev 那張表建表條件是 `if (r.code && r.rev)`，營收為 0 的商品
+//     不進 map，所以那欄的「—」分不出「上一期沒這個商品」和「上一期營收是 0」。
+//     那是已知未修的瑕疵（修它會連帶改變成長比與成長分析，是另一件事）。
+//     寫進說明等於昭告同事那欄有問題而我們不打算修 —— 所以只記在這裡，文案裡不提。
+const KPI_CMP_HELP_BUDGET=[
+  {q:'日預算這一欄要特別注意',
+   a:'副標顯示的是【上一期的日預算】（每天平均花多少），不是上一期的廣告費總額 —— 兩者差 15~16 倍。\n上一期的廣告費總額在旁邊「廣告費 / 上期」那一欄。'},
+  {q:'三種顯示各有意思',
+   a:'「上期 $340」＝上一期有這個商品\n「上期 $0」＝上一期有這個商品，但沒投廣告\n「—」＝上一期沒有這個商品（新品）'},
+];
+// mode → {title, 段落陣列}。認不得的 mode 一律回 'full'：它是內容的超集合，
+//   最壞情況是使用者看到比需要的多，而不是看到空白彈窗。
+function _kpiCmpHelpOf(mode){
+  if(mode==='col')        return {title:'這一欄的「上期」', secs:KPI_CMP_HELP_COL};
+  if(mode==='col-budget') return {title:'這一欄的「上期」', secs:KPI_CMP_HELP_COL.concat(KPI_CMP_HELP_BUDGET)};
+  return {title:'比較基準說明', secs:KPI_CMP_HELP};
+}
+function _kpiCmpHelpHtml(secs){
+  // 排版沿用 .tsh-q / .tsh-a（同一張卡片裡的同型說明彈窗，刻意共用；它們不是跨功能，
+  //   是同一個功能的幾個入口）。\n 是文案裡刻意的分行 → 轉 <br>，理由同 _testShopHelpHtml。
+  return secs.map(it=>`<div class="tsh-q">${it.q}</div><div class="tsh-a">${it.a.replace(/\n/g,'<br>')}</div>`).join('');
+}
+// mode：'full'（省略時的預設，頂端 ⓘ 走這個）／'col'（營收・廣告費表頭）／'col-budget'（日預算表頭）
+function openKpiCmpHelp(mode){
+  // 先關掉測試通路那顆的彈窗：兩者同為 .ana-overlay、同 z-index 2000，而測試通路頁面上
+  //   兩顆 ⓘ 同時存在 → 不先關會疊在一起（後 append 的蓋住前者，關掉上層才露出下層）。
+  closeTestShopHelp();
+  let ov=document.getElementById('kch-overlay');
+  if(!ov){
+    ov=document.createElement('div');ov.id='kch-overlay';ov.className='ana-overlay';
+    // 外殼建立一次；標題與 body 在下面【每次 open 都重寫】，理由見本區上方註解。
+    ov.innerHTML=`<div class="ana-modal" onclick="event.stopPropagation()">
+      <div class="ana-modal-hdr"><span class="ana-modal-title"></span><button class="ana-modal-x" onclick="closeKpiCmpHelp()">✕</button></div>
+      <div class="ana-modal-body"></div>
+      <div class="ana-modal-ftr">
+        <button class="ana-cancel-btn" onclick="closeKpiCmpHelp()">關閉</button>
+      </div>
+    </div>`;
+    ov.onclick=closeKpiCmpHelp;
+    document.body.appendChild(ov);
+  }
+  const cfg=_kpiCmpHelpOf(mode);
+  // textContent 不是 innerHTML：標題是純文字，用 textContent 就不必煩惱跳脫。
+  ov.querySelector('.ana-modal-title').textContent=cfg.title;
+  ov.querySelector('.ana-modal-body').innerHTML=_kpiCmpHelpHtml(cfg.secs);
+  // 換過內容 → 捲軸歸零。不歸零的話：先開日預算那版捲到底、再開短版，會停在上一次的位置。
+  ov.querySelector('.ana-modal-body').scrollTop=0;
+  ov.classList.add('open');
+}
+function closeKpiCmpHelp(){
+  document.getElementById('kch-overlay')?.classList.remove('open');
 }
 
 // ── 測試通路：期間切換 / 自動載入 / 費率 ──
@@ -16516,8 +16659,8 @@ function doExport(shop){
 //   老闆 2026-08-18 指定「上半月比上半月、下半月比下半月」＝跟上個月的同一段期間比。
 //   既有的 getPrevPeriodKey 是滾動的（下半→同月上半、上半→上月下半、整月→上月整月），
 //   表格逐列與小計列的「上期」欄【繼續用它、本次完全不動】。兩套基準會同時出現在畫面上，
-//   這是刻意的取捨，靠 cmp.label 那段期間字串讓使用者分辨（實測：同一畫面頂端 +7.2%、
-//   小計列成長比 +0.2%，差 7 個百分點，沒有期間字串沒有人分得出來）。
+//   這是刻意的取捨，靠第三行的期別字串（cmp.month/half → _lmPeriodShort）讓使用者分辨
+//   （實測：同一畫面頂端 +7.2%、小計列成長比 +0.2%，差 7 個百分點，沒有期別沒有人分得出來）。
 //
 // ── 形狀照抄 MOMO 的 momoPrevPeriodKey（本檔搜該函式）──
 //   那支早就是「整月比上月整月、半月比上月同半月」，跟這裡要的完全一樣，只差 key 格式
@@ -16535,21 +16678,27 @@ function _lmSamePeriodParts(month,half){
   return { month:`${y}/${String(mo).padStart(2,'0')}`, half };
 }
 
-// 把 getPeriodLabel 的 'YYYY/MM/DD – YYYY/MM/DD' 壓成 'YYYY/MM/DD–MM/DD'。
-//   🔴 刻意【不新寫一支日期格式函式】：唯一的日期來源仍是 getPeriodLabel(:1388 附近)，
-//     這裡只做顯示層的截字。原樣輸出會把同一個年月印兩次，實測每格第三行多約 45px、
-//     整個 #header-kpi-block 多約 180px —— 那些像素純粹花在重複的 '2026/07'。
-//   🔴 這段【依賴 getPeriodLabel 目前的輸出格式】（en-dash 前後有空格、兩段同為 YYYY/MM/DD）。
-//     格式一旦對不上就【原樣回傳】，不做任何猜測 —— 最壞情況只是字變長，
-//     絕不會壞掉、也不會吐出半截日期。改 getPeriodLabel 的人不必回來改這裡。
-function _lmCompactLabel(full){
-  const s=String(full==null?'':full);
-  const p=s.split('–');                       // en-dash，非 hyphen
-  if(p.length!==2) return s;
-  const a=p[0].trim(), b=p[1].trim();
-  const pre=a.slice(0,8);                     // 'YYYY/MM/'
-  if(!/^\d{4}\/\d{2}\/$/.test(pre)) return s;
-  return b.startsWith(pre) ? `${a}–${b.slice(8)}` : s;
+// 第三行的期別短字串：'2026/07' + 'first' → '7月上半'。
+//
+//   🔴 【比照 MOMO 的 momoPeriodLabel（本檔搜該函式）】。同一個系統對同一件事本來有兩種寫法：
+//     MOMO 的 KPI 卡寫「vs 7月整月」，蝦皮頂端一度寫「上月同期 (2026/07/01–15)」——
+//     那個不一致本身就是老闆這次抱怨的「沒有規則」，所以收斂成同一種。
+//   ⚠ 與 momoPeriodLabel 有一個字的差異：那支回「7月上」/「7月下」，這裡回「7月上半」/
+//     「7月下半」（半月語彙跟隨蝦皮既有的 _halfLabel / HALVES：「上半」「下半」「整月」）。
+//     刻意不共用 momoPeriodLabel：它吃的是 'YYYY-MM-H1'，蝦皮是 'YYYY/MM' + 'first'，
+//     轉格式的程式碼比這三行還長（理由同 _lmSamePeriodParts 不共用 momoPrevPeriodKey）。
+//
+//   🔴 前一版這裡是 _lmCompactLabel（把 getPeriodLabel 的 'YYYY/MM/DD – YYYY/MM/DD' 截成
+//     'YYYY/MM/DD–MM/DD'），2026-08-18 整支刪除，兩個理由：
+//     ① 它截過頭 —— 實測輸出是 (2026/07/01–15) 而不是預期的 (2026/07/01–07/15)。
+//     ② 就算修好，那串日期每格要 14 個字元 ×3 格；實測 #header-kpi-block 已達 1037.2px、
+//        1280px 螢幕上三格自己就在換行，那些像素花在使用者不會逐日核對的日期上。
+//     ⇒ 期別用短寫法，但【金額保留】（見 setKpis 的說明）。
+function _lmPeriodShort(month,half){
+  const m=/^\d{4}\/(\d{2})$/.exec(month||'');
+  if(!m) return '';
+  const h=half==='first'?'上半':half==='second'?'下半':half==='full'?'整月':'';
+  return `${Number(m[1])}月${h}`;
 }
 
 // 上月同期的三個總額 + 期間字串。取不到 / 不該顯示時一律回 null（＝三格第三行全部留空）。
@@ -16592,13 +16741,13 @@ function _lastMonthSameTotals(shop){
     if(!rep||!rep.built||!rep.built.length)return null;
     let lmRev=0,lmAds=0,lmPure=0;
     rep.built.forEach(r=>{lmRev+=r.rev||0;lmAds+=r.adsFee||0;lmPure+=r.pureProfit||0;});
-    return {rev:lmRev,ads:lmAds,pure:lmPure,
-            label:_lmCompactLabel(getPeriodLabel(p.month,p.half)),
-            month:p.month,half:p.half};
+    return {rev:lmRev,ads:lmAds,pure:lmPure,month:p.month,half:p.half};
   }catch{return null;}
 }
 // 第 6 參數 cmp = _lastMonthSameTotals(shop) 的回傳值：
-//   {rev, ads, pure, label, month, half} | null，null＝不顯示比較段。
+//   {rev, ads, pure, month, half} | null，null＝不顯示比較段。
+//   （曾經有第六個欄位 label，2026-08-18 隨 _lmCompactLabel 一起移除 —— 期別改由
+//     month/half 現算成短字串，見 _lmPeriodShort。）
 //   🔴 判斷一律寫 !cmp，【絕對不要】寫 cmp===null：三個空狀態呼叫點雖然已經統一成顯式
 //     傳 null（tryLoadSaved 的 else 分支 / _testEmpty / syncHeaderKpis 的早退），但只要
 //     日後有人新增呼叫點漏傳第 6 參數，===null 會放行 undefined、接著在讀 cmp.rev 時
@@ -16641,7 +16790,12 @@ function setKpis(shop,rev,gross,ads,pure,cmp){
   // ── 第三行：較上月同期 ──
   // 🔴 文案一律「上月同期」，【絕對不要】出現「上期」兩個字：表格逐列與小計列的「上期」
   //   走 getPrevPeriodKey 的【滾動】基準，跟這裡的【上月同一段期間】不是同一個東西，
-  //   而且兩者會同時出現在同一個畫面上。期間字串 (cmp.label) 是使用者唯一的辨識線索。
+  //   而且兩者會同時出現在同一個畫面上。期別短字串（vs 7月上半）是使用者唯一的辨識線索。
+  //
+  // ⚠ 期別用短寫法「vs 7月上半」（比照 MOMO 的 mm-kpi-d，見 _lmPeriodShort），
+  //   但【金額保留】—— 這一點【刻意與 MOMO 不同，不是漏抄】：MOMO 那張卡只寫「vs 7月整月」
+  //   不給基期金額，因為 MOMO 全頁只有一套基準、沒有對照的需要。蝦皮同一畫面上有兩套基準，
+  //   金額是使用者對帳時唯一能自己驗證「頂端這個 +7.2% 是拿什麼算的」的東西。拿掉就沒得驗。
   //
   // 顯示規則（三格一致）：
   //   · !cmp（取不到報表 / 有篩選）→ 三格第三行【全部】留空。不顯示「上月同期 —」：
@@ -16665,7 +16819,8 @@ function setKpis(shop,rev,gross,ads,pure,cmp){
       const col=colored?(d>=0?'#10b981':'#ef4444'):'inherit';
       pct=`<span style="color:${col}">較上月同期 ${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%</span>`;
     }
-    const amt=`上月同期 (${cmp.label}) ${base<0?'−':''}NT$ ${fmtN(base)}`;
+    const per=_lmPeriodShort(cmp.month,cmp.half);
+    const amt=`vs ${per} ${base<0?'−':''}NT$ ${fmtN(base)}`;
     return `${pct}<span style="margin-left:${pct?10:0}px;font-weight:500">${amt}</span>`;
   };
   const cRev=document.getElementById('kv-rev-cmp-header');
@@ -16735,6 +16890,7 @@ Object.assign(window, {
   onHalfChange,onMapFile,onMonthChange,onPlatformRateChange,openAddSummaryRowModal,openAnaSettings,openColPicker,
   onTestPeriodChange,onTestRateChange,   // 測試通路期間列的 inline onchange 用，缺了會 ReferenceError、輸入框靜默失效
   openTestShopHelp,closeTestShopHelp,    // 測試通路期間列 ⓘ 與彈窗關閉鈕的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
+  openKpiCmpHelp,closeKpiCmpHelp,        // 頂端「ⓘ 比較基準」+ 表頭三顆 ? + 彈窗關閉鈕的 inline onclick 用，同上
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
   openTestSettings,closeTestSettings,addTestDraftCond,removeTestDraftCond,deleteTestDraftRule,addTestDraftRule,saveTestSettings,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,
