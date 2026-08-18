@@ -16046,16 +16046,88 @@ function updateHalfBtnLabels(shop){
   container.innerHTML=`<div class="sp-seg-grp">${btns.map(h=>`<button type="button" class="sp-seg${h.id===curHalf?' on':''}" onclick="onHalfChange('${shop}','${h.id}',null,true)">${h.label}</button>`).join('')}</div>`;
 }
 
+// ── 蝦皮月份下拉的可見清單（由新到舊、不含還沒到的月份）──
+//   🔴 刻意【不動】MONTHS 常數（本檔 :271）：它是三處共用的 —— 蝦皮這裡、酷澎｜總表的
+//     coupangSummaryHTML、以及酷澎各賣場與 MO+ 佔位頁的 momoShopHTML。改常數會同時翻掉
+//     另外兩個下拉。所以只在蝦皮這一支產生子集，另外兩處讀到的永遠是原始的 12 個月升冪清單。
+//   🔴 絕對不可以就地 mutate：MONTHS.reverse() / .sort() 會靜默翻轉那兩個下拉，而且 diff
+//     只會出現在這一區、看起來完全正常。這裡 filter 先產生新陣列，reverse 作用在複本上。
+//   判定用【字串比較】而非 Date 物件：MONTHS 的元素是補零的 'YYYY/MM'（:271 可驗），固定寬度
+//     ⇒ 字典序等於時間序。這樣繞開兩個坑：① new Date('2026-09-01') 被當 UTC 解析，UTC+8 換算
+//     成本地是 8/31 08:00，跨月當天會提早一天判定；② getMonth() 是 0-based 的 off-by-one。
+//   ⚠ 條件刻意寫成單純的 `mo<=nowYm`，【不是】「濾掉今年的未來月份」那種把年份寫死的形狀 ——
+//     跨年時字串比較自然成立，日後 MONTHS 補上 2027 會自動正確，不必回來改這裡。
+//   ⚠ 當場 new Date()，【不重用】模組層的 _initCurMonth（:298）：那是載入時算一次的 const，
+//     分頁開著跨月不會更新。本函式一輩子只跑幾次（initProfitPeriodControls 的 forEach），成本可忽略。
+//   ⚠ 跨年炸彈本次刻意不修：MONTHS 只有 2026，2027/01 一到蝦皮與酷澎都會卡住、且無法建立
+//     2027 年的報表。修它必須動常數 ⇒ 會波及酷澎，超出本次範圍，已另記技術債。
+function _shopeeVisibleMonths(){
+  const d=new Date();
+  const nowYm=`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}`;   // 寫法與 :298 的 _initCurMonth 逐字一致
+  const vis=MONTHS.filter(mo=>mo<=nowYm).reverse();   // filter 回傳新陣列，reverse 只動那個複本
+  // 空清單要退回完整 MONTHS：使用者機器時間早於 2026/01（重灌沒對時 / 虛擬機 / CMOS 沒電）時
+  //   filter 會全濾光，而那比不做這個功能【更糟】—— select 一個 option 都沒有 → 兜底值 vis[0]
+  //   是 undefined → state.curMonth=undefined → lsKey（:406）組出 `ec|好麻吉|undefined|full`
+  //   → 永遠找不到報表、畫面空白；使用者再動一下下拉，sel.value 是 '' 又把 state 寫成空字串。
+  return vis.length?vis:[...MONTHS].reverse();
+}
+// ── 把某通路的 curMonth 夾回可見清單內（⚠ 有副作用：會寫 state）──
+//   ⚠ 名字帶 clamp 是刻意的：下方 periodRowShopeeHTML / shopHTML / momoShopHTML 那一批
+//     「傳 id 回字串」的函式一律無副作用，這支【不屬於】那一批，別把它併回去。
+//   為什麼非做不可：state[shop].curMonth 的初值來自 :324 的 _readLastMonth → _findLatestPeriod，
+//     它掃的是【實際存在的報表 key】，所以可能落在可見清單之外（同事先前手動切到 2026/12 並
+//     產生過報表）。那時 periodRowShopeeHTML 的 option 沒有一個帶 selected → 瀏覽器 fallback
+//     顯示第一個，但 state.curMonth 仍是 2026/12，而 tryLoadSaved 讀的是 state ——
+//     【下拉寫著 8 月、表格卻是 12 月的資料，而且不報錯】。
+//   ⚠ 這個狀態是改成「由新到舊」之後才變得難以察覺的：升冪時對不上會顯示 2026/01，八月看到
+//     一月一眼就知道不對；降冪時第一個就是當月，看起來完全合理 —— 同一個錯誤從一眼看穿
+//     變成沒有人會回報。所以排序反轉與這道防護是綁在一起的，不要只留其中一個。
+//
+//   🔴 旁路警告（維護 _userPickedPeriod 的人請讀）：本函式是【無條件】夾回的，刻意【不看】
+//     _userPickedPeriod（:1066）。檔案裡有一套「使用者親手選過就不再自動改他的月份」的保護，
+//     _applyLatestPeriod（:1071）第一行就是 `if(_userPickedPeriod[shop]) return true;` ——
+//     本函式是那套保護之外的一條旁路：同事手動切到未來月份之後，期間列重建時仍會被夾回來。
+//     這是刻意的（未來月份本來就不該可選，尊重一個不該存在的選擇沒有意義），但兩者相隔
+//     一萬五千行，不寫在這裡就不會有人發現。
+//
+//   🔴 時序依賴（目前安全，但沒有任何斷言在保護它）：本函式只改 state，【不呼叫 tryLoadSaved】。
+//     現在安全是因為呼叫點在 initProfitPeriodControls 建 DOM 那一圈，而表格載入是稍後
+//     initShopUI 走 onMonthChange / _applyLatestPeriod 才做的 —— 夾回發生在載入之前。
+//     若日後有人把期間列的重建挪到別的時機（切通路時重建、雲端快照回來時重建），就會出現
+//     「state 已夾回、表格還停在舊月份」—— 正好是本函式要防的那個 bug 的鏡像版本。
+//
+//   ⚠ 測試通路早退：它走 periodRowTestHTML（起訖日期輸入框）、沒有月份下拉，curMonth 對它
+//     只是無害殘值（理由見 :322 的既有註解）。夾它等於製造一次沒人要求、也沒人看得到的
+//     state 改動。守衛刻意放在函式內部而不是呼叫端，才能讓 initProfitPeriodControls 的
+//     forEach 維持零分支（見下方 periodRowHTML 那段註解），範式與同一圈裡的
+//     updateHalfBtnLabels（內部 if(!container)return）一致。
+function _clampShopeeCurMonth(id){
+  if(id===TEST_SHOP_ID) return;
+  const s=state[id];
+  if(!s) return;
+  const vis=_shopeeVisibleMonths();
+  if(vis.indexOf(s.curMonth)<0) s.curMonth=vis[0];
+}
+
 // ── 期間列 HTML（照 shopHTML / momoShopHTML / coupangSummaryHTML 的範式：傳 shop 回字串）──
 //   分流只發生在 periodRowHTML 這一支，initProfitPeriodControls 的 forEach 維持零分支。
 //   ⚠ 2026-08-18 改：區間從 select 改成分段按鈕（上／下／整月，形狀比照 MOMO）。本函式因此
 //     不再與抽出時逐字相同 —— 少了「區間」那個 span 標籤（按鈕自己已經說明，且要靠它省下的寬度），
 //     #half-btns-{id} 也拿掉了 inline 的 gap:4px（連體按鈕要零 gap，間距靠 .sp-seg-grp 的外框）。
-//     月份下拉這一半【沒有動】，仍是寫死 inline style。按鈕本體由 updateHalfBtnLabels 注入。
-function periodRowShopeeHTML(id){return`
+//     按鈕本體由 updateHalfBtnLabels 注入。
+//   ⚠ 2026-08-18 二改：月份下拉的選項改讀 _shopeeVisibleMonths()（由新到舊、濾掉還沒到的月份），
+//     不再直接 map MONTHS；原本寫死的 '2026/05' 兜底也換成清單第一個（那個魔法字串跨年後
+//     會變成「兜底值不在選項內」）。select 本身的 inline style 維持原樣、沒有改寫成 class。
+//     ⚠ 只有【蝦皮這一支】吃子集；MONTHS 常數與酷澎的兩個下拉（coupangSummaryHTML :7432、
+//     momoShopHTML :7690）一個字元都沒動，理由見 _shopeeVisibleMonths 上方註解。
+//   ⚠ 本函式維持無副作用（傳 id 回字串）：curMonth 夾回是 _clampShopeeCurMonth 的事，
+//     由 initProfitPeriodControls 在呼叫本函式【之前】做掉。不要把那段合併進來。
+function periodRowShopeeHTML(id){
+  const months=_shopeeVisibleMonths();
+  return`
       <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
       <select id="month-sel-${id}" onchange="onMonthChange('${id}',true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
-        ${[...MONTHS].reverse().map(mo=>`<option value="${mo}" ${mo===(state[id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
+        ${months.map(mo=>`<option value="${mo}" ${mo===(state[id].curMonth||months[0])?'selected':''}>${mo}</option>`).join('')}
       </select>
       <div id="half-btns-${id}"></div>`;}
 // 測試通路：期間是任意起訖日，不是月份+半月。費率輸入也掛在這一列
@@ -16179,6 +16251,12 @@ function initProfitPeriodControls(){
     const div=document.createElement('div');
     div.id='period-row-'+s.id;
     div.style.cssText='display:none;align-items:center;gap:8px;flex-wrap:wrap';
+    // ⚠ 必須在 periodRowHTML 之【前】：那支是純函式、只把 state.curMonth 讀出來決定哪個 option
+    //   帶 selected。curMonth 若落在可見清單之外（同事先前切到未來月份並產生過報表），
+    //   沒有先夾回就會變成「下拉顯示當月、表格卻載入未來月份的資料」。順序不可對調。
+    //   測試通路由 _clampShopeeCurMonth 內部早退擋掉（同 updateHalfBtnLabels 的範式），
+    //   所以這一圈仍然零分支。
+    _clampShopeeCurMonth(s.id);
     div.innerHTML=periodRowHTML(s.id);
     wrap.appendChild(div);
     // ⚠ 測試通路刻意不分流：updateHalfBtnLabels 內部有 if(!container)return —— 沒有
