@@ -768,6 +768,39 @@ function _sweepAllLocalReportsIntoPending(){
   }catch{}
 }
 
+// 全推路徑（無 allowKeys＝蝦皮全域鈕/程式全推）的刪除防護：對每個要推的 key 讀雲端、算 willDelete（雲端有本機無的葉節點數）。
+//   >0＝這次整包覆蓋會刪掉雲端某些東西（可能是同事的）→ 該 key 跳過不推（沒經預覽確認，不可靜默覆蓋刪除）。回 Map(key→willDeleteCount)。
+//   走預覽的路徑（有 allowKeys）＝使用者已逐項確認 → 不套此 guard、照推。
+//   不套：蝦皮 ec|（不同 collection·單一寫者整份 regen·Keani 地盤，另議）、products/origins（自有 updatedAt 版本比對）、cost（read-merge-write）。
+async function _momoFullPushDeleteGuard(taskKeys){
+  const skip=new Map();
+  const keys=[...taskKeys];
+  // app/profit 欄位一次讀齊（optlog/freight/rent/f1102/notes/edits/其他設定都是它的欄位）
+  const isAppProfitField=k=>!k.startsWith('ec|') && !k.startsWith('ec_momo_products|') && !k.startsWith('ec_momo_moplus_origins|') && !k.startsWith('ec_momo_reconcile|') && !k.startsWith('ec_momo_s1103|') && !k.startsWith('ec_momo_e001|') && k!=='ec_momo_cost_by_origin';
+  let appProfit=null;
+  if(keys.some(isAppProfitField)){ try{ const s=await window.__cloudProfit.getDoc(); appProfit=(s&&s.exists&&s.exists())?(s.data()||{}):{}; }catch(e){ appProfit=null; } }
+  for(const k of keys){
+    if(k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_moplus_origins|') || k==='ec_momo_cost_by_origin') continue;   // 各有自己的機制/另議
+    // 本機值（與推送同源）
+    let localV=null;
+    try{
+      if(k.startsWith('ec_momo_e001|')){ const pp=k.split('|'); localV=momoLoadE001Doc(pp[1],pp[2]); }
+      else { if(Store._mem&&Store._mem[k]!==undefined) localV=Store._mem[k]; if(localV===null){ const raw=localStorage.getItem(k); if(raw) localV=JSON.parse(raw); } }
+    }catch(e){}
+    // 雲端值
+    let cloudV=undefined;
+    try{
+      if(k.startsWith('ec_momo_reconcile|')){ const pp=k.split('|'); const s=await window.__cloudReconcile.getDoc(pp[1],pp[2]); cloudV=(s&&s.exists&&s.exists())?s.data():undefined; }
+      else if(k.startsWith('ec_momo_s1103|')){ const s=await window.__cloudS1103.getDoc(k.slice('ec_momo_s1103|'.length)); cloudV=(s&&s.exists&&s.exists())?s.data():undefined; }
+      else if(k.startsWith('ec_momo_e001|')){ const pp=k.split('|'); const s=await window.__cloudE001.getDoc(pp[1],pp[2]); cloudV=(s&&s.exists&&s.exists())?s.data():undefined; }
+      else if(appProfit){ cloudV=appProfit[k]; }
+    }catch(e){ cloudV=undefined; }
+    if(cloudV===undefined || cloudV===null) continue;   // 雲端沒有＝純新增、不會刪
+    const wd=momoCloudDeleteCount(localV, cloudV);
+    if(wd>0) skip.set(k, wd);
+  }
+  return skip;
+}
 async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中的 key（逐項勾選）；不傳=全推
   const btn=document.getElementById('global-sync-btn');
   // 斷掉上一次同步埋的「2 秒後還原徽章」重畫，免得它在這次的進度顯示中途引爆蓋掉進度
@@ -887,10 +920,27 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       else skippedProblem.push({key:pk,reason:'設定值讀不到'});
     });
     if(allowKeys instanceof Set){ const before=tasks.length; for(let i=tasks.length-1;i>=0;i--){ if(!allowKeys.has(tasks[i].key)) tasks.splice(i,1); } console.log('[syncToCloud] allowKeys 過濾:',before,'→',tasks.length,'｜選中:',[...allowKeys]); }   // 逐項勾選：只推選中的 key
-    console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length,'｜要推 keys:',tasks.map(t=>t.key));
+    // 🛡 全推路徑（無 allowKeys＝蝦皮全域鈕/程式全推、不經 MOMO 同步預覽）的刪除防護：會刪掉雲端資料的 key 跳過不推、明確回報。
+    //   走預覽的路徑（有 allowKeys）＝使用者已逐項確認過刪除 → 不套、照推。
+    const skippedWillDelete=[];
+    if(!(allowKeys instanceof Set)){
+      try{
+        const skipMap=await _momoFullPushDeleteGuard(new Set(tasks.map(t=>t.key)));
+        if(skipMap && skipMap.size){
+          for(let i=tasks.length-1;i>=0;i--){ if(skipMap.has(tasks[i].key)){ skippedWillDelete.push({key:tasks[i].key, willDelete:skipMap.get(tasks[i].key)}); tasks.splice(i,1); } }
+          console.warn('[syncToCloud] 全推刪除防護：跳過 '+skippedWillDelete.length+' 項（會刪雲端資料、未經預覽確認）：',skippedWillDelete);
+        }
+      }catch(e){ console.warn('[syncToCloud] 刪除防護計算失敗（保守起見不阻擋、照推）：',e); }
+    }
+    console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length,'skippedWillDelete:',skippedWillDelete.length,'｜要推 keys:',tasks.map(t=>t.key));
     if(tasks.length===0){
-      // 沒有要送的 task —— 但有 skippedProblem 一定要講，不能只說「沒有需要同步」（那正是舊 bug）
-      if(skippedProblem.length>0){
+      // 沒有要送的 task —— 但有 skippedProblem / skippedWillDelete 一定要講，不能只說「沒有需要同步」（那正是舊 bug／靜默跳過）
+      if(skippedWillDelete.length>0){   // 🛡 全部被刪除防護擋下 → 明確告知去預覽確認，絕不靜默
+        const detail=skippedWillDelete.map(x=>x.key+'：會刪雲端 '+x.willDelete+' 筆').join('\n');
+        if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'有項目未推送（保護雲端資料）',message:skippedWillDelete.length+' 項因為「會刪掉雲端資料（可能是同事的更新）」而未推送。\n請到該賣場的「同步預覽」逐項確認後再推。',detail,kind:'warn'});
+        else if(typeof showToast==='function') showToast(skippedWillDelete.length+' 項會刪雲端資料、未推送，請到同步預覽確認','error');
+        _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete});
+      }else if(skippedProblem.length>0){
         if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:'有 '+skippedProblem.length+' 筆資料在本機讀不到、沒推上去（可能損毀）。\n請到淨利表重新產生這些報表。',detail:skippedProblem.map(x=>x.key+'：'+x.reason).join('\n'),kind:'error'});
         else if(typeof showToast==='function') showToast('有 '+skippedProblem.length+' 筆資料讀不到','error');
         _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty});
@@ -919,9 +969,9 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
-    _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty});
-    // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 時出現；只要有問題就 ⚠ + 彈窗
-    const problems=failed.length+skippedProblem.length;
+    _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete});
+    // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 且 skippedWillDelete=0 時出現；只要有問題/被保護跳過就 ⚠ + 彈窗
+    const problems=failed.length+skippedProblem.length+skippedWillDelete.length;
     if(problems===0){
       if(btn){btn.textContent='✓ 已同步 '+ok.length+' 筆';btn.style.background='#10b981';btn.style.color='#fff';btn.style.borderColor='#10b981';_syncBtnRepaintTimer=setTimeout(()=>{ _showSyncBtn(); },2000);}
       if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端','success');
@@ -933,9 +983,11 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       const lines=[];
       failed.forEach(f=>lines.push('［失敗］'+f.key+'：'+f.msg));
       skippedProblem.forEach(p=>lines.push('［讀不到］'+p.key+'：'+p.reason));
+      skippedWillDelete.forEach(x=>lines.push('［保護未推］'+x.key+'：會刪雲端 '+x.willDelete+' 筆（可能是同事的更新）'));
       let msg='成功 '+ok.length+' 筆。';
       if(failed.length) msg+='\n'+failed.length+' 筆沒推上雲端，資料還在本機 → 重整前請先匯出 Excel 備份，稍後再按同步重試。';
       if(skippedProblem.length) msg+='\n'+skippedProblem.length+' 筆在本機讀不到（可能損毀）→ 請到淨利表重新產生這些報表。';
+      if(skippedWillDelete.length) msg+='\n'+skippedWillDelete.length+' 項因會刪除雲端資料（可能是同事的更新）而未推送 → 請到該賣場的「同步預覽」逐項確認後再推。';
       if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:msg,detail:lines.join('\n'),kind:'error'});
       else if(typeof showToast==='function') showToast('同步未完成：'+problems+' 筆有問題','error');
     }
