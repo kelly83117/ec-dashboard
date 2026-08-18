@@ -343,8 +343,32 @@ try {
           const data = (snap && snap.data && snap.data()) || null; if (!data) return;
           if (window._momoCostJustSaved && (Date.now() - window._momoCostJustSaved < 5000)) return;   // 剛本機存過 → 不被 echo 覆蓋
           let changed = false;
-          if (data.costMap && JSON.stringify(Store._profitMem['ec_momo_cost_by_origin']) !== JSON.stringify(data.costMap)) { Store._profitMem['ec_momo_cost_by_origin'] = data.costMap; changed = true; }
-          if (data.meta && JSON.stringify(Store._profitMem['ec_momo_cost_by_origin_meta']) !== JSON.stringify(data.meta)) { Store._profitMem['ec_momo_cost_by_origin_meta'] = data.meta; changed = true; }
+          // ⚠ dirty 守衛（比照 momo_products/origins 訂閱）：ec_momo_cost_dirty 裡的原廠編號＝本機補了還沒推，
+          //   逐 key merge 保留本機值、其餘取雲端；不整包覆蓋（原本整包覆蓋會把本機未推的成本蓋掉＝資料遺失根因）。
+          const dirtySet = (window.__momoCostDirtySet && window.__momoCostDirtySet()) || new Set();
+          if (data.costMap) {
+            const localMap = Store._profitMem['ec_momo_cost_by_origin'] || {};
+            const mergedMap = Object.assign({}, data.costMap); const kept = [];
+            dirtySet.forEach(o => { if (Object.prototype.hasOwnProperty.call(localMap, o)) { mergedMap[o] = localMap[o]; kept.push(o); } });
+            if (JSON.stringify(localMap) !== JSON.stringify(mergedMap)) {
+              Store._profitMem['ec_momo_cost_by_origin'] = mergedMap;   // 三鏡像一起更（sweep/預覽讀 localStorage/_mem，只更 _profitMem 會 stale）
+              try { localStorage.setItem('ec_momo_cost_by_origin', JSON.stringify(mergedMap)); } catch (e) {}
+              try { if (Store._mem) Store._mem['ec_momo_cost_by_origin'] = mergedMap; } catch (e) {}
+              changed = true;
+              if (kept.length) console.log('[momo_cost_by_origin] dirty 守衛：保留本機未推 ' + kept.length + ' 個原廠成本（不被雲端覆蓋）：', kept.slice(0, 10));
+            }
+          }
+          if (data.meta) {
+            const localMeta = Store._profitMem['ec_momo_cost_by_origin_meta'] || {};
+            const mergedMeta = Object.assign({}, data.meta);
+            dirtySet.forEach(o => { if (Object.prototype.hasOwnProperty.call(localMeta, o)) mergedMeta[o] = localMeta[o]; });   // dirty 原廠的 meta 也保留本機（跟 cost 同一個 doc、同步時一起 read-merge-write）
+            if (JSON.stringify(localMeta) !== JSON.stringify(mergedMeta)) {
+              Store._profitMem['ec_momo_cost_by_origin_meta'] = mergedMeta;
+              try { localStorage.setItem('ec_momo_cost_by_origin_meta', JSON.stringify(mergedMeta)); } catch (e) {}
+              try { if (Store._mem) Store._mem['ec_momo_cost_by_origin_meta'] = mergedMeta; } catch (e) {}
+              changed = true;
+            }
+          }
           if (changed) { console.log('[momo_cost_by_origin] 收到更新'); window.dispatchEvent(new CustomEvent('momoCostByOriginReady')); }
         }, err => { console.error('[momo_cost_by_origin subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_cost_by_origin subscribe failed', e); }
