@@ -10654,37 +10654,7 @@ function momoRenderProfitBody(shop, tableOnly){
     // ═══ 階段四：物流按逐SKU出貨形狀重分配（甲配=C1202訂編／乙配=C1204寄倉；此時 rows=全商品，period 總和才正確）═══
     //   period 內錨定 物流total=logiTotal×(R_period/月R)、再按形狀分 → Σ該店fee=該店R×feeRate 不變（月總/期別總不動、逐SKU重分配）。
     //   乙配無 C1204 → frt=null → 維持營收攤(aggregate 的 feeRate乙 已含全部物流+倉租，estimated)。
-    if((shop==='甲配'||shop==='乙配') && period){
-      const mo=String(period).slice(0,7);
-      const frt=momoMonthFreightInfo(shop, mo);
-      if(frt){
-        _freightMode='proportional';
-        const involved=rows.filter(r=>(r.revenue>0.5||r.qty>0));
-        const R_period=involved.reduce((s,r)=>s+(r.revenue||0),0);
-        const shape_period=involved.reduce((s,r)=>s+(r.skuFreightPeriod||0),0);
-        const logiPeriod=frt.shopRev>0 ? frt.logiTotal*(R_period/frt.shopRev) : 0;
-        if(shape_period>0){
-          _freightMode='precise';
-          involved.forEach(r=>{
-            const 物流_i=logiPeriod*((r.skuFreightPeriod||0)/shape_period);
-            const 倉租_i=(frt.rentMode==='c1212')?(r.skuRentPeriod||0):0;   // C1212 逐SKU actual倉租(稅前、已按期別拆)；非c1212 時倉租仍併在 otherRate(營收攤)、此處0
-            const 其他_i=(r.revenue||0)*frt.otherRate;   // rentMode=c1212 時 otherRate 已去 yiZucuRate(僅shared)；否則含倉租(營收攤)
-            r.profit=(r.revenue||0)-物流_i-倉租_i-其他_i-(r.cost||0);
-            // ⚠ 與 momoAggregatePeriods 的 margin 同款判斷：營收0但有毛利（整批退貨仍扣運費/成本）→ null（畫面「—」），不可回 0（會蓋掉 aggregate 算對的 null → 顯示誤導的 0%）。
-            r.margin=r.revenue>0?(r.profit/r.revenue)*100:(Math.abs(r.profit)>0.5?null:0);
-          });
-        }
-        // C1212 方案2：零銷量但有倉租的 SKU（含下架呆滯品）→ 掛自己的實際倉租、淨利=負倉租、毛利率「—」（分母0）。不營收攤、不藏。
-        //   守恆：這些 SKU 的倉租先前是被營收攤到有銷量商品（隱藏補貼）；現在歸還本人 → 有銷量商品毛利率上升、呆滯品現形，Σ倉租=乙倉租不變。
-        if(frt.rentMode==='c1212'){
-          rows.forEach(r=>{
-            if(r.revenue>0.5||r.qty>0) return;   // 有銷量的已在上面 involved 處理
-            const 倉租_i=(r.skuRentPeriod||0);
-            if(倉租_i>0){ r.profit=-(倉租_i)-(r.cost||0); r.margin=null; r._rentOnly=true; }   // 純倉租虧損；rev=0 → margin 顯示「—」
-          });
-        }
-      }
-    }
+    _freightMode=momoStage4Redistribute(shop, period, rows);   // 階段四逐SKU重分配（抽成共用函式，與分析卡規則7 同一份口徑）
     window.__momoFreightMode=_freightMode;   // 供 banner 用（僅完整重繪；tableOnly 不重繪總覽）
     // 存基準列快取（搜尋/篩選/排序之前的原序）供之後 tableOnly 重用
     _momoBaseRows[shop]={ period, rows:rows.slice(), stock:{at:_stockAt, stale:_stockStale, dateStr:_stockDateStr, ageDays:_stockAgeDays} };
@@ -11492,11 +11462,12 @@ const MOMO_TAG_GROUPS=[
   ]},
   {group:'庫存', tags:[
     {k:'stale_stock', emoji:'📦', label:'呆滯庫存', short:'呆滯', desc:'有寄倉倉租且本期零銷量（含已下架仍有寄倉）→ 積了貨、還在燒倉租。分級：重度>365天／中度90~365／輕度<90', shopOnly:'乙配'},
+    {k:'rent_eats_margin', emoji:'🔥', label:'倉租吃掉毛利', short:'倉租蝕利', desc:'有寄倉倉租且本期有銷量、但倉租 > 毛利→本期淨虧（賣得掉但速度追不上倉租，該降價加速或減量）。逐SKU實際倉租口徑', shopOnly:'乙配'},
   ]},
 ];
 // 逐列「主標籤」嚴重度優先序（最該注意排前面）：缺成本 > 重跌 > 退貨警示 > 低利 > 高營收 > 其他。
 //   同一商品多標籤時，逐列只顯示這份清單裡最前面那個當主標籤，其餘收成「+N」。
-const MOMO_TAG_PRIORITY=['no_cost','drop','return_warn','stale_stock','profit_low','rev_top','dead_new','dead_long','traffic_hilo','surge','rev_mid','rev_dev','traffic_lohi'];
+const MOMO_TAG_PRIORITY=['no_cost','drop','return_warn','stale_stock','rent_eats_margin','profit_low','rev_top','dead_new','dead_long','traffic_hilo','surge','rev_mid','rev_dev','traffic_lohi'];
 function momoPrimaryTag(tagKeys){ for(const k of MOMO_TAG_PRIORITY){ if(tagKeys.indexOf(k)>=0) return k; } return tagKeys&&tagKeys[0]||null; }
 // 「標籤」欄的 chip：主標籤(emoji+短字) + 其餘收「+N」，hover title 列全部。行高不變靠 CSS height:16px。
 //   half=半月：流量類(🔵🟣)瀏覽量為 S1103 月值拆分估算 → 主標籤是流量類時掛「估」小標；hover 全清單也逐一標。
@@ -11580,6 +11551,8 @@ function momoComputeTags(shop, periodKey){
   // 呆滯庫存（乙配專屬）：獨立一遍，因為呆滯要含「下架仍有寄倉」的品，不能只掃上架 R（R 已濾掉 discontinued）。
   //   momoStaleStockList 內部 gate shop==='乙配'，甲配/MO+ 回 [] 直接跳過（零影響、不報錯）。add() 會一併補進 bySku[sku]（下架品雖不在 R，仍可掛標）+ counts。
   momoStaleStockList(shop, periodKey).forEach(s=>add(s.sku,'stale_stock'));
+  // 倉租吃掉毛利（乙配專屬）：有倉租+本期有銷量+淨利<0。同 gate shop==='乙配'（甲配/MO+ 回 []）。這些 SKU 有銷量、在 R 內，add() 掛得到標籤
+  momoRentEatsMarginList(shop, periodKey).forEach(s=>add(s.sku,'rent_eats_margin'));
   const anyRecon=R.some(r=>r.a.reconciled);
   return {isFullMonth, isHalf, bySku, counts, priorOk, estimated:!anyRecon, soldCount:n, avgRet};
 }
@@ -15032,6 +15005,58 @@ function momoStaleStockList(shop, periodKey){
   });
   return out;   // 未排序；呼叫端各自取用（規則卡按倉租、標籤依 sku 掛）
 }
+// ═══ 階段四：甲乙配運費/倉租逐SKU重分配（共用；淨利表 render 與分析卡規則7 同一份，避免兩路徑口徑分歧）═══
+//   mutates rows（每列需有 revenue/qty/cost/skuFreightPeriod/skuRentPeriod）→ 設 r.profit/r.margin/r._rentOnly；回傳 freightMode。
+//   ⚠ 與原 render 內嵌邏輯逐字相同（只是抽成函式），改這裡＝render 與規則7 一起改，不會再有「改一個忘另一個」。
+function momoStage4Redistribute(shop, period, rows){
+  if(!((shop==='甲配'||shop==='乙配') && period)) return 'none';
+  const mo=String(period).slice(0,7);
+  const frt=momoMonthFreightInfo(shop, mo);
+  if(!frt) return 'none';
+  let mode='proportional';
+  const involved=rows.filter(r=>(r.revenue>0.5||r.qty>0));
+  const R_period=involved.reduce((s,r)=>s+(r.revenue||0),0);
+  const shape_period=involved.reduce((s,r)=>s+(r.skuFreightPeriod||0),0);
+  const logiPeriod=frt.shopRev>0 ? frt.logiTotal*(R_period/frt.shopRev) : 0;
+  if(shape_period>0){
+    mode='precise';
+    involved.forEach(r=>{
+      const 物流_i=logiPeriod*((r.skuFreightPeriod||0)/shape_period);
+      const 倉租_i=(frt.rentMode==='c1212')?(r.skuRentPeriod||0):0;   // C1212 逐SKU actual倉租(稅前、已按期別拆)；非c1212 時倉租仍併在 otherRate(營收攤)、此處0
+      const 其他_i=(r.revenue||0)*frt.otherRate;   // rentMode=c1212 時 otherRate 已去 yiZucuRate(僅shared)；否則含倉租(營收攤)
+      r.profit=(r.revenue||0)-物流_i-倉租_i-其他_i-(r.cost||0);
+      r.margin=r.revenue>0?(r.profit/r.revenue)*100:(Math.abs(r.profit)>0.5?null:0);   // 營收0但有毛利→null（畫面「—」），不可回0
+    });
+  }
+  if(frt.rentMode==='c1212'){   // 零銷量但有倉租的SKU（含下架呆滯）→ 掛實際倉租、淨利=負倉租、毛利率「—」；守恆
+    rows.forEach(r=>{
+      if(r.revenue>0.5||r.qty>0) return;
+      const 倉租_i=(r.skuRentPeriod||0);
+      if(倉租_i>0){ r.profit=-(倉租_i)-(r.cost||0); r.margin=null; r._rentOnly=true; }
+    });
+  }
+  return mode;
+}
+// ═══ 倉租吃掉毛利（乙配專屬，規則7）：有倉租 且 本期有銷量 且 本期淨利<0（逐SKU實際倉租口徑，與淨利表同）═══
+//   影響金額＝淨虧損＝倉租−毛利＝−淨利。跟呆滯（規則6，零銷量）互補、零重疊。甲配/MO+ 回 []。
+function momoRentEatsMarginList(shop, period){
+  if(shop!=='乙配') return [];                     // 硬性：只有乙配有寄倉倉租；甲配/MO+ 不跑
+  const keys=momoExpandPeriod(period);
+  const rows=momoLoadProducts('乙配').map(p=>{
+    const a=momoAggregatePeriods(p, keys, '乙配', {lean:true});   // lean 仍回 skuFreightPeriod/skuRentPeriod（只跳 listPrice/latestSale）
+    return { sku:p.sku||'', name:p.name||'', revenue:a.revenue||0, qty:a.qty||0, cost:a.cost||0,
+             skuFreightPeriod:a.skuFreightPeriod, skuRentPeriod:a.skuRentPeriod, profit:a.profit, margin:a.margin };
+  });
+  momoStage4Redistribute('乙配', period, rows);   // 逐SKU重分配 → r.profit 改為實際倉租口徑淨利
+  const out=[];
+  rows.forEach(r=>{ const rent=Number(r.skuRentPeriod||0), q=r.qty||0;
+    if(q>0 && rent>0 && r.profit!=null && r.profit<0){   // 有銷量＋有倉租＋淨利<0（＝倉租>毛利）
+      // rent（skuRentPeriod）是稅前（淨利計算用）；顯示改含稅 ×1.05，跟呆滯規則(rentSku 含稅)與對帳單口徑一致。netLoss=−淨利 維持稅前
+      out.push({ sku:r.sku, name:r.name, rent:Math.round(rent*1.05), netLoss:-r.profit, qty:q });
+    }
+  });
+  return out;
+}
 // 單賣場分析：回傳該卡片所需（建議條池取影響金額前 2、缺成本統計、topImpact 供排序）。
 //   ⚠ 缺成本商品排除在規則1~3之外（不用 0/平均成本代算）；費率多解估毛利用「上界」最保守值（不用下界，避免高估漏抓賠錢）。
 function momoShopAnalysis(shop, period, prevKey, incomplete){
@@ -15103,6 +15128,13 @@ function momoShopAnalysis(shop, period, prevKey, incomplete){
     const lv=stale.reduce((o,x)=>{o[x.level]=(o[x.level]||0)+1;return o;},{});   // 分級計數（重/中/輕）→ 顯示，不影響影響金額
     const lvTxt=[lv.heavy?'重度 '+lv.heavy:'',lv.mid?'中度 '+lv.mid:'',lv.light?'輕度 '+lv.light:''].filter(Boolean).join('／');
     sugg.push({impact:sumRent, html:`<b>${stale.length} 項呆滯庫存</b> · 本期倉租 ${momoMoney(sumRent)}<span class="mm-anlz-d">${_momoEsc(worst.sku)}（${momoStaleLevelLabel(worst.level)}）積了 ${worst.sellable.toLocaleString()} 件、${worst.staleDays.toLocaleString()} 天沒賣、本期燒 ${momoMoney(worst.rent)}${lvTxt?'　·　'+lvTxt:''}</span>`});
+  }
+  // 規則7 倉租吃掉毛利（乙配專屬：有倉租且本期有銷量且淨利<0）。影響金額＝淨虧損＝−淨利。跟規則6（呆滯，零銷量）互補
+  const rentEat=momoRentEatsMarginList(shop, period);
+  if(rentEat.length){
+    const sumLoss=rentEat.reduce((s,x)=>s+x.netLoss,0);
+    const worst=rentEat.slice().sort((x,y)=>y.netLoss-x.netLoss)[0];   // 最嚴重＝淨虧最多
+    sugg.push({impact:sumLoss, html:`<b>${rentEat.length} 項倉租吃掉毛利</b> · 本期淨虧 ${momoMoney(sumLoss)}<span class="mm-anlz-d">${_momoEsc(worst.sku)} 賣 ${Math.round(worst.qty).toLocaleString()} 件、倉租 ${momoMoney(worst.rent)}、淨虧 ${momoMoney(worst.netLoss)}</span>`});
   }
   sugg.sort((x,y)=>y.impact-x.impact);
   out.suggestions=sugg.slice(0,2); out.noAnomaly=(sugg.length===0); out.topImpact=sugg.length?sugg[0].impact:0;
