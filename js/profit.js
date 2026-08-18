@@ -10439,7 +10439,7 @@ function momoPeriodTotals(shop, periodKey){
   momoLoadProducts(shop).forEach(p=>{
     const isActive = p.discontinued!==true;   // 上架
     if(isActive) activeTotal++;
-    const a=momoAggregatePeriods(p, keys, shop);
+    const a=momoAggregatePeriods(p, keys, shop, {lean:true});   // 彙總只讀 rev/profit/qty/covered/missCost，不需 listPrice/latestSale → lean 跳過逐SKU掃描熱點（MO+麻吉 每次 ~3s→~40ms；趨勢圖 ×32 次是通路總覽卡頓主因）
     // 動銷/計入判定用 grossQty(C1105訂單數，賣出後全退仍算有動)：讓動銷率不因「銷量改用對帳數量」而變動；qty 總和才是顯示銷量(對帳數量)
     const g=(a.grossQty!=null?a.grossQty:a.qty);
     const active = g>0 || Math.abs(a.revenue)>0.5;
@@ -14741,7 +14741,7 @@ function momoOvMonthsRange(endMo){
 function momoOvTop10(shop, period){
   const keys=momoExpandPeriod(period);
   const items=[];
-  momoLoadProducts(shop).forEach(p=>{ const a=momoAggregatePeriods(p,keys,shop); const q=a.qty||0; if(q>0) items.push({name:(p.name||p.sku||'—'), qty:q}); });
+  momoLoadProducts(shop).forEach(p=>{ const a=momoAggregatePeriods(p,keys,shop,{lean:true}); const q=a.qty||0; if(q>0) items.push({name:(p.name||p.sku||'—'), qty:q}); });   // Top10 只需 qty → lean（避免逐SKU掃描熱點）
   items.sort((a,b)=>b.qty-a.qty);
   return items.slice(0,10);
 }
