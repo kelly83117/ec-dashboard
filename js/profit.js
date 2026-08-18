@@ -15371,17 +15371,27 @@ function momoShopAnalysis(shop, period, prevKey, incomplete){
     if(prevKeys){ const pa=momoAggregatePeriods(p, prevKeys, shop, {lean:true}); if(pa){ prevMarginR=pa.margin; prevRev=pa.revenue||0; prevQty=pa.qty||0; prevCost=pa.cost||0; } }
     const stockRaw=(p.origin && stockMap[p.origin]!=null)?stockMap[p.origin]:null;
     const stock=stockRaw==null?null:(ratio===1?stockRaw:Math.floor(stockRaw*ratio));
-    rows.push({ sku:p.sku||'', name:p.name||'', rev, qty, marginR, profitR, covered, stock, stockRaw, curCost:a.cost||0, prevMarginR, prevRev, prevQty, prevCost });
+    rows.push({ sku:p.sku||'', name:p.name||'', rev, qty, marginR, profitR, covered, stock, stockRaw, curCost:a.cost||0, skuFreightPeriod:a.skuFreightPeriod, skuRentPeriod:a.skuRentPeriod, prevMarginR, prevRev, prevQty, prevCost });
   });
   out.missN=missSet.size; out.missRev=missRev;
   // rev 前 20% 門檻（規則2用）
   const revSorted=rows.map(r=>r.rev).filter(v=>v>0).sort((x,y)=>y-x);
   const revThreshold = revSorted.length? revSorted[Math.max(0,Math.floor(revSorted.length*cfg.topRevPctile)-1)] : Infinity;
   const sugg=[];
-  // 規則1 賠錢（毛利率<0、covered）
-  const losers=rows.filter(r=>r.covered && r.marginR!=null && r.marginR<0);
+  // 規則1 賠錢：甲配/MO+ 用聚合毛利率（無寄倉倉租、口徑不變）；乙配改用逐SKU實際倉租口徑（與淨利表/規則6/7 一致），
+  //   並排除已歸規則6（呆滯）/規則7（倉租蝕利）的商品 → 賠錢池不與倉租規則重複計同一商品（每個賠錢品恰進一條規則）。
+  let losers;
+  if(shop==='乙配'){
+    const yiRows=rows.map(r=>({sku:r.sku, name:r.name, revenue:r.rev, qty:r.qty, cost:r.curCost, skuFreightPeriod:r.skuFreightPeriod, skuRentPeriod:r.skuRentPeriod, profit:r.profitR, covered:r.covered}));
+    momoStage4Redistribute('乙配', period, yiRows);   // → r.profit 逐SKU實際倉租口徑
+    const rentRuleSkus=new Set([...momoStaleStockList('乙配',period).map(x=>x.sku), ...momoRentEatsMarginList('乙配',period).map(x=>x.sku)]);   // 規則6/7 專屬，排除避免重複計同一商品
+    losers=yiRows.filter(r=>r.covered && r.profit!=null && r.profit<0 && !rentRuleSkus.has(r.sku))
+      .map(r=>({sku:r.sku, name:r.name, profitR:r.profit, marginR:(r.revenue>0?r.profit/r.revenue*100:null)}));
+  } else {
+    losers=rows.filter(r=>r.covered && r.marginR!=null && r.marginR<0).map(r=>({sku:r.sku, name:r.name, profitR:r.profitR, marginR:r.marginR}));
+  }
   if(losers.length){ const totalLoss=losers.reduce((s,r)=>s+Math.max(0,-(r.profitR||0)),0); const worst=losers.slice().sort((x,y)=>(-(x.profitR||0))-(-(y.profitR||0)))[0];
-    sugg.push({impact:totalLoss, html:`<b>${losers.length} 項賠錢商品</b>，合計虧 ${momoMoney(totalLoss)}<span class="mm-anlz-d">最慘 ${_momoEsc(worst.sku)}：毛利率 ${worst.marginR.toFixed(1)}%、虧 ${momoMoney(-(worst.profitR||0))}</span>`}); }
+    sugg.push({impact:totalLoss, html:`<b>${losers.length} 項賠錢商品</b>，合計虧 ${momoMoney(totalLoss)}<span class="mm-anlz-d">最慘 ${_momoEsc(worst.sku)}：毛利率 ${worst.marginR!=null?worst.marginR.toFixed(1):'—'}%、虧 ${momoMoney(-(worst.profitR||0))}</span>`}); }
   // 規則2 低毛利高營收（0≤毛利率<門檻 且 營收進前20%）
   const lowHi=rows.filter(r=>r.covered && r.marginR!=null && r.marginR>=0 && r.marginR<cfg.lowMarginPct && r.rev>=revThreshold);
   if(lowHi.length){ const sumRev=lowHi.reduce((s,r)=>s+r.rev,0); const worst=lowHi.slice().sort((x,y)=>y.rev-x.rev)[0];
@@ -15420,7 +15430,7 @@ function momoShopAnalysis(shop, period, prevKey, incomplete){
   if(rentEat.length){
     const sumLoss=rentEat.reduce((s,x)=>s+x.netLoss,0);
     const worst=rentEat.slice().sort((x,y)=>y.netLoss-x.netLoss)[0];   // 最嚴重＝淨虧最多
-    sugg.push({impact:sumLoss, html:`<b>${rentEat.length} 項倉租吃掉毛利</b> · 本期淨虧 ${momoMoney(sumLoss)}<span class="mm-anlz-d">${_momoEsc(worst.sku)} 賣 ${Math.round(worst.qty).toLocaleString()} 件、倉租 ${momoMoney(worst.rent)}、淨虧 ${momoMoney(worst.netLoss)}</span>`});
+    sugg.push({impact:sumLoss, html:`<b>${rentEat.length} 項倉租吃掉毛利</b> · 本期淨虧 ${momoMoney(sumLoss)}${losers.length===0?'（本期賠錢商品皆為此類）':''}<span class="mm-anlz-d">${_momoEsc(worst.sku)} 賣 ${Math.round(worst.qty).toLocaleString()} 件、倉租 ${momoMoney(worst.rent)}、淨虧 ${momoMoney(worst.netLoss)}</span>`});   // 規則1(非倉租賠錢)為空時標明：本期賠錢商品皆已歸此類（避免規則1顯0被誤解成沒生效）
   }
   sugg.sort((x,y)=>y.impact-x.impact);
   out.suggestions=sugg.slice(0,2); out.noAnomaly=(sugg.length===0); out.topImpact=sugg.length?sugg[0].impact:0;
