@@ -15987,32 +15987,45 @@ function closeCoupangDist(){
   document.getElementById('coupang-dist-overlay')?.classList.remove('open');
 }
 
+// 區間分段按鈕（上／下／整月）。樣式走 css/profit.css 的 .sp-seg-grp / .sp-seg（在 /* Period */ 區塊），
+//   不寫 inline style；為什麼不共用 MOMO 的 .mm-seg、為什麼不做 disabled，理由都寫在那裡。
+// ⚠ 單一渲染來源：永遠從 state[shop].curHalf 重算 + 整段 innerHTML 重繪，【不做】「就地改 class」的
+//   最佳化。本函式有兩個呼叫點 —— onHalfChange（有被點的按鈕）與 onMonthChange（沒有），
+//   就地改只有前者做得到，兩條路徑分歧就會出現「畫面亮的段」與 curHalf 不一致的 bug。
+//   onHalfChange 的第三個參數 btn 因此維持死參數、永遠傳 null（勿接回來用）。
 function updateHalfBtnLabels(shop){
-  const m=state[shop]?.curMonth||'2026/05';
-  const[y,mo]=m.split('/');
-  const last=new Date(+y,+mo,0).getDate();
-  const curHalf=state[shop]?.curHalf||'first';
+  const container=document.getElementById('half-btns-'+shop);
+  // 🔴 這道守衛必須留在【所有 DOM 操作之前】，不可下移：initProfitPeriodControls 的 SHOPS.forEach
+  //   會對五個通路都呼叫本函式，而測試通路走 periodRowTestHTML、根本沒有 #half-btns-測試通路。
+  //   守衛一旦落到後面，那一圈會中途 throw → 它後面的通路期間列全部建不出來。
+  if(!container)return;
   const btns=[
-    {id:'first',label:'上半月'},
-    {id:'second',label:'下半月'},
+    {id:'first',label:'上'},
+    {id:'second',label:'下'},
     {id:'full',label:'整月'},
   ];
-  const container=document.getElementById('half-btns-'+shop);
-  if(!container)return;
-  container.innerHTML=`<select onchange="onHalfChange('${shop}',this.value,null,true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">${btns.map(h=>`<option value="${h.id}"${h.id===curHalf?' selected':''}>${h.label}</option>`).join('')}</select>`;
+  // 白名單（不能只用 ||'first' 擋 falsy）：select 版遇到不在選項內的 curHalf，瀏覽器會 fallback
+  //   顯示第一個 option、畫面看起來仍正常；按鈕版沒有這個 fallback，會變成三顆全白、
+  //   使用者看不出現在是哪一期，但表格卻已經載入了某一期的資料。
+  const raw=state[shop]?.curHalf;
+  const curHalf=btns.some(h=>h.id===raw)?raw:'first';
+  // ⚠ inline handler 裡【不要】用 this / event.target：這整段會被下一次 innerHTML 重繪銷毀，
+  //   任何操作宿主節點的寫法都會碰到已脫離文件的節點。
+  container.innerHTML=`<div class="sp-seg-grp">${btns.map(h=>`<button type="button" class="sp-seg${h.id===curHalf?' on':''}" onclick="onHalfChange('${shop}','${h.id}',null,true)">${h.label}</button>`).join('')}</div>`;
 }
 
 // ── 期間列 HTML（照 shopHTML / momoShopHTML / coupangSummaryHTML 的範式：傳 shop 回字串）──
 //   分流只發生在 periodRowHTML 這一支，initProfitPeriodControls 的 forEach 維持零分支。
-//   ⚠ periodRowShopeeHTML 的內容與抽出前【逐字相同】（只把 s.id 改成參數 id），
-//     蝦皮四家產生的 DOM 一個字元都沒變 —— 有 node 腳本做 byte 級比對佐證。
+//   ⚠ 2026-08-18 改：區間從 select 改成分段按鈕（上／下／整月，形狀比照 MOMO）。本函式因此
+//     不再與抽出時逐字相同 —— 少了「區間」那個 span 標籤（按鈕自己已經說明，且要靠它省下的寬度），
+//     #half-btns-{id} 也拿掉了 inline 的 gap:4px（連體按鈕要零 gap，間距靠 .sp-seg-grp 的外框）。
+//     月份下拉這一半【沒有動】，仍是寫死 inline style。按鈕本體由 updateHalfBtnLabels 注入。
 function periodRowShopeeHTML(id){return`
       <span style="font-size:12px;color:#6b7280;font-weight:500">月份</span>
       <select id="month-sel-${id}" onchange="onMonthChange('${id}',true)" style="padding:4px 10px;background:white;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;cursor:pointer;color:#1a1a2e">
         ${MONTHS.map(mo=>`<option value="${mo}" ${mo===(state[id].curMonth||'2026/05')?'selected':''}>${mo}</option>`).join('')}
       </select>
-      <span style="font-size:12px;color:#6b7280;font-weight:500;margin-left:4px">區間</span>
-      <div id="half-btns-${id}" style="display:flex;gap:4px"></div>`;}
+      <div id="half-btns-${id}"></div>`;}
 // 測試通路：期間是任意起訖日，不是月份+半月。費率輸入也掛在這一列
 //   （不是上傳 modal 裡那顆 platformRate，理由見 onTestRateChange）。
 //   樣式走 css/profit.css 的 .tp-* class，不寫 inline style。

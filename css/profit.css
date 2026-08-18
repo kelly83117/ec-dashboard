@@ -39,6 +39,33 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .half-btn{padding:6px 14px;border:1.5px solid #e4e6ef;border-radius:7px;font-size:13px;font-weight:500;font-family:'Noto Sans TC',sans-serif;background:#fff;color:#6b7280;cursor:pointer;transition:all .15s;white-space:nowrap;}
 .half-btn:hover{border-color:#5b5fcf;color:#5b5fcf;}
 .half-btn.active{background:#5b5fcf;border-color:#5b5fcf;color:#fff;}
+/* ── 蝦皮四家通路的「區間」分段按鈕（上／下／整月）──
+   由 updateHalfBtnLabels 產生，掛在 periodRowShopeeHTML 的 #half-btns-{通路} 容器內。
+   形狀（連體、共用外框、border-left 分隔、零 gap）比照 MOMO 的 .mm-seg-grp / .mm-seg
+   （見下方「MOMO 淨利表 UI」區塊裡的「分段期別控制」那組），但選中色用蝦皮主色 #5b5fcf，
+   不是 MOMO 的桃紅 #e4007f。
+
+   🔴 刻意【不共用】.mm-seg：
+     1. mm- 這個前綴出現在蝦皮頁面是錯誤的命名暗示，日後有人調 MOMO 樣式會誤傷蝦皮。
+     2. .mm-seg.on 綁死 MOMO 品牌色 #e4007f，蝦皮沿用會冒出一顆桃紅按鈕。
+
+   🔴 刻意【不沿用】上方的 .half-btn / .half-btns：
+     那是 2026-06-11 commit 63b4298 的「日期標籤版」遺留（按鈕上印「6/1–6/15」這種文字），
+     隔天 2026-06-12 commit a5cc474 改成 select 之後就沒有任何 JS 引用了（全 repo 零命中）。
+     它的 padding:6px 14px + 13px 字是為那種長標籤設計的，套上「上／下／整月」短標籤
+     會比現在的 select 寬約 120px。孤兒 CSS 本次刻意不刪，留待另一個清理 PR 處理。
+
+   🔴 刻意【不做】:disabled 灰化：
+     MOMO 會依該半月實際有無資料把段位變灰（.mm-seg:disabled）。蝦皮的半月是純日曆切分
+     （getDays / getPeriodLabel 純算日期、MONTHS 是寫死的 12 個月），三顆永遠合法 ——
+     做了也永遠全亮，只是多一份沒有資訊量的死碼。 */
+.sp-seg-grp{display:inline-flex;border:1px solid #e5e7eb;border-radius:7px;overflow:hidden;}
+.sp-seg{padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;border:none;border-left:1px solid #e5e7eb;background:#fff;color:#6b7280;font-family:'Noto Sans TC',sans-serif;}
+.sp-seg:first-child{border-left:none;}
+/* :not(.on) 不可省：漏掉的話滑鼠移到已選中那顆會被淺灰蓋掉主色，看起來像選擇被取消。
+   也刻意不抄 .mm-seg 的 :not(:disabled) —— 蝦皮不做 disabled，那個條件永遠為真、是死碼。 */
+.sp-seg:hover:not(.on){background:#f9fafb;}
+.sp-seg.on{background:#5b5fcf;color:#fff;}
 .days-badge{font-size:12px;color:#5b5fcf;background:#ede9fe;padding:3px 10px;border-radius:5px;font-weight:600;white-space:nowrap;}
 
 /* Upload */
@@ -744,8 +771,10 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 
 /* ── 測試通路期間列：日期起訖 + 專屬費率輸入 ──
    顏色一律走 css/main.css:2 的 :root 變數，不寫死色碼、不碰 --bg。
-   ⚠ 這一列只有測試通路會用到（periodRowTestHTML）；其他四家仍是 initProfitPeriodControls
-     原本那段寫死 inline style 的月份/區間下拉，刻意不動、不改寫成 class。 */
+   ⚠ 這一列只有測試通路會用到（periodRowTestHTML）；其他四家走 periodRowShopeeHTML，
+     月份【仍是】寫死 inline style 的下拉、刻意不動不改寫成 class；區間已於 2026-08-18 改成
+     分段按鈕，樣式在上方 Period 區塊的 .sp-seg-grp / .sp-seg（那組是寫死色碼，
+     與本區塊的 var(--*) 不同批，各自跟隨所在區塊的既有慣例）。 */
 .tp-lbl{font-size:12px;color:var(--text-muted);font-weight:500;}
 .tp-lbl-gap{margin-left:8px;}
 .tp-sep{font-size:12px;color:var(--text-muted);}
