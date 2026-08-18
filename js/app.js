@@ -2592,6 +2592,34 @@ function __localRemove(key) {
   try { localStorage.removeItem(key); } catch {}
 }
 
+/* ---------- 工作日誌 pending 名單：由 app.js 搶先建立，好在這裡包上「最後一次 add 的時間戳」 ----------
+ * 用途：下面 cs.subscribe 裡的 ec.dailyProgress 保護要判斷「pending 是不是還新鮮」，需要一個時間戳。
+ *
+ * 為什麼時間戳記在這裡、而不是記在 add 的呼叫端：
+ *   實際 add 的地方有三處 —— js/pages/daily.js（手打待辦）、js/pages/marketing.js（洞察/淨利
+ *   自動摘要）、js/profit.js（MOMO 自動摘要）。這一輪刻意不動那三個檔案（js/profit.js 與
+ *   js/firebase.js 同事正在改），所以改成「app.js 先把 Set 建好、把 add/delete/clear 包起來」，
+ *   讓那三處的 `window.__dpPendingNames = window.__dpPendingNames || new Set()` 直接拿到這一顆。
+ *   main.js 的 import 順序是 app → pages/* → profit → firebase，app.js 模組頂層必定最先執行，
+ *   而那三處都是在 render / 使用者操作時才跑到，所以一定拿得到包好的這顆。→ 零改動達成時間戳。
+ *
+ * ⚠ 若日後有人把那三處的 `|| new Set()` 改成無條件 `new Set()`，這層包裝會被整個丟掉，
+ *   __dpPendingAt 永遠停在 0 → 下面的 guard 直接失效（fail-open：不會壞事，但止血歸零、
+ *   而且沒有任何錯誤訊息）。要動那三處的建立方式時，請回頭看這裡。
+ */
+window.__dpPendingNames = window.__dpPendingNames || new Set();
+window.__dpPendingAt = window.__dpPendingAt || 0;   // 最後一次 add 的毫秒時間戳；0 = 目前沒有 pending
+if (!window.__dpPendingNames.__stampWrapped) {
+  const __dpOrigAdd = window.__dpPendingNames.add.bind(window.__dpPendingNames);
+  const __dpOrigDel = window.__dpPendingNames.delete.bind(window.__dpPendingNames);
+  const __dpOrigClr = window.__dpPendingNames.clear.bind(window.__dpPendingNames);
+  window.__dpPendingNames.add = (v) => { const r = __dpOrigAdd(v); window.__dpPendingAt = Date.now(); return r; };
+  // delete / clear 清空後把時間戳歸零，避免「已經推完雲端」卻還被當成新鮮 pending
+  window.__dpPendingNames.delete = (v) => { const r = __dpOrigDel(v); if (window.__dpPendingNames.size === 0) window.__dpPendingAt = 0; return r; };
+  window.__dpPendingNames.clear = () => { const r = __dpOrigClr(); window.__dpPendingAt = 0; return r; };
+  window.__dpPendingNames.__stampWrapped = true;
+}
+
 // 雲端寫入失敗時的通用通報：呼叫 App.showAlertModal (pages/modal.js 提供)，
 // 退而求其次走 console.error + showToast。會幫使用者翻譯 1 MiB 超限這類常見錯。
 function __notifyCloudFail(key, err, action) {
@@ -2978,6 +3006,55 @@ async function __setupCloud() {
           });
         }
       } catch {}
+      // ══════ 保護本機未同步的工作日誌 ec.dailyProgress（止血，2026-08-18）══════
+      // 症狀：同事手打的待辦「整天不見」。元兇就是下面那行 `Store._mem = next` —— 手打待辦走
+      //   Store.setLocalOnly，只進 _mem + localStorage，要按「☁ 同步雲端」才推上去；但在按之前，
+      //   只要任何人動了 app/main 任何一個欄位，這個 subscribe 就 fire，_mem 被雲端版整個取代，
+      //   那些字在「按同步之前」就已經沒了。（更糟的是按下去推的是已被洗掉的版本，還會跳「已同步 ✓」。）
+      //
+      // 🔴 這【不是】照抄上面 __insightPendingNotes 那段，語義不一樣，review 時請不要當成等價改動：
+      //   ・__insightPendingNotes 裝的是【key】（'ec.insight_玩樂_notes'）→ 一個 pending 只凍結
+      //     一個賣場的 notes，其他賣場照常收雲端更新，傷害被 key 的粒度框住。
+      //   ・__dpPendingNames 裝的是【人名】，而 ec.dailyProgress 只有一把 key、裝著所有人 ×
+      //     全部日期 → 任何一個人 pending，就凍結全部人的全部日期。傷害半徑大一個量級。
+      //   形狀可以抄，語義不能混為一談。
+      //
+      // 因此一定要配時限（洞察表那段沒有時限，是因為它的傷害已被 key 粒度框住，這裡沒有這層保險）：
+      //   ⚠ 10 分鐘是【猜的，沒有實際使用數據】。取這個數的想法是「打一批待辦到按同步多半在幾分鐘內」；
+      //     最壞情況是「看到別人的更新晚 10 分鐘」——工作日誌不是即時協作工具，可以接受。
+      //     同時 js/profit.js 的 momoUpdateDailyProgress 每次都 add、多數 silent 不推雲（黏性很強），
+      //     有了時限就會自己解開，不會讓 MOMO 操作者整天看不到別人的更新。
+      //   ⚠ 要調整這個數字，判準是【同事「打完待辦」到「按下 ☁ 同步」的實際間隔】：
+      //     多數人超過 10 分鐘才按 → 調大；抱怨「看不到別人更新」多過「資料掉」→ 調小。先量再改，別憑感覺。
+      //
+      // ⚠ 這道 guard 的效力邊界（別誤以為它做得比實際多）：
+      //   ・救不回【已經掉的】資料 —— 雲端那份早就被覆蓋過了，這裡只擋未來。上線後舊資料不會自己回來。
+      //   ・擋不住「開頁那一刻首批 snapshot 就洗掉」：__dpPendingNames 的三個建立點（daily.js /
+      //     marketing.js / profit.js）都要等使用者操作到那裡才跑，daily.js 那個還卡在
+      //     `if (viewDate < todayStr) return;` 之後（看過去日期時根本不會建立），
+      //     而首批 snapshot 在 boot 幾秒內就到 → 開頁瞬間這道 guard 必然是關的。
+      //   ・開機回填【刻意不做】：localStorage 那份 ec.dailyProgress 是殘缺的 —— 老闆任務的
+      //     指派 / 刪除 / 勾選走 Store.set，雲端模式下 origSet 的 `if (this._useMem) { …; return; }`
+      //     直接 return、不寫 localStorage。拿它回填會把已刪除的老闆任務待辦復活、把已勾選的取消掉。
+      //     真要做得另想辦法（只補雲端完全沒有的 date×person 格、不覆蓋不刪除），另案處理。
+      //
+      // 💊 這只是止血，不是根治。根治是 per-person merge 推送（推之前先讀雲端最新、只套自己那格的
+      //   diff，模式可參考 js/profit.js 的 saveSummaryRows），那要動六處寫入路徑、跨 daily.js /
+      //   marketing.js / profit.js 三個檔案，其中一處在 MOMO 區（同事正在改），等那輪落地再做。
+      //
+      // ⚠ __dpPendingNames 目前【沒有】持久化，重整即歸零（__insightPendingNotes 不同，它在
+      //   js/pages/marketing.js 有 restore + persist wrapper）。日後若有人要補 dp 的持久化：
+      //   🔴 洞察表那個 persist wrapper 只包了 add / delete、【沒包 clear】—— 因為洞察表從來沒用過
+      //     clear。而全 repo 用到 .clear() 的只有 js/pages/daily.js 同步成功那一處。照抄會靜默漏掉：
+      //     .clear() 清了記憶體 Set 但 localStorage 的名單原封不動 → 下次開機回填時把「已經推上雲的
+      //     舊本機版」再蓋回雲端，製造一條新的資料回退路徑。要補持久化請連 clear 一起包。
+      try {
+        const dpPending = window.__dpPendingNames;   // 可能還不存在：那三個建立點都還沒跑到
+        const dpFresh = window.__dpPendingAt && (Date.now() - window.__dpPendingAt < 10 * 60 * 1000);
+        if (dpPending && dpPending.size > 0 && dpFresh && Store._mem && Store._mem['ec.dailyProgress'] !== undefined) {
+          next['ec.dailyProgress'] = Store._mem['ec.dailyProgress'];
+        }
+      } catch {}
       Store._mem = next;
       // 首批雲端 snapshot 一定強制重繪（即便 App 尚未準備、或 dirty check 誤判）
       // 否則手機開頁時，「dashboard 先用空資料 render → 雲端到了但被 dirty 條件擋住」會看不到數字
@@ -3001,12 +3078,21 @@ async function __setupCloud() {
         return;
       }
       const active = document.activeElement;
+      // dp-todo-add-input = 工作日誌「新增待辦」輸入框（daily.js 的 <input type="text">，
+      //   打字後要按 Enter 才進 Store）。原本不在這個清單裡 → 打到一半 snapshot 一來就整頁重繪、
+      //   字被清掉。跟上面 ec.dailyProgress 的 guard 同源（同一個 handler、同樣是「打的東西不見」），
+      //   但 guard 救不到這一段：那些字還沒進 Store，pending 也還沒 add。
       const inOurInput = active && active.tagName === 'INPUT' && (
         active.classList.contains('card-rev') || active.classList.contains('card-ads') ||
-        active.classList.contains('entry-rev') || active.classList.contains('entry-ads')
+        active.classList.contains('entry-rev') || active.classList.contains('entry-ads') ||
+        active.classList.contains('dp-todo-add-input')
       );
       // 任一卡片有未儲存更動就不要重繪（避免把使用者打到一半的數字蓋掉）
-      const hasUnsavedChanges = Array.from(document.querySelectorAll('.card-rev, .card-ads')).some(el => {
+      // 一併納入 .dp-todo-add-input：只靠上面的 inOurInput 不夠，那個只在「還聚焦著」時才擋，
+      //   使用者打完字沒按 Enter 就點去別處，保護就失效了。
+      //   它沒有 dataset.original，norm(undefined) === '' → 空的不算 dirty、打了字才算，
+      //   正好就是「打了但還沒送出」的語義，不必額外加 dataset。
+      const hasUnsavedChanges = Array.from(document.querySelectorAll('.card-rev, .card-ads, .dp-todo-add-input')).some(el => {
         const norm = v => (v == null ? '' : String(v).trim());
         return norm(el.value) !== norm(el.dataset.original);
       });
