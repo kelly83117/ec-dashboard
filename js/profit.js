@@ -11490,10 +11490,13 @@ const MOMO_TAG_GROUPS=[
     {k:'return_warn', emoji:'⚠️', label:'退貨警示', short:'退貨高', desc:'退貨率 > 該期平均兩倍'},
     {k:'no_cost',     emoji:'❌', label:'缺成本',   short:'缺成本', desc:'有營收但無成本'},
   ]},
+  {group:'庫存', tags:[
+    {k:'stale_stock', emoji:'📦', label:'呆滯庫存', short:'呆滯', desc:'有寄倉倉租且本期零銷量（含已下架仍有寄倉）→ 積了貨、還在燒倉租。分級：重度>365天／中度90~365／輕度<90', shopOnly:'乙配'},
+  ]},
 ];
 // 逐列「主標籤」嚴重度優先序（最該注意排前面）：缺成本 > 重跌 > 退貨警示 > 低利 > 高營收 > 其他。
 //   同一商品多標籤時，逐列只顯示這份清單裡最前面那個當主標籤，其餘收成「+N」。
-const MOMO_TAG_PRIORITY=['no_cost','drop','return_warn','profit_low','rev_top','dead_new','dead_long','traffic_hilo','surge','rev_mid','rev_dev','traffic_lohi'];
+const MOMO_TAG_PRIORITY=['no_cost','drop','return_warn','stale_stock','profit_low','rev_top','dead_new','dead_long','traffic_hilo','surge','rev_mid','rev_dev','traffic_lohi'];
 function momoPrimaryTag(tagKeys){ for(const k of MOMO_TAG_PRIORITY){ if(tagKeys.indexOf(k)>=0) return k; } return tagKeys&&tagKeys[0]||null; }
 // 「標籤」欄的 chip：主標籤(emoji+短字) + 其餘收「+N」，hover title 列全部。行高不變靠 CSS height:16px。
 //   half=半月：流量類(🔵🟣)瀏覽量為 S1103 月值拆分估算 → 主標籤是流量類時掛「估」小標；hover 全清單也逐一標。
@@ -11574,6 +11577,9 @@ function momoComputeTags(shop, periodKey){
     if(num(r.a.margin)&&r.a.margin<20) add(r.sku,'profit_low');
     if(avgRet!=null&&num(r.a.returnRate)&&r.a.returnRate>avgRet*2&&r.a.returnRate>0) add(r.sku,'return_warn');
     if(isMoPlus ? (r.a.covered===false) : !(Number(r.p.cost)>0)) add(r.sku,'no_cost'); });   // MO+：成本涵蓋<100% 才標；甲乙：product.cost 缺
+  // 呆滯庫存（乙配專屬）：獨立一遍，因為呆滯要含「下架仍有寄倉」的品，不能只掃上架 R（R 已濾掉 discontinued）。
+  //   momoStaleStockList 內部 gate shop==='乙配'，甲配/MO+ 回 [] 直接跳過（零影響、不報錯）。add() 會一併補進 bySku[sku]（下架品雖不在 R，仍可掛標）+ counts。
+  momoStaleStockList(shop, periodKey).forEach(s=>add(s.sku,'stale_stock'));
   const anyRecon=R.some(r=>r.a.reconciled);
   return {isFullMonth, isHalf, bySku, counts, priorOk, estimated:!anyRecon, soldCount:n, avgRet};
 }
@@ -11683,11 +11689,13 @@ function momoRenderFilterPanel(shop){
   const active=momoFilterActiveCount(shop);
   // 半月：只有「成長類」停用(標僅整月、disable)，其餘照常可選；流量類另標「半月估算」。
   const tagHTML=MOMO_TAG_GROUPS.map(g=>{
+    const gTags=g.tags.filter(t=>!t.shopOnly || t.shopOnly===shop);   // shopOnly 標籤（呆滯庫存＝乙配）在其他賣場整條不出現，甲配/MO+ 零干擾
+    if(!gTags.length) return '';                                       // 整組被濾空（非乙配的庫存組）→ 連組頭都不畫
     const growthOff = !full && g.group==='成長';
     const gHead = g.group
       + (growthOff?' <span class="mm-fp-gp-note">· 僅整月</span>':'')
       + ((!full && g.group==='流量')?' <span class="mm-fp-gp-note">· 半月估算</span>':'');
-    const tagsHtml = g.tags.map(t=>{
+    const tagsHtml = gTags.map(t=>{
       if(growthOff){
         return `<button class="mm-fp-tag dis" disabled title="${t.emoji} ${t.label}｜半月環比雜訊大（一個大單就 ±50%），僅整月計算">${t.emoji} ${t.label} <span class="mm-fp-cnt">僅整月</span></button>`;
       }
@@ -14995,6 +15003,35 @@ function momoPeriodIncomplete(periodKey){
 }
 // 規則池門檻（可調）
 const MOMO_ANALYSIS_CFG={ lowMarginPct:10, marginDropPt:5, topRevPctile:0.2 };
+// ═══ 呆滯庫存（乙配專屬：只有乙配有寄倉倉租 C1212 + F1102 即時庫存）═══
+//   呆滯＝有倉租 且 本期零銷量 且 有 F1102 紀錄。影響金額＝該期別 per-SKU 倉租（實際燒的錢，非庫存價值——庫存價值是沉沒成本，倉租才是持續流失）。
+//   分級按滯銷天數（F1102），只影響顯示/排序、不影響影響金額。門檻可調（天）：
+const MOMO_STALE_STOCK_CFG={ heavyDays:365, midDays:90 };   // 重度>365、中度90~365、輕度<90（但本期零銷量）
+function momoStaleLevel(days){ const c=MOMO_STALE_STOCK_CFG; return days>c.heavyDays?'heavy':(days>=c.midDays?'mid':'light'); }
+function momoStaleLevelLabel(level){ return level==='heavy'?'重度':(level==='mid'?'中度':'輕度'); }
+// 乙配某期別的呆滯清單。含已下架仍有寄倉的品（訊號更強：不賣了還在燒錢）。甲配/MO+ 直接回 []（無寄倉倉租、無 F1102）。
+//   ⚠ 倉租為月顆粒（ec_momo_rent|乙配|<月>）→ 用 period 所在月；半月期別亦取整月倉租（倉租無次月granularity）。
+function momoStaleStockList(shop, periodKey){
+  if(shop!=='乙配') return [];                                   // 硬性：只做乙配、條件分支不硬跑
+  const month=String(periodKey||'').slice(0,7);
+  const rent=momoLoadRent('乙配', month);                        // {rentSku:{sku:raw應付倉租(稅前)}, total, ...}
+  const f1102=momoLoadF1102('乙配');                             // {skus:{sku:{sellable,staleDays,out30,turnDays,...}}}
+  if(!rent||!rent.rentSku||!f1102||!f1102.skus) return [];       // 缺任一來源→無法判定（不猜、不誤報）
+  const keys=momoExpandPeriod(periodKey); const out=[];
+  momoLoadProducts('乙配').forEach(p=>{                          // 含下架（momoLoadProducts 不濾 discontinued）
+    const sku=p.sku; if(!sku) return;
+    const rentAmt=Number(rent.rentSku[sku]||0); if(!(rentAmt>0)) return;   // 沒燒錢＝不是這條要抓的（零銷量也不算）
+    const f=f1102.skus[sku]; if(!f) return;                      // 無 F1102 紀錄＝無資料≠呆滯
+    const a=momoAggregatePeriods(p, keys, '乙配', {lean:true});  // 只對「有倉租＋有F1102」的少數候選算，非全表
+    const g=(a.grossQty!=null?a.grossQty:a.qty)||0;
+    if(g>0 || Math.abs(a.revenue||0)>0.5) return;                // 本期有動＝非呆滯
+    const days=Number(f.staleDays)||0;
+    out.push({ sku, name:p.name||'', rent:rentAmt, staleDays:days, sellable:Number(f.sellable)||0,
+      out30:(f.out30!=null?Number(f.out30):null), turnDays:(f.turnDays!=null?Number(f.turnDays):null),
+      discontinued:p.discontinued===true, level:momoStaleLevel(days) });
+  });
+  return out;   // 未排序；呼叫端各自取用（規則卡按倉租、標籤依 sku 掛）
+}
 // 單賣場分析：回傳該卡片所需（建議條池取影響金額前 2、缺成本統計、topImpact 供排序）。
 //   ⚠ 缺成本商品排除在規則1~3之外（不用 0/平均成本代算）；費率多解估毛利用「上界」最保守值（不用下界，避免高估漏抓賠錢）。
 function momoShopAnalysis(shop, period, prevKey, incomplete){
@@ -15058,6 +15095,15 @@ function momoShopAnalysis(shop, period, prevKey, incomplete){
     sugg.push({impact:sumRev, html:`<b>${outs.length} 項斷貨</b>（庫存 0 仍有銷量），影響營收 ${momoMoney(sumRev)}<span class="mm-anlz-d">最大 ${_momoEsc(worst.sku)}：本期營收 ${momoMoney(worst.rev)}、銷量 ${Math.round(worst.qty).toLocaleString()}</span>`}); }
   // 規則5 缺成本（項數＋影響營收）
   if(missSet.size){ sugg.push({impact:missRev, html:`<b>缺成本 ${missSet.size} ${isMoPlus?'個原廠編號':'項商品'}</b>，影響營收 ${momoMoney(missRev)}<span class="mm-anlz-d">補齊即計入加權毛利率</span>`}); }
+  // 規則6 呆滯庫存（乙配專屬：有倉租且本期零銷量）。影響金額＝本期倉租（跟其他規則同一個 $ 基準才能同池排序）；最嚴重＝滯銷最久
+  const stale=momoStaleStockList(shop, period);
+  if(stale.length){
+    const sumRent=stale.reduce((s,x)=>s+x.rent,0);
+    const worst=stale.slice().sort((x,y)=>(y.staleDays-x.staleDays)||(y.rent-x.rent))[0];   // 最嚴重＝滯銷天數最久（分級基準），同天數再比倉租
+    const lv=stale.reduce((o,x)=>{o[x.level]=(o[x.level]||0)+1;return o;},{});   // 分級計數（重/中/輕）→ 顯示，不影響影響金額
+    const lvTxt=[lv.heavy?'重度 '+lv.heavy:'',lv.mid?'中度 '+lv.mid:'',lv.light?'輕度 '+lv.light:''].filter(Boolean).join('／');
+    sugg.push({impact:sumRent, html:`<b>${stale.length} 項呆滯庫存</b> · 本期倉租 ${momoMoney(sumRent)}<span class="mm-anlz-d">${_momoEsc(worst.sku)}（${momoStaleLevelLabel(worst.level)}）積了 ${worst.sellable.toLocaleString()} 件、${worst.staleDays.toLocaleString()} 天沒賣、本期燒 ${momoMoney(worst.rent)}${lvTxt?'　·　'+lvTxt:''}</span>`});
+  }
   sugg.sort((x,y)=>y.impact-x.impact);
   out.suggestions=sugg.slice(0,2); out.noAnomaly=(sugg.length===0); out.topImpact=sugg.length?sugg[0].impact:0;
   return out;
