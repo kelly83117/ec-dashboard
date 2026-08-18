@@ -7871,6 +7871,7 @@ function _momoOBaseSet(k, ts){ try{ const m=_momoReadJson(_MOMO_OBASE_LS,{})||{}
 window.__momoIsOriginsDirty=function(k){ return _momoOIsDirty(k); };              // firebase.js 訂閱：dirty 守衛（持久化、跨重整）
 window.__momoClearOriginsDirty=function(k){ try{ _momoODirtyDel(k); }catch{} };    // firebase.js 訂閱自癒用：dirty 過期時清掉
 window.__momoNoteOriginsCloudBase=function(k, ts){ if(ts) _momoOBaseSet(k, ts); }; // firebase.js 訂閱：接受雲端後記錄基準
+window.__momoCostDirtySet=function(){ try{ return new Set(momoCostDirtyGet()); }catch{ return new Set(); } };   // firebase.js cost 訂閱：dirty 守衛（保留本機未推的原廠成本，不被雲端整包蓋掉）
 window.__momoOriginsBaseGet=function(k){ return _momoOBaseGet(k); };              // 預覽：讀本機基準版本
 // ── #169 origins 衝突守衛的「單一決策點」（2026-08-17 自癒修）：subscription 收到雲端 doc 時呼叫，回傳該怎麼處理 ──
 //   根因：原本 subscription 對 dirty key 只會「跳過」、從不清 dirty；dirty 只在 syncToCloud 的 ok-loop 清（限本 session 推的 key）。
@@ -10255,6 +10256,10 @@ async function momoOpenSyncPreview(shop){
       const cmap=(costCloud&&costCloud.costMap)||undefined;   // 比 costMap、非整 doc
       if(cmap===undefined){ it.status='new'; it.cloudCount=0; return; }   // 首次上雲（雲端空）
       it._cloudVal=cmap; it.cloudCount=Object.keys(cmap).length; it.status=_eq(it.localVal,cmap)?'same':'diff';
+      // Option A（修「有未同步·推不動」）：dirty 非空＝本機有未推意圖（權威訊號）→ 即使地圖==雲端也視為待推、進主表可勾。
+      //   read-merge-write 推送會消化 dirty 並清掉（momoSyncCostByOrigin 尾端 momoCostDirtyClear），提示才不會誤亮到底。
+      //   ⚠ 不採「無變更就清 dirty」：那會把「未推」訊號直接抹掉＝跟資料靜默消失同類。
+      if(it.status==='same'){ try{ if(momoCostDirtyGet().length>0){ it.status='diff'; it._costDirtyOnly=true; } }catch(e){} }
       return;
     }
     const cv=cloud[it.key]; it._cloudVal=cv;
@@ -14603,6 +14608,16 @@ function momoSetCostByOrigin(origin, cost, opts){
   m.changes=m.changes||[]; m.changes.push({at:np.date+' '+np.time, by:opts.by||'', from:(from==null?null:Number(from)), to:c, note:opts.note||'', src:opts.src||(opts.manual?'人工':'匯入')});
   if(m.changes.length>50) m.changes=m.changes.slice(-50);   // 只留最近 50 筆
   const ok=momoSaveCostByOrigin(map); momoSaveCostMeta(meta); momoCostDirtyAdd(origin);
+  // 手動補成本 → 記一筆工作日誌（optlog type「補成本」）。keyed by 原廠編號（非真品號→總表篩選自然排除、只進工作日誌計數）。
+  //   ⚠ 只有 manual 且帶 shop 才寫；批次匯入(momoPersistCostByOrigin·非 manual)不寫、不洗版。
+  if(opts.manual && opts.shop){
+    try{
+      const om=momoLoadOptlog(opts.shop); om[origin]=Array.isArray(om[origin])?om[origin]:[];
+      om[origin].push({ id:'opt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:np.date, time:np.time, shop:opts.shop, sku:origin, by:opts.by||'', type:'補成本', note:'原廠 '+origin+' 成本 '+(from==null?'—':from)+'→'+c+(opts.note?' · '+opts.note:'') });
+      momoSaveOptlog(opts.shop, om);   // _markPending → 同步走 momoSyncOptlog（read-merge-write）
+      momoUpdateDailyProgress({silent:true});   // 工作日誌 counts 立即跟上
+    }catch(e){ try{ console.warn('[momo 補成本 optlog]', e); }catch{} }
+  }
   return {ok, from:(from==null?null:Number(from)), to:c};
 }
 // 手動補成本 → 在「毛利真的依賴此表的 MO+ 商品」的異動時間軸各記一筆（甲乙用 product.cost、不記＝不誤導）。
@@ -14627,7 +14642,7 @@ function momoMoPlusCostInlineSave(shop, sku, origin){
   const c=cEl?cEl.value:'', note=(nEl?nEl.value:'').trim();
   if(!(Number(c)>=0)){ alert('成本需為 ≥0 的數字'); return; }
   if(!note){ alert('請填異動原因'); return; }
-  const r=momoSetCostByOrigin(origin, c, {by:momoCurrentUserName(), note, manual:true, src:'人工'});
+  const r=momoSetCostByOrigin(origin, c, {by:momoCurrentUserName(), note, manual:true, src:'人工', shop});
   if(!r.ok){ alert(r.note||'儲存失敗'); return; }
   const n=momoCostAddHistoryToMoPlusProducts(origin, Number(c), r.from, note);   // MO+ 商品各記一筆
   try{ momoBumpMoPlusEpoch(); }catch{}   // 涵蓋率/毛利快取失效 → 就地重繪即更新
@@ -14660,7 +14675,7 @@ function momoMissingCostSave(shop, origin){
   const c=(document.getElementById('mm-mc-c-'+oid)||{}).value, note=((document.getElementById('mm-mc-n-'+oid)||{}).value||'').trim();
   if(!(Number(c)>=0)){ alert('成本需為 ≥0 的數字'); return; }
   if(!note){ alert('請填異動原因'); return; }
-  const r=momoSetCostByOrigin(origin, c, {by:momoCurrentUserName(), note, manual:true, src:'人工'});
+  const r=momoSetCostByOrigin(origin, c, {by:momoCurrentUserName(), note, manual:true, src:'人工', shop});
   if(!r.ok){ alert(r.note||'儲存失敗'); return; }
   const n=momoCostAddHistoryToMoPlusProducts(origin, Number(c), r.from, note);
   try{ momoBumpMoPlusEpoch(); }catch{}
