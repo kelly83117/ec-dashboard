@@ -11297,7 +11297,7 @@ const MOMO_OPTLOG_DP_SHOPS=MOMO_SHOPS.filter(s=>s!=='總表');
 const MOMO_OPTLOG_DP_SEP='·';                 // 賣場與 type 的組合分隔（顯示與明細比對共用；賣場名不含此字元）
 function momoOptlogUserToName(by){   // optlog 存 username → 工作日誌以人名為 key；查無對應時退回 username 本身（不靜默丟、配合 personInfos 聯集仍會顯示）
   if(!by) return '';
-  try{ const users=(window.Store&&Store.get)?(Store.get('users',[])||[]):[]; const u=users.find(x=>x&&x.username===by); if(u&&u.name) return u.name; }catch(e){}
+  try{ const users=(window.Store&&Store.get)?(Store.get('ec.users',[])||[]):[]; const u=users.find(x=>x&&x.username===by); if(u&&u.name) return u.name; }catch(e){}
   return by;
 }
 // 掃當天 optlog → { 人名: { '甲配·調價':N, ... } }（type 動態、不寫死）
@@ -14600,7 +14600,7 @@ async function momoSyncCostByOrigin(){
   momoSaveCostByOrigin(mergedMap); momoSaveCostMeta(mergedMeta); momoCostDirtyClear();   // 本機回寫 merged（含同事的）+ 清 dirty
 }
 // ══════ 成本表維護入口（甲配/乙配/MO+ 共用 ec_momo_cost_by_origin；直接補莫筆克沒有的原廠編號）══════
-function momoCurrentUserName(){ try{ const s=(window.Store&&Store.get)?(Store.get('session',{})||{}):{}; const un=s.username||s.user||s.name; if(un) return momoOptlogUserToName(un); }catch(e){} return ''; }
+function momoCurrentUserName(){ try{ const s=(window.Store&&Store.get)?(Store.get('ec.session',{})||{}):{}; const un=s.username||s.user||s.name; if(un) return momoOptlogUserToName(un); }catch(e){} return ''; }
 // 某原廠編號被哪些賣場的哪些商品用到（掃四賣場 product.origin / origins[]）→ [{shop, n, skus:[..前幾個..]}]
 function momoCostOriginUsage(origin){
   const out=[];
