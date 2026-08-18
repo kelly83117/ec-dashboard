@@ -8091,7 +8091,7 @@ function momoAggregatePeriods(product,periodKeys,shop,opts){
           const profit=eRev-feeAmt-cogs;
           const marginPct=eRev>0?Math.round((profit/eRev)*1000)/10:null;
           const ls=_lean?null:momoMoPlusLatestSaleForSku(shop, product.sku);
-          const lp=_lean?{}:momoMoPlusListPriceForSku(shop, product.sku, ls?ls.sp:null, product.listPriceManual);
+          const lp=_lean?{}:momoMoPlusListPriceForSku(shop, product.sku, ls?ls.sp:null, (product.listPriceManual ?? null));
           const fr=momoFeeRateForSku(shop, product.sku);
           return { qty:eQty, revenue:eRev, profit, margin:marginPct, cost:cogs, feeD:feeAmt,
             returnRate:null, retQty:0, retKnown:false,   // 未結算估算（E001）：無結算退貨資料 → 退貨率「—」
@@ -8109,7 +8109,7 @@ function momoAggregatePeriods(product,periodKeys,shop,opts){
     (periodKeys||[]).forEach(k=>{ const o=momoMoPlusOriginsForSku(shop, product.sku, k); Object.keys(o.originsQty).forEach(g=>{ originsQty[g]=(originsQty[g]||0)+o.originsQty[g]; }); feeD+=o.feeD; feeC+=o.feeC; feeB+=o.feeB; retQty+=o.ret; if(o.retKnown) retKnown=true; });
     const m=momoMoPlusMarginCalc({qty, revA, originsQty, feeD, feeC, feeB, costMap:momoMoPlusCostMapCached()});
     const ls=_lean?null:momoMoPlusLatestSaleForSku(shop, product.sku);   // 最新成交價（跨全部資料、不受本期別限制）；lean 跳過（分析不需、且是逐SKU掃描熱點）
-    const lp=_lean?{}:momoMoPlusListPriceForSku(shop, product.sku, ls?ls.sp:null, product.listPriceManual);   // 掛牌價（商品主檔、銷售最多規格）+ 各規格 + 落差；lean 跳過
+    const lp=_lean?{}:momoMoPlusListPriceForSku(shop, product.sku, ls?ls.sp:null, (product.listPriceManual ?? null));   // 掛牌價（商品主檔、銷售最多規格）+ 各規格 + 落差；lean 跳過
     const fr=momoFeeRateForSku(shop, product.sku);   // 成交費率反推結論（跨月交集，純顯示/排序、不進毛利）
     return {
       qty, revenue:revA, profit:m.margin, margin:m.marginPct, cost:m.cogs, feeD:m.feeD, feeC:m.feeC, feeB:m.feeB, freightNet:m.freightNet,
@@ -9753,6 +9753,9 @@ function momoMoPlusListPriceForSku(shop, sku, latestSp, manualPrice){
     else chosen=priced[0];                                 // 無銷量 → 第一個有掛牌價的規格
   }
   const masterListPrice=chosen?Number(chosen.listPrice):null;   // 主檔掛牌價（代表規格＝銷量最多）
+  // ⚠ 效能：manualPrice===undefined 才走這條 momoLoadProducts().find（O(N) 掃全部商品）。逐商品/逐列呼叫端「務必」傳入 manualPrice
+  //   （手上本來就有 product、傳 product.listPriceManual ?? null 即可），否則 render 迴圈會變 O(N²)（MO+好麻吉 1277 商品 ~3s）。
+  //   單發呼叫（modal/明細，一次一個 SKU）省略無妨。
   if(manualPrice===undefined){ try{ const p=momoLoadProducts(shop).find(x=>x.sku===sku); manualPrice=(p&&Number(p.listPriceManual)>0)?Number(p.listPriceManual):null; }catch(e){ manualPrice=null; } }
   const isManual=Number(manualPrice)>0;
   const listPrice=isManual?Number(manualPrice):masterListPrice;   // 顯示值：手動優先、否則主檔
@@ -11763,7 +11766,7 @@ function momoProductAnomalies(p, shop, ctx){
     // ⚠ 缺售價＝與總表「售價」欄完全同源同邏輯（single source）：掛牌價(主檔 momoMoPlusListPriceForSku)
     //   或 最新成交價(對帳明細 momoMoPlusLatestSaleForSku) 任一有值即「有售價」；兩者皆無、總表顯示「—」才算缺。
     //   （不可只看主檔——總表無主檔掛牌時會回退顯示成交價；只看主檔會把「已有成交價」的商品全誤標缺售價）
-    const lp = momoMoPlusListPriceForSku(shop, p.sku, null).listPrice;
+    const lp = momoMoPlusListPriceForSku(shop, p.sku, null, (p.listPriceManual ?? null)).listPrice;   // 傳 manualPrice → 免內部 momoLoadProducts().find（本函式逐商品跑、find 會 O(N²)）
     const ls = momoMoPlusLatestSaleForSku(shop, p.sku);
     const sp = (lp==null) && !(ls && ls.sp!=null);
     return { cost, pp:false, sp, any:cost||sp };                               // MO+ 無進價：pp 恆 false（缺進價 chip/badge 因此不出現）
