@@ -780,6 +780,39 @@ function _sweepAllLocalReportsIntoPending(){
   }catch{}
 }
 
+// 全推路徑（無 allowKeys＝蝦皮全域鈕/程式全推）的刪除防護：對每個要推的 key 讀雲端、算 willDelete（雲端有本機無的葉節點數）。
+//   >0＝這次整包覆蓋會刪掉雲端某些東西（可能是同事的）→ 該 key 跳過不推（沒經預覽確認，不可靜默覆蓋刪除）。回 Map(key→willDeleteCount)。
+//   走預覽的路徑（有 allowKeys）＝使用者已逐項確認 → 不套此 guard、照推。
+//   不套：蝦皮 ec|（不同 collection·單一寫者整份 regen·Keani 地盤，另議）、products/origins（自有 updatedAt 版本比對）、cost（read-merge-write）。
+async function _momoFullPushDeleteGuard(taskKeys){
+  const skip=new Map();
+  const keys=[...taskKeys];
+  // app/profit 欄位一次讀齊（optlog/freight/rent/f1102/notes/edits/其他設定都是它的欄位）
+  const isAppProfitField=k=>!k.startsWith('ec|') && !k.startsWith('ec_momo_products|') && !k.startsWith('ec_momo_moplus_origins|') && !k.startsWith('ec_momo_reconcile|') && !k.startsWith('ec_momo_s1103|') && !k.startsWith('ec_momo_e001|') && k!=='ec_momo_cost_by_origin';
+  let appProfit=null;
+  if(keys.some(isAppProfitField)){ try{ const s=await window.__cloudProfit.getDoc(); appProfit=(s&&s.exists&&s.exists())?(s.data()||{}):{}; }catch(e){ appProfit=null; } }
+  for(const k of keys){
+    if(k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_moplus_origins|') || k==='ec_momo_cost_by_origin' || k.startsWith('ec_momo_optlog|')) continue;   // 各有自己的機制：optlog 走 read-merge-write（不刪除、不需 willDelete 擋）；products/origins 版本比對；cost merge；蝦皮另議
+    // 本機值（與推送同源）
+    let localV=null;
+    try{
+      if(k.startsWith('ec_momo_e001|')){ const pp=k.split('|'); localV=momoLoadE001Doc(pp[1],pp[2]); }
+      else { if(Store._mem&&Store._mem[k]!==undefined) localV=Store._mem[k]; if(localV===null){ const raw=localStorage.getItem(k); if(raw) localV=JSON.parse(raw); } }
+    }catch(e){}
+    // 雲端值
+    let cloudV=undefined;
+    try{
+      if(k.startsWith('ec_momo_reconcile|')){ const pp=k.split('|'); const s=await window.__cloudReconcile.getDoc(pp[1],pp[2]); cloudV=(s&&s.exists&&s.exists())?s.data():undefined; }
+      else if(k.startsWith('ec_momo_s1103|')){ const s=await window.__cloudS1103.getDoc(k.slice('ec_momo_s1103|'.length)); cloudV=(s&&s.exists&&s.exists())?s.data():undefined; }
+      else if(k.startsWith('ec_momo_e001|')){ const pp=k.split('|'); const s=await window.__cloudE001.getDoc(pp[1],pp[2]); cloudV=(s&&s.exists&&s.exists())?s.data():undefined; }
+      else if(appProfit){ cloudV=appProfit[k]; }
+    }catch(e){ cloudV=undefined; }
+    if(cloudV===undefined || cloudV===null) continue;   // 雲端沒有＝純新增、不會刪
+    const wd=momoCloudDeleteCount(localV, cloudV);
+    if(wd>0) skip.set(k, wd);
+  }
+  return skip;
+}
 async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中的 key（逐項勾選）；不傳=全推
   const btn=document.getElementById('global-sync-btn');
   // 斷掉上一次同步埋的「2 秒後還原徽章」重畫，免得它在這次的進度顯示中途引爆蓋掉進度
@@ -802,6 +835,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     const taskKeys=new Set();       // 已排入推送的 key，避免同一個 key 排兩次（見下方 pending 迴圈開頭）
     const skippedByDesign=[];       // filemeta：故意不上雲，安靜
     const skippedProblem=[];        // 讀不到 / 損毀 / 非物件：一定要浮上來
+    const _optlogMerges=[];         // optlog read-merge-write 併回雲端的筆數（{shop,n}）→ 「已合併雲端 N 筆」不靜默
     // ec_notes 這次沒被編輯過 → by design 的安靜跳過（性質同 skippedByDesign，不彈窗、不出 toast）。
     //   ⚠ 刻意不彈窗：封存搬家之後，只要當期有調整、而使用者這次沒編輯過，每一次同步都會觸發這條，
     //     跳出來就變成雜訊。診斷靠下面的 console.log 與 window.__lastSyncReport.skippedNotDirty 就夠。
@@ -887,6 +921,11 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         return;
       }
       if(pk==='ec_momo_cost_by_origin_meta') return;   // meta 併入上面 cost 那筆一起推、不各推（momoSaveCostMeta 不 markPending）
+      if(pk.startsWith('ec_momo_optlog|')){   // 優化紀錄：read-merge-write（逐 SKU 依 entry id union、不覆蓋不刪除同事的）→ 兩人各改各的 SKU 可共存
+        const oshop=pk.slice('ec_momo_optlog|'.length);
+        tasks.push({key:pk, run:()=>momoSyncOptlog(oshop).then(n=>{ if(n>0) _optlogMerges.push({shop:oshop, n}); })});
+        return;
+      }
       // field key（設定類）
       let val=null;
       try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
@@ -899,10 +938,27 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       else skippedProblem.push({key:pk,reason:'設定值讀不到'});
     });
     if(allowKeys instanceof Set){ const before=tasks.length; for(let i=tasks.length-1;i>=0;i--){ if(!allowKeys.has(tasks[i].key)) tasks.splice(i,1); } console.log('[syncToCloud] allowKeys 過濾:',before,'→',tasks.length,'｜選中:',[...allowKeys]); }   // 逐項勾選：只推選中的 key
-    console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length,'｜要推 keys:',tasks.map(t=>t.key));
+    // 🛡 全推路徑（無 allowKeys＝蝦皮全域鈕/程式全推、不經 MOMO 同步預覽）的刪除防護：會刪掉雲端資料的 key 跳過不推、明確回報。
+    //   走預覽的路徑（有 allowKeys）＝使用者已逐項確認過刪除 → 不套、照推。
+    const skippedWillDelete=[];
+    if(!(allowKeys instanceof Set)){
+      try{
+        const skipMap=await _momoFullPushDeleteGuard(new Set(tasks.map(t=>t.key)));
+        if(skipMap && skipMap.size){
+          for(let i=tasks.length-1;i>=0;i--){ if(skipMap.has(tasks[i].key)){ skippedWillDelete.push({key:tasks[i].key, willDelete:skipMap.get(tasks[i].key)}); tasks.splice(i,1); } }
+          console.warn('[syncToCloud] 全推刪除防護：跳過 '+skippedWillDelete.length+' 項（會刪雲端資料、未經預覽確認）：',skippedWillDelete);
+        }
+      }catch(e){ console.warn('[syncToCloud] 刪除防護計算失敗（保守起見不阻擋、照推）：',e); }
+    }
+    console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length,'skippedWillDelete:',skippedWillDelete.length,'｜要推 keys:',tasks.map(t=>t.key));
     if(tasks.length===0){
-      // 沒有要送的 task —— 但有 skippedProblem 一定要講，不能只說「沒有需要同步」（那正是舊 bug）
-      if(skippedProblem.length>0){
+      // 沒有要送的 task —— 但有 skippedProblem / skippedWillDelete 一定要講，不能只說「沒有需要同步」（那正是舊 bug／靜默跳過）
+      if(skippedWillDelete.length>0){   // 🛡 全部被刪除防護擋下 → 明確告知去預覽確認，絕不靜默
+        const detail=skippedWillDelete.map(x=>x.key+'：會刪雲端 '+x.willDelete+' 筆').join('\n');
+        if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'有項目未推送（保護雲端資料）',message:skippedWillDelete.length+' 項因為「會刪掉雲端資料（可能是同事的更新）」而未推送。\n請到該賣場的「同步預覽」逐項確認後再推。',detail,kind:'warn'});
+        else if(typeof showToast==='function') showToast(skippedWillDelete.length+' 項會刪雲端資料、未推送，請到同步預覽確認','error');
+        _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete});
+      }else if(skippedProblem.length>0){
         if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:'有 '+skippedProblem.length+' 筆資料在本機讀不到、沒推上去（可能損毀）。\n請到淨利表重新產生這些報表。',detail:skippedProblem.map(x=>x.key+'：'+x.reason).join('\n'),kind:'error'});
         else if(typeof showToast==='function') showToast('有 '+skippedProblem.length+' 筆資料讀不到','error');
         _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty});
@@ -931,12 +987,13 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
-    _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty});
-    // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 時出現；只要有問題就 ⚠ + 彈窗
-    const problems=failed.length+skippedProblem.length;
+    _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,optlogMerges:_optlogMerges});
+    const _mergedN=_optlogMerges.reduce((s,x)=>s+(x.n||0),0);   // optlog 合併併回雲端的總筆數（不靜默）
+    // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 且 skippedWillDelete=0 時出現；只要有問題/被保護跳過就 ⚠ + 彈窗
+    const problems=failed.length+skippedProblem.length+skippedWillDelete.length;
     if(problems===0){
       if(btn){btn.textContent='✓ 已同步 '+ok.length+' 筆';btn.style.background='#10b981';btn.style.color='#fff';btn.style.borderColor='#10b981';_syncBtnRepaintTimer=setTimeout(()=>{ _showSyncBtn(); },2000);}
-      if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端','success');
+      if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端'+(_mergedN>0?'（優化紀錄已合併雲端 '+_mergedN+' 筆）':''),'success');
       // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌（失敗只記 console，不影響同步結果判定）
       try { if(window.App && typeof App._updateDailyProgressFromAdjustments === 'function') App._updateDailyProgressFromAdjustments({ pushToCloud: true }); }
       catch(e){ console.warn('[autoSummary profit]', e); }
@@ -945,9 +1002,11 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       const lines=[];
       failed.forEach(f=>lines.push('［失敗］'+f.key+'：'+f.msg));
       skippedProblem.forEach(p=>lines.push('［讀不到］'+p.key+'：'+p.reason));
+      skippedWillDelete.forEach(x=>lines.push('［保護未推］'+x.key+'：會刪雲端 '+x.willDelete+' 筆（可能是同事的更新）'));
       let msg='成功 '+ok.length+' 筆。';
       if(failed.length) msg+='\n'+failed.length+' 筆沒推上雲端，資料還在本機 → 重整前請先匯出 Excel 備份，稍後再按同步重試。';
       if(skippedProblem.length) msg+='\n'+skippedProblem.length+' 筆在本機讀不到（可能損毀）→ 請到淨利表重新產生這些報表。';
+      if(skippedWillDelete.length) msg+='\n'+skippedWillDelete.length+' 項因會刪除雲端資料（可能是同事的更新）而未推送 → 請到該賣場的「同步預覽」逐項確認後再推。';
       if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:msg,detail:lines.join('\n'),kind:'error'});
       else if(typeof showToast==='function') showToast('同步未完成：'+problems+' 筆有問題','error');
     }
@@ -10021,6 +10080,22 @@ function momoDiffDetail(local, cloud){
   }
   return {total, samples};
 }
+// 臨時止血（2026-08-18）：算「推本機上去會從雲端『刪掉』幾筆」＝雲端有、本機沒有的葉節點數（遞迴，涵蓋 optlog 逐SKU/逐entry、
+//   reconcile/freight/rent/f1102 逐SKU 等各種巢狀 map）。>0 → 該筆整包覆蓋會抹掉雲端某些東西（可能是同事的）→ 預覽預設不勾＋警告。
+//   ⚠ 只算「雲端有本機無」（刪除方向）；純值不同是「覆蓋」不算刪除；本機有雲端無是「新增」不算刪除（維持預設勾）。
+//   陣列元素以 id→sku→穩定序列化當身分（optlog entry 有唯一 id、products 有 sku）。products/origins 不走這條（有自己的版本比對，行為不變）。
+function momoCloudDeleteCount(local, cloud){
+  const norm=v=>{ try{ return JSON.parse(JSON.stringify(v==null?null:v)); }catch(e){ return v; } };
+  const _key=x=>(x&&x.id!=null)?('id:'+x.id):(x&&x.sku!=null)?('sku:'+x.sku):_momoStableStr(x);
+  const _leaves=v=>{ if(v==null) return 1; if(Array.isArray(v)) return v.length||1; if(typeof v==='object'){ let n=0; for(const k of Object.keys(v)) n+=_leaves(v[k]); return n||1; } return 1; };
+  const walk=(l,c)=>{
+    if(c==null) return 0;
+    if(Array.isArray(c)){ const lset=new Set((Array.isArray(l)?l:[]).map(_key)); return c.filter(x=>!lset.has(_key(x))).length; }   // 雲端陣列裡本機沒有的元素數
+    if(typeof c==='object'){ let n=0; for(const k of Object.keys(c)){ const lv=(l&&typeof l==='object')?l[k]:undefined; if(lv===undefined) n+=_leaves(c[k]); else n+=walk(lv,c[k]); } return n; }
+    return 0;   // 純值不同＝覆蓋、非刪除
+  };
+  try{ return walk(norm(local), norm(cloud)); }catch(e){ return 0; }
+}
 // 收集「這次同步實際會推的 key」——與 syncToCloud 同源：先跑同一個 sweep，再讀同一個 _pendingSyncKeys。
 //   絕不自己掃 localStorage（會漏掉 session 內標過、不在 sweep 白名單的 key → 預覽騙人）。
 function _momoCollectPending(shop){
@@ -10191,6 +10266,14 @@ async function momoOpenSyncPreview(shop){
   items.forEach(it=>{ if(it.status==='new' && (it.localCount||0)>500) it.suspicious=true; });
   // 差異明細掛到每筆 diff item（modal 顯示 + 報告都用）
   items.forEach(it=>{ if(it.status==='diff'){ try{ it.diff=momoDiffDetail(it.localVal, it._cloudVal); }catch(e){ it.diffErr=String(e&&e.message||e); } } });
+  // 臨時止血：算「這次推會從雲端刪掉幾筆」（雲端有本機無）。>0 → 預設不勾＋紅字警告。
+  //   products/原廠成本（商品主檔/MO+逐列成本）不套：它們有自己的 updatedAt 版本比對（conflict），行為不變。
+  items.forEach(it=>{ it.willDelete=0; it.willMerge=0;
+    if(it.status==='diff'){
+      if(it.key && it.key.startsWith('ec_momo_optlog|')){ try{ it.willMerge=momoMergeOptlog(it._cloudVal, it.localVal).addedFromCloud; }catch(e){} }   // optlog 走 read-merge-write：不刪除、不套 willDelete；willMerge＝會併回本機沒有的雲端筆數
+      else if(it.kind!=='MOMO商品主檔' && it.kind!=='MO+逐列成本'){ it.willDelete=momoCloudDeleteCount(it.localVal, it._cloudVal); }
+    }
+  });
   // #3：把這次預覽的比對快照 + 差異明細寫進 __lastSyncReport（MOMO 同步先前完全沒診斷輸出）。confirm 後 syncToCloud 會再覆寫成 'done'。
   try{ window.__lastSyncReport={ ts:Date.now(), mode:'momo-preview', shop, items:items.map(it=>({key:it.key,kind:it.kind,localCount:it.localCount,cloudCount:it.cloudCount,status:it.status,diff:it.diff,diffErr:it.diffErr})) }; }catch(e){}
   momoRenderSyncPreviewModal(shop, items);
@@ -10212,10 +10295,13 @@ function momoRenderSyncPreviewModal(shop, items){
     if(it.status==='readfail') return `<span style="color:#d97706">無法比對（雲端讀取失敗，仍會整包覆蓋）</span>`;
     const cnt=(it.cloudCount!==it.localCount)?`（雲端 ${it.cloudCount} / 本機 ${it.localCount} 筆）`:'';
     if(it.conflict) return `<span style="color:#dc2626;font-weight:700" title="雲端在你載入後又被更新過（可能是同事推的），推了會用你的舊資料整包蓋掉雲端較新版本${cnt}">⚠ 雲端較新，預設不推</span>`;   // 【2】版本比對命中
+    if(it.willMerge>0) return `<span style="color:#2563eb;font-weight:600" title="優化紀錄走逐 SKU 依 id 合併（read-merge-write）：不覆蓋、不刪除。推送會把雲端有、你本機沒有的 ${it.willMerge} 筆一併併回，兩邊的紀錄都保留。${cnt}">🔀 將合併（不覆蓋不刪除）· 併回 ${it.willMerge} 筆</span>`;   // optlog read-merge-write
+    if(it.willDelete>0) return `<span style="color:#dc2626;font-weight:700" title="整包覆蓋：雲端有、本機沒有的 ${it.willDelete} 筆會被刪掉（可能是同事今天做的、你本機還沒載到）。展開看是哪幾筆。${cnt}">⚠ 這會刪掉雲端 ${it.willDelete} 筆（可能是同事的更新），預設不推</span>`;   // 臨時止血：整包覆蓋會刪雲端資料
     return `<span style="color:#9a3412;font-weight:600" title="推了會用本機整包覆蓋雲端${cnt}">內容不同</span>`;
   };
   const anyDiff=items.some(it=>it.status==='diff');
   const anyConflict=items.some(it=>it.conflict);   // 【2】：有「雲端較新」衝突項
+  const anyWillDelete=items.some(it=>it.willDelete>0);   // 臨時止血：有「整包覆蓋會刪雲端」項
   // 差異明細（diff item）：預設收合，摘要一行「N 筆不同 · 展開」；明細講變化(陣列講筆數)不倒 JSON；全值在 title tooltip
   const diffHtml=it=>{ const d=it.diff; if(!d||!d.samples||!d.samples.length) return it.diffErr?`<div class="mm-sync-diff">差異明細計算失敗：${esc(it.diffErr)}</div>`:'';
     const ss=d.samples.map(s=>`<div class="mm-sync-diff-row"${(s.local!=null||s.cloud!=null)?` title="本機：${esc(String(s.local))}　|　雲端：${esc(String(s.cloud))}"`:''}>· <b>${esc(String(s.item))}</b>${(s.field&&s.field!=='(整筆)')?' · '+esc(s.field):''}：${esc(s.desc||'')}</div>`).join('');
@@ -10224,8 +10310,8 @@ function momoRenderSyncPreviewModal(shop, items){
   const _e001Row=it=>it.kind==='MO+未結算銷量';
   const _cntCell=(it,v)=>{ if(v==null) return '—'; if(_e001Row(it)) return v+' 件'; return v; };   // E001「本機/雲端」欄改顯示未結算銷量件數＋單位（非 top-level 欄位數）
   const _cntTitle=it=>_e001Row(it)&&it.e001Stat?` title="未結算銷量 ${it.e001Stat.qty} 件 / ${it.e001Stat.skuN} SKU（本 src 主掌且未結算；＝總表看到的未結算銷量口徑）"`:'';
-  const rowHtml=(it,checked)=>`<tr style="border-top:1px solid #f3f4f6${(it.conflict||it.suspicious)?';background:#fef2f2':''}">
-      <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}"${it.conflict?' data-conflict="1"':''}${it.suspicious?' data-suspicious="1"':''} ${checked?'checked':''} onchange="momoSyncUpdateCount()"></td>
+  const rowHtml=(it,checked)=>`<tr style="border-top:1px solid #f3f4f6${(it.conflict||it.suspicious||it.willDelete>0)?';background:#fef2f2':''}">
+      <td style="padding:6px 4px;text-align:center"><input type="checkbox" class="mm-sync-chk" data-key="${esc(it.key)}"${it.conflict?' data-conflict="1"':''}${it.suspicious?' data-suspicious="1"':''}${it.willDelete>0?` data-willdelete="${it.willDelete}"`:''} ${checked?'checked':''} onchange="momoSyncUpdateCount()"></td>
       <td style="padding:6px 8px;font-family:monospace;word-break:break-all" title="底層 key（未變）：${esc(it.key)}">${esc(momoKeyDisplay(it.key))}${_e001Row(it)?`<div style="font-family:inherit;color:#d97706;font-size:11px;margin-top:2px">⚠ 未結算估算值·會被對帳明細取代${it.e001Stat?`（${it.e001Stat.skuN} SKU）`:''}</div>`:''}</td>
       <td style="padding:6px 8px;color:${typeColor[it.kind]||'#6b7280'};font-weight:600;white-space:nowrap">${it.kind}</td>
       <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums"${_cntTitle(it)}>${_cntCell(it,it.localCount)}</td>
@@ -10235,11 +10321,11 @@ function momoRenderSyncPreviewModal(shop, items){
   const anySuspicious=items.some(it=>it.suspicious);   // P3(1)：雲端0但本機>500
   const changed=items.filter(it=>it.status!=='same'), unchanged=items.filter(it=>it.status==='same');   // localonly 收進無變更區、不進待推
   const theadHtml=`<thead><tr style="text-align:left;color:#6b7280;font-weight:600">
-      <th style="padding:6px 4px;text-align:center"><input type="checkbox" id="mm-sync-all" ${(anyConflict||anySuspicious)?'':'checked'} onchange="momoSyncToggleAll(this.checked)"></th>
+      <th style="padding:6px 4px;text-align:center"><input type="checkbox" id="mm-sync-all" ${(anyConflict||anySuspicious||anyWillDelete)?'':'checked'} onchange="momoSyncToggleAll(this.checked)"></th>
       <th style="padding:6px 8px">資料 key</th><th style="padding:6px 8px">類型</th><th style="padding:6px 8px;text-align:right">本機</th><th style="padding:6px 8px;text-align:right">雲端</th><th style="padding:6px 8px">狀態 / 差異</th>
     </tr></thead>`;
   const mainHtml = changed.length
-    ? `<table style="width:100%;border-collapse:collapse;font-size:12px">${theadHtml}<tbody id="mm-sync-main-body">${changed.map(it=>rowHtml(it,!it.conflict && !it.suspicious)).join('')}</tbody></table>`
+    ? `<table style="width:100%;border-collapse:collapse;font-size:12px">${theadHtml}<tbody id="mm-sync-main-body">${changed.map(it=>rowHtml(it,!it.conflict && !it.suspicious && !(it.willDelete>0))).join('')}</tbody></table>`
     : `<div style="padding:18px;text-align:center;color:#9ca3af;font-size:13px">目前沒有需要同步的項目${unchanged.length?`（另有 ${unchanged.length} 項無變更）`:''}</div>`;
   const unchangedHtml = unchanged.length
     ? `<details class="mm-sync-unchanged"><summary>另有 ${unchanged.length} 項無變更 · 展開（預設不推，可個別勾）</summary><table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px"><tbody>${unchanged.map(it=>rowHtml(it,false)).join('')}</tbody></table></details>`
@@ -10249,6 +10335,7 @@ function momoRenderSyncPreviewModal(shop, items){
     <div style="padding:12px 20px;overflow:auto">
       <div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">只列出<b>有變更</b>（新增／內容不同）的項目，預設全勾；無變更／本機輔助表收在下方。<b>商品主檔</b>有版本比對（雲端較新會標紅、預設不勾）；<b>其他項目（月對帳／排行榜／運費…）為整包覆蓋、無版本比對</b>，請確認不會蓋掉同事的更新。<br>⚠ 差異明細顯示的是<b>「本機現值 ｜ 雲端現值」</b>（非「將變成」）；<b>勾選推送＝該筆雲端整包覆蓋成本機的值</b>。</div>
       ${anyConflict?`<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;line-height:1.6">🚫 有項目<b>雲端較新</b>（你載入後雲端又被人更新過，可能是同事推的）——這些列<b>預設不勾</b>、避免用你的舊資料蓋掉同事的更新。建議<b>重新整理</b>拿到最新雲端後再改。若你確定要覆蓋，需手動勾選並二次確認。</div>`:''}
+      ${anyWillDelete?`<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;line-height:1.6">🗑 有項目<b>雲端有、本機沒有的資料</b>（可能是同事今天做的、你本機還沒載到）——這是<b>整包覆蓋、無 per-key 合併</b>，推了會把那些筆<b>刪掉</b>。這些列<b>預設不勾</b>；點該列「展開」看是哪幾筆。建議<b>重新整理</b>拿到最新雲端後再推；若確定要覆蓋，需手動勾選並二次確認。</div>`:''}
       ${anySuspicious?`<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;line-height:1.6">🚨 有項目<b>本機筆數很多、雲端卻讀到 0</b>——很可能是<b>雲端讀取失敗</b>（不是真的新增）。整包推上去會<b>清空雲端</b> → 這些列<b>預設不勾</b>，請先確認雲端真的沒有、或重新整理後再推。</div>`:''}
       ${anyDiff?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#9a3412;line-height:1.6">⚠️ 有項目<b>內容不同</b>——點該列「展開」看差在哪個 SKU/欄位，確認是你要覆蓋的再保持勾選。</div>`:''}
       ${mainHtml}
@@ -10277,6 +10364,13 @@ function momoConfirmSync(shop){
   // 【2】二次攔截：使用者手動勾回「雲端較新」的衝突項 → 明確再確認一次（避免手滑覆蓋同事更新）
   const conflictKeys=checkedEls.filter(c=>c.getAttribute('data-conflict')==='1').map(c=>c.getAttribute('data-key'));
   if(conflictKeys.length && !confirm('你勾選了 '+conflictKeys.length+' 項「雲端較新」的資料：\n'+conflictKeys.join('\n')+'\n\n推送會用你的本機（較舊）版本整包蓋掉雲端較新的版本，可能丟失同事的更新。\n\n確定要覆蓋嗎？（建議先重新整理拿最新雲端）')) return;
+  // 臨時止血 二次攔截：手動勾回「整包覆蓋會刪雲端」項 → 明列每筆會刪幾筆、再確認一次
+  const delEls=checkedEls.filter(c=>c.getAttribute('data-willdelete'));
+  if(delEls.length){
+    const lines=delEls.map(c=>'· '+c.getAttribute('data-key')+'：將刪除雲端 '+c.getAttribute('data-willdelete')+' 筆');
+    const totalDel=delEls.reduce((s,c)=>s+(parseInt(c.getAttribute('data-willdelete'),10)||0),0);
+    if(!confirm('你勾選了 '+delEls.length+' 項「雲端有、本機沒有」的資料，推送會整包覆蓋、把這些筆從雲端刪掉（可能是同事的更新），共 '+totalDel+' 筆：\n\n'+lines.join('\n')+'\n\n確定要刪除嗎？（建議先重新整理拿最新雲端）')) return;
+  }
   // P3(1) 二次攔截：手動勾回「雲端讀取可疑（本機多/雲端0）」→ 明確再確認（整包推會清空雲端）
   const suspiciousKeys=checkedEls.filter(c=>c.getAttribute('data-suspicious')==='1').map(c=>c.getAttribute('data-key'));
   if(suspiciousKeys.length && !confirm('你勾選了 '+suspiciousKeys.length+' 項「雲端讀取可疑」（本機很多筆、雲端卻讀到 0）：\n'+suspiciousKeys.join('\n')+'\n\n若雲端其實有資料、只是這次沒讀到，整包推會把它清空。\n\n確定要推嗎？（建議先重新整理確認雲端真的沒有）')) return;
@@ -10447,7 +10541,7 @@ function momoProfitTableHTML(shop){
   //   搜尋框放在「殼」(本函式) 而非 momo-tbl，才不會每敲一鍵就被重繪掉焦點（momoOnSearch 只重繪表格）。
   return `
     <div class="mm-row" style="margin-bottom:10px">
-      <span class="mm-field"><span class="mm-lbl">期別</span><select class="mm-sel" onchange="momoSetPeriodMonth('${shop}',this.value)">${monthOpts}</select><span class="mm-seg-grp">${segBtns}</span></span>
+      <span class="mm-field"><span class="mm-lbl">月份</span><select class="mm-sel" onchange="momoSetPeriodMonth('${shop}',this.value)">${monthOpts}</select><span class="mm-seg-grp">${segBtns}</span></span>
       <span id="momo-status-${shop}" class="mm-field"></span>
     </div>
     <div id="momo-ov-${shop}"></div>
@@ -11023,7 +11117,41 @@ function momoSaveOptlog(shop,map){ const k=momoOptlogKey(shop);
   try{ localStorage.setItem(k,JSON.stringify(map)); }catch{}
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=map; }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=map; }catch{}
-  try{ _markPending(k); }catch{}   // 走既有 pending → 同步時 __cloudProfit.setField（field 分支）
+  try{ _markPending(k); }catch{}   // 走既有 pending → 同步時 momoSyncOptlog（read-merge-write，見下）
+}
+// optlog 逐 SKU 依 entry id union 合併（read-merge-write，比照 cost_by_origin；不覆蓋、不刪除同事的）。
+//   刪除策略：接受復活、不做 tombstone（append log 刪除罕見）。同 id 保留雲端（保守·不覆蓋別人；同 id≈同一筆、內容本應相同）。
+//   回 { merged, addedFromCloud }：addedFromCloud＝雲端有、本機沒有、這次併回來的 entry 數（供「已合併雲端 N 筆」不靜默報告）。
+function momoMergeOptlog(cloud, local){
+  const c=(cloud&&typeof cloud==='object'&&!Array.isArray(cloud))?cloud:{}, l=(local&&typeof local==='object'&&!Array.isArray(local))?local:{};
+  const out={}; let addedFromCloud=0;
+  const eid=e=>(e&&e.id!=null)?String(e.id):_momoStableStr(e);   // 無 id 的舊資料以穩定序列化當身分
+  const skey=e=>String((e&&e.date)||'')+' '+String((e&&e.time)||'')+' '+eid(e);   // 排序鍵：日期+時間+id（決定性→冪等；render 會 reverse 成新在上）
+  new Set([...Object.keys(c),...Object.keys(l)]).forEach(sku=>{
+    const ca=Array.isArray(c[sku])?c[sku]:[], la=Array.isArray(l[sku])?l[sku]:[];
+    const localIds=new Set(la.map(eid)), byId=new Map();
+    ca.forEach(e=>byId.set(eid(e),e));                                   // 雲端先：同 id 保留雲端（保守）
+    la.forEach(e=>{ const id=eid(e); if(!byId.has(id)) byId.set(id,e); });  // 本機獨有的補上（本機新加的）
+    ca.forEach(e=>{ if(!localIds.has(eid(e))) addedFromCloud++; });        // 雲端有本機無＝這次併回來的
+    const arr=[...byId.values()].sort((a,b)=>skey(a).localeCompare(skey(b)));
+    if(arr.length) out[sku]=arr;
+  });
+  return { merged:out, addedFromCloud };
+}
+// optlog 同步（read-merge-write）：讀雲端 optlog 欄 → 合併 → 寫回雲端 + 本機更新成合併結果（不重 _markPending）。回 addedFromCloud。
+async function momoSyncOptlog(shop){
+  const k=momoOptlogKey(shop);
+  const snap=await window.__cloudProfit.getDoc();
+  const cd=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{};
+  const cloudOpt=(cd[k]&&typeof cd[k]==='object')?cd[k]:{};
+  const { merged, addedFromCloud }=momoMergeOptlog(cloudOpt, momoLoadOptlog(shop)||{});
+  await window.__cloudProfit.setField(k, momoFsSanitizeDeep(merged));   // 寫回合併結果（雲端）
+  // 本機三鏡像同步成合併結果（否則下次同步又出現差異）；⚠ 不 _markPending（剛推完、避免立刻又進待推）
+  try{ localStorage.setItem(k,JSON.stringify(merged)); }catch{}
+  try{ if(Store._profitMem) Store._profitMem[k]=merged; }catch{}
+  try{ if(Store._mem) Store._mem[k]=merged; }catch{}
+  try{ momoUpdateDailyProgress({silent:true}); }catch(e){}   // 工作日誌 counts 跟著合併結果更新
+  return addedFromCloud;
 }
 // 一次性遷移：把前後雙底線的舊合成 key（__master_import__/__sync_new__）改成合法形式（Firestore 拒 __..__ → 同步炸）。
 //   併到目標 key（若已存在）、entry.sku 一併改；idempotent（無壞 key 就 no-op）；改到就 momoSaveOptlog（標 pending → 下次同步推乾淨版）。回遷移筆數。
