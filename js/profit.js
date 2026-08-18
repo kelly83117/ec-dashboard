@@ -10915,14 +10915,7 @@ function momoRenderProfitBody(shop, tableOnly){
     const filterInfo= _filterOn
       ? `<div class="mm-filter-info">🏷 已篩選 <b>${_filteredCount}</b> / ${_baseCount} 項${tagsRes.estimated?' · <span style="color:#d97706">🟡 含未對帳估算</span>':''} <button class="mm-linkbtn" onclick="momoClearFilters('${shop}')">清除篩選</button></div>`
       : '';
-    // 乙配口徑變更一次性說明（Piece 2 費用重分上線）：寄倉運費歸正 → 乙配毛利率下修、跟改版前不可對照。可關(localStorage)。
-    let yiCaveat='';
-    if(shop==='乙配' && !_filterOn){ let dismissed=false; try{ dismissed=localStorage.getItem('ec_momo_yi_caveat')==='1'; }catch(e){}
-      if(!dismissed) yiCaveat=`<div class="mm-banner mm-banner-warn" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px">
-        <span>📢 <b>乙配費用口徑已變更（寄倉運費歸正）</b>：寄倉物流(C1204)與倉租已<b>全額歸乙配</b>、不再由甲配按營收補貼；乙配毛利率因此<b>下修（約 −14pp）</b>。這是修正後的真實數字，<b>跟改版前的乙配毛利率不可直接對照</b>。有 C1204 的月逐SKU精算、沒 C1204 的月按乙配店內營收攤估算（狀態列標示）。</span>
-        <button class="mm-linkbtn" style="flex-shrink:0" onclick="momoDismissYiCaveat('${shop}')">知道了</button>
-      </div>`;
-    }
+    // 乙配「口徑已變更·不可對照」橫幅已於 2026-08-18 移除：七個月已同口徑、無 5→6 斷點，該說明過期（留著反讓新同事困惑能不能對比）。
     // E001 未結算：改用甲配狀態晶片「⚠ 未對帳」（見 statusChip MO+ 分支），不另做橫幅。
     // MO+ 狀態橫幅：結算中(+12天未到) / 資料不完整(缺 origins 來源) / 雙寫不一致 / 缺成本彙總
     let moPlusBanner='';
@@ -10977,12 +10970,11 @@ function momoRenderProfitBody(shop, tableOnly){
         </div>`;
       }
     }
-    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+yiCaveat+moPlusBanner+moPlusMissCostChip+moPlusFeeAnomChip+moPlusPriceBanner+overview+statusBanner;
+    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+moPlusBanner+moPlusMissCostChip+moPlusFeeAnomChip+moPlusPriceBanner+overview+statusBanner;
   }
   tbl.innerHTML=discHint+tableHTML;
   momoSyncFilterChip(shop);   // 篩選變動後同步工具列 🏷 按鈕作用中狀態（殼不重繪）
 }
-function momoDismissYiCaveat(shop){ try{ localStorage.setItem('ec_momo_yi_caveat','1'); }catch(e){} momoRenderProfitBody(shop,false); }   // 關閉乙配口徑變更說明（一次性）
 function momoDismissMoPlusPriceHint(shop){ try{ localStorage.setItem('ec_momo_price_hint','1'); }catch(e){} momoRenderProfitBody(shop,false); }   // 關閉 MO+ 售價需重傳提示（一次性）
 
 /* ═══════════════ 單品分析 modal（待辦B）+ optimizationLog（待辦C）═══════════════
@@ -14954,9 +14946,9 @@ function momoOvTop10(shop, period){
 }
 // ══════════ 各賣場分析區塊（通路總覽，KPI 下方 / 趨勢圖上方）══════════
 // 前提二：口徑變更點（賣場費用/營收口徑在某期別起變更，跨線的期間對比一律不產出結論——否則把口徑跳動誤讀成經營改善）。
-const MOMO_CALIB_CHANGES=[
-  { shop:'乙配', from:'2026-06', reason:'寄倉物流+倉租歸乙配，六月起與五月前不可對照' }
-];
+// 口徑變更線登記表（機制保留、供日後真的有口徑變更時登記）。2026-08-18 清空乙配 2026-06 那筆：
+//   七個月對帳單已逐月拆出寄倉費、C1204/C1212 全齊 → 計算早已同口徑、無 5→6 斷點，該抑制過期故移除。
+const MOMO_CALIB_CHANGES=[];
 function momoCrossesCalibChange(shop, keyA, keyB){   // 兩期別(月粒度)是否跨越某賣場的口徑變更線
   const a=String(keyA||'').slice(0,7), b=String(keyB||'').slice(0,7);
   if(!a||!b) return false;
@@ -15228,7 +15220,7 @@ function momoRenderSummary(){
     ${momoRenderShopAnalysisSection(period, perShop)}
     <div class="mm-ov-grid">
       <div class="mm-ov-card"><div class="mm-ov-h">營收 + 淨利趨勢（2026 各月）</div><div class="mm-ov-canvas"><canvas id="momo-ov-trend"></canvas></div></div>
-      <div class="mm-ov-card"><div class="mm-ov-h">各賣場毛利率（2026 各月）</div><div class="mm-ov-canvas"><canvas id="momo-ov-margin"></canvas></div><div style="font-size:11px;color:#9ca3af;margin-top:4px">📌 乙配自 2026-06 費用口徑變更（寄倉物流+倉租歸乙配），六月起與五月前不可對照。</div></div>
+      <div class="mm-ov-card"><div class="mm-ov-h">各賣場毛利率（2026 各月）</div><div class="mm-ov-canvas"><canvas id="momo-ov-margin"></canvas></div></div>
     </div>
     <div class="mm-ov-grid">
       <div class="mm-ov-card"><div class="mm-ov-h">營收佔比（${momoPeriodLabel(period)}）</div><div class="mm-ov-canvas"><canvas id="momo-ov-pie"></canvas></div></div>
@@ -16460,7 +16452,7 @@ Object.assign(window, {
   momoRenderMoPlusRecon,momoMoPlusReconSetMonth,momoMoPlusReconToggle,momoClearMoPlusReconPdf,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
   momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoOpenDpDetailFromEl,momoCloseDpDetail,
-  momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoDismissYiCaveat,momoOvSetMonth,
+  momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoOvSetMonth,
   momoSearchClear,momoSearchClearToggle,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,momoSyncToggleAll,momoSyncUpdateCount,momoExportExcel,
   momoShopAnalysis,momoRenderShopAnalysisSection,momoCrossesCalibChange,momoPeriodIncomplete,momoCalibReason,
