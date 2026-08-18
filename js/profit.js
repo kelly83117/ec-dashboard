@@ -7910,10 +7910,15 @@ window.__momoOriginsBaseGet=function(k){ return _momoOBaseGet(k); };            
 //   ⚠ 不放寬防護：只有「雲端已等於本機(推已落地) 或 本機根本不存在(orphan)」才判定 dirty 過期並清掉；
 //     「dirty 且雲端≠本機且本機存在」＝本機確實較新未推 → 仍照舊跳過覆蓋、保護本機（與 #169 原行為完全相同）。
 function momoOriginsCloudDecision(k, cloudData){
-  const local = (typeof Store!=='undefined' && Store._profitMem) ? Store._profitMem[k] : undefined;
+  let local = (typeof Store!=='undefined' && Store._profitMem) ? Store._profitMem[k] : undefined;
+  // ⚠ reload gap 修：_profitMem 於 reload 後可能尚未補水 → 改由 localStorage 取本機權威值（persisted、跨重整），
+  //   避免 dirty 未推的逐列成本被下方「localMissing 自癒」誤判為孤兒而清 dirty＋接受雲端（＝未推值被覆蓋）。
+  let _oLsFail=false;
+  if(local==null){ try{ const _s=localStorage.getItem(k); if(_s!=null) local=JSON.parse(_s); }catch(e){ _oLsFail=true; } }
   const localMissing = (local==null);
   let equal=false; try{ equal = !localMissing && JSON.stringify(local)===JSON.stringify(cloudData); }catch{ equal=false; }
   if(_momoOIsDirty(k)){
+    if(_oLsFail) return {action:'skip'};   // dirty 但 localStorage 讀取失敗＝不確定 → 不覆蓋（安全預設）
     if(equal || localMissing){ _momoODirtyDel(k); return {action:'accept', healed:true}; }   // 自癒：雲端已追上／本機不存在 → dirty 過期，清掉並接受雲端
     return {action:'skip'};                                                                    // 保護：本機較新未推、雲端較舊 → 不覆蓋（不放寬）
   }
