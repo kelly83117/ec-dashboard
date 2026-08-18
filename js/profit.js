@@ -10506,7 +10506,7 @@ function momoProfitTableHTML(shop){
   //   搜尋框放在「殼」(本函式) 而非 momo-tbl，才不會每敲一鍵就被重繪掉焦點（momoOnSearch 只重繪表格）。
   return `
     <div class="mm-row" style="margin-bottom:10px">
-      <span class="mm-field"><span class="mm-lbl">期別</span><select class="mm-sel" onchange="momoSetPeriodMonth('${shop}',this.value)">${monthOpts}</select><span class="mm-seg-grp">${segBtns}</span></span>
+      <span class="mm-field"><span class="mm-lbl">月份</span><select class="mm-sel" onchange="momoSetPeriodMonth('${shop}',this.value)">${monthOpts}</select><span class="mm-seg-grp">${segBtns}</span></span>
       <span id="momo-status-${shop}" class="mm-field"></span>
     </div>
     <div id="momo-ov-${shop}"></div>
