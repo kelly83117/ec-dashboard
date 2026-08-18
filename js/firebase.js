@@ -346,8 +346,25 @@ try {
           // ⚠ dirty 守衛（比照 momo_products/origins 訂閱）：ec_momo_cost_dirty 裡的原廠編號＝本機補了還沒推，
           //   逐 key merge 保留本機值、其餘取雲端；不整包覆蓋（原本整包覆蓋會把本機未推的成本蓋掉＝資料遺失根因）。
           const dirtySet = (window.__momoCostDirtySet && window.__momoCostDirtySet()) || new Set();
+          // ⚠ reload gap 修：dirty 非空時，本機權威值改讀 localStorage（persisted、跨重整），不依賴 Store._profitMem——
+          //   reload 後訂閱可能「早於 _profitMem 從 localStorage 補水」就觸發 → _profitMem 空 → 舊碼 merge 取不到本機值
+          //   → 未推成本被雲端整包覆蓋（＝Vanessa 四筆消失的主要路徑）。讀不到 localStorage（dirty 存在卻拿不到本機表）
+          //   → 安全預設「不覆蓋」跳過本輪（寧可暫不同步，也不洗掉未推值）。dirty 空時維持原 fast path（_profitMem）。
+          let _localMap, _localMeta;
+          if (dirtySet.size > 0) {
+            try {
+              const _sm = localStorage.getItem('ec_momo_cost_by_origin');
+              const _se = localStorage.getItem('ec_momo_cost_by_origin_meta');
+              _localMap = _sm != null ? JSON.parse(_sm) : null;
+              _localMeta = _se != null ? JSON.parse(_se) : {};
+            } catch (e) { _localMap = null; }
+            if (!_localMap) { console.warn('[momo_cost_by_origin] dirty 非空但無法取得本機權威成本表 → 跳過本輪雲端更新（不覆蓋未推）'); return; }
+          } else {
+            _localMap = Store._profitMem['ec_momo_cost_by_origin'] || {};
+            _localMeta = Store._profitMem['ec_momo_cost_by_origin_meta'] || {};
+          }
           if (data.costMap) {
-            const localMap = Store._profitMem['ec_momo_cost_by_origin'] || {};
+            const localMap = _localMap;
             const mergedMap = Object.assign({}, data.costMap); const kept = [];
             dirtySet.forEach(o => { if (Object.prototype.hasOwnProperty.call(localMap, o)) { mergedMap[o] = localMap[o]; kept.push(o); } });
             if (JSON.stringify(localMap) !== JSON.stringify(mergedMap)) {
@@ -359,7 +376,7 @@ try {
             }
           }
           if (data.meta) {
-            const localMeta = Store._profitMem['ec_momo_cost_by_origin_meta'] || {};
+            const localMeta = _localMeta || {};
             const mergedMeta = Object.assign({}, data.meta);
             dirtySet.forEach(o => { if (Object.prototype.hasOwnProperty.call(localMeta, o)) mergedMeta[o] = localMeta[o]; });   // dirty 原廠的 meta 也保留本機（跟 cost 同一個 doc、同步時一起 read-merge-write）
             if (JSON.stringify(localMeta) !== JSON.stringify(mergedMeta)) {
