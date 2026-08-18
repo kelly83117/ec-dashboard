@@ -10734,7 +10734,7 @@ function momoExportExcel(shop){
     const ws=XLSX.utils.aoa_to_sheet(aoa);
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'MOMO總表');
-    const safe=String(shop).replace(/[\\/:*?"<>|]/g,'');
+    const safe=String(momoShopDisplay(shop)).replace(/[\\/:*?"<>|]/g,'');   // 匯出檔名用顯示名（MO+好麻吉），內部 shop key 不變
     XLSX.writeFile(wb, `MOMO_${safe}_${period||''}_總表.xlsx`);
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
@@ -11371,9 +11371,11 @@ function momoOpenDpDetail(person, date, combo){
   if(!ov){ ov=document.createElement('div'); ov.id='momo-dp-detail-ov'; document.body.appendChild(ov); }
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.onclick=e=>{ if(e.target===ov) momoCloseDpDetail(); };
+  const _sepi=String(combo).indexOf(MOMO_OPTLOG_DP_SEP);   // 顯示用：把 combo 的賣場段轉顯示名（MO+麻吉→MO+好麻吉）；比對仍用原始 combo（上面 line 已比完）
+  const dispCombo=_sepi>=0?(momoShopDisplay(String(combo).slice(0,_sepi))+String(combo).slice(_sepi)):combo;
   ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.2)">
     <div style="padding:12px 16px;border-bottom:1px solid #eef0f2;display:flex;align-items:center;justify-content:space-between;gap:10px">
-      <div><div style="font-size:14px;font-weight:700;color:#4338ca">${esc(combo)}　${rows.length} 筆</div><div style="font-size:11px;color:#9ca3af;margin-top:1px">${esc(person)}　${esc(date)}　·　MOMO 優化紀錄</div></div>
+      <div><div style="font-size:14px;font-weight:700;color:#4338ca">${esc(dispCombo)}　${rows.length} 筆</div><div style="font-size:11px;color:#9ca3af;margin-top:1px">${esc(person)}　${esc(date)}　·　MOMO 優化紀錄</div></div>
       <button onclick="momoCloseDpDetail()" style="border:0;background:none;color:#9ca3af;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0">×</button>
     </div>
     <div style="padding:6px 16px 14px;overflow:auto">${body}</div>
@@ -14753,7 +14755,7 @@ function momoExportMissingCost(shop){
   });
   const csv='﻿'+lines.join('\r\n');   // BOM → Excel 正確辨識 UTF-8
   try{ const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-    a.download='MOMO_'+String(shop).replace(/[\\/:*?"<>|]/g,'')+'_缺成本清單_'+(s.period||'')+'.csv'; a.click();
+    a.download='MOMO_'+String(momoShopDisplay(shop)).replace(/[\\/:*?"<>|]/g,'')+'_缺成本清單_'+(s.period||'')+'.csv'; a.click();
     if(typeof showToast==='function') showToast('已匯出缺成本清單 '+s.originN+' 筆 CSV','success');
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
@@ -14818,7 +14820,7 @@ function momoExportFeeAnomaly(shop){
   s.list.forEach(e=>lines.push([esc(e.sku), esc(e.name), esc(fmt(e.obs17)), esc(fmt(e.pr)), esc(momoFeeAnomReason(e.reason))].join(',')));
   const csv='﻿'+lines.join('\r\n');
   try{ const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-    a.download='MOMO_'+String(shop).replace(/[\\/:*?"<>|]/g,'')+'_成交費率異常_'+(s.period||'')+'.csv'; a.click();
+    a.download='MOMO_'+String(momoShopDisplay(shop)).replace(/[\\/:*?"<>|]/g,'')+'_成交費率異常_'+(s.period||'')+'.csv'; a.click();
     if(typeof showToast==='function') showToast('已匯出成交費率異常 '+s.n+' 筆 CSV','success');
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
@@ -14940,31 +14942,31 @@ function _momoSyncAfterApply(shop,msg){
   if(typeof showToast==='function') showToast(msg+'（記得按 ☁ 同步雲端）','success');
 }
 function momoSyncApplyCost(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).costChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可套用的成本變動項目','info'); return; }
+  const items=(_momoSyncPlan.shops[shop]||{}).costChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可套用的成本變動項目','info'); return; }
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
   items.forEach(it=>{ const p=bySku.get(it.sku); if(!p)return; p.cost=it.new; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:it.new,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品資料同步：成本更新'}); });
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已更新 '+items.length+' 筆成本');
 }
 function momoSyncApplyPrice(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).priceChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可套用的售價/進價變動項目','info'); return; }
+  const items=(_momoSyncPlan.shops[shop]||{}).priceChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可套用的售價/進價變動項目','info'); return; }
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
   items.forEach(it=>{ const p=bySku.get(it.sku); if(!p)return; p.purchasePrice=it.newP; p.salePrice=it.newS; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:p.cost,purchasePrice:it.newP,salePrice:it.newS,note:'商品資料同步：進價/售價更新'}); });
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已更新 '+items.length+' 筆進價/售價');
 }
 function momoSyncApplyName(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).nameChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可套用的名稱變動項目','info'); return; }
+  const items=(_momoSyncPlan.shops[shop]||{}).nameChanged||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可套用的名稱變動項目','info'); return; }
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
   items.forEach(it=>{ const p=bySku.get(it.sku); if(p) p.name=it.new; });   // 名稱不進歷程
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已更新 '+items.length+' 筆名稱');
 }
 function momoSyncApplyDiscontinued(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).discontinued||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可標記下架的項目','info'); return; }
+  const items=(_momoSyncPlan.shops[shop]||{}).discontinued||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可標記下架的項目','info'); return; }
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
   items.forEach(it=>{ const p=bySku.get(it.sku); if(p) p.discontinued=true; });
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已標記 '+items.length+' 筆下架');
 }
 function momoSyncApplyNew(shop){
-  const items=(_momoSyncPlan.shops[shop]||{}).newItems||[]; if(!items.length){ if(typeof showToast==='function') showToast(shop+' 沒有可一鍵新增的未建檔項目','info'); return; }
+  const items=(_momoSyncPlan.shops[shop]||{}).newItems||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可一鍵新增的未建檔項目','info'); return; }
   const master=momoLoadProducts(shop), have=new Set(master.map(p=>p.sku)); let added=0;
   items.forEach(it=>{ if(have.has(it.sku))return; master.push({sku:it.sku, origin:it.origin, name:it.name, cost:it.cost, purchasePrice:it.purchasePrice, salePrice:it.salePrice, shippingPackaging:momoDefaultShip(shop), history:[{...momoNowParts(),cost:it.cost,purchasePrice:it.purchasePrice,salePrice:it.salePrice,note:'商品資料同步：新建檔'}], periods:{}}); have.add(it.sku); added++; });
   momoSaveProducts(shop,master);
@@ -16941,7 +16943,7 @@ Object.assign(window, {
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,
   momoRenderMoPlusRecon,momoMoPlusReconSetMonth,momoMoPlusReconToggle,momoClearMoPlusReconPdf,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
-  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoOpenDpDetailFromEl,momoCloseDpDetail,
+  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoOpenDpDetailFromEl,momoCloseDpDetail,momoShopDisplay,
   momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoOvSetMonth,
   momoSearchClear,momoSearchClearToggle,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,momoSyncToggleAll,momoSyncUpdateCount,momoExportExcel,
