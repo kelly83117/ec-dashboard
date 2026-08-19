@@ -7048,6 +7048,13 @@ function _scoreDefaultQ(){return Math.ceil((_KPI_NOW.getMonth()+1)/3);}
 let _scoreCurQ=_scoreDefaultQ();
 let _scoreCurYear=_KPI_NOW.getFullYear();
 let _scoreDefsOpen=false;
+// 目標卡（12 張）預設收起，讓評分結果上移。寫法比照上一行的 _scoreDefsOpen：模組層旗標
+//   + renderKpiTab 整區重繪。⚠ 刻意不用原生 <details>：renderKpiTab 是 el.innerHTML=…
+//   整區換掉，而 setScoreQ / adjustScoreBonus / saveScoreTargetsModal 都會呼叫它 →
+//   <details open> 的展開狀態撐不過任何一次重繪，模組層旗標可以。
+// ⚠ 但這個旗標【活不過重新整理】（模組層變數，不進 localStorage）：每個月要填數字的人
+//   每次開頁面都得多點一次展開。要根治得把狀態持久化，刻意不在本 commit 處理。
+let _scoreTargetsOpen=false;
 // 明細用「點分數」決定要看哪幾格，可以點多格一起比較（不限同一個月或同一個賣場）——
 // key 格式 "賣場|月份"。預設勾本季最新一個有資料月份的三個賣場。
 function _scoreDefaultDetailCells(year,q){
@@ -7061,6 +7068,7 @@ let _scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,_scoreCurQ);
 
 function setScoreQ(q){_scoreCurQ=q;_scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,q);renderKpiTab();}
 function toggleScoreDefs(){_scoreDefsOpen=!_scoreDefsOpen;renderKpiTab();}
+function toggleScoreTargets(){_scoreTargetsOpen=!_scoreTargetsOpen;renderKpiTab();}
 function toggleScoreDetailCell(shop,month){
   const key=shop+'|'+month;
   if(_scoreDetailCells.has(key))_scoreDetailCells.delete(key);else _scoreDetailCells.add(key);
@@ -7114,6 +7122,11 @@ function adjustScoreBonus(delta){
 function _kpiScoreViewHtml(){
   const year=_scoreCurYear,q=_scoreCurQ;
   const targets=getScoreTargetsForQ(year,q);
+  // 沒有設定過目標的季【強制展開】：「Q<n> 還沒有 KPI 目標設定，請按上面『✎ 編輯本季指標』
+  //   建立」這句唯一的引導文字就在 targetCardHtml 裡面（下方那串三元運算的 else 分支）。
+  //   收起來的話，新的一季（例如 Q4 剛開始）會變成一片空白 + 一顆字面對不上的「編輯」按鈕
+  //   —— 使用者要做的是「建立」，畫面上卻只剩「編輯」，沒有任何線索告訴他該按哪裡。
+  const targetsOpen=_scoreTargetsOpen||!targets;
   const qTabsHtml=[1,2,3,4].map(qq=>`<div onclick="setScoreQ(${qq})" style="padding:5px 14px;font-size:12px;font-weight:${qq===q?700:600};border-radius:16px;border:1px solid ${qq===q?'#5b5fcf':'#e5e7eb'};background:${qq===q?'#5b5fcf':''};color:${qq===q?'#fff':'#9ca3af'};cursor:pointer">Q${qq}</div>`).join('');
 
   const targetCardHtml=targets?SCORE_SHOPS.map((s,i)=>{
@@ -7145,8 +7158,11 @@ function _kpiScoreViewHtml(){
     <div style="font-size:11px;color:#9ca3af">每季指標與權重可獨立調整</div>
   </div>
 
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-    <div style="font-size:13px;font-weight:700;color:#374151">Q${q} KPI 目標與權重設定</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${targetsOpen?'10px':'24px'}">
+    <div onclick="toggleScoreTargets()" style="display:flex;align-items:center;gap:5px;cursor:pointer">
+      <span style="font-size:10px;transition:transform .15s;display:inline-block;color:#5b5fcf;${targetsOpen?'transform:rotate(90deg)':''}">▶</span>
+      <div style="font-size:13px;font-weight:700;color:#374151">Q${q} KPI 目標與權重設定</div>
+    </div>
     <div style="font-size:12px;font-weight:600;color:#5b5fcf;cursor:pointer" onclick="openEditScoreTargetsModal()">✎ 編輯本季指標</div>
   </div>
 
@@ -7155,8 +7171,10 @@ function _kpiScoreViewHtml(){
   </div>
   <div style="display:${_scoreDefsOpen?'block':'none'};border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px">${scoreDefsHtml(q)}</div>
 
-  <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:8px">${targetCardHtml}</div>
-  <div style="font-size:11px;color:#9ca3af;margin-bottom:24px">配分欄位總和建議為 100 分；按「✎ 編輯本季指標」可調整目標／低標／配分</div>
+  <div style="display:${targetsOpen?'block':'none'}">
+    <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:8px">${targetCardHtml}</div>
+    <div style="font-size:11px;color:#9ca3af;margin-bottom:24px">配分欄位總和建議為 100 分；按「✎ 編輯本季指標」可調整目標／低標／配分</div>
+  </div>
 
   <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
   <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px" id="score-cmp-table"></div>
@@ -17178,7 +17196,7 @@ Object.assign(window, {
   momoCostInlineToggle,momoMoPlusCostInlineSave,momoMissingCostSave,momoExportCostByOrigin,momoBumpMoPlusEpoch,
   momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoOpenMissingCostPanel,momoExportMissingCost,momoOpenFeeAnomalyPanel,momoExportFeeAnomaly,momoUploadShowDryRun,momoUploadDryRunCSV,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
-  setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
+  setScoreQ,toggleScoreDefs,toggleScoreTargets,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
   openProdTagPanel,closeProdTagPanel,saveProdTagPanel,addProdTagToDraft,removeProdTagFromDraft,
   saveProdTags,patchProdTagCell,renderProdTagPanelBody,syncProdTagDraftFromDOM,
