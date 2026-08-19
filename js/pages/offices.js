@@ -3073,7 +3073,7 @@ Object.assign(App, {
           const pct = rev > 0 ? profit / rev * 100 : null;
           return `<tr style="vertical-align:middle">
             <td style="text-align:center;color:#9ca3af;font-size:12px">${i + 1}</td>
-            <td style="font-weight:600">${escapeHtml(r.name || '')}</td>
+            <td style="font-weight:600;text-align:left">${escapeHtml(r.name || '')}</td>
             <td style="text-align:right">${priceF(r.cost)}</td>
             <td style="text-align:right">${priceF(r.rev)}</td>
             <td style="text-align:right">${cost || rev ? priceF(profit) : '<span style="color:var(--text-muted)">—</span>'}</td>
