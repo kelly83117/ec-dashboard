@@ -7058,9 +7058,38 @@ let _scoreDefsOpen=false;
 //   + renderKpiTab 整區重繪。⚠ 刻意不用原生 <details>：renderKpiTab 是 el.innerHTML=…
 //   整區換掉，而 setScoreQ / adjustScoreBonus / saveScoreTargetsModal 都會呼叫它 →
 //   <details open> 的展開狀態撐不過任何一次重繪，模組層旗標可以。
-// ⚠ 但這個旗標【活不過重新整理】（模組層變數，不進 localStorage）：每個月要填數字的人
-//   每次開頁面都得多點一次展開。要根治得把狀態持久化，刻意不在本 commit 處理。
-let _scoreTargetsOpen=false;
+// 展開/收起的選擇記在【瀏覽器本機】，跨頁面重整保留。一對讀寫函式的形狀比照本檔的
+//   getTagFilters / saveTagFilters（同樣屬於「個人畫面偏好」這一類）。
+//   🔴 這是純本機狀態，【絕對不上雲，任何形式都不行】：一個人的畫面收合不該影響其他人，
+//     app/profit 也沒有容量可以浪費。所以【不走 Store.set】（雲端模式下它結尾會 setField
+//     推 Firestore，見 js/app.js 搜 `Store.set = function`）、也【不走 Store.setLocalOnly】
+//     （那支的語意是「先在本機收集、之後按☁同步雲端推上去」，用它會讓後人以為這個值遲早
+//     要上雲），直接 raw localStorage。
+//   🔴 key 名有兩個地雷，要改名前先讀完：
+//     ① 不可用 ec| 或 ec_momo_ 開頭 —— 那些前綴會被同步掃描的白名單撈進待推清單
+//        （本檔搜 localStorage.key，二十幾個迴圈清一色是前綴判準），一撈進去就等於上雲。
+//     ② 不可叫 ec_score_targets_open —— 與雲端資料 key ec_score_targets_v1 只差字尾，
+//        在 DevTools 的 localStorage 清單裡兩個並排，遲早有人刪錯那一個。
+//   ⚠ 值用 '1'/'0' 而不是 JSON：它是布林不是陣列，少一層 JSON.parse 就少一種炸法
+//     （手動在 DevTools 塞成沒引號的 true 會讓 JSON.parse 失敗）。比照 js/app.js 的
+//     ec.sidebarCollapsed，不比照 getTagFilters 的 JSON.stringify。
+//   ⚠ 寫入失敗（無痕模式 / 配額滿）一律靜默吞掉，退化成「這個旗標活不過重整」＝本功能
+//     加入之前的行為，不會壞任何東西。刻意【不】接本檔的 _isQuotaErr / _lsFailNotified 通報：
+//     那套是給「報表存不進去＝真的會掉資料」用的，收合狀態掉了不值得彈窗打斷使用者。
+//     也刻意【不】接 Store._useMem 的記憶體降級（js/app.js 搜 `_useMem`）—— 跟隨隔壁
+//     getTagFilters / ec.sidebarCollapsed 的既有慣例，各自 try/catch 就好。
+//   ⚠ 這個偏好是【每個瀏覽器一份，不是每個帳號一份】：localStorage 的作用域是 origin，
+//     而下面那行讀取發生在模組載入當下、早於使用者登入。同一台電腦兩個同事輪流用會互相
+//     繼承收合狀態。這是刻意的取捨 —— 要按帳號分就得把使用者識別放進 key，那會製造
+//     「登入後才能讀」的時序依賴，正是下面那段註解要避免的東西。既有的 ec.sidebarCollapsed
+//     / ec_tagfilters_user / ec_lastMonth_* 全都是同一個模型。
+const _SCORE_TARGETS_OPEN_LS='ec_score_targets_open_ui';
+function getScoreTargetsOpen(){try{return localStorage.getItem(_SCORE_TARGETS_OPEN_LS)==='1';}catch{return false;}}
+function saveScoreTargetsOpen(v){try{localStorage.setItem(_SCORE_TARGETS_OPEN_LS,v?'1':'0');}catch{}}
+// 讀取寫在模組層宣告處，比照上方的 _scoreCurQ 與下方的 _scoreDetailCells：這個值只依賴
+//   localStorage、不依賴雲端或 DOM，越早求值越單純。放到 renderKpiTab / initShopUI 補讀
+//   反而多一條時序依賴。
+let _scoreTargetsOpen=getScoreTargetsOpen();
 // 明細用「點分數」決定要看哪幾格，可以點多格一起比較（不限同一個月或同一個賣場）——
 // key 格式 "賣場|月份"。預設勾本季最新一個有資料月份的三個賣場。
 function _scoreDefaultDetailCells(year,q){
@@ -7074,7 +7103,7 @@ let _scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,_scoreCurQ);
 
 function setScoreQ(q){_scoreCurQ=q;_scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,q);renderKpiTab();}
 function toggleScoreDefs(){_scoreDefsOpen=!_scoreDefsOpen;renderKpiTab();}
-function toggleScoreTargets(){_scoreTargetsOpen=!_scoreTargetsOpen;renderKpiTab();}
+function toggleScoreTargets(){_scoreTargetsOpen=!_scoreTargetsOpen;saveScoreTargetsOpen(_scoreTargetsOpen);renderKpiTab();}
 function toggleScoreDetailCell(shop,month){
   const key=shop+'|'+month;
   if(_scoreDetailCells.has(key))_scoreDetailCells.delete(key);else _scoreDetailCells.add(key);
@@ -7132,6 +7161,10 @@ function _kpiScoreViewHtml(){
   //   建立」這句唯一的引導文字就在 targetCardHtml 裡面（下方那串三元運算的 else 分支）。
   //   收起來的話，新的一季（例如 Q4 剛開始）會變成一片空白 + 一顆字面對不上的「編輯」按鈕
   //   —— 使用者要做的是「建立」，畫面上卻只剩「編輯」，沒有任何線索告訴他該按哪裡。
+  //   ⚠⚠ 這道強制展開會【蓋過持久化的值】（_scoreTargetsOpen 現在記在 localStorage）：
+  //     使用者在沒有目標的季手動收起，重整後仍然是展開的，看起來像持久化壞掉。
+  //     【這不是 bug，不要來修。】強制展開是為了讓 Q4 一到不會有人對著空白畫面，那道防線
+  //     比「記住收起」重要；而且沒有目標的季本來就沒東西可看，收起來也沒省到什麼版面。
   const targetsOpen=_scoreTargetsOpen||!targets;
   const qTabsHtml=[1,2,3,4].map(qq=>`<div onclick="setScoreQ(${qq})" style="padding:5px 14px;font-size:12px;font-weight:${qq===q?700:600};border-radius:16px;border:1px solid ${qq===q?'#5b5fcf':'#e5e7eb'};background:${qq===q?'#5b5fcf':''};color:${qq===q?'#fff':'#9ca3af'};cursor:pointer">Q${qq}</div>`).join('');
 
