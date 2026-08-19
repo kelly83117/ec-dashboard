@@ -10657,17 +10657,17 @@ function momoPeriodTotals(shop, periodKey){
   const keys=momoExpandPeriod(periodKey);
   const isMoPlus=momoIsMoPlus(shop);
   let rev=0, profit=0, qty=0, any=false, missCost=0, missCostDisc=0;   // missCost：該期有營收但缺成本 → 淨利虛高；Disc=其中已下架
-  let soldActive=0, activeTotal=0;   // 動銷率用：soldActive=上架且該期有銷售、activeTotal=上架總數（下架不計，跟「上架 516」對得起來）
+  let soldActive=0, activeTotal=0;   // 動銷率用：soldActive=本期有銷售（不論上下架，分子）、activeTotal=目前上架 ∪ 本期有銷售（分母；賣過卻已下架的也算現役池，避免漏算）
   let revMiss=0, revMissQty=0;   // 有銷量(qty>0)但營收≈0 → 缺營收（多半缺進價，估不出未稅進價×qty）→ 淨利假性大虧，畫面要標
   let revCov=0, profitCov=0;   // MO+：成本涵蓋 100% 的 SKU 才計入加權毛利率（分母/分子）；未涵蓋的營收/淨利仍進 KPI 總額但不進毛利率
   momoLoadProducts(shop).forEach(p=>{
     const isActive = p.discontinued!==true;   // 上架
-    if(isActive) activeTotal++;
     const a=momoAggregatePeriods(p, keys, shop, {lean:true});   // 彙總只讀 rev/profit/qty/covered/missCost，不需 listPrice/latestSale → lean 跳過逐SKU掃描熱點（MO+麻吉 每次 ~3s→~40ms；趨勢圖 ×32 次是通路總覽卡頓主因）
     // 動銷/計入判定用 grossQty(C1105訂單數，賣出後全退仍算有動)：讓動銷率不因「銷量改用對帳數量」而變動；qty 總和才是顯示銷量(對帳數量)
     const g=(a.grossQty!=null?a.grossQty:a.qty);
-    const active = g>0 || Math.abs(a.revenue)>0.5;
-    if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; if(isActive) soldActive++;
+    const active = g>0 || Math.abs(a.revenue)>0.5;   // 本期有銷售
+    if(isActive || active) activeTotal++;   // 動銷率分母＝目前上架 ∪ 本期有銷售（賣過卻已下架的也算現役池；只算「目前上架」會漏掉這批）
+    if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; soldActive++;   // 分子＝本期有銷售（不論上下架）
       if(isMoPlus){   // MO+ 缺成本＝成本涵蓋<100%（非 product.cost）；covered 才進加權毛利率
         if(a.covered){ revCov+=a.revenue; profitCov+=a.profit; }
         else { missCost++; if(p.discontinued===true) missCostDisc++; }
@@ -10685,10 +10685,10 @@ function momoTotalsFromRows(rows){
   let rev=0, profit=0, qty=0, any=false, missCost=0, missCostDisc=0, soldActive=0, activeTotal=0, revMiss=0, revMissQty=0;
   rows.forEach(r=>{
     const isActive=r.discontinued!==true;
-    if(isActive) activeTotal++;
     const g=(r.grossQty!=null?r.grossQty:r.qty);
-    const active=g>0 || Math.abs(r.revenue)>0.5;
-    if(active){ any=true; rev+=r.revenue||0; profit+=r.profit||0; qty+=r.qty||0; if(!(Number(r.cost)>0)){ missCost++; if(r.discontinued===true) missCostDisc++; } if(isActive) soldActive++;
+    const active=g>0 || Math.abs(r.revenue)>0.5;   // 本期有銷售
+    if(isActive || active) activeTotal++;   // 分母＝目前上架 ∪ 本期有銷售（口徑同 momoPeriodTotals）
+    if(active){ any=true; rev+=r.revenue||0; profit+=r.profit||0; qty+=r.qty||0; if(!(Number(r.cost)>0)){ missCost++; if(r.discontinued===true) missCostDisc++; } soldActive++;   // 分子＝本期有銷售（不論上下架）
       if(g>0 && Math.abs(r.revenue)<0.5){ revMiss++; revMissQty+=g; } }
   });
   return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty };
@@ -11600,7 +11600,7 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
   const money=v=>momoMoney(v);
   const marginColor=m=> m>=25?'#059669':m>=15?'#d97706':'#dc2626';   // 毛利率看絕對值：≥25綠 / ≥15橘 / <15紅
   const marginDelta=hasPrev?((cur.margin-prev.margin>=0?'+':'')+(cur.margin-prev.margin).toFixed(1)+'pp'):'—';
-  // 動銷率＝上架且有銷售 ÷ 上架總數（分母不含下架）；環比用 pp 差、上升=好(綠)
+  // 動銷率＝本期有銷售 ÷（目前上架 ∪ 本期有銷售）；環比用 pp 差、上升=好(綠)
   const rate = cur.activeTotal>0 ? cur.soldActive/cur.activeTotal*100 : null;
   const prevRate = (hasPrev && prev.activeTotal>0) ? prev.soldActive/prev.activeTotal*100 : null;
   const rateD = (rate!=null && prevRate!=null)
@@ -11614,7 +11614,7 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
     {label:'總淨利', info:'該期所有商品淨利合計。已扣 MOMO 費用與商品成本。（未稅）', val:money(cur.profit), d:momoKpiDelta(cur.profit,prev.profit,hasPrev)},
     {label:'加權毛利率', info:'總淨利 ÷ 總營收。', val:momoPct(cur.margin), valColor:marginColor(cur.margin), d:{txt:marginDelta,color:'#9ca3af'}},
     {label:'總銷量', val:Math.round(cur.qty).toLocaleString()+' 件', d:momoKpiDelta(cur.qty,prev.qty,hasPrev)},
-    {label:'動銷率', info:'該期別「有銷售的上架商品數 ÷ 上架商品總數」。分母＝上架總數（不含已下架，跟工具列「上架 N」一致）；看有多少比例的上架品真的動起來。', val:rateVal, d:rateD},
+    {label:'動銷率', info:'該期別「本期有銷售的商品數 ÷（目前上架 ∪ 本期有銷售）」。分子＝本期有賣出的商品（不論現在上下架）；分母＝目前上架、再加上「本期有賣、但現已下架」的商品——後者若只算「目前上架」會被漏掉（賣過的沒被計進動銷）。長期下架又沒賣的不進分母。分子必為分母子集，不會超過 100%。', val:rateVal, d:rateD},
   ];
   // 運費淨額卡片已移除（Vanessa 不需要此數字）。運費淨 B−C 已逐 SKU 攤入毛利（cell.c/cell.b→feeC/feeB），
   //   底層計算保留於 momoMoPlusMarginCalc，此處只移除通路層加總卡片的顯示。→ MO+ KPI 卡由六張變五張。
