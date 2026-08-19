@@ -10871,7 +10871,7 @@ function momoRenderProfitBody(shop, tableOnly){
     const stockBadge=(c.k==='stock'&&_stockAt)
       ? ` <span style="font-size:10px;font-weight:500;color:${_stockStale?'#f97316':'#9ca3af'}" title="庫存資料日期${_stockStale?`（已 ${_stockAgeDays} 天未更新）`:''}">${_stockStale?'⚠':''}${_stockDateStr}</span>` : '';
     const name=`<span class="mm-th-name">${c.label}${stockBadge}</span>`;
-    return `<th class="mm-th${c.left?' tl':''}" onclick="momoProfitSetSort('${shop}','${c.k}')" style="cursor:pointer;text-align:${c.left?'left':'right'}">`
+    return `<th class="mm-th${c.left?' tl':''}${c.fixed?' mm-sticky-col':''}" onclick="momoProfitSetSort('${shop}','${c.k}')" style="cursor:pointer;text-align:${c.left?'left':'right'}">`
       +`<span class="mm-th-wrap">${name}${info}${ar}</span>`
       +`<span class="mm-col-grip" onmousedown="momoColResizeDrag(event,'${shop}','${c.k}')" onclick="event.stopPropagation()"></span></th>`;
   }).join('');
@@ -10882,7 +10882,7 @@ function momoRenderProfitBody(shop, tableOnly){
         // 商品名截斷「跟著欄寬」(CSS：flex:1+min-width:0+ellipsis)，拉寬即見更多、拉滿見全名；hover title 顯示全名
         //   已下架標記移到第二行（穩定資訊，不受商品名長度截掉）
         const discTag=r.discontinued?` · <span style="color:#9ca3af;font-weight:600">已下架</span>`:'';
-        return `<td class="tl"><div class="mm-name-wrap"><span class="mm-name-clip" title="${nmEsc}">${r.name||'—'}</span></div><div class="mm-sub-line">品號 ${r.sku||'—'}${r.origin?' · 原廠 '+r.origin:''}${discTag}</div></td>`;
+        return `<td class="tl mm-sticky-col"><div class="mm-name-wrap"><span class="mm-name-clip" title="${nmEsc}">${r.name||'—'}</span></div><div class="mm-sub-line">品號 ${r.sku||'—'}${r.origin?' · 原廠 '+r.origin:''}${discTag}</div></td>`;
       }
       if(c.k==='tags'){
         // 整月/半月都顯示算得出的標籤（半月：成長類不計、流量類標「估」）。無標籤→空白（正常品）。overflow:hidden 防窄欄溢出、預設 140px 夠放「⚠️退貨高 +2」。
