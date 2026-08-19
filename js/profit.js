@@ -10013,6 +10013,16 @@ function momoChannelFromDeliveryType(t){
 const MOMO_SUBTABS_JIA=[['總表','profit'],['批次維護','batch'],['商品同步','sync'],['訂單明細','upload'],['月對帳','recon'],['⟳重建','rebuild']];
 const MOMO_SUBTABS_YI =[['總表','profit'],['批次維護','batch'],['商品同步','sync'],['訂單明細','upload'],['月對帳','recon'],['⟳重建','rebuild']];   // 「倉租費」分頁已移除(v315)：手動月總從沒進計算、已被對帳單「寄倉倉租費(EC)」取代；ec_momo_rent_records 舊資料保留不清
 const MOMO_SUBTABS_MOPLUS=[['總表','profit'],['批次維護','batch'],['商品同步','sync'],['訂單明細','upload'],['月對帳','recon']];   // MO+ 月對帳＝核對「momo 有沒有按對帳單收錢」（逐項實際扣款，非甲乙的費率估算）
+// 該賣場的子分頁清單（甲乙有⟳重建、MO+ 沒有）——切賣場保留子分頁時要判斷目標賣場有無該分頁
+function momoSubsFor(shop){ return momoIsMoPlus(shop)?MOMO_SUBTABS_MOPLUS:(shop==='乙配'?MOMO_SUBTABS_YI:MOMO_SUBTABS_JIA); }
+function momoSubLabel(id){ const hit=MOMO_SUBTABS_JIA.find(s=>s[1]===id); return hit?hit[0]:id; }
+// 切賣場時清掉所有「已選但未處理」的上傳檔（四組全域狀態，不分賣場 → 不清會把甲配檔帶到乙配、可能誤傳）
+function momoClearStagedFiles(){
+  try{ _momoSyncFiles.info=null; _momoSyncFiles.cost=null; }catch(e){}                                  // 商品同步
+  try{ Object.keys(_momoUpFiles).forEach(k=>{ _momoUpFiles[k]=(k==='jia')?[]:null; }); }catch(e){}      // 訂單明細
+  try{ _momoReconStage.xls=null; _momoReconStage.pdf=null; _momoReconStage.xlsName=''; _momoReconStage.pdfName=''; }catch(e){}  // 月對帳
+  try{ _momoRebuildFiles.length=0; _momoRebuildLastFiles=null; }catch(e){}                               // ⟳重建
+}
 const _momoSub={};          // shop -> 目前子分頁 id
 const _momoPeriodSel={};    // shop -> 選中的期別 key（'' = 尚無資料）
 const _momoSearch={};       // shop -> 搜尋字串
@@ -10602,6 +10612,7 @@ function momoProfitTableHTML(shop){
       <span class="mm-stat"><span class="mm-stat-item">總<b>${total}</b></span><span class="mm-stat-item">上架<b>${activeCount}</b></span><span class="mm-stat-item">下架<b>${discCount}</b></span></span>
       ${discToggle}
       <span class="col-picker-wrap" style="position:relative;margin-left:auto"><button id="momo-filter-chip-${shop}" class="mm-chip${momoFilterActiveCount(shop)?' on':''}" style="${momoFilterActiveCount(shop)?'background:#5b5fcf;border-color:#5b5fcf;color:#fff':''}" onclick="momoOpenFilterPanel('${shop}',this)">🏷 標籤 / 篩選${momoFilterActiveCount(shop)?'（'+momoFilterActiveCount(shop)+'）':''}</button></span>
+      <span id="momo-filter-info-${shop}" style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:8px;white-space:nowrap"></span>
       <button class="mm-chip" onclick="momoOpenHierarchy('${shop}')">📊 階層圖</button>
       <span class="col-picker-wrap" style="position:relative">
         <button class="mm-chip" onclick="momoOpenColPicker('${shop}',this)">☰ 欄位</button>
@@ -10845,6 +10856,8 @@ function momoRenderProfitBody(shop, tableOnly){
   const _baseCount=rows.length;
   if(_filterOn) rows=rows.filter(r=>momoRowPassesFilter(shop,r,r._tags));
   const _filteredCount=rows.length;
+  // 篩選結果（已篩選 N/M ＋ 清除）就近顯示在工具列「🏷 篩選」鈕旁（不再放 KPI 上方遠處）；每次重繪都更新（含搜尋 tableOnly）
+  try{ const _fiEl=document.getElementById('momo-filter-info-'+shop); if(_fiEl) _fiEl.innerHTML = _filterOn ? `🏷 已篩選 <b style="color:#5b5fcf">${_filteredCount}</b> / ${_baseCount} 項 <button class="mm-linkbtn" onclick="momoClearFilters('${shop}')">清除篩選</button>` : ''; }catch(e){}
   const sort=_momoSort[shop]||{col:'revenue',dir:'desc'};   // 預設營收高→低（使用者點欄位可改；清除排序也回到這個預設）
   if(sort){
     rows.sort((a,b)=>{
@@ -11084,10 +11097,11 @@ function momoRenderProfitBody(shop, tableOnly){
       }
       verifyBlock = errHTML + noteHTML;
     }
-    // 已篩選 N / 基數（旁附估算標）：只有啟用篩選時顯示，一鍵清除。
-    const filterInfo= _filterOn
-      ? `<div class="mm-filter-info">🏷 已篩選 <b>${_filteredCount}</b> / ${_baseCount} 項${tagsRes.estimated?' · <span style="color:#d97706">🟡 含未對帳估算</span>':''} <button class="mm-linkbtn" onclick="momoClearFilters('${shop}')">清除篩選</button></div>`
-      : '';
+    // 「已篩選 N/M ＋ 清除」已移到工具列篩選鈕旁（見上方 momo-filter-info 更新）。此處只留「跟著 KPI 數字走」的兩條小標，各自獨立、不再混在一條：
+    //   ① 估算標（🟡 期別層、與篩選無關）：本期未對帳/未結算＝KPI 數字含估算。② 篩選標：套篩選時 KPI＝子集數字。分開放才不誤導。
+    const estNote = tagsRes.estimated ? `<div class="mm-kpi-note" style="color:#d97706">🟡 本期數字含未對帳估算（尚未上傳當月對帳單／未結算）</div>` : '';
+    const filterNote = _filterOn ? `<div class="mm-kpi-note" style="color:#5b5fcf">🏷 以下數字為篩選後 <b>${_filteredCount}</b> 項（清除篩選見上方工具列）</div>` : '';
+    const kpiNotes = estNote + filterNote;
     // 乙配「口徑已變更·不可對照」橫幅已於 2026-08-18 移除：七個月已同口徑、無 5→6 斷點，該說明過期（留著反讓新同事困惑能不能對比）。
     // E001 未結算：改用甲配狀態晶片「⚠ 未對帳」（見 statusChip MO+ 分支），不另做橫幅。
     // MO+ 狀態橫幅：結算中(+12天未到) / 資料不完整(缺 origins 來源) / 雙寫不一致 / 缺成本彙總
@@ -11143,7 +11157,7 @@ function momoRenderProfitBody(shop, tableOnly){
         </div>`;
       }
     }
-    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=filterInfo+moPlusBanner+moPlusMissCostChip+moPlusFeeAnomChip+moPlusPriceBanner+overview+statusBanner;
+    const ov=document.getElementById('momo-ov-'+shop); if(ov) ov.innerHTML=moPlusBanner+moPlusMissCostChip+moPlusFeeAnomChip+moPlusPriceBanner+kpiNotes+overview+statusBanner;   // kpiNotes（估算/篩選）緊貼 KPI 卡上方＝標示跟著數字走
   }
   tbl.innerHTML=discHint+tableHTML;
   momoSyncFilterChip(shop);   // 篩選變動後同步工具列 🏷 按鈕作用中狀態（殼不重繪）
@@ -14795,11 +14809,16 @@ function momoRenderMissingCostPanel(shop){
     <input id="mm-mc-n-${oid}" type="text" placeholder="異動原因（必填）" style="width:150px;padding:2px 6px;border:1px solid #e5e7eb;border-radius:5px">
     <button onclick="momoMissingCostSave('${shop}','${_momoEsc(x.origin)}')" style="padding:2px 12px;border:none;border-radius:5px;background:#10b981;color:#fff;cursor:pointer">存</button>
   </div>`; }).join('');
-  return `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:12px">
-    <div style="font-weight:700;font-size:13px;margin-bottom:4px">缺成本原廠編號（${list.length} 個）— 一次補完</div>
-    <div style="font-size:10px;color:#9a3412;margin-bottom:6px">⚠ 甲乙+MO+ 共用成本表；補一次連動所有用到的 MO+ 商品毛利、各記歷程。已上雲、記得同步。存完該筆從清單消失、涵蓋率即更新。</div>
-    ${rows}</div>`;
+  // 可展開收合（沿用系統既有 <details> 收合做法）：預設收合（清單常達兩三百筆、每次都滑很久）；狀態記 localStorage、下次維持；標題（summary）收合時仍顯示項數。
+  const open=momoMissCostExpandGet(shop);
+  return `<details ${open?'open':''} ontoggle="momoMissCostExpandSet('${shop}',this.open)" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+    <summary style="cursor:pointer;user-select:none;font-weight:700;font-size:13px">缺成本原廠編號（${list.length} 個）— 一次補完</summary>
+    <div style="font-size:10px;color:#9a3412;margin:6px 0">⚠ 甲乙+MO+ 共用成本表；補一次連動所有用到的 MO+ 商品毛利、各記歷程。已上雲、記得同步。存完該筆從清單消失、涵蓋率即更新。</div>
+    ${rows}</details>`;
 }
+// 缺成本區塊展開狀態（per-shop localStorage；預設收合＝false）
+function momoMissCostExpandGet(shop){ try{ return localStorage.getItem('momo_misscost_expand|'+shop)==='1'; }catch(e){ return false; } }
+function momoMissCostExpandSet(shop,open){ try{ localStorage.setItem('momo_misscost_expand|'+shop, open?'1':'0'); }catch(e){} }
 function momoMissingCostSave(shop, origin){
   const oid=String(origin).replace(/[^A-Za-z0-9]/g,'_');
   const c=(document.getElementById('mm-mc-c-'+oid)||{}).value, note=((document.getElementById('mm-mc-n-'+oid)||{}).value||'').trim();
@@ -15668,6 +15687,15 @@ function syncCoupangToCloud(shop){
 }
 
 function setMomoShop(shop,btn){
+  const prevShop=curMomoShop;   // 切換前的賣場（用來搬子分頁 + 判斷是否真的換賣場）
+  if(prevShop && prevShop!==shop){
+    momoClearStagedFiles();   // ⚠ 換賣場先清已選未處理的檔案（四組全域）→ 杜絕甲配檔誤傳到乙配
+    const prevSub=_momoSub[prevShop];   // 保留當前子分頁到新賣場（新賣場有就沿用、沒有如⟳重建→回總表+提示，不靜默跳走）
+    if(prevSub && prevSub!=='profit'){
+      if(momoSubsFor(shop).some(s=>s[1]===prevSub)) _momoSub[shop]=prevSub;
+      else { _momoSub[shop]='profit'; try{ if(typeof showToast==='function') showToast('「'+momoSubLabel(prevSub)+'」在 '+momoShopDisplay(shop)+' 沒有此分頁，已回總表','info'); }catch(e){} }
+    }
+  }
   curMomoShop=shop;
   _saveProfitView('momo',shop);   // 記錄當前檢視＝MOMO+此賣場（App.render 重建後 restoreProfitView 才還原得回來，不再彈回蝦皮）
   document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
@@ -17101,7 +17129,7 @@ Object.assign(window, {
   momoSearchClear,momoSearchClearToggle,
   momoOpenSyncPreview,momoConfirmSync,momoCloseSyncPreview,momoRefreshSyncBtn,momoSyncToggleAll,momoSyncUpdateCount,momoExportExcel,
   momoShopAnalysis,momoRenderShopAnalysisSection,momoCrossesCalibChange,momoPeriodIncomplete,momoCalibReason,
-  momoCostInlineToggle,momoMoPlusCostInlineSave,momoMissingCostSave,momoExportCostByOrigin,momoBumpMoPlusEpoch,
+  momoCostInlineToggle,momoMoPlusCostInlineSave,momoMissingCostSave,momoMissCostExpandSet,momoExportCostByOrigin,momoBumpMoPlusEpoch,
   momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoOpenMissingCostPanel,momoExportMissingCost,momoOpenFeeAnomalyPanel,momoExportFeeAnomaly,momoUploadShowDryRun,momoUploadDryRunCSV,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
   setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
