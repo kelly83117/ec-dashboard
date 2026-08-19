@@ -672,6 +672,8 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 /* 已篩選 N / 基數 提示條（總覽上方） */
 .mm-filter-info{display:flex;align-items:center;gap:8px;font-size:12px;color:#4b5563;background:#eef0fb;border:1px solid #dfe3f7;border-radius:8px;padding:6px 12px;margin-bottom:10px;}
 .mm-filter-info b{color:#5b5fcf;}
+/* KPI 卡上方的小標（估算/篩選）：緊貼 KPI 數字、標示跟著數字走。每條一行、小字、不搶版面。 */
+.mm-kpi-note{font-size:12px;font-weight:600;line-height:1.5;margin-bottom:4px;}
 /* MOMO｜總表 通路總覽：圖表卡片格線（auto-fit 自動換行、不外溢） */
 .mm-ov-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:16px;}
 .mm-ov-grid3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr));}
