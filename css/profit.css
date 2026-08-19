@@ -722,6 +722,20 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .mm-th-wrap .mm-info{margin-left:0;flex:0 0 auto;}
 .mm-th-arrow{flex:0 0 auto;width:10px;text-align:center;font-size:10px;line-height:1;color:#5b5fcf;}
 
+/* ── 凍結欄：品號/商品欄水平 sticky ──────────────────────────────────
+   只作用主總表 .mm-ptbl 裡掛了 .mm-sticky-col 的那一欄（name 固定首欄）。
+   同為 .mm-ptbl 的單品分析 modal / 批次維護 / 兩張對帳表，其欄位【不掛】此 class → 完全不受影響。
+   主總表僅一個凍結欄 → left 恆為 0、不隨欄寬變（無多欄 offset 問題）。
+   垂直表頭 sticky 由既有 `thead tr{top:0;z-index:3}` 提供；此處只補【水平】。
+   左上角那格＝th，兩軸交會（垂直隨 thead tr、水平靠自身 left:0），z-index 疊最高。
+   欄寬仍由 colgroup <col>（table-layout:fixed）決定，sticky 只改定位、不改寬 → 不碰 #186 欄寬拖曳。 */
+.mm-ptbl td.mm-sticky-col{position:sticky;left:0;z-index:2;background:#fff;}
+.mm-ptbl th.mm-sticky-col{position:sticky;left:0;z-index:4;background:#f8f9fc;}
+/* hover 時凍結欄跟整列同色（td #fff → #fafbff，比照 `tbody tr:hover td`），避免滑過去凍結欄變異色 */
+.mm-ptbl tbody tr:hover td.mm-sticky-col{background:#fafbff;}
+/* 凍結欄右緣陰影（視覺區隔，看得出是凍結的）；放在 sticky 元素上 → 疊在相鄰非 sticky 欄之上、不被蓋掉 */
+.mm-ptbl td.mm-sticky-col,.mm-ptbl th.mm-sticky-col{box-shadow:2px 0 5px -2px rgba(15,23,42,.18);}
+
 /* 測試標籤編輯面板（外殼沿用 .ana-overlay / .ana-modal，這裡只補面板內部）
    z-index 3000 與 .pnm-overlay 同層：兩者都是「從表格點格子開出來」的編輯視窗，
    要蓋過 .tag-filter-bar(400) / .col-picker-menu(300) / .ana-overlay(2000)。 */
