@@ -8980,6 +8980,9 @@ function momoAllPeriods(shop){
 // 上線首月：更早的月份只有零星跨月訂單、資料不完整 → 不列入期別下拉（純隱藏選項）。
 //   ⚠ 底層資料原樣保留、momoAllPeriods 仍回傳、彙總/整月照算；只有下拉選項與環比基準受此邊界影響。
 const MOMO_FIRST_PERIOD='2026-01';
+// 單品分析「成交均價」判定門檻：相對變動 = (最高−最低)÷中位數 < 此 % → 視為「無明顯變動」不畫圖、顯示單一數字。
+//   成交均價＝訂購金額÷訂購數（含折扣/抵用券/四捨五入必有小數浮動），故用相對%、不用絕對值/相等判定。實測甲乙分布雙峰（<1% vs ≥5%、中間無值），3% 安全落在兩峰間。
+const MOMO_PRICE_FLAT_PCT=3;
 // 下拉可見的月份清單（YYYY-MM，>= 上線首月，去重排序）。給分段期別控制的「月」選單與預設期別用。
 function momoVisibleMonths(shop){
   return [...new Set(momoAllPeriods(shop).filter(k=>k.slice(0,7)>=MOMO_FIRST_PERIOD).map(k=>k.slice(0,7)))].sort();
@@ -11478,11 +11481,13 @@ function momoRenderAnalysis(shop,p){
   const viewPts=series.filter(s=>s.view!=null).length;    // 有效瀏覽量月數
   const priceVals=series.filter(s=>s.avgPrice!=null).map(s=>s.avgPrice);   // 有值月份的成交均價（按月序）
   const pricePts=priceVals.length;
-  // 成交均價：有值月>=2 才談變動。spread(最高-最低)<=1元＝小數浮動＝未變動→不畫圖、顯示單一數字；spread>1→畫折線。
-  //   ⚠ 有值月<2 是「資料缺漏」（走 s1103Empty），跟「未變動」分開處理，不可混。
+  // 成交均價：有值月>=2 才談變動。相對變動 = (最高−最低)÷中位數 < MOMO_PRICE_FLAT_PCT% → 無明顯變動→不畫圖、顯示單一數字；≥門檻→畫折線。
+  //   ⚠ 有值月===1 是「資料不足（無從比較）」、===0 是「無資料（走 s1103Empty）」，都跟「無明顯變動」分開處理，不可混。
   const priceSpread = pricePts>=2 ? (Math.max.apply(null,priceVals)-Math.min.apply(null,priceVals)) : 0;
-  const priceVaries = pricePts>=2 && priceSpread>1;
-  const priceFlatVal = pricePts ? Math.round(priceVals[priceVals.length-1]) : null;   // 未變動時顯示的值（取最近一個有值月）
+  const priceMed = pricePts>=2 ? priceVals.slice().sort((a,b)=>a-b)[Math.floor(priceVals.length/2)] : 0;
+  const priceRelPct = (pricePts>=2 && priceMed>0) ? (priceSpread/priceMed*100) : 0;   // 相對變動%
+  const priceVaries = pricePts>=2 && priceRelPct >= MOMO_PRICE_FLAT_PCT;
+  const priceFlatVal = pricePts ? Math.round(priceVals[priceVals.length-1]) : null;   // 無明顯變動/資料不足時顯示的值（取最近一個有值月）
   // 資料完整度：有值月是否涵蓋「該商品有做生意的月份」。未涵蓋＝部分月缺 S1103 → 不敢斷言「期間未變動」（跟真缺漏分開）。
   //   只算上線首月起的活躍月（2025/12 等上線前的零星跨月不列入完整度母數，否則長壽商品都會被誤標 partial）。avgPrice 本就無 2025/12（沒 S1103）。
   const priceActiveMonths = series.filter(s=>s.active && s.mo>=MOMO_FIRST_PERIOD).length;
@@ -11512,9 +11517,10 @@ function momoRenderAnalysis(shop,p){
         <div style="font-size:11px;color:#d97706;margin-top:4px">${fm.isMoPlus?'註：各月毛利率用該商品原廠編號的成本表（cost_by_origin）<b>目前值</b> live 回算（成本非存在商品層、無歷史版本）→ 成本表更新後歷史月會一起變、不反映當月真實成本，看趨勢別看絕對值。':'註：各月毛利率一律用商品「目前」成本回算（歷史成本尚未接 momoEffectiveAt）→ 不反映當月真實成本，看趨勢別看絕對值。'}</div></div>
 
       ${fm.hasS1103?`<div class="mm-ana-sec"><div class="mm-ana-h">成交均價（訂購金額 ÷ 訂購數）</div>
-        ${pricePts<2 ? s1103Empty
+        ${pricePts===0 ? s1103Empty
+          : pricePts===1 ? `<div style="font-size:13px;color:#64748b;padding:8px 2px">資料不足（僅 1 期成交均價 <b style="font-size:15px;color:#334155">$${priceFlatVal.toLocaleString()}</b>，無從比較變動）</div>`
           : priceVaries ? `<div style="position:relative;height:150px"><canvas id="mm-ana-price"></canvas></div>`
-          : `<div style="font-size:13px;color:#334155;padding:8px 2px">成交均價 <b style="font-size:15px">$${priceFlatVal.toLocaleString()}</b> <span style="color:#94a3b8;font-size:12px">（${priceComplete?`${pricePts} 個月期間未變動`:`僅 ${pricePts} 個月有 S1103 值、未變動；其餘活躍月缺資料`}）</span></div>`
+          : `<div style="font-size:13px;color:#334155;padding:8px 2px" title="變動 < ${MOMO_PRICE_FLAT_PCT}% 視為無明顯變動（成交均價＝訂購金額÷訂購數，含折扣/抵用券會有小數浮動）">本期成交均價無明顯變動（<b style="font-size:15px">$${priceFlatVal.toLocaleString()}</b>）<span style="color:#94a3b8;font-size:12px"> · 期間變動 ${priceRelPct.toFixed(1)}%${priceComplete?'':`；僅 ${pricePts} 個月有 S1103 值、其餘活躍月缺資料`}</span></div>`
         }</div>`:''}
 
       <div class="mm-ana-sec"><div class="mm-ana-h">商品異動時間軸</div>${momoHistoryTimelineHTML(p)}</div>
