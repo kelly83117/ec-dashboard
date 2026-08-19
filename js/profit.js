@@ -1545,6 +1545,12 @@ function tryLoadSaved(shop){
     const _hLbl=s.curHalf==='first'?'上半月':s.curHalf==='second'?'下半月':'整月';
     document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${s.curMonth} ${_hLbl} 尚無資料，請上傳報表產生</div></div>`;
     document.getElementById('period-tag-'+shop).textContent='';
+    // 搜尋列右邊的「N 筆」。renderTable 是它唯一的寫入點（本檔搜 `cnt-'+shop`），而空狀態
+    //   這條路不會走到 renderTable → 不清就會留著上一期的筆數，跟旁邊的空表格互相矛盾。
+    //   ⚠ 這一行刻意用 if 判空、與上面兩行的裸取值不同（見 _testEmpty 上方那段對照說明）：
+    //     成本不對稱 —— 判空的代價是零；裸取若日後因模板變動而炸 TypeError，會中斷【整個】
+    //     else 分支，讓「切到空期間」這塊功能整個壞掉。成對的一行在 _testEmpty。
+    const c=document.getElementById('cnt-'+shop); if(c)c.textContent='';
     if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;}
     // 第 6 參數 cmp 顯式傳 null（＝三格第三行留空）。改版前這裡只傳 5 個參數、靠 undefined
     //   達成同樣效果，但 syncHeaderKpis 的早退分支傳的是 null —— 三個空狀態呼叫點兩種寫法。
@@ -16773,6 +16779,7 @@ function _testEmpty(shop,hint){
   const t=document.getElementById('tbl-'+shop);
   if(t)t.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${hint}</div></div>`;
   const p=document.getElementById('period-tag-'+shop); if(p)p.textContent='';
+  const c=document.getElementById('cnt-'+shop); if(c)c.textContent='';   // 理由同 tryLoadSaved 的 else 分支
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;}
   setKpis(shop,0,0,0,0,null);   // cmp 顯式傳 null，理由同 tryLoadSaved 的 else 分支
   updateTagFilterBar(shop);
