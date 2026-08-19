@@ -14625,7 +14625,13 @@ function momoParseProductInfo(rows){
     const sku=String(r[idx.sku]||'').trim(); if(!sku) continue;
     const ch=chOf(r[idx.warehouse]);
     if(!ch){ if(unknownWarehouse.length<20) unknownWarehouse.push({sku,warehouse:r[idx.warehouse]}); continue; }
-    if(products[ch][sku]) continue;   // 合併變體：取第一個（Q1）
+    if(products[ch][sku]){
+      // 多規格變體：origin/name/進價/售價 仍取第一列（維持既有行為）；但「銷售狀況」改成聚合＝
+      //   任一規格 status='進行' → 整個商品編號視為在架（政策：任一規格在架就算上架，不因某一規格暫停就把整編號標下架）。
+      //   只會「升級」成進行、不會把已聚合的進行降級 → 等價於「所有規格都非進行才算下架」。
+      if(String(r[idx.status]||'').trim()==='進行') products[ch][sku].status='進行';
+      continue;
+    }
     products[ch][sku]={
       sku, origin:String(r[idx.origin]||'').trim(), name:String(r[idx.name]||'').trim(),
       purchasePrice:num(r[idx.purchase]), salePrice:num(r[idx.sale]), status:String(r[idx.status]||'').trim()
