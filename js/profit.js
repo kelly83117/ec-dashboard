@@ -9607,7 +9607,7 @@ function momoSaveMoPlusMaster(shop, doc){ return momoSaveMoPlusOriginsDoc(shop, 
 const MOMO_FEE_RATES=[3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,10,12,13,13.5];   // 公告費率集合（rules.momo.com.tw/payment/00002）
 // 公告表「非檔期/檔期」配對（rules.momo.com.tw/payment/00002）。反推配對模型：非檔期列須解到某配對的 np、檔期列須解到同配對的 pr。
 //   ⚠ 刻意不含 8/8.x 配對：實測有 SKU 非檔期實收 8%（不在任何配對）→ 標異常人工確認（使用者定案：不猜配對填補、保留「公告配對與帳單有出入」訊號）。
-const MOMO_FEE_PAIRS=[[3,3.5],[4,4.5],[5,5.5],[5.5,6.5],[6,6.5],[6,7],[6.5,7.5],[7,7.5],[7.5,8.5],[9,10],[12,13],[12,13.5]];
+const MOMO_FEE_PAIRS=[[3,3.5],[4,4.5],[5,5.5],[5.5,6.5],[6,6.5],[6,7],[6.5,7.5],[7,7.5],[7.5,8.5],[8,9],[9,10],[12,13],[12,13.5]];   // [8,9]＝手機週邊配件（手機掛繩/支架），Vanessa 後台查證 2026-08-19
 const MOMO_FEE_NP=[...new Set(MOMO_FEE_PAIRS.map(p=>p[0]))];   // 非檔期配對值 {3,4,5,5.5,6,6.5,7,7.5,9,12}
 const MOMO_FEE_PR=[...new Set(MOMO_FEE_PAIRS.map(p=>p[1]))];   // 檔期配對值   {3.5,4.5,5.5,6.5,7,7.5,8.5,10,13,13.5}
 // 逐列候選費率（限指定費率集）：使 round(price×qty×r%)==fee 的所有費率。base<=0 或 fee<=0 → []（呼叫端另判「無資料」vs「無解」）。
@@ -9650,6 +9650,10 @@ const MOMO_ANNOUNCED_FEE_TABLE={
     {cat1:'車類',        cat2:'機車',          cat3:'',              np:4,   pr:4.5},
     {cat1:'車類',        cat2:'汽車',          cat3:'',              np:4,   pr:4.5},
     {cat1:'保健',        cat2:'',              cat3:'',              np:7.5, pr:8.5, note:'部分品項 12%/13%（家庭計畫/情趣用品/保健用品）'},
+    // ── Vanessa momo 後台逐層查證，2026-08-19（來源＝店家後台商品分類，非公告 URL）──
+    {cat1:'手機',        cat2:'週邊配件',      cat3:'手機平板配件／手機掛繩', np:8,  pr:9,   note:'Vanessa 後台查證 2026-08-19'},
+    {cat1:'手機',        cat2:'週邊配件',      cat3:'手機平板配件／手機支架', np:8,  pr:9,   note:'Vanessa 後台查證 2026-08-19'},
+    {cat1:'資訊電腦',    cat2:'電腦主機/設備', cat3:'筆電包／內袋',           np:7,  pr:7.5, note:'Vanessa 後台查證 2026-08-19'},
   ],
 };
 let _momoPromoSet=null, _momoPromoSetKey=null;
