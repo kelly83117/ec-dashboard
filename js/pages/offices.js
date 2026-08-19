@@ -3084,8 +3084,29 @@ Object.assign(App, {
             </div></td>
           </tr>`;
         }).join('');
+    const savesHtml = (() => {
+      const savesKey = activeQ === 'Q3' ? 'ec.d2.margin.saves' : `ec.d2.margin.saves.${activeQ.toLowerCase()}`;
+      const saves = Store.get(savesKey, []);
+      if (!saves.length) return '';
+      return `<div class="table-card" style="margin-bottom:12px">
+        <div class="table-card-header"><h3>📂 存檔記錄</h3><p>共 ${saves.length} 份，點擊「載入」可還原該次匯入的資料</p></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>存檔時間</th><th style="text-align:right">商品數</th><th></th></tr></thead>
+          <tbody>${saves.map((s, si) => `<tr>
+            <td>${escapeHtml(s.ts || '')}</td>
+            <td style="text-align:right">${s.data ? s.data.length : 0} 筆</td>
+            <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
+              <button class="mg-save-load" data-si="${si}" style="padding:3px 10px;border:1px solid #d1fae5;background:#f0fdf4;color:#1a7a6e;border-radius:5px;font-size:12px;cursor:pointer">載入</button>
+              <button class="mg-save-del" data-si="${si}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+            </div></td>
+          </tr>`).join('')}
+          </tbody>
+        </table></div>
+      </div>`;
+    })();
     return `
       ${qTabsHtml}
+      ${savesHtml}
       <div class="table-card">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div><h3>📊 新品毛利表</h3><p>記錄商品成本與營收，自動計算毛利與毛利率（共 ${list.length} 筆）</p></div>
@@ -3111,27 +3132,7 @@ Object.assign(App, {
           <thead><tr><th style="text-align:center;width:48px">編號</th><th style="text-align:left">品名</th><th style="text-align:right">成本</th><th style="text-align:right">營收</th><th style="text-align:right">毛利</th><th style="text-align:center">毛利率</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table></div>
-      </div>
-      ${(() => {
-        const savesKey = activeQ === 'Q3' ? 'ec.d2.margin.saves' : `ec.d2.margin.saves.${activeQ.toLowerCase()}`;
-        const saves = Store.get(savesKey, []);
-        if (!saves.length) return '';
-        return `<div class="table-card" style="margin-top:12px">
-          <div class="table-card-header"><h3>📂 存檔記錄</h3><p>共 ${saves.length} 份，點擊「載入」可還原該次匯入的資料</p></div>
-          <div class="table-wrap"><table>
-            <thead><tr><th>存檔時間</th><th style="text-align:right">商品數</th><th></th></tr></thead>
-            <tbody>${saves.map((s, si) => `<tr>
-              <td>${escapeHtml(s.ts || '')}</td>
-              <td style="text-align:right">${s.data ? s.data.length : 0} 筆</td>
-              <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
-                <button class="mg-save-load" data-si="${si}" style="padding:3px 10px;border:1px solid #d1fae5;background:#f0fdf4;color:#1a7a6e;border-radius:5px;font-size:12px;cursor:pointer">載入</button>
-                <button class="mg-save-del" data-si="${si}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
-              </div></td>
-            </tr>`).join('')}
-            </tbody>
-          </table></div>
-        </div>`;
-      })()}`;
+      </div>`;
   },
 
   bindD2MarginTab() {
