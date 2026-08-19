@@ -15005,8 +15005,9 @@ function momoBuildSyncPlan(parsed){
   ['甲配','乙配'].forEach(shop=>{
     const master=momoLoadProducts(shop);
     const bySku=new Map(master.map(p=>[p.sku,p]));
-    const costChanged=[], priceChanged=[], nameChanged=[], discontinued=[], newItems=[], noCost=[];
+    const costChanged=[], priceChanged=[], nameChanged=[], discontinued=[], reactivate=[], newItems=[], noCost=[];
     const seen=new Set();
+    const f1102Skus=(shop==='乙配')?((momoLoadF1102(shop)||{}).skus||{}):{};   // 乙配 F1102 寄倉即時狀態，當復架輔助訊號
     if(hasInfo){
       const incoming=parsed.info.products[shop]||{};
       Object.keys(incoming).forEach(sku=>{
@@ -15037,8 +15038,25 @@ function momoBuildSyncPlan(parsed){
         if(Number(p.cost)!==Number(newCost)) costChanged.push({sku:p.sku, name:p.name, old:p.cost, new:newCost});
       });
     }
+    // 復架候選：掃「所有已下架品」（甲配 881／乙配 143 全掃，不只 incoming），主檔銷售狀況=進行、或（乙配）F1102 狀態=進行且有庫存 → 提出復架。
+    //   政策：人工確認、不自動復架（比照標下架流程）。F1102 只是輔助訊號、仍走人工。需上傳商品資訊檔才比對主檔訊號（同標下架）；F1102 訊號 乙配 恆可判。
+    if(hasInfo){
+      const incoming=parsed.info.products[shop]||{};
+      master.forEach(p=>{
+        if(p.discontinued!==true) return;
+        const inc=incoming[p.sku];
+        const masterProg=!!inc && inc.status==='進行';                       // 主檔訊號：這份商品資訊說「進行」
+        const fe=f1102Skus[p.sku];
+        const fStock=fe?(fe.sellable!=null?fe.sellable:(fe.consigned||0)):null;
+        const f1102Prog=!!fe && fe.status==='進行' && fStock>0;              // 乙配輔助訊號：F1102 進行且可賣量>0
+        if(masterProg||f1102Prog){
+          const signals=[masterProg?'主檔進行':null, f1102Prog?('F1102進行·庫存'+fStock):null].filter(Boolean);
+          reactivate.push({sku:p.sku, name:p.name, masterStatus:(inc?inc.status:null), f1102Status:(fe?fe.status:null), f1102Stock:fStock, signals});
+        }
+      });
+    }
     const notSeen=hasInfo?master.filter(p=>!seen.has(p.sku)).map(p=>p.sku):[];
-    plan.shops[shop]={costChanged,priceChanged,nameChanged,discontinued,newItems,noCost,notSeen};
+    plan.shops[shop]={costChanged,priceChanged,nameChanged,discontinued,reactivate,newItems,noCost,notSeen};
   });
   return plan;
 }
@@ -15070,6 +15088,14 @@ function momoSyncApplyDiscontinued(shop){
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
   items.forEach(it=>{ const p=bySku.get(it.sku); if(p) p.discontinued=true; });
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已標記 '+items.length+' 筆下架');
+}
+// 復架（對稱於標下架）：把已下架但主檔恢復進行／F1102 進行有庫存的商品設回上架。政策＝人工確認、不自動。
+//   ⚠ 復架＝商品重新出現在上架清單、計入動銷率分母，是「資源復活」的敏感變更 → 一律寫 history 留稽核軌跡（標下架未寫，但復架更需要）。
+function momoSyncApplyReactivate(shop){
+  const items=(_momoSyncPlan.shops[shop]||{}).reactivate||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可復架的項目','info'); return; }
+  const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
+  items.forEach(it=>{ const p=bySku.get(it.sku); if(p){ p.discontinued=false; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:p.cost,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品資料同步：復架（'+((it.signals||[]).join('／')||'人工')+'）'}); } });
+  momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已復架 '+items.length+' 筆');
 }
 function momoSyncApplyNew(shop){
   const items=(_momoSyncPlan.shops[shop]||{}).newItems||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可一鍵新增的未建檔項目','info'); return; }
@@ -15161,10 +15187,13 @@ function momoRenderSyncPreview(shop){
       +cat('售價/進價有變動',sp.priceChanged,'momoSyncApplyPrice','套用價格','#374151')
       +cat('商品名稱有變動',sp.nameChanged,'momoSyncApplyName','套用名稱','#374151')
       +cat('已下架（銷售狀況≠進行）',sp.discontinued,'momoSyncApplyDiscontinued','標記下架','#9ca3af')
+      +((sp.reactivate&&sp.reactivate.length)?`<div style="display:flex;align-items:flex-start;gap:10px;padding:6px 0;border-top:1px solid #f3f4f6">
+        <div style="flex:1;font-size:12px"><b style="color:#059669">可復架（已下架但恢復進行）${sp.reactivate.length}</b><div style="color:#9ca3af;margin-top:2px">${sp.reactivate.slice(0,8).map(x=>`${_momoEsc(x.name||x.sku)}<span style="color:#059669">（${x.signals.join('／')}）</span>`).join('、')}${sp.reactivate.length>8?' …':''}</div></div>
+        <button onclick="momoSyncApplyReactivate('${s}')" style="padding:4px 12px;border-radius:6px;border:none;background:#059669;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">批次復架</button></div>`:'')
       +cat('未建檔品項',sp.newItems,'momoSyncApplyNew','一鍵新增','#5b5fcf')
       +(sp.noCost.length?`<div style="font-size:12px;color:#f97316;padding:6px 0;border-top:1px solid #f3f4f6">查無成本 ${sp.noCost.length}（莫筆克表沒這些原廠編號，成本不動）：${sp.noCost.slice(0,10).map(x=>x.origin).join('、')}</div>`:'')
       +(sp.notSeen.length?`<div style="font-size:12px;color:#9ca3af;padding:6px 0;border-top:1px solid #f3f4f6">本次未比對到 ${sp.notSeen.length}（主檔有、這份 MOMO資訊沒有）</div>`:'');
-    const clean=!sp.costChanged.length&&!sp.priceChanged.length&&!sp.nameChanged.length&&!sp.discontinued.length&&!sp.newItems.length&&!sp.noCost.length&&!sp.notSeen.length;
+    const clean=!sp.costChanged.length&&!sp.priceChanged.length&&!sp.nameChanged.length&&!sp.discontinued.length&&!(sp.reactivate&&sp.reactivate.length)&&!sp.newItems.length&&!sp.noCost.length&&!sp.notSeen.length;
     return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:10px">
       <div style="font-size:13px;font-weight:700;margin-bottom:2px">${s}</div>
       ${clean?'<div style="font-size:12px;color:#10b981">無差異</div>':inner}</div>`;
@@ -15178,6 +15207,7 @@ function momoRenderSyncPreview(shop){
     const parts=[];
     if(osp.newItems.length)     parts.push(osp.newItems.length+' 筆未建檔');
     if(osp.discontinued.length) parts.push(osp.discontinued.length+' 筆待標記下架');
+    if(osp.reactivate&&osp.reactivate.length) parts.push(osp.reactivate.length+' 筆可復架');
     if(osp.costChanged.length)  parts.push(osp.costChanged.length+' 筆成本有變動');
     if(osp.priceChanged.length) parts.push(osp.priceChanged.length+' 筆售價/進價有變動');
     if(osp.nameChanged.length)  parts.push(osp.nameChanged.length+' 筆名稱有變動');
@@ -17042,7 +17072,7 @@ Object.assign(window, {
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
   momoEditRecalc,momoMoPlusEditRecalc,momoMoPlusDualMargin,momoMoPlusClearPrice,momoMoPlusShowPriceDiffs,momoMoPlusPriceDiffApplyOne,momoMoPlusPriceDiffApplyAll,
   momoUploadFile,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,momoUploadYiMonth,
-  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyNew,momoJumpShop,
+  momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyReactivate,momoSyncApplyNew,momoJumpShop,
   momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,momoMigrateS1103ToCollection,momoMigrateOptlogBadKeys,momoFsInvalidFieldKeys,
   momoRebuildPick,momoRebuildRemove,momoRebuildGenerate,momoRebuildDownloadReport,momoRebuildConfirm,momoTrimPreview,momoTrimBackupAndApply,
   momoRebuildDryRun,momoRebuildApply,momoTrimHistoryDryRun,momoTrimHistoryApply,
