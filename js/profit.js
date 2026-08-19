@@ -7048,6 +7048,13 @@ function _scoreDefaultQ(){return Math.ceil((_KPI_NOW.getMonth()+1)/3);}
 let _scoreCurQ=_scoreDefaultQ();
 let _scoreCurYear=_KPI_NOW.getFullYear();
 let _scoreDefsOpen=false;
+// 目標卡（12 張）預設收起，讓評分結果上移。寫法比照上一行的 _scoreDefsOpen：模組層旗標
+//   + renderKpiTab 整區重繪。⚠ 刻意不用原生 <details>：renderKpiTab 是 el.innerHTML=…
+//   整區換掉，而 setScoreQ / adjustScoreBonus / saveScoreTargetsModal 都會呼叫它 →
+//   <details open> 的展開狀態撐不過任何一次重繪，模組層旗標可以。
+// ⚠ 但這個旗標【活不過重新整理】（模組層變數，不進 localStorage）：每個月要填數字的人
+//   每次開頁面都得多點一次展開。要根治得把狀態持久化，刻意不在本 commit 處理。
+let _scoreTargetsOpen=false;
 // 明細用「點分數」決定要看哪幾格，可以點多格一起比較（不限同一個月或同一個賣場）——
 // key 格式 "賣場|月份"。預設勾本季最新一個有資料月份的三個賣場。
 function _scoreDefaultDetailCells(year,q){
@@ -7061,6 +7068,7 @@ let _scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,_scoreCurQ);
 
 function setScoreQ(q){_scoreCurQ=q;_scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,q);renderKpiTab();}
 function toggleScoreDefs(){_scoreDefsOpen=!_scoreDefsOpen;renderKpiTab();}
+function toggleScoreTargets(){_scoreTargetsOpen=!_scoreTargetsOpen;renderKpiTab();}
 function toggleScoreDetailCell(shop,month){
   const key=shop+'|'+month;
   if(_scoreDetailCells.has(key))_scoreDetailCells.delete(key);else _scoreDetailCells.add(key);
@@ -7114,6 +7122,11 @@ function adjustScoreBonus(delta){
 function _kpiScoreViewHtml(){
   const year=_scoreCurYear,q=_scoreCurQ;
   const targets=getScoreTargetsForQ(year,q);
+  // 沒有設定過目標的季【強制展開】：「Q<n> 還沒有 KPI 目標設定，請按上面『✎ 編輯本季指標』
+  //   建立」這句唯一的引導文字就在 targetCardHtml 裡面（下方那串三元運算的 else 分支）。
+  //   收起來的話，新的一季（例如 Q4 剛開始）會變成一片空白 + 一顆字面對不上的「編輯」按鈕
+  //   —— 使用者要做的是「建立」，畫面上卻只剩「編輯」，沒有任何線索告訴他該按哪裡。
+  const targetsOpen=_scoreTargetsOpen||!targets;
   const qTabsHtml=[1,2,3,4].map(qq=>`<div onclick="setScoreQ(${qq})" style="padding:5px 14px;font-size:12px;font-weight:${qq===q?700:600};border-radius:16px;border:1px solid ${qq===q?'#5b5fcf':'#e5e7eb'};background:${qq===q?'#5b5fcf':''};color:${qq===q?'#fff':'#9ca3af'};cursor:pointer">Q${qq}</div>`).join('');
 
   const targetCardHtml=targets?SCORE_SHOPS.map((s,i)=>{
@@ -7145,8 +7158,11 @@ function _kpiScoreViewHtml(){
     <div style="font-size:11px;color:#9ca3af">每季指標與權重可獨立調整</div>
   </div>
 
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-    <div style="font-size:13px;font-weight:700;color:#374151">Q${q} KPI 目標與權重設定</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${targetsOpen?'10px':'24px'}">
+    <div onclick="toggleScoreTargets()" style="display:flex;align-items:center;gap:5px;cursor:pointer">
+      <span style="font-size:10px;transition:transform .15s;display:inline-block;color:#5b5fcf;${targetsOpen?'transform:rotate(90deg)':''}">▶</span>
+      <div style="font-size:13px;font-weight:700;color:#374151">Q${q} KPI 目標與權重設定</div>
+    </div>
     <div style="font-size:12px;font-weight:600;color:#5b5fcf;cursor:pointer" onclick="openEditScoreTargetsModal()">✎ 編輯本季指標</div>
   </div>
 
@@ -7155,8 +7171,10 @@ function _kpiScoreViewHtml(){
   </div>
   <div style="display:${_scoreDefsOpen?'block':'none'};border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px">${scoreDefsHtml(q)}</div>
 
-  <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:8px">${targetCardHtml}</div>
-  <div style="font-size:11px;color:#9ca3af;margin-bottom:24px">配分欄位總和建議為 100 分；按「✎ 編輯本季指標」可調整目標／低標／配分</div>
+  <div style="display:${targetsOpen?'block':'none'}">
+    <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:8px">${targetCardHtml}</div>
+    <div style="font-size:11px;color:#9ca3af;margin-bottom:24px">配分欄位總和建議為 100 分；按「✎ 編輯本季指標」可調整目標／低標／配分</div>
+  </div>
 
   <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
   <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px" id="score-cmp-table"></div>
@@ -7292,25 +7310,99 @@ function renderScoreDetailPanel(){
 }
 
 function editScoreMonthlyCell(monthKey,shop,field,tdEl){
-  const all=getScoreMonthlyAll();
-  if(!all[monthKey])all[monthKey]=JSON.parse(JSON.stringify(SCORE_DEFAULT_MONTHLY[monthKey]||{}));
-  if(!all[monthKey][shop])all[monthKey][shop]={...(SCORE_DEFAULT_MONTHLY[monthKey]?.[shop]||{})};
-  const curVal=all[monthKey][shop][field];
+  // 🔴 種子的深拷貝【刻意不在這裡做】（舊版是函式開頭就補種子）：getScoreMonthlyAll()
+  //   命中 Store._profitMem._score_monthly_v1 時回傳的是【活物件本身】（不是複製，見該
+  //   函式），舊版一開啟編輯器就寫 all[monthKey]=種子 →「點開又取消」其實已經改掉記憶體
+  //   狀態，之後任何一次 saveScoreMonthlyAll 都會把種子當成使用者填的資料整包推上雲端。
+  //   改成只有真的要寫入時（commit 內）才補種子；開啟編輯器一律唯讀。
+  // 讀值只走 readCur 這一支：curVal 與 cancel() 的重讀必須是【同一種讀法】，否則
+  //   「值有沒有變」會拿兩套語意互比。三層回退等價於舊版的讀取結果（整月沒存過→用種子／
+  //   該月存過但這個通路沒有→用種子的該通路／都有→用已存值）。
+  const readCur=()=>(getScoreMonthlyForKey(monthKey)[shop]||SCORE_DEFAULT_MONTHLY[monthKey]?.[shop]||{})[field];
+  const curVal=readCur();
+  // 還原用。onclick 掛在 tdEl【自己】身上（見 scoreShopMonthDetailHtml 的 editableNum /
+  //   simpleMetricCard），只換 innerHTML 不動節點本身 → 還原後這一格照樣點得開，
+  //   不需要為了把 onclick 補回來而重繪整個面板。
+  const origContent=tdEl.innerHTML;
   const inp=document.createElement('input');
   inp.type='number';inp.step='0.01';inp.value=curVal??'';
+  // 指路：spinner（type=number 右緣那對上下箭頭）不在這裡處理，也不該在這裡處理 ——
+  //   css/main.css:68-74 的 input[type="number"]::-webkit-inner-spin-button /
+  //   ::-webkit-outer-spin-button 已經全站關掉了（那段沒有被任何 @media 包住，main.css
+  //   又是全站第一支載入的樣式，這顆 inp 的 type='number' 直接命中該選擇器）。
+  //   ⚠ 不要在下面這條 cssText 尾端補 -webkit-appearance:none：spinner 是 shadow 偽元素，
+  //     inline style 打不到偽元素，補了對 Chrome 是【無效的】（元素層級真正有效的只有
+  //     -moz-appearance:textfield 那一半，而 main.css:69 也早就有了）。要動只能回 main.css 動。
+  //   ⚠ 下面的 wheel 與 keydown 的 ↑/↓ 仍然各自要擋：那兩者是瀏覽器對【聚焦中的 input】
+  //     的滾輪／按鍵步進，跟 spinner 是三條不同的觸發路徑。看到那兩處有擋、這裡沒擋，
+  //     是刻意的，不是遺漏。
   inp.style.cssText='width:90px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
+  // 🔴 擋冒泡：onclick 掛在容器（tdEl）上，input 是容器的子節點 —— 不擋的話點進輸入框
+  //   會冒泡回容器、再跑一次本函式，把輸入框整個重建、游標跳掉、輸入到一半的字消失。
+  inp.addEventListener('click',e=>e.stopPropagation());
+  // 🔴 擋滾輪。這是【本次改動新開的】誤寫路徑，不是既有問題：type=number 的 input 聚焦中
+  //   會吃 wheel 事件直接改值。上面那行擋掉冒泡【之前】，任何滑進輸入框的點擊都會觸發
+  //   重建、把值洗回原值，等於意外幫忙擋住了；擋掉冒泡後輸入框活得下來，使用者把游標
+  //   停在輸入框上捲頁面就會靜默 ±step，blur 時判定「值有改」→ 直接寫進雲端而本人不知情。
+  //   ⚠ 代價：游標落在這顆 90px 輸入框上時整頁捲不動（preventDefault 連捲動一起擋）。
+  inp.addEventListener('wheel',e=>{e.preventDefault();},{passive:false});
   tdEl.innerHTML='';tdEl.appendChild(inp);inp.focus();if(inp.value)inp.select();
   let done=false;
-  const save=()=>{
+  // 取消＝原則上只把這一格的 innerHTML 換回去，【不呼叫 renderScoreDetailPanel /
+  //   renderScoreComparisonTable】。理由同 _pnmEditNote 上方那段註解：blur 發生在
+  //   mousedown（①），而 click 要 mousedown 與 mouseup 落在同一元素才成立（③）——
+  //   在①就整包重繪，會把使用者剛按下的那顆東西在②之前銷毀 → 第一下永遠沒反應。
+  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur。
+  //
+  //   ⚠ 例外（刻意保留的重繪路徑）：origContent 是開啟編輯器【當下】的畫面快照。編輯
+  //     期間 Store._profitMem._score_monthly_v1 會被 firebase.js 的 app/profit 訂閱整包
+  //     換掉（這個 key 沒接 _markPending，bounce-back 守衛擋不到它），而 profitDataReady
+  //     的監聽者不重繪評分明細 → 同事若在這幾秒內改了同一格，用 origContent 還原就是把
+  //     【過期畫面】貼回去，而且不會自己好。所以還原前重讀一次：值變過就改走重繪。
+  //     代價是這一次點擊可能被吃掉（就是上面那段 ①②③），但顯示過期資料的代價更高。
+  const cancel=()=>{
     if(done)return;done=true;
+    if(readCur()!==curVal){renderScoreComparisonTable();renderScoreDetailPanel();return;}
+    tdEl.innerHTML=origContent;
+  };
+  const commit=()=>{
+    if(done)return;
     const v=parseFloat(inp.value);
-    all[monthKey][shop][field]=isNaN(v)?null:v;
+    // 值沒變就不寫：saveScoreMonthlyAll 是整包 map 直推 Firestore，按 Enter 確認一下
+    //   不該換來一次全量寫入 + 兩支重繪。走 cancel()（done 由 cancel 自己設）。
+    if(!isNaN(v)&&v===curVal){cancel();return;}
+    done=true;
+    const all=getScoreMonthlyAll();
+    // ⚠ 副作用【仍然存在】，本次刻意不處理：下面兩行會把該月三個通路的種子整包固化成
+    //   使用者資料。舊版是「點開就發生」，改完是「真的要寫入才發生」—— 嚴格變好但沒消失：
+    //   在 2026-04~07 任一格存一次，那個月其餘欄位就從種子（日後改 code 會跟著變）
+    //   永久變成已存資料。
+    if(!all[monthKey])all[monthKey]=JSON.parse(JSON.stringify(SCORE_DEFAULT_MONTHLY[monthKey]||{}));
+    if(!all[monthKey][shop])all[monthKey][shop]={...(SCORE_DEFAULT_MONTHLY[monthKey]?.[shop]||{})};
+    // 清空＋Enter＝使用者明確要清掉這一格 → delete，不寫 null。computeShopMonthScore 的
+    //   判斷是 m.revA!=null，null 與「沒有這個 key」對計分完全等價，但 null 會在 Firestore
+    //   文件裡留下實體佔位。寫法比照同檔 editKpiCell 的空值處理（delete shopData[field]）。
+    if(isNaN(v))delete all[monthKey][shop][field];
+    else all[monthKey][shop][field]=v;
     saveScoreMonthlyAll(all);
     renderScoreComparisonTable();
     renderScoreDetailPanel();
   };
-  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}});
-  inp.addEventListener('blur',save);
+  // ⚠ ↑/↓ 一定要擋：type=number 的 input 聚焦中，按 ↑/↓ 會直接 ±step（本函式 step=0.01）
+  //   改掉輸入框裡的值。而使用者按方向鍵想跳到下一格是很自然的動作 —— 值被改掉後一失焦
+  //   就會被判定「值有改」→ 靜默寫進雲端而本人完全不知情。這與上面 wheel 是同一類洞，
+  //   而且發生機率更高（滾輪要游標剛好停在框上，方向鍵只要手指按下去），故一併堵掉。
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();commit();}
+    if(e.key==='Escape'){e.preventDefault();cancel();}
+    if(e.key==='ArrowUp'||e.key==='ArrowDown')e.preventDefault();
+  });
+  // 失焦：值沒變（含被清空）→ 一律當取消，不寫入；真的改成新值才存。
+  //   ⚠ 刻意不抄 editKpiCell 的 setTimeout 120ms 緩衝。
+  inp.addEventListener('blur',()=>{
+    const v=parseFloat(inp.value);
+    if(isNaN(v)||v===curVal)cancel();else commit();
+  });
 }
 
 function openEditScoreTargetsModal(){
@@ -17132,7 +17224,7 @@ Object.assign(window, {
   momoCostInlineToggle,momoMoPlusCostInlineSave,momoMissingCostSave,momoMissCostExpandSet,momoExportCostByOrigin,momoBumpMoPlusEpoch,
   momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoOpenMissingCostPanel,momoExportMissingCost,momoOpenFeeAnomalyPanel,momoExportFeeAnomaly,momoUploadShowDryRun,momoUploadDryRunCSV,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
-  setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
+  setScoreQ,toggleScoreDefs,toggleScoreTargets,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
   openProdTagPanel,closeProdTagPanel,saveProdTagPanel,addProdTagToDraft,removeProdTagFromDraft,
   saveProdTags,patchProdTagCell,renderProdTagPanelBody,syncProdTagDraftFromDOM,
