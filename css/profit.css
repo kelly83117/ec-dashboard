@@ -25,8 +25,20 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 
 .shop-content{display:none;}
 .shop-content.active{display:block;}
-/* 主數字下方的副標小字。.sub-rev＝營收欄的「上期 $X」，.sub-ads＝廣告費欄的「上期 $X」。
-   併在同一條規則：兩者的視覺層級刻意完全一致（同樣是「本期主數字 + 上期參照」）。
+/* 主數字下方的副標小字（.sub-rev / .sub-ads 併在同一條規則）。
+   這條規則定義的分類是「本期主數字 + 上期參照」—— 凡屬於這個分類的副標，視覺層級
+   刻意完全一致，所以共用規則、不各自開 class。目前有五個輸出點、兩種文案
+   （都在 js/profit.js，搜下列函式名或直接搜 class 名）：
+     商品列 · 營收欄    .sub-rev  「上期 $X」／無上期時「—」   rowCell 裡 inline 寫死
+     商品列 · 廣告費欄  .sub-ads  「上期 $X」／無上期時「—」   _subAdsHtml（兩個呼叫點共用）
+     商品列 · 日預算欄  .sub-ads  「上期 $X」／無上期時「—」   _subDayBudgetHtml
+     小計列 · 營收欄    .sub-rev  「$X」                       totalCell 裡 inline 寫死
+     小計列 · 廣告費欄  .sub-ads  「$X」                       totalCell 裡 inline 寫死
+   ⚠ 小計列那兩個【不寫「上期」兩個字、也不做 null 處理】，0 就直接顯示 $0。這是刻意的，
+     理由見 js/profit.js 的 totalCell 上方註解。
+   ⚠ .sub-ads 這個名字會出現在不是廣告費的欄位（日預算）—— 已知且接受的取捨，完整理由見
+     js/profit.js 的 _subDayBudgetHtml 上方那段（那裡稱日預算副標為「第三個實例」）。
+     那段與這段互為交叉引用，改任何一邊請兩邊一起改。
    ⚠ 廣告費格的排版【只能靠這個 class】，不可加在 <td> 上 —— patchRow 會整個覆寫該格的
      className（見 js/profit.js 搜 `adsEl.className`），加在那裡編輯一次就消失。 */
 .sub-rev,.sub-ads{font-size:11px;color:#9ca3af;font-weight:400;font-family:'Noto Sans TC',sans-serif;margin-top:2px;line-height:1.3;}
