@@ -6367,25 +6367,101 @@ function editKpiFieldNote(month,groupKey,field,thEl){
 }
 function editKpiCommonCost(month,groupKey,tdEl){
   const rows=getKpiRows();
+  // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：理由同 editKpiFieldNote /
+  //   editKpiMergedField ——getKpiRows() 回傳的是活陣列本身，開編輯器就 push 的話 Esc 撤不回來
+  //   （Esc 只還原 innerHTML），那列全空的 row 會被之後任何一次 saveKpiRows 一起推上 Firestore。
+  //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
-  if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
   const fieldName=groupKey+'Common';
-  const curVal=row[fieldName]||'';
+  // ⚠ 讀法維持 ||''【刻意不改成 !=null】去對齊 editKpiMergedField：那會改變既有語意
+  //   （已存的 0 會從「讀成無值」變成「讀成 0」），超出本輪範圍。
+  //   代價是【0 與無值在讀取端無法分辨】—— 下面的比較式子必須知道 curVal 只會是 '' 或非 0 數字，
+  //   絕對不可以拿 0==='' 去比。
+  const curVal=(row||{})[fieldName]||'';
   const origContent=tdEl.innerHTML;
   const inp=document.createElement('input');
   inp.type='number';inp.value=curVal;
   inp.style.cssText='width:90px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
+  // 🔴 擋冒泡：onclick 掛在 tdEl 自己身上（見 _kpiGroupTableHtml 的 isCommon 分支），input 是
+  //   它的子節點 —— 不擋的話點進輸入框會冒泡回 td、再跑一次本函式，把輸入框整個重建。
+  //   ⚠ 這條的後果比另兩條更立即：本函式的 blur 是【同步】的（沒有 120ms 緩衝），重建時舊 inp
+  //     被移出文件 → 當場 blur → 當場寫一次雲端 + renderKpiTab() 把剛建好的新 inp 洗掉。
+  //   寫法比照同檔 editKpiFieldNote。
+  inp.onclick=e=>e.stopPropagation();
+  // 🔴 擋滾輪：type=number 的 input 聚焦中會吃 wheel 直接改值 —— 游標停在框上捲頁面就會靜默
+  //   ±step，一失焦就被判定「值有改」而寫進雲端。
+  //   ⚠ 與 editKpiMergedField 同樣【只在聚焦時擋】，刻意不照抄 PR #223 的無條件 preventDefault：
+  //     這格帶 rowspan（蝦皮組 4 個賣場 ＝ 跨 4 列，比合併格更高）、又位在 _kpiGroupTableHtml 的
+  //     overflow-x:auto 容器裡，無條件擋會連 shift+滾輪的橫捲一起吃掉。沒聚焦時滾輪本來就
+  //     改不到值，只在聚焦時擋即可。
+  inp.addEventListener('wheel',e=>{if(document.activeElement===inp)e.preventDefault();},{passive:false});
   tdEl.innerHTML='';tdEl.appendChild(inp);inp.focus();if(inp.value)inp.select();
   let done=false;
-  const save=()=>{
+  // 取消＝只把這一格的 innerHTML 換回去，【不呼叫 renderKpiTab】。
+  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur
+  //   （本函式的 blur 是同步的，這一發會立刻跑進 handler，靠 done 擋住）。
+  //   ⚠ tdEl 帶 rowspan 且 onclick 掛在它自己身上，只換 innerHTML 不動節點 → 還原後照樣點得開。
+  const cancel=()=>{
     if(done)return;done=true;
-    const v=parseFloat(inp.value);
-    if(!isNaN(v)&&v!==0)row[fieldName]=v;else delete row[fieldName];
+    tdEl.innerHTML=origContent;
+  };
+  const commit=()=>{
+    if(done)return;
+    const s=inp.value.trim();
+    const v=parseFloat(s);
+    // ⚠ hasVal 含 v!==0 —— 這條【打 0 等於刪掉】，與 editKpiMergedField 的「0 是合法值、存得進去」
+    //   【正好相反】。兩邊都不是 bug，是各自的既有語意，本輪刻意不對齊（見下方 delete 那行）。
+    const hasVal=s!==''&&!isNaN(v)&&v!==0;
+    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
+    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    //   ⚠ 兩側【分開判】而不是寫成 v===curVal：curVal 可能是 ''（無值），拿 0==='' 比恆 false。
+    //     hasVal 為 false 時要比的是「本來就沒有值嗎」——本來就沒有、Enter 時打的又是空/0，
+    //     那不是「清空」而是【什麼都沒發生】，不該為它建出一列空 row。
+    //   ⚠ 【已知缺口，刻意不在這輪處理】：上面 curVal 的 ||'' 讀法把「已存的 0」也讀成 ''，
+    //     所以對那筆資料按「清空 + Enter」會落進 curVal==='' 這一邊、被判定成【什麼都沒發生】
+    //     而 cancel —— 那個 0 從此刪不掉（舊版的 blur 無條件存檔反而刪得掉）。
+    //     前提是 Firestore 裡真的有 shopeeCommon:0：app 內唯一的寫入者就是本函式，而它永遠
+    //     不寫 0（見 hasVal 的 v!==0），所以只可能來自手動改 Firestore 或更早的程式版本。
+    //     要修得改用「key 在不在」（fieldName in row）判斷，那就變成【兩套讀法互比】——
+    //     與本輪「讀值與比較必須同一種讀法」的原則衝突，且會動到 ||'' 的語意，另案處理。
+    if(hasVal?v===curVal:curVal===''){cancel();return;}
+    done=true;
+    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
+    // 清空（或打 0）＋Enter＝使用者明確要清掉這格 → delete。
+    //   ⚠ 【打 0 也 delete】是這條的既有語意，本輪【沒有動】：同一張表的 editKpiMergedField 打 0
+    //     是存 0，兩格外觀一樣、行為相反。要對齊請另案處理（會影響已存資料的判讀），不要在
+    //     失焦防呆這輪順手改。
+    //   改的只是「誰能觸發它」：以前 blur 也會走到這裡（全選 Backspace 後點旁邊＝共同費用
+    //   無聲消失），現在只有 Enter 到得了。
+    if(hasVal)row[fieldName]=v;else delete row[fieldName];
     saveKpiRows(rows);
     renderKpiTab();
   };
-  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}if(e.key==='Escape'){done=true;tdEl.innerHTML=origContent;}});
-  inp.addEventListener('blur',save);
+  // ⚠ ↑/↓ 一定要擋：type=number 聚焦中按 ↑/↓ 會直接 ±step（本框沒設 step ＝ ±1）改掉值，
+  //   而使用者按方向鍵想跳格是很自然的動作 —— 值被改掉後一失焦就會被判定「值有改」→
+  //   靜默寫進雲端。與上面 wheel 是同一類洞，發生機率更高，一併堵掉。作法同 PR #223。
+  //   （指路：spinner 那對上下箭頭不在這裡處理 —— css/main.css:68-73 已經全站關掉了。）
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();commit();}
+    if(e.key==='Escape'){e.preventDefault();cancel();}
+    if(e.key==='ArrowUp'||e.key==='ArrowDown')e.preventDefault();
+  });
+  // 失焦：已清空、打 0、或值沒變 → 一律當取消，不寫入；真的改成新值才存。
+  //   ⚠ 本函式的 blur 是【同步】的（四條裡唯一沒有 120ms + activeElement 檢查的），本輪刻意
+  //     保留不動 —— 加 setTimeout 是行為變更，不在這輪範圍。
+  //     因此判斷式【不能】依賴 document.activeElement：同步 blur 觸發時焦點通常已經是 body，
+  //     那個檢查在這裡不但沒用還會誤判。下面三條只讀 inp.value 與 curVal，兩者當下都拿得到，
+  //     自己站得住。
+  //   ⚠ 三條【分開寫】，不併成 isNaN(v)||v===curVal 一條：那樣會把「使用者清空」與「值沒變」
+  //     混成同一件事，而前者正是本輪要修的那顆 bug，必須自己一條看得見。
+  inp.addEventListener('blur',()=>{
+    const s=inp.value.trim();
+    if(s===''){cancel();return;}                  // ① 已清空 → 取消（本輪主 bug）
+    const v=parseFloat(s);
+    if(isNaN(v)||v===0){cancel();return;}          // ② 打不出數字 / 打 0（本條的 0 ≡ 無值）→ 取消
+    if(v===curVal){cancel();return;}               // ③ 值沒變 → 取消
+    commit();
+  });
 }
 // 只算總營收/總純利/純利率，不組 HTML——給總覽卡片跟明細表格共用。
 function _kpiGroupTotals(row,group){
