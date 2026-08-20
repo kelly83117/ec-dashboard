@@ -6610,11 +6610,16 @@ function toggleKpiGroup(month,groupKey){
 //       基期金額，所以兩種情況輸出不同；我們不顯示金額，兩者輸出都是空字串。
 //   · base>0 這條的兩個理由（併進 cmpOk 之後仍然成立，寫在這裡免得後人放寬它）：
 //     ① 分母為負時 (cur-base)/base 的符號會翻轉 —— 「本期虧更多」會顯示成正成長。
-//     ② 【KPI 這裡多一個蝦皮沒有的觸發來源】：四條編輯路徑（editKpiCell / editKpiFieldNote /
-//        editKpiCommonCost / editKpiMergedField）都是一進編輯器就先 push 一列空 row，
-//        而它們的 blur 是無條件存檔 —— 點一下儲存格什麼都沒打就失焦，那個月就有一列
-//        全空的 row。那種 row 的 totalRev / totalPure 都是 0，守衛一旦放寬成 base!=null
-//        之類的寫法，畫面上就會出現「較上月 −100%」而基期其實根本沒人填過。
+//     ② 【KPI 這裡多一個蝦皮沒有的觸發來源 —— 但它已經被堵掉了】：四條編輯路徑
+//        （editKpiCell / editKpiFieldNote / editKpiCommonCost / editKpiMergedField）
+//        以前是一進編輯器就先 push 一列空 row、blur 又無條件存檔 —— 點一下儲存格什麼都
+//        沒打就失焦，那個月就有一列全空的 row。fix/kpi-blur-guard 已經修掉：空 row 改成
+//        只在 commit 內才建，四條的 blur 也只允許「寫得出新值」，清空與刪除只能由 Enter
+//        觸發，所以【誤觸不會再製造出這種 row】。
+//        ⚠ 守衛【仍然要留】，理由是上面的 ① —— 那與空 row 無關，基期為負就會翻轉符號。
+//        而且舊資料裡已經存在的全空 row 不會自己消失（只能用「清空此月份」刪，見
+//        deleteKpiRow）。那種 row 的 totalRev / totalPure 都是 0，守衛一旦放寬成
+//        base!=null 之類的寫法，畫面上就會出現「較上月 −100%」而基期其實根本沒人填過。
 //   · 營收、純利、純利率 pp【三者都上綠紅】（不照抄 MOMO momoKpiDelta 那套中性灰）。
 //     ⚠ 綠紅用 #059669 / #dc2626，【不是】PR #206 的 #10b981 / #ef4444：本卡的純利主數字
 //       （下方那行）與年度總表的 _kpiYoyHtml 都用前者，同一張卡上出現兩種綠會很明顯。
@@ -6909,9 +6914,14 @@ function _kpiMaxNormalMonth(year){
 //      不保留的話那些列會變成孤兒：年度總表照樣把它列成一欄（見 _kpiYearViewHtml 的
 //      visibleMonths），但月結表選不到 → 既編輯不了，也按不到「清空此月份」那顆
 //      （deleteKpiRow 只有月結表這一個入口）——【看得到、改不掉、刪不掉】。
-//      未來月份怎麼會長出 row：四條編輯路徑（editKpiCell / editKpiFieldNote /
+//      未來月份怎麼會長出 row：以前四條編輯路徑（editKpiCell / editKpiFieldNote /
 //      editKpiCommonCost / editKpiMergedField）都是一進編輯器就先把空列 push 進 rows，
-//      而它們的 blur 是無條件存檔 —— 點一下儲存格、什麼都沒打就失焦，那個月就被建出來了。
+//      blur 又無條件存檔 —— 點一下儲存格、什麼都沒打就失焦，那個月就被建出來了。
+//      fix/kpi-blur-guard 已經把那條路徑修掉：空列改成只在 commit 內才建，四條的 blur
+//      也只允許「寫得出新值」，清空與刪除只能由 Enter 觸發 —— 誤觸不會再長出未來月份。
+//      ⚠ ③【仍然要留】，理由與那顆 bug 無關：使用者【刻意】先去填明年 1 月、或雲端來的
+//        舊資料本來就帶著未來月份的 row，都照樣會出現。只要出現一次，不保留就是上面說的
+//        孤兒列 ——【看得到、改不掉、刪不掉】。
 //      ⚠ ③【實際生效的範圍只有「當年的未來月份」】。其他年份被 ② 全列了，m<=maxM 恆成立，
 //        hasRow 那一半永遠短路掉 —— 對明年是徹底的 no-op。找不到它在哪發揮作用是正常的，
 //        今天（8 月）它只影響 9~12 月這四格。
