@@ -6545,7 +6545,7 @@ function _kpiYearOptions(){
   const years=[];
   for(let y=cur-2;y<=cur+1;y++)years.push(y);
   if(!years.includes(_kpiCurYear))years.push(_kpiCurYear);
-  return years.sort((a,b)=>a-b);
+  return years.sort((a,b)=>b-a);
 }
 function setKpiViewMode(mode){_kpiViewMode=mode;renderKpiTab();}
 function setKpiYear(y){_kpiCurYear=parseInt(y);renderKpiTab();}
@@ -7163,10 +7163,10 @@ function _scoreYearOptions(){
   const years=[];
   for(let y=cur-2;y<=cur+1;y++)years.push(y);
   if(!years.includes(_scoreCurYear))years.push(_scoreCurYear);
-  // 🔴 新到舊（b-a），【刻意與 _kpiYearOptions 的 a-b 不同】，不是抄錯：本專案規則是
-  //   「凡是有月份或年份的地方，最新的排最上面」。上方那支月結表的 _kpiYearOptions 仍是
-  //   舊到新，屬於既有功能，要留給獨立的「月份/年份排序統一」處理（動它之前得先勘查
-  //   MONTHS 的共用關係），這輪只讓評分表新加的這支照規則走。
+  // 新到舊（b-a）：本專案規則是「凡是有月份或年份的地方，最新的排最上面」。
+  //   ⚠ 上方月結表／年度總表共用的 _kpiYearOptions 也是 b-a —— 兩支現在【方向一致】。
+  //     但它們【沒有共用任何程式碼】，只共用這條規則，不會互相拉住：改其中一支的排序時，
+  //     另一支不會跟著變，要自己記得一起改。
   return years.sort((a,b)=>b-a);
 }
 function setScoreQ(q){_scoreCurQ=q;_scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,q);renderKpiTab();}
