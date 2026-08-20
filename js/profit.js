@@ -6950,6 +6950,14 @@ const SCORE_DEFAULT_MONTHLY={
               玩樂:{revA:22.94,prevProfit:399710,curProfit:null,adsA:53,badA:19},
               森之旅:{revA:18.43,prevProfit:77545,curProfit:67134,adsA:37,badA:24} },
 };
+// 種子資料所屬的年份。上面 SCORE_DEFAULT_MONTHLY 的 key 前四碼（'2026-04'~'2026-07'）
+//   就是這個數字，兩者是【綁在一起的一份資料的兩半】：目標（依季）＋ 月度實際數字（依月）。
+//   要換種子就【兩邊一起換】，只改一邊會讓某一年長出「有目標但沒有月數字」或反過來的畫面。
+// 🔴 刻意【不】寫成 _KPI_NOW.getFullYear()：種子屬於 2026 這件事，不會因為今年是哪一年
+//   而改變。用「當年」的話，跨年那一刻 2026 Q2/Q3 的目標會開始回 null ——
+//   SCORE_DEFAULT_MONTHLY 的四個月數字還在，卻再也算不出分數，整批變成「—」；
+//   同時新的那一年會長出這組目標卡卻沒有任何月資料，種子的兩半就此錯開一年。
+const SCORE_DEFAULT_TARGETS_YEAR=2026;
 
 function getScoreTargetsAll(){
   try{
@@ -6968,7 +6976,17 @@ function getScoreTargetsForQ(year,q){
   const all=getScoreTargetsAll();
   const key=year+'-Q'+q;
   if(all[key])return all[key];
-  return SCORE_DEFAULT_TARGETS[q]||null;
+  // 🔴 種子【只在它自己所屬的那一年回退】，見上方的 SCORE_DEFAULT_TARGETS_YEAR。
+  //   SCORE_DEFAULT_TARGETS 只有「季」一個維度、沒有年份，舊寫法是
+  //   `return SCORE_DEFAULT_TARGETS[q]` —— year 參數被整個丟掉。評分表加了年份選擇器
+  //   之後那等於「每一年的 Q2/Q3 都憑空長出同一組目標卡」，而且 computeShopMonthScore
+  //   會拿它算出分數，使用者沒有任何線索知道那是假資料。
+  //   回 null 之後，其他年份會走既有那道「沒目標就強制展開 + 引導文字」的路徑
+  //   （見 _kpiScoreViewHtml 的 targetsOpen 與 targetCardHtml 那串三元的 else 分支）。
+  //   ⚠ Number(year)：年份從 <select> 進來是字串。setScoreYear 已經 parseInt，這裡再收
+  //     一次斂 —— 否則日後有人用別的路徑傳字串進來，=== 會靜默失敗、種子永遠不回退。
+  if(Number(year)===SCORE_DEFAULT_TARGETS_YEAR)return SCORE_DEFAULT_TARGETS[q]||null;
+  return null;
 }
 
 function getScoreMonthlyAll(){
@@ -7133,7 +7151,32 @@ function _scoreDefaultDetailCells(year,q){
 }
 let _scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,_scoreCurQ);
 
+// 年份選項：當年 -2 ~ +1，共四年。整支比照月結表的 _kpiYearOptions（本檔上方）。
+//   🔴 刻意【不】掃「實存資料有哪幾年」：getScoreTargetsAll / getScoreMonthlyAll /
+//     getScoreBonusAll 三支都優先讀 Store._profitMem，而那份要等 js/firebase.js 的
+//     app/profit 訂閱回來才完整 —— 模組載入當下掃出來的年份會少，會變成「一進畫面
+//     選項少一個、切走再切回來就多一個」。固定區間沒有這個時序問題。
+//   ⚠ 保底把 _scoreCurYear 自己補進去（同 _kpiYearOptions 的最後一段）：避免日後有人
+//     用別的路徑把年份設到區間外時，下拉裡選不到目前這一年。
+function _scoreYearOptions(){
+  const cur=_KPI_NOW.getFullYear();
+  const years=[];
+  for(let y=cur-2;y<=cur+1;y++)years.push(y);
+  if(!years.includes(_scoreCurYear))years.push(_scoreCurYear);
+  // 🔴 新到舊（b-a），【刻意與 _kpiYearOptions 的 a-b 不同】，不是抄錯：本專案規則是
+  //   「凡是有月份或年份的地方，最新的排最上面」。上方那支月結表的 _kpiYearOptions 仍是
+  //   舊到新，屬於既有功能，要留給獨立的「月份/年份排序統一」處理（動它之前得先勘查
+  //   MONTHS 的共用關係），這輪只讓評分表新加的這支照規則走。
+  return years.sort((a,b)=>b-a);
+}
 function setScoreQ(q){_scoreCurQ=q;_scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,q);renderKpiTab();}
+// 🔴 一定要跟著重設 _scoreDetailCells，作法與上一行的 setScoreQ 完全相同：那個 Set 的
+//   key 形狀是「好麻吉|7」，【不含年份】。若只寫 {_scoreCurYear=y;renderKpiTab();}，
+//   在 2026 勾了 7 月、切到 2025 之後 2025-07 會自動被勾選，展開一組根本不存在的資料，
+//   而且不會報錯（computeShopMonthScore 查無目標回 null，明細只印一行灰字）。
+// ⚠ parseInt 不可省（比照 setKpiYear）：<select> 的 this.value 是字串，而
+//   getScoreTargetsForQ 現在要拿 year 跟種子所屬年份做嚴格比較。
+function setScoreYear(y){_scoreCurYear=parseInt(y);_scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,_scoreCurQ);renderKpiTab();}
 function toggleScoreDefs(){_scoreDefsOpen=!_scoreDefsOpen;renderKpiTab();}
 function toggleScoreTargets(){_scoreTargetsOpen=!_scoreTargetsOpen;saveScoreTargetsOpen(_scoreTargetsOpen);renderKpiTab();}
 function toggleScoreDetailCell(shop,month){
@@ -7198,6 +7241,7 @@ function _kpiScoreViewHtml(){
   //     【這不是 bug，不要來修。】強制展開是為了讓 Q4 一到不會有人對著空白畫面，那道防線
   //     比「記住收起」重要；而且沒有目標的季本來就沒東西可看，收起來也沒省到什麼版面。
   const targetsOpen=_scoreTargetsOpen||!targets;
+  const yearOpts=_scoreYearOptions().map(y=>`<option value="${y}"${y===year?' selected':''}>${y}年</option>`).join('');
   const qTabsHtml=[1,2,3,4].map(qq=>`<div onclick="setScoreQ(${qq})" style="padding:5px 14px;font-size:12px;font-weight:${qq===q?700:600};border-radius:16px;border:1px solid ${qq===q?'#5b5fcf':'#e5e7eb'};background:${qq===q?'#5b5fcf':''};color:${qq===q?'#fff':'#9ca3af'};cursor:pointer">Q${qq}</div>`).join('');
 
   const targetCardHtml=targets?SCORE_SHOPS.map((s,i)=>{
@@ -7221,18 +7265,21 @@ function _kpiScoreViewHtml(){
           </div>`).join('')}
       </div>
     </div>`;
-  }).join(''):`<div style="padding:24px;text-align:center;font-size:12px;color:#9ca3af">Q${q} 還沒有 KPI 目標設定，請按上面「✎ 編輯本季指標」建立</div>`;
+  }).join(''):`<div style="padding:24px;text-align:center;font-size:12px;color:#9ca3af">${year} Q${q} 還沒有 KPI 目標設定，請按上面「✎ 編輯本季指標」建立</div>`;
 
   return `
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-    <div style="display:flex;gap:6px">${qTabsHtml}</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <select onchange="setScoreYear(this.value)" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:16px;background:#fff;font-size:12px;font-weight:600;color:#374151;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
+      <div style="display:flex;gap:6px">${qTabsHtml}</div>
+    </div>
     <div style="font-size:11px;color:#9ca3af">每季指標與權重可獨立調整</div>
   </div>
 
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${targetsOpen?'10px':'24px'}">
     <div onclick="toggleScoreTargets()" style="display:flex;align-items:center;gap:5px;cursor:pointer">
       <span style="font-size:10px;transition:transform .15s;display:inline-block;color:#5b5fcf;${targetsOpen?'transform:rotate(90deg)':''}">▶</span>
-      <div style="font-size:13px;font-weight:700;color:#374151">Q${q} KPI 目標與權重設定</div>
+      <div style="font-size:13px;font-weight:700;color:#374151">${year} Q${q} KPI 目標與權重設定</div>
     </div>
     <div style="font-size:12px;font-weight:600;color:#5b5fcf;cursor:pointer" onclick="openEditScoreTargetsModal()">✎ 編輯本季指標</div>
   </div>
@@ -7505,7 +7552,7 @@ function openEditScoreTargetsModal(){
     </div>`;
   }).join('');
   ov.innerHTML=`<div class="ana-modal" style="width:520px;max-width:96vw;max-height:85vh;overflow-y:auto">
-    <div class="ana-modal-hdr"><span>編輯 Q${q} KPI 目標與權重</span><button class="ana-close-btn" onclick="this.closest('.ana-overlay').remove()">✕</button></div>
+    <div class="ana-modal-hdr"><span>編輯 ${year} Q${q} KPI 目標與權重</span><button class="ana-close-btn" onclick="this.closest('.ana-overlay').remove()">✕</button></div>
     <div class="ana-modal-body" style="padding:20px">
       ${shopBlocks}
       <div style="font-size:11px;color:#9ca3af;margin-bottom:12px">低標留空代表沒有低標（未達目標就不得分）；每個賣場的配分總和建議為 100</div>
@@ -17302,7 +17349,7 @@ Object.assign(window, {
   momoCostInlineToggle,momoMoPlusCostInlineSave,momoMissingCostSave,momoMissCostExpandSet,momoExportCostByOrigin,momoBumpMoPlusEpoch,
   momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoOpenMissingCostPanel,momoExportMissingCost,momoOpenFeeAnomalyPanel,momoExportFeeAnomaly,momoUploadShowDryRun,momoUploadDryRunCSV,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
-  setScoreQ,toggleScoreDefs,toggleScoreTargets,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
+  setScoreQ,setScoreYear,toggleScoreDefs,toggleScoreTargets,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
   openProdTagPanel,closeProdTagPanel,saveProdTagPanel,addProdTagToDraft,removeProdTagFromDraft,
   saveProdTags,patchProdTagCell,renderProdTagPanelBody,syncProdTagDraftFromDOM,
