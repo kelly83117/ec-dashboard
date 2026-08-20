@@ -6362,6 +6362,19 @@ function _kpiGroupTotals(row,group){
   if(group.commonCostLabel)totalPure-=(row[group.key+'Common']||0);
   return{totalRev,totalPure,pureRateAgg:totalRev>0?totalPure/totalRev:0,pureKey};
 }
+// 上一個月的 key。'2026-01' → '2025-12'。
+//   ⚠ 形狀照抄本檔的 momoPrevPeriodKey 與 _lmSamePeriodParts（跨年那行
+//     `if(mo<1){mo=12;y--;}` 三支逐字相同），但【刻意不共用】：那兩支吃的是帶期別後綴的
+//     'YYYY-MM-H1' 與斜線格式的 'YYYY/MM'，月結表是純 'YYYY-MM'。轉格式的程式碼比本函式
+//     還長 —— 理由與 _lmSamePeriodParts 上方對 momoPrevPeriodKey 的說明相同。
+//   ⚠ 跨年【不是理論情況】：年份下拉可選 cur-2 ~ cur+1（見 _kpiYearOptions），1 月的上個月
+//     確實會落在去年 12 月，而那個月很可能真的有 row。
+//   ⚠ 輸入不合法一律回 ''（呼叫端會因此取不到 prevRow → 比較行全部留空），不 throw。
+function _kpiPrevMonthKey(month){
+  const m=/^(\d{4})-(\d{2})$/.exec(month||''); if(!m) return '';
+  let y=+m[1], mo=+m[2]-1; if(mo<1){ mo=12; y--; }
+  return y+'-'+String(mo).padStart(2,'0');
+}
 // 哪些「row.id:group.key」目前是展開狀態——只是畫面互動狀態，不用存雲端，
 // 重新整理會回到全部收合。
 const _kpiExpandedGroups=new Set();
@@ -6370,17 +6383,104 @@ function toggleKpiGroup(month,groupKey){
   if(_kpiExpandedGroups.has(id))_kpiExpandedGroups.delete(id);else _kpiExpandedGroups.add(id);
   renderKpiTab();
 }
+// 五張通路卡的「較上月」對照（2026-08-20 新增）。骨架搬 PR #206 的頂端三格
+//   （本檔搜 setKpis 的 lmLine），但有幾處【刻意偏離】，逐條寫在下面。
+//
+// 🔴 基期【只給 ±%，不給基期金額】—— 這是與 PR #206 最大的差異，不是漏抄。
+//   原版保留金額的理由寫在 setKpis 裡：「蝦皮同一畫面上有兩套基準（頂端的『上月同期』
+//   與表格逐列的『上期』），金額是使用者對帳時唯一能自己驗證這個 +7.2% 是拿什麼算的」。
+//   月結表【只有一套基準】，那個理由不成立。而版面成本是實打實的：本區是
+//   grid-template-columns:repeat(auto-fit,minmax(150px,1fr))，單格最小 150px 再扣
+//   padding 左右各 14px —— 「vs 7月 NT$ 1,234,567」在那個寬度一定換行，兩個指標就是多四行。
+//   （原版自己也踩過：PR #206 實測 #header-kpi-block 已達 1037.2px、1280px 螢幕上三格就在
+//     換行，那次是把日期字串砍短來換空間。這裡格子更多更窄，只能連金額一起砍。）
+//
+// 🔴 本期與基期【一律走同一支 _kpiGroupTotals】，不可以一邊用卡片算法、一邊用小計算法。
+//   已知問題：_kpiGroupTotals【不做 fieldMerge 歸零】，而小計列（_kpiGroupTableHtml）與
+//   年度總表（_kpiShopAnnualTotal）都會做 —— 三處算法裡卡片是唯一的例外。KPI_GROUPS 中
+//   只有 MOMO 有 fieldMerge（ship 欄位：好麻吉/森之旅合併、甲配/露營館不適用），所以
+//   MOMO 那張卡的純利與小計列本來就對不起來。【那是既有問題，本次不修。】
+//   但基期若改用別支取數，這個靜態誤差會變成【會動的誤差】：寄倉運費某個月從 3 萬變 6 萬，
+//   卡片就會憑空多出一段純利跌幅。同一支函式至少保證本期與基期偏得一樣、相減後多半抵消。
+//
+// 🔴 純利率用【pp（百分點）】不是 %，而且 pureRateAgg 是【小數】(0.1925) ——
+//   pp 差必須寫 (cur-prev)*100。⚠ 年度總表的 grandRate / groupRate 是【百分比數值】(19.25)、
+//   口徑相反（那邊的註解也反過來警告不要照抄這裡的 *100），改任一邊前先確認自己在哪一套。
+//
+// 🔴🔴 顯示與否由【一道共用守衛 cmpOk】決定，三行【全有或全無】—— 這是刻意與 PR #206
+//   相同的策略（原版三格共用一道 !cmp），不要為了「多顯示一行」把它拆成三道。
+//   拆開會做出【破洞卡】。具體情境：上個月營收 100、純利 −5,000（小生意但賠錢）——
+//     · 營收行 base=100>0    → 顯示
+//     · 純利行 base=−5000    → 留空（見下方 base>0 的理由①）
+//     · 純利率 pp 只看 totalRev>0 → 顯示
+//   同一張卡變成「有、空、有」，中間那個洞會被讀成「純利那格壞了」。
+//   一致性比多顯示一行重要 ⇒ 有一項不可比，整張卡的比較行一起留空。
+//   ⚠ 守衛【同時看 totalRev 與 totalPure】兩者：營收與純利的 ±% 都是除法，任一個基期
+//     <= 0 都會出問題（純利尤其：基期為負時分母翻轉，「本期虧更多」會顯示成正成長）。
+//     pp 雖然是相減、不會翻轉符號，但它跟著整張卡的一致性走，不另開判斷。
+//   ⚠ 下方的 cmpPct 已經【不再自己判斷 base】—— 它假設呼叫端已經過 cmpOk。
+//     這是刻意的：判斷只留一處，才不會有人日後只改其中一處而讓卡片又破洞。
+//
+// 顯示規則：
+//   · cmpOk 為 false（含「上個月根本沒有 row」）→ 三行【全部留空】，不顯示「較上月 —」。
+//     沿用本檔 _kpiYoyHtml 的 `if(!prev)return ''` 與 PR #206 的既有決定：
+//     永遠是破折號的欄位只會讓人以為壞掉。
+//     ⚠ 這裡不必像 PR #206 那樣同時保留 !cmp 與 base>0 兩條 —— 原版 cmp 存在時還要顯示
+//       基期金額，所以兩種情況輸出不同；我們不顯示金額，兩者輸出都是空字串。
+//   · base>0 這條的兩個理由（併進 cmpOk 之後仍然成立，寫在這裡免得後人放寬它）：
+//     ① 分母為負時 (cur-base)/base 的符號會翻轉 —— 「本期虧更多」會顯示成正成長。
+//     ② 【KPI 這裡多一個蝦皮沒有的觸發來源】：四條編輯路徑（editKpiCell / editKpiFieldNote /
+//        editKpiCommonCost / editKpiMergedField）都是一進編輯器就先 push 一列空 row，
+//        而它們的 blur 是無條件存檔 —— 點一下儲存格什麼都沒打就失焦，那個月就有一列
+//        全空的 row。那種 row 的 totalRev / totalPure 都是 0，守衛一旦放寬成 base!=null
+//        之類的寫法，畫面上就會出現「較上月 −100%」而基期其實根本沒人填過。
+//   · 營收、純利、純利率 pp【三者都上綠紅】（不照抄 MOMO momoKpiDelta 那套中性灰）。
+//     ⚠ 綠紅用 #059669 / #dc2626，【不是】PR #206 的 #10b981 / #ef4444：本卡的純利主數字
+//       （下方那行）與年度總表的 _kpiYoyHtml 都用前者，同一張卡上出現兩種綠會很明顯。
+//   · pp 除了 cmpOk 之外還要 totalRev>0：那不是基期守衛，是【本期側】的條件 ——
+//     同一行的純利率本來就寫 `totalRev>0 ? … : '—'`，本期沒有營收時那格顯示的是破折號，
+//     旁邊掛一個 pp 沒有意義。條件與該行原本的判斷一致，不是新增的例外。
+//
+// ⚠ 刻意【不搬】PR #206 第三行的 min-height:18px 地板：那是給 flex row 用的（三格底部
+//   會參差）；本區是 CSS Grid，grid item 預設 align-items:stretch，五張卡高度本來就齊。
+// ⚠ 刻意【不搬】原版的篩選守衛（_lastMonthSameTotals 開頭那行）：月結表沒有搜尋、
+//   沒有標籤篩選、沒有排序，那條完全不適用。
 function _kpiSummaryCardsHtml(row){
-  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px">
+  const prevMonth=_kpiPrevMonthKey(row.month);
+  // getKpiRows() 讀一次就好（五個 group 共用），比照 _kpiYearViewHtml 開頭的 const rows=getKpiRows()。
+  const prevRow=prevMonth?getKpiRows().find(r=>r.month===prevMonth):null;
+  // ⚠ 純格式化，【不含判斷】——呼叫端必須已經過 cmpOk。理由見上方守衛那段。
+  const cmpPct=(cur,base)=>{
+    const d=(cur-base)/base*100;
+    return `<div style="font-size:12px;font-weight:600;margin-top:2px;color:${d>=0?'#059669':'#dc2626'}">較上月 ${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%</div>`;
+  };
+  // ⚠ minmax 的下限 190px 是【換行門檻】，不是卡片寬度 —— 這是配套，不是主角。
+  //   欄位是 auto-fit + 1fr：容器夠寬時五張卡本來就滿版五等分，調下限【不會讓卡片變寬】，
+  //   它只決定「窄到什麼程度就換行」。
+  //   之所以從 150px 提到 190px：主數字放大到 24px 之後，NT$7,534,546 這種長度約需 155px，
+  //   150px 的下限在窄螢幕會被字撐破。
+  //   代價：內容區寬度低於約 990px（190×5 ＋ gap 10×4）時，grid 會換成 4+1 兩排。
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:16px">
     ${KPI_GROUPS.map(g=>{
       const{totalPure,pureRateAgg,totalRev}=_kpiGroupTotals(row,g);
-      return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
-        <div style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${g.color};display:inline-block;flex-shrink:0"></span>${g.title}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:6px">營收</div>
-        <div style="font-size:19px;font-weight:700;color:#1f2937">NT$${fmtN(Math.round(totalRev))}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:5px">純利</div>
-        <div style="font-size:14px;font-weight:600;color:${totalPure>=0?'#059669':'#dc2626'}">NT$${fmtN(Math.round(totalPure))}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:2px">純利率 ${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}</div>
+      const prev=prevRow?_kpiGroupTotals(prevRow,g):null;
+      const cmpOk=!!(prev&&prev.totalRev>0&&prev.totalPure>0);   // 一道共用守衛，三行全有或全無
+      const revCmp=cmpOk?cmpPct(totalRev,prev.totalRev):'';
+      const pureCmp=cmpOk?cmpPct(totalPure,prev.totalPure):'';
+      let ppTxt='';
+      if(cmpOk&&totalRev>0){
+        const dpp=(pureRateAgg-prev.pureRateAgg)*100;
+        ppTxt=` <span style="font-weight:700;color:${dpp>=0?'#059669':'#dc2626'}">${dpp>=0?'+':'−'}${Math.abs(dpp).toFixed(1)}pp</span>`;
+      }
+      return `<div style="background:#f8f9fc;border-radius:8px;padding:16px 18px">
+        <div style="font-size:13px;color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${g.color};display:inline-block;flex-shrink:0"></span>${g.title}</div>
+        <div style="font-size:12px;color:#9ca3af;margin-top:6px">營收</div>
+        <div style="font-size:24px;font-weight:700;color:#1f2937">NT$${fmtN(Math.round(totalRev))}</div>
+        ${revCmp}
+        <div style="font-size:12px;color:#9ca3af;margin-top:5px">純利</div>
+        <div style="font-size:24px;font-weight:600;color:${totalPure>=0?'#059669':'#dc2626'}">NT$${fmtN(Math.round(totalPure))}</div>
+        ${pureCmp}
+        <div style="font-size:12px;color:#9ca3af;margin-top:2px">純利率 ${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}${ppTxt}</div>
       </div>`;
     }).join('')}
   </div>`;
