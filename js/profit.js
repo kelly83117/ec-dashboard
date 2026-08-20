@@ -6950,6 +6950,14 @@ const SCORE_DEFAULT_MONTHLY={
               玩樂:{revA:22.94,prevProfit:399710,curProfit:null,adsA:53,badA:19},
               森之旅:{revA:18.43,prevProfit:77545,curProfit:67134,adsA:37,badA:24} },
 };
+// 種子資料所屬的年份。上面 SCORE_DEFAULT_MONTHLY 的 key 前四碼（'2026-04'~'2026-07'）
+//   就是這個數字，兩者是【綁在一起的一份資料的兩半】：目標（依季）＋ 月度實際數字（依月）。
+//   要換種子就【兩邊一起換】，只改一邊會讓某一年長出「有目標但沒有月數字」或反過來的畫面。
+// 🔴 刻意【不】寫成 _KPI_NOW.getFullYear()：種子屬於 2026 這件事，不會因為今年是哪一年
+//   而改變。用「當年」的話，跨年那一刻 2026 Q2/Q3 的目標會開始回 null ——
+//   SCORE_DEFAULT_MONTHLY 的四個月數字還在，卻再也算不出分數，整批變成「—」；
+//   同時新的那一年會長出這組目標卡卻沒有任何月資料，種子的兩半就此錯開一年。
+const SCORE_DEFAULT_TARGETS_YEAR=2026;
 
 function getScoreTargetsAll(){
   try{
@@ -6968,7 +6976,17 @@ function getScoreTargetsForQ(year,q){
   const all=getScoreTargetsAll();
   const key=year+'-Q'+q;
   if(all[key])return all[key];
-  return SCORE_DEFAULT_TARGETS[q]||null;
+  // 🔴 種子【只在它自己所屬的那一年回退】，見上方的 SCORE_DEFAULT_TARGETS_YEAR。
+  //   SCORE_DEFAULT_TARGETS 只有「季」一個維度、沒有年份，舊寫法是
+  //   `return SCORE_DEFAULT_TARGETS[q]` —— year 參數被整個丟掉。評分表加了年份選擇器
+  //   之後那等於「每一年的 Q2/Q3 都憑空長出同一組目標卡」，而且 computeShopMonthScore
+  //   會拿它算出分數，使用者沒有任何線索知道那是假資料。
+  //   回 null 之後，其他年份會走既有那道「沒目標就強制展開 + 引導文字」的路徑
+  //   （見 _kpiScoreViewHtml 的 targetsOpen 與 targetCardHtml 那串三元的 else 分支）。
+  //   ⚠ Number(year)：年份從 <select> 進來是字串。setScoreYear 已經 parseInt，這裡再收
+  //     一次斂 —— 否則日後有人用別的路徑傳字串進來，=== 會靜默失敗、種子永遠不回退。
+  if(Number(year)===SCORE_DEFAULT_TARGETS_YEAR)return SCORE_DEFAULT_TARGETS[q]||null;
+  return null;
 }
 
 function getScoreMonthlyAll(){
@@ -7021,6 +7039,22 @@ function scoreCalcMetric(actual,target,low,weight,lowerBetter){
   }
 }
 function scoreRound(n){return Math.round(n*100)/100;}
+// 分數的顯示格式：統一顯示【整數】。不格式化的話 scoreRound 壓完兩位之後直接內插，
+//   JS 的 Number→String 會吃掉尾隨的 0，同一欄就出現 100 / 25.95 / 26.7 三種格式。
+//   分數的值域是 0~100，位數本來就不齊（9 與 100），補小數點換不到對齊、只換到雜訊。
+// 🔴 刻意用 Math.floor 無條件捨去，【不是四捨五入】：顏色門檻讀的是【未格式化的原始
+//   number】（scoreColor 在下方，80 分以上綠燈），而「ⓘ 指標定義與計分方式說明」裡的
+//   顏色圖例會寫明「80 分以上為綠色」。若改用四捨五入，79.6 分會顯示成 80 卻仍然是
+//   黃燈 —— 畫面與圖例當場矛盾，而且看起來像顏色壞掉。
+//   捨去保證「顯示值永遠不高於實際值」⇒ 綠燈的格子必定顯示 80 以上，黃燈的格子必定
+//   顯示 79 以下，兩者不可能打架。
+//   ⚠ 不要「順手修正」成 Math.round —— 那會四捨五入，等於拆掉上面這個保證。
+//     看到 Math.floor 覺得奇怪是正常的，它是刻意的，不是寫錯。
+// 代價：有小數的值會被截掉（本季平均 76.67 會顯示成 76）。這是刻意取捨 —— 這張表是
+//   用來看趨勢與顏色的，小數位不影響判讀。
+// 傳進來的一律是非負數（scoreCalcMetric 的回傳值域是 0~weight），所以不必擔心
+//   Math.floor 對負數是往 -∞ 捨去。
+function scoreFmt(n){return String(Math.floor(n));}
 function computeShopMonthScore(shop,year,monthNum,q){
   const t=getScoreTargetsForQ(year,q)?.[shop];
   if(!t)return null;
@@ -7048,6 +7082,22 @@ function scoreRatioColor(score,weight){
   if(ratio>=0.8)return{bg:'#ecfdf5',fg:'#059669',border:'#a7f3d0'};
   if(ratio>=0.4)return{bg:'#fffbeb',fg:'#b45309',border:'#fde68a'};
   return{bg:'#fef2f2',fg:'#dc2626',border:'#fecaca'};
+}
+// 圖例的色塊【直接呼叫 scoreColor 取色】，刻意不自己寫死 hex：色碼或門檻日後有人改，
+//   圖例會跟著變，不會退化成一段對不上表格的假說明。三個代表值 80/50/0 是刻意挑的，
+//   各自落在 scoreColor 上面那三個分支上。
+//   ⚠ 門檻數字若改動，除了上面的函式，這裡的 80/50/0 與標籤文字要一起改（文字沒辦法
+//     從函式推導，函式的門檻寫在 if 裡面）。
+// ⚠ 用色塊而不是 emoji（■ / 🟢）：emoji 在不同 OS 走不同字型，形狀與色相都對不上這裡的
+//   色票，Windows 與手機看到的會是兩種東西。
+// 色票的 background / color / border 三者一次用滿，是為了跟表格分數格【同一套外觀】
+//   （比較表那格的寫法見本檔 renderScoreComparisonTable）；只塗 bg 的話 #ecfdf5 太淡，
+//   小方塊幾乎看不出顏色。
+function scoreLegendSwatches(){
+  return [{s:80,l:'80 分以上'},{s:50,l:'50–79 分'},{s:0,l:'未滿 50 分'}].map(b=>{
+    const c=scoreColor(b.s);
+    return `<span style="display:inline-block;padding:1px 8px;border-radius:6px;background:${c.bg};color:${c.fg};border:1px solid ${c.border};font-weight:700;white-space:nowrap">${b.l}</span>`;
+  }).join('');
 }
 
 function _scoreDefaultQ(){return Math.ceil((_KPI_NOW.getMonth()+1)/3);}
@@ -7101,7 +7151,32 @@ function _scoreDefaultDetailCells(year,q){
 }
 let _scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,_scoreCurQ);
 
+// 年份選項：當年 -2 ~ +1，共四年。整支比照月結表的 _kpiYearOptions（本檔上方）。
+//   🔴 刻意【不】掃「實存資料有哪幾年」：getScoreTargetsAll / getScoreMonthlyAll /
+//     getScoreBonusAll 三支都優先讀 Store._profitMem，而那份要等 js/firebase.js 的
+//     app/profit 訂閱回來才完整 —— 模組載入當下掃出來的年份會少，會變成「一進畫面
+//     選項少一個、切走再切回來就多一個」。固定區間沒有這個時序問題。
+//   ⚠ 保底把 _scoreCurYear 自己補進去（同 _kpiYearOptions 的最後一段）：避免日後有人
+//     用別的路徑把年份設到區間外時，下拉裡選不到目前這一年。
+function _scoreYearOptions(){
+  const cur=_KPI_NOW.getFullYear();
+  const years=[];
+  for(let y=cur-2;y<=cur+1;y++)years.push(y);
+  if(!years.includes(_scoreCurYear))years.push(_scoreCurYear);
+  // 🔴 新到舊（b-a），【刻意與 _kpiYearOptions 的 a-b 不同】，不是抄錯：本專案規則是
+  //   「凡是有月份或年份的地方，最新的排最上面」。上方那支月結表的 _kpiYearOptions 仍是
+  //   舊到新，屬於既有功能，要留給獨立的「月份/年份排序統一」處理（動它之前得先勘查
+  //   MONTHS 的共用關係），這輪只讓評分表新加的這支照規則走。
+  return years.sort((a,b)=>b-a);
+}
 function setScoreQ(q){_scoreCurQ=q;_scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,q);renderKpiTab();}
+// 🔴 一定要跟著重設 _scoreDetailCells，作法與上一行的 setScoreQ 完全相同：那個 Set 的
+//   key 形狀是「好麻吉|7」，【不含年份】。若只寫 {_scoreCurYear=y;renderKpiTab();}，
+//   在 2026 勾了 7 月、切到 2025 之後 2025-07 會自動被勾選，展開一組根本不存在的資料，
+//   而且不會報錯（computeShopMonthScore 查無目標回 null，明細只印一行灰字）。
+// ⚠ parseInt 不可省（比照 setKpiYear）：<select> 的 this.value 是字串，而
+//   getScoreTargetsForQ 現在要拿 year 跟種子所屬年份做嚴格比較。
+function setScoreYear(y){_scoreCurYear=parseInt(y);_scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,_scoreCurQ);renderKpiTab();}
 function toggleScoreDefs(){_scoreDefsOpen=!_scoreDefsOpen;renderKpiTab();}
 function toggleScoreTargets(){_scoreTargetsOpen=!_scoreTargetsOpen;saveScoreTargetsOpen(_scoreTargetsOpen);renderKpiTab();}
 function toggleScoreDetailCell(shop,month){
@@ -7166,6 +7241,7 @@ function _kpiScoreViewHtml(){
   //     【這不是 bug，不要來修。】強制展開是為了讓 Q4 一到不會有人對著空白畫面，那道防線
   //     比「記住收起」重要；而且沒有目標的季本來就沒東西可看，收起來也沒省到什麼版面。
   const targetsOpen=_scoreTargetsOpen||!targets;
+  const yearOpts=_scoreYearOptions().map(y=>`<option value="${y}"${y===year?' selected':''}>${y}年</option>`).join('');
   const qTabsHtml=[1,2,3,4].map(qq=>`<div onclick="setScoreQ(${qq})" style="padding:5px 14px;font-size:12px;font-weight:${qq===q?700:600};border-radius:16px;border:1px solid ${qq===q?'#5b5fcf':'#e5e7eb'};background:${qq===q?'#5b5fcf':''};color:${qq===q?'#fff':'#9ca3af'};cursor:pointer">Q${qq}</div>`).join('');
 
   const targetCardHtml=targets?SCORE_SHOPS.map((s,i)=>{
@@ -7189,18 +7265,21 @@ function _kpiScoreViewHtml(){
           </div>`).join('')}
       </div>
     </div>`;
-  }).join(''):`<div style="padding:24px;text-align:center;font-size:12px;color:#9ca3af">Q${q} 還沒有 KPI 目標設定，請按上面「✎ 編輯本季指標」建立</div>`;
+  }).join(''):`<div style="padding:24px;text-align:center;font-size:12px;color:#9ca3af">${year} Q${q} 還沒有 KPI 目標設定，請按上面「✎ 編輯本季指標」建立</div>`;
 
   return `
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-    <div style="display:flex;gap:6px">${qTabsHtml}</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <select onchange="setScoreYear(this.value)" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:16px;background:#fff;font-size:12px;font-weight:600;color:#374151;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
+      <div style="display:flex;gap:6px">${qTabsHtml}</div>
+    </div>
     <div style="font-size:11px;color:#9ca3af">每季指標與權重可獨立調整</div>
   </div>
 
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${targetsOpen?'10px':'24px'}">
     <div onclick="toggleScoreTargets()" style="display:flex;align-items:center;gap:5px;cursor:pointer">
       <span style="font-size:10px;transition:transform .15s;display:inline-block;color:#5b5fcf;${targetsOpen?'transform:rotate(90deg)':''}">▶</span>
-      <div style="font-size:13px;font-weight:700;color:#374151">Q${q} KPI 目標與權重設定</div>
+      <div style="font-size:13px;font-weight:700;color:#374151">${year} Q${q} KPI 目標與權重設定</div>
     </div>
     <div style="font-size:12px;font-weight:600;color:#5b5fcf;cursor:pointer" onclick="openEditScoreTargetsModal()">✎ 編輯本季指標</div>
   </div>
@@ -7218,6 +7297,12 @@ function _kpiScoreViewHtml(){
   <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
   <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px" id="score-cmp-table"></div>
   <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">點分數看明細，可以點多個一起比較；灰色分數代表當月還沒有資料</div>
+  <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;line-height:1.8">
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span>分數色階（僅供快速辨識）：</span>${scoreLegendSwatches()}
+    </div>
+    <div>明細卡的單項顏色看「得分 ÷ 該項配分」的比例，門檻為 80% / 40%</div>
+  </div>
 
   <div id="score-detail-panel" style="margin-bottom:20px"></div>
 
@@ -7244,7 +7329,7 @@ function renderScoreComparisonTable(){
       const col=scoreColor(r.total);
       const active=_scoreDetailCells.has(s.id+'|'+m);
       return `<td style="text-align:center;padding:8px 6px">
-        <span onclick="toggleScoreDetailCell('${s.id}',${m})" style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer">${r.total}</span>
+        <span onclick="toggleScoreDetailCell('${s.id}',${m})" style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer">${scoreFmt(r.total)}</span>
       </td>`;
     }).join('');
     const vals=months.map(m=>{const r=computeShopMonthScore(s.id,year,m,q);return r&&r.hasData?r.total:null;}).filter(v=>v!=null);
@@ -7252,7 +7337,7 @@ function renderScoreComparisonTable(){
     return `<tr style="border-top:1px solid #f3f4f6">
       <td style="padding:8px 12px"><div style="font-size:13px;font-weight:700;color:#374151">${s.id}</div><div style="font-size:10.5px;color:#9ca3af">${s.pos}</div></td>
       ${cells}
-      <td style="text-align:center;padding:8px 10px;font-size:13px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums">${avg==null?'—':avg}</td>
+      <td style="text-align:center;padding:8px 10px;font-size:13px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums">${avg==null?'—':scoreFmt(avg)}</td>
     </tr>`;
   }).join('');
   container.innerHTML=`<table style="width:100%;border-collapse:collapse">
@@ -7280,7 +7365,7 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
     return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px">
         <div style="font-size:11.5px;color:#9ca3af;font-weight:600">${label}</div>
-        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${score} 分</div>
+        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${scoreFmt(score)} 分</div>
       </div>
       <div onclick="editScoreMonthlyCell('${monthKey}','${shop}','${field}',this)" style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15;cursor:pointer;border-bottom:1px dashed #d1d5db;display:inline-block">${valDisp}</div>
       <div style="font-size:11.5px;color:#9ca3af;margin-top:3px">目標 ${target}%</div>
@@ -7294,7 +7379,7 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
     return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px">
         <div style="font-size:11.5px;color:#9ca3af;font-weight:600">純利成長</div>
-        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${r.growS} 分</div>
+        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${scoreFmt(r.growS)} 分</div>
       </div>
       <div style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15">${valDisp}</div>
       <div style="font-size:11.5px;color:#9ca3af;margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -7318,7 +7403,7 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
         <div style="font-size:13.5px;font-weight:700;color:#374151">${shop}</div>
         <div style="font-size:11px;color:#9ca3af">${s.pos}</div>
       </div>
-      <div style="padding:3px 10px;border-radius:7px;background:${totCol.bg};color:${totCol.fg};border:1px solid ${totCol.border};font-size:13px;font-weight:700;font-variant-numeric:tabular-nums">${r.total} 分</div>
+      <div style="padding:3px 10px;border-radius:7px;background:${totCol.bg};color:${totCol.fg};border:1px solid ${totCol.border};font-size:13px;font-weight:700;font-variant-numeric:tabular-nums">${scoreFmt(r.total)} 分</div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${cardHtml}</div>
   </div>`;
@@ -7467,7 +7552,7 @@ function openEditScoreTargetsModal(){
     </div>`;
   }).join('');
   ov.innerHTML=`<div class="ana-modal" style="width:520px;max-width:96vw;max-height:85vh;overflow-y:auto">
-    <div class="ana-modal-hdr"><span>編輯 Q${q} KPI 目標與權重</span><button class="ana-close-btn" onclick="this.closest('.ana-overlay').remove()">✕</button></div>
+    <div class="ana-modal-hdr"><span>編輯 ${year} Q${q} KPI 目標與權重</span><button class="ana-close-btn" onclick="this.closest('.ana-overlay').remove()">✕</button></div>
     <div class="ana-modal-body" style="padding:20px">
       ${shopBlocks}
       <div style="font-size:11px;color:#9ca3af;margin-bottom:12px">低標留空代表沒有低標（未達目標就不得分）；每個賣場的配分總和建議為 100</div>
@@ -17264,7 +17349,7 @@ Object.assign(window, {
   momoCostInlineToggle,momoMoPlusCostInlineSave,momoMissingCostSave,momoMissCostExpandSet,momoExportCostByOrigin,momoBumpMoPlusEpoch,
   momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoOpenMissingCostPanel,momoExportMissingCost,momoOpenFeeAnomalyPanel,momoExportFeeAnomaly,momoUploadShowDryRun,momoUploadDryRunCSV,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
-  setScoreQ,toggleScoreDefs,toggleScoreTargets,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
+  setScoreQ,setScoreYear,toggleScoreDefs,toggleScoreTargets,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
   openProdTagPanel,closeProdTagPanel,saveProdTagPanel,addProdTagToDraft,removeProdTagFromDraft,
   saveProdTags,patchProdTagCell,renderProdTagPanelBody,syncProdTagDraftFromDOM,
