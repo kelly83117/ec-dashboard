@@ -6302,11 +6302,17 @@ function editKpiCell(month,groupKey,shop,field,tdEl){
 // 從欄位標題點進去編輯，跟編輯賣場數字的輸入框完全分開。
 function editKpiFieldNote(month,groupKey,field,thEl){
   const rows=getKpiRows();
+  // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：getKpiRows() 命中
+  //   Store._profitMem._kpi_v1 時回傳的是【活陣列本身】（不是複製，見該函式），舊版
+  //   一開啟編輯器就把空 row push 進去 →「點開又按 Esc」其實已經改掉記憶體狀態
+  //   （Esc 只還原 innerHTML，不會把那列拿掉），之後任何一次 saveKpiRows（改別格、
+  //   改別的月份都算）都會把那列全空的 row 一起整包推上 Firestore。
+  //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
-  if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-  if(!row.kpiFieldNotes)row.kpiFieldNotes={};
   const key=groupKey+':'+field;
-  const cur=row.kpiFieldNotes[key]||'';
+  // 讀值與下面「值有沒有變」的比較必須是【同一種讀法】，否則會拿兩套語意互比。
+  //   row 可能還不存在（這個月從沒填過任何東西）→ 等同備註是空字串。
+  const cur=(row?.kpiFieldNotes||{})[key]||'';
   const origContent=thEl.innerHTML;
   const inp=document.createElement('input');
   inp.type='text';inp.value=cur;inp.placeholder='備註，如：便利袋8000、宅配通7000';
@@ -6315,18 +6321,49 @@ function editKpiFieldNote(month,groupKey,field,thEl){
   thEl.innerHTML='';thEl.appendChild(inp);
   inp.focus();if(inp.value)inp.select();
   let done=false;
-  const save=()=>{
+  // 取消＝只把這一格的 innerHTML 換回去，【不呼叫 renderKpiTab】。理由同 editScoreMonthlyCell
+  //   上方那段：blur 發生在 mousedown，而 click 要 mousedown 與 mouseup 落在同一元素才成立
+  //   —— 在 mousedown 就整包重繪，會把使用者剛按下的那顆東西銷毀 → 第一下永遠沒反應。
+  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur。
+  //   ⚠ 刻意【不搬】PR #223 cancel() 裡「重讀比對、值變過改走重繪」那段：那條的前提是
+  //     _score_monthly_v1 沒接 _markPending、擋不住雲端 bounce-back；而 saveKpiRows 有走
+  //     _cloudWriteSafe → _markPending('_kpi_v1')，__profitShouldSkipCloudOverwrite 擋得到。
+  //     何況這裡的重繪是整包 renderKpiTab()，比評分表那兩支貴。
+  const cancel=()=>{
     if(done)return;done=true;
+    thEl.innerHTML=origContent;
+  };
+  const commit=()=>{
+    if(done)return;
     const v=inp.value.trim();
+    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
+    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    //   ⚠ 這條比的是【純字串】：備註本來就是文字，沒有 editKpiCell 那種「同一格可能存
+    //     公式也可能存數字」的歧義，不需要（也不可以）先 parseFloat 再比。
+    if(v===cur){cancel();return;}
+    done=true;
+    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
+    if(!row.kpiFieldNotes)row.kpiFieldNotes={};
+    // 清空＋Enter＝使用者明確要清掉這則備註 → delete，維持原本的寫法（不寫 ''）。
+    //   這個行為本來就是對的，本次【沒有改】—— 改的只是「誰能觸發它」：以前 blur 也會
+    //   走到這裡（全選 Backspace 後點旁邊＝備註無聲消失），現在只有 Enter 到得了。
     if(v)row.kpiFieldNotes[key]=v;else delete row.kpiFieldNotes[key];
     saveKpiRows(rows);
     renderKpiTab();
   };
   inp.addEventListener('keydown',e=>{
-    if(e.key==='Enter'){e.preventDefault();save();}
-    if(e.key==='Escape'){done=true;thEl.innerHTML=origContent;}
+    if(e.key==='Enter'){e.preventDefault();commit();}
+    if(e.key==='Escape'){e.preventDefault();cancel();}
   });
-  inp.addEventListener('blur',()=>setTimeout(()=>{if(document.activeElement!==inp)save();},120));
+  // 失焦：值沒變、或被清空 → 一律當取消，不寫入；真的改成新內容才存。
+  //   ⚠ type=text，不必像 editKpiCommonCost / editKpiMergedField 那樣擋 wheel 與 ↑/↓：
+  //     那兩者是瀏覽器對 type=number 的步進，文字框不會被步進。看到那兩處有擋、這裡沒擋
+  //     是刻意的，不是遺漏。
+  inp.addEventListener('blur',()=>setTimeout(()=>{
+    if(document.activeElement===inp)return;
+    const v=inp.value.trim();
+    if(v===''||v===cur)cancel();else commit();
+  },120));
 }
 function editKpiCommonCost(month,groupKey,tdEl){
   const rows=getKpiRows();
