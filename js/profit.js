@@ -7065,6 +7065,22 @@ function scoreRatioColor(score,weight){
   if(ratio>=0.4)return{bg:'#fffbeb',fg:'#b45309',border:'#fde68a'};
   return{bg:'#fef2f2',fg:'#dc2626',border:'#fecaca'};
 }
+// 圖例的色塊【直接呼叫 scoreColor 取色】，刻意不自己寫死 hex：色碼或門檻日後有人改，
+//   圖例會跟著變，不會退化成一段對不上表格的假說明。三個代表值 80/50/0 是刻意挑的，
+//   各自落在 scoreColor 上面那三個分支上。
+//   ⚠ 門檻數字若改動，除了上面的函式，這裡的 80/50/0 與標籤文字要一起改（文字沒辦法
+//     從函式推導，函式的門檻寫在 if 裡面）。
+// ⚠ 用色塊而不是 emoji（■ / 🟢）：emoji 在不同 OS 走不同字型，形狀與色相都對不上這裡的
+//   色票，Windows 與手機看到的會是兩種東西。
+// 色票的 background / color / border 三者一次用滿，是為了跟表格分數格【同一套外觀】
+//   （比較表那格的寫法見本檔 renderScoreComparisonTable）；只塗 bg 的話 #ecfdf5 太淡，
+//   小方塊幾乎看不出顏色。
+function scoreLegendSwatches(){
+  return [{s:80,l:'80 分以上'},{s:50,l:'50–79 分'},{s:0,l:'未滿 50 分'}].map(b=>{
+    const c=scoreColor(b.s);
+    return `<span style="display:inline-block;padding:1px 8px;border-radius:6px;background:${c.bg};color:${c.fg};border:1px solid ${c.border};font-weight:700;white-space:nowrap">${b.l}</span>`;
+  }).join('');
+}
 
 function _scoreDefaultQ(){return Math.ceil((_KPI_NOW.getMonth()+1)/3);}
 let _scoreCurQ=_scoreDefaultQ();
@@ -7234,6 +7250,12 @@ function _kpiScoreViewHtml(){
   <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
   <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px" id="score-cmp-table"></div>
   <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">點分數看明細，可以點多個一起比較；灰色分數代表當月還沒有資料</div>
+  <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;line-height:1.8">
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span>分數色階（僅供快速辨識）：</span>${scoreLegendSwatches()}
+    </div>
+    <div>明細卡的單項顏色看「得分 ÷ 該項配分」的比例，門檻為 80% / 40%</div>
+  </div>
 
   <div id="score-detail-panel" style="margin-bottom:20px"></div>
 
