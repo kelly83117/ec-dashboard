@@ -6261,52 +6261,126 @@ function kpiCellClick(month,groupKey,shop,field,tdEl,editable){
 }
 function editKpiCell(month,groupKey,shop,field,tdEl){
   const rows=getKpiRows();
+  // 🔴 空 row / groupKey / shop 三層容器的建立【刻意不在這裡做】（舊版是函式開頭就建）：
+  //   理由同 editKpiFieldNote / editKpiMergedField / editKpiCommonCost ——getKpiRows() 回傳的是
+  //   活陣列本身，開編輯器就 push 的話 Esc 撤不回來（Esc 只還原 innerHTML），那列全空的 row
+  //   會被之後任何一次 saveKpiRows 一起推上 Firestore。
+  //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
-  if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-  if(!row[groupKey])row[groupKey]={};
-  if(!row[groupKey][shop])row[groupKey][shop]={};
-  const shopData=row[groupKey][shop];
+  // ⚠ 唯讀快照：row 還不存在時給 {}，讓下面的 curVal 與 _kpiEvalFormula 都拿得到東西。
+  //   row 存在時它就是 row[groupKey][shop] 本身（commit 寫入的也是同一個物件）。
+  const shopData=(row?.[groupKey]||{})[shop]||{};
   const group=KPI_GROUPS.find(g=>g.key===groupKey);
   const curVal=shopData[field+'Formula']!=null?shopData[field+'Formula']:(shopData[field]!=null?shopData[field]:'');
+  // 「值有沒有變」比的是【字串】，不是數字：curVal 可能是公式（=實際營收*21%）也可能是數字，
+  //   parseFloat 比不了公式。curVal 本身就是「拿去填進 inp.value 的那個東西」，拿輸入框現值
+  //   跟它比，才是使用者感知的「我沒改」。
+  const cur=curVal===''?'':String(curVal);
   const origContent=tdEl.innerHTML;
   const inp=document.createElement('input');
   inp.type='text';inp.value=curVal;inp.placeholder='數字或公式，如 =實際營收*21%';
   inp.style.cssText='width:150px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
+  // 🔴 擋冒泡：onclick 掛在 tdEl 自己身上（走 kpiCellClick），input 是它的子節點 —— 不擋的話
+  //   點進輸入框會冒泡回 td → kpiCellClick 因為 ctx.field===field 不符合帶入參照的條件 →
+  //   落到 editKpiCell 把編輯器整個重建，【打到一半的公式當場消失】。
+  //   ⚠ 這【不會】影響公式帶入參照：帶入時 click 的 target 是【另一格的 td】，本 input 不在
+  //     那條祖先鏈上，這個 handler 根本不會被呼叫（帶入靠的是 kpiCellClick 直接操作
+  //     ctx.inputEl + focus()，不經過本 input 的事件）。加了它反而讓插入參照後回點輸入框
+  //     調游標不會再炸掉半成品公式。
+  //   ⚠ 蓋不到的殘留：點在 td 上、input 以外的空白處仍會冒泡到 td 的 onclick → 重建。
+  //     要修得動 td 的 onclick，不在本輪範圍。
+  inp.onclick=e=>e.stopPropagation();
   tdEl.innerHTML='';tdEl.style.whiteSpace='normal';tdEl.appendChild(inp);
   inp.focus();if(inp.value)inp.select();
   _kpiFormulaCtx={month,groupKey,shop,field,inputEl:inp};
   let done=false;
-  const save=()=>{
+  // 取消＝清掉公式 ctx、把 whiteSpace 與這一格的 innerHTML 換回去，【不呼叫 renderKpiTab】。
+  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur。
+  //   ⚠ ctx 的清除時機與舊版一致（編輯器關閉時清），只是舊版寫在 save 與 Esc 兩處，
+  //     現在收斂到 cancel / commit 兩支 —— 沒有這行的話，關掉的輸入框會留在 ctx 裡，
+  //     下一次點別格會把欄位名插進一個已經脫離文件的 input。
+  const cancel=()=>{
     if(done)return;done=true;
     if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;
+    tdEl.style.whiteSpace='';
+    tdEl.innerHTML=origContent;
+  };
+  const commit=()=>{
+    if(done)return;
     const raw=inp.value.trim();
     const isPlain=/^-?\d+(\.\d+)?$/.test(raw);
     const computed=_kpiEvalFormula(raw,shopData,group);
-    if(raw===''||isNaN(computed)){
-      delete shopData[field];delete shopData[field+'Formula'];
+    const hasVal=raw!==''&&!isNaN(computed);
+    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
+    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    //   🔴 「沒變」＝字面沒變【而且】重算出來的也沒變。第二個條件是為了公式：
+    //     使用者打的公式是【存檔當下算好凍結】的（computed 寫進 shopData[field]，
+    //     _kpiCalcAll 只在 out[f.k]==null 時才套公式，渲染端也是直接顯示已存的數字），
+    //     被參照的欄位改掉之後它就過期了，而全檔【沒有任何地方會自動重算它】——
+    //     舊版「blur 一律存檔」等於每次進出編輯器都順手幫它刷新一次。只比字面的話
+    //     那條重算路徑會消失，過期的數字連按 Enter 都救不回來，只能整格刪掉重打。
+    //   ⚠ hasVal 為 false 時比的是「本來就沒有值嗎」——本來就沒有、現在打的又是空/算不出來，
+    //     那不是「清空」而是【什麼都沒發生】，不該為它建出一列空 row。
+    const unchanged=hasVal?(raw===cur&&computed===shopData[field]):curVal==='';
+    if(unchanged){cancel();return;}
+    done=true;
+    if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;
+    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
+    if(!row[groupKey])row[groupKey]={};
+    if(!row[groupKey][shop])row[groupKey][shop]={};
+    const target=row[groupKey][shop];
+    if(!hasVal){
+      // 清空（或公式算不出來）＋Enter＝使用者明確要清掉這格 → delete 兩個 key，維持原本的寫法。
+      //   這個行為本來就是對的（PR #223 的 editScoreMonthlyCell 還是抄這裡的），本次【沒有改】——
+      //   改的只是「誰能觸發它」：以前 blur 也會走到這裡（全選 Backspace 後點旁邊＝數字無聲消失），
+      //   現在只有 Enter 到得了。
+      delete target[field];delete target[field+'Formula'];
     }else{
       // 打 0 是刻意要蓋成 0（跟完全沒填、留給公式自動算不一樣），要真的存下來，不能當作空白清掉。
-      shopData[field]=computed;
-      if(isPlain)delete shopData[field+'Formula'];else shopData[field+'Formula']=raw;
+      target[field]=computed;
+      if(isPlain)delete target[field+'Formula'];else target[field+'Formula']=raw;
     }
     saveKpiRows(rows);
     renderKpiTab();
   };
+  // ⚠ type=text，【刻意不擋】wheel 與 ↑/↓（editKpiCommonCost / editKpiMergedField 那兩條有擋）：
+  //   那兩個是瀏覽器對 type=number 的步進，文字框不會被步進；而 ↑/↓ 在文字框裡是移動游標，
+  //   擋掉會很難用。看到那兩處有擋、這裡沒擋是刻意的，不是遺漏。
   inp.addEventListener('keydown',e=>{
-    if(e.key==='Enter'){e.preventDefault();save();}
-    if(e.key==='Escape'){done=true;if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;tdEl.style.whiteSpace='';tdEl.innerHTML=origContent;}
+    if(e.key==='Enter'){e.preventDefault();commit();}
+    if(e.key==='Escape'){e.preventDefault();cancel();}
   });
-  inp.addEventListener('blur',()=>setTimeout(()=>{if(document.activeElement!==inp)save();},120));
+  // 失焦：只允許「寫得出新值」；任何會落到 delete 分支的情況一律取消 —— 刪除只能由 Enter 觸發。
+  //   🔴 這裡的 setTimeout 120ms + activeElement 檢查是【載重的】，不是可有可無的慣性寫法，
+  //     【不要】為了對齊 PR #223 的 editScoreMonthlyCell（那條刻意寫成同步 blur）把它拿掉：
+  //     它是公式帶入參照的支撐 —— 在本格輸入 = 之後去點同一列的別格，那一下 mousedown 會先
+  //     讓本 input 失焦，靠 kpiCellClick 在 120ms 內把欄位名插進來並 focus() 回本 input、
+  //     使下面的 activeElement 檢查不成立，這個編輯器才活得下去。改成同步 blur ＝ 公式參照當場報廢。
+  //   ⚠ 三條分開寫，不併成一條：把「使用者清空」與「值沒變」混在一起會讓本輪要修的那顆 bug
+  //     不再看得見。
+  inp.addEventListener('blur',()=>setTimeout(()=>{
+    if(document.activeElement===inp)return;                          // ⓪ 焦點又回來了（公式帶入）
+    const raw=inp.value.trim();
+    if(raw===''){cancel();return;}                                   // ① 已清空 → 取消（本輪主 bug）
+    if(isNaN(_kpiEvalFormula(raw,shopData,group))){cancel();return;}  // ② 算不出值（公式打一半、含逗號…）→ 會走 delete → 取消
+    commit();                                                        // ③ 其餘交給 commit 判「值沒變」
+  },120));
 }
 // 手續費/運費的備註是「這個月、這個組別」共用一則，跟點哪個賣場的數字無關——
 // 從欄位標題點進去編輯，跟編輯賣場數字的輸入框完全分開。
 function editKpiFieldNote(month,groupKey,field,thEl){
   const rows=getKpiRows();
+  // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：getKpiRows() 命中
+  //   Store._profitMem._kpi_v1 時回傳的是【活陣列本身】（不是複製，見該函式），舊版
+  //   一開啟編輯器就把空 row push 進去 →「點開又按 Esc」其實已經改掉記憶體狀態
+  //   （Esc 只還原 innerHTML，不會把那列拿掉），之後任何一次 saveKpiRows（改別格、
+  //   改別的月份都算）都會把那列全空的 row 一起整包推上 Firestore。
+  //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
-  if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-  if(!row.kpiFieldNotes)row.kpiFieldNotes={};
   const key=groupKey+':'+field;
-  const cur=row.kpiFieldNotes[key]||'';
+  // 讀值與下面「值有沒有變」的比較必須是【同一種讀法】，否則會拿兩套語意互比。
+  //   row 可能還不存在（這個月從沒填過任何東西）→ 等同備註是空字串。
+  const cur=(row?.kpiFieldNotes||{})[key]||'';
   const origContent=thEl.innerHTML;
   const inp=document.createElement('input');
   inp.type='text';inp.value=cur;inp.placeholder='備註，如：便利袋8000、宅配通7000';
@@ -6315,40 +6389,147 @@ function editKpiFieldNote(month,groupKey,field,thEl){
   thEl.innerHTML='';thEl.appendChild(inp);
   inp.focus();if(inp.value)inp.select();
   let done=false;
-  const save=()=>{
+  // 取消＝只把這一格的 innerHTML 換回去，【不呼叫 renderKpiTab】。理由同 editScoreMonthlyCell
+  //   上方那段：blur 發生在 mousedown，而 click 要 mousedown 與 mouseup 落在同一元素才成立
+  //   —— 在 mousedown 就整包重繪，會把使用者剛按下的那顆東西銷毀 → 第一下永遠沒反應。
+  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur。
+  //   ⚠ 刻意【不搬】PR #223 cancel() 裡「重讀比對、值變過改走重繪」那段：那條的前提是
+  //     _score_monthly_v1 沒接 _markPending、擋不住雲端 bounce-back；而 saveKpiRows 有走
+  //     _cloudWriteSafe → _markPending('_kpi_v1')，__profitShouldSkipCloudOverwrite 擋得到。
+  //     何況這裡的重繪是整包 renderKpiTab()，比評分表那兩支貴。
+  const cancel=()=>{
     if(done)return;done=true;
+    thEl.innerHTML=origContent;
+  };
+  const commit=()=>{
+    if(done)return;
     const v=inp.value.trim();
+    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
+    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    //   ⚠ 這條比的是【純字串】：備註本來就是文字，沒有 editKpiCell 那種「同一格可能存
+    //     公式也可能存數字」的歧義，不需要（也不可以）先 parseFloat 再比。
+    if(v===cur){cancel();return;}
+    done=true;
+    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
+    if(!row.kpiFieldNotes)row.kpiFieldNotes={};
+    // 清空＋Enter＝使用者明確要清掉這則備註 → delete，維持原本的寫法（不寫 ''）。
+    //   這個行為本來就是對的，本次【沒有改】—— 改的只是「誰能觸發它」：以前 blur 也會
+    //   走到這裡（全選 Backspace 後點旁邊＝備註無聲消失），現在只有 Enter 到得了。
     if(v)row.kpiFieldNotes[key]=v;else delete row.kpiFieldNotes[key];
     saveKpiRows(rows);
     renderKpiTab();
   };
   inp.addEventListener('keydown',e=>{
-    if(e.key==='Enter'){e.preventDefault();save();}
-    if(e.key==='Escape'){done=true;thEl.innerHTML=origContent;}
+    if(e.key==='Enter'){e.preventDefault();commit();}
+    if(e.key==='Escape'){e.preventDefault();cancel();}
   });
-  inp.addEventListener('blur',()=>setTimeout(()=>{if(document.activeElement!==inp)save();},120));
+  // 失焦：值沒變、或被清空 → 一律當取消，不寫入；真的改成新內容才存。
+  //   ⚠ type=text，不必像 editKpiCommonCost / editKpiMergedField 那樣擋 wheel 與 ↑/↓：
+  //     那兩者是瀏覽器對 type=number 的步進，文字框不會被步進。看到那兩處有擋、這裡沒擋
+  //     是刻意的，不是遺漏。
+  inp.addEventListener('blur',()=>setTimeout(()=>{
+    if(document.activeElement===inp)return;
+    const v=inp.value.trim();
+    if(v===''||v===cur)cancel();else commit();
+  },120));
 }
 function editKpiCommonCost(month,groupKey,tdEl){
   const rows=getKpiRows();
+  // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：理由同 editKpiFieldNote /
+  //   editKpiMergedField ——getKpiRows() 回傳的是活陣列本身，開編輯器就 push 的話 Esc 撤不回來
+  //   （Esc 只還原 innerHTML），那列全空的 row 會被之後任何一次 saveKpiRows 一起推上 Firestore。
+  //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
-  if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
   const fieldName=groupKey+'Common';
-  const curVal=row[fieldName]||'';
+  // ⚠ 讀法維持 ||''【刻意不改成 !=null】去對齊 editKpiMergedField：那會改變既有語意
+  //   （已存的 0 會從「讀成無值」變成「讀成 0」），超出本輪範圍。
+  //   代價是【0 與無值在讀取端無法分辨】—— 下面的比較式子必須知道 curVal 只會是 '' 或非 0 數字，
+  //   絕對不可以拿 0==='' 去比。
+  const curVal=(row||{})[fieldName]||'';
   const origContent=tdEl.innerHTML;
   const inp=document.createElement('input');
   inp.type='number';inp.value=curVal;
   inp.style.cssText='width:90px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
+  // 🔴 擋冒泡：onclick 掛在 tdEl 自己身上（見 _kpiGroupTableHtml 的 isCommon 分支），input 是
+  //   它的子節點 —— 不擋的話點進輸入框會冒泡回 td、再跑一次本函式，把輸入框整個重建。
+  //   ⚠ 這條的後果比另兩條更立即：本函式的 blur 是【同步】的（沒有 120ms 緩衝），重建時舊 inp
+  //     被移出文件 → 當場 blur → 當場寫一次雲端 + renderKpiTab() 把剛建好的新 inp 洗掉。
+  //   寫法比照同檔 editKpiFieldNote。
+  inp.onclick=e=>e.stopPropagation();
+  // 🔴 擋滾輪：type=number 的 input 聚焦中會吃 wheel 直接改值 —— 游標停在框上捲頁面就會靜默
+  //   ±step，一失焦就被判定「值有改」而寫進雲端。
+  //   ⚠ 與 editKpiMergedField 同樣【只在聚焦時擋】，刻意不照抄 PR #223 的無條件 preventDefault：
+  //     這格帶 rowspan（蝦皮組 4 個賣場 ＝ 跨 4 列，比合併格更高）、又位在 _kpiGroupTableHtml 的
+  //     overflow-x:auto 容器裡，無條件擋會連 shift+滾輪的橫捲一起吃掉。沒聚焦時滾輪本來就
+  //     改不到值，只在聚焦時擋即可。
+  inp.addEventListener('wheel',e=>{if(document.activeElement===inp)e.preventDefault();},{passive:false});
   tdEl.innerHTML='';tdEl.appendChild(inp);inp.focus();if(inp.value)inp.select();
   let done=false;
-  const save=()=>{
+  // 取消＝只把這一格的 innerHTML 換回去，【不呼叫 renderKpiTab】。
+  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur
+  //   （本函式的 blur 是同步的，這一發會立刻跑進 handler，靠 done 擋住）。
+  //   ⚠ tdEl 帶 rowspan 且 onclick 掛在它自己身上，只換 innerHTML 不動節點 → 還原後照樣點得開。
+  const cancel=()=>{
     if(done)return;done=true;
-    const v=parseFloat(inp.value);
-    if(!isNaN(v)&&v!==0)row[fieldName]=v;else delete row[fieldName];
+    tdEl.innerHTML=origContent;
+  };
+  const commit=()=>{
+    if(done)return;
+    const s=inp.value.trim();
+    const v=parseFloat(s);
+    // ⚠ hasVal 含 v!==0 —— 這條【打 0 等於刪掉】，與 editKpiMergedField 的「0 是合法值、存得進去」
+    //   【正好相反】。兩邊都不是 bug，是各自的既有語意，本輪刻意不對齊（見下方 delete 那行）。
+    const hasVal=s!==''&&!isNaN(v)&&v!==0;
+    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
+    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    //   ⚠ 兩側【分開判】而不是寫成 v===curVal：curVal 可能是 ''（無值），拿 0==='' 比恆 false。
+    //     hasVal 為 false 時要比的是「本來就沒有值嗎」——本來就沒有、Enter 時打的又是空/0，
+    //     那不是「清空」而是【什麼都沒發生】，不該為它建出一列空 row。
+    //   ⚠ 【已知缺口，刻意不在這輪處理】：上面 curVal 的 ||'' 讀法把「已存的 0」也讀成 ''，
+    //     所以對那筆資料按「清空 + Enter」會落進 curVal==='' 這一邊、被判定成【什麼都沒發生】
+    //     而 cancel —— 那個 0 從此刪不掉（舊版的 blur 無條件存檔反而刪得掉）。
+    //     前提是 Firestore 裡真的有 shopeeCommon:0：app 內唯一的寫入者就是本函式，而它永遠
+    //     不寫 0（見 hasVal 的 v!==0），所以只可能來自手動改 Firestore 或更早的程式版本。
+    //     要修得改用「key 在不在」（fieldName in row）判斷，那就變成【兩套讀法互比】——
+    //     與本輪「讀值與比較必須同一種讀法」的原則衝突，且會動到 ||'' 的語意，另案處理。
+    if(hasVal?v===curVal:curVal===''){cancel();return;}
+    done=true;
+    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
+    // 清空（或打 0）＋Enter＝使用者明確要清掉這格 → delete。
+    //   ⚠ 【打 0 也 delete】是這條的既有語意，本輪【沒有動】：同一張表的 editKpiMergedField 打 0
+    //     是存 0，兩格外觀一樣、行為相反。要對齊請另案處理（會影響已存資料的判讀），不要在
+    //     失焦防呆這輪順手改。
+    //   改的只是「誰能觸發它」：以前 blur 也會走到這裡（全選 Backspace 後點旁邊＝共同費用
+    //   無聲消失），現在只有 Enter 到得了。
+    if(hasVal)row[fieldName]=v;else delete row[fieldName];
     saveKpiRows(rows);
     renderKpiTab();
   };
-  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}if(e.key==='Escape'){done=true;tdEl.innerHTML=origContent;}});
-  inp.addEventListener('blur',save);
+  // ⚠ ↑/↓ 一定要擋：type=number 聚焦中按 ↑/↓ 會直接 ±step（本框沒設 step ＝ ±1）改掉值，
+  //   而使用者按方向鍵想跳格是很自然的動作 —— 值被改掉後一失焦就會被判定「值有改」→
+  //   靜默寫進雲端。與上面 wheel 是同一類洞，發生機率更高，一併堵掉。作法同 PR #223。
+  //   （指路：spinner 那對上下箭頭不在這裡處理 —— css/main.css:68-73 已經全站關掉了。）
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();commit();}
+    if(e.key==='Escape'){e.preventDefault();cancel();}
+    if(e.key==='ArrowUp'||e.key==='ArrowDown')e.preventDefault();
+  });
+  // 失焦：已清空、打 0、或值沒變 → 一律當取消，不寫入；真的改成新值才存。
+  //   ⚠ 本函式的 blur 是【同步】的（四條裡唯一沒有 120ms + activeElement 檢查的），本輪刻意
+  //     保留不動 —— 加 setTimeout 是行為變更，不在這輪範圍。
+  //     因此判斷式【不能】依賴 document.activeElement：同步 blur 觸發時焦點通常已經是 body，
+  //     那個檢查在這裡不但沒用還會誤判。下面三條只讀 inp.value 與 curVal，兩者當下都拿得到，
+  //     自己站得住。
+  //   ⚠ 三條【分開寫】，不併成 isNaN(v)||v===curVal 一條：那樣會把「使用者清空」與「值沒變」
+  //     混成同一件事，而前者正是本輪要修的那顆 bug，必須自己一條看得見。
+  inp.addEventListener('blur',()=>{
+    const s=inp.value.trim();
+    if(s===''){cancel();return;}                  // ① 已清空 → 取消（本輪主 bug）
+    const v=parseFloat(s);
+    if(isNaN(v)||v===0){cancel();return;}          // ② 打不出數字 / 打 0（本條的 0 ≡ 無值）→ 取消
+    if(v===curVal){cancel();return;}               // ③ 值沒變 → 取消
+    commit();
+  });
 }
 // 只算總營收/總純利/純利率，不組 HTML——給總覽卡片跟明細表格共用。
 function _kpiGroupTotals(row,group){
@@ -6429,11 +6610,16 @@ function toggleKpiGroup(month,groupKey){
 //       基期金額，所以兩種情況輸出不同；我們不顯示金額，兩者輸出都是空字串。
 //   · base>0 這條的兩個理由（併進 cmpOk 之後仍然成立，寫在這裡免得後人放寬它）：
 //     ① 分母為負時 (cur-base)/base 的符號會翻轉 —— 「本期虧更多」會顯示成正成長。
-//     ② 【KPI 這裡多一個蝦皮沒有的觸發來源】：四條編輯路徑（editKpiCell / editKpiFieldNote /
-//        editKpiCommonCost / editKpiMergedField）都是一進編輯器就先 push 一列空 row，
-//        而它們的 blur 是無條件存檔 —— 點一下儲存格什麼都沒打就失焦，那個月就有一列
-//        全空的 row。那種 row 的 totalRev / totalPure 都是 0，守衛一旦放寬成 base!=null
-//        之類的寫法，畫面上就會出現「較上月 −100%」而基期其實根本沒人填過。
+//     ② 【KPI 這裡多一個蝦皮沒有的觸發來源 —— 但它已經被堵掉了】：四條編輯路徑
+//        （editKpiCell / editKpiFieldNote / editKpiCommonCost / editKpiMergedField）
+//        以前是一進編輯器就先 push 一列空 row、blur 又無條件存檔 —— 點一下儲存格什麼都
+//        沒打就失焦，那個月就有一列全空的 row。fix/kpi-blur-guard 已經修掉：空 row 改成
+//        只在 commit 內才建，四條的 blur 也只允許「寫得出新值」，清空與刪除只能由 Enter
+//        觸發，所以【誤觸不會再製造出這種 row】。
+//        ⚠ 守衛【仍然要留】，理由是上面的 ① —— 那與空 row 無關，基期為負就會翻轉符號。
+//        而且舊資料裡已經存在的全空 row 不會自己消失（只能用「清空此月份」刪，見
+//        deleteKpiRow）。那種 row 的 totalRev / totalPure 都是 0，守衛一旦放寬成
+//        base!=null 之類的寫法，畫面上就會出現「較上月 −100%」而基期其實根本沒人填過。
 //   · 營收、純利、純利率 pp【三者都上綠紅】（不照抄 MOMO momoKpiDelta 那套中性灰）。
 //     ⚠ 綠紅用 #059669 / #dc2626，【不是】PR #206 的 #10b981 / #ef4444：本卡的純利主數字
 //       （下方那行）與年度總表的 _kpiYoyHtml 都用前者，同一張卡上出現兩種綠會很明顯。
@@ -6497,25 +6683,85 @@ function _kpiFieldMergeStatus(group,field,shop){
 }
 function editKpiMergedField(month,mergeKey,tdEl){
   const rows=getKpiRows();
+  // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：理由同 editKpiFieldNote
+  //   ——getKpiRows() 回傳的是活陣列本身，開編輯器就 push 的話，Esc 也撤不回來（Esc 只還原
+  //   innerHTML），那列全空的 row 會被之後任何一次 saveKpiRows 一起推上 Firestore。
+  //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
-  if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-  if(!row.kpiFieldMerges)row.kpiFieldMerges={};
-  const curVal=row.kpiFieldMerges[mergeKey]!=null?row.kpiFieldMerges[mergeKey]:'';
+  // 讀值與下面「值有沒有變」的比較必須是【同一種讀法】，否則會拿兩套語意互比。
+  //   ⚠ 這裡用 !=null【不是】||：0 是合法的合併值，要讀得出來（與同檔 editKpiCommonCost
+  //     的 row[fieldName]||'' 相反，那條 0 會被讀成 ''，兩邊的既有語意本來就不同，不要對齊）。
+  //   row 不存在（這個月從沒填過任何東西）→ 等同無值，用 '' 表示。
+  const curVal=(row?.kpiFieldMerges||{})[mergeKey]!=null?row.kpiFieldMerges[mergeKey]:'';
   const origContent=tdEl.innerHTML;
   const inp=document.createElement('input');
   inp.type='number';inp.value=curVal;
   inp.style.cssText='width:100px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
+  // 🔴 擋冒泡：onclick 掛在 tdEl 自己身上（見 _kpiGroupTableHtml 的 merged 分支），input 是
+  //   它的子節點 —— 不擋的話點進輸入框會冒泡回 td、再跑一次本函式，把輸入框整個重建、
+  //   打到一半的數字消失。寫法比照同檔 editKpiFieldNote。
+  inp.onclick=e=>e.stopPropagation();
+  // 🔴 擋滾輪：type=number 的 input 聚焦中會吃 wheel 直接改值 —— 使用者把游標停在框上捲頁面
+  //   就會靜默 ±step，一失焦就被判定「值有改」而寫進雲端。
+  //   ⚠ 這裡【刻意不照抄】PR #223 editScoreMonthlyCell 的無條件 preventDefault，不是漏抄：
+  //     那格是評分明細裡的單列 90px 輸入框；這格帶 rowspan（MOMO 寄倉運費跨 2 列）、又位在
+  //     _kpiGroupTableHtml 的 overflow-x:auto 容器裡（MOMO 組 12 欄，實務上要橫捲），
+  //     無條件擋會連 shift+滾輪的橫捲一起吃掉，垂直命中面積又是普通儲存格的兩倍。
+  //     而滾輪改值的前提是【輸入框處於聚焦狀態】—— 沒聚焦時滾輪本來就動不到值，
+  //     所以只在聚焦時擋就足以堵住那個洞，代價縮到最小。
+  inp.addEventListener('wheel',e=>{if(document.activeElement===inp)e.preventDefault();},{passive:false});
   tdEl.innerHTML='';tdEl.appendChild(inp);inp.focus();if(inp.value)inp.select();
   let done=false;
-  const save=()=>{
+  // 取消＝只把這一格的 innerHTML 換回去，【不呼叫 renderKpiTab】。理由同 editKpiFieldNote：
+  //   blur 發生在 mousedown，在那時整包重繪會把使用者剛按下的東西銷毀 → 第一下沒反應。
+  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur。
+  //   ⚠ tdEl 帶 rowspan 且 onclick 掛在它自己身上，只換 innerHTML 不動節點 → 還原後照樣點得開。
+  const cancel=()=>{
     if(done)return;done=true;
-    const v=parseFloat(inp.value);
-    if(inp.value.trim()!==''&&!isNaN(v))row.kpiFieldMerges[mergeKey]=v;else delete row.kpiFieldMerges[mergeKey];
+    tdEl.innerHTML=origContent;
+  };
+  const commit=()=>{
+    if(done)return;
+    const s=inp.value.trim();
+    const v=parseFloat(s);
+    const hasVal=s!==''&&!isNaN(v);
+    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
+    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    //   ⚠ 兩側【分開判】而不是寫成 v===curVal：curVal 可能是 ''（無值），拿 0==='' 比恆 false。
+    //     hasVal 為 false 時要比的是「本來就沒有值嗎」——本來就沒有、Enter 時也是空的，
+    //     那不是「清空」而是【什麼都沒發生】，不該為它建出一列空 row。
+    if(hasVal?v===curVal:curVal===''){cancel();return;}
+    done=true;
+    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
+    if(!row.kpiFieldMerges)row.kpiFieldMerges={};
+    // 清空＋Enter＝使用者明確要清掉這一格 → delete，維持原本的寫法（不寫 null）。
+    //   這個行為本來就是對的，本次【沒有改】—— 改的只是「誰能觸發它」：以前 blur 也會走到
+    //   這裡（全選 Backspace 後點旁邊＝合併值無聲消失），現在只有 Enter 到得了。
+    if(hasVal)row.kpiFieldMerges[mergeKey]=v;else delete row.kpiFieldMerges[mergeKey];
     saveKpiRows(rows);
     renderKpiTab();
   };
-  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}if(e.key==='Escape'){done=true;tdEl.innerHTML=origContent;}});
-  inp.addEventListener('blur',()=>setTimeout(()=>{if(document.activeElement!==inp)save();},120));
+  // ⚠ ↑/↓ 一定要擋：type=number 聚焦中按 ↑/↓ 會直接 ±step（本框沒設 step ＝ ±1）改掉值，
+  //   而使用者按方向鍵想跳格是很自然的動作 —— 值被改掉後一失焦就會被判定「值有改」→
+  //   靜默寫進雲端。與上面 wheel 是同一類洞，發生機率更高，一併堵掉。作法同 PR #223。
+  //   （指路：spinner 那對上下箭頭不在這裡處理 —— css/main.css:68-73 已經全站關掉了。）
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();commit();}
+    if(e.key==='Escape'){e.preventDefault();cancel();}
+    if(e.key==='ArrowUp'||e.key==='ArrowDown')e.preventDefault();
+  });
+  // 失焦：已清空、或值沒變 → 一律當取消，不寫入；真的改成新值才存。
+  //   ⚠ 兩條【分開寫】，不併成 isNaN(v)||v===curVal 一條：那樣會把「使用者清空」與
+  //     「值沒變」混成同一件事，而前者正是本輪要修的那顆 bug，必須自己一條看得見。
+  //   ⚠ 120ms + activeElement 檢查是既有寫法，本次刻意保留不動（本輪只改判斷，不改時序）。
+  inp.addEventListener('blur',()=>setTimeout(()=>{
+    if(document.activeElement===inp)return;
+    const s=inp.value.trim();
+    if(s===''){cancel();return;}              // ① 已清空 → 取消（本輪主 bug）
+    const v=parseFloat(s);
+    if(isNaN(v)||v===curVal){cancel();return;} // ② 打不出數字 / 值沒變 → 取消
+    commit();
+  },120));
 }
 function _kpiGroupTableHtml(row,group){
   const expanded=_kpiExpandedGroups.has(row.month+':'+group.key);
@@ -6668,9 +6914,14 @@ function _kpiMaxNormalMonth(year){
 //      不保留的話那些列會變成孤兒：年度總表照樣把它列成一欄（見 _kpiYearViewHtml 的
 //      visibleMonths），但月結表選不到 → 既編輯不了，也按不到「清空此月份」那顆
 //      （deleteKpiRow 只有月結表這一個入口）——【看得到、改不掉、刪不掉】。
-//      未來月份怎麼會長出 row：四條編輯路徑（editKpiCell / editKpiFieldNote /
+//      未來月份怎麼會長出 row：以前四條編輯路徑（editKpiCell / editKpiFieldNote /
 //      editKpiCommonCost / editKpiMergedField）都是一進編輯器就先把空列 push 進 rows，
-//      而它們的 blur 是無條件存檔 —— 點一下儲存格、什麼都沒打就失焦，那個月就被建出來了。
+//      blur 又無條件存檔 —— 點一下儲存格、什麼都沒打就失焦，那個月就被建出來了。
+//      fix/kpi-blur-guard 已經把那條路徑修掉：空列改成只在 commit 內才建，四條的 blur
+//      也只允許「寫得出新值」，清空與刪除只能由 Enter 觸發 —— 誤觸不會再長出未來月份。
+//      ⚠ ③【仍然要留】，理由與那顆 bug 無關：使用者【刻意】先去填明年 1 月、或雲端來的
+//        舊資料本來就帶著未來月份的 row，都照樣會出現。只要出現一次，不保留就是上面說的
+//        孤兒列 ——【看得到、改不掉、刪不掉】。
 //      ⚠ ③【實際生效的範圍只有「當年的未來月份」】。其他年份被 ② 全列了，m<=maxM 恆成立，
 //        hasRow 那一半永遠短路掉 —— 對明年是徹底的 no-op。找不到它在哪發揮作用是正常的，
 //        今天（8 月）它只影響 9~12 月這四格。
