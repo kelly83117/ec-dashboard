@@ -6545,16 +6545,81 @@ function _kpiYearOptions(){
   const years=[];
   for(let y=cur-2;y<=cur+1;y++)years.push(y);
   if(!years.includes(_kpiCurYear))years.push(_kpiCurYear);
-  return years.sort((a,b)=>a-b);
+  return years.sort((a,b)=>b-a);
+}
+// 「正常情況下最新的月份」：當年＝當月，其他年份（過去與明年）＝12 月。
+//   抽成獨立一支，是因為 _kpiVisibleMonthNums 拿它當過濾上界、setKpiYear 拿它當夾回目標
+//   —— 同一條規則寫兩份遲早會分岔。
+// 🔴 當場 new Date()，【不重用】上方的 _KPI_NOW：那是模組載入時算一次的 const，分頁開著
+//   跨月不會更新。理由與寫法比照本檔的 _shopeeVisibleMonths（它的註解說明得更完整）。
+//   本函式只在渲染月結表與換年份時各跑一兩次，成本可忽略。
+function _kpiMaxNormalMonth(year){
+  const d=new Date();
+  return (year===d.getFullYear())?(d.getMonth()+1):12;
+}
+// 月結表的月份選項（由新到舊）。三條規則疊在一起：
+//   ① 選中年份 === 當年 → 只列到當月（規則：還沒到的月份不顯示）。
+//   ② 其他年份（過去、以及刻意保留在下拉裡的明年）→ 12 個月全列。
+//      「還沒到」這條分界線只存在於【當年】這個框架裡；對明年套用它，線會落在今年的某個
+//      月份上，跟明年這個框架毫無關係。而年份下拉刻意列到 cur+1（見 _kpiYearOptions），
+//      切過去卻一個月都不給選的話下拉會變空 —— 但 _kpiCurMonthNum 不會跟著空，_kpiYM()
+//      照樣算得出月份、下面整張表照樣渲染，變成「空下拉 + 明年的資料表，而且改不回來」。
+//   ③ 🔴 該月份【已經有 row 存在】→ 一律保留，即使它是還沒到的月份。
+//      不保留的話那些列會變成孤兒：年度總表照樣把它列成一欄（見 _kpiYearViewHtml 的
+//      visibleMonths），但月結表選不到 → 既編輯不了，也按不到「清空此月份」那顆
+//      （deleteKpiRow 只有月結表這一個入口）——【看得到、改不掉、刪不掉】。
+//      未來月份怎麼會長出 row：四條編輯路徑（editKpiCell / editKpiFieldNote /
+//      editKpiCommonCost / editKpiMergedField）都是一進編輯器就先把空列 push 進 rows，
+//      而它們的 blur 是無條件存檔 —— 點一下儲存格、什麼都沒打就失焦，那個月就被建出來了。
+//      ⚠ ③【實際生效的範圍只有「當年的未來月份」】。其他年份被 ② 全列了，m<=maxM 恆成立，
+//        hasRow 那一半永遠短路掉 —— 對明年是徹底的 no-op。找不到它在哪發揮作用是正常的，
+//        今天（8 月）它只影響 9~12 月這四格。
+//   🔴 判準用「row 存不存在」，【刻意不看值】，與 _kpiYearViewHtml 的 visibleMonths 是同一套
+//     —— 兩張表對「這個月算不算存在」的認定必須一致，否則會出現一邊有、一邊沒有的月份。
+//     不看值的兩個佐證都在本檔：editKpiCell 的存檔分支明說「打 0 是刻意要蓋成 0（跟完全沒填、
+//     留給公式自動算不一樣），要真的存下來」；而 _kpiFmt 對 0 走 falsy 分支、畫面上顯示成「—」。
+//     所以「認真填了 0」與「根本沒填」在【值】與【畫面】上都分不出來，只有「key 在不在」分得開。
+//   ⚠ 本函式【刻意去掃實存資料】(getKpiRows)，這與本檔 _scoreYearOptions 上方那段「刻意不掃」
+//     的註解【取捨相反，不是自相矛盾】。兩邊的代價不對稱：評分表不掃，最壞只是年份下拉少一個
+//     選項（切走再切回來就補上）；月結表若不掃，會直接製造出上面 ③ 說的孤兒列 —— 看得到、
+//     改不掉、刪不掉。所以這裡接受那個時序缺點：雲端 (Store._profitMem._kpi_v1) 還沒回來時
+//     這裡掃到的只有 localStorage 的列，未來月份可能少列幾個，等快照到了重繪就會補上。
+//   ⚠ 回傳恆非空：year===當年時上界至少是 1，其他年份是 12 —— 所以不需要 _shopeeVisibleMonths
+//     那道「濾光了就退回完整清單」的兜底。
+//   ⚠ 但一月時，當年的清單就真的只剩「1月」一個選項（除非有未來月份的 row）。那是【刻意的】：
+//     月結表是資料型清單，規則是「還沒到的月份隱藏」；只有年度框架型的下拉（例如首頁圖表的
+//     12 個月）才改用 disabled 灰掉、保留完整框架。看到只剩一個選項不是壞掉。
+function _kpiVisibleMonthNums(year){
+  const maxM=_kpiMaxNormalMonth(year);
+  const rows=getKpiRows();
+  const hasRow=m=>rows.some(r=>r.month===`${year}-${String(m).padStart(2,'0')}`);
+  const out=[];
+  for(let m=12;m>=1;m--)if(m<=maxM||hasRow(m))out.push(m);
+  return out;
 }
 function setKpiViewMode(mode){_kpiViewMode=mode;renderKpiTab();}
-function setKpiYear(y){_kpiCurYear=parseInt(y);renderKpiTab();}
+// ⚠ 換年份要把 _kpiCurMonthNum 夾回可見清單：在明年（12 個月全列）選了 12 月，再切回當年
+//   （只列到當月）時，12 不在清單裡 → 沒有任何 option 帶 selected → 瀏覽器 fallback 顯示
+//   第一個，但 _kpiCurMonthNum 仍是 12，而 _kpiYM() 讀的是它 ——【下拉寫著 8 月、表格卻是
+//   12 月的資料，而且不報錯】。同型的坑見本檔的 _clampShopeeCurMonth。
+// 🔴 夾回目標用 _kpiMaxNormalMonth，【不是】清單的第一個元素 —— 這是與 _clampShopeeCurMonth
+//   刻意不同的地方。那支可以直接取 vis[0]，因為它的清單【不可能含未來月份】；本函式的清單
+//   會（規則③保留有 row 的未來月）。今天 8 月、若有人誤點過 12 月留下一列，清單就是
+//   [12,8,7,…]，取 vis[0] 會讓「從明年切回今年」落在 12 月而不是 8 月，非常反直覺。
+// ⚠ _kpiMaxNormalMonth 的回傳值必定在清單內（m<=maxM 恆通過過濾），所以夾回不會夾到空值。
+// ⚠ _kpiCurMonthNum 全檔只有兩個寫入點：宣告處的初值（＝當月，恆合法）與 setKpiMonthNum
+//   （值只可能來自下拉、必定在清單內）。所以夾在這一支就夠，不必另外拆一支 clamp 函式。
+function setKpiYear(y){
+  _kpiCurYear=parseInt(y);
+  if(_kpiVisibleMonthNums(_kpiCurYear).indexOf(_kpiCurMonthNum)<0)_kpiCurMonthNum=_kpiMaxNormalMonth(_kpiCurYear);
+  renderKpiTab();
+}
 function setKpiMonthNum(m){_kpiCurMonthNum=parseInt(m);renderKpiTab();}
 function _kpiMonthViewHtml(){
   const month=_kpiYM();
   const row=getOrCreateKpiRow(month);
   const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===_kpiCurYear?' selected':''}>${y}年</option>`).join('');
-  const monthOpts=Array.from({length:12},(_,i)=>i+1).map(m=>`<option value="${m}"${m===_kpiCurMonthNum?' selected':''}>${m}月</option>`).join('');
+  const monthOpts=_kpiVisibleMonthNums(_kpiCurYear).map(m=>`<option value="${m}"${m===_kpiCurMonthNum?' selected':''}>${m}月</option>`).join('');
   return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
     <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
     <select onchange="setKpiMonthNum(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${monthOpts}</select>
@@ -7163,10 +7228,10 @@ function _scoreYearOptions(){
   const years=[];
   for(let y=cur-2;y<=cur+1;y++)years.push(y);
   if(!years.includes(_scoreCurYear))years.push(_scoreCurYear);
-  // 🔴 新到舊（b-a），【刻意與 _kpiYearOptions 的 a-b 不同】，不是抄錯：本專案規則是
-  //   「凡是有月份或年份的地方，最新的排最上面」。上方那支月結表的 _kpiYearOptions 仍是
-  //   舊到新，屬於既有功能，要留給獨立的「月份/年份排序統一」處理（動它之前得先勘查
-  //   MONTHS 的共用關係），這輪只讓評分表新加的這支照規則走。
+  // 新到舊（b-a）：本專案規則是「凡是有月份或年份的地方，最新的排最上面」。
+  //   ⚠ 上方月結表／年度總表共用的 _kpiYearOptions 也是 b-a —— 兩支現在【方向一致】。
+  //     但它們【沒有共用任何程式碼】，只共用這條規則，不會互相拉住：改其中一支的排序時，
+  //     另一支不會跟著變，要自己記得一起改。
   return years.sort((a,b)=>b-a);
 }
 function setScoreQ(q){_scoreCurQ=q;_scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,q);renderKpiTab();}
