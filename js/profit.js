@@ -7021,6 +7021,22 @@ function scoreCalcMetric(actual,target,low,weight,lowerBetter){
   }
 }
 function scoreRound(n){return Math.round(n*100)/100;}
+// 分數的顯示格式：統一顯示【整數】。不格式化的話 scoreRound 壓完兩位之後直接內插，
+//   JS 的 Number→String 會吃掉尾隨的 0，同一欄就出現 100 / 25.95 / 26.7 三種格式。
+//   分數的值域是 0~100，位數本來就不齊（9 與 100），補小數點換不到對齊、只換到雜訊。
+// 🔴 刻意用 Math.floor 無條件捨去，【不是四捨五入】：顏色門檻讀的是【未格式化的原始
+//   number】（scoreColor 在下方，80 分以上綠燈），而「ⓘ 指標定義與計分方式說明」裡的
+//   顏色圖例會寫明「80 分以上為綠色」。若改用四捨五入，79.6 分會顯示成 80 卻仍然是
+//   黃燈 —— 畫面與圖例當場矛盾，而且看起來像顏色壞掉。
+//   捨去保證「顯示值永遠不高於實際值」⇒ 綠燈的格子必定顯示 80 以上，黃燈的格子必定
+//   顯示 79 以下，兩者不可能打架。
+//   ⚠ 不要「順手修正」成 Math.round —— 那會四捨五入，等於拆掉上面這個保證。
+//     看到 Math.floor 覺得奇怪是正常的，它是刻意的，不是寫錯。
+// 代價：有小數的值會被截掉（本季平均 76.67 會顯示成 76）。這是刻意取捨 —— 這張表是
+//   用來看趨勢與顏色的，小數位不影響判讀。
+// 傳進來的一律是非負數（scoreCalcMetric 的回傳值域是 0~weight），所以不必擔心
+//   Math.floor 對負數是往 -∞ 捨去。
+function scoreFmt(n){return String(Math.floor(n));}
 function computeShopMonthScore(shop,year,monthNum,q){
   const t=getScoreTargetsForQ(year,q)?.[shop];
   if(!t)return null;
@@ -7244,7 +7260,7 @@ function renderScoreComparisonTable(){
       const col=scoreColor(r.total);
       const active=_scoreDetailCells.has(s.id+'|'+m);
       return `<td style="text-align:center;padding:8px 6px">
-        <span onclick="toggleScoreDetailCell('${s.id}',${m})" style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer">${r.total}</span>
+        <span onclick="toggleScoreDetailCell('${s.id}',${m})" style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer">${scoreFmt(r.total)}</span>
       </td>`;
     }).join('');
     const vals=months.map(m=>{const r=computeShopMonthScore(s.id,year,m,q);return r&&r.hasData?r.total:null;}).filter(v=>v!=null);
@@ -7252,7 +7268,7 @@ function renderScoreComparisonTable(){
     return `<tr style="border-top:1px solid #f3f4f6">
       <td style="padding:8px 12px"><div style="font-size:13px;font-weight:700;color:#374151">${s.id}</div><div style="font-size:10.5px;color:#9ca3af">${s.pos}</div></td>
       ${cells}
-      <td style="text-align:center;padding:8px 10px;font-size:13px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums">${avg==null?'—':avg}</td>
+      <td style="text-align:center;padding:8px 10px;font-size:13px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums">${avg==null?'—':scoreFmt(avg)}</td>
     </tr>`;
   }).join('');
   container.innerHTML=`<table style="width:100%;border-collapse:collapse">
@@ -7280,7 +7296,7 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
     return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px">
         <div style="font-size:11.5px;color:#9ca3af;font-weight:600">${label}</div>
-        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${score} 分</div>
+        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${scoreFmt(score)} 分</div>
       </div>
       <div onclick="editScoreMonthlyCell('${monthKey}','${shop}','${field}',this)" style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15;cursor:pointer;border-bottom:1px dashed #d1d5db;display:inline-block">${valDisp}</div>
       <div style="font-size:11.5px;color:#9ca3af;margin-top:3px">目標 ${target}%</div>
@@ -7294,7 +7310,7 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
     return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px">
         <div style="font-size:11.5px;color:#9ca3af;font-weight:600">純利成長</div>
-        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${r.growS} 分</div>
+        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${scoreFmt(r.growS)} 分</div>
       </div>
       <div style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15">${valDisp}</div>
       <div style="font-size:11.5px;color:#9ca3af;margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -7318,7 +7334,7 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
         <div style="font-size:13.5px;font-weight:700;color:#374151">${shop}</div>
         <div style="font-size:11px;color:#9ca3af">${s.pos}</div>
       </div>
-      <div style="padding:3px 10px;border-radius:7px;background:${totCol.bg};color:${totCol.fg};border:1px solid ${totCol.border};font-size:13px;font-weight:700;font-variant-numeric:tabular-nums">${r.total} 分</div>
+      <div style="padding:3px 10px;border-radius:7px;background:${totCol.bg};color:${totCol.fg};border:1px solid ${totCol.border};font-size:13px;font-weight:700;font-variant-numeric:tabular-nums">${scoreFmt(r.total)} 分</div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${cardHtml}</div>
   </div>`;
