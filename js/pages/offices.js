@@ -3065,27 +3065,67 @@ Object.assign(App, {
     </div>`;
     const priceF = v => Number(v) ? 'NT$' + Number(v).toLocaleString() : '<span style="color:var(--text-muted)">—</span>';
     const pctF = v => v != null ? `<span style="font-weight:700;color:${v >= 30 ? '#059669' : v >= 15 ? '#f59e0b' : '#dc2626'}">${v.toFixed(1)}%</span>` : '<span style="color:var(--text-muted)">—</span>';
+    // 排序
+    const mgSortCol = Store.get('ec.d2.margin.sortCol', '');
+    const mgSortDir = Store.get('ec.d2.margin.sortDir', 'asc');
+    const sortedList = mgSortCol ? [...list].sort((a, b) => {
+      const getVal = r => {
+        const cost = Number(r.cost || 0), rev = Number(r.rev || 0);
+        if (mgSortCol === 'cost') return cost;
+        if (mgSortCol === 'rev') return rev;
+        if (mgSortCol === 'profit') return rev - cost;
+        if (mgSortCol === 'pct') return rev > 0 ? (rev - cost) / rev * 100 : -Infinity;
+        return 0;
+      };
+      return mgSortDir === 'asc' ? getVal(a) - getVal(b) : getVal(b) - getVal(a);
+    }) : list;
+    const thSort = (col, label) => {
+      const active = mgSortCol === col;
+      const arrow = active ? (mgSortDir === 'asc' ? ' ↑' : ' ↓') : '';
+      return `<th class="mg-sort-th" data-col="${col}" style="text-align:right;cursor:pointer;user-select:none;color:${active?'#059669':'inherit'}">${label}${arrow}</th>`;
+    };
     const rows = list.length === 0
       ? `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
-      : list.map((r, i) => {
+      : sortedList.map((r, i) => {
           const cost = Number(r.cost || 0), rev = Number(r.rev || 0);
           const profit = rev - cost;
           const pct = rev > 0 ? profit / rev * 100 : null;
           return `<tr style="vertical-align:middle">
             <td style="text-align:center;color:#9ca3af;font-size:12px">${i + 1}</td>
-            <td style="font-weight:600">${escapeHtml(r.name || '')}</td>
+            <td style="font-weight:600;text-align:left">${escapeHtml(r.name || '')}</td>
             <td style="text-align:right">${priceF(r.cost)}</td>
             <td style="text-align:right">${priceF(r.rev)}</td>
             <td style="text-align:right">${cost || rev ? priceF(profit) : '<span style="color:var(--text-muted)">—</span>'}</td>
             <td style="text-align:center">${pctF(pct)}</td>
             <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
-              <button class="mg-edit" data-i="${i}" style="padding:3px 10px;border:1px solid #d1fae5;background:#f0fdf4;color:#1a7a6e;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
-              <button class="mg-del" data-i="${i}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+              <button class="mg-edit" data-i="${list.indexOf(r)}" style="padding:3px 10px;border:1px solid #d1fae5;background:#f0fdf4;color:#1a7a6e;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
+              <button class="mg-del" data-i="${list.indexOf(r)}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
             </div></td>
           </tr>`;
         }).join('');
+    const savesHtml = (() => {
+      const savesKey = activeQ === 'Q3' ? 'ec.d2.margin.saves' : `ec.d2.margin.saves.${activeQ.toLowerCase()}`;
+      const saves = Store.get(savesKey, []);
+      if (!saves.length) return '';
+      return `<div class="table-card" style="margin-bottom:12px">
+        <div class="table-card-header"><h3>📂 存檔記錄</h3><p>共 ${saves.length} 份，點擊「載入」可還原該次匯入的資料</p></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>存檔時間</th><th style="text-align:right">商品數</th><th></th></tr></thead>
+          <tbody>${saves.map((s, si) => `<tr>
+            <td>${escapeHtml(s.ts || '')}</td>
+            <td style="text-align:right">${s.data ? s.data.length : 0} 筆</td>
+            <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
+              <button class="mg-save-load" data-si="${si}" style="padding:3px 10px;border:1px solid #d1fae5;background:#f0fdf4;color:#1a7a6e;border-radius:5px;font-size:12px;cursor:pointer">載入</button>
+              <button class="mg-save-del" data-si="${si}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+            </div></td>
+          </tr>`).join('')}
+          </tbody>
+        </table></div>
+      </div>`;
+    })();
     return `
       ${qTabsHtml}
+      ${savesHtml}
       <div class="table-card">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div><h3>📊 新品毛利表</h3><p>記錄商品成本與營收，自動計算毛利與毛利率（共 ${list.length} 筆）</p></div>
@@ -3108,35 +3148,27 @@ Object.assign(App, {
           </div>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th style="text-align:center;width:48px">編號</th><th style="text-align:left">品名</th><th style="text-align:right">成本</th><th style="text-align:right">營收</th><th style="text-align:right">毛利</th><th style="text-align:center">毛利率</th><th></th></tr></thead>
+          <thead><tr><th style="text-align:center;width:48px">編號</th><th style="text-align:left">品名</th>${thSort('cost','成本')}${thSort('rev','營收')}${thSort('profit','毛利')}${thSort('pct','毛利率')}<th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table></div>
-      </div>
-      ${(() => {
-        const savesKey = activeQ === 'Q3' ? 'ec.d2.margin.saves' : `ec.d2.margin.saves.${activeQ.toLowerCase()}`;
-        const saves = Store.get(savesKey, []);
-        if (!saves.length) return '';
-        return `<div class="table-card" style="margin-top:12px">
-          <div class="table-card-header"><h3>📂 存檔記錄</h3><p>共 ${saves.length} 份，點擊「載入」可還原該次匯入的資料</p></div>
-          <div class="table-wrap"><table>
-            <thead><tr><th>存檔時間</th><th style="text-align:right">商品數</th><th></th></tr></thead>
-            <tbody>${saves.map((s, si) => `<tr>
-              <td>${escapeHtml(s.ts || '')}</td>
-              <td style="text-align:right">${s.data ? s.data.length : 0} 筆</td>
-              <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
-                <button class="mg-save-load" data-si="${si}" style="padding:3px 10px;border:1px solid #d1fae5;background:#f0fdf4;color:#1a7a6e;border-radius:5px;font-size:12px;cursor:pointer">載入</button>
-                <button class="mg-save-del" data-si="${si}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
-              </div></td>
-            </tr>`).join('')}
-            </tbody>
-          </table></div>
-        </div>`;
-      })()}`;
+      </div>`;
   },
 
   bindD2MarginTab() {
     document.querySelectorAll('.mg-q-tab').forEach(btn => btn.addEventListener('click', () => {
       Store.set('ec.d2.margin.q', btn.dataset.q);
+      this.render();
+    }));
+    document.querySelectorAll('.mg-sort-th').forEach(th => th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      const cur = Store.get('ec.d2.margin.sortCol', '');
+      const dir = Store.get('ec.d2.margin.sortDir', 'asc');
+      if (cur === col) {
+        Store.set('ec.d2.margin.sortDir', dir === 'asc' ? 'desc' : 'asc');
+      } else {
+        Store.set('ec.d2.margin.sortCol', col);
+        Store.set('ec.d2.margin.sortDir', 'desc');
+      }
       this.render();
     }));
     const mgForm = document.getElementById('mg-form');

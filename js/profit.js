@@ -1545,6 +1545,12 @@ function tryLoadSaved(shop){
     const _hLbl=s.curHalf==='first'?'上半月':s.curHalf==='second'?'下半月':'整月';
     document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${s.curMonth} ${_hLbl} 尚無資料，請上傳報表產生</div></div>`;
     document.getElementById('period-tag-'+shop).textContent='';
+    // 搜尋列右邊的「N 筆」。renderTable 是它唯一的寫入點（本檔搜 `cnt-'+shop`），而空狀態
+    //   這條路不會走到 renderTable → 不清就會留著上一期的筆數，跟旁邊的空表格互相矛盾。
+    //   ⚠ 這一行刻意用 if 判空、與上面兩行的裸取值不同（見 _testEmpty 上方那段對照說明）：
+    //     成本不對稱 —— 判空的代價是零；裸取若日後因模板變動而炸 TypeError，會中斷【整個】
+    //     else 分支，讓「切到空期間」這塊功能整個壞掉。成對的一行在 _testEmpty。
+    const c=document.getElementById('cnt-'+shop); if(c)c.textContent='';
     if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;}
     // 第 6 參數 cmp 顯式傳 null（＝三格第三行留空）。改版前這裡只傳 5 個參數、靠 undefined
     //   達成同樣效果，但 syncHeaderKpis 的早退分支傳的是 null —— 三個空狀態呼叫點兩種寫法。
@@ -6539,16 +6545,81 @@ function _kpiYearOptions(){
   const years=[];
   for(let y=cur-2;y<=cur+1;y++)years.push(y);
   if(!years.includes(_kpiCurYear))years.push(_kpiCurYear);
-  return years.sort((a,b)=>a-b);
+  return years.sort((a,b)=>b-a);
+}
+// 「正常情況下最新的月份」：當年＝當月，其他年份（過去與明年）＝12 月。
+//   抽成獨立一支，是因為 _kpiVisibleMonthNums 拿它當過濾上界、setKpiYear 拿它當夾回目標
+//   —— 同一條規則寫兩份遲早會分岔。
+// 🔴 當場 new Date()，【不重用】上方的 _KPI_NOW：那是模組載入時算一次的 const，分頁開著
+//   跨月不會更新。理由與寫法比照本檔的 _shopeeVisibleMonths（它的註解說明得更完整）。
+//   本函式只在渲染月結表與換年份時各跑一兩次，成本可忽略。
+function _kpiMaxNormalMonth(year){
+  const d=new Date();
+  return (year===d.getFullYear())?(d.getMonth()+1):12;
+}
+// 月結表的月份選項（由新到舊）。三條規則疊在一起：
+//   ① 選中年份 === 當年 → 只列到當月（規則：還沒到的月份不顯示）。
+//   ② 其他年份（過去、以及刻意保留在下拉裡的明年）→ 12 個月全列。
+//      「還沒到」這條分界線只存在於【當年】這個框架裡；對明年套用它，線會落在今年的某個
+//      月份上，跟明年這個框架毫無關係。而年份下拉刻意列到 cur+1（見 _kpiYearOptions），
+//      切過去卻一個月都不給選的話下拉會變空 —— 但 _kpiCurMonthNum 不會跟著空，_kpiYM()
+//      照樣算得出月份、下面整張表照樣渲染，變成「空下拉 + 明年的資料表，而且改不回來」。
+//   ③ 🔴 該月份【已經有 row 存在】→ 一律保留，即使它是還沒到的月份。
+//      不保留的話那些列會變成孤兒：年度總表照樣把它列成一欄（見 _kpiYearViewHtml 的
+//      visibleMonths），但月結表選不到 → 既編輯不了，也按不到「清空此月份」那顆
+//      （deleteKpiRow 只有月結表這一個入口）——【看得到、改不掉、刪不掉】。
+//      未來月份怎麼會長出 row：四條編輯路徑（editKpiCell / editKpiFieldNote /
+//      editKpiCommonCost / editKpiMergedField）都是一進編輯器就先把空列 push 進 rows，
+//      而它們的 blur 是無條件存檔 —— 點一下儲存格、什麼都沒打就失焦，那個月就被建出來了。
+//      ⚠ ③【實際生效的範圍只有「當年的未來月份」】。其他年份被 ② 全列了，m<=maxM 恆成立，
+//        hasRow 那一半永遠短路掉 —— 對明年是徹底的 no-op。找不到它在哪發揮作用是正常的，
+//        今天（8 月）它只影響 9~12 月這四格。
+//   🔴 判準用「row 存不存在」，【刻意不看值】，與 _kpiYearViewHtml 的 visibleMonths 是同一套
+//     —— 兩張表對「這個月算不算存在」的認定必須一致，否則會出現一邊有、一邊沒有的月份。
+//     不看值的兩個佐證都在本檔：editKpiCell 的存檔分支明說「打 0 是刻意要蓋成 0（跟完全沒填、
+//     留給公式自動算不一樣），要真的存下來」；而 _kpiFmt 對 0 走 falsy 分支、畫面上顯示成「—」。
+//     所以「認真填了 0」與「根本沒填」在【值】與【畫面】上都分不出來，只有「key 在不在」分得開。
+//   ⚠ 本函式【刻意去掃實存資料】(getKpiRows)，這與本檔 _scoreYearOptions 上方那段「刻意不掃」
+//     的註解【取捨相反，不是自相矛盾】。兩邊的代價不對稱：評分表不掃，最壞只是年份下拉少一個
+//     選項（切走再切回來就補上）；月結表若不掃，會直接製造出上面 ③ 說的孤兒列 —— 看得到、
+//     改不掉、刪不掉。所以這裡接受那個時序缺點：雲端 (Store._profitMem._kpi_v1) 還沒回來時
+//     這裡掃到的只有 localStorage 的列，未來月份可能少列幾個，等快照到了重繪就會補上。
+//   ⚠ 回傳恆非空：year===當年時上界至少是 1，其他年份是 12 —— 所以不需要 _shopeeVisibleMonths
+//     那道「濾光了就退回完整清單」的兜底。
+//   ⚠ 但一月時，當年的清單就真的只剩「1月」一個選項（除非有未來月份的 row）。那是【刻意的】：
+//     月結表是資料型清單，規則是「還沒到的月份隱藏」；只有年度框架型的下拉（例如首頁圖表的
+//     12 個月）才改用 disabled 灰掉、保留完整框架。看到只剩一個選項不是壞掉。
+function _kpiVisibleMonthNums(year){
+  const maxM=_kpiMaxNormalMonth(year);
+  const rows=getKpiRows();
+  const hasRow=m=>rows.some(r=>r.month===`${year}-${String(m).padStart(2,'0')}`);
+  const out=[];
+  for(let m=12;m>=1;m--)if(m<=maxM||hasRow(m))out.push(m);
+  return out;
 }
 function setKpiViewMode(mode){_kpiViewMode=mode;renderKpiTab();}
-function setKpiYear(y){_kpiCurYear=parseInt(y);renderKpiTab();}
+// ⚠ 換年份要把 _kpiCurMonthNum 夾回可見清單：在明年（12 個月全列）選了 12 月，再切回當年
+//   （只列到當月）時，12 不在清單裡 → 沒有任何 option 帶 selected → 瀏覽器 fallback 顯示
+//   第一個，但 _kpiCurMonthNum 仍是 12，而 _kpiYM() 讀的是它 ——【下拉寫著 8 月、表格卻是
+//   12 月的資料，而且不報錯】。同型的坑見本檔的 _clampShopeeCurMonth。
+// 🔴 夾回目標用 _kpiMaxNormalMonth，【不是】清單的第一個元素 —— 這是與 _clampShopeeCurMonth
+//   刻意不同的地方。那支可以直接取 vis[0]，因為它的清單【不可能含未來月份】；本函式的清單
+//   會（規則③保留有 row 的未來月）。今天 8 月、若有人誤點過 12 月留下一列，清單就是
+//   [12,8,7,…]，取 vis[0] 會讓「從明年切回今年」落在 12 月而不是 8 月，非常反直覺。
+// ⚠ _kpiMaxNormalMonth 的回傳值必定在清單內（m<=maxM 恆通過過濾），所以夾回不會夾到空值。
+// ⚠ _kpiCurMonthNum 全檔只有兩個寫入點：宣告處的初值（＝當月，恆合法）與 setKpiMonthNum
+//   （值只可能來自下拉、必定在清單內）。所以夾在這一支就夠，不必另外拆一支 clamp 函式。
+function setKpiYear(y){
+  _kpiCurYear=parseInt(y);
+  if(_kpiVisibleMonthNums(_kpiCurYear).indexOf(_kpiCurMonthNum)<0)_kpiCurMonthNum=_kpiMaxNormalMonth(_kpiCurYear);
+  renderKpiTab();
+}
 function setKpiMonthNum(m){_kpiCurMonthNum=parseInt(m);renderKpiTab();}
 function _kpiMonthViewHtml(){
   const month=_kpiYM();
   const row=getOrCreateKpiRow(month);
   const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===_kpiCurYear?' selected':''}>${y}年</option>`).join('');
-  const monthOpts=Array.from({length:12},(_,i)=>i+1).map(m=>`<option value="${m}"${m===_kpiCurMonthNum?' selected':''}>${m}月</option>`).join('');
+  const monthOpts=_kpiVisibleMonthNums(_kpiCurYear).map(m=>`<option value="${m}"${m===_kpiCurMonthNum?' selected':''}>${m}月</option>`).join('');
   return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
     <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
     <select onchange="setKpiMonthNum(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${monthOpts}</select>
@@ -6944,6 +7015,14 @@ const SCORE_DEFAULT_MONTHLY={
               玩樂:{revA:22.94,prevProfit:399710,curProfit:null,adsA:53,badA:19},
               森之旅:{revA:18.43,prevProfit:77545,curProfit:67134,adsA:37,badA:24} },
 };
+// 種子資料所屬的年份。上面 SCORE_DEFAULT_MONTHLY 的 key 前四碼（'2026-04'~'2026-07'）
+//   就是這個數字，兩者是【綁在一起的一份資料的兩半】：目標（依季）＋ 月度實際數字（依月）。
+//   要換種子就【兩邊一起換】，只改一邊會讓某一年長出「有目標但沒有月數字」或反過來的畫面。
+// 🔴 刻意【不】寫成 _KPI_NOW.getFullYear()：種子屬於 2026 這件事，不會因為今年是哪一年
+//   而改變。用「當年」的話，跨年那一刻 2026 Q2/Q3 的目標會開始回 null ——
+//   SCORE_DEFAULT_MONTHLY 的四個月數字還在，卻再也算不出分數，整批變成「—」；
+//   同時新的那一年會長出這組目標卡卻沒有任何月資料，種子的兩半就此錯開一年。
+const SCORE_DEFAULT_TARGETS_YEAR=2026;
 
 function getScoreTargetsAll(){
   try{
@@ -6962,7 +7041,17 @@ function getScoreTargetsForQ(year,q){
   const all=getScoreTargetsAll();
   const key=year+'-Q'+q;
   if(all[key])return all[key];
-  return SCORE_DEFAULT_TARGETS[q]||null;
+  // 🔴 種子【只在它自己所屬的那一年回退】，見上方的 SCORE_DEFAULT_TARGETS_YEAR。
+  //   SCORE_DEFAULT_TARGETS 只有「季」一個維度、沒有年份，舊寫法是
+  //   `return SCORE_DEFAULT_TARGETS[q]` —— year 參數被整個丟掉。評分表加了年份選擇器
+  //   之後那等於「每一年的 Q2/Q3 都憑空長出同一組目標卡」，而且 computeShopMonthScore
+  //   會拿它算出分數，使用者沒有任何線索知道那是假資料。
+  //   回 null 之後，其他年份會走既有那道「沒目標就強制展開 + 引導文字」的路徑
+  //   （見 _kpiScoreViewHtml 的 targetsOpen 與 targetCardHtml 那串三元的 else 分支）。
+  //   ⚠ Number(year)：年份從 <select> 進來是字串。setScoreYear 已經 parseInt，這裡再收
+  //     一次斂 —— 否則日後有人用別的路徑傳字串進來，=== 會靜默失敗、種子永遠不回退。
+  if(Number(year)===SCORE_DEFAULT_TARGETS_YEAR)return SCORE_DEFAULT_TARGETS[q]||null;
+  return null;
 }
 
 function getScoreMonthlyAll(){
@@ -7015,6 +7104,22 @@ function scoreCalcMetric(actual,target,low,weight,lowerBetter){
   }
 }
 function scoreRound(n){return Math.round(n*100)/100;}
+// 分數的顯示格式：統一顯示【整數】。不格式化的話 scoreRound 壓完兩位之後直接內插，
+//   JS 的 Number→String 會吃掉尾隨的 0，同一欄就出現 100 / 25.95 / 26.7 三種格式。
+//   分數的值域是 0~100，位數本來就不齊（9 與 100），補小數點換不到對齊、只換到雜訊。
+// 🔴 刻意用 Math.floor 無條件捨去，【不是四捨五入】：顏色門檻讀的是【未格式化的原始
+//   number】（scoreColor 在下方，80 分以上綠燈），而「ⓘ 指標定義與計分方式說明」裡的
+//   顏色圖例會寫明「80 分以上為綠色」。若改用四捨五入，79.6 分會顯示成 80 卻仍然是
+//   黃燈 —— 畫面與圖例當場矛盾，而且看起來像顏色壞掉。
+//   捨去保證「顯示值永遠不高於實際值」⇒ 綠燈的格子必定顯示 80 以上，黃燈的格子必定
+//   顯示 79 以下，兩者不可能打架。
+//   ⚠ 不要「順手修正」成 Math.round —— 那會四捨五入，等於拆掉上面這個保證。
+//     看到 Math.floor 覺得奇怪是正常的，它是刻意的，不是寫錯。
+// 代價：有小數的值會被截掉（本季平均 76.67 會顯示成 76）。這是刻意取捨 —— 這張表是
+//   用來看趨勢與顏色的，小數位不影響判讀。
+// 傳進來的一律是非負數（scoreCalcMetric 的回傳值域是 0~weight），所以不必擔心
+//   Math.floor 對負數是往 -∞ 捨去。
+function scoreFmt(n){return String(Math.floor(n));}
 function computeShopMonthScore(shop,year,monthNum,q){
   const t=getScoreTargetsForQ(year,q)?.[shop];
   if(!t)return null;
@@ -7043,11 +7148,63 @@ function scoreRatioColor(score,weight){
   if(ratio>=0.4)return{bg:'#fffbeb',fg:'#b45309',border:'#fde68a'};
   return{bg:'#fef2f2',fg:'#dc2626',border:'#fecaca'};
 }
+// 圖例的色塊【直接呼叫 scoreColor 取色】，刻意不自己寫死 hex：色碼或門檻日後有人改，
+//   圖例會跟著變，不會退化成一段對不上表格的假說明。三個代表值 80/50/0 是刻意挑的，
+//   各自落在 scoreColor 上面那三個分支上。
+//   ⚠ 門檻數字若改動，除了上面的函式，這裡的 80/50/0 與標籤文字要一起改（文字沒辦法
+//     從函式推導，函式的門檻寫在 if 裡面）。
+// ⚠ 用色塊而不是 emoji（■ / 🟢）：emoji 在不同 OS 走不同字型，形狀與色相都對不上這裡的
+//   色票，Windows 與手機看到的會是兩種東西。
+// 色票的 background / color / border 三者一次用滿，是為了跟表格分數格【同一套外觀】
+//   （比較表那格的寫法見本檔 renderScoreComparisonTable）；只塗 bg 的話 #ecfdf5 太淡，
+//   小方塊幾乎看不出顏色。
+function scoreLegendSwatches(){
+  return [{s:80,l:'80 分以上'},{s:50,l:'50–79 分'},{s:0,l:'未滿 50 分'}].map(b=>{
+    const c=scoreColor(b.s);
+    return `<span style="display:inline-block;padding:1px 8px;border-radius:6px;background:${c.bg};color:${c.fg};border:1px solid ${c.border};font-weight:700;white-space:nowrap">${b.l}</span>`;
+  }).join('');
+}
 
 function _scoreDefaultQ(){return Math.ceil((_KPI_NOW.getMonth()+1)/3);}
 let _scoreCurQ=_scoreDefaultQ();
 let _scoreCurYear=_KPI_NOW.getFullYear();
 let _scoreDefsOpen=false;
+// 目標卡（12 張）預設收起，讓評分結果上移。寫法比照上一行的 _scoreDefsOpen：模組層旗標
+//   + renderKpiTab 整區重繪。⚠ 刻意不用原生 <details>：renderKpiTab 是 el.innerHTML=…
+//   整區換掉，而 setScoreQ / adjustScoreBonus / saveScoreTargetsModal 都會呼叫它 →
+//   <details open> 的展開狀態撐不過任何一次重繪，模組層旗標可以。
+// 展開/收起的選擇記在【瀏覽器本機】，跨頁面重整保留。一對讀寫函式的形狀比照本檔的
+//   getTagFilters / saveTagFilters（同樣屬於「個人畫面偏好」這一類）。
+//   🔴 這是純本機狀態，【絕對不上雲，任何形式都不行】：一個人的畫面收合不該影響其他人，
+//     app/profit 也沒有容量可以浪費。所以【不走 Store.set】（雲端模式下它結尾會 setField
+//     推 Firestore，見 js/app.js 搜 `Store.set = function`）、也【不走 Store.setLocalOnly】
+//     （那支的語意是「先在本機收集、之後按☁同步雲端推上去」，用它會讓後人以為這個值遲早
+//     要上雲），直接 raw localStorage。
+//   🔴 key 名有兩個地雷，要改名前先讀完：
+//     ① 不可用 ec| 或 ec_momo_ 開頭 —— 那些前綴會被同步掃描的白名單撈進待推清單
+//        （本檔搜 localStorage.key，二十幾個迴圈清一色是前綴判準），一撈進去就等於上雲。
+//     ② 不可叫 ec_score_targets_open —— 與雲端資料 key ec_score_targets_v1 只差字尾，
+//        在 DevTools 的 localStorage 清單裡兩個並排，遲早有人刪錯那一個。
+//   ⚠ 值用 '1'/'0' 而不是 JSON：它是布林不是陣列，少一層 JSON.parse 就少一種炸法
+//     （手動在 DevTools 塞成沒引號的 true 會讓 JSON.parse 失敗）。比照 js/app.js 的
+//     ec.sidebarCollapsed，不比照 getTagFilters 的 JSON.stringify。
+//   ⚠ 寫入失敗（無痕模式 / 配額滿）一律靜默吞掉，退化成「這個旗標活不過重整」＝本功能
+//     加入之前的行為，不會壞任何東西。刻意【不】接本檔的 _isQuotaErr / _lsFailNotified 通報：
+//     那套是給「報表存不進去＝真的會掉資料」用的，收合狀態掉了不值得彈窗打斷使用者。
+//     也刻意【不】接 Store._useMem 的記憶體降級（js/app.js 搜 `_useMem`）—— 跟隨隔壁
+//     getTagFilters / ec.sidebarCollapsed 的既有慣例，各自 try/catch 就好。
+//   ⚠ 這個偏好是【每個瀏覽器一份，不是每個帳號一份】：localStorage 的作用域是 origin，
+//     而下面那行讀取發生在模組載入當下、早於使用者登入。同一台電腦兩個同事輪流用會互相
+//     繼承收合狀態。這是刻意的取捨 —— 要按帳號分就得把使用者識別放進 key，那會製造
+//     「登入後才能讀」的時序依賴，正是下面那段註解要避免的東西。既有的 ec.sidebarCollapsed
+//     / ec_tagfilters_user / ec_lastMonth_* 全都是同一個模型。
+const _SCORE_TARGETS_OPEN_LS='ec_score_targets_open_ui';
+function getScoreTargetsOpen(){try{return localStorage.getItem(_SCORE_TARGETS_OPEN_LS)==='1';}catch{return false;}}
+function saveScoreTargetsOpen(v){try{localStorage.setItem(_SCORE_TARGETS_OPEN_LS,v?'1':'0');}catch{}}
+// 讀取寫在模組層宣告處，比照上方的 _scoreCurQ 與下方的 _scoreDetailCells：這個值只依賴
+//   localStorage、不依賴雲端或 DOM，越早求值越單純。放到 renderKpiTab / initShopUI 補讀
+//   反而多一條時序依賴。
+let _scoreTargetsOpen=getScoreTargetsOpen();
 // 明細用「點分數」決定要看哪幾格，可以點多格一起比較（不限同一個月或同一個賣場）——
 // key 格式 "賣場|月份"。預設勾本季最新一個有資料月份的三個賣場。
 function _scoreDefaultDetailCells(year,q){
@@ -7059,8 +7216,34 @@ function _scoreDefaultDetailCells(year,q){
 }
 let _scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,_scoreCurQ);
 
+// 年份選項：當年 -2 ~ +1，共四年。整支比照月結表的 _kpiYearOptions（本檔上方）。
+//   🔴 刻意【不】掃「實存資料有哪幾年」：getScoreTargetsAll / getScoreMonthlyAll /
+//     getScoreBonusAll 三支都優先讀 Store._profitMem，而那份要等 js/firebase.js 的
+//     app/profit 訂閱回來才完整 —— 模組載入當下掃出來的年份會少，會變成「一進畫面
+//     選項少一個、切走再切回來就多一個」。固定區間沒有這個時序問題。
+//   ⚠ 保底把 _scoreCurYear 自己補進去（同 _kpiYearOptions 的最後一段）：避免日後有人
+//     用別的路徑把年份設到區間外時，下拉裡選不到目前這一年。
+function _scoreYearOptions(){
+  const cur=_KPI_NOW.getFullYear();
+  const years=[];
+  for(let y=cur-2;y<=cur+1;y++)years.push(y);
+  if(!years.includes(_scoreCurYear))years.push(_scoreCurYear);
+  // 新到舊（b-a）：本專案規則是「凡是有月份或年份的地方，最新的排最上面」。
+  //   ⚠ 上方月結表／年度總表共用的 _kpiYearOptions 也是 b-a —— 兩支現在【方向一致】。
+  //     但它們【沒有共用任何程式碼】，只共用這條規則，不會互相拉住：改其中一支的排序時，
+  //     另一支不會跟著變，要自己記得一起改。
+  return years.sort((a,b)=>b-a);
+}
 function setScoreQ(q){_scoreCurQ=q;_scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,q);renderKpiTab();}
+// 🔴 一定要跟著重設 _scoreDetailCells，作法與上一行的 setScoreQ 完全相同：那個 Set 的
+//   key 形狀是「好麻吉|7」，【不含年份】。若只寫 {_scoreCurYear=y;renderKpiTab();}，
+//   在 2026 勾了 7 月、切到 2025 之後 2025-07 會自動被勾選，展開一組根本不存在的資料，
+//   而且不會報錯（computeShopMonthScore 查無目標回 null，明細只印一行灰字）。
+// ⚠ parseInt 不可省（比照 setKpiYear）：<select> 的 this.value 是字串，而
+//   getScoreTargetsForQ 現在要拿 year 跟種子所屬年份做嚴格比較。
+function setScoreYear(y){_scoreCurYear=parseInt(y);_scoreDetailCells=_scoreDefaultDetailCells(_scoreCurYear,_scoreCurQ);renderKpiTab();}
 function toggleScoreDefs(){_scoreDefsOpen=!_scoreDefsOpen;renderKpiTab();}
+function toggleScoreTargets(){_scoreTargetsOpen=!_scoreTargetsOpen;saveScoreTargetsOpen(_scoreTargetsOpen);renderKpiTab();}
 function toggleScoreDetailCell(shop,month){
   const key=shop+'|'+month;
   if(_scoreDetailCells.has(key))_scoreDetailCells.delete(key);else _scoreDetailCells.add(key);
@@ -7114,6 +7297,16 @@ function adjustScoreBonus(delta){
 function _kpiScoreViewHtml(){
   const year=_scoreCurYear,q=_scoreCurQ;
   const targets=getScoreTargetsForQ(year,q);
+  // 沒有設定過目標的季【強制展開】：「Q<n> 還沒有 KPI 目標設定，請按上面『✎ 編輯本季指標』
+  //   建立」這句唯一的引導文字就在 targetCardHtml 裡面（下方那串三元運算的 else 分支）。
+  //   收起來的話，新的一季（例如 Q4 剛開始）會變成一片空白 + 一顆字面對不上的「編輯」按鈕
+  //   —— 使用者要做的是「建立」，畫面上卻只剩「編輯」，沒有任何線索告訴他該按哪裡。
+  //   ⚠⚠ 這道強制展開會【蓋過持久化的值】（_scoreTargetsOpen 現在記在 localStorage）：
+  //     使用者在沒有目標的季手動收起，重整後仍然是展開的，看起來像持久化壞掉。
+  //     【這不是 bug，不要來修。】強制展開是為了讓 Q4 一到不會有人對著空白畫面，那道防線
+  //     比「記住收起」重要；而且沒有目標的季本來就沒東西可看，收起來也沒省到什麼版面。
+  const targetsOpen=_scoreTargetsOpen||!targets;
+  const yearOpts=_scoreYearOptions().map(y=>`<option value="${y}"${y===year?' selected':''}>${y}年</option>`).join('');
   const qTabsHtml=[1,2,3,4].map(qq=>`<div onclick="setScoreQ(${qq})" style="padding:5px 14px;font-size:12px;font-weight:${qq===q?700:600};border-radius:16px;border:1px solid ${qq===q?'#5b5fcf':'#e5e7eb'};background:${qq===q?'#5b5fcf':''};color:${qq===q?'#fff':'#9ca3af'};cursor:pointer">Q${qq}</div>`).join('');
 
   const targetCardHtml=targets?SCORE_SHOPS.map((s,i)=>{
@@ -7137,16 +7330,22 @@ function _kpiScoreViewHtml(){
           </div>`).join('')}
       </div>
     </div>`;
-  }).join(''):`<div style="padding:24px;text-align:center;font-size:12px;color:#9ca3af">Q${q} 還沒有 KPI 目標設定，請按上面「✎ 編輯本季指標」建立</div>`;
+  }).join(''):`<div style="padding:24px;text-align:center;font-size:12px;color:#9ca3af">${year} Q${q} 還沒有 KPI 目標設定，請按上面「✎ 編輯本季指標」建立</div>`;
 
   return `
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-    <div style="display:flex;gap:6px">${qTabsHtml}</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <select onchange="setScoreYear(this.value)" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:16px;background:#fff;font-size:12px;font-weight:600;color:#374151;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
+      <div style="display:flex;gap:6px">${qTabsHtml}</div>
+    </div>
     <div style="font-size:11px;color:#9ca3af">每季指標與權重可獨立調整</div>
   </div>
 
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-    <div style="font-size:13px;font-weight:700;color:#374151">Q${q} KPI 目標與權重設定</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${targetsOpen?'10px':'24px'}">
+    <div onclick="toggleScoreTargets()" style="display:flex;align-items:center;gap:5px;cursor:pointer">
+      <span style="font-size:10px;transition:transform .15s;display:inline-block;color:#5b5fcf;${targetsOpen?'transform:rotate(90deg)':''}">▶</span>
+      <div style="font-size:13px;font-weight:700;color:#374151">${year} Q${q} KPI 目標與權重設定</div>
+    </div>
     <div style="font-size:12px;font-weight:600;color:#5b5fcf;cursor:pointer" onclick="openEditScoreTargetsModal()">✎ 編輯本季指標</div>
   </div>
 
@@ -7155,12 +7354,20 @@ function _kpiScoreViewHtml(){
   </div>
   <div style="display:${_scoreDefsOpen?'block':'none'};border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px">${scoreDefsHtml(q)}</div>
 
-  <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:8px">${targetCardHtml}</div>
-  <div style="font-size:11px;color:#9ca3af;margin-bottom:24px">配分欄位總和建議為 100 分；按「✎ 編輯本季指標」可調整目標／低標／配分</div>
+  <div style="display:${targetsOpen?'block':'none'}">
+    <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:8px">${targetCardHtml}</div>
+    <div style="font-size:11px;color:#9ca3af;margin-bottom:24px">配分欄位總和建議為 100 分；按「✎ 編輯本季指標」可調整目標／低標／配分</div>
+  </div>
 
   <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
   <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px" id="score-cmp-table"></div>
   <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">點分數看明細，可以點多個一起比較；灰色分數代表當月還沒有資料</div>
+  <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;line-height:1.8">
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span>分數色階（僅供快速辨識）：</span>${scoreLegendSwatches()}
+    </div>
+    <div>明細卡的單項顏色看「得分 ÷ 該項配分」的比例，門檻為 80% / 40%</div>
+  </div>
 
   <div id="score-detail-panel" style="margin-bottom:20px"></div>
 
@@ -7187,7 +7394,7 @@ function renderScoreComparisonTable(){
       const col=scoreColor(r.total);
       const active=_scoreDetailCells.has(s.id+'|'+m);
       return `<td style="text-align:center;padding:8px 6px">
-        <span onclick="toggleScoreDetailCell('${s.id}',${m})" style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer">${r.total}</span>
+        <span onclick="toggleScoreDetailCell('${s.id}',${m})" style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer">${scoreFmt(r.total)}</span>
       </td>`;
     }).join('');
     const vals=months.map(m=>{const r=computeShopMonthScore(s.id,year,m,q);return r&&r.hasData?r.total:null;}).filter(v=>v!=null);
@@ -7195,7 +7402,7 @@ function renderScoreComparisonTable(){
     return `<tr style="border-top:1px solid #f3f4f6">
       <td style="padding:8px 12px"><div style="font-size:13px;font-weight:700;color:#374151">${s.id}</div><div style="font-size:10.5px;color:#9ca3af">${s.pos}</div></td>
       ${cells}
-      <td style="text-align:center;padding:8px 10px;font-size:13px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums">${avg==null?'—':avg}</td>
+      <td style="text-align:center;padding:8px 10px;font-size:13px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums">${avg==null?'—':scoreFmt(avg)}</td>
     </tr>`;
   }).join('');
   container.innerHTML=`<table style="width:100%;border-collapse:collapse">
@@ -7223,7 +7430,7 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
     return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px">
         <div style="font-size:11.5px;color:#9ca3af;font-weight:600">${label}</div>
-        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${score} 分</div>
+        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${scoreFmt(score)} 分</div>
       </div>
       <div onclick="editScoreMonthlyCell('${monthKey}','${shop}','${field}',this)" style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15;cursor:pointer;border-bottom:1px dashed #d1d5db;display:inline-block">${valDisp}</div>
       <div style="font-size:11.5px;color:#9ca3af;margin-top:3px">目標 ${target}%</div>
@@ -7237,7 +7444,7 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
     return `<div style="background:#f8f9fc;border-radius:8px;padding:12px 14px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px">
         <div style="font-size:11.5px;color:#9ca3af;font-weight:600">純利成長</div>
-        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${r.growS} 分</div>
+        <div style="padding:2px 10px;border-radius:6px;font-size:12px;font-weight:700;background:${col.bg};color:${col.fg};white-space:nowrap">${scoreFmt(r.growS)} 分</div>
       </div>
       <div style="font-size:22px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;line-height:1.15">${valDisp}</div>
       <div style="font-size:11.5px;color:#9ca3af;margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -7261,7 +7468,7 @@ function scoreShopMonthDetailHtml(s,year,month,q,isLast){
         <div style="font-size:13.5px;font-weight:700;color:#374151">${shop}</div>
         <div style="font-size:11px;color:#9ca3af">${s.pos}</div>
       </div>
-      <div style="padding:3px 10px;border-radius:7px;background:${totCol.bg};color:${totCol.fg};border:1px solid ${totCol.border};font-size:13px;font-weight:700;font-variant-numeric:tabular-nums">${r.total} 分</div>
+      <div style="padding:3px 10px;border-radius:7px;background:${totCol.bg};color:${totCol.fg};border:1px solid ${totCol.border};font-size:13px;font-weight:700;font-variant-numeric:tabular-nums">${scoreFmt(r.total)} 分</div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${cardHtml}</div>
   </div>`;
@@ -7292,25 +7499,99 @@ function renderScoreDetailPanel(){
 }
 
 function editScoreMonthlyCell(monthKey,shop,field,tdEl){
-  const all=getScoreMonthlyAll();
-  if(!all[monthKey])all[monthKey]=JSON.parse(JSON.stringify(SCORE_DEFAULT_MONTHLY[monthKey]||{}));
-  if(!all[monthKey][shop])all[monthKey][shop]={...(SCORE_DEFAULT_MONTHLY[monthKey]?.[shop]||{})};
-  const curVal=all[monthKey][shop][field];
+  // 🔴 種子的深拷貝【刻意不在這裡做】（舊版是函式開頭就補種子）：getScoreMonthlyAll()
+  //   命中 Store._profitMem._score_monthly_v1 時回傳的是【活物件本身】（不是複製，見該
+  //   函式），舊版一開啟編輯器就寫 all[monthKey]=種子 →「點開又取消」其實已經改掉記憶體
+  //   狀態，之後任何一次 saveScoreMonthlyAll 都會把種子當成使用者填的資料整包推上雲端。
+  //   改成只有真的要寫入時（commit 內）才補種子；開啟編輯器一律唯讀。
+  // 讀值只走 readCur 這一支：curVal 與 cancel() 的重讀必須是【同一種讀法】，否則
+  //   「值有沒有變」會拿兩套語意互比。三層回退等價於舊版的讀取結果（整月沒存過→用種子／
+  //   該月存過但這個通路沒有→用種子的該通路／都有→用已存值）。
+  const readCur=()=>(getScoreMonthlyForKey(monthKey)[shop]||SCORE_DEFAULT_MONTHLY[monthKey]?.[shop]||{})[field];
+  const curVal=readCur();
+  // 還原用。onclick 掛在 tdEl【自己】身上（見 scoreShopMonthDetailHtml 的 editableNum /
+  //   simpleMetricCard），只換 innerHTML 不動節點本身 → 還原後這一格照樣點得開，
+  //   不需要為了把 onclick 補回來而重繪整個面板。
+  const origContent=tdEl.innerHTML;
   const inp=document.createElement('input');
   inp.type='number';inp.step='0.01';inp.value=curVal??'';
+  // 指路：spinner（type=number 右緣那對上下箭頭）不在這裡處理，也不該在這裡處理 ——
+  //   css/main.css:68-74 的 input[type="number"]::-webkit-inner-spin-button /
+  //   ::-webkit-outer-spin-button 已經全站關掉了（那段沒有被任何 @media 包住，main.css
+  //   又是全站第一支載入的樣式，這顆 inp 的 type='number' 直接命中該選擇器）。
+  //   ⚠ 不要在下面這條 cssText 尾端補 -webkit-appearance:none：spinner 是 shadow 偽元素，
+  //     inline style 打不到偽元素，補了對 Chrome 是【無效的】（元素層級真正有效的只有
+  //     -moz-appearance:textfield 那一半，而 main.css:69 也早就有了）。要動只能回 main.css 動。
+  //   ⚠ 下面的 wheel 與 keydown 的 ↑/↓ 仍然各自要擋：那兩者是瀏覽器對【聚焦中的 input】
+  //     的滾輪／按鍵步進，跟 spinner 是三條不同的觸發路徑。看到那兩處有擋、這裡沒擋，
+  //     是刻意的，不是遺漏。
   inp.style.cssText='width:90px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
+  // 🔴 擋冒泡：onclick 掛在容器（tdEl）上，input 是容器的子節點 —— 不擋的話點進輸入框
+  //   會冒泡回容器、再跑一次本函式，把輸入框整個重建、游標跳掉、輸入到一半的字消失。
+  inp.addEventListener('click',e=>e.stopPropagation());
+  // 🔴 擋滾輪。這是【本次改動新開的】誤寫路徑，不是既有問題：type=number 的 input 聚焦中
+  //   會吃 wheel 事件直接改值。上面那行擋掉冒泡【之前】，任何滑進輸入框的點擊都會觸發
+  //   重建、把值洗回原值，等於意外幫忙擋住了；擋掉冒泡後輸入框活得下來，使用者把游標
+  //   停在輸入框上捲頁面就會靜默 ±step，blur 時判定「值有改」→ 直接寫進雲端而本人不知情。
+  //   ⚠ 代價：游標落在這顆 90px 輸入框上時整頁捲不動（preventDefault 連捲動一起擋）。
+  inp.addEventListener('wheel',e=>{e.preventDefault();},{passive:false});
   tdEl.innerHTML='';tdEl.appendChild(inp);inp.focus();if(inp.value)inp.select();
   let done=false;
-  const save=()=>{
+  // 取消＝原則上只把這一格的 innerHTML 換回去，【不呼叫 renderScoreDetailPanel /
+  //   renderScoreComparisonTable】。理由同 _pnmEditNote 上方那段註解：blur 發生在
+  //   mousedown（①），而 click 要 mousedown 與 mouseup 落在同一元素才成立（③）——
+  //   在①就整包重繪，會把使用者剛按下的那顆東西在②之前銷毀 → 第一下永遠沒反應。
+  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur。
+  //
+  //   ⚠ 例外（刻意保留的重繪路徑）：origContent 是開啟編輯器【當下】的畫面快照。編輯
+  //     期間 Store._profitMem._score_monthly_v1 會被 firebase.js 的 app/profit 訂閱整包
+  //     換掉（這個 key 沒接 _markPending，bounce-back 守衛擋不到它），而 profitDataReady
+  //     的監聽者不重繪評分明細 → 同事若在這幾秒內改了同一格，用 origContent 還原就是把
+  //     【過期畫面】貼回去，而且不會自己好。所以還原前重讀一次：值變過就改走重繪。
+  //     代價是這一次點擊可能被吃掉（就是上面那段 ①②③），但顯示過期資料的代價更高。
+  const cancel=()=>{
     if(done)return;done=true;
+    if(readCur()!==curVal){renderScoreComparisonTable();renderScoreDetailPanel();return;}
+    tdEl.innerHTML=origContent;
+  };
+  const commit=()=>{
+    if(done)return;
     const v=parseFloat(inp.value);
-    all[monthKey][shop][field]=isNaN(v)?null:v;
+    // 值沒變就不寫：saveScoreMonthlyAll 是整包 map 直推 Firestore，按 Enter 確認一下
+    //   不該換來一次全量寫入 + 兩支重繪。走 cancel()（done 由 cancel 自己設）。
+    if(!isNaN(v)&&v===curVal){cancel();return;}
+    done=true;
+    const all=getScoreMonthlyAll();
+    // ⚠ 副作用【仍然存在】，本次刻意不處理：下面兩行會把該月三個通路的種子整包固化成
+    //   使用者資料。舊版是「點開就發生」，改完是「真的要寫入才發生」—— 嚴格變好但沒消失：
+    //   在 2026-04~07 任一格存一次，那個月其餘欄位就從種子（日後改 code 會跟著變）
+    //   永久變成已存資料。
+    if(!all[monthKey])all[monthKey]=JSON.parse(JSON.stringify(SCORE_DEFAULT_MONTHLY[monthKey]||{}));
+    if(!all[monthKey][shop])all[monthKey][shop]={...(SCORE_DEFAULT_MONTHLY[monthKey]?.[shop]||{})};
+    // 清空＋Enter＝使用者明確要清掉這一格 → delete，不寫 null。computeShopMonthScore 的
+    //   判斷是 m.revA!=null，null 與「沒有這個 key」對計分完全等價，但 null 會在 Firestore
+    //   文件裡留下實體佔位。寫法比照同檔 editKpiCell 的空值處理（delete shopData[field]）。
+    if(isNaN(v))delete all[monthKey][shop][field];
+    else all[monthKey][shop][field]=v;
     saveScoreMonthlyAll(all);
     renderScoreComparisonTable();
     renderScoreDetailPanel();
   };
-  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save();}});
-  inp.addEventListener('blur',save);
+  // ⚠ ↑/↓ 一定要擋：type=number 的 input 聚焦中，按 ↑/↓ 會直接 ±step（本函式 step=0.01）
+  //   改掉輸入框裡的值。而使用者按方向鍵想跳到下一格是很自然的動作 —— 值被改掉後一失焦
+  //   就會被判定「值有改」→ 靜默寫進雲端而本人完全不知情。這與上面 wheel 是同一類洞，
+  //   而且發生機率更高（滾輪要游標剛好停在框上，方向鍵只要手指按下去），故一併堵掉。
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();commit();}
+    if(e.key==='Escape'){e.preventDefault();cancel();}
+    if(e.key==='ArrowUp'||e.key==='ArrowDown')e.preventDefault();
+  });
+  // 失焦：值沒變（含被清空）→ 一律當取消，不寫入；真的改成新值才存。
+  //   ⚠ 刻意不抄 editKpiCell 的 setTimeout 120ms 緩衝。
+  inp.addEventListener('blur',()=>{
+    const v=parseFloat(inp.value);
+    if(isNaN(v)||v===curVal)cancel();else commit();
+  });
 }
 
 function openEditScoreTargetsModal(){
@@ -7336,7 +7617,7 @@ function openEditScoreTargetsModal(){
     </div>`;
   }).join('');
   ov.innerHTML=`<div class="ana-modal" style="width:520px;max-width:96vw;max-height:85vh;overflow-y:auto">
-    <div class="ana-modal-hdr"><span>編輯 Q${q} KPI 目標與權重</span><button class="ana-close-btn" onclick="this.closest('.ana-overlay').remove()">✕</button></div>
+    <div class="ana-modal-hdr"><span>編輯 ${year} Q${q} KPI 目標與權重</span><button class="ana-close-btn" onclick="this.closest('.ana-overlay').remove()">✕</button></div>
     <div class="ana-modal-body" style="padding:20px">
       ${shopBlocks}
       <div style="font-size:11px;color:#9ca3af;margin-bottom:12px">低標留空代表沒有低標（未達目標就不得分）；每個賣場的配分總和建議為 100</div>
@@ -9610,7 +9891,7 @@ function momoSaveMoPlusMaster(shop, doc){ return momoSaveMoPlusOriginsDoc(shop, 
 const MOMO_FEE_RATES=[3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,10,12,13,13.5];   // 公告費率集合（rules.momo.com.tw/payment/00002）
 // 公告表「非檔期/檔期」配對（rules.momo.com.tw/payment/00002）。反推配對模型：非檔期列須解到某配對的 np、檔期列須解到同配對的 pr。
 //   ⚠ 刻意不含 8/8.x 配對：實測有 SKU 非檔期實收 8%（不在任何配對）→ 標異常人工確認（使用者定案：不猜配對填補、保留「公告配對與帳單有出入」訊號）。
-const MOMO_FEE_PAIRS=[[3,3.5],[4,4.5],[5,5.5],[5.5,6.5],[6,6.5],[6,7],[6.5,7.5],[7,7.5],[7.5,8.5],[9,10],[12,13],[12,13.5]];
+const MOMO_FEE_PAIRS=[[3,3.5],[4,4.5],[5,5.5],[5.5,6.5],[6,6.5],[6,7],[6.5,7.5],[7,7.5],[7.5,8.5],[8,9],[9,10],[12,13],[12,13.5]];   // [8,9]＝手機週邊配件（手機掛繩/支架），Vanessa 後台查證 2026-08-19
 const MOMO_FEE_NP=[...new Set(MOMO_FEE_PAIRS.map(p=>p[0]))];   // 非檔期配對值 {3,4,5,5.5,6,6.5,7,7.5,9,12}
 const MOMO_FEE_PR=[...new Set(MOMO_FEE_PAIRS.map(p=>p[1]))];   // 檔期配對值   {3.5,4.5,5.5,6.5,7,7.5,8.5,10,13,13.5}
 // 逐列候選費率（限指定費率集）：使 round(price×qty×r%)==fee 的所有費率。base<=0 或 fee<=0 → []（呼叫端另判「無資料」vs「無解」）。
@@ -9653,6 +9934,10 @@ const MOMO_ANNOUNCED_FEE_TABLE={
     {cat1:'車類',        cat2:'機車',          cat3:'',              np:4,   pr:4.5},
     {cat1:'車類',        cat2:'汽車',          cat3:'',              np:4,   pr:4.5},
     {cat1:'保健',        cat2:'',              cat3:'',              np:7.5, pr:8.5, note:'部分品項 12%/13%（家庭計畫/情趣用品/保健用品）'},
+    // ── Vanessa momo 後台逐層查證，2026-08-19（來源＝店家後台商品分類，非公告 URL）──
+    {cat1:'手機',        cat2:'週邊配件',      cat3:'手機平板配件／手機掛繩', np:8,  pr:9,   note:'Vanessa 後台查證 2026-08-19'},
+    {cat1:'手機',        cat2:'週邊配件',      cat3:'手機平板配件／手機支架', np:8,  pr:9,   note:'Vanessa 後台查證 2026-08-19'},
+    {cat1:'資訊電腦',    cat2:'電腦主機/設備', cat3:'筆電包／內袋',           np:7,  pr:7.5, note:'Vanessa 後台查證 2026-08-19'},
   ],
 };
 let _momoPromoSet=null, _momoPromoSetKey=null;
@@ -16687,6 +16972,7 @@ function _testEmpty(shop,hint){
   const t=document.getElementById('tbl-'+shop);
   if(t)t.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${hint}</div></div>`;
   const p=document.getElementById('period-tag-'+shop); if(p)p.textContent='';
+  const c=document.getElementById('cnt-'+shop); if(c)c.textContent='';   // 理由同 tryLoadSaved 的 else 分支
   if(curShop===shop){const gb=document.getElementById('global-exp-btn');if(gb)gb.disabled=true;}
   setKpis(shop,0,0,0,0,null);   // cmp 顯式傳 null，理由同 tryLoadSaved 的 else 分支
   updateTagFilterBar(shop);
@@ -17138,7 +17424,7 @@ Object.assign(window, {
   momoCostInlineToggle,momoMoPlusCostInlineSave,momoMissingCostSave,momoMissCostExpandSet,momoExportCostByOrigin,momoBumpMoPlusEpoch,
   momoPeriodGuardClose,momoPeriodGuardToggleAll,momoPeriodGuardUpdateCount,momoPeriodGuardConfirm,momoUploadOpenGuard,momoExportCostByOrigin,momoOpenMissingCostPanel,momoExportMissingCost,momoOpenFeeAnomalyPanel,momoExportFeeAnomaly,momoUploadShowDryRun,momoUploadDryRunCSV,
   openAffUpload,closeAffUpload,onAffFile,generateAffRpt,syncAffRptToCloud,affSetSort,clearAffRpt,
-  setScoreQ,toggleScoreDefs,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
+  setScoreQ,setScoreYear,toggleScoreDefs,toggleScoreTargets,adjustScoreBonus,editScoreMonthlyCell,toggleScoreDetailCell,
   openEditScoreTargetsModal,saveScoreTargetsModal,
   openProdTagPanel,closeProdTagPanel,saveProdTagPanel,addProdTagToDraft,removeProdTagFromDraft,
   saveProdTags,patchProdTagCell,renderProdTagPanelBody,syncProdTagDraftFromDOM,
