@@ -6261,42 +6261,110 @@ function kpiCellClick(month,groupKey,shop,field,tdEl,editable){
 }
 function editKpiCell(month,groupKey,shop,field,tdEl){
   const rows=getKpiRows();
+  // 🔴 空 row / groupKey / shop 三層容器的建立【刻意不在這裡做】（舊版是函式開頭就建）：
+  //   理由同 editKpiFieldNote / editKpiMergedField / editKpiCommonCost ——getKpiRows() 回傳的是
+  //   活陣列本身，開編輯器就 push 的話 Esc 撤不回來（Esc 只還原 innerHTML），那列全空的 row
+  //   會被之後任何一次 saveKpiRows 一起推上 Firestore。
+  //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
-  if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-  if(!row[groupKey])row[groupKey]={};
-  if(!row[groupKey][shop])row[groupKey][shop]={};
-  const shopData=row[groupKey][shop];
+  // ⚠ 唯讀快照：row 還不存在時給 {}，讓下面的 curVal 與 _kpiEvalFormula 都拿得到東西。
+  //   row 存在時它就是 row[groupKey][shop] 本身（commit 寫入的也是同一個物件）。
+  const shopData=(row?.[groupKey]||{})[shop]||{};
   const group=KPI_GROUPS.find(g=>g.key===groupKey);
   const curVal=shopData[field+'Formula']!=null?shopData[field+'Formula']:(shopData[field]!=null?shopData[field]:'');
+  // 「值有沒有變」比的是【字串】，不是數字：curVal 可能是公式（=實際營收*21%）也可能是數字，
+  //   parseFloat 比不了公式。curVal 本身就是「拿去填進 inp.value 的那個東西」，拿輸入框現值
+  //   跟它比，才是使用者感知的「我沒改」。
+  const cur=curVal===''?'':String(curVal);
   const origContent=tdEl.innerHTML;
   const inp=document.createElement('input');
   inp.type='text';inp.value=curVal;inp.placeholder='數字或公式，如 =實際營收*21%';
   inp.style.cssText='width:150px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
+  // 🔴 擋冒泡：onclick 掛在 tdEl 自己身上（走 kpiCellClick），input 是它的子節點 —— 不擋的話
+  //   點進輸入框會冒泡回 td → kpiCellClick 因為 ctx.field===field 不符合帶入參照的條件 →
+  //   落到 editKpiCell 把編輯器整個重建，【打到一半的公式當場消失】。
+  //   ⚠ 這【不會】影響公式帶入參照：帶入時 click 的 target 是【另一格的 td】，本 input 不在
+  //     那條祖先鏈上，這個 handler 根本不會被呼叫（帶入靠的是 kpiCellClick 直接操作
+  //     ctx.inputEl + focus()，不經過本 input 的事件）。加了它反而讓插入參照後回點輸入框
+  //     調游標不會再炸掉半成品公式。
+  //   ⚠ 蓋不到的殘留：點在 td 上、input 以外的空白處仍會冒泡到 td 的 onclick → 重建。
+  //     要修得動 td 的 onclick，不在本輪範圍。
+  inp.onclick=e=>e.stopPropagation();
   tdEl.innerHTML='';tdEl.style.whiteSpace='normal';tdEl.appendChild(inp);
   inp.focus();if(inp.value)inp.select();
   _kpiFormulaCtx={month,groupKey,shop,field,inputEl:inp};
   let done=false;
-  const save=()=>{
+  // 取消＝清掉公式 ctx、把 whiteSpace 與這一格的 innerHTML 換回去，【不呼叫 renderKpiTab】。
+  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur。
+  //   ⚠ ctx 的清除時機與舊版一致（編輯器關閉時清），只是舊版寫在 save 與 Esc 兩處，
+  //     現在收斂到 cancel / commit 兩支 —— 沒有這行的話，關掉的輸入框會留在 ctx 裡，
+  //     下一次點別格會把欄位名插進一個已經脫離文件的 input。
+  const cancel=()=>{
     if(done)return;done=true;
     if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;
+    tdEl.style.whiteSpace='';
+    tdEl.innerHTML=origContent;
+  };
+  const commit=()=>{
+    if(done)return;
     const raw=inp.value.trim();
     const isPlain=/^-?\d+(\.\d+)?$/.test(raw);
     const computed=_kpiEvalFormula(raw,shopData,group);
-    if(raw===''||isNaN(computed)){
-      delete shopData[field];delete shopData[field+'Formula'];
+    const hasVal=raw!==''&&!isNaN(computed);
+    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
+    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    //   🔴 「沒變」＝字面沒變【而且】重算出來的也沒變。第二個條件是為了公式：
+    //     使用者打的公式是【存檔當下算好凍結】的（computed 寫進 shopData[field]，
+    //     _kpiCalcAll 只在 out[f.k]==null 時才套公式，渲染端也是直接顯示已存的數字），
+    //     被參照的欄位改掉之後它就過期了，而全檔【沒有任何地方會自動重算它】——
+    //     舊版「blur 一律存檔」等於每次進出編輯器都順手幫它刷新一次。只比字面的話
+    //     那條重算路徑會消失，過期的數字連按 Enter 都救不回來，只能整格刪掉重打。
+    //   ⚠ hasVal 為 false 時比的是「本來就沒有值嗎」——本來就沒有、現在打的又是空/算不出來，
+    //     那不是「清空」而是【什麼都沒發生】，不該為它建出一列空 row。
+    const unchanged=hasVal?(raw===cur&&computed===shopData[field]):curVal==='';
+    if(unchanged){cancel();return;}
+    done=true;
+    if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;
+    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
+    if(!row[groupKey])row[groupKey]={};
+    if(!row[groupKey][shop])row[groupKey][shop]={};
+    const target=row[groupKey][shop];
+    if(!hasVal){
+      // 清空（或公式算不出來）＋Enter＝使用者明確要清掉這格 → delete 兩個 key，維持原本的寫法。
+      //   這個行為本來就是對的（PR #223 的 editScoreMonthlyCell 還是抄這裡的），本次【沒有改】——
+      //   改的只是「誰能觸發它」：以前 blur 也會走到這裡（全選 Backspace 後點旁邊＝數字無聲消失），
+      //   現在只有 Enter 到得了。
+      delete target[field];delete target[field+'Formula'];
     }else{
       // 打 0 是刻意要蓋成 0（跟完全沒填、留給公式自動算不一樣），要真的存下來，不能當作空白清掉。
-      shopData[field]=computed;
-      if(isPlain)delete shopData[field+'Formula'];else shopData[field+'Formula']=raw;
+      target[field]=computed;
+      if(isPlain)delete target[field+'Formula'];else target[field+'Formula']=raw;
     }
     saveKpiRows(rows);
     renderKpiTab();
   };
+  // ⚠ type=text，【刻意不擋】wheel 與 ↑/↓（editKpiCommonCost / editKpiMergedField 那兩條有擋）：
+  //   那兩個是瀏覽器對 type=number 的步進，文字框不會被步進；而 ↑/↓ 在文字框裡是移動游標，
+  //   擋掉會很難用。看到那兩處有擋、這裡沒擋是刻意的，不是遺漏。
   inp.addEventListener('keydown',e=>{
-    if(e.key==='Enter'){e.preventDefault();save();}
-    if(e.key==='Escape'){done=true;if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;tdEl.style.whiteSpace='';tdEl.innerHTML=origContent;}
+    if(e.key==='Enter'){e.preventDefault();commit();}
+    if(e.key==='Escape'){e.preventDefault();cancel();}
   });
-  inp.addEventListener('blur',()=>setTimeout(()=>{if(document.activeElement!==inp)save();},120));
+  // 失焦：只允許「寫得出新值」；任何會落到 delete 分支的情況一律取消 —— 刪除只能由 Enter 觸發。
+  //   🔴 這裡的 setTimeout 120ms + activeElement 檢查是【載重的】，不是可有可無的慣性寫法，
+  //     【不要】為了對齊 PR #223 的 editScoreMonthlyCell（那條刻意寫成同步 blur）把它拿掉：
+  //     它是公式帶入參照的支撐 —— 在本格輸入 = 之後去點同一列的別格，那一下 mousedown 會先
+  //     讓本 input 失焦，靠 kpiCellClick 在 120ms 內把欄位名插進來並 focus() 回本 input、
+  //     使下面的 activeElement 檢查不成立，這個編輯器才活得下去。改成同步 blur ＝ 公式參照當場報廢。
+  //   ⚠ 三條分開寫，不併成一條：把「使用者清空」與「值沒變」混在一起會讓本輪要修的那顆 bug
+  //     不再看得見。
+  inp.addEventListener('blur',()=>setTimeout(()=>{
+    if(document.activeElement===inp)return;                          // ⓪ 焦點又回來了（公式帶入）
+    const raw=inp.value.trim();
+    if(raw===''){cancel();return;}                                   // ① 已清空 → 取消（本輪主 bug）
+    if(isNaN(_kpiEvalFormula(raw,shopData,group))){cancel();return;}  // ② 算不出值（公式打一半、含逗號…）→ 會走 delete → 取消
+    commit();                                                        // ③ 其餘交給 commit 判「值沒變」
+  },120));
 }
 // 手續費/運費的備註是「這個月、這個組別」共用一則，跟點哪個賣場的數字無關——
 // 從欄位標題點進去編輯，跟編輯賣場數字的輸入框完全分開。
