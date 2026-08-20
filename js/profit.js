@@ -7013,9 +7013,9 @@ function renderKpiTab(){
   //   實例就會一直握著一個已經不存在的 canvas。
   kpiYearDestroyCharts();
   const modeTabsHtml=`<div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid #e5e7eb">
-    <div onclick="setKpiViewMode('month')" style="padding:8px 16px;font-size:13px;font-weight:${_kpiViewMode==='month'?700:400};color:${_kpiViewMode==='month'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='month'?'#5b5fcf':'transparent'};cursor:pointer">月結表</div>
-    <div onclick="setKpiViewMode('year')" style="padding:8px 16px;font-size:13px;font-weight:${_kpiViewMode==='year'?700:400};color:${_kpiViewMode==='year'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='year'?'#5b5fcf':'transparent'};cursor:pointer">年度總表</div>
-    <div onclick="setKpiViewMode('score')" style="padding:8px 16px;font-size:13px;font-weight:${_kpiViewMode==='score'?700:400};color:${_kpiViewMode==='score'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='score'?'#5b5fcf':'transparent'};cursor:pointer">評分表</div>
+    <div onclick="setKpiViewMode('month')" style="padding:10px 20px;font-size:15px;font-weight:${_kpiViewMode==='month'?700:400};color:${_kpiViewMode==='month'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='month'?'#5b5fcf':'transparent'};cursor:pointer">月結表</div>
+    <div onclick="setKpiViewMode('year')" style="padding:10px 20px;font-size:15px;font-weight:${_kpiViewMode==='year'?700:400};color:${_kpiViewMode==='year'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='year'?'#5b5fcf':'transparent'};cursor:pointer">年度總表</div>
+    <div onclick="setKpiViewMode('score')" style="padding:10px 20px;font-size:15px;font-weight:${_kpiViewMode==='score'?700:400};color:${_kpiViewMode==='score'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='score'?'#5b5fcf':'transparent'};cursor:pointer">評分表</div>
   </div>`;
   const body=_kpiViewMode==='year'?_kpiYearViewHtml():_kpiViewMode==='score'?_kpiScoreViewHtml():_kpiMonthViewHtml();
   el.innerHTML=`<div style="padding:14px 16px 16px">${modeTabsHtml}${body}</div>`;
@@ -7443,10 +7443,10 @@ function _kpiScoreViewHtml(){
 
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${targetsOpen?'10px':'24px'}">
     <div onclick="toggleScoreTargets()" style="display:flex;align-items:center;gap:5px;cursor:pointer">
-      <span style="font-size:10px;transition:transform .15s;display:inline-block;color:#5b5fcf;${targetsOpen?'transform:rotate(90deg)':''}">▶</span>
-      <div style="font-size:13px;font-weight:700;color:#374151">${year} Q${q} KPI 目標與權重設定</div>
+      <span style="font-size:12px;transition:transform .15s;display:inline-block;color:#5b5fcf;${targetsOpen?'transform:rotate(90deg)':''}">▶</span>
+      <div style="font-size:15px;font-weight:700;color:#374151">${year} Q${q} KPI 目標與權重設定</div>
     </div>
-    <div style="font-size:12px;font-weight:600;color:#5b5fcf;cursor:pointer" onclick="openEditScoreTargetsModal()">✎ 編輯本季指標</div>
+    <div style="font-size:13px;font-weight:600;color:#5b5fcf;cursor:pointer" onclick="openEditScoreTargetsModal()">✎ 編輯本季指標</div>
   </div>
 
   <div onclick="toggleScoreDefs()" style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#5b5fcf;cursor:pointer;margin-bottom:10px">
@@ -7459,7 +7459,7 @@ function _kpiScoreViewHtml(){
     <div style="font-size:11px;color:#9ca3af;margin-bottom:24px">配分欄位總和建議為 100 分；按「✎ 編輯本季指標」可調整目標／低標／配分</div>
   </div>
 
-  <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
+  <div style="font-size:15px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
   <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px" id="score-cmp-table"></div>
   <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">點分數看明細，可以點多個一起比較；灰色分數代表當月還沒有資料</div>
   <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;line-height:1.8">
@@ -7482,7 +7482,13 @@ function renderScoreComparisonTable(){
   if(!container)return;
   const year=_scoreCurYear,q=_scoreCurQ;
   const months=SCORE_QUARTER_MONTHS[q];
-  const monthHeads=months.map(m=>`<th style="text-align:center;padding:8px 6px;font-size:11px;color:#6b7280;font-weight:700;min-width:64px">${m}月</th>`).join('');
+  // ⚠ 這裡的 min-width【跟著下面色票的 min-width 走】，兩者必須一起改：
+  //   全站 * { box-sizing:border-box }（見 css/main.css 開頭），所以色票的 min-width:56px
+  //   已經【含】它自己的 padding:5px 10px；再加上 td 左右各 8px，月份欄實際最小就是
+  //   56 + 16 = 72px。這個 72 訂在這裡只是讓 th 不要比 td 窄，【不是】欄寬的真正下限。
+  //   ⚠ 要推算欄寬請從色票的 min-width 算起，不要只看這個數字 —— 2026-08-20 放大字級前
+  //     這裡是 64px、色票是 44px（44+16=60 < 64），當時 64 才是真正的約束；放大後主客易位。
+  const monthHeads=months.map(m=>`<th style="text-align:center;padding:10px 8px;font-size:13px;color:#6b7280;font-weight:700;min-width:72px">${m}月</th>`).join('');
   const rows=SCORE_SHOPS.map(s=>{
     const cells=months.map(m=>{
       const r=computeShopMonthScore(s.id,year,m,q);
@@ -7490,26 +7496,26 @@ function renderScoreComparisonTable(){
       //   也就沒有任何入口可以填第一筆資料。種子 SCORE_DEFAULT_MONTHLY 只涵蓋
       //   2026-04～07，種子用完之後這張表就再也無法新增資料（實測確認）。
       //   ⚠ 這個 onclick 不可移除。
-      if(!r||!r.hasData)return `<td style="text-align:center;padding:8px 6px"><span onclick="toggleScoreDetailCell('${s.id}',${m})" style="color:#d1d5db;font-size:12px;cursor:pointer">—</span></td>`;
+      if(!r||!r.hasData)return `<td style="text-align:center;padding:10px 8px"><span onclick="toggleScoreDetailCell('${s.id}',${m})" style="color:#d1d5db;font-size:16px;cursor:pointer">—</span></td>`;
       const col=scoreColor(r.total);
       const active=_scoreDetailCells.has(s.id+'|'+m);
-      return `<td style="text-align:center;padding:8px 6px">
-        <span onclick="toggleScoreDetailCell('${s.id}',${m})" style="display:inline-block;min-width:44px;padding:3px 8px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer">${scoreFmt(r.total)}</span>
+      return `<td style="text-align:center;padding:10px 8px">
+        <span onclick="toggleScoreDetailCell('${s.id}',${m})" style="display:inline-block;min-width:56px;padding:5px 10px;border-radius:7px;background:${col.bg};color:${col.fg};border:${active?'1.5px solid '+col.fg:'1px solid '+col.border};font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer">${scoreFmt(r.total)}</span>
       </td>`;
     }).join('');
     const vals=months.map(m=>{const r=computeShopMonthScore(s.id,year,m,q);return r&&r.hasData?r.total:null;}).filter(v=>v!=null);
     const avg=vals.length?scoreRound(vals.reduce((a,b)=>a+b,0)/vals.length):null;
     return `<tr style="border-top:1px solid #f3f4f6">
-      <td style="padding:8px 12px"><div style="font-size:13px;font-weight:700;color:#374151">${s.id}</div><div style="font-size:10.5px;color:#9ca3af">${s.pos}</div></td>
+      <td style="padding:10px 14px"><div style="font-size:15px;font-weight:700;color:#374151">${s.id}</div><div style="font-size:12px;color:#9ca3af">${s.pos}</div></td>
       ${cells}
-      <td style="text-align:center;padding:8px 10px;font-size:13px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums">${avg==null?'—':scoreFmt(avg)}</td>
+      <td style="text-align:center;padding:10px 12px;font-size:17px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums">${avg==null?'—':scoreFmt(avg)}</td>
     </tr>`;
   }).join('');
   container.innerHTML=`<table style="width:100%;border-collapse:collapse">
     <thead><tr style="background:#f8f9fc">
-      <th style="text-align:left;padding:8px 12px;font-size:11px;color:#6b7280;font-weight:700">賣場</th>
+      <th style="text-align:left;padding:10px 14px;font-size:13px;color:#6b7280;font-weight:700">賣場</th>
       ${monthHeads}
-      <th style="text-align:center;padding:8px 10px;font-size:11px;color:#6b7280;font-weight:700">本季平均</th>
+      <th style="text-align:center;padding:10px 12px;font-size:13px;color:#6b7280;font-weight:700">本季平均</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
