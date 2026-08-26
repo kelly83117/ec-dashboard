@@ -992,3 +992,47 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   overflow-x:auto;
   margin-bottom:10px;
 }
+
+/* KPI 月結表：合併儲存格（目前只有 MOMO 的寄倉運費：mo+0號店/mo+1號店 共用一筆）。
+   那一格從「rowspan 顯示總額」改成【每個通路各自一格、只顯示自己攤到的份額】。
+   ⚠ 曾經把總額一起印在格子裡（「342 共 1,740」），已退場：那會把主值推離右緣，
+     同一欄的 MOMO-寄倉 與小計是靠右的、個位數對不上，兩格之間主值起點也差一個字元。
+     總額改成【編輯的當下】才提示（.kpi-merge-hint）。對齊比省一次點擊重要。
+   ⚠ 顏色一律走 css/main.css:2 的 :root 變數，不寫死色碼、不碰 --bg。 */
+.kpi-merge-share{font-variant-numeric:tabular-nums;}
+
+/* 合併儲存格的定位基準。⚠ 只有 position:relative、沒有任何偏移 ⇒ 不移動任何一個像素，
+   純粹是給下面那個絕對定位的提示當 containing block。 */
+.kpi-merge-cell{position:relative;}
+
+/* 編輯時浮在輸入框正上方的提示（由 editKpiMergedFieldHinted 掛上、由編輯器的收尾路徑帶走）。
+   🔴 position:absolute —— 脫離文件流，【不可能撐高列、不可能撐寬欄】。平常那格沒有這個節點，
+     只有上面的 position:relative，所以非編輯狀態的版面與加這組樣式之前完全一樣。
+   🔴 bottom:100% 往【上】長，不往左也不往右：
+     · 往左會蓋掉同列的「實際營收」—— 那是編輯時唯一能讓人確認自己在編輯哪一家的參照，
+       蓋掉它反而更容易搞混，正好是這個提示要解決的問題。
+     · 往右（left:100%）在 LTR 會增加可捲寬度，可能讓外層 overflow-x:auto 多出一段橫向捲軸。
+     · 往上是垂直方向，在 overflow-x:auto 的容器裡不產生橫向捲軸；且 mo+0/mo+1 是第 3、4 列，
+       上面還有兩列，不會頂到表頭。
+   🔴 pointer-events:none —— 滑鼠事件穿透，它不可能被點到、不可能取得焦點、不可能觸發
+     td 的 onclick ⇒ 在 editKpiMergedField 的 blur 判斷路徑上等同不存在。
+     這比「在 blur handler 裡多判斷一個元素」可靠：沒有需要維護的例外分支。
+   ⚠ right:0 讓它靠著輸入框的右緣對齊，不會歪到鄰欄上方。 */
+.kpi-merge-hint{
+  position:absolute;
+  bottom:100%;
+  right:0;
+  margin-bottom:4px;
+  padding:3px 8px;
+  white-space:nowrap;
+  pointer-events:none;
+  font-size:11px;
+  line-height:1.5;
+  font-weight:400;
+  color:var(--text-muted);
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:6px;
+  box-shadow:var(--shadow-sm);
+  z-index:5;
+}
