@@ -1024,7 +1024,13 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   right:0;
   margin-bottom:4px;
   padding:3px 8px;
-  white-space:nowrap;
+  /* ⚠ pre 不是 nowrap：提示是兩行，換行字元由 JS 用 &#10; 送進 data-merge-hint。
+     pre 同時保留換行【並且不自動折行】—— 用 pre-line 的話寬度一窄就會自己再折，
+     行數變得不可預期，往上長的高度就跟著不可預期。 */
+  white-space:pre;
+  /* 內文靠左：td 是 text-align:right，繼承下來會讓兩行長度不一的句子右緣參差、很難讀。
+     這【不影響外框位置】—— 外框仍由下方的 right:0 對齊格子右緣。 */
+  text-align:left;
   pointer-events:none;
   font-size:11px;
   line-height:1.5;

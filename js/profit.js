@@ -6950,8 +6950,16 @@ function _kpiGroupTableHtml(row,group){
           ?`${mergeStatus.shops.join('+')}共用一筆${c.l} ${fmtN(Math.round(mergedVal))}${by?`，按${byLabel}比例攤到本通路 ${fmtN(Math.round(shareVal))}`:'（未設定攤提分母，本通路不分攤）'}。點擊編輯的是【總額】，不是這一格。`
           :`${mergeStatus.shops.join('+')}共用一筆${c.l}，點擊編輯總額`;
         // 編輯時要顯示的那一行。⚠ 關鍵是【改了兩邊都會變】這個後果，不是「這是總額」這個事實。
-        const editHint='這是兩家共用的總額，改了兩邊都會變';
-        return `<td id="${tid}" class="kpi-merge-cell" data-merge-hint="${editHint}" onclick="editKpiMergedFieldHinted('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${title}">${dispVal}</td>`;
+        // 編輯時浮在輸入框正上方的兩行提示。兩行各講一件事，缺一不可：
+        //   ① 這裡填的是【總額】—— 使用者手上是新竹物流一張帳單，填的就是那張帳單的數字。
+        //   ② 各通路的金額是【算出來的、不能個別改】—— 那兩格是白底（看起來可編輯）、
+        //      顯示的卻是攤提結果，不講清楚會以為 1,398 可以直接改。
+        //   ⚠ 舊版只有「這是兩家共用的總額，改了兩邊都會變」：講了後果，沒講【為什麼格子上的
+        //     數字跟輸入框的數字不一樣】，而那正是使用者第一眼會卡住的地方。
+        //   ⚠ 換行用 &#10; 送進屬性（HTML parser 會解回真正的 \n），搭配 css 的 white-space:pre。
+        //     不用 <br>：提示是走 textContent 塞進去的，不為了排版開 innerHTML 這個口。
+        const editHint='這裡填的是兩家共用的總額\n各通路金額按訂單數自動分攤，不能個別改';
+        return `<td id="${tid}" class="kpi-merge-cell" data-merge-hint="${editHint.replace(/\n/g,'&#10;')}" onclick="editKpiMergedFieldHinted('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${title}">${dispVal}</td>`;
       }
       totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);
       const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
