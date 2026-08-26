@@ -957,3 +957,13 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .mm-fee-anom{color:#dc2626;font-weight:700;}
 .mm-fee-note{color:#9ca3af;}
 .mm-fee-pred{font-size:11px;color:#9ca3af;margin-top:2px;}
+
+/* KPI 月結表：「這一格沒有值」的破折號。
+   🔴 存在的理由是【0 與無值必須分得出來】：物流運費／合併儲存格這兩格以前用真值判斷
+     （commonCost?…:'—'），存進去的 0 會被印成「—」，跟「從沒填過」在畫面上完全一樣 ——
+     使用者打完 0 按 Enter 看到「—」，無從確認自己那筆有沒有存成功。
+     判斷改成「key 在不在」之後，0 顯示成 0、只有真的沒有值才走這個 class。
+   ⚠ 判準沿用同一張表一般格既有的 explicitlySet（js/profit.js 搜 `有明確存過值`），
+     不是新造一套。
+   取代原本寫在 JS 字串裡的 inline style="color:#d1d5db"。 */
+.kpi-cell-empty{color:var(--text-faint);}

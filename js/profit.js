@@ -6441,11 +6441,16 @@ function editKpiCommonCost(month,groupKey,tdEl){
   //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
   const fieldName=groupKey+'Common';
-  // ⚠ 讀法維持 ||''【刻意不改成 !=null】去對齊 editKpiMergedField：那會改變既有語意
-  //   （已存的 0 會從「讀成無值」變成「讀成 0」），超出本輪範圍。
-  //   代價是【0 與無值在讀取端無法分辨】—— 下面的比較式子必須知道 curVal 只會是 '' 或非 0 數字，
-  //   絕對不可以拿 0==='' 去比。
-  const curVal=(row||{})[fieldName]||'';
+  // 讀值與下面「值有沒有變」的比較必須是【同一種讀法】，否則會拿兩套語意互比。
+  //   ⚠ 這裡用 !=null【不是】||：0 是合法的共同費用（物流運費那個月真的是 0 也要存得下來），
+  //     要讀得出來。與同檔 editKpiMergedField:6701 的讀法【逐字相同】—— 兩格外觀一樣，
+  //     行為現在也一樣，不要再讓它們分岔。
+  //   ⚠ 舊版是 (row||{})[fieldName]||''（打 0 等於刪掉、已存的 0 又刪不掉）。換成 !=null 之後
+  //     「0」與「無值」在讀取端終於分得開，下面三處（hasVal / 比較式 / blur ②）才站得住。
+  //     ⚠ 實測過現有資料才換的：2026-01~06 的 shopeeCommon 全是非 0 number、其餘四組的
+  //       *Common 全部不存在 ⇒ 這次換讀法【不會動到任何一筆既有數字】。
+  //   row 不存在（這個月從沒填過任何東西）→ 等同無值，用 '' 表示。
+  const curVal=(row||{})[fieldName]!=null?row[fieldName]:'';
   const origContent=tdEl.innerHTML;
   const inp=document.createElement('input');
   inp.type='number';inp.value=curVal;
@@ -6477,30 +6482,28 @@ function editKpiCommonCost(month,groupKey,tdEl){
     if(done)return;
     const s=inp.value.trim();
     const v=parseFloat(s);
-    // ⚠ hasVal 含 v!==0 —— 這條【打 0 等於刪掉】，與 editKpiMergedField 的「0 是合法值、存得進去」
-    //   【正好相反】。兩邊都不是 bug，是各自的既有語意，本輪刻意不對齊（見下方 delete 那行）。
-    const hasVal=s!==''&&!isNaN(v)&&v!==0;
+    // ⚠ hasVal 【不含】v!==0 —— 0 是合法值、存得進去，與 editKpiMergedField:6733 逐字相同。
+    //   舊版是 s!==''&&!isNaN(v)&&v!==0（打 0 等於刪掉），與隔壁那格外觀一樣、行為相反，
+    //   已於本次對齊。清空該格的唯一方式是【清空後按 Enter】（PR #231 定的規則，沒有改動）。
+    const hasVal=s!==''&&!isNaN(v);
     // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
     //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
     //   ⚠ 兩側【分開判】而不是寫成 v===curVal：curVal 可能是 ''（無值），拿 0==='' 比恆 false。
     //     hasVal 為 false 時要比的是「本來就沒有值嗎」——本來就沒有、Enter 時打的又是空/0，
     //     那不是「清空」而是【什麼都沒發生】，不該為它建出一列空 row。
-    //   ⚠ 【已知缺口，刻意不在這輪處理】：上面 curVal 的 ||'' 讀法把「已存的 0」也讀成 ''，
-    //     所以對那筆資料按「清空 + Enter」會落進 curVal==='' 這一邊、被判定成【什麼都沒發生】
-    //     而 cancel —— 那個 0 從此刪不掉（舊版的 blur 無條件存檔反而刪得掉）。
-    //     前提是 Firestore 裡真的有 shopeeCommon:0：app 內唯一的寫入者就是本函式，而它永遠
-    //     不寫 0（見 hasVal 的 v!==0），所以只可能來自手動改 Firestore 或更早的程式版本。
-    //     要修得改用「key 在不在」（fieldName in row）判斷，那就變成【兩套讀法互比】——
-    //     與本輪「讀值與比較必須同一種讀法」的原則衝突，且會動到 ||'' 的語意，另案處理。
+    //   ⚠ 【舊版的已知缺口已隨讀法一起修掉】：舊的 ||'' 把「已存的 0」讀成 ''，對那筆資料按
+    //     「清空 + Enter」會落進 curVal==='' 這一邊、被判定成【什麼都沒發生】而 cancel，
+    //     那個 0 從此刪不掉。現在 curVal 用 !=null 讀，已存的 0 讀出來就是 0，
+    //     「清空 + Enter」走 hasVal=false + curVal===0（不是 ''）→ 進 delete，刪得掉。
     if(hasVal?v===curVal:curVal===''){cancel();return;}
     done=true;
     if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-    // 清空（或打 0）＋Enter＝使用者明確要清掉這格 → delete。
-    //   ⚠ 【打 0 也 delete】是這條的既有語意，本輪【沒有動】：同一張表的 editKpiMergedField 打 0
-    //     是存 0，兩格外觀一樣、行為相反。要對齊請另案處理（會影響已存資料的判讀），不要在
-    //     失焦防呆這輪順手改。
-    //   改的只是「誰能觸發它」：以前 blur 也會走到這裡（全選 Backspace 後點旁邊＝共同費用
-    //   無聲消失），現在只有 Enter 到得了。
+    // 清空＋Enter＝使用者明確要清掉這格 → delete，維持原本的寫法（不寫 null）。
+    //   ⚠ 【打 0 現在是存 0，不是 delete】—— 本次對齊 editKpiMergedField:6746。舊版是
+    //     「打 0 也 delete」，跟隔壁那格外觀一樣、行為相反，那才是要修的東西。
+    //     這一行本身【沒有改】：hasVal 不再排除 0 之後，它自動走成「0 → 存 0」。
+    //   PR #231 定下的「誰能觸發 delete」沒有變：以前 blur 也會走到這裡（全選 Backspace 後
+    //   點旁邊＝共同費用無聲消失），現在仍然只有 Enter 到得了。
     if(hasVal)row[fieldName]=v;else delete row[fieldName];
     saveKpiRows(rows);
     renderKpiTab();
@@ -6514,7 +6517,10 @@ function editKpiCommonCost(month,groupKey,tdEl){
     if(e.key==='Escape'){e.preventDefault();cancel();}
     if(e.key==='ArrowUp'||e.key==='ArrowDown')e.preventDefault();
   });
-  // 失焦：已清空、打 0、或值沒變 → 一律當取消，不寫入；真的改成新值才存。
+  // 失焦：已清空、打不出數字、或值沒變 → 一律當取消，不寫入；真的改成新值才存。
+  //   ⚠ 舊版的 ② 是 isNaN(v)||v===0（打 0 當取消）。0 現在是合法值，② 改成比 curVal，
+  //     與 editKpiMergedField:6768 對齊。這裡【只換判斷條件】，位置、時序、三條分開寫的
+  //     結構全部維持 PR #231 的原樣。
   //   ⚠ 本函式的 blur 是【同步】的（四條裡唯一沒有 120ms + activeElement 檢查的），本輪刻意
   //     保留不動 —— 加 setTimeout 是行為變更，不在這輪範圍。
   //     因此判斷式【不能】依賴 document.activeElement：同步 blur 觸發時焦點通常已經是 body，
@@ -6526,7 +6532,7 @@ function editKpiCommonCost(month,groupKey,tdEl){
     const s=inp.value.trim();
     if(s===''){cancel();return;}                  // ① 已清空 → 取消（本輪主 bug）
     const v=parseFloat(s);
-    if(isNaN(v)||v===0){cancel();return;}          // ② 打不出數字 / 打 0（本條的 0 ≡ 無值）→ 取消
+    if(isNaN(v)){cancel();return;}                 // ② 打不出數字 → 取消（0 不再落在這裡）
     if(v===curVal){cancel();return;}               // ③ 值沒變 → 取消
     commit();
   });
@@ -6809,7 +6815,14 @@ function _kpiGroupTableHtml(row,group){
       if(c.isCommon){
         if(shopIdx!==0)return '';
         const tid=`kpi-${row.month}-${group.key}-common`;
-        const dispVal=commonCost?fmtN(Math.round(commonCost)):'<span style="color:#d1d5db">—</span>';
+        // 🔴 顯示判準是【key 在不在】，不是真值 —— 判準與同一張表一般格的 explicitlySet
+        //   （本函式下方搜 `有明確存過值`）逐字相同，不新造一套。
+        //   舊寫法是 commonCost?…:'—'：0 是 falsy ⇒ 存進去的 0 會印成「—」，與「從沒填過」
+        //   在畫面上完全無法分辨。使用者打 0 按 Enter 後看到「—」，無從確認存了沒。
+        //   ⚠ 上面那行 commonCost=row[commonField]||0 是【計算用】的（totalPure-=commonCost），
+        //     刻意不動；顯示另外判一次，兩者不共用一個變數。
+        const commonSet=row[commonField]!=null;
+        const dispVal=commonSet?fmtN(Math.round(commonCost)):'<span class="kpi-cell-empty">—</span>';
         return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一賣場）">${dispVal}</td>`;
       }
       const mergeStatus=_kpiFieldMergeStatus(group,c.k,shop);
@@ -6821,7 +6834,12 @@ function _kpiGroupTableHtml(row,group){
         const mergedVal=(row.kpiFieldMerges||{})[mergeStatus.mergeKey]||0;
         totals[c.k]=(totals[c.k]||0)+mergedVal;
         const tid=`kpi-${row.month}-${mergeStatus.mergeKey}`.replace(/["'\s:]/g,'_');
-        const dispVal=mergedVal?fmtN(Math.round(mergedVal)):'<span style="color:#d1d5db">—</span>';
+        // 🔴 同上，判準是【key 在不在】。這一格的 editKpiMergedField【本來就存得下 0】
+        //   （hasVal 不含 v!==0，見該函式），所以「存了 0 卻顯示成 —」在這裡是【既有缺陷】，
+        //   不是本次改動造成的 —— 兩格既然要行為一致，顯示也一起對齊。
+        //   ⚠ 上面那行 mergedVal=…||0 是【計算用】的（累加進 totals[c.k]），刻意不動。
+        const mergedSet=(row.kpiFieldMerges||{})[mergeStatus.mergeKey]!=null;
+        const dispVal=mergedSet?fmtN(Math.round(mergedVal)):'<span class="kpi-cell-empty">—</span>';
         return `<td id="${tid}" rowspan="${mergeStatus.shops.length}" onclick="editKpiMergedField('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${mergeStatus.shops.join('+')}共用一格${c.l}，只影響小計，不算進各自純利">${dispVal}</td>`;
       }
       totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);

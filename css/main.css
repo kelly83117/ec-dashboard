@@ -12,6 +12,11 @@
     --border: #e5e7eb;
     --text: #111827;
     --text-muted: #6b7280;
+    /* 比 --text-muted 更淡的一階，用在「這一格沒有值」的破折號上。
+       色值取自全站早就散落各處的 #d1d5db（js/profit.js 與 css/profit.css 合計約 48 處寫死），
+       這裡只是把它收成變數給新程式碼用；既有那些【刻意不一次改完】——那是獨立的清理，
+       混進功能修改會讓 diff 看不出重點。 */
+    --text-faint: #d1d5db;
     --success: #10b981;
     --success-soft: #d1fae5;
     --warn: #f59e0b;
