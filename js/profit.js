@@ -17083,6 +17083,108 @@ function closeCoupangDist(){
   document.getElementById('coupang-dist-overlay')?.classList.remove('open');
 }
 
+/* ═══════════════ 酷澎重建 PR-1：純解析層（不接 UI／雲端，比照 MOMO 解析器風格）═══════════════
+   規格已定稿（勿重設計）：營收＝選項價格×數量；費用照官方規則(5.5%+2%+免運7%+$2/訂單)；期別依訂購日期月粒度；
+   成本查莫筆克成本表·公司商品代碼·trim 尾端 tab；price_inventory 是壓縮 XML 變體(SheetJS 只讀到 dimension 宣告的 3 列)須自解。
+   ⚠ 這批只是純函式，尚未接任何入口；PR-2 起才寫雲端/UI。─── харness 抽取標記：CUP-PARSE-BEGIN */
+const COUPANG_FEE_RATES={ deal:0.055, flow:0.02, freeShip:0.07, invoicePerOrder:2 };   // 2607 實測重現 13.94%（可調常數）
+// 尾端 tab(&#x9;)/空白 trim —— 公司商品代碼常帶尾 tab，不 trim 會對不到成本表
+function _cupTrimCode(s){ return String(s==null?'':s).replace(/\s+$/,'').replace(/^\s+/,''); }
+// 訂購日期 → 期別 'YYYY-MM'（月粒度）。吃 'YYYY-MM-DD ...' 或 'YYYY/MM/DD'
+function _cupOrderPeriod(orderDate){ const m=String(orderDate||'').match(/(\d{4})[-/](\d{2})/); return m?m[1]+'-'+m[2]:null; }
+// 是否純數字條碼（非原廠編號；原廠編號形如 H373-01）→ 無莫筆克對應是正常、非缺成本
+function _cupIsBarcode(code){ const c=_cupTrimCode(code); return c!=='' && /^\d+$/.test(c); }
+
+// ① 訂單檔（Delivery 分頁，含表頭列）→ per-order 彙總。cols: 訂單編號2/訂購日期10/公司商品代碼17/條碼18/運費類型22/運費23/數量24/選項價格25
+//    回 { orders:{oid:{goods,ship,isFree,period,items:[{code,qty,optPrice,barcode}]}}, periods:Set, codeSet:Set(trim), rowN }
+function coupangParseOrders(rows){
+  const num=v=>{ const n=parseFloat(String(v==null?'':v).replace(/,/g,'')); return isNaN(n)?0:n; };
+  const orders={}, periods=new Set(), codeSet=new Set(); let rowN=0;
+  (rows||[]).slice(1).forEach(r=>{
+    if(!r||!r[2]) return;                                  // 無訂單編號＝空列/footer
+    rowN++;
+    const oid=String(r[2]).trim();
+    const o=orders[oid]=orders[oid]||{goods:0, ship:0, isFree:true, period:null, items:[]};
+    const qty=num(r[24]), opt=num(r[25]);
+    o.goods+=opt*qty;                                      // 營收＝選項價格×數量（規格定稿）
+    o.ship+=num(r[23]);
+    if(String(r[22]||'').trim()!=='免費') o.isFree=false;  // 任一列非「免費」→整單非免運（＝運費類型口徑；已驗與運費=0 同組 581 單）
+    const pd=_cupOrderPeriod(r[10]); if(pd){ o.period=o.period||pd; periods.add(pd); }
+    const code=_cupTrimCode(r[17]); if(code) codeSet.add(code);
+    o.items.push({ code, qty, optPrice:opt, barcode:_cupTrimCode(r[18]) });
+  });
+  return { orders, periods, codeSet, rowN };
+}
+
+// ② 費用（官方規則·逐訂單四捨五入再加）。orders＝coupangParseOrders().orders。回 {deal,flow,freeShip,invoice,total,rate,freeN,paidN,goodsAll,shipAll}
+function coupangFeeCalc(orders, rates){
+  const R=rates||COUPANG_FEE_RATES;
+  let deal=0, flow=0, freeShip=0, goodsAll=0, shipAll=0, freeN=0, paidN=0; const oids=Object.keys(orders||{});
+  oids.forEach(oid=>{ const o=orders[oid];
+    goodsAll+=o.goods; shipAll+=o.ship;
+    deal+=Math.round(o.goods*R.deal);                                    // 成交手續費：貨款(不含運費)
+    flow+=Math.round(o.goods*R.flow)+Math.round(o.ship*R.flow);          // 金流/系統費：商品+運費逐項四捨五入再加
+    if(o.isFree){ freeN++; freeShip+=Math.round(o.goods*R.freeShip); }   // 免運服務費：只對免運訂單商品
+    else paidN++;
+  });
+  const invoice=oids.length*R.invoicePerOrder;                           // 發票代收轉付 $2/訂單
+  const total=deal+flow+freeShip+invoice;
+  return { deal, flow, freeShip, invoice, total, rate:(goodsAll>0?total/goodsAll:0), freeN, paidN, goodsAll:Math.round(goodsAll), shipAll:Math.round(shipAll), orderN:oids.length };
+}
+
+// ③ price_inventory 壓縮 XML 變體 → 自解 sheet1.xml（⚠忽略 <dimension>：該檔宣告 A1:S3 只 3 列、SheetJS 信它→靜默漏掉全部資料列）。
+//    cols(第3列表頭起)：條碼4/供應商商品代碼5/銷售狀態11/剩餘數量(庫存)12/銷售數量13/選項ID2。回 [{code,stock,salesQty,status,barcode,optionId}]
+function coupangParsePriceInventoryXML(sheetXml){
+  const dec=s=>String(s).replace(/&#x([0-9a-fA-F]+);/g,(_,h)=>String.fromCharCode(parseInt(h,16))).replace(/&#([0-9]+);/g,(_,d)=>String.fromCharCode(+d)).replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"');
+  const colNum=ref=>{ const m=(ref.match(/^([A-Z]+)/)||['','A'])[1]; let n=0; for(const ch of m) n=n*26+(ch.charCodeAt(0)-64); return n-1; };
+  const rows=[];
+  for(const rm of String(sheetXml||'').matchAll(/<row[^>]*>(.*?)<\/row>/gs)){
+    const arr=[];
+    for(const cm of rm[1].matchAll(/<c\s+([^>]*?)(?:\/>|>(.*?)<\/c>)/gs)){
+      const rref=(cm[1].match(/r="([A-Z]+\d+)"/)||[])[1]; if(!rref) continue;
+      const inner=cm[2]||''; const isM=inner.match(/<is>(?:<t[^>]*>(.*?)<\/t>)?<\/is>/s), vM=inner.match(/<v>(.*?)<\/v>/s);
+      arr[colNum(rref)]= isM ? dec(isM[1]||'') : (vM?dec(vM[1]):'');
+    }
+    rows.push(arr);
+  }
+  // 前 3 列＝說明/區塊標題/欄位表頭 → 資料從第 4 列(index 3)起；至少要有 供應商商品代碼 或 供應商商品ID 才算資料列
+  return rows.slice(3).filter(r=>r && (String(r[5]||'').trim() || String(r[0]||'').trim())).map(r=>({
+    code:_cupTrimCode(r[5]), stock:(String(r[12]||'').trim()!==''&&!isNaN(+r[12]))?+r[12]:null,
+    salesQty:(String(r[13]||'').trim()!==''&&!isNaN(+r[13]))?+r[13]:null, status:String(r[11]||'').trim(),
+    barcode:String(r[4]||'').trim(), optionId:String(r[2]||'').trim()
+  }));
+}
+
+// ④ MSF（VAT History Report 分頁，含表頭）→ per-order。cols: 訂單編號0/廠商商品代號1(15位·字串)/銷售確認日期2/項目類別3(VENDOR_ITEM|DELIVERY_FEE)/銷售5-11/退貨12-18
+//    回 { byOrder:{oid:{hasDeliveryFee, returnAmt}}, returnTotal, orderN }。⚠ 廠商商品代號一律字串讀（15 位純數字·避免浮點精度掉尾）
+function coupangParseMSF(rows){
+  const num=v=>{ const n=parseFloat(String(v==null?'':v).replace(/,/g,'')); return isNaN(n)?0:n; };
+  const byOrder={}; let returnTotal=0;
+  (rows||[]).slice(1).forEach(r=>{
+    if(!r||r[0]==null||String(r[0]).trim()==='') return;
+    const oid=String(r[0]).trim();                          // 字串讀·不轉 Number
+    const o=byOrder[oid]=byOrder[oid]||{hasDeliveryFee:false, returnAmt:0};
+    if(String(r[3]||'').trim()==='DELIVERY_FEE') o.hasDeliveryFee=true;
+    let ret=0; for(let i=12;i<=18;i++) ret+=num(r[i]);       // 退貨 7 欄加總
+    o.returnAmt+=ret; returnTotal+=ret;
+  });
+  return { byOrder, returnTotal:Math.round(returnTotal), orderN:Object.keys(byOrder).length };
+}
+
+// ⑤ 成本對應：codes(訂單/PI 出現的公司商品代碼) vs 莫筆克成本表(costCodes＝已 trim 的 Set/Map key)。
+//    回 { matched:[], missing:[](真缺·像原廠編號但查無), barcodeNonOrigin:[](純數字條碼·非原廠編號·無對應屬正常) }
+function coupangCostMatch(codes, costCodes){
+  const has= (costCodes instanceof Set) ? (c=>costCodes.has(c)) : (c=>Object.prototype.hasOwnProperty.call(costCodes||{}, c));
+  const matched=[], missing=[], barcodeNonOrigin=[];
+  [...new Set((codes||[]).map(_cupTrimCode).filter(Boolean))].forEach(c=>{
+    if(has(c)) matched.push(c);
+    else if(_cupIsBarcode(c)) barcodeNonOrigin.push(c);     // 純數字條碼 → 非原廠編號、無莫筆克對應是正常，不算缺成本
+    else missing.push(c);                                    // 像原廠編號卻查無 → 真缺成本
+  });
+  return { matched, missing, barcodeNonOrigin };
+}
+/* ─── harness 抽取標記：CUP-PARSE-END ─── */
+
 // 區間分段按鈕（上／下／整月）。樣式走 css/profit.css 的 .sp-seg-grp / .sp-seg（在 /* Period */ 區塊），
 //   不寫 inline style；為什麼不共用 MOMO 的 .mm-seg、為什麼不做 disabled，理由都寫在那裡。
 // ⚠ 單一渲染來源：永遠從 state[shop].curHalf 重算 + 整段 innerHTML 重繪，【不做】「就地改 class」的
