@@ -6173,8 +6173,10 @@ const KPI_GROUPS=[
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>(d.rev-d.ret)>0?((d.rev-d.ret)-d.cost-d.ship-d.misc-d.tax-d.material)/(d.rev-d.ret):0},
     ],
     order:['qty','rev','cost','ret','actualRev','ship','misc','tax','material','receivable','pure','pureRate'],
-    // 寄倉運費：好麻吉／森之旅固定共用一筆合併儲存格（不算進這兩個賣場各自的純利，只影響小計）；
-    // 甲配／露營館這個欄位不適用（灰底不能編輯）；寄倉維持自己獨立的數字。
+    // 寄倉運費：好麻吉／森之旅固定共用一筆合併儲存格。
+    //   ⚠ 2026-08-26 起【會按 shareBy 指定的比例攤進這兩個通路各自的純利】——
+    //     舊註解寫的「不算進各自純利，只影響小計」已經不成立，那時這筆錢其實一格都沒扣。
+    //   甲配／露營館這個欄位不適用（灰底不能編輯）；寄倉維持自己獨立的數字。
     fieldMerge:{
       ship:{
         mergeGroups:[{shops:['mo+0號店(好麻吉)','mo+1號店(森之旅)']}],
@@ -6872,7 +6874,7 @@ function _kpiGroupTableHtml(row,group){
   // 欄位固定表格版面＋每欄等寬，欄位之間才會平均分配空間，不會被瀏覽器依內容長短撐出忽大忽小的間隔。
   const colgroup=`<colgroup><col style="width:130px">${cols.map(()=>`<col style="width:calc((100% - 130px)/${cols.length})">`).join('')}</colgroup>`;
   const thead=`<tr style="background:#f8f9fc">
-    <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc">${group.shops.length>1?'賣場':'名稱'}</th>
+    <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc">${group.shops.length>1?'通路':'名稱'}</th>
     ${cols.map(c=>{
       if(c.isCommon){
         return `<th style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap" title="${group.commonCostLabel}">${c.l}</th>`;
@@ -6887,7 +6889,7 @@ function _kpiGroupTableHtml(row,group){
     }).join('')}
   </tr>`;
   const{pureKey}=_kpiGroupTotals(row,group);
-  // 共同費用：整組共用一筆，只影響小計純利，不分攤到各賣場——用 rowspan 直向合併成一欄，不再另外多一行。
+  // 共同費用：整組共用一筆，只影響小計純利，不分攤到各通路——用 rowspan 直向合併成一欄，不再另外多一行。
   const commonField=group.key+'Common';
   const commonCost=row[commonField]||0;
   const totals={};
@@ -6913,11 +6915,11 @@ function _kpiGroupTableHtml(row,group){
         //     刻意不動；顯示另外判一次，兩者不共用一個變數。
         const commonSet=row[commonField]!=null;
         const dispVal=commonSet?fmtN(Math.round(commonCost)):'<span class="kpi-cell-empty">—</span>';
-        return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一賣場）">${dispVal}</td>`;
+        return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一通路）">${dispVal}</td>`;
       }
       const mergeStatus=_kpiFieldMergeStatus(group,c.k,shop);
       if(mergeStatus?.type==='na'){
-        return `<td style="padding:6px 10px;text-align:right;font-size:12.5px;color:#d1d5db" title="這個賣場不適用${c.l}">—</td>`;
+        return `<td style="padding:6px 10px;text-align:right;font-size:12.5px;color:#d1d5db" title="這個通路不適用${c.l}">—</td>`;
       }
       if(mergeStatus?.type==='merged'){
         // 🔴 2026-08-26：這一欄從「rowspan 一格顯示總額」改成【每個通路各自一格、顯示自己分到的份額】。
@@ -7370,7 +7372,7 @@ function _kpiYearViewHtml(){
     <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:${424+52*monthCount}px">
       <colgroup><col style="width:110px"><col style="width:44px">${visibleMonths.map(()=>'<col style="width:52px">').join('')}<col style="width:100px"><col style="width:100px"><col style="width:70px"></colgroup>
       <thead><tr style="background:#f8f9fc">
-        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;cursor:default">賣場</th>
+        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;cursor:default">通路</th>
         <th></th>
         ${monthHeaders}
         <th style="text-align:right;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700;cursor:default">全年營收</th>
