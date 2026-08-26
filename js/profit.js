@@ -17163,8 +17163,9 @@ function coupangParseMSF(rows){
   (rows||[]).slice(1).forEach(r=>{
     if(!r||r[0]==null||String(r[0]).trim()==='') return;
     const oid=String(r[0]).trim();                          // 字串讀·不轉 Number
-    const o=byOrder[oid]=byOrder[oid]||{hasDeliveryFee:false, returnAmt:0};
+    const o=byOrder[oid]=byOrder[oid]||{hasDeliveryFee:false, returnAmt:0, confirmDate:''};
     if(String(r[3]||'').trim()==='DELIVERY_FEE') o.hasDeliveryFee=true;
+    const cd=String(r[2]||'').trim(); if(cd && cd>o.confirmDate) o.confirmDate=cd;   // 銷售確認日期（取最晚）→ 供擱置退貨「缺月份」近似提示（PR-2）
     let ret=0; for(let i=12;i<=18;i++) ret+=num(r[i]);       // 退貨 7 欄加總
     o.returnAmt+=ret; returnTotal+=ret;
   });
@@ -17184,6 +17185,65 @@ function coupangCostMatch(codes, costCodes){
   return { matched, missing, barcodeNonOrigin };
 }
 /* ─── harness 抽取標記：CUP-PARSE-END ─── */
+
+/* ═══════════════ 酷澎重建 PR-2：資料模型 doc 建構器 ＋ 退貨歸期解析（純函式，尚未接 UI／雲端）═══════════════
+   模型：per-商品(公司商品代碼)-期別 彙總；費用逐訂單算後按商品營收占比攤到 SKU；缺成本→net null（不假裝完整）。
+   退貨：Option A —— 掛原始銷售期。report doc 存 orderNos[]；讀取端由所有月 doc 建「訂單編號→下單月」索引，
+        MSF 退貨查得到→歸該月、查不到→擱置（近似缺月份＝結算月往前 1~2 月）。不搬記錄、無重複計算。
+   ─── harness 抽取標記：CUP-MODEL-BEGIN */
+// YYYY-MM 往前推 n 月
+function _cupMonthShift(ym, n){ const m=String(ym||'').match(/(\d{4})-(\d{2})/); if(!m) return null; let t=(+m[1])*12+(+m[2]-1)-n; const y=Math.floor(t/12), mo=t%12+1; return y+'-'+String(mo).padStart(2,'0'); }
+
+// ① 報表 doc 建構：parsed=coupangParseOrders()；costMap=原廠編號→單位成本(莫筆克)；piByCode=公司商品代碼→{stock}。
+//    回 { shop, month, skus:{code:{qty,rev,cost,deal,flow,freeShip,invoice,net,stock,covered}}, orderNos:[訂單編號…] }
+function coupangBuildReportDoc(shop, month, parsed, costMap, piByCode){
+  const R=COUPANG_FEE_RATES, skus={}, orderNos=[];
+  const getCost=c=>{ const v=(costMap instanceof Map)?costMap.get(c):(costMap&&costMap[c]); return (v!=null&&!isNaN(+v))?+v:null; };
+  Object.keys(parsed.orders||{}).forEach(oid=>{
+    const o=parsed.orders[oid]; orderNos.push(oid);
+    const oDeal=Math.round(o.goods*R.deal), oFlow=Math.round(o.goods*R.flow)+Math.round(o.ship*R.flow), oFree=o.isFree?Math.round(o.goods*R.freeShip):0, oInv=R.invoicePerOrder;
+    const gTot=o.goods>0?o.goods:1;
+    (o.items||[]).forEach(it=>{
+      const code=it.code||'(無代碼)', itGoods=it.optPrice*it.qty, sh=itGoods/gTot;
+      const c=skus[code]=skus[code]||{qty:0,rev:0,deal:0,flow:0,freeShip:0,invoice:0};
+      c.qty+=it.qty; c.rev+=itGoods; c.deal+=oDeal*sh; c.flow+=oFlow*sh; c.freeShip+=oFree*sh; c.invoice+=oInv*sh;
+    });
+  });
+  Object.keys(skus).forEach(code=>{ const c=skus[code];
+    ['rev','deal','flow','freeShip','invoice'].forEach(k=>c[k]=Math.round(c[k]));
+    const unit=getCost(code); c.cost=(unit!=null)?Math.round(unit*c.qty):null; c.covered=(unit!=null);   // 缺成本＝covered:false（比照 MO+ coverage）
+    c.stock=(piByCode&&piByCode[code])?piByCode[code].stock:null;
+    const fees=c.deal+c.flow+c.freeShip+c.invoice;
+    c.net=(c.cost!=null)?(c.rev-c.cost-fees):null;   // 缺成本 → net null（不進「已完整」淨利）
+  });
+  return { shop, month, skus, orderNos };
+}
+
+// ② MSF 退貨 doc 建構：parsedMsf=coupangParseMSF()。整包冪等（重傳同 MSF 覆蓋）
+function coupangBuildMsfDoc(shop, src, parsedMsf){ return { shop, src, byOrder:(parsedMsf&&parsedMsf.byOrder)||{}, returnTotal:(parsedMsf&&parsedMsf.returnTotal)||0 }; }
+
+// ③ 訂單編號→下單月 索引（跨所有已上傳月 report doc 的 orderNos）
+function coupangBuildOrderIndex(reportDocs){ const idx={}; (reportDocs||[]).forEach(rd=>{ (rd&&rd.orderNos||[]).forEach(oid=>{ idx[String(oid)]=rd.month; }); }); return idx; }
+
+// ④ 退貨歸期解析（讀取端）：msfDocs=已上傳 MSF docs；orderIndex=coupangBuildOrderIndex()。
+//    回 { byMonth:{月:退貨額}, pending:[{oid,returnAmt,confirmDate}], pendingTotal, pendingN, missingOrderFiles:[近似缺的訂單檔月] }
+function coupangResolveReturns(msfDocs, orderIndex){
+  const uploaded=new Set(Object.values(orderIndex||{}));   // 已上傳的下單月（這些不算「缺」）
+  const byMonth={}, pending=[], missSet={};
+  (msfDocs||[]).forEach(md=>{ const bo=(md&&md.byOrder)||{};
+    Object.keys(bo).forEach(oid=>{ const ret=Number(bo[oid].returnAmt)||0; if(!ret) return;   // 只處理有退貨金額
+      const mo=orderIndex&&orderIndex[String(oid)];
+      if(mo){ byMonth[mo]=(byMonth[mo]||0)+ret; }
+      else { const cd=String(bo[oid].confirmDate||''); pending.push({oid, returnAmt:ret, confirmDate:cd});
+        const cm=(cd.match(/(\d{4}-\d{2})/)||[])[1];   // 近似缺訂單檔＝結算月往前 1、2 月（實測 8 月結算對應 6/7 月下單）
+        if(cm){ [1,2].forEach(n=>{ const g=_cupMonthShift(cm,n); if(g && !uploaded.has(g)) missSet[g]=(missSet[g]||0)+1; }); }   // 已上傳的月不列入「缺」
+      }
+    });
+  });
+  Object.keys(byMonth).forEach(k=>byMonth[k]=Math.round(byMonth[k]));
+  return { byMonth, pending, pendingTotal:Math.round(pending.reduce((a,p)=>a+p.returnAmt,0)), pendingN:pending.length, missingOrderFiles:Object.keys(missSet).sort() };
+}
+/* ─── harness 抽取標記：CUP-MODEL-END ─── */
 
 // 區間分段按鈕（上／下／整月）。樣式走 css/profit.css 的 .sp-seg-grp / .sp-seg（在 /* Period */ 區塊），
 //   不寫 inline style；為什麼不共用 MOMO 的 .mm-seg、為什麼不做 disabled，理由都寫在那裡。
