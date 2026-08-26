@@ -6542,7 +6542,16 @@ function _kpiGroupTotals(row,group){
   const pureKey=group.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))?.k;
   let totalRev=0,totalPure=0;
   group.shops.forEach(shop=>{
-    const d=_kpiCalcAll(row[group.key]?.[shop]||{},group);
+    // 🔴 2026-08-26 修：這裡以前【漏了】合併／不適用欄位歸零（只有小計、單店全年、年度總表
+    //   三處有做），而缺值會讓 _kpiCalcAll 的 f.calc(out)||0 把【整條純利吞成 0】——
+    //   不是少扣一項。實際後果：MOMO 卡片把 mo+0號店(好麻吉) 與 mo+1號店(森之旅) 兩條
+    //   純利都算成 0，2026-01 卡片顯示 54,342（＝只剩 MOMO-寄倉 一家），小計卻是 189,157。
+    //   ⚠ 修的是【餵給公式的資料】，不是公式：KPI_GROUPS 的 pure 公式與 _kpiCalcAll 的
+    //     f.calc(out)||0 這一輪一個字都沒動。
+    //   ⚠ 通路卡片的「較上月 ±%」本期與基期【都】走本函式（見 _kpiSummaryCardsHtml 裡
+    //     _kpiGroupTotals(row,g) 與 _kpiGroupTotals(prevRow,g) 兩行），所以基期會一起修好，
+    //     不會出現一邊修好一邊沒修 —— 那正是該處註解要求「本期與基期一律走同一支」的理由。
+    const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop),group);
     totalRev+=d.rev||0;
     totalPure+=d[pureKey]||0;
   });
@@ -6687,6 +6696,27 @@ function _kpiFieldMergeStatus(group,field,shop){
   if(g)return{type:'merged',shops:g.shops,mergeKey:group.key+':'+field+':'+g.shops[0]};
   return null;
 }
+// 合併／不適用欄位歸零：某個通路在某個欄位是合併儲存格或不適用時（例如 MOMO 寄倉運費：
+//   好麻吉/森之旅共用一格、甲配/露營館不適用），算這個通路自己的純利時要把該欄當成 0 ——
+//   費用改成算在合併儲存格或小計上。
+// 🔴 「缺值」與「0」在這裡【差很多】，不是少扣一項而已：_kpiCalcAll 是
+//   `if(out[f.k]==null)out[f.k]=f.calc(out)||0`，公式裡有 undefined ⇒ 結果 NaN ⇒ ||0 把
+//   【整條純利吞成 0】。所以沒做這道前處理的呼叫端，拿到的不是「少扣運費的純利」，
+//   而是 0。
+// 🔴 這支是從三個【逐字相同】的既有區塊抽出來的（小計 _kpiGroupTableHtml、單店全年
+//   _kpiShopAnnualTotal、年度總表 _kpiYearViewHtml；2026-08-26 用程式正規化比對過，
+//   三者除了變數名 group/g 之外一個字不差）。同一天把第四個呼叫端 _kpiGroupTotals（通路卡片）
+//   併進來 —— 卡片以前【沒有】做這道前處理，導致 MOMO 卡片把 mo+0/mo+1 兩家的純利整條
+//   算成 0（2026-01 實測：卡片 54,342，小計 189,157）。
+//   四處從此走同一支，【不要再各寫一份】。
+// ⚠ 純函式：不 mutate raw。沒有要歸零的欄位時原樣回傳【同一個物件參考】，
+//   與抽出前的 `let rawForCalc=raw;` 行為相同（呼叫端仍拿得到原本那個 raw）。
+function _kpiRawForCalc(raw,group,shop){
+  if(!group.fieldMerge)return raw;
+  const zeroFields={};
+  Object.keys(group.fieldMerge).forEach(f=>{if(_kpiFieldMergeStatus(group,f,shop))zeroFields[f]=0;});
+  return Object.keys(zeroFields).length?{...raw,...zeroFields}:raw;
+}
 function editKpiMergedField(month,mergeKey,tdEl){
   const rows=getKpiRows();
   // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：理由同 editKpiFieldNote
@@ -6800,14 +6830,10 @@ function _kpiGroupTableHtml(row,group){
   let totalRev=0,totalPure=0;
   const bodyRows=group.shops.map((shop,shopIdx)=>{
     const raw=row[group.key]?.[shop]||{};
-    // 有些欄位這個賣場是合併/不適用（例如 MOMO 寄倉運費），算這個賣場自己的純利時要當作 0，
-    // 費用改成算在合併儲存格或小計上，不會讓這個賣場的公式因為缺值變成 NaN。
-    let rawForCalc=raw;
-    if(group.fieldMerge){
-      const zeroFields={};
-      Object.keys(group.fieldMerge).forEach(f=>{if(_kpiFieldMergeStatus(group,f,shop))zeroFields[f]=0;});
-      if(Object.keys(zeroFields).length)rawForCalc={...raw,...zeroFields};
-    }
+    // 合併／不適用欄位歸零 —— 抽成 _kpiRawForCalc 共用（原本這裡有六行，與單店全年、
+    //   年度總表逐字相同）。⚠ raw 本身仍要留著：下面 explicitlySet 判「有沒有明確存過值」
+    //   看的是原始 raw，不能拿歸零後的版本去判（那會把「不適用」判成「存過 0」）。
+    const rawForCalc=_kpiRawForCalc(raw,group,shop);
     const d=_kpiCalcAll(rawForCalc,group);
     totalRev+=d.rev||0;
     totalPure+=d[pureKey]||0;
@@ -7009,14 +7035,7 @@ function _kpiShopAnnualTotal(rows,year,group,shop,pureKey){
     const month=`${year}-${String(m).padStart(2,'0')}`;
     const row=rows.find(r=>r.month===month);
     if(!row)continue;
-    const raw=row[group.key]?.[shop]||{};
-    let rawForCalc=raw;
-    if(group.fieldMerge){
-      const zeroFields={};
-      Object.keys(group.fieldMerge).forEach(f=>{if(_kpiFieldMergeStatus(group,f,shop))zeroFields[f]=0;});
-      if(Object.keys(zeroFields).length)rawForCalc={...raw,...zeroFields};
-    }
-    const d=_kpiCalcAll(rawForCalc,group);
+    const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop),group);
     rev+=d.rev||0;pure+=d[pureKey]||0;
   }
   return{rev,pure};
@@ -7087,16 +7106,8 @@ function _kpiYearViewHtml(){
           monthPureTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:#d1d5db">—</td>`);
           continue;
         }
-        const raw=row[g.key]?.[shop]||{};
-        // 有些欄位這個賣場是合併/不適用（例如 MOMO 寄倉運費好麻吉/森之旅共用），
-        // 算純利時要當作 0，不能讓公式因為缺值變成 NaN（跟月結表明細的邏輯一致）。
-        let rawForCalc=raw;
-        if(g.fieldMerge){
-          const zeroFields={};
-          Object.keys(g.fieldMerge).forEach(f=>{if(_kpiFieldMergeStatus(g,f,shop))zeroFields[f]=0;});
-          if(Object.keys(zeroFields).length)rawForCalc={...raw,...zeroFields};
-        }
-        const d=_kpiCalcAll(rawForCalc,g);
+        // 合併／不適用欄位歸零，與月結表明細、單店全年共用同一支（原本三處各寫一份、逐字相同）。
+        const d=_kpiCalcAll(_kpiRawForCalc(row[g.key]?.[shop]||{},g,shop),g);
         const pureV=d[pureKey]||0,revV=d.rev||0;
         annualRev+=revV;annualPure+=pureV;
         monthGrandRev[i]+=revV;monthGrandPure[i]+=pureV;gMonthRev[i]+=revV;
