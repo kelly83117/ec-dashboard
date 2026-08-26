@@ -6592,12 +6592,12 @@ function toggleKpiGroup(month,groupKey){
 //     換行，那次是把日期字串砍短來換空間。這裡格子更多更窄，只能連金額一起砍。）
 //
 // 🔴 本期與基期【一律走同一支 _kpiGroupTotals】，不可以一邊用卡片算法、一邊用小計算法。
-//   已知問題：_kpiGroupTotals【不做 fieldMerge 歸零】，而小計列（_kpiGroupTableHtml）與
-//   年度總表（_kpiShopAnnualTotal）都會做 —— 三處算法裡卡片是唯一的例外。KPI_GROUPS 中
-//   只有 MOMO 有 fieldMerge（ship 欄位：好麻吉/森之旅合併、甲配/露營館不適用），所以
-//   MOMO 那張卡的純利與小計列本來就對不起來。【那是既有問題，本次不修。】
-//   但基期若改用別支取數，這個靜態誤差會變成【會動的誤差】：寄倉運費某個月從 3 萬變 6 萬，
-//   卡片就會憑空多出一段純利跌幅。同一支函式至少保證本期與基期偏得一樣、相減後多半抵消。
+//   理由是【誤差要能抵消】：兩邊走同一支，任何口徑偏差在本期與基期上都一樣大，相減之後
+//   多半抵消；一邊改用別支取數，靜態誤差就會變成【會動的誤差】—— 例如寄倉運費某個月從
+//   3 萬變 6 萬，卡片就會憑空多出一段純利跌幅。
+//   ⚠ 這條【與現在四處是否同口徑無關】，不要因為「反正都一樣了」就放寬它。
+//     （2026-08-26 / PR #232 之前，_kpiGroupTotals 確實漏做 fieldMerge 歸零、與小計列對不起來；
+//       那個偏差已經修掉，四處現在都走 _kpiRawForCalc。但這條規則不是為了那個偏差才立的。）
 //
 // 🔴 純利率用【pp（百分點）】不是 %，而且 pureRateAgg 是【小數】(0.1925) ——
 //   pp 差必須寫 (cur-prev)*100。⚠ 年度總表的 grandRate / groupRate 是【百分比數值】(19.25)、
@@ -7132,13 +7132,25 @@ function _kpiYearViewHtml(){
         ${monthPureTds.join('')}
       </tr>`;
     }).join('');
-    // 整組共同費用（如物流運費）全年加總要扣掉，跟賣場明細頁的小計邏輯一致（今年、去年都要扣）。
+    // 整組共同費用（如物流運費）全年加總要扣掉，跟通路明細頁的小計邏輯一致（今年、去年都要扣）。
     if(g.commonCostLabel){
       for(let m=1;m<=12;m++){
         const monthCur=`${_kpiCurYear}-${String(m).padStart(2,'0')}`;
         const rowCur=rows.find(r=>r.month===monthCur);
         const cCur=rowCur?.[g.key+'Common']||0;
         groupPure-=cCur;grandPure-=cCur;
+        // 逐月那一排（全年總計/純利）也要扣，否則「12 個月橫向加總」跟右邊的全年純利、
+        //   以及上方大卡對不起來，差額正好是全年共同費用（2026 年實測 160,875）。
+        //   🔴 索引【必須換算】，不可以寫 monthGrandPure[m-1]：本迴圈的 m 是【日曆月份】1~12，
+        //     而 monthGrandPure 的索引對應 visibleMonths[i]（見本函式開頭 visibleMonths 上方那段
+        //     警告）—— 只有「該年每個月都有 row」時兩者才剛好相等。2026 年資料是連續的 1~6 月，
+        //     所以寫錯也測不出來；換成「1、3、5 月有資料」的年份就會把 5 月的費用扣到 3 月頭上。
+        //   ⚠ mi<0 代表這個月沒有 row → 不會出現在大表上。此時 rowCur 必為 undefined ⇒ cCur 已經
+        //     是 0，本來就沒東西要扣；這道守衛是為了不去寫 monthGrandPure[-1]（那會在陣列上長出
+        //     一個 -1 屬性，.map() 雖然不會迭代到，但是髒的）。
+        //   ⚠ 取數【沿用上面同一個 cCur】，不另外再讀一次 row —— 兩處讀法若分岔，日後改一邊就漏。
+        const mi=visibleMonths.indexOf(m);
+        if(mi>=0)monthGrandPure[mi]-=cCur;
         const monthPrev=`${prevYear}-${String(m).padStart(2,'0')}`;
         const rowPrev=rows.find(r=>r.month===monthPrev);
         const cPrev=rowPrev?.[g.key+'Common']||0;
@@ -7159,8 +7171,12 @@ function _kpiYearViewHtml(){
     return headerRow+shopTrs;
   }).join('');
   // 月營收圖的資料：只在有可見月份時才產生；空狀態一律設 null，避免留著上一個年份的資料。
-  //   ⚠ 只放營收。純利刻意不放——monthGrandPure 不扣共同費用、grandPure 有扣，
-  //     混進同一張圖會跟上方大卡對不上。
+  //   ⚠ 只放營收，純利【目前不放】。
+  //     ⚠ 舊理由（monthGrandPure 不扣共同費用、grandPure 有扣，混進同一張圖會跟大卡對不上）
+  //       在 2026-08-26 補扣之後【已經不成立】—— 兩者現在同口徑。
+  //     現在不放純利的理由只剩「還沒做」：把純利畫進圖是新功能，不是這次補扣的附帶結果。
+  //     要加的話請當成獨立需求評估（雙 Y 軸、負值、五組共用刻度都要重想），不要因為
+  //     「反正口徑已經一致了」就順手加進來。
   //   ⚠ datasets 這個欄位名沿用 Chart.js 術語，但它【不會】原封不動餵給 Chart.js——
   //     renderKpiYearChart 會自己組 dataset：①五組相加成一條全站折線、②五組各畫一張小圖。
   //   ⚠ backgroundColor（通路識別色）目前是【閒置欄位】：①用 #5b5fcf、②統一 #2a78d6，
@@ -7193,11 +7209,16 @@ function _kpiYearViewHtml(){
   // ── 年度摘要卡＋通路摘要表（純版面重組：數字全部沿用上面已算完的既有變數，不重算）──
   //   ⚠ grandRate / groupRate 已經是百分比數值（19.25），直接 toFixed，不要再乘 100。
   //     （_kpiSummaryCardsHtml 的 pureRateAgg 是小數 0.1925、口徑相反，不要照抄那邊的 *100 寫法。）
-  //   ⚠ 設計意圖：本卡的「全年純利」取自 grandPure —— 那是【已扣共同費用】的數字
+  //   ⚠ 本卡的「全年純利」取自 grandPure —— 那是【已扣共同費用】的數字
   //     （共同費用在上面 g.commonCostLabel 區塊逐月從 grandPure 減掉）。
-  //     下方大表 12 個月的 monthGrandPure 則【未扣共同費用】，所以「12 個月純利橫向加總」
-  //     跟本卡的全年純利對不起來，差額就是全年的共同費用。這是既有差異，
-  //     2026-08-14 判定不在本次改版範圍內修正，這裡刻意不加任何畫面說明文字。
+  //     下方大表 12 個月的 monthGrandPure 【同一個區塊、同一個 cCur 也扣了】（2026-08-26 補），
+  //     所以「12 個月純利橫向加總」現在等於本卡的全年純利。
+  //     ⚠ 舊註解記載的「差額就是全年共同費用、2026-08-14 判定不修」已經處理掉了，不要再拿
+  //       那段描述當現況。
+  //     ⚠ 仍然【刻意不加畫面說明文字】：橫向現在加得起來，但同一欄【直向】加不起來 ——
+  //       上方各通路的純利格不分攤共同費用（那是單一通路的數字），所以 14 格相加會比
+  //       「全年總計」那格多出當月的共同費用。這與群組分隔列早就存在的落差同一性質
+  //       （蝦皮各通路全年純利相加 7,475,473 vs 群組列 7,314,598），是這張表的既定慣例。
   const bigCard=(label,valueHtml,color)=>`<div style="flex:1;min-width:180px;background:#f8f9fc;border-radius:10px;padding:18px 20px">
     <div style="font-size:12px;color:#9ca3af;font-weight:600;letter-spacing:.03em">${label}</div>
     <div style="font-size:30px;font-weight:700;margin-top:6px;line-height:1.15;font-variant-numeric:tabular-nums;color:${color}">${valueHtml}</div>
@@ -7312,8 +7333,10 @@ function renderKpiTab(){
 //     堆疊長條 → 蝦皮 89.5%、官網 0.05%，畫面上只看得到蝦皮與 MOMO 兩色，legend 卻列著五個顏色。
 //     單色長條 + tooltip 拆分 → 「還要滑過去看」。tooltip 是查詢不是顯示。
 //     也不要把小通路併成「其他」：官網與業外是有人在看的。
-//   只畫營收。純利刻意不畫——monthGrandPure 不扣共同費用、grandPure 有扣，
-//   混進同一張圖會跟上方三張大卡對不上。
+//   只畫營收，純利【目前不畫】。
+//   ⚠ 舊理由（monthGrandPure 不扣共同費用、grandPure 有扣，會跟上方三張大卡對不上）在
+//     2026-08-26 補扣之後【已經不成立】。現在不畫的理由只剩「還沒做」——見
+//     _kpiYearChartData 上方同一件事的說明，要加請當成獨立需求評估。
 //   ⚠ 這裡【不做】destroy 舊實例：那是 renderKpiTab 開頭 kpiYearDestroyCharts() 的責任。
 //     在這裡也做會變成兩個地方各管一半，日後改一邊就漏。
 function renderKpiYearChart(){
