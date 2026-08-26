@@ -10276,7 +10276,8 @@ function momoSaveMoPlusMaster(shop, doc){ return momoSaveMoPlusOriginsDoc(shop, 
    ⚠ 反推僅供顯示/異常偵測，毛利一律走逐筆實際值（見 spec 界線）。*/
 const MOMO_FEE_RATES=[3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,10,12,13,13.5];   // 公告費率集合（rules.momo.com.tw/payment/00002）
 // 公告表「非檔期/檔期」配對（rules.momo.com.tw/payment/00002）。反推配對模型：非檔期列須解到某配對的 np、檔期列須解到同配對的 pr。
-//   ⚠ 刻意不含 8/8.x 配對：實測有 SKU 非檔期實收 8%（不在任何配對）→ 標異常人工確認（使用者定案：不猜配對填補、保留「公告配對與帳單有出入」訊號）。
+//   ⚠ 原則不變：配對只收「已查證」的實際費率，【絕不憑反推結果猜測填補】——沒配對的實收費率一律標異常人工確認，保留「公告配對與帳單有出入」訊號。
+//   [8,9]＝手機週邊配件（手機掛繩／手機支架），Vanessa 2026-08-19 於 MOMO 後台逐層查證的實際費率（非檔期 8%／檔期 9%），屬「已查證」故納入，非反推猜測。
 const MOMO_FEE_PAIRS=[[3,3.5],[4,4.5],[5,5.5],[5.5,6.5],[6,6.5],[6,7],[6.5,7.5],[7,7.5],[7.5,8.5],[8,9],[9,10],[12,13],[12,13.5]];   // [8,9]＝手機週邊配件（手機掛繩/支架），Vanessa 後台查證 2026-08-19
 const MOMO_FEE_NP=[...new Set(MOMO_FEE_PAIRS.map(p=>p[0]))];   // 非檔期配對值 {3,4,5,5.5,6,6.5,7,7.5,9,12}
 const MOMO_FEE_PR=[...new Set(MOMO_FEE_PAIRS.map(p=>p[1]))];   // 檔期配對值   {3.5,4.5,5.5,6.5,7,7.5,8.5,10,13,13.5}
@@ -12017,7 +12018,7 @@ function momoOptlogTodayCounts(){
     const map=momoLoadOptlog(shop)||{};
     Object.keys(map).forEach(sku=>{ (map[sku]||[]).forEach(e=>{
       if(!e || (e.date||'')!==today) return;
-      const person=momoOptlogUserToName(e.by); if(!person) return;
+      const person=momoOptlogUserToName(e.by) || '未指派';   // 缺 by（無操作者）→ 併入「未指派」桶，比照 ADJ_SHOP_TO_PERSON['維克']='未指派'；不靜默丟、不回填人名
       const key=shop+MOMO_OPTLOG_DP_SEP+(e.type||'其他');
       const c=byPerson[person]=byPerson[person]||{};
       c[key]=(c[key]||0)+1;
@@ -13064,6 +13065,7 @@ function momoBatchSubmitEdit(shop){
   p.history.push(entry);
   momoSaveProducts(shop,products);
   { const _skuChg=changes.find(c=>c.field==='品號'); if(_skuChg){ try{ momoRenameSkuOptlog(shop,_skuChg.from,_skuChg.to); }catch(e){ try{ console.warn('[改品號 optlog 遷移]',e); }catch{} } } }   // 品號改名一併遷移 optlog（否則 om[oldSku] 變孤兒）
+  { const _ed=changes.filter(c=>c.field==='商品名稱'||c.field==='原廠編號'); if(_ed.length){ try{ momoLogProductAddOptlog(shop, p.sku, '編輯資料', _ed.map(c=>c.field+' '+(c.from||'—')+'→'+(c.to||'—')).join('；')+(note?' · '+note:'')); }catch(e){} } }   // 改動二：名稱/原廠異動寫 optlog（原本只有品號 rename 寫；工作日誌看得到）。此時 p.sku 已是新品號、rename 已遷移 → 掛新 key 正確
   if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop);
   // 改原廠 → 莫筆克成本「只提示不自動改」（成本是稽核數字、要走成本欄+異動原因，不因改編號悄悄變動）
   let costHint='';
@@ -13218,6 +13220,7 @@ function momoMoPlusBatchSubmitEdit(shop){
   momoSaveProducts(shop,products);
   { const _skuChg=changes.find(c=>c.field==='品號'); if(_skuChg){ try{ momoRenameSkuOptlog(shop,_skuChg.from,_skuChg.to); }catch(e){ try{ console.warn('[改品號 optlog 遷移]',e); }catch{} } } }   // 品號改名一併遷移 optlog（否則 om[oldSku] 變孤兒）
   if(priceChanged){ try{ momoLogProductAddOptlog(shop, p.sku, '調價', '售價 '+(curManual==null?'主檔':'$'+curManual)+' → $'+newManual); }catch(e){} }   // 改售價寫一筆 optlog（工作日誌看得到）
+  { const _ed=changes.filter(c=>c.field==='商品名稱'||c.field==='原廠編號'); if(_ed.length){ try{ momoLogProductAddOptlog(shop, p.sku, '編輯資料', _ed.map(c=>c.field+' '+(c.from||'—')+'→'+(c.to||'—')).join('；')+(note?' · '+note:'')); }catch(e){} } }   // 改動二：名稱/原廠異動寫 optlog（原本只有品號 rename / 售價寫；工作日誌看得到）
   if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop);
   momoRenderBatchEditList(shop); momoRenderBatchEditForm(shop);   // 名稱/品號改動 → 左側清單也刷新
   if(typeof showToast==='function') showToast('已更新並記錄一筆歷程','success');
@@ -13240,13 +13243,17 @@ function momoMoPlusClearPrice(shop, sku){
 // 「以主檔為準」批次清除手動售價。skus=可選 Set/陣列（只清這些）；省略＝全部。回清除筆數。
 function momoMoPlusClearAllManualPrice(shop, skus){
   const only=skus?(skus instanceof Set?skus:new Set(skus)):null;
-  const products=momoLoadProducts(shop); let n=0; const np=momoNowParts();
+  const products=momoLoadProducts(shop); let n=0; const np=momoNowParts(); const changed=[];
   products.forEach(p=>{ if(only && !only.has(p.sku)) return;
     if(Number(p.listPriceManual)>0){ const from=Number(p.listPriceManual); delete p.listPriceManual; delete p.listPriceManualMeta;
     p.history=p.history||[]; p.history.push({...np, note:'售價改回主檔（批次清除手動值 $'+from+'）', changes:[{field:'售價', from:from, to:'主檔'}]});
-    try{ momoLogProductAddOptlog(shop, p.sku, '調價', '售價改回主檔（批次清除手動值 $'+from+'）'); }catch(e){}
-    n++; } });
+    changed.push(p.sku); n++; } });
   if(n) momoSaveProducts(shop, products);
+  // 工作日誌 optlog（改動一：批次不再逐筆洗版）：單筆→掛真品號（進該商品優化紀錄時間軸）；多筆→一筆彙總（synthetic key 不撞真品號、僅進工作日誌 counts，比照 15808『同步新建』）。product.history 仍逐筆保留（非洗版、在各商品自己的異動記錄）。
+  try{
+    if(changed.length===1) momoLogProductAddOptlog(shop, changed[0], '調價', '售價改回主檔（清除手動值）');
+    else if(changed.length>1) momoLogProductAddOptlog(shop, 'price-reset', '調價', '批次改用主檔掛牌價·'+changed.length+' 筆');
+  }catch(e){}
   return n;
 }
 // 主檔匯入落差清單 modal：列出手動售價 vs 主檔掛牌不同的商品，可逐筆或全部改用主檔。
@@ -13431,10 +13438,14 @@ function momoMoPlusAddPreview(shop){
   const origin=(g('origin')?g('origin').value:'').trim();
   const sp=parseFloat(g('sp')?g('sp').value:''), fee=parseFloat(g('fee')?g('fee').value:'');
   const costMap=momoMoPlusCostMapCached();
+  const _ci=document.getElementById('momo-mpadd-cost-'+shop);           // 改動五：成本欄改可輸入 → 試算優先取手動值，其次原廠自動帶
+  const _typed=_ci?parseFloat(_ci.value):NaN;
+  const _byOrigin=(origin && Number(costMap[origin])>0)?Number(costMap[origin]):null;
   let cost=null, costHtml;
-  if(!origin) costHtml='<span style="color:#9ca3af">輸入原廠編號自動帶成本</span>';
-  else if(Number(costMap[origin])>0){ cost=Number(costMap[origin]); costHtml='成本 <b>$'+cost+'</b> <span style="color:#9ca3af">（原廠 '+_momoEsc(origin)+' 自動帶入）</span>'; }
-  else costHtml='<span style="color:#dc2626;font-weight:700">查無成本</span> <span style="color:#9ca3af">（原廠 '+_momoEsc(origin)+' 不在莫筆克成本表 → 補表後才可試算）</span>';
+  if(_typed>=0){ cost=_typed; costHtml='成本 <b>$'+cost+'</b> <span style="color:#9ca3af">（'+((_byOrigin!=null&&Number(_byOrigin)===Number(cost))?'原廠 '+_momoEsc(origin)+' 自動帶入':'手動輸入')+'）</span>'; }
+  else if(!origin) costHtml='<span style="color:#9ca3af">輸入原廠編號自動帶成本</span>';
+  else if(_byOrigin!=null){ cost=_byOrigin; costHtml='成本 <b>$'+cost+'</b> <span style="color:#9ca3af">（原廠 '+_momoEsc(origin)+' 自動帶入）</span>'; }
+  else costHtml='<span style="color:#dc2626;font-weight:700">查無成本</span> <span style="color:#9ca3af">（原廠 '+_momoEsc(origin)+' 不在莫筆克成本表 → 可在成本欄手動輸入）</span>';
   const other=momoMoPlusOtherFeeRate();
   const col=v=>v>=20?'#10b981':(v>=0?'#d97706':'#dc2626');
   let mHtml;
@@ -13448,9 +13459,7 @@ function momoMoPlusAddPreview(shop){
     <div style="font-size:11px;color:#9ca3af;margin-top:6px;line-height:1.7">成交手續費 $${feeAmt.toFixed(0)}（售價 ${sp}×${fee}%）｜(b) 再扣其他平台費用率 <input type="number" value="${other.pct}" onchange="momoMoPlusSetOtherFee('${shop}',this.value)" style="width:58px;padding:1px 5px;border:1px solid #e5e7eb;border-radius:5px;font-size:11px"> %，取自 <b>${_momoEsc(other.month)}</b>（可調）</div>`;
   } else if(origin && cost==null) mHtml='<div style="color:#dc2626;font-size:12px;margin-top:8px">查無成本 → 無法試算毛利（先補該原廠編號成本表）</div>';
   else mHtml='<div style="color:#9ca3af;font-size:12px;margin-top:8px">填 原廠編號＋售價＋成交費率 即時試算兩數毛利率</div>';
-  const costFld=document.getElementById('momo-mpadd-cost-'+shop);   // 唯讀成本欄（欄位順序用）同步
-  if(costFld) costFld.innerHTML = cost!=null?('$'+cost) : (origin?'<span style="color:#dc2626">查無成本</span>':'輸入原廠編號自動帶');
-  box.innerHTML=costHtml+mHtml;
+  box.innerHTML=costHtml+mHtml;   // 改動五：成本欄已是可輸入 input，不再由此覆寫其值（避免打字時被清掉）
 }
 // 新增表單費率來源暫存（shop → {source, autofillRate}）；送出時寫入 product 供 P4 回頭比對
 const _moPlusAddFee={};
@@ -13468,7 +13477,7 @@ function momoRenderMoPlusBatchAdd(shop){
         <div><label style="${_MOMO_LB}">商品編號（選填，留空自動 TEMP-）</label><input id="momo-mpadd-sku-${shop}" type="text" style="${_MOMO_INP}"></div>
         <div><label style="${_MOMO_LB}">原廠編號（自動帶成本＋建議費率）</label><input id="momo-mpadd-origin-${shop}" type="text" oninput="momoMoPlusAddOriginChanged('${shop}')" placeholder="例：H236-01" style="${_MOMO_INP}"></div>
         <div style="grid-column:1/3"><label style="${_MOMO_LB}">商品名稱（必填）</label><input id="momo-mpadd-name-${shop}" type="text" style="${_MOMO_INP}"></div>
-        <div><label style="${_MOMO_LB}">成本（原廠編號自動帶入 · 唯讀）</label><div id="momo-mpadd-cost-${shop}" style="${_MOMO_INP};background:#f8fafc;color:#64748b;display:flex;align-items:center;font-size:12px">輸入原廠編號自動帶</div></div>
+        <div><label style="${_MOMO_LB}">成本（原廠編號自動帶入；查無可手動輸入）</label><input id="momo-mpadd-cost-${shop}" type="number" oninput="momoMoPlusAddPreview('${shop}')" placeholder="輸入原廠編號自動帶" style="${_MOMO_INP}"><div id="momo-mpadd-cost-src-${shop}" style="font-size:11px;margin-top:2px;line-height:1.4"></div></div>
         <div><label style="${_MOMO_LB}" title="填的售價會存起來、編輯時帶得出來；日後匯入商品主檔會自動改用官方掛牌價（匯入摘要會列出被取代的項）">售價（掛牌）</label><input id="momo-mpadd-sp-${shop}" type="number" oninput="momoMoPlusAddPreview('${shop}')" style="${_MOMO_INP}"></div>
         <div style="grid-column:1/3">
           <label style="${_MOMO_LB}">成交費率 %</label>
@@ -13509,6 +13518,13 @@ function momoMoPlusAddOriginChanged(shop){
   const extra=sug.warn12?'⚠ 此前綴有 12% 前例，請確認是否為美妝/精品（用左側 12% 鈕）':'';
   momoMoPlusAddFeeBadge(shop, extra);
   if(sug.refNote){ const el=document.getElementById('momo-mpadd-feebadge-'+shop); if(el) el.innerHTML+=` <span style="color:#9ca3af">· ${_momoEsc(sug.refNote)}</span>`; }
+  // 改動五：原廠變更 → 自動帶成本（cost_by_origin）；查無則清空並提示可手動輸入＋兩句補充（比照甲乙 momoAddOriginLookup 的 momo-add-cost-src）
+  { const costEl=g('cost'); const srcEl=document.getElementById('momo-mpadd-cost-src-'+shop);
+    let c=null; try{ if(origin){ const cm=momoMoPlusCostMapCached(); if(Number(cm[origin])>0) c=Number(cm[origin]); } }catch(e){}
+    if(!origin){ if(costEl) costEl.value=''; if(srcEl) srcEl.innerHTML=''; }
+    else if(c!=null){ if(costEl) costEl.value=c; if(srcEl) srcEl.innerHTML=`<span class="mm-cost-src-ok">來源：莫筆克（${c}）</span>`; }
+    else { if(costEl) costEl.value=''; if(srcEl) srcEl.innerHTML=`<span class="mm-cost-src-warn">查無此原廠編號的成本，請手動輸入</span><div style="font-size:10px;color:#9ca3af;margin-top:2px">此成本會套用到所有相同原廠編號的商品（含甲配／乙配）</div><div style="font-size:10px;color:#9ca3af">手動輸入的成本不會被莫筆克主檔匯入覆蓋，要改需回原畫面手動修改</div>`; }
+  }
   momoMoPlusAddPreview(shop);
 }
 // 使用者手改費率 → 標手動
@@ -13535,7 +13551,9 @@ function momoMoPlusAddOne(shop){
   const feeVal=parseFloat((g('fee')?g('fee').value:''));
   const feeSrc=(_moPlusAddFee[shop]||{}).source||'default';           // prefix_diff/prefix_same/default/manual（P4 命中率量測依據）
   const spVal=parseFloat((g('sp')?g('sp').value:''));                 // 售價（暫估）：落地為 listPriceManual(src:'add')＋記時間軸；編輯帶得出來、主檔一到自動被取代
-  let costV=null; try{ if(origin){ const cm=momoMoPlusCostMapCached(); if(Number(cm[origin])>0) costV=Number(cm[origin]); } }catch(e){}
+  const _costEl=g('cost'); const _typedCost=_costEl?parseFloat(_costEl.value):NaN;   // 改動五：成本欄可手動輸入 → 優先取手動值
+  let _byOriginCost=null; try{ if(origin){ const cm=momoMoPlusCostMapCached(); if(Number(cm[origin])>0) _byOriginCost=Number(cm[origin]); } }catch(e){}
+  let costV = (_typedCost>=0) ? _typedCost : _byOriginCost;
   // 時間軸（唯一 rich 來源）：新增這筆 history entry 帶齊欄位；feeSource 寫進 note（事由欄）→ 時間軸看得到、不改共用表格欄（甲乙不受影響）
   const feeNote=(feeVal>=0)?('｜成交費率 '+feeVal+'%（來源 '+feeSrc+'）'):'';
   const hist={ date:now.date, time:now.time,
@@ -13550,6 +13568,11 @@ function momoMoPlusAddOne(shop){
   if(feeVal>=0){ p.feeRatePredicted={rate:feeVal, source:feeSrc, at}; }
   products.push(p);
   momoSaveProducts(shop,products);
+  // 改動五：手動輸入的成本 → 寫進共用 cost_by_origin（走 momoSetCostByOrigin manual 路徑：受保護、不被莫筆克主檔匯入覆蓋）。
+  //   MO+ 毛利逐列 live 查 cost_by_origin，故必寫此表、不寫 product.cost。僅在「新值或與現值不同」時寫（避免重複補成本 optlog）。
+  if(origin && costV!=null && costV>=0 && (_byOriginCost==null || Number(_byOriginCost)!==Number(costV))){
+    try{ momoSetCostByOrigin(origin, costV, {manual:true, shop, by:momoCurrentUserName(), note:'新增商品時手動輸入成本', src:'新增'}); }catch(e){}
+  }
   // 工作日誌連動（比照 momoAddOptlog：一筆 optlog、type '新增商品'、by=登入者 → 走既有 momoUpdateDailyProgress 進當日 counts）。
   //   rich 欄位只存 history 一份；此 optlog 只當工作日誌計數指標，靠 sku 軟連結回商品（不各存一份）。
   try{
@@ -15434,7 +15457,7 @@ function momoSetCostByOrigin(origin, cost, opts){
   if(opts.manual && opts.shop){
     try{
       const om=momoLoadOptlog(opts.shop); om[origin]=Array.isArray(om[origin])?om[origin]:[];
-      om[origin].push({ id:'opt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:np.date, time:np.time, shop:opts.shop, sku:origin, by:opts.by||'', type:'補成本', note:'原廠 '+origin+' 成本 '+(from==null?'—':from)+'→'+c+(opts.note?' · '+opts.note:'') });
+      om[origin].push({ id:'opt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:np.date, time:np.time, shop:opts.shop, sku:origin, by:opts.by||'系統補寫', type:'補成本', note:'原廠 '+origin+' 成本 '+(from==null?'—':from)+'→'+c+(opts.note?' · '+opts.note:'') });   // 缺 by（程式化/無登入補成本）→ 標「系統補寫」明確值，不留空以免日後又進未指派；既有舊資料不追溯
       momoSaveOptlog(opts.shop, om);   // _markPending → 同步走 momoSyncOptlog（read-merge-write）
       momoUpdateDailyProgress({silent:true});   // 工作日誌 counts 立即跟上
     }catch(e){ try{ console.warn('[momo 補成本 optlog]', e); }catch{} }
@@ -15788,7 +15811,8 @@ function momoSyncApplyName(shop){
 function momoSyncApplyDiscontinued(shop){
   const items=(_momoSyncPlan.shops[shop]||{}).discontinued||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可標記下架的項目','info'); return; }
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
-  items.forEach(it=>{ const p=bySku.get(it.sku); if(p) p.discontinued=true; });
+  // 改動二：標下架也寫 history 留稽核軌跡（對稱復架；optlog 維持不寫——標下架非「資源異動」、不進工作日誌）。
+  items.forEach(it=>{ const p=bySku.get(it.sku); if(p){ p.discontinued=true; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:p.cost,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品資料同步：標記下架（'+((it.signals||[]).join('／')||'主檔非進行')+'）'}); } });
   momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已標記 '+items.length+' 筆下架');
 }
 // 復架（對稱於標下架）：把已下架但主檔恢復進行／F1102 進行有庫存的商品設回上架。政策＝人工確認、不自動。
@@ -15796,8 +15820,11 @@ function momoSyncApplyDiscontinued(shop){
 function momoSyncApplyReactivate(shop){
   const items=(_momoSyncPlan.shops[shop]||{}).reactivate||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可復架的項目','info'); return; }
   const master=momoLoadProducts(shop), bySku=new Map(master.map(p=>[p.sku,p]));
-  items.forEach(it=>{ const p=bySku.get(it.sku); if(p){ p.discontinued=false; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:p.cost,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品資料同步：復架（'+((it.signals||[]).join('／')||'人工')+'）'}); } });
-  momoSaveProducts(shop,master); _momoSyncAfterApply(shop, shop+' 已復架 '+items.length+' 筆');
+  let n=0;
+  items.forEach(it=>{ const p=bySku.get(it.sku); if(p){ p.discontinued=false; p.history=p.history||[]; p.history.push({...momoNowParts(),cost:p.cost,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品資料同步：復架（'+((it.signals||[]).join('／')||'人工')+'）'}); n++; } });
+  momoSaveProducts(shop,master);
+  if(n>0) momoLogProductAddOptlog(shop, 'sync-reactivate', '復架', '商品資料同步·復架 '+n+' 筆');   // 改動二：復架＝一筆彙總 optlog（工作日誌看得到；比照 15812『同步新建』synthetic key，不撞真品號、不洗版）
+  _momoSyncAfterApply(shop, shop+' 已復架 '+n+' 筆');
 }
 function momoSyncApplyNew(shop){
   const items=(_momoSyncPlan.shops[shop]||{}).newItems||[]; if(!items.length){ if(typeof showToast==='function') showToast(momoShopDisplay(shop)+' 沒有可一鍵新增的未建檔項目','info'); return; }
