@@ -634,6 +634,29 @@ try {
     removeImage: (imgId) => deleteDoc(doc(db, 'task_images', imgId)),
   };
 
+  // ============== 酷澎重建 PR-2 ── 報表 coupang_reports（每賣場每月一 doc，比照 momo_reconcile）＋ 退貨 coupang_msf（每份 MSF 一 doc，比照 momo_e001） ==============
+  //   ⚠ 內部賣場 key 用 '麻吉'/'露營館'（顯示名 '好麻吉'/'露營館' 由 cupShopDisplay 處理，PR-3）；doc id 用 maji/luying，與 MOMO 的 mo_maji 天然不同命名空間 → 跨平台可分。
+  //   report doc id = shopDocId + '_' + 'YYYY-MM'（例 maji_2026-07）；doc 內 { shop, month, skus:{code:{qty,rev,cost,...費用}}, orderNos:[訂單編號…], updatedAt }。
+  //     orderNos 存本月全部訂單編號（Option A：退貨 MSF.訂單編號→下單月 讀取端解析用；跟報表同生共死、不留孤兒索引；~15KB/月/賣場、A1 每月一 doc 有界）。
+  //   msf doc id = shopDocId + '_' + msfSrc；doc 內 { shop, src, byOrder:{oid:{returnAmt,confirmDate,hasDeliveryFee}}, returnTotal }。
+  //   getDoc/subscribe 命名【必須】保留（落本機防護讀取白名單、自動放行）；setReport/setSrc 唯一寫入。report 帶 updatedAt serverTimestamp 供推送前版本比對（比照 momo_products/origins）；msf 整包取代冪等（重傳同檔覆蓋、不累加，比照 s1103）。
+  //   ⚠ PR-4 五處同步登記要處理【兩個】key 前綴：ec_coupang|（報表）＋ ec_coupang_msf|（退貨）。TEST_NOWRITE 物件數 14→16。
+  const COUPANG_SHOP_DOCID = { '麻吉':'maji', '露營館':'luying' };
+  const coupangReportsColRef = collection(db, 'coupang_reports');
+  const coupangReportDocId = (shop, month) => (COUPANG_SHOP_DOCID[shop] || shop) + '_' + month;
+  window.__cloudCoupang = {
+    getDoc:    (shop, month) => getDoc(doc(db, 'coupang_reports', coupangReportDocId(shop, month))),
+    setReport: (shop, month, data) => { const { updatedAt:_drop, ...clean } = (data || {}); return setDoc(doc(db, 'coupang_reports', coupangReportDocId(shop, month)), { ...clean, updatedAt: serverTimestamp() }); },
+    subscribe: (cb) => onSnapshot(coupangReportsColRef, cb),
+  };
+  const coupangMsfColRef = collection(db, 'coupang_msf');
+  const coupangMsfDocId = (shop, src) => (COUPANG_SHOP_DOCID[shop] || shop) + '_' + src;
+  window.__cloudCoupangMsf = {
+    getDoc: (shop, src) => getDoc(doc(db, 'coupang_msf', coupangMsfDocId(shop, src))),
+    setSrc: (shop, src, data) => setDoc(doc(db, 'coupang_msf', coupangMsfDocId(shop, src)), data || {}),
+    subscribe: (cb) => onSnapshot(coupangMsfColRef, cb),
+  };
+
   window.dispatchEvent(new Event('cloudStoreReady'));
 
   // 首頁渲染完後 1.5 秒（給 dashboard / 圖表時間），背景把重量級訂閱接上
