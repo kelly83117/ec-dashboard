@@ -967,3 +967,28 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
      不是新造一套。
    取代原本寫在 JS 字串裡的 inline style="color:#d1d5db"。 */
 .kpi-cell-empty{color:var(--text-faint);}
+
+/* KPI 評分表「賣場月度評分比較」的外框（容器 id=score-cmp-table，內容由
+   renderScoreComparisonTable 以 innerHTML 填入一張 width:100% 的 table）。
+   ⚠ 從 js/profit.js 的 inline style 搬過來，值【逐項對照、不改樣子】：
+     border 1px solid #e5e7eb → var(--border)（css/main.css:12 就是 #e5e7eb，同值）
+     border-radius:10px / margin-bottom:10px → 原樣保留
+   🔴 唯一的行為變更：overflow:hidden → overflow-x:auto。
+     舊寫法在窄視窗（手機）會把表格右邊【直接裁掉】，而且沒有任何方式捲過去看。
+     月份欄帶 min-width:72px（見 renderScoreComparisonTable 上方那段註解：色票 56px + td
+     左右 padding 16px），一季三個月就有 216px，加上賣場欄與本季平均欄，表格有內建的
+     最小寬度，窄視窗放不下。
+     ⚠ 用 auto【不是 scroll】：scroll 會永久顯示捲軸，桌機當場變樣。
+       這也是刻意【不沿用 .tscroll】的原因 —— 那支是 overflow-x:scroll + min-height:420px，
+       給淨利表整頁大表用的，套到這張 5 列小表會撐出 420px 高。
+     沿用同分頁既有做法：_kpiGroupTableHtml 與 _kpiYearViewHtml 的表格容器都是 overflow-x:auto。
+   ⚠ border-radius 保留字面 10px：:root 只有 --radius(12px) 與 --radius-sm(8px)，沒有 10px；
+     換過去會改變桌機外觀，本輪不做。
+   ⚠ 表格本身【刻意不加 min-width】：那會是一個憑空發明的數字，而欄位既有的 min-width
+     已經撐出下限。要加請另案給數字。 */
+.score-cmp-wrap{
+  border:1px solid var(--border);
+  border-radius:10px;
+  overflow-x:auto;
+  margin-bottom:10px;
+}

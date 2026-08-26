@@ -7763,7 +7763,7 @@ function _kpiScoreViewHtml(){
   </div>
 
   <div style="font-size:15px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
-  <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px" id="score-cmp-table"></div>
+  <div class="score-cmp-wrap" id="score-cmp-table"></div>
   <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">點分數看明細，可以點多個一起比較；灰色分數代表當月還沒有資料</div>
   <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;line-height:1.8">
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
