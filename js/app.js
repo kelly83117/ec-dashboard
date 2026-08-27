@@ -778,8 +778,11 @@ const App = {
     // 唯讀角色：全域標記 → CSS 停用動作鈕 + 點擊攔截（防線③）
     document.body.classList.toggle('ro-readonly', user.role === 'view');
     if (user.role !== 'view') {
-      // 切回非唯讀（含側欄等不隨 render 重建的元素）：清掉殘留的停用裝飾
-      document.querySelectorAll('.ro-blocked').forEach(el => { el.classList.remove('ro-blocked'); el.__roMarked = false; });
+      // 切回非唯讀（含側欄等不隨 render 重建的元素）：清掉殘留的停用裝飾 / readOnly
+      document.querySelectorAll('.ro-blocked').forEach(el => {
+        el.classList.remove('ro-blocked'); el.__roMarked = false;
+        if (el.__roReadonly) { el.readOnly = false; el.__roReadonly = false; }
+      });
     }
 
     const isAdmin = user.role === 'admin';
@@ -3240,56 +3243,57 @@ function mapAnaLabel(l) { return ANA_LABEL_DISPLAY[l] || l; }  // 未列的（�
  * 採【允許為主 + 攔截寫入】：view 的檢視動作（切賣場/季別/排序/篩選/匯出/看帳號）一律放行，
  * 只攔明確的寫入 handler；漏網的仍由資料層擋下（不會改到資料，只是少了灰底提示）。 */
 // 明確「會改資料」的 inline handler 名稱片段（不含匯出 doExport/momoExport/cupExport、不含檢視狀態 setShop/tab/filter）
-const __RO_WRITE_RE = /\b(generate|generateAffRpt|generateCoupang|syncToCloud|momoOpenSyncPreview|momoConfirmSync|momoUpload|momoMoPlus(Upload|Batch|Master|CostInline|EditRecalc|AddOne|SetOtherFee|PriceDiff|ClearPrice|AddFeeExc)|momoE001(Apply|File|Remove|Clear)|momoRecon(Pick|Generate|Store)|momoRebuild|momoSyncFile|momoSyncApplyReactivate|momoBatchSubmit|momoDeleteProduct|momoDeleteOptlog|momoAddOptlog|momoMissingCostSave|momoAddPickCost|onGlobalFile|onAffFile|onCoupangFile|cupMissCostSave|onCupNoteChange|startEdit|confirmAdsEdit|startNote|submitProfitNote|_pnmEditNote|editKpi(CommonCost|MergedField)|confirmAddSummaryRow|openAddSummaryRowModal|_sumRestoreRow|saveAnaSettings|saveTestSettings|saveGrowthSettings|onPlatformRateChange|confirmBatchTag|openBatchTagPanel|confirmDeleteFile|openDeleteFileModal|openUserModal|deleteUser|openChangePasswordModal|openBossTaskModal|_?deleteBossTask|openDailyTaskModal|deleteDailyTask|openQuickTodoModal|openBossLineConfigModal|openInsightNoteModal|openInsightSettingsModal|openScoreModal|addTodoItem|restorePlatformsBackup|openPlatformModal)\b/;
+const __RO_WRITE_RE = /\b(generate|generateAffRpt|generateCoupang|syncToCloud|syncCoupangToCloud|momoOpenSyncPreview|momoConfirmSync|momoUpload|momoMoPlus(Upload|Batch|Master|CostInline|EditRecalc|AddOne|SetOtherFee|PriceDiff|ClearPrice|AddFeeExc)|momoE001(Apply|File|Remove|Clear)|momoRecon(Pick|Generate|Store)|momoRebuild|momoSyncFile|momoSyncApplyReactivate|momoBatchSubmit|momoDeleteProduct|momoDeleteOptlog|momoAddOptlog|momoMissingCostSave|momoAddPickCost|onGlobalFile|onAffFile|onCoupangFile|cupMissCostSave|onCupNoteChange|startEdit|confirmAdsEdit|startNote|submitProfitNote|_pnmEditNote|editKpi(CommonCost|MergedField)|confirmAddSummaryRow|openAddSummaryRowModal|_sumRestoreRow|saveAnaSettings|saveTestSettings|saveGrowthSettings|onPlatformRateChange|confirmBatchTag|openBatchTagPanel|confirmDeleteFile|openDeleteFileModal|openUserModal|deleteUser|openChangePasswordModal|openBossTaskModal|_?deleteBossTask|openDailyTaskModal|deleteDailyTask|openQuickTodoModal|openBossLineConfigModal|openInsightNoteModal|openInsightSettingsModal|openScoreModal|addTodoItem|restorePlatformsBackup|openPlatformModal)\b/;
 function __roIsWriteEl(el) {
   if (!el || !el.getAttribute) return false;
   if (el.matches && el.matches('input[type="file"]')) return true;
-  const oc = el.getAttribute('onclick');
-  if (oc && __RO_WRITE_RE.test(oc)) return true;
+  // 檢查 onclick / oninput / onchange 三種 inline handler（酷澎調整欄 note 走 oninput）
+  const h = (el.getAttribute('onclick') || '') + ';' + (el.getAttribute('oninput') || '') + ';' + (el.getAttribute('onchange') || '');
+  if (__RO_WRITE_RE.test(h)) return true;
   if (el.getAttribute('contenteditable') === 'true') return true;
   return false;
 }
 function __roInitUIGuard() {
-  // 點擊攔截（capture 階段，趕在 inline handler 之前）
-  document.addEventListener('click', function (e) {
+  // 事件攔截（capture 階段，趕在 inline handler 之前）：click / input / change 三種
+  //   click＝按鈕與可編輯格；input＝即時輸入（酷澎調整欄 note oninput）；change＝檔案上傳 input
+  function __roGuardEvent(e) {
     if (!document.body.classList.contains('ro-readonly')) return;
     let el = e.target;
     for (let i = 0; el && i < 6; i++, el = el.parentElement) {
       if (__roIsWriteEl(el)) {
         e.preventDefault();
         e.stopImmediatePropagation();
+        if (el.matches && el.matches('input[type="file"]')) { try { el.value = ''; } catch {} }
         __roDenied();
         return;
       }
     }
-  }, true);
-  // change 攔截（檔案上傳 input 的 onchange 走 change 不走 click）
-  document.addEventListener('change', function (e) {
-    if (!document.body.classList.contains('ro-readonly')) return;
-    const el = e.target;
-    if (el && el.matches && el.matches('input[type="file"]')) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      try { el.value = ''; } catch {}
-      __roDenied();
-    }
-  }, true);
-  // 視覺裝飾：把寫入控制項標成灰底 + hover 提示（決策 1）。debounce 掃描動態渲染的內容。
+  }
+  document.addEventListener('click', __roGuardEvent, true);
+  document.addEventListener('input', __roGuardEvent, true);
+  document.addEventListener('change', __roGuardEvent, true);
+  // 視覺裝飾：把寫入控制項標成灰底 + hover 提示（決策 1）；寫入輸入框直接設 readOnly（不能打字）。
+  //   debounce 掃描動態渲染的內容。
   let __roDecoT = 0;
   function __roDecorate() {
     if (!document.body.classList.contains('ro-readonly')) {
-      // 非唯讀（含切回 admin/staff）：清掉殘留裝飾，避免跨角色切換留下灰底 class
+      // 非唯讀（含切回 admin/staff）：清掉殘留裝飾，避免跨角色切換留下灰底 class / readOnly
       document.querySelectorAll('#view-app .ro-blocked').forEach(el => {
         el.classList.remove('ro-blocked'); el.__roMarked = false;
+        if (el.__roReadonly) { el.readOnly = false; el.__roReadonly = false; }
       });
       return;
     }
-    const nodes = document.querySelectorAll('#view-app [onclick], #view-app input[type="file"], #view-app [contenteditable="true"]');
+    const nodes = document.querySelectorAll('#view-app [onclick], #view-app [oninput], #view-app [onchange], #view-app input[type="file"], #view-app [contenteditable="true"]');
     nodes.forEach(el => {
       if (el.__roMarked) return;
       if (__roIsWriteEl(el)) {
         el.classList.add('ro-blocked');
         if (!el.title) el.title = '唯讀帳號無此權限';
+        // 文字/數字輸入框（如酷澎調整欄）直接設 readOnly，view 不能打字
+        if ((el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type !== 'file')) && !el.readOnly) {
+          el.readOnly = true; el.__roReadonly = true;
+        }
         el.__roMarked = true;
       }
     });
