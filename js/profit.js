@@ -6173,12 +6173,20 @@ const KPI_GROUPS=[
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>(d.rev-d.ret)>0?((d.rev-d.ret)-d.cost-d.ship-d.misc-d.tax-d.material)/(d.rev-d.ret):0},
     ],
     order:['qty','rev','cost','ret','actualRev','ship','misc','tax','material','receivable','pure','pureRate'],
-    // 寄倉運費：好麻吉／森之旅固定共用一筆合併儲存格（不算進這兩個賣場各自的純利，只影響小計）；
-    // 甲配／露營館這個欄位不適用（灰底不能編輯）；寄倉維持自己獨立的數字。
+    // 寄倉運費：好麻吉／森之旅固定共用一筆合併儲存格。
+    //   ⚠ 2026-08-26 起【會按 shareBy 指定的比例攤進這兩個通路各自的純利】——
+    //     舊註解寫的「不算進各自純利，只影響小計」已經不成立，那時這筆錢其實一格都沒扣。
+    //   甲配／露營館這個欄位不適用（灰底不能編輯）；寄倉維持自己獨立的數字。
     fieldMerge:{
       ship:{
         mergeGroups:[{shops:['mo+0號店(好麻吉)','mo+1號店(森之旅)']}],
         notApplicable:['MOMO-甲配','mo+2號店(露營館)'],
+        // 攤提分母：這一筆共用的錢按合併通路的哪個欄位比例分。
+        //   'qty'（訂單數）是 MOMO 業務負責人的決定 —— 運費跟件數走，不跟金額走。
+        //   ⚠ 財務儀表板那邊目前用【營收】比例，兩邊會不一致；那是已知的、暫時的。
+        //     兩法差額實測 40~154 元（最大佔單一通路純利 1.91%），群組層完全相同。
+        //   ⚠ 沒有 shareBy 的 fieldMerge 維持舊行為（歸零、不攤），見 _kpiRawForCalc。
+        shareBy:'qty',
       },
     }},
 ];
@@ -6551,7 +6559,7 @@ function _kpiGroupTotals(row,group){
     //   ⚠ 通路卡片的「較上月 ±%」本期與基期【都】走本函式（見 _kpiSummaryCardsHtml 裡
     //     _kpiGroupTotals(row,g) 與 _kpiGroupTotals(prevRow,g) 兩行），所以基期會一起修好，
     //     不會出現一邊修好一邊沒修 —— 那正是該處註解要求「本期與基期一律走同一支」的理由。
-    const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop),group);
+    const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop,row),group);
     totalRev+=d.rev||0;
     totalPure+=d[pureKey]||0;
   });
@@ -6592,12 +6600,12 @@ function toggleKpiGroup(month,groupKey){
 //     換行，那次是把日期字串砍短來換空間。這裡格子更多更窄，只能連金額一起砍。）
 //
 // 🔴 本期與基期【一律走同一支 _kpiGroupTotals】，不可以一邊用卡片算法、一邊用小計算法。
-//   已知問題：_kpiGroupTotals【不做 fieldMerge 歸零】，而小計列（_kpiGroupTableHtml）與
-//   年度總表（_kpiShopAnnualTotal）都會做 —— 三處算法裡卡片是唯一的例外。KPI_GROUPS 中
-//   只有 MOMO 有 fieldMerge（ship 欄位：好麻吉/森之旅合併、甲配/露營館不適用），所以
-//   MOMO 那張卡的純利與小計列本來就對不起來。【那是既有問題，本次不修。】
-//   但基期若改用別支取數，這個靜態誤差會變成【會動的誤差】：寄倉運費某個月從 3 萬變 6 萬，
-//   卡片就會憑空多出一段純利跌幅。同一支函式至少保證本期與基期偏得一樣、相減後多半抵消。
+//   理由是【誤差要能抵消】：兩邊走同一支，任何口徑偏差在本期與基期上都一樣大，相減之後
+//   多半抵消；一邊改用別支取數，靜態誤差就會變成【會動的誤差】—— 例如寄倉運費某個月從
+//   3 萬變 6 萬，卡片就會憑空多出一段純利跌幅。
+//   ⚠ 這條【與現在四處是否同口徑無關】，不要因為「反正都一樣了」就放寬它。
+//     （2026-08-26 / PR #232 之前，_kpiGroupTotals 確實漏做 fieldMerge 歸零、與小計列對不起來；
+//       那個偏差已經修掉，四處現在都走 _kpiRawForCalc。但這條規則不是為了那個偏差才立的。）
 //
 // 🔴 純利率用【pp（百分點）】不是 %，而且 pureRateAgg 是【小數】(0.1925) ——
 //   pp 差必須寫 (cur-prev)*100。⚠ 年度總表的 grandRate / groupRate 是【百分比數值】(19.25)、
@@ -6711,11 +6719,42 @@ function _kpiFieldMergeStatus(group,field,shop){
 //   四處從此走同一支，【不要再各寫一份】。
 // ⚠ 純函式：不 mutate raw。沒有要歸零的欄位時原樣回傳【同一個物件參考】，
 //   與抽出前的 `let rawForCalc=raw;` 行為相同（呼叫端仍拿得到原本那個 raw）。
-function _kpiRawForCalc(raw,group,shop){
+// 合併儲存格的攤提：一筆共用的錢（例如 mo+0號店/mo+1號店 共用的寄倉運費）按 shareBy
+//   指定的欄位比例分給合併群組裡的每個通路，回傳「本通路分到多少」。
+// 🔴 分母缺值一律回 0（＝整筆不攤，退回攤提前的行為），【不猜、不換備援分母、不平均分】：
+//   換分母會產生「畫面上看不出用了哪個分母」的數字，那比少扣一筆更難查。
+//   ⚠ 代價講明白：那個月這筆錢會【一格都沒扣】，跟 2026-08-26 之前一樣。
+//     缺值時的畫面提示另案處理（本檔寫這行時六個月都沒有缺值）。
+// ⚠ 分母讀的是【raw 值】(row[group.key][shop][shareBy])，不是 _kpiCalcAll 的輸出 ——
+//   shareBy 目前指向 manual 欄位(qty)，raw 就是最終值；而且這樣不會與 _kpiCalcAll 互相遞迴。
+// ⚠ 刻意【不四捨五入】：各份保留小數，加總才會精確等於總額。捨入是顯示層的事
+//   （_kpiGroupTableHtml 用 fmtN(Math.round(...))）。
+function _kpiMergeShare(row,group,field,st,shop){
+  const total=(row?.kpiFieldMerges||{})[st.mergeKey];
+  if(total==null||!total)return 0;                       // 沒填 / 0 → 沒東西可攤
+  const by=group.fieldMerge?.[field]?.shareBy;
+  if(!by)return 0;                                       // 沒設定分母 → 維持舊行為（歸零不攤）
+  const box=row?.[group.key]||{};
+  const vals=st.shops.map(s=>(box[s]||{})[by]);
+  if(vals.some(v=>v==null||v===''))return 0;             // 任一家缺值 → 整筆不攤
+  const denom=vals.reduce((a,v)=>a+(Number(v)||0),0);
+  if(!(denom>0))return 0;                                // 合計 0 或負 → 不攤
+  return total*(Number((box[shop]||{})[by])||0)/denom;
+}
+// 合併／不適用欄位的前處理：把該通路在這些欄位上「該用的值」補進去，再交給 _kpiCalcAll。
+//   ⚠ na（不適用）→ 0；merged（合併）→ 攤到本通路的份額（沒設 shareBy 時同樣是 0）。
+//     2026-08-26 之前兩者【都】無條件歸 0，那時 mo+ 那筆寄倉運費全站一格都沒扣。
+//   ⚠ 多收 row：攤提必須知道同群組其他通路的分母欄位，而公式求值當下拿不到
+//     （KPI_GROUPS 裡的 calc 只收單一通路的 d）。四個呼叫端都已經有 row 在 scope。
+function _kpiRawForCalc(raw,group,shop,row){
   if(!group.fieldMerge)return raw;
-  const zeroFields={};
-  Object.keys(group.fieldMerge).forEach(f=>{if(_kpiFieldMergeStatus(group,f,shop))zeroFields[f]=0;});
-  return Object.keys(zeroFields).length?{...raw,...zeroFields}:raw;
+  const patch={};
+  Object.keys(group.fieldMerge).forEach(f=>{
+    const st=_kpiFieldMergeStatus(group,f,shop);
+    if(!st)return;
+    patch[f]=st.type==='merged'?_kpiMergeShare(row,group,f,st,shop):0;
+  });
+  return Object.keys(patch).length?{...raw,...patch}:raw;
 }
 function editKpiMergedField(month,mergeKey,tdEl){
   const rows=getKpiRows();
@@ -6799,6 +6838,33 @@ function editKpiMergedField(month,mergeKey,tdEl){
     commit();
   },120));
 }
+// 合併儲存格的編輯入口（薄包裝）：開編輯器，然後在輸入框正上方掛一行提示。
+// 🔴 存在的理由：那一格平常顯示的是【本通路分到的份額】（例如 342），點下去編輯器帶出來的
+//   卻是【兩家共用的總額】（1,740）。這個落差是拆格顯示的必然副作用，困惑發生在「點下去
+//   那一刻」，提示就出現在那一刻、那個位置。
+//   ⚠ 試過把總額直接印在格子裡（「342 共 1,740」），退場了：它把主值推離右緣，
+//     同一欄的 MOMO-寄倉 與小計是靠右的，個位數對不上；而且兩格主值長度不同，
+//     連彼此的起點都差一個字元。對齊比省一次點擊重要。
+// 🔴 【原函式 editKpiMergedField 一行都不動】—— 這是刻意的：PR #231 的四道防呆
+//   （wheel / ↑↓ / Esc / 120ms blur + activeElement）全部留在原地，本包裝只在它跑完之後
+//   多掛一個節點。
+// 🔴 提示元素 pointer-events:none（見 css .kpi-merge-hint），所以它【不可能被點到、不可能
+//   取得焦點、不可能觸發 td 的 onclick】⇒ 它在 blur 的判斷路徑上等同不存在。
+//   這比「在 blur handler 裡多判斷一個元素」可靠：沒有需要維護的例外分支。
+// ⚠ 清理不必自己做，三條收尾路徑都會帶走它：
+//   ① origContent 在本包裝呼叫【之前】就已擷取 ⇒ cancel() 的 innerHTML 還原不含提示
+//   ② commit() 走 renderKpiTab() 整表重繪
+//   ③ 原函式從進入到 appendChild(inp) 之間沒有任何 early return，不會出現「有提示沒編輯器」
+// ⚠ 提示文字走 data-merge-hint 屬性，不塞進 onclick 字串 —— 省掉一層引號跳脫。
+function editKpiMergedFieldHinted(month,mergeKey,tdEl){
+  editKpiMergedField(month,mergeKey,tdEl);
+  const hint=tdEl.dataset.mergeHint;
+  if(!hint)return;
+  const el=document.createElement('div');
+  el.className='kpi-merge-hint';
+  el.textContent=hint;   // textContent 不是 innerHTML：文字來自設定檔，但沒有理由開這個口
+  tdEl.appendChild(el);  // 不可聚焦的 div，append 不會把焦點從 inp 搶走
+}
 function _kpiGroupTableHtml(row,group){
   const expanded=_kpiExpandedGroups.has(row.month+':'+group.key);
   // 公式欄位（如稅金、實際營收、純利）現在也能點擊打數字覆蓋，不是只有手動欄位才能編輯。
@@ -6808,7 +6874,7 @@ function _kpiGroupTableHtml(row,group){
   // 欄位固定表格版面＋每欄等寬，欄位之間才會平均分配空間，不會被瀏覽器依內容長短撐出忽大忽小的間隔。
   const colgroup=`<colgroup><col style="width:130px">${cols.map(()=>`<col style="width:calc((100% - 130px)/${cols.length})">`).join('')}</colgroup>`;
   const thead=`<tr style="background:#f8f9fc">
-    <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc">${group.shops.length>1?'賣場':'名稱'}</th>
+    <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc">${group.shops.length>1?'通路':'名稱'}</th>
     ${cols.map(c=>{
       if(c.isCommon){
         return `<th style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap" title="${group.commonCostLabel}">${c.l}</th>`;
@@ -6823,7 +6889,7 @@ function _kpiGroupTableHtml(row,group){
     }).join('')}
   </tr>`;
   const{pureKey}=_kpiGroupTotals(row,group);
-  // 共同費用：整組共用一筆，只影響小計純利，不分攤到各賣場——用 rowspan 直向合併成一欄，不再另外多一行。
+  // 共同費用：整組共用一筆，只影響小計純利，不分攤到各通路——用 rowspan 直向合併成一欄，不再另外多一行。
   const commonField=group.key+'Common';
   const commonCost=row[commonField]||0;
   const totals={};
@@ -6833,7 +6899,7 @@ function _kpiGroupTableHtml(row,group){
     // 合併／不適用欄位歸零 —— 抽成 _kpiRawForCalc 共用（原本這裡有六行，與單店全年、
     //   年度總表逐字相同）。⚠ raw 本身仍要留著：下面 explicitlySet 判「有沒有明確存過值」
     //   看的是原始 raw，不能拿歸零後的版本去判（那會把「不適用」判成「存過 0」）。
-    const rawForCalc=_kpiRawForCalc(raw,group,shop);
+    const rawForCalc=_kpiRawForCalc(raw,group,shop,row);
     const d=_kpiCalcAll(rawForCalc,group);
     totalRev+=d.rev||0;
     totalPure+=d[pureKey]||0;
@@ -6849,24 +6915,51 @@ function _kpiGroupTableHtml(row,group){
         //     刻意不動；顯示另外判一次，兩者不共用一個變數。
         const commonSet=row[commonField]!=null;
         const dispVal=commonSet?fmtN(Math.round(commonCost)):'<span class="kpi-cell-empty">—</span>';
-        return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一賣場）">${dispVal}</td>`;
+        return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一通路）">${dispVal}</td>`;
       }
       const mergeStatus=_kpiFieldMergeStatus(group,c.k,shop);
       if(mergeStatus?.type==='na'){
-        return `<td style="padding:6px 10px;text-align:right;font-size:12.5px;color:#d1d5db" title="這個賣場不適用${c.l}">—</td>`;
+        return `<td style="padding:6px 10px;text-align:right;font-size:12.5px;color:#d1d5db" title="這個通路不適用${c.l}">—</td>`;
       }
       if(mergeStatus?.type==='merged'){
-        if(shopIdx!==group.shops.indexOf(mergeStatus.shops[0]))return '';
+        // 🔴 2026-08-26：這一欄從「rowspan 一格顯示總額」改成【每個通路各自一格、顯示自己分到的份額】。
+        //   理由：純利已經按比例扣掉了，若畫面上只有一個總額，兩家的純利各少一截而找不到原因 ——
+        //   那與年度總表逐月純利漏扣共同費用是同一種病，不要再造一個。
+        //   ⚠ 編輯仍然是【集中的】：兩格的 onclick 都送同一個 mergeKey，editKpiMergedField
+        //     讀寫的都是那筆總額（見該函式 curVal 與 commit），所以它【一行都不用改】，
+        //     PR #231 的四道防呆（wheel / ↑↓ / Esc / 120ms blur）原樣保留。
+        const isLeader=shopIdx===group.shops.indexOf(mergeStatus.shops[0]);
         const mergedVal=(row.kpiFieldMerges||{})[mergeStatus.mergeKey]||0;
-        totals[c.k]=(totals[c.k]||0)+mergedVal;
-        const tid=`kpi-${row.month}-${mergeStatus.mergeKey}`.replace(/["'\s:]/g,'_');
-        // 🔴 同上，判準是【key 在不在】。這一格的 editKpiMergedField【本來就存得下 0】
-        //   （hasVal 不含 v!==0，見該函式），所以「存了 0 卻顯示成 —」在這裡是【既有缺陷】，
-        //   不是本次改動造成的 —— 兩格既然要行為一致，顯示也一起對齊。
-        //   ⚠ 上面那行 mergedVal=…||0 是【計算用】的（累加進 totals[c.k]），刻意不動。
+        // 🔴 總額只能進小計【一次】。舊版靠上面那行 early return 保證（非領頭直接 return ''，
+        //   跑不到這裡）；現在兩個通路都會走到，必須自己擋，否則這一欄小計會變成兩倍。
+        if(isLeader)totals[c.k]=(totals[c.k]||0)+mergedVal;
+        const tid=`kpi-${row.month}-${mergeStatus.mergeKey}-${shop}`.replace(/["'\s:]/g,'_');
+        // 判準是【key 在不在】，不是真值：存進去的 0 要顯示成 0，不能跟「從沒填過」一樣印成 —。
         const mergedSet=(row.kpiFieldMerges||{})[mergeStatus.mergeKey]!=null;
-        const dispVal=mergedSet?fmtN(Math.round(mergedVal)):'<span class="kpi-cell-empty">—</span>';
-        return `<td id="${tid}" rowspan="${mergeStatus.shops.length}" onclick="editKpiMergedField('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${mergeStatus.shops.join('+')}共用一格${c.l}，只影響小計，不算進各自純利">${dispVal}</td>`;
+        // 本通路分到的份額：來自 _kpiRawForCalc 的攤提結果（ship 是 manual 欄，_kpiCalcAll 不會動它）。
+        const shareVal=d[c.k]||0;
+        //   ⚠ 格子裡【只有份額】，刻意不把總額一起印進來：那會把主值推離右緣，同一欄的
+        //     MOMO-寄倉 與小計是靠右的，個位數會對不上，兩格之間主值起點也差一個字元。
+        //     總額改在【編輯的當下】用提示告知（見 editKpiMergedFieldHinted）。
+        const dispVal=mergedSet
+          ?`<span class="kpi-merge-share">${fmtN(Math.round(shareVal))}</span>`
+          :'<span class="kpi-cell-empty">—</span>';
+        const by=group.fieldMerge?.[c.k]?.shareBy;
+        const byLabel=by?(group.manual.find(f=>f.k===by)?.l||by):'';
+        const title=mergedSet
+          ?`${mergeStatus.shops.join('+')}共用一筆${c.l} ${fmtN(Math.round(mergedVal))}${by?`，按${byLabel}比例攤到本通路 ${fmtN(Math.round(shareVal))}`:'（未設定攤提分母，本通路不分攤）'}。點擊編輯的是【總額】，不是這一格。`
+          :`${mergeStatus.shops.join('+')}共用一筆${c.l}，點擊編輯總額`;
+        // 編輯時要顯示的那一行。⚠ 關鍵是【改了兩邊都會變】這個後果，不是「這是總額」這個事實。
+        // 編輯時浮在輸入框正上方的兩行提示。兩行各講一件事，缺一不可：
+        //   ① 這裡填的是【總額】—— 使用者手上是新竹物流一張帳單，填的就是那張帳單的數字。
+        //   ② 各通路的金額是【算出來的、不能個別改】—— 那兩格是白底（看起來可編輯）、
+        //      顯示的卻是攤提結果，不講清楚會以為 1,398 可以直接改。
+        //   ⚠ 舊版只有「這是兩家共用的總額，改了兩邊都會變」：講了後果，沒講【為什麼格子上的
+        //     數字跟輸入框的數字不一樣】，而那正是使用者第一眼會卡住的地方。
+        //   ⚠ 換行用 &#10; 送進屬性（HTML parser 會解回真正的 \n），搭配 css 的 white-space:pre。
+        //     不用 <br>：提示是走 textContent 塞進去的，不為了排版開 innerHTML 這個口。
+        const editHint='這裡填的是兩家共用的總額\n各通路金額按訂單數自動分攤，不能個別改';
+        return `<td id="${tid}" class="kpi-merge-cell" data-merge-hint="${editHint.replace(/\n/g,'&#10;')}" onclick="editKpiMergedFieldHinted('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${title}">${dispVal}</td>`;
       }
       totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);
       const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
@@ -7035,7 +7128,7 @@ function _kpiShopAnnualTotal(rows,year,group,shop,pureKey){
     const month=`${year}-${String(m).padStart(2,'0')}`;
     const row=rows.find(r=>r.month===month);
     if(!row)continue;
-    const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop),group);
+    const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop,row),group);
     rev+=d.rev||0;pure+=d[pureKey]||0;
   }
   return{rev,pure};
@@ -7107,7 +7200,7 @@ function _kpiYearViewHtml(){
           continue;
         }
         // 合併／不適用欄位歸零，與月結表明細、單店全年共用同一支（原本三處各寫一份、逐字相同）。
-        const d=_kpiCalcAll(_kpiRawForCalc(row[g.key]?.[shop]||{},g,shop),g);
+        const d=_kpiCalcAll(_kpiRawForCalc(row[g.key]?.[shop]||{},g,shop,row),g);
         const pureV=d[pureKey]||0,revV=d.rev||0;
         annualRev+=revV;annualPure+=pureV;
         monthGrandRev[i]+=revV;monthGrandPure[i]+=pureV;gMonthRev[i]+=revV;
@@ -7132,13 +7225,25 @@ function _kpiYearViewHtml(){
         ${monthPureTds.join('')}
       </tr>`;
     }).join('');
-    // 整組共同費用（如物流運費）全年加總要扣掉，跟賣場明細頁的小計邏輯一致（今年、去年都要扣）。
+    // 整組共同費用（如物流運費）全年加總要扣掉，跟通路明細頁的小計邏輯一致（今年、去年都要扣）。
     if(g.commonCostLabel){
       for(let m=1;m<=12;m++){
         const monthCur=`${_kpiCurYear}-${String(m).padStart(2,'0')}`;
         const rowCur=rows.find(r=>r.month===monthCur);
         const cCur=rowCur?.[g.key+'Common']||0;
         groupPure-=cCur;grandPure-=cCur;
+        // 逐月那一排（全年總計/純利）也要扣，否則「12 個月橫向加總」跟右邊的全年純利、
+        //   以及上方大卡對不起來，差額正好是全年共同費用（2026 年實測 160,875）。
+        //   🔴 索引【必須換算】，不可以寫 monthGrandPure[m-1]：本迴圈的 m 是【日曆月份】1~12，
+        //     而 monthGrandPure 的索引對應 visibleMonths[i]（見本函式開頭 visibleMonths 上方那段
+        //     警告）—— 只有「該年每個月都有 row」時兩者才剛好相等。2026 年資料是連續的 1~6 月，
+        //     所以寫錯也測不出來；換成「1、3、5 月有資料」的年份就會把 5 月的費用扣到 3 月頭上。
+        //   ⚠ mi<0 代表這個月沒有 row → 不會出現在大表上。此時 rowCur 必為 undefined ⇒ cCur 已經
+        //     是 0，本來就沒東西要扣；這道守衛是為了不去寫 monthGrandPure[-1]（那會在陣列上長出
+        //     一個 -1 屬性，.map() 雖然不會迭代到，但是髒的）。
+        //   ⚠ 取數【沿用上面同一個 cCur】，不另外再讀一次 row —— 兩處讀法若分岔，日後改一邊就漏。
+        const mi=visibleMonths.indexOf(m);
+        if(mi>=0)monthGrandPure[mi]-=cCur;
         const monthPrev=`${prevYear}-${String(m).padStart(2,'0')}`;
         const rowPrev=rows.find(r=>r.month===monthPrev);
         const cPrev=rowPrev?.[g.key+'Common']||0;
@@ -7159,8 +7264,12 @@ function _kpiYearViewHtml(){
     return headerRow+shopTrs;
   }).join('');
   // 月營收圖的資料：只在有可見月份時才產生；空狀態一律設 null，避免留著上一個年份的資料。
-  //   ⚠ 只放營收。純利刻意不放——monthGrandPure 不扣共同費用、grandPure 有扣，
-  //     混進同一張圖會跟上方大卡對不上。
+  //   ⚠ 只放營收，純利【目前不放】。
+  //     ⚠ 舊理由（monthGrandPure 不扣共同費用、grandPure 有扣，混進同一張圖會跟大卡對不上）
+  //       在 2026-08-26 補扣之後【已經不成立】—— 兩者現在同口徑。
+  //     現在不放純利的理由只剩「還沒做」：把純利畫進圖是新功能，不是這次補扣的附帶結果。
+  //     要加的話請當成獨立需求評估（雙 Y 軸、負值、五組共用刻度都要重想），不要因為
+  //     「反正口徑已經一致了」就順手加進來。
   //   ⚠ datasets 這個欄位名沿用 Chart.js 術語，但它【不會】原封不動餵給 Chart.js——
   //     renderKpiYearChart 會自己組 dataset：①五組相加成一條全站折線、②五組各畫一張小圖。
   //   ⚠ backgroundColor（通路識別色）目前是【閒置欄位】：①用 #5b5fcf、②統一 #2a78d6，
@@ -7193,11 +7302,16 @@ function _kpiYearViewHtml(){
   // ── 年度摘要卡＋通路摘要表（純版面重組：數字全部沿用上面已算完的既有變數，不重算）──
   //   ⚠ grandRate / groupRate 已經是百分比數值（19.25），直接 toFixed，不要再乘 100。
   //     （_kpiSummaryCardsHtml 的 pureRateAgg 是小數 0.1925、口徑相反，不要照抄那邊的 *100 寫法。）
-  //   ⚠ 設計意圖：本卡的「全年純利」取自 grandPure —— 那是【已扣共同費用】的數字
+  //   ⚠ 本卡的「全年純利」取自 grandPure —— 那是【已扣共同費用】的數字
   //     （共同費用在上面 g.commonCostLabel 區塊逐月從 grandPure 減掉）。
-  //     下方大表 12 個月的 monthGrandPure 則【未扣共同費用】，所以「12 個月純利橫向加總」
-  //     跟本卡的全年純利對不起來，差額就是全年的共同費用。這是既有差異，
-  //     2026-08-14 判定不在本次改版範圍內修正，這裡刻意不加任何畫面說明文字。
+  //     下方大表 12 個月的 monthGrandPure 【同一個區塊、同一個 cCur 也扣了】（2026-08-26 補），
+  //     所以「12 個月純利橫向加總」現在等於本卡的全年純利。
+  //     ⚠ 舊註解記載的「差額就是全年共同費用、2026-08-14 判定不修」已經處理掉了，不要再拿
+  //       那段描述當現況。
+  //     ⚠ 仍然【刻意不加畫面說明文字】：橫向現在加得起來，但同一欄【直向】加不起來 ——
+  //       上方各通路的純利格不分攤共同費用（那是單一通路的數字），所以 14 格相加會比
+  //       「全年總計」那格多出當月的共同費用。這與群組分隔列早就存在的落差同一性質
+  //       （蝦皮各通路全年純利相加 7,475,473 vs 群組列 7,314,598），是這張表的既定慣例。
   const bigCard=(label,valueHtml,color)=>`<div style="flex:1;min-width:180px;background:#f8f9fc;border-radius:10px;padding:18px 20px">
     <div style="font-size:12px;color:#9ca3af;font-weight:600;letter-spacing:.03em">${label}</div>
     <div style="font-size:30px;font-weight:700;margin-top:6px;line-height:1.15;font-variant-numeric:tabular-nums;color:${color}">${valueHtml}</div>
@@ -7266,7 +7380,7 @@ function _kpiYearViewHtml(){
     <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:${424+52*monthCount}px">
       <colgroup><col style="width:110px"><col style="width:44px">${visibleMonths.map(()=>'<col style="width:52px">').join('')}<col style="width:100px"><col style="width:100px"><col style="width:70px"></colgroup>
       <thead><tr style="background:#f8f9fc">
-        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;cursor:default">賣場</th>
+        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;cursor:default">通路</th>
         <th></th>
         ${monthHeaders}
         <th style="text-align:right;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700;cursor:default">全年營收</th>
@@ -7312,8 +7426,10 @@ function renderKpiTab(){
 //     堆疊長條 → 蝦皮 89.5%、官網 0.05%，畫面上只看得到蝦皮與 MOMO 兩色，legend 卻列著五個顏色。
 //     單色長條 + tooltip 拆分 → 「還要滑過去看」。tooltip 是查詢不是顯示。
 //     也不要把小通路併成「其他」：官網與業外是有人在看的。
-//   只畫營收。純利刻意不畫——monthGrandPure 不扣共同費用、grandPure 有扣，
-//   混進同一張圖會跟上方三張大卡對不上。
+//   只畫營收，純利【目前不畫】。
+//   ⚠ 舊理由（monthGrandPure 不扣共同費用、grandPure 有扣，會跟上方三張大卡對不上）在
+//     2026-08-26 補扣之後【已經不成立】。現在不畫的理由只剩「還沒做」——見
+//     _kpiYearChartData 上方同一件事的說明，要加請當成獨立需求評估。
 //   ⚠ 這裡【不做】destroy 舊實例：那是 renderKpiTab 開頭 kpiYearDestroyCharts() 的責任。
 //     在這裡也做會變成兩個地方各管一半，日後改一邊就漏。
 function renderKpiYearChart(){
@@ -7740,7 +7856,7 @@ function _kpiScoreViewHtml(){
   </div>
 
   <div style="font-size:15px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
-  <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px" id="score-cmp-table"></div>
+  <div class="score-cmp-wrap" id="score-cmp-table"></div>
   <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">點分數看明細，可以點多個一起比較；灰色分數代表當月還沒有資料</div>
   <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;line-height:1.8">
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -17947,7 +18063,7 @@ Object.assign(window, {
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,
-  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,
+  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,editKpiMergedFieldHinted,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
