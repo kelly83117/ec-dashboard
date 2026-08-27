@@ -1736,3 +1736,16 @@
   [style*="tabular-nums"], .nums, td, th {
     font-variant-numeric: tabular-nums !important;
   }
+
+/* ===== 唯讀角色「檢視」：停用的動作控制項（決策 1：停用不隱藏，hover 提示） ===== */
+/* 由 app.js 的 body.ro-readonly + .ro-blocked（MutationObserver 裝飾）驅動；真正防線在資料層。 */
+.ro-readonly .ro-blocked {
+  opacity: .45 !important;
+  cursor: not-allowed !important;
+  filter: grayscale(.35);
+  /* 保留 pointer-events：讓 capture 階段點擊攔截仍能觸發提示、hover title 仍可見 */
+}
+.ro-readonly button[disabled] {
+  opacity: .45 !important;
+  cursor: not-allowed !important;
+}
