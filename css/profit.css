@@ -967,3 +967,273 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
      不是新造一套。
    取代原本寫在 JS 字串裡的 inline style="color:#d1d5db"。 */
 .kpi-cell-empty{color:var(--text-faint);}
+
+/* KPI 評分表「賣場月度評分比較」的外框（容器 id=score-cmp-table，內容由
+   renderScoreComparisonTable 以 innerHTML 填入一張 width:100% 的 table）。
+   ⚠ 從 js/profit.js 的 inline style 搬過來，值【逐項對照、不改樣子】：
+     border 1px solid #e5e7eb → var(--border)（css/main.css:12 就是 #e5e7eb，同值）
+     border-radius:10px / margin-bottom:10px → 原樣保留
+   🔴 唯一的行為變更：overflow:hidden → overflow-x:auto。
+     舊寫法在窄視窗（手機）會把表格右邊【直接裁掉】，而且沒有任何方式捲過去看。
+     月份欄帶 min-width:72px（見 renderScoreComparisonTable 上方那段註解：色票 56px + td
+     左右 padding 16px），一季三個月就有 216px，加上賣場欄與本季平均欄，表格有內建的
+     最小寬度，窄視窗放不下。
+     ⚠ 用 auto【不是 scroll】：scroll 會永久顯示捲軸，桌機當場變樣。
+       這也是刻意【不沿用 .tscroll】的原因 —— 那支是 overflow-x:scroll + min-height:420px，
+       給淨利表整頁大表用的，套到這張 5 列小表會撐出 420px 高。
+     沿用同分頁既有做法：_kpiGroupTableHtml 與 _kpiYearViewHtml 的表格容器都是 overflow-x:auto。
+   ⚠ border-radius 保留字面 10px：:root 只有 --radius(12px) 與 --radius-sm(8px)，沒有 10px；
+     換過去會改變桌機外觀，本輪不做。
+   ⚠ 表格本身【刻意不加 min-width】：那會是一個憑空發明的數字，而欄位既有的 min-width
+     已經撐出下限。要加請另案給數字。 */
+.score-cmp-wrap{
+  border:1px solid var(--border);
+  border-radius:10px;
+  overflow-x:auto;
+  margin-bottom:10px;
+}
+
+/* KPI 月結表：合併儲存格（目前只有 MOMO 的寄倉運費：mo+0號店/mo+1號店 共用一筆）。
+   那一格從「rowspan 顯示總額」改成【每個通路各自一格、只顯示自己攤到的份額】。
+   ⚠ 曾經把總額一起印在格子裡（「342 共 1,740」），已退場：那會把主值推離右緣，
+     同一欄的 MOMO-寄倉 與小計是靠右的、個位數對不上，兩格之間主值起點也差一個字元。
+     總額改成【編輯的當下】才提示（.kpi-merge-hint）。對齊比省一次點擊重要。
+   ⚠ 顏色一律走 css/main.css:2 的 :root 變數，不寫死色碼、不碰 --bg。 */
+.kpi-merge-share{font-variant-numeric:tabular-nums;}
+
+/* 合併儲存格的定位基準。⚠ 只有 position:relative、沒有任何偏移 ⇒ 不移動任何一個像素，
+   純粹是給下面那個絕對定位的提示當 containing block。 */
+.kpi-merge-cell{position:relative;}
+
+/* 編輯時浮在輸入框正上方的提示（由 editKpiMergedFieldHinted 掛上、由編輯器的收尾路徑帶走）。
+   🔴 position:absolute —— 脫離文件流，【不可能撐高列、不可能撐寬欄】。平常那格沒有這個節點，
+     只有上面的 position:relative，所以非編輯狀態的版面與加這組樣式之前完全一樣。
+   🔴 bottom:100% 往【上】長，不往左也不往右：
+     · 往左會蓋掉同列的「實際營收」—— 那是編輯時唯一能讓人確認自己在編輯哪一家的參照，
+       蓋掉它反而更容易搞混，正好是這個提示要解決的問題。
+     · 往右（left:100%）在 LTR 會增加可捲寬度，可能讓外層 overflow-x:auto 多出一段橫向捲軸。
+     · 往上是垂直方向，在 overflow-x:auto 的容器裡不產生橫向捲軸；且 mo+0/mo+1 是第 3、4 列，
+       上面還有兩列，不會頂到表頭。
+   🔴 pointer-events:none —— 滑鼠事件穿透，它不可能被點到、不可能取得焦點、不可能觸發
+     td 的 onclick ⇒ 在 editKpiMergedField 的 blur 判斷路徑上等同不存在。
+     這比「在 blur handler 裡多判斷一個元素」可靠：沒有需要維護的例外分支。
+   ⚠ right:0 讓它靠著輸入框的右緣對齊，不會歪到鄰欄上方。 */
+.kpi-merge-hint{
+  position:absolute;
+  bottom:100%;
+  right:0;
+  margin-bottom:4px;
+  padding:3px 8px;
+  /* ⚠ pre 不是 nowrap：提示是兩行，換行字元由 JS 用 &#10; 送進 data-merge-hint。
+     pre 同時保留換行【並且不自動折行】—— 用 pre-line 的話寬度一窄就會自己再折，
+     行數變得不可預期，往上長的高度就跟著不可預期。 */
+  white-space:pre;
+  /* 內文靠左：td 是 text-align:right，繼承下來會讓兩行長度不一的句子右緣參差、很難讀。
+     這【不影響外框位置】—— 外框仍由下方的 right:0 對齊格子右緣。 */
+  text-align:left;
+  pointer-events:none;
+  font-size:11px;
+  line-height:1.5;
+  font-weight:400;
+  color:var(--text-muted);
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:6px;
+  box-shadow:var(--shadow-sm);
+  z-index:5;
+}
+
+/* ═══════════ 淨利表 · 分頁按鈕列（三組，允許換行）═══════════
+   🔴 為什麼有 flex-wrap：實測（2026-08-28，main v589）按鈕列是 flex 不換行，而外層卡片是
+     overflow:hidden ⇒ 溢出的按鈕【直接被剪掉、沒有捲軸、沒有任何提示】。
+     .main 雖然是 overflow-x:auto 也救不到 —— 卡片先剪掉了，.main 量到的 scrollWidth
+     等於 clientWidth，捲軸永遠不會出現。
+     當時實測：三組需 1066px，而 1366 螢幕 + 側欄展開的卡片只有 1070px（扣掉卡片 padding 28px
+     後只剩 1042px）→ 最右邊那顆【已經】被切 11px。這是加 wrap 之前就存在的問題。
+   ⚠ 歷史（免得有人以為註解過期）：v591 曾經有【第四組】「對帳」，需求 1183px、在 1366/1440
+     全部被切；v593 把那顆按鈕搬進蝦皮 pill 列，第四組移除，現在又是三組。
+     wrap 仍然要留 —— 三組現在的內在寬是 1137px（蝦皮組吸收了對帳鈕而變寬），
+     1366 展開／1366 收合／1440 展開三種常見組合仍然裝不下一排，會換成兩排。
+   ⚠ 換行的代價（v593 實測、已知並接受）：以前換行掉下去的是那顆 28px 高的獨立對帳鈕
+     （第二排很矮，整列 101px）；現在掉下去的是完整兩層的酷澎組（65px），整列變 138px。
+     在 1366 收合與 1440 展開這兩個寬度，按鈕列比 v592 高 37px。 */
+.pf-tabrow{
+  display:flex;
+  align-items:flex-start;
+  /* 🔴 這一行是本區的主角。沒有它，最右邊的組在 1366/1440 的機器上會被直接剪掉。 */
+  flex-wrap:wrap;
+  /* 直向 8px 是換行後兩排之間的呼吸；橫向 12px 【必須維持原值】——
+     它與下方 .pf-tabgrp 的 padding-left 一起復刻原本「12px + 1px 分隔線 + 12px」的間距。 */
+  row-gap:8px;
+  column-gap:12px;
+}
+/* 分隔線從【獨立的 1px div】改成【組自己的 border-left】。
+   🔴 這不是美化，是換行的必要條件：獨立 div 是 flex item，換行時它會單獨落在某一排的
+     行首或行尾，變成一條沒有依附對象的浮線。做成 border 之後它永遠黏著自己的組，不可能落單。
+   ⚠ 未換行時的視覺【與改動前逐像素相同】：
+     舊：組 —12px(gap)— 線(1px) —12px(gap)— 組
+     新：組 —12px(gap)— 線(border 1px) —12px(padding)— 組
+     兩者都是「12 / 1 / 12」，線的位置與粗細不變。
+   ⚠ 舊的分隔線是 align-self:stretch（撐滿該行的 cross size）；border-left 撐滿的是自己的
+     padding box 高度。三組高度相同 ⇒ 結果一樣。
+   ⚠ 殘留（已知、可接受）：換行時落在第二排【行首】的那一組仍會顯示自己的左邊框，
+     看起來像一條貼在左緣的細線。純 CSS 無法表達「行首不畫」，而它比「浮空的分隔線」輕微得多。
+   ⚠ v593 更新：作用對象從四組減為三組（對帳那組已移進蝦皮 pill 列），
+     所以現在畫線的只有 MOMO 與酷澎兩組。上面那個「行首左邊框」的殘留【依然存在】——
+     換行時掉到第二排的是酷澎組，它就是一個 + .pf-tabgrp。 */
+.pf-tabgrp{
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+}
+.pf-tabgrp + .pf-tabgrp{
+  border-left:1px solid var(--border);
+  padding-left:12px;
+}
+
+/* ═══════════ 淨利表 · 對帳分頁（蝦皮進帳報表 PDF 解析；只讀、只顯示）═══════════
+   🔴 這一區【沒有任何寫入路徑】：不寫 localStorage、不寫 Firestore、不碰任何既有 key。
+     解析結果只活在記憶體，重新整理就消失 —— 這是規格，不是缺陷。
+   ⚠ 顏色一律走 css/main.css:2 的 :root 變數，不寫死色碼、不碰 --bg。 */
+
+/* 分頁按鈕。v593 起這顆位在【蝦皮 pill 列的最右邊】（原本是獨立的第四組）。
+   🔴 刻意【不覆寫 background】—— 這是本規則最重要的一行「沒有寫」的東西：
+     v591 的舊版是 background:var(--text-muted); color:#fff（實心深灰），那是為了「獨立站在
+     白色卡片上」設計的。搬進 pill 列（底色 #f3f4f6）之後那個寫法有兩個相反的後果：
+       ① 沒被選中時看起來像【永遠 active】；
+       ② 真的切到它時 .stab.active 的白底反而讓它【變淡】—— 狀態顯示是反的。
+     所以只留灰色調性（其實就是 .stab 的預設 #6b7280），讓 .stab / .stab.active 原樣生效，
+     它的 active 行為與左邊五顆賣場完全一致。
+   ⚠ 那「這顆看起來不就跟賣場一樣了？」—— 區隔改由兩個【既有元件】承擔，不新造視覺語言：
+     ① 前面一條 .stab-sep（與「測試通路」前面那條同一個 class）
+     ② 下面的空心圓點 .sdot-hollow
+   ⚠ 已知並接受：選中對帳時的白底樣式與「選中某個賣場」完全相同，pill 列裡只能靠空心圓點
+     與位置分辨。不為它再開一條 active 專屬規則 —— 那會變成又一條只為單顆按鈕存在的樣式。 */
+.stab.stab-recon{
+  color:var(--text-muted);
+}
+/* 空心圓點：與五顆賣場的實心 .sdot 同尺寸同位置（沿用 .sdot 的 width/height/border-radius），
+   只把填色換成外框 ⇒「空心 vs 實心」一眼看得出這一顆不是賣場。
+   🔴 要 box-sizing:border-box —— .sdot 是 width/height 各 8px，不收邊框寬度的話
+     1.5px 外框會把它撐成 11px，跟左邊五顆對不齊。
+   ⚠ 刻意不用圖示字元（例如 ⚖）：在 Windows 會被渲染成彩色 emoji，與 8px 的 CSS 圓點
+     大小、基線都對不齊，而且各系統字型不一。 */
+.sdot-hollow{
+  background:transparent;
+  border:1.5px solid var(--text-muted);
+  box-sizing:border-box;
+}
+
+.recon-wrap{max-width:1100px;}
+.recon-hd{
+  display:flex;
+  align-items:baseline;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:12px;
+}
+.recon-title{font-size:15px;font-weight:700;color:var(--text);}
+.recon-note{font-size:11.5px;color:var(--text-muted);line-height:1.6;}
+.recon-btn{
+  padding:5px 12px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--surface);
+  color:var(--text-muted);
+  font-size:12px;
+  font-family:inherit;
+  cursor:pointer;
+}
+.recon-btn:hover{border-color:var(--primary);color:var(--primary);}
+.recon-scroll{overflow-x:auto;}
+.recon-tbl{
+  border-collapse:collapse;
+  font-size:12.5px;
+  width:100%;
+  min-width:640px;
+}
+.recon-tbl th,.recon-tbl td{
+  border:1px solid var(--border);
+  padding:5px 10px;
+  white-space:nowrap;
+}
+/* 欄頭＝賣場。🔴 橫向欄位是【固定的四家蝦皮】，不是上傳順序 ——
+   使用者在哪一欄上傳就是哪一家，全程不從檔名猜賣場。 */
+.recon-tbl thead th{
+  background:var(--primary-soft);
+  color:var(--text);
+  font-weight:700;
+  font-size:12.5px;
+  text-align:center;
+}
+.recon-tbl th.recon-rowhead{
+  background:var(--surface);
+  text-align:left;
+  font-weight:600;
+  color:var(--text);
+  white-space:nowrap;
+}
+/* 手續費的四個子項：縮排 + 淡一階，跟小計那一列在視覺上分得開。 */
+.recon-tbl th.recon-sub{
+  padding-left:22px;
+  font-weight:400;
+  color:var(--text-muted);
+}
+.recon-tbl td{
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+  color:var(--text);
+}
+.recon-tbl td.recon-cell-upload{text-align:center;white-space:normal;}
+.recon-file{font-size:11px;width:100%;color:var(--text-muted);}
+.recon-fname{
+  display:block;
+  font-size:11px;
+  color:var(--text-muted);
+  margin-top:3px;
+  max-width:150px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+/* 🔴 抓不到 ≠ 0。0 是合法值（實測維克的「優惠券與補貼」就是 0），
+   兩者在畫面上必須分得開，否則這張表沒有查核價值。 */
+.recon-miss{color:var(--danger);font-size:11.5px;}
+.recon-empty{color:var(--text-faint);}
+.recon-tbl tr.recon-sumrow td,
+.recon-tbl tr.recon-sumrow th{background:var(--primary-soft);font-weight:700;}
+.recon-ok{color:var(--success);font-weight:700;}
+.recon-bad{color:var(--danger);font-weight:700;}
+/* 期間列：四欄期間不一致就整列標紅。
+   🔴 這一頁刻意不掛期間列（#profit-period-wrap-row），所以畫面上沒有任何「這是哪個月」的
+     參照 —— 期間只能從 PDF 自己抽（第 1 頁「從 YYYY-MM-DD 到 YYYY-MM-DD 的報表」那一行）。
+     不顯示的話，四家傳了不同月份的檔會若無其事地並排，而使用者無從察覺。 */
+.recon-period{font-size:11.5px;color:var(--text-muted);font-weight:400;}
+.recon-period-bad{color:var(--danger);font-weight:700;}
+.recon-warn{
+  margin:10px 0 0;
+  padding:7px 10px;
+  border:1px solid var(--danger);
+  border-radius:6px;
+  background:var(--danger-soft);
+  color:var(--danger);
+  font-size:12px;
+  font-weight:600;
+}
+/* 原始文字層 dump：解析錯時唯一能看出 PDF 實際版面的地方 ——
+   它是功能的一部分，不是除錯殘留，請勿當成 debug code 清掉。 */
+.recon-dump{margin-top:12px;font-size:11.5px;}
+.recon-dump summary{cursor:pointer;color:var(--text-muted);padding:3px 0;}
+.recon-dump pre{
+  margin:6px 0 0;
+  padding:8px 10px;
+  max-height:320px;
+  overflow:auto;
+  background:var(--primary-soft);
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-size:11px;
+  line-height:1.55;
+  white-space:pre;
+}
+.recon-err{color:var(--danger);font-size:12px;padding:6px 0;}

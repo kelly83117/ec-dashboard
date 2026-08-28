@@ -4,9 +4,14 @@ const { Store, escapeHtml, showToast, hashPassword, computeScore, OFFICE_CONFIG,
 
 Object.assign(App, {
   viewUsers() {
-    if (this.currentUser.role !== 'admin') {
+    const role = this.currentUser.role;
+    // admin：完整管理；view：唯讀檢視（決策 3，寫入動作停用）；staff：不可存取
+    if (role !== 'admin' && role !== 'view') {
       return `<div class="placeholder-page"><div class="emoji">🔒</div><h3>權限不足</h3><p>僅管理員可存取此頁面</p></div>`;
     }
+    const ro = role === 'view';   // 唯讀檢視：顯示清單但停用新增/編輯/刪除
+    const roAttr = ro ? 'disabled title="唯讀帳號無此權限"' : '';
+    const roleName = r => r === 'admin' ? '管理員' : (r === 'view' ? '檢視' : '員工');
     const users = Store.get(Store.KEYS.users, []);
     const rows = users.map(u => {
       const isAdmin = u.role === 'admin';
@@ -18,31 +23,32 @@ Object.assign(App, {
           <div class="employee-avatar">${escapeHtml(u.name.slice(0,1))}</div>
           <div class="info">
             <div class="name">${escapeHtml(u.name)}
-              <span class="badge-role ${isAdmin?'role-admin':'role-staff'}">${isAdmin?'管理員':'員工'}</span>
+              <span class="badge-role ${isAdmin?'role-admin':'role-staff'}">${roleName(u.role)}</span>
               ${crossBadge}
             </div>
             <div class="meta">@${escapeHtml(u.username)} · ${escapeHtml(getUserDeptLabel(u))}</div>
           </div>
-          <button class="icon-btn" title="編輯" onclick="App.openUserModal('${escapeHtml(u.username)}')">✏️</button>
+          <button class="icon-btn" title="${ro?'唯讀帳號無此權限':'編輯'}" ${roAttr} onclick="App.openUserModal('${escapeHtml(u.username)}')">✏️</button>
           ${u.username === this.currentUser.username
             ? ''
-            : `<button class="icon-btn danger" title="刪除" onclick="App.deleteUser('${escapeHtml(u.username)}')">🗑️</button>`}
+            : `<button class="icon-btn danger" title="${ro?'唯讀帳號無此權限':'刪除'}" ${roAttr} onclick="App.deleteUser('${escapeHtml(u.username)}')">🗑️</button>`}
         </div>
       `;
     }).join('');
 
     return `
       <div class="page-header">
-        <h2>員工帳號管理</h2>
+        <h2>員工帳號管理${ro ? ' <span class="badge-role" style="background:var(--warn-soft);color:var(--warn)">唯讀檢視</span>' : ''}</h2>
       </div>
       <div class="filter-bar">
         <span class="filter-spacer"></span>
-        <button class="btn-add" onclick="App.openUserModal()">+ 新增帳號</button>
+        <button class="btn-add" ${roAttr} onclick="App.openUserModal()">+ 新增帳號</button>
       </div>
       <div class="table-card">${rows || '<div class="empty"><div class="emoji">👥</div>尚無帳號</div>'}</div>
     `;
   },
   openUserModal(username) {
+    if (this.isReadOnly && this.isReadOnly()) { showToast('🔒 檢視帳號為唯讀，無法修改資料', 'error'); return; }
     const users = Store.get(Store.KEYS.users, []);
     const user = username ? users.find(u => u.username === username) : null;
     const isEdit = !!user;
@@ -68,6 +74,7 @@ Object.assign(App, {
           <select id="f-urole">
             <option value="staff" ${u.role==='staff'?'selected':''}>員工</option>
             <option value="admin" ${u.role==='admin'?'selected':''}>管理員</option>
+            <option value="view" ${u.role==='view'?'selected':''}>檢視（唯讀）</option>
           </select>
         </div>
         <div class="field">
@@ -218,6 +225,7 @@ Object.assign(App, {
     });
   },
   deleteUser(username) {
+    if (this.isReadOnly && this.isReadOnly()) { showToast('🔒 檢視帳號為唯讀，無法修改資料', 'error'); return; }
     if (username === this.currentUser.username) {
       showToast('不能刪除自己的帳號', 'error');
       return;
@@ -231,6 +239,7 @@ Object.assign(App, {
     this.render();
   },
   openChangePasswordModal() {
+    if (this.isReadOnly && this.isReadOnly()) { showToast('🔒 檢視帳號為唯讀，無法修改資料', 'error'); return; }
     const username = this.currentUser?.username;
     if (!username) { showToast('尚未登入', 'error'); return; }
 

@@ -730,7 +730,7 @@ const App = {
   _isRouteAllowed(route, user) {
     if (route === 'dashboard') return true;
     if (route === 'employees') return true;
-    if (route === 'users') return user.role === 'admin';
+    if (route === 'users') return user.role === 'admin' || user.role === 'view';  // view：唯讀檢視帳號頁
     if (route.startsWith('office-')) {
       const rest = route.slice('office-'.length);
       const firstDash = rest.indexOf('-');
@@ -771,13 +771,25 @@ const App = {
   applyUserPerms(user) {
     const deptLabel = getUserDeptLabel(user);
     document.getElementById('user-name').textContent = user.name;
-    document.getElementById('user-role').textContent =
-      (user.role === 'admin' ? '管理員' : '員工') + '・' + deptLabel;
+    const __roleLabel = user.role === 'admin' ? '管理員' : (user.role === 'view' ? '檢視（唯讀）' : '員工');
+    document.getElementById('user-role').textContent = __roleLabel + '・' + deptLabel;
     document.getElementById('user-avatar').textContent = user.name.slice(0, 1);
 
+    // 唯讀角色：全域標記 → CSS 停用動作鈕 + 點擊攔截（防線③）
+    document.body.classList.toggle('ro-readonly', user.role === 'view');
+    if (user.role !== 'view') {
+      // 切回非唯讀（含側欄等不隨 render 重建的元素）：清掉殘留的停用裝飾 / readOnly
+      document.querySelectorAll('.ro-blocked').forEach(el => {
+        el.classList.remove('ro-blocked'); el.__roMarked = false;
+        if (el.__roReadonly) { el.readOnly = false; el.__roReadonly = false; }
+      });
+    }
+
     const isAdmin = user.role === 'admin';
-    document.getElementById('admin-group').style.display = isAdmin ? '' : 'none';
-    document.getElementById('nav-users').style.display = isAdmin ? '' : 'none';
+    // 帳號管理：admin 完整；view 可進頁「唯讀檢視」（決策 3，寫入動作由 users.js 停用）；staff 不可見
+    const canSeeUsers = isAdmin || user.role === 'view';
+    document.getElementById('admin-group').style.display = canSeeUsers ? '' : 'none';
+    document.getElementById('nav-users').style.display = canSeeUsers ? '' : 'none';
 
     const departments = Store.get(Store.KEYS.departments, []);
     // 子路由 → feature key 對應（同部門的不同子頁）
@@ -2575,8 +2587,65 @@ function __bootApp() {
 const __LOCAL_ONLY_KEYS = new Set([Store.KEYS.session]);
 // 本機獨有前綴（訂價資料體積大，不上 Firestore）
 const __LOCAL_ONLY_PREFIXES = ['ec.d2.pricing.'];
+
+/* ═══════════ 唯讀角色「檢視」(role==='view') ═══════════
+ * 只能看、不能改。前端防呆（Firestore 規則目前仍全開，非防駭）。
+ * 三道防線：① Store 包裝層閘門（本檔）② __cloud* 集中防護（__installReadonlyCloudGuard）
+ *          ③ UI 停用（body.ro-readonly + 點擊攔截）。真正防線是 ①②，UI 只求體驗。 */
+function __isReadOnly() {
+  try { return !!(App && App.currentUser && App.currentUser.role === 'view'); }
+  catch { return false; }
+}
+// view 專用 local-only 前綴：KPI月結/新品毛利的「切季別·子分頁·排序」等純畫面狀態，
+//   目前走 Store.set 會上雲。這輪【不動】__LOCAL_ONLY_PREFIXES（offices.js 區同事在改，
+//   正式把這兩個前綴加進去另列待辦、動前知會 Keani）。改成「唯讀角色寫這些前綴時就地轉本機」，
+//   讓 view 仍能切季別/排序但不上雲——而不是擋下（擋下連排序都不能動）。
+const __RO_VIEW_LOCAL = ['ec.d2.kpi.', 'ec.d2.margin.'];
+function __isReadonlyViewState(key) {
+  return typeof key === 'string' && __RO_VIEW_LOCAL.some(p => key.startsWith(p));
+}
+// 唯讀角色被擋時的提示（節流，避免連點洗版）
+let __roToastAt = 0;
+function __roDenied() {
+  const now = Date.now();
+  if (now - __roToastAt < 1500) return;
+  __roToastAt = now;
+  try { if (typeof showToast === 'function') showToast('🔒 檢視帳號為唯讀，無法修改資料', 'error'); } catch {}
+}
+
 function __isLocalOnly(key) {
-  return __LOCAL_ONLY_KEYS.has(key) || __LOCAL_ONLY_PREFIXES.some(p => key.startsWith(p));
+  if (__LOCAL_ONLY_KEYS.has(key)) return true;
+  if (__LOCAL_ONLY_PREFIXES.some(p => key.startsWith(p))) return true;
+  // 唯讀角色：把 kpi/margin 的畫面狀態視為本機（get/set/remove 一致 → 可切換但不上雲）
+  if (__isReadonlyViewState(key) && __isReadOnly()) return true;
+  return false;
+}
+App.isReadOnly = __isReadOnly;
+
+// 唯讀角色雲端寫入防護（防線②）：view 角色時，所有 __cloud* 物件的寫入方法一律 no-op。
+//   涵蓋三類【繞過 Store 包裝層】的直呼寫入：
+//     ① profit.js 直呼 __cloudMomo/__cloudProfit/__cloudS1103/… 的同步與即時寫
+//     ② marketing.js 洞察清除 __cloudStore.removeFields/removeField
+//     ③ daily.js 老闆任務附圖 __cloudTaskImage
+//   沿用 TEST_NOWRITE 的就地換方法手法，但只在 role==='view' 時生效（一般使用者零影響）。
+//   讀取方法（getDoc/subscribe/…）與 forKey 不包（forKey 的回傳寫入只在已被 Store 閘門擋掉的路徑內觸發）。
+function __installReadonlyCloudGuard() {
+  if (window.__roCloudGuardOn) return;
+  const READ_OK = new Set(['getDoc', 'subscribe', 'getDocForShop', 'subscribeShop', 'forKey']);
+  const names = Object.keys(window).filter(k =>
+    k.indexOf('__cloud') === 0 && window[k] && typeof window[k] === 'object');
+  names.forEach(n => {
+    const o = window[n];
+    Object.keys(o).forEach(k => {
+      const fn = o[k];
+      if (typeof fn !== 'function' || READ_OK.has(k)) return;
+      o[k] = function () {
+        if (__isReadOnly()) { __roDenied(); return Promise.resolve(); }
+        return fn.apply(o, arguments);
+      };
+    });
+  });
+  window.__roCloudGuardOn = true;
 }
 
 function __localGet(key, fallback) {
@@ -2819,7 +2888,8 @@ async function __setupCloud() {
       return origGet(key, fallback);
     };
     Store.set = function(key, value) {
-      if (__isLocalOnly(key)) { __localSet(key, value); return; }
+      if (__isLocalOnly(key)) { __localSet(key, value); return; }  // view 的 kpi/margin 也在此就地轉本機
+      if (__isReadOnly()) { __roDenied(); return; }                // 唯讀角色：非本機 key 一律擋
       // ⚠ 資料保護：擋掉可疑的「users → 1~2 個」寫入
       //   避免任何路徑（seedData bug、Firestore cache race、別的 code）
       //   把多個帳號覆蓋成只剩 admin。真的要刪除靠 users.js 手動流程（單筆刪除）。
@@ -2866,12 +2936,14 @@ async function __setupCloud() {
     // 注意：origSet 在 _useMem=true（雲端模式必為 true）時只寫 _mem 不寫 localStorage，
     //       導致重整後本機編輯全部消失。這裡強制兩處都寫，重整後可恢復。
     Store.setLocalOnly = function(key, value) {
+      if (__isReadOnly() && !__isLocalOnly(key)) { __roDenied(); return; }  // 唯讀：擋非本機資料的本機寫入（營收/洞察備註等）；view 的 kpi/margin 因 __isLocalOnly 為真而放行
       if (window.__unmarkRecentlyDeleted) window.__unmarkRecentlyDeleted(key);
       try { Store._mem[key] = value; } catch {}
       try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
     };
     // 手動把指定 key 推到雲端（搭配 setLocalOnly 使用）
     Store.pushKeyToCloud = async function(key) {
+      if (__isReadOnly()) { __roDenied(); return false; }   // 唯讀：任何同步上雲一律擋
       // 路由與 Store.set 同：ec.insight_* 走 per-shop doc → app/insight → app/main
       let target = cs;
       let wentToPerShop = false;
@@ -2928,7 +3000,8 @@ async function __setupCloud() {
       }
     };
     Store.remove = function(key) {
-      if (__isLocalOnly(key)) { __localRemove(key); return; }
+      if (__isLocalOnly(key)) { __localRemove(key); return; }  // session 登出走這裡 → 唯讀也能登出
+      if (__isReadOnly()) { __roDenied(); return; }            // 唯讀：其他刪除一律擋
       origRemove(key);
       const targetCloud = (typeof key === 'string' && key.startsWith('ec.insight_') && window.__cloudInsight) ? window.__cloudInsight : cs;
       try {
@@ -2938,6 +3011,9 @@ async function __setupCloud() {
         }
       } catch (e) { __notifyCloudFail(key, e, '刪除'); }
     };
+
+    // 唯讀角色雲端寫入防護：包住所有 __cloud* 寫入方法（防線②，涵蓋繞過上面包裝層的直呼）
+    __installReadonlyCloudGuard();
 
     // 暫存「剛剛刪掉的 key」(避免訂閱 race 把它們從雲端 snapshot 帶回來)
     window.__recentlyDeleted = window.__recentlyDeleted || new Map();
@@ -3161,9 +3237,85 @@ const ANA_LABEL_DISPLAY = {
 };
 function mapAnaLabel(l) { return ANA_LABEL_DISPLAY[l] || l; }  // 未列的（加50、危險商品…）原樣回傳
 
+/* ═══════════ 唯讀角色 UI 防線③（點擊攔截 + 視覺停用） ═══════════
+ * 真正防線是資料層（①Store 閘門 ②__cloud 防護）。這裡只求體驗：
+ * 讓 view 角色點動作鈕時被擋 + 提示、動作鈕看起來是灰的（決策 1：停用不隱藏）。
+ * 採【允許為主 + 攔截寫入】：view 的檢視動作（切賣場/季別/排序/篩選/匯出/看帳號）一律放行，
+ * 只攔明確的寫入 handler；漏網的仍由資料層擋下（不會改到資料，只是少了灰底提示）。 */
+// 明確「會改資料」的 inline handler 名稱片段（不含匯出 doExport/momoExport/cupExport、不含檢視狀態 setShop/tab/filter）
+const __RO_WRITE_RE = /\b(generate|generateAffRpt|generateCoupang|syncToCloud|syncCoupangToCloud|momoOpenSyncPreview|momoConfirmSync|momoUpload|momoMoPlus(Upload|Batch|Master|CostInline|EditRecalc|AddOne|SetOtherFee|PriceDiff|ClearPrice|AddFeeExc)|momoE001(Apply|File|Remove|Clear)|momoRecon(Pick|Generate|Store)|momoRebuild|momoSyncFile|momoSyncApplyReactivate|momoBatchSubmit|momoDeleteProduct|momoDeleteOptlog|momoAddOptlog|momoMissingCostSave|momoAddPickCost|onGlobalFile|onAffFile|onCoupangFile|cupMissCostSave|onCupNoteChange|startEdit|confirmAdsEdit|startNote|submitProfitNote|_pnmEditNote|editKpi(CommonCost|MergedField)|confirmAddSummaryRow|openAddSummaryRowModal|_sumRestoreRow|saveAnaSettings|saveTestSettings|saveGrowthSettings|onPlatformRateChange|confirmBatchTag|openBatchTagPanel|confirmDeleteFile|openDeleteFileModal|openUserModal|deleteUser|openChangePasswordModal|openBossTaskModal|_?deleteBossTask|openDailyTaskModal|deleteDailyTask|openQuickTodoModal|openBossLineConfigModal|openInsightNoteModal|openInsightSettingsModal|openScoreModal|addTodoItem|restorePlatformsBackup|openPlatformModal)\b/;
+function __roIsWriteEl(el) {
+  if (!el || !el.getAttribute) return false;
+  if (el.matches && el.matches('input[type="file"]')) return true;
+  // 檢查 onclick / oninput / onchange 三種 inline handler（酷澎調整欄 note 走 oninput）
+  const h = (el.getAttribute('onclick') || '') + ';' + (el.getAttribute('oninput') || '') + ';' + (el.getAttribute('onchange') || '');
+  if (__RO_WRITE_RE.test(h)) return true;
+  if (el.getAttribute('contenteditable') === 'true') return true;
+  return false;
+}
+function __roInitUIGuard() {
+  // 事件攔截（capture 階段，趕在 inline handler 之前）：click / input / change 三種
+  //   click＝按鈕與可編輯格；input＝即時輸入（酷澎調整欄 note oninput）；change＝檔案上傳 input
+  function __roGuardEvent(e) {
+    if (!document.body.classList.contains('ro-readonly')) return;
+    let el = e.target;
+    for (let i = 0; el && i < 6; i++, el = el.parentElement) {
+      if (__roIsWriteEl(el)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (el.matches && el.matches('input[type="file"]')) { try { el.value = ''; } catch {} }
+        __roDenied();
+        return;
+      }
+    }
+  }
+  document.addEventListener('click', __roGuardEvent, true);
+  document.addEventListener('input', __roGuardEvent, true);
+  document.addEventListener('change', __roGuardEvent, true);
+  // 視覺裝飾：把寫入控制項標成灰底 + hover 提示（決策 1）；寫入輸入框直接設 readOnly（不能打字）。
+  //   debounce 掃描動態渲染的內容。
+  let __roDecoT = 0;
+  function __roDecorate() {
+    if (!document.body.classList.contains('ro-readonly')) {
+      // 非唯讀（含切回 admin/staff）：清掉殘留裝飾，避免跨角色切換留下灰底 class / readOnly
+      document.querySelectorAll('#view-app .ro-blocked').forEach(el => {
+        el.classList.remove('ro-blocked'); el.__roMarked = false;
+        if (el.__roReadonly) { el.readOnly = false; el.__roReadonly = false; }
+      });
+      return;
+    }
+    const nodes = document.querySelectorAll('#view-app [onclick], #view-app [oninput], #view-app [onchange], #view-app input[type="file"], #view-app [contenteditable="true"]');
+    nodes.forEach(el => {
+      if (el.__roMarked) return;
+      if (__roIsWriteEl(el)) {
+        el.classList.add('ro-blocked');
+        if (!el.title) el.title = '唯讀帳號無此權限';
+        // 文字/數字輸入框（如酷澎調整欄）直接設 readOnly，view 不能打字
+        if ((el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type !== 'file')) && !el.readOnly) {
+          el.readOnly = true; el.__roReadonly = true;
+        }
+        el.__roMarked = true;
+      }
+    });
+  }
+  const obs = new MutationObserver(() => {
+    clearTimeout(__roDecoT);
+    __roDecoT = setTimeout(__roDecorate, 120);
+  });
+  const root = document.getElementById('view-app') || document.body;
+  obs.observe(root, { childList: true, subtree: true });
+  __roDecorate();
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', __roInitUIGuard);
+} else {
+  __roInitUIGuard();
+}
+
 /* ===================== window 匯流排 ===================== */
 Object.assign(window, {
   App, Store, mapAnaLabel, ANA_LABEL_DISPLAY,
+  canWrite: () => !__isReadOnly(), isReadOnly: __isReadOnly,
   hashPassword, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
   canAccessOffice, hasOfficeFeature, trendFromQuarters,
   toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms,

@@ -9,8 +9,8 @@ const TEST_SHOP_ID='測試通路';
 window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
   <div style="padding:10px 14px;border-bottom:1px solid #e5e7eb">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
-      <div style="display:flex;gap:12px;align-items:flex-start">
-        <div style="display:flex;flex-direction:column;gap:5px">
+      <div class="pf-tabrow">
+        <div class="pf-tabgrp">
           <button class="stab active" style="background:#ee4d2d;color:#fff;border-color:#ee4d2d;font-weight:700;width:100%;justify-content:center;font-size:15px" onclick="setShop('總表',this)">蝦皮｜總表</button>
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉</button>
@@ -18,10 +18,23 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <button class="stab" style="font-size:15px" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
             <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
             <span class="stab-sep"></span><button class="stab" style="font-size:15px" onclick="setShop('${TEST_SHOP_ID}',this)"><span class="sdot" style="background:#8b5cf6"></span>${TEST_SHOP_ID}</button>
+            <!-- 對帳：放在蝦皮 pill 列的最右邊（原本是獨立的第四組，孤立在最右側，同事看不出那是蝦皮的東西）。
+                 🔴 onclick 仍然是 setReconTab、容器仍然是 recon-content-shopee ——【換位置不換 setter】。
+                    setShop 不可能誤收它：全檔的按鈕查找一律是 button[onclick*="setXxx('…'"]（本檔搜 onclick*=），
+                    而 .stab 的列舉只做 remove('active')，都與 DOM 位置無關。
+                 ⚠ 它【不是賣場】，用兩個訊號跟左邊五顆區隔，兩個都沿用既有元件、不新造視覺語言：
+                    ① 前面一條 .stab-sep（與「測試通路」前面那條同一個 class）
+                    ② 空心圓點 .sdot.sdot-hollow（與五顆實心 .sdot 同尺寸同位置，空心 vs 實心一眼可辨）
+                 ⚠ 刻意【不覆寫底色】（見 css 的 .stab.stab-recon）：覆寫會讓它看起來永遠 active，
+                    而真的切到它時 .stab.active 的白底反而讓它變淡 —— 狀態顯示會是反的。
+                 ⚠ 這是全部 15 顆 .stab 裡【唯一】帶 title 的，其餘 14 顆都沒有，本次也不順手補。
+                 ⚠ title 文字是常數字串，不含雙引號 / 角括號 / & / 反引號 / 插值符號 ⇒【不做跳脫】，
+                    與本檔其他靜態 title 同寫法；escapeHtmlLike 只用在動態值上。
+                    🔴 這整段註解在 __profitTabHtml 這個【模板字串】裡，寫註解時也要避開反引號與插值符號。 -->
+            <span class="stab-sep"></span><button class="stab stab-recon" style="font-size:15px" title="上傳蝦皮進帳報表 PDF 對帳用，只顯示不寫入任何資料" onclick="setReconTab('shopee',this)"><span class="sdot sdot-hollow"></span>對帳</button>
           </div>
         </div>
-        <div style="width:1px;background:#e5e7eb;align-self:stretch"></div>
-        <div style="display:flex;flex-direction:column;gap:5px">
+        <div class="pf-tabgrp">
           <button class="stab" id="momo-summary-btn" style="background:#e4007f;color:#fff;border-color:#e4007f;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.9" onclick="setMomoShop('總表',this)">MOMO｜總表</button>
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setMomoShop('甲配',this)"><span class="sdot" style="background:#d4380d"></span>甲配</button>
@@ -30,8 +43,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+森之旅',this)"><span class="sdot" style="background:#ffa940"></span>MO+森之旅</button>
           </div>
         </div>
-        <div style="width:1px;background:#e5e7eb;align-self:stretch"></div>
-        <div style="display:flex;flex-direction:column;gap:5px">
+        <div class="pf-tabgrp">
           <button class="stab" style="background:#0ea5e9;color:#fff;border-color:#0ea5e9;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.9" onclick="setCoupangShop('總表',this)">酷澎｜總表</button>
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setCoupangShop('麻吉',this)"><span class="sdot" style="background:#c0392b"></span>好麻吉</button>
@@ -254,6 +266,14 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div id="coupang-content-總表" class="shop-content" style="padding:16px 20px"></div>
   <div id="coupang-content-麻吉" class="shop-content" style="padding:16px 20px"></div>
   <div id="coupang-content-露營館" class="shop-content" style="padding:16px 20px"></div>
+  <!-- 對帳分頁的容器。🔴 id 前綴【必須】是 recon-content-，不可以用 content-：
+       廣告費編輯後的 stayOnShop（本檔搜 _activeEl.id.startsWith 那一行）會在 50/200/500ms
+       三次把畫面強制拉回蝦皮賣場，它的守衛就是靠這個前綴判斷「現在不在蝦皮頁」。
+       另一處同型守衛在雲端快照回來時的蝦皮 tab 修復（同樣搜 _activeEl.id.startsWith）。
+       命名成 content-對帳 會被這兩道守衛當成蝦皮頁 → 被計時器踢掉。
+       🔴 這條在【按鈕已經搬進蝦皮 pill 列之後仍然成立】，而且更重要：按鈕現在看起來像蝦皮的一員，
+          容器卻【不能】跟著改成 content- 前綴。兩者刻意不對稱，不是漏改。 -->
+  <div id="recon-content-shopee" class="shop-content" style="padding:16px 20px"></div>
 </div>`;
 
 const SHOPS=[{id:'好麻吉',color:'#5b5fcf'},{id:'玩樂',color:'#10b981'},{id:'森之旅',color:'#f59e0b'},{id:'維克',color:'#14b8a6'},{id:TEST_SHOP_ID,color:'#8b5cf6'}];
@@ -6146,12 +6166,20 @@ const KPI_GROUPS=[
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>(d.rev-d.ret)>0?((d.rev-d.ret)-d.cost-d.ship-d.misc-d.tax-d.material)/(d.rev-d.ret):0},
     ],
     order:['qty','rev','cost','ret','actualRev','ship','misc','tax','material','receivable','pure','pureRate'],
-    // 寄倉運費：好麻吉／森之旅固定共用一筆合併儲存格（不算進這兩個賣場各自的純利，只影響小計）；
-    // 甲配／露營館這個欄位不適用（灰底不能編輯）；寄倉維持自己獨立的數字。
+    // 寄倉運費：好麻吉／森之旅固定共用一筆合併儲存格。
+    //   ⚠ 2026-08-26 起【會按 shareBy 指定的比例攤進這兩個通路各自的純利】——
+    //     舊註解寫的「不算進各自純利，只影響小計」已經不成立，那時這筆錢其實一格都沒扣。
+    //   甲配／露營館這個欄位不適用（灰底不能編輯）；寄倉維持自己獨立的數字。
     fieldMerge:{
       ship:{
         mergeGroups:[{shops:['mo+0號店(好麻吉)','mo+1號店(森之旅)']}],
         notApplicable:['MOMO-甲配','mo+2號店(露營館)'],
+        // 攤提分母：這一筆共用的錢按合併通路的哪個欄位比例分。
+        //   'qty'（訂單數）是 MOMO 業務負責人的決定 —— 運費跟件數走，不跟金額走。
+        //   ⚠ 財務儀表板那邊目前用【營收】比例，兩邊會不一致；那是已知的、暫時的。
+        //     兩法差額實測 40~154 元（最大佔單一通路純利 1.91%），群組層完全相同。
+        //   ⚠ 沒有 shareBy 的 fieldMerge 維持舊行為（歸零、不攤），見 _kpiRawForCalc。
+        shareBy:'qty',
       },
     }},
 ];
@@ -6524,7 +6552,7 @@ function _kpiGroupTotals(row,group){
     //   ⚠ 通路卡片的「較上月 ±%」本期與基期【都】走本函式（見 _kpiSummaryCardsHtml 裡
     //     _kpiGroupTotals(row,g) 與 _kpiGroupTotals(prevRow,g) 兩行），所以基期會一起修好，
     //     不會出現一邊修好一邊沒修 —— 那正是該處註解要求「本期與基期一律走同一支」的理由。
-    const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop),group);
+    const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop,row),group);
     totalRev+=d.rev||0;
     totalPure+=d[pureKey]||0;
   });
@@ -6565,12 +6593,12 @@ function toggleKpiGroup(month,groupKey){
 //     換行，那次是把日期字串砍短來換空間。這裡格子更多更窄，只能連金額一起砍。）
 //
 // 🔴 本期與基期【一律走同一支 _kpiGroupTotals】，不可以一邊用卡片算法、一邊用小計算法。
-//   已知問題：_kpiGroupTotals【不做 fieldMerge 歸零】，而小計列（_kpiGroupTableHtml）與
-//   年度總表（_kpiShopAnnualTotal）都會做 —— 三處算法裡卡片是唯一的例外。KPI_GROUPS 中
-//   只有 MOMO 有 fieldMerge（ship 欄位：好麻吉/森之旅合併、甲配/露營館不適用），所以
-//   MOMO 那張卡的純利與小計列本來就對不起來。【那是既有問題，本次不修。】
-//   但基期若改用別支取數，這個靜態誤差會變成【會動的誤差】：寄倉運費某個月從 3 萬變 6 萬，
-//   卡片就會憑空多出一段純利跌幅。同一支函式至少保證本期與基期偏得一樣、相減後多半抵消。
+//   理由是【誤差要能抵消】：兩邊走同一支，任何口徑偏差在本期與基期上都一樣大，相減之後
+//   多半抵消；一邊改用別支取數，靜態誤差就會變成【會動的誤差】—— 例如寄倉運費某個月從
+//   3 萬變 6 萬，卡片就會憑空多出一段純利跌幅。
+//   ⚠ 這條【與現在四處是否同口徑無關】，不要因為「反正都一樣了」就放寬它。
+//     （2026-08-26 / PR #232 之前，_kpiGroupTotals 確實漏做 fieldMerge 歸零、與小計列對不起來；
+//       那個偏差已經修掉，四處現在都走 _kpiRawForCalc。但這條規則不是為了那個偏差才立的。）
 //
 // 🔴 純利率用【pp（百分點）】不是 %，而且 pureRateAgg 是【小數】(0.1925) ——
 //   pp 差必須寫 (cur-prev)*100。⚠ 年度總表的 grandRate / groupRate 是【百分比數值】(19.25)、
@@ -6684,11 +6712,42 @@ function _kpiFieldMergeStatus(group,field,shop){
 //   四處從此走同一支，【不要再各寫一份】。
 // ⚠ 純函式：不 mutate raw。沒有要歸零的欄位時原樣回傳【同一個物件參考】，
 //   與抽出前的 `let rawForCalc=raw;` 行為相同（呼叫端仍拿得到原本那個 raw）。
-function _kpiRawForCalc(raw,group,shop){
+// 合併儲存格的攤提：一筆共用的錢（例如 mo+0號店/mo+1號店 共用的寄倉運費）按 shareBy
+//   指定的欄位比例分給合併群組裡的每個通路，回傳「本通路分到多少」。
+// 🔴 分母缺值一律回 0（＝整筆不攤，退回攤提前的行為），【不猜、不換備援分母、不平均分】：
+//   換分母會產生「畫面上看不出用了哪個分母」的數字，那比少扣一筆更難查。
+//   ⚠ 代價講明白：那個月這筆錢會【一格都沒扣】，跟 2026-08-26 之前一樣。
+//     缺值時的畫面提示另案處理（本檔寫這行時六個月都沒有缺值）。
+// ⚠ 分母讀的是【raw 值】(row[group.key][shop][shareBy])，不是 _kpiCalcAll 的輸出 ——
+//   shareBy 目前指向 manual 欄位(qty)，raw 就是最終值；而且這樣不會與 _kpiCalcAll 互相遞迴。
+// ⚠ 刻意【不四捨五入】：各份保留小數，加總才會精確等於總額。捨入是顯示層的事
+//   （_kpiGroupTableHtml 用 fmtN(Math.round(...))）。
+function _kpiMergeShare(row,group,field,st,shop){
+  const total=(row?.kpiFieldMerges||{})[st.mergeKey];
+  if(total==null||!total)return 0;                       // 沒填 / 0 → 沒東西可攤
+  const by=group.fieldMerge?.[field]?.shareBy;
+  if(!by)return 0;                                       // 沒設定分母 → 維持舊行為（歸零不攤）
+  const box=row?.[group.key]||{};
+  const vals=st.shops.map(s=>(box[s]||{})[by]);
+  if(vals.some(v=>v==null||v===''))return 0;             // 任一家缺值 → 整筆不攤
+  const denom=vals.reduce((a,v)=>a+(Number(v)||0),0);
+  if(!(denom>0))return 0;                                // 合計 0 或負 → 不攤
+  return total*(Number((box[shop]||{})[by])||0)/denom;
+}
+// 合併／不適用欄位的前處理：把該通路在這些欄位上「該用的值」補進去，再交給 _kpiCalcAll。
+//   ⚠ na（不適用）→ 0；merged（合併）→ 攤到本通路的份額（沒設 shareBy 時同樣是 0）。
+//     2026-08-26 之前兩者【都】無條件歸 0，那時 mo+ 那筆寄倉運費全站一格都沒扣。
+//   ⚠ 多收 row：攤提必須知道同群組其他通路的分母欄位，而公式求值當下拿不到
+//     （KPI_GROUPS 裡的 calc 只收單一通路的 d）。四個呼叫端都已經有 row 在 scope。
+function _kpiRawForCalc(raw,group,shop,row){
   if(!group.fieldMerge)return raw;
-  const zeroFields={};
-  Object.keys(group.fieldMerge).forEach(f=>{if(_kpiFieldMergeStatus(group,f,shop))zeroFields[f]=0;});
-  return Object.keys(zeroFields).length?{...raw,...zeroFields}:raw;
+  const patch={};
+  Object.keys(group.fieldMerge).forEach(f=>{
+    const st=_kpiFieldMergeStatus(group,f,shop);
+    if(!st)return;
+    patch[f]=st.type==='merged'?_kpiMergeShare(row,group,f,st,shop):0;
+  });
+  return Object.keys(patch).length?{...raw,...patch}:raw;
 }
 function editKpiMergedField(month,mergeKey,tdEl){
   const rows=getKpiRows();
@@ -6772,6 +6831,33 @@ function editKpiMergedField(month,mergeKey,tdEl){
     commit();
   },120));
 }
+// 合併儲存格的編輯入口（薄包裝）：開編輯器，然後在輸入框正上方掛一行提示。
+// 🔴 存在的理由：那一格平常顯示的是【本通路分到的份額】（例如 342），點下去編輯器帶出來的
+//   卻是【兩家共用的總額】（1,740）。這個落差是拆格顯示的必然副作用，困惑發生在「點下去
+//   那一刻」，提示就出現在那一刻、那個位置。
+//   ⚠ 試過把總額直接印在格子裡（「342 共 1,740」），退場了：它把主值推離右緣，
+//     同一欄的 MOMO-寄倉 與小計是靠右的，個位數對不上；而且兩格主值長度不同，
+//     連彼此的起點都差一個字元。對齊比省一次點擊重要。
+// 🔴 【原函式 editKpiMergedField 一行都不動】—— 這是刻意的：PR #231 的四道防呆
+//   （wheel / ↑↓ / Esc / 120ms blur + activeElement）全部留在原地，本包裝只在它跑完之後
+//   多掛一個節點。
+// 🔴 提示元素 pointer-events:none（見 css .kpi-merge-hint），所以它【不可能被點到、不可能
+//   取得焦點、不可能觸發 td 的 onclick】⇒ 它在 blur 的判斷路徑上等同不存在。
+//   這比「在 blur handler 裡多判斷一個元素」可靠：沒有需要維護的例外分支。
+// ⚠ 清理不必自己做，三條收尾路徑都會帶走它：
+//   ① origContent 在本包裝呼叫【之前】就已擷取 ⇒ cancel() 的 innerHTML 還原不含提示
+//   ② commit() 走 renderKpiTab() 整表重繪
+//   ③ 原函式從進入到 appendChild(inp) 之間沒有任何 early return，不會出現「有提示沒編輯器」
+// ⚠ 提示文字走 data-merge-hint 屬性，不塞進 onclick 字串 —— 省掉一層引號跳脫。
+function editKpiMergedFieldHinted(month,mergeKey,tdEl){
+  editKpiMergedField(month,mergeKey,tdEl);
+  const hint=tdEl.dataset.mergeHint;
+  if(!hint)return;
+  const el=document.createElement('div');
+  el.className='kpi-merge-hint';
+  el.textContent=hint;   // textContent 不是 innerHTML：文字來自設定檔，但沒有理由開這個口
+  tdEl.appendChild(el);  // 不可聚焦的 div，append 不會把焦點從 inp 搶走
+}
 function _kpiGroupTableHtml(row,group){
   const expanded=_kpiExpandedGroups.has(row.month+':'+group.key);
   // 公式欄位（如稅金、實際營收、純利）現在也能點擊打數字覆蓋，不是只有手動欄位才能編輯。
@@ -6781,7 +6867,7 @@ function _kpiGroupTableHtml(row,group){
   // 欄位固定表格版面＋每欄等寬，欄位之間才會平均分配空間，不會被瀏覽器依內容長短撐出忽大忽小的間隔。
   const colgroup=`<colgroup><col style="width:130px">${cols.map(()=>`<col style="width:calc((100% - 130px)/${cols.length})">`).join('')}</colgroup>`;
   const thead=`<tr style="background:#f8f9fc">
-    <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc">${group.shops.length>1?'賣場':'名稱'}</th>
+    <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc">${group.shops.length>1?'通路':'名稱'}</th>
     ${cols.map(c=>{
       if(c.isCommon){
         return `<th style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap" title="${group.commonCostLabel}">${c.l}</th>`;
@@ -6796,7 +6882,7 @@ function _kpiGroupTableHtml(row,group){
     }).join('')}
   </tr>`;
   const{pureKey}=_kpiGroupTotals(row,group);
-  // 共同費用：整組共用一筆，只影響小計純利，不分攤到各賣場——用 rowspan 直向合併成一欄，不再另外多一行。
+  // 共同費用：整組共用一筆，只影響小計純利，不分攤到各通路——用 rowspan 直向合併成一欄，不再另外多一行。
   const commonField=group.key+'Common';
   const commonCost=row[commonField]||0;
   const totals={};
@@ -6806,7 +6892,7 @@ function _kpiGroupTableHtml(row,group){
     // 合併／不適用欄位歸零 —— 抽成 _kpiRawForCalc 共用（原本這裡有六行，與單店全年、
     //   年度總表逐字相同）。⚠ raw 本身仍要留著：下面 explicitlySet 判「有沒有明確存過值」
     //   看的是原始 raw，不能拿歸零後的版本去判（那會把「不適用」判成「存過 0」）。
-    const rawForCalc=_kpiRawForCalc(raw,group,shop);
+    const rawForCalc=_kpiRawForCalc(raw,group,shop,row);
     const d=_kpiCalcAll(rawForCalc,group);
     totalRev+=d.rev||0;
     totalPure+=d[pureKey]||0;
@@ -6822,24 +6908,51 @@ function _kpiGroupTableHtml(row,group){
         //     刻意不動；顯示另外判一次，兩者不共用一個變數。
         const commonSet=row[commonField]!=null;
         const dispVal=commonSet?fmtN(Math.round(commonCost)):'<span class="kpi-cell-empty">—</span>';
-        return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一賣場）">${dispVal}</td>`;
+        return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一通路）">${dispVal}</td>`;
       }
       const mergeStatus=_kpiFieldMergeStatus(group,c.k,shop);
       if(mergeStatus?.type==='na'){
-        return `<td style="padding:6px 10px;text-align:right;font-size:12.5px;color:#d1d5db" title="這個賣場不適用${c.l}">—</td>`;
+        return `<td style="padding:6px 10px;text-align:right;font-size:12.5px;color:#d1d5db" title="這個通路不適用${c.l}">—</td>`;
       }
       if(mergeStatus?.type==='merged'){
-        if(shopIdx!==group.shops.indexOf(mergeStatus.shops[0]))return '';
+        // 🔴 2026-08-26：這一欄從「rowspan 一格顯示總額」改成【每個通路各自一格、顯示自己分到的份額】。
+        //   理由：純利已經按比例扣掉了，若畫面上只有一個總額，兩家的純利各少一截而找不到原因 ——
+        //   那與年度總表逐月純利漏扣共同費用是同一種病，不要再造一個。
+        //   ⚠ 編輯仍然是【集中的】：兩格的 onclick 都送同一個 mergeKey，editKpiMergedField
+        //     讀寫的都是那筆總額（見該函式 curVal 與 commit），所以它【一行都不用改】，
+        //     PR #231 的四道防呆（wheel / ↑↓ / Esc / 120ms blur）原樣保留。
+        const isLeader=shopIdx===group.shops.indexOf(mergeStatus.shops[0]);
         const mergedVal=(row.kpiFieldMerges||{})[mergeStatus.mergeKey]||0;
-        totals[c.k]=(totals[c.k]||0)+mergedVal;
-        const tid=`kpi-${row.month}-${mergeStatus.mergeKey}`.replace(/["'\s:]/g,'_');
-        // 🔴 同上，判準是【key 在不在】。這一格的 editKpiMergedField【本來就存得下 0】
-        //   （hasVal 不含 v!==0，見該函式），所以「存了 0 卻顯示成 —」在這裡是【既有缺陷】，
-        //   不是本次改動造成的 —— 兩格既然要行為一致，顯示也一起對齊。
-        //   ⚠ 上面那行 mergedVal=…||0 是【計算用】的（累加進 totals[c.k]），刻意不動。
+        // 🔴 總額只能進小計【一次】。舊版靠上面那行 early return 保證（非領頭直接 return ''，
+        //   跑不到這裡）；現在兩個通路都會走到，必須自己擋，否則這一欄小計會變成兩倍。
+        if(isLeader)totals[c.k]=(totals[c.k]||0)+mergedVal;
+        const tid=`kpi-${row.month}-${mergeStatus.mergeKey}-${shop}`.replace(/["'\s:]/g,'_');
+        // 判準是【key 在不在】，不是真值：存進去的 0 要顯示成 0，不能跟「從沒填過」一樣印成 —。
         const mergedSet=(row.kpiFieldMerges||{})[mergeStatus.mergeKey]!=null;
-        const dispVal=mergedSet?fmtN(Math.round(mergedVal)):'<span class="kpi-cell-empty">—</span>';
-        return `<td id="${tid}" rowspan="${mergeStatus.shops.length}" onclick="editKpiMergedField('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${mergeStatus.shops.join('+')}共用一格${c.l}，只影響小計，不算進各自純利">${dispVal}</td>`;
+        // 本通路分到的份額：來自 _kpiRawForCalc 的攤提結果（ship 是 manual 欄，_kpiCalcAll 不會動它）。
+        const shareVal=d[c.k]||0;
+        //   ⚠ 格子裡【只有份額】，刻意不把總額一起印進來：那會把主值推離右緣，同一欄的
+        //     MOMO-寄倉 與小計是靠右的，個位數會對不上，兩格之間主值起點也差一個字元。
+        //     總額改在【編輯的當下】用提示告知（見 editKpiMergedFieldHinted）。
+        const dispVal=mergedSet
+          ?`<span class="kpi-merge-share">${fmtN(Math.round(shareVal))}</span>`
+          :'<span class="kpi-cell-empty">—</span>';
+        const by=group.fieldMerge?.[c.k]?.shareBy;
+        const byLabel=by?(group.manual.find(f=>f.k===by)?.l||by):'';
+        const title=mergedSet
+          ?`${mergeStatus.shops.join('+')}共用一筆${c.l} ${fmtN(Math.round(mergedVal))}${by?`，按${byLabel}比例攤到本通路 ${fmtN(Math.round(shareVal))}`:'（未設定攤提分母，本通路不分攤）'}。點擊編輯的是【總額】，不是這一格。`
+          :`${mergeStatus.shops.join('+')}共用一筆${c.l}，點擊編輯總額`;
+        // 編輯時要顯示的那一行。⚠ 關鍵是【改了兩邊都會變】這個後果，不是「這是總額」這個事實。
+        // 編輯時浮在輸入框正上方的兩行提示。兩行各講一件事，缺一不可：
+        //   ① 這裡填的是【總額】—— 使用者手上是新竹物流一張帳單，填的就是那張帳單的數字。
+        //   ② 各通路的金額是【算出來的、不能個別改】—— 那兩格是白底（看起來可編輯）、
+        //      顯示的卻是攤提結果，不講清楚會以為 1,398 可以直接改。
+        //   ⚠ 舊版只有「這是兩家共用的總額，改了兩邊都會變」：講了後果，沒講【為什麼格子上的
+        //     數字跟輸入框的數字不一樣】，而那正是使用者第一眼會卡住的地方。
+        //   ⚠ 換行用 &#10; 送進屬性（HTML parser 會解回真正的 \n），搭配 css 的 white-space:pre。
+        //     不用 <br>：提示是走 textContent 塞進去的，不為了排版開 innerHTML 這個口。
+        const editHint='這裡填的是兩家共用的總額\n各通路金額按訂單數自動分攤，不能個別改';
+        return `<td id="${tid}" class="kpi-merge-cell" data-merge-hint="${editHint.replace(/\n/g,'&#10;')}" onclick="editKpiMergedFieldHinted('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${title}">${dispVal}</td>`;
       }
       totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);
       const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
@@ -7008,7 +7121,7 @@ function _kpiShopAnnualTotal(rows,year,group,shop,pureKey){
     const month=`${year}-${String(m).padStart(2,'0')}`;
     const row=rows.find(r=>r.month===month);
     if(!row)continue;
-    const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop),group);
+    const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop,row),group);
     rev+=d.rev||0;pure+=d[pureKey]||0;
   }
   return{rev,pure};
@@ -7080,7 +7193,7 @@ function _kpiYearViewHtml(){
           continue;
         }
         // 合併／不適用欄位歸零，與月結表明細、單店全年共用同一支（原本三處各寫一份、逐字相同）。
-        const d=_kpiCalcAll(_kpiRawForCalc(row[g.key]?.[shop]||{},g,shop),g);
+        const d=_kpiCalcAll(_kpiRawForCalc(row[g.key]?.[shop]||{},g,shop,row),g);
         const pureV=d[pureKey]||0,revV=d.rev||0;
         annualRev+=revV;annualPure+=pureV;
         monthGrandRev[i]+=revV;monthGrandPure[i]+=pureV;gMonthRev[i]+=revV;
@@ -7105,13 +7218,25 @@ function _kpiYearViewHtml(){
         ${monthPureTds.join('')}
       </tr>`;
     }).join('');
-    // 整組共同費用（如物流運費）全年加總要扣掉，跟賣場明細頁的小計邏輯一致（今年、去年都要扣）。
+    // 整組共同費用（如物流運費）全年加總要扣掉，跟通路明細頁的小計邏輯一致（今年、去年都要扣）。
     if(g.commonCostLabel){
       for(let m=1;m<=12;m++){
         const monthCur=`${_kpiCurYear}-${String(m).padStart(2,'0')}`;
         const rowCur=rows.find(r=>r.month===monthCur);
         const cCur=rowCur?.[g.key+'Common']||0;
         groupPure-=cCur;grandPure-=cCur;
+        // 逐月那一排（全年總計/純利）也要扣，否則「12 個月橫向加總」跟右邊的全年純利、
+        //   以及上方大卡對不起來，差額正好是全年共同費用（2026 年實測 160,875）。
+        //   🔴 索引【必須換算】，不可以寫 monthGrandPure[m-1]：本迴圈的 m 是【日曆月份】1~12，
+        //     而 monthGrandPure 的索引對應 visibleMonths[i]（見本函式開頭 visibleMonths 上方那段
+        //     警告）—— 只有「該年每個月都有 row」時兩者才剛好相等。2026 年資料是連續的 1~6 月，
+        //     所以寫錯也測不出來；換成「1、3、5 月有資料」的年份就會把 5 月的費用扣到 3 月頭上。
+        //   ⚠ mi<0 代表這個月沒有 row → 不會出現在大表上。此時 rowCur 必為 undefined ⇒ cCur 已經
+        //     是 0，本來就沒東西要扣；這道守衛是為了不去寫 monthGrandPure[-1]（那會在陣列上長出
+        //     一個 -1 屬性，.map() 雖然不會迭代到，但是髒的）。
+        //   ⚠ 取數【沿用上面同一個 cCur】，不另外再讀一次 row —— 兩處讀法若分岔，日後改一邊就漏。
+        const mi=visibleMonths.indexOf(m);
+        if(mi>=0)monthGrandPure[mi]-=cCur;
         const monthPrev=`${prevYear}-${String(m).padStart(2,'0')}`;
         const rowPrev=rows.find(r=>r.month===monthPrev);
         const cPrev=rowPrev?.[g.key+'Common']||0;
@@ -7132,8 +7257,12 @@ function _kpiYearViewHtml(){
     return headerRow+shopTrs;
   }).join('');
   // 月營收圖的資料：只在有可見月份時才產生；空狀態一律設 null，避免留著上一個年份的資料。
-  //   ⚠ 只放營收。純利刻意不放——monthGrandPure 不扣共同費用、grandPure 有扣，
-  //     混進同一張圖會跟上方大卡對不上。
+  //   ⚠ 只放營收，純利【目前不放】。
+  //     ⚠ 舊理由（monthGrandPure 不扣共同費用、grandPure 有扣，混進同一張圖會跟大卡對不上）
+  //       在 2026-08-26 補扣之後【已經不成立】—— 兩者現在同口徑。
+  //     現在不放純利的理由只剩「還沒做」：把純利畫進圖是新功能，不是這次補扣的附帶結果。
+  //     要加的話請當成獨立需求評估（雙 Y 軸、負值、五組共用刻度都要重想），不要因為
+  //     「反正口徑已經一致了」就順手加進來。
   //   ⚠ datasets 這個欄位名沿用 Chart.js 術語，但它【不會】原封不動餵給 Chart.js——
   //     renderKpiYearChart 會自己組 dataset：①五組相加成一條全站折線、②五組各畫一張小圖。
   //   ⚠ backgroundColor（通路識別色）目前是【閒置欄位】：①用 #5b5fcf、②統一 #2a78d6，
@@ -7166,11 +7295,16 @@ function _kpiYearViewHtml(){
   // ── 年度摘要卡＋通路摘要表（純版面重組：數字全部沿用上面已算完的既有變數，不重算）──
   //   ⚠ grandRate / groupRate 已經是百分比數值（19.25），直接 toFixed，不要再乘 100。
   //     （_kpiSummaryCardsHtml 的 pureRateAgg 是小數 0.1925、口徑相反，不要照抄那邊的 *100 寫法。）
-  //   ⚠ 設計意圖：本卡的「全年純利」取自 grandPure —— 那是【已扣共同費用】的數字
+  //   ⚠ 本卡的「全年純利」取自 grandPure —— 那是【已扣共同費用】的數字
   //     （共同費用在上面 g.commonCostLabel 區塊逐月從 grandPure 減掉）。
-  //     下方大表 12 個月的 monthGrandPure 則【未扣共同費用】，所以「12 個月純利橫向加總」
-  //     跟本卡的全年純利對不起來，差額就是全年的共同費用。這是既有差異，
-  //     2026-08-14 判定不在本次改版範圍內修正，這裡刻意不加任何畫面說明文字。
+  //     下方大表 12 個月的 monthGrandPure 【同一個區塊、同一個 cCur 也扣了】（2026-08-26 補），
+  //     所以「12 個月純利橫向加總」現在等於本卡的全年純利。
+  //     ⚠ 舊註解記載的「差額就是全年共同費用、2026-08-14 判定不修」已經處理掉了，不要再拿
+  //       那段描述當現況。
+  //     ⚠ 仍然【刻意不加畫面說明文字】：橫向現在加得起來，但同一欄【直向】加不起來 ——
+  //       上方各通路的純利格不分攤共同費用（那是單一通路的數字），所以 14 格相加會比
+  //       「全年總計」那格多出當月的共同費用。這與群組分隔列早就存在的落差同一性質
+  //       （蝦皮各通路全年純利相加 7,475,473 vs 群組列 7,314,598），是這張表的既定慣例。
   const bigCard=(label,valueHtml,color)=>`<div style="flex:1;min-width:180px;background:#f8f9fc;border-radius:10px;padding:18px 20px">
     <div style="font-size:12px;color:#9ca3af;font-weight:600;letter-spacing:.03em">${label}</div>
     <div style="font-size:30px;font-weight:700;margin-top:6px;line-height:1.15;font-variant-numeric:tabular-nums;color:${color}">${valueHtml}</div>
@@ -7239,7 +7373,7 @@ function _kpiYearViewHtml(){
     <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:${424+52*monthCount}px">
       <colgroup><col style="width:110px"><col style="width:44px">${visibleMonths.map(()=>'<col style="width:52px">').join('')}<col style="width:100px"><col style="width:100px"><col style="width:70px"></colgroup>
       <thead><tr style="background:#f8f9fc">
-        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;cursor:default">賣場</th>
+        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;cursor:default">通路</th>
         <th></th>
         ${monthHeaders}
         <th style="text-align:right;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700;cursor:default">全年營收</th>
@@ -7285,8 +7419,10 @@ function renderKpiTab(){
 //     堆疊長條 → 蝦皮 89.5%、官網 0.05%，畫面上只看得到蝦皮與 MOMO 兩色，legend 卻列著五個顏色。
 //     單色長條 + tooltip 拆分 → 「還要滑過去看」。tooltip 是查詢不是顯示。
 //     也不要把小通路併成「其他」：官網與業外是有人在看的。
-//   只畫營收。純利刻意不畫——monthGrandPure 不扣共同費用、grandPure 有扣，
-//   混進同一張圖會跟上方三張大卡對不上。
+//   只畫營收，純利【目前不畫】。
+//   ⚠ 舊理由（monthGrandPure 不扣共同費用、grandPure 有扣，會跟上方三張大卡對不上）在
+//     2026-08-26 補扣之後【已經不成立】。現在不畫的理由只剩「還沒做」——見
+//     _kpiYearChartData 上方同一件事的說明，要加請當成獨立需求評估。
 //   ⚠ 這裡【不做】destroy 舊實例：那是 renderKpiTab 開頭 kpiYearDestroyCharts() 的責任。
 //     在這裡也做會變成兩個地方各管一半，日後改一邊就漏。
 function renderKpiYearChart(){
@@ -7713,7 +7849,7 @@ function _kpiScoreViewHtml(){
   </div>
 
   <div style="font-size:15px;font-weight:700;color:#374151;margin-bottom:10px">賣場月度評分比較｜Q${q}</div>
-  <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:10px" id="score-cmp-table"></div>
+  <div class="score-cmp-wrap" id="score-cmp-table"></div>
   <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">點分數看明細，可以點多個一起比較；灰色分數代表當月還沒有資料</div>
   <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;line-height:1.8">
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -8038,7 +8174,7 @@ function setShop(shop,btn){
   //   ⚠ 必須擋在下面那道「失效分頁防護」【之前】：那道防護會把 shop 改寫成 '總表' 並落地
   //     localStorage（ec_curShop / ec_profitView），把使用者「停在森之旅」就地抹掉 → 切回淨利表再也還原不回去。
   //   ⚠ 判準用 .shop-content（淨利表 DOM 在不在）而不是 content-<shop>（這個分頁還在不在）——
-  //     兩件事不同，混用就是上面那個誤判的根因。.shop-content 只由 __profitTabHtml 的 15 個 div 產生，全有或全無。
+  //     兩件事不同，混用就是上面那個誤判的根因。.shop-content 只由 __profitTabHtml 的 16 個 div 產生，全有或全無。
   //   ⚠ 刻意不印 warn：d1 每頁 render 都會來一次，印了只會洗版。
   //   結構問題（計時器在 d1 每頁都排）留在 offices.js，今天不動；只在 setShop 這個共同出口收斂。
   if(!document.querySelector('.shop-content')) return;
@@ -8123,6 +8259,18 @@ function restoreProfitView(){
   if(platform==='coupang' && shop){
     const btn=document.querySelector("button[onclick*=\"setCoupangShop('"+shop+"'\"]");
     if(typeof setCoupangShop==='function') setCoupangShop(shop, btn||null);
+    return;
+  }
+  // 🔴 對帳分頁的還原分支【不是可選的】。沒有它，platform==='recon' 會一路掉到最下面的
+  //   _restoreShopeeInline() → setShop(ec_curShop) → 而 setShop 會順手把 ec_profitView
+  //   覆寫成 {platform:'shopee'}（本檔 setShop 的 _saveProfitView 那行）。
+  //   後果：使用者停在對帳頁時只要 App.render() 重建一次（切分頁、雲端刷新都會），
+  //   就被彈回蝦皮【而且再也回不去】—— 那個狀態在 localStorage 裡、不上雲，
+  //   推新版也救不回來，只能請對方自己清 ec_profitView。
+  //   ⚠ 2026-08-28 實測過這條路：未知 platform 確實會被就地抹掉，不是理論。
+  if(platform==='recon' && shop){
+    const btn=document.querySelector("button[onclick*=\"setReconTab('"+shop+"'\"]");
+    if(typeof setReconTab==='function') setReconTab(shop, btn||null);
     return;
   }
   _restoreShopeeInline();   // shopee 或未設定 → 蝦皮還原（逐字不變）
@@ -16431,6 +16579,306 @@ function setCoupangShop(shop,btn){
   if(kpiBlock)kpiBlock.style.display='none';
 }
 
+// ═══════════ 淨利表 · 對帳分頁（蝦皮進帳報表 PDF 解析）═══════════
+// 🔴 這一整區【沒有任何寫入路徑】：不寫 localStorage、不寫 Firestore、不碰任何既有 key。
+//   解析結果只活在下面的 _reconFiles，重新整理就沒了 —— 這是規格，不是缺陷。
+//   （唯一會碰 localStorage 的是 setReconTab 裡的 _saveProfitView，那是【分頁位置】不是解析資料，
+//     與其他三個平台走同一支既有機制。）
+// ⚠ 對帳是【功能】不是平台：按鈕用中性灰（.stab-recon）、單顆不做兩層，
+//   刻意跟蝦皮橘／MOMO 桃紅／酷澎藍區隔開。
+const RECON_SHOPS=['好麻吉','玩樂','維克','森之旅'];
+// shop → {name, ok, err, fields, rows, pages, period}
+let _reconFiles={};
+// 🔴 解析中的鎖【必須逐賣場】，不可以是單一布林。
+//   舊版（KPI 月結表那一版）是一個 input 多選 + for 迴圈逐份 await，所以一把全域鎖夠用；
+//   這一版是四個獨立 input，使用者可以同時選四個檔 —— 全域鎖會讓 A 欄解析中時
+//   B 欄的選檔被 `return` 【靜默丟掉】，沒有任何提示。
+let _reconBusy={};
+
+// ── 以下八支是從 feat/kpi-payout-pdf-preview (a08bafb) 整段移植的解析核心。
+//    🔴 邏輯一個字都沒動，只做了 _kpiPayout* → _reconPayout* 的改名。
+//    那八支已對兩份真 PDF（好麻吉 2026-01 / 維克 2026-01）實測 16/16 全對，
+//    含三個版面變異：運費正數 +429、AMS 子項缺席、優惠券為 0。
+//    要改請先回去看那兩份檔，不要憑讀碼改。 ──
+
+// 撥款摘要的四個主欄位。⚠ 這裡的 l 會拿去做【完全相等】比對，不是 includes（理由見 _reconPayoutPick）。
+const RECON_PAYOUT_FIELDS=[
+  {k:'buyerPaid',l:'買家支付商品金額'},
+  {k:'coupon',   l:'優惠券與補貼'},
+  {k:'shipTotal',l:'賣家運費總支付'},
+  {k:'fee',      l:'手續費'},
+];
+// 手續費底下的子項。⚠ 數量【會變】：實測維克 2026-01 沒有「AMS推廣費用」那一行，只有三項。
+//   所以子項一律各自獨立比對、缺的顯示「抓不到」，不可以用行號或固定位移定位。
+const RECON_PAYOUT_FEE_SUBS=[
+  {k:'feeDeal', l:'成交手續費'},
+  {k:'feeOther',l:'其他服務費'},
+  {k:'feeFlow', l:'金流與系統處理費'},
+  {k:'feeAms',  l:'AMS推廣費用'},
+];
+// 數字 token → number。
+// 🔴 【不做 Math.abs】：賣家運費總支付可能是正數（實測維克 2026-01 是 +429，其他月是負數），
+//   取絕對值會把那個月的方向講反。正負號一路原樣帶到畫面上。
+// ⚠ 三種負號都要吃：摘要區用 ASCII '-'，撥款明細表用 U+2212 '−'，另外防一手全形 '－'。
+//   會計式括號負數 (1,234) 一併處理（目前沒看到，但成本只有一行）。
+function _reconPayoutNum(s){
+  let t=String(s==null?'':s).replace(/\s|NT\$|\$/g,'');
+  if(!t)return null;
+  let neg=false;
+  if(/^\((.*)\)$/.test(t)){neg=true;t=t.replace(/^\(|\)$/g,'');}
+  if(/^[-−－]/.test(t)){neg=true;t=t.replace(/^[-−－]/,'');}
+  if(!/^[\d,]+(\.\d+)?$/.test(t))return null;
+  const n=parseFloat(t.replace(/,/g,''));
+  return isFinite(n)?(neg?-n:n):null;
+}
+// 整串重複一次 → 收成一次。蝦皮把主欄位標籤【同一串畫兩次微偏移】來模擬粗體
+//   （實測 x=35.6 與 x=35.8 各印一次「買家支付商品金額」）。
+//   相鄰去重（Δx<2，見 _reconPayoutRows）已經吃掉實測到的情況，這支是第二道保險。
+// ⚠ 只在長度為偶數且前後半完全相同時才折半 —— '成交手續費'（5 字）不會被誤動。
+function _reconPayoutDedup(s){
+  const n=s.length;
+  return (n>=2&&n%2===0&&s.slice(0,n/2)===s.slice(n/2))?s.slice(0,n/2):s;
+}
+// pdf.js 的 textContent.items → 依 y 分列（容差 3pt），列內依 x 排序，再拆成 label / amount。
+// 🔴 amount 取【x 最大】的數字 cell，不是「標籤後面第一個數字」：
+//   金額欄是右對齊，用 x 定位才不受 PDF 內部繪製順序影響。
+//   （既有的 momoReadPdfText 是 items.map(str).join(' ') 把整頁壓成一條字串、座標全丟，
+//     那種扁平化會讓粗體列出現「數字排在標籤前面」的假象。那支【刻意不動】——
+//     月對帳有自己的一致性閘，不在這輪範圍。）
+function _reconPayoutRows(items){
+  const rows=[];
+  (items||[]).forEach(it=>{
+    if(!it||!it.str)return;
+    const x=it.transform[4],y=it.transform[5];
+    let r=rows.find(r=>Math.abs(r.y-y)<=3);
+    if(!r){r={y,cells:[]};rows.push(r);}
+    r.cells.push({x,s:it.str});
+  });
+  rows.sort((a,b)=>b.y-a.y);
+  return rows.map(r=>{
+    r.cells.sort((a,b)=>a.x-b.x);
+    const parts=[];
+    r.cells.forEach(c=>{
+      const s=String(c.s||'').replace(/\s+/g,'');
+      if(!s)return;                                            // 純空白的 cell（蝦皮到處都是）
+      const prev=parts[parts.length-1];
+      if(prev&&prev.s===s&&Math.abs(prev.x-c.x)<2)return;      // fake-bold 重疊的第二份
+      parts.push({x:c.x,s});
+    });
+    let label='',amtX=-Infinity,amount=null,amountRaw='';
+    parts.forEach(p=>{
+      const n=_reconPayoutNum(p.s);
+      // 非數字 → 併進標籤（'AMS' 與 '推廣費用' 是兩個 item，要接起來才等於 'AMS推廣費用'）
+      if(n===null){label+=p.s;return;}
+      if(p.x>amtX){amtX=p.x;amount=n;amountRaw=p.s;}
+    });
+    return{y:r.y,label:_reconPayoutDedup(label),amount,amountRaw,
+           raw:parts.map(p=>'['+p.x.toFixed(1)+']'+p.s).join(' ')};
+  });
+}
+// 一頁的列 → 填進 out。
+// 🔴 標籤用【完全相等】而不是 includes：'成交手續費'.includes('手續費') 是 true，
+//   用 includes 的話子項會把小計那一格搶走 —— 這是這份報表最容易踩的坑。
+//   同理「賣家運費補助(參考用)」（非撥款之參考資訊區塊，實測就在摘要下方）
+//   不會被「賣家運費總支付」命中。
+// ⚠ 先出現的頁優先，不被後頁覆蓋（撥款摘要在第 1 頁，後面幾頁是逐日明細）。
+function _reconPayoutPick(rows,page,out){
+  [...RECON_PAYOUT_FIELDS,...RECON_PAYOUT_FEE_SUBS].forEach(f=>{
+    if(out[f.k]!==undefined)return;
+    const hit=rows.find(r=>r.label===f.l&&r.amount!==null);
+    if(hit)out[f.k]={v:hit.amount,raw:hit.amountRaw,page,y:hit.y};
+  });
+}
+// 解析一份 PDF。⚠ 先掃第 1 頁（撥款摘要都在那裡）；四個主欄位有缺才往後掃，
+//   避免為了一份 5 頁的報表把逐日明細也全部跑一遍。
+async function _reconPayoutParseFile(file){
+  const lib=window.pdfjsLib||window['pdfjs-dist/build/pdf'];
+  if(!lib)throw new Error('pdf.js 尚未載入，請硬重整（Ctrl+F5）後再試');
+  try{lib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}catch{}
+  const doc=await lib.getDocument({data:await file.arrayBuffer()}).promise;
+  const out={};let dumpRows=[];
+  for(let p=1;p<=doc.numPages;p++){
+    const rows=_reconPayoutRows((await (await doc.getPage(p)).getTextContent()).items);
+    if(p===1)dumpRows=rows;                                   // dump 只留第 1 頁（撥款摘要）
+    _reconPayoutPick(rows,p,out);
+    if(RECON_PAYOUT_FIELDS.every(f=>out[f.k]!==undefined))break;
+  }
+  return{fields:out,rows:dumpRows,pages:doc.numPages};
+}
+// 千分位 + 【保留正負號】。
+// 🔴 本檔的 fmtN 是 `Math.abs(Math.round(v)).toLocaleString()` —— 它【會取絕對值】
+//   （見本檔 fmtN 定義與 _fSigned 上方那段說明）。這張表的整個重點就是如實顯示方向，
+//   所以【絕對不可以】用 fmtN。也不用 _fSigned —— 那支會加 '$' 前綴，這裡要的是原始數字。
+// ⚠ 0 要印成 '0'，不是 '—'（'—' 留給「抓不到」，兩者必須分得開）。
+function _reconPayoutFmt(n){
+  const v=Math.round(Number(n)||0);
+  return (v<0?'-':'')+Math.abs(v).toLocaleString();
+}
+// ── 移植區結束 ──
+
+// 從第 1 頁抽出報表期間（「從 2026-01-01 到 2026-01-31 的報表」那一行，實測 y≈732.6）。
+// 🔴 為什麼要有這支：這一頁刻意【不掛期間列】（見 setReconTab 隱藏 #profit-period-wrap-row），
+//   所以畫面上沒有任何「這是哪個月」的參照。不顯示的話，四家傳了不同月份的檔會若無其事地
+//   並排，而使用者無從察覺。MOMO 月對帳靠「下拉選的月 vs PDF 的月」比對（momoRenderReconReport
+//   的 monthMatch），這裡沒有下拉可比，只能拿四欄互相比。
+// ⚠ 走 _reconPayoutRows 產生的 label：那一行的 cell 是「從 / 2026-01-01 / 到 / 2026-01-31 / 的報表」
+//   加一堆空白 cell，非數字 cell 會被併進 label（日期含 '-' 不符數字判準，所以也在 label 裡）
+//   ⇒ label === '從2026-01-01到2026-01-31的報表'。2026-08-28 對兩份真 PDF 實測過。
+const _RECON_PERIOD_RE=/從(\d{4}-\d{2}-\d{2})到(\d{4}-\d{2}-\d{2})的報表/;
+function _reconPeriodOf(rows){
+  for(const r of (rows||[])){
+    const m=_RECON_PERIOD_RE.exec(r.label||'');
+    if(m)return{from:m[1],to:m[2],key:m[1]+'~'+m[2]};
+  }
+  return null;
+}
+
+// 檔案選取 → 解析 → 重繪。
+// 🔴 shop 是【欄位帶進來的】，不是從檔名猜的：使用者在哪一欄上傳就是哪一家。
+//   （檔名規則沒有任何程式可依據，猜錯又不會報錯 —— 那與本檔 pureKey 用中文標題 substring
+//     反查是同一種病。）
+async function reconPayoutPick(e,shop){
+  const f=(e&&e.target&&e.target.files||[])[0];
+  try{e.target.value='';}catch{}
+  if(!f)return;
+  if(_reconBusy[shop])return;          // ⚠ 只鎖【這一欄】，別欄照樣可以同時傳
+  _reconBusy[shop]=true;
+  renderReconTab();
+  try{
+    const r=await _reconPayoutParseFile(f);
+    _reconFiles[shop]=Object.assign({name:f.name,ok:true,err:''},r,{period:_reconPeriodOf(r.rows)});
+  }catch(err){
+    console.warn('[對帳] 解析失敗',shop,f.name,err);
+    _reconFiles[shop]={name:f.name,ok:false,err:(err&&err.message)||String(err),fields:{},rows:[],pages:0,period:null};
+  }
+  _reconBusy[shop]=false;
+  renderReconTab();
+}
+function clearRecon(){_reconFiles={};_reconBusy={};renderReconTab();}
+// 一格的顯示。🔴 抓不到一律印「抓不到」，【不可以】退化成 0 或空白 ——
+//   0 是合法值（實測維克的「優惠券與補貼」就是 0），兩者混在一起這張表就沒有查核價值了。
+function _reconCell(hit){
+  if(!hit)return '<span class="recon-miss">抓不到</span>';
+  return _reconPayoutFmt(hit.v);
+}
+function reconShopeeHtml(){
+  const has=RECON_SHOPS.some(s=>_reconFiles[s]);
+  // 期間一致性：只比對【已經解析出期間】的欄。四欄期間不同 ⇒ 全部標紅 + 上方掛一條警告。
+  const keys=[...new Set(RECON_SHOPS.map(s=>_reconFiles[s]&&_reconFiles[s].period&&_reconFiles[s].period.key).filter(Boolean))];
+  const periodBad=keys.length>1;
+  const th=RECON_SHOPS.map(s=>{
+    const d=_reconFiles[s];
+    const p=d&&d.period;
+    const pTxt=p?(p.from+' ~ '+p.to):(d?'期間抓不到':'—');
+    const cls='recon-period'+((periodBad&&p)||(d&&!p)?' recon-period-bad':'');
+    return '<th>'+escapeHtmlLike(s)+'<div class="'+cls+'">'+escapeHtmlLike(pTxt)+'</div></th>';
+  }).join('');
+  // 上傳列：每家一個獨立的 input。⚠ 解析中的那一欄顯示「解析中…」而不是換掉 input——
+  //   換掉會讓使用者以為欄位消失了。
+  const upRow='<tr><th class="recon-rowhead">上傳 PDF</th>'+RECON_SHOPS.map(s=>{
+    const d=_reconFiles[s];
+    return '<td class="recon-cell-upload">'
+      +'<input type="file" accept=".pdf" class="recon-file" onchange="reconPayoutPick(event,\''+s+'\')">'
+      +(_reconBusy[s]?'<span class="recon-fname">解析中…</span>'
+        :(d?'<span class="recon-fname" title="'+escapeHtmlLike(d.name)+'">'+escapeHtmlLike(d.name)
+             +(d.ok?'（'+d.pages+' 頁）':'')+'</span>':''))
+      +(d&&!d.ok?'<span class="recon-miss">解析失敗</span>':'')
+      +'</td>';
+  }).join('')+'</tr>';
+
+  let dataRows='';
+  if(has){
+    RECON_PAYOUT_FIELDS.forEach(fd=>{
+      dataRows+='<tr'+(fd.k==='fee'?' class="recon-sumrow"':'')+'>'
+        +'<th class="recon-rowhead">'+fd.l+(fd.k==='fee'?'（小計）':'')+'</th>'
+        +RECON_SHOPS.map(s=>'<td>'+(_reconFiles[s]?_reconCell(_reconFiles[s].fields[fd.k]):'<span class="recon-empty">—</span>')+'</td>').join('')
+        +'</tr>';
+    });
+    RECON_PAYOUT_FEE_SUBS.forEach(fd=>{
+      dataRows+='<tr><th class="recon-rowhead recon-sub">└ '+fd.l+'</th>'
+        +RECON_SHOPS.map(s=>'<td>'+(_reconFiles[s]?_reconCell(_reconFiles[s].fields[fd.k]):'<span class="recon-empty">—</span>')+'</td>').join('')
+        +'</tr>';
+    });
+    // 子項加總。⚠ 抓不到的子項以 0 計入，並在同一格標「(N項)」——
+    //   不然「✓ 相符」會讓人以為四項都在（實測維克那份只有三項，加總照樣等於小計）。
+    dataRows+='<tr><th class="recon-rowhead">子項加總</th>'+RECON_SHOPS.map(s=>{
+      const d=_reconFiles[s];
+      if(!d)return '<td><span class="recon-empty">—</span></td>';
+      const sum=RECON_PAYOUT_FEE_SUBS.reduce((a,fd)=>a+(d.fields[fd.k]?d.fields[fd.k].v:0),0);
+      const got=RECON_PAYOUT_FEE_SUBS.filter(fd=>d.fields[fd.k]).length;
+      return '<td title="'+got+' / '+RECON_PAYOUT_FEE_SUBS.length+' 項有抓到">'+_reconPayoutFmt(sum)
+        +'<span class="recon-note"> ('+got+'項)</span></td>';
+    }).join('')+'</tr>';
+    dataRows+='<tr class="recon-sumrow"><th class="recon-rowhead">小計 − 子項加總</th>'+RECON_SHOPS.map(s=>{
+      const d=_reconFiles[s];
+      if(!d)return '<td><span class="recon-empty">—</span></td>';
+      const sub=d.fields.fee?d.fields.fee.v:null;
+      if(sub===null)return '<td><span class="recon-miss">抓不到</span></td>';
+      const sum=RECON_PAYOUT_FEE_SUBS.reduce((a,fd)=>a+(d.fields[fd.k]?d.fields[fd.k].v:0),0);
+      const diff=sub-sum;
+      return '<td class="'+(diff===0?'recon-ok':'recon-bad')+'">'+(diff===0?'✓ 0（相符）':'⚠ '+_reconPayoutFmt(diff))+'</td>';
+    }).join('')+'</tr>';
+  }
+
+  // 原始文字層 dump：解析錯時唯一能看出 PDF 實際版面的地方，是功能的一部分、不是除錯殘留。
+  const dumps=RECON_SHOPS.filter(s=>_reconFiles[s]).map(s=>{
+    const d=_reconFiles[s];
+    return '<details class="recon-dump">'
+      +'<summary>▸ 原始文字層 · '+escapeHtmlLike(s)+' · '+escapeHtmlLike(d.name)+'（第 1 頁，逐列 y / x 座標）</summary>'
+      +(d.err?'<div class="recon-err">'+escapeHtmlLike(d.err)+'</div>':'')
+      +'<pre>'+(escapeHtmlLike((d.rows||[]).map(r=>'y='+r.y.toFixed(1).padStart(7)+' | label="'+r.label+'" | amount='+(r.amount===null?'—':r.amount)+' | '+r.raw).join('\n'))||'（沒有文字層，可能是掃描檔）')+'</pre>'
+      +'</details>';
+  }).join('');
+
+  return '<div class="recon-wrap">'
+    +'<div class="recon-hd"><span class="recon-title">蝦皮進帳報表 · 對帳</span>'
+    +(has?'<button type="button" class="recon-btn" onclick="clearRecon()">全部清除</button>':'')
+    +'<span class="recon-note">四家各自上傳當月「進帳報表」PDF。<b>解析結果只顯示在這裡</b>，不會寫進任何報表、不會上雲，重新整理就消失。</span></div>'
+    +(periodBad?'<div class="recon-warn">⚠ 四欄的報表期間不一致（'+escapeHtmlLike(keys.join('　/　'))+'），請確認是不是傳到不同月份的檔。</div>':'')
+    +'<div class="recon-scroll"><table class="recon-tbl">'
+    +'<thead><tr><th class="recon-rowhead">欄位</th>'+th+'</tr></thead>'
+    +'<tbody>'+upRow+dataRows+'</tbody></table></div>'
+    +(has?'':'<div class="recon-note" style="margin-top:10px">尚未上傳任何檔案 —— 在上面任一欄選檔就會出現解析結果。</div>')
+    +dumps
+    +'</div>';
+}
+function renderReconTab(){
+  const el=document.getElementById('recon-content-shopee');
+  if(!el)return;
+  el.innerHTML=reconShopeeHtml();
+}
+// 對帳分頁的切換。骨架比照 setCoupangShop，但【補上它缺的三件事】：
+//   ① 失效分頁防護（setShop 有、setMomoShop/setCoupangShop 都沒有）：
+//      2026-08-28 實測 setMomoShop('不存在的店') → .shop-content.active 與 .stab.active
+//      雙雙歸零 ⇒ 整頁全白、Console 一個字都不印，而且壞值已經先寫進 localStorage。
+//      這裡把 _saveProfitView 放在防護【之後】，壞值不落地。
+//   ② 主動隱藏 #profit-period-wrap-row：那兩支都不碰它 ⇒ 從蝦皮某賣場切過來時，
+//      蝦皮的月份下拉 + 三顆半月按鈕會殘留在畫面上（2026-08-28 實測 wrapRow 維持 flex）。
+//      這一頁沒有半月概念，殘留正是要避開的東西。
+//   ③ restoreProfitView 的 'recon' 分支（見該函式），否則使用者停在這頁時會被就地抹掉。
+function setReconTab(id,btn){
+  if(!document.querySelector('.shop-content'))return;   // 不在淨利表頁 → no-op（比照 setShop 開頭）
+  // 失效分頁防護：未知 id 退回唯一的安全狀態（蝦皮進帳），並讓下面的 _saveProfitView 覆寫自癒。
+  if(!document.getElementById('recon-content-'+id)){
+    console.warn('[對帳] 分頁「'+id+'」已不存在，退回蝦皮進帳');
+    id='shopee';
+    btn=document.querySelector("button[onclick*=\"setReconTab('shopee'\"]")||null;
+  }
+  _saveProfitView('recon',id);
+  document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
+  const el=document.getElementById('recon-content-'+id);
+  if(el){
+    el.classList.add('active');
+    renderReconTab();   // lazy fill：進來才畫（state 在 _reconFiles，重畫不會掉資料）
+  }
+  const wrapRow=document.getElementById('profit-period-wrap-row');
+  if(wrapRow)wrapRow.style.display='none';
+  const kpiBlock=document.getElementById('header-kpi-row');
+  if(kpiBlock)kpiBlock.style.display='none';
+}
+
 let _cupShop='';
 const _cupFiles={order:null, pi:null, msf:null};   // PR-3：訂單(必要)/price_inventory(先收檔不解析)/MSF(退貨·選填)
 const _cupReportDoc={};   // shop → 最近一次產出的報表 doc（coupangBuildReportDoc）
@@ -18142,10 +18590,14 @@ Object.assign(window, {
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,
-  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,
+  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,editKpiMergedFieldHinted,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
+  // 對帳分頁的三個 inline handler（分頁鈕 onclick / 四個檔案 input 的 onchange / 全部清除鈕）。
+  //   ⚠ setReconTab 還會被 restoreProfitView 用 typeof 檢查後呼叫 —— 沒掛上去的話那條還原分支
+  //     會靜默失效，使用者停在對帳頁時就會被彈回蝦皮（正是這輪要防的那件事）。
+  setReconTab,reconPayoutPick,clearRecon,
   coupangSummaryHTML,setCoupangSummaryView,syncCoupangSummaryFromKpi,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
