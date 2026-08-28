@@ -1043,19 +1043,24 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   z-index:5;
 }
 
-/* ═══════════ 淨利表 · 分頁按鈕列（三組 → 四組，允許換行）═══════════
-   🔴 為什麼要改：實測（2026-08-28，main v589）按鈕列是 flex 不換行，而外層卡片是
+/* ═══════════ 淨利表 · 分頁按鈕列（三組，允許換行）═══════════
+   🔴 為什麼有 flex-wrap：實測（2026-08-28，main v589）按鈕列是 flex 不換行，而外層卡片是
      overflow:hidden ⇒ 溢出的按鈕【直接被剪掉、沒有捲軸、沒有任何提示】。
      .main 雖然是 overflow-x:auto 也救不到 —— 卡片先剪掉了，.main 量到的 scrollWidth
      等於 clientWidth，捲軸永遠不會出現。
-   實測數據（卡片可用寬 vs 按鈕列所需寬）：
-     三組需 1066px：1366 螢幕 + 側欄展開（卡片 1070px）→ 已被切 11px（【既有】問題）
-     四組需 1183px：1366 展開切 128px（整組看不見）／1366 收合切 34px／1440 展開切 54px
-   ⇒ 加 flex-wrap 換行，順便把上面那個既有的 11px 一起修掉。 */
+     當時實測：三組需 1066px，而 1366 螢幕 + 側欄展開的卡片只有 1070px（扣掉卡片 padding 28px
+     後只剩 1042px）→ 最右邊那顆【已經】被切 11px。這是加 wrap 之前就存在的問題。
+   ⚠ 歷史（免得有人以為註解過期）：v591 曾經有【第四組】「對帳」，需求 1183px、在 1366/1440
+     全部被切；v593 把那顆按鈕搬進蝦皮 pill 列，第四組移除，現在又是三組。
+     wrap 仍然要留 —— 三組現在的內在寬是 1137px（蝦皮組吸收了對帳鈕而變寬），
+     1366 展開／1366 收合／1440 展開三種常見組合仍然裝不下一排，會換成兩排。
+   ⚠ 換行的代價（v593 實測、已知並接受）：以前換行掉下去的是那顆 28px 高的獨立對帳鈕
+     （第二排很矮，整列 101px）；現在掉下去的是完整兩層的酷澎組（65px），整列變 138px。
+     在 1366 收合與 1440 展開這兩個寬度，按鈕列比 v592 高 37px。 */
 .pf-tabrow{
   display:flex;
   align-items:flex-start;
-  /* 🔴 這一行是本區的主角。沒有它，第四組在 1366/1440 的機器上完全看不見。 */
+  /* 🔴 這一行是本區的主角。沒有它，最右邊的組在 1366/1440 的機器上會被直接剪掉。 */
   flex-wrap:wrap;
   /* 直向 8px 是換行後兩排之間的呼吸；橫向 12px 【必須維持原值】——
      它與下方 .pf-tabgrp 的 padding-left 一起復刻原本「12px + 1px 分隔線 + 12px」的間距。 */
@@ -1072,7 +1077,10 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
    ⚠ 舊的分隔線是 align-self:stretch（撐滿該行的 cross size）；border-left 撐滿的是自己的
      padding box 高度。三組高度相同 ⇒ 結果一樣。
    ⚠ 殘留（已知、可接受）：換行時落在第二排【行首】的那一組仍會顯示自己的左邊框，
-     看起來像一條貼在左緣的細線。純 CSS 無法表達「行首不畫」，而它比「浮空的分隔線」輕微得多。 */
+     看起來像一條貼在左緣的細線。純 CSS 無法表達「行首不畫」，而它比「浮空的分隔線」輕微得多。
+   ⚠ v593 更新：作用對象從四組減為三組（對帳那組已移進蝦皮 pill 列），
+     所以現在畫線的只有 MOMO 與酷澎兩組。上面那個「行首左邊框」的殘留【依然存在】——
+     換行時掉到第二排的是酷澎組，它就是一個 + .pf-tabgrp。 */
 .pf-tabgrp{
   display:flex;
   flex-direction:column;
@@ -1088,12 +1096,32 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
      解析結果只活在記憶體，重新整理就消失 —— 這是規格，不是缺陷。
    ⚠ 顏色一律走 css/main.css:2 的 :root 變數，不寫死色碼、不碰 --bg。 */
 
-/* 分頁按鈕：中性灰。蝦皮 #ee4d2d／MOMO #e4007f／酷澎 #0ea5e9 是【平台】識別色，
-   對帳是【功能】不是平台 —— 用不帶品牌屬性的灰，讓這個差別在視覺上讀得出來。 */
+/* 分頁按鈕。v593 起這顆位在【蝦皮 pill 列的最右邊】（原本是獨立的第四組）。
+   🔴 刻意【不覆寫 background】—— 這是本規則最重要的一行「沒有寫」的東西：
+     v591 的舊版是 background:var(--text-muted); color:#fff（實心深灰），那是為了「獨立站在
+     白色卡片上」設計的。搬進 pill 列（底色 #f3f4f6）之後那個寫法有兩個相反的後果：
+       ① 沒被選中時看起來像【永遠 active】；
+       ② 真的切到它時 .stab.active 的白底反而讓它【變淡】—— 狀態顯示是反的。
+     所以只留灰色調性（其實就是 .stab 的預設 #6b7280），讓 .stab / .stab.active 原樣生效，
+     它的 active 行為與左邊五顆賣場完全一致。
+   ⚠ 那「這顆看起來不就跟賣場一樣了？」—— 區隔改由兩個【既有元件】承擔，不新造視覺語言：
+     ① 前面一條 .stab-sep（與「測試通路」前面那條同一個 class）
+     ② 下面的空心圓點 .sdot-hollow
+   ⚠ 已知並接受：選中對帳時的白底樣式與「選中某個賣場」完全相同，pill 列裡只能靠空心圓點
+     與位置分辨。不為它再開一條 active 專屬規則 —— 那會變成又一條只為單顆按鈕存在的樣式。 */
 .stab.stab-recon{
-  background:var(--text-muted);
-  color:#fff;
-  border-color:var(--text-muted);
+  color:var(--text-muted);
+}
+/* 空心圓點：與五顆賣場的實心 .sdot 同尺寸同位置（沿用 .sdot 的 width/height/border-radius），
+   只把填色換成外框 ⇒「空心 vs 實心」一眼看得出這一顆不是賣場。
+   🔴 要 box-sizing:border-box —— .sdot 是 width/height 各 8px，不收邊框寬度的話
+     1.5px 外框會把它撐成 11px，跟左邊五顆對不齊。
+   ⚠ 刻意不用圖示字元（例如 ⚖）：在 Windows 會被渲染成彩色 emoji，與 8px 的 CSS 圓點
+     大小、基線都對不齊，而且各系統字型不一。 */
+.sdot-hollow{
+  background:transparent;
+  border:1.5px solid var(--text-muted);
+  box-sizing:border-box;
 }
 
 .recon-wrap{max-width:1100px;}

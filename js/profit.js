@@ -18,6 +18,20 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <button class="stab" style="font-size:15px" onclick="setShop('森之旅',this)"><span class="sdot" style="background:#f59e0b"></span>森之旅</button>
             <button class="stab" style="font-size:15px" onclick="setShop('維克',this)"><span class="sdot" style="background:#14b8a6"></span>維克</button>
             <span class="stab-sep"></span><button class="stab" style="font-size:15px" onclick="setShop('${TEST_SHOP_ID}',this)"><span class="sdot" style="background:#8b5cf6"></span>${TEST_SHOP_ID}</button>
+            <!-- 對帳：放在蝦皮 pill 列的最右邊（原本是獨立的第四組，孤立在最右側，同事看不出那是蝦皮的東西）。
+                 🔴 onclick 仍然是 setReconTab、容器仍然是 recon-content-shopee ——【換位置不換 setter】。
+                    setShop 不可能誤收它：全檔的按鈕查找一律是 button[onclick*="setXxx('…'"]（本檔搜 onclick*=），
+                    而 .stab 的列舉只做 remove('active')，都與 DOM 位置無關。
+                 ⚠ 它【不是賣場】，用兩個訊號跟左邊五顆區隔，兩個都沿用既有元件、不新造視覺語言：
+                    ① 前面一條 .stab-sep（與「測試通路」前面那條同一個 class）
+                    ② 空心圓點 .sdot.sdot-hollow（與五顆實心 .sdot 同尺寸同位置，空心 vs 實心一眼可辨）
+                 ⚠ 刻意【不覆寫底色】（見 css 的 .stab.stab-recon）：覆寫會讓它看起來永遠 active，
+                    而真的切到它時 .stab.active 的白底反而讓它變淡 —— 狀態顯示會是反的。
+                 ⚠ 這是全部 15 顆 .stab 裡【唯一】帶 title 的，其餘 14 顆都沒有，本次也不順手補。
+                 ⚠ title 文字是常數字串，不含雙引號 / 角括號 / & / 反引號 / 插值符號 ⇒【不做跳脫】，
+                    與本檔其他靜態 title 同寫法；escapeHtmlLike 只用在動態值上。
+                    🔴 這整段註解在 __profitTabHtml 這個【模板字串】裡，寫註解時也要避開反引號與插值符號。 -->
+            <span class="stab-sep"></span><button class="stab stab-recon" style="font-size:15px" title="上傳蝦皮進帳報表 PDF 對帳用，只顯示不寫入任何資料" onclick="setReconTab('shopee',this)"><span class="sdot sdot-hollow"></span>對帳</button>
           </div>
         </div>
         <div class="pf-tabgrp">
@@ -35,17 +49,6 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <button class="stab" style="font-size:15px" onclick="setCoupangShop('麻吉',this)"><span class="sdot" style="background:#c0392b"></span>麻吉</button>
             <button class="stab" style="font-size:15px" onclick="setCoupangShop('露營館',this)"><span class="sdot" style="background:#e74c3c"></span>露營館</button>
           </div>
-        </div>
-        <!-- 對帳：這是【功能】不是平台，所以刻意做成單顆中性灰按鈕，不長成上面三組
-             「平台總表 + 子賣場 pill 列」的兩層形狀 —— 兩層會讓它看起來像第四個平台。
-             ⚠ 之後酷澎／MOMO 的對帳進來時再在下面補 pill 列（容器 id 已預留 recon-content-{id}）。 -->
-        <div class="pf-tabgrp">
-          <!-- ⚠ 這是 15 顆 .stab 裡【第一個】帶 title 的，沒有既有慣例可循 —— 其餘 14 顆
-               （蝦皮 6 / MOMO 5 / 酷澎 3）目前都沒有 title，本次刻意不順手補，那是另一件事。
-               ⚠ 文字是常數字串，不含雙引號 / 角括號 / & / 反引號 / 插值符號，所以【不做跳脫】——
-               與本檔其他靜態 title（例如 kpiCellClick 那格的「點擊編輯；輸入 = 後…」）同寫法；
-               escapeHtmlLike 只用在動態值上。 -->
-          <button class="stab stab-recon" style="font-weight:700;width:100%;justify-content:center;font-size:15px" title="上傳蝦皮進帳報表 PDF 對帳用，只顯示不寫入任何資料" onclick="setReconTab('shopee',this)">對帳</button>
         </div>
       </div>
     </div>
@@ -293,7 +296,10 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <!-- 對帳分頁的容器。🔴 id 前綴【必須】是 recon-content-，不可以用 content-：
        廣告費編輯後的 stayOnShop（本檔搜 _activeEl.id.startsWith 那一行）會在 50/200/500ms
        三次把畫面強制拉回蝦皮賣場，它的守衛就是靠這個前綴判斷「現在不在蝦皮頁」。
-       命名成 content-對帳 會被那三發計時器踢掉。 -->
+       另一處同型守衛在雲端快照回來時的蝦皮 tab 修復（同樣搜 _activeEl.id.startsWith）。
+       命名成 content-對帳 會被這兩道守衛當成蝦皮頁 → 被計時器踢掉。
+       🔴 這條在【按鈕已經搬進蝦皮 pill 列之後仍然成立】，而且更重要：按鈕現在看起來像蝦皮的一員，
+          容器卻【不能】跟著改成 content- 前綴。兩者刻意不對稱，不是漏改。 -->
   <div id="recon-content-shopee" class="shop-content" style="padding:16px 20px"></div>
 </div>`;
 
