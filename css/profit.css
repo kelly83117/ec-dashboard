@@ -1042,3 +1042,170 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   box-shadow:var(--shadow-sm);
   z-index:5;
 }
+
+/* ═══════════ 淨利表 · 分頁按鈕列（三組 → 四組，允許換行）═══════════
+   🔴 為什麼要改：實測（2026-08-28，main v589）按鈕列是 flex 不換行，而外層卡片是
+     overflow:hidden ⇒ 溢出的按鈕【直接被剪掉、沒有捲軸、沒有任何提示】。
+     .main 雖然是 overflow-x:auto 也救不到 —— 卡片先剪掉了，.main 量到的 scrollWidth
+     等於 clientWidth，捲軸永遠不會出現。
+   實測數據（卡片可用寬 vs 按鈕列所需寬）：
+     三組需 1066px：1366 螢幕 + 側欄展開（卡片 1070px）→ 已被切 11px（【既有】問題）
+     四組需 1183px：1366 展開切 128px（整組看不見）／1366 收合切 34px／1440 展開切 54px
+   ⇒ 加 flex-wrap 換行，順便把上面那個既有的 11px 一起修掉。 */
+.pf-tabrow{
+  display:flex;
+  align-items:flex-start;
+  /* 🔴 這一行是本區的主角。沒有它，第四組在 1366/1440 的機器上完全看不見。 */
+  flex-wrap:wrap;
+  /* 直向 8px 是換行後兩排之間的呼吸；橫向 12px 【必須維持原值】——
+     它與下方 .pf-tabgrp 的 padding-left 一起復刻原本「12px + 1px 分隔線 + 12px」的間距。 */
+  row-gap:8px;
+  column-gap:12px;
+}
+/* 分隔線從【獨立的 1px div】改成【組自己的 border-left】。
+   🔴 這不是美化，是換行的必要條件：獨立 div 是 flex item，換行時它會單獨落在某一排的
+     行首或行尾，變成一條沒有依附對象的浮線。做成 border 之後它永遠黏著自己的組，不可能落單。
+   ⚠ 未換行時的視覺【與改動前逐像素相同】：
+     舊：組 —12px(gap)— 線(1px) —12px(gap)— 組
+     新：組 —12px(gap)— 線(border 1px) —12px(padding)— 組
+     兩者都是「12 / 1 / 12」，線的位置與粗細不變。
+   ⚠ 舊的分隔線是 align-self:stretch（撐滿該行的 cross size）；border-left 撐滿的是自己的
+     padding box 高度。三組高度相同 ⇒ 結果一樣。
+   ⚠ 殘留（已知、可接受）：換行時落在第二排【行首】的那一組仍會顯示自己的左邊框，
+     看起來像一條貼在左緣的細線。純 CSS 無法表達「行首不畫」，而它比「浮空的分隔線」輕微得多。 */
+.pf-tabgrp{
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+}
+.pf-tabgrp + .pf-tabgrp{
+  border-left:1px solid var(--border);
+  padding-left:12px;
+}
+
+/* ═══════════ 淨利表 · 對帳分頁（蝦皮進帳報表 PDF 解析；只讀、只顯示）═══════════
+   🔴 這一區【沒有任何寫入路徑】：不寫 localStorage、不寫 Firestore、不碰任何既有 key。
+     解析結果只活在記憶體，重新整理就消失 —— 這是規格，不是缺陷。
+   ⚠ 顏色一律走 css/main.css:2 的 :root 變數，不寫死色碼、不碰 --bg。 */
+
+/* 分頁按鈕：中性灰。蝦皮 #ee4d2d／MOMO #e4007f／酷澎 #0ea5e9 是【平台】識別色，
+   對帳是【功能】不是平台 —— 用不帶品牌屬性的灰，讓這個差別在視覺上讀得出來。 */
+.stab.stab-recon{
+  background:var(--text-muted);
+  color:#fff;
+  border-color:var(--text-muted);
+}
+
+.recon-wrap{max-width:1100px;}
+.recon-hd{
+  display:flex;
+  align-items:baseline;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:12px;
+}
+.recon-title{font-size:15px;font-weight:700;color:var(--text);}
+.recon-note{font-size:11.5px;color:var(--text-muted);line-height:1.6;}
+.recon-btn{
+  padding:5px 12px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--surface);
+  color:var(--text-muted);
+  font-size:12px;
+  font-family:inherit;
+  cursor:pointer;
+}
+.recon-btn:hover{border-color:var(--primary);color:var(--primary);}
+.recon-scroll{overflow-x:auto;}
+.recon-tbl{
+  border-collapse:collapse;
+  font-size:12.5px;
+  width:100%;
+  min-width:640px;
+}
+.recon-tbl th,.recon-tbl td{
+  border:1px solid var(--border);
+  padding:5px 10px;
+  white-space:nowrap;
+}
+/* 欄頭＝賣場。🔴 橫向欄位是【固定的四家蝦皮】，不是上傳順序 ——
+   使用者在哪一欄上傳就是哪一家，全程不從檔名猜賣場。 */
+.recon-tbl thead th{
+  background:var(--primary-soft);
+  color:var(--text);
+  font-weight:700;
+  font-size:12.5px;
+  text-align:center;
+}
+.recon-tbl th.recon-rowhead{
+  background:var(--surface);
+  text-align:left;
+  font-weight:600;
+  color:var(--text);
+  white-space:nowrap;
+}
+/* 手續費的四個子項：縮排 + 淡一階，跟小計那一列在視覺上分得開。 */
+.recon-tbl th.recon-sub{
+  padding-left:22px;
+  font-weight:400;
+  color:var(--text-muted);
+}
+.recon-tbl td{
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+  color:var(--text);
+}
+.recon-tbl td.recon-cell-upload{text-align:center;white-space:normal;}
+.recon-file{font-size:11px;width:100%;color:var(--text-muted);}
+.recon-fname{
+  display:block;
+  font-size:11px;
+  color:var(--text-muted);
+  margin-top:3px;
+  max-width:150px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+/* 🔴 抓不到 ≠ 0。0 是合法值（實測維克的「優惠券與補貼」就是 0），
+   兩者在畫面上必須分得開，否則這張表沒有查核價值。 */
+.recon-miss{color:var(--danger);font-size:11.5px;}
+.recon-empty{color:var(--text-faint);}
+.recon-tbl tr.recon-sumrow td,
+.recon-tbl tr.recon-sumrow th{background:var(--primary-soft);font-weight:700;}
+.recon-ok{color:var(--success);font-weight:700;}
+.recon-bad{color:var(--danger);font-weight:700;}
+/* 期間列：四欄期間不一致就整列標紅。
+   🔴 這一頁刻意不掛期間列（#profit-period-wrap-row），所以畫面上沒有任何「這是哪個月」的
+     參照 —— 期間只能從 PDF 自己抽（第 1 頁「從 YYYY-MM-DD 到 YYYY-MM-DD 的報表」那一行）。
+     不顯示的話，四家傳了不同月份的檔會若無其事地並排，而使用者無從察覺。 */
+.recon-period{font-size:11.5px;color:var(--text-muted);font-weight:400;}
+.recon-period-bad{color:var(--danger);font-weight:700;}
+.recon-warn{
+  margin:10px 0 0;
+  padding:7px 10px;
+  border:1px solid var(--danger);
+  border-radius:6px;
+  background:var(--danger-soft);
+  color:var(--danger);
+  font-size:12px;
+  font-weight:600;
+}
+/* 原始文字層 dump：解析錯時唯一能看出 PDF 實際版面的地方 ——
+   它是功能的一部分，不是除錯殘留，請勿當成 debug code 清掉。 */
+.recon-dump{margin-top:12px;font-size:11.5px;}
+.recon-dump summary{cursor:pointer;color:var(--text-muted);padding:3px 0;}
+.recon-dump pre{
+  margin:6px 0 0;
+  padding:8px 10px;
+  max-height:320px;
+  overflow:auto;
+  background:var(--primary-soft);
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-size:11px;
+  line-height:1.55;
+  white-space:pre;
+}
+.recon-err{color:var(--danger);font-size:12px;padding:6px 0;}
