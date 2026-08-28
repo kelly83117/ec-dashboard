@@ -40,7 +40,12 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
              「平台總表 + 子賣場 pill 列」的兩層形狀 —— 兩層會讓它看起來像第四個平台。
              ⚠ 之後酷澎／MOMO 的對帳進來時再在下面補 pill 列（容器 id 已預留 recon-content-{id}）。 -->
         <div class="pf-tabgrp">
-          <button class="stab stab-recon" style="font-weight:700;width:100%;justify-content:center;font-size:15px" onclick="setReconTab('shopee',this)">對帳</button>
+          <!-- ⚠ 這是 15 顆 .stab 裡【第一個】帶 title 的，沒有既有慣例可循 —— 其餘 14 顆
+               （蝦皮 6 / MOMO 5 / 酷澎 3）目前都沒有 title，本次刻意不順手補，那是另一件事。
+               ⚠ 文字是常數字串，不含雙引號 / 角括號 / & / 反引號 / 插值符號，所以【不做跳脫】——
+               與本檔其他靜態 title（例如 kpiCellClick 那格的「點擊編輯；輸入 = 後…」）同寫法；
+               escapeHtmlLike 只用在動態值上。 -->
+          <button class="stab stab-recon" style="font-weight:700;width:100%;justify-content:center;font-size:15px" title="上傳蝦皮進帳報表 PDF 對帳用，只顯示不寫入任何資料" onclick="setReconTab('shopee',this)">對帳</button>
         </div>
       </div>
     </div>
