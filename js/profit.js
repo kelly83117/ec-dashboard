@@ -9,8 +9,8 @@ const TEST_SHOP_ID='測試通路';
 window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
   <div style="padding:10px 14px;border-bottom:1px solid #e5e7eb">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
-      <div style="display:flex;gap:12px;align-items:flex-start">
-        <div style="display:flex;flex-direction:column;gap:5px">
+      <div class="pf-tabrow">
+        <div class="pf-tabgrp">
           <button class="stab active" style="background:#ee4d2d;color:#fff;border-color:#ee4d2d;font-weight:700;width:100%;justify-content:center;font-size:15px" onclick="setShop('總表',this)">蝦皮｜總表</button>
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setShop('好麻吉',this)"><span class="sdot" style="background:#5b5fcf"></span>好麻吉</button>
@@ -20,8 +20,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <span class="stab-sep"></span><button class="stab" style="font-size:15px" onclick="setShop('${TEST_SHOP_ID}',this)"><span class="sdot" style="background:#8b5cf6"></span>${TEST_SHOP_ID}</button>
           </div>
         </div>
-        <div style="width:1px;background:#e5e7eb;align-self:stretch"></div>
-        <div style="display:flex;flex-direction:column;gap:5px">
+        <div class="pf-tabgrp">
           <button class="stab" id="momo-summary-btn" style="background:#e4007f;color:#fff;border-color:#e4007f;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.9" onclick="setMomoShop('總表',this)">MOMO｜總表</button>
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setMomoShop('甲配',this)"><span class="sdot" style="background:#d4380d"></span>甲配</button>
@@ -30,13 +29,18 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+森之旅',this)"><span class="sdot" style="background:#ffa940"></span>MO+森之旅</button>
           </div>
         </div>
-        <div style="width:1px;background:#e5e7eb;align-self:stretch"></div>
-        <div style="display:flex;flex-direction:column;gap:5px">
+        <div class="pf-tabgrp">
           <button class="stab" style="background:#0ea5e9;color:#fff;border-color:#0ea5e9;font-weight:700;width:100%;justify-content:center;font-size:15px;opacity:0.9" onclick="setCoupangShop('總表',this)">酷澎｜總表</button>
           <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;border-radius:7px;padding:2px">
             <button class="stab" style="font-size:15px" onclick="setCoupangShop('麻吉',this)"><span class="sdot" style="background:#c0392b"></span>麻吉</button>
             <button class="stab" style="font-size:15px" onclick="setCoupangShop('露營館',this)"><span class="sdot" style="background:#e74c3c"></span>露營館</button>
           </div>
+        </div>
+        <!-- 對帳：這是【功能】不是平台，所以刻意做成單顆中性灰按鈕，不長成上面三組
+             「平台總表 + 子賣場 pill 列」的兩層形狀 —— 兩層會讓它看起來像第四個平台。
+             ⚠ 之後酷澎／MOMO 的對帳進來時再在下面補 pill 列（容器 id 已預留 recon-content-{id}）。 -->
+        <div class="pf-tabgrp">
+          <button class="stab stab-recon" style="font-weight:700;width:100%;justify-content:center;font-size:15px" onclick="setReconTab('shopee',this)">對帳</button>
         </div>
       </div>
     </div>
@@ -281,6 +285,11 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div id="coupang-content-總表" class="shop-content" style="padding:16px 20px"></div>
   <div id="coupang-content-麻吉" class="shop-content" style="padding:16px 20px"></div>
   <div id="coupang-content-露營館" class="shop-content" style="padding:16px 20px"></div>
+  <!-- 對帳分頁的容器。🔴 id 前綴【必須】是 recon-content-，不可以用 content-：
+       廣告費編輯後的 stayOnShop（本檔搜 _activeEl.id.startsWith 那一行）會在 50/200/500ms
+       三次把畫面強制拉回蝦皮賣場，它的守衛就是靠這個前綴判斷「現在不在蝦皮頁」。
+       命名成 content-對帳 會被那三發計時器踢掉。 -->
+  <div id="recon-content-shopee" class="shop-content" style="padding:16px 20px"></div>
 </div>`;
 
 const SHOPS=[{id:'好麻吉',color:'#5b5fcf'},{id:'玩樂',color:'#10b981'},{id:'森之旅',color:'#f59e0b'},{id:'維克',color:'#14b8a6'},{id:TEST_SHOP_ID,color:'#8b5cf6'}];
@@ -8181,7 +8190,7 @@ function setShop(shop,btn){
   //   ⚠ 必須擋在下面那道「失效分頁防護」【之前】：那道防護會把 shop 改寫成 '總表' 並落地
   //     localStorage（ec_curShop / ec_profitView），把使用者「停在森之旅」就地抹掉 → 切回淨利表再也還原不回去。
   //   ⚠ 判準用 .shop-content（淨利表 DOM 在不在）而不是 content-<shop>（這個分頁還在不在）——
-  //     兩件事不同，混用就是上面那個誤判的根因。.shop-content 只由 __profitTabHtml 的 15 個 div 產生，全有或全無。
+  //     兩件事不同，混用就是上面那個誤判的根因。.shop-content 只由 __profitTabHtml 的 16 個 div 產生，全有或全無。
   //   ⚠ 刻意不印 warn：d1 每頁 render 都會來一次，印了只會洗版。
   //   結構問題（計時器在 d1 每頁都排）留在 offices.js，今天不動；只在 setShop 這個共同出口收斂。
   if(!document.querySelector('.shop-content')) return;
@@ -8266,6 +8275,18 @@ function restoreProfitView(){
   if(platform==='coupang' && shop){
     const btn=document.querySelector("button[onclick*=\"setCoupangShop('"+shop+"'\"]");
     if(typeof setCoupangShop==='function') setCoupangShop(shop, btn||null);
+    return;
+  }
+  // 🔴 對帳分頁的還原分支【不是可選的】。沒有它，platform==='recon' 會一路掉到最下面的
+  //   _restoreShopeeInline() → setShop(ec_curShop) → 而 setShop 會順手把 ec_profitView
+  //   覆寫成 {platform:'shopee'}（本檔 setShop 的 _saveProfitView 那行）。
+  //   後果：使用者停在對帳頁時只要 App.render() 重建一次（切分頁、雲端刷新都會），
+  //   就被彈回蝦皮【而且再也回不去】—— 那個狀態在 localStorage 裡、不上雲，
+  //   推新版也救不回來，只能請對方自己清 ec_profitView。
+  //   ⚠ 2026-08-28 實測過這條路：未知 platform 確實會被就地抹掉，不是理論。
+  if(platform==='recon' && shop){
+    const btn=document.querySelector("button[onclick*=\"setReconTab('"+shop+"'\"]");
+    if(typeof setReconTab==='function') setReconTab(shop, btn||null);
     return;
   }
   _restoreShopeeInline();   // shopee 或未設定 → 蝦皮還原（逐字不變）
@@ -16556,6 +16577,306 @@ function setCoupangShop(shop,btn){
   if(shop!=='總表')cupTryLoadSaved(shop);
 }
 
+// ═══════════ 淨利表 · 對帳分頁（蝦皮進帳報表 PDF 解析）═══════════
+// 🔴 這一整區【沒有任何寫入路徑】：不寫 localStorage、不寫 Firestore、不碰任何既有 key。
+//   解析結果只活在下面的 _reconFiles，重新整理就沒了 —— 這是規格，不是缺陷。
+//   （唯一會碰 localStorage 的是 setReconTab 裡的 _saveProfitView，那是【分頁位置】不是解析資料，
+//     與其他三個平台走同一支既有機制。）
+// ⚠ 對帳是【功能】不是平台：按鈕用中性灰（.stab-recon）、單顆不做兩層，
+//   刻意跟蝦皮橘／MOMO 桃紅／酷澎藍區隔開。
+const RECON_SHOPS=['好麻吉','玩樂','維克','森之旅'];
+// shop → {name, ok, err, fields, rows, pages, period}
+let _reconFiles={};
+// 🔴 解析中的鎖【必須逐賣場】，不可以是單一布林。
+//   舊版（KPI 月結表那一版）是一個 input 多選 + for 迴圈逐份 await，所以一把全域鎖夠用；
+//   這一版是四個獨立 input，使用者可以同時選四個檔 —— 全域鎖會讓 A 欄解析中時
+//   B 欄的選檔被 `return` 【靜默丟掉】，沒有任何提示。
+let _reconBusy={};
+
+// ── 以下八支是從 feat/kpi-payout-pdf-preview (a08bafb) 整段移植的解析核心。
+//    🔴 邏輯一個字都沒動，只做了 _kpiPayout* → _reconPayout* 的改名。
+//    那八支已對兩份真 PDF（好麻吉 2026-01 / 維克 2026-01）實測 16/16 全對，
+//    含三個版面變異：運費正數 +429、AMS 子項缺席、優惠券為 0。
+//    要改請先回去看那兩份檔，不要憑讀碼改。 ──
+
+// 撥款摘要的四個主欄位。⚠ 這裡的 l 會拿去做【完全相等】比對，不是 includes（理由見 _reconPayoutPick）。
+const RECON_PAYOUT_FIELDS=[
+  {k:'buyerPaid',l:'買家支付商品金額'},
+  {k:'coupon',   l:'優惠券與補貼'},
+  {k:'shipTotal',l:'賣家運費總支付'},
+  {k:'fee',      l:'手續費'},
+];
+// 手續費底下的子項。⚠ 數量【會變】：實測維克 2026-01 沒有「AMS推廣費用」那一行，只有三項。
+//   所以子項一律各自獨立比對、缺的顯示「抓不到」，不可以用行號或固定位移定位。
+const RECON_PAYOUT_FEE_SUBS=[
+  {k:'feeDeal', l:'成交手續費'},
+  {k:'feeOther',l:'其他服務費'},
+  {k:'feeFlow', l:'金流與系統處理費'},
+  {k:'feeAms',  l:'AMS推廣費用'},
+];
+// 數字 token → number。
+// 🔴 【不做 Math.abs】：賣家運費總支付可能是正數（實測維克 2026-01 是 +429，其他月是負數），
+//   取絕對值會把那個月的方向講反。正負號一路原樣帶到畫面上。
+// ⚠ 三種負號都要吃：摘要區用 ASCII '-'，撥款明細表用 U+2212 '−'，另外防一手全形 '－'。
+//   會計式括號負數 (1,234) 一併處理（目前沒看到，但成本只有一行）。
+function _reconPayoutNum(s){
+  let t=String(s==null?'':s).replace(/\s|NT\$|\$/g,'');
+  if(!t)return null;
+  let neg=false;
+  if(/^\((.*)\)$/.test(t)){neg=true;t=t.replace(/^\(|\)$/g,'');}
+  if(/^[-−－]/.test(t)){neg=true;t=t.replace(/^[-−－]/,'');}
+  if(!/^[\d,]+(\.\d+)?$/.test(t))return null;
+  const n=parseFloat(t.replace(/,/g,''));
+  return isFinite(n)?(neg?-n:n):null;
+}
+// 整串重複一次 → 收成一次。蝦皮把主欄位標籤【同一串畫兩次微偏移】來模擬粗體
+//   （實測 x=35.6 與 x=35.8 各印一次「買家支付商品金額」）。
+//   相鄰去重（Δx<2，見 _reconPayoutRows）已經吃掉實測到的情況，這支是第二道保險。
+// ⚠ 只在長度為偶數且前後半完全相同時才折半 —— '成交手續費'（5 字）不會被誤動。
+function _reconPayoutDedup(s){
+  const n=s.length;
+  return (n>=2&&n%2===0&&s.slice(0,n/2)===s.slice(n/2))?s.slice(0,n/2):s;
+}
+// pdf.js 的 textContent.items → 依 y 分列（容差 3pt），列內依 x 排序，再拆成 label / amount。
+// 🔴 amount 取【x 最大】的數字 cell，不是「標籤後面第一個數字」：
+//   金額欄是右對齊，用 x 定位才不受 PDF 內部繪製順序影響。
+//   （既有的 momoReadPdfText 是 items.map(str).join(' ') 把整頁壓成一條字串、座標全丟，
+//     那種扁平化會讓粗體列出現「數字排在標籤前面」的假象。那支【刻意不動】——
+//     月對帳有自己的一致性閘，不在這輪範圍。）
+function _reconPayoutRows(items){
+  const rows=[];
+  (items||[]).forEach(it=>{
+    if(!it||!it.str)return;
+    const x=it.transform[4],y=it.transform[5];
+    let r=rows.find(r=>Math.abs(r.y-y)<=3);
+    if(!r){r={y,cells:[]};rows.push(r);}
+    r.cells.push({x,s:it.str});
+  });
+  rows.sort((a,b)=>b.y-a.y);
+  return rows.map(r=>{
+    r.cells.sort((a,b)=>a.x-b.x);
+    const parts=[];
+    r.cells.forEach(c=>{
+      const s=String(c.s||'').replace(/\s+/g,'');
+      if(!s)return;                                            // 純空白的 cell（蝦皮到處都是）
+      const prev=parts[parts.length-1];
+      if(prev&&prev.s===s&&Math.abs(prev.x-c.x)<2)return;      // fake-bold 重疊的第二份
+      parts.push({x:c.x,s});
+    });
+    let label='',amtX=-Infinity,amount=null,amountRaw='';
+    parts.forEach(p=>{
+      const n=_reconPayoutNum(p.s);
+      // 非數字 → 併進標籤（'AMS' 與 '推廣費用' 是兩個 item，要接起來才等於 'AMS推廣費用'）
+      if(n===null){label+=p.s;return;}
+      if(p.x>amtX){amtX=p.x;amount=n;amountRaw=p.s;}
+    });
+    return{y:r.y,label:_reconPayoutDedup(label),amount,amountRaw,
+           raw:parts.map(p=>'['+p.x.toFixed(1)+']'+p.s).join(' ')};
+  });
+}
+// 一頁的列 → 填進 out。
+// 🔴 標籤用【完全相等】而不是 includes：'成交手續費'.includes('手續費') 是 true，
+//   用 includes 的話子項會把小計那一格搶走 —— 這是這份報表最容易踩的坑。
+//   同理「賣家運費補助(參考用)」（非撥款之參考資訊區塊，實測就在摘要下方）
+//   不會被「賣家運費總支付」命中。
+// ⚠ 先出現的頁優先，不被後頁覆蓋（撥款摘要在第 1 頁，後面幾頁是逐日明細）。
+function _reconPayoutPick(rows,page,out){
+  [...RECON_PAYOUT_FIELDS,...RECON_PAYOUT_FEE_SUBS].forEach(f=>{
+    if(out[f.k]!==undefined)return;
+    const hit=rows.find(r=>r.label===f.l&&r.amount!==null);
+    if(hit)out[f.k]={v:hit.amount,raw:hit.amountRaw,page,y:hit.y};
+  });
+}
+// 解析一份 PDF。⚠ 先掃第 1 頁（撥款摘要都在那裡）；四個主欄位有缺才往後掃，
+//   避免為了一份 5 頁的報表把逐日明細也全部跑一遍。
+async function _reconPayoutParseFile(file){
+  const lib=window.pdfjsLib||window['pdfjs-dist/build/pdf'];
+  if(!lib)throw new Error('pdf.js 尚未載入，請硬重整（Ctrl+F5）後再試');
+  try{lib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}catch{}
+  const doc=await lib.getDocument({data:await file.arrayBuffer()}).promise;
+  const out={};let dumpRows=[];
+  for(let p=1;p<=doc.numPages;p++){
+    const rows=_reconPayoutRows((await (await doc.getPage(p)).getTextContent()).items);
+    if(p===1)dumpRows=rows;                                   // dump 只留第 1 頁（撥款摘要）
+    _reconPayoutPick(rows,p,out);
+    if(RECON_PAYOUT_FIELDS.every(f=>out[f.k]!==undefined))break;
+  }
+  return{fields:out,rows:dumpRows,pages:doc.numPages};
+}
+// 千分位 + 【保留正負號】。
+// 🔴 本檔的 fmtN 是 `Math.abs(Math.round(v)).toLocaleString()` —— 它【會取絕對值】
+//   （見本檔 fmtN 定義與 _fSigned 上方那段說明）。這張表的整個重點就是如實顯示方向，
+//   所以【絕對不可以】用 fmtN。也不用 _fSigned —— 那支會加 '$' 前綴，這裡要的是原始數字。
+// ⚠ 0 要印成 '0'，不是 '—'（'—' 留給「抓不到」，兩者必須分得開）。
+function _reconPayoutFmt(n){
+  const v=Math.round(Number(n)||0);
+  return (v<0?'-':'')+Math.abs(v).toLocaleString();
+}
+// ── 移植區結束 ──
+
+// 從第 1 頁抽出報表期間（「從 2026-01-01 到 2026-01-31 的報表」那一行，實測 y≈732.6）。
+// 🔴 為什麼要有這支：這一頁刻意【不掛期間列】（見 setReconTab 隱藏 #profit-period-wrap-row），
+//   所以畫面上沒有任何「這是哪個月」的參照。不顯示的話，四家傳了不同月份的檔會若無其事地
+//   並排，而使用者無從察覺。MOMO 月對帳靠「下拉選的月 vs PDF 的月」比對（momoRenderReconReport
+//   的 monthMatch），這裡沒有下拉可比，只能拿四欄互相比。
+// ⚠ 走 _reconPayoutRows 產生的 label：那一行的 cell 是「從 / 2026-01-01 / 到 / 2026-01-31 / 的報表」
+//   加一堆空白 cell，非數字 cell 會被併進 label（日期含 '-' 不符數字判準，所以也在 label 裡）
+//   ⇒ label === '從2026-01-01到2026-01-31的報表'。2026-08-28 對兩份真 PDF 實測過。
+const _RECON_PERIOD_RE=/從(\d{4}-\d{2}-\d{2})到(\d{4}-\d{2}-\d{2})的報表/;
+function _reconPeriodOf(rows){
+  for(const r of (rows||[])){
+    const m=_RECON_PERIOD_RE.exec(r.label||'');
+    if(m)return{from:m[1],to:m[2],key:m[1]+'~'+m[2]};
+  }
+  return null;
+}
+
+// 檔案選取 → 解析 → 重繪。
+// 🔴 shop 是【欄位帶進來的】，不是從檔名猜的：使用者在哪一欄上傳就是哪一家。
+//   （檔名規則沒有任何程式可依據，猜錯又不會報錯 —— 那與本檔 pureKey 用中文標題 substring
+//     反查是同一種病。）
+async function reconPayoutPick(e,shop){
+  const f=(e&&e.target&&e.target.files||[])[0];
+  try{e.target.value='';}catch{}
+  if(!f)return;
+  if(_reconBusy[shop])return;          // ⚠ 只鎖【這一欄】，別欄照樣可以同時傳
+  _reconBusy[shop]=true;
+  renderReconTab();
+  try{
+    const r=await _reconPayoutParseFile(f);
+    _reconFiles[shop]=Object.assign({name:f.name,ok:true,err:''},r,{period:_reconPeriodOf(r.rows)});
+  }catch(err){
+    console.warn('[對帳] 解析失敗',shop,f.name,err);
+    _reconFiles[shop]={name:f.name,ok:false,err:(err&&err.message)||String(err),fields:{},rows:[],pages:0,period:null};
+  }
+  _reconBusy[shop]=false;
+  renderReconTab();
+}
+function clearRecon(){_reconFiles={};_reconBusy={};renderReconTab();}
+// 一格的顯示。🔴 抓不到一律印「抓不到」，【不可以】退化成 0 或空白 ——
+//   0 是合法值（實測維克的「優惠券與補貼」就是 0），兩者混在一起這張表就沒有查核價值了。
+function _reconCell(hit){
+  if(!hit)return '<span class="recon-miss">抓不到</span>';
+  return _reconPayoutFmt(hit.v);
+}
+function reconShopeeHtml(){
+  const has=RECON_SHOPS.some(s=>_reconFiles[s]);
+  // 期間一致性：只比對【已經解析出期間】的欄。四欄期間不同 ⇒ 全部標紅 + 上方掛一條警告。
+  const keys=[...new Set(RECON_SHOPS.map(s=>_reconFiles[s]&&_reconFiles[s].period&&_reconFiles[s].period.key).filter(Boolean))];
+  const periodBad=keys.length>1;
+  const th=RECON_SHOPS.map(s=>{
+    const d=_reconFiles[s];
+    const p=d&&d.period;
+    const pTxt=p?(p.from+' ~ '+p.to):(d?'期間抓不到':'—');
+    const cls='recon-period'+((periodBad&&p)||(d&&!p)?' recon-period-bad':'');
+    return '<th>'+escapeHtmlLike(s)+'<div class="'+cls+'">'+escapeHtmlLike(pTxt)+'</div></th>';
+  }).join('');
+  // 上傳列：每家一個獨立的 input。⚠ 解析中的那一欄顯示「解析中…」而不是換掉 input——
+  //   換掉會讓使用者以為欄位消失了。
+  const upRow='<tr><th class="recon-rowhead">上傳 PDF</th>'+RECON_SHOPS.map(s=>{
+    const d=_reconFiles[s];
+    return '<td class="recon-cell-upload">'
+      +'<input type="file" accept=".pdf" class="recon-file" onchange="reconPayoutPick(event,\''+s+'\')">'
+      +(_reconBusy[s]?'<span class="recon-fname">解析中…</span>'
+        :(d?'<span class="recon-fname" title="'+escapeHtmlLike(d.name)+'">'+escapeHtmlLike(d.name)
+             +(d.ok?'（'+d.pages+' 頁）':'')+'</span>':''))
+      +(d&&!d.ok?'<span class="recon-miss">解析失敗</span>':'')
+      +'</td>';
+  }).join('')+'</tr>';
+
+  let dataRows='';
+  if(has){
+    RECON_PAYOUT_FIELDS.forEach(fd=>{
+      dataRows+='<tr'+(fd.k==='fee'?' class="recon-sumrow"':'')+'>'
+        +'<th class="recon-rowhead">'+fd.l+(fd.k==='fee'?'（小計）':'')+'</th>'
+        +RECON_SHOPS.map(s=>'<td>'+(_reconFiles[s]?_reconCell(_reconFiles[s].fields[fd.k]):'<span class="recon-empty">—</span>')+'</td>').join('')
+        +'</tr>';
+    });
+    RECON_PAYOUT_FEE_SUBS.forEach(fd=>{
+      dataRows+='<tr><th class="recon-rowhead recon-sub">└ '+fd.l+'</th>'
+        +RECON_SHOPS.map(s=>'<td>'+(_reconFiles[s]?_reconCell(_reconFiles[s].fields[fd.k]):'<span class="recon-empty">—</span>')+'</td>').join('')
+        +'</tr>';
+    });
+    // 子項加總。⚠ 抓不到的子項以 0 計入，並在同一格標「(N項)」——
+    //   不然「✓ 相符」會讓人以為四項都在（實測維克那份只有三項，加總照樣等於小計）。
+    dataRows+='<tr><th class="recon-rowhead">子項加總</th>'+RECON_SHOPS.map(s=>{
+      const d=_reconFiles[s];
+      if(!d)return '<td><span class="recon-empty">—</span></td>';
+      const sum=RECON_PAYOUT_FEE_SUBS.reduce((a,fd)=>a+(d.fields[fd.k]?d.fields[fd.k].v:0),0);
+      const got=RECON_PAYOUT_FEE_SUBS.filter(fd=>d.fields[fd.k]).length;
+      return '<td title="'+got+' / '+RECON_PAYOUT_FEE_SUBS.length+' 項有抓到">'+_reconPayoutFmt(sum)
+        +'<span class="recon-note"> ('+got+'項)</span></td>';
+    }).join('')+'</tr>';
+    dataRows+='<tr class="recon-sumrow"><th class="recon-rowhead">小計 − 子項加總</th>'+RECON_SHOPS.map(s=>{
+      const d=_reconFiles[s];
+      if(!d)return '<td><span class="recon-empty">—</span></td>';
+      const sub=d.fields.fee?d.fields.fee.v:null;
+      if(sub===null)return '<td><span class="recon-miss">抓不到</span></td>';
+      const sum=RECON_PAYOUT_FEE_SUBS.reduce((a,fd)=>a+(d.fields[fd.k]?d.fields[fd.k].v:0),0);
+      const diff=sub-sum;
+      return '<td class="'+(diff===0?'recon-ok':'recon-bad')+'">'+(diff===0?'✓ 0（相符）':'⚠ '+_reconPayoutFmt(diff))+'</td>';
+    }).join('')+'</tr>';
+  }
+
+  // 原始文字層 dump：解析錯時唯一能看出 PDF 實際版面的地方，是功能的一部分、不是除錯殘留。
+  const dumps=RECON_SHOPS.filter(s=>_reconFiles[s]).map(s=>{
+    const d=_reconFiles[s];
+    return '<details class="recon-dump">'
+      +'<summary>▸ 原始文字層 · '+escapeHtmlLike(s)+' · '+escapeHtmlLike(d.name)+'（第 1 頁，逐列 y / x 座標）</summary>'
+      +(d.err?'<div class="recon-err">'+escapeHtmlLike(d.err)+'</div>':'')
+      +'<pre>'+(escapeHtmlLike((d.rows||[]).map(r=>'y='+r.y.toFixed(1).padStart(7)+' | label="'+r.label+'" | amount='+(r.amount===null?'—':r.amount)+' | '+r.raw).join('\n'))||'（沒有文字層，可能是掃描檔）')+'</pre>'
+      +'</details>';
+  }).join('');
+
+  return '<div class="recon-wrap">'
+    +'<div class="recon-hd"><span class="recon-title">蝦皮進帳報表 · 對帳</span>'
+    +(has?'<button type="button" class="recon-btn" onclick="clearRecon()">全部清除</button>':'')
+    +'<span class="recon-note">四家各自上傳當月「進帳報表」PDF。<b>解析結果只顯示在這裡</b>，不會寫進任何報表、不會上雲，重新整理就消失。</span></div>'
+    +(periodBad?'<div class="recon-warn">⚠ 四欄的報表期間不一致（'+escapeHtmlLike(keys.join('　/　'))+'），請確認是不是傳到不同月份的檔。</div>':'')
+    +'<div class="recon-scroll"><table class="recon-tbl">'
+    +'<thead><tr><th class="recon-rowhead">欄位</th>'+th+'</tr></thead>'
+    +'<tbody>'+upRow+dataRows+'</tbody></table></div>'
+    +(has?'':'<div class="recon-note" style="margin-top:10px">尚未上傳任何檔案 —— 在上面任一欄選檔就會出現解析結果。</div>')
+    +dumps
+    +'</div>';
+}
+function renderReconTab(){
+  const el=document.getElementById('recon-content-shopee');
+  if(!el)return;
+  el.innerHTML=reconShopeeHtml();
+}
+// 對帳分頁的切換。骨架比照 setCoupangShop，但【補上它缺的三件事】：
+//   ① 失效分頁防護（setShop 有、setMomoShop/setCoupangShop 都沒有）：
+//      2026-08-28 實測 setMomoShop('不存在的店') → .shop-content.active 與 .stab.active
+//      雙雙歸零 ⇒ 整頁全白、Console 一個字都不印，而且壞值已經先寫進 localStorage。
+//      這裡把 _saveProfitView 放在防護【之後】，壞值不落地。
+//   ② 主動隱藏 #profit-period-wrap-row：那兩支都不碰它 ⇒ 從蝦皮某賣場切過來時，
+//      蝦皮的月份下拉 + 三顆半月按鈕會殘留在畫面上（2026-08-28 實測 wrapRow 維持 flex）。
+//      這一頁沒有半月概念，殘留正是要避開的東西。
+//   ③ restoreProfitView 的 'recon' 分支（見該函式），否則使用者停在這頁時會被就地抹掉。
+function setReconTab(id,btn){
+  if(!document.querySelector('.shop-content'))return;   // 不在淨利表頁 → no-op（比照 setShop 開頭）
+  // 失效分頁防護：未知 id 退回唯一的安全狀態（蝦皮進帳），並讓下面的 _saveProfitView 覆寫自癒。
+  if(!document.getElementById('recon-content-'+id)){
+    console.warn('[對帳] 分頁「'+id+'」已不存在，退回蝦皮進帳');
+    id='shopee';
+    btn=document.querySelector("button[onclick*=\"setReconTab('shopee'\"]")||null;
+  }
+  _saveProfitView('recon',id);
+  document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
+  const el=document.getElementById('recon-content-'+id);
+  if(el){
+    el.classList.add('active');
+    renderReconTab();   // lazy fill：進來才畫（state 在 _reconFiles，重畫不會掉資料）
+  }
+  const wrapRow=document.getElementById('profit-period-wrap-row');
+  if(wrapRow)wrapRow.style.display='none';
+  const kpiBlock=document.getElementById('header-kpi-row');
+  if(kpiBlock)kpiBlock.style.display='none';
+}
+
 let _cupShop='';
 const _cupFiles={mobic:null,idlist:null};
 
@@ -18067,6 +18388,10 @@ Object.assign(window, {
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,renderCoupangTable,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
+  // 對帳分頁的三個 inline handler（分頁鈕 onclick / 四個檔案 input 的 onchange / 全部清除鈕）。
+  //   ⚠ setReconTab 還會被 restoreProfitView 用 typeof 檢查後呼叫 —— 沒掛上去的話那條還原分支
+  //     會靜默失效，使用者停在對帳頁時就會被彈回蝦皮（正是這輪要防的那件事）。
+  setReconTab,reconPayoutPick,clearRecon,
   coupangSummaryHTML,setCoupangSummaryView,syncCoupangSummaryFromKpi,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
