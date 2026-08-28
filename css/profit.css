@@ -1134,6 +1134,36 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 }
 .recon-title{font-size:15px;font-weight:700;color:var(--text);}
 .recon-note{font-size:11.5px;color:var(--text-muted);line-height:1.6;}
+
+/* 月份下拉（整頁共用一個月份，供下一輪落地組 doc id 用）。
+   ⚠ 這一頁【沒有半月概念】—— 進帳報表是整月的，所以只有月份、沒有上/下半月按鈕，
+     也不掛蝦皮那排 #profit-period-wrap-row（setReconTab 會主動隱藏它）。
+   ⚠ 實測（2026-08-28，main v593）：.recon-hd 是 flex-wrap + align-items:baseline，
+     加這個 select 之後標題列從 27px 變 30px（select 比原本最高的子元素高 3px），
+     在 main 寬 ≥ 1040px（≈ 螢幕 1280 側欄展開 / 1165 收合）都維持【一排】，說明文字不會被擠換行。
+     再窄就會換兩排（58px）—— 1366/1440/1536/1920 全部在門檻之上，不受影響。 */
+.recon-month{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+.recon-month-lbl{font-size:12px;color:var(--text-muted);font-weight:600;}
+/* 🔴 刻意【不借用既有的 .mm-sel】：那是 MOMO 命名，而且寫死四個 hex
+   （#e5e7eb / #374151 / #fff / #5b5fcf），與本區「顏色一律走 :root 變數」的規則相衝。
+   這裡是等效外觀但全部走變數的版本。 */
+.recon-sel{
+  padding:4px 10px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--surface);
+  color:var(--text);
+  font-size:12.5px;
+  font-family:inherit;
+  font-variant-numeric:tabular-nums;
+  outline:none;
+  cursor:pointer;
+}
+.recon-sel:focus{border-color:var(--primary);}
 .recon-btn{
   padding:5px 12px;
   border:1px solid var(--border);

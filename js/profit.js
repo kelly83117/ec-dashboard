@@ -16594,6 +16594,45 @@ let _reconFiles={};
 //   這一版是四個獨立 input，使用者可以同時選四個檔 —— 全域鎖會讓 A 欄解析中時
 //   B 欄的選檔被 `return` 【靜默丟掉】，沒有任何提示。
 let _reconBusy={};
+// 整頁共用的月份（'YYYY-MM'，'' = 未選）。
+// 🔴 存在的理由不是 UI 好看：下一輪落地時 doc id 是 {賣場}_{YYYY-MM}，沒有明確月份就存不了。
+//   而月份【不能只從 PDF 取】—— 四家可能傳到不同月份的檔（這正是 recon-warn 那條警告的存在理由），
+//   所以必須有一個使用者看得到、也改得動的值。
+// ⚠ 仍然是【零寫入】：這兩個變數只活在記憶體，不進 localStorage、不進 Firestore，重整就沒。
+let _reconMonth='';
+// 使用者有沒有【親手】改過月份。true 時自動帶入就不再覆蓋他的選擇。
+//   ⚠ 選回空白（''）會把它重置回 false —— 那是「我不要指定月份」的意思，
+//     不是「我要鎖住這個選擇」。少了這條，手滑選到「請選擇」之後自動帶入就永遠失效，
+//     而畫面上沒有任何東西會告訴使用者「自動帶入已經關掉了」。
+let _reconMonthTouched=false;
+// 期間 → 所屬月份（'YYYY-MM'）。
+// 🔴 from 與 to 不同月時回 null（＝跨月），呼叫端據此【不自動帶入、且該欄標紅】。
+//   ⚠ 這條分支【未經真實跨月樣本驗證】：手上四份實測 PDF（好麻吉/玩樂/維克/森之旅 2026-01）
+//     期間全都是整月（2026-01-01 ~ 2026-01-31），我們不知道蝦皮會不會出跨月的進帳報表。
+//     選擇「標紅 + 不猜」而不是「取 from 的月份」，理由是：猜錯不會有任何徵兆，
+//     標紅至少會讓人看到異常。若日後拿到真的跨月樣本，請回來重新決定要不要改。
+function _reconMonthOf(p){
+  if(!p||!p.from||!p.to)return null;
+  const a=String(p.from).slice(0,7), b=String(p.to).slice(0,7);
+  return a===b?a:null;
+}
+// 月份下拉的選項。⚠ 沿用蝦皮側既有的 MONTHS 常數（本檔搜 `const MONTHS=`），
+//   只把 'YYYY/MM' 換成這一頁要的 'YYYY-MM' —— 刻意【不新造第二份硬寫的月份清單】。
+// ⚠ 不濾掉未來月份：進帳報表是月結後才出，理論上只用得到過去月，但 MOMO 月對帳的
+//   momoReconMonthOptions 也是全 12 個月不濾，照既有慣例走；而且濾掉還要處理
+//   「全被濾光」的 fallback（見 _shopeeVisibleMonths 那一整段），不值得。
+// ⚠ 已知債（本輪不處理）：MONTHS 寫死 2026 全年。2027 一到就沒有正確的月份可選，
+//   而下一輪 doc id 會用到這個值 —— 那時「選項怪怪的」會升級成「存到錯的 doc 且不報錯」。
+function _reconMonthOptions(){ return MONTHS.map(m=>m.replace('/','-')).reverse(); }
+// 使用者改月份。⚠ focus() 是【必要的】不是體貼：renderReconTab 是整包 innerHTML 重繪，
+//   select 會被銷毀重建 ⇒ 焦點掉到 body。而 Chrome 在關閉狀態的 select 上按上下鍵是
+//   【每按一次就觸發 change】—— 少了這行，鍵盤使用者按第一下之後就再也動不了。
+function setReconMonth(v){
+  _reconMonth=v||'';
+  _reconMonthTouched=!!_reconMonth;   // 選回空白 ⇒ 重置成 false（見上方 _reconMonthTouched 的說明）
+  renderReconTab();
+  try{ const el=document.getElementById('recon-month-sel'); if(el)el.focus(); }catch{}
+}
 
 // ── 以下八支是從 feat/kpi-payout-pdf-preview (a08bafb) 整段移植的解析核心。
 //    🔴 邏輯一個字都沒動，只做了 _kpiPayout* → _reconPayout* 的改名。
@@ -16746,7 +16785,17 @@ async function reconPayoutPick(e,shop){
   renderReconTab();
   try{
     const r=await _reconPayoutParseFile(f);
-    _reconFiles[shop]=Object.assign({name:f.name,ok:true,err:''},r,{period:_reconPeriodOf(r.rows)});
+    const p=_reconPeriodOf(r.rows);
+    _reconFiles[shop]=Object.assign({name:f.name,ok:true,err:''},r,{period:p});
+    // 自動帶月份。🔴 兩個條件【都要】：
+    //   !_reconMonthTouched → 使用者改過就不覆蓋他的選擇；
+    //   !_reconMonth        → 只在【第一份】帶。少了這條，先傳好麻吉(2026-01)帶出 2026-01、
+    //                         再傳玩樂(2026-03) 就會把下拉【默默改成 2026-03】，那正是最該避免的。
+    // ⚠ 跨月（_reconMonthOf 回 null）不帶入 —— 寧可留空讓人自己選，也不猜一個月份。
+    if(!_reconMonthTouched&&!_reconMonth){
+      const ym=_reconMonthOf(p);
+      if(ym)_reconMonth=ym;
+    }
   }catch(err){
     console.warn('[對帳] 解析失敗',shop,f.name,err);
     _reconFiles[shop]={name:f.name,ok:false,err:(err&&err.message)||String(err),fields:{},rows:[],pages:0,period:null};
@@ -16754,7 +16803,10 @@ async function reconPayoutPick(e,shop){
   _reconBusy[shop]=false;
   renderReconTab();
 }
-function clearRecon(){_reconFiles={};_reconBusy={};renderReconTab();}
+// 全部清除＝回到初始狀態，月份也一起清（含 _reconMonthTouched 重置）。
+// ⚠ 曾考慮「手選過的月份保留、只清自動帶的」，退場了：按「全部清除」的人期待的就是全部清除，
+//   留一個他看不出為什麼還在的月份，比重新選一次更困擾。
+function clearRecon(){_reconFiles={};_reconBusy={};_reconMonth='';_reconMonthTouched=false;renderReconTab();}
 // 一格的顯示。🔴 抓不到一律印「抓不到」，【不可以】退化成 0 或空白 ——
 //   0 是合法值（實測維克的「優惠券與補貼」就是 0），兩者混在一起這張表就沒有查核價值了。
 function _reconCell(hit){
@@ -16770,8 +16822,18 @@ function reconShopeeHtml(){
     const d=_reconFiles[s];
     const p=d&&d.period;
     const pTxt=p?(p.from+' ~ '+p.to):(d?'期間抓不到':'—');
-    const cls='recon-period'+((periodBad&&p)||(d&&!p)?' recon-period-bad':'');
-    return '<th>'+escapeHtmlLike(s)+'<div class="'+cls+'">'+escapeHtmlLike(pTxt)+'</div></th>';
+    // 第二種檢查（本輪新增）：這一欄的期間所屬月份 vs 上方下拉選的月份。
+    //   ⚠ 與「四欄之間不一致」【共用同一個 .recon-period-bad】，不另做一套樣式（規格要求）。
+    //   ⚠ 跨月（_reconMonthOf 回 null）也算不符 —— 一份跨月的報表本來就不屬於任何單一月份。
+    const monthBad=!!(_reconMonth&&p&&_reconMonthOf(p)!==_reconMonth);
+    const cls='recon-period'+((periodBad&&p)||(d&&!p)||monthBad?' recon-period-bad':'');
+    // 🔴 三種紅染同一個色，同時發生時分不出是哪一種 —— 用 title 補說明是哪一條觸發的。
+    //   （刻意不加第二條 banner：規格要求沿用現有邏輯，而 banner 已經有一條了。）
+    const tip=monthBad?(_reconMonthOf(p)?'這一欄是 '+_reconMonthOf(p)+'，與上方選的 '+_reconMonth+' 不符'
+                                        :'這一欄的期間跨月，不屬於任何單一月份')
+      :(periodBad&&p)?'這一欄的期間與其他欄不一致'
+      :(d&&!p)?'這份 PDF 抓不到期間（第 1 頁沒有「從…到…的報表」那一行）':'';
+    return '<th>'+escapeHtmlLike(s)+'<div class="'+cls+'"'+(tip?' title="'+escapeHtmlLike(tip)+'"':'')+'>'+escapeHtmlLike(pTxt)+'</div></th>';
   }).join('');
   // 上傳列：每家一個獨立的 input。⚠ 解析中的那一欄顯示「解析中…」而不是換掉 input——
   //   換掉會讓使用者以為欄位消失了。
@@ -16830,8 +16892,16 @@ function reconShopeeHtml(){
       +'</details>';
   }).join('');
 
+  // 月份下拉。⚠ 這一頁【沒有半月概念】（進帳報表是整月的），所以刻意只有月份、沒有上/下半月，
+  //   也不掛蝦皮那排 #profit-period-wrap-row（setReconTab 會主動把它隱藏）。
+  const monthSel='<span class="recon-month"><span class="recon-month-lbl">月份</span>'
+    +'<select id="recon-month-sel" class="recon-sel" onchange="setReconMonth(this.value)">'
+    +'<option value=""'+(_reconMonth?'':' selected')+'>請選擇</option>'
+    +_reconMonthOptions().map(m=>'<option value="'+m+'"'+(m===_reconMonth?' selected':'')+'>'+m+'</option>').join('')
+    +'</select></span>';
   return '<div class="recon-wrap">'
     +'<div class="recon-hd"><span class="recon-title">蝦皮進帳報表 · 對帳</span>'
+    +monthSel
     +(has?'<button type="button" class="recon-btn" onclick="clearRecon()">全部清除</button>':'')
     +'<span class="recon-note">四家各自上傳當月「進帳報表」PDF。<b>解析結果只顯示在這裡</b>，不會寫進任何報表、不會上雲，重新整理就消失。</span></div>'
     +(periodBad?'<div class="recon-warn">⚠ 四欄的報表期間不一致（'+escapeHtmlLike(keys.join('　/　'))+'），請確認是不是傳到不同月份的檔。</div>':'')
@@ -18597,7 +18667,7 @@ Object.assign(window, {
   // 對帳分頁的三個 inline handler（分頁鈕 onclick / 四個檔案 input 的 onchange / 全部清除鈕）。
   //   ⚠ setReconTab 還會被 restoreProfitView 用 typeof 檢查後呼叫 —— 沒掛上去的話那條還原分支
   //     會靜默失效，使用者停在對帳頁時就會被彈回蝦皮（正是這輪要防的那件事）。
-  setReconTab,reconPayoutPick,clearRecon,
+  setReconTab,reconPayoutPick,clearRecon,setReconMonth,
   coupangSummaryHTML,setCoupangSummaryView,syncCoupangSummaryFromKpi,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
