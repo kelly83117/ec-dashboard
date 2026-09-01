@@ -725,6 +725,54 @@ function _notifyLsSaveFail(shop, month, half, err){
   }
 }
 
+// ── 調整（ec_notes）沒存進 localStorage 的通報 ──
+//  與上面 _notifyLsSaveFail（報表用）刻意分開，兩個差異都不是重複、不要合併：
+//   (1) 【不走「一 session 只彈一次、之後降級 toast」】。saveNotes 會在商品/廣告調整彈窗【還開著】
+//       時被呼叫（_pnmEditNote / deleteProfitNote 都不關彈窗），而 .toast 的 z-index 是 200、
+//       .pnm-overlay 是 3000 → toast 會被壓在彈窗後面，使用者【看不到】。這裡一律走 showAlertModal
+//       （.modal-backdrop z-index 99999，蓋得過），連彈防護交給 showAlertModal 內建的 2.5 秒同 key dedupe。
+//   (2) 【建議依欄位分流】。報表那份說「按同步推得上去，不受這個問題影響」——對報表成立（它推的是
+//       記憶體裡那份），但對【商品調整】是錯的：商品調整的同步讀的是本機存檔，不是畫面上的值，
+//       按同步救不了。而【廣告調整】仍走記憶體那份、按同步還有機會。
+//       🔴 原本兩種情況都寫在同一段，改成【只顯示對應的那一句】。原因：openNotePopup 對兩種
+//         shopKey 用的是【同一個彈窗】，標題與版面一樣，而欄位名寫在表格表頭上、正好被彈窗蓋住
+//         → 使用者站在彈窗前面根本分不出自己剛改的是哪一欄，「兩種都講」等於要他做一個他做不到
+//         的判斷。程式知道答案（shopKey 帶不帶 _growth），就不該把這個判斷丟給使用者。
+//       ⚠ 這裡依 key 形狀分流的是【訊息文字】，不是資料處理路徑 —— 因此【不違反】saveNotes 上方
+//         那條「不依 key 形狀分流」的規則。那條規則防的是「兩種 key 形狀開始走不同的登記/推送
+//         邏輯」；本函式一行資料都不碰，只決定要對使用者說哪一句話。
+//         🔴 若日後有人想把這個分流搬回 saveNotes 去「順便」決定登記行為 —— 停下來，那才是違反。
+function _notifyNotesSaveFail(shop, code, err){
+  const quota=_isQuotaErr(err);
+  const isGrowth=/_growth$/.test(String(shop||''));
+  // 顯示用名稱：把內部 key 形狀（玩樂_growth／玩樂|2026/08|second）還原成人看得懂的
+  //   「玩樂 的商品調整／廣告調整」。⚠ 使用者訊息裡不出現 key 名，技術細節走 console.error 與 detail。
+  const shopName=String(shop||'').replace(/_growth$/,'').split('|')[0];
+  const colName=isGrowth?'商品調整':'廣告調整';
+  const who=shopName+' 的'+colName+(code!==undefined&&code!==null?('（品號 '+code+'）'):'');
+  console.error('[saveNotes] 調整沒有存進 localStorage：ec_notes|'+shop+(code!=null?'／'+code:''), err);
+  const title=quota?'本機空間已滿，這筆調整沒存起來':'這筆調整沒存進這台電腦';
+  const howTo=isGrowth
+    ? '按「☁ 同步雲端」也救不了它 —— 商品調整的同步是讀這台電腦上的存檔，不是讀畫面上的值。\n'+
+      '請先把剛打的文字複製起來，清出空間之後重新輸入一次。\n'
+    : '按「☁ 同步雲端」還是有機會推得上去，可以先試試看。推成功就沒事了。\n'+
+      '若推不上去，再把文字複製起來，清出空間之後重新輸入一次。\n';
+  const message=
+    who+' 【沒有】存進這台電腦。\n'+
+    '畫面上還看得到它，但那只是暫存 —— 重整或關掉分頁就會消失。\n\n'+
+    howTo+
+    '\n清空間的方式：關掉其他分頁、或清掉瀏覽器裡這個網站的舊快取。\n\n'+
+    '⚠ 如果「☁ 同步雲端」按鈕上還有數字，那是先前存成功的東西，\n'+
+    '　 按下去不會把剛剛這一筆救回來，也不要因為它顯示同步成功就以為沒事了。';
+  const detail=(err&&(err.name||err.message))?('錯誤：'+(err.name||'')+' '+(err.message||'')):'';
+  if(window.App&&typeof App.showAlertModal==='function'){
+    App.showAlertModal({ title:title, message:message, detail:detail, kind:'error', dedupeKey:'notesSaveFail' });
+    return;
+  }
+  // 退路：App 還沒就緒才會走到這裡。toast 在彈窗開著時會被蓋住（見上方 (1)），但總比沒訊息好。
+  if(typeof showToast==='function') showToast('這筆調整沒存進本機，重整就會消失','error',6000);
+}
+
 // 序列化前剝掉「純衍生欄位」。目前只有一個：analysisAll（廣告分析的多標籤陣列）。
 //
 // 🔴 為什麼 analysisAll 不能落地
@@ -4367,35 +4415,77 @@ function getNotes(shop){
 function saveNotes(shop,notes,code){
   window._shopJustSaved=Date.now();
   const k='ec_notes|'+shop;
-  try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
+  // ── localStorage 寫入：寫完【讀回驗證】，不押注在瀏覽器怎麼回報失敗 ──
+  //   為什麼不只 try/catch：規範說配額滿時 setItem 丟 QuotaExceededError，但本檔上方
+  //   _notifyLsSaveFail 那段註解寫的是「配額滿了會靜默失敗」，我們無法從程式碼確認當初遇到的
+  //   是哪一種。讀回比對【不依賴瀏覽器如何回報】—— 丟例外、靜默不存、只存一半，讀回來不等於
+  //   寫進去的字串就一律判失敗。成本是多一次同尺寸 getItem + 字串比較（一個通路的調整，可忽略）。
+  //   localStorage 整個被封鎖（SecurityError）時 getItem 也會丟 → 落到 catch → 判失敗，方向正確。
+  const _payload=JSON.stringify(notes);
+  let _lsOk=false, _lsErr=null;
+  try{
+    localStorage.setItem(k,_payload);
+    _lsOk=(localStorage.getItem(k)===_payload);
+    if(!_lsOk) _lsErr=new Error('setItem 沒有丟例外，但讀回的內容不符（可能靜默失敗，或另一個分頁同時寫了同一把 key）');
+  }catch(e){ _lsOk=false; _lsErr=e; }
+  //   ⚠ _profitMem 照樣寫，【刻意不回滾】：畫面要立刻反映使用者剛打的字，而失敗通報正是要請他
+  //     「把文字複製起來重打」—— 回滾會讓 renderPnmList（saveNotes 之後緊接著跑）當場把那段文字
+  //     抹掉，毀掉唯一的救援路徑。保留它 + 大聲說明，比回滾誠實也比較有用。
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=notes;}catch{}
-  // 掛進待同步集合，讓「☁ 同步雲端」推得到（商品調整 _growth 原本完全沒有上雲的路）
-  _pendingSyncKeys.add(k);
-  // persisted 待同步標記（跨重整）。兩組讀取端都認它，完整對照表見 syncToCloud 那段
-  //   「dirty 判準全檔【四處】」的註解。
-  //   ⚠ 這裡【刻意不判斷 key 形狀】：saveNotes 一旦開始分流 key 形狀，就是下一個 bug 的位置。
-  //   因此 ec_notes|{通路}_growth 也會被登記，兩種 key 形狀混在同一個陣列裡，這是刻意的。
-  //   🔴 舊註解曾寫「_growth 永遠不會被清掉，因為它不可能命中閘門」——【那個理由是錯的】，不要照抄回去。
-  //     清除端是 syncToCloud 收尾那行 `ok.forEach(k=>{ if(k.startsWith('ec_notes|')) _notesDirtyDel(k) })`，
-  //     判準是 key 前綴、不是「有沒有走過閘門」，所以只要 _growth 真的推成功過一次就會被清掉。
-  //   _growth 現在的完整生命週期：saveNotes 登記 → 重整後由 _sweepAllLocalReportsIntoPending
-  //     依這份註冊表撿回 _pendingSyncKeys → 走泛用 field 分支推送 → 推成功後由上述收尾清除。
-  //     若看到某把 _growth 一直清不掉，代表它一直沒推成功（例如被 _momoFullPushDeleteGuard 擋下），
-  //     那是要去查的訊號，不是「已知無害的殘留」。
-  _notesDirtyAdd(k);
-  // ── 品號級 dirty（第二塊接線）──
-  //   記「這把 key 底下的哪個品號被碰過」，給 syncNotesGrowth 的 dirty-scoped merge 當身分用
-  //   （adjustment 沒有 id、內容欄位 date+period 在真實資料上會撞號，不能用內容當身分）。
-  //   🔴 這【不違反】上面那條「刻意不判斷 key 形狀」：那條講的是【不依 key 的形狀分流行為】——
-  //     例如寫成 `if(k.endsWith('_growth')) _notesItemsDirtyAdd(...)` 就是違反，因為兩種 key 形狀
-  //     會開始走不同的登記邏輯。這裡對兩種形狀【一視同仁】，只是多接收呼叫端告知的
-  //     「這次動到的是哪個品號」，那是一個與 key 形狀無關的參數。要在這裡加形狀分流之前先想清楚。
-  //   ⚠ code 沒傳（undefined / null）時的行為【明確定義】：不寫品號級註冊表，其餘一字不變
-  //     （localStorage / _profitMem / _pendingSyncKeys / key 級 dirty / _showSyncBtn 全部照舊）。
-  //     這是刻意讓它【大聲壞掉】而不是猜一個品號：未來若有人新增第四個呼叫端卻忘了傳 code，
-  //     這把 key 會有 key 級 dirty 但品號級是空的 → syncNotesGrowth 的 (b) 會 throw，
-  //     在同步彈窗明確報「沒有任何品號被登記」。猜品號、或退回整包覆蓋，才是災難。
-  if(code!==undefined&&code!==null) _notesItemsDirtyAdd(k, code);
+  // 🔴🔴 三個待同步標記【只在 localStorage 真的寫成功時才登記】 🔴🔴
+  //   三者語意相同：「這台機器上有一份值得推的東西」。localStorage 寫失敗之後這句話是假的 ——
+  //   syncNotesGrowth 讀的是 _mem → localStorage，【看不到】_profitMem 裡那份編輯。
+  //   登記任何一個都是對同步流程開一張兌現不了的支票，而後果不對稱：
+  //     ・只跳過品號級、保留 key 級 → 重整後 sweep 撿回、品號 dirty 是 [] → 每次同步都彈
+  //       「沒有任何品號被登記」的失敗，把一次存檔失敗變成永久性同步失敗。
+  //     ・三個都保留（本次修掉的舊行為）→ 品號 dirty 有它、localStorage 沒有它 →
+  //       momoMergeByKey 走 `else delete out[k]` → 【把那個品號從雲端刪掉】。這是真的資料損失。
+  //   ⚠ 只「不新增」，【絕不移除】既有 dirty 條目 —— 之前成功存過的編輯仍然該推。
+  if(_lsOk){
+    // 掛進待同步集合，讓「☁ 同步雲端」推得到（商品調整 _growth 原本完全沒有上雲的路）
+    _pendingSyncKeys.add(k);
+    // persisted 待同步標記（跨重整）。兩組讀取端都認它，完整對照表見 syncToCloud 那段
+    //   「dirty 判準全檔【四處】」的註解。
+    //   ⚠ 這裡【刻意不判斷 key 形狀】：saveNotes 一旦開始分流 key 形狀，就是下一個 bug 的位置。
+    //   因此 ec_notes|{通路}_growth 也會被登記，兩種 key 形狀混在同一個陣列裡，這是刻意的。
+    //   🔴 舊註解曾寫「_growth 永遠不會被清掉，因為它不可能命中閘門」——【那個理由是錯的】，不要照抄回去。
+    //     清除端是 syncToCloud 收尾那行 `ok.forEach(k=>{ if(k.startsWith('ec_notes|')) _notesDirtyDel(k) })`，
+    //     判準是 key 前綴、不是「有沒有走過閘門」，所以只要 _growth 真的推成功過一次就會被清掉。
+    //   _growth 現在的完整生命週期：saveNotes 登記 → 重整後由 _sweepAllLocalReportsIntoPending
+    //     依這份註冊表撿回 _pendingSyncKeys → 走泛用 field 分支推送 → 推成功後由上述收尾清除。
+    //     若看到某把 _growth 一直清不掉，代表它一直沒推成功（例如被 _momoFullPushDeleteGuard 擋下），
+    //     那是要去查的訊號，不是「已知無害的殘留」。
+    _notesDirtyAdd(k);
+    // ── 品號級 dirty（第二塊接線）──
+    //   記「這把 key 底下的哪個品號被碰過」，給 syncNotesGrowth 的 dirty-scoped merge 當身分用
+    //   （adjustment 沒有 id、內容欄位 date+period 在真實資料上會撞號，不能用內容當身分）。
+    //   🔴 這【不違反】上面那條「刻意不判斷 key 形狀」：那條講的是【不依 key 的形狀分流行為】——
+    //     例如寫成 `if(k.endsWith('_growth')) _notesItemsDirtyAdd(...)` 就是違反，因為兩種 key 形狀
+    //     會開始走不同的登記邏輯。這裡對兩種形狀【一視同仁】，只是多接收呼叫端告知的
+    //     「這次動到的是哪個品號」，那是一個與 key 形狀無關的參數。要在這裡加形狀分流之前先想清楚。
+    //   ⚠ 上面那個 if(_lsOk) 同樣【不是】依 key 形狀分流：它依的是「這次寫入成功了沒有」，
+    //     對兩種 key 形狀一視同仁。這也是為什麼失敗通報必須把商品調整與廣告調整【兩種情況都講】
+    //     （見 _notifyNotesSaveFail 的文案）—— 不能靠 key 形狀在這裡分流出不同行為。
+    //   ⚠ code 沒傳（undefined / null）時的行為【明確定義】：不寫品號級註冊表，其餘一字不變
+    //     （localStorage / _profitMem / _pendingSyncKeys / key 級 dirty / _showSyncBtn 全部照舊）。
+    //     這是刻意讓它【大聲壞掉】而不是猜一個品號：未來若有人新增第四個呼叫端卻忘了傳 code，
+    //     這把 key 會有 key 級 dirty 但品號級是空的 → syncNotesGrowth 的 (b) 會 throw，
+    //     在同步彈窗明確報「沒有任何品號被登記」。猜品號、或退回整包覆蓋，才是災難。
+    if(code!==undefined&&code!==null) _notesItemsDirtyAdd(k, code);
+  }else{
+    _notifyNotesSaveFail(shop, code, _lsErr);
+  }
+  // ══════ ⚠ 未完成的技術債：這一輪只修了「會刪雲端資料」那一半 ══════
+  //   本函式一次會寫 localStorage 三次：主資料（上面）、key 級 dirty（_notesDirtyAdd）、
+  //   品號級 dirty（_notesItemsDirtyAdd）。上面的 if(_lsOk) 只驗證了【主資料】那一次。
+  //   後兩次各自只有 console.error，失敗不會回頭撤銷前面已經成功的部分。
+  //   🔴 還沒修的另一半：主資料寫【成功】、品號級 dirty 寫【失敗】
+  //     → localStorage 有新內容、dirty 沒登記該品號
+  //     → 同步時 momoMergeByKey 不碰它 → 雲端保留舊值 → 使用者的編輯【靜默沒上去】。
+  //     方向安全（不會刪雲端資料），但仍然是靜默失效，而且不見得比這次修的那條罕見。
+  //   要完整修，需要讓這三次寫入具有【原子性】（三個都成功、或全部回滾），
+  //   那是一個明顯更大的改動（要處理「回滾主資料」與「畫面已經渲染」的衝突）。
+  //   這一輪刻意先止血【會造成不可逆損失】的那條，另一半留著。看到這段就知道它還在，不是漏掉。
   _showSyncBtn(shop);
   // 立即同步工作日誌摘要（不必等按 ☁ 同步雲端；silent 不顯示 toast 避免太吵）
   try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}
