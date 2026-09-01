@@ -731,26 +731,39 @@ function _notifyLsSaveFail(shop, month, half, err){
 //       時被呼叫（_pnmEditNote / deleteProfitNote 都不關彈窗），而 .toast 的 z-index 是 200、
 //       .pnm-overlay 是 3000 → toast 會被壓在彈窗後面，使用者【看不到】。這裡一律走 showAlertModal
 //       （.modal-backdrop z-index 99999，蓋得過），連彈防護交給 showAlertModal 內建的 2.5 秒同 key dedupe。
-//   (2) 【建議完全相反】。報表那份說「按同步推得上去，不受這個問題影響」——對報表成立（它推的是
+//   (2) 【建議依欄位分流】。報表那份說「按同步推得上去，不受這個問題影響」——對報表成立（它推的是
 //       記憶體裡那份），但對【商品調整】是錯的：商品調整的同步讀的是本機存檔，不是畫面上的值，
-//       按同步救不了。而【廣告調整】仍走記憶體那份、按同步還有機會。所以兩種情況都要講清楚，
-//       不能只寫一種、也不能寫成中性的「沒存起來」就算了（那會讓廣告調整白白放棄一條救得回來的路）。
-//  ⚠ 文案刻意【不出現 key 名稱與函式名】：這是給使用者看的，不是給工程師看的。
-//    技術細節放 console.error 與 detail 欄。
+//       按同步救不了。而【廣告調整】仍走記憶體那份、按同步還有機會。
+//       🔴 原本兩種情況都寫在同一段，改成【只顯示對應的那一句】。原因：openNotePopup 對兩種
+//         shopKey 用的是【同一個彈窗】，標題與版面一樣，而欄位名寫在表格表頭上、正好被彈窗蓋住
+//         → 使用者站在彈窗前面根本分不出自己剛改的是哪一欄，「兩種都講」等於要他做一個他做不到
+//         的判斷。程式知道答案（shopKey 帶不帶 _growth），就不該把這個判斷丟給使用者。
+//       ⚠ 這裡依 key 形狀分流的是【訊息文字】，不是資料處理路徑 —— 因此【不違反】saveNotes 上方
+//         那條「不依 key 形狀分流」的規則。那條規則防的是「兩種 key 形狀開始走不同的登記/推送
+//         邏輯」；本函式一行資料都不碰，只決定要對使用者說哪一句話。
+//         🔴 若日後有人想把這個分流搬回 saveNotes 去「順便」決定登記行為 —— 停下來，那才是違反。
 function _notifyNotesSaveFail(shop, code, err){
   const quota=_isQuotaErr(err);
-  const who=String(shop||'')+(code!==undefined&&code!==null?('／品號 '+code):'');
+  const isGrowth=/_growth$/.test(String(shop||''));
+  // 顯示用名稱：把內部 key 形狀（玩樂_growth／玩樂|2026/08|second）還原成人看得懂的
+  //   「玩樂 的商品調整／廣告調整」。⚠ 使用者訊息裡不出現 key 名，技術細節走 console.error 與 detail。
+  const shopName=String(shop||'').replace(/_growth$/,'').split('|')[0];
+  const colName=isGrowth?'商品調整':'廣告調整';
+  const who=shopName+' 的'+colName+(code!==undefined&&code!==null?('（品號 '+code+'）'):'');
   console.error('[saveNotes] 調整沒有存進 localStorage：ec_notes|'+shop+(code!=null?'／'+code:''), err);
   const title=quota?'本機空間已滿，這筆調整沒存起來':'這筆調整沒存進這台電腦';
+  const howTo=isGrowth
+    ? '按「☁ 同步雲端」也救不了它 —— 商品調整的同步是讀這台電腦上的存檔，不是讀畫面上的值。\n'+
+      '請先把剛打的文字複製起來，清出空間之後重新輸入一次。\n'
+    : '按「☁ 同步雲端」還是有機會推得上去，可以先試試看。推成功就沒事了。\n'+
+      '若推不上去，再把文字複製起來，清出空間之後重新輸入一次。\n';
   const message=
-    who+' 的調整【沒有】存進這台電腦。\n'+
+    who+' 【沒有】存進這台電腦。\n'+
     '畫面上還看得到它，但那只是暫存 —— 重整或關掉分頁就會消失。\n\n'+
-    '接下來怎麼做，看你剛剛改的是哪一欄：\n'+
-    '・「商品調整」→ 按「☁ 同步雲端」也救不了它（商品調整的同步是讀這台電腦上的存檔，\n'+
-    '　 不是讀畫面上的值）。請先把剛打的文字複製起來，清出空間之後重新輸入一次。\n'+
-    '・「廣告調整」→ 按「☁ 同步雲端」還是有機會推得上去，可以先試試看。推成功就沒事了。\n\n'+
-    '清空間的方式：關掉其他分頁、或清掉瀏覽器裡這個網站的舊快取。\n'+
-    '（為了不讓雲端誤判成「你把這筆刪掉了」，這次刻意沒有把它記成待同步。）';
+    howTo+
+    '\n清空間的方式：關掉其他分頁、或清掉瀏覽器裡這個網站的舊快取。\n\n'+
+    '⚠ 如果「☁ 同步雲端」按鈕上還有數字，那是先前存成功的東西，\n'+
+    '　 按下去不會把剛剛這一筆救回來，也不要因為它顯示同步成功就以為沒事了。';
   const detail=(err&&(err.name||err.message))?('錯誤：'+(err.name||'')+' '+(err.message||'')):'';
   if(window.App&&typeof App.showAlertModal==='function'){
     App.showAlertModal({ title:title, message:message, detail:detail, kind:'error', dedupeKey:'notesSaveFail' });
