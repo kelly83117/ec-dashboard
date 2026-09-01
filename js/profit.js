@@ -769,6 +769,22 @@ function _sweepAllLocalReportsIntoPending(){
         if(!(Store._profitMem&&Store._profitMem[k])){ try{ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=JSON.parse(localStorage.getItem(k)); }catch{} }
         continue;
       }
+      // 商品調整（ec_notes|{通路}_growth，全通路全期間共用一把）：重整後 _pendingSyncKeys 會歸零，
+      //   沒有這條的話「編輯過但還沒推成功」的商品調整就再也回不到待推清單 —— 推不上雲、而且完全無聲。
+      //   ⚠ 只有 dirty（真正經 saveNotes 編輯過、還沒推成功）才進 pending，判準比照上面 ec_momo_products|
+      //     那條（本檔搜 `if(_momoIsDirty(k))`）：localStorage 存在 ≠ 待推，幾個月前推成功後留下的殘留
+      //     一律不撿，否則會拿舊快照整包覆蓋回雲端。
+      //   ⚠ 廣告調整（ec_notes|{通路}|{月}|{半月}）【刻意不撿】：它在 syncToCloud 有自己的當期閘門
+      //     （搜 `_notesIsDirty('ec_notes|'+_nk)`）。這裡撿了會繞過那道閘門，把封存分片的內容整批寫回
+      //     app/profit（封存省下的額度當場吐回去）。所以 `ec_notes|` 這一整類在本分支處理完就 continue，
+      //     不讓它落到下面任何分支，日後在下面加分支也不會誤傷。
+      //   ⚠【不要補水 Store._mem / Store._profitMem】—— 這不是漏寫。推送走的泛用 field 分支
+      //     （本檔搜 `// field key（設定類）`）自帶 localStorage fallback，補水只會多出第二個資料來源，
+      //     讓「預覽看到的」與「實際推的」有機會分歧。順手補齊＝製造下一個 bug。
+      if(k&&k.startsWith('ec_notes|')){
+        if(/_growth$/.test(k)&&_notesIsDirty(k)) _pendingSyncKeys.add(k);
+        continue;
+      }
       // ⚠ stock（ec_momo_stock_by_origin）仍不在此：走獨立 momo_stock collection 自動推。
       // filemeta 不上雲（雲端零讀取端）→ 不塞進 pending，省下「撈進來→推送略過→收尾刪」的白工
       if(k&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')){
@@ -10869,18 +10885,34 @@ function momoRenderSub(shop){
 
 // ── MOMO 同步鈕（甲配/乙配 pill 列最右）+ 同步預覽視窗 ──
 //   #header-kpi-row（全域鈕所在）在 MOMO 頁被隱藏，MOMO 需自備入口；此鈕呼叫預覽 → 確認 → 全域 syncToCloud。
-// 唯讀待同步計數（只給 MOMO 同步鈕決定亮/暗用）：只數 key，不 mutate _pendingSyncKeys、不回填 Store、不 parse value。
+// 唯讀待同步計數（只給 MOMO 同步鈕決定亮/暗用）：只數 key，不 mutate _pendingSyncKeys、不回填 Store。
+//   ⚠ 「不 parse value」只對【被數的那些 key】成立：為了跟 sweep 的 ec_notes|*_growth 條件一致，
+//     這裡會在迴圈【外】把 ec_notes_dirty 註冊表讀一次、轉成 Set 重複用（單一小陣列，不是逐 key 讀）。
+//     不要改成迴圈內每個 key 各呼叫一次 _notesIsDirty —— 那是 localStorage.getItem + JSON.parse × N。
 // ⚠️ 這裡的白名單前綴必須跟 _sweepAllLocalReportsIntoPending()（本檔搜 `function _sweepAllLocalReportsIntoPending`）
 //    保持一致——那邊改了前綴，這邊也要一起改，否則鈕亮暗會跟實際會推的對不上。
 function _momoSyncPendingCount(){
   const keys=new Set();
   // (1) 這個 session 已 _markPending 的（排除 marker / _summary_v1，比照 _realPendingCount）
   _pendingSyncKeys.forEach(k=>{ if(k.startsWith('__shop__|'))return; if(k==='_summary_v1')return; keys.add(k); });
+  // ec_notes dirty 註冊表：迴圈外讀一次。三種狀態的判準與 _notesIsDirty（本檔搜 `function _notesIsDirty`）逐條對齊：
+  //   raw===null      註冊表不存在＝從沒人編輯過的正常空狀態 → 都不算（集合空）
+  //   非陣列 / throw  內容損毀或 localStorage 被擋 → notesDirtyAll=true（全算進去、鈕亮）
+  //   ⚠ 損毀時的 fail-safe 方向【刻意】與 _notesIsDirty 相同：兩份白名單不一致正是上面那段註解在防的事。
+  //     這裡回 true 最壞只是鈕多亮一次（不影響實際推送）；回 false 會變成「鈕是暗的、按下去卻推得出東西」。
+  let notesDirtySet=null, notesDirtyAll=false;
+  try{
+    const raw=localStorage.getItem('ec_notes_dirty');
+    if(raw===null) notesDirtySet=new Set();
+    else{ const a=JSON.parse(raw); if(Array.isArray(a)) notesDirtySet=new Set(a); else notesDirtyAll=true; }
+  }catch{ notesDirtyAll=true; }
+  const notesDirtyHas=k=>notesDirtyAll||!!(notesDirtySet&&notesDirtySet.has(k));
   // (2) localStorage 裡符合 sweep 白名單前綴的——重整後 session 標記已清空，靠這個撐起亮暗（只讀 key 名，不 parse value）
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
       if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留 */
+         || (k.startsWith('ec_notes|') && /_growth$/.test(k) && notesDirtyHas(k))   /* 商品調整：與 sweep 逐條同條件（dirty 才算）。廣告調整不算——它走 syncToCloud 的當期閘門，不經 sweep */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
     }
   }catch{}
