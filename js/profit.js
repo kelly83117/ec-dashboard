@@ -514,6 +514,85 @@ function _notesItemsDirtyClear(fullKey, codes){
 window.__notesItemsDirtyGet   = _notesItemsDirtyGet;
 window.__notesItemsDirtyAdd   = _notesItemsDirtyAdd;
 window.__notesItemsDirtyClear = _notesItemsDirtyClear;
+
+// ══════ 商品調整（ec_notes|{通路}_growth）的 dirty-scoped merge 推送 ══════
+//  形狀照抄同檔 momoSyncCostByOrigin（本檔搜 `async function momoSyncCostByOrigin`）：
+//    getDoc → momoMergeByKey → setField → 本機鏡像回寫 merged。
+//  但有【四處刻意不同】，每一處下面都標了理由。想「統一成跟它一樣」之前先讀完那四段。
+//
+//  回傳：這次因為「不在 dirty 內」而被保留下來的雲端獨有品號數
+//    （供同步結果回報「保留雲端 N 個品號」，讓合併不靜默；比照 momoSyncOptlog 的 addedFromCloud）。
+//  失敗一律 throw：syncToCloud 的 task 迴圈會 catch，收進 failed → 彈窗列出
+//    「［失敗］<key>：<訊息>」、key 留在 _pendingSyncKeys、兩份 dirty 都不清（因為不在 ok 裡）。
+//    ⚠ 刻意不在這裡自己彈窗：那條管道已經存在、逐 key 帶訊息，而且與「有沒有推成功」同一個判準。
+async function syncNotesGrowth(fullKey){
+  // ── (a) 品號 dirty 讀到 null ＝ 註冊表損毀 → 中止。絕不當成空陣列 ──
+  //   鐵律出處見本檔 `const _NOTES_ITEMS_DIRTY_LS` 上方那段。當成 [] 的後果：
+  //   momoMergeByKey(cloud, local, []) 回傳完全等於 cloud → 推上去看起來成功、實際上一個字都沒上去。
+  const dirty=_notesItemsDirtyGet(fullKey);
+  if(dirty===null) throw new Error('品號待同步註冊表（ec_notes_items_dirty）損毀，已中止合併，以免整包覆蓋蓋掉同事的更新。本次未推送，你的調整還在本機 → 請先匯出備份；清掉該註冊表之後，這些編輯需要重做一次才會被登記。');
+  // ── (b) dirty 是空陣列 → 跳過推送並回報，不推一份等同雲端的資料 ──
+  //   正常流程不會出現（saveNotes 同時寫兩份 dirty）。走到這裡代表兩份不同步，
+  //   最可能是 _notesItemsDirtyAdd 當時寫入失敗（localStorage 配額滿 / 被擋，當下有紅字）。
+  //   ⚠「安靜跳過」與「照推」都是靜默失效：照推＝把雲端原封不動寫回去，
+  //     ok 會有這把 key、彈窗顯示成功、__lastSyncReport 乾淨，但使用者的編輯一次都沒上去。
+  if(dirty.length===0) throw new Error('這把商品調整被標記為待同步，但沒有任何品號被登記，無法判斷該合併哪些品號 → 本次未推送（刻意不推一份等同雲端的資料）。多半是先前 localStorage 寫入失敗；請重新編輯一次該品號再同步。');
+  // ── (c) 雲端讀不到 → 中止，【不】推整份上去 ──
+  //   ⚠ momoSyncCostByOrigin 有一段 `cloudEmpty ? Object.keys(localMap) : dirty` 的「首次上雲推整份」，
+  //     這裡【刻意不照抄】：對 ec_notes 而言「雲端空」更可能是讀取失敗，而整份推上去就是
+  //     last-write-wins —— 正是這整套 merge 要修掉的東西。兩者方向相反，不要統一。
+  //     （順帶：那段對 cost 自己也是地雷 —— 讀取失敗時會用本機整份蓋掉 6683 筆。另案。）
+  const snap=await window.__cloudProfit.getDoc();
+  if(!(snap&&snap.exists&&snap.exists())) throw new Error('讀不到雲端 app/profit（doc 不存在或讀取失敗），已中止合併。本次未推送，資料還在本機，請稍後再按同步重試。');
+  const cloudDoc=snap.data()||{};
+  const cloudRaw=cloudDoc[fullKey];
+  //   雲端 doc 讀得到、但沒有這把 key ＝ 從未上過雲端。【也中止】：
+  //   dirty-scoped merge 沒有基準可用；只推 dirty 那幾個品號會讓本機其他品號靜默上不了雲，
+  //   推整份又是 last-write-wins。「第一次上雲」會改變雲端狀態，應由人決定，不由同步流程代勞。
+  if(cloudRaw===undefined||cloudRaw===null) throw new Error('雲端 app/profit 讀得到，但這把商品調整從未上過雲端，dirty-scoped merge 沒有基準可用 → 已中止，本次未推送。首次上雲會改變雲端狀態，請人工確認後再處理。');
+  if(typeof cloudRaw!=='object'||Array.isArray(cloudRaw)) throw new Error('雲端這把商品調整不是物件（型別異常），已中止合併，以免寫壞雲端。');
+  // ── (d) 深拷貝雲端再 merge ──
+  //   momoMergeByKey 是淺拷貝（Object.assign 只複製第一層）→ 不深拷的話，merged 裡所有
+  //   「沒碰過」的品號會與 snap.data() 共用同一個子物件；而 merged 等一下要寫進 Store._profitMem
+  //   成為活的應用狀態（getNotes / daily.js 工作日誌 / marketing.js 洞察表都讀它），
+  //   任何一處就地修改（例如 _pnmEditNote 的 `t.text=v`）會同時污染兩邊，而且不報錯。
+  //   ⚠ 為什麼選深拷貝而不是「規定 merged 唯讀」：後者是跨三個檔案二十幾個讀取點的紀律承諾，
+  //     沒有任何機制能強制執行；深拷貝是一行、局部、看得見的。這裡的量是一個通路的商品調整
+  //     （數十～數百個小物件），不是 cost_by_origin 的 6683 筆，成本可忽略。
+  const cloudMap=JSON.parse(JSON.stringify(cloudRaw));
+  // 本機值：與現行泛用推送分支同源（Store._mem → localStorage），保證「預覽看到的 == 實際推的」。
+  //   ⚠ 刻意不讀 Store._profitMem：雲端訂閱會整包覆蓋 _profitMem 但【從不回寫 localStorage】
+  //     （見 js/firebase.js 的 app/profit 訂閱），所以 _profitMem 可能已經是雲端版，
+  //     localStorage 才是「我的編輯」。讀錯來源會讓刪除與改字整個失效。
+  let localMap=null;
+  try{ if(Store._mem && Store._mem[fullKey]!==undefined) localMap=Store._mem[fullKey]; }catch{}
+  if(localMap===null){ try{ const raw=localStorage.getItem(fullKey); if(raw) localMap=JSON.parse(raw); }catch{} }
+  if(localMap===null||localMap===undefined) localMap={};   // 本機整把不見（例如所有品號都被刪光）＝ dirty 那些品號一律走 delete 分支，這是正確的
+  if(typeof localMap!=='object'||Array.isArray(localMap)) throw new Error('本機這把商品調整不是物件（可能損毀），已中止合併，以免把壞資料推上雲端。');
+  const merged=momoMergeByKey(cloudMap, localMap, dirty);
+  // 保留下來的雲端獨有品號數＝雲端有、本機沒有、且不在 dirty 內 → 這些是同事的資料，這次被保住了。
+  //   （舊的整包覆蓋會把它們全部刪掉，所以這個數字正是這次改動的價值，要讓使用者看見。）
+  const dirtySet=new Set(dirty.map(String));
+  let keptFromCloud=0;
+  Object.keys(cloudMap).forEach(c=>{ if(!dirtySet.has(String(c)) && !Object.prototype.hasOwnProperty.call(localMap,c)) keptFromCloud++; });
+  await window.__cloudProfit.setField(fullKey, momoFsSanitizeDeep(merged));
+  // 本機回寫 merged（含同事的），否則下次同步又出現差異。
+  //   ⚠ 只寫 saveNotes 也會寫的那兩處（localStorage + _profitMem）。momoSyncOptlog 寫三鏡像，
+  //     這裡【刻意不主動新增 Store._mem[k]】：saveNotes 不寫 _mem，憑空生一個第三來源之後
+  //     只會 stale（預覽讀 _mem 優先 → 會顯示舊值）。但若 _mem 本來就有這把 key，一併更新、不留舊值。
+  try{ localStorage.setItem(fullKey,JSON.stringify(merged)); }catch(e){ console.error('[syncNotesGrowth] merged 回寫 localStorage 失敗（雲端已經是 merged，本機會 stale 到下次重整）：',fullKey,e); }
+  try{ if(Store._profitMem) Store._profitMem[fullKey]=merged; }catch{}
+  try{ if(Store._mem && Store._mem[fullKey]!==undefined) Store._mem[fullKey]=merged; }catch{}
+  // ── (e) ⚠【刻意不在這裡清 dirty】—— 與 momoSyncCostByOrigin 尾端的 momoCostDirtyClear() 不同 ──
+  //   兩份 dirty（key 級 ec_notes_dirty / 品號級 ec_notes_items_dirty）必須同生同滅，
+  //   所以兩者都放在 syncToCloud 收尾那個 ok.forEach 裡（本檔搜 `_notesItemsDirtyClear(k)`）：
+  //   同一個觸發來源（ok＝這次真的推成功的 key）、同一次迭代、相鄰兩個語句 → 結構上無法只清一邊。
+  //   若把品號級搬回這裡自己清：只要 setField 之後到 promise resolve 之間出任何例外，
+  //   這把 key 會落到 failed → key 級不清、品號級已清 → 下次同步 dirty 變成 []，
+  //   只能靠上面 (b) 接住並報錯。不要搬回來。
+  try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}   // 比照 momoSyncOptlog 尾端：合併後工作日誌計數跟著更新
+  return keptFromCloud;
+}
 // 本機儲存（不推雲端），加到 pending 集合等使用者手動同步
 function _cloudWriteSafe(key, payload, label){
   // 存 localStorage
@@ -916,7 +995,11 @@ async function _momoFullPushDeleteGuard(taskKeys){
   let appProfit=null;
   if(keys.some(isAppProfitField)){ try{ const s=await window.__cloudProfit.getDoc(); appProfit=(s&&s.exists&&s.exists())?(s.data()||{}):{}; }catch(e){ appProfit=null; } }
   for(const k of keys){
-    if(k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_moplus_origins|') || k==='ec_momo_cost_by_origin' || k.startsWith('ec_momo_optlog|')) continue;   // 各有自己的機制：optlog 走 read-merge-write（不刪除、不需 willDelete 擋）；products/origins 版本比對；cost merge；蝦皮另議
+    if(k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_moplus_origins|') || k==='ec_momo_cost_by_origin' || k.startsWith('ec_momo_optlog|')
+       || (k.startsWith('ec_notes|') && /_growth$/.test(k))) continue;   // 各有自己的機制：optlog 與商品調整 ec_notes|*_growth 走 read-merge-write（不刪除同事的、不需 willDelete 擋）；products/origins 版本比對；cost merge；蝦皮報表另議
+    //   ⚠ ec_notes 只排除 _growth：廣告調整 ec_notes|{通路}|{月}|{半月} 仍走整包 setField、
+    //     【仍然需要】這道 willDelete 防護，不要順手一起排除。
+    //   ⚠ ec_edits|{通路} 也還沒走 merge（第三塊才處理），同樣留在防護底下。
     // 本機值（與推送同源）
     let localV=null;
     try{
@@ -960,6 +1043,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     const skippedByDesign=[];       // filemeta：故意不上雲，安靜
     const skippedProblem=[];        // 讀不到 / 損毀 / 非物件：一定要浮上來
     const _optlogMerges=[];         // optlog read-merge-write 併回雲端的筆數（{shop,n}）→ 「已合併雲端 N 筆」不靜默
+    const _notesMerges=[];          // 商品調整 dirty-scoped merge 保留下來的雲端獨有品號數（{key,n}）→ 「保留雲端 N 個品號」不靜默
     // ec_notes 這次沒被編輯過 → by design 的安靜跳過（性質同 skippedByDesign，不彈窗、不出 toast）。
     //   ⚠ 刻意不彈窗：封存搬家之後，只要當期有調整、而使用者這次沒編輯過，每一次同步都會觸發這條，
     //     跳出來就變成雜訊。診斷靠下面的 console.log 與 window.__lastSyncReport.skippedNotDirty 就夠。
@@ -1063,6 +1147,13 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         tasks.push({key:pk, run:()=>momoSyncOptlog(oshop).then(n=>{ if(n>0) _optlogMerges.push({shop:oshop, n}); })});
         return;
       }
+      if(pk.startsWith('ec_notes|') && /_growth$/.test(pk)){   // 商品調整：dirty-scoped merge（逐品號、只覆蓋你改過的、不刪同事的）→ 兩人各改各的品號可共存
+        //   ⚠ 只有 _growth 走這裡。廣告調整 ec_notes|{通路}|{月}|{半月} 在本迴圈【之前】就已由當期閘門
+        //     排進 taskKeys（本檔搜 `_notesIsDirty('ec_notes|'+_nk)`），迴圈開頭的 taskKeys.has(pk) 會擋掉它；
+        //     而且它的形狀也不匹配 /_growth$/ → 廣告調整的行為完全不變。
+        tasks.push({key:pk, run:()=>syncNotesGrowth(pk).then(n=>{ if(n>0) _notesMerges.push({key:pk, n}); })});
+        return;
+      }
       // field key（設定類）
       let val=null;
       try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
@@ -1120,17 +1211,22 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     // pending 清理：只保留 failed + skippedProblem（要重試 / 要一直提醒），其餘刪掉
     // 只清掉「這次真的推成功」的 key（ok）；失敗/讀不到/逐項勾選未選的一律留在 pending 下次再推
     ok.forEach(k=>_pendingSyncKeys.delete(k));
-    ok.forEach(k=>{ if(k.startsWith('ec_notes|')){ try{ _notesDirtyDel(k); }catch{} } });          // 真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
+    //   ⚠ 兩份 dirty（key 級 ec_notes_dirty / 品號級 ec_notes_items_dirty）【必須同生同滅】，
+    //     所以刻意寫在同一個 callback 的相鄰兩行：同一個觸發來源（ok＝這次真的推成功的 key）、
+    //     同一次迭代 → 結構上無法只清一邊。不要把品號級那句搬進 syncNotesGrowth
+    //     （理由見該函式尾端 (e) 那段：搬回去會製造「key 級沒清、品號級清了」的難查狀態）。
+    ok.forEach(k=>{ if(k.startsWith('ec_notes|')){ try{ _notesDirtyDel(k); }catch{} try{ _notesItemsDirtyClear(k); }catch{} } });   // 真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
-    _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,optlogMerges:_optlogMerges});
+    _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,optlogMerges:_optlogMerges,notesMerges:_notesMerges});
     const _mergedN=_optlogMerges.reduce((s,x)=>s+(x.n||0),0);   // optlog 合併併回雲端的總筆數（不靜默）
+    const _notesKeptN=_notesMerges.reduce((s,x)=>s+(x.n||0),0);   // 商品調整合併時保留下來的雲端獨有品號總數（不靜默）
     // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 且 skippedWillDelete=0 時出現；只要有問題/被保護跳過就 ⚠ + 彈窗
     const problems=failed.length+skippedProblem.length+skippedWillDelete.length;
     if(problems===0){
       if(btn){btn.textContent='✓ 已同步 '+ok.length+' 筆';btn.style.background='#10b981';btn.style.color='#fff';btn.style.borderColor='#10b981';_syncBtnRepaintTimer=setTimeout(()=>{ _showSyncBtn(); },2000);}
-      if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端'+(_mergedN>0?'（優化紀錄已合併雲端 '+_mergedN+' 筆）':''),'success');
+      if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端'+(_mergedN>0?'（優化紀錄已合併雲端 '+_mergedN+' 筆）':'')+(_notesKeptN>0?'（商品調整已保留雲端 '+_notesKeptN+' 個品號）':''),'success');
       // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌（失敗只記 console，不影響同步結果判定）
       try { if(window.App && typeof App._updateDailyProgressFromAdjustments === 'function') App._updateDailyProgressFromAdjustments({ pushToCloud: true }); }
       catch(e){ console.warn('[autoSummary profit]', e); }
@@ -4239,7 +4335,7 @@ function getNotes(shop){
   try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return migrate(JSON.parse(JSON.stringify(Store._mem[k]))); }catch{}
   try{ return migrate(JSON.parse(localStorage.getItem(k)||'{}')); }catch{return{};}
 }
-function saveNotes(shop,notes){
+function saveNotes(shop,notes,code){
   window._shopJustSaved=Date.now();
   const k='ec_notes|'+shop;
   try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
@@ -4258,6 +4354,19 @@ function saveNotes(shop,notes){
   //     若看到某把 _growth 一直清不掉，代表它一直沒推成功（例如被 _momoFullPushDeleteGuard 擋下），
   //     那是要去查的訊號，不是「已知無害的殘留」。
   _notesDirtyAdd(k);
+  // ── 品號級 dirty（第二塊接線）──
+  //   記「這把 key 底下的哪個品號被碰過」，給 syncNotesGrowth 的 dirty-scoped merge 當身分用
+  //   （adjustment 沒有 id、內容欄位 date+period 在真實資料上會撞號，不能用內容當身分）。
+  //   🔴 這【不違反】上面那條「刻意不判斷 key 形狀」：那條講的是【不依 key 的形狀分流行為】——
+  //     例如寫成 `if(k.endsWith('_growth')) _notesItemsDirtyAdd(...)` 就是違反，因為兩種 key 形狀
+  //     會開始走不同的登記邏輯。這裡對兩種形狀【一視同仁】，只是多接收呼叫端告知的
+  //     「這次動到的是哪個品號」，那是一個與 key 形狀無關的參數。要在這裡加形狀分流之前先想清楚。
+  //   ⚠ code 沒傳（undefined / null）時的行為【明確定義】：不寫品號級註冊表，其餘一字不變
+  //     （localStorage / _profitMem / _pendingSyncKeys / key 級 dirty / _showSyncBtn 全部照舊）。
+  //     這是刻意讓它【大聲壞掉】而不是猜一個品號：未來若有人新增第四個呼叫端卻忘了傳 code，
+  //     這把 key 會有 key 級 dirty 但品號級是空的 → syncNotesGrowth 的 (b) 會 throw，
+  //     在同步彈窗明確報「沒有任何品號被登記」。猜品號、或退回整包覆蓋，才是災難。
+  if(code!==undefined&&code!==null) _notesItemsDirtyAdd(k, code);
   _showSyncBtn(shop);
   // 立即同步工作日誌摘要（不必等按 ☁ 同步雲端；silent 不顯示 toast 避免太吵）
   try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}
@@ -5401,7 +5510,7 @@ function submitProfitNote(){
   const _entry={date:today,text:v};
   if(_isG&&_st&&_st.curMonth&&_st.curHalf)_entry.period=`${_st.curMonth}|${_st.curHalf}`;
   notes[code].adjustments.push(_entry);
-  saveNotes(shopKey,notes);
+  saveNotes(shopKey,notes,code);
   closeProfitNoteModal();
   applyFilters(shop,{keepScroll:true});
 }
@@ -5471,7 +5580,7 @@ function _pnmEditNote(origIdx,btn){
     // 收尾逐字比照 deleteProfitNote 的最後一行（不關彈窗、帶 keepScroll）。
     //   兩處差異：那邊是 splice、這邊是改 text；那邊刪光後會 delete notes[code]，
     //   編輯不會改變陣列長度，所以這裡沒有那一行。
-    saveNotes(shopKey,notes);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
+    saveNotes(shopKey,notes,code);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
   };
   inp.addEventListener('keydown',e=>{
     if(e.key==='Enter'){e.preventDefault();save();}
@@ -5521,7 +5630,7 @@ function deleteProfitNote(origIdx,btn){
   if(!t||String(t.text||'')!==btn.dataset.text||String(t.date||'—')!==btn.dataset.date){_abort('資料在彈窗開啟期間變動過');return;}
   notes[code].adjustments.splice(origIdx,1);
   if(!notes[code].adjustments.length)delete notes[code];
-  saveNotes(shopKey,notes);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
+  saveNotes(shopKey,notes,code);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
 }
 function closeProfitNoteModal(){document.getElementById('profit-note-modal')?.classList.remove('open');_pnm=null;}
 function startNote(shop,code){openNotePopup(shop,code);}
@@ -11289,6 +11398,18 @@ async function momoOpenSyncPreview(shop){
   items.forEach(it=>{ it.willDelete=0; it.willMerge=0;
     if(it.status==='diff'){
       if(it.key && it.key.startsWith('ec_momo_optlog|')){ try{ it.willMerge=momoMergeOptlog(it._cloudVal, it.localVal).addedFromCloud; }catch(e){} }   // optlog 走 read-merge-write：不刪除、不套 willDelete；willMerge＝會併回本機沒有的雲端筆數
+      else if(it.key && it.key.startsWith('ec_notes|') && /_growth$/.test(it.key)){
+        // 商品調整走 dirty-scoped merge：同樣不刪除同事的、【不可套 willDelete】——套了會顯示紅字
+        //   「會刪掉雲端 N 筆、預設不推」，與實際行為不符，會把使用者嚇到不敢推。
+        //   willMerge 在這裡的語意＝雲端有、本機沒有、且不在品號 dirty 內的品號數
+        //   ＝ 這次推送【會被保留下來】的同事資料（舊的整包覆蓋會把它們全刪掉）。
+        //   ⚠ dirty 讀到 null（註冊表損毀）時這裡【不報錯】：預覽是唯讀的，willMerge 留 0；
+        //     真正的中止與報錯發生在 syncNotesGrowth 的 (a)，那裡才是會寫雲端的地方。
+        try{ const _d=_notesItemsDirtyGet(it.key);
+          if(Array.isArray(_d)){ const _s=new Set(_d.map(String)); const _c=it._cloudVal||{}, _l=it.localVal||{};
+            it.willMerge=Object.keys(_c).filter(c=>!_s.has(String(c)) && !Object.prototype.hasOwnProperty.call(_l,c)).length; }
+        }catch(e){}
+      }
       else if(it.kind!=='MOMO商品主檔' && it.kind!=='MO+逐列成本'){ it.willDelete=momoCloudDeleteCount(it.localVal, it._cloudVal); }
     }
   });
@@ -11313,6 +11434,8 @@ function momoRenderSyncPreviewModal(shop, items){
     if(it.status==='readfail') return `<span style="color:#d97706">無法比對（雲端讀取失敗，仍會整包覆蓋）</span>`;
     const cnt=(it.cloudCount!==it.localCount)?`（雲端 ${it.cloudCount} / 本機 ${it.localCount} 筆）`:'';
     if(it.conflict) return `<span style="color:#dc2626;font-weight:700" title="雲端在你載入後又被更新過（可能是同事推的），推了會用你的舊資料整包蓋掉雲端較新版本${cnt}">⚠ 雲端較新，預設不推</span>`;   // 【2】版本比對命中
+    const _isNG=it.key && it.key.startsWith('ec_notes|') && /_growth$/.test(it.key);   // 商品調整：dirty-scoped merge，永遠不整包覆蓋 → 不可落到下面「會刪掉雲端／內容不同（整包覆蓋）」那兩條
+    if(_isNG) return `<span style="color:#2563eb;font-weight:600" title="商品調整走逐品號 dirty-scoped 合併（read-merge-write）：只覆蓋你這次改過的品號，其餘一律保留雲端，不會蓋掉同事的更新。${cnt}">🔀 將合併（只動你改過的品號）${it.willMerge>0?' · 保留雲端 '+it.willMerge+' 個品號':''}</span>`;
     if(it.willMerge>0) return `<span style="color:#2563eb;font-weight:600" title="優化紀錄走逐 SKU 依 id 合併（read-merge-write）：不覆蓋、不刪除。推送會把雲端有、你本機沒有的 ${it.willMerge} 筆一併併回，兩邊的紀錄都保留。${cnt}">🔀 將合併（不覆蓋不刪除）· 併回 ${it.willMerge} 筆</span>`;   // optlog read-merge-write
     if(it.willDelete>0) return `<span style="color:#dc2626;font-weight:700" title="整包覆蓋：雲端有、本機沒有的 ${it.willDelete} 筆會被刪掉（可能是同事今天做的、你本機還沒載到）。展開看是哪幾筆。${cnt}">⚠ 這會刪掉雲端 ${it.willDelete} 筆（可能是同事的更新），預設不推</span>`;   // 臨時止血：整包覆蓋會刪雲端資料
     return `<span style="color:#9a3412;font-weight:600" title="推了會用本機整包覆蓋雲端${cnt}">內容不同</span>`;
