@@ -559,6 +559,35 @@ async function syncNotesGrowth(fullKey){
   //   ⚠ 為什麼選深拷貝而不是「規定 merged 唯讀」：後者是跨三個檔案二十幾個讀取點的紀律承諾，
   //     沒有任何機制能強制執行；深拷貝是一行、局部、看得見的。這裡的量是一個通路的商品調整
   //     （數十～數百個小物件），不是 cost_by_origin 的 6683 筆，成本可忽略。
+  //   🔴🔴 這一行的【已知限制】，動 ec_notes 的資料形狀之前必須先讀完 🔴🔴
+  //     JSON round-trip 是「深拷貝」最省事的寫法，但它【會靜默改寫 Firestore 的特殊型別】：
+  //       Timestamp            → 變成 {seconds,nanoseconds,…} 之類的普通物件（不再是 Timestamp）
+  //       undefined 值         → 整個 key 被丟掉（欄位消失）
+  //       NaN / Infinity       → 變成 null
+  //       Bytes / GeoPoint / DocumentReference → 變成各自 toJSON() 的形狀
+  //     ⚠ 最嚴重的一點：cloudRaw 來自 snap.data()，裡面包含【本次沒有 dirty、原封從雲端來的
+  //       同事品號】。上面那個改寫是無差別的 —— 也就是說，這一行有能力動到「我根本沒碰過」
+  //       的資料，而且不報錯、畫面上看不出來。這正是本專案反覆出事的形狀。
+  //     （對照組：下面那行 momoFsSanitizeDeep 沒有這個問題 —— 它只改 key 名，而它會改的三種 key
+  //       ('' / /^__.*__$/ / >1500 bytes) 正好是 Firestore 自己拒收的，所以雲端不可能存有命中它們
+  //       的 key → 對雲端來源是可證明的恆等變換。有問題的是這一行，不是那一行。）
+  //
+  //     ✅ 目前為什麼是安全的（這是【現況的事實】，不是永久保證）：
+  //       ec_notes|{通路}_growth 的所有 value 都是【字串】—— 形狀是
+  //         { 品號: { adjustments: [ {date:'2026/08/07', text:'…', period?:'2026/07|second'} ] } }，
+  //       date / text / period 三個欄位全是字串，沒有任何 Firestore 特殊型別。
+  //       而這把 key 的唯一寫入端就是本函式下面那行 setField(fullKey, merged)，
+  //       merged 的兩個來源（JSON.parse(localStorage) 與這一行的 JSON round-trip）也都是純 JSON
+  //       → 雲端存的永遠是純 JSON → round-trip 恆等。
+  //
+  //     🔴 何時會壞掉：只要有人往 adjustment（或這把 key 的任何一層）加一個【非 JSON 型別】的
+  //       欄位，例如 serverTimestamp() 的伺服器時間戳、Bytes、GeoPoint，
+  //       這一行就會在每一次同步時把它靜默改寫掉 —— 連同事那些我沒碰過的品號一起。
+  //       ⚠ 要加那種欄位之前，【必須先處理這一行】。可行方向擇一：
+  //         (i) 換成 structuredClone(cloudRaw)（保留型別，但 Firestore 的 class instance 不一定能複製）
+  //         (ii) 只對「本次 dirty 的品號」做拷貝，其餘品號直接沿用 cloud 的參照 + 明確規定唯讀
+  //         (iii) 改成不在本機保留 merged、每次都重讀雲端（代價是多一次 getDoc）
+  //       在那之前，請把「ec_notes 的 value 只能是純 JSON」當成這把 key 的硬性約束。
   const cloudMap=JSON.parse(JSON.stringify(cloudRaw));
   // 本機值：與現行泛用推送分支同源（Store._mem → localStorage），保證「預覽看到的 == 實際推的」。
   //   ⚠ 刻意不讀 Store._profitMem：雲端訂閱會整包覆蓋 _profitMem 但【從不回寫 localStorage】
