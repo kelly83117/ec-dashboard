@@ -408,6 +408,112 @@ function _notesIsDirty(k){
     return a.includes(k);
   }catch{ return true; }
 }
+// ══════ 品號級 dirty 註冊表（persisted，跨重整）══════
+//  用途：給 dirty-scoped merge 用（模式與資料流見同檔 momoSyncCostByOrigin + momoMergeByKey，
+//    本檔搜 `function momoMergeByKey`）。上面那份 _NOTES_DIRTY_LS 記的是「哪一把 key 被編輯過」，
+//    這一份再往下一層，記「那把 key 底下的哪些【品號】被碰過」。
+//  為什麼需要這一層：ec_notes|{通路}_growth 是全通路全期間共用一個物件，整包 setField ＝
+//    last-write-wins，會蓋掉同事的更新；而 adjustment 沒有 id、內容欄位（date+period）在真實
+//    資料上會撞號（2026-09 實測 12 組），所以【不能用內容當身分】。改用「我碰過誰」這份註冊表
+//    當身分：merge 時只在 dirty 的品號上表態，其餘一律保留雲端。
+//    這也是唯一能表達「刪除」的方式 —— 碰過、但本機已經沒有 ＝ 我刪的（見 momoMergeByKey 的
+//    `else delete out[k]`）；沒碰過而本機沒有 ＝ 同事剛新增的，保留。
+//
+//  結構（localStorage['ec_notes_items_dirty']）：
+//    { "ec_notes|玩樂_growth": ["F220","E150"], "ec_notes|好麻吉_growth": ["A001"] }
+//    ⚠ 刻意用物件、不用扁平的 "key|品號" 複合字串：momoMergeByKey 的第三參數要的就是
+//      「某一張 map 底下的 key 陣列」，物件結構直接就是那個形狀；而且品號字元集不可控，
+//      任何分隔符都可能出事。
+//
+//  🔴🔴 三態回傳。Get 回的 null【絕對不可以】當成 [] 處理 —— 這是本註冊表最重要的一條 🔴🔴
+//    null   ＝ 註冊表讀不到 / 內容損毀 / localStorage 被擋。【不是】「沒碰過」。
+//    []     ＝ 讀得到、確定沒碰過。
+//    [...]  ＝ 讀得到、碰過這些品號。
+//    ⚠ 呼叫端（未來的 syncNotesGrowth 等）收到 null 時【必須中止該 key 的 merge，並明確報錯給
+//      使用者】（App.showAlertModal，至少也要 showToast + console.error），絕不可以繼續推。
+//    ⚠ 為什麼這一層不像上面 _notesIsDirty 那樣選一個 fallback 方向 —— 因為兩個方向都是
+//      【靜默失效】，而靜默失效正是本 codebase 反覆出事的形狀：
+//        當成「全部都 dirty」→ momoMergeByKey 會用本機整份覆蓋雲端整份 ＝ 退回 last-write-wins，
+//                             靜默蓋掉同事的更新（正是這整套機制要修掉的東西）。
+//        當成「都不 dirty」  → merge 什麼都不做 ＝ 使用者剛打的調整靜默不生效，畫面上跟成功一樣。
+//      兩害都無法從畫面上察覺。所以這一層【不做選擇】，把選擇權交給有 UI 可以報錯的那一層。
+//    🔴 如果你正打算在呼叫端加上 `?? []`、`|| []`、`Array.isArray(x)?x:[]` —— 停下來。
+//      那一行就是把上面兩種靜默失效原封不動裝回去。要處理 null 請「中止 + 報錯」，
+//      不要「補一個預設值讓程式跑得下去」。程式跑得下去正是這個 bug 的症狀，不是解法。
+//
+//  ── 交接給第二塊（寫 syncNotesGrowth 的人）的三個已知行為，動工前先讀完 ──
+//  (1) momoMergeByKey 是【淺拷貝】（`Object.assign({}, cloud)` 只複製第一層）。
+//      cost_by_origin 的 value 是純量所以無感，但這裡的 value 是 {adjustments:[…]} 巢狀物件 →
+//      merged 結果裡所有「沒碰過」的品號，與 getDoc 拿回來的雲端快照【共用同一個子物件參照】。
+//      在 merged 上就地修改（例如比照 _pnmEditNote 的 `t.text=v`）會同時污染兩邊。
+//      第二塊要嘛 merge 前先深拷貝 cloud，要嘛明確規定 merged 結果唯讀。
+//  (2) momoMergeByKey 判斷「刪除」只看 `hasOwnProperty(local, 品號)`，【不看底下有幾筆】：
+//      ・刪光整個品號（deleteProfitNote 的 `delete notes[code]`）→ 雲端該品號乾淨消失 ✅
+//      ・刪三筆中的一筆 → 品號還在 → out[品號] 被本機整個陣列覆蓋 ＝ 該品號範圍內仍然是
+//        last-write-wins（同事同時在同一品號加的那筆會被吃掉）。
+//      驗收「刪除生效」時這兩種情況【必須分開測】；只測一種就宣稱修好，會漏掉另一種。
+//  (3) 品號級 dirty【分不出期別】：ec_notes|{通路}_growth 全期間共用一把 adjustments，
+//      靠每筆的 period 欄位過濾顯示。註冊表只記「我碰過 F220」，分不出碰的是 7 月上半那筆
+//      還是 8 月下半那筆 → 同一品號跨期別會互相覆蓋。這是【已知取捨】（爆炸半徑仍只有一個
+//      品號，比現況「整個通路」小兩個量級），不是 bug，驗收時不要當成 bug 回報。
+//      要根治得做到 adjustment 級身分，而那需要 id —— 見上面「不能用內容當身分」那段。
+const _NOTES_ITEMS_DIRTY_LS='ec_notes_items_dirty';
+// 讀。不傳 fullKey → 回整份 map（除錯用）。三態語意見上方：null 不可當 []。
+function _notesItemsDirtyGet(fullKey){
+  let raw;
+  try{ raw=localStorage.getItem(_NOTES_ITEMS_DIRTY_LS); }
+  catch(e){ console.error('[notesItemsDirty] localStorage 讀取失敗，回 null（呼叫端必須中止 merge 並報錯，不可當成空）：',e); return null; }
+  if(raw===null) return fullKey===undefined ? {} : [];   // 註冊表不存在 ＝ 從沒人碰過，是正常空狀態、不是失敗
+  let m;
+  try{ m=JSON.parse(raw); }
+  catch(e){ console.error('[notesItemsDirty] 註冊表 JSON 損毀，回 null（呼叫端必須中止 merge 並報錯，不可當成空）。原始內容：',raw); return null; }
+  if(m===null||typeof m!=='object'||Array.isArray(m)){ console.error('[notesItemsDirty] 註冊表不是物件，回 null（呼叫端必須中止 merge 並報錯，不可當成空）。原始內容：',raw); return null; }
+  if(fullKey===undefined) return m;
+  const a=m[fullKey];
+  if(a===undefined) return [];                           // 註冊表本身是好的、只是這把 key 沒被碰過 → 真的空
+  if(!Array.isArray(a)){ console.error('[notesItemsDirty] 該 key 的項目不是陣列，回 null（呼叫端必須中止 merge 並報錯，不可當成空）：',fullKey,a); return null; }
+  return a;
+}
+// 加一個品號。
+//   ⚠ 損毀時【刻意不重建】：重建會把「損毀 → null → 呼叫端中止」變成「合法 → [] → 靜默不推」，
+//     剛好繞過上面整段防護。寫不進去就留下 console.error，讓 Get 那端繼續回 null。
+//     （這與上面 _notesDirtyAdd 的「兩害相權取重建」相反，因為那份的 fallback 方向是安全的、這份不是。）
+function _notesItemsDirtyAdd(fullKey, code){
+  if(!fullKey||code===undefined||code===null) return;
+  try{
+    const m=_notesItemsDirtyGet();
+    if(m===null){ console.error('[notesItemsDirty] 註冊表損毀，這次的品號標記沒存下來（刻意不重建，理由見函式上方）：',fullKey,code); return; }
+    const s=new Set(Array.isArray(m[fullKey])?m[fullKey]:[]);
+    if(s.has(String(code))) return;
+    s.add(String(code));
+    m[fullKey]=[...s];
+    localStorage.setItem(_NOTES_ITEMS_DIRTY_LS,JSON.stringify(m));
+  }catch(e){ console.error('[notesItemsDirty] 寫入註冊表失敗，這個品號的待同步標記沒存下來：',fullKey,code,e); }
+}
+// 清。codes 省略 → 清掉該 fullKey 整條（比照 momoCostDirtyClear 的 !keys 分支）；
+//   給 codes → 只清那幾個品號。清完該 key 空了就把整條移除，不留空陣列無限累積。
+function _notesItemsDirtyClear(fullKey, codes){
+  if(!fullKey) return;
+  try{
+    const m=_notesItemsDirtyGet();
+    if(m===null){ console.error('[notesItemsDirty] 註冊表損毀，這次的清除沒生效（刻意不重建）：',fullKey,codes); return; }
+    if(!Object.prototype.hasOwnProperty.call(m,fullKey)) return;
+    if(!codes){ delete m[fullKey]; }
+    else{
+      const rm=new Set((Array.isArray(codes)?codes:[codes]).map(String));
+      const left=(Array.isArray(m[fullKey])?m[fullKey]:[]).filter(c=>!rm.has(String(c)));
+      if(left.length) m[fullKey]=left; else delete m[fullKey];
+    }
+    localStorage.setItem(_NOTES_ITEMS_DIRTY_LS,JSON.stringify(m));
+  }catch(e){ console.error('[notesItemsDirty] 清除註冊表失敗：',fullKey,codes,e); }
+}
+// Console 測試/除錯用（比照本檔 window.__momoClassifyPeriods 的慣例）。
+//   ⚠ 這一輪【只定義、零呼叫端】：saveNotes / submitProfitNote / _pnmEditNote / deleteProfitNote
+//     一行都沒動，接線是第二塊的事。所以在有人呼叫 Add 之前，ec_notes_items_dirty 這把
+//     localStorage key 根本不會被建立。
+window.__notesItemsDirtyGet   = _notesItemsDirtyGet;
+window.__notesItemsDirtyAdd   = _notesItemsDirtyAdd;
+window.__notesItemsDirtyClear = _notesItemsDirtyClear;
 // 本機儲存（不推雲端），加到 pending 集合等使用者手動同步
 function _cloudWriteSafe(key, payload, label){
   // 存 localStorage
@@ -15613,6 +15719,11 @@ function momoMergeByKey(cloud, local, dirtyKeys){
   (dirtyKeys||[]).forEach(k=>{ if(local && Object.prototype.hasOwnProperty.call(local,k)) out[k]=local[k]; else delete out[k]; });
   return out;
 }
+// ⚠ 淺拷貝：`Object.assign({}, cloud)` 只複製第一層 → 回傳結果中「不在 dirtyKeys 內」的 value
+//   與傳進來的 cloud 共用同一個子物件參照。cost_by_origin 的 value 是純量所以無感；用在巢狀
+//   value（例如 ec_notes 的 {adjustments:[…]}）時，在結果上就地修改會同時污染 cloud 那份。
+//   完整交接說明見本檔 `const _NOTES_ITEMS_DIRTY_LS` 上方那段註解的 (1)。
+window.__momoMergeByKey = momoMergeByKey;   // Console 測試/除錯用（純函式，可餵假資料）
 // ── 編輯器/匯入寫單一原廠成本：更新 cost map + meta（異動紀錄 + manual 旗標）+ dirty，回 {ok}。──
 function momoSetCostByOrigin(origin, cost, opts){
   opts=opts||{}; origin=String(origin||'').trim(); const c=Number(cost);
