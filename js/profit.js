@@ -863,8 +863,21 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     const notes=getNotes(_nk);
     // 🔴 閘門：只推「真的被 saveNotes 編輯過、還沒推成功」的。沒有它的話，getNotes 讀到的封存分片內容
     //   會被原封不動寫回 app/profit（理由見 _NOTES_DIRTY_LS 那段註解）。
-    //   ⚠ 條件字串與 _momoCollectPending 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`，全檔只有兩處）：
+    //   ⚠ 條件字串與 _momoCollectPending 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`）：
     //     兩處不一致 ＝ 預覽說要推 N 筆、實際推 N±1 筆，而且不報錯。本檔已因「兩處只改一處」出過事（PR #93、預覽騙人那條）。
+    //   ⚠ dirty 判準全檔【四處】（舊註解寫「全檔只有兩處」已過期），分成兩組、組內必須一致、組間刻意不同。
+    //     ⚠ grep `_notesIsDirty(` 只會找到【三處】：④ 為了避免逐 key 讀 localStorage，把同一套判準
+    //       內聯成該函式區域的 notesDirtyHas（搜 `const notesDirtyHas`）。改 dirty 語意時四處都要動。
+    //     ── 廣告調整組（key＝ec_notes|{通路}|{月}|{半月}，判準 `'ec_notes|'+_nk`）──
+    //       ① 本處（syncToCloud）              推送端當期閘門
+    //       ② _momoCollectPending              ①的同步預覽端鏡像
+    //     ── 商品調整組（key＝ec_notes|{通路}_growth，判準 `ec_notes|` 前綴 + `/_growth$/`）──
+    //       ③ _sweepAllLocalReportsIntoPending 跨重整把 dirty 的 _growth 撿回 _pendingSyncKeys
+    //       ④ _momoSyncPendingCount            ③的 MOMO 同步鈕亮暗鏡像（內聯 notesDirtyHas，判準與③相同）
+    //     組間判準不同【不是漏改】：①推的值來自 getNotes（_profitMem 優先＝app/profit 與封存分片的合併
+    //     結果），所以需要閘門擋住「切到已封存月份、按一下同步就把分片內容整批寫回 app/profit」；
+    //     ③④撿的 _growth 走的是泛用 field 分支，值來自 localStorage，沒有分片合併問題。
+    //     把③④改成也吃 `_nk`，等於讓封存月份繞過①那道閘門 —— 不要這樣做。
     //   ⚠ 跳過一定要留下可查紀錄，否則跟「資料靜默消失」分不出來。
     if(Object.keys(notes).length>0){
       if(_notesIsDirty('ec_notes|'+_nk)){ taskKeys.add('ec_notes|'+_nk); tasks.push({key:'ec_notes|'+_nk,run:()=>window.__cloudProfit.setField('ec_notes|'+_nk,notes)}); }
@@ -4127,12 +4140,17 @@ function saveNotes(shop,notes){
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=notes;}catch{}
   // 掛進待同步集合，讓「☁ 同步雲端」推得到（商品調整 _growth 原本完全沒有上雲的路）
   _pendingSyncKeys.add(k);
-  // persisted 待同步標記（跨重整）→ syncToCloud 的 ec_notes 閘門只認這個。
+  // persisted 待同步標記（跨重整）。兩組讀取端都認它，完整對照表見 syncToCloud 那段
+  //   「dirty 判準全檔【四處】」的註解。
   //   ⚠ 這裡【刻意不判斷 key 形狀】：saveNotes 一旦開始分流 key 形狀，就是下一個 bug 的位置。
-  //   因此 ec_notes|{通路}_growth 也會被登記，而且它【永遠不會被清掉】—— 清除只發生在「推送成功」，
-  //   而能走那道閘門的 key 一律是 ec_notes|{通路}|{月}|{半月} 格式，不可能命中 _growth
-  //   （_growth 走的是下方泛用 field 分支，不經閘門）。這是【已知且無害】的殘留：
-  //   看到 localStorage['ec_notes_dirty'] 裡有清不掉的 _growth，不是壞了，不要去「修」它。
+  //   因此 ec_notes|{通路}_growth 也會被登記，兩種 key 形狀混在同一個陣列裡，這是刻意的。
+  //   🔴 舊註解曾寫「_growth 永遠不會被清掉，因為它不可能命中閘門」——【那個理由是錯的】，不要照抄回去。
+  //     清除端是 syncToCloud 收尾那行 `ok.forEach(k=>{ if(k.startsWith('ec_notes|')) _notesDirtyDel(k) })`，
+  //     判準是 key 前綴、不是「有沒有走過閘門」，所以只要 _growth 真的推成功過一次就會被清掉。
+  //   _growth 現在的完整生命週期：saveNotes 登記 → 重整後由 _sweepAllLocalReportsIntoPending
+  //     依這份註冊表撿回 _pendingSyncKeys → 走泛用 field 分支推送 → 推成功後由上述收尾清除。
+  //     若看到某把 _growth 一直清不掉，代表它一直沒推成功（例如被 _momoFullPushDeleteGuard 擋下），
+  //     那是要去查的訊號，不是「已知無害的殘留」。
   _notesDirtyAdd(k);
   _showSyncBtn(shop);
   // 立即同步工作日誌摘要（不必等按 ☁ 同步雲端；silent 不顯示 toast 避免太吵）
@@ -10989,8 +11007,12 @@ function _momoCollectPending(shop){
   const items=[], seen=new Set();
   const add=(key,kind,val,over)=>{ if(seen.has(key))return; seen.add(key); const it={key,kind,localVal:val,localCount:(over&&over.count!=null?over.count:_momoCount(val))}; if(over&&over.stat) it.e001Stat=over.stat; items.push(it); };
   // syncToCloud 開頭那兩條 shop 專屬 extra（465-469）：MOMO 賣場通常為空
-  //   ⚠ ec_notes 的閘門條件與 syncToCloud 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`，全檔只有兩處）：
+  //   ⚠ ec_notes 的閘門條件與 syncToCloud 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`）：
   //     兩處不一致 ＝ 預覽說要推 N 筆、實際推 N±1 筆，而且不報錯。改一處就必須同時改另一處。
+  //   ⚠ dirty 判準全檔【四處】、分成兩組，本處是廣告調整組的②。完整對照表在 syncToCloud
+  //     那段同名註解裡（搜 `dirty 判準全檔【四處】`），刻意不在這裡重複一份，避免兩邊各自漂移。
+  //     另一組（③ _sweepAllLocalReportsIntoPending / ④ _momoSyncPendingCount）判準【刻意不同】：
+  //     它們吃 `ec_notes|` 前綴 + `/_growth$/`，不吃 `_nk`。不要為了「統一」把它們改成一樣。
   try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0&&_notesIsDirty('ec_notes|'+_nk)) add('ec_notes|'+_nk,'其他設定',notes); }catch{}
   try{ const edits=getEdits(shop); if(edits&&Object.keys(edits).length>0) add('ec_edits|'+shop,'其他設定',edits); }catch{}
   _pendingSyncKeys.forEach(pk=>{
