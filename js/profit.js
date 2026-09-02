@@ -408,6 +408,70 @@ function _notesIsDirty(k){
     return a.includes(k);
   }catch{ return true; }
 }
+// ══════ 編輯覆蓋值（ec_edits）的「真正本機編輯」註冊表（persisted，跨重整）══════
+//  形狀完全比照上方 _NOTES_DIRTY_LS 三支（本檔搜 `const _NOTES_DIRTY_LS`），三種狀態的
+//  fail-safe 方向【逐條相同】，理由見下方 _editsIsDirty 上的註解。
+//  為什麼需要：syncToCloud 那條 ec_edits extra 的唯一納入條件曾經是 Object.keys(edits).length>0，
+//    而值來自 getEdits（_profitMem 優先＝雲端訂閱灌進來的）→「雲端有資料」本身就會變成一筆
+//    推送任務，跟使用者有沒有編輯過完全無關；而且推的是雲端值，推「成功」後還會清掉待推標記。
+//    本註冊表就是那道缺失的「真的編輯過」判準，與 readEditsForPush（換來源）是一組，不可只做一半。
+//
+//  🔴🔴 這個 PR【沒有做】的部分，寫在這裡免得被下一個人當成已結案 🔴🔴
+//   ① 第三段的 dirty-scoped merge【尚未做】（下一個 PR）。ec_edits 目前仍是整包 setField
+//     last-write-wins，仍留在 _momoFullPushDeleteGuard 底下（本檔搜 `ec_edits|{通路} 也還沒走 merge`）。
+//     本 PR 只解「不該推的別推、要推的推對來源」，不解「兩人同時改同一個通路會互蓋」。
+//     ⚠ 附帶一提：commitEdit 清空最後一個覆蓋值時只 `delete edits[code][col]`、不刪 edits[code]，
+//       會留下空殼 {}；local={code:{}} 對上 cloud={code:{col:v}} 時 momoCloudDeleteCount 會算出
+//       willDelete=1、被守衛擋下。這是【既有行為】（守衛的 localV 一直讀 _mem→localStorage，
+//       本檔搜 `// 本機值（與推送同源）`），本 PR 不改變它，待第三段 merge 一併處理。
+//   ② 本 PR 上線【之前】就已經「編輯過但沒推上去」的使用者，他們的 localStorage 裡有值、
+//     但註冊表是空的 → 那些編輯【不會】被自動撿回來，必須再編輯一次（哪怕改成同樣的數字）
+//     才會登記 dirty。這是 dirty 註冊表這類方案的共同代價，不是 bug。
+const _EDITS_DIRTY_LS='ec_edits_dirty';   // JSON array：真正編輯過還沒推的 full key（ec_edits|{通路}）
+function _editsDirtyAdd(k){
+  // ⚠ 兩條失敗路徑都【不吞】：註冊表出事就等於這道救援網出事，必須留下訊號（比照 _notesDirtyAdd）。
+  try{
+    const raw=localStorage.getItem(_EDITS_DIRTY_LS);
+    let arr=[];
+    if(raw!==null){   // raw===null ＝ 從沒人編輯過的正常空狀態（判準與 _editsIsDirty 逐字一致，兩支對「不存在」的認定不能分歧）
+      let a, ok=true;
+      try{ a=JSON.parse(raw); }catch{ ok=false; }
+      if(ok && Array.isArray(a)) arr=a;
+      // 🔴 重建的代價與 _notesDirtyAdd 那段【完全相同】：損毀期間 _editsIsDirty 一律回 true（全推）＝
+      //   安全狀態；一旦這裡重建成「只含這一把」，註冊表又變回合法陣列，_editsIsDirty 對其他所有 key
+      //   立刻回 false —— 損毀之前那些還沒推上去的編輯就被靜默跳過了（fail-safe 轉 fail-unsafe）。
+      //   仍然選擇重建，是因為不重建的話註冊表永遠損毀、_editsIsDirty 永遠回 true ＝ 閘門等於沒做。
+      //   代價換成下面這行【刺眼的 console.error】：看到它就要人工確認有沒有覆蓋值漏上雲。
+      else console.error('[editsDirty] 註冊表內容損毀，已重建成只含這一把。先前未推送的編輯標記可能已遺失 —— 請人工比對 app/profit 確認舊的覆蓋值有沒有漏上雲。原始內容：',raw);
+    }
+    if(!arr.includes(k)){ arr.push(k); localStorage.setItem(_EDITS_DIRTY_LS,JSON.stringify(arr)); }
+  }catch(e){ console.error('[editsDirty] 寫入註冊表失敗，這把 key 的待同步標記沒存下來：',k,e); }   // localStorage 被擋 / 配額滿：重整後 _editsIsDirty 會回 false、syncToCloud 就不推它 ＝ 使用者改的數字上不了雲
+}
+function _editsDirtyDel(k){
+  try{
+    const raw=localStorage.getItem(_EDITS_DIRTY_LS);
+    const a=raw?JSON.parse(raw):[];
+    if(Array.isArray(a)&&a.includes(k)) localStorage.setItem(_EDITS_DIRTY_LS,JSON.stringify(a.filter(x=>x!==k)));
+  }catch{}   // 刪不掉只是下次多推一次（安全方向），不必吵
+}
+// 🔴 三種狀態的方向與 _notesIsDirty（本檔搜 `function _notesIsDirty`）【逐條相同】，理由也相同
+//   —— 失效後果不對稱：
+//   ⚠ 三種狀態必須分開判、不可合併成一個 fallback：
+//     raw===null      註冊表根本不存在 ＝ 從沒人編輯過，是正常空狀態、不是失敗 → false
+//                     （回 true 等於每次都推，本閘門等於沒做）
+//     非陣列 / throw  內容損毀或 localStorage 被擋 → true（照推）
+//                     回 false 是「不推」＝使用者改的數字靜默上不了雲，是【不可觀測】的失敗；
+//                     回 true 最壞只是多推一次自己的值，而且推送來源已經是 readEditsForPush
+//                     （localStorage），不會像舊的 getEdits 那樣把雲端值推回雲端。
+function _editsIsDirty(k){
+  try{
+    const raw=localStorage.getItem(_EDITS_DIRTY_LS);
+    if(raw===null) return false;
+    const a=JSON.parse(raw);
+    if(!Array.isArray(a)) return true;
+    return a.includes(k);
+  }catch{ return true; }
+}
 // ══════ 品號級 dirty 註冊表（persisted，跨重整）══════
 //  用途：給 dirty-scoped merge 用（模式與資料流見同檔 momoSyncCostByOrigin + momoMergeByKey，
 //    本檔搜 `function momoMergeByKey`）。上面那份 _NOTES_DIRTY_LS 記的是「哪一把 key 被編輯過」，
@@ -1132,7 +1196,8 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     //   會被原封不動寫回 app/profit（理由見 _NOTES_DIRTY_LS 那段註解）。
     //   ⚠ 條件字串與 _momoCollectPending 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`）：
     //     兩處不一致 ＝ 預覽說要推 N 筆、實際推 N±1 筆，而且不報錯。本檔已因「兩處只改一處」出過事（PR #93、預覽騙人那條）。
-    //   ⚠ dirty 判準全檔【四處】（舊註解寫「全檔只有兩處」已過期），分成兩組、組內必須一致、組間刻意不同。
+    //   ⚠ dirty 判準全檔【六處】（舊註解寫過「兩處」「四處」，都已過期），分成三組、
+    //     組內必須一致、組間刻意不同。
     //     ⚠ grep `_notesIsDirty(` 只會找到【三處】：④ 為了避免逐 key 讀 localStorage，把同一套判準
     //       內聯成該函式區域的 notesDirtyHas（搜 `const notesDirtyHas`）。改 dirty 語意時四處都要動。
     //     ── 廣告調整組（key＝ec_notes|{通路}|{月}|{半月}，判準 `'ec_notes|'+_nk`）──
@@ -1141,17 +1206,40 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     //     ── 商品調整組（key＝ec_notes|{通路}_growth，判準 `ec_notes|` 前綴 + `/_growth$/`）──
     //       ③ _sweepAllLocalReportsIntoPending 跨重整把 dirty 的 _growth 撿回 _pendingSyncKeys
     //       ④ _momoSyncPendingCount            ③的 MOMO 同步鈕亮暗鏡像（內聯 notesDirtyHas，判準與③相同）
+    //     ── 編輯覆蓋值組（key＝ec_edits|{通路}，判準 `_editsIsDirty('ec_edits|'+shop)`，註冊表 ec_edits_dirty）──
+    //       ⑤ 本函式下方那條 ec_edits extra    推送端閘門（來源 readEditsForPush，【不是】getEdits）
+    //       ⑥ _momoCollectPending 的同一條      ⑤的同步預覽端鏡像，【必須逐字相同】
+    //     ⚠ ⑤⑥【不進 sweep、也不進 _momoSyncPendingCount】：ec_edits 完全不經 _pendingSyncKeys，
+    //       只靠本函式的 shop extra 進 tasks，所以它沒有③④那種「跨重整撿回」的對應物 ——
+    //       重整後只要 localStorage 與註冊表都還在，下一次按同步就會重新走⑤，不需要 sweep。
     //     組間判準不同【不是漏改】：①推的值來自 getNotes（_profitMem 優先＝app/profit 與封存分片的合併
     //     結果），所以需要閘門擋住「切到已封存月份、按一下同步就把分片內容整批寫回 app/profit」；
-    //     ③④撿的 _growth 走的是泛用 field 分支，值來自 localStorage，沒有分片合併問題。
+    //     ③④撿的 _growth 走的是泛用 field 分支，值來自 localStorage，沒有分片合併問題；
+    //     ⑤⑥推的值來自 readEditsForPush（localStorage，刻意不讀 _profitMem），閘門擋的是
+    //     「雲端有資料就變成推送任務」。三組各有各的病因，不要為了「統一」把判準合併。
     //     把③④改成也吃 `_nk`，等於讓封存月份繞過①那道閘門 —— 不要這樣做。
     //   ⚠ 跳過一定要留下可查紀錄，否則跟「資料靜默消失」分不出來。
     if(Object.keys(notes).length>0){
       if(_notesIsDirty('ec_notes|'+_nk)){ taskKeys.add('ec_notes|'+_nk); tasks.push({key:'ec_notes|'+_nk,run:()=>window.__cloudProfit.setField('ec_notes|'+_nk,notes)}); }
       else { skippedNotDirty.push('ec_notes|'+_nk); console.log('[syncToCloud] ec_notes 未編輯過、跳過推送（避免把封存分片的內容寫回 app/profit）：','ec_notes|'+_nk); }
     }
-    const edits=getEdits(shop);
-    if(Object.keys(edits).length>0){ taskKeys.add('ec_edits|'+shop); tasks.push({key:'ec_edits|'+shop,run:()=>window.__cloudProfit.setField('ec_edits|'+shop,edits)}); }
+    // 🔴 閘門 + 來源，兩者是一組，不可只改一邊（完整理由見 readEditsForPush 上方那段）：
+    //   來源：readEditsForPush（_mem → localStorage，【不讀 _profitMem】）＝「這台機器上的編輯」。
+    //   閘門：_editsIsDirty ＝「真的被 saveEdits 編輯過、還沒推成功」。
+    //   舊碼用 getEdits + 只看 Object.keys().length>0 → 雲端有資料就變推送任務，跟有沒有編輯無關；
+    //   而且推的是雲端值，推「成功」後還會清掉 dirty，把救援線索一起抹掉。
+    //   ⚠ 條件字串與 _momoCollectPending 那份【必須逐字相同】（搜 `_editsIsDirty('ec_edits|'+shop)`）：
+    //     兩處不一致 ＝ 預覽說要推 N 筆、實際推 N±1 筆，而且不報錯（PR #93 的形狀）。
+    //   ⚠ 跳過一定要留下可查紀錄，否則跟「資料靜默消失」分不出來。
+    //   ⚠ 下面那行 taskKeys.add 目前【沒有作用】：ec_edits 不進 _pendingSyncKeys，所以下方
+    //     `_pendingSyncKeys.forEach` 的 `taskKeys.has(pk)` 去重永遠碰不到它。保留它是為了與上面
+    //     ec_notes 那條對稱；日後若有人把 ec_edits 加進 sweep，這行才會【首次】真正生效，
+    //     而屆時它的正確性從未被驗過 —— 那時請當成新行為重新驗，不要假設它一直在運作。
+    const edits=readEditsForPush(shop);
+    if(Object.keys(edits).length>0){
+      if(_editsIsDirty('ec_edits|'+shop)){ taskKeys.add('ec_edits|'+shop); tasks.push({key:'ec_edits|'+shop,run:()=>window.__cloudProfit.setField('ec_edits|'+shop,edits)}); }
+      else { skippedNotDirty.push('ec_edits|'+shop); console.log('[syncToCloud] ec_edits 未編輯過、跳過推送（避免把雲端值原封推回雲端）：','ec_edits|'+shop); }
+    }
     // 遍歷所有 pending keys 分類：
     //   ec|filemeta|... = filemeta，故意不上雲 → skippedByDesign（安靜）
     //   ec|... 其他      = 報表 key，payload 要是物件才推；讀不到/損毀 → skippedProblem（要講）
@@ -1293,6 +1381,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     //     同一次迭代 → 結構上無法只清一邊。不要把品號級那句搬進 syncNotesGrowth
     //     （理由見該函式尾端 (e) 那段：搬回去會製造「key 級沒清、品號級清了」的難查狀態）。
     ok.forEach(k=>{ if(k.startsWith('ec_notes|')){ try{ _notesDirtyDel(k); }catch{} try{ _notesItemsDirtyClear(k); }catch{} } });   // 真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
+    ok.forEach(k=>{ if(k.startsWith('ec_edits|')){ try{ _editsDirtyDel(k); }catch{} } });   // 編輯覆蓋值同理：真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
@@ -4394,12 +4483,108 @@ function getEdits(shop){
   try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
   try{return JSON.parse(localStorage.getItem(k)||'{}');}catch{return{};}
 }
+// ── 推送端專用的 ec_edits 讀取（與顯示端 getEdits【刻意不同源】，這不是重複）──
+//  getEdits（上方）讀取序是 _profitMem → _mem → localStorage，第一順位是【雲端訂閱灌進來的值】。
+//  這裡【刻意跳過 _profitMem】，只讀 _mem → localStorage，理由三條，改之前先讀完：
+//   (1) 推的必須是「這台機器上的編輯」，不是「雲端現值」。saveEdits 從不呼叫 _markPending，
+//       所以 __profitShouldSkipCloudOverwrite（本檔搜該名）對 ec_edits 的唯一保護是
+//       _shopJustSaved 的 5 秒窗；超過 5 秒，只要有人動 app/profit 任何欄位，訂閱就會把
+//       Store._profitMem['ec_edits|…'] 整包換成雲端值 —— 使用者剛打的數字從記憶體消失，
+//       localStorage 那份還在但 getEdits 讀不到。用 getEdits 推＝把雲端值原封推回雲端，
+//       推「成功」之後還會清掉 dirty，連救援線索一起抹掉。
+//   (2) 與 _momoFullPushDeleteGuard 的 localV【同源】。那裡讀的是 _mem → localStorage
+//       （本檔搜 `// 本機值（與推送同源）`），而舊的 getEdits 讀 _profitMem —— 那行註解
+//       對 ec_edits 一直是【謊言】：守衛看到 localStorage 的空、推送看到 _profitMem 的雲端值，
+//       於是守衛誤報「會刪雲端 N 筆」。改成同源之後，守衛比的與推的是同一份值。
+//   (3) 顯示端【故意維持原樣】：畫面要顯示「雲端＋本機的合併現況」，跨裝置才看得到同事的覆蓋值。
+//       兩者不同源是設計，不是待統一的重複。🔴 不要為了「一致」把 getEdits 也改成讀 localStorage，
+//       那會讓沒在這台機器編輯過的人看不到任何覆蓋值。
+//  ⚠【_mem 這一層目前是死碼】，保留它只為與守衛 1084 那行【形式】對齊：
+//    ec_edits 全檔沒有任何地方寫 Store._mem —— saveEdits 只寫 localStorage + _profitMem、
+//    Store._mem 只裝 app/main（不含 app/profit 的 key）、sweep 的補水分支也不含 ec_edits|。
+//    所以實務上這支等於「只讀 localStorage」。
+//    🔴 若日後有人讓某條路徑寫 Store._mem['ec_edits|…']（例如把 ec_edits 加進 sweep 的補水），
+//      這一層會突然活過來、推送來源【無聲改變】，而且沒有任何測試會抓到。動到那裡時請一併回來看這裡。
+//  ⚠ 回傳值必須是【可安全 mutate 的】：getEdits 回傳的是 _profitMem 的活參照（與 getNotes 的
+//    JSON 深拷貝形成對比），呼叫端 commitEdit 就地改它。本函式兩條路徑都交出新物件
+//    （_mem 那條明確深拷、localStorage 那條天然是 JSON.parse 的新物件），不把共享狀態交出去。
+//  ⚠ 讀不到一律回 {}（不是 null）：呼叫端用 Object.keys(...).length>0 判斷要不要建推送任務，
+//    回 null 會炸。localStorage 沒有這把 key ＝ 這台機器沒編輯過 ＝ 沒有東西該推，回 {} 正確。
+//  🔴 必須用 function 宣告，【不要改成 const 箭頭函式】：本函式被 syncToCloud（本檔約 1150 行，
+//    定義在它上面數千行之前）呼叫，靠的是函式宣告提升；改成 const 會進 TDZ、syncToCloud 當場炸。
+function readEditsForPush(shop){
+  const k='ec_edits|'+shop;
+  try{ if(typeof Store!=='undefined' && Store._mem && Store._mem[k]) return JSON.parse(JSON.stringify(Store._mem[k])); }catch{}
+  try{ const raw=localStorage.getItem(k); if(raw) return JSON.parse(raw); }catch{}
+  return {};
+}
 function saveEdits(shop,edits){
   window._shopJustSaved=Date.now();
   const k='ec_edits|'+shop;
-  try{localStorage.setItem(k,JSON.stringify(edits));}catch{}
+  // ── localStorage 寫入：寫完【讀回驗證】，比照 saveNotes（本檔搜 `_lsOk`）──
+  //   🔴 這一步是「推送來源改讀 localStorage」的【必要配套】，不是順手加的：
+  //     推送端現在讀 localStorage（readEditsForPush），寫失敗卻還登記 dirty
+  //     ＝ 下次同步拿一份【舊的 / 不存在的】值去蓋雲端。
+  //   為什麼不只 try/catch：規範說配額滿丟 QuotaExceededError，但本檔 _notifyLsSaveFail 那段
+  //     註解寫的是「配額滿了會靜默失敗」，無法從程式碼確認當初遇到的是哪一種。讀回比對
+  //     【不依賴瀏覽器如何回報】—— 丟例外、靜默不存、只存一半，讀回來不等於寫進去的就判失敗。
+  const _payload=JSON.stringify(edits);
+  let _lsOk=false, _lsErr=null;
+  try{
+    localStorage.setItem(k,_payload);
+    _lsOk=(localStorage.getItem(k)===_payload);
+    if(!_lsOk) _lsErr=new Error('setItem 沒有丟例外，但讀回的內容不符（可能靜默失敗，或另一個分頁同時寫了同一把 key）');
+  }catch(e){ _lsOk=false; _lsErr=e; }
+  //   ⚠ _profitMem 照樣寫、【刻意不回滾】：畫面要立刻反映使用者剛改的數字（取捨比照 saveNotes）。
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=edits;}catch{}
+  //   🔴 只有寫入確認成功才登記 dirty。失敗還登記 ＝ 推送端會拿舊值蓋雲端（見上方）。
+  //     ⚠ 只「不新增」，【絕不移除】既有 dirty 條目 —— 之前成功存過的編輯仍然該推。
+  if(_lsOk) _editsDirtyAdd(k);
+  else _notifyEditsSaveFail(shop, _lsErr);
   _showSyncBtn(shop);
+}
+// ── 編輯覆蓋值（ec_edits）沒存進 localStorage 的通報 ──
+//  ⚠ 刻意【不用 showToast】：saveEdits 由 commitEdit 呼叫，而數字是從 #ads-edit-overlay 那個
+//    彈窗送出的；.toast 的 z-index 是 200、彈窗層是 3000 → toast 會被壓在後面看不到
+//    （同一個坑見 _notifyNotesSaveFail 上方的 (1)）。走 App.showAlertModal（.modal-backdrop 99999）。
+//  ⚠ modal 不可用時【只 console.error、不 fallback toast】：看不見的訊息等於沒有訊息，
+//    與其給一個蓋在彈窗後面的假安慰，不如把它留在 Console 讓查的人找得到。
+//  ⚠ 訊息不出現 key 名與函式名；技術細節走 console.error 與 detail 欄。
+//  🔴 一次 session 只彈一次窗，之後【只】console.error（比照上方 _lsFailNotified 的形狀，
+//    但這裡連 toast 都不降級，理由同上）。為什麼只彈一次：
+//      訊息內容每次都相同，而 commitEdit 是【每改一格數字就跑一次】—— 連改五格就是五次失敗。
+//      重複彈窗會擋住使用者正在進行的輸入。第一次已經告知「要清空間並重新輸入」，
+//      後續的重複沒有新資訊，只有干擾。
+//    ⚠ showAlertModal 內建的 dedupe 只有 2.5 秒，擋不住「連改十幾秒」這種常態操作，
+//      所以必須自己記一個旗標，不能只靠 dedupeKey。
+//  ⚠ 旗標【只存在記憶體、不寫 localStorage】：這條路徑觸發的前提就是 localStorage 寫不進去，
+//    把旗標寫進去會是同一個失敗。重整後歸零是刻意的 —— 新的一次 session 值得再警告一次。
+let _editsFailNotified = false;   // 同一次 session 只彈一次窗；重整歸零（刻意不持久化，理由見上）
+function _notifyEditsSaveFail(shop, err){
+  const quota=_isQuotaErr(err);
+  console.error('[saveEdits] 編輯覆蓋值沒有存進 localStorage：ec_edits|'+shop, err);
+  const title=quota?'本機空間已滿，這次的數字沒存起來':'這次的數字沒存進這台電腦';
+  if(_editsFailNotified){
+    console.error('[saveEdits] 同一次 session 的第 2 次以後的存檔失敗，不再彈窗（訊息與第一次相同、會擋住輸入）：', title);
+    return;
+  }
+  const message=
+    String(shop||'')+' 的數字覆蓋【沒有】存進這台電腦。\n'+
+    '畫面上還看得到它，但那只是暫存 —— 重整或關掉分頁就會消失。\n\n'+
+    '按「☁ 同步雲端」也救不了它 —— 數字覆蓋的同步是讀這台電腦上的存檔，不是讀畫面上的值。\n'+
+    '請先把剛改的數字記下來，清出空間之後重新輸入一次。\n\n'+
+    '清空間的方式：關掉其他分頁、或清掉瀏覽器裡這個網站的舊快取。\n\n'+
+    '⚠ 這個提醒這次開啟頁面只會出現一次。在你清出空間之前，接下來改的數字【也都不會存起來】，\n'+
+    '　 但不會再跳窗（會擋住你打字），只會記在 F12 的 Console 裡。\n\n'+
+    '⚠ 如果「☁ 同步雲端」按鈕上還有數字，那是先前存成功的東西，\n'+
+    '　 按下去不會把剛剛這一次救回來，也不要因為它顯示同步成功就以為沒事了。';
+  const detail=(err&&(err.name||err.message))?('錯誤：'+(err.name||'')+' '+(err.message||'')):'';
+  if(window.App&&typeof App.showAlertModal==='function'){
+    _editsFailNotified=true;   // ⚠ 只有【真的彈出去】才立旗標；modal 不可用時不立，下次還有機會彈
+    App.showAlertModal({ title:title, message:message, detail:detail, kind:'error', dedupeKey:'editsSaveFail' });
+    return;
+  }
+  console.error('[saveEdits] App.showAlertModal 不可用，這次的存檔失敗只留在 Console：', title);
 }
 function getNotes(shop){
   const k='ec_notes|'+shop;
@@ -4445,7 +4630,7 @@ function saveNotes(shop,notes,code){
     // 掛進待同步集合，讓「☁ 同步雲端」推得到（商品調整 _growth 原本完全沒有上雲的路）
     _pendingSyncKeys.add(k);
     // persisted 待同步標記（跨重整）。兩組讀取端都認它，完整對照表見 syncToCloud 那段
-    //   「dirty 判準全檔【四處】」的註解。
+    //   「dirty 判準全檔【六處】」的註解。
     //   ⚠ 這裡【刻意不判斷 key 形狀】：saveNotes 一旦開始分流 key 形狀，就是下一個 bug 的位置。
     //   因此 ec_notes|{通路}_growth 也會被登記，兩種 key 形狀混在同一個陣列裡，這是刻意的。
     //   🔴 舊註解曾寫「_growth 永遠不會被清掉，因為它不可能命中閘門」——【那個理由是錯的】，不要照抄回去。
@@ -11343,12 +11528,22 @@ function _momoCollectPending(shop){
   // syncToCloud 開頭那兩條 shop 專屬 extra（465-469）：MOMO 賣場通常為空
   //   ⚠ ec_notes 的閘門條件與 syncToCloud 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`）：
   //     兩處不一致 ＝ 預覽說要推 N 筆、實際推 N±1 筆，而且不報錯。改一處就必須同時改另一處。
-  //   ⚠ dirty 判準全檔【四處】、分成兩組，本處是廣告調整組的②。完整對照表在 syncToCloud
-  //     那段同名註解裡（搜 `dirty 判準全檔【四處】`），刻意不在這裡重複一份，避免兩邊各自漂移。
+  //   ⚠ dirty 判準全檔【六處】、分成三組。本處【同時】是廣告調整組的②與編輯覆蓋值組的⑥。
+  //     完整對照表在 syncToCloud 那段同名註解裡（搜 `dirty 判準全檔【六處】`），
+  //     刻意不在這裡重複一份，避免兩邊各自漂移。
   //     另一組（③ _sweepAllLocalReportsIntoPending / ④ _momoSyncPendingCount）判準【刻意不同】：
   //     它們吃 `ec_notes|` 前綴 + `/_growth$/`，不吃 `_nk`。不要為了「統一」把它們改成一樣。
   try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0&&_notesIsDirty('ec_notes|'+_nk)) add('ec_notes|'+_nk,'其他設定',notes); }catch{}
-  try{ const edits=getEdits(shop); if(edits&&Object.keys(edits).length>0) add('ec_edits|'+shop,'其他設定',edits); }catch{}
+  //   ⚠ ec_edits 的來源與閘門與 syncToCloud 那份【必須逐字相同】（搜 `_editsIsDirty('ec_edits|'+shop)`）：
+  //     兩處不一致 ＝ 預覽說要推 N 筆、實際推 N±1 筆，而且不報錯（PR #93 的形狀）。
+  //   ⚠ 跳過時也要留痕：本函式沒有 skippedNotDirty 這種桶子（不加就是那一列直接從預覽消失，
+  //     使用者看不出為什麼），所以至少 console.log 一行，文字與推送端那句一致，兩邊都查得到。
+  try{ const edits=readEditsForPush(shop);
+    if(edits&&Object.keys(edits).length>0){
+      if(_editsIsDirty('ec_edits|'+shop)) add('ec_edits|'+shop,'其他設定',edits);
+      else console.log('[syncToCloud] ec_edits 未編輯過、跳過推送（避免把雲端值原封推回雲端）：','ec_edits|'+shop);
+    }
+  }catch{}
   _pendingSyncKeys.forEach(pk=>{
     if(pk.startsWith('__shop__|')) return;               // marker，不推
     if(pk.startsWith('ec|filemeta|')) return;            // 故意不上雲
