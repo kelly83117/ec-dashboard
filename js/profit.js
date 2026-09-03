@@ -593,6 +593,96 @@ window.__notesItemsDirtyGet   = _notesItemsDirtyGet;
 window.__notesItemsDirtyAdd   = _notesItemsDirtyAdd;
 window.__notesItemsDirtyClear = _notesItemsDirtyClear;
 
+// ══════ 編輯覆蓋值（ec_edits）的品號級 dirty 註冊表（persisted，跨重整）══════
+//  形狀與三態語意【逐字比照】上方 _NOTES_ITEMS_DIRTY_LS 那一組（本檔搜 `const _NOTES_ITEMS_DIRTY_LS`）。
+//  刻意寫成獨立三支、不與 ec_notes 共用一份實作：兩者的 localStorage key 不同、清除時機不同，
+//    抽共用得多一個「哪一份註冊表」的參數，那個參數會變成下一個「傳錯一次就靜默走鐘」的位置。
+//    形式重複在這裡是刻意的成本，換的是兩條線各自可以獨立改而不互相波及。
+//
+//  結構（localStorage['ec_edits_items_dirty']）：
+//    { "ec_edits|玩樂": ["F220","E150"], "ec_edits|好麻吉": ["A001"] }
+//
+//  🔴🔴 三態回傳，Get 回的 null【絕對不可以】當成 [] 處理 —— 理由與 ec_notes 那份完全相同 🔴🔴
+//    null   ＝ 註冊表讀不到 / 內容損毀 / localStorage 被擋。【不是】「沒碰過」。
+//    []     ＝ 讀得到、確定沒碰過。
+//    [...]  ＝ 讀得到、碰過這些品號。
+//    ⚠ 呼叫端收到 null 必須中止並明確報錯（見 _editsPushGate 的 level:'problem'），
+//      不可以補 `?? []` / `|| []` 讓程式跑得下去 —— 程式跑得下去正是這個 bug 的症狀。
+//
+//  ── ec_edits 與 ec_notes 在【爆炸半徑】上的差異（決定為什麼這一層更必要）──
+//    ec_notes 一把 key 涵蓋一個期間；ec_edits|{通路} 一把涵蓋該通路【所有期間所有品號】。
+//    沒有這一層就只能整包 setField ＝ 兩個人同時改同一個通路必定互蓋，而且不報錯。
+const _EDITS_ITEMS_DIRTY_LS='ec_edits_items_dirty';
+// 讀。不傳 fullKey → 回整份 map（除錯用 + 升級補登記用）。三態語意見上方：null 不可當 []。
+function _editsItemsDirtyGet(fullKey){
+  let raw;
+  try{ raw=localStorage.getItem(_EDITS_ITEMS_DIRTY_LS); }
+  catch(e){ console.error('[editsItemsDirty] localStorage 讀取失敗，回 null（呼叫端必須中止並報錯，不可當成空）：',e); return null; }
+  if(raw===null) return fullKey===undefined ? {} : [];   // 註冊表不存在 ＝ 從沒人碰過，是正常空狀態、不是失敗
+  let m;
+  try{ m=JSON.parse(raw); }
+  catch(e){ console.error('[editsItemsDirty] 註冊表 JSON 損毀，回 null（呼叫端必須中止並報錯，不可當成空）。原始內容：',raw); return null; }
+  if(m===null||typeof m!=='object'||Array.isArray(m)){ console.error('[editsItemsDirty] 註冊表不是物件，回 null（呼叫端必須中止並報錯，不可當成空）。原始內容：',raw); return null; }
+  if(fullKey===undefined) return m;
+  const a=m[fullKey];
+  if(a===undefined) return [];                           // 註冊表本身是好的、只是這把 key 沒被碰過 → 真的空
+  if(!Array.isArray(a)){ console.error('[editsItemsDirty] 該 key 的項目不是陣列，回 null（呼叫端必須中止並報錯，不可當成空）：',fullKey,a); return null; }
+  return a;
+}
+// 加一個品號。
+//   ⚠ 損毀時【刻意不重建】：重建會把「損毀 → null → 呼叫端中止」變成「合法 → [] → 靜默不推」，
+//     剛好繞過上面整段防護。寫不進去就留下 console.error，讓 Get 那端繼續回 null。
+//     （這與 _editsDirtyAdd 的「兩害相權取重建」相反，因為那份的 fallback 方向是安全的、這份不是。）
+function _editsItemsDirtyAdd(fullKey, code){
+  if(!fullKey||code===undefined||code===null) return;
+  try{
+    const m=_editsItemsDirtyGet();
+    if(m===null){ console.error('[editsItemsDirty] 註冊表損毀，這次的品號標記沒存下來（刻意不重建，理由見函式上方）：',fullKey,code); return; }
+    const s=new Set(Array.isArray(m[fullKey])?m[fullKey]:[]);
+    if(s.has(String(code))) return;
+    s.add(String(code));
+    m[fullKey]=[...s];
+    localStorage.setItem(_EDITS_ITEMS_DIRTY_LS,JSON.stringify(m));
+  }catch(e){ console.error('[editsItemsDirty] 寫入註冊表失敗，這個品號的待同步標記沒存下來：',fullKey,code,e); }
+}
+// 清。codes 省略 → 清掉該 fullKey 整條；給 codes → 只清那幾個品號。
+//   清完該 key 空了就把整條移除，不留空陣列無限累積。
+function _editsItemsDirtyClear(fullKey, codes){
+  if(!fullKey) return;
+  try{
+    const m=_editsItemsDirtyGet();
+    if(m===null){ console.error('[editsItemsDirty] 註冊表損毀，這次的清除沒生效（刻意不重建）：',fullKey,codes); return; }
+    if(!Object.prototype.hasOwnProperty.call(m,fullKey)) return;
+    if(!codes){ delete m[fullKey]; }
+    else{
+      const rm=new Set((Array.isArray(codes)?codes:[codes]).map(String));
+      const left=(Array.isArray(m[fullKey])?m[fullKey]:[]).filter(c=>!rm.has(String(c)));
+      if(left.length) m[fullKey]=left; else delete m[fullKey];
+    }
+    localStorage.setItem(_EDITS_ITEMS_DIRTY_LS,JSON.stringify(m));
+  }catch(e){ console.error('[editsItemsDirty] 清除註冊表失敗：',fullKey,codes,e); }
+}
+// Console 測試/除錯用（比照上方 window.__notesItemsDirty* 的慣例）。
+//   ⚠ 這一個 commit【只定義、零呼叫端】：saveEdits / commitEdit / syncToCloud / 同步預覽
+//     一行都沒動，接線是後續 commit 的事。所以在有人呼叫 Add 之前，ec_edits_items_dirty
+//     這把 localStorage key 根本不會被建立。
+window.__editsItemsDirtyGet   = _editsItemsDirtyGet;
+window.__editsItemsDirtyAdd   = _editsItemsDirtyAdd;
+window.__editsItemsDirtyClear = _editsItemsDirtyClear;
+
+// ══════ 「這把 ec_edits key 走 dirty-scoped merge 嗎」的【唯一判準】══════
+//  與下方 _notesUsesMerge 對稱。全檔呼叫點一律用這一支，不要各自寫 startsWith
+//  （搜 `_editsUsesMerge(`）：
+//    ① _momoFullPushDeleteGuard 的排除條件（merge 不整包覆蓋 → 不套 willDelete）
+//    ② 未來若有第二種 ec_edits key 形狀，判準只有這裡要改
+//  為什麼「`ec_edits|` 前綴」這個判準是安全的：ec_edits 全檔只有一種 key 形狀
+//    （'ec_edits|'+shop，見 getEdits / readEditsForPush / saveEdits 三處各自組的字串），
+//    而 saveEdits 全專案只有一個呼叫點（commitEdit）。
+//  🔴 用 function 宣告不用 const 箭頭：本支被 _momoFullPushDeleteGuard（本檔約 1300 行）呼叫，
+//    它定義在本行【之後】數百行，靠函式宣告提升；改成 const 會進 TDZ 風險區
+//    （理由同本檔 readEditsForPush 上方那段）。
+function _editsUsesMerge(k){ return typeof k==='string' && k.startsWith('ec_edits|'); }
+
 // ══════ 「這把 ec_notes key 走 dirty-scoped merge 嗎」的【唯一判準】══════
 //  🔴 全檔【四個呼叫點】一律用這一支，不要各自寫 startsWith / 正規表示式（搜 `_notesUsesMerge(`）：
 //    ① _momoFullPushDeleteGuard 的排除條件（merge 不整包覆蓋 → 不套 willDelete）
