@@ -1361,7 +1361,7 @@ async function _momoFullPushDeleteGuard(taskKeys){
   if(keys.some(isAppProfitField)){ try{ const s=await window.__cloudProfit.getDoc(); appProfit=(s&&s.exists&&s.exists())?(s.data()||{}):{}; }catch(e){ appProfit=null; } }
   for(const k of keys){
     if(k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_moplus_origins|') || k==='ec_momo_cost_by_origin' || k.startsWith('ec_momo_optlog|')
-       || _notesUsesMerge(k)) continue;   // 各有自己的機制：optlog 與 ec_notes（商品調整+廣告調整）走 read-merge-write（不刪除同事的、不需 willDelete 擋）；products/origins 版本比對；cost merge；蝦皮報表另議
+       || _notesUsesMerge(k) || _editsUsesMerge(k)) continue;   // 各有自己的機制：optlog 與 ec_notes / ec_edits 走 read-merge-write（不刪除同事的、不需 willDelete 擋）；products/origins 版本比對；cost merge；蝦皮報表另議
     //   🔴 2026-09-03 起 ec_notes【整類】排除（判準統一走 _notesUsesMerge），不再只排除 _growth。
     //     為什麼廣告調整也必須排除（不是順手）：本守衛算 willDelete 用的是 momoCloudDeleteCount，
     //     它遞迴到 adjustments 陣列、用 _momoStableStr（整個物件序列化）當元素身分 →
@@ -1371,7 +1371,21 @@ async function _momoFullPushDeleteGuard(taskKeys){
     //     改字是最常見的操作，所以那不是偶發誤報，是【永久卡死】。
     //     而 merge 本身不可能刪掉同事的資料：momoMergeByKey 只在該品號進了 dirty 時才表態，
     //     其餘一律 `Object.assign({}, cloud)` 原封保留 —— 比 willDelete 這種粗篩更精準。
-    //   ⚠ ec_edits|{通路} 也還沒走 merge（第三塊才處理），同樣留在防護底下。
+    //   🔴 ec_edits|{通路} 於本次（第三塊）一併排除，判準走 _editsUsesMerge。
+    //     ── 移出之後【失去】的保護，講清楚以免日後有人以為是漏改 ──
+    //       本守衛對 ec_edits 實際擋下的是兩種「本機比雲端少」：
+    //       (i) 品號級（本機沒有某品號、雲端有）→ merge 完全補上，而且更精準：
+    //           沒進 dirty 的品號一律 `Object.assign({}, cloud)` 原封保留，不需要粗篩。
+    //       (ii) 欄位級（同一品號本機的 inner map 比雲端少一欄）→ merge【補不上】：
+    //           momoMergeByKey 的 `out[k]=local[k]` 是整包替換 inner map。
+    //           今天不成立（可編輯欄位只有 adsFee 一個，editTd/startEdit 全檔只傳 'adsFee'），
+    //           但若日後新增第二個可編輯欄位，這就是真正的缺口 —— 屆時要把 dirty 做到
+    //           「品號+欄位」層，不是把這把 key 塞回守衛底下（那會再次永久卡死，理由同上）。
+    //     ── 順帶效果：現在被守衛卡住那批會開始推得動 ──
+    //       commitEdit 清空最後一個覆蓋值時只 `delete edits[code][col]`、留下空殼 {}，
+    //       local={code:{}} 對上 cloud={code:{col:v}} 會被 momoCloudDeleteCount 算成
+    //       willDelete=1 → 那把 key 一直被 splice 掉、ec_edits_dirty 永遠清不掉。
+    //       移出之後它們第一次推得上去，代價是那些空殼 {} 會寫進 app/profit（無害但會累積）。
     // 本機值（與推送同源）
     let localV=null;
     try{
