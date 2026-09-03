@@ -2862,8 +2862,13 @@ Object.assign(App, {
       Store.set('ec.pricing.rates', saved);
       document.getElementById('pr-rates-panel').style.display = 'none';
       self.render();
-      const t = document.getElementById('toast');
-      if (t) { t.textContent = '費率已儲存'; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2000); }
+      // 2026-09-03：原本這裡繞過 showToast() 直接操作 #toast，但【沒有 clearTimeout(t._timer)】
+      //   —— 前一則 toast 還沒到期的計時器會把這則「費率已儲存」提早收掉。改回走 showToast()，
+      //   它會清掉舊計時器。改動之後 toast 一定看得見（z-index 提到 --z-toast），
+      //   這個既有的時序 bug 會比以前更常被踩到，所以順手一起修。
+      //   ⚠ 刻意不帶 type：原本手寫那段只加 'show'、沒加 'success'，底色是 var(--text) 深色。
+      //     帶 'success' 會把底色改成綠色 —— 那是外觀改動，不在這次範圍內。
+      showToast('費率已儲存');
     });
     document.getElementById('pr-rates-reset')?.addEventListener('click', () => {
       if (!confirm('確定還原所有分頁為預設費率？')) return;
