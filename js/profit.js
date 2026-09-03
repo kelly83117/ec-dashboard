@@ -683,6 +683,36 @@ window.__editsItemsDirtyClear = _editsItemsDirtyClear;
 //    （理由同本檔 readEditsForPush 上方那段）。
 function _editsUsesMerge(k){ return typeof k==='string' && k.startsWith('ec_edits|'); }
 
+// ══════ 餵給 momoMergeByKey 之前，把 dirty 清單濾成「本機真的有這個品號」══════
+//  🔴 效果 ＝【關掉 momoMergeByKey 對 ec_edits 的刪除分支】。
+//    momoMergeByKey 的第三參數若含有「local 沒有 hasOwnProperty」的 key，它會走
+//    `else delete out[k]`（本檔搜 `function momoMergeByKey`）把該 key 從雲端刪掉。
+//    那個語意對 ec_notes 是【正當的】（deleteProfitNote 真的會 `delete notes[code]`，
+//    「碰過但本機沒有」＝「我刪的」），所以 momoMergeByKey 本身一個字都不改。
+//  ── 為什麼 ec_edits 要關掉它 ──
+//    (1) ec_edits 沒有任何程式碼會從 map 移除品號 key：commitEdit 清空覆蓋值時只
+//        `delete edits[code][col]`、不刪 edits[code]（本檔搜 `function commitEdit`），
+//        所以 delete 分支在正常流程下【本來就不可達】。
+//    (2) 它唯一會被觸發的路徑是「saveEdits 存檔失敗 + 失敗照登 dirty」：那時候
+//        localStorage 裡是【沒有這次編輯的舊值】，該品號可能整個不存在 → delete 分支
+//        會把【同事對該品號的覆蓋值】從雲端刪掉。使用者只是存檔失敗，代價卻落在別人身上。
+//    (3) 關掉之後，存檔失敗的最壞結果回到「這次編輯沒推上去」，而那件事有
+//        _notifyEditsSaveFail 的彈窗在通報，不是靜默失敗。
+//  ⚠ 清空覆蓋值留下的空殼 {} 【不受本濾法影響】：那是 key 存在、值為空物件，
+//    hasOwnProperty 為 true → 照樣進 merge → out[品號]={} → isEdited 回 false、
+//    雲端那筆覆蓋值正確地被清掉。「清空」與「刪除」在這裡是兩件事，不要混為一談。
+//  ⚠ 被濾掉的一定要留痕：否則「我明明改過卻沒上雲」會查不到。
+//  🔴 顯示端（saveEdits 的 _profitMem 鏡射）與推送端（syncEditsMerge）【共用這一支】，
+//    這樣畫面顯示的就是「現在按同步，雲端會變成的樣子」，兩邊不可能分歧。
+function _editsMergeKeys(fullKey, localMap, items){
+  const arr=Array.isArray(items)?items:[];
+  if(!localMap || typeof localMap!=='object') return [];
+  const keep=[], drop=[];
+  arr.forEach(c=>{ (Object.prototype.hasOwnProperty.call(localMap,c)?keep:drop).push(c); });
+  if(drop.length) console.warn('[editsMerge] 這些品號被標成待同步、但本機讀不到它們，已從合併範圍濾掉（不會去刪雲端那幾筆）：',fullKey,drop);
+  return keep;
+}
+
 // ══════ 「這把 ec_notes key 走 dirty-scoped merge 嗎」的【唯一判準】══════
 //  🔴 全檔【四個呼叫點】一律用這一支，不要各自寫 startsWith / 正規表示式（搜 `_notesUsesMerge(`）：
 //    ① _momoFullPushDeleteGuard 的排除條件（merge 不整包覆蓋 → 不套 willDelete）
@@ -4744,7 +4774,11 @@ function readEditsForPush(shop){
   try{ const raw=localStorage.getItem(k); if(raw) return JSON.parse(raw); }catch{}
   return {};
 }
-function saveEdits(shop,edits){
+//  code＝這次動到的品號，由 commitEdit 傳入，給品號級 dirty 與 _profitMem 鏡射用。
+//  ⚠ 沒傳（undefined / null）時的行為【明確定義】：不寫品號級註冊表、鏡射退成 degraded
+//    路徑，其餘一字不變。刻意讓它大聲壞掉（_editsPushGate 會判 level:'problem'）而不是
+//    猜一個品號 —— 猜品號或退回整包覆蓋才是災難。範式比照 saveNotes 的 code 參數。
+function saveEdits(shop,edits,code){
   window._shopJustSaved=Date.now();
   const k='ec_edits|'+shop;
   // ── localStorage 寫入：寫完【讀回驗證】，比照 saveNotes（本檔搜 `_lsOk`）──
@@ -4755,28 +4789,81 @@ function saveEdits(shop,edits){
   //     註解寫的是「配額滿了會靜默失敗」，無法從程式碼確認當初遇到的是哪一種。讀回比對
   //     【不依賴瀏覽器如何回報】—— 丟例外、靜默不存、只存一半，讀回來不等於寫進去的就判失敗。
   const _payload=JSON.stringify(edits);
+
+  // ══════ 🔴 兩份 dirty：在主資料寫入【之前】登記，且【無論成敗都保留】 ══════
+  //  方向與位置比照 saveNotes（本檔搜 `🔴 這一行【必須緊貼上一行】`）。這是相對於 09/02
+  //  舊行為（`if(_lsOk) _editsDirtyAdd(k)`）的【方向性翻轉】，動它之前先讀完這段。
+  //
+  //  ── 為什麼現在可以翻轉（舊註解說「接 merge 之前不改這裡」，現在就是接 merge 的時候）──
+  //    舊理由：ec_edits 走整包 setField，基準是【本機那一份】，失敗照登＝拿一份沒寫成的
+  //      舊值整包蓋掉雲端。無害性依賴的是 merge，不是 dirty 本身。
+  //    現況：推送改走 syncEditsMerge，基準是【當下現撈的雲端 doc】，只覆蓋登記過的品號 →
+  //      多登記一個品號最壞是把本機現值再寫一次雲端，無害。前提成立，翻轉成立。
+  //
+  //  ── 為什麼一定要翻轉：兩份 dirty 必須原子 ──
+  //    key 級與品號級是同一件事的兩半，_editsPushGate 同時要這兩半才放行。只要出現
+  //    「key 級有、品號級沒有」，那把 key 就會每一次同步都被判 level:'problem'、彈窗、
+  //    推不出去，而且自己好不了（dirty 只在推成功時清）。2026-09-03 ec_notes 就是這樣
+  //    卡死的，遠端查了三輪才定位。包在 if(_lsOk) 裡並不能保證原子性 —— 真正會把兩半
+  //    撕開的是這兩支【自己】的失敗路徑，if 擋不到；if 只換來「主資料寫失敗時什麼都不
+  //    登記」這個【漏推】方向。
+  //
+  //  ── fail-safe 方向：寧可多推，不可漏推 ──
+  //    多推：merge 只動登記過的品號，推的值是 readEditsForPush 當下讀到的現值 → 無害。
+  //    漏推：使用者改的數字永久滯留本機，畫面正常、同步顯示成功，直到雲端快照回來蓋掉。
+  //  🔴 saveNotes 在這裡的代價是「把漏推換成有機會誤刪」（本機沒有該品號 → merge 走
+  //    delete 分支）。ec_edits【沒有這個代價】：_editsMergeKeys 已經把「本機讀不到的品號」
+  //    濾掉，delete 分支關閉（完整理由見該函式上方）。所以這個方向對 ec_edits 是純賺。
+  //
+  //  ⚠ 只「新增」，【絕不移除】既有 dirty 條目 —— 之前成功存過的編輯仍然該推。
+  //  🔴 這兩行【必須緊貼】：中間不可以插入任何會 return / throw / await 的東西。
+  //    要加東西請加在這兩行【之前】或【之後】。
+  //  ⚠ 刻意【不】呼叫 _pendingSyncKeys.add(k)（saveNotes 那三行的第一行是它）：
+  //    那會讓 ec_edits 首次進 sweep，而 syncToCloud 那條 ec_edits extra 的 taskKeys.add
+  //    屆時才會首次生效、正確性從未被驗過（本檔搜 `taskKeys.add 目前【沒有作用】`）。
+  //    ec_edits 不經 _pendingSyncKeys，靠 syncToCloud 開頭那條 extra 每次現算，這是刻意的。
+  _editsDirtyAdd(k);
+  if(code!==undefined&&code!==null) _editsItemsDirtyAdd(k, code);
+
   let _lsOk=false, _lsErr=null;
   try{
     localStorage.setItem(k,_payload);
     _lsOk=(localStorage.getItem(k)===_payload);
     if(!_lsOk) _lsErr=new Error('setItem 沒有丟例外，但讀回的內容不符（可能靜默失敗，或另一個分頁同時寫了同一把 key）');
   }catch(e){ _lsOk=false; _lsErr=e; }
-  //   ⚠ _profitMem 照樣寫、【刻意不回滾】：畫面要立刻反映使用者剛改的數字（取捨比照 saveNotes）。
-  try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=edits;}catch{}
-  //   🔴 只有寫入確認成功才登記 dirty。失敗還登記 ＝ 推送端會拿舊值蓋雲端（見上方）。
-  //     ⚠ 只「不新增」，【絕不移除】既有 dirty 條目 —— 之前成功存過的編輯仍然該推。
-  //   ⚠ 同型於 saveNotes 09/03 修的撕裂問題，但此處【刻意維持 _lsOk 才登記】——
-  //     ec_edits 仍走整包 setField，失敗照登會推舊值；待接上 dirty-scoped merge 後
-  //     改為與 saveNotes 相同的失敗照登方向（見 D-1c 第三段）。
-  //     🔴 兩者能不能同方向，取決於【推送時的基準是什麼】：saveNotes 走 syncNotesMerge，
-  //       基準是【當下現撈的雲端 doc】、只覆蓋登記過的品號，所以多登記一個品號最壞是
-  //       把本機現值再寫一次；ec_edits 是整包 setField，基準是【本機那一份】，
-  //       失敗照登＝拿一份沒寫成的舊值整包蓋掉雲端。無害性依賴的是 merge，不是 dirty 本身。
-  //     ⚠ 代價已知並接受：空間不足時這筆覆蓋值【不會被登記、也不會被推上雲】，而
-  //       _notifyEditsSaveFail 一 session 只彈一次 → 第二格之後完全靜默，同步彈窗還是顯示
-  //       成功（它根本沒進 dirty，連 skippedNotDirty 都不會出現）。接 merge 之前不改這裡。
-  if(_lsOk) _editsDirtyAdd(k);
-  else _notifyEditsSaveFail(shop, _lsErr);
+
+  // ══════ _profitMem 鏡射：dirty-scoped【合併】，不是整份取代 ══════
+  //  🔴 為什麼不能再寫 `Store._profitMem[k]=edits`：commitEdit 的底稿已改成
+  //    readEditsForPush（＝只有本機那份），整份鏡射進去會把【同事的覆蓋值】從記憶體抹掉，
+  //    而 getEdits 第一順位讀 _profitMem → 畫面上同事那些紫色 cell-edited 標記當場消失，
+  //    且會一直錯到下一次雲端快照回來或使用者重整為止。
+  //  🔴 為什麼不是 `Object.assign({}, base, edits)`：那會讓【本機過期、且不在 dirty】的
+  //    品號蓋掉畫面上的雲端現值 —— 例如某品號早就推成功（dirty 已清）、同事後來又改過，
+  //    本機 localStorage 還留著舊值。那種品號推送端不會推（不在 dirty），畫面卻會顯示舊值，
+  //    正是「畫面說一套、推的是另一套」。所以疊的範圍必須是 dirty，不是「本機全部」。
+  //  ⇒ 與推送端【同一支 momoMergeByKey、同一份 dirty、同一支 _editsMergeKeys】，
+  //    畫面顯示的就是「現在按同步，雲端會變成的樣子」，兩邊結構上不可能分歧。
+  //  ⚠ 這裡【刻意不深拷貝】：base 就是 _profitMem 自己，共用子物件參照是現況；而
+  //    commitEdit 的底稿已是 readEditsForPush 交出的新物件，不再就地改 _profitMem，
+  //    所以沒有污染路徑。真正需要深拷貝的是 syncEditsMerge 裡來自 Firestore snapshot 的
+  //    cloudRaw（那份會被 momoMergeByKey 淺拷貝共用），兩者不要混為一談。
+  //  ⚠ 品號級註冊表讀不到（null＝損毀）時退成「只疊這次動到的那一個品號」：畫面一定要
+  //    反映使用者剛改的數字（取捨比照 saveNotes 的「_profitMem 照樣寫、刻意不回滾」），
+  //    其餘品號原封不動。不退回整份取代 —— 那正是這次要修掉的東西。
+  try{
+    if(typeof Store!=='undefined'&&Store._profitMem){
+      const base=(Store._profitMem[k]&&typeof Store._profitMem[k]==='object'&&!Array.isArray(Store._profitMem[k]))?Store._profitMem[k]:{};
+      const items=_editsItemsDirtyGet(k);
+      const scope=(items===null)
+        ? ((code!==undefined&&code!==null)?[String(code)]:[])   // degraded：註冊表損毀 → 只疊這一筆
+        : items;
+      Store._profitMem[k]=momoMergeByKey(base, edits, _editsMergeKeys(k, edits, scope));
+    }
+  }catch(e){ console.error('[saveEdits] _profitMem 鏡射合併失敗，畫面可能顯示舊值（本機資料與 dirty 都已寫好，不影響推送）：',k,e); }
+
+  // 寫入結果只用來決定「要不要通報使用者」，【不再決定要不要登記 dirty】——
+  //   登記已經在上面做完了，理由見那一段。這裡剩下的唯一責任是「壞了要說」。
+  if(!_lsOk) _notifyEditsSaveFail(shop, _lsErr);
   _showSyncBtn(shop);
 }
 // ── 編輯覆蓋值（ec_edits）沒存進 localStorage 的通報 ──
@@ -5080,7 +5167,12 @@ function commitEdit(shop,code,col,val,tdId){
   if(!edits[code])edits[code]={};
   const numVal=parseFloat(val);
   if(!isNaN(numVal)){edits[code][col]=numVal;}else{delete edits[code][col];}
-  saveEdits(shop,edits);
+  //   ⚠ 第三參數 code 是【必要的】，不是順手傳：saveEdits 靠它登記品號級 dirty
+  //     （給 dirty-scoped merge 當身分）並決定 _profitMem 鏡射的範圍。不傳的話那把 key
+  //     會有 key 級 dirty 但品號級是空的 → _editsPushGate 判 level:'problem'、推不出去。
+  //   ⚠ 清空覆蓋值（上一行走 delete 分支）時【也要傳】：那時 edits[code] 是空殼 {}，
+  //     merge 要靠它把雲端那筆覆蓋值清掉。「清空」不是「不動」。
+  saveEdits(shop,edits,code);
   recalcRow(shop,code,edits[code]||{});
   // adsFee 只更新有變動的 cell，避免整張表重渲染造成閃爍
   if(col==='adsFee'){patchRow(shop,code,edits[code]||{});}
