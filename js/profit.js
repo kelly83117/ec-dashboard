@@ -877,9 +877,16 @@ function _notifyLsSaveFail(shop, month, half, err){
 // ── 調整（ec_notes）沒存進 localStorage 的通報 ──
 //  與上面 _notifyLsSaveFail（報表用）刻意分開，兩個差異都不是重複、不要合併：
 //   (1) 【不走「一 session 只彈一次、之後降級 toast」】。saveNotes 會在商品/廣告調整彈窗【還開著】
-//       時被呼叫（_pnmEditNote / deleteProfitNote 都不關彈窗），而 .toast 的 z-index 是 200、
-//       .pnm-overlay 是 3000 → toast 會被壓在彈窗後面，使用者【看不到】。這裡一律走 showAlertModal
-//       （.modal-backdrop z-index 99999，蓋得過），連彈防護交給 showAlertModal 內建的 2.5 秒同 key dedupe。
+//       時被呼叫（_pnmEditNote / deleteProfitNote 都不關彈窗）。
+//       ▸ 歷史理由（已失效）：.toast 的 z-index 曾是 200、.pnm-overlay 是 3000 → toast 會被壓在
+//         彈窗後面，使用者【看不到】，所以只能走 showAlertModal（.modal-backdrop 99999，蓋得過）。
+//       ▸ 現況：2026-09-03 起 .toast 提到 --z-toast(100000) 並加 pointer-events:none
+//         （見 css/main.css 的 .toast，技術債 B-1 #147）→ toast 在彈窗開著時已經看得見，
+//         **z-index 不再是這裡選擇 modal 的理由**。
+//       ▸ 此處維持走 showAlertModal 的理由是：訊息本身有 10 行以上（含「同步救不救得回來」的
+//         分流說明與兩段 ⚠ 警告），toast 是單行短訊 + 2.2 秒自動消失 + 後蓋前，塞不下也留不住；
+//         而且這是「資料沒存進去」等級的事，需要使用者按過「知道了」才算讀到。
+//         連彈防護交給 showAlertModal 內建的 2.5 秒同 key dedupe。
 //   (2) 【建議依欄位分流】。報表那份說「按同步推得上去，不受這個問題影響」——對報表成立（它推的是
 //       記憶體裡那份），但對【商品調整】是錯的：商品調整的同步讀的是本機存檔，不是畫面上的值，
 //       按同步救不了。而【廣告調整】仍走記憶體那份、按同步還有機會。
@@ -918,7 +925,9 @@ function _notifyNotesSaveFail(shop, code, err){
     App.showAlertModal({ title:title, message:message, detail:detail, kind:'error', dedupeKey:'notesSaveFail' });
     return;
   }
-  // 退路：App 還沒就緒才會走到這裡。toast 在彈窗開著時會被蓋住（見上方 (1)），但總比沒訊息好。
+  // 退路：App 還沒就緒才會走到這裡。
+  //   ⚠ 2026-09-03 起 toast 在彈窗開著時已經看得見（--z-toast，見上方 (1) 的「現況」），
+  //     所以這條退路不再是「看不清楚但總比沒有好」，是真的看得到 —— 只是它裝不下完整說明。
   if(typeof showToast==='function') showToast('這筆調整沒存進本機，重整就會消失','error',6000);
 }
 
@@ -4662,10 +4671,19 @@ function saveEdits(shop,edits){
 }
 // ── 編輯覆蓋值（ec_edits）沒存進 localStorage 的通報 ──
 //  ⚠ 刻意【不用 showToast】：saveEdits 由 commitEdit 呼叫，而數字是從 #ads-edit-overlay 那個
-//    彈窗送出的；.toast 的 z-index 是 200、彈窗層是 3000 → toast 會被壓在後面看不到
-//    （同一個坑見 _notifyNotesSaveFail 上方的 (1)）。走 App.showAlertModal（.modal-backdrop 99999）。
-//  ⚠ modal 不可用時【只 console.error、不 fallback toast】：看不見的訊息等於沒有訊息，
-//    與其給一個蓋在彈窗後面的假安慰，不如把它留在 Console 讓查的人找得到。
+//    彈窗送出的。
+//    ▸ 歷史理由（已失效）：.toast 的 z-index 曾是 200、彈窗層是 3000 → toast 會被壓在後面看不到
+//      （同一個坑見 _notifyNotesSaveFail 上方的 (1)），所以只能走 App.showAlertModal
+//      （.modal-backdrop 99999）。
+//    ▸ 現況：2026-09-03 起 .toast 提到 --z-toast(100000) 並加 pointer-events:none
+//      （技術債 B-1 #147）→ **z-index 已不再是這裡選擇 modal 的理由**。
+//    ▸ 此處維持走 showAlertModal 的理由是：訊息本身有 12 行、含「按同步也救不回來」與
+//      「這個提醒只出現一次」兩段必讀的 ⚠，toast 是單行短訊 + 自動消失 + 後蓋前，裝不下。
+//  ⚠ modal 不可用時【只 console.error、不 fallback toast】—— 這條決定 2026-09-03 【維持不動】。
+//    ▸ 原本的理由是「看不見的訊息等於沒有訊息，與其給一個蓋在彈窗後面的假安慰，不如把它留在
+//      Console 讓查的人找得到」。toast 現在看得見了，所以【這個前提已經改變】。
+//    ▸ 是否翻案（改成 fallback 一則短 toast + Console 留全文）**待評估、本次刻意不順手改**：
+//      翻案要重新想「短到一行的訊息會不會讓使用者以為只是小問題」，那是獨立的一題。
 //  ⚠ 訊息不出現 key 名與函式名；技術細節走 console.error 與 detail 欄。
 //  🔴 一次 session 只彈一次窗，之後【只】console.error（比照上方 _lsFailNotified 的形狀，
 //    但這裡連 toast 都不降級，理由同上）。為什麼只彈一次：
@@ -6044,7 +6062,15 @@ function deleteProfitNote(origIdx,btn){
     renderPnmList();renderPnmHistory();
     const msg='這筆紀錄剛剛被更新過，清單已重新整理，請再確認一次';
     if(window.App&&typeof App.showAlertModal==='function')App.showAlertModal({title:'沒有刪除',message:msg,kind:'warn',dedupeKey:'pnmDelStale'});
-    else if(typeof showToast==='function')showToast(msg,'error',4000);   // 退路：toast 的 z-index(200) 蓋不過 .pnm-overlay(3000)，看得不清楚，但總比沒訊息好
+    // 退路：toast。
+    //   ▸ 歷史理由（已失效）：toast 的 z-index(200) 蓋不過 .pnm-overlay(3000)，看得不清楚，
+    //     但總比沒訊息好 —— 所以主路徑用 showAlertModal、toast 只當退路。
+    //   ▸ 現況：2026-09-03 起 .toast 提到 --z-toast(100000) 並加 pointer-events:none
+    //     （技術債 B-1 #147）→ toast 在 .pnm-overlay 開著時看得見了。
+    //   ▸ 🔴 這一句訊息只有一行、短到 toast 完全裝得下，**除了 z-index 之外沒有記錄別的理由**
+    //     要優先用 showAlertModal。也就是說：原本的理由已失效，此處維持現狀只是尚未重新評估，
+    //     不是有新的理由。要不要改成一律走 toast（少一次「知道了」的點擊）是待辦，不在本次範圍。
+    else if(typeof showToast==='function')showToast(msg,'error',4000);
   };
   if(!btn||!btn.dataset||btn.dataset.text===undefined){_abort('拿不到來源 × 鈕或它的比對屬性');return;}
   const t=notes[code].adjustments[origIdx];
