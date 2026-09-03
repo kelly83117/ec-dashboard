@@ -5059,7 +5059,24 @@ function closeAdsEditModal(){
 }
 
 function commitEdit(shop,code,col,val,tdId){
-  const edits=getEdits(shop);
+  // 🔴 編輯基準【刻意用 readEditsForPush，不是 getEdits】—— 兩者不同源是設計，不是筆誤。
+  //   getEdits 第一順位讀 Store._profitMem，而 ec_edits 從不進 _pendingSyncKeys
+  //   （saveEdits 不呼叫 _markPending）→ __profitShouldSkipCloudOverwrite（本檔搜該名）
+  //   對它只剩 _shopJustSaved 的 5 秒窗。超過 5 秒，只要任何人動了 app/profit 的任一欄位，
+  //   js/firebase.js 的訂閱就會把 Store._profitMem['ec_edits|…'] 整包換成雲端值。
+  //   拿它當底稿 ＝ 把雲端值當成「我的意圖」寫回 localStorage，而 localStorage 正是
+  //   推送端（readEditsForPush）的來源。整包 setField 時代這大致自我抵銷；接上
+  //   dirty-scoped merge 之後就不是了 —— 本機沒有的品號會被判成「我刪的」。
+  //   ⚠ 另一條修法（讓 saveEdits 也 _pendingSyncKeys.add）刻意【不採用】：那會讓 ec_edits
+  //     首次進 sweep，而 syncToCloud 那條 ec_edits extra 的 taskKeys.add 屆時才會首次生效，
+  //     它的正確性從未被驗過（本檔搜 `taskKeys.add 目前【沒有作用】`）。
+  //   ⚠ 顯示端【維持】getEdits：startEdit（彈窗預填）與 renderTable（紫色 cell-edited 標記）
+  //     要看到「雲端＋本機」的合併現況，跨裝置才看得到同事的覆蓋值。不要為了「一致」把那兩處
+  //     也改掉 —— 那會讓沒在這台機器編輯過的人看不到任何覆蓋值。
+  //   ⚠ 附帶效果（不是巧合，是這次要的）：readEditsForPush 兩條路徑都交出【新物件】，
+  //     所以本函式下面那幾行就地改的不再是 Store._profitMem 的活參照。_profitMem 的更新
+  //     改由 saveEdits 統一負責（見該函式的鏡射合併）。
+  const edits=readEditsForPush(shop);
   if(!edits[code])edits[code]={};
   const numVal=parseFloat(val);
   if(!isNaN(numVal)){edits[code][col]=numVal;}else{delete edits[code][col];}
