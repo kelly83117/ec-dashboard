@@ -1215,6 +1215,68 @@ function _showSyncBtn(shop){
   }
   if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn();   // MOMO 頁那顆同步鈕跟著刷新（同一個 pending 來源）
 }
+// ══════ ec_edits 升級補登記（一次性、冪等）══════
+//  問題：ec_edits_dirty（key 級）是 09/02 就上線的，操作人員機器上【已經有值】；而品號級
+//    註冊表是這次才新增、必然是空的。_editsItemsDirtyGet 對「註冊表不存在」回的是 []
+//    （正常空狀態，不是 null）→ _editsPushGate 判 items.length===0 → level:'problem' →
+//    永遠推不出去，而 dirty 只在推成功時清 ⇒ 【永久卡死】。這正是 09/03 第二波災情
+//    （B-1 #157b）的形狀，不補登記就會在全體使用者身上重演一次。
+//
+//  🔴 為什麼不用「effKeys fallback」（items 空就退成 Object.keys(localMap)）：
+//    那會把「品號註冊表是空的」這個訊號【永久關掉】。而那個訊號正是 09/03 唯一讓我們發現
+//    兩份 dirty 被撕開的偵測點。一次性補登記只在升級時跑一次，之後訊號照常有效。
+//
+//  ── 補什麼、不補什麼 ──
+//    ・只處理 ec_edits_dirty 裡【還有值】的 key。推得掉的人成功後 dirty 已清、升級時是空的，
+//      本函式對他們完全不跑。所以會被補到的正是「推送一直失敗的那批」，而他們的 localStorage
+//      就是他們的意圖 —— 這是接受這個推測的理由。
+//    ・品號級註冊表【已經有該 key 的條目】→ 跳過（冪等，第二次以後不做事）。
+//    ・readEditsForPush 讀不到本機資料（空物件）→ 【不補】、留 console.warn，讓它照原本的
+//      規則大聲失敗。硬塞空陣列等於把 problem 偽裝成 quiet，是最壞的一種「修好」。
+//
+//  🔴 留痕（這是接受「憑 localStorage 推測」的條件）：補登記時把 fullKey、品號數、完整品號
+//    清單都印出來，並明講這批 dirty 是升級時推測補上的、不是使用者逐一編輯登記的。
+//    事後若有人問「為什麼我的某個品號被改回舊值」，這行 console 是唯一的線索來源。
+//
+//  ⚠ 實作上【一次讀、就地補、一次寫】，刻意不逐個呼叫 _editsItemsDirtyAdd：
+//    會走到補登記的正是 localStorage 快滿的機器，數百次整份 read-modify-write 是拿他們的
+//    配額換形式整潔。既有的 _editsItemsDirtyClear 就是同一個「讀一次改一次寫一次」的形狀，
+//    不算多一套邏輯。
+//  ⚠ 掛在 _sweepAllLocalReportsIntoPending 頂端那組既有一次性遷移旁邊：那支是 syncToCloud
+//    與 _momoCollectPending【共同的第一行】，所以推送端與預覽端看到的狀態必然一致。
+function _editsMigrateItemsDirty(){
+  let dirtyKeys=[];
+  try{
+    const raw=localStorage.getItem(_EDITS_DIRTY_LS);
+    if(raw===null) return;                       // 從沒人編輯過 ＝ 沒有東西要補，正常
+    const a=JSON.parse(raw);
+    if(!Array.isArray(a)) return;                // 損毀 → 不補（_editsIsDirty 會回 true 照推，讓閘門去處理）
+    dirtyKeys=a.filter(k=>typeof k==='string'&&k.startsWith('ec_edits|'));
+  }catch(e){ console.error('[editsMigrate] 讀 ec_edits_dirty 失敗，這次不補登記：',e); return; }
+  if(!dirtyKeys.length) return;
+  const m=_editsItemsDirtyGet();
+  if(m===null){ console.error('[editsMigrate] 品號級註冊表損毀，這次不補登記（刻意不重建，理由見 _editsItemsDirtyAdd 上方）'); return; }
+  let changed=false;
+  dirtyKeys.forEach(fullKey=>{
+    if(Object.prototype.hasOwnProperty.call(m,fullKey)) return;   // 已有條目 → 冪等跳過
+    const shop=fullKey.slice('ec_edits|'.length);
+    let codes=[];
+    try{ codes=Object.keys(readEditsForPush(shop)||{}); }catch(e){ codes=[]; }
+    if(!codes.length){
+      console.warn('[editsMigrate] '+fullKey+' 有 key 級 dirty 但本機讀不到任何編輯覆蓋值 → 【不補登記】，讓它照原規則在同步時明確失敗（硬塞空陣列會把 problem 偽裝成 quiet）');
+      return;
+    }
+    m[fullKey]=codes;
+    changed=true;
+    console.warn('[editsMigrate] 升級補登記 '+fullKey+'：'+codes.length+' 個品號。'
+      +'🔴 這批 dirty 是升級時【依 localStorage 推測補上】的，不是使用者逐一編輯登記的 —— '
+      +'其中可能混有「只是碰巧被寫進這台 localStorage 的同事覆蓋值」（舊版 commitEdit 以 getEdits 為底稿，'
+      +'會把雲端值一起寫回本機）。第一次同步會用本機這份覆蓋雲端這幾個品號。完整清單：', codes);
+  });
+  if(!changed) return;
+  try{ localStorage.setItem(_EDITS_ITEMS_DIRTY_LS,JSON.stringify(m)); }
+  catch(e){ console.error('[editsMigrate] 寫回品號級註冊表失敗，補登記沒有生效（下次同步仍會被閘門判 problem）：',e); }
+}
 // 掃出本機所有 ec|shop|month|half 報表 key 塞進 pending set
 //   讓 syncToCloud 不只推「本次會話新增」的，也把 localStorage 裡累積
 //   （包含前次重整前留下、pending set 已清空）的一併推上雲端。
@@ -1227,6 +1289,7 @@ function _sweepAllLocalReportsIntoPending(){
   try{ momoCleanLegacyE001Keys(); }catch{}   // 掃描前先清掉 #139/#140 E001 無分片殘留（否則會被掃進待推、預覽出現無 src 空殼列）
   try{ momoMigrateOptlogBadKeys(); }catch{}   // 推送前把 optlog 的前後雙底線舊 key 遷移成合法形式（否則同步該賣場 optlog 會炸）
   try{ momoClearMoPlusReconPdf(); }catch{}   // 清除 MO+ 月對帳孤兒 doc.pdf（PDF/手動 B/F/I 區塊已移除）→ 同步時整份覆蓋、雲端也去除
+  try{ _editsMigrateItemsDirty(); }catch{}   // ec_edits 升級補登記：舊版留下的 key 級 dirty 沒有對應的品號級條目，不補會被 _editsPushGate 判 problem 而永久卡死
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
