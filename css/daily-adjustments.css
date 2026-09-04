@@ -179,7 +179,7 @@
 .adj-prog-note-body{padding-top:2px;}
 .adj-prog-toggle{display:flex;align-items:center;gap:6px;margin:3px 0;width:100%;background:none;border:none;padding:0;cursor:pointer;font:inherit;text-align:left;}
 .adj-prog-caret{font-size:10px;color:#9ca3af;flex-shrink:0;}
-.adj-prog-detail{padding:2px 0 4px 8px;border-left:2px solid #f3f4f6;margin:0 0 4px 4px;}
+.adj-prog-detail{padding:2px 0 4px 8px;border-left:2px solid var(--prog-rail);margin:0 0 4px 4px;}
 .adj-prog-grp .adj-prog-shop{font-size:11px;font-weight:700;color:#6b7280;}
 .adj-prog-sub .adj-prog-shop{font-size:11px;min-width:64px;color:#6b7280;padding-left:8px;}
 .adj-prog-p100{color:var(--prog-done);}
@@ -241,6 +241,47 @@
 .adj-prog-done > summary::before{content:'▸ ';}
 .adj-prog-done[open] > summary::before{content:'▾ ';}
 
+/* ── 月層底下的兩條半月列（唯讀、不可展開，【預設可見】）────────────────────
+   DOM 上是月層 button 的兄弟節點，也在 .adj-prog-detail 外面（見 daily.js 的紅字註解）。
+   欄寬 1fr 60px 46px 與 .adj-prog-grp / .adj-prog-subs .adj-prog-sub 完全一致，
+   月層長條、半月列、標籤明細三層的數字才會連成同一條直線。
+   🔴 border-left / margin-left 刻意與 .adj-prog-detail 的【完全相同】（2px var(--prog-rail) / 4px）：
+   半月列已不在 detail 內，兩塊各畫各的，只有幾何一致時展開後才連成同一條直線軌，
+   不會出現一段左移一段右移的斷階。顏色已抽成 --prog-rail 讓兩處不可能各改各的，
+   但寬度與 margin 仍是兩份字面值，改任一邊的數字都要同步改另一邊。
+   ⚠ 不碰 --bg（底色由老闆指定，不得更動）。 */
+.adj-prog-halves{padding:0 0 0 8px;margin:0 0 2px 4px;border-left:2px solid var(--prog-rail);}
+.adj-prog-half{display:grid;grid-template-columns:1fr 60px 46px;column-gap:10px;align-items:center;}
+.adj-prog-half .adj-prog-shop{font-size:11px;color:var(--text-muted,#6b7280);min-width:0;}
+/* 樹狀前綴：固定兩列（上半月 / 下半月），所以 first/last 就是 ├ / └ */
+.adj-prog-half:first-child .adj-prog-shop::before{content:'├ ';color:#d1d5db;}
+.adj-prog-half:last-child  .adj-prog-shop::before{content:'└ ';color:#d1d5db;}
+.adj-prog-half .adj-prog-num,
+.adj-prog-half .adj-prog-pct{text-align:right;min-width:0;}
+/* 「尚無報表」/「載入中」：占滿數字那兩欄並靠右，與有數字的那列對齊，不會孤零零卡在左邊 */
+.adj-prog-half .adj-prog-na{grid-column:2 / -1;text-align:right;font-size:11px;}
+
+/* 說明區（整頁一份，渲染在人員卡片欄最上方，不再每張卡片各印一次）。
+   收合狀態要看得出來「這是可以點的」，不能像一條細分隔線 ——
+   用全站既有的可點擊語意色（--primary / --primary-soft，同 .dp-todo-add-btn 那組），
+   淡底 + 同色邊框把它從背景裡拉出來。展開後的內文仍沿用 .adj-prog-note 的 10px / #9ca3af。
+   ⚠ 不碰 --bg（底色由老闆指定，不得更動）。 */
+.adj-prog-note-host{
+  background:var(--primary-soft,#eef2ff);
+  border:1px solid var(--primary-soft,#eef2ff);
+  border-radius:10px;
+  padding:8px 14px;
+  margin-top:0;
+}
+/* 特異性與 .adj-prog-note > summary 相同（1 class + 1 element），靠「宣告在後面」勝出。
+   兩者的相對位置不要對調，否則標題會掉回 10px 灰字。 */
+.adj-prog-note-host > summary{
+  font-size:12px;
+  font-weight:700;
+  color:var(--primary,#4f46e5);
+}
+.adj-prog-note-host:hover{border-color:var(--primary,#4f46e5);}
+
 /* 人員卡片：洞察表「今日調整」chip（<button>，點開明細彈窗）。視覺沿用 .adj-pill 的語彙，
    顏色由 JS 經 --chip-bg / --chip-fg CSS 變數傳入（單一來源 = daily.js INSIGHT_STYLE）。不碰 --bg。 */
 .ins-chip {
@@ -277,6 +318,12 @@
   --prog-done: #10b981;    /* 綠：100% 完成，沿用既有 .adj-prog-p100 */
   --prog-doing: #6366f1;   /* 靛：進行中，沿用既有 .adj-prog-p50 與 .adj-prog-fill */
   --prog-low: #d97706;     /* 琥珀：低於 50%，沿用既有 .adj-prog-p0；刻意不用紅：期中偏低是常態不是過錯 */
+  /* 進度條的「縮排軌」：月層底下那條把半月列與標籤明細串起來的直線。
+     🔴 .adj-prog-halves 與 .adj-prog-detail 是【兩塊分開的 DOM】（半月列在 detail 外面），
+     各畫各的 border-left，只有色值與幾何完全一致時才會連成同一條線、不出現斷階。
+     抽成變數就是為了讓那兩處不可能各改各的。色值 #f3f4f6 與抽變數前完全相同。
+     ⚠ 只給那兩條 border 用。同色碼的 .adj-prog-bar（長條底槽）語意不同，刻意不套。 */
+  --prog-rail: #f3f4f6;
 }
 .adj-x { margin-top: 4px; }
 .adj-x summary {

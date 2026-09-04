@@ -5083,13 +5083,20 @@ function testRuleStats(shop,rule){
   const done=matched.filter(r=>isSuggDone(shop,r.code)).length;
   return{total,done};
 }
+// 「這個品號的廣告調整欄有沒有東西」。兩種歷史形狀:舊資料是字串、新資料是 {adjustments:[…]}。
+//   抽出來是因為現在有兩把 key 要判(該期 + 該月 |full),兩邊必須完全同一套規則。
+function _adNoteHasText(nd){
+  return (typeof nd==='string')?!!nd.trim():!!((nd&&nd.adjustments)||[]).length;
+}
 // 【單期】通路的逐標籤優化進度。回 null = 該期報表不存在。
 // 2026-09-04 從 shopLabelProgress 拆出:【純重構,判定條件一個字都沒改】,
 //   只把「自己算今天是哪一期」換成吃參數,讓月層(_progMergeMonth)能對同月的 first / second
 //   各跑一次。對外入口仍是 shopLabelProgress,回傳欄位與拆分前完全相同。
-// ⚠ |full 的商品調整目前【三處都不算完成】(此處用嚴格相等,月層只是把兩期相加)。
-//   已知與 _inGrowthPeriod 的「該月任何期間都顯示」特例口徑不一致 —— 那條放寬留到
-//   月層顯示(第 2 塊)一起做,那時數字本來就要變,可以一次驗完。
+// 🔴 |full【上半月 / 下半月 / 月層三處都算完成】(2026-09-04 放寬,與 _inGrowthPeriod 的
+//   「該月任何期間都顯示」特例對齊,還掉「進度條與淨利表彈窗口徑不一致」那條債)。
+//   一筆在「整月」畫面打的調整是對整個月份的宣告,兩輪都被它滿足 —— 兩條路的機制不同:
+//   商品調整 → 判定條件多認一個值(單一 key,每筆自帶 period 欄);
+//   廣告調整 → 多讀一把 |full 的 key(key 本身就是期別分區,不是靠欄位)。
 // 分母:該期報表列重算標籤(不讀快照標籤,與工作日誌同法);
 // 分子【2026-08-07 拆成兩個獨立來源,不再共用一個 isDone】:
 //   廣告分析的標籤 → 只認該期「廣告調整」ec_notes|{shop}|{month}|{half};
@@ -5107,6 +5114,9 @@ function _periodLabelProgress(shop,month,half){
   const rows=Array.isArray(rep&&rep.built)?rep.built:(Array.isArray(rep&&rep.rows)?rep.rows:null);
   if(!rows||!rows.length)return null;
   const adNotes=mem['ec_notes|'+shop+'|'+month+'|'+half]||{};
+  // 同月「整月」畫面打的廣告調整。key 可能不存在(多數月份都沒有)→ 與上一行同樣用 ||{} 兜底。
+  //   實測 2026-09-04:ec_notes|玩樂|2026/08|full 7 個品號、|2026/07|full 4 個、森之旅 2026/07 1 個。
+  const adNotesFull=mem['ec_notes|'+shop+'|'+month+'|full']||{};
   const gNotes=mem['ec_notes|'+shop+'_growth']||{};
   // 廣告調整【刻意不做逐筆 date 過濾】:key 本身就是期間分區(submitProfitNote 以
   //   curMonth/curHalf 組 shopKey),能寫進來的必然屬於該期。而 entry.date 是「打字當下
@@ -5115,10 +5125,10 @@ function _periodLabelProgress(shop,month,half){
   // 商品調整【必須】逐筆過濾:所有期間共用單一 key ec_notes|{shop}_growth,不過濾會跨期汙染。
   const doneAds=new Set();      // 該期廣告調整有紀錄的商品
   const doneGrowth=new Set();   // 有【歸屬本期】商品調整的商品
-  Object.keys(adNotes).forEach(code=>{
-    const nd=adNotes[code];
-    const has=(typeof nd==='string')?!!nd.trim():!!((nd&&nd.adjustments)||[]).length;
-    if(has)doneAds.add(code);
+  // 兩把 key 共用【同一支】判定(_adNoteHasText),不複製兩份 —— 複製的那份日後改一邊漏一邊。
+  //   Set 天然去重:同一個品號兩把都有,只會進去一次。
+  [adNotes,adNotesFull].forEach(src=>{
+    Object.keys(src).forEach(code=>{ if(_adNoteHasText(src[code]))doneAds.add(code); });
   });
   // 🔴 這裡【沒有】舊版那行 `if(done.has(code))return;` 跨來源短路,是刻意移除的。
   //   在單一 done Set 的年代它只是省事(有廣告調整就不必再看商品調整,反正落同一個桶);
@@ -5126,7 +5136,13 @@ function _periodLabelProgress(shop,month,half){
   //   成長分析永遠少算 —— 而那正是 638 個有廣告調整的商品,幾乎涵蓋全部。
   Object.keys(gNotes).forEach(code=>{
     const nd=gNotes[code];if(!nd||typeof nd==='string')return;
-    if((nd.adjustments||[]).some(a=>_growthPeriodOf(a)===period))doneGrowth.add(code);
+    // 放寬:同月的「本期」或「整月」都算。月份用 p.slice(0,7)、期別用 p.slice(8),
+    //   沿用本檔既有的硬編碼位移寫法(_inGrowthPeriod / _growthPeriodLabel 都是),
+    //   刻意不改成 split('|')[1] —— period 字串格式不動,兩處寫法一致才不會日後漏改。
+    if((nd.adjustments||[]).some(a=>{
+      const p=_growthPeriodOf(a);
+      return !!p&&p.slice(0,7)===month&&(p.slice(8)===half||p.slice(8)==='full');
+    }))doneGrowth.add(code);
   });
   const ana={},growth={};let doneTotal=0;
   rows.forEach(r=>{
@@ -5212,42 +5228,29 @@ function _progMergeMonth(shop,month,rawFirst,rawSecond){
   return{month,loaded:_progHeavyLoaded(),have,missing,total,doneTotal,ana,growth};
 }
 
-// 通路的「工作流本期」逐標籤優化進度 —— 對外唯一入口(消費者:js/pages/daily.js 的 buildProgressHtml)。
-//   頂層欄位與拆分前【完全相同】,畫面零變化。月層與另一期掛在【不可列舉】的 lazy getter 上:
-//   - enumerable:false → Object.keys / JSON.stringify 看不到,不影響既有序列化結果
-//   - lazy → 沒有人讀 otherHalf / monthly 時,另一期【一列都不會算】(好麻吉單期 800+ 列,
-//     而 buildProgressHtml 在人員迴圈裡逐人呼叫,這條是工作日誌最慢的路徑)
-//   otherHalf / monthly 供第 2 塊(月層顯示)使用;monthly 的 loaded / have / missing 讓上層
-//   分得出「這期是 0」「這期沒報表」「訂閱還沒回來」三種狀態。
+// 通路的「工作流本月」進度 —— 對外唯一入口(消費者:js/pages/daily.js 的 buildProgressHtml)。
+//   月份來自【今天】(_growthPeriodOf 的工作流推算),與淨利表當前選擇的期間【脫鉤】——
+//   顯示端要用回傳的 month,不可以改讀 state[shop].curMonth,否則四個通路會顯示不同月份。
+// 🔴 2026-09-04 塊 1 的 lazy getter(otherHalf / monthly)已移除,改成兩期都【立即】算:
+//   月層顯示一啟用,兩期本來就每次都要用,lazy 只剩一層看不出效果的間接。更重要的是舊版
+//   「當期沒報表就 return null」會讓維克這種「上半月有 132 列、下半月還沒產」的通路整個消失,
+//   月層永遠看不到 —— 而「一期還沒產」是每個月有一半時間的常態,不是例外。
+// 回 null = 兩期都沒有報表(或期別算不出來)→ 畫面維持「—」。
+//   first / second 為 null = 該期沒有報表(不是 0);monthly.loaded=false = 訂閱還沒回來。
 function shopLabelProgress(shop){
   const now=new Date();
   const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
   const period=_growthPeriodOf({date:today});
   if(!period)return null;
   const [month,half]=period.split('|');
-  const curRaw=_periodLabelProgress(shop,month,half);
-  if(!curRaw)return null;                       // 與拆分前一致:當期沒報表 → null → 畫面顯示「—」
-  // 🔴 out 就是單期 raw 本身(不包裝、不複製):ana / growth 都是內部物件的直接參照,
-  //   與拆分前的 return 完全一樣 —— 這是「JSON.stringify 與 main 位元等同」的來源。
-  const out=curRaw;
-  const otherH=half==='first'?'second':'first';
-  // _oDone 是【布林】未取值旗標,不依賴 undefined/null 的區別:
-  //   另一期沒報表時 _oRaw 是 null,靠 _oDone 仍能正確 memo 住,不會每次讀取都重掃一遍另一期。
-  let _oRaw,_oDone=false,_m,_mDone=false;
-  const otherRaw=()=>{if(!_oDone){_oRaw=_periodLabelProgress(shop,month,otherH);_oDone=true;}return _oRaw;};
-  Object.defineProperty(out,'otherHalf',{enumerable:false,configurable:true,get:otherRaw});
-  Object.defineProperty(out,'monthly',{enumerable:false,configurable:true,get(){
-    if(!_mDone){
-      const o=otherRaw();
-      _m=_progMergeMonth(shop,month,half==='first'?curRaw:o,half==='first'?o:curRaw);
-      _mDone=true;
-    }
-    return _m;
-  }});
-  return out;
+  const first=_periodLabelProgress(shop,month,'first');
+  const second=_periodLabelProgress(shop,month,'second');
+  const monthly=_progMergeMonth(shop,month,first,second);
+  if(!monthly)return null;
+  return{month,curHalf:half,loaded:monthly.loaded,first,second,monthly};
 }
 window.shopLabelProgress=shopLabelProgress;
-// 掛 window:第 2 塊與 Console 驗證腳本要能對指定期別直接取單期結果。
+// 掛 window:驗證腳本要能對指定期別直接取單期結果。
 window._periodLabelProgress=_periodLabelProgress;
 window._progMergeMonth=_progMergeMonth;
 // 測試標籤那一格。點一下開編輯面板（改標記日期 / 新增移除標籤 / 管理標籤清單）。
