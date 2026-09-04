@@ -6,7 +6,10 @@ const Store = window.Store;
 //     常數放後面會撞 TDZ、整個模組載入失敗。
 const TEST_SHOP_ID='測試通路';
 
-window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
+// 🔴 最外層卡片刻意【沒有】overflow:hidden（2026-09-04 移除）：它會把「🏷 標籤」與「☰ 欄位」
+//   這兩個 position:absolute 的面板整個裁掉，沒有捲軸、也沒有任何提示。完整理由與副作用
+//   見 css/profit.css 的 .col-picker-menu 上方註解。要回滾就把 overflow:hidden 加回這一行。
+window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px">
   <div style="padding:10px 14px;border-bottom:1px solid #e5e7eb">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
       <div class="pf-tabrow">
