@@ -378,6 +378,44 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .cp-row.cp-row-dragging{opacity:.35;}
 .cp-row.cp-row-drag-over{box-shadow:inset 0 2px 0 #5b5fcf;}
 .cp-row-handle{cursor:grab;color:#c7cad1;font-size:12px;line-height:1;flex-shrink:0;}
+
+/* 蝦皮「☰ 欄位」面板【專用】的兩欄排列。
+   ⚠ 只有 js/profit.js 的 openColPicker（蝦皮）會把 cp-2col 掛上去。另外三個共用
+     .col-picker-menu 外殼的產生點【都沒有】、本次也一個字都沒動：
+       momoOpenColPicker   （MOMO 欄位，15 欄）
+       openCupColPicker    （酷澎欄位，12 欄）
+       momoOpenFilterPanel （MOMO 標籤 / 篩選，className 是 'col-picker-menu open mm-filter-panel'）
+     新增的兩條選擇器都以 .cp-2col 開頭 ⇒ 不可能匹配到沒掛這個 class 的元素。
+
+   🔴 為什麼【不能】直接改 .col-picker-menu.open 的 display，而要另開一個 class：
+     .mm-filter-panel 只覆寫了 position/top/right/left/bottom/z-index/min-width/max-width/
+     padding/max-height/overflow-y/font-family ——【沒有覆寫 display】，它能顯示完全是靠
+     繼承上面那條 .col-picker-menu.open{display:block}。把基底類改成 display:grid，
+     MOMO 篩選面板會當場變成 grid 容器，它內部的 .mm-fp-top / .mm-fp-foot 兩個
+     position:sticky 會跟著壞掉。
+
+   🔴 為什麼必須寫成 .cp-2col.open（兩個 class）而不是 .cp-2col：
+     .cp-2col 是 (0,1,0)，會【輸給】上面 .col-picker-menu.open 的 (0,2,0)，兩欄不會生效。
+     寫成 .col-picker-menu.cp-2col 也不行 —— 那會贏過 .col-picker-menu{display:none}，
+     面板在沒有 .open 時也會露出來。.cp-2col.open 同為 (0,2,0) 且在後面 ⇒ 剛好。
+
+   🔴 為什麼要兩欄（2026-09-04 在 1440×860 筆電實測，不是估算）：
+     單欄面板高 711px、上緣 393、下緣 1104 → 超出視窗 244px；而外層卡片
+     （js/profit.js 的 __profitTabHtml 最外層 div）是 overflow:hidden ⇒ 面板是被【裁掉】，
+     不是掉出視窗，沒有捲軸、沒有任何提示，最後 9~10 個欄位看不到也點不到。
+     20 列改兩欄 → 10 列，預估高度約 381-396px，下緣約 767-789，完整落在視窗內。
+     ⚠ 因此本次【刻意不動】那顆卡片的 overflow:hidden —— 兩欄之後已經不需要它。
+
+   ⚠ 已知的行為代價（已評估並接受，不是待修的 bug）：
+     cpRowDrop 只讀 e.clientY、不讀 e.clientX，兩欄之後同一排的左右兩格 top/height 相同 ⇒
+     「要插在左邊還是右邊」判斷不到，游標左右移動沒有作用、上下微動反而會翻轉落點。
+     資料層是安全的：filter → indexOf → splice 三步在任何幾何下都產生合法排列，
+     不會遺失欄位、不會重複、不會越界（getOrderedCols 另有補漏自癒）。純粹是操作手感問題。 */
+.cp-2col.open{display:grid;grid-template-columns:repeat(2,max-content);}
+/* 標題列（第一個子元素）與底部按鈕列（最後一個）橫跨兩欄；中間的 .cp-row 自動兩欄填入。
+   用 > 子選擇器鎖在本面板自己的直接子元素上，renderColPicker 的 innerHTML 一個字都不用改。 */
+.cp-2col > :first-child,.cp-2col > :last-child{grid-column:1 / -1;}
+
 /* Suggestion rules (建議) */
 .sugg-btn-wrap{display:flex;align-items:center;border:1px solid #e4e6ef;border-radius:8px;overflow:hidden;}
 .sugg-btn-wrap .col-pick-btn{border:none;border-radius:0;}
