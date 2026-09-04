@@ -2378,7 +2378,13 @@ function buildCardAdjustmentsHtml(person, viewDate) {
   // （原 person === '郭雅琪' 的「無淨利表」特例已移除：那是郭雅琪負責維克時期寫的，
   //   2026/07/29 改為負責玩樂後該提示變成事實錯誤，且與下方進度區塊矛盾）
   if (recs.length === 0) {
-    return buildProgressHtml(person)?`<div class="adj-sec">${buildProgressHtml(person)}</div>`:'';
+    // 🔴 先存變數再用，【不要】改回 `buildProgressHtml(person)?…${buildProgressHtml(person)}…` 那種
+    //   三元寫法：它會把同一個人的進度整個算【兩次】（條件判斷一次、模板內插一次）。
+    //   buildProgressHtml 內部對負責的每個通路各呼叫一次 shopLabelProgress，而那支要逐列重算標籤
+    //   （好麻吉單期就 800+ 列，每列各跑一次 calcAnalysisAll + calcGrowthAnalysis）。
+    //   「當日 0 筆調整」是常見狀態（週末、剛開站），這條正好是最慢的那條路徑。
+    const prog = buildProgressHtml(person);
+    return prog ? `<div class="adj-sec">${prog}</div>` : '';
   }
 
   const total = recs.length;
