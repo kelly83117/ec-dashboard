@@ -16,7 +16,35 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .panel{background:#fff;border-radius:12px;border:1px solid #e4e6ef;overflow:hidden;}
 .global-upload{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid #e4e6ef;background:#fafbff;flex-wrap:wrap;}
 
-.stab{padding:4px 14px;border:0;background:transparent;font-size:12px;font-weight:600;font-family:'Noto Sans TC',sans-serif;color:#6b7280;cursor:pointer;border-radius:6px;transition:all .12s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
+/* 淨利表頂端三塊通路切換列的按鈕（上排「通路｜總表」+ 下排藥丸列）。
+   ⚠ 直接改這條共用規則、【不加】.pf-tabrow 範圍限制：全 repo 15 顆 .stab 全部產生於
+     js/profit.js:12-52 的 .pf-tabrow 內（已 grep 全 repo 確認：class="stab" 只命中
+     js/profit.js 的 14/16/17/18/19/20/34/38/40/41/42/43/47/49/50 共 15 行，無任何動態建立）。
+     寫成 .pf-tabrow .stab 會讓本行的 padding 變成永遠取不到的死值，還會誤導後人以為
+     .stab 另有他用 —— 判準同本檔 .sp-seg:hover:not(.on) 那段「不留死碼」的註解。
+
+   🔴 左右 10px 是為「1440px 寬、側欄展開時三塊不換行」反推出來的，不是隨手調的美感值：
+       可用 1115px ／ 原需 1164px（差 49px）
+       12 顆有效按鈕（15 顆扣掉三顆 width:100% 的「總表」鈕，它們被藥丸列撐開、
+       自身 padding 不影響所需寬）各省 (14−10)×2 = 8px，共省 96px
+       新需 1068px → 餘裕 47px
+     ⚠ 1115 與 1164 是 2026-09-04 在瀏覽器用 getBoundingClientRect 實測的，不是估算。
+
+   🔴 不要再放寬到 11px 以上：.stab.active 是 font-weight:700（預設 600），選中那顆的字
+     比較寬 ⇒ 三塊的寬度會隨「目前停在哪個通路」浮動。11px 只剩 23px 餘裕，吸收不了這個
+     抖動，會做出「平常好好的、切到某個通路才換行」的間歇性 bug，重現條件極難找。
+
+   🔴 兩個會讓這 47px 餘裕歸零的已知威脅，日後動到其中任一個都要重算本行：
+     ① TEST_SHOP_ID（js/profit.js:7，原始碼自己註明「將來可能改名或整個移除」）改成更長的
+        名稱時，第 1 塊每多一個全形字 +15px —— 多 3 個字就再度換行。
+     ② .stab-ok（本檔下方兩行，目前全 repo 零使用點）若被接回去，每顆 +6px 圓點 +2px
+        margin-left = 8px × 12 顆 = 96px，與本次節省量完全相等，會一次全部還原成換行。
+
+   ⚠ 可用寬 1115px 的來源之一是 js/profit.js:11 那個外層 inline flex 的
+     justify-content:space-between —— 它目前只有 .pf-tabrow 一個子元素、實際沒作用，但一旦
+     有人往那個 flex 塞第二個元素，可用寬會立刻縮水（還要再扣 gap:10px），餘裕歸零。
+     那個約束只寫在 js 的 inline style 裡，只讀本檔看不到，故記在這裡。 */
+.stab{padding:4px 10px;border:0;background:transparent;font-size:12px;font-weight:600;font-family:'Noto Sans TC',sans-serif;color:#6b7280;cursor:pointer;border-radius:6px;transition:all .12s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
 .stab:hover{color:#374151;}
 .stab.active{background:white;color:#1a1a2e;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.1);}
 .sdot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
