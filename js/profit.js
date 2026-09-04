@@ -5083,7 +5083,13 @@ function testRuleStats(shop,rule){
   const done=matched.filter(r=>isSuggDone(shop,r.code)).length;
   return{total,done};
 }
-// 通路的「工作流本期」逐標籤優化進度。回 null = 該期報表不存在。
+// 【單期】通路的逐標籤優化進度。回 null = 該期報表不存在。
+// 2026-09-04 從 shopLabelProgress 拆出:【純重構,判定條件一個字都沒改】,
+//   只把「自己算今天是哪一期」換成吃參數,讓月層(_progMergeMonth)能對同月的 first / second
+//   各跑一次。對外入口仍是 shopLabelProgress,回傳欄位與拆分前完全相同。
+// ⚠ |full 的商品調整目前【三處都不算完成】(此處用嚴格相等,月層只是把兩期相加)。
+//   已知與 _inGrowthPeriod 的「該月任何期間都顯示」特例口徑不一致 —— 那條放寬留到
+//   月層顯示(第 2 塊)一起做,那時數字本來就要變,可以一次驗完。
 // 分母:該期報表列重算標籤(不讀快照標籤,與工作日誌同法);
 // 分子【2026-08-07 拆成兩個獨立來源,不再共用一個 isDone】:
 //   廣告分析的標籤 → 只認該期「廣告調整」ec_notes|{shop}|{month}|{half};
@@ -5092,12 +5098,10 @@ function testRuleStats(shop,rule){
 // 為什麼要拆:舊版單一 done Set 同時餵給兩組。實測好麻吉 2026/07 下半月 822 列中
 //   638 個商品有廣告調整(78%),那 638 個身上的成長標籤就被一併算成完成 ——
 //   「爆發品 180/232」是假的,實際有本期商品調整的只有 39 個商品。
-function shopLabelProgress(shop){
-  const now=new Date();
-  const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
-  const period=_growthPeriodOf({date:today});
-  if(!period)return null;
-  const [month,half]=period.split('|');
+function _periodLabelProgress(shop,month,half){
+  // 與舊版 _growthPeriodOf({date:today}) 產出的字串【同格式】('2026/08|second'),
+  //   所以下方 `_growthPeriodOf(a)===period` 的比對邏輯一字未變。
+  const period=`${month}|${half}`;
   const mem=(typeof Store!=='undefined'&&Store._profitMem)||{};
   const rep=mem['ec|'+shop+'|'+month+'|'+half];
   const rows=Array.isArray(rep&&rep.built)?rep.built:(Array.isArray(rep&&rep.rows)?rep.rows:null);
@@ -5162,7 +5166,90 @@ function shopLabelProgress(shop){
   });
   return{month,half,total:rows.length,doneTotal,ana,growth};
 }
+
+// 月層資料是否「已經可能載入完成」。🔴 未知一律當成【還沒載入】——
+//   寧可多顯示一次「載入中」,也不要在訂閱還沒回來時斬釘截鐵說「尚無報表」。
+//   依據:js/firebase.js 的 __heavyProfitSubsLoaded(profits collection + archive 分片是延後訂閱,
+//   開站 1.5 秒後或使用者切進淨利表才接)。用 ===true,undefined / 未定義都回 false。
+//   ⚠ 極限:這個旗標的語義是「訂閱【已發出】」,不是「首批快照【已回來】」,
+//     所以 loaded===true 之後仍可能有短暫空窗期;它也不涵蓋 app/profit 本身那條輕量訂閱。
+function _progHeavyLoaded(){return window.__heavyProfitSubsLoaded===true;}
+
+// 舊格式報表的 warn 去重:同一個 shop|month|half 一個 session 只噴一次。
+//   同款模式:本檔的 _lsFailNotified、js/pages/daily.js 的 _adjClsWarned。
+//   為什麼需要:shopLabelProgress 在人員迴圈裡逐人呼叫,月曆每次重繪都會再跑一輪。
+const _progFmtWarned=new Set();
+
+// 月層彙總:【純數字相加,沒有任何集合運算】。
+//   月層的每一個數字都等於「上半月那一格 + 下半月那一格」,沒有例外。
+//   🔴 不做跨期去重:去重會把「下半月那批還沒碰的商品」從分母吸收掉(它們上半月出現過、不佔新格子),
+//     結果月層百分比會【高於】底下兩列半月,而且高得很合理、沒有人會發現。
+//   只出現在單一期的標籤,另一期當 0 相加(不跳過該標籤)。
+//   回 null = 兩期都沒有報表(或加總後分母 <= 0,避免 0/0 產生 NaN% 與 width:NaN%)。
+//   shop 只用於 warn 訊息與去重 key(raw 裡沒有帶通路名),不參與任何計算。
+function _progMergeMonth(shop,month,rawFirst,rawSecond){
+  const parts=[['first',rawFirst],['second',rawSecond]];
+  const have=[],missing=[];
+  parts.forEach(p=>{(p[1]?have:missing).push(p[0]);});
+  if(!have.length)return null;
+  let total=0,doneTotal=0;
+  const ana={},growth={};
+  parts.forEach(p=>{
+    const h=p[0],raw=p[1];
+    if(!raw)return;
+    total+=raw.total;doneTotal+=raw.doneTotal;
+    Object.keys(raw.ana).forEach(l=>{const b=(ana[l]=ana[l]||{t:0,d:0});b.t+=raw.ana[l].t;b.d+=raw.ana[l].d;});
+    Object.keys(raw.growth).forEach(l=>{const b=(growth[l]=growth[l]||{t:0,d:0});b.t+=raw.growth[l].t;b.d+=raw.growth[l].d;});
+    // 舊格式報表(rep.rows,缺 growthRate / prevRev)會讓 calcGrowthAnalysis 整批回空 label,
+    //   月層的成長桶就只剩新格式那一期,看起來像「月層 = 半月」而且不 throw、不報錯。出一次 warn。
+    const wk=shop+'|'+month+'|'+h;
+    if(raw.total>0&&!Object.keys(raw.growth).length&&!_progFmtWarned.has(wk)){
+      _progFmtWarned.add(wk);
+      console.warn('[_progMergeMonth] 該期有',raw.total,'列但成長標籤 0 個,可能是舊格式報表(缺 growthRate/prevRev)：',wk);
+    }
+  });
+  if(total<=0)return null;
+  return{month,loaded:_progHeavyLoaded(),have,missing,total,doneTotal,ana,growth};
+}
+
+// 通路的「工作流本期」逐標籤優化進度 —— 對外唯一入口(消費者:js/pages/daily.js 的 buildProgressHtml)。
+//   頂層欄位與拆分前【完全相同】,畫面零變化。月層與另一期掛在【不可列舉】的 lazy getter 上:
+//   - enumerable:false → Object.keys / JSON.stringify 看不到,不影響既有序列化結果
+//   - lazy → 沒有人讀 otherHalf / monthly 時,另一期【一列都不會算】(好麻吉單期 800+ 列,
+//     而 buildProgressHtml 在人員迴圈裡逐人呼叫,這條是工作日誌最慢的路徑)
+//   otherHalf / monthly 供第 2 塊(月層顯示)使用;monthly 的 loaded / have / missing 讓上層
+//   分得出「這期是 0」「這期沒報表」「訂閱還沒回來」三種狀態。
+function shopLabelProgress(shop){
+  const now=new Date();
+  const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
+  const period=_growthPeriodOf({date:today});
+  if(!period)return null;
+  const [month,half]=period.split('|');
+  const curRaw=_periodLabelProgress(shop,month,half);
+  if(!curRaw)return null;                       // 與拆分前一致:當期沒報表 → null → 畫面顯示「—」
+  // 🔴 out 就是單期 raw 本身(不包裝、不複製):ana / growth 都是內部物件的直接參照,
+  //   與拆分前的 return 完全一樣 —— 這是「JSON.stringify 與 main 位元等同」的來源。
+  const out=curRaw;
+  const otherH=half==='first'?'second':'first';
+  // _oDone 是【布林】未取值旗標,不依賴 undefined/null 的區別:
+  //   另一期沒報表時 _oRaw 是 null,靠 _oDone 仍能正確 memo 住,不會每次讀取都重掃一遍另一期。
+  let _oRaw,_oDone=false,_m,_mDone=false;
+  const otherRaw=()=>{if(!_oDone){_oRaw=_periodLabelProgress(shop,month,otherH);_oDone=true;}return _oRaw;};
+  Object.defineProperty(out,'otherHalf',{enumerable:false,configurable:true,get:otherRaw});
+  Object.defineProperty(out,'monthly',{enumerable:false,configurable:true,get(){
+    if(!_mDone){
+      const o=otherRaw();
+      _m=_progMergeMonth(shop,month,half==='first'?curRaw:o,half==='first'?o:curRaw);
+      _mDone=true;
+    }
+    return _m;
+  }});
+  return out;
+}
 window.shopLabelProgress=shopLabelProgress;
+// 掛 window:第 2 塊與 Console 驗證腳本要能對指定期別直接取單期結果。
+window._periodLabelProgress=_periodLabelProgress;
+window._progMergeMonth=_progMergeMonth;
 // 測試標籤那一格。點一下開編輯面板（改標記日期 / 新增移除標籤 / 管理標籤清單）。
 //   只顯示「本期間結束日 >= 標記日」的標籤 —— 測試開始前的期間不該掛著未來才貼的標籤，
 //   否則「測試前 vs 測試後」的成效比較會分不出來。
