@@ -371,6 +371,28 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .col-pick-btn{padding:7px 14px;border:1px solid #e4e6ef;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;font-weight:600;color:#374151;}
 .col-pick-btn:hover{background:#f3f4f6;}
 .col-picker-wrap{position:relative;display:inline-block;}
+/* ═══════ 這兩個面板的「不會被裁掉」是靠一個【不在本檔】的前提，動之前務必讀完 ═══════
+   🔴 淨利表最外層那顆卡片（js/profit.js 的 window.__profitTabHtml 第一行，inline style）
+     原本有 overflow:hidden，已於 2026-09-04 【刻意移除】。本檔的 .col-picker-menu 與
+     上方的 .tag-filter-bar 兩個 position:absolute 面板，能不能被看到，就取決於那一行。
+
+   為什麼移除（2026-09-04 在 1440×860 實測，不是估算）：
+     .tag-filter-bar  高 775px、上緣 395、下緣 1170 → 超出視窗 310px
+     .col-picker-menu 高 711px（PR #253 改兩欄後已降到約 390px，不再溢出）
+     兩者都是 absolute、containing block 都在那顆卡片內 ⇒ 有 overflow:hidden 時是被【裁掉】，
+     不是掉出視窗：沒有捲軸、沒有任何提示，面板下半部看不到也點不到。
+     移除後面板落進 .main 的可捲範圍（實測 main 可捲 92 + window 可捲 152 = 244，剛好等於當時的溢出量）。
+     ⚠ 同時實測過：移除前後、開面板前後，.main clientWidth 都是 1200、三塊 .pf-tabgrp 上緣
+       全程 31/31/31 —— 不會把 PR #252 修好的通路切換列推回換行。
+
+   🔴 已知副作用（已評估並接受，不是待修）：
+     overflow:hidden 本身會建立捲動容器。移除之後，卡片內【且沿路沒有中介捲動容器】的
+     <thead><tr>（本檔上方有一條【無範圍限定】的 `thead tr{position:sticky;top:0}` 全域規則），
+     其 scrollport 會從「那顆永遠不捲的卡片」改成 .main ⇒ 原本形同失效的 sticky 表頭會開始真的黏住。
+     已確認至少一處：momoMoPlusBatchQueueHTML 產生的批次佇列表（渲染進 #momo-sub-content-{通路}，
+     沿路無捲動容器）。在 .tscroll / .recon-scroll / .ana-modal 裡的表頭不受影響（各有自己的 scrollport）。
+
+   回滾方式：把 overflow:hidden 加回 js/profit.js 那一行即可，一行還原、行為完全回到 2026-09-04 之前。 */
 .col-picker-menu{display:none;position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid #e4e6ef;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.1);z-index:300;min-width:155px;padding:4px 0;}
 .col-picker-menu.open{display:block;}
 .cp-row{display:flex;align-items:center;gap:8px;padding:6px 13px;cursor:pointer;font-size:13px;color:#374151;user-select:none;}
