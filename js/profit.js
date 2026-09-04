@@ -5859,7 +5859,11 @@ function resetHiddenCols(shop){try{localStorage.removeItem(_HCOLS_LS);}catch{}ap
 function openColPicker(shop,btn){
   let m=document.getElementById('colpick-'+shop);
   if(m){m.remove();return;}
-  m=document.createElement('div');m.id='colpick-'+shop;m.className='col-picker-menu open';
+  // cp-2col：蝦皮這一份【專屬】的兩欄排列（20 列排不進 860px 高的筆電視窗，見 css/profit.css 的 .cp-2col 註解）。
+  //   🔴 只加在這裡。MOMO 欄位（momoOpenColPicker）/ 酷澎欄位（openCupColPicker）/ MOMO 標籤篩選
+  //     （momoOpenFilterPanel）三處的 className 字面【與本行的 'col-picker-menu open' 逐字相同】，
+  //     改動時務必連 m.id='colpick-'+shop 一起比對定位，不要用短字串搜尋，會誤改。
+  m=document.createElement('div');m.id='colpick-'+shop;m.className='col-picker-menu open cp-2col';
   const wrap=btn?.closest('.col-picker-wrap');
   (wrap||btn?.parentElement||document.body).appendChild(m);
   renderColPicker(shop);
