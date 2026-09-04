@@ -47,6 +47,35 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .stab{padding:4px 10px;border:0;background:transparent;font-size:12px;font-weight:600;font-family:'Noto Sans TC',sans-serif;color:#6b7280;cursor:pointer;border-radius:6px;transition:all .12s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
 .stab:hover{color:#374151;}
 .stab.active{background:white;color:#1a1a2e;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.1);}
+/* 1280px 螢幕的使用者專用（1440 已由上面 .stab 的左右 10px 解決，那條【不要動】）。
+   ⚠ 必須放在 .stab 之後：兩者特異度同為 (0,1,0)（@media 不加特異度），靠來源順序分勝負。
+   ⚠ 只覆寫 padding-left / padding-right，刻意不用 padding 簡寫 —— 簡寫會一併重寫上下的 4px，
+     值雖相同但語意上是多改了東西。
+
+   🔴 4px 是 2026-09-04 在 1280×800（側欄展開、好麻吉）實測反推的，不是估算：
+       .pf-tabrow 容器可用寬 955px
+         （注意不是 .main 的 1040 —— 中間被卡片 border 與 header padding 吃掉約 85px）
+       左右 padding 10 → 需要 1068px → 掉第二排
+       左右 padding  6 → 需要  972px → 仍掉第二排
+       左右 padding  4 → 需要  924px → ✅ 三塊 .pf-tabgrp 上緣 31/31/31，排成一排
+
+   🔴 餘裕是 0，已知並接受：任何字數變動（通路改名、新增通路、TEST_SHOP_ID 變長）
+     都會讓它在 1280 再度換行。失敗形態是「掉回兩排」——版面變醜，不是資料錯誤，可容忍。
+     ⚠ PR #254 已移除外層卡片的 overflow:hidden，所以【不會】再發生舊版那種
+       「最右邊的按鈕被無聲剪掉、沒有捲軸也沒有提示」的失敗。
+
+   ⚠ 已實測【無效】，不要再試：縮小三顆「通路｜總表」鈕的 font-size（15→13）。
+     它們帶 inline width:100%、在 .pf-tabgrp 這個 column flex 裡被藥丸列撐開，
+     群組寬度由【下排藥丸列】決定 ⇒ 改字級總寬一點都不會變，只會讓字變小變醜。
+
+   ⚠ 側欄收合時因 .main 的 zoom:1.12（css/main.css）反而需要更多寬度，本條 @media
+     對收合狀態幫助有限。那是另一個題目，本次已知未解、刻意不加 body.sidebar-collapsed 變體。
+
+   ⚠ 斷點不衝突：本檔既有的 @media 只有 (max-width:720px) 的 .mm-anlz-grid；
+     css/main.css 的 900 / 768 / 700 / 460 都不碰 .stab。1366 是全站最大的一個斷點。 */
+@media (max-width:1366px){
+  .stab{padding-left:4px;padding-right:4px;}
+}
 .sdot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .stab-ok{width:6px;height:6px;border-radius:50%;background:#d1d5db;margin-left:2px;transition:background .3s;}
 .stab-ok.on{background:#10b981;}
