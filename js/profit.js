@@ -12969,7 +12969,10 @@ function momoOptlogTodayCounts(){
     const map=momoLoadOptlog(shop)||{};
     Object.keys(map).forEach(sku=>{ (map[sku]||[]).forEach(e=>{
       if(!e || (e.date||'')!==today) return;
-      const person=momoOptlogUserToName(e.by) || '未指派';   // 缺 by（無操作者）→ 併入「未指派」桶，比照 ADJ_SHOP_TO_PERSON['維克']='未指派'；不靜默丟、不回填人名
+      // 🔴 這裡的『未指派』是「MOMO 優化紀錄查無操作者」的桶名，與工作日誌的【人員／通路歸屬】完全無關，
+      //    不要跟著那邊一起改。舊註解寫「比照 ADJ_SHOP_TO_PERSON['維克']='未指派'」已於 2026-09-04 失效
+      //    （維克已由楊心雨接手），該次刻意不動本行 —— 對全庫 '未指派' 做整批取代會把這個桶誤標成某人做的。
+      const person=momoOptlogUserToName(e.by) || '未指派';   // 缺 by（無操作者）→ 併入「未指派」桶；不靜默丟、不回填人名
       const key=shop+MOMO_OPTLOG_DP_SEP+(e.type||'其他');
       const c=byPerson[person]=byPerson[person]||{};
       c[key]=(c[key]||0)+1;

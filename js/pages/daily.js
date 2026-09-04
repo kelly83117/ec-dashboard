@@ -5,15 +5,18 @@ const { Store, escapeHtml, showToast, toDateStr, addDays, todayStr, genId, DAILY
 Object.assign(App, {
   renderWeeklyCalendarTab(deptId, color, dept) {
     // 老闆指示：移除月曆/週曆/甘特圖，每位同事下班前 5 分鐘寫今日工作進度即可
-    // 只保留 3 位同事：陳君葳、洪嘉蓮、郭雅琪
-    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
-    // 月曆上用來標示「這天誰填過」的顏色點：陳君葳(Vivian)紫、洪嘉蓮(inna)藍、郭雅琪(Kelly)黃
-    const PERSON_COLORS = { '陳君葳': '#8b5cf6', '洪嘉蓮': '#3b82f6', '郭雅琪': '#f59e0b' };
+    // 只保留 4 位同事：陳君葳、洪嘉蓮、郭雅琪、楊心雨（2026-09-04 楊心雨接手維克後加入）
+    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
+    // 月曆上用來標示「這天誰填過」的顏色點：陳君葳(Vivian)紫、洪嘉蓮(inna)藍、郭雅琪(Kelly)黃、楊心雨(Astrid)桃紅
+    //   🔴 新增人員的選色規則：① 不可與上列既有色同色系 ② 不可用灰色系 —— 灰(#6b7280)是「查無此人設定」
+    //   的 fallback（見本檔 avatarHtml 與月曆計數列的 `|| '#6b7280'`），用灰會分不出「有設定」與「漏設定」。
+    const PERSON_COLORS = { '陳君葳': '#8b5cf6', '洪嘉蓮': '#3b82f6', '郭雅琪': '#f59e0b', '楊心雨': '#db2777' };
     // 月曆待辦事項條的淡色底：左邊一條深色，底色用淡色，不要整條實色
     const PERSON_LIGHT = {
       '陳君葳': { bg: '#ede9fe', text: '#6d28d9' },
       '洪嘉蓮': { bg: '#dbeafe', text: '#1d4ed8' },
       '郭雅琪': { bg: '#fef3c7', text: '#92400e' },
+      '楊心雨': { bg: '#fce7f3', text: '#9d174d' },
     };
     const users = Store.get(Store.KEYS.users, []);
     const now = new Date();
@@ -396,7 +399,7 @@ Object.assign(App, {
     `;
   },
   openBossLineConfigModal() {
-    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
+    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     const canManageLine = isAdmin
       || hasOfficeFeature(this.currentUser, '行銷', 'lineNotify')
@@ -597,7 +600,7 @@ Object.assign(App, {
     });
   },
   openBossTaskModal(taskId) {
-    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
+    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
     const todayStr = toDateStr(new Date());
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     if (!isAdmin) { showToast('沒有權限', 'error'); return; }
@@ -791,7 +794,7 @@ Object.assign(App, {
         const text = (descEl && descEl.value || '').trim();
         if (!text) { showToast('請輸入任務內容', 'error'); return false; }
         const list = (Store.get('ec.bossTasks', []) || []).slice();
-        const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪'];
+        const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
         const assigneeVal = assigneeEl ? assigneeEl.value : '全體';
         const dueVal = dueEl ? dueEl.value : '';
         if (existing) {
@@ -2119,18 +2122,27 @@ function collectAdjustments() {
 //   資料源：collectAdjustments()，依日期索引後查表。純唯讀，不寫任何 Store。
 //   通路→人 對應寫在本檔（不引 marketing.js；洞察表日後將廢除）。
 // ============================================================================
+// 🔴 死碼：ADJ_ALLOWED_NAMES 全 repo 零消費者（grep 只有這一行宣告），改它的值【不會生效】。
+//    真正決定「固定顯示 / 可被指派 / 收 LINE 通知」的是各處的 ALLOWED_NAMES —— 本檔的
+//    renderWeeklyCalendarTab、openBossLineConfigModal、openBossTaskModal 及其儲存 handler，
+//    加上 marketing.js 的 _updateDailyProgressFromAdjustments，共五份。
+//    2026-09-04 加入楊心雨時刻意【不動】這一行的值，避免後人誤以為改這裡就有效；移除它超出當次範圍。
 const ADJ_ALLOWED_NAMES  = ['陳君葳', '洪嘉蓮', '郭雅琪'];              // 顯示順序
-// ⚠️ 這份表在 marketing.js:1699 有一份 SHOP_TO_PERSON，內容必須一致。改這裡一定要一起改那裡。
+// ⚠️ 這份表在 marketing.js 的 _updateDailyProgressFromAdjustments 內有一份 SHOP_TO_PERSON，
+//    內容必須一致。改這裡一定要一起改那裡（刻意不寫行號：行號會漂移，以符號名為準）。
 // ⚠️ 2026-07-29 更正：玩樂是郭雅琪 2026/04 起接手，先前寫成洪嘉蓮是錯的。
-// ⚠️ 維克目前無人負責，值填 '未指派'。這個通路是老闆指定要保留的，不可以從表裡移除 ——
+// ⚠️ 2026-09-04 更正：維克由楊心雨(Astrid)接手，值從 '未指派' 改為 '楊心雨'。
+// ⚠️ 維克這個通路是老闆指定要保留的，不可以從表裡移除 ——
 //    marketing.js 的 INSIGHT_SHOPS = Object.keys(SHOP_TO_PERSON) 由本表 key 推導，
 //    少一個通路 = 該通路的洞察活動完全不被統計，而且不報錯。
-// ⚠️ 已知限制：'未指派' 不在硬寫的 ALLOWED_NAMES 裡，工作日誌月曆/卡片目前不會顯示它
-//    （daily.js 約 273 行的 filter 會濾掉）。這是已知的顯示缺口，另排處理。
-//    有人接手維克時把名字填進來即可自動正確。
-const ADJ_SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '郭雅琪', '森之旅': '陳君葳', '維克': '未指派' };
-const ADJ_MAX_ROWS = 10;                                              // 每人預設顯示筆數
-// 人 → 通路（反查）：{ 洪嘉蓮:['好麻吉'], 郭雅琪:['玩樂'], 陳君葳:['森之旅'], 未指派:['維克'] }
+// ⚠️ 2026-09-04 更正（舊註解已錯，勿再引用）：舊版寫「'未指派' 不在硬寫的 ALLOWED_NAMES 裡，
+//    工作日誌月曆/卡片不會顯示它」。那句自 2026-07-31 起就不成立 —— 當天加入的 _dpExtraNames
+//    聯集會把「該日有資料的非名單人」一併排進 personInfos，月曆計數列與圖例走同一份聯集
+//    （calExtraPeople）。正確描述是：不在 ALLOWED_NAMES 的人，只要當天有資料就會長出一張
+//    fallback 灰底卡片；ALLOWED_NAMES 決定的是「固定顯示 + 可被老闆指派 + 收 LINE 通知」。
+const ADJ_SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '郭雅琪', '森之旅': '陳君葳', '維克': '楊心雨' };
+const ADJ_MAX_ROWS = 10;                                              // 每人預設顯示筆數（死碼，未被引用）
+// 人 → 通路（反查）：{ 洪嘉蓮:['好麻吉'], 郭雅琪:['玩樂'], 陳君葳:['森之旅'], 楊心雨:['維克'] }
 const ADJ_PERSON_TO_SHOPS = Object.keys(ADJ_SHOP_TO_PERSON).reduce((m, shop) => {
   const p = ADJ_SHOP_TO_PERSON[shop];
   (m[p] = m[p] || []).push(shop);
