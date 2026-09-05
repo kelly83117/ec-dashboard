@@ -380,13 +380,13 @@ function _markPending(key){
 //        本註冊表必須把這兩種狀態分開（理由見下方 _notesIsDirty），用它就分不開，
 //        而且失敗方向會反過來變成「不推」＝丟資料。
 //    (2) 它位在 MOMO 區（本檔約 6900 行以後），那一區改動頻繁；不依賴它就不會被那邊波及。
-// ══════ dirty 註冊表「寫入失敗」記錄（E-0a 第一、二塊：記錄＋寫入當下 toast）══════
+// ══════ dirty 註冊表「寫入失敗」記錄（E-0a 第一～三塊：記錄＋toast＋同步收尾通報）══════
 //  為什麼需要：下方三支 dirty 註冊表（_notesDirtyAdd / _editsDirtyAdd / _notesItemsDirtyAdd）
 //    寫入失敗時只有 console.error。而「主資料成功、dirty 失敗」是真實可達的 —— 滿載機器上
 //    刪除或縮短調整＝主資料是縮小寫入（會成功），註冊表是成長寫入（會爆）——
 //    那種時候一個字都不會吵：_notesIsDirty 回 false → syncToCloud 安靜跳過 →
 //    toast 說「沒有需要同步的資料」，使用者的調整永遠上不了雲。
-//    這份記錄是通報的唯一資料來源（寫入當下的 toast 已接：見下方 _notifyDirtyFail；第三塊接同步收尾的 modal）。
+//    這份記錄是通報的唯一資料來源（寫入當下的 toast：_notifyDirtyFail；同步收尾的通報與清除：syncToCloud 的 dirtyFailSnap / _dirtyFailClear）。
 //  為什麼鏡射 sessionStorage：要記的正是「localStorage 滿了」，失敗標記寫回 localStorage
 //    是雞生蛋；sessionStorage 配額獨立、撐過同分頁 F5。同一理由的既有前例：本檔 momoUiW
 //    上方註解（搜 momoUiW）。⚠ 關分頁 / 重開瀏覽器就沒了 —— 已知取捨：跨重啟沒有可靠訊號
@@ -439,6 +439,28 @@ function _notifyDirtyFail(reg,key){
     _dirtyFailNotified=true;
     const what=(reg==='editsDirty')?'改的數字':'打的調整';
     showToast('⚠ 剛才'+what+'沒有登記進待同步清單（多半是這台電腦的儲存空間滿了）。按「☁ 同步雲端」不會把它推上雲，重整後畫面也會變回雲端版本 → 請先把內容複製備份；空間清出來之前重打也存不進去。此提醒這次開頁只出現一次，之後只記在 F12 Console。','error',12000);
+  }catch{}
+}
+// ── 清除（E-0a 第三塊）：某把 key【真的推送成功】後，把它對應的失敗記錄消掉（模組層 + sessionStorage 一起）──
+//  🔴 設計是「至少報一次、成功推送該 key 後才清」：syncToCloud 收尾一開始先 _dirtyFailList()
+//    拍快照，problems / modal / __lastSyncReport 全吃快照 → 本函式何時跑都蓋不掉本次報告。
+//  ⚠ 已知且接受的殘餘風險：記錄沒存「丟的是哪一筆」（key 級根本沒有品號可記），所以同一把
+//    key 的【另一筆】編輯成功同步也會清掉記錄 —— modal 文案已明示「若剛才重打的不含當時
+//    那筆，請再確認」。要逐品號對消是獨立技術債（2026-09-05 裁決），不在 E-0a。
+function _dirtyFailClear(key){
+  try{
+    _dirtyWriteFailures.forEach(function(v,id){ if(id.slice(id.indexOf('|')+1)===key) _dirtyWriteFailures.delete(id); });
+    try{
+      const raw=sessionStorage.getItem(_DIRTYFAIL_SS);
+      if(raw){
+        const old=JSON.parse(raw);
+        if(old&&typeof old==='object'&&!Array.isArray(old)){
+          let changed=false;
+          Object.keys(old).forEach(function(id){ if(id.slice(id.indexOf('|')+1)===key){ delete old[id]; changed=true; } });
+          if(changed) sessionStorage.setItem(_DIRTYFAIL_SS,JSON.stringify(old));
+        }
+      }
+    }catch{}
   }catch{}
 }
 const _NOTES_DIRTY_LS='ec_notes_dirty';   // JSON array：真正編輯過還沒推的 full key（ec_notes|…）
@@ -1544,24 +1566,39 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       }catch(e){ console.warn('[syncToCloud] 刪除防護計算失敗（保守起見不阻擋、照推）：',e); }
     }
     console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length,'skippedWillDelete:',skippedWillDelete.length,'｜要推 keys:',tasks.map(t=>t.key));
+    // ── E-0a 第三塊：dirty 登記失敗的快照 ──
+    //   problems / modal / __lastSyncReport 全部吃這份快照，而清除（_dirtyFailClear，鍵在 ok 上）
+    //   影響不到本次 →「至少報一次、成功推送該 key 後才清」由此保證，與程式行序無關。
+    const dirtyFailSnap=_dirtyFailList();
     if(tasks.length===0){
       // 沒有要送的 task —— 但有 skippedProblem / skippedWillDelete 一定要講，不能只說「沒有需要同步」（那正是舊 bug／靜默跳過）
       if(skippedWillDelete.length>0){   // 🛡 全部被刪除防護擋下 → 明確告知去預覽確認，絕不靜默
         const detail=skippedWillDelete.map(x=>x.key+'：會刪雲端 '+x.willDelete+' 筆').join('\n');
         if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'有項目未推送（保護雲端資料）',message:skippedWillDelete.length+' 項因為「會刪掉雲端資料（可能是同事的更新）」而未推送。\n請到該賣場的「同步預覽」逐項確認後再推。',detail,kind:'warn'});
         else if(typeof showToast==='function') showToast(skippedWillDelete.length+' 項會刪雲端資料、未推送，請到同步預覽確認','error');
-        _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete});
+        _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,dirtyWriteFailures:dirtyFailSnap});
       }else if(skippedProblem.length>0){
         if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:'有 '+skippedProblem.length+' 筆資料在本機讀不到、沒推上去（可能損毀）。\n請到淨利表重新產生這些報表。',detail:skippedProblem.map(x=>x.key+'：'+x.reason).join('\n'),kind:'error'});
         else if(typeof showToast==='function') showToast('有 '+skippedProblem.length+' 筆資料讀不到','error');
-        _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty});
+        _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty,dirtyWriteFailures:dirtyFailSnap});
+      }else if(dirtyFailSnap.length>0){
+        // 🔴 E-0a 第三塊：早退分支的轉向 —— 災情最典型的形狀就落在這裡：使用者只打了調整、
+        //   登記掉了 → 不 dirty → 沒有任何 task → 原本走下面那句「沒有需要同步的資料」，
+        //   把資料遺失講成一切正常。【只有失敗記錄非空才進本分支】；記錄為空時走原本的 else，
+        //   行為與過去完全相同（封存月份的安靜不受波及）。
+        //   ⚠ 這裡【不清記錄】：什麼都沒推成功，沒有清的依據（清除只鍵在 ok 上，見收尾）。
+        const _dfKeys=[...new Set(dirtyFailSnap.map(x=>x.key))];
+        const _dfDetail=_dfKeys.map(k=>'［登記失敗］'+k+'（尚未重新推送，警告會持續出現）').join('\n');
+        if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'有調整沒有登記進待同步清單',message:_dfKeys.length+' 把資料先前的「待同步登記」寫入失敗（多半是這台電腦的儲存空間滿了），這次同步【沒有】把它們推上雲 —— 雖然看起來像「沒有需要同步的資料」。\n請先清出空間、重打受影響的那幾筆再按同步；在此之前每次同步都會出現本提醒。\n（有登記失敗記錄時，本次不自動更新工作日誌摘要。）',detail:_dfDetail,kind:'error'});
+        else if(typeof showToast==='function') showToast('有 '+_dfKeys.length+' 把資料的待同步登記失敗過，這次沒有推上雲','error');
+        _report('nothing',{skippedByDesign,skippedNotDirty,dirtyWriteFailures:dirtyFailSnap});
       }else{
         // ⚠ toast 文案刻意不動（不提「跳過 N 筆」）：skippedNotDirty 是 by design 的安靜跳過。
         //   但 _report 一定要帶上它 —— 「切到已封存月份、沒有別的待同步、按同步」正是本閘門最典型的
         //   情境，而它 100% 走這條出口（tasks.length===0）。不帶就會被 _report 的預設 [] 蓋掉，
         //   跳過紀錄剛好在最需要它的那一次消失。
         if(typeof showToast==='function') showToast('沒有需要同步的資料','info');
-        _report('nothing',{skippedByDesign,skippedNotDirty});
+        _report('nothing',{skippedByDesign,skippedNotDirty,dirtyWriteFailures:dirtyFailSnap});
       }
       if(btn){btn.disabled=false; _showSyncBtn();} return;
     }
@@ -1584,12 +1621,14 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     ok.forEach(k=>{ if(k.startsWith('ec_edits|')){ try{ _editsDirtyDel(k); }catch{} } });   // 編輯覆蓋值同理：真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
+    ok.forEach(k=>{ _dirtyFailClear(k); });   // E-0a 第三塊：這把 key 真的推成功 → 清失敗記錄。報告吃 dirtyFailSnap（上方快照），本行蓋不掉本次報告；殘餘風險（同 key 別筆編輯也會洗綠）已在 modal 文案明示
     if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
-    _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,optlogMerges:_optlogMerges,notesMerges:_notesMerges});
+    _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,optlogMerges:_optlogMerges,notesMerges:_notesMerges,dirtyWriteFailures:dirtyFailSnap});
     const _mergedN=_optlogMerges.reduce((s,x)=>s+(x.n||0),0);   // optlog 合併併回雲端的總筆數（不靜默）
     const _notesKeptN=_notesMerges.reduce((s,x)=>s+(x.n||0),0);   // ec_notes 合併時保留下來的雲端獨有品號總數（不靜默）
-    // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 且 skippedWillDelete=0 時出現；只要有問題/被保護跳過就 ⚠ + 彈窗
-    const problems=failed.length+skippedProblem.length+skippedWillDelete.length;
+    // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 且 skippedWillDelete=0 且【無 dirty 登記失敗記錄】時出現；只要有問題/被保護跳過/掉過登記就 ⚠ + 彈窗
+    const dirtyFailKeys=[...new Set(dirtyFailSnap.map(x=>x.key))];   // E-0a 第三塊：以 key 去重（同一把 key 的 key 級/品號級記錄算一件事）
+    const problems=failed.length+skippedProblem.length+skippedWillDelete.length+dirtyFailKeys.length;
     if(problems===0){
       if(btn){btn.textContent='✓ 已同步 '+ok.length+' 筆';btn.style.background='#10b981';btn.style.color='#fff';btn.style.borderColor='#10b981';_syncBtnRepaintTimer=setTimeout(()=>{ _showSyncBtn(); },2000);}
       if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端'+(_mergedN>0?'（優化紀錄已合併雲端 '+_mergedN+' 筆）':'')+(_notesKeptN>0?'（調整備註已保留雲端 '+_notesKeptN+' 個品號）':''),'success');
@@ -1602,10 +1641,17 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       failed.forEach(f=>lines.push('［失敗］'+f.key+'：'+f.msg));
       skippedProblem.forEach(p=>lines.push('［讀不到］'+p.key+'：'+p.reason));
       skippedWillDelete.forEach(x=>lines.push('［保護未推］'+x.key+'：會刪雲端 '+x.willDelete+' 筆（可能是同事的更新）'));
+      dirtyFailKeys.forEach(k=>lines.push('［登記失敗］'+k+(ok.indexOf(k)>=0?'（本次已重新推送，警告不再出現）':'（尚未重新推送，警告會持續出現）')));
       let msg='成功 '+ok.length+' 筆。';
       if(failed.length) msg+='\n'+failed.length+' 筆沒推上雲端，資料還在本機 → 重整前請先匯出 Excel 備份，稍後再按同步重試。';
       if(skippedProblem.length) msg+='\n'+skippedProblem.length+' 筆在本機讀不到（可能損毀）→ 請到淨利表重新產生這些報表。';
       if(skippedWillDelete.length) msg+='\n'+skippedWillDelete.length+' 項因會刪除雲端資料（可能是同事的更新）而未推送 → 請到該賣場的「同步預覽」逐項確認後再推。';
+      if(dirtyFailKeys.length){
+        const _dfUnhealed=dirtyFailKeys.filter(k=>ok.indexOf(k)<0), _dfHealed=dirtyFailKeys.filter(k=>ok.indexOf(k)>=0);
+        if(_dfUnhealed.length) msg+='\n'+_dfUnhealed.length+' 把資料先前的「待同步登記」寫入失敗（多半是儲存空間滿了）→ 那些調整/編輯【沒有】被推上雲。請先清出空間、重打受影響的那幾筆再按同步；在此之前每次同步都會出現本提醒。';
+        if(_dfHealed.length) msg+='\n'+_dfHealed.length+' 把先前登記失敗的資料本次已重新推送成功，此警告之後不再出現。⚠ 這把 key 剛已重新推送，若剛才重打的不含當時那筆，請再確認。';
+        msg+='\n（有登記失敗記錄時，本次不自動更新工作日誌摘要。）';
+      }
       if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:msg,detail:lines.join('\n'),kind:'error'});
       else if(typeof showToast==='function') showToast('同步未完成：'+problems+' 筆有問題','error');
     }
