@@ -380,6 +380,47 @@ function _markPending(key){
 //        本註冊表必須把這兩種狀態分開（理由見下方 _notesIsDirty），用它就分不開，
 //        而且失敗方向會反過來變成「不推」＝丟資料。
 //    (2) 它位在 MOMO 區（本檔約 6900 行以後），那一區改動頻繁；不依賴它就不會被那邊波及。
+// ══════ dirty 註冊表「寫入失敗」記錄（E-0a 第一塊：只記錄，不通報）══════
+//  為什麼需要：下方三支 dirty 註冊表（_notesDirtyAdd / _editsDirtyAdd / _notesItemsDirtyAdd）
+//    寫入失敗時只有 console.error。而「主資料成功、dirty 失敗」是真實可達的 —— 滿載機器上
+//    刪除或縮短調整＝主資料是縮小寫入（會成功），註冊表是成長寫入（會爆）——
+//    那種時候一個字都不會吵：_notesIsDirty 回 false → syncToCloud 安靜跳過 →
+//    toast 說「沒有需要同步的資料」，使用者的調整永遠上不了雲。
+//    這份記錄是後續通報的唯一資料來源（第二塊接寫入當下的 toast、第三塊接同步收尾的 modal）。
+//  為什麼鏡射 sessionStorage：要記的正是「localStorage 滿了」，失敗標記寫回 localStorage
+//    是雞生蛋；sessionStorage 配額獨立、撐過同分頁 F5。同一理由的既有前例：本檔 momoUiW
+//    上方註解（搜 momoUiW）。⚠ 關分頁 / 重開瀏覽器就沒了 —— 已知取捨：跨重啟沒有可靠訊號
+//    能分辨「登記掉了」與「已同步成功」（兩者在 localStorage 長得一樣），硬做＝一盞常亮的燈。
+//  🔴 _dirtyFailAdd 在別人的 catch 裡跑，自己【絕不能再拋】：全身 try/catch，sessionStorage
+//    那層再包一層。用 function 宣告不用 const，避免 TDZ（理由同本檔 readEditsForPush 上方註解）。
+const _DIRTYFAIL_SS='ec_dirtyfail_v1';   // sessionStorage key：{ 'reg|key': {n,msg,ts} }
+const _dirtyWriteFailures=new Map();     // 本 session 失敗記錄：'reg|key' → {n:次數, msg:最後錯誤, ts}
+function _dirtyFailAdd(reg,key,err){
+  try{
+    const id=reg+'|'+key;
+    const cur=_dirtyWriteFailures.get(id)||{n:0,msg:'',ts:0};
+    cur.n++;
+    cur.msg=err?(((err.name||'')+' '+(err.message||String(err))).trim()):'(註冊表損毀早退)';
+    cur.ts=Date.now();
+    _dirtyWriteFailures.set(id,cur);
+    try{
+      const m={};
+      // 先搬 sessionStorage 既有的（F5 後模組層歸零、只剩那份，不可整包蓋掉），再用本層覆蓋同名的
+      const raw=sessionStorage.getItem(_DIRTYFAIL_SS);
+      if(raw){ const old=JSON.parse(raw); if(old&&typeof old==='object'&&!Array.isArray(old)) Object.keys(old).forEach(function(k2){ m[k2]=old[k2]; }); }
+      _dirtyWriteFailures.forEach(function(v,k2){ m[k2]=v; });
+      sessionStorage.setItem(_DIRTYFAIL_SS,JSON.stringify(m));
+    }catch{}
+  }catch{}
+}
+// 讀取端：模組層 + sessionStorage 合併（同名以模組層為準）。回陣列；Console 除錯與後續兩塊共用。
+function _dirtyFailList(){
+  const m={};
+  try{ const raw=sessionStorage.getItem(_DIRTYFAIL_SS); if(raw){ const old=JSON.parse(raw); if(old&&typeof old==='object'&&!Array.isArray(old)) Object.keys(old).forEach(function(k){ m[k]=old[k]; }); } }catch{}
+  try{ _dirtyWriteFailures.forEach(function(v,k){ m[k]=v; }); }catch{}
+  return Object.keys(m).map(function(k){ const i=k.indexOf('|'); return Object.assign({reg:k.slice(0,i), key:k.slice(i+1)}, m[k]); });
+}
+window.__dirtyFailures=_dirtyFailList;   // Console 查詢入口（第一塊驗收用；之後兩塊的資料來源同這份）
 const _NOTES_DIRTY_LS='ec_notes_dirty';   // JSON array：真正編輯過還沒推的 full key（ec_notes|…）
 function _notesDirtyAdd(k){
   // ⚠ 兩條失敗路徑都【不吞】：註冊表出事就等於這道救援網出事，必須留下訊號，不可安靜失敗。
@@ -401,7 +442,7 @@ function _notesDirtyAdd(k){
       else console.error('[notesDirty] 註冊表內容損毀，已重建成只含這一把。先前未推送的調整標記可能已遺失 —— 請人工比對 app/profit 確認舊的調整有沒有漏上雲。原始內容：',raw);
     }
     if(!arr.includes(k)){ arr.push(k); localStorage.setItem(_NOTES_DIRTY_LS,JSON.stringify(arr)); }
-  }catch(e){ console.error('[notesDirty] 寫入註冊表失敗，這把 key 的待同步標記沒存下來：',k,e); }   // localStorage 被擋 / 配額滿：重整後 _notesIsDirty 會回 false、syncToCloud 就不推它 ＝ 使用者打的調整上不了雲
+  }catch(e){ console.error('[notesDirty] 寫入註冊表失敗，這把 key 的待同步標記沒存下來：',k,e); _dirtyFailAdd('notesDirty',k,e); }   // localStorage 被擋 / 配額滿：重整後 _notesIsDirty 會回 false、syncToCloud 就不推它 ＝ 使用者打的調整上不了雲
 }
 function _notesDirtyDel(k){
   try{
@@ -462,7 +503,7 @@ function _editsDirtyAdd(k){
       else console.error('[editsDirty] 註冊表內容損毀，已重建成只含這一把。先前未推送的編輯標記可能已遺失 —— 請人工比對 app/profit 確認舊的覆蓋值有沒有漏上雲。原始內容：',raw);
     }
     if(!arr.includes(k)){ arr.push(k); localStorage.setItem(_EDITS_DIRTY_LS,JSON.stringify(arr)); }
-  }catch(e){ console.error('[editsDirty] 寫入註冊表失敗，這把 key 的待同步標記沒存下來：',k,e); }   // localStorage 被擋 / 配額滿：重整後 _editsIsDirty 會回 false、syncToCloud 就不推它 ＝ 使用者改的數字上不了雲
+  }catch(e){ console.error('[editsDirty] 寫入註冊表失敗，這把 key 的待同步標記沒存下來：',k,e); _dirtyFailAdd('editsDirty',k,e); }   // localStorage 被擋 / 配額滿：重整後 _editsIsDirty 會回 false、syncToCloud 就不推它 ＝ 使用者改的數字上不了雲
 }
 function _editsDirtyDel(k){
   try{
@@ -563,13 +604,13 @@ function _notesItemsDirtyAdd(fullKey, code){
   if(!fullKey||code===undefined||code===null) return;
   try{
     const m=_notesItemsDirtyGet();
-    if(m===null){ console.error('[notesItemsDirty] 註冊表損毀，這次的品號標記沒存下來（刻意不重建，理由見函式上方）：',fullKey,code); return; }
+    if(m===null){ console.error('[notesItemsDirty] 註冊表損毀，這次的品號標記沒存下來（刻意不重建，理由見函式上方）：',fullKey,code); _dirtyFailAdd('notesItemsDirty-corrupt',fullKey,null); return; }
     const s=new Set(Array.isArray(m[fullKey])?m[fullKey]:[]);
     if(s.has(String(code))) return;
     s.add(String(code));
     m[fullKey]=[...s];
     localStorage.setItem(_NOTES_ITEMS_DIRTY_LS,JSON.stringify(m));
-  }catch(e){ console.error('[notesItemsDirty] 寫入註冊表失敗，這個品號的待同步標記沒存下來：',fullKey,code,e); }
+  }catch(e){ console.error('[notesItemsDirty] 寫入註冊表失敗，這個品號的待同步標記沒存下來：',fullKey,code,e); _dirtyFailAdd('notesItemsDirty',fullKey,e); }
 }
 // 清。codes 省略 → 清掉該 fullKey 整條（比照 momoCostDirtyClear 的 !keys 分支）；
 //   給 codes → 只清那幾個品號。清完該 key 空了就把整條移除，不留空陣列無限累積。
