@@ -380,13 +380,13 @@ function _markPending(key){
 //        本註冊表必須把這兩種狀態分開（理由見下方 _notesIsDirty），用它就分不開，
 //        而且失敗方向會反過來變成「不推」＝丟資料。
 //    (2) 它位在 MOMO 區（本檔約 6900 行以後），那一區改動頻繁；不依賴它就不會被那邊波及。
-// ══════ dirty 註冊表「寫入失敗」記錄（E-0a 第一塊：只記錄，不通報）══════
+// ══════ dirty 註冊表「寫入失敗」記錄（E-0a 第一、二塊：記錄＋寫入當下 toast）══════
 //  為什麼需要：下方三支 dirty 註冊表（_notesDirtyAdd / _editsDirtyAdd / _notesItemsDirtyAdd）
 //    寫入失敗時只有 console.error。而「主資料成功、dirty 失敗」是真實可達的 —— 滿載機器上
 //    刪除或縮短調整＝主資料是縮小寫入（會成功），註冊表是成長寫入（會爆）——
 //    那種時候一個字都不會吵：_notesIsDirty 回 false → syncToCloud 安靜跳過 →
 //    toast 說「沒有需要同步的資料」，使用者的調整永遠上不了雲。
-//    這份記錄是後續通報的唯一資料來源（第二塊接寫入當下的 toast、第三塊接同步收尾的 modal）。
+//    這份記錄是通報的唯一資料來源（寫入當下的 toast 已接：見下方 _notifyDirtyFail；第三塊接同步收尾的 modal）。
 //  為什麼鏡射 sessionStorage：要記的正是「localStorage 滿了」，失敗標記寫回 localStorage
 //    是雞生蛋；sessionStorage 配額獨立、撐過同分頁 F5。同一理由的既有前例：本檔 momoUiW
 //    上方註解（搜 momoUiW）。⚠ 關分頁 / 重開瀏覽器就沒了 —— 已知取捨：跨重啟沒有可靠訊號
@@ -411,6 +411,7 @@ function _dirtyFailAdd(reg,key,err){
       _dirtyWriteFailures.forEach(function(v,k2){ m[k2]=v; });
       sessionStorage.setItem(_DIRTYFAIL_SS,JSON.stringify(m));
     }catch{}
+    _notifyDirtyFail(reg,key);   // 記錄完成才通報（通報自己不會拋，見其函式）
   }catch{}
 }
 // 讀取端：模組層 + sessionStorage 合併（同名以模組層為準）。回陣列；Console 除錯與後續兩塊共用。
@@ -421,6 +422,25 @@ function _dirtyFailList(){
   return Object.keys(m).map(function(k){ const i=k.indexOf('|'); return Object.assign({reg:k.slice(0,i), key:k.slice(i+1)}, m[k]); });
 }
 window.__dirtyFailures=_dirtyFailList;   // Console 查詢入口（第一塊驗收用；之後兩塊的資料來源同這份）
+// ── 寫入當下的通報（E-0a 第二塊）──
+//  ⚠ 用 toast 不用 modal：saveNotes / saveEdits 之後緊接著重繪與輸入流程，modal 會打斷打字；
+//    toast 自 2026-09-03（--z-toast 提到 100000）起彈窗開著也看得見。
+//  🔴 去重旗標【刻意不與】_notesFailNotified / _editsFailNotified 共用：共用的話，同 session
+//    先發生過「主資料失敗」彈窗，之後的「只有 dirty 失敗」（主資料成功、完全無聲的那一格）
+//    就會被吃掉 —— 那正是這整套要修的洞。代價是「全部失敗」時 modal + toast 各出一個，
+//    兩者權重不同（modal 重、toast 輕），可接受。
+//  ⚠ 文案不能只叫人「重打」：空間清出來之前重打一樣失敗（成長寫入必爆，配額測試 2026-09-05
+//    對照 B 實測）。要指向真的能解的動作：先複製備份 → 清空間 → 再重打。
+let _dirtyFailNotified=false;   // 同一次 session 只出一次 toast；重整歸零（比照 _notesFailNotified，刻意不持久化）
+function _notifyDirtyFail(reg,key){
+  try{
+    if(_dirtyFailNotified) return;              // 後續失敗只留 console（各失敗點 catch 已自帶 console.error）
+    if(typeof showToast!=='function') return;   // toast 不可用就【不立旗標】，下次失敗還有機會出聲（比照 _notifyNotesSaveFail）
+    _dirtyFailNotified=true;
+    const what=(reg==='editsDirty')?'改的數字':'打的調整';
+    showToast('⚠ 剛才'+what+'沒有登記進待同步清單（多半是這台電腦的儲存空間滿了）。按「☁ 同步雲端」不會把它推上雲，重整後畫面也會變回雲端版本 → 請先把內容複製備份；空間清出來之前重打也存不進去。此提醒這次開頁只出現一次，之後只記在 F12 Console。','error',12000);
+  }catch{}
+}
 const _NOTES_DIRTY_LS='ec_notes_dirty';   // JSON array：真正編輯過還沒推的 full key（ec_notes|…）
 function _notesDirtyAdd(k){
   // ⚠ 兩條失敗路徑都【不吞】：註冊表出事就等於這道救援網出事，必須留下訊號，不可安靜失敗。
