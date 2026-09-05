@@ -42,20 +42,21 @@ const Store = {
     try {
       const raw = localStorage.getItem(key);
       return raw ? JSON.parse(raw) : fallback;
-    } catch {
+    } catch (e) {
       this._useMem = true;
+      __notifyStoreMemFallback('flip', 'Store.get 讀取失敗（值損毀或 localStorage 不可用）→ 已切記憶體模式', key, e);
       return this._mem[key] !== undefined ? this._mem[key] : fallback;
     }
   },
   set(key, value) {
     if (this._useMem) { this._mem[key] = value; return; }
     try { localStorage.setItem(key, JSON.stringify(value)); }
-    catch { this._useMem = true; this._mem[key] = value; }
+    catch (e) { this._useMem = true; this._mem[key] = value; __notifyStoreMemFallback('flip', 'Store.set 寫入失敗（配額滿或 localStorage 不可用）→ 已切記憶體模式', key, e); }
   },
   remove(key) {
     if (this._useMem) { delete this._mem[key]; return; }
     try { localStorage.removeItem(key); }
-    catch { this._useMem = true; delete this._mem[key]; }
+    catch (e) { this._useMem = true; delete this._mem[key]; __notifyStoreMemFallback('flip', 'Store.remove 刪除失敗（localStorage 不可用）→ 已切記憶體模式', key, e); }
   },
 };
 
@@ -477,23 +478,28 @@ const App = {
   route: 'employees',
   filter: { dept: 'all', quarter: 'all', range: 'today', customStart: '', customEnd: '', officeTab: {}, dailyProgress: { employee: 'all', status: 'all', dateFrom: '', dateTo: '' }, dashboardMarketing: { employee: 'all' } },
 
+  // E-0b：開站探針（從 init 抽出成具名方法 —— 讓驗收能從 Console 直接呼叫）。
+  //   記憶體模式在雲端同步下是正常狀態；只有 localStorage 真的寫不進去（配額滿 / 隱私模式）才通報。
+  //   通報升級自 console.warn（原本只有 Console 紅字，使用者看不到）；狀況持續時每次開站都會再報一次。
+  _checkMemFallbackAtBoot() {
+    if (!Store._useMem) return;
+    try {
+      localStorage.setItem('__ec_ls_probe__', '1');
+      localStorage.removeItem('__ec_ls_probe__');
+      // localStorage 正常，_useMem=true 是因為雲端同步；不需要警告
+      console.log('[EC] 使用記憶體 + 雲端同步模式（正常）');
+    } catch (e) {
+      console.warn('[EC] localStorage 不可用（隱私模式或空間爆），本次資料重整後會清空');
+      __notifyStoreMemFallback('flip', '開站探針：localStorage 不可用', '__ec_ls_probe__', e);
+    }
+  },
+
   init() {
     seedData();
     this.ensureAdmin();
     this.bindNav();
     this.bindSidebarToggle();
-    // 記憶體模式：雲端同步下這是正常狀態（Store._mem 為主，Firestore 為持久層）
-    // 只有 localStorage 真的寫不進去（quota / 隱私模式）時才提醒
-    if (Store._useMem) {
-      try {
-        localStorage.setItem('__ec_ls_probe__', '1');
-        localStorage.removeItem('__ec_ls_probe__');
-        // localStorage 正常，_useMem=true 是因為雲端同步；不需要顯眼警告
-        console.log('[EC] 使用記憶體 + 雲端同步模式（正常）');
-      } catch {
-        console.warn('[EC] localStorage 不可用（隱私模式或空間爆），本次資料重整後會清空');
-      }
-    }
+    this._checkMemFallbackAtBoot();
     // 整個應用層級的「離開頁面警告」：偵測所有未同步來源
     //   洞察表 / 淨利表 / 工作日誌 / 儀表板營收卡片
     if (!window.__appUnloadGuardInstalled) {
@@ -2655,7 +2661,8 @@ function __localGet(key, fallback) {
   } catch { return fallback; }
 }
 function __localSet(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  try { localStorage.setItem(key, JSON.stringify(value)); }
+  catch (e) { __notifyStoreMemFallback('localset', '__localSet 寫入失敗（本機專屬 key，無雲端備份）', key, e); }
 }
 function __localRemove(key) {
   try { localStorage.removeItem(key); } catch {}
@@ -2718,6 +2725,57 @@ function __notifyCloudFail(key, err, action) {
   } else if (typeof window.showToast === 'function') {
     window.showToast('❌ 雲端' + action + '失敗：' + (friendly.split('\n')[0] || raw), 'error');
   }
+}
+
+// ══════ E-0b：Store 記憶體降級 / 本機專屬寫入失敗的通報 ══════
+//  背景：Store.get/set/remove 的 catch 會把 _useMem 翻成 true（記憶體模式）——翻轉後讀不到的
+//    key 一律回 fallback（畫面部分變空、不是被刪），寫入只進 _mem（重整即失）。
+//    雲端模式（__setupCloud 成功）下 _useMem=true 是刻意常態、包裝後的 Store.set 不碰
+//    localStorage，所以翻轉實際只發生在「雲端未接上（離線/連線失敗的 fallback 模式）」或
+//    「本機值損毀被 get 讀到」。翻回 false 的路徑不存在，恢復 = 清空間 + 重新整理（IIFE 重探）。
+//  __localSet 是另一條（不翻旗標）：session 與 ec.d2.pricing.* 的活持久層只有 localStorage
+//    （app/main 裡的 pricing 欄位是排除清單加入前的舊拷貝殘留，經查無任何現行路徑更新它，
+//    不能當備份 —— 2026-09-05 逐條驗證：包裝 set/remove 早退、pushKeyToCloud 呼叫點零 pricing、
+//    首次遷移只迭代 Store.KEYS）。寫失敗原本 catch{} 全靜默 → 一併通報。
+//  ⚠ 本函式在別人的 catch 裡跑，全身 try/catch【絕不再拋】。
+//  ⚠ 各 kind 一 session 一次；modal 不可用時不立旗標（比照 profit.js _notifyNotesSaveFail 慣例）。
+//    每次失敗都更新 window.__storeMemFallbackInfo（Console 診斷用）。
+let __memFallbackNotified = false;     // kind='flip'（含開站探針）共用
+let __localSetFailNotified = false;    // kind='localset' 獨立（兩者幾乎互斥：localset 只在雲端模式走到）
+function __notifyStoreMemFallback(kind, reason, key, err) {
+  try {
+    const msg = (err && (err.name || err.message)) ? (((err.name || '') + ' ' + (err.message || '')).trim()) : String(err || reason);
+    console.error('[Store 降級] ' + reason + '｜key:', key, err);
+    const prev = window.__storeMemFallbackInfo;
+    window.__storeMemFallbackInfo = { kind: kind, reason: reason, key: key, msg: msg, ts: Date.now(), n: (prev && prev.n ? prev.n : 0) + 1 };
+    const canModal = window.App && typeof window.App.showAlertModal === 'function';
+    if (kind === 'localset') {
+      if (__localSetFailNotified) return;
+      const isPricing = typeof key === 'string' && key.startsWith('ec.d2.pricing.');
+      const isSession = key === Store.KEYS.session;
+      const what = isPricing ? '訂價資料' : (isSession ? '登入狀態' : '本機專屬資料');
+      const body = '一筆只存在本機的資料沒有存進去（多半是這台電腦的儲存空間滿了）：' + what + '。\n'
+        + (isSession ? '影響：重新整理後需要重新登入。\n' : '')
+        + (isPricing ? '影響：這次修改【不會保留】。訂價資料不會自動上雲（雲端僅有較舊的殘留拷貝，不能當備份）→ 請先匯出或截圖，清出空間後再改一次。\n' : '')
+        + '清出儲存空間後重新整理即可恢復。此提醒這次開頁只出現一次，之後只記在 F12 Console。';
+      if (canModal) { __localSetFailNotified = true; window.App.showAlertModal({ title: '有本機資料沒有存進去', message: body, detail: 'key: ' + key + '\n' + msg, kind: 'error', dedupeKey: 'store-localset-fail' }); }
+      else if (typeof window.showToast === 'function') window.showToast('⚠ 本機資料寫入失敗（空間可能滿了）：' + what, 'error', 8000);
+      return;
+    }
+    // kind='flip'：Store 已切換記憶體模式（含開站探針偵測到 localStorage 不可用）
+    if (__memFallbackNotified) return;
+    const body = '這台電腦的瀏覽器儲存空間無法使用（多半是空間滿了；也可能是無痕視窗或隱私設定）。\n'
+      + '系統已改用「暫存模式」：\n'
+      + '・畫面上部分資料可能顯示成空白 —— 那是「讀不到」，不是被刪掉。\n'
+      + '・你現在輸入的內容只存在這個分頁 → 請【不要關閉分頁】。\n'
+      + '・若雲端有連上：帳號／營收／工作日誌等主要資料仍會同步上雲，但【登入狀態與訂價資料不會】'
+      + '（訂價不會自動上雲，雲端僅有較舊的殘留拷貝）。\n'
+      + '・若雲端也沒接上（離線／連線失敗）：這段期間輸入的內容【不會被保存在任何地方】。\n'
+      + '建議：先把重要內容複製或匯出 → 清出空間 → 重新整理即可恢復正常模式。\n'
+      + '若你正在無痕視窗：這是預期行為，關閉視窗後本機資料本來就不保留。';
+    if (canModal) { __memFallbackNotified = true; window.App.showAlertModal({ title: '本機儲存已停用（暫存模式）', message: body, detail: reason + '\nkey: ' + key + '\n' + msg, kind: 'error', dedupeKey: 'store-mem-fallback' }); }
+    else if (typeof window.showToast === 'function') window.showToast('⚠ 本機儲存已停用（暫存模式）：輸入內容重整後會消失，請勿關閉分頁', 'error', 12000);
+  } catch {}
 }
 
 async function __setupCloud() {
