@@ -2001,7 +2001,7 @@ function collectAdjustments() {
       const _a = window.calcAnalysisAll(row.adsFee, row.pureRate, row.targetROI, row.roiDiff, row.clicks, row.pureProfit, row.roi);
       r.anaAll = Array.isArray(_a) ? _a : [];
       r.anaLabel = r.anaAll[0]?.label || ''; r.anaCls = r.anaAll[0]?.cls || '';
-      const _g = window.calcGrowthAnalysis(row.growthRate, row.rev, row.prevRev, row.pureRate);
+      const _g = window.calcGrowthAnalysis(row.growthRate, row.rev, row.prevRev, row.pureRate, row.adsFee ?? null, row.clicks ?? null);
       r.growthLabel = _g.label; r.growthCls = _g.cls || '';
     } catch (e) { labelErrCount++; }
     return r;

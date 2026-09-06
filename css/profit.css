@@ -562,6 +562,16 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .ana-cancel-btn{padding:9px 18px;background:#f3f4f6;color:#6b7280;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;}
 .ana-gear-btn{background:none;border:none;cursor:pointer;font-size:13px;color:#9ca3af;padding:1px 5px;border-radius:4px;vertical-align:middle;margin-left:2px;line-height:1;}
 .ana-gear-btn:hover{color:#5b5fcf;background:#eff0ff;}
+/* ── 成長分析 modal：內建標籤排除條件（每個標籤列下方的縮排子列）── */
+.grx-row{display:flex;gap:5px;align-items:center;padding:3px 0 8px 20px;border-bottom:1px solid #f9fafb;}
+.grx-lbl{font-size:11px;font-weight:700;color:var(--warn);flex-shrink:0;}
+.grx-row select,.grx-row input[type=number]{padding:4px 6px;border:1px solid var(--border);border-radius:5px;font-size:12px;background:var(--surface);font-family:'Noto Sans TC',sans-serif;outline:none;}
+.grx-row input[type=number]{width:80px;font-family:monospace;}
+.grx-f{width:126px;}
+.grx-op{width:52px;}
+.grx-row select:focus,.grx-row input:focus{border-color:var(--primary);}
+.grx-hint{font-size:11px;color:var(--text-muted);}
+.grx-notes{font-size:12px;color:var(--text-muted);background:var(--warn-soft);border-radius:8px;padding:8px 12px;line-height:1.9;margin-bottom:6px;}
 
 .pill{display:inline-block;padding:2px 9px;border-radius:10px;font-size:12px;font-weight:600;}
 .ph{background:#d1fae5;color:#065f46;}.pm{background:#fef3c7;color:#92400e;}.pl{background:#fee2e2;color:#991b1b;}.pn{background:#f3f4f6;color:#9ca3af;}
