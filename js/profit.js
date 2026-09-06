@@ -2469,7 +2469,7 @@ function loadIntoUI(shop,built,period,days){
     built.forEach(r=>{
       Object.assign(r,_anaDerive(calcAnalysisAll(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0)));
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
+      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0,r.adsFee??null,r.clicks??null);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
       r.profitPct=(r.rev>0)?(r.pureRate+r.adsPct):null;
     });
@@ -3607,7 +3607,7 @@ function buildShop(shop,days){
     // 上期營收 & 成長比（所有賣場都算：整月賣場比對上個月整月，好麻吉上/下半月比對同月/上月對應半月）
     const prevRev = prevRevMap[p.code] ?? null;
     const growthRate = (prevRev!==null && prevRev>0) ? (p.rev - prevRev) / prevRev : null;
-    const growthAnalysis = calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate);
+    const growthAnalysis = calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate, adsFee ?? null, clicks ?? null);
     // 上期廣告費。`?? null` 只會在【上期沒有這個商品】時給 null —— prevAdsMap 的建立條件
     //   只看 code、金額 0 照樣有值（見 getPrevPeriodMap），所以畫面分得出「上期投了 $0」
     //   與「上期沒這商品」。這一點與 prevRev 刻意不同。
@@ -4213,7 +4213,7 @@ function reapplyAnaToAll(){
     built.forEach(r=>{
       Object.assign(r,_anaDerive(calcAnalysisAll(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0)));
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
+      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0,r.adsFee??null,r.clicks??null);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
     });
     applyFilters(s.id);
@@ -4381,7 +4381,12 @@ function getDisabledGrowthTags(){return _cloudRead('ec_growth_disabled')||[];}
 function disableGrowthTag(label){const a=getDisabledGrowthTags();if(!a.includes(label))a.push(label);_cloudWrite('ec_growth_disabled',a);renderGrowthModalBody();reapplyAnaToAll();}
 function restoreGrowthTag(label){const a=getDisabledGrowthTags().filter(l=>l!==label);_cloudWrite('ec_growth_disabled',a);renderGrowthModalBody();reapplyAnaToAll();}
 function saveCustomGrowthRules(r){_cloudWrite('ec_growth_custom',r);}
-function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate) {
+// ⚠ adsFee / clicks 本函式目前【完全不使用】，先接線給下一塊的排除條件用。
+//   六個呼叫端（本檔 5 處 + daily.js 的 window.calcGrowthAnalysis）新參數一律傳 `x ?? null`、
+//   【不可 ||0】：缺值要保留 null，讓 evalAnaConds 開頭的 null guard 把用到該欄位的條件判 false
+//   （＝舊快照缺這欄時排除條件不觸發、行為不變）；||0 會把「缺資料」塌成「真的 0」，
+//   「< 門檻」型的排除會恆成立、舊列標籤靜默消失。同型前科見 calcTestTags 的 pureRate 註解。
+function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate, adsFee, clicks) {
   const t=getGrowthThresh();
   const dis=new Set(getDisabledGrowthTags());
   const ok=l=>!dis.has(l);
@@ -5559,7 +5564,7 @@ function recalcRow(shop,code,ov){
   const ana=_anaDerive(calcAnalysisAll(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi));
   const testTags=calcTestTags(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
   const growthRate=r.growthRate;
-  const growthAnalysis=calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate);
+  const growthAnalysis=calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate,adsFee??null,r.clicks??null);   // adsFee＝本函式開頭 ov.adsFee 那個含剛編輯值的區域變數（同 calcAnalysisAll 的慣例），不是編輯前的 r.adsFee
   Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,profitPct,targetROI,roiDiff,dayBudget,...ana,testTags,growthAnalysis});
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
@@ -5664,7 +5669,7 @@ function _periodLabelProgress(shop,month,half){
     let alAll=[],gl='';
     try{
       alAll=calcAnalysisAll(r.adsFee,r.pureRate,r.targetROI,r.roiDiff,r.clicks,r.pureProfit,r.roi)||[];
-      gl=calcGrowthAnalysis(r.growthRate,r.rev,r.prevRev,r.pureRate).label||'';
+      gl=calcGrowthAnalysis(r.growthRate,r.rev,r.prevRev,r.pureRate,r.adsFee??null,r.clicks??null).label||'';
     }catch(e){}
     // 多標籤：陣列裡每個標籤各自累計一次 t / d。
     //   🔴 同列去重（seen）：ana[label].t 的語義是「帶該標籤的【商品數】」，而畫面上的
