@@ -4381,6 +4381,11 @@ function getDisabledGrowthTags(){return _cloudRead('ec_growth_disabled')||[];}
 function disableGrowthTag(label){const a=getDisabledGrowthTags();if(!a.includes(label))a.push(label);_cloudWrite('ec_growth_disabled',a);renderGrowthModalBody();reapplyAnaToAll();}
 function restoreGrowthTag(label){const a=getDisabledGrowthTags().filter(l=>l!==label);_cloudWrite('ec_growth_disabled',a);renderGrowthModalBody();reapplyAnaToAll();}
 function saveCustomGrowthRules(r){_cloudWrite('ec_growth_custom',r);}
+// ── 內建標籤排除條件（第二塊：判定＋資料層；UI 在第三塊）──
+//   結構：{ '標籤名': [{f,op,v}, …] }，條件格式與 evalAnaConds 相同（多條件 AND）。
+//   沒設定的標籤＝不排除。損毀（非物件）時回 {}＝全部不排除（安全側，不 throw）。
+function getGrowthExcludes(){const v=_cloudRead('ec_growth_exclude'); return (v&&typeof v==='object'&&!Array.isArray(v))?v:{};}
+function saveGrowthExcludes(m){_cloudWrite('ec_growth_exclude',m);}   // 目前無 UI 呼叫端（第三塊接），先與其他 growth key 的寫入端對齊
 // ⚠ adsFee / clicks 本函式目前【完全不使用】，先接線給下一塊的排除條件用。
 //   六個呼叫端（本檔 5 處 + daily.js 的 window.calcGrowthAnalysis）新參數一律傳 `x ?? null`、
 //   【不可 ||0】：缺值要保留 null，讓 evalAnaConds 開頭的 null guard 把用到該欄位的條件判 false
@@ -4391,16 +4396,28 @@ function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate, adsFee, clicks) 
   const dis=new Set(getDisabledGrowthTags());
   const ok=l=>!dis.has(l);
   const G=growthRate, R=rev, P=pureRate*100;
-  if(ok('🔴重跌品')&&G !== null && G < -(t.fallPct/100)) return { label:'🔴重跌品', cls:'tag-danger' };
-  if(ok('🟢爆發品')&&G !== null && G > (t.risePct/100))  return { label:'🟢爆發品', cls:'tag-high' };
+  // ── 內建標籤排除條件（ec_growth_exclude）──
+  //   語意：排除條件【全部成立】＝該分支視為不成立、繼續往下走（不是 return 空）。
+  //   空值走安全側：欄位值 null/undefined → evalAnaConds 的 null guard 判該條件 false
+  //   → every() 整組 false ＝【不排除】→ 標籤照常顯示（舊快照缺 adsFee/clicks 不會讓標籤靜默消失）。
+  //   ⚠ _exVals 與下方自訂規則那行的 vals【刻意不同】：這裡 G / prevRev 不塌 0、
+  //     pureRate 為 null 時 P 保留 null（自訂那邊的 P 已被上面 P=pureRate*100 那行以 null*100===0 塌成 0）——
+  //     塌 0 會讓「< 門檻」型排除在缺資料時恆成立，正好違反上一行的安全側。
+  //   ⚠ 該標籤的排除設定非陣列（損毀）→ 視為不排除、不 throw：本函式多數呼叫端沒 try/catch 包著。
+  //   自訂規則【刻意不吃排除】：自訂條件本身就能寫營收門檻，不疊第二層。
+  const _excl=getGrowthExcludes();
+  const _exVals={G, R, P:(pureRate===null||pureRate===undefined)?null:P, prevRev, adsFee, clicks};
+  const ex=l=>{const c=_excl[l];return !(Array.isArray(c)&&evalAnaConds(c,_exVals));};   // true=不排除
+  if(ok('🔴重跌品')&&ex('🔴重跌品')&&G !== null && G < -(t.fallPct/100)) return { label:'🔴重跌品', cls:'tag-danger' };
+  if(ok('🟢爆發品')&&ex('🟢爆發品')&&G !== null && G > (t.risePct/100))  return { label:'🟢爆發品', cls:'tag-high' };
   for(const ct of getCustomGrowthRules()){
     if(evalAnaConds(ct.conds,{G:G??0,R,P,prevRev:prevRev??0}))return{label:ct.label,cls:ct.cls||'tag-add100'};
   }
-  if(ok('👑高營收')&&R >= t.highRev)                           return { label:'👑高營收', cls:'tag-add300' };
-  if(ok('🟨中營收')&&R >= t.midRevMin && R < t.midRevMax)      return { label:'🟨中營收', cls:'tag-add200' };
-  if(ok('🟡發展品')&&R >= t.devRevMin && R < t.devRevMax)      return { label:'🟡發展品', cls:'tag-add100' };
-  if(ok('🔻低利品')&&P < t.lowPurePct)                         return { label:'🔻低利品', cls:'tag-low' };
-  if(ok('⚫斷銷品')&&prevRev !== null && prevRev > 0 && (rev === 0 || rev === null)) return { label:'⚫斷銷品', cls:'tag-lose' };
+  if(ok('👑高營收')&&ex('👑高營收')&&R >= t.highRev)                           return { label:'👑高營收', cls:'tag-add300' };
+  if(ok('🟨中營收')&&ex('🟨中營收')&&R >= t.midRevMin && R < t.midRevMax)      return { label:'🟨中營收', cls:'tag-add200' };
+  if(ok('🟡發展品')&&ex('🟡發展品')&&R >= t.devRevMin && R < t.devRevMax)      return { label:'🟡發展品', cls:'tag-add100' };
+  if(ok('🔻低利品')&&ex('🔻低利品')&&P < t.lowPurePct)                         return { label:'🔻低利品', cls:'tag-low' };
+  if(ok('⚫斷銷品')&&ex('⚫斷銷品')&&prevRev !== null && prevRev > 0 && (rev === 0 || rev === null)) return { label:'⚫斷銷品', cls:'tag-lose' };
   return { label:'', cls:'' };
 }
 
