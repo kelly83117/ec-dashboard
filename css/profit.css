@@ -16,9 +16,66 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .panel{background:#fff;border-radius:12px;border:1px solid #e4e6ef;overflow:hidden;}
 .global-upload{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid #e4e6ef;background:#fafbff;flex-wrap:wrap;}
 
-.stab{padding:4px 14px;border:0;background:transparent;font-size:12px;font-weight:600;font-family:'Noto Sans TC',sans-serif;color:#6b7280;cursor:pointer;border-radius:6px;transition:all .12s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
+/* 淨利表頂端三塊通路切換列的按鈕（上排「通路｜總表」+ 下排藥丸列）。
+   ⚠ 直接改這條共用規則、【不加】.pf-tabrow 範圍限制：全 repo 15 顆 .stab 全部產生於
+     js/profit.js:12-52 的 .pf-tabrow 內（已 grep 全 repo 確認：class="stab" 只命中
+     js/profit.js 的 14/16/17/18/19/20/34/38/40/41/42/43/47/49/50 共 15 行，無任何動態建立）。
+     寫成 .pf-tabrow .stab 會讓本行的 padding 變成永遠取不到的死值，還會誤導後人以為
+     .stab 另有他用 —— 判準同本檔 .sp-seg:hover:not(.on) 那段「不留死碼」的註解。
+
+   🔴 左右 10px 是為「1440px 寬、側欄展開時三塊不換行」反推出來的，不是隨手調的美感值：
+       可用 1115px ／ 原需 1164px（差 49px）
+       12 顆有效按鈕（15 顆扣掉三顆 width:100% 的「總表」鈕，它們被藥丸列撐開、
+       自身 padding 不影響所需寬）各省 (14−10)×2 = 8px，共省 96px
+       新需 1068px → 餘裕 47px
+     ⚠ 1115 與 1164 是 2026-09-04 在瀏覽器用 getBoundingClientRect 實測的，不是估算。
+
+   🔴 不要再放寬到 11px 以上：.stab.active 是 font-weight:700（預設 600），選中那顆的字
+     比較寬 ⇒ 三塊的寬度會隨「目前停在哪個通路」浮動。11px 只剩 23px 餘裕，吸收不了這個
+     抖動，會做出「平常好好的、切到某個通路才換行」的間歇性 bug，重現條件極難找。
+
+   🔴 兩個會讓這 47px 餘裕歸零的已知威脅，日後動到其中任一個都要重算本行：
+     ① TEST_SHOP_ID（js/profit.js:7，原始碼自己註明「將來可能改名或整個移除」）改成更長的
+        名稱時，第 1 塊每多一個全形字 +15px —— 多 3 個字就再度換行。
+     ② .stab-ok（本檔下方兩行，目前全 repo 零使用點）若被接回去，每顆 +6px 圓點 +2px
+        margin-left = 8px × 12 顆 = 96px，與本次節省量完全相等，會一次全部還原成換行。
+
+   ⚠ 可用寬 1115px 的來源之一是 js/profit.js:11 那個外層 inline flex 的
+     justify-content:space-between —— 它目前只有 .pf-tabrow 一個子元素、實際沒作用，但一旦
+     有人往那個 flex 塞第二個元素，可用寬會立刻縮水（還要再扣 gap:10px），餘裕歸零。
+     那個約束只寫在 js 的 inline style 裡，只讀本檔看不到，故記在這裡。 */
+.stab{padding:4px 10px;border:0;background:transparent;font-size:12px;font-weight:600;font-family:'Noto Sans TC',sans-serif;color:#6b7280;cursor:pointer;border-radius:6px;transition:all .12s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
 .stab:hover{color:#374151;}
 .stab.active{background:white;color:#1a1a2e;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.1);}
+/* 1280px 螢幕的使用者專用（1440 已由上面 .stab 的左右 10px 解決，那條【不要動】）。
+   ⚠ 必須放在 .stab 之後：兩者特異度同為 (0,1,0)（@media 不加特異度），靠來源順序分勝負。
+   ⚠ 只覆寫 padding-left / padding-right，刻意不用 padding 簡寫 —— 簡寫會一併重寫上下的 4px，
+     值雖相同但語意上是多改了東西。
+
+   🔴 4px 是 2026-09-04 在 1280×800（側欄展開、好麻吉）實測反推的，不是估算：
+       .pf-tabrow 容器可用寬 955px
+         （注意不是 .main 的 1040 —— 中間被卡片 border 與 header padding 吃掉約 85px）
+       左右 padding 10 → 需要 1068px → 掉第二排
+       左右 padding  6 → 需要  972px → 仍掉第二排
+       左右 padding  4 → 需要  924px → ✅ 三塊 .pf-tabgrp 上緣 31/31/31，排成一排
+
+   🔴 餘裕是 0，已知並接受：任何字數變動（通路改名、新增通路、TEST_SHOP_ID 變長）
+     都會讓它在 1280 再度換行。失敗形態是「掉回兩排」——版面變醜，不是資料錯誤，可容忍。
+     ⚠ PR #254 已移除外層卡片的 overflow:hidden，所以【不會】再發生舊版那種
+       「最右邊的按鈕被無聲剪掉、沒有捲軸也沒有提示」的失敗。
+
+   ⚠ 已實測【無效】，不要再試：縮小三顆「通路｜總表」鈕的 font-size（15→13）。
+     它們帶 inline width:100%、在 .pf-tabgrp 這個 column flex 裡被藥丸列撐開，
+     群組寬度由【下排藥丸列】決定 ⇒ 改字級總寬一點都不會變，只會讓字變小變醜。
+
+   ⚠ 側欄收合時因 .main 的 zoom:1.12（css/main.css）反而需要更多寬度，本條 @media
+     對收合狀態幫助有限。那是另一個題目，本次已知未解、刻意不加 body.sidebar-collapsed 變體。
+
+   ⚠ 斷點不衝突：本檔既有的 @media 只有 (max-width:720px) 的 .mm-anlz-grid；
+     css/main.css 的 900 / 768 / 700 / 460 都不碰 .stab。1366 是全站最大的一個斷點。 */
+@media (max-width:1366px){
+  .stab{padding-left:4px;padding-right:4px;}
+}
 .sdot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .stab-ok{width:6px;height:6px;border-radius:50%;background:#d1d5db;margin-left:2px;transition:background .3s;}
 .stab-ok.on{background:#10b981;}
@@ -343,6 +400,28 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .col-pick-btn{padding:7px 14px;border:1px solid #e4e6ef;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;font-weight:600;color:#374151;}
 .col-pick-btn:hover{background:#f3f4f6;}
 .col-picker-wrap{position:relative;display:inline-block;}
+/* ═══════ 這兩個面板的「不會被裁掉」是靠一個【不在本檔】的前提，動之前務必讀完 ═══════
+   🔴 淨利表最外層那顆卡片（js/profit.js 的 window.__profitTabHtml 第一行，inline style）
+     原本有 overflow:hidden，已於 2026-09-04 【刻意移除】。本檔的 .col-picker-menu 與
+     上方的 .tag-filter-bar 兩個 position:absolute 面板，能不能被看到，就取決於那一行。
+
+   為什麼移除（2026-09-04 在 1440×860 實測，不是估算）：
+     .tag-filter-bar  高 775px、上緣 395、下緣 1170 → 超出視窗 310px
+     .col-picker-menu 高 711px（PR #253 改兩欄後已降到約 390px，不再溢出）
+     兩者都是 absolute、containing block 都在那顆卡片內 ⇒ 有 overflow:hidden 時是被【裁掉】，
+     不是掉出視窗：沒有捲軸、沒有任何提示，面板下半部看不到也點不到。
+     移除後面板落進 .main 的可捲範圍（實測 main 可捲 92 + window 可捲 152 = 244，剛好等於當時的溢出量）。
+     ⚠ 同時實測過：移除前後、開面板前後，.main clientWidth 都是 1200、三塊 .pf-tabgrp 上緣
+       全程 31/31/31 —— 不會把 PR #252 修好的通路切換列推回換行。
+
+   🔴 已知副作用（已評估並接受，不是待修）：
+     overflow:hidden 本身會建立捲動容器。移除之後，卡片內【且沿路沒有中介捲動容器】的
+     <thead><tr>（本檔上方有一條【無範圍限定】的 `thead tr{position:sticky;top:0}` 全域規則），
+     其 scrollport 會從「那顆永遠不捲的卡片」改成 .main ⇒ 原本形同失效的 sticky 表頭會開始真的黏住。
+     已確認至少一處：momoMoPlusBatchQueueHTML 產生的批次佇列表（渲染進 #momo-sub-content-{通路}，
+     沿路無捲動容器）。在 .tscroll / .recon-scroll / .ana-modal 裡的表頭不受影響（各有自己的 scrollport）。
+
+   回滾方式：把 overflow:hidden 加回 js/profit.js 那一行即可，一行還原、行為完全回到 2026-09-04 之前。 */
 .col-picker-menu{display:none;position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid #e4e6ef;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.1);z-index:300;min-width:155px;padding:4px 0;}
 .col-picker-menu.open{display:block;}
 .cp-row{display:flex;align-items:center;gap:8px;padding:6px 13px;cursor:pointer;font-size:13px;color:#374151;user-select:none;}
@@ -350,6 +429,44 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .cp-row.cp-row-dragging{opacity:.35;}
 .cp-row.cp-row-drag-over{box-shadow:inset 0 2px 0 #5b5fcf;}
 .cp-row-handle{cursor:grab;color:#c7cad1;font-size:12px;line-height:1;flex-shrink:0;}
+
+/* 蝦皮「☰ 欄位」面板【專用】的兩欄排列。
+   ⚠ 只有 js/profit.js 的 openColPicker（蝦皮）會把 cp-2col 掛上去。另外三個共用
+     .col-picker-menu 外殼的產生點【都沒有】、本次也一個字都沒動：
+       momoOpenColPicker   （MOMO 欄位，15 欄）
+       openCupColPicker    （酷澎欄位，12 欄）
+       momoOpenFilterPanel （MOMO 標籤 / 篩選，className 是 'col-picker-menu open mm-filter-panel'）
+     新增的兩條選擇器都以 .cp-2col 開頭 ⇒ 不可能匹配到沒掛這個 class 的元素。
+
+   🔴 為什麼【不能】直接改 .col-picker-menu.open 的 display，而要另開一個 class：
+     .mm-filter-panel 只覆寫了 position/top/right/left/bottom/z-index/min-width/max-width/
+     padding/max-height/overflow-y/font-family ——【沒有覆寫 display】，它能顯示完全是靠
+     繼承上面那條 .col-picker-menu.open{display:block}。把基底類改成 display:grid，
+     MOMO 篩選面板會當場變成 grid 容器，它內部的 .mm-fp-top / .mm-fp-foot 兩個
+     position:sticky 會跟著壞掉。
+
+   🔴 為什麼必須寫成 .cp-2col.open（兩個 class）而不是 .cp-2col：
+     .cp-2col 是 (0,1,0)，會【輸給】上面 .col-picker-menu.open 的 (0,2,0)，兩欄不會生效。
+     寫成 .col-picker-menu.cp-2col 也不行 —— 那會贏過 .col-picker-menu{display:none}，
+     面板在沒有 .open 時也會露出來。.cp-2col.open 同為 (0,2,0) 且在後面 ⇒ 剛好。
+
+   🔴 為什麼要兩欄（2026-09-04 在 1440×860 筆電實測，不是估算）：
+     單欄面板高 711px、上緣 393、下緣 1104 → 超出視窗 244px；而外層卡片
+     （js/profit.js 的 __profitTabHtml 最外層 div）是 overflow:hidden ⇒ 面板是被【裁掉】，
+     不是掉出視窗，沒有捲軸、沒有任何提示，最後 9~10 個欄位看不到也點不到。
+     20 列改兩欄 → 10 列，預估高度約 381-396px，下緣約 767-789，完整落在視窗內。
+     ⚠ 因此本次【刻意不動】那顆卡片的 overflow:hidden —— 兩欄之後已經不需要它。
+
+   ⚠ 已知的行為代價（已評估並接受，不是待修的 bug）：
+     cpRowDrop 只讀 e.clientY、不讀 e.clientX，兩欄之後同一排的左右兩格 top/height 相同 ⇒
+     「要插在左邊還是右邊」判斷不到，游標左右移動沒有作用、上下微動反而會翻轉落點。
+     資料層是安全的：filter → indexOf → splice 三步在任何幾何下都產生合法排列，
+     不會遺失欄位、不會重複、不會越界（getOrderedCols 另有補漏自癒）。純粹是操作手感問題。 */
+.cp-2col.open{display:grid;grid-template-columns:repeat(2,max-content);}
+/* 標題列（第一個子元素）與底部按鈕列（最後一個）橫跨兩欄；中間的 .cp-row 自動兩欄填入。
+   用 > 子選擇器鎖在本面板自己的直接子元素上，renderColPicker 的 innerHTML 一個字都不用改。 */
+.cp-2col > :first-child,.cp-2col > :last-child{grid-column:1 / -1;}
+
 /* Suggestion rules (建議) */
 .sugg-btn-wrap{display:flex;align-items:center;border:1px solid #e4e6ef;border-radius:8px;overflow:hidden;}
 .sugg-btn-wrap .col-pick-btn{border:none;border-radius:0;}
