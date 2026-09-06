@@ -4411,7 +4411,10 @@ function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate, adsFee, clicks) 
   if(ok('🔴重跌品')&&ex('🔴重跌品')&&G !== null && G < -(t.fallPct/100)) return { label:'🔴重跌品', cls:'tag-danger' };
   if(ok('🟢爆發品')&&ex('🟢爆發品')&&G !== null && G > (t.risePct/100))  return { label:'🟢爆發品', cls:'tag-high' };
   for(const ct of getCustomGrowthRules()){
-    if(evalAnaConds(ct.conds,{G:G??0,R,P,prevRev:prevRev??0}))return{label:ct.label,cls:ct.cls||'tag-add100'};
+    // adsFee / clicks 裸傳（呼叫端一律 ?? null）：缺值 → evalAnaConds null guard → 該條件不成立，
+    //   與 _exVals 的安全側一致。⚠ 與既有四欄的塌 0 寫法（G??0 / prevRev??0）刻意不同——
+    //   那是既有行為，動了會改變現有自訂規則的判定，不在本次範圍。
+    if(evalAnaConds(ct.conds,{G:G??0,R,P,prevRev:prevRev??0,adsFee,clicks}))return{label:ct.label,cls:ct.cls||'tag-add100'};
   }
   if(ok('👑高營收')&&ex('👑高營收')&&R >= t.highRev)                           return { label:'👑高營收', cls:'tag-add300' };
   if(ok('🟨中營收')&&ex('🟨中營收')&&R >= t.midRevMin && R < t.midRevMax)      return { label:'🟨中營收', cls:'tag-add200' };
@@ -4426,8 +4429,13 @@ let _growthNewConds=[];
 let _growthNewLabel='';
 let _growthNewCls='tag-add300';
 const GROWTH_FIELD_OPTS=[
-  {v:'G',l:'成長率%(G)'},{v:'R',l:'營收(R)'},{v:'P',l:'淨利率%(P)'},{v:'prevRev',l:'上期營收'}
+  {v:'G',l:'成長率%(G)'},{v:'R',l:'營收(R)'},{v:'P',l:'淨利率%(P)'},{v:'prevRev',l:'上期營收'},
+  {v:'adsFee',l:'廣告費(adsFee)'},{v:'clicks',l:'點擊數(clicks)'}
 ];
+// 本清單由【內建標籤排除條件】與【自訂規則】兩個編輯器共用（condRowHtml / exRow），
+//   六個欄位兩邊的判定都吃得到（自訂規則的 vals 已補 adsFee/clicks，見 calcGrowthAnalysis）。
+//   ⚠ 空值語意兩邊不同：排除條件的 G/prevRev 缺值不塌 0（安全側）；自訂規則沿用既有的
+//     G??0 / prevRev??0 塌 0 —— 新加的 adsFee/clicks 在兩邊都走安全側。詳見該函式內兩處註解。
 function openGrowthSettings(shop){
   let ov=document.getElementById('growth-overlay');
   if(!ov){
@@ -4451,6 +4459,20 @@ function closeGrowthSettings(){document.getElementById('growth-overlay')?.classL
 function renderGrowthModalBody(){
   const t=getGrowthThresh();const custom=getCustomGrowthRules();
   const disabled=getDisabledGrowthTags();
+  const excl=getGrowthExcludes();
+  // 每個內建標籤下方一列排除條件編輯器（一列一條；資料結構仍是陣列，只是長度 0/1 —— 第二塊已定）。
+  //   刻意不塞進 .ana-rule-row 同一列：modal 固定 640px，中營收那列已有兩個門檻輸入框，再塞
+  //   下拉×2+輸入框必定超寬。子列佔滿寬度，垂直靠 .ana-modal-body 既有捲動吸收。
+  //   ⚠ 只渲染既有設定的第一條：UI 不做多條件 AND；若有人用 Console 塞了多條，儲存時會被覆蓋成單條。
+  const exRow=(label)=>{
+    const c=(Array.isArray(excl[label])&&excl[label][0])?excl[label][0]:null;
+    const vAttr=c?String(c.v).replace(/"/g,'&quot;'):'';
+    return`<div class="grx-row" data-grx="${label}"><span class="grx-lbl">排除</span>
+      <select class="grx-f">${GROWTH_FIELD_OPTS.map(o=>`<option value="${o.v}"${c&&o.v===c.f?' selected':''}>${o.l}</option>`).join('')}</select>
+      <select class="grx-op">${['>=','>','<=','<','=','!='].map(o=>`<option value="${o}"${c&&o===c.op?' selected':''}>${o}</option>`).join('')}</select>
+      <input type="number" class="grx-v" value="${vAttr}" placeholder="留空">
+      <span class="grx-hint">符合就不標；留空＝不排除</span></div>`;
+  };
   const inp=(id,val,step='1',w='70px')=>`<input type="number" id="grths-${id}" value="${val}" step="${step}" style="width:${w}">`;
   const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}"${o.v===_growthNewCls?' selected':''}>${o.l}</option>`).join('');
   const condRowHtml=(i,c)=>`<div class="ana-cond-row" id="grthcr-${i}">
@@ -4467,16 +4489,24 @@ function renderGrowthModalBody(){
   }).join(''):`<div class="ana-custom-empty">尚無自訂標籤</div>`;
   const disabledSection=disabled.length?`<div class="ana-sec-hdr" style="margin-top:16px">已停用標籤</div>${disabled.map(l=>`<div class="ana-rule-row" style="opacity:.5"><span class="ana-rule-tag tag-low" style="min-width:auto;padding:4px 8px">${l}</span><span class="ana-rule-desc" style="font-size:12px;color:#9ca3af">已停用</span><button class="ana-rule-del" style="color:#10b981" onclick="restoreGrowthTag(decodeURIComponent('${encodeURIComponent(l)}'))" title="恢復">↩</button></div>`).join('')}`:'';
   document.getElementById('growth-modal-body').innerHTML=`
+    <div class="grx-notes">・符合排除條件的商品不會顯示任何成長標籤，畫面上不會有任何記號。<br>・排除條件會影響工作日誌的優化進度分母，包含已經過去的期間。<br>・如果自訂標籤取了跟內建標籤一樣的名字，排除條件對它無效。</div>
     <div class="ana-sec-hdr">成長類</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">🔴重跌品</span><span class="ana-rule-desc">成長率 &lt; -${inp('fallPct',t.fallPct,'0.1')} %</span>${trash('🔴重跌品')}</div>
+    ${exRow('🔴重跌品')}
     <div class="ana-rule-row"><span class="ana-rule-tag tag-high">🟢爆發品</span><span class="ana-rule-desc">成長率 > ${inp('risePct',t.risePct,'0.1')} %</span>${trash('🟢爆發品')}</div>
+    ${exRow('🟢爆發品')}
     <div class="ana-sec-hdr">營收類</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">👑高營收</span><span class="ana-rule-desc">營收 ≥ ${inp('highRev',t.highRev,'100','80px')}</span>${trash('👑高營收')}</div>
+    ${exRow('👑高營收')}
     <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">🟨中營收</span><span class="ana-rule-desc">營收 ${inp('midRevMin',t.midRevMin,'100','80px')} ~ ${inp('midRevMax',t.midRevMax,'100','80px')}</span>${trash('🟨中營收')}</div>
+    ${exRow('🟨中營收')}
     <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">🟡發展品</span><span class="ana-rule-desc">營收 ${inp('devRevMin',t.devRevMin,'100','80px')} ~ ${inp('devRevMax',t.devRevMax,'100','80px')}</span>${trash('🟡發展品')}</div>
+    ${exRow('🟡發展品')}
     <div class="ana-sec-hdr">利潤類</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-low">🔻低利品</span><span class="ana-rule-desc">淨利率 &lt; ${inp('lowPurePct',t.lowPurePct,'0.1')} %</span>${trash('🔻低利品')}</div>
+    ${exRow('🔻低利品')}
     <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">⚫斷銷品</span><span class="ana-rule-desc">上期有銷售，本期營收 = 0</span>${trash('⚫斷銷品')}</div>
+    ${exRow('⚫斷銷品')}
     <div class="ana-sec-hdr">自訂標籤</div>
     <div id="growth-custom-list">${customRows}</div>
     ${disabledSection}
@@ -4523,6 +4553,17 @@ function saveGrowthSettings(){
     devRevMin:gg('devRevMin')??5000,devRevMax:gg('devRevMax')??7000,
     lowPurePct:gg('lowPurePct')??20,
   };
+  // 排除條件：整份從 7 條 .grx-row 重建 —— 數值留空的標籤【不寫進物件】＝從 ec_growth_exclude
+  //   移除（不存空字串/null）。副作用（刻意接受）：不在畫面上的殘留 key、或 Console 塞的多條件
+  //   陣列，儲存時都會被這份重建結果覆蓋。v 存字串，與自訂規則的 conds 同格式（evalAnaConds 會 parseFloat）。
+  const excl={};
+  document.querySelectorAll('#growth-modal-body .grx-row').forEach(row=>{
+    const label=row.dataset.grx;if(!label)return;
+    const v=(row.querySelector('.grx-v')?.value??'').trim();
+    if(v==='')return;
+    excl[label]=[{f:row.querySelector('.grx-f').value,op:row.querySelector('.grx-op').value,v}];
+  });
+  saveGrowthExcludes(excl);
   saveGrowthThresh(t);closeGrowthSettings();reapplyAnaToAll();
 }
 
