@@ -6,7 +6,10 @@ const Store = window.Store;
 //     常數放後面會撞 TDZ、整個模組載入失敗。
 const TEST_SHOP_ID='測試通路';
 
-window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
+// 🔴 最外層卡片刻意【沒有】overflow:hidden（2026-09-04 移除）：它會把「🏷 標籤」與「☰ 欄位」
+//   這兩個 position:absolute 的面板整個裁掉，沒有捲軸、也沒有任何提示。完整理由與副作用
+//   見 css/profit.css 的 .col-picker-menu 上方註解。要回滾就把 overflow:hidden 加回這一行。
+window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px">
   <div style="padding:10px 14px;border-bottom:1px solid #e5e7eb">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
       <div class="pf-tabrow">
@@ -352,17 +355,114 @@ function _markPending(key){
   _showSyncBtn();
 }
 // ══════ 廣告調整（ec_notes）的「真正本機編輯」註冊表（persisted，跨重整）══════
-//  為什麼需要：syncToCloud 開頭那條 ec_notes 推送讀的是 getNotes()，而 getNotes 第一層讀
+//  只有真正經 saveNotes 編輯、且還沒成功推上雲的 key 會進這個註冊表。
+//
+//  ── 舊理由（2026-09-03 起【部分失效】，保留是為了讓人看懂它為什麼長這樣）──
+//    當初 syncToCloud 那條 ec_notes 推送的 payload 是 getNotes()，而 getNotes 第一層讀
 //    Store._profitMem —— 那是 app/profit 與封存分片（app/profit_notes_YYYY）的【合併結果】。
-//    沒有這道閘門的話，使用者只要把月份下拉切到已封存的月份、按一下「☁ 同步雲端」，那個月的
+//    沒有閘門的話，使用者只要把月份下拉切到已封存的月份、按一下「☁ 同步雲端」，那個月的
 //    ec_notes 就會被從封存分片讀出來、原封不動寫回 app/profit —— 封存省下的額度當場吐回去，
-//    而且完全無聲。只有真正經 saveNotes 編輯、且還沒成功推上雲的 key 會進這個註冊表。
+//    而且完全無聲。
+//    ⇒ 這條理由現在【已經不成立】：廣告調整改走 syncNotesMerge，推的值來自 readNotesForPush
+//      （_mem → localStorage，不讀 _profitMem），而且只寫 dirty 的那幾個品號，不會搬整份分片。
+//
+//  🔴 ── 新理由（現在真正撐著這道閘門的東西，拿掉它會立刻出事）──
+//    廣告調整改走 dirty-scoped merge 之後，「沒編輯過」⇒「品號級 dirty 也是空的」⇒
+//    syncNotesMerge 的 (b) 會 throw。沒有這道閘門的話，syncToCloud 會替【當期】無條件建一個
+//    task，於是使用者只要停在任何一個「有調整、但這次沒編輯過」的月份按同步，就會吃到一次
+//    「沒有任何品號被登記」的失敗彈窗 —— 每一次同步都跳。
+//    ⇒ 這道閘門的性質已經從「節流（省額度）」變成「防呆（不讓正常操作報錯）」。
+//      結論不變：【保留】。但如果你日後在讀舊註解時覺得「額度問題已經沒了、可以拿掉」，
+//      請先讀完這一段 —— 那正是這次把兩個理由分開寫的原因。
 //  ⚠ 這三支刻意【不呼叫】同檔既有的 _momoReadJson（搜 `function _momoReadJson`）。
 //    這【不是】沒注意到重複，是兩個明確理由，不要為了「消除重複」改回去：
 //    (1) 語意不相容：_momoReadJson 把「key 不存在」與「內容損毀」吞成同一個 fallback 值。
 //        本註冊表必須把這兩種狀態分開（理由見下方 _notesIsDirty），用它就分不開，
 //        而且失敗方向會反過來變成「不推」＝丟資料。
 //    (2) 它位在 MOMO 區（本檔約 6900 行以後），那一區改動頻繁；不依賴它就不會被那邊波及。
+// ══════ dirty 註冊表「寫入失敗」記錄（E-0a 第一～三塊：記錄＋toast＋同步收尾通報）══════
+//  為什麼需要：下方三支 dirty 註冊表（_notesDirtyAdd / _editsDirtyAdd / _notesItemsDirtyAdd）
+//    寫入失敗時只有 console.error。而「主資料成功、dirty 失敗」是真實可達的 —— 滿載機器上
+//    刪除或縮短調整＝主資料是縮小寫入（會成功），註冊表是成長寫入（會爆）——
+//    那種時候一個字都不會吵：_notesIsDirty 回 false → syncToCloud 安靜跳過 →
+//    toast 說「沒有需要同步的資料」，使用者的調整永遠上不了雲。
+//    這份記錄是通報的唯一資料來源（寫入當下的 toast：_notifyDirtyFail；同步收尾的通報與清除：syncToCloud 的 dirtyFailSnap / _dirtyFailClear）。
+//  為什麼鏡射 sessionStorage：要記的正是「localStorage 滿了」，失敗標記寫回 localStorage
+//    是雞生蛋；sessionStorage 配額獨立、撐過同分頁 F5。同一理由的既有前例：本檔 momoUiW
+//    上方註解（搜 momoUiW）。⚠ 關分頁 / 重開瀏覽器就沒了 —— 已知取捨：跨重啟沒有可靠訊號
+//    能分辨「登記掉了」與「已同步成功」（兩者在 localStorage 長得一樣），硬做＝一盞常亮的燈。
+//  🔴 _dirtyFailAdd 在別人的 catch 裡跑，自己【絕不能再拋】：全身 try/catch，sessionStorage
+//    那層再包一層。用 function 宣告不用 const，避免 TDZ（理由同本檔 readEditsForPush 上方註解）。
+const _DIRTYFAIL_SS='ec_dirtyfail_v1';   // sessionStorage key：{ 'reg|key': {n,msg,ts} }
+const _dirtyWriteFailures=new Map();     // 本 session 失敗記錄：'reg|key' → {n:次數, msg:最後錯誤, ts}
+function _dirtyFailAdd(reg,key,err){
+  try{
+    const id=reg+'|'+key;
+    const cur=_dirtyWriteFailures.get(id)||{n:0,msg:'',ts:0};
+    cur.n++;
+    cur.msg=err?(((err.name||'')+' '+(err.message||String(err))).trim()):'(註冊表損毀早退)';
+    cur.ts=Date.now();
+    _dirtyWriteFailures.set(id,cur);
+    try{
+      const m={};
+      // 先搬 sessionStorage 既有的（F5 後模組層歸零、只剩那份，不可整包蓋掉），再用本層覆蓋同名的
+      const raw=sessionStorage.getItem(_DIRTYFAIL_SS);
+      if(raw){ const old=JSON.parse(raw); if(old&&typeof old==='object'&&!Array.isArray(old)) Object.keys(old).forEach(function(k2){ m[k2]=old[k2]; }); }
+      _dirtyWriteFailures.forEach(function(v,k2){ m[k2]=v; });
+      sessionStorage.setItem(_DIRTYFAIL_SS,JSON.stringify(m));
+    }catch{}
+    _notifyDirtyFail(reg,key);   // 記錄完成才通報（通報自己不會拋，見其函式）
+  }catch{}
+}
+// 讀取端：模組層 + sessionStorage 合併（同名以模組層為準）。回陣列；Console 除錯與後續兩塊共用。
+function _dirtyFailList(){
+  const m={};
+  try{ const raw=sessionStorage.getItem(_DIRTYFAIL_SS); if(raw){ const old=JSON.parse(raw); if(old&&typeof old==='object'&&!Array.isArray(old)) Object.keys(old).forEach(function(k){ m[k]=old[k]; }); } }catch{}
+  try{ _dirtyWriteFailures.forEach(function(v,k){ m[k]=v; }); }catch{}
+  return Object.keys(m).map(function(k){ const i=k.indexOf('|'); return Object.assign({reg:k.slice(0,i), key:k.slice(i+1)}, m[k]); });
+}
+window.__dirtyFailures=_dirtyFailList;   // Console 查詢入口（第一塊驗收用；之後兩塊的資料來源同這份）
+// ── 寫入當下的通報（E-0a 第二塊）──
+//  ⚠ 用 toast 不用 modal：saveNotes / saveEdits 之後緊接著重繪與輸入流程，modal 會打斷打字；
+//    toast 自 2026-09-03（--z-toast 提到 100000）起彈窗開著也看得見。
+//  🔴 去重旗標【刻意不與】_notesFailNotified / _editsFailNotified 共用：共用的話，同 session
+//    先發生過「主資料失敗」彈窗，之後的「只有 dirty 失敗」（主資料成功、完全無聲的那一格）
+//    就會被吃掉 —— 那正是這整套要修的洞。代價是「全部失敗」時 modal + toast 各出一個，
+//    兩者權重不同（modal 重、toast 輕），可接受。
+//  ⚠ 文案不能只叫人「重打」：空間清出來之前重打一樣失敗（成長寫入必爆，配額測試 2026-09-05
+//    對照 B 實測）。要指向真的能解的動作：先複製備份 → 清空間 → 再重打。
+let _dirtyFailNotified=false;   // 同一次 session 只出一次 toast；重整歸零（比照 _notesFailNotified，刻意不持久化）
+function _notifyDirtyFail(reg,key){
+  try{
+    if(_dirtyFailNotified) return;              // 後續失敗只留 console（各失敗點 catch 已自帶 console.error）
+    if(typeof showToast!=='function') return;   // toast 不可用就【不立旗標】，下次失敗還有機會出聲（比照 _notifyNotesSaveFail）
+    _dirtyFailNotified=true;
+    const what=(reg==='editsDirty')?'改的數字':'打的調整';
+    showToast('⚠ 剛才'+what+'沒有登記進待同步清單（多半是這台電腦的儲存空間滿了）。按「☁ 同步雲端」不會把它推上雲，重整後畫面也會變回雲端版本 → 請先把內容複製備份；空間清出來之前重打也存不進去。此提醒這次開頁只出現一次，之後只記在 F12 Console。','error',12000);
+  }catch{}
+}
+// ── 清除（E-0a 第三塊）：某把 key【真的推送成功】後，把它對應的失敗記錄消掉（模組層 + sessionStorage 一起）──
+//  🔴 設計是「至少報一次、成功推送該 key 後才清」：syncToCloud 收尾一開始先 _dirtyFailList()
+//    拍快照，problems / modal / __lastSyncReport 全吃快照 → 本函式何時跑都蓋不掉本次報告。
+//  ⚠ 已知且接受的殘餘風險：記錄沒存「丟的是哪一筆」（key 級根本沒有品號可記），所以同一把
+//    key 的【另一筆】編輯成功同步也會清掉記錄 —— modal 文案已明示「若剛才重打的不含當時
+//    那筆，請再確認」。要逐品號對消是獨立技術債（2026-09-05 裁決），不在 E-0a。
+function _dirtyFailClear(key){
+  try{
+    _dirtyWriteFailures.forEach(function(v,id){ if(id.slice(id.indexOf('|')+1)===key) _dirtyWriteFailures.delete(id); });
+    try{
+      const raw=sessionStorage.getItem(_DIRTYFAIL_SS);
+      if(raw){
+        const old=JSON.parse(raw);
+        if(old&&typeof old==='object'&&!Array.isArray(old)){
+          let changed=false;
+          Object.keys(old).forEach(function(id){ if(id.slice(id.indexOf('|')+1)===key){ delete old[id]; changed=true; } });
+          if(changed) sessionStorage.setItem(_DIRTYFAIL_SS,JSON.stringify(old));
+        }
+      }
+    }catch{}
+  }catch{}
+}
 const _NOTES_DIRTY_LS='ec_notes_dirty';   // JSON array：真正編輯過還沒推的 full key（ec_notes|…）
 function _notesDirtyAdd(k){
   // ⚠ 兩條失敗路徑都【不吞】：註冊表出事就等於這道救援網出事，必須留下訊號，不可安靜失敗。
@@ -384,7 +484,7 @@ function _notesDirtyAdd(k){
       else console.error('[notesDirty] 註冊表內容損毀，已重建成只含這一把。先前未推送的調整標記可能已遺失 —— 請人工比對 app/profit 確認舊的調整有沒有漏上雲。原始內容：',raw);
     }
     if(!arr.includes(k)){ arr.push(k); localStorage.setItem(_NOTES_DIRTY_LS,JSON.stringify(arr)); }
-  }catch(e){ console.error('[notesDirty] 寫入註冊表失敗，這把 key 的待同步標記沒存下來：',k,e); }   // localStorage 被擋 / 配額滿：重整後 _notesIsDirty 會回 false、syncToCloud 就不推它 ＝ 使用者打的調整上不了雲
+  }catch(e){ console.error('[notesDirty] 寫入註冊表失敗，這把 key 的待同步標記沒存下來：',k,e); _dirtyFailAdd('notesDirty',k,e); }   // localStorage 被擋 / 配額滿：重整後 _notesIsDirty 會回 false、syncToCloud 就不推它 ＝ 使用者打的調整上不了雲
 }
 function _notesDirtyDel(k){
   try{
@@ -407,6 +507,477 @@ function _notesIsDirty(k){
     if(!Array.isArray(a)) return true;
     return a.includes(k);
   }catch{ return true; }
+}
+// ══════ 編輯覆蓋值（ec_edits）的「真正本機編輯」註冊表（persisted，跨重整）══════
+//  形狀完全比照上方 _NOTES_DIRTY_LS 三支（本檔搜 `const _NOTES_DIRTY_LS`），三種狀態的
+//  fail-safe 方向【逐條相同】，理由見下方 _editsIsDirty 上的註解。
+//  為什麼需要：syncToCloud 那條 ec_edits extra 的唯一納入條件曾經是 Object.keys(edits).length>0，
+//    而值來自 getEdits（_profitMem 優先＝雲端訂閱灌進來的）→「雲端有資料」本身就會變成一筆
+//    推送任務，跟使用者有沒有編輯過完全無關；而且推的是雲端值，推「成功」後還會清掉待推標記。
+//    本註冊表就是那道缺失的「真的編輯過」判準，與 readEditsForPush（換來源）是一組，不可只做一半。
+//
+//  🔴🔴 這個 PR【沒有做】的部分，寫在這裡免得被下一個人當成已結案 🔴🔴
+//   ① 第三段的 dirty-scoped merge【尚未做】（下一個 PR）。ec_edits 目前仍是整包 setField
+//     last-write-wins，仍留在 _momoFullPushDeleteGuard 底下（本檔搜 `ec_edits|{通路} 也還沒走 merge`）。
+//     本 PR 只解「不該推的別推、要推的推對來源」，不解「兩人同時改同一個通路會互蓋」。
+//     ⚠ 附帶一提：commitEdit 清空最後一個覆蓋值時只 `delete edits[code][col]`、不刪 edits[code]，
+//       會留下空殼 {}；local={code:{}} 對上 cloud={code:{col:v}} 時 momoCloudDeleteCount 會算出
+//       willDelete=1、被守衛擋下。這是【既有行為】（守衛的 localV 一直讀 _mem→localStorage，
+//       本檔搜 `// 本機值（與推送同源）`），本 PR 不改變它，待第三段 merge 一併處理。
+//   ② 本 PR 上線【之前】就已經「編輯過但沒推上去」的使用者，他們的 localStorage 裡有值、
+//     但註冊表是空的 → 那些編輯【不會】被自動撿回來，必須再編輯一次（哪怕改成同樣的數字）
+//     才會登記 dirty。這是 dirty 註冊表這類方案的共同代價，不是 bug。
+const _EDITS_DIRTY_LS='ec_edits_dirty';   // JSON array：真正編輯過還沒推的 full key（ec_edits|{通路}）
+function _editsDirtyAdd(k){
+  // ⚠ 兩條失敗路徑都【不吞】：註冊表出事就等於這道救援網出事，必須留下訊號（比照 _notesDirtyAdd）。
+  try{
+    const raw=localStorage.getItem(_EDITS_DIRTY_LS);
+    let arr=[];
+    if(raw!==null){   // raw===null ＝ 從沒人編輯過的正常空狀態（判準與 _editsIsDirty 逐字一致，兩支對「不存在」的認定不能分歧）
+      let a, ok=true;
+      try{ a=JSON.parse(raw); }catch{ ok=false; }
+      if(ok && Array.isArray(a)) arr=a;
+      // 🔴 重建的代價與 _notesDirtyAdd 那段【完全相同】：損毀期間 _editsIsDirty 一律回 true（全推）＝
+      //   安全狀態；一旦這裡重建成「只含這一把」，註冊表又變回合法陣列，_editsIsDirty 對其他所有 key
+      //   立刻回 false —— 損毀之前那些還沒推上去的編輯就被靜默跳過了（fail-safe 轉 fail-unsafe）。
+      //   仍然選擇重建，是因為不重建的話註冊表永遠損毀、_editsIsDirty 永遠回 true ＝ 閘門等於沒做。
+      //   代價換成下面這行【刺眼的 console.error】：看到它就要人工確認有沒有覆蓋值漏上雲。
+      else console.error('[editsDirty] 註冊表內容損毀，已重建成只含這一把。先前未推送的編輯標記可能已遺失 —— 請人工比對 app/profit 確認舊的覆蓋值有沒有漏上雲。原始內容：',raw);
+    }
+    if(!arr.includes(k)){ arr.push(k); localStorage.setItem(_EDITS_DIRTY_LS,JSON.stringify(arr)); }
+  }catch(e){ console.error('[editsDirty] 寫入註冊表失敗，這把 key 的待同步標記沒存下來：',k,e); _dirtyFailAdd('editsDirty',k,e); }   // localStorage 被擋 / 配額滿：重整後 _editsIsDirty 會回 false、syncToCloud 就不推它 ＝ 使用者改的數字上不了雲
+}
+function _editsDirtyDel(k){
+  try{
+    const raw=localStorage.getItem(_EDITS_DIRTY_LS);
+    const a=raw?JSON.parse(raw):[];
+    if(Array.isArray(a)&&a.includes(k)) localStorage.setItem(_EDITS_DIRTY_LS,JSON.stringify(a.filter(x=>x!==k)));
+  }catch{}   // 刪不掉只是下次多推一次（安全方向），不必吵
+}
+// 🔴 三種狀態的方向與 _notesIsDirty（本檔搜 `function _notesIsDirty`）【逐條相同】，理由也相同
+//   —— 失效後果不對稱：
+//   ⚠ 三種狀態必須分開判、不可合併成一個 fallback：
+//     raw===null      註冊表根本不存在 ＝ 從沒人編輯過，是正常空狀態、不是失敗 → false
+//                     （回 true 等於每次都推，本閘門等於沒做）
+//     非陣列 / throw  內容損毀或 localStorage 被擋 → true（照推）
+//                     回 false 是「不推」＝使用者改的數字靜默上不了雲，是【不可觀測】的失敗；
+//                     回 true 最壞只是多推一次自己的值，而且推送來源已經是 readEditsForPush
+//                     （localStorage），不會像舊的 getEdits 那樣把雲端值推回雲端。
+function _editsIsDirty(k){
+  try{
+    const raw=localStorage.getItem(_EDITS_DIRTY_LS);
+    if(raw===null) return false;
+    const a=JSON.parse(raw);
+    if(!Array.isArray(a)) return true;
+    return a.includes(k);
+  }catch{ return true; }
+}
+// ══════ 品號級 dirty 註冊表（persisted，跨重整）══════
+//  用途：給 dirty-scoped merge 用（模式與資料流見同檔 momoSyncCostByOrigin + momoMergeByKey，
+//    本檔搜 `function momoMergeByKey`）。上面那份 _NOTES_DIRTY_LS 記的是「哪一把 key 被編輯過」，
+//    這一份再往下一層，記「那把 key 底下的哪些【品號】被碰過」。
+//  為什麼需要這一層：ec_notes|{通路}_growth 是全通路全期間共用一個物件，整包 setField ＝
+//    last-write-wins，會蓋掉同事的更新；而 adjustment 沒有 id、內容欄位（date+period）在真實
+//    資料上會撞號（2026-09 實測 12 組），所以【不能用內容當身分】。改用「我碰過誰」這份註冊表
+//    當身分：merge 時只在 dirty 的品號上表態，其餘一律保留雲端。
+//    這也是唯一能表達「刪除」的方式 —— 碰過、但本機已經沒有 ＝ 我刪的（見 momoMergeByKey 的
+//    `else delete out[k]`）；沒碰過而本機沒有 ＝ 同事剛新增的，保留。
+//
+//  結構（localStorage['ec_notes_items_dirty']）：
+//    { "ec_notes|玩樂_growth": ["F220","E150"], "ec_notes|好麻吉_growth": ["A001"] }
+//    ⚠ 刻意用物件、不用扁平的 "key|品號" 複合字串：momoMergeByKey 的第三參數要的就是
+//      「某一張 map 底下的 key 陣列」，物件結構直接就是那個形狀；而且品號字元集不可控，
+//      任何分隔符都可能出事。
+//
+//  🔴🔴 三態回傳。Get 回的 null【絕對不可以】當成 [] 處理 —— 這是本註冊表最重要的一條 🔴🔴
+//    null   ＝ 註冊表讀不到 / 內容損毀 / localStorage 被擋。【不是】「沒碰過」。
+//    []     ＝ 讀得到、確定沒碰過。
+//    [...]  ＝ 讀得到、碰過這些品號。
+//    ⚠ 呼叫端（syncNotesMerge 等）收到 null 時【必須中止該 key 的 merge，並明確報錯給
+//      使用者】（App.showAlertModal，至少也要 showToast + console.error），絕不可以繼續推。
+//    ⚠ 為什麼這一層不像上面 _notesIsDirty 那樣選一個 fallback 方向 —— 因為兩個方向都是
+//      【靜默失效】，而靜默失效正是本 codebase 反覆出事的形狀：
+//        當成「全部都 dirty」→ momoMergeByKey 會用本機整份覆蓋雲端整份 ＝ 退回 last-write-wins，
+//                             靜默蓋掉同事的更新（正是這整套機制要修掉的東西）。
+//        當成「都不 dirty」  → merge 什麼都不做 ＝ 使用者剛打的調整靜默不生效，畫面上跟成功一樣。
+//      兩害都無法從畫面上察覺。所以這一層【不做選擇】，把選擇權交給有 UI 可以報錯的那一層。
+//    🔴 如果你正打算在呼叫端加上 `?? []`、`|| []`、`Array.isArray(x)?x:[]` —— 停下來。
+//      那一行就是把上面兩種靜默失效原封不動裝回去。要處理 null 請「中止 + 報錯」，
+//      不要「補一個預設值讓程式跑得下去」。程式跑得下去正是這個 bug 的症狀，不是解法。
+//
+//  ── 交接給 merge 實作者（syncNotesMerge）的三個已知行為，動工前先讀完 ──
+//  (1) momoMergeByKey 是【淺拷貝】（`Object.assign({}, cloud)` 只複製第一層）。
+//      cost_by_origin 的 value 是純量所以無感，但這裡的 value 是 {adjustments:[…]} 巢狀物件 →
+//      merged 結果裡所有「沒碰過」的品號，與 getDoc 拿回來的雲端快照【共用同一個子物件參照】。
+//      在 merged 上就地修改（例如比照 _pnmEditNote 的 `t.text=v`）會同時污染兩邊。
+//      第二塊要嘛 merge 前先深拷貝 cloud，要嘛明確規定 merged 結果唯讀。
+//  (2) momoMergeByKey 判斷「刪除」只看 `hasOwnProperty(local, 品號)`，【不看底下有幾筆】：
+//      ・刪光整個品號（deleteProfitNote 的 `delete notes[code]`）→ 雲端該品號乾淨消失 ✅
+//      ・刪三筆中的一筆 → 品號還在 → out[品號] 被本機整個陣列覆蓋 ＝ 該品號範圍內仍然是
+//        last-write-wins（同事同時在同一品號加的那筆會被吃掉）。
+//      驗收「刪除生效」時這兩種情況【必須分開測】；只測一種就宣稱修好，會漏掉另一種。
+//  (3) 品號級 dirty【分不出期別】：ec_notes|{通路}_growth 全期間共用一把 adjustments，
+//      靠每筆的 period 欄位過濾顯示。註冊表只記「我碰過 F220」，分不出碰的是 7 月上半那筆
+//      還是 8 月下半那筆 → 同一品號跨期別會互相覆蓋。這是【已知取捨】（爆炸半徑仍只有一個
+//      品號，比現況「整個通路」小兩個量級），不是 bug，驗收時不要當成 bug 回報。
+//      要根治得做到 adjustment 級身分，而那需要 id —— 見上面「不能用內容當身分」那段。
+const _NOTES_ITEMS_DIRTY_LS='ec_notes_items_dirty';
+// 讀。不傳 fullKey → 回整份 map（除錯用）。三態語意見上方：null 不可當 []。
+function _notesItemsDirtyGet(fullKey){
+  let raw;
+  try{ raw=localStorage.getItem(_NOTES_ITEMS_DIRTY_LS); }
+  catch(e){ console.error('[notesItemsDirty] localStorage 讀取失敗，回 null（呼叫端必須中止 merge 並報錯，不可當成空）：',e); return null; }
+  if(raw===null) return fullKey===undefined ? {} : [];   // 註冊表不存在 ＝ 從沒人碰過，是正常空狀態、不是失敗
+  let m;
+  try{ m=JSON.parse(raw); }
+  catch(e){ console.error('[notesItemsDirty] 註冊表 JSON 損毀，回 null（呼叫端必須中止 merge 並報錯，不可當成空）。原始內容：',raw); return null; }
+  if(m===null||typeof m!=='object'||Array.isArray(m)){ console.error('[notesItemsDirty] 註冊表不是物件，回 null（呼叫端必須中止 merge 並報錯，不可當成空）。原始內容：',raw); return null; }
+  if(fullKey===undefined) return m;
+  const a=m[fullKey];
+  if(a===undefined) return [];                           // 註冊表本身是好的、只是這把 key 沒被碰過 → 真的空
+  if(!Array.isArray(a)){ console.error('[notesItemsDirty] 該 key 的項目不是陣列，回 null（呼叫端必須中止 merge 並報錯，不可當成空）：',fullKey,a); return null; }
+  return a;
+}
+// 加一個品號。
+//   ⚠ 損毀時【刻意不重建】：重建會把「損毀 → null → 呼叫端中止」變成「合法 → [] → 靜默不推」，
+//     剛好繞過上面整段防護。寫不進去就留下 console.error，讓 Get 那端繼續回 null。
+//     （這與上面 _notesDirtyAdd 的「兩害相權取重建」相反，因為那份的 fallback 方向是安全的、這份不是。）
+function _notesItemsDirtyAdd(fullKey, code){
+  if(!fullKey||code===undefined||code===null) return;
+  try{
+    const m=_notesItemsDirtyGet();
+    if(m===null){ console.error('[notesItemsDirty] 註冊表損毀，這次的品號標記沒存下來（刻意不重建，理由見函式上方）：',fullKey,code); _dirtyFailAdd('notesItemsDirty-corrupt',fullKey,null); return; }
+    const s=new Set(Array.isArray(m[fullKey])?m[fullKey]:[]);
+    if(s.has(String(code))) return;
+    s.add(String(code));
+    m[fullKey]=[...s];
+    localStorage.setItem(_NOTES_ITEMS_DIRTY_LS,JSON.stringify(m));
+  }catch(e){ console.error('[notesItemsDirty] 寫入註冊表失敗，這個品號的待同步標記沒存下來：',fullKey,code,e); _dirtyFailAdd('notesItemsDirty',fullKey,e); }
+}
+// 清。codes 省略 → 清掉該 fullKey 整條（比照 momoCostDirtyClear 的 !keys 分支）；
+//   給 codes → 只清那幾個品號。清完該 key 空了就把整條移除，不留空陣列無限累積。
+function _notesItemsDirtyClear(fullKey, codes){
+  if(!fullKey) return;
+  try{
+    const m=_notesItemsDirtyGet();
+    if(m===null){ console.error('[notesItemsDirty] 註冊表損毀，這次的清除沒生效（刻意不重建）：',fullKey,codes); return; }
+    if(!Object.prototype.hasOwnProperty.call(m,fullKey)) return;
+    if(!codes){ delete m[fullKey]; }
+    else{
+      const rm=new Set((Array.isArray(codes)?codes:[codes]).map(String));
+      const left=(Array.isArray(m[fullKey])?m[fullKey]:[]).filter(c=>!rm.has(String(c)));
+      if(left.length) m[fullKey]=left; else delete m[fullKey];
+    }
+    localStorage.setItem(_NOTES_ITEMS_DIRTY_LS,JSON.stringify(m));
+  }catch(e){ console.error('[notesItemsDirty] 清除註冊表失敗：',fullKey,codes,e); }
+}
+// Console 測試/除錯用（比照本檔 window.__momoClassifyPeriods 的慣例）。
+//   ⚠ 這一輪【只定義、零呼叫端】：saveNotes / submitProfitNote / _pnmEditNote / deleteProfitNote
+//     一行都沒動，接線是第二塊的事。所以在有人呼叫 Add 之前，ec_notes_items_dirty 這把
+//     localStorage key 根本不會被建立。
+window.__notesItemsDirtyGet   = _notesItemsDirtyGet;
+window.__notesItemsDirtyAdd   = _notesItemsDirtyAdd;
+window.__notesItemsDirtyClear = _notesItemsDirtyClear;
+
+// ══════ 編輯覆蓋值（ec_edits）的品號級 dirty 註冊表（persisted，跨重整）══════
+//  形狀與三態語意【逐字比照】上方 _NOTES_ITEMS_DIRTY_LS 那一組（本檔搜 `const _NOTES_ITEMS_DIRTY_LS`）。
+//  刻意寫成獨立三支、不與 ec_notes 共用一份實作：兩者的 localStorage key 不同、清除時機不同，
+//    抽共用得多一個「哪一份註冊表」的參數，那個參數會變成下一個「傳錯一次就靜默走鐘」的位置。
+//    形式重複在這裡是刻意的成本，換的是兩條線各自可以獨立改而不互相波及。
+//
+//  結構（localStorage['ec_edits_items_dirty']）：
+//    { "ec_edits|玩樂": ["F220","E150"], "ec_edits|好麻吉": ["A001"] }
+//
+//  🔴🔴 三態回傳，Get 回的 null【絕對不可以】當成 [] 處理 —— 理由與 ec_notes 那份完全相同 🔴🔴
+//    null   ＝ 註冊表讀不到 / 內容損毀 / localStorage 被擋。【不是】「沒碰過」。
+//    []     ＝ 讀得到、確定沒碰過。
+//    [...]  ＝ 讀得到、碰過這些品號。
+//    ⚠ 呼叫端收到 null 必須中止並明確報錯（見 _editsPushGate 的 level:'problem'），
+//      不可以補 `?? []` / `|| []` 讓程式跑得下去 —— 程式跑得下去正是這個 bug 的症狀。
+//
+//  ── ec_edits 與 ec_notes 在【爆炸半徑】上的差異（決定為什麼這一層更必要）──
+//    ec_notes 一把 key 涵蓋一個期間；ec_edits|{通路} 一把涵蓋該通路【所有期間所有品號】。
+//    沒有這一層就只能整包 setField ＝ 兩個人同時改同一個通路必定互蓋，而且不報錯。
+const _EDITS_ITEMS_DIRTY_LS='ec_edits_items_dirty';
+// 讀。不傳 fullKey → 回整份 map（除錯用 + 升級補登記用）。三態語意見上方：null 不可當 []。
+function _editsItemsDirtyGet(fullKey){
+  let raw;
+  try{ raw=localStorage.getItem(_EDITS_ITEMS_DIRTY_LS); }
+  catch(e){ console.error('[editsItemsDirty] localStorage 讀取失敗，回 null（呼叫端必須中止並報錯，不可當成空）：',e); return null; }
+  if(raw===null) return fullKey===undefined ? {} : [];   // 註冊表不存在 ＝ 從沒人碰過，是正常空狀態、不是失敗
+  let m;
+  try{ m=JSON.parse(raw); }
+  catch(e){ console.error('[editsItemsDirty] 註冊表 JSON 損毀，回 null（呼叫端必須中止並報錯，不可當成空）。原始內容：',raw); return null; }
+  if(m===null||typeof m!=='object'||Array.isArray(m)){ console.error('[editsItemsDirty] 註冊表不是物件，回 null（呼叫端必須中止並報錯，不可當成空）。原始內容：',raw); return null; }
+  if(fullKey===undefined) return m;
+  const a=m[fullKey];
+  if(a===undefined) return [];                           // 註冊表本身是好的、只是這把 key 沒被碰過 → 真的空
+  if(!Array.isArray(a)){ console.error('[editsItemsDirty] 該 key 的項目不是陣列，回 null（呼叫端必須中止並報錯，不可當成空）：',fullKey,a); return null; }
+  return a;
+}
+// 加一個品號。
+//   ⚠ 損毀時【刻意不重建】：重建會把「損毀 → null → 呼叫端中止」變成「合法 → [] → 靜默不推」，
+//     剛好繞過上面整段防護。寫不進去就留下 console.error，讓 Get 那端繼續回 null。
+//     （這與 _editsDirtyAdd 的「兩害相權取重建」相反，因為那份的 fallback 方向是安全的、這份不是。）
+function _editsItemsDirtyAdd(fullKey, code){
+  if(!fullKey||code===undefined||code===null) return;
+  try{
+    const m=_editsItemsDirtyGet();
+    if(m===null){ console.error('[editsItemsDirty] 註冊表損毀，這次的品號標記沒存下來（刻意不重建，理由見函式上方）：',fullKey,code); return; }
+    const s=new Set(Array.isArray(m[fullKey])?m[fullKey]:[]);
+    if(s.has(String(code))) return;
+    s.add(String(code));
+    m[fullKey]=[...s];
+    localStorage.setItem(_EDITS_ITEMS_DIRTY_LS,JSON.stringify(m));
+  }catch(e){ console.error('[editsItemsDirty] 寫入註冊表失敗，這個品號的待同步標記沒存下來：',fullKey,code,e); }
+}
+// 清。codes 省略 → 清掉該 fullKey 整條；給 codes → 只清那幾個品號。
+//   清完該 key 空了就把整條移除，不留空陣列無限累積。
+function _editsItemsDirtyClear(fullKey, codes){
+  if(!fullKey) return;
+  try{
+    const m=_editsItemsDirtyGet();
+    if(m===null){ console.error('[editsItemsDirty] 註冊表損毀，這次的清除沒生效（刻意不重建）：',fullKey,codes); return; }
+    if(!Object.prototype.hasOwnProperty.call(m,fullKey)) return;
+    if(!codes){ delete m[fullKey]; }
+    else{
+      const rm=new Set((Array.isArray(codes)?codes:[codes]).map(String));
+      const left=(Array.isArray(m[fullKey])?m[fullKey]:[]).filter(c=>!rm.has(String(c)));
+      if(left.length) m[fullKey]=left; else delete m[fullKey];
+    }
+    localStorage.setItem(_EDITS_ITEMS_DIRTY_LS,JSON.stringify(m));
+  }catch(e){ console.error('[editsItemsDirty] 清除註冊表失敗：',fullKey,codes,e); }
+}
+// Console 測試/除錯用（比照上方 window.__notesItemsDirty* 的慣例）。
+//   ⚠ 這一個 commit【只定義、零呼叫端】：saveEdits / commitEdit / syncToCloud / 同步預覽
+//     一行都沒動，接線是後續 commit 的事。所以在有人呼叫 Add 之前，ec_edits_items_dirty
+//     這把 localStorage key 根本不會被建立。
+window.__editsItemsDirtyGet   = _editsItemsDirtyGet;
+window.__editsItemsDirtyAdd   = _editsItemsDirtyAdd;
+window.__editsItemsDirtyClear = _editsItemsDirtyClear;
+
+// ══════ 「這把 ec_edits key 走 dirty-scoped merge 嗎」的【唯一判準】══════
+//  與下方 _notesUsesMerge 對稱。全檔呼叫點一律用這一支，不要各自寫 startsWith
+//  （搜 `_editsUsesMerge(`）：
+//    ① _momoFullPushDeleteGuard 的排除條件（merge 不整包覆蓋 → 不套 willDelete）
+//    ② 未來若有第二種 ec_edits key 形狀，判準只有這裡要改
+//  為什麼「`ec_edits|` 前綴」這個判準是安全的：ec_edits 全檔只有一種 key 形狀
+//    （'ec_edits|'+shop，見 getEdits / readEditsForPush / saveEdits 三處各自組的字串），
+//    而 saveEdits 全專案只有一個呼叫點（commitEdit）。
+//  🔴 用 function 宣告不用 const 箭頭：本支被 _momoFullPushDeleteGuard（本檔約 1300 行）呼叫，
+//    它定義在本行【之後】數百行，靠函式宣告提升；改成 const 會進 TDZ 風險區
+//    （理由同本檔 readEditsForPush 上方那段）。
+function _editsUsesMerge(k){ return typeof k==='string' && k.startsWith('ec_edits|'); }
+
+// ══════ 餵給 momoMergeByKey 之前，把 dirty 清單濾成「本機真的有這個品號」══════
+//  🔴 效果 ＝【關掉 momoMergeByKey 對 ec_edits 的刪除分支】。
+//    momoMergeByKey 的第三參數若含有「local 沒有 hasOwnProperty」的 key，它會走
+//    `else delete out[k]`（本檔搜 `function momoMergeByKey`）把該 key 從雲端刪掉。
+//    那個語意對 ec_notes 是【正當的】（deleteProfitNote 真的會 `delete notes[code]`，
+//    「碰過但本機沒有」＝「我刪的」），所以 momoMergeByKey 本身一個字都不改。
+//  ── 為什麼 ec_edits 要關掉它 ──
+//    (1) ec_edits 沒有任何程式碼會從 map 移除品號 key：commitEdit 清空覆蓋值時只
+//        `delete edits[code][col]`、不刪 edits[code]（本檔搜 `function commitEdit`），
+//        所以 delete 分支在正常流程下【本來就不可達】。
+//    (2) 它唯一會被觸發的路徑是「saveEdits 存檔失敗 + 失敗照登 dirty」：那時候
+//        localStorage 裡是【沒有這次編輯的舊值】，該品號可能整個不存在 → delete 分支
+//        會把【同事對該品號的覆蓋值】從雲端刪掉。使用者只是存檔失敗，代價卻落在別人身上。
+//    (3) 關掉之後，存檔失敗的最壞結果回到「這次編輯沒推上去」，而那件事有
+//        _notifyEditsSaveFail 的彈窗在通報，不是靜默失敗。
+//  ⚠ 清空覆蓋值留下的空殼 {} 【不受本濾法影響】：那是 key 存在、值為空物件，
+//    hasOwnProperty 為 true → 照樣進 merge → out[品號]={} → isEdited 回 false、
+//    雲端那筆覆蓋值正確地被清掉。「清空」與「刪除」在這裡是兩件事，不要混為一談。
+//  ⚠ 被濾掉的一定要留痕：否則「我明明改過卻沒上雲」會查不到。
+//  🔴 顯示端（saveEdits 的 _profitMem 鏡射）與推送端（syncEditsMerge）【共用這一支】，
+//    這樣畫面顯示的就是「現在按同步，雲端會變成的樣子」，兩邊不可能分歧。
+function _editsMergeKeys(fullKey, localMap, items){
+  const arr=Array.isArray(items)?items:[];
+  if(!localMap || typeof localMap!=='object') return [];
+  const keep=[], drop=[];
+  arr.forEach(c=>{ (Object.prototype.hasOwnProperty.call(localMap,c)?keep:drop).push(c); });
+  if(drop.length) console.warn('[editsMerge] 這些品號被標成待同步、但本機讀不到它們，已從合併範圍濾掉（不會去刪雲端那幾筆）：',fullKey,drop);
+  return keep;
+}
+
+// ══════ 「這把 ec_notes key 走 dirty-scoped merge 嗎」的【唯一判準】══════
+//  🔴 全檔【四個呼叫點】一律用這一支，不要各自寫 startsWith / 正規表示式（搜 `_notesUsesMerge(`）：
+//    ① _momoFullPushDeleteGuard 的排除條件（merge 不整包覆蓋 → 不套 willDelete）
+//    ② syncToCloud 的 _pendingSyncKeys 迴圈：決定這把 key 走 syncNotesMerge 還是泛用 setField
+//    ③ 同步預覽的 willMerge 計算
+//    ④ 同步預覽狀態文字的分流（🔀 將合併 vs ⚠ 會刪掉雲端）
+//  ⚠ 還有【第五個相關位置但刻意不呼叫它】：syncToCloud 的 shop extra（廣告調整當期那條，
+//    本檔搜 `_notesIsDirty('ec_notes|'+_nk)`）直接寫死走 syncNotesMerge —— 因為 'ec_notes|'+_nk
+//    必然命中本判準，加一個永遠為真的 if 只會讓人以為還有另一條路。判準的定義仍以本支為準。
+//  兩處判準不一致 ＝ 預覽說要推 N 筆、實際推 N±1 筆，而且不報錯（PR #93 的形狀）。
+//
+//  為什麼「`ec_notes|` 前綴」這個判準是安全的（動它之前先重跑這個驗證）：
+//    saveNotes 全專案【只有三個呼叫點】（本檔搜 `saveNotes(`：_pnmAddNote / _pnmEditNote /
+//    _pnmDeleteNote 那三處），三處都傳 shopKey，而 shopKey 只有兩種形狀 ——
+//      ・ec_notes|{通路}_growth        （商品調整）
+//      ・ec_notes|{通路}|{月}|{半月}    （廣告調整）
+//    這兩種【都】要走 merge，所以判準可以化簡成前綴，不需要再分 /_growth$/。
+//  ⚠ 舊式的裸 key `ec_notes|{通路}`（doExport 的 getNotes(shop) 還在讀）不受影響：
+//    它從來沒有寫入端 → 不會進 ec_notes_dirty、不會進 _pendingSyncKeys → 不會變成 task。
+//  🔴 用 function 宣告不用 const 箭頭：本支被 _momoFullPushDeleteGuard / syncToCloud 呼叫，
+//    它們定義在本行【之後】數百行，靠函式宣告提升；改成 const 會進 TDZ 風險區（理由同
+//    本檔 readEditsForPush 上方那段）。
+function _notesUsesMerge(k){ return typeof k==='string' && k.startsWith('ec_notes|'); }
+// ══════ merge 推送端專用的 ec_notes 讀取（與顯示端 getNotes【刻意不同源】，這不是重複）══════
+//  🔴 抽成一支的理由：syncNotesMerge（實際推的值）與 _momoCollectPending（預覽顯示的值）
+//    必須讀到【完全相同】的東西，否則就是「預覽說要推 N 筆、實際推 N±1 筆而且不報錯」——
+//    本檔已經因為「兩處各寫一份、只改一處」出過事（PR #93）。與其寫兩份再用註解要求
+//    「必須逐字相同」，不如只有一份實作，結構上不可能漂移。
+//  來源序：Store._mem → localStorage，【刻意跳過 Store._profitMem】。理由與 readEditsForPush
+//    那段（本檔搜 `function readEditsForPush`）完全同型：
+//    雲端訂閱會整包覆蓋 _profitMem 但【從不回寫 localStorage】（見 js/firebase.js 的 app/profit
+//    訂閱），所以 _profitMem 可能已經是雲端版，localStorage 才是「我的編輯」。
+//    讀錯來源會讓刪除與改字整個失效（2026-09-03 現場實測過這個形狀）。
+//  ⚠【_mem 這一層目前是死碼】，保留只為與 readEditsForPush / _momoFullPushDeleteGuard 的
+//    localV【形式】對齊：saveNotes 只寫 localStorage + _profitMem，Store._mem 只裝 app/main。
+//    日後若有人讓某條路徑寫 Store._mem['ec_notes|…']，這一層會突然活過來、來源無聲改變。
+//  ⚠ 顯示端 getNotes【故意維持原樣】（_profitMem 優先＝app/profit + 封存分片的合併視圖）：
+//    畫面要顯示合併現況，跨裝置才看得到同事的調整。兩者不同源是設計，不是待統一的重複。
+//    🔴 不要為了「一致」把 getNotes 也改成讀 localStorage。
+//  ⚠ 回傳 null ＝ 本機整把不存在（與「存在但是空物件 {}」不同）。呼叫端各自決定怎麼處理：
+//    syncNotesMerge 當成 {}（dirty 的品號一律走 delete 分支，這是正確的「我刪光了」語意）；
+//    預覽端當成 0 筆顯示。
+function readNotesForPush(fullKey){
+  let v=null;
+  try{ if(typeof Store!=='undefined' && Store._mem && Store._mem[fullKey]!==undefined) v=Store._mem[fullKey]; }catch{}
+  if(v===null){ try{ const raw=localStorage.getItem(fullKey); if(raw) v=JSON.parse(raw); }catch{} }
+  return (v===undefined?null:v);
+}
+// ══════ ec_notes 的 dirty-scoped merge 推送（商品調整 + 廣告調整共用）══════
+//  🔴 兩種 key 形狀共用這一支，判準見本檔 `function _notesUsesMerge`：
+//    ・商品調整 ec_notes|{通路}_growth          （2026-09-01 起走這條）
+//    ・廣告調整 ec_notes|{通路}|{月}|{半月}      （本次接上；原本是整包 setField）
+//  label 只影響【給使用者看的訊息文字】，不影響任何邏輯分支 —— 本函式對 key 形狀
+//    完全不分流，這是刻意的（一分流就是下一個「兩處判準漂移」的位置）。
+//
+//  形狀照抄同檔 momoSyncCostByOrigin（本檔搜 `async function momoSyncCostByOrigin`）：
+//    getDoc → momoMergeByKey → setField → 本機鏡像回寫 merged。
+//  但有【四處刻意不同】，每一處下面都標了理由。想「統一成跟它一樣」之前先讀完那四段。
+//
+//  回傳：這次因為「不在 dirty 內」而被保留下來的雲端獨有品號數
+//    （供同步結果回報「保留雲端 N 個品號」，讓合併不靜默；比照 momoSyncOptlog 的 addedFromCloud）。
+//  失敗一律 throw：syncToCloud 的 task 迴圈會 catch，收進 failed → 彈窗列出
+//    「［失敗］<key>：<訊息>」、key 留在 _pendingSyncKeys、兩份 dirty 都不清（因為不在 ok 裡）。
+//    ⚠ 刻意不在這裡自己彈窗：那條管道已經存在、逐 key 帶訊息，而且與「有沒有推成功」同一個判準。
+async function syncNotesMerge(fullKey, label){
+  const _L=label||'商品調整';   // 只用於訊息文字；不參與任何判斷
+  // ── (a) 品號 dirty 讀到 null ＝ 註冊表損毀 → 中止。絕不當成空陣列 ──
+  //   鐵律出處見本檔 `const _NOTES_ITEMS_DIRTY_LS` 上方那段。當成 [] 的後果：
+  //   momoMergeByKey(cloud, local, []) 回傳完全等於 cloud → 推上去看起來成功、實際上一個字都沒上去。
+  const dirty=_notesItemsDirtyGet(fullKey);
+  if(dirty===null) throw new Error('品號待同步註冊表（ec_notes_items_dirty）損毀，已中止合併，以免整包覆蓋蓋掉同事的更新。本次未推送，你的調整還在本機 → 請先匯出備份；清掉該註冊表之後，這些編輯需要重做一次才會被登記。');
+  // ── (b) dirty 是空陣列 → 跳過推送並回報，不推一份等同雲端的資料 ──
+  //   正常流程不會出現（saveNotes 同時寫兩份 dirty）。走到這裡代表兩份不同步，
+  //   最可能是 _notesItemsDirtyAdd 當時寫入失敗（localStorage 配額滿 / 被擋，當下有紅字）。
+  //   ⚠「安靜跳過」與「照推」都是靜默失效：照推＝把雲端原封不動寫回去，
+  //     ok 會有這把 key、彈窗顯示成功、__lastSyncReport 乾淨，但使用者的編輯一次都沒上去。
+  //   ⚠ 訊息尾端那句是 2026-09-03 補的：這次災情裡使用者看到 (b) 完全無法自救，
+  //     我方遠端查了三輪才定位。訊息要能讓下一個踩到的人自己走出來。
+  if(dirty.length===0) throw new Error('這把'+_L+'被標記為待同步，但沒有任何品號被登記，無法判斷該合併哪些品號 → 本次未推送（刻意不推一份等同雲端的資料）。多半是先前 localStorage 寫入失敗；請重新編輯一次該品號再同步。若剛存檔就看到此訊息，多半是儲存空間不足導致品號登記失敗 —— 重打該格再同步即可。');
+  // ── (c) 讀不到雲端 doc → 中止，【不】推整份上去 ──
+  //   ⚠ momoSyncCostByOrigin 有一段 `cloudEmpty ? Object.keys(localMap) : dirty` 的「首次上雲推整份」，
+  //     這裡【刻意不照抄】：對 ec_notes 而言「雲端空」更可能是讀取失敗，而整份推上去就是
+  //     last-write-wins —— 正是這整套 merge 要修掉的東西。兩者方向相反，不要統一。
+  //     （順帶：那段對 cost 自己也是地雷 —— 讀取失敗時會用本機整份蓋掉 6683 筆。另案。）
+  const snap=await window.__cloudProfit.getDoc();
+  if(!(snap&&snap.exists&&snap.exists())) throw new Error('讀不到雲端 app/profit（doc 不存在或讀取失敗），已中止合併。本次未推送，資料還在本機，請稍後再按同步重試。');
+  const cloudDoc=snap.data()||{};
+  const cloudRaw=cloudDoc[fullKey];
+  // ── (c2) doc 讀得到、但【沒有這把 key】→ 以空物件當基準繼續 merge，【不中止】 ──
+  //   🔴 這一條 2026-09-03 從「throw」改成「用 {} 當基準」，理由三條，改回去之前先讀完：
+  //   (1) 安全性可證明：app/profit 裡沒有這個欄位 ⇒ 這次 setField 不可能刪掉 app/profit 的
+  //       任何東西。merge 出來的結果 = 本機 dirty 的那幾個品號（其餘 `delete out[k]` 對空物件
+  //       是 no-op），純新增，方向與「刪掉同事的資料」相反。
+  //   (2) 廣告調整接上 merge 之後，undefined 有【兩種完全正常】的成因，舊的 throw 會把它們
+  //       誤判成異常：
+  //         ・全新期間（新的月份 / 半月，第一次有人寫調整）→ 舊行為 = 第一筆調整永遠推不上去。
+  //         ・已封存的月份 —— 那把 key 在 app/profit_notes_YYYY 這個【另一個 doc】裡，而
+  //           __cloudProfit.getDoc()/setField 都只碰 app/profit（見 js/firebase.js 的
+  //           PROFIT_ARCHIVE_DOCS 與 profitDocRef）→ 舊行為 = 訊息說「從未上過雲端」但其實
+  //           上過，而且使用者對封存月的編輯再也推不上去。2026-09-03 實測雲端有 9 把這種 key
+  //           （好麻吉/森之旅/玩樂 的 2026/03 與 2026/06，品號數 14~312）。
+  //       setField 碰不到封存分片，所以這裡寫進 app/profit 的只有「她動過的那幾個品號」——
+  //       畫面不受影響（_profitMem 是 archives + current 合併，current 優先）。
+  //   (3) 🔴 這【正是 _NOTES_DIRTY_LS 那道閘門原本想要的結果】：舊行為（整包 setField
+  //       getNotes 的合併視圖）會把整份封存內容搬回 app/profit，把封存省下的額度當場吐回去；
+  //       改成 merge 之後只寫動過的品號，額度問題自然消失。詳見本檔搜 `const _NOTES_DIRTY_LS`。
+  //   ⚠【不要】把上面那條「讀不到 doc」一起放寬 —— 兩者是不同的事：doc 讀不到＝讀取失敗
+  //     （雲端可能有一整份資料），這裡＝doc 讀到了、確定沒有這個欄位。方向相反，不可合併。
+  const cloudRawIsMissing = (cloudRaw===undefined || cloudRaw===null);
+  if(!cloudRawIsMissing && (typeof cloudRaw!=='object'||Array.isArray(cloudRaw))) throw new Error('雲端這把'+_L+'不是物件（型別異常），已中止合併，以免寫壞雲端。');
+  // ── (d) 深拷貝雲端再 merge ──
+  //   momoMergeByKey 是淺拷貝（Object.assign 只複製第一層）→ 不深拷的話，merged 裡所有
+  //   「沒碰過」的品號會與 snap.data() 共用同一個子物件；而 merged 等一下要寫進 Store._profitMem
+  //   成為活的應用狀態（getNotes / daily.js 工作日誌 / marketing.js 洞察表都讀它），
+  //   任何一處就地修改（例如 _pnmEditNote 的 `t.text=v`）會同時污染兩邊，而且不報錯。
+  //   ⚠ 為什麼選深拷貝而不是「規定 merged 唯讀」：後者是跨三個檔案二十幾個讀取點的紀律承諾，
+  //     沒有任何機制能強制執行；深拷貝是一行、局部、看得見的。這裡的量是一個通路的商品調整
+  //     （數十～數百個小物件），不是 cost_by_origin 的 6683 筆，成本可忽略。
+  //   🔴🔴 這一行的【已知限制】，動 ec_notes 的資料形狀之前必須先讀完 🔴🔴
+  //     JSON round-trip 是「深拷貝」最省事的寫法，但它【會靜默改寫 Firestore 的特殊型別】：
+  //       Timestamp            → 變成 {seconds,nanoseconds,…} 之類的普通物件（不再是 Timestamp）
+  //       undefined 值         → 整個 key 被丟掉（欄位消失）
+  //       NaN / Infinity       → 變成 null
+  //       Bytes / GeoPoint / DocumentReference → 變成各自 toJSON() 的形狀
+  //     ⚠ 最嚴重的一點：cloudRaw 來自 snap.data()，裡面包含【本次沒有 dirty、原封從雲端來的
+  //       同事品號】。上面那個改寫是無差別的 —— 也就是說，這一行有能力動到「我根本沒碰過」
+  //       的資料，而且不報錯、畫面上看不出來。這正是本專案反覆出事的形狀。
+  //     （對照組：下面那行 momoFsSanitizeDeep 沒有這個問題 —— 它只改 key 名，而它會改的三種 key
+  //       ('' / /^__.*__$/ / >1500 bytes) 正好是 Firestore 自己拒收的，所以雲端不可能存有命中它們
+  //       的 key → 對雲端來源是可證明的恆等變換。有問題的是這一行，不是那一行。）
+  //
+  //     ✅ 目前為什麼是安全的（這是【現況的事實】，不是永久保證）：
+  //       ec_notes 的所有 value 都是【字串】（兩種 key 形狀共用同一支 saveNotes 寫入，形狀相同）—— 形狀是
+  //         { 品號: { adjustments: [ {date:'2026/08/07', text:'…', period?:'2026/07|second'} ] } }，
+  //       date / text / period 三個欄位全是字串，沒有任何 Firestore 特殊型別。
+  //       而這些 key 的唯一寫入端就是本函式下面那行 setField(fullKey, merged)，
+  //       merged 的兩個來源（JSON.parse(localStorage) 與這一行的 JSON round-trip）也都是純 JSON
+  //       → 雲端存的永遠是純 JSON → round-trip 恆等。
+  //
+  //     🔴 何時會壞掉：只要有人往 adjustment（或這把 key 的任何一層）加一個【非 JSON 型別】的
+  //       欄位，例如 serverTimestamp() 的伺服器時間戳、Bytes、GeoPoint，
+  //       這一行就會在每一次同步時把它靜默改寫掉 —— 連同事那些我沒碰過的品號一起。
+  //       ⚠ 要加那種欄位之前，【必須先處理這一行】。可行方向擇一：
+  //         (i) 換成 structuredClone(cloudRaw)（保留型別，但 Firestore 的 class instance 不一定能複製）
+  //         (ii) 只對「本次 dirty 的品號」做拷貝，其餘品號直接沿用 cloud 的參照 + 明確規定唯讀
+  //         (iii) 改成不在本機保留 merged、每次都重讀雲端（代價是多一次 getDoc）
+  //       在那之前，請把「ec_notes 的 value 只能是純 JSON」當成這把 key 的硬性約束。
+  //   ⚠ cloudRawIsMissing（見 (c2)）時【跳過這一行】直接用 {} —— JSON round-trip 對 undefined
+  //     會回傳 undefined、對 null 回傳 null，兩者都不是合法的 merge 基準。
+  const cloudMap=cloudRawIsMissing ? {} : JSON.parse(JSON.stringify(cloudRaw));
+  // 本機值：走 readNotesForPush（Store._mem → localStorage，刻意不讀 _profitMem），
+  //   與同步預覽端【同一支實作】，保證「預覽看到的 == 實際推的」。完整理由見該函式上方那段。
+  //   🔴 2026-09-03 從內聯改成呼叫共用函式：預覽端也要讀同一份，兩邊各寫一份必然漂移。
+  let localMap=readNotesForPush(fullKey);
+  if(localMap===null||localMap===undefined) localMap={};   // 本機整把不見（例如所有品號都被刪光）＝ dirty 那些品號一律走 delete 分支，這是正確的
+  if(typeof localMap!=='object'||Array.isArray(localMap)) throw new Error('本機這把'+_L+'不是物件（可能損毀），已中止合併，以免把壞資料推上雲端。');
+  const merged=momoMergeByKey(cloudMap, localMap, dirty);
+  // 保留下來的雲端獨有品號數＝雲端有、本機沒有、且不在 dirty 內 → 這些是同事的資料，這次被保住了。
+  //   （舊的整包覆蓋會把它們全部刪掉，所以這個數字正是這次改動的價值，要讓使用者看見。）
+  const dirtySet=new Set(dirty.map(String));
+  let keptFromCloud=0;
+  Object.keys(cloudMap).forEach(c=>{ if(!dirtySet.has(String(c)) && !Object.prototype.hasOwnProperty.call(localMap,c)) keptFromCloud++; });
+  await window.__cloudProfit.setField(fullKey, momoFsSanitizeDeep(merged));
+  // 本機回寫 merged（含同事的），否則下次同步又出現差異。
+  //   ⚠ 只寫 saveNotes 也會寫的那兩處（localStorage + _profitMem）。momoSyncOptlog 寫三鏡像，
+  //     這裡【刻意不主動新增 Store._mem[k]】：saveNotes 不寫 _mem，憑空生一個第三來源之後
+  //     只會 stale（預覽讀 _mem 優先 → 會顯示舊值）。但若 _mem 本來就有這把 key，一併更新、不留舊值。
+  try{ localStorage.setItem(fullKey,JSON.stringify(merged)); }catch(e){ console.error('[syncNotesMerge] merged 回寫 localStorage 失敗（雲端已經是 merged，本機會 stale 到下次重整）：',fullKey,e); }
+  try{ if(Store._profitMem) Store._profitMem[fullKey]=merged; }catch{}
+  try{ if(Store._mem && Store._mem[fullKey]!==undefined) Store._mem[fullKey]=merged; }catch{}
+  // ── (e) ⚠【刻意不在這裡清 dirty】—— 與 momoSyncCostByOrigin 尾端的 momoCostDirtyClear() 不同 ──
+  //   兩份 dirty（key 級 ec_notes_dirty / 品號級 ec_notes_items_dirty）必須同生同滅，
+  //   所以兩者都放在 syncToCloud 收尾那個 ok.forEach 裡（本檔搜 `_notesItemsDirtyClear(k)`）：
+  //   同一個觸發來源（ok＝這次真的推成功的 key）、同一次迭代、相鄰兩個語句 → 結構上無法只清一邊。
+  //   若把品號級搬回這裡自己清：只要 setField 之後到 promise resolve 之間出任何例外，
+  //   這把 key 會落到 failed → key 級不清、品號級已清 → 下次同步 dirty 變成 []，
+  //   只能靠上面 (b) 接住並報錯。不要搬回來。
+  try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}   // 比照 momoSyncOptlog 尾端：合併後工作日誌計數跟著更新
+  return keptFromCloud;
 }
 // 本機儲存（不推雲端），加到 pending 集合等使用者手動同步
 function _cloudWriteSafe(key, payload, label){
@@ -509,6 +1080,71 @@ function _notifyLsSaveFail(shop, month, half, err){
   if(typeof showToast === 'function'){
     showToast('報表沒存進本機，請先按同步雲端再重整', 'error');
   }
+}
+
+// ── 調整（ec_notes）沒存進 localStorage 的通報 ──
+//  與上面 _notifyLsSaveFail（報表用）刻意分開，兩個差異都不是重複、不要合併：
+//   (1) 【走 showAlertModal，不走 toast】。saveNotes 會在商品/廣告調整彈窗【還開著】
+//       時被呼叫（_pnmEditNote / deleteProfitNote 都不關彈窗）。
+//       ▸ 歷史理由（已失效）：.toast 的 z-index 曾是 200、.pnm-overlay 是 3000 → toast 會被壓在
+//         彈窗後面，使用者【看不到】，所以只能走 showAlertModal（.modal-backdrop 99999，蓋得過）。
+//       ▸ 現況：2026-09-03 起 .toast 提到 --z-toast(100000) 並加 pointer-events:none
+//         （見 css/main.css 的 .toast，技術債 B-1 #147）→ toast 在彈窗開著時已經看得見，
+//         **z-index 不再是這裡選擇 modal 的理由**。
+//       ▸ 此處維持走 showAlertModal 的理由是：這是「資料沒存進去」等級的事，
+//         需要使用者按過「知道了」才算讀到；toast 是短訊 + 自動消失 + 後蓋前，留不住。
+//   (2) 【2026-09-03：改成一 session 只彈一次，之後只 console.error】。形狀比照
+//       _notifyEditsSaveFail 的 _editsFailNotified（本檔搜 `let _editsFailNotified`），
+//       理由也相同：saveNotes 是【每存一格就跑一次】，而空間不足是持續狀態 ——
+//       連存五格就是五次失敗、五個彈窗，每一個都蓋住她正在打的字。訊息內容每次都一樣，
+//       第二次之後沒有新資訊，只有干擾。showAlertModal 內建的 dedupe 只有 2.5 秒，
+//       擋不住「連續編輯十幾秒」這種常態操作，所以必須自己記旗標。
+//       ⚠ 旗標只存記憶體、不寫 localStorage：這條路徑的觸發前提就是 localStorage 寫不進去。
+//       ⚠ 只有【真的彈出去】才立旗標；modal 不可用時不立，下次還有機會彈。
+//   (3) 【2026-09-03：拿掉依欄位（_growth）分流的「按同步救不救得回來」那兩句】。
+//       原本商品調整說「按同步也救不了（同步讀的是本機存檔）」、廣告調整說「按同步還有機會
+//       （走記憶體那份）」。🔴 廣告調整那一句自 PR #249 起【已經是假的】：廣告調整改走
+//       syncNotesMerge，推送來源是 readNotesForPush（_mem → localStorage，刻意不讀
+//       _profitMem）—— 與商品調整完全同源。兩者現在都救不了，分流沒有意義。
+//       ⚠ 而且 2026-09-03 起 saveNotes 改成【寫失敗也照樣登記 dirty】（見該函式那段），
+//         「按同步試試看」這個建議從無效變成【有害】：那會拿本機的舊值/空值去 merge。
+//         新文案因此不再提同步，只講「重打這一格」。
+//       ⚠ colName（商品調整／廣告調整）保留：那是用來告訴她「是哪一欄」，不是行為分流。
+//         程式知道答案（shopKey 帶不帶 _growth），就不該把這個判斷丟給使用者。
+//         🔴 若日後有人想把這個分流搬回 saveNotes 去「順便」決定登記行為 —— 停下來，那才是違反。
+let _notesFailNotified = false;   // 同一次 session 只彈一次窗；重整歸零（刻意不持久化，理由見 (2)）
+function _notifyNotesSaveFail(shop, code, err){
+  const quota=_isQuotaErr(err);
+  const isGrowth=/_growth$/.test(String(shop||''));
+  // 顯示用名稱：把內部 key 形狀（玩樂_growth／玩樂|2026/08|second）還原成人看得懂的
+  //   「玩樂 的商品調整／廣告調整」。⚠ 使用者訊息裡不出現 key 名，技術細節走 console.error 與 detail。
+  const shopName=String(shop||'').replace(/_growth$/,'').split('|')[0];
+  const colName=isGrowth?'商品調整':'廣告調整';
+  const who=shopName+' 的'+colName+(code!==undefined&&code!==null?('（品號 '+code+'）'):'');
+  console.error('[saveNotes] 調整沒有存進 localStorage：ec_notes|'+shop+(code!=null?'／'+code:''), err);
+  const title=quota?'這台電腦的儲存空間快滿了':'這筆編輯可能沒有存穩';
+  if(_notesFailNotified){
+    console.error('[saveNotes] 同一次 session 的第 2 次以後的存檔失敗，不再彈窗（訊息與第一次相同、會擋住輸入）：', title, who);
+    return;
+  }
+  const message=
+    '這台電腦給這個網站的儲存空間快滿了，這筆編輯可能沒有存穩。\n'+
+    '（這一筆是：'+who+'）\n\n'+
+    '請重打這一格、按 Enter，再按一次同步；若持續出現請聯絡管理員。\n\n'+
+    '⚠ 畫面上還看得到你剛打的字，但那只是暫存 —— 重整或關掉分頁就會消失，\n'+
+    '　 所以請先把文字複製起來再重打。\n'+
+    '⚠ 這個提醒這次開啟頁面只會出現一次。在空間清出來之前，接下來打的字也可能\n'+
+    '　 存不穩，但不會再跳窗（會擋住你打字），只會記在 F12 的 Console 裡。';
+  const detail=(err&&(err.name||err.message))?('錯誤：'+(err.name||'')+' '+(err.message||'')):'';
+  if(window.App&&typeof App.showAlertModal==='function'){
+    _notesFailNotified=true;   // ⚠ 只有【真的彈出去】才立旗標；modal 不可用時不立，下次還有機會彈
+    App.showAlertModal({ title:title, message:message, detail:detail, kind:'error', dedupeKey:'notesSaveFail' });
+    return;
+  }
+  // 退路：App 還沒就緒才會走到這裡。
+  //   ⚠ 2026-09-03 起 toast 在彈窗開著時已經看得見（--z-toast，見上方 (1) 的「現況」），
+  //     所以這條退路不再是「看不清楚但總比沒有好」，是真的看得到 —— 只是它裝不下完整說明。
+  if(typeof showToast==='function') showToast('這筆調整沒存進本機，重整就會消失','error',6000);
 }
 
 // 序列化前剝掉「純衍生欄位」。目前只有一個：analysisAll（廣告分析的多標籤陣列）。
@@ -665,6 +1301,68 @@ function _showSyncBtn(shop){
   }
   if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn();   // MOMO 頁那顆同步鈕跟著刷新（同一個 pending 來源）
 }
+// ══════ ec_edits 升級補登記（一次性、冪等）══════
+//  問題：ec_edits_dirty（key 級）是 09/02 就上線的，操作人員機器上【已經有值】；而品號級
+//    註冊表是這次才新增、必然是空的。_editsItemsDirtyGet 對「註冊表不存在」回的是 []
+//    （正常空狀態，不是 null）→ _editsPushGate 判 items.length===0 → level:'problem' →
+//    永遠推不出去，而 dirty 只在推成功時清 ⇒ 【永久卡死】。這正是 09/03 第二波災情
+//    （B-1 #157b）的形狀，不補登記就會在全體使用者身上重演一次。
+//
+//  🔴 為什麼不用「effKeys fallback」（items 空就退成 Object.keys(localMap)）：
+//    那會把「品號註冊表是空的」這個訊號【永久關掉】。而那個訊號正是 09/03 唯一讓我們發現
+//    兩份 dirty 被撕開的偵測點。一次性補登記只在升級時跑一次，之後訊號照常有效。
+//
+//  ── 補什麼、不補什麼 ──
+//    ・只處理 ec_edits_dirty 裡【還有值】的 key。推得掉的人成功後 dirty 已清、升級時是空的，
+//      本函式對他們完全不跑。所以會被補到的正是「推送一直失敗的那批」，而他們的 localStorage
+//      就是他們的意圖 —— 這是接受這個推測的理由。
+//    ・品號級註冊表【已經有該 key 的條目】→ 跳過（冪等，第二次以後不做事）。
+//    ・readEditsForPush 讀不到本機資料（空物件）→ 【不補】、留 console.warn，讓它照原本的
+//      規則大聲失敗。硬塞空陣列等於把 problem 偽裝成 quiet，是最壞的一種「修好」。
+//
+//  🔴 留痕（這是接受「憑 localStorage 推測」的條件）：補登記時把 fullKey、品號數、完整品號
+//    清單都印出來，並明講這批 dirty 是升級時推測補上的、不是使用者逐一編輯登記的。
+//    事後若有人問「為什麼我的某個品號被改回舊值」，這行 console 是唯一的線索來源。
+//
+//  ⚠ 實作上【一次讀、就地補、一次寫】，刻意不逐個呼叫 _editsItemsDirtyAdd：
+//    會走到補登記的正是 localStorage 快滿的機器，數百次整份 read-modify-write 是拿他們的
+//    配額換形式整潔。既有的 _editsItemsDirtyClear 就是同一個「讀一次改一次寫一次」的形狀，
+//    不算多一套邏輯。
+//  ⚠ 掛在 _sweepAllLocalReportsIntoPending 頂端那組既有一次性遷移旁邊：那支是 syncToCloud
+//    與 _momoCollectPending【共同的第一行】，所以推送端與預覽端看到的狀態必然一致。
+function _editsMigrateItemsDirty(){
+  let dirtyKeys=[];
+  try{
+    const raw=localStorage.getItem(_EDITS_DIRTY_LS);
+    if(raw===null) return;                       // 從沒人編輯過 ＝ 沒有東西要補，正常
+    const a=JSON.parse(raw);
+    if(!Array.isArray(a)) return;                // 損毀 → 不補（_editsIsDirty 會回 true 照推，讓閘門去處理）
+    dirtyKeys=a.filter(k=>typeof k==='string'&&k.startsWith('ec_edits|'));
+  }catch(e){ console.error('[editsMigrate] 讀 ec_edits_dirty 失敗，這次不補登記：',e); return; }
+  if(!dirtyKeys.length) return;
+  const m=_editsItemsDirtyGet();
+  if(m===null){ console.error('[editsMigrate] 品號級註冊表損毀，這次不補登記（刻意不重建，理由見 _editsItemsDirtyAdd 上方）'); return; }
+  let changed=false;
+  dirtyKeys.forEach(fullKey=>{
+    if(Object.prototype.hasOwnProperty.call(m,fullKey)) return;   // 已有條目 → 冪等跳過
+    const shop=fullKey.slice('ec_edits|'.length);
+    let codes=[];
+    try{ codes=Object.keys(readEditsForPush(shop)||{}); }catch(e){ codes=[]; }
+    if(!codes.length){
+      console.warn('[editsMigrate] '+fullKey+' 有 key 級 dirty 但本機讀不到任何編輯覆蓋值 → 【不補登記】，讓它照原規則在同步時明確失敗（硬塞空陣列會把 problem 偽裝成 quiet）');
+      return;
+    }
+    m[fullKey]=codes;
+    changed=true;
+    console.warn('[editsMigrate] 升級補登記 '+fullKey+'：'+codes.length+' 個品號。'
+      +'🔴 這批 dirty 是升級時【依 localStorage 推測補上】的，不是使用者逐一編輯登記的 —— '
+      +'其中可能混有「只是碰巧被寫進這台 localStorage 的同事覆蓋值」（舊版 commitEdit 以 getEdits 為底稿，'
+      +'會把雲端值一起寫回本機）。第一次同步會用本機這份覆蓋雲端這幾個品號。完整清單：', codes);
+  });
+  if(!changed) return;
+  try{ localStorage.setItem(_EDITS_ITEMS_DIRTY_LS,JSON.stringify(m)); }
+  catch(e){ console.error('[editsMigrate] 寫回品號級註冊表失敗，補登記沒有生效（下次同步仍會被閘門判 problem）：',e); }
+}
 // 掃出本機所有 ec|shop|month|half 報表 key 塞進 pending set
 //   讓 syncToCloud 不只推「本次會話新增」的，也把 localStorage 裡累積
 //   （包含前次重整前留下、pending set 已清空）的一併推上雲端。
@@ -677,6 +1375,7 @@ function _sweepAllLocalReportsIntoPending(){
   try{ momoCleanLegacyE001Keys(); }catch{}   // 掃描前先清掉 #139/#140 E001 無分片殘留（否則會被掃進待推、預覽出現無 src 空殼列）
   try{ momoMigrateOptlogBadKeys(); }catch{}   // 推送前把 optlog 的前後雙底線舊 key 遷移成合法形式（否則同步該賣場 optlog 會炸）
   try{ momoClearMoPlusReconPdf(); }catch{}   // 清除 MO+ 月對帳孤兒 doc.pdf（PDF/手動 B/F/I 區塊已移除）→ 同步時整份覆蓋、雲端也去除
+  try{ _editsMigrateItemsDirty(); }catch{}   // ec_edits 升級補登記：舊版留下的 key 級 dirty 沒有對應的品號級條目，不補會被 _editsPushGate 判 problem 而永久卡死
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
@@ -793,6 +1492,22 @@ function _sweepAllLocalReportsIntoPending(){
         if(!(Store._profitMem&&Store._profitMem[k])){ try{ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=JSON.parse(localStorage.getItem(k)); }catch{} }
         continue;
       }
+      // 商品調整（ec_notes|{通路}_growth，全通路全期間共用一把）：重整後 _pendingSyncKeys 會歸零，
+      //   沒有這條的話「編輯過但還沒推成功」的商品調整就再也回不到待推清單 —— 推不上雲、而且完全無聲。
+      //   ⚠ 只有 dirty（真正經 saveNotes 編輯過、還沒推成功）才進 pending，判準比照上面 ec_momo_products|
+      //     那條（本檔搜 `if(_momoIsDirty(k))`）：localStorage 存在 ≠ 待推，幾個月前推成功後留下的殘留
+      //     一律不撿，否則會拿舊快照整包覆蓋回雲端。
+      //   ⚠ 廣告調整（ec_notes|{通路}|{月}|{半月}）【刻意不撿】：它在 syncToCloud 有自己的當期閘門
+      //     （搜 `_notesIsDirty('ec_notes|'+_nk)`）。這裡撿了會繞過那道閘門，把封存分片的內容整批寫回
+      //     app/profit（封存省下的額度當場吐回去）。所以 `ec_notes|` 這一整類在本分支處理完就 continue，
+      //     不讓它落到下面任何分支，日後在下面加分支也不會誤傷。
+      //   ⚠【不要補水 Store._mem / Store._profitMem】—— 這不是漏寫。推送走的泛用 field 分支
+      //     （本檔搜 `// field key（設定類）`）自帶 localStorage fallback，補水只會多出第二個資料來源，
+      //     讓「預覽看到的」與「實際推的」有機會分歧。順手補齊＝製造下一個 bug。
+      if(k&&k.startsWith('ec_notes|')){
+        if(/_growth$/.test(k)&&_notesIsDirty(k)) _pendingSyncKeys.add(k);
+        continue;
+      }
       // ⚠ stock（ec_momo_stock_by_origin）仍不在此：走獨立 momo_stock collection 自動推。
       // filemeta 不上雲（雲端零讀取端）→ 不塞進 pending，省下「撈進來→推送略過→收尾刪」的白工
       if(k&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')){
@@ -814,11 +1529,37 @@ async function _momoFullPushDeleteGuard(taskKeys){
   const skip=new Map();
   const keys=[...taskKeys];
   // app/profit 欄位一次讀齊（optlog/freight/rent/f1102/notes/edits/其他設定都是它的欄位）
-  const isAppProfitField=k=>!k.startsWith('ec|') && !k.startsWith('ec_momo_products|') && !k.startsWith('ec_momo_moplus_origins|') && !k.startsWith('ec_momo_reconcile|') && !k.startsWith('ec_momo_s1103|') && !k.startsWith('ec_momo_e001|') && !cupIsReportKey(k) && !cupIsMsfKey(k) && k!=='ec_momo_cost_by_origin';
+  const isAppProfitField=k=>!k.startsWith('ec|') && !k.startsWith('ec_momo_products|') && !k.startsWith('ec_momo_moplus_origins|') && !k.startsWith('ec_momo_reconcile|') && !k.startsWith('ec_momo_s1103|') && !k.startsWith('ec_momo_e001|') && !cupIsReportKey(k) && !cupIsMsfKey(k) && !cupIsNoteKey(k) && k!=='ec_momo_cost_by_origin';
   let appProfit=null;
   if(keys.some(isAppProfitField)){ try{ const s=await window.__cloudProfit.getDoc(); appProfit=(s&&s.exists&&s.exists())?(s.data()||{}):{}; }catch(e){ appProfit=null; } }
   for(const k of keys){
-    if(k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_moplus_origins|') || k==='ec_momo_cost_by_origin' || k.startsWith('ec_momo_optlog|') || cupIsNoteKey(k)) continue;   // 各有自己的機制：optlog／酷澎備註走 read-merge-write（不刪除同事的、不需 willDelete 擋，且自由文字會誤報）；products/origins 版本比對；cost merge；蝦皮另議
+    if(k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_moplus_origins|') || k==='ec_momo_cost_by_origin' || k.startsWith('ec_momo_optlog|')
+       || _notesUsesMerge(k) || _editsUsesMerge(k) || cupIsNoteKey(k)) continue;   // 各有自己的機制：optlog / ec_notes / ec_edits / 酷澎備註走 read-merge-write（不刪除同事的、不需 willDelete 擋，且自由文字會誤報）；products/origins 版本比對；cost merge；蝦皮報表另議
+    //   🔴 2026-09-03 起 ec_notes【整類】排除（判準統一走 _notesUsesMerge），不再只排除 _growth。
+    //     為什麼廣告調整也必須排除（不是順手）：本守衛算 willDelete 用的是 momoCloudDeleteCount，
+    //     它遞迴到 adjustments 陣列、用 _momoStableStr（整個物件序列化）當元素身分 →
+    //     使用者【只是把某筆調整的文字改掉】，雲端那筆舊字串就不在本機集合裡 → 必然 willDelete≥1
+    //     → 該 key 被 splice 掉、永遠推不上去（2026-09-03 現場實測：玩樂 2026/08 下半月，
+    //     本機 172 筆是雲端 169 筆的超集，只因 E123 改了字就被判「會刪雲端 1 筆」）。
+    //     改字是最常見的操作，所以那不是偶發誤報，是【永久卡死】。
+    //     而 merge 本身不可能刪掉同事的資料：momoMergeByKey 只在該品號進了 dirty 時才表態，
+    //     其餘一律 `Object.assign({}, cloud)` 原封保留 —— 比 willDelete 這種粗篩更精準。
+    //   🔴 ec_edits|{通路} 於本次（第三塊）一併排除，判準走 _editsUsesMerge。
+    //     ── 移出之後【失去】的保護，講清楚以免日後有人以為是漏改 ──
+    //       本守衛對 ec_edits 實際擋下的是兩種「本機比雲端少」：
+    //       (i) 品號級（本機沒有某品號、雲端有）→ merge 完全補上，而且更精準：
+    //           沒進 dirty 的品號一律 `Object.assign({}, cloud)` 原封保留，不需要粗篩。
+    //       (ii) 欄位級（同一品號本機的 inner map 比雲端少一欄）→ merge【補不上】：
+    //           momoMergeByKey 的 `out[k]=local[k]` 是整包替換 inner map。
+    //           今天不成立（可編輯欄位只有 adsFee 一個，editTd/startEdit 全檔只傳 'adsFee'），
+    //           但若日後新增第二個可編輯欄位，這就是真正的缺口 —— 屆時要把 dirty 做到
+    //           「品號+欄位」層，不是把這把 key 塞回守衛底下（那會再次永久卡死，理由同上）。
+    //     ── 順帶效果：現在被守衛卡住那批會開始推得動 ──
+    //       commitEdit 清空最後一個覆蓋值時只 `delete edits[code][col]`、留下空殼 {}，
+    //       local={code:{}} 對上 cloud={code:{col:v}} 會被 momoCloudDeleteCount 算成
+    //       willDelete=1 → 那把 key 一直被 splice 掉、ec_edits_dirty 永遠清不掉。
+    //       移出之後它們第一次推得上去，代價是那些空殼 {} 會寫進 app/profit（無害但會累積）。
+    //   🔴 酷澎備註（ec_coupang_note|）比照 ec_notes/ec_edits 排除：自由文字進 momoCloudDeleteCount 會誤報，改走 syncCupNoteMerge。
     // 本機值（與推送同源）
     let localV=null;
     try{
@@ -866,24 +1607,92 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     const skippedByDesign=[];       // filemeta：故意不上雲，安靜
     const skippedProblem=[];        // 讀不到 / 損毀 / 非物件：一定要浮上來
     const _optlogMerges=[];         // optlog read-merge-write 併回雲端的筆數（{shop,n}）→ 「已合併雲端 N 筆」不靜默
+    const _notesMerges=[];          // ec_notes（商品調整+廣告調整）dirty-scoped merge 保留下來的雲端獨有品號數（{key,n}）→ 「保留雲端 N 個品號」不靜默
+    // ⚠ ec_edits 刻意用【獨立的桶】而不是併進 _notesMerges：兩者的 toast 文案不同
+    //   （「調整備註」vs「編輯覆蓋值」），併在一起會把編輯覆蓋值的合併說成調整備註的。
+    const _editsMerges=[];          // ec_edits dirty-scoped merge 保留下來的雲端獨有品號數（{key,n}）→ 「保留雲端 N 個品號」不靜默
     // ec_notes 這次沒被編輯過 → by design 的安靜跳過（性質同 skippedByDesign，不彈窗、不出 toast）。
     //   ⚠ 刻意不彈窗：封存搬家之後，只要當期有調整、而使用者這次沒編輯過，每一次同步都會觸發這條，
     //     跳出來就變成雜訊。診斷靠下面的 console.log 與 window.__lastSyncReport.skippedNotDirty 就夠。
     const skippedNotDirty=[];
     // 同步當前通路的備註 / 編輯（按期間獨立存）
     const _nk=shop+'|'+(s?.curMonth||'')+'|'+(s?.curHalf||'');
+    // ⚠ notes 只用來判斷「這把 key 有沒有東西」（下面的 Object.keys(...).length>0），
+    //   【不再是 payload】—— 2026-09-03 起廣告調整改走 syncNotesMerge，真正推的值由那支
+    //   自己從 _mem → localStorage 讀（本檔搜 `本機值：與現行泛用推送分支同源`）。
+    //   🔴 這一行【刻意保留 getNotes】：這裡要問的是「當期有沒有調整存在」，而那是
+    //     app/profit + 封存分片的合併視圖才答得出來的問題（本機沒產過報表的月份，
+    //     localStorage 可能整把不存在）。判斷用合併視圖、推送用本機值，兩者不同源是設計。
     const notes=getNotes(_nk);
-    // 🔴 閘門：只推「真的被 saveNotes 編輯過、還沒推成功」的。沒有它的話，getNotes 讀到的封存分片內容
-    //   會被原封不動寫回 app/profit（理由見 _NOTES_DIRTY_LS 那段註解）。
-    //   ⚠ 條件字串與 _momoCollectPending 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`，全檔只有兩處）：
+    // 🔴 閘門：只推「真的被 saveNotes 編輯過、還沒推成功」的。
+    //   ⚠ 條件字串與 _momoCollectPending 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`）：
     //     兩處不一致 ＝ 預覽說要推 N 筆、實際推 N±1 筆，而且不報錯。本檔已因「兩處只改一處」出過事（PR #93、預覽騙人那條）。
+    //   ⚠ dirty 判準全檔【六處】（舊註解寫過「兩處」「四處」，都已過期），分成三組、
+    //     組內必須一致、組間刻意不同。
+    //     ⚠ grep `_notesIsDirty(` 只會找到【三處】：④ 為了避免逐 key 讀 localStorage，把同一套判準
+    //       內聯成該函式區域的 notesDirtyHas（搜 `const notesDirtyHas`）。改 dirty 語意時四處都要動。
+    //     ── 廣告調整組（key＝ec_notes|{通路}|{月}|{半月}，判準 `'ec_notes|'+_nk`）──
+    //       ① 本處（syncToCloud）              推送端當期閘門
+    //       ② _momoCollectPending              ①的同步預覽端鏡像
+    //     ── 商品調整組（key＝ec_notes|{通路}_growth，判準 `ec_notes|` 前綴 + `/_growth$/`）──
+    //       ③ _sweepAllLocalReportsIntoPending 跨重整把 dirty 的 _growth 撿回 _pendingSyncKeys
+    //       ④ _momoSyncPendingCount            ③的 MOMO 同步鈕亮暗鏡像（內聯 notesDirtyHas，判準與③相同）
+    //       ⚠ ③④【刻意仍只吃 _growth】：廣告調整不進 sweep，理由見③那段註解（撿了會繞過①的當期閘門，
+    //         把封存分片內容整批寫回 app/profit）。這與下面「兩組都走 merge」不衝突 ——
+    //         「走不走 merge」與「進不進 sweep」是兩件事，不要因為前者統一了就把後者也統一。
+    //     ── 編輯覆蓋值組（key＝ec_edits|{通路}，判準 `_editsIsDirty('ec_edits|'+shop)`，註冊表 ec_edits_dirty）──
+    //       ⑤ 本函式下方那條 ec_edits extra    推送端閘門（來源 readEditsForPush，【不是】getEdits）
+    //       ⑥ _momoCollectPending 的同一條      ⑤的同步預覽端鏡像，【必須逐字相同】
+    //     ⚠ ⑤⑥【不進 sweep、也不進 _momoSyncPendingCount】：ec_edits 完全不經 _pendingSyncKeys，
+    //       只靠本函式的 shop extra 進 tasks，所以它沒有③④那種「跨重整撿回」的對應物 ——
+    //       重整後只要 localStorage 與註冊表都還在，下一次按同步就會重新走⑤，不需要 sweep。
+    //     組間判準不同【不是漏改】：①的閘門現在擋的是「沒編輯過卻建 task」——2026-09-03 廣告調整
+    //     改走 syncNotesMerge 之後，沒編輯過 ⇒ 品號級 dirty 也是空 ⇒ 會命中該函式的 (b) 而 throw，
+    //     所以這道閘門從「節流」變成「防呆」，【更不能拿掉】（舊理由「擋住把分片內容寫回 app/profit」
+    //     已隨換來源而部分失效，但結論不變）；
+    //     ③④撿的 _growth 走的是泛用 field 分支的 key 收集，值由 syncNotesMerge 自己讀，沒有分片合併問題；
+    //     ⑤⑥推的值來自 readEditsForPush（localStorage，刻意不讀 _profitMem），閘門擋的是
+    //     「雲端有資料就變成推送任務」。三組各有各的病因，不要為了「統一」把判準合併。
+    //     把③④改成也吃 `_nk`，等於讓封存月份繞過①那道閘門 —— 不要這樣做。
+    //   🔴 「走不走 dirty-scoped merge」是【另一條獨立的判準】，全檔統一走 _notesUsesMerge
+    //     （四個呼叫點 + 本處這個刻意寫死的例外，清單見該函式上方），與上面這六處的 dirty 判準
+    //     【不是同一件事】，不要混在一起改。
     //   ⚠ 跳過一定要留下可查紀錄，否則跟「資料靜默消失」分不出來。
     if(Object.keys(notes).length>0){
-      if(_notesIsDirty('ec_notes|'+_nk)){ taskKeys.add('ec_notes|'+_nk); tasks.push({key:'ec_notes|'+_nk,run:()=>window.__cloudProfit.setField('ec_notes|'+_nk,notes)}); }
-      else { skippedNotDirty.push('ec_notes|'+_nk); console.log('[syncToCloud] ec_notes 未編輯過、跳過推送（避免把封存分片的內容寫回 app/profit）：','ec_notes|'+_nk); }
+      //   🔴 2026-09-03：run 從整包 setField 改成 syncNotesMerge（dirty-scoped merge，逐品號、
+      //     只覆蓋你改過的、不刪同事的），與商品調整那條（本檔搜 `_notesUsesMerge(pk)`）同一支。
+      //     ⚠ 這裡【刻意不判斷 _notesUsesMerge】：'ec_notes|'+_nk 必然命中它，寫成 if 只會多一條
+      //       永遠為真的分支，反而讓人以為還有另一條路。判準本身仍是那一支說了算。
+      //     ⚠ 路由留在 shop extra（只處理「當期」那一把）、【不搬到下面的 _pendingSyncKeys 迴圈】：
+      //       搬過去會讓這個 session 內編輯過的【所有期間】都變成 task，繞過上面那道當期閘門 ——
+      //       行為範圍變大、且會讓「有 key 級 dirty 但沒品號級」的存量 key 立刻命中 (b) 而報錯。
+      if(_notesIsDirty('ec_notes|'+_nk)){ taskKeys.add('ec_notes|'+_nk); tasks.push({key:'ec_notes|'+_nk,run:()=>syncNotesMerge('ec_notes|'+_nk,'廣告調整').then(n=>{ if(n>0) _notesMerges.push({key:'ec_notes|'+_nk, n}); })}); }
+      else { skippedNotDirty.push('ec_notes|'+_nk); console.log('[syncToCloud] ec_notes 未編輯過、跳過推送（沒編輯過就沒有品號級 dirty，硬推會命中 syncNotesMerge 的 (b) 而報錯）：','ec_notes|'+_nk); }
     }
-    const edits=getEdits(shop);
-    if(Object.keys(edits).length>0){ taskKeys.add('ec_edits|'+shop); tasks.push({key:'ec_edits|'+shop,run:()=>window.__cloudProfit.setField('ec_edits|'+shop,edits)}); }
+    // 🔴 閘門與來源【全部收進 _editsPushGate 這一支】，推送端與預覽端呼叫同一支。
+    //   舊碼是「這裡一份、_momoCollectPending 一份，靠註解要求兩處逐字相同」——
+    //   本檔已經證明那個紀律撐不住（PR #93 預覽騙人、#157b 兩份 dirty 撕裂），所以改成
+    //   共用函式。要改納入條件請改那一支，不要在這裡加分支。
+    //   ⚠ level 的分流不可省：'quiet'（沒編輯過 / 本機沒東西）進 skippedNotDirty 安靜跳過；
+    //     'problem'（本機損毀 / 品號註冊表損毀 / 標了 dirty 卻沒登記品號）進 skippedProblem，
+    //     收尾會彈窗。兩者混在一起 ＝ 不是洗版就是靜默失效。
+    //   ⚠ 下面那行 taskKeys.add 目前【沒有作用】：ec_edits 不進 _pendingSyncKeys，所以下方
+    //     `_pendingSyncKeys.forEach` 的 `taskKeys.has(pk)` 去重永遠碰不到它。保留它是為了與上面
+    //     ec_notes 那條對稱；日後若有人把 ec_edits 加進 sweep，這行才會【首次】真正生效，
+    //     而屆時它的正確性從未被驗過 —— 那時請當成新行為重新驗，不要假設它一直在運作。
+    //   ⚠ gate 物件【直接傳給 syncEditsMerge】，不要讓它自己再讀一次 local / items ——
+    //     再讀一次就是第二個來源，「預覽看到的 == 實際推的」正是靠同一份資料保證的。
+    const _editsGate=_editsPushGate(shop);
+    if(_editsGate.ok){
+      taskKeys.add(_editsGate.fullKey);
+      tasks.push({key:_editsGate.fullKey,run:()=>syncEditsMerge(shop,_editsGate).then(n=>{ if(n>0) _editsMerges.push({key:_editsGate.fullKey, n}); })});
+    }else if(_editsGate.level==='problem'){
+      skippedProblem.push({key:_editsGate.fullKey, reason:_editsGate.reason});
+      console.warn('[syncToCloud] ec_edits 未推送（異常）：',_editsGate.fullKey,_editsGate.reason);
+    }else{
+      skippedNotDirty.push(_editsGate.fullKey);
+      console.log('[syncToCloud] ec_edits '+_editsGate.reason+'：',_editsGate.fullKey);
+    }
     // 遍歷所有 pending keys 分類：
     //   ec|filemeta|... = filemeta，故意不上雲 → skippedByDesign（安靜）
     //   ec|... 其他      = 報表 key，payload 要是物件才推；讀不到/損毀 → skippedProblem（要講）
@@ -979,6 +1788,18 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         tasks.push({key:pk, run:()=>momoSyncOptlog(oshop).then(n=>{ if(n>0) _optlogMerges.push({shop:oshop, n}); })});
         return;
       }
+      if(_notesUsesMerge(pk)){   // ec_notes：dirty-scoped merge（逐品號、只覆蓋你改過的、不刪同事的）→ 兩人各改各的品號可共存
+        //   ⚠ 實務上【只有 _growth 會走到這裡】。廣告調整 ec_notes|{通路}|{月}|{半月} 雖然
+        //     saveNotes 也會把它加進 _pendingSyncKeys，但它在本迴圈【之前】就已由當期閘門排進
+        //     taskKeys（本檔搜 `_notesIsDirty('ec_notes|'+_nk)`），迴圈開頭的 taskKeys.has(pk)
+        //     會擋掉它；而非當期的那些（切過月份留下的）不會被閘門收，落到這裡就會被推 ——
+        //     🔴 判準從 /_growth$/ 放寬成 _notesUsesMerge 之後，這是【行為的實質變化】：
+        //     同一個 session 內切過月份、各自編輯過的期間，現在會一起被推上去（走 merge，安全）。
+        //     重整之後 sweep 不撿廣告調整，所以這個範圍僅限「本次會話」，不會回溯歷史。
+        //     label 用 pk 的形狀分辨：_growth＝商品調整，其餘＝廣告調整（只影響訊息文字）。
+        tasks.push({key:pk, run:()=>syncNotesMerge(pk, /_growth$/.test(pk)?'商品調整':'廣告調整').then(n=>{ if(n>0) _notesMerges.push({key:pk, n}); })});
+        return;
+      }
       // field key（設定類）
       let val=null;
       try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
@@ -1004,24 +1825,39 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       }catch(e){ console.warn('[syncToCloud] 刪除防護計算失敗（保守起見不阻擋、照推）：',e); }
     }
     console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length,'skippedWillDelete:',skippedWillDelete.length,'｜要推 keys:',tasks.map(t=>t.key));
+    // ── E-0a 第三塊：dirty 登記失敗的快照 ──
+    //   problems / modal / __lastSyncReport 全部吃這份快照，而清除（_dirtyFailClear，鍵在 ok 上）
+    //   影響不到本次 →「至少報一次、成功推送該 key 後才清」由此保證，與程式行序無關。
+    const dirtyFailSnap=_dirtyFailList();
     if(tasks.length===0){
       // 沒有要送的 task —— 但有 skippedProblem / skippedWillDelete 一定要講，不能只說「沒有需要同步」（那正是舊 bug／靜默跳過）
       if(skippedWillDelete.length>0){   // 🛡 全部被刪除防護擋下 → 明確告知去預覽確認，絕不靜默
         const detail=skippedWillDelete.map(x=>x.key+'：會刪雲端 '+x.willDelete+' 筆').join('\n');
         if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'有項目未推送（保護雲端資料）',message:skippedWillDelete.length+' 項因為「會刪掉雲端資料（可能是同事的更新）」而未推送。\n請到該賣場的「同步預覽」逐項確認後再推。',detail,kind:'warn'});
         else if(typeof showToast==='function') showToast(skippedWillDelete.length+' 項會刪雲端資料、未推送，請到同步預覽確認','error');
-        _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete});
+        _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,dirtyWriteFailures:dirtyFailSnap});
       }else if(skippedProblem.length>0){
         if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:'有 '+skippedProblem.length+' 筆資料在本機讀不到、沒推上去（可能損毀）。\n請到淨利表重新產生這些報表。',detail:skippedProblem.map(x=>x.key+'：'+x.reason).join('\n'),kind:'error'});
         else if(typeof showToast==='function') showToast('有 '+skippedProblem.length+' 筆資料讀不到','error');
-        _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty});
+        _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty,dirtyWriteFailures:dirtyFailSnap});
+      }else if(dirtyFailSnap.length>0){
+        // 🔴 E-0a 第三塊：早退分支的轉向 —— 災情最典型的形狀就落在這裡：使用者只打了調整、
+        //   登記掉了 → 不 dirty → 沒有任何 task → 原本走下面那句「沒有需要同步的資料」，
+        //   把資料遺失講成一切正常。【只有失敗記錄非空才進本分支】；記錄為空時走原本的 else，
+        //   行為與過去完全相同（封存月份的安靜不受波及）。
+        //   ⚠ 這裡【不清記錄】：什麼都沒推成功，沒有清的依據（清除只鍵在 ok 上，見收尾）。
+        const _dfKeys=[...new Set(dirtyFailSnap.map(x=>x.key))];
+        const _dfDetail=_dfKeys.map(k=>'［登記失敗］'+k+'（尚未重新推送，警告會持續出現）').join('\n');
+        if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'有調整沒有登記進待同步清單',message:_dfKeys.length+' 把資料先前的「待同步登記」寫入失敗（多半是這台電腦的儲存空間滿了），這次同步【沒有】把它們推上雲 —— 雖然看起來像「沒有需要同步的資料」。\n請先清出空間、重打受影響的那幾筆再按同步；在此之前每次同步都會出現本提醒。\n（有登記失敗記錄時，本次不自動更新工作日誌摘要。）',detail:_dfDetail,kind:'error'});
+        else if(typeof showToast==='function') showToast('有 '+_dfKeys.length+' 把資料的待同步登記失敗過，這次沒有推上雲','error');
+        _report('nothing',{skippedByDesign,skippedNotDirty,dirtyWriteFailures:dirtyFailSnap});
       }else{
         // ⚠ toast 文案刻意不動（不提「跳過 N 筆」）：skippedNotDirty 是 by design 的安靜跳過。
         //   但 _report 一定要帶上它 —— 「切到已封存月份、沒有別的待同步、按同步」正是本閘門最典型的
         //   情境，而它 100% 走這條出口（tasks.length===0）。不帶就會被 _report 的預設 [] 蓋掉，
         //   跳過紀錄剛好在最需要它的那一次消失。
         if(typeof showToast==='function') showToast('沒有需要同步的資料','info');
-        _report('nothing',{skippedByDesign,skippedNotDirty});
+        _report('nothing',{skippedByDesign,skippedNotDirty,dirtyWriteFailures:dirtyFailSnap});
       }
       if(btn){btn.disabled=false; _showSyncBtn();} return;
     }
@@ -1036,18 +1872,31 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     // pending 清理：只保留 failed + skippedProblem（要重試 / 要一直提醒），其餘刪掉
     // 只清掉「這次真的推成功」的 key（ok）；失敗/讀不到/逐項勾選未選的一律留在 pending 下次再推
     ok.forEach(k=>_pendingSyncKeys.delete(k));
-    ok.forEach(k=>{ if(k.startsWith('ec_notes|')){ try{ _notesDirtyDel(k); }catch{} } });          // 真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
+    //   ⚠ 兩份 dirty（key 級 ec_notes_dirty / 品號級 ec_notes_items_dirty）【必須同生同滅】，
+    //     所以刻意寫在同一個 callback 的相鄰兩行：同一個觸發來源（ok＝這次真的推成功的 key）、
+    //     同一次迭代 → 結構上無法只清一邊。不要把品號級那句搬進 syncNotesMerge
+    //     （理由見該函式尾端 (e) 那段：搬回去會製造「key 級沒清、品號級清了」的難查狀態）。
+    ok.forEach(k=>{ if(k.startsWith('ec_notes|')){ try{ _notesDirtyDel(k); }catch{} try{ _notesItemsDirtyClear(k); }catch{} } });   // 真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
+    //   ⚠ 兩份 dirty（key 級 ec_edits_dirty / 品號級 ec_edits_items_dirty）【必須同生同滅】，
+    //     理由與上面 ec_notes 那行完全相同：同一個觸發來源（ok＝這次真的推成功的 key）、
+    //     同一次迭代、相鄰兩個語句 → 結構上無法只清一邊。不要把品號級搬進 syncEditsMerge
+    //     （搬回去會製造「key 級沒清、品號級清了」＝下次 _editsPushGate 判 problem 的難查狀態）。
+    ok.forEach(k=>{ if(k.startsWith('ec_edits|')){ try{ _editsDirtyDel(k); }catch{} try{ _editsItemsDirtyClear(k); }catch{} } });   // 編輯覆蓋值同理：真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     ok.forEach(k=>{ if(cupIsNoteKey(k)){ try{ _cupNoteKeyDirtyDel(k); _cupNoteItemsDirtyClear(k); }catch{} } });   // 酷澎備註：兩層 dirty 同一迴圈相鄰清（只清推成功的 key；失敗留著下次再推）
+    ok.forEach(k=>{ _dirtyFailClear(k); });   // E-0a 第三塊：這把 key 真的推成功 → 清失敗記錄。報告吃 dirtyFailSnap（上方快照），本行蓋不掉本次報告；殘餘風險（同 key 別筆編輯也會洗綠）已在 modal 文案明示
     if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
-    _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,optlogMerges:_optlogMerges});
+    _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,optlogMerges:_optlogMerges,notesMerges:_notesMerges,editsMerges:_editsMerges,dirtyWriteFailures:dirtyFailSnap});
     const _mergedN=_optlogMerges.reduce((s,x)=>s+(x.n||0),0);   // optlog 合併併回雲端的總筆數（不靜默）
-    // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 且 skippedWillDelete=0 時出現；只要有問題/被保護跳過就 ⚠ + 彈窗
-    const problems=failed.length+skippedProblem.length+skippedWillDelete.length;
+    const _notesKeptN=_notesMerges.reduce((s,x)=>s+(x.n||0),0);   // ec_notes 合併時保留下來的雲端獨有品號總數（不靜默）
+    const _editsKeptN=_editsMerges.reduce((s,x)=>s+(x.n||0),0);   // ec_edits 合併時保留下來的雲端獨有品號總數（不靜默）
+    // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 且 skippedWillDelete=0 且【無 dirty 登記失敗記錄】時出現；只要有問題/被保護跳過/掉過登記就 ⚠ + 彈窗
+    const dirtyFailKeys=[...new Set(dirtyFailSnap.map(x=>x.key))];   // E-0a 第三塊：以 key 去重（同一把 key 的 key 級/品號級記錄算一件事）
+    const problems=failed.length+skippedProblem.length+skippedWillDelete.length+dirtyFailKeys.length;
     if(problems===0){
       if(btn){btn.textContent='✓ 已同步 '+ok.length+' 筆';btn.style.background='#10b981';btn.style.color='#fff';btn.style.borderColor='#10b981';_syncBtnRepaintTimer=setTimeout(()=>{ _showSyncBtn(); },2000);}
-      if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端'+(_mergedN>0?'（優化紀錄已合併雲端 '+_mergedN+' 筆）':''),'success');
+      if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端'+(_mergedN>0?'（優化紀錄已合併雲端 '+_mergedN+' 筆）':'')+(_notesKeptN>0?'（調整備註已保留雲端 '+_notesKeptN+' 個品號）':'')+(_editsKeptN>0?'（編輯覆蓋值已保留雲端 '+_editsKeptN+' 個品號）':''),'success');
       // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌（失敗只記 console，不影響同步結果判定）
       try { if(window.App && typeof App._updateDailyProgressFromAdjustments === 'function') App._updateDailyProgressFromAdjustments({ pushToCloud: true }); }
       catch(e){ console.warn('[autoSummary profit]', e); }
@@ -1057,10 +1906,17 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       failed.forEach(f=>lines.push('［失敗］'+f.key+'：'+f.msg));
       skippedProblem.forEach(p=>lines.push('［讀不到］'+p.key+'：'+p.reason));
       skippedWillDelete.forEach(x=>lines.push('［保護未推］'+x.key+'：會刪雲端 '+x.willDelete+' 筆（可能是同事的更新）'));
+      dirtyFailKeys.forEach(k=>lines.push('［登記失敗］'+k+(ok.indexOf(k)>=0?'（本次已重新推送，警告不再出現）':'（尚未重新推送，警告會持續出現）')));
       let msg='成功 '+ok.length+' 筆。';
       if(failed.length) msg+='\n'+failed.length+' 筆沒推上雲端，資料還在本機 → 重整前請先匯出 Excel 備份，稍後再按同步重試。';
       if(skippedProblem.length) msg+='\n'+skippedProblem.length+' 筆在本機讀不到（可能損毀）→ 請到淨利表重新產生這些報表。';
       if(skippedWillDelete.length) msg+='\n'+skippedWillDelete.length+' 項因會刪除雲端資料（可能是同事的更新）而未推送 → 請到該賣場的「同步預覽」逐項確認後再推。';
+      if(dirtyFailKeys.length){
+        const _dfUnhealed=dirtyFailKeys.filter(k=>ok.indexOf(k)<0), _dfHealed=dirtyFailKeys.filter(k=>ok.indexOf(k)>=0);
+        if(_dfUnhealed.length) msg+='\n'+_dfUnhealed.length+' 把資料先前的「待同步登記」寫入失敗（多半是儲存空間滿了）→ 那些調整/編輯【沒有】被推上雲。請先清出空間、重打受影響的那幾筆再按同步；在此之前每次同步都會出現本提醒。';
+        if(_dfHealed.length) msg+='\n'+_dfHealed.length+' 把先前登記失敗的資料本次已重新推送成功，此警告之後不再出現。⚠ 這把 key 剛已重新推送，若剛才重打的不含當時那筆，請再確認。';
+        msg+='\n（有登記失敗記錄時，本次不自動更新工作日誌摘要。）';
+      }
       if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:msg,detail:lines.join('\n'),kind:'error'});
       else if(typeof showToast==='function') showToast('同步未完成：'+problems+' 筆有問題','error');
     }
@@ -1666,7 +2522,7 @@ function loadIntoUI(shop,built,period,days){
     built.forEach(r=>{
       Object.assign(r,_anaDerive(calcAnalysisAll(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0)));
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
+      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0,r.adsFee??null,r.clicks??null);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
       r.profitPct=(r.rev>0)?(r.pureRate+r.adsPct):null;
     });
@@ -2804,7 +3660,7 @@ function buildShop(shop,days){
     // 上期營收 & 成長比（所有賣場都算：整月賣場比對上個月整月，好麻吉上/下半月比對同月/上月對應半月）
     const prevRev = prevRevMap[p.code] ?? null;
     const growthRate = (prevRev!==null && prevRev>0) ? (p.rev - prevRev) / prevRev : null;
-    const growthAnalysis = calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate);
+    const growthAnalysis = calcGrowthAnalysis(growthRate, p.rev, prevRev, pureRate, adsFee ?? null, clicks ?? null);
     // 上期廣告費。`?? null` 只會在【上期沒有這個商品】時給 null —— prevAdsMap 的建立條件
     //   只看 code、金額 0 照樣有值（見 getPrevPeriodMap），所以畫面分得出「上期投了 $0」
     //   與「上期沒這商品」。這一點與 prevRev 刻意不同。
@@ -3410,7 +4266,7 @@ function reapplyAnaToAll(){
     built.forEach(r=>{
       Object.assign(r,_anaDerive(calcAnalysisAll(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0)));
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0);
+      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0,r.adsFee??null,r.clicks??null);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
     });
     applyFilters(s.id);
@@ -3578,21 +4434,46 @@ function getDisabledGrowthTags(){return _cloudRead('ec_growth_disabled')||[];}
 function disableGrowthTag(label){const a=getDisabledGrowthTags();if(!a.includes(label))a.push(label);_cloudWrite('ec_growth_disabled',a);renderGrowthModalBody();reapplyAnaToAll();}
 function restoreGrowthTag(label){const a=getDisabledGrowthTags().filter(l=>l!==label);_cloudWrite('ec_growth_disabled',a);renderGrowthModalBody();reapplyAnaToAll();}
 function saveCustomGrowthRules(r){_cloudWrite('ec_growth_custom',r);}
-function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate) {
+// ── 內建標籤排除條件（第二塊：判定＋資料層；UI 在第三塊）──
+//   結構：{ '標籤名': [{f,op,v}, …] }，條件格式與 evalAnaConds 相同（多條件 AND）。
+//   沒設定的標籤＝不排除。損毀（非物件）時回 {}＝全部不排除（安全側，不 throw）。
+function getGrowthExcludes(){const v=_cloudRead('ec_growth_exclude'); return (v&&typeof v==='object'&&!Array.isArray(v))?v:{};}
+function saveGrowthExcludes(m){_cloudWrite('ec_growth_exclude',m);}   // 目前無 UI 呼叫端（第三塊接），先與其他 growth key 的寫入端對齊
+// ⚠ adsFee / clicks 本函式目前【完全不使用】，先接線給下一塊的排除條件用。
+//   六個呼叫端（本檔 5 處 + daily.js 的 window.calcGrowthAnalysis）新參數一律傳 `x ?? null`、
+//   【不可 ||0】：缺值要保留 null，讓 evalAnaConds 開頭的 null guard 把用到該欄位的條件判 false
+//   （＝舊快照缺這欄時排除條件不觸發、行為不變）；||0 會把「缺資料」塌成「真的 0」，
+//   「< 門檻」型的排除會恆成立、舊列標籤靜默消失。同型前科見 calcTestTags 的 pureRate 註解。
+function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate, adsFee, clicks) {
   const t=getGrowthThresh();
   const dis=new Set(getDisabledGrowthTags());
   const ok=l=>!dis.has(l);
   const G=growthRate, R=rev, P=pureRate*100;
-  if(ok('🔴重跌品')&&G !== null && G < -(t.fallPct/100)) return { label:'🔴重跌品', cls:'tag-danger' };
-  if(ok('🟢爆發品')&&G !== null && G > (t.risePct/100))  return { label:'🟢爆發品', cls:'tag-high' };
+  // ── 內建標籤排除條件（ec_growth_exclude）──
+  //   語意：排除條件【全部成立】＝該分支視為不成立、繼續往下走（不是 return 空）。
+  //   空值走安全側：欄位值 null/undefined → evalAnaConds 的 null guard 判該條件 false
+  //   → every() 整組 false ＝【不排除】→ 標籤照常顯示（舊快照缺 adsFee/clicks 不會讓標籤靜默消失）。
+  //   ⚠ _exVals 與下方自訂規則那行的 vals【刻意不同】：這裡 G / prevRev 不塌 0、
+  //     pureRate 為 null 時 P 保留 null（自訂那邊的 P 已被上面 P=pureRate*100 那行以 null*100===0 塌成 0）——
+  //     塌 0 會讓「< 門檻」型排除在缺資料時恆成立，正好違反上一行的安全側。
+  //   ⚠ 該標籤的排除設定非陣列（損毀）→ 視為不排除、不 throw：本函式多數呼叫端沒 try/catch 包著。
+  //   自訂規則【刻意不吃排除】：自訂條件本身就能寫營收門檻，不疊第二層。
+  const _excl=getGrowthExcludes();
+  const _exVals={G, R, P:(pureRate===null||pureRate===undefined)?null:P, prevRev, adsFee, clicks};
+  const ex=l=>{const c=_excl[l];return !(Array.isArray(c)&&evalAnaConds(c,_exVals));};   // true=不排除
+  if(ok('🔴重跌品')&&ex('🔴重跌品')&&G !== null && G < -(t.fallPct/100)) return { label:'🔴重跌品', cls:'tag-danger' };
+  if(ok('🟢爆發品')&&ex('🟢爆發品')&&G !== null && G > (t.risePct/100))  return { label:'🟢爆發品', cls:'tag-high' };
   for(const ct of getCustomGrowthRules()){
-    if(evalAnaConds(ct.conds,{G:G??0,R,P,prevRev:prevRev??0}))return{label:ct.label,cls:ct.cls||'tag-add100'};
+    // adsFee / clicks 裸傳（呼叫端一律 ?? null）：缺值 → evalAnaConds null guard → 該條件不成立，
+    //   與 _exVals 的安全側一致。⚠ 與既有四欄的塌 0 寫法（G??0 / prevRev??0）刻意不同——
+    //   那是既有行為，動了會改變現有自訂規則的判定，不在本次範圍。
+    if(evalAnaConds(ct.conds,{G:G??0,R,P,prevRev:prevRev??0,adsFee,clicks}))return{label:ct.label,cls:ct.cls||'tag-add100'};
   }
-  if(ok('👑高營收')&&R >= t.highRev)                           return { label:'👑高營收', cls:'tag-add300' };
-  if(ok('🟨中營收')&&R >= t.midRevMin && R < t.midRevMax)      return { label:'🟨中營收', cls:'tag-add200' };
-  if(ok('🟡發展品')&&R >= t.devRevMin && R < t.devRevMax)      return { label:'🟡發展品', cls:'tag-add100' };
-  if(ok('🔻低利品')&&P < t.lowPurePct)                         return { label:'🔻低利品', cls:'tag-low' };
-  if(ok('⚫斷銷品')&&prevRev !== null && prevRev > 0 && (rev === 0 || rev === null)) return { label:'⚫斷銷品', cls:'tag-lose' };
+  if(ok('👑高營收')&&ex('👑高營收')&&R >= t.highRev)                           return { label:'👑高營收', cls:'tag-add300' };
+  if(ok('🟨中營收')&&ex('🟨中營收')&&R >= t.midRevMin && R < t.midRevMax)      return { label:'🟨中營收', cls:'tag-add200' };
+  if(ok('🟡發展品')&&ex('🟡發展品')&&R >= t.devRevMin && R < t.devRevMax)      return { label:'🟡發展品', cls:'tag-add100' };
+  if(ok('🔻低利品')&&ex('🔻低利品')&&P < t.lowPurePct)                         return { label:'🔻低利品', cls:'tag-low' };
+  if(ok('⚫斷銷品')&&ex('⚫斷銷品')&&prevRev !== null && prevRev > 0 && (rev === 0 || rev === null)) return { label:'⚫斷銷品', cls:'tag-lose' };
   return { label:'', cls:'' };
 }
 
@@ -3601,8 +4482,13 @@ let _growthNewConds=[];
 let _growthNewLabel='';
 let _growthNewCls='tag-add300';
 const GROWTH_FIELD_OPTS=[
-  {v:'G',l:'成長率%(G)'},{v:'R',l:'營收(R)'},{v:'P',l:'淨利率%(P)'},{v:'prevRev',l:'上期營收'}
+  {v:'G',l:'成長率%(G)'},{v:'R',l:'營收(R)'},{v:'P',l:'淨利率%(P)'},{v:'prevRev',l:'上期營收'},
+  {v:'adsFee',l:'廣告費(adsFee)'},{v:'clicks',l:'點擊數(clicks)'}
 ];
+// 本清單由【內建標籤排除條件】與【自訂規則】兩個編輯器共用（condRowHtml / exRow），
+//   六個欄位兩邊的判定都吃得到（自訂規則的 vals 已補 adsFee/clicks，見 calcGrowthAnalysis）。
+//   ⚠ 空值語意兩邊不同：排除條件的 G/prevRev 缺值不塌 0（安全側）；自訂規則沿用既有的
+//     G??0 / prevRev??0 塌 0 —— 新加的 adsFee/clicks 在兩邊都走安全側。詳見該函式內兩處註解。
 function openGrowthSettings(shop){
   let ov=document.getElementById('growth-overlay');
   if(!ov){
@@ -3626,6 +4512,20 @@ function closeGrowthSettings(){document.getElementById('growth-overlay')?.classL
 function renderGrowthModalBody(){
   const t=getGrowthThresh();const custom=getCustomGrowthRules();
   const disabled=getDisabledGrowthTags();
+  const excl=getGrowthExcludes();
+  // 每個內建標籤下方一列排除條件編輯器（一列一條；資料結構仍是陣列，只是長度 0/1 —— 第二塊已定）。
+  //   刻意不塞進 .ana-rule-row 同一列：modal 固定 640px，中營收那列已有兩個門檻輸入框，再塞
+  //   下拉×2+輸入框必定超寬。子列佔滿寬度，垂直靠 .ana-modal-body 既有捲動吸收。
+  //   ⚠ 只渲染既有設定的第一條：UI 不做多條件 AND；若有人用 Console 塞了多條，儲存時會被覆蓋成單條。
+  const exRow=(label)=>{
+    const c=(Array.isArray(excl[label])&&excl[label][0])?excl[label][0]:null;
+    const vAttr=c?String(c.v).replace(/"/g,'&quot;'):'';
+    return`<div class="grx-row" data-grx="${label}"><span class="grx-lbl">排除</span>
+      <select class="grx-f">${GROWTH_FIELD_OPTS.map(o=>`<option value="${o.v}"${c&&o.v===c.f?' selected':''}>${o.l}</option>`).join('')}</select>
+      <select class="grx-op">${['>=','>','<=','<','=','!='].map(o=>`<option value="${o}"${c&&o===c.op?' selected':''}>${o}</option>`).join('')}</select>
+      <input type="number" class="grx-v" value="${vAttr}" placeholder="留空">
+      <span class="grx-hint">符合就不標；留空＝不排除</span></div>`;
+  };
   const inp=(id,val,step='1',w='70px')=>`<input type="number" id="grths-${id}" value="${val}" step="${step}" style="width:${w}">`;
   const clsOpts=ANA_CLS_OPTS.map(o=>`<option value="${o.v}"${o.v===_growthNewCls?' selected':''}>${o.l}</option>`).join('');
   const condRowHtml=(i,c)=>`<div class="ana-cond-row" id="grthcr-${i}">
@@ -3642,16 +4542,24 @@ function renderGrowthModalBody(){
   }).join(''):`<div class="ana-custom-empty">尚無自訂標籤</div>`;
   const disabledSection=disabled.length?`<div class="ana-sec-hdr" style="margin-top:16px">已停用標籤</div>${disabled.map(l=>`<div class="ana-rule-row" style="opacity:.5"><span class="ana-rule-tag tag-low" style="min-width:auto;padding:4px 8px">${l}</span><span class="ana-rule-desc" style="font-size:12px;color:#9ca3af">已停用</span><button class="ana-rule-del" style="color:#10b981" onclick="restoreGrowthTag(decodeURIComponent('${encodeURIComponent(l)}'))" title="恢復">↩</button></div>`).join('')}`:'';
   document.getElementById('growth-modal-body').innerHTML=`
+    <div class="grx-notes">・符合排除條件的商品不會顯示任何成長標籤，畫面上不會有任何記號。<br>・排除條件會影響工作日誌的優化進度分母，包含已經過去的期間。<br>・如果自訂標籤取了跟內建標籤一樣的名字，排除條件對它無效。</div>
     <div class="ana-sec-hdr">成長類</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">🔴重跌品</span><span class="ana-rule-desc">成長率 &lt; -${inp('fallPct',t.fallPct,'0.1')} %</span>${trash('🔴重跌品')}</div>
+    ${exRow('🔴重跌品')}
     <div class="ana-rule-row"><span class="ana-rule-tag tag-high">🟢爆發品</span><span class="ana-rule-desc">成長率 > ${inp('risePct',t.risePct,'0.1')} %</span>${trash('🟢爆發品')}</div>
+    ${exRow('🟢爆發品')}
     <div class="ana-sec-hdr">營收類</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-add300">👑高營收</span><span class="ana-rule-desc">營收 ≥ ${inp('highRev',t.highRev,'100','80px')}</span>${trash('👑高營收')}</div>
+    ${exRow('👑高營收')}
     <div class="ana-rule-row"><span class="ana-rule-tag tag-add200">🟨中營收</span><span class="ana-rule-desc">營收 ${inp('midRevMin',t.midRevMin,'100','80px')} ~ ${inp('midRevMax',t.midRevMax,'100','80px')}</span>${trash('🟨中營收')}</div>
+    ${exRow('🟨中營收')}
     <div class="ana-rule-row"><span class="ana-rule-tag tag-add100">🟡發展品</span><span class="ana-rule-desc">營收 ${inp('devRevMin',t.devRevMin,'100','80px')} ~ ${inp('devRevMax',t.devRevMax,'100','80px')}</span>${trash('🟡發展品')}</div>
+    ${exRow('🟡發展品')}
     <div class="ana-sec-hdr">利潤類</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-low">🔻低利品</span><span class="ana-rule-desc">淨利率 &lt; ${inp('lowPurePct',t.lowPurePct,'0.1')} %</span>${trash('🔻低利品')}</div>
+    ${exRow('🔻低利品')}
     <div class="ana-rule-row"><span class="ana-rule-tag tag-lose">⚫斷銷品</span><span class="ana-rule-desc">上期有銷售，本期營收 = 0</span>${trash('⚫斷銷品')}</div>
+    ${exRow('⚫斷銷品')}
     <div class="ana-sec-hdr">自訂標籤</div>
     <div id="growth-custom-list">${customRows}</div>
     ${disabledSection}
@@ -3698,6 +4606,17 @@ function saveGrowthSettings(){
     devRevMin:gg('devRevMin')??5000,devRevMax:gg('devRevMax')??7000,
     lowPurePct:gg('lowPurePct')??20,
   };
+  // 排除條件：整份從 7 條 .grx-row 重建 —— 數值留空的標籤【不寫進物件】＝從 ec_growth_exclude
+  //   移除（不存空字串/null）。副作用（刻意接受）：不在畫面上的殘留 key、或 Console 塞的多條件
+  //   陣列，儲存時都會被這份重建結果覆蓋。v 存字串，與自訂規則的 conds 同格式（evalAnaConds 會 parseFloat）。
+  const excl={};
+  document.querySelectorAll('#growth-modal-body .grx-row').forEach(row=>{
+    const label=row.dataset.grx;if(!label)return;
+    const v=(row.querySelector('.grx-v')?.value??'').trim();
+    if(v==='')return;
+    excl[label]=[{f:row.querySelector('.grx-f').value,op:row.querySelector('.grx-op').value,v}];
+  });
+  saveGrowthExcludes(excl);
   saveGrowthThresh(t);closeGrowthSettings();reapplyAnaToAll();
 }
 
@@ -4138,12 +5057,287 @@ function getEdits(shop){
   try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
   try{return JSON.parse(localStorage.getItem(k)||'{}');}catch{return{};}
 }
-function saveEdits(shop,edits){
+// ── 推送端專用的 ec_edits 讀取（與顯示端 getEdits【刻意不同源】，這不是重複）──
+//  getEdits（上方）讀取序是 _profitMem → _mem → localStorage，第一順位是【雲端訂閱灌進來的值】。
+//  這裡【刻意跳過 _profitMem】，只讀 _mem → localStorage，理由三條，改之前先讀完：
+//   (1) 推的必須是「這台機器上的編輯」，不是「雲端現值」。saveEdits 從不呼叫 _markPending，
+//       所以 __profitShouldSkipCloudOverwrite（本檔搜該名）對 ec_edits 的唯一保護是
+//       _shopJustSaved 的 5 秒窗；超過 5 秒，只要有人動 app/profit 任何欄位，訂閱就會把
+//       Store._profitMem['ec_edits|…'] 整包換成雲端值 —— 使用者剛打的數字從記憶體消失，
+//       localStorage 那份還在但 getEdits 讀不到。用 getEdits 推＝把雲端值原封推回雲端，
+//       推「成功」之後還會清掉 dirty，連救援線索一起抹掉。
+//   (2) 與 _momoFullPushDeleteGuard 的 localV【同源】。那裡讀的是 _mem → localStorage
+//       （本檔搜 `// 本機值（與推送同源）`），而舊的 getEdits 讀 _profitMem —— 那行註解
+//       對 ec_edits 一直是【謊言】：守衛看到 localStorage 的空、推送看到 _profitMem 的雲端值，
+//       於是守衛誤報「會刪雲端 N 筆」。改成同源之後，守衛比的與推的是同一份值。
+//   (3) 顯示端【故意維持原樣】：畫面要顯示「雲端＋本機的合併現況」，跨裝置才看得到同事的覆蓋值。
+//       兩者不同源是設計，不是待統一的重複。🔴 不要為了「一致」把 getEdits 也改成讀 localStorage，
+//       那會讓沒在這台機器編輯過的人看不到任何覆蓋值。
+//  ⚠【_mem 這一層目前是死碼】，保留它只為與守衛 1084 那行【形式】對齊：
+//    ec_edits 全檔沒有任何地方寫 Store._mem —— saveEdits 只寫 localStorage + _profitMem、
+//    Store._mem 只裝 app/main（不含 app/profit 的 key）、sweep 的補水分支也不含 ec_edits|。
+//    所以實務上這支等於「只讀 localStorage」。
+//    🔴 若日後有人讓某條路徑寫 Store._mem['ec_edits|…']（例如把 ec_edits 加進 sweep 的補水），
+//      這一層會突然活過來、推送來源【無聲改變】，而且沒有任何測試會抓到。動到那裡時請一併回來看這裡。
+//  ⚠ 回傳值必須是【可安全 mutate 的】：getEdits 回傳的是 _profitMem 的活參照（與 getNotes 的
+//    JSON 深拷貝形成對比），呼叫端 commitEdit 就地改它。本函式兩條路徑都交出新物件
+//    （_mem 那條明確深拷、localStorage 那條天然是 JSON.parse 的新物件），不把共享狀態交出去。
+//  ⚠ 讀不到一律回 {}（不是 null）：呼叫端用 Object.keys(...).length>0 判斷要不要建推送任務，
+//    回 null 會炸。localStorage 沒有這把 key ＝ 這台機器沒編輯過 ＝ 沒有東西該推，回 {} 正確。
+//  🔴 必須用 function 宣告，【不要改成 const 箭頭函式】：本函式被 syncToCloud（本檔約 1150 行，
+//    定義在它上面數千行之前）呼叫，靠的是函式宣告提升；改成 const 會進 TDZ、syncToCloud 當場炸。
+function readEditsForPush(shop){
+  const k='ec_edits|'+shop;
+  try{ if(typeof Store!=='undefined' && Store._mem && Store._mem[k]) return JSON.parse(JSON.stringify(Store._mem[k])); }catch{}
+  try{ const raw=localStorage.getItem(k); if(raw) return JSON.parse(raw); }catch{}
+  return {};
+}
+// ══════ ec_edits「這次同步推不推這把 key」的【唯一閘門】══════
+//  🔴 推送端（syncToCloud）與預覽端（_momoCollectPending）【呼叫同一支】，不靠「兩處逐字相同」
+//    的紀律 —— 本檔已經證明那個紀律撐不住（PR #93 預覽騙人、#157b 兩份 dirty 撕裂）。
+//    兩邊問同一個 g.ok，「預覽說要推 1 筆、按下去卻失敗」在結構上不可能發生。
+//
+//  回傳 { ok, level, reason, fullKey, local, items }
+//    ok:true   → 可以推。items＝品號級 dirty 清單、local＝readEditsForPush 的結果，
+//                兩者直接交給 syncEditsMerge 用，呼叫端不要自己再讀一次（再讀就會漂移）。
+//    ok:false  → level 決定怎麼回報，這個分流是刻意的：
+//      'quiet'   正常的不推（沒編輯過 / 本機沒有覆蓋值）→ skippedNotDirty，安靜、只留 console
+//      'problem' 異常（本機資料損毀 / 品號註冊表損毀 / 標了 dirty 卻沒登記任何品號）
+//                → skippedProblem，會彈窗（syncToCloud 收尾那個 showAlertModal）
+//
+//  🔴 與 syncNotesMerge 的刻意差異：那支對「品號 dirty 損毀 / 空」是 throw（規則 (a)(b)），
+//    整把 key 進 failed、留在 pending、下次再撞一次。這裡改成【擋在建 task 之前】、歸到
+//    skippedProblem。兩者都不靜默（skippedProblem 一樣會彈窗），但後者不會把整批同步標成
+//    失敗，也不會每次同步都重跑一次注定失敗的網路請求。
+//    ⚠ 這一輪【不動 ec_notes】：那邊的預覽端只問 _notesIsDirty、不問品號級，缺口還在。
+//      要修是另一個題目，順手改會把兩條線綁在一起。
+//
+//  ⚠ 判斷順序有意義，不要重排：型別 → 有沒有東西 → 有沒有編輯過 → 品號級。
+//    先問「本機有沒有東西」才問「有沒有編輯過」，是為了讓「這台從沒編輯過」走 quiet 而不是
+//    problem —— 那是絕大多數使用者的正常狀態。
+function _editsPushGate(shop){
+  const fullKey='ec_edits|'+shop;
+  let local=null;
+  try{ local=readEditsForPush(shop); }catch(e){ local=null; }
+  if(local===null||typeof local!=='object'||Array.isArray(local))
+    return {ok:false, level:'problem', reason:'本機的編輯覆蓋值不是物件（可能損毀），未推送', fullKey, local:null, items:null};
+  if(Object.keys(local).length===0)
+    return {ok:false, level:'quiet', reason:'本機沒有任何編輯覆蓋值', fullKey, local, items:[]};
+  if(!_editsIsDirty(fullKey))
+    return {ok:false, level:'quiet', reason:'未編輯過、跳過推送（避免把雲端值原封推回雲端）', fullKey, local, items:null};
+  const items=_editsItemsDirtyGet(fullKey);
+  if(items===null)
+    return {ok:false, level:'problem', reason:'品號待同步註冊表（ec_edits_items_dirty）損毀，未推送 —— 硬推會退回整包覆蓋、蓋掉同事的更新', fullKey, local, items:null};
+  if(items.length===0)
+    return {ok:false, level:'problem', reason:'被標記為待同步、但沒有任何品號被登記，無法判斷該合併哪些品號 → 未推送（刻意不推一份等同雲端的資料）。多半是先前 localStorage 寫入失敗；請重新編輯一次該品號再同步', fullKey, local, items:[]};
+  return {ok:true, level:'', reason:'', fullKey, local, items};
+}
+// ══════ ec_edits 的 dirty-scoped merge 推送 ══════
+//  骨架照 syncNotesMerge（本檔搜 `async function syncNotesMerge`）：
+//    getDoc → 深拷貝 cloudRaw → readEditsForPush → momoMergeByKey → setField → 回寫本機。
+//  gate＝_editsPushGate 的結果，【必須由呼叫端傳入】：閘門已經讀過 local 與 items，
+//    這裡再讀一次就是第二個來源，而「預覽看到的 == 實際推的」正是靠同一份資料保證的。
+//  回傳：這次因為「不在 dirty 內」而被保留下來的雲端獨有品號數（供回報「保留雲端 N 個品號」，
+//    讓合併不靜默；比照 syncNotesMerge 的 keptFromCloud）。
+//  失敗一律 throw：syncToCloud 的 task 迴圈會 catch → failed → 彈窗列出、key 留著、dirty 不清。
+async function syncEditsMerge(shop, gate){
+  const g=gate||_editsPushGate(shop);
+  if(!g.ok) throw new Error('編輯覆蓋值未通過推送閘門：'+g.reason);
+  const fullKey=g.fullKey;
+  // ── 讀不到雲端 doc → 中止，【不】推整份上去 ──
+  //   （不照抄 momoSyncCostByOrigin 的 cloudEmpty 推整份：對 ec_edits 而言「雲端空」更可能
+  //     是讀取失敗，而整份推上去就是 last-write-wins —— 正是這整套 merge 要修掉的東西。
+  //     理由與 syncNotesMerge 的 (c) 逐條相同。）
+  const snap=await window.__cloudProfit.getDoc();
+  if(!(snap&&snap.exists&&snap.exists())) throw new Error('讀不到雲端 app/profit（doc 不存在或讀取失敗），已中止合併。本次未推送，資料還在本機，請稍後再按同步重試。');
+  const cloudDoc=snap.data()||{};
+  const cloudRaw=cloudDoc[fullKey];
+  // doc 讀得到、但沒有這把 key → 以空物件當基準繼續 merge，【不中止】。
+  //   安全性可證明：app/profit 沒有這個欄位 ⇒ 這次 setField 不可能刪掉任何東西，
+  //   merge 結果 = 本機 dirty 的那幾個品號，純新增。（同 syncNotesMerge 的 (c2)。）
+  const cloudRawIsMissing=(cloudRaw===undefined||cloudRaw===null);
+  if(!cloudRawIsMissing && (typeof cloudRaw!=='object'||Array.isArray(cloudRaw))) throw new Error('雲端這把編輯覆蓋值不是物件（型別異常），已中止合併，以免寫壞雲端。');
+  // 🔴 深拷貝雲端再 merge —— 這一行【絕對不能省】：
+  //   momoMergeByKey 是淺拷貝（`Object.assign({}, cloud)` 只複製第一層）→ merged 裡所有
+  //   「沒碰過」的品號會與 snap.data() 共用同一個子物件；而 merged 等一下要寫進
+  //   Store._profitMem 成為活的應用狀態（getEdits / startEdit / renderTable 都讀它）。
+  //   ec_edits 的值是 {欄位:值} 巢狀物件，而 commitEdit 就是就地改 `edits[code][col]=…` 的
+  //   ——只要哪天有人讓底稿又指回 _profitMem，共用參照會同時污染兩邊而且不報錯。
+  //   ⚠ cloudRawIsMissing 時跳過這一行直接用 {}：JSON round-trip 對 undefined 回 undefined、
+  //     對 null 回 null，兩者都不是合法的 merge 基準。
+  //   ⚠ 已知限制與 syncNotesMerge 的 (d) 相同：JSON round-trip 會靜默改寫 Firestore 特殊型別
+  //     （Timestamp / undefined / NaN / Bytes…）。ec_edits 的值目前【全是數字】
+  //     （commitEdit 的 parseFloat，本檔搜 `const numVal=parseFloat(val)`），純 JSON，
+  //     round-trip 恆等。要往這把 key 加非 JSON 型別的欄位之前，必須先處理這一行。
+  const cloudMap=cloudRawIsMissing ? {} : JSON.parse(JSON.stringify(cloudRaw));
+  const localMap=g.local;
+  // 🔴 濾掉「本機讀不到的品號」＝關掉 delete 分支，完整理由見 _editsMergeKeys 上方。
+  //   與 saveEdits 的 _profitMem 鏡射【共用同一支】，所以畫面顯示的就是這裡算出來的東西。
+  const dirty=_editsMergeKeys(fullKey, localMap, g.items);
+  if(dirty.length===0) throw new Error('登記為待同步的品號在本機都讀不到，已中止合併（不推一份等同雲端的資料）。你的編輯可能沒有存進 localStorage（空間不足）→ 請重新編輯一次該品號再同步。');
+  const merged=momoMergeByKey(cloudMap, localMap, dirty);
+  // 保留下來的雲端獨有品號數＝雲端有、本機沒有、且不在 dirty 內 → 同事的資料，這次被保住了。
+  //   （舊的整包覆蓋會把它們全部刪掉，所以這個數字正是這次改動的價值，要讓使用者看見。）
+  const dirtySet=new Set(dirty.map(String));
+  let keptFromCloud=0;
+  Object.keys(cloudMap).forEach(c=>{ if(!dirtySet.has(String(c)) && !Object.prototype.hasOwnProperty.call(localMap,c)) keptFromCloud++; });
+  await window.__cloudProfit.setField(fullKey, momoFsSanitizeDeep(merged));
+  // 本機回寫 merged（含同事的），否則下次同步又出現差異。
+  //   ⚠ 只寫 saveEdits 也會寫的那兩處（localStorage + _profitMem）。【刻意不主動新增
+  //     Store._mem[fullKey]】：saveEdits 不寫 _mem，憑空生一個第三來源之後只會 stale
+  //     （readEditsForPush 的 _mem 那一層優先於 localStorage）。但若 _mem 本來就有這把 key，
+  //     一併更新、不留舊值。範式與 syncNotesMerge 尾端逐條相同。
+  try{ localStorage.setItem(fullKey,JSON.stringify(merged)); }catch(e){ console.error('[syncEditsMerge] merged 回寫 localStorage 失敗（雲端已經是 merged，本機會 stale 到下次重整）：',fullKey,e); }
+  try{ if(Store._profitMem) Store._profitMem[fullKey]=merged; }catch{}
+  try{ if(Store._mem && Store._mem[fullKey]!==undefined) Store._mem[fullKey]=merged; }catch{}
+  // ⚠【刻意不在這裡清 dirty】：兩份 dirty 必須同生同滅，所以都放在 syncToCloud 收尾那個
+  //   ok.forEach 裡（本檔搜 `_editsItemsDirtyClear(k)`）—— 同一個觸發來源（ok＝真的推成功的
+  //   key）、同一次迭代、相鄰兩個語句 → 結構上無法只清一邊。理由同 syncNotesMerge 的 (e)。
+  return keptFromCloud;
+}
+//  code＝這次動到的品號，由 commitEdit 傳入，給品號級 dirty 與 _profitMem 鏡射用。
+//  ⚠ 沒傳（undefined / null）時的行為【明確定義】：不寫品號級註冊表、鏡射退成 degraded
+//    路徑，其餘一字不變。刻意讓它大聲壞掉（_editsPushGate 會判 level:'problem'）而不是
+//    猜一個品號 —— 猜品號或退回整包覆蓋才是災難。範式比照 saveNotes 的 code 參數。
+function saveEdits(shop,edits,code){
   window._shopJustSaved=Date.now();
   const k='ec_edits|'+shop;
-  try{localStorage.setItem(k,JSON.stringify(edits));}catch{}
-  try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=edits;}catch{}
+  // ── localStorage 寫入：寫完【讀回驗證】，比照 saveNotes（本檔搜 `_lsOk`）──
+  //   🔴 這一步是「推送來源改讀 localStorage」的【必要配套】，不是順手加的：
+  //     推送端現在讀 localStorage（readEditsForPush），寫失敗卻還登記 dirty
+  //     ＝ 下次同步拿一份【舊的 / 不存在的】值去蓋雲端。
+  //   為什麼不只 try/catch：規範說配額滿丟 QuotaExceededError，但本檔 _notifyLsSaveFail 那段
+  //     註解寫的是「配額滿了會靜默失敗」，無法從程式碼確認當初遇到的是哪一種。讀回比對
+  //     【不依賴瀏覽器如何回報】—— 丟例外、靜默不存、只存一半，讀回來不等於寫進去的就判失敗。
+  const _payload=JSON.stringify(edits);
+
+  // ══════ 🔴 兩份 dirty：在主資料寫入【之前】登記，且【無論成敗都保留】 ══════
+  //  方向與位置比照 saveNotes（本檔搜 `🔴 這一行【必須緊貼上一行】`）。這是相對於 09/02
+  //  舊行為（`if(_lsOk) _editsDirtyAdd(k)`）的【方向性翻轉】，動它之前先讀完這段。
+  //
+  //  ── 為什麼現在可以翻轉（舊註解說「接 merge 之前不改這裡」，現在就是接 merge 的時候）──
+  //    舊理由：ec_edits 走整包 setField，基準是【本機那一份】，失敗照登＝拿一份沒寫成的
+  //      舊值整包蓋掉雲端。無害性依賴的是 merge，不是 dirty 本身。
+  //    現況：推送改走 syncEditsMerge，基準是【當下現撈的雲端 doc】，只覆蓋登記過的品號 →
+  //      多登記一個品號最壞是把本機現值再寫一次雲端，無害。前提成立，翻轉成立。
+  //
+  //  ── 為什麼一定要翻轉：兩份 dirty 必須原子 ──
+  //    key 級與品號級是同一件事的兩半，_editsPushGate 同時要這兩半才放行。只要出現
+  //    「key 級有、品號級沒有」，那把 key 就會每一次同步都被判 level:'problem'、彈窗、
+  //    推不出去，而且自己好不了（dirty 只在推成功時清）。2026-09-03 ec_notes 就是這樣
+  //    卡死的，遠端查了三輪才定位。包在 if(_lsOk) 裡並不能保證原子性 —— 真正會把兩半
+  //    撕開的是這兩支【自己】的失敗路徑，if 擋不到；if 只換來「主資料寫失敗時什麼都不
+  //    登記」這個【漏推】方向。
+  //
+  //  ── fail-safe 方向：寧可多推，不可漏推 ──
+  //    多推：merge 只動登記過的品號，推的值是 readEditsForPush 當下讀到的現值 → 無害。
+  //    漏推：使用者改的數字永久滯留本機，畫面正常、同步顯示成功，直到雲端快照回來蓋掉。
+  //  🔴 saveNotes 在這裡的代價是「把漏推換成有機會誤刪」（本機沒有該品號 → merge 走
+  //    delete 分支）。ec_edits【沒有這個代價】：_editsMergeKeys 已經把「本機讀不到的品號」
+  //    濾掉，delete 分支關閉（完整理由見該函式上方）。所以這個方向對 ec_edits 是純賺。
+  //
+  //  ⚠ 只「新增」，【絕不移除】既有 dirty 條目 —— 之前成功存過的編輯仍然該推。
+  //  🔴 這兩行【必須緊貼】：中間不可以插入任何會 return / throw / await 的東西。
+  //    要加東西請加在這兩行【之前】或【之後】。
+  //  ⚠ 刻意【不】呼叫 _pendingSyncKeys.add(k)（saveNotes 那三行的第一行是它）：
+  //    那會讓 ec_edits 首次進 sweep，而 syncToCloud 那條 ec_edits extra 的 taskKeys.add
+  //    屆時才會首次生效、正確性從未被驗過（本檔搜 `taskKeys.add 目前【沒有作用】`）。
+  //    ec_edits 不經 _pendingSyncKeys，靠 syncToCloud 開頭那條 extra 每次現算，這是刻意的。
+  _editsDirtyAdd(k);
+  if(code!==undefined&&code!==null) _editsItemsDirtyAdd(k, code);
+
+  let _lsOk=false, _lsErr=null;
+  try{
+    localStorage.setItem(k,_payload);
+    _lsOk=(localStorage.getItem(k)===_payload);
+    if(!_lsOk) _lsErr=new Error('setItem 沒有丟例外，但讀回的內容不符（可能靜默失敗，或另一個分頁同時寫了同一把 key）');
+  }catch(e){ _lsOk=false; _lsErr=e; }
+
+  // ══════ _profitMem 鏡射：dirty-scoped【合併】，不是整份取代 ══════
+  //  🔴 為什麼不能再寫 `Store._profitMem[k]=edits`：commitEdit 的底稿已改成
+  //    readEditsForPush（＝只有本機那份），整份鏡射進去會把【同事的覆蓋值】從記憶體抹掉，
+  //    而 getEdits 第一順位讀 _profitMem → 畫面上同事那些紫色 cell-edited 標記當場消失，
+  //    且會一直錯到下一次雲端快照回來或使用者重整為止。
+  //  🔴 為什麼不是 `Object.assign({}, base, edits)`：那會讓【本機過期、且不在 dirty】的
+  //    品號蓋掉畫面上的雲端現值 —— 例如某品號早就推成功（dirty 已清）、同事後來又改過，
+  //    本機 localStorage 還留著舊值。那種品號推送端不會推（不在 dirty），畫面卻會顯示舊值，
+  //    正是「畫面說一套、推的是另一套」。所以疊的範圍必須是 dirty，不是「本機全部」。
+  //  ⇒ 與推送端【同一支 momoMergeByKey、同一份 dirty、同一支 _editsMergeKeys】，
+  //    畫面顯示的就是「現在按同步，雲端會變成的樣子」，兩邊結構上不可能分歧。
+  //  ⚠ 這裡【刻意不深拷貝】：base 就是 _profitMem 自己，共用子物件參照是現況；而
+  //    commitEdit 的底稿已是 readEditsForPush 交出的新物件，不再就地改 _profitMem，
+  //    所以沒有污染路徑。真正需要深拷貝的是 syncEditsMerge 裡來自 Firestore snapshot 的
+  //    cloudRaw（那份會被 momoMergeByKey 淺拷貝共用），兩者不要混為一談。
+  //  ⚠ 品號級註冊表讀不到（null＝損毀）時退成「只疊這次動到的那一個品號」：畫面一定要
+  //    反映使用者剛改的數字（取捨比照 saveNotes 的「_profitMem 照樣寫、刻意不回滾」），
+  //    其餘品號原封不動。不退回整份取代 —— 那正是這次要修掉的東西。
+  try{
+    if(typeof Store!=='undefined'&&Store._profitMem){
+      const base=(Store._profitMem[k]&&typeof Store._profitMem[k]==='object'&&!Array.isArray(Store._profitMem[k]))?Store._profitMem[k]:{};
+      const items=_editsItemsDirtyGet(k);
+      const scope=(items===null)
+        ? ((code!==undefined&&code!==null)?[String(code)]:[])   // degraded：註冊表損毀 → 只疊這一筆
+        : items;
+      Store._profitMem[k]=momoMergeByKey(base, edits, _editsMergeKeys(k, edits, scope));
+    }
+  }catch(e){ console.error('[saveEdits] _profitMem 鏡射合併失敗，畫面可能顯示舊值（本機資料與 dirty 都已寫好，不影響推送）：',k,e); }
+
+  // 寫入結果只用來決定「要不要通報使用者」，【不再決定要不要登記 dirty】——
+  //   登記已經在上面做完了，理由見那一段。這裡剩下的唯一責任是「壞了要說」。
+  if(!_lsOk) _notifyEditsSaveFail(shop, _lsErr);
   _showSyncBtn(shop);
+}
+// ── 編輯覆蓋值（ec_edits）沒存進 localStorage 的通報 ──
+//  ⚠ 刻意【不用 showToast】：saveEdits 由 commitEdit 呼叫，而數字是從 #ads-edit-overlay 那個
+//    彈窗送出的。
+//    ▸ 歷史理由（已失效）：.toast 的 z-index 曾是 200、彈窗層是 3000 → toast 會被壓在後面看不到
+//      （同一個坑見 _notifyNotesSaveFail 上方的 (1)），所以只能走 App.showAlertModal
+//      （.modal-backdrop 99999）。
+//    ▸ 現況：2026-09-03 起 .toast 提到 --z-toast(100000) 並加 pointer-events:none
+//      （技術債 B-1 #147）→ **z-index 已不再是這裡選擇 modal 的理由**。
+//    ▸ 此處維持走 showAlertModal 的理由是：訊息本身有 12 行、含「按同步也救不回來」與
+//      「這個提醒只出現一次」兩段必讀的 ⚠，toast 是單行短訊 + 自動消失 + 後蓋前，裝不下。
+//  ⚠ modal 不可用時【只 console.error、不 fallback toast】—— 這條決定 2026-09-03 【維持不動】。
+//    ▸ 原本的理由是「看不見的訊息等於沒有訊息，與其給一個蓋在彈窗後面的假安慰，不如把它留在
+//      Console 讓查的人找得到」。toast 現在看得見了，所以【這個前提已經改變】。
+//    ▸ 是否翻案（改成 fallback 一則短 toast + Console 留全文）**待評估、本次刻意不順手改**：
+//      翻案要重新想「短到一行的訊息會不會讓使用者以為只是小問題」，那是獨立的一題。
+//  ⚠ 訊息不出現 key 名與函式名；技術細節走 console.error 與 detail 欄。
+//  🔴 一次 session 只彈一次窗，之後【只】console.error（比照上方 _lsFailNotified 的形狀，
+//    但這裡連 toast 都不降級，理由同上）。為什麼只彈一次：
+//      訊息內容每次都相同，而 commitEdit 是【每改一格數字就跑一次】—— 連改五格就是五次失敗。
+//      重複彈窗會擋住使用者正在進行的輸入。第一次已經告知「要清空間並重新輸入」，
+//      後續的重複沒有新資訊，只有干擾。
+//    ⚠ showAlertModal 內建的 dedupe 只有 2.5 秒，擋不住「連改十幾秒」這種常態操作，
+//      所以必須自己記一個旗標，不能只靠 dedupeKey。
+//  ⚠ 旗標【只存在記憶體、不寫 localStorage】：這條路徑觸發的前提就是 localStorage 寫不進去，
+//    把旗標寫進去會是同一個失敗。重整後歸零是刻意的 —— 新的一次 session 值得再警告一次。
+let _editsFailNotified = false;   // 同一次 session 只彈一次窗；重整歸零（刻意不持久化，理由見上）
+function _notifyEditsSaveFail(shop, err){
+  const quota=_isQuotaErr(err);
+  console.error('[saveEdits] 編輯覆蓋值沒有存進 localStorage：ec_edits|'+shop, err);
+  const title=quota?'本機空間已滿，這次的數字沒存起來':'這次的數字沒存進這台電腦';
+  if(_editsFailNotified){
+    console.error('[saveEdits] 同一次 session 的第 2 次以後的存檔失敗，不再彈窗（訊息與第一次相同、會擋住輸入）：', title);
+    return;
+  }
+  const message=
+    String(shop||'')+' 的數字覆蓋【沒有】存進這台電腦。\n'+
+    '畫面上還看得到它，但那只是暫存 —— 重整或關掉分頁就會消失。\n\n'+
+    '按「☁ 同步雲端」也救不了它 —— 數字覆蓋的同步是讀這台電腦上的存檔，不是讀畫面上的值。\n'+
+    '請先把剛改的數字記下來，清出空間之後重新輸入一次。\n\n'+
+    '清空間的方式：關掉其他分頁、或清掉瀏覽器裡這個網站的舊快取。\n\n'+
+    '⚠ 這個提醒這次開啟頁面只會出現一次。在你清出空間之前，接下來改的數字【也都不會存起來】，\n'+
+    '　 但不會再跳窗（會擋住你打字），只會記在 F12 的 Console 裡。\n\n'+
+    '⚠ 如果「☁ 同步雲端」按鈕上還有數字，那是先前存成功的東西，\n'+
+    '　 按下去不會把剛剛這一次救回來，也不要因為它顯示同步成功就以為沒事了。';
+  const detail=(err&&(err.name||err.message))?('錯誤：'+(err.name||'')+' '+(err.message||'')):'';
+  if(window.App&&typeof App.showAlertModal==='function'){
+    _editsFailNotified=true;   // ⚠ 只有【真的彈出去】才立旗標；modal 不可用時不立，下次還有機會彈
+    App.showAlertModal({ title:title, message:message, detail:detail, kind:'error', dedupeKey:'editsSaveFail' });
+    return;
+  }
+  console.error('[saveEdits] App.showAlertModal 不可用，這次的存檔失敗只留在 Console：', title);
 }
 function getNotes(shop){
   const k='ec_notes|'+shop;
@@ -4156,20 +5350,120 @@ function getNotes(shop){
   try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return migrate(JSON.parse(JSON.stringify(Store._mem[k]))); }catch{}
   try{ return migrate(JSON.parse(localStorage.getItem(k)||'{}')); }catch{return{};}
 }
-function saveNotes(shop,notes){
+// ⚠ 根本問題未解：使用者 localStorage 接近瀏覽器配額（本案例：182 筆廣告調整 + 13 期報表快取）。
+//   本修法只保證 dirty 原子性，不解決空間。下一個受害者會是報表 lsSave 本身。
+//   待辦：舊期間報表快取的清理機制（另案）。
+function saveNotes(shop,notes,code){
   window._shopJustSaved=Date.now();
   const k='ec_notes|'+shop;
-  try{localStorage.setItem(k,JSON.stringify(notes));}catch{}
-  try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=notes;}catch{}
+  // ── localStorage 寫入：寫完【讀回驗證】，不押注在瀏覽器怎麼回報失敗 ──
+  //   為什麼不只 try/catch：規範說配額滿時 setItem 丟 QuotaExceededError，但本檔上方
+  //   _notifyLsSaveFail 那段註解寫的是「配額滿了會靜默失敗」，我們無法從程式碼確認當初遇到的
+  //   是哪一種。讀回比對【不依賴瀏覽器如何回報】—— 丟例外、靜默不存、只存一半，讀回來不等於
+  //   寫進去的字串就一律判失敗。成本是多一次同尺寸 getItem + 字串比較（一個通路的調整，可忽略）。
+  //   localStorage 整個被封鎖（SecurityError）時 getItem 也會丟 → 落到 catch → 判失敗，方向正確。
+  const _payload=JSON.stringify(notes);
+
+  // ══════ 🔴 三個待同步標記：在主資料寫入【之前】登記，且【無論成敗都保留】 ══════
+  //  2026-09-03 重排。原本這三行包在下方的 `if(_lsOk){…}` 裡（＝寫成功才登記），
+  //  現在移到寫入之前、三行緊鄰。這是【方向性的翻轉】，不是搬家，動它之前先讀完這段。
+  //
+  //  ── 為什麼翻轉：兩份 dirty 必須原子 ──
+  //    key 級（_notesDirtyAdd）與品號級（_notesItemsDirtyAdd）是同一件事的兩半，
+  //    syncNotesMerge 同時要這兩半才推得動。只要出現「key 級有、品號級沒有」，
+  //    那把 key 就會【每一次同步都命中規則 (b) 而失敗】，而且自己好不了 ——
+  //    失敗的 key 留在 _pendingSyncKeys（收尾只刪 ok 的），下次同步再撞一次。
+  //    2026-09-03 正式站實測：使用者 localStorage 接近滿載、setItem 間歇性失敗，
+  //    兩份 dirty 被撕開之後同步永久卡死，遠端查了三輪才定位。
+  //    包在 if(_lsOk) 裡並不能保證原子性 —— 真正會把兩半撕開的是這兩支【自己】的
+  //    失敗路徑（品號級註冊表損毀 → Get 回 null → 提早 return；或它自己的 setItem
+  //    配額爆掉），那兩條都在 if 裡面，if 擋不到。所以 if 沒有換來原子性，
+  //    只換來「主資料寫失敗時什麼都不登記」這個【漏推】方向。
+  //
+  //  ── fail-safe 的方向：寧可多推，不可漏推 ──
+  //    多推：merge 只動【登記過的品號】，而它推的值是 readNotesForPush 當下從
+  //      localStorage 讀到的【現值】。多推一個品號 ＝ 把本機現值再寫一次雲端，無害。
+  //    漏推：使用者打的字永久滯留本機，畫面上看起來好好的、同步顯示成功，
+  //      直到雲端快照回來把它蓋掉 —— 靜默、不可逆、事後查不出來。
+  //    兩者不對稱，所以失敗時的方向選【都登記】。
+  //
+  //  🔴 這個選擇有代價，不是免費的（動手前必須知道）：
+  //    主資料【完全沒寫進去】而 dirty 登記了的話，merge 時 localMap 裡沒有這個品號 →
+  //    momoMergeByKey 走 `else delete out[k]` → 把該品號從雲端刪掉。
+  //    亦即：把「漏推」換成了「有機會誤刪」。之所以仍然這樣選，是因為
+  //    (1) 主資料寫失敗時 _notifyNotesSaveFail 會彈窗，使用者當場知道要重打；
+  //    (2) 誤刪只發生在「該品號本機從來沒有過任何一筆」的情況（編輯既有筆記時
+  //        localStorage 舊值仍在，走的是覆蓋不是刪除）；
+  //    (3) 漏推是靜默的，誤刪至少伴隨一個彈窗。
+  //    ⚠ 這一條是本次修改最尖銳的取捨。若日後決定要更保守，正確的方向是讓
+  //      momoMergeByKey 的刪除分支要求「本機曾經有過」的證據，【不是】把登記搬回 if 裡面。
+  //
+  //  ⚠ 這兩支自己的失敗都只留 console.error（`[notesDirty]` / `[notesItemsDirty]`），
+  //    刻意不彈窗：主資料的通報已經夠吵，再疊一個會蓋住使用者正在打的字。
+  //    兩支都不會寫出半截 JSON —— JSON.stringify 先組完整字串，setItem 是全有或全無。
+  //
+  //  ⚠ 只「新增」，【絕不移除】既有 dirty 條目 —— 之前成功存過的編輯仍然該推。
+  //
   // 掛進待同步集合，讓「☁ 同步雲端」推得到（商品調整 _growth 原本完全沒有上雲的路）
   _pendingSyncKeys.add(k);
-  // persisted 待同步標記（跨重整）→ syncToCloud 的 ec_notes 閘門只認這個。
+  // persisted 待同步標記（跨重整）。兩組讀取端都認它，完整對照表見 syncToCloud 那段
+  //   「dirty 判準全檔【六處】」的註解。
   //   ⚠ 這裡【刻意不判斷 key 形狀】：saveNotes 一旦開始分流 key 形狀，就是下一個 bug 的位置。
-  //   因此 ec_notes|{通路}_growth 也會被登記，而且它【永遠不會被清掉】—— 清除只發生在「推送成功」，
-  //   而能走那道閘門的 key 一律是 ec_notes|{通路}|{月}|{半月} 格式，不可能命中 _growth
-  //   （_growth 走的是下方泛用 field 分支，不經閘門）。這是【已知且無害】的殘留：
-  //   看到 localStorage['ec_notes_dirty'] 裡有清不掉的 _growth，不是壞了，不要去「修」它。
+  //   因此 ec_notes|{通路}_growth 也會被登記，兩種 key 形狀混在同一個陣列裡，這是刻意的。
+  //   🔴 舊註解曾寫「_growth 永遠不會被清掉，因為它不可能命中閘門」——【那個理由是錯的】，不要照抄回去。
+  //     清除端是 syncToCloud 收尾那行 `ok.forEach(k=>{ if(k.startsWith('ec_notes|')) _notesDirtyDel(k) })`，
+  //     判準是 key 前綴、不是「有沒有走過閘門」，所以只要 _growth 真的推成功過一次就會被清掉。
+  //   _growth 現在的完整生命週期：saveNotes 登記 → 重整後由 _sweepAllLocalReportsIntoPending
+  //     依這份註冊表撿回 _pendingSyncKeys → 走泛用 field 分支推送 → 推成功後由上述收尾清除。
+  //     若看到某把 _growth 一直清不掉，代表它一直沒推成功（例如被 _momoFullPushDeleteGuard 擋下），
+  //     那是要去查的訊號，不是「已知無害的殘留」。
   _notesDirtyAdd(k);
+  // ── 品號級 dirty ──
+  //   記「這把 key 底下的哪個品號被碰過」，給 syncNotesMerge 的 dirty-scoped merge 當身分用
+  //   （adjustment 沒有 id、內容欄位 date+period 在真實資料上會撞號，不能用內容當身分）。
+  //   🔴 這一行【必須緊貼上一行】：中間不可以插入任何會 return / throw / await 的東西，
+  //     那正是這次災情的形狀。要加東西請加在這兩行【之前】或【之後】。
+  //   🔴 這【不違反】上面那條「刻意不判斷 key 形狀」：那條講的是【不依 key 的形狀分流行為】——
+  //     例如寫成 `if(k.endsWith('_growth')) _notesItemsDirtyAdd(...)` 就是違反，因為兩種 key 形狀
+  //     會開始走不同的登記邏輯。這裡對兩種形狀【一視同仁】，只是多接收呼叫端告知的
+  //     「這次動到的是哪個品號」，那是一個與 key 形狀無關的參數。要在這裡加形狀分流之前先想清楚。
+  //   ⚠ code 沒傳（undefined / null）時的行為【明確定義】：不寫品號級註冊表，其餘一字不變
+  //     （localStorage / _profitMem / _pendingSyncKeys / key 級 dirty / _showSyncBtn 全部照舊）。
+  //     這是刻意讓它【大聲壞掉】而不是猜一個品號：未來若有人新增第四個呼叫端卻忘了傳 code，
+  //     這把 key 會有 key 級 dirty 但品號級是空的 → syncNotesMerge 的 (b) 會 throw，
+  //     在同步彈窗明確報「沒有任何品號被登記」。猜品號、或退回整包覆蓋，才是災難。
+  //     ⚠ 現行三個呼叫點（_pnmAddNote / _pnmEditNote / deleteProfitNote）全部都傳。
+  if(code!==undefined&&code!==null) _notesItemsDirtyAdd(k, code);
+
+  let _lsOk=false, _lsErr=null;
+  try{
+    localStorage.setItem(k,_payload);
+    _lsOk=(localStorage.getItem(k)===_payload);
+    if(!_lsOk) _lsErr=new Error('setItem 沒有丟例外，但讀回的內容不符（可能靜默失敗，或另一個分頁同時寫了同一把 key）');
+  }catch(e){ _lsOk=false; _lsErr=e; }
+  //   ⚠ _profitMem 照樣寫，【刻意不回滾】：畫面要立刻反映使用者剛打的字，而失敗通報正是要請他
+  //     「把文字複製起來重打」—— 回滾會讓 renderPnmList（saveNotes 之後緊接著跑）當場把那段文字
+  //     抹掉，毀掉唯一的救援路徑。保留它 + 大聲說明，比回滾誠實也比較有用。
+  try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=notes;}catch{}
+  // 寫入結果只用來決定「要不要通報使用者」，【不再決定要不要登記 dirty】——
+  //   登記已經在上面做完了，理由見那一段。這裡剩下的唯一責任是「壞了要說」。
+  if(!_lsOk) _notifyNotesSaveFail(shop, code, _lsErr);
+  // ══════ ⚠ 仍未完成的技術債（2026-09-03 更新：範圍縮小了，但沒有消失）══════
+  //   本函式一次會寫 localStorage 三次：key 級 dirty（_notesDirtyAdd）、品號級 dirty
+  //   （_notesItemsDirtyAdd）、主資料（上面那個 _lsOk 區塊）。三次各自獨立，沒有交易語意。
+  //   ▸ 已解決：主資料寫失敗 → 現在【照樣登記兩份 dirty】，不再出現「key 級有、品號級沒有」
+  //     這種撕開狀態；使用者會拿到彈窗，重打一次即可回到正軌。
+  //   🔴 仍未解決：兩份 dirty【彼此之間】還是可能撕開 ——
+  //     `_notesDirtyAdd` 成功、`_notesItemsDirtyAdd` 失敗（品號級註冊表損毀 → Get 回 null
+  //     而提早 return；或它自己的 setItem 配額爆掉）→ 又回到規則 (b) 永久卡死那條路。
+  //     ⚠ 這一條【就是 2026-09-03 災情的真正形狀】，本次沒有修掉，只是把「主資料失敗」
+  //       這個較常見的觸發源從它前面移開了。兩者容易混為一談，不要當成已修。
+  //     兩支失敗時都只有 console.error（`[notesDirty]` / `[notesItemsDirty]`），沒有彈窗、
+  //     沒有回頭撤銷，也沒有任何地方會發現兩份對不上。
+  //   要完整修，需要三選一：讓兩份 dirty 合併成【同一個 localStorage key】（一次 setItem
+  //     ＝天然原子）、或寫完之後回讀驗證兩份都在（不在就撤銷另一份）、或在 syncNotesMerge
+  //     的 (b) 之前先自我修復。第一條最乾淨但要改動所有讀取端。
+  //   看到這段就知道它還在，不是漏掉。
   _showSyncBtn(shop);
   // 立即同步工作日誌摘要（不必等按 ☁ 同步雲端；silent 不顯示 toast 避免太吵）
   try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}
@@ -4273,11 +5567,33 @@ function closeAdsEditModal(){
 }
 
 function commitEdit(shop,code,col,val,tdId){
-  const edits=getEdits(shop);
+  // 🔴 編輯基準【刻意用 readEditsForPush，不是 getEdits】—— 兩者不同源是設計，不是筆誤。
+  //   getEdits 第一順位讀 Store._profitMem，而 ec_edits 從不進 _pendingSyncKeys
+  //   （saveEdits 不呼叫 _markPending）→ __profitShouldSkipCloudOverwrite（本檔搜該名）
+  //   對它只剩 _shopJustSaved 的 5 秒窗。超過 5 秒，只要任何人動了 app/profit 的任一欄位，
+  //   js/firebase.js 的訂閱就會把 Store._profitMem['ec_edits|…'] 整包換成雲端值。
+  //   拿它當底稿 ＝ 把雲端值當成「我的意圖」寫回 localStorage，而 localStorage 正是
+  //   推送端（readEditsForPush）的來源。整包 setField 時代這大致自我抵銷；接上
+  //   dirty-scoped merge 之後就不是了 —— 本機沒有的品號會被判成「我刪的」。
+  //   ⚠ 另一條修法（讓 saveEdits 也 _pendingSyncKeys.add）刻意【不採用】：那會讓 ec_edits
+  //     首次進 sweep，而 syncToCloud 那條 ec_edits extra 的 taskKeys.add 屆時才會首次生效，
+  //     它的正確性從未被驗過（本檔搜 `taskKeys.add 目前【沒有作用】`）。
+  //   ⚠ 顯示端【維持】getEdits：startEdit（彈窗預填）與 renderTable（紫色 cell-edited 標記）
+  //     要看到「雲端＋本機」的合併現況，跨裝置才看得到同事的覆蓋值。不要為了「一致」把那兩處
+  //     也改掉 —— 那會讓沒在這台機器編輯過的人看不到任何覆蓋值。
+  //   ⚠ 附帶效果（不是巧合，是這次要的）：readEditsForPush 兩條路徑都交出【新物件】，
+  //     所以本函式下面那幾行就地改的不再是 Store._profitMem 的活參照。_profitMem 的更新
+  //     改由 saveEdits 統一負責（見該函式的鏡射合併）。
+  const edits=readEditsForPush(shop);
   if(!edits[code])edits[code]={};
   const numVal=parseFloat(val);
   if(!isNaN(numVal)){edits[code][col]=numVal;}else{delete edits[code][col];}
-  saveEdits(shop,edits);
+  //   ⚠ 第三參數 code 是【必要的】，不是順手傳：saveEdits 靠它登記品號級 dirty
+  //     （給 dirty-scoped merge 當身分）並決定 _profitMem 鏡射的範圍。不傳的話那把 key
+  //     會有 key 級 dirty 但品號級是空的 → _editsPushGate 判 level:'problem'、推不出去。
+  //   ⚠ 清空覆蓋值（上一行走 delete 分支）時【也要傳】：那時 edits[code] 是空殼 {}，
+  //     merge 要靠它把雲端那筆覆蓋值清掉。「清空」不是「不動」。
+  saveEdits(shop,edits,code);
   recalcRow(shop,code,edits[code]||{});
   // adsFee 只更新有變動的 cell，避免整張表重渲染造成閃爍
   if(col==='adsFee'){patchRow(shop,code,edits[code]||{});}
@@ -4359,7 +5675,7 @@ function recalcRow(shop,code,ov){
   const ana=_anaDerive(calcAnalysisAll(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi));
   const testTags=calcTestTags(adsFee,pureRate,targetROI,roiDiff,r.clicks,pureProfit,r.roi);
   const growthRate=r.growthRate;
-  const growthAnalysis=calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate);
+  const growthAnalysis=calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate,adsFee??null,r.clicks??null);   // adsFee＝本函式開頭 ov.adsFee 那個含剛編輯值的區域變數（同 calcAnalysisAll 的慣例），不是編輯前的 r.adsFee
   Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,profitPct,targetROI,roiDiff,dayBudget,...ana,testTags,growthAnalysis});
   const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
 }
@@ -4384,7 +5700,20 @@ function testRuleStats(shop,rule){
   const done=matched.filter(r=>isSuggDone(shop,r.code)).length;
   return{total,done};
 }
-// 通路的「工作流本期」逐標籤優化進度。回 null = 該期報表不存在。
+// 「這個品號的廣告調整欄有沒有東西」。兩種歷史形狀:舊資料是字串、新資料是 {adjustments:[…]}。
+//   抽出來是因為現在有兩把 key 要判(該期 + 該月 |full),兩邊必須完全同一套規則。
+function _adNoteHasText(nd){
+  return (typeof nd==='string')?!!nd.trim():!!((nd&&nd.adjustments)||[]).length;
+}
+// 【單期】通路的逐標籤優化進度。回 null = 該期報表不存在。
+// 2026-09-04 從 shopLabelProgress 拆出:【純重構,判定條件一個字都沒改】,
+//   只把「自己算今天是哪一期」換成吃參數,讓月層(_progMergeMonth)能對同月的 first / second
+//   各跑一次。對外入口仍是 shopLabelProgress,回傳欄位與拆分前完全相同。
+// 🔴 |full【上半月 / 下半月 / 月層三處都算完成】(2026-09-04 放寬,與 _inGrowthPeriod 的
+//   「該月任何期間都顯示」特例對齊,還掉「進度條與淨利表彈窗口徑不一致」那條債)。
+//   一筆在「整月」畫面打的調整是對整個月份的宣告,兩輪都被它滿足 —— 兩條路的機制不同:
+//   商品調整 → 判定條件多認一個值(單一 key,每筆自帶 period 欄);
+//   廣告調整 → 多讀一把 |full 的 key(key 本身就是期別分區,不是靠欄位)。
 // 分母:該期報表列重算標籤(不讀快照標籤,與工作日誌同法);
 // 分子【2026-08-07 拆成兩個獨立來源,不再共用一個 isDone】:
 //   廣告分析的標籤 → 只認該期「廣告調整」ec_notes|{shop}|{month}|{half};
@@ -4393,17 +5722,18 @@ function testRuleStats(shop,rule){
 // 為什麼要拆:舊版單一 done Set 同時餵給兩組。實測好麻吉 2026/07 下半月 822 列中
 //   638 個商品有廣告調整(78%),那 638 個身上的成長標籤就被一併算成完成 ——
 //   「爆發品 180/232」是假的,實際有本期商品調整的只有 39 個商品。
-function shopLabelProgress(shop){
-  const now=new Date();
-  const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
-  const period=_growthPeriodOf({date:today});
-  if(!period)return null;
-  const [month,half]=period.split('|');
+function _periodLabelProgress(shop,month,half){
+  // 與舊版 _growthPeriodOf({date:today}) 產出的字串【同格式】('2026/08|second'),
+  //   所以下方 `_growthPeriodOf(a)===period` 的比對邏輯一字未變。
+  const period=`${month}|${half}`;
   const mem=(typeof Store!=='undefined'&&Store._profitMem)||{};
   const rep=mem['ec|'+shop+'|'+month+'|'+half];
   const rows=Array.isArray(rep&&rep.built)?rep.built:(Array.isArray(rep&&rep.rows)?rep.rows:null);
   if(!rows||!rows.length)return null;
   const adNotes=mem['ec_notes|'+shop+'|'+month+'|'+half]||{};
+  // 同月「整月」畫面打的廣告調整。key 可能不存在(多數月份都沒有)→ 與上一行同樣用 ||{} 兜底。
+  //   實測 2026-09-04:ec_notes|玩樂|2026/08|full 7 個品號、|2026/07|full 4 個、森之旅 2026/07 1 個。
+  const adNotesFull=mem['ec_notes|'+shop+'|'+month+'|full']||{};
   const gNotes=mem['ec_notes|'+shop+'_growth']||{};
   // 廣告調整【刻意不做逐筆 date 過濾】:key 本身就是期間分區(submitProfitNote 以
   //   curMonth/curHalf 組 shopKey),能寫進來的必然屬於該期。而 entry.date 是「打字當下
@@ -4412,10 +5742,10 @@ function shopLabelProgress(shop){
   // 商品調整【必須】逐筆過濾:所有期間共用單一 key ec_notes|{shop}_growth,不過濾會跨期汙染。
   const doneAds=new Set();      // 該期廣告調整有紀錄的商品
   const doneGrowth=new Set();   // 有【歸屬本期】商品調整的商品
-  Object.keys(adNotes).forEach(code=>{
-    const nd=adNotes[code];
-    const has=(typeof nd==='string')?!!nd.trim():!!((nd&&nd.adjustments)||[]).length;
-    if(has)doneAds.add(code);
+  // 兩把 key 共用【同一支】判定(_adNoteHasText),不複製兩份 —— 複製的那份日後改一邊漏一邊。
+  //   Set 天然去重:同一個品號兩把都有,只會進去一次。
+  [adNotes,adNotesFull].forEach(src=>{
+    Object.keys(src).forEach(code=>{ if(_adNoteHasText(src[code]))doneAds.add(code); });
   });
   // 🔴 這裡【沒有】舊版那行 `if(done.has(code))return;` 跨來源短路,是刻意移除的。
   //   在單一 done Set 的年代它只是省事(有廣告調整就不必再看商品調整,反正落同一個桶);
@@ -4423,7 +5753,13 @@ function shopLabelProgress(shop){
   //   成長分析永遠少算 —— 而那正是 638 個有廣告調整的商品,幾乎涵蓋全部。
   Object.keys(gNotes).forEach(code=>{
     const nd=gNotes[code];if(!nd||typeof nd==='string')return;
-    if((nd.adjustments||[]).some(a=>_growthPeriodOf(a)===period))doneGrowth.add(code);
+    // 放寬:同月的「本期」或「整月」都算。月份用 p.slice(0,7)、期別用 p.slice(8),
+    //   沿用本檔既有的硬編碼位移寫法(_inGrowthPeriod / _growthPeriodLabel 都是),
+    //   刻意不改成 split('|')[1] —— period 字串格式不動,兩處寫法一致才不會日後漏改。
+    if((nd.adjustments||[]).some(a=>{
+      const p=_growthPeriodOf(a);
+      return !!p&&p.slice(0,7)===month&&(p.slice(8)===half||p.slice(8)==='full');
+    }))doneGrowth.add(code);
   });
   const ana={},growth={};let doneTotal=0;
   rows.forEach(r=>{
@@ -4444,7 +5780,7 @@ function shopLabelProgress(shop){
     let alAll=[],gl='';
     try{
       alAll=calcAnalysisAll(r.adsFee,r.pureRate,r.targetROI,r.roiDiff,r.clicks,r.pureProfit,r.roi)||[];
-      gl=calcGrowthAnalysis(r.growthRate,r.rev,r.prevRev,r.pureRate).label||'';
+      gl=calcGrowthAnalysis(r.growthRate,r.rev,r.prevRev,r.pureRate,r.adsFee??null,r.clicks??null).label||'';
     }catch(e){}
     // 多標籤：陣列裡每個標籤各自累計一次 t / d。
     //   🔴 同列去重（seen）：ana[label].t 的語義是「帶該標籤的【商品數】」，而畫面上的
@@ -4463,7 +5799,77 @@ function shopLabelProgress(shop){
   });
   return{month,half,total:rows.length,doneTotal,ana,growth};
 }
+
+// 月層資料是否「已經可能載入完成」。🔴 未知一律當成【還沒載入】——
+//   寧可多顯示一次「載入中」,也不要在訂閱還沒回來時斬釘截鐵說「尚無報表」。
+//   依據:js/firebase.js 的 __heavyProfitSubsLoaded(profits collection + archive 分片是延後訂閱,
+//   開站 1.5 秒後或使用者切進淨利表才接)。用 ===true,undefined / 未定義都回 false。
+//   ⚠ 極限:這個旗標的語義是「訂閱【已發出】」,不是「首批快照【已回來】」,
+//     所以 loaded===true 之後仍可能有短暫空窗期;它也不涵蓋 app/profit 本身那條輕量訂閱。
+function _progHeavyLoaded(){return window.__heavyProfitSubsLoaded===true;}
+
+// 舊格式報表的 warn 去重:同一個 shop|month|half 一個 session 只噴一次。
+//   同款模式:本檔的 _lsFailNotified、js/pages/daily.js 的 _adjClsWarned。
+//   為什麼需要:shopLabelProgress 在人員迴圈裡逐人呼叫,月曆每次重繪都會再跑一輪。
+const _progFmtWarned=new Set();
+
+// 月層彙總:【純數字相加,沒有任何集合運算】。
+//   月層的每一個數字都等於「上半月那一格 + 下半月那一格」,沒有例外。
+//   🔴 不做跨期去重:去重會把「下半月那批還沒碰的商品」從分母吸收掉(它們上半月出現過、不佔新格子),
+//     結果月層百分比會【高於】底下兩列半月,而且高得很合理、沒有人會發現。
+//   只出現在單一期的標籤,另一期當 0 相加(不跳過該標籤)。
+//   回 null = 兩期都沒有報表(或加總後分母 <= 0,避免 0/0 產生 NaN% 與 width:NaN%)。
+//   shop 只用於 warn 訊息與去重 key(raw 裡沒有帶通路名),不參與任何計算。
+function _progMergeMonth(shop,month,rawFirst,rawSecond){
+  const parts=[['first',rawFirst],['second',rawSecond]];
+  const have=[],missing=[];
+  parts.forEach(p=>{(p[1]?have:missing).push(p[0]);});
+  if(!have.length)return null;
+  let total=0,doneTotal=0;
+  const ana={},growth={};
+  parts.forEach(p=>{
+    const h=p[0],raw=p[1];
+    if(!raw)return;
+    total+=raw.total;doneTotal+=raw.doneTotal;
+    Object.keys(raw.ana).forEach(l=>{const b=(ana[l]=ana[l]||{t:0,d:0});b.t+=raw.ana[l].t;b.d+=raw.ana[l].d;});
+    Object.keys(raw.growth).forEach(l=>{const b=(growth[l]=growth[l]||{t:0,d:0});b.t+=raw.growth[l].t;b.d+=raw.growth[l].d;});
+    // 舊格式報表(rep.rows,缺 growthRate / prevRev)會讓 calcGrowthAnalysis 整批回空 label,
+    //   月層的成長桶就只剩新格式那一期,看起來像「月層 = 半月」而且不 throw、不報錯。出一次 warn。
+    const wk=shop+'|'+month+'|'+h;
+    if(raw.total>0&&!Object.keys(raw.growth).length&&!_progFmtWarned.has(wk)){
+      _progFmtWarned.add(wk);
+      console.warn('[_progMergeMonth] 該期有',raw.total,'列但成長標籤 0 個,可能是舊格式報表(缺 growthRate/prevRev)：',wk);
+    }
+  });
+  if(total<=0)return null;
+  return{month,loaded:_progHeavyLoaded(),have,missing,total,doneTotal,ana,growth};
+}
+
+// 通路的「工作流本月」進度 —— 對外唯一入口(消費者:js/pages/daily.js 的 buildProgressHtml)。
+//   月份來自【今天】(_growthPeriodOf 的工作流推算),與淨利表當前選擇的期間【脫鉤】——
+//   顯示端要用回傳的 month,不可以改讀 state[shop].curMonth,否則四個通路會顯示不同月份。
+// 🔴 2026-09-04 塊 1 的 lazy getter(otherHalf / monthly)已移除,改成兩期都【立即】算:
+//   月層顯示一啟用,兩期本來就每次都要用,lazy 只剩一層看不出效果的間接。更重要的是舊版
+//   「當期沒報表就 return null」會讓維克這種「上半月有 132 列、下半月還沒產」的通路整個消失,
+//   月層永遠看不到 —— 而「一期還沒產」是每個月有一半時間的常態,不是例外。
+// 回 null = 兩期都沒有報表(或期別算不出來)→ 畫面維持「—」。
+//   first / second 為 null = 該期沒有報表(不是 0);monthly.loaded=false = 訂閱還沒回來。
+function shopLabelProgress(shop){
+  const now=new Date();
+  const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
+  const period=_growthPeriodOf({date:today});
+  if(!period)return null;
+  const [month,half]=period.split('|');
+  const first=_periodLabelProgress(shop,month,'first');
+  const second=_periodLabelProgress(shop,month,'second');
+  const monthly=_progMergeMonth(shop,month,first,second);
+  if(!monthly)return null;
+  return{month,curHalf:half,loaded:monthly.loaded,first,second,monthly};
+}
 window.shopLabelProgress=shopLabelProgress;
+// 掛 window:驗證腳本要能對指定期別直接取單期結果。
+window._periodLabelProgress=_periodLabelProgress;
+window._progMergeMonth=_progMergeMonth;
 // 測試標籤那一格。點一下開編輯面板（改標記日期 / 新增移除標籤 / 管理標籤清單）。
 //   只顯示「本期間結束日 >= 標記日」的標籤 —— 測試開始前的期間不該掛著未來才貼的標籤，
 //   否則「測試前 vs 測試後」的成效比較會分不出來。
@@ -5163,7 +6569,11 @@ function resetHiddenCols(shop){try{localStorage.removeItem(_HCOLS_LS);}catch{}ap
 function openColPicker(shop,btn){
   let m=document.getElementById('colpick-'+shop);
   if(m){m.remove();return;}
-  m=document.createElement('div');m.id='colpick-'+shop;m.className='col-picker-menu open';
+  // cp-2col：蝦皮這一份【專屬】的兩欄排列（20 列排不進 860px 高的筆電視窗，見 css/profit.css 的 .cp-2col 註解）。
+  //   🔴 只加在這裡。MOMO 欄位（momoOpenColPicker）/ 酷澎欄位（openCupColPicker）/ MOMO 標籤篩選
+  //     （momoOpenFilterPanel）三處的 className 字面【與本行的 'col-picker-menu open' 逐字相同】，
+  //     改動時務必連 m.id='colpick-'+shop 一起比對定位，不要用短字串搜尋，會誤改。
+  m=document.createElement('div');m.id='colpick-'+shop;m.className='col-picker-menu open cp-2col';
   const wrap=btn?.closest('.col-picker-wrap');
   (wrap||btn?.parentElement||document.body).appendChild(m);
   renderColPicker(shop);
@@ -5313,7 +6723,7 @@ function submitProfitNote(){
   const _entry={date:today,text:v};
   if(_isG&&_st&&_st.curMonth&&_st.curHalf)_entry.period=`${_st.curMonth}|${_st.curHalf}`;
   notes[code].adjustments.push(_entry);
-  saveNotes(shopKey,notes);
+  saveNotes(shopKey,notes,code);
   closeProfitNoteModal();
   applyFilters(shop,{keepScroll:true});
 }
@@ -5383,7 +6793,7 @@ function _pnmEditNote(origIdx,btn){
     // 收尾逐字比照 deleteProfitNote 的最後一行（不關彈窗、帶 keepScroll）。
     //   兩處差異：那邊是 splice、這邊是改 text；那邊刪光後會 delete notes[code]，
     //   編輯不會改變陣列長度，所以這裡沒有那一行。
-    saveNotes(shopKey,notes);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
+    saveNotes(shopKey,notes,code);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
   };
   inp.addEventListener('keydown',e=>{
     if(e.key==='Enter'){e.preventDefault();save();}
@@ -5426,14 +6836,22 @@ function deleteProfitNote(origIdx,btn){
     renderPnmList();renderPnmHistory();
     const msg='這筆紀錄剛剛被更新過，清單已重新整理，請再確認一次';
     if(window.App&&typeof App.showAlertModal==='function')App.showAlertModal({title:'沒有刪除',message:msg,kind:'warn',dedupeKey:'pnmDelStale'});
-    else if(typeof showToast==='function')showToast(msg,'error',4000);   // 退路：toast 的 z-index(200) 蓋不過 .pnm-overlay(3000)，看得不清楚，但總比沒訊息好
+    // 退路：toast。
+    //   ▸ 歷史理由（已失效）：toast 的 z-index(200) 蓋不過 .pnm-overlay(3000)，看得不清楚，
+    //     但總比沒訊息好 —— 所以主路徑用 showAlertModal、toast 只當退路。
+    //   ▸ 現況：2026-09-03 起 .toast 提到 --z-toast(100000) 並加 pointer-events:none
+    //     （技術債 B-1 #147）→ toast 在 .pnm-overlay 開著時看得見了。
+    //   ▸ 🔴 這一句訊息只有一行、短到 toast 完全裝得下，**除了 z-index 之外沒有記錄別的理由**
+    //     要優先用 showAlertModal。也就是說：原本的理由已失效，此處維持現狀只是尚未重新評估，
+    //     不是有新的理由。要不要改成一律走 toast（少一次「知道了」的點擊）是待辦，不在本次範圍。
+    else if(typeof showToast==='function')showToast(msg,'error',4000);
   };
   if(!btn||!btn.dataset||btn.dataset.text===undefined){_abort('拿不到來源 × 鈕或它的比對屬性');return;}
   const t=notes[code].adjustments[origIdx];
   if(!t||String(t.text||'')!==btn.dataset.text||String(t.date||'—')!==btn.dataset.date){_abort('資料在彈窗開啟期間變動過');return;}
   notes[code].adjustments.splice(origIdx,1);
   if(!notes[code].adjustments.length)delete notes[code];
-  saveNotes(shopKey,notes);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
+  saveNotes(shopKey,notes,code);renderPnmList();renderPnmHistory();renderPnmInsight();applyFilters(shopKey.split('|')[0].replace('_growth',''),{keepScroll:true});
 }
 function closeProfitNoteModal(){document.getElementById('profit-note-modal')?.classList.remove('open');_pnm=null;}
 function startNote(shop,code){openNotePopup(shop,code);}
@@ -10921,18 +12339,34 @@ function momoRenderSub(shop){
 
 // ── MOMO 同步鈕（甲配/乙配 pill 列最右）+ 同步預覽視窗 ──
 //   #header-kpi-row（全域鈕所在）在 MOMO 頁被隱藏，MOMO 需自備入口；此鈕呼叫預覽 → 確認 → 全域 syncToCloud。
-// 唯讀待同步計數（只給 MOMO 同步鈕決定亮/暗用）：只數 key，不 mutate _pendingSyncKeys、不回填 Store、不 parse value。
+// 唯讀待同步計數（只給 MOMO 同步鈕決定亮/暗用）：只數 key，不 mutate _pendingSyncKeys、不回填 Store。
+//   ⚠ 「不 parse value」只對【被數的那些 key】成立：為了跟 sweep 的 ec_notes|*_growth 條件一致，
+//     這裡會在迴圈【外】把 ec_notes_dirty 註冊表讀一次、轉成 Set 重複用（單一小陣列，不是逐 key 讀）。
+//     不要改成迴圈內每個 key 各呼叫一次 _notesIsDirty —— 那是 localStorage.getItem + JSON.parse × N。
 // ⚠️ 這裡的白名單前綴必須跟 _sweepAllLocalReportsIntoPending()（本檔搜 `function _sweepAllLocalReportsIntoPending`）
 //    保持一致——那邊改了前綴，這邊也要一起改，否則鈕亮暗會跟實際會推的對不上。
 function _momoSyncPendingCount(){
   const keys=new Set();
   // (1) 這個 session 已 _markPending 的（排除 marker / _summary_v1，比照 _realPendingCount）
   _pendingSyncKeys.forEach(k=>{ if(k.startsWith('__shop__|'))return; if(k==='_summary_v1')return; keys.add(k); });
+  // ec_notes dirty 註冊表：迴圈外讀一次。三種狀態的判準與 _notesIsDirty（本檔搜 `function _notesIsDirty`）逐條對齊：
+  //   raw===null      註冊表不存在＝從沒人編輯過的正常空狀態 → 都不算（集合空）
+  //   非陣列 / throw  內容損毀或 localStorage 被擋 → notesDirtyAll=true（全算進去、鈕亮）
+  //   ⚠ 損毀時的 fail-safe 方向【刻意】與 _notesIsDirty 相同：兩份白名單不一致正是上面那段註解在防的事。
+  //     這裡回 true 最壞只是鈕多亮一次（不影響實際推送）；回 false 會變成「鈕是暗的、按下去卻推得出東西」。
+  let notesDirtySet=null, notesDirtyAll=false;
+  try{
+    const raw=localStorage.getItem('ec_notes_dirty');
+    if(raw===null) notesDirtySet=new Set();
+    else{ const a=JSON.parse(raw); if(Array.isArray(a)) notesDirtySet=new Set(a); else notesDirtyAll=true; }
+  }catch{ notesDirtyAll=true; }
+  const notesDirtyHas=k=>notesDirtyAll||!!(notesDirtySet&&notesDirtySet.has(k));
   // (2) localStorage 裡符合 sweep 白名單前綴的——重整後 session 標記已清空，靠這個撐起亮暗（只讀 key 名，不 parse value）
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
       if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
+         || (k.startsWith('ec_notes|') && /_growth$/.test(k) && notesDirtyHas(k))   /* 商品調整：與 sweep 逐條同條件（dirty 才算）。廣告調整不算——它走 syncToCloud 的當期閘門，不經 sweep */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
     }
   }catch{}
@@ -11009,10 +12443,33 @@ function _momoCollectPending(shop){
   const items=[], seen=new Set();
   const add=(key,kind,val,over)=>{ if(seen.has(key))return; seen.add(key); const it={key,kind,localVal:val,localCount:(over&&over.count!=null?over.count:_momoCount(val))}; if(over&&over.stat) it.e001Stat=over.stat; items.push(it); };
   // syncToCloud 開頭那兩條 shop 專屬 extra（465-469）：MOMO 賣場通常為空
-  //   ⚠ ec_notes 的閘門條件與 syncToCloud 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`，全檔只有兩處）：
+  //   ⚠ ec_notes 的閘門條件與 syncToCloud 那份【必須逐字相同】（搜 `_notesIsDirty('ec_notes|'+_nk)`）：
   //     兩處不一致 ＝ 預覽說要推 N 筆、實際推 N±1 筆，而且不報錯。改一處就必須同時改另一處。
-  try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0&&_notesIsDirty('ec_notes|'+_nk)) add('ec_notes|'+_nk,'其他設定',notes); }catch{}
-  try{ const edits=getEdits(shop); if(edits&&Object.keys(edits).length>0) add('ec_edits|'+shop,'其他設定',edits); }catch{}
+  //   ⚠ dirty 判準全檔【六處】、分成三組。本處【同時】是廣告調整組的②與編輯覆蓋值組的⑥。
+  //     完整對照表在 syncToCloud 那段同名註解裡（搜 `dirty 判準全檔【六處】`），
+  //     刻意不在這裡重複一份，避免兩邊各自漂移。
+  //     另一組（③ _sweepAllLocalReportsIntoPending / ④ _momoSyncPendingCount）判準【刻意不同】：
+  //     它們吃 `ec_notes|` 前綴 + `/_growth$/`，不吃 `_nk`。不要為了「統一」把它們改成一樣。
+  //   🔴 2026-09-03：ec_notes 的【納入判斷】與【顯示的值】現在來自兩個不同的地方，這是刻意的 ——
+  //     ・納入判斷 `Object.keys(getNotes(_nk)).length>0`：與推送端逐字相同（推送端也是問
+  //       getNotes「當期有沒有調整存在」，那要合併視圖才答得出來）。
+  //     ・localVal 走 readNotesForPush（_mem → localStorage）：與 syncNotesMerge 實際推的值
+  //       【同一支實作】。舊碼這裡塞的是 getNotes 的結果（_profitMem 優先＝可能已被雲端訂閱
+  //       蓋回雲端版）→ 預覽顯示的筆數與 willMerge 都會跟實際推的對不上，而且不報錯。
+  //     ⚠ 兩者不同源【不是漏改】。要改任何一邊，先確認你改的是「納不納入」還是「推什麼值」。
+  try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0&&_notesIsDirty('ec_notes|'+_nk)) add('ec_notes|'+_nk,'其他設定',readNotesForPush('ec_notes|'+_nk)||{}); }catch{}
+  //   🔴 ec_edits 的來源與閘門【呼叫與推送端同一支 _editsPushGate】，不再靠「兩處逐字相同」
+  //     的紀律 —— 那個紀律在本檔已經失效兩次（PR #93 預覽騙人、#157b 兩份 dirty 撕裂）。
+  //     兩邊問同一個 g.ok ⇒「預覽說要推 1 筆、按下去卻失敗」在結構上不可能發生。
+  //     ⚠ 顯示的值用 g.local（閘門讀到的那一份），不要自己再呼叫一次 readEditsForPush ——
+  //       再讀一次就是第二個來源，兩次之間若有任何寫入就會分歧。
+  //   ⚠ 跳過時也要留痕：本函式沒有 skippedNotDirty 這種桶子（不加就是那一列直接從預覽消失，
+  //     使用者看不出為什麼），所以至少 console 一行，文字與推送端同源（都來自 g.reason）。
+  try{ const g=_editsPushGate(shop);
+    if(g.ok) add(g.fullKey,'其他設定',g.local);
+    else if(g.level==='problem') console.warn('[syncToCloud] ec_edits 未推送（異常）：',g.fullKey,g.reason);
+    else console.log('[syncToCloud] ec_edits '+g.reason+'：',g.fullKey);
+  }catch{}
   _pendingSyncKeys.forEach(pk=>{
     if(pk.startsWith('__shop__|')) return;               // marker，不推
     if(pk.startsWith('ec|filemeta|')) return;            // 故意不上雲
@@ -11243,7 +12700,29 @@ async function momoOpenSyncPreview(shop){
   items.forEach(it=>{ it.willDelete=0; it.willMerge=0;
     if(it.status==='diff'){
       if(it.key && it.key.startsWith('ec_momo_optlog|')){ try{ it.willMerge=momoMergeOptlog(it._cloudVal, it.localVal).addedFromCloud; }catch(e){} }   // optlog 走 read-merge-write：不刪除、不套 willDelete；willMerge＝會併回本機沒有的雲端筆數
-      else if(it.kind!=='MOMO商品主檔' && it.kind!=='MO+逐列成本' && it.kind!=='酷澎報表' && it.kind!=='酷澎退貨'){ it.willDelete=momoCloudDeleteCount(it.localVal, it._cloudVal); }   // 酷澎整份覆蓋（regenerate=整月新報表）＋雲端 doc 帶 updatedAt 本機無 → doc 級 willDelete 是假陽性，排除（狀態已由 7b rows 比對反映）
+      else if(_notesUsesMerge(it.key)){
+        // ec_notes（商品調整+廣告調整）走 dirty-scoped merge：同樣不刪除同事的、【不可套 willDelete】——套了會顯示紅字
+        //   「會刪掉雲端 N 筆、預設不推」，與實際行為不符，會把使用者嚇到不敢推。
+        //   willMerge 在這裡的語意＝雲端有、本機沒有、且不在品號 dirty 內的品號數
+        //   ＝ 這次推送【會被保留下來】的同事資料（舊的整包覆蓋會把它們全刪掉）。
+        //   ⚠ dirty 讀到 null（註冊表損毀）時這裡【不報錯】：預覽是唯讀的，willMerge 留 0；
+        //     真正的中止與報錯發生在 syncNotesMerge 的 (a)，那裡才是會寫雲端的地方。
+        try{ const _d=_notesItemsDirtyGet(it.key);
+          if(Array.isArray(_d)){ const _s=new Set(_d.map(String)); const _c=it._cloudVal||{}, _l=it.localVal||{};
+            it.willMerge=Object.keys(_c).filter(c=>!_s.has(String(c)) && !Object.prototype.hasOwnProperty.call(_l,c)).length; }
+        }catch(e){}
+      }
+      else if(cupIsNoteKey(it.key)){
+        // 酷澎備註走 dirty-scoped merge（比照 ec_notes）：不刪除同事的、【不可套 willDelete】。
+        //   willMerge＝雲端有、本機沒有、且不在品號 dirty 內的 SKU 數＝這次推送會被保留下來的同事備註。
+        //   dirty 讀到 null（損毀）時不報錯（預覽唯讀）；真正中止發生在 syncCupNoteMerge。
+        try{ const _d=_cupNoteItemsDirtyGet(it.key);
+          if(Array.isArray(_d)){ const _s=new Set(_d.map(String)); const _c=it._cloudVal||{}, _l=it.localVal||{};
+            it.willMerge=Object.keys(_c).filter(c=>!_s.has(String(c)) && !Object.prototype.hasOwnProperty.call(_l,c)).length; }
+        }catch(e){}
+      }
+      else if(it.kind!=='MOMO商品主檔' && it.kind!=='MO+逐列成本' && it.kind!=='酷澎報表' && it.kind!=='酷澎退貨'){ it.willDelete=momoCloudDeleteCount(it.localVal, it._cloudVal); }   // 酷澎報表/退貨整份覆蓋（regenerate=整月新報表）＋雲端 doc 帶 updatedAt 本機無 → doc 級 willDelete 假陽性，排除（狀態已由 rows/byOrder 比對反映）
+
     }
   });
   // #3：把這次預覽的比對快照 + 差異明細寫進 __lastSyncReport（MOMO 同步先前完全沒診斷輸出）。confirm 後 syncToCloud 會再覆寫成 'done'。
@@ -11258,6 +12737,22 @@ function momoRenderSyncPreviewModal(shop, items){
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const typeColor={'MOMO商品主檔':'#5b5fcf','蝦皮報表':'#e4007f','酷澎報表':'#0ea5e9','酷澎退貨':'#0284c7','其他設定':'#9ca3af'};
   const statusCell=it=>{
+    // 🔴🔴【已知，未修】走 merge 的 key 在預覽會顯示成「新增」，cloudCount 與實推結果不一致 🔴🔴
+    //   成因：status 的判定在 momoOpenSyncPreview 的泛用分支（本檔搜 `const cv=cloud[it.key]`），
+    //     只看「app/profit 有沒有這個欄位」——沒有就 status='new' / cloudCount=0。
+    //     但 ec_notes 走 dirty-scoped merge 之後，「app/profit 沒有這把 key」有兩種正常成因：
+    //       ・全新期間（第一次有人在這個月/半月寫調整）
+    //       ・🔴 已封存的月份 —— key 在 app/profit_notes_YYYY 這個【另一個 doc】裡，而
+    //         __cloudProfit.getDoc() 只讀 app/profit（見 js/firebase.js 的 PROFIT_ARCHIVE_DOCS）。
+    //         2026-09-03 實測雲端有 9 把這種 key（好麻吉/森之旅/玩樂 的 2026/03 與 2026/06）。
+    //   症狀：預覽顯示「新增 · 雲端 0 / 本機 N 筆」，讓人以為整份 N 筆要上雲；
+    //     但 syncNotesMerge 的 (c2) 是以【空物件】當基準只寫 dirty 的那幾個品號 →
+    //     推完 app/profit 只會多那幾筆，不是 N 筆。預覽與結果對不上。
+    //   ⚠ 但【不會造成資料損失】：推的內容是對的（只有使用者真的動過的品號），
+    //     封存分片是另一個 doc、setField 碰不到它，畫面讀的 _profitMem 仍是 archives+current 合併。
+    //   ⇒ 2026-09-03 這一輪【刻意不修】：要修得在預覽端引入「這把 key 走 merge 時 cloudCount
+    //     該怎麼算」的新語意（至少要讓 status 分出 new / merge-new 兩種），範圍超出本次。
+    //     修的時候記得：改這裡的同時也要改 momoOpenSyncPreview 的 status 判定，兩處是一組。
     if(it.status==='new'){
       if(it.suspicious) return `<span style="color:#dc2626;font-weight:700" title="本機 ${it.localCount} 筆、但雲端讀到 0——筆數這麼多卻雲端全空，很可能是雲端讀取失敗、不是真的新增。整包推上去會清空雲端 → 確認前請勿推送（已預設不勾）。">⚠ 雲端讀取可疑，預設不推</span>`;
       return `<span style="color:#10b981;font-weight:600">新增</span>`;
@@ -11267,6 +12762,8 @@ function momoRenderSyncPreviewModal(shop, items){
     if(it.status==='readfail') return `<span style="color:#d97706">無法比對（雲端讀取失敗，仍會整包覆蓋）</span>`;
     const cnt=(it.cloudCount!==it.localCount)?`（雲端 ${it.cloudCount} / 本機 ${it.localCount} 筆）`:'';
     if(it.conflict) return `<span style="color:#dc2626;font-weight:700" title="雲端在你載入後又被更新過（可能是同事推的），推了會用你的舊資料整包蓋掉雲端較新版本${cnt}">⚠ 雲端較新，預設不推</span>`;   // 【2】版本比對命中
+    const _isNG=_notesUsesMerge(it.key);   // ec_notes（商品調整+廣告調整）：dirty-scoped merge，永遠不整包覆蓋 → 不可落到下面「會刪掉雲端／內容不同（整包覆蓋）」那兩條
+    if(_isNG) return `<span style="color:#2563eb;font-weight:600" title="調整備註走逐品號 dirty-scoped 合併（read-merge-write）：只覆蓋你這次改過的品號，其餘一律保留雲端，不會蓋掉同事的更新。${cnt}">🔀 將合併（只動你改過的品號）${it.willMerge>0?' · 保留雲端 '+it.willMerge+' 個品號':''}</span>`;
     if(it.willMerge>0) return `<span style="color:#2563eb;font-weight:600" title="優化紀錄走逐 SKU 依 id 合併（read-merge-write）：不覆蓋、不刪除。推送會把雲端有、你本機沒有的 ${it.willMerge} 筆一併併回，兩邊的紀錄都保留。${cnt}">🔀 將合併（不覆蓋不刪除）· 併回 ${it.willMerge} 筆</span>`;   // optlog read-merge-write
     if(it.willDelete>0) return `<span style="color:#dc2626;font-weight:700" title="整包覆蓋：雲端有、本機沒有的 ${it.willDelete} 筆會被刪掉（可能是同事今天做的、你本機還沒載到）。展開看是哪幾筆。${cnt}">⚠ 這會刪掉雲端 ${it.willDelete} 筆（可能是同事的更新），預設不推</span>`;   // 臨時止血：整包覆蓋會刪雲端資料
     return `<span style="color:#9a3412;font-weight:600" title="推了會用本機整包覆蓋雲端${cnt}">內容不同</span>`;
@@ -12253,7 +13750,10 @@ function momoOptlogTodayCounts(){
     const map=momoLoadOptlog(shop)||{};
     Object.keys(map).forEach(sku=>{ (map[sku]||[]).forEach(e=>{
       if(!e || (e.date||'')!==today) return;
-      const person=momoOptlogUserToName(e.by) || '未指派';   // 缺 by（無操作者）→ 併入「未指派」桶，比照 ADJ_SHOP_TO_PERSON['維克']='未指派'；不靜默丟、不回填人名
+      // 🔴 這裡的『未指派』是「MOMO 優化紀錄查無操作者」的桶名，與工作日誌的【人員／通路歸屬】完全無關，
+      //    不要跟著那邊一起改。舊註解寫「比照 ADJ_SHOP_TO_PERSON['維克']='未指派'」已於 2026-09-04 失效
+      //    （維克已由楊心雨接手），該次刻意不動本行 —— 對全庫 '未指派' 做整批取代會把這個桶誤標成某人做的。
+      const person=momoOptlogUserToName(e.by) || '未指派';   // 缺 by（無操作者）→ 併入「未指派」桶；不靜默丟、不回填人名
       const key=shop+MOMO_OPTLOG_DP_SEP+(e.type||'其他');
       const c=byPerson[person]=byPerson[person]||{};
       c[key]=(c[key]||0)+1;
@@ -15673,6 +17173,11 @@ function momoMergeByKey(cloud, local, dirtyKeys){
   (dirtyKeys||[]).forEach(k=>{ if(local && Object.prototype.hasOwnProperty.call(local,k)) out[k]=local[k]; else delete out[k]; });
   return out;
 }
+// ⚠ 淺拷貝：`Object.assign({}, cloud)` 只複製第一層 → 回傳結果中「不在 dirtyKeys 內」的 value
+//   與傳進來的 cloud 共用同一個子物件參照。cost_by_origin 的 value 是純量所以無感；用在巢狀
+//   value（例如 ec_notes 的 {adjustments:[…]}）時，在結果上就地修改會同時污染 cloud 那份。
+//   完整交接說明見本檔 `const _NOTES_ITEMS_DIRTY_LS` 上方那段註解的 (1)。
+window.__momoMergeByKey = momoMergeByKey;   // Console 測試/除錯用（純函式，可餵假資料）
 // ── 編輯器/匯入寫單一原廠成本：更新 cost map + meta（異動紀錄 + manual 旗標）+ dirty，回 {ok}。──
 function momoSetCostByOrigin(origin, cost, opts){
   opts=opts||{}; origin=String(origin||'').trim(); const c=Number(cost);
@@ -16745,6 +18250,45 @@ let _reconFiles={};
 //   這一版是四個獨立 input，使用者可以同時選四個檔 —— 全域鎖會讓 A 欄解析中時
 //   B 欄的選檔被 `return` 【靜默丟掉】，沒有任何提示。
 let _reconBusy={};
+// 整頁共用的月份（'YYYY-MM'，'' = 未選）。
+// 🔴 存在的理由不是 UI 好看：下一輪落地時 doc id 是 {賣場}_{YYYY-MM}，沒有明確月份就存不了。
+//   而月份【不能只從 PDF 取】—— 四家可能傳到不同月份的檔（這正是 recon-warn 那條警告的存在理由），
+//   所以必須有一個使用者看得到、也改得動的值。
+// ⚠ 仍然是【零寫入】：這兩個變數只活在記憶體，不進 localStorage、不進 Firestore，重整就沒。
+let _reconMonth='';
+// 使用者有沒有【親手】改過月份。true 時自動帶入就不再覆蓋他的選擇。
+//   ⚠ 選回空白（''）會把它重置回 false —— 那是「我不要指定月份」的意思，
+//     不是「我要鎖住這個選擇」。少了這條，手滑選到「請選擇」之後自動帶入就永遠失效，
+//     而畫面上沒有任何東西會告訴使用者「自動帶入已經關掉了」。
+let _reconMonthTouched=false;
+// 期間 → 所屬月份（'YYYY-MM'）。
+// 🔴 from 與 to 不同月時回 null（＝跨月），呼叫端據此【不自動帶入、且該欄標紅】。
+//   ⚠ 這條分支【未經真實跨月樣本驗證】：手上四份實測 PDF（好麻吉/玩樂/維克/森之旅 2026-01）
+//     期間全都是整月（2026-01-01 ~ 2026-01-31），我們不知道蝦皮會不會出跨月的進帳報表。
+//     選擇「標紅 + 不猜」而不是「取 from 的月份」，理由是：猜錯不會有任何徵兆，
+//     標紅至少會讓人看到異常。若日後拿到真的跨月樣本，請回來重新決定要不要改。
+function _reconMonthOf(p){
+  if(!p||!p.from||!p.to)return null;
+  const a=String(p.from).slice(0,7), b=String(p.to).slice(0,7);
+  return a===b?a:null;
+}
+// 月份下拉的選項。⚠ 沿用蝦皮側既有的 MONTHS 常數（本檔搜 `const MONTHS=`），
+//   只把 'YYYY/MM' 換成這一頁要的 'YYYY-MM' —— 刻意【不新造第二份硬寫的月份清單】。
+// ⚠ 不濾掉未來月份：進帳報表是月結後才出，理論上只用得到過去月，但 MOMO 月對帳的
+//   momoReconMonthOptions 也是全 12 個月不濾，照既有慣例走；而且濾掉還要處理
+//   「全被濾光」的 fallback（見 _shopeeVisibleMonths 那一整段），不值得。
+// ⚠ 已知債（本輪不處理）：MONTHS 寫死 2026 全年。2027 一到就沒有正確的月份可選，
+//   而下一輪 doc id 會用到這個值 —— 那時「選項怪怪的」會升級成「存到錯的 doc 且不報錯」。
+function _reconMonthOptions(){ return MONTHS.map(m=>m.replace('/','-')).reverse(); }
+// 使用者改月份。⚠ focus() 是【必要的】不是體貼：renderReconTab 是整包 innerHTML 重繪，
+//   select 會被銷毀重建 ⇒ 焦點掉到 body。而 Chrome 在關閉狀態的 select 上按上下鍵是
+//   【每按一次就觸發 change】—— 少了這行，鍵盤使用者按第一下之後就再也動不了。
+function setReconMonth(v){
+  _reconMonth=v||'';
+  _reconMonthTouched=!!_reconMonth;   // 選回空白 ⇒ 重置成 false（見上方 _reconMonthTouched 的說明）
+  renderReconTab();
+  try{ const el=document.getElementById('recon-month-sel'); if(el)el.focus(); }catch{}
+}
 
 // ── 以下八支是從 feat/kpi-payout-pdf-preview (a08bafb) 整段移植的解析核心。
 //    🔴 邏輯一個字都沒動，只做了 _kpiPayout* → _reconPayout* 的改名。
@@ -16897,7 +18441,17 @@ async function reconPayoutPick(e,shop){
   renderReconTab();
   try{
     const r=await _reconPayoutParseFile(f);
-    _reconFiles[shop]=Object.assign({name:f.name,ok:true,err:''},r,{period:_reconPeriodOf(r.rows)});
+    const p=_reconPeriodOf(r.rows);
+    _reconFiles[shop]=Object.assign({name:f.name,ok:true,err:''},r,{period:p});
+    // 自動帶月份。🔴 兩個條件【都要】：
+    //   !_reconMonthTouched → 使用者改過就不覆蓋他的選擇；
+    //   !_reconMonth        → 只在【第一份】帶。少了這條，先傳好麻吉(2026-01)帶出 2026-01、
+    //                         再傳玩樂(2026-03) 就會把下拉【默默改成 2026-03】，那正是最該避免的。
+    // ⚠ 跨月（_reconMonthOf 回 null）不帶入 —— 寧可留空讓人自己選，也不猜一個月份。
+    if(!_reconMonthTouched&&!_reconMonth){
+      const ym=_reconMonthOf(p);
+      if(ym)_reconMonth=ym;
+    }
   }catch(err){
     console.warn('[對帳] 解析失敗',shop,f.name,err);
     _reconFiles[shop]={name:f.name,ok:false,err:(err&&err.message)||String(err),fields:{},rows:[],pages:0,period:null};
@@ -16905,7 +18459,10 @@ async function reconPayoutPick(e,shop){
   _reconBusy[shop]=false;
   renderReconTab();
 }
-function clearRecon(){_reconFiles={};_reconBusy={};renderReconTab();}
+// 全部清除＝回到初始狀態，月份也一起清（含 _reconMonthTouched 重置）。
+// ⚠ 曾考慮「手選過的月份保留、只清自動帶的」，退場了：按「全部清除」的人期待的就是全部清除，
+//   留一個他看不出為什麼還在的月份，比重新選一次更困擾。
+function clearRecon(){_reconFiles={};_reconBusy={};_reconMonth='';_reconMonthTouched=false;renderReconTab();}
 // 一格的顯示。🔴 抓不到一律印「抓不到」，【不可以】退化成 0 或空白 ——
 //   0 是合法值（實測維克的「優惠券與補貼」就是 0），兩者混在一起這張表就沒有查核價值了。
 function _reconCell(hit){
@@ -16921,8 +18478,18 @@ function reconShopeeHtml(){
     const d=_reconFiles[s];
     const p=d&&d.period;
     const pTxt=p?(p.from+' ~ '+p.to):(d?'期間抓不到':'—');
-    const cls='recon-period'+((periodBad&&p)||(d&&!p)?' recon-period-bad':'');
-    return '<th>'+escapeHtmlLike(s)+'<div class="'+cls+'">'+escapeHtmlLike(pTxt)+'</div></th>';
+    // 第二種檢查（本輪新增）：這一欄的期間所屬月份 vs 上方下拉選的月份。
+    //   ⚠ 與「四欄之間不一致」【共用同一個 .recon-period-bad】，不另做一套樣式（規格要求）。
+    //   ⚠ 跨月（_reconMonthOf 回 null）也算不符 —— 一份跨月的報表本來就不屬於任何單一月份。
+    const monthBad=!!(_reconMonth&&p&&_reconMonthOf(p)!==_reconMonth);
+    const cls='recon-period'+((periodBad&&p)||(d&&!p)||monthBad?' recon-period-bad':'');
+    // 🔴 三種紅染同一個色，同時發生時分不出是哪一種 —— 用 title 補說明是哪一條觸發的。
+    //   （刻意不加第二條 banner：規格要求沿用現有邏輯，而 banner 已經有一條了。）
+    const tip=monthBad?(_reconMonthOf(p)?'這一欄是 '+_reconMonthOf(p)+'，與上方選的 '+_reconMonth+' 不符'
+                                        :'這一欄的期間跨月，不屬於任何單一月份')
+      :(periodBad&&p)?'這一欄的期間與其他欄不一致'
+      :(d&&!p)?'這份 PDF 抓不到期間（第 1 頁沒有「從…到…的報表」那一行）':'';
+    return '<th>'+escapeHtmlLike(s)+'<div class="'+cls+'"'+(tip?' title="'+escapeHtmlLike(tip)+'"':'')+'>'+escapeHtmlLike(pTxt)+'</div></th>';
   }).join('');
   // 上傳列：每家一個獨立的 input。⚠ 解析中的那一欄顯示「解析中…」而不是換掉 input——
   //   換掉會讓使用者以為欄位消失了。
@@ -16981,8 +18548,16 @@ function reconShopeeHtml(){
       +'</details>';
   }).join('');
 
+  // 月份下拉。⚠ 這一頁【沒有半月概念】（進帳報表是整月的），所以刻意只有月份、沒有上/下半月，
+  //   也不掛蝦皮那排 #profit-period-wrap-row（setReconTab 會主動把它隱藏）。
+  const monthSel='<span class="recon-month"><span class="recon-month-lbl">月份</span>'
+    +'<select id="recon-month-sel" class="recon-sel" onchange="setReconMonth(this.value)">'
+    +'<option value=""'+(_reconMonth?'':' selected')+'>請選擇</option>'
+    +_reconMonthOptions().map(m=>'<option value="'+m+'"'+(m===_reconMonth?' selected':'')+'>'+m+'</option>').join('')
+    +'</select></span>';
   return '<div class="recon-wrap">'
     +'<div class="recon-hd"><span class="recon-title">蝦皮進帳報表 · 對帳</span>'
+    +monthSel
     +(has?'<button type="button" class="recon-btn" onclick="clearRecon()">全部清除</button>':'')
     +'<span class="recon-note">四家各自上傳當月「進帳報表」PDF。<b>解析結果只顯示在這裡</b>，不會寫進任何報表、不會上雲，重新整理就消失。</span></div>'
     +(periodBad?'<div class="recon-warn">⚠ 四欄的報表期間不一致（'+escapeHtmlLike(keys.join('　/　'))+'），請確認是不是傳到不同月份的檔。</div>':'')
@@ -18958,7 +20533,7 @@ Object.assign(window, {
   // 對帳分頁的三個 inline handler（分頁鈕 onclick / 四個檔案 input 的 onchange / 全部清除鈕）。
   //   ⚠ setReconTab 還會被 restoreProfitView 用 typeof 檢查後呼叫 —— 沒掛上去的話那條還原分支
   //     會靜默失效，使用者停在對帳頁時就會被彈回蝦皮（正是這輪要防的那件事）。
-  setReconTab,reconPayoutPick,clearRecon,
+  setReconTab,reconPayoutPick,clearRecon,setReconMonth,
   coupangSummaryHTML,setCoupangSummaryView,syncCoupangSummaryFromKpi,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,

@@ -34,6 +34,14 @@
        賣場欄是唯一沒指定 width 的欄，會把剩餘寬度全部吃掉（1600px 螢幕下佔 889px），
        把賣場名稱和輸入欄推到螢幕兩端。收住面板寬度就沒有剩餘可吃。 */
     --entry-max-w: 760px;
+    /* toast 的堆疊層級。比 .modal-backdrop（99999）高一階，讓彈窗開著時的訊息看得見。
+       ⚠ 中間值（5000 / 10000 之類）沒有意義：真正被蓋住的呼叫點壓倒性集中在 .modal-backdrop
+       這一層，淨利表那些 .ana-overlay（2000~4000）上的錯誤訊息早就走 App.showAlertModal
+       （本身就是 99999）、現在就蓋得過。取中間值等於修好本來就沒壞的，一處也沒修到真正壞的。
+       ⚠ 與 dashboard.js 的 #month-pick-pop（inline z-index:100000）同分；#toast 是 <body>
+       最後一個子元素、DOM 順序在後 → 同分時 toast 勝。搭配 .toast 的 pointer-events:none，
+       月份鈕照樣點得到，這個平手無害。 */
+    --z-toast: 100000;
   }
 
   * { box-sizing: border-box; }
@@ -1372,7 +1380,27 @@
     gap: 4px;
   }
 
-  /* Toast */
+  /* Toast
+     2026-09-03（技術債 B-1 #147）：z-index 200 → var(--z-toast)。原本 200 排在全站
+     z-index 階梯的倒數第四層，除了幾個表格 sticky 格子以外，每一個浮層都比它高
+     —— 彈窗一開，toast 完全看不見。
+
+     🔴 pointer-events:none 與 z-index 是【同一件事】，不可分開改：
+       .toast 定位在 bottom:24px right:24px，而 .modal 的 footer（取消 / 儲存）也在右下角
+       （.modal-backdrop 是 align-items:center + padding:24px，內容長的彈窗底緣正好落在
+       距畫面底部 24~48px）。原本 z-index 200 之所以無害，純粹是因為它被壓在彈窗後面 ——
+       「看不見」這個 bug 正好順便掩蓋了「會擋住點擊」這個 bug。只提 z-index 而不加
+       pointer-events，等於把「訊息看不到」換成「儲存鈕有 2.2 秒吃不到點擊」，後者更難查：
+       使用者只會說「有時候按儲存沒反應」。
+     🔴 max-width 同理：原本沒有寬度上限，長訊息（例如 profit.js 那則列出所有新增欄位名稱的）
+       會從右下角一路往左長、橫跨整個畫面底部，重疊面積更大。
+
+     ⚠ 技術債（本次【不】處理，只記錄）：提高 z-index 只讓訊息從「不存在」變成「大概率錯過」。
+       24 處表單驗證訊息（帳號管理、工作日誌、平台營收、季度評分）的使用者視線在畫面中央的
+       彈窗上、手在輸入框裡，訊息卻閃在右下角 2.2 秒。正解是欄位旁的 inline error。
+     ⚠ 那 24 處【不能】改用 showAlertModal：它與表單共用同一個 #modal 元素
+       （App.openModal 會 modal.innerHTML=...），在 onSave 裡呼叫會把使用者正在填的表單抹掉。
+       所以在 inline error 做出來之前，提高 toast 是那 24 處唯一的低成本解。 */
   .toast {
     position: fixed;
     bottom: 24px;
@@ -1383,7 +1411,9 @@
     border-radius: var(--radius-sm);
     box-shadow: var(--shadow-lg);
     font-size: 14px;
-    z-index: 200;
+    z-index: var(--z-toast);
+    pointer-events: none;
+    max-width: min(480px, calc(100vw - 48px));
     transform: translateY(100px);
     opacity: 0;
     transition: all .25s;
