@@ -20337,13 +20337,30 @@ function _lmPeriodShort(month,half){
 
 // 上月同期的三個總額 + 期間字串。取不到 / 不該顯示時一律回 null（＝三格第三行全部留空）。
 //
-//   🔴 有任何篩選條件時回 null —— 不是因為算不出來，是因為算出來會騙人：
-//     本期的三個數字在 renderTable 裡是【篩選後那批列】的加總（見該函式的 kpiSrc=list），
-//     而上月同期永遠只能是【全量】—— 沒有辦法把本期的篩選條件套到另一份報表上。
-//     使用者篩了「低效廣告」那批，就會看到本期廣告費暴跌、基期不變，得出「廣告花少了」
-//     的結論。那是假訊號。
-//     【沒有數字，使用者會去清掉篩選再看一次；有錯的數字，使用者會直接相信它。】
-//     sorts 不影響加總，但一併納入判斷：規則單純成「動過篩選列就不顯示」，日後才不會有人改錯。
+//   🔴 篩選狀態的規則（2026-09-07 起分三路；之前是「有任何篩選就回 null」）：
+//     · 有篩選 且 curHalf==='full'（整月）→ 基期改用【篩選子集的上月同期】：拿 _filtered
+//       那批品號去上期報表撈同品號的 rev/adsFee/pureProfit 加總（見函式內）。本期分子
+//       （renderTable 的 kpiSrc=list / syncHeaderKpis 的 _filtered）與基期同一批品號，
+//       分子分母同母體，舊規則要擋的「本期子集 vs 基期全量」假訊號在這條路不存在。
+//     · 有篩選 且 半月（first/second）→ 維持回 null。理由是舊規則的原話：算出來會騙人 ——
+//       表格逐列的「上期」走 getPrevPeriodKey 的【滾動】基準（8月下半→8月上半），頂端走
+//       【上月同期】（8月下半→7月下半），兩者只有整月恰好同一期；半月該用哪個基準
+//       需求方尚未拍板（2026-09-07），拍板前寧可留空。
+//       【沒有數字，使用者會去清掉篩選再看一次；有錯的數字，使用者會直接相信它。】
+//     sorts 不影響加總，但沿用舊規則一併算「有篩選」：規則單純、日後才不會有人改錯
+//       （僅排序時 _filtered 是全量排序後的同一批列，子集加總＝全量加總，數字不變只是換路）。
+//
+//   🔴 子集基期是【刻意接受的取捨，不是 bug】：基期只涵蓋本期 built 裡有的商品 ——
+//     上期有、但本期停售（沒賣也沒投廣告 → 不在本期 agg，見 buildShop）的商品，
+//     其上期營收與【負純利】會從基期蒸發 ⇒「篩選=全選」不等於「未篩選」，
+//     同一句「vs 8月整月」下是兩個母體。需求方拍板用「篩選後那批商品的上期表現」
+//     當基期（新品以 0 計、停售品不計），照做。
+//
+//   🔴 有篩選但 _filtered 不是陣列（null 過渡態，見 applyFilters 尾端註解）→ 回 null，
+//     【絕不 fallback 回 _built】：fallback 等於「本期子集、基期全量」，正是這道守衛
+//     2026-08-18 立起來要擋的假訊號。syncHeaderKpis 的【主數字】在同一個過渡態
+//     【刻意 fallback 回 _built】（唯讀顯示、等於改版前行為，見該函式內註解）——
+//     兩套是各自正確的失敗策略，不要統一。
 //
 //   🔴 這道守衛【必須寫在本函式裡面】，不可以靠呼叫端漏傳參數達成。這不是風格潔癖，是實證：
 //     改版前營收那格靠 renderTable「不傳第 6 參數」來隱藏比較段，結果 2026-08-18 實測出
@@ -20367,14 +20384,25 @@ function _lmPeriodShort(month,half){
 //     整條藏掉的錯（見 setKpis 內的說明）。
 function _lastMonthSameTotals(shop){
   const s=state[shop];if(!s)return null;
-  if(s.search||(s.tagFilters&&s.tagFilters.length)||(s.filters&&Object.keys(s.filters).length)||(s.sorts&&s.sorts.col))return null;
+  const lmFiltOn=!!(s.search||(s.tagFilters&&s.tagFilters.length)||(s.filters&&Object.keys(s.filters).length)||(s.sorts&&s.sorts.col));
+  if(lmFiltOn&&s.curHalf!=='full')return null;            // 半月＋篩選：維持隱藏（基準未拍板，見上方註解）
+  if(lmFiltOn&&!Array.isArray(s._filtered))return null;   // 過渡態：絕不 fallback 回 _built（見上方註解）
   try{
     const p=_lmSamePeriodParts(s.curMonth,s.curHalf);
     if(!p)return null;
     const rep=lsLoad(shop,p.month,p.half);
     if(!rep||!rep.built||!rep.built.length)return null;
     let lmRev=0,lmAds=0,lmPure=0;
-    rep.built.forEach(r=>{lmRev+=r.rev||0;lmAds+=r.adsFee||0;lmPure+=r.pureProfit||0;});
+    if(lmFiltOn){
+      // 篩選子集：一次 forEach 建 {code→{rev,ads,pure}}、再一次 forEach 查表加總（O(n+m)，
+      //   形狀同 getPrevPeriodMap 的對照表；【不要】改成逐列 rep.built.find，那是 O(n×m)）。
+      //   上期沒有的品號（新品）查不到 → 計 0。三格共用同一份表、同一次迴圈。
+      const lmMap={};
+      rep.built.forEach(r=>{if(r.code)lmMap[r.code]={rev:r.rev||0,ads:r.adsFee||0,pure:r.pureProfit||0};});
+      s._filtered.forEach(r=>{const b=lmMap[r.code];if(b){lmRev+=b.rev;lmAds+=b.ads;lmPure+=b.pure;}});
+    }else{
+      rep.built.forEach(r=>{lmRev+=r.rev||0;lmAds+=r.adsFee||0;lmPure+=r.pureProfit||0;});
+    }
     return {rev:lmRev,ads:lmAds,pure:lmPure,month:p.month,half:p.half};
   }catch{return null;}
 }
@@ -20432,7 +20460,8 @@ function setKpis(shop,rev,gross,ads,pure,cmp){
   //   金額是使用者對帳時唯一能自己驗證「頂端這個 +7.2% 是拿什麼算的」的東西。拿掉就沒得驗。
   //
   // 顯示規則（三格一致）：
-  //   · !cmp（取不到報表 / 有篩選）→ 三格第三行【全部】留空。不顯示「上月同期 —」：
+  //   · !cmp（取不到報表 / 半月＋篩選 / 篩選過渡態，見 _lastMonthSameTotals 的三路規則）
+  //     → 三格第三行【全部】留空。不顯示「上月同期 —」：
   //     永遠是破折號的欄位只會讓人以為壞掉（沿用改版前的既有決定）。
   //   · cmp 存在 → 金額【一律顯示，含 NT$ 0】；百分比【只在基期 > 0 時】顯示。
   //     🔴 改版前寫的是 (prevAds&&prevAds>0)，會把「上月同期沒投廣告($0)」整條藏掉 ——
