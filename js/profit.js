@@ -4861,6 +4861,12 @@ function applyFilters(shop,opts){
   //     會停在這個狀態）。讀它的人【必須自己處理 null，絕對不可以 fallback 回 _built】——
   //     使用者篩出 80 筆按全選、系統卻選了看不見的 822 筆，他不會發現。
   //     「什麼都不選」是安全的失敗，「選了全部」是危險的失敗。正確作法是把全選鈕停用。
+  //   ⚠ 讀者名單（動 _filtered 的語意之前先把這份看完）：批次選取那族（全選鈕/批次標記，
+  //     本檔搜 _bselCanAll）之外，syncHeaderKpis 自 2026-09-07 起也讀它，當頂端三格 KPI
+  //     主數字的加總來源 —— 那邊 null 時【刻意 fallback 回 _built】（唯讀顯示，理由見該
+  //     函式內註解），與上一條批次選取的「絕不 fallback」是兩套各自正確的失敗策略。
+  //     例如日後若把「沒篩選就不建拷貝、留 null」當效能優化，批次選取只是全選鈕變灰，
+  //     KPI 卻會靜默跳回全量 —— 改語意前兩個讀者都要看過。
   //   ⚠ 勾選狀態要另外存 Set<code>，【不要掛在 row 物件上】：_filtered 與 _built 共用同一批
   //     row 參照，而 lsSave / syncToCloud 序列化的就是那些 row，_stripDerived 只剝
   //     analysisAll / profitPct 兩個、擋不住新欄位 —— 掛上去就會跟著報表寫進 Firestore。
@@ -20462,8 +20468,19 @@ function syncHeaderKpis(shop){
   if(shop==='總表'||!state[shop]){return;}
   const s=state[shop];
   if(!s._built||!s._built.length){setKpis(shop,0,0,0,0,null);return;}
+  // 🔴 加總來源選 _filtered（applyFilters 篩完、畫面上正顯示的那批列）而不是 _built 全量：
+  //   本函式是三個入口（setShop 切回 / patchRow 編輯格 / 雲端重載 handler）的最後寫入者，
+  //   用 _built 會在篩選中把 renderTable 剛寫入的子集加總覆寫回全量 —— 表格 1711 筆、
+  //   頂端卻是 2328 筆的總額（2026-09-07 正式站實測重現：好麻吉 2026/08 整月篩「爆發品」
+  //   後切通路再切回）。修在本函式內而不是逐一修呼叫端，理由同 _lastMonthSameTotals 的
+  //   守衛：顯式擋在共同出口，日後新增呼叫端也不會繞過。
+  //   ⚠ _filtered 為 null（_built 剛換掉、下一次 applyFilters 之前的過渡態）時 fallback
+  //     回 _built —— 這是唯讀顯示，fallback 等於本次修改前的既有行為，不會更糟。
+  //     批次選取那條「絕不 fallback 回 _built」的鐵律（見 applyFilters 尾端註解）是寫給
+  //     「會選到看不見的列」的操作用的，兩邊失敗策略刻意不同，不要統一。
+  const src=Array.isArray(s._filtered)?s._filtered:s._built;
   let tRev=0,tGross=0,tAds=0,tPure=0;
-  s._built.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
+  src.forEach(r=>{tRev+=r.rev;tGross+=r.gross;tAds+=r.adsFee;tPure+=r.pureProfit;});
   // 🔴 這裡原本有一段【內聯的滾動期間推算】（算 prevTotalRev 餵給舊的第 6 參數 prevRev），
   //   2026-08-18 隨頂端三格改版一併移除 —— 不是因為它有錯，是因為它算出來的值【已經沒有
   //   任何人讀】：頂端的比較基準改成「上月同期」後由 _lastMonthSameTotals 一次供三個總額。
