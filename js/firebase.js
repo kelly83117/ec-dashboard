@@ -337,6 +337,78 @@ try {
         }, err => { console.error('[momo_e001 subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_e001 subscribe failed', e); }
 
+      // PR-4：coupang_reports collection（每賣場每月一 doc）→ Store._profitMem['ec_coupang|<shop>|<month>']（cupLoadReport 讀取順序一致）
+      //   ⚠ setReport 存的 doc 沒有 shop 欄位（只有 {month,rows,ts,updatedAt}）→ 賣場靠 docId 前綴反查（比照 momo_reconcile 的 lastIndexOf('_') 切法；月份 'YYYY-MM' 不含 '_'）。
+      try {
+        onSnapshot(coupangReportsColRef, snap => {
+          const changed = [];
+          snap.forEach(d => {
+            const data = d.data() || {};
+            const idStr = String(d.id);
+            const cut = idStr.lastIndexOf('_');
+            const docPrefix = cut >= 0 ? idStr.slice(0, cut) : idStr;
+            const shop = COUPANG_DOCID_SHOP[docPrefix] || null;
+            const month = data.month || (cut >= 0 ? idStr.slice(cut + 1) : '');
+            if (!shop || !month) return;
+            const k = 'ec_coupang|' + shop + '|' + month;
+            if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;   // 本機未同步/剛存 → 不覆蓋
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) return;
+            Store._profitMem[k] = data;
+            changed.push(k);
+          });
+          if (changed.length) { console.log('[coupang_reports] 收到更新：', changed); window.dispatchEvent(new CustomEvent('coupangReportReady', { detail: { changed } })); }
+        }, err => { console.error('[coupang_reports subscribe 失敗]', err); });
+      } catch (e) { console.warn('coupang_reports subscribe failed', e); }
+
+      // PR-4：coupang_msf collection（每賣場每來源月一 doc）→ Store._profitMem['ec_coupang_msf|<shop>|<src>']（cupLoadReturns 讀取順序一致）
+      //   setSrc 存的 doc＝退貨解析結果 res（無 shop/src 欄）→ 賣場靠 docId 前綴反查、src（來源月）取 docId 後段。
+      try {
+        onSnapshot(coupangMsfColRef, snap => {
+          const changed = [];
+          snap.forEach(d => {
+            const data = d.data() || {};
+            const idStr = String(d.id);
+            const cut = idStr.lastIndexOf('_');
+            const docPrefix = cut >= 0 ? idStr.slice(0, cut) : idStr;
+            const shop = COUPANG_DOCID_SHOP[docPrefix] || null;
+            const src = cut >= 0 ? idStr.slice(cut + 1) : '';
+            if (!shop || !src) return;
+            const k = 'ec_coupang_msf|' + shop + '|' + src;
+            if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) return;
+            Store._profitMem[k] = data;
+            changed.push(k);
+          });
+          if (changed.length) { console.log('[coupang_msf] 收到更新：', changed); window.dispatchEvent(new CustomEvent('coupangMsfReady', { detail: { changed } })); }
+        }, err => { console.error('[coupang_msf subscribe 失敗]', err); });
+      } catch (e) { console.warn('coupang_msf subscribe failed', e); }
+
+      // PR-4b：coupang_note collection（每賣場每月一 doc）→ Store 三鏡像['ec_coupang_note|<shop>|<month>']。note 從報表 doc 拆出、走 merge。
+      //   本機有未推備註（持久 dirty，跨重整）→ 整月不覆蓋（推送時 syncCupNoteMerge 逐 SKU merge 才不會漏同事的）；否則接受雲端 + 回寫三鏡像（heal stale）。
+      try {
+        onSnapshot(coupangNoteColRef, snap => {
+          const changed = [];
+          snap.forEach(d => {
+            const data = d.data() || {};
+            const idStr = String(d.id);
+            const cut = idStr.lastIndexOf('_');
+            const docPrefix = cut >= 0 ? idStr.slice(0, cut) : idStr;
+            const shop = COUPANG_DOCID_SHOP[docPrefix] || null;
+            const month = cut >= 0 ? idStr.slice(cut + 1) : '';
+            if (!shop || !month) return;
+            const k = 'ec_coupang_note|' + shop + '|' + month;
+            if (window.__cupNoteKeyDirty && window.__cupNoteKeyDirty(k)) return;   // 本機有未推備註（持久 dirty）→ 整月不覆蓋
+            if (window.__momoShouldSkipCloudOverwrite && window.__momoShouldSkipCloudOverwrite(k)) return;   // 記憶體 pending / 剛存 5 秒
+            if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(data)) return;
+            Store._profitMem[k] = data;
+            try { Store._mem = Store._mem || {}; Store._mem[k] = data; } catch (e) {}   // 三鏡像（cupLoadNoteDoc 讀 _profitMem→_mem→localStorage；heal stale）
+            try { localStorage.setItem(k, JSON.stringify(data)); } catch (e) {}
+            changed.push(k);
+          });
+          if (changed.length) { console.log('[coupang_note] 收到更新：', changed); window.dispatchEvent(new CustomEvent('coupangNoteReady', { detail: { changed } })); }
+        }, err => { console.error('[coupang_note subscribe 失敗]', err); });
+      } catch (e) { console.warn('coupang_note subscribe failed', e); }
+
       // momo_cost_by_origin（帳號級單一 doc）→ Store._profitMem['ec_momo_cost_by_origin'] + '..._meta'。原廠編號→成本，MO+ 毛利依賴、需跨人跨機。
       try {
         onSnapshot(costByOriginDocRef, snap => {
@@ -640,8 +712,9 @@ try {
   //     orderNos 存本月全部訂單編號（Option A：退貨 MSF.訂單編號→下單月 讀取端解析用；跟報表同生共死、不留孤兒索引；~15KB/月/賣場、A1 每月一 doc 有界）。
   //   msf doc id = shopDocId + '_' + msfSrc；doc 內 { shop, src, byOrder:{oid:{returnAmt,confirmDate,hasDeliveryFee}}, returnTotal }。
   //   getDoc/subscribe 命名【必須】保留（落本機防護讀取白名單、自動放行）；setReport/setSrc 唯一寫入。report 帶 updatedAt serverTimestamp 供推送前版本比對（比照 momo_products/origins）；msf 整包取代冪等（重傳同檔覆蓋、不累加，比照 s1103）。
-  //   ⚠ PR-4 五處同步登記要處理【兩個】key 前綴：ec_coupang|（報表）＋ ec_coupang_msf|（退貨）。TEST_NOWRITE 物件數 14→16。
+  //   ⚠ 各同步枚舉點要處理【三個】key 前綴：ec_coupang|（報表）＋ ec_coupang_msf|（退貨）＋ ec_coupang_note|（備註，PR-4b 從報表拆出）。本機測試防護掃到的雲端物件數為 17。
   const COUPANG_SHOP_DOCID = { '麻吉':'maji', '露營館':'luying' };
+  const COUPANG_DOCID_SHOP = Object.fromEntries(Object.entries(COUPANG_SHOP_DOCID).map(([k,v]) => [v, k]));   // 反查 docId 前綴→賣場（setReport/setSrc 存的 doc 沒有 shop 欄，onSnapshot 靠這個還原 key）
   const coupangReportsColRef = collection(db, 'coupang_reports');
   const coupangReportDocId = (shop, month) => (COUPANG_SHOP_DOCID[shop] || shop) + '_' + month;
   window.__cloudCoupang = {
@@ -655,6 +728,16 @@ try {
     getDoc: (shop, src) => getDoc(doc(db, 'coupang_msf', coupangMsfDocId(shop, src))),
     setSrc: (shop, src, data) => setDoc(doc(db, 'coupang_msf', coupangMsfDocId(shop, src)), data || {}),
     subscribe: (cb) => onSnapshot(coupangMsfColRef, cb),
+  };
+  // PR-4b：coupang_note collection（每賣場每月一 doc）→ note 從報表 doc 拆出（不再折進報表、不再進 app/profit）。
+  //   doc id = shopDocId + '_' + 'YYYY-MM'；doc 內 { SKU原廠編號: note字串 }（＋ subscribe 還原 key 靠 docId 前綴反查，同 report）。
+  //   走 dirty-scoped merge（syncCupNoteMerge 逐 SKU、只覆蓋改過的、不刪同事的）→ setNote 寫的是 merge 後整份、無 updatedAt（比照 msf、移出 delete guard）。
+  const coupangNoteColRef = collection(db, 'coupang_note');
+  const coupangNoteDocId = (shop, month) => (COUPANG_SHOP_DOCID[shop] || shop) + '_' + month;
+  window.__cloudCoupangNote = {
+    getDoc:  (shop, month) => getDoc(doc(db, 'coupang_note', coupangNoteDocId(shop, month))),
+    setNote: (shop, month, data) => setDoc(doc(db, 'coupang_note', coupangNoteDocId(shop, month)), data || {}),
+    subscribe: (cb) => onSnapshot(coupangNoteColRef, cb),
   };
 
   window.dispatchEvent(new Event('cloudStoreReady'));
