@@ -1420,3 +1420,17 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .tagfx-table th.tagfx-c1,.tagfx-table th.tagfx-c2{z-index:4;background:var(--primary-soft);}
 /* hover 色跟全域 tbody tr:hover td 的字面值同值，凍結格才不會閃色差（同 .mm-sticky-col 的 hover 做法） */
 .tagfx-table tbody tr:hover td.tagfx-c1,.tagfx-table tbody tr:hover td.tagfx-c2{background:#fafbff;}
+/* 模式切換：僅可比較商品 / 全部商品（含新品） */
+.tagfx-modes{display:flex;gap:6px;margin-bottom:12px;}
+.tagfx-mode-btn{
+  padding:4px 12px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:7px;
+  font-size:12px;
+  color:var(--text-muted);
+  font-family:inherit;
+  cursor:pointer;
+}
+.tagfx-mode-btn:hover{background:var(--primary-soft);}
+.tagfx-mode-btn.on{background:var(--primary-soft);border-color:var(--primary);color:var(--primary);font-weight:700;}
