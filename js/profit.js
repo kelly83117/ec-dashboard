@@ -4168,23 +4168,24 @@ function setTagFxMode(mode){
   _tagFxCtx.mode=mode;
   _tagFxRender();
 }
-// 純計算、不碰 DOM / state（node 可單獨驗）。readTags=(code)=>[{tag,date}]。
-//   🔴 新品規則（新品＝上月對照表查不到品號）分兩件事，不要混：
-//     · 金額加總：預設【完全排除】；includeNew=true（「全部商品」模式）才計入，前期以 0 計 ——
-//       老闆看整體規模用。照現有 KPI 的「查不到計 0」直接當預設會讓新品變成無限成長。
-//     · 成功率（growCnt/cmpCnt）：【兩個模式都不含新品】。新品前期必為 0，本期有營收就必然
-//       「成長」，放進分母會把成功率灌到接近 100%，而且偏往「測試有效」—— 這是本功能最不能出的錯。
-//       所以 includeNew 分支只加金額，growCnt / cmpCnt 一律不動。
+// 純計算、不碰 DOM / state（node 可單獨驗），且【與顯示模式無關】——同一份結果供 cmp/all
+//   兩模式與收合/展開共用，開窗算一次存 _tagFxCtx，之後全是純渲染。
+//   🔴 新品規則（新品＝上月對照表查不到品號）：可比較與新品的加總【分開存】，不要合流 ——
+//     · curRev/prevRev/curPure/…＝【純可比較商品】的加總。所有比率（成長率/廣告佔比/成功率）
+//       一律只從這組算：新品前期必為 0，混進任何比率的分子或分母都會把數字灌往
+//       「測試有效」方向 —— 這是本功能最不能出的錯（成功率灌向 100%、成長率 +10% 變 +176%）。
+//     · newRev/newPure/newAds＝新品的本期加總。只有「全部商品」模式的【金額顯示】會把它
+//       加到後期（前期以 0 計），老闆看整體規模用。
 //   一商品多標籤 → 每個標籤的列各算它一次（沿用篩選面板 prodCounts 的既定慣例）。
 //   newProdCnt 是【去重後的新品商品數】（同一新品掛兩標籤只算 1，給標題用）；
 //   各列的 newCnt 則跟 cmpCnt 一樣按標籤重複計（「45 ＋8新」跟面板 pill 同一套口徑）。
-function _tagFxCompute(curBuilt,prevBuilt,readTags,defLabels,includeNew){
+function _tagFxCompute(curBuilt,prevBuilt,readTags,defLabels){
   const prevMap=Object.create(null);   // 商品編號是外部資料，{} 會被 __proto__ 之類的品名污染（同 _prevDayBudgetReaderFor）
   prevBuilt.forEach(r=>{ if(!r||!r.code)return; prevMap[r.code]={rev:r.rev||0,pure:r.pureProfit||0,ads:r.adsFee||0}; });
   const buckets=Object.create(null);
   const order=[];
   const bucketOf=label=>{
-    if(!buckets[label]){ buckets[label]={label,cmpCnt:0,newCnt:0,growCnt:0,curRev:0,prevRev:0,curPure:0,prevPure:0,curAds:0,prevAds:0}; order.push(label); }
+    if(!buckets[label]){ buckets[label]={label,cmpCnt:0,newCnt:0,growCnt:0,curRev:0,prevRev:0,curPure:0,prevPure:0,curAds:0,prevAds:0,newRev:0,newPure:0,newAds:0}; order.push(label); }
     return buckets[label];
   };
   const newCodes=new Set();
@@ -4197,8 +4198,7 @@ function _tagFxCompute(curBuilt,prevBuilt,readTags,defLabels,includeNew){
       const b=bucketOf(o.tag);
       if(!base){
         b.newCnt++;newCodes.add(r.code);
-        if(!includeNew)return;
-        b.curRev+=r.rev||0; b.curPure+=r.pureProfit||0; b.curAds+=r.adsFee||0;   // 前期 +0；growCnt/cmpCnt 刻意不動（見上方註解）
+        b.newRev+=r.rev||0; b.newPure+=r.pureProfit||0; b.newAds+=r.adsFee||0;   // 進獨立的新品加總；growCnt/cmpCnt/curX 一律不動（見上方註解）
         return;
       }
       b.cmpCnt++;
@@ -4228,7 +4228,7 @@ function buildTagFxHtml(shop,curMonth,curRep,prevRep,mode){
   const readTags=_prodTagsReaderFor(shop,{month:curMonth,half:'full'});
   const defs=getTagDefs();
   const all=mode==='all';
-  const {rows,emptyDefCnt,newProdCnt}=_tagFxCompute(curRep.built,prevRep.built,readTags,defs.map(d=>d.label),all);
+  const {rows,emptyDefCnt,newProdCnt}=_tagFxCompute(curRep.built,prevRep.built,readTags,defs.map(d=>d.label));
   if(!rows.length)return {html:'<div class="tagfx-empty">本期整月報表中沒有任何掛測試標籤的商品</div>',newProdCnt:0};
   const NA='<span class="tagfx-na">—</span>';
   const modes=`<div class="tagfx-modes">
@@ -4239,18 +4239,22 @@ function buildTagFxHtml(shop,curMonth,curRep,prevRep,mode){
     // 金額欄有無數字看該模式計入了幾個商品；cmp 模式全新品列＝「—」不寫 NT$ 0（沒有可比較商品 ≠ 金額是 0）
     const inSum=all?(b.cmpCnt+b.newCnt):b.cmpCnt;
     const amt=v=>inSum?_tagFxAmt(v):NA;
-    const adsPct=(inSum&&b.curRev>0)?`${(b.curAds/b.curRev*100).toFixed(2)}%`:NA;
-    // 🔴 成功率兩個模式都只算可比較商品（分母永遠 cmpCnt）：新品前期必為 0，有營收就必然「成長」，
-    //   放進分母會把成功率灌到接近 100% 且偏往「測試有效」。all 模式加註標明，截圖的人才不會誤讀。
+    // 🔴 口徑鐵律：金額顯示 all 模式含新品（後期 +newX、前期 +0）；【所有比率】不分模式一律
+    //   只用可比較加總（curX/prevX）—— 成長率/廣告佔比/成功率在 cmp 與 all 數字完全相同。
+    //   新品混進任何比率都是往「測試有效」方向灌水（前期必為 0）。all 模式在佔比/成功率加註標明。
+    const curRev=all?b.curRev+b.newRev:b.curRev;
+    const curPure=all?b.curPure+b.newPure:b.curPure;
+    const curAds=all?b.curAds+b.newAds:b.curAds;
+    const adsPct=(b.cmpCnt&&b.curRev>0)?`${(b.curAds/b.curRev*100).toFixed(2)}%${all?'（不含新品）':''}`:NA;
     const okRate=b.cmpCnt?`${b.growCnt}/${b.cmpCnt} = ${(b.growCnt/b.cmpCnt*100).toFixed(1)}%${all?'（不含新品）':''}`:NA;
     const cnt=`${b.cmpCnt}${b.newCnt?` ＋${b.newCnt}新`:''}`;
     const lbl=String(b.label).replace(/</g,'&lt;').replace(/"/g,'&quot;');
     return `<tr>
       <td class="tl tagfx-c1" title="${lbl}"><span class="tag ${tagDefCls(b.label)}">${lbl}</span></td>
       <td class="tagfx-c2">${cnt}</td>
-      <td>${amt(b.prevRev)}</td><td>${amt(b.curRev)}</td><td>${_tagFxGrowth(b.curRev,b.prevRev)}</td>
-      <td>${amt(b.prevPure)}</td><td>${amt(b.curPure)}</td><td>${_tagFxGrowth(b.curPure,b.prevPure)}</td>
-      <td>${amt(b.prevAds)}</td><td>${amt(b.curAds)}</td><td>${adsPct}</td>
+      <td>${amt(b.prevRev)}</td><td>${amt(curRev)}</td><td>${_tagFxGrowth(b.curRev,b.prevRev)}</td>
+      <td>${amt(b.prevPure)}</td><td>${amt(curPure)}</td><td>${_tagFxGrowth(b.curPure,b.prevPure)}</td>
+      <td>${amt(b.prevAds)}</td><td>${amt(curAds)}</td><td>${adsPct}</td>
       <td>${okRate}</td>
     </tr>`;
   }).join('');
