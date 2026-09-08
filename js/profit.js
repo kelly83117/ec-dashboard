@@ -2520,9 +2520,10 @@ function clearPeriod(shop){
 function loadIntoUI(shop,built,period,days){
   if(built&&Array.isArray(built)){
     built.forEach(r=>{
+      // ⚠ 下行 calcAnalysisAll 的 r.pureRate||0 刻意保留：它的 null/0 語意沒驗證過，不要跟下兩行的 ??null 統一
       Object.assign(r,_anaDerive(calcAnalysisAll(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0)));
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0,r.adsFee??null,r.clicks??null);
+      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate??null,r.adsFee??null,r.clicks??null);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
       r.profitPct=(r.rev>0)?(r.pureRate+r.adsPct):null;
     });
@@ -4264,9 +4265,10 @@ function reapplyAnaToAll(){
   SHOPS.forEach(s=>{
     const built=state[s.id]._built;if(!built)return;
     built.forEach(r=>{
+      // ⚠ 下行 calcAnalysisAll 的 r.pureRate||0 刻意保留：它的 null/0 語意沒驗證過，不要跟下兩行的 ??null 統一
       Object.assign(r,_anaDerive(calcAnalysisAll(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0)));
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0,r.adsFee??null,r.clicks??null);
+      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate??null,r.adsFee??null,r.clicks??null);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
     });
     applyFilters(s.id);
