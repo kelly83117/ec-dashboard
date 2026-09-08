@@ -3208,6 +3208,18 @@ async function __setupCloud() {
         //   之前這兩個函式在 boot 時就跑，雲端還沒回來 → 誤判成「沒 admin」→ 覆寫雲端。
         try { if (typeof seedData === 'function') seedData(); } catch (e) { console.warn('post-snapshot seedData failed', e); }
         try { if (App && typeof App.ensureAdmin === 'function') App.ensureAdmin(); } catch (e) { console.warn('post-snapshot ensureAdmin failed', e); }
+        // fallback boot（5 秒計時器先到）用的是 localStorage 舊快照的 user，而雲端到位後
+        //   沒有任何路徑會重畫側欄（render 只管主內容區、applyUserPerms 只在 enterApp 跑一次）
+        //   → 側欄停在過期權限（Kelly 案：化石 departments 只剩商開）。
+        //   這裡用雲端新資料重新解析 currentUser 並重跑 applyUserPerms 補上那一次。
+        //   正常路（雲端先到才 boot）fresh 與 currentUser 同內容，applyUserPerms 冪等 → no-op。
+        //   找不到對應帳號（雲端被刪）→ 維持原狀，不清空 currentUser（與既有行為一致）。
+        try {
+          if (App.currentUser && typeof App.applyUserPerms === 'function') {
+            const freshUser = (Store.get(Store.KEYS.users, []) || []).find(u => u.username === App.currentUser.username);
+            if (freshUser) { App.currentUser = freshUser; App.applyUserPerms(freshUser); }
+          }
+        } catch (e) { console.warn('post-snapshot perms refresh failed', e); }
         try { App.render(); } catch (e) { console.warn('first cloud snapshot render failed', e); }
         return;
       }
