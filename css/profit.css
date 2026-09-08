@@ -1399,6 +1399,9 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
    全部走 :root 變數。dist-modal 模板裡的 inline style 是既有的，這裡刻意不抄。 */
 .tagfx-btn{margin-left:2px;}
 .tagfx-modal{width:980px;max-width:96vw;}
+/* 展開態（_tagFxRender 依 expand 切）：十欄自然寬 978px+ 塞不進 980，加寬到 1280（96vw 天花板照舊，
+   1280×800 螢幕實得 1229px、實測裝得下十欄）。收合維持 980，「六欄不橫捲」不受影響。 */
+.tagfx-modal.tagfx-wide{width:1280px;}
 .tagfx-modal-body{padding:20px;overflow-y:auto;max-height:72vh;}
 /* 12 欄在窄視窗必超寬：捲動關在自己的容器裡，不讓整個彈窗 body 橫向捲 */
 .tagfx-scroll{overflow-x:auto;}
@@ -1415,7 +1418,9 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
    c1 固定寬 150px、c2 接續 left:150px —— 主表格的 left 硬編碼與實際欄寬重疊是已記技術債
    （見本檔上方 .bsel-cb 那段註解），這裡用固定寬讓 left 有依據，不抄那個 left。 */
 .tagfx-table th.tagfx-c1,.tagfx-table td.tagfx-c1{position:sticky;left:0;width:150px;min-width:150px;max-width:150px;overflow:hidden;text-overflow:ellipsis;}
-.tagfx-table th.tagfx-c2,.tagfx-table td.tagfx-c2{position:sticky;left:150px;box-shadow:2px 0 5px -2px rgba(15,23,42,.18);}
+/* 右緣陰影刻意比 .mm-sticky-col 重：捲動時被裁切的數字直接貼著這條邊，陰影太淡會看起來像版面壞掉
+   （2026-09-08 正式站實測），加重後裁切數字在視覺上明確處於窗格外。 */
+.tagfx-table th.tagfx-c2,.tagfx-table td.tagfx-c2{position:sticky;left:150px;box-shadow:3px 0 8px -1px rgba(15,23,42,.35);}
 .tagfx-table td.tagfx-c1,.tagfx-table td.tagfx-c2{z-index:2;background:var(--surface);}
 .tagfx-table th.tagfx-c1,.tagfx-table th.tagfx-c2{z-index:4;background:var(--primary-soft);}
 /* hover 色跟全域 tbody tr:hover td 的字面值同值，凍結格才不會閃色差（同 .mm-sticky-col 的 hover 做法） */

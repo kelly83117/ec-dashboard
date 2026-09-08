@@ -4161,6 +4161,11 @@ function _tagFxRender(){
   const c=_tagFxCtx;if(!c)return;
   const body=document.getElementById('tagfx-modal-body');
   const titleEl=document.getElementById('tagfx-modal-title');
+  // 展開十欄塞不進 980px（2026-09-08 實測：自然寬 978px vs 內容寬 940px）→ 展開時加寬彈窗。
+  //   1280×800 螢幕被 max-width:96vw 壓到 1229px，實測十欄（七位數金額＋全註記）剛好裝下；
+  //   資料更寬時仍可捲，凍結邊界的加重陰影（.tagfx-c2）負責讓裁切數字看得出在窗格外。
+  const modal=document.querySelector('#tagfx-modal-overlay .ana-modal');
+  if(modal)modal.classList.toggle('tagfx-wide',!!c.expand);
   // 🔴 標題必須含模式與期間：老闆會截圖轉貼，截圖裡看不出彈窗外的任何狀態（含切換鈕的選中態）。
   const modeTxt=c.mode==='all'?`全部商品（含新品 ${c.data.newProdCnt} 個）`:'僅可比較商品';
   if(titleEl)titleEl.textContent=`測試標籤成效 · ${c.curMonth} 整月 vs ${c.prevMonth} 整月 · ${modeTxt}`;
