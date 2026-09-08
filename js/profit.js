@@ -1716,11 +1716,11 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         else{ skippedProblem.push({key:pk,reason:'報表資料讀不到或損毀'}); }
         return;
       }
-      if(pk.startsWith('ec_momo_products|')){   // MOMO 商品主檔 → momo_products collection（每賣場一 doc，避開 app/profit 1MB）
+      if(pk.startsWith('ec_momo_products|')){   // MOMO 商品主檔 → momo_products collection（逐 SKU merge：getDoc 雲端 → 只覆蓋 dirty SKU → 保留雲端其餘/獨有）
         const shop=pk.split('|')[1];
-        const items=momoPendingProducts(pk);   // ⚠ 讀待同步本機值(_mem→localStorage)，非 momoLoadProducts(_profitMem 優先，會 stale)→ 推的==預覽看的
-        if(window.__cloudMomo && Array.isArray(items)){ tasks.push({key:pk,run:()=>window.__cloudMomo.setShop(shop,momoFsSanitizeDeep(items))}); }   // 統一 key 檢核
-        else{ skippedProblem.push({key:pk,reason:'MOMO 商品主檔讀不到，或雲端層未就緒'}); }
+        if(!window.__cloudMomo){ skippedProblem.push({key:pk,reason:'MOMO 商品主檔雲端層未就緒'}); return; }
+        if(window.__MOMO_MERGE_ENFORCE===true){ tasks.push({key:pk,run:()=>momoSyncProductsMerge(shop)}); }   // B2 enforce：真 merge 寫入（getDoc→plan→setShop merged→更新 last-pushed）
+        else{ momoSyncProductsMerge(shop,{shadow:true}).catch(()=>{}); skippedProblem.push({key:pk,reason:'products 逐 SKU merge 為 SHADOW 模式（未寫雲端）；Console 已印 merge 對照，確認後在 Console 設 window.__MOMO_MERGE_ENFORCE=true 再同步'}); }   // B1 shadow：算+log 不寫、fail-safe（沒設 enforce 就絕不寫雲端）
         return;
       }
       if(pk.startsWith('ec_momo_reconcile|')){   // MOMO 月對帳 → momo_reconcile collection（每 shop 每月一 doc）
@@ -10117,21 +10117,9 @@ function momoSaveProducts(shop,products){
     try{ if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品資料接近容量上限',message:msg+'\n\n（此警告在每次寫入超過 '+MOMO_DOC_WARN_KB+'KB 時出現）',kind:'error'}); }catch{}
     try{ window.__momoSizeWarn={shop, kb:Math.round(_kb), at:Date.now()}; }catch{}
   } else { try{ if(window.__momoSizeWarn&&window.__momoSizeWarn.shop===shop) delete window.__momoSizeWarn; }catch{} } }catch(e){}
-  // A0 集中兜底：覆寫【前】讀「舊 localStorage」(上次持久化) 當基準，diff 出變動/新增/刪除的 SKU → 標品號級 dirty。
-  //   ⚠ 基準一定讀 localStorage、【不可】讀 _profitMem——_profitMem 是活參照、apply 已就地改過（momoLoadProducts 回傳它本身），diff 會落空。
-  //   ⚠ 順序：讀舊 → diff → 標 dirty → 才 setItem（下一行）。用 _momoStableStr（已 sort 物件鍵）當簽名 → 純鍵序不算變動，只抓真值變。
-  try{
-    let oldArr=null; try{ const _o=localStorage.getItem(k); if(_o) oldArr=JSON.parse(_o); }catch{}
-    if(Array.isArray(products)){
-      const sig=p=>_momoStableStr(p);
-      const oldMap=new Map((Array.isArray(oldArr)?oldArr:[]).filter(p=>p&&p.sku!=null).map(p=>[String(p.sku), sig(p)]));
-      const newMap=new Map(products.filter(p=>p&&p.sku!=null).map(p=>[String(p.sku), sig(p)]));
-      const changed=[];
-      newMap.forEach((s,sku)=>{ if(!oldMap.has(sku) || oldMap.get(sku)!==s) changed.push(sku); });   // 新增 + 值變動
-      oldMap.forEach((_,sku)=>{ if(!newMap.has(sku)) changed.push(sku); });                            // 本機刪除（B merge 需標 sku 走 delete 分支）
-      if(changed.length) _momoProductsItemsDirtyAdd(k, changed);
-    }
-  }catch(e){ try{ console.error('[productsItemsDirty] A0 diff 失敗，本次未標品號級（whole-key dirty 仍標、B 退整份）：',e); }catch{} }
+  // last-pushed 模型（2026-09-08 取代 A0 品號註冊表）：dirty 純即時算 diff(本機, 上次成功推的版本)，
+  //   【不】在存檔時標任何品號註冊表 → 少一套狀態。改回原值＝下次算 diff 自動不 dirty。
+  //   見下方 momoProductsDirtySkus / momoProductsPlanMerge / momoSyncProductsMerge。
   try{ localStorage.setItem(k,_json); }catch{}
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=products; }catch{}  // 權威鏡像（跨裝置：momo_products 訂閱也灌這裡）
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}              // 保留三鏡像一致
@@ -10163,65 +10151,100 @@ window.__momoShouldSkipCloudOverwrite=function(k){
 //     「本機是幾天前 stale 快照、要跟雲端」的實情；若真有未推編輯，改動內容會與雲端不同 → 由 base 版本比對（【2】）在推送前擋下。
 //  ── base 版本表（persisted）：本機這份 products 目前「基於哪個雲端版本(updatedAt ms)」。推送前 getDoc 到的
 //     雲端 updatedAt 若 > base → 雲端在我載入後又被人更新過 → 衝突，預覽標紅、預設不推。
-const _MOMO_PDIRTY_LS='ec_momo_products_dirty';   // JSON array：真正編輯過還沒推的 full key
-const _MOMO_PBASE_LS ='ec_momo_products_base';    // JSON map：full key → 雲端 updatedAt(ms)
+const _MOMO_PDIRTY_LS='ec_momo_products_dirty';   // JSON array：真正編輯過還沒推的 full key（onSnapshot 守衛 + pending 閘；推成功才清）
 function _momoReadJson(lsKey, fallback){ try{ const raw=localStorage.getItem(lsKey); return raw?JSON.parse(raw):fallback; }catch{ return fallback; } }
 function _momoDirtyAdd(k){ try{ const a=_momoReadJson(_MOMO_PDIRTY_LS,[]); if(Array.isArray(a)&&!a.includes(k)){ a.push(k); localStorage.setItem(_MOMO_PDIRTY_LS,JSON.stringify(a)); } }catch{} }
 function _momoDirtyDel(k){ try{ let a=_momoReadJson(_MOMO_PDIRTY_LS,[]); if(Array.isArray(a)&&a.includes(k)){ a=a.filter(x=>x!==k); localStorage.setItem(_MOMO_PDIRTY_LS,JSON.stringify(a)); } }catch{} }
 function _momoIsDirty(k){ try{ const a=_momoReadJson(_MOMO_PDIRTY_LS,[]); return Array.isArray(a)&&a.includes(k); }catch{ return false; } }
-function _momoBaseGet(k){ try{ const m=_momoReadJson(_MOMO_PBASE_LS,{}); return (m&&m[k])||0; }catch{ return 0; } }
-function _momoBaseSet(k, ts){ try{ const m=_momoReadJson(_MOMO_PBASE_LS,{})||{}; m[k]=ts||0; localStorage.setItem(_MOMO_PBASE_LS,JSON.stringify(m)); }catch{} }
-// ══════ A0：products 品號級 dirty 註冊表（persisted，跨重整）——集中在 momoSaveProducts 兜底標記 ══════
-//   與整份 _MOMO_PDIRTY_LS 並存（過渡期兩套都在；B merge 讀這份判「哪些 SKU 用本機」，整份續當 sweep/pendingCount 閘、B 才退）。
-//   三態（比照 Keani ec_notes_items_dirty）：
-//     raw===null      → 正常空（從沒標過），Get 回 {} 或 []
-//     JSON 損毀/非物件 → 回 null（呼叫端須中止，【絕不當成空】——當空會讓 B 的 momoMergeByKey 用空 dirty ＝ merge 出等於雲端、一個 SKU 都沒推＝靜默失效）
-//     該 key 缺       → []（真空）；[...] → 這些 SKU 髒
-//   ⚠ 損毀刻意不重建（重建會把「損毀→中止」變「合法→靜默不推」，繞過防護）。
-//   🔴 B 階段 null-fallback 合約（A0 先定義、B 依賴）：Get 回 null（品號級註冊表壞了）時，
-//     B【不可】拿它當空去 merge、也【不可】拿它當「全部髒」整份覆蓋（會蓋掉同事在共享 SKU 的較新編輯）。
-//     B 應退回【整份 _MOMO_PDIRTY_LS whole-key dirty 的既有行為】＝走現有整份 conflict block、預設不推、報錯，
-//     不寫雲端（＝最安全：不刪雲端獨有、不蓋共享 SKU）。這條可靠，因為 momoSaveProducts 一定同時標 whole-key（下方 10125）＝backstop 永遠在。
-const _MOMO_PIDIRTY_LS='ec_momo_products_items_dirty';   // JSON map：full key(ec_momo_products|<shop>) → [sku…]
-function _momoProductsItemsDirtyGet(fullKey){
-  let raw; try{ raw=localStorage.getItem(_MOMO_PIDIRTY_LS); }
-  catch(e){ console.error('[productsItemsDirty] localStorage 讀取失敗，回 null（呼叫端須中止、不可當空）：',e); return null; }
-  if(raw===null) return fullKey===undefined ? {} : [];
-  let m; try{ m=JSON.parse(raw); }
-  catch(e){ console.error('[productsItemsDirty] 註冊表 JSON 損毀，回 null（呼叫端須中止、不可當空）。原始：',raw); return null; }
-  if(m===null||typeof m!=='object'||Array.isArray(m)){ console.error('[productsItemsDirty] 註冊表不是物件，回 null。原始：',raw); return null; }
-  if(fullKey===undefined) return m;
-  const a=m[fullKey];
-  if(a===undefined) return [];
-  if(!Array.isArray(a)){ console.error('[productsItemsDirty] 該 key 項目不是陣列，回 null：',fullKey,a); return null; }
-  return a;
+window.__momoIsProductsDirty=function(k){ return _momoIsDirty(k); };   // firebase.js 訂閱：dirty 守衛（保護未推編輯不被雲端 echo 覆蓋）
+
+// ═══════════ products 逐 SKU merge：last-pushed 基準（2026-09-08 取代 A0 整份/品號註冊表 + base 版本表）═══════════
+//  設計（Vanessa 拍板）：dirty = diff(本機, 上次成功推的版本)。baseline 持久化 localStorage（ec_momo_products_lastpushed|<shop> → {sku:簽名}），
+//    【只】在推送成功時更新，不依賴 onSnapshot（故無「dirty 賣場拿不到 baseline」死鎖）。
+//    dirty 純即時算（無獨立品號註冊表——少一套狀態）：改回原值＝自動不 dirty。
+//  🔴 首次無 last-pushed（bootstrap，含全部既有裝置第一次跑本版）：以【當下雲端】為基準算 dirty
+//    （changed=本機≠雲端、added=本機獨有），【removed 一律空】——沒有「我推過」的證據不敢當「我刪了」，雲端獨有 SKU 一律保留（絕不刪）。
+//    對「本機==雲端」的現況＝0 dirty、只建 baseline，安全。推成功後 baseline 就位，之後 removed 才有意義。
+//  ⚠ 與拍板字面「null 退整份 whole-overwrite」的差異：整份覆蓋會刪雲端獨有 SKU（違反同句「絕不刪」）→ 這裡改成
+//    「以雲端為基準 bootstrap 後照 merge」＝同時滿足「首次保守」與「絕不刪雲端獨有」。若要別的語意請講。
+const _MOMO_PLP_LS='ec_momo_products_lastpushed';   // localStorage 前綴：ec_momo_products_lastpushed|<shop> → JSON {sku:簽名}
+function momoProductsLastPushedKey(shop){ return _MOMO_PLP_LS+'|'+shop; }
+function _momoProductsBuildSig(items){ const m={}; (Array.isArray(items)?items:[]).forEach(p=>{ if(p&&p.sku!=null) m[String(p.sku)]=_momoStableStr(p); }); return m; }
+function _momoProductsLastPushedGet(shop){   // 回 {sku:sig} 或 null（不存在／損毀）→ null 觸發 bootstrap
+  let raw; try{ raw=localStorage.getItem(momoProductsLastPushedKey(shop)); }catch(e){ return null; }
+  if(raw==null) return null;
+  try{ const m=JSON.parse(raw); if(m&&typeof m==='object'&&!Array.isArray(m)) return m; }catch(e){ try{ console.error('[products lastpushed] JSON 損毀，當無 baseline（bootstrap）：',shop,raw); }catch{} }
+  return null;
 }
-function _momoProductsItemsDirtyAdd(fullKey, skus){
-  if(!fullKey||!skus||!skus.length) return;
-  try{ const m=_momoProductsItemsDirtyGet();
-    if(m===null){ console.error('[productsItemsDirty] 註冊表損毀，這批 SKU 標記沒存下來（刻意不重建，理由見上方）：',fullKey,skus); return; }   // whole-key dirty 仍會標（backstop），B 退整份
-    const s=new Set(Array.isArray(m[fullKey])?m[fullKey]:[]);
-    skus.forEach(x=>{ if(x!=null) s.add(String(x)); });
-    m[fullKey]=[...s];
-    localStorage.setItem(_MOMO_PIDIRTY_LS,JSON.stringify(m));
-  }catch(e){ console.error('[productsItemsDirty] 寫入註冊表失敗，這批 SKU 待同步標記沒存下來：',fullKey,skus,e); }
+function _momoProductsLastPushedSet(shop, items){ try{ localStorage.setItem(momoProductsLastPushedKey(shop), JSON.stringify(_momoProductsBuildSig(items))); }catch(e){ try{ console.error('[products lastpushed] 寫入失敗：',shop,e); }catch{} } }
+window.__momoProductsLastPushedGet=function(shop){ return _momoProductsLastPushedGet(shop); };   // Console 檢視／Vanessa 驗收
+window.__momoProductsLastPushedSet=function(shop, items){ _momoProductsLastPushedSet(shop, items||momoPendingProducts(momoProductsKey(shop))||[]); };
+// dirty SKU 即時推導（同步、給 UI／預覽）：本機 pending(_mem→localStorage) vs last-pushed 基準。
+//   回 {baseline:'lastpushed'|'bootstrap', unknown, changed[], added[], removed[], pushSkus[], count}。
+//   bootstrap（無 baseline）需雲端才能精準 → 這裡回 {baseline:'bootstrap',unknown:true}，實際 dirty 由推送時 plan 以雲端為準算。
+function momoProductsDirtySkus(shop){
+  const local=momoPendingProducts(momoProductsKey(shop))||[];
+  const lp=_momoProductsLastPushedGet(shop);
+  const localMap=_momoProductsBuildSig(local);
+  if(lp===null){ const added=Object.keys(localMap); return {baseline:'bootstrap', unknown:true, changed:[], added, removed:[], pushSkus:added, count:added.length}; }
+  const changed=[], added=[], removed=[];
+  Object.keys(localMap).forEach(sku=>{ if(!(sku in lp)) added.push(sku); else if(localMap[sku]!==lp[sku]) changed.push(sku); });
+  Object.keys(lp).forEach(sku=>{ if(!(sku in localMap)) removed.push(sku); });
+  const pushSkus=changed.concat(added);
+  return {baseline:'lastpushed', unknown:false, changed, added, removed, pushSkus, count:pushSkus.length+removed.length};
 }
-function _momoProductsItemsDirtyClear(fullKey, skus){
-  if(!fullKey) return;
-  try{ const m=_momoProductsItemsDirtyGet();
-    if(m===null){ console.error('[productsItemsDirty] 損毀，這次清除沒生效（刻意不重建）：',fullKey,skus); return; }
-    if(!Object.prototype.hasOwnProperty.call(m,fullKey)) return;
-    if(!skus){ delete m[fullKey]; }
-    else{ const rm=new Set((Array.isArray(skus)?skus:[skus]).map(String)); const left=(Array.isArray(m[fullKey])?m[fullKey]:[]).filter(x=>!rm.has(String(x))); if(left.length) m[fullKey]=left; else delete m[fullKey]; }
-    localStorage.setItem(_MOMO_PIDIRTY_LS,JSON.stringify(m));
-  }catch(e){ console.error('[productsItemsDirty] 清除註冊表失敗：',fullKey,skus,e); }
+window.__momoProductsDirtySkus=function(shop){ return momoProductsDirtySkus(shop); };
+// merge 計畫（純函式、可合成測）：雲端陣列 + 本機 pending + last-pushed 簽名(null=bootstrap) → 要寫回雲端的合併陣列 + 對照數字。
+//   overwrite=changed∪added（本機值覆蓋／新增）；delete=removed（僅 lastpushed 模式；bootstrap 不刪雲端獨有）；其餘雲端 SKU 原封保留。
+//   conflictSkus（僅告警、不阻擋、不改寫入行為）：overwrite 的 SKU 中雲端現值 ≠ 我上次推的值（同事在我推後也動過）→ 本設計 last-write-wins、記錄供檢視。
+function momoProductsPlanMerge(shop, cloudItems, localItems, lastPushedSig){
+  const cloud=Array.isArray(cloudItems)?cloudItems:[];
+  const local=Array.isArray(localItems)?localItems:[];
+  const cloudMap=new Map(); cloud.forEach(p=>{ if(p&&p.sku!=null) cloudMap.set(String(p.sku),p); });
+  const localMap=new Map(); local.forEach(p=>{ if(p&&p.sku!=null) localMap.set(String(p.sku),p); });
+  const bootstrap = (lastPushedSig===null);
+  const base = bootstrap ? _momoProductsBuildSig(cloud) : lastPushedSig;   // bootstrap：以雲端為基準
+  const changed=[], added=[], removed=[];
+  localMap.forEach((p,sku)=>{ const sig=_momoStableStr(p); if(!(sku in base)) added.push(sku); else if(sig!==base[sku]) changed.push(sku); });
+  if(!bootstrap){ Object.keys(base).forEach(sku=>{ if(!localMap.has(sku)) removed.push(sku); }); }   // bootstrap 不算 removed（不刪雲端獨有）
+  const overwrite=new Set(changed.concat(added));
+  const removeSet=new Set(removed);
+  const conflictSkus=[];
+  overwrite.forEach(sku=>{ const cp=cloudMap.get(sku); const csig=cp?_momoStableStr(cp):undefined; if(csig!==undefined && csig!==base[sku]) conflictSkus.push(sku); });   // bootstrap 時 base=雲端 → 天然無此類
+  // 組合 merged：照雲端順序保留 → overwrite 改本機值 → removed 跳過 → 最後補「雲端沒有的新增」
+  const merged=[]; let preserveCount=0;
+  cloud.forEach(p=>{ if(!p||p.sku==null){ merged.push(p); return; } const sku=String(p.sku); if(removeSet.has(sku)) return; if(overwrite.has(sku)) merged.push(localMap.get(sku)); else { merged.push(p); preserveCount++; } });
+  overwrite.forEach(sku=>{ if(!cloudMap.has(sku)) merged.push(localMap.get(sku)); });
+  // 並排對照數字：整份覆蓋（whole-overwrite）會推「本機整份」、刪掉「雲端有本機無」的 SKU；merge 救回的就是這批雲端獨有
+  let cloudOnly=0; cloudMap.forEach((_,sku)=>{ if(!localMap.has(sku)) cloudOnly++; });   // = 整份覆蓋會刪 / merge 保留的雲端獨有數
+  return { mode: bootstrap?'bootstrap':'lastpushed', merged, changed, added, removed, pushSkus:[...overwrite], deleteSkus:[...removeSet], preserveCount, conflictSkus, cloudCount:cloud.length, localCount:local.length, mergedCount:merged.length, wholeOverwritePush:local.length, cloudOnly };
 }
-window.__momoProductsItemsDirtyGet   = _momoProductsItemsDirtyGet;   // Console 測試/除錯 + B 讀取
-window.__momoProductsItemsDirtyAdd   = _momoProductsItemsDirtyAdd;
-window.__momoProductsItemsDirtyClear = _momoProductsItemsDirtyClear;
-window.__momoIsProductsDirty=function(k){ return _momoIsDirty(k); };          // firebase.js 訂閱：dirty 守衛
-window.__momoNoteCloudBase =function(k, ts){ if(ts) _momoBaseSet(k, ts); };   // firebase.js 訂閱：接受雲端後記錄基準
-window.__momoProductsBaseGet=function(k){ return _momoBaseGet(k); };          // 預覽【2】：讀本機基準版本
+window.__momoProductsPlanMerge=momoProductsPlanMerge;   // 合成測/診斷可直呼
+window.__MOMO_MERGE_ENFORCE=false;   // 🔴 B2 閘：false=SHADOW（syncToCloud 不寫雲端、只 log 對照）；設 true 才真的 merge 寫入。Vanessa 驗收前先 shadow 對照。
+// 實際推送（syncToCloud 分派呼叫；opts.shadow=true 供 __momoMergeShadow 診斷）：getDoc 雲端 → plan → log →（非 shadow 才寫 + 更新 last-pushed）。
+async function momoSyncProductsMerge(shop, opts){
+  const shadow = !!(opts&&opts.shadow===true);
+  const pk=momoProductsKey(shop);
+  const local=momoPendingProducts(pk)||[];
+  const lp=_momoProductsLastPushedGet(shop);
+  const snap=await window.__cloudMomo.getDoc(shop); const dd=snap.exists()?(snap.data()||{}):{}; const cloudItems=dd.items||[];
+  const plan=momoProductsPlanMerge(shop, cloudItems, local, lp);
+  const tag = shadow?'SHADOW（未寫雲端）':'ENFORCE（寫入雲端）';
+  try{ console.log('%c[products merge '+tag+'] '+shop+'（mode='+plan.mode+'）'
+    +'\n   整份覆蓋 → 推 '+plan.wholeOverwritePush+' 筆、刪雲端 '+plan.cloudOnly+' 個'
+    +'\n   merge    → 推 '+plan.pushSkus.length+' 筆(改'+plan.changed.length+'/增'+plan.added.length+')、刪 '+plan.deleteSkus.length+' 筆、保留雲端 '+plan.preserveCount+' 個（救回 '+plan.cloudOnly+' 個雲端獨有）'
+    +'\n   雲端→合併 '+plan.cloudCount+'→'+plan.mergedCount
+    +(plan.conflictSkus.length?'\n   ⚠ 同事在我推後也動過同一 SKU(last-write-wins、用我的值) '+plan.conflictSkus.length+' 筆：'+plan.conflictSkus.slice(0,20).join(','):''),
+    'color:'+(shadow?'#2563eb':'#16a34a')+';font-weight:700'); }catch{}
+  try{ window.__momoLastMergePlan={shop, at:Date.now(), shadow, mode:plan.mode, pushSkus:plan.pushSkus, changed:plan.changed, added:plan.added, deleteSkus:plan.deleteSkus, preserveCount:plan.preserveCount, conflictSkus:plan.conflictSkus, cloudCount:plan.cloudCount, mergedCount:plan.mergedCount, wholeOverwritePush:plan.wholeOverwritePush, cloudOnly:plan.cloudOnly}; }catch{}
+  if(shadow) return { shadow:true, plan };
+  // 🛡 清空防呆：本機空但雲端有資料 → 幾乎必是本機讀取異常，不是「清空整店」的真實意圖 → 中止不寫（fail-loud）
+  if((!Array.isArray(local) || local.length===0) && cloudItems.length>0){ const msg='[products merge] '+shop+' 本機為空、雲端有 '+cloudItems.length+' 筆 → 中止不寫（避免清空整店；請確認本機資料後再推）'; try{ console.error(msg); }catch{} throw new Error(msg); }
+  await window.__cloudMomo.setShop(shop, momoFsSanitizeDeep(plan.merged));   // 整包寫回 merged（已保留雲端獨有、只覆蓋 dirty、bootstrap 不刪）
+  _momoProductsLastPushedSet(shop, plan.merged);   // 🔴 推成功才更新 baseline → 下輪 dirty 歸零
+  return { shadow:false, plan };
+}
+window.__momoMergeShadow=function(shop){ return momoSyncProductsMerge(shop,{shadow:true}); };   // Console 診斷：只讀+log，不寫、不改 baseline
 // ══════ origins（momo_moplus_origins）衝突防護（2026-08-14）：比照 products 的持久化 dirty + updatedAt base ══════
 //  根因：origins 原本只有 in-memory _pendingSyncKeys，重整就空 → 訂閱無版本比對、舊雲端灌回本機（Vanessa 同步後回退實例）。
 //  改：① 持久化 dirty 註冊表（跨重整）＝「本機有未推重傳」的權威訊號；② updatedAt base ＝推送前擋「雲端較新」。
@@ -12683,11 +12706,16 @@ async function momoOpenSyncPreview(shop){
       const mc=momoCloud[it.key];
       if(!mc || mc.error){ it.status='readfail'; it.cloudCount=null; return; }   // __cloudMomo 缺 / 該賣場讀失敗 → 不掛掉整個預覽，單列標無法比對
       const cItems=mc.items; it._cloudVal=cItems;
-      if(cItems===undefined){ it.status='new'; it.cloudCount=0; }
-      else { it.cloudCount=_momoCount(cItems); it.status=_eq(it.localVal,cItems)?'same':'diff'; }
-      // 【2】版本比對：內容不同、且雲端 updatedAt > 本機基準（我載入後雲端又被人推過）→ 標衝突（推了會蓋掉同事較新版本）。
-      //   base 讀不到（0）時採保守：只要雲端有版本戳且內容不同就當衝突（無從證明本機是最新）。
-      if(it.status==='diff'){ const base=(window.__momoProductsBaseGet?window.__momoProductsBaseGet(it.key):0); const cts=mc.updatedAt||0; if(cts && (!base || cts>base)) it.conflict=true; }
+      if(cItems!==undefined) it.cloudCount=_momoCount(cItems);
+      // last-pushed 逐 SKU：status 由「有無 dirty SKU（本機 vs last-pushed）」決定，【不】用整份陣列 deep-eq
+      //   → 同事在雲端加/改別的 SKU 不再讓我這把無關的同步被誤判 diff／被整份 conflict block 擋（merge 天然保留雲端獨有）。
+      const shopP=it.key.slice('ec_momo_products|'.length);
+      const lpSig=(window.__momoProductsLastPushedGet?window.__momoProductsLastPushedGet(shopP):null);
+      const plan=momoProductsPlanMerge(shopP, (cItems===undefined?[]:cItems), it.localVal||[], lpSig);
+      it._mergePlan={mode:plan.mode, pushN:plan.pushSkus.length, delN:plan.deleteSkus.length, preserveN:plan.preserveCount, conflictN:plan.conflictSkus.length, conflictSkus:plan.conflictSkus.slice(0,20), changed:plan.changed.length, added:plan.added.length, removed:plan.removed.length};
+      const hasWork = plan.pushSkus.length>0 || plan.deleteSkus.length>0;
+      it.status = (cItems===undefined) ? (hasWork?'diff':'new') : (hasWork ? 'diff' : 'same');
+      // 不再設整份 it.conflict（merge 保留雲端獨有、不刪同事）。「同事也動過同一 SKU」＝ conflictSkus（僅告警、last-write-wins），見 _mergePlan / merge log。
       return;
     }
     if(it.kind==='MOMO月對帳'){
