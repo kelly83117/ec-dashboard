@@ -1411,3 +1411,35 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .tagfx-na{color:var(--text-faint);}
 .tagfx-note{margin-top:10px;font-size:12px;color:var(--text-muted);}
 .tagfx-empty{padding:28px 10px;text-align:center;font-size:13px;color:var(--text-muted);line-height:1.8;}
+/* 凍結前兩欄：z-index 階層照 .mm-sticky-col（td:2 / th:4；表頭列本身吃全域 thead tr 的 sticky top z:3）。
+   c1 固定寬 150px、c2 接續 left:150px —— 主表格的 left 硬編碼與實際欄寬重疊是已記技術債
+   （見本檔上方 .bsel-cb 那段註解），這裡用固定寬讓 left 有依據，不抄那個 left。 */
+.tagfx-table th.tagfx-c1,.tagfx-table td.tagfx-c1{position:sticky;left:0;width:150px;min-width:150px;max-width:150px;overflow:hidden;text-overflow:ellipsis;}
+.tagfx-table th.tagfx-c2,.tagfx-table td.tagfx-c2{position:sticky;left:150px;box-shadow:2px 0 5px -2px rgba(15,23,42,.18);}
+.tagfx-table td.tagfx-c1,.tagfx-table td.tagfx-c2{z-index:2;background:var(--surface);}
+.tagfx-table th.tagfx-c1,.tagfx-table th.tagfx-c2{z-index:4;background:var(--primary-soft);}
+/* hover 色跟全域 tbody tr:hover td 的字面值同值，凍結格才不會閃色差（同 .mm-sticky-col 的 hover 做法） */
+.tagfx-table tbody tr:hover td.tagfx-c1,.tagfx-table tbody tr:hover td.tagfx-c2{background:#fafbff;}
+/* 模式切換：僅可比較商品 / 全部商品（含新品） */
+.tagfx-modes{display:flex;gap:6px;margin-bottom:12px;}
+.tagfx-mode-btn{
+  padding:4px 12px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:7px;
+  font-size:12px;
+  color:var(--text-muted);
+  font-family:inherit;
+  cursor:pointer;
+}
+.tagfx-mode-btn:hover{background:var(--primary-soft);}
+.tagfx-mode-btn.on{background:var(--primary-soft);border-color:var(--primary);color:var(--primary);font-weight:700;}
+/* 展開鈕靠右，跟兩顆模式鈕分開（同列但不同組） */
+.tagfx-expand-btn{margin-left:auto;}
+/* 指標欄兩行（照 KPI 卡）：上=後期金額、下=成長率 */
+.tagfx-cell-amt{font-weight:600;}
+.tagfx-cell-rate{font-size:11px;margin-top:2px;}
+/* 廣告費的成長率行中性灰（蓋掉 tagfx-up/down 的綠紅，理由見 buildTagFxHtml 頭註） */
+.tagfx-neutral .tagfx-up,.tagfx-neutral .tagfx-down{color:var(--text-muted);font-weight:500;}
+/* 「（不含新品）」小字註記（僅展開模式的廣告佔比/成功率） */
+.tagfx-subnote{font-size:10.5px;color:var(--text-muted);font-weight:400;margin-left:2px;}

@@ -4145,25 +4145,58 @@ function openTagFxModal(shop){
     body.innerHTML=`<div class="tagfx-empty">缺 ${missing.join('、')} 的報表存檔，無法比較。<br>需要兩個月份都以「整月」區間產生並儲存過報表。</div>`;
     ov.classList.add('open');return;
   }
-  // 🔴 標題必須含模式與期間：老闆會截圖轉貼，截圖裡看不出彈窗外的任何狀態。
-  setTitle(`測試標籤成效 · ${curMonth} 整月 vs ${prevMonth} 整月 · 僅可比較商品`);
-  body.innerHTML=buildTagFxHtml(shop,curMonth,curRep,prevRep);
+  // 聚合只在開窗算一次存 ctx，之後切模式/展開都是純渲染（見 _tagFxCompute 頭註）。
+  // 期間規則沿用既有的「標記日 ≤ 期末」（getProdTagsFor + _periodEndDate），期末取整月月底，不另寫日期判定。
+  const readTags=_prodTagsReaderFor(shop,{month:curMonth,half:'full'});
+  const data=_tagFxCompute(curRep.built,prevRep.built,readTags,getTagDefs().map(d=>d.label));
+  _tagFxCtx={shop,curMonth,prevMonth,data,mode:'cmp',expand:false};
+  _tagFxRender();
   ov.classList.add('open');
 }
 function closeTagFxModal(){document.getElementById('tagfx-modal-overlay')?.classList.remove('open');}
-// 純計算、不碰 DOM / state（node 可單獨驗）。readTags=(code)=>[{tag,date}]。
-//   🔴 新品規則：上月對照表查不到品號＝新品，【完全排除】於加總與成功率，只進 newCnt ——
-//     照現有 KPI 的「查不到計 0」會讓新品變成無限成長，把數字往「測試有效」方向灌水。
+// 開窗當下的聚合結果（data）＋顯示狀態（mode/expand），🔴 不存原始報表、不重讀 lsLoad ——
+//   代價是 ctx 綁著開窗當下的快照，重新產生報表後要關窗重開才會吃到新資料（同 dist-modal 的行為）。
+let _tagFxCtx=null;
+function _tagFxRender(){
+  const c=_tagFxCtx;if(!c)return;
+  const body=document.getElementById('tagfx-modal-body');
+  const titleEl=document.getElementById('tagfx-modal-title');
+  // 🔴 標題必須含模式與期間：老闆會截圖轉貼，截圖裡看不出彈窗外的任何狀態（含切換鈕的選中態）。
+  const modeTxt=c.mode==='all'?`全部商品（含新品 ${c.data.newProdCnt} 個）`:'僅可比較商品';
+  if(titleEl)titleEl.textContent=`測試標籤成效 · ${c.curMonth} 整月 vs ${c.prevMonth} 整月 · ${modeTxt}`;
+  if(body)body.innerHTML=buildTagFxHtml(c.data,c.mode,c.expand);
+}
+function setTagFxMode(mode){
+  if(!_tagFxCtx||_tagFxCtx.mode===mode)return;
+  _tagFxCtx.mode=mode;
+  _tagFxRender();
+}
+function toggleTagFxExpand(){
+  if(!_tagFxCtx)return;
+  _tagFxCtx.expand=!_tagFxCtx.expand;
+  _tagFxRender();
+}
+// 純計算、不碰 DOM / state（node 可單獨驗），且【與顯示模式無關】——同一份結果供 cmp/all
+//   兩模式與收合/展開共用，開窗算一次存 _tagFxCtx，之後全是純渲染。
+//   🔴 新品規則（新品＝上月對照表查不到品號）：可比較與新品的加總【分開存】，不要合流 ——
+//     · curRev/prevRev/curPure/…＝【純可比較商品】的加總。所有比率（成長率/廣告佔比/成功率）
+//       一律只從這組算：新品前期必為 0，混進任何比率的分子或分母都會把數字灌往
+//       「測試有效」方向 —— 這是本功能最不能出的錯（成功率灌向 100%、成長率 +10% 變 +176%）。
+//     · newRev/newPure/newAds＝新品的本期加總。只有「全部商品」模式的【金額顯示】會把它
+//       加到後期（前期以 0 計），老闆看整體規模用。
 //   一商品多標籤 → 每個標籤的列各算它一次（沿用篩選面板 prodCounts 的既定慣例）。
+//   newProdCnt 是【去重後的新品商品數】（同一新品掛兩標籤只算 1，給標題用）；
+//   各列的 newCnt 則跟 cmpCnt 一樣按標籤重複計（「45 ＋8新」跟面板 pill 同一套口徑）。
 function _tagFxCompute(curBuilt,prevBuilt,readTags,defLabels){
   const prevMap=Object.create(null);   // 商品編號是外部資料，{} 會被 __proto__ 之類的品名污染（同 _prevDayBudgetReaderFor）
   prevBuilt.forEach(r=>{ if(!r||!r.code)return; prevMap[r.code]={rev:r.rev||0,pure:r.pureProfit||0,ads:r.adsFee||0}; });
   const buckets=Object.create(null);
   const order=[];
   const bucketOf=label=>{
-    if(!buckets[label]){ buckets[label]={label,cmpCnt:0,newCnt:0,growCnt:0,curRev:0,prevRev:0,curPure:0,prevPure:0,curAds:0,prevAds:0}; order.push(label); }
+    if(!buckets[label]){ buckets[label]={label,cmpCnt:0,newCnt:0,growCnt:0,curRev:0,prevRev:0,curPure:0,prevPure:0,curAds:0,prevAds:0,newRev:0,newPure:0,newAds:0}; order.push(label); }
     return buckets[label];
   };
+  const newCodes=new Set();
   curBuilt.forEach(r=>{
     if(!r||!r.code)return;
     const tags=readTags(r.code);
@@ -4171,7 +4204,11 @@ function _tagFxCompute(curBuilt,prevBuilt,readTags,defLabels){
     const base=prevMap[r.code];
     tags.forEach(o=>{
       const b=bucketOf(o.tag);
-      if(!base){ b.newCnt++; return; }
+      if(!base){
+        b.newCnt++;newCodes.add(r.code);
+        b.newRev+=r.rev||0; b.newPure+=r.pureProfit||0; b.newAds+=r.adsFee||0;   // 進獨立的新品加總；growCnt/cmpCnt/curX 一律不動（見上方註解）
+        return;
+      }
       b.cmpCnt++;
       b.curRev+=r.rev||0; b.curPure+=r.pureProfit||0; b.curAds+=r.adsFee||0;
       b.prevRev+=base.rev; b.prevPure+=base.pure; b.prevAds+=base.ads;
@@ -4183,7 +4220,7 @@ function _tagFxCompute(curBuilt,prevBuilt,readTags,defLabels){
   defLabels.forEach(l=>{ if(buckets[l])rows.push(buckets[l]); });
   order.forEach(l=>{ if(!defLabels.includes(l))rows.push(buckets[l]); });
   const emptyDefCnt=defLabels.filter(l=>!buckets[l]).length;
-  return {rows,emptyDefCnt};
+  return {rows,emptyDefCnt,newProdCnt:newCodes.size};
 }
 // 帶號金額：fmtN 內建 Math.abs 會吃掉負號，負號自己補（照 setKpis 的 lmLine，該處註解有明講）。
 function _tagFxAmt(v){return (v<0?'−':'')+'NT$ '+fmtN(v);}
@@ -4193,31 +4230,58 @@ function _tagFxGrowth(cur,base){
   const d=(cur-base)/base*100;
   return `<span class="${d>=0?'tagfx-up':'tagfx-down'}">${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%</span>`;
 }
-function buildTagFxHtml(shop,curMonth,curRep,prevRep){
-  // 期間規則沿用既有的「標記日 ≤ 期末」（getProdTagsFor + _periodEndDate），只是期末取整月月底，不另寫日期判定。
-  const readTags=_prodTagsReaderFor(shop,{month:curMonth,half:'full'});
-  const defs=getTagDefs();
-  const {rows,emptyDefCnt}=_tagFxCompute(curRep.built,prevRep.built,readTags,defs.map(d=>d.label));
+// 純渲染：吃 _tagFxCompute 的結果（data），🔴 不重算聚合、不讀報表。回傳 html 字串。
+//   mode：'cmp'＝僅可比較（預設）／'all'＝金額含新品。
+//   expand：false＝六欄結論（標籤/商品數/營收/純利/廣告費/成功率，一頁看完 —— 老闆唯一明確的要求）
+//           ／true＝前期三欄插在對應指標欄左邊＋廣告佔比，共十欄。
+//   指標欄兩行照 KPI 卡：第一行後期金額、第二行成長率（可比較口徑，基期 ≤ 0「—」）。
+//   ⚠ 廣告費的成長率行維持中性灰、不上綠紅：廣告費變多不必然是壞事（同 setKpis 的 lmLine
+//     對廣告費 colored=false 的既有決定，見該處註解）。用 .tagfx-neutral 蓋色，不動 _tagFxGrowth。
+//   🔴 「（不含新品）」加註只出現在【展開模式】的廣告佔比與成功率：收合格短，塞小字毀掉
+//     「一頁看完」；且收合的成長率兩模式數字完全相同（C-1 口徑鐵律）沒有誤讀空間，
+//     金額含新品由標題的「全部商品（含新品 N 個）」交代。
+function buildTagFxHtml(data,mode,expand){
+  const {rows,emptyDefCnt}=data;
   if(!rows.length)return '<div class="tagfx-empty">本期整月報表中沒有任何掛測試標籤的商品</div>';
+  const all=mode==='all';
   const NA='<span class="tagfx-na">—</span>';
-  // cmpCnt=0（該標籤下全是新品）時金額一律「—」不寫 NT$ 0：沒有可比較商品 ≠ 金額是 0。
-  const amt=(b,v)=>b.cmpCnt?_tagFxAmt(v):NA;
+  const modes=`<div class="tagfx-modes">
+    <button class="tagfx-mode-btn${all?'':' on'}" onclick="setTagFxMode('cmp')">僅可比較商品</button>
+    <button class="tagfx-mode-btn${all?' on':''}" onclick="setTagFxMode('all')">全部商品（含新品）</button>
+    <button class="tagfx-mode-btn tagfx-expand-btn" onclick="toggleTagFxExpand()">${expand?'收合':'顯示前期數字'}</button>
+  </div>`;
   const trs=rows.map(b=>{
-    const adsPct=(b.cmpCnt&&b.curRev>0)?`${(b.curAds/b.curRev*100).toFixed(2)}%`:NA;
-    const okRate=b.cmpCnt?`${b.growCnt}/${b.cmpCnt} = ${(b.growCnt/b.cmpCnt*100).toFixed(1)}%`:NA;
+    // 金額欄有無數字看該模式計入了幾個商品；cmp 模式全新品列＝「—」不寫 NT$ 0（沒有可比較商品 ≠ 金額是 0）
+    const inSum=all?(b.cmpCnt+b.newCnt):b.cmpCnt;
+    const amt=v=>inSum?_tagFxAmt(v):NA;
+    // 🔴 口徑鐵律（C-1）：金額顯示 all 模式含新品（後期 +newX、前期 +0）；所有比率不分模式
+    //   一律只用可比較加總（curX/prevX）——新品混進任何比率都是往「測試有效」方向灌水。
+    const mCell=(curShow,cmpCur,cmpPrev,neutral)=>`<td><div class="tagfx-cell-amt">${amt(curShow)}</div><div class="tagfx-cell-rate${neutral?' tagfx-neutral':''}">${_tagFxGrowth(cmpCur,cmpPrev)}</div></td>`;
+    const revCell=mCell(all?b.curRev+b.newRev:b.curRev,b.curRev,b.prevRev,false);
+    const pureCell=mCell(all?b.curPure+b.newPure:b.curPure,b.curPure,b.prevPure,false);
+    const adsCell=mCell(all?b.curAds+b.newAds:b.curAds,b.curAds,b.prevAds,true);
+    const adsPct=(b.cmpCnt&&b.curRev>0)?`${(b.curAds/b.curRev*100).toFixed(2)}%${all?'<span class="tagfx-subnote">（不含新品）</span>':''}`:NA;
+    const okRate=b.cmpCnt?`${b.growCnt}/${b.cmpCnt} = ${(b.growCnt/b.cmpCnt*100).toFixed(1)}%${(all&&expand)?'<span class="tagfx-subnote">（不含新品）</span>':''}`:NA;
     const cnt=`${b.cmpCnt}${b.newCnt?` ＋${b.newCnt}新`:''}`;
+    const lbl=String(b.label).replace(/</g,'&lt;').replace(/"/g,'&quot;');
     return `<tr>
-      <td class="tl"><span class="tag ${tagDefCls(b.label)}">${String(b.label).replace(/</g,'&lt;')}</span></td>
-      <td>${cnt}</td>
-      <td>${amt(b,b.prevRev)}</td><td>${amt(b,b.curRev)}</td><td>${_tagFxGrowth(b.curRev,b.prevRev)}</td>
-      <td>${amt(b,b.prevPure)}</td><td>${amt(b,b.curPure)}</td><td>${_tagFxGrowth(b.curPure,b.prevPure)}</td>
-      <td>${amt(b,b.prevAds)}</td><td>${amt(b,b.curAds)}</td><td>${adsPct}</td>
+      <td class="tl tagfx-c1" title="${lbl}"><span class="tag ${tagDefCls(b.label)}">${lbl}</span></td>
+      <td class="tagfx-c2">${cnt}</td>
+      ${expand?`<td>${amt(b.prevRev)}</td>`:''}${revCell}
+      ${expand?`<td>${amt(b.prevPure)}</td>`:''}${pureCell}
+      ${expand?`<td>${amt(b.prevAds)}</td>`:''}${adsCell}
+      ${expand?`<td>${adsPct}</td>`:''}
       <td>${okRate}</td>
     </tr>`;
   }).join('');
   const note=emptyDefCnt?`<div class="tagfx-note">另有 ${emptyDefCnt} 個標籤本期無商品</div>`:'';
-  return `<div class="tagfx-scroll"><table class="tagfx-table">
-    <thead><tr><th class="tl">標籤</th><th>商品數</th><th>前期營收</th><th>後期營收</th><th>營收成長率</th><th>前期純利</th><th>後期純利</th><th>純利成長率</th><th>前期廣告費</th><th>後期廣告費</th><th>廣告佔比</th><th>營收成功率</th></tr></thead>
+  const head=`<thead><tr><th class="tl tagfx-c1">標籤</th><th class="tagfx-c2">商品數</th>${
+    expand?'<th>前期營收</th>':''}<th>營收</th>${
+    expand?'<th>前期純利</th>':''}<th>純利</th>${
+    expand?'<th>前期廣告費</th>':''}<th>廣告費</th>${
+    expand?'<th>廣告佔比</th>':''}<th>營收成功率</th></tr></thead>`;
+  return `${modes}<div class="tagfx-scroll"><table class="tagfx-table">
+    ${head}
     <tbody>${trs}</tbody></table></div>${note}`;
 }
 
@@ -20784,7 +20848,7 @@ Object.assign(window, {
   openTestShopHelp,closeTestShopHelp,    // 測試通路期間列 ⓘ 與彈窗關閉鈕的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
   openKpiCmpHelp,closeKpiCmpHelp,        // 頂端「ⓘ 比較基準」+ 表頭三顆 ? + 彈窗關閉鈕的 inline onclick 用，同上
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
-  openTagFxModal,closeTagFxModal,   // 標籤成效彈窗的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
+  openTagFxModal,closeTagFxModal,setTagFxMode,toggleTagFxExpand,   // 標籤成效彈窗的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
   openTestSettings,closeTestSettings,addTestDraftCond,removeTestDraftCond,deleteTestDraftRule,addTestDraftRule,saveTestSettings,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,
