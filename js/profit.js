@@ -12874,8 +12874,8 @@ const MOMO_PROFIT_COLS=[
   {k:'qty',label:'本期銷量',fmt:'num',w:100,info:'對帳數量＝賣出−客退。進價×銷量即為營收。',infoMoPlus:'對帳明細逐列數量合計。營收＝A 貨款（非進價×銷量）。'},
   {k:'convRate',label:'成交率',fmt:'pct1',w:96,info:'對帳數量 ÷ 瀏覽量。',noMoPlus:true},
   {k:'revenue',label:'營收',fmt:'money',w:130,info:'未稅進價 × 對帳數量。已扣客退。（未稅）',infoMoPlus:'A 貨款合計（代收金額＋mo點支付＋全站抵用券支付）。代收代付平台代收，非進價×銷量。'},
-  {k:'margin',label:'毛利率',fmt:'pct1',w:100,info:'淨利 ÷ 未稅營收。淨利＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無）。',infoMoPlus:'淨利 ÷ 營收。淨利＝營收 − 成本 − D手續費(逐列15項) − C代扣運費 + B運費代收(同訂單營收攤估)。'},
-  {k:'profit',label:'毛利貢獻',fmt:'money',w:130,info:'該商品淨利金額＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無）。（未稅）',infoMoPlus:'該商品淨利金額＝營收 − 成本 − D手續費 − C代扣運費 + B運費代收。'},
+  {k:'margin',label:'淨利率',fmt:'pct1',w:100,info:'淨利 ÷ 未稅營收。淨利＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無）。',infoMoPlus:'淨利 ÷ 營收。淨利＝營收 − 成本 − D手續費(逐列15項) − C代扣運費 + B運費代收(同訂單營收攤估)。'},
+  {k:'profit',label:'淨利貢獻',fmt:'money',w:130,info:'該商品淨利金額＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無）。（未稅）',infoMoPlus:'該商品淨利金額＝營收 − 成本 − D手續費 − C代扣運費 + B運費代收。'},
   {k:'feeRate',label:'成交費率',fmt:'pct1',w:128,info:'MO+ 成交手續費反推的費率（非檔期）。逐列 round(售價×數量×費率%)=手續費、跨月取交集。唯一解=粗體深色；多解=淡色範圍+「待收斂」（月份越多越收斂）；異常=紅（跨月候選互斥、代表有問題）；無成交手續費資料=「—」。排序與篩選皆依「範圍下界」＝能保證的最低費率（撈高費率商品）：篩「>10%」＝下界都 >10% 才算。多解列的下界即篩選/排序值。⚠ 僅供顯示與異常偵測，毛利一律走逐筆實際手續費、不用反推值。',moPlusOnly:true},
   {k:'returnRate',label:'退貨率',fmt:'pct1',w:96,info:'客退數量 ÷ 賣出數量（賣出=對帳數量+客退數量），來源=對帳單逐SKU、月顆粒。未對帳月顯示「—」。hover 看退貨件數/金額。',infoMoPlus:'回收確認件數 ÷（已送達+回收確認），來源=對帳明細逐列、月顆粒。未結算/舊資料顯「—」（需重傳對帳明細）。hover 看退貨件數。'},
   {k:'stock',label:'庫存',fmt:'num',w:112,info:'乙配＝F1102 寄倉即時「可賣量」(寄倉數−已訂購待出庫)、未涵蓋顯示「—」、在途量與資料時間見 tooltip；甲配／MO+＝莫筆克庫存×分配比例。兩套來源、tooltip 各自標明。'},
@@ -13931,9 +13931,9 @@ function momoRenderAnalysis(shop,p){
         ${viewPts>=2&&series.some(s=>s.viewEst)?`<div style="font-size:11px;color:#d97706;margin-top:4px">部分月份瀏覽量為半月沿用整月的估算值（標「估」）。</div>`:''}
       </div>`:''}
 
-      <div class="mm-ana-sec"><div class="mm-ana-h">毛利率（%）　<span style="font-size:11px;font-weight:400;color:#94a3b8"><span style="color:${_MOMO_CY}">■</span> 青=已對帳(系統計算)　<span style="color:${_MOMO_GY}">■</span> 灰=未對帳(估算)</span></div>
+      <div class="mm-ana-sec"><div class="mm-ana-h">淨利率（%）　<span style="font-size:11px;font-weight:400;color:#94a3b8"><span style="color:${_MOMO_CY}">■</span> 青=已對帳(系統計算)　<span style="color:${_MOMO_GY}">■</span> 灰=未對帳(估算)</span></div>
         <div style="position:relative;height:160px"><canvas id="mm-ana-margin"></canvas></div>
-        <div style="font-size:11px;color:#d97706;margin-top:4px">${fm.isMoPlus?'註：各月毛利率用該商品原廠編號的成本表（cost_by_origin）<b>目前值</b> live 回算（成本非存在商品層、無歷史版本）→ 成本表更新後歷史月會一起變、不反映當月真實成本，看趨勢別看絕對值。':'註：各月毛利率一律用商品「目前」成本回算（歷史成本尚未接 momoEffectiveAt）→ 不反映當月真實成本，看趨勢別看絕對值。'}</div></div>
+        <div style="font-size:11px;color:#d97706;margin-top:4px">${fm.isMoPlus?'註：各月淨利率用該商品原廠編號的成本表（cost_by_origin）<b>目前值</b> live 回算（成本非存在商品層、無歷史版本）→ 成本表更新後歷史月會一起變、不反映當月真實成本，看趨勢別看絕對值。':'註：各月淨利率一律用商品「目前」成本回算（歷史成本尚未接 momoEffectiveAt）→ 不反映當月真實成本，看趨勢別看絕對值。'}</div></div>
 
       ${fm.hasS1103?`<div class="mm-ana-sec"><div class="mm-ana-h">成交均價（訂購金額 ÷ 訂購數）</div>
         ${pricePts===0 ? s1103Empty
@@ -13974,7 +13974,7 @@ function momoRenderAnalysis(shop,p){
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>'$'+Math.round(v)}}}} }));
   const mgCv=document.getElementById('mm-ana-margin');
   if(mgCv) _momoAnalysisCharts.push(new Chart(mgCv.getContext('2d'),{ type:'line',
-    data:{labels,datasets:[{label:'毛利率',data:series.map(s=>s.margin),
+    data:{labels,datasets:[{label:'淨利率',data:series.map(s=>s.margin),
       borderColor:'#64748b',tension:.3,spanGaps:true,
       pointBackgroundColor:series.map(s=>s.reconciled?_MOMO_CY:_MOMO_GY),
       pointBorderColor:series.map(s=>s.reconciled?_MOMO_CY:_MOMO_GY),pointRadius:4}]},
@@ -14037,8 +14037,11 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
   const hasPrev=!!prev.hasData;
   const prevLbl=prevKey?momoPeriodLabel(prevKey):'上期';
   const money=v=>momoMoney(v);
-  const marginColor=m=> m>=25?'#059669':m>=15?'#d97706':'#dc2626';   // 毛利率看絕對值：≥25綠 / ≥15橘 / <15紅
+  const marginColor=m=> m>=25?'#059669':m>=15?'#d97706':'#dc2626';   // 淨利率看絕對值：≥25綠 / ≥15橘 / <15紅
   const marginDelta=hasPrev?((cur.margin-prev.margin>=0?'+':'')+(cur.margin-prev.margin).toFixed(1)+'pp'):'—';
+  const _netMarginTip=momoIsMoPlus(shop)
+    ? '加權淨利率 ＝ 總淨利 ÷ 總營收。淨利＝營收 − 商品成本 − 平台費用(D手續費逐列15項) − C代扣運費 + B運費代收。'
+    : '加權淨利率 ＝ 總淨利 ÷ 總營收。淨利＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無寄倉物流/倉租）。';
   // 動銷率＝本期有銷售 ÷（目前上架 ∪ 本期有銷售）；環比用 pp 差、上升=好(綠)
   const rate = cur.activeTotal>0 ? cur.soldActive/cur.activeTotal*100 : null;
   const prevRate = (hasPrev && prev.activeTotal>0) ? prev.soldActive/prev.activeTotal*100 : null;
@@ -14051,7 +14054,7 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
   const cards=[
     {label:'總營收', info:'該期所有商品營收合計。（未稅）', val:money(cur.rev), d:momoKpiDelta(cur.rev,prev.rev,hasPrev)},
     {label:'總淨利', info:'該期所有商品淨利合計。已扣 MOMO 費用與商品成本。（未稅）', val:money(cur.profit), d:momoKpiDelta(cur.profit,prev.profit,hasPrev)},
-    {label:'加權毛利率', info:'總淨利 ÷ 總營收。', val:momoPct(cur.margin), valColor:marginColor(cur.margin), d:{txt:marginDelta,color:'#9ca3af'}},
+    {label:'加權淨利率', info:_netMarginTip, val:momoPct(cur.margin), valColor:marginColor(cur.margin), d:{txt:marginDelta,color:'#9ca3af'}},
     {label:'總銷量', val:Math.round(cur.qty).toLocaleString()+' 件', d:momoKpiDelta(cur.qty,prev.qty,hasPrev)},
     {label:'動銷率', info:'該期別「本期有銷售的商品數 ÷（目前上架 ∪ 本期有銷售）」。分子＝本期有賣出的商品（不論現在上下架）；分母＝目前上架、再加上「本期有賣、但現已下架」的商品——後者若只算「目前上架」會被漏掉（賣過的沒被計進動銷）。長期下架又沒賣的不進分母。分子必為分母子集，不會超過 100%。', val:rateVal, d:rateD},
   ];
@@ -14477,7 +14480,7 @@ function momoOpenHierarchy(shop){
     <span style="flex:1;height:10px;background:#f1f5f9;border-radius:5px;overflow:hidden"><span style="display:block;height:100%;width:${den>0?(n/den*100):0}%;background:${color}"></span></span>
   </div>`;
   const colHead=`<div style="display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;color:#94a3b8;padding:0 0 4px;border-bottom:1px solid #eef0f2;margin-bottom:4px">
-    <span style="width:66px">毛利率</span><span style="width:52px;text-align:right">數量</span><span style="width:54px;text-align:right">佔比</span><span style="flex:1"></span>
+    <span style="width:66px">淨利率</span><span style="width:52px;text-align:right">數量</span><span style="width:54px;text-align:right">佔比</span><span style="flex:1"></span>
   </div>`;
   const B=s.bins;
   const bandsHtml=colHead+[
@@ -14493,18 +14496,18 @@ function momoOpenHierarchy(shop){
   ov.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:560px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden">
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
       <div>
-        <div style="font-size:16px;font-weight:800;color:#1e293b">毛利率分佈 · ${momoShopDisplay(shop)}${periodLbl?' · '+periodLbl:''}</div>
-        <div style="font-size:12px;color:#94a3b8;margin-top:3px">統計全部商品 <b>${fmtN(s.total)}</b>（不隨表格篩選變動）· 有毛利率 <b>${fmtN(s.withMargin)}</b></div>
+        <div style="font-size:16px;font-weight:800;color:#1e293b">淨利率分佈 · ${momoShopDisplay(shop)}${periodLbl?' · '+periodLbl:''}</div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:3px">統計全部商品 <b>${fmtN(s.total)}</b>（不隨表格篩選變動）· 有淨利率 <b>${fmtN(s.withMargin)}</b></div>
       </div>
       <button onclick="momoCloseHierarchy()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:18px;cursor:pointer;line-height:1">✕</button>
     </div>
     <div style="padding:16px 20px;max-height:calc(100vh - 180px);overflow:auto">
-      ${s.withMargin===0?`<div style="font-size:13px;color:#94a3b8;text-align:center;padding:20px">此期別沒有可計算毛利率的商品。</div>`:bandsHtml}
+      ${s.withMargin===0?`<div style="font-size:13px;color:#94a3b8;text-align:center;padding:20px">此期別沒有可計算淨利率的商品。</div>`:bandsHtml}
       ${(s.zeroRev||s.noCost)?`<div style="margin-top:12px;padding-top:10px;border-top:1px solid #f1f5f9">
-        ${sideRow('零營收',s.zeroRev,'本期無銷售／整批退貨（毛利率「—」）→ 不列入級距')}
-        ${sideRow('無法計算',s.noCost,'缺成本 → 毛利率無法計算（不當 0%、不進任何級距）')}
+        ${sideRow('零營收',s.zeroRev,'本期無銷售／整批退貨（淨利率「—」）→ 不列入級距')}
+        ${sideRow('無法計算',s.noCost,'缺成本 → 淨利率無法計算（不當 0%、不進任何級距）')}
       </div>`:''}
-      <div style="font-size:10.5px;color:#9ca3af;margin-top:12px;line-height:1.6">毛利率＝總表同口徑（淨利 ÷ 營收）；級距左閉右開（例：0–10% 表示 0 ≤ x &lt; 10、≥60% 為 x ≥ 60）。佔比分母＝有毛利率的 ${fmtN(s.withMargin)} 筆。<br>八級距 ${fmtN(s.withMargin)} ＋ 零營收 ${fmtN(s.zeroRev)} ＋ 無法計算 ${fmtN(s.noCost)} ＝ 全部 ${fmtN(totalAll)} 個商品。${shop==='甲配'?'（甲配物流重分配後個別 SKU 可能在邊界微移。）':''}</div>
+      <div style="font-size:10.5px;color:#9ca3af;margin-top:12px;line-height:1.6">淨利率＝總表同口徑（淨利 ÷ 營收）；級距左閉右開（例：0–10% 表示 0 ≤ x &lt; 10、≥60% 為 x ≥ 60）。佔比分母＝有淨利率的 ${fmtN(s.withMargin)} 筆。<br>八級距 ${fmtN(s.withMargin)} ＋ 零營收 ${fmtN(s.zeroRev)} ＋ 無法計算 ${fmtN(s.noCost)} ＝ 全部 ${fmtN(totalAll)} 個商品。${shop==='甲配'?'（甲配物流重分配後個別 SKU 可能在邊界微移。）':''}</div>
     </div>
   </div>`;
   document.body.appendChild(ov);
@@ -18007,7 +18010,7 @@ function momoRenderSummary(){
   const marginColor=m=>m>=25?'#059669':m>=15?'#d97706':'#dc2626';
   const marginDelta=hasPrev?((T.margin-prevT.margin>=0?'+':'')+(T.margin-prevT.margin).toFixed(1)+'pp'):'—';
   // 前提一：當前月未完成 → 一律不產出成長/衰退（無同期間可比、避免「比當月至今 vs 上月整月」的假衰退）。
-  // 前提二：合計跨任一賣場的口徑變更線 → 淨利/毛利率不與上期對比（營收/銷量不受口徑影響、仍可比）。
+  // 前提二：合計跨任一賣場的口徑變更線 → 淨利/淨利率不與上期對比（營收/銷量不受口徑影響、仍可比）。
   const _incomplete=momoPeriodIncomplete(period);
   const _aggCross=_MOMO_OV_SHOPS.some(s=>prevKey && momoCrossesCalibChange(s, prevKey, period));
   const _mute={txt:'—',color:'#9ca3af'};
@@ -18018,14 +18021,14 @@ function momoRenderSummary(){
   const cards=[
     {label:'總營收', val:momoMoney(T.rev), d:_dRev},
     {label:'總淨利', val:momoMoney(T.profit), d:_dProfit},
-    {label:'加權毛利率', val:momoPct(T.margin), valColor:marginColor(T.margin), d:_dMargin},
+    {label:'加權淨利率', info:'加權淨利率 ＝ 總淨利 ÷ 總營收（甲配＋乙配＋MO+ 合計）。淨利＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（各賣場依實際帳單、口徑不同）。', val:momoPct(T.margin), valColor:marginColor(T.margin), d:_dMargin},
     {label:'總銷量', val:Math.round(T.qty).toLocaleString()+' 件', d:_dQty},
     // 動銷率已移除出 KPI 卡（各賣場口徑、合計意義不大）；動銷率改放「賣場比較」圖、各賣場各自算。
   ];
   const _kpiNote = _incomplete
     ? `<div class="mm-banner mm-banner-warn" style="margin-bottom:10px">⚠ 當月未完（第 ${_incomplete.day}/${_incomplete.total} 天）：KPI 為累計至今、<b>未產出成長／衰退結論</b>（無同期間可比）。</div>`
-    : (_aggCross ? `<div class="mm-banner mm-banner-warn" style="margin-bottom:10px">⚠ 本期跨乙配口徑變更線：<b>淨利／毛利率不與上期對比</b>（口徑不同、避免把口徑跳動誤讀為經營變化）。</div>` : '');
-  const cardHTML=cards.map(c=>`<div class="mm-kpi"><div class="mm-kpi-l">${c.label}</div><div class="mm-kpi-v"${c.valColor?` style="color:${c.valColor}"`:''}>${c.val}</div><div class="mm-kpi-d" style="color:${c.d.color}">${c.d.txt}<span class="base"> vs ${prevLbl}</span></div></div>`).join('');
+    : (_aggCross ? `<div class="mm-banner mm-banner-warn" style="margin-bottom:10px">⚠ 本期跨乙配口徑變更線：<b>淨利／淨利率不與上期對比</b>（口徑不同、避免把口徑跳動誤讀為經營變化）。</div>` : '');
+  const cardHTML=cards.map(c=>`<div class="mm-kpi"><div class="mm-kpi-l">${c.label}${c.info?` <span class="mm-info" title="${c.info}">?</span>`:''}</div><div class="mm-kpi-v"${c.valColor?` style="color:${c.valColor}"`:''}>${c.val}</div><div class="mm-kpi-d" style="color:${c.d.color}">${c.d.txt}<span class="base"> vs ${prevLbl}</span></div></div>`).join('');
   const moPlusNote = moPlusEmpty.length? `<div class="mm-banner mm-banner-warn" style="margin-bottom:10px">⚠ 合計目前只含<b>甲配＋乙配</b>；<b>${moPlusEmpty.join('、')} 尚無資料</b>（階段三待做）未計入。有 MO+ 資料後自動納入並標估算。</div>` : '';
   el.innerHTML=`
     <div class="mm-row" style="margin-bottom:12px;align-items:center"><span class="mm-field"><span class="mm-lbl">期別</span><select class="mm-sel" onchange="momoOvSetMonth(this.value)">${monthOpts}</select></span>
@@ -18035,11 +18038,11 @@ function momoRenderSummary(){
     ${momoRenderShopAnalysisSection(period, perShop)}
     <div class="mm-ov-grid">
       <div class="mm-ov-card"><div class="mm-ov-h">營收 + 淨利趨勢（2026 各月）</div><div class="mm-ov-canvas"><canvas id="momo-ov-trend"></canvas></div></div>
-      <div class="mm-ov-card"><div class="mm-ov-h">各賣場毛利率（2026 各月）</div><div class="mm-ov-canvas"><canvas id="momo-ov-margin"></canvas></div></div>
+      <div class="mm-ov-card"><div class="mm-ov-h">各賣場淨利率（2026 各月）</div><div class="mm-ov-canvas"><canvas id="momo-ov-margin"></canvas></div></div>
     </div>
     <div class="mm-ov-grid">
       <div class="mm-ov-card"><div class="mm-ov-h">營收佔比（${momoPeriodLabel(period)}）</div><div class="mm-ov-canvas"><canvas id="momo-ov-pie"></canvas></div></div>
-      <div class="mm-ov-card"><div class="mm-ov-h">賣場比較：毛利率／動銷率</div><div class="mm-ov-canvas"><canvas id="momo-ov-cmp"></canvas></div></div>
+      <div class="mm-ov-card"><div class="mm-ov-h">賣場比較：淨利率／動銷率</div><div class="mm-ov-canvas"><canvas id="momo-ov-cmp"></canvas></div></div>
     </div>
     <div class="mm-anlz-grid">${(()=>{ const _t=_MOMO_OV_SHOPS.filter(s=>momoLoadProducts(s).length>0), _odd=_t.length%2===1; return _t.map((s,i)=>`<div class="mm-ov-card${_odd&&i===_t.length-1?' mm-anlz-span':''}"><div class="mm-ov-h">${momoShopDisplay(s)} 銷量 Top 10（${momoPeriodLabel(period)}）</div><div class="mm-ov-canvas"><canvas id="momo-ov-top10-${s}"></canvas></div></div>`).join(''); })()}</div>`;
   momoOvBuildCharts(period, perShop);
@@ -18069,7 +18072,7 @@ function momoOvBuildCharts(period, perShop){
   // 4. 賣場比較橫條：毛利率 + 動銷率（各賣場各自）
   const cmp=_MOMO_OV_SHOPS.filter(s=>perShop[s].rev>0.5);
   mk('momo-ov-cmp',{type:'bar',data:{labels:cmp.map(momoShopDisplay),datasets:[
-    {label:'毛利率%',data:cmp.map(s=>+(perShop[s].margin).toFixed(1)),backgroundColor:'#5b5fcf'},
+    {label:'淨利率%',data:cmp.map(s=>+(perShop[s].margin).toFixed(1)),backgroundColor:'#5b5fcf'},
     {label:'動銷率%',data:cmp.map(s=>perShop[s].activeTotal>0?+(perShop[s].soldActive/perShop[s].activeTotal*100).toFixed(1):0),backgroundColor:'#10b981'}]},
     options:baseOpt({indexAxis:'y',plugins:{legend:{position:'top'}},scales:{x:{ticks:{callback:v=>v+'%'}}}})});
   // 5. 各賣場銷量 Top 10（每個有資料的賣場一張橫條，品名截斷、tooltip 顯示完整名）
