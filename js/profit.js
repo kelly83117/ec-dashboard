@@ -4218,6 +4218,18 @@ function tagFxJump(label){
   setSort(shop,'growthRate','asc');         // 尾端呼叫 applyFilters，下滑排最前
   document.getElementById('tfbar-'+shop)?.classList.remove('open');   // setTagFilter 會順手展開篩選面板，跳轉情境不需要
   _tagFxShowJumpBanner(shop,c.curMonth,label);
+  // 把「這是跳轉造成的篩選」持久化進 ec_filterstate（附加欄位；_loadFilterState 逐欄挑名，
+  //   多的 key 被忽略、四欄回傳不受影響）：開頁時 _tagFxMaybeResumeBanner 據此重建橫幅，
+  //   殘留篩選才有解釋與清除入口（不然隔天開頁是原半月＋看不見的篩選，只會覺得商品變少了）。
+  //   🔴 自然過期是本設計的關鍵：之後任何篩選操作都會走 _saveFilterState 用固定四欄
+  //     【整包重寫】→ 旗標自動消失 → 使用者改過篩選就不再重建橫幅。所以這裡用
+  //     「讀回-附加-寫回」，【不要動 _saveFilterState 本體】，動了自然過期就死了。
+  try{
+    const k='ec_filterstate|'+shop;
+    const o=JSON.parse(localStorage.getItem(k)||'{}');
+    o.tagfxJump={label};
+    localStorage.setItem(k,JSON.stringify(o));
+  }catch{}
 }
 // 跳轉提示橫幅：骨架照抄 showMapWarnBanner（本檔搜該名），連同那條教訓一起抄——
 //   清除 callback 必須直接掛 window（inline onclick 讀不到 module 頂層變數），且
@@ -4226,7 +4238,7 @@ function tagFxJump(label){
 //   差異：新 id、資訊色系（CSS 的 .tagfx-jump-banner）、插在 #tbl-{shop} 上方隨頁面捲動（非 fixed）。
 //   單例覆寫：連點多個標籤只有一條、內容換成最後一次（清除鈕只清得到最後一次的狀態，拍板接受）。
 window._tagFxBannerClear=null;
-function _tagFxShowJumpBanner(shop,month,label){
+function _tagFxShowJumpBanner(shop,month,label,resumed){
   const tbl=document.getElementById('tbl-'+shop);if(!tbl)return;
   window._tagFxBannerClear=()=>{
     // 清除只管篩選＋排序、不碰期別（拍板）：畫面正在整月，連期別一起切走比不清更困惑。
@@ -4238,12 +4250,26 @@ function _tagFxShowJumpBanner(shop,month,label){
   let el=document.getElementById('tagfx-jump-banner');
   if(!el){ el=document.createElement('div');el.id='tagfx-jump-banner';el.className='tagfx-jump-banner'; }
   const esc=String(label).replace(/</g,'&lt;');
-  el.innerHTML=`<div>已切換為 ${month} 整月，並篩選「${esc}」（依成長比排序，下滑在前）</div>
+  // resumed＝開頁重建：期別已還原成使用者原本的區間，文案刻意【不提月份】——提了就說謊（拍板）。
+  const msg=resumed
+    ?`上次從「標籤成效」跳轉留下的篩選「${esc}」仍在套用（依成長比排序）`
+    :`已切換為 ${month} 整月，並篩選「${esc}」（依成長比排序，下滑在前）`;
+  el.innerHTML=`<div>${msg}</div>
     <div class="tagfx-jump-banner-btns">
       <button class="tagfx-jump-clear" onclick="_tagFxBannerClear&&_tagFxBannerClear()">✕ 清除篩選</button>
       <button class="tagfx-jump-close" onclick="document.getElementById('tagfx-jump-banner').remove()">關閉</button>
     </div>`;
   tbl.parentNode.insertBefore(el,tbl);
+}
+// 開頁重建跳轉橫幅（initShopUI 在還原篩選之後呼叫）：
+//   旗標只在「篩選還是跳轉那一套」時存在（任何篩選操作經 _saveFilterState 整包重寫即自然清掉），
+//   再驗 tagFilters 仍含該標籤才重建——旗標與實際篩選脫鉤時【寧可不顯示】，不做半真的提示。
+function _tagFxMaybeResumeBanner(shop){
+  try{
+    const raw=JSON.parse(localStorage.getItem('ec_filterstate|'+shop)||'{}');
+    const jl=raw&&raw.tagfxJump&&raw.tagfxJump.label;
+    if(jl&&(state[shop].tagFilters||[]).includes('prod|'+jl))_tagFxShowJumpBanner(shop,'',jl,true);
+  }catch{}
 }
 // 純計算、不碰 DOM / state（node 可單獨驗），且【與顯示模式無關】——同一份結果供 cmp/all
 //   兩模式與收合/展開共用，開窗算一次存 _tagFxCtx，之後全是純渲染。
@@ -20608,6 +20634,7 @@ function initShopUI(shop){
     //     操作的重置行為 —— 已在設計階段評估後否決。寧可多繪一次，不動共用路徑。
     applyFilters(shop);
   }
+  _tagFxMaybeResumeBanner(shop);   // 跳轉殘留篩選的開頁橫幅：須在篩選還原之後（它要驗 tagFilters），#tbl 此時已渲染
   if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
   if(Object.keys(globalMap).length>0){
     const uc=document.getElementById('uc-map-'+shop);
