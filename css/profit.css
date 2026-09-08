@@ -1454,3 +1454,8 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 /* 成功率格可點跳轉（塊D）：只有 cmpCnt>0 的格帶這個 class */
 .tagfx-table td.tagfx-jump{cursor:pointer;}
 .tagfx-table td.tagfx-jump:hover{background:var(--primary-soft);}
+/* 跳轉提示橫幅：資訊色系、插在表格上方隨頁面捲動（非 fixed）、單例覆寫 */
+.tagfx-jump-banner{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--info-soft);border:1px solid var(--info);border-radius:8px;padding:8px 14px;margin:8px 0;font-size:12.5px;color:var(--text);line-height:1.6;}
+.tagfx-jump-banner-btns{display:flex;gap:6px;flex-shrink:0;}
+.tagfx-jump-clear{background:var(--surface);color:var(--info);border:1px solid var(--info);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;}
+.tagfx-jump-close{background:var(--info);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-family:inherit;}

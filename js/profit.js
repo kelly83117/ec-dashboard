@@ -4191,11 +4191,50 @@ function toggleTagFxExpand(){
 function tagFxJump(label){
   const c=_tagFxCtx;if(!c)return;
   closeTagFxModal();
-  if(state[c.shop]&&state[c.shop].curHalf!=='full')onHalfChange(c.shop,'full',null,true);
-  setTagFilter(c.shop,null);                // 先清空：setTagFilter 是 toggle，殘留同名篩選時直接加會反向取消
-  setTagFilter(c.shop,'prod|'+label);
-  setSort(c.shop,'growthRate','asc');       // 尾端呼叫 applyFilters，下滑排最前
-  document.getElementById('tfbar-'+c.shop)?.classList.remove('open');   // setTagFilter 會順手展開篩選面板，跳轉情境不需要
+  const shop=c.shop;
+  if(state[shop]&&state[shop].curHalf!=='full'){
+    // 只切不記（2026-09-08 拍板）：點一格成功率不該改寫使用者的持久狀態 ——
+    //   byUser=false → 不設 _userPickedPeriod 鎖（onHalfChange 裡是有條件的）；
+    //   ec_lastHalf_{shop} 是 onHalfChange 裡【無條件】寫入的，先存後還原，
+    //   使用者下次開頁回到他原本的期別。
+    // 🔴 隱性耦合警告：onHalfChange 目前只寫 ec_lastHalf_{shop} 這一個持久 key，本 wrapper
+    //   也只還原它——若日後有人在 onHalfChange 裡新增持久化 key，這個 wrapper 不會知道
+    //   也不會還原，跳轉就會開始污染那個新 key。動 onHalfChange 的持久化時請回來看這裡。
+    let saved=null;try{saved=localStorage.getItem('ec_lastHalf_'+shop);}catch{}
+    onHalfChange(shop,'full',null,false);
+    try{ if(saved===null)localStorage.removeItem('ec_lastHalf_'+shop);else localStorage.setItem('ec_lastHalf_'+shop,saved); }catch{}
+  }
+  setTagFilter(shop,null);                  // 先清空：setTagFilter 是 toggle，殘留同名篩選時直接加會反向取消
+  setTagFilter(shop,'prod|'+label);
+  setSort(shop,'growthRate','asc');         // 尾端呼叫 applyFilters，下滑排最前
+  document.getElementById('tfbar-'+shop)?.classList.remove('open');   // setTagFilter 會順手展開篩選面板，跳轉情境不需要
+  _tagFxShowJumpBanner(shop,c.curMonth,label);
+}
+// 跳轉提示橫幅：骨架照抄 showMapWarnBanner（本檔搜該名），連同那條教訓一起抄——
+//   清除 callback 必須直接掛 window（inline onclick 讀不到 module 頂層變數），且
+//   ⚠ 不可改用 Object.assign(window,{…})：那複製的是當下的值，之後重新賦值不會同步。
+//   刻意【不共用】map-warn-banner：那是商品對照表警告的單例，共用 id 會互蓋。
+//   差異：新 id、資訊色系（CSS 的 .tagfx-jump-banner）、插在 #tbl-{shop} 上方隨頁面捲動（非 fixed）。
+//   單例覆寫：連點多個標籤只有一條、內容換成最後一次（清除鈕只清得到最後一次的狀態，拍板接受）。
+window._tagFxBannerClear=null;
+function _tagFxShowJumpBanner(shop,month,label){
+  const tbl=document.getElementById('tbl-'+shop);if(!tbl)return;
+  window._tagFxBannerClear=()=>{
+    // 清除只管篩選＋排序、不碰期別（拍板）：畫面正在整月，連期別一起切走比不清更困惑。
+    state[shop].sorts={};                   // 排序一併清；接著 setTagFilter(null) 會 _saveFilterState + applyFilters 一次做完
+    setTagFilter(shop,null);
+    document.getElementById('tfbar-'+shop)?.classList.remove('open');
+    document.getElementById('tagfx-jump-banner')?.remove();
+  };
+  let el=document.getElementById('tagfx-jump-banner');
+  if(!el){ el=document.createElement('div');el.id='tagfx-jump-banner';el.className='tagfx-jump-banner'; }
+  const esc=String(label).replace(/</g,'&lt;');
+  el.innerHTML=`<div>已切換為 ${month} 整月，並篩選「${esc}」（依成長比排序，下滑在前）</div>
+    <div class="tagfx-jump-banner-btns">
+      <button class="tagfx-jump-clear" onclick="_tagFxBannerClear&&_tagFxBannerClear()">✕ 清除篩選</button>
+      <button class="tagfx-jump-close" onclick="document.getElementById('tagfx-jump-banner').remove()">關閉</button>
+    </div>`;
+  tbl.parentNode.insertBefore(el,tbl);
 }
 // 純計算、不碰 DOM / state（node 可單獨驗），且【與顯示模式無關】——同一份結果供 cmp/all
 //   兩模式與收合/展開共用，開窗算一次存 _tagFxCtx，之後全是純渲染。
