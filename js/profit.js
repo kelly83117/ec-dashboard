@@ -10117,6 +10117,21 @@ function momoSaveProducts(shop,products){
     try{ if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品資料接近容量上限',message:msg+'\n\n（此警告在每次寫入超過 '+MOMO_DOC_WARN_KB+'KB 時出現）',kind:'error'}); }catch{}
     try{ window.__momoSizeWarn={shop, kb:Math.round(_kb), at:Date.now()}; }catch{}
   } else { try{ if(window.__momoSizeWarn&&window.__momoSizeWarn.shop===shop) delete window.__momoSizeWarn; }catch{} } }catch(e){}
+  // A0 集中兜底：覆寫【前】讀「舊 localStorage」(上次持久化) 當基準，diff 出變動/新增/刪除的 SKU → 標品號級 dirty。
+  //   ⚠ 基準一定讀 localStorage、【不可】讀 _profitMem——_profitMem 是活參照、apply 已就地改過（momoLoadProducts 回傳它本身），diff 會落空。
+  //   ⚠ 順序：讀舊 → diff → 標 dirty → 才 setItem（下一行）。用 _momoStableStr（已 sort 物件鍵）當簽名 → 純鍵序不算變動，只抓真值變。
+  try{
+    let oldArr=null; try{ const _o=localStorage.getItem(k); if(_o) oldArr=JSON.parse(_o); }catch{}
+    if(Array.isArray(products)){
+      const sig=p=>_momoStableStr(p);
+      const oldMap=new Map((Array.isArray(oldArr)?oldArr:[]).filter(p=>p&&p.sku!=null).map(p=>[String(p.sku), sig(p)]));
+      const newMap=new Map(products.filter(p=>p&&p.sku!=null).map(p=>[String(p.sku), sig(p)]));
+      const changed=[];
+      newMap.forEach((s,sku)=>{ if(!oldMap.has(sku) || oldMap.get(sku)!==s) changed.push(sku); });   // 新增 + 值變動
+      oldMap.forEach((_,sku)=>{ if(!newMap.has(sku)) changed.push(sku); });                            // 本機刪除（B merge 需標 sku 走 delete 分支）
+      if(changed.length) _momoProductsItemsDirtyAdd(k, changed);
+    }
+  }catch(e){ try{ console.error('[productsItemsDirty] A0 diff 失敗，本次未標品號級（whole-key dirty 仍標、B 退整份）：',e); }catch{} }
   try{ localStorage.setItem(k,_json); }catch{}
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=products; }catch{}  // 權威鏡像（跨裝置：momo_products 訂閱也灌這裡）
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}              // 保留三鏡像一致
@@ -10156,6 +10171,54 @@ function _momoDirtyDel(k){ try{ let a=_momoReadJson(_MOMO_PDIRTY_LS,[]); if(Arra
 function _momoIsDirty(k){ try{ const a=_momoReadJson(_MOMO_PDIRTY_LS,[]); return Array.isArray(a)&&a.includes(k); }catch{ return false; } }
 function _momoBaseGet(k){ try{ const m=_momoReadJson(_MOMO_PBASE_LS,{}); return (m&&m[k])||0; }catch{ return 0; } }
 function _momoBaseSet(k, ts){ try{ const m=_momoReadJson(_MOMO_PBASE_LS,{})||{}; m[k]=ts||0; localStorage.setItem(_MOMO_PBASE_LS,JSON.stringify(m)); }catch{} }
+// ══════ A0：products 品號級 dirty 註冊表（persisted，跨重整）——集中在 momoSaveProducts 兜底標記 ══════
+//   與整份 _MOMO_PDIRTY_LS 並存（過渡期兩套都在；B merge 讀這份判「哪些 SKU 用本機」，整份續當 sweep/pendingCount 閘、B 才退）。
+//   三態（比照 Keani ec_notes_items_dirty）：
+//     raw===null      → 正常空（從沒標過），Get 回 {} 或 []
+//     JSON 損毀/非物件 → 回 null（呼叫端須中止，【絕不當成空】——當空會讓 B 的 momoMergeByKey 用空 dirty ＝ merge 出等於雲端、一個 SKU 都沒推＝靜默失效）
+//     該 key 缺       → []（真空）；[...] → 這些 SKU 髒
+//   ⚠ 損毀刻意不重建（重建會把「損毀→中止」變「合法→靜默不推」，繞過防護）。
+//   🔴 B 階段 null-fallback 合約（A0 先定義、B 依賴）：Get 回 null（品號級註冊表壞了）時，
+//     B【不可】拿它當空去 merge、也【不可】拿它當「全部髒」整份覆蓋（會蓋掉同事在共享 SKU 的較新編輯）。
+//     B 應退回【整份 _MOMO_PDIRTY_LS whole-key dirty 的既有行為】＝走現有整份 conflict block、預設不推、報錯，
+//     不寫雲端（＝最安全：不刪雲端獨有、不蓋共享 SKU）。這條可靠，因為 momoSaveProducts 一定同時標 whole-key（下方 10125）＝backstop 永遠在。
+const _MOMO_PIDIRTY_LS='ec_momo_products_items_dirty';   // JSON map：full key(ec_momo_products|<shop>) → [sku…]
+function _momoProductsItemsDirtyGet(fullKey){
+  let raw; try{ raw=localStorage.getItem(_MOMO_PIDIRTY_LS); }
+  catch(e){ console.error('[productsItemsDirty] localStorage 讀取失敗，回 null（呼叫端須中止、不可當空）：',e); return null; }
+  if(raw===null) return fullKey===undefined ? {} : [];
+  let m; try{ m=JSON.parse(raw); }
+  catch(e){ console.error('[productsItemsDirty] 註冊表 JSON 損毀，回 null（呼叫端須中止、不可當空）。原始：',raw); return null; }
+  if(m===null||typeof m!=='object'||Array.isArray(m)){ console.error('[productsItemsDirty] 註冊表不是物件，回 null。原始：',raw); return null; }
+  if(fullKey===undefined) return m;
+  const a=m[fullKey];
+  if(a===undefined) return [];
+  if(!Array.isArray(a)){ console.error('[productsItemsDirty] 該 key 項目不是陣列，回 null：',fullKey,a); return null; }
+  return a;
+}
+function _momoProductsItemsDirtyAdd(fullKey, skus){
+  if(!fullKey||!skus||!skus.length) return;
+  try{ const m=_momoProductsItemsDirtyGet();
+    if(m===null){ console.error('[productsItemsDirty] 註冊表損毀，這批 SKU 標記沒存下來（刻意不重建，理由見上方）：',fullKey,skus); return; }   // whole-key dirty 仍會標（backstop），B 退整份
+    const s=new Set(Array.isArray(m[fullKey])?m[fullKey]:[]);
+    skus.forEach(x=>{ if(x!=null) s.add(String(x)); });
+    m[fullKey]=[...s];
+    localStorage.setItem(_MOMO_PIDIRTY_LS,JSON.stringify(m));
+  }catch(e){ console.error('[productsItemsDirty] 寫入註冊表失敗，這批 SKU 待同步標記沒存下來：',fullKey,skus,e); }
+}
+function _momoProductsItemsDirtyClear(fullKey, skus){
+  if(!fullKey) return;
+  try{ const m=_momoProductsItemsDirtyGet();
+    if(m===null){ console.error('[productsItemsDirty] 損毀，這次清除沒生效（刻意不重建）：',fullKey,skus); return; }
+    if(!Object.prototype.hasOwnProperty.call(m,fullKey)) return;
+    if(!skus){ delete m[fullKey]; }
+    else{ const rm=new Set((Array.isArray(skus)?skus:[skus]).map(String)); const left=(Array.isArray(m[fullKey])?m[fullKey]:[]).filter(x=>!rm.has(String(x))); if(left.length) m[fullKey]=left; else delete m[fullKey]; }
+    localStorage.setItem(_MOMO_PIDIRTY_LS,JSON.stringify(m));
+  }catch(e){ console.error('[productsItemsDirty] 清除註冊表失敗：',fullKey,skus,e); }
+}
+window.__momoProductsItemsDirtyGet   = _momoProductsItemsDirtyGet;   // Console 測試/除錯 + B 讀取
+window.__momoProductsItemsDirtyAdd   = _momoProductsItemsDirtyAdd;
+window.__momoProductsItemsDirtyClear = _momoProductsItemsDirtyClear;
 window.__momoIsProductsDirty=function(k){ return _momoIsDirty(k); };          // firebase.js 訂閱：dirty 守衛
 window.__momoNoteCloudBase =function(k, ts){ if(ts) _momoBaseSet(k, ts); };   // firebase.js 訂閱：接受雲端後記錄基準
 window.__momoProductsBaseGet=function(k){ return _momoBaseGet(k); };          // 預覽【2】：讀本機基準版本
