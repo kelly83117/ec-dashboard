@@ -2450,6 +2450,9 @@ function tryLoadSaved(shop){
     //   ⚠ clearPeriod 曾經也有這三行，2026-08-17 一起移除了：它改成【只清上傳紀錄、不刪報表】之後
     //     不再動 _built，前提就消失了 —— 報表還在，_filtered 與批次選取本來就該原封不動留著。
     state[shop]._filtered=null;_batchSelClear(shop);_renderBatchSelInfo(shop);
+    // 切到空期間：這條路不走 loadIntoUI、篩選沒被清，但跳轉橫幅的月份字樣已過期 ——
+    //   半真半假的提示比全錯更難察覺，跟著本分支的清理一起移除。
+    document.getElementById('tagfx-jump-banner')?.remove();
     const _hLbl=s.curHalf==='first'?'上半月':s.curHalf==='second'?'下半月':'整月';
     document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${s.curMonth} ${_hLbl} 尚無資料，請上傳報表產生</div></div>`;
     document.getElementById('period-tag-'+shop).textContent='';
@@ -2548,7 +2551,13 @@ function loadIntoUI(shop,built,period,days){
   state[shop]._filtered=null;_batchSelClear(shop);_renderBatchSelInfo(shop);
   // 雲端刷新（別人按同步）不重置：使用者設好的篩選/排序不該被別人的動作清掉。
   //   只有使用者自己切月份/切通路時才重置（那時 _cloudRefreshing 為 false）。
-  if(!_cloudRefreshing){ state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[]; }   // 標籤篩選跟 filters/sorts 同批重置：切月份/切通路不殘留（搜尋另行保留，見下一行）
+  if(!_cloudRefreshing){
+    state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];   // 標籤篩選跟 filters/sorts 同批重置：切月份/切通路不殘留（搜尋另行保留，見下一行）
+    // 篩選被清，跳轉橫幅（tagfx-jump-banner）的「已篩選⋯」就成了謊話，同批移除。
+    //   放在同一個 if 裡＝被同一個旗標保護：雲端刷新（_cloudRefreshing=true）篩選保留、橫幅也保留。
+    //   跳轉自己也走到這裡，但橫幅插入在跳轉鏈的最後一步（見 tagFxJump），移到的只會是上一次的舊橫幅。
+    document.getElementById('tagfx-jump-banner')?.remove();
+  }
   // search 刻意不重置：切月份保留關鍵字（唯一清掉它的是頁面初次載入時 state 的整包初始化）
   const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
   document.getElementById('period-tag-'+shop).textContent=period;
