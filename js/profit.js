@@ -2520,9 +2520,10 @@ function clearPeriod(shop){
 function loadIntoUI(shop,built,period,days){
   if(built&&Array.isArray(built)){
     built.forEach(r=>{
+      // ⚠ 下行 calcAnalysisAll 的 r.pureRate||0 刻意保留：它的 null/0 語意沒驗證過，不要跟下兩行的 ??null 統一
       Object.assign(r,_anaDerive(calcAnalysisAll(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0)));
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0,r.adsFee??null,r.clicks??null);
+      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate??null,r.adsFee??null,r.clicks??null);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
       r.profitPct=(r.rev>0)?(r.pureRate+r.adsPct):null;
     });
@@ -4264,9 +4265,10 @@ function reapplyAnaToAll(){
   SHOPS.forEach(s=>{
     const built=state[s.id]._built;if(!built)return;
     built.forEach(r=>{
+      // ⚠ 下行 calcAnalysisAll 的 r.pureRate||0 刻意保留：它的 null/0 語意沒驗證過，不要跟下兩行的 ??null 統一
       Object.assign(r,_anaDerive(calcAnalysisAll(r.adsFee||0,r.pureRate||0,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0)));
       r.testTags=calcTestTags(r.adsFee||0,r.pureRate??null,r.targetROI??null,r.roiDiff??null,r.clicks||0,r.pureProfit||0,r.roi||0);
-      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate||0,r.adsFee??null,r.clicks??null);
+      r.growthAnalysis=calcGrowthAnalysis(r.growthRate??null,r.rev||0,r.prevRev??null,r.pureRate??null,r.adsFee??null,r.clicks??null);
       r.growthAnalysisLabel=r.growthAnalysis?.label||'';
     });
     applyFilters(s.id);
@@ -4438,7 +4440,7 @@ function saveCustomGrowthRules(r){_cloudWrite('ec_growth_custom',r);}
 //   結構：{ '標籤名': [{f,op,v}, …] }，條件格式與 evalAnaConds 相同（多條件 AND）。
 //   沒設定的標籤＝不排除。損毀（非物件）時回 {}＝全部不排除（安全側，不 throw）。
 function getGrowthExcludes(){const v=_cloudRead('ec_growth_exclude'); return (v&&typeof v==='object'&&!Array.isArray(v))?v:{};}
-function saveGrowthExcludes(m){_cloudWrite('ec_growth_exclude',m);}   // 目前無 UI 呼叫端（第三塊接），先與其他 growth key 的寫入端對齊
+function saveGrowthExcludes(m){_cloudWrite('ec_growth_exclude',m);}   // UI 寫入端＝saveGrowthSettings（「儲存並套用」整份重建後寫入）
 // ⚠ adsFee / clicks 本函式目前【完全不使用】，先接線給下一塊的排除條件用。
 //   六個呼叫端（本檔 5 處 + daily.js 的 window.calcGrowthAnalysis）新參數一律傳 `x ?? null`、
 //   【不可 ||0】：缺值要保留 null，讓 evalAnaConds 開頭的 null guard 把用到該欄位的條件判 false
@@ -4456,10 +4458,14 @@ function calcGrowthAnalysis(growthRate, rev, prevRev, pureRate, adsFee, clicks) 
   //   ⚠ _exVals 與下方自訂規則那行的 vals【刻意不同】：這裡 G / prevRev 不塌 0、
   //     pureRate 為 null 時 P 保留 null（自訂那邊的 P 已被上面 P=pureRate*100 那行以 null*100===0 塌成 0）——
   //     塌 0 會讓「< 門檻」型排除在缺資料時恆成立，正好違反上一行的安全側。
+  //   ⚠ P 另外把「呼叫端 ||0 塌出來的 0」還原成 null（pureRate===0 && !(rev>0)）：全庫 pureRate 的
+  //     推導只有 rev>0?x:null 一種形狀（buildShop / recalcRow），真 0 必然伴隨 rev>0，這個組合可以
+  //     百分之百斷定是塌 0。刻意【不用】寬版 !(rev>0)：舊格式列（rep.rows）不保證有 rev 欄位，
+  //     寬版會把「rev 缺、pureRate 有值」的列從「排除可觸發」變「不觸發」，影響面超出塌 0 案例。
   //   ⚠ 該標籤的排除設定非陣列（損毀）→ 視為不排除、不 throw：本函式多數呼叫端沒 try/catch 包著。
   //   自訂規則【刻意不吃排除】：自訂條件本身就能寫營收門檻，不疊第二層。
   const _excl=getGrowthExcludes();
-  const _exVals={G, R, P:(pureRate===null||pureRate===undefined)?null:P, prevRev, adsFee, clicks};
+  const _exVals={G, R, P:(pureRate===null||pureRate===undefined||(pureRate===0&&!(rev>0)))?null:P, prevRev, adsFee, clicks};
   const ex=l=>{const c=_excl[l];return !(Array.isArray(c)&&evalAnaConds(c,_exVals));};   // true=不排除
   if(ok('🔴重跌品')&&ex('🔴重跌品')&&G !== null && G < -(t.fallPct/100)) return { label:'🔴重跌品', cls:'tag-danger' };
   if(ok('🟢爆發品')&&ex('🟢爆發品')&&G !== null && G > (t.risePct/100))  return { label:'🟢爆發品', cls:'tag-high' };
