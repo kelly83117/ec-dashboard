@@ -13349,7 +13349,7 @@ function momoRenderProfitBody(shop, tableOnly){
       if(c.k==='margin'){
         // 營收0但有毛利（整批退貨）→ margin=null → 「—」，不顯示誤導的 0%；負毛利標紅（是負值，不是 0）
         // ⚠ 未結算估算列（e001Estimated）比照甲配未對帳月：數字照常顯示（一般樣式、無 ~/估/斜體）；估算僅由頂端橫幅標示。
-        if(r.margin==null) return `<td style="text-align:right;color:#c7cad1;font-weight:700" title="營收為 0（此期可能整批退貨）→ 毛利率無法計算">—</td>`;
+        if(r.margin==null) return `<td style="text-align:right;color:#c7cad1;font-weight:700" title="營收為 0（此期可能整批退貨）→ 淨利率無法計算">—</td>`;
         const m=r.margin;
         // MO+：毛利組成 tooltip（營收 − 成本 − 手續費D − 代扣運費C + 運費代收B）。C 逐筆掛列（精算）、B 按同訂單商品營收攤（攤估）。
         let mTip='';
@@ -13488,7 +13488,7 @@ function momoRenderProfitBody(shop, tableOnly){
       } else if(_e001Est){
         // MO+ 未結算（E001）：沿用甲配未對帳狀態晶片「⚠ 未對帳」（同 mm-status no 樣式、同容器）；估算費率與來源月放 tooltip、不佔版面、不另做橫幅。
         const _efr=momoMoPlusE001Ctx(shop).estFee;
-        const _tip=('未結算估算（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑）；毛利率用估算平台費率 '+(_efr?(_efr.rate*100).toFixed(1)+'%（'+_efr.mode+(_efr.months?' '+_efr.months.join('/'):'')+'、含成交手續費+其他D+運費淨）':'—')+'。待該期別對帳明細上傳後由結算值完全取代（不並存不相加）。').replace(/"/g,'&quot;');
+        const _tip=('未結算估算（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑）；淨利率用估算平台費率 '+(_efr?(_efr.rate*100).toFixed(1)+'%（'+_efr.mode+(_efr.months?' '+_efr.months.join('/'):'')+'、含成交手續費+其他D+運費淨）':'—')+'。待該期別對帳明細上傳後由結算值完全取代（不並存不相加）。').replace(/"/g,'&quot;');
         statusChip=`<span class="mm-status no" title="${_tip}">⚠ 未對帳</span>`;
       }
     }
@@ -13541,7 +13541,7 @@ function momoRenderProfitBody(shop, tableOnly){
       const mc=momoMoPlusMissingCostSummary(shop);
       if(mc.originN>0){
         moPlusMissCostChip=`<div class="mm-banner" style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412">
-          <span>🏷️ <b>缺成本 ${mc.originN} 個原廠編號</b>（影響 ${mc.skuN} 項商品 · 影響營收 <b>${momoMoney(mc.totalRev)}</b>）→ 補齊即計入加權毛利率</span>
+          <span>🏷️ <b>缺成本 ${mc.originN} 個原廠編號</b>（影響 ${mc.skuN} 項商品 · 影響營收 <b>${momoMoney(mc.totalRev)}</b>）→ 補齊即計入加權淨利率</span>
           <span style="display:flex;gap:8px;flex-shrink:0">
             <button class="mm-linkbtn" onclick="momoOpenMissingCostPanel('${shop}')">查看清單</button>
             <button class="mm-linkbtn" onclick="momoExportMissingCost('${shop}')">⬇ 匯出 CSV</button>
@@ -14094,12 +14094,12 @@ const MOMO_TAG_GROUPS=[
     {k:'drop',  emoji:'🔴', label:'重跌品', short:'重跌', desc:'營收環比 < −30%（上期需 ≥5 件才計）。僅整月計算（半月環比雜訊大）'},
   ]},
   {group:'營收', tags:[
-    {k:'rev_top', emoji:'👑', label:'高營收', short:'高營收', desc:'毛利貢獻前 10%（分母=該期有銷售）'},
-    {k:'rev_mid', emoji:'🟠', label:'中營收', short:'中營收', desc:'毛利貢獻前 10~30%'},
-    {k:'rev_dev', emoji:'🟡', label:'發展品', short:'發展品', desc:'毛利貢獻前 30~50%'},
+    {k:'rev_top', emoji:'👑', label:'高營收', short:'高營收', desc:'淨利貢獻前 10%（分母=該期有銷售）'},
+    {k:'rev_mid', emoji:'🟠', label:'中營收', short:'中營收', desc:'淨利貢獻前 10~30%'},
+    {k:'rev_dev', emoji:'🟡', label:'發展品', short:'發展品', desc:'淨利貢獻前 30~50%'},
   ]},
   {group:'利潤', tags:[
-    {k:'profit_low',  emoji:'🔻', label:'低利品',   short:'低利品', desc:'毛利率 < 20%'},
+    {k:'profit_low',  emoji:'🔻', label:'低利品',   short:'低利品', desc:'淨利率 < 20%'},
     {k:'return_warn', emoji:'⚠️', label:'退貨警示', short:'退貨高', desc:'退貨率 > 該期平均兩倍'},
     {k:'no_cost',     emoji:'❌', label:'缺成本',   short:'缺成本', desc:'有營收但無成本'},
   ]},
@@ -14396,7 +14396,7 @@ function momoRenderFilterPanel(shop){
     <button id="momo-nf-addbtn-${shop}" class="mm-fp-addbtn" onclick="momoNumAdd('${shop}')">加入</button>
     <span id="momo-nf-pending-${shop}" class="mm-fp-pending" style="display:none">↵ 按 Enter 或「加入」才套用</span>
   </div>
-  <div class="mm-fp-hint">值格可直接按 Enter 套用。「區間」需填兩格（左＝下限、右＝上限）；&gt; / &lt; 只用左格。⚠ 無值（零營收毛利率「—」）不會被撈進條件。</div>`;
+  <div class="mm-fp-hint">值格可直接按 Enter 套用。「區間」需填兩格（左＝下限、右＝上限）；&gt; / &lt; 只用左格。⚠ 無值（零營收淨利率「—」）不會被撈進條件。</div>`;
   // 優化紀錄篩選區（type 動態＋系統事件收合、時間脫鉤期別、操作者）
   const of=momoOptlogFilterGet(shop), ost=momoOptlogStats(shop);
   const qq=s=>String(s).replace(/'/g,"\\'");   // onclick 用單引號包，防單引號破壞（type/by 一般無，防呆）
@@ -17905,11 +17905,11 @@ function momoShopAnalysis(shop, period, prevKey, incomplete){
     losers=rows.filter(r=>r.covered && r.marginR!=null && r.marginR<0).map(r=>({sku:r.sku, name:r.name, profitR:r.profitR, marginR:r.marginR}));
   }
   if(losers.length){ const totalLoss=losers.reduce((s,r)=>s+Math.max(0,-(r.profitR||0)),0); const worst=losers.slice().sort((x,y)=>(-(x.profitR||0))-(-(y.profitR||0)))[0];
-    sugg.push({impact:totalLoss, html:`<b>${losers.length} 項賠錢商品</b>，合計虧 ${momoMoney(totalLoss)}<span class="mm-anlz-d">最慘 ${_momoEsc(worst.sku)}：毛利率 ${worst.marginR!=null?worst.marginR.toFixed(1):'—'}%、虧 ${momoMoney(-(worst.profitR||0))}</span>`}); }
+    sugg.push({impact:totalLoss, html:`<b>${losers.length} 項賠錢商品</b>，合計虧 ${momoMoney(totalLoss)}<span class="mm-anlz-d">最慘 ${_momoEsc(worst.sku)}：淨利率 ${worst.marginR!=null?worst.marginR.toFixed(1):'—'}%、虧 ${momoMoney(-(worst.profitR||0))}</span>`}); }
   // 規則2 低毛利高營收（0≤毛利率<門檻 且 營收進前20%）
   const lowHi=rows.filter(r=>r.covered && r.marginR!=null && r.marginR>=0 && r.marginR<cfg.lowMarginPct && r.rev>=revThreshold);
   if(lowHi.length){ const sumRev=lowHi.reduce((s,r)=>s+r.rev,0); const worst=lowHi.slice().sort((x,y)=>y.rev-x.rev)[0];
-    sugg.push({impact:sumRev, html:`<b>${lowHi.length} 項低毛利高營收</b>，合計營收 ${momoMoney(sumRev)}<span class="mm-anlz-d">最大 ${_momoEsc(worst.sku)}：毛利率 ${worst.marginR.toFixed(1)}%、營收 ${momoMoney(worst.rev)}</span>`}); }
+    sugg.push({impact:sumRev, html:`<b>${lowHi.length} 項低淨利高營收</b>，合計營收 ${momoMoney(sumRev)}<span class="mm-anlz-d">最大 ${_momoEsc(worst.sku)}：淨利率 ${worst.marginR.toFixed(1)}%、營收 ${momoMoney(worst.rev)}</span>`}); }
   // 規則3 毛利率惡化（跌>門檻pt、covered、非跨口徑線）；主因判定售價 vs 成本
   if(!crossCalib){
     const wor=rows.filter(r=>r.covered && r.marginR!=null && r.prevMarginR!=null && r.rev>0 && r.qty>0 && r.prevRev>0 && r.prevQty>0 && (r.prevMarginR-r.marginR)>cfg.marginDropPt)   // 兩期都要有實際銷售，否則「停售(營收→0)」會被誤判成毛利率惡化
@@ -17922,14 +17922,14 @@ function momoShopAnalysis(shop, period, prevKey, incomplete){
       else if(pSig||(priceDrop<0 && Math.abs(priceDrop)>=Math.abs(costRise))) cause=`主因售價下降 ${momoMoney(avgPp)}→${momoMoney(avgPc)}`;
       else if(cSig||costRise>0) cause=`主因成本上升 ${momoMoney(ucP)}→${momoMoney(ucC)}`;
       else cause=`量或組合變化（售價/成本變動不顯著）`;
-      sugg.push({impact:w.impact, html:`<b>${wor.length} 項毛利率惡化</b>，影響約 ${momoMoney(w.impact)}<span class="mm-anlz-d">最嚴重 ${_momoEsc(r.sku)}：${r.prevMarginR.toFixed(1)}%→${r.marginR.toFixed(1)}%（跌 ${w.drop.toFixed(1)}pt）· ${cause}</span>`}); }
+      sugg.push({impact:w.impact, html:`<b>${wor.length} 項淨利率惡化</b>，影響約 ${momoMoney(w.impact)}<span class="mm-anlz-d">最嚴重 ${_momoEsc(r.sku)}：${r.prevMarginR.toFixed(1)}%→${r.marginR.toFixed(1)}%（跌 ${w.drop.toFixed(1)}pt）· ${cause}</span>`}); }
   }
   // 規則4 斷貨（莫筆克實際庫存=0 且本期仍有銷量）——用 stockRaw 排除「分配後為 0」的誤報
   const outs=rows.filter(r=>r.stockRaw===0 && r.qty>0);
   if(outs.length){ const sumRev=outs.reduce((s,r)=>s+r.rev,0); const worst=outs.slice().sort((x,y)=>y.rev-x.rev)[0];
     sugg.push({impact:sumRev, html:`<b>${outs.length} 項斷貨</b>（庫存 0 仍有銷量），影響營收 ${momoMoney(sumRev)}<span class="mm-anlz-d">最大 ${_momoEsc(worst.sku)}：本期營收 ${momoMoney(worst.rev)}、銷量 ${Math.round(worst.qty).toLocaleString()}</span>`}); }
   // 規則5 缺成本（項數＋影響營收）
-  if(missSet.size){ sugg.push({impact:missRev, html:`<b>缺成本 ${missSet.size} ${isMoPlus?'個原廠編號':'項商品'}</b>，影響營收 ${momoMoney(missRev)}<span class="mm-anlz-d">補齊即計入加權毛利率</span>`}); }
+  if(missSet.size){ sugg.push({impact:missRev, html:`<b>缺成本 ${missSet.size} ${isMoPlus?'個原廠編號':'項商品'}</b>，影響營收 ${momoMoney(missRev)}<span class="mm-anlz-d">補齊即計入加權淨利率</span>`}); }
   // 規則6 呆滯庫存（乙配專屬：有倉租且本期零銷量）。影響金額＝本期倉租（跟其他規則同一個 $ 基準才能同池排序）；最嚴重＝滯銷最久
   const stale=momoStaleStockList(shop, period);
   if(stale.length){
@@ -17944,7 +17944,7 @@ function momoShopAnalysis(shop, period, prevKey, incomplete){
   if(rentEat.length){
     const sumLoss=rentEat.reduce((s,x)=>s+x.netLoss,0);
     const worst=rentEat.slice().sort((x,y)=>y.netLoss-x.netLoss)[0];   // 最嚴重＝淨虧最多
-    sugg.push({impact:sumLoss, html:`<b>${rentEat.length} 項倉租吃掉毛利</b> · 本期淨虧 ${momoMoney(sumLoss)}${losers.length===0?'（本期賠錢商品皆為此類）':''}<span class="mm-anlz-d">${_momoEsc(worst.sku)} 賣 ${Math.round(worst.qty).toLocaleString()} 件、倉租 ${momoMoney(worst.rent)}、淨虧 ${momoMoney(worst.netLoss)}</span>`});   // 規則1(非倉租賠錢)為空時標明：本期賠錢商品皆已歸此類（避免規則1顯0被誤解成沒生效）
+    sugg.push({impact:sumLoss, html:`<b>${rentEat.length} 項倉租吃掉淨利</b> · 本期淨虧 ${momoMoney(sumLoss)}${losers.length===0?'（本期賠錢商品皆為此類）':''}<span class="mm-anlz-d">${_momoEsc(worst.sku)} 賣 ${Math.round(worst.qty).toLocaleString()} 件、倉租 ${momoMoney(worst.rent)}、淨虧 ${momoMoney(worst.netLoss)}</span>`});   // 規則1(非倉租賠錢)為空時標明：本期賠錢商品皆已歸此類（避免規則1顯0被誤解成沒生效）
   }
   sugg.sort((x,y)=>y.impact-x.impact);
   out.suggestions=sugg.slice(0,2); out.noAnomaly=(sugg.length===0); out.topImpact=sugg.length?sugg[0].impact:0;
@@ -17964,7 +17964,7 @@ function momoAnlzCardHTML(anlz, perShopT, prevMargin, ptSuppressed, span){
   const mColor=margin>=25?'#059669':margin>=15?'#d97706':'#dc2626';
   const suggHtml = anlz.noAnomaly ? `<div class="mm-anlz-ok">本期無異常項目</div>` : anlz.suggestions.map(s=>`<div class="mm-anlz-sg">${s.html}</div>`).join('');
   return `<div class="mm-anlz-card${spanCls}"><div class="mm-anlz-head"><span class="mm-anlz-dot" style="background:${color}"></span><span class="mm-anlz-name">${_momoEsc(disp)}</span></div>`
-    +`<div class="mm-anlz-metrics">營收 <b>${momoMoney(rev)}</b> · 毛利率 <b style="color:${mColor}">${momoPct(margin)}</b> ${ptHtml}</div>`
+    +`<div class="mm-anlz-metrics">營收 <b>${momoMoney(rev)}</b> · 淨利率 <b style="color:${mColor}">${momoPct(margin)}</b> ${ptHtml}</div>`
     +`<div class="mm-anlz-sugg">${suggHtml}</div>`
     +`<button class="mm-anlz-btn" onclick="setMomoShop('${shop}')">查看 ${_momoEsc(disp)}</button></div>`;
 }
