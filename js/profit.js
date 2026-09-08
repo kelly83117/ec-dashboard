@@ -140,6 +140,12 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
       <div class="ana-modal-body" id="dist-modal-body" style="padding:20px;overflow-y:auto;max-height:72vh"></div>
     </div>
   </div>
+  <div class="ana-overlay" id="tagfx-modal-overlay" onclick="if(event.target===this)closeTagFxModal()">
+    <div class="ana-modal tagfx-modal">
+      <div class="ana-modal-hdr"><span id="tagfx-modal-title">測試標籤成效</span><button class="ana-close-btn" onclick="closeTagFxModal()">✕</button></div>
+      <div class="ana-modal-body tagfx-modal-body" id="tagfx-modal-body"></div>
+    </div>
+  </div>
   <div class="ana-overlay" id="ads-edit-overlay" onclick="if(event.target===this)closeAdsEditModal()">
     <div class="ana-modal" style="width:400px;max-width:96vw">
       <div class="ana-modal-hdr"><span>修改廣告費</span><button class="ana-close-btn" onclick="closeAdsEditModal()">✕</button></div>
@@ -2312,6 +2318,7 @@ function shopHTML(shop){return`
       </div>
       <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
       <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
+      <button class="col-pick-btn tagfx-btn" onclick="openTagFxModal('${shop}')">📈 標籤成效</button>
     </div>
     <div id="tbl-${shop}">
       <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">選擇區間後上傳報表，按「▶ 產生並儲存」</div></div>
@@ -4101,6 +4108,117 @@ function buildDistHtml(shop,built){
       ${noAdsRows}
     </tbody>
   </table>`;
+}
+
+// ── 標籤成效彈窗（tagfx）：手動測試標籤的前後期成效報告 ──
+//   🔴 資料來源是【手動測試標籤】（ec_tags|{通路}，經 _prodTagsReaderFor 讀取，即「標籤」
+//     面板第三排那套）。與 calcTestTags / r.testTags（「建議」欄的條件式自動判定）無關 ——
+//     兩套同名「測試標籤」，撞名已有 PR #81 計數翻倍前科，動這裡前先分清楚拿的是哪一套。
+//   基期固定【本月整月 vs 上月整月】（2026-09-08 拍板），與使用者當前檢視的期別無關：
+//     month 取 state[shop].curMonth，half 一律 'full'，兩份都走 lsLoad 讀存檔。
+//     任一份整月存檔不存在 → 空狀態寫明缺哪一份，不 fallback、不特例
+//     （例：維克 2026/08 只有上半月存檔，空狀態是預期行為）。
+//   只在點按鈕時計算，不進 renderTable 熱路徑。
+//   ⚠ 期間 pattern 與 _lastMonthSameTotals 同形（lsLoad → code 對照表 → 查表加總），但【刻意
+//     不呼叫它】：它綁 state 的篩選守衛、基期又是「上月同期」而非固定整月。
+function openTagFxModal(shop){
+  const ov=document.getElementById('tagfx-modal-overlay');if(!ov)return;
+  const body=document.getElementById('tagfx-modal-body');
+  const titleEl=document.getElementById('tagfx-modal-title');
+  const setTitle=t=>{if(titleEl)titleEl.textContent=t;};
+  const curMonth=state[shop]&&state[shop].curMonth;
+  const p=_lmSamePeriodParts(curMonth,'full');
+  if(!p){
+    setTitle('測試標籤成效');
+    body.innerHTML='<div class="tagfx-empty">無法辨識當前月份，請先選擇月份</div>';
+    ov.classList.add('open');return;
+  }
+  const prevMonth=p.month;
+  const curRep=lsLoad(shop,curMonth,'full');
+  const prevRep=lsLoad(shop,prevMonth,'full');
+  // 缺哪一份就講哪一份，兩份都缺就並列。🔴 不要顯示 0：沒有存檔 ≠ 數字是 0。
+  const missing=[];
+  if(!curRep||!Array.isArray(curRep.built)||!curRep.built.length)missing.push(`${curMonth} 整月`);
+  if(!prevRep||!Array.isArray(prevRep.built)||!prevRep.built.length)missing.push(`${prevMonth} 整月`);
+  if(missing.length){
+    setTitle('測試標籤成效');
+    body.innerHTML=`<div class="tagfx-empty">缺 ${missing.join('、')} 的報表存檔，無法比較。<br>需要兩個月份都以「整月」區間產生並儲存過報表。</div>`;
+    ov.classList.add('open');return;
+  }
+  // 🔴 標題必須含模式與期間：老闆會截圖轉貼，截圖裡看不出彈窗外的任何狀態。
+  setTitle(`測試標籤成效 · ${curMonth} 整月 vs ${prevMonth} 整月 · 僅可比較商品`);
+  body.innerHTML=buildTagFxHtml(shop,curMonth,curRep,prevRep);
+  ov.classList.add('open');
+}
+function closeTagFxModal(){document.getElementById('tagfx-modal-overlay')?.classList.remove('open');}
+// 純計算、不碰 DOM / state（node 可單獨驗）。readTags=(code)=>[{tag,date}]。
+//   🔴 新品規則：上月對照表查不到品號＝新品，【完全排除】於加總與成功率，只進 newCnt ——
+//     照現有 KPI 的「查不到計 0」會讓新品變成無限成長，把數字往「測試有效」方向灌水。
+//   一商品多標籤 → 每個標籤的列各算它一次（沿用篩選面板 prodCounts 的既定慣例）。
+function _tagFxCompute(curBuilt,prevBuilt,readTags,defLabels){
+  const prevMap=Object.create(null);   // 商品編號是外部資料，{} 會被 __proto__ 之類的品名污染（同 _prevDayBudgetReaderFor）
+  prevBuilt.forEach(r=>{ if(!r||!r.code)return; prevMap[r.code]={rev:r.rev||0,pure:r.pureProfit||0,ads:r.adsFee||0}; });
+  const buckets=Object.create(null);
+  const order=[];
+  const bucketOf=label=>{
+    if(!buckets[label]){ buckets[label]={label,cmpCnt:0,newCnt:0,growCnt:0,curRev:0,prevRev:0,curPure:0,prevPure:0,curAds:0,prevAds:0}; order.push(label); }
+    return buckets[label];
+  };
+  curBuilt.forEach(r=>{
+    if(!r||!r.code)return;
+    const tags=readTags(r.code);
+    if(!tags.length)return;
+    const base=prevMap[r.code];
+    tags.forEach(o=>{
+      const b=bucketOf(o.tag);
+      if(!base){ b.newCnt++; return; }
+      b.cmpCnt++;
+      b.curRev+=r.rev||0; b.curPure+=r.pureProfit||0; b.curAds+=r.adsFee||0;
+      b.prevRev+=base.rev; b.prevPure+=base.pure; b.prevAds+=base.ads;
+      if((r.rev||0)>base.rev)b.growCnt++;
+    });
+  });
+  // 列序：標籤定義順序在前；已刪定義但仍有標記的附在後（有商品就要見光，同面板 0 筆仍顯示的精神）
+  const rows=[];
+  defLabels.forEach(l=>{ if(buckets[l])rows.push(buckets[l]); });
+  order.forEach(l=>{ if(!defLabels.includes(l))rows.push(buckets[l]); });
+  const emptyDefCnt=defLabels.filter(l=>!buckets[l]).length;
+  return {rows,emptyDefCnt};
+}
+// 帶號金額：fmtN 內建 Math.abs 會吃掉負號，負號自己補（照 setKpis 的 lmLine，該處註解有明講）。
+function _tagFxAmt(v){return (v<0?'−':'')+'NT$ '+fmtN(v);}
+// 成長率：基期 ≤ 0 一律「—」——分母為負時符號翻轉，「虧更多」會顯示成正成長（照 lmLine 的 base>0 守衛）。
+function _tagFxGrowth(cur,base){
+  if(!(base>0))return '<span class="tagfx-na">—</span>';
+  const d=(cur-base)/base*100;
+  return `<span class="${d>=0?'tagfx-up':'tagfx-down'}">${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%</span>`;
+}
+function buildTagFxHtml(shop,curMonth,curRep,prevRep){
+  // 期間規則沿用既有的「標記日 ≤ 期末」（getProdTagsFor + _periodEndDate），只是期末取整月月底，不另寫日期判定。
+  const readTags=_prodTagsReaderFor(shop,{month:curMonth,half:'full'});
+  const defs=getTagDefs();
+  const {rows,emptyDefCnt}=_tagFxCompute(curRep.built,prevRep.built,readTags,defs.map(d=>d.label));
+  if(!rows.length)return '<div class="tagfx-empty">本期整月報表中沒有任何掛測試標籤的商品</div>';
+  const NA='<span class="tagfx-na">—</span>';
+  // cmpCnt=0（該標籤下全是新品）時金額一律「—」不寫 NT$ 0：沒有可比較商品 ≠ 金額是 0。
+  const amt=(b,v)=>b.cmpCnt?_tagFxAmt(v):NA;
+  const trs=rows.map(b=>{
+    const adsPct=(b.cmpCnt&&b.curRev>0)?`${(b.curAds/b.curRev*100).toFixed(2)}%`:NA;
+    const okRate=b.cmpCnt?`${b.growCnt}/${b.cmpCnt} = ${(b.growCnt/b.cmpCnt*100).toFixed(1)}%`:NA;
+    const cnt=`${b.cmpCnt}${b.newCnt?` ＋${b.newCnt}新`:''}`;
+    return `<tr>
+      <td class="tl"><span class="tag ${tagDefCls(b.label)}">${String(b.label).replace(/</g,'&lt;')}</span></td>
+      <td>${cnt}</td>
+      <td>${amt(b,b.prevRev)}</td><td>${amt(b,b.curRev)}</td><td>${_tagFxGrowth(b.curRev,b.prevRev)}</td>
+      <td>${amt(b,b.prevPure)}</td><td>${amt(b,b.curPure)}</td><td>${_tagFxGrowth(b.curPure,b.prevPure)}</td>
+      <td>${amt(b,b.prevAds)}</td><td>${amt(b,b.curAds)}</td><td>${adsPct}</td>
+      <td>${okRate}</td>
+    </tr>`;
+  }).join('');
+  const note=emptyDefCnt?`<div class="tagfx-note">另有 ${emptyDefCnt} 個標籤本期無商品</div>`:'';
+  return `<div class="tagfx-scroll"><table class="tagfx-table">
+    <thead><tr><th class="tl">標籤</th><th>商品數</th><th>前期營收</th><th>後期營收</th><th>營收成長率</th><th>前期純利</th><th>後期純利</th><th>純利成長率</th><th>前期廣告費</th><th>後期廣告費</th><th>廣告佔比</th><th>營收成功率</th></tr></thead>
+    <tbody>${trs}</tbody></table></div>${note}`;
 }
 
 function onGlobalFile(event,type){
@@ -20575,6 +20693,7 @@ Object.assign(window, {
   openTestShopHelp,closeTestShopHelp,    // 測試通路期間列 ⓘ 與彈窗關閉鈕的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
   openKpiCmpHelp,closeKpiCmpHelp,        // 頂端「ⓘ 比較基準」+ 表頭三顆 ? + 彈窗關閉鈕的 inline onclick 用，同上
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
+  openTagFxModal,closeTagFxModal,   // 標籤成效彈窗的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
   openTestSettings,closeTestSettings,addTestDraftCond,removeTestDraftCond,deleteTestDraftRule,addTestDraftRule,saveTestSettings,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,

@@ -1394,3 +1394,20 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   white-space:pre;
 }
 .recon-err{color:var(--danger);font-size:12px;padding:6px 0;}
+
+/* ── 標籤成效彈窗（tagfx，js/profit.js 的 openTagFxModal / buildTagFxHtml）──
+   全部走 :root 變數。dist-modal 模板裡的 inline style 是既有的，這裡刻意不抄。 */
+.tagfx-btn{margin-left:2px;}
+.tagfx-modal{width:980px;max-width:96vw;}
+.tagfx-modal-body{padding:20px;overflow-y:auto;max-height:72vh;}
+/* 12 欄在窄視窗必超寬：捲動關在自己的容器裡，不讓整個彈窗 body 橫向捲 */
+.tagfx-scroll{overflow-x:auto;}
+.tagfx-table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap;}
+.tagfx-table th{background:var(--primary-soft);color:var(--text);font-weight:700;padding:7px 10px;border:1px solid var(--border);text-align:right;}
+.tagfx-table td{padding:6px 10px;border:1px solid var(--border);text-align:right;color:var(--text);}
+.tagfx-table th.tl,.tagfx-table td.tl{text-align:left;}
+.tagfx-up{color:var(--success);font-weight:600;}
+.tagfx-down{color:var(--danger);font-weight:600;}
+.tagfx-na{color:var(--text-faint);}
+.tagfx-note{margin-top:10px;font-size:12px;color:var(--text-muted);}
+.tagfx-empty{padding:28px 10px;text-align:center;font-size:13px;color:var(--text-muted);line-height:1.8;}
