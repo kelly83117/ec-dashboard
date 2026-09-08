@@ -4181,6 +4181,22 @@ function toggleTagFxExpand(){
   _tagFxCtx.expand=!_tagFxCtx.expand;
   _tagFxRender();
 }
+// 成功率格 → 關彈窗跳回淨利表：套該標籤篩選 + 成長比升冪（下滑排最前）。
+//   🔴 順序鎖死：先切整月、再設篩選 —— onHalfChange → tryLoadSaved → loadIntoUI 會把
+//     filters/sorts/tagFilters 全部清空（見 loadIntoUI 內那行的註解），反過來就被洗掉。
+//   整月存檔必存在：彈窗本身就是讀它才開得起來（同一個 lsLoad），不需再防。
+//   ⚠ 表格篩出的集合與成功率分子分母【不保證一一對齊】：上月營收 0/查無的商品
+//     growthRate 為 null、排序沉底（getPrevPeriodMap 的 rev 表建表條件 r.code && r.rev）。
+//     格子的 title 文案刻意不承諾「就是那 N 隻」。
+function tagFxJump(label){
+  const c=_tagFxCtx;if(!c)return;
+  closeTagFxModal();
+  if(state[c.shop]&&state[c.shop].curHalf!=='full')onHalfChange(c.shop,'full',null,true);
+  setTagFilter(c.shop,null);                // 先清空：setTagFilter 是 toggle，殘留同名篩選時直接加會反向取消
+  setTagFilter(c.shop,'prod|'+label);
+  setSort(c.shop,'growthRate','asc');       // 尾端呼叫 applyFilters，下滑排最前
+  document.getElementById('tfbar-'+c.shop)?.classList.remove('open');   // setTagFilter 會順手展開篩選面板，跳轉情境不需要
+}
 // 純計算、不碰 DOM / state（node 可單獨驗），且【與顯示模式無關】——同一份結果供 cmp/all
 //   兩模式與收合/展開共用，開窗算一次存 _tagFxCtx，之後全是純渲染。
 //   🔴 新品規則（新品＝上月對照表查不到品號）：可比較與新品的加總【分開存】，不要合流 ——
@@ -4284,15 +4300,26 @@ function buildTagFxHtml(data,mode,expand){
       ${expand?`<td>${amt(b.prevPure)}</td>`:''}${pureCell}
       ${expand?`<td>${amt(b.prevAds)}</td>`:''}${adsCell}
       ${expand?`<td>${adsPct}</td>`:''}
-      <td>${okRate}</td>
+      <td${b.cmpCnt?` class="tagfx-jump" onclick="tagFxJump('${String(b.label).replace(/"/g,'&quot;').replace(/'/g,"\\'")}')" title="點擊查看該標籤的商品明細（依成長比排序）"`:''}>${okRate}</td>
     </tr>`;
   }).join('');
   const note=emptyDefCnt?`<div class="tagfx-note">另有 ${emptyDefCnt} 個標籤本期無商品</div>`:'';
-  const head=`<thead><tr><th class="tl tagfx-c1">標籤</th><th class="tagfx-c2">商品數</th>${
-    expand?'<th>前期營收</th>':''}<th>營收</th>${
-    expand?'<th>前期純利</th>':''}<th>純利</th>${
-    expand?'<th>前期廣告費</th>':''}<th>廣告費</th>${
-    expand?'<th>廣告佔比</th>':''}<th>營收成功率</th></tr></thead>`;
+  // 欄位說明：照抄主表格 _hdrQ 的 .hdr-help 外觀，但【只做 title hover、不開彈窗】——
+  //   六欄各開一個彈窗太重，這張表是電腦上看的報告（2026-09-08 拍板）。前期三欄欄名自明，不加。
+  const TIP={
+    cnt:'該標籤下的商品數。「45 ＋8新」表示 45 個可與上月比較，8 個是新品（不列入計算）',
+    rev:'上行為本期金額，下行為與上月整月的成長率',
+    pure:'上行為本期金額，下行為與上月整月的成長率',
+    ads:'上行為本期金額，下行為與上月整月的成長率',
+    adsPct:'本期廣告費 ÷ 本期營收',
+    ok:'該標籤下營收比上月成長的商品數 ÷ 可比較商品數。加總金額容易被單一商品帶偏，這欄看的是「對多數商品有沒有效」',
+  };
+  const q=k=>`<button type="button" class="hdr-help" title="${TIP[k]}">?</button>`;
+  const head=`<thead><tr><th class="tl tagfx-c1">標籤</th><th class="tagfx-c2">商品數${q('cnt')}</th>${
+    expand?'<th>前期營收</th>':''}<th>營收${q('rev')}</th>${
+    expand?'<th>前期純利</th>':''}<th>純利${q('pure')}</th>${
+    expand?'<th>前期廣告費</th>':''}<th>廣告費${q('ads')}</th>${
+    expand?`<th>廣告佔比${q('adsPct')}</th>`:''}<th>營收成功率${q('ok')}</th></tr></thead>`;
   return `${modes}<div class="tagfx-scroll"><table class="tagfx-table">
     ${head}
     <tbody>${trs}</tbody></table></div>${note}`;
@@ -20861,7 +20888,7 @@ Object.assign(window, {
   openTestShopHelp,closeTestShopHelp,    // 測試通路期間列 ⓘ 與彈窗關閉鈕的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
   openKpiCmpHelp,closeKpiCmpHelp,        // 頂端「ⓘ 比較基準」+ 表頭三顆 ? + 彈窗關閉鈕的 inline onclick 用，同上
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
-  openTagFxModal,closeTagFxModal,setTagFxMode,toggleTagFxExpand,   // 標籤成效彈窗的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
+  openTagFxModal,closeTagFxModal,setTagFxMode,toggleTagFxExpand,tagFxJump,   // 標籤成效彈窗的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
   openTestSettings,closeTestSettings,addTestDraftCond,removeTestDraftCond,deleteTestDraftRule,addTestDraftRule,saveTestSettings,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,

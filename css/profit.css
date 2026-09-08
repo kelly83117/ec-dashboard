@@ -1449,5 +1449,8 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .tagfx-cell-rate .tagfx-up,.tagfx-cell-rate .tagfx-down{font-weight:500;}
 /* 廣告費的成長率行中性灰（蓋掉 tagfx-up/down 的綠紅，理由見 buildTagFxHtml 頭註） */
 .tagfx-neutral .tagfx-up,.tagfx-neutral .tagfx-down{color:var(--text-muted);font-weight:500;}
-/* 「（不含新品）」小字註記（僅展開模式的廣告佔比/成功率） */
+/* 「（不含新品）」小字註記（展開模式的廣告佔比；成功率的註記已併進第二行） */
 .tagfx-subnote{font-size:10.5px;color:var(--text-muted);font-weight:400;margin-left:2px;}
+/* 成功率格可點跳轉（塊D）：只有 cmpCnt>0 的格帶這個 class */
+.tagfx-table td.tagfx-jump{cursor:pointer;}
+.tagfx-table td.tagfx-jump:hover{background:var(--primary-soft);}
