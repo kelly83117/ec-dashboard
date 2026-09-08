@@ -211,14 +211,14 @@ try {
             // ⚠ dirty 守衛：真正編輯過還沒推的 key → 保護，不被雲端覆蓋（persisted，跨重整；區分「stale 舊快照 vs 我改了還沒推」）
             if (window.__momoIsProductsDirty && window.__momoIsProductsDirty(k)) return;
             if (JSON.stringify(Store._profitMem[k]) === JSON.stringify(items)) {   // 內容相同：不覆蓋、不重繪，但記錄雲端版本基準
-              if (ts && window.__momoNoteCloudBase) window.__momoNoteCloudBase(k, ts);
+              if (window.__momoProductsLastPushedSet) window.__momoProductsLastPushedSet(shop, items);   // 無 dirty（走到這＝212 dirty-skip 沒攔）→ bootstrap/更新 lastPushed=當下雲端；dirty 賣場在 212 已 return=baseline 凍結
               return;
             }
             // 【1】 stale 修正：not-dirty → 本機三鏡像一起跟上雲端（預覽/推送讀 _mem→localStorage，只更 _profitMem 會 stale）
             Store._profitMem[k] = items;
             try { localStorage.setItem(k, JSON.stringify(items)); } catch (e) {}
             try { if (Store._mem) Store._mem[k] = items; } catch (e) {}
-            if (ts && window.__momoNoteCloudBase) window.__momoNoteCloudBase(k, ts);
+            if (window.__momoProductsLastPushedSet) window.__momoProductsLastPushedSet(shop, items);   // 無 dirty（走到這＝212 dirty-skip 沒攔）→ bootstrap/更新 lastPushed=當下雲端；dirty 賣場在 212 已 return=baseline 凍結
             changed.push(shop);
           });
           if (changed.length) {
