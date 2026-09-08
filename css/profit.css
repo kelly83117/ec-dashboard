@@ -1441,9 +1441,12 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .tagfx-mode-btn.on{background:var(--primary-soft);border-color:var(--primary);color:var(--primary);font-weight:700;}
 /* 展開鈕靠右，跟兩顆模式鈕分開（同列但不同組） */
 .tagfx-expand-btn{margin-left:auto;}
-/* 指標欄兩行（照 KPI 卡）：上=後期金額、下=成長率 */
-.tagfx-cell-amt{font-weight:600;}
-.tagfx-cell-rate{font-size:11px;margin-top:2px;}
+/* 指標欄兩行（照 KPI 卡）：上=大數字（金額/成功率），下=小註記（成長率/分子分母）。
+   層級刻意拉開——一眼先看到上行，下行是註記：上行加大加深，下行縮小降不透明度、
+   綠紅減重，不跟上行搶（2026-09-08 拍板）。 */
+.tagfx-cell-amt{font-weight:600;font-size:13px;color:var(--text);}
+.tagfx-cell-rate{font-size:11px;margin-top:2px;opacity:.75;}
+.tagfx-cell-rate .tagfx-up,.tagfx-cell-rate .tagfx-down{font-weight:500;}
 /* 廣告費的成長率行中性灰（蓋掉 tagfx-up/down 的綠紅，理由見 buildTagFxHtml 頭註） */
 .tagfx-neutral .tagfx-up,.tagfx-neutral .tagfx-down{color:var(--text-muted);font-weight:500;}
 /* 「（不含新品）」小字註記（僅展開模式的廣告佔比/成功率） */

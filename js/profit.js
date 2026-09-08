@@ -4233,7 +4233,10 @@ function _tagFxAmt(v){return (v<0?'−':'')+'NT$ '+fmtN(v);}
 function _tagFxGrowth(cur,base){
   if(!(base>0))return '<span class="tagfx-na">—</span>';
   const d=(cur-base)/base*100;
-  return `<span class="${d>=0?'tagfx-up':'tagfx-down'}">${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%</span>`;
+  // ±999% 以上只顯示 >+999% / >−999%：那種數字多半只是基期太小（$92 → $2,144 = +2239%），
+  //   精確值沒有資訊價值還把欄寬撐爆。🔴 純顯示層截斷，不動計算結果。
+  const txt=Math.abs(d)>999?`>${d>=0?'+':'−'}999%`:`${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%`;
+  return `<span class="${d>=0?'tagfx-up':'tagfx-down'}">${txt}</span>`;
 }
 // 純渲染：吃 _tagFxCompute 的結果（data），🔴 不重算聚合、不讀報表。回傳 html 字串。
 //   mode：'cmp'＝僅可比較（預設）／'all'＝金額含新品。
@@ -4266,7 +4269,12 @@ function buildTagFxHtml(data,mode,expand){
     const pureCell=mCell(all?b.curPure+b.newPure:b.curPure,b.curPure,b.prevPure,false);
     const adsCell=mCell(all?b.curAds+b.newAds:b.curAds,b.curAds,b.prevAds,true);
     const adsPct=(b.cmpCnt&&b.curRev>0)?`${(b.curAds/b.curRev*100).toFixed(2)}%${all?'<span class="tagfx-subnote">（不含新品）</span>':''}`:NA;
-    const okRate=b.cmpCnt?`${b.growCnt}/${b.cmpCnt} = ${(b.growCnt/b.cmpCnt*100).toFixed(1)}%${(all&&expand)?'<span class="tagfx-subnote">（不含新品）</span>':''}`:NA;
+    // 成功率跟指標欄同節奏：上=大數字（百分比）、下=小註記（分子/分母）。六欄視覺結構統一成
+    //   「上面一個大數字、下面一個小註記」。all 模式的「不含新品」併進第二行（2026-09-08 拍板，
+    //   取代先前「只在展開模式加註」的規則——第二行本來就是小字，收合也放得下）。
+    const okRate=b.cmpCnt
+      ?`<div class="tagfx-cell-amt">${(b.growCnt/b.cmpCnt*100).toFixed(1)}%</div><div class="tagfx-cell-rate">${b.growCnt}/${b.cmpCnt}${all?' · 不含新品':''}</div>`
+      :NA;
     const cnt=`${b.cmpCnt}${b.newCnt?` ＋${b.newCnt}新`:''}`;
     const lbl=String(b.label).replace(/</g,'&lt;').replace(/"/g,'&quot;');
     return `<tr>
