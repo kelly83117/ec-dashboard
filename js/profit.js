@@ -4206,9 +4206,10 @@ function buildTagFxHtml(shop,curMonth,curRep,prevRep){
     const adsPct=(b.cmpCnt&&b.curRev>0)?`${(b.curAds/b.curRev*100).toFixed(2)}%`:NA;
     const okRate=b.cmpCnt?`${b.growCnt}/${b.cmpCnt} = ${(b.growCnt/b.cmpCnt*100).toFixed(1)}%`:NA;
     const cnt=`${b.cmpCnt}${b.newCnt?` ＋${b.newCnt}新`:''}`;
+    const lbl=String(b.label).replace(/</g,'&lt;').replace(/"/g,'&quot;');
     return `<tr>
-      <td class="tl"><span class="tag ${tagDefCls(b.label)}">${String(b.label).replace(/</g,'&lt;')}</span></td>
-      <td>${cnt}</td>
+      <td class="tl tagfx-c1" title="${lbl}"><span class="tag ${tagDefCls(b.label)}">${lbl}</span></td>
+      <td class="tagfx-c2">${cnt}</td>
       <td>${amt(b,b.prevRev)}</td><td>${amt(b,b.curRev)}</td><td>${_tagFxGrowth(b.curRev,b.prevRev)}</td>
       <td>${amt(b,b.prevPure)}</td><td>${amt(b,b.curPure)}</td><td>${_tagFxGrowth(b.curPure,b.prevPure)}</td>
       <td>${amt(b,b.prevAds)}</td><td>${amt(b,b.curAds)}</td><td>${adsPct}</td>
@@ -4217,7 +4218,7 @@ function buildTagFxHtml(shop,curMonth,curRep,prevRep){
   }).join('');
   const note=emptyDefCnt?`<div class="tagfx-note">另有 ${emptyDefCnt} 個標籤本期無商品</div>`:'';
   return `<div class="tagfx-scroll"><table class="tagfx-table">
-    <thead><tr><th class="tl">標籤</th><th>商品數</th><th>前期營收</th><th>後期營收</th><th>營收成長率</th><th>前期純利</th><th>後期純利</th><th>純利成長率</th><th>前期廣告費</th><th>後期廣告費</th><th>廣告佔比</th><th>營收成功率</th></tr></thead>
+    <thead><tr><th class="tl tagfx-c1">標籤</th><th class="tagfx-c2">商品數</th><th>前期營收</th><th>後期營收</th><th>營收成長率</th><th>前期純利</th><th>後期純利</th><th>純利成長率</th><th>前期廣告費</th><th>後期廣告費</th><th>廣告佔比</th><th>營收成功率</th></tr></thead>
     <tbody>${trs}</tbody></table></div>${note}`;
 }
 
