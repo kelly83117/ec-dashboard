@@ -964,22 +964,42 @@ Object.assign(App, {
       const all = [...baseCols, {v:sc(scoreVal),center:true,w:'1fr'}];
       return `<div style="display:grid;grid-template-columns:${all.map(c=>c.w||'1fr').join(' ')};align-items:center;background:${bg};border-bottom:1px solid #f3f4f6">${all.map(c=>`<div style="padding:8px 10px;font-size:13px;${c.center?'text-align:center':''}">${c.v}</div>`).join('')}</div>`;
     };
+    // 從新品毛利表讀取實際數據計算選品得分
+    const mgQKey = activeQ === 'Q3' ? 'ec.d2.margin' : `ec.d2.margin.${activeQ.toLowerCase()}`;
+    const mgList = Store.get(mgQKey, []).filter(r => !r.old);
+    const mgProfits = mgList.map(r => { const c = Number(r.cost||0), v = Number(r.rev||0); return v - c; });
+    const actualCount = mgList.length;
+    const actual10k = mgProfits.filter(p => p > 10000).length;
+    const actual8k  = mgProfits.filter(p => p > 8000 && p <= 10000).length;
+    const actual5k  = mgProfits.filter(p => p > 5000 && p <= 8000).length;
+    const qtyScore  = actualCount >= 50 ? 30 : 0;
+    const score10k  = actual10k >= 2 ? 10 : 0;
+    const score8k   = actual8k  >= 5 ? 6  : 0;
+    const score5k   = actual5k  >= 5 ? 4  : 0;
+    const selectionScore = qtyScore + score10k + score8k + score5k;
+
     const nowM = new Date().getMonth() + 1;
     const curIdx = monthNums.findIndex(m => parseInt(m) === nowM);
     const cur = monthScores[curIdx >= 0 ? curIdx : monthScores.length - 1] || {sc:0,sa:0};
     const totalScore = cur.sc + cur.sa + (cur.bonus || 0);
     const totalsStr = monthScores.map((ms, i) => `${parseInt(monthNums[i])}月 ${ms.sc+ms.sa+(ms.bonus||0)}分`).join(' ／ ');
 
+    // 實際數量標籤
+    const actual = (n, target) => {
+      const met = n >= target;
+      return `<span style="font-size:11px;color:${met?'#059669':'#9ca3af'};margin-left:4px">(實際 ${n})</span>`;
+    };
+
     const leftPanel = `
       <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;min-width:280px">
         <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">選品 — 每季</div>
         ${subHQ([{l:'項目',w:'2fr'},{l:'目標支數'},{l:'配分'}])}
-        ${rowQ([{v:'管量：新品數量（季）',w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true}], 0)}
+        ${rowQ([{v:`管量：新品數量（季）${actual(actualCount,50)}`,w:'2fr'},{v:blue('50'),center:true},{v:blue('30'),center:true}], qtyScore)}
         <div style="background:#f0faf0;padding:6px 10px;font-size:11px;font-weight:600;color:#2e7d32;border-bottom:1px solid #c8e6c9">管質分層（三層互斥）</div>
         ${subHQ([{l:'分層條件',w:'2fr'},{l:'毛利門檻(≥)'},{l:'目標'},{l:'配分'}])}
-        ${rowQ([{v:'毛利 ≥ 1萬',w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true}], 0)}
-        ${rowQ([{v:'毛利 ≥ 8千（< 1萬）',w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true}], 0, '#fafafa')}
-        ${rowQ([{v:'毛利 ≥ 5千（< 8千）',w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true}], 0)}
+        ${rowQ([{v:`毛利 ≥ 1萬${actual(actual10k,2)}`,w:'2fr'},{v:blue('10,000'),center:true},{v:blue('2'),center:true},{v:blue('10'),center:true}], score10k)}
+        ${rowQ([{v:`毛利 ≥ 8千（< 1萬）${actual(actual8k,5)}`,w:'2fr'},{v:blue('8,000'),center:true},{v:blue('5'),center:true},{v:blue('6'),center:true}], score8k, '#fafafa')}
+        ${rowQ([{v:`毛利 ≥ 5千（< 8千）${actual(actual5k,5)}`,w:'2fr'},{v:blue('5,000'),center:true},{v:blue('5'),center:true},{v:blue('4'),center:true}], score5k)}
         <div style="background:#1a7a6e;color:#fff;font-weight:700;font-size:12px;padding:8px 12px">議價 — 每月</div>
         ${subH([{l:'指標',w:'2fr'},{l:'目標值'},{l:'配分'}])}
         ${row([{v:'議價數量目標（個／月）',w:'2fr'},{v:blue('20'),center:true},{v:blue('20'),center:true}], ms => ms.sc)}
