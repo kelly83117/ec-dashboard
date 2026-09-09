@@ -3184,6 +3184,8 @@ Object.assign(App, {
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <button id="mg-import-btn" style="padding:7px 16px;background:#1d4ed8;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">📥 匯入 Excel</button>
             <input id="mg-import-file" type="file" accept=".xlsx,.xls" style="display:none">
+            <button id="mg-date-fill-btn" style="padding:7px 14px;background:#fff;color:#6b7280;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer" title="從 Excel 補齊建檔日期，不影響現有成本/營收資料">📅 補齊建檔日期</button>
+            <input id="mg-date-fill-file" type="file" accept=".xlsx,.xls" style="display:none">
             <button id="mg-old-import-btn" style="padding:7px 14px;background:#fff;color:#6b7280;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer" title="上傳庫存總表，系統自動記住舊品名稱，之後匯入新品時自動踢除">🗂 載入舊品清單</button>
             <input id="mg-old-import-file" type="file" accept=".xlsx,.xls" style="display:none">
             ${(() => { const op = Store.get('ec.d2.oldProducts', []); return op.length > 0 ? `<span style="font-size:11px;color:#9ca3af;padding:4px 10px;background:#f3f4f6;border-radius:20px">已載入 ${op.length} 個舊品</span>` : ''; })()}
@@ -3317,6 +3319,46 @@ Object.assign(App, {
       if (!confirm('確定要清除所有資料？')) return;
       Store.set(mgKey, []);
       this.render();
+    });
+
+    // 補齊建檔日期
+    const dateFillBtn = document.getElementById('mg-date-fill-btn');
+    const dateFillFile = document.getElementById('mg-date-fill-file');
+    dateFillBtn?.addEventListener('click', () => dateFillFile?.click());
+    dateFillFile?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const XLSX = window.XLSX;
+          if (!XLSX) { showToast('Excel 解析器尚未載入，請稍後再試'); return; }
+          const wb = XLSX.read(ev.target.result, { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          if (data.length < 2) { showToast('檔案無資料'); return; }
+          const headers = data[0].map(h => String(h).trim());
+          const nameIdx = headers.findIndex(h => h === '商品名稱');
+          const dateIdx = ['商品建立日期','建檔日期','建立時間','建立日期','上架日期'].reduce((f, col) => f >= 0 ? f : headers.findIndex(h => h === col), -1);
+          if (nameIdx < 0 || dateIdx < 0) { showToast('找不到「商品名稱」或日期欄位'); return; }
+          const dateMap = new Map();
+          for (let i = 1; i < data.length; i++) {
+            const name = String(data[i][nameIdx] || '').trim();
+            const date = String(data[i][dateIdx] || '').trim();
+            if (name && date && !dateMap.has(name)) dateMap.set(name, date.split(' ')[0].split('T')[0]);
+          }
+          const list = Store.get(mgKey, []);
+          let updated = 0;
+          list.forEach(r => {
+            if (!r.date && dateMap.has(r.name)) { r.date = dateMap.get(r.name); updated++; }
+          });
+          Store.set(mgKey, list);
+          dateFillFile.value = '';
+          showToast(`補齊完成，共更新 ${updated} 筆建檔日期`);
+          this.render();
+        } catch (err) { showToast('補齊失敗：' + err.message); }
+      };
+      reader.readAsArrayBuffer(file);
     });
 
     // 載入舊品清單（庫存總表）
