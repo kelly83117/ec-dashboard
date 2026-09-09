@@ -3184,7 +3184,7 @@ Object.assign(App, {
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <button id="mg-import-btn" style="padding:7px 16px;background:#1d4ed8;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">📥 匯入 Excel</button>
             <input id="mg-import-file" type="file" accept=".xlsx,.xls" style="display:none">
-            <button id="mg-date-fill-btn" style="padding:7px 14px;background:#fff;color:#6b7280;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer" title="從 Excel 補齊建檔日期，不影響現有成本/營收資料">📅 補齊建檔日期</button>
+            <button id="mg-date-fill-btn" style="padding:7px 14px;background:#fff;color:#6b7280;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer" title="從 Excel 同時補齊建檔日期與樣式/尺寸，不影響現有成本/營收資料">📅 補齊日期＋樣式</button>
             <input id="mg-date-fill-file" type="file" accept=".xlsx,.xls" style="display:none">
             <button id="mg-old-import-btn" style="padding:7px 14px;background:#fff;color:#6b7280;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer" title="上傳庫存總表，系統自動記住舊品名稱，之後匯入新品時自動踢除">🗂 載入舊品清單</button>
             <input id="mg-old-import-file" type="file" accept=".xlsx,.xls" style="display:none">
@@ -3321,7 +3321,7 @@ Object.assign(App, {
       this.render();
     });
 
-    // 補齊建檔日期
+    // 補齊日期＋樣式/尺寸
     const dateFillBtn = document.getElementById('mg-date-fill-btn');
     const dateFillFile = document.getElementById('mg-date-fill-file');
     dateFillBtn?.addEventListener('click', () => dateFillFile?.click());
@@ -3338,23 +3338,42 @@ Object.assign(App, {
           const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
           if (data.length < 2) { showToast('檔案無資料'); return; }
           const headers = data[0].map(h => String(h).trim());
-          const nameIdx = headers.findIndex(h => h === '商品名稱');
-          const dateIdx = ['商品建立日期','建檔日期','建立時間','建立日期','上架日期'].reduce((f, col) => f >= 0 ? f : headers.findIndex(h => h === col), -1);
-          if (nameIdx < 0 || dateIdx < 0) { showToast('找不到「商品名稱」或日期欄位'); return; }
-          const dateMap = new Map();
+          const nameIdx  = headers.findIndex(h => h === '商品名稱');
+          const dateIdx  = ['商品建立日期','建檔日期','建立時間','建立日期','上架日期'].reduce((f, col) => f >= 0 ? f : headers.findIndex(h => h === col), -1);
+          const styleIdx = headers.findIndex(h => h === '樣式');
+          const sizeIdx  = headers.findIndex(h => h === '尺寸');
+          const costIdx2 = headers.findIndex(h => h === '成本');
+          const revIdx2  = headers.findIndex(h => h === '售價');
+          if (nameIdx < 0) { showToast('找不到「商品名稱」欄位'); return; }
+          // 建立 name → { date, variants[] }
+          const fillMap = new Map();
           for (let i = 1; i < data.length; i++) {
-            const name = String(data[i][nameIdx] || '').trim();
-            const date = String(data[i][dateIdx] || '').trim();
-            if (name && date && !dateMap.has(name)) dateMap.set(name, date.split(' ')[0].split('T')[0]);
+            const row = data[i];
+            const name  = String(row[nameIdx]  || '').trim(); if (!name) continue;
+            const date  = dateIdx  >= 0 ? String(row[dateIdx]  || '').trim() : '';
+            const style = styleIdx >= 0 ? String(row[styleIdx] || '').trim() : '';
+            const size  = sizeIdx  >= 0 ? String(row[sizeIdx]  || '').trim() : '';
+            const cost  = costIdx2 >= 0 ? Number(row[costIdx2]) || 0 : 0;
+            const rev   = revIdx2  >= 0 ? Number(row[revIdx2])  || 0 : 0;
+            if (!fillMap.has(name)) fillMap.set(name, { date: date.split(' ')[0].split('T')[0], variants: [] });
+            const entry = fillMap.get(name);
+            if (!entry.date && date) entry.date = date.split(' ')[0].split('T')[0];
+            if (style || size) entry.variants.push({ style, size, cost, rev });
           }
+          const oldSet = new Set(Store.get('ec.d2.oldProducts', []));
           const list = Store.get(mgKey, []);
-          let updated = 0;
+          let updDate = 0, updVar = 0;
           list.forEach(r => {
-            if (!r.date && dateMap.has(r.name)) { r.date = dateMap.get(r.name); updated++; }
+            const info = fillMap.get(r.name);
+            if (!info) return;
+            if (!r.date && info.date) { r.date = info.date; updDate++; }
+            if (oldSet.has(r.name) && info.variants.length > 0 && (!r.variants || !r.variants.length)) {
+              r.variants = info.variants; r.old = true; updVar++;
+            }
           });
           Store.set(mgKey, list);
           dateFillFile.value = '';
-          showToast(`補齊完成，共更新 ${updated} 筆建檔日期`);
+          showToast(`補齊完成：日期 ${updDate} 筆、樣式/尺寸 ${updVar} 筆`);
           this.render();
         } catch (err) { showToast('補齊失敗：' + err.message); }
       };
