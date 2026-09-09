@@ -159,33 +159,34 @@ ESM 有個致命陷阱必須牢記：
 - `Store` 是 localStorage 包裝層（含 `_mem` / `_profitMem` 記憶體鏡像）。
 - 版本號 `<meta app-version>` 每次部署都要更新，`version.js` 才會清舊快取。
 
-### 版本號 bump 規則（🔴 流程：feature 不 bump、合併後一鍵 bump）
+### 版本號 bump 規則（🔴 分兩條：動 runtime 走本機原子合併、純文件用按鈕）
 
 版號散在 **15 處**（下列）。**為什麼要有流程**：每支 feature PR 若各自 bump，就會在這
 15 行互相衝突（天天在收的合併稅），還常手動漏改一兩處。**根治＝feature 分支一律不碰
-版號，合併進 `main` 後才用 `bump-version.js` 一鍵設新號、單一 chore commit。**
+版號，改由合併端統一 bump。** 但 bump 若晚於部署就出事，見下方空窗實測。
 
-**流程（照做）：**
-1. **feature 分支開發：不要動版號那 15 處**（index.html + js/main.js 的 app-version /
-   `?v=`）→ PR 之間不再碰同幾行、不再衝突。
-2. **PR 合併進 `main` 後**，在 `main` 上跑：
-   ```bash
-   git checkout main && git pull origin main
-   node bump-version.js <新版號>      # 例 2026-09-09-658（比 main 現值 +1；--check 會告訴你現值）
-   git add index.html js/main.js && git commit -m "chore: bump version to <新版號>" && git push
-   ```
-   `bump-version.js`（repo 根目錄）自動偵測 index.html 現版號 → 換全部 15 處
-   （index.html 5＋js/main.js 10）→ **自動 grep 驗證**（次數對＝5/10、舊版號零殘留），
-   任一項不符就非零離開、不留半套。`node bump-version.js --check` 可單獨複查一致性。
-3. 版號**比 `main` 現值大**即可（你人就在 main 上；不要憑記憶，`--check` 或搜 `app-version` 看現值）。
-
-⚠️ **空窗風險（bump 不是可選步驟）**：feature 合併進 `main` 後、bump 前，`main` 是
+⚠️ **空窗風險（實測，不是理論）**：feature 合併進 `main` 後、bump 前，`main` 是
 「**新 code + 舊版號**」。若 GitHub Pages 在這空窗部署，使用者拿到新 code + 舊版號 →
 `version.js` 偵測不到新版 → 快取不刷新 → 拿到**舊 CSS/JS**（v226→227 血淚同類）。
-**規則：動到 runtime（js/css）的 PR，合併後【立刻】在 `main` 跑
-`bump-version.js` + commit + push，不隔夜、不讓部署搶在 bump 前。bump 是合併流程的
-一部分，不是可選步驟。** 最穩＝本機把 feature 合進 main 後、bump 一起做完再一次 push
-（零空窗）；退而求其次＝按鈕合併後立刻 bump（空窗只有一次部署延遲那麼短）。
+**這個 repo 實測部署延遲 40 秒 ～ 5 分鐘、會抖**（2026-09-09 量 5 次部署，最快 40s）——
+所以「按鈕合併後追著跑 bump」靠人手速**不可靠**：踩到 40s 部署就來不及。因此規則如下。
+
+**A. 動到 runtime（`js/` 或 `css/`）的 PR → 本機原子合併（唯一正規流程，零空窗）：**
+```bash
+git checkout main && git pull origin main
+git merge <feature 分支>          # 本機合，不要用 GitHub 按鈕
+node bump-version.js <新版號>      # 同一個工作區；例 2026-09-09-658（比 main 現值 +1，--check 會告訴你現值）
+git add index.html js/main.js && git commit -m "chore: bump version to <新版號>"
+git push                          # merge + bump 同一次 push
+```
+→ merge 與 bump 在**同一次 push** 送上去，Pages 部署到的必定是「新 code + 新版號」，
+**零空窗**，不管部署 40 秒還 5 分鐘都安全。`bump-version.js`（repo 根目錄）自動偵測
+index.html 現版號 → 換全部 15 處（index.html 5＋js/main.js 10）→ **自動 grep 驗證**
+（次數對＝5/10、舊版號零殘留），任一項不符就非零離開、不留半套；`--check` 可單獨複查。
+版號**比 `main` 現值大**即可（不要憑記憶，`--check` 或搜 `app-version` 看現值）。
+
+**B. 純文件 / 腳本 PR（不動 `js/`、`css/`）→ 用 GitHub 按鈕合併即可，不需 bump。**
+沒動 runtime 就沒有快取失效問題，也就沒有空窗；這支 PR 本身就是 B 類。
 
 **15 處是哪些**（`bump-version.js` 自動處理，人工不用逐一改）：`index.html` 的
 app-version meta ×1、main.js `?v=` ×1、3 個 CSS `?v=` ×3；`js/main.js` 10 個 import `?v=` ×10。
