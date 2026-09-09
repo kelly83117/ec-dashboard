@@ -2120,6 +2120,202 @@ function _renderBatchSelInfo(shop){
   if(acts)acts.classList.toggle('on',n>0);
 }
 
+// ══════════════ 拆分試算（ec_split）══════════════
+//  問題：兩個品號共用同一個蝦皮商品頁時，莫筆克報表把營收全算在其中一個上。
+//  本功能讓使用者把一部分「營收 + 毛利」從 A 品號搬到 B 品號，當場看到兩支各自的
+//  營收 / 毛利 / 純利 / 純利率。比例每期不同、看著已產好的報表手動算。
+//
+//  🔴 硬約束（與使用者確認過的取捨，【不要】順手優化掉）：
+//    【不寫回報表本體】。主表格那兩列顯示的仍是未拆分的原始數字，試算結果只在彈窗裡看得到。
+//    所以本區【絕對不碰】built 上的任何欄位，也不呼叫 recalcRow / patchRow / lsSave。
+//    要驗證有沒有踩線：本區不該出現 `r.rev=` / `r.gross=` / `Object.assign(built[` 這類寫入。
+//
+//  ⚠ 宣告與函式刻意整塊放在 `// ── Init ──` 之前，理由同上面 _cloudRefreshing / _tagPanelCtx /
+//    _batchSel 那幾段：下方 SHOPS.forEach 在【模組頂層】就會走到 shopHTML（工具列那顆鈕）
+//    與 onMonthChange → applyFilters（按鈕組數的重繪掛點），宣告放後面會落入 let 的 TDZ、
+//    整個 profit.js 模組評估中斷、淨利表白畫面。勿搬動。
+let _splitDraft = null;   // [{from,to,rev,gross}] 未儲存草稿；null ＝ 彈窗沒開
+let _splitShop  = null;   // 草稿屬於哪個通路。關窗即清 —— 不清的話切通路後再開窗會把上一個通路的草稿套上來
+
+// key 形狀：ec_split|{通路}|{月}|{半月}，與 ec_notes 的廣告調整同一個四段形狀。
+//   ⚠ 期別直接讀 state[shop] 的當下值：彈窗是「看著現在這一期的報表」開的，
+//     取法與 renderTable 的 noteKey（本檔搜 `const noteKey=shop+'|'`）逐字相同。
+function _splitKey(shop){
+  const s=state[shop]||{};
+  return 'ec_split|'+shop+'|'+(s.curMonth||'')+'|'+(s.curHalf||'');
+}
+// 半月標籤。逐字沿用 tryLoadSaved 空狀態那行（本檔搜 `const _hLbl=`），不另發明一套字樣。
+function _splitHalfLabel(half){ return half==='first'?'上半月':half==='second'?'下半月':'整月'; }
+// 空字串 / 非數字一律當 0。
+//   ⚠ 刻意【不用】本檔的 num()：那支會剝掉 , $ % 三種符號，對搬運額這種純手打數字沒必要，
+//     而且會把「1,0」這種手殘輸入靜默變成 10。這裡寧可讓它變 0（使用者看得見）。
+function _splitNum(v){ const n=parseFloat(v); return Number.isFinite(n)?n:0; }
+
+// ── 彈窗 ──
+//  型態照抄 openAnaSettings（懶建立 createElement + classList.add('open')），沿用既有的
+//  .ana-overlay / .ana-modal / .ana-modal-hdr / .ana-modal-body / .ana-modal-ftr /
+//  .ana-modal-title / .ana-modal-x / .ana-cancel-btn —— CSS 零新增。
+//  ⚠ .ana-modal 預設寬 640px（css/profit.css 搜 `.ana-modal{`），結果表有四欄、每組四列，
+//    用 inline style 加寬。這是既有寫法（openUnmatchedModal 的
+//    `class="ana-modal" style="width:min(860px,95vw)"`），不是新增 class。
+function openSplitModal(shop){
+  const built=state[shop]?._built;
+  if(!built||!built.length){alert('請先產生報表');return;}
+  let ov=document.getElementById('split-overlay');
+  if(!ov){
+    ov=document.createElement('div');ov.id='split-overlay';ov.className='ana-overlay';
+    ov.innerHTML=`<div class="ana-modal" style="width:min(880px,96vw)" onclick="event.stopPropagation()">
+      <div class="ana-modal-hdr"><span class="ana-modal-title" id="split-modal-title">⚖ 拆分試算</span><button class="ana-modal-x" onclick="closeSplitModal()">✕</button></div>
+      <div class="ana-modal-body" id="split-modal-body"></div>
+      <div class="ana-modal-ftr">
+        <button class="ana-cancel-btn" onclick="closeSplitModal()">關閉</button>
+      </div>
+    </div>`;
+    ov.onclick=closeSplitModal;
+    document.body.appendChild(ov);
+  }
+  _splitShop=shop;
+  _splitDraft=[];
+  // 品號清單（下拉搜尋用）。
+  //   🔴 資料源是 state[shop]._built，【不可以】照抄 openUnmatchedModal 的 s.rawMobic ——
+  //     rawMobic 沒有任何持久化路徑（本檔搜 `state[shop].rawMobic=`，三處全是記憶體指派），
+  //     重整後是 null。那條路只在「剛上傳完檔案」的 generate 流程裡成立；本彈窗是看著
+  //     【已存報表】開的，照抄會得到一個永遠搜不到東西的空下拉。
+  //   ⚠ 去重用 `in` 而不是 truthy：品號理論上不會是空字串，但 built 是外部資料。
+  const names={},codes=[];
+  built.forEach(r=>{ if(r&&r.code!=null&&!(r.code in names)){ names[r.code]=r.name||''; codes.push(r.code); } });
+  window._splitCodeNames=names;window._splitAllCodes=codes;
+  const s=state[shop]||{};
+  const t=document.getElementById('split-modal-title');
+  if(t)t.textContent=`⚖ 拆分試算 · ${shop} ${s.curMonth||''} ${_splitHalfLabel(s.curHalf)}`;
+  renderSplitModalBody();
+  ov.classList.add('open');
+}
+function closeSplitModal(){
+  document.getElementById('split-overlay')?.classList.remove('open');
+  _splitDraft=null;_splitShop=null;
+}
+
+// 把 DOM 上的現值收回草稿。
+//   🔴 這是【唯一】會寫 _splitDraft 內容的地方（splitAddRow / splitRemoveRow 只改長度）——
+//     所有 handler 一律先呼叫它、再做自己的事。刻意不讓各 handler 自己去寫對應的欄位：
+//     那樣 DOM 與草稿就是兩個來源，正常情況下相等、只在資料變形時靜默分岔。本檔已經因為
+//     「兩處各寫一份」出過事（見 readNotesForPush 上方那段 PR #93 的說明）。
+//   ⚠ 2026-09-09 實測發現的具體形狀：舊版 splitNumInput 直接寫 _splitDraft[i][field]、
+//     而重繪前的收回是讀 DOM —— 只要有任何一條路徑改了草稿卻沒同步回 input，
+//     下一次重繪就會把它悄悄改回 input 上的舊值。改成單一來源之後結構上不可能發生。
+//   同型先例是 syncProdTagDraftFromDOM（本檔搜該名）。四個欄位一次收齊。
+function _splitSyncDraftFromDOM(){
+  if(!Array.isArray(_splitDraft))return;
+  _splitDraft.forEach((row,i)=>{
+    const from=document.getElementById('sp-sel-'+i+'-from');
+    const to  =document.getElementById('sp-sel-'+i+'-to');
+    const rev =document.getElementById('sp-rev-'+i);
+    const gro =document.getElementById('sp-gross-'+i);
+    if(from)row.from =from.value||'';
+    if(to)  row.to   =to.value||'';
+    if(rev) row.rev  =_splitNum(rev.value);
+    if(gro) row.gross=_splitNum(gro.value);
+  });
+}
+function splitAddRow(){
+  if(!Array.isArray(_splitDraft))return;
+  _splitSyncDraftFromDOM();
+  _splitDraft.push({from:'',to:'',rev:0,gross:0});
+  renderSplitModalBody();
+}
+function splitRemoveRow(i){
+  if(!Array.isArray(_splitDraft))return;
+  _splitSyncDraftFromDOM();
+  _splitDraft.splice(i,1);
+  renderSplitModalBody();
+}
+// 數字輸入。
+//   ⚠ 【不重繪整個 body】—— 重繪會讓 input 失焦、一個數字打不完。只把 DOM 收回草稿。
+//   ⚠ 不收參數：值從 DOM 讀（單一來源，見 _splitSyncDraftFromDOM 的紅字）。
+function splitNumInput(){
+  _splitSyncDraftFromDOM();
+}
+
+// ── 品號選擇（搜尋框 + 下拉）──
+//  邏輯逐字照抄 umSearch / umSelect / umHideDrop（本檔搜 `function umSearch`），
+//  差別只有兩處：① id 前綴 sp- 而非 um-，② 多一個 side（from/to）維度。
+//  資料源的差異見 openSplitModal 那段的紅字說明 —— 那是【唯一】不可以照抄的地方。
+function splitSearch(i,side){
+  const inp=document.getElementById('sp-inp-'+i+'-'+side);
+  const drop=document.getElementById('sp-drop-'+i+'-'+side);
+  if(!inp||!drop)return;
+  const q=inp.value.trim().toLowerCase();
+  const codes=window._splitAllCodes||[];
+  const names=window._splitCodeNames||{};
+  const filtered=q?codes.filter(c=>String(c).toLowerCase().includes(q)||(names[c]||'').toLowerCase().includes(q)):codes;
+  drop.innerHTML=filtered.slice(0,80).map(c=>`<div onclick="splitSelect(${i},'${side}','${String(c).replace(/'/g,"\\'")}')" style="padding:6px 10px;font-size:12px;cursor:pointer;border-bottom:1px solid #f3f4f6;color:#374151" onmouseenter="this.style.background='#f0f4ff'" onmouseleave="this.style.background=''">${c}${names[c]?' – <span style=color:#6b7280>'+names[c]+'</span>':''}</div>`).join('');
+  drop.style.display=filtered.length?'':'none';
+}
+function splitSelect(i,side,code){
+  const inp=document.getElementById('sp-inp-'+i+'-'+side);
+  const sel=document.getElementById('sp-sel-'+i+'-'+side);
+  const drop=document.getElementById('sp-drop-'+i+'-'+side);
+  const names=window._splitCodeNames||{};
+  if(inp)inp.value=code+(names[code]?' – '+names[code]:'');
+  if(sel)sel.value=code;
+  if(drop)drop.style.display='none';
+  _splitSyncDraftFromDOM();   // 值一律從 DOM 收回，不在這裡直接寫草稿（單一來源，見該函式的紅字）
+}
+function splitHideDrop(i,side){
+  const drop=document.getElementById('sp-drop-'+i+'-'+side);
+  if(drop)drop.style.display='none';
+}
+// 一格品號選擇器的 HTML。兩側（from/to）共用，結構照抄 openUnmatchedModal 的 um-wrap 那塊。
+function _splitPickerHtml(i,side,code){
+  const names=window._splitCodeNames||{};
+  const shown=code?(code+(names[code]?' – '+names[code]:'')):'';
+  const ph=side==='from'?'搜尋 A（搬出）編號 / 名稱…':'搜尋 B（搬入）編號 / 名稱…';
+  return `<div style="position:relative">
+    <input id="sp-inp-${i}-${side}" type="text" placeholder="${ph}" value="${escapeHtmlLike(shown)}"
+      oninput="splitSearch(${i},'${side}')" onfocus="splitSearch(${i},'${side}')" onblur="setTimeout(()=>splitHideDrop(${i},'${side}'),200)"
+      style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:12px">
+    <input type="hidden" id="sp-sel-${i}-${side}" value="${escapeHtmlLike(code||'')}">
+    <div id="sp-drop-${i}-${side}" style="display:none;position:absolute;top:100%;left:0;width:280px;background:white;border:1.5px solid #e5e7eb;border-radius:6px;max-height:140px;overflow-y:auto;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.12);text-align:left"></div>
+  </div>`;
+}
+
+function renderSplitModalBody(){
+  const body=document.getElementById('split-modal-body');
+  if(!body)return;
+  const rows=Array.isArray(_splitDraft)?_splitDraft:[];
+  const rowsHtml=rows.map((r,i)=>`
+    <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:700;color:#5b5fcf">第 ${i+1} 組</span>
+        <button onclick="splitRemoveRow(${i})" style="padding:3px 10px;border:1.5px solid #e5e7eb;border-radius:6px;background:white;font-size:11px;color:#ef4444;cursor:pointer">移除這組</button>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="flex:1 1 210px;min-width:180px">
+          <div style="font-size:11px;color:#9ca3af;font-weight:600;margin-bottom:3px">A 品號（搬出）</div>
+          ${_splitPickerHtml(i,'from',r.from)}
+        </div>
+        <div style="flex:1 1 210px;min-width:180px">
+          <div style="font-size:11px;color:#9ca3af;font-weight:600;margin-bottom:3px">B 品號（搬入）</div>
+          ${_splitPickerHtml(i,'to',r.to)}
+        </div>
+        <div style="flex:0 1 120px;min-width:100px">
+          <div style="font-size:11px;color:#9ca3af;font-weight:600;margin-bottom:3px">搬運營收</div>
+          <input id="sp-rev-${i}" type="number" value="${Number.isFinite(r.rev)?r.rev:0}" oninput="splitNumInput()"
+            style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:12px;font-variant-numeric:tabular-nums">
+        </div>
+        <div style="flex:0 1 120px;min-width:100px">
+          <div style="font-size:11px;color:#9ca3af;font-weight:600;margin-bottom:3px">搬運毛利</div>
+          <input id="sp-gross-${i}" type="number" value="${Number.isFinite(r.gross)?r.gross:0}" oninput="splitNumInput()"
+            style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:12px;font-variant-numeric:tabular-nums">
+        </div>
+      </div>
+    </div>`).join('');
+  const empty=rows.length?'':`<div style="color:#9ca3af;font-size:13px;padding:18px 0;text-align:center">還沒有任何一組。按下面的「＋ 新增一組」開始。</div>`;
+  body.innerHTML=`${empty}${rowsHtml}
+    <button onclick="splitAddRow()" style="padding:7px 16px;border:1.5px dashed #5b5fcf;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#5b5fcf;cursor:pointer">＋ 新增一組</button>`;
+}
+
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
@@ -2319,6 +2515,7 @@ function shopHTML(shop){return`
       <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
       <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
       <button class="col-pick-btn tagfx-btn" onclick="openTagFxModal('${shop}')">📈 標籤成效</button>
+      ${shop!==TEST_SHOP_ID?`<button class="col-pick-btn" id="split-btn-${shop}" onclick="openSplitModal('${shop}')">⚖ 拆分試算</button>`:''}
     </div>
     <div id="tbl-${shop}">
       <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">選擇區間後上傳報表，按「▶ 產生並儲存」</div></div>
@@ -21239,4 +21436,8 @@ Object.assign(window, {
   // 批次加/移除標籤。前四個是工具列與彈窗的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效。
   openBatchTagPanel,closeBatchTagPanel,renderBatchTagPanelBody,confirmBatchTag,_batchUseEnd,
   saveProdTagsBatch,
+  // 拆分試算。全部是工具列那顆鈕與彈窗內的 inline onclick / oninput / onfocus / onblur 用，
+  //   漏掛任何一個都會 ReferenceError、那顆按鈕或那格輸入框靜默失效。
+  openSplitModal,closeSplitModal,renderSplitModalBody,
+  splitAddRow,splitRemoveRow,splitNumInput,splitSearch,splitSelect,splitHideDrop,
 });
