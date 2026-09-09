@@ -966,7 +966,7 @@ Object.assign(App, {
     };
     // 從新品毛利表讀取實際數據計算選品得分
     const mgQKey = activeQ === 'Q3' ? 'ec.d2.margin' : `ec.d2.margin.${activeQ.toLowerCase()}`;
-    const mgList = Store.get(mgQKey, []).filter(r => !r.old);
+    const mgList = Store.get(mgQKey, []);
     const mgProfits = mgList.map(r => { const c = Number(r.cost||0), v = Number(r.rev||0); return v - c; });
     const actualCount = mgList.length;
     const actual10k = mgProfits.filter(p => p > 10000).length;
