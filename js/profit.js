@@ -1540,7 +1540,7 @@ async function _momoFullPushDeleteGuard(taskKeys){
   if(keys.some(isAppProfitField)){ try{ const s=await window.__cloudProfit.getDoc(); appProfit=(s&&s.exists&&s.exists())?(s.data()||{}):{}; }catch(e){ appProfit=null; } }
   for(const k of keys){
     if(k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_moplus_origins|') || k==='ec_momo_cost_by_origin' || k.startsWith('ec_momo_optlog|')
-       || _notesUsesMerge(k) || _editsUsesMerge(k) || cupIsNoteKey(k)) continue;   // 各有自己的機制：optlog / ec_notes / ec_edits / 酷澎備註走 read-merge-write（不刪除同事的、不需 willDelete 擋，且自由文字會誤報）；products/origins 版本比對；cost merge；蝦皮報表另議
+       || _notesUsesMerge(k) || _editsUsesMerge(k) || cupIsNoteKey(k) || k.startsWith('ec_momo_f1102|')) continue;   // 各有自己的機制：optlog / ec_notes / ec_edits / 酷澎備註走 read-merge-write（不刪除同事的、不需 willDelete 擋，且自由文字會誤報）；products/origins 版本比對；cost merge；蝦皮報表另議；f1102 乙配寄倉＝單一寫者、每次全快照覆蓋（今天匯出取代 08/18 舊快照），willDelete 又遞迴葉節點(每品號10欄)把「差5品號」灌成「刪50」假警告 → 比照 products/coupang 排除
     //   🔴 2026-09-03 起 ec_notes【整類】排除（判準統一走 _notesUsesMerge），不再只排除 _growth。
     //     為什麼廣告調整也必須排除（不是順手）：本守衛算 willDelete 用的是 momoCloudDeleteCount，
     //     它遞迴到 adjustments 陣列、用 _momoStableStr（整個物件序列化）當元素身分 →
@@ -13125,7 +13125,7 @@ async function momoOpenSyncPreview(shop){
             it.willMerge=Object.keys(_c).filter(c=>!_s.has(String(c)) && !Object.prototype.hasOwnProperty.call(_l,c)).length; }
         }catch(e){}
       }
-      else if(it.kind!=='MOMO商品主檔' && it.kind!=='MO+逐列成本' && it.kind!=='酷澎報表' && it.kind!=='酷澎退貨'){ it.willDelete=momoCloudDeleteCount(it.localVal, it._cloudVal); }   // 酷澎報表/退貨整份覆蓋（regenerate=整月新報表）＋雲端 doc 帶 updatedAt 本機無 → doc 級 willDelete 假陽性，排除（狀態已由 rows/byOrder 比對反映）
+      else if(it.kind!=='MOMO商品主檔' && it.kind!=='MO+逐列成本' && it.kind!=='酷澎報表' && it.kind!=='酷澎退貨' && it.kind!=='MOMO寄倉庫存'){ it.willDelete=momoCloudDeleteCount(it.localVal, it._cloudVal); }   // 酷澎報表/退貨整份覆蓋＋雲端 updatedAt 本機無→假陽性排除；MOMO寄倉庫存(f1102)＝單一寫者全快照覆蓋、momoCloudDeleteCount 遞迴葉節點(每品號10欄)灌水成假警告 → 排除（比照全推 guard 1543）
 
     }
   });
