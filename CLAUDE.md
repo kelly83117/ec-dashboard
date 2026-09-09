@@ -159,22 +159,44 @@ ESM 有個致命陷阱必須牢記：
 - `Store` 是 localStorage 包裝層（含 `_mem` / `_profitMem` 記憶體鏡像）。
 - 版本號 `<meta app-version>` 每次部署都要更新，`version.js` 才會清舊快取。
 
-### 版本號 bump 規則（共 15 處）
-改任何檔案（**含 CSS**）都要 bump 版本號，一次要改 **15 處**：
-- `index.html` 的 `<meta name="app-version">`（1 處）
-- `index.html` 的 `<script src="js/main.js?v=">`（1 處）
-- `index.html` 的 3 個 `<link rel="stylesheet" href="css/*.css?v=">`（3 處，
-  main.css / profit.css / daily-adjustments.css）
-- `js/main.js` 裡 10 個 import 的 `?v=`（10 處）
+### 版本號 bump 規則（🔴 分兩條：動 runtime 走本機原子合併、純文件用按鈕）
+
+版號散在 **15 處**（下列）。**為什麼要有流程**：每支 feature PR 若各自 bump，就會在這
+15 行互相衝突（天天在收的合併稅），還常手動漏改一兩處。**根治＝feature 分支一律不碰
+版號，改由合併端統一 bump。** 但 bump 若晚於部署就出事，見下方空窗實測。
+
+⚠️ **空窗風險（實測，不是理論）**：feature 合併進 `main` 後、bump 前，`main` 是
+「**新 code + 舊版號**」。若 GitHub Pages 在這空窗部署，使用者拿到新 code + 舊版號 →
+`version.js` 偵測不到新版 → 快取不刷新 → 拿到**舊 CSS/JS**（v226→227 血淚同類）。
+**這個 repo 實測部署延遲 40 秒 ～ 5 分鐘、會抖**（2026-09-09 量 5 次部署，最快 40s）——
+所以「按鈕合併後追著跑 bump」靠人手速**不可靠**：踩到 40s 部署就來不及。因此規則如下。
+
+**A. 動到 runtime（`js/` 或 `css/`）的 PR → 本機原子合併（唯一正規流程，零空窗）：**
+```bash
+git checkout main && git pull origin main
+git merge <feature 分支>          # 本機合，不要用 GitHub 按鈕
+node bump-version.js <新版號>      # 同一個工作區；例 2026-09-09-658（比 main 現值 +1，--check 會告訴你現值）
+git add index.html js/main.js && git commit -m "chore: bump version to <新版號>"
+git push                          # merge + bump 同一次 push
+```
+→ merge 與 bump 在**同一次 push** 送上去，Pages 部署到的必定是「新 code + 新版號」，
+**零空窗**，不管部署 40 秒還 5 分鐘都安全。`bump-version.js`（repo 根目錄）自動偵測
+index.html 現版號 → 換全部 15 處（index.html 5＋js/main.js 10）→ **自動 grep 驗證**
+（次數對＝5/10、舊版號零殘留），任一項不符就非零離開、不留半套；`--check` 可單獨複查。
+版號**比 `main` 現值大**即可（不要憑記憶，`--check` 或搜 `app-version` 看現值）。
+
+**B. 純文件 / 腳本 PR（不動 `js/`、`css/`）→ 用 GitHub 按鈕合併即可，不需 bump。**
+沒動 runtime 就沒有快取失效問題，也就沒有空窗；這支 PR 本身就是 B 類。
+
+**15 處是哪些**（`bump-version.js` 自動處理，人工不用逐一改）：`index.html` 的
+app-version meta ×1、main.js `?v=` ×1、3 個 CSS `?v=` ×3；`js/main.js` 10 個 import `?v=` ×10。
 
 ⚠️ **CSS 的 `?v=` 一定要一起改（2026-07-29 血淚教訓 v226→227）**：CSS `<link>`
 沒有 `?v=` 時，`version.js` 只清 Cache API（Service Worker）、碰不到瀏覽器
 HTTP 磁碟快取，`location.reload()` 又是同一個 URL → 改了 CSS 卻餵回舊的，
 使用者（尤其不清快取的同事）整批 `.mm-*` 樣式看不到、版面全跑掉。CSS 帶
-`?v=` 後才跟 JS 一樣改版即刷新。
-
-新版號要**比目前檔案裡的、也比 `main` 上的都大**。`main` 有時會回退，
-**一定要當場去檔案裡搜 `app-version` 確認現在的號碼**，不要憑記憶。
+`?v=` 後才跟 JS 一樣改版即刷新。這也是版號存在的唯一理由——每次部署每個資源
+都要換 URL 炸 disk cache；`bump-version.js` 保證 15 處同步、不漏。
 
 ### 舊版 Apps Script
 - `apps-script.gs` 的自動同步已停用，僅保留空函式避免殘留觸發報錯。新功能
