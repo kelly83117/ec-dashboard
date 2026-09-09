@@ -3128,9 +3128,27 @@ Object.assign(App, {
         </table></div>
       </div>`;
     })();
+    // 統計
+    const profits = list.map(r => { const c = Number(r.cost||0), v = Number(r.rev||0); return v - c; });
+    const cnt10k = profits.filter(p => p > 10000).length;
+    const cnt8k  = profits.filter(p => p > 8000).length;
+    const cnt5k  = profits.filter(p => p > 5000).length;
+    const statCard = (label, value, color) =>
+      `<div style="flex:1;min-width:120px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 16px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:${color}">${value}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:3px">${label}</div>
+      </div>`;
+    const statsHtml = list.length === 0 ? '' :
+      `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        ${statCard('新品總數', list.length + ' 筆', '#374151')}
+        ${statCard('毛利 > 10,000', cnt10k + ' 筆', cnt10k > 0 ? '#059669' : '#9ca3af')}
+        ${statCard('毛利 > 8,000',  cnt8k  + ' 筆', cnt8k  > 0 ? '#2563eb' : '#9ca3af')}
+        ${statCard('毛利 > 5,000',  cnt5k  + ' 筆', cnt5k  > 0 ? '#f59e0b' : '#9ca3af')}
+      </div>`;
     return `
       ${qTabsHtml}
       ${savesHtml}
+      ${statsHtml}
       <div class="table-card">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div><h3>📊 新品毛利表</h3><p>記錄商品成本與營收，自動計算毛利與毛利率（共 ${list.length} 筆）</p></div>
