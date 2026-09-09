@@ -1306,6 +1306,7 @@ function _showSyncBtn(shop){
     btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent=`☁ 同步雲端 (${n})`;
   }
   if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn();   // MOMO 頁那顆同步鈕跟著刷新（同一個 pending 來源）
+  if(typeof cupRefreshSyncBtn==='function' && typeof _cupShop!=='undefined' && _cupShop) cupRefreshSyncBtn(_cupShop);   // 酷澎分頁那顆同步鈕跟著刷新（存報表→pending→即時點亮，同一個 pending 來源）
 }
 // ══════ ec_edits 升級補登記（一次性、冪等）══════
 //  問題：ec_edits_dirty（key 級）是 09/02 就上線的，操作人員機器上【已經有值】；而品號級
@@ -10215,13 +10216,11 @@ function onCupMonthChange(shop,platform,sel){
   _cupPeriod[shop].month=sel.value;
   if(platform==='coupang'){_cupPeriod[shop].half='full';}
   updateCupHalfSelect(shop,platform);
-  if(platform==='coupang'&&shop!=='總表')cupTryLoadSaved(shop);
-  if(platform==='coupang'&&shop==='總表')syncCoupangSummaryFromKpi();
+  if(platform==='coupang'&&shop==='總表')syncCoupangSummaryFromKpi();   // cupTryLoadSaved 死路徑已移除；非總表酷澎的舊 render 由 cupRenderShop 取代
 }
 function onCupHalfChange(shop,platform,sel){
   _cupPeriod[shop]=_cupPeriod[shop]||{month:'2026/06',half:'first'};
   _cupPeriod[shop].half=sel.value;
-  if(platform==='coupang')cupTryLoadSaved(shop);
 }
 function updateCupHalfSelect(shop,platform){
   const p=_cupPeriod[shop]||{month:'2026/06',half:'first'};
@@ -10521,9 +10520,7 @@ function momoShopHTML(shop,platform='momo'){
       </div>
       <div style="display:flex;gap:8px">
         ${uploadBtn}
-        ${isCoupang
-          ?`<button class="export-btn" id="cup-sync-${shop}" disabled style="opacity:0.4;cursor:default" onclick="syncCoupangToCloud('${shop}')">☁ 同步雲端</button>`
-          :`<button class="export-btn" disabled style="opacity:0.4;cursor:default">☁ 同步雲端</button>`}
+        <button class="export-btn" disabled style="opacity:0.4;cursor:default">☁ 同步雲端</button>
         <button class="export-btn" disabled style="opacity:0.4;cursor:default">⬇ 匯出 Excel</button>
       </div>
     </div>
@@ -13040,13 +13037,20 @@ function _momoCollectPending(shop){
   // cost_by_origin 現已上雲（momo_cost_by_origin collection）→ 走上面 pending 流程當正常同步項（不再 localonly）。meta 隨 cost 一起 read-merge-write、不單列。
   return items;
 }
-async function momoOpenSyncPreview(shop){
+async function momoOpenSyncPreview(shop, opts){
   if(!window.__cloudProfit){
     if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'雲端尚未就緒，請重新整理後再同步。',kind:'warn'});
     else if(typeof showToast==='function') showToast('雲端未連線','error');
     return;
   }
-  const items=_momoCollectPending(shop);
+  let items=_momoCollectPending(shop);
+  // 酷澎分頁入口（opts.scope==='coupang'）：收集後只留酷澎三 kind ＋該賣場（key 第 2 段），
+  //   其餘通路（MOMO/蝦皮）的 pending 不進此預覽也不會被推 → 保證「只推酷澎」。
+  //   不傳 opts（MOMO/蝦皮全域鈕）＝原況：列全部 pending，零影響。
+  if(opts && opts.scope==='coupang'){
+    const only=opts.shop;
+    items=items.filter(it=>(it.kind==='酷澎報表'||it.kind==='酷澎退貨'||it.kind==='酷澎備註') && (!only || String(it.key).split('|')[1]===only));
+  }
   let cloud={};
   try{ const snap=await window.__cloudProfit.getDoc(); cloud=snap.exists()?(snap.data()||{}):{}; }
   catch(e){ const m=(e&&e.message)||String(e); if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'讀取雲端失敗',message:'無法讀取雲端現況，請稍後再試。',detail:m,kind:'error'}); else if(typeof showToast==='function') showToast('讀取雲端失敗','error'); return; }
@@ -13277,9 +13281,10 @@ async function momoOpenSyncPreview(shop){
   });
   // #3：把這次預覽的比對快照 + 差異明細寫進 __lastSyncReport（MOMO 同步先前完全沒診斷輸出）。confirm 後 syncToCloud 會再覆寫成 'done'。
   try{ window.__lastSyncReport={ ts:Date.now(), mode:'momo-preview', shop, items:items.map(it=>({key:it.key,kind:it.kind,localCount:it.localCount,cloudCount:it.cloudCount,status:it.status,diff:it.diff,diffErr:it.diffErr})) }; }catch(e){}
-  momoRenderSyncPreviewModal(shop, items);
+  momoRenderSyncPreviewModal(shop, items, opts);
 }
-function momoRenderSyncPreviewModal(shop, items){
+function momoRenderSyncPreviewModal(shop, items, opts){
+  const _isCup=!!(opts && opts.scope==='coupang');   // 酷澎入口：隱藏「匯出成本表 CSV」（那是 MOMO 成本表推送前備份、對酷澎無意義）
   let ov=document.getElementById('momo-sync-overlay');
   if(!ov){ ov=document.createElement('div'); ov.id='momo-sync-overlay'; document.body.appendChild(ov); }
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -13361,7 +13366,7 @@ function momoRenderSyncPreviewModal(shop, items){
       ${unchangedHtml}
     </div>
     <div style="padding:14px 20px;border-top:1px solid #eef0f2;display:flex;gap:10px;justify-content:space-between;align-items:center">
-      <div><button onclick="momoExportCostByOrigin()" style="padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#5b5fcf;font-size:12px;cursor:pointer" title="推送前備份：成本表 6683 筆首次上雲、逐 key merge 尚未經真檔驗證 → 先匯出 CSV 存可還原副本再推">⬇ 匯出成本表 CSV（推送前備份）</button></div>
+      <div>${_isCup?'':`<button onclick="momoExportCostByOrigin()" style="padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#5b5fcf;font-size:12px;cursor:pointer" title="推送前備份：成本表 6683 筆首次上雲、逐 key merge 尚未經真檔驗證 → 先匯出 CSV 存可還原副本再推">⬇ 匯出成本表 CSV（推送前備份）</button>`}</div>
       <div style="display:flex;gap:10px">
         <button onclick="momoCloseSyncPreview()" style="padding:7px 16px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>
         <button id="mm-sync-confirm-btn" onclick="momoConfirmSync('${shop}')" ${changed.length?'':'disabled'} style="padding:7px 18px;border-radius:7px;border:none;background:${changed.length?'#10b981':'#c7c9e6'};color:#fff;font-size:13px;font-weight:600;cursor:${changed.length?'pointer':'default'}">確認同步${changed.length?'（'+changed.length+' 項）':''}</button>
@@ -18628,10 +18633,6 @@ function momoOvBuildCharts(period, perShop){
 // PR-4：System A（cupLsKey / cupLsSave / cupLsLoad，4 段 ec_coupang|shop|month|half）已移除。
 //   舊版 syncCoupangToCloud 讀 System A、generateCoupang 存 System B → key 對不上、同步鈕靜默失效。
 //   統一走 canonical 3 段 ec_coupang|shop|month（見 cupReportKey）＋ 退貨 ec_coupang_msf|shop|src。
-function cupShowSyncBtn(shop){
-  const btn=document.getElementById('cup-sync-'+shop);
-  if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';btn.textContent='☁ 同步雲端';}
-}
 // PR-4：canonical 逐月一筆 ec_coupang|<shop>|<YYYY-MM> = {month,rows,ts}（rows 含 note；退貨 res 拆到 ec_coupang_msf）。
 //   ⚠ 段數守衛只認【3 段】：雲端現存 4 段舊格式 ec_coupang|shop|month|half 一律不碰（留 PR-5 歸檔、九處都用守衛擋掉）。
 function cupNormMonth(m){ return String(m||'').replace('/','-'); }   // '2026/07'→'2026-07'
@@ -18647,6 +18648,35 @@ function cupSaveReport(shop, month, rows, orderNos){ const k=cupReportKey(shop,m
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=payload; }catch(e){}   // 🔴 PR-3b bug 修：cupLoadReport 讀 _profitMem 優先；雲端舊 maji_YYYY-MM(無 stock/dispId)開頁灌進 _profitMem→只寫 _mem/localStorage 會被舊 _profitMem 蓋掉→總表庫存/站內編號顯示不出來（比照 momoSaveProducts 三鏡像一致）
   try{ window._momoJustSaved=Date.now(); }catch{}   // 剛存過守衛：5s 內雲端 echo 不覆蓋 _profitMem（雙保險，_markPending 已入 pending）
   _markPending(k); }
+// ══════ 酷澎分頁「☁ 同步雲端」鈕（比照 MOMO momo-sync-btn；PR：酷澎入口補齊）══════
+//   只推酷澎前綴的 pending（報表 ec_coupang| ＋ 退貨 ec_coupang_msf| ＋ 備註 ec_coupang_note|），
+//   不順帶推 MOMO/蝦皮；復用 syncToCloud(shop, allowKeys) 既有分派（setReport/setSrc/note merge）。
+//   不做逐項預覽：酷澎每 shop-month 一 doc、單一寫者、整份覆蓋、willDelete 已排除（見 syncToCloud 內酷澎分派）。
+//   唯讀角色由 app.js 三道防線擋：__RO_WRITE_RE 已含 cupSyncToCloud（點擊攔截＋.ro-blocked 灰底），
+//   且 __installReadonlyCloudGuard 把 __cloudCoupang* 寫入 no-op（真正防線在資料層）。
+function _cupPendingKeys(shop){   // 待同步集合中屬酷澎的 key；給 shop 時只取該賣場（key 第 2 段）
+  const out=[];
+  try{ _pendingSyncKeys.forEach(k=>{
+    if(!(cupIsReportKey(k)||cupIsMsfKey(k)||cupIsNoteKey(k))) return;
+    if(shop && String(k).split('|')[1]!==shop) return;
+    out.push(k);
+  }); }catch(e){}
+  return out;
+}
+function cupRefreshSyncBtn(shop){   // 依酷澎 pending 點亮(琥珀)/淡灰（唯讀估算、只決定亮暗，比照 momoRefreshSyncBtn）
+  const btn=document.getElementById('cup-sync-btn-'+shop);
+  if(!btn) return;
+  const has=_cupPendingKeys(shop).length>0;
+  if(has){ btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b'; }
+  else   { btn.disabled=true; btn.style.opacity='0.4';btn.style.cursor='default';btn.style.background='#fff';btn.style.color='#6b7280';btn.style.borderColor='#e5e7eb'; }
+  btn.textContent='☁ 同步雲端';
+}
+function cupSyncToCloud(shop){
+  // 開同步預覽（複用 MOMO momoOpenSyncPreview，scope 限酷澎該賣場）：列變更／雲端較新／差異明細 → 勾選確認才推。
+  //   只列＋只推酷澎（scope filter 在 momoOpenSyncPreview / momoConfirmSync 走 syncToCloud(shop, 勾選keys)）。
+  //   confirm 推成功後：syncToCloud 尾端 +2s _showSyncBtn() → 已掛 cupRefreshSyncBtn(_cupShop) → 本鈕自動變暗。
+  return momoOpenSyncPreview(shop, {scope:'coupang', shop:shop});
+}
 // MSF doc 存【原始 byOrder】非解析結果（PR-2 設計：coupangResolveReturns 是讀取端）。
 //   src＝MSF 自身月份（銷售確認日期的眾數月）→ 同一份 MSF 不論配哪個訂單檔上傳，都寫同一 doc（覆蓋、不累加、不雙重計算）。
 function cupSaveReturns(shop, src, msfRaw){ const k=cupMsfKey(shop,src);
@@ -18687,60 +18717,9 @@ function cupListMsfDocs(shop){ const pre='ec_coupang_msf|'+shop+'|'; const out=[
   return out; }
 function cupPrevMonth(month){ const m=cupNormMonth(month).match(/(\d{4})-(\d{2})/); if(!m)return null; const t=(+m[1])*12+(+m[2]-1)-1; return Math.floor(t/12)+'-'+String(t%12+1).padStart(2,'0'); }
 const _cupSelMonth={};   // shop → 目前選的月份 'YYYY-MM'
-function cupTryLoadSaved(shop){
-  const saved=cupLoadReport(shop);   // PR-3 新版格式
-  if(saved&&saved.rows){
-    _cupMergedRows[shop]=saved.rows;
-    _cupReturns[shop]=saved.res||{byMonth:{},pending:[],pendingTotal:0,pendingN:0,missingOrderFiles:[]};
-    if(saved.month)_cupPeriod[shop]={month:saved.month, half:'full'};
-    // KPI（缺成本不進淨利分母）
-    const covered=saved.rows.filter(r=>r.costStatus==='ok');
-    const totalRev=saved.rows.reduce((s,r)=>s+(r.rev||0),0);
-    const coveredNet=covered.reduce((s,r)=>s+(r.net||0),0), coveredRev=covered.reduce((s,r)=>s+(r.rev||0),0);
-    const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
-    set('cup-kv-rev-'+shop,'NT$ '+Math.round(totalRev).toLocaleString());
-    set('cup-kv-net-'+shop,'NT$ '+Math.round(coveredNet).toLocaleString());
-    set('cup-kv-rate-'+shop,(coveredRev>0?(coveredNet/coveredRev*100).toFixed(1)+'%':'—'));
-    renderCoupangReturnsBanner(shop, _cupReturns[shop], saved.rows, !!(_cupReturns[shop]&&(Object.keys(_cupReturns[shop].byMonth||{}).length||_cupReturns[shop].pendingN)));   // 舊佔位路徑：有退貨內容才視為已傳 MSF
-    renderCoupangTableBody(shop);
-    cupShowSyncBtn(shop);
-  }else{
-    const tbl=document.getElementById('cup-tbl-'+shop);
-    if(tbl)tbl.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">上傳「我的訂單」（＋選填 MSF）後按「▶ 產生並儲存」</div></div>`;
-    const revEl=document.getElementById('cup-kv-rev-'+shop);
-    const netEl=document.getElementById('cup-kv-net-'+shop);
-    const rateEl=document.getElementById('cup-kv-rate-'+shop);
-    if(revEl)revEl.textContent='—';
-    if(netEl)netEl.textContent='—';
-    if(rateEl)rateEl.textContent='—';
-    const btn=document.getElementById('cup-sync-'+shop);
-    if(btn){btn.disabled=true;btn.style.opacity='0.4';btn.style.cursor='default';btn.style.background='';btn.style.color='';btn.style.borderColor='';btn.textContent='☁ 同步雲端';}
-  }
-}
-function syncCoupangToCloud(shop){
-  const btn=document.getElementById('cup-sync-'+shop);
-  if(btn){btn.disabled=true;btn.textContent='同步中…';}
-  if(!window.__cloudCoupang || !window.__cloudCoupangMsf){   // PR-4：改推 coupang_reports / coupang_msf collection
-    if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'雲端尚未就緒，請重新整理。',kind:'warn'});
-    else if(typeof showToast==='function') showToast('雲端未連線','error');
-    if(btn)cupShowSyncBtn(shop);
-    return;
-  }
-  const month=_cupSelMonth[shop]||'';
-  const rep=month?cupLoadReport(shop,month):null;            // 讀 canonical 報表（_profitMem→_mem→localStorage，與推送同源）
-  if(!rep){ if(btn)cupShowSyncBtn(shop); return; }           // 沒報表可推
-  const jobs=[ window.__cloudCoupang.setReport(shop, cupNormMonth(month), rep) ];
-  cupListMsfDocs(shop).forEach(d=>{ const v=cupLoadReturns(shop,d.src); if(v) jobs.push(window.__cloudCoupangMsf.setSrc(shop, d.src, v)); });   // MSF 以自身月為鍵，全數推（通常 1-2 份）
-  Promise.all(jobs).then(()=>{
-    if(btn){btn.textContent='✓ 已同步';btn.style.background='#10b981';btn.style.borderColor='#10b981';}
-  }).catch(e=>{
-    const msg=(e&&e.message)||String(e);
-    if(window.App&&typeof App.showAlertModal==='function'){
-      App.showAlertModal({title:'同步失敗',message:'資料還在本機，請稍後再試。',detail:msg,kind:'error'});
-    }else if(typeof showToast==='function') showToast('同步失敗：'+msg,'error');
-    cupShowSyncBtn(shop);
-  });
-}
+// ⚠ 舊酷澎 render 路徑 cupTryLoadSaved / syncCoupangToCloud / cupShowSyncBtn（pre-PR-3b）已移除：
+//   零活呼叫（只掛在永不 render 的 momoShopHTML isCoupang 分支）。現行酷澎走 cupRenderShop
+//   ＋分頁同步鈕 cupSyncToCloud（只推酷澎 pending、復用 syncToCloud 分派）。
 
 function setMomoShop(shop,btn){
   const prevShop=curMomoShop;   // 切換前的賣場（用來搬子分頁 + 判斷是否真的換賣場）
@@ -19388,10 +19367,12 @@ function cupRenderShop(shop){
   }).join('');
   el.innerHTML=`
     <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center">${pills}
-      <button onclick="cupExportExcel('${shop}')" style="margin-left:auto;padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;border:1px solid #e5e7eb;background:#fff;color:#6b7280;cursor:pointer">⬇ 匯出 Excel</button>
+      <button id="cup-sync-btn-${shop}" onclick="cupSyncToCloud('${shop}')" disabled style="margin-left:auto;padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;border:1px solid #e5e7eb;background:#fff;color:#6b7280;opacity:0.4;cursor:default">☁ 同步雲端</button>
+      <button onclick="cupExportExcel('${shop}')" style="padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;border:1px solid #e5e7eb;background:#fff;color:#6b7280;cursor:pointer">⬇ 匯出 Excel</button>
     </div>
     <div id="cup-sub-content-${shop}"></div>`;
   cupRenderSub(shop);
+  cupRefreshSyncBtn(shop);   // 依酷澎 pending 點亮(琥珀)/淡灰
 }
 function cupSetSub(shop,id){ _cupSub[shop]=id; cupRenderShop(shop); }
 function cupRenderSub(shop){
@@ -20085,7 +20066,7 @@ function cupColDrop(e,shop,targetKey){
 }
 function cupColDragEnd(e){e.currentTarget.classList.remove('col-dragging');document.querySelectorAll('.col-drag-over').forEach(el=>el.classList.remove('col-drag-over'));}
 
-// renderCoupangTable（舊 17.5% 版）已於 PR-3 移除 —— 新版走 renderCoupangReport（generateCoupang）＋ cupTryLoadSaved。
+// renderCoupangTable（舊 17.5% 版）已於 PR-3 移除 —— 新版走 generateCoupang ＋ cupRenderShop / cupRenderProfitBody。
 // 點欄位標題排序：跟 setSort 一樣三段循環（大到小→小到大→還原原始順序），每個賣場各自記自己的排序狀態。
 const _cupSort={};
 function cupSetSort(shop,col){
@@ -21173,7 +21154,7 @@ Object.assign(window, {
   deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,editKpiMergedFieldHinted,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
-  closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,syncCoupangToCloud,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
+  closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
   // 對帳分頁的三個 inline handler（分頁鈕 onclick / 四個檔案 input 的 onchange / 全部清除鈕）。
   //   ⚠ setReconTab 還會被 restoreProfitView 用 typeof 檢查後呼叫 —— 沒掛上去的話那條還原分支
   //     會靜默失效，使用者停在對帳頁時就會被彈回蝦皮（正是這輪要防的那件事）。
