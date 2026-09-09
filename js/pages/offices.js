@@ -3134,8 +3134,8 @@ Object.assign(App, {
     // 統計
     const profits = list.map(r => { const c = Number(r.cost||0), v = Number(r.rev||0); return v - c; });
     const cnt10k = profits.filter(p => p > 10000).length;
-    const cnt8k  = profits.filter(p => p > 8000).length;
-    const cnt5k  = profits.filter(p => p > 5000).length;
+    const cnt8k  = profits.filter(p => p > 8000 && p <= 10000).length;
+    const cnt5k  = profits.filter(p => p > 5000 && p <= 8000).length;
     const statCard = (label, value, color) =>
       `<div style="flex:1;min-width:120px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 16px;text-align:center">
         <div style="font-size:22px;font-weight:800;color:${color}">${value}</div>
@@ -3145,8 +3145,8 @@ Object.assign(App, {
       `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
         ${statCard('新品總數', list.length + ' 筆', '#374151')}
         ${statCard('毛利 > 10,000', cnt10k + ' 筆', cnt10k > 0 ? '#059669' : '#9ca3af')}
-        ${statCard('毛利 > 8,000',  cnt8k  + ' 筆', cnt8k  > 0 ? '#2563eb' : '#9ca3af')}
-        ${statCard('毛利 > 5,000',  cnt5k  + ' 筆', cnt5k  > 0 ? '#f59e0b' : '#9ca3af')}
+        ${statCard('毛利 8,001~10,000', cnt8k + ' 筆', cnt8k > 0 ? '#2563eb' : '#9ca3af')}
+        ${statCard('毛利 5,001~8,000',  cnt5k + ' 筆', cnt5k > 0 ? '#f59e0b' : '#9ca3af')}
       </div>`;
     return `
       ${qTabsHtml}
