@@ -3124,7 +3124,7 @@ Object.assign(App, {
                   <th style="padding:4px 8px;text-align:left;border:1px solid #fcd34d">樣式</th>
                   <th style="padding:4px 8px;text-align:left;border:1px solid #fcd34d">尺寸</th>
                   <th style="padding:4px 8px;text-align:right;border:1px solid #fcd34d">成本</th>
-                  <th style="padding:4px 8px;text-align:right;border:1px solid #fcd34d">售價</th>
+                  <th style="padding:4px 8px;text-align:right;border:1px solid #fcd34d">營收</th>
                 </tr></thead>
                 <tbody>${variants.map(v => `<tr>
                   <td style="padding:3px 8px;border:1px solid #fde68a">${escapeHtml(v.style||'—')}</td>
