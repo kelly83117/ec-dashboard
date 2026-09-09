@@ -5776,16 +5776,32 @@ function saveNotes(shop,notes,code){
   // 立即同步工作日誌摘要（不必等按 ☁ 同步雲端；silent 不顯示 toast 避免太吵）
   try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}
 }
-// xpN / xpM = 格子上那行灰色小字的兩個數字，由 renderTable 的索引（_crossPeriodIndexFor）餵進來。
-//   🔴 口徑：兩個數字都必須等於【點開彈窗後那一區實際列出的列數】，不是另外算一套。
-//     ・xpN（其他期間）——【廣告調整欄】才吃這個參數，對齊 renderPnmHistory 走 _noteHistory 那條分支。
-//                       【商品調整欄】不吃，改用本函式自己算出來的 histCount：它與
-//                       renderPnmHistory 的 _growth 分支同源同判準（同一把 ec_notes|{通路}_growth、
-//                       同一個 _inGrowthPeriod、同樣不合併同日、同樣不濾空字串），
-//                       從索引再算一次只會多一份會漂移的複本。
-//     ・xpM（洞察表）——兩欄共用，對齊 renderPnmInsight（同日合併成一列 + 長備註恆 1 列）。
-//   ⚠ 兩者都是 optional：不傳就是 0，那行小字整行不出現 → 其餘呼叫端（window 匯出的那支）行為不變。
-function buildNoteCell(shopKey,code,noteId,noteData,xpN,xpM){
+// xp = 格子上那行灰色小字要印的數字，由 renderTable 的索引（_crossPeriodIndexFor）餵進來。
+//
+//   🔴 刻意用 options 物件、不用位置參數（沿用本檔既有慣例，如 applyFilters(shop,{keepScroll:true})）：
+//     「哪一欄吃哪個數字」要在【呼叫點】就讀得出來。前一版是 (…,xpN,xpM) 兩個位置參數，
+//     商品調整欄得傳 `0` 佔位 —— 那個 0 看起來像「這一欄沒有其他期間計數」，實際上它有
+//     （由下方 histCount 自己算），是個會誘人去把它接上索引的陷阱。改成具名之後，
+//     兩個呼叫點各自只寫自己真的吃的那一個 key，沒有佔位、也沒有需要回頭查順序的參數。
+//
+//   ・廣告調整欄 → {otherPeriods:N}
+//       N 對齊 renderPnmHistory 走 _noteHistory 那條分支。
+//       這一欄【不吃 insight】：洞察表打的是商品層級的處置紀錄，語意上與商品調整同類、
+//       與廣告調整不同類；兩欄都印會讓同一個 M 在同一列出現兩次，被讀成 2 筆。
+//   ・商品調整欄 → {insight:M}
+//       M 對齊 renderPnmInsight（同日合併成一列 + 長備註恆 1 列）。
+//       這一欄【不吃 otherPeriods】：它的「其他期間」只能來自本函式自己算的 histCount ——
+//       與 renderPnmHistory 的 _growth 分支同源同判準（同一把 ec_notes|{通路}_growth、
+//       同一個 _inGrowthPeriod、同樣不合併同日、同樣不濾空字串）。外面再餵一份就是
+//       第二個來源，兩份在正常情況下相等、畫面上看不出來，只會在資料變形時靜默分岔。
+//
+//   🔴 這兩條互斥【由程式碼把關】，不是只寫在註解裡：傳錯 key 會 console.warn 並忽略。
+//     擋的是具體的回歸 —— 有人把 insight 接回廣告調整欄（洞察表數字又變兩份），
+//     或把 otherPeriods 接上商品調整欄（其他期間變兩個來源）。
+//
+//   ⚠ xp 整個是 optional：不傳就兩個都是 0、那行小字整行不出現 →
+//     其餘呼叫端（window 匯出的那支）行為不變。
+function buildNoteCell(shopKey,code,noteId,noteData,xp){
   let adjList=[];
   if(noteData){if(typeof noteData==='string')adjList=[{date:'',text:noteData}];else adjList=noteData.adjustments||[];}
   // 商品調整（_growth）：只取當期算顯示，其他期間僅計數（供格子上的「其他期間 N」）。非 _growth 時 histCount 恆 0、adjList 不動。
@@ -5817,8 +5833,16 @@ function buildNoteCell(shopKey,code,noteId,noteData,xpN,xpM){
   //   N 或 M 為 0 → 該段不出現；兩個都 0 → 整行不出現（空格子維持原本的「點此新增」）。
   //   ⚠ 這一行【不掛自己的 onclick】：它是 .note-adj-cell 的子節點，點下去冒泡到那格既有的
   //     openNotePopup —— 開的就是現在點格子開的同一個彈窗，不新增任何行為、不多一個進入點。
-  const _xN=isGrowth?histCount:(xpN||0);
-  const _xM=xpM||0;
+  //   ⚠ warn 不 throw：本函式在 800+ 列的 forEach 裡跑，throw 會讓整張表變空白
+  //     —— 為了一個開發期的接線錯誤炸掉正式站的表格，代價不成比例。
+  if(xp){
+    if(isGrowth&&xp.otherPeriods!==undefined)
+      console.warn('[buildNoteCell] 商品調整欄不吃 otherPeriods（它的 N 只能來自本函式的 histCount，餵第二份會漂移），本次忽略：',shopKey,code);
+    if(!isGrowth&&xp.insight!==undefined)
+      console.warn('[buildNoteCell] 廣告調整欄不吃 insight（洞察表只印在商品調整欄，兩欄都印會讓同一個數字在同一列出現兩次），本次忽略：',shopKey,code);
+  }
+  const _xN=isGrowth?histCount:((xp&&xp.otherPeriods)||0);
+  const _xM=isGrowth?((xp&&xp.insight)||0):0;
   const _xParts=[];
   if(_xN>0)_xParts.push(`其他期間 ${_xN}`);
   if(_xM>0)_xParts.push(`洞察表 ${_xM}`);
@@ -7502,7 +7526,7 @@ function renderTable(shop,list,opts){
     };
 
     const gnoteId=`gnote-${shop}-${r.code}`;
-    const noteCellHtml=buildNoteCell(noteKey,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})(),crossRead.n(r.code),crossRead.m(r.code));
+    const noteCellHtml=buildNoteCell(noteKey,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})(),{otherPeriods:crossRead.n(r.code)});
 
     if(!r.fromMobic){
       const adsId=`td-${shop}-${r.code}-adsFee`;
@@ -7511,7 +7535,7 @@ function renderTable(shop,list,opts){
         adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span>${_subAdsHtml(r)}</td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
         note:noteCellHtml,
-        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,growthNotesAll[r.code],0,crossRead.m(r.code)),
+        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,growthNotesAll[r.code],{insight:crossRead.m(r.code)}),
         prodTags:buildProdTagCell(shop,r.code),
       };
       const bodyCells=orderedCols.map(c=>{
@@ -7551,7 +7575,7 @@ function renderTable(shop,list,opts){
         note:noteCellHtml,
         growthRate:`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`,
         growthAnalysis:`<td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`,
-        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,growthNotesAll[r.code],0,crossRead.m(r.code)),
+        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,growthNotesAll[r.code],{insight:crossRead.m(r.code)}),
         prodTags:buildProdTagCell(shop,r.code),
       };
       html+=`<tr>
