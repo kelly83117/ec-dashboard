@@ -3152,9 +3152,12 @@ Object.assign(App, {
       <div class="table-card">
         <div class="table-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
           <div><h3>📊 新品毛利表</h3><p>記錄商品成本與營收，自動計算毛利與毛利率（共 ${list.length} 筆）</p></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <button id="mg-import-btn" style="padding:7px 16px;background:#1d4ed8;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">📥 匯入 Excel</button>
             <input id="mg-import-file" type="file" accept=".xlsx,.xls" style="display:none">
+            <button id="mg-old-import-btn" style="padding:7px 14px;background:#fff;color:#6b7280;border:1px solid #e5e7eb;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer" title="上傳庫存總表，系統自動記住舊品名稱，之後匯入新品時自動踢除">🗂 載入舊品清單</button>
+            <input id="mg-old-import-file" type="file" accept=".xlsx,.xls" style="display:none">
+            ${(() => { const op = Store.get('ec.d2.oldProducts', []); return op.length > 0 ? `<span style="font-size:11px;color:#9ca3af;padding:4px 10px;background:#f3f4f6;border-radius:20px">已載入 ${op.length} 個舊品</span>` : ''; })()}
             <button id="mg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
             ${list.length > 0 ? `<button id="mg-clear-btn" style="padding:7px 16px;background:#fff;color:#dc2626;border:1px solid #fca5a5;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">🗑 一鍵清除</button>` : ''}
           </div>
@@ -3264,6 +3267,52 @@ Object.assign(App, {
       this.render();
     });
 
+    // 載入舊品清單（庫存總表）
+    const oldImportBtn = document.getElementById('mg-old-import-btn');
+    const oldImportFile = document.getElementById('mg-old-import-file');
+    oldImportBtn?.addEventListener('click', () => oldImportFile?.click());
+    oldImportFile?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const XLSX = window.XLSX;
+          if (!XLSX) { showToast('Excel 解析器尚未載入，請稍後再試'); return; }
+          const wb = XLSX.read(ev.target.result, { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          if (data.length < 2) { showToast('檔案無資料'); return; }
+          const headers = data[0].map(h => String(h).trim());
+          const nameIdx = headers.findIndex(h => h === '商品名稱');
+          const timeIdx = headers.findIndex(h => h === '建立時間');
+          if (nameIdx < 0) { showToast('找不到「商品名稱」欄位'); return; }
+          const cutoff = new Date('2026-07-01');
+          const oldNames = new Set();
+          for (let i = 1; i < data.length; i++) {
+            const row = data[i];
+            const name = String(row[nameIdx] || '').trim();
+            if (!name) continue;
+            if (timeIdx >= 0) {
+              const t = String(row[timeIdx] || '').trim();
+              if (t) {
+                const dt = new Date(t.replace(' ', 'T'));
+                if (!isNaN(dt) && dt >= cutoff) continue; // 新品，不列入舊品清單
+              }
+            }
+            oldNames.add(name);
+          }
+          Store.set('ec.d2.oldProducts', [...oldNames]);
+          oldImportFile.value = '';
+          showToast(`舊品清單已載入，共 ${oldNames.size} 個，之後匯入新品時自動踢除`);
+          this.render();
+        } catch (err) {
+          showToast('載入失敗：' + err.message);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
     // 匯入 Excel
     const importBtn = document.getElementById('mg-import-btn');
     const importFile = document.getElementById('mg-import-file');
@@ -3287,11 +3336,14 @@ Object.assign(App, {
           if (nameIdx < 0 || revIdx < 0 || costIdx < 0) {
             showToast('找不到欄位：需要「商品名稱」「售價」「成本」'); return;
           }
+          const oldSet = new Set(Store.get('ec.d2.oldProducts', []));
           const map = new Map();
+          let skippedOld = 0;
           for (let i = 1; i < data.length; i++) {
             const row = data[i];
             const name = String(row[nameIdx] || '').trim();
             if (!name) continue;
+            if (oldSet.size > 0 && oldSet.has(name)) { skippedOld++; continue; }
             const rev  = Number(row[revIdx])  || 0;
             const cost = Number(row[costIdx]) || 0;
             if (map.has(name)) {
@@ -3315,7 +3367,8 @@ Object.assign(App, {
           saves.unshift({ ts, data: merged });
           Store.set(savesKey, saves);
           importFile.value = '';
-          showToast(`匯入完成，共 ${merged.length} 個商品，已自動存檔`);
+          const skipMsg = skippedOld > 0 ? `（已踢除 ${skippedOld} 筆舊品）` : '';
+          showToast(`匯入完成，共 ${merged.length} 個商品${skipMsg}，已自動存檔`);
           this.render();
         } catch (err) {
           showToast('匯入失敗：' + err.message);
