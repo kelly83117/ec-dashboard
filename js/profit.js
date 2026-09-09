@@ -2450,6 +2450,9 @@ function tryLoadSaved(shop){
     //   ⚠ clearPeriod 曾經也有這三行，2026-08-17 一起移除了：它改成【只清上傳紀錄、不刪報表】之後
     //     不再動 _built，前提就消失了 —— 報表還在，_filtered 與批次選取本來就該原封不動留著。
     state[shop]._filtered=null;_batchSelClear(shop);_renderBatchSelInfo(shop);
+    // 切到空期間：這條路不走 loadIntoUI、篩選沒被清，但跳轉橫幅的月份字樣已過期 ——
+    //   半真半假的提示比全錯更難察覺，跟著本分支的清理一起移除。
+    document.getElementById('tagfx-jump-banner')?.remove();
     const _hLbl=s.curHalf==='first'?'上半月':s.curHalf==='second'?'下半月':'整月';
     document.getElementById('tbl-'+shop).innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">${s.curMonth} ${_hLbl} 尚無資料，請上傳報表產生</div></div>`;
     document.getElementById('period-tag-'+shop).textContent='';
@@ -2548,7 +2551,13 @@ function loadIntoUI(shop,built,period,days){
   state[shop]._filtered=null;_batchSelClear(shop);_renderBatchSelInfo(shop);
   // 雲端刷新（別人按同步）不重置：使用者設好的篩選/排序不該被別人的動作清掉。
   //   只有使用者自己切月份/切通路時才重置（那時 _cloudRefreshing 為 false）。
-  if(!_cloudRefreshing){ state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[]; }   // 標籤篩選跟 filters/sorts 同批重置：切月份/切通路不殘留（搜尋另行保留，見下一行）
+  if(!_cloudRefreshing){
+    state[shop].filters={};state[shop].sorts={};state[shop].tagFilters=[];   // 標籤篩選跟 filters/sorts 同批重置：切月份/切通路不殘留（搜尋另行保留，見下一行）
+    // 篩選被清，跳轉橫幅（tagfx-jump-banner）的「已篩選⋯」就成了謊話，同批移除。
+    //   放在同一個 if 裡＝被同一個旗標保護：雲端刷新（_cloudRefreshing=true）篩選保留、橫幅也保留。
+    //   跳轉自己也走到這裡，但橫幅插入在跳轉鏈的最後一步（見 tagFxJump），移到的只會是上一次的舊橫幅。
+    document.getElementById('tagfx-jump-banner')?.remove();
+  }
   // search 刻意不重置：切月份保留關鍵字（唯一清掉它的是頁面初次載入時 state 的整包初始化）
   const _se=document.getElementById('search-'+shop);if(_se)_se.value=state[shop].search||'';
   document.getElementById('period-tag-'+shop).textContent=period;
@@ -4145,25 +4154,144 @@ function openTagFxModal(shop){
     body.innerHTML=`<div class="tagfx-empty">缺 ${missing.join('、')} 的報表存檔，無法比較。<br>需要兩個月份都以「整月」區間產生並儲存過報表。</div>`;
     ov.classList.add('open');return;
   }
-  // 🔴 標題必須含模式與期間：老闆會截圖轉貼，截圖裡看不出彈窗外的任何狀態。
-  setTitle(`測試標籤成效 · ${curMonth} 整月 vs ${prevMonth} 整月 · 僅可比較商品`);
-  body.innerHTML=buildTagFxHtml(shop,curMonth,curRep,prevRep);
+  // 聚合只在開窗算一次存 ctx，之後切模式/展開都是純渲染（見 _tagFxCompute 頭註）。
+  // 期間規則沿用既有的「標記日 ≤ 期末」（getProdTagsFor + _periodEndDate），期末取整月月底，不另寫日期判定。
+  const readTags=_prodTagsReaderFor(shop,{month:curMonth,half:'full'});
+  const data=_tagFxCompute(curRep.built,prevRep.built,readTags,getTagDefs().map(d=>d.label));
+  _tagFxCtx={shop,curMonth,prevMonth,data,mode:'cmp',expand:false};
+  _tagFxRender();
   ov.classList.add('open');
 }
 function closeTagFxModal(){document.getElementById('tagfx-modal-overlay')?.classList.remove('open');}
-// 純計算、不碰 DOM / state（node 可單獨驗）。readTags=(code)=>[{tag,date}]。
-//   🔴 新品規則：上月對照表查不到品號＝新品，【完全排除】於加總與成功率，只進 newCnt ——
-//     照現有 KPI 的「查不到計 0」會讓新品變成無限成長，把數字往「測試有效」方向灌水。
+// 開窗當下的聚合結果（data）＋顯示狀態（mode/expand），🔴 不存原始報表、不重讀 lsLoad ——
+//   代價是 ctx 綁著開窗當下的快照，重新產生報表後要關窗重開才會吃到新資料（同 dist-modal 的行為）。
+let _tagFxCtx=null;
+function _tagFxRender(){
+  const c=_tagFxCtx;if(!c)return;
+  const body=document.getElementById('tagfx-modal-body');
+  const titleEl=document.getElementById('tagfx-modal-title');
+  // 展開十欄塞不進 980px（2026-09-08 實測：自然寬 978px vs 內容寬 940px）→ 展開時加寬彈窗。
+  //   1280×800 螢幕被 max-width:96vw 壓到 1229px，實測十欄（七位數金額＋全註記）剛好裝下；
+  //   資料更寬時仍可捲，凍結邊界的加重陰影（.tagfx-c2）負責讓裁切數字看得出在窗格外。
+  const modal=document.querySelector('#tagfx-modal-overlay .ana-modal');
+  if(modal)modal.classList.toggle('tagfx-wide',!!c.expand);
+  // 🔴 標題必須含模式與期間：老闆會截圖轉貼，截圖裡看不出彈窗外的任何狀態（含切換鈕的選中態）。
+  const modeTxt=c.mode==='all'?`全部商品（含新品 ${c.data.newProdCnt} 個）`:'僅可比較商品';
+  if(titleEl)titleEl.textContent=`測試標籤成效 · ${c.curMonth} 整月 vs ${c.prevMonth} 整月 · ${modeTxt}`;
+  if(body)body.innerHTML=buildTagFxHtml(c.data,c.mode,c.expand);
+}
+function setTagFxMode(mode){
+  if(!_tagFxCtx||_tagFxCtx.mode===mode)return;
+  _tagFxCtx.mode=mode;
+  _tagFxRender();
+}
+function toggleTagFxExpand(){
+  if(!_tagFxCtx)return;
+  _tagFxCtx.expand=!_tagFxCtx.expand;
+  _tagFxRender();
+}
+// 成功率格 → 關彈窗跳回淨利表：套該標籤篩選 + 成長比升冪（下滑排最前）。
+//   🔴 順序鎖死：先切整月、再設篩選 —— onHalfChange → tryLoadSaved → loadIntoUI 會把
+//     filters/sorts/tagFilters 全部清空（見 loadIntoUI 內那行的註解），反過來就被洗掉。
+//   整月存檔必存在：彈窗本身就是讀它才開得起來（同一個 lsLoad），不需再防。
+//   ⚠ 表格篩出的集合與成功率分子分母【不保證一一對齊】：上月營收 0/查無的商品
+//     growthRate 為 null、排序沉底（getPrevPeriodMap 的 rev 表建表條件 r.code && r.rev）。
+//     格子的 title 文案刻意不承諾「就是那 N 隻」。
+function tagFxJump(label){
+  const c=_tagFxCtx;if(!c)return;
+  closeTagFxModal();
+  const shop=c.shop;
+  if(state[shop]&&state[shop].curHalf!=='full'){
+    // 只切不記（2026-09-08 拍板）：點一格成功率不該改寫使用者的持久狀態 ——
+    //   byUser=false → 不設 _userPickedPeriod 鎖（onHalfChange 裡是有條件的）；
+    //   ec_lastHalf_{shop} 是 onHalfChange 裡【無條件】寫入的，先存後還原，
+    //   使用者下次開頁回到他原本的期別。
+    // 🔴 隱性耦合警告：onHalfChange 目前只寫 ec_lastHalf_{shop} 這一個持久 key，本 wrapper
+    //   也只還原它——若日後有人在 onHalfChange 裡新增持久化 key，這個 wrapper 不會知道
+    //   也不會還原，跳轉就會開始污染那個新 key。動 onHalfChange 的持久化時請回來看這裡。
+    let saved=null;try{saved=localStorage.getItem('ec_lastHalf_'+shop);}catch{}
+    onHalfChange(shop,'full',null,false);
+    try{ if(saved===null)localStorage.removeItem('ec_lastHalf_'+shop);else localStorage.setItem('ec_lastHalf_'+shop,saved); }catch{}
+  }
+  setTagFilter(shop,null);                  // 先清空：setTagFilter 是 toggle，殘留同名篩選時直接加會反向取消
+  setTagFilter(shop,'prod|'+label);
+  setSort(shop,'growthRate','asc');         // 尾端呼叫 applyFilters，下滑排最前
+  document.getElementById('tfbar-'+shop)?.classList.remove('open');   // setTagFilter 會順手展開篩選面板，跳轉情境不需要
+  _tagFxShowJumpBanner(shop,c.curMonth,label);
+  // 把「這是跳轉造成的篩選」持久化進 ec_filterstate（附加欄位；_loadFilterState 逐欄挑名，
+  //   多的 key 被忽略、四欄回傳不受影響）：開頁時 _tagFxMaybeResumeBanner 據此重建橫幅，
+  //   殘留篩選才有解釋與清除入口（不然隔天開頁是原半月＋看不見的篩選，只會覺得商品變少了）。
+  //   🔴 自然過期是本設計的關鍵：之後任何篩選操作都會走 _saveFilterState 用固定四欄
+  //     【整包重寫】→ 旗標自動消失 → 使用者改過篩選就不再重建橫幅。所以這裡用
+  //     「讀回-附加-寫回」，【不要動 _saveFilterState 本體】，動了自然過期就死了。
+  try{
+    const k='ec_filterstate|'+shop;
+    const o=JSON.parse(localStorage.getItem(k)||'{}');
+    o.tagfxJump={label};
+    localStorage.setItem(k,JSON.stringify(o));
+  }catch{}
+}
+// 跳轉提示橫幅：骨架照抄 showMapWarnBanner（本檔搜該名），連同那條教訓一起抄——
+//   清除 callback 必須直接掛 window（inline onclick 讀不到 module 頂層變數），且
+//   ⚠ 不可改用 Object.assign(window,{…})：那複製的是當下的值，之後重新賦值不會同步。
+//   刻意【不共用】map-warn-banner：那是商品對照表警告的單例，共用 id 會互蓋。
+//   差異：新 id、資訊色系（CSS 的 .tagfx-jump-banner）、插在 #tbl-{shop} 上方隨頁面捲動（非 fixed）。
+//   單例覆寫：連點多個標籤只有一條、內容換成最後一次（清除鈕只清得到最後一次的狀態，拍板接受）。
+window._tagFxBannerClear=null;
+function _tagFxShowJumpBanner(shop,month,label,resumed){
+  const tbl=document.getElementById('tbl-'+shop);if(!tbl)return;
+  window._tagFxBannerClear=()=>{
+    // 清除只管篩選＋排序、不碰期別（拍板）：畫面正在整月，連期別一起切走比不清更困惑。
+    state[shop].sorts={};                   // 排序一併清；接著 setTagFilter(null) 會 _saveFilterState + applyFilters 一次做完
+    setTagFilter(shop,null);
+    document.getElementById('tfbar-'+shop)?.classList.remove('open');
+    document.getElementById('tagfx-jump-banner')?.remove();
+  };
+  let el=document.getElementById('tagfx-jump-banner');
+  if(!el){ el=document.createElement('div');el.id='tagfx-jump-banner';el.className='tagfx-jump-banner'; }
+  const esc=String(label).replace(/</g,'&lt;');
+  // resumed＝開頁重建：期別已還原成使用者原本的區間，文案刻意【不提月份】——提了就說謊（拍板）。
+  const msg=resumed
+    ?`上次從「標籤成效」跳轉留下的篩選「${esc}」仍在套用（依成長比排序）`
+    :`已切換為 ${month} 整月，並篩選「${esc}」（依成長比排序，下滑在前）`;
+  el.innerHTML=`<div>${msg}</div>
+    <div class="tagfx-jump-banner-btns">
+      <button class="tagfx-jump-clear" onclick="_tagFxBannerClear&&_tagFxBannerClear()">✕ 清除篩選</button>
+      <button class="tagfx-jump-close" onclick="document.getElementById('tagfx-jump-banner').remove()">關閉</button>
+    </div>`;
+  tbl.parentNode.insertBefore(el,tbl);
+}
+// 開頁重建跳轉橫幅（initShopUI 在還原篩選之後呼叫）：
+//   旗標只在「篩選還是跳轉那一套」時存在（任何篩選操作經 _saveFilterState 整包重寫即自然清掉），
+//   再驗 tagFilters 仍含該標籤才重建——旗標與實際篩選脫鉤時【寧可不顯示】，不做半真的提示。
+function _tagFxMaybeResumeBanner(shop){
+  try{
+    const raw=JSON.parse(localStorage.getItem('ec_filterstate|'+shop)||'{}');
+    const jl=raw&&raw.tagfxJump&&raw.tagfxJump.label;
+    if(jl&&(state[shop].tagFilters||[]).includes('prod|'+jl))_tagFxShowJumpBanner(shop,'',jl,true);
+  }catch{}
+}
+// 純計算、不碰 DOM / state（node 可單獨驗），且【與顯示模式無關】——同一份結果供 cmp/all
+//   兩模式與收合/展開共用，開窗算一次存 _tagFxCtx，之後全是純渲染。
+//   🔴 新品規則（新品＝上月對照表查不到品號）：可比較與新品的加總【分開存】，不要合流 ——
+//     · curRev/prevRev/curPure/…＝【純可比較商品】的加總。所有比率（成長率/廣告佔比/成功率）
+//       一律只從這組算：新品前期必為 0，混進任何比率的分子或分母都會把數字灌往
+//       「測試有效」方向 —— 這是本功能最不能出的錯（成功率灌向 100%、成長率 +10% 變 +176%）。
+//     · newRev/newPure/newAds＝新品的本期加總。只有「全部商品」模式的【金額顯示】會把它
+//       加到後期（前期以 0 計），老闆看整體規模用。
 //   一商品多標籤 → 每個標籤的列各算它一次（沿用篩選面板 prodCounts 的既定慣例）。
+//   newProdCnt 是【去重後的新品商品數】（同一新品掛兩標籤只算 1，給標題用）；
+//   各列的 newCnt 則跟 cmpCnt 一樣按標籤重複計（「45 ＋8新」跟面板 pill 同一套口徑）。
 function _tagFxCompute(curBuilt,prevBuilt,readTags,defLabels){
   const prevMap=Object.create(null);   // 商品編號是外部資料，{} 會被 __proto__ 之類的品名污染（同 _prevDayBudgetReaderFor）
   prevBuilt.forEach(r=>{ if(!r||!r.code)return; prevMap[r.code]={rev:r.rev||0,pure:r.pureProfit||0,ads:r.adsFee||0}; });
   const buckets=Object.create(null);
   const order=[];
   const bucketOf=label=>{
-    if(!buckets[label]){ buckets[label]={label,cmpCnt:0,newCnt:0,growCnt:0,curRev:0,prevRev:0,curPure:0,prevPure:0,curAds:0,prevAds:0}; order.push(label); }
+    if(!buckets[label]){ buckets[label]={label,cmpCnt:0,newCnt:0,growCnt:0,curRev:0,prevRev:0,curPure:0,prevPure:0,curAds:0,prevAds:0,newRev:0,newPure:0,newAds:0}; order.push(label); }
     return buckets[label];
   };
+  const newCodes=new Set();
   curBuilt.forEach(r=>{
     if(!r||!r.code)return;
     const tags=readTags(r.code);
@@ -4171,7 +4299,11 @@ function _tagFxCompute(curBuilt,prevBuilt,readTags,defLabels){
     const base=prevMap[r.code];
     tags.forEach(o=>{
       const b=bucketOf(o.tag);
-      if(!base){ b.newCnt++; return; }
+      if(!base){
+        b.newCnt++;newCodes.add(r.code);
+        b.newRev+=r.rev||0; b.newPure+=r.pureProfit||0; b.newAds+=r.adsFee||0;   // 進獨立的新品加總；growCnt/cmpCnt/curX 一律不動（見上方註解）
+        return;
+      }
       b.cmpCnt++;
       b.curRev+=r.rev||0; b.curPure+=r.pureProfit||0; b.curAds+=r.adsFee||0;
       b.prevRev+=base.rev; b.prevPure+=base.pure; b.prevAds+=base.ads;
@@ -4183,7 +4315,7 @@ function _tagFxCompute(curBuilt,prevBuilt,readTags,defLabels){
   defLabels.forEach(l=>{ if(buckets[l])rows.push(buckets[l]); });
   order.forEach(l=>{ if(!defLabels.includes(l))rows.push(buckets[l]); });
   const emptyDefCnt=defLabels.filter(l=>!buckets[l]).length;
-  return {rows,emptyDefCnt};
+  return {rows,emptyDefCnt,newProdCnt:newCodes.size};
 }
 // 帶號金額：fmtN 內建 Math.abs 會吃掉負號，負號自己補（照 setKpis 的 lmLine，該處註解有明講）。
 function _tagFxAmt(v){return (v<0?'−':'')+'NT$ '+fmtN(v);}
@@ -4191,33 +4323,79 @@ function _tagFxAmt(v){return (v<0?'−':'')+'NT$ '+fmtN(v);}
 function _tagFxGrowth(cur,base){
   if(!(base>0))return '<span class="tagfx-na">—</span>';
   const d=(cur-base)/base*100;
-  return `<span class="${d>=0?'tagfx-up':'tagfx-down'}">${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%</span>`;
+  // ±999% 以上只顯示 >+999% / >−999%：那種數字多半只是基期太小（$92 → $2,144 = +2239%），
+  //   精確值沒有資訊價值還把欄寬撐爆。🔴 純顯示層截斷，不動計算結果。
+  const txt=Math.abs(d)>999?`>${d>=0?'+':'−'}999%`:`${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%`;
+  return `<span class="${d>=0?'tagfx-up':'tagfx-down'}">${txt}</span>`;
 }
-function buildTagFxHtml(shop,curMonth,curRep,prevRep){
-  // 期間規則沿用既有的「標記日 ≤ 期末」（getProdTagsFor + _periodEndDate），只是期末取整月月底，不另寫日期判定。
-  const readTags=_prodTagsReaderFor(shop,{month:curMonth,half:'full'});
-  const defs=getTagDefs();
-  const {rows,emptyDefCnt}=_tagFxCompute(curRep.built,prevRep.built,readTags,defs.map(d=>d.label));
+// 純渲染：吃 _tagFxCompute 的結果（data），🔴 不重算聚合、不讀報表。回傳 html 字串。
+//   mode：'cmp'＝僅可比較（預設）／'all'＝金額含新品。
+//   expand：false＝六欄結論（標籤/商品數/營收/純利/廣告費/成功率，一頁看完 —— 老闆唯一明確的要求）
+//           ／true＝前期三欄插在對應指標欄左邊＋廣告佔比，共十欄。
+//   指標欄兩行照 KPI 卡：第一行後期金額、第二行成長率（可比較口徑，基期 ≤ 0「—」）。
+//   ⚠ 廣告費的成長率行維持中性灰、不上綠紅：廣告費變多不必然是壞事（同 setKpis 的 lmLine
+//     對廣告費 colored=false 的既有決定，見該處註解）。用 .tagfx-neutral 蓋色，不動 _tagFxGrowth。
+//   🔴 「（不含新品）」加註只出現在【展開模式】的廣告佔比與成功率：收合格短，塞小字毀掉
+//     「一頁看完」；且收合的成長率兩模式數字完全相同（C-1 口徑鐵律）沒有誤讀空間，
+//     金額含新品由標題的「全部商品（含新品 N 個）」交代。
+function buildTagFxHtml(data,mode,expand){
+  const {rows,emptyDefCnt}=data;
   if(!rows.length)return '<div class="tagfx-empty">本期整月報表中沒有任何掛測試標籤的商品</div>';
+  const all=mode==='all';
   const NA='<span class="tagfx-na">—</span>';
-  // cmpCnt=0（該標籤下全是新品）時金額一律「—」不寫 NT$ 0：沒有可比較商品 ≠ 金額是 0。
-  const amt=(b,v)=>b.cmpCnt?_tagFxAmt(v):NA;
+  const modes=`<div class="tagfx-modes">
+    <button class="tagfx-mode-btn${all?'':' on'}" onclick="setTagFxMode('cmp')">僅可比較商品</button>
+    <button class="tagfx-mode-btn${all?' on':''}" onclick="setTagFxMode('all')">全部商品（含新品）</button>
+    <button class="tagfx-mode-btn tagfx-expand-btn" onclick="toggleTagFxExpand()">${expand?'收合':'顯示前期數字'}</button>
+  </div>`;
   const trs=rows.map(b=>{
-    const adsPct=(b.cmpCnt&&b.curRev>0)?`${(b.curAds/b.curRev*100).toFixed(2)}%`:NA;
-    const okRate=b.cmpCnt?`${b.growCnt}/${b.cmpCnt} = ${(b.growCnt/b.cmpCnt*100).toFixed(1)}%`:NA;
+    // 金額欄有無數字看該模式計入了幾個商品；cmp 模式全新品列＝「—」不寫 NT$ 0（沒有可比較商品 ≠ 金額是 0）
+    const inSum=all?(b.cmpCnt+b.newCnt):b.cmpCnt;
+    const amt=v=>inSum?_tagFxAmt(v):NA;
+    // 🔴 口徑鐵律（C-1）：金額顯示 all 模式含新品（後期 +newX、前期 +0）；所有比率不分模式
+    //   一律只用可比較加總（curX/prevX）——新品混進任何比率都是往「測試有效」方向灌水。
+    const mCell=(curShow,cmpCur,cmpPrev,neutral)=>`<td><div class="tagfx-cell-amt">${amt(curShow)}</div><div class="tagfx-cell-rate${neutral?' tagfx-neutral':''}">${_tagFxGrowth(cmpCur,cmpPrev)}</div></td>`;
+    const revCell=mCell(all?b.curRev+b.newRev:b.curRev,b.curRev,b.prevRev,false);
+    const pureCell=mCell(all?b.curPure+b.newPure:b.curPure,b.curPure,b.prevPure,false);
+    const adsCell=mCell(all?b.curAds+b.newAds:b.curAds,b.curAds,b.prevAds,true);
+    const adsPct=(b.cmpCnt&&b.curRev>0)?`${(b.curAds/b.curRev*100).toFixed(2)}%${all?'<span class="tagfx-subnote">（不含新品）</span>':''}`:NA;
+    // 成功率跟指標欄同節奏：上=大數字（百分比）、下=小註記（分子/分母）。六欄視覺結構統一成
+    //   「上面一個大數字、下面一個小註記」。all 模式的「不含新品」併進第二行（2026-09-08 拍板，
+    //   取代先前「只在展開模式加註」的規則——第二行本來就是小字，收合也放得下）。
+    const okRate=b.cmpCnt
+      ?`<div class="tagfx-cell-amt">${(b.growCnt/b.cmpCnt*100).toFixed(1)}%</div><div class="tagfx-cell-rate">${b.growCnt}/${b.cmpCnt}${all?' · 不含新品':''}</div>`
+      :NA;
     const cnt=`${b.cmpCnt}${b.newCnt?` ＋${b.newCnt}新`:''}`;
+    const lbl=String(b.label).replace(/</g,'&lt;').replace(/"/g,'&quot;');
     return `<tr>
-      <td class="tl"><span class="tag ${tagDefCls(b.label)}">${String(b.label).replace(/</g,'&lt;')}</span></td>
-      <td>${cnt}</td>
-      <td>${amt(b,b.prevRev)}</td><td>${amt(b,b.curRev)}</td><td>${_tagFxGrowth(b.curRev,b.prevRev)}</td>
-      <td>${amt(b,b.prevPure)}</td><td>${amt(b,b.curPure)}</td><td>${_tagFxGrowth(b.curPure,b.prevPure)}</td>
-      <td>${amt(b,b.prevAds)}</td><td>${amt(b,b.curAds)}</td><td>${adsPct}</td>
-      <td>${okRate}</td>
+      <td class="tl tagfx-c1" title="${lbl}"><span class="tag ${tagDefCls(b.label)}">${lbl}</span></td>
+      <td class="tagfx-c2">${cnt}</td>
+      ${expand?`<td>${amt(b.prevRev)}</td>`:''}${revCell}
+      ${expand?`<td>${amt(b.prevPure)}</td>`:''}${pureCell}
+      ${expand?`<td>${amt(b.prevAds)}</td>`:''}${adsCell}
+      ${expand?`<td>${adsPct}</td>`:''}
+      <td${b.cmpCnt?` class="tagfx-jump" onclick="tagFxJump('${String(b.label).replace(/"/g,'&quot;').replace(/'/g,"\\'")}')" title="點擊查看該標籤的商品明細（依成長比排序）"`:''}>${okRate}</td>
     </tr>`;
   }).join('');
   const note=emptyDefCnt?`<div class="tagfx-note">另有 ${emptyDefCnt} 個標籤本期無商品</div>`:'';
-  return `<div class="tagfx-scroll"><table class="tagfx-table">
-    <thead><tr><th class="tl">標籤</th><th>商品數</th><th>前期營收</th><th>後期營收</th><th>營收成長率</th><th>前期純利</th><th>後期純利</th><th>純利成長率</th><th>前期廣告費</th><th>後期廣告費</th><th>廣告佔比</th><th>營收成功率</th></tr></thead>
+  // 欄位說明：照抄主表格 _hdrQ 的 .hdr-help 外觀，但【只做 title hover、不開彈窗】——
+  //   六欄各開一個彈窗太重，這張表是電腦上看的報告（2026-09-08 拍板）。前期三欄欄名自明，不加。
+  const TIP={
+    cnt:'該標籤下的商品數。「45 ＋8新」表示 45 個可與上月比較，8 個是新品（不列入計算）',
+    rev:'上行為本期金額，下行為與上月整月的成長率',
+    pure:'上行為本期金額，下行為與上月整月的成長率',
+    ads:'上行為本期金額，下行為與上月整月的成長率',
+    adsPct:'本期廣告費 ÷ 本期營收',
+    ok:'該標籤下營收比上月成長的商品數 ÷ 可比較商品數。加總金額容易被單一商品帶偏，這欄看的是「對多數商品有沒有效」',
+  };
+  const q=k=>`<button type="button" class="hdr-help" title="${TIP[k]}">?</button>`;
+  const head=`<thead><tr><th class="tl tagfx-c1">標籤</th><th class="tagfx-c2">商品數${q('cnt')}</th>${
+    expand?'<th>前期營收</th>':''}<th>營收${q('rev')}</th>${
+    expand?'<th>前期純利</th>':''}<th>純利${q('pure')}</th>${
+    expand?'<th>前期廣告費</th>':''}<th>廣告費${q('ads')}</th>${
+    expand?`<th>廣告佔比${q('adsPct')}</th>`:''}<th>營收成功率${q('ok')}</th></tr></thead>`;
+  return `${modes}<div class="tagfx-scroll"><table class="tagfx-table">
+    ${head}
     <tbody>${trs}</tbody></table></div>${note}`;
 }
 
@@ -20505,6 +20683,7 @@ function initShopUI(shop){
     //     操作的重置行為 —— 已在設計階段評估後否決。寧可多繪一次，不動共用路徑。
     applyFilters(shop);
   }
+  _tagFxMaybeResumeBanner(shop);   // 跳轉殘留篩選的開頁橫幅：須在篩選還原之後（它要驗 tagFilters），#tbl 此時已渲染
   if(lsHasAny(shop)){const d=document.getElementById('dot-'+shop);if(d)d.classList.add('on');}
   if(Object.keys(globalMap).length>0){
     const uc=document.getElementById('uc-map-'+shop);
@@ -20833,7 +21012,7 @@ Object.assign(window, {
   openTestShopHelp,closeTestShopHelp,    // 測試通路期間列 ⓘ 與彈窗關閉鈕的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
   openKpiCmpHelp,closeKpiCmpHelp,        // 頂端「ⓘ 比較基準」+ 表頭三顆 ? + 彈窗關閉鈕的 inline onclick 用，同上
   openDeleteFileModal,openDistModal,openFilter,openGrowthSettings,openNotePopup,openUnmatchedModal,
-  openTagFxModal,closeTagFxModal,   // 標籤成效彈窗的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
+  openTagFxModal,closeTagFxModal,setTagFxMode,toggleTagFxExpand,tagFxJump,   // 標籤成效彈窗的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效
   openTestSettings,closeTestSettings,addTestDraftCond,removeTestDraftCond,deleteTestDraftRule,addTestDraftRule,saveTestSettings,
   openUploadModal,outsideClick,parseAdsCsv,patchRow,pill,readGrowthNewConds,readNewConds,
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,
