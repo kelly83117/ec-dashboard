@@ -3351,7 +3351,7 @@ Object.assign(App, {
           if (nameIdx < 0 || revIdx < 0 || costIdx < 0) {
             showToast('找不到欄位：需要「商品名稱」「售價」「成本」'); return;
           }
-          const dateIdx = ['建檔日期','建立時間','建立日期','上架日期'].reduce((found, col) => {
+          const dateIdx = ['商品建立日期','建檔日期','建立時間','建立日期','上架日期'].reduce((found, col) => {
             if (found >= 0) return found;
             return headers.findIndex(h => h === col);
           }, -1);
