@@ -5776,12 +5776,38 @@ function saveNotes(shop,notes,code){
   // 立即同步工作日誌摘要（不必等按 ☁ 同步雲端；silent 不顯示 toast 避免太吵）
   try{ if(window.App && typeof App._updateDailyProgressFromAdjustments==='function') App._updateDailyProgressFromAdjustments({silent:true}); }catch{}
 }
-function buildNoteCell(shopKey,code,noteId,noteData){
+// xp = 格子上那行灰色小字要印的數字，由 renderTable 的索引（_crossPeriodIndexFor）餵進來。
+//
+//   🔴 刻意用 options 物件、不用位置參數（沿用本檔既有慣例，如 applyFilters(shop,{keepScroll:true})）：
+//     「哪一欄吃哪個數字」要在【呼叫點】就讀得出來。前一版是 (…,xpN,xpM) 兩個位置參數，
+//     商品調整欄得傳 `0` 佔位 —— 那個 0 看起來像「這一欄沒有其他期間計數」，實際上它有
+//     （由下方 histCount 自己算），是個會誘人去把它接上索引的陷阱。改成具名之後，
+//     兩個呼叫點各自只寫自己真的吃的那一個 key，沒有佔位、也沒有需要回頭查順序的參數。
+//
+//   ・廣告調整欄 → {otherPeriods:N}
+//       N 對齊 renderPnmHistory 走 _noteHistory 那條分支。
+//       這一欄【不吃 insight】：洞察表打的是商品層級的處置紀錄，語意上與商品調整同類、
+//       與廣告調整不同類；兩欄都印會讓同一個 M 在同一列出現兩次，被讀成 2 筆。
+//   ・商品調整欄 → {insight:M}
+//       M 對齊 renderPnmInsight（同日合併成一列 + 長備註恆 1 列）。
+//       這一欄【不吃 otherPeriods】：它的「其他期間」只能來自本函式自己算的 histCount ——
+//       與 renderPnmHistory 的 _growth 分支同源同判準（同一把 ec_notes|{通路}_growth、
+//       同一個 _inGrowthPeriod、同樣不合併同日、同樣不濾空字串）。外面再餵一份就是
+//       第二個來源，兩份在正常情況下相等、畫面上看不出來，只會在資料變形時靜默分岔。
+//
+//   🔴 這兩條互斥【由程式碼把關】，不是只寫在註解裡：傳錯 key 會 console.warn 並忽略。
+//     擋的是具體的回歸 —— 有人把 insight 接回廣告調整欄（洞察表數字又變兩份），
+//     或把 otherPeriods 接上商品調整欄（其他期間變兩個來源）。
+//
+//   ⚠ xp 整個是 optional：不傳就兩個都是 0、那行小字整行不出現 →
+//     其餘呼叫端（window 匯出的那支）行為不變。
+function buildNoteCell(shopKey,code,noteId,noteData,xp){
   let adjList=[];
   if(noteData){if(typeof noteData==='string')adjList=[{date:'',text:noteData}];else adjList=noteData.adjustments||[];}
-  // 商品調整（_growth）：只取當期算顯示，其他期間僅計數（供「歷史 N」）。非 _growth 時 histCount 恆 0、adjList 不動 → 行為完全不變。
+  // 商品調整（_growth）：只取當期算顯示，其他期間僅計數（供格子上的「其他期間 N」）。非 _growth 時 histCount 恆 0、adjList 不動。
+  const isGrowth=shopKey.indexOf('_growth')>=0;
   let histCount=0;
-  if(shopKey.indexOf('_growth')>=0){
+  if(isGrowth){
     const bs=state[shopKey.replace('_growth','')];
     const cur=[];
     adjList.forEach(a=>{ if(bs&&_inGrowthPeriod(a,bs.curMonth,bs.curHalf))cur.push(a); else histCount++; });
@@ -5793,7 +5819,9 @@ function buildNoteCell(shopKey,code,noteId,noteData){
   const noDateItems=adjMap.get('')||[];
   const hoverLines=sorted.map(d=>`${d}　${adjMap.get(d).join('、')}`);
   if(noDateItems.length)hoverLines.push(...noDateItems);
-  if(histCount>0)hoverLines.push(`其他期間 ${histCount} 筆（點開查看）`);
+  // ⚠ 這裡原本還有一行 hover 提示「其他期間 N 筆（點開查看）」，【本次移除】：
+  //   同一個 N 現在直接印在格子上（下方 .note-xp），留著等於同一個數字在 hover 與格內各出現一次。
+  //   hover（title 屬性）從此只講【本期】的內容，語意單一。
   const hoverText=hoverLines.join('\n');
   const latestDate=sorted[0]||'';
   const latestText=latestDate?adjMap.get(latestDate).join('、'):(noDateItems[0]||'');
@@ -5801,14 +5829,53 @@ function buildNoteCell(shopKey,code,noteId,noteData){
   const bg=hasNote?'#fef3c7':'';const hBg=hasNote?'#fde68a':'#f3f4f6';
   const ce=code.replace(/'/g,"\\'");
   const ht=hoverText.replace(/"/g,'&quot;').replace(/</g,'&lt;');
-  // 商品調整不另加視覺元件（如「歷史 N」小標）：廣告調整欄當期無紀錄時也只顯示「點此新增」，
-  // 歷史一律藏在彈窗裡；兩欄行為保持一致。其他期間的筆數僅走上面 hover 提示。
+  // ── 跨期／洞察表計數小字 ──
+  //   N 或 M 為 0 → 該段不出現；兩個都 0 → 整行不出現（空格子維持原本的「點此新增」）。
+  //   ⚠ 這一行【不掛自己的 onclick】：它是 .note-adj-cell 的子節點，點下去冒泡到那格既有的
+  //     openNotePopup —— 開的就是現在點格子開的同一個彈窗，不新增任何行為、不多一個進入點。
+  //   ⚠ warn 不 throw：本函式在 800+ 列的 forEach 裡跑，throw 會讓整張表變空白
+  //     —— 為了一個開發期的接線錯誤炸掉正式站的表格，代價不成比例。
+  if(xp){
+    if(isGrowth&&xp.otherPeriods!==undefined)
+      console.warn('[buildNoteCell] 商品調整欄不吃 otherPeriods（它的 N 只能來自本函式的 histCount，餵第二份會漂移），本次忽略：',shopKey,code);
+    if(!isGrowth&&xp.insight!==undefined)
+      console.warn('[buildNoteCell] 廣告調整欄不吃 insight（洞察表只印在商品調整欄，兩欄都印會讓同一個數字在同一列出現兩次），本次忽略：',shopKey,code);
+  }
+  const _xN=isGrowth?histCount:((xp&&xp.otherPeriods)||0);
+  const _xM=isGrowth?((xp&&xp.insight)||0):0;
+  const _xParts=[];
+  if(_xN>0)_xParts.push(`其他期間 ${_xN}`);
+  //   🔴 這裡【不要】把範圍寫進標籤。曾經試過「洞察表（全期） M」（2026-09-09 加、同日拿掉）。
+  //     ⚠ 退回的理由【不是換行】—— 這一格所在的 <td> 吃 css/profit.css 的 `.tscroll td`
+  //       與 `td` 兩條規則（都帶 white-space:nowrap），nowrap 會繼承給子孫，
+  //       所以 .note-xp 永遠是 1 行、再長也不換行。
+  //       真正會發生的是【橫向溢出】：實測同一個格子（可用寬 114px、cellW 151px、
+  //       .note-adj-cell 是 min-width:130px / max-width:190px）——
+  //         「＋其他期間 2 · 洞察表 3」        需要 114px → 剛好放得下
+  //         「＋其他期間 2 · 洞察表（全期） 3」 需要 158px → 溢出 44px
+  //         兩位數版本更差：127px vs 171px。
+  //       溢出時 overflow 是 visible，字會壓到隔壁欄上，而且哪幾列會溢出取決於數字位數
+  //       → 800 列的表會參差不齊。這行字的全部價值就在於「掃表格時一眼看完」。
+  //     ⚠ 它要解決的問題是真的（M 來自 ec.insight_{通路}_notes，那把 key 沒有期別維度 →
+  //       切月份時 M 不會變，使用者會照周圍的框架把它讀成本期；2026-09-09 實際回報：
+  //       在 2026/08 整月看到「洞察表 7」，那 7 筆橫跨 2026/05~09）。
+  //       但「在每一列重複印一次系統限制」不是對的付法 —— 範圍說明改用別的管道講，
+  //       不要再往這一行加字。日後想加任何修飾語之前，先在【真實表格裡】量 .note-xp 的
+  //       scrollWidth 有沒有超過 clientWidth（不要在另外做的預覽面板裡量 —— 那裡沒有
+  //       繼承到 td 的 nowrap，量出來的是換行、不是溢出，會得到錯的結論）。
+  if(_xM>0)_xParts.push(`洞察表 ${_xM}`);
+  const _xTxt=_xParts.join(' · ');
+  // 有本期紀錄 → 接在既有內容【下方】，前面加「＋」表示這是本期以外的量；
+  // 沒有本期紀錄 → 這一行【取代】原本的「點此新增」（不加「＋」，它自己就是主體）。
+  const xpUnder=_xTxt?`<div class="note-xp">＋${_xTxt}</div>`:'';
+  const xpOnly=_xTxt?`<div class="note-xp note-xp-only">${_xTxt}</div>`:'';
   return`<td class="tl" style="padding:4px 8px;vertical-align:top">
     <div class="note-adj-cell" id="${noteId}" title="${ht}" style="background:${bg}"
       onmouseover="this.style.background='${hBg}'" onmouseout="this.style.background='${bg}'"
       onclick="openNotePopup('${shopKey}','${ce}')">
-      ${hasNote?`<div style="flex:1;min-width:0">${latestDate?`<div class="note-adj-date">${latestDate}</div>`:''}<div class="note-adj-text">${latestText.replace(/</g,'&lt;')}</div></div><span style="font-size:13px;flex-shrink:0;margin-top:1px">📝</span>`
-      :`<div style="flex:1;color:#9ca3af;font-size:11px;padding:2px 0">點此新增</div><span style="font-size:13px;flex-shrink:0">📝</span>`}
+      ${hasNote?`<div style="flex:1;min-width:0">${latestDate?`<div class="note-adj-date">${latestDate}</div>`:''}<div class="note-adj-text">${latestText.replace(/</g,'&lt;')}</div>${xpUnder}</div><span style="font-size:13px;flex-shrink:0;margin-top:1px">📝</span>`
+      :(xpOnly?`<div style="flex:1;min-width:0">${xpOnly}</div><span style="font-size:13px;flex-shrink:0">📝</span>`
+              :`<div style="flex:1;color:#9ca3af;font-size:11px;padding:2px 0">點此新增</div><span style="font-size:13px;flex-shrink:0">📝</span>`)}
     </div>
   </td>`;
 }
@@ -7250,6 +7317,74 @@ function _prevDayBudgetReaderFor(shop){
   }catch{}
   return function(code){ return map[code]; };
 }
+
+// ── 調整欄那行小字要用的兩個計數（一次算全表，逐列 O(1) 取用）──
+//   模式照抄上方 _prevDayBudgetReaderFor：建在 renderTable 的 forEach【外面】、回傳 reader、
+//   綁死這次 render 的快照，【不做任何跨次快取】—— 每次 renderTable 現建，所以不需要失效機制。
+//
+//   🔴 口徑是硬規格：兩個數字必須等於【點開彈窗後那一區實際列出的列數】，逐字相同。
+//     下面兩段是把彈窗的計數規則搬過來、改成「一次掃完所有品號」，不是另外發明一套。
+//     改動任何一邊都要連同另一邊一起改，否則格子上的數字會跟彈窗對不起來。
+//
+//   ▸ n（其他期間）— 對齊 renderPnmHistory 走 _noteHistory 的那條分支（＝廣告調整欄）：
+//       ・期別清單走 _listPeriods（判準是有沒有 ec|{通路}|{月}|{半月} 這把報表 key），跳過當期
+//       ・① 報表列的 r.note 是【單一字串】→ 算 1 筆、不拆開（2026/04 前的舊制人工紀錄）
+//       ・② ec_notes|{通路}|{月}|{半月} 的每一筆 adjustments 各算 1 筆
+//       ・①② 之間【不去重】，同日的也【不合併】—— 彈窗那邊是 hist.map 一筆一列，這裡照樣一筆一數
+//       ・空白過濾用 `t&&String(t).trim()`，與 _noteHistory 逐字相同
+//     ⚠ 與 _noteHistory 的唯一差別是【走訪方向】：那邊是「給定 code，每期 built.find 一次」，
+//       這邊是「每期把 built 掃一遍，見到有 note 的就記到該 code 頭上」。結果集合相同，
+//       但把 R×P 次 find 壓成 P 次掃描（好麻吉 822 列 × 13 期）。
+//
+//   ▸ m（洞察表）— 對齊 renderPnmInsight：
+//       ・adjustments 依 `a.date||'—'` 分組，同一天多筆在畫面上是【一列】→ 這裡數不重複日期數
+//       ・nd.text（長備註）不論多長都是【一列】→ 有內容就 +1
+//       ・key 是 ec.insight_{通路}_notes，【沒有期別維度】（已知且接受：切月份時 m 不會動）
+function _crossPeriodIndexFor(shop){
+  const s=state[shop];
+  // Object.create(null)：商品編號是外部資料，理由同 _prevDayBudgetReaderFor 那段。
+  const nMap=Object.create(null), mMap=Object.create(null);
+  try{
+    const skipM=s&&s.curMonth, skipH=s&&s.curHalf;
+    _listPeriods(shop).forEach(p=>{
+      if(p.month===skipM&&p.half===skipH) return;
+      // ① 匯入的：報表 built[] 裡的 r.note（純字串，算 1 筆）
+      let rep=null;
+      try{ rep=lsLoad(shop,p.month,p.half); }catch{}
+      const built=rep&&rep.built;
+      if(Array.isArray(built)){
+        built.forEach(r=>{
+          const t=r&&r.note;
+          if(r&&r.code!=null&&t&&String(t).trim()) nMap[r.code]=(nMap[r.code]||0)+1;
+        });
+      }
+      // ② 手打的：ec_notes|{shop}|{month}|{half} 的 adjustments
+      try{
+        const all=getNotes(shop+'|'+p.month+'|'+p.half)||{};
+        Object.keys(all).forEach(c=>{
+          const nd=all[c];
+          const adjs=nd&&(typeof nd==='string'?[{date:'',text:nd}]:(nd.adjustments||[]));
+          (adjs||[]).forEach(a=>{
+            const t=a&&a.text;
+            if(t&&String(t).trim()) nMap[c]=(nMap[c]||0)+1;
+          });
+        });
+      }catch{}
+    });
+  }catch(e){ console.warn('[crossPeriodIndex] 其他期間計數失敗，該欄小字以 0 呈現',e); }
+  try{
+    const ins=Store.get('ec.insight_'+shop+'_notes',{})||{};
+    Object.keys(ins).forEach(c=>{
+      const nd=ins[c];
+      const days=new Set();
+      ((nd&&nd.adjustments)||[]).forEach(a=>{ days.add((a&&a.date)||'—'); });
+      let m=days.size;
+      if(String((nd&&nd.text)||'').trim()) m++;
+      if(m>0) mMap[c]=m;
+    });
+  }catch(e){ console.warn('[crossPeriodIndex] 洞察表計數失敗，該欄小字以 0 呈現',e); }
+  return { n(code){ return nMap[code]||0; }, m(code){ return mMap[code]||0; } };
+}
 function renderTable(shop,list,opts){
   // 🔴 淨利表 DOM 已被拆除就直接早退。這【不是預防性的防禦，是修一個正式站 v444 實測可重現的 bug】：
   //   重現步驟：淨利表任一通路做過篩選（搜尋框打字即可）→ 立刻切到洞察表。
@@ -7375,6 +7510,17 @@ function renderTable(shop,list,opts){
   //   上方註解），800 列就是 800 次。同一個坑本檔已經踩過兩次，兩處都留了同樣的警告：
   //   updateTagFilterBar 與 applyFilters 裡的 prodRead。
   const prevBudRead=_prevDayBudgetReaderFor(shop);
+  // 🔴 同上一條，理由完全相同：商品調整（ec_notes|{通路}_growth）整個通路共用一把 key，
+  //   而 getNotes 命中記憶體時做的是 JSON.parse(JSON.stringify(…))【整份深拷貝】（見該函式）。
+  //   原本這一行寫在 forEach 裡的兩個分支各一次（mobic / 非 mobic），好麻吉 822 列
+  //   ＝ 每次重畫做 822 次整份深拷貝，而 renderTable 是 applyFilters 的共同出口
+  //   （22 個呼叫點）→ 搜尋框每打一個字就付一次。
+  //   ⚠ 提到迴圈外之後全表共用【同一個物件】：buildNoteCell 只讀不寫（它把過濾結果放進
+  //     自己的區域變數 cur，不動 noteData.adjustments），所以共用是安全的。日後若有人
+  //     讓 buildNoteCell 就地修改傳進去的 noteData，這裡要改回逐列取或先複製一份。
+  const growthNotesAll=getNotes(shop+'_growth');
+  // 同上：一次算完全表的「其他期間 N / 洞察表 M」，逐列 O(1) 取。不跨次快取，每次 render 現建。
+  const crossRead=_crossPeriodIndexFor(shop);
   let rowIdx=0;
   list.forEach(r=>{
     const pc=r.pureProfit>=0?'td-pos':'td-neg';
@@ -7398,7 +7544,7 @@ function renderTable(shop,list,opts){
     };
 
     const gnoteId=`gnote-${shop}-${r.code}`;
-    const noteCellHtml=buildNoteCell(noteKey,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})());
+    const noteCellHtml=buildNoteCell(noteKey,r.code,noteId,(()=>{const ec=notes[r.code];const rn=r.note?{adjustments:[{date:'',text:r.note}]}:null;if(ec&&rn){return{adjustments:[...rn.adjustments,...(ec.adjustments||[])]}}return ec||rn;})(),{otherPeriods:crossRead.n(r.code)});
 
     if(!r.fromMobic){
       const adsId=`td-${shop}-${r.code}-adsFee`;
@@ -7407,7 +7553,7 @@ function renderTable(shop,list,opts){
         adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span>${_subAdsHtml(r)}</td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
         note:noteCellHtml,
-        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
+        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,growthNotesAll[r.code],{insight:crossRead.m(r.code)}),
         prodTags:buildProdTagCell(shop,r.code),
       };
       const bodyCells=orderedCols.map(c=>{
@@ -7447,7 +7593,7 @@ function renderTable(shop,list,opts){
         note:noteCellHtml,
         growthRate:`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`,
         growthAnalysis:`<td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`,
-        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
+        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,growthNotesAll[r.code],{insight:crossRead.m(r.code)}),
         prodTags:buildProdTagCell(shop,r.code),
       };
       html+=`<tr>
