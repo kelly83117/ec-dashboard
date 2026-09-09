@@ -10684,6 +10684,10 @@ async function momoSyncProductsMerge(shop, opts){
   return { shadow:false, plan };
 }
 window.__momoMergeShadow=function(shop){ return momoSyncProductsMerge(shop,{shadow:true}); };   // Console 診斷：只讀+log，不寫、不改 baseline
+// 🔴 單賣場【真寫】enforce 入口（stage-1 逐賣場啟用用；不動全域閘門 __MOMO_MERGE_ENFORCE，其他人維持 shadow）。
+//   用法：先 await __momoMergeShadow('甲配') 看 __momoLastMergePlan 的保留/刪除數，確認後才 await __momoMergeEnforce('甲配')。
+//   內含 momoSyncProductsMerge 的「本機空+雲端有→中止」防呆；寫的是 merged（保留雲端獨有、只覆蓋 dirty）。
+window.__momoMergeEnforce=function(shop){ return momoSyncProductsMerge(shop); };
 // ══════ origins（momo_moplus_origins）衝突防護（2026-08-14）：比照 products 的持久化 dirty + updatedAt base ══════
 //  根因：origins 原本只有 in-memory _pendingSyncKeys，重整就空 → 訂閱無版本比對、舊雲端灌回本機（Vanessa 同步後回退實例）。
 //  改：① 持久化 dirty 註冊表（跨重整）＝「本機有未推重傳」的權威訊號；② updatedAt base ＝推送前擋「雲端較新」。
