@@ -1332,11 +1332,21 @@ Object.assign(App, {
       return `${needStabQ ? stabQTabsHtml : ''}<div class="table-card" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px">📋 ${activeStab} — 尚無資料，開發中</div>`;
     })();
 
+    // 選品季分（連動新品毛利表）
+    const _mgQKey = activeQ === 'Q3' ? 'ec.d2.margin' : `ec.d2.margin.${activeQ.toLowerCase()}`;
+    const _mgList = Store.get(_mgQKey, []);
+    const _mgProfits = _mgList.map(r => { const c = Number(r.cost||0), v = Number(r.rev||0); return v - c; });
+    const _actual10k = _mgProfits.filter(p => p > 10000).length;
+    const _actual8k  = _mgProfits.filter(p => p > 8000 && p <= 10000).length;
+    const _actual5k  = _mgProfits.filter(p => p > 5000 && p <= 8000).length;
+    const _selScore  = (_mgList.length >= 50 ? 30 : 0) + (_actual10k >= 2 ? 10 : 0) + (_actual8k >= 5 ? 6 : 0) + (_actual5k >= 5 ? 4 : 0);
+    const _selPerMonth = Math.round(_selScore / 3);
+
     const nowM = new Date().getMonth() + 1;
     const curIdx = activeMonths.findIndex(m => parseInt(m) === nowM);
     const cur = monthScores[curIdx >= 0 ? curIdx : monthScores.length - 1] || {sc:0,sa:0};
-    const kpiTotal = cur.sc + cur.sa + (cur.bonus || 0);
-    const kpiTotalsStr = monthScores.map((ms, i) => `${parseInt(activeMonths[i])}月 ${ms.sc+ms.sa+(ms.bonus||0)}分`).join(' ／ ');
+    const kpiTotal = _selPerMonth + cur.sc + cur.sa + (cur.bonus || 0);
+    const kpiTotalsStr = monthScores.map((ms, i) => `${parseInt(activeMonths[i])}月 ${_selPerMonth+ms.sc+ms.sa+(ms.bonus||0)}分`).join(' ／ ');
     const totalBarHtml = `<div style="background:linear-gradient(135deg,#1a7a6e,#0f5349);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-radius:10px;margin-bottom:14px">
       <div>
         <div style="font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.06em;margin-bottom:2px">當月得分總計</div>
