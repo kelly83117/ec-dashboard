@@ -363,7 +363,11 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
      另外給它一套互動樣式會讓人以為是第二個、不一樣的進入點。
    ⚠ 刻意【不做 line-clamp】：內容永遠是「其他期間 N · 洞察表 M」這種短字串，
      .note-adj-cell 的 max-width:190px 放得下；加了只會在數字變三位數時無聲截掉。 */
-.note-xp{font-size:11px;color:var(--text-muted);font-weight:600;line-height:1.3;margin-top:3px;}
+/* ⚠ font-weight 是 400、【不是】600：這一行是輔助資訊（別處還有什麼），
+   上面的日期＋本期紀錄才是這一格的主體。600 會讓兩者字重相同、互相搶注意力。
+   ⚠ 字級與顏色不再往下調（11px / --text-muted 已經是本表最淡的一階）——
+   再淡就會掉到「看不見」，那等於白做。降字重是唯一還有空間的維度。 */
+.note-xp{font-size:11px;color:var(--text-muted);font-weight:400;line-height:1.3;margin-top:3px;}
 /* 本期沒有紀錄時，這一行【取代】原本的「點此新增」而不是接在它下面 →
    不需要 margin-top，改成撐出跟那行一樣的上下留白，格子高度才不會跳。 */
 .note-xp-only{margin-top:0;padding:2px 0;}
