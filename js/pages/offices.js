@@ -3089,15 +3089,18 @@ Object.assign(App, {
       const arrow = active ? (mgSortDir === 'asc' ? ' ↑' : ' ↓') : '';
       return `<th class="mg-sort-th" data-col="${col}" style="text-align:right;cursor:pointer;user-select:none;color:${active?'#059669':'inherit'}">${label}${arrow}</th>`;
     };
+    const hasOld = list.some(r => r.old);
     const rows = list.length === 0
-      ? `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
+      ? `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
       : sortedList.map((r, i) => {
           const cost = Number(r.cost || 0), rev = Number(r.rev || 0);
           const profit = rev - cost;
           const pct = rev > 0 ? profit / rev * 100 : null;
-          return `<tr style="vertical-align:middle">
+          const oldFlag = r.old ? ' <span title="此商品名稱存在於舊品清單" style="color:#f59e0b;font-size:11px">⚠️舊品</span>' : '';
+          return `<tr style="vertical-align:middle;${r.old ? 'background:#fffbeb;' : ''}">
             <td style="text-align:center;color:#9ca3af;font-size:12px">${i + 1}</td>
-            <td style="font-weight:600;text-align:left">${escapeHtml(r.name || '')}</td>
+            <td style="font-weight:600;text-align:left">${escapeHtml(r.name || '')}${oldFlag}</td>
+            <td style="font-size:12px;color:#6b7280;text-align:left">${escapeHtml(r.date || '')}</td>
             <td style="text-align:right">${priceF(r.cost)}</td>
             <td style="text-align:right">${priceF(r.rev)}</td>
             <td style="text-align:right">${cost || rev ? priceF(profit) : '<span style="color:var(--text-muted)">—</span>'}</td>
@@ -3159,12 +3162,14 @@ Object.assign(App, {
             <input id="mg-old-import-file" type="file" accept=".xlsx,.xls" style="display:none">
             ${(() => { const op = Store.get('ec.d2.oldProducts', []); return op.length > 0 ? `<span style="font-size:11px;color:#9ca3af;padding:4px 10px;background:#f3f4f6;border-radius:20px">已載入 ${op.length} 個舊品</span>` : ''; })()}
             <button id="mg-add-btn" style="padding:7px 16px;background:#059669;color:white;border:0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">＋ 新增</button>
+            ${hasOld ? `<button id="mg-del-old-btn" style="padding:7px 14px;background:#fffbeb;color:#d97706;border:1px solid #fcd34d;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">⚠️ 刪除舊品</button>` : ''}
             ${list.length > 0 ? `<button id="mg-clear-btn" style="padding:7px 16px;background:#fff;color:#dc2626;border:1px solid #fca5a5;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer">🗑 一鍵清除</button>` : ''}
           </div>
         </div>
         <div id="mg-form" style="display:none;padding:16px;background:#f0fdf4;border-bottom:1px solid var(--border)">
-          <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:10px">
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">
             <input id="mg-name" placeholder="品名 *" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
+            <input id="mg-date" placeholder="建檔日期" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="mg-cost" type="number" placeholder="成本" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
             <input id="mg-rev" type="number" placeholder="營收" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit">
           </div>
@@ -3174,7 +3179,7 @@ Object.assign(App, {
           </div>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th style="text-align:center;width:48px">編號</th><th style="text-align:left">品名</th>${thSort('cost','成本')}${thSort('rev','營收')}${thSort('profit','毛利')}${thSort('pct','毛利率')}<th></th></tr></thead>
+          <thead><tr><th style="text-align:center;width:48px">編號</th><th style="text-align:left">品名</th><th style="text-align:left">建檔日期</th>${thSort('cost','成本')}${thSort('rev','營收')}${thSort('profit','毛利')}${thSort('pct','毛利率')}<th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table></div>
       </div>`;
@@ -3204,7 +3209,7 @@ Object.assign(App, {
     const mgSaveBtn = document.getElementById('mg-save');
     let mgEditIdx = -1;
     const clearMg = () => {
-      ['mg-name','mg-cost','mg-rev'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      ['mg-name','mg-date','mg-cost','mg-rev'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
       mgEditIdx = -1;
       mgSaveBtn.textContent = '儲存';
       mgForm.style.display = 'none';
@@ -3217,7 +3222,7 @@ Object.assign(App, {
     mgSaveBtn?.addEventListener('click', () => {
       const name = document.getElementById('mg-name')?.value.trim();
       if (!name) { showToast('請填寫品名'); return; }
-      const entry = { name, cost: document.getElementById('mg-cost')?.value || '', rev: document.getElementById('mg-rev')?.value || '' };
+      const entry = { name, date: document.getElementById('mg-date')?.value.trim() || '', cost: document.getElementById('mg-cost')?.value || '', rev: document.getElementById('mg-rev')?.value || '' };
       const list = Store.get(mgKey, []);
       if (mgEditIdx >= 0) { list[mgEditIdx] = entry; } else { list.push(entry); }
       Store.set(mgKey, list);
@@ -3229,6 +3234,7 @@ Object.assign(App, {
       const r = list[+btn.dataset.i]; if (!r) return;
       mgEditIdx = +btn.dataset.i;
       document.getElementById('mg-name').value = r.name || '';
+      document.getElementById('mg-date').value = r.date || '';
       document.getElementById('mg-cost').value = r.cost || '';
       document.getElementById('mg-rev').value = r.rev || '';
       mgSaveBtn.textContent = '更新';
@@ -3259,6 +3265,15 @@ Object.assign(App, {
       Store.set(savesKey, saves);
       this.render();
     }));
+
+    // 刪除⚠️舊品
+    document.getElementById('mg-del-old-btn')?.addEventListener('click', () => {
+      const list = Store.get(mgKey, []);
+      const oldCount = list.filter(r => r.old).length;
+      if (!confirm(`確定要刪除 ${oldCount} 筆⚠️舊品？`)) return;
+      Store.set(mgKey, list.filter(r => !r.old));
+      this.render();
+    });
 
     // 一鍵清除
     document.getElementById('mg-clear-btn')?.addEventListener('click', () => {
@@ -3336,27 +3351,34 @@ Object.assign(App, {
           if (nameIdx < 0 || revIdx < 0 || costIdx < 0) {
             showToast('找不到欄位：需要「商品名稱」「售價」「成本」'); return;
           }
+          const dateIdx = ['建檔日期','建立時間','建立日期','上架日期'].reduce((found, col) => {
+            if (found >= 0) return found;
+            return headers.findIndex(h => h === col);
+          }, -1);
           const oldSet = new Set(Store.get('ec.d2.oldProducts', []));
           const map = new Map();
-          let skippedOld = 0;
           for (let i = 1; i < data.length; i++) {
             const row = data[i];
             const name = String(row[nameIdx] || '').trim();
             if (!name) continue;
-            if (oldSet.size > 0 && oldSet.has(name)) { skippedOld++; continue; }
             const rev  = Number(row[revIdx])  || 0;
             const cost = Number(row[costIdx]) || 0;
+            const date = dateIdx >= 0 ? String(row[dateIdx] || '').trim() : '';
+            const isOld = oldSet.size > 0 && oldSet.has(name);
             if (map.has(name)) {
               map.get(name).rev  += rev;
               map.get(name).cost += cost;
+              if (!map.get(name).date && date) map.get(name).date = date;
             } else {
-              map.set(name, { name, rev, cost });
+              map.set(name, { name, date, rev, cost, old: isOld });
             }
           }
           const merged = [...map.values()].map(r => ({
             name: r.name,
+            date: r.date || '',
             rev:  Math.round(r.rev  * 100) / 100,
             cost: Math.round(r.cost * 100) / 100,
+            ...(r.old ? { old: true } : {}),
           }));
           Store.set(mgKey, merged);
           // 自動存檔
@@ -3367,8 +3389,9 @@ Object.assign(App, {
           saves.unshift({ ts, data: merged });
           Store.set(savesKey, saves);
           importFile.value = '';
-          const skipMsg = skippedOld > 0 ? `（已踢除 ${skippedOld} 筆舊品）` : '';
-          showToast(`匯入完成，共 ${merged.length} 個商品${skipMsg}，已自動存檔`);
+          const oldCount = merged.filter(r => r.old).length;
+          const oldMsg = oldCount > 0 ? `，其中 ${oldCount} 筆標記⚠️舊品，可點「刪除舊品」一鍵移除` : '';
+          showToast(`匯入完成，共 ${merged.length} 個商品${oldMsg}`);
           this.render();
         } catch (err) {
           showToast('匯入失敗：' + err.message);
