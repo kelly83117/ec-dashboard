@@ -7375,6 +7375,15 @@ function renderTable(shop,list,opts){
   //   上方註解），800 列就是 800 次。同一個坑本檔已經踩過兩次，兩處都留了同樣的警告：
   //   updateTagFilterBar 與 applyFilters 裡的 prodRead。
   const prevBudRead=_prevDayBudgetReaderFor(shop);
+  // 🔴 同上一條，理由完全相同：商品調整（ec_notes|{通路}_growth）整個通路共用一把 key，
+  //   而 getNotes 命中記憶體時做的是 JSON.parse(JSON.stringify(…))【整份深拷貝】（見該函式）。
+  //   原本這一行寫在 forEach 裡的兩個分支各一次（mobic / 非 mobic），好麻吉 822 列
+  //   ＝ 每次重畫做 822 次整份深拷貝，而 renderTable 是 applyFilters 的共同出口
+  //   （22 個呼叫點）→ 搜尋框每打一個字就付一次。
+  //   ⚠ 提到迴圈外之後全表共用【同一個物件】：buildNoteCell 只讀不寫（它把過濾結果放進
+  //     自己的區域變數 cur，不動 noteData.adjustments），所以共用是安全的。日後若有人
+  //     讓 buildNoteCell 就地修改傳進去的 noteData，這裡要改回逐列取或先複製一份。
+  const growthNotesAll=getNotes(shop+'_growth');
   let rowIdx=0;
   list.forEach(r=>{
     const pc=r.pureProfit>=0?'td-pos':'td-neg';
@@ -7407,7 +7416,7 @@ function renderTable(shop,list,opts){
         adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span>${_subAdsHtml(r)}</td>`,
         pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
         note:noteCellHtml,
-        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
+        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,growthNotesAll[r.code]),
         prodTags:buildProdTagCell(shop,r.code),
       };
       const bodyCells=orderedCols.map(c=>{
@@ -7447,7 +7456,7 @@ function renderTable(shop,list,opts){
         note:noteCellHtml,
         growthRate:`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`,
         growthAnalysis:`<td class="tl">${r.growthAnalysis&&r.growthAnalysis.label?`<span class="tag ${r.growthAnalysis.cls}">${r.growthAnalysis.label}</span>`:'—'}</td>`,
-        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,getNotes(shop+'_growth')[r.code]),
+        growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,growthNotesAll[r.code]),
         prodTags:buildProdTagCell(shop,r.code),
       };
       html+=`<tr>
