@@ -10659,7 +10659,7 @@ function momoProductsPlanMerge(shop, cloudItems, localItems, lastPushedSig){
   return { mode: bootstrap?'bootstrap':'lastpushed', merged, changed, added, removed, pushSkus:[...overwrite], deleteSkus:[...removeSet], preserveCount, conflictSkus, cloudCount:cloud.length, localCount:local.length, mergedCount:merged.length, wholeOverwritePush:local.length, cloudOnly };
 }
 window.__momoProductsPlanMerge=momoProductsPlanMerge;   // 合成測/診斷可直呼
-window.__MOMO_MERGE_ENFORCE=false;   // 🔴 B2 閘：false=SHADOW（syncToCloud 不寫雲端、只 log 對照）；設 true 才真的 merge 寫入。Vanessa 驗收前先 shadow 對照。
+window.__MOMO_MERGE_ENFORCE=true;   // 🟢 B2 閘：products 同步走逐 SKU merge 真寫（getDoc→plan→setShop merged；保留雲端獨有、只覆蓋 dirty、本機空+雲端有→中止防呆）。2026-09-09 stage-1 四賣場在真實資料驗過（甲配推155/乙配推26、deleteSkus 全 0、雲端獨有保留正確；MO+ 無變更跳過）→ 正式啟用。要臨時退回「只 log 不寫」改 false。
 // 實際推送（syncToCloud 分派呼叫；opts.shadow=true 供 __momoMergeShadow 診斷）：getDoc 雲端 → plan → log →（非 shadow 才寫 + 更新 last-pushed）。
 async function momoSyncProductsMerge(shop, opts){
   const shadow = !!(opts&&opts.shadow===true);
