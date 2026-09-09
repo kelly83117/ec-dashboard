@@ -3092,24 +3092,50 @@ Object.assign(App, {
     const hasOld = list.some(r => r.old);
     const rows = list.length === 0
       ? `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:28px;font-size:13px">尚無資料，點擊「＋ 新增」開始建立</td></tr>`
-      : sortedList.map((r, i) => {
+      : sortedList.flatMap((r, i) => {
           const cost = Number(r.cost || 0), rev = Number(r.rev || 0);
           const profit = rev - cost;
           const pct = rev > 0 ? profit / rev * 100 : null;
-          const oldFlag = r.old ? ' <span title="此商品名稱存在於舊品清單" style="color:#f59e0b;font-size:11px">⚠️舊品</span>' : '';
-          return `<tr style="vertical-align:middle;${r.old ? 'background:#fffbeb;' : ''}">
+          const origIdx = list.indexOf(r);
+          const variants = Array.isArray(r.variants) ? r.variants : [];
+          const hasVariants = r.old && variants.length > 0;
+          const expandBtn = hasVariants
+            ? `<button class="mg-expand-btn" data-i="${origIdx}" style="margin-left:6px;padding:1px 7px;border:1px solid #fcd34d;background:#fef3c7;color:#92400e;border-radius:10px;font-size:11px;cursor:pointer;vertical-align:middle">▶ ${variants.length}款</button>`
+            : '';
+          const oldFlag = r.old ? ` <span style="color:#f59e0b;font-size:11px">⚠️舊品</span>` : '';
+          const dateDisplay = r.date ? r.date.split(' ')[0].split('T')[0] : '';
+          const mainRow = `<tr style="vertical-align:middle;${r.old ? 'background:#fffbeb;' : ''}">
             <td style="text-align:center;color:#9ca3af;font-size:12px">${i + 1}</td>
-            <td style="font-weight:600;text-align:left">${escapeHtml(r.name || '')}${oldFlag}</td>
-            <td style="font-size:12px;color:#6b7280;text-align:left">${escapeHtml(r.date || '')}</td>
+            <td style="font-weight:600;text-align:left">${escapeHtml(r.name || '')}${oldFlag}${expandBtn}</td>
+            <td style="font-size:12px;color:#6b7280;text-align:left">${escapeHtml(dateDisplay)}</td>
             <td style="text-align:right">${priceF(r.cost)}</td>
             <td style="text-align:right">${priceF(r.rev)}</td>
             <td style="text-align:right">${cost || rev ? priceF(profit) : '<span style="color:var(--text-muted)">—</span>'}</td>
             <td style="text-align:center">${pctF(pct)}</td>
             <td style="white-space:nowrap"><div style="display:flex;gap:5px;justify-content:center">
-              <button class="mg-edit" data-i="${list.indexOf(r)}" style="padding:3px 10px;border:1px solid #d1fae5;background:#f0fdf4;color:#1a7a6e;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
-              <button class="mg-del" data-i="${list.indexOf(r)}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
+              <button class="mg-edit" data-i="${origIdx}" style="padding:3px 10px;border:1px solid #d1fae5;background:#f0fdf4;color:#1a7a6e;border-radius:5px;font-size:12px;cursor:pointer">編輯</button>
+              <button class="mg-del" data-i="${origIdx}" style="padding:3px 10px;border:1px solid #fee2e2;background:#fff5f5;color:#dc2626;border-radius:5px;font-size:12px;cursor:pointer">刪除</button>
             </div></td>
           </tr>`;
+          const variantRow = hasVariants ? `<tr class="mg-variant-row" data-i="${origIdx}" hidden>
+            <td colspan="8" style="padding:0 12px 10px 12px;background:#fffbeb">
+              <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <thead><tr style="background:#fef3c7">
+                  <th style="padding:4px 8px;text-align:left;border:1px solid #fcd34d">樣式</th>
+                  <th style="padding:4px 8px;text-align:left;border:1px solid #fcd34d">尺寸</th>
+                  <th style="padding:4px 8px;text-align:right;border:1px solid #fcd34d">成本</th>
+                  <th style="padding:4px 8px;text-align:right;border:1px solid #fcd34d">售價</th>
+                </tr></thead>
+                <tbody>${variants.map(v => `<tr>
+                  <td style="padding:3px 8px;border:1px solid #fde68a">${escapeHtml(v.style||'—')}</td>
+                  <td style="padding:3px 8px;border:1px solid #fde68a">${escapeHtml(v.size||'—')}</td>
+                  <td style="padding:3px 8px;border:1px solid #fde68a;text-align:right">${v.cost ? 'NT$'+Number(v.cost).toLocaleString() : '—'}</td>
+                  <td style="padding:3px 8px;border:1px solid #fde68a;text-align:right">${v.rev ? 'NT$'+Number(v.rev).toLocaleString() : '—'}</td>
+                </tr>`).join('')}</tbody>
+              </table>
+            </td>
+          </tr>` : '';
+          return [mainRow, variantRow].filter(Boolean);
         }).join('');
     const savesHtml = (() => {
       const savesKey = activeQ === 'Q3' ? 'ec.d2.margin.saves' : `ec.d2.margin.saves.${activeQ.toLowerCase()}`;
@@ -3133,6 +3159,7 @@ Object.assign(App, {
     })();
     // 統計
     const profits = list.map(r => { const c = Number(r.cost||0), v = Number(r.rev||0); return v - c; });
+    const totalProfit = profits.reduce((s, p) => s + p, 0);
     const cnt10k = profits.filter(p => p > 10000).length;
     const cnt8k  = profits.filter(p => p > 8000 && p <= 10000).length;
     const cnt5k  = profits.filter(p => p > 5000 && p <= 8000).length;
@@ -3141,9 +3168,11 @@ Object.assign(App, {
         <div style="font-size:22px;font-weight:800;color:${color}">${value}</div>
         <div style="font-size:11px;color:#9ca3af;margin-top:3px">${label}</div>
       </div>`;
+    const totalProfitColor = totalProfit > 0 ? '#059669' : totalProfit < 0 ? '#dc2626' : '#9ca3af';
     const statsHtml = list.length === 0 ? '' :
       `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
         ${statCard('新品總數', list.length + ' 筆', '#374151')}
+        ${statCard('總毛利', 'NT$' + Math.round(totalProfit).toLocaleString(), totalProfitColor)}
         ${statCard('毛利 > 10,000', cnt10k + ' 筆', cnt10k > 0 ? '#059669' : '#9ca3af')}
         ${statCard('毛利 8,001~10,000', cnt8k + ' 筆', cnt8k > 0 ? '#2563eb' : '#9ca3af')}
         ${statCard('毛利 5,001~8,000',  cnt5k + ' 筆', cnt5k > 0 ? '#f59e0b' : '#9ca3af')}
@@ -3266,6 +3295,17 @@ Object.assign(App, {
       this.render();
     }));
 
+    // 展開/收合舊品樣式
+    document.querySelectorAll('.mg-expand-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const varRow = document.querySelector(`.mg-variant-row[data-i="${btn.dataset.i}"]`);
+        if (!varRow) return;
+        varRow.hidden = !varRow.hidden;
+        btn.textContent = varRow.hidden ? `▶ ${btn.textContent.replace(/[▼▶]\s*/,'')}` : `▼ ${btn.textContent.replace(/[▼▶]\s*/,'')}`;
+      });
+    });
+
     // 刪除⚠️舊品
     document.getElementById('mg-del-old-btn')?.addEventListener('click', () => {
       const list = Store.get(mgKey, []);
@@ -3355,6 +3395,8 @@ Object.assign(App, {
             if (found >= 0) return found;
             return headers.findIndex(h => h === col);
           }, -1);
+          const styleIdx = headers.findIndex(h => h === '樣式');
+          const sizeIdx  = headers.findIndex(h => h === '尺寸');
           const oldSet = new Set(Store.get('ec.d2.oldProducts', []));
           const map = new Map();
           for (let i = 1; i < data.length; i++) {
@@ -3364,13 +3406,18 @@ Object.assign(App, {
             const rev  = Number(row[revIdx])  || 0;
             const cost = Number(row[costIdx]) || 0;
             const date = dateIdx >= 0 ? String(row[dateIdx] || '').trim() : '';
+            const style = styleIdx >= 0 ? String(row[styleIdx] || '').trim() : '';
+            const size  = sizeIdx  >= 0 ? String(row[sizeIdx]  || '').trim() : '';
             const isOld = oldSet.size > 0 && oldSet.has(name);
             if (map.has(name)) {
-              map.get(name).rev  += rev;
-              map.get(name).cost += cost;
-              if (!map.get(name).date && date) map.get(name).date = date;
+              const entry = map.get(name);
+              entry.rev  += rev;
+              entry.cost += cost;
+              if (!entry.date && date) entry.date = date;
+              if (isOld && (style || size)) entry.variants.push({ style, size, cost, rev });
             } else {
-              map.set(name, { name, date, rev, cost, old: isOld });
+              const variants = isOld && (style || size) ? [{ style, size, cost, rev }] : [];
+              map.set(name, { name, date, rev, cost, old: isOld, variants });
             }
           }
           const merged = [...map.values()].map(r => ({
@@ -3378,7 +3425,7 @@ Object.assign(App, {
             date: r.date || '',
             rev:  Math.round(r.rev  * 100) / 100,
             cost: Math.round(r.cost * 100) / 100,
-            ...(r.old ? { old: true } : {}),
+            ...(r.old ? { old: true, variants: r.variants } : {}),
           }));
           Store.set(mgKey, merged);
           // 自動存檔
