@@ -521,9 +521,25 @@ const App = {
     if (session) {
       const user = (Store.get(Store.KEYS.users, [])).find(u => u.username === session.username);
       if (user) {
-        this.enterApp(user);
+        this.enterApp(user);            // 分支1：session 在 + users 已載 + find 到
         return;
       }
+      // 分支2 vs 分支3：用 __firstMainSnapshotDone 分辨「雲端已回但真沒此帳號」vs「雲端還沒回」。
+      //   ⚠ 關鍵：空 users 陣列（載完真的沒人）＝旗標 true 下的合法值 → 落分支2，不會卡在分支3。
+      if (!window.__firstMainSnapshotDone) {
+        // 分支3：session 在、但雲端 users 還沒載到（多半是 5 秒 fallback 搶在雲端回來前開站）。
+        //   不要秒登出：留住 view-boot 遮罩、記下 pending session，等 __setupCloud 的 subscribe 首批
+        //   回來後重試還原（見 subscribe callback 內的 __bootPendingSession 區塊）。
+        //   8 秒 hard timeout 保底：雲端太久沒回（含純離線）才顯示登入頁 + 連線較慢提示，不無限轉圈。
+        window.__bootPendingSession = session;
+        window.__bootPendingTimer = setTimeout(() => {
+          window.__bootPendingSession = null;
+          window.__bootPendingTimer = null;
+          this.showLogin({ slow: true });
+        }, 8000);
+        return;   // 刻意不呼叫 showLogin → 保留 view-boot 遮罩、維持等待狀態
+      }
+      // 分支2：雲端已回（旗標 true），users 裡真的沒這帳號 → 正常落到下方 showLogin
     }
     this.showLogin();
   },
@@ -617,10 +633,13 @@ const App = {
   },
 
   /* ------------- 登入 ------------- */
-  showLogin() {
+  showLogin(opts) {
     document.getElementById('view-login').style.display = 'flex';
     document.getElementById('view-app').style.display = 'none';
     this._hideBoot();
+    // 開站競態分支3：等雲端 users 等超過 8 秒（連線慢/離線）才落到這裡 → 給提示、非帳密錯誤。
+    //   opts 省略時（logout / 正常首載未登入）行為完全不變。
+    if (opts && opts.slow) { try { this.showAuthError('連線較慢，請重新登入（或稍候再重整一次）'); } catch {} }
   },
 
   /* 隱藏全屏載入遮罩（淡出後移除）*/
@@ -3197,6 +3216,20 @@ async function __setupCloud() {
       // 標記主 doc 首批 snapshot 已回來 → seedData / ensureAdmin 才敢寫入
       //   （沒這旗標時，空 users 陣列會誤觸「補預設 admin 蓋掉雲端」的災難）
       window.__firstMainSnapshotDone = true;
+      // 開站競態修復（fix/relogin-boot-race）：boot 分支3 若因 users 未載而留住 view-boot、
+      //   記了 __bootPendingSession（未 showLogin），這裡首批 users 到位後重試還原。
+      //   此時 _useMem 已 true、_mem 有 users，Store.get(users) 讀得到雲端真值。
+      //   必須插在下面「App/currentUser 未就緒就 return」的 guard 之前——分支3 的 currentUser 為 null，
+      //   會被那個 guard 提早 return、跑不到重試。
+      if (window.__bootPendingSession && window.App && !App.currentUser) {
+        const pend = window.__bootPendingSession;
+        window.__bootPendingSession = null;
+        if (window.__bootPendingTimer) { clearTimeout(window.__bootPendingTimer); window.__bootPendingTimer = null; }
+        const pu = (Store.get(Store.KEYS.users, []) || []).find(u => u.username === pend.username);
+        if (pu) { try { App.enterApp(pu); } catch (e) { console.warn('[relogin retry] enterApp 失敗', e); } }
+        else { try { App.showLogin(); } catch (e) {} }   // 雲端回了、真沒此帳號 → 正常登入頁
+        return;   // 首批已由重試處理完（enterApp 內含 render）；不再往下走 dirty/重繪
+      }
       if (!(window.App && App.currentUser && typeof App.render === 'function')) {
         // App 還沒準備好，等準備好再補一次 render（由 enterApp 那邊處理）
         if (isFirstSnapshot) window.__pendingFirstRender = true;
