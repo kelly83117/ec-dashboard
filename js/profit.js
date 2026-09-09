@@ -2289,6 +2289,23 @@ function _splitDraftToMap(prev,draft){
 //     推送端（syncToCloud 的泛用 field 分支）會先問 Store._mem、讀不到才 fallback 到
 //     localStorage.getItem —— 所以【實際走的是 fallback 那一支】，這是預期行為不是漏接。
 function saveSplits(shop,map){
+  // 通路守衛（資料層共同出口）。判準與 shopHTML / openSplitModal 兩處【同源】—— 同一個 SPLIT_SHOPS。
+  //   🔴 這一道【必須放在這裡，不是放在 saveSplitDraft】：本函式才是共同出口 ——
+  //     localStorage、Store._profitMem、_pendingSyncKeys、_shopJustSaved 四件事全部發生在這裡，
+  //     而且它自己也掛在 window 上（本檔搜 `getSplits,saveSplits`），Console 可以直接呼叫、
+  //     完全繞過 openSplitModal。擋在共同出口等於同時擋住 UI 與程式兩條路。
+  //     判準放呼叫端就得每新增一個呼叫端補一次，而漏補是靜默的 —— 同型立場見 renderTable
+  //     開頭那段（「擋這一處等於擋住 22 條路；去擋計時器只擋得住其中 1 條」）。
+  //   ⚠ saveSplitDraft 因此【不需要】自己的守衛：它唯一的通路來源是 _splitShop，而那個變數
+  //     全檔只有兩個寫入點（openSplitModal 設值、closeSplitModal 設 null，本檔搜 `_splitShop=`），
+  //     不在 window 匯出名單裡 → 上游守好之後它拿不到白名單外的通路。再加一道只是第三份同樣的規則。
+  //   ⚠ 戳記與待推佇列都在守衛【之後】：擋下時不可以留下 _shopJustSaved（那會白白封鎖 5 秒
+  //     全通路雲端快照）、也不可以留下 pending key（那會讓同步鈕亮著卻推不出東西）。
+  if(!SPLIT_SHOPS.includes(shop)){
+    const err=new Error('通路「'+shop+'」不在 SPLIT_SHOPS 白名單，拒絕寫入拆分資料');
+    console.error('[saveSplits] '+err.message);
+    return {ok:false,err,key:null,blocked:true};
+  }
   // 🔴 第一行就設戳記，與 saveNotes 一致（本檔搜 `window._shopJustSaved=Date.now();`）。
   //   它讓 5 秒內的雲端快照不覆蓋剛存的值（__profitShouldSkipCloudOverwrite / profitDataReady）。
   //   ⚠ 它是【全域、不分通路不分 key】的 —— 所以只能在真正的「儲存」動作設，不可以綁 oninput。
@@ -2317,6 +2334,16 @@ function saveSplits(shop,map){
 //    用 inline style 加寬。這是既有寫法（openUnmatchedModal 的
 //    `class="ana-modal" style="width:min(860px,95vw)"`），不是新增 class。
 function openSplitModal(shop){
+  // 通路守衛（UI 入口）。判準與 shopHTML 那顆鈕【同源】—— 同一個 SPLIT_SHOPS，不另寫一份字面陣列。
+  //   為什麼需要：shopHTML 的白名單只擋住「鈕長不長出來」，本函式掛在 window 上
+  //   （本檔搜 `openSplitModal,closeSplitModal`），Console 打一行就能繞過那顆鈕開窗、
+  //   選品號、按儲存 —— 而測試通路的 state 也有 curMonth/curHalf（:347 五個通路一視同仁），
+  //   _splitKey 會組出一把看起來合法的 ec_split|測試通路|…，接著被 sweep 的
+  //   startsWith('ec_split|') 撿進待推、推上雲。白名單若只做在 render 層就只是視覺的。
+  //   ⚠ 用 console.warn 不用 alert：走到這裡代表是程式呼叫（使用者點不到那顆鈕），
+  //     彈窗給不了他任何能做的事。與 setShop 開頭那道守衛的靜默 return 不同的是，
+  //     那裡是「切頁時五個通路各來一次」會洗版，這裡不會，所以留得下訊息。
+  if(!SPLIT_SHOPS.includes(shop)){ console.warn('[openSplitModal] 通路「'+shop+'」不在 SPLIT_SHOPS 白名單，不開窗'); return; }
   const built=state[shop]?._built;
   if(!built||!built.length){alert('請先產生報表');return;}
   let ov=document.getElementById('split-overlay');
