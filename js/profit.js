@@ -2231,10 +2231,96 @@ function splitRemoveRow(i){
   renderSplitModalBody();
 }
 // 數字輸入。
-//   ⚠ 【不重繪整個 body】—— 重繪會讓 input 失焦、一個數字打不完。只把 DOM 收回草稿。
+//   ⚠ 【只重繪結果區、不重繪整個 body】—— 重繪 body 會讓 input 失焦、一個數字打不完。
 //   ⚠ 不收參數：值從 DOM 讀（單一來源，見 _splitSyncDraftFromDOM 的紅字）。
+//   🔴 這裡【絕對不可以】順手寫 localStorage。理由不是效能，是 window._shopJustSaved：
+//     那是一個【全域、不分通路、不分 key】的戳記（本檔搜 `window.__profitShouldSkipCloudOverwrite`），
+//     設一次會讓接下來 5 秒內【所有】app/profit 的雲端快照被整個 return 掉
+//     （見 profitDataReady listener 開頭那個 justSaved 早退）。綁在 oninput 上等於每打一個字
+//     就把那 5 秒窗口往後推一次 —— 使用者慢慢算比例的那幾分鐘，全通路都收不到同事的更新。
+//     寫入只綁在「儲存」按鈕上，見 saveSplitDraft。
 function splitNumInput(){
   _splitSyncDraftFromDOM();
+  renderSplitResults();
+}
+
+// ── 試算 ──
+//  公式逐字照抄 buildShop 與 recalcRow（兩份實作對這四項【逐字相同】，本檔搜
+//  `const platFee=p.rev*PLATFORM` 與 `const platFee=rev*PLATFORM` 自行比對）：
+//      platFee    = rev * PLATFORM
+//      pureProfit = gross - adsFee - platFee
+//      pureRate   = rev > 0 ? pureProfit / rev : null
+//  ⚠ adsFee 直接讀該列的 r.adsFee（那個值已經含使用者編輯過的覆蓋 —— recalcRow 把編輯後的
+//    adsFee 就地寫回 built 並 lsSave，本檔搜 `Object.assign(built[idx]`），【不要】重算。
+//  ⚠ 拆分只動 rev 與 gross，adsFee 兩邊都不動 —— 廣告費是各自的商品頁投放，與營收歸屬無關。
+function _splitCalc(rev,gross,adsFee,PLATFORM){
+  const platFee=rev*PLATFORM;
+  const pureProfit=gross-adsFee-platFee;
+  const pureRate=rev>0?pureProfit/rev:null;
+  return {rev,gross,pureProfit,pureRate};
+}
+// 一組草稿 → 四列試算結果，或 null（品號沒選齊 / 選到同一個 / 報表裡查無此品號）。
+//   ⚠ 回傳 reason 而不是靜默給 null：使用者填到一半是常態，畫面要講得出「還缺什麼」。
+function _splitRowsOf(shop,g){
+  const built=state[shop]&&state[shop]._built;
+  if(!Array.isArray(built))return {err:'尚未載入報表'};
+  if(!g.from||!g.to)return {err:'請選齊 A 與 B 兩個品號'};
+  if(g.from===g.to)return {err:'A 與 B 不能是同一個品號'};
+  const a=built.find(r=>r&&r.code===g.from);
+  const b=built.find(r=>r&&r.code===g.to);
+  if(!a)return {err:`這一期的報表裡找不到品號 ${g.from}`};
+  if(!b)return {err:`這一期的報表裡找不到品號 ${g.to}`};
+  const P=getPlatformRate(shop);
+  const aAds=a.adsFee||0,bAds=b.adsFee||0;
+  return {a,b,P,rows:[
+    {label:`A ${a.code} 原始`,   name:a.name||'', after:false, v:_splitCalc(a.rev||0,          a.gross||0,          aAds,P)},
+    {label:`A ${a.code} 拆分後`, name:a.name||'', after:true,  v:_splitCalc((a.rev||0)-g.rev,  (a.gross||0)-g.gross, aAds,P)},
+    {label:`B ${b.code} 原始`,   name:b.name||'', after:false, v:_splitCalc(b.rev||0,          b.gross||0,          bAds,P)},
+    {label:`B ${b.code} 拆分後`, name:b.name||'', after:true,  v:_splitCalc((b.rev||0)+g.rev,  (b.gross||0)+g.gross, bAds,P)},
+  ]};
+}
+// 結果區。只重繪這一塊（#split-results），不動上面那些 input。
+function renderSplitResults(){
+  const host=document.getElementById('split-results');
+  if(!host)return;
+  const shop=_splitShop;
+  const rows=Array.isArray(_splitDraft)?_splitDraft:[];
+  if(!shop||!rows.length){host.innerHTML='';return;}
+  const P=getPlatformRate(shop);
+  // ⚠ 費率顯示一定要走 toFixed：getPlatformRate 是 20.5/100，乘回 100 會是 20.499999999999996。
+  const rateTxt=(P*100).toFixed(1);
+  const cell=(v,after)=>{
+    const c=after?'#374151':'#9ca3af';
+    const w=after?'600':'400';
+    return `<td style="text-align:right;padding:5px 10px;color:${c};font-weight:${w};font-variant-numeric:tabular-nums">${_fSigned(v)}</td>`;
+  };
+  const blocks=rows.map((g,i)=>{
+    const r=_splitRowsOf(shop,g);
+    if(r.err)return `<div style="border:1px dashed #e5e7eb;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#9ca3af">第 ${i+1} 組：${escapeHtmlLike(r.err)}</div>`;
+    const trs=r.rows.map(x=>`<tr style="${x.after?'background:#f8f9fc;':''}border-bottom:1px solid #f3f4f6">
+      <td style="padding:5px 10px;font-size:12px;color:${x.after?'#374151':'#9ca3af'};font-weight:${x.after?'700':'400'};white-space:nowrap">${escapeHtmlLike(x.label)}</td>
+      ${cell(x.v.rev,x.after)}${cell(x.v.gross,x.after)}${cell(x.v.pureProfit,x.after)}
+      <td style="text-align:right;padding:5px 10px">${x.v.pureRate===null?'<span class="pill pn">—</span>':pill(x.v.pureRate*100)}</td>
+    </tr>`).join('');
+    return `<div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:#5b5fcf;margin-bottom:4px">第 ${i+1} 組　${escapeHtmlLike(r.a.name||'')} → ${escapeHtmlLike(r.b.name||'')}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#f8fafc;border-bottom:2px solid #e5e7eb">
+          <th style="text-align:left;padding:6px 10px;font-size:11px;color:#6b7280;font-weight:600">品號</th>
+          <th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;font-weight:600">營收</th>
+          <th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;font-weight:600">毛利</th>
+          <th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;font-weight:600">純利</th>
+          <th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;font-weight:600">純利率</th>
+        </tr></thead>
+        <tbody>${trs}</tbody>
+      </table>
+    </div>`;
+  }).join('');
+  host.innerHTML=`<div style="border-top:1px solid #e4e6ef;margin-top:16px;padding-top:14px">
+    <div style="font-size:13px;font-weight:700;color:#1f2937;margin-bottom:10px">試算結果</div>
+    ${blocks}
+    <div style="font-size:11px;color:#9ca3af;line-height:1.6">純利已扣掉各自的廣告費與平台費（${escapeHtmlLike(shop)} ${rateTxt}%），銷量與庫存不隨拆分變動。</div>
+  </div>`;
 }
 
 // ── 品號選擇（搜尋框 + 下拉）──
@@ -2261,6 +2347,7 @@ function splitSelect(i,side,code){
   if(sel)sel.value=code;
   if(drop)drop.style.display='none';
   _splitSyncDraftFromDOM();   // 值一律從 DOM 收回，不在這裡直接寫草稿（單一來源，見該函式的紅字）
+  renderSplitResults();       // 換了品號 → 四列全部要重算。同 splitNumInput，只重繪結果區
 }
 function splitHideDrop(i,side){
   const drop=document.getElementById('sp-drop-'+i+'-'+side);
@@ -2312,8 +2399,12 @@ function renderSplitModalBody(){
       </div>
     </div>`).join('');
   const empty=rows.length?'':`<div style="color:#9ca3af;font-size:13px;padding:18px 0;text-align:center">還沒有任何一組。按下面的「＋ 新增一組」開始。</div>`;
+  // ⚠ #split-results 是【獨立容器】：資料變動時只重繪它（renderSplitResults），
+  //   不重繪整個 body —— 重繪 body 會讓正在打字的 input 失焦。
   body.innerHTML=`${empty}${rowsHtml}
-    <button onclick="splitAddRow()" style="padding:7px 16px;border:1.5px dashed #5b5fcf;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#5b5fcf;cursor:pointer">＋ 新增一組</button>`;
+    <button onclick="splitAddRow()" style="padding:7px 16px;border:1.5px dashed #5b5fcf;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#5b5fcf;cursor:pointer">＋ 新增一組</button>
+    <div id="split-results"></div>`;
+  renderSplitResults();
 }
 
 // ── Init ──
@@ -21438,6 +21529,7 @@ Object.assign(window, {
   saveProdTagsBatch,
   // 拆分試算。全部是工具列那顆鈕與彈窗內的 inline onclick / oninput / onfocus / onblur 用，
   //   漏掛任何一個都會 ReferenceError、那顆按鈕或那格輸入框靜默失效。
-  openSplitModal,closeSplitModal,renderSplitModalBody,
+  openSplitModal,closeSplitModal,renderSplitModalBody,renderSplitResults,
   splitAddRow,splitRemoveRow,splitNumInput,splitSearch,splitSelect,splitHideDrop,
+  _splitCalc,_splitRowsOf,   // 純函式，掛上去給 Console 對數字用（不是 inline handler）
 });
