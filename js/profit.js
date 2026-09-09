@@ -18312,9 +18312,12 @@ function cupIsReportKey(k){ return typeof k==='string' && k.startsWith('ec_coupa
 function cupIsMsfKey(k){ return typeof k==='string' && k.startsWith('ec_coupang_msf|') && k.split('|').length===3; }
 // 存檔＝localStorage + Store._mem + _markPending（讓全域同步 sweep/預覽/計數撈得到；雲端由 syncToCloud 分派 setReport/setSrc）。
 function cupSaveReport(shop, month, rows, orderNos){ const k=cupReportKey(shop,month);
-  const clean=(rows||[]).map(r=>({code:r.code, name:r.name, qty:r.qty, rev:r.rev, fee:r.fee}));   // PR-4b：note 已拆到 coupang_note doc、不再存進報表（避免自由文字進 delete guard 誤報）；cost/net render 時 live 算
+  const clean=(rows||[]).map(r=>({code:r.code, name:r.name, qty:r.qty, rev:r.rev, fee:r.fee, dispId:r.dispId||'', stock:(r.stock!=null?r.stock:null)}));   // PR-4b：note 拆到 coupang_note；PR-3b：dispId(站內商品編號)+stock(庫存)持久化（結構化 ID／數字、非自由文字→不進 delete guard 誤報）；cost/net render 時 live 算
   const payload={month:cupNormMonth(month), rows:clean, orderNos:orderNos||[], ts:Date.now()};   // orderNos＝MSF 退貨歸期 join 用（讀取端 coupangBuildOrderIndex 跨所有已存月份）
-  try{ localStorage.setItem(k, JSON.stringify(payload)); }catch(e){} try{ Store._mem=Store._mem||{}; Store._mem[k]=payload; }catch(e){} _markPending(k); }
+  try{ localStorage.setItem(k, JSON.stringify(payload)); }catch(e){} try{ Store._mem=Store._mem||{}; Store._mem[k]=payload; }catch(e){}
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=payload; }catch(e){}   // 🔴 PR-3b bug 修：cupLoadReport 讀 _profitMem 優先；雲端舊 maji_YYYY-MM(無 stock/dispId)開頁灌進 _profitMem→只寫 _mem/localStorage 會被舊 _profitMem 蓋掉→總表庫存/站內編號顯示不出來（比照 momoSaveProducts 三鏡像一致）
+  try{ window._momoJustSaved=Date.now(); }catch{}   // 剛存過守衛：5s 內雲端 echo 不覆蓋 _profitMem（雙保險，_markPending 已入 pending）
+  _markPending(k); }
 // MSF doc 存【原始 byOrder】非解析結果（PR-2 設計：coupangResolveReturns 是讀取端）。
 //   src＝MSF 自身月份（銷售確認日期的眾數月）→ 同一份 MSF 不論配哪個訂單檔上傳，都寫同一 doc（覆蓋、不累加、不雙重計算）。
 function cupSaveReturns(shop, src, msfRaw){ const k=cupMsfKey(shop,src);
@@ -18867,7 +18870,9 @@ function cupGeneratePreview(){
   Promise.all([
     readXlsx(_cupFiles.order, 'Delivery'),
     _cupFiles.msf ? readXlsx(_cupFiles.msf, 'VAT History Report') : Promise.resolve(null),
-  ]).then(([ordRows, msfRows])=>{
+    _cupFiles.pi ? cupReadPriceInventory(_cupFiles.pi).catch(e=>({__piErr:(e&&e.message)||String(e)})) : Promise.resolve(null),
+  ]).then(([ordRows, msfRows, piMaps])=>{
+    let piErr=''; if(piMaps&&piMaps.__piErr){ piErr=(piMaps.__piErr==='__NO_DECOMPRESSION__')?'庫存需較新瀏覽器（此瀏覽器不支援解壓 price_inventory）':('price_inventory 解析失敗：'+piMaps.__piErr); piMaps=null; }   // PR-3b：PI 解壓失敗不擋主流程（庫存維持「—」、預覽紅字說明）
     const parsed=coupangParseOrders(ordRows);
     const months=[...parsed.periods].sort();
     if(!months.length) throw new Error('訂單檔無有效訂購日期，無法判定期別');
@@ -18876,7 +18881,7 @@ function cupGeneratePreview(){
     // code → 商品名稱（col17 公司商品代碼、col13 顯示產品名稱／col11 註冊商品名稱）
     const nameByCode={}; ordRows.slice(1).forEach(r=>{ if(!r||!r[2])return; const code=String(r[17]||'').replace(/\s+$/,'').replace(/^\s+/,''); const nm=String(r[13]||r[11]||'').trim(); if(code&&!nameByCode[code]) nameByCode[code]=nm; });
     const costMap=momoLoadCostByOrigin();   // 莫筆克成本表（原廠編號→成本數字）；走 MOMO 官方 loader（讀 _profitMem，Store.get 讀不到此命名空間）
-    const rd=coupangBuildReportDoc(shop, month, parsed, costMap, {});   // piByCode 空 → stock null（PR-3b 接 price_inventory）
+    const rd=coupangBuildReportDoc(shop, month, parsed, costMap, piMaps||null);   // PR-3b：傳 price_inventory join maps（未傳／失敗→null→stock 全 null→庫存欄「—」）
     // 退貨（讀取端解析，僅供預覽顯示）：index＝【全部已存報表 + 本檔】的 orderNos → 同一份 MSF 的歸期結果與總表一致
     let msfRaw=null, msfMonth=null, res=null, msfReject='';
     if(msfRows){
@@ -18899,7 +18904,8 @@ function cupGeneratePreview(){
       costOk:0, costMiss:0, costBar:0 };
     rows.forEach(r=>{ const has=(costMap[r.code]!=null&&!isNaN(+costMap[r.code])); if(has)st.costOk++; else if(/^\d+$/.test(r.code))st.costBar++; else st.costMiss++; });
     const sysHasMsf=cupListMsfDocs(shop).length>0;   // 系統既有 MSF doc（本次未帶時，總表仍會用既有 MSF 計退貨）→ 文案要區分
-    _cupUpStage[shop]={month, rows, orderNos:rd.orderNos||[], msfRaw, msfMonth, res, hasMsf:!!msfRaw, msfProvided:!!msfRows, msfReject, sysHasMsf, hasPi:!!_cupFiles.pi, stats:st};   // hasMsf 只在解析通過才 true→壞 MSF 不落地（generateCoupang 第 17117 行以 hasMsf&&msfRaw 為守衛）
+    const piStat = piMaps ? { rowN:piMaps.rowN, codeN:piMaps.codeN, covered:rows.filter(r=>r.stock!=null).length, total:rows.length } : null;   // PR-3b：庫存涵蓋率（本月幾個商品對到庫存）
+    _cupUpStage[shop]={month, rows, orderNos:rd.orderNos||[], msfRaw, msfMonth, res, hasMsf:!!msfRaw, msfProvided:!!msfRows, msfReject, sysHasMsf, hasPi:!!_cupFiles.pi, piErr, piStat, stats:st};   // hasMsf 只在解析通過才 true→壞 MSF 不落地（generateCoupang 第 17117 行以 hasMsf&&msfRaw 為守衛）
     cupRenderUploadPreview(shop);
     if(btn){btn.disabled=false;btn.textContent='▶ 產生預覽';}
   }).catch(err=>{ console.error(err); fail((err&&err.message)||err); });
@@ -18931,9 +18937,10 @@ function cupRenderUploadPreview(shop){
     if(S.res.pendingN>0) segs.push('待歸期 <b style="color:#d97706">'+S.res.pendingN+' 筆（'+money(S.res.pendingTotal)+'）</b>');
     retHtml=`<div>退貨歸期：${segs.length?segs.join(' · '):'本期 MSF 無退貨'} <span class="mm-info" title="${esc(tip)}">?</span></div>`;
   }
-  const piHtml = S.hasPi
-    ? `<div style="color:#6b7280">price_inventory：已選檔（本階段不解析，庫存欄稍後接入）</div>`
-    : `<div style="color:#6b7280">庫存：<span style="color:#d97706">未上傳 price_inventory，庫存欄顯示「—」</span></div>`;
+  let piHtml;
+  if(S.piErr){ piHtml=`<div style="color:#dc2626">庫存：<b>${esc(S.piErr)}</b>（庫存欄維持「—」）</div>`; }
+  else if(S.piStat){ const p=S.piStat, pct=p.total>0?(100*p.covered/p.total).toFixed(1):'0'; piHtml=`<div style="color:#6b7280">庫存（price_inventory）：解壓 <b>${p.rowN}</b> 列／<b>${p.codeN}</b> 個代碼；本月 <b>${p.covered}/${p.total}</b> 個商品對到庫存（<b>${pct}%</b>）</div>`; }
+  else{ piHtml=`<div style="color:#6b7280">庫存：<span style="color:#d97706">未上傳 price_inventory，庫存欄顯示「—」</span></div>`; }
   box.innerHTML=`
     <div style="border:1px solid #eef0f2;border-radius:10px;padding:14px 16px;margin-top:12px">
       <div style="font-weight:700;margin-bottom:8px">解析結果 · ${esc(cupShopDisplay(shop))} · ${esc(cupNormMonth(S.month))}（預覽，尚未寫入）</div>
@@ -18979,7 +18986,7 @@ function cupBuildRows(rd, nameByCode){
   const rows=[];
   Object.keys(rd.skus||{}).forEach(code=>{ const c=rd.skus[code];
     const fee=(c.deal||0)+(c.flow||0)+(c.freeShip||0)+(c.invoice||0);
-    rows.push({ code, name:(nameByCode&&nameByCode[code])||code, qty:c.qty, rev:c.rev, fee });
+    rows.push({ code, name:(nameByCode&&nameByCode[code])||code, qty:c.qty, rev:c.rev, fee, dispId:c.dispId||'', stock:(c.stock!=null?c.stock:null) });
   });
   return rows;
 }
@@ -18994,7 +19001,7 @@ function cupEnrichRows(rows){
     r.grossRate = (r.gross!=null&&r.rev>0) ? r.gross/r.rev : null;
     r.net = has ? ((r.rev||0)-(r.cost||0)-(r.fee||0)) : null;        // 淨利 = 毛利 − 平台費用($2/單已含在 fee)
     r.netRate = (r.net!=null&&r.rev>0) ? r.net/r.rev : null;
-    r.stock = null;
+    r.stock = (r.stock!=null) ? r.stock : null;   // PR-3b：保留報表 doc 帶來的庫存（舊 doc 無此欄→undefined→null→顯示「—」）；dispId 原樣透傳
   });
   return rows;
 }
@@ -19168,7 +19175,7 @@ function cupExportExcel(shop){
   const hc=getCupHiddenCols(); const cols=getCupOrderedCols().filter(c=>!hc.has(c.k));
   const cellVal=(r,c)=>{ const v=r[c.k];
     if(c.k==='cost'||c.k==='gross'||c.k==='net'){ if(r.costStatus==='missing') return '缺成本'; if(r.costStatus==='barcode') return '—(條碼)'; return v==null?'':v; }
-    if(c.k==='stock') return '—';
+    if(c.k==='stock') return v==null?'':v;   // PR-3b：匯出真實庫存（未上傳 PI→null→空白）
     if(c.fmt==='pct') return v==null?'':+(v*100).toFixed(1);
     return v==null?'':v;
   };
@@ -19611,8 +19618,8 @@ function onCupNoteChange(shop,code,value){
 // 酷澎表格欄位定義（跟蝦皮好麻吉的 PROFIT_COLS 是不同欄位集合，麻吉/露營館共用一份順序）
 // PR-3 重建欄位：營收=選項價格×量、費用=官方規則、成本查莫筆克、淨利。庫存欄先留、值顯「—」（PR-3b 接 price_inventory）。
 const CUP_TABLE_COLS=[
-  {k:'code',label:'原廠編號',w:120,info:'來源為訂單檔的公司商品代碼（＝原廠編號格式，如 H373-01）。'},
-  {k:'name',label:'商品名稱',w:160,info:'訂單檔的顯示產品名稱。'},
+  {k:'code',label:'原廠編號',w:120,info:'來源為訂單檔的公司商品代碼（＝原廠編號格式，如 H373-01）。內部碼。'},
+  {k:'name',label:'商品名稱',w:160,info:'訂單檔的顯示產品名稱。名稱下方小字為「酷澎商品編號」（站內商品頁 ID、消費者可搜尋；多選項以 / 分隔）。'},
   {k:'qty',label:'銷售數量',fmt:'num',w:100,info:'該商品本期銷售數量合計。'},   // 照抄 MO+ 本期銷量欄寬 100（4 字標題不被擠掉）
   {k:'rev',label:'營收',fmt:'money',w:100,info:'營收 ＝ 選項價格 × 數量。'},
   {k:'cost',label:'成本',fmt:'costCell',w:100,info:'該商品的成本合計（單位成本 × 數量），來源莫筆克成本表 cost_by_origin；缺成本顯示「缺成本」，不用 0 頂替。'},
@@ -19823,10 +19830,14 @@ function renderCoupangTableBody(shop){
         if(r.costStatus==='missing'||v==null) return `<td title="缺成本 → 淨利不計（未用 0 頂替）" style="color:#dc2626;font-weight:600">缺成本</td>`;
         return `<td>${momoMoney(v)}</td>`;   // 照抄 MO+ 金額欄：預設字重/色
       }
-      if(c.fmt==='stockCell'){ return `<td title="未上傳 price_inventory，庫存無資料（於「訂單明細」分頁上傳後接入；非商品缺庫存）" style="color:#9ca3af">—</td>`; }
-      // 商品名：照抄 MO+ 長名處理（mm-name-wrap + mm-name-clip 截斷 + title 全名；固定欄寬，不擠掉後面欄位）
+      if(c.fmt==='stockCell'){ return (v==null)
+        ? `<td title="未上傳 price_inventory（或此月無此檔）→ 庫存無資料；非商品缺庫存" style="color:#9ca3af">—</td>`
+        : `<td style="font-variant-numeric:tabular-nums">${Number(v).toLocaleString()}</td>`; }   // PR-3b：price_inventory 剩餘數量（多選項加總）
+      // 商品名：照 MOMO 名稱欄（mm-name-wrap+mm-name-clip、無硬 max-width→截斷跟著欄寬、拉寬見更多/拉滿見全名、hover title 全名）；
+      //   酷澎商品編號(dispId)改放名稱下方小字（照 MOMO 品號 .mm-sub-line：font-size:10px/#9ca3af/ellipsis；多選項 / 分隔、title 全列）
       if(c.k==='name'){ const nm=_momoEsc(String(v==null?'':v));
-        return `<td class="tl" style="${stk('name',false)}max-width:160px"><div class="mm-name-wrap" style="max-width:160px"><span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div></td>`; }
+        const did=_momoEsc(String(r.dispId||'')); const sub = did ? `<div class="mm-sub-line" title="酷澎商品編號 ${did}">酷澎編號 ${did}</div>` : '';
+        return `<td class="tl" style="${stk('name',false)}"><div class="mm-name-wrap"><span class="mm-name-clip" title="${nm}">${nm||'—'}</span></div>${sub}</td>`; }
       if(c.k==='code'){ return `<td class="tl" style="${stk('code',false)}white-space:nowrap;font-variant-numeric:tabular-nums">${_momoEsc(String(v==null?'':v))}</td>`; }
       const disp=c.fmt?fmtFns[c.fmt](v):(v==null?'':v);
       const cls=CUP_TABLE_LEFT_COLS.has(c.k)?'tl':'';
@@ -19899,7 +19910,7 @@ function coupangParseOrders(rows){
     if(String(r[22]||'').trim()!=='免費') o.isFree=false;  // 任一列非「免費」→整單非免運（＝運費類型口徑；已驗與運費=0 同組 581 單）
     const pd=_cupOrderPeriod(r[10]); if(pd){ o.period=o.period||pd; periods.add(pd); }
     const code=_cupTrimCode(r[17]); if(code) codeSet.add(code);
-    o.items.push({ code, qty, optPrice:opt, barcode:_cupTrimCode(r[18]) });
+    o.items.push({ code, qty, optPrice:opt, barcode:_cupTrimCode(r[18]), dispId:_cupTrimCode(r[14]) });   // dispId=顯示產品ID(col14)=酷澎站內商品頁ID（消費者可搜尋）
   });
   return { orders, periods, codeSet, rowN };
 }
@@ -19941,6 +19952,39 @@ function coupangParsePriceInventoryXML(sheetXml){
     salesQty:(String(r[13]||'').trim()!==''&&!isNaN(+r[13]))?+r[13]:null, status:String(r[11]||'').trim(),
     barcode:String(r[4]||'').trim(), optionId:String(r[2]||'').trim()
   }));
+}
+// ④ PR-3b：瀏覽器端解壓 price_inventory 壓縮 xlsx → 工作表 XML（deflate-raw）。
+//   ⚠ 該檔 local file header 的大小欄=0（data descriptor 串流式）→ 一律讀【中央目錄】的 compSize/offset（真值）。
+//   DecompressionStream 不支援(舊瀏覽器)→丟 __NO_DECOMPRESSION__，呼叫端顯示「庫存需較新瀏覽器」。
+async function coupangUnzipSheetXml(arrayBuffer, nameRe){
+  if(typeof DecompressionStream!=='function') throw new Error('__NO_DECOMPRESSION__');
+  const buf=new Uint8Array(arrayBuffer), dv=new DataView(arrayBuffer);
+  const u16=o=>dv.getUint16(o,true), u32=o=>dv.getUint32(o,true), td=new TextDecoder('utf-8');
+  let eocd=-1; for(let i=buf.length-22;i>=0;i--){ if(u32(i)===0x06054b50){ eocd=i; break; } }   // EOCD 從尾端往回掃
+  if(eocd<0) throw new Error('price_inventory 不是有效 ZIP（找不到 EOCD）');
+  const cdOff=u32(eocd+16), cdCnt=u16(eocd+10); let p=cdOff, target=null;
+  for(let n=0;n<cdCnt && u32(p)===0x02014b50;n++){
+    const method=u16(p+10), compSize=u32(p+20), nameLen=u16(p+28), extraLen=u16(p+30), cmtLen=u16(p+32), lho=u32(p+42);
+    const name=td.decode(buf.subarray(p+46,p+46+nameLen));
+    if((nameRe||/worksheets\/sheet1\.xml$/i).test(name)) target={method,compSize,lho};
+    p=p+46+nameLen+extraLen+cmtLen;
+  }
+  if(!target) throw new Error('price_inventory 找不到工作表 XML');
+  const lh=target.lho; if(u32(lh)!==0x04034b50) throw new Error('price_inventory ZIP local header 異常');
+  const ds=lh+30+u16(lh+26)+u16(lh+28), comp=buf.subarray(ds, ds+target.compSize);
+  if(target.method===0) return td.decode(comp);   // stored（未壓縮）
+  const stream=new Response(new Blob([comp]).stream().pipeThrough(new DecompressionStream('deflate-raw')));   // deflate
+  return td.decode(new Uint8Array(await stream.arrayBuffer()));
+}
+// price_inventory File → 解壓+解析 → {byCode:{code:{stock}}, byBar:{barcode:{stock}}, rowN, codeN}。庫存＝同 code／barcode 各列剩餘量【加總】（多選項合併）。
+async function cupReadPriceInventory(file){
+  const xml=await coupangUnzipSheetXml(await file.arrayBuffer());
+  const pi=coupangParsePriceInventoryXML(xml), byCode={}, byBar={};
+  pi.forEach(x=>{ if(x.stock==null) return;
+    if(x.code){ (byCode[x.code]=byCode[x.code]||{stock:0}).stock+=x.stock; }
+    if(x.barcode){ (byBar[x.barcode]=byBar[x.barcode]||{stock:0}).stock+=x.stock; }
+  });
+  return { byCode, byBar, rowN:pi.length, codeN:Object.keys(byCode).length };
 }
 
 // ④ MSF（VAT History Report 分頁，含表頭）→ per-order。cols: 訂單編號0/廠商商品代號1(15位·字串)/銷售確認日期2/項目類別3(VENDOR_ITEM|DELIVERY_FEE)/銷售5-11/退貨12-18
@@ -19999,7 +20043,8 @@ function _cupMonthShift(ym, n){ const m=String(ym||'').match(/(\d{4})-(\d{2})/);
 
 // ① 報表 doc 建構：parsed=coupangParseOrders()；costMap=原廠編號→單位成本(莫筆克)；piByCode=公司商品代碼→{stock}。
 //    回 { shop, month, skus:{code:{qty,rev,cost,deal,flow,freeShip,invoice,net,stock,covered}}, orderNos:[訂單編號…] }
-function coupangBuildReportDoc(shop, month, parsed, costMap, piByCode){
+function coupangBuildReportDoc(shop, month, parsed, costMap, pi){
+  const piByCode=(pi&&pi.byCode)||null, piByBar=(pi&&pi.byBar)||null;   // PR-3b：price_inventory join maps（庫存已按 code/barcode 各自加總）
   const R=COUPANG_FEE_RATES, skus={}, orderNos=[];
   const getCost=c=>{ const v=(costMap instanceof Map)?costMap.get(c):(costMap&&costMap[c]); return (v!=null&&!isNaN(+v))?+v:null; };
   Object.keys(parsed.orders||{}).forEach(oid=>{
@@ -20008,14 +20053,18 @@ function coupangBuildReportDoc(shop, month, parsed, costMap, piByCode){
     const gTot=o.goods>0?o.goods:1;
     (o.items||[]).forEach(it=>{
       const code=it.code||'(無代碼)', itGoods=it.optPrice*it.qty, sh=itGoods/gTot;
-      const c=skus[code]=skus[code]||{qty:0,rev:0,deal:0,flow:0,freeShip:0,invoice:0};
+      const c=skus[code]=skus[code]||{qty:0,rev:0,deal:0,flow:0,freeShip:0,invoice:0,_disp:new Set(),_bar:''};
       c.qty+=it.qty; c.rev+=itGoods; c.deal+=oDeal*sh; c.flow+=oFlow*sh; c.freeShip+=oFree*sh; c.invoice+=oInv*sh;
+      if(it.dispId) c._disp.add(it.dispId); if(!c._bar && it.barcode) c._bar=it.barcode;   // PR-3b：站內商品編號集合 + barcode（庫存 fallback 用）
     });
   });
   Object.keys(skus).forEach(code=>{ const c=skus[code];
     ['rev','deal','flow','freeShip','invoice'].forEach(k=>c[k]=Math.round(c[k]));
     const unit=getCost(code); c.cost=(unit!=null)?Math.round(unit*c.qty):null; c.covered=(unit!=null);   // 缺成本＝covered:false（比照 MO+ coverage）
-    c.stock=(piByCode&&piByCode[code])?piByCode[code].stock:null;
+    c.dispId=[...(c._disp||[])].join('/'); delete c._disp;   // PR-3b：酷澎站內商品編號（多選項合併同一原廠編號→以 / 分隔全列出）
+    // PR-3b 庫存：先 code join（實測 620/620=100%），對不上再 barcode fallback（此檔兩邊空、留給日後）；多選項同 code 已在 piByCode 各列加總
+    c.stock=(piByCode&&piByCode[code]!=null)?piByCode[code].stock:((piByBar&&c._bar&&piByBar[c._bar]!=null)?piByBar[c._bar].stock:null);
+    delete c._bar;
     const fees=c.deal+c.flow+c.freeShip+c.invoice;
     c.net=(c.cost!=null)?(c.rev-c.cost-fees):null;   // 缺成本 → net null（不進「已完整」淨利）
   });
