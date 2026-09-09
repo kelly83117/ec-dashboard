@@ -12776,6 +12776,10 @@ function momoRefreshSyncBtn(shop){
   btn.textContent='☁ 同步雲端';           // 不顯示筆數（避免估算數字與預覽對不上）
 }
 function _momoCount(v){ return Array.isArray(v)?v.length : (v&&typeof v==='object')?Object.keys(v).length : (v==null?0:1); }
+// 預覽「筆數」顯示：f1102/reconcile/s1103 的 doc 是 {meta…, skus:{品號→…}}——真實筆數在 skus，不是 doc 頂層欄位數
+//   （_momoCount 數頂層＝f1102 的 totals/exportedAt/skuN/source/skus=5、reconcile 的 month/reconNo/skus/summary/savedShop=5，會誤導成「殘缺」）。
+//   有 .skus 物件就數 skus；否則退回 _momoCount（freight/rent/其他設定/products 陣列不受影響）。⚠ 只影響顯示筆數，不動 willDelete/status 的內容比對。
+function _momoRowCount(v){ return (v&&typeof v==='object'&&v.skus&&typeof v.skus==='object'&&!Array.isArray(v.skus))?Object.keys(v.skus).length:_momoCount(v); }
 // 穩定序列化（排序物件 key）→ 比對「內容是否不同」不受 Firestore 回來的 key 順序影響，零 key-order 誤報
 function _momoStableStr(v){
   if(v===null||typeof v!=='object') return JSON.stringify(v);
@@ -12884,6 +12888,7 @@ function _momoCollectPending(shop){
     else if(cupIsReportKey(pk)){ over={count: (val&&Array.isArray(val.rows))?val.rows.length:0}; }   // 顯示商品筆數（非 doc top-level 欄位數），與 7b cloudCount 對齊
     else if(cupIsMsfKey(pk)){ over={count: (val&&val.byOrder)?Object.keys(val.byOrder).length:0}; }  // 顯示 MSF 訂單筆數
     else if(cupIsNoteKey(pk)){ over={count: (val&&typeof val==='object')?Object.keys(val).length:0}; }  // 顯示備註 SKU 筆數
+    else if(pk.startsWith('ec_momo_f1102|')||pk.startsWith('ec_momo_reconcile|')||pk.startsWith('ec_momo_s1103|')){ over={count:_momoRowCount(val)}; }   // 本機筆數＝skus 筆數（非 doc 頂層 5 欄；修「顯示 5 筆」誤導）
     add(pk,kind,val,over);
   });
   // cost_by_origin 現已上雲（momo_cost_by_origin collection）→ 走上面 pending 流程當正常同步項（不再 localonly）。meta 隨 cost 一起 read-merge-write、不單列。
@@ -13018,14 +13023,14 @@ async function momoOpenSyncPreview(shop){
       const rc=reconCloud[it.key];
       if(rc&&rc.__error){ it.status='readfail'; it.cloudCount=null; return; }
       if(rc===undefined){ it.status='new'; it.cloudCount=0; return; }
-      it._cloudVal=rc; it.cloudCount=_momoCount(rc); it.status=_eq(it.localVal,rc)?'same':'diff';
+      it._cloudVal=rc; it.cloudCount=_momoRowCount(rc); it.status=_eq(it.localVal,rc)?'same':'diff';   // 雲端筆數＝skus 筆數（非頂層 5 欄）
       return;
     }
     if(it.kind==='MOMO排行榜'){
       const sc=s1103Cloud[it.key];
       if(sc&&sc.__error){ it.status='readfail'; it.cloudCount=null; return; }
       if(sc===undefined){ it.status='new'; it.cloudCount=0; return; }
-      it._cloudVal=sc; it.cloudCount=_momoCount(sc); it.status=_eq(it.localVal,sc)?'same':'diff';
+      it._cloudVal=sc; it.cloudCount=_momoRowCount(sc); it.status=_eq(it.localVal,sc)?'same':'diff';   // 雲端筆數＝skus 品號筆數（非頂層欄位數）
       return;
     }
     if(it.kind==='MO+逐列成本'){
@@ -13087,7 +13092,7 @@ async function momoOpenSyncPreview(shop){
     }
     const cv=cloud[it.key]; it._cloudVal=cv;
     if(cv===undefined){ it.status='new'; it.cloudCount=0; }
-    else { it.cloudCount=_momoCount(cv); it.status=_eq(it.localVal,cv)?'same':'diff'; }
+    else { it.cloudCount=_momoRowCount(cv); it.status=_eq(it.localVal,cv)?'same':'diff'; }   // f1102 等 skus doc 顯示 skus 筆數；freight/rent/其他設定無 .skus→退回 _momoCount 不變
   });
   // P3(1) 通用防呆：顯示「雲端 0 / 新增」但本機筆數 > 500 → 很可能是雲端讀取失敗（不是真的新增），標可疑、預設不勾。
   //   防的是未來又有 key 搬走、預覽讀取端沒跟上（第 5 次）→ 整包覆蓋 + 雲端誤判 0 = 靜默資料損失。cost_by_origin 已是 localonly、不套此規則。
