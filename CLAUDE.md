@@ -159,22 +159,35 @@ ESM 有個致命陷阱必須牢記：
 - `Store` 是 localStorage 包裝層（含 `_mem` / `_profitMem` 記憶體鏡像）。
 - 版本號 `<meta app-version>` 每次部署都要更新，`version.js` 才會清舊快取。
 
-### 版本號 bump 規則（共 15 處）
-改任何檔案（**含 CSS**）都要 bump 版本號，一次要改 **15 處**：
-- `index.html` 的 `<meta name="app-version">`（1 處）
-- `index.html` 的 `<script src="js/main.js?v=">`（1 處）
-- `index.html` 的 3 個 `<link rel="stylesheet" href="css/*.css?v=">`（3 處，
-  main.css / profit.css / daily-adjustments.css）
-- `js/main.js` 裡 10 個 import 的 `?v=`（10 處）
+### 版本號 bump 規則（🔴 流程：feature 不 bump、合併後一鍵 bump）
+
+版號散在 **15 處**（下列）。**為什麼要有流程**：每支 feature PR 若各自 bump，就會在這
+15 行互相衝突（天天在收的合併稅），還常手動漏改一兩處。**根治＝feature 分支一律不碰
+版號，合併進 `main` 後才用 `bump-version.js` 一鍵設新號、單一 chore commit。**
+
+**流程（照做）：**
+1. **feature 分支開發：不要動版號那 15 處**（index.html + js/main.js 的 app-version /
+   `?v=`）→ PR 之間不再碰同幾行、不再衝突。
+2. **PR 合併進 `main` 後**，在 `main` 上跑：
+   ```bash
+   git checkout main && git pull origin main
+   node bump-version.js <新版號>      # 例 2026-09-09-658（比 main 現值 +1；--check 會告訴你現值）
+   git add index.html js/main.js && git commit -m "chore: bump version to <新版號>" && git push
+   ```
+   `bump-version.js`（repo 根目錄）自動偵測 index.html 現版號 → 換全部 15 處
+   （index.html 5＋js/main.js 10）→ **自動 grep 驗證**（次數對＝5/10、舊版號零殘留），
+   任一項不符就非零離開、不留半套。`node bump-version.js --check` 可單獨複查一致性。
+3. 版號**比 `main` 現值大**即可（你人就在 main 上；不要憑記憶，`--check` 或搜 `app-version` 看現值）。
+
+**15 處是哪些**（`bump-version.js` 自動處理，人工不用逐一改）：`index.html` 的
+app-version meta ×1、main.js `?v=` ×1、3 個 CSS `?v=` ×3；`js/main.js` 10 個 import `?v=` ×10。
 
 ⚠️ **CSS 的 `?v=` 一定要一起改（2026-07-29 血淚教訓 v226→227）**：CSS `<link>`
 沒有 `?v=` 時，`version.js` 只清 Cache API（Service Worker）、碰不到瀏覽器
 HTTP 磁碟快取，`location.reload()` 又是同一個 URL → 改了 CSS 卻餵回舊的，
 使用者（尤其不清快取的同事）整批 `.mm-*` 樣式看不到、版面全跑掉。CSS 帶
-`?v=` 後才跟 JS 一樣改版即刷新。
-
-新版號要**比目前檔案裡的、也比 `main` 上的都大**。`main` 有時會回退，
-**一定要當場去檔案裡搜 `app-version` 確認現在的號碼**，不要憑記憶。
+`?v=` 後才跟 JS 一樣改版即刷新。這也是版號存在的唯一理由——每次部署每個資源
+都要換 URL 炸 disk cache；`bump-version.js` 保證 15 處同步、不漏。
 
 ### 舊版 Apps Script
 - `apps-script.gs` 的自動同步已停用，僅保留空函式避免殘留觸發報錯。新功能
