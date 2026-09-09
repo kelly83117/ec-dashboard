@@ -2162,6 +2162,33 @@ function _renderBatchSelInfo(shop){
 let _splitDraft = null;   // [{from,to,rev,gross}] 未儲存草稿；null ＝ 彈窗沒開
 let _splitShop  = null;   // 草稿屬於哪個通路。關窗即清 —— 不清的話切通路後再開窗會把上一個通路的草稿套上來
 
+// 「⚖ 拆分試算」開放給哪些通路（工具列那顆鈕的判準）。
+//  🔴 這是【白名單：是這四個之一】，不是黑名單【不是測試通路】。初版寫成
+//    `${shop!==TEST_SHOP_ID?…:''}`，那個方向是錯的：SHOPS 之後只要多進一個非蝦皮的東西
+//    （第二個測試通路、或別的平台借用這條 render 路徑），那顆鈕就會【自動長出去】，
+//    而且不會有任何測試失敗 —— 因為沒有任何斷言在講「只有這四個」。
+//    白名單的失敗方向相反：新通路預設【沒有】這顆鈕，要有人明確加進來才會出現。
+//    這個功能的資料是「同一個蝦皮商品頁被兩個品號共用」，本質上就只對蝦皮四家成立。
+//
+//  ⚠ 為什麼【不】共用既有的常數陣列（三個候選都查過，逐一說明）：
+//    ・SUMMARY_SHOPS（本檔搜 `const SUMMARY_SHOPS`）：內容確實是這四家、宣告位置也夠早，
+//      但它自己就寫成 `SHOPS.filter(s=>s.id!==TEST_SHOP_ID)` —— 【本身就是黑名單】。
+//      共用它等於把同一個缺陷搬個位置，不是修掉；而且它的語意是「總表要顯示的賣場」
+//      （見它上方的註解：排除理由是總表的人工輸入欄位會被誤填），與本功能無關。
+//      型別也不同：它是 {id,color} 物件陣列，這裡要的是字串。
+//    ・RECON_SHOPS（本檔搜 `const RECON_SHOPS`）：內容剛好也是這四家（順序不同），
+//      但語意是「對帳分頁要開幾個 PDF 上傳欄」，而且它宣告在【本檔第 19282 行附近】——
+//      遠在下方 `// ── Init ──` 的 SHOPS.forEach(shopHTML) 之後。從 shopHTML 引用它
+//      會落入 const 的 TDZ、整個 profit.js 評估中斷。這一條是硬性不可行，不是偏好。
+//    ・SCORE_SHOPS（本檔搜 `const SCORE_SHOPS`）：只有三家（沒有維克），內容就不符。
+//    ⇒ 三個都不能用，所以這裡寫死一份。這確實是 repo 裡第 N 份同樣的四個字串
+//      （js/pages/marketing.js 的 INSIGHT_SHOPS 也有好幾份），但那幾份跨檔又各有語意，
+//      硬湊成一份共用常數只會讓「哪一份改了會影響誰」變得更難查。
+//
+//  ⚠ 宣告位置與上面兩個 let 同批，理由相同：shopHTML 在模組頂層的 Init 就會被呼叫，
+//    這個 const 放到 Init 之後會 TDZ。勿搬動。
+const SPLIT_SHOPS=['好麻吉','玩樂','森之旅','維克'];
+
 // key 形狀：ec_split|{通路}|{月}|{半月}，與 ec_notes 的廣告調整同一個四段形狀。
 //   ⚠ 期別直接讀 state[shop] 的當下值：彈窗是「看著現在這一期的報表」開的，
 //     取法與 renderTable 的 noteKey（本檔搜 `const noteKey=shop+'|'`）逐字相同。
@@ -2788,7 +2815,7 @@ function shopHTML(shop){return`
       <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
       <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
       <button class="col-pick-btn tagfx-btn" onclick="openTagFxModal('${shop}')">📈 標籤成效</button>
-      ${shop!==TEST_SHOP_ID?`<button class="col-pick-btn" id="split-btn-${shop}" onclick="openSplitModal('${shop}')">⚖ 拆分試算</button>`:''}
+      ${SPLIT_SHOPS.includes(shop)?`<button class="col-pick-btn" id="split-btn-${shop}" onclick="openSplitModal('${shop}')">⚖ 拆分試算</button>`:''}
     </div>
     <div id="tbl-${shop}">
       <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">選擇區間後上傳報表，按「▶ 產生並儲存」</div></div>
@@ -21725,5 +21752,5 @@ Object.assign(window, {
   openSplitModal,closeSplitModal,renderSplitModalBody,renderSplitResults,saveSplitDraft,
   splitAddRow,splitRemoveRow,splitNumInput,splitSearch,splitSelect,splitHideDrop,
   // 純函式與資料層，掛上去給 Console 對數字 / 查這一期存了什麼用（不是 inline handler）
-  _splitCalc,_splitRowsOf,_splitKey,_splitCount,getSplits,saveSplits,updateSplitBtn,
+  _splitCalc,_splitRowsOf,_splitKey,_splitCount,getSplits,saveSplits,updateSplitBtn,SPLIT_SHOPS,
 });
