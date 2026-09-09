@@ -1515,6 +1515,21 @@ function _sweepAllLocalReportsIntoPending(){
         if(/_growth$/.test(k)&&_notesIsDirty(k)) _pendingSyncKeys.add(k);
         continue;
       }
+      // 拆分試算（ec_split|{通路}|{月}|{半月}）：重整後 _pendingSyncKeys 會歸零，沒有這一條，
+      //   「存過但還沒按同步」的拆分就再也回不到待推清單 —— 推不上雲而且完全無聲。
+      //   ⚠ 判準【只看前綴、沒有 dirty 閘】，與上一條的 ec_notes 刻意不同：
+      //     ec_notes 需要 dirty 是因為它一把 key 涵蓋整個通路所有品號，撿到舊快照整包推回去
+      //     會蓋掉同事的更新；ec_split 的 key 已經切到「通路 × 期別」這麼細，而且 localStorage
+      //     裡有這把 key ＝ 這台機器上真的有人存過（saveSplits 是唯一寫入端），
+      //     撿回來重推最壞只是把本機現值再寫一次雲端。判準與下方 `ec|` 報表那條同型。
+      //   ⚠【不要補水 Store._mem / Store._profitMem】：推送走的泛用 field 分支自帶
+      //     localStorage fallback，補水只會多出第二個資料來源。理由同上一條 ec_notes 的說明。
+      //   🔴 這個判準必須與 _momoSyncPendingCount 的掃描前綴【逐字相同】（本檔搜
+      //     `function _momoSyncPendingCount`），兩份不一致 ＝ 鈕的亮暗跟實際會推的對不上。
+      if(k&&k.startsWith('ec_split|')){
+        _pendingSyncKeys.add(k);
+        continue;
+      }
       // ⚠ stock（ec_momo_stock_by_origin）仍不在此：走獨立 momo_stock collection 自動推。
       // filemeta 不上雲（雲端零讀取端）→ 不塞進 pending，省下「撈進來→推送略過→收尾刪」的白工
       if(k&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')){
@@ -1808,6 +1823,16 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         return;
       }
       // field key（設定類）
+      // ⚠ 拆分試算（ec_split|…）【刻意沒有自己的分支】，就是走這裡的整包 setField。
+      //   它的 value 是 {品號:{to,rev,gross}} 的扁平巢狀 map，三個 key 永遠一起寫、移除只寫 0
+      //   不 delete（見本檔 `function getSplits` 上方那段形狀約束）→ momoCloudDeleteCount 恆為 0
+      //   → 上方的 _momoFullPushDeleteGuard 攔不到它，所以不需要像 ec_notes / ec_edits 那樣
+      //   加進排除清單、也不需要 dirty-scoped merge。
+      // ⚠ 下面那兩行的來源順序對 ec_split 的實際結果是：saveSplits 只寫 localStorage +
+      //   Store._profitMem（不寫 Store._mem，理由同 saveNotes / saveEdits），所以第一行
+      //   `Store._mem[pk]` 永遠讀不到 → 實際走的是第二行 localStorage.getItem 的 fallback。
+      //   這是預期行為，不是漏接；【不要】為了「讓它走第一行」而去補寫 Store._mem，
+      //   那只會憑空多出第三個資料來源（同 readNotesForPush 上方那段的立場）。
       let val=null;
       try{ if(Store._mem && Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
       if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} }
@@ -2121,6 +2146,529 @@ function _renderBatchSelInfo(shop){
   if(acts)acts.classList.toggle('on',n>0);
 }
 
+// ══════════════ 拆分試算（ec_split）══════════════
+//  問題：兩個品號共用同一個蝦皮商品頁時，莫筆克報表把營收全算在其中一個上。
+//  本功能讓使用者把一部分「營收 + 毛利」從 A 品號搬到 B 品號，當場看到兩支各自的
+//  營收 / 毛利 / 純利 / 純利率。比例每期不同、看著已產好的報表手動算。
+//
+//  🔴 硬約束（與使用者確認過的取捨，【不要】順手優化掉）：
+//    【不寫回報表本體】。主表格那兩列顯示的仍是未拆分的原始數字，試算結果只在彈窗裡看得到。
+//    所以本區【絕對不碰】built 上的任何欄位，也不呼叫 recalcRow / patchRow / lsSave。
+//    要驗證有沒有踩線：本區不該出現 `r.rev=` / `r.gross=` / `Object.assign(built[` 這類寫入。
+//
+//  ⚠ 宣告與函式刻意整塊放在 `// ── Init ──` 之前，理由同上面 _cloudRefreshing / _tagPanelCtx /
+//    _batchSel 那幾段：下方 SHOPS.forEach 在【模組頂層】就會走到 shopHTML（工具列那顆鈕）
+//    與 onMonthChange → applyFilters（按鈕組數的重繪掛點），宣告放後面會落入 let 的 TDZ、
+//    整個 profit.js 模組評估中斷、淨利表白畫面。勿搬動。
+let _splitDraft = null;   // [{from,to,rev,gross}] 未儲存草稿；null ＝ 彈窗沒開
+let _splitShop  = null;   // 草稿屬於哪個通路。關窗即清 —— 不清的話切通路後再開窗會把上一個通路的草稿套上來
+
+// 「⚖ 拆分試算」開放給哪些通路（工具列那顆鈕的判準）。
+//  🔴 這是【白名單：是這四個之一】，不是黑名單【不是測試通路】。初版寫成
+//    `${shop!==TEST_SHOP_ID?…:''}`，那個方向是錯的：SHOPS 之後只要多進一個非蝦皮的東西
+//    （第二個測試通路、或別的平台借用這條 render 路徑），那顆鈕就會【自動長出去】，
+//    而且不會有任何測試失敗 —— 因為沒有任何斷言在講「只有這四個」。
+//    白名單的失敗方向相反：新通路預設【沒有】這顆鈕，要有人明確加進來才會出現。
+//    這個功能的資料是「同一個蝦皮商品頁被兩個品號共用」，本質上就只對蝦皮四家成立。
+//
+//  ⚠ 為什麼【不】共用既有的常數陣列（三個候選都查過，逐一說明）：
+//    ・SUMMARY_SHOPS（本檔搜 `const SUMMARY_SHOPS`）：內容確實是這四家、宣告位置也夠早，
+//      但它自己就寫成 `SHOPS.filter(s=>s.id!==TEST_SHOP_ID)` —— 【本身就是黑名單】。
+//      共用它等於把同一個缺陷搬個位置，不是修掉；而且它的語意是「總表要顯示的賣場」
+//      （見它上方的註解：排除理由是總表的人工輸入欄位會被誤填），與本功能無關。
+//      型別也不同：它是 {id,color} 物件陣列，這裡要的是字串。
+//    ・RECON_SHOPS（本檔搜 `const RECON_SHOPS`）：內容剛好也是這四家（順序不同），
+//      但語意是「對帳分頁要開幾個 PDF 上傳欄」，而且它宣告在【本檔第 19282 行附近】——
+//      遠在下方 `// ── Init ──` 的 SHOPS.forEach(shopHTML) 之後。從 shopHTML 引用它
+//      會落入 const 的 TDZ、整個 profit.js 評估中斷。這一條是硬性不可行，不是偏好。
+//    ・SCORE_SHOPS（本檔搜 `const SCORE_SHOPS`）：只有三家（沒有維克），內容就不符。
+//    ⇒ 三個都不能用，所以這裡寫死一份。這確實是 repo 裡第 N 份同樣的四個字串
+//      （js/pages/marketing.js 的 INSIGHT_SHOPS 也有好幾份），但那幾份跨檔又各有語意，
+//      硬湊成一份共用常數只會讓「哪一份改了會影響誰」變得更難查。
+//
+//  ⚠ 宣告位置與上面兩個 let 同批，理由相同：shopHTML 在模組頂層的 Init 就會被呼叫，
+//    這個 const 放到 Init 之後會 TDZ。勿搬動。
+const SPLIT_SHOPS=['好麻吉','玩樂','森之旅','維克'];
+
+// key 形狀：ec_split|{通路}|{月}|{半月}，與 ec_notes 的廣告調整同一個四段形狀。
+//   ⚠ 期別直接讀 state[shop] 的當下值：彈窗是「看著現在這一期的報表」開的，
+//     取法與 renderTable 的 noteKey（本檔搜 `const noteKey=shop+'|'`）逐字相同。
+function _splitKey(shop){
+  const s=state[shop]||{};
+  return 'ec_split|'+shop+'|'+(s.curMonth||'')+'|'+(s.curHalf||'');
+}
+// 半月標籤。逐字沿用 tryLoadSaved 空狀態那行（本檔搜 `const _hLbl=`），不另發明一套字樣。
+function _splitHalfLabel(half){ return half==='first'?'上半月':half==='second'?'下半月':'整月'; }
+// 空字串 / 非數字一律當 0。
+//   ⚠ 刻意【不用】本檔的 num()：那支會剝掉 , $ % 三種符號，對搬運額這種純手打數字沒必要，
+//     而且會把「1,0」這種手殘輸入靜默變成 10。這裡寧可讓它變 0（使用者看得見）。
+function _splitNum(v){ const n=parseFloat(v); return Number.isFinite(n)?n:0; }
+
+// ══════ 資料層 ══════
+//  value 形狀：{ "<A品號>": { to:"<B品號>", rev:<搬運額>, gross:<搬運額> } }
+//
+//  🔴 形狀是硬約束，違反會讓整把 key 被 _momoFullPushDeleteGuard 靜默 splice 掉、永遠推不上雲。
+//    判準來自 momoCloudDeleteCount（本檔搜 `function momoCloudDeleteCount`）的 walk：
+//      ・物件層 `if(lv===undefined) n+=_leaves(c[k])` ← 只有「雲端有、本機 undefined」才算刪除
+//      ・純值層 `return 0;   // 純值不同＝覆蓋、非刪除` ← 改數字不算刪除
+//      ・陣列層用 _momoStableStr 當元素身分 ← 改任何一個欄位＝舊元素消失＝必然 willDelete≥1
+//    ⇒ 三條規則，一條都不能破：
+//      ① 絕對【不可以用陣列】。ec_notes 的 adjustments 就是踩這條，2026-09-03 現場實測
+//         「只是把某筆調整的文字改掉」就被判 willDelete≥1、那把 key 永遠推不上去
+//         （本檔搜 `它遞迴到 adjustments 陣列`）。
+//      ② to / rev / gross 三個巢狀 key【永遠一起寫】。少寫一個 → 那一層 lv===undefined → 計為刪除。
+//      ③ 移除一組時 rev 與 gross 寫 0、to 原樣保留，【不 delete 任何 key】。
+//    ⇒ 因此本 key【不需要】dirty-scoped merge，走 syncToCloud 的泛用整包 setField 即可，
+//      也不需要加進刪除守衛的排除清單（本檔搜 `_notesUsesMerge(k) || _editsUsesMerge(k)`）。
+//      代價講清楚：整包 setField ＝ last-write-wins，同一期同一通路被兩人同時編會互蓋。
+//
+//  讀取序 _profitMem → _mem → localStorage，逐字照抄 getEdits（本檔搜 `function getEdits`）：
+//    第一順位是雲端訂閱灌進來的值，跨裝置才看得到同事存的拆分。
+function getSplits(shop){
+  const k=_splitKey(shop);
+  try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[k]) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
+  try{ return JSON.parse(localStorage.getItem(k)||'{}'); }catch{ return {}; }
+}
+// 這一期有幾組「真的有搬東西」的拆分。
+//   N ＝ rev 或 gross 不為 0 的組數 —— 被移除的那些是 {to 原樣, rev:0, gross:0} 的墓碑
+//   （見上方約束③），不能算進去，否則使用者刪光了按鈕還寫著「· 3 組」。
+function _splitCount(shop){
+  try{
+    const m=getSplits(shop);
+    return Object.keys(m||{}).filter(c=>{const v=m[c]||{};return _splitNum(v.rev)!==0||_splitNum(v.gross)!==0;}).length;
+  }catch{ return 0; }
+}
+// 工具列那顆鈕的文字。
+//   ⚠ 這個元素在 shopHTML 產生、住在 .toolbar 裡，【不會被 renderTable 的 innerHTML 洗掉】
+//     （那只覆蓋 #tbl-{shop}）—— 與 batchsel-{shop} 同一個生命週期，理由見 _renderBatchSelInfo 上方註解。
+//     所以它需要一個【自己的】重繪掛點：切月份 / 切半月 / 切通路時組數要跟著換。
+//     掛點選在 updateTagFilterBar 的兩個呼叫點旁邊（applyFilters 尾端 + tryLoadSaved 的空狀態分支），
+//     那兩處合起來涵蓋「有報表」與「這一期沒報表」兩條路，而且是同一個工具列的既有先例。
+function updateSplitBtn(shop){
+  const btn=document.getElementById('split-btn-'+shop);
+  if(!btn)return;                                  // 測試通路沒有這顆鈕（shopHTML 擋掉）→ 天然 no-op
+  const n=_splitCount(shop);
+  btn.textContent=n>0?`⚖ 拆分試算 · ${n} 組`:'⚖ 拆分試算';
+}
+// 已存的 map → 彈窗草稿。
+//   ⚠ 墓碑（rev 與 gross 都是 0）【不載入畫面】：那是使用者刪掉的組，重開彈窗還看到它會很困惑。
+//     但它們在 map 裡【原樣留著】（saveSplits 的合併會保住），這是約束③要的。
+function _splitMapToDraft(m){
+  const out=[];
+  Object.keys(m||{}).forEach(from=>{
+    const v=m[from]||{};
+    const rev=_splitNum(v.rev),gross=_splitNum(v.gross);
+    if(rev===0&&gross===0)return;
+    out.push({from,to:String(v.to||''),rev,gross});
+  });
+  return out;
+}
+// 草稿 → 要寫進去的 map。
+//   🔴 這裡是【合併】不是取代：以雲端／本機現有的 map 為底，草稿覆蓋上去，
+//     草稿裡沒有的既有品號一律降級成 {to 原樣, rev:0, gross:0} —— 絕不 delete（約束③）。
+//   🔴 三個 key 一律一起寫（約束②），連墓碑也是。
+function _splitDraftToMap(prev,draft){
+  const out={};
+  Object.keys(prev||{}).forEach(from=>{
+    const v=prev[from]||{};
+    out[from]={to:String(v.to||''),rev:0,gross:0};   // 先全部降級成墓碑，下面再被草稿覆蓋
+  });
+  (draft||[]).forEach(g=>{
+    if(!g||!g.from)return;
+    out[g.from]={to:String(g.to||''),rev:_splitNum(g.rev),gross:_splitNum(g.gross)};
+  });
+  return out;
+}
+// 寫入。
+//   零件對照（九個之中的 2/3/4）：localStorage（含讀回驗證）+ Store._profitMem 鏡射、
+//   _shopJustSaved 戳記、_pendingSyncKeys + _showSyncBtn。
+//   ⚠ 讀回驗證照抄 saveNotes（本檔搜 `_lsOk=(localStorage.getItem(k)===_payload)`）：
+//     規範說配額滿會丟 QuotaExceededError，但本檔既有註解記錄過「配額滿了會靜默失敗」，
+//     讀回比對不依賴瀏覽器怎麼回報。
+//   ⚠ 不寫 Store._mem：saveNotes / saveEdits 都不寫它，憑空生第三個來源只會 stale。
+//     推送端（syncToCloud 的泛用 field 分支）會先問 Store._mem、讀不到才 fallback 到
+//     localStorage.getItem —— 所以【實際走的是 fallback 那一支】，這是預期行為不是漏接。
+function saveSplits(shop,map){
+  // 通路守衛（資料層共同出口）。判準與 shopHTML / openSplitModal 兩處【同源】—— 同一個 SPLIT_SHOPS。
+  //   🔴 這一道【必須放在這裡，不是放在 saveSplitDraft】：本函式才是共同出口 ——
+  //     localStorage、Store._profitMem、_pendingSyncKeys、_shopJustSaved 四件事全部發生在這裡，
+  //     而且它自己也掛在 window 上（本檔搜 `getSplits,saveSplits`），Console 可以直接呼叫、
+  //     完全繞過 openSplitModal。擋在共同出口等於同時擋住 UI 與程式兩條路。
+  //     判準放呼叫端就得每新增一個呼叫端補一次，而漏補是靜默的 —— 同型立場見 renderTable
+  //     開頭那段（「擋這一處等於擋住 22 條路；去擋計時器只擋得住其中 1 條」）。
+  //   ⚠ saveSplitDraft 因此【不需要】自己的守衛：它唯一的通路來源是 _splitShop，而那個變數
+  //     全檔只有兩個寫入點（openSplitModal 設值、closeSplitModal 設 null，本檔搜 `_splitShop=`），
+  //     不在 window 匯出名單裡 → 上游守好之後它拿不到白名單外的通路。再加一道只是第三份同樣的規則。
+  //   ⚠ 戳記與待推佇列都在守衛【之後】：擋下時不可以留下 _shopJustSaved（那會白白封鎖 5 秒
+  //     全通路雲端快照）、也不可以留下 pending key（那會讓同步鈕亮著卻推不出東西）。
+  if(!SPLIT_SHOPS.includes(shop)){
+    const err=new Error('通路「'+shop+'」不在 SPLIT_SHOPS 白名單，拒絕寫入拆分資料');
+    console.error('[saveSplits] '+err.message);
+    return {ok:false,err,key:null,blocked:true};
+  }
+  // 🔴 第一行就設戳記，與 saveNotes 一致（本檔搜 `window._shopJustSaved=Date.now();`）。
+  //   它讓 5 秒內的雲端快照不覆蓋剛存的值（__profitShouldSkipCloudOverwrite / profitDataReady）。
+  //   ⚠ 它是【全域、不分通路不分 key】的 —— 所以只能在真正的「儲存」動作設，不可以綁 oninput。
+  window._shopJustSaved=Date.now();
+  const k=_splitKey(shop);
+  const payload=JSON.stringify(map);
+  let lsOk=false,lsErr=null;
+  try{
+    localStorage.setItem(k,payload);
+    lsOk=(localStorage.getItem(k)===payload);
+    if(!lsOk)lsErr=new Error('setItem 沒有丟例外，但讀回的內容不符（可能靜默失敗，或另一個分頁同時寫了同一把 key）');
+  }catch(e){ lsOk=false; lsErr=e; }
+  // _profitMem 照樣寫（畫面與推送都讀它），刻意不因為 localStorage 失敗而回滾 —— 理由同 saveNotes：
+  //   回滾會讓使用者剛打的數字當場消失，毀掉「請你複製起來重打」這條救援路徑。
+  try{ if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=map; }catch{}
+  _pendingSyncKeys.add(k);
+  _showSyncBtn(shop);
+  return {ok:lsOk,err:lsErr,key:k};
+}
+
+// ── 彈窗 ──
+//  型態照抄 openAnaSettings（懶建立 createElement + classList.add('open')），沿用既有的
+//  .ana-overlay / .ana-modal / .ana-modal-hdr / .ana-modal-body / .ana-modal-ftr /
+//  .ana-modal-title / .ana-modal-x / .ana-cancel-btn —— CSS 零新增。
+//  ⚠ .ana-modal 預設寬 640px（css/profit.css 搜 `.ana-modal{`），結果表有四欄、每組四列，
+//    用 inline style 加寬。這是既有寫法（openUnmatchedModal 的
+//    `class="ana-modal" style="width:min(860px,95vw)"`），不是新增 class。
+function openSplitModal(shop){
+  // 通路守衛（UI 入口）。判準與 shopHTML 那顆鈕【同源】—— 同一個 SPLIT_SHOPS，不另寫一份字面陣列。
+  //   為什麼需要：shopHTML 的白名單只擋住「鈕長不長出來」，本函式掛在 window 上
+  //   （本檔搜 `openSplitModal,closeSplitModal`），Console 打一行就能繞過那顆鈕開窗、
+  //   選品號、按儲存 —— 而測試通路的 state 也有 curMonth/curHalf（:347 五個通路一視同仁），
+  //   _splitKey 會組出一把看起來合法的 ec_split|測試通路|…，接著被 sweep 的
+  //   startsWith('ec_split|') 撿進待推、推上雲。白名單若只做在 render 層就只是視覺的。
+  //   ⚠ 用 console.warn 不用 alert：走到這裡代表是程式呼叫（使用者點不到那顆鈕），
+  //     彈窗給不了他任何能做的事。與 setShop 開頭那道守衛的靜默 return 不同的是，
+  //     那裡是「切頁時五個通路各來一次」會洗版，這裡不會，所以留得下訊息。
+  if(!SPLIT_SHOPS.includes(shop)){ console.warn('[openSplitModal] 通路「'+shop+'」不在 SPLIT_SHOPS 白名單，不開窗'); return; }
+  const built=state[shop]?._built;
+  if(!built||!built.length){alert('請先產生報表');return;}
+  let ov=document.getElementById('split-overlay');
+  if(!ov){
+    ov=document.createElement('div');ov.id='split-overlay';ov.className='ana-overlay';
+    ov.innerHTML=`<div class="ana-modal" style="width:min(880px,96vw)" onclick="event.stopPropagation()">
+      <div class="ana-modal-hdr"><span class="ana-modal-title" id="split-modal-title">⚖ 拆分試算</span><button class="ana-modal-x" onclick="closeSplitModal()">✕</button></div>
+      <div class="ana-modal-body" id="split-modal-body"></div>
+      <div class="ana-modal-ftr">
+        <button class="ana-cancel-btn" onclick="closeSplitModal()">關閉</button>
+        <button class="ana-save-btn" onclick="saveSplitDraft()">儲存</button>
+      </div>
+    </div>`;
+    ov.onclick=closeSplitModal;
+    document.body.appendChild(ov);
+  }
+  _splitShop=shop;
+  // 載入這一期已存的拆分（墓碑不入畫面，見 _splitMapToDraft）。
+  //   ⚠ 讀的是 getSplits，第一順位 _profitMem ＝ 同事推上去、雲端訂閱灌回來的那份。
+  _splitDraft=_splitMapToDraft(getSplits(shop));
+  // 品號清單（下拉搜尋用）。
+  //   🔴 資料源是 state[shop]._built，【不可以】照抄 openUnmatchedModal 的 s.rawMobic ——
+  //     rawMobic 沒有任何持久化路徑（本檔搜 `state[shop].rawMobic=`，三處全是記憶體指派），
+  //     重整後是 null。那條路只在「剛上傳完檔案」的 generate 流程裡成立；本彈窗是看著
+  //     【已存報表】開的，照抄會得到一個永遠搜不到東西的空下拉。
+  //   ⚠ 去重用 `in` 而不是 truthy：品號理論上不會是空字串，但 built 是外部資料。
+  const names={},codes=[];
+  built.forEach(r=>{ if(r&&r.code!=null&&!(r.code in names)){ names[r.code]=r.name||''; codes.push(r.code); } });
+  window._splitCodeNames=names;window._splitAllCodes=codes;
+  const s=state[shop]||{};
+  const t=document.getElementById('split-modal-title');
+  if(t)t.textContent=`⚖ 拆分試算 · ${shop} ${s.curMonth||''} ${_splitHalfLabel(s.curHalf)}`;
+  renderSplitModalBody();
+  ov.classList.add('open');
+}
+function closeSplitModal(){
+  document.getElementById('split-overlay')?.classList.remove('open');
+  _splitDraft=null;_splitShop=null;
+}
+
+// 把 DOM 上的現值收回草稿。
+//   🔴 這是【唯一】會寫 _splitDraft 內容的地方（splitAddRow / splitRemoveRow 只改長度）——
+//     所有 handler 一律先呼叫它、再做自己的事。刻意不讓各 handler 自己去寫對應的欄位：
+//     那樣 DOM 與草稿就是兩個來源，正常情況下相等、只在資料變形時靜默分岔。本檔已經因為
+//     「兩處各寫一份」出過事（見 readNotesForPush 上方那段 PR #93 的說明）。
+//   ⚠ 2026-09-09 實測發現的具體形狀：舊版 splitNumInput 直接寫 _splitDraft[i][field]、
+//     而重繪前的收回是讀 DOM —— 只要有任何一條路徑改了草稿卻沒同步回 input，
+//     下一次重繪就會把它悄悄改回 input 上的舊值。改成單一來源之後結構上不可能發生。
+//   同型先例是 syncProdTagDraftFromDOM（本檔搜該名）。四個欄位一次收齊。
+function _splitSyncDraftFromDOM(){
+  if(!Array.isArray(_splitDraft))return;
+  _splitDraft.forEach((row,i)=>{
+    const from=document.getElementById('sp-sel-'+i+'-from');
+    const to  =document.getElementById('sp-sel-'+i+'-to');
+    const rev =document.getElementById('sp-rev-'+i);
+    const gro =document.getElementById('sp-gross-'+i);
+    if(from)row.from =from.value||'';
+    if(to)  row.to   =to.value||'';
+    if(rev) row.rev  =_splitNum(rev.value);
+    if(gro) row.gross=_splitNum(gro.value);
+  });
+}
+function splitAddRow(){
+  if(!Array.isArray(_splitDraft))return;
+  _splitSyncDraftFromDOM();
+  _splitDraft.push({from:'',to:'',rev:0,gross:0});
+  renderSplitModalBody();
+}
+function splitRemoveRow(i){
+  if(!Array.isArray(_splitDraft))return;
+  _splitSyncDraftFromDOM();
+  _splitDraft.splice(i,1);
+  renderSplitModalBody();
+}
+// 數字輸入。
+//   ⚠ 【只重繪結果區、不重繪整個 body】—— 重繪 body 會讓 input 失焦、一個數字打不完。
+//   ⚠ 不收參數：值從 DOM 讀（單一來源，見 _splitSyncDraftFromDOM 的紅字）。
+//   🔴 這裡【絕對不可以】順手寫 localStorage。理由不是效能，是 window._shopJustSaved：
+//     那是一個【全域、不分通路、不分 key】的戳記（本檔搜 `window.__profitShouldSkipCloudOverwrite`），
+//     設一次會讓接下來 5 秒內【所有】app/profit 的雲端快照被整個 return 掉
+//     （見 profitDataReady listener 開頭那個 justSaved 早退）。綁在 oninput 上等於每打一個字
+//     就把那 5 秒窗口往後推一次 —— 使用者慢慢算比例的那幾分鐘，全通路都收不到同事的更新。
+//     寫入只綁在「儲存」按鈕上，見 saveSplitDraft。
+function splitNumInput(){
+  _splitSyncDraftFromDOM();
+  renderSplitResults();
+}
+
+// ── 試算 ──
+//  公式逐字照抄 buildShop 與 recalcRow（兩份實作對這四項【逐字相同】，本檔搜
+//  `const platFee=p.rev*PLATFORM` 與 `const platFee=rev*PLATFORM` 自行比對）：
+//      platFee    = rev * PLATFORM
+//      pureProfit = gross - adsFee - platFee
+//      pureRate   = rev > 0 ? pureProfit / rev : null
+//  ⚠ adsFee 直接讀該列的 r.adsFee（那個值已經含使用者編輯過的覆蓋 —— recalcRow 把編輯後的
+//    adsFee 就地寫回 built 並 lsSave，本檔搜 `Object.assign(built[idx]`），【不要】重算。
+//  ⚠ 拆分只動 rev 與 gross，adsFee 兩邊都不動 —— 廣告費是各自的商品頁投放，與營收歸屬無關。
+function _splitCalc(rev,gross,adsFee,PLATFORM){
+  const platFee=rev*PLATFORM;
+  const pureProfit=gross-adsFee-platFee;
+  const pureRate=rev>0?pureProfit/rev:null;
+  return {rev,gross,pureProfit,pureRate};
+}
+// 一組草稿 → 四列試算結果，或 null（品號沒選齊 / 選到同一個 / 報表裡查無此品號）。
+//   ⚠ 回傳 reason 而不是靜默給 null：使用者填到一半是常態，畫面要講得出「還缺什麼」。
+function _splitRowsOf(shop,g){
+  const built=state[shop]&&state[shop]._built;
+  if(!Array.isArray(built))return {err:'尚未載入報表'};
+  if(!g.from||!g.to)return {err:'請選齊 A 與 B 兩個品號'};
+  if(g.from===g.to)return {err:'A 與 B 不能是同一個品號'};
+  const a=built.find(r=>r&&r.code===g.from);
+  const b=built.find(r=>r&&r.code===g.to);
+  if(!a)return {err:`這一期的報表裡找不到品號 ${g.from}`};
+  if(!b)return {err:`這一期的報表裡找不到品號 ${g.to}`};
+  const P=getPlatformRate(shop);
+  const aAds=a.adsFee||0,bAds=b.adsFee||0;
+  return {a,b,P,rows:[
+    {label:`A ${a.code} 原始`,   name:a.name||'', after:false, v:_splitCalc(a.rev||0,          a.gross||0,          aAds,P)},
+    {label:`A ${a.code} 拆分後`, name:a.name||'', after:true,  v:_splitCalc((a.rev||0)-g.rev,  (a.gross||0)-g.gross, aAds,P)},
+    {label:`B ${b.code} 原始`,   name:b.name||'', after:false, v:_splitCalc(b.rev||0,          b.gross||0,          bAds,P)},
+    {label:`B ${b.code} 拆分後`, name:b.name||'', after:true,  v:_splitCalc((b.rev||0)+g.rev,  (b.gross||0)+g.gross, bAds,P)},
+  ]};
+}
+// 結果區。只重繪這一塊（#split-results），不動上面那些 input。
+function renderSplitResults(){
+  const host=document.getElementById('split-results');
+  if(!host)return;
+  const shop=_splitShop;
+  const rows=Array.isArray(_splitDraft)?_splitDraft:[];
+  if(!shop||!rows.length){host.innerHTML='';return;}
+  const P=getPlatformRate(shop);
+  // ⚠ 費率顯示一定要走 toFixed：getPlatformRate 是 20.5/100，乘回 100 會是 20.499999999999996。
+  const rateTxt=(P*100).toFixed(1);
+  const cell=(v,after)=>{
+    const c=after?'#374151':'#9ca3af';
+    const w=after?'600':'400';
+    return `<td style="text-align:right;padding:5px 10px;color:${c};font-weight:${w};font-variant-numeric:tabular-nums">${_fSigned(v)}</td>`;
+  };
+  const blocks=rows.map((g,i)=>{
+    const r=_splitRowsOf(shop,g);
+    if(r.err)return `<div style="border:1px dashed #e5e7eb;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#9ca3af">第 ${i+1} 組：${escapeHtmlLike(r.err)}</div>`;
+    const trs=r.rows.map(x=>`<tr style="${x.after?'background:#f8f9fc;':''}border-bottom:1px solid #f3f4f6">
+      <td style="padding:5px 10px;font-size:12px;color:${x.after?'#374151':'#9ca3af'};font-weight:${x.after?'700':'400'};white-space:nowrap">${escapeHtmlLike(x.label)}</td>
+      ${cell(x.v.rev,x.after)}${cell(x.v.gross,x.after)}${cell(x.v.pureProfit,x.after)}
+      <td style="text-align:right;padding:5px 10px">${x.v.pureRate===null?'<span class="pill pn">—</span>':pill(x.v.pureRate*100)}</td>
+    </tr>`).join('');
+    return `<div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:#5b5fcf;margin-bottom:4px">第 ${i+1} 組　${escapeHtmlLike(r.a.name||'')} → ${escapeHtmlLike(r.b.name||'')}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#f8fafc;border-bottom:2px solid #e5e7eb">
+          <th style="text-align:left;padding:6px 10px;font-size:11px;color:#6b7280;font-weight:600">品號</th>
+          <th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;font-weight:600">營收</th>
+          <th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;font-weight:600">毛利</th>
+          <th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;font-weight:600">純利</th>
+          <th style="text-align:right;padding:6px 10px;font-size:11px;color:#6b7280;font-weight:600">純利率</th>
+        </tr></thead>
+        <tbody>${trs}</tbody>
+      </table>
+    </div>`;
+  }).join('');
+  host.innerHTML=`<div style="border-top:1px solid #e4e6ef;margin-top:16px;padding-top:14px">
+    <div style="font-size:13px;font-weight:700;color:#1f2937;margin-bottom:10px">試算結果</div>
+    ${blocks}
+    <div style="font-size:11px;color:#9ca3af;line-height:1.6">純利已扣掉各自的廣告費與平台費（${escapeHtmlLike(shop)} ${rateTxt}%），銷量與庫存不隨拆分變動。</div>
+  </div>`;
+}
+
+// ── 儲存 ──
+//  🔴 全檔【唯一】會寫 localStorage / 進待同步佇列的拆分入口，而且只掛在「儲存」按鈕上。
+//    絕對不要接到 oninput / onblur：window._shopJustSaved 是全域、不分通路不分 key 的戳記，
+//    設一次就讓接下來 5 秒內所有 app/profit 雲端快照被整個 return 掉
+//    （profitDataReady 開頭的 justSaved 早退 + __profitShouldSkipCloudOverwrite）。
+//    綁即時輸入 ＝ 使用者慢慢算比例的那幾分鐘，全通路都收不到同事的更新。
+function saveSplitDraft(){
+  const shop=_splitShop;
+  if(!shop||!Array.isArray(_splitDraft)){ if(typeof showToast==='function')showToast('拆分試算尚未開啟','error'); return; }
+  _splitSyncDraftFromDOM();
+  // 同一個 A 品號只能有一組：map 用 A 當 key，兩組會互相蓋掉而且不報錯。
+  //   ⚠ 選擇「擋下並指名是哪個品號」而不是「後者覆蓋」：靜默覆蓋等於使用者填的一組憑空消失。
+  const seen=new Set(),dup=[];
+  _splitDraft.forEach(g=>{ if(!g.from)return; if(seen.has(g.from))dup.push(g.from); else seen.add(g.from); });
+  if(dup.length){
+    const msg='同一個 A 品號只能有一組拆分，這幾個重複了：'+[...new Set(dup)].join('、');
+    if(window.App&&typeof App.showAlertModal==='function')App.showAlertModal({title:'拆分試算未儲存',message:msg,kind:'warn'});
+    else if(typeof showToast==='function')showToast(msg,'error');
+    return;
+  }
+  const map=_splitDraftToMap(getSplits(shop),_splitDraft);
+  // Firestore 欄位名檢核：品號是外部資料，`__x__` 這種形狀會讓整把 key 推不上去。
+  //   走的是推送端同一支 momoFsInvalidFieldKeys（本檔搜該名），在這裡先擋掉才講得出是哪個品號；
+  //   等到 syncToCloud 才擋的話，訊息會出現在同步彈窗裡、離操作現場太遠。
+  try{
+    const bad=(typeof momoFsInvalidFieldKeys==='function')?momoFsInvalidFieldKeys(map):[];
+    if(bad.length){
+      const msg='這些品號不能當 Firestore 欄位名，未儲存：'+bad.slice(0,3).map(b=>b.key+'（'+b.reason+'）').join('、');
+      if(window.App&&typeof App.showAlertModal==='function')App.showAlertModal({title:'拆分試算未儲存',message:msg,kind:'error'});
+      else if(typeof showToast==='function')showToast(msg,'error');
+      return;
+    }
+  }catch(e){ console.error('[saveSplitDraft] 欄位名檢核失敗，保守起見不儲存：',e); return; }
+  const res=saveSplits(shop,map);
+  updateSplitBtn(shop);
+  renderSplitResults();
+  // ── 失敗有【兩種方向完全不同】的原因，文案必須分開 ──
+  //   ① blocked：通路不在 SPLIT_SHOPS 白名單 → 這是程式接線錯誤，重試一百次都不會過。
+  //   ② 其餘：localStorage 沒寫進去（配額 / 被擋 / 讀回不符）→ 這才是「空間 + 重試」那一組。
+  //   🔴 曾經兩者共用 ② 的文案：「數字沒有存進這台電腦，重整後就會消失，確認瀏覽器儲存空間後
+  //     再試一次」—— 對 ① 是徹底的誤導，會把人指去查儲存空間，而真正要看的是白名單。
+  if(res.blocked){
+    // ⚠ 這條路正常 UI 走不到（openSplitModal 開頭已經先擋掉），所以這段話的【實際讀者】
+    //   是「新增了一個開啟拆分試算的入口、卻忘記照抄白名單的開發者」。
+    //   因此：detail 直接點名常數與三個使用點，讓他一眼知道要去看哪裡。
+    //   ⚠ 刻意【不寫】「請再試一次 / 稍後重試」：這不是暫時性失敗，叫人重試是浪費他的時間。
+    //   ⚠ 也刻意【不提】儲存空間或重新整理 —— 那兩件事跟這個失敗一點關係都沒有。
+    console.error('[saveSplitDraft] 通路「'+shop+'」不在 SPLIT_SHOPS 白名單，這次沒有寫入任何資料。'
+      +'白名單常數在 js/profit.js 的 SPLIT_SHOPS，三個使用點：shopHTML 的按鈕條件 / openSplitModal 開頭 / saveSplits 開頭。'
+      +'新增入口時三處要用同一個判準。',res.err);
+    const bMsg='「'+shop+'」不支援拆分試算，這次沒有寫入任何資料。\n\n'
+      +'拆分試算只開放給蝦皮四個通路（'+SPLIT_SHOPS.join('／')+'）。這不是暫時性的狀況。';
+    const bDetail='被擋下的通路：'+shop+'\n'
+      +'白名單：js/profit.js 的 SPLIT_SHOPS = '+JSON.stringify(SPLIT_SHOPS)+'\n'
+      +'三個使用點：shopHTML 的按鈕條件 / openSplitModal 開頭 / saveSplits 開頭（本次擋下的是最後這一道）\n'
+      +'若你剛新增了一個開啟拆分試算的入口，把同一個判準補上去就好。';
+    if(window.App&&typeof App.showAlertModal==='function')
+      App.showAlertModal({title:'拆分試算未儲存（通路不支援）',message:bMsg,detail:bDetail,kind:'warn'});
+    else if(typeof showToast==='function')showToast(bMsg,'error');
+    return;
+  }
+  if(!res.ok){
+    console.error('[saveSplitDraft] 拆分試算沒有存進 localStorage：'+res.key,res.err);
+    const detail=res.key+'\n'+((res.err&&res.err.message)||String(res.err));
+    if(window.App&&typeof App.showAlertModal==='function')
+      App.showAlertModal({title:'拆分試算儲存失敗',message:'數字【沒有】存進這台電腦，重整後就會消失。請把數字記下來，確認瀏覽器儲存空間後再試一次。',detail,kind:'error'});
+    else if(typeof showToast==='function')showToast('拆分試算儲存失敗：'+detail,'error');
+    return;
+  }
+  const n=_splitCount(shop);
+  if(typeof showToast==='function')showToast(n>0?`已儲存 ${n} 組拆分 → 記得按「☁ 同步雲端」`:'已清空這一期的拆分 → 記得按「☁ 同步雲端」','success');
+}
+
+// ── 品號選擇（搜尋框 + 下拉）──
+//  邏輯逐字照抄 umSearch / umSelect / umHideDrop（本檔搜 `function umSearch`），
+//  差別只有兩處：① id 前綴 sp- 而非 um-，② 多一個 side（from/to）維度。
+//  資料源的差異見 openSplitModal 那段的紅字說明 —— 那是【唯一】不可以照抄的地方。
+function splitSearch(i,side){
+  const inp=document.getElementById('sp-inp-'+i+'-'+side);
+  const drop=document.getElementById('sp-drop-'+i+'-'+side);
+  if(!inp||!drop)return;
+  const q=inp.value.trim().toLowerCase();
+  const codes=window._splitAllCodes||[];
+  const names=window._splitCodeNames||{};
+  const filtered=q?codes.filter(c=>String(c).toLowerCase().includes(q)||(names[c]||'').toLowerCase().includes(q)):codes;
+  drop.innerHTML=filtered.slice(0,80).map(c=>`<div onclick="splitSelect(${i},'${side}','${String(c).replace(/'/g,"\\'")}')" style="padding:6px 10px;font-size:12px;cursor:pointer;border-bottom:1px solid #f3f4f6;color:#374151" onmouseenter="this.style.background='#f0f4ff'" onmouseleave="this.style.background=''">${c}${names[c]?' – <span style=color:#6b7280>'+names[c]+'</span>':''}</div>`).join('');
+  drop.style.display=filtered.length?'':'none';
+}
+function splitSelect(i,side,code){
+  const inp=document.getElementById('sp-inp-'+i+'-'+side);
+  const sel=document.getElementById('sp-sel-'+i+'-'+side);
+  const drop=document.getElementById('sp-drop-'+i+'-'+side);
+  const names=window._splitCodeNames||{};
+  if(inp)inp.value=code+(names[code]?' – '+names[code]:'');
+  if(sel)sel.value=code;
+  if(drop)drop.style.display='none';
+  _splitSyncDraftFromDOM();   // 值一律從 DOM 收回，不在這裡直接寫草稿（單一來源，見該函式的紅字）
+  renderSplitResults();       // 換了品號 → 四列全部要重算。同 splitNumInput，只重繪結果區
+}
+function splitHideDrop(i,side){
+  const drop=document.getElementById('sp-drop-'+i+'-'+side);
+  if(drop)drop.style.display='none';
+}
+// 一格品號選擇器的 HTML。兩側（from/to）共用，結構照抄 openUnmatchedModal 的 um-wrap 那塊。
+function _splitPickerHtml(i,side,code){
+  const names=window._splitCodeNames||{};
+  const shown=code?(code+(names[code]?' – '+names[code]:'')):'';
+  const ph=side==='from'?'搜尋 A（搬出）編號 / 名稱…':'搜尋 B（搬入）編號 / 名稱…';
+  return `<div style="position:relative">
+    <input id="sp-inp-${i}-${side}" type="text" placeholder="${ph}" value="${escapeHtmlLike(shown)}"
+      oninput="splitSearch(${i},'${side}')" onfocus="splitSearch(${i},'${side}')" onblur="setTimeout(()=>splitHideDrop(${i},'${side}'),200)"
+      style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:12px">
+    <input type="hidden" id="sp-sel-${i}-${side}" value="${escapeHtmlLike(code||'')}">
+    <div id="sp-drop-${i}-${side}" style="display:none;position:absolute;top:100%;left:0;width:280px;background:white;border:1.5px solid #e5e7eb;border-radius:6px;max-height:140px;overflow-y:auto;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.12);text-align:left"></div>
+  </div>`;
+}
+
+function renderSplitModalBody(){
+  const body=document.getElementById('split-modal-body');
+  if(!body)return;
+  const rows=Array.isArray(_splitDraft)?_splitDraft:[];
+  const rowsHtml=rows.map((r,i)=>`
+    <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:700;color:#5b5fcf">第 ${i+1} 組</span>
+        <button onclick="splitRemoveRow(${i})" style="padding:3px 10px;border:1.5px solid #e5e7eb;border-radius:6px;background:white;font-size:11px;color:#ef4444;cursor:pointer">移除這組</button>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="flex:1 1 210px;min-width:180px">
+          <div style="font-size:11px;color:#9ca3af;font-weight:600;margin-bottom:3px">A 品號（搬出）</div>
+          ${_splitPickerHtml(i,'from',r.from)}
+        </div>
+        <div style="flex:1 1 210px;min-width:180px">
+          <div style="font-size:11px;color:#9ca3af;font-weight:600;margin-bottom:3px">B 品號（搬入）</div>
+          ${_splitPickerHtml(i,'to',r.to)}
+        </div>
+        <div style="flex:0 1 120px;min-width:100px">
+          <div style="font-size:11px;color:#9ca3af;font-weight:600;margin-bottom:3px">搬運營收</div>
+          <input id="sp-rev-${i}" type="number" value="${Number.isFinite(r.rev)?r.rev:0}" oninput="splitNumInput()"
+            style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:12px;font-variant-numeric:tabular-nums">
+        </div>
+        <div style="flex:0 1 120px;min-width:100px">
+          <div style="font-size:11px;color:#9ca3af;font-weight:600;margin-bottom:3px">搬運毛利</div>
+          <input id="sp-gross-${i}" type="number" value="${Number.isFinite(r.gross)?r.gross:0}" oninput="splitNumInput()"
+            style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:12px;font-variant-numeric:tabular-nums">
+        </div>
+      </div>
+    </div>`).join('');
+  const empty=rows.length?'':`<div style="color:#9ca3af;font-size:13px;padding:18px 0;text-align:center">還沒有任何一組。按下面的「＋ 新增一組」開始。</div>`;
+  // ⚠ #split-results 是【獨立容器】：資料變動時只重繪它（renderSplitResults），
+  //   不重繪整個 body —— 重繪 body 會讓正在打字的 input 失焦。
+  body.innerHTML=`${empty}${rowsHtml}
+    <button onclick="splitAddRow()" style="padding:7px 16px;border:1.5px dashed #5b5fcf;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#5b5fcf;cursor:pointer">＋ 新增一組</button>
+    <div id="split-results"></div>`;
+  renderSplitResults();
+}
+
 // ── Init ──
 SHOPS.forEach(s=>{const el=document.getElementById('content-'+s.id);if(el)el.innerHTML=shopHTML(s.id);});
 SHOPS.forEach(s=>{onMonthChange(s.id);if(lsHasAny(s.id)){const d=document.getElementById('dot-'+s.id);if(d)d.classList.add('on');}});
@@ -2320,6 +2868,7 @@ function shopHTML(shop){return`
       <div class="col-picker-wrap"><button class="col-pick-btn" onclick="openColPicker('${shop}',this)">☰ 欄位</button></div>
       <button class="col-pick-btn" onclick="openDistModal('${shop}')" style="margin-left:2px">📊 階層圖</button>
       <button class="col-pick-btn tagfx-btn" onclick="openTagFxModal('${shop}')">📈 標籤成效</button>
+      ${SPLIT_SHOPS.includes(shop)?`<button class="col-pick-btn" id="split-btn-${shop}" onclick="openSplitModal('${shop}')">⚖ 拆分試算</button>`:''}
     </div>
     <div id="tbl-${shop}">
       <div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">選擇區間後上傳報表，按「▶ 產生並儲存」</div></div>
@@ -2469,6 +3018,7 @@ function tryLoadSaved(shop){
     //   統一成 null，並要求 setKpis 用 !cmp 判斷（見該函式註解），漏傳才不會變成 TypeError。
     setKpis(shop,0,0,0,0,null);
     updateTagFilterBar(shop);
+    updateSplitBtn(shop);   // 這一期沒報表 → 這條路不走 applyFilters，組數要在這裡自己更新（見該函式上方的掛點說明）
   }
 }
 function clearPeriodFromModal(){
@@ -5192,6 +5742,7 @@ function applyFilters(shop,opts){
   _batchSelClear(shop);
   renderTable(shop,list,opts);
   updateTagFilterBar(shop);
+  updateSplitBtn(shop);   // 工具列那顆「⚖ 拆分試算 · N 組」。與上一行同一個掛點：切月份/切半月/切通路都會流經這裡
 }
 function setSort(shop,col,dir){
   state[shop].sorts={col,dir};
@@ -12908,6 +13459,7 @@ function _momoSyncPendingCount(){
       const k=localStorage.key(i); if(!k) continue;
       if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
          || (k.startsWith('ec_notes|') && /_growth$/.test(k) && notesDirtyHas(k))   /* 商品調整：與 sweep 逐條同條件（dirty 才算）。廣告調整不算——它走 syncToCloud 的當期閘門，不經 sweep */
+         || k.startsWith('ec_split|')   /* 拆分試算：與 sweep 逐條同條件（只看前綴、沒有 dirty 閘）。判準要與那邊逐字相同，見 _sweepAllLocalReportsIntoPending 的 ec_split 分支 */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
     }
   }catch{}
@@ -13003,6 +13555,14 @@ function _momoCollectPending(shop){
   //       蓋回雲端版）→ 預覽顯示的筆數與 willMerge 都會跟實際推的對不上，而且不報錯。
   //     ⚠ 兩者不同源【不是漏改】。要改任何一邊，先確認你改的是「納不納入」還是「推什麼值」。
   try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0&&_notesIsDirty('ec_notes|'+_nk)) add('ec_notes|'+_nk,'其他設定',readNotesForPush('ec_notes|'+_nk)||{}); }catch{}
+  //   拆分試算：與上一行 ec_notes 同型的「當期 extra」——只加【目前顯示這一期】那一把。
+  //     ⚠ 已知且接受的限制（與 ec_notes 的廣告調整完全相同）：在 8 月存了拆分、切到 9 月才按
+  //       同步預覽，8 月那把不會出現在清單裡 —— 除非它還留在 _pendingSyncKeys（同一次 session
+  //       存的都會留著）或被 sweep 撿回來（重整後靠 ec_split 那條分支）。兩條路合起來涵蓋
+  //       實際會發生的情況，這裡不另外掃全部期別，避免預覽列出一堆使用者沒在看的期間。
+  //     ⚠ 值走 getSplits（_profitMem 優先），與 saveSplits 寫進去的是同一個物件參照 →
+  //       預覽顯示的筆數與實際推的必然一致，不需要「兩處逐字相同」那種紀律。
+  try{ const m=getSplits(shop); if(m&&Object.keys(m).length>0) add(_splitKey(shop),'其他設定',m); }catch{}
   //   🔴 ec_edits 的來源與閘門【呼叫與推送端同一支 _editsPushGate】，不再靠「兩處逐字相同」
   //     的紀律 —— 那個紀律在本檔已經失效兩次（PR #93 預覽騙人、#157b 兩份 dirty 撕裂）。
   //     兩邊問同一個 g.ok ⇒「預覽說要推 1 筆、按下去卻失敗」在結構上不可能發生。
@@ -21224,4 +21784,10 @@ Object.assign(window, {
   // 批次加/移除標籤。前四個是工具列與彈窗的 inline onclick 用，缺了會 ReferenceError、按鈕靜默失效。
   openBatchTagPanel,closeBatchTagPanel,renderBatchTagPanelBody,confirmBatchTag,_batchUseEnd,
   saveProdTagsBatch,
+  // 拆分試算。全部是工具列那顆鈕與彈窗內的 inline onclick / oninput / onfocus / onblur 用，
+  //   漏掛任何一個都會 ReferenceError、那顆按鈕或那格輸入框靜默失效。
+  openSplitModal,closeSplitModal,renderSplitModalBody,renderSplitResults,saveSplitDraft,
+  splitAddRow,splitRemoveRow,splitNumInput,splitSearch,splitSelect,splitHideDrop,
+  // 純函式與資料層，掛上去給 Console 對數字 / 查這一期存了什麼用（不是 inline handler）
+  _splitCalc,_splitRowsOf,_splitKey,_splitCount,getSplits,saveSplits,updateSplitBtn,SPLIT_SHOPS,
 });
