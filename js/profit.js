@@ -2548,6 +2548,31 @@ function saveSplitDraft(){
   const res=saveSplits(shop,map);
   updateSplitBtn(shop);
   renderSplitResults();
+  // ── 失敗有【兩種方向完全不同】的原因，文案必須分開 ──
+  //   ① blocked：通路不在 SPLIT_SHOPS 白名單 → 這是程式接線錯誤，重試一百次都不會過。
+  //   ② 其餘：localStorage 沒寫進去（配額 / 被擋 / 讀回不符）→ 這才是「空間 + 重試」那一組。
+  //   🔴 曾經兩者共用 ② 的文案：「數字沒有存進這台電腦，重整後就會消失，確認瀏覽器儲存空間後
+  //     再試一次」—— 對 ① 是徹底的誤導，會把人指去查儲存空間，而真正要看的是白名單。
+  if(res.blocked){
+    // ⚠ 這條路正常 UI 走不到（openSplitModal 開頭已經先擋掉），所以這段話的【實際讀者】
+    //   是「新增了一個開啟拆分試算的入口、卻忘記照抄白名單的開發者」。
+    //   因此：detail 直接點名常數與三個使用點，讓他一眼知道要去看哪裡。
+    //   ⚠ 刻意【不寫】「請再試一次 / 稍後重試」：這不是暫時性失敗，叫人重試是浪費他的時間。
+    //   ⚠ 也刻意【不提】儲存空間或重新整理 —— 那兩件事跟這個失敗一點關係都沒有。
+    console.error('[saveSplitDraft] 通路「'+shop+'」不在 SPLIT_SHOPS 白名單，這次沒有寫入任何資料。'
+      +'白名單常數在 js/profit.js 的 SPLIT_SHOPS，三個使用點：shopHTML 的按鈕條件 / openSplitModal 開頭 / saveSplits 開頭。'
+      +'新增入口時三處要用同一個判準。',res.err);
+    const bMsg='「'+shop+'」不支援拆分試算，這次沒有寫入任何資料。\n\n'
+      +'拆分試算只開放給蝦皮四個通路（'+SPLIT_SHOPS.join('／')+'）。這不是暫時性的狀況。';
+    const bDetail='被擋下的通路：'+shop+'\n'
+      +'白名單：js/profit.js 的 SPLIT_SHOPS = '+JSON.stringify(SPLIT_SHOPS)+'\n'
+      +'三個使用點：shopHTML 的按鈕條件 / openSplitModal 開頭 / saveSplits 開頭（本次擋下的是最後這一道）\n'
+      +'若你剛新增了一個開啟拆分試算的入口，把同一個判準補上去就好。';
+    if(window.App&&typeof App.showAlertModal==='function')
+      App.showAlertModal({title:'拆分試算未儲存（通路不支援）',message:bMsg,detail:bDetail,kind:'warn'});
+    else if(typeof showToast==='function')showToast(bMsg,'error');
+    return;
+  }
   if(!res.ok){
     console.error('[saveSplitDraft] 拆分試算沒有存進 localStorage：'+res.key,res.err);
     const detail=res.key+'\n'+((res.err&&res.err.message)||String(res.err));
