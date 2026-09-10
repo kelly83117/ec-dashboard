@@ -2661,9 +2661,26 @@ function renderSplitModalBody(){
       </div>
     </div>`).join('');
   const empty=rows.length?'':`<div style="color:#9ca3af;font-size:13px;padding:18px 0;text-align:center">還沒有任何一組。按下面的「＋ 新增一組」開始。</div>`;
+  // ── 使用說明（常駐灰字）──
+  //   🔴 刻意【不做成可收合／可展開】：使用者第一次收起來之後就再也不會打開，
+  //     而下面第二點正是最容易被誤會成 bug 的那一點，藏起來等於沒寫。
+  //   ⚠ 只寫「看畫面看不出來」的三件。怎麼選品號、怎麼加一組、怎麼移除，畫面上都有，不重複。
+  //   ⚠ 也刻意不重複結果表底下那行（純利已扣各自的廣告費與平台費、銷量與庫存不隨拆分變動，
+  //     見 renderSplitResults 尾端）—— 那行貼著它解釋的那張表，搬上來只會讓這一段變長，
+  //     而且同一句話要在兩個地方一起維護。
+  //   ⚠ 樣式沿用既有的 .dist-note（css/profit.css 搜 `.dist-note`）：它的定義就是
+  //     「.ana-modal-body 頂端的一段 12px 灰字 + margin-bottom」，位置、字級、間距全部符合
+  //     → 本次【零新增 CSS、零 inline style】。
+  //     代價講明白：那個 class 名字來自階層圖（dist-），現在多了一個非階層圖的使用者，
+  //     名字不再自我描述。要改名是獨立的清理（它只有兩個使用點），不混進這次的文案修改。
+  const help=`<div class="dist-note">`
+    +`・填完要按右下角的「儲存」；還要再按淨利表上方的「☁ 同步雲端」，同事才看得到。<br>`
+    +`・拆分結果【只在這個視窗裡看得到】，淨利表主表格上那兩列的數字不會跟著變 —— 這是刻意的設計，不是還沒做完。<br>`
+    +`・某一組不用了，把「搬運營收」和「搬運毛利」都填 0 就好。`
+    +`</div>`;
   // ⚠ #split-results 是【獨立容器】：資料變動時只重繪它（renderSplitResults），
   //   不重繪整個 body —— 重繪 body 會讓正在打字的 input 失焦。
-  body.innerHTML=`${empty}${rowsHtml}
+  body.innerHTML=`${help}${empty}${rowsHtml}
     <button onclick="splitAddRow()" style="padding:7px 16px;border:1.5px dashed #5b5fcf;border-radius:8px;background:white;font-size:13px;font-weight:600;color:#5b5fcf;cursor:pointer">＋ 新增一組</button>
     <div id="split-results"></div>`;
   renderSplitResults();
