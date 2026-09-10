@@ -211,7 +211,7 @@
    這裡只剩 shop 要蓋掉 168/169 行的 11px。層級改由標籤字級承擔：通路 13px > 分組/細項 12px。 */
 .adj-prog-subs .adj-prog-shop{font-size:12px;}
 .adj-prog-grp .adj-prog-shop{font-size:12px;}   /* 顏色維持 168 行既有的 muted #6b7280 */
-/* 進度條只留通路列（分組列不畫條:分母是標籤數、與通路列的商品數不可比）：通路列 7px > 基準 6px */
+/* 進度條只留期間列（分組列不畫條:分母是標籤數、與期間列的商品列數不可比）：期間列 7px > 基準 6px */
 .adj-prog-toggle .adj-prog-bar{height:7px;}
 /* 通路列展開箭頭：整區唯一的「可點」提示，放大加深；hover 再加深。色碼皆為本檔既有
    （#6b7280 同 .adj-prog-grp .adj-prog-shop、#374151 同 .adj-pill-plain），不改既有 .adj-prog-caret。 */
@@ -240,26 +240,6 @@
 .adj-prog-done > summary::-webkit-details-marker{display:none;}
 .adj-prog-done > summary::before{content:'▸ ';}
 .adj-prog-done[open] > summary::before{content:'▾ ';}
-
-/* ── 月層底下的兩條半月列（唯讀、不可展開，【預設可見】）────────────────────
-   DOM 上是月層 button 的兄弟節點，也在 .adj-prog-detail 外面（見 daily.js 的紅字註解）。
-   欄寬 1fr 60px 46px 與 .adj-prog-grp / .adj-prog-subs .adj-prog-sub 完全一致，
-   月層長條、半月列、標籤明細三層的數字才會連成同一條直線。
-   🔴 border-left / margin-left 刻意與 .adj-prog-detail 的【完全相同】（2px var(--prog-rail) / 4px）：
-   半月列已不在 detail 內，兩塊各畫各的，只有幾何一致時展開後才連成同一條直線軌，
-   不會出現一段左移一段右移的斷階。顏色已抽成 --prog-rail 讓兩處不可能各改各的，
-   但寬度與 margin 仍是兩份字面值，改任一邊的數字都要同步改另一邊。
-   ⚠ 不碰 --bg（底色由老闆指定，不得更動）。 */
-.adj-prog-halves{padding:0 0 0 8px;margin:0 0 2px 4px;border-left:2px solid var(--prog-rail);}
-.adj-prog-half{display:grid;grid-template-columns:1fr 60px 46px;column-gap:10px;align-items:center;}
-.adj-prog-half .adj-prog-shop{font-size:11px;color:var(--text-muted,#6b7280);min-width:0;}
-/* 樹狀前綴：固定兩列（上半月 / 下半月），所以 first/last 就是 ├ / └ */
-.adj-prog-half:first-child .adj-prog-shop::before{content:'├ ';color:#d1d5db;}
-.adj-prog-half:last-child  .adj-prog-shop::before{content:'└ ';color:#d1d5db;}
-.adj-prog-half .adj-prog-num,
-.adj-prog-half .adj-prog-pct{text-align:right;min-width:0;}
-/* 「尚無報表」/「載入中」：占滿數字那兩欄並靠右，與有數字的那列對齊，不會孤零零卡在左邊 */
-.adj-prog-half .adj-prog-na{grid-column:2 / -1;text-align:right;font-size:11px;}
 
 /* 說明區（整頁一份，渲染在人員卡片欄最上方，不再每張卡片各印一次）。
    收合狀態要看得出來「這是可以點的」，不能像一條細分隔線 ——
@@ -318,11 +298,13 @@
   --prog-done: #10b981;    /* 綠：100% 完成，沿用既有 .adj-prog-p100 */
   --prog-doing: #6366f1;   /* 靛：進行中，沿用既有 .adj-prog-p50 與 .adj-prog-fill */
   --prog-low: #d97706;     /* 琥珀：低於 50%，沿用既有 .adj-prog-p0；刻意不用紅：期中偏低是常態不是過錯 */
-  /* 進度條的「縮排軌」：月層底下那條把半月列與標籤明細串起來的直線。
-     🔴 .adj-prog-halves 與 .adj-prog-detail 是【兩塊分開的 DOM】（半月列在 detail 外面），
-     各畫各的 border-left，只有色值與幾何完全一致時才會連成同一條線、不出現斷階。
-     抽成變數就是為了讓那兩處不可能各改各的。色值 #f3f4f6 與抽變數前完全相同。
-     ⚠ 只給那兩條 border 用。同色碼的 .adj-prog-bar（長條底槽）語意不同，刻意不套。 */
+  /* 進度條的「縮排軌」：期間列展開 ▾ 之後，把標籤明細縮排出來的那條直線。
+     🔴 2026-09-10 移除月層合併之後，用它的只剩 .adj-prog-detail 【一處】——
+     原本還有 .adj-prog-halves 那兩條半月列（兩塊分開的 DOM 各畫各的 border-left，
+     抽成變數正是為了讓那兩處不可能各改各的），半月列已隨月層一起移除。
+     只剩一個使用者仍保留變數：--prog-* 這組是成套的，色值集中比散回規則裡好改。
+     色值 #f3f4f6 與抽變數前完全相同。
+     ⚠ 只給那條 border 用。同色碼的 .adj-prog-bar（長條底槽）語意不同，刻意不套。 */
   --prog-rail: #f3f4f6;
 }
 .adj-x { margin-top: 4px; }
