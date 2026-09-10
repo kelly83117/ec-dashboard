@@ -2341,7 +2341,7 @@ function buildProgressHtml(person){
   }catch(e){
     console.warn('[buildProgressHtml] 進度區塊算不出來，改顯示「—」：',person,e);
     if(!(ADJ_PERSON_TO_SHOPS[person]||[]).length)return'';
-    return`<div class="adj-prog"><div class="adj-prog-head"><div class="adj-prog-title">本期優化進度</div></div>`
+    return`<div class="adj-prog"><div class="adj-prog-head"><div class="adj-prog-title">優化進度</div></div>`
       +`<div class="adj-prog-row"><span class="adj-prog-na">—</span></div></div>`;
   }
 }
@@ -2350,9 +2350,11 @@ function _buildProgressHtmlInner(person){
   if(!shops.length)return'';
   const hasSLP=typeof window.shopLabelProgress==='function';
   const results=shops.map(shop=>({shop,p:hasSLP?window.shopLabelProgress(shop):null}));
-  // 標題不帶期別:月份與期別都印在每一列上(好麻吉 · 2026/08 上半月),
+  // 標題【不帶期別】:月份與期別都印在每一列上(好麻吉 · 2026/08 上半月),
   //   四個通路各自的月份 / 期別才不會混成一句看不出對象的標題。
-  const pt='本期優化進度';
+  //   也不再叫「本期優化進度」—— 畫面上同時列出兩期,「本期」是哪一期改由每一列自己的
+  //   ● 標記講(見 curMark);標題再說一次「本期」只會自相矛盾。
+  const pt='優化進度';
   // 🔴 t===0 守衛(bar / flat 都要):0/0 會算出 NaN → 畫面出現「NaN%」而且
   //   style="width:NaN%" 讓長條整條消失,不報錯。
   //   ⚠ 2026-09-10 移除月層相加之後,「沒有報表」在資料層已經是 data===null 而不是 total:0,
@@ -2373,15 +2375,22 @@ function _buildProgressHtmlInner(person){
     const cls=pct>=100?'adj-prog-p100':pct>=50?'adj-prog-p50':'adj-prog-p0';
     const mark=pct>=100?'✓ ':pct<50?'! ':'';
     return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-pct ${cls}">${mark}${pct}%</span>`;};
+  // 「本期」標記。🔴 兩條期間列【都】掛同一個 ●,非本期那個用 .adj-prog-cur-off 隱形
+  //   (visibility:hidden 保留佔位寬度,不是 display:none) —— 對齊因此由「兩條都有同一個
+  //   元素撐著」保證,不會因為只有一條多長出一個標記而錯位。
+  //   ⚠ 標記【不進 .adj-prog-shop 裡】:進去會改變那個 span 的寬度,而數字欄的位置正是
+  //     跟著它走的。放在它前面、當 flex 的兄弟,兩條各加同一段寬度,相對關係不變。
+  //   ⚠ 符號(●)是主判讀、顏色是輔助 —— 與本檔 flat() 的 ✓/! 同一個原則,不做純色相區分。
+  const curMark=on=>`<span class="adj-prog-cur${on?'':' adj-prog-cur-off'}"${on?' title="本期"':' aria-hidden="true"'}>●</span>`;
   const rows=results.map(({shop,p})=>{
-    if(!p)return`<div class="adj-prog-row"><span class="adj-prog-shop">${escapeHtml(shop)}</span><span class="adj-prog-na">—</span></div>`;
+    if(!p)return`<div class="adj-prog-row">${curMark(false)}<span class="adj-prog-shop">${escapeHtml(shop)}</span><span class="adj-prog-na">—</span></div>`;
     // 缺報表【必須看得出來】——「這期是 0」和「這期還沒產報表」看起來一樣的話,
     //   分母少一半而數字仍然合理,沒有人會發現。判別式(資料層已驗過、不要在這裡自己再推一套):
     //     data===null              ⇒ 尚無報表 / 載入中
     //     data.total>0&&doneTotal===0 ⇒ 照常畫成 0/N 0%(那是真的一個都沒碰,不是沒報表)
     // 🔴 loaded=false 代表 profits collection 的延後訂閱還沒回來(不是「沒有報表」)→ 顯示「載入中」。
     const na=p.loaded?'尚無報表':'載入中';
-    const naRow=(titleHtml)=>`<div class="adj-prog-row"><span class="adj-prog-shop">${titleHtml}</span><span class="adj-prog-na">${na}</span></div>`;
+    const naRow=(titleHtml,cur)=>`<div class="adj-prog-row">${curMark(!!cur)}<span class="adj-prog-shop">${titleHtml}</span><span class="adj-prog-na">${na}</span></div>`;
     // 🔴 兩期都沒報表 → 收成【一條】(只帶月份、不帶期別)。完全沒產過報表的通路,負責人每天會
     //   看到兩條一模一樣的「尚無報表」,比一條更吵而且沒有多給任何資訊。逐期顯示只在
     //   「一期有、一期沒有」時才有意義 —— 那時候少的那一期是真的在講一件事。
@@ -2418,14 +2427,14 @@ function _buildProgressHtmlInner(person){
     return p.periods.map(pr=>{
       const titleHtml=`${escapeHtml(shop)} · ${escapeHtml(pr.periodLabel)}`;
       const d=pr.data;
-      if(!d)return naRow(titleHtml);
+      if(!d)return naRow(titleHtml,pr.isCurrent);
       // 🔴 複合 key(通路|月份|期別):委派用的是 card.querySelector（單數），key 撞號時會
       //   靜默展開錯的那一個【而且不報錯】,所以 key 的唯一性是正確性要求,不是命名習慣。
       //   ⚠ 期別自 2026-09-10 起是【必要的】,不是預留:同一張卡片必定同時出現同通路、
       //     同月份的兩條,key 少了期別就一定撞號 —— 點下半月會展開上半月的明細。
       const key=shop+'|'+p.month+'|'+pr.half;
       return`<button type="button" class="adj-prog-row adj-prog-toggle" data-prog-key="${escapeHtml(key)}">
-          <span class="adj-prog-shop">${titleHtml}</span>${bar(d.doneTotal,d.total)}<span class="adj-prog-caret">▾</span>
+          ${curMark(pr.isCurrent)}<span class="adj-prog-shop">${titleHtml}</span>${bar(d.doneTotal,d.total)}<span class="adj-prog-caret">▾</span>
         </button>
         <div class="adj-prog-detail" data-prog-detail="${escapeHtml(key)}" hidden>
           ${grp('廣告分析',d.ana,'ana')}${grp('成長分析',d.growth,'growth')}

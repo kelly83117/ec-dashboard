@@ -6783,14 +6783,14 @@ function _progHeavyLoaded(){return window.__heavyProfitSubsLoaded===true;}
 //   periods 固定兩筆、固定 first → second 的時間順序(顯示端不必也不該再排)。
 //   data = _periodLabelProgress 的原樣結果;null = 該期沒有報表(不是 0)。
 //   loaded=false = profits 的延後訂閱還沒回來 → 顯示端該說「載入中」而不是「尚無報表」。
-//   ⚠ 刻意【不回】舊版那個 curHalf:兩期並列且依時間排序之後沒有任何顯示端會用到它
-//     (舊版就已經是零消費者)。日後要標「哪一期是本期」再加回來,不留沒人讀的欄位。
+//   isCurrent = 這一期是不是「今天推出來的那一期」。舊版那個【頂層】curHalf 字串沒有回來
+//     (它零消費者),取而代之的是【逐期】的布林 —— 顯示端要標的是「這一條」,不是「哪一個」。
 function shopLabelProgress(shop){
   const now=new Date();
   const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
   const period=_growthPeriodOf({date:today});
   if(!period)return null;
-  const month=period.split('|')[0];
+  const [month,curHalf]=period.split('|');
   // periodLabel 在【這裡】組好(不是丟 'first' 過去讓 daily.js 自己翻):期間語彙是本檔的責任,
   //   _halfLabel 的其他使用者(_growthPeriodLabel / _notifyLsSaveFail / 拆分試算標題)全都在本檔。
   //   這樣 daily.js 不必知道 'first' 是什麼,也就不必為 _halfLabel 新增一個 window 匯出。
@@ -6800,6 +6800,10 @@ function shopLabelProgress(shop){
     periods:['first','second'].map(h=>({
       half:h,
       periodLabel:`${month} ${_halfLabel(h)}`,
+      // isCurrent = 這一期就是【今天推出來的那一期】(_growthPeriodOf 的工作流期間)。
+      //   顯示端拿它標「本期」—— 兩條列長得一樣時,使用者得自己記今天幾號,
+      //   才知道哪一期還在進行中、哪一期已經該收尾了。
+      isCurrent:h===curHalf,
       data:_periodLabelProgress(shop,month,h)
     }))
   };

@@ -155,7 +155,16 @@
 .adj-prog{margin-top:8px;padding-top:8px;border-top:1px solid var(--border,#e5e7eb);}
 .adj-prog-title{font-size:12px;font-weight:700;color:var(--text-muted,#6b7280);margin-bottom:4px;}
 .adj-prog-row{display:flex;align-items:center;gap:6px;margin:3px 0;}
-.adj-prog-shop{font-size:13px;min-width:44px;}   /* 通路列（grp/sub 各自有覆蓋，層級靠這個拉開） */
+.adj-prog-shop{font-size:13px;min-width:44px;}   /* 期間列（grp/sub 各自有覆蓋，層級靠這個拉開） */
+/* 「本期」標記：兩條期間列【都】掛一個 ●，非本期那個只是隱形。
+   🔴 用 visibility:hidden，【不可】改成 display:none 或 [hidden] —— 那會讓佔位寬度塌掉，
+   本期那條的標籤與數字欄就會比另一條往右偏一整個標記寬，兩條對不齊。
+   隱形那個的存在【就是】對齊機制本身，不是可有可無的裝飾。
+   ⚠ 標記是 .adj-prog-shop 的【兄弟】不是子元素：進到裡面會改變那個 span 的寬度，
+     而數字欄的位置是跟著它走的。
+   色值走既有的 --prog-doing（靛，同「進行中」語意），不新增色碼、不碰 --bg。 */
+.adj-prog-cur{font-size:9px;color:var(--prog-doing);flex-shrink:0;}
+.adj-prog-cur-off{visibility:hidden;}
 .adj-prog-num{font-size:12px;color:var(--text-muted,#6b7280);font-variant-numeric:tabular-nums;}
 .adj-prog-bar{flex:1;height:6px;border-radius:3px;background:#f3f4f6;overflow:hidden;}
 .adj-prog-fill{display:block;height:100%;border-radius:3px;background:#6366f1;}
