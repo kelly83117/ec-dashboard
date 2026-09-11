@@ -5416,7 +5416,7 @@ function renderGrowthModalBody(){
   }).join(''):`<div class="ana-custom-empty">尚無自訂標籤</div>`;
   const disabledSection=disabled.length?`<div class="ana-sec-hdr" style="margin-top:16px">已停用標籤</div>${disabled.map(l=>`<div class="ana-rule-row" style="opacity:.5"><span class="ana-rule-tag tag-low" style="min-width:auto;padding:4px 8px">${l}</span><span class="ana-rule-desc" style="font-size:12px;color:#9ca3af">已停用</span><button class="ana-rule-del" style="color:#10b981" onclick="restoreGrowthTag(decodeURIComponent('${encodeURIComponent(l)}'))" title="恢復">↩</button></div>`).join('')}`:'';
   document.getElementById('growth-modal-body').innerHTML=`
-    <div class="grx-notes">・符合排除條件的商品不會顯示任何成長標籤，畫面上不會有任何記號。<br>・排除條件會影響工作日誌的優化進度分母，包含已經過去的期間。<br>・如果自訂標籤取了跟內建標籤一樣的名字，排除條件對它無效。</div>
+    <div class="grx-notes">・符合排除條件的商品不會顯示任何成長標籤，畫面上不會有任何記號。<br>・排除條件只改變工作日誌優化進度<b>展開後「成長分析」各標籤</b>的分母；<b>通路那條長條不會變</b> —— 長條的分母是該期報表的商品列數，跟標籤無關。<br>・改動會套用到<b>所有期間</b>，包含已經過去的。<br>・如果自訂標籤取了跟內建標籤一樣的名字，排除條件對它無效。</div>
     <div class="ana-sec-hdr">成長類</div>
     <div class="ana-rule-row"><span class="ana-rule-tag tag-danger">🔴重跌品</span><span class="ana-rule-desc">成長率 &lt; -${inp('fallPct',t.fallPct,'0.1')} %</span>${trash('🔴重跌品')}</div>
     ${exRow('🔴重跌品')}
@@ -6655,9 +6655,9 @@ function _adNoteHasText(nd){
 }
 // 【單期】通路的逐標籤優化進度。回 null = 該期報表不存在。
 // 2026-09-04 從 shopLabelProgress 拆出:【純重構,判定條件一個字都沒改】,
-//   只把「自己算今天是哪一期」換成吃參數,讓月層(_progMergeMonth)能對同月的 first / second
+//   只把「自己算今天是哪一期」換成吃參數,讓 shopLabelProgress 能對同月的 first / second
 //   各跑一次。對外入口仍是 shopLabelProgress,回傳欄位與拆分前完全相同。
-// 🔴 |full【上半月 / 下半月 / 月層三處都算完成】(2026-09-04 放寬,與 _inGrowthPeriod 的
+// 🔴 |full【上半月 / 下半月 兩期都算完成】(2026-09-04 放寬,與 _inGrowthPeriod 的
 //   「該月任何期間都顯示」特例對齊,還掉「進度條與淨利表彈窗口徑不一致」那條債)。
 //   一筆在「整月」畫面打的調整是對整個月份的宣告,兩輪都被它滿足 —— 兩條路的機制不同:
 //   商品調整 → 判定條件多認一個值(單一 key,每筆自帶 period 欄);
@@ -6748,7 +6748,7 @@ function _periodLabelProgress(shop,month,half){
   return{month,half,total:rows.length,doneTotal,ana,growth};
 }
 
-// 月層資料是否「已經可能載入完成」。🔴 未知一律當成【還沒載入】——
+// 淨利表的報表資料是否「已經可能載入完成」。🔴 未知一律當成【還沒載入】——
 //   寧可多顯示一次「載入中」,也不要在訂閱還沒回來時斬釘截鐵說「尚無報表」。
 //   依據:js/firebase.js 的 __heavyProfitSubsLoaded(profits collection + archive 分片是延後訂閱,
 //   開站 1.5 秒後或使用者切進淨利表才接)。用 ===true,undefined / 未定義都回 false。
@@ -6756,68 +6756,61 @@ function _periodLabelProgress(shop,month,half){
 //     所以 loaded===true 之後仍可能有短暫空窗期;它也不涵蓋 app/profit 本身那條輕量訂閱。
 function _progHeavyLoaded(){return window.__heavyProfitSubsLoaded===true;}
 
-// 舊格式報表的 warn 去重:同一個 shop|month|half 一個 session 只噴一次。
-//   同款模式:本檔的 _lsFailNotified、js/pages/daily.js 的 _adjClsWarned。
-//   為什麼需要:shopLabelProgress 在人員迴圈裡逐人呼叫,月曆每次重繪都會再跑一輪。
-const _progFmtWarned=new Set();
-
-// 月層彙總:【純數字相加,沒有任何集合運算】。
-//   月層的每一個數字都等於「上半月那一格 + 下半月那一格」,沒有例外。
-//   🔴 不做跨期去重:去重會把「下半月那批還沒碰的商品」從分母吸收掉(它們上半月出現過、不佔新格子),
-//     結果月層百分比會【高於】底下兩列半月,而且高得很合理、沒有人會發現。
-//   只出現在單一期的標籤,另一期當 0 相加(不跳過該標籤)。
-//   回 null = 兩期都沒有報表(或加總後分母 <= 0,避免 0/0 產生 NaN% 與 width:NaN%)。
-//   shop 只用於 warn 訊息與去重 key(raw 裡沒有帶通路名),不參與任何計算。
-function _progMergeMonth(shop,month,rawFirst,rawSecond){
-  const parts=[['first',rawFirst],['second',rawSecond]];
-  const have=[],missing=[];
-  parts.forEach(p=>{(p[1]?have:missing).push(p[0]);});
-  if(!have.length)return null;
-  let total=0,doneTotal=0;
-  const ana={},growth={};
-  parts.forEach(p=>{
-    const h=p[0],raw=p[1];
-    if(!raw)return;
-    total+=raw.total;doneTotal+=raw.doneTotal;
-    Object.keys(raw.ana).forEach(l=>{const b=(ana[l]=ana[l]||{t:0,d:0});b.t+=raw.ana[l].t;b.d+=raw.ana[l].d;});
-    Object.keys(raw.growth).forEach(l=>{const b=(growth[l]=growth[l]||{t:0,d:0});b.t+=raw.growth[l].t;b.d+=raw.growth[l].d;});
-    // 舊格式報表(rep.rows,缺 growthRate / prevRev)會讓 calcGrowthAnalysis 整批回空 label,
-    //   月層的成長桶就只剩新格式那一期,看起來像「月層 = 半月」而且不 throw、不報錯。出一次 warn。
-    const wk=shop+'|'+month+'|'+h;
-    if(raw.total>0&&!Object.keys(raw.growth).length&&!_progFmtWarned.has(wk)){
-      _progFmtWarned.add(wk);
-      console.warn('[_progMergeMonth] 該期有',raw.total,'列但成長標籤 0 個,可能是舊格式報表(缺 growthRate/prevRev)：',wk);
-    }
-  });
-  if(total<=0)return null;
-  return{month,loaded:_progHeavyLoaded(),have,missing,total,doneTotal,ana,growth};
-}
-
-// 通路的「工作流本月」進度 —— 對外唯一入口(消費者:js/pages/daily.js 的 buildProgressHtml)。
+// 通路的「工作流本月」兩期進度 —— 對外唯一入口(消費者:js/pages/daily.js 的 buildProgressHtml)。
 //   月份來自【今天】(_growthPeriodOf 的工作流推算),與淨利表當前選擇的期間【脫鉤】——
 //   顯示端要用回傳的 month,不可以改讀 state[shop].curMonth,否則四個通路會顯示不同月份。
-// 🔴 2026-09-04 塊 1 的 lazy getter(otherHalf / monthly)已移除,改成兩期都【立即】算:
-//   月層顯示一啟用,兩期本來就每次都要用,lazy 只剩一層看不出效果的間接。更重要的是舊版
-//   「當期沒報表就 return null」會讓維克這種「上半月有 132 列、下半月還沒產」的通路整個消失,
-//   月層永遠看不到 —— 而「一期還沒產」是每個月有一半時間的常態,不是例外。
-// 回 null = 兩期都沒有報表(或期別算不出來)→ 畫面維持「—」。
-//   first / second 為 null = 該期沒有報表(不是 0);monthly.loaded=false = 訂閱還沒回來。
+//
+// 🔴 2026-09-10【移除月層合併】(舊 _progMergeMonth,連同它的 warn 去重 Set _progFmtWarned 一起刪):
+//   上半月、下半月改成【各自獨立一條】,各自長條、各自展開明細,不再有「兩期相加」的數字。
+//   起因:負責通路的同事「都是以半個月為單位在調整商品」,月層那個相加出來的數字不是她的
+//   工作單位,而且需要一整段說明才看得懂(見下)。
+//
+// 🔴 為什麼【不要】把月層加回來 —— 舊 _progMergeMonth 的推理,函式刪了但這段必須留:
+//   ① 合併只能做【純數字相加】,不能做跨期去重。去重會把「下半月那批還沒碰的商品」從分母
+//      吸收掉(它們上半月出現過、不佔新格子),結果月層百分比會【高於】兩期各自的數字,
+//      而且高得很合理、沒有人會發現。
+//   ② 而純相加的分母語意就不是「商品數」,是「兩輪各要看一次」—— 同一個商品上半月看一次、
+//      下半月再看一次。這個分母正確但反直覺,畫面上得掛一整段說明才成立。
+//   兩條路都不好走,所以不合併:兩期各自的分母就是該期報表列數,直白、不必解釋。
+//
+// 🔴 報表缺席【不回 null】,改由 periods[i].data===null 表達 —— 舊版「兩期都沒報表就整個回 null」
+//   會讓顯示端把「還沒產報表」「訂閱還沒回來」「算不出來」三種狀態塌成同一個「—」。
+//   維克那種「上半月有 132 列、下半月還沒產」的通路,下半月那條必須明說「尚無報表」,
+//   不能整條消失、也不能顯示 0%(「一期還沒產」是每個月有一半時間的常態,不是例外)。
+// 回 null = 只剩一種情況:期別算不出來(今天的日期字串壞掉)。
+//
+// 回傳形狀:{ month:'2026/08', loaded:bool, periods:[{half,periodLabel,data}, …] }
+//   periods 固定兩筆、固定 first → second 的時間順序(顯示端不必也不該再排)。
+//   data = _periodLabelProgress 的原樣結果;null = 該期沒有報表(不是 0)。
+//   loaded=false = profits 的延後訂閱還沒回來 → 顯示端該說「載入中」而不是「尚無報表」。
+//   isCurrent = 這一期是不是「今天推出來的那一期」。舊版那個【頂層】curHalf 字串沒有回來
+//     (它零消費者),取而代之的是【逐期】的布林 —— 顯示端要標的是「這一條」,不是「哪一個」。
 function shopLabelProgress(shop){
   const now=new Date();
   const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
   const period=_growthPeriodOf({date:today});
   if(!period)return null;
-  const [month,half]=period.split('|');
-  const first=_periodLabelProgress(shop,month,'first');
-  const second=_periodLabelProgress(shop,month,'second');
-  const monthly=_progMergeMonth(shop,month,first,second);
-  if(!monthly)return null;
-  return{month,curHalf:half,loaded:monthly.loaded,first,second,monthly};
+  const [month,curHalf]=period.split('|');
+  // periodLabel 在【這裡】組好(不是丟 'first' 過去讓 daily.js 自己翻):期間語彙是本檔的責任,
+  //   _halfLabel 的其他使用者(_growthPeriodLabel / _notifyLsSaveFail / 拆分試算標題)全都在本檔。
+  //   這樣 daily.js 不必知道 'first' 是什麼,也就不必為 _halfLabel 新增一個 window 匯出。
+  return{
+    month,
+    loaded:_progHeavyLoaded(),
+    periods:['first','second'].map(h=>({
+      half:h,
+      periodLabel:`${month} ${_halfLabel(h)}`,
+      // isCurrent = 這一期就是【今天推出來的那一期】(_growthPeriodOf 的工作流期間)。
+      //   顯示端拿它標「本期」—— 兩條列長得一樣時,使用者得自己記今天幾號,
+      //   才知道哪一期還在進行中、哪一期已經該收尾了。
+      isCurrent:h===curHalf,
+      data:_periodLabelProgress(shop,month,h)
+    }))
+  };
 }
 window.shopLabelProgress=shopLabelProgress;
 // 掛 window:驗證腳本要能對指定期別直接取單期結果。
 window._periodLabelProgress=_periodLabelProgress;
-window._progMergeMonth=_progMergeMonth;
 // 測試標籤那一格。點一下開編輯面板（改標記日期 / 新增移除標籤 / 管理標籤清單）。
 //   只顯示「本期間結束日 >= 標記日」的標籤 —— 測試開始前的期間不該掛著未來才貼的標籤，
 //   否則「測試前 vs 測試後」的成效比較會分不出來。
