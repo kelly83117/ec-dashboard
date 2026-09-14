@@ -266,7 +266,9 @@ Object.assign(App, {
       const iconHtml = g.logo
         ? `<img class="summary-card-logo" src="${g.logo}" alt="${escapeHtml(g.name)}">`
         : `<span class="summary-card-icon">${g.icon}</span>`;
-      // 是否「昨日」單日範圍 → 才需要 live 計算（多日範圍只能算已存的）
+      // 檢視日 === 填寫日 → 才需要 live 計算（多日範圍只能算已存的）。
+      //   預設 'latest' 在截止日 === 昨日時成立（卡片跟著輸入框即時跳）；截止日 < 昨日（行銷早上正在填）
+      //   或填寫日期被切到別天補填時不成立 —— 後者是改預設之前就有的行為。
       const isSingleDay = rangeInfo.showDates && rangeInfo.showDates.length === 1
                           && rangeInfo.showDates[0] === inputDateStr;
 
@@ -1757,6 +1759,29 @@ Object.assign(App, {
       });
     };
 
+    // 表格是否還有任何一列 dirty（與 commit 尾端原本的 anyOtherDirty 同一條判斷）
+    //   ⚠ 掃的是共用 class .card-rev / .card-ads：現在頁面上只有填寫表格一份，將來若有第二張表用同 class，
+    //     這個判斷會被它污染。
+    const anyDirty = () => Array.from(document.querySelectorAll('.card-rev, .card-ads'))
+      .some(el => !sameVal(el.value, el.dataset.original || ''));
+    // 「卡住」修法：存了某列、但當時別列還在編輯 → 不能 render（會蓋掉打到一半的值），記 this._renderWhenClean；
+    //   等全部乾淨（別列存好或取消）再補 render。沒有這條，最後一列是用取消收尾時卡片會停在舊的一天，
+    //   使用者會以為沒存進去（雲端 bounce 又被 justSavedLocally 的 2 秒窗跳過）。
+    //   idx = 觸發這次檢查的那一列。焦點若在「別列」的輸入框（blur 路徑：使用者剛點進下一列要打字），先不 render ——
+    //   render 會重建 DOM 把焦點打掉，比卡片晚幾秒更新嚴重得多；旗標留著，等那列存好 / 取消再說。
+    //   ⚠ render 若拋錯被 catch 吃掉，旗標已清、畫面沒更新、沒有重試（與原本 try { this.render() } catch {} 同等級）。
+    const renderIfClean = (idx) => {
+      if (!this._renderWhenClean) return;
+      if (anyDirty()) return;
+      const active = document.activeElement;
+      const inOtherRow = active && active.tagName === 'INPUT'
+        && (active.classList.contains('card-rev') || active.classList.contains('card-ads'))
+        && +active.dataset.idx !== idx;
+      if (inOtherRow) return;
+      this._renderWhenClean = false;
+      try { this.render(); } catch {}
+    };
+
     // 還原輸入框到原始值
     const revert = (idx) => {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
@@ -1765,6 +1790,7 @@ Object.assign(App, {
       if (adsEl) adsEl.value = adsEl.dataset.original || '';
       updateRoas(idx);
       markUnsaved(idx);
+      renderIfClean(idx);   // 這列是最後一個 dirty 且之前有存過 → 補上被延後的 render
     };
 
     // 標記正在 commit 的列 — blur 還原邏輯看到這個 flag 就跳過，
@@ -1854,14 +1880,11 @@ Object.assign(App, {
       isCommitting.delete(idx);
       try { updateLiveTotals(); } catch {}
       showToast('已儲存 ✓', 'success');
-      // 若沒有其他列還在編輯（避免蓋掉使用者打到一半的值），
-      //   做完整 re-render → 右側折線圖、本月累計、當月總營收全部更新
-      const anyOtherDirty = Array.from(document.querySelectorAll('.card-rev, .card-ads')).some(el => {
-        return !sameVal(el.value, el.dataset.original || '');
-      });
-      if (!anyOtherDirty) {
-        try { this.render(); } catch {}
-      }
+      // 完整 re-render → 右側折線圖、本月累計、四張卡（截止日可能前進）全部更新。
+      //   沒有其他列在編輯 → 立刻 render（Enter 提交時焦點在同列，不會被 inOtherRow 擋）；
+      //   有別列 dirty → 旗標留著，等那列存好 / 取消時由 renderIfClean 補上。
+      this._renderWhenClean = true;
+      renderIfClean(idx);
     };
 
     // 顯示確認 / 取消 dialog
