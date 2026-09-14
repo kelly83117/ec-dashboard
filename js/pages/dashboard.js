@@ -17,6 +17,38 @@ Object.assign(App, {
     // 行銷每天填的是「昨日」資料；若使用者改了日期，以使用者選的為準（可補周末等）
     const defaultInputDate = toDateStr(addDays(now, -1));
     const todayStrLocal = toDateStr(now);
+
+    // ── 資料截止日（檢視範圍的預設）：全部「活躍通路」都有營收（> 0）的最後一天，且 ≤ 昨日 ──
+    //   為什麼不是昨日：行銷隔天早上才填、週一才補五六日，「昨日」一週約有 68 小時是空的，
+    //   預設畫面會是 NT$0 / ↓100% / 需要留意列出全部通路。截止日永遠指向一個完整的日子。
+    //   活躍通路 = 最近 14 天（≤ 昨日）內 daily 有過任何資料的通路。刻意不寫死 7、不吃
+    //   PLATFORMS / PLATFORM_GROUPS 常數：新增或停用通路時集合跟著資料走，截止日不會被停用通路卡住。
+    //   ⚠ 反例：停用通路若在 14 天窗內有一筆手誤，會被算活躍，截止日就退到它最後有值的那天（可能很舊）。
+    //   找不到全填日（新環境 / 資料清空 / 某通路長期缺填）→ fallback 昨日，畫面完全等於改動前。
+    const activeFrom = toDateStr(addDays(now, -14));
+    const revOn = (p, d) => +(p.daily?.[d]) > 0;
+    const activePlatforms = platforms.filter(p =>
+      Object.keys(p.daily || {}).some(d => d >= activeFrom && d <= defaultInputDate && p.daily[d] != null));
+    let dataCutoff = null;
+    if (activePlatforms.length) {
+      const candidates = [...new Set(activePlatforms.flatMap(p => Object.keys(p.daily || {})))]
+        .filter(d => d <= defaultInputDate).sort();
+      for (let i = candidates.length - 1; i >= 0; i--) {
+        if (activePlatforms.every(p => revOn(p, candidates[i]))) { dataCutoff = candidates[i]; break; }
+      }
+    }
+    const cutoffIsFallback = !dataCutoff;
+    if (cutoffIsFallback) dataCutoff = defaultInputDate;
+    // 落後天數（0 = 截止日就是昨日）；fallback 時恆 0
+    const cutoffLagDays = Math.round((new Date(defaultInputDate + 'T00:00:00') - new Date(dataCutoff + 'T00:00:00')) / 86400000);
+    // render 寫、bindDashboardPills 讀（日期 pill 正規化用）。bind 那邊的「昨日」是事件當下算的，
+    //   跨日後 watcher 重繪前那一分鐘兩者基準不同，但截止日優先判斷，結果仍正確。
+    this._dataCutoff = dataCutoff;
+    // M/D (週X) 短日期，給 label / tag 用
+    const shortDate = (dStr) => {
+      const d = new Date(dStr + 'T00:00:00');
+      return `${d.getMonth() + 1}/${d.getDate()} (${'日一二三四五六'[d.getDay()]})`;
+    };
     // 不允許選未來日期
     if (this.filter.entryDate && this.filter.entryDate > todayStrLocal) {
       this.filter.entryDate = defaultInputDate;
@@ -91,13 +123,22 @@ Object.assign(App, {
     // ── 檢視範圍（全頁共用：KPI 卡 / 排名長條 / 需要留意 / 圓餅圖）──
     // ⚠ 這與上面的「填寫日期」(filter.entryDate) 是兩回事：
     //   上面是「填」（只給填寫表格用）、這裡是「看」。兩者刻意分家，互不影響。
-    const summaryRange = this.filter.summaryRange || 'yesterday';
+    // render 時正規化：填寫完成後 snapshot 觸發重繪，截止日會前進，但 filter 可能停在舊鍵
+    //   （'yesterday' / 'customDay' 選到的那天現在就是截止日）→ 畫面會同時出現「昨日」與一顆
+    //   指向同一天的「回最新」。同一個日期只能落一種鍵：等於截止日的一律視為 'latest'。
+    //   只改 this.filter（記憶體），不碰 Store。
+    if ((this.filter.summaryRange === 'yesterday' && dataCutoff === defaultInputDate) ||
+        (this.filter.summaryRange === 'customDay' && this.filter.summaryDate === dataCutoff)) {
+      this.filter.summaryRange = 'latest';
+    }
+    const summaryRange = this.filter.summaryRange || 'latest';   // 預設 = 截止日；'yesterday' 保留為明確選項
     const customMonth = this.filter.summaryMonth || toDateStr(now).slice(0, 7);
     // 選日期：不允許未來
     if (this.filter.summaryDate && this.filter.summaryDate > todayStrLocal) {
-      this.filter.summaryDate = defaultInputDate;
+      this.filter.summaryDate = dataCutoff;
     }
-    const customDay = this.filter.summaryDate || defaultInputDate;
+    // 日期 pill 的顯示值要跟卡片同一天：'yesterday' 模式是昨日，其餘落回截止日
+    const customDay = this.filter.summaryDate || (this.filter.summaryRange === 'yesterday' ? defaultInputDate : dataCutoff);
     // 每日營收填寫預設收合；狀態記在 filter，重繪後才不會被打回收合
     const entryOpen = !!this.filter.revenueEntryOpen;
 
@@ -106,7 +147,12 @@ Object.assign(App, {
       const [y, m] = yyyymm.split('-').map(Number);
       const firstDay = new Date(y, m - 1, 1);
       const lastDay = new Date(y, m, 0);   // 該月最後一天
-      const limit = toDateStr(addDays(now, -1));  // 不超過昨日
+      // 不超過資料截止日（≤ 昨日；找不到全填日時 = 昨日，等於原本「不超過昨日」）。
+      //   本月累計截在截止日，monthRange 的 cutDay 從 showDates 尾巴推 → 基期對稱縮到同日號。
+      //   ⚠ 這個 limit 同時管 showDates 與 compareDates（monthDates(prevMs) 也走這裡），
+      //     compareDates 是「先被 limit 截、再被 cutDay filter」兩層疊加；改任何一層都要同時看另一層，
+      //     否則本期 / 基期的對稱就斷。
+      const limit = dataCutoff;
       const arr = [];
       for (let d = new Date(firstDay); toDateStr(d) <= toDateStr(lastDay); d = addDays(d, 1)) {
         const s = toDateStr(d);
@@ -115,16 +161,24 @@ Object.assign(App, {
       return arr;
     };
     // 單日範圍：showDates 只有一天，比較對象是它的前一天
-    const dayRange = (dStr, label) => ({
-      kind: 'day',
-      label,
-      dateLabel: dStr.replace(/-/g, '/'),
-      showDates: [dStr],
-      compareDates: [toDateStr(addDays(new Date(dStr + 'T00:00:00'), -1))],
-      compareLabel: '前一日',
-    });
-    // 月累計範圍：showDates 是該月每一天（不超過昨日），比較對象是前一個月
-    // ⚠ 本月是「部分月」（只累計到昨日）。若拿它去比上月整月，13 天比 30 天會全面假跌 —
+    // M/D 短日期（不補零），給 compareLabel / 月累計至 用
+    const md = (dStr) => `${+dStr.slice(5, 7)}/${+dStr.slice(8, 10)}`;
+    const dayRange = (dStr, label) => {
+      const prevStr = toDateStr(addDays(new Date(dStr + 'T00:00:00'), -1));
+      return {
+        kind: 'day',
+        label,
+        dateLabel: dStr.replace(/-/g, '/'),
+        showDates: [dStr],
+        compareDates: [prevStr],
+        // 寫實際日期（「較 9/09」）不寫「前一日」：預設檢視是截止日，落後時讀者不知道前一日是哪天。
+        //   三個消費端（四張卡 / 排名卡頭 / 需要留意 reason）都是 `較${compareLabel}` 拼的、沒有空格
+        //   （月模式是「較上月同期」），所以日期前的那個空格放在值裡；日補零（9/09）是定案格式。
+        compareLabel: ` ${+prevStr.slice(5, 7)}/${prevStr.slice(8, 10)}`,
+      };
+    };
+    // 月累計範圍：showDates 是該月每一天（不超過資料截止日），比較對象是前一個月
+    // ⚠ 本月是「部分月」（只累計到截止日）。若拿它去比上月整月，13 天比 30 天會全面假跌 —
     //   實測 7/1–13 比 6 月整月會算出 −59%，但比 6/1–13 其實只有 −3.1%，
     //   且有 4 個實際成長的通路會被誤判成暴跌。故部分月一律只比上月「同期」天數。
     //   完整月份（上月 / 選過去月份）維持整月比整月，那是正常的商業比較。
@@ -132,17 +186,33 @@ Object.assign(App, {
       const [yy, mm] = yyyymm.split('-').map(Number);
       const prevMs = toDateStr(new Date(yy, mm - 2, 1)).slice(0, 7);
       const showDates = monthDates(yyyymm);
-      const isPartial = yyyymm === toDateStr(now).slice(0, 7);   // 本月才會被昨日截斷
+      // 部分月 = showDates 被截止日截斷。用「該月天數」比，不用 31 / 30 —— 否則 2 月會被誤判成截斷。
+      //   以前用「月份名 === 本月」判：limit 改成截止日之後，截止日落進上月的早上（每月 1 號 09:00 前、
+      //   連假後首日）「上月」也會被截，若仍當完整月就變成 29 天比 31 天而標籤寫整月。
+      //   ⚠ 部分月比較仍有月長差異：3/31 早上截止日 3/29 看「上月」→ 本期 3/1–3/29 對基期 2/1–2/28。
+      //     這是原本「本月」就有的行為類別，現在「上月」被截斷時也會遇到。
+      const fullLen = new Date(yy, mm, 0).getDate();
+      const isPartial = showDates.length < fullLen;
+      // 月份名 === 本月：只給「需要留意」第三態用，與有沒有被截斷無關（C3 時兩者同義，這裡分家）
+      const isCurrentMonth = yyyymm === toDateStr(now).slice(0, 7);
       const cutDay = (isPartial && showDates.length)
         ? +showDates[showDates.length - 1].slice(8, 10)
         : 31;
       return {
         kind: 'month',
         label,
-        dateLabel: `${yyyymm.replace('-', '/')} 月累計`,
+        // 被截止日截斷的月份寫出累計到哪天（「2026/09 月累計至 9/10」），否則讀者會以為累計到昨天。
+        //   完整月不加「至」，那是整月。showDates 為空（每月 1 號）也不加：沒有尾日可寫，
+        //   而且這個字串還被排名 / 圓餅的空狀態句拼進去（「… 還沒有營收資料」），
+        //   「月累計至 X 還沒有營收資料」會自相矛盾 —— 空狀態不出現矛盾句是靠這條成立的。
+        dateLabel: `${yyyymm.replace('-', '/')} 月累計${(isPartial && showDates.length) ? `至 ${md(showDates[showDates.length - 1])}` : ''}`,
         showDates,
-        compareDates: monthDates(prevMs).filter(d => +d.slice(8, 10) <= cutDay),
+        // 每月 1 號 showDates 為空（昨日還在上月）→ 本期沒有任何一天，就沒有可比的基期。
+        //   以前這裡照樣算出上月整月 → 四張卡與七條通路全部 ↓100%、「需要留意」列出全部通路。
+        //   改給空陣列 → prev=0 → hasDelta=false → 走既有的「—」路徑。
+        compareDates: showDates.length ? monthDates(prevMs).filter(d => +d.slice(8, 10) <= cutDay) : [],
         compareLabel: isPartial ? `${compareLabel}同期` : compareLabel,
+        isCurrentMonth,   // 給「需要留意」第三態用：只有本月才寫「本月尚無營收資料」
       };
     };
     const buildRange = (key) => {
@@ -152,21 +222,33 @@ Object.assign(App, {
       if (key === 'thisMonth')  return monthRange(thisMs, `${thisMs.replace('-', '/')} 本月`, '上月');
       if (key === 'lastMonth')  return monthRange(lastMs, `${lastMs.replace('-', '/')} 上月`, '再上一月');
       if (key === 'customMonth') return monthRange(customMonth, customMonth.replace('-', '/'), '前一月');
-      // yesterday（預設）— 固定為真正的昨天，不再跟著填寫日期跑
-      return dayRange(defaultInputDate, '昨日');
+      // yesterday — 明確選項：固定為真正的昨天，不跟著填寫日期、也不跟著截止日跑
+      if (key === 'yesterday')  return dayRange(defaultInputDate, '昨日');
+      // latest（預設）— 資料截止日。label：截止日就是昨日 → 「昨日 M/D (週X)」；
+      //   落後 1 天不加註（每天早上填寫前的常態）；落後 ≥2 天才標「落後 N 天」。
+      const latestLabel = cutoffLagDays === 0
+        ? `昨日 ${shortDate(dataCutoff)}`
+        : (cutoffLagDays === 1 ? shortDate(dataCutoff) : `${shortDate(dataCutoff)} · 落後 ${cutoffLagDays} 天`);
+      // isFallback：找不到全填日（新環境 / 資料清空）→ 排名與圓餅的空狀態句子要說「尚無完整資料」，
+      //   不能用日期拼「9/13 還沒有營收資料」。只有這個分支有這欄位，其他鍵 undefined → falsy，行為零差異。
+      return { ...dayRange(dataCutoff, latestLabel), isFallback: cutoffIsFallback };
     };
     const rangeInfo = buildRange(summaryRange);
     const sumOver = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
     const sumAdsOver = (p, dates) => dates.reduce((s, d) => s + (+p.dailyAdSpend?.[d] || 0), 0);
 
     // 日期列 —— 控制「檢視範圍」（不是填寫日期）
-    // 單日 = 一顆日期 pill（原本的「昨日」按鈕已併入它）：
-    //   看昨天 → 掛個「昨日」標記；看其他天 → 標記換成可點的「↩ 回昨日」。
+    // 單日 = 一顆日期 pill：
+    //   看截止日（latest）→ 掛個標記：「最新 · 昨日」／「最新 M/D」／fallback 時「尚無完整資料」；
+    //   看其他天（yesterday / customDay）→ 標記換成可點的「↩ 回最新」。日期已在 pill 上，不另掛「昨日」字。
     //   同一時間只有一個控制項高亮：日期 pill（單日）／本月／上月／選月份 四者擇一。
-    const isDayView = summaryRange === 'yesterday' || summaryRange === 'customDay';
-    const dayTagHtml = summaryRange === 'yesterday'
-      ? '<span class="day-tag">昨日</span>'
-      : '<button type="button" id="summary-day-reset" class="pill pill-sm day-reset" title="回到昨日">↩ 回昨日</button>';
+    //   ⚠ 新增單日鍵一定要加進 isDayView，漏了的症狀是四個控制項一個都不高亮、且不會有 console error。
+    const isDayView = summaryRange === 'latest' || summaryRange === 'yesterday' || summaryRange === 'customDay';
+    const latestTag = cutoffIsFallback ? '尚無完整資料'
+      : (cutoffLagDays === 0 ? '最新 · 昨日' : `最新 ${dataCutoff.slice(5, 7).replace(/^0/, '')}/${dataCutoff.slice(8, 10).replace(/^0/, '')}`);
+    const dayTagHtml = summaryRange === 'latest'
+      ? `<span class="day-tag">${escapeHtml(latestTag)}</span>`
+      : '<button type="button" id="summary-day-reset" class="pill pill-sm day-reset" title="回到最新資料日">↩ 回最新</button>';
     const summaryPills = `
       <div id="summary-pills" class="summary-pills">
         <span class="summary-pills-label">檢視</span>
@@ -211,7 +293,9 @@ Object.assign(App, {
       const iconHtml = g.logo
         ? `<img class="summary-card-logo" src="${g.logo}" alt="${escapeHtml(g.name)}">`
         : `<span class="summary-card-icon">${g.icon}</span>`;
-      // 是否「昨日」單日範圍 → 才需要 live 計算（多日範圍只能算已存的）
+      // 檢視日 === 填寫日 → 才需要 live 計算（多日範圍只能算已存的）。
+      //   預設 'latest' 在截止日 === 昨日時成立（卡片跟著輸入框即時跳）；截止日 < 昨日（行銷早上正在填）
+      //   或填寫日期被切到別天補填時不成立 —— 後者是改預設之前就有的行為。
       const isSingleDay = rangeInfo.showDates && rangeInfo.showDates.length === 1
                           && rangeInfo.showDates[0] === inputDateStr;
 
@@ -390,7 +474,7 @@ Object.assign(App, {
         <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px">
           <div>
             <h3 style="margin:0;font-size:14px">每日營收填寫</h3>
-            <p style="margin:1px 0 0;font-size:11px;color:var(--text-muted)">輸入後按 Enter 或點別處跳出確認再儲存 · 過 12 點自動歸 0</p>
+            <p style="margin:1px 0 0;font-size:11px;color:var(--text-muted)">輸入後按 Enter 或右側 ✓ 儲存 · 點到別處會還原 · 過 12 點自動歸 0</p>
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <div style="display:flex;align-items:center;gap:4px;background:var(--bg);padding:3px 6px;border-radius:6px">
@@ -497,7 +581,9 @@ Object.assign(App, {
       return `
         <div class="rank-card">
           ${head}
-          <div class="rank-empty">${escapeHtml(dateDisplay)} 還沒有營收資料 — 等各通路數字填入後，這裡會顯示排名</div>
+          <div class="rank-empty">${rangeInfo.isFallback
+            ? '尚無任何一天所有通路都填齊 — 等各通路數字填入後，這裡會顯示排名'
+            : `${escapeHtml(dateDisplay)} 還沒有營收資料 — 等各通路數字填入後，這裡會顯示排名`}</div>
         </div>
       `;
     }
@@ -553,14 +639,17 @@ Object.assign(App, {
      - 指標走 channelMetrics()，與排名長條同一份計算
      - 純 render、無事件綁定：跟著既有重繪路徑更新
      門檻：跌幅 > 20%（需有比較期資料）、ROAS < 5（需 ROAS 可計算）；符合任一即列出。
-     跌幅的比較基準隨檢視範圍走：單日 = 較前一日、月累計 = 較上月，原因文字會標明。 */
+     跌幅的比較基準隨檢視範圍走：單日 = 較前一天（寫實際日期）、月累計 = 較上月同期，原因文字會標明。 */
   channelAlertsHtml(platforms, rangeInfo) {
     const DROP_LIMIT = -20;   // 跌幅超過 20% → 標記
     // 與排名長條的紅色門檻對齊（channelRankingHtml 的 is-low 也是 < 5），
     // 避免出現「排名長條是黃燈、卻被列入需要留意」的矛盾
     const ROAS_LIMIT = 5;     // ROAS 低於 5 → 標記
 
-    const alerts = this.channelMetrics(platforms, rangeInfo.showDates, rangeInfo.compareDates)
+    const metrics = this.channelMetrics(platforms, rangeInfo.showDates, rangeInfo.compareDates);
+    // 本期至少一個通路有營收 —— 與排名長條的空狀態判準（maxRev <= 0）同一個量，三塊會一起變空
+    const hasAnyRev = metrics.some(m => m.rev > 0);
+    const alerts = metrics
       .map((m) => {
         const reasons = [];
         // 比較期沒資料就沒有跌幅可言 → 不判斷（hasDelta 已含此保護）
@@ -594,7 +683,12 @@ Object.assign(App, {
     `;
 
     if (alerts.length === 0) {
-      const okText = rangeInfo.kind === 'month' ? '各通路表現穩定，無需特別留意' : '今日各通路表現穩定，無需特別留意';
+      // 第三態：本月完全沒有營收（每月 1 號、或整月還沒人填）→ 不能寫「穩定」，那是沒資料。
+      //   只限本月（isCurrentMonth）：選月份選到沒資料的過去月份仍走原文案。
+      //   ⚠ 不是保證出現：若有人先填了廣告費沒填營收，ROAS=0 會先產生一條警示，就不會走到這裡。
+      const okText = (rangeInfo.kind === 'month' && rangeInfo.isCurrentMonth && !hasAnyRev)
+        ? '本月尚無營收資料 — 各通路數字填入後，這裡會顯示需要留意的通路'
+        : '各通路表現穩定，無需特別留意';   // 日 / 月共用；不寫「今日」— 預設檢視是截止日，那天早就不是今日
       return `
         <div class="alert-card">
           ${head}
@@ -646,7 +740,7 @@ Object.assign(App, {
 
     if (total <= 0 || slices.length === 0) {
       this._pieState = null;
-      return `<div class="pie-card">${head}<div class="pie-empty">${escapeHtml(dateDisplay)} 還沒有營收資料</div></div>`;
+      return `<div class="pie-card">${head}<div class="pie-empty">${rangeInfo.isFallback ? '尚無完整營收資料' : `${escapeHtml(dateDisplay)} 還沒有營收資料`}</div></div>`;
     }
     // CDN 掛掉 / 離線時不要整頁炸掉，給替代訊息（下次重繪會自己補上）
     if (typeof window.Chart === 'undefined') {
@@ -1184,18 +1278,21 @@ Object.assign(App, {
         const yesterdayLocal = toDateStr(addDays(new Date(), -1));
         const v = dayPicker.value > todayLocal2 ? todayLocal2 : dayPicker.value;
         this.filter.summaryDate = v;
-        // 用日曆挑回昨天 → 正規化回「昨日」模式，
-        // 免得停在「其實就是昨天、卻還顯示『回昨日』」的尷尬狀態
-        this.filter.summaryRange = (v === yesterdayLocal) ? 'yesterday' : 'customDay';
+        // 正規化，優先序不能顛倒：= 截止日 → latest；= 昨日 → yesterday；否則 customDay。
+        //   截止日 === 昨日時同一個日期才不會落到兩種鍵。
+        //   _dataCutoff 是上次 render 算的、yesterdayLocal 是現在算的（跨日後 watcher 重繪前那一分鐘
+        //   基準不同），但截止日先判，結果仍正確。
+        const cutoff = this._dataCutoff || yesterdayLocal;
+        this.filter.summaryRange = (v === cutoff) ? 'latest' : ((v === yesterdayLocal) ? 'yesterday' : 'customDay');
         this.render();
       });
     }
-    // 檢視範圍 — 「↩ 回昨日」（只在檢視日不是昨天時才存在，比照填寫表格的 #entry-date-reset）
+    // 檢視範圍 — 「↩ 回最新」（只在檢視日不是截止日時才存在，比照填寫表格的 #entry-date-reset）
     const dayReset = document.getElementById('summary-day-reset');
     if (dayReset) {
       dayReset.addEventListener('click', () => {
-        this.filter.summaryRange = 'yesterday';
-        this.filter.summaryDate = null;   // 清掉 → customDay 會重新落回昨天
+        this.filter.summaryRange = 'latest';
+        this.filter.summaryDate = null;   // 清掉 → customDay 會重新落回截止日
         this.render();
       });
     }
@@ -1691,6 +1788,29 @@ Object.assign(App, {
       });
     };
 
+    // 表格是否還有任何一列 dirty（與 commit 尾端原本的 anyOtherDirty 同一條判斷）
+    //   ⚠ 掃的是共用 class .card-rev / .card-ads：現在頁面上只有填寫表格一份，將來若有第二張表用同 class，
+    //     這個判斷會被它污染。
+    const anyDirty = () => Array.from(document.querySelectorAll('.card-rev, .card-ads'))
+      .some(el => !sameVal(el.value, el.dataset.original || ''));
+    // 「卡住」修法：存了某列、但當時別列還在編輯 → 不能 render（會蓋掉打到一半的值），記 this._renderWhenClean；
+    //   等全部乾淨（別列存好或取消）再補 render。沒有這條，最後一列是用取消收尾時卡片會停在舊的一天，
+    //   使用者會以為沒存進去（雲端 bounce 又被 justSavedLocally 的 2 秒窗跳過）。
+    //   idx = 觸發這次檢查的那一列。焦點若在「別列」的輸入框（blur 路徑：使用者剛點進下一列要打字），先不 render ——
+    //   render 會重建 DOM 把焦點打掉，比卡片晚幾秒更新嚴重得多；旗標留著，等那列存好 / 取消再說。
+    //   ⚠ render 若拋錯被 catch 吃掉，旗標已清、畫面沒更新、沒有重試（與原本 try { this.render() } catch {} 同等級）。
+    const renderIfClean = (idx) => {
+      if (!this._renderWhenClean) return;
+      if (anyDirty()) return;
+      const active = document.activeElement;
+      const inOtherRow = active && active.tagName === 'INPUT'
+        && (active.classList.contains('card-rev') || active.classList.contains('card-ads'))
+        && +active.dataset.idx !== idx;
+      if (inOtherRow) return;
+      this._renderWhenClean = false;
+      try { this.render(); } catch {}
+    };
+
     // 還原輸入框到原始值
     const revert = (idx) => {
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
@@ -1699,6 +1819,7 @@ Object.assign(App, {
       if (adsEl) adsEl.value = adsEl.dataset.original || '';
       updateRoas(idx);
       markUnsaved(idx);
+      renderIfClean(idx);   // 這列是最後一個 dirty 且之前有存過 → 補上被延後的 render
     };
 
     // 標記正在 commit 的列 — blur 還原邏輯看到這個 flag 就跳過，
@@ -1788,14 +1909,11 @@ Object.assign(App, {
       isCommitting.delete(idx);
       try { updateLiveTotals(); } catch {}
       showToast('已儲存 ✓', 'success');
-      // 若沒有其他列還在編輯（避免蓋掉使用者打到一半的值），
-      //   做完整 re-render → 右側折線圖、本月累計、當月總營收全部更新
-      const anyOtherDirty = Array.from(document.querySelectorAll('.card-rev, .card-ads')).some(el => {
-        return !sameVal(el.value, el.dataset.original || '');
-      });
-      if (!anyOtherDirty) {
-        try { this.render(); } catch {}
-      }
+      // 完整 re-render → 右側折線圖、本月累計、四張卡（截止日可能前進）全部更新。
+      //   沒有其他列在編輯 → 立刻 render（Enter 提交時焦點在同列，不會被 inOtherRow 擋）；
+      //   有別列 dirty → 旗標留著，等那列存好 / 取消時由 renderIfClean 補上。
+      this._renderWhenClean = true;
+      renderIfClean(idx);
     };
 
     // 顯示確認 / 取消 dialog
