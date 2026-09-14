@@ -147,7 +147,12 @@ Object.assign(App, {
       const [y, m] = yyyymm.split('-').map(Number);
       const firstDay = new Date(y, m - 1, 1);
       const lastDay = new Date(y, m, 0);   // 該月最後一天
-      const limit = toDateStr(addDays(now, -1));  // 不超過昨日
+      // 不超過資料截止日（≤ 昨日；找不到全填日時 = 昨日，等於原本「不超過昨日」）。
+      //   本月累計截在截止日，monthRange 的 cutDay 從 showDates 尾巴推 → 基期對稱縮到同日號。
+      //   ⚠ 這個 limit 同時管 showDates 與 compareDates（monthDates(prevMs) 也走這裡），
+      //     compareDates 是「先被 limit 截、再被 cutDay filter」兩層疊加；改任何一層都要同時看另一層，
+      //     否則本期 / 基期的對稱就斷。
+      const limit = dataCutoff;
       const arr = [];
       for (let d = new Date(firstDay); toDateStr(d) <= toDateStr(lastDay); d = addDays(d, 1)) {
         const s = toDateStr(d);
@@ -164,8 +169,8 @@ Object.assign(App, {
       compareDates: [toDateStr(addDays(new Date(dStr + 'T00:00:00'), -1))],
       compareLabel: '前一日',
     });
-    // 月累計範圍：showDates 是該月每一天（不超過昨日），比較對象是前一個月
-    // ⚠ 本月是「部分月」（只累計到昨日）。若拿它去比上月整月，13 天比 30 天會全面假跌 —
+    // 月累計範圍：showDates 是該月每一天（不超過資料截止日），比較對象是前一個月
+    // ⚠ 本月是「部分月」（只累計到截止日）。若拿它去比上月整月，13 天比 30 天會全面假跌 —
     //   實測 7/1–13 比 6 月整月會算出 −59%，但比 6/1–13 其實只有 −3.1%，
     //   且有 4 個實際成長的通路會被誤判成暴跌。故部分月一律只比上月「同期」天數。
     //   完整月份（上月 / 選過去月份）維持整月比整月，那是正常的商業比較。
@@ -173,7 +178,15 @@ Object.assign(App, {
       const [yy, mm] = yyyymm.split('-').map(Number);
       const prevMs = toDateStr(new Date(yy, mm - 2, 1)).slice(0, 7);
       const showDates = monthDates(yyyymm);
-      const isPartial = yyyymm === toDateStr(now).slice(0, 7);   // 本月才會被昨日截斷
+      // 部分月 = showDates 被截止日截斷。用「該月天數」比，不用 31 / 30 —— 否則 2 月會被誤判成截斷。
+      //   以前用「月份名 === 本月」判：limit 改成截止日之後，截止日落進上月的早上（每月 1 號 09:00 前、
+      //   連假後首日）「上月」也會被截，若仍當完整月就變成 29 天比 31 天而標籤寫整月。
+      //   ⚠ 部分月比較仍有月長差異：3/31 早上截止日 3/29 看「上月」→ 本期 3/1–3/29 對基期 2/1–2/28。
+      //     這是原本「本月」就有的行為類別，現在「上月」被截斷時也會遇到。
+      const fullLen = new Date(yy, mm, 0).getDate();
+      const isPartial = showDates.length < fullLen;
+      // 月份名 === 本月：只給「需要留意」第三態用，與有沒有被截斷無關（C3 時兩者同義，這裡分家）
+      const isCurrentMonth = yyyymm === toDateStr(now).slice(0, 7);
       const cutDay = (isPartial && showDates.length)
         ? +showDates[showDates.length - 1].slice(8, 10)
         : 31;
@@ -187,7 +200,7 @@ Object.assign(App, {
         //   改給空陣列 → prev=0 → hasDelta=false → 走既有的「—」路徑。
         compareDates: showDates.length ? monthDates(prevMs).filter(d => +d.slice(8, 10) <= cutDay) : [],
         compareLabel: isPartial ? `${compareLabel}同期` : compareLabel,
-        isCurrentMonth: isPartial,   // 給「需要留意」第三態用：只有本月才寫「本月尚無營收資料」
+        isCurrentMonth,   // 給「需要留意」第三態用：只有本月才寫「本月尚無營收資料」
       };
     };
     const buildRange = (key) => {
