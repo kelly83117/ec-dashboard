@@ -17,6 +17,38 @@ Object.assign(App, {
     // 行銷每天填的是「昨日」資料；若使用者改了日期，以使用者選的為準（可補周末等）
     const defaultInputDate = toDateStr(addDays(now, -1));
     const todayStrLocal = toDateStr(now);
+
+    // ── 資料截止日（檢視範圍的預設）：全部「活躍通路」都有營收（> 0）的最後一天，且 ≤ 昨日 ──
+    //   為什麼不是昨日：行銷隔天早上才填、週一才補五六日，「昨日」一週約有 68 小時是空的，
+    //   預設畫面會是 NT$0 / ↓100% / 需要留意列出全部通路。截止日永遠指向一個完整的日子。
+    //   活躍通路 = 最近 14 天（≤ 昨日）內 daily 有過任何資料的通路。刻意不寫死 7、不吃
+    //   PLATFORMS / PLATFORM_GROUPS 常數：新增或停用通路時集合跟著資料走，截止日不會被停用通路卡住。
+    //   ⚠ 反例：停用通路若在 14 天窗內有一筆手誤，會被算活躍，截止日就退到它最後有值的那天（可能很舊）。
+    //   找不到全填日（新環境 / 資料清空 / 某通路長期缺填）→ fallback 昨日，畫面完全等於改動前。
+    const activeFrom = toDateStr(addDays(now, -14));
+    const revOn = (p, d) => +(p.daily?.[d]) > 0;
+    const activePlatforms = platforms.filter(p =>
+      Object.keys(p.daily || {}).some(d => d >= activeFrom && d <= defaultInputDate && p.daily[d] != null));
+    let dataCutoff = null;
+    if (activePlatforms.length) {
+      const candidates = [...new Set(activePlatforms.flatMap(p => Object.keys(p.daily || {})))]
+        .filter(d => d <= defaultInputDate).sort();
+      for (let i = candidates.length - 1; i >= 0; i--) {
+        if (activePlatforms.every(p => revOn(p, candidates[i]))) { dataCutoff = candidates[i]; break; }
+      }
+    }
+    const cutoffIsFallback = !dataCutoff;
+    if (cutoffIsFallback) dataCutoff = defaultInputDate;
+    // 落後天數（0 = 截止日就是昨日）；fallback 時恆 0
+    const cutoffLagDays = Math.round((new Date(defaultInputDate + 'T00:00:00') - new Date(dataCutoff + 'T00:00:00')) / 86400000);
+    // render 寫、bindDashboardPills 讀（日期 pill 正規化用）。bind 那邊的「昨日」是事件當下算的，
+    //   跨日後 watcher 重繪前那一分鐘兩者基準不同，但截止日優先判斷，結果仍正確。
+    this._dataCutoff = dataCutoff;
+    // M/D (週X) 短日期，給 label / tag 用
+    const shortDate = (dStr) => {
+      const d = new Date(dStr + 'T00:00:00');
+      return `${d.getMonth() + 1}/${d.getDate()} (${'日一二三四五六'[d.getDay()]})`;
+    };
     // 不允許選未來日期
     if (this.filter.entryDate && this.filter.entryDate > todayStrLocal) {
       this.filter.entryDate = defaultInputDate;
@@ -91,13 +123,22 @@ Object.assign(App, {
     // ── 檢視範圍（全頁共用：KPI 卡 / 排名長條 / 需要留意 / 圓餅圖）──
     // ⚠ 這與上面的「填寫日期」(filter.entryDate) 是兩回事：
     //   上面是「填」（只給填寫表格用）、這裡是「看」。兩者刻意分家，互不影響。
-    const summaryRange = this.filter.summaryRange || 'yesterday';
+    // render 時正規化：填寫完成後 snapshot 觸發重繪，截止日會前進，但 filter 可能停在舊鍵
+    //   （'yesterday' / 'customDay' 選到的那天現在就是截止日）→ 畫面會同時出現「昨日」與一顆
+    //   指向同一天的「回最新」。同一個日期只能落一種鍵：等於截止日的一律視為 'latest'。
+    //   只改 this.filter（記憶體），不碰 Store。
+    if ((this.filter.summaryRange === 'yesterday' && dataCutoff === defaultInputDate) ||
+        (this.filter.summaryRange === 'customDay' && this.filter.summaryDate === dataCutoff)) {
+      this.filter.summaryRange = 'latest';
+    }
+    const summaryRange = this.filter.summaryRange || 'latest';   // 預設 = 截止日；'yesterday' 保留為明確選項
     const customMonth = this.filter.summaryMonth || toDateStr(now).slice(0, 7);
     // 選日期：不允許未來
     if (this.filter.summaryDate && this.filter.summaryDate > todayStrLocal) {
-      this.filter.summaryDate = defaultInputDate;
+      this.filter.summaryDate = dataCutoff;
     }
-    const customDay = this.filter.summaryDate || defaultInputDate;
+    // 日期 pill 的顯示值要跟卡片同一天：'yesterday' 模式是昨日，其餘落回截止日
+    const customDay = this.filter.summaryDate || (this.filter.summaryRange === 'yesterday' ? defaultInputDate : dataCutoff);
     // 每日營收填寫預設收合；狀態記在 filter，重繪後才不會被打回收合
     const entryOpen = !!this.filter.revenueEntryOpen;
 
@@ -156,21 +197,31 @@ Object.assign(App, {
       if (key === 'thisMonth')  return monthRange(thisMs, `${thisMs.replace('-', '/')} 本月`, '上月');
       if (key === 'lastMonth')  return monthRange(lastMs, `${lastMs.replace('-', '/')} 上月`, '再上一月');
       if (key === 'customMonth') return monthRange(customMonth, customMonth.replace('-', '/'), '前一月');
-      // yesterday（預設）— 固定為真正的昨天，不再跟著填寫日期跑
-      return dayRange(defaultInputDate, '昨日');
+      // yesterday — 明確選項：固定為真正的昨天，不跟著填寫日期、也不跟著截止日跑
+      if (key === 'yesterday')  return dayRange(defaultInputDate, '昨日');
+      // latest（預設）— 資料截止日。label：截止日就是昨日 → 「昨日 M/D (週X)」；
+      //   落後 1 天不加註（每天早上填寫前的常態）；落後 ≥2 天才標「落後 N 天」。
+      const latestLabel = cutoffLagDays === 0
+        ? `昨日 ${shortDate(dataCutoff)}`
+        : (cutoffLagDays === 1 ? shortDate(dataCutoff) : `${shortDate(dataCutoff)} · 落後 ${cutoffLagDays} 天`);
+      return dayRange(dataCutoff, latestLabel);
     };
     const rangeInfo = buildRange(summaryRange);
     const sumOver = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
     const sumAdsOver = (p, dates) => dates.reduce((s, d) => s + (+p.dailyAdSpend?.[d] || 0), 0);
 
     // 日期列 —— 控制「檢視範圍」（不是填寫日期）
-    // 單日 = 一顆日期 pill（原本的「昨日」按鈕已併入它）：
-    //   看昨天 → 掛個「昨日」標記；看其他天 → 標記換成可點的「↩ 回昨日」。
+    // 單日 = 一顆日期 pill：
+    //   看截止日（latest）→ 掛個標記：「最新 · 昨日」／「最新 M/D」／fallback 時「尚無完整資料」；
+    //   看其他天（yesterday / customDay）→ 標記換成可點的「↩ 回最新」。日期已在 pill 上，不另掛「昨日」字。
     //   同一時間只有一個控制項高亮：日期 pill（單日）／本月／上月／選月份 四者擇一。
-    const isDayView = summaryRange === 'yesterday' || summaryRange === 'customDay';
-    const dayTagHtml = summaryRange === 'yesterday'
-      ? '<span class="day-tag">昨日</span>'
-      : '<button type="button" id="summary-day-reset" class="pill pill-sm day-reset" title="回到昨日">↩ 回昨日</button>';
+    //   ⚠ 新增單日鍵一定要加進 isDayView，漏了的症狀是四個控制項一個都不高亮、且不會有 console error。
+    const isDayView = summaryRange === 'latest' || summaryRange === 'yesterday' || summaryRange === 'customDay';
+    const latestTag = cutoffIsFallback ? '尚無完整資料'
+      : (cutoffLagDays === 0 ? '最新 · 昨日' : `最新 ${dataCutoff.slice(5, 7).replace(/^0/, '')}/${dataCutoff.slice(8, 10).replace(/^0/, '')}`);
+    const dayTagHtml = summaryRange === 'latest'
+      ? `<span class="day-tag">${escapeHtml(latestTag)}</span>`
+      : '<button type="button" id="summary-day-reset" class="pill pill-sm day-reset" title="回到最新資料日">↩ 回最新</button>';
     const summaryPills = `
       <div id="summary-pills" class="summary-pills">
         <span class="summary-pills-label">檢視</span>
@@ -1196,18 +1247,21 @@ Object.assign(App, {
         const yesterdayLocal = toDateStr(addDays(new Date(), -1));
         const v = dayPicker.value > todayLocal2 ? todayLocal2 : dayPicker.value;
         this.filter.summaryDate = v;
-        // 用日曆挑回昨天 → 正規化回「昨日」模式，
-        // 免得停在「其實就是昨天、卻還顯示『回昨日』」的尷尬狀態
-        this.filter.summaryRange = (v === yesterdayLocal) ? 'yesterday' : 'customDay';
+        // 正規化，優先序不能顛倒：= 截止日 → latest；= 昨日 → yesterday；否則 customDay。
+        //   截止日 === 昨日時同一個日期才不會落到兩種鍵。
+        //   _dataCutoff 是上次 render 算的、yesterdayLocal 是現在算的（跨日後 watcher 重繪前那一分鐘
+        //   基準不同），但截止日先判，結果仍正確。
+        const cutoff = this._dataCutoff || yesterdayLocal;
+        this.filter.summaryRange = (v === cutoff) ? 'latest' : ((v === yesterdayLocal) ? 'yesterday' : 'customDay');
         this.render();
       });
     }
-    // 檢視範圍 — 「↩ 回昨日」（只在檢視日不是昨天時才存在，比照填寫表格的 #entry-date-reset）
+    // 檢視範圍 — 「↩ 回最新」（只在檢視日不是截止日時才存在，比照填寫表格的 #entry-date-reset）
     const dayReset = document.getElementById('summary-day-reset');
     if (dayReset) {
       dayReset.addEventListener('click', () => {
-        this.filter.summaryRange = 'yesterday';
-        this.filter.summaryDate = null;   // 清掉 → customDay 會重新落回昨天
+        this.filter.summaryRange = 'latest';
+        this.filter.summaryDate = null;   // 清掉 → customDay 會重新落回截止日
         this.render();
       });
     }

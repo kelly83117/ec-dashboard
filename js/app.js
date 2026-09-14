@@ -787,7 +787,7 @@ const App = {
       this._lastInputDate = nowYesterday;
       if (this.route === 'dashboard' && typeof this.render === 'function') {
         this.render();
-        showToast(`已跨日，自動切換至 ${nowYesterday}`, 'success');
+        showToast(`已跨日，填寫日期已切換至 ${nowYesterday}`, 'success');   // 檢視範圍預設是資料截止日，跨日不會跟著換
       }
     }, 60000); // 每 60 秒檢查一次
   },
