@@ -17843,10 +17843,14 @@ function momoUploadGenerate(shop){
         const m=parsed.byMonth[mo];
         const recJ=momoLoadReconcile('甲配',mo), recY=momoLoadReconcile('乙配',mo);
         const sum=(recJ&&recJ.summary)||(recY&&recY.summary);
-        const zucu = (sum&&sum.fees)?Math.round(sum.fees['寄倉倉租費(EC)']||0):null;   // 對帳單寄倉倉租費(EC)（含稅整數）
-        const ok = (zucu!=null) && Math.abs(m.total-zucu)<=1;
-        rows.push({ month:mo, skuN:m.skuN, rentTotal:m.total, reconZucu:zucu, ok });
-        if(!ok) bad.push(mo+'：C1212 Σ應付倉租 '+m.total.toLocaleString()+' ≠ 對帳單寄倉倉租費(EC) '+(zucu==null?'（該月無對帳單、無法核對）':zucu.toLocaleString()));
+        const zucu = (sum&&sum.fees)?Math.round(sum.fees['寄倉倉租費(EC)']||0):null;   // 對帳單寄倉倉租費(EC)（含稅整數）；null=該月對帳單尚未上傳
+        // 🔴 時序：C1212 每月傳、對帳單(C1101)月結後才到 → 傳 C1212 時該月對帳單常常還沒來。
+        //   無對帳單(zucu==null) ≠ 核對失敗，是「沒東西可比」→ 放行寫入、標「待核」，等對帳單到了再核。
+        //   有對帳單才真核對、對不上才擋（保留這道防呆）。
+        const pending = (zucu==null);
+        const ok = pending ? true : (Math.abs(m.total-zucu)<=1);
+        rows.push({ month:mo, skuN:m.skuN, rentTotal:m.total, reconZucu:zucu, ok, pending });
+        if(!pending && !ok) bad.push(mo+'：C1212 Σ應付倉租 '+m.total.toLocaleString()+' ≠ 對帳單寄倉倉租費(EC) '+zucu.toLocaleString());
       });
       if(bad.length) throw new Error('C1212 倉租一致性檢核未通過（Σ應付倉租 必須等於該月對帳單寄倉倉租費(EC)），整份不寫入：\n'+bad.join('\n'));
       rentInfo={ months:parsed.months, rows, dataRows:parsed.dataRows, skippedEmpty:parsed.skippedEmpty };
@@ -18063,10 +18067,10 @@ function momoRenderUploadPreview(shop){
       <div style="font-size:11px;color:#2563eb;margin-top:2px">按「確認寫入」後會再跳一次「即將寫入 ${yi.month||'?'} 乙配運費」確認。半月於計算時按銷量拆（估算）。</div>
     </div>`;
   }
-  // 乙配倉租 C1212：逐月一致性對照（Σ應付倉租 vs 對帳單寄倉倉租費(EC)），已過閘才會到這（都 ✓）。
+  // 乙配倉租 C1212：逐月一致性對照（Σ應付倉租 vs 對帳單寄倉倉租費(EC)）。已過閘才到這：有對帳單的月都 ✓、無對帳單的月標「待核」（放行寫入、等對帳單到再核）。
   let rentHtml='';
   if(P.rentInfo){ const ri=P.rentInfo;
-    const monthRows=ri.rows.map(r=>`<tr><td style="padding:2px 8px">${r.month}</td><td style="padding:2px 8px;text-align:right">${r.skuN}</td><td style="padding:2px 8px;text-align:right">$${r.rentTotal.toLocaleString()}</td><td style="padding:2px 8px;text-align:right;color:#6b7280">$${(r.reconZucu||0).toLocaleString()}</td><td style="padding:2px 8px;text-align:center;color:${r.ok?'#059669':'#dc2626'}">${r.ok?'✓':'✗'}</td></tr>`).join('');
+    const monthRows=ri.rows.map(r=>`<tr><td style="padding:2px 8px">${r.month}</td><td style="padding:2px 8px;text-align:right">${r.skuN}</td><td style="padding:2px 8px;text-align:right">$${r.rentTotal.toLocaleString()}</td><td style="padding:2px 8px;text-align:right;color:#6b7280">${r.pending?'—':'$'+(r.reconZucu||0).toLocaleString()}</td><td style="padding:2px 8px;text-align:center;color:${r.pending?'#d97706':(r.ok?'#059669':'#dc2626')}">${r.pending?'待核':(r.ok?'✓':'✗')}</td></tr>`).join('');
     rentHtml=`<div style="border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#166534;line-height:1.6">
       🏬 <b>乙配倉租（C1212）→ 逐月×SKU 精算</b>（取代營收比例攤）：${ri.months.length} 個月、逐日 ${ri.dataRows.toLocaleString()} 列彙總（排除檔尾總計列 ${ri.skippedEmpty} 列）
       <div style="margin-top:4px;overflow:auto"><table style="border-collapse:collapse;font-size:11px"><thead><tr style="color:#166534"><th style="padding:2px 8px;text-align:left">月</th><th style="padding:2px 8px;text-align:right">品號</th><th style="padding:2px 8px;text-align:right">Σ應付倉租</th><th style="padding:2px 8px;text-align:right">對帳單寄倉倉租費</th><th style="padding:2px 8px">一致</th></tr></thead><tbody>${monthRows}</tbody></table></div>
