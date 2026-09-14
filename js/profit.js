@@ -12103,14 +12103,19 @@ function momoParseReconcileSummary(rawText){
   const fees={}; let feeSum=0;
   MOMO_FEE_LABELS.forEach(l=>{ const v=numAfter(l); if(v!=null){ fees[l]=v; feeSum+=v; } });
   const eM=t.match(/各項費用及罰則\s*總計\s*E\s*(-?[\d,]+)/); const E=eM?parseN(eM[1]):null;
+  // 🔴 未登錄費用項防呆：MOMO_FEE_LABELS 是寫死清單；PDF 若冒出清單外的新費用項（例 2026-08「違反商品品質罰款」），
+  //   feeSum 會漏、但 E（PDF 權威總計）含它 → 補一列「其他費用(未列)」讓 Σ 對上 E，永不因新項擋寫。
+  //   金額另存 unlistedFee 供畫面提示使用者：確認名稱後補進 MOMO_FEE_LABELS。E 缺讀時不補（走原本 Σ≠E 錯誤路徑）。
+  let unlistedFee=0;
+  if(E!=null){ const gap=Math.round((E-feeSum)*100)/100; if(gap>1){ unlistedFee=gap; fees['其他費用(未列)']=gap; feeSum+=gap; } }
   const holdPrev=numAfter('前期保留款(+)'), holdCur=numAfter('本期保留款(-)');
   const gM=t.match(/保留款總計\s*G[^-\d]*(-?[\d,]+)/); const G=gM?parseN(gM[1]):null;
   const pM=t.match(/實際應付貴公司金額\s*\(A\+C-E\+G\)\s*(-?[\d,]+)/); const payable=pM?parseN(pM[1]):null;
   const feesSumOk = E!=null && Math.abs(feeSum-E)<=1;
   const formulaOk = !!A && payable!=null && G!=null && Math.abs((A.incl+other.incl+(C?C.incl:0)-E+G)-payable)<=1;
-  if(!feesSumOk) errors.push('Σ12費用('+feeSum+')≠E('+E+')');
+  if(!feesSumOk) errors.push('Σ費用('+feeSum+')≠E('+E+')');
   if(!formulaOk) errors.push('A含稅+其他+C含稅−E+G≠實際應付');
-  return {period, reconNo, A, C, other, fees, feeSum, E, hold:{prev:holdPrev,cur:holdCur,G}, payable, valid:{feesSumOk,formulaOk,all:feesSumOk&&formulaOk}, errors};
+  return {period, reconNo, A, C, other, fees, feeSum, E, unlistedFee, hold:{prev:holdPrev,cur:holdCur,G}, payable, valid:{feesSumOk,formulaOk,all:feesSumOk&&formulaOk}, errors};
 }
 function momoSplitRevenueToPeriods(monthRevUntax, c1105RevByPeriod){
   const keys=Object.keys(c1105RevByPeriod||{});
@@ -12177,7 +12182,7 @@ function momoRenderReconReport(shop, detail, summ){
   const aMatch=summ.A&&Math.abs(xlsA+ (detail.meta.otherUntax||0) - summ.A.untax)<=2;
   const monthMatch=summ.period===_momoReconMonth;
   const okColor=b=>b?'#10b981':'#dc2626';
-  const feeRows=MOMO_FEE_LABELS.filter(l=>summ.fees[l]!=null).map(l=>`<tr><td class="l">${l}</td><td class="num">${n(summ.fees[l])}</td></tr>`).join('');
+  const feeRows=MOMO_FEE_LABELS.concat(summ.unlistedFee>0?['其他費用(未列)']:[]).filter(l=>summ.fees[l]!=null).map(l=>`<tr><td class="l">${l}</td><td class="num">${n(summ.fees[l])}</td></tr>`).join('');
   el.innerHTML=`
     <div class="mm-recon-h">對帳結果 — ${_momoReconMonth}</div>
     <div class="mm-recon-box">
@@ -12187,7 +12192,8 @@ function momoRenderReconReport(shop, detail, summ){
     </div>
     <div class="mm-recon-cols">
       <div class="mm-recon-col">
-        <div class="h">12 項費用（總計 E = ${n(summ.E)}）</div>
+        <div class="h">費用項（總計 E = ${n(summ.E)}）</div>
+        ${summ.unlistedFee>0?`<div style="font-size:11px;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:6px 8px;margin:0 0 6px">⚠ 本月有未登錄費用項 <b>$${n(summ.unlistedFee)}</b>（清單外的新項目，已自動歸入下方「其他費用(未列)」讓自驗平帳）。請對照 PDF 確認該項名稱、補進 MOMO_FEE_LABELS 清單。</div>`:''}
         <table class="mm-recon-tbl"><tbody>${feeRows}</tbody></table>
       </div>
       <div class="mm-recon-col">
@@ -12200,7 +12206,7 @@ function momoRenderReconReport(shop, detail, summ){
           <tr><td class="l"><b>momo 實際應付</b></td><td class="num"><b>${n(summ.payable)}</b></td></tr>
         </tbody></table>
         <div class="mm-selfcheck" style="background:${summ.valid.all?'#ecfdf5':'#fef2f2'};color:${summ.valid.all?'#065f46':'#991b1b'}">
-          自驗：Σ12費用==E ${summ.valid.feesSumOk?'✓':'✗'}　A+C−E+G==實際應付 ${summ.valid.formulaOk?'✓':'✗'}${summ.errors.length?'<br>'+summ.errors.map(_momoEsc).join('；'):''}</div>
+          自驗：Σ費用==E ${summ.valid.feesSumOk?'✓':'✗'}　A+C−E+G==實際應付 ${summ.valid.formulaOk?'✓':'✗'}${summ.errors.length?'<br>'+summ.errors.map(_momoEsc).join('；'):''}</div>
       </div>
     </div>
     <div class="mm-row" style="margin-top:12px">
@@ -17837,10 +17843,14 @@ function momoUploadGenerate(shop){
         const m=parsed.byMonth[mo];
         const recJ=momoLoadReconcile('甲配',mo), recY=momoLoadReconcile('乙配',mo);
         const sum=(recJ&&recJ.summary)||(recY&&recY.summary);
-        const zucu = (sum&&sum.fees)?Math.round(sum.fees['寄倉倉租費(EC)']||0):null;   // 對帳單寄倉倉租費(EC)（含稅整數）
-        const ok = (zucu!=null) && Math.abs(m.total-zucu)<=1;
-        rows.push({ month:mo, skuN:m.skuN, rentTotal:m.total, reconZucu:zucu, ok });
-        if(!ok) bad.push(mo+'：C1212 Σ應付倉租 '+m.total.toLocaleString()+' ≠ 對帳單寄倉倉租費(EC) '+(zucu==null?'（該月無對帳單、無法核對）':zucu.toLocaleString()));
+        const zucu = (sum&&sum.fees)?Math.round(sum.fees['寄倉倉租費(EC)']||0):null;   // 對帳單寄倉倉租費(EC)（含稅整數）；null=該月對帳單尚未上傳
+        // 🔴 時序：C1212 每月傳、對帳單(C1101)月結後才到 → 傳 C1212 時該月對帳單常常還沒來。
+        //   無對帳單(zucu==null) ≠ 核對失敗，是「沒東西可比」→ 放行寫入、標「待核」，等對帳單到了再核。
+        //   有對帳單才真核對、對不上才擋（保留這道防呆）。
+        const pending = (zucu==null);
+        const ok = pending ? true : (Math.abs(m.total-zucu)<=1);
+        rows.push({ month:mo, skuN:m.skuN, rentTotal:m.total, reconZucu:zucu, ok, pending });
+        if(!pending && !ok) bad.push(mo+'：C1212 Σ應付倉租 '+m.total.toLocaleString()+' ≠ 對帳單寄倉倉租費(EC) '+zucu.toLocaleString());
       });
       if(bad.length) throw new Error('C1212 倉租一致性檢核未通過（Σ應付倉租 必須等於該月對帳單寄倉倉租費(EC)），整份不寫入：\n'+bad.join('\n'));
       rentInfo={ months:parsed.months, rows, dataRows:parsed.dataRows, skippedEmpty:parsed.skippedEmpty };
@@ -18057,10 +18067,10 @@ function momoRenderUploadPreview(shop){
       <div style="font-size:11px;color:#2563eb;margin-top:2px">按「確認寫入」後會再跳一次「即將寫入 ${yi.month||'?'} 乙配運費」確認。半月於計算時按銷量拆（估算）。</div>
     </div>`;
   }
-  // 乙配倉租 C1212：逐月一致性對照（Σ應付倉租 vs 對帳單寄倉倉租費(EC)），已過閘才會到這（都 ✓）。
+  // 乙配倉租 C1212：逐月一致性對照（Σ應付倉租 vs 對帳單寄倉倉租費(EC)）。已過閘才到這：有對帳單的月都 ✓、無對帳單的月標「待核」（放行寫入、等對帳單到再核）。
   let rentHtml='';
   if(P.rentInfo){ const ri=P.rentInfo;
-    const monthRows=ri.rows.map(r=>`<tr><td style="padding:2px 8px">${r.month}</td><td style="padding:2px 8px;text-align:right">${r.skuN}</td><td style="padding:2px 8px;text-align:right">$${r.rentTotal.toLocaleString()}</td><td style="padding:2px 8px;text-align:right;color:#6b7280">$${(r.reconZucu||0).toLocaleString()}</td><td style="padding:2px 8px;text-align:center;color:${r.ok?'#059669':'#dc2626'}">${r.ok?'✓':'✗'}</td></tr>`).join('');
+    const monthRows=ri.rows.map(r=>`<tr><td style="padding:2px 8px">${r.month}</td><td style="padding:2px 8px;text-align:right">${r.skuN}</td><td style="padding:2px 8px;text-align:right">$${r.rentTotal.toLocaleString()}</td><td style="padding:2px 8px;text-align:right;color:#6b7280">${r.pending?'—':'$'+(r.reconZucu||0).toLocaleString()}</td><td style="padding:2px 8px;text-align:center;color:${r.pending?'#d97706':(r.ok?'#059669':'#dc2626')}">${r.pending?'待核':(r.ok?'✓':'✗')}</td></tr>`).join('');
     rentHtml=`<div style="border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#166534;line-height:1.6">
       🏬 <b>乙配倉租（C1212）→ 逐月×SKU 精算</b>（取代營收比例攤）：${ri.months.length} 個月、逐日 ${ri.dataRows.toLocaleString()} 列彙總（排除檔尾總計列 ${ri.skippedEmpty} 列）
       <div style="margin-top:4px;overflow:auto"><table style="border-collapse:collapse;font-size:11px"><thead><tr style="color:#166534"><th style="padding:2px 8px;text-align:left">月</th><th style="padding:2px 8px;text-align:right">品號</th><th style="padding:2px 8px;text-align:right">Σ應付倉租</th><th style="padding:2px 8px;text-align:right">對帳單寄倉倉租費</th><th style="padding:2px 8px">一致</th></tr></thead><tbody>${monthRows}</tbody></table></div>
