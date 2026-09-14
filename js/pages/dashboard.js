@@ -141,8 +141,12 @@ Object.assign(App, {
         label,
         dateLabel: `${yyyymm.replace('-', '/')} 月累計`,
         showDates,
-        compareDates: monthDates(prevMs).filter(d => +d.slice(8, 10) <= cutDay),
+        // 每月 1 號 showDates 為空（昨日還在上月）→ 本期沒有任何一天，就沒有可比的基期。
+        //   以前這裡照樣算出上月整月 → 四張卡與七條通路全部 ↓100%、「需要留意」列出全部通路。
+        //   改給空陣列 → prev=0 → hasDelta=false → 走既有的「—」路徑。
+        compareDates: showDates.length ? monthDates(prevMs).filter(d => +d.slice(8, 10) <= cutDay) : [],
         compareLabel: isPartial ? `${compareLabel}同期` : compareLabel,
+        isCurrentMonth: isPartial,   // 給「需要留意」第三態用：只有本月才寫「本月尚無營收資料」
       };
     };
     const buildRange = (key) => {
@@ -560,7 +564,10 @@ Object.assign(App, {
     // 避免出現「排名長條是黃燈、卻被列入需要留意」的矛盾
     const ROAS_LIMIT = 5;     // ROAS 低於 5 → 標記
 
-    const alerts = this.channelMetrics(platforms, rangeInfo.showDates, rangeInfo.compareDates)
+    const metrics = this.channelMetrics(platforms, rangeInfo.showDates, rangeInfo.compareDates);
+    // 本期至少一個通路有營收 —— 與排名長條的空狀態判準（maxRev <= 0）同一個量，三塊會一起變空
+    const hasAnyRev = metrics.some(m => m.rev > 0);
+    const alerts = metrics
       .map((m) => {
         const reasons = [];
         // 比較期沒資料就沒有跌幅可言 → 不判斷（hasDelta 已含此保護）
@@ -594,7 +601,12 @@ Object.assign(App, {
     `;
 
     if (alerts.length === 0) {
-      const okText = rangeInfo.kind === 'month' ? '各通路表現穩定，無需特別留意' : '今日各通路表現穩定，無需特別留意';
+      // 第三態：本月完全沒有營收（每月 1 號、或整月還沒人填）→ 不能寫「穩定」，那是沒資料。
+      //   只限本月（isCurrentMonth）：選月份選到沒資料的過去月份仍走原文案。
+      //   ⚠ 不是保證出現：若有人先填了廣告費沒填營收，ROAS=0 會先產生一條警示，就不會走到這裡。
+      const okText = (rangeInfo.kind === 'month' && rangeInfo.isCurrentMonth && !hasAnyRev)
+        ? '本月尚無營收資料 — 各通路數字填入後，這裡會顯示需要留意的通路'
+        : (rangeInfo.kind === 'month' ? '各通路表現穩定，無需特別留意' : '今日各通路表現穩定，無需特別留意');
       return `
         <div class="alert-card">
           ${head}
