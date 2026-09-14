@@ -161,14 +161,22 @@ Object.assign(App, {
       return arr;
     };
     // 單日範圍：showDates 只有一天，比較對象是它的前一天
-    const dayRange = (dStr, label) => ({
-      kind: 'day',
-      label,
-      dateLabel: dStr.replace(/-/g, '/'),
-      showDates: [dStr],
-      compareDates: [toDateStr(addDays(new Date(dStr + 'T00:00:00'), -1))],
-      compareLabel: '前一日',
-    });
+    // M/D 短日期（不補零），給 compareLabel / 月累計至 用
+    const md = (dStr) => `${+dStr.slice(5, 7)}/${+dStr.slice(8, 10)}`;
+    const dayRange = (dStr, label) => {
+      const prevStr = toDateStr(addDays(new Date(dStr + 'T00:00:00'), -1));
+      return {
+        kind: 'day',
+        label,
+        dateLabel: dStr.replace(/-/g, '/'),
+        showDates: [dStr],
+        compareDates: [prevStr],
+        // 寫實際日期（「較 9/09」）不寫「前一日」：預設檢視是截止日，落後時讀者不知道前一日是哪天。
+        //   三個消費端（四張卡 / 排名卡頭 / 需要留意 reason）都是 `較${compareLabel}` 拼的、沒有空格
+        //   （月模式是「較上月同期」），所以日期前的那個空格放在值裡；日補零（9/09）是定案格式。
+        compareLabel: ` ${+prevStr.slice(5, 7)}/${prevStr.slice(8, 10)}`,
+      };
+    };
     // 月累計範圍：showDates 是該月每一天（不超過資料截止日），比較對象是前一個月
     // ⚠ 本月是「部分月」（只累計到截止日）。若拿它去比上月整月，13 天比 30 天會全面假跌 —
     //   實測 7/1–13 比 6 月整月會算出 −59%，但比 6/1–13 其實只有 −3.1%，
@@ -193,7 +201,11 @@ Object.assign(App, {
       return {
         kind: 'month',
         label,
-        dateLabel: `${yyyymm.replace('-', '/')} 月累計`,
+        // 被截止日截斷的月份寫出累計到哪天（「2026/09 月累計至 9/10」），否則讀者會以為累計到昨天。
+        //   完整月不加「至」，那是整月。showDates 為空（每月 1 號）也不加：沒有尾日可寫，
+        //   而且這個字串還被排名 / 圓餅的空狀態句拼進去（「… 還沒有營收資料」），
+        //   「月累計至 X 還沒有營收資料」會自相矛盾 —— 空狀態不出現矛盾句是靠這條成立的。
+        dateLabel: `${yyyymm.replace('-', '/')} 月累計${(isPartial && showDates.length) ? `至 ${md(showDates[showDates.length - 1])}` : ''}`,
         showDates,
         // 每月 1 號 showDates 為空（昨日還在上月）→ 本期沒有任何一天，就沒有可比的基期。
         //   以前這裡照樣算出上月整月 → 四張卡與七條通路全部 ↓100%、「需要留意」列出全部通路。
@@ -217,7 +229,9 @@ Object.assign(App, {
       const latestLabel = cutoffLagDays === 0
         ? `昨日 ${shortDate(dataCutoff)}`
         : (cutoffLagDays === 1 ? shortDate(dataCutoff) : `${shortDate(dataCutoff)} · 落後 ${cutoffLagDays} 天`);
-      return dayRange(dataCutoff, latestLabel);
+      // isFallback：找不到全填日（新環境 / 資料清空）→ 排名與圓餅的空狀態句子要說「尚無完整資料」，
+      //   不能用日期拼「9/13 還沒有營收資料」。只有這個分支有這欄位，其他鍵 undefined → falsy，行為零差異。
+      return { ...dayRange(dataCutoff, latestLabel), isFallback: cutoffIsFallback };
     };
     const rangeInfo = buildRange(summaryRange);
     const sumOver = (p, dates) => dates.reduce((s, d) => s + (+p.daily?.[d] || 0), 0);
@@ -460,7 +474,7 @@ Object.assign(App, {
         <div class="table-card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px">
           <div>
             <h3 style="margin:0;font-size:14px">每日營收填寫</h3>
-            <p style="margin:1px 0 0;font-size:11px;color:var(--text-muted)">輸入後按 Enter 或點別處跳出確認再儲存 · 過 12 點自動歸 0</p>
+            <p style="margin:1px 0 0;font-size:11px;color:var(--text-muted)">輸入後按 Enter 或右側 ✓ 儲存 · 點到別處會還原 · 過 12 點自動歸 0</p>
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <div style="display:flex;align-items:center;gap:4px;background:var(--bg);padding:3px 6px;border-radius:6px">
@@ -567,7 +581,9 @@ Object.assign(App, {
       return `
         <div class="rank-card">
           ${head}
-          <div class="rank-empty">${escapeHtml(dateDisplay)} 還沒有營收資料 — 等各通路數字填入後，這裡會顯示排名</div>
+          <div class="rank-empty">${rangeInfo.isFallback
+            ? '尚無任何一天所有通路都填齊 — 等各通路數字填入後，這裡會顯示排名'
+            : `${escapeHtml(dateDisplay)} 還沒有營收資料 — 等各通路數字填入後，這裡會顯示排名`}</div>
         </div>
       `;
     }
@@ -623,7 +639,7 @@ Object.assign(App, {
      - 指標走 channelMetrics()，與排名長條同一份計算
      - 純 render、無事件綁定：跟著既有重繪路徑更新
      門檻：跌幅 > 20%（需有比較期資料）、ROAS < 5（需 ROAS 可計算）；符合任一即列出。
-     跌幅的比較基準隨檢視範圍走：單日 = 較前一日、月累計 = 較上月，原因文字會標明。 */
+     跌幅的比較基準隨檢視範圍走：單日 = 較前一天（寫實際日期）、月累計 = 較上月同期，原因文字會標明。 */
   channelAlertsHtml(platforms, rangeInfo) {
     const DROP_LIMIT = -20;   // 跌幅超過 20% → 標記
     // 與排名長條的紅色門檻對齊（channelRankingHtml 的 is-low 也是 < 5），
@@ -672,7 +688,7 @@ Object.assign(App, {
       //   ⚠ 不是保證出現：若有人先填了廣告費沒填營收，ROAS=0 會先產生一條警示，就不會走到這裡。
       const okText = (rangeInfo.kind === 'month' && rangeInfo.isCurrentMonth && !hasAnyRev)
         ? '本月尚無營收資料 — 各通路數字填入後，這裡會顯示需要留意的通路'
-        : (rangeInfo.kind === 'month' ? '各通路表現穩定，無需特別留意' : '今日各通路表現穩定，無需特別留意');
+        : '各通路表現穩定，無需特別留意';   // 日 / 月共用；不寫「今日」— 預設檢視是截止日，那天早就不是今日
       return `
         <div class="alert-card">
           ${head}
@@ -724,7 +740,7 @@ Object.assign(App, {
 
     if (total <= 0 || slices.length === 0) {
       this._pieState = null;
-      return `<div class="pie-card">${head}<div class="pie-empty">${escapeHtml(dateDisplay)} 還沒有營收資料</div></div>`;
+      return `<div class="pie-card">${head}<div class="pie-empty">${rangeInfo.isFallback ? '尚無完整營收資料' : `${escapeHtml(dateDisplay)} 還沒有營收資料`}</div></div>`;
     }
     // CDN 掛掉 / 離線時不要整頁炸掉，給替代訊息（下次重繪會自己補上）
     if (typeof window.Chart === 'undefined') {
