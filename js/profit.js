@@ -828,6 +828,37 @@ function _editsMergeKeys(fullKey, localMap, items){
 //    它們定義在本行【之後】數百行，靠函式宣告提升；改成 const 會進 TDZ 風險區（理由同
 //    本檔 readEditsForPush 上方那段）。
 function _notesUsesMerge(k){ return typeof k==='string' && k.startsWith('ec_notes|'); }
+// ══════ 「已封存期別唯讀」的寫入閘門（廣告調整 ec_notes|{通路}|{月}|{半月} 專用）══════
+//  為什麼需要：廣告調整搬進封存分片（app/profit_notes_YYYY，見 js/firebase.js PROFIT_ARCHIVE_DOCS）之後，
+//    若有人在該期新增／編輯／刪除並同步，syncNotesMerge 的 (c2)（app/profit 沒這把 key → cloudMap={}）
+//    會把 app/profit 寫成只含被動過的品號（刪除時是 {}），mergeAndNotify 頂層整把蓋掉封存那份 →
+//    該期其他品號的調整從所有人畫面消失（2026-09-16 以原文切片 + 假資料實測證實）。
+//  修法＝在寫入前擋下（本函式），不是在同步時拒推（那會讓資料永遠卡在待推）。
+//  規則（依序判斷）：
+//    app/profit 最新快照有這把 key              → 放行（當期、或尚未搬走）
+//    三支判斷函式不存在（Firebase 沒連上）        → 擋「載入中」
+//    封存分片未 ready（嚴格版：伺服器快照未到）    → 擋「載入中」
+//    封存 ready 且 key 在封存分片                → 擋「已封存」
+//    封存 ready 且兩邊都沒有                      → 放行（全新期別的第一筆）
+//  ⚠ 只套用四段 key：shopKey 形如「通路|月|半月」（split('|') 恰 3 段）。商品調整 _growth（無 '|'）與
+//    舊式單段 key 一律回 null、行為不變 —— 它們不分期別，不會被封存。
+//  ⚠ 三支判斷函式掛在 window、由 js/firebase.js 定義（本檔比它先執行）→ 必須在呼叫當下讀 window 並檢查 typeof，
+//    不可在模組頂層解構。函式不存在時擋下（fail-closed）：分不清「沒連上」與「封存」，寧可讓使用者稍後再試。
+//  ⚠ 已知代價：開站後 app/profit 首批快照到達前（實測數秒內），連當期也會顯示「載入中」；全新期別的第一筆
+//    要等封存 ready（實測 20～40 秒）。這是規則表的直接後果，已接受。
+//  回傳：null＝放行；字串＝擋下並以該字串當提示。呼叫端一律用 showToast 顯示（見 _pnmEditNote 閘門旁的理由）。
+const _NOTES_BLOCK_ARCHIVED='此期已封存，無法修改廣告調整。如需修改請聯絡管理員。';
+const _NOTES_BLOCK_LOADING='資料載入中，請稍候幾秒再試。';
+function _notesWriteBlockReason(shopKey){
+  if(typeof shopKey!=='string' || shopKey.split('|').length!==3) return null;
+  const k='ec_notes|'+shopKey;
+  const ok=typeof window.__profitCurrentHas==='function' && typeof window.__profitArchivesReady==='function' && typeof window.__profitArchiveHas==='function';
+  if(!ok) return _NOTES_BLOCK_LOADING;
+  if(window.__profitCurrentHas(k)) return null;
+  if(!window.__profitArchivesReady()) return _NOTES_BLOCK_LOADING;
+  if(window.__profitArchiveHas(k)) return _NOTES_BLOCK_ARCHIVED;
+  return null;
+}
 // ══════ merge 推送端專用的 ec_notes 讀取（與顯示端 getNotes【刻意不同源】，這不是重複）══════
 //  🔴 抽成一支的理由：syncNotesMerge（實際推的值）與 _momoCollectPending（預覽顯示的值）
 //    必須讀到【完全相同】的東西，否則就是「預覽說要推 N 筆、實際推 N±1 筆而且不報錯」——
@@ -6235,6 +6266,19 @@ function getNotes(shop){
 //   本修法只保證 dirty 原子性，不解決空間。下一個受害者會是報表 lsSave 本身。
 //   待辦：舊期間報表快取的清理機制（另案）。
 function saveNotes(shop,notes,code){
+  // ── 已封存期別唯讀：第二道防線（判準見 _notesWriteBlockReason）──
+  //   三個現行呼叫端（submitProfitNote / _pnmEditNote / deleteProfitNote）在動到任何東西之前都已各自擋過，
+  //   正常情況走不到這裡；這一道只為了接住【未來新增】的呼叫端，放在第一個副作用（下一行的 _shopJustSaved）之前。
+  //   ⚠ 這【不違反】下方「刻意不判斷 key 形狀」那條：本判斷對非四段 key（_growth、舊式單段）一律不套用、原封放行，
+  //     不是依 key 形狀分流【登記行為】—— 兩種形狀進到下面之後走的仍是同一套登記。
+  {
+    const _blk=_notesWriteBlockReason(shop);
+    if(_blk){
+      console.error('[saveNotes] 已封存／未就緒的期別，拒絕寫入（未動 localStorage / dirty / _profitMem）：ec_notes|'+shop, _blk);
+      if(typeof showToast==='function') showToast(_blk,'error',4000);
+      return;
+    }
+  }
   window._shopJustSaved=Date.now();
   const k='ec_notes|'+shop;
   // ── localStorage 寫入：寫完【讀回驗證】，不押注在瀏覽器怎麼回報失敗 ──
@@ -7653,6 +7697,9 @@ function submitProfitNote(){
   if(!_pnm)return;
   const inp=document.getElementById('pnm-inp');const v=inp?.value.trim();if(!v)return;
   const {shopKey,code}=_pnm;
+  // 已封存期別唯讀（判準見 _notesWriteBlockReason）：擋在 getNotes 之前，什麼都不動 ——
+  //   不關彈窗（closeProfitNoteModal 在下方）、不清輸入框（清值在 openNotePopup），使用者的字留在原地，只出 toast。
+  { const _blk=_notesWriteBlockReason(shopKey); if(_blk){ if(typeof showToast==='function') showToast(_blk,'error',4000); return; } }
   const now=new Date();
   const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
   const notes=getNotes(shopKey);
@@ -7715,6 +7762,12 @@ function _pnmEditNote(origIdx,btn){
     if(done)return;
     const v=inp.value.trim();
     if(!v||v===orig){cancel();return;}   // 空＝視同取消（要刪請用 ×）；沒改＝不寫入，避免無意義的寫入與同步徽章
+    // 已封存期別唯讀（判準見 _notesWriteBlockReason）：擋在 getNotes 之前、done 仍為 false —— 輸入框與使用者改的字
+    //   都留在原地，Escape / 失焦照樣走 cancel 還原，再按 Enter 會再提示一次。
+    //   🔴 提示【只能用 showToast，不能用 App.showAlertModal】：彈窗會奪走焦點 → 觸發下方 inp 的 blur → cancel →
+    //     使用者剛打的編輯文字被靜默丟掉。toast（pointer-events:none、不取焦）沒有這個問題。
+    //   ⚠ 刻意不在函式入口擋（不讓編輯框出現是第 4 塊的畫面工作）；且 ready 狀態可能在打字期間改變，save 時才是權威判斷。
+    { const _blk=_notesWriteBlockReason(shopKey); if(_blk){ if(typeof showToast==='function') showToast(_blk,'error',4000); return; } }
     const notes=getNotes(shopKey);if(!notes[code]){cancel();return;}
     if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
     const t=notes[code].adjustments[origIdx];
@@ -7769,6 +7822,9 @@ function _pnmEditNote(origIdx,btn){
 function deleteProfitNote(origIdx,btn){
   if(!_pnm)return;
   const {shopKey,code}=_pnm;
+  // 已封存期別唯讀（判準見 _notesWriteBlockReason）：擋在 getNotes 之前，不動 notes、不重繪、× 鈕與 dataset 原樣保留。
+  //   ⚠ 不走下方的 _abort：那是「資料在彈窗開啟期間變動過」的 stale 語意（會重繪 + 彈「沒有刪除」），與封存無關，不要混用。
+  { const _blk=_notesWriteBlockReason(shopKey); if(_blk){ if(typeof showToast==='function') showToast(_blk,'error',4000); return; } }
   const notes=getNotes(shopKey);if(!notes[code])return;
   if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
   // 擋下：不寫入、重繪成最新內容、明確告訴使用者這次沒有刪掉

@@ -130,6 +130,11 @@ try {
       && !!profitArchiveMeta[n] && profitArchiveMeta[n].fromCache === false);
     // 封存分片訂閱錯誤（回傳拷貝，呼叫端改不到內部狀態）。{} ＝ 目前沒有錯誤。
     window.__profitArchiveErrors = () => JSON.parse(JSON.stringify(profitArchiveErrors));
+    // app/profit【最新快照】裡是否有這把 key（讀 profitParts.current；首批快照未到時是 {} → 一律 false）。
+    //   與 __profitArchiveHas 搭配用（js/profit.js 的 _notesWriteBlockReason）：app/profit 有 → 不可能是「被搬走」的封存 key。
+    //   刻意不另設「app/profit 首批已到」狀態：它只會讓提示文字更細，不改變任何放行／擋下結果
+    //   （首批未到 → false → 由封存 ready 判斷接手；離線 fromCache 空快照也是 false → 方向正確）。同樣不回傳內容。
+    window.__profitCurrentHas = (key) => Object.prototype.hasOwnProperty.call(profitParts.current || {}, key);
     const mergeAndNotify = () => {
       const data = {};
       Object.values(profitParts.archives).forEach(d => Object.assign(data, d));
