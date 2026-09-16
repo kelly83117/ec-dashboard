@@ -96,6 +96,40 @@ try {
   try {
     Store._profitMem = Store._profitMem || {};
     const profitParts = { current: {}, archives: {} };
+    // ── 封存分片狀態的唯讀觀測點（給 js/profit.js 判「這把 key 是否已封存」用）──
+    //   本區【只提供讀取】、不接任何呼叫端；上線後使用者行為零變化。
+    //   ⚠ 掛的是【函式】不是值：module 內的 let/const 掛上 window 會變成當下快照，讀不到即時值
+    //     （先例：js/profit.js 的 window.__profitPendingCount 也是掛函式）。
+    //   ⚠ 刻意不以 __cloud 開頭：app.js 的 __installReadonlyCloudGuard 只包 __cloud* 物件的非白名單方法，
+    //     這三支是純讀取，不該被包、也不該被算進 TEST_NOWRITE 的雲端物件數。
+    //   ⚠ 適用範圍：只給 mergeAndNotify 走「直接覆蓋」分支的 key 用（ec_notes|、ec_edits| 這類）。
+    //     【不適用】ec| 報表 key —— 報表的權威在 profits collection，mergeAndNotify 對 ec| 只在
+    //     _profitMem 無值時才填入（見下方 mergeAndNotify），「在封存分片」對報表不代表「唯讀」。
+    //   🔴 本區【只回傳布林值與錯誤紀錄，不回傳封存內容】。「讀封存整把當同步基準」的做法
+    //     （改了就解封存）已被否決；不要在這裡加 __profitArchiveValue 之類的取值函式。
+    //   profitArchiveMeta[doc]   = { at, exists, fromCache }  每片最近一次快照的 metadata（onSnapshot 成功 callback 寫入）
+    //   profitArchiveErrors[doc] = { at, code, message }      onSnapshot 錯誤 callback 寫入；不自動清除
+    //     （SDK 的 onSnapshot 出錯後該監聽即終止、不會再送快照，「錯誤已解除」不會有任何訊號，清了等於說謊）
+    const profitArchiveMeta = {};
+    const profitArchiveErrors = {};
+    // 這把 key 是否存在於任一封存分片的【最新快照】。
+    //   快照未到 → false，與「確定不在」無法區分 → 呼叫端要先看 __profitArchivesReady()。
+    window.__profitArchiveHas = (key) => PROFIT_ARCHIVE_DOCS.some(n => {
+      const d = profitParts.archives[n];
+      return !!d && Object.prototype.hasOwnProperty.call(d, key);
+    });
+    // 所有封存分片是否都已從【伺服器】收到過快照（嚴格版）：
+    //   每片都要 (1) profitParts.archives 有那片的 key（訂閱 callback 對 exists()===false 也會寫入 {}，
+    //   所以 doc 不存在也算已到達），且 (2) 最近一次快照 metadata.fromCache 為 false。
+    //   (2) 的理由：本專案沒開 IndexedDB persistence，離線時 SDK 可能送出 exists()===false + fromCache 的
+    //   快照，若只看 (1) 會在離線時把所有封存期別誤判成「未封存」。離線 → ready 永遠 false（fail-closed）。
+    //   ⚠ 已 ready 後若又收到 fromCache=true 的快照（連線中斷、SDK 切到快取），ready 會退回 false，
+    //     等重新連上收到伺服器快照才恢復 —— 這是刻意的，離線期間不該相信封存判斷。
+    window.__profitArchivesReady = () => PROFIT_ARCHIVE_DOCS.every(n =>
+      Object.prototype.hasOwnProperty.call(profitParts.archives, n)
+      && !!profitArchiveMeta[n] && profitArchiveMeta[n].fromCache === false);
+    // 封存分片訂閱錯誤（回傳拷貝，呼叫端改不到內部狀態）。{} ＝ 目前沒有錯誤。
+    window.__profitArchiveErrors = () => JSON.parse(JSON.stringify(profitArchiveErrors));
     const mergeAndNotify = () => {
       const data = {};
       Object.values(profitParts.archives).forEach(d => Object.assign(data, d));
@@ -155,9 +189,14 @@ try {
       // archive docs (舊月份歷史資料)
       profitArchiveRefs.forEach((ref, idx) => {
         onSnapshot(ref, snap => {
+          // ⚠ 下一行對 exists()===false 仍寫入 {}：window.__profitArchivesReady 的「已到達」判準依賴這個行為（有 key＝到過）。改成 delete 會讓 ready 無聲退回 false。
           profitParts.archives[PROFIT_ARCHIVE_DOCS[idx]] = snap.exists() ? (snap.data() || {}) : {};
+          profitArchiveMeta[PROFIT_ARCHIVE_DOCS[idx]] = { at: Date.now(), exists: snap.exists(), fromCache: !!(snap.metadata && snap.metadata.fromCache) };   // 嚴格版 ready 用；不 includeMetadataChanges，只記每次資料快照附帶的 metadata
           mergeAndNotify();
-        }, err => { console.error('[profit archive subscribe 失敗]', PROFIT_ARCHIVE_DOCS[idx], err); });
+        }, err => {
+          profitArchiveErrors[PROFIT_ARCHIVE_DOCS[idx]] = { at: Date.now(), code: (err && err.code) || '', message: String((err && err.message) || err) };
+          console.error('[profit archive subscribe 失敗]', PROFIT_ARCHIVE_DOCS[idx], err);
+        });
       });
       // profits collection (每月每賣場獨立 doc)
       try {
