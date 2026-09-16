@@ -849,13 +849,18 @@ function _notesUsesMerge(k){ return typeof k==='string' && k.startsWith('ec_note
 //  回傳：null＝放行；字串＝擋下並以該字串當提示。呼叫端一律用 showToast 顯示（見 _pnmEditNote 閘門旁的理由）。
 const _NOTES_BLOCK_ARCHIVED='此期已封存，無法修改廣告調整。如需修改請聯絡管理員。';
 const _NOTES_BLOCK_LOADING='資料載入中，請稍候幾秒再試。';
+// 第 4 塊：封存分片【訂閱失敗】（__profitArchiveErrors() 非空且 ready 為 false）。SDK 出錯後該監聯即終止、ready 永遠不會來，
+//   再說「載入中」是說謊。這只是【文字分類】：回傳仍是非空字串 → 呼叫端 if(_blk) 照樣擋下；_notesSyncDisposition 對它
+//   仍回 'defer'（不 drop、不 push，保留 dirty 等重整）。放行／擋下的結果與第 2、3 塊完全相同。
+const _NOTES_BLOCK_ERROR='封存資料載入失敗，請重新整理頁面；若持續發生請聯絡管理員。';
+function _notesArchiveHasErrors(){ try{ const e=(typeof window.__profitArchiveErrors==='function')?window.__profitArchiveErrors():null; return !!(e&&Object.keys(e).length>0); }catch{ return false; } }
 function _notesWriteBlockReason(shopKey){
   if(typeof shopKey!=='string' || shopKey.split('|').length!==3) return null;
   const k='ec_notes|'+shopKey;
   const ok=typeof window.__profitCurrentHas==='function' && typeof window.__profitArchivesReady==='function' && typeof window.__profitArchiveHas==='function';
   if(!ok) return _NOTES_BLOCK_LOADING;
   if(window.__profitCurrentHas(k)) return null;
-  if(!window.__profitArchivesReady()) return _NOTES_BLOCK_LOADING;
+  if(!window.__profitArchivesReady()) return _notesArchiveHasErrors() ? _NOTES_BLOCK_ERROR : _NOTES_BLOCK_LOADING;   // 第 4 塊：只換文字，仍是擋下
   if(window.__profitArchiveHas(k)) return _NOTES_BLOCK_ARCHIVED;
   return null;
 }
@@ -872,6 +877,16 @@ function _notesWriteBlockReason(shopKey){
 //     一律只寫 `_notesSyncDisposition(key)`、不得附加任何條件 —— 預覽清單與實際推送靠這個保證一致。
 //  ⚠ 攔在組裝層而不是 syncNotesMerge 內：那支函式只有「寫入成功」與「throw → failed → 錯誤彈窗」兩種出口，
 //     'defer' 需要「靜默略過且不算失敗」，在函式內做不到；且預覽端不跑 syncNotesMerge，只能在組裝層鏡像。
+// 第 4 塊：彈窗／格子的呈現模式，只是 _notesWriteBlockReason 的映射（判準只有一份）。
+//   'edit'（放行）｜'archived'（唯讀：隱藏輸入列、不烘 ✎ ×、顯示說明）｜'error'（訂閱失敗：同 archived 的唯讀呈現、紅底說明）｜
+//   'loading'（B-(1)：輸入照常顯示，只多一行淡色說明；送出時由第 2 塊閘門再判）。_growth／非四段 key 恆 'edit'。
+function _notesPopupMode(shopKey){
+  const r=_notesWriteBlockReason(shopKey);
+  if(r===null) return 'edit';
+  if(r===_NOTES_BLOCK_ARCHIVED) return 'archived';
+  if(r===_NOTES_BLOCK_ERROR) return 'error';
+  return 'loading';
+}
 function _notesSyncDisposition(fullKey){
   if(!_notesUsesMerge(fullKey)) return 'push';
   const r=_notesWriteBlockReason(fullKey.slice('ec_notes|'.length));
@@ -1702,6 +1717,8 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
   const archivedDropped=[];
   const archivedDeferred=[];
   const _archiveErrs=()=>{ try{ return (typeof window.__profitArchiveErrors==='function')?window.__profitArchiveErrors():null; }catch{ return null; } };
+  // 第 4 塊：defer 的提示文字依「封存訂閱是否出錯」分兩種（出錯 → ready 永遠不會來，再說「載入中」是說謊）。只換文字，defer 的處置不變。
+  const _deferTxt=()=>_notesArchiveHasErrors()?'封存資料載入失敗，請重新整理頁面；若持續發生請聯絡管理員':'部分資料載入中，稍後再同步一次';
   const _report=(mode,extra)=>{ window.__lastSyncReport=Object.assign({ts:Date.now(),mode,ok:[],failed:[],skippedProblem:[],skippedByDesign:[],skippedNotDirty:[],archivedDropped,archivedDeferred,archiveErrors:_archiveErrs()},extra||{}); };
   if(!window.__cloudProfit||!window.__cloudProfitCol){
     if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'淨利表的雲端尚未就緒，請重新整理。',kind:'warn'});
@@ -1987,7 +2004,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         // 第 3 塊：這次沒有任何 task，但有封存期別的殘留待推被丟棄／延後 → 不能說「沒有需要同步的資料」。
         //   drop 用 error 樣式（有東西沒上傳、要讓人看見）；只有 defer 時用 info（稍後再按一次即可）。文案第 4 塊再調。
         if(archivedDropped.length>0){ if(typeof showToast==='function') showToast(archivedDropped.length+' 筆封存期別的修改未上傳（已從待推清單移除；內容記在 Console 與 __lastSyncReport）'+(archivedDeferred.length?'；另有 '+archivedDeferred.length+' 筆資料載入中，稍後再同步一次':''),'error',6000); }
-        else { if(typeof showToast==='function') showToast('部分資料載入中，稍後再同步一次（'+archivedDeferred.length+' 筆廣告調整尚未推送）','info',4000); }
+        else { if(typeof showToast==='function') showToast(_deferTxt()+'（'+archivedDeferred.length+' 筆廣告調整尚未推送）',_notesArchiveHasErrors()?'error':'info',_notesArchiveHasErrors()?6000:4000); }
         _report('nothing',{skippedByDesign,skippedNotDirty,dirtyWriteFailures:dirtyFailSnap});
       }else{
         // ⚠ toast 文案刻意不動（不提「跳過 N 筆」）：skippedNotDirty 是 by design 的安靜跳過。
@@ -2035,7 +2052,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     if(problems===0){
       if(btn){btn.textContent='✓ 已同步 '+ok.length+' 筆';btn.style.background='#10b981';btn.style.color='#fff';btn.style.borderColor='#10b981';_syncBtnRepaintTimer=setTimeout(()=>{ _showSyncBtn(); },2000);}
       // 第 3 塊：成功 toast 尾端接上封存殘留的處置結果（drop 用 error 樣式蓋過 success —— 有東西沒上傳不能是綠的；只有 defer 維持 success）。
-      const _archNote=(archivedDropped.length>0?'（'+archivedDropped.length+' 筆封存期別的修改未上傳，已從待推清單移除；內容記在 Console 與 __lastSyncReport）':'')+(archivedDeferred.length>0?'（部分資料載入中，稍後再同步一次）':'');
+      const _archNote=(archivedDropped.length>0?'（'+archivedDropped.length+' 筆封存期別的修改未上傳，已從待推清單移除；內容記在 Console 與 __lastSyncReport）':'')+(archivedDeferred.length>0?'（'+_deferTxt()+'）':'');
       if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端'+(_mergedN>0?'（優化紀錄已合併雲端 '+_mergedN+' 筆）':'')+(_notesKeptN>0?'（調整備註已保留雲端 '+_notesKeptN+' 個品號）':'')+(_editsKeptN>0?'（編輯覆蓋值已保留雲端 '+_editsKeptN+' 個品號）':'')+_archNote, archivedDropped.length>0?'error':'success', archivedDropped.length>0?6000:undefined);
       // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌（失敗只記 console，不影響同步結果判定）
       try { if(window.App && typeof App._updateDailyProgressFromAdjustments === 'function') App._updateDailyProgressFromAdjustments({ pushToCloud: true }); }
@@ -2059,9 +2076,9 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       }
       // 第 3 塊：封存殘留的處置也列進同一個彈窗（不另開新窗）。drop／defer 都【不計入 problems】——走到這裡是因為別的問題。
       archivedDropped.forEach(d=>lines.push('［封存未上傳］'+d.key+'：'+(d.codes?d.codes.length+' 個品號（'+d.codes.join('、')+'）':'品號不明（註冊表損毀）')+'，內容記在 Console 與 __lastSyncReport'+(d.persisted?'':'；⚠ 本機丟棄紀錄未能保存')));
-      archivedDeferred.forEach(k=>lines.push('［載入中未推］'+k+'：封存狀態未就緒，下次同步再試'));
+      archivedDeferred.forEach(k=>lines.push((_notesArchiveHasErrors()?'［封存載入失敗未推］':'［載入中未推］')+k+'：'+(_notesArchiveHasErrors()?'封存分片訂閱失敗，請重新整理頁面':'封存狀態未就緒，下次同步再試')));
       if(archivedDropped.length) msg+='\n'+archivedDropped.length+' 筆封存期別的修改未上傳（該期已封存，已從待推清單移除）。';
-      if(archivedDeferred.length) msg+='\n'+archivedDeferred.length+' 筆廣告調整因資料載入中未推送 → 稍後再同步一次。';
+      if(archivedDeferred.length) msg+='\n'+archivedDeferred.length+' 筆廣告調整未推送 → '+_deferTxt()+'。';
       if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:msg,detail:lines.join('\n'),kind:'error'});
       else if(typeof showToast==='function') showToast('同步未完成：'+problems+' 筆有問題','error');
     }
@@ -6501,6 +6518,9 @@ function saveNotes(shop,notes,code){
 //   ⚠ xp 整個是 optional：不傳就兩個都是 0、那行小字整行不出現 →
 //     其餘呼叫端（window 匯出的那支）行為不變。
 function buildNoteCell(shopKey,code,noteId,noteData,xp){
+  // 第 4 塊：封存（archived）／訂閱失敗（error）的期別，無紀錄時的佔位文字由「點此新增」改為「無調整紀錄」；edit / loading 維持原字。
+  //   判準同彈窗（_notesPopupMode；_growth 恆 edit）。只影響最後那個「無紀錄」分支的文字，其餘 HTML 與改前逐字相同。
+  const _ncMode=_notesPopupMode(shopKey); const _ncRo=(_ncMode==='archived'||_ncMode==='error');
   let adjList=[];
   if(noteData){if(typeof noteData==='string')adjList=[{date:'',text:noteData}];else adjList=noteData.adjustments||[];}
   // 商品調整（_growth）：只取當期算顯示，其他期間僅計數（供格子上的「其他期間 N」）。非 _growth 時 histCount 恆 0、adjList 不動。
@@ -6574,7 +6594,7 @@ function buildNoteCell(shopKey,code,noteId,noteData,xp){
       onclick="openNotePopup('${shopKey}','${ce}')">
       ${hasNote?`<div style="flex:1;min-width:0">${latestDate?`<div class="note-adj-date">${latestDate}</div>`:''}<div class="note-adj-text">${latestText.replace(/</g,'&lt;')}</div>${xpUnder}</div><span style="font-size:13px;flex-shrink:0;margin-top:1px">📝</span>`
       :(xpOnly?`<div style="flex:1;min-width:0">${xpOnly}</div><span style="font-size:13px;flex-shrink:0">📝</span>`
-              :`<div style="flex:1;color:#9ca3af;font-size:11px;padding:2px 0">點此新增</div><span style="font-size:13px;flex-shrink:0">📝</span>`)}
+              :`<div style="flex:1;color:#9ca3af;font-size:11px;padding:2px 0">${_ncRo?'無調整紀錄':'點此新增'}</div><span style="font-size:13px;flex-shrink:0">📝</span>`)}
     </div>
   </td>`;
 }
@@ -7508,10 +7528,13 @@ function buildSuggCell(shop,r){
   if(!r.testTags?.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
   const codeEsc=r.code.replace(/'/g,"\\'");
   const s=state[shop];const noteKey=shop+'|'+s.curMonth+'|'+s.curHalf;
+  // 第 4 塊：封存（archived）／訂閱失敗（error）的期別不能再寫 → title 不寫「填寫／編輯」。判準同彈窗（_notesPopupMode）；edit / loading 的 HTML 與改前逐字相同。
+  //   已知缺口（刻意不處理）：封存期的建議標籤永遠不會變成「✓ 已優化」，會一直亮著。
+  const _roMode=_notesPopupMode(noteKey); const _roTag=(_roMode==='archived'||_roMode==='error');
   if(isSuggDone(shop,r.code)){
-    return`<td class="tl"><span class="tag sugg-tag sugg-done" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊查看/編輯廣告調整">✓ 已優化</span></td>`;
+    return`<td class="tl"><span class="tag sugg-tag sugg-done" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="${_roTag?'點擊查看廣告調整（此期已封存）':'點擊查看/編輯廣告調整'}">✓ 已優化</span></td>`;
   }
-  const tagsHtml=r.testTags.map(tt=>`<span class="tag sugg-tag ${tt.cls}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${tt.label}</span>`).join(' ');
+  const tagsHtml=r.testTags.map(tt=>`<span class="tag sugg-tag ${tt.cls}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="${_roTag?'點擊查看廣告調整（此期已封存）':'點擊填寫廣告調整，即算完成'}">${tt.label}</span>`).join(' ');
   return`<td class="tl">${tagsHtml}</td>`;
 }
 
@@ -7656,7 +7679,8 @@ function openNotePopup(shopKey,code){
     modal.innerHTML=`<div class="pnm-box" onclick="event.stopPropagation()">
       <div class="pnm-header"><div class="pnm-title" id="pnm-title"></div><button class="pnm-close" onclick="closeProfitNoteModal()">×</button></div>
       <div class="pnm-body">
-        <div class="pnm-section">調整紀錄（按 Enter 或「送出」新增，自動加日期・自動儲存）</div>
+        <div class="pnm-section" id="pnm-section-main">調整紀錄（按 Enter 或「送出」新增，自動加日期・自動儲存）</div>
+        <div id="pnm-mode-note" class="pnm-mode-note" hidden></div>
         <div class="pnm-input-row"><input id="pnm-inp" class="pnm-inp" type="text" placeholder="例：調整主圖 / 加強廣告預算 +500"><button class="pnm-send" onclick="submitProfitNote()">送出</button></div>
         <div id="pnm-list" class="pnm-list"></div>
         <div id="pnm-hist-wrap" style="display:none">
@@ -7678,6 +7702,25 @@ function openNotePopup(shopKey,code){
   const r=state[baseShop]?._built?.find(x=>x.code===code);
   document.getElementById('pnm-title').textContent=r?`${code}・${r.name}`:code;
   const pnmInp=document.getElementById('pnm-inp');if(pnmInp)pnmInp.value='';
+  // ── 第 4 塊：封存期別唯讀呈現。模式在【開啟當下】判一次（_notesPopupMode），存在 _pnm.mode 給 renderPnmList 讀。
+  //   彈窗開著時狀態改變（ready 由 false 變 true、別人解封存）刻意不重畫：profitDataReady 監聽本來就不碰彈窗，
+  //   彈窗內容以開啟當下為準；送出時第 2 塊的閘門會再判一次，最壞是 toast 一次。
+  //   ⚠ 模板只建一次（上方 if(!modal)），所以 class / hidden / 文字都要在每次開啟時重設，不能只在建立時設。
+  //   ⚠ .pnm-input-row 自己有 display:flex，UA 的 [hidden] 會被蓋掉 → 用 .pnm-box.is-readonly .pnm-input-row{display:none}（css/profit.css）隱藏。
+  //   已知缺口（刻意不補）：readonly 時輸入列隱藏、綁在 #pnm-inp 上的 Escape 關窗失效，只能點「關閉」或點背景。
+  _pnm.mode=_notesPopupMode(shopKey);
+  { const box=modal.querySelector('.pnm-box'); const note=document.getElementById('pnm-mode-note'); const head=document.getElementById('pnm-section-main');
+    const ro=(_pnm.mode==='archived'||_pnm.mode==='error');
+    if(box) box.classList.toggle('is-readonly', ro);
+    if(head) head.textContent= ro ? '調整紀錄（僅供查看）' : '調整紀錄（按 Enter 或「送出」新增，自動加日期・自動儲存）';
+    if(note){
+      note.classList.remove('is-loading','is-error');
+      if(_pnm.mode==='archived'){ note.textContent='此期已封存，僅供查看。如需修改請聯絡管理員。'; note.hidden=false; }
+      else if(_pnm.mode==='error'){ note.textContent=_NOTES_BLOCK_ERROR; note.classList.add('is-error'); note.hidden=false; }
+      else if(_pnm.mode==='loading'){ note.textContent=_NOTES_BLOCK_LOADING; note.classList.add('is-loading'); note.hidden=false; }   // B-(1)：輸入照常顯示，只多一行不擋操作的說明
+      else { note.textContent=''; note.hidden=true; }
+    }
+  }
   renderPnmList();
   renderPnmHistory();
   renderPnmInsight();
@@ -7687,6 +7730,8 @@ function openNotePopup(shopKey,code){
 function renderPnmList(){
   if(!_pnm)return;
   const {shopKey,code}=_pnm;
+  // 第 4 塊：唯讀模式（archived / error，由 openNotePopup 判定存在 _pnm.mode）不烘 ✎ ×；edit / loading 的 HTML 與改前逐字相同。
+  const _ro=(_pnm.mode==='archived'||_pnm.mode==='error');
   const notes=getNotes(shopKey);const nd=notes[code];
   let adj=[];
   if(nd){if(typeof nd==='string')adj=[{date:'',text:nd}];else adj=nd.adjustments||[];}
@@ -7704,8 +7749,8 @@ function renderPnmList(){
   el.innerHTML=sorted.map(d=>map.get(d).map(({text,i})=>`<div class="pnm-entry">
     <div class="pnm-entry-date">${d}</div>
     <div class="pnm-entry-text">${text.replace(/</g,'&lt;')}</div>
-    <button class="pnm-entry-edit" onclick="_pnmEditNote(${i},this)" title="編輯這筆文字（保留原日期）">✎</button>
-    <button class="pnm-entry-del" onclick="deleteProfitNote(${i},this)" data-text="${escapeHtmlLike(text)}" data-date="${escapeHtmlLike(d)}">×</button>
+    ${_ro?'':`<button class="pnm-entry-edit" onclick="_pnmEditNote(${i},this)" title="編輯這筆文字（保留原日期）">✎</button>
+    <button class="pnm-entry-del" onclick="deleteProfitNote(${i},this)" data-text="${escapeHtmlLike(text)}" data-date="${escapeHtmlLike(d)}">×</button>`}
   </div>`).join('')).join('');
 }
 function renderPnmHistory(){
@@ -7819,6 +7864,9 @@ function _pnmEditNote(origIdx,btn){
   const row=btn.closest('.pnm-entry');if(!row)return;
   const span=row.querySelector('.pnm-entry-text');if(!span)return;   // 已在編輯中 → span 已被換掉 → 早退，不重複開
   const {shopKey,code}=_pnm;
+  // 第 4 塊：點 ✎ 的當下就判，不讓編輯框出現（第 2 塊 save() 內的閘門保留，作為第二道 —— 開編輯框後 ready 可能改變）。
+  //   同樣只能 toast（理由見 save() 內閘門旁註解）。唯讀模式下按鈕根本不會被烘出，這裡接的是「彈窗開著時狀態變了」與舊 DOM。
+  { const _blk=_notesWriteBlockReason(shopKey); if(_blk){ if(typeof showToast==='function') showToast(_blk,'error',4000); return; } }
   const _readAdj=()=>{const nd=getNotes(shopKey)[code];if(!nd)return[];return(typeof nd==='string')?[{date:'',text:nd}]:(nd.adjustments||[]);};
   const cur=_readAdj()[origIdx];if(!cur)return;
   const orig=String(cur.text||'');

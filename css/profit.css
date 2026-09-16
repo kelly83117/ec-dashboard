@@ -413,6 +413,15 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .pnm-entry-ins .pnm-entry-text{color:#581c87;}
 .pnm-footer{padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;}
 .pnm-close-btn{padding:7px 22px;border:1px solid #e4e6ef;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;}
+/* ── 封存期別唯讀（js/profit.js openNotePopup 的 _pnm.mode：archived / error → .pnm-box.is-readonly；說明條 #pnm-mode-note）──
+   新增類別用 :root 變數（main.css）；旁邊 .pnm-* 既有樣式刻意寫死 hex（見 .pnm-entry-edit 上方註解），本區【不動】它們。
+   ⚠ .pnm-input-row 自己有 display:flex，UA 的 [hidden]{display:none} 會被蓋掉 → 隱藏輸入列必須靠下面這條 class 規則，不能只設 hidden。
+   說明條底色用 --warn-soft（與表格廣告調整格子有紀錄時的 #fef3c7 同色，使用者已把它讀成「廣告調整」）；載入中 --info-soft；訂閱失敗 --danger-soft。
+   不動 --bg。 */
+.pnm-box.is-readonly .pnm-input-row{display:none;}
+.pnm-mode-note{margin-bottom:12px;padding:9px 12px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--warn-soft);color:var(--text);font-size:12.5px;line-height:1.5;word-break:break-word;}
+.pnm-mode-note.is-loading{background:var(--info-soft);}
+.pnm-mode-note.is-error{background:var(--danger-soft);}
 /* Column picker */
 .col-pick-btn{padding:7px 14px;border:1px solid #e4e6ef;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;font-weight:600;color:#374151;}
 .col-pick-btn:hover{background:#f3f4f6;}
