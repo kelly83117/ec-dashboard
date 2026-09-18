@@ -2018,11 +2018,31 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     }
     // 逐一 await：一次只送一筆，佇列深度恆為 1 → 不會撞 resource-exhausted；一筆炸不拖垮其他
     const ok=[]; const failed=[];
+    // 每筆推送 30 秒逾時（B-3 #204）：網路斷線時 Firestore SDK 的寫入 promise【不 resolve 也不 reject】（寫入排在 SDK
+    //   佇列等重連），沒有逾時的話迴圈永遠停在第 i 筆、按鈕卡在「同步中 i/N」且 disabled，使用者只能重整。
+    //   逾時走既有 catch → failed（key 留在 pending、dirty 不清、彈窗列出），與其他失敗【同一條出口】，不另開分支。
+    //   ⚠ 逾時【取消不了】SDK 佇列裡那筆：網路回來後它仍會送出。三種寫入都冪等（setReport 整份覆蓋 / setField 單欄位 /
+    //     merge 推送前現讀雲端），所以晚到的完成只記 console、不動 ok / failed / pending —— 報告已經出了，
+    //     下一次同步會再推一次同 key，結果一樣。也順便接住晚到的 reject，免得變成 unhandled rejection。
+    //   ⚠ 第一筆逾時後【剩下的不再嘗試】：逾時幾乎只在網路斷時發生，逐筆再等 30 秒只是 N×30 秒的空等
+    //     （實測 2 筆就 61 秒才彈窗）。剩下的 task 直接記進 failed（key 一樣留在 pending）並 break，走同一條失敗出口。
+    const _TASK_TIMEOUT_MS=30000;
     for(let i=0;i<tasks.length;i++){
       if(btn) btn.textContent='同步中 '+(i+1)+'/'+tasks.length;
       const _k=tasks[i].key;
-      try{ await tasks[i].run(); ok.push(_k); console.log('[PUSH] ✓',_k); }   // collection(momo_products/reconcile)寫入分支現在也有 log，路徑不再是黑的
+      let _tmo=null, _timedOut=false;
+      try{
+        const _p=tasks[i].run();
+        Promise.resolve(_p).then(()=>{ if(_timedOut) console.warn('[PUSH] ⏱ 逾時後才完成（SDK 佇列補送；下次同步會再推一次同 key）：',_k); }, e=>{ if(_timedOut) console.warn('[PUSH] ⏱ 逾時後才失敗：',_k,e); });
+        await Promise.race([ _p, new Promise((_,rej)=>{ _tmo=setTimeout(()=>{ _timedOut=true; rej(new Error('逾時（'+(_TASK_TIMEOUT_MS/1000)+' 秒沒有回應），可能是網路不穩；資料還在本機，請稍後再按一次同步')); },_TASK_TIMEOUT_MS); }) ]);
+        ok.push(_k); console.log('[PUSH] ✓',_k);   // collection(momo_products/reconcile)寫入分支現在也有 log，路徑不再是黑的
+      }
       catch(e){ failed.push({key:_k,msg:(e&&e.message)||String(e)}); console.error('[PUSH] ✗',_k,e); }
+      finally{ clearTimeout(_tmo); }
+      if(_timedOut){
+        for(let j=i+1;j<tasks.length;j++){ failed.push({key:tasks[j].key,msg:'前一筆逾時，這筆這次未嘗試；資料還在本機，請稍後再按一次同步'}); console.warn('[PUSH] ⏭ 前一筆逾時、未嘗試：',tasks[j].key); }
+        break;
+      }
     }
     // pending 清理：只保留 failed + skippedProblem（要重試 / 要一直提醒），其餘刪掉
     // 只清掉「這次真的推成功」的 key（ok）；失敗/讀不到/逐項勾選未選的一律留在 pending 下次再推
