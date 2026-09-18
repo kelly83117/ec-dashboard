@@ -201,6 +201,10 @@ const fmtNTD = n => 'NT$ ' + Math.round(n).toLocaleString();
 // 有廣告費的平台（其他平台不填、不顯示廣告費欄位）
 const PLATFORMS_WITH_AD_SPEND = new Set(['生活好麻吉', '玩樂盒子', '森之旅', '維克生活']);
 
+// 不參與「資料截止日」判斷的平台：小量通路常整天 0 營收，不能讓它們把全站預設檢視日往回拖
+//   （dashboard.js 的 activePlatforms 會先剔除這些）。與 PLATFORMS_WITH_AD_SPEND 同款白名單寫法。
+const PLATFORMS_EXCLUDED_FROM_CUTOFF = new Set(['PChome', '博客來', 'Friday']);
+
 // 平台所屬通路（卡片上的色標用）
 const PLATFORM_MARKETPLACE = {
   '生活好麻吉': 'shopee', '玩樂盒子': 'shopee', '森之旅': 'shopee', '維克生活': 'shopee',
@@ -3454,7 +3458,7 @@ Object.assign(window, {
   toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms,
   todayStr, genId, escapeHtml, showToast, fmtNTD, marketplaceBadgeHtml,
   getCategoryMeta, getCategoryItems,
-  uid, DEPT_COLORS, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORM_MARKETPLACE,
+  uid, DEPT_COLORS, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORMS_EXCLUDED_FROM_CUTOFF, PLATFORM_MARKETPLACE,
   MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, OFFICE_CONFIG, OFFICE_FEATURES,
   DAILY_TASK_STATUS, DAILY_TASK_STATUS_LIST, TASK_CATEGORIES, TASK_CATEGORY_NAMES,
   TASK_CATEGORY_ALIASES,

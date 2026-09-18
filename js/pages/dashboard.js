@@ -1,6 +1,6 @@
 /* js/pages/dashboard.js -- methods extracted from original App, merged back via Object.assign(App, ...) */
 const App = window.App;
-const { Store, escapeHtml, showToast, fmtNTD, toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORM_MARKETPLACE, MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, marketplaceBadgeHtml } = window;
+const { Store, escapeHtml, showToast, fmtNTD, toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORMS_EXCLUDED_FROM_CUTOFF, PLATFORM_MARKETPLACE, MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, marketplaceBadgeHtml } = window;
 
 Object.assign(App, {
   viewDashboard() {
@@ -26,8 +26,11 @@ Object.assign(App, {
     //   ⚠ 反例：停用通路若在 14 天窗內有一筆手誤，會被算活躍，截止日就退到它最後有值的那天（可能很舊）。
     //   找不到全填日（新環境 / 資料清空 / 某通路長期缺填）→ fallback 昨日，畫面完全等於改動前。
     const activeFrom = toDateStr(addDays(now, -14));
+    //   ⚠ PLATFORMS_EXCLUDED_FROM_CUTOFF（PChome / 博客來 / Friday）不算活躍通路：它們常整天 0，
+    //     若納入，「全部 > 0 的最後一天」會被拖到很久以前（實測：博客來昨日填 0 → 全站預設日退一天）。
     const revOn = (p, d) => +(p.daily?.[d]) > 0;
     const activePlatforms = platforms.filter(p =>
+      !PLATFORMS_EXCLUDED_FROM_CUTOFF.has(p.name) &&
       Object.keys(p.daily || {}).some(d => d >= activeFrom && d <= defaultInputDate && p.daily[d] != null));
     let dataCutoff = null;
     if (activePlatforms.length) {
