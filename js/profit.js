@@ -1732,7 +1732,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     const s=state[shop];
     const isPlainObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
     const tasks=[];                 // { key, run:()=>Promise }：延遲執行，逐一 await（佇列深度恆為 1）
-    const taskKeys=new Set();       // 已排入推送的 key，避免同一個 key 排兩次（見下方 pending 迴圈開頭）
+    const taskKeys=new Set();       // 當期 extra 已處置過的 key（排入推送、或封存 defer），pending 迴圈不再碰，避免同一個 key 排兩次 / defer 兩次（見下方 pending 迴圈開頭）
     const skippedByDesign=[];       // filemeta：故意不上雲，安靜
     const skippedProblem=[];        // 讀不到 / 損毀 / 非物件：一定要浮上來
     const _optlogMerges=[];         // optlog read-merge-write 併回雲端的筆數（{shop,n}）→ 「已合併雲端 N 筆」不靜默
@@ -1799,7 +1799,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       //       ⚠ 這裡只呼叫 _notesSyncDisposition、不附加任何條件（與 pending 迴圈、_momoCollectPending 兩處鏡像逐字同型）。
       const _nkDisp=_notesIsDirty('ec_notes|'+_nk) ? _notesSyncDisposition('ec_notes|'+_nk) : 'not-dirty';
       if(_nkDisp==='drop'){ archivedDropped.push(_notesDropArchived('ec_notes|'+_nk)); }
-      else if(_nkDisp==='defer'){ archivedDeferred.push('ec_notes|'+_nk); console.log('[syncToCloud] 封存狀態未就緒，這把廣告調整這次不推、保留到下次同步：','ec_notes|'+_nk); }
+      else if(_nkDisp==='defer'){ taskKeys.add('ec_notes|'+_nk); archivedDeferred.push('ec_notes|'+_nk); console.log('[syncToCloud] 封存狀態未就緒，這把廣告調整這次不推、保留到下次同步：','ec_notes|'+_nk); }   // taskKeys.add：同 session 剛存過的當期 key 也在 _pendingSyncKeys 裡，不加會被下方 pending 迴圈再 defer 一次（archivedDeferred 重複、toast 數字多一）
       else if(_nkDisp==='push'){ taskKeys.add('ec_notes|'+_nk); tasks.push({key:'ec_notes|'+_nk,run:()=>syncNotesMerge('ec_notes|'+_nk,'廣告調整').then(n=>{ if(n>0) _notesMerges.push({key:'ec_notes|'+_nk, n}); })}); }
       else { skippedNotDirty.push('ec_notes|'+_nk); console.log('[syncToCloud] ec_notes 未編輯過、跳過推送（沒編輯過就沒有品號級 dirty，硬推會命中 syncNotesMerge 的 (b) 而報錯）：','ec_notes|'+_nk); }
     }
