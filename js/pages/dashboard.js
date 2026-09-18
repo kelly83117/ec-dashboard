@@ -640,17 +640,28 @@ Object.assign(App, {
      - 指標走 channelMetrics()，與排名長條同一份計算
      - 純 render、無事件綁定：跟著既有重繪路徑更新
      門檻：跌幅 > 20%（需有比較期資料）、ROAS < 5（需 ROAS 可計算）；符合任一即列出。
+     前置：日均營收（本期 / 比較期取大）≥ ALERT_MIN_REV 才進判斷，小通路的 0 ↔ 幾百塊波動不示警。
      跌幅的比較基準隨檢視範圍走：單日 = 較前一天（寫實際日期）、月累計 = 較上月同期，原因文字會標明。 */
   channelAlertsHtml(platforms, rangeInfo) {
     const DROP_LIMIT = -20;   // 跌幅超過 20% → 標記
     // 與排名長條的紅色門檻對齊（channelRankingHtml 的 is-low 也是 < 5），
     // 避免出現「排名長條是黃燈、卻被列入需要留意」的矛盾
     const ROAS_LIMIT = 5;     // ROAS 低於 5 → 標記
+    // 日均營收（本期、比較期各自平均後取大）低於此值的通路不示警：
+    //   小通路（PChome / 博客來 / Friday）整天 0 或幾百塊，±100% 的波動沒有判讀價值。
+    //   用金額不用通路名單：既有七通路只要哪天真的兩期都低於此值，同樣不示警。
+    //   「取大」是為了留住「昨天 50,000 → 今天 0」這種該警的：只看本期會漏掉。
+    //   用日均而非期間總額，同一個常數在單日模式（= 當日 / 前一日取大）與月累計模式都成立。
+    //   跌幅與 ROAS 兩個條件一併受此門檻約束。
+    const ALERT_MIN_REV = 10000;
 
     const metrics = this.channelMetrics(platforms, rangeInfo.showDates, rangeInfo.compareDates);
     // 本期至少一個通路有營收 —— 與排名長條的空狀態判準（maxRev <= 0）同一個量，三塊會一起變空
     const hasAnyRev = metrics.some(m => m.rev > 0);
+    const showDays = Math.max(1, rangeInfo.showDates.length);
+    const cmpDays  = Math.max(1, rangeInfo.compareDates.length);
     const alerts = metrics
+      .filter(m => Math.max(m.rev / showDays, m.prev / cmpDays) >= ALERT_MIN_REV)
       .map((m) => {
         const reasons = [];
         // 比較期沒資料就沒有跌幅可言 → 不判斷（hasDelta 已含此保護）
