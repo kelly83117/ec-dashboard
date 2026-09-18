@@ -190,6 +190,11 @@ const PLATFORMS = [
   { name: 'MOMO',       icon: '🛒', color: '#ec4899', today: 612800, yesterday: 517131, week: 4050000, month: 15240000 },
   { name: 'MO+',        icon: '💎', color: '#db2777', today: 245400, yesterday: 230856, week: 1620000, month: 6120000 },
   { name: '酷澎',       icon: '🚀', color: '#3b82f6', today: 421900, yesterday: 367829, week: 2810000, month: 10580000 },
+  // 2026-09 新增三通路：只有營收、沒有廣告費 / ROAS（不進 PLATFORMS_WITH_AD_SPEND）。
+  //   ⚠ 這裡只是雲端 ec.platforms 為 null 時的種子；正式環境要另外把三筆物件 append 進 Firestore 才會出現。
+  { name: 'PChome',     icon: '🅿️', color: '#dc2626' },
+  { name: '博客來',     icon: '📚', color: '#0891b2' },
+  { name: 'Friday',     icon: '🛍️', color: '#8b5cf6' },
 ];
 const fmtNTD = n => 'NT$ ' + Math.round(n).toLocaleString();
 
@@ -201,13 +206,29 @@ const PLATFORM_MARKETPLACE = {
   '生活好麻吉': 'shopee', '玩樂盒子': 'shopee', '森之旅': 'shopee', '維克生活': 'shopee',
   'MOMO': 'momo', 'MO+': 'momo',
   '酷澎': 'coupang',
+  'PChome': 'pchome', '博客來': 'books', 'Friday': 'friday',
 };
-// 通路 logo 圖檔（檔案放在 logos/ 資料夾）
+// 通路 logo 圖檔（檔案放在 logos/ 資料夾；檔名大小寫要與 assets/ 一致，GitHub Pages 區分大小寫）
 const MARKETPLACE_BADGE = {
   shopee:  { src: 'assets/logos/shopee.png',  name: '蝦皮' },
   momo:    { src: 'assets/logos/momo.png',    name: 'MOMO' },
   coupang: { src: 'assets/logos/coupang.png', name: '酷澎' },
+  pchome:  { src: 'assets/logos/PChome.png',  name: 'PChome' },
+  books:   { src: 'assets/logos/books.png',   name: '博客來' },
+  friday:  { src: 'assets/logos/friday.png',  name: 'Friday' },
 };
+// 每日營收填寫表格 / 本月明細的分群「區段」：一個區段可含多個 marketplace（其他通路 = 3 個）。
+//   區段沒有任何平台在資料裡時，兩處都不畫（程式先上、資料後補的空窗期畫面與現在完全一樣）。
+const MARKETPLACE_SECTIONS = [
+  { key: 'shopee',  name: '蝦皮',     tint: '#ee4d2d', markets: ['shopee'] },
+  { key: 'momo',    name: 'MOMO',     tint: '#ec4899', markets: ['momo'] },
+  { key: 'coupang', name: '酷澎',     tint: '#3b82f6', markets: ['coupang'] },
+  { key: 'other',   name: '其他通路', tint: '#64748b', markets: ['pchome', 'books', 'friday'] },
+];
+function marketplaceSectionOf(platformName) {
+  const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
+  return MARKETPLACE_SECTIONS.find(s => s.markets.includes(m)) || MARKETPLACE_SECTIONS[0];
+}
 function marketplaceBadgeHtml(platformName) {
   const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
   const s = MARKETPLACE_BADGE[m];
@@ -218,12 +239,14 @@ function marketplaceBadgeHtml(platformName) {
   </div>`;
 }
 
-// 平台分組（用於儀表板上方 4 張總覽卡）
+// 平台分組（用於儀表板上方 5 張總覽卡；成員都不在資料裡的群組不畫）
+//   ⚠ 未來新增的小通路一律併進「其他通路」的 members，不要開第六張卡：五張一排已是 1280 寬的極限（見 css/main.css .summary-grid）。
 const PLATFORM_GROUPS = [
-  { name: '全通路總營收', icon: '🏪', color: '#0f172a', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活','MOMO','MO+','酷澎'] },
+  { name: '全通路總營收', icon: '🏪', color: '#0f172a', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活','MOMO','MO+','酷澎','PChome','博客來','Friday'] },
   { name: '蝦皮營收',     logo: 'assets/logos/shopee.png',  color: '#ee4d2d', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活'] },
   { name: 'MOMO營收',     logo: 'assets/logos/momo.png',    color: '#e6007e', members: ['MOMO','MO+'] },
   { name: '酷澎營收',     logo: 'assets/logos/coupang.png', color: '#3b82f6', members: ['酷澎'] },
+  { name: '其他通路',     icon: '🏬',                        color: '#64748b', members: ['PChome','博客來','Friday'] },
 ];
 
 /* ------------- 日期工具 ------------- */
@@ -3432,7 +3455,7 @@ Object.assign(window, {
   todayStr, genId, escapeHtml, showToast, fmtNTD, marketplaceBadgeHtml,
   getCategoryMeta, getCategoryItems,
   uid, DEPT_COLORS, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORM_MARKETPLACE,
-  MARKETPLACE_BADGE, PLATFORM_GROUPS, OFFICE_CONFIG, OFFICE_FEATURES,
+  MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, OFFICE_CONFIG, OFFICE_FEATURES,
   DAILY_TASK_STATUS, DAILY_TASK_STATUS_LIST, TASK_CATEGORIES, TASK_CATEGORY_NAMES,
   TASK_CATEGORY_ALIASES,
 });

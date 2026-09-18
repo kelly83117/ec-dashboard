@@ -1,6 +1,6 @@
 /* js/pages/dashboard.js -- methods extracted from original App, merged back via Object.assign(App, ...) */
 const App = window.App;
-const { Store, escapeHtml, showToast, fmtNTD, toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORM_MARKETPLACE, MARKETPLACE_BADGE, PLATFORM_GROUPS, marketplaceBadgeHtml } = window;
+const { Store, escapeHtml, showToast, fmtNTD, toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORM_MARKETPLACE, MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, marketplaceBadgeHtml } = window;
 
 Object.assign(App, {
   viewDashboard() {
@@ -95,7 +95,8 @@ Object.assign(App, {
           }
         });
       });
-      return { ...g, total };
+      // present：群組成員至少一個在資料裡；都不在（例：其他通路三筆還沒寫進雲端）→ 月區塊右側不畫它的小計
+      return { ...g, total, present: members.length > 0 };
     });
 
     const monthBlock = `
@@ -109,7 +110,7 @@ Object.assign(App, {
             </div>
           </div>
           <div style="display:flex;gap:32px;flex-wrap:wrap;justify-content:flex-end;flex:1">
-            ${monthGroupTotals.slice(1).map(g => `
+            ${monthGroupTotals.slice(1).filter(g => g.present).map(g => `
               <div style="text-align:right;min-width:120px">
                 <div style="font-size:11px;color:var(--text-muted);letter-spacing:.05em;margin-bottom:4px;text-transform:uppercase">${escapeHtml(g.name.replace('總營收','').replace('營收','').trim())}</div>
                 <div style="font-size:20px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-0.02em">${fmtNTD(g.total)}</div>
@@ -285,6 +286,8 @@ Object.assign(App, {
     // data-ads-idxs：該通路「有投廣告」的成員索引，供 bindCardInputs 即時算 ROAS
     const summaryCards = PLATFORM_GROUPS.map((g, gi) => {
       const members = platforms.filter(p => g.members.includes(p.name));
+      // 通路卡成員都不在資料裡（例：其他通路三筆還沒寫進雲端）→ 不畫空卡；主卡永遠畫
+      if (gi > 0 && members.length === 0) return '';
       const memberIdxs = members.map(p => platforms.indexOf(p)).filter(i => i >= 0);
       const cur  = members.reduce((s, p) => s + sumOver(p, rangeInfo.showDates), 0);
       const prev = members.reduce((s, p) => s + sumOver(p, rangeInfo.compareDates), 0);
@@ -346,15 +349,10 @@ Object.assign(App, {
       `;
     }).join('');
 
-    // 依通路分群（蝦皮 / MOMO / 酷澎）
-    const marketOrder = ['shopee', 'momo', 'coupang'];
-    const marketTint = { shopee: '#ee4d2d', momo: '#ec4899', coupang: '#3b82f6' };
-    const grouped = { shopee: [], momo: [], coupang: [] };
-    platforms.forEach((p, i) => {
-      const m = PLATFORM_MARKETPLACE[p.name] || 'shopee';
-      if (!grouped[m]) grouped[m] = [];
-      grouped[m].push({ p, i });
-    });
+    // 依區段分群（蝦皮 / MOMO / 酷澎 / 其他通路）— 區段定義在 app.js MARKETPLACE_SECTIONS，不在這裡寫死 key
+    const grouped = {};
+    MARKETPLACE_SECTIONS.forEach(s => { grouped[s.key] = []; });
+    platforms.forEach((p, i) => { grouped[marketplaceSectionOf(p.name).key].push({ p, i }); });
 
     // 單一通路列
     const buildPlatformRow = (p, i) => {
@@ -423,18 +421,18 @@ Object.assign(App, {
     };
 
     // 通路分群分隔列 + 該通路的通路列
-    const marketRowsHtml = marketOrder.map(m => {
-      const items = grouped[m] || [];
+    const marketRowsHtml = MARKETPLACE_SECTIONS.map(sec => {
+      const items = grouped[sec.key] || [];
       if (items.length === 0) return '';
-      const badge = MARKETPLACE_BADGE[m];
-      const tint = marketTint[m] || '#6b7280';
+      // 單一 marketplace 的區段沿用它的 logo；「其他通路」含三家，沒有共同 logo 就不放圖
+      const badge = sec.markets.length === 1 ? MARKETPLACE_BADGE[sec.markets[0]] : null;
       const dividerRow = `
         <tr style="background:var(--bg)">
           <td colspan="6" style="padding:6px 14px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
             <div style="display:flex;align-items:center;gap:7px">
-              <img src="${badge.src}" alt="${escapeHtml(badge.name)}"
-                style="width:14px;height:14px;border-radius:3px;object-fit:contain;flex-shrink:0">
-              <span style="font-size:11px;font-weight:600;color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase">${escapeHtml(badge.name)}</span>
+              ${badge ? `<img src="${badge.src}" alt="${escapeHtml(badge.name)}"
+                style="width:14px;height:14px;border-radius:3px;object-fit:contain;flex-shrink:0">` : ''}
+              <span style="font-size:11px;font-weight:600;color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase">${escapeHtml(sec.name)}</span>
               <span style="font-size:10px;color:var(--text-muted);font-weight:500">· ${items.length} 個通路</span>
             </div>
           </td>
@@ -1325,19 +1323,15 @@ Object.assign(App, {
       `${yMonth}-${String(mMonth + 1).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`
     );
 
-    // 依通路分群（蝦皮 4 / MOMO 2 / 酷澎 1）
-    const marketOrder = ['shopee', 'momo', 'coupang'];
-    const marketTint = { shopee: '#ee4d2d', momo: '#ec4899', coupang: '#3b82f6' };
-    const grouped = { shopee: [], momo: [], coupang: [] };
-    platforms.forEach(p => {
-      const m = PLATFORM_MARKETPLACE[p.name] || 'shopee';
-      if (!grouped[m]) grouped[m] = [];
-      grouped[m].push(p);
-    });
+    // 依區段分群（蝦皮 4 / MOMO 2 / 酷澎 1 / 其他通路 3）；只保留資料裡有平台的區段，小計欄跟著區段走
+    const grouped = {};
+    MARKETPLACE_SECTIONS.forEach(s => { grouped[s.key] = []; });
+    platforms.forEach(p => { grouped[marketplaceSectionOf(p.name).key].push(p); });
+    const sections = MARKETPLACE_SECTIONS.filter(s => grouped[s.key].length > 0);
 
     // 取所有平台的順序 + 各自是否有廣告費
     const flatPlatforms = [];
-    marketOrder.forEach(m => grouped[m].forEach(p => flatPlatforms.push({ p, market: m })));
+    sections.forEach(s => grouped[s.key].forEach(p => flatPlatforms.push({ p, market: s.key })));
 
     // 計算每平台每日 / 每平台總計 / 每日總計 / 整月總計
     const get = (p, d) => +(p.daily?.[d]) || 0;
@@ -1372,13 +1366,13 @@ Object.assign(App, {
     });
 
     // 通路合併表頭（緊湊版）
-    const marketHeadHtml = marketOrder.map(m => {
-      const items = grouped[m] || [];
-      if (items.length === 0) return '';
-      const tint = marketTint[m];
+    const marketHeadHtml = sections.map(sec => {
+      const items = grouped[sec.key];
+      const tint = sec.tint;
       const totalCols = items.reduce((s, p) => s + (PLATFORMS_WITH_AD_SPEND.has(p.name) ? 3 : 1), 0);
-      const badge = MARKETPLACE_BADGE[m];
-      return `<th colspan="${totalCols}" style="padding:3px 6px;background:${tint}14;color:${tint};text-align:center;font-size:12px;font-weight:700;border-left:2px solid ${tint};border-bottom:1px solid var(--border)"><img src="${badge.src}" style="width:12px;height:12px;vertical-align:middle;border-radius:3px;margin-right:3px;object-fit:contain">${escapeHtml(badge.name)}</th>`;
+      // 單一 marketplace 的區段沿用它的 logo；「其他通路」含三家，沒有共同 logo 就不放圖
+      const badge = sec.markets.length === 1 ? MARKETPLACE_BADGE[sec.markets[0]] : null;
+      return `<th colspan="${totalCols}" style="padding:3px 6px;background:${tint}14;color:${tint};text-align:center;font-size:12px;font-weight:700;border-left:2px solid ${tint};border-bottom:1px solid var(--border)">${badge ? `<img src="${badge.src}" style="width:12px;height:12px;vertical-align:middle;border-radius:3px;margin-right:3px;object-fit:contain">` : ''}${escapeHtml(sec.name)}</th>`;
     }).join('');
 
     // 平台名稱列
@@ -1406,13 +1400,13 @@ Object.assign(App, {
       const dayLabel = d.slice(5).replace('-', '/');
       let dayRev = 0;
       let dayAds = 0;
-      // 各通路當日小計（蝦皮 / MOMO / 酷澎）
-      const marketSubtotals = { shopee: 0, momo: 0, coupang: 0 };
+      // 各區段當日小計（蝦皮 / MOMO / 酷澎 / 其他通路）
+      const marketSubtotals = {};
+      sections.forEach(s => { marketSubtotals[s.key] = 0; });
       const cells = colSpec.map(({ p, hasAds }) => {
         const rev = get(p, d);
         dayRev += rev;
-        const m = PLATFORM_MARKETPLACE[p.name] || 'shopee';
-        marketSubtotals[m] += rev;
+        marketSubtotals[marketplaceSectionOf(p.name).key] += rev;
         // 每個通路的第一欄加 border-left 區隔
         const lb = '1px solid #94a3b8';
         if (hasAds) {
@@ -1433,9 +1427,7 @@ Object.assign(App, {
         <tr style="background:${isToday ? '#eef2ff44' : 'transparent'};line-height:1.25">
           <td style="padding:2px 8px;text-align:center;font-size:12px;font-weight:600;color:${isToday ? 'var(--primary)' : 'var(--text-muted)'};font-variant-numeric:tabular-nums;white-space:nowrap;border-right:1px solid var(--border);background:${isToday ? '#f5f3ff' : 'var(--surface)'}">${escapeHtml(dayLabel)}${isToday ? ' ●' : ''}</td>
           ${cells}
-          ${subtotalCell(marketSubtotals.shopee, '#ee4d2d')}
-          ${subtotalCell(marketSubtotals.momo, '#ec4899')}
-          ${subtotalCell(marketSubtotals.coupang, '#3b82f6')}
+          ${sections.map(s => subtotalCell(marketSubtotals[s.key], s.tint)).join('')}
           <td style="padding:2px 8px;text-align:center;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;color:${dayRev > 0 ? 'var(--text)' : '#cbd5e1'};background:#fef3c7;border-left:2px solid var(--warn)">${fmt(dayRev)}</td>
         </tr>
       `;
@@ -1453,8 +1445,9 @@ Object.assign(App, {
       return `<td style="padding:4px 6px;text-align:center;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;${lb}">${fmt(t.rev)}</td>`;
     }).join('');
 
-    // 通路月總計
-    const monthSubtotals = { shopee: 0, momo: 0, coupang: 0 };
+    // 區段月總計
+    const monthSubtotals = {};
+    sections.forEach(s => { monthSubtotals[s.key] = 0; });
     flatPlatforms.forEach(({ p, market }, idx) => {
       monthSubtotals[market] += platformTotals[idx].rev;
     });
@@ -1466,13 +1459,11 @@ Object.assign(App, {
             <tr>
               <th rowspan="3" style="padding:3px 8px;text-align:left;font-size:11px;color:var(--text-muted);font-weight:600;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);width:52px">日期</th>
               ${marketHeadHtml}
-              <th colspan="4" rowspan="2" style="padding:3px 8px;text-align:center;font-size:12px;color:var(--text-muted);font-weight:700;border-left:2px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg)">通路小計 / 當日總計</th>
+              <th colspan="${sections.length + 1}" rowspan="2" style="padding:3px 8px;text-align:center;font-size:12px;color:var(--text-muted);font-weight:700;border-left:2px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg)">通路小計 / 當日總計</th>
             </tr>
             <tr>${platformHeadHtml}</tr>
             <tr>${subHeadHtml}
-              <th style="padding:3px 6px;text-align:center;font-size:10.5px;color:#ee4d2d;font-weight:700;border-bottom:1px solid var(--border);background:#ee4d2d10;border-left:2px solid var(--border);white-space:nowrap;min-width:78px">蝦皮總營收</th>
-              <th style="padding:3px 6px;text-align:center;font-size:10.5px;color:#ec4899;font-weight:700;border-bottom:1px solid var(--border);background:#ec489910;white-space:nowrap;min-width:74px">MOMO總營收</th>
-              <th style="padding:3px 6px;text-align:center;font-size:10.5px;color:#3b82f6;font-weight:700;border-bottom:1px solid var(--border);background:#3b82f610;white-space:nowrap;min-width:72px">酷澎總營收</th>
+              ${sections.map((s, i) => `<th style="padding:3px 6px;text-align:center;font-size:10.5px;color:${s.tint};font-weight:700;border-bottom:1px solid var(--border);background:${s.tint}10;${i === 0 ? 'border-left:2px solid var(--border);' : ''}white-space:nowrap;min-width:78px">${escapeHtml(s.name)}總營收</th>`).join('')}
               <th style="padding:3px 6px;text-align:center;font-size:10.5px;color:var(--warn);font-weight:700;border-bottom:1px solid var(--border);background:#fef3c7;border-left:2px solid var(--warn);white-space:nowrap;min-width:86px">當日總營收</th>
             </tr>
           </thead>
@@ -1483,9 +1474,7 @@ Object.assign(App, {
             <tr style="background:var(--bg);border-top:2px solid var(--border);position:sticky;bottom:0;z-index:1">
               <td style="padding:4px 8px;text-align:center;font-size:12.5px;font-weight:800;color:var(--text);border-right:1px solid var(--border);background:var(--bg)">總計</td>
               ${totalCells}
-              <td style="padding:4px 8px;text-align:center;font-size:12.5px;font-weight:800;color:#ee4d2d;background:#ee4d2d18;border-left:2px solid var(--border);font-variant-numeric:tabular-nums">${fmt(monthSubtotals.shopee)}</td>
-              <td style="padding:4px 8px;text-align:center;font-size:12.5px;font-weight:800;color:#ec4899;background:#ec489918;font-variant-numeric:tabular-nums">${fmt(monthSubtotals.momo)}</td>
-              <td style="padding:4px 8px;text-align:center;font-size:12.5px;font-weight:800;color:#3b82f6;background:#3b82f618;font-variant-numeric:tabular-nums">${fmt(monthSubtotals.coupang)}</td>
+              ${sections.map((s, i) => `<td style="padding:4px 8px;text-align:center;font-size:12.5px;font-weight:800;color:${s.tint};background:${s.tint}18;${i === 0 ? 'border-left:2px solid var(--border);' : ''}font-variant-numeric:tabular-nums">${fmt(monthSubtotals[s.key])}</td>`).join('')}
               <td style="padding:4px 8px;text-align:center;font-size:14px;font-weight:800;color:var(--warn);background:#fef3c7;border-left:2px solid var(--warn);font-variant-numeric:tabular-nums">${fmt(monthTotalRev)}</td>
             </tr>
           </tfoot>
