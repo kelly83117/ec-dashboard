@@ -563,27 +563,35 @@
   }
 
   /* ------------- 儀表板首頁 · 總覽卡 (summary-card) -------------
-     四張一排：主卡「全通路總營收」放大，其餘三張為通路卡。
-     窄螢幕由下方 @media (max-width:460px) 的 .stat-grid 規則收成 1 欄。 */
+     五張一排：主卡「全通路總營收」放大，其餘四張為通路卡（蝦皮 / MOMO / 酷澎 / 其他通路）。
+     ⚠ 這組尺寸是「剛好塞下 1280 寬」的最小組合（2026-09-18 device toolbar 實測）：
+       側欄 240 + 內距 28×2 + 捲軸 15 之後主內容只有 1025px，五張各 189px、內寬 171px。
+       gap 10→6、內距 14/16→8、主卡金額 30→22、通路卡金額 20→18、標題 13/12→12、
+       佔比與 ROAS 行 11→10、logo 22→18、head gap 8→6，每一項再放大一級就折行。
+       1280 本月模式的 ROAS 行（「ROAS 28.65 · 廣告 NT$ 1,172,450」= 168px）只剩 3px 餘裕，
+       廣告費月累計到八位數就會溢出；標題與漲跌 pill 之間也只剩 8px（pill 出現 ↓ 100.0% 時會撞）。
+       🔴 未來新增的小通路一律併進 app.js PLATFORM_GROUPS 的「其他通路」members，不要開第六張卡——
+         第六張會把每張壓到 157px，主卡金額（本月 160px）與標題列（163px）直接溢出，而且已經沒有字級和內距可以再縮。
+     窄螢幕由下方 @media (max-width:768px) 的 .stat-grid 規則收成 2 欄、(max-width:460px) 收成 1 欄。 */
   .summary-grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
     margin-bottom: 12px;
   }
   .summary-card {
     display: flex;
     flex-direction: column;
-    padding: 14px 16px;
+    padding: 8px;
     box-shadow: none;
   }
   .summary-card-head {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: 6px;
     margin-bottom: 10px;
   }
   .summary-card-logo {
-    width: 22px; height: 22px;
+    width: 18px; height: 18px;
     object-fit: contain;
     border-radius: 4px;
     display: block;
@@ -640,7 +648,7 @@
     white-space: nowrap;
   }
   .summary-card-value {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 700;
     color: var(--text);
     line-height: 1.15;
@@ -648,8 +656,8 @@
     font-variant-numeric: tabular-nums;
   }
   /* 主卡（全通路總營收）：放大字級做出主從層級 */
-  .summary-card-main .summary-card-title { font-size: 13px; color: var(--text); }
-  .summary-card-main .summary-card-value { font-size: 30px; letter-spacing: -.02em; }
+  .summary-card-main .summary-card-title { font-size: 12px; color: var(--text); }
+  .summary-card-main .summary-card-value { font-size: 22px; letter-spacing: -.02em; }
   /* 通路卡底部：佔比 + ROAS / 廣告費，靠 margin-top:auto 對齊各卡底部 */
   .summary-card-foot {
     margin-top: auto;
@@ -660,7 +668,7 @@
   }
   .summary-card-share,
   .summary-card-ads {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 500;
     color: var(--text-muted);
     white-space: nowrap;
