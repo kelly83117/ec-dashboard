@@ -1476,3 +1476,14 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .tagfx-jump-banner-btns{display:flex;gap:6px;flex-shrink:0;}
 .tagfx-jump-clear{background:var(--surface);color:var(--info);border:1px solid var(--info);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;}
 .tagfx-jump-close{background:var(--info);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-family:inherit;}
+
+/* ═ PChome 平台色（品牌正紅 #E60012；docs §10：顏色不 inline。既有平台色 inline 不在此範圍）═ */
+.stab.pf-pchome, .stab.pf-pchome:hover{ background:#E60012; color:#fff; border-color:#E60012; }
+.pf-pchome-tag{ color:#E60012; border:1px solid #f6b8bd; border-radius:6px; padding:1px 8px; font-size:12px; }
+.pf-pchome-tag-off{ color:#c7c9d1; border:1px solid #eee; border-radius:6px; padding:1px 8px; font-size:12px; }
+.pf-pchome-pill{ padding:5px 14px; border-radius:7px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid #E60012; background:#E60012; color:#fff; }
+.pf-pchome-pill-off{ padding:5px 14px; border-radius:7px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid #e5e7eb; background:#fff; color:#6b7280; }
+.pf-pchome-btn{ padding:7px 18px; border:none; border-radius:7px; background:#E60012; color:#fff; font-weight:600; cursor:pointer; }
+.pf-pchome-btn:hover{ background:#c8000f; }
+.pf-pchome-upbox{ border:1px dashed #f6b8bd; background:#fff5f6; border-radius:10px; padding:14px; margin-bottom:16px; }
+.pf-pchome-edit{ cursor:pointer; color:#E60012; margin-left:6px; user-select:none; }
