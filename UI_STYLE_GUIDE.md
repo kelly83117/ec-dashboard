@@ -89,3 +89,20 @@
 3. **數字對齊**：所有金額 / KPI / 表格數字用 monospace + `tabular-nums`。
 4. **克制特效**：維持淺色、輕陰影、細圓角的 SaaS 質感；避免霓虹光暈、
    濃重漸層與過度動畫。
+
+---
+
+## 5. 技術債清單 (Known Tech Debt)
+
+改到相關區塊時順手還債；還不了也要知道它為什麼在那。
+
+- **平台分頁列字級用 `!important`（`css/profit.css` 的 `.pf-tabrow` 降級 @media）**
+  平台列（蝦皮 / MOMO / 酷澎 / PChome…）每顆按鈕的字級是 **inline 寫死**在
+  `js/profit.js` 的 `__profitTabHtml` 模板字串裡（18 顆 `.stab`，`style="font-size:15px"`）。
+  RWD 降級要在窄螢幕縮字級，@media 規則得蓋過 inline，只能用 `!important`
+  （author `!important` > inline normal）。
+  - **為什麼沒直接還**：`__profitTabHtml` 是一大段模板字串，為了搬 18 處 inline 去動它，
+    風險與收益不對等（易誤傷平台按鈕、且會跟其他人的平台程式碼混在一起）。
+  - **要還的話**：先把那 18 顆按鈕的 inline `font-size` 移進 `.stab`（CSS base），
+    再把 @media 裡的 `!important` 拿掉即可。**在還清之前，改平台列字級一律改
+    @media 的 `!important` 值，不要去動 js 的 inline**（兩邊不同步只會更難查）。
