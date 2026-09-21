@@ -47,35 +47,13 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .stab{padding:4px 10px;border:0;background:transparent;font-size:12px;font-weight:600;font-family:'Noto Sans TC',sans-serif;color:#6b7280;cursor:pointer;border-radius:6px;transition:all .12s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
 .stab:hover{color:#374151;}
 .stab.active{background:white;color:#1a1a2e;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.1);}
-/* 1280px 螢幕的使用者專用（1440 已由上面 .stab 的左右 10px 解決，那條【不要動】）。
-   ⚠ 必須放在 .stab 之後：兩者特異度同為 (0,1,0)（@media 不加特異度），靠來源順序分勝負。
-   ⚠ 只覆寫 padding-left / padding-right，刻意不用 padding 簡寫 —— 簡寫會一併重寫上下的 4px，
-     值雖相同但語意上是多改了東西。
-
-   🔴 4px 是 2026-09-04 在 1280×800（側欄展開、好麻吉）實測反推的，不是估算：
-       .pf-tabrow 容器可用寬 955px
-         （注意不是 .main 的 1040 —— 中間被卡片 border 與 header padding 吃掉約 85px）
-       左右 padding 10 → 需要 1068px → 掉第二排
-       左右 padding  6 → 需要  972px → 仍掉第二排
-       左右 padding  4 → 需要  924px → ✅ 三塊 .pf-tabgrp 上緣 31/31/31，排成一排
-
-   🔴 餘裕是 0，已知並接受：任何字數變動（通路改名、新增通路、TEST_SHOP_ID 變長）
-     都會讓它在 1280 再度換行。失敗形態是「掉回兩排」——版面變醜，不是資料錯誤，可容忍。
-     ⚠ PR #254 已移除外層卡片的 overflow:hidden，所以【不會】再發生舊版那種
-       「最右邊的按鈕被無聲剪掉、沒有捲軸也沒有提示」的失敗。
-
-   ⚠ 已實測【無效】，不要再試：縮小三顆「通路｜總表」鈕的 font-size（15→13）。
-     它們帶 inline width:100%、在 .pf-tabgrp 這個 column flex 裡被藥丸列撐開，
-     群組寬度由【下排藥丸列】決定 ⇒ 改字級總寬一點都不會變，只會讓字變小變醜。
-
-   ⚠ 側欄收合時因 .main 的 zoom:1.12（css/main.css）反而需要更多寬度，本條 @media
-     對收合狀態幫助有限。那是另一個題目，本次已知未解、刻意不加 body.sidebar-collapsed 變體。
-
-   ⚠ 斷點不衝突：本檔既有的 @media 只有 (max-width:720px) 的 .mm-anlz-grid；
-     css/main.css 的 900 / 768 / 700 / 460 都不碰 .stab。1366 是全站最大的一個斷點。 */
-@media (max-width:1366px){
-  .stab{padding-left:4px;padding-right:4px;}
-}
+/* 平台列的 RWD 降級（nowrap → 縮 gap/padding → 縮字 → 捲動）改由下方 .pf-tabrow / .pf-tabgrp
+   附近的 @media（1500/1300）統一處理，不在這裡另疊一套。舊的「@media 1366 只縮 .stab
+   左右 padding 到 4px、裝不下就 flex-wrap 掉第二排」策略已移除（PChome 併入後四組，1280 餘裕
+   為 0、再加通路必掉行）。
+   🔴 保留一條 2026-09-04 實測結論（新版降級仍靠它）：群組總寬由【下排藥丸列】決定——
+     「通路｜總表」鈕 width:100% 被藥丸列撐開，縮它的字級對總寬無效；要縮寬度得縮【藥丸】的
+     字級／padding（見下方 @media 的 .stab 規則）。 */
 .sdot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .stab-ok{width:6px;height:6px;border-radius:50%;background:#d1d5db;margin-left:2px;transition:background .3s;}
 .stab-ok.on{background:#10b981;}
@@ -1196,53 +1174,73 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   z-index:5;
 }
 
-/* ═══════════ 淨利表 · 分頁按鈕列（三組，允許換行）═══════════
-   🔴 為什麼有 flex-wrap：實測（2026-08-28，main v589）按鈕列是 flex 不換行，而外層卡片是
-     overflow:hidden ⇒ 溢出的按鈕【直接被剪掉、沒有捲軸、沒有任何提示】。
-     .main 雖然是 overflow-x:auto 也救不到 —— 卡片先剪掉了，.main 量到的 scrollWidth
-     等於 clientWidth，捲軸永遠不會出現。
-     當時實測：三組需 1066px，而 1366 螢幕 + 側欄展開的卡片只有 1070px（扣掉卡片 padding 28px
-     後只剩 1042px）→ 最右邊那顆【已經】被切 11px。這是加 wrap 之前就存在的問題。
-   ⚠ 歷史（免得有人以為註解過期）：v591 曾經有【第四組】「對帳」，需求 1183px、在 1366/1440
-     全部被切；v593 把那顆按鈕搬進蝦皮 pill 列，第四組移除，現在又是三組。
-     wrap 仍然要留 —— 三組現在的內在寬是 1137px（蝦皮組吸收了對帳鈕而變寬），
-     1366 展開／1366 收合／1440 展開三種常見組合仍然裝不下一排，會換成兩排。
-   ⚠ 換行的代價（v593 實測、已知並接受）：以前換行掉下去的是那顆 28px 高的獨立對帳鈕
-     （第二排很矮，整列 101px）；現在掉下去的是完整兩層的酷澎組（65px），整列變 138px。
-     在 1366 收合與 1440 展開這兩個寬度，按鈕列比 v592 高 37px。 */
+/* ═══════════ 淨利表 · 平台分頁列（多組，永遠一排）═══════════
+   🔴 策略（2026-09-21 改）：所有平台永遠在【同一排】，依螢幕寬度自動降級，不再換行。
+     舊版是 flex-wrap:wrap（裝不下就把最右邊那組掉到第二排）；PChome 併入變四組後，
+     1280 的餘裕早已是 0（見下方 .stab 那段實測），任何新增通路都會再度掉行 → 版面越加越亂。
+   依序降級（不要直接跳到最後一步），全部靠 @media 依螢幕寬觸發：
+     1. flex-wrap:nowrap —— 永不掉第二排。
+     2. 先收 column-gap 與 .pf-tabgrp 的間距、.stab 的左右 padding（@media 1500/1300）。
+     3. 再窄才縮【藥丸】字級 15→13，下限 13px（仍讀得清楚）（@media 1300 一次收到底；1280 零捲動）。
+        🔴 縮的是【下排藥丸】不是「通路｜總表」鈕：後者 width:100% 被藥丸列撐開，
+          群組總寬由藥丸列決定，縮總表鈕字級無效（2026-09-04 實測，見下方 .stab 註解）。
+        ⚠ 藥丸字級是 inline 寫死在 js（平台列每顆按鈕 style="font-size:15px"），@media 要蓋過
+          inline 只能用 !important；作用範圍僅限這一欄字級，不外溢。
+     4. 真的還放不下（例：1024 側欄展開）才 overflow-x 橫向捲動 —— 一排捲動，不換行。
+        ✅ 外層卡片的 overflow:hidden 已於 #254 移除，捲動不會被無聲裁掉（舊失敗形態已不存在）。
+   ⚠ 分隔線用 .pf-tabgrp 的 border-left（不是獨立 1px div）：nowrap 下不會有「浮空分隔線」，
+     且捲動時第一組在行首不畫左框，天然正確。 */
 .pf-tabrow{
   display:flex;
   align-items:flex-start;
-  /* 🔴 這一行是本區的主角。沒有它，最右邊的組在 1366/1440 的機器上會被直接剪掉。 */
-  flex-wrap:wrap;
-  /* 直向 8px 是換行後兩排之間的呼吸；橫向 12px 【必須維持原值】——
-     它與下方 .pf-tabgrp 的 padding-left 一起復刻原本「12px + 1px 分隔線 + 12px」的間距。 */
-  row-gap:8px;
+  flex-wrap:nowrap;              /* 1. 永遠一排 */
   column-gap:12px;
+  min-width:0;                   /* 允許比內容窄 → 觸發本容器捲動，而非把卡片撐寬 */
+  overflow-x:auto;              /* 4. 最後手段：一排放不下就橫向捲動 */
+  overflow-y:hidden;
+  scrollbar-width:thin;
+  scrollbar-color:#cbd5e1 transparent;
 }
-/* 分隔線從【獨立的 1px div】改成【組自己的 border-left】。
-   🔴 這不是美化，是換行的必要條件：獨立 div 是 flex item，換行時它會單獨落在某一排的
-     行首或行尾，變成一條沒有依附對象的浮線。做成 border 之後它永遠黏著自己的組，不可能落單。
-   ⚠ 未換行時的視覺【與改動前逐像素相同】：
-     舊：組 —12px(gap)— 線(1px) —12px(gap)— 組
-     新：組 —12px(gap)— 線(border 1px) —12px(padding)— 組
-     兩者都是「12 / 1 / 12」，線的位置與粗細不變。
-   ⚠ 舊的分隔線是 align-self:stretch（撐滿該行的 cross size）；border-left 撐滿的是自己的
-     padding box 高度。三組高度相同 ⇒ 結果一樣。
-   ⚠ 殘留（已知、可接受）：換行時落在第二排【行首】的那一組仍會顯示自己的左邊框，
-     看起來像一條貼在左緣的細線。純 CSS 無法表達「行首不畫」，而它比「浮空的分隔線」輕微得多。
-   ⚠ v593 更新：作用對象從四組減為三組（對帳那組已移進蝦皮 pill 列），
-     所以現在畫線的只有 MOMO 與酷澎兩組。上面那個「行首左邊框」的殘留【依然存在】——
-     換行時掉到第二排的是酷澎組，它就是一個 + .pf-tabgrp。 */
+.pf-tabrow::-webkit-scrollbar{height:6px;}
+.pf-tabrow::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;}
+.pf-tabrow::-webkit-scrollbar-track{background:transparent;}
+/* 分隔線用【組自己的 border-left】（不是獨立 1px div）。
+   🔴 nowrap 之後不會再換行，本來就不會有「浮空分隔線」；border-left 仍是最乾淨解：
+     它永遠黏著自己的組，且捲動時第一組在行首自然不畫左框（+ 選擇器天然做到）。
+   ⚠ 視覺間距【與舊 wrap 版逐像素相同】：組 —(column-gap)— border 1px —(padding-left)— 組，
+     兩側值一起隨 @media 收（12→8→6），維持左右對稱。
+   ⚠ 舊 wrap 版曾有「換行落在第二排行首仍顯示左框」的殘留——nowrap 後不再換行，該殘留消失。 */
 .pf-tabgrp{
   display:flex;
   flex-direction:column;
   gap:5px;
+  flex:0 0 auto;                 /* 群組不被壓縮變形；靠 @media 主動縮 gap/padding/字，不靠 flex-shrink 擠爛 */
 }
 .pf-tabgrp + .pf-tabgrp{
   border-left:1px solid var(--border);
   padding-left:12px;
 }
+/* ── 降級階梯（依螢幕寬；斷點對齊常見機種 1440/1280/1024，含側欄展開的可用寬）──
+   🔴 藥丸字級為什麼用 !important：平台列每顆按鈕的字級是【inline 寫死】在 js/profit.js 的
+      __profitTabHtml 模板字串裡（18 顆 .stab，style="font-size:15px"）。@media 要蓋過 inline
+      非 !important 不可（author !important > inline normal）。作用範圍僅限這一欄字級、不外溢。
+      ⚠ 技術債：要拿掉這裡的 !important，必須【先】把那 18 顆按鈕的 inline font-size 移進 CSS
+        （改 __profitTabHtml，屬另一輪、風險不對等，見 UI_STYLE_GUIDE.md 技術債清單）。在那之前
+        改字級一律改這裡的 !important 值，不要去動 js 的 inline（兩邊不同步只會更亂）。
+   斷點：1440 只收 gap/padding、字不動；1280 一次收到底（gap/padding + 字 15→13）＝1280 零捲動；
+        更窄（含 1024）沿用 1280 的到底值，放不下才由 .pf-tabrow 的 overflow-x 橫向捲動接手。 */
+@media (max-width:1500px){        /* ~1440：先收 gap 與 padding，字級不動（1440 一排、不捲） */
+  .pf-tabrow{column-gap:8px;}
+  .pf-tabgrp + .pf-tabgrp{padding-left:8px;}
+  .stab{padding-left:6px;padding-right:6px;}
+}
+@media (max-width:1300px){        /* ~1280：一次收到底 gap/padding + 藥丸字級 15→13（下限，仍清楚）＝1280 零捲動 */
+  .pf-tabrow{column-gap:6px;}
+  .pf-tabgrp{gap:4px;}
+  .pf-tabgrp + .pf-tabgrp{padding-left:6px;}
+  .stab{padding-left:4px;padding-right:4px;gap:4px;font-size:13px !important;}
+}
+/* 1024 及更窄：已無可再縮（字 13 為下限），一排放不下 → .pf-tabrow overflow-x 橫向捲動（可接受的最後手段）。 */
 
 /* ═══════════ 淨利表 · 對帳分頁（蝦皮進帳報表 PDF 解析；只讀、只顯示）═══════════
    🔴 這一區【沒有任何寫入路徑】：不寫 localStorage、不寫 Firestore、不碰任何既有 key。
