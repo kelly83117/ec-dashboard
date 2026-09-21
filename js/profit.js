@@ -837,6 +837,104 @@ function _editsMergeKeys(fullKey, localMap, items){
 //    它們定義在本行【之後】數百行，靠函式宣告提升；改成 const 會進 TDZ 風險區（理由同
 //    本檔 readEditsForPush 上方那段）。
 function _notesUsesMerge(k){ return typeof k==='string' && k.startsWith('ec_notes|'); }
+// ══════ 「已封存期別唯讀」的寫入閘門（廣告調整 ec_notes|{通路}|{月}|{半月} 專用）══════
+//  為什麼需要：廣告調整搬進封存分片（app/profit_notes_YYYY，見 js/firebase.js PROFIT_ARCHIVE_DOCS）之後，
+//    若有人在該期新增／編輯／刪除並同步，syncNotesMerge 的 (c2)（app/profit 沒這把 key → cloudMap={}）
+//    會把 app/profit 寫成只含被動過的品號（刪除時是 {}），mergeAndNotify 頂層整把蓋掉封存那份 →
+//    該期其他品號的調整從所有人畫面消失（2026-09-16 以原文切片 + 假資料實測證實）。
+//  修法＝在寫入前擋下（本函式），不是在同步時拒推（那會讓資料永遠卡在待推）。
+//  規則（依序判斷）：
+//    app/profit 最新快照有這把 key              → 放行（當期、或尚未搬走）
+//    三支判斷函式不存在（Firebase 沒連上）        → 擋「載入中」
+//    封存分片未 ready（嚴格版：伺服器快照未到）    → 擋「載入中」
+//    封存 ready 且 key 在封存分片                → 擋「已封存」
+//    封存 ready 且兩邊都沒有                      → 放行（全新期別的第一筆）
+//  ⚠ 只套用四段 key：shopKey 形如「通路|月|半月」（split('|') 恰 3 段）。商品調整 _growth（無 '|'）與
+//    舊式單段 key 一律回 null、行為不變 —— 它們不分期別，不會被封存。
+//  ⚠ 三支判斷函式掛在 window、由 js/firebase.js 定義（本檔比它先執行）→ 必須在呼叫當下讀 window 並檢查 typeof，
+//    不可在模組頂層解構。函式不存在時擋下（fail-closed）：分不清「沒連上」與「封存」，寧可讓使用者稍後再試。
+//  ⚠ 已知代價：開站後 app/profit 首批快照到達前（實測數秒內），連當期也會顯示「載入中」；全新期別的第一筆
+//    要等封存 ready（實測 20～40 秒）。這是規則表的直接後果，已接受。
+//  回傳：null＝放行；字串＝擋下並以該字串當提示。呼叫端一律用 showToast 顯示（見 _pnmEditNote 閘門旁的理由）。
+const _NOTES_BLOCK_ARCHIVED='此期已封存，無法修改廣告調整。如需修改請聯絡管理員。';
+const _NOTES_BLOCK_LOADING='資料載入中，請稍候幾秒再試。';
+// 第 4 塊：封存分片【訂閱失敗】（__profitArchiveErrors() 非空且 ready 為 false）。SDK 出錯後該監聯即終止、ready 永遠不會來，
+//   再說「載入中」是說謊。這只是【文字分類】：回傳仍是非空字串 → 呼叫端 if(_blk) 照樣擋下；_notesSyncDisposition 對它
+//   仍回 'defer'（不 drop、不 push，保留 dirty 等重整）。放行／擋下的結果與第 2、3 塊完全相同。
+const _NOTES_BLOCK_ERROR='封存資料載入失敗，請重新整理頁面；若持續發生請聯絡管理員。';
+function _notesArchiveHasErrors(){ try{ const e=(typeof window.__profitArchiveErrors==='function')?window.__profitArchiveErrors():null; return !!(e&&Object.keys(e).length>0); }catch{ return false; } }
+function _notesWriteBlockReason(shopKey){
+  if(typeof shopKey!=='string' || shopKey.split('|').length!==3) return null;
+  const k='ec_notes|'+shopKey;
+  const ok=typeof window.__profitCurrentHas==='function' && typeof window.__profitArchivesReady==='function' && typeof window.__profitArchiveHas==='function';
+  if(!ok) return _NOTES_BLOCK_LOADING;
+  if(window.__profitCurrentHas(k)) return null;
+  if(!window.__profitArchivesReady()) return _notesArchiveHasErrors() ? _NOTES_BLOCK_ERROR : _NOTES_BLOCK_LOADING;   // 第 4 塊：只換文字，仍是擋下
+  if(window.__profitArchiveHas(k)) return _NOTES_BLOCK_ARCHIVED;
+  return null;
+}
+// ══════ 同步端：封存期別的殘留待推怎麼處置（第 3 塊）══════
+//  第 2 塊只擋「以後的新寫入」；上線前就已存在的殘留 dirty（ec_notes_dirty / ec_notes_items_dirty / _pendingSyncKeys 裡的封存 key）
+//  若照原流程送進 syncNotesMerge，(c2) 仍會把 app/profit 寫成只含被動過的品號 → 遮蔽整期。所以同步【組裝 task 那一層】
+//  對每把即將送進 syncNotesMerge 的 ec_notes key 先問這一支：
+//    'push'  → 照原流程，一個字都不變（非 ec_notes、非四段 key、或第 2 塊判準放行）
+//    'drop'  → 已封存：不推、清掉這把 key 的 dirty 兩表與 _pendingSyncKeys、本機 localStorage【不刪】；內容記進
+//              window.__lastSyncReport.archivedDropped + console.warn + localStorage['ec_notes_archived_dropped']（見 _notesDropArchived）
+//    'defer' → 封存未 ready／判斷函式不存在：這次不推、不清 dirty，留到下次同步。【不是失敗】，不進 failed、不彈錯誤窗。
+//  🔴 這一支【沒有自己的判準】，只是把第 2 塊 _notesWriteBlockReason 的回傳映射成三態 —— 判準只有一份，不會與寫入端漂移。
+//  🔴 四個呼叫點（syncToCloud 當期 extra、syncToCloud pending 迴圈 _notesUsesMerge 分支、_momoCollectPending 的同兩處鏡像）
+//     一律只寫 `_notesSyncDisposition(key)`、不得附加任何條件 —— 預覽清單與實際推送靠這個保證一致。
+//  ⚠ 攔在組裝層而不是 syncNotesMerge 內：那支函式只有「寫入成功」與「throw → failed → 錯誤彈窗」兩種出口，
+//     'defer' 需要「靜默略過且不算失敗」，在函式內做不到；且預覽端不跑 syncNotesMerge，只能在組裝層鏡像。
+// 第 4 塊：彈窗／格子的呈現模式，只是 _notesWriteBlockReason 的映射（判準只有一份）。
+//   'edit'（放行）｜'archived'（唯讀：隱藏輸入列、不烘 ✎ ×、顯示說明）｜'error'（訂閱失敗：同 archived 的唯讀呈現、紅底說明）｜
+//   'loading'（B-(1)：輸入照常顯示，只多一行淡色說明；送出時由第 2 塊閘門再判）。_growth／非四段 key 恆 'edit'。
+function _notesPopupMode(shopKey){
+  const r=_notesWriteBlockReason(shopKey);
+  if(r===null) return 'edit';
+  if(r===_NOTES_BLOCK_ARCHIVED) return 'archived';
+  if(r===_NOTES_BLOCK_ERROR) return 'error';
+  return 'loading';
+}
+function _notesSyncDisposition(fullKey){
+  if(!_notesUsesMerge(fullKey)) return 'push';
+  const r=_notesWriteBlockReason(fullKey.slice('ec_notes|'.length));
+  if(r===null) return 'push';
+  return r===_NOTES_BLOCK_ARCHIVED ? 'drop' : 'defer';
+}
+// 丟棄一把封存 key 的殘留待推。回傳記進 report 的那筆 {key, codes, content, at, persisted}。
+//   codes   ＝ ec_notes_items_dirty 登記的品號（null＝品號級註冊表損毀，不知道碰過哪些）
+//   content ＝ 每個品號在本機 localStorage 的現值；【null ＝ 使用者曾在本機刪除該品號的調整，封存版仍保留】
+//   本機 localStorage 的整把 key 不刪（那是封存內容＋本機修改的合併快照，留著給管理員比對）。
+//   持久化：追加到 localStorage['ec_notes_archived_dropped']（JSON 陣列、上限 100 筆、超過丟最舊的）。
+//   ⚠ 持久化失敗（容量滿等）【不可以】讓同步失敗或卡住：catch → console.error → persisted:false，照常完成 drop。
+const _NOTES_DROPPED_LS='ec_notes_archived_dropped';
+const _NOTES_DROPPED_MAX=100;
+function _notesDropArchived(fullKey){
+  const codes=_notesItemsDirtyGet(fullKey);                       // [] / [...] / null(損毀)
+  const local=readNotesForPush(fullKey);                          // 本機現值（_mem → localStorage），可能為 null
+  const content={};
+  (Array.isArray(codes)?codes:[]).forEach(c=>{ content[c]=(local&&Object.prototype.hasOwnProperty.call(local,c))?local[c]:null; });
+  const rec={ key:fullKey, codes:Array.isArray(codes)?codes.slice():null, content, at:Date.now(), persisted:false };
+  // ⚠ 先寫入丟棄紀錄、再 console.warn：warn 印出的 persisted 必須是【最終結果】（2026-09-16 瀏覽器驗收時發現 warn 先印
+  //   → 物件顯示 persisted:false，與 __lastSyncReport / localStorage 的 true 對不上）。
+  try{
+    const raw=localStorage.getItem(_NOTES_DROPPED_LS);
+    let arr=[]; if(raw!==null){ const a=JSON.parse(raw); if(Array.isArray(a)) arr=a; else console.error('[syncToCloud] '+_NOTES_DROPPED_LS+' 內容不是陣列，已重建（原始內容）：',raw); }
+    arr.push({ key:rec.key, codes:rec.codes, content:rec.content, at:rec.at });
+    if(arr.length>_NOTES_DROPPED_MAX){ const over=arr.length-_NOTES_DROPPED_MAX; arr=arr.slice(over); console.warn('[syncToCloud] '+_NOTES_DROPPED_LS+' 超過 '+_NOTES_DROPPED_MAX+' 筆，已丟掉最舊的 '+over+' 筆'); }
+    localStorage.setItem(_NOTES_DROPPED_LS,JSON.stringify(arr));
+    rec.persisted=true;
+  }catch(e){ console.error('[syncToCloud] 丟棄紀錄無法保存到 localStorage（同步照常進行，紀錄仍在 Console 與 window.__lastSyncReport）：',fullKey,e); }
+  console.warn('[syncToCloud] 封存期別的殘留待推已丟棄：'+fullKey+'（未上傳；本機 localStorage 該 key 未刪；dirty 已清；丟棄紀錄'+(rec.persisted?'已':'【未能】')+'保存到 localStorage）。'
+    +'\n   codes＝這台曾編輯過的品號；content[品號]＝本機現值；content 為 null ＝ 使用者曾在本機刪除該品號的調整，封存版仍保留。', rec);
+  // 清這把 key 的待推狀態：只動這一把（三支都是單 key 操作）。註冊表損毀時 _notesItemsDirtyClear 只留 console.error、不動作，
+  //   下次同步會再 drop 一次並再記一次 —— 冪等、無害。
+  try{ _pendingSyncKeys.delete(fullKey); }catch{}
+  try{ _notesDirtyDel(fullKey); }catch{}
+  try{ _notesItemsDirtyClear(fullKey); }catch{}
+  return rec;
+}
 // ══════ merge 推送端專用的 ec_notes 讀取（與顯示端 getNotes【刻意不同源】，這不是重複）══════
 //  🔴 抽成一支的理由：syncNotesMerge（實際推的值）與 _momoCollectPending（預覽顯示的值）
 //    必須讀到【完全相同】的東西，否則就是「預覽說要推 N 筆、實際推 N±1 筆而且不報錯」——
@@ -1633,7 +1731,16 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
   clearTimeout(_syncBtnRepaintTimer);
   if(btn){btn.disabled=true;btn.textContent='同步中…';}
   // 每一條出口都會覆寫 window.__lastSyncReport（含 ts），永久保留，方便日後診斷「同步怪怪的」
-  const _report=(mode,extra)=>{ window.__lastSyncReport=Object.assign({ts:Date.now(),mode,ok:[],failed:[],skippedProblem:[],skippedByDesign:[],skippedNotDirty:[]},extra||{}); };
+  // 第 3 塊：封存期別的殘留待推（判準見 _notesSyncDisposition）。宣告在 try 之外、_report 之前，讓【每一條】_report 出口都自動帶上，不必逐一改呼叫端。
+  //   archivedDropped  ＝ 已封存 → 丟棄（不推、dirty 已清、內容記在這裡 + Console + localStorage['ec_notes_archived_dropped']；見 _notesDropArchived）
+  //   archivedDeferred ＝ 封存未 ready／判斷函式不存在 → 這次不推、dirty 保留、下次再試。【不是失敗】：不進 failed、不計入 problems。
+  //   archiveErrors    ＝ __profitArchiveErrors() 的拷貝（封存訂閱若出錯，ready 永遠不會來 → defer 會永遠重複；第 4 塊靠這個顯示）。
+  const archivedDropped=[];
+  const archivedDeferred=[];
+  const _archiveErrs=()=>{ try{ return (typeof window.__profitArchiveErrors==='function')?window.__profitArchiveErrors():null; }catch{ return null; } };
+  // 第 4 塊：defer 的提示文字依「封存訂閱是否出錯」分兩種（出錯 → ready 永遠不會來，再說「載入中」是說謊）。只換文字，defer 的處置不變。
+  const _deferTxt=()=>_notesArchiveHasErrors()?'封存資料載入失敗，請重新整理頁面；若持續發生請聯絡管理員':'部分資料載入中，稍後再同步一次';
+  const _report=(mode,extra)=>{ window.__lastSyncReport=Object.assign({ts:Date.now(),mode,ok:[],failed:[],skippedProblem:[],skippedByDesign:[],skippedNotDirty:[],archivedDropped,archivedDeferred,archiveErrors:_archiveErrs()},extra||{}); };
   if(!window.__cloudProfit||!window.__cloudProfitCol){
     if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'雲端未連線',message:'淨利表的雲端尚未就緒，請重新整理。',kind:'warn'});
     else if(typeof showToast==='function') showToast('雲端未連線','error');
@@ -1646,7 +1753,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     const s=state[shop];
     const isPlainObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
     const tasks=[];                 // { key, run:()=>Promise }：延遲執行，逐一 await（佇列深度恆為 1）
-    const taskKeys=new Set();       // 已排入推送的 key，避免同一個 key 排兩次（見下方 pending 迴圈開頭）
+    const taskKeys=new Set();       // 當期 extra 已處置過的 key（排入推送、或封存 defer），pending 迴圈不再碰，避免同一個 key 排兩次 / defer 兩次（見下方 pending 迴圈開頭）
     const skippedByDesign=[];       // filemeta：故意不上雲，安靜
     const skippedProblem=[];        // 讀不到 / 損毀 / 非物件：一定要浮上來
     const _optlogMerges=[];         // optlog read-merge-write 併回雲端的筆數（{shop,n}）→ 「已合併雲端 N 筆」不靜默
@@ -1709,7 +1816,12 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       //     ⚠ 路由留在 shop extra（只處理「當期」那一把）、【不搬到下面的 _pendingSyncKeys 迴圈】：
       //       搬過去會讓這個 session 內編輯過的【所有期間】都變成 task，繞過上面那道當期閘門 ——
       //       行為範圍變大、且會讓「有 key 級 dirty 但沒品號級」的存量 key 立刻命中 (b) 而報錯。
-      if(_notesIsDirty('ec_notes|'+_nk)){ taskKeys.add('ec_notes|'+_nk); tasks.push({key:'ec_notes|'+_nk,run:()=>syncNotesMerge('ec_notes|'+_nk,'廣告調整').then(n=>{ if(n>0) _notesMerges.push({key:'ec_notes|'+_nk, n}); })}); }
+      //     第 3 塊：dirty 之後先問 _notesSyncDisposition（判準見該函式）：drop＝已封存→丟棄；defer＝封存未 ready→保留到下次；push＝原流程。
+      //       ⚠ 這裡只呼叫 _notesSyncDisposition、不附加任何條件（與 pending 迴圈、_momoCollectPending 兩處鏡像逐字同型）。
+      const _nkDisp=_notesIsDirty('ec_notes|'+_nk) ? _notesSyncDisposition('ec_notes|'+_nk) : 'not-dirty';
+      if(_nkDisp==='drop'){ archivedDropped.push(_notesDropArchived('ec_notes|'+_nk)); }
+      else if(_nkDisp==='defer'){ taskKeys.add('ec_notes|'+_nk); archivedDeferred.push('ec_notes|'+_nk); console.log('[syncToCloud] 封存狀態未就緒，這把廣告調整這次不推、保留到下次同步：','ec_notes|'+_nk); }   // taskKeys.add：同 session 剛存過的當期 key 也在 _pendingSyncKeys 裡，不加會被下方 pending 迴圈再 defer 一次（archivedDeferred 重複、toast 數字多一）
+      else if(_nkDisp==='push'){ taskKeys.add('ec_notes|'+_nk); tasks.push({key:'ec_notes|'+_nk,run:()=>syncNotesMerge('ec_notes|'+_nk,'廣告調整').then(n=>{ if(n>0) _notesMerges.push({key:'ec_notes|'+_nk, n}); })}); }
       else { skippedNotDirty.push('ec_notes|'+_nk); console.log('[syncToCloud] ec_notes 未編輯過、跳過推送（沒編輯過就沒有品號級 dirty，硬推會命中 syncNotesMerge 的 (b) 而報錯）：','ec_notes|'+_nk); }
     }
     // 🔴 閘門與來源【全部收進 _editsPushGate 這一支】，推送端與預覽端呼叫同一支。
@@ -1840,6 +1952,11 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         //     同一個 session 內切過月份、各自編輯過的期間，現在會一起被推上去（走 merge，安全）。
         //     重整之後 sweep 不撿廣告調整，所以這個範圍僅限「本次會話」，不會回溯歷史。
         //     label 用 pk 的形狀分辨：_growth＝商品調整，其餘＝廣告調整（只影響訊息文字）。
+        //     第 3 塊：先問 _notesSyncDisposition（_growth／非四段 key 恆 push，行為不變）；drop＝已封存→丟棄；defer＝未 ready→保留。
+        //       ⚠ 只呼叫 _notesSyncDisposition、不附加任何條件（與當期 extra、_momoCollectPending 兩處鏡像逐字同型）。
+        { const _d=_notesSyncDisposition(pk);
+          if(_d==='drop'){ archivedDropped.push(_notesDropArchived(pk)); return; }
+          if(_d==='defer'){ archivedDeferred.push(pk); console.log('[syncToCloud] 封存狀態未就緒，這把廣告調整這次不推、保留到下次同步：',pk); return; } }
         tasks.push({key:pk, run:()=>syncNotesMerge(pk, /_growth$/.test(pk)?'商品調整':'廣告調整').then(n=>{ if(n>0) _notesMerges.push({key:pk, n}); })});
         return;
       }
@@ -1904,6 +2021,12 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'有調整沒有登記進待同步清單',message:_dfKeys.length+' 把資料先前的「待同步登記」寫入失敗（多半是這台電腦的儲存空間滿了），這次同步【沒有】把它們推上雲 —— 雖然看起來像「沒有需要同步的資料」。\n請先清出空間、重打受影響的那幾筆再按同步；在此之前每次同步都會出現本提醒。\n（有登記失敗記錄時，本次不自動更新工作日誌摘要。）',detail:_dfDetail,kind:'error'});
         else if(typeof showToast==='function') showToast('有 '+_dfKeys.length+' 把資料的待同步登記失敗過，這次沒有推上雲','error');
         _report('nothing',{skippedByDesign,skippedNotDirty,dirtyWriteFailures:dirtyFailSnap});
+      }else if(archivedDropped.length>0||archivedDeferred.length>0){
+        // 第 3 塊：這次沒有任何 task，但有封存期別的殘留待推被丟棄／延後 → 不能說「沒有需要同步的資料」。
+        //   drop 用 error 樣式（有東西沒上傳、要讓人看見）；只有 defer 時用 info（稍後再按一次即可）。文案第 4 塊再調。
+        if(archivedDropped.length>0){ if(typeof showToast==='function') showToast(archivedDropped.length+' 筆封存期別的修改未上傳（已從待推清單移除；內容記在 Console 與 __lastSyncReport）'+(archivedDeferred.length?'；另有 '+archivedDeferred.length+' 筆資料載入中，稍後再同步一次':''),'error',6000); }
+        else { if(typeof showToast==='function') showToast(_deferTxt()+'（'+archivedDeferred.length+' 筆廣告調整尚未推送）',_notesArchiveHasErrors()?'error':'info',_notesArchiveHasErrors()?6000:4000); }
+        _report('nothing',{skippedByDesign,skippedNotDirty,dirtyWriteFailures:dirtyFailSnap});
       }else{
         // ⚠ toast 文案刻意不動（不提「跳過 N 筆」）：skippedNotDirty 是 by design 的安靜跳過。
         //   但 _report 一定要帶上它 —— 「切到已封存月份、沒有別的待同步、按同步」正是本閘門最典型的
@@ -1916,11 +2039,31 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     }
     // 逐一 await：一次只送一筆，佇列深度恆為 1 → 不會撞 resource-exhausted；一筆炸不拖垮其他
     const ok=[]; const failed=[];
+    // 每筆推送 30 秒逾時（B-3 #204）：網路斷線時 Firestore SDK 的寫入 promise【不 resolve 也不 reject】（寫入排在 SDK
+    //   佇列等重連），沒有逾時的話迴圈永遠停在第 i 筆、按鈕卡在「同步中 i/N」且 disabled，使用者只能重整。
+    //   逾時走既有 catch → failed（key 留在 pending、dirty 不清、彈窗列出），與其他失敗【同一條出口】，不另開分支。
+    //   ⚠ 逾時【取消不了】SDK 佇列裡那筆：網路回來後它仍會送出。三種寫入都冪等（setReport 整份覆蓋 / setField 單欄位 /
+    //     merge 推送前現讀雲端），所以晚到的完成只記 console、不動 ok / failed / pending —— 報告已經出了，
+    //     下一次同步會再推一次同 key，結果一樣。也順便接住晚到的 reject，免得變成 unhandled rejection。
+    //   ⚠ 第一筆逾時後【剩下的不再嘗試】：逾時幾乎只在網路斷時發生，逐筆再等 30 秒只是 N×30 秒的空等
+    //     （實測 2 筆就 61 秒才彈窗）。剩下的 task 直接記進 failed（key 一樣留在 pending）並 break，走同一條失敗出口。
+    const _TASK_TIMEOUT_MS=30000;
     for(let i=0;i<tasks.length;i++){
       if(btn) btn.textContent='同步中 '+(i+1)+'/'+tasks.length;
       const _k=tasks[i].key;
-      try{ await tasks[i].run(); ok.push(_k); console.log('[PUSH] ✓',_k); }   // collection(momo_products/reconcile)寫入分支現在也有 log，路徑不再是黑的
+      let _tmo=null, _timedOut=false;
+      try{
+        const _p=tasks[i].run();
+        Promise.resolve(_p).then(()=>{ if(_timedOut) console.warn('[PUSH] ⏱ 逾時後才完成（SDK 佇列補送；下次同步會再推一次同 key）：',_k); }, e=>{ if(_timedOut) console.warn('[PUSH] ⏱ 逾時後才失敗：',_k,e); });
+        await Promise.race([ _p, new Promise((_,rej)=>{ _tmo=setTimeout(()=>{ _timedOut=true; rej(new Error('逾時（'+(_TASK_TIMEOUT_MS/1000)+' 秒沒有回應），可能是網路不穩；資料還在本機，請稍後再按一次同步')); },_TASK_TIMEOUT_MS); }) ]);
+        ok.push(_k); console.log('[PUSH] ✓',_k);   // collection(momo_products/reconcile)寫入分支現在也有 log，路徑不再是黑的
+      }
       catch(e){ failed.push({key:_k,msg:(e&&e.message)||String(e)}); console.error('[PUSH] ✗',_k,e); }
+      finally{ clearTimeout(_tmo); }
+      if(_timedOut){
+        for(let j=i+1;j<tasks.length;j++){ failed.push({key:tasks[j].key,msg:'前一筆逾時，這筆這次未嘗試；資料還在本機，請稍後再按一次同步'}); console.warn('[PUSH] ⏭ 前一筆逾時、未嘗試：',tasks[j].key); }
+        break;
+      }
     }
     // pending 清理：只保留 failed + skippedProblem（要重試 / 要一直提醒），其餘刪掉
     // 只清掉「這次真的推成功」的 key（ok）；失敗/讀不到/逐項勾選未選的一律留在 pending 下次再推
@@ -1950,7 +2093,9 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     const problems=failed.length+skippedProblem.length+skippedWillDelete.length+dirtyFailKeys.length;
     if(problems===0){
       if(btn){btn.textContent='✓ 已同步 '+ok.length+' 筆';btn.style.background='#10b981';btn.style.color='#fff';btn.style.borderColor='#10b981';_syncBtnRepaintTimer=setTimeout(()=>{ _showSyncBtn(); },2000);}
-      if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端'+(_mergedN>0?'（優化紀錄已合併雲端 '+_mergedN+' 筆）':'')+(_notesKeptN>0?'（調整備註已保留雲端 '+_notesKeptN+' 個品號）':'')+(_editsKeptN>0?'（編輯覆蓋值已保留雲端 '+_editsKeptN+' 個品號）':''),'success');
+      // 第 3 塊：成功 toast 尾端接上封存殘留的處置結果（drop 用 error 樣式蓋過 success —— 有東西沒上傳不能是綠的；只有 defer 維持 success）。
+      const _archNote=(archivedDropped.length>0?'（'+archivedDropped.length+' 筆封存期別的修改未上傳，已從待推清單移除；內容記在 Console 與 __lastSyncReport）':'')+(archivedDeferred.length>0?'（'+_deferTxt()+'）':'');
+      if(typeof showToast==='function') showToast('✓ 已同步 '+ok.length+' 筆到雲端'+(_mergedN>0?'（優化紀錄已合併雲端 '+_mergedN+' 筆）':'')+(_notesKeptN>0?'（調整備註已保留雲端 '+_notesKeptN+' 個品號）':'')+(_editsKeptN>0?'（編輯覆蓋值已保留雲端 '+_editsKeptN+' 個品號）':'')+_archNote, archivedDropped.length>0?'error':'success', archivedDropped.length>0?6000:undefined);
       // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌（失敗只記 console，不影響同步結果判定）
       try { if(window.App && typeof App._updateDailyProgressFromAdjustments === 'function') App._updateDailyProgressFromAdjustments({ pushToCloud: true }); }
       catch(e){ console.warn('[autoSummary profit]', e); }
@@ -1971,6 +2116,11 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         if(_dfHealed.length) msg+='\n'+_dfHealed.length+' 把先前登記失敗的資料本次已重新推送成功，此警告之後不再出現。⚠ 這把 key 剛已重新推送，若剛才重打的不含當時那筆，請再確認。';
         msg+='\n（有登記失敗記錄時，本次不自動更新工作日誌摘要。）';
       }
+      // 第 3 塊：封存殘留的處置也列進同一個彈窗（不另開新窗）。drop／defer 都【不計入 problems】——走到這裡是因為別的問題。
+      archivedDropped.forEach(d=>lines.push('［封存未上傳］'+d.key+'：'+(d.codes?d.codes.length+' 個品號（'+d.codes.join('、')+'）':'品號不明（註冊表損毀）')+'，內容記在 Console 與 __lastSyncReport'+(d.persisted?'':'；⚠ 本機丟棄紀錄未能保存')));
+      archivedDeferred.forEach(k=>lines.push((_notesArchiveHasErrors()?'［封存載入失敗未推］':'［載入中未推］')+k+'：'+(_notesArchiveHasErrors()?'封存分片訂閱失敗，請重新整理頁面':'封存狀態未就緒，下次同步再試')));
+      if(archivedDropped.length) msg+='\n'+archivedDropped.length+' 筆封存期別的修改未上傳（該期已封存，已從待推清單移除）。';
+      if(archivedDeferred.length) msg+='\n'+archivedDeferred.length+' 筆廣告調整未推送 → '+_deferTxt()+'。';
       if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:msg,detail:lines.join('\n'),kind:'error'});
       else if(typeof showToast==='function') showToast('同步未完成：'+problems+' 筆有問題','error');
     }
@@ -6257,6 +6407,19 @@ function getNotes(shop){
 //   本修法只保證 dirty 原子性，不解決空間。下一個受害者會是報表 lsSave 本身。
 //   待辦：舊期間報表快取的清理機制（另案）。
 function saveNotes(shop,notes,code){
+  // ── 已封存期別唯讀：第二道防線（判準見 _notesWriteBlockReason）──
+  //   三個現行呼叫端（submitProfitNote / _pnmEditNote / deleteProfitNote）在動到任何東西之前都已各自擋過，
+  //   正常情況走不到這裡；這一道只為了接住【未來新增】的呼叫端，放在第一個副作用（下一行的 _shopJustSaved）之前。
+  //   ⚠ 這【不違反】下方「刻意不判斷 key 形狀」那條：本判斷對非四段 key（_growth、舊式單段）一律不套用、原封放行，
+  //     不是依 key 形狀分流【登記行為】—— 兩種形狀進到下面之後走的仍是同一套登記。
+  {
+    const _blk=_notesWriteBlockReason(shop);
+    if(_blk){
+      console.error('[saveNotes] 已封存／未就緒的期別，拒絕寫入（未動 localStorage / dirty / _profitMem）：ec_notes|'+shop, _blk);
+      if(typeof showToast==='function') showToast(_blk,'error',4000);
+      return;
+    }
+  }
   window._shopJustSaved=Date.now();
   const k='ec_notes|'+shop;
   // ── localStorage 寫入：寫完【讀回驗證】，不押注在瀏覽器怎麼回報失敗 ──
@@ -6397,6 +6560,9 @@ function saveNotes(shop,notes,code){
 //   ⚠ xp 整個是 optional：不傳就兩個都是 0、那行小字整行不出現 →
 //     其餘呼叫端（window 匯出的那支）行為不變。
 function buildNoteCell(shopKey,code,noteId,noteData,xp){
+  // 第 4 塊：封存（archived）／訂閱失敗（error）的期別，無紀錄時的佔位文字由「點此新增」改為「無調整紀錄」；edit / loading 維持原字。
+  //   判準同彈窗（_notesPopupMode；_growth 恆 edit）。只影響最後那個「無紀錄」分支的文字，其餘 HTML 與改前逐字相同。
+  const _ncMode=_notesPopupMode(shopKey); const _ncRo=(_ncMode==='archived'||_ncMode==='error');
   let adjList=[];
   if(noteData){if(typeof noteData==='string')adjList=[{date:'',text:noteData}];else adjList=noteData.adjustments||[];}
   // 商品調整（_growth）：只取當期算顯示，其他期間僅計數（供格子上的「其他期間 N」）。非 _growth 時 histCount 恆 0、adjList 不動。
@@ -6470,7 +6636,7 @@ function buildNoteCell(shopKey,code,noteId,noteData,xp){
       onclick="openNotePopup('${shopKey}','${ce}')">
       ${hasNote?`<div style="flex:1;min-width:0">${latestDate?`<div class="note-adj-date">${latestDate}</div>`:''}<div class="note-adj-text">${latestText.replace(/</g,'&lt;')}</div>${xpUnder}</div><span style="font-size:13px;flex-shrink:0;margin-top:1px">📝</span>`
       :(xpOnly?`<div style="flex:1;min-width:0">${xpOnly}</div><span style="font-size:13px;flex-shrink:0">📝</span>`
-              :`<div style="flex:1;color:#9ca3af;font-size:11px;padding:2px 0">點此新增</div><span style="font-size:13px;flex-shrink:0">📝</span>`)}
+              :`<div style="flex:1;color:#9ca3af;font-size:11px;padding:2px 0">${_ncRo?'無調整紀錄':'點此新增'}</div><span style="font-size:13px;flex-shrink:0">📝</span>`)}
     </div>
   </td>`;
 }
@@ -7404,10 +7570,13 @@ function buildSuggCell(shop,r){
   if(!r.testTags?.length)return`<td class="tl" style="color:#d1d5db">—</td>`;
   const codeEsc=r.code.replace(/'/g,"\\'");
   const s=state[shop];const noteKey=shop+'|'+s.curMonth+'|'+s.curHalf;
+  // 第 4 塊：封存（archived）／訂閱失敗（error）的期別不能再寫 → title 不寫「填寫／編輯」。判準同彈窗（_notesPopupMode）；edit / loading 的 HTML 與改前逐字相同。
+  //   已知缺口（刻意不處理）：封存期的建議標籤永遠不會變成「✓ 已優化」，會一直亮著。
+  const _roMode=_notesPopupMode(noteKey); const _roTag=(_roMode==='archived'||_roMode==='error');
   if(isSuggDone(shop,r.code)){
-    return`<td class="tl"><span class="tag sugg-tag sugg-done" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊查看/編輯廣告調整">✓ 已優化</span></td>`;
+    return`<td class="tl"><span class="tag sugg-tag sugg-done" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="${_roTag?'點擊查看廣告調整（此期已封存）':'點擊查看/編輯廣告調整'}">✓ 已優化</span></td>`;
   }
-  const tagsHtml=r.testTags.map(tt=>`<span class="tag sugg-tag ${tt.cls}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="點擊填寫廣告調整，即算完成">${tt.label}</span>`).join(' ');
+  const tagsHtml=r.testTags.map(tt=>`<span class="tag sugg-tag ${tt.cls}" onclick="openNotePopup('${noteKey}','${codeEsc}')" title="${_roTag?'點擊查看廣告調整（此期已封存）':'點擊填寫廣告調整，即算完成'}">${tt.label}</span>`).join(' ');
   return`<td class="tl">${tagsHtml}</td>`;
 }
 
@@ -7552,7 +7721,8 @@ function openNotePopup(shopKey,code){
     modal.innerHTML=`<div class="pnm-box" onclick="event.stopPropagation()">
       <div class="pnm-header"><div class="pnm-title" id="pnm-title"></div><button class="pnm-close" onclick="closeProfitNoteModal()">×</button></div>
       <div class="pnm-body">
-        <div class="pnm-section">調整紀錄（按 Enter 或「送出」新增，自動加日期・自動儲存）</div>
+        <div class="pnm-section" id="pnm-section-main">調整紀錄（按 Enter 或「送出」新增，自動加日期・自動儲存）</div>
+        <div id="pnm-mode-note" class="pnm-mode-note" hidden></div>
         <div class="pnm-input-row"><input id="pnm-inp" class="pnm-inp" type="text" placeholder="例：調整主圖 / 加強廣告預算 +500"><button class="pnm-send" onclick="submitProfitNote()">送出</button></div>
         <div id="pnm-list" class="pnm-list"></div>
         <div id="pnm-hist-wrap" style="display:none">
@@ -7574,6 +7744,25 @@ function openNotePopup(shopKey,code){
   const r=state[baseShop]?._built?.find(x=>x.code===code);
   document.getElementById('pnm-title').textContent=r?`${code}・${r.name}`:code;
   const pnmInp=document.getElementById('pnm-inp');if(pnmInp)pnmInp.value='';
+  // ── 第 4 塊：封存期別唯讀呈現。模式在【開啟當下】判一次（_notesPopupMode），存在 _pnm.mode 給 renderPnmList 讀。
+  //   彈窗開著時狀態改變（ready 由 false 變 true、別人解封存）刻意不重畫：profitDataReady 監聽本來就不碰彈窗，
+  //   彈窗內容以開啟當下為準；送出時第 2 塊的閘門會再判一次，最壞是 toast 一次。
+  //   ⚠ 模板只建一次（上方 if(!modal)），所以 class / hidden / 文字都要在每次開啟時重設，不能只在建立時設。
+  //   ⚠ .pnm-input-row 自己有 display:flex，UA 的 [hidden] 會被蓋掉 → 用 .pnm-box.is-readonly .pnm-input-row{display:none}（css/profit.css）隱藏。
+  //   已知缺口（刻意不補）：readonly 時輸入列隱藏、綁在 #pnm-inp 上的 Escape 關窗失效，只能點「關閉」或點背景。
+  _pnm.mode=_notesPopupMode(shopKey);
+  { const box=modal.querySelector('.pnm-box'); const note=document.getElementById('pnm-mode-note'); const head=document.getElementById('pnm-section-main');
+    const ro=(_pnm.mode==='archived'||_pnm.mode==='error');
+    if(box) box.classList.toggle('is-readonly', ro);
+    if(head) head.textContent= ro ? '調整紀錄（僅供查看）' : '調整紀錄（按 Enter 或「送出」新增，自動加日期・自動儲存）';
+    if(note){
+      note.classList.remove('is-loading','is-error');
+      if(_pnm.mode==='archived'){ note.textContent='此期已封存，僅供查看。如需修改請聯絡管理員。'; note.hidden=false; }
+      else if(_pnm.mode==='error'){ note.textContent=_NOTES_BLOCK_ERROR; note.classList.add('is-error'); note.hidden=false; }
+      else if(_pnm.mode==='loading'){ note.textContent=_NOTES_BLOCK_LOADING; note.classList.add('is-loading'); note.hidden=false; }   // B-(1)：輸入照常顯示，只多一行不擋操作的說明
+      else { note.textContent=''; note.hidden=true; }
+    }
+  }
   renderPnmList();
   renderPnmHistory();
   renderPnmInsight();
@@ -7583,6 +7772,8 @@ function openNotePopup(shopKey,code){
 function renderPnmList(){
   if(!_pnm)return;
   const {shopKey,code}=_pnm;
+  // 第 4 塊：唯讀模式（archived / error，由 openNotePopup 判定存在 _pnm.mode）不烘 ✎ ×；edit / loading 的 HTML 與改前逐字相同。
+  const _ro=(_pnm.mode==='archived'||_pnm.mode==='error');
   const notes=getNotes(shopKey);const nd=notes[code];
   let adj=[];
   if(nd){if(typeof nd==='string')adj=[{date:'',text:nd}];else adj=nd.adjustments||[];}
@@ -7600,8 +7791,8 @@ function renderPnmList(){
   el.innerHTML=sorted.map(d=>map.get(d).map(({text,i})=>`<div class="pnm-entry">
     <div class="pnm-entry-date">${d}</div>
     <div class="pnm-entry-text">${text.replace(/</g,'&lt;')}</div>
-    <button class="pnm-entry-edit" onclick="_pnmEditNote(${i},this)" title="編輯這筆文字（保留原日期）">✎</button>
-    <button class="pnm-entry-del" onclick="deleteProfitNote(${i},this)" data-text="${escapeHtmlLike(text)}" data-date="${escapeHtmlLike(d)}">×</button>
+    ${_ro?'':`<button class="pnm-entry-edit" onclick="_pnmEditNote(${i},this)" title="編輯這筆文字（保留原日期）">✎</button>
+    <button class="pnm-entry-del" onclick="deleteProfitNote(${i},this)" data-text="${escapeHtmlLike(text)}" data-date="${escapeHtmlLike(d)}">×</button>`}
   </div>`).join('')).join('');
 }
 function renderPnmHistory(){
@@ -7675,6 +7866,9 @@ function submitProfitNote(){
   if(!_pnm)return;
   const inp=document.getElementById('pnm-inp');const v=inp?.value.trim();if(!v)return;
   const {shopKey,code}=_pnm;
+  // 已封存期別唯讀（判準見 _notesWriteBlockReason）：擋在 getNotes 之前，什麼都不動 ——
+  //   不關彈窗（closeProfitNoteModal 在下方）、不清輸入框（清值在 openNotePopup），使用者的字留在原地，只出 toast。
+  { const _blk=_notesWriteBlockReason(shopKey); if(_blk){ if(typeof showToast==='function') showToast(_blk,'error',4000); return; } }
   const now=new Date();
   const today=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
   const notes=getNotes(shopKey);
@@ -7712,6 +7906,9 @@ function _pnmEditNote(origIdx,btn){
   const row=btn.closest('.pnm-entry');if(!row)return;
   const span=row.querySelector('.pnm-entry-text');if(!span)return;   // 已在編輯中 → span 已被換掉 → 早退，不重複開
   const {shopKey,code}=_pnm;
+  // 第 4 塊：點 ✎ 的當下就判，不讓編輯框出現（第 2 塊 save() 內的閘門保留，作為第二道 —— 開編輯框後 ready 可能改變）。
+  //   同樣只能 toast（理由見 save() 內閘門旁註解）。唯讀模式下按鈕根本不會被烘出，這裡接的是「彈窗開著時狀態變了」與舊 DOM。
+  { const _blk=_notesWriteBlockReason(shopKey); if(_blk){ if(typeof showToast==='function') showToast(_blk,'error',4000); return; } }
   const _readAdj=()=>{const nd=getNotes(shopKey)[code];if(!nd)return[];return(typeof nd==='string')?[{date:'',text:nd}]:(nd.adjustments||[]);};
   const cur=_readAdj()[origIdx];if(!cur)return;
   const orig=String(cur.text||'');
@@ -7737,6 +7934,12 @@ function _pnmEditNote(origIdx,btn){
     if(done)return;
     const v=inp.value.trim();
     if(!v||v===orig){cancel();return;}   // 空＝視同取消（要刪請用 ×）；沒改＝不寫入，避免無意義的寫入與同步徽章
+    // 已封存期別唯讀（判準見 _notesWriteBlockReason）：擋在 getNotes 之前、done 仍為 false —— 輸入框與使用者改的字
+    //   都留在原地，Escape / 失焦照樣走 cancel 還原，再按 Enter 會再提示一次。
+    //   🔴 提示【只能用 showToast，不能用 App.showAlertModal】：彈窗會奪走焦點 → 觸發下方 inp 的 blur → cancel →
+    //     使用者剛打的編輯文字被靜默丟掉。toast（pointer-events:none、不取焦）沒有這個問題。
+    //   ⚠ 刻意不在函式入口擋（不讓編輯框出現是第 4 塊的畫面工作）；且 ready 狀態可能在打字期間改變，save 時才是權威判斷。
+    { const _blk=_notesWriteBlockReason(shopKey); if(_blk){ if(typeof showToast==='function') showToast(_blk,'error',4000); return; } }
     const notes=getNotes(shopKey);if(!notes[code]){cancel();return;}
     if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
     const t=notes[code].adjustments[origIdx];
@@ -7791,6 +7994,9 @@ function _pnmEditNote(origIdx,btn){
 function deleteProfitNote(origIdx,btn){
   if(!_pnm)return;
   const {shopKey,code}=_pnm;
+  // 已封存期別唯讀（判準見 _notesWriteBlockReason）：擋在 getNotes 之前，不動 notes、不重繪、× 鈕與 dataset 原樣保留。
+  //   ⚠ 不走下方的 _abort：那是「資料在彈窗開啟期間變動過」的 stale 語意（會重繪 + 彈「沒有刪除」），與封存無關，不要混用。
+  { const _blk=_notesWriteBlockReason(shopKey); if(_blk){ if(typeof showToast==='function') showToast(_blk,'error',4000); return; } }
   const notes=getNotes(shopKey);if(!notes[code])return;
   if(typeof notes[code]==='string')notes[code]={adjustments:[{date:'',text:notes[code]}]};
   // 擋下：不寫入、重繪成最新內容、明確告訴使用者這次沒有刪掉
@@ -13601,7 +13807,9 @@ function _momoCollectPending(shop){
   //       【同一支實作】。舊碼這裡塞的是 getNotes 的結果（_profitMem 優先＝可能已被雲端訂閱
   //       蓋回雲端版）→ 預覽顯示的筆數與 willMerge 都會跟實際推的對不上，而且不報錯。
   //     ⚠ 兩者不同源【不是漏改】。要改任何一邊，先確認你改的是「納不納入」還是「推什麼值」。
-  try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0&&_notesIsDirty('ec_notes|'+_nk)) add('ec_notes|'+_nk,'其他設定',readNotesForPush('ec_notes|'+_nk)||{}); }catch{}
+  //   第 3 塊：dirty 之後再問 _notesSyncDisposition —— 只有 'push' 才列進預覽；drop／defer 的 key 實際推送時也不會成 task（syncToCloud 同一支判準），
+  //     預覆不列＝兩端一致。⚠ 只呼叫 _notesSyncDisposition、不附加任何條件（與 syncToCloud 兩處逐字同型）。
+  try{ const s=state[shop]; const _nk=shop+'|'+((s&&s.curMonth)||'')+'|'+((s&&s.curHalf)||''); const notes=getNotes(_nk); if(notes&&Object.keys(notes).length>0&&_notesIsDirty('ec_notes|'+_nk)){ if(_notesSyncDisposition('ec_notes|'+_nk)==='push') add('ec_notes|'+_nk,'其他設定',readNotesForPush('ec_notes|'+_nk)||{}); else console.log('[syncPreview] 封存期別的廣告調整不列入預覽（同步時會依 _notesSyncDisposition 丟棄或延後）：','ec_notes|'+_nk); } }catch{}
   //   拆分試算：與上一行 ec_notes 同型的「當期 extra」——只加【目前顯示這一期】那一把。
   //     ⚠ 已知且接受的限制（與 ec_notes 的廣告調整完全相同）：在 8 月存了拆分、切到 9 月才按
   //       同步預覽，8 月那把不會出現在清單裡 —— 除非它還留在 _pendingSyncKeys（同一次 session
@@ -13624,6 +13832,9 @@ function _momoCollectPending(shop){
   }catch{}
   _pendingSyncKeys.forEach(pk=>{
     if(pk.startsWith('__shop__|')) return;               // marker，不推
+    // 第 3 塊：封存期別的 ec_notes 殘留不列入預覽（syncToCloud 的 pending 迴圈對同一把 key 用同一支判準丟棄／延後）。非 ec_notes、_growth 恆 'push'、不受影響。
+    //   ⚠ 只呼叫 _notesSyncDisposition、不附加任何條件。
+    if(_notesSyncDisposition(pk)!=='push'){ console.log('[syncPreview] 封存期別的廣告調整不列入預覽（同步時會依 _notesSyncDisposition 丟棄或延後）：',pk); return; }
     if(pk.startsWith('ec|filemeta|')) return;            // 故意不上雲
     if(pk.startsWith('ec|')){ add(pk,'蝦皮報表', Store._profitMem&&Store._profitMem[pk]); return; }   // → setReport（profits collection）
     let val=null;
