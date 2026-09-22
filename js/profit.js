@@ -5851,14 +5851,23 @@ function _loadFilterState(shop){
 }
 
 // ── Filters & Sort ──
-// 「名稱 / ID」欄下拉的「排除【C】【W】【H】商品」（Kelly 2026-09-22）：C＝清倉品、W＝冬季品、H＝夏季品。
-//   目前固定這三種、不開放自訂。狀態存在 s.filters.nameExcl={type:'excl',val:'CWH'} —— 用獨立 key 而不塞進
-//   filters.name，是因為下方迴圈的守衛會把「val 為空」的條目整個跳過，獨立 key 帶 val 天然通過，也能跟
-//   關鍵字篩選同時成立；存讀走既有的 _saveFilterState / _loadFilterState（filters 整包存），本體一行未動。
+// 「名稱 / ID」欄下拉的「排除【C】/【W】/【H】商品」（Kelly 2026-09-22）：C＝清倉品、W＝冬季品、H＝夏季品。
+//   三顆各自獨立的開關、可任意組合（Kelly 09/22 補充：要能只排除【H】）。固定這三種、不開放自訂。
+//   狀態存在 s.filters.nameExcl={type:'excl',val:'CH'} —— val 是「開啟中的字母」，固定依 C、W、H 順序排列，
+//   三顆都關掉時整個 key 刪除。用獨立 key 而不塞進 filters.name，是因為下方迴圈的守衛會把「val 為空」的
+//   條目整個跳過，獨立 key 帶 val 天然通過，也能跟關鍵字篩選同時成立；存讀走既有的 _saveFilterState /
+//   _loadFilterState（filters 整包存），本體一行未動。
+//   🔴 向下相容：第一版（PR #295）只有一顆、存的是 val:'CWH'，讀進來等於三顆都開，逐位行為與舊版相同。
+//     讀 val 一律先過 _nameExclLetters()：只留 C/W/H、其他字元丟棄、重排成固定順序；清完是空字串視同未開啟。
 //   🔴 為什麼允許前面有別的【】標籤：正式站實測（2026-09-22）名稱開頭會有多個標籤串接，且順序不固定 ——
 //     「【A級】【H】…」與「【H】【A級】…」兩種都存在，兩種都要排除；「【C級】」實測 0 筆、也不該命中
-//     （[CWH] 後面緊接「】」才算）。所以規則是：名稱開頭【連續的】【】標籤裡，只要有一個是【C】【W】【H】就排除。
-const NAME_EXCL_RE=/^(?:【[^】]*】)*?【[CWH]】/;
+//     （字母後面緊接「】」才算）。所以規則是：名稱開頭【連續的】【】標籤裡，只要有一個是「開啟中的」字母就排除。
+//     例：只開 H 時「【C】【H】x」要排除（有【H】）、「【C】x」保留；只開 C 時「【H】【A級】x」保留。
+const NAME_EXCL_LETTERS='CWH';
+function _nameExclLetters(val){return NAME_EXCL_LETTERS.split('').filter(c=>String(val||'').includes(c)).join('');}
+// 同一組字母的正規式快取起來，避免 applyFilters 每列重建。key 一定是過濾過的字母，最多 7 種組合。
+const _nameExclReCache={};
+function _nameExclRe(letters){return _nameExclReCache[letters]||(_nameExclReCache[letters]=new RegExp('^(?:【[^】]*】)*?【['+letters+']】'));}
 function applyFilters(shop,opts){
   const s=state[shop];if(!s)return;
   if(!s._built||!s._built.length)return;
@@ -5892,9 +5901,12 @@ function applyFilters(shop,opts){
   Object.entries(s.filters||{}).forEach(([col,f])=>{
     if(!f)return;
     if(f.type!=='range'&&(f.val===''||f.val===undefined))return;
+    // 排除 C/W/H：正規式建在 filter 外面（依開啟字母取快取）；val 洗完沒有半個 C/W/H → 視同未開啟、整條跳過。
+    const exclRe=f.type==='excl'?(l=>l?_nameExclRe(l):null)(_nameExclLetters(f.val)):null;
+    if(f.type==='excl'&&!exclRe)return;
     list=list.filter(r=>{
       // 排除 C/W/H 放在最前面：它只看名稱，零營收商品也要被排除，不能被下一行的 rev 守衛先判掉。
-      if(f.type==='excl')return !NAME_EXCL_RE.test(r.name||'');
+      if(f.type==='excl')return !exclRe.test(r.name||'');
       if(NULL_WHEN_NO_REV.has(col)&&!(r.rev>0))return false;
       const raw=r[col];
       const v=PCT_COLS.has(col)?num(raw)*100:raw;
@@ -5978,20 +5990,35 @@ function setColFilter(shop,col,type,val){
 }
 function clearColFilter(shop,col){
   delete(state[shop].filters||{})[col];
-  if(col==='name')delete(state[shop].filters||{}).nameExcl;   // 名稱欄的「✕ 清除」連排除 C/W/H 一起清（它存在同一欄的下拉裡）
+  if(col==='name')delete(state[shop].filters||{}).nameExcl;   // 名稱欄的「✕ 清除」連排除 C/W/H 三顆一起清（它們存在同一欄的下拉裡）
   state[shop].sorts={};
   _saveFilterState(shop);
   applyFilters(shop);
 }
-// 名稱欄下拉的「⛔ 排除【C】【W】【H】商品」toggle（規則見 NAME_EXCL_RE）。
-//   走跟 applyFpTxt 一樣的三步：改 filters → _saveFilterState → applyFilters；再關彈窗（一鍵完成，不用按確定）。
-function toggleNameExcl(shop){
-  if(!state[shop].filters)state[shop].filters={};
-  if(state[shop].filters.nameExcl)delete state[shop].filters.nameExcl;
-  else state[shop].filters.nameExcl={type:'excl',val:'CWH'};
+// 名稱欄下拉的「⛔ 排除【C】/【W】/【H】」三顆 toggle（規則見 NAME_EXCL_LETTERS）。letter 只接受 C/W/H，其他直接 return。
+//   走跟 applyFpTxt 一樣的三步：改 filters → _saveFilterState → applyFilters（一鍵完成，不用按確定）。
+//   🔴 彈窗刻意【不關】，讓使用者能連點兩三顆。但 applyFilters → renderTable 是整表 innerHTML 重畫（含 thead），
+//     彈窗掛在舊 <th> 底下會一起被拆掉、openPopup 變成懸空節點 —— 所以不能「留著不動」，要在重畫後找到
+//     新表頭的名稱欄 ▾ 鈕重開一次（openFilter 會先 closePopup 收掉懸空的那個，再依最新 state 畫 on/off）。
+//     關鍵字框打到一半的文字也一併帶過去，否則重開會被 cf?.val 蓋成空的、看起來像被吃掉。
+//     找不到按鈕（表格已被拆除等）就退回關彈窗，不留懸空節點。
+function toggleNameExcl(shop,letter){
+  if(typeof letter!=='string'||letter.length!==1||!NAME_EXCL_LETTERS.includes(letter))return;
+  const s=state[shop];if(!s)return;
+  if(!s.filters)s.filters={};
+  const cur=_nameExclLetters(s.filters.nameExcl?.val);
+  const next=cur.includes(letter)?cur.replace(letter,''):_nameExclLetters(cur+letter);
+  if(next)s.filters.nameExcl={type:'excl',val:next};
+  else delete s.filters.nameExcl;
   _saveFilterState(shop);
+  const typed=document.getElementById('fp-txt-'+shop+'__name')?.value;
   applyFilters(shop);
-  closePopup();
+  const btn=[...(document.getElementById('tbl-'+shop)?.querySelectorAll('thead .filter-btn')||[])]
+    .find(b=>(b.getAttribute('onclick')||'').includes("','name',"));
+  if(!btn){closePopup();return;}
+  openFilter(shop,'name',false,btn);
+  const inp=document.getElementById('fp-txt-'+shop+'__name');
+  if(inp&&typed!==undefined)inp.value=typed;
 }
 function applyFpNum(shop,col,sid){
   const minEl=document.getElementById('fp-min-'+sid);
@@ -6043,10 +6070,10 @@ function openFilter(shop,col,isNum,el){
       <div class="fp-sort-row">
         <button class="fp-sort-btn ${cs?.col===col&&cs?.dir==='asc'?'on':''}" onclick="setSort('${shop}','${col}','asc')">↑ A→Z</button>
         <button class="fp-sort-btn ${cs?.col===col&&cs?.dir==='desc'?'on':''}" onclick="setSort('${shop}','${col}','desc')">↓ Z→A</button>
-      </div>${col==='name'?`
+      </div>${col==='name'?[['C','清倉品'],['W','冬季品'],['H','夏季品']].map(([L,desc])=>`
       <div class="fp-sort-row">
-        <button class="fp-sort-btn ${s.filters?.nameExcl?'on':''}" onclick="toggleNameExcl('${shop}')">⛔ 排除【C】【W】【H】商品</button>
-      </div>`:''}
+        <button class="fp-sort-btn ${_nameExclLetters(s.filters?.nameExcl?.val).includes(L)?'on':''}" onclick="toggleNameExcl('${shop}','${L}')">⛔ 排除【${L}】${desc}</button>
+      </div>`).join(''):''}
       <div class="fp-confirm-row">
         <button class="fp-clear2" onclick="clearColFilter('${shop}','${col}');closePopup()">✕ 清除</button>
         <button class="fp-confirm" onclick="applyFpTxt('${shop}','${col}','${sid}');closePopup()">確定</button>
@@ -8267,7 +8294,7 @@ function renderTable(shop,list,opts){
 
   const ss=s.sorts||{};
   const si=(col)=>ss.col===col?(ss.dir==='asc'?' ▲':' ▼'):'';
-  const hasF=(col)=>!!(s.filters?.[col])||(col==='name'&&!!s.filters?.nameExcl)||ss.col===col;   // 名稱欄：排除 C/W/H 開著也算有篩選
+  const hasF=(col)=>!!(s.filters?.[col])||(col==='name'&&!!_nameExclLetters(s.filters?.nameExcl?.val))||ss.col===col;   // 名稱欄：排除 C/W/H 任一顆開著也算有篩選
   // help：欄名與 ▾ 之間的一顆 ?，點開「比較基準說明」彈窗。預設空字串 → 其餘欄位輸出逐字不變。
   //   🔴 只有帶「/ 上期」副標的三欄會傳（adsFee / rev / dayBudget，見 buildColHeader）。
   //   🔴 【不用】MOMO 的 .mm-info：那套是原生 title tooltip —— hover 才出現、手機完全看不到、
