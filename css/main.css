@@ -209,7 +209,7 @@
 
   /* 側欄 */
   .sidebar {
-    width: 240px;
+    width: var(--sidebar-w, 240px);   /* 可拖曳調整（sidebarResizeDrag 更新 --sidebar-w、存 localStorage）；預設 240、範圍 200~360。收合規則 width:0 仍勝出（見下） */
     background: var(--sidebar);
     color: var(--sidebar-text);
     display: flex;
@@ -218,7 +218,9 @@
     transition: width .25s ease;
     overflow: hidden;
   }
-  body.sidebar-collapsed .sidebar { width: 0; }
+  body.sidebar-collapsed .sidebar { width: 0; }   /* 選擇器比 `.sidebar` specific → 收合時勝過 var，寬度歸 0。⚠ 拖曳只更新 --sidebar-w、絕不寫 .sidebar 的 inline width（inline 會贏過本規則、導致收合失效） */
+  body.sidebar-resizing .sidebar,
+  body.sidebar-resizing .sidebar-toggle { transition: none; }   /* 拖曳中關掉 width/left 動畫，才跟手（收合切換時才要 .25s） */
   body.sidebar-collapsed .sidebar > * { opacity: 0; pointer-events: none; }
   /* 收合後右側畫面整體等比放大（zoom 兼容性更好，不會破壞 flex/fixed） */
   .main { transition: zoom .25s ease; }
@@ -227,7 +229,7 @@
   .sidebar-toggle {
     position: fixed;
     top: 18px;
-    left: 226px; /* 240 - 14 = 226，按鈕剛好騎在邊緣 */
+    left: calc(var(--sidebar-w, 240px) - 14px); /* 騎在側欄右緣（隨 --sidebar-w 移動；14＝按鈕半徑） */
     width: 28px;
     height: 28px;
     border-radius: 50%;
@@ -253,6 +255,21 @@
   }
   .sidebar-toggle:active { transform: translateY(1px); }
   body.sidebar-collapsed .sidebar-toggle { left: 8px; }
+  /* 側欄寬度拖曳把手：騎在側欄右緣的細直條（fixed → 不受 .sidebar overflow:hidden 裁切）。
+     拖曳更新 --sidebar-w（範圍 200~360）、存 localStorage。收合態與手機抽屜一律隱藏（無寬可調）。 */
+  .sidebar-resizer {
+    position: fixed;
+    top: 0;
+    left: calc(var(--sidebar-w, 240px) - 3px);
+    width: 6px;
+    height: 100vh;
+    cursor: col-resize;
+    z-index: 150;              /* 內容之上、收合鈕(200)之下 */
+    background: transparent;
+  }
+  .sidebar-resizer:hover,
+  .sidebar-resizer.dragging { background: rgba(99, 102, 241, .28); }
+  body.sidebar-collapsed .sidebar-resizer { display: none; }
   .sidebar-header {
     padding: 16px 20px 14px;
     display: flex;
@@ -1466,6 +1483,7 @@
       transition: transform .22s ease;
       box-shadow: 6px 0 28px rgba(0,0,0,.22);
     }
+    .sidebar-resizer { display: none; }   /* 手機抽屜模式無寬度拖曳（側欄=82vw 抽屜） */
     body.mobile-drawer-open .sidebar { transform: translateX(0); }
     body.mobile-drawer-open::before {
       content: '';
