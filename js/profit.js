@@ -2091,7 +2091,13 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     // 收尾：綠色「✓」只在 failed=0 且 skippedProblem=0 且 skippedWillDelete=0 且【無 dirty 登記失敗記錄】時出現；只要有問題/被保護跳過/掉過登記就 ⚠ + 彈窗
     const dirtyFailKeys=[...new Set(dirtyFailSnap.map(x=>x.key))];   // E-0a 第三塊：以 key 去重（同一把 key 的 key 級/品號級記錄算一件事）
     const problems=failed.length+skippedProblem.length+skippedWillDelete.length+dirtyFailKeys.length;
-    if(problems===0){
+    // ── 根治 2b：products 主檔未上雲的專屬安全網（與 __MOMO_MERGE_ENFORCE flag／根治1 auto-push 解耦）──
+    //   sync 跑完後，若還有 ec_momo_products|<shop> 留在持久化 dirty 註冊表 = 期別/銷售沒上雲
+    //   （flag 關、shadow 跳過、auto-push 失敗、或這次 scoped 沒含 products 都會落到這）。
+    //   不混進 skippedProblem 的「讀不到/損毀」通用文案，給 products 專屬可見警告；即使 problems===0 也擋掉綠燈。
+    const _prodDirtyShops=(()=>{ try{ return [...new Set(_momoReadJson(_MOMO_PDIRTY_LS,[]).filter(k=>String(k).startsWith('ec_momo_products|')).map(k=>momoShopDisplay(String(k).split('|')[1])))]; }catch{ return []; } })();
+    const _prodWarn = _prodDirtyShops.length ? ('商品主檔（期別／銷售）尚未上雲：'+_prodDirtyShops.join('、')+' → 請重按「☁ 同步雲端」。若持續：Console 打 window.__momoProductsDirtySkus(賣場) 查、或確認 window.__MOMO_MERGE_ENFORCE===true。') : '';
+    if(problems===0 && !_prodWarn){
       if(btn){btn.textContent='✓ 已同步 '+ok.length+' 筆';btn.style.background='#10b981';btn.style.color='#fff';btn.style.borderColor='#10b981';_syncBtnRepaintTimer=setTimeout(()=>{ _showSyncBtn(); },2000);}
       // 第 3 塊：成功 toast 尾端接上封存殘留的處置結果（drop 用 error 樣式蓋過 success —— 有東西沒上傳不能是綠的；只有 defer 維持 success）。
       const _archNote=(archivedDropped.length>0?'（'+archivedDropped.length+' 筆封存期別的修改未上傳，已從待推清單移除；內容記在 Console 與 __lastSyncReport）':'')+(archivedDeferred.length>0?'（'+_deferTxt()+'）':'');
@@ -2100,13 +2106,15 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       try { if(window.App && typeof App._updateDailyProgressFromAdjustments === 'function') App._updateDailyProgressFromAdjustments({ pushToCloud: true }); }
       catch(e){ console.warn('[autoSummary profit]', e); }
     }else{
-      if(btn){btn.disabled=false;btn.textContent='⚠ '+ok.length+' 成功 / '+problems+' 未完成';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';}
+      if(btn){btn.disabled=false;btn.textContent=(problems>0?('⚠ '+ok.length+' 成功 / '+problems+' 未完成'):'⚠ 商品主檔未上雲');btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';}
       const lines=[];
+      if(_prodWarn) lines.push('［未上雲·商品主檔］'+_prodDirtyShops.join('、')+'：期別/銷售留在本機、未推上雲');   // 根治 2b：products 專屬（不混進下面通用項）
       failed.forEach(f=>lines.push('［失敗］'+f.key+'：'+f.msg));
       skippedProblem.forEach(p=>lines.push('［讀不到］'+p.key+'：'+p.reason));
       skippedWillDelete.forEach(x=>lines.push('［保護未推］'+x.key+'：會刪雲端 '+x.willDelete+' 筆（可能是同事的更新）'));
       dirtyFailKeys.forEach(k=>lines.push('［登記失敗］'+k+(ok.indexOf(k)>=0?'（本次已重新推送，警告不再出現）':'（尚未重新推送，警告會持續出現）')));
       let msg='成功 '+ok.length+' 筆。';
+      if(_prodWarn) msg+='\n\n⚠ '+_prodWarn;   // 根治 2b：products 未上雲擺最前面、最顯眼（這正是 2026-08 靜默漏掉的那條）
       if(failed.length) msg+='\n'+failed.length+' 筆沒推上雲端，資料還在本機 → 重整前請先匯出 Excel 備份，稍後再按同步重試。';
       if(skippedProblem.length) msg+='\n'+skippedProblem.length+' 筆在本機讀不到（可能損毀）→ 請到淨利表重新產生這些報表。';
       if(skippedWillDelete.length) msg+='\n'+skippedWillDelete.length+' 項因會刪除雲端資料（可能是同事的更新）而未推送 → 請到該賣場的「同步預覽」逐項確認後再推。';
@@ -13726,6 +13734,15 @@ function momoRefreshSyncBtn(shop){
   if(has){ btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b'; }
   else   { btn.disabled=true; btn.style.opacity='0.4';btn.style.cursor='default';btn.style.background='#fff';btn.style.color='#6b7280';btn.style.borderColor='#e5e7eb'; }
   btn.textContent='☁ 同步雲端';           // 不顯示筆數（避免估算數字與預覽對不上）
+  // 根治 2c：tooltip 點名待推分類（只查 products / origins 兩個持久化 dirty 註冊表，不複製整份易漂移的前綴白名單）
+  try{
+    const prodShops=[...new Set(_momoReadJson(_MOMO_PDIRTY_LS,[]).filter(k=>String(k).startsWith('ec_momo_products|')).map(k=>momoShopDisplay(String(k).split('|')[1])))];
+    const oDirty=(_momoReadJson(_MOMO_ODIRTY_LS,[])||[]).length;
+    const parts=[];
+    if(prodShops.length) parts.push('商品主檔（期別/銷售）：'+prodShops.join('、'));
+    if(oDirty) parts.push('逐列成本 origins '+oDirty+' 份');
+    btn.title = has ? (parts.length ? ('待推 — '+parts.join('；')+(prodShops.length?'　⚠ 商品主檔務必推成功':'')) : '有待同步項目，點我推上雲') : '';
+  }catch{ btn.title=''; }
 }
 function _momoCount(v){ return Array.isArray(v)?v.length : (v&&typeof v==='object')?Object.keys(v).length : (v==null?0:1); }
 // 預覽「筆數」顯示：f1102/reconcile/s1103 的 doc 是 {meta…, skus:{品號→…}}——真實筆數在 skus，不是 doc 頂層欄位數
@@ -17653,6 +17670,23 @@ function momoMoPlusApplyPrepared(shop, parsed, plan, allowedPeriods, opts){
   const mm=(opts&&opts.deferConsistency)?null:momoMoPlusConsistency(shop);
   return {res, built, lsOk, mm};
 }
+// ── 根治 1：MO+ 對帳明細寫入後，自動把「這次寫的三把 key」推上雲（scoped，不誤推其他待同步）──
+//   走既有 syncToCloud 分派：products→enforce merge（__MOMO_MERGE_ENFORCE 現預設 true）、origins/reconcile→無條件推。
+//   ⚠ 結果一律回報、絕不靜默——2026-08 好麻吉「origins/reconcile 上雲、products 靜默沒上雲」正是敗在
+//     上傳流程不自動推、又沒警示。回傳 { ok, okN, failedN, prodDirty, preserved, err }：
+//     ok = 真的都上雲了（無 failed、products 不再 dirty、無例外）。prodDirty 以 dirty 註冊表為權威。
+async function momoMoPlusAutoPushUploaded(shop, keys){
+  const allow=new Set(keys);
+  let err=null, report=null;
+  try{ await syncToCloud(shop, allow); }catch(e){ err=e; }
+  try{ report=window.__lastSyncReport||null; }catch{}
+  const okN=(report&&report.ok&&report.ok.length)||0;
+  const failedN=(report&&report.failed&&report.failed.length)||0;
+  let preserved=0; try{ const mp=window.__momoLastMergePlan; if(mp&&mp.shop===shop) preserved=mp.cloudOnly||0; }catch{}
+  let prodDirty=true; try{ prodDirty=_momoIsDirty(momoProductsKey(shop)); }catch{}
+  try{ if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop); }catch{}   // 推完刷新同步鈕（亮暗＋2c tooltip 反映最新 dirty）
+  return { ok: !err && failedN===0 && !prodDirty, okN, failedN, prodDirty, preserved, err: err&&(err.message||String(err)) };
+}
 function momoMoPlusComputeGuard(plan, shop){
   const sp=plan.shops[shop]; if(!sp||!Object.keys(sp.updates).length) return {merged:{periods:[],notCovered:[]}, hasDanger:false};
   const inc={}; Object.keys(sp.updates).forEach(sku=>{ inc[sku]={}; Object.keys(sp.updates[sku]).forEach(pd=>{ inc[sku][pd]={qty:sp.updates[sku][pd].qty}; }); });
@@ -17715,8 +17749,9 @@ function momoMoPlusUploadOpenGuard(shop){
     subtitle:`本檔來源鍵：<b>${_momoEsc(P.srcCode)}</b>。對帳明細依入帳日編製、下單日落後約一個月——一份檔會跨多個期別、舊期別以本檔月份為來源<b>累加</b>（不覆蓋、不會變小），故<b>預設全勾</b>。`,
     cls:g.merged, onConfirm:(allowed)=>momoMoPlusUploadApply(shop, allowed) });
 }
-function momoMoPlusUploadApply(shop, allowedPeriods){
+async function momoMoPlusUploadApply(shop, allowedPeriods){
   const P=_moPlusUpPlan, parsed=_moPlusUpParsed; if(!P||!parsed) return;
+  const srcCode=parsed.srcCode;   // 先抓（下面會清空 _moPlusUpParsed，但 parsed 區域參照仍在）
   const {res, built, lsOk, mm}=momoMoPlusApplyPrepared(shop, parsed, P, allowedPeriods);   // ①寫products ②origins ③recon +寫後互查（單檔/批次共用）
   _moPlusUpFile=null; _moPlusUpParsed=null; _moPlusUpPlan=null;
   const lines=[momoPeriodReportLine('已寫入', res.wroteBy), momoPeriodReportLine('　其中累加到既有期別', res.accumBy), momoPeriodReportLine('已跳過（你未勾選）', res.gatedBy)].filter(Boolean);
@@ -17725,12 +17760,27 @@ function momoMoPlusUploadApply(shop, allowedPeriods){
   let extra='';
   if(!lsOk) extra+='\n\n⚠ 逐列成本（origins）寫入本機失敗（可能配額不足）——請截圖回報、先不要按同步（避免只推一半造成雲端不一致）。';
   if(mm.length) extra+='\n\n⚠ 雙寫不一致：'+mm.length+' 個期別 cell qty≠Σorigins（'+mm.slice(0,5).map(x=>x.sku+' '+momoPeriodLabel(x.period)+' '+x.cellQty+'≠'+x.sumOrigins).join('、')+(mm.length>5?' …':'')+'）。毛利會標紅、該期別不算數字，請回報。';
+  // ── 根治 1：寫入成功就自動把這次寫的三把 key 推上雲（scoped），結果併進 modal、絕不靜默 ──
+  let pushMsg='';
+  if(res.wrote>0 && lsOk){   // 有寫入且 origins 本機寫成功才自動推（lsOk 失敗時本來就叫使用者先別推）
+    const keys=[momoProductsKey(shop), momoMoPlusOriginsKey(shop, srcCode)];
+    const rmonth=momoMoPlusSrcToMonth(srcCode); if(rmonth) keys.push(momoReconcileKey(shop, rmonth));
+    const ap=await momoMoPlusAutoPushUploaded(shop, keys);
+    pushMsg = ap.ok
+      ? '\n\n✅ 已自動上雲：推 '+ap.okN+' 筆'+(ap.preserved?'／保留雲端 '+ap.preserved+' 個既有 SKU':'')+'（不用再手動按同步）。'
+      : '\n\n⚠ 自動上雲未完成'+(ap.err?'（'+ap.err+'）':'')+'——資料已寫進本機，但商品主檔可能沒推上雲。請按「☁ 同步雲端」重試。';
+  }
+  // ── 根治 2a：以 products dirty 為權威，明確標「商品主檔上雲了沒」（與 auto-push 自報解耦、雙保險）──
+  let prodDirty=false; try{ prodDirty=_momoIsDirty(momoProductsKey(shop)); }catch{}
+  const prodStateMsg = res.wrote>0 ? (prodDirty
+      ? '\n\n⚠ 商品主檔（期別／銷售）尚未上雲 → 請按「☁ 同步雲端」。'
+      : '\n\n✓ 商品主檔已上雲。') : '';
   const detail=lines.join('\n');
-  const kind=(!lsOk||mm.length)?'error':'info';
+  const kind=(!lsOk||mm.length||prodDirty)?'error':'info';
   if(res.wrote===0){ const msg=res.gatedCount?('這批都落在你未勾選的期別，未寫入。\n\n'+detail):'沒有相符的已建檔 SKU（先到批次維護建檔）。';
     if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'未寫入',message:msg+extra,kind:extra?'error':'warn'}); else alert(msg+extra); }
-  else if(window.App&&typeof App.showAlertModal==='function'){ App.showAlertModal({title:(kind==='error'?'已寫入但有警告':'已寫入（逐期別）'), message:detail+'\n\n逐列成本 origins：'+built.skuN+' 個 SKU（來源 '+parsed.srcCode+'）。記得按 ☁ 同步雲端。'+extra, kind}); }
-  else if(typeof showToast==='function'){ showToast((kind==='error'?'⚠ 已寫入但有警告，請看 console':'已寫入 '+res.wrote+' 筆')+'（記得同步）', kind==='error'?'error':'success'); }
+  else if(window.App&&typeof App.showAlertModal==='function'){ App.showAlertModal({title:(kind==='error'?'已寫入但有警告':'已寫入並上雲'), message:detail+'\n\n逐列成本 origins：'+built.skuN+' 個 SKU（來源 '+srcCode+'）。'+pushMsg+prodStateMsg+extra, kind}); }
+  else if(typeof showToast==='function'){ showToast((kind==='error'?'⚠ 已寫入但有警告，請看 console':'已寫入並上雲 '+res.wrote+' 筆'), kind==='error'?'error':'success'); }
   momoRenderMoPlusUpload(shop);
 }
 // ══════════════ MO+ 對帳明細「批次上傳」（多選、逐檔依序、任一失敗不中斷、進度顯示）══════════════
@@ -17759,6 +17809,7 @@ function momoMoPlusBatchUpdate(shop){ const prev=document.getElementById('moplus
 async function momoMoPlusBatchRun(shop){
   const b=_moPlusBatch; if(!b||b.shop!==shop||b.running||b.blocked||b.done) return;
   b.running=true; momoMoPlusBatchUpdate(shop); await momoYield();
+  const _pushSrcs=[];   // 根治 1（批次）：收集成功寫入的來源鍵，整批寫完自動一次上雲
   for(const it of b.items){
     if(it.status==='重複'){ it.status='略過'; it.detail='重複，未處理'; momoMoPlusBatchUpdate(shop); await momoYield(); continue; }
     it.status='處理中'; it.detail=''; momoMoPlusBatchUpdate(shop); await momoYield();
@@ -17774,7 +17825,7 @@ async function momoMoPlusBatchRun(shop){
           let d='寫入 '+res.wrote+' 筆 · '+built.skuN+' SKU · 期別 '+periods;
           if(r.unmatchedN) d+=' · 已跳過 '+r.unmatchedN+' 個未建檔商品';   // 少數未建檔照舊寫入，但不靜默：摘要標明跳過數
           if(momoMoPlusPlanHasShrink(r.plan)) d+=' · ⚠同來源變小';   // 數量變小警示保留（提示、不阻擋）
-          it.status='成功'; it.detail=d;
+          it.status='成功'; it.detail=d; _pushSrcs.push(r.srcCode);   // 根治 1：記下來源鍵，整批寫完自動上雲
         }
       }
     }catch(e){ it.status='失敗'; it.detail=String(e&&e.message||e).slice(0,80)+'（未寫入）'; }
@@ -17787,6 +17838,12 @@ async function momoMoPlusBatchRun(shop){
     b.finalMismatch=fm.length;
     b.finalMismatchSample=fm.slice(0,5).map(x=>String(x.sku).slice(-8)+' '+momoPeriodLabel(x.period)+' 商品數 '+x.cellQty+'≠源 '+x.sumOrigins);
   }catch(e){ b.finalMismatch=0; b.finalMismatchSample=[]; }
+  // ── 根治 1（批次）：整批寫完自動 scoped 上雲（products 一把 + 每個來源月的 origins/reconcile）；結果掛 b.autoPush 供 summary 顯示 ──
+  if(_pushSrcs.length){
+    const keys=new Set([momoProductsKey(shop)]);
+    _pushSrcs.forEach(src=>{ keys.add(momoMoPlusOriginsKey(shop, src)); const mo=momoMoPlusSrcToMonth(src); if(mo) keys.add(momoReconcileKey(shop, mo)); });
+    try{ b.autoPush=await momoMoPlusAutoPushUploaded(shop, [...keys]); }catch(e){ b.autoPush={ok:false, err:String(e&&e.message||e)}; }
+  }
   b.done=true; momoMoPlusBatchUpdate(shop);
 }
 function momoMoPlusBatchQueueHTML(shop){
@@ -17809,9 +17866,14 @@ function momoMoPlusBatchQueueHTML(shop){
     const cons=(b.finalMismatch>0)
       ? `<br><span style="color:#dc2626;font-weight:700">⚠ 一致性檢查：${b.finalMismatch} 筆 商品數與逐列成本(origins)不符（資料<b>已寫入本機</b>、非寫入失敗；請回報）</span>${(b.finalMismatchSample&&b.finalMismatchSample.length)?'<br><span style="color:#9ca3af;font-size:11px">例：'+esc(b.finalMismatchSample.join('、'))+'</span>':''}`
       : `<br><span style="color:#065f46">一致性檢查：✓ 商品數與逐列成本一致（0 筆不符）</span>`;
-    const hasIssue=failN>0 || b.finalMismatch>0;
+    const ap=b.autoPush;   // 根治 1（批次）：整批寫完的自動上雲結果
+    const apLine = ap ? (ap.ok
+        ? `<br><span style="color:#065f46">☁ 已自動上雲：推 <b>${ap.okN}</b> 筆${ap.preserved?'／保留雲端 '+ap.preserved+' 個既有 SKU':''}（不用再手動同步）</span>`
+        : `<br><span style="color:#dc2626;font-weight:700">⚠ 自動上雲未完成${ap.err?'（'+esc(ap.err)+'）':''}——商品主檔可能沒上雲，請按「☁ 同步雲端」重試</span>`)
+      : '<br>記得按 <b>☁ 同步雲端</b> 才會上雲。';
+    const hasIssue=failN>0 || b.finalMismatch>0 || (ap && !ap.ok);
     summary=`<div class="mm-banner" style="margin-top:10px;${hasIssue?'background:#fffbeb;border:1px solid #fde68a;color:#92400e':'background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46'}">
-      ✅ 完成：成功 <b>${okN}</b> 檔／失敗 <b>${failN}</b> 檔${failN?'<br>失敗（未寫入）：'+esc(failList.join('；')):''}${cons}<br>記得按 <b>☁ 同步雲端</b> 才會上雲。</div>`;
+      ✅ 完成：成功 <b>${okN}</b> 檔／失敗 <b>${failN}</b> 檔${failN?'<br>失敗（未寫入）：'+esc(failList.join('；')):''}${cons}${apLine}</div>`;
   }
   const canRun = !b.blocked && !b.running && !b.done;
   return `<div style="border:1px solid #eef0f2;border-radius:10px;padding:14px 16px">
