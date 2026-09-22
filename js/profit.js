@@ -22831,7 +22831,7 @@ function pchomeRenderReconInfo(shop){
 }
 // ── 總表計算（口徑：docs §3/§5 + 使用者拍板）──
 //   單位＝帳務月 snapshot；本賣場訂單貨款段逐「廠商料號」彙總。營收未稅=應付金額/1.05；成本=product.cost（建檔凍結值）×銷量；
-//   淨利=營收未稅−成本−費用未稅；成本 null → 淨利/淨利率 null，不進加權分母。歸期依單號確認日（見 docs §4；此 snapshot 內各列已屬此帳務月）。
+//   淨利=營收未稅−成本−費用未稅；成本 null → 該列淨利/淨利率顯「—」。加權淨利率＝總淨利÷總營收（照 momo、含缺成本列營收 → 缺成本時偏高、由 missBanner 警示）。歸期依單號確認日（見 docs §4；此 snapshot 內各列已屬此帳務月）。
 //   費用：罰金(有商品編號)歸 SKU（商品編號→料號 map，罰金段本身無廠商料號）；其他(D)組無 SKU 明細→未分攤；
 //   未分攤(D) 有貼上解析用對帳單(D)（完整、含簡訊費等 8 項）、否則退回 CSV(D)組加總(標不完整)。不按營收比例分攤罰金。
 // 上架判定：商品狀態以「上架」開頭（實測值有「上架」「上架(啟用)」）＝上架；其餘（下架/停用…）＝已下架。無主檔/無狀態（有售但不在清單）→ 當上架。
@@ -22893,13 +22893,15 @@ function pchomeProfitCalc(entry, shop){
   var totCost=skus.reduce(function(s,x){return s+(x.成本||0);},0);   // 零銷列 costTotal=unit×0=0 → 合計不變
   var feeUntaxTotal=dTotal/1.05;   // dTotal 恆為數（即時＝CSV(D)+簡訊推算；已對帳＝對帳單D）
   var totProfit=totRev-totCost-feeUntaxTotal;   // 合計＝真實聚合（缺成本料號的營收計入、成本未計→偏樂觀，用缺成本數提示）
-  // 缺成本/加權/納入占比：只算「有業績」列——零銷上架品不該被當缺成本、也不進加權分母（比照缺成本＝有營收但無成本）。
+  // 缺成本數/納入占比：只算「有業績」列（零銷上架品不算缺成本）。缺成本＝有營收但無成本。
   var biz=skus.filter(function(x){return x.hasBiz;});
   var known=biz.filter(function(x){return x.costKnown;});
-  var knownRev=known.reduce(function(s,x){return s+x.營收;},0), knownProfit=known.reduce(function(s,x){return s+x.淨利;},0);
+  var knownRev=known.reduce(function(s,x){return s+x.營收;},0);
+  // 加權淨利率＝總淨利 ÷ 總營收（完全照 momo momoPeriodTotals 的 margin＝profit/rev；含未分攤費用、與總淨利卡同基準、兩卡對得起來）。
+  //   ⚠ 口徑變更（2026-09）：舊版用 knownProfit/knownRev（缺成本不進分母），已改為 momo 公式 → 缺成本>0 時營收計入、成本未計 → 加權會偏高，由 missBanner 警示「可能高估」（不再說「不進分母」）。
   return { skus:skus, 未分攤:unalloc, 未分攤未稅:unalloc/1.05, dTotal:dTotal, dSource:dSource, feeState:feeState, penaltyUnattributed:penaltyUnattributed,
     合計:{營收:totRev,銷量:totQty,成本:totCost,費用:feeUntaxTotal,淨利:totProfit},
-    加權淨利率:(knownRev>0?knownProfit/knownRev:null), 納入占比:(totRev>0?knownRev/totRev:null), 缺成本數:(biz.length-known.length),
+    加權淨利率:(totRev>0?totProfit/totRev:null), 納入占比:(totRev>0?knownRev/totRev:null), 缺成本數:(biz.length-known.length),
     bizCount:biz.length, discCount:skus.filter(function(x){return x.discontinued;}).length, activeCount:skus.filter(function(x){return !x.discontinued;}).length,
     簡訊費推算:{訂單數:smsOrders, 含稅:smsEstIncl, 未稅:smsEstIncl/1.05}, 簡訊費實際:smsActual,
     即時費用含稅:即時費用含稅, 即時費用未稅:即時費用含稅/1.05 };
@@ -22912,13 +22914,6 @@ var _pchomeRenderedRows={};  // shop → {key,sorted,calc}：最近一次總表�
 function pchomePct(r){ return (r==null||!isFinite(r))?'—':((r*100).toFixed(1)+'%'); }
 function pchomeSetProfitMonth(shop,key){ _pchomeProfitMonth[shop]=key; pchomeRenderSub(shop); }
 function pchomeProfitSetSort(shop,col){ var c=_pchomeProfitSort[shop]; _pchomeProfitSort[shop]=(!c||c.col!==col)?{col:col,dir:'desc'}:(c.dir==='desc'?{col:col,dir:'asc'}:null); pchomeRenderSub(shop); }   // 點欄名切換 desc→asc→取消（比照 momoProfitSetSort）
-// KPI vs 上期 delta（比照 momoKpiDelta）：只有上一期有資料【且本期已結束】才顯示；本期未完不顯示（同「本期未完不算成長率」）。
-function pchomeKpiDelta(curV, prevV, kind){
-  if(prevV==null||curV==null) return '';
-  if(kind==='pp'){ var d=(curV-prevV)*100; return '<span style="color:'+(d>=0?'#10b981':'#ef4444')+'">'+(d>=0?'▲':'▼')+Math.abs(d).toFixed(1)+'pp</span><span class="base"> vs 上期</span>'; }
-  if(!prevV) return ''; var p=(curV-prevV)/Math.abs(prevV)*100;
-  return '<span style="color:'+(p>=0?'#10b981':'#ef4444')+'">'+(p>=0?'▲':'▼')+Math.abs(p).toFixed(1)+'%</span><span class="base"> vs 上期</span>';
-}
 // ══════════ PChome 總表：欄位管理 + 標籤 + 篩選（全部照 momo 甲配，pchome- 前綴、沿用共用 col-picker/mm-fp CSS 與 momoUiW 欄寬 helper）══════════
 // 單一權威欄位定義（顯示欄＋數值篩選欄都由此導出）。name 固定首欄、tags 左欄；fmt 供數值篩選判斷可篩欄。
 var PCHOME_PROFIT_COLS=[
@@ -23181,30 +23176,46 @@ function pchomeProfitTabHTML(shop){
   if(!months.length) return '<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">尚無對帳資料。<br>請到「月對帳」上傳對帳明細（並貼上對帳單數字），總表才有營收與費用可算。</div></div>';
   var key=_pchomeProfitMonth[shop]; if(!key||months.indexOf(key)<0) key=months[months.length-1];
   var entry=all[key], calc=pchomeProfitCalc(entry, shop), open=pchomePeriodOpen(entry.期間), miss=calc.缺成本數, T=calc.合計;
-  var prevIdx=months.indexOf(key)-1, prevCalc=(prevIdx>=0)?pchomeProfitCalc(all[months[prevIdx]], shop):null, showDelta=!!(prevCalc&&!open);
+  var prevIdx=months.indexOf(key)-1, prevKey=(prevIdx>=0)?months[prevIdx]:'', prevCalc=prevKey?pchomeProfitCalc(all[prevKey], shop):null;
+  var e=calc.簡訊費推算, act=calc.簡訊費實際;   // 簡訊費推算/實際（feeChip tooltip + 狀態橫幅共用）
   // 期別控制列（.mm-row + .mm-field + .mm-sel；狀態 slot 放本期未完 chip）
   var monthOpts=months.slice().reverse().map(function(m){ return '<option value="'+esc(m)+'"'+(m===key?' selected':'')+'>'+esc(m)+' 期</option>'; }).join('');
   var feeChip=(calc.feeState==='已對帳')
-    ? '<span class="mm-status ok" title="費用以貼上的對帳單 (D) 為權威值">已對帳</span>'
+    ? '<span class="mm-status ok" title="'+esc('費用以貼上的對帳單 (D) 為權威值。'+(act!=null?'簡訊費實際 (D5) '+pchomeMoney(act)+'／即時推算 '+e.訂單數+' 張單 '+pchomeMoney(e.含稅)+'（差 '+pchomeMoney(act-e.含稅)+'）':'（對帳單未帶 D5 明細）'))+'">已對帳</span>'
     : '<span class="mm-status no" title="對帳單未貼上；費用＝CSV(D)實際＋簡訊費推算（即時值，誤差個位數元）→ 到月對帳貼對帳單轉權威">未對帳</span>';   // 比照 momo 已對帳/未對帳
   var openChip=open?'<span class="mm-status no" title="今天仍在帳務區間內，資料每天會變、不與上期比成長">本期未完</span>':'';
   var ctrl='<div class="mm-row" style="margin-bottom:10px">'
     +'<span class="mm-field"><span class="mm-lbl">帳務月</span><select class="mm-sel" onchange="pchomeSetProfitMonth(\''+shop+'\',this.value)">'+monthOpts+'</select></span>'
     +'<span class="mm-field" style="color:#9ca3af;font-size:12px">區間 '+esc(entry.期間||'')+'　·　歸期依單號確認日</span>'
     +'<span class="mm-field">'+feeChip+(openChip?' '+openChip:'')+'</span></div>';
-  // KPI 4 卡（.mm-kpi；vs 上期 delta 在 .mm-kpi-d）
+  // KPI 5 卡（完全照 momo momoOverviewHTML：總營收｜總淨利｜加權淨利率｜總銷量｜動銷率，每張 ? 提示＋vs上期 delta；下方琥珀狀態橫幅）。
+  //   費用卡拿掉（費用已含在總淨利＝營收−成本−費用，資訊沒消失、只換位置）。狀態改到 KPI 下方橫幅（文字照 PChome 實況，非 momo 的費率/退貨率估算）。
   var wm=calc.加權淨利率, incl=calc.納入占比;
-  var wmColor=(wm==null)?'#9ca3af':(wm>=0.25?'#10b981':(wm>=0.15?'#f59e0b':'#ef4444'));
-  var wmSub=(miss>0)?'<span style="color:#f59e0b">涵蓋 '+pchomePct(incl)+' 營收・缺成本 '+miss+' 支未計</span>':'<span class="base">涵蓋 100% 營收</span>';
-  var feeSub=(calc.feeState==='已對帳')?'<span class="base">已對帳・對帳單 (D)</span>':'<span style="color:#f59e0b">即時・含簡訊推算 '+pchomeMoney(calc.簡訊費推算.未稅)+'</span>';   // 未稅，與費用 KPI 同基準（避免註記含稅數字比未稅 KPI 大、無說明的並列誤讀）
-  var kc=function(label,val,sub,color){ return '<div class="mm-kpi"><div class="mm-kpi-l">'+label+'</div><div class="mm-kpi-v"'+(color?' style="color:'+color+'"':'')+'>'+val+'</div>'+(sub?'<div class="mm-kpi-d">'+sub+'</div>':'')+'</div>'; };
+  var wmColor=(wm==null)?'#9ca3af':(wm>=0.25?'#059669':(wm>=0.15?'#d97706':'#dc2626'));   // 值色照 momo marginColor（≥25綠/≥15橘/<15紅、絕對值）
+  var prevT=prevCalc?prevCalc.合計:null, prevLbl=prevKey||'上期';
+  var hasPrev=!!(prevCalc && !open);   // 有上期資料【且本期已結束】才算 delta；否則「—」（同 momo：無上期/本期未完都靜音）
+  var kdPct=function(cur,prev){ if(!hasPrev||cur==null||prev==null||prev===0) return {txt:'—',color:'#9ca3af'}; var d=(cur-prev)/Math.abs(prev)*100,up=d>=0; return {txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'%',color:up?'#059669':'#dc2626'}; };   // 絕對量：%、綠▲/紅▼
+  // 動銷率（照 momo）：分子＝本期有售(不論上下架)、分母＝目前上架 ∪ 本期有售
+  var dxDen=calc.skus.filter(function(x){return !x.discontinued||x.hasBiz;}).length, dxNum=calc.bizCount||0;
+  var dxRate=dxDen>0?dxNum/dxDen:null;
+  var pdxDen=prevCalc?prevCalc.skus.filter(function(x){return !x.discontinued||x.hasBiz;}).length:0;
+  var pdxRate=(prevCalc&&pdxDen>0)?(prevCalc.bizCount||0)/pdxDen:null;
+  var dxDelta=(hasPrev&&dxRate!=null&&pdxRate!=null)?(function(){var d=(dxRate-pdxRate)*100,up=d>=0;return {txt:(up?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+'pp',color:up?'#059669':'#dc2626'};})():{txt:'—',color:'#9ca3af'};   // pp、綠▲/紅▼（升＝好）
+  var wmDelta=(hasPrev&&wm!=null&&prevCalc.加權淨利率!=null)?(function(){var d=(wm-prevCalc.加權淨利率)*100;return {txt:(d>=0?'+':'')+d.toFixed(1)+'pp',color:'#9ca3af'};})():{txt:'—',color:'#9ca3af'};   // pp、中性灰（不分方向，照 momo）
+  var dxVal=dxRate!=null?(pchomePct(dxRate)+' <span style="font-size:12px;color:#9ca3af;font-weight:400">('+dxNum+' / '+dxDen+')</span>'):'—';
+  var wmTip='加權淨利率 ＝ 總淨利 ÷ 總營收（與總淨利卡同基準、含未分攤費用）。淨利＝營收 − 商品成本 − 平台費用（D 手續費＋罰金＋未分攤簡訊/包材等）。'+(miss>0?('⚠ 缺成本 '+miss+' 支：其營收已計入、成本未計 → 加權淨利率偏高（可能高估）。目前有成本料號涵蓋 '+pchomePct(incl)+' 營收。'):'本期所有料號都有成本、涵蓋 100% 營收。');
+  var kc=function(label,info,val,valColor,d){ return '<div class="mm-kpi"><div class="mm-kpi-l">'+label+(info?' <span class="mm-info" title="'+esc(info)+'">?</span>':'')+'</div><div class="mm-kpi-v"'+(valColor?' style="color:'+valColor+'"':'')+'>'+val+'</div><div class="mm-kpi-d" style="color:'+d.color+'">'+d.txt+'<span class="base"> vs '+esc(prevLbl)+'</span></div></div>'; };
   var kpi='<div class="mm-kpis">'
-    +kc('營收（未稅）', pchomeMoney(T.營收), showDelta?pchomeKpiDelta(T.營收,prevCalc.合計.營收):'', '')
-    +kc('銷量', pchomeNum(T.銷量)+' 件', showDelta?pchomeKpiDelta(T.銷量,prevCalc.合計.銷量):'', '')
-    +kc('加權淨利率', (miss>0&&wm==null)?'—':pchomePct(wm), wmSub+(showDelta?'　'+pchomeKpiDelta(wm,prevCalc.加權淨利率,'pp'):''), wmColor)
-    +kc('費用（未稅）', pchomeMoney(T.費用), feeSub+(showDelta?'　'+pchomeKpiDelta(T.費用,prevCalc.合計.費用):''), '')
+    +kc('總營收', '該期所有商品營收合計。（未稅）', pchomeMoney(T.營收), '', kdPct(T.營收, prevT?prevT.營收:null))
+    +kc('總淨利', '該期所有商品淨利合計。已扣 PChome 平台費用（D 手續費＋罰金）與商品成本。（未稅）', pchomeMoney(T.淨利), '', kdPct(T.淨利, prevT?prevT.淨利:null))
+    +kc('加權淨利率', wmTip, (wm==null)?'—':pchomePct(wm), wmColor, wmDelta)
+    +kc('總銷量', '', pchomeNum(T.銷量)+' 件', '', kdPct(T.銷量, prevT?prevT.銷量:null))
+    +kc('動銷率', '本期有銷售的商品數 ÷（目前上架 ∪ 本期有售）。分子＝本期有賣出（不論上下架）；分母＝目前上架＋「本期有賣但已下架」；長期下架又沒賣的不進分母。分子必為分母子集、不超過 100%。', dxVal, '', dxDelta)
     +'</div>';
-  var missBanner=(miss>0)?'<div class="mm-banner mm-banner-err">⚠ 有 <b>'+miss+'</b> 個料號缺成本——其淨利/淨利率顯示「—」、不進加權淨利率分母；合計淨利偏高（營收計入、成本未計）。到「商品同步」補成本即對齊。</div>':'';
+  // KPI 下方狀態橫幅（照 momo verifyTxt 位置/class；文字照 PChome 實況：未對帳＝CSV(D)實際+簡訊推算，非費率/退貨率估算）。已對帳→無橫幅（同 momo，狀態由 feeChip 綠標＋tooltip 表達）。併入原表格下方 smsBanner，不重複。
+  var statusBanner=(calc.feeState==='已對帳') ? ''
+    : '<div class="mm-banner mm-banner-warn">⚠ <b>未對帳</b>（'+esc(key)+'）· 費用＝CSV (D) 實際 ＋ 簡訊推算 <b>'+pchomeMoney(e.含稅)+'</b>（'+e.訂單數+' 張單×1，已計入合計）→ 到「月對帳」貼上對帳單轉權威值<br><span style="font-weight:400">簡訊費推算：不重複訂單數（按轉單日期歸期）×1 元。⚠ 單價 1 元 PChome 未公告、僅單一樣本佐證；取消訂單簡訊不在明細→算不到→推算偏低。</span></div>';
+  var missBanner=(miss>0)?'<div class="mm-banner mm-banner-err">⚠ 有 <b>'+miss+'</b> 個有營收的料號缺成本——其營收已計入、成本未計 → <b>總淨利／加權淨利率偏高（可能高估）</b>；該列逐項淨利/淨利率顯「—」。到「商品同步」補成本即對齊。</div>':'';
   var pnMis=calc.skus.filter(function(x){return x.pnMismatch;});
   var pnBanner=pnMis.length?'<div class="mm-banner mm-banner-err">⚠ 有 <b>'+pnMis.length+'</b> 個料號的商品編號在對帳明細與上架清單不一致：'+pnMis.map(function(x){return esc(x.料號)+'（對帳 '+esc(x.reconPN)+' / 清單 '+esc(x.listPN)+'）';}).join('、')+'。請確認上架清單是否為最新（未靜默挑值，兩邊都列出）。</div>':'';
   // 工具列（照 momo）：上下架 toggle（有下架品才出現）＋ 🏷 標籤/篩選 ＋ ☰ 欄位
@@ -23292,16 +23303,9 @@ function pchomeProfitTabHTML(shop){
     ? '<div class="tscroll"><table class="mm-ptbl" style="table-layout:fixed;min-width:'+minW+'px">'+colgroup+thead+'<tbody>'+bodyRows+unallocRow+totRow+'</tbody></table></div>'+noRowNote
     : '<div class="empty"><div class="empty-icon">📋</div><div class="empty-hint">本帳務月「'+esc(shop)+'」無訂單貨款明細。</div></div>';
   var reconNote='<div class="mm-banner" style="background:#f9fafb;border:1px solid #eef0f4;color:#6b7280">逐列淨利 ＋ 未分攤費用 ＝ 合計（缺成本料號會造成差額，補完即對齊）。金額四捨五入到整數、合計由完整精度加總，逐列相加與合計差 ±1 元屬正常。罰金依商品編號歸該 SKU、其餘 (D) 進未分攤（不按營收比例分攤）。</div>';
-  // 簡訊費（推算）→ .mm-banner-warn。雙狀態：即時＝已計入合計（標推算）；已對帳＝以對帳單為準、推算退參考並顯示差額。
-  var e=calc.簡訊費推算, act=calc.簡訊費實際, smsTxt;
-  if(calc.feeState==='已對帳'){
-    smsTxt='已對帳：費用以對帳單 (D) 為準。'+(act!=null?('簡訊費實際 (D5) <b>'+pchomeMoney(act)+'</b>｜即時推算 '+e.訂單數+' 張單 '+pchomeMoney(e.含稅)+'｜差 <b>'+pchomeMoney(act-e.含稅)+'</b>（取消訂單簡訊＋單價假設誤差）'):'（對帳單未帶 D5 明細，無法比對簡訊費差額）');
-  }else{
-    smsTxt='即時：費用 ＝ CSV (D) 實際 ＋ <b>簡訊費推算 '+pchomeMoney(e.含稅)+'</b>（'+e.訂單數+' 張單×1，<b>已計入上方合計</b>）。上傳對帳單後轉「已對帳」實際值。';
-  }
-  var smsBanner='<div class="mm-banner mm-banner-warn">'+smsTxt+'<br><span style="font-weight:400">簡訊費推算規則：不重複訂單數（按轉單日期歸期）× 1 元。⚠ 單價 1 元 PChome 未公告、僅單一樣本佐證；取消訂單簡訊不在明細→算不到→推算偏低。</span></div>';
   _pchomeRenderedRows[shop]={ key:key, sorted:shown, calc:calc };   // 供匯出 Excel：畫面所見（已套帳務月＋排序＋篩選＋上下架 toggle）。照 momo momoRenderProfitBody 存 _momoRenderedRows 的做法。
-  return ctrl+kpi+missBanner+pnBanner+toolbar+table+reconNote+smsBanner;
+  // statusBanner 緊接 KPI 卡下方（照 momo verifyTxt 位置）；smsBanner 已併入 statusBanner，不再單獨掛表格下方。
+  return ctrl+kpi+statusBanner+missBanner+pnBanner+toolbar+table+reconNote;
 }
 // 總表匯出 Excel：用最近渲染的那份（已套當前帳務月＋排序）＝畫面所見。照 momo momoExportExcel。
 //   數字一律推「完整精度原始值」（非畫面 $ 整數／% 一位），Excel 可再運算；null／缺成本→空格（不寫 0，比照 momo 與畫面「—」）。含未分攤費用列與合計列。
