@@ -5851,6 +5851,14 @@ function _loadFilterState(shop){
 }
 
 // ── Filters & Sort ──
+// 「名稱 / ID」欄下拉的「排除【C】【W】【H】商品」（Kelly 2026-09-22）：C＝清倉品、W＝冬季品、H＝夏季品。
+//   目前固定這三種、不開放自訂。狀態存在 s.filters.nameExcl={type:'excl',val:'CWH'} —— 用獨立 key 而不塞進
+//   filters.name，是因為下方迴圈的守衛會把「val 為空」的條目整個跳過，獨立 key 帶 val 天然通過，也能跟
+//   關鍵字篩選同時成立；存讀走既有的 _saveFilterState / _loadFilterState（filters 整包存），本體一行未動。
+//   🔴 為什麼允許前面有別的【】標籤：正式站實測（2026-09-22）名稱開頭會有多個標籤串接，且順序不固定 ——
+//     「【A級】【H】…」與「【H】【A級】…」兩種都存在，兩種都要排除；「【C級】」實測 0 筆、也不該命中
+//     （[CWH] 後面緊接「】」才算）。所以規則是：名稱開頭【連續的】【】標籤裡，只要有一個是【C】【W】【H】就排除。
+const NAME_EXCL_RE=/^(?:【[^】]*】)*?【[CWH]】/;
 function applyFilters(shop,opts){
   const s=state[shop];if(!s)return;
   if(!s._built||!s._built.length)return;
@@ -5885,6 +5893,8 @@ function applyFilters(shop,opts){
     if(!f)return;
     if(f.type!=='range'&&(f.val===''||f.val===undefined))return;
     list=list.filter(r=>{
+      // 排除 C/W/H 放在最前面：它只看名稱，零營收商品也要被排除，不能被下一行的 rev 守衛先判掉。
+      if(f.type==='excl')return !NAME_EXCL_RE.test(r.name||'');
       if(NULL_WHEN_NO_REV.has(col)&&!(r.rev>0))return false;
       const raw=r[col];
       const v=PCT_COLS.has(col)?num(raw)*100:raw;
@@ -5968,9 +5978,20 @@ function setColFilter(shop,col,type,val){
 }
 function clearColFilter(shop,col){
   delete(state[shop].filters||{})[col];
+  if(col==='name')delete(state[shop].filters||{}).nameExcl;   // 名稱欄的「✕ 清除」連排除 C/W/H 一起清（它存在同一欄的下拉裡）
   state[shop].sorts={};
   _saveFilterState(shop);
   applyFilters(shop);
+}
+// 名稱欄下拉的「⛔ 排除【C】【W】【H】商品」toggle（規則見 NAME_EXCL_RE）。
+//   走跟 applyFpTxt 一樣的三步：改 filters → _saveFilterState → applyFilters；再關彈窗（一鍵完成，不用按確定）。
+function toggleNameExcl(shop){
+  if(!state[shop].filters)state[shop].filters={};
+  if(state[shop].filters.nameExcl)delete state[shop].filters.nameExcl;
+  else state[shop].filters.nameExcl={type:'excl',val:'CWH'};
+  _saveFilterState(shop);
+  applyFilters(shop);
+  closePopup();
 }
 function applyFpNum(shop,col,sid){
   const minEl=document.getElementById('fp-min-'+sid);
@@ -6022,7 +6043,10 @@ function openFilter(shop,col,isNum,el){
       <div class="fp-sort-row">
         <button class="fp-sort-btn ${cs?.col===col&&cs?.dir==='asc'?'on':''}" onclick="setSort('${shop}','${col}','asc')">↑ A→Z</button>
         <button class="fp-sort-btn ${cs?.col===col&&cs?.dir==='desc'?'on':''}" onclick="setSort('${shop}','${col}','desc')">↓ Z→A</button>
-      </div>
+      </div>${col==='name'?`
+      <div class="fp-sort-row">
+        <button class="fp-sort-btn ${s.filters?.nameExcl?'on':''}" onclick="toggleNameExcl('${shop}')">⛔ 排除【C】【W】【H】商品</button>
+      </div>`:''}
       <div class="fp-confirm-row">
         <button class="fp-clear2" onclick="clearColFilter('${shop}','${col}');closePopup()">✕ 清除</button>
         <button class="fp-confirm" onclick="applyFpTxt('${shop}','${col}','${sid}');closePopup()">確定</button>
@@ -8243,7 +8267,7 @@ function renderTable(shop,list,opts){
 
   const ss=s.sorts||{};
   const si=(col)=>ss.col===col?(ss.dir==='asc'?' ▲':' ▼'):'';
-  const hasF=(col)=>!!(s.filters?.[col])||ss.col===col;
+  const hasF=(col)=>!!(s.filters?.[col])||(col==='name'&&!!s.filters?.nameExcl)||ss.col===col;   // 名稱欄：排除 C/W/H 開著也算有篩選
   // help：欄名與 ▾ 之間的一顆 ?，點開「比較基準說明」彈窗。預設空字串 → 其餘欄位輸出逐字不變。
   //   🔴 只有帶「/ 上期」副標的三欄會傳（adsFee / rev / dayBudget，見 buildColHeader）。
   //   🔴 【不用】MOMO 的 .mm-info：那套是原生 title tooltip —— hover 才出現、手機完全看不到、
@@ -22069,7 +22093,7 @@ Object.assign(window, {
   coupangSummaryHTML,setCoupangSummaryView,syncCoupangSummaryFromKpi,
   showSheetReassignModal,escapeHtmlLike,
   startEdit,startNote,submitNewAnaRule,submitNewGrowthRule,submitProfitNote,syncHeaderKpis,
-  syncToCloud,toggleHiddenCol,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
+  syncToCloud,toggleHiddenCol,toggleNameExcl,toggleTagPopup,toggleTfDrop,tryLoadSaved,umHideDrop,umSearch,
   ignoreAllUnmatched,umSelect,umSetAll,umToggle,updateAdsEditPreview,updateDaysBadge,updateHalfBtnLabels,
   updateTagFilterBar,validateMapWarnings,
   buildSuggCell,
