@@ -4,6 +4,10 @@ const { Store, escapeHtml, showToast, toDateStr, addDays, todayStr, genId, DAILY
 
 Object.assign(App, {
   renderWeeklyCalendarTab(deptId, color, dept) {
+    // ⚡ 懶載：工作日誌「調整備註」要讀 profits archive（延後訂閱）；boot 已不再無條件預抓，
+    //   故進工作日誌時主動觸發 __loadHeavyProfitSubs()，否則舊月調整會一直卡「載入中」。
+    //   守衛 __heavyProfitSubsLoaded 保證只訂一次（已載過就直接 return，不重訂）。
+    try { if (typeof window.__loadHeavyProfitSubs === 'function') window.__loadHeavyProfitSubs(); } catch {}
     // 老闆指示：移除月曆/週曆/甘特圖，每位同事下班前 5 分鐘寫今日工作進度即可
     // 只保留 4 位同事：陳君葳、洪嘉蓮、郭雅琪、楊心雨（2026-09-04 楊心雨接手維克後加入）
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
