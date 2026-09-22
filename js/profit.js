@@ -1179,7 +1179,7 @@ function _notifyLsSaveFail(shop, month, half, err){
     who + ' 的報表沒有存進這台電腦。\n' +
     '資料目前只在記憶體裡，重整或關掉分頁就會消失。\n\n' +
     '請現在按「☁ 同步雲端」把它推上去（推得上去，不受這個問題影響）。\n' +
-    '保險起見也可以先按「匯出 Excel」留一份。';
+    '保險起見也可以先按「匯出 Excel」留一份（如有篩選請先清除，才會匯出全部商品）。';
   const detail = (err && (err.name || err.message))
     ? ('錯誤：' + (err.name||'') + ' ' + (err.message||'')) : '';
 
@@ -21653,13 +21653,32 @@ function initShopUI(shop){
 
 // ── Export ──
 function doExport(shop){
-  const built=state[shop]._built;if(!built?.length)return;
+  const s=state[shop];const built=s?._built;if(!built?.length)return;
+  // 🔴 匯出來源＝ s._filtered（applyFilters 篩完、畫面正顯示的那批列，含搜尋/標籤/欄位篩選/排序），
+  //   不是 _built 全量 —— 「匯出＝畫面上看到的」，與 momoExportExcel / cupExportExcel 同一語意。
+  //   改在本函式內部（唯一出口），不逐一修呼叫端，理由同 syncHeaderKpis（PR #264）。
+  //   ⚠ 24 欄的欄位對應一字未動，只換了來源；未篩選時 _filtered 是 _built 的同序淺拷貝
+  //     （applyFilters 開頭 `[...s._built]`），匯出內容逐位不變。
+  //   🔴 _filtered 不是陣列（過渡態：_editedAt 早退那條路，_built 已換新、畫面還是舊列）→ 擋下，
+  //     【絕不 fallback 回 _built】：匯出是會被拿去交差的產物，「給了全部」是危險失敗，
+  //     與批次選取同一族（見 applyFilters 尾端註解）；syncHeaderKpis 的 fallback 是唯讀顯示，不同族。
+  const src=s._filtered;
+  if(!Array.isArray(src)){alert('畫面資料剛更新、篩選尚未重算，請重新點一次篩選或切換期間後再匯出。');return;}
+  if(!src.length){alert('目前篩選結果為 0 筆，沒有可匯出的資料。');return;}
+  // 「已篩選」標示用【筆數比對】而不是判斷篩選狀態：條件剛好命中全部時檔案就是完整的，不誤標；
+  //   也不必照抄 _lastMonthSameTotals 的 lmFiltOn（那條把「僅排序」也算篩選，對檔名是誤標）。
+  const partial=src.length!==built.length;
+  const fileSuffix=partial?`_篩選${src.length}筆(共${built.length}筆)`:'';
+  // 工作表名：Excel 上限 31 字、禁 / \ ? * [ ] :。原名＝通路 id（最長「測試通路」4 字），加「(篩選)」
+  //   仍遠低於上限；截短只是守住規格，不預期會觸發。
+  let sheetName=shop;
+  if(partial){const tag='(篩選)';const base=String(shop).replace(/[\/\\?*\[\]:]/g,'');sheetName=base.slice(0,31-tag.length)+tag;}
   const wb=XLSX.utils.book_new();
   const h=['商品ID','編號','商品名稱','廣告費','營收','毛利','淨利','淨利率%','廣告佔比%','可用庫存','目標ROI','直接投入產出','投入產出','實際-目標','點擊數','日預算','廣告分析','調整備註',
     '上期營收','成長比','成長分析','成長調整','測試標籤','利潤%'];
   const exportNotes=getNotes(shop);
   const exportGrowthNotes=getNotes(shop+'_growth');
-  const d=built.map(r=>[
+  const d=src.map(r=>[
     !r.shopeeIds?.length?'未對應':r.shopeeIds.length===1?r.shopeeIds[0]:'多個',
     r.code,r.name,+r.adsFee.toFixed(0),+r.rev.toFixed(0),+r.gross.toFixed(0),+r.pureProfit.toFixed(0),
     !(r.rev>0)?'-':+(r.pureRate*100).toFixed(2),+(r.adsPct*100).toFixed(2),r.stock,
@@ -21680,8 +21699,8 @@ function doExport(shop){
     getProdTagsFor(shop,r.code).map(o=>o.date?`${o.tag}(${o.date})`:o.tag).join('、'),
     !(r.rev>0)?'-':+(r.profitPct*100).toFixed(2)
   ]);
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([h,...d]),shop);
-  XLSX.writeFile(wb,`淨利表_${shop}_${state[shop]._period||''}.xlsx`);
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([h,...d]),sheetName);
+  XLSX.writeFile(wb,`淨利表_${shop}_${s._period||''}${fileSuffix}.xlsx`);
 }
 
 // ── Helpers ──
