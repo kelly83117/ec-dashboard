@@ -22336,6 +22336,10 @@ function pchomeSyncBtnHTML(shop){
                : 'border:1px solid #e5e7eb;background:#fff;color:#6b7280;opacity:0.4;cursor:default';
   return '<button id="pchome-sync-btn-'+shop+'" onclick="pchomeOpenSyncPreview(\''+shop+'\')"'+(n>0?'':' disabled')+' style="margin-left:auto;padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;'+st+'" title="把 PChome 對帳資料／商品主檔推上雲端">☁ 同步雲端</button>';
 }
+// 匯出 Excel 鈕：照抄 momo momo-exp-btn（inline 中性樣式、恆啟用；無資料時由 pchomeExportExcel alert）。緊接同步鈕右側（同步鈕已 margin-left:auto，這顆靠 flex gap 貼齊）。
+function pchomeExportBtnHTML(shop){
+  return '<button id="pchome-exp-btn-'+shop+'" onclick="pchomeExportExcel(\''+shop+'\')" style="padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;border:1px solid #e5e7eb;background:#fff;color:#6b7280;cursor:pointer" title="把目前帳務月的商品獲利總表（含未分攤／合計列）匯出成 Excel，數字為完整精度">⬇ 匯出 Excel</button>';
+}
 function pchomeCloseSyncPreview(){ var o=document.getElementById('pchome-sync-ov'); if(o) o.remove(); }
 // 對帳明細列數：某帳務月＝段0(轉單)+段1(寄倉) rows；整份＝各帳務月加總
 function pchomeReconMonthRows(e){ var s=(e&&e.segments)||[]; return ((((s[0]||{}).rows)||[]).length)+((((s[1]||{}).rows)||[]).length); }
@@ -22455,7 +22459,7 @@ function pchomeRenderShop(shop){
   var pills=PCHOME_SUBTABS.map(function(t){ var on=_pchomeSub[shop]===t[1];
     return '<button onclick="pchomeSetSub(\''+shop+'\',\''+t[1]+'\')" class="'+(on?'pf-pchome-pill':'pf-pchome-pill-off')+'">'+t[0]+'</button>';
   }).join('');
-  el.innerHTML='<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center">'+pills+pchomeSyncBtnHTML(shop)+'</div><div id="pchome-sub-content-'+shop+'"></div>';
+  el.innerHTML='<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center">'+pills+pchomeSyncBtnHTML(shop)+pchomeExportBtnHTML(shop)+'</div><div id="pchome-sub-content-'+shop+'"></div>';
   pchomeRenderSub(shop);
 }
 function pchomeSetSub(shop,id){ _pchomeSub[shop]=id; pchomeRenderShop(shop); }
@@ -22821,6 +22825,7 @@ function pchomeProfitCalc(entry, shop){
 //   PChome 特有元素一律用 momo 既有 class 表達：未分攤=輕小計列、缺成本=.mm-banner-err、多入=.mm-cell-tag、本期未完=.mm-status、簡訊費推算=.mm-banner-warn。品牌色只在 .pf-pchome（pills/按鈕），表格/KPI 走 momo 中性色。
 var _pchomeProfitMonth={};   // shop → 選中的帳務月（預設 latest）
 var _pchomeProfitSort={};    // shop → {col,dir} | null
+var _pchomeRenderedRows={};  // shop → {key,sorted,calc}：最近一次總表渲染結果，供「匯出 Excel」讀（匯出==畫面所見，照 momo _momoRenderedRows）
 function pchomePct(r){ return (r==null||!isFinite(r))?'—':((r*100).toFixed(1)+'%'); }
 function pchomeSetProfitMonth(shop,key){ _pchomeProfitMonth[shop]=key; pchomeRenderSub(shop); }
 function pchomeProfitSetSort(shop,col){ var c=_pchomeProfitSort[shop]; _pchomeProfitSort[shop]=(!c||c.col!==col)?{col:col,dir:'desc'}:(c.dir==='desc'?{col:col,dir:'asc'}:null); pchomeRenderSub(shop); }   // 點欄名切換 desc→asc→取消（比照 momoProfitSetSort）
@@ -22917,6 +22922,44 @@ function pchomeProfitTabHTML(shop){
     smsTxt='即時：費用 ＝ CSV (D) 實際 ＋ <b>簡訊費推算 '+pchomeMoney(e.含稅)+'</b>（'+e.訂單數+' 張單×1，<b>已計入上方合計</b>）。上傳對帳單後轉「已對帳」實際值。';
   }
   var smsBanner='<div class="mm-banner mm-banner-warn">'+smsTxt+'<br><span style="font-weight:400">簡訊費推算規則：不重複訂單數（按轉單日期歸期）× 1 元。⚠ 單價 1 元 PChome 未公告、僅單一樣本佐證；取消訂單簡訊不在明細→算不到→推算偏低。</span></div>';
+  _pchomeRenderedRows[shop]={ key:key, sorted:sorted, calc:calc };   // 供匯出 Excel：畫面所見（已套帳務月＋排序）。照 momo momoRenderProfitBody 存 _momoRenderedRows 的做法。
   return ctrl+kpi+missBanner+pnBanner+table+reconNote+smsBanner;
 }
-Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeListingFile, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, parsePChomeReconcile, pchomeParseStatement, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc });
+// 總表匯出 Excel：用最近渲染的那份（已套當前帳務月＋排序）＝畫面所見。照 momo momoExportExcel。
+//   數字一律推「完整精度原始值」（非畫面 $ 整數／% 一位），Excel 可再運算；null／缺成本→空格（不寫 0，比照 momo 與畫面「—」）。含未分攤費用列與合計列。
+function pchomeExportExcel(shop){
+  var snap=_pchomeRenderedRows[shop];
+  if(!snap || !snap.sorted || !snap.calc || !snap.sorted.length){ alert('目前沒有可匯出的資料，請先切到「總表」開啟商品獲利總表。'); return; }
+  if(typeof XLSX==='undefined' || !XLSX.utils || typeof XLSX.writeFile!=='function'){ alert('匯出元件未載入，請重新整理後再試。'); return; }
+  var calc=snap.calc, T=calc.合計, key=snap.key;
+  var header=['商品編號','料號','商品名稱','規格','成本(單價)','供貨價(未稅)','售價(含稅)','營收(未稅)','銷量','費用(未稅)','淨利','淨利率(%)'];
+  var aoa=[header];
+  snap.sorted.forEach(function(x){
+    aoa.push([
+      x.商品編號||'', x.料號||'', x.商品名||'', x.規格||'',
+      x.costKnown?x.unitCost:'',            // 成本＝單價（畫面 成本 欄顯示單價）；缺成本→空
+      (x.供貨價!=null)?x.供貨價:'',
+      (x.售價!=null)?x.售價:'',
+      x.營收,                                // 完整精度未稅營收
+      x.銷量,
+      (x.罰金含稅>0)?x.費用:'',              // 逐列費用＝歸該 SKU 罰金(未稅)；無罰金→空（畫面顯「—」）
+      (x.淨利!=null)?x.淨利:'',
+      (x.淨利率!=null)?x.淨利率*100:''        // 比率→百分比數值（完整精度，非四捨五入到一位）
+    ]);
+  });
+  // 未分攤費用列（與畫面同判準：未稅未分攤>0.005 或 CSV 加總不完整）
+  if(calc.未分攤未稅>0.005 || calc.dSource==='csv'){
+    aoa.push(['','','未分攤費用（無 SKU 明細：簡訊費／包材費等）','','','','','','', calc.未分攤未稅, -calc.未分攤未稅, '']);
+  }
+  // 合計列（供貨價/售價是單價、加總無意義→空；淨利率＝合計淨利÷合計營收）
+  var totMargin=(T.營收>0)?T.淨利/T.營收*100:'';
+  aoa.push(['','','合計','', (T.成本>0?T.成本:''), '', '', T.營收, T.銷量, T.費用, T.淨利, totMargin]);
+  try{
+    var ws=XLSX.utils.aoa_to_sheet(aoa);
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'PChome總表');
+    var safe=String(shop).replace(/[\\/:*?"<>|]/g,'');
+    XLSX.writeFile(wb, 'PChome_'+safe+'_'+(key||'')+'_總表.xlsx');
+  }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
+}
+Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeListingFile, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc });
