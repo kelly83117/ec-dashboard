@@ -22263,6 +22263,120 @@ function pchomeParseListing(buf){
   return Object.keys(byCode).map(function(k){return byCode[k];});
 }
 
+// ── PChome 同步雲端（自有鈕，因全域 #header-kpi-row 在 PChome 頁被藏）──
+//   推送機制沿用平台無關的 syncToCloud（scoped 到 PChome key、不誤推別平台 pending）；dirty/計數/sweep 都已接好。
+//   最小預覽：按下先顯示「即將推送內容（帳務月・列數・匯出時間）」＋雲端較新警示（ec_pchome_recon 整份覆蓋，擋靜默蓋掉同事較新匯出）→ 確認才推。
+function pchomePendingKeys(){ try{ return pchomeDirtyGet().filter(function(k){ return k==='ec_pchome_recon'||k==='ec_pchome_products'; }); }catch(e){ return []; } }
+function pchomeSyncBtnHTML(shop){
+  // 照抄 momo momo-sync-btn（inline 樣式、非 class）：有待推＝琥珀 #f59e0b 白字可按；無待推＝白底灰字 opacity .4 disabled。文字固定「☁ 同步雲端」不顯示筆數（避免估算與預覽對不上，同 momoRefreshSyncBtn）。
+  var n=pchomePendingKeys().length;
+  var st = n>0 ? 'border:1px solid #f59e0b;background:#f59e0b;color:#fff;opacity:1;cursor:pointer'
+               : 'border:1px solid #e5e7eb;background:#fff;color:#6b7280;opacity:0.4;cursor:default';
+  return '<button id="pchome-sync-btn-'+shop+'" onclick="pchomeOpenSyncPreview(\''+shop+'\')"'+(n>0?'':' disabled')+' style="margin-left:auto;padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;'+st+'" title="把 PChome 對帳資料／商品主檔推上雲端">☁ 同步雲端</button>';
+}
+function pchomeCloseSyncPreview(){ var o=document.getElementById('pchome-sync-ov'); if(o) o.remove(); }
+// 對帳明細列數：某帳務月＝段0(轉單)+段1(寄倉) rows；整份＝各帳務月加總
+function pchomeReconMonthRows(e){ var s=(e&&e.segments)||[]; return ((((s[0]||{}).rows)||[]).length)+((((s[1]||{}).rows)||[]).length); }
+function pchomeReconTotalRows(map){ map=map||{}; return Object.keys(map).reduce(function(t,m){ return t+pchomeReconMonthRows(map[m]); },0); }
+// 衝突判準（匯出時間）：cloud>local 衝突；且三個邊界一律當衝突（拿不準就當衝突、預設不勾）：
+//   雲端有本機無(會刪)、本機無匯出時間、雲端無匯出時間、兩邊都無。安全(非衝突)只在：共有帳務月且兩邊都有匯出時間且 cloud<=local。
+function pchomeReconConflict(local, cloud){ local=local||{}; cloud=cloud||{}; var reasons=[], conflict=false;
+  Object.keys(cloud).forEach(function(m){ if(!(m in local)){ conflict=true; reasons.push(m+'：雲端有、本機沒有（推了會從雲端刪掉）'); } });
+  Object.keys(local).forEach(function(m){ if(!(m in cloud)) return; var lt=String((local[m]||{}).匯出時間||''), ct=String((cloud[m]||{}).匯出時間||'');
+    if(!lt||!ct||ct>lt){ conflict=true; reasons.push(m+'：'+(!lt&&!ct?'兩邊都無匯出時間':(!lt?'本機無匯出時間':(!ct?'雲端無匯出時間':'雲端較新（'+ct+' > 本機 '+lt+'）')))+'→拿不準當衝突'); } });
+  return {conflict:conflict, reasons:reasons};
+}
+// 同步預覽（完全照 momo momoRenderSyncPreviewModal：class/內聯樣式/用字/警示 box/全選計數/confirm() 二次攔截；確認鈕綠 #10b981；差異走 .mm-sync-diff）
+async function pchomeOpenSyncPreview(shop){
+  if(!window.__cloudProfit){ if(typeof showToast==='function') showToast('雲端未連線','error'); return; }
+  var keys=pchomePendingKeys();
+  if(!keys.length){ if(typeof showToast==='function') showToast('目前沒有待同步的 PChome 資料',''); return; }
+  var recon=pchomeLoadRecon(), prods=pchomeLoadProducts();
+  var cloud={}; try{ var snap=await window.__cloudProfit.getDoc(); cloud=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{}; }
+  catch(e){ if(typeof showToast==='function') showToast('讀取雲端失敗，請稍後再試','error'); return; }
+  var items=[];
+  if(keys.indexOf('ec_pchome_recon')>=0){
+    var cr=cloud['ec_pchome_recon']||{}, hasCloud=cloud['ec_pchome_recon']!=null && Object.keys(cr).length>0;
+    var status=!hasCloud?'new':(JSON.stringify(recon)===JSON.stringify(cr)?'same':'diff');
+    var cf=(status==='diff')?pchomeReconConflict(recon, cr):{conflict:false,reasons:[]};
+    var months=Object.keys(recon).concat(Object.keys(cr)).filter(function(m,i,a){return a.indexOf(m)===i;}).sort();
+    var samples=months.map(function(m){ var l=recon[m], c=cr[m]; var lr=l?pchomeReconMonthRows(l):null, crr=c?pchomeReconMonthRows(c):null;
+      return {item:m+' 期', desc:'本機 '+(lr==null?'—':lr+' 列')+'（匯出 '+(l?(l.匯出時間||'未知'):'（無）')+'）｜雲端 '+(crr==null?'—':crr+' 列')+'（匯出 '+(c?(c.匯出時間||'未知'):'（無）')+'）'}; });
+    items.push({key:'ec_pchome_recon', kind:'PChome對帳', name:'對帳資料', localCount:pchomeReconTotalRows(recon), cloudCount:(hasCloud?pchomeReconTotalRows(cr):0), status:status, conflict:cf.conflict, conflictReasons:cf.reasons, diffSamples:samples, diffSummary:samples.length+' 個帳務月'});
+  }
+  if(keys.indexOf('ec_pchome_products')>=0){
+    var cp=cloud['ec_pchome_products']; var hasCP=Array.isArray(cp)&&cp.length>0;
+    var st2=!hasCP?'new':(JSON.stringify(prods)===JSON.stringify(cp)?'same':'diff');
+    // 商品主檔衝突判準＝與對帳同一套（檔名匯出時間；cloud>local 或任一缺→衝突、拿不準預設不勾）。數量比對只當輔助資訊、不當判準（下架汰換數量本就會變少）。
+    var lpt=String(((prods||[])[0]||{}).匯出時間||''), cpt=String((hasCP?(cp[0]||{}).匯出時間:'')||'');
+    var pconflict=(st2==='diff') && (!lpt || !cpt || cpt>lpt);
+    var preasons=pconflict?[(!lpt&&!cpt?'兩邊都無匯出時間':(!lpt?'本機無匯出時間':(!cpt?'雲端無匯出時間（加此欄前推的舊資料）':'雲端較新（'+cpt+' > 本機 '+lpt+'）')))+'→拿不準當衝突'] : [];
+    var psamples=[{item:'料號數', desc:'本機 '+((prods||[]).length)+' 料號（匯出 '+(lpt||'未知')+'）｜雲端 '+(hasCP?cp.length+' 料號（匯出 '+(cpt||'未知')+'）':'（無）')}];
+    items.push({key:'ec_pchome_products', kind:'PChome商品主檔', name:'商品主檔', localCount:(prods||[]).length, cloudCount:(hasCP?cp.length:0), status:st2, conflict:pconflict, conflictReasons:preasons, diffSamples:psamples, diffSummary:'料號數比對'});
+  }
+  pchomeRenderSyncPreviewModal(shop, items);
+}
+function pchomeRenderSyncPreviewModal(shop, items){
+  var esc=function(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+  var ov=document.getElementById('pchome-sync-ov'); if(!ov){ ov=document.createElement('div'); ov.id='pchome-sync-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=function(e){ if(e.target===ov) pchomeCloseSyncPreview(); };
+  var typeColor={'PChome對帳':'#E60012','PChome商品主檔':'#5b5fcf'};
+  var statusCell=function(it){
+    if(it.conflict) return '<span style="color:#dc2626;font-weight:700" title="'+esc((it.conflictReasons||[]).join('；')||'雲端較新或無法確認新舊')+'">⚠ 雲端較新／拿不準，預設不推</span>';
+    if(it.status==='new') return '<span style="color:#10b981;font-weight:600">新增</span>';
+    if(it.status==='same') return '<span style="color:#9ca3af">無變更</span>';
+    return '<span style="color:#9a3412;font-weight:600" title="推了會用本機整包覆蓋雲端">內容不同（整包覆蓋）</span>';
+  };
+  var diffHtml=function(it){ if(!it.diffSamples||!it.diffSamples.length) return '';
+    var ss=it.diffSamples.map(function(s){ return '<div class="mm-sync-diff-row">· <b>'+esc(s.item)+'</b>：'+esc(s.desc)+'</div>'; }).join('');
+    return '<details class="mm-sync-diff"><summary>'+(it.diffSummary||(it.diffSamples.length+' 項'))+' · 展開比對</summary>'+ss+'</details>'; };
+  var rowHtml=function(it,checked){ return '<tr style="border-top:1px solid #f3f4f6'+(it.conflict?';background:#fef2f2':'')+'">'
+    +'<td style="padding:6px 4px;text-align:center"><input type="checkbox" class="pchome-sync-chk" data-key="'+esc(it.key)+'"'+(it.conflict?' data-conflict="1"':'')+(checked?' checked':'')+' onchange="pchomeSyncUpdateCount()"></td>'
+    +'<td style="padding:6px 8px" title="'+esc(it.key)+'">'+esc(it.name)+'</td>'
+    +'<td style="padding:6px 8px;color:'+(typeColor[it.kind]||'#6b7280')+';font-weight:600;white-space:nowrap">'+esc(it.kind)+'</td>'
+    +'<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">'+it.localCount+'</td>'
+    +'<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">'+it.cloudCount+'</td>'
+    +'<td style="padding:6px 8px">'+statusCell(it)+((it.status==='diff'||it.conflict)?diffHtml(it):'')+'</td></tr>'; };
+  var changed=items.filter(function(it){return it.status!=='same';}), unchanged=items.filter(function(it){return it.status==='same';});
+  var anyConflict=items.some(function(it){return it.conflict;});
+  var thead='<thead><tr style="text-align:left;color:#6b7280;font-weight:600"><th style="padding:6px 4px;text-align:center"><input type="checkbox" id="pchome-sync-all"'+(anyConflict?'':' checked')+' onchange="pchomeSyncToggleAll(this.checked)"></th><th style="padding:6px 8px">資料</th><th style="padding:6px 8px">類型</th><th style="padding:6px 8px;text-align:right">本機</th><th style="padding:6px 8px;text-align:right">雲端</th><th style="padding:6px 8px">狀態 / 差異</th></tr></thead>';
+  var mainHtml=changed.length
+    ? '<table style="width:100%;border-collapse:collapse;font-size:12px">'+thead+'<tbody id="pchome-sync-main-body">'+changed.map(function(it){return rowHtml(it,!it.conflict);}).join('')+'</tbody></table>'
+    : '<div style="padding:18px;text-align:center;color:#9ca3af;font-size:13px">目前沒有需要同步的項目'+(unchanged.length?'（另有 '+unchanged.length+' 項無變更）':'')+'</div>';
+  var unchangedHtml=unchanged.length
+    ? '<details class="mm-sync-unchanged"><summary>另有 '+unchanged.length+' 項無變更 · 展開（預設不推，可個別勾）</summary><table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px"><tbody>'+unchanged.map(function(it){return rowHtml(it,false);}).join('')+'</tbody></table></details>'
+    : '';
+  ov.innerHTML='<div style="background:#fff;border-radius:12px;max-width:820px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid #eef0f2;font-size:15px;font-weight:700">同步預覽 — 勾選要推送到雲端的項目</div>'
+    +'<div style="padding:12px 20px;overflow:auto">'
+    +'<div style="font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6">只列出<b>有變更</b>（新增／內容不同）的項目，預設全勾；無變更收在下方。對帳資料為<b>整包覆蓋、無版本比對</b>，請確認不會蓋掉同事的更新。<br>⚠ 差異明細顯示的是<b>「本機現值 ｜ 雲端現值」</b>（非「將變成」）；<b>勾選推送＝該筆雲端整包覆蓋成本機的值</b>。</div>'
+    +(anyConflict?'<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#dc2626;line-height:1.6">🚫 有項目<b>雲端較新或無法確認新舊</b>（可能同事推過較新的匯出）——這些列<b>預設不勾</b>，避免用你的舊資料蓋掉。建議<b>重新整理</b>、或去 PChome 重匯最新一份再推；若確定要覆蓋，需手動勾選並二次確認。</div>':'')
+    +mainHtml+unchangedHtml
+    +'</div>'
+    +'<div style="padding:14px 20px;border-top:1px solid #eef0f2;display:flex;gap:10px;justify-content:flex-end;align-items:center">'
+    +'<button onclick="pchomeCloseSyncPreview()" style="padding:7px 16px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>'
+    +'<button id="pchome-sync-confirm-btn" onclick="pchomeConfirmSync(\''+shop+'\')"'+(changed.length?'':' disabled')+' style="padding:7px 18px;border-radius:7px;border:none;background:'+(changed.length?'#10b981':'#c7c9e6')+';color:#fff;font-size:13px;font-weight:600;cursor:'+(changed.length?'pointer':'default')+'">確認同步'+(changed.length?'（'+changed.length+' 項）':'')+'</button>'
+    +'</div></div>';
+  try{ pchomeSyncUpdateCount(); }catch(e){}
+}
+function pchomeSyncToggleAll(checked){ document.querySelectorAll('#pchome-sync-main-body .pchome-sync-chk').forEach(function(c){c.checked=checked;}); pchomeSyncUpdateCount(); }
+function pchomeSyncUpdateCount(){
+  var n=[].slice.call(document.querySelectorAll('.pchome-sync-chk')).filter(function(c){return c.checked;}).length;
+  var btn=document.getElementById('pchome-sync-confirm-btn'); if(btn){ btn.disabled=(n===0); btn.textContent='確認同步'+(n?'（'+n+' 項）':''); btn.style.background=n?'#10b981':'#c7c9e6'; btn.style.cursor=n?'pointer':'default'; }
+  var main=[].slice.call(document.querySelectorAll('#pchome-sync-main-body .pchome-sync-chk')), mn=main.filter(function(c){return c.checked;}).length;
+  var all=document.getElementById('pchome-sync-all'); if(all){ all.checked=(main.length>0&&mn===main.length); all.indeterminate=(mn>0&&mn<main.length); }
+}
+function pchomeConfirmSync(shop){
+  var checkedEls=[].slice.call(document.querySelectorAll('.pchome-sync-chk')).filter(function(c){return c.checked;});
+  // 二次攔截：勾了「雲端較新／拿不準」的衝突項 → 原生 confirm 再確認一次（照 momoConfirmSync）
+  var conflictKeys=checkedEls.filter(function(c){return c.getAttribute('data-conflict')==='1';}).map(function(c){return c.getAttribute('data-key');});
+  if(conflictKeys.length && !confirm('你勾選了 '+conflictKeys.length+' 項「雲端較新／拿不準」的資料：\n'+conflictKeys.join('\n')+'\n\n推送會用你的本機版本整包蓋掉雲端，可能丟失同事較新的匯出。\n\n確定要覆蓋嗎？（建議先去 PChome 重匯最新一份再推）')) return;
+  var keys=checkedEls.map(function(c){return c.getAttribute('data-key');});
+  pchomeCloseSyncPreview();
+  if(!keys.length) return;
+  Promise.resolve(window.syncToCloud(shop, new Set(keys))).then(function(){ pchomeRenderShop(shop); }).catch(function(){ pchomeRenderShop(shop); });   // syncToCloud 自帶 showToast 成功/失敗；重繪更新待推數
+}
 // ── section 殼（賣場層＝轉單/寄倉，比照甲配/乙配；子分頁照 momoRenderShop）──
 function setPChomeShop(shop,btn){
   _saveProfitView('pchome',shop);
@@ -22279,7 +22393,7 @@ function pchomeRenderShop(shop){
   var pills=PCHOME_SUBTABS.map(function(t){ var on=_pchomeSub[shop]===t[1];
     return '<button onclick="pchomeSetSub(\''+shop+'\',\''+t[1]+'\')" class="'+(on?'pf-pchome-pill':'pf-pchome-pill-off')+'">'+t[0]+'</button>';
   }).join('');
-  el.innerHTML='<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center">'+pills+'</div><div id="pchome-sub-content-'+shop+'"></div>';
+  el.innerHTML='<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center">'+pills+pchomeSyncBtnHTML(shop)+'</div><div id="pchome-sub-content-'+shop+'"></div>';
   pchomeRenderSub(shop);
 }
 function pchomeSetSub(shop,id){ _pchomeSub[shop]=id; pchomeRenderShop(shop); }
@@ -22314,15 +22428,16 @@ function pchomeListingFile(shop,e){
     var msg=document.getElementById('pchome-listing-msg-'+shop);
     try{
       var list=pchomeParseListing(rd.result);
+      var 匯出t=pchomeExportTime(f.name);   // 上架清單檔名時間戳（2026091813_上架商品.xls → 2026/09/18 13 時），與對帳同格式；供同步衝突比對
       var costMap=(typeof momoLoadCostByOrigin==='function'?momoLoadCostByOrigin():{})||{};
-      // 整份覆蓋商品主檔；cost 建檔時查 cost_by_origin（含先前 PChome ✎ 值）→ 凍結進 product.cost，不 live 查
+      // 整份覆蓋商品主檔；cost 建檔時查 cost_by_origin（含先前 PChome ✎ 值）→ 凍結進 product.cost，不 live 查。匯出時間逐列掛（陣列無 top-level 放處、同步只讀第一列）
       var products=list.map(function(o){ var c=costMap[o.料號];
-        return { sku:o.料號, 料號:o.料號, 商品名:o.商品名, 規格:o.規格, 商品編號:o.商品編號, 供貨價:o.供貨價, 售價:o.售價, 毛利率PC:o.毛利率PC, 可賣量:o.可賣量, 缺貨:(Number(o.可賣量)===0), 出貨方式:o.出貨方式, shop:(o.出貨方式||'轉單'), 商品狀態:o.商品狀態, cost:(c!=null?Number(c):null), origin:o.料號 };
+        return { sku:o.料號, 料號:o.料號, 商品名:o.商品名, 規格:o.規格, 商品編號:o.商品編號, 供貨價:o.供貨價, 售價:o.售價, 毛利率PC:o.毛利率PC, 可賣量:o.可賣量, 缺貨:(Number(o.可賣量)===0), 出貨方式:o.出貨方式, shop:(o.出貨方式||'轉單'), 商品狀態:o.商品狀態, cost:(c!=null?Number(c):null), origin:o.料號, 匯出時間:匯出t };
       });
       pchomeSaveProducts(products);
       var byShop={}; products.forEach(function(p){byShop[p.shop]=(byShop[p.shop]||0)+1;});
       var oos=products.filter(function(p){return p.缺貨;}).length, miss=products.filter(function(p){return p.cost==null;}).length;
-      if(msg){ msg.textContent='已更新商品主檔 '+products.length+' 料號（整份覆蓋）｜出貨方式 '+JSON.stringify(byShop)+'｜缺貨 '+oos+'｜缺成本 '+miss+'。'; msg.style.color='#059669'; }
+      if(msg){ msg.textContent='已更新商品主檔 '+products.length+' 料號（整份覆蓋，匯出時間 '+(匯出t||'未知')+'）｜出貨方式 '+JSON.stringify(byShop)+'｜缺貨 '+oos+'｜缺成本 '+miss+'。'; msg.style.color='#059669'; }
       pchomeRenderMaster(shop);
     }catch(err){ if(msg){ msg.textContent='解析失敗：'+_momoEsc(String(err&&err.message||err)); msg.style.color='#dc2626'; } }
   };
@@ -22742,4 +22857,4 @@ function pchomeProfitTabHTML(shop){
   var smsBanner='<div class="mm-banner mm-banner-warn">'+smsTxt+'<br><span style="font-weight:400">簡訊費推算規則：不重複訂單數（按轉單日期歸期）× 1 元。⚠ 單價 1 元 PChome 未公告、僅單一樣本佐證；取消訂單簡訊不在明細→算不到→推算偏低。</span></div>';
   return ctrl+kpi+missBanner+pnBanner+table+reconNote+smsBanner;
 }
-Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeListingFile, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeSetProfitMonth, pchomeProfitSetSort, parsePChomeReconcile, pchomeParseStatement, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc });
+Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeListingFile, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, parsePChomeReconcile, pchomeParseStatement, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc });
