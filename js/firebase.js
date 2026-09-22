@@ -786,11 +786,15 @@ try {
 
   window.dispatchEvent(new Event('cloudStoreReady'));
 
-  // 首頁渲染完後 1.5 秒（給 dashboard / 圖表時間），背景把重量級訂閱接上
-  // 進淨利表如果還沒接上，會主動觸發
-  setTimeout(() => {
-    if (typeof window.__loadHeavyProfitSubs === 'function') window.__loadHeavyProfitSubs();
-  }, 1500);
+  // ⚡ 重量級訂閱（profits archive + momo_products/origins/reconcile/… 初次快照約 10MB）
+  //   【不再】開站後無條件預抓——那會讓每個人（含只看首頁的老闆）boot 就拉 10MB：
+  //   桌機 app/main 首批被 channel congest → 卡 8 秒 boot timeout；手機再疊 2.4MB JS
+  //   → 分頁記憶體爆掉「Can't open this page」。改成【懶載】：真正需要的頁才觸發
+  //   `__loadHeavyProfitSubs()` —— 淨利表（offices.js route office-d1-profit，已觸發）、
+  //   工作日誌（daily.js renderWeeklyCalendarTab，讀 profits archive 的調整備註）。
+  //   守衛 `__heavyProfitSubsLoaded`（本檔上方）保證只訂一次，切頁進出不重訂。
+  //   ⚠ 洞察/首頁不需要：洞察讀的是 app/profit（本檔 172 boot 立即訂的當月 doc）的 ec_notes，
+  //     首頁 dashboard 完全不讀這三個 collection。
 } catch (e) {
   console.error('Firebase init failed:', e);
 }
