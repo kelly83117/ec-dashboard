@@ -526,6 +526,7 @@ const App = {
     this.ensureAdmin();
     this.bindNav();
     this.bindSidebarToggle();
+    this.bindSidebarResize();
     this._checkMemFallbackAtBoot();
     // 整個應用層級的「離開頁面警告」：偵測所有未同步來源
     //   洞察表 / 淨利表 / 工作日誌 / 儀表板營收卡片
@@ -657,6 +658,44 @@ const App = {
       });
     }
     window.addEventListener('resize', updateIcon);
+  },
+
+  /* ------------- 側欄寬度拖曳（全站共用；與收合共存）-------------
+     ⚠ 只更新 CSS 變數 --sidebar-w，【絕不】寫 .sidebar 的 inline width——inline 會贏過
+        `body.sidebar-collapsed .sidebar{width:0}`、導致收合失效（見 css 註解）。
+     範圍 min 200 / max 360（RWD 選 (c)：cap max、不動平台列 nowrap+overflow-x，最壞 .main 只少 120px）。
+     升級路徑：若日後嫌 360 太窄→走 (b) ResizeObserver 依容器寬降級平台列，不要改回 (a) container query。 */
+  bindSidebarResize() {
+    const MIN = 200, MAX = 360, KEY = 'ec.sidebarWidth';
+    const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
+    const clamp = (w) => Math.max(MIN, Math.min(MAX, Math.round(w)));
+    const setW = (w) => document.documentElement.style.setProperty('--sidebar-w', clamp(w) + 'px');
+    // 還原上次寬度（桌機才套；手機抽屜寬度由 @media 82vw 決定、不受此影響）
+    try {
+      const saved = parseInt(localStorage.getItem(KEY), 10);
+      if (isFinite(saved) && !isMobile()) setW(saved);
+    } catch {}
+    const handle = document.getElementById('sidebar-resizer');
+    if (!handle) return;
+    handle.addEventListener('mousedown', (e) => {
+      if (isMobile() || document.body.classList.contains('sidebar-collapsed')) return;   // 手機/收合態無寬可拖
+      e.preventDefault();
+      let lastW = clamp(e.clientX);
+      handle.classList.add('dragging');
+      document.body.classList.add('sidebar-resizing');   // → css 關掉 .sidebar 的 width transition，拖曳才跟手
+      document.body.style.userSelect = 'none';
+      const move = (ev) => { lastW = clamp(ev.clientX); setW(lastW); };   // 側欄左緣=視窗 x0 → 游標 x 即寬度
+      const up = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        handle.classList.remove('dragging');
+        document.body.classList.remove('sidebar-resizing');
+        document.body.style.userSelect = '';
+        try { localStorage.setItem(KEY, String(lastW)); } catch {}
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
   },
 
   /* ------------- 登入 ------------- */
