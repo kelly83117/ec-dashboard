@@ -2095,7 +2095,12 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     //   sync 跑完後，若還有 ec_momo_products|<shop> 留在持久化 dirty 註冊表 = 期別/銷售沒上雲
     //   （flag 關、shadow 跳過、auto-push 失敗、或這次 scoped 沒含 products 都會落到這）。
     //   不混進 skippedProblem 的「讀不到/損毀」通用文案，給 products 專屬可見警告；即使 problems===0 也擋掉綠燈。
-    const _prodDirtyShops=(()=>{ try{ return [...new Set(_momoReadJson(_MOMO_PDIRTY_LS,[]).filter(k=>String(k).startsWith('ec_momo_products|')).map(k=>momoShopDisplay(String(k).split('|')[1])))]; }catch{ return []; } })();
+    //   🔴 判準用【SKU 級 dirty count】（__momoProductsDirtySkus），不是整份舊標記（_MOMO_PDIRTY_LS）：
+    //     整份標記可能殘留 true，但 SKU 級 diff 已空（changed/added/removed 全 []、count:0＝本機==last-pushed＝乾淨）
+    //     → 只用整份標記會誤報「尚未上雲」。改成：整份標記當候選賣場、SKU 級 count>0 才真的算沒推。
+    const _prodDirtyShops=(()=>{ try{ return [...new Set(_momoReadJson(_MOMO_PDIRTY_LS,[]).filter(k=>String(k).startsWith('ec_momo_products|')).map(k=>String(k).split('|')[1]))]
+      .filter(sh=>{ try{ return (momoProductsDirtySkus(sh).count||0)>0; }catch{ return false; } })
+      .map(sh=>momoShopDisplay(sh)); }catch{ return []; } })();
     const _prodWarn = _prodDirtyShops.length ? ('商品主檔（期別／銷售）尚未上雲：'+_prodDirtyShops.join('、')+' → 請重按「☁ 同步雲端」。若持續：Console 打 window.__momoProductsDirtySkus(賣場) 查、或確認 window.__MOMO_MERGE_ENFORCE===true。') : '';
     if(problems===0 && !_prodWarn){
       if(btn){btn.textContent='✓ 已同步 '+ok.length+' 筆';btn.style.background='#10b981';btn.style.color='#fff';btn.style.borderColor='#10b981';_syncBtnRepaintTimer=setTimeout(()=>{ _showSyncBtn(); },2000);}
@@ -13787,7 +13792,8 @@ function momoRefreshSyncBtn(shop){
   btn.textContent='☁ 同步雲端';           // 不顯示筆數（避免估算數字與預覽對不上）
   // 根治 2c：tooltip 點名待推分類（只查 products / origins 兩個持久化 dirty 註冊表，不複製整份易漂移的前綴白名單）
   try{
-    const prodShops=[...new Set(_momoReadJson(_MOMO_PDIRTY_LS,[]).filter(k=>String(k).startsWith('ec_momo_products|')).map(k=>momoShopDisplay(String(k).split('|')[1])))];
+    const prodShops=[...new Set(_momoReadJson(_MOMO_PDIRTY_LS,[]).filter(k=>String(k).startsWith('ec_momo_products|')).map(k=>String(k).split('|')[1]))]
+      .filter(sh=>{ try{ return (momoProductsDirtySkus(sh).count||0)>0; }catch{ return false; } }).map(sh=>momoShopDisplay(sh));   // 2c 同修：SKU 級 count>0 才列 products 待推（整份殘留標記不算）
     const oDirty=(_momoReadJson(_MOMO_ODIRTY_LS,[])||[]).length;
     const parts=[];
     if(prodShops.length) parts.push('商品主檔（期別/銷售）：'+prodShops.join('、'));
@@ -17725,7 +17731,7 @@ function momoMoPlusApplyPrepared(shop, parsed, plan, allowedPeriods, opts){
 //   走既有 syncToCloud 分派：products→enforce merge（__MOMO_MERGE_ENFORCE 現預設 true）、origins/reconcile→無條件推。
 //   ⚠ 結果一律回報、絕不靜默——2026-08 好麻吉「origins/reconcile 上雲、products 靜默沒上雲」正是敗在
 //     上傳流程不自動推、又沒警示。回傳 { ok, okN, failedN, prodDirty, preserved, err }：
-//     ok = 真的都上雲了（無 failed、products 不再 dirty、無例外）。prodDirty 以 dirty 註冊表為權威。
+//     ok = 真的都上雲了（無 failed、products SKU 級已無 diff、無例外）。prodDirty 以【SKU 級 count】為準（非整份殘留標記）。
 async function momoMoPlusAutoPushUploaded(shop, keys){
   const allow=new Set(keys);
   let err=null, report=null;
@@ -17734,7 +17740,7 @@ async function momoMoPlusAutoPushUploaded(shop, keys){
   const okN=(report&&report.ok&&report.ok.length)||0;
   const failedN=(report&&report.failed&&report.failed.length)||0;
   let preserved=0; try{ const mp=window.__momoLastMergePlan; if(mp&&mp.shop===shop) preserved=mp.cloudOnly||0; }catch{}
-  let prodDirty=true; try{ prodDirty=_momoIsDirty(momoProductsKey(shop)); }catch{}
+  let prodDirty=true; try{ prodDirty=(momoProductsDirtySkus(shop).count||0)>0; }catch{}   // SKU 級 count（非整份殘留標記）：真有沒推的 changed/added/removed 才算 dirty
   try{ if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop); }catch{}   // 推完刷新同步鈕（亮暗＋2c tooltip 反映最新 dirty）
   return { ok: !err && failedN===0 && !prodDirty, okN, failedN, prodDirty, preserved, err: err&&(err.message||String(err)) };
 }
@@ -17822,7 +17828,7 @@ async function momoMoPlusUploadApply(shop, allowedPeriods){
       : '\n\n⚠ 自動上雲未完成'+(ap.err?'（'+ap.err+'）':'')+'——資料已寫進本機，但商品主檔可能沒推上雲。請按「☁ 同步雲端」重試。';
   }
   // ── 根治 2a：以 products dirty 為權威，明確標「商品主檔上雲了沒」（與 auto-push 自報解耦、雙保險）──
-  let prodDirty=false; try{ prodDirty=_momoIsDirty(momoProductsKey(shop)); }catch{}
+  let prodDirty=false; try{ prodDirty=(momoProductsDirtySkus(shop).count||0)>0; }catch{}   // 根治 2a 同修：SKU 級 count（非整份殘留標記）才算 dirty，count:0 不誤報
   const prodStateMsg = res.wrote>0 ? (prodDirty
       ? '\n\n⚠ 商品主檔（期別／銷售）尚未上雲 → 請按「☁ 同步雲端」。'
       : '\n\n✓ 商品主檔已上雲。') : '';
