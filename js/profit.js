@@ -10439,8 +10439,8 @@ function setKpiYear(y){
   renderKpiTab();
 }
 // 月結表的年／月合併成【一個】選單（「2026/6」「2026/5」…由新到舊），總覽與填寫模式共用。
-//   · 2025/1 起到【下個月】每個月都列：每到新的一個月，清單就自動多出再下一個月（可以先開下個月來填）。
-//   · 2025 之前：只列【有資料】的月份，避免下拉選單拉得很長（2026-09-23 使用者要求）。
+//   · 2026/1 起到【下個月】每個月都列：每到新的一個月，清單就自動多出再下一個月（可以先開下個月來填）。
+//   · 2026 之前（含 2025 整年）：只列【有資料】的月份，避免下拉選單拉得很長（2026-09-23 使用者要求隱藏 2025）。
 //   · 🔴 有 row 的月份一律列出，不管哪一年（= _kpiVisibleMonthNums 的規則③）：
 //     否則年度總表看得到、月結表選不到 →【看得到、改不掉、刪不掉】的孤兒 row。
 //   · 目前選的月份一定在清單內：不在的話 <select> 會靜默顯示第一個選項，表格卻是另一個月。
@@ -10448,9 +10448,9 @@ function setKpiYear(y){
 function _kpiMonthSelectOptions(){
   const d=new Date(),cy=d.getFullYear(),cm=d.getMonth()+1;
   const set=new Set();
-  // 2025/1 → 下個月（每到新的一個月，清單自動多出再下一個月）；2025 之前只列有資料的月份（下面那行）。
+  // 2026/1 → 下個月（每到新的一個月，清單自動多出再下一個月）；2026 之前只列有資料的月份（下面那行）。
   const ny=cm===12?cy+1:cy,nm=cm===12?1:cm+1;
-  for(let y=2025;y<=ny;y++)for(let m=1;m<=(y===ny?nm:12);m++)set.add(y+'-'+String(m).padStart(2,'0'));
+  for(let y=2026;y<=ny;y++)for(let m=1;m<=(y===ny?nm:12);m++)set.add(y+'-'+String(m).padStart(2,'0'));
   getKpiRows().forEach(r=>{if(r&&/^\d{4}-\d{2}$/.test(r.month))set.add(r.month);});
   set.add(_kpiYM());
   return [...set].sort().reverse();
