@@ -9713,7 +9713,8 @@ function _kpiWaterfallHtml(w){
     return `<div class="km-wf-row">
       <div class="km-wf-l"${b.t?` title="${b.t}"`:''}>${b.l}</div>
       <div class="km-wf-track"><div class="km-wf-bar ${b.cls}" style="left:${left}%;width:${Math.max(right-left,0.3)}%"></div></div>
-      <div class="km-wf-v">${amt(b)} · ${pc(b)}</div>
+      <div class="km-wf-v">${amt(b)}</div>
+      <div class="km-wf-p">${pc(b)}</div>
     </div>`;}).join('')}</div>`;
 }
 
