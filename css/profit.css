@@ -1519,50 +1519,63 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-rate-fill.km-rate-neg{background:#dc2626;}
 .km-badge{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--warn-soft);color:#92400e;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .km-badge-done{background:var(--success-soft);color:#047857;}
-/* B 填寫模式 */
+/* B 填寫模式
+   可讀性（2026-09-23 調整）：表頭、店名、數字、唯讀計算欄、小計各自一個層級，不再全部一樣淡。
+   · 輸入框 14px 深色字、框線 #cbd5e1（比 --border 深一階，框才看得清楚）
+   · 空格：琥珀虛線框＋淡黃底 → 一眼看出還沒填
+   · 純利／純利率：唯讀計算欄，淡灰底＋左側分隔線，跟可填的格子分開
+   · 所有同列元件高度固定 32px → 框線與數字對齊（見 .km-in / .km-roval / .km-shareval / .km-f-na） */
 .km-fill{display:grid;grid-template-columns:150px minmax(0,1fr);gap:14px;align-items:start;}
 .km-side{display:flex;flex-direction:column;gap:6px;position:sticky;top:8px;}
-.km-side-item{display:flex;align-items:center;gap:6px;padding:8px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);cursor:pointer;font-size:13px;text-align:left;}
-.km-side-item.active{border-color:var(--primary);background:var(--primary-soft);}
-.km-side-name{font-weight:700;color:var(--text);flex:1;}
-.km-keys{margin-top:8px;font-size:11.5px;line-height:1.8;color:var(--text-muted);background:var(--bg);border-radius:var(--radius-sm);padding:10px;}
-.km-keys b{color:var(--text);}
+.km-side-item{display:flex;align-items:center;gap:6px;padding:9px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);cursor:pointer;font-size:13.5px;text-align:left;}
+.km-side-item:hover{border-color:#c7d2fe;}
+.km-side-item.active{border-color:var(--primary);background:var(--primary-soft);box-shadow:inset 3px 0 0 var(--primary);}
+.km-side-name{font-weight:700;color:var(--text);flex:1;white-space:nowrap;}
 .km-fill-main{min-width:0;}
-.km-fill-title{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700;margin-bottom:10px;}
-.km-fill-sub{font-size:12.5px;font-weight:400;color:var(--text-muted);}
-.km-ftable{font-size:12px;}
-.km-ftable th{vertical-align:bottom;white-space:normal;padding:6px 4px;}
-.km-ftable td{padding:6px 4px;white-space:normal;}
-.km-ftable td.km-f-shop{white-space:normal;min-width:64px;max-width:96px;line-height:1.35;}
-.km-ftable td{vertical-align:top;}
+.km-fill-title{display:flex;align-items:baseline;gap:10px;font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px;}
+.km-fill-title .km-dot{align-self:center;width:10px;height:10px;}
+.km-fill-sub{font-size:13px;font-weight:500;color:#4b5563;}
+/* 鍵盤操作：一列橫排，每一項自己不斷行（整項換到下一行，不會拆成一字一行） */
+.km-keys{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:0 0 10px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12.5px;color:#374151;}
+.km-key{white-space:nowrap;display:inline-flex;align-items:center;gap:4px;}
+.km-key kbd{display:inline-block;min-width:18px;padding:1px 6px;border:1px solid #cbd5e1;border-bottom-width:2px;border-radius:5px;background:#fff;font:600 11.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#111827;text-align:center;}
+.km-key code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:#fff;border:1px solid var(--border);border-radius:4px;padding:0 5px;color:#111827;}
+.km-ftable{font-size:13px;color:#111827;}
+.km-ftable th{vertical-align:bottom;white-space:normal;padding:8px 5px;font-size:12.5px;font-weight:700;color:#374151;background:#f1f5f9;border-bottom:2px solid #cbd5e1;}
+.km-ftable td{padding:7px 5px;white-space:normal;vertical-align:top;border-top:1px solid #e5e7eb;}
+.km-ftable tbody tr:hover td{background:#fafbff;}
 .km-ftable th:not(.km-f-shop){text-align:right;}
 .km-th{display:flex;justify-content:flex-end;align-items:center;gap:2px 4px;flex-wrap:wrap;}
-.km-note{font-size:10.5px;font-weight:600;color:var(--text-muted);cursor:pointer;}
-.km-note.has{color:var(--warn);font-size:9px;}
-.km-f-shop{font-weight:600;color:var(--text);white-space:nowrap;}
-.km-in{width:100%;min-width:56px;box-sizing:border-box;height:28px;line-height:18px;padding:4px 5px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;background:var(--surface);color:var(--text);outline:none;}
-.km-in:focus{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-soft);}
-.km-in.km-empty{border:1.5px dashed var(--warn);}
+.km-note{font-size:11px;font-weight:600;color:var(--primary);cursor:pointer;}
+.km-note.has{color:var(--warn);font-size:10px;}
+.km-f-shop{font-weight:700;color:#111827;white-space:nowrap;font-size:13.5px;}
+.km-ftable td.km-f-shop{white-space:nowrap;line-height:32px;padding-right:10px;}
+.km-in{width:100%;min-width:58px;box-sizing:border-box;height:32px;line-height:22px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;font-weight:500;text-align:right;font-variant-numeric:tabular-nums;background:var(--surface);color:#111827;outline:none;}
+.km-in:hover{border-color:#94a3b8;}
+.km-in:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft);}
+.km-in.km-empty{border:1.5px dashed #f59e0b;background:#fffbeb;}
 .km-in.km-invalid{border:1.5px solid var(--danger);background:var(--danger-soft);}
-.km-in.km-has-formula{background-image:linear-gradient(135deg,var(--primary-soft) 0 8px,transparent 8px);}
-.km-sublabel{font-size:10.5px;color:#9ca3af;margin-top:3px;line-height:1.3;text-align:right;}
-.km-sublabel-hint{color:var(--primary);}
-.km-f-shop .km-sublabel{text-align:left;}
-.km-f-na{text-align:right;color:var(--text-faint);line-height:28px;}
+.km-in.km-has-formula{background-image:linear-gradient(135deg,var(--primary-soft) 0 9px,transparent 9px);}
+.km-sublabel{font-size:11px;color:#6b7280;margin-top:3px;line-height:1.35;text-align:right;}
+.km-sublabel-hint{color:var(--primary);font-weight:500;white-space:nowrap;}
+.km-f-share .km-sublabel{white-space:nowrap;}
+.km-f-shop .km-sublabel{text-align:left;line-height:1.35;}
+.km-f-na{text-align:right;color:#9ca3af;line-height:32px;}
 .km-f-share{text-align:right;}
-.km-shareval{box-sizing:border-box;min-height:28px;padding:4px 6px;border:1px solid transparent;font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;color:var(--text-muted);}
-.km-table td.km-f-ro{color:var(--text);font-weight:600;}
-.km-roval{box-sizing:border-box;min-height:28px;padding:4px 0;border:1px solid transparent;line-height:18px;white-space:nowrap;}
-.km-tmp{display:inline-block;margin-left:5px;font-size:10.5px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:#92400e;vertical-align:1px;}
+.km-shareval{box-sizing:border-box;min-height:32px;padding:4px 6px;border:1px solid transparent;font-size:14px;line-height:22px;font-variant-numeric:tabular-nums;color:#4b5563;}
+.km-ftable td.km-f-ro{color:#111827;font-weight:700;font-size:14px;background:#f8fafc;}
+.km-ftable th.km-f-rohead{background:#e2e8f0;}
+.km-ftable td.km-f-ro-first,.km-ftable th.km-f-ro-first{border-left:2px solid #cbd5e1;}
+.km-roval{box-sizing:border-box;min-height:32px;padding:4px 2px;border:1px solid transparent;line-height:22px;white-space:nowrap;}
+.km-tmp{display:inline-block;margin-left:5px;font-size:11px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:#92400e;vertical-align:1px;line-height:1.6;}
 .km-f-common td{background:#fcfcfd;}
 .km-common-in{display:flex;align-items:flex-start;gap:8px;max-width:240px;}
-.km-f-sub td{font-weight:700;background:var(--bg);border-top:1px solid var(--border);}
+.km-ftable tr.km-f-sub td{font-weight:800;font-size:14px;background:#eef2ff;border-top:2px solid #c7d2fe;color:#1e1b4b;}
 .km-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;flex-wrap:wrap;}
-.km-foot-l{font-size:12px;color:var(--text-muted);}
+.km-foot-l{font-size:12.5px;color:#4b5563;}
 .km-done{font-size:13px;font-weight:700;color:#047857;}
 @media (max-width:900px){
   .km-big{grid-template-columns:1fr 1fr;}
   .km-fill{grid-template-columns:1fr;}
   .km-side{position:static;flex-direction:row;flex-wrap:wrap;}
-  .km-keys{display:none;}
 }
