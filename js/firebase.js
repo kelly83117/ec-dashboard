@@ -186,11 +186,16 @@ try {
     //   mergeAndNotify 合併 archive 用的 Object.values(profitParts.archives)，順序等於哪個
     //   onSnapshot 先回來，是【非決定性】的。兩片若出現同名 key，誰蓋掉誰每次載入都可能不同，
     //   而且不會報錯、不會有任何徵兆。新增分片前先確認它的 key 前綴與既有各片都不重疊。
+    // ⚡ 進淨利表不再一次訂滿 13 collection（手機首批 ~10MB → renderer OOM 根因）→ 按平台分四組懶載。
+    //   各組首次呼叫才訂閱、__loadedSubGroups 記已訂、切回同平台不重訂；四組到齊才把相容旗標 __heavyProfitSubsLoaded 設 true。
+    window.__loadedSubGroups = window.__loadedSubGroups || new Set();
     window.__heavyProfitSubsLoaded = false;
-    window.__loadHeavyProfitSubs = () => {
-      if (window.__heavyProfitSubsLoaded) return;
-      window.__heavyProfitSubsLoaded = true;
-      console.log('[profit] 開始載入 archive doc + profits collection');
+    const __markSubsMaybeAllLoaded = () => { if (['shopee','archive','momo','coupang'].every(g => window.__loadedSubGroups.has(g))) window.__heavyProfitSubsLoaded = true; };
+    // ══ 蝦皮舊月組：archive docs（個別蝦皮賣場看舊月 + 工作日誌讀調整備註；獨立成組→工作日誌可只載這組、不拖 profits 4.4MB）══
+    window.__loadArchiveSubs = () => {
+      if (window.__loadedSubGroups.has('archive')) return;
+      window.__loadedSubGroups.add('archive');
+      console.log('[profit] 載入 archive 組（舊月份歷史 doc）');
       // archive docs (舊月份歷史資料)
       profitArchiveRefs.forEach((ref, idx) => {
         onSnapshot(ref, snap => {
@@ -203,6 +208,11 @@ try {
           console.error('[profit archive subscribe 失敗]', PROFIT_ARCHIVE_DOCS[idx], err);
         });
       });
+      __markSubsMaybeAllLoaded();
+    };
+
+    // ══ 蝦皮組成員①：profits collection（每月每賣場獨立 doc）。與 aff_rpt 同屬蝦皮組，由 __loadShopeeSubs 一起呼叫。══
+    const __subProfits = () => {
       // profits collection (每月每賣場獨立 doc)
       try {
         const profitsColRef = collection(db, 'profits');
@@ -239,7 +249,13 @@ try {
           }
         }, err => { console.error('[profits collection subscribe 失敗]', err); });
       } catch (e) { console.warn('profits collection subscribe failed', e); }
+    };
 
+    // ══ MOMO 組：products/origins/reconcile/s1103/stock/e001/cost（MOMO 任一分頁含總表都要全載→總表逐 SKU 加總才完整）══
+    window.__loadMomoSubs = () => {
+      if (window.__loadedSubGroups.has('momo')) return;
+      window.__loadedSubGroups.add('momo');
+      console.log('[profit] 載入 MOMO 組（products/origins/reconcile/s1103/stock/e001/cost）');
       // momo_products collection（每賣場一 doc）→ 併回 Store._profitMem['ec_momo_products|<shop>']（維持 momoLoadProducts 讀取順序）
       try {
         onSnapshot(momoProductsColRef, snap => {
@@ -380,7 +396,15 @@ try {
           if (changed.length) { console.log('[momo_e001] 收到更新：', changed); window.dispatchEvent(new CustomEvent('momoE001Ready', { detail: { changed } })); }
         }, err => { console.error('[momo_e001 subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_e001 subscribe failed', e); }
+      __subMomoCost();
+      __markSubsMaybeAllLoaded();
+    };
 
+    // ══ 酷澎組：coupang_reports/msf/note ══
+    window.__loadCoupangSubs = () => {
+      if (window.__loadedSubGroups.has('coupang')) return;
+      window.__loadedSubGroups.add('coupang');
+      console.log('[profit] 載入酷澎組（coupang_reports/msf/note）');
       // PR-4：coupang_reports collection（每賣場每月一 doc）→ Store._profitMem['ec_coupang|<shop>|<month>']（cupLoadReport 讀取順序一致）
       //   ⚠ setReport 存的 doc 沒有 shop 欄位（只有 {month,rows,ts,updatedAt}）→ 賣場靠 docId 前綴反查（比照 momo_reconcile 的 lastIndexOf('_') 切法；月份 'YYYY-MM' 不含 '_'）。
       try {
@@ -452,7 +476,11 @@ try {
           if (changed.length) { console.log('[coupang_note] 收到更新：', changed); window.dispatchEvent(new CustomEvent('coupangNoteReady', { detail: { changed } })); }
         }, err => { console.error('[coupang_note subscribe 失敗]', err); });
       } catch (e) { console.warn('coupang_note subscribe failed', e); }
+      __markSubsMaybeAllLoaded();
+    };
 
+    // ══ MOMO 組成員（成本）：momo_cost_by_origin。定義在酷澎組後、由 __loadMomoSubs 呼叫（原廠編號→成本，MO+ 毛利依賴）══
+    const __subMomoCost = () => {
       // momo_cost_by_origin（帳號級單一 doc）→ Store._profitMem['ec_momo_cost_by_origin'] + '..._meta'。原廠編號→成本，MO+ 毛利依賴、需跨人跨機。
       try {
         onSnapshot(costByOriginDocRef, snap => {
@@ -505,10 +533,13 @@ try {
           if (changed) { console.log('[momo_cost_by_origin] 收到更新'); window.dispatchEvent(new CustomEvent('momoCostByOriginReady')); }
         }, err => { console.error('[momo_cost_by_origin subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_cost_by_origin subscribe failed', e); }
+    };
 
+    // ══ 蝦皮組成員②：aff_rpt（好麻吉聯盟行銷分頁）。由 __loadShopeeSubs 呼叫。══
+    const __subAff = () => {
       // aff_rpt collection（每通路一 doc）→ Store._profitMem['ec_aff_rpt|<shop>']。
-      //   為什麼掛在 __loadHeavyProfitSubs 裡而不是開站就訂：聯盟行銷分頁位在「淨利表 → 好麻吉賣場」內，
-      //   使用者一定要先進淨利表才看得到，180KB 的 doc 不該在開站瞬間跟首頁搶頻寬。
+      //   為什麼懶載而不是開站就訂：聯盟行銷分頁位在「淨利表 → 好麻吉賣場」內，使用者一定要先進淨利表才看得到，
+      //   180KB 的 doc 不該在開站瞬間跟首頁搶頻寬。
       //   ⚠ 下面讀的 window._affJustSaved 是由 js/profit.js 的 affRptLsSave 設定的（塊 2 才會加）。
       //     在塊 2 落地之前這個守衛恆為 falsy＝永遠不跳過，這是分塊施工的中間狀態，不是漏寫。
       AFF_SHOPS.forEach(shop => {
@@ -525,6 +556,19 @@ try {
         } catch (e) { console.warn('aff_rpt subscribe failed', shop, e); }
       });
     };
+
+    // ══ 蝦皮組：profits collection + aff_rpt（個別蝦皮賣場淨利表 / 聯盟行銷分頁；蝦皮總表只吃 boot 的 _summary_v1、不需這組）══
+    window.__loadShopeeSubs = () => {
+      if (window.__loadedSubGroups.has('shopee')) return;
+      window.__loadedSubGroups.add('shopee');
+      console.log('[profit] 載入蝦皮組（profits collection + aff_rpt）');
+      __subProfits();
+      __subAff();
+      __markSubsMaybeAllLoaded();
+    };
+
+    // 相容 shim：舊碼/除錯若呼叫 __loadHeavyProfitSubs → 一次載滿四組（＝還原成 ~10MB，正常流程不該再走這條；保留只為相容）。
+    window.__loadHeavyProfitSubs = () => { window.__loadShopeeSubs(); window.__loadArchiveSubs(); window.__loadMomoSubs(); window.__loadCoupangSubs(); };
   } catch (e) { console.warn('profit subscribe failed', e); }
 
   // setReport 立刻建好（寫入用），讀取（getDoc / onSnapshot）才延後
@@ -786,15 +830,17 @@ try {
 
   window.dispatchEvent(new Event('cloudStoreReady'));
 
-  // ⚡ 重量級訂閱（profits archive + momo_products/origins/reconcile/… 初次快照約 10MB）
-  //   【不再】開站後無條件預抓——那會讓每個人（含只看首頁的老闆）boot 就拉 10MB：
-  //   桌機 app/main 首批被 channel congest → 卡 8 秒 boot timeout；手機再疊 2.4MB JS
-  //   → 分頁記憶體爆掉「Can't open this page」。改成【懶載】：真正需要的頁才觸發
-  //   `__loadHeavyProfitSubs()` —— 淨利表（offices.js route office-d1-profit，已觸發）、
-  //   工作日誌（daily.js renderWeeklyCalendarTab，讀 profits archive 的調整備註）。
-  //   守衛 `__heavyProfitSubsLoaded`（本檔上方）保證只訂一次，切頁進出不重訂。
-  //   ⚠ 洞察/首頁不需要：洞察讀的是 app/profit（本檔 172 boot 立即訂的當月 doc）的 ec_notes，
-  //     首頁 dashboard 完全不讀這三個 collection。
+  // ⚡ 重量級訂閱（profits + momo_products/origins/… 全部訂完初次快照約 10MB）：
+  //   【不再】開站後無條件預抓（那會讓每個人 boot 就拉 10MB → 桌機 channel congest 卡 boot timeout、手機分頁記憶體爆），
+  //   而且【不再一次訂滿 13 個】（那是手機進淨利表 renderer OOM 的根因）。改成【按平台分四組懶載】，各組的 loader 在本檔上方定義：
+  //     __loadShopeeSubs  ── profits collection + aff_rpt。觸發：setShop 到個別蝦皮賣場、工作日誌。
+  //     __loadArchiveSubs ── profits archive docs（舊月）。觸發：setShop 到蝦皮賣場（看舊月）、工作日誌。
+  //     __loadMomoSubs    ── momo_products/origins/reconcile/s1103/stock/e001/cost。觸發：setMomoShop（含總表→逐 SKU 加總全賣場）、工作日誌點 MOMO chip 明細。
+  //     __loadCoupangSubs ── coupang_reports/msf/note。觸發：setCoupangShop。
+  //   各組 __loadedSubGroups(Set) 守衛：只訂一次、切頁/切回不重訂；四組到齊才把相容旗標 __heavyProfitSubsLoaded 設 true。
+  //   保留 __loadHeavyProfitSubs shim（一次載滿四組）僅為相容/除錯，正常流程不再呼叫。
+  //   ⚠ 洞察/首頁/蝦皮總表/KPI月結不需任何重量級組：洞察讀 app/profit（本檔 boot 立即訂的當月 doc）ec_notes、
+  //     首頁 dashboard 讀 app/main platforms、蝦皮總表讀 boot 的 _summary_v1、KPI月結讀 getKpiRows——皆 boot 已載。
 } catch (e) {
   console.error('Firebase init failed:', e);
 }
