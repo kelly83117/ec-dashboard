@@ -28,26 +28,40 @@ Object.assign(App, {
       this.bindInsightTab();
     }
     // d1 profit 子頁：初始化淨利表的賣場分頁內容
-    if (deptId === 'd1' && this.route === 'office-d1-profit' && typeof SHOPS !== 'undefined') {
-      // 進入淨利表 → 主動確保重量級訂閱已載入（archive doc + profits collection）
-      if (typeof window.__loadHeavyProfitSubs === 'function') window.__loadHeavyProfitSubs();
-      setTimeout(() => {
+    if (deptId === 'd1' && this.route === 'office-d1-profit') {
+      // 🔴 profit.js 動態載入 + 風險3：__ensureProfit 必須【先 resolve】（profit.js 執行完、window 匯出＋
+      //   __momoShouldSkipCloudOverwrite 等 momo 守衛都掛好），【才】能呼叫 __loadHeavyProfitSubs（它的
+      //   onSnapshot 回呼要用那些守衛；守衛未掛就訂閱＝雲端 echo 可能覆蓋本機未推編輯＝資料事故）。
+      if (!window.__profitReady) {
+        // 未載：先動態載 profit.js，載完 App.render 重繪整頁 → 本函式重跑、走下面「已 ready」分支
+        //   （__loadHeavyProfitSubs 那時才觸發，確保在 __ensureProfit resolve 之後）。
+        //   ⚠ 此分支【刻意不呼叫】__loadHeavyProfitSubs；平台列骨架由 904/819 顯示「載入中」佔位。
         try {
-          SHOPS.forEach(s => {
-            const el = document.getElementById('content-' + s.id);
-            if (el && !el.innerHTML.trim() && typeof shopHTML === 'function') {
-              el.innerHTML = shopHTML(s.id);
-            }
+          window.__ensureProfit().then(() => this.render()).catch(() => {
+            const box = document.querySelector('.pf-loading'); if (box) box.textContent = '淨利表載入失敗，請重新整理頁面';
           });
-          if(typeof initProfitPeriodControls==='function') initProfitPeriodControls();
-          SHOPS.forEach(s => {
-            if (typeof initShopUI === 'function') initShopUI(s.id);
-          });
-          // 重建後還原「當前檢視」：改用平台感知的 restoreProfitView(profit.js)，讓 MOMO/酷澎 也還原得回、不再一律彈回蝦皮好麻吉。
-          //   ⚠ fallback：helper 未載到(profit.js 沒載/未定義)時退回原本只認 ec_curShop 的蝦皮 inline 還原，不讓還原直接壞掉。
-          try{ if(typeof window.restoreProfitView==='function'){ window.restoreProfitView(); } else { const _sv=localStorage.getItem('ec_curShop');if(_sv&&_sv!=='總表'&&typeof setShop==='function'){const _sb=document.querySelector("button[onclick*=\"setShop('"+_sv+"'\"]");setShop(_sv,_sb||null);} } }catch{}
-        } catch (e) { console.error('profit init failed', e); }
-      }, 200);
+        } catch (e) { console.error('[profit] __ensureProfit 觸發失敗', e); }
+      } else if (typeof SHOPS !== 'undefined') {
+        // 已 ready（profit.js 載完、守衛都在）→ 安全觸發重量級訂閱（archive doc + profits collection）+ 填賣場內容。
+        if (typeof window.__loadHeavyProfitSubs === 'function') window.__loadHeavyProfitSubs();
+        setTimeout(() => {
+          try {
+            SHOPS.forEach(s => {
+              const el = document.getElementById('content-' + s.id);
+              if (el && !el.innerHTML.trim() && typeof shopHTML === 'function') {
+                el.innerHTML = shopHTML(s.id);
+              }
+            });
+            if(typeof initProfitPeriodControls==='function') initProfitPeriodControls();
+            SHOPS.forEach(s => {
+              if (typeof initShopUI === 'function') initShopUI(s.id);
+            });
+            // 重建後還原「當前檢視」：改用平台感知的 restoreProfitView(profit.js)，讓 MOMO/酷澎 也還原得回、不再一律彈回蝦皮好麻吉。
+            //   ⚠ fallback：helper 未載到(profit.js 沒載/未定義)時退回原本只認 ec_curShop 的蝦皮 inline 還原，不讓還原直接壞掉。
+            try{ if(typeof window.restoreProfitView==='function'){ window.restoreProfitView(); } else { const _sv=localStorage.getItem('ec_curShop');if(_sv&&_sv!=='總表'&&typeof setShop==='function'){const _sb=document.querySelector("button[onclick*=\"setShop('"+_sv+"'\"]");setShop(_sv,_sb||null);} } }catch{}
+          } catch (e) { console.error('profit init failed', e); }
+        }, 200);
+      }
     }
     // 動態 tab 的事件綁定
     const activeTab = this.filter.officeTab[deptId];
@@ -816,7 +830,7 @@ Object.assign(App, {
       } else if (activeTab.dynamic === 'launch-plan') {
         tabContent = this.renderLaunchPlanTab();
       } else if (activeTab.key === 'profit') {
-        tabContent = window.__profitTabHtml || '';
+        tabContent = window.__profitReady ? (window.__profitTabHtml || '') : '<div class="pf-loading" style="padding:48px 20px;text-align:center;color:#9ca3af;font-size:14px">淨利表載入中…</div>';   // profit.js 動態載入：未 ready 顯佔位（下方 setTimeout 的 shopHTML/initShopUI 有 typeof 守衛、未載即 no-op，載完由 App.render 重繪補上）
         setTimeout(function() {
           if (typeof SHOPS !== 'undefined') {
             try {
@@ -901,7 +915,7 @@ Object.assign(App, {
       ${deptId === 'd3' ? `<div style="margin-bottom:20px">${this.renderFestivalCalendarTab()}</div>` : ''}
       ${deptId === 'd1' && !subRoute ? `<div style="margin-bottom:20px">${this.renderWeeklyCalendarTab(deptId, color, dept)}</div>` : ''}
       ${deptId === 'd1' && subRoute === 'kpi' ? this.renderMarketingKpiTabHtml() : ''}
-      ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitTabHtml || '') : ''}
+      ${deptId === 'd1' && subRoute === 'profit' ? (window.__profitReady ? (window.__profitTabHtml || '') : '<div class="pf-loading" style="padding:48px 20px;text-align:center;color:#9ca3af;font-size:14px">淨利表載入中…（首次進入約需幾秒下載淨利表模組）</div>') : ''}
       ${deptId === 'd1' && subRoute === 'insight' ? this.renderInsightTabHtml() : ''}
       ${deptId === 'd2' && subRoute === 'kpi' ? this.renderD2KpiTabHtml() : ''}
       ${deptId === 'd2' && subRoute === 'pricing' ? this.renderD2PricingTabHtml() : ''}
@@ -932,6 +946,12 @@ Object.assign(App, {
   },
 
   renderMarketingKpiTabHtml() {
+    // 🔴 行銷 KPI 月結表用 profit.js 的 buildKpiTabHtml/renderKpiTab（動態載入後才有）→ 未 ready 先觸發載入 + 佔位，
+    //   載完 App.render 重繪走下面（__profitReady 守衛防重入）。漏這條的話這頁會空白（buildKpiTabHtml undefined → 回 ''）。
+    if (!window.__profitReady) {
+      try { window.__ensureProfit().then(() => this.render()).catch(() => {}); } catch (e) {}
+      return '<div class="pf-loading" style="padding:48px 20px;text-align:center;color:#9ca3af;font-size:14px">KPI 月結表載入中…（首次進入約需幾秒下載淨利表模組）</div>';
+    }
     setTimeout(function() {
       if (typeof renderKpiTab === 'function') renderKpiTab();
     }, 200);

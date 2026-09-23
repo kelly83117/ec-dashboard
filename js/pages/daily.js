@@ -4,10 +4,18 @@ const { Store, escapeHtml, showToast, toDateStr, addDays, todayStr, genId, DAILY
 
 Object.assign(App, {
   renderWeeklyCalendarTab(deptId, color, dept) {
-    // ⚡ 懶載：工作日誌「調整備註」要讀 profits archive（延後訂閱）；boot 已不再無條件預抓，
-    //   故進工作日誌時主動觸發 __loadHeavyProfitSubs()，否則舊月調整會一直卡「載入中」。
-    //   守衛 __heavyProfitSubsLoaded 保證只訂一次（已載過就直接 return，不重訂）。
-    try { if (typeof window.__loadHeavyProfitSubs === 'function') window.__loadHeavyProfitSubs(); } catch {}
+    // ⚡ profit.js 動態載入 + 懶載 profits archive：工作日誌用 collectAdjustments（calcAnalysis 等 profit.js 匯出）算
+    //   調整標籤 + 讀 profits archive 的調整備註。
+    //   🔴 風險3（同 offices）：__ensureProfit 要【先 resolve】（profit.js 載完、momo 守衛掛好）才呼叫
+    //     __loadHeavyProfitSubs（守衛未掛就訂閱＝雲端可能覆蓋本機＝資料事故）。
+    if (!window.__profitReady) {
+      // 未載：先動態載 profit.js，載完 App.render 重繪 → 本函式重跑走 else（標籤那時才算得出）。
+      //   此分支【不】呼叫 __loadHeavyProfitSubs；本次先渲染（collectAdjustments 對 calc 未就緒已有容錯，見本檔內註解）。
+      try { window.__ensureProfit().then(() => this.render()).catch(() => {}); } catch {}
+    } else {
+      // 已 ready → 觸發重量級訂閱（守衛 __heavyProfitSubsLoaded 保證只訂一次、切頁不重訂）。
+      try { if (typeof window.__loadHeavyProfitSubs === 'function') window.__loadHeavyProfitSubs(); } catch {}
+    }
     // 老闆指示：移除月曆/週曆/甘特圖，每位同事下班前 5 分鐘寫今日工作進度即可
     // 只保留 4 位同事：陳君葳、洪嘉蓮、郭雅琪、楊心雨（2026-09-04 楊心雨接手維克後加入）
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
