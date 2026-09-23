@@ -1089,16 +1089,6 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .mm-fee-note{color:#9ca3af;}
 .mm-fee-pred{font-size:11px;color:#9ca3af;margin-top:2px;}
 
-/* KPI 月結表：「這一格沒有值」的破折號。
-   🔴 存在的理由是【0 與無值必須分得出來】：物流運費／合併儲存格這兩格以前用真值判斷
-     （commonCost?…:'—'），存進去的 0 會被印成「—」，跟「從沒填過」在畫面上完全一樣 ——
-     使用者打完 0 按 Enter 看到「—」，無從確認自己那筆有沒有存成功。
-     判斷改成「key 在不在」之後，0 顯示成 0、只有真的沒有值才走這個 class。
-   ⚠ 判準沿用同一張表一般格既有的 explicitlySet（js/profit.js 搜 `有明確存過值`），
-     不是新造一套。
-   取代原本寫在 JS 字串裡的 inline style="color:#d1d5db"。 */
-.kpi-cell-empty{color:var(--text-faint);}
-
 /* KPI 評分表「賣場月度評分比較」的外框（容器 id=score-cmp-table，內容由
    renderScoreComparisonTable 以 innerHTML 填入一張 width:100% 的 table）。
    ⚠ 從 js/profit.js 的 inline style 搬過來，值【逐項對照、不改樣子】：
@@ -1122,56 +1112,6 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   border-radius:10px;
   overflow-x:auto;
   margin-bottom:10px;
-}
-
-/* KPI 月結表：合併儲存格（目前只有 MOMO 的寄倉運費：mo+0號店/mo+1號店 共用一筆）。
-   那一格從「rowspan 顯示總額」改成【每個通路各自一格、只顯示自己攤到的份額】。
-   ⚠ 曾經把總額一起印在格子裡（「342 共 1,740」），已退場：那會把主值推離右緣，
-     同一欄的 MOMO-寄倉 與小計是靠右的、個位數對不上，兩格之間主值起點也差一個字元。
-     總額改成【編輯的當下】才提示（.kpi-merge-hint）。對齊比省一次點擊重要。
-   ⚠ 顏色一律走 css/main.css:2 的 :root 變數，不寫死色碼、不碰 --bg。 */
-.kpi-merge-share{font-variant-numeric:tabular-nums;}
-
-/* 合併儲存格的定位基準。⚠ 只有 position:relative、沒有任何偏移 ⇒ 不移動任何一個像素，
-   純粹是給下面那個絕對定位的提示當 containing block。 */
-.kpi-merge-cell{position:relative;}
-
-/* 編輯時浮在輸入框正上方的提示（由 editKpiMergedFieldHinted 掛上、由編輯器的收尾路徑帶走）。
-   🔴 position:absolute —— 脫離文件流，【不可能撐高列、不可能撐寬欄】。平常那格沒有這個節點，
-     只有上面的 position:relative，所以非編輯狀態的版面與加這組樣式之前完全一樣。
-   🔴 bottom:100% 往【上】長，不往左也不往右：
-     · 往左會蓋掉同列的「實際營收」—— 那是編輯時唯一能讓人確認自己在編輯哪一家的參照，
-       蓋掉它反而更容易搞混，正好是這個提示要解決的問題。
-     · 往右（left:100%）在 LTR 會增加可捲寬度，可能讓外層 overflow-x:auto 多出一段橫向捲軸。
-     · 往上是垂直方向，在 overflow-x:auto 的容器裡不產生橫向捲軸；且 mo+0/mo+1 是第 3、4 列，
-       上面還有兩列，不會頂到表頭。
-   🔴 pointer-events:none —— 滑鼠事件穿透，它不可能被點到、不可能取得焦點、不可能觸發
-     td 的 onclick ⇒ 在 editKpiMergedField 的 blur 判斷路徑上等同不存在。
-     這比「在 blur handler 裡多判斷一個元素」可靠：沒有需要維護的例外分支。
-   ⚠ right:0 讓它靠著輸入框的右緣對齊，不會歪到鄰欄上方。 */
-.kpi-merge-hint{
-  position:absolute;
-  bottom:100%;
-  right:0;
-  margin-bottom:4px;
-  padding:3px 8px;
-  /* ⚠ pre 不是 nowrap：提示是兩行，換行字元由 JS 用 &#10; 送進 data-merge-hint。
-     pre 同時保留換行【並且不自動折行】—— 用 pre-line 的話寬度一窄就會自己再折，
-     行數變得不可預期，往上長的高度就跟著不可預期。 */
-  white-space:pre;
-  /* 內文靠左：td 是 text-align:right，繼承下來會讓兩行長度不一的句子右緣參差、很難讀。
-     這【不影響外框位置】—— 外框仍由下方的 right:0 對齊格子右緣。 */
-  text-align:left;
-  pointer-events:none;
-  font-size:11px;
-  line-height:1.5;
-  font-weight:400;
-  color:var(--text-muted);
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:6px;
-  box-shadow:var(--shadow-sm);
-  z-index:5;
 }
 
 /* ═══════════ 淨利表 · 平台分頁列（多組，永遠一排）═══════════
@@ -1494,3 +1434,182 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .pf-pchome-btn:hover{ background:#c8000f; }
 .pf-pchome-upbox{ border:1px dashed #f6b8bd; background:#fff5f6; border-radius:10px; padding:14px; margin-bottom:16px; }
 .pf-pchome-edit{ cursor:pointer; color:#E60012; margin-left:6px; user-select:none; }
+
+/* KPI 月結表：這一格寫入 app/kpi 失敗（或 10 秒還沒確認）→ 標紅。由 kpiWriteCell 記錄、_kpiBadCls 套上。 */
+.kpi-cell-failed{background:#fee2e2 !important;box-shadow:inset 0 0 0 1.5px #dc2626;}
+
+/* ═══════════ KPI 月結表（2026-09-23 改版）：總覽 + 填寫模式 ═══════════
+   前綴 .km-（KPI monthly）：.kpi-* 已被淨利表頁首的 KPI 條（.kpi-strip / .kpi-big-row…）用掉，不混用。
+   顏色一律走 :root token；「較上月」的綠紅刻意用 #059669 / #dc2626（與年度總表 _kpiYoyHtml 一致，
+   規則見 js/profit.js 搜 _kpiCmpOk 上方那段），不是 --success / --danger。 */
+.km-up{color:#059669;}
+.km-down{color:#dc2626;}
+.km-top{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
+.km-top-r{margin-left:auto;}
+.km-mode{font-size:12px;font-weight:700;color:var(--primary);background:var(--primary-soft);padding:3px 10px;border-radius:999px;}
+.km-progress,.km-back,.km-next{padding:7px 14px;border-radius:var(--radius-sm);border:1px solid var(--warn);background:var(--warn-soft);color:#92400e;font-size:13px;font-weight:700;cursor:pointer;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-progress.done{border-color:var(--success);background:var(--success-soft);color:#047857;}
+.km-back{border-color:var(--border);background:var(--surface);color:var(--text-muted);}
+.km-dl{padding:7px 14px;border-radius:var(--radius-sm);border:1px solid #cbd5e1;background:#fff;color:#374151;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;margin-right:8px;}
+.km-dl:hover{border-color:var(--primary);color:var(--primary);}
+.km-next{border-color:var(--primary);background:var(--primary);color:#fff;}
+.km-empty{padding:24px 0;text-align:center;color:var(--text-muted);font-size:13px;}
+.km-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0;}
+.km-cmp{display:block;font-size:11px;font-weight:600;margin-top:2px;white-space:nowrap;}
+td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
+/* A2 大數字列 */
+/* 四張大卡是整頁的主角：白底、陰影、頂部主色線、數字最大；下面的本月重點刻意退一階（淡灰底、無陰影、字小一號） */
+.km-big{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:12px;margin-bottom:12px;}
+.km-card{background:#fff;border:1px solid #e5e7eb;border-top:3px solid #6366f1;border-radius:10px;padding:14px 18px;min-width:0;box-shadow:0 2px 8px rgba(15,23,42,.07),0 1px 2px rgba(15,23,42,.05);}
+.km-l{font-size:11px;color:#9ca3af;font-weight:600;}
+.km-v{font-size:24px;font-weight:800;color:#1a1a2e;font-variant-numeric:tabular-nums;margin:2px 0 1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.km-sub{font-size:11px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums;}
+/* 面板 */
+.km-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;margin-bottom:12px;}
+.km-panel{background:#fff;border:1px solid #eef0f2;border-radius:10px;padding:12px 14px;margin-bottom:12px;min-width:0;}
+.km-two .km-panel{margin-bottom:0;}
+.km-panel-t{font-size:13px;font-weight:700;color:#374151;margin-bottom:10px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+.km-panel-hint{font-size:11px;font-weight:500;color:#9ca3af;}
+/* A3 瀑布圖 */
+.km-wf{display:grid;grid-template-columns:max-content minmax(80px,1fr) max-content max-content;align-items:center;gap:7px 10px;font-size:12px;color:#374151;}
+.km-wf-row{display:contents;}
+.km-panel-sub{font-size:11px;color:#9ca3af;margin:-6px 0 10px;line-height:1.5;}
+.km-wf-l{color:#374151;font-weight:600;white-space:nowrap;}
+.km-wf-track{position:relative;height:16px;background:var(--bg);border-radius:4px;}
+.km-wf-bar{position:absolute;top:0;bottom:0;border-radius:3px;}
+.km-wf-rev{background:#94a3b8;}
+.km-wf-cost{background:#fca5a5;}
+.km-wf-pure{background:#059669;}
+.km-wf-loss{background:#dc2626;}
+.km-wf-p{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600;color:#6b7280;min-width:48px;}
+.km-wf-v{text-align:left;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600;color:#1a1a2e;}
+/* A4 營收組成 */
+.km-mix-list{display:flex;flex-direction:column;gap:7px;min-width:0;flex:1;}
+.km-mix-item{display:grid;grid-template-columns:8px minmax(56px,max-content) 52px 1fr;align-items:center;gap:6px 8px;font-size:12px;color:#374151;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-mix-name{font-weight:600;color:#374151;}
+.km-mix-share{font-weight:800;color:#1a1a2e;text-align:right;}
+.km-mix-rate{color:#9ca3af;font-weight:600;text-align:left;padding-left:10px;}
+/* 本月重點：三張小卡並排（月份選單下、四張大卡上）。左側色條：綠＝成長、紅＝下滑、紫＝純利率最高 */
+.km-hl{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin:0 0 16px;}
+.km-hl-card{background:#f8f9fc;border:1px solid #eef0f4;border-left:4px solid #c7d2fe;border-radius:9px;padding:8px 14px;min-width:0;}
+.km-hl-card.up{border-left-color:#059669;}
+.km-hl-card.down{border-left-color:#dc2626;}
+.km-hl-card.best{border-left-color:#6366f1;}
+.km-hl-l{font-size:11px;font-weight:600;color:#9ca3af;}
+.km-hl-main{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:2px;}
+.km-hl-name{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#1a1a2e;white-space:nowrap;}
+.km-hl-big{font-size:16px;font-weight:800;color:#1a1a2e;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-hl-big.km-up{color:#059669;}.km-hl-big.km-down{color:#dc2626;}
+.km-hl-sub{font-size:11px;color:#9ca3af;font-weight:500;margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* 營收組成：左圓餅、右清單 */
+.km-mix{display:flex;align-items:center;gap:18px;}
+.km-mix-pie{position:relative;width:170px;height:170px;flex-shrink:0;}
+/* 全通路純利卡：配色同其他三張，只用略寬的欄位與數字色區分 */
+.km-card-main .km-v{font-size:26px;}
+/* A5 各通路表 + 填寫模式共用的表格 */
+.km-tablewrap{overflow-x:auto;}
+.km-table{width:100%;border-collapse:collapse;font-size:12.5px;color:#374151;}
+.km-table th{text-align:left;padding:7px 10px;color:#6b7280;font-size:11px;font-weight:600;background:#f8f9fc;white-space:nowrap;border-bottom:1px solid #eef0f4;}
+.km-table td{padding:7px 10px;border-top:1px solid #f3f4f6;vertical-align:middle;text-align:left;}
+.km-table .km-n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-table .km-c{white-space:nowrap;}
+.km-table tfoot td{font-weight:800;color:#1a1a2e;background:#f8f9fc;border-top:1px solid #e5e7eb;}
+/* 各通路表字級：對齊整頁的字級階層（2026-09-23 使用者要求「符合整頁比例」；填寫模式表格不受影響）
+   小標籤 11px（＝上方各卡的灰色標籤、大卡的 ▲▼）→ 展開的各店 13px → 主列通路名與數字 14px
+   （比本月重點的 16px 低一階、比面板內文 12px 高一階）。
+   ⚠ 本檔另有全域 td{font-size:14px}（淨利表舊樣式），必須直接指定 td 才蓋得過。 */
+.km-ch-table{font-size:13px;}
+.km-ch-table td{font-size:13px;padding-top:9px;padding-bottom:9px;}
+.km-ch-table th{font-size:11px;}
+.km-ch-table .km-cmp{font-size:11px;}
+.km-ch-table .km-badge{font-size:11px;}
+.km-ch-table .km-ch-name{font-size:13px;}
+.km-ch-table .km-ch-sub td{font-size:13px;padding-top:7px;padding-bottom:7px;}
+.km-ch{cursor:pointer;}
+.km-ch:hover td{background:#fafbff;}
+.km-ch-name{font-weight:700;color:#1a1a2e;white-space:nowrap;}
+.km-ch-name .km-dot{margin:0 6px 0 4px;}
+.km-caret{color:var(--text-muted);display:inline-block;transition:transform .15s;width:10px;}
+.km-caret.open{transform:rotate(90deg);}
+.km-ch-sub td{background:#fcfcfd;color:#6b7280;}
+.km-table td.km-ch-shop{padding-left:34px;white-space:nowrap;}
+.km-rate{display:flex;align-items:center;gap:8px;min-width:130px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-rate-track{flex:1;height:8px;background:var(--bg);border-radius:4px;overflow:hidden;min-width:60px;}
+.km-rate-fill{height:100%;background:#059669;border-radius:4px;}
+.km-rate-fill.km-rate-neg{background:#dc2626;}
+.km-badge{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--warn-soft);color:#92400e;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-badge-done{background:var(--success-soft);color:#047857;}
+/* B 填寫模式
+   可讀性（2026-09-23 調整）：表頭、店名、數字、唯讀計算欄、小計各自一個層級，不再全部一樣淡。
+   · 輸入框 14px 深色字、框線 #cbd5e1（比 --border 深一階，框才看得清楚）
+   · 空格：琥珀虛線框＋淡黃底 → 一眼看出還沒填
+   · 純利／純利率：唯讀計算欄，淡灰底＋左側分隔線，跟可填的格子分開
+   · 所有同列元件高度固定 32px → 框線與數字對齊（見 .km-in / .km-roval / .km-shareval / .km-f-na） */
+.km-fill{display:grid;grid-template-columns:150px minmax(0,1fr);gap:14px;align-items:start;}
+.km-side{display:flex;flex-direction:column;gap:6px;position:sticky;top:8px;}
+.km-side-item{display:flex;align-items:center;gap:6px;padding:9px 10px;border:1px solid #eef0f4;border-radius:var(--radius-sm);background:#fff;cursor:pointer;font-size:13px;text-align:left;}
+.km-side-item:hover{border-color:#c7d2fe;}
+.km-side-item.active{border-color:var(--primary);background:var(--primary-soft);box-shadow:inset 3px 0 0 var(--primary);}
+.km-side-name{font-weight:700;color:#374151;flex:1;white-space:nowrap;}
+.km-fill-main{min-width:0;}
+.km-fill-title{display:flex;align-items:baseline;gap:10px;font-size:15px;font-weight:800;color:#1a1a2e;margin-bottom:10px;}
+.km-fill-title .km-dot{align-self:center;width:10px;height:10px;}
+.km-fill-sub{font-size:12px;font-weight:600;color:#6b7280;}
+/* 鍵盤操作：一列橫排，每一項自己不斷行（整項換到下一行，不會拆成一字一行） */
+.km-ftable{font-size:12.5px;color:#374151;}
+.km-ftable th{vertical-align:bottom;white-space:normal;padding:7px 5px;font-size:11px;font-weight:600;color:#6b7280;background:#f8f9fc;border-bottom:1px solid #e5e7eb;}
+.km-ftable td{padding:7px 5px;white-space:normal;vertical-align:top;border-top:1px solid #f3f4f6;}
+.km-ftable tbody tr:hover td{background:#fafbff;}
+.km-ftable th:not(.km-f-shop){text-align:right;}
+.km-th{display:flex;justify-content:flex-end;align-items:center;gap:2px 4px;flex-wrap:wrap;}
+.km-note{font-size:11px;font-weight:600;color:var(--primary);cursor:pointer;}
+.km-note.has{color:var(--warn);font-size:10px;}
+.km-f-shop{font-weight:700;color:#1a1a2e;white-space:nowrap;font-size:13px;}
+.km-ftable td.km-f-shop{white-space:nowrap;line-height:32px;padding-right:10px;}
+.km-in{width:100%;min-width:54px;box-sizing:border-box;height:32px;line-height:22px;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;background:#fff;color:#1a1a2e;outline:none;}
+.km-in:hover{border-color:#94a3b8;}
+.km-in:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft);}
+.km-in.km-empty{border:1.5px dashed #f59e0b;background:#fffbeb;}
+.km-in.km-invalid{border:1.5px solid var(--danger);background:var(--danger-soft);}
+.km-in.km-has-formula{background-image:linear-gradient(135deg,var(--primary-soft) 0 9px,transparent 9px);}
+.km-sublabel{font-size:11px;color:#9ca3af;font-weight:500;margin-top:3px;line-height:1.35;text-align:right;}
+.km-sublabel-hint{color:var(--primary);font-weight:500;white-space:nowrap;}
+.km-f-share .km-sublabel{white-space:nowrap;}
+.km-f-shop .km-sublabel{text-align:left;line-height:1.35;}
+.km-f-na{text-align:right;color:#9ca3af;line-height:32px;}
+.km-f-share{text-align:right;}
+.km-shareval{box-sizing:border-box;min-height:32px;padding:4px 6px;border:1px solid transparent;font-size:13px;font-weight:600;line-height:22px;font-variant-numeric:tabular-nums;color:#6b7280;}
+.km-ftable td.km-f-ro{color:#1a1a2e;font-weight:800;font-size:13px;background:#f8f9fc;}
+.km-ftable th.km-f-rohead{background:#eef0f4;}
+.km-ftable td.km-f-ro-first,.km-ftable th.km-f-ro-first{border-left:2px solid #cbd5e1;}
+.km-roval{box-sizing:border-box;min-height:32px;padding:4px 2px;border:1px solid transparent;line-height:22px;white-space:nowrap;}
+.km-tmp{display:inline-block;margin-left:5px;font-size:11px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:#92400e;vertical-align:1px;line-height:1.6;}
+.km-f-common td{background:#fcfcfd;}
+.km-common-in{display:flex;align-items:flex-start;gap:8px;max-width:240px;}
+.km-ftable tr.km-f-sub td{font-weight:800;font-size:13px;background:#f5f6fb;border-top:1px solid #d1d5db;color:#1a1a2e;}
+.km-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;flex-wrap:wrap;}
+.km-foot-l{font-size:11.5px;color:#9ca3af;font-weight:500;}
+.km-done{font-size:13px;font-weight:700;color:#047857;}
+/* 填寫模式旁的「?」：hover 或 Tab 聚焦才顯示鍵盤操作說明（平常不佔版面、不干擾輸入） */
+.km-help{position:relative;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:1px solid #cbd5e1;background:#fff;color:#6b7280;font-size:11px;font-weight:800;cursor:help;outline:none;}
+.km-help:hover,.km-help:focus{border-color:var(--primary);color:var(--primary);}
+.km-help-pop{display:none;position:absolute;top:calc(100% + 8px);left:-8px;z-index:30;width:max-content;min-width:230px;padding:10px 12px;background:#1a1a2e;color:#e5e7eb;border-radius:8px;box-shadow:var(--shadow-lg);font-size:12px;font-weight:500;line-height:1.5;cursor:default;grid-template-columns:max-content max-content;gap:6px 14px;align-items:center;}
+.km-help:hover .km-help-pop,.km-help:focus .km-help-pop{display:grid;}
+.km-help-t{grid-column:1 / -1;font-size:11px;font-weight:700;color:#9ca3af;}
+.km-help-k{white-space:nowrap;text-align:right;}
+.km-help-v{white-space:nowrap;color:#fff;}
+.km-help kbd{display:inline-block;min-width:16px;padding:0 5px;border:1px solid #475569;border-bottom-width:2px;border-radius:4px;background:#27273f;font:600 11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#fff;text-align:center;}
+.km-help code{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;background:#27273f;border-radius:4px;padding:0 5px;color:#fff;}
+/* 新通路 since 之前：不列入進度 */
+.km-badge-off{background:#f3f4f6;color:#9ca3af;}
+/* 填寫表格欄多（MOMO 8 個填寫欄＋客單價／純利／純利率），金額又帶 $：1500px 以下左側通路清單改成表格上方一排分頁，
+   把寬度讓給表格（1280 寬時側欄會把表格擠出橫向捲軸、輸入框裡的數字被截掉）。 */
+@media (max-width:1499px){
+  .km-fill{grid-template-columns:minmax(0,1fr);gap:10px;}
+  .km-side{position:static;flex-direction:row;flex-wrap:wrap;gap:6px;}
+  .km-side-item{padding:6px 10px;}
+  .km-side-item.active{box-shadow:inset 0 -2px 0 var(--primary);}
+}
+@media (max-width:900px){
+  .km-big{grid-template-columns:1fr 1fr;}
+}

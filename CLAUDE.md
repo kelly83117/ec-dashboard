@@ -61,10 +61,25 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    ⚠ 這段防護碼**刻意不存在於 repo 裡**：`grep TEST_NOWRITE` 零命中是**正確狀態**，不是異常，
    不要因為搜不到就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「[TEST_NOWRITE] 已停用雲端寫入：14 物件 / N 方法」**，才能放心測。
-   **判斷標準是「物件數對不對」：必須是 14**（2026-08-13 實測）。
-   方法數 N 與下方 table 的條數**以工具實際印出的為準**，這份文件刻意不寫死——沒有實測依據。
-3. 沒看到這行紅字、或**物件數不是 14** → **絕對不要繼續操作，立刻關閉分頁**。
+   **「TEST_NOWRITE v2 已啟用：18 個物件 / 27 個寫入方法已停用」**，才能放心測。
+   **判斷標準是「物件數對不對」：必須是 18**（2026-09-23 實測：加了 `__cloudKpi`（app/kpi，
+   KPI 月結表）之後；加之前是 17 物件 / 25 方法）。
+   方法數 27 同日實測（`__cloudKpi` 貢獻 `writePaths` + `smokeWritePaths` 兩支），只當參考；
+   下方 table 的條數**以工具實際印出的為準**。合併 main v690（profit.js 動態載入）後重測仍是 18 / 27
+   ——雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
+   ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
+   （觸發 profit.js 動態載入）才會存在；還沒進就打會 `is not defined`。
+   🔴 **起 server 前，要在同一條指令裡確認防護碼真的在檔案裡**（例：`grep -c "TEST_NOWRITE v2 結束" js/firebase.js`
+   必須是 1，否則不起 server）。2026-09-23 實例：貼防護碼的指令因為前面一個 `cmp` 失敗（CRLF 差異）整串中斷，
+   但起 server 是另一條指令照樣跑了 → 頁面在**沒有防護**的狀態下開了幾秒。事後查證正式資料沒被改到，
+   但那是運氣，不是流程保護。
+   ⚠ v2 防護碼的 MUST 清單要含 `['__cloudKpi', 'writePaths']`、`['__cloudKpi', 'smokeWritePaths']`，
+   物件下限改 18，否則新物件沒有 fail-loud 保護。
+   ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
+   （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
+   `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
+   放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
+3. 沒看到這行紅字、或**物件數不是 18** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 
 ⚠ **物件數會隨著新增雲端物件而變**（曾經是 4 物件 / 9 方法，早就過期）。不要當常數背，
@@ -77,7 +92,7 @@ grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js
 **這不是理論上的可能性 —— 2026-08-12 的實例**：當天 17:39 這份文件才把物件數更正成 13
 （commit `465a799`），**同一天** 23:31 同事的 `__cloudE001` 就 merge 進 main（PR #146，
 commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**。所以永遠當場重數，
-不要相信文件上的數字（包括上面那個 14）。
+不要相信文件上的數字（包括上面那個 18）。
 
 🔴 字元集一定要用 `[A-Za-z0-9_]`，**不能**寫成 `[A-Za-z_]` —— 舊寫法吃不到數字，會漏掉
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
@@ -143,6 +158,9 @@ ESM 有個致命陷阱必須牢記：
   `subscribe`）存取。
 - `app/profit` — 淨利表「當期」資料（避免單檔撞 Firestore 1MB 上限）。
 - `app/profit_YYYY_MM`（archive docs）— 舊月份歷史資料，延後訂閱。
+- `app/kpi` — KPI 月結表（`months.{YYYY-MM}.{路徑}` + `meta.{YYYY-MM}.{路徑}={by,at}`）。
+  透過 `window.__cloudKpi.writePaths` **逐格 FieldPath 寫入**、多人同時填不互蓋；記憶體仍轉回
+  `Store._profitMem._kpi_v1` 陣列供讀取端用。舊的 `app/profit._kpi_v1` 是搬移前的備份，**不要再寫它**。
 - `profits` collection — 每月每賣場一份獨立 doc（doc id 用 `__` 取代 `/`）。
 - 含 `.` 的字面欄位用 Firestore **REST API + backtick escape** 刪除
   （SDK 的 `updateDoc` 搭 `FieldPath` 不一定刪得掉），見 `firebase.js`

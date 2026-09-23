@@ -1400,6 +1400,10 @@ window.__profitPendingCount = _realPendingCount;
 //   本機有未同步變更（pending）或剛存過 → 雲端快照不覆蓋 _profitMem，保住本機版本。
 //   對照組：MOMO 已有同型別的 __momoShouldSkipCloudOverwrite（本檔搜得到），這是蝦皮淨利表缺的那一份。
 window.__profitShouldSkipCloudOverwrite=function(k){
+  // KPI 月結表 v2：Store._profitMem._kpi_v1 由 app/kpi 訂閱層（本檔搜 _kpiV2Install）獨佔。
+  //   這裡擋的是【舊的】app/profit 訂閱把 _kpi_v1 備份蓋回記憶體；新訂閱不經過這支守衛。
+  //   _kpi_v1 也不再被 _markPending（kpiWriteCell 直寫 app/kpi）。
+  if(k==='_kpi_v1' && _kpiV2.installed) return true;
   try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
   if(window._shopJustSaved && (Date.now()-window._shopJustSaved < 5000)) return true;
   // PChome recon/主檔：dirty 持久化（跨重整）→ 本機已存未推時擋掉雲端 app/profit echo 覆蓋，避免資料被舊雲端值蓋回。
@@ -8897,16 +8901,339 @@ function getKpiRows(){
     const s=localStorage.getItem('ec_kpi_v1');return s?JSON.parse(s):[];
   }catch{return [];}
 }
-function saveKpiRows(rows){
-  try{localStorage.setItem('ec_kpi_v1',JSON.stringify(rows));}catch{}
+// ══════ KPI 月結表 v2：每格直接寫雲端 app/kpi（2026-09-23，取代整包 saveKpiRows）══════
+//  舊版 saveKpiRows 每存一格就把 _kpi_v1（所有月份整個陣列）整包 setField 到 app/profit，
+//  又走 _cloudWriteSafe → _markPending('_kpi_v1') → __profitShouldSkipCloudOverwrite 擋掉雲端快照
+//  ⇒ 這台看不到別人新填的數字，下一次存檔就把別人的資料洗掉。
+//  現在：
+//  · 寫入：kpiWriteCell 只送「改到的那幾格」的 FieldPath（firebase.js window.__cloudKpi.writePaths），
+//    同時寫 meta（誰、何時）。不碰 localStorage、不 _markPending、不經同步鈕。
+//  · 讀取：【記憶體形狀不變】—— 訂閱 app/kpi，把 months map 轉回舊的 rows 陣列放進
+//    Store._profitMem._kpi_v1，getKpiRows 與所有讀取端（年度總表、通路卡、酷澎總表、評分表）一行都不用改。
+//  · 搬移前（app/kpi 沒有 migratedAt）：畫面＝舊 app/profit._kpi_v1 為底 + app/kpi 已寫的格子疊上去
+//    （新寫的蓋舊的）。搬移前清空一格寫的是 null（墓碑），否則舊值會從底下透出來；搬移時把墓碑一併清掉。
+//  · 這個記憶體槽由本層獨佔：__profitShouldSkipCloudOverwrite 對 '_kpi_v1' 恆回 true，
+//    擋的是【舊的】app/profit 訂閱（mergeAndNotify）別把 _kpi_v1 備份蓋回來；新訂閱不經過那道守衛。
+//  回滾：讀寫改回 _kpi_v1（app/profit._kpi_v1 搬移時保留不刪，就是備份）。
+const _kpiV2={
+  installed:false,
+  cloud:undefined,      // app/kpi 最新快照：undefined＝還沒到、null＝文件不存在、{}＝資料
+  cloudErr:null,
+  legacy:undefined,     // app/profit._kpi_v1（只在搬移前訂閱）：undefined＝還沒到
+  unsubLegacy:null,
+  overlay:[],           // 送出但還沒被快照吸收的寫入：{seq,month,segs,val,resolved}
+  seq:0,
+  failed:new Map(),     // 儲存格 key → 'fail'（寫入失敗）| 'slow'（10 秒還沒確認）
+  lastJson:'',
+  renderTimer:null,
+};
+function _kpiIsMap(v){return v!==null&&typeof v==='object'&&!Array.isArray(v);}
+function _kpiLeaves(obj,pre,out){
+  Object.keys(obj||{}).forEach(k=>{
+    const v=obj[k];const p=pre.concat(k);
+    if(_kpiIsMap(v))_kpiLeaves(v,p,out);else out.push([p,v]);
+  });
+  return out;
+}
+// 舊 row 的葉節點（id / month 是 row 自己的識別，不是資料，不搬）。
+function _kpiRowLeaves(row){
+  const o={};
+  Object.keys(row||{}).forEach(k=>{if(k!=='id'&&k!=='month')o[k]=row[k];});
+  return _kpiLeaves(o,[],[]);
+}
+function _kpiSetPath(obj,segs,v){
+  let o=obj;
+  for(let i=0;i<segs.length-1;i++){if(!_kpiIsMap(o[segs[i]]))o[segs[i]]={};o=o[segs[i]];}
+  o[segs[segs.length-1]]=v;
+}
+function _kpiDelPath(obj,segs){
+  let o=obj;
+  for(let i=0;i<segs.length-1;i++){o=o[segs[i]];if(!_kpiIsMap(o))return;}
+  delete o[segs[segs.length-1]];
+}
+function _kpiMigrated(){return !!(_kpiV2.cloud&&_kpiV2.cloud.migratedAt);}
+// 組出畫面用的 rows 陣列（形狀與舊 _kpi_v1 相同）。
+//   withOverlay=false → 只含雲端已確認的資料（localStorage 鏡像用，不把還沒確認的寫入存成「成功」）。
+//   ⚠ 一個月份沒有任何非 null 的值就不產生 row（全部格子都清空了、或搬移前墓碑蓋掉全部舊值 → 那個月消失）。
+function _kpiCompose(withOverlay,src){
+  src=src||_kpiV2;
+  const M={};
+  const migrated=!!(src.cloud&&src.cloud.migratedAt);
+  if(!migrated)(src.legacy||[]).forEach(r=>{
+    if(!r||!r.month)return;
+    M[r.month]=M[r.month]||{};
+    _kpiRowLeaves(r).forEach(([p,v])=>{if(v!=null)_kpiSetPath(M[r.month],p,v);});
+  });
+  const months=(src.cloud&&_kpiIsMap(src.cloud.months))?src.cloud.months:{};
+  Object.keys(months).forEach(m=>{
+    if(!_kpiIsMap(months[m]))return;
+    M[m]=M[m]||{};
+    _kpiLeaves(months[m],[],[]).forEach(([p,v])=>{if(v===null)_kpiDelPath(M[m],p);else _kpiSetPath(M[m],p,v);});
+  });
+  if(withOverlay)(src.overlay||[]).forEach(o=>{
+    M[o.month]=M[o.month]||{};
+    if(o.val==null)_kpiDelPath(M[o.month],o.segs);else _kpiSetPath(M[o.month],o.segs,o.val);
+  });
+  return Object.keys(M).sort().filter(m=>_kpiLeaves(M[m],[],[]).some(([,v])=>v!=null)).map(m=>{
+    const row=_kpiEmptyRow(m);
+    Object.keys(M[m]).forEach(k=>{row[k]=M[m][k];});
+    return JSON.parse(JSON.stringify(row));
+  });
+}
+// 雲端資料就緒了嗎：app/kpi 快照到了，而且（搬移前）舊 _kpi_v1 也到了。沒就緒前不覆蓋記憶體，
+//   getKpiRows 會先讀 localStorage 的鏡像。
+function _kpiReady(){return _kpiV2.cloud!==undefined&&(_kpiMigrated()||_kpiV2.legacy!==undefined);}
+function _kpiPublish(){
+  if(!_kpiReady())return;
+  const rows=_kpiCompose(true);
+  const json=JSON.stringify(rows);
+  if(json===_kpiV2.lastJson)return;
+  _kpiV2.lastJson=json;
   try{ if(typeof Store!=='undefined'){ Store._profitMem=Store._profitMem||{}; Store._profitMem._kpi_v1=rows; } }catch{}
-  // KPI 是偶爾才存一次的手動輸入，這裡沒有另外的「同步雲端」按鈕可以點，
-  // 所以直接即時推雲端，不要走 _cloudWriteSafe 的「本機優先、等按鈕手動同步」流程
-  // （不然像淨利表分頁那樣要另外去按同步鈕，資料才會真的進雲端）。
-  if(window.__cloudProfit&&typeof window.__cloudProfit.setField==='function'){
-    window.__cloudProfit.setField('_kpi_v1', rows).catch(e=>console.warn('[KPI] 雲端同步失敗，稍後會透過同步雲端按鈕補推',e));
+  try{ localStorage.setItem('ec_kpi_v1',JSON.stringify(_kpiCompose(false))); }catch{}
+  _kpiRefreshViews();
+}
+// 有人正在 KPI 分頁裡輸入嗎：彈出式編輯器（備註）帶 data-kpi-editor；填寫模式與評分表的輸入框看焦點。
+function _kpiIsEditing(el){
+  if(_kpiPointerDown)return true;   // 滑鼠按著：等 click 完成再畫（見 _kpiAfterClick）
+  if(el.querySelector('input[data-kpi-editor]'))return true;
+  const a=document.activeElement;
+  return !!(a&&el.contains(a)&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'));
+}
+// 快照進來 → 重畫。正在編輯就等編輯器關掉再畫，【不能】把打到一半的輸入框洗掉。
+function _kpiRefreshViews(){
+  clearTimeout(_kpiV2.renderTimer);_kpiV2.renderTimer=null;
+  const el=document.getElementById('kpi-tab-content');
+  if(el){
+    if(_kpiIsEditing(el)){_kpiV2.renderTimer=setTimeout(_kpiRefreshViews,400);return;}
+    renderKpiTab();
   }
-  _cloudWriteSafe('_kpi_v1', rows, 'KPI月結表');
+  if(document.getElementById('cup-sum-kpi-rev')){try{syncCoupangSummaryFromKpi();}catch{}}
+}
+function _kpiCellKey(month,segs){return [month].concat(segs).join('\u0001');}
+// 給 _kpiGroupTableHtml 用：這一格上次寫入失敗（或還沒確認）就回傳 class。
+function _kpiBadCls(month,segs){
+  const s=_kpiV2.failed.get(_kpiCellKey(month,segs));
+  return s?' kpi-cell-failed':'';
+}
+function _kpiWho(){
+  const u=window.App&&window.App.currentUser;
+  return (u&&(u.name||u.username))||'';
+}
+// 寫一格（或一次多格）到 app/kpi。
+//   kpiWriteCell(month, segs, value)          一格：segs 是 row 內的路徑，例 ['shopee','好麻吉','rev']
+//   kpiWriteCell(month, [[segs,value],…])     多格：一次 updateDoc 原子寫入（之後 Excel 貼上、整欄沿用上月用）
+//   value === undefined ＝ 刪除這格。回傳 Promise<boolean>（true＝雲端已確認）。
+//   🔴 失敗時：toast + 該格標紅 + 撤回畫面上的值；【不寫 localStorage】假裝成功。
+function kpiWriteCell(month,segsOrPairs,value){
+  const pairs=(Array.isArray(segsOrPairs)&&Array.isArray(segsOrPairs[0]))?segsOrPairs:[[segsOrPairs,value]];
+  if(!pairs.length)return Promise.resolve(true);
+  if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){
+    if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法修改資料','error');
+    return Promise.resolve(false);
+  }
+  const ck=window.__cloudKpi;
+  if(!ck||typeof ck.writePaths!=='function'){
+    if(typeof showToast==='function')showToast('❌ 雲端未連線，KPI 沒有存進去','error',6000);
+    return Promise.resolve(false);
+  }
+  const migrated=_kpiMigrated();
+  const by=_kpiWho();
+  const cloudPairs=[];
+  const entries=[];
+  pairs.forEach(([segs,v])=>{
+    // 搬移前刪除要寫 null 墓碑，否則舊 _kpi_v1 的值會從底下透出來。
+    const del=v===undefined;
+    const cv=del?(migrated?ck.DELETE:null):v;
+    cloudPairs.push([['months',month].concat(segs),cv]);
+    cloudPairs.push([['meta',month].concat(segs),del?{by,at:ck.TS,del:true}:{by,at:ck.TS}]);
+    const e={seq:++_kpiV2.seq,month,segs:segs.slice(),val:del?null:v,resolved:false};
+    entries.push(e);_kpiV2.overlay.push(e);
+    _kpiV2.failed.delete(_kpiCellKey(month,segs));
+  });
+  console.log('%c[KPI] 寫入 app/kpi','color:#5b5fcf;font-weight:700',
+    cloudPairs.map(([p,v])=>p.join(' › ')+' = '+(v===ck.DELETE?'<deleteField>':v===null?'null（搬移前墓碑）':JSON.stringify(v,(k,x)=>x===ck.TS?'<serverTimestamp>':x))));
+  _kpiPublish();
+  const slow=setTimeout(()=>{
+    entries.forEach(e=>{if(!e.resolved)_kpiV2.failed.set(_kpiCellKey(e.month,e.segs),'slow');});
+    if(typeof showToast==='function')showToast('⚠ KPI 雲端 10 秒還沒確認寫入（網路？），標紅的格子請稍後重整確認','error',8000);
+    _kpiV2.lastJson='';_kpiPublish();
+  },10000);
+  return ck.writePaths(cloudPairs).then(()=>{
+    clearTimeout(slow);
+    entries.forEach(e=>{e.resolved=true;_kpiV2.failed.delete(_kpiCellKey(e.month,e.segs));});
+    return true;
+  },err=>{
+    clearTimeout(slow);
+    console.error('[KPI] 寫入 app/kpi 失敗',err,cloudPairs);
+    _kpiV2.overlay=_kpiV2.overlay.filter(o=>entries.indexOf(o)<0);
+    entries.forEach(e=>_kpiV2.failed.set(_kpiCellKey(e.month,e.segs),'fail'));
+    if(typeof showToast==='function')showToast('❌ KPI 儲存失敗：'+((err&&(err.code||err.message))||err)+'（標紅的格子沒有存進雲端）','error',8000);
+    _kpiV2.lastJson='';_kpiPublish();
+    return false;
+  });
+}
+function _kpiOnCloud(data){
+  _kpiV2.cloud=data;_kpiV2.cloudErr=null;
+  // 已送出且已確認的寫入，快照裡一定已經有了 → 從疊加層拿掉。還沒確認的留著（快照可能是別人更早的寫入）。
+  _kpiV2.overlay=_kpiV2.overlay.filter(o=>!o.resolved);
+  if(_kpiMigrated()&&_kpiV2.unsubLegacy){try{_kpiV2.unsubLegacy();}catch{}_kpiV2.unsubLegacy=null;}
+  _kpiPublish();
+}
+function _kpiV2Install(){
+  if(_kpiV2.installed)return;
+  const ck=window.__cloudKpi;
+  if(!ck||typeof ck.subscribe!=='function')return;
+  _kpiV2.installed=true;
+  // profit.js 是動態載入（v690 起）：載入前 firebase.js 的 app/profit 訂閱已經把舊 _kpi_v1 備份寫進
+  //   Store._profitMem._kpi_v1（那時 __profitShouldSkipCloudOverwrite 還不存在、擋不到）。
+  //   搬移之後那是過期的備份 → 先清掉，讓 getKpiRows 退回 localStorage 鏡像（上次雲端確認過的資料），
+  //   等 app/kpi 第一個快照到了由 _kpiPublish 接手。
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) delete Store._profitMem._kpi_v1; }catch{}
+  ck.subscribe(_kpiOnCloud,err=>{_kpiV2.cloudErr=err;console.error('[KPI] app/kpi 訂閱失敗（畫面停在本機鏡像）',err);});
+  // 搬移前的底：舊 app/profit._kpi_v1。與 firebase.js 的 mergeAndNotify 訂同一份文件，SDK 共用同一條監聽，不多下載。
+  if(window.__cloudProfit&&typeof window.__cloudProfit.subscribe==='function'){
+    _kpiV2.unsubLegacy=window.__cloudProfit.subscribe(d=>{
+      if(_kpiMigrated())return;
+      _kpiV2.legacy=Array.isArray(d&&d._kpi_v1)?d._kpi_v1:[];
+      _kpiPublish();
+    });
+  }else{
+    _kpiV2.legacy=[];
+  }
+}
+window.addEventListener('cloudStoreReady',_kpiV2Install);
+if(window.__cloudKpi)_kpiV2Install();
+// 一次性搬移：app/profit._kpi_v1 → app/kpi。舊 _kpi_v1 保留不刪（備份 / 回滾用）。
+//   __kpiMigrateToV2()                 ＝ dryRun：只在 console 印每月格數與各通路營收/純利，不寫入
+//   __kpiMigrateToV2({dryRun:false})   ＝ 正式執行（會再跳 confirm）
+//   app/kpi 已有 migratedAt → 拒絕。搬移前就有人寫進 app/kpi 的格子（新版上線到搬移之間）：
+//   以新寫的為準、舊值不蓋它；搬移前的 null 墓碑一併刪掉。
+async function __kpiMigrateToV2(opts){
+  const dryRun=!(opts&&opts.dryRun===false);
+  const ck=window.__cloudKpi,cp=window.__cloudProfit;
+  if(!ck||!cp){console.error('[KPI 搬移] 雲端未連線');return null;}
+  const [kSnap,pSnap]=await Promise.all([ck.getDoc(),cp.getDoc()]);
+  const kData=kSnap.exists()?(kSnap.data()||{}):{};
+  if(kData.migratedAt){
+    console.error('[KPI 搬移] 拒絕：app/kpi 已經搬過（migratedAt 存在，by '+(kData.migratedBy||'?')+'）');
+    return {refused:true};
+  }
+  const legacy=(pSnap.exists()&&Array.isArray((pSnap.data()||{})._kpi_v1))?pSnap.data()._kpi_v1:[];
+  const v2m=_kpiIsMap(kData.months)?kData.months:{};
+  const has=(m,p)=>{   // app/kpi 在這條路徑（或它的上下層）已經有東西 → 舊值不寫
+    let o=v2m[m];
+    for(let i=0;i<p.length;i++){if(!_kpiIsMap(o))return o!==undefined;o=o[p[i]];}
+    return o!==undefined;
+  };
+  const byMonth={};let preExisting=0,tomb=0;
+  legacy.forEach(r=>{
+    if(!r||!r.month)return;
+    _kpiRowLeaves(r).forEach(([p,v])=>{
+      if(v==null||has(r.month,p))return;
+      (byMonth[r.month]=byMonth[r.month]||[]).push([['months',r.month].concat(p),v]);
+    });
+  });
+  Object.keys(v2m).forEach(m=>{
+    if(!_kpiIsMap(v2m[m]))return;
+    _kpiLeaves(v2m[m],[],[]).forEach(([p,v])=>{
+      if(v===null){tomb++;(byMonth[m]=byMonth[m]||[]).push([['months',m].concat(p),ck.DELETE]);}
+      else preExisting++;
+    });
+  });
+  // 模擬「搬完之後的 app/kpi」（把要寫的格子套上去、帶 migratedAt → 不再讀舊底），
+  //   逐月跟目前畫面 getKpiRows 對帳：兩者應該一模一樣。
+  const sim={months:JSON.parse(JSON.stringify(v2m)),migratedAt:1};
+  Object.values(byMonth).forEach(l=>l.forEach(([p,v])=>{
+    if(v===ck.DELETE)_kpiDelPath(sim.months,p.slice(1));else _kpiSetPath(sim.months,p.slice(1),v);
+  }));
+  const after=_kpiCompose(false,{cloud:sim});
+  const screen=getKpiRows();
+  screen.forEach(r=>{if(!after.some(a=>a.month===r.month)&&_kpiRowLeaves(r).some(([,v])=>v!=null))console.warn('[KPI 搬移] 畫面上有、搬完會不見的月份：',r.month);});
+  const report=after.map(row=>{
+    const o={月份:row.month,格數:_kpiRowLeaves(row).length};
+    let rev=0,pure=0,ok=true;
+    const sRow=screen.find(r=>r.month===row.month);
+    KPI_GROUPS.forEach(g=>{
+      const t=_kpiGroupTotals(row,g);
+      o[g.title+'營收']=Math.round(t.totalRev);o[g.title+'純利']=Math.round(t.totalPure);
+      rev+=t.totalRev;pure+=t.totalPure;
+      const s=sRow?_kpiGroupTotals(sRow,g):{totalRev:0,totalPure:0};
+      if(Math.round(s.totalRev)!==Math.round(t.totalRev)||Math.round(s.totalPure)!==Math.round(t.totalPure))ok=false;
+    });
+    o['合計營收']=Math.round(rev);o['合計純利']=Math.round(pure);
+    o['與目前畫面一致']=ok?'✓':'✗';
+    return o;
+  });
+  const writeCount=Object.values(byMonth).reduce((a,l)=>a+l.length,0);
+  console.log('%c[KPI 搬移] '+(dryRun?'dryRun（不寫入）':'正式執行前預覽')+'：舊 _kpi_v1 '+legacy.length+' 個月 → app/kpi；要寫 '+writeCount+' 格'
+    +(preExisting?'；app/kpi 搬移前已有 '+preExisting+' 格（以新的為準、不覆蓋）':'')+(tomb?'；清掉 '+tomb+' 個搬移前墓碑':''),
+    'color:#5b5fcf;font-weight:700;font-size:13px');
+  console.table(report);
+  if(report.some(r=>r['與目前畫面一致']!=='✓'))console.warn('[KPI 搬移] 有月份和目前畫面對不上（✗），先查清楚再正式執行');
+  if(dryRun)return report;
+  if(!confirm('確定把 KPI 月結表 '+Object.keys(byMonth).length+' 個月、'+writeCount+' 格搬到 app/kpi？\n舊的 _kpi_v1 會保留當備份。'))return {cancelled:true};
+  // 一個月一次 updateDoc（每次都是原子的）；中途失敗可以重跑：已寫的路徑會被 has() 跳過。migratedAt 最後才寫。
+  for(const m of Object.keys(byMonth).sort()){
+    await ck.writePaths(byMonth[m]);
+    console.log('[KPI 搬移] '+m+' 已寫入 '+byMonth[m].length+' 格');
+  }
+  await ck.writePaths([[['migratedAt'],ck.TS],[['migratedBy'],_kpiWho()],[['migratedFrom'],'app/profit._kpi_v1'],[['migratedCells'],writeCount]]);
+  console.log('%c[KPI 搬移] 完成。app/profit._kpi_v1 保留未刪。','color:#059669;font-weight:700');
+  return report;
+}
+// 🧪 app/kpi 真實寫入路徑的冒煙測試：只寫 app/kpi_smoke（firebase.js 的 smokeWritePaths 寫死那份文件，碰不到 app/kpi）。
+//   驗的是本機 TEST_NOWRITE 永遠驗不到的那一段：真的 updateDoc + new FieldPath(...)——
+//   店名含 + ( ) 中文、key 含 : 與 .、多組原子寫入、deleteField、serverTimestamp、0 存得下來、文件不存在時自動建立、
+//   改一格不動到別格。跑完把這次的測試月份刪掉。
+//   本機防護碼開著時 smokeWritePaths 會被攔成 no-op → 本函式偵測到就直接說「沒有真的寫」並停下，不假裝通過。
+async function __kpiSmokeTest(){
+  const ck=window.__cloudKpi;
+  if(!ck||typeof ck.smokeWritePaths!=='function'){console.error('[KPI smoke] __cloudKpi.smokeWritePaths 不存在');return null;}
+  const M='smoke-'+Date.now();
+  const shop='mo+0號店(好麻吉)',mk='momo:ship:mo+0號店(好麻吉)',nk='momo:ship',dk='dot.key';
+  const P=(...s)=>['months',M].concat(s);
+  const res=[];
+  const check=(name,ok,detail)=>{res.push({項目:name,結果:ok?'✅':'❌',細節:detail==null?'':String(detail)});return ok;};
+  const read=async()=>{const s=await ck.getDoc('smoke');return (s&&s.exists&&s.exists())?(s.data()||{}):null;};
+  const hits0=(window.__TEST_NOWRITE_HITS||[]).length;
+  const blocked=()=>(window.__TEST_NOWRITE_HITS||[]).slice(hits0).some(h=>String(h.呼叫).includes('smokeWritePaths'));
+  const before=await read();
+  check('讀取 app/kpi_smoke',true,before?'文件已存在':'文件不存在 → 這次會測到「自動建立」');
+  try{
+    await ck.smokeWritePaths([
+      [P('momo',shop,'qty'),5],[P('momo',shop,'rev'),1234.5],
+      [P('kpiFieldMerges',mk),1740],[P('kpiFieldNotes',nk),'便利袋+宅配(8000)'],[P('kpiFieldNotes',dk),'x'],
+      [P('shopeeCommon'),0],
+      [['meta',M,'momo',shop,'qty'],{by:'smoke',at:ck.TS}],
+    ]);
+  }catch(e){check('第一次寫入',false,(e&&(e.code||e.message))||e);console.table(res);return res;}
+  if(blocked()){
+    console.warn('%c[KPI smoke] smokeWritePaths 被 TEST_NOWRITE 攔下 → 沒有真的寫，測試停止。要真跑請先貼「只放行 kpi_smoke」的放行碼。','color:#b45309;font-weight:700');
+    return {blocked:true};
+  }
+  let d=await read();const m=d&&d.months&&d.months[M];
+  check('寫入後文件存在（不存在時自動建立）',!!d);
+  check('店名含 + ( ) 中文的路徑',!!(m&&m.momo&&m.momo[shop]&&m.momo[shop].qty===5),JSON.stringify(m&&m.momo));
+  check('小數存得下來',!!(m&&m.momo&&m.momo[shop]&&m.momo[shop].rev===1234.5));
+  check('key 含 : 的路徑（合併欄位）',!!(m&&m.kpiFieldMerges&&m.kpiFieldMerges[mk]===1740));
+  check('備註文字含 + ( )',!!(m&&m.kpiFieldNotes&&m.kpiFieldNotes[nk]==='便利袋+宅配(8000)'));
+  check('key 含 . 不會被拆成巢狀',!!(m&&m.kpiFieldNotes&&m.kpiFieldNotes[dk]==='x'),m&&m.kpiFieldNotes&&Object.keys(m.kpiFieldNotes).join(','));
+  check('0 存得下來',!!(m&&m.shopeeCommon===0));
+  const at=d&&d.meta&&d.meta[M]&&d.meta[M].momo&&d.meta[M].momo[shop]&&d.meta[M].momo[shop].qty&&d.meta[M].momo[shop].qty.at;
+  check('meta 的 serverTimestamp',!!(at&&typeof at.toMillis==='function'),at&&at.toMillis?new Date(at.toMillis()).toLocaleString():at);
+  await ck.smokeWritePaths([[P('momo',shop,'rev'),ck.DELETE],[P('momo',shop,'qty'),6]]);
+  d=await read();const m2=d&&d.months&&d.months[M];
+  check('deleteField 刪掉一格',!!(m2&&m2.momo&&m2.momo[shop]&&!('rev' in m2.momo[shop])));
+  check('同一次寫入改另一格（原子多組）',!!(m2&&m2.momo&&m2.momo[shop]&&m2.momo[shop].qty===6));
+  check('改一格不動到別格',!!(m2&&m2.kpiFieldMerges&&m2.kpiFieldMerges[mk]===1740&&m2.shopeeCommon===0&&m2.kpiFieldNotes[nk]==='便利袋+宅配(8000)'));
+  await ck.smokeWritePaths([[['months',M],ck.DELETE],[['meta',M],ck.DELETE]]);
+  d=await read();
+  check('清理（刪掉這次的測試月份）',!!(d&&!(d.months&&d.months[M])&&!(d.meta&&d.meta[M])));
+  const pass=res.every(r=>r.結果==='✅');
+  console.log('%c[KPI smoke] '+(pass?'全部通過 ✅':'有項目失敗 ❌')+'（只寫 app/kpi_smoke）','font-weight:700;color:'+(pass?'#059669':'#dc2626'));
+  console.table(res);
+  return {pass,res};
 }
 const KPI_GROUPS=[
   {key:'shopee',title:'蝦皮',color:'#ee4d2d',shops:['好麻吉','玩樂','維克','森之旅'],
@@ -8939,8 +9266,8 @@ const KPI_GROUPS=[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ship},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ship)/d.rev:0},
     ]},
-  {key:'momo',title:'MOMO',color:'#3a7bd5',shops:['MOMO-甲配','MOMO-寄倉','mo+0號店(好麻吉)','mo+1號店(森之旅)','mo+2號店(露營館)'],
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收(進價稅)'},{k:'cost',l:'商品成本'},{k:'ret',l:'退貨金額'},{k:'ship',l:'寄倉運費'},{k:'misc',l:'各項費用'},{k:'material',l:'耗材'},{k:'receivable',l:'應收帳款11日'}],
+  {key:'momo',title:'MOMO',color:'#3a7bd5',shops:['MOMO-甲配','MOMO-寄倉','mo+0號店(好麻吉)','mo+1號店(森之旅)'],
+    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收(進價稅)'},{k:'cost',l:'商品成本'},{k:'ret',l:'退貨金額'},{k:'ship',l:'寄倉運費'},{k:'misc',l:'各項費用'},{k:'material',l:'耗材'},{k:'receivable',l:'應收帳款'}],
     formula:[
       {k:'actualRev',l:'實際營收',fmt:'money',calc:d=>d.rev-d.ret},
       {k:'tax',l:'稅金(5%)',fmt:'money',calc:d=>(d.rev-d.ret)*0.05},
@@ -8955,7 +9282,7 @@ const KPI_GROUPS=[
     fieldMerge:{
       ship:{
         mergeGroups:[{shops:['mo+0號店(好麻吉)','mo+1號店(森之旅)']}],
-        notApplicable:['MOMO-甲配','mo+2號店(露營館)'],
+        notApplicable:['MOMO-甲配'],
         // 攤提分母：這一筆共用的錢按合併通路的哪個欄位比例分。
         //   'qty'（訂單數）是 MOMO 業務負責人的決定 —— 運費跟件數走，不跟金額走。
         //   ⚠ 財務儀表板那邊目前用【營收】比例，兩邊會不一致；那是已知的、暫時的。
@@ -8964,6 +9291,27 @@ const KPI_GROUPS=[
         shareBy:'qty',
       },
     }},
+  // 2026-09-23 新增三個通路，欄位與公式照酷澎（訂單數／營收／商品成本／手續費／退貨運費／稅金／耗材）。
+  //   key 用英文（寫進 app/kpi 的路徑），畫面名稱在 title／shops。
+  //   since：從這個月起才算進填寫進度（之前的月份不把它們算成缺格；數字照樣可以填、照樣算進合計）。
+  {key:'pchome',since:'2026-08',title:'PChome',color:'#d97706',shops:['PChome'],
+    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
+    formula:[
+      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material},
+      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ret-d.tax-d.material)/d.rev:0},
+    ]},
+  {key:'friday',since:'2026-08',title:'FriDay',color:'#0891b2',shops:['FriDay'],
+    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
+    formula:[
+      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material},
+      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ret-d.tax-d.material)/d.rev:0},
+    ]},
+  {key:'books',since:'2026-08',title:'博客來',color:'#8b5a2b',shops:['博客來'],
+    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
+    formula:[
+      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material},
+      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ret-d.tax-d.material)/d.rev:0},
+    ]},
 ];
 function _kpiFmt(v,fmt){
   if(fmt==='pct')return v?(v*100).toFixed(2)+'%':'—';
@@ -8979,20 +9327,22 @@ function _kpiCalcAll(d,group){
 // 一個月只會做一次這張表，所以不用「新增月份」的額外步驟——
 // 年份/月份直接用下拉選單指定，選到的月份如果還沒有資料，
 // 畫面上就顯示空白可編輯的表格，真的填了數字才會建立/儲存那個月。
-function _kpiEmptyRow(month){return{id:month,month,shopee:{},coupang:{},other:{},website:{},momo:{}};}
+function _kpiEmptyRow(month){return{id:month,month,shopee:{},coupang:{},other:{},website:{},momo:{},pchome:{},friday:{},books:{}};}
+// 店名的【畫面顯示名稱】。🔴 只改顯示、不改鍵：店名本身就是 app/kpi 的路徑（months.{月}.momo.{店名}.…）
+//   與合併欄位的 key（momo:ship:mo+0號店(好麻吉)），改鍵＝舊資料全部對不上。要改名一律改這張表。
+const KPI_SHOP_LABELS={
+  'MOMO-甲配':'甲配',
+  'MOMO-寄倉':'乙配',
+  'mo+0號店(好麻吉)':'MO+好麻吉',
+  'mo+1號店(森之旅)':'MO+森之旅',
+};
+function _kpiShopLabel(shop){return KPI_SHOP_LABELS[shop]||shop;}
 function getOrCreateKpiRow(month){
   return getKpiRows().find(r=>r.month===month)||_kpiEmptyRow(month);
-}
-function deleteKpiRow(month){
-  if(!confirm('確定清空這個月份的資料？'))return;
-  saveKpiRows(getKpiRows().filter(r=>r.month!==month));
-  renderKpiTab();
 }
 // 手動輸入欄允許打公式（例如 rev*21%），用同一個賣場已經填過的欄位名稱
 // 當變數；備註只開放給手續費/運費類欄位（key 是 fee 或 ship 的都算）。
 const KPI_NOTEABLE_FIELDS=new Set(['fee','ship']);
-// 目前正在編輯公式的儲存格（供「點其他欄位帶入公式」使用）：{month,groupKey,shop,field,inputEl}
-let _kpiFormulaCtx=null;
 function _kpiFieldValues(shopData,group){
   const calc=_kpiCalcAll(shopData||{},group);
   const out={};
@@ -9024,131 +9374,6 @@ function _kpiEvalFormula(str,shopData,group){
     return typeof val==='number'&&isFinite(val)?val:NaN;
   }catch{return NaN;}
 }
-// 儲存格點擊分派：如果目前同一列有其他欄位正在編輯公式，點這裡是「帶入參照」而不是打開自己的編輯框。
-function kpiCellClick(month,groupKey,shop,field,tdEl,editable){
-  const ctx=_kpiFormulaCtx;
-  if(ctx&&ctx.month===month&&ctx.groupKey===groupKey&&ctx.shop===shop&&ctx.field!==field){
-    const group=KPI_GROUPS.find(g=>g.key===groupKey);
-    const f=[...group.manual,...group.formula].find(x=>x.k===field);
-    if(f){
-      const inp=ctx.inputEl;
-      const start=inp.selectionStart??inp.value.length;
-      const end=inp.selectionEnd??inp.value.length;
-      inp.value=inp.value.slice(0,start)+f.l+inp.value.slice(end);
-      const pos=start+f.l.length;
-      inp.focus();inp.setSelectionRange(pos,pos);
-    }
-    return;
-  }
-  if(editable)editKpiCell(month,groupKey,shop,field,tdEl);
-}
-function editKpiCell(month,groupKey,shop,field,tdEl){
-  const rows=getKpiRows();
-  // 🔴 空 row / groupKey / shop 三層容器的建立【刻意不在這裡做】（舊版是函式開頭就建）：
-  //   理由同 editKpiFieldNote / editKpiMergedField / editKpiCommonCost ——getKpiRows() 回傳的是
-  //   活陣列本身，開編輯器就 push 的話 Esc 撤不回來（Esc 只還原 innerHTML），那列全空的 row
-  //   會被之後任何一次 saveKpiRows 一起推上 Firestore。
-  //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
-  let row=rows.find(r=>r.month===month);
-  // ⚠ 唯讀快照：row 還不存在時給 {}，讓下面的 curVal 與 _kpiEvalFormula 都拿得到東西。
-  //   row 存在時它就是 row[groupKey][shop] 本身（commit 寫入的也是同一個物件）。
-  const shopData=(row?.[groupKey]||{})[shop]||{};
-  const group=KPI_GROUPS.find(g=>g.key===groupKey);
-  const curVal=shopData[field+'Formula']!=null?shopData[field+'Formula']:(shopData[field]!=null?shopData[field]:'');
-  // 「值有沒有變」比的是【字串】，不是數字：curVal 可能是公式（=實際營收*21%）也可能是數字，
-  //   parseFloat 比不了公式。curVal 本身就是「拿去填進 inp.value 的那個東西」，拿輸入框現值
-  //   跟它比，才是使用者感知的「我沒改」。
-  const cur=curVal===''?'':String(curVal);
-  const origContent=tdEl.innerHTML;
-  const inp=document.createElement('input');
-  inp.type='text';inp.value=curVal;inp.placeholder='數字或公式，如 =實際營收*21%';
-  inp.style.cssText='width:150px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
-  // 🔴 擋冒泡：onclick 掛在 tdEl 自己身上（走 kpiCellClick），input 是它的子節點 —— 不擋的話
-  //   點進輸入框會冒泡回 td → kpiCellClick 因為 ctx.field===field 不符合帶入參照的條件 →
-  //   落到 editKpiCell 把編輯器整個重建，【打到一半的公式當場消失】。
-  //   ⚠ 這【不會】影響公式帶入參照：帶入時 click 的 target 是【另一格的 td】，本 input 不在
-  //     那條祖先鏈上，這個 handler 根本不會被呼叫（帶入靠的是 kpiCellClick 直接操作
-  //     ctx.inputEl + focus()，不經過本 input 的事件）。加了它反而讓插入參照後回點輸入框
-  //     調游標不會再炸掉半成品公式。
-  //   ⚠ 蓋不到的殘留：點在 td 上、input 以外的空白處仍會冒泡到 td 的 onclick → 重建。
-  //     要修得動 td 的 onclick，不在本輪範圍。
-  inp.onclick=e=>e.stopPropagation();
-  tdEl.innerHTML='';tdEl.style.whiteSpace='normal';tdEl.appendChild(inp);
-  inp.focus();if(inp.value)inp.select();
-  _kpiFormulaCtx={month,groupKey,shop,field,inputEl:inp};
-  let done=false;
-  // 取消＝清掉公式 ctx、把 whiteSpace 與這一格的 innerHTML 換回去，【不呼叫 renderKpiTab】。
-  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur。
-  //   ⚠ ctx 的清除時機與舊版一致（編輯器關閉時清），只是舊版寫在 save 與 Esc 兩處，
-  //     現在收斂到 cancel / commit 兩支 —— 沒有這行的話，關掉的輸入框會留在 ctx 裡，
-  //     下一次點別格會把欄位名插進一個已經脫離文件的 input。
-  const cancel=()=>{
-    if(done)return;done=true;
-    if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;
-    tdEl.style.whiteSpace='';
-    tdEl.innerHTML=origContent;
-  };
-  const commit=()=>{
-    if(done)return;
-    const raw=inp.value.trim();
-    const isPlain=/^-?\d+(\.\d+)?$/.test(raw);
-    const computed=_kpiEvalFormula(raw,shopData,group);
-    const hasVal=raw!==''&&!isNaN(computed);
-    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
-    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
-    //   🔴 「沒變」＝字面沒變【而且】重算出來的也沒變。第二個條件是為了公式：
-    //     使用者打的公式是【存檔當下算好凍結】的（computed 寫進 shopData[field]，
-    //     _kpiCalcAll 只在 out[f.k]==null 時才套公式，渲染端也是直接顯示已存的數字），
-    //     被參照的欄位改掉之後它就過期了，而全檔【沒有任何地方會自動重算它】——
-    //     舊版「blur 一律存檔」等於每次進出編輯器都順手幫它刷新一次。只比字面的話
-    //     那條重算路徑會消失，過期的數字連按 Enter 都救不回來，只能整格刪掉重打。
-    //   ⚠ hasVal 為 false 時比的是「本來就沒有值嗎」——本來就沒有、現在打的又是空/算不出來，
-    //     那不是「清空」而是【什麼都沒發生】，不該為它建出一列空 row。
-    const unchanged=hasVal?(raw===cur&&computed===shopData[field]):curVal==='';
-    if(unchanged){cancel();return;}
-    done=true;
-    if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;
-    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-    if(!row[groupKey])row[groupKey]={};
-    if(!row[groupKey][shop])row[groupKey][shop]={};
-    const target=row[groupKey][shop];
-    if(!hasVal){
-      // 清空（或公式算不出來）＋Enter＝使用者明確要清掉這格 → delete 兩個 key，維持原本的寫法。
-      //   這個行為本來就是對的（PR #223 的 editScoreMonthlyCell 還是抄這裡的），本次【沒有改】——
-      //   改的只是「誰能觸發它」：以前 blur 也會走到這裡（全選 Backspace 後點旁邊＝數字無聲消失），
-      //   現在只有 Enter 到得了。
-      delete target[field];delete target[field+'Formula'];
-    }else{
-      // 打 0 是刻意要蓋成 0（跟完全沒填、留給公式自動算不一樣），要真的存下來，不能當作空白清掉。
-      target[field]=computed;
-      if(isPlain)delete target[field+'Formula'];else target[field+'Formula']=raw;
-    }
-    saveKpiRows(rows);
-    renderKpiTab();
-  };
-  // ⚠ type=text，【刻意不擋】wheel 與 ↑/↓（editKpiCommonCost / editKpiMergedField 那兩條有擋）：
-  //   那兩個是瀏覽器對 type=number 的步進，文字框不會被步進；而 ↑/↓ 在文字框裡是移動游標，
-  //   擋掉會很難用。看到那兩處有擋、這裡沒擋是刻意的，不是遺漏。
-  inp.addEventListener('keydown',e=>{
-    if(e.key==='Enter'){e.preventDefault();commit();}
-    if(e.key==='Escape'){e.preventDefault();cancel();}
-  });
-  // 失焦：只允許「寫得出新值」；任何會落到 delete 分支的情況一律取消 —— 刪除只能由 Enter 觸發。
-  //   🔴 這裡的 setTimeout 120ms + activeElement 檢查是【載重的】，不是可有可無的慣性寫法，
-  //     【不要】為了對齊 PR #223 的 editScoreMonthlyCell（那條刻意寫成同步 blur）把它拿掉：
-  //     它是公式帶入參照的支撐 —— 在本格輸入 = 之後去點同一列的別格，那一下 mousedown 會先
-  //     讓本 input 失焦，靠 kpiCellClick 在 120ms 內把欄位名插進來並 focus() 回本 input、
-  //     使下面的 activeElement 檢查不成立，這個編輯器才活得下去。改成同步 blur ＝ 公式參照當場報廢。
-  //   ⚠ 三條分開寫，不併成一條：把「使用者清空」與「值沒變」混在一起會讓本輪要修的那顆 bug
-  //     不再看得見。
-  inp.addEventListener('blur',()=>setTimeout(()=>{
-    if(document.activeElement===inp)return;                          // ⓪ 焦點又回來了（公式帶入）
-    const raw=inp.value.trim();
-    if(raw===''){cancel();return;}                                   // ① 已清空 → 取消（本輪主 bug）
-    if(isNaN(_kpiEvalFormula(raw,shopData,group))){cancel();return;}  // ② 算不出值（公式打一半、含逗號…）→ 會走 delete → 取消
-    commit();                                                        // ③ 其餘交給 commit 判「值沒變」
-  },120));
-}
 // 手續費/運費的備註是「這個月、這個組別」共用一則，跟點哪個賣場的數字無關——
 // 從欄位標題點進去編輯，跟編輯賣場數字的輸入框完全分開。
 function editKpiFieldNote(month,groupKey,field,thEl){
@@ -9156,7 +9381,7 @@ function editKpiFieldNote(month,groupKey,field,thEl){
   // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：getKpiRows() 命中
   //   Store._profitMem._kpi_v1 時回傳的是【活陣列本身】（不是複製，見該函式），舊版
   //   一開啟編輯器就把空 row push 進去 →「點開又按 Esc」其實已經改掉記憶體狀態
-  //   （Esc 只還原 innerHTML，不會把那列拿掉），之後任何一次 saveKpiRows（改別格、
+  //   （Esc 只還原 innerHTML，不會把那列拿掉），之後任何一次（舊版整包寫入的，已移除）saveKpiRows（改別格、
   //   改別的月份都算）都會把那列全空的 row 一起整包推上 Firestore。
   //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
@@ -9165,7 +9390,7 @@ function editKpiFieldNote(month,groupKey,field,thEl){
   //   row 可能還不存在（這個月從沒填過任何東西）→ 等同備註是空字串。
   const cur=(row?.kpiFieldNotes||{})[key]||'';
   const origContent=thEl.innerHTML;
-  const inp=document.createElement('input');
+  const inp=document.createElement('input');inp.dataset.kpiEditor='1';
   inp.type='text';inp.value=cur;inp.placeholder='備註，如：便利袋8000、宅配通7000';
   inp.style.cssText='width:190px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:11.5px;text-align:right;outline:none;font-weight:400;color:#374151';
   inp.onclick=e=>e.stopPropagation();
@@ -9177,8 +9402,8 @@ function editKpiFieldNote(month,groupKey,field,thEl){
   //   —— 在 mousedown 就整包重繪，會把使用者剛按下的那顆東西銷毀 → 第一下永遠沒反應。
   //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur。
   //   ⚠ 刻意【不搬】PR #223 cancel() 裡「重讀比對、值變過改走重繪」那段：那條的前提是
-  //     _score_monthly_v1 沒接 _markPending、擋不住雲端 bounce-back；而 saveKpiRows 有走
-  //     _cloudWriteSafe → _markPending('_kpi_v1')，__profitShouldSkipCloudOverwrite 擋得到。
+  //     _score_monthly_v1 沒接 _markPending、擋不住雲端 bounce-back；KPI 現在走 app/kpi 訂閱層，
+  //     快照進來時若有編輯器開著會延後重畫（本檔搜 _kpiRefreshViews），不會洗掉輸入框。
   //     何況這裡的重繪是整包 renderKpiTab()，比評分表那兩支貴。
   const cancel=()=>{
     if(done)return;done=true;
@@ -9187,19 +9412,16 @@ function editKpiFieldNote(month,groupKey,field,thEl){
   const commit=()=>{
     if(done)return;
     const v=inp.value.trim();
-    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
-    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    // 值沒變就不寫：每次 commit 都是一次 app/kpi 雲端寫入（含 meta），按 Enter 確認一下不該換來
+    //   一次雲端寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
     //   ⚠ 這條比的是【純字串】：備註本來就是文字，沒有 editKpiCell 那種「同一格可能存
     //     公式也可能存數字」的歧義，不需要（也不可以）先 parseFloat 再比。
     if(v===cur){cancel();return;}
     done=true;
-    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-    if(!row.kpiFieldNotes)row.kpiFieldNotes={};
     // 清空＋Enter＝使用者明確要清掉這則備註 → delete，維持原本的寫法（不寫 ''）。
     //   這個行為本來就是對的，本次【沒有改】—— 改的只是「誰能觸發它」：以前 blur 也會
     //   走到這裡（全選 Backspace 後點旁邊＝備註無聲消失），現在只有 Enter 到得了。
-    if(v)row.kpiFieldNotes[key]=v;else delete row.kpiFieldNotes[key];
-    saveKpiRows(rows);
+    kpiWriteCell(month,['kpiFieldNotes',key],v||undefined);
     renderKpiTab();
   };
   inp.addEventListener('keydown',e=>{
@@ -9215,110 +9437,6 @@ function editKpiFieldNote(month,groupKey,field,thEl){
     const v=inp.value.trim();
     if(v===''||v===cur)cancel();else commit();
   },120));
-}
-function editKpiCommonCost(month,groupKey,tdEl){
-  const rows=getKpiRows();
-  // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：理由同 editKpiFieldNote /
-  //   editKpiMergedField ——getKpiRows() 回傳的是活陣列本身，開編輯器就 push 的話 Esc 撤不回來
-  //   （Esc 只還原 innerHTML），那列全空的 row 會被之後任何一次 saveKpiRows 一起推上 Firestore。
-  //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
-  let row=rows.find(r=>r.month===month);
-  const fieldName=groupKey+'Common';
-  // 讀值與下面「值有沒有變」的比較必須是【同一種讀法】，否則會拿兩套語意互比。
-  //   ⚠ 這裡用 !=null【不是】||：0 是合法的共同費用（物流運費那個月真的是 0 也要存得下來），
-  //     要讀得出來。與同檔 editKpiMergedField:6701 的讀法【逐字相同】—— 兩格外觀一樣，
-  //     行為現在也一樣，不要再讓它們分岔。
-  //   ⚠ 舊版是 (row||{})[fieldName]||''（打 0 等於刪掉、已存的 0 又刪不掉）。換成 !=null 之後
-  //     「0」與「無值」在讀取端終於分得開，下面三處（hasVal / 比較式 / blur ②）才站得住。
-  //     ⚠ 實測過現有資料才換的：2026-01~06 的 shopeeCommon 全是非 0 number、其餘四組的
-  //       *Common 全部不存在 ⇒ 這次換讀法【不會動到任何一筆既有數字】。
-  //   row 不存在（這個月從沒填過任何東西）→ 等同無值，用 '' 表示。
-  const curVal=(row||{})[fieldName]!=null?row[fieldName]:'';
-  const origContent=tdEl.innerHTML;
-  const inp=document.createElement('input');
-  inp.type='number';inp.value=curVal;
-  inp.style.cssText='width:90px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
-  // 🔴 擋冒泡：onclick 掛在 tdEl 自己身上（見 _kpiGroupTableHtml 的 isCommon 分支），input 是
-  //   它的子節點 —— 不擋的話點進輸入框會冒泡回 td、再跑一次本函式，把輸入框整個重建。
-  //   ⚠ 這條的後果比另兩條更立即：本函式的 blur 是【同步】的（沒有 120ms 緩衝），重建時舊 inp
-  //     被移出文件 → 當場 blur → 當場寫一次雲端 + renderKpiTab() 把剛建好的新 inp 洗掉。
-  //   寫法比照同檔 editKpiFieldNote。
-  inp.onclick=e=>e.stopPropagation();
-  // 🔴 擋滾輪：type=number 的 input 聚焦中會吃 wheel 直接改值 —— 游標停在框上捲頁面就會靜默
-  //   ±step，一失焦就被判定「值有改」而寫進雲端。
-  //   ⚠ 與 editKpiMergedField 同樣【只在聚焦時擋】，刻意不照抄 PR #223 的無條件 preventDefault：
-  //     這格帶 rowspan（蝦皮組 4 個賣場 ＝ 跨 4 列，比合併格更高）、又位在 _kpiGroupTableHtml 的
-  //     overflow-x:auto 容器裡，無條件擋會連 shift+滾輪的橫捲一起吃掉。沒聚焦時滾輪本來就
-  //     改不到值，只在聚焦時擋即可。
-  inp.addEventListener('wheel',e=>{if(document.activeElement===inp)e.preventDefault();},{passive:false});
-  tdEl.innerHTML='';tdEl.appendChild(inp);inp.focus();if(inp.value)inp.select();
-  let done=false;
-  // 取消＝只把這一格的 innerHTML 換回去，【不呼叫 renderKpiTab】。
-  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur
-  //   （本函式的 blur 是同步的，這一發會立刻跑進 handler，靠 done 擋住）。
-  //   ⚠ tdEl 帶 rowspan 且 onclick 掛在它自己身上，只換 innerHTML 不動節點 → 還原後照樣點得開。
-  const cancel=()=>{
-    if(done)return;done=true;
-    tdEl.innerHTML=origContent;
-  };
-  const commit=()=>{
-    if(done)return;
-    const s=inp.value.trim();
-    const v=parseFloat(s);
-    // ⚠ hasVal 【不含】v!==0 —— 0 是合法值、存得進去，與 editKpiMergedField:6733 逐字相同。
-    //   舊版是 s!==''&&!isNaN(v)&&v!==0（打 0 等於刪掉），與隔壁那格外觀一樣、行為相反，
-    //   已於本次對齊。清空該格的唯一方式是【清空後按 Enter】（PR #231 定的規則，沒有改動）。
-    const hasVal=s!==''&&!isNaN(v);
-    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
-    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
-    //   ⚠ 兩側【分開判】而不是寫成 v===curVal：curVal 可能是 ''（無值），拿 0==='' 比恆 false。
-    //     hasVal 為 false 時要比的是「本來就沒有值嗎」——本來就沒有、Enter 時打的又是空/0，
-    //     那不是「清空」而是【什麼都沒發生】，不該為它建出一列空 row。
-    //   ⚠ 【舊版的已知缺口已隨讀法一起修掉】：舊的 ||'' 把「已存的 0」讀成 ''，對那筆資料按
-    //     「清空 + Enter」會落進 curVal==='' 這一邊、被判定成【什麼都沒發生】而 cancel，
-    //     那個 0 從此刪不掉。現在 curVal 用 !=null 讀，已存的 0 讀出來就是 0，
-    //     「清空 + Enter」走 hasVal=false + curVal===0（不是 ''）→ 進 delete，刪得掉。
-    if(hasVal?v===curVal:curVal===''){cancel();return;}
-    done=true;
-    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-    // 清空＋Enter＝使用者明確要清掉這格 → delete，維持原本的寫法（不寫 null）。
-    //   ⚠ 【打 0 現在是存 0，不是 delete】—— 本次對齊 editKpiMergedField:6746。舊版是
-    //     「打 0 也 delete」，跟隔壁那格外觀一樣、行為相反，那才是要修的東西。
-    //     這一行本身【沒有改】：hasVal 不再排除 0 之後，它自動走成「0 → 存 0」。
-    //   PR #231 定下的「誰能觸發 delete」沒有變：以前 blur 也會走到這裡（全選 Backspace 後
-    //   點旁邊＝共同費用無聲消失），現在仍然只有 Enter 到得了。
-    if(hasVal)row[fieldName]=v;else delete row[fieldName];
-    saveKpiRows(rows);
-    renderKpiTab();
-  };
-  // ⚠ ↑/↓ 一定要擋：type=number 聚焦中按 ↑/↓ 會直接 ±step（本框沒設 step ＝ ±1）改掉值，
-  //   而使用者按方向鍵想跳格是很自然的動作 —— 值被改掉後一失焦就會被判定「值有改」→
-  //   靜默寫進雲端。與上面 wheel 是同一類洞，發生機率更高，一併堵掉。作法同 PR #223。
-  //   （指路：spinner 那對上下箭頭不在這裡處理 —— css/main.css:68-73 已經全站關掉了。）
-  inp.addEventListener('keydown',e=>{
-    if(e.key==='Enter'){e.preventDefault();commit();}
-    if(e.key==='Escape'){e.preventDefault();cancel();}
-    if(e.key==='ArrowUp'||e.key==='ArrowDown')e.preventDefault();
-  });
-  // 失焦：已清空、打不出數字、或值沒變 → 一律當取消，不寫入；真的改成新值才存。
-  //   ⚠ 舊版的 ② 是 isNaN(v)||v===0（打 0 當取消）。0 現在是合法值，② 改成比 curVal，
-  //     與 editKpiMergedField:6768 對齊。這裡【只換判斷條件】，位置、時序、三條分開寫的
-  //     結構全部維持 PR #231 的原樣。
-  //   ⚠ 本函式的 blur 是【同步】的（四條裡唯一沒有 120ms + activeElement 檢查的），本輪刻意
-  //     保留不動 —— 加 setTimeout 是行為變更，不在這輪範圍。
-  //     因此判斷式【不能】依賴 document.activeElement：同步 blur 觸發時焦點通常已經是 body，
-  //     那個檢查在這裡不但沒用還會誤判。下面三條只讀 inp.value 與 curVal，兩者當下都拿得到，
-  //     自己站得住。
-  //   ⚠ 三條【分開寫】，不併成 isNaN(v)||v===curVal 一條：那樣會把「使用者清空」與「值沒變」
-  //     混成同一件事，而前者正是本輪要修的那顆 bug，必須自己一條看得見。
-  inp.addEventListener('blur',()=>{
-    const s=inp.value.trim();
-    if(s===''){cancel();return;}                  // ① 已清空 → 取消（本輪主 bug）
-    const v=parseFloat(s);
-    if(isNaN(v)){cancel();return;}                 // ② 打不出數字 → 取消（0 不再落在這裡）
-    if(v===curVal){cancel();return;}               // ③ 值沒變 → 取消
-    commit();
-  });
 }
 // 只算總營收/總純利/純利率，不組 HTML——給總覽卡片跟明細表格共用。
 function _kpiGroupTotals(row,group){
@@ -9415,8 +9533,8 @@ function toggleKpiGroup(month,groupKey){
 //        只在 commit 內才建，四條的 blur 也只允許「寫得出新值」，清空與刪除只能由 Enter
 //        觸發，所以【誤觸不會再製造出這種 row】。
 //        ⚠ 守衛【仍然要留】，理由是上面的 ① —— 那與空 row 無關，基期為負就會翻轉符號。
-//        而且舊資料裡已經存在的全空 row 不會自己消失（只能用「清空此月份」刪，見
-//        deleteKpiRow）。那種 row 的 totalRev / totalPure 都是 0，守衛一旦放寬成
+//        而且舊資料裡可能有「有 key 但值全是 0」的 row（全空的 row 在 _kpiCompose 已不產生）。
+//        那種 row 的 totalRev / totalPure 都是 0，守衛一旦放寬成
 //        base!=null 之類的寫法，畫面上就會出現「較上月 −100%」而基期其實根本沒人填過。
 //   · 營收、純利、純利率 pp【三者都上綠紅】（不照抄 MOMO momoKpiDelta 那套中性灰）。
 //     ⚠ 綠紅用 #059669 / #dc2626，【不是】PR #206 的 #10b981 / #ef4444：本卡的純利主數字
@@ -9429,45 +9547,733 @@ function toggleKpiGroup(month,groupKey){
 //   會參差）；本區是 CSS Grid，grid item 預設 align-items:stretch，五張卡高度本來就齊。
 // ⚠ 刻意【不搬】原版的篩選守衛（_lastMonthSameTotals 開頭那行）：月結表沒有搜尋、
 //   沒有標籤篩選、沒有排序，那條完全不適用。
-function _kpiSummaryCardsHtml(row){
-  const prevMonth=_kpiPrevMonthKey(row.month);
-  // getKpiRows() 讀一次就好（五個 group 共用），比照 _kpiYearViewHtml 開頭的 const rows=getKpiRows()。
-  const prevRow=prevMonth?getKpiRows().find(r=>r.month===prevMonth):null;
-  // ⚠ 純格式化，【不含判斷】——呼叫端必須已經過 cmpOk。理由見上方守衛那段。
-  const cmpPct=(cur,base)=>{
-    const d=(cur-base)/base*100;
-    return `<div style="font-size:12px;font-weight:600;margin-top:2px;color:${d>=0?'#059669':'#dc2626'}">較上月 ${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%</div>`;
-  };
-  // ⚠ minmax 的下限 190px 是【換行門檻】，不是卡片寬度 —— 這是配套，不是主角。
-  //   欄位是 auto-fit + 1fr：容器夠寬時五張卡本來就滿版五等分，調下限【不會讓卡片變寬】，
-  //   它只決定「窄到什麼程度就換行」。
-  //   之所以從 150px 提到 190px：主數字放大到 24px 之後，NT$7,534,546 這種長度約需 155px，
-  //   150px 的下限在窄螢幕會被字撐破。
-  //   代價：內容區寬度低於約 990px（190×5 ＋ gap 10×4）時，grid 會換成 4+1 兩排。
-  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:16px">
-    ${KPI_GROUPS.map(g=>{
-      const{totalPure,pureRateAgg,totalRev}=_kpiGroupTotals(row,g);
-      const prev=prevRow?_kpiGroupTotals(prevRow,g):null;
-      const cmpOk=!!(prev&&prev.totalRev>0&&prev.totalPure>0);   // 一道共用守衛，三行全有或全無
-      const revCmp=cmpOk?cmpPct(totalRev,prev.totalRev):'';
-      const pureCmp=cmpOk?cmpPct(totalPure,prev.totalPure):'';
-      let ppTxt='';
-      if(cmpOk&&totalRev>0){
-        const dpp=(pureRateAgg-prev.pureRateAgg)*100;
-        ppTxt=` <span style="font-weight:700;color:${dpp>=0?'#059669':'#dc2626'}">${dpp>=0?'+':'−'}${Math.abs(dpp).toFixed(1)}pp</span>`;
+// 🆕 2026-09-23 月結表改版：上面這整段規則原本寫給「五張通路卡」（舊 _kpiSummaryCardsHtml，已隨舊明細表移除），
+//   現在由 _kpiCmpOk / _kpiCmpPctHtml / _kpiCmpPpHtml 共用，套在總覽大數字列、各通路表、本月重點三處。
+//   規則一字未改：一道共用守衛（基期營收>0 且 基期純利>0）、全有或全無、純利率用 pp、綠 #059669 / 紅 #dc2626（.km-up / .km-down）。
+//   ⚠ 本段只【重新排版】，算法一律走既有的 _kpiGroupTotals / _kpiCalcAll / _kpiRawForCalc（含 fieldMerge 攤提），不另寫一套。
+function _kpiCmpOk(prev){return !!(prev&&prev.rev>0&&prev.pure>0);}
+function _kpiCmpPctHtml(cur,base){
+  const d=(cur-base)/base*100;
+  return `<span class="km-cmp ${d>=0?'km-up':'km-down'}" title="較上月">${d>=0?'▲':'▼'}${Math.abs(d).toFixed(1)}%</span>`;
+}
+function _kpiCmpPpHtml(cur,base){
+  const d=(cur-base)*100;
+  return `<span class="km-cmp ${d>=0?'km-up':'km-down'}" title="純利率較上月（百分點）">${d>=0?'▲':'▼'}${Math.abs(d).toFixed(1)}pp</span>`;
+}
+// 金額／數字格式：fmtN 取絕對值，負號要自己補。
+function _kpiMoney(v){v=Number(v)||0;return (v<0?'−':'')+'$'+fmtN(v);}
+// 這個欄位是不是金額：訂單數（qty）是件數，其他 manual 欄與合併欄、共同費用都是錢。
+function _kpiIsMoneyField(k){return k!=='qty';}
+function _kpiCellIsMoney(cell){return cell.kind==='cell'?_kpiIsMoneyField(cell.segs[2]):true;}
+function _kpiNum(v){v=Number(v)||0;return (v<0?'-':'')+fmtN(v);}
+function _kpiRatePct(r){return (r*100).toFixed(2)+'%';}
+function _kpiEscAttr(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+// 單一通路的計算結果（合併／不適用欄位的前處理與攤提，跟小計、年度總表同一支）。
+function _kpiShopCalc(row,group,shop){
+  return _kpiCalcAll(_kpiRawForCalc(((row&&row[group.key])||{})[shop]||{},group,shop,row),group);
+}
+// 全通路合計＝五組 _kpiGroupTotals 加總；訂單數＝各店 qty 加總。
+function _kpiAllTotals(row){
+  let rev=0,pure=0,qty=0;
+  KPI_GROUPS.forEach(g=>{
+    const t=_kpiGroupTotals(row,g);rev+=t.totalRev;pure+=t.totalPure;
+    g.shops.forEach(s=>{qty+=Number(_kpiShopCalc(row,g,s).qty)||0;});
+  });
+  return{rev,pure,qty,rate:rev>0?pure/rev:0,aov:qty>0?rev/qty:0};
+}
+function _kpiGroupT(row,g){
+  if(!row)return null;
+  const t=_kpiGroupTotals(row,g);
+  return{rev:t.totalRev,pure:t.totalPure,rate:t.pureRateAgg,pureKey:t.pureKey};
+}
+
+// ── 填寫進度的「格」：唯一一支，總覽進度鈕、通路列徽章、填寫模式左側清單共用 ──
+//   規則：每家店的 manual 欄位各一格；合併欄位整組只算一格（存在 kpiFieldMerges）；不適用的不算；
+//   共同費用（有 commonCostLabel 的組）算一格。公式欄位不算（它們由公式算出）。
+function _kpiFillSlots(row,group){
+  const slots=[];const seen=new Set();
+  // group.since（例：新通路 '2026-08'）之前的月份 → 0 格（不列入進度，也不會顯示「暫」「未完成」）
+  if(group.since&&row&&row.month&&row.month<group.since)return slots;
+  const box=(row&&row[group.key])||{};
+  group.shops.forEach(shop=>{
+    group.manual.forEach(f=>{
+      const st=_kpiFieldMergeStatus(group,f.k,shop);
+      if(st&&st.type==='na')return;
+      if(st&&st.type==='merged'){
+        if(seen.has(st.mergeKey))return;seen.add(st.mergeKey);
+        slots.push({shops:st.shops,field:f.k,filled:((row&&row.kpiFieldMerges)||{})[st.mergeKey]!=null});
+        return;
       }
-      return `<div style="background:#f8f9fc;border-radius:8px;padding:16px 18px">
-        <div style="font-size:13px;color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${g.color};display:inline-block;flex-shrink:0"></span>${g.title}</div>
-        <div style="font-size:12px;color:#9ca3af;margin-top:6px">營收</div>
-        <div style="font-size:24px;font-weight:700;color:#1f2937">NT$${fmtN(Math.round(totalRev))}</div>
-        ${revCmp}
-        <div style="font-size:12px;color:#9ca3af;margin-top:5px">純利</div>
-        <div style="font-size:24px;font-weight:600;color:${totalPure>=0?'#059669':'#dc2626'}">NT$${fmtN(Math.round(totalPure))}</div>
-        ${pureCmp}
-        <div style="font-size:12px;color:#9ca3af;margin-top:2px">純利率 ${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}${ppTxt}</div>
-      </div>`;
-    }).join('')}
+      slots.push({shops:[shop],field:f.k,filled:(box[shop]||{})[f.k]!=null});
+    });
+  });
+  if(group.commonCostLabel)slots.push({shops:[],field:'_common',filled:!!row&&row[group.key+'Common']!=null});
+  return slots;
+}
+function _kpiFillCount(row,group){
+  const s=_kpiFillSlots(row,group);const filled=s.filter(x=>x.filled).length;
+  return{filled,total:s.length,missing:s.length-filled};
+}
+function _kpiFillCountAll(row){
+  return KPI_GROUPS.reduce((a,g)=>{const c=_kpiFillCount(row,g);a.filled+=c.filled;a.total+=c.total;a.missing+=c.missing;return a;},{filled:0,total:0,missing:0});
+}
+function _kpiFillBadge(c){
+  if(c.total===0)return `<span class="km-badge km-badge-off" title="這個月還不列入填寫進度">不列入</span>`;
+  return c.missing===0
+    ?`<span class="km-badge km-badge-done">✓ ${c.filled} / ${c.total}</span>`
+    :`<span class="km-badge">${c.filled} / ${c.total}</span>`;
+}
+
+// ── A2 大數字列（4 格）──
+function _kpiBigNumbersHtml(row,prevRow){
+  const c=_kpiAllTotals(row),p=prevRow?_kpiAllTotals(prevRow):null;
+  // 訂單數／客單價也是除法：基期訂單數 0 一樣不可比 → 併進同一道守衛（仍然全有或全無）。
+  const ok=_kpiCmpOk(p)&&p.qty>0;
+  const pct=(a,b)=>ok?_kpiCmpPctHtml(a,b):'';
+  const pp=ok&&c.rev>0?_kpiCmpPpHtml(c.rate,p.rate):'';   // 純利率卡的較上月用 pp（百分點），同一道守衛
+  return `<div class="km-big">
+    <div class="km-card km-card-main">
+      <div class="km-l">全通路純利</div>
+      <div class="km-v">${_kpiMoney(c.pure)}</div>
+      ${pct(c.pure,p&&p.pure)}
+    </div>
+    <div class="km-card"><div class="km-l">純利率</div><div class="km-v">${c.rev>0?_kpiRatePct(c.rate):'—'}</div>${pp}</div>
+    <div class="km-card"><div class="km-l">營收</div><div class="km-v">${_kpiMoney(c.rev)}</div>${pct(c.rev,p&&p.rev)}</div>
+    <div class="km-card"><div class="km-l">訂單數</div><div class="km-v">${c.qty?fmtN(c.qty):'—'}</div>${pct(c.qty,p&&p.qty)}</div>
+    <div class="km-card"><div class="km-l">客單價</div><div class="km-v">${c.qty?_kpiMoney(c.aov):'—'}</div>${pct(c.aov,p&&p.aov)}</div>
   </div>`;
+}
+
+// ── A3 營收成本結構（瀑布圖）──
+// 各組欄位 → 瀑布圖類別。【沒列到的】（稅金、耗材、退貨、各項費用、應收帳款…）不歸類，
+//   「其他」一律用差額算：營收 − 商品成本 − 平台手續費 − 廣告費 − 物流運費 − 純利。
+//   '_common' ＝ 該組的共同費用（row[group.key+'Common']，目前只有蝦皮的物流運費）。
+//   ship 讀的是 _kpiShopCalc 之後的值 ⇒ MOMO 寄倉運費已按 shareBy 攤進 mo+0／mo+1，不適用的通路是 0。
+const KPI_WF_CATS=[{k:'cost',l:'商品成本'},{k:'fee',l:'平台手續費'},{k:'ads',l:'廣告費'},{k:'ship',l:'物流運費'}];
+const KPI_WF_MAP={
+  shopee:{cost:'cost',fee:'fee',ads:'ads',_common:'ship'},
+  coupang:{cost:'cost',fee:'fee'},
+  other:{cost:'cost',fee:'fee',ship:'ship'},
+  website:{cost:'cost',fee:'fee',ship:'ship'},
+  momo:{cost:'cost',ship:'ship'},
+  pchome:{cost:'cost',fee:'fee'},
+  friday:{cost:'cost',fee:'fee'},
+  books:{cost:'cost',fee:'fee'},
+};
+function _kpiWaterfall(row){
+  const cat={cost:0,fee:0,ads:0,ship:0};let rev=0,pure=0;const byGroup=[];
+  KPI_GROUPS.forEach(g=>{
+    const t=_kpiGroupTotals(row,g);rev+=t.totalRev;pure+=t.totalPure;
+    const m=KPI_WF_MAP[g.key]||{};
+    const gc={組:g.title,營收:Math.round(t.totalRev)};
+    Object.keys(m).forEach(f=>{
+      let v=0;
+      if(f==='_common')v=Number(row[g.key+'Common'])||0;
+      else g.shops.forEach(s=>{v+=Number(_kpiShopCalc(row,g,s)[f])||0;});
+      cat[m[f]]+=v;gc[(f==='_common'?'共同費用':f)+'→'+m[f]]=Math.round(v);
+    });
+    gc.純利=Math.round(t.totalPure);
+    byGroup.push(gc);
+  });
+  const other=rev-cat.cost-cat.fee-cat.ads-cat.ship-pure;
+  return{rev,pure,cat,other,byGroup};
+}
+// 每個月份＋資料只印一次（renderKpiTab 很常跑，不要洗版）。
+let _kpiWfLogKey='';
+function _kpiLogWaterfall(month,w){
+  const key=month+'|'+JSON.stringify(w);
+  if(key===_kpiWfLogKey)return;_kpiWfLogKey=key;
+  const pct=v=>w.rev>0?(v/w.rev*100).toFixed(2)+'%':'—';
+  const lines=[{類別:'營收',金額:Math.round(w.rev),佔營收:pct(w.rev)}]
+    .concat(KPI_WF_CATS.map(c=>({類別:c.l,金額:Math.round(w.cat[c.k]),佔營收:pct(w.cat[c.k])})))
+    .concat([{類別:'其他（差額）',金額:Math.round(w.other),佔營收:pct(w.other)},{類別:'純利',金額:Math.round(w.pure),佔營收:pct(w.pure)}]);
+  const segSum=w.cat.cost+w.cat.fee+w.cat.ads+w.cat.ship+w.other;
+  console.log('%c[KPI 瀑布圖] '+month+'　各段合計 '+Math.round(segSum)+' ＝ 營收−純利 '+Math.round(w.rev-w.pure)+(Math.abs(segSum-(w.rev-w.pure))<0.5?' ✓':' ✗'),'color:#4f46e5;font-weight:700');
+  console.table(lines);
+  console.table(w.byGroup);
+}
+function _kpiWaterfallHtml(w){
+  if(!(w.rev>0))return `<div class="km-empty">這個月還沒有營收資料</div>`;
+  const pct=v=>v/w.rev*100;
+  const bars=[{l:'營收',v:w.rev,from:0,to:100,cls:'km-wf-rev',kind:'rev'}];
+  let rem=100;
+  KPI_WF_CATS.map(c=>({l:c.l,v:w.cat[c.k]}))
+    .concat([{l:'其他（稅金、耗材、退貨等）',v:w.other,t:'稅金、耗材、退貨、各項費用等（＝營收 − 前四項 − 純利，用差額算）'}])
+    .forEach(x=>{const a=rem-pct(x.v);bars.push({l:x.l,v:x.v,from:Math.min(a,rem),to:Math.max(a,rem),cls:'km-wf-cost',t:x.t,kind:'cost'});rem=a;});
+  bars.push({l:'純利',v:w.pure,from:Math.min(0,rem),to:Math.max(0,rem),cls:w.pure>=0?'km-wf-pure':'km-wf-loss',kind:'pure'});
+  // 右側文字：「金額 · 佔營收 %」。成本類是扣掉的 → 前面加「−」（差額「其他」若是負值則顯示「+」）；
+  //   營收那條只寫「100%」；純利照實際正負號、不加扣除的負號。
+  const amt=b=>{
+    if(b.kind==='cost')return (b.v>=0?'−':'+')+'$'+fmtN(b.v);
+    return _kpiMoney(b.v);
+  };
+  const pc=b=>b.kind==='rev'?'100%':Math.abs(pct(b.v)).toFixed(1)+'%';
+  return `<div class="km-wf">${bars.map(b=>{
+    const left=Math.max(0,Math.min(100,b.from)),right=Math.max(0,Math.min(100,b.to));
+    return `<div class="km-wf-row">
+      <div class="km-wf-l"${b.t?` title="${b.t}"`:''}>${b.l}</div>
+      <div class="km-wf-track"><div class="km-wf-bar ${b.cls}" style="left:${left}%;width:${Math.max(right-left,0.3)}%"></div></div>
+      <div class="km-wf-v">${amt(b)}</div>
+      <div class="km-wf-p">${pc(b)}</div>
+    </div>`;}).join('')}</div>`;
+}
+
+// ── A4 營收組成（圓餅圖）──
+//   圓餅圖只畫營收 > 0 的通路（0 元畫不出扇形）；右側清單照樣列出全部通路。
+//   Chart 實例由 renderKpiMixChart 建、renderKpiTab 開頭 kpiMixDestroyChart 清（innerHTML 重畫會把舊 canvas 換掉，
+//   不 destroy 的話實例會一直握著脫離文件的 canvas——同 kpiYearDestroyCharts 的理由）。
+let _kpiMixChartData=null;
+let _kpiMixChart=null;
+function kpiMixDestroyChart(){ if(_kpiMixChart){ try{_kpiMixChart.destroy();}catch(e){} _kpiMixChart=null; } }
+function _kpiMixHtml(row){
+  const gs=KPI_GROUPS.map(g=>({g,cur:_kpiGroupT(row,g)}));
+  const tot=gs.reduce((a,x)=>a+x.cur.rev,0);
+  if(!(tot>0)){_kpiMixChartData=null;return '<div class="km-empty">這個月還沒有營收資料</div>';}
+  const pie=gs.filter(x=>x.cur.rev>0);
+  _kpiMixChartData={labels:pie.map(x=>x.g.title),data:pie.map(x=>x.cur.rev),colors:pie.map(x=>x.g.color),total:tot};
+  const list=gs.map(x=>'<div class="km-mix-item"><span class="km-dot" style="background:'+x.g.color+'"></span><span class="km-mix-name">'+x.g.title+'</span>'
+    +'<span class="km-mix-share">'+(x.cur.rev/tot*100).toFixed(1)+'%</span>'
+    +'<span class="km-mix-rate">純利率 '+(x.cur.rev>0?_kpiRatePct(x.cur.rate):'—')+'</span></div>').join('');
+  return '<div class="km-mix"><div class="km-mix-pie"><canvas id="kpi-mix-pie"></canvas></div><div class="km-mix-list">'+list+'</div></div>';
+}
+function renderKpiMixChart(){
+  const d=_kpiMixChartData;
+  const c=document.getElementById('kpi-mix-pie');
+  if(!d||!c||typeof Chart==='undefined')return;   // 沒資料／CDN 沒載到：右側清單照樣看得到
+  const o=Chart.getChart(c); if(o){try{o.destroy();}catch(e){}}
+  _kpiMixChart=new Chart(c.getContext('2d'),{
+    type:'pie',
+    data:{labels:d.labels,datasets:[{data:d.data,backgroundColor:d.colors,borderColor:'#fff',borderWidth:2}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},   // 圖例用右側清單（含純利率），不用 Chart 內建的
+        tooltip:{callbacks:{label:ctx=>ctx.label+'　$'+fmtN(ctx.parsed)+'（'+(ctx.parsed/d.total*100).toFixed(1)+'%）'}},
+      },
+    },
+  });
+}
+// ── 本月重點（月份選單下方、四張大卡上方）──
+//   成長／下滑兩句只看通過 cmpOk 的通路（不可比的跳過）；都沒有就不出那一句；三句都沒有就整條不出。
+function _kpiHighlightsHtml(row,prevRow){
+  const gs=KPI_GROUPS.map(g=>({g,cur:_kpiGroupT(row,g),prev:_kpiGroupT(prevRow,g)}));
+  const cmp=gs.filter(x=>_kpiCmpOk(x.prev)).map(x=>Object.assign({},x,{d:(x.cur.pure-x.prev.pure)/x.prev.pure}));
+  const up=cmp.filter(x=>x.d>0).sort((a,b)=>b.d-a.d)[0];
+  const down=cmp.filter(x=>x.d<0).sort((a,b)=>a.d-b.d)[0];
+  const best=gs.filter(x=>x.cur.rev>0).sort((a,b)=>b.cur.rate-a.cur.rate)[0];
+  // 三張小卡並排：上面灰色標籤、中間通路名、右邊大的數字、下面一行上月→本月。一眼一張，不用讀一整句。
+  const card=(cls,label,g,big,bigCls,sub)=>'<div class="km-hl-card '+cls+'"><div class="km-hl-l">'+label+'</div>'
+    +'<div class="km-hl-main"><span class="km-hl-name"><span class="km-dot" style="background:'+g.color+'"></span>'+g.title+'</span>'
+    +'<span class="km-hl-big '+bigCls+'">'+big+'</span></div>'+(sub?'<div class="km-hl-sub">'+sub+'</div>':'')+'</div>';
+  const hl=[];
+  if(up)hl.push(card('up','純利成長最多',up.g,'▲'+(up.d*100).toFixed(1)+'%','km-up','上月 '+_kpiMoney(up.prev.pure)+' → 本月 '+_kpiMoney(up.cur.pure)));
+  if(down)hl.push(card('down','純利下滑最多',down.g,'▼'+Math.abs(down.d*100).toFixed(1)+'%','km-down','上月 '+_kpiMoney(down.prev.pure)+' → 本月 '+_kpiMoney(down.cur.pure)));
+  if(best)hl.push(card('best','純利率最高',best.g,_kpiRatePct(best.cur.rate),'','營收 '+_kpiMoney(best.cur.rev)+' · 純利 '+_kpiMoney(best.cur.pure)));
+  return hl.length?'<div class="km-hl">'+hl.join('')+'</div>':'';
+}
+
+// ── A5 各通路表（唯讀；編輯一律到填寫模式）──
+function _kpiRateBarHtml(rate,hasRev){
+  const w=hasRev?Math.max(0,Math.min(100,rate*100)):0;
+  return `<div class="km-rate"><div class="km-rate-track"><div class="km-rate-fill ${rate<0?'km-rate-neg':''}" style="width:${w}%"></div></div><span>${hasRev?_kpiRatePct(rate):'—'}</span></div>`;
+}
+function _kpiChannelTableHtml(row,prevRow){
+  const month=row.month;
+  const cmpCells=(cur,prev)=>{
+    const ok=_kpiCmpOk(prev);
+    return{rev:ok?_kpiCmpPctHtml(cur.rev,prev.rev):'',pure:ok?_kpiCmpPctHtml(cur.pure,prev.pure):'',pp:ok&&cur.rev>0?_kpiCmpPpHtml(cur.rate,prev.rate):''};
+  };
+  const body=KPI_GROUPS.map(g=>{
+    const cur=_kpiGroupT(row,g),prev=_kpiGroupT(prevRow,g),cc=cmpCells(cur,prev);
+    const open=_kpiExpandedGroups.has(month+':'+g.key);
+    let html=`<tr class="km-ch" onclick="toggleKpiGroup('${month}','${g.key}')">
+      <td class="km-ch-name"><span class="km-caret${open?' open':''}">▸</span><span class="km-dot" style="background:${g.color}"></span>${g.title}</td>
+      <td>${_kpiRateBarHtml(cur.rate,cur.rev>0)}</td>
+      <td class="km-n">${_kpiMoney(cur.rev)}</td><td class="km-c">${cc.rev}</td>
+      <td class="km-n ${cur.pure<0?'km-down':''}">${_kpiMoney(cur.pure)}</td><td class="km-c">${cc.pure}</td>
+      <td class="km-c">${cc.pp}</td>
+      <td class="km-c">${_kpiFillBadge(_kpiFillCount(row,g))}</td>
+    </tr>`;
+    if(open){
+      g.shops.forEach(s=>{
+        const d=_kpiShopCalc(row,g,s);const rev=Number(d.rev)||0,pure=Number(d[cur.pureKey])||0;
+        html+=`<tr class="km-ch-sub"><td class="km-ch-shop">${_kpiShopLabel(s)}</td><td>${_kpiRateBarHtml(rev>0?pure/rev:0,rev>0)}</td>
+          <td class="km-n">${_kpiMoney(rev)}</td><td></td><td class="km-n ${pure<0?'km-down':''}">${_kpiMoney(pure)}</td><td></td><td></td><td></td></tr>`;
+      });
+    }
+    return html;
+  }).join('');
+  const all=_kpiAllTotals(row),pa=prevRow?_kpiAllTotals(prevRow):null,ca=cmpCells(all,pa);
+  return `<div class="km-tablewrap"><table class="km-table km-ch-table">
+    <thead><tr><th>通路</th><th>純利率</th><th class="km-n">營收</th><th>較上月</th><th class="km-n">純利</th><th>較上月</th><th>純利率變化</th><th>填寫進度</th></tr></thead>
+    <tbody>${body}</tbody>
+    <tfoot><tr><td>合計</td><td>${_kpiRateBarHtml(all.rate,all.rev>0)}</td><td class="km-n">${_kpiMoney(all.rev)}</td><td class="km-c">${ca.rev}</td>
+      <td class="km-n ${all.pure<0?'km-down':''}">${_kpiMoney(all.pure)}</td><td class="km-c">${ca.pure}</td><td class="km-c">${ca.pp}</td>
+      <td class="km-c">${_kpiFillBadge(_kpiFillCountAll(row))}</td></tr></tfoot>
+  </table></div>`;
+}
+function _kpiOverviewHtml(row,prevRow){
+  const w=_kpiWaterfall(row);
+  _kpiLogWaterfall(row.month,w);
+  return `${_kpiBigNumbersHtml(row,prevRow)}
+    ${_kpiHighlightsHtml(row,prevRow)}
+    <div class="km-two">
+      <div class="km-panel"><div class="km-panel-t">營收成本結構</div><div class="km-panel-sub">本月全通路營收扣除各項成本與費用後的純利，百分比為佔營收比例。</div>${_kpiWaterfallHtml(w)}</div>
+      <div class="km-panel"><div class="km-panel-t">營收組成</div>${_kpiMixHtml(row)}</div>
+    </div>
+    <div class="km-panel"><div class="km-panel-t">各通路<span class="km-panel-hint">點通路看各店；要改數字請按右上角進入填寫模式</span></div>${_kpiChannelTableHtml(row,prevRow)}</div>`;
+}
+
+// ══════ B 填寫模式（同一個 KPI 分頁內切換；年月沿用目前選的）══════
+let _kpiFillMode=false;
+let _kpiFillGroup=KPI_GROUPS[0].key;
+function kpiOpenFill(groupKey){
+  const row=getOrCreateKpiRow(_kpiYM());
+  _kpiFillMode=true;_kpiViewMode='month';
+  _kpiFillGroup=groupKey||(KPI_GROUPS.find(g=>_kpiFillCount(row,g).missing>0)||KPI_GROUPS[0]).key;
+  renderKpiTab();
+}
+function kpiCloseFill(){_kpiFillMode=false;renderKpiTab();}
+function kpiFillPickGroup(groupKey){_kpiFillGroup=groupKey;renderKpiTab();}
+function _kpiFillGroupObj(){return KPI_GROUPS.find(g=>g.key===_kpiFillGroup)||KPI_GROUPS[0];}
+// 欄位＝該組 manual 欄位，順序照 group.order（order 裡的公式欄位跳過；沒排到的 manual 接在後面）。
+function _kpiFillCols(group){
+  const man=group.manual.map(f=>f.k);
+  const ord=(group.order||man).filter(k=>man.includes(k));
+  man.forEach(k=>{if(!ord.includes(k))ord.push(k);});
+  return ord.map(k=>group.manual.find(f=>f.k===k));
+}
+// 一格的種類：cell 一般｜merge 合併欄位領頭店（存總額）｜share 合併欄位其他店（唯讀份額）｜na 不適用｜common 共同費用
+function _kpiFillCell(group,shop,f){
+  const st=_kpiFieldMergeStatus(group,f.k,shop);
+  if(st&&st.type==='na')return{kind:'na'};
+  if(st&&st.type==='merged'){
+    if(shop!==st.shops[0])return{kind:'share',st};
+    return{kind:'merge',st,segs:['kpiFieldMerges',st.mergeKey]};
+  }
+  return{kind:'cell',segs:[group.key,shop,f.k]};
+}
+function _kpiFillCur(row,cell){
+  if(!row)return{};
+  if(cell.kind==='merge')return{v:(row.kpiFieldMerges||{})[cell.st.mergeKey]};
+  if(cell.kind==='common')return{v:row[cell.segs[0]]};
+  const sd=(row[cell.segs[0]]||{})[cell.segs[1]]||{};
+  return{v:sd[cell.segs[2]],formula:sd[cell.segs[2]+'Formula']};
+}
+// 「好麻吉+森之旅共用，按訂單數攤」：店名取括號內的短名。
+function _kpiMergeHint(group,st,field){
+  const names=st.shops.map(s=>{const m=/\(([^)]+)\)/.exec(s);return m?m[1]:s;}).join('+');
+  const by=group.fieldMerge?.[field]?.shareBy;
+  const byL=by?(group.manual.find(f=>f.k===by)?.l||by):'';
+  return names+'共用'+(byL?'，按'+byL+'攤':'');
+}
+function _kpiFillInputHtml(month,row,cell,r,c){
+  const cur=_kpiFillCur(row,cell);
+  const has=cur.v!=null;
+  const raw=cur.formula!=null?String(cur.formula):(has?String(cur.v):'');
+  const disp=has?(_kpiCellIsMoney(cell)?_kpiMoney(cur.v):_kpiNum(cur.v)):'';
+  let cls=has?'':' km-empty';
+  cls+=_kpiBadCls(month,cell.segs);
+  if(cur.formula!=null)cls+=' km-has-formula';
+  return `<input class="km-in${cls}" type="text" inputmode="decimal" autocomplete="off"
+    data-k="${_kpiEscAttr(JSON.stringify(cell.segs))}" data-kind="${cell.kind}" data-r="${r}" data-c="${c}"
+    data-raw="${_kpiEscAttr(raw)}" data-disp="${_kpiEscAttr(disp)}" value="${_kpiEscAttr(disp)}"
+    ${cur.formula!=null?`title="公式：${_kpiEscAttr(raw)}"`:''}
+    onfocus="kpiFillFocus(this)" onblur="kpiFillBlur(this)" onkeydown="kpiFillKey(event,this)" onpaste="kpiFillPaste(event,this)">`;
+}
+function _kpiTsMs(at){
+  if(at==null)return null;
+  if(typeof at==='number')return at;
+  if(typeof at.toMillis==='function')return at.toMillis();
+  if(at.seconds!=null)return at.seconds*1000;
+  return null;
+}
+// 這個通路在這個月 meta 裡最新的一筆（誰、何時）。meta 的葉節點是 {by,at}。
+function _kpiLastEdit(month,groupKey){
+  const meta=_kpiV2.cloud&&_kpiV2.cloud.meta&&_kpiV2.cloud.meta[month];
+  if(!_kpiIsMap(meta))return null;
+  let best=null;
+  const walk=o=>{
+    if(!_kpiIsMap(o))return;
+    if('by' in o&&'at' in o){const t=_kpiTsMs(o.at);if(t!=null&&(!best||t>best.t))best={by:o.by,t};return;}
+    Object.keys(o).forEach(k=>walk(o[k]));
+  };
+  walk(meta[groupKey]);walk(meta[groupKey+'Common']);
+  ['kpiFieldNotes','kpiFieldMerges'].forEach(k=>{
+    const m=meta[k];if(_kpiIsMap(m))Object.keys(m).forEach(x=>{if(x.startsWith(groupKey+':'))walk(m[x]);});
+  });
+  return best;
+}
+function _kpiFmtTime(t){
+  const d=new Date(t),n=new Date();
+  const hm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  return d.toDateString()===n.toDateString()?hm:(d.getMonth()+1)+'/'+d.getDate()+' '+hm;
+}
+// 客單價＝實際營收 ÷ 訂單數（填寫模式最左的唯讀計算欄）。
+//   「實際營收」：有 actualRev 公式的組（MOMO：營收 − 退貨金額）用它；其他組用 rev。
+//   蝦皮本來就有 aov 公式欄（可能被手動覆蓋），直接用 _kpiCalcAll 算出的 d.aov，不另算一套。
+//   訂單數是 0 或沒填 → null（顯示「—」）。
+function _kpiRealRev(d){return d.actualRev!=null?Number(d.actualRev)||0:Number(d.rev)||0;}
+function _kpiAovOf(d,group){
+  if(!(Number(d.qty)>0))return null;
+  if(group.formula.some(f=>f.k==='aov'))return Number(d.aov)||0;
+  return _kpiRealRev(d)/Number(d.qty);
+}
+function _kpiFillHtml(row){
+  const month=row.month;
+  const group=_kpiFillGroupObj();
+  const cols=_kpiFillCols(group);
+  const{pureKey}=_kpiGroupTotals(row,group);
+  // 還有 manual 欄位空著的店（合併欄位沒填 → 整組每家都算）
+  const tmpShops=new Set();
+  _kpiFillSlots(row,group).forEach(s=>{if(!s.filled)s.shops.forEach(x=>tmpShops.add(x));});
+  const side=KPI_GROUPS.map(g=>{
+    const fc=_kpiFillCount(row,g);
+    return `<button class="km-side-item${g.key===group.key?' active':''}" onclick="kpiFillPickGroup('${g.key}')">
+      <span class="km-dot" style="background:${g.color}"></span><span class="km-side-name">${g.title}</span>${_kpiFillBadge(fc)}</button>`;
+  }).join('');
+  const head=`<tr><th class="km-f-shop">${group.shops.length>1?'通路':'名稱'}</th><th class="km-n km-f-rohead km-f-aov" title="實際營收 ÷ 訂單數（自動計算，不能直接改）">客單價</th>${cols.map(f=>{
+    const note=KPI_NOTEABLE_FIELDS.has(f.k)?(row.kpiFieldNotes||{})[group.key+':'+f.k]:null;
+    const noteBtn=KPI_NOTEABLE_FIELDS.has(f.k)
+      ?`<span class="km-note${note?' has':''}" onclick="editKpiFieldNote('${month}','${group.key}','${f.k}',this)" title="${note?'備註：'+_kpiEscAttr(note)+'（點擊修改）':'點擊新增這個月的備註'}">${note?'●':'＋備註'}</span>`:'';
+    return `<th><div class="km-th">${f.l}${noteBtn}</div></th>`;
+  }).join('')}<th class="km-n km-f-rohead km-f-ro-first" title="依公式自動計算，不能直接改">純利</th><th class="km-n km-f-rohead" title="依公式自動計算，不能直接改">純利率</th></tr>`;
+  const body=group.shops.map((shop,ri)=>{
+    const d=_kpiShopCalc(row,group,shop);
+    const cells=cols.map((f,ci)=>{
+      const cell=_kpiFillCell(group,shop,f);
+      if(cell.kind==='na')return `<td class="km-f-na" title="這個通路不適用${f.l}">—</td>`;
+      // 合併欄位的小字要短：欄很窄，長句會折成三四行把整列撐高。完整說明放 title（滑鼠停上去看）。
+      if(cell.kind==='share')return `<td class="km-f-share" title="${_kpiMergeHint(group,cell.st,f.k)}（這一格是攤到的份額，不能直接改）"><div class="km-shareval">${_kpiMoney(d[f.k])}</div><div class="km-sublabel">按訂單數攤</div></td>`;
+      // 小字一律放在輸入框【下方】：放上方會把框往下推，跟同一列其他格的框線對不齊。
+      const hint=cell.kind==='merge'?`<div class="km-sublabel km-sublabel-hint">MO+共用・填總額</div>`:'';
+      return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填兩家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
+    }).join('');
+    const pure=Number(d[pureKey])||0;
+    const rate=d.pureRate!=null?Number(d.pureRate):(d.rev>0?pure/d.rev:0);
+    const tmp=tmpShops.has(shop)?`<span class="km-tmp" title="這家店還有欄位沒填，純利是暫時的">暫</span>`:'';
+    const aov=_kpiAovOf(d,group);
+    return `<tr><td class="km-f-shop">${_kpiShopLabel(shop)}</td><td class="km-n km-f-ro km-f-aov"><div class="km-roval">${aov==null?'—':_kpiMoney(aov)}</div></td>${cells}
+      <td class="km-n km-f-ro km-f-ro-first ${pure<0?'km-down':''}"><div class="km-roval">${_kpiMoney(pure)}${tmp}</div></td>
+      <td class="km-n km-f-ro"><div class="km-roval">${Number(d.rev)>0?_kpiRatePct(rate):'—'}</div></td></tr>`;
+  }).join('');
+  let commonRow='';
+  if(group.commonCostLabel){
+    const cell={kind:'common',segs:[group.key+'Common']};
+    const cv=Number(row[group.key+'Common'])||0;
+    commonRow=`<tr class="km-f-common"><td class="km-f-shop" title="${group.commonCostLabel}">共同費用<div class="km-sublabel">${group.commonCostShortLabel||''}</div></td><td class="km-f-ro km-f-aov"></td>
+      <td colspan="${cols.length}"><div class="km-common-in">${_kpiFillInputHtml(month,row,cell,group.shops.length,0)}</div></td>
+      <td class="km-n km-f-ro km-f-ro-first"><div class="km-roval">${cv?'−$'+fmtN(cv):'—'}</div></td><td class="km-f-ro"></td></tr>`;
+  }
+  // 小計：manual 欄位直接加總（合併欄位只算總額一次、不適用略過）；純利／純利率＝_kpiGroupTotals。
+  const t=_kpiGroupTotals(row,group);
+  const fc=_kpiFillCount(row,group);
+  const subCells=cols.map(f=>{
+    let sum=0,any=false;const seen=new Set();
+    group.shops.forEach(shop=>{
+      const cell=_kpiFillCell(group,shop,f);
+      if(cell.kind==='na'||cell.kind==='share')return;
+      const k=JSON.stringify(cell.segs);if(seen.has(k))return;seen.add(k);
+      const v=_kpiFillCur(row,cell).v;if(v!=null){any=true;sum+=Number(v)||0;}
+    });
+    return `<td class="km-n">${any?(_kpiIsMoneyField(f.k)?_kpiMoney(sum):_kpiNum(sum)):'—'}</td>`;
+  }).join('');
+  // 小計客單價＝各店實際營收加總 ÷ 訂單數加總（不是各店客單價平均）
+  let sRev=0,sQty=0;group.shops.forEach(shop=>{const d=_kpiShopCalc(row,group,shop);sRev+=_kpiRealRev(d);sQty+=Number(d.qty)||0;});
+  const subAov=sQty>0?_kpiMoney(sRev/sQty):'—';
+  const subRow=`<tr class="km-f-sub"><td class="km-f-shop">小計${fc.missing?'<span class="km-tmp">未完成</span>':''}</td><td class="km-n km-f-aov">${subAov}</td>${subCells}
+    <td class="km-n km-f-ro-first ${t.totalPure<0?'km-down':''}">${_kpiMoney(t.totalPure)}</td><td class="km-n">${t.totalRev>0?_kpiRatePct(t.pureRateAgg):'—'}</td></tr>`;
+  const le=_kpiLastEdit(month,group.key);
+  const gi=KPI_GROUPS.findIndex(g=>g.key===group.key);
+  const next=KPI_GROUPS.slice(gi+1).concat(KPI_GROUPS.slice(0,gi)).find(g=>_kpiFillCount(row,g).missing>0);
+  const nextBtn=next
+    ?`<button class="km-next" onclick="kpiFillPickGroup('${next.key}')">下一個：${next.title}（還差 ${_kpiFillCount(row,next).missing} 格）→</button>`
+    :(fc.missing?'':`<span class="km-done">✓ 這個月全部填完</span>`);
+  return `<div class="km-fill">
+    <aside class="km-side">${side}</aside>
+    <div class="km-fill-main">
+      <div class="km-fill-title"><span class="km-dot" style="background:${group.color}"></span>${group.title}<span class="km-fill-sub">${month.replace('-','/')} · ${fc.total?`已填 ${fc.filled} / ${fc.total} 格`:`${group.since.replace('-','/')} 起才列入填寫進度（這個月可以填，但不算缺格）`}</span></div>
+      <div class="km-tablewrap"><table class="km-table km-ftable"><thead>${head}</thead><tbody>${body}${commonRow}${subRow}</tbody></table></div>
+      <div class="km-foot"><span class="km-foot-l">每格打完就存到雲端 · 最後編輯：${le?_kpiEscAttr(le.by||'?')+' '+_kpiFmtTime(le.t):'—'}</span>${nextBtn}</div>
+    </div>
+  </div>`;
+}
+// ── 填寫模式的輸入框事件 ──
+function _kpiFillInputs(){
+  const el=document.getElementById('kpi-tab-content');
+  return el?[...el.querySelectorAll('input.km-in')]:[];
+}
+function _kpiFillFocusKey(k){
+  if(k==null)return;
+  const t=_kpiFillInputs().find(i=>i.dataset.k===k);
+  if(t)t.focus();
+}
+function _kpiFillRerender(focusKey){renderKpiTab();_kpiFillFocusKey(focusKey);}
+// 滑鼠按著的時候不重畫：blur 發生在 mousedown，這時整表重畫會把使用者正要點的按鈕／格子換掉 → 那一下 click 沒反應。
+//   等 mouseup、click 跑完（setTimeout 0）再畫。_kpiIsEditing 也看這個旗標（雲端快照的延後重畫同理）。
+let _kpiPointerDown=false;
+document.addEventListener('mousedown',()=>{_kpiPointerDown=true;},true);
+document.addEventListener('mouseup',()=>{setTimeout(()=>{_kpiPointerDown=false;},0);},true);
+function _kpiAfterClick(fn){
+  if(!_kpiPointerDown){fn();return;}
+  document.addEventListener('mouseup',()=>setTimeout(fn,0),{once:true,capture:true});
+}
+function kpiFillFocus(inp){
+  inp.dataset.done='';
+  inp.value=inp.dataset.raw||'';
+  try{inp.select();}catch{}
+}
+// 「1,234」「NT$1,234」「$ 1234」→ 1234；不是純數字回 null（交給公式或報錯）。
+function _kpiParseNum(s){
+  const t=String(s).replace(/NT\$|\$|,|\s/g,'');
+  return /^-?\d+(\.\d+)?$/.test(t)?parseFloat(t):null;
+}
+function _kpiFillInvalid(inp,msg){
+  inp.classList.add('km-invalid');
+  if(typeof showToast==='function')showToast(msg+'（這一格沒有存）','error',5000);
+  return 'invalid';
+}
+// 回傳 'same'（沒變、不寫）｜'written'｜'invalid'。
+//   🔴 清空只有 Enter 能觸發（fromBlur 時清空＝取消）：PR #231 的教訓——全選 Backspace 後點旁邊，數字會無聲消失。
+function _kpiFillCommit(inp,fromBlur){
+  const raw=inp.value.trim();
+  const orig=inp.dataset.raw||'';
+  inp.classList.remove('km-invalid');
+  if(raw===orig)return 'same';
+  if(raw===''&&fromBlur)return 'same';
+  const month=_kpiYM();
+  const segs=JSON.parse(inp.dataset.k);
+  const kind=inp.dataset.kind;
+  const group=_kpiFillGroupObj();
+  const row=getOrCreateKpiRow(month);
+  const pairs=[];
+  if(kind==='cell'){
+    const sd=(row[segs[0]]||{})[segs[1]]||{};
+    const fSegs=[segs[0],segs[1],segs[2]+'Formula'];
+    const hadFormula=sd[segs[2]+'Formula']!=null;
+    if(raw===''){
+      pairs.push([segs,undefined]);
+      if(hadFormula)pairs.push([fSegs,undefined]);
+    }else{
+      const n=_kpiParseNum(raw);
+      if(n!=null){
+        if(n===sd[segs[2]]&&!hadFormula)return 'same';
+        pairs.push([segs,n]);
+        if(hadFormula)pairs.push([fSegs,undefined]);
+      }else{
+        // 公式：存檔當下算好凍結（與舊 editKpiCell 同語意：值＋*Formula 兩個 key）
+        const v=_kpiEvalFormula(raw,sd,group);
+        if(isNaN(v))return _kpiFillInvalid(inp,'公式算不出數字：'+raw);
+        pairs.push([segs,v]);pairs.push([fSegs,raw]);
+      }
+    }
+  }else{
+    const cur=_kpiFillCur(row,kind==='merge'?{kind,segs,st:{mergeKey:segs[1]}}:{kind,segs}).v;
+    if(raw===''){pairs.push([segs,undefined]);}
+    else{
+      const n=_kpiParseNum(raw);
+      if(n==null)return _kpiFillInvalid(inp,'請輸入數字：'+raw);
+      if(n===cur)return 'same';
+      pairs.push([segs,n]);
+    }
+  }
+  kpiWriteCell(month,pairs);
+  return 'written';
+}
+function kpiFillBlur(inp){
+  setTimeout(()=>{
+    if(inp.dataset.done==='1'||!document.contains(inp))return;
+    const a=document.activeElement;
+    const nk=(a&&a.classList&&a.classList.contains('km-in'))?a.dataset.k:null;
+    const r=_kpiFillCommit(inp,true);
+    if(r==='written')_kpiAfterClick(()=>{
+      // 等 click 跑完後焦點可能又換了（點到另一格）→ 以那時的焦點為準
+      const b=document.activeElement;
+      _kpiFillRerender((b&&b.classList&&b.classList.contains('km-in'))?b.dataset.k:nk);
+    });
+    else if(r==='same')inp.value=inp.dataset.disp||'';
+  },0);
+}
+function _kpiFillNeighbor(inp,dir){
+  const all=_kpiFillInputs();
+  if(dir==='right'||dir==='left'){const i=all.indexOf(inp);return all[i+(dir==='right'?1:-1)]||null;}
+  const r=+inp.dataset.r,c=+inp.dataset.c,step=dir==='down'?1:-1;
+  const rows=[...new Set(all.map(x=>+x.dataset.r))].sort((a,b)=>a-b);
+  const cand=rows.filter(x=>step>0?x>r:x<r);
+  if(step<0)cand.reverse();
+  for(const rr of cand){const same=all.find(x=>+x.dataset.r===rr&&+x.dataset.c===c);if(same)return same;}
+  return cand.length?all.find(x=>+x.dataset.r===cand[0])||null:null;
+}
+function kpiFillKey(e,inp){
+  const k=e.key;
+  if(k==='Escape'){e.preventDefault();inp.value=inp.dataset.raw||'';inp.classList.remove('km-invalid');return;}
+  let dir=null;
+  if(k==='Enter'||k==='ArrowDown')dir='down';
+  else if(k==='ArrowUp')dir='up';
+  else if(k==='Tab')dir=e.shiftKey?'left':'right';
+  if(!dir)return;
+  e.preventDefault();
+  const target=_kpiFillNeighbor(inp,dir);
+  const r=_kpiFillCommit(inp,k!=='Enter');
+  if(r==='invalid')return;
+  inp.dataset.done='1';
+  if(r==='written'){_kpiFillRerender(target?target.dataset.k:inp.dataset.k);return;}
+  inp.value=inp.dataset.disp||'';
+  if(target)target.focus();else inp.dataset.done='';
+}
+// 貼上 Excel：多格 TSV 從這一格往右、往下填；先預覽「將寫入 N 格」，確認後一次原子寫入。
+//   非數字、不適用／唯讀、超出表格的格子列出來，不寫。單一值的貼上交給瀏覽器（照一般輸入流程存）。
+function kpiFillPaste(e,inp){
+  const text=((e.clipboardData||window.clipboardData)&&(e.clipboardData||window.clipboardData).getData('text/plain'))||'';
+  const body=text.replace(/\r/g,'').replace(/\n+$/,'');
+  if(!/[\t\n]/.test(body))return;
+  e.preventDefault();
+  const lines=body.split('\n').map(l=>l.split('\t'));
+  const month=_kpiYM();
+  const group=_kpiFillGroupObj();
+  const row=getOrCreateKpiRow(month);
+  const cols=_kpiFillCols(group);
+  const r0=+inp.dataset.r,c0=+inp.dataset.c;
+  const at=(r,c)=>{
+    if(r<group.shops.length)return c<cols.length?{cell:_kpiFillCell(group,group.shops[r],cols[c]),label:_kpiShopLabel(group.shops[r])+' '+cols[c].l}:null;
+    if(r===group.shops.length&&group.commonCostLabel&&c===0)return{cell:{kind:'common',segs:[group.key+'Common']},label:'共同費用'};
+    return null;
+  };
+  const pairs=[],preview=[],skipped=[];const seen=new Set();
+  lines.forEach((cells,i)=>cells.forEach((txt,j)=>{
+    const t=txt.trim();if(t==='')return;
+    const g=at(r0+i,c0+j);
+    if(!g){skipped.push(`第 ${i+1} 列第 ${j+1} 欄「${t}」：超出表格`);return;}
+    if(g.cell.kind==='na'||g.cell.kind==='share'){skipped.push(`${g.label}「${t}」：這格不能填`);return;}
+    const n=_kpiParseNum(t);
+    if(n==null){skipped.push(`${g.label}「${t}」：不是數字`);return;}
+    const key=JSON.stringify(g.cell.segs);if(seen.has(key))return;seen.add(key);
+    pairs.push([g.cell.segs,n]);
+    if(g.cell.kind==='cell'&&_kpiFillCur(row,g.cell).formula!=null)pairs.push([[g.cell.segs[0],g.cell.segs[1],g.cell.segs[2]+'Formula'],undefined]);
+    preview.push(`${g.label} = ${n.toLocaleString(undefined,{maximumFractionDigits:6})}`);   // 預覽照原值顯示，不四捨五入（1.5 不能顯示成 2）
+  }));
+  if(!preview.length){alert('沒有可以寫入的數字。'+(skipped.length?'\n\n'+skipped.join('\n'):''));return;}
+  const msg=`將寫入 ${preview.length} 格（${group.title}，${month}）：\n`+preview.slice(0,20).join('\n')+(preview.length>20?`\n…另外 ${preview.length-20} 格`:'')
+    +(skipped.length?`\n\n略過 ${skipped.length} 格（不寫）：\n`+skipped.slice(0,12).join('\n')+(skipped.length>12?'\n…':''):'');
+  if(!confirm(msg))return;
+  inp.dataset.done='1';
+  kpiWriteCell(month,pairs);
+  _kpiFillRerender(inp.dataset.k);
+}
+
+// 填寫模式旁的「?」：滑鼠移上去（或 Tab 聚焦）才出現鍵盤操作說明，平常不佔版面。
+function _kpiKeysHelpHtml(){
+  const items=[
+    ['<kbd>Enter</kbd> <kbd>↓</kbd>','下一列'],['<kbd>↑</kbd>','上一列'],
+    ['<kbd>Tab</kbd>','右一格'],['<kbd>Shift</kbd>+<kbd>Tab</kbd>','左一格'],
+    ['<kbd>Esc</kbd>','還原這一格'],['清空後 <kbd>Enter</kbd>','刪除這一格'],
+    ['<code>=營收*21%</code>','可以打公式'],['從 Excel 複製','可貼上多格'],
+  ];
+  return `<span class="km-help" tabindex="0" role="button" aria-label="鍵盤操作說明">?<span class="km-help-pop" role="tooltip">
+    <span class="km-help-t">鍵盤操作</span>${items.map(([k,v])=>`<span class="km-help-k">${k}</span><span class="km-help-v">${v}</span>`).join('')}</span></span>`;
+}
+// ── 填寫模式「下載 Excel」──
+//   目前選的月份：第一張「總表」（各通路營收／純利／純利率／填寫進度＋合計），之後一個通路一張。
+//   各通路那張的欄位跟畫面一樣：店名、客單價、各填寫欄、純利、純利率；有共同費用的組多一列共同費用
+//   （金額放在純利欄、以負數表示——它只扣小計純利），最後一列小計。
+//   🔴 數字一律存成【數值】（不是 "$1,234" 這種文字），金額格式 $#,##0、純利率 0.00%，打開就能加總。
+//   ⚠ 合併欄位（MOMO 寄倉運費）：領頭店那格放【總額】、另一家放【攤到的份額】，跟畫面一致。
+//   ⚠ 空格留白（不是 0）；不適用的格子寫「—」。
+//   沿用本檔既有的 SheetJS（index.html 載 xlsx 0.18.5；MOMO／酷澎匯出也用這套）。
+function kpiFillDownloadExcel(){
+  if(typeof XLSX==='undefined'||!XLSX.utils||typeof XLSX.writeFile!=='function'){alert('匯出元件未載入，請重新整理後再試。');return;}
+  const month=_kpiYM();
+  const row=getOrCreateKpiRow(month);
+  const MONEY='"$"#,##0;-"$"#,##0',COUNT='#,##0',PCT='0.00%';
+  // aoa + 同形狀的格式表 → 產生工作表並套格式
+  const mkSheet=(aoa,fmt,widths)=>{
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    fmt.forEach((r,ri)=>r.forEach((z,ci)=>{
+      if(!z)return;const ref=XLSX.utils.encode_cell({r:ri,c:ci});
+      if(ws[ref]&&typeof ws[ref].v==='number')ws[ref].z=z;
+    }));
+    ws['!cols']=widths.map(w=>({wch:w}));
+    return ws;
+  };
+  const wb=XLSX.utils.book_new();
+  // ① 總表
+  {
+    const aoa=[['通路','營收','純利','純利率','填寫進度']],fmt=[[]];
+    KPI_GROUPS.forEach(g=>{
+      const t=_kpiGroupTotals(row,g),fc=_kpiFillCount(row,g);
+      aoa.push([g.title,t.totalRev,t.totalPure,t.totalRev>0?t.pureRateAgg:'',fc.total?fc.filled+' / '+fc.total:'不列入']);
+      fmt.push([null,MONEY,MONEY,PCT,null]);
+    });
+    const a=_kpiAllTotals(row),fa=_kpiFillCountAll(row);
+    aoa.push(['合計',a.rev,a.pure,a.rev>0?a.rate:'',fa.filled+' / '+fa.total]);
+    fmt.push([null,MONEY,MONEY,PCT,null]);
+    XLSX.utils.book_append_sheet(wb,mkSheet(aoa,fmt,[12,16,16,10,12]),'總表');
+  }
+  // ② 各通路
+  KPI_GROUPS.forEach(g=>{
+    const cols=_kpiFillCols(g);
+    const pureKey=_kpiGroupTotals(row,g).pureKey;
+    const aoa=[['店名','客單價'].concat(cols.map(f=>f.l),['純利','純利率'])];
+    const fmt=[[]];
+    const colFmt=f=>_kpiIsMoneyField(f.k)?MONEY:COUNT;
+    g.shops.forEach(shop=>{
+      const d=_kpiShopCalc(row,g,shop);
+      const aov=_kpiAovOf(d,g);
+      const vals=cols.map(f=>{
+        const cell=_kpiFillCell(g,shop,f);
+        if(cell.kind==='na')return '—';
+        if(cell.kind==='share')return Number(d[f.k])||0;
+        const v=_kpiFillCur(row,cell).v;
+        return v==null?'':Number(v);
+      });
+      const pure=Number(d[pureKey])||0;
+      const rate=d.pureRate!=null?Number(d.pureRate):(Number(d.rev)>0?pure/Number(d.rev):'');
+      aoa.push([_kpiShopLabel(shop),aov==null?'':aov].concat(vals,[pure,Number(d.rev)>0?rate:'']));
+      fmt.push([null,MONEY].concat(cols.map(colFmt),[MONEY,PCT]));
+    });
+    if(g.commonCostLabel){
+      const has=row[g.key+'Common']!=null;
+      aoa.push(['共同費用（'+(g.commonCostShortLabel||'')+'）',''].concat(cols.map(()=>''),[has?-(Number(row[g.key+'Common'])||0):'','']));
+      fmt.push([null,null].concat(cols.map(()=>null),[MONEY,null]));
+    }
+    const t=_kpiGroupTotals(row,g);
+    let sRev=0,sQty=0;
+    g.shops.forEach(shop=>{const d=_kpiShopCalc(row,g,shop);sRev+=_kpiRealRev(d);sQty+=Number(d.qty)||0;});
+    const sums=cols.map(f=>{
+      let sum=0,any=false;const seen=new Set();
+      g.shops.forEach(shop=>{
+        const cell=_kpiFillCell(g,shop,f);
+        if(cell.kind==='na'||cell.kind==='share')return;
+        const k=JSON.stringify(cell.segs);if(seen.has(k))return;seen.add(k);
+        const v=_kpiFillCur(row,cell).v;if(v!=null){any=true;sum+=Number(v)||0;}
+      });
+      return any?sum:'';
+    });
+    aoa.push(['小計',sQty>0?sRev/sQty:''].concat(sums,[t.totalPure,t.totalRev>0?t.pureRateAgg:'']));
+    fmt.push([null,MONEY].concat(cols.map(colFmt),[MONEY,PCT]));
+    const name=g.title.replace(/[\\\/?*\[\]:]/g,'').slice(0,31);   // 工作表名稱不能有 \ / ? * [ ] :、最長 31 字
+    XLSX.utils.book_append_sheet(wb,mkSheet(aoa,fmt,[16,11].concat(cols.map(()=>13),[13,9])),name);
+  });
+  XLSX.writeFile(wb,'KPI月結表_'+month+'.xlsx');
+}
+// ── 月結表入口：頂列（分頁在 renderKpiTab、這裡是年月＋進度鈕）→ 總覽或填寫模式 ──
+function _kpiMonthViewHtml(){
+  const month=_kpiYM();
+  const row=getOrCreateKpiRow(month);
+  const prevRow=getKpiRows().find(r=>r.month===_kpiPrevMonthKey(month))||null;
+  const ymOpts=_kpiMonthSelectOptions().map(ym=>`<option value="${ym}"${ym===month?' selected':''}>${ym.slice(0,4)}/${+ym.slice(5)}</option>`).join('');
+  const fc=_kpiFillCountAll(row);
+  const right=_kpiFillMode
+    ?`<button class="km-dl" onclick="kpiFillDownloadExcel()" title="下載這個月的月結表（總表＋各通路一張）">⬇ 下載 Excel</button><button class="km-back" onclick="kpiCloseFill()">← 回總覽</button>`
+    :(fc.missing===0
+      ?`<button class="km-progress done" onclick="kpiOpenFill()" title="全部填完，點擊進入填寫模式">✓ 填寫進度 ${fc.filled} / ${fc.total}</button>`
+      :`<button class="km-progress" onclick="kpiOpenFill()" title="還差 ${fc.missing} 格，點擊進入填寫模式">填寫進度 ${fc.filled} / ${fc.total}</button>`);
+  return `<div class="km-top">
+    <select class="mm-sel" onchange="setKpiYM(this.value)" title="選月份">${ymOpts}</select>
+    ${_kpiFillMode?`<span class="km-mode">填寫模式</span>${_kpiKeysHelpHtml()}`:''}
+    <span class="km-top-r">${right}</span>
+  </div>
+  ${_kpiFillMode?_kpiFillHtml(row):_kpiOverviewHtml(row,prevRow)}`;
 }
 // 找出某個賣場在某個欄位是否被合併（跟其他賣場共用一格）或不適用（例如 MOMO 寄倉運費：
 // 好麻吉/森之旅共用一格、甲配/露營館不適用），回傳 null 代表這個賣場照正常方式獨立編輯。
@@ -9531,251 +10337,6 @@ function _kpiRawForCalc(raw,group,shop,row){
   });
   return Object.keys(patch).length?{...raw,...patch}:raw;
 }
-function editKpiMergedField(month,mergeKey,tdEl){
-  const rows=getKpiRows();
-  // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：理由同 editKpiFieldNote
-  //   ——getKpiRows() 回傳的是活陣列本身，開編輯器就 push 的話，Esc 也撤不回來（Esc 只還原
-  //   innerHTML），那列全空的 row 會被之後任何一次 saveKpiRows 一起推上 Firestore。
-  //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
-  let row=rows.find(r=>r.month===month);
-  // 讀值與下面「值有沒有變」的比較必須是【同一種讀法】，否則會拿兩套語意互比。
-  //   ⚠ 這裡用 !=null【不是】||：0 是合法的合併值，要讀得出來（與同檔 editKpiCommonCost
-  //     的 row[fieldName]||'' 相反，那條 0 會被讀成 ''，兩邊的既有語意本來就不同，不要對齊）。
-  //   row 不存在（這個月從沒填過任何東西）→ 等同無值，用 '' 表示。
-  const curVal=(row?.kpiFieldMerges||{})[mergeKey]!=null?row.kpiFieldMerges[mergeKey]:'';
-  const origContent=tdEl.innerHTML;
-  const inp=document.createElement('input');
-  inp.type='number';inp.value=curVal;
-  inp.style.cssText='width:100px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
-  // 🔴 擋冒泡：onclick 掛在 tdEl 自己身上（見 _kpiGroupTableHtml 的 merged 分支），input 是
-  //   它的子節點 —— 不擋的話點進輸入框會冒泡回 td、再跑一次本函式，把輸入框整個重建、
-  //   打到一半的數字消失。寫法比照同檔 editKpiFieldNote。
-  inp.onclick=e=>e.stopPropagation();
-  // 🔴 擋滾輪：type=number 的 input 聚焦中會吃 wheel 直接改值 —— 使用者把游標停在框上捲頁面
-  //   就會靜默 ±step，一失焦就被判定「值有改」而寫進雲端。
-  //   ⚠ 這裡【刻意不照抄】PR #223 editScoreMonthlyCell 的無條件 preventDefault，不是漏抄：
-  //     那格是評分明細裡的單列 90px 輸入框；這格帶 rowspan（MOMO 寄倉運費跨 2 列）、又位在
-  //     _kpiGroupTableHtml 的 overflow-x:auto 容器裡（MOMO 組 12 欄，實務上要橫捲），
-  //     無條件擋會連 shift+滾輪的橫捲一起吃掉，垂直命中面積又是普通儲存格的兩倍。
-  //     而滾輪改值的前提是【輸入框處於聚焦狀態】—— 沒聚焦時滾輪本來就動不到值，
-  //     所以只在聚焦時擋就足以堵住那個洞，代價縮到最小。
-  inp.addEventListener('wheel',e=>{if(document.activeElement===inp)e.preventDefault();},{passive:false});
-  tdEl.innerHTML='';tdEl.appendChild(inp);inp.focus();if(inp.value)inp.select();
-  let done=false;
-  // 取消＝只把這一格的 innerHTML 換回去，【不呼叫 renderKpiTab】。理由同 editKpiFieldNote：
-  //   blur 發生在 mousedown，在那時整包重繪會把使用者剛按下的東西銷毀 → 第一下沒反應。
-  //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur。
-  //   ⚠ tdEl 帶 rowspan 且 onclick 掛在它自己身上，只換 innerHTML 不動節點 → 還原後照樣點得開。
-  const cancel=()=>{
-    if(done)return;done=true;
-    tdEl.innerHTML=origContent;
-  };
-  const commit=()=>{
-    if(done)return;
-    const s=inp.value.trim();
-    const v=parseFloat(s);
-    const hasVal=s!==''&&!isNaN(v);
-    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
-    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
-    //   ⚠ 兩側【分開判】而不是寫成 v===curVal：curVal 可能是 ''（無值），拿 0==='' 比恆 false。
-    //     hasVal 為 false 時要比的是「本來就沒有值嗎」——本來就沒有、Enter 時也是空的，
-    //     那不是「清空」而是【什麼都沒發生】，不該為它建出一列空 row。
-    if(hasVal?v===curVal:curVal===''){cancel();return;}
-    done=true;
-    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-    if(!row.kpiFieldMerges)row.kpiFieldMerges={};
-    // 清空＋Enter＝使用者明確要清掉這一格 → delete，維持原本的寫法（不寫 null）。
-    //   這個行為本來就是對的，本次【沒有改】—— 改的只是「誰能觸發它」：以前 blur 也會走到
-    //   這裡（全選 Backspace 後點旁邊＝合併值無聲消失），現在只有 Enter 到得了。
-    if(hasVal)row.kpiFieldMerges[mergeKey]=v;else delete row.kpiFieldMerges[mergeKey];
-    saveKpiRows(rows);
-    renderKpiTab();
-  };
-  // ⚠ ↑/↓ 一定要擋：type=number 聚焦中按 ↑/↓ 會直接 ±step（本框沒設 step ＝ ±1）改掉值，
-  //   而使用者按方向鍵想跳格是很自然的動作 —— 值被改掉後一失焦就會被判定「值有改」→
-  //   靜默寫進雲端。與上面 wheel 是同一類洞，發生機率更高，一併堵掉。作法同 PR #223。
-  //   （指路：spinner 那對上下箭頭不在這裡處理 —— css/main.css:68-73 已經全站關掉了。）
-  inp.addEventListener('keydown',e=>{
-    if(e.key==='Enter'){e.preventDefault();commit();}
-    if(e.key==='Escape'){e.preventDefault();cancel();}
-    if(e.key==='ArrowUp'||e.key==='ArrowDown')e.preventDefault();
-  });
-  // 失焦：已清空、或值沒變 → 一律當取消，不寫入；真的改成新值才存。
-  //   ⚠ 兩條【分開寫】，不併成 isNaN(v)||v===curVal 一條：那樣會把「使用者清空」與
-  //     「值沒變」混成同一件事，而前者正是本輪要修的那顆 bug，必須自己一條看得見。
-  //   ⚠ 120ms + activeElement 檢查是既有寫法，本次刻意保留不動（本輪只改判斷，不改時序）。
-  inp.addEventListener('blur',()=>setTimeout(()=>{
-    if(document.activeElement===inp)return;
-    const s=inp.value.trim();
-    if(s===''){cancel();return;}              // ① 已清空 → 取消（本輪主 bug）
-    const v=parseFloat(s);
-    if(isNaN(v)||v===curVal){cancel();return;} // ② 打不出數字 / 值沒變 → 取消
-    commit();
-  },120));
-}
-// 合併儲存格的編輯入口（薄包裝）：開編輯器，然後在輸入框正上方掛一行提示。
-// 🔴 存在的理由：那一格平常顯示的是【本通路分到的份額】（例如 342），點下去編輯器帶出來的
-//   卻是【兩家共用的總額】（1,740）。這個落差是拆格顯示的必然副作用，困惑發生在「點下去
-//   那一刻」，提示就出現在那一刻、那個位置。
-//   ⚠ 試過把總額直接印在格子裡（「342 共 1,740」），退場了：它把主值推離右緣，
-//     同一欄的 MOMO-寄倉 與小計是靠右的，個位數對不上；而且兩格主值長度不同，
-//     連彼此的起點都差一個字元。對齊比省一次點擊重要。
-// 🔴 【原函式 editKpiMergedField 一行都不動】—— 這是刻意的：PR #231 的四道防呆
-//   （wheel / ↑↓ / Esc / 120ms blur + activeElement）全部留在原地，本包裝只在它跑完之後
-//   多掛一個節點。
-// 🔴 提示元素 pointer-events:none（見 css .kpi-merge-hint），所以它【不可能被點到、不可能
-//   取得焦點、不可能觸發 td 的 onclick】⇒ 它在 blur 的判斷路徑上等同不存在。
-//   這比「在 blur handler 裡多判斷一個元素」可靠：沒有需要維護的例外分支。
-// ⚠ 清理不必自己做，三條收尾路徑都會帶走它：
-//   ① origContent 在本包裝呼叫【之前】就已擷取 ⇒ cancel() 的 innerHTML 還原不含提示
-//   ② commit() 走 renderKpiTab() 整表重繪
-//   ③ 原函式從進入到 appendChild(inp) 之間沒有任何 early return，不會出現「有提示沒編輯器」
-// ⚠ 提示文字走 data-merge-hint 屬性，不塞進 onclick 字串 —— 省掉一層引號跳脫。
-function editKpiMergedFieldHinted(month,mergeKey,tdEl){
-  editKpiMergedField(month,mergeKey,tdEl);
-  const hint=tdEl.dataset.mergeHint;
-  if(!hint)return;
-  const el=document.createElement('div');
-  el.className='kpi-merge-hint';
-  el.textContent=hint;   // textContent 不是 innerHTML：文字來自設定檔，但沒有理由開這個口
-  tdEl.appendChild(el);  // 不可聚焦的 div，append 不會把焦點從 inp 搶走
-}
-function _kpiGroupTableHtml(row,group){
-  const expanded=_kpiExpandedGroups.has(row.month+':'+group.key);
-  // 公式欄位（如稅金、實際營收、純利）現在也能點擊打數字覆蓋，不是只有手動欄位才能編輯。
-  const allCols=[...group.manual.map(c=>({...c,editable:true})),...group.formula.map(c=>({...c,editable:true}))];
-  if(group.commonCostLabel)allCols.push({k:'_common',l:group.commonCostShortLabel||group.commonCostLabel,editable:false,isCommon:true});
-  const cols=group.order?group.order.map(k=>allCols.find(c=>c.k===k)).filter(Boolean):allCols;
-  // 欄位固定表格版面＋每欄等寬，欄位之間才會平均分配空間，不會被瀏覽器依內容長短撐出忽大忽小的間隔。
-  const colgroup=`<colgroup><col style="width:130px">${cols.map(()=>`<col style="width:calc((100% - 130px)/${cols.length})">`).join('')}</colgroup>`;
-  const thead=`<tr style="background:#f8f9fc">
-    <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;background:#f8f9fc">${group.shops.length>1?'通路':'名稱'}</th>
-    ${cols.map(c=>{
-      if(c.isCommon){
-        return `<th style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap" title="${group.commonCostLabel}">${c.l}</th>`;
-      }
-      if(KPI_NOTEABLE_FIELDS.has(c.k)){
-        const note=(row.kpiFieldNotes||{})[group.key+':'+c.k];
-        const dot=note?` <span style="color:#f59e0b;font-size:8px" aria-hidden="true">●</span>`:'';
-        const title=note?`備註：${note.replace(/"/g,'&quot;')}（點擊修改，這個月共用一則）`:'點擊新增這個月的備註（例如：便利袋8000、宅配通7000）';
-        return `<th onclick="editKpiFieldNote('${row.month}','${group.key}','${c.k}',this)" style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap;cursor:pointer" title="${title}">${c.l}${dot}</th>`;
-      }
-      return `<th style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap">${c.l}</th>`;
-    }).join('')}
-  </tr>`;
-  const{pureKey}=_kpiGroupTotals(row,group);
-  // 共同費用：整組共用一筆，只影響小計純利，不分攤到各通路——用 rowspan 直向合併成一欄，不再另外多一行。
-  const commonField=group.key+'Common';
-  const commonCost=row[commonField]||0;
-  const totals={};
-  let totalRev=0,totalPure=0;
-  const bodyRows=group.shops.map((shop,shopIdx)=>{
-    const raw=row[group.key]?.[shop]||{};
-    // 合併／不適用欄位歸零 —— 抽成 _kpiRawForCalc 共用（原本這裡有六行，與單店全年、
-    //   年度總表逐字相同）。⚠ raw 本身仍要留著：下面 explicitlySet 判「有沒有明確存過值」
-    //   看的是原始 raw，不能拿歸零後的版本去判（那會把「不適用」判成「存過 0」）。
-    const rawForCalc=_kpiRawForCalc(raw,group,shop,row);
-    const d=_kpiCalcAll(rawForCalc,group);
-    totalRev+=d.rev||0;
-    totalPure+=d[pureKey]||0;
-    const cells=cols.map(c=>{
-      if(c.isCommon){
-        if(shopIdx!==0)return '';
-        const tid=`kpi-${row.month}-${group.key}-common`;
-        // 🔴 顯示判準是【key 在不在】，不是真值 —— 判準與同一張表一般格的 explicitlySet
-        //   （本函式下方搜 `有明確存過值`）逐字相同，不新造一套。
-        //   舊寫法是 commonCost?…:'—'：0 是 falsy ⇒ 存進去的 0 會印成「—」，與「從沒填過」
-        //   在畫面上完全無法分辨。使用者打 0 按 Enter 後看到「—」，無從確認存了沒。
-        //   ⚠ 上面那行 commonCost=row[commonField]||0 是【計算用】的（totalPure-=commonCost），
-        //     刻意不動；顯示另外判一次，兩者不共用一個變數。
-        const commonSet=row[commonField]!=null;
-        const dispVal=commonSet?fmtN(Math.round(commonCost)):'<span class="kpi-cell-empty">—</span>';
-        return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一通路）">${dispVal}</td>`;
-      }
-      const mergeStatus=_kpiFieldMergeStatus(group,c.k,shop);
-      if(mergeStatus?.type==='na'){
-        return `<td style="padding:6px 10px;text-align:right;font-size:12.5px;color:#d1d5db" title="這個通路不適用${c.l}">—</td>`;
-      }
-      if(mergeStatus?.type==='merged'){
-        // 🔴 2026-08-26：這一欄從「rowspan 一格顯示總額」改成【每個通路各自一格、顯示自己分到的份額】。
-        //   理由：純利已經按比例扣掉了，若畫面上只有一個總額，兩家的純利各少一截而找不到原因 ——
-        //   那與年度總表逐月純利漏扣共同費用是同一種病，不要再造一個。
-        //   ⚠ 編輯仍然是【集中的】：兩格的 onclick 都送同一個 mergeKey，editKpiMergedField
-        //     讀寫的都是那筆總額（見該函式 curVal 與 commit），所以它【一行都不用改】，
-        //     PR #231 的四道防呆（wheel / ↑↓ / Esc / 120ms blur）原樣保留。
-        const isLeader=shopIdx===group.shops.indexOf(mergeStatus.shops[0]);
-        const mergedVal=(row.kpiFieldMerges||{})[mergeStatus.mergeKey]||0;
-        // 🔴 總額只能進小計【一次】。舊版靠上面那行 early return 保證（非領頭直接 return ''，
-        //   跑不到這裡）；現在兩個通路都會走到，必須自己擋，否則這一欄小計會變成兩倍。
-        if(isLeader)totals[c.k]=(totals[c.k]||0)+mergedVal;
-        const tid=`kpi-${row.month}-${mergeStatus.mergeKey}-${shop}`.replace(/["'\s:]/g,'_');
-        // 判準是【key 在不在】，不是真值：存進去的 0 要顯示成 0，不能跟「從沒填過」一樣印成 —。
-        const mergedSet=(row.kpiFieldMerges||{})[mergeStatus.mergeKey]!=null;
-        // 本通路分到的份額：來自 _kpiRawForCalc 的攤提結果（ship 是 manual 欄，_kpiCalcAll 不會動它）。
-        const shareVal=d[c.k]||0;
-        //   ⚠ 格子裡【只有份額】，刻意不把總額一起印進來：那會把主值推離右緣，同一欄的
-        //     MOMO-寄倉 與小計是靠右的，個位數會對不上，兩格之間主值起點也差一個字元。
-        //     總額改在【編輯的當下】用提示告知（見 editKpiMergedFieldHinted）。
-        const dispVal=mergedSet
-          ?`<span class="kpi-merge-share">${fmtN(Math.round(shareVal))}</span>`
-          :'<span class="kpi-cell-empty">—</span>';
-        const by=group.fieldMerge?.[c.k]?.shareBy;
-        const byLabel=by?(group.manual.find(f=>f.k===by)?.l||by):'';
-        const title=mergedSet
-          ?`${mergeStatus.shops.join('+')}共用一筆${c.l} ${fmtN(Math.round(mergedVal))}${by?`，按${byLabel}比例攤到本通路 ${fmtN(Math.round(shareVal))}`:'（未設定攤提分母，本通路不分攤）'}。點擊編輯的是【總額】，不是這一格。`
-          :`${mergeStatus.shops.join('+')}共用一筆${c.l}，點擊編輯總額`;
-        // 編輯時要顯示的那一行。⚠ 關鍵是【改了兩邊都會變】這個後果，不是「這是總額」這個事實。
-        // 編輯時浮在輸入框正上方的兩行提示。兩行各講一件事，缺一不可：
-        //   ① 這裡填的是【總額】—— 使用者手上是新竹物流一張帳單，填的就是那張帳單的數字。
-        //   ② 各通路的金額是【算出來的、不能個別改】—— 那兩格是白底（看起來可編輯）、
-        //      顯示的卻是攤提結果，不講清楚會以為 1,398 可以直接改。
-        //   ⚠ 舊版只有「這是兩家共用的總額，改了兩邊都會變」：講了後果，沒講【為什麼格子上的
-        //     數字跟輸入框的數字不一樣】，而那正是使用者第一眼會卡住的地方。
-        //   ⚠ 換行用 &#10; 送進屬性（HTML parser 會解回真正的 \n），搭配 css 的 white-space:pre。
-        //     不用 <br>：提示是走 textContent 塞進去的，不為了排版開 innerHTML 這個口。
-        const editHint='這裡填的是兩家共用的總額\n各通路金額按訂單數自動分攤，不能個別改';
-        return `<td id="${tid}" class="kpi-merge-cell" data-merge-hint="${editHint.replace(/\n/g,'&#10;')}" onclick="editKpiMergedFieldHinted('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${title}">${dispVal}</td>`;
-      }
-      totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);
-      const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
-      const shopArg=shop.replace(/'/g,"\\'");
-      // 有明確存過值（就算是刻意打的 0）都要顯示出數字，不能因為是 0 就跟「完全沒填」一樣顯示 —。
-      const explicitlySet=raw[c.k]!=null;
-      const dispVal=explicitlySet?(c.fmt==='pct'?(d[c.k]*100).toFixed(2)+'%':fmtN(Math.round(d[c.k]))):_kpiFmt(d[c.k],c.fmt);
-      const isPure=c.k.startsWith('pure')&&c.fmt==='money';
-      const color=isPure?(d[c.k]>=0?'#059669':'#dc2626'):'#374151';
-      return `<td id="${tid}" onclick="kpiCellClick('${row.month}','${group.key}','${shopArg}','${c.k}',this,true)" style="padding:6px 10px;text-align:right;font-size:12.5px;color:${color};cursor:pointer;white-space:nowrap" title="點擊編輯；輸入 = 後點其他欄位可帶入公式，如 =實際營收*21%">${dispVal}</td>`;
-    }).join('');
-    return `<tr style="border-top:1px solid #f0f0f0">
-      <td style="padding:6px 12px;font-size:12.5px;font-weight:600;color:#374151;background:#fff;text-align:left;white-space:nowrap">${shop}</td>
-      ${cells}
-    </tr>`;
-  }).join('');
-  totalPure-=commonCost;
-  const pureRateAgg=totalRev>0?totalPure/totalRev:0;
-  const subtotalCells=cols.map(c=>{
-    if(c.isCommon)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${commonCost?fmtN(Math.round(commonCost)):'—'}</td>`;
-    if(c.k===pureKey)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:${totalPure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(totalPure))}</td>`;
-    if(c.k==='pureRate')return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${totalRev>0?(pureRateAgg*100).toFixed(2)+'%':'—'}</td>`;
-    // 比率／平均型欄位（成本佔比、廣告佔比、客單價）不能直接加總，要用小計後的加總數字重算；
-    // 其餘金額型欄位（不管原本是手動輸入還是公式，現在都能點擊覆蓋）本身可以加總，包含被手動覆蓋過的值。
-    if(c.fmt!=='pct'&&!c.avg)return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;font-weight:700;color:#374151">${totals[c.k]?fmtN(Math.round(totals[c.k])):'—'}</td>`;
-    return `<td style="padding:7px 10px;text-align:right;font-size:12.5px;color:#374151">${_kpiFmt(c.calc(totals),c.fmt)}</td>`;
-  }).join('');
-  const subtotalRow=`<tr style="border-top:1px solid #e5e7eb;background:#f8f9fc">
-    <td style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#374151;background:#f8f9fc;text-align:left;white-space:nowrap">小計</td>
-    ${subtotalCells}
-  </tr>`;
-  return `<div style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;overflow:hidden">
-    <div onclick="toggleKpiGroup('${row.month}','${group.key}')" style="padding:10px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;background:#fff">
-      <span style="font-size:13px;font-weight:700;color:#1e293b;border-left:3px solid ${group.color};padding-left:8px">${group.title}</span>
-      <span style="color:#9ca3af;display:inline-block;transition:transform .15s;transform:rotate(${expanded?90:0}deg)">▸</span>
-    </div>
-    ${expanded?`<div style="overflow-x:auto">
-      <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:700px">${colgroup}<thead>${thead}</thead><tbody>${bodyRows}${subtotalRow}</tbody></table>
-    </div>`:''}
-  </div>`;
-}
 // ── 檢視狀態：月結表／年度總表 切換、目前選的年月（預設今天所在的年月）──
 let _kpiViewMode='month';
 // 年度月營收堆疊圖的資料（由 _kpiYearViewHtml 產生、renderKpiYearChart 消費）。
@@ -9824,8 +10385,7 @@ function _kpiMaxNormalMonth(year){
 //      照樣算得出月份、下面整張表照樣渲染，變成「空下拉 + 明年的資料表，而且改不回來」。
 //   ③ 🔴 該月份【已經有 row 存在】→ 一律保留，即使它是還沒到的月份。
 //      不保留的話那些列會變成孤兒：年度總表照樣把它列成一欄（見 _kpiYearViewHtml 的
-//      visibleMonths），但月結表選不到 → 既編輯不了，也按不到「清空此月份」那顆
-//      （deleteKpiRow 只有月結表這一個入口）——【看得到、改不掉、刪不掉】。
+//      visibleMonths），但月結表選不到 → 編輯不了、清不掉 ——【看得到、改不掉、刪不掉】。
 //      未來月份怎麼會長出 row：以前四條編輯路徑（editKpiCell / editKpiFieldNote /
 //      editKpiCommonCost / editKpiMergedField）都是一進編輯器就先把空列 push 進 rows，
 //      blur 又無條件存檔 —— 點一下儲存格、什麼都沒打就失焦，那個月就被建出來了。
@@ -9870,27 +10430,35 @@ function setKpiViewMode(mode){_kpiViewMode=mode;renderKpiTab();}
 //   會（規則③保留有 row 的未來月）。今天 8 月、若有人誤點過 12 月留下一列，清單就是
 //   [12,8,7,…]，取 vis[0] 會讓「從明年切回今年」落在 12 月而不是 8 月，非常反直覺。
 // ⚠ _kpiMaxNormalMonth 的回傳值必定在清單內（m<=maxM 恆通過過濾），所以夾回不會夾到空值。
-// ⚠ _kpiCurMonthNum 全檔只有兩個寫入點：宣告處的初值（＝當月，恆合法）與 setKpiMonthNum
-//   （值只可能來自下拉、必定在清單內）。所以夾在這一支就夠，不必另外拆一支 clamp 函式。
+// ⚠ _kpiCurMonthNum 全檔只有兩個寫入點：宣告處的初值（＝當月，恆合法）與 setKpiYM
+//   （值只可能來自月結表的年月下拉、必定在清單內）。所以夾在這一支就夠，不必另外拆一支 clamp 函式。
+// ⚠ 本函式現在只剩年度總表的年份下拉在用（月結表改成 setKpiYM 單一年月選單，2026-09-23）。
 function setKpiYear(y){
   _kpiCurYear=parseInt(y);
   if(_kpiVisibleMonthNums(_kpiCurYear).indexOf(_kpiCurMonthNum)<0)_kpiCurMonthNum=_kpiMaxNormalMonth(_kpiCurYear);
   renderKpiTab();
 }
-function setKpiMonthNum(m){_kpiCurMonthNum=parseInt(m);renderKpiTab();}
-function _kpiMonthViewHtml(){
-  const month=_kpiYM();
-  const row=getOrCreateKpiRow(month);
-  const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===_kpiCurYear?' selected':''}>${y}年</option>`).join('');
-  const monthOpts=_kpiVisibleMonthNums(_kpiCurYear).map(m=>`<option value="${m}"${m===_kpiCurMonthNum?' selected':''}>${m}月</option>`).join('');
-  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
-    <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
-    <select onchange="setKpiMonthNum(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${monthOpts}</select>
-    <button onclick="deleteKpiRow('${month}')" style="background:none;border:none;color:#d1d5db;cursor:pointer;font-size:12px;margin-left:4px" title="清空這個月份的資料">清空此月份</button>
-  </div>
-  ${_kpiSummaryCardsHtml(row)}
-  ${KPI_GROUPS.map(g=>_kpiGroupTableHtml(row,g)).join('')}
-  <div style="margin-top:6px"><span style="font-size:11px;color:#9ca3af">灰底欄位為公式自動計算，白底欄位點擊可編輯，點分組列可展開/收合明細</span></div>`;
+// 月結表的年／月合併成【一個】選單（「2026/6」「2026/5」…由新到舊），總覽與填寫模式共用。
+//   · 2026/1 起到【下個月】每個月都列：每到新的一個月，清單就自動多出再下一個月（可以先開下個月來填）。
+//   · 2026 之前（含 2025 整年）：只列【有資料】的月份，避免下拉選單拉得很長（2026-09-23 使用者要求隱藏 2025）。
+//   · 🔴 有 row 的月份一律列出，不管哪一年（= _kpiVisibleMonthNums 的規則③）：
+//     否則年度總表看得到、月結表選不到 →【看得到、改不掉、刪不掉】的孤兒 row。
+//   · 目前選的月份一定在清單內：不在的話 <select> 會靜默顯示第一個選項，表格卻是另一個月。
+//   ⚠ 當場 new Date()，不重用模組載入時算好的 _KPI_NOW（分頁開著跨月不會更新，理由同 _kpiMaxNormalMonth）。
+function _kpiMonthSelectOptions(){
+  const d=new Date(),cy=d.getFullYear(),cm=d.getMonth()+1;
+  const set=new Set();
+  // 2026/1 → 下個月（每到新的一個月，清單自動多出再下一個月）；2026 之前只列有資料的月份（下面那行）。
+  const ny=cm===12?cy+1:cy,nm=cm===12?1:cm+1;
+  for(let y=2026;y<=ny;y++)for(let m=1;m<=(y===ny?nm:12);m++)set.add(y+'-'+String(m).padStart(2,'0'));
+  getKpiRows().forEach(r=>{if(r&&/^\d{4}-\d{2}$/.test(r.month))set.add(r.month);});
+  set.add(_kpiYM());
+  return [...set].sort().reverse();
+}
+function setKpiYM(v){
+  const m=/^(\d{4})-(\d{2})$/.exec(v||'');if(!m)return;
+  _kpiCurYear=+m[1];_kpiCurMonthNum=+m[2];
+  renderKpiTab();
 }
 // 年度總表：統一成一張表，列＝各賣場（依組別分段），欄＝12個月＋全年營收/純利/純利率，
 // 不再是「月份 x 組別」趨勢表跟「各賣場全年統計」上下兩張表並存。
@@ -9988,7 +10556,7 @@ function _kpiYearViewHtml(){
       const rate=annualRev>0?annualPure/annualRev*100:null;
       const bg=_kpiShopBgColor(shop);
       return `<tr style="border-top:1px solid #f0f0f0;background:${bg}">
-        <td rowspan="2" style="padding:6px 12px 6px 20px;font-size:12.5px;font-weight:600;color:#374151;text-align:left;white-space:nowrap;vertical-align:middle">${shop}</td>
+        <td rowspan="2" style="padding:6px 12px 6px 20px;font-size:12.5px;font-weight:600;color:#374151;text-align:left;white-space:nowrap;vertical-align:middle">${_kpiShopLabel(shop)}</td>
         <td style="padding:5px 8px;text-align:left;font-size:10.5px;color:#9ca3af;white-space:nowrap">營收</td>
         ${monthRevTds.join('')}
         <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;color:#6b7280;vertical-align:middle">${annualRev?fmtN(Math.round(annualRev)):'—'}${_kpiYoyHtml(annualRev,prev.rev)}</td>
@@ -10181,6 +10749,7 @@ function renderKpiTab(){
   //   而切到月結表／評分表時 renderKpiYearChart 根本不會被呼叫，
   //   實例就會一直握著一個已經不存在的 canvas。
   kpiYearDestroyCharts();
+  kpiMixDestroyChart();
   const modeTabsHtml=`<div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid #e5e7eb">
     <div onclick="setKpiViewMode('month')" style="padding:10px 20px;font-size:15px;font-weight:${_kpiViewMode==='month'?700:400};color:${_kpiViewMode==='month'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='month'?'#5b5fcf':'transparent'};cursor:pointer">月結表</div>
     <div onclick="setKpiViewMode('year')" style="padding:10px 20px;font-size:15px;font-weight:${_kpiViewMode==='year'?700:400};color:${_kpiViewMode==='year'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='year'?'#5b5fcf':'transparent'};cursor:pointer">年度總表</div>
@@ -10190,6 +10759,7 @@ function renderKpiTab(){
   el.innerHTML=`<div style="padding:14px 16px 16px">${modeTabsHtml}${body}</div>`;
   if(_kpiViewMode==='score'){renderScoreComparisonTable();renderScoreDetailPanel();}
   if(_kpiViewMode==='year'){renderKpiYearChart();}
+  if(_kpiViewMode==='month'&&!_kpiFillMode){renderKpiMixChart();}
 }
 // 年度總表的兩組折線圖：
 //   ① 全站月營收（一條線＝五個通路相加），緊接三張大卡，補充大卡的全年數字。
@@ -22126,8 +22696,9 @@ Object.assign(window, {
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
-  buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,
-  deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,editKpiMergedFieldHinted,
+  buildKpiTabHtml,renderKpiTab,getKpiRows,kpiWriteCell,__kpiMigrateToV2,setKpiViewMode,setKpiYear,
+  toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
+  kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillDownloadExcel,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
