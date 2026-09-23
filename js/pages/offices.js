@@ -1027,7 +1027,7 @@ Object.assign(App, {
       <div style="background:#1a7a6e;color:#fff;padding:12px 16px">
         <div style="font-size:15px;font-weight:700;margin-bottom:5px">📊 採購績效 KPI 計分架構</div>
         <div style="font-size:11px;opacity:.85;line-height:1.9">
-          每月總分 ＝ 選品季分 ÷ 3 ＋ 當月議價（40）＋ 當月出錯率（10）＋ 加分 − 扣分 &nbsp;｜&nbsp; 季累計 ＝ 三個月當月總分合計
+          每月總分 ＝ 選品季分（達標當月即給滿分，不均分）＋ 當月議價（40）＋ 當月出錯率（10）＋ 加分 − 扣分 &nbsp;｜&nbsp; 季累計 ＝ 三個月當月總分合計
         </div>
       </div>
       <div style="display:flex;gap:14px;padding:14px;flex-wrap:wrap;background:#f9fafb">
@@ -1340,7 +1340,7 @@ Object.assign(App, {
     const _actual8k  = _mgProfits.filter(p => p > 8000 && p <= 10000).length;
     const _actual5k  = _mgProfits.filter(p => p > 5000 && p <= 8000).length;
     const _selScore  = (_mgList.length >= 50 ? 30 : 0) + (_actual10k >= 2 ? 10 : 0) + (_actual8k >= 5 ? 6 : 0) + (_actual5k >= 5 ? 4 : 0);
-    const _selPerMonth = Math.round(_selScore / 3);
+    const _selPerMonth = _selScore;
 
     const nowM = new Date().getMonth() + 1;
     const curIdx = activeMonths.findIndex(m => parseInt(m) === nowM);
