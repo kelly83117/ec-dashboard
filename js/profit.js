@@ -9086,6 +9086,11 @@ function _kpiV2Install(){
   const ck=window.__cloudKpi;
   if(!ck||typeof ck.subscribe!=='function')return;
   _kpiV2.installed=true;
+  // profit.js 是動態載入（v690 起）：載入前 firebase.js 的 app/profit 訂閱已經把舊 _kpi_v1 備份寫進
+  //   Store._profitMem._kpi_v1（那時 __profitShouldSkipCloudOverwrite 還不存在、擋不到）。
+  //   搬移之後那是過期的備份 → 先清掉，讓 getKpiRows 退回 localStorage 鏡像（上次雲端確認過的資料），
+  //   等 app/kpi 第一個快照到了由 _kpiPublish 接手。
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) delete Store._profitMem._kpi_v1; }catch{}
   ck.subscribe(_kpiOnCloud,err=>{_kpiV2.cloudErr=err;console.error('[KPI] app/kpi 訂閱失敗（畫面停在本機鏡像）',err);});
   // 搬移前的底：舊 app/profit._kpi_v1。與 firebase.js 的 mergeAndNotify 訂同一份文件，SDK 共用同一條監聽，不多下載。
   if(window.__cloudProfit&&typeof window.__cloudProfit.subscribe==='function'){
