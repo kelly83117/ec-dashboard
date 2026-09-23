@@ -9804,7 +9804,7 @@ function _kpiChannelTableHtml(row,prevRow){
     return html;
   }).join('');
   const all=_kpiAllTotals(row),pa=prevRow?_kpiAllTotals(prevRow):null,ca=cmpCells(all,pa);
-  return `<div class="km-tablewrap"><table class="km-table">
+  return `<div class="km-tablewrap"><table class="km-table km-ch-table">
     <thead><tr><th>通路</th><th>純利率</th><th class="km-n">營收</th><th>較上月</th><th class="km-n">純利</th><th>較上月</th><th>純利率變化</th><th>填寫進度</th></tr></thead>
     <tbody>${body}</tbody>
     <tfoot><tr><td>合計</td><td>${_kpiRateBarHtml(all.rate,all.rev>0)}</td><td class="km-n">${_kpiMoney(all.rev)}</td><td class="km-c">${ca.rev}</td>

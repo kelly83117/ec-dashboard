@@ -1514,6 +1514,12 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-table .km-n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .km-table .km-c{white-space:nowrap;}
 .km-table tfoot td{font-weight:800;color:#1a1a2e;background:#f8f9fc;border-top:1px solid #e5e7eb;}
+/* 各通路表：整張字級比共用的 .km-table 小 1px（2026-09-23 使用者要求；填寫模式表格不受影響） */
+.km-ch-table{font-size:13px;}
+.km-ch-table td{font-size:13px;}   /* ⚠ 本檔另有全域 td{font-size:14px}（淨利表舊樣式），必須直接指定 td 才蓋得過 */
+.km-ch-table th{font-size:10px;}
+.km-ch-table .km-cmp{font-size:10px;}
+.km-ch-table .km-badge{font-size:10.5px;}
 .km-ch{cursor:pointer;}
 .km-ch:hover td{background:#fafbff;}
 .km-ch-name{font-weight:700;color:#1a1a2e;white-space:nowrap;}
