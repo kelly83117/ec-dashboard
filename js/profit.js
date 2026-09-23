@@ -9293,19 +9293,20 @@ const KPI_GROUPS=[
     }},
   // 2026-09-23 新增三個通路，欄位與公式照酷澎（訂單數／營收／商品成本／手續費／退貨運費／稅金／耗材）。
   //   key 用英文（寫進 app/kpi 的路徑），畫面名稱在 title／shops。
-  {key:'pchome',title:'PChome',color:'#d97706',shops:['PChome'],
+  //   since：從這個月起才算進填寫進度（之前的月份不把它們算成缺格；數字照樣可以填、照樣算進合計）。
+  {key:'pchome',since:'2026-08',title:'PChome',color:'#d97706',shops:['PChome'],
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
     formula:[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ret-d.tax-d.material)/d.rev:0},
     ]},
-  {key:'friday',title:'FriDay',color:'#0891b2',shops:['FriDay'],
+  {key:'friday',since:'2026-08',title:'FriDay',color:'#0891b2',shops:['FriDay'],
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
     formula:[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ret-d.tax-d.material)/d.rev:0},
     ]},
-  {key:'books',title:'博客來',color:'#8b5a2b',shops:['博客來'],
+  {key:'books',since:'2026-08',title:'博客來',color:'#8b5a2b',shops:['博客來'],
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
     formula:[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material},
@@ -9588,6 +9589,8 @@ function _kpiGroupT(row,g){
 //   共同費用（有 commonCostLabel 的組）算一格。公式欄位不算（它們由公式算出）。
 function _kpiFillSlots(row,group){
   const slots=[];const seen=new Set();
+  // group.since（例：新通路 '2026-08'）之前的月份 → 0 格（不列入進度，也不會顯示「暫」「未完成」）
+  if(group.since&&row&&row.month&&row.month<group.since)return slots;
   const box=(row&&row[group.key])||{};
   group.shops.forEach(shop=>{
     group.manual.forEach(f=>{
@@ -9612,6 +9615,7 @@ function _kpiFillCountAll(row){
   return KPI_GROUPS.reduce((a,g)=>{const c=_kpiFillCount(row,g);a.filled+=c.filled;a.total+=c.total;a.missing+=c.missing;return a;},{filled:0,total:0,missing:0});
 }
 function _kpiFillBadge(c){
+  if(c.total===0)return `<span class="km-badge km-badge-off" title="這個月還不列入填寫進度">不列入</span>`;
   return c.missing===0
     ?`<span class="km-badge km-badge-done">✓ ${c.filled} / ${c.total}</span>`
     :`<span class="km-badge">${c.filled} / ${c.total}</span>`;
@@ -9759,11 +9763,6 @@ function _kpiChannelTableHtml(row,prevRow){
         html+=`<tr class="km-ch-sub"><td class="km-ch-shop">${_kpiShopLabel(s)}</td><td>${_kpiRateBarHtml(rev>0?pure/rev:0,rev>0)}</td>
           <td class="km-n">${fmtN(rev)}</td><td></td><td class="km-n ${pure<0?'km-down':''}">${_kpiNum(pure)}</td><td></td><td></td><td></td></tr>`;
       });
-      if(g.commonCostLabel){
-        const cv=Number(row[g.key+'Common'])||0;
-        html+=`<tr class="km-ch-sub"><td class="km-ch-shop" title="${g.commonCostLabel}">共同費用（${g.commonCostShortLabel||'共同費用'}）</td><td></td><td></td><td></td>
-          <td class="km-n">${cv?'−'+fmtN(cv):'—'}</td><td></td><td></td><td></td></tr>`;
-      }
     }
     return html;
   }).join('');
@@ -9872,6 +9871,16 @@ function _kpiFmtTime(t){
   const hm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
   return d.toDateString()===n.toDateString()?hm:(d.getMonth()+1)+'/'+d.getDate()+' '+hm;
 }
+// 客單價＝實際營收 ÷ 訂單數（填寫模式最左的唯讀計算欄）。
+//   「實際營收」：有 actualRev 公式的組（MOMO：營收 − 退貨金額）用它；其他組用 rev。
+//   蝦皮本來就有 aov 公式欄（可能被手動覆蓋），直接用 _kpiCalcAll 算出的 d.aov，不另算一套。
+//   訂單數是 0 或沒填 → null（顯示「—」）。
+function _kpiRealRev(d){return d.actualRev!=null?Number(d.actualRev)||0:Number(d.rev)||0;}
+function _kpiAovOf(d,group){
+  if(!(Number(d.qty)>0))return null;
+  if(group.formula.some(f=>f.k==='aov'))return Number(d.aov)||0;
+  return _kpiRealRev(d)/Number(d.qty);
+}
 function _kpiFillHtml(row){
   const month=row.month;
   const group=_kpiFillGroupObj();
@@ -9885,7 +9894,7 @@ function _kpiFillHtml(row){
     return `<button class="km-side-item${g.key===group.key?' active':''}" onclick="kpiFillPickGroup('${g.key}')">
       <span class="km-dot" style="background:${g.color}"></span><span class="km-side-name">${g.title}</span>${_kpiFillBadge(fc)}</button>`;
   }).join('');
-  const head=`<tr><th class="km-f-shop">${group.shops.length>1?'通路':'名稱'}</th>${cols.map(f=>{
+  const head=`<tr><th class="km-f-shop">${group.shops.length>1?'通路':'名稱'}</th><th class="km-n km-f-rohead km-f-aov" title="實際營收 ÷ 訂單數（自動計算，不能直接改）">客單價</th>${cols.map(f=>{
     const note=KPI_NOTEABLE_FIELDS.has(f.k)?(row.kpiFieldNotes||{})[group.key+':'+f.k]:null;
     const noteBtn=KPI_NOTEABLE_FIELDS.has(f.k)
       ?`<span class="km-note${note?' has':''}" onclick="editKpiFieldNote('${month}','${group.key}','${f.k}',this)" title="${note?'備註：'+_kpiEscAttr(note)+'（點擊修改）':'點擊新增這個月的備註'}">${note?'●':'＋備註'}</span>`:'';
@@ -9905,7 +9914,8 @@ function _kpiFillHtml(row){
     const pure=Number(d[pureKey])||0;
     const rate=d.pureRate!=null?Number(d.pureRate):(d.rev>0?pure/d.rev:0);
     const tmp=tmpShops.has(shop)?`<span class="km-tmp" title="這家店還有欄位沒填，純利是暫時的">暫</span>`:'';
-    return `<tr><td class="km-f-shop">${_kpiShopLabel(shop)}</td>${cells}
+    const aov=_kpiAovOf(d,group);
+    return `<tr><td class="km-f-shop">${_kpiShopLabel(shop)}</td><td class="km-n km-f-ro km-f-aov"><div class="km-roval">${aov==null?'—':_kpiNum(aov)}</div></td>${cells}
       <td class="km-n km-f-ro km-f-ro-first ${pure<0?'km-down':''}"><div class="km-roval">${_kpiNum(pure)}${tmp}</div></td>
       <td class="km-n km-f-ro"><div class="km-roval">${Number(d.rev)>0?_kpiRatePct(rate):'—'}</div></td></tr>`;
   }).join('');
@@ -9913,7 +9923,7 @@ function _kpiFillHtml(row){
   if(group.commonCostLabel){
     const cell={kind:'common',segs:[group.key+'Common']};
     const cv=Number(row[group.key+'Common'])||0;
-    commonRow=`<tr class="km-f-common"><td class="km-f-shop" title="${group.commonCostLabel}">共同費用<div class="km-sublabel">${group.commonCostShortLabel||''}</div></td>
+    commonRow=`<tr class="km-f-common"><td class="km-f-shop" title="${group.commonCostLabel}">共同費用<div class="km-sublabel">${group.commonCostShortLabel||''}</div></td><td class="km-f-ro km-f-aov"></td>
       <td colspan="${cols.length}"><div class="km-common-in">${_kpiFillInputHtml(month,row,cell,group.shops.length,0)}</div></td>
       <td class="km-n km-f-ro km-f-ro-first"><div class="km-roval">${cv?'−'+fmtN(cv):'—'}</div></td><td class="km-f-ro"></td></tr>`;
   }
@@ -9930,7 +9940,10 @@ function _kpiFillHtml(row){
     });
     return `<td class="km-n">${any?_kpiNum(sum):'—'}</td>`;
   }).join('');
-  const subRow=`<tr class="km-f-sub"><td class="km-f-shop">小計${fc.missing?'<span class="km-tmp">未完成</span>':''}</td>${subCells}
+  // 小計客單價＝各店實際營收加總 ÷ 訂單數加總（不是各店客單價平均）
+  let sRev=0,sQty=0;group.shops.forEach(shop=>{const d=_kpiShopCalc(row,group,shop);sRev+=_kpiRealRev(d);sQty+=Number(d.qty)||0;});
+  const subAov=sQty>0?_kpiNum(sRev/sQty):'—';
+  const subRow=`<tr class="km-f-sub"><td class="km-f-shop">小計${fc.missing?'<span class="km-tmp">未完成</span>':''}</td><td class="km-n km-f-aov">${subAov}</td>${subCells}
     <td class="km-n km-f-ro-first ${t.totalPure<0?'km-down':''}">${_kpiNum(t.totalPure)}</td><td class="km-n">${t.totalRev>0?_kpiRatePct(t.pureRateAgg):'—'}</td></tr>`;
   const le=_kpiLastEdit(month,group.key);
   const gi=KPI_GROUPS.findIndex(g=>g.key===group.key);
@@ -9941,17 +9954,7 @@ function _kpiFillHtml(row){
   return `<div class="km-fill">
     <aside class="km-side">${side}</aside>
     <div class="km-fill-main">
-      <div class="km-fill-title"><span class="km-dot" style="background:${group.color}"></span>${group.title}<span class="km-fill-sub">${month.replace('-','/')} · 已填 ${fc.filled} / ${fc.total} 格</span></div>
-      <div class="km-keys" aria-label="鍵盤操作">
-        <span class="km-key"><kbd>Enter</kbd><kbd>↓</kbd>下一列</span>
-        <span class="km-key"><kbd>↑</kbd>上一列</span>
-        <span class="km-key"><kbd>Tab</kbd>右一格</span>
-        <span class="km-key"><kbd>Shift</kbd>+<kbd>Tab</kbd>左一格</span>
-        <span class="km-key"><kbd>Esc</kbd>還原</span>
-        <span class="km-key">清空後按 <kbd>Enter</kbd>＝刪除這格</span>
-        <span class="km-key">可打公式 <code>=營收*21%</code></span>
-        <span class="km-key">可從 Excel 貼上多格</span>
-      </div>
+      <div class="km-fill-title"><span class="km-dot" style="background:${group.color}"></span>${group.title}<span class="km-fill-sub">${month.replace('-','/')} · ${fc.total?`已填 ${fc.filled} / ${fc.total} 格`:`${group.since.replace('-','/')} 起才列入填寫進度（這個月可以填，但不算缺格）`}</span></div>
       <div class="km-tablewrap"><table class="km-table km-ftable"><thead>${head}</thead><tbody>${body}${commonRow}${subRow}</tbody></table></div>
       <div class="km-foot"><span class="km-foot-l">每格打完就存到雲端 · 最後編輯：${le?_kpiEscAttr(le.by||'?')+' '+_kpiFmtTime(le.t):'—'}</span>${nextBtn}</div>
     </div>
@@ -10120,6 +10123,17 @@ function kpiFillPaste(e,inp){
   _kpiFillRerender(inp.dataset.k);
 }
 
+// 填寫模式旁的「?」：滑鼠移上去（或 Tab 聚焦）才出現鍵盤操作說明，平常不佔版面。
+function _kpiKeysHelpHtml(){
+  const items=[
+    ['<kbd>Enter</kbd> <kbd>↓</kbd>','下一列'],['<kbd>↑</kbd>','上一列'],
+    ['<kbd>Tab</kbd>','右一格'],['<kbd>Shift</kbd>+<kbd>Tab</kbd>','左一格'],
+    ['<kbd>Esc</kbd>','還原這一格'],['清空後 <kbd>Enter</kbd>','刪除這一格'],
+    ['<code>=營收*21%</code>','可以打公式'],['從 Excel 複製','可貼上多格'],
+  ];
+  return `<span class="km-help" tabindex="0" role="button" aria-label="鍵盤操作說明">?<span class="km-help-pop" role="tooltip">
+    <span class="km-help-t">鍵盤操作</span>${items.map(([k,v])=>`<span class="km-help-k">${k}</span><span class="km-help-v">${v}</span>`).join('')}</span></span>`;
+}
 // ── 月結表入口：頂列（分頁在 renderKpiTab、這裡是年月＋進度鈕）→ 總覽或填寫模式 ──
 function _kpiMonthViewHtml(){
   const month=_kpiYM();
@@ -10134,7 +10148,7 @@ function _kpiMonthViewHtml(){
       :`<button class="km-progress" onclick="kpiOpenFill()">${_kpiCurMonthNum} 月已填 ${fc.filled} / ${fc.total} 格 · 還差 ${fc.missing} 格</button>`);
   return `<div class="km-top">
     <select class="mm-sel" onchange="setKpiYM(this.value)" title="選月份">${ymOpts}</select>
-    ${_kpiFillMode?'<span class="km-mode">填寫模式</span>':''}
+    ${_kpiFillMode?`<span class="km-mode">填寫模式</span>${_kpiKeysHelpHtml()}`:''}
     <span class="km-top-r">${right}</span>
   </div>
   ${_kpiFillMode?_kpiFillHtml(row):_kpiOverviewHtml(row,prevRow)}`;
@@ -10303,19 +10317,18 @@ function setKpiYear(y){
   renderKpiTab();
 }
 // 月結表的年／月合併成【一個】選單（「2026/6」「2026/5」…由新到舊），總覽與填寫模式共用。
-//   規則＝原本 _kpiYearOptions × _kpiVisibleMonthNums 跨年份攤平，「還沒到的月份不顯示」套到每一年：
-//   · 從（今年−2）年 1 月到當月，每個月都列 —— 下限同 _kpiYearOptions 的 cur-2。
-//   · 🔴 有 row 的月份一律列出，不管哪一年、是不是還沒到（= _kpiVisibleMonthNums 的規則③）：
+//   · 2025/1 起到【下個月】每個月都列：每到新的一個月，清單就自動多出再下一個月（可以先開下個月來填）。
+//   · 2025 之前：只列【有資料】的月份，避免下拉選單拉得很長（2026-09-23 使用者要求）。
+//   · 🔴 有 row 的月份一律列出，不管哪一年（= _kpiVisibleMonthNums 的規則③）：
 //     否則年度總表看得到、月結表選不到 →【看得到、改不掉、刪不掉】的孤兒 row。
-//     這條也涵蓋 cur-2 之前的舊資料（原本的年份下拉選不到那些年，攤平後反而選得到）。
 //   · 目前選的月份一定在清單內：不在的話 <select> 會靜默顯示第一個選項，表格卻是另一個月。
-//   ⚠ 原本年份下拉列到 cur+1、切過去 12 個月全列；攤平後明年的月份【只有有 row 的才列】——
-//     「還沒到的月份不顯示」這條規則現在套到每一年，不再只看年份框架。
 //   ⚠ 當場 new Date()，不重用模組載入時算好的 _KPI_NOW（分頁開著跨月不會更新，理由同 _kpiMaxNormalMonth）。
 function _kpiMonthSelectOptions(){
   const d=new Date(),cy=d.getFullYear(),cm=d.getMonth()+1;
   const set=new Set();
-  for(let y=cy-2;y<=cy;y++)for(let m=1;m<=(y===cy?cm:12);m++)set.add(y+'-'+String(m).padStart(2,'0'));
+  // 2025/1 → 下個月（每到新的一個月，清單自動多出再下一個月）；2025 之前只列有資料的月份（下面那行）。
+  const ny=cm===12?cy+1:cy,nm=cm===12?1:cm+1;
+  for(let y=2025;y<=ny;y++)for(let m=1;m<=(y===ny?nm:12);m++)set.add(y+'-'+String(m).padStart(2,'0'));
   getKpiRows().forEach(r=>{if(r&&/^\d{4}-\d{2}$/.test(r.month))set.add(r.month);});
   set.add(_kpiYM());
   return [...set].sort().reverse();
