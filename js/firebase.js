@@ -793,7 +793,7 @@ try {
   //     每條路徑都是 new FieldPath(...segments)：店名含 + ( ) 中文、備註 key 含 : 都不必跳脫。
   //     value === DELETE → deleteField()；物件值裡（任意層）=== TS → serverTimestamp()。
   //   ⚠ getDoc/subscribe 命名【必須】保留：本機防護碼與唯讀角色的讀取白名單是字串比對。writePaths 是唯一寫入。
-  //   ⚠ 新增這顆後本機防護掃到的雲端物件數為 18（見 CLAUDE.md TEST_NOWRITE 段）。
+  //   ⚠ 新增這顆後本機防護掃到的雲端物件數為 18、寫入方法 27（writePaths + smokeWritePaths；見 CLAUDE.md TEST_NOWRITE 段）。
   //   回滾：profit.js 的讀寫改回 _kpi_v1 即可，app/profit._kpi_v1 搬移時保留不刪。
   const kpiDocRef = doc(db, 'app', 'kpi');
   const KPI_DELETE = Symbol('kpiDelete');
@@ -808,31 +808,38 @@ try {
     }
     return v;
   };
-  const kpiUpdate = (pairs) => {
+  const kpiUpdate = (ref, pairs) => {
     const args = [];
     pairs.forEach(([segs, v]) => { args.push(new FieldPath(...segs), kpiVal(v)); });
-    return updateDoc(kpiDocRef, ...args);
+    return updateDoc(ref, ...args);
   };
+  // 文件不存在的處理比照 safeSetField，但建空文件用 merge:true —— 兩個人同時第一次寫入時，
+  //   後建的那個 setDoc({}) 不帶 merge 會把先寫進去的格子整份清掉。
+  const kpiWriteTo = async (ref, pairs) => {
+    if (!Array.isArray(pairs) || !pairs.length) return;
+    try {
+      await kpiUpdate(ref, pairs);
+    } catch (e) {
+      if (e && (e.code === 'not-found' || String(e).includes('No document to update'))) {
+        await setDoc(ref, {}, { merge: true });
+        await kpiUpdate(ref, pairs);
+      } else {
+        throw e;
+      }
+    }
+  };
+  // app/kpi_smoke：只給 __kpiSmokeTest（js/profit.js）驗「真的寫進 Firestore」那一段用，跟 app/kpi 同一支 kpiWriteTo。
+  //   ⚠ smokeWritePaths【寫死】這份文件、不收文件參數 ⇒ 它不可能寫到 app/kpi 或任何正式資料。
+  //   ⚠ 本機 TEST_NOWRITE 會照樣把它 no-op（它不在讀取白名單）；要真跑 smoke test，本機另貼「只放行這一支」的放行碼，
+  //     放行碼【不進 repo】。getDoc('smoke') 讀這份文件（getDoc 在讀取白名單內，防護碼開著也讀得到）。
+  const kpiSmokeRef = doc(db, 'app', 'kpi_smoke');
   window.__cloudKpi = {
     DELETE: KPI_DELETE,
     TS: KPI_TS,
-    getDoc: () => getDoc(kpiDocRef),
+    getDoc: (which) => getDoc(which === 'smoke' ? kpiSmokeRef : kpiDocRef),
     subscribe: (cb, onErr) => onSnapshot(kpiDocRef, snap => cb(snap.exists() ? (snap.data() || {}) : null), onErr),
-    // 文件不存在的處理比照 safeSetField，但建空文件用 merge:true —— 兩個人同時第一次寫入時，
-    //   後建的那個 setDoc({}) 不帶 merge 會把先寫進去的格子整份清掉。
-    writePaths: async (pairs) => {
-      if (!Array.isArray(pairs) || !pairs.length) return;
-      try {
-        await kpiUpdate(pairs);
-      } catch (e) {
-        if (e && (e.code === 'not-found' || String(e).includes('No document to update'))) {
-          await setDoc(kpiDocRef, {}, { merge: true });
-          await kpiUpdate(pairs);
-        } else {
-          throw e;
-        }
-      }
-    },
+    writePaths: (pairs) => kpiWriteTo(kpiDocRef, pairs),
+    smokeWritePaths: (pairs) => kpiWriteTo(kpiSmokeRef, pairs),
   };
 
   window.dispatchEvent(new Event('cloudStoreReady'));

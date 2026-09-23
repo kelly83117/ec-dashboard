@@ -61,12 +61,17 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    ⚠ 這段防護碼**刻意不存在於 repo 裡**：`grep TEST_NOWRITE` 零命中是**正確狀態**，不是異常，
    不要因為搜不到就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「TEST_NOWRITE v2 已啟用：18 個物件 / 26 個寫入方法已停用」**，才能放心測。
+   **「TEST_NOWRITE v2 已啟用：18 個物件 / 27 個寫入方法已停用」**，才能放心測。
    **判斷標準是「物件數對不對」：必須是 18**（2026-09-23 實測：加了 `__cloudKpi`（app/kpi，
    KPI 月結表）之後；加之前是 17 物件 / 25 方法）。
-   方法數 26 同日實測，只當參考；下方 table 的條數**以工具實際印出的為準**。
-   ⚠ v2 防護碼的 MUST 清單要含 `['__cloudKpi', 'writePaths']`、物件下限改 18，
-   否則新物件沒有 fail-loud 保護。
+   方法數 27 同日實測（`__cloudKpi` 貢獻 `writePaths` + `smokeWritePaths` 兩支），只當參考；
+   下方 table 的條數**以工具實際印出的為準**。
+   ⚠ v2 防護碼的 MUST 清單要含 `['__cloudKpi', 'writePaths']`、`['__cloudKpi', 'smokeWritePaths']`，
+   物件下限改 18，否則新物件沒有 fail-loud 保護。
+   ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
+   （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
+   `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
+   放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
 3. 沒看到這行紅字、或**物件數不是 18** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 

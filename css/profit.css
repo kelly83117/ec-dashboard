@@ -1089,16 +1089,6 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .mm-fee-note{color:#9ca3af;}
 .mm-fee-pred{font-size:11px;color:#9ca3af;margin-top:2px;}
 
-/* KPI 月結表：「這一格沒有值」的破折號。
-   🔴 存在的理由是【0 與無值必須分得出來】：物流運費／合併儲存格這兩格以前用真值判斷
-     （commonCost?…:'—'），存進去的 0 會被印成「—」，跟「從沒填過」在畫面上完全一樣 ——
-     使用者打完 0 按 Enter 看到「—」，無從確認自己那筆有沒有存成功。
-     判斷改成「key 在不在」之後，0 顯示成 0、只有真的沒有值才走這個 class。
-   ⚠ 判準沿用同一張表一般格既有的 explicitlySet（js/profit.js 搜 `有明確存過值`），
-     不是新造一套。
-   取代原本寫在 JS 字串裡的 inline style="color:#d1d5db"。 */
-.kpi-cell-empty{color:var(--text-faint);}
-
 /* KPI 評分表「賣場月度評分比較」的外框（容器 id=score-cmp-table，內容由
    renderScoreComparisonTable 以 innerHTML 填入一張 width:100% 的 table）。
    ⚠ 從 js/profit.js 的 inline style 搬過來，值【逐項對照、不改樣子】：
@@ -1122,56 +1112,6 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   border-radius:10px;
   overflow-x:auto;
   margin-bottom:10px;
-}
-
-/* KPI 月結表：合併儲存格（目前只有 MOMO 的寄倉運費：mo+0號店/mo+1號店 共用一筆）。
-   那一格從「rowspan 顯示總額」改成【每個通路各自一格、只顯示自己攤到的份額】。
-   ⚠ 曾經把總額一起印在格子裡（「342 共 1,740」），已退場：那會把主值推離右緣，
-     同一欄的 MOMO-寄倉 與小計是靠右的、個位數對不上，兩格之間主值起點也差一個字元。
-     總額改成【編輯的當下】才提示（.kpi-merge-hint）。對齊比省一次點擊重要。
-   ⚠ 顏色一律走 css/main.css:2 的 :root 變數，不寫死色碼、不碰 --bg。 */
-.kpi-merge-share{font-variant-numeric:tabular-nums;}
-
-/* 合併儲存格的定位基準。⚠ 只有 position:relative、沒有任何偏移 ⇒ 不移動任何一個像素，
-   純粹是給下面那個絕對定位的提示當 containing block。 */
-.kpi-merge-cell{position:relative;}
-
-/* 編輯時浮在輸入框正上方的提示（由 editKpiMergedFieldHinted 掛上、由編輯器的收尾路徑帶走）。
-   🔴 position:absolute —— 脫離文件流，【不可能撐高列、不可能撐寬欄】。平常那格沒有這個節點，
-     只有上面的 position:relative，所以非編輯狀態的版面與加這組樣式之前完全一樣。
-   🔴 bottom:100% 往【上】長，不往左也不往右：
-     · 往左會蓋掉同列的「實際營收」—— 那是編輯時唯一能讓人確認自己在編輯哪一家的參照，
-       蓋掉它反而更容易搞混，正好是這個提示要解決的問題。
-     · 往右（left:100%）在 LTR 會增加可捲寬度，可能讓外層 overflow-x:auto 多出一段橫向捲軸。
-     · 往上是垂直方向，在 overflow-x:auto 的容器裡不產生橫向捲軸；且 mo+0/mo+1 是第 3、4 列，
-       上面還有兩列，不會頂到表頭。
-   🔴 pointer-events:none —— 滑鼠事件穿透，它不可能被點到、不可能取得焦點、不可能觸發
-     td 的 onclick ⇒ 在 editKpiMergedField 的 blur 判斷路徑上等同不存在。
-     這比「在 blur handler 裡多判斷一個元素」可靠：沒有需要維護的例外分支。
-   ⚠ right:0 讓它靠著輸入框的右緣對齊，不會歪到鄰欄上方。 */
-.kpi-merge-hint{
-  position:absolute;
-  bottom:100%;
-  right:0;
-  margin-bottom:4px;
-  padding:3px 8px;
-  /* ⚠ pre 不是 nowrap：提示是兩行，換行字元由 JS 用 &#10; 送進 data-merge-hint。
-     pre 同時保留換行【並且不自動折行】—— 用 pre-line 的話寬度一窄就會自己再折，
-     行數變得不可預期，往上長的高度就跟著不可預期。 */
-  white-space:pre;
-  /* 內文靠左：td 是 text-align:right，繼承下來會讓兩行長度不一的句子右緣參差、很難讀。
-     這【不影響外框位置】—— 外框仍由下方的 right:0 對齊格子右緣。 */
-  text-align:left;
-  pointer-events:none;
-  font-size:11px;
-  line-height:1.5;
-  font-weight:400;
-  color:var(--text-muted);
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:6px;
-  box-shadow:var(--shadow-sm);
-  z-index:5;
 }
 
 /* ═══════════ 淨利表 · 平台分頁列（多組，永遠一排）═══════════
@@ -1497,3 +1437,140 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 
 /* KPI 月結表：這一格寫入 app/kpi 失敗（或 10 秒還沒確認）→ 標紅。由 kpiWriteCell 記錄、_kpiBadCls 套上。 */
 .kpi-cell-failed{background:#fee2e2 !important;box-shadow:inset 0 0 0 1.5px #dc2626;}
+
+/* ═══════════ KPI 月結表（2026-09-23 改版）：總覽 + 填寫模式 ═══════════
+   前綴 .km-（KPI monthly）：.kpi-* 已被淨利表頁首的 KPI 條（.kpi-strip / .kpi-big-row…）用掉，不混用。
+   顏色一律走 :root token；「較上月」的綠紅刻意用 #059669 / #dc2626（與年度總表 _kpiYoyHtml 一致，
+   規則見 js/profit.js 搜 _kpiCmpOk 上方那段），不是 --success / --danger。 */
+.km-up{color:#059669;}
+.km-down{color:#dc2626;}
+.km-top{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
+.km-top-r{margin-left:auto;}
+.km-mode{font-size:12px;font-weight:700;color:var(--primary);background:var(--primary-soft);padding:3px 10px;border-radius:999px;}
+.km-progress,.km-back,.km-next{padding:7px 14px;border-radius:var(--radius-sm);border:1px solid var(--warn);background:var(--warn-soft);color:#92400e;font-size:13px;font-weight:700;cursor:pointer;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-progress.done{border-color:var(--success);background:var(--success-soft);color:#047857;}
+.km-back{border-color:var(--border);background:var(--surface);color:var(--text-muted);}
+.km-next{border-color:var(--primary);background:var(--primary);color:#fff;}
+.km-empty{padding:24px 0;text-align:center;color:var(--text-muted);font-size:13px;}
+.km-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0;}
+.km-cmp{display:block;font-size:12px;font-weight:600;margin-top:2px;white-space:nowrap;}
+td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
+/* A2 大數字列 */
+.km-big{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:10px;margin-bottom:16px;}
+.km-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 18px;min-width:0;}
+.km-card-dark{background:var(--sidebar);border-color:var(--sidebar);color:#fff;}
+.km-card-dark .km-l,.km-card-dark .km-sub{color:var(--sidebar-muted);}
+.km-card-dark .km-up{color:#34d399;}
+.km-card-dark .km-down{color:#f87171;}
+.km-l{font-size:12px;color:var(--text-muted);font-weight:600;}
+.km-v{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.km-card-dark .km-v{font-size:28px;}
+.km-sub{font-size:12px;margin-top:4px;font-variant-numeric:tabular-nums;}
+/* 面板 */
+.km-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;margin-bottom:12px;}
+.km-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:12px;min-width:0;}
+.km-two .km-panel{margin-bottom:0;}
+.km-panel-t{font-size:14px;font-weight:700;color:var(--text);margin-bottom:12px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+.km-panel-hint{font-size:12px;font-weight:400;color:var(--text-muted);}
+/* A3 瀑布圖 */
+.km-wf-row{display:grid;grid-template-columns:76px 1fr 110px 58px;align-items:center;gap:8px;padding:4px 0;font-size:12.5px;}
+.km-wf-l{color:var(--text);font-weight:600;white-space:nowrap;}
+.km-wf-track{position:relative;height:16px;background:var(--bg);border-radius:4px;}
+.km-wf-bar{position:absolute;top:0;bottom:0;border-radius:3px;}
+.km-wf-rev{background:#94a3b8;}
+.km-wf-cost{background:#fca5a5;}
+.km-wf-pure{background:#059669;}
+.km-wf-loss{background:#dc2626;}
+.km-wf-v{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-wf-p{text-align:right;color:var(--text-muted);font-variant-numeric:tabular-nums;white-space:nowrap;}
+/* A4 營收組成 */
+.km-mix-bar{display:flex;height:18px;border-radius:5px;overflow:hidden;background:var(--bg);margin-bottom:10px;}
+.km-mix-seg{height:100%;min-width:2px;}
+.km-mix-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:6px 12px;margin-bottom:12px;}
+.km-mix-item{display:flex;align-items:center;gap:6px;font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-mix-name{font-weight:600;color:var(--text);}
+.km-mix-share{font-weight:700;}
+.km-mix-rate{color:var(--text-muted);margin-left:auto;}
+.km-hl-t{font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:6px;border-top:1px solid var(--border);padding-top:10px;}
+.km-hl{margin:0;padding:0;list-style:none;font-size:12.5px;line-height:1.9;color:var(--text);}
+.km-tag{display:inline-block;font-size:11px;font-weight:700;padding:0 7px;border-radius:999px;background:var(--bg);border:1px solid var(--border);margin-right:6px;color:var(--text-muted);}
+.km-tag.km-up{color:#059669;border-color:#a7f3d0;background:#ecfdf5;}
+.km-tag.km-down{color:#dc2626;border-color:#fecaca;background:#fef2f2;}
+/* A5 各通路表 + 填寫模式共用的表格 */
+.km-tablewrap{overflow-x:auto;}
+.km-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+.km-table th{text-align:left;padding:7px 10px;color:var(--text-muted);font-size:11.5px;font-weight:700;background:var(--bg);white-space:nowrap;border-bottom:1px solid var(--border);}
+.km-table td{padding:7px 10px;border-top:1px solid #f0f0f0;vertical-align:middle;text-align:left;}
+.km-table .km-n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-table .km-c{white-space:nowrap;}
+.km-table tfoot td{font-weight:700;background:var(--bg);border-top:1px solid var(--border);}
+.km-ch{cursor:pointer;}
+.km-ch:hover td{background:#fafbff;}
+.km-ch-name{font-weight:700;white-space:nowrap;}
+.km-ch-name .km-dot{margin:0 6px 0 4px;}
+.km-caret{color:var(--text-muted);display:inline-block;transition:transform .15s;width:10px;}
+.km-caret.open{transform:rotate(90deg);}
+.km-ch-sub td{background:#fcfcfd;color:var(--text-muted);}
+.km-table td.km-ch-shop{padding-left:34px;white-space:nowrap;}
+.km-rate{display:flex;align-items:center;gap:8px;min-width:130px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-rate-track{flex:1;height:8px;background:var(--bg);border-radius:4px;overflow:hidden;min-width:60px;}
+.km-rate-fill{height:100%;background:#059669;border-radius:4px;}
+.km-rate-fill.km-rate-neg{background:#dc2626;}
+.km-badge{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--warn-soft);color:#92400e;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-badge-done{background:var(--success-soft);color:#047857;}
+/* B 填寫模式 */
+.km-fill{display:grid;grid-template-columns:150px minmax(0,1fr);gap:14px;align-items:start;}
+.km-side{display:flex;flex-direction:column;gap:6px;position:sticky;top:8px;}
+.km-side-item{display:flex;align-items:center;gap:6px;padding:8px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);cursor:pointer;font-size:13px;text-align:left;}
+.km-side-item.active{border-color:var(--primary);background:var(--primary-soft);}
+.km-side-name{font-weight:700;color:var(--text);flex:1;}
+.km-keys{margin-top:8px;font-size:11.5px;line-height:1.8;color:var(--text-muted);background:var(--bg);border-radius:var(--radius-sm);padding:10px;}
+.km-keys b{color:var(--text);}
+.km-fill-main{min-width:0;}
+.km-fill-title{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700;margin-bottom:10px;}
+.km-fill-sub{font-size:12.5px;font-weight:400;color:var(--text-muted);}
+.km-ftable{font-size:12px;}
+.km-ftable th{vertical-align:bottom;white-space:normal;padding:6px 4px;}
+.km-ftable td{padding:6px 4px;white-space:normal;}
+.km-ftable td.km-f-shop{white-space:normal;min-width:64px;max-width:96px;line-height:1.35;}
+.km-ftable td{vertical-align:top;}
+.km-ftable th:not(.km-f-shop){text-align:right;}
+.km-th{display:flex;justify-content:flex-end;align-items:center;gap:2px 4px;flex-wrap:wrap;}
+.km-note{font-size:10.5px;font-weight:600;color:var(--text-muted);cursor:pointer;}
+.km-note.has{color:var(--warn);font-size:9px;}
+.km-copy{display:block;margin:3px 0 0 auto;font-size:10.5px;padding:1px 6px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text-muted);cursor:pointer;white-space:nowrap;}
+.km-copy:hover{border-color:var(--primary);color:var(--primary);}
+.km-f-shop{font-weight:600;color:var(--text);white-space:nowrap;}
+.km-in{width:100%;min-width:56px;box-sizing:border-box;padding:4px 5px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;background:var(--surface);color:var(--text);outline:none;}
+.km-in:focus{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-soft);}
+.km-in.km-empty{border:1.5px dashed var(--warn);}
+.km-in.km-warn{border:1.5px solid var(--warn);background:var(--warn-soft);}
+.km-in.km-invalid{border:1.5px solid var(--danger);background:var(--danger-soft);}
+.km-in.km-has-formula{background-image:linear-gradient(135deg,var(--primary-soft) 0 8px,transparent 8px);}
+.km-prev{font-size:10.5px;color:#9ca3af;text-align:right;margin-top:2px;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.km-hint{font-size:10.5px;line-height:1.3;color:var(--primary);text-align:right;margin-bottom:2px;}
+.km-f-share .km-prev{white-space:normal;line-height:1.3;}
+.km-f-na{text-align:right;color:var(--text-faint);}
+.km-f-share{text-align:right;}
+.km-shareval{padding:5px 7px;font-variant-numeric:tabular-nums;color:var(--text-muted);}
+.km-table td.km-f-ro{color:var(--text);font-weight:600;padding-top:12px;}
+.km-tmp{display:inline-block;margin-left:5px;font-size:10.5px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:#92400e;vertical-align:1px;}
+.km-f-common td{background:#fcfcfd;}
+.km-common-in{display:flex;align-items:flex-start;gap:8px;max-width:240px;}
+.km-common-in .km-copy{margin-top:6px;}
+.km-f-sub td{font-weight:700;background:var(--bg);border-top:1px solid var(--border);}
+.km-anom{margin-top:10px;border:1px solid var(--warn);background:var(--warn-soft);border-radius:var(--radius-sm);padding:10px 12px;font-size:12.5px;}
+.km-anom-t{font-weight:700;color:#92400e;margin-bottom:6px;}
+.km-anom-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:3px 0;font-variant-numeric:tabular-nums;}
+.km-btn-sm{padding:3px 10px;border-radius:6px;border:1px solid var(--warn);background:var(--surface);color:#92400e;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.km-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;flex-wrap:wrap;}
+.km-foot-l{font-size:12px;color:var(--text-muted);}
+.km-done{font-size:13px;font-weight:700;color:#047857;}
+.km-danger{margin-top:24px;padding-top:12px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-muted);}
+.km-clear{padding:5px 12px;border-radius:6px;border:1px solid var(--danger);background:var(--surface);color:var(--danger);font-size:12.5px;font-weight:600;cursor:pointer;}
+@media (max-width:900px){
+  .km-big{grid-template-columns:1fr 1fr;}
+  .km-fill{grid-template-columns:1fr;}
+  .km-side{position:static;flex-direction:row;flex-wrap:wrap;}
+  .km-keys{display:none;}
+}
