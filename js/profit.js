@@ -10269,7 +10269,7 @@ function _kpiMonthViewHtml(){
       ?`<button class="km-progress done" onclick="kpiOpenFill()" title="全部填完，點擊進入填寫模式">✓ 填寫進度 ${fc.filled} / ${fc.total}</button>`
       :`<button class="km-progress" onclick="kpiOpenFill()" title="還差 ${fc.missing} 格，點擊進入填寫模式">填寫進度 ${fc.filled} / ${fc.total}</button>`);
   return `<div class="km-top">
-    <select class="mm-sel km-month-sel" onchange="setKpiYM(this.value)" title="選月份">${ymOpts}</select>
+    <select class="mm-sel" onchange="setKpiYM(this.value)" title="選月份">${ymOpts}</select>
     ${_kpiFillMode?`<span class="km-mode">填寫模式</span>${_kpiKeysHelpHtml()}`:''}
     <span class="km-top-r">${right}</span>
   </div>
