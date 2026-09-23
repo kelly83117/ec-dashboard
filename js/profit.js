@@ -9632,7 +9632,7 @@ function _kpiBigNumbersHtml(row,prevRow){
   const pct=(a,b)=>ok?_kpiCmpPctHtml(a,b):'';
   const pp=ok&&c.rev>0?' '+_kpiCmpPpHtml(c.rate,p.rate):'';
   return `<div class="km-big">
-    <div class="km-card km-card-dark">
+    <div class="km-card km-card-main">
       <div class="km-l">全通路純利</div>
       <div class="km-v">${_kpiMoney(c.pure)}</div>
       ${pct(c.pure,p&&p.pure)}
@@ -9717,25 +9717,54 @@ function _kpiWaterfallHtml(w){
     </div>`;}).join('')}</div>`;
 }
 
-// ── A4 營收組成 + 本月重點 ──
-function _kpiMixHtml(row,prevRow){
-  const gs=KPI_GROUPS.map(g=>({g,cur:_kpiGroupT(row,g),prev:_kpiGroupT(prevRow,g)}));
+// ── A4 營收組成（圓餅圖）──
+//   圓餅圖只畫營收 > 0 的通路（0 元畫不出扇形）；右側清單照樣列出全部通路。
+//   Chart 實例由 renderKpiMixChart 建、renderKpiTab 開頭 kpiMixDestroyChart 清（innerHTML 重畫會把舊 canvas 換掉，
+//   不 destroy 的話實例會一直握著脫離文件的 canvas——同 kpiYearDestroyCharts 的理由）。
+let _kpiMixChartData=null;
+let _kpiMixChart=null;
+function kpiMixDestroyChart(){ if(_kpiMixChart){ try{_kpiMixChart.destroy();}catch(e){} _kpiMixChart=null; } }
+function _kpiMixHtml(row){
+  const gs=KPI_GROUPS.map(g=>({g,cur:_kpiGroupT(row,g)}));
   const tot=gs.reduce((a,x)=>a+x.cur.rev,0);
-  if(!(tot>0))return `<div class="km-empty">這個月還沒有營收資料</div>`;
-  const bar=gs.filter(x=>x.cur.rev>0).map(x=>`<div class="km-mix-seg" style="width:${x.cur.rev/tot*100}%;background:${x.g.color}" title="${x.g.title} ${(x.cur.rev/tot*100).toFixed(1)}%"></div>`).join('');
-  const list=gs.map(x=>`<div class="km-mix-item"><span class="km-dot" style="background:${x.g.color}"></span><span class="km-mix-name">${x.g.title}</span>
-    <span class="km-mix-share">${(x.cur.rev/tot*100).toFixed(1)}%</span><span class="km-mix-rate">純利率 ${x.cur.rev>0?_kpiRatePct(x.cur.rate):'—'}</span></div>`).join('');
-  // 本月重點：成長／下滑兩句只看通過 cmpOk 的通路（不可比的跳過）；都沒有就不出那一句。
-  const cmp=gs.filter(x=>_kpiCmpOk(x.prev)).map(x=>({...x,d:(x.cur.pure-x.prev.pure)/x.prev.pure}));
+  if(!(tot>0)){_kpiMixChartData=null;return '<div class="km-empty">這個月還沒有營收資料</div>';}
+  const pie=gs.filter(x=>x.cur.rev>0);
+  _kpiMixChartData={labels:pie.map(x=>x.g.title),data:pie.map(x=>x.cur.rev),colors:pie.map(x=>x.g.color),total:tot};
+  const list=gs.map(x=>'<div class="km-mix-item"><span class="km-dot" style="background:'+x.g.color+'"></span><span class="km-mix-name">'+x.g.title+'</span>'
+    +'<span class="km-mix-share">'+(x.cur.rev/tot*100).toFixed(1)+'%</span>'
+    +'<span class="km-mix-rate">純利率 '+(x.cur.rev>0?_kpiRatePct(x.cur.rate):'—')+'</span></div>').join('');
+  return '<div class="km-mix"><div class="km-mix-pie"><canvas id="kpi-mix-pie"></canvas></div><div class="km-mix-list">'+list+'</div></div>';
+}
+function renderKpiMixChart(){
+  const d=_kpiMixChartData;
+  const c=document.getElementById('kpi-mix-pie');
+  if(!d||!c||typeof Chart==='undefined')return;   // 沒資料／CDN 沒載到：右側清單照樣看得到
+  const o=Chart.getChart(c); if(o){try{o.destroy();}catch(e){}}
+  _kpiMixChart=new Chart(c.getContext('2d'),{
+    type:'pie',
+    data:{labels:d.labels,datasets:[{data:d.data,backgroundColor:d.colors,borderColor:'#fff',borderWidth:2}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},   // 圖例用右側清單（含純利率），不用 Chart 內建的
+        tooltip:{callbacks:{label:ctx=>ctx.label+'　$'+fmtN(ctx.parsed)+'（'+(ctx.parsed/d.total*100).toFixed(1)+'%）'}},
+      },
+    },
+  });
+}
+// ── 本月重點（月份選單下方、四張大卡上方）──
+//   成長／下滑兩句只看通過 cmpOk 的通路（不可比的跳過）；都沒有就不出那一句；三句都沒有就整條不出。
+function _kpiHighlightsHtml(row,prevRow){
+  const gs=KPI_GROUPS.map(g=>({g,cur:_kpiGroupT(row,g),prev:_kpiGroupT(prevRow,g)}));
+  const cmp=gs.filter(x=>_kpiCmpOk(x.prev)).map(x=>Object.assign({},x,{d:(x.cur.pure-x.prev.pure)/x.prev.pure}));
   const up=cmp.filter(x=>x.d>0).sort((a,b)=>b.d-a.d)[0];
   const down=cmp.filter(x=>x.d<0).sort((a,b)=>a.d-b.d)[0];
   const best=gs.filter(x=>x.cur.rev>0).sort((a,b)=>b.cur.rate-a.cur.rate)[0];
   const hl=[];
-  if(up)hl.push(`<li><span class="km-tag km-up">純利成長最多</span>${up.g.title} <b class="km-up">+${(up.d*100).toFixed(1)}%</b>（${_kpiMoney(up.prev.pure)} → ${_kpiMoney(up.cur.pure)}）</li>`);
-  if(down)hl.push(`<li><span class="km-tag km-down">純利下滑最多</span>${down.g.title} <b class="km-down">−${Math.abs(down.d*100).toFixed(1)}%</b>（${_kpiMoney(down.prev.pure)} → ${_kpiMoney(down.cur.pure)}）</li>`);
-  if(best)hl.push(`<li><span class="km-tag">純利率最高</span>${best.g.title} <b>${_kpiRatePct(best.cur.rate)}</b></li>`);
-  return `<div class="km-mix-bar">${bar}</div><div class="km-mix-list">${list}</div>
-    ${hl.length?`<div class="km-hl-t">本月重點</div><ul class="km-hl">${hl.join('')}</ul>`:''}`;
+  if(up)hl.push('<span class="km-hl-item"><span class="km-tag km-up">純利成長最多</span>'+up.g.title+' <b class="km-up">▲'+(up.d*100).toFixed(1)+'%</b><span class="km-hl-sub">'+_kpiMoney(up.prev.pure)+' → '+_kpiMoney(up.cur.pure)+'</span></span>');
+  if(down)hl.push('<span class="km-hl-item"><span class="km-tag km-down">純利下滑最多</span>'+down.g.title+' <b class="km-down">▼'+Math.abs(down.d*100).toFixed(1)+'%</b><span class="km-hl-sub">'+_kpiMoney(down.prev.pure)+' → '+_kpiMoney(down.cur.pure)+'</span></span>');
+  if(best)hl.push('<span class="km-hl-item"><span class="km-tag">純利率最高</span>'+best.g.title+' <b>'+_kpiRatePct(best.cur.rate)+'</b></span>');
+  return hl.length?'<div class="km-hl"><span class="km-hl-t">本月重點</span>'+hl.join('')+'</div>':'';
 }
 
 // ── A5 各通路表（唯讀；編輯一律到填寫模式）──
@@ -9781,10 +9810,11 @@ function _kpiChannelTableHtml(row,prevRow){
 function _kpiOverviewHtml(row,prevRow){
   const w=_kpiWaterfall(row);
   _kpiLogWaterfall(row.month,w);
-  return `${_kpiBigNumbersHtml(row,prevRow)}
+  return `${_kpiHighlightsHtml(row,prevRow)}
+    ${_kpiBigNumbersHtml(row,prevRow)}
     <div class="km-two">
       <div class="km-panel"><div class="km-panel-t">營收成本結構</div><div class="km-panel-sub">本月全通路營收扣除各項成本與費用後的純利，百分比為佔營收比例。</div>${_kpiWaterfallHtml(w)}</div>
-      <div class="km-panel"><div class="km-panel-t">營收組成</div>${_kpiMixHtml(row,prevRow)}</div>
+      <div class="km-panel"><div class="km-panel-t">營收組成</div>${_kpiMixHtml(row)}</div>
     </div>
     <div class="km-panel"><div class="km-panel-t">各通路<span class="km-panel-hint">點通路看各店；要改數字請按右上角進入填寫模式</span></div>${_kpiChannelTableHtml(row,prevRow)}</div>`;
 }
@@ -10714,6 +10744,7 @@ function renderKpiTab(){
   //   而切到月結表／評分表時 renderKpiYearChart 根本不會被呼叫，
   //   實例就會一直握著一個已經不存在的 canvas。
   kpiYearDestroyCharts();
+  kpiMixDestroyChart();
   const modeTabsHtml=`<div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid #e5e7eb">
     <div onclick="setKpiViewMode('month')" style="padding:10px 20px;font-size:15px;font-weight:${_kpiViewMode==='month'?700:400};color:${_kpiViewMode==='month'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='month'?'#5b5fcf':'transparent'};cursor:pointer">月結表</div>
     <div onclick="setKpiViewMode('year')" style="padding:10px 20px;font-size:15px;font-weight:${_kpiViewMode==='year'?700:400};color:${_kpiViewMode==='year'?'#5b5fcf':'#9ca3af'};border-bottom:2px solid ${_kpiViewMode==='year'?'#5b5fcf':'transparent'};cursor:pointer">年度總表</div>
@@ -10723,6 +10754,7 @@ function renderKpiTab(){
   el.innerHTML=`<div style="padding:14px 16px 16px">${modeTabsHtml}${body}</div>`;
   if(_kpiViewMode==='score'){renderScoreComparisonTable();renderScoreDetailPanel();}
   if(_kpiViewMode==='year'){renderKpiYearChart();}
+  if(_kpiViewMode==='month'&&!_kpiFillMode){renderKpiMixChart();}
 }
 // 年度總表的兩組折線圖：
 //   ① 全站月營收（一條線＝五個通路相加），緊接三張大卡，補充大卡的全年數字。
