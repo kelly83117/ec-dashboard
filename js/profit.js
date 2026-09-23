@@ -9815,8 +9815,8 @@ function _kpiChannelTableHtml(row,prevRow){
 function _kpiOverviewHtml(row,prevRow){
   const w=_kpiWaterfall(row);
   _kpiLogWaterfall(row.month,w);
-  return `${_kpiHighlightsHtml(row,prevRow)}
-    ${_kpiBigNumbersHtml(row,prevRow)}
+  return `${_kpiBigNumbersHtml(row,prevRow)}
+    ${_kpiHighlightsHtml(row,prevRow)}
     <div class="km-two">
       <div class="km-panel"><div class="km-panel-t">營收成本結構</div><div class="km-panel-sub">本月全通路營收扣除各項成本與費用後的純利，百分比為佔營收比例。</div>${_kpiWaterfallHtml(w)}</div>
       <div class="km-panel"><div class="km-panel-t">營收組成</div>${_kpiMixHtml(row)}</div>

@@ -1458,10 +1458,11 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .km-cmp{display:block;font-size:11px;font-weight:600;margin-top:2px;white-space:nowrap;}
 td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 /* A2 大數字列 */
-.km-big{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:10px;margin-bottom:16px;}
-.km-card{background:#fff;border:1px solid #eef0f4;border-radius:9px;padding:12px 16px;min-width:0;}
+/* 四張大卡是整頁的主角：白底、陰影、頂部主色線、數字最大；下面的本月重點刻意退一階（淡灰底、無陰影、字小一號） */
+.km-big{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:12px;margin-bottom:12px;}
+.km-card{background:#fff;border:1px solid #e5e7eb;border-top:3px solid #6366f1;border-radius:10px;padding:14px 18px;min-width:0;box-shadow:0 2px 8px rgba(15,23,42,.07),0 1px 2px rgba(15,23,42,.05);}
 .km-l{font-size:11px;color:#9ca3af;font-weight:600;}
-.km-v{font-size:20px;font-weight:800;color:#1a1a2e;font-variant-numeric:tabular-nums;margin:2px 0 1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.km-v{font-size:24px;font-weight:800;color:#1a1a2e;font-variant-numeric:tabular-nums;margin:2px 0 1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .km-sub{font-size:11px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums;}
 /* 面板 */
 .km-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;margin-bottom:12px;}
@@ -1489,22 +1490,22 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-mix-share{font-weight:800;color:#1a1a2e;text-align:right;}
 .km-mix-rate{color:#9ca3af;font-weight:600;text-align:left;padding-left:10px;}
 /* 本月重點：三張小卡並排（月份選單下、四張大卡上）。左側色條：綠＝成長、紅＝下滑、紫＝純利率最高 */
-.km-hl{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin:0 0 12px;}
-.km-hl-card{background:#fff;border:1px solid #eef0f4;border-left:4px solid #c7d2fe;border-radius:9px;padding:9px 14px;min-width:0;}
+.km-hl{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin:0 0 16px;}
+.km-hl-card{background:#f8f9fc;border:1px solid #eef0f4;border-left:4px solid #c7d2fe;border-radius:9px;padding:8px 14px;min-width:0;}
 .km-hl-card.up{border-left-color:#059669;}
 .km-hl-card.down{border-left-color:#dc2626;}
 .km-hl-card.best{border-left-color:#6366f1;}
 .km-hl-l{font-size:11px;font-weight:600;color:#9ca3af;}
 .km-hl-main{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:2px;}
-.km-hl-name{display:inline-flex;align-items:center;gap:6px;font-size:14px;font-weight:700;color:#1a1a2e;white-space:nowrap;}
-.km-hl-big{font-size:18px;font-weight:800;color:#1a1a2e;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-hl-name{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#1a1a2e;white-space:nowrap;}
+.km-hl-big{font-size:16px;font-weight:800;color:#1a1a2e;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .km-hl-big.km-up{color:#059669;}.km-hl-big.km-down{color:#dc2626;}
 .km-hl-sub{font-size:11px;color:#9ca3af;font-weight:500;margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 /* 營收組成：左圓餅、右清單 */
 .km-mix{display:flex;align-items:center;gap:18px;}
 .km-mix-pie{position:relative;width:170px;height:170px;flex-shrink:0;}
 /* 全通路純利卡：配色同其他三張，只用略寬的欄位與數字色區分 */
-.km-card-main .km-v{font-size:22px;}
+.km-card-main .km-v{font-size:26px;}
 /* A5 各通路表 + 填寫模式共用的表格 */
 .km-tablewrap{overflow-x:auto;}
 .km-table{width:100%;border-collapse:collapse;font-size:12.5px;color:#374151;}
