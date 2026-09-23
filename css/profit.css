@@ -1468,8 +1468,6 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;margin-bottom:12px;}
 .km-panel{background:#fff;border:1px solid #eef0f2;border-radius:10px;padding:12px 14px;margin-bottom:12px;min-width:0;}
 .km-two .km-panel{margin-bottom:0;}
-/* 各通路卡：與四張大卡同一組主角樣式（白底、陰影、頂部主色線） */
-.km-panel-main{border:1px solid #e5e7eb;border-top:3px solid #6366f1;border-radius:10px;padding:14px 16px;box-shadow:0 2px 8px rgba(15,23,42,.07),0 1px 2px rgba(15,23,42,.05);}
 .km-panel-t{font-size:13px;font-weight:700;color:#374151;margin-bottom:10px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
 .km-panel-hint{font-size:11px;font-weight:500;color:#9ca3af;}
 /* A3 瀑布圖 */

@@ -9821,7 +9821,7 @@ function _kpiOverviewHtml(row,prevRow){
       <div class="km-panel"><div class="km-panel-t">營收成本結構</div><div class="km-panel-sub">本月全通路營收扣除各項成本與費用後的純利，百分比為佔營收比例。</div>${_kpiWaterfallHtml(w)}</div>
       <div class="km-panel"><div class="km-panel-t">營收組成</div>${_kpiMixHtml(row)}</div>
     </div>
-    <div class="km-panel km-panel-main"><div class="km-panel-t">各通路<span class="km-panel-hint">點通路看各店；要改數字請按右上角進入填寫模式</span></div>${_kpiChannelTableHtml(row,prevRow)}</div>`;
+    <div class="km-panel"><div class="km-panel-t">各通路<span class="km-panel-hint">點通路看各店；要改數字請按右上角進入填寫模式</span></div>${_kpiChannelTableHtml(row,prevRow)}</div>`;
 }
 
 // ══════ B 填寫模式（同一個 KPI 分頁內切換；年月沿用目前選的）══════
