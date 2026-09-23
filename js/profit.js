@@ -9630,14 +9630,14 @@ function _kpiBigNumbersHtml(row,prevRow){
   // 訂單數／客單價也是除法：基期訂單數 0 一樣不可比 → 併進同一道守衛（仍然全有或全無）。
   const ok=_kpiCmpOk(p)&&p.qty>0;
   const pct=(a,b)=>ok?_kpiCmpPctHtml(a,b):'';
-  const pp=ok&&c.rev>0?' '+_kpiCmpPpHtml(c.rate,p.rate):'';
+  const pp=ok&&c.rev>0?_kpiCmpPpHtml(c.rate,p.rate):'';   // 純利率卡的較上月用 pp（百分點），同一道守衛
   return `<div class="km-big">
     <div class="km-card km-card-main">
       <div class="km-l">全通路純利</div>
       <div class="km-v">${_kpiMoney(c.pure)}</div>
       ${pct(c.pure,p&&p.pure)}
-      <div class="km-sub">純利率 ${c.rev>0?_kpiRatePct(c.rate):'—'}${pp}</div>
     </div>
+    <div class="km-card"><div class="km-l">純利率</div><div class="km-v">${c.rev>0?_kpiRatePct(c.rate):'—'}</div>${pp}</div>
     <div class="km-card"><div class="km-l">營收</div><div class="km-v">${_kpiMoney(c.rev)}</div>${pct(c.rev,p&&p.rev)}</div>
     <div class="km-card"><div class="km-l">訂單數</div><div class="km-v">${c.qty?fmtN(c.qty):'—'}</div>${pct(c.qty,p&&p.qty)}</div>
     <div class="km-card"><div class="km-l">客單價</div><div class="km-v">${c.qty?_kpiMoney(c.aov):'—'}</div>${pct(c.aov,p&&p.aov)}</div>
