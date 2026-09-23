@@ -1540,17 +1540,19 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-note{font-size:10.5px;font-weight:600;color:var(--text-muted);cursor:pointer;}
 .km-note.has{color:var(--warn);font-size:9px;}
 .km-f-shop{font-weight:600;color:var(--text);white-space:nowrap;}
-.km-in{width:100%;min-width:56px;box-sizing:border-box;padding:4px 5px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;background:var(--surface);color:var(--text);outline:none;}
+.km-in{width:100%;min-width:56px;box-sizing:border-box;height:28px;line-height:18px;padding:4px 5px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;background:var(--surface);color:var(--text);outline:none;}
 .km-in:focus{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-soft);}
 .km-in.km-empty{border:1.5px dashed var(--warn);}
 .km-in.km-invalid{border:1.5px solid var(--danger);background:var(--danger-soft);}
 .km-in.km-has-formula{background-image:linear-gradient(135deg,var(--primary-soft) 0 8px,transparent 8px);}
-.km-sublabel{font-size:10.5px;color:#9ca3af;margin-top:2px;line-height:1.3;}
-.km-hint{font-size:10.5px;line-height:1.3;color:var(--primary);text-align:right;margin-bottom:2px;}
-.km-f-na{text-align:right;color:var(--text-faint);}
+.km-sublabel{font-size:10.5px;color:#9ca3af;margin-top:3px;line-height:1.3;text-align:right;}
+.km-sublabel-hint{color:var(--primary);}
+.km-f-shop .km-sublabel{text-align:left;}
+.km-f-na{text-align:right;color:var(--text-faint);line-height:28px;}
 .km-f-share{text-align:right;}
-.km-shareval{padding:5px 7px;font-variant-numeric:tabular-nums;color:var(--text-muted);}
-.km-table td.km-f-ro{color:var(--text);font-weight:600;padding-top:12px;}
+.km-shareval{box-sizing:border-box;min-height:28px;padding:4px 6px;border:1px solid transparent;font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;color:var(--text-muted);}
+.km-table td.km-f-ro{color:var(--text);font-weight:600;}
+.km-roval{box-sizing:border-box;min-height:28px;padding:4px 0;border:1px solid transparent;line-height:18px;white-space:nowrap;}
 .km-tmp{display:inline-block;margin-left:5px;font-size:10.5px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:#92400e;vertical-align:1px;}
 .km-f-common td{background:#fcfcfd;}
 .km-common-in{display:flex;align-items:flex-start;gap:8px;max-width:240px;}

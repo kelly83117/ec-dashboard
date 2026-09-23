@@ -9865,15 +9865,16 @@ function _kpiFillHtml(row){
       const cell=_kpiFillCell(group,shop,f);
       if(cell.kind==='na')return `<td class="km-f-na" title="這個通路不適用${f.l}">—</td>`;
       if(cell.kind==='share')return `<td class="km-f-share"><div class="km-shareval">${_kpiNum(d[f.k])}</div><div class="km-sublabel">${_kpiMergeHint(group,cell.st,f.k)}</div></td>`;
-      const hint=cell.kind==='merge'?`<div class="km-hint">${_kpiMergeHint(group,cell.st,f.k)}（填總額）</div>`:'';
-      return `<td>${hint}${_kpiFillInputHtml(month,row,cell,ri,ci)}</td>`;
+      // 小字一律放在輸入框【下方】：放上方會把框往下推，跟同一列其他格的框線對不齊。
+      const hint=cell.kind==='merge'?`<div class="km-sublabel km-sublabel-hint">${_kpiMergeHint(group,cell.st,f.k)}（填總額）</div>`:'';
+      return `<td>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
     }).join('');
     const pure=Number(d[pureKey])||0;
     const rate=d.pureRate!=null?Number(d.pureRate):(d.rev>0?pure/d.rev:0);
     const tmp=tmpShops.has(shop)?`<span class="km-tmp" title="這家店還有欄位沒填，純利是暫時的">暫</span>`:'';
     return `<tr><td class="km-f-shop">${shop}</td>${cells}
-      <td class="km-n km-f-ro ${pure<0?'km-down':''}">${_kpiNum(pure)}${tmp}</td>
-      <td class="km-n km-f-ro">${Number(d.rev)>0?_kpiRatePct(rate):'—'}</td></tr>`;
+      <td class="km-n km-f-ro ${pure<0?'km-down':''}"><div class="km-roval">${_kpiNum(pure)}${tmp}</div></td>
+      <td class="km-n km-f-ro"><div class="km-roval">${Number(d.rev)>0?_kpiRatePct(rate):'—'}</div></td></tr>`;
   }).join('');
   let commonRow='';
   if(group.commonCostLabel){
@@ -9881,7 +9882,7 @@ function _kpiFillHtml(row){
     const cv=Number(row[group.key+'Common'])||0;
     commonRow=`<tr class="km-f-common"><td class="km-f-shop" title="${group.commonCostLabel}">共同費用<div class="km-sublabel">${group.commonCostShortLabel||''}</div></td>
       <td colspan="${cols.length}"><div class="km-common-in">${_kpiFillInputHtml(month,row,cell,group.shops.length,0)}</div></td>
-      <td class="km-n km-f-ro">${cv?'−'+fmtN(cv):'—'}</td><td></td></tr>`;
+      <td class="km-n km-f-ro"><div class="km-roval">${cv?'−'+fmtN(cv):'—'}</div></td><td></td></tr>`;
   }
   // 小計：manual 欄位直接加總（合併欄位只算總額一次、不適用略過）；純利／純利率＝_kpiGroupTotals。
   const t=_kpiGroupTotals(row,group);
