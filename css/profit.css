@@ -1446,6 +1446,7 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .km-down{color:#dc2626;}
 .km-top{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
 .km-top-r{margin-left:auto;}
+.km-month-sel{min-width:140px;padding:6px 12px;font-size:14px;font-weight:700;color:#1a1a2e;}
 .km-mode{font-size:12px;font-weight:700;color:var(--primary);background:var(--primary-soft);padding:3px 10px;border-radius:999px;}
 .km-progress,.km-back,.km-next{padding:7px 14px;border-radius:var(--radius-sm);border:1px solid var(--warn);background:var(--warn-soft);color:#92400e;font-size:13px;font-weight:700;cursor:pointer;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .km-progress.done{border-color:var(--success);background:var(--success-soft);color:#047857;}
