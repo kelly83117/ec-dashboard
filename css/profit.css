@@ -1450,6 +1450,8 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .km-progress,.km-back,.km-next{padding:7px 14px;border-radius:var(--radius-sm);border:1px solid var(--warn);background:var(--warn-soft);color:#92400e;font-size:13px;font-weight:700;cursor:pointer;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .km-progress.done{border-color:var(--success);background:var(--success-soft);color:#047857;}
 .km-back{border-color:var(--border);background:var(--surface);color:var(--text-muted);}
+.km-dl{padding:7px 14px;border-radius:var(--radius-sm);border:1px solid #cbd5e1;background:#fff;color:#374151;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;margin-right:8px;}
+.km-dl:hover{border-color:var(--primary);color:var(--primary);}
 .km-next{border-color:var(--primary);background:var(--primary);color:#fff;}
 .km-empty{padding:24px 0;text-align:center;color:var(--text-muted);font-size:13px;}
 .km-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0;}
@@ -1582,8 +1584,14 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-help code{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;background:#27273f;border-radius:4px;padding:0 5px;color:#fff;}
 /* 新通路 since 之前：不列入進度 */
 .km-badge-off{background:#f3f4f6;color:#9ca3af;}
+/* 填寫表格欄多（MOMO 8 個填寫欄＋客單價／純利／純利率），金額又帶 $：1500px 以下左側通路清單改成表格上方一排分頁，
+   把寬度讓給表格（1280 寬時側欄會把表格擠出橫向捲軸、輸入框裡的數字被截掉）。 */
+@media (max-width:1499px){
+  .km-fill{grid-template-columns:minmax(0,1fr);gap:10px;}
+  .km-side{position:static;flex-direction:row;flex-wrap:wrap;gap:6px;}
+  .km-side-item{padding:6px 10px;}
+  .km-side-item.active{box-shadow:inset 0 -2px 0 var(--primary);}
+}
 @media (max-width:900px){
   .km-big{grid-template-columns:1fr 1fr;}
-  .km-fill{grid-template-columns:1fr;}
-  .km-side{position:static;flex-direction:row;flex-wrap:wrap;}
 }

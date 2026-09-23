@@ -9267,7 +9267,7 @@ const KPI_GROUPS=[
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ship)/d.rev:0},
     ]},
   {key:'momo',title:'MOMO',color:'#3a7bd5',shops:['MOMO-甲配','MOMO-寄倉','mo+0號店(好麻吉)','mo+1號店(森之旅)'],
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收(進價稅)'},{k:'cost',l:'商品成本'},{k:'ret',l:'退貨金額'},{k:'ship',l:'寄倉運費'},{k:'misc',l:'各項費用'},{k:'material',l:'耗材'},{k:'receivable',l:'應收帳款11日'}],
+    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收(進價稅)'},{k:'cost',l:'商品成本'},{k:'ret',l:'退貨金額'},{k:'ship',l:'寄倉運費'},{k:'misc',l:'各項費用'},{k:'material',l:'耗材'},{k:'receivable',l:'應收帳款'}],
     formula:[
       {k:'actualRev',l:'實際營收',fmt:'money',calc:d=>d.rev-d.ret},
       {k:'tax',l:'稅金(5%)',fmt:'money',calc:d=>(d.rev-d.ret)*0.05},
@@ -9554,14 +9554,17 @@ function toggleKpiGroup(month,groupKey){
 function _kpiCmpOk(prev){return !!(prev&&prev.rev>0&&prev.pure>0);}
 function _kpiCmpPctHtml(cur,base){
   const d=(cur-base)/base*100;
-  return `<span class="km-cmp ${d>=0?'km-up':'km-down'}">較上月 ${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}%</span>`;
+  return `<span class="km-cmp ${d>=0?'km-up':'km-down'}" title="較上月">${d>=0?'▲':'▼'}${Math.abs(d).toFixed(1)}%</span>`;
 }
 function _kpiCmpPpHtml(cur,base){
   const d=(cur-base)*100;
-  return `<span class="km-cmp ${d>=0?'km-up':'km-down'}">${d>=0?'+':'−'}${Math.abs(d).toFixed(1)}pp</span>`;
+  return `<span class="km-cmp ${d>=0?'km-up':'km-down'}" title="純利率較上月（百分點）">${d>=0?'▲':'▼'}${Math.abs(d).toFixed(1)}pp</span>`;
 }
 // 金額／數字格式：fmtN 取絕對值，負號要自己補。
-function _kpiMoney(v){v=Number(v)||0;return (v<0?'−':'')+'NT$'+fmtN(v);}
+function _kpiMoney(v){v=Number(v)||0;return (v<0?'−':'')+'$'+fmtN(v);}
+// 這個欄位是不是金額：訂單數（qty）是件數，其他 manual 欄與合併欄、共同費用都是錢。
+function _kpiIsMoneyField(k){return k!=='qty';}
+function _kpiCellIsMoney(cell){return cell.kind==='cell'?_kpiIsMoneyField(cell.segs[2]):true;}
 function _kpiNum(v){v=Number(v)||0;return (v<0?'-':'')+fmtN(v);}
 function _kpiRatePct(r){return (r*100).toFixed(2)+'%';}
 function _kpiEscAttr(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
@@ -9701,8 +9704,8 @@ function _kpiWaterfallHtml(w){
   // 右側文字：「金額 · 佔營收 %」。成本類是扣掉的 → 前面加「−」（差額「其他」若是負值則顯示「+」）；
   //   營收那條只寫「100%」；純利照實際正負號、不加扣除的負號。
   const amt=b=>{
-    if(b.kind==='cost')return (b.v>=0?'−':'+')+fmtN(b.v);
-    return _kpiNum(b.v);
+    if(b.kind==='cost')return (b.v>=0?'−':'+')+'$'+fmtN(b.v);
+    return _kpiMoney(b.v);
   };
   const pc=b=>b.kind==='rev'?'100%':Math.abs(pct(b.v)).toFixed(1)+'%';
   return `<div class="km-wf">${bars.map(b=>{
@@ -9752,8 +9755,8 @@ function _kpiChannelTableHtml(row,prevRow){
     let html=`<tr class="km-ch" onclick="toggleKpiGroup('${month}','${g.key}')">
       <td class="km-ch-name"><span class="km-caret${open?' open':''}">▸</span><span class="km-dot" style="background:${g.color}"></span>${g.title}</td>
       <td>${_kpiRateBarHtml(cur.rate,cur.rev>0)}</td>
-      <td class="km-n">${fmtN(cur.rev)}</td><td class="km-c">${cc.rev}</td>
-      <td class="km-n ${cur.pure<0?'km-down':''}">${_kpiNum(cur.pure)}</td><td class="km-c">${cc.pure}</td>
+      <td class="km-n">${_kpiMoney(cur.rev)}</td><td class="km-c">${cc.rev}</td>
+      <td class="km-n ${cur.pure<0?'km-down':''}">${_kpiMoney(cur.pure)}</td><td class="km-c">${cc.pure}</td>
       <td class="km-c">${cc.pp}</td>
       <td class="km-c">${_kpiFillBadge(_kpiFillCount(row,g))}</td>
     </tr>`;
@@ -9761,7 +9764,7 @@ function _kpiChannelTableHtml(row,prevRow){
       g.shops.forEach(s=>{
         const d=_kpiShopCalc(row,g,s);const rev=Number(d.rev)||0,pure=Number(d[cur.pureKey])||0;
         html+=`<tr class="km-ch-sub"><td class="km-ch-shop">${_kpiShopLabel(s)}</td><td>${_kpiRateBarHtml(rev>0?pure/rev:0,rev>0)}</td>
-          <td class="km-n">${fmtN(rev)}</td><td></td><td class="km-n ${pure<0?'km-down':''}">${_kpiNum(pure)}</td><td></td><td></td><td></td></tr>`;
+          <td class="km-n">${_kpiMoney(rev)}</td><td></td><td class="km-n ${pure<0?'km-down':''}">${_kpiMoney(pure)}</td><td></td><td></td><td></td></tr>`;
       });
     }
     return html;
@@ -9770,8 +9773,8 @@ function _kpiChannelTableHtml(row,prevRow){
   return `<div class="km-tablewrap"><table class="km-table">
     <thead><tr><th>通路</th><th>純利率</th><th class="km-n">營收</th><th>較上月</th><th class="km-n">純利</th><th>較上月</th><th>純利率變化</th><th>填寫進度</th></tr></thead>
     <tbody>${body}</tbody>
-    <tfoot><tr><td>合計</td><td>${_kpiRateBarHtml(all.rate,all.rev>0)}</td><td class="km-n">${fmtN(all.rev)}</td><td class="km-c">${ca.rev}</td>
-      <td class="km-n ${all.pure<0?'km-down':''}">${_kpiNum(all.pure)}</td><td class="km-c">${ca.pure}</td><td class="km-c">${ca.pp}</td>
+    <tfoot><tr><td>合計</td><td>${_kpiRateBarHtml(all.rate,all.rev>0)}</td><td class="km-n">${_kpiMoney(all.rev)}</td><td class="km-c">${ca.rev}</td>
+      <td class="km-n ${all.pure<0?'km-down':''}">${_kpiMoney(all.pure)}</td><td class="km-c">${ca.pure}</td><td class="km-c">${ca.pp}</td>
       <td class="km-c">${_kpiFillBadge(_kpiFillCountAll(row))}</td></tr></tfoot>
   </table></div>`;
 }
@@ -9833,7 +9836,7 @@ function _kpiFillInputHtml(month,row,cell,r,c){
   const cur=_kpiFillCur(row,cell);
   const has=cur.v!=null;
   const raw=cur.formula!=null?String(cur.formula):(has?String(cur.v):'');
-  const disp=has?_kpiNum(cur.v):'';
+  const disp=has?(_kpiCellIsMoney(cell)?_kpiMoney(cur.v):_kpiNum(cur.v)):'';
   let cls=has?'':' km-empty';
   cls+=_kpiBadCls(month,cell.segs);
   if(cur.formula!=null)cls+=' km-has-formula';
@@ -9906,17 +9909,17 @@ function _kpiFillHtml(row){
       const cell=_kpiFillCell(group,shop,f);
       if(cell.kind==='na')return `<td class="km-f-na" title="這個通路不適用${f.l}">—</td>`;
       // 合併欄位的小字要短：欄很窄，長句會折成三四行把整列撐高。完整說明放 title（滑鼠停上去看）。
-      if(cell.kind==='share')return `<td class="km-f-share" title="${_kpiMergeHint(group,cell.st,f.k)}（這一格是攤到的份額，不能直接改）"><div class="km-shareval">${_kpiNum(d[f.k])}</div><div class="km-sublabel">按訂單數攤</div></td>`;
+      if(cell.kind==='share')return `<td class="km-f-share" title="${_kpiMergeHint(group,cell.st,f.k)}（這一格是攤到的份額，不能直接改）"><div class="km-shareval">${_kpiMoney(d[f.k])}</div><div class="km-sublabel">按訂單數攤</div></td>`;
       // 小字一律放在輸入框【下方】：放上方會把框往下推，跟同一列其他格的框線對不齊。
-      const hint=cell.kind==='merge'?`<div class="km-sublabel km-sublabel-hint">共用・填總額</div>`:'';
+      const hint=cell.kind==='merge'?`<div class="km-sublabel km-sublabel-hint">MO+共用・填總額</div>`:'';
       return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填兩家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
     }).join('');
     const pure=Number(d[pureKey])||0;
     const rate=d.pureRate!=null?Number(d.pureRate):(d.rev>0?pure/d.rev:0);
     const tmp=tmpShops.has(shop)?`<span class="km-tmp" title="這家店還有欄位沒填，純利是暫時的">暫</span>`:'';
     const aov=_kpiAovOf(d,group);
-    return `<tr><td class="km-f-shop">${_kpiShopLabel(shop)}</td><td class="km-n km-f-ro km-f-aov"><div class="km-roval">${aov==null?'—':_kpiNum(aov)}</div></td>${cells}
-      <td class="km-n km-f-ro km-f-ro-first ${pure<0?'km-down':''}"><div class="km-roval">${_kpiNum(pure)}${tmp}</div></td>
+    return `<tr><td class="km-f-shop">${_kpiShopLabel(shop)}</td><td class="km-n km-f-ro km-f-aov"><div class="km-roval">${aov==null?'—':_kpiMoney(aov)}</div></td>${cells}
+      <td class="km-n km-f-ro km-f-ro-first ${pure<0?'km-down':''}"><div class="km-roval">${_kpiMoney(pure)}${tmp}</div></td>
       <td class="km-n km-f-ro"><div class="km-roval">${Number(d.rev)>0?_kpiRatePct(rate):'—'}</div></td></tr>`;
   }).join('');
   let commonRow='';
@@ -9925,7 +9928,7 @@ function _kpiFillHtml(row){
     const cv=Number(row[group.key+'Common'])||0;
     commonRow=`<tr class="km-f-common"><td class="km-f-shop" title="${group.commonCostLabel}">共同費用<div class="km-sublabel">${group.commonCostShortLabel||''}</div></td><td class="km-f-ro km-f-aov"></td>
       <td colspan="${cols.length}"><div class="km-common-in">${_kpiFillInputHtml(month,row,cell,group.shops.length,0)}</div></td>
-      <td class="km-n km-f-ro km-f-ro-first"><div class="km-roval">${cv?'−'+fmtN(cv):'—'}</div></td><td class="km-f-ro"></td></tr>`;
+      <td class="km-n km-f-ro km-f-ro-first"><div class="km-roval">${cv?'−$'+fmtN(cv):'—'}</div></td><td class="km-f-ro"></td></tr>`;
   }
   // 小計：manual 欄位直接加總（合併欄位只算總額一次、不適用略過）；純利／純利率＝_kpiGroupTotals。
   const t=_kpiGroupTotals(row,group);
@@ -9938,13 +9941,13 @@ function _kpiFillHtml(row){
       const k=JSON.stringify(cell.segs);if(seen.has(k))return;seen.add(k);
       const v=_kpiFillCur(row,cell).v;if(v!=null){any=true;sum+=Number(v)||0;}
     });
-    return `<td class="km-n">${any?_kpiNum(sum):'—'}</td>`;
+    return `<td class="km-n">${any?(_kpiIsMoneyField(f.k)?_kpiMoney(sum):_kpiNum(sum)):'—'}</td>`;
   }).join('');
   // 小計客單價＝各店實際營收加總 ÷ 訂單數加總（不是各店客單價平均）
   let sRev=0,sQty=0;group.shops.forEach(shop=>{const d=_kpiShopCalc(row,group,shop);sRev+=_kpiRealRev(d);sQty+=Number(d.qty)||0;});
-  const subAov=sQty>0?_kpiNum(sRev/sQty):'—';
+  const subAov=sQty>0?_kpiMoney(sRev/sQty):'—';
   const subRow=`<tr class="km-f-sub"><td class="km-f-shop">小計${fc.missing?'<span class="km-tmp">未完成</span>':''}</td><td class="km-n km-f-aov">${subAov}</td>${subCells}
-    <td class="km-n km-f-ro-first ${t.totalPure<0?'km-down':''}">${_kpiNum(t.totalPure)}</td><td class="km-n">${t.totalRev>0?_kpiRatePct(t.pureRateAgg):'—'}</td></tr>`;
+    <td class="km-n km-f-ro-first ${t.totalPure<0?'km-down':''}">${_kpiMoney(t.totalPure)}</td><td class="km-n">${t.totalRev>0?_kpiRatePct(t.pureRateAgg):'—'}</td></tr>`;
   const le=_kpiLastEdit(month,group.key);
   const gi=KPI_GROUPS.findIndex(g=>g.key===group.key);
   const next=KPI_GROUPS.slice(gi+1).concat(KPI_GROUPS.slice(0,gi)).find(g=>_kpiFillCount(row,g).missing>0);
@@ -10134,6 +10137,90 @@ function _kpiKeysHelpHtml(){
   return `<span class="km-help" tabindex="0" role="button" aria-label="鍵盤操作說明">?<span class="km-help-pop" role="tooltip">
     <span class="km-help-t">鍵盤操作</span>${items.map(([k,v])=>`<span class="km-help-k">${k}</span><span class="km-help-v">${v}</span>`).join('')}</span></span>`;
 }
+// ── 填寫模式「下載 Excel」──
+//   目前選的月份：第一張「總表」（各通路營收／純利／純利率／填寫進度＋合計），之後一個通路一張。
+//   各通路那張的欄位跟畫面一樣：店名、客單價、各填寫欄、純利、純利率；有共同費用的組多一列共同費用
+//   （金額放在純利欄、以負數表示——它只扣小計純利），最後一列小計。
+//   🔴 數字一律存成【數值】（不是 "$1,234" 這種文字），金額格式 $#,##0、純利率 0.00%，打開就能加總。
+//   ⚠ 合併欄位（MOMO 寄倉運費）：領頭店那格放【總額】、另一家放【攤到的份額】，跟畫面一致。
+//   ⚠ 空格留白（不是 0）；不適用的格子寫「—」。
+//   沿用本檔既有的 SheetJS（index.html 載 xlsx 0.18.5；MOMO／酷澎匯出也用這套）。
+function kpiFillDownloadExcel(){
+  if(typeof XLSX==='undefined'||!XLSX.utils||typeof XLSX.writeFile!=='function'){alert('匯出元件未載入，請重新整理後再試。');return;}
+  const month=_kpiYM();
+  const row=getOrCreateKpiRow(month);
+  const MONEY='"$"#,##0;-"$"#,##0',COUNT='#,##0',PCT='0.00%';
+  // aoa + 同形狀的格式表 → 產生工作表並套格式
+  const mkSheet=(aoa,fmt,widths)=>{
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    fmt.forEach((r,ri)=>r.forEach((z,ci)=>{
+      if(!z)return;const ref=XLSX.utils.encode_cell({r:ri,c:ci});
+      if(ws[ref]&&typeof ws[ref].v==='number')ws[ref].z=z;
+    }));
+    ws['!cols']=widths.map(w=>({wch:w}));
+    return ws;
+  };
+  const wb=XLSX.utils.book_new();
+  // ① 總表
+  {
+    const aoa=[['通路','營收','純利','純利率','填寫進度']],fmt=[[]];
+    KPI_GROUPS.forEach(g=>{
+      const t=_kpiGroupTotals(row,g),fc=_kpiFillCount(row,g);
+      aoa.push([g.title,t.totalRev,t.totalPure,t.totalRev>0?t.pureRateAgg:'',fc.total?fc.filled+' / '+fc.total:'不列入']);
+      fmt.push([null,MONEY,MONEY,PCT,null]);
+    });
+    const a=_kpiAllTotals(row),fa=_kpiFillCountAll(row);
+    aoa.push(['合計',a.rev,a.pure,a.rev>0?a.rate:'',fa.filled+' / '+fa.total]);
+    fmt.push([null,MONEY,MONEY,PCT,null]);
+    XLSX.utils.book_append_sheet(wb,mkSheet(aoa,fmt,[12,16,16,10,12]),'總表');
+  }
+  // ② 各通路
+  KPI_GROUPS.forEach(g=>{
+    const cols=_kpiFillCols(g);
+    const pureKey=_kpiGroupTotals(row,g).pureKey;
+    const aoa=[['店名','客單價'].concat(cols.map(f=>f.l),['純利','純利率'])];
+    const fmt=[[]];
+    const colFmt=f=>_kpiIsMoneyField(f.k)?MONEY:COUNT;
+    g.shops.forEach(shop=>{
+      const d=_kpiShopCalc(row,g,shop);
+      const aov=_kpiAovOf(d,g);
+      const vals=cols.map(f=>{
+        const cell=_kpiFillCell(g,shop,f);
+        if(cell.kind==='na')return '—';
+        if(cell.kind==='share')return Number(d[f.k])||0;
+        const v=_kpiFillCur(row,cell).v;
+        return v==null?'':Number(v);
+      });
+      const pure=Number(d[pureKey])||0;
+      const rate=d.pureRate!=null?Number(d.pureRate):(Number(d.rev)>0?pure/Number(d.rev):'');
+      aoa.push([_kpiShopLabel(shop),aov==null?'':aov].concat(vals,[pure,Number(d.rev)>0?rate:'']));
+      fmt.push([null,MONEY].concat(cols.map(colFmt),[MONEY,PCT]));
+    });
+    if(g.commonCostLabel){
+      const has=row[g.key+'Common']!=null;
+      aoa.push(['共同費用（'+(g.commonCostShortLabel||'')+'）',''].concat(cols.map(()=>''),[has?-(Number(row[g.key+'Common'])||0):'','']));
+      fmt.push([null,null].concat(cols.map(()=>null),[MONEY,null]));
+    }
+    const t=_kpiGroupTotals(row,g);
+    let sRev=0,sQty=0;
+    g.shops.forEach(shop=>{const d=_kpiShopCalc(row,g,shop);sRev+=_kpiRealRev(d);sQty+=Number(d.qty)||0;});
+    const sums=cols.map(f=>{
+      let sum=0,any=false;const seen=new Set();
+      g.shops.forEach(shop=>{
+        const cell=_kpiFillCell(g,shop,f);
+        if(cell.kind==='na'||cell.kind==='share')return;
+        const k=JSON.stringify(cell.segs);if(seen.has(k))return;seen.add(k);
+        const v=_kpiFillCur(row,cell).v;if(v!=null){any=true;sum+=Number(v)||0;}
+      });
+      return any?sum:'';
+    });
+    aoa.push(['小計',sQty>0?sRev/sQty:''].concat(sums,[t.totalPure,t.totalRev>0?t.pureRateAgg:'']));
+    fmt.push([null,MONEY].concat(cols.map(colFmt),[MONEY,PCT]));
+    const name=g.title.replace(/[\\\/?*\[\]:]/g,'').slice(0,31);   // 工作表名稱不能有 \ / ? * [ ] :、最長 31 字
+    XLSX.utils.book_append_sheet(wb,mkSheet(aoa,fmt,[16,11].concat(cols.map(()=>13),[13,9])),name);
+  });
+  XLSX.writeFile(wb,'KPI月結表_'+month+'.xlsx');
+}
 // ── 月結表入口：頂列（分頁在 renderKpiTab、這裡是年月＋進度鈕）→ 總覽或填寫模式 ──
 function _kpiMonthViewHtml(){
   const month=_kpiYM();
@@ -10142,10 +10229,10 @@ function _kpiMonthViewHtml(){
   const ymOpts=_kpiMonthSelectOptions().map(ym=>`<option value="${ym}"${ym===month?' selected':''}>${ym.slice(0,4)}/${+ym.slice(5)}</option>`).join('');
   const fc=_kpiFillCountAll(row);
   const right=_kpiFillMode
-    ?`<button class="km-back" onclick="kpiCloseFill()">← 回總覽</button>`
+    ?`<button class="km-dl" onclick="kpiFillDownloadExcel()" title="下載這個月的月結表（總表＋各通路一張）">⬇ 下載 Excel</button><button class="km-back" onclick="kpiCloseFill()">← 回總覽</button>`
     :(fc.missing===0
-      ?`<button class="km-progress done" onclick="kpiOpenFill()">✓ 已填完</button>`
-      :`<button class="km-progress" onclick="kpiOpenFill()">${_kpiCurMonthNum} 月已填 ${fc.filled} / ${fc.total} 格 · 還差 ${fc.missing} 格</button>`);
+      ?`<button class="km-progress done" onclick="kpiOpenFill()" title="全部填完，點擊進入填寫模式">✓ 填寫進度 ${fc.filled} / ${fc.total}</button>`
+      :`<button class="km-progress" onclick="kpiOpenFill()" title="還差 ${fc.missing} 格，點擊進入填寫模式">填寫進度 ${fc.filled} / ${fc.total}</button>`);
   return `<div class="km-top">
     <select class="mm-sel" onchange="setKpiYM(this.value)" title="選月份">${ymOpts}</select>
     ${_kpiFillMode?`<span class="km-mode">填寫模式</span>${_kpiKeysHelpHtml()}`:''}
@@ -22562,7 +22649,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   buildKpiTabHtml,renderKpiTab,getKpiRows,kpiWriteCell,__kpiMigrateToV2,setKpiViewMode,setKpiYear,
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
-  kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,
+  kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillDownloadExcel,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
