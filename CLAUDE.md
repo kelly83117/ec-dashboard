@@ -65,7 +65,14 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    **判斷標準是「物件數對不對」：必須是 18**（2026-09-23 實測：加了 `__cloudKpi`（app/kpi，
    KPI 月結表）之後；加之前是 17 物件 / 25 方法）。
    方法數 27 同日實測（`__cloudKpi` 貢獻 `writePaths` + `smokeWritePaths` 兩支），只當參考；
-   下方 table 的條數**以工具實際印出的為準**。
+   下方 table 的條數**以工具實際印出的為準**。合併 main v690（profit.js 動態載入）後重測仍是 18 / 27
+   ——雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
+   ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
+   （觸發 profit.js 動態載入）才會存在；還沒進就打會 `is not defined`。
+   🔴 **起 server 前，要在同一條指令裡確認防護碼真的在檔案裡**（例：`grep -c "TEST_NOWRITE v2 結束" js/firebase.js`
+   必須是 1，否則不起 server）。2026-09-23 實例：貼防護碼的指令因為前面一個 `cmp` 失敗（CRLF 差異）整串中斷，
+   但起 server 是另一條指令照樣跑了 → 頁面在**沒有防護**的狀態下開了幾秒。事後查證正式資料沒被改到，
+   但那是運氣，不是流程保護。
    ⚠ v2 防護碼的 MUST 清單要含 `['__cloudKpi', 'writePaths']`、`['__cloudKpi', 'smokeWritePaths']`，
    物件下限改 18，否則新物件沒有 fail-loud 保護。
    ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
