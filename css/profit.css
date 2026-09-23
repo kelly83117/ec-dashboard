@@ -1442,11 +1442,6 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
    前綴 .km-（KPI monthly）：.kpi-* 已被淨利表頁首的 KPI 條（.kpi-strip / .kpi-big-row…）用掉，不混用。
    顏色一律走 :root token；「較上月」的綠紅刻意用 #059669 / #dc2626（與年度總表 _kpiYoyHtml 一致，
    規則見 js/profit.js 搜 _kpiCmpOk 上方那段），不是 --success / --danger。 */
-/* 數字字型：拉丁字（數字、$、%、▲▼）先用 Segoe UI（Windows）／系統 UI 字型，圓、寬、好辨識；
-   中文字自動退回站上的微軟正黑體。只套在「數字」元素上，標籤與中文說明不動（2026-09-23 使用者指定）。
-   ⚠ 必須 !important：css/main.css「全站強制黑體」用 *{font-family:…!important} 把所有元素鎖成微軟正黑體；
-     這裡是【刻意的局部例外】，只限 KPI 月結表的數字元素（class 選擇器在兩邊都 !important 時勝過 *）。 */
-.km-v,.km-table .km-n,.km-in,.km-roval,.km-shareval,.km-wf-v,.km-mix-share,.km-mix-rate,.km-cmp,.km-hl b,.km-hl-sub,.km-badge,.km-progress,.km-sub{font-family:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,"Microsoft JhengHei","PingFang TC",sans-serif !important;}
 .km-up{color:#059669;}
 .km-down{color:#dc2626;}
 .km-top{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
