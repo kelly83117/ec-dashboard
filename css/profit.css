@@ -1519,12 +1519,12 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
    小標籤 11px（＝上方各卡的灰色標籤、大卡的 ▲▼）→ 展開的各店 13px → 主列通路名與數字 14px
    （比本月重點的 16px 低一階、比面板內文 12px 高一階）。
    ⚠ 本檔另有全域 td{font-size:14px}（淨利表舊樣式），必須直接指定 td 才蓋得過。 */
-.km-ch-table{font-size:14px;}
-.km-ch-table td{font-size:14px;padding-top:9px;padding-bottom:9px;}
+.km-ch-table{font-size:13px;}
+.km-ch-table td{font-size:13px;padding-top:9px;padding-bottom:9px;}
 .km-ch-table th{font-size:11px;}
 .km-ch-table .km-cmp{font-size:11px;}
 .km-ch-table .km-badge{font-size:11px;}
-.km-ch-table .km-ch-name{font-size:14px;}
+.km-ch-table .km-ch-name{font-size:13px;}
 .km-ch-table .km-ch-sub td{font-size:13px;padding-top:7px;padding-bottom:7px;}
 .km-ch{cursor:pointer;}
 .km-ch:hover td{background:#fafbff;}
