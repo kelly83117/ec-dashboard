@@ -14,6 +14,23 @@ window.addEventListener('error', function(e) {
   else console.error('JS error before DOM ready:', e);
 });
 
+// ⚡ profit.js（~1.9MB）動態載入器：main.js 已拿掉靜態 import（登入不再等 1.9MB，手機到得了登入畫面）。
+//   在「進淨利表 / 工作日誌」時 await window.__ensureProfit() → 載完才 render／才用 profit.js 的 window 匯出。
+//   · 只載一次：promise 快取（__profitLoaded），切頁進出不重載；失敗會清掉、可重試。
+//   · ?v= 讀 <meta app-version>（單一版號源、跟部署版號一致、不會漂；同 offices.js fetch pricing.json 的招式）。
+//   · import('./profit.js') 在本模組（js/app.js）解析 → js/profit.js（相對路徑正確）。
+window.__profitLoaded = null;    // 載入 promise（第一次 __ensureProfit 呼叫時建立；≠已載完）
+window.__profitReady = false;    // 🔴 true = profit.js 模組【已執行完、window 匯出/__profitTabHtml 都掛好】。判「已載」一律看這個，不要看 __profitLoaded（那只代表 promise 已建、可能還沒 resolve）
+window.__ensureProfit = function () {
+  if (window.__profitLoaded) return window.__profitLoaded;
+  var ver = '';
+  try { ver = (document.querySelector('meta[name="app-version"]') || {}).content || ''; } catch (e) {}
+  window.__profitLoaded = import('./profit.js?v=' + ver)
+    .then(function (m) { window.__profitReady = true; return m; })   // resolve 後才算 ready
+    .catch(function (e) { window.__profitLoaded = null; console.error('[profit] 動態載入失敗（可重試）', e); throw e; });
+  return window.__profitLoaded;
+};
+
 const Store = {
   KEYS: {
     users: 'ec.users',
