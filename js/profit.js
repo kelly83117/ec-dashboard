@@ -1400,6 +1400,10 @@ window.__profitPendingCount = _realPendingCount;
 //   本機有未同步變更（pending）或剛存過 → 雲端快照不覆蓋 _profitMem，保住本機版本。
 //   對照組：MOMO 已有同型別的 __momoShouldSkipCloudOverwrite（本檔搜得到），這是蝦皮淨利表缺的那一份。
 window.__profitShouldSkipCloudOverwrite=function(k){
+  // KPI 月結表 v2：Store._profitMem._kpi_v1 由 app/kpi 訂閱層（本檔搜 _kpiV2Install）獨佔。
+  //   這裡擋的是【舊的】app/profit 訂閱把 _kpi_v1 備份蓋回記憶體；新訂閱不經過這支守衛。
+  //   _kpi_v1 也不再被 _markPending（kpiWriteCell 直寫 app/kpi）。
+  if(k==='_kpi_v1' && _kpiV2.installed) return true;
   try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
   if(window._shopJustSaved && (Date.now()-window._shopJustSaved < 5000)) return true;
   // PChome recon/主檔：dirty 持久化（跨重整）→ 本機已存未推時擋掉雲端 app/profit echo 覆蓋，避免資料被舊雲端值蓋回。
@@ -8897,16 +8901,282 @@ function getKpiRows(){
     const s=localStorage.getItem('ec_kpi_v1');return s?JSON.parse(s):[];
   }catch{return [];}
 }
-function saveKpiRows(rows){
-  try{localStorage.setItem('ec_kpi_v1',JSON.stringify(rows));}catch{}
+// ══════ KPI 月結表 v2：每格直接寫雲端 app/kpi（2026-09-23，取代整包 saveKpiRows）══════
+//  舊版 saveKpiRows 每存一格就把 _kpi_v1（所有月份整個陣列）整包 setField 到 app/profit，
+//  又走 _cloudWriteSafe → _markPending('_kpi_v1') → __profitShouldSkipCloudOverwrite 擋掉雲端快照
+//  ⇒ 這台看不到別人新填的數字，下一次存檔就把別人的資料洗掉。
+//  現在：
+//  · 寫入：kpiWriteCell 只送「改到的那幾格」的 FieldPath（firebase.js window.__cloudKpi.writePaths），
+//    同時寫 meta（誰、何時）。不碰 localStorage、不 _markPending、不經同步鈕。
+//  · 讀取：【記憶體形狀不變】—— 訂閱 app/kpi，把 months map 轉回舊的 rows 陣列放進
+//    Store._profitMem._kpi_v1，getKpiRows 與所有讀取端（年度總表、通路卡、酷澎總表、評分表）一行都不用改。
+//  · 搬移前（app/kpi 沒有 migratedAt）：畫面＝舊 app/profit._kpi_v1 為底 + app/kpi 已寫的格子疊上去
+//    （新寫的蓋舊的）。搬移前清空一格寫的是 null（墓碑），否則舊值會從底下透出來；搬移時把墓碑一併清掉。
+//  · 這個記憶體槽由本層獨佔：__profitShouldSkipCloudOverwrite 對 '_kpi_v1' 恆回 true，
+//    擋的是【舊的】app/profit 訂閱（mergeAndNotify）別把 _kpi_v1 備份蓋回來；新訂閱不經過那道守衛。
+//  回滾：讀寫改回 _kpi_v1（app/profit._kpi_v1 搬移時保留不刪，就是備份）。
+const _kpiV2={
+  installed:false,
+  cloud:undefined,      // app/kpi 最新快照：undefined＝還沒到、null＝文件不存在、{}＝資料
+  cloudErr:null,
+  legacy:undefined,     // app/profit._kpi_v1（只在搬移前訂閱）：undefined＝還沒到
+  unsubLegacy:null,
+  overlay:[],           // 送出但還沒被快照吸收的寫入：{seq,month,segs,val,resolved}
+  seq:0,
+  failed:new Map(),     // 儲存格 key → 'fail'（寫入失敗）| 'slow'（10 秒還沒確認）
+  lastJson:'',
+  renderTimer:null,
+};
+function _kpiIsMap(v){return v!==null&&typeof v==='object'&&!Array.isArray(v);}
+function _kpiLeaves(obj,pre,out){
+  Object.keys(obj||{}).forEach(k=>{
+    const v=obj[k];const p=pre.concat(k);
+    if(_kpiIsMap(v))_kpiLeaves(v,p,out);else out.push([p,v]);
+  });
+  return out;
+}
+// 舊 row 的葉節點（id / month 是 row 自己的識別，不是資料，不搬）。
+function _kpiRowLeaves(row){
+  const o={};
+  Object.keys(row||{}).forEach(k=>{if(k!=='id'&&k!=='month')o[k]=row[k];});
+  return _kpiLeaves(o,[],[]);
+}
+function _kpiSetPath(obj,segs,v){
+  let o=obj;
+  for(let i=0;i<segs.length-1;i++){if(!_kpiIsMap(o[segs[i]]))o[segs[i]]={};o=o[segs[i]];}
+  o[segs[segs.length-1]]=v;
+}
+function _kpiDelPath(obj,segs){
+  let o=obj;
+  for(let i=0;i<segs.length-1;i++){o=o[segs[i]];if(!_kpiIsMap(o))return;}
+  delete o[segs[segs.length-1]];
+}
+function _kpiMigrated(){return !!(_kpiV2.cloud&&_kpiV2.cloud.migratedAt);}
+// 組出畫面用的 rows 陣列（形狀與舊 _kpi_v1 相同）。
+//   withOverlay=false → 只含雲端已確認的資料（localStorage 鏡像用，不把還沒確認的寫入存成「成功」）。
+//   ⚠ 一個月份沒有任何非 null 的值就不產生 row（清空此月份、搬移前墓碑都靠這條消失）。
+function _kpiCompose(withOverlay,src){
+  src=src||_kpiV2;
+  const M={};
+  const migrated=!!(src.cloud&&src.cloud.migratedAt);
+  if(!migrated)(src.legacy||[]).forEach(r=>{
+    if(!r||!r.month)return;
+    M[r.month]=M[r.month]||{};
+    _kpiRowLeaves(r).forEach(([p,v])=>{if(v!=null)_kpiSetPath(M[r.month],p,v);});
+  });
+  const months=(src.cloud&&_kpiIsMap(src.cloud.months))?src.cloud.months:{};
+  Object.keys(months).forEach(m=>{
+    if(!_kpiIsMap(months[m]))return;
+    M[m]=M[m]||{};
+    _kpiLeaves(months[m],[],[]).forEach(([p,v])=>{if(v===null)_kpiDelPath(M[m],p);else _kpiSetPath(M[m],p,v);});
+  });
+  if(withOverlay)(src.overlay||[]).forEach(o=>{
+    if(!o.segs.length){if(o.val==null)delete M[o.month];return;}
+    M[o.month]=M[o.month]||{};
+    if(o.val==null)_kpiDelPath(M[o.month],o.segs);else _kpiSetPath(M[o.month],o.segs,o.val);
+  });
+  return Object.keys(M).sort().filter(m=>_kpiLeaves(M[m],[],[]).some(([,v])=>v!=null)).map(m=>{
+    const row=_kpiEmptyRow(m);
+    Object.keys(M[m]).forEach(k=>{row[k]=M[m][k];});
+    return JSON.parse(JSON.stringify(row));
+  });
+}
+// 雲端資料就緒了嗎：app/kpi 快照到了，而且（搬移前）舊 _kpi_v1 也到了。沒就緒前不覆蓋記憶體，
+//   getKpiRows 會先讀 localStorage 的鏡像。
+function _kpiReady(){return _kpiV2.cloud!==undefined&&(_kpiMigrated()||_kpiV2.legacy!==undefined);}
+function _kpiPublish(){
+  if(!_kpiReady())return;
+  const rows=_kpiCompose(true);
+  const json=JSON.stringify(rows);
+  if(json===_kpiV2.lastJson)return;
+  _kpiV2.lastJson=json;
   try{ if(typeof Store!=='undefined'){ Store._profitMem=Store._profitMem||{}; Store._profitMem._kpi_v1=rows; } }catch{}
-  // KPI 是偶爾才存一次的手動輸入，這裡沒有另外的「同步雲端」按鈕可以點，
-  // 所以直接即時推雲端，不要走 _cloudWriteSafe 的「本機優先、等按鈕手動同步」流程
-  // （不然像淨利表分頁那樣要另外去按同步鈕，資料才會真的進雲端）。
-  if(window.__cloudProfit&&typeof window.__cloudProfit.setField==='function'){
-    window.__cloudProfit.setField('_kpi_v1', rows).catch(e=>console.warn('[KPI] 雲端同步失敗，稍後會透過同步雲端按鈕補推',e));
+  try{ localStorage.setItem('ec_kpi_v1',JSON.stringify(_kpiCompose(false))); }catch{}
+  _kpiRefreshViews();
+}
+// 有人正在 KPI 分頁裡輸入嗎（四條編輯器的 input 都帶 data-kpi-editor；評分表等其他輸入框看焦點）。
+function _kpiIsEditing(el){
+  if(_kpiFormulaCtx)return true;
+  if(el.querySelector('input[data-kpi-editor]'))return true;
+  const a=document.activeElement;
+  return !!(a&&el.contains(a)&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'));
+}
+// 快照進來 → 重畫。正在編輯就等編輯器關掉再畫，【不能】把打到一半的輸入框洗掉。
+function _kpiRefreshViews(){
+  clearTimeout(_kpiV2.renderTimer);_kpiV2.renderTimer=null;
+  const el=document.getElementById('kpi-tab-content');
+  if(el){
+    if(_kpiIsEditing(el)){_kpiV2.renderTimer=setTimeout(_kpiRefreshViews,400);return;}
+    renderKpiTab();
   }
-  _cloudWriteSafe('_kpi_v1', rows, 'KPI月結表');
+  if(document.getElementById('cup-sum-kpi-rev')){try{syncCoupangSummaryFromKpi();}catch{}}
+}
+function _kpiCellKey(month,segs){return [month].concat(segs).join('\u0001');}
+// 給 _kpiGroupTableHtml 用：這一格上次寫入失敗（或還沒確認）就回傳 class。
+function _kpiBadCls(month,segs){
+  const s=_kpiV2.failed.get(_kpiCellKey(month,segs));
+  return s?' kpi-cell-failed':'';
+}
+function _kpiWho(){
+  const u=window.App&&window.App.currentUser;
+  return (u&&(u.name||u.username))||'';
+}
+// 寫一格（或一次多格）到 app/kpi。
+//   kpiWriteCell(month, segs, value)          一格：segs 是 row 內的路徑，例 ['shopee','好麻吉','rev']
+//   kpiWriteCell(month, [[segs,value],…])     多格：一次 updateDoc 原子寫入（之後 Excel 貼上、整欄沿用上月用）
+//   value === undefined ＝ 刪除這格；segs=[] ＝ 整個月份。回傳 Promise<boolean>（true＝雲端已確認）。
+//   🔴 失敗時：toast + 該格標紅 + 撤回畫面上的值；【不寫 localStorage】假裝成功。
+function kpiWriteCell(month,segsOrPairs,value){
+  const pairs=(Array.isArray(segsOrPairs)&&Array.isArray(segsOrPairs[0]))?segsOrPairs:[[segsOrPairs,value]];
+  if(!pairs.length)return Promise.resolve(true);
+  if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){
+    if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法修改資料','error');
+    return Promise.resolve(false);
+  }
+  const ck=window.__cloudKpi;
+  if(!ck||typeof ck.writePaths!=='function'){
+    if(typeof showToast==='function')showToast('❌ 雲端未連線，KPI 沒有存進去','error',6000);
+    return Promise.resolve(false);
+  }
+  const migrated=_kpiMigrated();
+  const by=_kpiWho();
+  const cloudPairs=[];
+  const entries=[];
+  pairs.forEach(([segs,v])=>{
+    // 搬移前刪除要寫 null 墓碑，否則舊 _kpi_v1 的值會從底下透出來。整月刪除只在搬移後才會是 segs=[]。
+    const del=v===undefined;
+    const cv=del?(migrated||!segs.length?ck.DELETE:null):v;
+    cloudPairs.push([['months',month].concat(segs),cv]);
+    cloudPairs.push([['meta',month].concat(segs),del?{by,at:ck.TS,del:true}:{by,at:ck.TS}]);
+    const e={seq:++_kpiV2.seq,month,segs:segs.slice(),val:del?null:v,resolved:false};
+    entries.push(e);_kpiV2.overlay.push(e);
+    _kpiV2.failed.delete(_kpiCellKey(month,segs));
+  });
+  console.log('%c[KPI] 寫入 app/kpi','color:#5b5fcf;font-weight:700',
+    cloudPairs.map(([p,v])=>p.join(' › ')+' = '+(v===ck.DELETE?'<deleteField>':v===null?'null（搬移前墓碑）':JSON.stringify(v,(k,x)=>x===ck.TS?'<serverTimestamp>':x))));
+  _kpiPublish();
+  const slow=setTimeout(()=>{
+    entries.forEach(e=>{if(!e.resolved)_kpiV2.failed.set(_kpiCellKey(e.month,e.segs),'slow');});
+    if(typeof showToast==='function')showToast('⚠ KPI 雲端 10 秒還沒確認寫入（網路？），標紅的格子請稍後重整確認','error',8000);
+    _kpiV2.lastJson='';_kpiPublish();
+  },10000);
+  return ck.writePaths(cloudPairs).then(()=>{
+    clearTimeout(slow);
+    entries.forEach(e=>{e.resolved=true;_kpiV2.failed.delete(_kpiCellKey(e.month,e.segs));});
+    return true;
+  },err=>{
+    clearTimeout(slow);
+    console.error('[KPI] 寫入 app/kpi 失敗',err,cloudPairs);
+    _kpiV2.overlay=_kpiV2.overlay.filter(o=>entries.indexOf(o)<0);
+    entries.forEach(e=>_kpiV2.failed.set(_kpiCellKey(e.month,e.segs),'fail'));
+    if(typeof showToast==='function')showToast('❌ KPI 儲存失敗：'+((err&&(err.code||err.message))||err)+'（標紅的格子沒有存進雲端）','error',8000);
+    _kpiV2.lastJson='';_kpiPublish();
+    return false;
+  });
+}
+function _kpiOnCloud(data){
+  _kpiV2.cloud=data;_kpiV2.cloudErr=null;
+  // 已送出且已確認的寫入，快照裡一定已經有了 → 從疊加層拿掉。還沒確認的留著（快照可能是別人更早的寫入）。
+  _kpiV2.overlay=_kpiV2.overlay.filter(o=>!o.resolved);
+  if(_kpiMigrated()&&_kpiV2.unsubLegacy){try{_kpiV2.unsubLegacy();}catch{}_kpiV2.unsubLegacy=null;}
+  _kpiPublish();
+}
+function _kpiV2Install(){
+  if(_kpiV2.installed)return;
+  const ck=window.__cloudKpi;
+  if(!ck||typeof ck.subscribe!=='function')return;
+  _kpiV2.installed=true;
+  ck.subscribe(_kpiOnCloud,err=>{_kpiV2.cloudErr=err;console.error('[KPI] app/kpi 訂閱失敗（畫面停在本機鏡像）',err);});
+  // 搬移前的底：舊 app/profit._kpi_v1。與 firebase.js 的 mergeAndNotify 訂同一份文件，SDK 共用同一條監聽，不多下載。
+  if(window.__cloudProfit&&typeof window.__cloudProfit.subscribe==='function'){
+    _kpiV2.unsubLegacy=window.__cloudProfit.subscribe(d=>{
+      if(_kpiMigrated())return;
+      _kpiV2.legacy=Array.isArray(d&&d._kpi_v1)?d._kpi_v1:[];
+      _kpiPublish();
+    });
+  }else{
+    _kpiV2.legacy=[];
+  }
+}
+window.addEventListener('cloudStoreReady',_kpiV2Install);
+if(window.__cloudKpi)_kpiV2Install();
+// 一次性搬移：app/profit._kpi_v1 → app/kpi。舊 _kpi_v1 保留不刪（備份 / 回滾用）。
+//   __kpiMigrateToV2()                 ＝ dryRun：只在 console 印每月格數與各通路營收/純利，不寫入
+//   __kpiMigrateToV2({dryRun:false})   ＝ 正式執行（會再跳 confirm）
+//   app/kpi 已有 migratedAt → 拒絕。搬移前就有人寫進 app/kpi 的格子（新版上線到搬移之間）：
+//   以新寫的為準、舊值不蓋它；搬移前的 null 墓碑一併刪掉。
+async function __kpiMigrateToV2(opts){
+  const dryRun=!(opts&&opts.dryRun===false);
+  const ck=window.__cloudKpi,cp=window.__cloudProfit;
+  if(!ck||!cp){console.error('[KPI 搬移] 雲端未連線');return null;}
+  const [kSnap,pSnap]=await Promise.all([ck.getDoc(),cp.getDoc()]);
+  const kData=kSnap.exists()?(kSnap.data()||{}):{};
+  if(kData.migratedAt){
+    console.error('[KPI 搬移] 拒絕：app/kpi 已經搬過（migratedAt 存在，by '+(kData.migratedBy||'?')+'）');
+    return {refused:true};
+  }
+  const legacy=(pSnap.exists()&&Array.isArray((pSnap.data()||{})._kpi_v1))?pSnap.data()._kpi_v1:[];
+  const v2m=_kpiIsMap(kData.months)?kData.months:{};
+  const has=(m,p)=>{   // app/kpi 在這條路徑（或它的上下層）已經有東西 → 舊值不寫
+    let o=v2m[m];
+    for(let i=0;i<p.length;i++){if(!_kpiIsMap(o))return o!==undefined;o=o[p[i]];}
+    return o!==undefined;
+  };
+  const byMonth={};let preExisting=0,tomb=0;
+  legacy.forEach(r=>{
+    if(!r||!r.month)return;
+    _kpiRowLeaves(r).forEach(([p,v])=>{
+      if(v==null||has(r.month,p))return;
+      (byMonth[r.month]=byMonth[r.month]||[]).push([['months',r.month].concat(p),v]);
+    });
+  });
+  Object.keys(v2m).forEach(m=>{
+    if(!_kpiIsMap(v2m[m]))return;
+    _kpiLeaves(v2m[m],[],[]).forEach(([p,v])=>{
+      if(v===null){tomb++;(byMonth[m]=byMonth[m]||[]).push([['months',m].concat(p),ck.DELETE]);}
+      else preExisting++;
+    });
+  });
+  // 模擬「搬完之後的 app/kpi」（把要寫的格子套上去、帶 migratedAt → 不再讀舊底），
+  //   逐月跟目前畫面 getKpiRows 對帳：兩者應該一模一樣。
+  const sim={months:JSON.parse(JSON.stringify(v2m)),migratedAt:1};
+  Object.values(byMonth).forEach(l=>l.forEach(([p,v])=>{
+    if(v===ck.DELETE)_kpiDelPath(sim.months,p.slice(1));else _kpiSetPath(sim.months,p.slice(1),v);
+  }));
+  const after=_kpiCompose(false,{cloud:sim});
+  const screen=getKpiRows();
+  screen.forEach(r=>{if(!after.some(a=>a.month===r.month)&&_kpiRowLeaves(r).some(([,v])=>v!=null))console.warn('[KPI 搬移] 畫面上有、搬完會不見的月份：',r.month);});
+  const report=after.map(row=>{
+    const o={月份:row.month,格數:_kpiRowLeaves(row).length};
+    let rev=0,pure=0,ok=true;
+    const sRow=screen.find(r=>r.month===row.month);
+    KPI_GROUPS.forEach(g=>{
+      const t=_kpiGroupTotals(row,g);
+      o[g.title+'營收']=Math.round(t.totalRev);o[g.title+'純利']=Math.round(t.totalPure);
+      rev+=t.totalRev;pure+=t.totalPure;
+      const s=sRow?_kpiGroupTotals(sRow,g):{totalRev:0,totalPure:0};
+      if(Math.round(s.totalRev)!==Math.round(t.totalRev)||Math.round(s.totalPure)!==Math.round(t.totalPure))ok=false;
+    });
+    o['合計營收']=Math.round(rev);o['合計純利']=Math.round(pure);
+    o['與目前畫面一致']=ok?'✓':'✗';
+    return o;
+  });
+  const writeCount=Object.values(byMonth).reduce((a,l)=>a+l.length,0);
+  console.log('%c[KPI 搬移] '+(dryRun?'dryRun（不寫入）':'正式執行前預覽')+'：舊 _kpi_v1 '+legacy.length+' 個月 → app/kpi；要寫 '+writeCount+' 格'
+    +(preExisting?'；app/kpi 搬移前已有 '+preExisting+' 格（以新的為準、不覆蓋）':'')+(tomb?'；清掉 '+tomb+' 個搬移前墓碑':''),
+    'color:#5b5fcf;font-weight:700;font-size:13px');
+  console.table(report);
+  if(report.some(r=>r['與目前畫面一致']!=='✓'))console.warn('[KPI 搬移] 有月份和目前畫面對不上（✗），先查清楚再正式執行');
+  if(dryRun)return report;
+  if(!confirm('確定把 KPI 月結表 '+Object.keys(byMonth).length+' 個月、'+writeCount+' 格搬到 app/kpi？\n舊的 _kpi_v1 會保留當備份。'))return {cancelled:true};
+  // 一個月一次 updateDoc（每次都是原子的）；中途失敗可以重跑：已寫的路徑會被 has() 跳過。migratedAt 最後才寫。
+  for(const m of Object.keys(byMonth).sort()){
+    await ck.writePaths(byMonth[m]);
+    console.log('[KPI 搬移] '+m+' 已寫入 '+byMonth[m].length+' 格');
+  }
+  await ck.writePaths([[['migratedAt'],ck.TS],[['migratedBy'],_kpiWho()],[['migratedFrom'],'app/profit._kpi_v1'],[['migratedCells'],writeCount]]);
+  console.log('%c[KPI 搬移] 完成。app/profit._kpi_v1 保留未刪。','color:#059669;font-weight:700');
+  return report;
 }
 const KPI_GROUPS=[
   {key:'shopee',title:'蝦皮',color:'#ee4d2d',shops:['好麻吉','玩樂','維克','森之旅'],
@@ -8985,7 +9255,15 @@ function getOrCreateKpiRow(month){
 }
 function deleteKpiRow(month){
   if(!confirm('確定清空這個月份的資料？'))return;
-  saveKpiRows(getKpiRows().filter(r=>r.month!==month));
+  // 搬移後：整個 months.{月} 一次 deleteField。搬移前：逐格寫 null 墓碑（舊 _kpi_v1 的底還在，
+  //   只刪 app/kpi 的月份會讓舊值整月透出來）。
+  if(_kpiMigrated()){
+    kpiWriteCell(month,[],undefined);
+  }else{
+    const row=getKpiRows().find(r=>r.month===month);
+    const pairs=row?_kpiRowLeaves(row).filter(([,v])=>v!=null).map(([p])=>[p,undefined]):[];
+    if(pairs.length)kpiWriteCell(month,pairs);
+  }
   renderKpiTab();
 }
 // 手動輸入欄允許打公式（例如 rev*21%），用同一個賣場已經填過的欄位名稱
@@ -9047,7 +9325,7 @@ function editKpiCell(month,groupKey,shop,field,tdEl){
   // 🔴 空 row / groupKey / shop 三層容器的建立【刻意不在這裡做】（舊版是函式開頭就建）：
   //   理由同 editKpiFieldNote / editKpiMergedField / editKpiCommonCost ——getKpiRows() 回傳的是
   //   活陣列本身，開編輯器就 push 的話 Esc 撤不回來（Esc 只還原 innerHTML），那列全空的 row
-  //   會被之後任何一次 saveKpiRows 一起推上 Firestore。
+  //   會被之後任何一次（舊版整包寫入的，已移除）saveKpiRows 一起推上 Firestore。
   //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
   // ⚠ 唯讀快照：row 還不存在時給 {}，讓下面的 curVal 與 _kpiEvalFormula 都拿得到東西。
@@ -9060,7 +9338,7 @@ function editKpiCell(month,groupKey,shop,field,tdEl){
   //   跟它比，才是使用者感知的「我沒改」。
   const cur=curVal===''?'':String(curVal);
   const origContent=tdEl.innerHTML;
-  const inp=document.createElement('input');
+  const inp=document.createElement('input');inp.dataset.kpiEditor='1';
   inp.type='text';inp.value=curVal;inp.placeholder='數字或公式，如 =實際營收*21%';
   inp.style.cssText='width:150px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
   // 🔴 擋冒泡：onclick 掛在 tdEl 自己身上（走 kpiCellClick），input 是它的子節點 —— 不擋的話
@@ -9094,8 +9372,8 @@ function editKpiCell(month,groupKey,shop,field,tdEl){
     const isPlain=/^-?\d+(\.\d+)?$/.test(raw);
     const computed=_kpiEvalFormula(raw,shopData,group);
     const hasVal=raw!==''&&!isNaN(computed);
-    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
-    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    // 值沒變就不寫：每次 commit 都是一次 app/kpi 雲端寫入（含 meta），按 Enter 確認一下不該換來
+    //   一次雲端寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
     //   🔴 「沒變」＝字面沒變【而且】重算出來的也沒變。第二個條件是為了公式：
     //     使用者打的公式是【存檔當下算好凍結】的（computed 寫進 shopData[field]，
     //     _kpiCalcAll 只在 out[f.k]==null 時才套公式，渲染端也是直接顯示已存的數字），
@@ -9108,22 +9386,23 @@ function editKpiCell(month,groupKey,shop,field,tdEl){
     if(unchanged){cancel();return;}
     done=true;
     if(_kpiFormulaCtx&&_kpiFormulaCtx.inputEl===inp)_kpiFormulaCtx=null;
-    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-    if(!row[groupKey])row[groupKey]={};
-    if(!row[groupKey][shop])row[groupKey][shop]={};
-    const target=row[groupKey][shop];
+    // 只送這一格的路徑（值 + 公式兩個 key），不再整包 rows。rows / row 一律不 mutate —— 畫面由 kpiWriteCell 的疊加層更新。
+    const hadFormula=shopData[field+'Formula']!=null;
+    const pairs=[];
     if(!hasVal){
-      // 清空（或公式算不出來）＋Enter＝使用者明確要清掉這格 → delete 兩個 key，維持原本的寫法。
+      // 清空（或公式算不出來）＋Enter＝使用者明確要清掉這格 → 刪兩個 key，維持原本的寫法。
       //   這個行為本來就是對的（PR #223 的 editScoreMonthlyCell 還是抄這裡的），本次【沒有改】——
       //   改的只是「誰能觸發它」：以前 blur 也會走到這裡（全選 Backspace 後點旁邊＝數字無聲消失），
       //   現在只有 Enter 到得了。
-      delete target[field];delete target[field+'Formula'];
+      pairs.push([[groupKey,shop,field],undefined]);
     }else{
       // 打 0 是刻意要蓋成 0（跟完全沒填、留給公式自動算不一樣），要真的存下來，不能當作空白清掉。
-      target[field]=computed;
-      if(isPlain)delete target[field+'Formula'];else target[field+'Formula']=raw;
+      pairs.push([[groupKey,shop,field],computed]);
+      if(!isPlain)pairs.push([[groupKey,shop,field+'Formula'],raw]);
     }
-    saveKpiRows(rows);
+    // 公式 key 本來就不存在就不送刪除（省一條 meta，也不在搬移前留下無意義的墓碑）。
+    if((!hasVal||isPlain)&&hadFormula)pairs.push([[groupKey,shop,field+'Formula'],undefined]);
+    kpiWriteCell(month,pairs);
     renderKpiTab();
   };
   // ⚠ type=text，【刻意不擋】wheel 與 ↑/↓（editKpiCommonCost / editKpiMergedField 那兩條有擋）：
@@ -9156,7 +9435,7 @@ function editKpiFieldNote(month,groupKey,field,thEl){
   // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：getKpiRows() 命中
   //   Store._profitMem._kpi_v1 時回傳的是【活陣列本身】（不是複製，見該函式），舊版
   //   一開啟編輯器就把空 row push 進去 →「點開又按 Esc」其實已經改掉記憶體狀態
-  //   （Esc 只還原 innerHTML，不會把那列拿掉），之後任何一次 saveKpiRows（改別格、
+  //   （Esc 只還原 innerHTML，不會把那列拿掉），之後任何一次（舊版整包寫入的，已移除）saveKpiRows（改別格、
   //   改別的月份都算）都會把那列全空的 row 一起整包推上 Firestore。
   //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
@@ -9165,7 +9444,7 @@ function editKpiFieldNote(month,groupKey,field,thEl){
   //   row 可能還不存在（這個月從沒填過任何東西）→ 等同備註是空字串。
   const cur=(row?.kpiFieldNotes||{})[key]||'';
   const origContent=thEl.innerHTML;
-  const inp=document.createElement('input');
+  const inp=document.createElement('input');inp.dataset.kpiEditor='1';
   inp.type='text';inp.value=cur;inp.placeholder='備註，如：便利袋8000、宅配通7000';
   inp.style.cssText='width:190px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:11.5px;text-align:right;outline:none;font-weight:400;color:#374151';
   inp.onclick=e=>e.stopPropagation();
@@ -9177,8 +9456,8 @@ function editKpiFieldNote(month,groupKey,field,thEl){
   //   —— 在 mousedown 就整包重繪，會把使用者剛按下的那顆東西銷毀 → 第一下永遠沒反應。
   //   done 必須在動 DOM【之前】設：換 innerHTML 會把 inp 移出文件，Firefox 會補一發 blur。
   //   ⚠ 刻意【不搬】PR #223 cancel() 裡「重讀比對、值變過改走重繪」那段：那條的前提是
-  //     _score_monthly_v1 沒接 _markPending、擋不住雲端 bounce-back；而 saveKpiRows 有走
-  //     _cloudWriteSafe → _markPending('_kpi_v1')，__profitShouldSkipCloudOverwrite 擋得到。
+  //     _score_monthly_v1 沒接 _markPending、擋不住雲端 bounce-back；KPI 現在走 app/kpi 訂閱層，
+  //     快照進來時若有編輯器開著會延後重畫（本檔搜 _kpiRefreshViews），不會洗掉輸入框。
   //     何況這裡的重繪是整包 renderKpiTab()，比評分表那兩支貴。
   const cancel=()=>{
     if(done)return;done=true;
@@ -9187,19 +9466,16 @@ function editKpiFieldNote(month,groupKey,field,thEl){
   const commit=()=>{
     if(done)return;
     const v=inp.value.trim();
-    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
-    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    // 值沒變就不寫：每次 commit 都是一次 app/kpi 雲端寫入（含 meta），按 Enter 確認一下不該換來
+    //   一次雲端寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
     //   ⚠ 這條比的是【純字串】：備註本來就是文字，沒有 editKpiCell 那種「同一格可能存
     //     公式也可能存數字」的歧義，不需要（也不可以）先 parseFloat 再比。
     if(v===cur){cancel();return;}
     done=true;
-    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-    if(!row.kpiFieldNotes)row.kpiFieldNotes={};
     // 清空＋Enter＝使用者明確要清掉這則備註 → delete，維持原本的寫法（不寫 ''）。
     //   這個行為本來就是對的，本次【沒有改】—— 改的只是「誰能觸發它」：以前 blur 也會
     //   走到這裡（全選 Backspace 後點旁邊＝備註無聲消失），現在只有 Enter 到得了。
-    if(v)row.kpiFieldNotes[key]=v;else delete row.kpiFieldNotes[key];
-    saveKpiRows(rows);
+    kpiWriteCell(month,['kpiFieldNotes',key],v||undefined);
     renderKpiTab();
   };
   inp.addEventListener('keydown',e=>{
@@ -9220,7 +9496,7 @@ function editKpiCommonCost(month,groupKey,tdEl){
   const rows=getKpiRows();
   // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：理由同 editKpiFieldNote /
   //   editKpiMergedField ——getKpiRows() 回傳的是活陣列本身，開編輯器就 push 的話 Esc 撤不回來
-  //   （Esc 只還原 innerHTML），那列全空的 row 會被之後任何一次 saveKpiRows 一起推上 Firestore。
+  //   （Esc 只還原 innerHTML），那列全空的 row 會被之後任何一次（舊版整包寫入的，已移除）saveKpiRows 一起推上 Firestore。
   //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
   const fieldName=groupKey+'Common';
@@ -9235,7 +9511,7 @@ function editKpiCommonCost(month,groupKey,tdEl){
   //   row 不存在（這個月從沒填過任何東西）→ 等同無值，用 '' 表示。
   const curVal=(row||{})[fieldName]!=null?row[fieldName]:'';
   const origContent=tdEl.innerHTML;
-  const inp=document.createElement('input');
+  const inp=document.createElement('input');inp.dataset.kpiEditor='1';
   inp.type='number';inp.value=curVal;
   inp.style.cssText='width:90px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
   // 🔴 擋冒泡：onclick 掛在 tdEl 自己身上（見 _kpiGroupTableHtml 的 isCommon 分支），input 是
@@ -9269,8 +9545,8 @@ function editKpiCommonCost(month,groupKey,tdEl){
     //   舊版是 s!==''&&!isNaN(v)&&v!==0（打 0 等於刪掉），與隔壁那格外觀一樣、行為相反，
     //   已於本次對齊。清空該格的唯一方式是【清空後按 Enter】（PR #231 定的規則，沒有改動）。
     const hasVal=s!==''&&!isNaN(v);
-    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
-    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    // 值沒變就不寫：每次 commit 都是一次 app/kpi 雲端寫入（含 meta），按 Enter 確認一下不該換來
+    //   一次雲端寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
     //   ⚠ 兩側【分開判】而不是寫成 v===curVal：curVal 可能是 ''（無值），拿 0==='' 比恆 false。
     //     hasVal 為 false 時要比的是「本來就沒有值嗎」——本來就沒有、Enter 時打的又是空/0，
     //     那不是「清空」而是【什麼都沒發生】，不該為它建出一列空 row。
@@ -9280,15 +9556,13 @@ function editKpiCommonCost(month,groupKey,tdEl){
     //     「清空 + Enter」走 hasVal=false + curVal===0（不是 ''）→ 進 delete，刪得掉。
     if(hasVal?v===curVal:curVal===''){cancel();return;}
     done=true;
-    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
     // 清空＋Enter＝使用者明確要清掉這格 → delete，維持原本的寫法（不寫 null）。
     //   ⚠ 【打 0 現在是存 0，不是 delete】—— 本次對齊 editKpiMergedField:6746。舊版是
     //     「打 0 也 delete」，跟隔壁那格外觀一樣、行為相反，那才是要修的東西。
     //     這一行本身【沒有改】：hasVal 不再排除 0 之後，它自動走成「0 → 存 0」。
     //   PR #231 定下的「誰能觸發 delete」沒有變：以前 blur 也會走到這裡（全選 Backspace 後
     //   點旁邊＝共同費用無聲消失），現在仍然只有 Enter 到得了。
-    if(hasVal)row[fieldName]=v;else delete row[fieldName];
-    saveKpiRows(rows);
+    kpiWriteCell(month,[fieldName],hasVal?v:undefined);
     renderKpiTab();
   };
   // ⚠ ↑/↓ 一定要擋：type=number 聚焦中按 ↑/↓ 會直接 ±step（本框沒設 step ＝ ±1）改掉值，
@@ -9535,7 +9809,7 @@ function editKpiMergedField(month,mergeKey,tdEl){
   const rows=getKpiRows();
   // 🔴 空 row 的建立【刻意不在這裡做】（舊版是函式開頭就 push）：理由同 editKpiFieldNote
   //   ——getKpiRows() 回傳的是活陣列本身，開編輯器就 push 的話，Esc 也撤不回來（Esc 只還原
-  //   innerHTML），那列全空的 row 會被之後任何一次 saveKpiRows 一起推上 Firestore。
+  //   innerHTML），那列全空的 row 會被之後任何一次（舊版整包寫入的，已移除）saveKpiRows 一起推上 Firestore。
   //   改成只有真的要寫入時（commit 內）才建；開啟編輯器一律唯讀。
   let row=rows.find(r=>r.month===month);
   // 讀值與下面「值有沒有變」的比較必須是【同一種讀法】，否則會拿兩套語意互比。
@@ -9544,7 +9818,7 @@ function editKpiMergedField(month,mergeKey,tdEl){
   //   row 不存在（這個月從沒填過任何東西）→ 等同無值，用 '' 表示。
   const curVal=(row?.kpiFieldMerges||{})[mergeKey]!=null?row.kpiFieldMerges[mergeKey]:'';
   const origContent=tdEl.innerHTML;
-  const inp=document.createElement('input');
+  const inp=document.createElement('input');inp.dataset.kpiEditor='1';
   inp.type='number';inp.value=curVal;
   inp.style.cssText='width:100px;border:1.5px solid #5b5fcf;border-radius:4px;padding:2px 6px;font-size:12px;text-align:right;outline:none';
   // 🔴 擋冒泡：onclick 掛在 tdEl 自己身上（見 _kpiGroupTableHtml 的 merged 分支），input 是
@@ -9575,20 +9849,17 @@ function editKpiMergedField(month,mergeKey,tdEl){
     const s=inp.value.trim();
     const v=parseFloat(s);
     const hasVal=s!==''&&!isNaN(v);
-    // 值沒變就不寫：saveKpiRows 是整包 rows 直推 Firestore，按 Enter 確認一下不該換來
-    //   一次全量寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
+    // 值沒變就不寫：每次 commit 都是一次 app/kpi 雲端寫入（含 meta），按 Enter 確認一下不該換來
+    //   一次雲端寫入 + 一次整表重繪。走 cancel()（done 由 cancel 自己設）。
     //   ⚠ 兩側【分開判】而不是寫成 v===curVal：curVal 可能是 ''（無值），拿 0==='' 比恆 false。
     //     hasVal 為 false 時要比的是「本來就沒有值嗎」——本來就沒有、Enter 時也是空的，
     //     那不是「清空」而是【什麼都沒發生】，不該為它建出一列空 row。
     if(hasVal?v===curVal:curVal===''){cancel();return;}
     done=true;
-    if(!row){row=_kpiEmptyRow(month);rows.push(row);rows.sort((a,b)=>a.month.localeCompare(b.month));}
-    if(!row.kpiFieldMerges)row.kpiFieldMerges={};
     // 清空＋Enter＝使用者明確要清掉這一格 → delete，維持原本的寫法（不寫 null）。
     //   這個行為本來就是對的，本次【沒有改】—— 改的只是「誰能觸發它」：以前 blur 也會走到
     //   這裡（全選 Backspace 後點旁邊＝合併值無聲消失），現在只有 Enter 到得了。
-    if(hasVal)row.kpiFieldMerges[mergeKey]=v;else delete row.kpiFieldMerges[mergeKey];
-    saveKpiRows(rows);
+    kpiWriteCell(month,['kpiFieldMerges',mergeKey],hasVal?v:undefined);
     renderKpiTab();
   };
   // ⚠ ↑/↓ 一定要擋：type=number 聚焦中按 ↑/↓ 會直接 ±step（本框沒設 step ＝ ±1）改掉值，
@@ -9658,7 +9929,7 @@ function _kpiGroupTableHtml(row,group){
         const note=(row.kpiFieldNotes||{})[group.key+':'+c.k];
         const dot=note?` <span style="color:#f59e0b;font-size:8px" aria-hidden="true">●</span>`:'';
         const title=note?`備註：${note.replace(/"/g,'&quot;')}（點擊修改，這個月共用一則）`:'點擊新增這個月的備註（例如：便利袋8000、宅配通7000）';
-        return `<th onclick="editKpiFieldNote('${row.month}','${group.key}','${c.k}',this)" style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap;cursor:pointer" title="${title}">${c.l}${dot}</th>`;
+        return `<th class="${_kpiBadCls(row.month,['kpiFieldNotes',group.key+':'+c.k]).trim()}" onclick="editKpiFieldNote('${row.month}','${group.key}','${c.k}',this)" style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap;cursor:pointer" title="${title}">${c.l}${dot}</th>`;
       }
       return `<th style="padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap">${c.l}</th>`;
     }).join('')}
@@ -9690,7 +9961,7 @@ function _kpiGroupTableHtml(row,group){
         //     刻意不動；顯示另外判一次，兩者不共用一個變數。
         const commonSet=row[commonField]!=null;
         const dispVal=commonSet?fmtN(Math.round(commonCost)):'<span class="kpi-cell-empty">—</span>';
-        return `<td id="${tid}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一通路）">${dispVal}</td>`;
+        return `<td id="${tid}" class="${_kpiBadCls(row.month,[commonField]).trim()}" rowspan="${group.shops.length}" onclick="editKpiCommonCost('${row.month}','${group.key}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${group.commonCostLabel}（點擊編輯，只影響小計純利，不影響單一通路）">${dispVal}</td>`;
       }
       const mergeStatus=_kpiFieldMergeStatus(group,c.k,shop);
       if(mergeStatus?.type==='na'){
@@ -9734,7 +10005,7 @@ function _kpiGroupTableHtml(row,group){
         //   ⚠ 換行用 &#10; 送進屬性（HTML parser 會解回真正的 \n），搭配 css 的 white-space:pre。
         //     不用 <br>：提示是走 textContent 塞進去的，不為了排版開 innerHTML 這個口。
         const editHint='這裡填的是兩家共用的總額\n各通路金額按訂單數自動分攤，不能個別改';
-        return `<td id="${tid}" class="kpi-merge-cell" data-merge-hint="${editHint.replace(/\n/g,'&#10;')}" onclick="editKpiMergedFieldHinted('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${title}">${dispVal}</td>`;
+        return `<td id="${tid}" class="kpi-merge-cell${_kpiBadCls(row.month,['kpiFieldMerges',mergeStatus.mergeKey])}" data-merge-hint="${editHint.replace(/\n/g,'&#10;')}" onclick="editKpiMergedFieldHinted('${row.month}','${mergeStatus.mergeKey.replace(/'/g,"\\'")}',this)" style="padding:6px 10px;text-align:right;font-size:12.5px;cursor:pointer;white-space:nowrap;vertical-align:middle" title="${title}">${dispVal}</td>`;
       }
       totals[c.k]=(totals[c.k]||0)+(d[c.k]||0);
       const tid=`kpi-${row.month}-${group.key}-${shop}-${c.k}`.replace(/["'\s]/g,'_');
@@ -9744,7 +10015,7 @@ function _kpiGroupTableHtml(row,group){
       const dispVal=explicitlySet?(c.fmt==='pct'?(d[c.k]*100).toFixed(2)+'%':fmtN(Math.round(d[c.k]))):_kpiFmt(d[c.k],c.fmt);
       const isPure=c.k.startsWith('pure')&&c.fmt==='money';
       const color=isPure?(d[c.k]>=0?'#059669':'#dc2626'):'#374151';
-      return `<td id="${tid}" onclick="kpiCellClick('${row.month}','${group.key}','${shopArg}','${c.k}',this,true)" style="padding:6px 10px;text-align:right;font-size:12.5px;color:${color};cursor:pointer;white-space:nowrap" title="點擊編輯；輸入 = 後點其他欄位可帶入公式，如 =實際營收*21%">${dispVal}</td>`;
+      return `<td id="${tid}" class="${_kpiBadCls(row.month,[group.key,shop,c.k]).trim()}" onclick="kpiCellClick('${row.month}','${group.key}','${shopArg}','${c.k}',this,true)" style="padding:6px 10px;text-align:right;font-size:12.5px;color:${color};cursor:pointer;white-space:nowrap" title="點擊編輯；輸入 = 後點其他欄位可帶入公式，如 =實際營收*21%">${dispVal}</td>`;
     }).join('');
     return `<tr style="border-top:1px solid #f0f0f0">
       <td style="padding:6px 12px;font-size:12.5px;font-weight:600;color:#374151;background:#fff;text-align:left;white-space:nowrap">${shop}</td>
@@ -22114,7 +22385,7 @@ Object.assign(window, {
   reapplyAnaToAll,recalcRow,removeGroupAds,removeGrowthCond,removeNewCond,renderAnaModalBody,
   renderColPicker,renderGroupAdsCards,renderGrowthModalBody,renderPnmList,renderSummary,
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
-  buildKpiTabHtml,renderKpiTab,getKpiRows,saveKpiRows,setKpiViewMode,setKpiYear,setKpiMonthNum,
+  buildKpiTabHtml,renderKpiTab,getKpiRows,kpiWriteCell,__kpiMigrateToV2,setKpiViewMode,setKpiYear,setKpiMonthNum,
   deleteKpiRow,editKpiCell,editKpiCommonCost,toggleKpiGroup,kpiCellClick,editKpiFieldNote,editKpiMergedField,editKpiMergedFieldHinted,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,

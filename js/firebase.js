@@ -756,7 +756,7 @@ try {
   //     orderNos 存本月全部訂單編號（Option A：退貨 MSF.訂單編號→下單月 讀取端解析用；跟報表同生共死、不留孤兒索引；~15KB/月/賣場、A1 每月一 doc 有界）。
   //   msf doc id = shopDocId + '_' + msfSrc；doc 內 { shop, src, byOrder:{oid:{returnAmt,confirmDate,hasDeliveryFee}}, returnTotal }。
   //   getDoc/subscribe 命名【必須】保留（落本機防護讀取白名單、自動放行）；setReport/setSrc 唯一寫入。report 帶 updatedAt serverTimestamp 供推送前版本比對（比照 momo_products/origins）；msf 整包取代冪等（重傳同檔覆蓋、不累加，比照 s1103）。
-  //   ⚠ 各同步枚舉點要處理【三個】key 前綴：ec_coupang|（報表）＋ ec_coupang_msf|（退貨）＋ ec_coupang_note|（備註，PR-4b 從報表拆出）。本機測試防護掃到的雲端物件數為 17。
+  //   ⚠ 各同步枚舉點要處理【三個】key 前綴：ec_coupang|（報表）＋ ec_coupang_msf|（退貨）＋ ec_coupang_note|（備註，PR-4b 從報表拆出）。本機測試防護掃到的雲端物件數為 17（其後加 __cloudKpi 變 18，見下方 app/kpi 段）。
   const COUPANG_SHOP_DOCID = { '麻吉':'maji', '露營館':'luying' };
   const COUPANG_DOCID_SHOP = Object.fromEntries(Object.entries(COUPANG_SHOP_DOCID).map(([k,v]) => [v, k]));   // 反查 docId 前綴→賣場（setReport/setSrc 存的 doc 沒有 shop 欄，onSnapshot 靠這個還原 key）
   const coupangReportsColRef = collection(db, 'coupang_reports');
@@ -782,6 +782,57 @@ try {
     getDoc:  (shop, month) => getDoc(doc(db, 'coupang_note', coupangNoteDocId(shop, month))),
     setNote: (shop, month, data) => setDoc(doc(db, 'coupang_note', coupangNoteDocId(shop, month)), data || {}),
     subscribe: (cb) => onSnapshot(coupangNoteColRef, cb),
+  };
+
+  // ============== KPI 月結表獨立文件 app/kpi（每格一條 FieldPath 寫入，多人同時填不互蓋） ==============
+  //   舊版把整個 _kpi_v1 陣列（所有月份）整包 setField 進 app/profit → 最後存的人蓋掉所有人。
+  //   結構：months.{YYYY-MM}.{與舊 _kpi_v1 row 相同的巢狀路徑}（{group}.{shop}.{field}、*Formula、
+  //         kpiFieldNotes.{key}、kpiFieldMerges.{key}、{group}Common）
+  //         meta.{YYYY-MM}.{同一條路徑} = { by, at }；搬移完成後頂層有 migratedAt。
+  //   writePaths(pairs)：pairs = [[segments[], value], …]，一次 updateDoc 原子寫入多格。
+  //     每條路徑都是 new FieldPath(...segments)：店名含 + ( ) 中文、備註 key 含 : 都不必跳脫。
+  //     value === DELETE → deleteField()；物件值裡（任意層）=== TS → serverTimestamp()。
+  //   ⚠ getDoc/subscribe 命名【必須】保留：本機防護碼與唯讀角色的讀取白名單是字串比對。writePaths 是唯一寫入。
+  //   ⚠ 新增這顆後本機防護掃到的雲端物件數為 18（見 CLAUDE.md TEST_NOWRITE 段）。
+  //   回滾：profit.js 的讀寫改回 _kpi_v1 即可，app/profit._kpi_v1 搬移時保留不刪。
+  const kpiDocRef = doc(db, 'app', 'kpi');
+  const KPI_DELETE = Symbol('kpiDelete');
+  const KPI_TS = Symbol('kpiServerTimestamp');
+  const kpiVal = (v) => {
+    if (v === KPI_DELETE) return deleteField();
+    if (v === KPI_TS) return serverTimestamp();
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const o = {};
+      Object.keys(v).forEach(k => { o[k] = kpiVal(v[k]); });
+      return o;
+    }
+    return v;
+  };
+  const kpiUpdate = (pairs) => {
+    const args = [];
+    pairs.forEach(([segs, v]) => { args.push(new FieldPath(...segs), kpiVal(v)); });
+    return updateDoc(kpiDocRef, ...args);
+  };
+  window.__cloudKpi = {
+    DELETE: KPI_DELETE,
+    TS: KPI_TS,
+    getDoc: () => getDoc(kpiDocRef),
+    subscribe: (cb, onErr) => onSnapshot(kpiDocRef, snap => cb(snap.exists() ? (snap.data() || {}) : null), onErr),
+    // 文件不存在的處理比照 safeSetField，但建空文件用 merge:true —— 兩個人同時第一次寫入時，
+    //   後建的那個 setDoc({}) 不帶 merge 會把先寫進去的格子整份清掉。
+    writePaths: async (pairs) => {
+      if (!Array.isArray(pairs) || !pairs.length) return;
+      try {
+        await kpiUpdate(pairs);
+      } catch (e) {
+        if (e && (e.code === 'not-found' || String(e).includes('No document to update'))) {
+          await setDoc(kpiDocRef, {}, { merge: true });
+          await kpiUpdate(pairs);
+        } else {
+          throw e;
+        }
+      }
+    },
   };
 
   window.dispatchEvent(new Event('cloudStoreReady'));

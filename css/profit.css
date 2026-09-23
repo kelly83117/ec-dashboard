@@ -1494,3 +1494,6 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .pf-pchome-btn:hover{ background:#c8000f; }
 .pf-pchome-upbox{ border:1px dashed #f6b8bd; background:#fff5f6; border-radius:10px; padding:14px; margin-bottom:16px; }
 .pf-pchome-edit{ cursor:pointer; color:#E60012; margin-left:6px; user-select:none; }
+
+/* KPI 月結表：這一格寫入 app/kpi 失敗（或 10 秒還沒確認）→ 標紅。由 kpiWriteCell 記錄、_kpiBadCls 套上。 */
+.kpi-cell-failed{background:#fee2e2 !important;box-shadow:inset 0 0 0 1.5px #dc2626;}
