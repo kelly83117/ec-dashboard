@@ -4,17 +4,23 @@ const { Store, escapeHtml, showToast, toDateStr, addDays, todayStr, genId, DAILY
 
 Object.assign(App, {
   renderWeeklyCalendarTab(deptId, color, dept) {
-    // ⚡ profit.js 動態載入 + 懶載 profits archive：工作日誌用 collectAdjustments（calcAnalysis 等 profit.js 匯出）算
-    //   調整標籤 + 讀 profits archive 的調整備註。
-    //   🔴 風險3（同 offices）：__ensureProfit 要【先 resolve】（profit.js 載完、momo 守衛掛好）才呼叫
-    //     __loadHeavyProfitSubs（守衛未掛就訂閱＝雲端可能覆蓋本機＝資料事故）。
+    // ⚡ profit.js 動態載入 + 懶載工作日誌需要的雲端組：工作日誌用 collectAdjustments（calcAnalysis 等 profit.js 匯出）算
+    //   調整標籤 + 讀報表/舊月的調整備註。需要的組＝蝦皮（collectAdjustments 第一趟掃 ec| 報表 key，含 profits collection 近月）
+    //   + archive（舊月調整備註）。★不需 MOMO 組：右側「MOMO · 今日調整」卡讀的 counts 是同步時就預算好、存進
+    //     ec.dailyProgress（app/main、boot 已載）的 momo-summary，render 不讀 momo_products；只有點 chip 看明細
+    //     （momoOpenDpDetail）才回 optlog 現算 → 那條路徑自己補載 MOMO 組（見 profit.js）。也不需酷澎（工作日誌無酷澎卡）。
+    //   🔴 風險3（同 offices）：__ensureProfit 要【先 resolve】（profit.js 載完、momo 守衛掛好）才呼叫任何 __load*Subs
+    //     （守衛未掛就訂閱＝雲端可能覆蓋本機＝資料事故）。
     if (!window.__profitReady) {
       // 未載：先動態載 profit.js，載完 App.render 重繪 → 本函式重跑走 else（標籤那時才算得出）。
-      //   此分支【不】呼叫 __loadHeavyProfitSubs；本次先渲染（collectAdjustments 對 calc 未就緒已有容錯，見本檔內註解）。
+      //   此分支【不】訂閱；本次先渲染（collectAdjustments 對 calc 未就緒已有容錯，見本檔內註解）。
       try { window.__ensureProfit().then(() => this.render()).catch(() => {}); } catch {}
     } else {
-      // 已 ready → 觸發重量級訂閱（守衛 __heavyProfitSubsLoaded 保證只訂一次、切頁不重訂）。
-      try { if (typeof window.__loadHeavyProfitSubs === 'function') window.__loadHeavyProfitSubs(); } catch {}
+      // 已 ready → 懶載蝦皮組 + archive 組（各組 Set 守衛保證只訂一次、切頁進出不重訂）。
+      try {
+        if (typeof window.__loadShopeeSubs === 'function') window.__loadShopeeSubs();
+        if (typeof window.__loadArchiveSubs === 'function') window.__loadArchiveSubs();
+      } catch {}
     }
     // 老闆指示：移除月曆/週曆/甘特圖，每位同事下班前 5 分鐘寫今日工作進度即可
     // 只保留 4 位同事：陳君葳、洪嘉蓮、郭雅琪、楊心雨（2026-09-04 楊心雨接手維克後加入）

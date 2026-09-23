@@ -10982,6 +10982,10 @@ function setShop(shop,btn){
   document.querySelectorAll('.shop-content').forEach(el=>el.classList.remove('active'));
   document.getElementById('content-'+shop).classList.add('active');
   const isCross=(shop==='總表');   // 跨賣場頁面，不屬於任何單一賣場
+  // ⚡ 懶載蝦皮組（profits collection + aff_rpt）：只有進個別蝦皮賣場才需要；蝦皮總表只吃 boot 的 _summary_v1、不載。
+  //   一併載 archive（舊月）→ 月份選單往回選舊月時資料在、不回歸；切回同賣場不重訂（firebase.js 的 Set 守衛）。
+  //   ⚠ archive 是否改成「真的選到舊月才載」＝段2 可再收斂；此處先確保無回歸。
+  if(!isCross){ try{ window.__loadShopeeSubs && window.__loadShopeeSubs(); window.__loadArchiveSubs && window.__loadArchiveSubs(); }catch(e){} }
   const wrap=document.getElementById('profit-period-wrap');
   const wrapRow=document.getElementById('profit-period-wrap-row');
   if(wrap){
@@ -15246,6 +15250,9 @@ function momoUpdateDailyProgress(opts){
 // 工作日誌 momo-summary chip 明細：用 (人+日期+賣場·type) 回 optlog 現算原文（不存 refId、比照蝦皮回源頭）
 function momoOpenDpDetailFromEl(el){ if(!el||!el.getAttribute) return; momoOpenDpDetail(el.getAttribute('data-mm-person')||'', el.getAttribute('data-mm-date')||'', el.getAttribute('data-mm-combo')||''); }
 function momoOpenDpDetail(person, date, combo){
+  // ⚡ 工作日誌點 MOMO chip 看明細才需要 MOMO 組（optlog 在 momo_products 訂閱鏈裡）。多半 localStorage 已有快取；
+  //   若是全新 session 沒載過 MOMO，這裡先觸發訂閱（切回不重訂）；資料非同步回來，極少數首點可能需再點一次。
+  try{ if(typeof window.__loadMomoSubs==='function') window.__loadMomoSubs(); }catch(e){}
   const rows=[];
   MOMO_OPTLOG_DP_SHOPS.forEach(shop=>{
     const master=momoLoadProducts(shop)||[]; const nameBySku=new Map(master.map(p=>[p.sku,p.name||'']));
@@ -19667,6 +19674,9 @@ const _cupSelMonth={};   // shop → 目前選的月份 'YYYY-MM'
 //   ＋分頁同步鈕 cupSyncToCloud（只推酷澎 pending、復用 syncToCloud 分派）。
 
 function setMomoShop(shop,btn){
+  // ⚡ 懶載 MOMO 組（products/origins/reconcile/s1103/stock/e001/cost）。含總表：MOMO 總表逐 SKU 加總全賣場，必須全載。
+  //   放在最前面（render 之前）→ 訂閱先啟動，資料回來由 momoDataReady 等事件精準重繪；切回同平台不重訂。
+  try{ if(typeof window.__loadMomoSubs==='function') window.__loadMomoSubs(); }catch(e){}
   const prevShop=curMomoShop;   // 切換前的賣場（用來搬子分頁 + 判斷是否真的換賣場）
   if(prevShop && prevShop!==shop){
     momoClearStagedFiles();   // ⚠ 換賣場先清已選未處理的檔案（四組全域）→ 杜絕甲配檔誤傳到乙配
@@ -19698,6 +19708,8 @@ function setMomoShop(shop,btn){
 }
 
 function setCoupangShop(shop,btn){
+  // ⚡ 懶載酷澎組（coupang_reports/msf/note）。含總表：酷澎逐店表需要各店 coupang doc；切回同平台不重訂。
+  try{ if(typeof window.__loadCoupangSubs==='function') window.__loadCoupangSubs(); }catch(e){}
   _saveProfitView('coupang',shop);   // 記錄當前檢視＝酷澎+此賣場（同上，供重建後還原）
   document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');

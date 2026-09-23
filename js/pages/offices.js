@@ -30,20 +30,21 @@ Object.assign(App, {
     // d1 profit 子頁：初始化淨利表的賣場分頁內容
     if (deptId === 'd1' && this.route === 'office-d1-profit') {
       // 🔴 profit.js 動態載入 + 風險3：__ensureProfit 必須【先 resolve】（profit.js 執行完、window 匯出＋
-      //   __momoShouldSkipCloudOverwrite 等 momo 守衛都掛好），【才】能呼叫 __loadHeavyProfitSubs（它的
-      //   onSnapshot 回呼要用那些守衛；守衛未掛就訂閱＝雲端 echo 可能覆蓋本機未推編輯＝資料事故）。
+      //   __momoShouldSkipCloudOverwrite 等 momo 守衛都掛好），【才】能訂任何重量級組（各組 loader 的 onSnapshot 回呼
+      //   要用那些守衛；守衛未掛就訂閱＝雲端 echo 可能覆蓋本機未推編輯＝資料事故）。而重量級組現在由平台切換函式懶載，
+      //   restoreProfitView（下面 setTimeout）叫對應 setter 才訂 → 天然落在 __ensureProfit resolve 之後。
       if (!window.__profitReady) {
-        // 未載：先動態載 profit.js，載完 App.render 重繪整頁 → 本函式重跑、走下面「已 ready」分支
-        //   （__loadHeavyProfitSubs 那時才觸發，確保在 __ensureProfit resolve 之後）。
-        //   ⚠ 此分支【刻意不呼叫】__loadHeavyProfitSubs；平台列骨架由 904/819 顯示「載入中」佔位。
+        // 未載：先動態載 profit.js，載完 App.render 重繪整頁 → 本函式重跑、走下面「已 ready」分支（那時才 restore→按組訂閱）。
+        //   ⚠ 此分支【刻意不訂任何組】；平台列骨架由 904/819 顯示「載入中」佔位。
         try {
           window.__ensureProfit().then(() => this.render()).catch(() => {
             const box = document.querySelector('.pf-loading'); if (box) box.textContent = '淨利表載入失敗，請重新整理頁面';
           });
         } catch (e) { console.error('[profit] __ensureProfit 觸發失敗', e); }
       } else if (typeof SHOPS !== 'undefined') {
-        // 已 ready（profit.js 載完、守衛都在）→ 安全觸發重量級訂閱（archive doc + profits collection）+ 填賣場內容。
-        if (typeof window.__loadHeavyProfitSubs === 'function') window.__loadHeavyProfitSubs();
+        // 已 ready（profit.js 載完、守衛都在）→ 不再一次載滿 13 collection（手機 OOM 根因）。重量級訂閱改由平台切換函式
+        //   按組懶載：setShop→蝦皮組 / setMomoShop→MOMO組 / setCoupangShop→酷澎組。下面 setTimeout 裡的 restoreProfitView
+        //   會叫「還原到的那個平台」對應 setter → 只載那一組；落在蝦皮總表（預設、無還原）時不載任何重量級組（只吃 boot 的 _summary_v1）。
         setTimeout(() => {
           try {
             SHOPS.forEach(s => {
