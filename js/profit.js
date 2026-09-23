@@ -9761,11 +9761,15 @@ function _kpiHighlightsHtml(row,prevRow){
   const up=cmp.filter(x=>x.d>0).sort((a,b)=>b.d-a.d)[0];
   const down=cmp.filter(x=>x.d<0).sort((a,b)=>a.d-b.d)[0];
   const best=gs.filter(x=>x.cur.rev>0).sort((a,b)=>b.cur.rate-a.cur.rate)[0];
+  // 三張小卡並排：上面灰色標籤、中間通路名、右邊大的數字、下面一行上月→本月。一眼一張，不用讀一整句。
+  const card=(cls,label,g,big,bigCls,sub)=>'<div class="km-hl-card '+cls+'"><div class="km-hl-l">'+label+'</div>'
+    +'<div class="km-hl-main"><span class="km-hl-name"><span class="km-dot" style="background:'+g.color+'"></span>'+g.title+'</span>'
+    +'<span class="km-hl-big '+bigCls+'">'+big+'</span></div>'+(sub?'<div class="km-hl-sub">'+sub+'</div>':'')+'</div>';
   const hl=[];
-  if(up)hl.push('<span class="km-hl-item"><span class="km-tag km-up">純利成長最多</span>'+up.g.title+' <b class="km-up">▲'+(up.d*100).toFixed(1)+'%</b><span class="km-hl-sub">'+_kpiMoney(up.prev.pure)+' → '+_kpiMoney(up.cur.pure)+'</span></span>');
-  if(down)hl.push('<span class="km-hl-item"><span class="km-tag km-down">純利下滑最多</span>'+down.g.title+' <b class="km-down">▼'+Math.abs(down.d*100).toFixed(1)+'%</b><span class="km-hl-sub">'+_kpiMoney(down.prev.pure)+' → '+_kpiMoney(down.cur.pure)+'</span></span>');
-  if(best)hl.push('<span class="km-hl-item"><span class="km-tag">純利率最高</span>'+best.g.title+' <b>'+_kpiRatePct(best.cur.rate)+'</b></span>');
-  return hl.length?'<div class="km-hl"><span class="km-hl-t">本月重點</span>'+hl.join('')+'</div>':'';
+  if(up)hl.push(card('up','純利成長最多',up.g,'▲'+(up.d*100).toFixed(1)+'%','km-up','上月 '+_kpiMoney(up.prev.pure)+' → 本月 '+_kpiMoney(up.cur.pure)));
+  if(down)hl.push(card('down','純利下滑最多',down.g,'▼'+Math.abs(down.d*100).toFixed(1)+'%','km-down','上月 '+_kpiMoney(down.prev.pure)+' → 本月 '+_kpiMoney(down.cur.pure)));
+  if(best)hl.push(card('best','純利率最高',best.g,_kpiRatePct(best.cur.rate),'','營收 '+_kpiMoney(best.cur.rev)+' · 純利 '+_kpiMoney(best.cur.pure)));
+  return hl.length?'<div class="km-hl">'+hl.join('')+'</div>':'';
 }
 
 // ── A5 各通路表（唯讀；編輯一律到填寫模式）──
