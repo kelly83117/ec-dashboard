@@ -16,7 +16,7 @@ const { Store, escapeHtml, showToast, PLATFORMS_WITH_AD_SPEND } = window;
 
 const SHEET_SYNC_URL = 'https://script.google.com/macros/s/AKfycbz6IpYlNDuk9frEwZIW1kZqrH2s8SpYhgg5AiXwwmyTX4HJ7cITfhuInmaiXNluNZmA3w/exec';
 // 可以按這顆鈕的帳號（username 轉小寫比對，不看角色）
-const SHEET_SYNC_USERS = ['kelly'];
+const SHEET_SYNC_USERS = ['kelly', 'keani'];   // ⚠ 'keani' 只供分支驗收，merge 前要 revert
 
 const SS_DATA_KEYS = [
   '玩樂盒子|營收', '玩樂盒子|廣告費',
