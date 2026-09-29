@@ -1,6 +1,6 @@
 /* ===================== Firebase Firestore 雲端同步層 ===================== */
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
-import { getFirestore, doc, collection, getDoc, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import { getFirestore, doc, collection, getDoc, getDocFromServer, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
@@ -62,7 +62,8 @@ try {
   };
 
   window.__cloudStore = {
-    getDoc: () => getDoc(docRef),
+    // getDoc('server')：強制讀伺服器現值（不吃本機快取）；無參數呼叫行為不變
+    getDoc: (src) => src === 'server' ? getDocFromServer(docRef) : getDoc(docRef),
     setField: (key, value) => safeSetField(docRef, key, value),
     removeField: (key) => restDeleteFields([key]),
     removeFields: (keys) => restDeleteFields(keys),

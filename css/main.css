@@ -743,6 +743,57 @@
     border-color: var(--primary);
     color: var(--primary);
   }
+  /* 從試算表同步（只有 SHEET_SYNC_USERS 看得到）：跟本月明細同層級的次要鈕，字色用 --primary 區分。
+     雲端首批快照前 disabled。預覽彈窗的 .ss-* 樣式在下面。只用既有 :root 變數，不碰儀表板底色。 */
+  .entry-sync-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--primary);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .entry-sync-btn:hover:not(:disabled) {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+  }
+  .entry-sync-btn:disabled {
+    color: var(--text-muted);
+    cursor: not-allowed;
+    opacity: .6;
+  }
+  .ss-root { font-size: 13px; color: var(--text); }
+  .ss-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .ss-mode { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  .ss-month { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); font: inherit; }
+  .ss-reload { margin-left: auto; }
+  .ss-range { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; }
+  .ss-loading, .ss-info { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--info); }
+  .ss-error { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--danger-soft); color: var(--danger); margin-top: 8px; }
+  .ss-ok { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--success-soft); color: var(--success); margin-top: 8px; }
+  .ss-summary-line { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .ss-section { margin-bottom: 12px; }
+  .ss-section-title { font-weight: 700; margin-bottom: 6px; }
+  .ss-section-bad .ss-section-title, .ss-bad-text { color: var(--danger); }
+  .ss-list { margin: 0; padding-left: 18px; }
+  .ss-table { width: 100%; border-collapse: collapse; }
+  .ss-table th, .ss-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+  .ss-table th { color: var(--text-muted); font-weight: 600; font-size: 12px; }
+  .ss-table .ss-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ss-td-cb { width: 24px; }
+  .ss-note { color: var(--warn); font-size: 12px; }
+  .ss-tag { font-size: 11px; color: var(--text-muted); }
+  .ss-daybad td { background: var(--danger-soft); color: var(--danger); }
+  .ss-muted { color: var(--text-muted); font-size: 12px; margin: 6px 0 10px; }
+  .ss-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+  .ss-actions .ss-confirm { width: auto; padding: 10px 20px; }
   .entry-toggle-btn {
     display: inline-flex;
     align-items: center;
