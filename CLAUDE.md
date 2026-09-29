@@ -155,7 +155,8 @@ ESM 有個致命陷阱必須牢記：
 ### Firebase Firestore 結構
 - `app/main` — 主資料文件（帳號、部門、員工、平台營收、洞察表…）。
   透過 `window.__cloudStore`（`getDoc` / `setField` / `removeField(s)` /
-  `subscribe`）存取。
+  `subscribe`）存取。`getDoc('server')` 強制讀伺服器現值（`getDocFromServer`，不吃本機快取），
+  無參數仍是原本的 `getDoc`；「從試算表同步」比對 / 寫前 / 寫後驗證都用它。
 - `app/profit` — 淨利表「當期」資料（避免單檔撞 Firestore 1MB 上限）。
 - `app/profit_YYYY_MM`（archive docs）— 舊月份歷史資料，延後訂閱。
 - `app/kpi` — KPI 月結表（`months.{YYYY-MM}.{路徑}` + `meta.{YYYY-MM}.{路徑}={by,at}`）。

@@ -270,6 +270,8 @@ Object.assign(App, {
             value="${escapeHtml(customMonth)}" max="${escapeHtml(toDateStr(now).slice(0,7))}">
         </span>
         <span class="summary-pills-actions">
+          ${(typeof this.canSheetSync === 'function' && this.canSheetSync()) ? `<button type="button" class="entry-sync-btn" onclick="App.openSheetSync()"
+            ${window.__firstMainSnapshotDone ? 'title="把試算表「蝦皮每日營收」的數字寫進儀表板（先預覽、再確認）"' : 'disabled title="雲端資料載入中"'}>⇩ 從試算表同步</button>` : ''}
           <button type="button" id="open-month-detail" class="entry-detail-btn" title="查看本月每日明細">
             📅 本月明細
           </button>
