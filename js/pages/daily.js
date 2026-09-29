@@ -326,12 +326,12 @@ Object.assign(App, {
       // 第三塊：當日「處理的商品數」，每人一行，置於 todo 橫條上方。來源 = 淨利表(getAdjIndex，
       //   自帶快取) + 洞察表(insIndexForCal，迴圈外建一次)，同商品跨來源去重（key = shop|code；
       //   code 空時用「來源前綴+#index」保筆數，不讓多筆塌成一筆、也不讓兩來源的無碼列互撞）。
-      //   依 ADJ_SHOP_TO_PERSON 歸人，ALLOWED_NAMES 順序，只顯示有數字的人（天然上限 3，不與 MAX_CAL_BARS 合併）。
+      //   依該格日期的負責人（adjOwnerOf）歸人，ALLOWED_NAMES 順序，只顯示有數字的人（天然上限 3，不與 MAX_CAL_BARS 合併）。
       //   顏色走 PERSON_COLORS / PERSON_LIGHT，用 CSS 變數傳給 css/daily-adjustments.css 的排版規則。
       const slash = dateStr.replace(/-/g, '/');
       const keySet = {};   // person -> Set(商品 key)
       const addRecs = (recs, srcTag) => recs.forEach((r, i) => {
-        const person = ADJ_SHOP_TO_PERSON[r.shop];
+        const person = adjOwnerOf(r.shop, dateStr);
         if (!person) return;
         const key = r.code ? (r.shop + '|' + r.code) : (r.shop + '|#' + srcTag + i);
         (keySet[person] = keySet[person] || new Set()).add(key);
@@ -340,7 +340,7 @@ Object.assign(App, {
       addRecs(insIndexForCal[slash] || [], 'i');
       const adjCountByPerson = {};
       Object.keys(keySet).forEach(n => { adjCountByPerson[n] = keySet[n].size; });
-      // MOMO 優化紀錄計數：口徑跟卡片一致＝該人 momo-summary 的 counts「總和」（不是 item 數）。歸屬用 by(登入者)、非蝦皮 ADJ_SHOP_TO_PERSON。
+      // MOMO 優化紀錄計數：口徑跟卡片一致＝該人 momo-summary 的 counts「總和」（不是 item 數）。歸屬用 by(登入者)、非蝦皮 adjOwnerOf。
       const momoCountByPerson = {};
       Object.keys(dayEntries).forEach(n => {
         const v = dayEntries[n]; if (!Array.isArray(v)) return;
@@ -412,10 +412,10 @@ Object.assign(App, {
             ${bossCardHtml}
             ${/* 進度說明：整頁一份。只在看「今天」時出現——進度條永遠算今天推出的期別，
                   看過去日期時它跟畫面上那天無關，常駐一塊卡片只是佔掉垂直空間。
-                  ⚠ ADJ_PERSON_TO_SHOPS 是本檔【底部】的 top-level const，這裡（檔案上半部）
+                  ⚠ adjShopsOf 讀的 ADJ_OWNER_TIMELINE 是本檔【底部】的 top-level const，這裡（檔案上半部）
                     引用得到，是因為 render 只在模組載入完成後才被呼叫。若日後有人把渲染改成
                     模組載入期就執行，這行會炸 Cannot access ... before initialization。 */''}
-            ${isEditable && personInfos.some(p => (ADJ_PERSON_TO_SHOPS[p.name] || []).length) ? buildProgressNoteHtml() : ''}
+            ${isEditable && personInfos.some(p => adjShopsOf(p.name, todayStr).length) ? buildProgressNoteHtml() : ''}
             ${cards}
           </div>
         </div>
@@ -1284,7 +1284,7 @@ Object.assign(App, {
   },
   openAdjustmentDetailModal(person, viewDate, kind, group) {
     const slashDate = String(viewDate || '').replace(/-/g, '/');
-    const recs = (getAdjIndex()[slashDate] || []).filter(r => ADJ_SHOP_TO_PERSON[r.shop] === person);
+    const recs = (getAdjIndex()[slashDate] || []).filter(r => adjOwnerOf(r.shop, viewDate) === person);
     const list = _adjRecsForGroup(recs, kind, group);   // ← 與 pill 計數同一個函式，數字保證一致
     const parts = String(viewDate).split('-');
     const md = `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
@@ -1336,11 +1336,11 @@ Object.assign(App, {
   },
   openInsightDetailModal(person, viewDate, label) {
     // 洞察表「今日調整」chip 明細：純唯讀，只讀 Store，不寫任何東西。
-    //   通路歸屬用模組層 ADJ_PERSON_TO_SHOPS（由 ADJ_SHOP_TO_PERSON 反查，單一來源）；
+    //   通路歸屬用模組層 adjShopsOf(person, viewDate)（查 ADJ_OWNER_TIMELINE，單一來源；用「查看的那天」歸屬）；
     //   分類用 window.__insightClassify（marketing.js 抽出的共用判定）＝「依目前資料重算」，
     //   所以歷史日期若門檻 / 銷售資料已變動，明細可能與當日 chip 數字不同。
     const slashDate = String(viewDate || '').replace(/-/g, '/');
-    const shops = ADJ_PERSON_TO_SHOPS[person] || [];
+    const shops = adjShopsOf(person, viewDate);
     const rows = [];
     shops.forEach(shop => {
       const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
@@ -2155,26 +2155,66 @@ function collectAdjustments() {
 //    加上 marketing.js 的 _updateDailyProgressFromAdjustments，共五份。
 //    2026-09-04 加入楊心雨時刻意【不動】這一行的值，避免後人誤以為改這裡就有效；移除它超出當次範圍。
 const ADJ_ALLOWED_NAMES  = ['陳君葳', '洪嘉蓮', '郭雅琪'];              // 顯示順序
-// ⚠️ 這份表在 marketing.js 的 _updateDailyProgressFromAdjustments 內有一份 SHOP_TO_PERSON，
-//    內容必須一致。改這裡一定要一起改那裡（刻意不寫行號：行號會漂移，以符號名為準）。
+// 通路 → 負責人：【單一來源】就是下方的 ADJ_OWNER_TIMELINE（依生效日的清單）。
+//    marketing.js 的 _updateDailyProgressFromAdjustments 不再自己複寫一份，改經 window 讀
+//    adjOwnerOf / ADJ_ALL_SHOPS（本檔結尾 Object.assign(window, …) 掛出）。
+// ⚠️ 換負責人 = 在清單【最後】加一段 { from:'YYYY-MM-DD', map:{…} }，【不要改舊段】——
+//    紀錄本身不存負責人，歸屬是「用紀錄日期查這份清單」算出來的；改舊段會讓歷史跟著變成新負責人。
 // ⚠️ 2026-07-29 更正：玩樂是郭雅琪 2026/04 起接手，先前寫成洪嘉蓮是錯的。
 // ⚠️ 2026-09-04 更正：維克由楊心雨(Astrid)接手，值從 '未指派' 改為 '楊心雨'。
-// ⚠️ 維克這個通路是老闆指定要保留的，不可以從表裡移除 ——
-//    marketing.js 的 INSIGHT_SHOPS = Object.keys(SHOP_TO_PERSON) 由本表 key 推導，
+// ⚠️ 2026-10-01 起好麻吉（洪嘉蓮 → 郭雅琪）、玩樂（郭雅琪 → 洪嘉蓮）交換；9/30（含）以前維持原負責人。
+// ⚠️ 維克這個通路是老闆指定要保留的，不可以從清單裡移除 ——
+//    ADJ_ALL_SHOPS（marketing.js 的 INSIGHT_SHOPS 也是它）由各段 map 的 key 推導，
 //    少一個通路 = 該通路的洞察活動完全不被統計，而且不報錯。
 // ⚠️ 2026-09-04 更正（舊註解已錯，勿再引用）：舊版寫「'未指派' 不在硬寫的 ALLOWED_NAMES 裡，
 //    工作日誌月曆/卡片不會顯示它」。那句自 2026-07-31 起就不成立 —— 當天加入的 _dpExtraNames
 //    聯集會把「該日有資料的非名單人」一併排進 personInfos，月曆計數列與圖例走同一份聯集
 //    （calExtraPeople）。正確描述是：不在 ALLOWED_NAMES 的人，只要當天有資料就會長出一張
 //    fallback 灰底卡片；ALLOWED_NAMES 決定的是「固定顯示 + 可被老闆指派 + 收 LINE 通知」。
-const ADJ_SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '郭雅琪', '森之旅': '陳君葳', '維克': '楊心雨' };
+//    from 由小到大；第一段 from:'' 代表「最早以前」。日期一律用 YYYY-MM-DD 比字串大小。
+const ADJ_OWNER_TIMELINE = [
+  { from: '',           map: { '好麻吉': '洪嘉蓮', '玩樂': '郭雅琪', '森之旅': '陳君葳', '維克': '楊心雨' } },
+  { from: '2026-10-01', map: { '好麻吉': '郭雅琪', '玩樂': '洪嘉蓮', '森之旅': '陳君葳', '維克': '楊心雨' } },
+];
 const ADJ_MAX_ROWS = 10;                                              // 每人預設顯示筆數（死碼，未被引用）
-// 人 → 通路（反查）：{ 洪嘉蓮:['好麻吉'], 郭雅琪:['玩樂'], 陳君葳:['森之旅'], 楊心雨:['維克'] }
-const ADJ_PERSON_TO_SHOPS = Object.keys(ADJ_SHOP_TO_PERSON).reduce((m, shop) => {
-  const p = ADJ_SHOP_TO_PERSON[shop];
-  (m[p] = m[p] || []).push(shop);
-  return m;
-}, {});
+// 所有時段通路的聯集，依第一次出現的順序（＝舊 Object.keys(對照表) 的順序：好麻吉、玩樂、森之旅、維克）
+const ADJ_ALL_SHOPS = Object.freeze(ADJ_OWNER_TIMELINE.reduce((out, t) => {
+  Object.keys(t.map).forEach(shop => { if (out.indexOf(shop) < 0) out.push(shop); });
+  return out;
+}, []));
+// 日期 → 'YYYY-MM-DD'。接受 'YYYY-MM-DD' / 'YYYY/MM/DD'（可帶時間字尾）；不合法回 null。
+function _adjDateKey(d) {
+  const k = String(d == null ? '' : d).slice(0, 10).replace(/\//g, '-');
+  return /^\d{4}-\d{2}-\d{2}$/.test(k) ? k : null;
+}
+// 某天生效的那份 map。日期不合法 → null（每個不同的壞值只 warn 一次）。
+//   未知一律不歸屬（比照 profit.js _inPeriod「未知一律 false」），不猜今天、不猜最新。
+const _adjBadDateWarned = new Set();
+function _adjMapOn(date) {
+  const k = _adjDateKey(date);
+  if (!k) {
+    const tag = String(date);
+    if (!_adjBadDateWarned.has(tag)) {
+      _adjBadDateWarned.add(tag);
+      console.warn('[adjOwner] 日期不合法，這筆不歸屬任何人：', date);
+    }
+    return null;
+  }
+  for (let i = ADJ_OWNER_TIMELINE.length - 1; i >= 0; i--) {
+    if (k >= ADJ_OWNER_TIMELINE[i].from) return ADJ_OWNER_TIMELINE[i].map;
+  }
+  return null;
+}
+// 通路 → 某天的負責人；查不到回 undefined。
+function adjOwnerOf(shop, date) {
+  const m = _adjMapOn(date);
+  return m ? m[shop] : undefined;
+}
+// 人 → 某天負責的通路（ADJ_ALL_SHOPS 順序）；每次回新陣列，查不到回 []。
+function adjShopsOf(person, date) {
+  const m = _adjMapOn(date);
+  return m ? ADJ_ALL_SHOPS.filter(shop => m[shop] === person) : [];
+}
 // 開發期檢查：同一 label 若出現不同 cls，warn 一次（cls 取「該組第一筆」是推論，這裡驗證它）
 const _adjClsWarned = new Set();
 function _warnAdjClsMismatch(label, a, b) {
@@ -2290,7 +2330,7 @@ window.addEventListener('profitDataReady', () => {
   //   其他頁不動（資料已進 Store，切過去自然渲染）。route 判斷沿用 app.js 既有慣例（App.render 重繪當前 route）。
   if (window.App && window.App.route === 'office-d1' && typeof window.App.render === 'function') window.App.render();
 });
-// 洞察表調整索引：{ 'YYYY/MM/DD': [{shop, code}] }。來源 = ADJ_SHOP_TO_PERSON 各通路的
+// 洞察表調整索引：{ 'YYYY/MM/DD': [{shop, code}] }。來源 = ADJ_ALL_SHOPS 各通路的
 // ec.insight_{shop}_notes；日期同時支援 dash/slash，一律正規化成斜線（與 getAdjIndex 一致）；
 // date 空的跳過。純唯讀。
 // 🔴 刻意不做模組層快取：getAdjIndex 的快取靠 profitDataReady 事件失效，洞察資料沒有對應事件，
@@ -2298,7 +2338,7 @@ window.addEventListener('profitDataReady', () => {
 function getInsIndex() {
   const idx = {};
   try {
-    Object.keys(ADJ_SHOP_TO_PERSON).forEach(shop => {
+    ADJ_ALL_SHOPS.forEach(shop => {
       const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
       Object.keys(notes).forEach(code => {
         const adjustments = (notes[code] && notes[code].adjustments) || [];
@@ -2358,13 +2398,13 @@ function buildProgressHtml(person){
     return _buildProgressHtmlInner(person);
   }catch(e){
     console.warn('[buildProgressHtml] 進度區塊算不出來，改顯示「—」：',person,e);
-    if(!(ADJ_PERSON_TO_SHOPS[person]||[]).length)return'';
+    if(!adjShopsOf(person,toDateStr(new Date())).length)return'';
     return`<div class="adj-prog"><div class="adj-prog-head"><div class="adj-prog-title">優化進度</div></div>`
       +`<div class="adj-prog-row"><span class="adj-prog-na">—</span></div></div>`;
   }
 }
 function _buildProgressHtmlInner(person){
-  const shops=ADJ_PERSON_TO_SHOPS[person]||[];
+  const shops=adjShopsOf(person,toDateStr(new Date()));
   if(!shops.length)return'';
   const hasSLP=typeof window.shopLabelProgress==='function';
   const results=shops.map(shop=>({shop,p:hasSLP?window.shopLabelProgress(shop):null}));
@@ -2473,7 +2513,7 @@ function _buildProgressHtmlInner(person){
 //   pill 計數一律走 _adjRecsForGroup（與 modal 明細同源，數字保證一致）。
 function buildCardAdjustmentsHtml(person, viewDate) {
   const slashDate = String(viewDate || '').replace(/-/g, '/');
-  const recs = (getAdjIndex()[slashDate] || []).filter(r => ADJ_SHOP_TO_PERSON[r.shop] === person);
+  const recs = (getAdjIndex()[slashDate] || []).filter(r => adjOwnerOf(r.shop, viewDate) === person);
 
   // 空狀態：當日 0 筆 → 只留進度區塊，沒有進度就整塊不顯示
   // （原 person === '郭雅琪' 的「無淨利表」特例已移除：那是郭雅琪負責維克時期寫的，
@@ -2754,4 +2794,4 @@ window.__taskImageCleanup = async function () {
   console.log('建議再跑一次 __taskImageAudit() 確認結果');
 };
 
-Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES, _tiListAll });
+Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, adjOwnerOf, adjShopsOf, ADJ_ALL_SHOPS, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES, _tiListAll });

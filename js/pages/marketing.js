@@ -1684,22 +1684,26 @@ Object.assign(App, {
   _updateDailyProgressFromAdjustments(opts) {
     // 洞察表：每個通路的調整動作自動連動到對應「通路負責人」的工作日誌
     //   ⚠️ 2026-09-04 更正：本行原本複寫了一份對照（玩樂→洪嘉蓮、維克→郭雅琪），那是 2026-07-29
-    //      之前的舊資料、已錯一個多月。現行對應【一律以下方 SHOP_TO_PERSON 為準】，這裡不再複寫。
+    //      之前的舊資料、已錯一個多月。現行對應【一律以 daily.js 的 ADJ_OWNER_TIMELINE 為準】，這裡不再複寫。
     //   不管是誰做的調整（Kelly 或員工本人），一律歸給該通路負責人
     //   調整全刪光 → 重新統計得 0 個 → 該日誌段落自動被清空
     // 淨利表：仍以「登入者」為對象（未變），只有 ALLOWED_NAMES 名單內的員工登入時才寫
     const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
-    // ⚠️ 這份表在 daily.js 有一份 ADJ_SHOP_TO_PERSON（2026-09-04 當時位於該檔 2131 行；舊註解寫的
-    //    daily.js:1639 早已失效），內容必須一致。改這裡一定要一起改那裡 —— 行號會漂移，以符號名為準。
-    // ⚠️ 2026-07-29 更正：玩樂是郭雅琪 2026/04 起接手，先前寫成洪嘉蓮是錯的。
-    // ⚠️ 2026-09-04 更正：維克由楊心雨(Astrid)接手，值從 '未指派' 改為 '楊心雨'。
-    // ⚠️ 維克這個通路是老闆指定要保留的，不可以從表裡移除 ——
-    //    INSIGHT_SHOPS = Object.keys(SHOP_TO_PERSON) 由本表 key 推導，
+    // ⚠️ 通路 → 負責人的對照表【只在 daily.js 的 ADJ_OWNER_TIMELINE】（依生效日的清單，單一來源），
+    //    本檔不再複寫一份；一律經 window.adjOwnerOf(shop, 今天) / window.ADJ_ALL_SHOPS 讀。
+    //    換負責人去那份清單最後加一段，不要在這裡加表。
+    //    daily.js 比本檔晚 import，但本函式只在使用者按同步 / 改備註時才執行，那時 window 上已掛好。
+    // ⚠️ 維克這個通路是老闆指定要保留的，不可以從 daily.js 的清單移除 ——
+    //    INSIGHT_SHOPS = window.ADJ_ALL_SHOPS 由該清單推導，
     //    少一個通路 = 該通路的洞察活動完全不被統計，而且不報錯。
     // ⚠️ 2026-09-04 更正（舊註解已錯，勿再引用）：舊版寫「'未指派' 不在硬寫的 ALLOWED_NAMES 裡，
     //    工作日誌月曆/卡片不會顯示它」。那句自 2026-07-31 起就不成立 —— daily.js 的 _dpExtraNames
     //    聯集會把「該日有資料的非名單人」一併顯示（月曆與圖例走同一份聯集 calExtraPeople）。
-    const SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '郭雅琪', '森之旅': '陳君葳', '維克': '楊心雨' };
+    // 防呆：對照表沒掛好就【在任何寫入之前】停下 —— 寧可今天不更新摘要，也不要用錯的歸屬寫進工作日誌。
+    if (typeof window.adjOwnerOf !== 'function' || typeof window.adjShopsOf !== 'function' || !Array.isArray(window.ADJ_ALL_SHOPS)) {
+      console.error('[autoSummary] daily.js 的通路負責人對照（window.adjOwnerOf / window.adjShopsOf / window.ADJ_ALL_SHOPS）尚未就緒，本次不更新工作日誌摘要');
+      return;
+    }
     const userName = this.currentUser && this.currentUser.name;
     const usernameId = this.currentUser && this.currentUser.username;
     if (!userName) return;
@@ -1714,10 +1718,11 @@ Object.assign(App, {
     // ======== 1. 洞察表：per-shop 累計 → attribute 給該賣場對應的人 ========
     // 不看 `a.by`（不管誰改）：Kelly 或員工做的都算給該賣場負責人
     // 結構：insightCountsByPerson[person] = { '成長品': N, ... }
-    const INSIGHT_SHOPS = Object.keys(SHOP_TO_PERSON); // ['好麻吉','玩樂','森之旅','維克']
+    const INSIGHT_SHOPS = window.ADJ_ALL_SHOPS; // ['好麻吉','玩樂','森之旅','維克']
     const insightCountsByPerson = {};
     INSIGHT_SHOPS.forEach(shop => {
-      const person = SHOP_TO_PERSON[shop];
+      const person = window.adjOwnerOf(shop, todayDash);   // 用「今天」歸屬（本函式只寫今天）
+      if (!person) return;
       const counts = insightCountsByPerson[person] = insightCountsByPerson[person] || {};
       const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
       Object.keys(notes).forEach(code => {
@@ -1791,7 +1796,7 @@ Object.assign(App, {
 
     // 受影響 = 3 位賣場負責人（insight 一定要重算，即便今天沒調整也要跑一次，
     //   舊自動段落才會被清掉）+ 若登入者是 profit 對象也算
-    const affectedPersons = new Set(Object.values(SHOP_TO_PERSON));
+    const affectedPersons = new Set(INSIGHT_SHOPS.map(s => window.adjOwnerOf(s, todayDash)).filter(Boolean));
     if (profitPerson) affectedPersons.add(profitPerson);
 
     const all = Store.get('ec.dailyProgress', {}) || {};
