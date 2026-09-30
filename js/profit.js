@@ -23768,10 +23768,10 @@ function pchomeProfitCalc(entry, shop){
   }); }
   // ── 費用逐筆歸屬（含稅；淨利時 ÷1.05）──
   // 行銷/專案獎勵金段（B1/C1/D4/D12）→ pchomeBuildMarketingSeg 拆 fixed（進攤提池）/variable（行銷推廣費逐筆→SKU）。
-  var fixedPool=0, unallocPool=0, mktWarnings=[];
+  var fixedPool=0, unallocPool=0, mktWarnings=[], fixedNames=[];
   segs.forEach(function(s){ if(!pchomeIsMktSeg(s)) return;
     var m=pchomeBuildMarketingSeg(s);
-    m.fixed.forEach(function(f){ fixedPool+=(f.amount||0); });
+    m.fixed.forEach(function(f){ fixedPool+=(f.amount||0); if((f.amount||0)>0 && f.name && fixedNames.indexOf(f.name)<0) fixedNames.push(f.name); });   // 收集當期>0的固定費項目名（tooltip 攤提行列出、不列金額）
     unallocPool+=(m.unallocatable||0);
     if(m.warnings&&m.warnings.length) mktWarnings=mktWarnings.concat(m.warnings);
     m.variable.forEach(function(v){ (v.lines||[]).forEach(function(l){
@@ -23804,6 +23804,7 @@ function pchomeProfitCalc(entry, shop){
   var 責任險=(af&&af.明細&&af.明細.D11)?(Number(af.明細.D11.v)||0):0;
   var fixedKnown=(feeState==='已對帳');   // 即時：CSV 月結前常缺固定費 → 攤提不完整、由 render banner 標「固定費未知」
   var 攤提池=fixedPool+責任險+unallocPool;
+  var 攤提項目=fixedNames.slice(); if(責任險>0) 攤提項目.push('產品責任險'); if(unallocPool>0.5) 攤提項目.push('無法歸屬費用');   // tooltip 攤提行列出（只名稱、0 不列）
   // 按 max(淨營收,0) 比例攤到有正營收的 SKU；殘差給營收最大的那支 → Σ攤提 === 攤提池（下方 assert）。零銷/負營收不攤。
   var wList=order.map(function(c){return bySku[c];}).filter(function(o){return o&&(o.營收||0)>0.5;});
   var wSum=wList.reduce(function(a,o){return a+Math.max(o.營收||0,0);},0);
@@ -23862,7 +23863,7 @@ function pchomeProfitCalc(entry, shop){
     簡訊費推算:{列數:smsShipLineCount, 退貨物流筆數:smsReturnLogisticsCount, 推算:smsEst, 含稅:smsEst, 未稅:smsEst/1.05}, 簡訊費實際:smsActual,
     // 簡訊費五個自驗欄（月對帳核對報告用；docs §9）：推算＝出貨列數＋退貨物流筆數；實際＝對帳單 D5。
     smsEstimate:smsEst, smsShipLineCount:smsShipLineCount, smsReturnLogisticsCount:smsReturnLogisticsCount, smsReturnGoodsCount:smsReturnGoodsCount, smsActualD5:smsActual,
-    費用池:{固定費:fixedPool, 責任險:責任險, 無法歸屬:unallocPool, 攤提池:攤提池, 可歸屬含稅:attribHK, fixedKnown:fixedKnown}, mktWarnings:mktWarnings,   // 月對帳核對報告 + tooltip
+    費用池:{固定費:fixedPool, 責任險:責任險, 無法歸屬:unallocPool, 攤提池:攤提池, 攤提項目:攤提項目, 可歸屬含稅:attribHK, fixedKnown:fixedKnown}, mktWarnings:mktWarnings,   // 月對帳核對報告 + tooltip
     退貨未歸屬含稅:returnUnattributed,   // 段2 退貨對不到料號的金額（含稅、警示用；本期應為 0）
     即時費用含稅:即時費用含稅, 即時費用未稅:即時費用含稅/1.05 };
 }
@@ -24222,7 +24223,9 @@ function pchomeProfitTabHTML(shop){
     if(m.行銷推廣費>0) parts.push('行銷推廣費 '+pchomeMoney(m.行銷推廣費)+'（逐筆）');
     if(m.退貨物流費>0) parts.push('退貨物流費 '+pchomeMoney(m.退貨物流費)+'（逐筆）');
     if(m.簡訊費>0) parts.push('簡訊費 '+pchomeMoney(m.簡訊費)+'（逐筆）');
-    if(m.攤提>0) parts.push('攤提 '+pchomeMoney(m.攤提)+'（固定費／責任險／無法歸屬，按營收比例攤）');
+    if(m.攤提>0){ parts.push('攤提 '+pchomeMoney(m.攤提)+'（按營收比例攤）');
+      var items=(calc.費用池&&calc.費用池.攤提項目)||[];   // 攤提含哪些費用（只名稱、當期 0 不列）
+      if(items.length) parts.push('　　'+items.join('・')); }
     if(!parts.length) return '本期無平台費用';
     return parts.join('\n')+'\n───────\n含稅合計 '+pchomeMoney(m.含稅合計)+' ÷ 1.05 ＝ '+pchomeMoney(x.費用)+'（未稅）'; };
   // 逐欄 cell renderer（key→td），body/未分攤/合計 共用；重排/隱藏都對得上（保留原本的缺成本→—、淨利率上色邏輯）。
