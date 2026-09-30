@@ -460,6 +460,17 @@ app/profit 實測已 796.6 KB / 1 MB（77.8%、剩 227 KB），PChome 新資料*
 
 這樣不管 profit.js 多晚載入，初次 hydrate 都不漏。**optlog／history 表單那輪新增各自的 apply 函式時，記得同樣在定義後 drain 對應的 `__pchome*CloudLatest`**，否則會重蹈此 bug。此陷阱只影響「動態載入模組 + boot 期訂閱」的組合，是本專案 ESM 動態載入架構的通用地雷。
 
+### 同步鈕待推數：通路切分（PR #317）＋ 黑名單技術債
+
+各通路在自己的分頁按自己的同步鈕，**待推數必須依通路切分**——某通路的待推只能點亮自己的鈕。
+
+- PChome 有自有鈕（`pchome-sync-btn-<shop>`）+ 自有計數 `pchomePendingKeys()`（讀 `pchomeDirtyGet()`：`ec_pchome_recon`/`products`/`orders`）。
+- momo/蝦皮的全域鈕 `global-sync-btn` 用 `_realPendingCount()`；momo 分頁鈕用 `_momoSyncPendingCount()`；酷澎鈕用 `_cupPendingKeys()`。
+
+🐛 **PR #317 修的正式站 bug**：`ec_pchome_*` 經 `_markPending` 進了共用的 `_pendingSyncKeys`（實際推送需要它在裡面），而 `_realPendingCount` / `_momoSyncPendingCount` **盲數整個 `_pendingSyncKeys`** → PChome 待推**點亮了 momo 的鈕**。修法：這兩個計數函式在迴圈裡 `startsWith('ec_pchome_')` 跳過（計數端排除、不從 `_pendingSyncKeys` 移除）。
+
+🔴 **技術債（現在不改，記著）**：計數端用 `startsWith('ec_pchome_')` 排除是**黑名單**做法。以後**新增通路**若照同樣方式把 key 塞進 `_pendingSyncKeys`，`_realPendingCount`/`_momoSyncPendingCount` 又會把它算進去、**再次點亮 momo 的鈕**（同一個 bug 重演）。比較穩的是**各通路的計數各自持有明確的 key 前綴白名單**（像 `_momoSyncPendingCount` part(2) 那份 localStorage 前綴清單那樣，只是要連 part(1) 的 `_pendingSyncKeys` 迴圈也改成白名單）。這跟 `pchomeIsFeeSeg` 當初用前綴判斷踩的是同一類坑（黑名單/前綴比對 → 新增項目就漏）。根治＝改白名單，屬跨通路重構、投報中等，延後。
+
 ---
 
 ## 5. UI 規格
