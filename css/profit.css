@@ -1607,6 +1607,30 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-ftable th.km-f-rohead{background:#eef0f4;}
 .km-ftable td.km-f-ro-first,.km-ftable th.km-f-ro-first{border-left:2px solid #cbd5e1;}
 .km-roval{box-sizing:border-box;min-height:32px;padding:4px 2px;border:1px solid transparent;line-height:22px;white-space:nowrap;}
+/* MOMO 自動帶入（2026-09-30）：按鈕同 .km-dl 外觀、「自動」小標籤、預覽表 */
+.km-au-bar{margin-left:auto;display:inline-flex;align-items:center;gap:8px;}
+.km-au-btn{padding:6px 12px;border-radius:var(--radius-sm);border:1px solid #cbd5e1;background:#fff;color:#374151;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;}
+.km-au-btn:hover{border-color:var(--primary);color:var(--primary);}
+.km-au-btn:disabled{opacity:.6;cursor:wait;}
+.km-au-hint{font-size:11.5px;font-weight:600;color:#92400e;background:var(--warn-soft);padding:2px 8px;border-radius:999px;white-space:nowrap;}
+.km-au-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--primary-soft);color:var(--primary);line-height:1.6;}
+.km-au-sub{font-size:12px;color:#6b7280;margin-bottom:10px;}
+.km-au-tbl{width:100%;border-collapse:collapse;font-size:12.5px;color:#374151;font-variant-numeric:tabular-nums;}
+.km-au-tbl th{text-align:left;padding:6px 8px;color:#6b7280;font-size:11px;font-weight:600;background:#f8f9fc;white-space:nowrap;border-bottom:1px solid #eef0f4;}
+.km-au-tbl td{padding:6px 8px;border-top:1px solid #f3f4f6;vertical-align:top;white-space:nowrap;text-align:left;font-size:12.5px;}
+.km-au-tbl .km-n{text-align:right;}
+.km-au-tbl td.km-au-src{white-space:normal;color:#6b7280;font-size:11.5px;min-width:220px;}
+.km-au-arrow{color:#9ca3af;text-align:center;}
+.km-au-val{font-weight:700;color:#1a1a2e;}
+.km-au-nil{color:#9ca3af;}
+.km-au-w .km-au-st{color:#047857;font-weight:700;}
+.km-au-s{color:#9ca3af;}.km-au-s .km-au-val{color:#9ca3af;font-weight:500;}
+.km-au-x .km-au-st{color:#b45309;font-weight:700;}
+.km-au-upd{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:#92400e;}
+.km-au-check{margin-top:6px;font-size:12px;font-weight:600;}
+.km-au-note{margin-top:2px;font-size:11px;color:#9ca3af;}
+.km-au-snap{font-size:12px;color:#047857;background:var(--success-soft);border-radius:6px;padding:6px 10px;margin-bottom:10px;}
+.km-au-check.ok{color:#047857;}.km-au-check.bad{color:#dc2626;}
 .km-tmp{display:inline-block;margin-left:5px;font-size:11px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:#92400e;vertical-align:1px;line-height:1.6;}
 .km-f-common td{background:#fcfcfd;}
 .km-common-in{display:flex;align-items:flex-start;gap:8px;max-width:240px;}
