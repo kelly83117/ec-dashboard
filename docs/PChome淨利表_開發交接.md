@@ -439,6 +439,27 @@ DIAECY-A900KE6PT-005 → D27-11  (藏青)
 
 `單位成本` 在全期內每個料號都一致，沒有逐單浮動。
 
+### 雲端：三個獨立 doc（不進 app/profit）＋ 動態載入 hydrate 陷阱（2026-09-30）
+
+app/profit 實測已 796.6 KB / 1 MB（77.8%、剩 227 KB），PChome 新資料**不塞 app/profit**，改走三個獨立 doc（成長速率不同、互不拖累）：
+
+| 資料 | Store key | Firestore doc | 同步物件 |
+|---|---|---|---|
+| 訂單明細 | `ec_pchome_orders` | `app/pchome_orders` | `__cloudPchomeOrders` |
+| 優化紀錄 | `ec_pchome_optlog\|<shop>` | `app/pchome_optlog` | `__cloudPchomeOptlog` |
+| 商品歷程 | `ec_pchome_history` | `app/pchome_history` | `__cloudPchomeHistory` |
+
+物件照 `__cloudProfit` 慣例（`getDoc/setField/removeFields/subscribe`、per-field 寫）。doc 內**按帳務月/shop/料號分欄位**存 → 日後可 `removeFields` 裁剪（訂單累積式，一年約 2400 筆 ~500 KB）。同步走既有 `syncToCloud` task 迴圈加分支（**不另開寫入路徑**）、共用 dirty/pending/警示/「☁ 同步雲端」；不自動推、read-merge-write（保留他機資料）。既有 `ec_pchome_products`（326 KB）、`ec_pchome_recon` 仍在 app/profit，之後獨立 PR 遷移（有 #305 備份）。
+
+🔴 **動態載入 hydrate 陷阱（做 optlog／history 表單時會再遇到，務必照同一模式）**：
+`js/profit.js` 是**動態載入**（進淨利表才 `import`，見 `main.js`，手機 1.9 MB 優化）。但 `firebase.js` 在 **boot 就註冊雲端訂閱**，比 profit.js 早就緒。因此 `app/pchome_*` 的**首個快照觸發時，profit.js 定義的套用函式 `window.__pchomeApplyCloud*` 還不存在** → 被 `typeof === 'function'` 檢查略過。之後 doc 內容不變 → onSnapshot 不再觸發 → **初次 hydrate 永遠漏掉**（症狀：清 localStorage 重整後、換機開，訂單讀不回來）。
+
+**解法（PR #315 已實作）**：
+1. `firebase.js` 訂閱**一律先把最新快照緩存到 `window.__pchome{Orders,Optlog,History}CloudLatest`**，再嘗試呼叫套用函式。
+2. `profit.js` 在套用函式定義後，**立刻從緩存 drain 補套一次**（`if(typeof window.__pchomeOrdersCloudLatest!=='undefined') window.__pchomeApplyCloudOrders(...)`）。
+
+這樣不管 profit.js 多晚載入，初次 hydrate 都不漏。**optlog／history 表單那輪新增各自的 apply 函式時，記得同樣在定義後 drain 對應的 `__pchome*CloudLatest`**，否則會重蹈此 bug。此陷阱只影響「動態載入模組 + boot 期訂閱」的組合，是本專案 ESM 動態載入架構的通用地雷。
+
 ---
 
 ## 5. UI 規格
