@@ -1535,6 +1535,8 @@ function _sweepAllLocalReportsIntoPending(){
       if(k&&(k==='ec_pchome_recon'||k==='ec_pchome_products')){ if(pchomeDirtyGet().indexOf(k)>=0) _pendingSyncKeys.add(k); continue; }
       // PChome 訂單明細（獨立 doc app/pchome_orders，走專屬 pchomeSyncOrders 分支）：dirty 才撿回 pending。value 由 pchomeSyncOrders 直接讀 pchomeLoadOrders，不需在此補水。
       if(k&&k==='ec_pchome_orders'){ if(pchomeDirtyGet().indexOf(k)>=0) _pendingSyncKeys.add(k); continue; }
+      // PChome 優化紀錄／商品歷程（獨立 doc，走專屬 pchomeSyncOptlog／pchomeSyncHistory 分支）：dirty 才撿回。
+      if(k&&(k==='ec_pchome_history'||k.indexOf('ec_pchome_optlog|')===0)){ if(pchomeDirtyGet().indexOf(k)>=0) _pendingSyncKeys.add(k); continue; }
       // MOMO 倉租費分頁已移除(v315)：不再把 ec_momo_rent_records 補進 pending 推送（雲端既有 field 不動、只停止再推）。
       // MOMO 月對帳（階段二）：ec_momo_reconcile|<shop>|<YYYY-MM> → momo_reconcile collection（每 shop 每月一 doc）
       if(k&&k.startsWith('ec_momo_reconcile|')){
@@ -1973,6 +1975,17 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         else{ skippedProblem.push({key:pk,reason:'PChome 訂單明細雲端層未就緒'}); }
         return;
       }
+      if(pk.startsWith('ec_pchome_optlog|')){   // 優化紀錄：獨立 doc app/pchome_optlog，read-merge-write（逐 SKU 依 entry id union、不覆蓋不刪同事的）
+        var _poshop=pk.slice('ec_pchome_optlog|'.length);
+        if(window.__cloudPchomeOptlog){ tasks.push({key:pk, run:()=>pchomeSyncOptlog(_poshop)}); }
+        else{ skippedProblem.push({key:pk,reason:'PChome 優化紀錄雲端層未就緒'}); }
+        return;
+      }
+      if(pk==='ec_pchome_history'){   // 商品歷程：獨立 doc app/pchome_history，read-merge-write（逐料號依 entry id union）
+        if(window.__cloudPchomeHistory){ tasks.push({key:pk, run:()=>pchomeSyncHistory()}); }
+        else{ skippedProblem.push({key:pk,reason:'PChome 商品歷程雲端層未就緒'}); }
+        return;
+      }
       if(_notesUsesMerge(pk)){   // ec_notes：dirty-scoped merge（逐品號、只覆蓋你改過的、不刪同事的）→ 兩人各改各的品號可共存
         //   ⚠ 實務上【只有 _growth 會走到這裡】。廣告調整 ec_notes|{通路}|{月}|{半月} 雖然
         //     saveNotes 也會把它加進 _pendingSyncKeys，但它在本迴圈【之前】就已由當期閘門排進
@@ -2111,7 +2124,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     ok.forEach(k=>{ if(cupIsNoteKey(k)){ try{ _cupNoteKeyDirtyDel(k); _cupNoteItemsDirtyClear(k); }catch{} } });   // 酷澎備註：兩層 dirty 同一迴圈相鄰清（只清推成功的 key；失敗留著下次再推）
-    ok.forEach(k=>{ if(k==='ec_pchome_recon'||k==='ec_pchome_products'||k==='ec_pchome_orders'){ try{ pchomeDirtyDel(k); }catch{} } });   // PChome recon/主檔/訂單明細：真的推成功才清持久 dirty（失敗留著繼續保護＋繼續算待推）
+    ok.forEach(k=>{ if(k==='ec_pchome_recon'||k==='ec_pchome_products'||k==='ec_pchome_orders'||k==='ec_pchome_history'||k.indexOf('ec_pchome_optlog|')===0){ try{ pchomeDirtyDel(k); }catch{} } });   // PChome recon/主檔/訂單明細/優化紀錄/歷程：真的推成功才清持久 dirty（失敗留著繼續保護＋繼續算待推）
     ok.forEach(k=>{ _dirtyFailClear(k); });   // E-0a 第三塊：這把 key 真的推成功 → 清失敗記錄。報告吃 dirtyFailSnap（上方快照），本行蓋不掉本次報告；殘餘風險（同 key 別筆編輯也會洗綠）已在 modal 文案明示
     if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
     _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,optlogMerges:_optlogMerges,notesMerges:_notesMerges,editsMerges:_editsMerges,dirtyWriteFailures:dirtyFailSnap});
@@ -23570,6 +23583,107 @@ window.addEventListener('pchomeOrdersReady', function(){
 //   __pchomeApplyCloudOrders 尚未定義時就觸發過了（會漏掉初次 hydrate）。firebase.js 把最新快照緩存在
 //   window.__pchomeOrdersCloudLatest；此處在 apply 定義後立刻補套一次 → 換機/清快取後訂單能從雲端讀回。
 try{ if(typeof window.__pchomeOrdersCloudLatest!=='undefined') window.__pchomeApplyCloudOrders(window.__pchomeOrdersCloudLatest); }catch(e){}
+
+// ══════════ 批次維護資料層：優化紀錄(optlog) + 商品歷程(history)（照 momo 複製；各自獨立 doc，v711 基建已就位）══════════
+//   optlog：Store key ec_pchome_optlog|<shop> → app/pchome_optlog（doc 內每 shop 一欄＝{sku:[entry]}）。entry 形狀完全照 momo。
+//   history：Store key ec_pchome_history（map 料號→[entry]）→ app/pchome_history（doc 內每料號一欄＝[entry]）。
+//   兩者都走既有 syncToCloud（各自分支 read-merge-write、按 entry id union、不覆蓋不刪同事的）、共用 dirty/pending/sweep/PChome 同步鈕；不自動推。
+//   類型清單、by、entry 形狀一律照 momo（MOMO_OPTLOG_TYPES / App.currentUser.username / {id,date,time,shop,sku,by,type,note}）。
+var PCHOME_OPTLOG_TYPES=MOMO_OPTLOG_TYPES;   // 照 momo 八項，單一來源（下拉用；歷史存當時字串）
+function pchomeMergeByIdMap(cloud, local){   // 照 momoMergeOptlog：外層 key（optlog=sku／history=料號）逐一 union entries by id、同 id 保留雲端（保守不覆蓋同事）
+  var c=(cloud&&typeof cloud==='object'&&!Array.isArray(cloud))?cloud:{}, l=(local&&typeof local==='object'&&!Array.isArray(local))?local:{}, out={}, added=0;
+  var eid=function(e){ return (e&&e.id!=null)?String(e.id):JSON.stringify(e); };
+  var skey=function(e){ return String((e&&e.date)||'')+' '+String((e&&e.time)||'')+' '+eid(e); };
+  var keys={}; Object.keys(c).forEach(function(k){keys[k]=1;}); Object.keys(l).forEach(function(k){keys[k]=1;});
+  Object.keys(keys).forEach(function(kk){ var ca=Array.isArray(c[kk])?c[kk]:[], la=Array.isArray(l[kk])?l[kk]:[];
+    var localIds={}; la.forEach(function(e){localIds[eid(e)]=1;}); var byId={};
+    ca.forEach(function(e){ byId[eid(e)]=e; }); la.forEach(function(e){ var id=eid(e); if(!byId[id]) byId[id]=e; });
+    ca.forEach(function(e){ if(!localIds[eid(e)]) added++; });
+    var arr=Object.keys(byId).map(function(id){return byId[id];}).sort(function(a,b){return skey(a)<skey(b)?-1:(skey(a)>skey(b)?1:0);});
+    if(arr.length) out[kk]=arr; });
+  return { merged:out, added:added };
+}
+// ── optlog ──
+function pchomeOptlogKey(shop){ return 'ec_pchome_optlog|'+shop; }
+function pchomeLoadOptlog(shop){ var k=pchomeOptlogKey(shop);
+  try{ if(Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch(e){}
+  try{ if(Store._mem&&Store._mem[k]) return Store._mem[k]; }catch(e){}
+  try{ var l=localStorage.getItem(k); if(l) return JSON.parse(l); }catch(e){}
+  return {}; }
+function pchomeSaveOptlog(shop,map){ var k=pchomeOptlogKey(shop);
+  try{ localStorage.setItem(k,JSON.stringify(map)); }catch(e){}
+  try{ if(Store._profitMem) Store._profitMem[k]=map; }catch(e){}
+  try{ if(Store._mem) Store._mem[k]=map; }catch(e){}
+  try{ _markPending(k); }catch(e){}
+  try{ pchomeDirtyAdd(k); }catch(e){}   // 持久 dirty（PChome 自有鈕計數/重整撿回）
+}
+// 新增一筆優化紀錄（系統事件與表單共用；entry={type,note}）。by＝當前使用者。照 momoAddOptlog。
+function pchomeAddOptlog(shop, sku, entry){ if(!shop||!sku) return;
+  var map=pchomeLoadOptlog(shop); map[sku]=map[sku]||[];
+  var by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
+  map[sku].push({ id:'popt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:momoNowParts().date, time:momoNowParts().time, shop:shop, sku:sku, by:by, type:(entry&&entry.type)||'其他', note:(entry&&entry.note)||'' });
+  pchomeSaveOptlog(shop, map);
+}
+async function pchomeSyncOptlog(shop){   // read-merge-write：讀 app/pchome_optlog 的 shop 欄 → 合併 → 寫回；本機鏡像成合併結果（不重 _markPending）
+  if(!window.__cloudPchomeOptlog) throw new Error('PChome 優化紀錄雲端層未就緒');
+  var snap=await window.__cloudPchomeOptlog.getDoc();
+  var cd=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{};
+  var cloudOpt=(cd[shop]&&typeof cd[shop]==='object')?cd[shop]:{};
+  var res=pchomeMergeByIdMap(cloudOpt, pchomeLoadOptlog(shop)||{});
+  await window.__cloudPchomeOptlog.setField(shop, momoFsSanitizeDeep(res.merged));   // 每 shop 一欄
+  var k=pchomeOptlogKey(shop);
+  try{ localStorage.setItem(k,JSON.stringify(res.merged)); }catch(e){}
+  try{ if(Store._profitMem) Store._profitMem[k]=res.merged; }catch(e){}
+  try{ if(Store._mem) Store._mem[k]=res.merged; }catch(e){}
+  return res.added;
+}
+// firebase.js app/pchome_optlog 訂閱 → 攤平每 shop 欄回 Store._profitMem['ec_pchome_optlog|'+shop]。dirty 不覆蓋（保住未推）。
+window.__pchomeApplyCloudOptlog=function(docData){ try{ var data=docData||{};
+  Object.keys(data).forEach(function(shop){ var k='ec_pchome_optlog|'+shop; if(pchomeDirtyGet().indexOf(k)>=0) return;   // 本機未推→不覆蓋
+    var v=data[shop]; if(v&&typeof v==='object'){ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=v; Store._mem=Store._mem||{}; Store._mem[k]=v; } });
+}catch(e){ console.error('[pchome optlog] 套用雲端失敗：',e); } };
+try{ if(typeof window.__pchomeOptlogCloudLatest!=='undefined') window.__pchomeApplyCloudOptlog(window.__pchomeOptlogCloudLatest); }catch(e){}   // drain（動態載入時序，見訂單明細同註）
+// ── history（商品歷程；獨立 doc、非內嵌 product）──
+function pchomeHistoryKey(){ return 'ec_pchome_history'; }
+function pchomeLoadHistory(){ var k=pchomeHistoryKey();
+  try{ if(Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch(e){}
+  try{ if(Store._mem&&Store._mem[k]) return Store._mem[k]; }catch(e){}
+  try{ var l=localStorage.getItem(k); if(l) return JSON.parse(l); }catch(e){}
+  return {}; }
+function pchomeSaveHistory(map){ var k=pchomeHistoryKey();
+  try{ localStorage.setItem(k,JSON.stringify(map)); }catch(e){}
+  try{ if(Store._profitMem) Store._profitMem[k]=map; }catch(e){}
+  try{ if(Store._mem) Store._mem[k]=map; }catch(e){}
+  try{ _markPending(k); }catch(e){}
+  try{ pchomeDirtyAdd(k); }catch(e){}
+}
+// 新增一筆商品歷程（照 momo product.history entry：{date,time,cost,purchasePrice,salePrice,note,changes?}；無 by 欄，操作者在 optlog）。
+function pchomeAddHistory(料號, entry){ if(!料號) return;
+  var map=pchomeLoadHistory(); map[料號]=map[料號]||[];
+  var e={ id:'phist_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:momoNowParts().date, time:momoNowParts().time };
+  if(entry) Object.keys(entry).forEach(function(f){ e[f]=entry[f]; });
+  map[料號].push(e); pchomeSaveHistory(map);
+}
+function pchomeHistoryFor(料號){ var map=pchomeLoadHistory(); return Array.isArray(map[料號])?map[料號]:[]; }   // 給時間軸渲染用（缺席→空陣列，安全）
+async function pchomeSyncHistory(){   // read-merge-write：每料號一欄；只寫本機有的料號（雲端獨有料號不動）
+  if(!window.__cloudPchomeHistory) throw new Error('PChome 商品歷程雲端層未就緒');
+  var snap=await window.__cloudPchomeHistory.getDoc();
+  var cd=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{};
+  var local=pchomeLoadHistory()||{};
+  var res=pchomeMergeByIdMap(cd, local);   // {merged:{料號:[entry]}, added}
+  var localKeys=Object.keys(local);
+  for(var i=0;i<localKeys.length;i++){ var 料號=localKeys[i]; await window.__cloudPchomeHistory.setField(料號, momoFsSanitizeDeep(res.merged[料號]||local[料號])); }   // 逐料號欄寫回（本機有的）
+  var k=pchomeHistoryKey();
+  try{ localStorage.setItem(k,JSON.stringify(res.merged)); }catch(e){}
+  try{ if(Store._profitMem) Store._profitMem[k]=res.merged; }catch(e){}
+  try{ if(Store._mem) Store._mem[k]=res.merged; }catch(e){}
+  return res.added;
+}
+window.__pchomeApplyCloudHistory=function(docData){ try{ var k='ec_pchome_history'; if(pchomeDirtyGet().indexOf(k)>=0) return;   // 本機未推→不覆蓋
+  var data=docData||{}; Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=data; Store._mem=Store._mem||{}; Store._mem[k]=data;
+}catch(e){ console.error('[pchome history] 套用雲端失敗：',e); } };
+try{ if(typeof window.__pchomeHistoryCloudLatest!=='undefined') window.__pchomeApplyCloudHistory(window.__pchomeHistoryCloudLatest); }catch(e){}
+
 // 已對帳判定：對帳資料（各帳務月訂單貨款明細段）出現過的「訂單編號-序號」集合。
 function pchomeReconOrderKeys(){ var all=pchomeLoadRecon(), set={};
   Object.keys(all).forEach(function(m){ var segs=(all[m]&&all[m].segments)||[];
@@ -23908,7 +24022,7 @@ function pchomeParseListing(buf){
 // ── PChome 同步雲端（自有鈕，因全域 #header-kpi-row 在 PChome 頁被藏）──
 //   推送機制沿用平台無關的 syncToCloud（scoped 到 PChome key、不誤推別平台 pending）；dirty/計數/sweep 都已接好。
 //   最小預覽：按下先顯示「即將推送內容（帳務月・列數・匯出時間）」＋雲端較新警示（ec_pchome_recon 整份覆蓋，擋靜默蓋掉同事較新匯出）→ 確認才推。
-function pchomePendingKeys(){ try{ return pchomeDirtyGet().filter(function(k){ return k==='ec_pchome_recon'||k==='ec_pchome_products'||k==='ec_pchome_orders'; }); }catch(e){ return []; } }
+function pchomePendingKeys(){ try{ return pchomeDirtyGet().filter(function(k){ return k==='ec_pchome_recon'||k==='ec_pchome_products'||k==='ec_pchome_orders'||k==='ec_pchome_history'||k.indexOf('ec_pchome_optlog|')===0; }); }catch(e){ return []; } }
 function pchomeSyncBtnHTML(shop){
   // 照抄 momo momo-sync-btn（inline 樣式、非 class）：有待推＝琥珀 #f59e0b 白字可按；無待推＝白底灰字 opacity .4 disabled。文字固定「☁ 同步雲端」不顯示筆數（避免估算與預覽對不上，同 momoRefreshSyncBtn）。
   var n=pchomePendingKeys().length;
@@ -23972,6 +24086,17 @@ async function pchomeOpenSyncPreview(shop){
     var cloudByBM={}; Object.keys((typeof co!=='undefined'&&co)||{}).forEach(function(bm){ cloudByBM[bm]=Object.keys(co[bm]||{}).length; });
     var osamples=Object.keys(byBM).sort().map(function(m){ return {item:m+' 期', desc:'本機 '+byBM[m]+' 筆（雲端此月 '+(cloudByBM[m]||0)+' 筆）'}; });
     items.push({key:'ec_pchome_orders', kind:'PChome訂單明細', name:'訂單明細', localCount:localN, cloudCount:cloudN, status:ost, conflict:false, merge:true, conflictReasons:[], diffSamples:osamples, diffSummary:Object.keys(byBM).length+' 個帳務月 · upsert 合併（不覆蓋雲端）'});
+  }
+  // 優化紀錄（每 shop 一 key；read-merge-write、不覆蓋雲端）
+  keys.filter(function(k){return k.indexOf('ec_pchome_optlog|')===0;}).forEach(function(ok2){
+    var osh=ok2.slice('ec_pchome_optlog|'.length), lom=pchomeLoadOptlog(osh)||{};
+    var n=Object.keys(lom).reduce(function(a,s){return a+(Array.isArray(lom[s])?lom[s].length:0);},0);
+    items.push({key:ok2, kind:'PChome優化紀錄', name:'優化紀錄（'+osh+'）', localCount:n, cloudCount:0, status:(n>0?'diff':'same'), conflict:false, merge:true, conflictReasons:[], diffSamples:[], diffSummary:Object.keys(lom).length+' 個 SKU · '+n+' 筆 · 合併 upsert（不覆蓋雲端）'});
+  });
+  // 商品歷程（單一 key；read-merge-write、不覆蓋雲端）
+  if(keys.indexOf('ec_pchome_history')>=0){
+    var lh=pchomeLoadHistory()||{}, hn=Object.keys(lh).reduce(function(a,c){return a+(Array.isArray(lh[c])?lh[c].length:0);},0);
+    items.push({key:'ec_pchome_history', kind:'PChome商品歷程', name:'商品歷程', localCount:hn, cloudCount:0, status:(hn>0?'diff':'same'), conflict:false, merge:true, conflictReasons:[], diffSamples:[], diffSummary:Object.keys(lh).length+' 個料號 · '+hn+' 筆 · 合併 upsert（不覆蓋雲端）'});
   }
   pchomeRenderSyncPreviewModal(shop, items);
 }
@@ -25201,6 +25326,6 @@ function pchomeExportExcel(shop){
     XLSX.writeFile(wb, 'PChome_'+safe+'_'+(key||'')+'_總表.xlsx');
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
-Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBatchSetMode, pchomeListingFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeStatementHtmFile, pchomeOrderPick, pchomeOrderRemove, pchomeOrderGenerate, pchomeOrderApply, pchomeOrderCancel, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc,
+Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBatchSetMode, pchomeAddOptlog, pchomeAddHistory, pchomeListingFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeStatementHtmFile, pchomeOrderPick, pchomeOrderRemove, pchomeOrderGenerate, pchomeOrderApply, pchomeOrderCancel, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc,
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel });
