@@ -23024,6 +23024,10 @@ window.addEventListener('pchomeOrdersReady', function(){
     var el=document.getElementById('pchome-content-'+shop); if(el&&el.classList.contains('active')) pchomeRenderSub(shop);
   }); }catch(e){}
 });
+// 🔴 drain：profit.js 是動態載入（進淨利表才 import），firebase.js 的 boot 訂閱早就緒、首個雲端快照在
+//   __pchomeApplyCloudOrders 尚未定義時就觸發過了（會漏掉初次 hydrate）。firebase.js 把最新快照緩存在
+//   window.__pchomeOrdersCloudLatest；此處在 apply 定義後立刻補套一次 → 換機/清快取後訂單能從雲端讀回。
+try{ if(typeof window.__pchomeOrdersCloudLatest!=='undefined') window.__pchomeApplyCloudOrders(window.__pchomeOrdersCloudLatest); }catch(e){}
 // 已對帳判定：對帳資料（各帳務月訂單貨款明細段）出現過的「訂單編號-序號」集合。
 function pchomeReconOrderKeys(){ var all=pchomeLoadRecon(), set={};
   Object.keys(all).forEach(function(m){ var segs=(all[m]&&all[m].segments)||[];

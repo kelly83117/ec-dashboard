@@ -921,11 +921,15 @@ try {
     removeFields:(keys) => pchomeRestDelete('app/pchome_history')(keys),
     subscribe:   (cb) => onSnapshot(pchomeHistoryRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
   };
-  // 訂閱：把雲端資料交給 profit.js 的套用函式（bounce-back 守衛在那裡；沒定義＝該功能未上線→安靜略過，infra 先就位）
+  // 訂閱：把雲端資料交給 profit.js 的套用函式（bounce-back 守衛在那裡）。
+  //   🔴 profit.js 是【動態載入】（進淨利表才 import，見 main.js）→ boot 時本訂閱先於 profit.js 就緒，
+  //   首個快照觸發時 __pchomeApplyCloud* 還不存在（會漏掉初次 hydrate）。所以【一律先把最新快照緩存到 window】，
+  //   profit.js 載入時從緩存 drain（見 profit.js `__pchomeOrdersCloudLatest`），保證換機/清快取後初次讀回不漏。
+  //   沒定義套用函式（optlog/history 表單未上線）＝只緩存、不套用，infra 先就位。
   try {
-    window.__cloudPchomeOrders.subscribe(data => { if (typeof window.__pchomeApplyCloudOrders === 'function') window.__pchomeApplyCloudOrders(data); });
-    window.__cloudPchomeOptlog.subscribe(data => { if (typeof window.__pchomeApplyCloudOptlog === 'function') window.__pchomeApplyCloudOptlog(data); });
-    window.__cloudPchomeHistory.subscribe(data => { if (typeof window.__pchomeApplyCloudHistory === 'function') window.__pchomeApplyCloudHistory(data); });
+    window.__cloudPchomeOrders.subscribe(data => { window.__pchomeOrdersCloudLatest = data; if (typeof window.__pchomeApplyCloudOrders === 'function') window.__pchomeApplyCloudOrders(data); });
+    window.__cloudPchomeOptlog.subscribe(data => { window.__pchomeOptlogCloudLatest = data; if (typeof window.__pchomeApplyCloudOptlog === 'function') window.__pchomeApplyCloudOptlog(data); });
+    window.__cloudPchomeHistory.subscribe(data => { window.__pchomeHistoryCloudLatest = data; if (typeof window.__pchomeApplyCloudHistory === 'function') window.__pchomeApplyCloudHistory(data); });
   } catch (e) { console.error('[pchome cloud] 訂閱失敗：', e); }
 
   window.dispatchEvent(new Event('cloudStoreReady'));
