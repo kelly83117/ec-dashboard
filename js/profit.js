@@ -1553,6 +1553,14 @@ function _sweepAllLocalReportsIntoPending(){
         }
         continue;
       }
+      // MOMO C1105 每日配送單數（KPI 月結表訂單數來源）：ec_momo_c1105_ship|<YYYY-MM> → 同 freight 走 setField field 分支（不開新雲端物件）
+      if(k&&k.startsWith('ec_momo_c1105_ship|')){
+        _pendingSyncKeys.add(k);
+        if(!(Store._mem&&Store._mem[k])){
+          try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+        }
+        continue;
+      }
       // MOMO 倉租（C1212 乙配寄倉，月×SKU）：ec_momo_rent|<shop>|<YYYY-MM> → 同 freight 走 setField field 分支（不開新雲端物件）
       if(k&&k.startsWith('ec_momo_rent|')){
         _pendingSyncKeys.add(k);
@@ -9073,13 +9081,14 @@ function kpiWriteCell(month,segsOrPairs,value){
   const by=_kpiWho();
   const cloudPairs=[];
   const entries=[];
-  pairs.forEach(([segs,v])=>{
+  pairs.forEach(([segs,v,metaExtra])=>{
     // 搬移前刪除要寫 null 墓碑，否則舊 _kpi_v1 的值會從底下透出來。
     const del=v===undefined;
     const cv=del?(migrated?ck.DELETE:null):v;
     cloudPairs.push([['months',month].concat(segs),cv]);
-    cloudPairs.push([['meta',month].concat(segs),del?{by,at:ck.TS,del:true}:{by,at:ck.TS}]);
-    const e={seq:++_kpiV2.seq,month,segs:segs.slice(),val:del?null:v,resolved:false};
+    // metaExtra（選填，第三個元素）：自動帶入寫 {src:'auto',from,val}。手動編輯不帶 → meta 整個換成 {by,at}，「自動」標籤自然消失。
+    cloudPairs.push([['meta',month].concat(segs),del?{by,at:ck.TS,del:true}:Object.assign({by,at:ck.TS},metaExtra||{})]);
+    const e={seq:++_kpiV2.seq,month,segs:segs.slice(),val:del?null:v,resolved:false,meta:del?null:Object.assign({by},metaExtra||{})};
     entries.push(e);_kpiV2.overlay.push(e);
     _kpiV2.failed.delete(_kpiCellKey(month,segs));
   });
@@ -9325,6 +9334,16 @@ const KPI_GROUPS=[
         //     兩法差額實測 40~154 元（最大佔單一通路純利 1.91%），群組層完全相同。
         //   ⚠ 沒有 shareBy 的 fieldMerge 維持舊行為（歸零、不攤），見 _kpiRawForCalc。
         shareBy:'qty',
+        fillHint:'MO+共用・填總額',
+      },
+      // 應收帳款：甲配＋乙配共用一格（2026-09-30 起；月對帳 PDF 的 A+C−E+G 是整個帳號一筆，拆不開）。
+      //   ⚠ 不設 shareBy：應收帳款不在任何公式裡、不進純利、不攤。
+      //   ⚠ legacySum：改成共用格之前，這兩家是各填各的（歷史月份甲配填整筆、乙配填 0）。共用格還沒有值時，
+      //     填寫進度與畫面顯示改用「兩家舊值相加」，舊月份不會因為改成共用格就變成缺格。一旦共用格有值就以它為準。
+      receivable:{
+        mergeGroups:[{shops:['MOMO-甲配','MOMO-寄倉']}],
+        legacySum:true,
+        fillHint:'甲乙配共用・填總額',
       },
     }},
   // 2026-09-23 新增三個通路，欄位與公式照酷澎（訂單數／營收／商品成本／手續費／退貨運費／稅金／耗材）。
@@ -9641,7 +9660,7 @@ function _kpiFillSlots(row,group){
       if(st&&st.type==='na')return;
       if(st&&st.type==='merged'){
         if(seen.has(st.mergeKey))return;seen.add(st.mergeKey);
-        slots.push({shops:st.shops,field:f.k,filled:((row&&row.kpiFieldMerges)||{})[st.mergeKey]!=null});
+        slots.push({shops:st.shops,field:f.k,filled:_kpiMergedValue(row,group,f.k,st).v!=null});
         return;
       }
       slots.push({shops:[shop],field:f.k,filled:(box[shop]||{})[f.k]!=null});
@@ -9907,20 +9926,20 @@ function _kpiFillCell(group,shop,f,month){
   if(st&&st.type==='na')return{kind:'na'};
   if(st&&st.type==='merged'){
     if(shop!==st.shops[0])return{kind:'share',st};
-    return{kind:'merge',st,segs:['kpiFieldMerges',st.mergeKey]};
+    return{kind:'merge',st,segs:['kpiFieldMerges',st.mergeKey],group,field:f.k};
   }
   return{kind:'cell',segs:[group.key,shop,f.k]};
 }
 function _kpiFillCur(row,cell){
   if(!row)return{};
-  if(cell.kind==='merge')return{v:(row.kpiFieldMerges||{})[cell.st.mergeKey]};
+  if(cell.kind==='merge')return cell.group?_kpiMergedValue(row,cell.group,cell.field,cell.st):{v:(row.kpiFieldMerges||{})[cell.st.mergeKey]};
   if(cell.kind==='common')return{v:row[cell.segs[0]]};
   const sd=(row[cell.segs[0]]||{})[cell.segs[1]]||{};
   return{v:sd[cell.segs[2]],formula:sd[cell.segs[2]+'Formula']};
 }
 // 「好麻吉+森之旅(+玩樂)共用，按訂單數攤」：店名取括號內的短名。
 function _kpiMergeHint(group,st,field){
-  const names=st.shops.map(s=>{const m=/\(([^)]+)\)/.exec(s);return m?m[1]:s;}).join('+');
+  const names=st.shops.map(s=>{const m=/\(([^)]+)\)/.exec(s);return m?m[1]:_kpiShopLabel(s);}).join('+');
   const by=group.fieldMerge?.[field]?.shareBy;
   const byL=by?(group.manual.find(f=>f.k===by)?.l||by):'';
   return names+'共用'+(byL?'，按'+byL+'攤':'');
@@ -10002,9 +10021,14 @@ function _kpiFillHtml(row){
       const cell=_kpiFillCell(group,shop,f,month);
       if(cell.kind==='na')return `<td class="km-f-na" title="這個通路不適用${f.l}">—</td>`;
       // 合併欄位的小字要短：欄很窄，長句會折成三四行把整列撐高。完整說明放 title（滑鼠停上去看）。
-      if(cell.kind==='share')return `<td class="km-f-share" title="${_kpiMergeHint(group,cell.st,f.k)}（這一格是攤到的份額，不能直接改）"><div class="km-shareval">${_kpiMoney(d[f.k])}</div><div class="km-sublabel">按訂單數攤</div></td>`;
+      if(cell.kind==='share'){
+        // 沒有 shareBy 的共用格（應收帳款）不攤 → 不顯示份額，只說明填在哪一格
+        if(!group.fieldMerge?.[f.k]?.shareBy)return `<td class="km-f-share" title="${_kpiMergeHint(group,cell.st,f.k)}：填在${_kpiShopLabel(cell.st.shops[0])}那一格（不攤、不進純利）"><div class="km-shareval">—</div><div class="km-sublabel">併入${_kpiShopLabel(cell.st.shops[0])}</div></td>`;
+        return `<td class="km-f-share" title="${_kpiMergeHint(group,cell.st,f.k)}（這一格是攤到的份額，不能直接改）"><div class="km-shareval">${_kpiMoney(d[f.k])}</div><div class="km-sublabel">按訂單數攤</div></td>`;
+      }
       // 小字一律放在輸入框【下方】：放上方會把框往下推，跟同一列其他格的框線對不齊。
-      const hint=cell.kind==='merge'?`<div class="km-sublabel km-sublabel-hint">MO+共用・填總額</div>`:'';
+      const hint=(cell.kind==='merge'?`<div class="km-sublabel km-sublabel-hint">${group.fieldMerge?.[f.k]?.fillHint||'共用・填總額'}</div>`:'')
+        +(_kpiIsAutoMeta(_kpiMetaAt(month,cell.segs))?`<div class="km-sublabel"><span class="km-au-tag" title="從對帳單自動帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；手動改這格後標籤會消失">自動</span></div>`:'');
       return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填${['','一','兩','三','四'][cell.st.shops.length]||cell.st.shops.length}家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
     }).join('');
     const pure=Number(d[pureKey])||0;
@@ -10047,10 +10071,16 @@ function _kpiFillHtml(row){
   const nextBtn=next
     ?`<button class="km-next" onclick="kpiFillPickGroup('${next.key}')">下一個：${next.title}（還差 ${_kpiFillCount(row,next).missing} 格）→</button>`
     :(fc.missing?'':`<span class="km-done">✓ 這個月全部填完</span>`);
+  // MOMO：甲配／乙配部分欄位可從對帳單等既有資料帶入（先預覽、確認才寫）
+  let autoBtn='';
+  if(group.key==='momo'){
+    const h=_kpiMomoAutoHint(month,row);
+    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}<button id="km-au-btn" class="km-au-btn" onclick="kpiMomoAutoFill()" title="甲配、乙配的訂單數／營收／成本／退貨／各項費用／耗材／應收帳款，從對帳單、C1105、淨利表總表帶入。按下去會先預覽，確認後才寫入。">從對帳單帶入 ${month.replace('-','/')}</button></span>`;
+  }
   return `<div class="km-fill">
     <aside class="km-side">${side}</aside>
     <div class="km-fill-main">
-      <div class="km-fill-title"><span class="km-dot" style="background:${group.color}"></span>${group.title}<span class="km-fill-sub">${month.replace('-','/')} · ${fc.total?`已填 ${fc.filled} / ${fc.total} 格`:`${group.since.replace('-','/')} 起才列入填寫進度（這個月可以填，但不算缺格）`}</span></div>
+      <div class="km-fill-title"><span class="km-dot" style="background:${group.color}"></span>${group.title}<span class="km-fill-sub">${month.replace('-','/')} · ${fc.total?`已填 ${fc.filled} / ${fc.total} 格`:`${group.since.replace('-','/')} 起才列入填寫進度（這個月可以填，但不算缺格）`}</span>${autoBtn}</div>
       <div class="km-tablewrap"><table class="km-table km-ftable"><thead>${head}</thead><tbody>${body}${commonRow}${subRow}</tbody></table></div>
       <div class="km-foot"><span class="km-foot-l">每格打完就存到雲端 · 最後編輯：${le?_kpiEscAttr(le.by||'?')+' '+_kpiFmtTime(le.t):'—'}</span>${nextBtn}</div>
     </div>
@@ -10219,6 +10249,240 @@ function kpiFillPaste(e,inp){
   _kpiFillRerender(inp.dataset.k);
 }
 
+// ══ KPI MOMO 自動帶入（甲配／寄倉）2026-09-30 ══
+//   填寫模式 MOMO 區的「從對帳單帶入 {月份}」：先預覽每格「目前值 → 帶入值」＋來源，確認後一次 kpiWriteCell 原子寫入，
+//   meta 多記 {src:'auto', from:'recon:2026-08', val:帶入值}。手動改那格 → meta 換成 {by,at} → 「自動」標籤消失。
+//   🔴 來源不存在一律【不寫】（標「等上傳」／「需重新上傳對帳單」），絕不寫 0。
+//   🔴 算法全部沿用淨利表既有函式，不另寫一套：費用拆分＝momoMonthFeeSplit、商品成本＝momoPeriodTotals（總表整月）。
+//   各欄口徑（回測依據見 PR 說明）：
+//     營收 rev    ＝(Σ對帳金額(未稅) U ＋ Σ客退金額 R)×1.05 ＝ 賣出金額 P ×1.05（對帳單逐列 U＝P−R；甲乙分開）
+//     退貨 ret    ＝ Σ客退金額 R ×1.05 ＋ 「退貨貨款」分頁 Σ含稅進價 J（甲乙分開；舊對帳單沒解析這頁 → 需重新上傳）
+//     各項費用 misc＝ momoMonthFeeSplit 的甲／乙各自（專屬＋shared×營收佔比）×1.05（甲＋乙＝PDF E）
+//     應收帳款    ＝ PDF A+C−E+G（payable），甲乙共用格
+//     商品成本 cost＝ 總表整月 Σ對帳數量×成本（momoPeriodTotals(...).cost）
+//     訂單數 qty  ＝ C1105 不重複配送單號（排除「未出即退」），依實際出貨日歸月；甲配＝指定貨運＋超商取貨、乙配＝寄倉
+//     耗材 material＝ 公式 =訂單數*3（已經手填過的格子不覆蓋）
+const KPI_MOMO_AUTO_SHOPS=[['MOMO-甲配','甲配'],['MOMO-寄倉','乙配']];
+const KPI_MOMO_MATERIAL_FORMULA='=訂單數*3';
+// 一格的 meta：本機還在疊加層（剛寫、雲端快照還沒回來）的以疊加層為準，否則讀雲端 meta。
+function _kpiMetaAt(month,segs){
+  const k=segs.join('\u0001');
+  for(let i=_kpiV2.overlay.length-1;i>=0;i--){const o=_kpiV2.overlay[i];if(o.month===month&&o.segs.join('\u0001')===k)return o.meta||null;}
+  let o=_kpiV2.cloud&&_kpiV2.cloud.meta&&_kpiV2.cloud.meta[month];
+  for(const s of segs){if(!_kpiIsMap(o))return null;o=o[s];}
+  return _kpiIsMap(o)?o:null;
+}
+function _kpiIsAutoMeta(m){return !!(m&&m.src==='auto'&&!m.del);}
+function _kpiNextMonthStart(month){const [y,m]=month.split('-').map(Number);return new Date(y,m,1).getTime();}
+// MOMO 資料（商品主檔／月對帳）是懶載入（進 MOMO 頁才載）。帶入前先要求載入，等到本月對帳單與商品主檔都到（或逾時）。
+let _kpiMomoReconSeen=false;
+// 對帳單／商品主檔更新 → 正在看 KPI 填寫模式的 MOMO 區就重畫（「來源已更新」提示跟著變）。setTimeout：等 momoClearFeeRateCache 那支 listener 先跑。
+window.addEventListener('momoReconcileReady',()=>{_kpiMomoReconSeen=true;setTimeout(_kpiMomoRefreshIfVisible,0);});
+window.addEventListener('momoDataReady',()=>setTimeout(_kpiMomoRefreshIfVisible,0));
+function _kpiMomoRefreshIfVisible(){if(_kpiFillMode&&_kpiFillGroup==='momo'&&document.getElementById('km-au-btn'))_kpiRefreshViews();}
+function _kpiMomoDataLoaded(){
+  try{return !!(window.__loadedSubGroups&&window.__loadedSubGroups.has('momo'))&&momoLoadProducts('甲配').length>0&&momoLoadProducts('乙配').length>0;}catch{return false;}
+}
+async function _kpiEnsureMomoData(month){
+  try{if(typeof window.__loadMomoSubs==='function')window.__loadMomoSubs();}catch{}
+  const t0=Date.now();
+  while(Date.now()-t0<15000){
+    const prodOk=momoLoadProducts('甲配').length>0&&momoLoadProducts('乙配').length>0;
+    const recOk=!!(momoLoadReconcile('甲配',month)&&momoLoadReconcile('乙配',month));
+    if(prodOk&&(recOk||(_kpiMomoReconSeen&&Date.now()-t0>3000)))return true;
+    await new Promise(r=>setTimeout(r,300));
+  }
+  return momoLoadProducts('甲配').length>0;
+}
+// 算出這個月每一格要帶入什麼。純計算、不寫入。
+//   回傳 {items:[…], checks:{E,miscSum,…}}；item.status：
+//     write＝會寫入｜same＝已是同一個自動值（不寫）｜keep＝已手填、不覆蓋（耗材）｜wait＝等上傳｜reupload＝需重新上傳對帳單
+//   opts.override（回測用，不存檔）：{retSheet:{甲配:{J},乙配:{J}}, ship:{甲配:n,乙配:n}}＝假裝已重新上傳。
+function _kpiMomoAutoPlan(month,row,opts){
+  opts=opts||{};const ov=opts.override||{};
+  row=row||getOrCreateKpiRow(month);
+  const group=KPI_GROUPS.find(g=>g.key==='momo');
+  const box=row.momo||{};
+  const rec={甲配:momoLoadReconcile('甲配',month),乙配:momoLoadReconcile('乙配',month)};
+  const summ=(rec.甲配&&rec.甲配.summary)||(rec.乙配&&rec.乙配.summary)||null;
+  const recOk=!!(rec.甲配&&rec.乙配&&summ);
+  const split=recOk?momoMonthFeeSplit(month):null;
+  const prodLoaded=momoLoadProducts('甲配').length>0&&momoLoadProducts('乙配').length>0;
+  const shipDoc=momoLoadC1105Ship(month);
+  const recSrc='recon:'+month;
+  const items=[];
+  const m0=v=>_kpiMoney(v);
+  const push=(it)=>{
+    const meta=_kpiMetaAt(month,it.segs);
+    it.auto=_kpiIsAutoMeta(meta);it.metaVal=meta&&meta.val;
+    if(it.status==='write'){
+      if(it.cur===it.val&&it.auto&&it.metaVal===it.val)it.status='same';
+      it.srcChanged=it.auto&&it.metaVal!=null&&it.metaVal!==it.val;   // 之前帶入過、來源後來變了
+    }
+    items.push(it);
+  };
+  const wait=(why)=>({status:'wait',note:why});
+  const sumSkus=(doc,k)=>Object.values((doc&&doc.skus)||{}).reduce((a,x)=>a+(Number(x[k])||0),0);
+  const qtyVal={};
+  KPI_MOMO_AUTO_SHOPS.forEach(([shop,ms])=>{
+    const sd=box[shop]||{};
+    const base=f=>({shop,ms,field:f,label:group.manual.find(x=>x.k===f).l,segs:['momo',shop,f],cur:sd[f]});
+    const doc=rec[ms];
+    // 訂單數
+    {
+      const it=base('qty');let r;
+      const oq=ov.ship&&ov.ship[ms];
+      if(oq!=null)r={status:'write',val:oq,src:'c1105:'+month,comp:'C1105 不重複配送單號（回測：直接讀檔）'};
+      else if(!shipDoc||!shipDoc.days)r=wait((prodLoaded&&momoPeriodTotals(ms,month+'-FULL').qty>0)?'需重新上傳 C1105（舊版上傳沒有存配送單號）':'等上傳 C1105');
+      else{
+        const days=Object.keys(shipDoc.days).filter(d=>d.slice(0,7)===month).sort();
+        const complete=(shipDoc.uploads||[]).some(u=>u.at>=_kpiNextMonthStart(month));
+        const n=days.reduce((a,d)=>a+(Number(shipDoc.days[d][ms])||0),0);
+        const last=days.length?days[days.length-1].slice(5).replace('-','/'):'—';
+        if(!complete)r=wait('C1105 只到 '+last+'（月底後再傳一次整月）');
+        else r={status:'write',val:n,src:'c1105:'+month,comp:'C1105 不重複配送單號（排除未出即退）'+days.length+' 天，'+ (ms==='甲配'?'指定貨運＋超商取貨':'寄倉')};
+      }
+      Object.assign(it,r);push(it);
+      qtyVal[shop]=it.status==='write'||it.status==='same'?it.val:(sd.qty!=null?Number(sd.qty):null);
+    }
+    // 營收
+    {
+      const it=base('rev');
+      if(!recOk)Object.assign(it,wait('等上傳對帳單'));
+      else{const U=sumSkus(doc,'revUntax'),R=sumSkus(doc,'retAmt');
+        Object.assign(it,{status:'write',val:Math.round((U+R)*1.05),src:recSrc,comp:'(對帳金額 '+m0(U)+' ＋ 客退 '+m0(R)+') ×1.05'});}
+      push(it);
+    }
+    // 商品成本
+    {
+      const it=base('cost');
+      if(!recOk)Object.assign(it,wait('等上傳對帳單'));
+      else if(!prodLoaded)Object.assign(it,wait('MOMO 商品主檔還沒載入'));
+      else{const t=momoPeriodTotals(ms,month+'-FULL');
+        const extra=(t.unreconciled?'；含 '+t.unreconciled+' 個不在對帳單的品號（成本按銷量估）':'')+(t.missCost?'；⚠ '+t.missCost+' 個品號缺成本':'');
+        Object.assign(it,{status:'write',val:Math.round(t.cost),src:'profit:'+month+'-FULL',comp:'總表整月 Σ對帳數量×成本'+extra});}
+      push(it);
+    }
+    // 退貨金額
+    {
+      const it=base('ret');
+      const J=ov.retSheet&&ov.retSheet[ms]&&ov.retSheet[ms].J!=null?ov.retSheet[ms].J:(doc&&doc.retSheetV&&doc.retSheet?Number(doc.retSheet.J)||0:null);
+      if(!recOk)Object.assign(it,wait('等上傳對帳單'));
+      else if(J==null)Object.assign(it,{status:'reupload',note:'需重新上傳對帳單（舊版沒有解析「退貨貨款」分頁）'});
+      else{const R=sumSkus(doc,'retAmt');
+        Object.assign(it,{status:'write',val:Math.round(R*1.05+J),src:recSrc,comp:'客退 '+m0(R)+'×1.05 ＋ 退貨貨款含稅進價 '+m0(J)});}
+      push(it);
+    }
+    // 各項費用
+    {
+      const it=base('misc');
+      if(!recOk||!split)Object.assign(it,wait('等上傳對帳單'));
+      else{
+        const own=ms==='甲配'?split.甲物流:(split.乙物流+split.乙倉租);
+        const R=ms==='甲配'?split.甲R:split.乙R;
+        const shr=split.shared*R/split.A;
+        const ownL=ms==='甲配'?'物流費用（第三方＋超商）':'寄倉分攤運費＋寄倉倉租費';
+        Object.assign(it,{status:'write',val:Math.round((own+shr)*1.05),src:recSrc,raw:(own+shr)*1.05,
+          comp:'專屬 '+m0(own*1.05)+'（'+ownL+'）＋分攤 '+m0(shr*1.05)+'（共用費用 '+m0(split.shared*1.05)+' × 營收佔比 '+(R/split.A*100).toFixed(1)+'%）'});
+      }
+      push(it);
+    }
+  });
+  // 耗材（公式）：訂單數要先有（本次帶入或已填）
+  KPI_MOMO_AUTO_SHOPS.forEach(([shop,ms])=>{
+    const sd=box[shop]||{};
+    const it={shop,ms,field:'material',label:'耗材',segs:['momo',shop,'material'],cur:sd.material,formula:KPI_MOMO_MATERIAL_FORMULA};
+    const meta=_kpiMetaAt(month,it.segs);
+    if(sd.material!=null&&!_kpiIsAutoMeta(meta))Object.assign(it,{status:'keep',note:'已經手填過，不覆蓋'});
+    else if(qtyVal[shop]==null)Object.assign(it,wait('等訂單數'));
+    else Object.assign(it,{status:'write',val:qtyVal[shop]*3,src:'formula:訂單數*3',comp:'訂單數 '+fmtN(qtyVal[shop])+' × 3'});
+    if(it.status==='write'&&sd.materialFormula!==KPI_MOMO_MATERIAL_FORMULA)it.formulaChanged=true;
+    push(it);
+    if(it.status==='same'&&it.formulaChanged)it.status='write';
+  });
+  // 應收帳款（甲乙共用格）
+  {
+    const st=_kpiFieldMergeStatus(group,'receivable','MOMO-甲配',month);
+    const it={shop:'MOMO-甲配',ms:'甲配＋乙配',field:'receivable',label:'應收帳款',segs:['kpiFieldMerges',st.mergeKey],cur:_kpiMergedValue(row,group,'receivable',st).v};
+    if(!summ||summ.payable==null)Object.assign(it,wait('等上傳對帳單'));
+    else Object.assign(it,{status:'write',val:Math.round(summ.payable),src:recSrc,comp:'PDF 實際應付 A+C−E+G'});
+    push(it);
+  }
+  const misc=items.filter(x=>x.field==='misc'&&x.val!=null);
+  const checks={E:summ&&summ.E, miscSum:misc.length===2?misc[0].val+misc[1].val:null};
+  return{items,checks,recOk,prodLoaded};
+}
+const _KPI_AUTO_STATUS={write:['會寫入','km-au-w'],same:['相同，不寫','km-au-s'],keep:['已手填，不覆蓋','km-au-s'],wait:['等上傳','km-au-x'],reupload:['需重新上傳對帳單','km-au-x']};
+function _kpiAutoPreviewHtml(month,plan){
+  const v=(it,x)=>x==null?'<span class="km-au-nil">空白</span>':(it.field==='qty'?_kpiNum(x):_kpiMoney(x));
+  const rows=plan.items.map(it=>{
+    const [sl,sc]=_KPI_AUTO_STATUS[it.status]||[it.status,''];
+    const val=it.val!=null?v(it,it.val):'—';
+    return `<tr class="${sc}"><td>${_kpiShopLabel(it.shop)}${it.field==='receivable'?'＋乙配':''}</td><td>${it.label}</td>
+      <td class="km-n">${v(it,it.cur)}</td><td class="km-au-arrow">→</td><td class="km-n km-au-val">${val}</td>
+      <td class="km-au-st">${sl}${it.srcChanged?'<span class="km-au-upd">來源已更新</span>':''}</td>
+      <td class="km-au-src">${_kpiEscAttr(it.comp||it.note||'')}</td></tr>`;
+  }).join('');
+  const c=plan.checks;
+  const eLine=(c.E!=null&&c.miscSum!=null)?`<div class="km-au-check ${Math.abs(c.miscSum-c.E)<=1?'ok':'bad'}">各項費用驗算：甲配＋乙配 ${_kpiMoney(c.miscSum)}　PDF E ${_kpiMoney(c.E)}　差 ${fmtN(c.miscSum-c.E)}</div>`:'';
+  const nW=plan.items.filter(x=>x.status==='write').length;
+  return `<div class="km-au">
+    <div class="km-au-sub">${month.replace('-','/')} · MOMO 甲配／乙配 · 會寫入 <b>${nW}</b> 格（沒有來源資料的格子不寫、不會寫 0）</div>
+    <div class="km-tablewrap"><table class="km-au-tbl"><thead><tr><th>店</th><th>欄位</th><th class="km-n">目前值</th><th></th><th class="km-n">帶入值</th><th>狀態</th><th>來源／組成</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${eLine}</div>`;
+}
+async function kpiMomoAutoFill(){
+  const month=_kpiYM();
+  if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法修改資料','error');return;}
+  const btn=document.getElementById('km-au-btn');if(btn){btn.disabled=true;btn.textContent='載入 MOMO 資料中…';}
+  await _kpiEnsureMomoData(month);
+  if(btn){btn.disabled=false;}
+  const plan=_kpiMomoAutoPlan(month);
+  const writes=plan.items.filter(x=>x.status==='write');
+  App.openModal({title:'從對帳單帶入 '+month.replace('-','/'),width:'980px',bodyHtml:_kpiAutoPreviewHtml(month,plan),
+    saveLabel:writes.length?'確認寫入 '+writes.length+' 格':'沒有可寫入的格子',
+    onSave:()=>{
+      if(!writes.length)return true;
+      const pairs=[];
+      writes.forEach(it=>{
+        const meta={src:'auto',from:it.src,val:it.val};
+        pairs.push([it.segs,it.val,meta]);
+        if(it.formula)pairs.push([[it.segs[0],it.segs[1],it.segs[2]+'Formula'],it.formula,meta]);
+        else if(it.segs[0]==='momo'){const sd=((getOrCreateKpiRow(month).momo||{})[it.segs[1]])||{};if(sd[it.segs[2]+'Formula']!=null)pairs.push([[it.segs[0],it.segs[1],it.segs[2]+'Formula'],undefined]);}
+      });
+      kpiWriteCell(month,pairs).then(ok=>{if(ok&&typeof showToast==='function')showToast('已帶入 '+writes.length+' 格（MOMO '+month+'）','success');});
+      _kpiFillRerender();
+      return true;
+    }});
+  renderKpiTab();
+}
+// 已帶入過的月份，來源之後有更新 → 按鈕旁提示（不自動改）。MOMO 資料沒載入時不算（不為了提示去載 10MB）。
+function _kpiMomoAutoHint(month,row){
+  if(!_kpiMomoDataLoaded())return null;
+  const anyAuto=KPI_MOMO_AUTO_SHOPS.some(([shop])=>['qty','rev','cost','ret','misc','material'].some(f=>_kpiIsAutoMeta(_kpiMetaAt(month,['momo',shop,f]))));
+  if(!anyAuto)return null;
+  try{return _kpiMomoAutoPlan(month,row).items.some(x=>x.srcChanged)?'changed':null;}catch(e){console.warn('[KPI] 自動帶入提示計算失敗',e);return null;}
+}
+// 回測（唯讀、不寫入）：__kpiMomoAutofillBacktest(['2026-01',…], overrides) 印出 月份｜店｜欄位｜目前手填值｜自動算出值｜差額｜差異%。
+//   overrides：{'2026-01':{retSheet:{甲配:{J},乙配:{J}}, ship:{甲配:n,乙配:n}}}——給「舊月份還沒重新上傳」時直接用原始檔算出的值。
+async function __kpiMomoAutofillBacktest(months,overrides){
+  months=months||['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06','2026-07','2026-08'];
+  await _kpiEnsureMomoData(months[months.length-1]);
+  const out=[];
+  months.forEach(m=>{
+    const row=getOrCreateKpiRow(m);
+    const plan=_kpiMomoAutoPlan(m,row,{override:(overrides||{})[m]});
+    plan.items.forEach(it=>{
+      const cur=it.cur==null?null:Number(it.cur);
+      const d=(it.val!=null&&cur!=null)?it.val-cur:null;
+      out.push({月份:m,店:_kpiShopLabel(it.shop)+(it.field==='receivable'?'＋乙配':''),欄位:it.label,目前手填值:cur,自動算出值:it.val!=null?it.val:(it.note||it.status),
+        差額:d,'差異%':(d!=null&&cur)?+(d/cur*100).toFixed(2):null,來源:it.comp||''});
+    });
+    if(plan.checks.E!=null)out.push({月份:m,店:'驗算',欄位:'各項費用 甲＋乙 vs E',目前手填值:plan.checks.E,自動算出值:plan.checks.miscSum,差額:plan.checks.miscSum!=null?plan.checks.miscSum-plan.checks.E:null});
+  });
+  console.table(out);
+  return out;
+}
 // 填寫模式旁的「?」：滑鼠移上去（或 Tab 聚焦）才出現鍵盤操作說明，平常不佔版面。
 function _kpiKeysHelpHtml(){
   const items=[
@@ -10280,7 +10544,7 @@ function kpiFillDownloadExcel(){
       const vals=cols.map(f=>{
         const cell=_kpiFillCell(g,shop,f,row.month);
         if(cell.kind==='na')return '—';
-        if(cell.kind==='share')return Number(d[f.k])||0;
+        if(cell.kind==='share')return g.fieldMerge?.[f.k]?.shareBy?(Number(d[f.k])||0):'—';   // 不攤的共用格（應收帳款）：跟畫面一樣寫「—」
         const v=_kpiFillCur(row,cell).v;
         return v==null?'':Number(v);
       });
@@ -10378,6 +10642,17 @@ function _kpiFieldMergeStatus(group,field,shop,month){
 //   shareBy 目前指向 manual 欄位(qty)，raw 就是最終值；而且這樣不會與 _kpiCalcAll 互相遞迴。
 // ⚠ 刻意【不四捨五入】：各份保留小數，加總才會精確等於總額。捨入是顯示層的事
 //   （_kpiGroupTableHtml 用 fmtN(Math.round(...))）。
+// 合併儲存格目前的總額：{v, legacy}。共用格有值 → 用它；沒有值且該欄設了 legacySum（應收帳款）→
+//   改用成員各自的舊值相加（legacy:true，只給顯示／填寫進度用，不寫回）。都沒有 → v:undefined。
+//   ⚠ 寄倉運費沒設 legacySum → 行為與改版前完全相同（只看 kpiFieldMerges）。
+function _kpiMergedValue(row,group,field,st){
+  const v=(row?.kpiFieldMerges||{})[st.mergeKey];
+  if(v!=null)return{v};
+  if(!group.fieldMerge?.[field]?.legacySum)return{v:undefined};
+  const box=row?.[group.key]||{};
+  const vals=st.shops.map(s=>(box[s]||{})[field]).filter(x=>x!=null&&x!=='');
+  return vals.length?{v:vals.reduce((a,x)=>a+(Number(x)||0),0),legacy:true}:{v:undefined};
+}
 function _kpiMergeShare(row,group,field,st,shop){
   const total=(row?.kpiFieldMerges||{})[st.mergeKey];
   if(total==null||!total)return 0;                       // 沒填 / 0 → 沒東西可攤
@@ -12897,6 +13172,29 @@ function momoTrimBackupAndApply(shop){
 /* ═══════════════ 階段二：對帳單（月權威）解析 + 營收側 ═══════════════
    對帳單「訂單貨款」分頁 → 逐SKU（品號層，單品彙總）。依「賣出方式」分通路：一般販售→甲配、寄倉販售→乙配。
    營收=對帳金額(未稅) 為 SKU 月權威值（已 net 客退）；半月拆分才估算（用 C1105 revUntaxSum 比例）。 */
+// 「退貨貨款」分頁（2026-09-30 新增，給 KPI 月結表「退貨金額」用）：欄位與「訂單貨款」同一套表頭。
+//   依「賣出方式」分甲乙，只存合計、不存逐列。J＝「含稅進價」欄逐列加總（KPI 退貨金額的算法照使用者手算：ΣJ）；
+//   QJ＝Σ客退數量×含稅進價（客退數量>1 的列 ΣJ 會少算，另存一份供比對）；revUntax+tax＝這頁的對帳金額＋稅額（8 個月實測＝PDF 折讓 C 含稅的負值）。表頭用名稱找，不用欄位字母。
+//   rows 是 null（檔案裡沒有這個分頁）→ 回全 0（有新版解析、只是這個月沒有退貨貨款）。
+function momoParseReconcileReturns(rows){
+  const zero=()=>({rows:0,J:0,QJ:0,retQty:0,retAmt:0,revUntax:0,tax:0});
+  const out={甲配:zero(),乙配:zero(),sheet:!!rows};
+  if(!rows) return out;
+  let h=-1; for(let i=0;i<Math.min(rows.length,30);i++){ if((rows[i]||[]).map(c=>String(c).trim()).includes('品號')){ h=i; break; } }
+  if(h<0){ if(rows.some(r=>(r||[]).some(c=>String(c).trim()!==''))) throw new Error('對帳單「退貨貨款」分頁：找不到「品號」表頭'); return out; }
+  const hd=(rows[h]||[]).map(c=>String(c).trim()); const ix=n=>hd.indexOf(n);
+  const I={sku:ix('品號'),sell:ix('賣出方式'),J:ix('含稅進價'),Q:ix('客退數量'),R:ix('客退金額'),U:ix('對帳金額(未稅)'),T:ix('對帳稅額')};
+  if(I.sell<0||I.J<0) throw new Error('對帳單「退貨貨款」分頁：缺必要欄（需要 賣出方式 / 含稅進價），實際表頭：'+hd.filter(Boolean).join('、'));
+  const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
+  for(let i=h+1;i<rows.length;i++){ const r=rows[i]; if(!r) continue; if(!String(r[I.sku]||'').trim()) continue;
+    const sell=String(r[I.sell]||'').trim();
+    const shop= sell==='一般販售'?'甲配' : sell==='寄倉販售'?'乙配' : null;
+    if(!shop) continue;
+    const b=out[shop]; const J=num(r[I.J]), Q=I.Q>=0?num(r[I.Q]):0;
+    b.rows++; b.J+=J; b.QJ+=Q*J; b.retQty+=Q; if(I.R>=0)b.retAmt+=num(r[I.R]); if(I.U>=0)b.revUntax+=num(r[I.U]); if(I.T>=0)b.tax+=num(r[I.T]);
+  }
+  return out;
+}
 function momoParseReconcile(rows, otherRows){
   let h=-1; for(let i=0;i<Math.min(rows.length,30);i++){ if((rows[i]||[]).map(c=>String(c).trim()).includes('品號')){ h=i; break; } }
   if(h<0) throw new Error('對帳單：找不到「品號」表頭（要「訂單貨款」分頁，不是摘要頁）');
@@ -13108,6 +13406,9 @@ async function momoReconGenerate(shop){
     const main=wb.sheet('訂單貨款')||wb.firstSheet();
     const other=wb.names.includes('其他訂單')?wb.sheet('其他訂單'):null;
     const detail=momoParseReconcile(main, other);
+    // 退貨貨款分頁解析失敗不擋整份對帳（它只給 KPI 用）：retSheet=null → 存 retSheetV:0，KPI 那格會標「需重新上傳對帳單」。
+    try{ detail.retSheet=momoParseReconcileReturns(wb.names.includes('退貨貨款')?wb.sheet('退貨貨款'):null); }
+    catch(e){ detail.retSheet=null; console.warn('[momo] 退貨貨款分頁解析失敗（不影響對帳）：',e); if(typeof showToast==='function') showToast('⚠ 退貨貨款分頁讀不到：'+(e&&e.message||e)+'（對帳照常，KPI 退貨金額不會自動帶入）','error',8000); }
     const pdfText=await momoReadPdfText(_momoReconStage.pdf);
     const summ=momoParseReconcileSummary(pdfText);
     momoRenderReconReport(shop, detail, summ);
@@ -13128,6 +13429,7 @@ function momoRenderReconReport(shop, detail, summ){
       對帳號碼 <b>${_momoEsc(summ.reconNo||'?')}</b>　對帳區間月 <b style="color:${okColor(monthMatch)}">${summ.period||'?'}</b> ${monthMatch?'✓':'⚠與所選月不符'}<br>
       A(未稅營收)：xls甲乙合計 <b>${n(xlsA)}</b>${detail.meta.otherUntax?'+其他'+n(detail.meta.otherUntax):''} vs pdf A <b>${n(summ.A&&summ.A.untax)}</b> <span style="color:${okColor(aMatch)}">${aMatch?'✓ 一致':'⚠ 不一致'}</span><br>
       一般販售(甲配) ${n(detail.meta.revUntax.甲配)}　寄倉販售(乙配) ${n(detail.meta.revUntax.乙配)}
+      ${detail.retSheet?`<br>退貨貨款分頁：甲配 ${detail.retSheet.甲配.rows} 列（含稅進價合計 ${n(detail.retSheet.甲配.J)}）　乙配 ${detail.retSheet.乙配.rows} 列（含稅進價合計 ${n(detail.retSheet.乙配.J)}）${detail.retSheet.sheet?'':'　<span style="color:#9ca3af">（檔案沒有這個分頁，記為 0）</span>'}`:''}
     </div>
     <div class="mm-recon-cols">
       <div class="mm-recon-col">
@@ -13157,7 +13459,9 @@ function momoRenderReconReport(shop, detail, summ){
 function momoReconStore(shop){
   const L=window.__momoReconLast; if(!L||!L.summ.valid.all){ alert('自驗未過，不存'); return; }
   // 每 shop 存該賣場的逐SKU（detail.byShop[shop]）+ 該月摘要（summ，兩賣場共用月費用）
-  ['甲配','乙配'].forEach(s=>{ momoSaveReconcile(s, L.month, { month:L.month, reconNo:L.summ.reconNo, skus:L.detail.byShop[s]||{}, summary:L.summ, savedShop:s }); });
+  //   retSheet：該店「退貨貨款」分頁合計（KPI 退貨金額用）；retSheetV 標示是新版解析存的（舊 doc 沒有 → KPI 標「需重新上傳對帳單」）。
+  ['甲配','乙配'].forEach(s=>{ const rs=L.detail.retSheet; momoSaveReconcile(s, L.month, { month:L.month, reconNo:L.summ.reconNo, skus:L.detail.byShop[s]||{}, summary:L.summ, savedShop:s,
+    retSheet:rs?rs[s]:null, retSheetV:rs?1:0 }); });
   momoClearFeeRateCache();   // 總表下次重繪即吃到這份對帳單（該月轉「已對帳」權威）
   if(typeof showToast==='function') showToast('已存 '+L.month+' 月對帳（甲配+乙配，記得按 ☁ 同步雲端）','success');
 }
@@ -14416,7 +14720,7 @@ function _momoSyncPendingCount(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
-      if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
+      if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
          || (k.startsWith('ec_notes|') && /_growth$/.test(k) && notesDirtyHas(k))   /* 商品調整：與 sweep 逐條同條件（dirty 才算）。廣告調整不算——它走 syncToCloud 的當期閘門，不經 sweep */
          || k.startsWith('ec_split|')   /* 拆分試算：與 sweep 逐條同條件（只看前綴、沒有 dirty 閘）。判準要與那邊逐字相同，見 _sweepAllLocalReportsIntoPending 的 ec_split 分支 */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
@@ -14562,7 +14866,7 @@ function _momoCollectPending(shop){
     else if(cupIsNoteKey(pk)){ val=cupNoteForPush(pk)||{}; }                                  // 酷澎備註：與 push（cupNoteForPush，_mem→localStorage）同源
     else { try{ if(Store._mem&&Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
       if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} } }
-    const kind = pk==='ec_momo_cost_by_origin'?'MOMO成本表' : pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk.startsWith('ec_momo_reconcile|')?'MOMO月對帳' : pk.startsWith('ec_momo_freight|')?'MOMO運費' : pk.startsWith('ec_momo_rent|')?'MOMO倉租' : pk.startsWith('ec_momo_f1102|')?'MOMO寄倉庫存' : pk.startsWith('ec_momo_s1103|')?'MOMO排行榜' : pk.startsWith('ec_momo_moplus_origins|')?'MO+逐列成本' : pk.startsWith('ec_momo_e001|')?'MO+未結算銷量' : cupIsReportKey(pk)?'酷澎報表' : cupIsMsfKey(pk)?'酷澎退貨' : cupIsNoteKey(pk)?'酷澎備註' : '其他設定';
+    const kind = pk==='ec_momo_cost_by_origin'?'MOMO成本表' : pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk.startsWith('ec_momo_reconcile|')?'MOMO月對帳' : pk.startsWith('ec_momo_freight|')?'MOMO運費' : pk.startsWith('ec_momo_c1105_ship|')?'MOMO訂單數(KPI)' :pk.startsWith('ec_momo_rent|')?'MOMO倉租' : pk.startsWith('ec_momo_f1102|')?'MOMO寄倉庫存' : pk.startsWith('ec_momo_s1103|')?'MOMO排行榜' : pk.startsWith('ec_momo_moplus_origins|')?'MO+逐列成本' : pk.startsWith('ec_momo_e001|')?'MO+未結算銷量' : cupIsReportKey(pk)?'酷澎報表' : cupIsMsfKey(pk)?'酷澎退貨' : cupIsNoteKey(pk)?'酷澎備註' : '其他設定';
     // E001「本機/雲端」欄改顯示「未結算銷量件數」（本 src 主掌+未結算）而非 _momoCount 的 17 個 top-level 欄位（對使用者無意義）。
     let over=null;
     if(momoIsShardedE001Key(pk)){ try{ const st=momoE001OwnedUnsettledStat(pk.split('|')[1], val); over={count:st.qty, stat:st}; }catch(e){} }
@@ -15171,6 +15475,7 @@ function momoPeriodTotals(shop, periodKey){
   let soldActive=0, activeTotal=0;   // 動銷率用：soldActive=本期有銷售（不論上下架，分子）、activeTotal=目前上架 ∪ 本期有銷售（分母；賣過卻已下架的也算現役池，避免漏算）
   let revMiss=0, revMissQty=0;   // 有銷量(qty>0)但營收≈0 → 缺營收（多半缺進價，估不出未稅進價×qty）→ 淨利假性大虧，畫面要標
   let revCov=0, profitCov=0;   // MO+：成本涵蓋 100% 的 SKU 才計入加權毛利率（分母/分子）；未涵蓋的營收/淨利仍進 KPI 總額但不進毛利率
+  let cost=0, unreconciled=0;   // cost：Σ商品成本（甲乙＝product.cost×對帳數量，同總表）；unreconciled：本期有銷售但不在對帳單的品號數（KPI 自動帶入用）
   momoLoadProducts(shop).forEach(p=>{
     const isActive = p.discontinued!==true;   // 上架
     const a=momoAggregatePeriods(p, keys, shop, {lean:true});   // 彙總只讀 rev/profit/qty/covered/missCost，不需 listPrice/latestSale → lean 跳過逐SKU掃描熱點（MO+麻吉 每次 ~3s→~40ms；趨勢圖 ×32 次是通路總覽卡頓主因）
@@ -15179,6 +15484,7 @@ function momoPeriodTotals(shop, periodKey){
     const active = g>0 || Math.abs(a.revenue)>0.5;   // 本期有銷售
     if(isActive || active) activeTotal++;   // 動銷率分母＝目前上架 ∪ 本期有銷售（賣過卻已下架的也算現役池；只算「目前上架」會漏掉這批）
     if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; soldActive++;   // 分子＝本期有銷售（不論上下架）
+      cost+=Number(a.cost)||0; if(a.reconciled===false) unreconciled++;
       if(isMoPlus){   // MO+ 缺成本＝成本涵蓋<100%（非 product.cost）；covered 才進加權毛利率
         if(a.covered){ revCov+=a.revenue; profitCov+=a.profit; }
         else { missCost++; if(p.discontinued===true) missCostDisc++; }
@@ -15188,7 +15494,7 @@ function momoPeriodTotals(shop, periodKey){
       if(!isMoPlus && g>0 && Math.abs(a.revenue)<0.5){ revMiss++; revMissQty+=g; } }   // MO+ 營收=A 實際值、非進價估算 → 「缺進價」橫幅對 MO+ 無意義、排除
   });
   const margin = isMoPlus ? (revCov>0?(profitCov/revCov)*100:0) : (rev>0?(profit/rev)*100:0);
-  return { hasData:any, rev, profit, qty, margin, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty, revCov, profitCov };
+  return { hasData:any, rev, profit, qty, margin, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty, revCov, profitCov, cost, unreconciled };
 }
 // 從「已篩選後的顯示列」算總覽（口徑與 momoPeriodTotals 完全一致，只是母體換成 rows）→ 篩選時卡片跟著變。
 //   rows 已帶 revenue/profit/qty/grossQty/cost/discontinued（cost=未稅前的商品成本欄，缺成本判定同總覽）。
@@ -17471,10 +17777,22 @@ function momoParseC1105(rows){
   // 「進價(未稅)」為選填欄（供淨利表新模型算未稅營收=未稅進價×對帳數量的 revUntax 權重用）：
   //   獨立找、缺欄=-1（revUntax 該筆記 0），不塞 momoLocateCols 必要欄以免舊檔缺欄整份 throw。
   const iPriceUntax=(rows[headerIdx]||[]).map(c=>String(c).trim()).indexOf('進價(未稅)');
+  // 「配送單號」「實際出貨日」為選填欄（2026-09-30 新增，給 KPI 月結表「訂單數」）：
+  //   訂單數＝該店【不重複配送單號】（排除「未出即退」這個佔位值）、依【實際出貨日】歸日。
+  //   ⚠ 用配送單號不用訂單編號：回測 2026-01～05，使用者手填的訂單數 10 格有 8 格與「不重複配送單號」完全相同（另 2 格差 1），
+  //     與不重複訂單編號差 30～50。C1105 一個檔＝一個月的實際出貨日（訂單成立日會跨到上個月）。
+  const hdr=(rows[headerIdx]||[]).map(c=>String(c).trim());
+  const iShipNo=hdr.indexOf('配送單號'), iShipDate=hdr.indexOf('實際出貨日');
+  const shipSets={};   // 'YYYY-MM-DD' → {甲配:Set,乙配:Set}
   const num=v=>parseFloat(String(v).replace(/,/g,''))||0;
   const sales={甲配:{},乙配:{}}, revUntax={甲配:{},乙配:{}}, orderSkuQty={}, unknownChannel=[], badPeriod=[], dateFallback=[];
   for(let i=headerIdx+1;i<rows.length;i++){
     const r=rows[i]; if(!r) continue;
+    if(iShipNo>=0&&iShipDate>=0){
+      const ch=momoChannelFromDeliveryType(String(r[idx.deliveryType]||'').trim());
+      const no=String(r[iShipNo]||'').trim(), day=momoC1105Day(r[iShipDate]);
+      if(ch&&day&&no&&no!=='未出即退'){ const d=shipSets[day]=shipSets[day]||{甲配:new Set(),乙配:new Set()}; d[ch].add(no); }
+    }
     const sku=String(r[idx.sku]||'').trim(); if(!sku) continue;
     const qty=num(r[idx.qty]);
     const rev=iPriceUntax>=0?Math.round(num(r[iPriceUntax])*qty):0;   // 未稅進價×數量（round整數，供 qtySources 緊湊編碼）
@@ -17494,7 +17812,45 @@ function momoParseC1105(rows){
     revUntax[channel][sku]=revUntax[channel][sku]||{};
     revUntax[channel][sku][period]=(revUntax[channel][sku][period]||0)+rev;
   }
-  return {sales,revUntax,orderSkuQty,unknownChannel,badPeriod,dateFallback};
+  // shipDays：{ 'YYYY-MM-DD':{甲配:n,乙配:n} }；檔案缺這兩欄 → null（不寫 KPI 訂單數來源）。
+  let shipDays=null;
+  if(iShipNo>=0&&iShipDate>=0){ shipDays={}; Object.keys(shipSets).forEach(d=>{ shipDays[d]={甲配:shipSets[d].甲配.size, 乙配:shipSets[d].乙配.size}; }); }
+  return {sales,revUntax,orderSkuQty,unknownChannel,badPeriod,dateFallback,shipDays};
+}
+// C1105「實際出貨日」→ 'YYYY-MM-DD'。檔案裡是 '2026/08/31' 文字；保險起見也接 Excel 日期序號。判不出 → null。
+function momoC1105Day(v){
+  if(typeof v==='number'&&v>20000&&v<80000&&typeof XLSX!=='undefined'&&XLSX.SSF){ const d=XLSX.SSF.parse_date_code(v); if(d) return d.y+'-'+String(d.m).padStart(2,'0')+'-'+String(d.d).padStart(2,'0'); }
+  const m=/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/.exec(String(v||''));
+  if(!m) return null;
+  const mn=+m[2], dn=+m[3]; if(mn<1||mn>12||dn<1||dn>31) return null;
+  return m[1]+'-'+String(mn).padStart(2,'0')+'-'+String(dn).padStart(2,'0');
+}
+// KPI 訂單數來源（每月一份）：ec_momo_c1105_ship|<YYYY-MM> → { month, days:{'YYYY-MM-DD':{甲配,乙配}}, uploads:[{at,first,last}] }。
+//   逐日存 → 同一天重傳就覆蓋那一天（上半月、下半月分開傳也能湊成整月，不會重複算）。儲存比照 freight：app/profit 欄位、按「☁ 同步雲端」才上雲。
+function momoC1105ShipKey(month){ return 'ec_momo_c1105_ship|'+month; }
+function momoLoadC1105Ship(month){ const k=momoC1105ShipKey(month);
+  try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]) return Store._mem[k]; }catch{}
+  try{ const l=localStorage.getItem(k); if(l) return JSON.parse(l); }catch{}
+  return null; }
+function momoSaveC1105Ship(month,data){ const k=momoC1105ShipKey(month);
+  try{ localStorage.setItem(k,JSON.stringify(data)); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=data; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=data; }catch{} }
+// 把一次 C1105 上傳的 shipDays 併進各月份（同一天覆蓋）。回傳寫了哪些月份。
+function momoMergeC1105Ship(shipDays){
+  if(!shipDays) return [];
+  const byMonth={};
+  Object.keys(shipDays).forEach(d=>{ const mo=d.slice(0,7); (byMonth[mo]=byMonth[mo]||{})[d]=shipDays[d]; });
+  const now=Date.now();
+  return Object.keys(byMonth).sort().map(mo=>{
+    const old=momoLoadC1105Ship(mo)||{};
+    const days=Object.assign({}, old.days||{}, byMonth[mo]);
+    const ds=Object.keys(byMonth[mo]).sort();
+    const uploads=(Array.isArray(old.uploads)?old.uploads:[]).concat([{at:now,first:ds[0],last:ds[ds.length-1]}]).slice(-12);
+    momoSaveC1105Ship(mo,{month:mo,days,uploads,source:'C1105'});
+    return mo;
+  });
 }
 // 甲配 UnsendList（舊式）：運費只記在每張訂單第一列（訂編/品號/運費），續列空白。
 //   → 依「訂編」收該訂單總運費（運費欄）。分攤到各 SKU 在 momoAllocateJiaFreightHybrid（有 C1105→數量精算／無→已存銷量估算）。
@@ -18904,6 +19260,7 @@ function momoUploadGenerate(shop){
     _momoUpPlan.srcCode=momoRebuildSrcFromName((_momoUpFiles.c1105&&_momoUpFiles.c1105.name)||'');   // 本檔月份代號(2608)＝增量 compact writer 的來源鍵；判不出→writer 退回各期別自身月份
     _momoUpPlan.yiInfo=yiInfo; _momoUpPlan.yiFreight=yi; _momoUpPlan.yiMonth=yiInfo?yiInfo.month:'';   // 乙配 C1204 逐SKU運費 + 目標月份(存 ec_momo_freight|乙配|<月>)
     _momoUpPlan.s1105Error=s1105Error;
+    _momoUpPlan.c1105Ship=c1105.shipDays||null;   // KPI 訂單數來源（不重複配送單號／實際出貨日），寫入時併進 ec_momo_c1105_ship|<月>
     _momoUpPlan.s1103=s1103; _momoUpPlan.s1103Sanity=s1103Sanity; _momoUpPlan.s1103Error=s1103Error;
     if(jiaResult){ _momoUpPlan.jiaMonths=jiaResult.months; _momoUpPlan.jiaFiles=jiaFilesBreakdown; _momoUpPlan.jiaUnmatchedOrders=jiaResult.unmatchedOrders; _momoUpPlan.badPeriod=_momoUpPlan.badPeriod.concat(jiaResult.badPeriod); }
     if(s1105&&s1105.badPeriod&&s1105.badPeriod.length) _momoUpPlan.badPeriod=_momoUpPlan.badPeriod.concat(s1105.badPeriod);   // S1105 退貨判不出期別的訂編也浮出來
@@ -19025,7 +19382,13 @@ function momoRenderUploadPreview(shop){
   const skips=[];
   if(P.unknownChannel.length) skips.push(`未知配送類型 ${P.unknownChannel.length} 筆`);
   if(P.jiaUnmatchedOrders&&P.jiaUnmatchedOrders.length) skips.push(`甲配運費訂單在 C1105 找不到 ${P.jiaUnmatchedOrders.length} 筆（該運費未分攤）`);
-  const skipHtml=skips.length?`<div style="font-size:12px;color:#9ca3af;margin-bottom:8px">略過（未計入）：${skips.join('、')}</div>`:'';
+  const skipHtml=skips.length?`<div style="font-size:12px;color:#9ca3af;margin-bottom:8px">略過（未計入）：${skips.join('、')}</div>`
+    :'';
+  // KPI 訂單數（不重複配送單號、依實際出貨日歸月）：寫入時一起存，給 KPI 月結表「從對帳單帶入」用
+  let shipHtml='';
+  if(P.c1105Ship){ const bm={}; Object.keys(P.c1105Ship).forEach(d=>{ const mo=d.slice(0,7); const x=bm[mo]=bm[mo]||{甲配:0,乙配:0,days:0}; x.甲配+=P.c1105Ship[d].甲配; x.乙配+=P.c1105Ship[d].乙配; x.days++; });
+    shipHtml=`<div style="font-size:12px;color:#6b7280;margin-bottom:8px">KPI 訂單數（不重複配送單號、排除未出即退，依實際出貨日）：${Object.keys(bm).sort().map(mo=>`${mo} 甲配 <b>${bm[mo].甲配.toLocaleString()}</b>／乙配 <b>${bm[mo].乙配.toLocaleString()}</b>（${bm[mo].days} 天）`).join('　')}</div>`; }
+  else if(P.c1105Ship===null&&!P.noSales){ shipHtml=`<div style="font-size:12px;color:#9ca3af;margin-bottom:8px">KPI 訂單數：這個 C1105 檔沒有「配送單號／實際出貨日」欄，不會更新</div>`; }
   // S1103 排行榜 sanity（交集比較、不變式「下單量 ≥ 對帳量」）。⚠ 所有插值一律 _momoEsc：SKU/訊息含「<」會被當標籤吃字（舊 bug）。
   let s1103Html='';
   if(P.s1103Error){ s1103Html=`<div class="mm-banner mm-banner-warn" style="margin-bottom:8px">⚠ 排行榜（S1103）解析失敗，已略過（瀏覽量不會更新）：${_momoEsc(P.s1103Error)}</div>`; }
@@ -19102,7 +19465,7 @@ function momoRenderUploadPreview(shop){
   }
   el.innerHTML=`
     <div style="font-size:13px;font-weight:700;margin-bottom:8px">預覽（尚未寫入）</div>
-    ${shopBlock('甲配')}${shopBlock('乙配')}${jiaHtml}${yiHtml}${rentHtml}${f1102Html}${owHtml}${badHtml}${s1105ErrHtml}${s1103Html}${skipHtml}
+    ${shopBlock('甲配')}${shopBlock('乙配')}${jiaHtml}${yiHtml}${rentHtml}${f1102Html}${owHtml}${badHtml}${s1105ErrHtml}${s1103Html}${shipHtml}${skipHtml}
     ${(P._guard&&P._guard.hasDanger)
       ? `<button onclick="momoUploadOpenGuard('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer">⚠ 逐期別檢視並寫入 →</button>`
       : `<button onclick="momoUploadApply('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:${_shrink.length?'#dc2626':'#10b981'};color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認寫入${_shrink.length?'（⚠️ '+_shrink.length+' 筆會變小）':(P.overwrite.length?'（含覆蓋 '+P.overwrite.length+' 筆）':'')}</button>`}
@@ -19159,6 +19522,8 @@ function momoUploadApply(shop, allowedPeriods){
   //    undefined＝無危險期別、全寫（正常上傳）。分類/modal 已移到產生預覽當下，這裡只落盤 + 逐期別回報。
   //    過濾在 momoApplyUploadPlan（組 payload 前），不是 UI 擋。
   const res=momoApplyUploadPlan(P, allowedPeriods||null);
+  // KPI 訂單數來源：跟銷量同一次上傳一起落盤（逐日覆蓋、冪等；不受期別閘門影響——它不動銷量 cell）
+  const shipMonths=momoMergeC1105Ship(P.c1105Ship);
   _momoUpPlan=null; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.s1103=null; _momoUpFiles.yi=null; _momoUpFiles.rent=null; _momoUpRentMonth=''; _momoUpFiles.f1102=null;
   const lines=[momoPeriodReportLine('已寫入', res.wroteBy),
     momoPeriodReportLine('　其中累加到既有期別', res.accumBy),   // ① 舊期別行為從「跳過」變「累加」→ 逐期別列出，不靜默
@@ -19166,6 +19531,7 @@ function momoUploadApply(shop, allowedPeriods){
   if(freightMonths.length) lines.push('運費：'+freightMonths.join('、'));
   if(f1102Wrote) lines.push('乙配寄倉庫存：已更新');
   if(s1103Month) lines.push('排行榜：'+s1103Month);
+  if(shipMonths.length) lines.push('KPI 訂單數（配送單號）：'+shipMonths.join('、'));
   const detail=lines.join('\n');
   if(res.wrote===0 && !freightMonths.length && !s1103Month){
     const msg=(res.skippedCount||res.gatedCount)?('這批銷量都落在受保護的期別，未覆蓋。\n\n'+detail):'這批沒有相符的已建檔商品（或無銷量）。請確認檔案或先到批次維護建檔。';
@@ -22767,6 +23133,7 @@ Object.assign(window, {
   buildKpiTabHtml,renderKpiTab,getKpiRows,kpiWriteCell,__kpiMigrateToV2,setKpiViewMode,setKpiYear,
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
   kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillDownloadExcel,
+  kpiMomoAutoFill,__kpiMomoAutofillBacktest,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
