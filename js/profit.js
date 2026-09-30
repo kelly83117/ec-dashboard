@@ -24476,6 +24476,68 @@ function pchomeHistoryTimelineHTML(料號){ var h=pchomeHistoryFor(料號)||[]; 
     return '<div style="font-size:12px;padding:6px 10px;border-left:2px solid #e5e7eb;margin-bottom:4px"><span style="color:#9ca3af">'+_momoEsc((e.date||'')+(e.time?' '+e.time:''))+'</span> 成本 '+(e.cost!=null?e.cost:'—')+' / 供貨價 '+(e.供貨價!=null?e.供貨價:'—')+' / 售價 '+(e.售價!=null?e.售價:'—')+(ch?'<span style="color:#7c3aed"> · '+_momoEsc(ch)+'</span>':'')+(e.note?'<span style="color:#6b7280"> — '+_momoEsc(e.note)+'</span>':'')+'</div>'; }).join('');
 }
 function pchomeRefreshSyncBtn(shop){ var el=document.getElementById('pchome-sync-btn-'+shop); if(el) el.outerHTML=pchomeSyncBtnHTML(shop); }
+// ── 單品分析 modal（點總表列開；逐 SKU 歷程 + optlog 區塊，照 momoOpenAnalysis/momoRenderOptlogSection）──
+//   PChome 無 S1103/月銷量序列 → 不畫 momo 那些圖（momo 有的資料 PChome 沒有）；範圍＝歷程時間軸 + 優化紀錄（檢視/新增/刪除）。
+function pchomeOpenAnalysis(shop, 料號){
+  var p=(pchomeLoadProducts()||[]).find(function(x){ return String(x.料號||'').trim()===String(料號).trim(); });
+  if(!p){ if(typeof showToast==='function') showToast('找不到商品 '+料號,'error'); return; }
+  var ov=document.getElementById('pchome-analysis-overlay'); if(!ov){ ov=document.createElement('div'); ov.id='pchome-analysis-overlay'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;z-index:4000;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';
+  ov.onclick=function(e){ if(e.target===ov) pchomeCloseAnalysis(); };
+  pchomeRenderAnalysis(shop, p);
+}
+function pchomeCloseAnalysis(){ var ov=document.getElementById('pchome-analysis-overlay'); if(ov) ov.remove(); }
+function pchomeRenderAnalysis(shop, p){
+  var ov=document.getElementById('pchome-analysis-overlay'); if(!ov) return;
+  var esc=_momoEsc, m=pchomeCalcMargin(p.cost, p.供貨價);
+  var mtxt=(m!=null&&Number(p.cost)>0)?pchomePct(m):'—';
+  var disc=!pchomeIsActive(p)?' <span style="font-size:12px;color:#9ca3af;font-weight:600">· 已下架</span>':'';
+  var pnstr=(p.商品編號||[]).join('、');
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:720px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid #eef0f2;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'
+    +'<div style="min-width:0"><div style="font-size:16px;font-weight:800;color:#1e293b;line-height:1.35">'+esc(p.商品名||p.料號)+disc+'</div>'
+    +'<div style="font-size:12px;color:#94a3b8;margin-top:2px">原廠編號 '+esc(p.料號||'—')+(pnstr?' · PChome 商品編號 '+esc(pnstr):'')+' · '+esc(shop)+'</div></div>'
+    +'<button onclick="pchomeCloseAnalysis()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:18px;cursor:pointer;line-height:1">✕</button></div>'
+    +'<div style="padding:16px 20px;max-height:calc(100vh - 140px);overflow:auto">'
+    +'<div class="mm-ana-sec"><div class="mm-ana-h">目前值</div><div style="font-size:13px;color:#334155;line-height:1.9">成本 <b>'+pchomeMoney(p.cost||0)+'</b> ｜ 供貨價(含稅) <b>'+pchomeMoney(p.供貨價||0)+'</b> ｜ PChome 售價 '+(p.售價?pchomeMoney(p.售價):'—')+' ｜ 淨利率 <b>'+mtxt+'</b> <span style="color:#9ca3af;font-size:11px">（供貨價÷1.05 − 成本）÷（供貨價÷1.05）</span></div></div>'
+    +'<div class="mm-ana-sec"><div class="mm-ana-h">商品異動時間軸</div>'+pchomeHistoryTimelineHTML(p.料號)+'</div>'
+    +'<div class="mm-ana-sec" id="pchome-optlog-sec"></div>'
+    +'</div></div>';
+  pchomeRenderOptlogSection(shop, p.料號);
+}
+// 優化紀錄區塊（檢視/新增/刪除；照 momoRenderOptlogSection）
+function pchomeRenderOptlogSection(shop, 料號){
+  var el=document.getElementById('pchome-optlog-sec'); if(!el) return;
+  var list=(pchomeLoadOptlog(shop)[料號])||[];
+  var rows=list.length? list.map(function(e,i){return {e:e,i:i};}).reverse().map(function(o){ var e=o.e,i=o.i;
+    return '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid #f1f5f9">'
+      +'<span style="flex-shrink:0;font-size:11px;color:#94a3b8;width:74px">'+_momoEsc(e.date||'')+'</span>'
+      +'<span style="flex-shrink:0;font-size:11px;font-weight:700;color:#4f46e5;background:#eef2ff;border-radius:5px;padding:1px 7px">'+_momoEsc(e.type||'其他')+'</span>'
+      +'<span style="flex:1;font-size:12px;color:#334155;min-width:0;word-break:break-word">'+_momoEsc(e.note||'')+(e.by?' <span style="color:#94a3b8">· '+_momoEsc(momoOptlogUserToName(e.by)||e.by)+'</span>':'')+'</span>'
+      +'<a onclick="pchomeDeleteOptlog(\''+shop+'\',\''+_momoEsc(料號)+'\','+i+')" title="刪除" style="flex-shrink:0;color:#ef4444;cursor:pointer;font-weight:700">✕</a></div>';
+  }).join('') : '<div style="font-size:12px;color:#94a3b8;padding:4px 0">尚無優化紀錄。記下調價/上下架/做活動等人工動作，之後跟銷量並看因果。</div>';
+  el.innerHTML='<div class="mm-ana-h">優化紀錄'+(list.length?'（'+list.length+'）':'')+'</div>'
+    +'<div style="margin-bottom:8px">'+rows+'</div>'
+    +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+    +'<select id="pchome-optlog-type" class="mm-sel" style="font-size:12px;padding:5px 8px;border:1px solid #e5e7eb;border-radius:7px">'+PCHOME_OPTLOG_TYPES.map(function(t){return '<option value="'+t+'">'+t+'</option>';}).join('')+'</select>'
+    +'<input id="pchome-optlog-note" type="text" placeholder="例：調降供貨價 / 上架活動" style="flex:1;min-width:160px;font-size:12px;padding:6px 9px;border:1px solid #e5e7eb;border-radius:7px" onkeydown="if(event.key===\'Enter\')pchomeAddOptlogModal(\''+shop+'\',\''+_momoEsc(料號)+'\')">'
+    +'<button onclick="pchomeAddOptlogModal(\''+shop+'\',\''+_momoEsc(料號)+'\')" class="mm-btn-primary" style="font-size:12px;padding:6px 14px">＋ 新增</button></div>';
+}
+function pchomeAddOptlogModal(shop, 料號){
+  var sel=document.getElementById('pchome-optlog-type'), note=document.getElementById('pchome-optlog-note');
+  var type=sel?sel.value:'其他', txt=note?note.value.trim():'';
+  if(!txt){ if(note){ note.focus(); note.style.borderColor='#dc2626'; } return; }
+  pchomeAddOptlog(shop, 料號, {type:type, note:txt});
+  pchomeOptlogClearCache(shop); pchomeRefreshSyncBtn(shop);
+  pchomeRenderOptlogSection(shop, 料號);
+}
+function pchomeDeleteOptlog(shop, 料號, idx){
+  var map=pchomeLoadOptlog(shop); if(!map[料號]) return;
+  map[料號].splice(idx,1); if(!map[料號].length) delete map[料號];
+  pchomeSaveOptlog(shop, map);
+  pchomeOptlogClearCache(shop); pchomeRefreshSyncBtn(shop);
+  pchomeRenderOptlogSection(shop, 料號);
+}
 function pchomeRenderBatchEdit(shop){
   var body=document.getElementById('pchome-batch-body-'+shop); if(!body) return;
   var all=pchomeBatchProducts(shop);
@@ -25801,7 +25863,7 @@ function pchomeProfitTabHTML(shop){
       default: return dashCell;
     }
   };
-  var bodyRows=shown.map(function(x){ return '<tr>'+COLS.map(function(c){return cell(c,x);}).join('')+'</tr>'; }).join('');
+  var bodyRows=shown.map(function(x){ return '<tr onclick="pchomeOpenAnalysis(\''+shop+'\',\''+_momoEsc(x.料號)+'\')" style="cursor:pointer" title="點看單品分析（歷程／優化紀錄）">'+COLS.map(function(c){return cell(c,x);}).join('')+'</tr>'; }).join('');
   // 未分攤費用列（column-driven；比 .tr-total 輕的小計列）
   var showUnalloc=(calc.未分攤未稅>0.005||calc.dSource==='csv');
   var unallocCell=function(c){
@@ -25880,4 +25942,5 @@ Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBat
   pchomeBatchSelect, pchomeBatchSearch, pchomeBatchSetFilter, pchomeBatchToggleDisc, pchomeBatchSplitDrag, pchomeEditRecalc, pchomeEditOriginHint, pchomeBatchSubmitEdit, pchomeDeleteProduct, pchomeAddRecalc, pchomeAddOriginChanged, pchomeBatchSubmitAdd, pchomeListingFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeStatementHtmFile, pchomeOrderPick, pchomeOrderRemove, pchomeOrderGenerate, pchomeOrderApply, pchomeOrderCancel, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc,
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel,
-  pchomeOptlogTypeToggle, pchomeOptlogTimeSet, pchomeOptlogBySet, pchomeOptlogSysToggle });
+  pchomeOptlogTypeToggle, pchomeOptlogTimeSet, pchomeOptlogBySet, pchomeOptlogSysToggle,
+  pchomeOpenAnalysis, pchomeCloseAnalysis, pchomeAddOptlogModal, pchomeDeleteOptlog });
