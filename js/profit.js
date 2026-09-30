@@ -9655,14 +9655,32 @@ function _kpiEscAttr(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&qu
 function _kpiShopCalc(row,group,shop){
   return _kpiCalcAll(_kpiRawForCalc(((row&&row[group.key])||{})[shop]||{},group,shop,row),group);
 }
-// 全通路合計＝五組 _kpiGroupTotals 加總；訂單數＝各店 qty 加總。
+// 客單價的取樣（2026-10-01）：只算「實際營收 > 0 且 訂單數 > 0」的店，分子分母用同一批店。
+//   excluded＝只填了其中一邊的店（兩邊都沒填的店本來就不影響分子分母，不列）。全通路／通路層共用這一支。
+function _kpiAovPool(row,groups){
+  let rev=0,qty=0;const excluded=[];
+  groups.forEach(g=>g.shops.forEach(s=>{
+    const d=_kpiShopCalc(row,g,s),r=_kpiRealRev(d),q=Number(d.qty)||0;
+    if(r>0&&q>0){rev+=r;qty+=q;}
+    else if(r>0||q>0)excluded.push(_kpiShopLabel(s));
+  }));
+  return{aov:qty>0?rev/qty:null,rev,qty,excluded};
+}
+// 「未含：甲配、乙配（訂單數或營收未填）」小字；滑鼠移上去看完整清單。沒有被排除的店 → ''。
+function _kpiAovExHtml(excluded){
+  if(!excluded||!excluded.length)return '';
+  const full='未含：'+excluded.join('、')+'（訂單數或營收未填）';
+  return `<div class="km-aov-ex" title="${_kpiEscAttr(full)}">${_kpiEscAttr(full)}</div>`;
+}
+// 全通路合計＝五組 _kpiGroupTotals 加總；訂單數＝各店 qty 加總。客單價走 _kpiAovPool（只算營收、訂單數都有填的店）。
 function _kpiAllTotals(row){
   let rev=0,pure=0,qty=0;
   KPI_GROUPS.forEach(g=>{
     const t=_kpiGroupTotals(row,g);rev+=t.totalRev;pure+=t.totalPure;
     g.shops.forEach(s=>{qty+=Number(_kpiShopCalc(row,g,s).qty)||0;});
   });
-  return{rev,pure,qty,rate:rev>0?pure/rev:0,aov:qty>0?rev/qty:0};
+  const ap=_kpiAovPool(row,KPI_GROUPS);
+  return{rev,pure,qty,rate:rev>0?pure/rev:0,aov:ap.aov,aovExcluded:ap.excluded};
 }
 function _kpiGroupT(row,g){
   if(!row)return null;
@@ -9726,7 +9744,7 @@ function _kpiBigNumbersHtml(row,prevRow){
     <div class="km-card"><div class="km-l">純利率</div><div class="km-v">${c.rev>0?_kpiRatePct(c.rate):'—'}</div>${pp}</div>
     <div class="km-card"><div class="km-l">營收</div><div class="km-v">${_kpiMoney(c.rev)}</div>${pct(c.rev,p&&p.rev)}</div>
     <div class="km-card"><div class="km-l">訂單數</div><div class="km-v">${c.qty?fmtN(c.qty):'—'}</div>${pct(c.qty,p&&p.qty)}</div>
-    <div class="km-card"><div class="km-l">客單價</div><div class="km-v">${c.qty?_kpiMoney(c.aov):'—'}</div>${pct(c.aov,p&&p.aov)}</div>
+    <div class="km-card"><div class="km-l">客單價</div><div class="km-v">${c.aov!=null?_kpiMoney(c.aov):'—'}</div>${c.aov!=null&&p&&p.aov!=null?pct(c.aov,p.aov):''}${_kpiAovExHtml(c.aovExcluded)}</div>
   </div>`;
 }
 
@@ -10027,10 +10045,10 @@ function _kpiFmtTime(t){
 // 客單價＝實際營收 ÷ 訂單數（填寫模式最左的唯讀計算欄）。
 //   「實際營收」：有 actualRev 公式的組（MOMO：營收 − 退貨金額）用它；其他組用 rev。
 //   蝦皮本來就有 aov 公式欄（可能被手動覆蓋），直接用 _kpiCalcAll 算出的 d.aov，不另算一套。
-//   訂單數是 0 或沒填 → null（顯示「—」）。
+//   訂單數或實際營收是 0／沒填 → null（顯示「—」）——與全通路／通路層的 _kpiAovPool 同一套規則。
 function _kpiRealRev(d){return d.actualRev!=null?Number(d.actualRev)||0:Number(d.rev)||0;}
 function _kpiAovOf(d,group){
-  if(!(Number(d.qty)>0))return null;
+  if(!(Number(d.qty)>0)||!(_kpiRealRev(d)>0))return null;
   if(group.formula.some(f=>f.k==='aov'))return Number(d.aov)||0;
   return _kpiRealRev(d)/Number(d.qty);
 }
@@ -10075,7 +10093,7 @@ function _kpiFillHtml(row){
     const rate=d.pureRate!=null?Number(d.pureRate):(d.rev>0?pure/d.rev:0);
     const tmp=tmpShops.has(shop)?`<span class="km-tmp" title="這家店還有欄位沒填，純利是暫時的">暫</span>`:'';
     const aov=_kpiAovOf(d,group);
-    return `<tr><td class="km-f-shop">${_kpiShopLabel(shop)}</td><td class="km-n km-f-ro km-f-aov"><div class="km-roval">${aov==null?'—':_kpiMoney(aov)}</div></td>${cells}
+    return `<tr><td class="km-f-shop">${_kpiShopLabel(shop)}</td><td class="km-n km-f-ro km-f-aov"${aov==null&&(Number(d.qty)>0||_kpiRealRev(d)>0)?' title="訂單數或營收未填，不算客單價"':''}><div class="km-roval">${aov==null?'—':_kpiMoney(aov)}</div></td>${cells}
       <td class="km-n km-f-ro km-f-ro-first ${pure<0?'km-down':''}"><div class="km-roval">${_kpiMoney(pure)}${tmp}</div></td>
       <td class="km-n km-f-ro"><div class="km-roval">${Number(d.rev)>0?_kpiRatePct(rate):'—'}</div></td></tr>`;
   }).join('');
@@ -10102,8 +10120,8 @@ function _kpiFillHtml(row){
     return `<td class="km-n">${any?(_kpiIsMoneyField(f.k)?_kpiMoney(sum):_kpiNum(sum)):'—'}</td>`;
   }).join('');
   // 小計客單價＝各店實際營收加總 ÷ 訂單數加總（不是各店客單價平均）
-  let sRev=0,sQty=0;group.shops.forEach(shop=>{const d=_kpiShopCalc(row,group,shop);sRev+=_kpiRealRev(d);sQty+=Number(d.qty)||0;});
-  const subAov=sQty>0?_kpiMoney(sRev/sQty):'—';
+  const ap=_kpiAovPool(row,[group]);   // 小計客單價：只算營收、訂單數都有填的店
+  const subAov=(ap.aov!=null?_kpiMoney(ap.aov):'—')+_kpiAovExHtml(ap.excluded);
   const subRow=`<tr class="km-f-sub"><td class="km-f-shop">小計${fc.missing?'<span class="km-tmp">未完成</span>':''}</td><td class="km-n km-f-aov">${subAov}</td>${subCells}
     <td class="km-n km-f-ro-first ${t.totalPure<0?'km-down':''}">${_kpiMoney(t.totalPure)}</td><td class="km-n">${t.totalRev>0?_kpiRatePct(t.pureRateAgg):'—'}</td></tr>`;
   const le=_kpiLastEdit(month,group.key);
@@ -10686,8 +10704,7 @@ function kpiFillDownloadExcel(){
       fmt.push([null,null].concat(cols.map(()=>null),[MONEY,null]));
     }
     const t=_kpiGroupTotals(row,g);
-    let sRev=0,sQty=0;
-    g.shops.forEach(shop=>{const d=_kpiShopCalc(row,g,shop);sRev+=_kpiRealRev(d);sQty+=Number(d.qty)||0;});
+    const ap=_kpiAovPool(row,[g]);   // 小計客單價：只算營收、訂單數都有填的店（同畫面）
     const sums=cols.map(f=>{
       if(f.fx)return g.shops.reduce((a,shop)=>a+(Number(_kpiShopCalc(row,g,shop)[f.k])||0),0);   // 公式欄：各店算出來的值加總
       let sum=0,any=false;const seen=new Set();
@@ -10699,7 +10716,7 @@ function kpiFillDownloadExcel(){
       });
       return any?sum:'';
     });
-    aoa.push(['小計',sQty>0?sRev/sQty:''].concat(sums,[t.totalPure,t.totalRev>0?t.pureRateAgg:'']));
+    aoa.push(['小計',ap.aov!=null?ap.aov:''].concat(sums,[t.totalPure,t.totalRev>0?t.pureRateAgg:'']));
     fmt.push([null,MONEY].concat(cols.map(colFmt),[MONEY,PCT]));
     const name=g.title.replace(/[\\\/?*\[\]:]/g,'').slice(0,31);   // 工作表名稱不能有 \ / ? * [ ] :、最長 31 字
     XLSX.utils.book_append_sheet(wb,mkSheet(aoa,fmt,[16,11].concat(cols.map(()=>13),[13,9])),name);
@@ -10820,7 +10837,6 @@ let _kpiYearChartData=null;
 //     module 頂層的 let 不是 live binding，掛上去複製的是 module 求值當下的 null，
 //     之後 _kpiYearViewHtml 再怎麼重新賦值，window 上那份都會永遠停在 null。
 //   只有 getter，沒有 setter：這是觀測點，不是外部改狀態的入口。
-window.__kpiYearChartData=()=>_kpiYearChartData;
 // 年度總表的 Chart 實例（①全站折線 + ②五張小折線，共六張）。
 //   寫法比照本檔的 momoOv 那組（搜 _momoOvCharts / momoOvDestroyCharts）：
 //   陣列 + 單一清理函式；建圖一律走 renderKpiYearChart 裡的 mk()，才不會漏 push。

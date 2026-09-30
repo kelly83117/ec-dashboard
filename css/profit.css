@@ -1471,6 +1471,9 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-l{font-size:11px;color:#9ca3af;font-weight:600;}
 .km-v{font-size:24px;font-weight:800;color:#1a1a2e;font-variant-numeric:tabular-nums;margin:2px 0 1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .km-sub{font-size:11px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums;}
+/* 客單價「未含：…（訂單數或營收未填）」：一行、超出省略，滑鼠移上去（title）看完整清單 */
+.km-aov-ex{margin-top:3px;font-size:11px;font-weight:500;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;cursor:help;}
+.km-f-aov .km-aov-ex{max-width:90px;margin-left:auto;}
 /* 面板 */
 .km-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;margin-bottom:12px;}
 .km-panel{background:#fff;border:1px solid #eef0f2;border-radius:10px;padding:12px 14px;margin-bottom:12px;min-width:0;}
