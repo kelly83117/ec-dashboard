@@ -25880,10 +25880,10 @@ function pchomeProfitTabHTML(shop){
   var nameCell=function(x){
     // sub-line 照 momo「品號 · 原廠」兩識別碼：PChome＝商品編號 · 料號。不一致→標紅不靜默挑一個；已下架標記接在後面。
     var idLine=x.pnMismatch
-      ? '<span style="color:#ef4444">⚠ 商品編號 對帳 '+esc(x.reconPN)+' ≠ 清單 '+esc(x.listPN)+'</span> · 料號 '+esc(x.料號)
-      : '商編 '+esc(x.商品編號||'—')+' · 料號 '+esc(x.料號);
+      ? '<span style="color:#ef4444">⚠ 商品編號 對帳 '+esc(x.reconPN)+' ≠ 清單 '+esc(x.listPN)+'</span> · 原編 '+esc(x.料號)
+      : '商編 '+esc(x.商品編號||'—')+' · 原編 '+esc(x.料號);
     if(x.discontinued) idLine+=' · <span style="color:#9ca3af;font-weight:600">已下架</span>';
-    return '<td class="tl mm-sticky-col"><div class="mm-name-wrap"><span class="mm-name-clip" title="'+esc((x.商品名||'')+(x.規格?'（'+x.規格+'）':''))+'">'+esc(x.商品名||'—')+(x.規格?'（'+esc(x.規格)+'）':'')+'</span></div><div class="mm-sub-line" title="'+esc('商品編號 '+(x.商品編號||'—')+' · 料號 '+x.料號)+'">'+idLine+'</div></td>'; };
+    return '<td class="tl mm-sticky-col"><div class="mm-name-wrap"><span class="mm-name-clip" title="'+esc((x.商品名||'')+(x.規格?'（'+x.規格+'）':''))+'">'+esc(x.商品名||'—')+(x.規格?'（'+esc(x.規格)+'）':'')+'</span></div><div class="mm-sub-line" title="'+esc('商品編號 '+(x.商品編號||'—')+' · 原編 '+x.料號)+'">'+idLine+'</div></td>'; };
   // 費用 tooltip：逐項拆解（含稅、值 0 不列）。逐筆項標「（逐筆）」、攤提標「按營收比例攤」；末列 含稅合計÷1.05＝未稅。
   var feeTip=function(x){ var m=x.費用明細||{}, parts=[];
     if(m.罰金>0) parts.push('罰金 '+pchomeMoney(m.罰金)+'（逐筆）');
