@@ -9338,6 +9338,12 @@ const KPI_GROUPS=[
     ],
     // 填寫模式裡也顯示成一欄的公式欄（灰底輸入框、placeholder＝公式值、可手動覆蓋、不算填寫進度）
     fillFormula:['actualRev'],
+    // 某幾家店的 manual 欄位改成「自動預設、可覆蓋」（2026-10-01：甲配耗材）：
+    //   存了值＝手動覆蓋；沒存＝calc 算出的預設（在 _kpiRawForCalc 補上，所以純利、小計、總覽、年度總表全部吃同一個值）。
+    //   填寫模式那一格灰底＋placeholder、不算填寫進度；「從對帳單帶入」不寫。乙配耗材仍是 fieldMerge 的不適用、MO+ 各店仍手填。
+    autoFill:{
+      material:{shops:['MOMO-甲配'],calc:d=>(d.qty==null||d.qty==='')?undefined:(Number(d.qty)||0)*3,desc:'耗材 = 訂單數 × $3（可手動覆蓋）'},
+    },
     order:['qty','rev','cost','ret','actualRev','ship','misc','tax','material','receivable','pure','pureRate'],
     // 寄倉運費：好麻吉／森之旅固定共用一筆合併儲存格。
     //   ⚠ 2026-08-26 起【會按 shareBy 指定的比例攤進這兩個通路各自的純利】——
@@ -9714,6 +9720,7 @@ function _kpiFillSlots(row,group){
     //   不影響能不能填、合計算不算）。
     if(group.shopSince&&group.shopSince[shop]&&row&&row.month&&row.month<group.shopSince[shop])return;
     group.manual.forEach(f=>{
+      if(_kpiIsAutoFill(group,shop,f.k))return;   // 自動預設的格子（甲配耗材）不算填寫進度
       const st=_kpiFieldMergeStatus(group,f.k,shop,row.month);
       if(st&&st.type==='na')return;
       if(st&&st.type==='merged'){
@@ -9993,7 +10000,7 @@ function _kpiFillCell(group,shop,f,month){
     if(shop!==st.shops[0])return{kind:'share',st};
     return{kind:'merge',st,segs:['kpiFieldMerges',st.mergeKey],group,field:f.k};
   }
-  return{kind:'cell',segs:[group.key,shop,f.k],fx:!!f.fx,group,shop};
+  return{kind:'cell',segs:[group.key,shop,f.k],fx:!!f.fx||_kpiIsAutoFill(group,shop,f.k),group,shop};
 }
 function _kpiFillCur(row,cell){
   if(!row)return{};
@@ -10083,8 +10090,10 @@ function _kpiFillHtml(row){
     const noteBtn=KPI_NOTEABLE_FIELDS.has(f.k)
       ?`<span class="km-note${note?' has':''}" onclick="editKpiFieldNote('${month}','${group.key}','${f.k}',this)" title="${note?'備註：'+_kpiEscAttr(note)+'（點擊修改）':'點擊新增這個月的備註'}">${note?'●':'＋備註'}</span>`:'';
     if(f.fx)return `<th><div class="km-th">${f.l}${_kpiInfoHtml(group.title+' '+f.l,[f.desc])}</div></th>`;
+    const af=group.autoFill&&group.autoFill[f.k];
+    if(af)return `<th><div class="km-th">${f.l}${noteBtn}${_kpiInfoHtml(group.title+' '+f.l,[af.desc,'自動計算：'+af.shops.map(_kpiShopLabel).join('、')+'（其他店照原本方式）'])}</div></th>`;
     return `<th><div class="km-th">${f.l}${noteBtn}</div></th>`;
-  }).join('')}<th class="km-n km-f-rohead km-f-ro-first" title="依公式自動計算，不能直接改">純利${_kpiInfoHtml(group.title+' 純利',[_kpiDesc(group,pureKey),_kpiDesc(group,'tax'),_kpiDesc(group,'actualRev')])}</th><th class="km-n km-f-rohead" title="依公式自動計算，不能直接改">純利率${_kpiInfoHtml(group.title+' 純利率',[_kpiDesc(group,'pureRate')])}</th></tr>`;
+  }).join('')}<th class="km-n km-f-rohead km-f-ro-first" title="依公式自動計算，不能直接改">純利${_kpiInfoHtml(group.title+' 純利',[_kpiDesc(group,pureKey),_kpiDesc(group,'tax'),_kpiDesc(group,'actualRev')].concat(Object.values(group.autoFill||{}).map(a=>a.desc)))}</th><th class="km-n km-f-rohead" title="依公式自動計算，不能直接改">純利率${_kpiInfoHtml(group.title+' 純利率',[_kpiDesc(group,'pureRate')])}</th></tr>`;
   const body=group.shops.map((shop,ri)=>{
     const d=_kpiShopCalc(row,group,shop);
     const cells=cols.map((f,ci)=>{
@@ -10128,7 +10137,7 @@ function _kpiFillHtml(row){
       const cell=_kpiFillCell(group,shop,f,month);
       if(cell.kind==='na'||cell.kind==='share')return;
       const k=JSON.stringify(cell.segs);if(seen.has(k))return;seen.add(k);
-      const v=_kpiFillCur(row,cell).v;if(v!=null){any=true;sum+=Number(v)||0;}
+      const v=cell.fx?_kpiShopCalc(row,group,shop)[f.k]:_kpiFillCur(row,cell).v;if(v!=null){any=true;sum+=Number(v)||0;}   // 自動預設格用算出來的值
     });
     return `<td class="km-n">${any?(_kpiIsMoneyField(f.k)?_kpiMoney(sum):_kpiNum(sum)):'—'}</td>`;
   }).join('');
@@ -10333,9 +10342,8 @@ function kpiFillPaste(e,inp){
 //     應收帳款    ＝ PDF A+C−E+G（payable），甲乙共用格
 //     商品成本 cost＝ 總表整月 Σ對帳數量×成本（momoPeriodTotals(...).cost）
 //     訂單數 qty  ＝ C1105 不重複配送單號（排除「未出即退」），依實際出貨日歸月；甲配＝指定貨運＋超商取貨、乙配＝寄倉
-//     耗材 material＝ 公式 =訂單數*3（已經手填過的格子不覆蓋）
+//     耗材        ＝ 不帶入（甲配由 KPI_GROUPS.momo.autoFill 自動算訂單數×3、可覆蓋；乙配不適用）
 const KPI_MOMO_AUTO_SHOPS=[['MOMO-甲配','甲配'],['MOMO-寄倉','乙配']];
-const KPI_MOMO_MATERIAL_FORMULA='=訂單數*3';
 // 一格的 meta：本機還在疊加層（剛寫、雲端快照還沒回來）的以疊加層為準，否則讀雲端 meta。
 function _kpiMetaAt(month,segs){
   const k=segs.join('\u0001');
@@ -10463,19 +10471,7 @@ function _kpiMomoAutoPlan(month,row,opts){
       push(it);
     }
   });
-  // 耗材（公式）：訂單數要先有（本次帶入或已填）
-  KPI_MOMO_AUTO_SHOPS.forEach(([shop,ms])=>{
-    if(_kpiFieldMergeStatus(group,'material',shop,month)?.type==='na')return;   // 乙配不適用耗材（fieldMerge.material.notApplicable）→ 不帶入
-    const sd=box[shop]||{};
-    const it={shop,ms,field:'material',label:'耗材',segs:['momo',shop,'material'],cur:sd.material,formula:KPI_MOMO_MATERIAL_FORMULA};
-    const meta=_kpiMetaAt(month,it.segs);
-    if(sd.material!=null&&!_kpiIsAutoMeta(meta))Object.assign(it,{status:'keep',note:'已經手填過，不覆蓋'});
-    else if(qtyVal[shop]==null)Object.assign(it,wait('等訂單數'));
-    else Object.assign(it,{status:'write',val:qtyVal[shop]*3,src:'formula:訂單數*3',comp:'訂單數 '+fmtN(qtyVal[shop])+' × 3'});
-    if(it.status==='write'&&sd.materialFormula!==KPI_MOMO_MATERIAL_FORMULA)it.formulaChanged=true;
-    push(it);
-    if(it.status==='same'&&it.formulaChanged)it.status='write';
-  });
+  // 耗材：2026-10-01 起不帶入（甲配＝KPI_GROUPS.autoFill 自動算訂單數×3、可覆蓋；乙配不適用；MO+ 手填）
   // 應收帳款（甲乙共用格）
   {
     const st=_kpiFieldMergeStatus(group,'receivable','MOMO-甲配',month);
@@ -10542,8 +10538,7 @@ async function kpiMomoAutoFill(){
       writes.forEach(it=>{
         const meta={src:'auto',from:it.src,val:it.val};
         pairs.push([it.segs,it.val,meta]);
-        if(it.formula)pairs.push([[it.segs[0],it.segs[1],it.segs[2]+'Formula'],it.formula,meta]);
-        else if(it.segs[0]==='momo'){const sd=((getOrCreateKpiRow(month).momo||{})[it.segs[1]])||{};if(sd[it.segs[2]+'Formula']!=null)pairs.push([[it.segs[0],it.segs[1],it.segs[2]+'Formula'],undefined]);}
+        if(it.segs[0]==='momo'){const sd=((getOrCreateKpiRow(month).momo||{})[it.segs[1]])||{};if(sd[it.segs[2]+'Formula']!=null)pairs.push([[it.segs[0],it.segs[1],it.segs[2]+'Formula'],undefined]);}
       });
       kpiWriteCell(month,pairs,undefined,{extra}).then(ok=>{
         if(!ok&&extra)_kpiMomoSnapLocal.delete(month);   // 寫入失敗 → 快照也沒存進去，下次帶入要重新存
@@ -10612,10 +10607,51 @@ async function __kpiMomoRestore(month){
       }});
   });
 }
+// ── 甲配耗材一次性整理（2026-10-01，甲配耗材改成「自動＝訂單數×3、可覆蓋」時用）──
+//   舊的「從對帳單帶入」會寫 material＋materialFormula('=訂單數*3')。新做法不再存公式：
+//   · 公式那格的值＝訂單數×3 → 刪掉值和公式，改由 autoFill 自動算（值不變）
+//   · 值≠訂單數×3（訂單數後來改過）→ 只刪公式，值留著當手動覆蓋（值不變）
+//   · 純數字（沒有公式）的格子不動＝手動覆蓋
+//   __kpiMomoMaterialMigrate()：讀雲端現值（伺服器），列預覽（console.table＋視窗），按確認才【所有月份一次原子寫入】。
+async function __kpiMomoMaterialMigrate(){
+  const ck=window.__cloudKpi;
+  if(!ck||typeof ck.writePaths!=='function'){console.error('[甲配耗材整理] 雲端未連線');return null;}
+  if(!_kpiMigrated()){console.error('[甲配耗材整理] app/kpi 還沒搬移，不整理');return null;}
+  const snap=await ck.getDoc('server');const d=snap.exists()?(snap.data()||{}):{};
+  const shop='MOMO-甲配',items=[];
+  Object.keys(d.months||{}).sort().forEach(m=>{
+    const c=((d.months[m]||{}).momo||{})[shop];
+    if(!c||c.materialFormula==null)return;
+    const exp=(c.qty==null||c.qty==='')?null:(Number(c.qty)||0)*3;
+    items.push({month:m,qty:c.qty,material:c.material,formula:c.materialFormula,expect:exp,auto:exp!=null&&Number(c.material)===exp});
+  });
+  console.log('%c[甲配耗材整理] 有公式的月份 '+items.length+' 個（純數字的月份不動）','color:#5b5fcf;font-weight:700');
+  console.table(items.map(x=>({月份:x.month,訂單數:x.qty,目前值:x.material,公式:x.formula,'訂單數×3':x.expect,處理:x.auto?'刪值與公式→自動計算（值不變）':'只刪公式→值留作手動覆蓋（值不變）'})));
+  if(!items.length){if(typeof showToast==='function')showToast('甲配耗材沒有需要整理的月份','success');return{items:0};}
+  const by=_kpiWho(),pairs=[];
+  items.forEach(x=>{
+    const b=['months',x.month,'momo',shop],mb=['meta',x.month,'momo',shop];
+    pairs.push([b.concat('materialFormula'),ck.DELETE],[mb.concat('materialFormula'),{by,at:ck.TS,del:true,src:'migrate'}]);
+    if(x.auto)pairs.push([b.concat('material'),ck.DELETE],[mb.concat('material'),{by,at:ck.TS,del:true,src:'migrate'}]);
+  });
+  const rows=items.map(x=>`<tr><td>${x.month}</td><td class="km-n">${x.qty==null?'—':fmtN(x.qty)}</td><td class="km-n">${_kpiMoney(x.material)}</td><td>${_kpiEscAttr(x.formula)}</td><td class="km-n">${x.expect==null?'—':_kpiMoney(x.expect)}</td><td>${x.auto?'改成自動計算（值不變）':'轉成手動覆蓋（值不變）'}</td></tr>`).join('');
+  return new Promise(resolve=>{
+    App.openModal({title:'甲配耗材整理（改成自動計算）',width:'760px',
+      bodyHtml:`<div class="km-au"><div class="km-au-sub">只處理存了公式（materialFormula）的月份，共 <b>${items.length}</b> 個；純數字的月份不動。數字都不會變，純利不變。按確認後一次寫入（${pairs.length} 條路徑）。</div>
+        <div class="km-tablewrap"><table class="km-au-tbl"><thead><tr><th>月份</th><th class="km-n">訂單數</th><th class="km-n">目前值</th><th>公式</th><th class="km-n">訂單數×3</th><th>處理</th></tr></thead><tbody>${rows}</tbody></table></div></div>`,
+      saveLabel:'確認整理 '+items.length+' 個月',
+      onCancel:()=>resolve({cancelled:true}),
+      onSave:()=>{
+        ck.writePaths(pairs).then(()=>{if(typeof showToast==='function')showToast('甲配耗材已整理 '+items.length+' 個月（值不變）','success');resolve({items:items.length,paths:pairs.length,ok:true});},
+          e=>{console.error('[甲配耗材整理] 寫入失敗',e);if(typeof showToast==='function')showToast('甲配耗材整理失敗：'+((e&&(e.code||e.message))||e),'error',8000);resolve({ok:false});});
+        return true;
+      }});
+  });
+}
 // 已帶入過的月份，來源之後有更新 → 按鈕旁提示（不自動改）。MOMO 資料沒載入時不算（不為了提示去載 10MB）。
 function _kpiMomoAutoHint(month,row){
   if(!_kpiMomoDataLoaded())return null;
-  const anyAuto=KPI_MOMO_AUTO_SHOPS.some(([shop])=>['qty','rev','cost','ret','misc','material'].some(f=>_kpiIsAutoMeta(_kpiMetaAt(month,['momo',shop,f]))));
+  const anyAuto=KPI_MOMO_AUTO_SHOPS.some(([shop])=>['qty','rev','cost','ret','misc'].some(f=>_kpiIsAutoMeta(_kpiMetaAt(month,['momo',shop,f]))));
   if(!anyAuto)return null;
   try{return _kpiMomoAutoPlan(month,row).items.some(x=>x.srcChanged)?'changed':null;}catch(e){console.warn('[KPI] 自動帶入提示計算失敗',e);return null;}
 }
@@ -10725,7 +10761,7 @@ function kpiFillDownloadExcel(){
         const cell=_kpiFillCell(g,shop,f,row.month);
         if(cell.kind==='na'||cell.kind==='share')return;
         const k=JSON.stringify(cell.segs);if(seen.has(k))return;seen.add(k);
-        const v=_kpiFillCur(row,cell).v;if(v!=null){any=true;sum+=Number(v)||0;}
+        const v=cell.fx?_kpiShopCalc(row,g,shop)[f.k]:_kpiFillCur(row,cell).v;if(v!=null){any=true;sum+=Number(v)||0;}   // 自動預設格用算出來的值
       });
       return any?sum:'';
     });
@@ -10829,15 +10865,22 @@ function _kpiMergeShare(row,group,field,st,shop){
 //   ⚠ 多收 row：攤提必須知道同群組其他通路的分母欄位，而公式求值當下拿不到
 //     （KPI_GROUPS 裡的 calc 只收單一通路的 d）。四個呼叫端都已經有 row 在 scope。
 function _kpiRawForCalc(raw,group,shop,row){
-  if(!group.fieldMerge)return raw;
+  if(!group.fieldMerge&&!group.autoFill)return raw;
   const patch={};
-  Object.keys(group.fieldMerge).forEach(f=>{
+  Object.keys(group.fieldMerge||{}).forEach(f=>{
     const st=_kpiFieldMergeStatus(group,f,shop,row.month);
     if(!st)return;
     patch[f]=st.type==='merged'?_kpiMergeShare(row,group,f,st,shop):0;
   });
+  // autoFill：這家店這一格沒存值 → 用預設（例：甲配耗材＝訂單數×3）；存了值＝手動覆蓋，原樣用。算不出來（沒訂單數）→ 不補，維持空。
+  Object.keys(group.autoFill||{}).forEach(f=>{
+    const a=group.autoFill[f];
+    if(!a.shops.includes(shop)||!(raw[f]==null||raw[f]===''))return;
+    const v=a.calc(raw);if(v!=null&&!Number.isNaN(v))patch[f]=v;
+  });
   return Object.keys(patch).length?{...raw,...patch}:raw;
 }
+function _kpiIsAutoFill(group,shop,k){return !!(group.autoFill&&group.autoFill[k]&&group.autoFill[k].shops.includes(shop));}
 // ── 檢視狀態：月結表／年度總表 切換、目前選的年月（預設今天所在的年月）──
 let _kpiViewMode='month';
 // 年度月營收堆疊圖的資料（由 _kpiYearViewHtml 產生、renderKpiYearChart 消費）。
@@ -10850,6 +10893,7 @@ let _kpiYearChartData=null;
 //     module 頂層的 let 不是 live binding，掛上去複製的是 module 求值當下的 null，
 //     之後 _kpiYearViewHtml 再怎麼重新賦值，window 上那份都會永遠停在 null。
 //   只有 getter，沒有 setter：這是觀測點，不是外部改狀態的入口。
+window.__kpiYearChartData=()=>_kpiYearChartData;
 // 年度總表的 Chart 實例（①全站折線 + ②五張小折線，共六張）。
 //   寫法比照本檔的 momoOv 那組（搜 _momoOvCharts / momoOvDestroyCharts）：
 //   陣列 + 單一清理函式；建圖一律走 renderKpiYearChart 裡的 mk()，才不會漏 push。
@@ -23380,7 +23424,7 @@ Object.assign(window, {
   buildKpiTabHtml,renderKpiTab,getKpiRows,kpiWriteCell,__kpiMigrateToV2,setKpiViewMode,setKpiYear,
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
   kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillDownloadExcel,
-  kpiMomoAutoFill,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,
+  kpiMomoAutoFill,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
