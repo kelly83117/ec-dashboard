@@ -9828,9 +9828,9 @@ function _kpiChannelTableHtml(row,prevRow){
       _kpiFillBadge(_kpiFillCount(row,g)),
     ]);
     if(open){
-      g.shops.forEach(s=>{
+      g.shops.forEach((s,i)=>{
         const d=_kpiShopCalc(row,g,s);const rev=Number(d.rev)||0,pure=Number(d[cur.pureKey])||0;
-        html+=line('kc-sub','',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','','']);
+        html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','','']);
       });
     }
     return html;
