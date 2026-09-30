@@ -22980,13 +22980,14 @@ function pchomeParseStatement(text){
   var lines=String(text||'').split(/\r?\n/);
   var period=null;
   for(var pi=0;pi<lines.length && !period;pi++){ var pm=lines[pi].match(/本期\s*[（(]\s*(\d{4}\/\d{1,2}\/\d{1,2})\s*[~～\-－]\s*(\d{4}\/\d{1,2}\/\d{1,2})\s*[）)]/); if(pm) period={start:pm[1],end:pm[2]}; }
-  var CODE_RE=/^\s*[（(]\s*([A-Fa-f]\s*\d{0,2})\s*[）)]\s*(.*)$/;
+  // 代號列：括號版「（D11）標題」照舊；放寬也吃裸碼「D11⇥標題」（複製過程括號常掉；裸碼要求緊接 tab 界定，避免誤吃 DEBWN3 之類）。
+  var CODE_RE=/^\s*(?:[（(]\s*([A-Fa-f]\s*\d{0,2})\s*[）)]|([A-Fa-f]\d{0,2})(?=\t))\s*(.*)$/;
   var isNum=function(t){ return /^-?[\d,]+(?:\.\d+)?$/.test(t); };
   var isDash=function(t){ return /^[-—─]+$/.test(t); };
   var toNum=function(t){ return Number(String(t).replace(/,/g,'')); };
   // 先蒐集所有代號列（含所在行號），多行列要靠「下一個代號行」界定範圍
   var starts=[];
-  lines.forEach(function(ln,idx){ var m=ln.match(CODE_RE); if(m) starts.push({code:m[1].replace(/\s+/g,'').toUpperCase(), rest:m[2], idx:idx}); });
+  lines.forEach(function(ln,idx){ var m=ln.match(CODE_RE); if(m) starts.push({code:(m[1]||m[2]).replace(/\s+/g,'').toUpperCase(), rest:(m[3]||''), idx:idx}); });
   var codes={}, labels={}, subitems={}, order=[];
   starts.forEach(function(row, ri){
     var code=row.code;
@@ -23008,6 +23009,52 @@ function pchomeParseStatement(text){
     codes[code]=val; labels[code]=label||PCHOME_D_LABELS[code]||''; if(order.indexOf(code)<0) order.push(code);
   });
   return { codes:codes, labels:labels, subitems:subitems, order:order, period:period };
+}
+// 對帳單 .htm 上傳解析（真實檔權威來源；比貼上文字可靠——括號在複製時常掉）。輸出格式與 pchomeParseStatement 相容 + 多回 untax/tax（交叉檢查）。
+//   結構（見 docs §4）：單一 table.table_box；代號在 span.s_parenthesis（同 class 也用在「含稅/寄倉商品」等非代號 → 用 ^[A-F]\d{0,2}$ 篩）；
+//   金額＝該列最後一個 td；(A1)/(A2) 用 rowspan、續列無代號 span 累加到上一子碼；未稅/稅額/期間在 table 外（ul.right / ul.info_box）。
+function pchomeParseStatementHtm(html){
+  var doc; try{ doc=new DOMParser().parseFromString(String(html||''),'text/html'); }catch(e){ return {error:'HTML 無法解析：'+(e&&e.message||e)}; }
+  var table=doc.querySelector('table.table_box');
+  if(!table) return {error:'找不到 <table class="table_box">——這可能不是 PChome 對帳單 .htm，或格式已改版。'};
+  var CODE=/^[A-F]\d{0,2}$/;
+  var toNum=function(t){ t=String(t==null?'':t).replace(/,/g,'').trim(); if(t===''||/^[-—─]+$/.test(t)) return null; var n=Number(t); return isFinite(n)?n:NaN; };
+  var codes={}, labels={}, subitems={}, order={}, orderArr=[], lastSub=null;
+  var rows=[].slice.call(table.querySelectorAll('tbody tr'));
+  rows.forEach(function(tr){
+    var tds=[].slice.call(tr.children).filter(function(el){return el.tagName==='TD';});
+    if(!tds.length) return;
+    var amt=toNum(tds[tds.length-1].textContent);
+    var codeEl=[].slice.call(tr.querySelectorAll('span.s_parenthesis')).filter(function(s){return CODE.test(s.textContent.trim());})[0];
+    if(codeEl){
+      var code=codeEl.textContent.trim();
+      var codeTd=codeEl.closest('td');
+      var codeLabel=codeTd?codeTd.textContent.replace(code,'').trim():'';
+      // 子標籤（一般轉單/寄倉…）＝金額前一格且非代號格
+      var subLabel=(tds.length>=2 && tds[tds.length-2]!==codeTd)?tds[tds.length-2].textContent.trim():'';
+      var v=(amt==null?0:amt);
+      codes[code]=(codes[code]||0)+v; if(!order[code]){order[code]=1;orderArr.push(code);}
+      labels[code]=labels[code]||codeLabel||PCHOME_D_LABELS[code]||'';
+      if(code==='A1'||code==='A2'){ lastSub=code; subitems[code]=[{label:subLabel||codeLabel, v:v}]; }
+      else lastSub=null;
+    } else if(lastSub){   // 續列（rowspan 下的寄倉訂單/寄倉客退商品）：無代號 → 累加到上一個 A1/A2
+      var sl=(tds.length>=2)?tds[tds.length-2].textContent.trim():'';
+      var vv=(amt==null?0:amt);
+      codes[lastSub]=(codes[lastSub]||0)+vv;
+      (subitems[lastSub]=subitems[lastSub]||[]).push({label:sl, v:vv});
+    }
+  });
+  // 表格外：未稅 / 稅額（ul.right），對帳日期區間（ul.info_box）
+  var untax=null, tax=null;
+  [].slice.call(doc.querySelectorAll('.header .right li, ul.right li')).forEach(function(li){ var t=li.textContent||'', m;
+    if(untax==null && /未稅/.test(t) && (m=t.match(/(-?[\d,]+)\s*$/))) untax=toNum(m[1]);
+    else if(tax==null && /稅額/.test(t) && (m=t.match(/(-?[\d,]+)\s*$/))) tax=toNum(m[1]); });
+  var period=null;
+  [].slice.call(doc.querySelectorAll('.info_box li, li')).forEach(function(li){ if(period) return; var t=li.textContent||'';
+    var pm=t.match(/(\d{4}\/\d{1,2}\/\d{1,2})\s*[~～\-－]\s*(\d{4}\/\d{1,2}\/\d{1,2})/);
+    if(pm && /區間/.test(t)) period={start:pm[1],end:pm[2]}; });
+  if(!Object.keys(codes).length) return {error:'table.table_box 內沒有解析到任何代號（A/B/C/D/F…）——格式可能已改版。'};
+  return { codes:codes, labels:labels, subitems:subitems, order:orderArr, period:period, untax:untax, tax:tax, source:'htm' };
 }
 
 // ── 對帳資料 store（月對帳）：主鍵＝帳務月（YYYY-MM，pchomeBillingMonth 正規化），重傳整份覆蓋、絕不 append（docs §4 最易錯）。{ 帳務月: {帳務月, 期間, segments, 匯出時間, 上傳時間, ts} } ──
@@ -23382,8 +23429,12 @@ function pchomeReconManualCard(shop, latest, csvHuo, csvFees){
   var srcTag=af.來源==='paste'?'<span style="color:#059669;font-size:11px">（目前值來自貼上解析）</span>':(af.更新時間?'<span style="color:#9ca3af;font-size:11px">（手動輸入）</span>':'');
   return '<div style="border:1px solid #eee;border-radius:10px;padding:12px;margin-top:12px">'
     +'<div style="font-weight:600;margin-bottom:2px">對帳單數字（頁面 (A)(B)(C)(D)(F)）'+srcTag+'</div>'
-    +'<div style="font-size:11px;color:#6b7280;margin-bottom:8px">把 PChome <b>對帳單頁面表格整塊複製</b>貼進下面 → 按「解析」自動填入 (A)-(F) 與 (D) 子項（含 CSV 沒有的簡訊費等）；確認無誤再按「儲存」。「---」視為 0。含稅。</div>'
-    +'<textarea id="pchome-paste-'+shop+'" rows="4" placeholder="從對帳單頁面整塊複製貼上（含「編號 項目 應付金額…」那幾列與「本期(…~…)」）" style="width:100%;border:1px solid #d1d5db;border-radius:5px;padding:6px 8px;font-size:12px;box-sizing:border-box;font-family:monospace"></textarea>'
+    +'<div style="font-size:11px;color:#6b7280;margin-bottom:8px">建議<b>上傳對帳單 .htm</b>（最可靠）；或把對帳單頁面表格整塊複製貼下面按「解析」。兩者都只<b>預覽</b>、確認無誤再按「儲存」才寫入。「---」視為 0。含稅。</div>'
+    +'<div style="margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+      +'<label class="pf-pchome-btn" style="cursor:pointer;display:inline-block">⬆ 上傳對帳單 .htm<input type="file" accept=".htm,.html" style="display:none" onchange="pchomeStatementHtmFile(\''+shop+'\',this)"></label>'
+      +'<span style="font-size:11px;color:#9ca3af">PChome 對帳單頁面「另存 .htm」上傳 → 自動解析 (A)-(F)＋(D) 明細＋期間，並跑期別／未稅稅額／(F) 驗算檢查</span>'
+    +'</div>'
+    +'<textarea id="pchome-paste-'+shop+'" rows="3" placeholder="（備案）從對帳單頁面整塊複製貼上（含「編號 項目 應付金額…」那幾列與「本期(…~…)」）" style="width:100%;border:1px solid #d1d5db;border-radius:5px;padding:6px 8px;font-size:12px;box-sizing:border-box;font-family:monospace"></textarea>'
     +'<div style="margin:6px 0 10px;display:flex;gap:10px;align-items:center"><button class="pf-pchome-btn" onclick="pchomeReconParsePaste(\''+shop+'\')">解析</button><span style="font-size:11px;color:#9ca3af">解析只預覽、不寫入；確認後按下方「儲存」才存</span></div>'
     +'<div id="pchome-paste-preview-'+shop+'"></div>'
     +'<div style="font-size:11px;color:#6b7280;margin:10px 0 4px">解析後可在此修正（留空＝未填、不猜）：</div>'
@@ -23394,15 +23445,37 @@ function pchomeReconManualCard(shop, latest, csvHuo, csvFees){
     +'<div style="margin-top:8px;display:flex;gap:10px;align-items:center"><button class="pf-pchome-btn" onclick="pchomeReconManualSave(\''+shop+'\')">儲存對帳單數字</button><span id="pchome-af-msg-'+shop+'" style="font-size:12px"></span></div>'
     +chipHtml+'</div>';
 }
+// 上傳/貼上解析的五道檢查（預覽與存檔共用同一份判斷，單一真相）：
+//   1. 期間一致性（對帳單 vs 編輯帳務月 vs CSV 對帳明細期間）— 不合 = 硬擋（9/21 錯期寫入事故的直接防線）
+//   3. 未稅＋稅額 === (A) — 免費的解析正確性驗證
+//   4. (F) 驗算 (A)−(B)−(C)−(D) === (F) — 不合最可能解析錯
+function pchomeStatementChecks(shop, parsed){
+  var all=pchomeLoadRecon(), months=Object.keys(all).sort();
+  var key=months.length?months[months.length-1]:'';   // 月對帳頁編輯的就是最新帳務月
+  var c=(parsed&&parsed.codes)||{}, out={key:key};
+  var parsedBM=(parsed&&parsed.period)?pchomeBillingMonth(parsed.period.start):null;   // 2. key 一律走既有正規化函式
+  var csvPeriod=(all[key]&&all[key].期間)||'';
+  var csvBM=csvPeriod?pchomeBillingMonth(csvPeriod):'';
+  out.parsedBM=parsedBM; out.csvBM=csvBM; out.csvPeriod=csvPeriod; out.periodStr=(parsed&&parsed.period)?(parsed.period.start+'~'+parsed.period.end):'';
+  if(!parsed||!parsed.period){ out.periodOk=false; out.periodMsg='未偵測到對帳單期間（區間行）→ 無法比對期別，擋下。請確認上傳的是 PChome 對帳單 .htm。'; }
+  else if(key && parsedBM!==key){ out.periodOk=false; out.periodMsg='對帳單期別 '+out.periodStr+'（帳務月 '+parsedBM+'）≠ 目前編輯帳務月 '+key+'（可能選錯期或傳錯檔）'; }
+  else if(csvBM && parsedBM!==csvBM){ out.periodOk=false; out.periodMsg='對帳單期別（帳務月 '+parsedBM+'）≠ CSV 對帳明細期間 '+csvPeriod+'（帳務月 '+csvBM+'）'; }
+  else { out.periodOk=true; out.periodMsg='對帳單期別 '+out.periodStr+'（帳務月 '+parsedBM+'）＝ 編輯帳務月 '+key+'＝CSV 期間，相符'; }
+  if(parsed&&parsed.untax!=null&&parsed.tax!=null&&c.A!=null){ var s=parsed.untax+parsed.tax; out.taxSum=s; out.taxOk=Math.abs(s-c.A)<=0.5;
+    out.taxMsg='未稅 '+pchomeMoney(parsed.untax)+' ＋ 稅額 '+pchomeMoney(parsed.tax)+' ＝ '+pchomeMoney(s)+(out.taxOk?' ＝ (A) '+pchomeMoney(c.A):' ≠ (A) '+pchomeMoney(c.A)+'（差 '+pchomeMoney(s-c.A)+'）'); }
+  else out.taxOk=null;
+  if(c.A!=null&&c.B!=null&&c.C!=null&&c.D!=null&&c.F!=null){ var fc=c.A-c.B-c.C-c.D; out.fCalc=fc; out.fOk=Math.abs(fc-c.F)<=0.5;
+    out.fMsg='(A)−(B)−(C)−(D) ＝ '+pchomeMoney(fc)+(out.fOk?' ＝ (F) '+pchomeMoney(c.F):' ≠ (F) '+pchomeMoney(c.F)+'（差 '+pchomeMoney(c.F-fc)+'）'); }
+  else out.fOk=null;
+  return out;
+}
 function pchomeReconPastePreviewHTML(shop, parsed){
-  var all=pchomeLoadRecon(), months=Object.keys(all).sort(), key=months.length?months[months.length-1]:'';
   var c=parsed.codes;
-  var pchk;
-  if(parsed.period){ var pm=pchomeBillingMonth(parsed.period.start);
-    pchk=(key && pm!==key)
-      ? '<div style="color:#dc2626;font-weight:700">⚠ 對帳單期別 '+_momoEsc(parsed.period.start+'~'+parsed.period.end)+'（帳務月 '+_momoEsc(pm)+'）與目前 CSV 帳務月 <b>'+_momoEsc(key)+'</b> 不同——可能貼錯期別，請確認再存。</div>'
-      : '<div style="color:#059669">✓ 對帳單期別 '+_momoEsc(parsed.period.start+'~'+parsed.period.end)+'（帳務月 '+_momoEsc(pm)+'）與 CSV 帳務月相符。</div>';
-  } else pchk='<div style="color:#d97706">⚠ 未偵測到「本期(…~…)」期別行，無法比對期別（不影響數值解析）。</div>';
+  var ck=pchomeStatementChecks(shop, parsed);
+  var line=function(ok,msg){ var col=ok===true?'#059669':(ok===false?'#dc2626':'#d97706'), ic=ok===true?'✓':(ok===false?'⚠':'•'); return '<div style="color:'+col+(ok===false?';font-weight:700':'')+'">'+ic+' '+_momoEsc(msg)+'</div>'; };
+  var pchk=line(ck.periodOk, ck.periodMsg);
+  var taxChk=(ck.taxOk!=null)?line(ck.taxOk, '未稅＋稅額 交叉檢查：'+ck.taxMsg):'';
+  var fPrev=(ck.fOk!=null)?line(ck.fOk, '(F) 驗算：'+ck.fMsg):'';
   var mains=['A','B','C','D','F'].map(function(code){ var has=c[code]!=null; return '<span style="margin-right:14px">('+code+') '+(has?'<b>'+pchomeMoney(c[code])+'</b>':'<span style="color:#dc2626">未解析到</span>')+'</span>'; }).join('');
   // (A1)/(A2) 轉單/寄倉拆分（日後賣場營收拆分依據）
   var subHtml='';
@@ -23412,7 +23485,8 @@ function pchomeReconPastePreviewHTML(shop, parsed){
   var dsum=dcodes.reduce(function(t,code){ return t+(Number(c[code])||0); },0);
   return '<div style="border:1px dashed #93c5fd;background:#f8fbff;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.7">'
     +'<div style="font-weight:600;margin-bottom:4px">解析結果（預覽，尚未寫入——確認後按「儲存對帳單數字」）</div>'
-    +pchk
+    +pchk+taxChk+fPrev
+    +(ck.periodOk===false?'<div style="color:#dc2626;font-weight:700;margin-top:2px">↑ 期別不符，按「儲存」會被擋下（防錯期覆蓋）。</div>':'')
     +'<div style="margin-top:6px">主值：'+mains+'</div>'
     +subHtml
     +'<div style="margin-top:6px"><b>(D) 子項</b>（'+dcodes.length+' 項，合計 '+pchomeMoney(dsum)+'）<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px"><tbody>'+drows+'</tbody></table></div>'
@@ -23427,6 +23501,22 @@ function pchomeReconParsePaste(shop){
   ['A','B','C','D','F'].forEach(function(code){ var el=document.getElementById('pchome-af-'+code+'-'+shop); if(el && parsed.codes[code]!=null) el.value=parsed.codes[code]; });   // 解析後填入可修正欄（未解析到的不動、不猜）
   if(prevBox) prevBox.innerHTML=pchomeReconPastePreviewHTML(shop, parsed);
 }
+// 對帳單 .htm 上傳 → 解析 → 填入 (A)-(F) 欄 + 預覽（含五道檢查）；只暫存不寫入，按「儲存」才落地（沿用 pchomeReconManualSave 的期別硬擋 + F confirm + 既有覆蓋/同步保護）。
+function pchomeStatementHtmFile(shop, inputEl){
+  var f=inputEl&&inputEl.files&&inputEl.files[0]; if(!f) return;
+  var prevBox=document.getElementById('pchome-paste-preview-'+shop);
+  var rd=new FileReader();
+  rd.onload=function(){
+    var parsed=pchomeParseStatementHtm(rd.result);
+    if(parsed.error){ if(prevBox) prevBox.innerHTML='<div style="color:#dc2626;font-size:12px">⚠ '+_momoEsc(parsed.error)+'</div>'; _pchomePastePreview[shop]=null; try{inputEl.value='';}catch(e){} return; }
+    _pchomePastePreview[shop]=parsed;
+    ['A','B','C','D','F'].forEach(function(code){ var el=document.getElementById('pchome-af-'+code+'-'+shop); if(el && parsed.codes[code]!=null) el.value=parsed.codes[code]; });
+    if(prevBox) prevBox.innerHTML=pchomeReconPastePreviewHTML(shop, parsed);
+    try{inputEl.value='';}catch(e){}   // 允許重傳同一檔
+  };
+  rd.onerror=function(){ if(prevBox) prevBox.innerHTML='<div style="color:#dc2626;font-size:12px">讀取檔案失敗，請重試。</div>'; try{inputEl.value='';}catch(e){} };
+  rd.readAsText(f,'utf-8');
+}
 function pchomeReconManualSave(shop){
   var all=pchomeLoadRecon(); var months=Object.keys(all).sort();
   var msg=document.getElementById('pchome-af-msg-'+shop);
@@ -23438,6 +23528,12 @@ function pchomeReconManualSave(shop){
   var bad=[['A',A],['B',B],['C',C],['D',D],['F',F]].filter(function(p){ return p[1]!==null && isNaN(p[1]); });
   if(bad.length){ if(msg){ msg.textContent='('+bad.map(function(p){return p[0];}).join('、')+') 要填數字或留空。'; msg.style.color='#dc2626'; } return; }
   var pv=_pchomePastePreview[shop]||null;
+  // ── 防護 #1 期間一致性（硬擋）：解析出的期間 vs 編輯帳務月 vs CSV 對帳明細期間，任一不合＝擋在寫入前（9/21 錯期覆蓋事故防線）。
+  if(pv && pv.period){ var ck1=pchomeStatementChecks(shop, pv);
+    if(!ck1.periodOk){ if(msg){ msg.innerHTML='⚠ 期別不符，已擋下未寫入：'+_momoEsc(ck1.periodMsg)+'。請確認沒選錯期或傳錯檔。'; msg.style.color='#dc2626'; } return; } }
+  // ── 防護 #4 (F) 驗算（用即將寫入的輸入值；不符最可能解析錯）：紅字已在預覽，寫入前再 confirm() 二次攔截（照 momo 慣例、不無聲寫入）。
+  if(A!=null&&B!=null&&C!=null&&D!=null&&F!=null){ var fc=A-B-C-D;
+    if(Math.abs(fc-F)>0.5 && !confirm('(F) 驗算不符：(A)−(B)−(C)−(D) = '+pchomeMoney(fc)+'，但 (F) = '+pchomeMoney(F)+'（差 '+pchomeMoney(F-fc)+'）。\n最可能是解析或輸入有誤。確定仍要寫入嗎？')){ if(msg){ msg.textContent='已取消寫入（(F) 驗算不符）。'; msg.style.color='#d97706'; } return; } }
   var obj={A:A,B:B,C:C,D:D,F:F,備註:String(note||''),更新時間:Date.now()};
   var mismatch=false;
   if(pv){   // 這次有貼上解析 → 帶入 (D) 子項明細 + (A1/A2) 轉單寄倉拆分 + 期別 + 來源
@@ -24118,6 +24214,6 @@ function pchomeExportExcel(shop){
     XLSX.writeFile(wb, 'PChome_'+safe+'_'+(key||'')+'_總表.xlsx');
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
-Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeListingFile, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc,
+Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeListingFile, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeStatementHtmFile, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc,
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel });
