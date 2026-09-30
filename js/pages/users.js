@@ -2,6 +2,30 @@
 const App = window.App;
 const { Store, escapeHtml, showToast, hashPassword, computeScore, OFFICE_CONFIG, OFFICE_FEATURES } = window;
 
+// 姓名／帳號互撞規則（之後要靠姓名與 username 認人，兩者在全部帳號間都不能混淆）。
+//   比對一律「去頭尾空白＋不分大小寫」；「其他帳號」用原本的 username 排除自己，
+//   所以自己的姓名等於自己的 username 是允許的。
+//   selfUsername：編輯時＝原本的 username；新增時＝null（此時才檢查新 username 撞別人姓名）。
+//   checkName：編輯時只有姓名真的改了才檢查，避免舊資料或系統自動建的帳號（如「陳大明」）
+//   本來就重名、讓整個帳號連改權限都存不了。
+//   回傳錯誤訊息；沒撞到回 null。
+const normId = s => String(s || '').trim().toLowerCase();
+function userIdentityClash(list, { name, username, selfUsername, checkName }) {
+  const others = list.filter(x => x.username !== selfUsername);
+  if (checkName) {
+    const n = normId(name);
+    const sameName = others.find(x => normId(x.name) === n);
+    if (sameName) return `姓名「${name}」已經是帳號 ${sameName.username} 的姓名`;
+    if (others.some(x => normId(x.username) === n)) return `姓名「${name}」已經是別人的登入帳號`;
+  }
+  if (selfUsername == null) {
+    const u = normId(username);
+    const nameOwner = others.find(x => normId(x.name) === u);
+    if (nameOwner) return `帳號「${username}」已經是帳號 ${nameOwner.username} 的姓名`;
+  }
+  return null;
+}
+
 Object.assign(App, {
   viewUsers() {
     const role = this.currentUser.role;
@@ -179,6 +203,12 @@ Object.assign(App, {
         if (!isEdit && list.some(x => x.username.toLowerCase() === usernameVal.toLowerCase())) {
           showToast('帳號已存在（不分大小寫）', 'error'); return false;
         }
+        const clash = userIdentityClash(list, {
+          name, username: usernameVal,
+          selfUsername: isEdit ? user.username : null,
+          checkName: !isEdit || normId(name) !== normId(user.name),
+        });
+        if (clash) { showToast(clash, 'error', 4000); return false; }
         if (isEdit) {
           const i = list.findIndex(x => x.username === user.username);
           list[i].name = name;
