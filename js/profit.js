@@ -44,6 +44,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
             <button class="stab" style="font-size:15px" onclick="setMomoShop('乙配',this)"><span class="sdot" style="background:#fa541c"></span>乙配</button>
             <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+麻吉',this)"><span class="sdot" style="background:#ff7a45"></span>MO+好麻吉</button>
             <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+森之旅',this)"><span class="sdot" style="background:#ffa940"></span>MO+森之旅</button>
+            <button class="stab" style="font-size:15px" onclick="setMomoShop('MO+玩樂',this)"><span class="sdot" style="background:#34d399"></span>MO+玩樂</button>
           </div>
         </div>
         <div class="pf-tabgrp">
@@ -279,6 +280,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
   <div id="momo-content-乙配" class="shop-content" style="padding:16px 20px"></div>
   <div id="momo-content-MO+麻吉" class="shop-content" style="padding:16px 20px"></div>
   <div id="momo-content-MO+森之旅" class="shop-content" style="padding:16px 20px"></div>
+  <div id="momo-content-MO+玩樂" class="shop-content" style="padding:16px 20px"></div>
   <div id="coupang-content-總表" class="shop-content" style="padding:16px 20px"></div>
   <div id="coupang-content-麻吉" class="shop-content" style="padding:16px 20px"></div>
   <div id="coupang-content-露營館" class="shop-content" style="padding:16px 20px"></div>
@@ -9266,7 +9268,10 @@ const KPI_GROUPS=[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ship},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ship)/d.rev:0},
     ]},
-  {key:'momo',title:'MOMO',color:'#3a7bd5',shops:['MOMO-甲配','MOMO-寄倉','mo+0號店(好麻吉)','mo+1號店(森之旅)'],
+  {key:'momo',title:'MOMO',color:'#3a7bd5',shops:['MOMO-甲配','MOMO-寄倉','mo+0號店(好麻吉)','mo+1號店(森之旅)','mo+2號店(玩樂)'],
+    // shopSince：這家店從這個月起才算進填寫進度／寄倉運費共用格（見 _kpiFillSlots、_kpiFieldMergeStatus）。
+    //   之前的月份數字照樣可以填、合計照樣算，只是不列缺格、也不參與共用格攤提（歷史月份結果不變）。
+    shopSince:{'mo+2號店(玩樂)':'2026-10'},
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收(進價稅)'},{k:'cost',l:'商品成本'},{k:'ret',l:'退貨金額'},{k:'ship',l:'寄倉運費'},{k:'misc',l:'各項費用'},{k:'material',l:'耗材'},{k:'receivable',l:'應收帳款'}],
     formula:[
       {k:'actualRev',l:'實際營收',fmt:'money',calc:d=>d.rev-d.ret},
@@ -9281,7 +9286,8 @@ const KPI_GROUPS=[
     //   甲配／露營館這個欄位不適用（灰底不能編輯）；寄倉維持自己獨立的數字。
     fieldMerge:{
       ship:{
-        mergeGroups:[{shops:['mo+0號店(好麻吉)','mo+1號店(森之旅)']}],
+        // ⚠ 好麻吉必須維持第一個：mergeKey 用 g.shops[0]，換了既有 kpiFieldMerges 全部對不上。
+        mergeGroups:[{shops:['mo+0號店(好麻吉)','mo+1號店(森之旅)','mo+2號店(玩樂)']}],
         notApplicable:['MOMO-甲配'],
         // 攤提分母：這一筆共用的錢按合併通路的哪個欄位比例分。
         //   'qty'（訂單數）是 MOMO 業務負責人的決定 —— 運費跟件數走，不跟金額走。
@@ -9335,6 +9341,7 @@ const KPI_SHOP_LABELS={
   'MOMO-寄倉':'乙配',
   'mo+0號店(好麻吉)':'MO+好麻吉',
   'mo+1號店(森之旅)':'MO+森之旅',
+  'mo+2號店(玩樂)':'MO+玩樂',
 };
 function _kpiShopLabel(shop){return KPI_SHOP_LABELS[shop]||shop;}
 function getOrCreateKpiRow(month){
@@ -9596,8 +9603,11 @@ function _kpiFillSlots(row,group){
   if(group.since&&row&&row.month&&row.month<group.since)return slots;
   const box=(row&&row[group.key])||{};
   group.shops.forEach(shop=>{
+    // shopSince：這家店在 shopSince 之前的月份 0 格（只影響進度計算與共用格生效；
+    //   不影響能不能填、合計算不算）。
+    if(group.shopSince&&group.shopSince[shop]&&row&&row.month&&row.month<group.shopSince[shop])return;
     group.manual.forEach(f=>{
-      const st=_kpiFieldMergeStatus(group,f.k,shop);
+      const st=_kpiFieldMergeStatus(group,f.k,shop,row.month);
       if(st&&st.type==='na')return;
       if(st&&st.type==='merged'){
         if(seen.has(st.mergeKey))return;seen.add(st.mergeKey);
@@ -9844,8 +9854,8 @@ function _kpiFillCols(group){
   return ord.map(k=>group.manual.find(f=>f.k===k));
 }
 // 一格的種類：cell 一般｜merge 合併欄位領頭店（存總額）｜share 合併欄位其他店（唯讀份額）｜na 不適用｜common 共同費用
-function _kpiFillCell(group,shop,f){
-  const st=_kpiFieldMergeStatus(group,f.k,shop);
+function _kpiFillCell(group,shop,f,month){
+  const st=_kpiFieldMergeStatus(group,f.k,shop,month);
   if(st&&st.type==='na')return{kind:'na'};
   if(st&&st.type==='merged'){
     if(shop!==st.shops[0])return{kind:'share',st};
@@ -9860,7 +9870,7 @@ function _kpiFillCur(row,cell){
   const sd=(row[cell.segs[0]]||{})[cell.segs[1]]||{};
   return{v:sd[cell.segs[2]],formula:sd[cell.segs[2]+'Formula']};
 }
-// 「好麻吉+森之旅共用，按訂單數攤」：店名取括號內的短名。
+// 「好麻吉+森之旅(+玩樂)共用，按訂單數攤」：店名取括號內的短名。
 function _kpiMergeHint(group,st,field){
   const names=st.shops.map(s=>{const m=/\(([^)]+)\)/.exec(s);return m?m[1]:s;}).join('+');
   const by=group.fieldMerge?.[field]?.shareBy;
@@ -9941,13 +9951,13 @@ function _kpiFillHtml(row){
   const body=group.shops.map((shop,ri)=>{
     const d=_kpiShopCalc(row,group,shop);
     const cells=cols.map((f,ci)=>{
-      const cell=_kpiFillCell(group,shop,f);
+      const cell=_kpiFillCell(group,shop,f,month);
       if(cell.kind==='na')return `<td class="km-f-na" title="這個通路不適用${f.l}">—</td>`;
       // 合併欄位的小字要短：欄很窄，長句會折成三四行把整列撐高。完整說明放 title（滑鼠停上去看）。
       if(cell.kind==='share')return `<td class="km-f-share" title="${_kpiMergeHint(group,cell.st,f.k)}（這一格是攤到的份額，不能直接改）"><div class="km-shareval">${_kpiMoney(d[f.k])}</div><div class="km-sublabel">按訂單數攤</div></td>`;
       // 小字一律放在輸入框【下方】：放上方會把框往下推，跟同一列其他格的框線對不齊。
       const hint=cell.kind==='merge'?`<div class="km-sublabel km-sublabel-hint">MO+共用・填總額</div>`:'';
-      return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填兩家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
+      return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填${['','一','兩','三','四'][cell.st.shops.length]||cell.st.shops.length}家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
     }).join('');
     const pure=Number(d[pureKey])||0;
     const rate=d.pureRate!=null?Number(d.pureRate):(d.rev>0?pure/d.rev:0);
@@ -9971,7 +9981,7 @@ function _kpiFillHtml(row){
   const subCells=cols.map(f=>{
     let sum=0,any=false;const seen=new Set();
     group.shops.forEach(shop=>{
-      const cell=_kpiFillCell(group,shop,f);
+      const cell=_kpiFillCell(group,shop,f,month);
       if(cell.kind==='na'||cell.kind==='share')return;
       const k=JSON.stringify(cell.segs);if(seen.has(k))return;seen.add(k);
       const v=_kpiFillCur(row,cell).v;if(v!=null){any=true;sum+=Number(v)||0;}
@@ -10135,7 +10145,7 @@ function kpiFillPaste(e,inp){
   const cols=_kpiFillCols(group);
   const r0=+inp.dataset.r,c0=+inp.dataset.c;
   const at=(r,c)=>{
-    if(r<group.shops.length)return c<cols.length?{cell:_kpiFillCell(group,group.shops[r],cols[c]),label:_kpiShopLabel(group.shops[r])+' '+cols[c].l}:null;
+    if(r<group.shops.length)return c<cols.length?{cell:_kpiFillCell(group,group.shops[r],cols[c],month),label:_kpiShopLabel(group.shops[r])+' '+cols[c].l}:null;
     if(r===group.shops.length&&group.commonCostLabel&&c===0)return{cell:{kind:'common',segs:[group.key+'Common']},label:'共同費用'};
     return null;
   };
@@ -10220,7 +10230,7 @@ function kpiFillDownloadExcel(){
       const d=_kpiShopCalc(row,g,shop);
       const aov=_kpiAovOf(d,g);
       const vals=cols.map(f=>{
-        const cell=_kpiFillCell(g,shop,f);
+        const cell=_kpiFillCell(g,shop,f,row.month);
         if(cell.kind==='na')return '—';
         if(cell.kind==='share')return Number(d[f.k])||0;
         const v=_kpiFillCur(row,cell).v;
@@ -10242,7 +10252,7 @@ function kpiFillDownloadExcel(){
     const sums=cols.map(f=>{
       let sum=0,any=false;const seen=new Set();
       g.shops.forEach(shop=>{
-        const cell=_kpiFillCell(g,shop,f);
+        const cell=_kpiFillCell(g,shop,f,row.month);
         if(cell.kind==='na'||cell.kind==='share')return;
         const k=JSON.stringify(cell.segs);if(seen.has(k))return;seen.add(k);
         const v=_kpiFillCur(row,cell).v;if(v!=null){any=true;sum+=Number(v)||0;}
@@ -10277,12 +10287,22 @@ function _kpiMonthViewHtml(){
 }
 // 找出某個賣場在某個欄位是否被合併（跟其他賣場共用一格）或不適用（例如 MOMO 寄倉運費：
 // 好麻吉/森之旅共用一格、甲配/露營館不適用），回傳 null 代表這個賣場照正常方式獨立編輯。
-function _kpiFieldMergeStatus(group,field,shop){
+// month 必傳：共用格成員依月份決定（group.shopSince）。玩樂 2026-10 前不在共用格裡，
+//   否則它歷史月訂單數全空 → _kpiMergeShare「任一家缺值整筆不攤」→ 好麻吉/森之旅歷史寄倉運費全部沒扣。
+//   mergeKey 仍用原始 g.shops[0]（好麻吉），與生效成員無關。
+function _kpiFieldMergeStatus(group,field,shop,month){
+  if(typeof month!=='string'||!month){
+    console.error('_kpiFieldMergeStatus: 缺少 month 參數',group&&group.key,field,shop);
+    throw new Error('_kpiFieldMergeStatus: month is required');
+  }
   const cfg=group.fieldMerge?.[field];
   if(!cfg)return null;
+  const since=group.shopSince||{};
+  const active=s=>!since[s]||month>=since[s];
+  if(!active(shop))return{type:'na'};
   if(cfg.notApplicable?.includes(shop))return{type:'na'};
   const g=cfg.mergeGroups?.find(mg=>mg.shops.includes(shop));
-  if(g)return{type:'merged',shops:g.shops,mergeKey:group.key+':'+field+':'+g.shops[0]};
+  if(g)return{type:'merged',shops:g.shops.filter(active),mergeKey:group.key+':'+field+':'+g.shops[0]};
   return null;
 }
 // 合併／不適用欄位歸零：某個通路在某個欄位是合併儲存格或不適用時（例如 MOMO 寄倉運費：
@@ -10331,7 +10351,7 @@ function _kpiRawForCalc(raw,group,shop,row){
   if(!group.fieldMerge)return raw;
   const patch={};
   Object.keys(group.fieldMerge).forEach(f=>{
-    const st=_kpiFieldMergeStatus(group,f,shop);
+    const st=_kpiFieldMergeStatus(group,f,shop,row.month);
     if(!st)return;
     patch[f]=st.type==='merged'?_kpiMergeShare(row,group,f,st,shop):0;
   });
@@ -11637,7 +11657,7 @@ function restoreProfitView(){
   _restoreShopeeInline();   // shopee 或未設定 → 蝦皮還原（逐字不變）
 }
 
-const MOMO_SHOPS=['總表','甲配','乙配','MO+麻吉','MO+森之旅'];
+const MOMO_SHOPS=['總表','甲配','乙配','MO+麻吉','MO+森之旅','MO+玩樂'];
 let curMomoShop=null;
 
 const _cupPeriod={};
@@ -12247,7 +12267,7 @@ window.addEventListener('momoReconcileReady',()=>{
 //   刪除指令印出來給人工確認一致後再貼。順序：部署後隔 24h（快取淘汰）→ 跑此函式 → 驗證✅ → 才刪舊欄位。
 async function momoMigrateProductsToCollection(){
   if(!window.__cloudMomo || !window.__cloudProfit){ console.error('[遷移] 雲端層未就緒，請重整'); return; }
-  const shops=['甲配','乙配','MO+麻吉','MO+森之旅'];
+  const shops=['甲配','乙配','MO+麻吉','MO+森之旅','MO+玩樂'];
   const report=[];
   let appProfit={};
   try{ const snap=await window.__cloudProfit.getDoc(); appProfit=snap.exists()?(snap.data()||{}):{}; }
@@ -18011,7 +18031,7 @@ function momoCleanDirtyPeriodKeys(){
    兩道 guard：① 檔名 YYMM→srcCode 判不出 fail loud（不猜當月，否則來源鍵錯、冪等失效）；
               ② 擋 E001／傳錯檔——需有「訂單明細」分頁 + 第 3 列 header 為對帳明細格式。*/
 let _moPlusUpFile=null, _moPlusUpParsed=null, _moPlusUpPlan=null;
-function momoIsMoPlus(shop){ return shop==='MO+麻吉'||shop==='MO+森之旅'; }
+function momoIsMoPlus(shop){ return shop==='MO+麻吉'||shop==='MO+森之旅'||shop==='MO+玩樂'; }
 // ⚠ 顯示名間接層（勿把內部 key 一起改）：'MO+麻吉' 這個字串「同時是資料 key」——散在 localStorage key
 //   (ec_momo_products|MO+麻吉 / ec_momo_moplus_origins|MO+麻吉|src)、firebase.js MOMO_SHOP_DOCID 的鍵
 //   (值 mo_maji 才是雲端 docid)、DOM id (momo-content-/momo-tbl-MO+麻吉)、MOMO_SHOPS/_MOMO_OV_* 與
@@ -18039,7 +18059,7 @@ function momoRenderMoPlusUpload(shop){
   c.innerHTML=`
     <div style="max-width:820px">
       <div class="mm-note" style="background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.7">
-        上傳 <b>mo+${shop==='MO+麻吉'?'好麻吉':'森之旅'}對帳明細_YYMM.xls</b>（「訂單明細」分頁）。<b>可一次選多個月份</b>批次上傳。<br>
+        上傳 <b>mo+${({'MO+麻吉':'好麻吉','MO+森之旅':'森之旅','MO+玩樂':'玩樂'})[shop]}對帳明細_YYMM.xls</b>（「訂單明細」分頁）。<b>可一次選多個月份</b>批次上傳。<br>
         <span class="mm-muted">代收代付逐筆精算：期別依<b>訂單號碼下單日</b>（一份檔會跨多個期別，跨月尾巴以本檔月份為來源<b>累加</b>不覆蓋）。逐列 A+B−C−D 對<b>實際入帳金額</b>驗證。⚠ 對帳明細與 E001 副檔名相同——選錯檔會被擋下。</span>
       </div>
       <div class="mm-uprow">
@@ -18052,7 +18072,7 @@ function momoRenderMoPlusUpload(shop){
 
       <div style="border-top:1px dashed #e5e7eb;margin:22px 0 14px"></div>
       <div class="mm-note" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:12px;line-height:1.7;color:#92400e">
-        上傳 <b>E001_mo+${shop==='MO+麻吉'?'好麻吉':'森之旅'}訂單_YYMM.xls</b> ＝<b>未結算銷量</b>（每週更新用）。<br>
+        上傳 <b>E001_mo+${({'MO+麻吉':'好麻吉','MO+森之旅':'森之旅','MO+玩樂':'玩樂'})[shop]}訂單_YYMM.xls</b> ＝<b>未結算銷量</b>（每週更新用）。<br>
         <span class="mm-muted">只取「配送結束」列的<b>銷量</b>，不碰金額（營收/毛利權威一律對帳明細）。<b>某期別一旦有對帳明細就自動由結算取代、不再顯示。</b>期別依訂編下單日、與對帳明細同基準。存後按<b>同步雲端</b>，其他人開總表也看得到未結算數字（標<b>估算·未對帳</b>）。</span>
       </div>
       <div class="mm-uprow">
@@ -18151,7 +18171,7 @@ function momoRenderMoPlusProductSync(shop){
   c.innerHTML=`
     <div style="max-width:820px">
       <div class="mm-note" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-bottom:12px;line-height:1.7;color:#065f46">
-        上傳 <b>mo+${shop==='MO+麻吉'?'好麻吉':'森之旅'}商品資訊.xls</b>（「匯出商品價格資料」分頁）＝商品主檔。<br>
+        上傳 <b>mo+${({'MO+麻吉':'好麻吉','MO+森之旅':'森之旅','MO+玩樂':'玩樂'})[shop]}商品資訊.xls</b>（「匯出商品價格資料」分頁）＝商品主檔。<br>
         <span class="mm-muted">補齊<b>商品編號→原廠編號完整對照</b>（含零銷量商品）+ <b>掛牌售價/市價</b>。可一次批次建檔（新品自動帶成本靠這個）。當前快照、重傳取代主檔欄位，<b>不動</b>既有銷售/期別資料。</span>
       </div>
       <div class="mm-uprow">
@@ -18610,7 +18630,7 @@ function momoRenderMoPlusRecon(shop){
 // 一次性清除所有 MO+ 月對帳 doc 的 doc.pdf（PDF/手動 B/F/I 區塊已移除、此欄成孤兒）。刪除 + markPending → 同步時整份覆蓋、雲端也去除。回清除筆數。
 function momoClearMoPlusReconPdf(){
   let n=0; const pref='ec_momo_reconcile|';
-  ['MO+麻吉','MO+森之旅'].forEach(shop=>{
+  ['MO+麻吉','MO+森之旅','MO+玩樂'].forEach(shop=>{
     const pf=pref+shop+'|', months=new Set();
     const scan=st=>{ if(st) Object.keys(st).forEach(k=>{ if(k.indexOf(pf)===0) months.add(k.slice(pf.length)); }); };
     try{ scan(typeof Store!=='undefined'&&Store._profitMem); scan(typeof Store!=='undefined'&&Store._mem); }catch(e){}
@@ -19237,7 +19257,7 @@ function momoCurrentUserName(){ try{ const s=(window.Store&&Store.get)?(Store.ge
 // 某原廠編號被哪些賣場的哪些商品用到（掃四賣場 product.origin / origins[]）→ [{shop, n, skus:[..前幾個..]}]
 function momoCostOriginUsage(origin){
   const out=[];
-  ['甲配','乙配','MO+麻吉','MO+森之旅'].forEach(shop=>{
+  ['甲配','乙配','MO+麻吉','MO+森之旅','MO+玩樂'].forEach(shop=>{
     const skus=[]; try{ momoLoadProducts(shop).forEach(p=>{ const os=(p.origins&&p.origins.length)?p.origins:(p.origin?[p.origin]:[]); if(os.indexOf(origin)>=0) skus.push(p.sku); }); }catch(e){}
     if(skus.length) out.push({shop, n:skus.length, skus:skus.slice(0,5)});
   });
@@ -19287,7 +19307,7 @@ function momoSetCostByOrigin(origin, cost, opts){
 // 手動補成本 → 在「毛利真的依賴此表的 MO+ 商品」的異動時間軸各記一筆（甲乙用 product.cost、不記＝不誤導）。
 //   ⚠ 標明「因共用成本表變動」、每個受影響商品各一筆（非灌爆單一時間軸），文字註「同時影響 N 個 MO+ 商品」。
 function momoCostAddHistoryToMoPlusProducts(origin, cost, from, note){
-  const affected=[]; ['MO+麻吉','MO+森之旅'].forEach(shop=>{ momoLoadProducts(shop).forEach(p=>{ const os=(p.origins&&p.origins.length)?p.origins:(p.origin?[p.origin]:[]); if(os.indexOf(origin)>=0) affected.push({shop,sku:p.sku}); }); });
+  const affected=[]; ['MO+麻吉','MO+森之旅','MO+玩樂'].forEach(shop=>{ momoLoadProducts(shop).forEach(p=>{ const os=(p.origins&&p.origins.length)?p.origins:(p.origin?[p.origin]:[]); if(os.indexOf(origin)>=0) affected.push({shop,sku:p.sku}); }); });
   const n=affected.length; const np=momoNowParts();
   const byShop={}; affected.forEach(a=>{ (byShop[a.shop]=byShop[a.shop]||[]).push(a.sku); });
   Object.keys(byShop).forEach(shop=>{ const set=new Set(byShop[shop]); const products=momoLoadProducts(shop); let ch=false;
@@ -19512,7 +19532,7 @@ const _MOMO_STOCK_LS='ec_momo_stock_by_origin';
 const MOMO_STOCK_STALE_DAYS=14;   // 超過視為過期（莫筆克不定期上傳）→ 畫面橘字提示
 // 庫存欄各賣場「分配比例」：莫筆克是甲乙+MO+ 共用總庫存，此欄按比例估各賣場可用（分配估算、非實際庫存）。
 //   ⚠ 可調設定、集中一處，勿寫死在渲染邏輯：之後比例會調、乙配會改用 F1102 寄倉即時庫存的實際數字（屆時把乙配從這裡拿掉/改資料源）。
-const MOMO_STOCK_RATIO={ '甲配':0.2, 'MO+麻吉':0.2, 'MO+森之旅':0.2, '乙配':1 };   // 乙配暫維持 100%（待換 F1102，勿為求一致順手給比例）
+const MOMO_STOCK_RATIO={ '甲配':0.2, 'MO+麻吉':0.2, 'MO+森之旅':0.2, 'MO+玩樂':0.2, '乙配':1 };   // 乙配暫維持 100%（待換 F1102，勿為求一致順手給比例）
 function momoStockRatio(shop){ const r=MOMO_STOCK_RATIO[shop]; return (typeof r==='number' && r>=0)?r:1; }   // 未設定的賣場預設 1（不縮放、安全）
 function momoStockByOriginKey(){ return _MOMO_STOCK_LS; }
 function momoLoadStockByOrigin(){ const k=_MOMO_STOCK_LS;
@@ -19797,8 +19817,8 @@ function momoMonthHalfState(month){   // 補強①：三態半月判斷；只認
 }
 // ══════════ MOMO｜總表 → 通路總覽（甲配+乙配+MO+ 合計；圖表為主）══════════
 //   MO+ 目前無資料(階段三待做) → 合計實為甲+乙、MO+ 標「尚無資料」；有資料後自動納入。圖表用已載的 Chart.js(CDN，無 build)。
-const _MOMO_OV_SHOPS=['甲配','乙配','MO+麻吉','MO+森之旅'];
-const _MOMO_OV_COLOR={'甲配':'#5b5fcf','乙配':'#0ea5e9','MO+麻吉':'#ff7a45','MO+森之旅':'#ffa940'};
+const _MOMO_OV_SHOPS=['甲配','乙配','MO+麻吉','MO+森之旅','MO+玩樂'];
+const _MOMO_OV_COLOR={'甲配':'#5b5fcf','乙配':'#0ea5e9','MO+麻吉':'#ff7a45','MO+森之旅':'#ffa940','MO+玩樂':'#34d399'};
 let _momoOvPeriod='', _momoOvCharts=[];
 function momoOvDestroyCharts(){ _momoOvCharts.forEach(c=>{try{c.destroy();}catch(e){}}); _momoOvCharts=[]; }
 function momoOvSetMonth(v){ _momoOvPeriod=v+'-FULL'; momoRenderSummary(); }   // 總覽固定整月（無半月）
