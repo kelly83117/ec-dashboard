@@ -1676,6 +1676,9 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-au-warn-tbl th{padding:2px 10px 2px 0;font-size:11px;font-weight:600;color:#b45309;background:none;border:none;text-align:left;}
 .km-au-warn-tbl th.km-n,.km-au-warn-tbl td.km-n{text-align:right;}
 .km-au-warn-tbl td{padding:1px 10px 1px 0;border:none;}
+/* 帶入預覽的勾選欄（只寫勾選的列） */
+.km-au-tbl .km-au-c{width:34px;text-align:center;padding-left:4px;padding-right:4px;}
+.km-au-tbl .km-au-c input{width:15px;height:15px;cursor:pointer;accent-color:var(--primary);}
 .km-au-snap{font-size:12px;color:#047857;background:var(--success-soft);border-radius:6px;padding:6px 10px;margin-bottom:10px;}
 .km-au-check.ok{color:#047857;}.km-au-check.bad{color:#dc2626;}
 .km-tmp{display:inline-block;margin-left:5px;font-size:11px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:#92400e;vertical-align:1px;line-height:1.6;}
