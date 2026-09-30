@@ -1533,20 +1533,22 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .kc-h2 .kc-c{border-top:none;padding:7px 10px;font-size:11px;font-weight:600;color:#6b7280;background:#f8f9fc;}
 .kc-h2 .kc-name{text-align:left;}
 /* 通路列 */
-.kc-ch{cursor:pointer;font-size:15px;font-weight:700;color:#1a1a2e;}
+.kc-ch{cursor:pointer;font-size:13px;font-weight:700;color:#1a1a2e;}
 .kc-ch:hover .kc-c{background:#fafbff;}
 .kc-caret{display:inline-block;width:12px;color:#9ca3af;transition:transform .15s;}
 .kc-ch.open .kc-caret{transform:rotate(90deg);}
 .kc-name .km-dot{margin:0 7px 0 2px;vertical-align:1px;}
 /* 展開的各店列 */
-.kc-sub{font-size:14px;font-weight:400;color:#4b5563;}
+.kc-sub{font-size:13px;font-weight:400;color:#4b5563;}
 .kc-sub .kc-c{background:#fcfcfe;}
 .kc-sub .kc-name{padding-left:40px;}
 /* 合計列：上面 2px 線、底部封住三組框 */
-.kc-total{font-size:16px;font-weight:800;color:#1a1a2e;}
+.kc-total{font-size:13px;font-weight:800;color:#1a1a2e;}
 .kc-total .kc-c{border-top:2px solid #d1d5db;background:#f8f9fc;}
 .kc-total .kc-g1,.kc-total .kc-g1+.kc-c{border-bottom:1.5px solid #cbd5e1;}
 .kc-fill .km-badge{font-size:11px;}
+/* 較上月（▲▼）11px，與上一版相同；以「每組第二格」定位，不用 .km-down（負數金額也用它） */
+.kc-ch .kc-g1+.kc-c,.kc-total .kc-g1+.kc-c{font-size:11px;}
 /* 標題列右邊的圖例 */
 .km-panel-t .kc-legend{margin-left:auto;font-size:11px;font-weight:500;color:#9ca3af;}
 .kc-s1{grid-column:2/4;}.kc-s2{grid-column:4/6;}.kc-s3{grid-column:6/8;}
