@@ -22874,6 +22874,9 @@ function pchomeExportTime(fname){ var m=String(fname||'').match(/(\d{4})(\d{2})(
 // 本期是否未完（今天 < 區間結束日）→ 標「本期未完」不算成長率
 function pchomePeriodOpen(區間){ var m=String(區間||'').match(/~\s*(\d{4})\/(\d{2})\/(\d{2})/); if(!m) return false; var end=new Date(+m[1],+m[2]-1,+m[3],23,59,59); return new Date()<=end; }
 var PCHOME_SEG={ '轉單':0, '寄倉':1 };              // 轉單→段0「一般轉單」；寄倉→段1「寄倉訂單」
+// 退貨成本處理開關（使用者定案 2026/09/30，驗收時再確認一次）：true＝沖回（貨實體退回、成本 = unitCost × 淨數量，退回不算銷貨成本）；
+//   false＝不沖回（退回多半破損不能再上架 → 成本當損失留該 SKU、成本 = unitCost × gross 數量）。改一行即切換、不散落各處。
+var PCHOME_RETURN_COST_REVERSAL=true;
 // CSV 16 段 → 對帳單欄位分組（PChome 對帳單結構：CSV 16 段 ≠ 對帳單 (A)(B)(C)(D) 一對一）。
 //   用「對帳項目名稱」對應，不靠段序位置——PChome 若改順序/略掉空段，位置法會錯位（docs §2 對照表）。
 //   (A)貨款=A1訂單貨款+A2退貨貨款+A3其他應付；(B)/(C)=折讓單；(D)=費用。★只有 (D) 組才是費用（費用卡＋(D)差額的唯一來源）。
@@ -23415,8 +23418,11 @@ function pchomeRenderReconInfo(shop){
     +'<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:#6b7280"><th style="padding:4px 8px">費用項（對帳單代號）</th><th style="padding:4px 8px;text-align:right">總額(含稅)</th></tr></thead><tbody>'+feeRows+'</tbody></table>'
     +(unknownSegs.length?'<div style="font-size:11px;color:#dc2626;margin-top:8px;line-height:1.6">⚠ CSV 有 '+unknownSegs.length+' 個未知段有值、未列入對照表（可能 PChome 新增段或改名）：<b>'+unknownSegs.map(function(s){return _momoEsc(s.對帳項目)+'='+s.總額;}).join('、')+'</b>。請補進 PCHOME_SEG_GROUP 對照表，別當它是費用。</div>':'')
     +'<div style="font-size:11px;color:#d97706;margin-top:8px;line-height:1.6">⚠ 只列 (D) 組費用（段 8–15）。退貨貨款屬 (A)、折讓單屬 (B)/(C)，不在此。'+feeSrcNote+'</div></div>';
-  // 對帳單數字手動輸入卡（(A)-(F)+備註）。CSV 貨款＝本賣場訂單貨款段總額（含稅，A1）；CSV 有明細費用＝(D) 組總額（含稅）。
+  // 對帳單數字手動輸入卡（(A)-(F)+備註）。CSV 貨款＝本賣場訂單貨款(A1)−退貨貨款(A2)（含稅、與對帳單 A 同口徑）；CSV 有明細費用＝(D) 組總額（含稅）。
   var csvHuo=Number((segs[PCHOME_SEG[shop]]||{}).總額)||0;
+  // 扣退貨貨款(A2)：對帳單 A = A1 + A2(退貨，負) → CSV 對照也要淨扣退貨，否則 (A) vs CSV 會誤報「差＝退貨額」。
+  var retNamesC=(shop==='寄倉')?{'退貨貨款明細 - 寄倉訂單':1,'退貨貨款明細 - 寄倉客退商品(退回廠商)':1}:{'退貨貨款明細 - 一般轉單':1};
+  segs.forEach(function(s){ if(retNamesC[String(s.對帳項目||'').trim()]) csvHuo-=(Number(s.總額)||0); });
   var manualCard=pchomeReconManualCard(shop, latest, csvHuo, csvFeesD);
   // 訂單明細（本賣場段逐列，接在費用卡底下；同單多序相鄰排列）。出貨單號 12 位字串不轉 number；歸期依單號確認日。
   var od=segs[PCHOME_SEG[shop]]||{rows:[]};
@@ -23460,6 +23466,18 @@ function pchomeProfitCalc(entry, shop){
     if(!o.reconPN) o.reconPN=String(r['商品編號']||'').trim();   // 對帳明細的 PChome 商品編號（給 sub-line 顯示 + 與上架清單核對）
     if(!o.單位成本) o.單位成本=Number(r['單位成本'])||0;          // 對帳明細單位成本＝PChome 向我方進貨單價（含稅、全期一致）＝供貨價來源
   });
+  // 退貨貨款（A2）逐筆 → 從該 SKU 淨營收(÷1.05)/淨銷量扣除。歸期＝退貨出現的這期（照對帳單，不回頭改前期）。
+  //   段2 表頭無廠商料號、只有商品編號 → pnToCode(段0) 否則商品主檔 商品編號→料號；對不到 → returnUnattributed（不靜默丟）。
+  var pnToCodeP={}; products.forEach(function(p){ var cp=String(p.料號||'').trim(); var pns=Array.isArray(p.商品編號)?p.商品編號:[p.商品編號]; pns.forEach(function(pn){ pn=String(pn||'').trim(); if(pn&&cp&&!pnToCodeP[pn]) pnToCodeP[pn]=cp; }); });
+  var retNames=(shop==='寄倉')?{'退貨貨款明細 - 寄倉訂單':1,'退貨貨款明細 - 寄倉客退商品(退回廠商)':1}:{'退貨貨款明細 - 一般轉單':1};
+  var returnUnattributed=0;
+  segs.forEach(function(s){ if(!retNames[String(s.對帳項目||'').trim()]) return; (s.rows||[]).forEach(function(r){
+    var amt=Number(r['應付金額'])||0, qty=Number(r['數量'])||0; if(!amt&&!qty) return;
+    var pn=String(r['商品編號']||'').trim(), code=pnToCode[pn]||pnToCodeP[pn]||'';
+    if(code){ var o=bySku[code]; if(!o){ o=bySku[code]={料號:code,商品名:String(r['商品名稱']||''),規格:String(r['規格名稱']||'').trim(),營收:0,銷量:0,罰金:0,reconPN:pn,單位成本:Number(r['單位成本'])||0}; order.push(code); }
+      o.營收-=amt/1.05; o.銷量-=qty; o.退貨數量=(o.退貨數量||0)+qty; o.退貨營收未稅=(o.退貨營收未稅||0)+amt/1.05;
+    } else returnUnattributed+=amt;
+  }); });
   var penSeg=null; segs.forEach(function(s){ if(String(s.對帳項目||'').trim()==='罰金') penSeg=s; });   // 以名稱找，不靠段序
   var penaltyAttributed=0, penaltyUnattributed=0;
   if(penSeg&&penSeg.rows){ penSeg.rows.forEach(function(r){
@@ -23485,8 +23503,11 @@ function pchomeProfitCalc(entry, shop){
   var skus=order.map(function(code){
     var o=bySku[code]||{料號:code,商品名:'',規格:'',營收:0,銷量:0,罰金:0,reconPN:'',單位成本:0};   // 零銷（不在 recon）→ 空業績殼
     var p=pBy[code], unit=(p&&p.cost!=null)?Number(p.cost):null, ck=(unit!=null);
-    var hasBiz=(Math.abs(o.營收||0)>0.5)||((o.銷量||0)>0);   // 本期有無業績（有售/有營收）
-    var costTotal=ck?unit*o.銷量:null, feeUntax=(o.罰金||0)/1.05;
+    // 本期有無業績（有售）：用【淨值正向】判定——只有退貨（淨營收/淨銷量 ≤0）不算有售（動銷率分子、淨利率都靠這個）。
+    var hasBiz=((o.營收||0)>0.5)||((o.銷量||0)>0);
+    var retQty=(o.退貨數量)||0, grossQty=(o.銷量||0)+retQty;   // 淨 + 退 = 段0 gross
+    var costQty=PCHOME_RETURN_COST_REVERSAL?(o.銷量||0):grossQty;   // 沖回→淨數量；不沖回→gross（退貨成本當損失留著）
+    var costTotal=ck?unit*costQty:null, feeUntax=(o.罰金||0)/1.05;
     // 無業績（零銷）列：淨利/淨利率一律「—」——沒有營收就沒有淨利，比照缺成本口徑，不顯示誤導的 $0/0%。
     var profit=(hasBiz&&ck)?(o.營收-costTotal-feeUntax):null, margin=(hasBiz&&ck&&o.營收>0)?profit/o.營收:null;
     var name=(p&&p.商品名)?p.商品名:o.商品名, spec=(p&&p.規格)?p.規格:o.規格;
@@ -23496,7 +23517,7 @@ function pchomeProfitCalc(entry, shop){
     var supplyUntax=(o.單位成本>0)?o.單位成本/1.05:((p&&Number(p.供貨價)>0)?Number(p.供貨價)/1.05:null);
     var price=(p&&p.售價!=null&&Number(p.售價)>0)?Number(p.售價):null;   // 售價：上架清單網路價（含稅、僅參考）；無清單→null 顯「—」
     var discontinued=!!(p&&!pchomeIsActive(p));   // 已下架（顯示層 toggle 控制；有售的下架品仍計入合計）
-    return { 料號:code,商品名:name,規格:spec,商品編號:(reconPN||listPN),reconPN:reconPN,listPN:listPN,pnMismatch:pnMismatch,unitCost:unit,costKnown:ck,hasBiz:hasBiz,discontinued:discontinued,成本:costTotal,供貨價:supplyUntax,售價:price,營收:o.營收,銷量:o.銷量,費用:feeUntax,罰金含稅:o.罰金,淨利:profit,淨利率:margin };
+    return { 料號:code,商品名:name,規格:spec,商品編號:(reconPN||listPN),reconPN:reconPN,listPN:listPN,pnMismatch:pnMismatch,unitCost:unit,costKnown:ck,hasBiz:hasBiz,discontinued:discontinued,成本:costTotal,供貨價:supplyUntax,售價:price,營收:o.營收,銷量:o.銷量,退貨數量:retQty,費用:feeUntax,罰金含稅:o.罰金,淨利:profit,淨利率:margin };
   });
   var totRev=skus.reduce(function(s,x){return s+x.營收;},0), totQty=skus.reduce(function(s,x){return s+x.銷量;},0);   // 零銷列 0 → 合計不變
   var totCost=skus.reduce(function(s,x){return s+(x.成本||0);},0);   // 零銷列 costTotal=unit×0=0 → 合計不變
@@ -23513,6 +23534,7 @@ function pchomeProfitCalc(entry, shop){
     加權淨利率:(totRev>0?totProfit/totRev:null), 納入占比:(totRev>0?knownRev/totRev:null), 缺成本數:(biz.length-known.length),
     bizCount:biz.length, discCount:skus.filter(function(x){return x.discontinued;}).length, activeCount:skus.filter(function(x){return !x.discontinued;}).length,
     簡訊費推算:{訂單數:smsOrders, 含稅:smsEstIncl, 未稅:smsEstIncl/1.05}, 簡訊費實際:smsActual,
+    退貨未歸屬含稅:returnUnattributed,   // 段2 退貨對不到料號的金額（含稅、警示用；本期應為 0）
     即時費用含稅:即時費用含稅, 即時費用未稅:即時費用含稅/1.05 };
 }
 // ── 總表渲染（完全照 momo 甲配：.mm-row/.mm-sel 期別控制、.mm-kpi 卡+vs上期 delta、.tscroll+.mm-ptbl+.mm-sticky-col 表、.tr-total 合計、$整數/1位%）──
