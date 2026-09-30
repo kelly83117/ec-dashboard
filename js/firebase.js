@@ -887,6 +887,47 @@ try {
     smokeWritePaths: (pairs) => kpiWriteTo(kpiSmokeRef, pairs),
   };
 
+  // ══════════ PChome 獨立雲端 doc（三份，成長速率不同→各自一 doc，不擠 app/profit 的 1MB）══════════
+  //   照 __cloudProfit 慣例：單 doc + getDoc/setField/removeFields/subscribe，per-field 寫入
+  //   （setField 走 safeSetField＝updateDoc+FieldPath，逐格寫、不整包覆蓋、多人各改各欄不互蓋）。
+  //   訂閱層把雲端資料交給 js/profit.js 的 __pchomeApplyCloud*（那裡才讀得到 pchomeLoadOrders/pchomeDirtyGet
+  //   ＝bounce-back 守衛的依據）；沒定義就 no-op ＝ 該功能（optlog/history 表單）未上線時 infra 先就位。
+  //   🔴 寫入端一律走既有 syncToCloud task 迴圈（不另開寫入路徑）；本層只提供雲端存取物件與訂閱。
+  const pchomeOrdersRef  = doc(db, 'app', 'pchome_orders');
+  const pchomeOptlogRef  = doc(db, 'app', 'pchome_optlog');
+  const pchomeHistoryRef = doc(db, 'app', 'pchome_history');
+  const pchomeRestDelete = (docPath) => async (keys) => {
+    const params = keys.map(k => 'updateMask.fieldPaths=' + encodeURIComponent('`' + k + '`')).join('&');
+    const url = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId + '/databases/(default)/documents/' + docPath + '?' + params;
+    const resp = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{"fields":{}}' });
+    if (!resp.ok) throw new Error('REST delete failed: ' + resp.status);
+    return resp.json();
+  };
+  window.__cloudPchomeOrders = {
+    getDoc:      () => getDoc(pchomeOrdersRef),
+    setField:    (key, value) => safeSetField(pchomeOrdersRef, key, value),
+    removeFields:(keys) => pchomeRestDelete('app/pchome_orders')(keys),
+    subscribe:   (cb) => onSnapshot(pchomeOrdersRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
+  };
+  window.__cloudPchomeOptlog = {
+    getDoc:      () => getDoc(pchomeOptlogRef),
+    setField:    (key, value) => safeSetField(pchomeOptlogRef, key, value),
+    removeFields:(keys) => pchomeRestDelete('app/pchome_optlog')(keys),
+    subscribe:   (cb) => onSnapshot(pchomeOptlogRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
+  };
+  window.__cloudPchomeHistory = {
+    getDoc:      () => getDoc(pchomeHistoryRef),
+    setField:    (key, value) => safeSetField(pchomeHistoryRef, key, value),
+    removeFields:(keys) => pchomeRestDelete('app/pchome_history')(keys),
+    subscribe:   (cb) => onSnapshot(pchomeHistoryRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
+  };
+  // 訂閱：把雲端資料交給 profit.js 的套用函式（bounce-back 守衛在那裡；沒定義＝該功能未上線→安靜略過，infra 先就位）
+  try {
+    window.__cloudPchomeOrders.subscribe(data => { if (typeof window.__pchomeApplyCloudOrders === 'function') window.__pchomeApplyCloudOrders(data); });
+    window.__cloudPchomeOptlog.subscribe(data => { if (typeof window.__pchomeApplyCloudOptlog === 'function') window.__pchomeApplyCloudOptlog(data); });
+    window.__cloudPchomeHistory.subscribe(data => { if (typeof window.__pchomeApplyCloudHistory === 'function') window.__pchomeApplyCloudHistory(data); });
+  } catch (e) { console.error('[pchome cloud] 訂閱失敗：', e); }
+
   window.dispatchEvent(new Event('cloudStoreReady'));
 
   // ⚡ 重量級訂閱（profits + momo_products/origins/… 全部訂完初次快照約 10MB）：

@@ -1397,7 +1397,7 @@ function _realPendingCount(){
   // PChome recon/主檔：dirty 持久化（跨重整）。重整後 _pendingSyncKeys 歸零，靠這裡撐起待推數，
   //   否則資料未推但鈕顯示 0 → 使用者不會按同步 → 清快取/換機就遺失（PChome 後台只留一年帳務）。
   //   只算 dirty 且尚未在本 session 的 _pendingSyncKeys（避免重複計）。字面等值，不影響其他平台。
-  try{ pchomeDirtyGet().forEach(k=>{ if((k==='ec_pchome_recon'||k==='ec_pchome_products') && !_pendingSyncKeys.has(k)) n++; }); }catch(e){}
+  try{ pchomeDirtyGet().forEach(k=>{ if((k==='ec_pchome_recon'||k==='ec_pchome_products'||k==='ec_pchome_orders') && !_pendingSyncKeys.has(k)) n++; }); }catch(e){}
   return n;
 }
 window.__profitPendingCount = _realPendingCount;
@@ -1506,6 +1506,13 @@ function _sweepAllLocalReportsIntoPending(){
   try{ momoMigrateOptlogBadKeys(); }catch{}   // 推送前把 optlog 的前後雙底線舊 key 遷移成合法形式（否則同步該賣場 optlog 會炸）
   try{ momoClearMoPlusReconPdf(); }catch{}   // 清除 MO+ 月對帳孤兒 doc.pdf（PDF/手動 B/F/I 區塊已移除）→ 同步時整份覆蓋、雲端也去除
   try{ _editsMigrateItemsDirty(); }catch{}   // ec_edits 升級補登記：舊版留下的 key 級 dirty 沒有對應的品號級條目，不補會被 _editsPushGate 判 problem 而永久卡死
+  try{   // 一次性遷移：2b 期的本機訂單明細（存過但從未上雲、沒 dirty 標記）→ 標 dirty，使用者下次按「☁ 同步雲端」即上雲。不自動推。
+    if(!localStorage.getItem('ec_pchome_orders_migrated_v1')){
+      var _om=null; try{ _om=localStorage.getItem('ec_pchome_orders'); }catch(e){}
+      if(_om && _om!=='{}' && _om!=='null') pchomeDirtyAdd('ec_pchome_orders');
+      try{ localStorage.setItem('ec_pchome_orders_migrated_v1','1'); }catch(e){}
+    }
+  }catch{}
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i);
@@ -1527,6 +1534,8 @@ function _sweepAllLocalReportsIntoPending(){
       //   乾淨/已推的不撿（localStorage 存在≠待推，同 ec_momo_products 的教訓）。⚠ 字面等值、不用前綴（與守衛/計數端一致）。
       //   value 由下方 field 分支的 localStorage fallback 取得，不需在此補水 Store._mem。
       if(k&&(k==='ec_pchome_recon'||k==='ec_pchome_products')){ if(pchomeDirtyGet().indexOf(k)>=0) _pendingSyncKeys.add(k); continue; }
+      // PChome 訂單明細（獨立 doc app/pchome_orders，走專屬 pchomeSyncOrders 分支）：dirty 才撿回 pending。value 由 pchomeSyncOrders 直接讀 pchomeLoadOrders，不需在此補水。
+      if(k&&k==='ec_pchome_orders'){ if(pchomeDirtyGet().indexOf(k)>=0) _pendingSyncKeys.add(k); continue; }
       // MOMO 倉租費分頁已移除(v315)：不再把 ec_momo_rent_records 補進 pending 推送（雲端既有 field 不動、只停止再推）。
       // MOMO 月對帳（階段二）：ec_momo_reconcile|<shop>|<YYYY-MM> → momo_reconcile collection（每 shop 每月一 doc）
       if(k&&k.startsWith('ec_momo_reconcile|')){
@@ -1952,6 +1961,11 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         tasks.push({key:pk, run:()=>momoSyncOptlog(oshop).then(n=>{ if(n>0) _optlogMerges.push({shop:oshop, n}); })});
         return;
       }
+      if(pk==='ec_pchome_orders'){   // 訂單明細：獨立 doc app/pchome_orders，read-merge-write（按帳務月分欄位、upsert 不刪窗口外、保留其他機器的訂單）
+        if(window.__cloudPchomeOrders){ tasks.push({key:pk, run:()=>pchomeSyncOrders()}); }
+        else{ skippedProblem.push({key:pk,reason:'PChome 訂單明細雲端層未就緒'}); }
+        return;
+      }
       if(_notesUsesMerge(pk)){   // ec_notes：dirty-scoped merge（逐品號、只覆蓋你改過的、不刪同事的）→ 兩人各改各的品號可共存
         //   ⚠ 實務上【只有 _growth 會走到這裡】。廣告調整 ec_notes|{通路}|{月}|{半月} 雖然
         //     saveNotes 也會把它加進 _pendingSyncKeys，但它在本迴圈【之前】就已由當期閘門排進
@@ -2090,7 +2104,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     ok.forEach(k=>{ if(cupIsNoteKey(k)){ try{ _cupNoteKeyDirtyDel(k); _cupNoteItemsDirtyClear(k); }catch{} } });   // 酷澎備註：兩層 dirty 同一迴圈相鄰清（只清推成功的 key；失敗留著下次再推）
-    ok.forEach(k=>{ if(k==='ec_pchome_recon'||k==='ec_pchome_products'){ try{ pchomeDirtyDel(k); }catch{} } });   // PChome recon/主檔：真的推成功才清持久 dirty（失敗留著繼續保護＋繼續算待推）
+    ok.forEach(k=>{ if(k==='ec_pchome_recon'||k==='ec_pchome_products'||k==='ec_pchome_orders'){ try{ pchomeDirtyDel(k); }catch{} } });   // PChome recon/主檔/訂單明細：真的推成功才清持久 dirty（失敗留著繼續保護＋繼續算待推）
     ok.forEach(k=>{ _dirtyFailClear(k); });   // E-0a 第三塊：這把 key 真的推成功 → 清失敗記錄。報告吃 dirtyFailSnap（上方快照），本行蓋不掉本次報告；殘餘風險（同 key 別筆編輯也會洗綠）已在 modal 文案明示
     if(skippedByDesign.length) console.log('[syncToCloud] 略過 filemeta '+skippedByDesign.length+' 筆（不上雲）');
     _report('done',{ok,failed,skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,optlogMerges:_optlogMerges,notesMerges:_notesMerges,editsMerges:_editsMerges,dirtyWriteFailures:dirtyFailSnap});
@@ -22919,10 +22933,11 @@ function pchomeDirtyGet(){ try{ var l=localStorage.getItem(pchomeDirtyKey()); va
 function pchomeDirtyAdd(k){ try{ var s=new Set(pchomeDirtyGet()); s.add(k); localStorage.setItem(pchomeDirtyKey(),JSON.stringify([...s])); }catch(e){} }
 function pchomeDirtyDel(k){ try{ var left=pchomeDirtyGet().filter(function(x){return x!==k;}); localStorage.setItem(pchomeDirtyKey(),JSON.stringify(left)); }catch(e){} }
 
-// ══════════ 轉單訂單明細（每日檔）2b：即時營收來源、upsert 累積、本機專用（不上雲）══════════
-//   用途：對帳單還沒出來前看區間營收（約週更）。帳務權威一律以對帳資料為準；這裡只呈現、不接總表/月對帳計算。
-//   🔴 個資（收貨人/ZIP/地址/手機/市話）在 parser 就不放進物件（白名單只讀需要的欄）；不進 localStorage/雲端/顯示/匯出。
-//   儲存：本機 localStorage + _profitMem（不 _markPending、不上雲）——每日檔會 accumulate、放 app/profit 會撞 1MB；即時個人視圖。
+// ══════════ 轉單訂單明細（每日檔）2b：即時營收來源、upsert 累積、上雲（獨立 doc app/pchome_orders）══════════
+//   用途：對帳單還沒出來前看區間營收（約週更），餵總表「未對帳月」即時營收；帳務權威一律以對帳資料為準（已對帳月不受此影響）。
+//   🔴 個資（收貨人/ZIP/地址/手機/市話）在 parser 就不放進物件（白名單只讀需要的欄）；【永不】進 localStorage/雲端/顯示/匯出。
+//   儲存：本機 localStorage + _profitMem + _markPending/pchomeDirtyAdd → 按「☁ 同步雲端」推 app/pchome_orders
+//     （獨立 doc、非 app/profit，避開 1MB；read-merge-write、按帳務月分欄位可裁剪）。上雲後同事/老闆在別台讀得到。
 var PCHOME_OD_KEEP={ '訂單編號':'訂單編號','NO':'序號','轉單日期':'轉單日期','出貨日期':'出貨日期','商品編號':'商品編號','廠商料號':'料號','商品名稱':'商品名','商品規格':'規格','下訂時數量':'下訂','取消數量':'取消','應出貨數量':'應出貨','單位成本':'單位成本','成本小計':'成本小計','確認':'確認' };
 var PCHOME_OD_PII=['收貨人','ZIP','收貨地址(訂單編號)','收貨地址','收貨人手機','收貨人市話'];   // 明列供驗收比對；parser 靠白名單、不靠這份排除（多一道文件化）
 var PCHOME_OD_NUMF={ '下訂':1,'取消':1,'應出貨':1,'單位成本':1,'成本小計':1 };
@@ -22950,10 +22965,65 @@ function pchomeLoadOrders(){ var k=pchomeOrdersKey();
   try{ var l=localStorage.getItem(k); if(l) return JSON.parse(l); }catch(e){}
   return {}; }
 function pchomeSaveOrders(map){ var k=pchomeOrdersKey();
-  try{ localStorage.setItem(k, JSON.stringify(map)); }catch(e){ try{ if(window.App&&App.showAlertModal) App.showAlertModal({title:'訂單明細未安全保存',message:'本機儲存失敗（多半空間不足）：資料在記憶體、重整會遺失。轉單訂單明細本機專用、不上雲。',kind:'error'}); }catch(_){} }
+  try{ localStorage.setItem(k, JSON.stringify(map)); }catch(e){ try{ if(window.App&&App.showAlertModal) App.showAlertModal({title:'訂單明細未安全保存',message:'本機儲存失敗（多半空間不足）：資料在記憶體、重整會遺失。請先按「☁ 同步雲端」把已寫入的推上雲。',kind:'error'}); }catch(_){} }
   try{ Store._mem=Store._mem||{}; Store._mem[k]=map; }catch(e){}
   try{ if(Store._profitMem) Store._profitMem[k]=map; }catch(e){}
+  try{ _markPending(k); }catch(e){}   // 訂單明細上雲（app/pchome_orders 獨立 doc）：標待同步，按「☁ 同步雲端」才推（不自動推）
+  try{ pchomeDirtyAdd(k); }catch(e){}   // 持久 dirty（跨重整）→ 待推數撐得住、重整後撿得回
 }
+// ── 訂單明細 → app/pchome_orders（獨立 doc）：read-merge-write，按帳務月分欄位（日後可 removeFields 裁剪）──
+//   雲端該月為底 + 本機 upsert（同 key 本機覆蓋、窗口外不刪）→ 保留其他機器的訂單。冪等：逾時補送結果一致。
+//   🔴 走既有 syncToCloud task 迴圈呼叫（ec_pchome_orders 分支），不另開寫入路徑。
+async function pchomeSyncOrders(){
+  if(!window.__cloudPchomeOrders) throw new Error('PChome 訂單明細雲端層未就緒');
+  var local=pchomeLoadOrders()||{};
+  var byBM={};   // 帳務月 → {key:order}；欄位名只收 YYYY-MM，其餘落 _nodate（Firestore 欄位名不可為空）
+  Object.keys(local).forEach(function(k){ var o=local[k]||{}; var bm=pchomeBillingMonth(o['轉單日期']||''); if(!/^\d{4}-\d{2}$/.test(bm)) bm='_nodate'; (byBM[bm]=byBM[bm]||{})[k]=o; });
+  var months=Object.keys(byBM);
+  if(!months.length) return 0;   // 本機無訂單 → 不寫（不清空雲端）
+  var snap=await window.__cloudPchomeOrders.getDoc();
+  var cloud=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{};
+  var mergedAll={};
+  Object.keys(cloud).forEach(function(bm){ if(cloud[bm]&&typeof cloud[bm]==='object') mergedAll[bm]=Object.assign({}, cloud[bm]); });   // 先納入雲端全部月（含本機沒有的月，不動）
+  for(var i=0;i<months.length;i++){ var bm=months[i];
+    var merged=Object.assign({}, (cloud[bm]&&typeof cloud[bm]==='object')?cloud[bm]:{}, byBM[bm]);   // 雲端底 + 本機 upsert（同 key 本機覆蓋）
+    await window.__cloudPchomeOrders.setField(bm, momoFsSanitizeDeep(merged));   // per-field（逐帳務月）→ 多人各推各月不互蓋
+    mergedAll[bm]=merged;
+  }
+  // 回寫本機（含雲端其他機器的訂單）→ 下次同步無假差異、UI 立即反映合併結果
+  var flat={}; Object.keys(mergedAll).forEach(function(bm){ var b=mergedAll[bm]||{}; Object.keys(b).forEach(function(kk){ flat[kk]=b[kk]; }); });
+  try{ localStorage.setItem(pchomeOrdersKey(), JSON.stringify(flat)); }catch(e){}
+  try{ Store._mem=Store._mem||{}; Store._mem[pchomeOrdersKey()]=flat; }catch(e){}
+  try{ if(Store._profitMem) Store._profitMem[pchomeOrdersKey()]=flat; }catch(e){}
+  return 0;
+}
+// firebase.js app/pchome_orders 訂閱 → 套用雲端訂單（扁平化帳務月桶）。bounce-back 守衛：
+//   本機有未推（dirty）→ 雲端底 + 本機覆蓋（保住剛上傳未推的、也吸收雲端其他機器新訂單）；乾淨 → 採用雲端（換機/清快取讀回）。
+//   🔴 雲端空且本機有訂單 → 不覆蓋（首次上雲前／尚未推，避免把本機訂單洗掉）。
+window.__pchomeApplyCloudOrders=function(monthBuckets){
+  try{
+    var data=monthBuckets||{}, cloudFlat={};
+    Object.keys(data).forEach(function(bm){ var b=data[bm]; if(b&&typeof b==='object') Object.keys(b).forEach(function(k){ cloudFlat[k]=b[k]; }); });
+    var localMap=pchomeLoadOrders()||{};
+    var localN=Object.keys(localMap).length, cloudN=Object.keys(cloudFlat).length;
+    if(cloudN===0 && localN>0) return;   // 雲端空、本機有 → 保住本機（尚未上雲）
+    var dirty=pchomeDirtyGet().indexOf('ec_pchome_orders')>=0;
+    var result = dirty ? Object.assign({}, cloudFlat, localMap) : cloudFlat;   // dirty：雲端底+本機覆蓋；乾淨：採雲端
+    var prev=null; try{ prev=(Store._profitMem&&Store._profitMem['ec_pchome_orders'])||null; }catch(e){}
+    if(prev && JSON.stringify(prev)===JSON.stringify(result)) return;   // 無變化 → 不動、不重繪（避免自身 echo 閃爍）
+    try{ Store._profitMem=Store._profitMem||{}; Store._profitMem['ec_pchome_orders']=result; }catch(e){}
+    try{ Store._mem=Store._mem||{}; Store._mem['ec_pchome_orders']=result; }catch(e){}
+    try{ localStorage.setItem('ec_pchome_orders', JSON.stringify(result)); }catch(e){}
+    window.dispatchEvent(new CustomEvent('pchomeOrdersReady'));
+  }catch(e){ console.error('[pchome orders] 套用雲端訂單失敗：',e); }
+};
+// 雲端訂單到達 → 若正在看該 PChome 賣場、且沒有上傳中的暫存/預覽，重繪當前子分頁（訂單為唯讀資料、無 inline 編輯→重繪安全）
+window.addEventListener('pchomeOrdersReady', function(){
+  try{ ['轉單','寄倉'].forEach(function(shop){
+    if(_pchomeOrderPending[shop]||(_pchomeOrderStaged[shop]&&_pchomeOrderStaged[shop]['轉單'])) return;   // 使用者正在上傳/預覽 → 不重繪，免蓋掉
+    var el=document.getElementById('pchome-content-'+shop); if(el&&el.classList.contains('active')) pchomeRenderSub(shop);
+  }); }catch(e){}
+});
 // 已對帳判定：對帳資料（各帳務月訂單貨款明細段）出現過的「訂單編號-序號」集合。
 function pchomeReconOrderKeys(){ var all=pchomeLoadRecon(), set={};
   Object.keys(all).forEach(function(m){ var segs=(all[m]&&all[m].segments)||[];
@@ -22991,7 +23061,7 @@ function pchomeOrderApply(shop){ var pend=_pchomeOrderPending[shop]; if(!pend){ 
   pchomeSaveOrders(map);
   _pchomeOrderStaged[shop]={}; _pchomeOrderPending[shop]=null;
   pchomeRenderSub(shop);
-  var msg=document.getElementById('pchome-order-msg-'+shop); if(msg){ msg.textContent='已寫入，累積 '+Object.keys(map).length+' 筆。未對帳月的總表即時營收已更新（切到「總表」查看）。'; msg.style.color='#059669'; }
+  var msg=document.getElementById('pchome-order-msg-'+shop); if(msg){ msg.textContent='已寫入，累積 '+Object.keys(map).length+' 筆。未對帳月的總表即時營收已更新（切到「總表」查看）。記得按「☁ 同步雲端」上傳，否則只在這台。'; msg.style.color='#059669'; }
 }
 function pchomeOrderCancel(shop){ _pchomeOrderPending[shop]=null; var box=document.getElementById('pchome-order-preview-'+shop); if(box) box.innerHTML='<div style="color:#9ca3af;font-size:12px">已取消，未寫入。</div>'; }
 // ── 訂單明細 → 總表：未對帳月（無對帳資料）用訂單明細估算營收；已對帳月一律用對帳資料（照 momo reconciled?實際:估算 整期切換）──
@@ -23423,7 +23493,7 @@ function pchomeOrderTabHTML(shop){
     return '<div class="mm-uprow"><div class="mm-uplbl">'+name+(code?' <span class="mm-code">'+code+'</span>':'')+tag+(hint?'<div class="mm-hint">'+hint+'</div>':'')+'</div><div class="mm-upctl">'+ctl+'</div></div>'; };
   var anyStaged=!!st['轉單'];
   return '<div class="pf-pchome-upbox">'
-    +'<div style="font-size:12px;color:#6b7280;margin-bottom:10px">上傳 PChome <b>每日訂單匯出（轉單訂單明細）</b>→ 對帳單還沒出來前，未對帳月的總表<b>即時營收</b>用這份估算（有對帳資料的月份仍以對帳資料為準、此份不覆蓋）。🔴 個資（收貨人/地址/電話…）解析時即丟棄、不儲存。按「▶ 產生預覽」看筆數/帳務月分布再確認寫入。</div>'
+    +'<div style="font-size:12px;color:#6b7280;margin-bottom:10px">上傳 PChome <b>每日訂單匯出（轉單訂單明細）</b>→ 對帳單還沒出來前，未對帳月的總表<b>即時營收</b>用這份估算（有對帳資料的月份仍以對帳資料為準、此份不覆蓋）。🔴 個資（收貨人/地址/電話…）解析時即丟棄、不上傳。按「▶ 產生預覽」看筆數/帳務月分布 → <b>確認寫入</b> → 按「<b>☁ 同步雲端</b>」上傳，同事和老闆在別台就看得到最新數據（未推前只在這台）。</div>'
     +cell('轉單','轉單訂單明細','每日',true,'PChome 後台每日訂單匯出（.csv）· 依「訂單編號＋序號」upsert 累積、窗口外不刪 · 帳務月依轉單日期落在 26–25 區間')
     +cell('寄倉','寄倉訂單明細','每日',false,'寄倉業務目前未開通、格式待確認',true)
     +'<div style="margin-top:10px;display:flex;gap:10px;align-items:center"><button class="pf-pchome-btn" onclick="pchomeOrderGenerate(\''+shop+'\')"'+(anyStaged?'':' disabled')+'>▶ 產生預覽</button><span style="font-size:11px;color:#9ca3af">'+(anyStaged?'解析後預覽帳務月分布、確認才寫入':'請先選「轉單訂單明細」檔')+'</span></div>'
