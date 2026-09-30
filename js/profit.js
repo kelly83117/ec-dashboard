@@ -23084,6 +23084,51 @@ function pchomeAllMonths(){ var recon=pchomeLoadRecon(), ob=pchomeOrdersByBillin
 function pchomeMonthEntry(month){ var recon=pchomeLoadRecon(); if(recon[month]) return recon[month];
   var ob=pchomeOrdersByBillingMonth(); if(ob[month]) return pchomeSynthEntryFromOrders(month, ob[month]); return null; }
 
+// ── 未對帳月費用估算（機制照 momo「reconciled?實際:估算」；估的內容換 PChome 費用結構，無 %費率）──
+//   帳務週期 26→25：帳務月 M 涵蓋 (M-1)/26 ~ M/25。回傳已過天數 / 總天數（供固定費按比例計入，避免月初月末因整筆固定費壓入而劇烈跳動）。
+function pchomeBillingCycleDays(month){
+  var m=String(month||'').match(/(\d{4})-(\d{2})/); if(!m) return {elapsed:0,total:30,start:null,end:null};
+  var y=+m[1], mo=+m[2];
+  var start=new Date(y, mo-2, 26); start.setHours(0,0,0,0);   // (M-1)/26（Date 月份 0-based：mo-1=M、mo-2=M-1；負值/跨年 JS 自動處理）
+  var end=new Date(y, mo-1, 25); end.setHours(0,0,0,0);       // M/25
+  var today=new Date(); today.setHours(0,0,0,0);
+  var total=Math.round((end-start)/86400000)+1;
+  var elapsed=Math.round((Math.min(today.getTime(),end.getTime())-start.getTime())/86400000)+1;
+  if(elapsed<0) elapsed=0; if(elapsed>total) elapsed=total;
+  return {elapsed:elapsed, total:total, start:start, end:end};
+}
+// 未對帳月費用估算（含稅整戶 D 值 + 明細）。組成：
+//   1. 固定費（系統服務費/活動贊助費/獎勵金合約/產品責任險）＝近 N 期已對帳月固定費平均 × 已過天數比例（按天數計入、不整筆壓上）
+//   2. 簡訊費＝訂單明細出貨列數 ×1 元（精算、非估算）；退貨物流筆數訂單明細無此資料 → 0（橫幅註明）
+//   3. 行銷推廣費＝近期已對帳月「行銷推廣費 ÷ 貨款(營收未稅)」比率 × 本期營收
+//   4. 退貨物流費、罰金＝同上比率；無基準月 → 0（橫幅註明未估）
+//   對帳資料一上傳即走已對帳路徑、整月切回實際（本函式只在 synth entry 走）。
+function pchomeEstimateUnreconFees(month, shop){
+  var recon=pchomeLoadRecon(), ob=pchomeOrdersByBillingMonth(), orders=ob[month]||[];
+  var revThis=orders.reduce(function(a,o){return a+(Number(o['成本小計'])||0);},0)/1.05;   // 本期營收（未稅）＝Σ成本小計÷1.05
+  var smsShip=orders.reduce(function(a,o){ return a+(((Number(o['應出貨'])||0)>0)?1:0); },0);   // 出貨列數＝應出貨>0 的訂單列（計費筆數，×1 元含稅）
+  var sms含稅=smsShip;   // 退貨物流筆數＝0（訂單明細無此資料）
+  // 近 3 期已對帳月（有貼對帳單 D）；排除本月；新→舊
+  var rm=Object.keys(recon).filter(function(m){ return m!==month && recon[m] && recon[m].對帳單 && recon[m].對帳單.D!=null; }).sort().reverse().slice(0,3);
+  var fixList=[], mktR=[], retR=[], penR=[];
+  rm.forEach(function(m){
+    var c=pchomeProfitCalc(recon[m], shop);   // 已對帳路徑（有 D）→ 不遞迴進本估算
+    var fx=((c.費用池&&c.費用池.固定費)||0)+((c.費用池&&c.費用池.責任險)||0);   // 含稅
+    fixList.push(fx);
+    var rev=(c.合計&&c.合計.營收)||0;
+    if(rev>0.5){ var mkt=0,ret=0,pen=0; (c.skus||[]).forEach(function(x){ var d=x.費用明細||{}; mkt+=(d.行銷推廣費||0); ret+=(d.退貨物流費||0); pen+=(d.罰金||0); });
+      mktR.push(mkt/rev); retR.push(ret/rev); penR.push(pen/rev); }
+  });
+  var avg=function(a){ return a.length?a.reduce(function(s,x){return s+x;},0)/a.length:0; };
+  var cyc=pchomeBillingCycleDays(month);
+  var fixMonthly=avg(fixList);
+  var fixProrated=cyc.total>0?fixMonthly*cyc.elapsed/cyc.total:fixMonthly;
+  var mkt=avg(mktR)*revThis, ret=avg(retR)*revThis, pen=avg(penR)*revThis;
+  var D=fixProrated+sms含稅+mkt+ret+pen;   // 含稅整戶估算
+  return { D:D, 明細:{ D5:{v:sms含稅} }, __est:true,
+    breakdown:{ 固定費月:fixMonthly, 固定費計入:fixProrated, elapsed:cyc.elapsed, total:cyc.total, 簡訊:sms含稅, 簡訊筆數:smsShip, 行銷:mkt, 退物:ret, 罰金:pen, 基準月數:rm.length, hasRecon:rm.length>0, hasRet:retR.length>0&&avg(retR)>0, hasPen:penR.length>0&&avg(penR)>0 } };
+}
+
 // ── 賣場層＝轉單/寄倉（比照 momo 甲配/乙配：在平台群組的 shop 子列，各自 pchome-content-<shop>）。
 //    轉單/寄倉共用同一套 render，用 shop 字串分派（比照甲配/乙配）；差別只在讀哪一段。
 //    子分頁（商品同步…）在 shop 底下，結構照 momo momoRenderShop（flex gap:6px/margin-bottom:16px + pill 幾何，顏色走 .pf-pchome-pill class）。
@@ -24054,11 +24099,14 @@ function pchomeProfitCalc(entry, shop){
   var csvD=0, hasCsvD=false; segs.forEach(function(s){ if(pchomeIsFeeSeg(s)){ csvD+=(Number(s.總額)||0); hasCsvD=true; } });   // CSV (D) 組實際加總（含稅、整戶）
   var 即時費用整戶=csvD+smsByShop['轉單']+smsByShop['寄倉'];   // 即時整戶＝CSV(D)實際 + 兩賣場簡訊推算
   // 費用雙狀態（比照 momo 已對帳/未對帳雙流；但 PChome 無 %費率、不做 estFeeRate 那種比例暫估）：
-  var af=entry&&entry.對帳單||null, feeState, dWhole, dSource;
+  var af=entry&&entry.對帳單||null, feeState, dWhole, dSource, estBreakdown=null;
   if(af && af.D!=null){ feeState='已對帳'; dWhole=Number(af.D)||0; dSource='paste'; }   // 對帳單(D) 權威、整戶（含兩賣場、含實際 D5）
+  else if(entry&&entry.__fromOrders){   // 未對帳月（訂單明細 synth）：估算費用（機制照 momo reconciled?實際:估算；估的內容換 PChome 費用結構）→ 走與已對帳相同的攤提機制、只是 D 來自估算
+    var _est=pchomeEstimateUnreconFees(entry.帳務月, shop); feeState='估算'; dWhole=_est.D||0; dSource='est'; af=_est; estBreakdown=_est.breakdown;
+  }
   else { feeState='即時'; dWhole=即時費用整戶; dSource=(hasCsvD?'csv':'none'); }         // 即時＝CSV(D)+兩賣場簡訊推算（整戶）
   var 責任險=(af&&af.明細&&af.明細.D11)?(Number(af.明細.D11.v)||0):0;
-  var fixedKnown=(feeState==='已對帳');   // 即時：CSV 月結前常缺固定費 → 攤提不完整、由 render banner 標「固定費未知」
+  var fixedKnown=(feeState==='已對帳'||feeState==='估算');   // 即時：CSV 月結前常缺固定費 → 攤提不完整、由 render banner 標「固定費未知」
   // ── 寄倉 bug 修：費用分兩類 ──
   //   逐筆（罰金/行銷推廣/退貨物流/簡訊）已按訂單賣場歸入 逐筆ByShop。整戶待分攤＝D − 兩賣場逐筆
   //   （＝固定費+責任險+對不到料號費用+D與CSV差額），按各賣場淨營收比例分（本期寄倉營收 0 → 100% 歸轉單、寄倉 0）。
@@ -24139,6 +24187,7 @@ function pchomeProfitCalc(entry, shop){
     smsEstimate:smsEst, smsShipLineCount:smsShipLineCount, smsReturnLogisticsCount:smsReturnLogisticsCount, smsReturnGoodsCount:smsReturnGoodsCount, smsActualD5:smsActual,
     費用池:{固定費:fixedPool, 責任險:責任險, 無法歸屬:unallocPool, 攤提池:攤提池, 攤提項目:攤提項目, 可歸屬含稅:attribHK, fixedKnown:fixedKnown}, mktWarnings:mktWarnings,   // 月對帳核對報告 + tooltip
     退貨未歸屬含稅:returnUnattributed,   // 段2 退貨對不到料號的金額（含稅、警示用；本期應為 0）
+    estBreakdown:estBreakdown,   // 未對帳月費用估算明細（feeState==='估算' 時非 null；狀態橫幅用）
     即時費用含稅:dTotal, 即時費用未稅:dTotal/1.05 };
 }
 // ── 總表渲染（完全照 momo 甲配：.mm-row/.mm-sel 期別控制、.mm-kpi 卡+vs上期 delta、.tscroll+.mm-ptbl+.mm-sticky-col 表、.tr-total 合計、$整數/1位%）──
@@ -24417,7 +24466,9 @@ function pchomeProfitTabHTML(shop){
   var monthOpts=months.slice().reverse().map(function(m){ return '<option value="'+esc(m)+'"'+(m===key?' selected':'')+'>'+esc(m)+' 期</option>'; }).join('');
   var feeChip=(calc.feeState==='已對帳')
     ? '<span class="mm-status ok" title="'+esc('費用以貼上的對帳單 (D) 為權威值。'+(act!=null?'簡訊費實際 (D5) '+pchomeMoney(act)+'／逐筆推算 '+e.推算+' 筆（出貨列 '+e.列數+'＋退貨物流 '+e.退貨物流筆數+'）'+pchomeMoney(e.含稅)+'（差 '+pchomeMoney(act-e.含稅)+'）':'（對帳單未帶 D5 明細）'))+'">已對帳</span>'
-    : '<span class="mm-status no" title="對帳單未貼上；費用＝CSV(D)實際＋簡訊費推算（即時值，誤差個位數元）→ 到月對帳貼對帳單轉權威">未對帳</span>';   // 比照 momo 已對帳/未對帳
+    : (calc.feeState==='估算'
+      ? '<span class="mm-status no" title="對帳單未貼上；未對帳月費用為估算（固定費按已過天數比例＋簡訊費精算＋行銷/退貨物流/罰金近期比率）→ 到月對帳貼對帳單轉權威值">未對帳 · 估算</span>'
+      : '<span class="mm-status no" title="對帳單未貼上；費用＝CSV(D)實際＋簡訊費推算（即時值，誤差個位數元）→ 到月對帳貼對帳單轉權威">未對帳</span>');   // 比照 momo 已對帳/未對帳
   var openChip=open?'<span class="mm-status no" title="今天仍在帳務區間內，資料每天會變、不與上期比成長">本期未完</span>':'';
   var ctrl='<div class="mm-row" style="margin-bottom:10px">'
     +'<span class="mm-field"><span class="mm-lbl">帳務月</span><select class="mm-sel" onchange="pchomeSetProfitMonth(\''+shop+'\',this.value)">'+monthOpts+'</select></span>'
@@ -24448,9 +24499,21 @@ function pchomeProfitTabHTML(shop){
     +kc('動銷率', '本期有銷售的商品數 ÷（目前上架 ∪ 本期有售）。分子＝本期有賣出（不論上下架）；分母＝目前上架＋「本期有賣但已下架」；長期下架又沒賣的不進分母。分子必為分母子集、不超過 100%。', dxVal, '', dxDelta)
     +'</div>';
   // KPI 下方狀態橫幅（照 momo verifyTxt 位置/class；文字照 PChome 實況：未對帳＝CSV(D)實際+簡訊推算，非費率/退貨率估算）。已對帳→無橫幅（同 momo，狀態由 feeChip 綠標＋tooltip 表達）。併入原表格下方 smsBanner，不重複。
+  var bd=calc.estBreakdown;
   var statusBanner=(calc.feeState==='已對帳') ? ''
     : (entry.__fromOrders
-      ? '<div class="mm-banner mm-banner-warn">⚠ <b>未對帳（'+esc(key)+'）· 營收由「轉單訂單明細」暫估</b>（Σ成本小計÷1.05；此帳務月尚無對帳資料 CSV）。<br><span style="font-weight:400">銷量＝Σ下訂時數量；<b>費用即時、此月幾乎無資料</b>（無對帳資料 CSV／對帳單）→ 淨利僅供概估。到「月對帳」上傳當月<b>對帳資料 CSV</b>＋貼上對帳單即轉權威值（照 momo：已對帳月以對帳資料為準）。</span></div>'
+      ? '<div class="mm-banner mm-banner-warn">⚠ <b>未對帳（'+esc(key)+'）· 對帳單出來前的估算</b>（機制照 momo：對帳後整月切回實際值）。營收＝訂單明細 Σ成本小計÷1.05、銷量＝Σ下訂（暫估）。'
+        +(bd
+          ? '<br><span style="font-weight:400"><b>費用估算 '+pchomeMoney(calc.即時費用含稅)+'（含稅）</b>：'
+            +'固定費 '+pchomeMoney(bd.固定費計入)+'（系統服務費/活動贊助/獎勵金/責任險；近 '+bd.基準月數+' 期實際 '+pchomeMoney(bd.固定費月)+' × 已過 '+bd.elapsed+'/'+bd.total+' 天<b>按天數計入</b>，避免月初月末淨利率劇烈跳動）'
+            +' ｜ 簡訊費 '+pchomeMoney(bd.簡訊)+'（出貨列 '+bd.簡訊筆數+' × 1 元，<b>精算</b>；退貨物流筆數訂單明細無資料 → 未計）'
+            +' ｜ 行銷推廣費 '+pchomeMoney(bd.行銷)+'（近期「行銷推廣費÷貨款」比率 × 本期貨款）'
+            +(bd.hasRet?' ｜ 退貨物流 '+pchomeMoney(bd.退物)+'（近期比率）':' ｜ 退貨物流 <b>未估</b>（無近期資料 → 0）')
+            +(bd.hasPen?' ｜ 罰金 '+pchomeMoney(bd.罰金)+'（近期比率）':' ｜ 罰金 <b>未估</b>（無近期資料 → 0）')
+            +'。'+(bd.hasRecon?'':'<b>⚠ 尚無已對帳基準月 → 固定費/變動費估為 0，僅簡訊費精算。</b>')
+            +'到「月對帳」上傳對帳資料 CSV＋貼上對帳單即轉<b>權威值</b>。</span>'
+          : '<br><span style="font-weight:400">費用估算資料不足。到「月對帳」上傳對帳資料即轉權威值。</span>')
+        +'</div>'
       : '<div class="mm-banner mm-banner-warn">⚠ <b>未對帳</b>（'+esc(key)+'）· 費用＝CSV (D) 實際 ＋ 簡訊推算 <b>'+pchomeMoney(e.含稅)+'</b>（'+e.推算+' 計費筆數×1，已計入合計）→ 到「月對帳」貼上對帳單轉權威值<br><span style="font-weight:400">簡訊費推算＝出貨明細列 '+e.列數+' 筆＋退貨物流 '+e.退貨物流筆數+' 筆，各 ×1 元（是計費筆數不是簡訊封數；一箱一出貨單號、同訂單多序號共用單號）。⚠ 單價 1 元 PChome 未公告、僅單一樣本佐證；取消訂單簡訊不在明細→算不到→推算偏低。<br>⚠ 只在對帳單出現、CSV 沒有的費用（如<b>產品責任險 D11</b>）此時尚未計入 → 費用偏低、<b>淨利可能略偏高</b>；貼上對帳單即補齊。</span></div>');
   var missBanner=(miss>0)?'<div class="mm-banner mm-banner-err">⚠ 有 <b>'+miss+'</b> 個有營收的料號缺成本——其營收已計入、成本未計 → <b>總淨利／加權淨利率偏高（可能高估）</b>；該列逐項淨利/淨利率顯「—」。到「商品同步」補成本即對齊。</div>':'';
   var pnMis=calc.skus.filter(function(x){return x.pnMismatch;});
