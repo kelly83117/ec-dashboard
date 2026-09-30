@@ -62,8 +62,8 @@ Object.assign(App, {
         <div class="field"><label>姓名</label><input id="f-uname" value="${escapeHtml(u.name)}" required></div>
         <div class="field">
           <label>帳號</label>
-          <input id="f-uusername" value="${escapeHtml(u.username)}" required>
-          ${isEdit ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">改帳號後需要用新名字重新登入</div>' : ''}
+          <input id="f-uusername" value="${escapeHtml(u.username)}" required${isEdit ? ' readonly class="user-field-locked"' : ''}>
+          ${isEdit ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">帳號建立後不可修改</div>' : ''}
         </div>
         <div class="field">
           <label>${isEdit ? '新密碼（留空保留原密碼）' : '初始密碼（留空預設為 123）'}</label>
@@ -151,7 +151,9 @@ Object.assign(App, {
       },
       onSave: () => {
         const name = document.getElementById('f-uname').value.trim();
-        const usernameNew = document.getElementById('f-uusername').value.trim();
+        // username 建立後不可修改（之後要用它記錄誰改了什麼）：編輯時一律用原值，
+        //   不讀輸入框——readonly 用 F12 就能拿掉，不能當防線。
+        const usernameVal = isEdit ? user.username : document.getElementById('f-uusername').value.trim();
         const password = document.getElementById('f-upassword').value;
         const role = document.getElementById('f-urole').value;
         const selectedDepts = Array.from(document.querySelectorAll('.f-udept-cb'))
@@ -166,22 +168,14 @@ Object.assign(App, {
             .map(cb => cb.value);
           officeFeatures[deptName] = features;
         });
-        if (!name || !usernameNew) { showToast('請填寫姓名與帳號', 'error'); return false; }
+        if (!name || !usernameVal) { showToast('請填寫姓名與帳號', 'error'); return false; }
         const list = Store.get(Store.KEYS.users, []);
-        // 撞名檢查：新增時擋任何撞名；編輯時只有改成別人已有的名字才擋（改回原本自己不擋）
-        const conflict = list.some(x =>
-          x.username.toLowerCase() === usernameNew.toLowerCase() &&
-          (!isEdit || x.username !== user.username)
-        );
-        if (conflict) { showToast('帳號已存在（不分大小寫）', 'error'); return false; }
-        let usernameChanged = false;
+        // 撞名檢查只在新增時做（編輯不改 username，沒有撞名問題）
+        if (!isEdit && list.some(x => x.username.toLowerCase() === usernameVal.toLowerCase())) {
+          showToast('帳號已存在（不分大小寫）', 'error'); return false;
+        }
         if (isEdit) {
           const i = list.findIndex(x => x.username === user.username);
-          const oldUsername = list[i].username;
-          if (oldUsername !== usernameNew) {
-            list[i].username = usernameNew;
-            usernameChanged = true;
-          }
           list[i].name = name;
           list[i].role = role;
           list[i].departments = selectedDepts;
@@ -194,7 +188,7 @@ Object.assign(App, {
           }
         } else {
           const initialPw = password || '123';
-          list.push({ username: usernameNew, name, role, departments: selectedDepts, officeFeatures, password: hashPassword(initialPw) });
+          list.push({ username: usernameVal, name, role, departments: selectedDepts, officeFeatures, password: hashPassword(initialPw) });
         }
         Store.set(Store.KEYS.users, list);
 
@@ -207,14 +201,6 @@ Object.assign(App, {
           delete this.currentUser.crossOfficeAccess;
           this.currentUser.officeFeatures = officeFeatures;
           delete this.currentUser.canManageLineNotify;
-          // 改到自己的帳號 → session 綁的還是舊 username，強制登出讓使用者用新名字登入
-          if (usernameChanged) {
-            showToast('帳號已改為「' + usernameNew + '」，請用新帳號重新登入', 'success');
-            Store.remove(Store.KEYS.session);
-            setTimeout(() => { this.showLogin(); }, 800);
-            return true;
-          }
-          this.currentUser.username = usernameNew; // 同步更新（一般不會走到，因為 usernameChanged 上面已 return）
           this.applyUserPerms(this.currentUser);
         }
 
