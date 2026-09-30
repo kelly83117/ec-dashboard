@@ -59,15 +59,15 @@ Object.assign(App, {
     this.openModal({
       title: isEdit ? '編輯帳號' : '新增帳號',
       bodyHtml: `
-        <div class="field"><label>姓名</label><input id="f-uname" value="${escapeHtml(u.name)}" required></div>
+        <div class="field"><label>姓名</label><input id="f-uname" value="${escapeHtml(u.name)}" autocomplete="off" required></div>
         <div class="field">
           <label>帳號</label>
-          <input id="f-uusername" value="${escapeHtml(u.username)}" required${isEdit ? ' readonly class="user-field-locked"' : ''}>
+          <input id="f-uusername" value="${escapeHtml(u.username)}" required${isEdit ? ' readonly class="user-field-locked"' : ' autocomplete="off"'}>
           ${isEdit ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">帳號建立後不可修改</div>' : ''}
         </div>
         <div class="field">
           <label>${isEdit ? '新密碼（留空保留原密碼）' : '初始密碼（留空預設為 123）'}</label>
-          <input type="password" id="f-upassword" placeholder="${isEdit ? '不改密碼請留空' : '預設 123'}">
+          <input type="password" id="f-upassword" autocomplete="new-password" readonly placeholder="${isEdit ? '不改密碼請留空' : '預設 123'}">
         </div>
         <div class="field">
           <label>權限</label>
@@ -124,6 +124,11 @@ Object.assign(App, {
         </div>
       `,
       onMount: () => {
+        // 防瀏覽器密碼管理員自動填入：autocomplete="new-password" 只是「請求」，Chrome 不保證遵守；
+        //   密碼欄先以 readonly 產生（主流瀏覽器不會自動填 readonly 欄位；常見做法，非規格保證），使用者點進去時才解除。
+        //   否則管理員自己的密碼可能被悄悄填進來，存檔就把這個帳號的密碼改成跟管理員一樣。
+        const pwEl = document.getElementById('f-upassword');
+        if (pwEl) pwEl.addEventListener('focus', () => pwEl.removeAttribute('readonly'), { once: true });
         // 點 ▶/▼ 展開或收起該部門的子功能
         document.querySelectorAll('[data-dept-toggle]').forEach(area => {
           area.addEventListener('click', () => {
