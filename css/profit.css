@@ -1586,10 +1586,11 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-ftable{font-size:12.5px;color:#374151;}
 .km-ftable th{vertical-align:bottom;white-space:normal;padding:7px 5px;font-size:11px;font-weight:600;color:#6b7280;background:#f8f9fc;border-bottom:1px solid #e5e7eb;}
 .km-ftable td{padding:7px 5px;white-space:normal;vertical-align:top;border-top:1px solid #f3f4f6;}
-/* 2026-10-01 MOMO 多了「實際營收」一欄：1400px 以下左右內距收窄，1280 寬時金額（$451,312）才不會被截字、也不出水平捲軸 */
+/* 2026-10-01 MOMO 多了「實際營收」「稅金」兩欄：1400px 以下左右內距收窄，1280 寬時金額（$451,312）才不會被截字、也不出水平捲軸。
+   輸入框最窄 64px：萬一還是放不下，表格會水平捲動（外層 .km-tablewrap），不會把數字截掉。 */
 @media (max-width:1400px){
-  .km-ftable td,.km-ftable th{padding-left:3px;padding-right:3px;}
-  .km-ftable .km-in{padding-left:4px;padding-right:4px;}
+  .km-ftable td,.km-ftable th{padding-left:1px;padding-right:1px;}
+  .km-ftable .km-in{padding-left:2px;padding-right:2px;min-width:64px;}
 }
 .km-ftable tbody tr:hover td{background:#fafbff;}
 .km-ftable th:not(.km-f-shop){text-align:right;}
