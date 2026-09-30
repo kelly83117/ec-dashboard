@@ -1061,6 +1061,9 @@ async function syncNotesMerge(fullKey, label){
   //         (ii) 只對「本次 dirty 的品號」做拷貝，其餘品號直接沿用 cloud 的參照 + 明確規定唯讀
   //         (iii) 改成不在本機保留 merged、每次都重讀雲端（代價是多一次 getDoc）
   //       在那之前，請把「ec_notes 的 value 只能是純 JSON」當成這把 key 的硬性約束。
+  //     ⚠ 2026-09-30 起 entry 多一個選填欄位 by（填寫人 username，【純字串】，仍符合上述約束）：
+  //       只在 submitProfitNote 新增時寫；_pnmEditNote 就地改 text、不動 by（編輯舊筆不補、編輯新筆不改）；
+  //       舊筆沒有 by、不回填。合併以品號為單位整筆取代（momoMergeByKey），by 不參與任何身分判斷。
   //   ⚠ cloudRawIsMissing（見 (c2)）時【跳過這一行】直接用 {} —— JSON round-trip 對 undefined
   //     會回傳 undefined、對 null 回傳 null，兩者都不是合法的 merge 基準。
   const cloudMap=cloudRawIsMissing ? {} : JSON.parse(JSON.stringify(cloudRaw));
@@ -7949,6 +7952,11 @@ function submitProfitNote(){
   const _st=state[shop];
   const _entry={date:today,text:v};
   if(_isG&&_st&&_st.curMonth&&_st.curHalf)_entry.period=`${_st.curMonth}|${_st.curHalf}`;
+  // 填寫人：登入帳號 username（v704 起建立後不可改、不重複），顯示時再查 ec.users 轉姓名。
+  //   取不到（未登入 / 空字串 / 只有空白）→【不加這個欄位】，不寫 ''：沒有 by ＝「未記錄」，與舊筆同一種狀態。
+  //   只在新增時寫；_pnmEditNote 只改 text、deleteProfitNote 只 splice，兩者都不碰 by（純 JSON 約束見 syncNotesMerge (d)）。
+  const _by=String(window.App?.currentUser?.username||'').trim();
+  if(_by)_entry.by=_by;
   notes[code].adjustments.push(_entry);
   saveNotes(shopKey,notes,code);
   closeProfitNoteModal();
