@@ -328,6 +328,33 @@ CSV 有 16 段，但對帳單只有 **(A)(B)(C)(D)** 四組。**不要用「段�
 
 唯一的防護是顯示層：成本欄位旁顯示供貨價/成本比值，異常高的比值（8 倍以上）代表可能忘了乘，**只標示不阻擋**。
 
+🔴 **成本的真正持久層是共用表，這點不直觀、務必記住**：`product.cost` 是**凍結的快取值**，成本的權威持久層是**共用的 `ec_momo_cost_by_origin`（＋ `ec_momo_cost_meta` 記人工/來源）**，跟 momo 共用。手動 ✎ 改成本（`pchomeMasterCommit`）會同時寫 `product.cost` 與 `momoSetCostByOrigin(manual, src:'PChome')`。**重傳上架清單時 `product.cost` 會從共用表 `momoLoadCostByOrigin()` 重查回填**（查不到才保留既有），所以**手動成本不會因重傳而遺失**。→ 因此商品同步**不需要**另做一套「人工成本保護 / protected[] 彈窗」，共用表機制已經在保護。唯一會弄丟成本的情況：商品從清單消失被**整筆刪除**（就是下面在修的 bug）。
+
+### 商品同步：合併，不是整份覆蓋（2026-09-30 起，PR 待補）
+
+上架清單上傳 (`pchomeListingFile`) 從「整份覆蓋」改成**合併 + 差異預覽 gate**。修的 bug：舊的整份覆蓋會把「這次清單沒有的商品」整筆刪掉，`product.cost` 一起消失 → 該 SKU **過去期別的淨利算不出來**（calc 讀 `product.cost`、不 live 查共用表）。
+
+**新增兩個欄位**（形狀非破壞、舊記錄缺席有安全預設）：
+- `source`: `'listing'`（來自上架清單）｜`'manual'`（批次維護手建、第 6 步才會有來源）。**現有記錄無此欄 → 視為 `'listing'`**。
+- `lastSeenExport`: 字串，該筆**最後一次出現在上架清單時的匯出時間**（`pchomeExportTime` 格式「YYYY/MM/DD HH 時」，固定寬度→字串比較即時序）。
+
+**下架狀態用戳記推導、不存 boolean**（自我修復、免維護、能知道是哪版清單後消失）：
+- `pchomeLatestExport(products)` ＝ 全部 `listing` 來源記錄的最大 `lastSeenExport` ＝ 目前最新清單版本。
+- `pchomeVanished(p, latest)` ＝ `source!=='manual'` 且 `p.lastSeenExport` 存在 且 `!== latest`。
+- calc 的 `discontinued` ＝ `!pchomeIsActive(p) || pchomeVanished(p, latest)`。總表「顯示已下架」toggle 讀的還是 `discontinued`，顯示層不動。
+- 🔴 **`lastSeenExport` 缺席 → 不推導為消失**（現有 329 筆全都沒有此欄；否則第一次同步會把全部誤標下架）。第一次上傳只會給「這次在清單裡」的品打上戳記，不會 flag 任何消失。
+
+**合併規則**（`pchomeApplyListingMerge`）：
+- 清單有、本機沒有 → 新增，`source:'listing'`、`lastSeenExport=本次匯出`。
+- 兩邊都有 → 只更新 `PCHOME_LISTING_FIELDS`（商品名/規格/商品編號/供貨價/售價/毛利率PC/可賣量/缺貨/出貨方式/shop/商品狀態）＋ `cost` 從共用表重查 ＋ `lastSeenExport=本次匯出`；**不碰**其他我方欄位。
+- 本機有、清單沒有 → **保留整筆、不更新 `lastSeenExport`**（於是被 `pchomeVanished` 推導為消失、標下架）；`source:'manual'` 者連消失都不推導（手建品不會因沒上架就被標下架）。
+
+**差異預覽 gate**（`pchomeRenderListingPreview`，照 momo 視覺語彙）：解析後**不直接寫**，先顯示新增 N／更新 N（列出變更欄位 舊→新）／消失 N（標下架）／保留未標 N（舊記錄無戳記）→ **確認才 `pchomeApplyListingMerge`**、取消什麼都不寫。寫入仍走既有 `pchomeSaveProducts`（localStorage＋_mem＋_profitMem＋_markPending＋pchomeDirtyAdd），雲端覆蓋仍由既有「☁ 同步雲端」的「雲端較新」把關，**不另開寫入路徑**。
+
+**歷程（per-product history）這次不做**：PChome 目前沒有任何東西會編輯商品本體（成本改動已記在 `ec_momo_cost_meta` 的 `changes[]`），為 329 筆各加歷程陣列會撐大上雲文件；**留到第 6 步批次維護**跟優化紀錄／工作日誌一起做。這次只確保資料形狀不擋住之後加歷程。
+
+**⚠ 備份**：這支合併後，使用者第一次在正式站按同步＝新合併邏輯第一次跑真實資料。動工前已把正式站 `ec_pchome_products`（329 筆）匯出備份：`C:/Users/victo/Downloads/PChome儀表板檔案/ec_pchome_products_backup_20260930_174827.json`。**第一次在正式站按同步前，先確認這個備份檔還在。**
+
 ### 費用
 
 **全部是對帳單實際金額，沒有任何費率需要推算。** 不要建費率模型。
