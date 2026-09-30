@@ -24818,7 +24818,7 @@ function pchomeOrderTabHTML(shop){
     return '<div class="mm-uprow"><div class="mm-uplbl">'+name+(code?' <span class="mm-code">'+code+'</span>':'')+tag+(hint?'<div class="mm-hint">'+hint+'</div>':'')+'</div><div class="mm-upctl">'+ctl+'</div></div>'; };
   var anyStaged=!!st['轉單'];
   return '<div class="pf-pchome-upbox">'
-    +'<div style="font-size:12px;color:#6b7280;margin-bottom:10px">上傳 PChome <b>每日訂單匯出（轉單訂單明細）</b>→ 對帳單還沒出來前，未對帳月的總表<b>即時營收</b>用這份估算（有對帳資料的月份仍以對帳資料為準、此份不覆蓋）。🔴 個資（收貨人/地址/電話…）解析時即丟棄、不上傳。按「▶ 產生預覽」看筆數/帳務月分布 → <b>確認寫入</b> → 按「<b>☁ 同步雲端</b>」上傳，同事和老闆在別台就看得到最新數據（未推前只在這台）。</div>'
+    +'<div style="font-size:12px;color:#6b7280;margin-bottom:10px">上傳 PChome 每日訂單匯出（轉單訂單明細）→ 對帳單還沒出來前，未對帳月的總表<b>即時營收</b>用這份估算（有對帳資料的月份仍以對帳資料為準、此份不覆蓋）。按「<b>▶ 產生預覽</b>」看筆數/帳務月分布再確認寫入。</div>'
     +cell('轉單','轉單訂單明細','每日',true,'PChome 後台每日訂單匯出（.csv）· 依「訂單編號＋序號」upsert 累積、窗口外不刪 · 帳務月依轉單日期落在 26–25 區間')
     +cell('寄倉','寄倉訂單明細','每日',false,'寄倉業務目前未開通、格式待確認',true)
     +'<div style="margin-top:10px;display:flex;gap:10px;align-items:center"><button class="pf-pchome-btn" onclick="pchomeOrderGenerate(\''+shop+'\')"'+(anyStaged?'':' disabled')+'>▶ 產生預覽</button><span style="font-size:11px;color:#9ca3af">'+(anyStaged?'解析後預覽帳務月分布、確認才寫入':'請先選「轉單訂單明細」檔')+'</span></div>'
@@ -25798,7 +25798,7 @@ function pchomeProfitTabHTML(shop){
   var feeChip=(calc.feeState==='已對帳')
     ? '<span class="mm-status ok" title="'+esc('費用以貼上的對帳單 (D) 為權威值。'+(act!=null?'簡訊費實際 (D5) '+pchomeMoney(act)+'／逐筆推算 '+e.推算+' 筆（出貨列 '+e.列數+'＋退貨物流 '+e.退貨物流筆數+'）'+pchomeMoney(e.含稅)+'（差 '+pchomeMoney(act-e.含稅)+'）':'（對帳單未帶 D5 明細）'))+'">已對帳</span>'
     : (calc.feeState==='估算'
-      ? '<span class="mm-status no" title="對帳單未貼上；未對帳月費用為估算（固定費按已過天數比例＋簡訊費精算＋行銷/退貨物流/罰金近期比率）→ 到月對帳貼對帳單轉權威值">未對帳 · 估算</span>'
+      ? '<span class="mm-status no" title="對帳單未貼上；未對帳月費用為估算（固定費按已過天數比例＋簡訊費精算＋行銷/退貨物流/罰金近期比率）→ 到月對帳貼對帳單轉權威值">未對帳</span>'
       : '<span class="mm-status no" title="對帳單未貼上；費用＝CSV(D)實際＋簡訊費推算（即時值，誤差個位數元）→ 到月對帳貼對帳單轉權威">未對帳</span>');   // 比照 momo 已對帳/未對帳
   var openChip=open?'<span class="mm-status no" title="今天仍在帳務區間內，資料每天會變、不與上期比成長">本期未完</span>':'';
   var ctrl='<div class="mm-row" style="margin-bottom:10px">'
@@ -25833,16 +25833,13 @@ function pchomeProfitTabHTML(shop){
   var bd=calc.estBreakdown;
   var statusBanner=(calc.feeState==='已對帳') ? ''
     : (entry.__fromOrders
-      ? '<div class="mm-banner mm-banner-warn">⚠ <b>未對帳（'+esc(key)+'）· 對帳單出來前的估算</b>（機制照 momo：對帳後整月切回實際值）。營收＝訂單明細 Σ成本小計÷1.05、銷量＝Σ下訂（暫估）。'
+      ? '<div class="mm-banner mm-banner-warn">⚠ <b>未對帳（'+esc(key)+'）· 對帳單出來前的估算</b>。營收＝訂單明細 Σ成本小計÷1.05、銷量＝Σ下訂（暫估）。'
         +(bd
-          ? '<br><span style="font-weight:400"><b>費用估算 '+pchomeMoney(calc.即時費用含稅)+'（含稅）</b>：'
-            +'固定費 '+pchomeMoney(bd.固定費計入)+'（系統服務費/活動贊助/獎勵金/責任險；近 '+bd.基準月數+' 期實際 '+pchomeMoney(bd.固定費月)+' × 已過 '+bd.elapsed+'/'+bd.total+' 天<b>按天數計入</b>，避免月初月末淨利率劇烈跳動）'
-            +' ｜ 簡訊費 '+pchomeMoney(bd.簡訊)+'（出貨列 '+bd.簡訊筆數+' × 1 元，<b>精算</b>；退貨物流筆數訂單明細無資料 → 未計）'
-            +' ｜ 行銷推廣費 '+pchomeMoney(bd.行銷)+'（近期「行銷推廣費÷貨款」比率 × 本期貨款）'
-            +(bd.hasRet?' ｜ 退貨物流 '+pchomeMoney(bd.退物)+'（近期比率）':' ｜ 退貨物流 <b>未估</b>（無近期資料 → 0）')
-            +(bd.hasPen?' ｜ 罰金 '+pchomeMoney(bd.罰金)+'（近期比率）':' ｜ 罰金 <b>未估</b>（無近期資料 → 0）')
-            +'。'+(bd.hasRecon?'':'<b>⚠ 尚無已對帳基準月 → 固定費/變動費估為 0，僅簡訊費精算。</b>')
-            +'到「月對帳」上傳對帳資料 CSV＋貼上對帳單即轉<b>權威值</b>。</span>'
+          ? '<br><span style="font-weight:400">'
+            +(bd.hasRecon
+              ? '費用估算含：固定費（<b>按已過天數計入</b>）、簡訊費、行銷推廣費'+(bd.hasRet?'、退貨物流':'')+(bd.hasPen?'、罰金':'')+'。'
+              : '<b>尚無已對帳基準月 → 僅簡訊費精算、其餘費用估為 0。</b>')
+            +'到「月對帳」上傳對帳資料即轉<b>權威值</b>。</span>'
           : '<br><span style="font-weight:400">費用估算資料不足。到「月對帳」上傳對帳資料即轉權威值。</span>')
         +'</div>'
       : '<div class="mm-banner mm-banner-warn">⚠ <b>未對帳</b>（'+esc(key)+'）· 費用＝CSV (D) 實際 ＋ 簡訊推算 <b>'+pchomeMoney(e.含稅)+'</b>（'+e.推算+' 計費筆數×1，已計入合計）→ 到「月對帳」貼上對帳單轉權威值<br><span style="font-weight:400">簡訊費推算＝出貨明細列 '+e.列數+' 筆＋退貨物流 '+e.退貨物流筆數+' 筆，各 ×1 元（是計費筆數不是簡訊封數；一箱一出貨單號、同訂單多序號共用單號）。⚠ 單價 1 元 PChome 未公告、僅單一樣本佐證；取消訂單簡訊不在明細→算不到→推算偏低。<br>⚠ 只在對帳單出現、CSV 沒有的費用（如<b>產品責任險 D11</b>）此時尚未計入 → 費用偏低、<b>淨利可能略偏高</b>；貼上對帳單即補齊。</span></div>');
@@ -25863,7 +25860,7 @@ function pchomeProfitTabHTML(shop){
   // 表格：欄位動態（pchomeDisplayCols，含顯隱/排序）+ 標籤欄 + 欄寬拖曳；colgroup/thead/tbody/未分攤/合計 一律走同一份 COLS。
   var tagsRes=pchomeTagsFor(shop), tagBy=tagsRes.bySku||{};
   var COLS=pchomeDisplayCols(shop);
-  var sort=_pchomeProfitSort[shop];
+  var sort=_pchomeProfitSort[shop]||{col:'revenue',dir:'desc'};   // 預設營收高→低（照 momo）：正營收高→低 → 零銷售(0) → 負營收(只退貨)墊底 → 無營收(null)最後；使用者點欄位可改、清除排序回此預設
   var kf={name:function(x){return x.料號;},unitCost:function(x){return x.unitCost;},supply:function(x){return x.供貨價;},price:function(x){return x.售價;},revenue:function(x){return x.營收;},qty:function(x){return x.銷量;},fee:function(x){return x.費用;},profit:function(x){return x.淨利;},margin:function(x){return x.淨利率;}};
   var sorted=calc.skus.slice();
   if(sort&&kf[sort.col]){ var dir=(sort.dir==='asc')?1:-1, f=kf[sort.col];
@@ -25884,7 +25881,7 @@ function pchomeProfitTabHTML(shop){
     // sub-line 照 momo「品號 · 原廠」兩識別碼：PChome＝商品編號 · 料號。不一致→標紅不靜默挑一個；已下架標記接在後面。
     var idLine=x.pnMismatch
       ? '<span style="color:#ef4444">⚠ 商品編號 對帳 '+esc(x.reconPN)+' ≠ 清單 '+esc(x.listPN)+'</span> · 料號 '+esc(x.料號)
-      : '商品編號 '+esc(x.商品編號||'—')+' · 料號 '+esc(x.料號);
+      : '商編 '+esc(x.商品編號||'—')+' · 料號 '+esc(x.料號);
     if(x.discontinued) idLine+=' · <span style="color:#9ca3af;font-weight:600">已下架</span>';
     return '<td class="tl mm-sticky-col"><div class="mm-name-wrap"><span class="mm-name-clip" title="'+esc((x.商品名||'')+(x.規格?'（'+x.規格+'）':''))+'">'+esc(x.商品名||'—')+(x.規格?'（'+esc(x.規格)+'）':'')+'</span></div><div class="mm-sub-line" title="'+esc('商品編號 '+(x.商品編號||'—')+' · 料號 '+x.料號)+'">'+idLine+'</div></td>'; };
   // 費用 tooltip：逐項拆解（含稅、值 0 不列）。逐筆項標「（逐筆）」、攤提標「按營收比例攤」；末列 含稅合計÷1.05＝未稅。
