@@ -1514,29 +1514,46 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-table .km-n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .km-table .km-c{white-space:nowrap;}
 .km-table tfoot td{font-weight:800;color:#1a1a2e;background:#f8f9fc;border-top:1px solid #e5e7eb;}
-/* 各通路表字級：對齊整頁的字級階層（2026-09-23 使用者要求「符合整頁比例」；填寫模式表格不受影響）
-   小標籤 11px（＝上方各卡的灰色標籤、大卡的 ▲▼）→ 展開的各店 13px → 主列通路名與數字 14px
-   （比本月重點的 16px 低一階、比面板內文 12px 高一階）。
-   ⚠ 本檔另有全域 td{font-size:14px}（淨利表舊樣式），必須直接指定 td 才蓋得過。 */
-.km-ch-table{font-size:13px;}
-.km-ch-table td{font-size:13px;padding-top:9px;padding-bottom:9px;}
-.km-ch-table th{font-size:11px;}
-.km-ch-table .km-cmp{font-size:11px;}
-.km-ch-table .km-badge{font-size:11px;}
-.km-ch-table .km-ch-name{font-size:13px;}
-.km-ch-table .km-ch-sub td{font-size:13px;padding-top:7px;padding-bottom:7px;}
-.km-ch{cursor:pointer;}
-.km-ch:hover td{background:#fafbff;}
-.km-ch-name{font-weight:700;color:#1a1a2e;white-space:nowrap;}
-.km-ch-name .km-dot{margin:0 6px 0 4px;}
-.km-caret{color:var(--text-muted);display:inline-block;transition:transform .15s;width:10px;}
-.km-caret.open{transform:rotate(90deg);}
-.km-ch-sub td{background:#fcfcfd;color:#6b7280;}
-.km-table td.km-ch-shop{padding-left:34px;white-space:nowrap;}
-.km-rate{display:flex;align-items:center;gap:8px;min-width:130px;font-variant-numeric:tabular-nums;white-space:nowrap;}
-.km-rate-track{flex:1;height:8px;background:var(--bg);border-radius:4px;overflow:hidden;min-width:60px;}
-.km-rate-fill{height:100%;background:#059669;border-radius:4px;}
-.km-rate-fill.km-rate-neg{background:#dc2626;}
+/* A5 各通路表（2026-09-30 改柔和風格，對齊上方卡片／重點卡／瀑布圖）：
+   不畫硬框線、不用灰色表頭色帶；三組用「組間留白＋組標籤下方細色條」區分（色條沿用瀑布圖：營收灰藍、純利綠、純利率靛）。
+   欄寬：通路 220｜營收本月 1fr｜較上月 120｜純利本月 1fr｜較上月 120｜純利率本月 110｜較上月 120｜填寫進度 130。
+   ⚠ 每欄是 minmax(最小, 指定寬)：1440 寬時各欄就是指定寬；1280 寬時往最小值收、不出橫向捲軸。每一列用同一組欄寬 → 欄位對齊。
+   組間留白用每組第一格的 margin-left（每一列都一樣）→ 仍然對齊。列底色／hover 畫在整列（圓角），不是格子。 */
+.kc{min-width:760px;font-variant-numeric:tabular-nums;color:#374151;}
+.kc-row{display:grid;grid-template-columns:minmax(128px,220px) minmax(108px,1fr) minmax(84px,120px) minmax(108px,1fr) minmax(84px,120px) minmax(80px,110px) minmax(84px,120px) minmax(96px,130px);gap:0;border-radius:8px;}
+.kc-c{padding:9px 10px;white-space:nowrap;min-width:0;}
+.kc-n{text-align:right;}
+.kc-g1{margin-left:12px;}
+/* 表頭上層：組標籤（12px 灰字）＋下方 3px 色條 */
+.kc-h1 .kc-c{padding:0;}
+.kc-h1 .kc-glabel{padding:0 10px 6px;text-align:center;font-size:12px;font-weight:700;color:#6b7280;border-bottom:3px solid #e5e7eb;border-radius:0 0 2px 2px;}
+.kc-h1 .kc-s1{border-bottom-color:#94a3b8;}
+.kc-h1 .kc-s2{border-bottom-color:#059669;}
+.kc-h1 .kc-s3{border-bottom-color:#6366f1;}
+/* 表頭下層：同重點卡標籤（11px 淺灰），無底色 */
+.kc-h2 .kc-c{padding:7px 10px 6px;font-size:11px;font-weight:600;color:#9ca3af;}
+.kc-h2 .kc-name{text-align:left;}
+/* 通路列：列與列之間只有極淡的分隔線 */
+.kc-ch{cursor:pointer;font-size:13px;font-weight:700;color:#1a1a2e;box-shadow:inset 0 1px 0 #f3f4f6;transition:background .12s;}
+.kc-h2+.kc-ch{box-shadow:none;}
+.kc-ch:hover{background:#f8f9fc;}
+.kc-caret{display:inline-block;width:12px;color:#9ca3af;transition:transform .15s;}
+.kc-ch.open .kc-caret{transform:rotate(90deg);}
+.kc-name .km-dot{margin:0 7px 0 2px;vertical-align:1px;}
+/* 展開：通路列＋各店列一起變成一張淺灰底圓角卡（同重點卡底色） */
+.kc-ch.open{background:#f8f9fc;border-radius:8px 8px 0 0;}
+.kc-sub{font-size:13px;font-weight:400;color:#6b7280;background:#f8f9fc;border-radius:0;}
+.kc-sub-last{border-radius:0 0 8px 8px;margin-bottom:4px;}
+.kc-sub .kc-c{padding-top:6px;padding-bottom:6px;}
+.kc-sub .kc-name{padding-left:40px;}
+/* 合計列：淺灰底圓角卡（同重點卡 #f8f9fc + #eef0f4 細框） */
+.kc-total{font-size:13px;font-weight:800;color:#1a1a2e;background:#f8f9fc;border:1px solid #eef0f4;border-radius:9px;margin-top:6px;}
+.kc-fill .km-badge{font-size:11px;}
+/* 較上月（▲▼）11px，與上一版相同；以「每組第二格」定位，不用 .km-down（負數金額也用它） */
+.kc-ch .kc-g1+.kc-c,.kc-total .kc-g1+.kc-c{font-size:11px;}
+/* 標題列右邊的圖例 */
+.km-panel-t .kc-legend{margin-left:auto;font-size:11px;font-weight:500;color:#9ca3af;}
+.kc-s1{grid-column:2/4;}.kc-s2{grid-column:4/6;}.kc-s3{grid-column:6/8;}
 .km-badge{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--warn-soft);color:#92400e;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .km-badge-done{background:var(--success-soft);color:#047857;}
 /* B 填寫模式
