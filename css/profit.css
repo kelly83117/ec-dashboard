@@ -1586,12 +1586,6 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-ftable{font-size:12.5px;color:#374151;}
 .km-ftable th{vertical-align:bottom;white-space:normal;padding:7px 5px;font-size:11px;font-weight:600;color:#6b7280;background:#f8f9fc;border-bottom:1px solid #e5e7eb;}
 .km-ftable td{padding:7px 5px;white-space:normal;vertical-align:top;border-top:1px solid #f3f4f6;}
-/* 2026-10-01 MOMO 多了「實際營收」「稅金」兩欄：1400px 以下左右內距收窄，1280 寬時金額（$451,312）才不會被截字、也不出水平捲軸。
-   輸入框最窄 64px：萬一還是放不下，表格會水平捲動（外層 .km-tablewrap），不會把數字截掉。 */
-@media (max-width:1400px){
-  .km-ftable td,.km-ftable th{padding-left:1px;padding-right:1px;}
-  .km-ftable .km-in{padding-left:2px;padding-right:2px;min-width:64px;}
-}
 .km-ftable tbody tr:hover td{background:#fafbff;}
 .km-ftable th:not(.km-f-shop){text-align:right;}
 .km-th{display:flex;justify-content:flex-end;align-items:center;gap:2px 4px;flex-wrap:wrap;}
@@ -1629,6 +1623,32 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-ftable th.km-f-rohead{background:#eef0f4;}
 .km-ftable td.km-f-ro-first,.km-ftable th.km-f-ro-first{border-left:2px solid #cbd5e1;}
 .km-roval{box-sizing:border-box;min-height:32px;padding:4px 2px;border:1px solid transparent;line-height:22px;white-space:nowrap;}
+/* 填寫表格：對齊＋不斷行＋等比縮放（2026-10-01）
+   · 對齊：數字欄一律靠右＋tabular-nums；每個數字元件（輸入框、灰底自動值、攤到的份額、純利、小計、「—」、欄標題）
+     右邊都留同樣的內縮 R＝1px 框線＋6px 內距（×k）→ 上下每一列的個位數對齊。只有第一欄（店名）靠左。
+   · 不斷行：th／td／欄標題／小字一律 nowrap。欄寬靠 .km-sizer（輸入框下面一份高度 0 的同字數字）撐開 → 數字不會被截。
+   · 等比縮放：放不下時 JS（_kpiFillFit）設 --k（0.769～1），字級、內距、輸入框高度一起縮；字最小 10px（欄標題、小字也一起縮）。 */
+.km-ftable{--k:1;--km-r:calc(1px + 6px*var(--k));font-size:max(10px,calc(12.5px*var(--k)));}
+.km-ftable th{white-space:nowrap;padding:calc(7px*var(--k)) calc(5px*var(--k));font-size:max(10px,calc(11px*var(--k)));}
+.km-ftable td{white-space:nowrap;padding:calc(7px*var(--k)) calc(5px*var(--k));}
+.km-ftable th:not(.km-f-shop){padding-right:calc(5px*var(--k) + var(--km-r));}
+.km-ftable .km-th{flex-wrap:nowrap;}
+.km-ftable td.km-f-shop{line-height:calc(32px*var(--k));font-size:max(10px,calc(13px*var(--k)));padding-right:calc(10px*var(--k));}
+.km-ftable .km-in{height:calc(32px*var(--k));line-height:calc(22px*var(--k));padding:calc(4px*var(--k)) calc(6px*var(--k));font-size:max(10px,calc(13px*var(--k)));min-width:calc(54px*var(--k));}
+.km-ftable .km-sizer{height:0;overflow:hidden;visibility:hidden;padding:0 var(--km-r);font-size:max(10px,calc(13px*var(--k)));font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-ftable .km-roval,.km-ftable .km-shareval{min-height:calc(32px*var(--k));line-height:calc(22px*var(--k));padding:calc(4px*var(--k)) calc(6px*var(--k));font-variant-numeric:tabular-nums;text-align:right;}
+.km-ftable td.km-f-ro{font-size:max(10px,calc(13px*var(--k)));}
+.km-ftable .km-shareval{font-size:max(10px,calc(13px*var(--k)));}
+.km-ftable .km-roval .km-tmp{margin:0 5px 0 0;}
+/* 小計「未完成」：小圖示＋滑鼠提示（不撐寬通路欄／純利欄） */
+.km-ftable .km-sub-warn{margin-left:4px;color:#b45309;font-weight:700;cursor:help;}
+.km-ftable .km-f-na{line-height:calc(32px*var(--k));padding-right:calc(5px*var(--k) + var(--km-r));text-align:right;}
+.km-ftable .km-sublabel{white-space:nowrap;margin-top:calc(3px*var(--k));font-size:max(10px,calc(11px*var(--k)));padding-right:var(--km-r);text-align:right;}
+.km-ftable .km-f-shop .km-sublabel{padding-right:0;text-align:left;}
+.km-ftable tr.km-f-sub td{font-size:max(10px,calc(13px*var(--k)));font-variant-numeric:tabular-nums;}
+.km-ftable tr.km-f-sub td.km-n{padding-right:calc(5px*var(--k) + var(--km-r));text-align:right;}
+.km-ftable .km-info{width:calc(15px*var(--k));height:calc(15px*var(--k));margin-left:calc(4px*var(--k));}
+.km-ftable .km-common-in{max-width:calc(240px*var(--k));}
 /* MOMO 自動帶入（2026-09-30）：按鈕同 .km-dl 外觀、「自動」小標籤、預覽表 */
 .km-au-bar{margin-left:auto;display:inline-flex;align-items:center;gap:8px;}
 .km-au-btn{padding:6px 12px;border-radius:var(--radius-sm);border:1px solid #cbd5e1;background:#fff;color:#374151;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;}
@@ -1651,6 +1671,16 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-au-upd{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:#92400e;}
 .km-au-check{margin-top:6px;font-size:12px;font-weight:600;}
 .km-au-note{margin-top:2px;font-size:11px;color:#9ca3af;}
+/* MO+ 商品成本缺成本清單：黃色警示（不擋寫入） */
+.km-au-tbl tr.km-au-warn td{border-top:none;padding-top:0;}
+.km-au-warn-t{font-size:12px;font-weight:700;color:#92400e;background:var(--warn-soft);border-radius:6px;padding:5px 10px;white-space:normal;}
+.km-au-warn-tbl{width:auto;margin:4px 0 2px 10px;border-collapse:collapse;font-size:11.5px;color:#92400e;}
+.km-au-warn-tbl th{padding:2px 10px 2px 0;font-size:11px;font-weight:600;color:#b45309;background:none;border:none;text-align:left;}
+.km-au-warn-tbl th.km-n,.km-au-warn-tbl td.km-n{text-align:right;}
+.km-au-warn-tbl td{padding:1px 10px 1px 0;border:none;}
+/* 帶入預覽的勾選欄（只寫勾選的列） */
+.km-au-tbl .km-au-c{width:34px;text-align:center;padding-left:4px;padding-right:4px;}
+.km-au-tbl .km-au-c input{width:15px;height:15px;cursor:pointer;accent-color:var(--primary);}
 .km-au-snap{font-size:12px;color:#047857;background:var(--success-soft);border-radius:6px;padding:6px 10px;margin-bottom:10px;}
 .km-au-check.ok{color:#047857;}.km-au-check.bad{color:#dc2626;}
 .km-tmp{display:inline-block;margin-left:5px;font-size:11px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:#92400e;vertical-align:1px;line-height:1.6;}
