@@ -1627,23 +1627,25 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
    · 對齊：數字欄一律靠右＋tabular-nums；每個數字元件（輸入框、灰底自動值、攤到的份額、純利、小計、「—」、欄標題）
      右邊都留同樣的內縮 R＝1px 框線＋6px 內距（×k）→ 上下每一列的個位數對齊。只有第一欄（店名）靠左。
    · 不斷行：th／td／欄標題／小字一律 nowrap。欄寬靠 .km-sizer（輸入框下面一份高度 0 的同字數字）撐開 → 數字不會被截。
-   · 等比縮放：放不下時 JS（_kpiFillFit）設 --k（0.846～1），字級、內距、輸入框高度一起縮；字最小 11px。 */
-.km-ftable{--k:1;--km-r:calc(1px + 6px*var(--k));font-size:max(11px,calc(12.5px*var(--k)));}
-.km-ftable th{white-space:nowrap;padding:calc(7px*var(--k)) calc(5px*var(--k));}
+   · 等比縮放：放不下時 JS（_kpiFillFit）設 --k（0.769～1），字級、內距、輸入框高度一起縮；字最小 10px（欄標題、小字也一起縮）。 */
+.km-ftable{--k:1;--km-r:calc(1px + 6px*var(--k));font-size:max(10px,calc(12.5px*var(--k)));}
+.km-ftable th{white-space:nowrap;padding:calc(7px*var(--k)) calc(5px*var(--k));font-size:max(10px,calc(11px*var(--k)));}
 .km-ftable td{white-space:nowrap;padding:calc(7px*var(--k)) calc(5px*var(--k));}
 .km-ftable th:not(.km-f-shop){padding-right:calc(5px*var(--k) + var(--km-r));}
 .km-ftable .km-th{flex-wrap:nowrap;}
-.km-ftable td.km-f-shop{line-height:calc(32px*var(--k));font-size:max(11px,calc(13px*var(--k)));padding-right:calc(10px*var(--k));}
-.km-ftable .km-in{height:calc(32px*var(--k));line-height:calc(22px*var(--k));padding:calc(4px*var(--k)) calc(6px*var(--k));font-size:max(11px,calc(13px*var(--k)));min-width:calc(54px*var(--k));}
-.km-ftable .km-sizer{height:0;overflow:hidden;visibility:hidden;padding:0 var(--km-r);font-size:max(11px,calc(13px*var(--k)));font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.km-ftable td.km-f-shop{line-height:calc(32px*var(--k));font-size:max(10px,calc(13px*var(--k)));padding-right:calc(10px*var(--k));}
+.km-ftable .km-in{height:calc(32px*var(--k));line-height:calc(22px*var(--k));padding:calc(4px*var(--k)) calc(6px*var(--k));font-size:max(10px,calc(13px*var(--k)));min-width:calc(54px*var(--k));}
+.km-ftable .km-sizer{height:0;overflow:hidden;visibility:hidden;padding:0 var(--km-r);font-size:max(10px,calc(13px*var(--k)));font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .km-ftable .km-roval,.km-ftable .km-shareval{min-height:calc(32px*var(--k));line-height:calc(22px*var(--k));padding:calc(4px*var(--k)) calc(6px*var(--k));font-variant-numeric:tabular-nums;text-align:right;}
-.km-ftable td.km-f-ro{font-size:max(11px,calc(13px*var(--k)));}
-.km-ftable .km-shareval{font-size:max(11px,calc(13px*var(--k)));}
+.km-ftable td.km-f-ro{font-size:max(10px,calc(13px*var(--k)));}
+.km-ftable .km-shareval{font-size:max(10px,calc(13px*var(--k)));}
 .km-ftable .km-roval .km-tmp{margin:0 5px 0 0;}
+/* 小計「未完成」：小圖示＋滑鼠提示（不撐寬通路欄／純利欄） */
+.km-ftable .km-sub-warn{margin-left:4px;color:#b45309;font-weight:700;cursor:help;}
 .km-ftable .km-f-na{line-height:calc(32px*var(--k));padding-right:calc(5px*var(--k) + var(--km-r));text-align:right;}
-.km-ftable .km-sublabel{white-space:nowrap;margin-top:calc(3px*var(--k));padding-right:var(--km-r);text-align:right;}
+.km-ftable .km-sublabel{white-space:nowrap;margin-top:calc(3px*var(--k));font-size:max(10px,calc(11px*var(--k)));padding-right:var(--km-r);text-align:right;}
 .km-ftable .km-f-shop .km-sublabel{padding-right:0;text-align:left;}
-.km-ftable tr.km-f-sub td{font-size:max(11px,calc(13px*var(--k)));font-variant-numeric:tabular-nums;}
+.km-ftable tr.km-f-sub td{font-size:max(10px,calc(13px*var(--k)));font-variant-numeric:tabular-nums;}
 .km-ftable tr.km-f-sub td.km-n{padding-right:calc(5px*var(--k) + var(--km-r));text-align:right;}
 .km-ftable .km-info{width:calc(15px*var(--k));height:calc(15px*var(--k));margin-left:calc(4px*var(--k));}
 .km-ftable .km-common-in{max-width:calc(240px*var(--k));}

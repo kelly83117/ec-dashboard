@@ -1555,7 +1555,7 @@ function _sweepAllLocalReportsIntoPending(){
         continue;
       }
       // MOMO C1105 每日配送單數（KPI 月結表訂單數來源）：ec_momo_c1105_ship|<YYYY-MM> → 同 freight 走 setField field 分支（不開新雲端物件）
-      if(k&&(k.startsWith('ec_momo_c1105_ship|')||k.startsWith('ec_momo_moplus_orders|'))){
+      if(k&&(k.startsWith('ec_momo_c1105_ship|')||k.startsWith('ec_momo_moplus_orders|')||k.startsWith('ec_momo_moplus_unreg|'))){
         _pendingSyncKeys.add(k);
         if(!(Store._mem&&Store._mem[k])){
           try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
@@ -10150,7 +10150,8 @@ function _kpiFillHtml(row){
   // 小計客單價＝各店實際營收加總 ÷ 訂單數加總（不是各店客單價平均）
   const ap=_kpiAovPool(row,[group]);   // 小計客單價：只算營收、訂單數都有填的店
   const subAov=(ap.aov!=null?_kpiMoney(ap.aov):'—')+_kpiAovExHtml(ap.excluded);
-  const subRow=`<tr class="km-f-sub"><td class="km-f-shop">小計${fc.missing?'<span class="km-tmp">未完成</span>':''}</td><td class="km-n km-f-aov">${subAov}</td>${subCells}
+  // 「未完成」改成小計旁的 ⚠ 小圖示＋滑鼠提示（文字標籤放店名欄會撐寬通路欄、放純利前面會撐寬純利欄，1280 寬 MOMO 就放不下）
+  const subRow=`<tr class="km-f-sub"><td class="km-f-shop">小計${fc.missing?'<span class="km-sub-warn" title="未完成：這個月還有格子沒填，小計純利是暫時的">⚠</span>':''}</td><td class="km-n km-f-aov">${subAov}</td>${subCells}
     <td class="km-n km-f-ro-first ${t.totalPure<0?'km-down':''}">${_kpiMoney(t.totalPure)}</td><td class="km-n">${t.totalRev>0?_kpiRatePct(t.pureRateAgg):'—'}</td></tr>`;
   const le=_kpiLastEdit(month,group.key);
   const gi=KPI_GROUPS.findIndex(g=>g.key===group.key);
@@ -10537,9 +10538,9 @@ function _kpiMoPlusCost(ms,month){
     if(isFinite(cc)){cost+=q*cc;return;}
     missQty+=q;const k=sku+'\u0001'+o;(miss[k]=miss[k]||{sku,origin:o===MOMO_NO_ORIGIN?'':o,qty:0}).qty+=q;
   })));
-  // 未建檔品號（不在商品主檔、沒進 o → 沒算成本）：上傳時存在 doc.unreg（2026-10-01 起）；只列數量 > 0 的
-  let unreg=null;
-  if(doc.unreg&&doc.unreg.skus){const list=Object.entries(doc.unreg.skus).map(([sku,q])=>({sku,qty:Number(q)||0})).filter(x=>x.qty>0).sort((a,b)=>b.qty-a.qty);
+  // 未建檔品號（不在商品主檔、沒進 o → 沒算成本）：上傳對帳明細時存在 ec_momo_moplus_unreg|店|月（2026-10-01 起）；只列數量 > 0 的
+  let unreg=null;const ur=momoLoadMoPlusUnreg(ms,month);
+  if(ur&&ur.skus){const list=Object.entries(ur.skus).map(([sku,q])=>({sku,qty:Number(q)||0})).filter(x=>x.qty>0).sort((a,b)=>b.qty-a.qty);
     unreg={n:list.length,qty:list.reduce((a,x)=>a+x.qty,0),list};}
   return{cost,qty,missQty,miss:Object.values(miss).sort((a,b)=>b.qty-a.qty),src,unreg};
 }
@@ -11436,9 +11437,9 @@ function renderKpiTab(){
 }
 // 填寫模式表格放不下時整張表一起縮小（2026-10-01）：
 //   表格所有字級／內距／輸入框高度都寫成 calc(N*var(--k))（見 profit.css「填寫表格等比縮放」），這裡只算 --k。
-//   --k＝容器寬 ÷ 表格實際寬（反覆逼近幾次：邊框 1px 不縮放，不是完全線性）。下限＝數字 11px（13px×k≥11 → k≥11/13），
+//   --k＝容器寬 ÷ 表格實際寬（反覆逼近幾次：邊框 1px 不縮放，不是完全線性）。下限＝數字 10px（13px×k≥10 → k≥10/13；2026-10-01 從 11px 改 10px），
 //   縮到下限還放不下才讓外層 .km-tablewrap 出水平捲軸。視窗／側欄收合造成容器寬度改變 → ResizeObserver 重算。
-const KPI_FILL_KMIN=11/13;
+const KPI_FILL_KMIN=10/13;
 function _kpiFillFit(){
   const el=document.getElementById('kpi-tab-content');
   const tbl=el&&el.querySelector('table.km-ftable');if(!tbl)return;
@@ -14785,14 +14786,10 @@ function momoFeeRateAccumulatePairs(monthsData){
 function momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods){
   const has=new Set(momoLoadProducts(shop).map(p=>p.sku));
   const gated=pd=>allowedPeriods && !allowedPeriods.has(pd);
-  const skus={}, unreg={};
+  const skus={};
   (parsed.lines||[]).forEach(ln=>{
     if(ln.freight) return;                                        // 運費列不進 SKU（B 另計於 freight）
-    if(!has.has(ln.sku)){                                         // 只收已建檔（與 momoBuildMoPlusPlan 一致）
-      // 未建檔品號：只存統計（品號→數量，口徑同 o：排除回收確認、同樣的期別過濾），給 KPI 帶入預覽看「有多少沒算進成本」；不寫商品主檔
-      if(ln.sku && /^\d{4}-\d{2}-H[12]$/.test(ln.period) && !gated(ln.period)) unreg[ln.sku]=(unreg[ln.sku]||0)+(ln.status!=='回收確認'?(Number(ln.qty)||0):0);
-      return;
-    }
+    if(!has.has(ln.sku)) return;                                  // 只收已建檔（與 momoBuildMoPlusPlan 一致）
     if(!/^\d{4}-\d{2}-H[12]$/.test(ln.period)) return;
     if(gated(ln.period)) return;                                  // 期別閘門：與 products 同步
     const cell=(skus[ln.sku]=skus[ln.sku]||{})[ln.period]=(skus[ln.sku][ln.period])||{o:{}, d:0, c:0, b:0, ret:0};
@@ -14821,9 +14818,7 @@ function momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods){
   return { doc:{ shop, src:parsed.srcCode, skus, freight, latestSale,
     feeCand:fc.cand, feeNosol:fc.nosol,                                    // 舊 17-費率（相容/rollback）
     feeNp:fc.np, feeNpNosol:fc.npNosol, feePr:fc.pr, feePrNosol:fc.prNosol, // 配對模型（重傳後啟用）
-    feeUncovered:fc.uncoveredMonths,
-    unreg:{ v:1, skus:Object.fromEntries(Object.entries(unreg).map(([k,q])=>[k,Math.round(q)])) } },   // 未建檔品號統計（2026-10-01；舊 doc 沒有這欄＝要重傳對帳明細才有）
-    skuN:Object.keys(skus).length };
+    feeUncovered:fc.uncoveredMonths }, skuN:Object.keys(skus).length };
 }
 // ① 雙寫互查：momo_products cell qty(Σsources) vs origins Σo，逐(sku,period)。回 mismatches[]（呼叫端出可見警告、標該期別）。
 function momoMoPlusConsistency(shop){
@@ -15143,7 +15138,7 @@ function _momoSyncPendingCount(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
-      if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
+      if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_moplus_unreg|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
          || (k.startsWith('ec_notes|') && /_growth$/.test(k) && notesDirtyHas(k))   /* 商品調整：與 sweep 逐條同條件（dirty 才算）。廣告調整不算——它走 syncToCloud 的當期閘門，不經 sweep */
          || k.startsWith('ec_split|')   /* 拆分試算：與 sweep 逐條同條件（只看前綴、沒有 dirty 閘）。判準要與那邊逐字相同，見 _sweepAllLocalReportsIntoPending 的 ec_split 分支 */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
@@ -15289,7 +15284,7 @@ function _momoCollectPending(shop){
     else if(cupIsNoteKey(pk)){ val=cupNoteForPush(pk)||{}; }                                  // 酷澎備註：與 push（cupNoteForPush，_mem→localStorage）同源
     else { try{ if(Store._mem&&Store._mem[pk]!==undefined) val=Store._mem[pk]; }catch{}
       if(val===null){ try{ const raw=localStorage.getItem(pk); if(raw) val=JSON.parse(raw); }catch{} } }
-    const kind = pk==='ec_momo_cost_by_origin'?'MOMO成本表' : pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk.startsWith('ec_momo_reconcile|')?'MOMO月對帳' : pk.startsWith('ec_momo_freight|')?'MOMO運費' : pk.startsWith('ec_momo_c1105_ship|')?'MOMO訂單數(KPI)' : pk.startsWith('ec_momo_moplus_orders|')?'MO+訂單數(KPI)' :pk.startsWith('ec_momo_rent|')?'MOMO倉租' : pk.startsWith('ec_momo_f1102|')?'MOMO寄倉庫存' : pk.startsWith('ec_momo_s1103|')?'MOMO排行榜' : pk.startsWith('ec_momo_moplus_origins|')?'MO+逐列成本' : pk.startsWith('ec_momo_e001|')?'MO+未結算銷量' : cupIsReportKey(pk)?'酷澎報表' : cupIsMsfKey(pk)?'酷澎退貨' : cupIsNoteKey(pk)?'酷澎備註' : '其他設定';
+    const kind = pk==='ec_momo_cost_by_origin'?'MOMO成本表' : pk.startsWith('ec_momo_products|')?'MOMO商品主檔' : pk.startsWith('ec_momo_reconcile|')?'MOMO月對帳' : pk.startsWith('ec_momo_freight|')?'MOMO運費' : pk.startsWith('ec_momo_c1105_ship|')?'MOMO訂單數(KPI)' : pk.startsWith('ec_momo_moplus_orders|')?'MO+訂單數(KPI)' : pk.startsWith('ec_momo_moplus_unreg|')?'MO+未建檔統計(KPI)' :pk.startsWith('ec_momo_rent|')?'MOMO倉租' : pk.startsWith('ec_momo_f1102|')?'MOMO寄倉庫存' : pk.startsWith('ec_momo_s1103|')?'MOMO排行榜' : pk.startsWith('ec_momo_moplus_origins|')?'MO+逐列成本' : pk.startsWith('ec_momo_e001|')?'MO+未結算銷量' : cupIsReportKey(pk)?'酷澎報表' : cupIsMsfKey(pk)?'酷澎退貨' : cupIsNoteKey(pk)?'酷澎備註' : '其他設定';
     // E001「本機/雲端」欄改顯示「未結算銷量件數」（本 src 主掌+未結算）而非 _momoCount 的 17 個 top-level 欄位（對使用者無意義）。
     let over=null;
     if(momoIsShardedE001Key(pk)){ try{ const st=momoE001OwnedUnsettledStat(pk.split('|')[1], val); over={count:st.qty, stat:st}; }catch(e){} }
@@ -18879,6 +18874,29 @@ function momoSaveMoPlusOrders(shop,parsed){
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=data; }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=data; }catch{}
   return k; }
+// KPI 用的未建檔品號統計（2026-10-01）：ec_momo_moplus_unreg|<shop>|<YYYY-MM> → {shop, month, src, skus:{品號:數量}, uploadedAt}（app/profit 欄位，比照 ec_momo_moplus_orders）。
+//   不在商品主檔的品號沒有進 origins doc → 沒算進 MO+ 商品成本；這裡只存統計，讓 KPI 帶入預覽看得到漏了多少。【不】寫商品主檔。
+//   口徑同 origins 的數量：排除運費列、回收確認列不計量、期別要合法；月級、不受期別閘門（同訂單數）。「只更新 KPI 訂單數」也會寫。
+function momoMoPlusUnregKey(shop,month){ return 'ec_momo_moplus_unreg|'+shop+'|'+month; }
+function momoLoadMoPlusUnreg(shop,month){ const k=momoMoPlusUnregKey(shop,month);
+  try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]) return Store._mem[k]; }catch{}
+  try{ const l=localStorage.getItem(k); if(l) return JSON.parse(l); }catch{}
+  return null; }
+function momoSaveMoPlusUnreg(shop,parsed){
+  const month=momoMoPlusSrcToMonth(parsed&&parsed.srcCode); if(!month) return null;
+  const has=new Set(momoLoadProducts(shop).map(p=>p.sku)); const skus={};
+  (parsed.lines||[]).forEach(ln=>{
+    if(ln.freight||!ln.sku||has.has(ln.sku)) return;
+    if(!/^\d{4}-\d{2}-H[12]$/.test(ln.period||'')) return;
+    skus[momoFsSafeKey(ln.sku)]=(skus[momoFsSafeKey(ln.sku)]||0)+(ln.status!=='回收確認'?(Number(ln.qty)||0):0);
+  });
+  Object.keys(skus).forEach(k=>skus[k]=Math.round(skus[k]));
+  const k=momoMoPlusUnregKey(shop,month), data={shop,month,src:parsed.srcCode,skus,uploadedAt:Date.now()};
+  try{ localStorage.setItem(k,JSON.stringify(data)); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=data; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=data; }catch{}
+  return k; }
 function momoMoPlusKpiOnlyToggle(shop,v){ _moPlusKpiOnly=!!v; _moPlusUpParsed=null; _moPlusUpPlan=null; momoRenderMoPlusUpload(shop); }
 // 只推指定的 key（KPI 訂單數用；不檢查商品主檔 dirty——這條路本來就不碰商品主檔）
 async function momoMoPlusPushKeys(shop, keys){
@@ -19149,7 +19167,7 @@ async function momoMoPlusUploadGenerate(shop){
     if(!r.parsed||!r.parsed.ok){ _moPlusUpParsed=r.parsed; _moPlusUpPlan=null; momoRenderMoPlusPreview(shop); return; }
     _moPlusUpParsed=r.parsed; _moPlusUpPlan=null;
     const mo=momoMoPlusSrcToMonth(r.parsed.srcCode), old=momoLoadMoPlusOrders(shop, mo);
-    if(prev) prev.innerHTML=`<div class="mm-recon-box" style="border-color:#a7f3d0;background:#ecfdf5;color:#065f46;margin-bottom:8px"><b>只更新 KPI 訂單數：不會改動淨利表</b>（商品主檔、對帳明細、月對帳都不動）<br>只寫：${_momoEsc(momoMoPlusOrdersKey(shop, mo))}</div>
+    if(prev) prev.innerHTML=`<div class="mm-recon-box" style="border-color:#a7f3d0;background:#ecfdf5;color:#065f46;margin-bottom:8px"><b>只更新 KPI 訂單數：不會改動淨利表</b>（商品主檔、對帳明細、月對帳都不動）<br>只寫：${_momoEsc(momoMoPlusOrdersKey(shop, mo))}、${_momoEsc(momoMoPlusUnregKey(shop, mo))}（未建檔品號統計）</div>
       <div style="font-size:13px;margin-bottom:10px">${_momoEsc(mo)} 不重複訂單號碼 <b>${r.parsed.orderCount.toLocaleString()}</b> 筆（含回收確認）${old?'　目前存的：'+old.orders:''}</div>
       <button class="mm-btn-primary" onclick="momoMoPlusKpiOnlyApply('${shop}')">確認寫入 KPI 訂單數</button>
       <button onclick="momoMoPlusUploadRemove('${shop}')" style="margin-left:8px;padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:12px;cursor:pointer">取消</button>`;
@@ -19172,6 +19190,7 @@ async function momoMoPlusUploadGenerate(shop){
 function momoMoPlusApplyPrepared(shop, parsed, plan, allowedPeriods, opts){
   const res=momoApplyUploadPlan(plan, allowedPeriods||null);                 // ① 寫 momo_products（qty/revA，compact 累加）
   momoSaveMoPlusOrders(shop, parsed);                                          // ⓪ KPI 訂單數（不重複訂單號碼，月級、不受期別閘門）
+  momoSaveMoPlusUnreg(shop, parsed);                                           // ⓪-b KPI 未建檔品號統計（月級；不寫商品主檔）
   const built=momoBuildMoPlusOriginsDoc(parsed, shop, allowedPeriods||null);   // ② 雙寫 origins doc（同一期別閘門）
   const lsOk=momoSaveMoPlusOriginsDoc(shop, parsed.srcCode, built.doc);
   try{   // ③ 月對帳 recon doc（月級、不受期別閘門；保留既有 pdf 不覆蓋）
@@ -19264,9 +19283,9 @@ function momoRenderMoPlusPreview(shop){
 }
 async function momoMoPlusKpiOnlyApply(shop){
   const p=_moPlusUpParsed; if(!p||!p.ok) return;
-  const k=momoSaveMoPlusOrders(shop, p); _moPlusUpFile=null; _moPlusUpParsed=null; _moPlusUpPlan=null;
+  const k=momoSaveMoPlusOrders(shop, p), ku=momoSaveMoPlusUnreg(shop, p); _moPlusUpFile=null; _moPlusUpParsed=null; _moPlusUpPlan=null;
   if(!k){ if(typeof showToast==='function') showToast('判不出月份，未寫入','error'); momoRenderMoPlusUpload(shop); return; }
-  const ap=await momoMoPlusPushKeys(shop,[k]);
+  const ap=await momoMoPlusPushKeys(shop,[k].concat(ku?[ku]:[]));
   if(typeof showToast==='function') showToast(ap.ok?('已更新 KPI 訂單數並上雲（'+k.split('|').pop()+' '+p.orderCount+' 筆，淨利表沒動）'):('KPI 訂單數已存本機，但上雲沒成功'+(ap.err?'（'+ap.err+'）':'')+'，請按 ☁ 同步雲端'), ap.ok?'success':'error', 6000);
   momoRenderMoPlusUpload(shop);
 }
@@ -19293,7 +19312,7 @@ async function momoMoPlusUploadApply(shop, allowedPeriods){
   let pushMsg='';
   if(res.wrote>0 && lsOk){   // 有寫入且 origins 本機寫成功才自動推（lsOk 失敗時本來就叫使用者先別推）
     const keys=[momoProductsKey(shop), momoMoPlusOriginsKey(shop, srcCode)];
-    const rmonth=momoMoPlusSrcToMonth(srcCode); if(rmonth){ keys.push(momoReconcileKey(shop, rmonth)); keys.push(momoMoPlusOrdersKey(shop, rmonth)); }
+    const rmonth=momoMoPlusSrcToMonth(srcCode); if(rmonth){ keys.push(momoReconcileKey(shop, rmonth)); keys.push(momoMoPlusOrdersKey(shop, rmonth)); keys.push(momoMoPlusUnregKey(shop, rmonth)); }
     const ap=await momoMoPlusAutoPushUploaded(shop, keys);
     pushMsg = ap.ok
       ? '\n\n✅ 已自動上雲：推 '+ap.okN+' 筆'+(ap.preserved?'／保留雲端 '+ap.preserved+' 個既有 SKU':'')+'（不用再手動按同步）。'
@@ -19346,7 +19365,7 @@ async function momoMoPlusBatchRun(shop){
       it.status='處理中'; it.detail=''; momoMoPlusBatchUpdate(shop); await momoYield();
       try{ const r=await momoMoPlusPrepareFile(it.file, shop);
         if(!r.parsed||!r.parsed.ok){ it.status='失敗'; it.detail=r.reason||'解析失敗（未寫入）'; }
-        else{ const k=momoSaveMoPlusOrders(shop, r.parsed); if(k){ okKeys.push(k); it.status='成功'; it.detail='KPI 訂單數 '+r.parsed.orderCount+'（淨利表未動）'; } else { it.status='失敗'; it.detail='判不出月份（未寫入）'; } }
+        else{ const k=momoSaveMoPlusOrders(shop, r.parsed), ku=momoSaveMoPlusUnreg(shop, r.parsed); if(k){ okKeys.push(k); if(ku) okKeys.push(ku); it.status='成功'; it.detail='KPI 訂單數 '+r.parsed.orderCount+'（淨利表未動）'; } else { it.status='失敗'; it.detail='判不出月份（未寫入）'; } }
       }catch(e){ it.status='失敗'; it.detail=String(e&&e.message||e).slice(0,80)+'（未寫入）'; }
       momoMoPlusBatchUpdate(shop); await momoYield();
     }
@@ -19385,7 +19404,7 @@ async function momoMoPlusBatchRun(shop){
   // ── 根治 1（批次）：整批寫完自動 scoped 上雲（products 一把 + 每個來源月的 origins/reconcile）；結果掛 b.autoPush 供 summary 顯示 ──
   if(_pushSrcs.length){
     const keys=new Set([momoProductsKey(shop)]);
-    _pushSrcs.forEach(src=>{ keys.add(momoMoPlusOriginsKey(shop, src)); const mo=momoMoPlusSrcToMonth(src); if(mo){ keys.add(momoReconcileKey(shop, mo)); keys.add(momoMoPlusOrdersKey(shop, mo)); } });
+    _pushSrcs.forEach(src=>{ keys.add(momoMoPlusOriginsKey(shop, src)); const mo=momoMoPlusSrcToMonth(src); if(mo){ keys.add(momoReconcileKey(shop, mo)); keys.add(momoMoPlusOrdersKey(shop, mo)); keys.add(momoMoPlusUnregKey(shop, mo)); } });
     try{ b.autoPush=await momoMoPlusAutoPushUploaded(shop, [...keys]); }catch(e){ b.autoPush={ok:false, err:String(e&&e.message||e)}; }
   }
   b.done=true; momoMoPlusBatchUpdate(shop);
