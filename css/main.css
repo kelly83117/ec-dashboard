@@ -163,6 +163,15 @@
     border-color: var(--primary);
     box-shadow: 0 0 0 3px rgba(99, 102, 241, .15);
   }
+  /* 帳號管理「編輯帳號」的帳號欄：username 建立後不可修改（js/pages/users.js），做成看得出鎖住的樣子 */
+  .field input.user-field-locked,
+  .field input.user-field-locked:focus {
+    background: var(--bg);
+    color: var(--text-muted);
+    border-color: var(--border);
+    box-shadow: none;
+    cursor: not-allowed;
+  }
   .btn-primary {
     width: 100%;
     background: var(--primary);
