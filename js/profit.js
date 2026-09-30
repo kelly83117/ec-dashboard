@@ -22903,6 +22903,66 @@ function pchomeDirtyGet(){ try{ var l=localStorage.getItem(pchomeDirtyKey()); va
 function pchomeDirtyAdd(k){ try{ var s=new Set(pchomeDirtyGet()); s.add(k); localStorage.setItem(pchomeDirtyKey(),JSON.stringify([...s])); }catch(e){} }
 function pchomeDirtyDel(k){ try{ var left=pchomeDirtyGet().filter(function(x){return x!==k;}); localStorage.setItem(pchomeDirtyKey(),JSON.stringify(left)); }catch(e){} }
 
+// ══════════ 轉單訂單明細（每日檔）2b：即時營收來源、upsert 累積、本機專用（不上雲）══════════
+//   用途：對帳單還沒出來前看區間營收（約週更）。帳務權威一律以對帳資料為準；這裡只呈現、不接總表/月對帳計算。
+//   🔴 個資（收貨人/ZIP/地址/手機/市話）在 parser 就不放進物件（白名單只讀需要的欄）；不進 localStorage/雲端/顯示/匯出。
+//   儲存：本機 localStorage + _profitMem（不 _markPending、不上雲）——每日檔會 accumulate、放 app/profit 會撞 1MB；即時個人視圖。
+var PCHOME_OD_KEEP={ '訂單編號':'訂單編號','NO':'序號','轉單日期':'轉單日期','出貨日期':'出貨日期','商品編號':'商品編號','廠商料號':'料號','商品名稱':'商品名','商品規格':'規格','下訂時數量':'下訂','取消數量':'取消','應出貨數量':'應出貨','單位成本':'單位成本','成本小計':'成本小計','確認':'確認' };
+var PCHOME_OD_PII=['收貨人','ZIP','收貨地址(訂單編號)','收貨地址','收貨人手機','收貨人市話'];   // 明列供驗收比對；parser 靠白名單、不靠這份排除（多一道文件化）
+var PCHOME_OD_NUMF={ '下訂':1,'取消':1,'應出貨':1,'單位成本':1,'成本小計':1 };
+// 單行表頭（line 1；line 0 是使用聲明）。個資欄從不進 idx → 從不讀進物件。
+function pchomeParseOrderDetail(text){
+  var lines=String(text||'').split(/\r?\n/);
+  if(lines.length<2) throw new Error('轉單訂單明細列數不足（需含表頭列）');
+  var hi=1; if(String(lines[1]||'').indexOf('訂單編號')<0){ for(var g=0;g<Math.min(lines.length,5);g++){ if(String(lines[g]).indexOf('訂單編號')>=0 && String(lines[g]).indexOf('商品名稱')>=0){ hi=g; break; } } }
+  var H=lines[hi].split('\t').map(function(s){ return pchomeUnescape(s).trim(); });
+  var idx={}; Object.keys(PCHOME_OD_KEEP).forEach(function(hn){ var i=H.indexOf(hn); if(i>=0) idx[PCHOME_OD_KEEP[hn]]=i; });   // 白名單欄→index（找不到就沒有、不硬切索引）
+  if(idx['訂單編號']==null||idx['序號']==null||idx['成本小計']==null) throw new Error('表頭缺必要欄（訂單編號/NO/成本小計）——可能不是轉單訂單明細檔（表頭：'+H.slice(0,6).join('、')+'…）');
+  var out=[];
+  for(var j=hi+1;j<lines.length;j++){ if(!String(lines[j]).trim()) continue; var c=lines[j].split('\t');
+    var o={}; Object.keys(idx).forEach(function(f){ var v=pchomeUnescape(c[idx[f]]==null?'':c[idx[f]]).trim(); o[f]=PCHOME_OD_NUMF[f]?(Number(v.replace(/,/g,''))||0):v; });
+    if(!String(o['訂單編號']||'').trim()) continue;
+    o.key=String(o['訂單編號']).trim()+'-'+String(o['序號']||'').trim();
+    out.push(o);
+  }
+  return out;
+}
+function pchomeOrdersKey(){ return 'ec_pchome_orders'; }
+function pchomeLoadOrders(){ var k=pchomeOrdersKey();
+  try{ if(Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch(e){}
+  try{ if(Store._mem&&Store._mem[k]) return Store._mem[k]; }catch(e){}
+  try{ var l=localStorage.getItem(k); if(l) return JSON.parse(l); }catch(e){}
+  return {}; }
+function pchomeSaveOrders(map){ var k=pchomeOrdersKey();
+  try{ localStorage.setItem(k, JSON.stringify(map)); }catch(e){ try{ if(window.App&&App.showAlertModal) App.showAlertModal({title:'訂單明細未安全保存',message:'本機儲存失敗（多半空間不足）：資料在記憶體、重整會遺失。轉單訂單明細本機專用、不上雲。',kind:'error'}); }catch(_){} }
+  try{ Store._mem=Store._mem||{}; Store._mem[k]=map; }catch(e){}
+  try{ if(Store._profitMem) Store._profitMem[k]=map; }catch(e){}
+}
+// 已對帳判定：對帳資料（各帳務月訂單貨款明細段）出現過的「訂單編號-序號」集合。
+function pchomeReconOrderKeys(){ var all=pchomeLoadRecon(), set={};
+  Object.keys(all).forEach(function(m){ var segs=(all[m]&&all[m].segments)||[];
+    segs.forEach(function(s){ if(/^訂單貨款明細/.test(String(s.對帳項目||''))) (s.rows||[]).forEach(function(r){ var k=String(r['訂單編號-序號']||'').trim(); if(k) set[k]=1; }); }); });
+  return set; }
+function pchomeOrderFile(shop,e){
+  var f=e&&e.target&&e.target.files&&e.target.files[0];
+  try{ if(e&&e.target) e.target.value=''; }catch(_){}   // 清 input 讓重選同檔也觸發
+  if(!f) return;
+  var rd=new FileReader();
+  rd.onload=function(){
+    var msg=document.getElementById('pchome-order-msg-'+shop);
+    try{
+      var list=pchomeParseOrderDetail(pchomeDecode(rd.result));
+      var 匯入t=pchomeExportTime(f.name)||new Date().toLocaleString();
+      var map=pchomeLoadOrders(), added=0;
+      list.forEach(function(o){ o.匯入時間=匯入t; if(!map[o.key]) added++; map[o.key]=o; });   // upsert by 訂單編號-序號（新覆蓋舊、窗口外不刪）
+      pchomeSaveOrders(map);
+      if(msg){ msg.textContent='已匯入 '+list.length+' 筆（新增 '+added+'、更新 '+(list.length-added)+'）；累積 '+Object.keys(map).length+' 筆。匯入時間 '+匯入t+'。'; msg.style.color='#059669'; }
+      pchomeRenderOrderView(shop);
+    }catch(err){ if(msg){ msg.textContent='解析失敗：'+_momoEsc(String(err&&err.message||err)); msg.style.color='#dc2626'; } }
+  };
+  rd.readAsArrayBuffer(f);
+}
+
 // ── 賣場層＝轉單/寄倉（比照 momo 甲配/乙配：在平台群組的 shop 子列，各自 pchome-content-<shop>）。
 //    轉單/寄倉共用同一套 render，用 shop 字串分派（比照甲配/乙配）；差別只在讀哪一段。
 //    子分頁（商品同步…）在 shop 底下，結構照 momo momoRenderShop（flex gap:6px/margin-bottom:16px + pill 幾何，顏色走 .pf-pchome-pill class）。
@@ -23276,18 +23336,95 @@ function pchomeSetSub(shop,id){ _pchomeSub[shop]=id; pchomeRenderShop(shop); }
 function pchomeRenderSub(shop){
   var c=document.getElementById('pchome-sub-content-'+shop); if(!c) return;
   var sub=_pchomeSub[shop]||'profit';
-  if(sub==='upload'){ c.innerHTML=pchomeOrderTabHTML(shop); return; }   // 訂單明細＝每日「轉單訂單明細」檔（2a 空骨架、2b 做上傳解析）
+  if(sub==='upload'){ c.innerHTML=pchomeOrderTabHTML(shop); pchomeRenderOrderView(shop); return; }   // 訂單明細＝每日「轉單訂單明細」檔（即時營收）
   if(sub==='recon'){ c.innerHTML=pchomeReconTabHTML(shop); pchomeRenderReconInfo(shop); return; }
   if(sub==='sync'){ c.innerHTML=pchomeSyncTabHTML(shop); pchomeRenderMaster(shop); return; }
   c.innerHTML=pchomeProfitTabHTML(shop);   // profit（總表：KPI 卡＋逐列淨利＋未分攤/合計）
 }
-// 訂單明細分頁（每日「轉單訂單明細」檔）：2a 只做空骨架、2b 才做上傳/解析/表格。
+// 訂單明細分頁（每日「轉單訂單明細」檔）＝即時營收：上傳中樞＋累積狀態＋區間篩選＋合計卡＋逐筆表。
+var _pchomeOrderRange={};   // shop → {from,to}（轉單日期 YYYY/MM/DD）
 function pchomeOrderTabHTML(shop){
-  return '<div class="empty"><div class="empty-icon">📦</div><div class="empty-hint">'
-    +'尚無資料——「轉單訂單明細」（PChome 每日訂單檔）上傳將於下一版開放。<br>'
-    +'這裡會顯示每日訂單的<b>確認／出貨狀態</b>（未確認＝還沒處理的訂單）。<br>'
-    +'<span style="color:#9ca3af;font-size:12px">帳務數字仍以「月對帳」的對帳資料為準。</span>'
-    +'</div></div>';
+  return '<div class="pf-pchome-upbox">'
+    +'<div style="font-weight:600;margin-bottom:4px">上傳轉單訂單明細（.csv，PChome 每日訂單檔）</div>'
+    +'<div style="font-size:12px;color:#6b7280;margin-bottom:8px">即時營收來源（對帳單還沒出來前看一段區間的營收，約週更）。按「訂單編號＋序號」<b>累積 upsert</b>（同單新覆蓋舊、窗口外的不刪）。🔴 個資（收貨人/地址/電話…）解析時即丟棄、不儲存。<b>費用與淨利請看總表（帳務月）</b>，帳務權威一律以「月對帳」對帳資料為準。</div>'
+    +'<input type="file" accept=".csv" onchange="pchomeOrderFile(\''+shop+'\',event)">'
+    +'<div id="pchome-order-msg-'+shop+'" style="font-size:12px;margin-top:8px"></div></div>'
+    +'<div id="pchome-order-view-'+shop+'"></div>';
+}
+function pchomeOrderRangeSet(shop,which,val){ var r=_pchomeOrderRange[shop]||{}; r[which]=String(val||'').replace(/-/g,'/'); _pchomeOrderRange[shop]=r; pchomeRenderOrderView(shop); }
+function pchomeOrderQuick(shop,mode){ var now=new Date(), y=now.getFullYear(), m=now.getMonth();
+  var f2=function(n){return String(n).padStart(2,'0');}, iso=function(d){return d.getFullYear()+'/'+f2(d.getMonth()+1)+'/'+f2(d.getDate());};
+  var from,to=iso(now);
+  if(mode==='thisMonth'){ from=y+'/'+f2(m+1)+'/01'; to=iso(new Date(y,m+1,0)); }
+  else if(mode==='lastMonth'){ var pm=new Date(y,m-1,1); from=pm.getFullYear()+'/'+f2(pm.getMonth()+1)+'/01'; to=iso(new Date(y,m,0)); }
+  else if(mode==='7d'){ from=iso(new Date(now.getTime()-6*864e5)); }
+  else if(mode==='30d'){ from=iso(new Date(now.getTime()-29*864e5)); }
+  _pchomeOrderRange[shop]={from:from,to:to}; pchomeRenderOrderView(shop);
+}
+function pchomeRenderOrderView(shop){
+  var box=document.getElementById('pchome-order-view-'+shop); if(!box) return;
+  var map=pchomeLoadOrders(), keys=Object.keys(map);
+  if(!keys.length){ box.innerHTML='<div class="empty" style="margin-top:14px"><div class="empty-icon">📦</div><div class="empty-hint">尚無資料——上傳轉單訂單明細（.csv）後，這裡顯示區間營收與逐筆訂單。<br><span style="color:#9ca3af;font-size:12px">⚠ 這份資料<b>只存在上傳它的那台電腦、不會同步到雲端</b>。若你在別台機器看到這裡是空的，請重新上傳轉單訂單明細（不是資料壞了）。</span></div></div>'; return; }
+  var esc=_momoEsc, rows=keys.map(function(k){return map[k];});
+  var dates=rows.map(function(r){return r['轉單日期'];}).filter(Boolean).sort();
+  var dmin=dates[0]||'', dmax=dates[dates.length-1]||'';
+  var rng=_pchomeOrderRange[shop]; if(!rng){ rng={from:dmin,to:dmax}; _pchomeOrderRange[shop]=rng; }
+  var 最後更新=rows.map(function(r){return r.匯入時間||'';}).filter(Boolean).sort().pop()||'未知';
+  var pBy={}; pchomeLoadProducts().forEach(function(p){pBy[p.料號]=p;});
+  var reconSet=pchomeReconOrderKeys();
+  var inR=rows.filter(function(r){ var d=r['轉單日期']||''; return (!rng.from||d>=rng.from)&&(!rng.to||d<=rng.to); });
+  var rev=0,qty=0,cost=0,missCost=0,unrecN=0,unrecAmt=0;
+  inR.forEach(function(r){ rev+=(r['成本小計']||0)/1.05; qty+=(r['下訂']||0);
+    var p=pBy[r['料號']]; if(p&&p.cost!=null) cost+=Number(p.cost)*(r['下訂']||0); else if((r['成本小計']||0)>0) missCost++;
+    if(!reconSet[r.key]){ unrecN++; unrecAmt+=(r['成本小計']||0); } });
+  var profit=rev-cost, margin=(rev>0)?profit/rev:null;
+  var toISO=function(d){return String(d||'').replace(/\//g,'-');};
+  // 狀態列
+  var statusRow='<div class="mm-row" style="margin:12px 0 6px;gap:16px;font-size:12px;color:#374151;flex-wrap:wrap">'
+    +'<span>累積 <b>'+rows.length+'</b> 筆</span><span>涵蓋轉單日 <b>'+esc(dmin)+'</b> ~ <b>'+esc(dmax)+'</b></span><span>最後更新 <b>'+esc(最後更新)+'</b></span></div>';
+  // 區間選單 + 快捷
+  var ctrl='<div class="mm-row" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
+    +'<span class="mm-field"><span class="mm-lbl">轉單日 起</span><input type="date" value="'+esc(toISO(rng.from))+'" onchange="pchomeOrderRangeSet(\''+shop+'\',\'from\',this.value)" style="border:1px solid #d1d5db;border-radius:5px;padding:3px 6px;font-size:13px"></span>'
+    +'<span class="mm-field"><span class="mm-lbl">迄</span><input type="date" value="'+esc(toISO(rng.to))+'" onchange="pchomeOrderRangeSet(\''+shop+'\',\'to\',this.value)" style="border:1px solid #d1d5db;border-radius:5px;padding:3px 6px;font-size:13px"></span>'
+    +'<button class="mm-chip" onclick="pchomeOrderQuick(\''+shop+'\',\'thisMonth\')">本月</button>'
+    +'<button class="mm-chip" onclick="pchomeOrderQuick(\''+shop+'\',\'lastMonth\')">上月</button>'
+    +'<button class="mm-chip" onclick="pchomeOrderQuick(\''+shop+'\',\'7d\')">近 7 天</button>'
+    +'<button class="mm-chip" onclick="pchomeOrderQuick(\''+shop+'\',\'30d\')">近 30 天</button>'
+    +'<span style="color:#9ca3af;font-size:12px">區間內 '+inR.length+' 筆</span></div>';
+  // 四張合計卡
+  var kc=function(label,info,val,color){ return '<div class="mm-kpi"><div class="mm-kpi-l">'+label+(info?' <span class="mm-info" title="'+esc(info)+'">?</span>':'')+'</div><div class="mm-kpi-v"'+(color?' style="color:'+color+'"':'')+'>'+val+'</div></div>'; };
+  var mColor=(margin==null)?'#9ca3af':(margin>=0.25?'#059669':(margin>=0.15?'#d97706':'#dc2626'));
+  var cards='<div class="mm-kpis">'
+    +kc('營收（未稅）','區間內 Σ成本小計 ÷ 1.05（成本小計＝含稅營收、已驗證＝對帳資料段0 應付金額；不經數量欄換算）', pchomeMoney(rev))
+    +kc('銷量','區間內 Σ下訂時數量（不用應出貨數量：37 筆有 34 對得上、會漏算已計費但應出貨=0 的）', pchomeNum(qty)+' 件')
+    +kc('成本','商品成本 × 下訂時數量（product.cost 凍結值）'+(missCost?'；⚠ '+missCost+' 筆缺成本未計→毛利偏高':''), pchomeMoney(cost))
+    +kc('毛利／毛利率（未扣費用）','營收 − 成本；毛利率＝毛利 ÷ 營收。⚠ 此頁<b>未扣平台費用</b>、非淨利——實際淨利率請看總表（帳務月，本期約 39.6%）', pchomeMoney(profit)+' <span style="font-size:13px;color:'+mColor+'">('+pchomePct(margin)+' <span style="color:#9ca3af">未扣費用</span>)</span>', '')
+    +'</div>';
+  // 說明橫幅（momo 未對帳語彙）+ 尚未對帳
+  var banner='<div class="mm-banner mm-banner-warn">⚠ <b>即時數字、非已對帳</b>——此頁營收來自轉單訂單明細（約週更），對帳單出來前的估算；<b>費用與淨利請看總表（帳務月）</b>，帳務權威以對帳資料為準。'
+    +(unrecN?'<br>區間內<b> '+unrecN+' </b>筆<b>尚未對帳</b>（未出現在對帳資料）· 含稅 <b>'+pchomeMoney(unrecAmt)+'</b>。':'<br>區間內所有訂單都已在對帳資料中（已對帳）。')+'</div>';
+  // 逐筆表
+  var td=function(v,extra){ return '<td style="padding:3px 6px;'+(extra||'')+'">'+esc(String(v==null?'':v))+'</td>'; };
+  var grp=function(k){ k=String(k||''); var i=k.lastIndexOf('-'); return i>0?k.slice(0,i):k; };
+  var sorted=inR.slice().sort(function(a,b){ var da=a['轉單日期']||'',db=b['轉單日期']||''; if(da!==db)return da<db?1:-1; return grp(a.key)<grp(b.key)?-1:1; });   // 轉單日新→舊
+  var body=sorted.length? sorted.map(function(r){
+    var recd=!!reconSet[r.key];
+    var badge=recd?'<span class="mm-status ok">已對帳</span>':'<span class="mm-status no">尚未對帳</span>';
+    return '<tr style="border-top:1px solid #f3f4f6">'
+      +td(r.key,'font-family:monospace;white-space:nowrap')+'<td style="padding:3px 6px">'+badge+'</td>'
+      +td(r['轉單日期'],'white-space:nowrap')+td(r['出貨日期'],'white-space:nowrap;color:#9ca3af')
+      +td(r['商品編號'],'font-family:monospace')+td(r['料號'],'font-family:monospace')+td(r['商品名'])+td(r['規格']||'')
+      +td(r['下訂'],'text-align:right')+td(r['取消'],'text-align:right;color:#9ca3af')+td(r['應出貨'],'text-align:right;color:#9ca3af')
+      +td(r['單位成本'],'text-align:right')+td(r['成本小計'],'text-align:right')
+      +'<td style="padding:3px 6px;text-align:right">'+pchomeMoney((r['成本小計']||0)/1.05)+'</td>'
+      +'<td style="padding:3px 6px">'+(r['確認']||'')+'</td></tr>';
+  }).join('') : '<tr><td colspan="15" style="padding:8px;color:#9ca3af">此區間無訂單</td></tr>';
+  var table='<div style="border:1px solid #eee;border-radius:10px;padding:12px;margin-top:12px">'
+    +'<div style="font-weight:600;margin-bottom:6px">逐筆訂單（區間內 '+sorted.length+' 筆）<span style="font-weight:400;color:#9ca3af;font-size:12px"> · 來源：轉單訂單明細（約週更）</span></div>'
+    +'<div style="max-height:420px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="text-align:left;color:#6b7280">'
+    +'<th style="padding:3px 6px">訂單編號-序號</th><th style="padding:3px 6px">對帳</th><th style="padding:3px 6px">轉單日期</th><th style="padding:3px 6px">出貨日期</th><th style="padding:3px 6px">商品編號</th><th style="padding:3px 6px">料號</th><th style="padding:3px 6px">商品名</th><th style="padding:3px 6px">規格</th><th style="padding:3px 6px;text-align:right">下訂</th><th style="padding:3px 6px;text-align:right">取消</th><th style="padding:3px 6px;text-align:right">應出貨</th><th style="padding:3px 6px;text-align:right">單位成本</th><th style="padding:3px 6px;text-align:right">成本小計</th><th style="padding:3px 6px;text-align:right">營收(未稅)</th><th style="padding:3px 6px">確認</th></tr></thead><tbody>'+body+'</tbody></table></div>'
+    +'<div style="font-size:11px;color:#9ca3af;margin-top:6px">日期基準＝轉單日期；「取消/應出貨」僅顯示、不用於營收（營收＝成本小計÷1.05）；「對帳」欄＝該訂單是否已出現在對帳資料。</div></div>';
+  box.innerHTML=statusRow+ctrl+cards+banner+table;
 }
 
 // ── 商品同步：上架清單上傳 → 全商品主檔（整份覆蓋）＋✎成本編輯＋三態＋缺貨標記 ──
@@ -23728,7 +23865,7 @@ function pchomeRenderReconInfo(shop){
   var odCard='<div style="border:1px solid #eee;border-radius:10px;padding:12px;margin-top:12px">'
     +'<div style="font-weight:600;margin-bottom:6px">訂單貨款明細（'+(shop==='寄倉'?'寄倉訂單':'一般轉單')+'，'+orows.length+' 列）<span style="font-weight:400;color:#9ca3af;font-size:12px"> · 來源：對帳資料（段 '+PCHOME_SEG[shop]+'）</span></div>'
     +'<div style="max-height:360px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="text-align:left;color:#6b7280"><th style="padding:3px 6px">訂單編號-序號</th><th style="padding:3px 6px">商品編號</th><th style="padding:3px 6px">商品名稱</th><th style="padding:3px 6px">規格</th><th style="padding:3px 6px;text-align:right">數量</th><th style="padding:3px 6px;text-align:right">單位成本</th><th style="padding:3px 6px;text-align:right">應付金額</th><th style="padding:3px 6px">單號確認日</th><th style="padding:3px 6px">轉單日期</th><th style="padding:3px 6px">出貨單號</th><th style="padding:3px 6px">廠商料號</th></tr></thead><tbody>'+odRows+'</tbody></table></div>'
-    +'<div style="font-size:11px;color:#9ca3af;margin-top:6px">歸期依<b>單號確認日</b>（非轉單日期）；出貨單號為 12 位字串；同單多序相鄰排列（分組＝最後一個連字號前）。</div></div>';
+    +'<div style="font-size:11px;color:#9ca3af;margin-top:6px">帳務月由對帳資料的<b>列帳日期區間</b>決定（逐列日期基準為<b>轉單日期</b>）；出貨單號為 12 位字串；同單多序相鄰排列（分組＝最後一個連字號前）。「單號確認日」欄為檔案原值、僅顯示、不決定歸期。</div></div>';
   var listRows=months.map(function(k){ var r=all[k]; return '<li style="padding:2px 0">'+_momoEsc(k)+' 期（'+_momoEsc(r.期間||'')+'；匯出 '+_momoEsc(r.匯出時間||'未知')+'）</li>'; }).join('');
   box.innerHTML=timeHdr+diffCard+feeCard+manualCard+odCard
     +'<div style="margin-top:12px;font-size:12px;color:#6b7280"><b>已存對帳（帳務月）</b>（主鍵＝帳務月＝區間起始日正規化，重傳整份覆蓋、不累加）：<ul style="margin:4px 0 0 18px">'+listRows+'</ul></div>';
@@ -24193,7 +24330,7 @@ function pchomeProfitTabHTML(shop){
   var openChip=open?'<span class="mm-status no" title="今天仍在帳務區間內，資料每天會變、不與上期比成長">本期未完</span>':'';
   var ctrl='<div class="mm-row" style="margin-bottom:10px">'
     +'<span class="mm-field"><span class="mm-lbl">帳務月</span><select class="mm-sel" onchange="pchomeSetProfitMonth(\''+shop+'\',this.value)">'+monthOpts+'</select></span>'
-    +'<span class="mm-field" style="color:#9ca3af;font-size:12px">區間 '+esc(entry.期間||'')+'　·　歸期依單號確認日</span>'
+    +'<span class="mm-field" style="color:#9ca3af;font-size:12px">區間 '+esc(entry.期間||'')+'　·　帳務月依對帳資料列帳區間（日期基準＝轉單日期）</span>'
     +'<span class="mm-field">'+feeChip+(openChip?' '+openChip:'')+'</span></div>';
   // KPI 5 卡（完全照 momo momoOverviewHTML：總營收｜總淨利｜加權淨利率｜總銷量｜動銷率，每張 ? 提示＋vs上期 delta；下方琥珀狀態橫幅）。
   //   費用卡拿掉（費用已含在總淨利＝營收−成本−費用，資訊沒消失、只換位置）。狀態改到 KPI 下方橫幅（文字照 PChome 實況，非 momo 的費率/退貨率估算）。
@@ -24365,6 +24502,6 @@ function pchomeExportExcel(shop){
     XLSX.writeFile(wb, 'PChome_'+safe+'_'+(key||'')+'_總表.xlsx');
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
-Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeListingFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeStatementHtmFile, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc,
+Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeListingFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeStatementHtmFile, pchomeOrderFile, pchomeOrderRangeSet, pchomeOrderQuick, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc,
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel });
