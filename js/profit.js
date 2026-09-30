@@ -22784,6 +22784,11 @@ function pchomeUnescape(v){ if(v==null) return ''; v=String(v); var prev;
     if(v.length>=2&&v.startsWith('"')&&v.endsWith('"')){ v=v.slice(1,-1).replace(/""/g,'"'); continue; }
   }while(v!==prev); return v; }
 var PCHOME_NUM_FIELDS=new Set(['數量','單位成本','成本小計','團購折扣','應付金額']);
+// HTML entity decode（對帳明細文字欄是 PChome 自由輸入、含 &#21173; 數字實體＋常見具名實體）。套在所有文字欄。
+function pchomeDecodeEntities(s){ if(s==null) return ''; s=String(s); if(s.indexOf('&')<0) return s;
+  return s.replace(/&#(\d+);/g,function(m,d){ try{ return String.fromCodePoint(+d); }catch(e){ return m; } })
+          .replace(/&#x([0-9a-fA-F]+);/g,function(m,h){ try{ return String.fromCodePoint(parseInt(h,16)); }catch(e){ return m; } })
+          .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;|&#39;/g,"'").replace(/&amp;/g,'&'); }
 function _pchomeCell(line,i){ var a=String(line).split('\t'); return a[i]!=null?a[i]:''; }
 function _pchomeBlank(line){ return String(line||'').replace(/[\t\s]/g,'')===''; }
 function parsePChomeReconcile(text){
@@ -22801,16 +22806,26 @@ function parsePChomeReconcile(text){
       subtotals.push({header:block[hi].split('\t').map(pchomeUnescape), values:(block[hi+1]||'').split('\t').map(pchomeUnescape)});
       hi+=2;
     }
-    var headerLine=(hi<block.length && !_pchomeBlank(block[hi]))?block[hi]:'';
-    var headers=headerLine?headerLine.split('\t').map(pchomeUnescape):[];
-    var rows=[];
-    for(var j=(headerLine?hi+1:hi);j<block.length;j++){
-      if(_pchomeBlank(block[j])) break;
-      var raw=block[j].split('\t'), row={_raw:raw};
-      headers.forEach(function(h,k){ var val=pchomeUnescape(raw[k]!=null?raw[k]:''); if(PCHOME_NUM_FIELDS.has(h)) val=Number(val); else if(h==='規格名稱') val=val.trim(); row[h]=val; });
-      rows.push(row);
+    // 明細區塊：一段裡可能有 0~N 個（各自表頭+資料，用空白列分隔）。段12 行銷推廣費逐筆是其一；未來子項可能多個。
+    //   段0（無 subtotals）就是單一區塊＝訂單貨款，行為與舊版一致（headers/rows 取第一區塊）。
+    var buildRow=function(hdr,line){ var raw=String(line).split('\t'), row={_raw:raw};
+      hdr.forEach(function(h,k){ var v=raw[k]!=null?raw[k]:''; v=pchomeUnescape(v);
+        if(PCHOME_NUM_FIELDS.has(h)) v=Number(v);
+        else { v=pchomeDecodeEntities(v); if(h==='規格名稱') v=v.trim(); }
+        row[h]=v; });
+      return row; };
+    var detailBlocks=[], p=hi;
+    while(p<block.length){
+      while(p<block.length && _pchomeBlank(block[p])) p++;                 // 跳空白列
+      if(p>=block.length) break;
+      var hdr=block[p].split('\t').map(pchomeUnescape); p++;               // 本區塊表頭
+      var brows=[];
+      while(p<block.length && !_pchomeBlank(block[p])){ brows.push(buildRow(hdr,block[p])); p++; }
+      detailBlocks.push({headers:hdr, rows:brows});
     }
-    var seg={段序:s,對帳項目:對帳項目,總額:總額,headers:headers,rows:rows};
+    var headers=detailBlocks.length?detailBlocks[0].headers:[];
+    var rows=detailBlocks.length?detailBlocks[0].rows:[];
+    var seg={段序:s,對帳項目:對帳項目,總額:總額,headers:headers,rows:rows,detailBlocks:detailBlocks};
     if(subtotals.length) seg.subtotals=subtotals;
     segments.push(seg);
   }
@@ -22869,7 +22884,47 @@ var PCHOME_SEG_GROUP={
   '行銷獎勵金(PChome開發票)':'D4', '進貨退出運費(寄倉商品)':'D9', '分攤安裝費(寄倉商品)':'D10', '專案獎勵金(PChome開發票)':'D12'
 };
 function pchomeSegGroup(對帳項目){ return PCHOME_SEG_GROUP[String(對帳項目||'').trim()]||null; }        // 'A1'/'B1'/'D2'… 或 null（未知段）
-function pchomeIsFeeSeg(s){ var g=pchomeSegGroup(s&&s.對帳項目); return !!g && g.charAt(0)==='D'; }        // 只有 (D) 組＝費用
+// 費用組＝明確白名單（B1/C1 折讓單當費用[定案①]、D1..D15）。★不用前綴判斷（前綴判斷曾差點把 A/新段誤判；此為明確清單）。
+var PCHOME_FEE_GROUPS=new Set(['B1','C1','D1','D2','D3','D4','D5','D6','D7','D8','D9','D10','D11','D12','D13','D14','D15']);
+function pchomeIsFeeSeg(s){ return PCHOME_FEE_GROUPS.has(pchomeSegGroup(s&&s.對帳項目)); }        // 白名單：B1/C1/D1..D15
+// 行銷/專案獎勵金段（B1/C1/D4/D12）＝「子項迷你表＋逐筆明細」或「科目/金額」版型 → 拆成 fixed/variable。
+var PCHOME_MKT_SEGS=new Set(['行銷獎勵金(PChome開發票)','行銷獎勵金(貴公司已開折讓單)','專案獎勵金(PChome開發票)','專案獎勵金(貴公司已開折讓單)']);
+function pchomeIsMktSeg(s){ return PCHOME_MKT_SEGS.has(String(s&&s.對帳項目||'').trim()) || !!(s&&s.subtotals&&s.subtotals.length); }
+// 把一個獎勵金段拆成 { segmentName, variant, total, fixed:[{name,amount}], variable:[{name,total,lines:[…]}], unallocatable, warnings:[] }
+//   版型以「實際看到的表頭形狀」判斷（不靠段名猜）：子項表頭皆 `XXX-應付金額` → subitem；含「科目|金額」→ account（未知長相、警示不強解）。
+//   變動子項辨識：逐筆明細區塊的金額欄名（去「-應付金額」）比對子項名 → 命中的是 variable，其餘 fixed。loop 多個逐筆區塊。
+function pchomeBuildMarketingSeg(seg){
+  var out={ segmentName:String(seg.對帳項目||'').trim(), variant:'unknown', total:Number(seg.總額)||0, fixed:[], variable:[], unallocatable:0, warnings:[] };
+  var subs=seg.subtotals||[];
+  var sub=null; for(var i=0;i<subs.length;i++){ var h=subs[i].header||[]; if(h.length && h.every(function(c){return /應付金額$/.test(String(c||'').trim());})){ sub=subs[i]; break; } }
+  if(sub){
+    out.variant='subitem';
+    var names=sub.header.map(function(h){ return String(h||'').replace(/-?應付金額$/,'').trim(); });
+    var vals=(sub.values||[]).map(function(v){ return Number(pchomeUnescape(String(v)))||0; });
+    var detailByName={};
+    (seg.detailBlocks||[]).forEach(function(db){
+      var amtIdx=-1, amtName=''; (db.headers||[]).forEach(function(h,k){ if(/應付金額$/.test(String(h||'').trim())){ amtIdx=k; amtName=String(h).replace(/-?應付金額$/,'').trim(); } });
+      if(amtIdx<0) return;   // 無金額欄的區塊（如子項迷你表本身被誤收）→ 跳過
+      detailByName[amtName]=(db.rows||[]).map(function(r){ return {
+        date:r['轉單日期']||'', 訂單序號:String(r['訂單編號-序號']||'').trim(), 商品編號:String(r['商品編號']||'').trim(),
+        productName:r['商品名稱']||'', category:r['商品館']||'', activityName:r['行銷活動名稱']||'', amount:Number(r[db.headers[amtIdx]])||0, sku:'' }; });
+    });
+    names.forEach(function(nm,k){ if(nm==='') return;
+      if(detailByName[nm]) out.variable.push({name:nm, total:vals[k], lines:detailByName[nm]});
+      else out.fixed.push({name:nm, amount:vals[k]}); });
+    // (a) 子項加總 === 段總額
+    var sumFixed=out.fixed.reduce(function(a,b){return a+b.amount;},0);
+    var sumVarVal=out.variable.reduce(function(a,v){return a+v.total;},0);
+    if(Math.abs(sumFixed+sumVarVal-out.total)>0.5){ var d=out.total-(sumFixed+sumVarVal); out.unallocatable+=d; out.warnings.push('段「'+out.segmentName+'」子項加總 '+(sumFixed+sumVarVal)+' ≠ 總額 '+out.total+'（差 '+d+'，記 unreconciled）'); }
+    // (b) 逐筆加總 === 該子項值列
+    out.variable.forEach(function(v){ var ls=v.lines.reduce(function(x,l){return x+l.amount;},0); if(Math.abs(ls-v.total)>0.5){ var d=v.total-ls; out.unallocatable+=d; out.warnings.push('子項「'+v.name+'」逐筆加總 '+ls+' ≠ 值列 '+v.total+'（差 '+d+'，歸無法歸屬）'); } });
+  } else {
+    var hdrs=(seg.detailBlocks||[]).map(function(db){return (db.headers||[]).join('|');}).filter(Boolean);
+    out.variant=hdrs.some(function(h){return /科目/.test(h)&&/金額/.test(h);})?'account':'unknown';
+    if(out.total>0.5){ out.unallocatable+=out.total; out.warnings.push('段「'+out.segmentName+'」為 '+out.variant+' 版型（表頭：'+(hdrs.join(' ; ')||'無')+'），總額 '+out.total+' 未拆解、全額記為無法歸屬（有資料後再定拆法）'); }
+  }
+  return out;
+}
 // (D) 子項代號→名稱（fallback；解析時優先用貼上內容自帶的品名）。D1-D15 完整 15 項，CSV 只有其中 7 項有對應段。
 var PCHOME_D_LABELS={ D1:'退貨物流費',D2:'罰金',D3:'分攤運費',D4:'行銷獎勵金(PChome開發票)',D5:'簡訊費',D6:'包材費',D7:'倉儲費',D8:'倉庫作業處理費',D9:'進貨退出運費',D10:'分攤安裝費',D11:'產品責任險',D12:'專案獎勵金(PChome開發票)',D13:'廣告費',D14:'加值服務',D15:'第三方廣告代收款' };
 var _pchomePastePreview={};   // {shop: 解析結果}（解析後暫存，按儲存才寫入 store；不直接落地）
