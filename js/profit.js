@@ -9315,12 +9315,13 @@ const KPI_GROUPS=[
     shopSince:{'mo+2號店(玩樂)':'2026-10'},
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收(進價稅)'},{k:'cost',l:'商品成本'},{k:'ret',l:'退貨金額'},{k:'ship',l:'寄倉運費'},{k:'misc',l:'各項費用'},{k:'material',l:'耗材'},{k:'receivable',l:'應收帳款'}],
     formula:[
-      // ⚠ 稅金／純利／純利率用的是 (營收(進價稅) − 退貨金額)，【不是】實際營收欄 —— 實際營收手動覆蓋只改那一格顯示（與客單價），不影響純利。
+      // 2026-10-01：稅金／純利／純利率改用「實際營收」這一格（有手動覆蓋就用覆蓋值，沒有就是 營收(進價稅) − 退貨金額）。
+      //   ⚠ 依賴 _kpiCalcAll 依 formula 陣列順序填值：actualRev 必須排在 tax／pure 前面。
       //   稅金手填了就用手填值（_kpiCalcAll：有值就不算公式），純利跟著用手填的稅金。
-      {k:'actualRev',l:'實際營收',fmt:'money',calc:d=>d.rev-d.ret,desc:'實際營收 = 營收(進價稅) − 退貨金額（可手動覆蓋；覆蓋只改這一格，不影響稅金、純利）'},
-      {k:'tax',l:'稅金(5%)',fmt:'money',calc:d=>(d.rev-d.ret)*0.05,desc:'稅金 = (營收(進價稅) − 退貨金額) × 5%（稅金欄有手填值時用手填值）'},
-      {k:'pure',l:'純利(實收)',fmt:'money',calc:d=>(d.rev-d.ret)-d.cost-d.ship-d.misc-d.tax-d.material,desc:'純利 = (營收(進價稅) − 退貨金額) − 商品成本 − 寄倉運費 − 各項費用 − 稅金 − 耗材'},
-      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>(d.rev-d.ret)>0?((d.rev-d.ret)-d.cost-d.ship-d.misc-d.tax-d.material)/(d.rev-d.ret):0,desc:'純利率 = 純利 ÷ (營收(進價稅) − 退貨金額)'},
+      {k:'actualRev',l:'實際營收',fmt:'money',calc:d=>d.rev-d.ret,desc:'實際營收 = 營收(進價稅) − 退貨金額（可手動覆蓋）'},
+      {k:'tax',l:'稅金(5%)',fmt:'money',calc:d=>d.actualRev*0.05,desc:'稅金 = 實際營收 × 5%（稅金欄有手填值時用手填值）'},
+      {k:'pure',l:'純利(實收)',fmt:'money',calc:d=>d.actualRev-d.cost-d.ship-d.misc-d.tax-d.material,desc:'純利 = 實際營收 − 商品成本 − 寄倉運費 − 各項費用 − 稅金 − 耗材'},
+      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.actualRev>0?(d.actualRev-d.cost-d.ship-d.misc-d.tax-d.material)/d.actualRev:0,desc:'純利率 = 純利 ÷ 實際營收'},
     ],
     // 填寫模式裡也顯示成一欄的公式欄（灰底輸入框、placeholder＝公式值、可手動覆蓋、不算填寫進度）
     fillFormula:['actualRev'],
@@ -9517,7 +9518,7 @@ function _kpiGroupTotals(row,group){
     //     _kpiGroupTotals(row,g) 與 _kpiGroupTotals(prevRow,g) 兩行），所以基期會一起修好，
     //     不會出現一邊修好一邊沒修 —— 那正是該處註解要求「本期與基期一律走同一支」的理由。
     const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop,row),group);
-    totalRev+=d.rev||0;
+    totalRev+=_kpiRealRev(d);   // 2026-10-01：統一用實際營收（MOMO＝實際營收欄；其他通路的營收欄本來就是實際營收）
     totalPure+=d[pureKey]||0;
   });
   if(group.commonCostLabel)totalPure-=(row[group.key+'Common']||0);
@@ -9783,7 +9784,7 @@ function _kpiWaterfallHtml(w){
   const bars=[{l:'營收',v:w.rev,from:0,to:100,cls:'km-wf-rev',kind:'rev'}];
   let rem=100;
   KPI_WF_CATS.map(c=>({l:c.l,v:w.cat[c.k]}))
-    .concat([{l:'其他（稅金、耗材、退貨等）',v:w.other,t:'稅金、耗材、退貨、各項費用等（＝營收 − 前四項 − 純利，用差額算）'}])
+    .concat([{l:'其他（稅金、耗材等）',v:w.other,t:'稅金、耗材、各項費用等（＝營收 − 前四項 − 純利，用差額算；營收已是實際營收＝已扣退貨，退貨不在這裡）'}])
     .forEach(x=>{const a=rem-pct(x.v);bars.push({l:x.l,v:x.v,from:Math.min(a,rem),to:Math.max(a,rem),cls:'km-wf-cost',t:x.t,kind:'cost'});rem=a;});
   bars.push({l:'純利',v:w.pure,from:Math.min(0,rem),to:Math.max(0,rem),cls:w.pure>=0?'km-wf-pure':'km-wf-loss',kind:'pure'});
   // 右側文字：「金額 · 佔營收 %」。成本類是扣掉的 → 前面加「−」（差額「其他」若是負值則顯示「+」）；
@@ -9889,8 +9890,8 @@ function _kpiChannelTableHtml(row,prevRow){
   const head='<div class="kc-row kc-h1"><div class="kc-c"></div>'
     +'<div class="kc-c kc-glabel kc-g1 kc-s1">營收</div>'
     +'<div class="kc-c kc-glabel kc-g1 kc-s2">純利'+_kpiInfoHtml('各通路純利＝該通路各店純利加總',KPI_GROUPS.map(g=>{const pk=g.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'));return pk&&pk.desc?g.title+'：'+pk.desc:'';}))+'</div>'
-    // 這張表的通路純利率是「通路純利合計 ÷ 通路營收合計」（_kpiGroupTotals 的 pureRateAgg），分母是各通路的「營收」欄（rev）——從欄位名稱產生
-    +'<div class="kc-c kc-glabel kc-g1 kc-gend kc-s3">純利率'+_kpiInfoHtml('這張表的純利率＝純利 ÷ 營收（通路各店加總後再除）',KPI_GROUPS.map(g=>g.title+'：純利 ÷ '+((g.manual.find(f=>f.k==='rev')||{}).l||'營收')).concat(['合計的純利率 = 合計純利 ÷ 合計營收']))+'</div>'
+    // 這張表的通路純利率是「通路純利合計 ÷ 通路實際營收合計」（_kpiGroupTotals 的 pureRateAgg）；分母名稱從欄位產生（MOMO＝實際營收，其他通路＝營收欄）
+    +'<div class="kc-c kc-glabel kc-g1 kc-gend kc-s3">純利率'+_kpiInfoHtml('這張表的純利率＝純利 ÷ 實際營收（通路各店加總後再除）',KPI_GROUPS.map(g=>g.title+'：純利 ÷ '+(((g.formula.find(f=>f.k==='actualRev')||g.manual.find(f=>f.k==='rev'))||{}).l||'營收')).concat(['合計的純利率 = 合計純利 ÷ 合計實際營收']))+'</div>'
     +'<div class="kc-c"></div></div>'
     +line('kc-h2','',['通路','本月','較上月','本月','較上月','本月','較上月','填寫進度']);
   const body=KPI_GROUPS.map(g=>{
@@ -9905,7 +9906,7 @@ function _kpiChannelTableHtml(row,prevRow){
     ]);
     if(open){
       g.shops.forEach((s,i)=>{
-        const d=_kpiShopCalc(row,g,s);const rev=Number(d.rev)||0,pure=Number(d[cur.pureKey])||0;
+        const d=_kpiShopCalc(row,g,s);const rev=_kpiRealRev(d),pure=Number(d[cur.pureKey])||0;   // 實際營收（同通路列）
         html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','','']);
       });
     }
@@ -10052,7 +10053,7 @@ function _kpiFillHtml(row){
       ?`<span class="km-note${note?' has':''}" onclick="editKpiFieldNote('${month}','${group.key}','${f.k}',this)" title="${note?'備註：'+_kpiEscAttr(note)+'（點擊修改）':'點擊新增這個月的備註'}">${note?'●':'＋備註'}</span>`:'';
     if(f.fx)return `<th><div class="km-th">${f.l}${_kpiInfoHtml(group.title+' '+f.l,[f.desc])}</div></th>`;
     return `<th><div class="km-th">${f.l}${noteBtn}</div></th>`;
-  }).join('')}<th class="km-n km-f-rohead km-f-ro-first" title="依公式自動計算，不能直接改">純利${_kpiInfoHtml(group.title+' 純利',[_kpiDesc(group,pureKey)].concat(group.formula.filter(x=>x.k==='tax').map(x=>x.desc)))}</th><th class="km-n km-f-rohead" title="依公式自動計算，不能直接改">純利率${_kpiInfoHtml(group.title+' 純利率',[_kpiDesc(group,'pureRate')])}</th></tr>`;
+  }).join('')}<th class="km-n km-f-rohead km-f-ro-first" title="依公式自動計算，不能直接改">純利${_kpiInfoHtml(group.title+' 純利',[_kpiDesc(group,pureKey),_kpiDesc(group,'tax'),_kpiDesc(group,'actualRev')])}</th><th class="km-n km-f-rohead" title="依公式自動計算，不能直接改">純利率${_kpiInfoHtml(group.title+' 純利率',[_kpiDesc(group,'pureRate')])}</th></tr>`;
   const body=group.shops.map((shop,ri)=>{
     const d=_kpiShopCalc(row,group,shop);
     const cells=cols.map((f,ci)=>{
@@ -10942,7 +10943,7 @@ function _kpiShopAnnualTotal(rows,year,group,shop,pureKey){
     const row=rows.find(r=>r.month===month);
     if(!row)continue;
     const d=_kpiCalcAll(_kpiRawForCalc(row[group.key]?.[shop]||{},group,shop,row),group);
-    rev+=d.rev||0;pure+=d[pureKey]||0;
+    rev+=_kpiRealRev(d);pure+=d[pureKey]||0;   // 實際營收（同 _kpiGroupTotals）
   }
   return{rev,pure};
 }
@@ -11014,7 +11015,7 @@ function _kpiYearViewHtml(){
         }
         // 合併／不適用欄位歸零，與月結表明細、單店全年共用同一支（原本三處各寫一份、逐字相同）。
         const d=_kpiCalcAll(_kpiRawForCalc(row[g.key]?.[shop]||{},g,shop,row),g);
-        const pureV=d[pureKey]||0,revV=d.rev||0;
+        const pureV=d[pureKey]||0,revV=_kpiRealRev(d);   // 實際營收（同 _kpiGroupTotals）
         annualRev+=revV;annualPure+=pureV;
         monthGrandRev[i]+=revV;monthGrandPure[i]+=pureV;gMonthRev[i]+=revV;
         monthRevTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:#6b7280">${revV?fmtN(Math.round(revV)):'—'}</td>`);
