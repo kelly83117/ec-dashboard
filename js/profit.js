@@ -10608,10 +10608,10 @@ async function __kpiMomoRestore(month){
   });
 }
 // ── 甲配耗材一次性整理（2026-10-01，甲配耗材改成「自動＝訂單數×3、可覆蓋」時用）──
-//   舊的「從對帳單帶入」會寫 material＋materialFormula('=訂單數*3')。新做法不再存公式：
-//   · 公式那格的值＝訂單數×3 → 刪掉值和公式，改由 autoFill 自動算（值不變）
-//   · 值≠訂單數×3（訂單數後來改過）→ 只刪公式，值留著當手動覆蓋（值不變）
-//   · 純數字（沒有公式）的格子不動＝手動覆蓋
+//   存的值（不論純數字或舊「從對帳單帶入」寫的 material＋materialFormula）：
+//   · 值＝訂單數×3 → 刪掉值（有公式一起刪），改由 autoFill 自動算（值不變）
+//   · 值≠訂單數×3 → 保留當手動覆蓋（值不變）；有公式的只刪公式
+//   · 訂單數空著 → 算不出預設，保留原值不動
 //   __kpiMomoMaterialMigrate()：讀雲端現值（伺服器），列預覽（console.table＋視窗），按確認才【所有月份一次原子寫入】。
 async function __kpiMomoMaterialMigrate(){
   const ck=window.__cloudKpi;
@@ -10621,28 +10621,32 @@ async function __kpiMomoMaterialMigrate(){
   const shop='MOMO-甲配',items=[];
   Object.keys(d.months||{}).sort().forEach(m=>{
     const c=((d.months[m]||{}).momo||{})[shop];
-    if(!c||c.materialFormula==null)return;
+    if(!c||(c.material==null&&c.materialFormula==null))return;
     const exp=(c.qty==null||c.qty==='')?null:(Number(c.qty)||0)*3;
-    items.push({month:m,qty:c.qty,material:c.material,formula:c.materialFormula,expect:exp,auto:exp!=null&&Number(c.material)===exp});
+    const eq=exp!=null&&c.material!=null&&Number(c.material)===exp, hasF=c.materialFormula!=null;
+    const act=eq?'auto':(hasF?'dropFormula':'keep');
+    items.push({month:m,qty:c.qty,material:c.material,formula:c.materialFormula,expect:exp,act,
+      label:act==='auto'?'刪掉'+(hasF?'（連同公式）':'')+'→改自動計算（值不變）':act==='dropFormula'?'只刪公式→保留手動覆蓋（值不變）':(exp==null?'訂單數空著→保留手動覆蓋（不動）':'不等於訂單數×3→保留手動覆蓋（不動）')});
   });
-  console.log('%c[甲配耗材整理] 有公式的月份 '+items.length+' 個（純數字的月份不動）','color:#5b5fcf;font-weight:700');
-  console.table(items.map(x=>({月份:x.month,訂單數:x.qty,目前值:x.material,公式:x.formula,'訂單數×3':x.expect,處理:x.auto?'刪值與公式→自動計算（值不變）':'只刪公式→值留作手動覆蓋（值不變）'})));
-  if(!items.length){if(typeof showToast==='function')showToast('甲配耗材沒有需要整理的月份','success');return{items:0};}
+  const todo=items.filter(x=>x.act!=='keep');
+  console.log('%c[甲配耗材整理] 有存值的月份 '+items.length+' 個，要改 '+todo.length+' 個','color:#5b5fcf;font-weight:700');
+  console.table(items.map(x=>({月份:x.month,存的值:x.material,公式:x.formula||'—','訂單數×3':x.expect,處理方式:x.label})));
+  if(!todo.length){if(typeof showToast==='function')showToast('甲配耗材沒有需要整理的月份','success');return{items:0};}
   const by=_kpiWho(),pairs=[];
-  items.forEach(x=>{
+  todo.forEach(x=>{
     const b=['months',x.month,'momo',shop],mb=['meta',x.month,'momo',shop];
-    pairs.push([b.concat('materialFormula'),ck.DELETE],[mb.concat('materialFormula'),{by,at:ck.TS,del:true,src:'migrate'}]);
-    if(x.auto)pairs.push([b.concat('material'),ck.DELETE],[mb.concat('material'),{by,at:ck.TS,del:true,src:'migrate'}]);
+    if(x.formula!=null)pairs.push([b.concat('materialFormula'),ck.DELETE],[mb.concat('materialFormula'),{by,at:ck.TS,del:true,src:'migrate'}]);
+    if(x.act==='auto')pairs.push([b.concat('material'),ck.DELETE],[mb.concat('material'),{by,at:ck.TS,del:true,src:'migrate'}]);
   });
-  const rows=items.map(x=>`<tr><td>${x.month}</td><td class="km-n">${x.qty==null?'—':fmtN(x.qty)}</td><td class="km-n">${_kpiMoney(x.material)}</td><td>${_kpiEscAttr(x.formula)}</td><td class="km-n">${x.expect==null?'—':_kpiMoney(x.expect)}</td><td>${x.auto?'改成自動計算（值不變）':'轉成手動覆蓋（值不變）'}</td></tr>`).join('');
+  const rows=items.map(x=>`<tr class="${x.act==='keep'?'km-au-s':'km-au-w'}"><td>${x.month}</td><td class="km-n">${_kpiMoney(x.material)}${x.formula?`<div class="km-au-note">公式 ${_kpiEscAttr(x.formula)}</div>`:''}</td><td class="km-n">${x.expect==null?'—':_kpiMoney(x.expect)}</td><td class="km-au-st">${x.label}</td></tr>`).join('');
   return new Promise(resolve=>{
-    App.openModal({title:'甲配耗材整理（改成自動計算）',width:'760px',
-      bodyHtml:`<div class="km-au"><div class="km-au-sub">只處理存了公式（materialFormula）的月份，共 <b>${items.length}</b> 個；純數字的月份不動。數字都不會變，純利不變。按確認後一次寫入（${pairs.length} 條路徑）。</div>
-        <div class="km-tablewrap"><table class="km-au-tbl"><thead><tr><th>月份</th><th class="km-n">訂單數</th><th class="km-n">目前值</th><th>公式</th><th class="km-n">訂單數×3</th><th>處理</th></tr></thead><tbody>${rows}</tbody></table></div></div>`,
-      saveLabel:'確認整理 '+items.length+' 個月',
+    App.openModal({title:'甲配耗材整理（改成自動計算）',width:'720px',
+      bodyHtml:`<div class="km-au"><div class="km-au-sub">存的值等於訂單數×3 的改成自動計算，其他保留手動覆蓋。要改 <b>${todo.length}</b> 個月；數字都不會變，純利不變。按確認後一次寫入（${pairs.length} 條路徑）。</div>
+        <div class="km-tablewrap"><table class="km-au-tbl"><thead><tr><th>月份</th><th class="km-n">存的值</th><th class="km-n">訂單數×3</th><th>處理方式</th></tr></thead><tbody>${rows}</tbody></table></div></div>`,
+      saveLabel:'確認整理 '+todo.length+' 個月',
       onCancel:()=>resolve({cancelled:true}),
       onSave:()=>{
-        ck.writePaths(pairs).then(()=>{if(typeof showToast==='function')showToast('甲配耗材已整理 '+items.length+' 個月（值不變）','success');resolve({items:items.length,paths:pairs.length,ok:true});},
+        ck.writePaths(pairs).then(()=>{if(typeof showToast==='function')showToast('甲配耗材已整理 '+todo.length+' 個月（值不變）','success');resolve({items:todo.length,paths:pairs.length,ok:true});},
           e=>{console.error('[甲配耗材整理] 寫入失敗',e);if(typeof showToast==='function')showToast('甲配耗材整理失敗：'+((e&&(e.code||e.message))||e),'error',8000);resolve({ok:false});});
         return true;
       }});
