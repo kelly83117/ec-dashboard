@@ -389,6 +389,13 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .pnm-entry-ins{background:#faf5ff;border-left-color:#7e22ce;}
 .pnm-entry-ins .pnm-entry-date{color:#7e22ce;}
 .pnm-entry-ins .pnm-entry-text{color:#581c87;}
+/* 填寫人灰字（js/profit.js renderPnmList 上方的 _pnmByHtml；只有帶 by 的列才有這個節點）：放在日期欄內、日期下方一行。
+   display:block 換行而不是跟日期同行：.pnm-entry-date 是 nowrap + min-width，同行會把日期欄撐寬、擠壓文字欄。
+   新增類別用 :root 變數（同下方封存唯讀區的做法），不動旁邊寫死 hex 的既有 .pnm-* 樣式。
+   width:0 + min-width:100%：width:0 讓姓名【不參與】日期欄的寬度計算（日期欄照舊由日期文字 + min-width:68px 決定），
+   min-width:100% 再讓它填滿日期欄既有寬度；長名稱（查不到姓名時顯示的 username）就在欄內折行，不會撐寬日期欄、擠壓文字欄。
+   2026-09-30 靜態版面實測：不加這兩條時 20 字 username 把日期欄從 68px 撐到 104px。 */
+.pnm-entry-by{display:block;font-size:10px;font-weight:400;color:var(--text-muted);margin-top:2px;width:0;min-width:100%;white-space:normal;overflow-wrap:anywhere;}
 .pnm-footer{padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;}
 .pnm-close-btn{padding:7px 22px;border:1px solid #e4e6ef;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;}
 /* ── 封存期別唯讀（js/profit.js openNotePopup 的 _pnm.mode：archived / error → .pnm-box.is-readonly；說明條 #pnm-mode-note）──
