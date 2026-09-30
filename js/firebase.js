@@ -601,7 +601,7 @@ try {
   //   每賣場一 doc 各自 1MB 額度，也把「整包 last-write-wins」的覆蓋範圍縮小到單一賣場。
   // doc id 用 ASCII 代號（中文/+ 在 URL/REST/Console 難查）；doc 內存 { shop:'甲配', items:[...] }（保留原名、反查用）。
   // payload 包 {items}：Firestore 一份 doc 是 map、不能頂層存陣列（同 setReport 對陣列 reject 的原因）。
-  const MOMO_SHOP_DOCID = { '甲配':'jia', '乙配':'yi', 'MO+麻吉':'mo_maji', 'MO+森之旅':'mo_senzhilu' };
+  const MOMO_SHOP_DOCID = { '甲配':'jia', '乙配':'yi', 'MO+麻吉':'mo_maji', 'MO+森之旅':'mo_senzhilu', 'MO+玩樂':'mo_wanle' };
   const MOMO_DOCID_SHOP = Object.fromEntries(Object.entries(MOMO_SHOP_DOCID).map(([k,v]) => [v, k]));   // 反查 fallback
   const momoProductsColRef = collection(db, 'momo_products');
   window.__cloudMomo = {
