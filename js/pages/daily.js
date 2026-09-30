@@ -249,6 +249,14 @@ Object.assign(App, {
           const chips = keys.map(k => `<button type="button" class="mm-dp-chip" data-mm-person="${escapeHtml(p.name)}" data-mm-date="${escapeHtml(viewDate)}" data-mm-combo="${escapeHtml(k)}" onclick="momoOpenDpDetailFromEl(this)"><span>${escapeHtml(dispCombo(k))}</span><span style="opacity:.6">·</span><b>${counts[k]}</b></button>`).join('');
           return `<div class="mm-dp-card"><div class="mm-dp-card-h"><span class="mm-dp-card-t">MOMO · 今日調整</span><span class="mm-dp-card-auto">自動更新</span></div><div class="mm-dp-chips">${chips}</div></div>`;
         }
+        // PChome optlog 今日調整（照 MOMO 那支並列；chip 點擊回 optlog 現算明細，處理函式 pchomeOpenDpDetailFromEl 在 profit.js）
+        if (it && it.kind === 'pchome-summary') {
+          const counts = it.counts || {};
+          const keys = Object.keys(counts).filter(k => counts[k]);
+          if (keys.length === 0) return '';
+          const chips = keys.map(k => `<button type="button" class="mm-dp-chip" data-pch-person="${escapeHtml(p.name)}" data-pch-date="${escapeHtml(viewDate)}" data-pch-combo="${escapeHtml(k)}" onclick="pchomeOpenDpDetailFromEl(this)"><span>${escapeHtml(k)}</span><span style="opacity:.6">·</span><b>${counts[k]}</b></button>`).join('');
+          return `<div class="mm-dp-card"><div class="mm-dp-card-h"><span class="mm-dp-card-t">PChome · 今日調整</span><span class="mm-dp-card-auto">自動更新</span></div><div class="mm-dp-chips">${chips}</div></div>`;
+        }
         return `
         <div class="dp-todo-row" data-item-id="${escapeHtml(it.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
           <span style="color:${PERSON_COLORS[p.name] || '#6b7280'};font-size:13px;flex-shrink:0">●</span>
@@ -346,6 +354,9 @@ Object.assign(App, {
         const v = dayEntries[n]; if (!Array.isArray(v)) return;
         const ms = v.find(it => it && it.kind === 'momo-summary');
         if (ms && ms.counts) { const s = Object.values(ms.counts).reduce((a, b) => a + (b || 0), 0); if (s > 0) momoCountByPerson[n] = s; }
+        // PChome 優化紀錄計數（同 MOMO 口徑：該人 pchome-summary counts 總和）→ 併進當日處理商品數
+        const ps = v.find(it => it && it.kind === 'pchome-summary');
+        if (ps && ps.counts) { const s = Object.values(ps.counts).reduce((a, b) => a + (b || 0), 0); if (s > 0) momoCountByPerson[n] = (momoCountByPerson[n] || 0) + s; }
       });
       // 合併計數 + 名單聯集（同 personInfos：3 人在前不變、其餘穩定排序）。3 人無 MOMO → totalCalCount=adjCount、色/標題/數字一字不變。
       const totalCalCount = {};

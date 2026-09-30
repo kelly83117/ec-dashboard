@@ -23869,6 +23869,7 @@ async function pchomeSyncOptlog(shop){   // read-merge-write：讀 app/pchome_op
   try{ localStorage.setItem(k,JSON.stringify(res.merged)); }catch(e){}
   try{ if(Store._profitMem) Store._profitMem[k]=res.merged; }catch(e){}
   try{ if(Store._mem) Store._mem[k]=res.merged; }catch(e){}
+  try{ pchomeUpdateDailyProgress({silent:true}); }catch(e){}   // 合併後工作日誌 pchome-summary counts 跟著更新（照 momoSyncOptlog）
   return res.added;
 }
 // firebase.js app/pchome_optlog 訂閱 → 攤平每 shop 欄回 Store._profitMem['ec_pchome_optlog|'+shop]。dirty 不覆蓋（保住未推）。
@@ -24398,7 +24399,8 @@ function pchomeConfirmSync(shop){
   var keys=checkedEls.map(function(c){return c.getAttribute('data-key');});
   pchomeCloseSyncPreview();
   if(!keys.length) return;
-  Promise.resolve(window.syncToCloud(shop, new Set(keys))).then(function(){ pchomeRenderShop(shop); }).catch(function(){ pchomeRenderShop(shop); });   // syncToCloud 自帶 showToast 成功/失敗；重繪更新待推數
+  Promise.resolve(window.syncToCloud(shop, new Set(keys))).then(function(){ try{ pchomeUpdateDailyProgress({pushToCloud:true}); }catch(e){}   // 同步成功→工作日誌 pchome-summary 一起推給老闆（照 momo）
+    pchomeRenderShop(shop); }).catch(function(){ pchomeRenderShop(shop); });   // syncToCloud 自帶 showToast 成功/失敗；重繪更新待推數
 }
 // ── section 殼（賣場層＝轉單/寄倉，比照甲配/乙配；子分頁照 momoRenderShop）──
 function setPChomeShop(shop,btn){
@@ -24538,6 +24540,55 @@ function pchomeDeleteOptlog(shop, 料號, idx){
   pchomeOptlogClearCache(shop); pchomeRefreshSyncBtn(shop);
   pchomeRenderOptlogSection(shop, 料號);
 }
+// ══════ PChome 優化紀錄 → 工作日誌 pchome-summary（照 momo momoUpdateDailyProgress／momoOpenDpDetail；ec.dailyProgress 全站共用，只換 pchome-summary、保留 momo-summary 與其他）══════
+var PCHOME_OPTLOG_DP_SHOPS=['轉單','寄倉'];
+var PCHOME_OPTLOG_DP_SEP='·';
+function pchomeOptlogTodayCounts(){
+  var today=momoNowParts().date, byPerson={};
+  PCHOME_OPTLOG_DP_SHOPS.forEach(function(shop){ var map=pchomeLoadOptlog(shop)||{};
+    Object.keys(map).forEach(function(sku){ (map[sku]||[]).forEach(function(e){ if(!e||(e.date||'')!==today) return;
+      var person=momoOptlogUserToName(e.by)||'未指派'; var key=shop+PCHOME_OPTLOG_DP_SEP+(e.type||'其他');
+      var c=byPerson[person]=byPerson[person]||{}; c[key]=(c[key]||0)+1; }); }); });
+  return byPerson;
+}
+function pchomeUpdateDailyProgress(opts){
+  opts=opts||{}; if(!(window.Store&&Store.get)) return;
+  var today=momoNowParts().date, countsByPerson=pchomeOptlogTodayCounts();
+  var all=Store.get('ec.dailyProgress',{})||{}; var day=Object.assign({}, all[today]||{});
+  var affected=new Set(Object.keys(countsByPerson));
+  Object.keys(day).forEach(function(person){ var v=day[person]; if(Array.isArray(v)&&v.some(function(it){return it&&it.kind==='pchome-summary';})) affected.add(person); });
+  if(affected.size===0) return;
+  var toItems=function(v){ return Array.isArray(v)?v.slice():(v&&String(v).trim()?[{id:'legacy',text:String(v).trim(),done:false}]:[]); };
+  var anyContent=false;
+  affected.forEach(function(person){
+    var kept=toItems(day[person]).filter(function(it){ return it&&it.kind!=='pchome-summary'; });   // 🔴 只換 pchome-summary，保留 momo-summary/蝦皮 insight/profit/待辦
+    var c=countsByPerson[person];
+    if(c&&Object.keys(c).length){ kept.unshift({id:'auto-pchome-'+person, kind:'pchome-summary', counts:c, done:false, auto:true}); anyContent=true; }
+    if(kept.length) day[person]=kept; else delete day[person];
+  });
+  var next=Object.assign({}, all);
+  if(Object.keys(day).length===0) delete next[today]; else next[today]=day;
+  if(typeof Store.setLocalOnly==='function') Store.setLocalOnly('ec.dailyProgress', next); else Store.set('ec.dailyProgress', next);
+  try{ window.__dpPendingNames=window.__dpPendingNames||new Set(); affected.forEach(function(p){window.__dpPendingNames.add(p);}); if(typeof window.__updateDpSyncBadge==='function') window.__updateDpSyncBadge(); }catch(e){}
+  if(opts.pushToCloud && typeof Store.pushKeyToCloud==='function'){ Store.pushKeyToCloud('ec.dailyProgress').then(function(){ try{ if(window.__dpPendingNames) affected.forEach(function(p){window.__dpPendingNames.delete(p);}); if(typeof window.__updateDpSyncBadge==='function') window.__updateDpSyncBadge(); }catch(e){} }).catch(function(e){console.warn('[pchome dp push]',e);}); }
+  if(anyContent && !opts.silent){ var tail=opts.pushToCloud?'（已連同推給老闆）':'（記得按「☁ 同步雲端」推給老闆）'; if(typeof showToast==='function') showToast('已自動更新工作日誌'+tail,'info'); }
+}
+function pchomeOpenDpDetailFromEl(el){ if(!el||!el.getAttribute) return; pchomeOpenDpDetail(el.getAttribute('data-pch-person')||'', el.getAttribute('data-pch-date')||'', el.getAttribute('data-pch-combo')||''); }
+function pchomeOpenDpDetail(person, date, combo){
+  var rows=[];
+  PCHOME_OPTLOG_DP_SHOPS.forEach(function(shop){ var nameBy={}; (pchomeLoadProducts()||[]).forEach(function(p){ nameBy[p.料號]=p.商品名||''; });
+    var map=pchomeLoadOptlog(shop)||{};
+    Object.keys(map).forEach(function(sku){ (map[sku]||[]).forEach(function(e){ if(!e||(e.date||'')!==date) return; if((momoOptlogUserToName(e.by))!==person) return; if((shop+PCHOME_OPTLOG_DP_SEP+(e.type||'其他'))!==combo) return;
+      rows.push({shop:shop, sku:sku, name:nameBy[sku]||'', type:e.type||'其他', note:e.note||'', time:e.time||''}); }); }); });
+  rows.sort(function(a,b){ return String(a.time).localeCompare(String(b.time)); });
+  var esc=_momoEsc;
+  var body=rows.length? rows.map(function(r){ return '<div style="border-top:1px solid #eef0f2;padding:7px 2px;display:flex;gap:10px;align-items:flex-start"><span style="font-size:11px;color:#9ca3af;flex-shrink:0;width:38px">'+esc(r.time)+'</span><div style="min-width:0;flex:1"><div style="font-size:12px;color:#111827"><b>'+esc(r.name||r.sku)+'</b> <span style="color:#9ca3af;font-family:monospace">'+esc(r.sku)+'</span></div>'+(r.note?'<div style="font-size:12px;color:#374151;margin-top:1px;word-break:break-word">'+esc(r.note)+'</div>':'')+'</div></div>'; }).join('') : '<div style="padding:14px 2px;color:#9ca3af;font-size:12px">找不到對應紀錄（可能已刪除或改期）</div>';
+  var ov=document.getElementById('pchome-dp-detail-ov'); if(!ov){ ov=document.createElement('div'); ov.id='pchome-dp-detail-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=function(e){ if(e.target===ov) pchomeCloseDpDetail(); };
+  ov.innerHTML='<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.2)"><div style="padding:12px 16px;border-bottom:1px solid #eef0f2;display:flex;align-items:center;justify-content:space-between;gap:10px"><div><div style="font-size:14px;font-weight:700;color:#4338ca">'+esc(combo)+'　'+rows.length+' 筆</div><div style="font-size:11px;color:#9ca3af;margin-top:1px">'+esc(person)+'　'+esc(date)+'　·　PChome 優化紀錄</div></div><button onclick="pchomeCloseDpDetail()" style="border:0;background:none;color:#9ca3af;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0">×</button></div><div style="padding:6px 16px 14px;overflow:auto">'+body+'</div></div>';
+}
+function pchomeCloseDpDetail(){ var ov=document.getElementById('pchome-dp-detail-ov'); if(ov) ov.remove(); }
 function pchomeRenderBatchEdit(shop){
   var body=document.getElementById('pchome-batch-body-'+shop); if(!body) return;
   var all=pchomeBatchProducts(shop);
@@ -25943,4 +25994,5 @@ Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBat
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel,
   pchomeOptlogTypeToggle, pchomeOptlogTimeSet, pchomeOptlogBySet, pchomeOptlogSysToggle,
-  pchomeOpenAnalysis, pchomeCloseAnalysis, pchomeAddOptlogModal, pchomeDeleteOptlog });
+  pchomeOpenAnalysis, pchomeCloseAnalysis, pchomeAddOptlogModal, pchomeDeleteOptlog,
+  pchomeUpdateDailyProgress, pchomeOpenDpDetailFromEl, pchomeOpenDpDetail, pchomeCloseDpDetail });
