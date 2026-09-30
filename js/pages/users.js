@@ -25,6 +25,10 @@ function userIdentityClash(list, { name, username, selfUsername, checkName }) {
   }
   return null;
 }
+// 編輯帳號存檔前確認視窗用的權限名稱（viewUsers 的 roleName 是區域函式，且把未設定也顯示成員工；
+//   確認視窗要照實列出「從什麼改成什麼」，所以另外一份、未設定就照實寫）
+const ROLE_LABELS = { admin: '管理員', staff: '員工', view: '檢視（唯讀）' };
+const roleLabel = r => ROLE_LABELS[r] || '（未設定）';
 
 Object.assign(App, {
   viewUsers() {
@@ -209,6 +213,18 @@ Object.assign(App, {
           checkName: !isEdit || normId(name) !== normId(user.name),
         });
         if (clash) { showToast(clash, 'error', 4000); return false; }
+        // 編輯時的敏感變更，存檔前列出來讓操作的人確認（放在所有檢查之後：被擋下的不先跳確認）。
+        //   姓名：存 username 的歷史紀錄會跟著顯示新姓名（帳號換人用）；密碼：可能是瀏覽器自動填入；權限：升降級。
+        if (isEdit) {
+          const changes = [];
+          if (normId(name) !== normId(user.name)) changes.push(`・姓名：${user.name || '（空白）'} → ${name}（MOMO 優化紀錄、洞察表等存帳號的紀錄會改顯示新姓名；首頁營收署名、KPI 最後編輯等存姓名的會停在舊姓名）`);
+          if (password) changes.push('・更改密碼（請確認是你剛剛輸入的，不是瀏覽器自動填入）');
+          if (role !== user.role) changes.push(`・權限：${roleLabel(user.role)} → ${roleLabel(role)}`);
+          // 管理員把自己降權：確定後就不能再改任何帳號（員工進不了帳號管理、檢視只能唯讀），只能靠別的管理員救
+          const selfDemote = user.username === this.currentUser.username && user.role === 'admin' && role !== 'admin';
+          const warn = selfDemote ? '\n\n⚠ 這是你自己的帳號。降權後你將無法再修改任何帳號（包括改回自己的權限），只能請其他管理員恢復。' : '';
+          if (changes.length && !confirm(`即將修改帳號 ${user.username}（${user.name || '未填姓名'}）：\n${changes.join('\n')}${warn}\n\n確定要儲存嗎？`)) return false;
+        }
         if (isEdit) {
           const i = list.findIndex(x => x.username === user.username);
           list[i].name = name;
