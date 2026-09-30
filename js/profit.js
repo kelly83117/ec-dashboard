@@ -23015,7 +23015,8 @@ function pchomeMonthEntry(month){ var recon=pchomeLoadRecon(); if(recon[month]) 
 //    轉單/寄倉共用同一套 render，用 shop 字串分派（比照甲配/乙配）；差別只在讀哪一段。
 //    子分頁（商品同步…）在 shop 底下，結構照 momo momoRenderShop（flex gap:6px/margin-bottom:16px + pill 幾何，顏色走 .pf-pchome-pill class）。
 var _pchomeSub={};
-var PCHOME_SUBTABS=[['總表','profit'],['商品同步','sync'],['訂單明細','upload'],['月對帳','recon']];   // 訂單明細＝每日「轉單訂單明細」檔（2b 做上傳解析、2a 先空骨架）；月對帳＝每月「對帳資料」（16 段）對帳
+var _pchomeBatchMode={};   // shop → 'edit' | 'add'（分頁內模式鈕，照 momo _momoBatchMode）
+var PCHOME_SUBTABS=[['總表','profit'],['批次維護','batch'],['商品同步','sync'],['訂單明細','upload'],['月對帳','recon']];   // 批次維護排總表右邊（賣場層子分頁，照 momoRenderBatch，兩顆模式鈕）；訂單明細＝每日「轉單訂單明細」檔（2b 做上傳解析、2a 先空骨架）；月對帳＝每月「對帳資料」（16 段）對帳
 // 帳務月正規化：列帳日期區間起始日（PChome 週期 26→25，起始月 M → 帳務月 M+1）。主鍵用帳務月、不用完整字串（後台本期結束日會隨當天變動）。
 function pchomeBillingMonth(區間){ var m=String(區間||'').match(/(\d{4})\/(\d{2})\/(\d{2})/); if(!m) return String(區間||''); var y=+m[1],mo=+m[2],d=+m[3]; if(d>=26){ mo++; if(mo>12){mo=1;y++;} } return y+'-'+String(mo).padStart(2,'0'); }
 // CSV 檔名開頭時間戳 → 匯出時間（2026091614 = 2026/09/16 14 時）
@@ -23387,7 +23388,30 @@ function pchomeRenderSub(shop){
   if(sub==='upload'){ c.innerHTML=pchomeOrderTabHTML(shop); return; }   // 訂單明細＝純上傳入口（照 momo）；資料餵總表未對帳月即時營收
   if(sub==='recon'){ c.innerHTML=pchomeReconTabHTML(shop); pchomeRenderReconInfo(shop); return; }
   if(sub==='sync'){ c.innerHTML=pchomeSyncTabHTML(shop); pchomeRenderMaster(shop); return; }
+  if(sub==='batch'){ pchomeRenderBatch(shop); return; }   // 批次維護（照 momoRenderBatch：容器 innerHTML 由 pchomeRenderBatch 自己寫）
   c.innerHTML=pchomeProfitTabHTML(shop);   // profit（總表：KPI 卡＋逐列淨利＋未分攤/合計）
+}
+// ── 批次維護（賣場層子分頁，照 momoRenderBatch：兩顆分頁內模式鈕「編輯現有商品／新增商品」）──
+//   🔴 第 1 步＝分頁骨架＋模式鈕＋空狀態。編輯／新增表單、即時淨利率預覽、歷程時間軸、異常篩選
+//   於後續步驟依「定案：批次維護」規格陸續補上（欄位不照搬 momo 供應商模式、用 PChome 供貨商口徑）。
+function pchomeRenderBatch(shop){
+  var c=document.getElementById('pchome-sub-content-'+shop); if(!c) return;
+  if(!_pchomeBatchMode[shop]) _pchomeBatchMode[shop]='edit';
+  var mode=_pchomeBatchMode[shop];
+  var tab=function(label,m){ var on=mode===m; return '<button onclick="pchomeBatchSetMode(\''+shop+'\',\''+m+'\')" style="padding:5px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid '+(on?'#5b5fcf':'#e5e7eb')+';background:'+(on?'#5b5fcf':'#fff')+';color:'+(on?'#fff':'#6b7280')+'">'+label+'</button>'; };
+  c.innerHTML='<div style="display:flex;gap:6px;margin-bottom:16px">'+tab('編輯現有商品','edit')+tab('新增商品','add')+'</div><div id="pchome-batch-body-'+shop+'"></div>';
+  if(mode==='edit') pchomeRenderBatchEdit(shop); else pchomeRenderBatchAdd(shop);
+}
+function pchomeBatchSetMode(shop,m){ _pchomeBatchMode[shop]=m; pchomeRenderBatch(shop); }
+function pchomeRenderBatchEdit(shop){
+  var body=document.getElementById('pchome-batch-body-'+shop); if(!body) return;
+  var all=pchomeLoadProducts()||[];
+  if(!all.length){ body.innerHTML='<div class="empty"><div class="empty-icon">📦</div><div class="empty-hint">尚無商品資料，請到批次維護新增</div></div>'; return; }
+  body.innerHTML='<div class="empty"><div class="empty-icon">🚧</div><div class="empty-hint">編輯介面於後續步驟實作（目前商品主檔 '+all.length+' 筆）<br>搜尋清單＋編輯表單＋歷程時間軸照 momo 陸續補上</div></div>';
+}
+function pchomeRenderBatchAdd(shop){
+  var body=document.getElementById('pchome-batch-body-'+shop); if(!body) return;
+  body.innerHTML='<div class="empty"><div class="empty-icon">🚧</div><div class="empty-hint">新增商品表單於後續步驟實作<br>欄位＋即時淨利率預覽＋送出寫入照「定案：批次維護」規格陸續補上</div></div>';
 }
 // 訂單明細分頁（每日「轉單訂單明細」檔）＝即時營收：上傳中樞＋累積狀態＋區間篩選＋合計卡＋逐筆表。
 // 訂單明細分頁＝純上傳入口（照 momo momoRenderUpload：fileRow 檔案格 + ▶產生預覽；無自己的檢視畫面）。
@@ -24484,6 +24508,6 @@ function pchomeExportExcel(shop){
     XLSX.writeFile(wb, 'PChome_'+safe+'_'+(key||'')+'_總表.xlsx');
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
-Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeListingFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeStatementHtmFile, pchomeOrderPick, pchomeOrderRemove, pchomeOrderGenerate, pchomeOrderApply, pchomeOrderCancel, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc,
+Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBatchSetMode, pchomeListingFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeStatementHtmFile, pchomeOrderPick, pchomeOrderRemove, pchomeOrderGenerate, pchomeOrderApply, pchomeOrderCancel, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc,
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel });
