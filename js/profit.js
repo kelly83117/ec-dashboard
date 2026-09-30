@@ -9783,44 +9783,62 @@ function _kpiHighlightsHtml(row,prevRow){
 }
 
 // ── A5 各通路表（唯讀；編輯一律到填寫模式）──
-function _kpiRateBarHtml(rate,hasRev){
-  const w=hasRev?Math.max(0,Math.min(100,rate*100)):0;
-  return `<div class="km-rate"><div class="km-rate-track"><div class="km-rate-fill ${rate<0?'km-rate-neg':''}" style="width:${w}%"></div></div><span>${hasRev?_kpiRatePct(rate):'—'}</span></div>`;
+//   2026-09-30 重新排版：固定欄寬 grid（每一列都是同一組 grid-template-columns → 欄位對齊）、兩層表頭、
+//   營收／純利／純利率三組各一個框。
+//   🔴 框線畫在【格子】上（每一列該組的第一格 border-left、純利率最後一格 border-right、表頭組標籤 border-top、
+//     合計列 border-bottom），列的上下留白也放在格子的 padding 裡、列與列之間沒有 gap → 直線從表頭到合計列連續不斷。
+//   較上月沿用 _kpiCmpOk（全有或全無、不可比就留空）；純利率用 pp。
+//   ⚠ 這張表的 ▲▼ 格式（箭頭後空一格）是本表專用，大卡的 _kpiCmpPctHtml 不動。
+function _kcCmp(cur,base){
+  const d=(cur-base)/base*100;
+  return '<span class="'+(d>=0?'km-up':'km-down')+'">'+(d>=0?'▲':'▼')+' '+Math.abs(d).toFixed(1)+'%</span>';
+}
+function _kcPp(cur,base){
+  const d=(cur-base)*100;
+  return '<span class="'+(d>=0?'km-up':'km-down')+'">'+(d>=0?'▲':'▼')+' '+Math.abs(d).toFixed(1)+'pp</span>';
 }
 function _kpiChannelTableHtml(row,prevRow){
   const month=row.month;
   const cmpCells=(cur,prev)=>{
     const ok=_kpiCmpOk(prev);
-    return{rev:ok?_kpiCmpPctHtml(cur.rev,prev.rev):'',pure:ok?_kpiCmpPctHtml(cur.pure,prev.pure):'',pp:ok&&cur.rev>0?_kpiCmpPpHtml(cur.rate,prev.rate):''};
+    return{rev:ok?_kcCmp(cur.rev,prev.rev):'',pure:ok?_kcCmp(cur.pure,prev.pure):'',pp:ok&&cur.rev>0?_kcPp(cur.rate,prev.rate):''};
   };
+  const neg=v=>v<0?' km-down':'';
+  // 一列 8 格：通路｜營收本月｜營收較上月｜純利本月｜純利較上月｜純利率本月｜純利率較上月｜填寫進度
+  const line=(cls,attrs,c)=>'<div class="kc-row '+cls+'"'+(attrs||'')+'>'
+    +'<div class="kc-c kc-name">'+c[0]+'</div>'
+    +'<div class="kc-c kc-n kc-g1">'+c[1]+'</div><div class="kc-c kc-n">'+c[2]+'</div>'
+    +'<div class="kc-c kc-n kc-g1">'+c[3]+'</div><div class="kc-c kc-n">'+c[4]+'</div>'
+    +'<div class="kc-c kc-n kc-g1">'+c[5]+'</div><div class="kc-c kc-n kc-gend">'+c[6]+'</div>'
+    +'<div class="kc-c kc-n kc-fill">'+c[7]+'</div></div>';
+  const head='<div class="kc-row kc-h1"><div class="kc-c"></div>'
+    +'<div class="kc-c kc-glabel kc-g1 kc-s1">營收</div>'
+    +'<div class="kc-c kc-glabel kc-g1 kc-s2">純利</div>'
+    +'<div class="kc-c kc-glabel kc-g1 kc-gend kc-s3">純利率</div>'
+    +'<div class="kc-c"></div></div>'
+    +line('kc-h2','',['通路','本月','較上月','本月','較上月','本月','較上月','填寫進度']);
   const body=KPI_GROUPS.map(g=>{
     const cur=_kpiGroupT(row,g),prev=_kpiGroupT(prevRow,g),cc=cmpCells(cur,prev);
     const open=_kpiExpandedGroups.has(month+':'+g.key);
-    let html=`<tr class="km-ch" onclick="toggleKpiGroup('${month}','${g.key}')">
-      <td class="km-ch-name"><span class="km-caret${open?' open':''}">▸</span><span class="km-dot" style="background:${g.color}"></span>${g.title}</td>
-      <td>${_kpiRateBarHtml(cur.rate,cur.rev>0)}</td>
-      <td class="km-n">${_kpiMoney(cur.rev)}</td><td class="km-c">${cc.rev}</td>
-      <td class="km-n ${cur.pure<0?'km-down':''}">${_kpiMoney(cur.pure)}</td><td class="km-c">${cc.pure}</td>
-      <td class="km-c">${cc.pp}</td>
-      <td class="km-c">${_kpiFillBadge(_kpiFillCount(row,g))}</td>
-    </tr>`;
+    let html=line('kc-ch'+(open?' open':''),' onclick="toggleKpiGroup(\''+month+'\',\''+g.key+'\')" title="點擊展開／收合各店"',[
+      '<span class="kc-caret">▸</span><span class="km-dot" style="background:'+g.color+'"></span>'+g.title,
+      '<span class="'+neg(cur.rev).trim()+'">'+_kpiMoney(cur.rev)+'</span>',cc.rev,
+      '<span class="'+neg(cur.pure).trim()+'">'+_kpiMoney(cur.pure)+'</span>',cc.pure,
+      cur.rev>0?_kpiRatePct(cur.rate):'—',cc.pp,
+      _kpiFillBadge(_kpiFillCount(row,g)),
+    ]);
     if(open){
       g.shops.forEach(s=>{
         const d=_kpiShopCalc(row,g,s);const rev=Number(d.rev)||0,pure=Number(d[cur.pureKey])||0;
-        html+=`<tr class="km-ch-sub"><td class="km-ch-shop">${_kpiShopLabel(s)}</td><td>${_kpiRateBarHtml(rev>0?pure/rev:0,rev>0)}</td>
-          <td class="km-n">${_kpiMoney(rev)}</td><td></td><td class="km-n ${pure<0?'km-down':''}">${_kpiMoney(pure)}</td><td></td><td></td><td></td></tr>`;
+        html+=line('kc-sub','',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','','']);
       });
     }
     return html;
   }).join('');
   const all=_kpiAllTotals(row),pa=prevRow?_kpiAllTotals(prevRow):null,ca=cmpCells(all,pa);
-  return `<div class="km-tablewrap"><table class="km-table km-ch-table">
-    <thead><tr><th>通路</th><th>純利率</th><th class="km-n">營收</th><th>較上月</th><th class="km-n">純利</th><th>較上月</th><th>純利率變化</th><th>填寫進度</th></tr></thead>
-    <tbody>${body}</tbody>
-    <tfoot><tr><td>合計</td><td>${_kpiRateBarHtml(all.rate,all.rev>0)}</td><td class="km-n">${_kpiMoney(all.rev)}</td><td class="km-c">${ca.rev}</td>
-      <td class="km-n ${all.pure<0?'km-down':''}">${_kpiMoney(all.pure)}</td><td class="km-c">${ca.pure}</td><td class="km-c">${ca.pp}</td>
-      <td class="km-c">${_kpiFillBadge(_kpiFillCountAll(row))}</td></tr></tfoot>
-  </table></div>`;
+  const foot=line('kc-total','',['合計',_kpiMoney(all.rev),ca.rev,'<span class="'+neg(all.pure).trim()+'">'+_kpiMoney(all.pure)+'</span>',ca.pure,
+    all.rev>0?_kpiRatePct(all.rate):'—',ca.pp,_kpiFillBadge(_kpiFillCountAll(row))]);
+  return '<div class="km-tablewrap"><div class="kc">'+head+body+foot+'</div></div>';
 }
 function _kpiOverviewHtml(row,prevRow){
   const w=_kpiWaterfall(row);
@@ -9831,7 +9849,7 @@ function _kpiOverviewHtml(row,prevRow){
       <div class="km-panel"><div class="km-panel-t">營收成本結構</div><div class="km-panel-sub">本月全通路營收扣除各項成本與費用後的純利，百分比為佔營收比例。</div>${_kpiWaterfallHtml(w)}</div>
       <div class="km-panel"><div class="km-panel-t">營收組成</div>${_kpiMixHtml(row)}</div>
     </div>
-    <div class="km-panel"><div class="km-panel-t">各通路<span class="km-panel-hint">點通路看各店；要改數字請按右上角進入填寫模式</span></div>${_kpiChannelTableHtml(row,prevRow)}</div>`;
+    <div class="km-panel"><div class="km-panel-t">各通路<span class="kc-legend">點通路展開各店明細 · <span class="km-up">▲</span> 成長 <span class="km-down">▼</span> 衰退</span></div>${_kpiChannelTableHtml(row,prevRow)}</div>`;
 }
 
 // ══════ B 填寫模式（同一個 KPI 分頁內切換；年月沿用目前選的）══════
