@@ -7842,6 +7842,14 @@ function openNotePopup(shopKey,code){
   modal.classList.add('open');
   setTimeout(()=>pnmInp?.focus(),60);
 }
+// 調整彈窗每列日期下方的填寫人灰字（by ＝ submitProfitNote 記下的 username，查 ec.users 轉姓名；查不到顯示原字串）。
+//   🔴 沒有 by（舊筆、未登入時新增）→ 回【空字串】、不輸出任何節點，那一列的 HTML 與加這功能前逐字相同。
+//     絕不可用 adjOwnerOf 之類的推算值補上：by 記的是「誰按的」，推算值是「誰負責」，冒充就是假紀錄。
+//   姓名一律經 escapeHtmlLike 跳脫（ec.users 的 name 是使用者輸入）。
+function _pnmByHtml(by){
+  if(typeof by!=='string'||!by.trim()) return '';
+  return `<span class="pnm-entry-by">${escapeHtmlLike(momoOptlogUserToName(by)||by)}</span>`;
+}
 function renderPnmList(){
   if(!_pnm)return;
   const {shopKey,code}=_pnm;
@@ -7857,12 +7865,12 @@ function renderPnmList(){
   const map=new Map();
   adj.forEach((a,i)=>{
     if(isGrowth&&!(gS&&_inGrowthPeriod(a,gS.curMonth,gS.curHalf)))return;
-    const d=a.date||'—';if(!map.has(d))map.set(d,[]);map.get(d).push({text:a.text,i});
+    const d=a.date||'—';if(!map.has(d))map.set(d,[]);map.get(d).push({text:a.text,i,by:a.by});
   });
   if(!map.size){el.innerHTML=`<div style="padding:14px;text-align:center;color:#9ca3af;font-size:12px">${isGrowth?'本期尚無調整紀錄':'尚無調整紀錄'}</div>`;return;}
   const sorted=[...map.keys()].sort((a,b)=>b.localeCompare(a));
-  el.innerHTML=sorted.map(d=>map.get(d).map(({text,i})=>`<div class="pnm-entry">
-    <div class="pnm-entry-date">${d}</div>
+  el.innerHTML=sorted.map(d=>map.get(d).map(({text,i,by})=>`<div class="pnm-entry">
+    <div class="pnm-entry-date">${d}${_pnmByHtml(by)}</div>
     <div class="pnm-entry-text">${text.replace(/</g,'&lt;')}</div>
     ${_ro?'':`<button class="pnm-entry-edit" onclick="_pnmEditNote(${i},this)" title="編輯這筆文字（保留原日期）">✎</button>
     <button class="pnm-entry-del" onclick="deleteProfitNote(${i},this)" data-text="${escapeHtmlLike(text)}" data-date="${escapeHtmlLike(d)}">×</button>`}
@@ -7881,12 +7889,12 @@ function renderPnmHistory(){
     let gadj=[];
     if(gnd){if(typeof gnd==='string')gadj=[{date:'',text:gnd}];else gadj=gnd.adjustments||[];}
     const others=[];
-    gadj.forEach((a,i)=>{ if(!(gs&&_inGrowthPeriod(a,gs.curMonth,gs.curHalf))) others.push({date:a.date,text:a.text,i,period:_growthPeriodOf(a)}); });   // 保留原始索引 i；period 供顯示期間標籤用
+    gadj.forEach((a,i)=>{ if(!(gs&&_inGrowthPeriod(a,gs.curMonth,gs.curHalf))) others.push({date:a.date,text:a.text,i,period:_growthPeriodOf(a),by:a.by}); });   // 保留原始索引 i；period 供顯示期間標籤用；by 供填寫人顯示
     if(!others.length){ wrap.style.display='none'; box.innerHTML=''; return; }
     others.sort((x,y)=>String(y.date||'').localeCompare(String(x.date||'')));   // 日期新到舊
     wrap.style.display='';
     box.innerHTML=others.map(o=>`<div class="pnm-entry">
-      <div class="pnm-entry-date">${_growthPeriodLabel(o)}</div>
+      <div class="pnm-entry-date">${_growthPeriodLabel(o)}${_pnmByHtml(o.by)}</div>
       <div class="pnm-entry-text">${String(o.text||'').replace(/</g,'&lt;')}</div>
       <button class="pnm-entry-edit" onclick="_pnmEditNote(${o.i},this)" title="編輯這筆文字（保留原日期）">✎</button>
       <button class="pnm-entry-del" onclick="deleteProfitNote(${o.i},this)" data-text="${escapeHtmlLike(o.text)}" data-date="${escapeHtmlLike(o.date||'—')}">×</button>
