@@ -1887,8 +1887,8 @@ Object.assign(App, {
     const salesEntry = (weeks[0]?.products || []).find(p => p.code === code);
     const productName = masterEntry?.mocbicName || masterEntry?.name || salesEntry?.name || '';
 
-    // 紀錄樣式：淺紫色背景 + 紫色文字。同一天的多筆 → 同列顯示，用「、」串起；
-    // ✕ 刪除整列（同一天的所有調整一次刪），data-del-date 帶日期。
+    // 紀錄樣式：淺紫色背景 + 紫色文字。同一天的多筆 → 同列顯示，用「、」串起（只是顯示層合併，
+    // 資料仍逐筆獨立）。data-edit-date / data-del-date 帶日期，編輯與 ✕ 由 onMount 逐筆處理。
     const renderAdjList = () => {
       const all = note.adjustments || [];
       if (all.length === 0) {
@@ -1979,7 +1979,7 @@ Object.assign(App, {
       const now = new Date();
       const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
       note.adjustments = note.adjustments || [];
-      note.adjustments.push({ date: dateStr, text, by: this.currentUser?.username || '' });
+      note.adjustments.push(_insAdjNewEntry(dateStr, text, this.currentUser?.username));
       inp.value = '';
       autoSave();
       this.render();
@@ -2095,75 +2095,147 @@ Object.assign(App, {
         // 打開即可直接輸入
         setTimeout(() => newAdjInput.focus(), 30);
 
+        const rebindAdjList = () => {
+          adjList.innerHTML = renderAdjList();
+          bindDelButtons();
+          bindEditChips();
+        };
+
+        // 刪除單一筆（ref 是 note.adjustments 裡的原物件）。確認框寫出刪的是哪一筆文字。
+        const deleteAdjEntry = (ref) => {
+          if (!confirm(`確定刪除這筆調整紀錄？\n\n${ref.date || '（無日期）'}　${ref.text || ''}`)) return;
+          const r = _insAdjRemove(note.adjustments, ref);
+          if (!r.removed) {
+            showToast('這筆紀錄剛剛被更新過，沒有刪除，請再確認一次', 'error');
+            rebindAdjList();
+            return;
+          }
+          note.adjustments = r.list;
+          // 除了 mutate 本地 `note` 也直接改 _mem[notesKey][code]（避免 subscribe 換過參照後 note 是孤兒）
+          // 這條路是保險：即使 `note` 已經跟 _mem 脫鉤，_mem 仍然反映刪除。
+          //   只用物件參照過濾（重跑也不會多刪）；_mem 若是另一份拷貝（參照對不到）就不動它，
+          //   下面 autoSave 會用 note.adjustments 整筆寫回。
+          try {
+            if (Store._mem[notesKey] && Store._mem[notesKey][code]) {
+              const memAdj = Store._mem[notesKey][code].adjustments || [];
+              const memFiltered = memAdj.filter(a => a !== ref);
+              const memText = Store._mem[notesKey][code].text || '';
+              if (memFiltered.length === 0 && !memText) {
+                delete Store._mem[notesKey][code];
+              } else {
+                Store._mem[notesKey][code].adjustments = memFiltered;
+              }
+            }
+          } catch (e) { console.warn('[洞察表] _mem 直接寫入失敗', e); }
+          adjList.innerHTML = renderAdjList();
+          autoSave();
+          // 重新計算工作日誌摘要 → 該人員的「【洞察表 · 今日調整】」區塊立刻反映本次刪除
+          // silent:true 不跳 toast；不直接推雲端，等使用者按「☁ 同步雲端」一次推完
+          try { this._updateDailyProgressFromAdjustments({ silent: true }); } catch (e) { console.warn('[del->dp]', e); }
+          this.render();
+          bindDelButtons();
+          bindEditChips();
+        };
+
+        // ✕：當天只有一筆 → 確認後刪那一筆；多筆 → 該格展開成逐筆清單，每筆各一顆 ✕，指定刪哪一筆。
         const bindDelButtons = () => {
           adjList.querySelectorAll('[data-del-date]').forEach(b => {
+            // renderAdjList 的 HTML 刻意不改（回歸快照要求逐字相同），提示文字在這裡換成新語意
+            b.title = '刪除紀錄（同一天有多筆時可指定刪哪一筆）';
             b.addEventListener('click', () => {
-              const targetDate = b.dataset.delDate;
-              note.adjustments = (note.adjustments || []).filter(a => (a.date || '') !== targetDate);
-              // 除了 mutate 本地 `note` 也直接改 _mem[notesKey][code]（避免 subscribe 換過參照後 note 是孤兒）
-              // 這條路是保險：即使 `note` 已經跟 _mem 脫鉤，_mem 仍然反映刪除
-              try {
-                if (Store._mem[notesKey] && Store._mem[notesKey][code]) {
-                  const memAdj = Store._mem[notesKey][code].adjustments || [];
-                  const memFiltered = memAdj.filter(a => (a.date || '') !== targetDate);
-                  const memText = Store._mem[notesKey][code].text || '';
-                  if (memFiltered.length === 0 && !memText) {
-                    delete Store._mem[notesKey][code];
-                  } else {
-                    Store._mem[notesKey][code].adjustments = memFiltered;
-                  }
-                }
-              } catch (e) { console.warn('[洞察表] _mem 直接寫入失敗', e); }
-              adjList.innerHTML = renderAdjList();
-              autoSave();
-              // 重新計算工作日誌摘要 → 該人員的「【洞察表 · 今日調整】」區塊立刻反映本次刪除
-              // silent:true 不跳 toast；不直接推雲端，等使用者按「☁ 同步雲端」一次推完
-              try { this._updateDailyProgressFromAdjustments({ silent: true }); } catch (e) { console.warn('[del->dp]', e); }
-              this.render();
-              bindDelButtons();
-              bindEditChips();
+              const entries = _insAdjEntriesOfDate(note.adjustments, b.dataset.delDate);
+              if (entries.length === 0) return;
+              if (entries.length === 1) { deleteAdjEntry(entries[0]); return; }
+              const row = b.parentNode;
+              const span = row.querySelector('[data-edit-date]');
+              if (!span) return;   // 這格正在編輯或已展開 → 不重複開
+              const box = document.createElement('div');
+              box.className = 'ins-adj-pick';
+              const hint = document.createElement('div');
+              hint.className = 'ins-adj-hint';
+              hint.textContent = '要刪哪一筆？';
+              box.appendChild(hint);
+              entries.forEach(ref => {
+                const item = document.createElement('div');
+                item.className = 'ins-adj-pick-item';
+                const txt = document.createElement('span');
+                txt.className = 'ins-adj-pick-text';
+                txt.textContent = ref.text || '';
+                const del = document.createElement('button');
+                del.type = 'button';
+                del.className = 'icon-btn ins-adj-pick-del';
+                del.title = '刪除這一筆';
+                del.textContent = '✕';
+                del.addEventListener('click', () => deleteAdjEntry(ref));
+                item.appendChild(txt);
+                item.appendChild(del);
+                box.appendChild(item);
+              });
+              const cancel = document.createElement('button');
+              cancel.type = 'button';
+              cancel.className = 'ins-adj-pick-cancel';
+              cancel.textContent = '取消';
+              cancel.addEventListener('click', rebindAdjList);
+              box.appendChild(cancel);
+              row.replaceChild(box, span);
+              b.hidden = true;
             });
           });
         };
 
-        // 雙擊調整記錄 → 變成 inline input 編輯
+        // 雙擊調整記錄 → 該格每一筆各一個輸入框（一筆就一個），只改被改的那一筆：
+        //   date 與原作者 by 不動；有登入者才在被改的那筆加 editedBy / editedAt。
+        //   Enter 或焦點離開這一格 = 儲存，Esc = 取消；在同一格的輸入框之間切換不算離開。
         const bindEditChips = () => {
           adjList.querySelectorAll('[data-edit-date]').forEach(span => {
             span.addEventListener('dblclick', () => {
-              const targetDate = span.dataset.editDate;
-              const current = span.textContent;
-              const input = document.createElement('input');
-              input.type = 'text';
-              input.value = current;
-              input.style.cssText = 'flex:1;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:12px;font-family:inherit;color:#312e81;font-weight:500';
-              const parent = span.parentNode;
-              parent.replaceChild(input, span);
-              input.focus();
-              input.select();
+              const entries = _insAdjEntriesOfDate(note.adjustments, span.dataset.editDate);
+              if (entries.length === 0) return;
+              const box = document.createElement('div');
+              box.className = 'ins-adj-edit';
+              const inputs = entries.map(ref => {
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'ins-adj-edit-input';
+                input.value = ref.text || '';
+                box.appendChild(input);
+                return input;
+              });
+              if (entries.length > 1) {
+                const hint = document.createElement('div');
+                hint.className = 'ins-adj-hint';
+                hint.textContent = '逐筆編輯：Enter 儲存、Esc 取消';
+                box.appendChild(hint);
+              }
+              span.parentNode.replaceChild(box, span);
+              inputs[0].focus();
+              inputs[0].select();
               let done = false;
               const finish = (save) => {
                 if (done) return; done = true;
                 if (save) {
-                  const newText = input.value.trim();
-                  if (newText && newText !== current) {
-                    // 該日所有紀錄合併為單筆新文字（仍保留原日期）
-                    const others = (note.adjustments || []).filter(a => (a.date || '') !== targetDate);
-                    others.push({ date: targetDate, text: newText, by: this.currentUser?.username || '' });
-                    note.adjustments = others;
+                  const r = _insAdjApplyEdits(note.adjustments,
+                    entries.map((ref, i) => ({ ref, text: inputs[i].value })),
+                    this.currentUser?.username, new Date().toISOString());
+                  if (r.missing) {
+                    showToast('這筆紀錄剛剛被更新過，沒有儲存，請再確認一次', 'error');
+                  } else if (r.changed) {
+                    note.adjustments = r.list;
                     autoSave();
                     try { this._updateDailyProgressFromAdjustments({ silent: true }); } catch (e) { console.warn('[edit->dp]', e); }
                     this.render();
                   }
                 }
-                adjList.innerHTML = renderAdjList();
-                bindDelButtons();
-                bindEditChips();
+                rebindAdjList();
               };
-              input.addEventListener('keydown', (e) => {
+              box.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') { e.preventDefault(); finish(true); }
                 else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
               });
-              input.addEventListener('blur', () => finish(true));
+              box.addEventListener('focusout', (e) => {
+                if (e.relatedTarget && box.contains(e.relatedTarget)) return;
+                finish(true);
+              });
             });
           });
         };
@@ -2182,7 +2254,7 @@ Object.assign(App, {
           const d = new Date();
           const dateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
           note.adjustments = note.adjustments || [];
-          note.adjustments.push({ date: dateStr, text, by: this.currentUser?.username || '' });
+          note.adjustments.push(_insAdjNewEntry(dateStr, text, this.currentUser?.username));
           adjList.innerHTML = renderAdjList();
 
           // 視覺確認：輸入框變綠色 + 顯示 ✓ 已加入；0.5 秒後清空換下一筆
@@ -2374,6 +2446,48 @@ Object.assign(App, {
     showToast(`已匯出 ${fname}（${rows.length} 筆）`, 'success');
   },
 });
+
+// ── 洞察表調整紀錄：逐筆新增 / 編輯 / 刪除（技術債 #259）─────────────────────
+// 彈窗「一天一格、用「、」串起」只是【顯示層】的合併；資料層每筆都是獨立物件
+// （ab17051 原設計）。編輯與刪除一律以【物件參照】定位被指定的那一筆，只動那一筆：
+// 不合併同日其他筆、不改原作者 by、不受同一天 date 寫法不同（2026-06-18 / 2026/06/18）影響。
+// 填寫人寫法比照淨利表 submitProfitNote：取不到登入者就【不加 by 欄位】，不寫 ''。
+function _insAdjNewEntry(date, text, username) {
+  const entry = { date, text };
+  const by = String(username || '').trim();
+  if (by) entry.by = by;
+  return entry;
+}
+// 某一格（同一個 date 字串）底下的所有紀錄，依原陣列順序
+function _insAdjEntriesOfDate(list, date) {
+  return (list || []).filter(a => a && (a.date || '') === date);
+}
+// edits: [{ ref, text }]，ref 是 list 裡的原物件。空字串 / 沒改 → 該筆略過。
+// 被改的那一筆：保留 date、by 等所有原欄位，只換 text；有登入者才加 editedBy / editedAt。
+// 回傳 { list, changed, missing }：missing > 0 代表有 ref 已不在 list（資料被換過），呼叫端應整批放棄。
+function _insAdjApplyEdits(list, edits, username, nowIso) {
+  const src = list || [];
+  const by = String(username || '').trim();
+  const repl = new Map();
+  let missing = 0;
+  (edits || []).forEach(({ ref, text }) => {
+    const v = String(text || '').trim();
+    if (!v || v === String(ref.text || '')) return;
+    if (src.indexOf(ref) < 0) { missing++; return; }
+    const next = Object.assign({}, ref, { text: v });
+    if (by) { next.editedBy = by; next.editedAt = nowIso; }
+    repl.set(ref, next);
+  });
+  if (missing || repl.size === 0) return { list: src, changed: 0, missing };
+  return { list: src.map(a => (repl.has(a) ? repl.get(a) : a)), changed: repl.size, missing: 0 };
+}
+// 只刪 ref 這一個物件（參照比對；同文字同日期的另一筆不會被誤刪）
+function _insAdjRemove(list, ref) {
+  const src = list || [];
+  const i = src.indexOf(ref);
+  if (i < 0) return { list: src, removed: false };
+  return { list: src.slice(0, i).concat(src.slice(i + 1)), removed: true };
+}
 
 // 洞察表分類判定：原本內嵌在 _updateDailyProgressFromAdjustments，抽到模組層
 // 讓 daily.js 的洞察 chip 明細彈窗共用（判定邏輯逐字保留；門檻 T 改為每次呼叫現算）
