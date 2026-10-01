@@ -24983,22 +24983,23 @@ function pchomeEstFeeRate(shop){
     if(rev>0.5) return {rate:fee/rev, month:m}; }catch(e){}
   return {rate:null, month:m};
 }
-// 批次維護即時預覽（新增/編輯共用、公式與提示一致）：估計淨利率為主（大、顯眼）、毛利率次要；有估計費率時扣費用估淨利、無已對帳月退回只顯毛利率。
+// 批次維護即時預覽（新增/編輯共用）：只正向、兩行以內、白話。第 1 行＝估計淨利率＋30% 把關；第 2 行＝一句話說明。
+//   毛利率與「偏保守」原理只放估計淨利率的 title tooltip、不攤在畫面上。售價由供貨價÷0.75 回推（填進售價欄、可覆寫）。
 function pchomeBatchPreviewHTML(cost, supply, est){
   var esc=_momoEsc, net=(Number(supply)||0)/1.05, c=Number(cost)||0;
-  if(!(net>0)||!(c>0)) return '<span style="color:#9ca3af;font-size:12px">成本 / 供貨價 填齊即時計算</span>';
-  var gross=(net-c)/net;                                   // 毛利率（未扣費用）
-  var grossBadge=(gross>=0.30)?'<span style="color:#10b981;font-weight:600"> ✓ 超過 30%</span>':'<span style="color:#f97316;font-weight:600"> ⚠ 未達 30%</span>';
+  if(!(net>0)||!(c>0)) return '<span style="color:#9ca3af;font-size:12px">填成本與供貨價即算估計淨利率</span>';
+  var gross=(net-c)/net;   // 毛利率（未扣費用）→ 只進 tooltip
+  var badge=function(v){ return v>=0.30?'<span style="color:#10b981;font-weight:600">✓ 超過 30%</span>':'<span style="color:#f97316;font-weight:600">⚠ 未達 30%</span>'; };
   if(est&&est.rate!=null){
-    var estNet=(net-c-net*est.rate)/net;                  // 估計淨利率＝（供貨價÷1.05 − 成本 − 供貨價÷1.05 × 估計費率）÷（供貨價÷1.05）
+    var estNet=(net-c-net*est.rate)/net;   // 估計淨利率
     var col=estNet>=0.15?'#10b981':(estNet>=0?'#d97706':'#ef4444');
-    return '估計淨利率 <b style="color:'+col+';font-size:18px">'+pchomePct(estNet)+'</b>'
-      +' <span style="color:#9ca3af;font-size:12px">｜ 毛利率 '+pchomePct(gross)+grossBadge+'</span>'
-      +'<div style="font-size:11px;color:#9ca3af;margin-top:3px;line-height:1.5">費率 <b>'+pchomePct(est.rate)+'</b>（取自 '+esc(est.month)+' 已對帳）× 供貨價未稅 '+pchomeMoney(net)+' ＝估計費用 '+pchomeMoney(net*est.rate)+'。<b>此估計偏保守</b>：費率裡大部分是每月固定費攤在小量上，量增加後會下降（真實淨利率通常高於此）。</div>';
+    var tip='毛利率（未扣平台費用）'+pchomePct(gross)+'。估計偏保守：費率含每月固定費攤在小量上，量增後會降、真實淨利率通常更高。';
+    return '估計淨利率 <b style="color:'+col+';font-size:18px" title="'+esc(tip)+'">'+pchomePct(estNet)+'</b>　'+badge(estNet)
+      +'<div style="font-size:11px;color:#9ca3af;margin-top:3px">已扣平台費用（費率 '+pchomePct(est.rate)+'，取自 '+esc(est.month)+' 已對帳）。售價為供貨價 ÷ 0.75 回推，可自行修改。</div>';
   }
-  // 無已對帳月 → 退回只顯毛利率
-  return '毛利率 <b style="color:'+(gross>=0.30?'#10b981':'#f97316')+';font-size:18px">'+pchomePct(gross)+'</b>'+grossBadge
-    +'<div style="font-size:11px;color:#9ca3af;margin-top:3px">尚無已對帳月，無法估算費用（只顯示毛利率）。上傳任一月對帳單後，這裡會改顯「估計淨利率」。</div>';
+  // 無已對帳月 → 無法估平台費用，只顯毛利率
+  return '毛利率 <b style="color:'+(gross>=0.30?'#10b981':'#f97316')+';font-size:18px">'+pchomePct(gross)+'</b>　'+badge(gross)
+    +'<div style="font-size:11px;color:#9ca3af;margin-top:3px">尚無已對帳月，無法估算平台費用（只顯示毛利率）。售價為供貨價 ÷ 0.75 回推，可自行修改。</div>';
 }
 // 商品異常：缺成本/缺供貨價/缺售價（0/null/負都算缺）。售價僅參考，缺售價只提示不影響計算。
 function pchomeProductAnomalies(p){ var miss=function(v){ return !(Number(v)>0); };
@@ -25205,10 +25206,9 @@ function pchomeRenderBatchEditForm(shop){
     +'<div style="margin-bottom:10px">'+keyFields+'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px">'
     +'<div><label style="'+_MOMO_LB+'">成本</label><input id="pch-edit-cost-'+shop+'" type="number" oninput="pchomeEditRecalc(\''+shop+'\')" value="'+(p.cost==null?'':p.cost)+'" style="'+_MOMO_INP+'"></div>'
-    +'<div><label style="'+_MOMO_LB+'">供貨價(含稅)</label><input id="pch-edit-supply-'+shop+'" type="number" oninput="pchomeEditRecalc(\''+shop+'\')" value="'+(p.供貨價==null?'':p.供貨價)+'" style="'+_MOMO_INP+'"></div>'
-    +'<div><label style="'+_MOMO_LB+'">PChome 售價(含稅)<span style="color:#9ca3af">·僅參考</span></label><input id="pch-edit-price-'+shop+'" type="number" value="'+(p.售價==null?'':p.售價)+'" style="'+_MOMO_INP+'"></div></div>'
+    +'<div><label style="'+_MOMO_LB+'">供貨價(含稅)</label><input id="pch-edit-supply-'+shop+'" type="number" oninput="pchomeEditSupplyChanged(\''+shop+'\')" value="'+(p.供貨價==null?'':p.供貨價)+'" style="'+_MOMO_INP+'"></div>'
+    +'<div><label style="'+_MOMO_LB+'">PChome 售價(含稅)<span style="color:#9ca3af">·僅參考</span></label><input id="pch-edit-price-'+shop+'" type="number" value="'+(p.售價==null?'':p.售價)+'" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">填供貨價後自動帶入（供貨價 ÷ 0.75），可自行修改</div></div></div>'
     +'<div id="pch-edit-preview-'+shop+'" style="min-height:22px;margin-bottom:4px"></div>'
-    +'<div style="font-size:11px;color:#9ca3af;margin-bottom:10px">估計淨利率 ＝（供貨價÷1.05 − 成本 − 供貨價÷1.05 × 估計費率）÷（供貨價÷1.05）；估計費率＝最近已對帳月的 費用÷營收。毛利率為未扣費用的上限、次要參考。<b>售價不進計算</b>（網路價、非我方營收基準）。總表的校正照舊（上傳對帳/訂單後自動轉實際值）。</div>'
     +'<div style="margin-bottom:10px"><label style="'+_MOMO_LB+'">異動原因（必填）</label><input id="pch-edit-note-'+shop+'" type="text" placeholder="例：補上成本 / 供應商調漲供貨價" style="'+_MOMO_INP+'"></div>'
     +'<button onclick="pchomeBatchSubmitEdit(\''+shop+'\')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">送出（新增一筆歷程）</button>'
     +'<div style="margin-top:16px"><div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">異動歷程（新到舊）</div>'+pchomeHistoryTimelineHTML(p.料號)+'</div>'
@@ -25224,6 +25224,8 @@ function pchomeEditRecalc(shop){ var prev=document.getElementById('pch-edit-prev
   var cost=parseFloat((document.getElementById('pch-edit-cost-'+shop)||{}).value)||0, supply=parseFloat((document.getElementById('pch-edit-supply-'+shop)||{}).value)||0;
   prev.innerHTML=pchomeBatchPreviewHTML(cost, supply, _pchomeEstFeeRateCache[shop]);
 }
+// 改供貨價 → 售價欄自動帶 供貨價÷0.75（四捨五入、可覆寫；0.75 寫死）→ 再重算估計淨利率。初次 render 不呼叫、不蓋既有售價。
+function pchomeEditSupplyChanged(shop){ var spEl=document.getElementById('pch-edit-price-'+shop), su=parseFloat((document.getElementById('pch-edit-supply-'+shop)||{}).value)||0; if(spEl && su>0) spEl.value=Math.round(su/0.75); pchomeEditRecalc(shop); }
 // 原廠編號→莫筆克成本提示字串（編輯/新增共用；不自動填成本，提示用）
 function pchomeOriginCostHintHTML(originVal){ var o=String(originVal||'').trim();
   if(!o) return '此欄＝廠商料號／料號；填了會查莫筆克成本表提示成本（不自動改，需自行填成本＋原因）';
@@ -25321,10 +25323,9 @@ function pchomeRenderBatchAdd(shop){
     +'<div><label style="'+_MOMO_LB+'">PChome 商品編號</label><input id="pch-add-pn-'+shop+'" type="text" style="'+_MOMO_INP+'"></div>'
     +'<div><label style="'+_MOMO_LB+'">成本</label><input id="pch-add-cost-'+shop+'" type="number" oninput="pchomeAddRecalc(\''+shop+'\')" style="'+_MOMO_INP+'"></div></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">'
-    +'<div><label style="'+_MOMO_LB+'">供貨價(含稅)（必填）</label><input id="pch-add-supply-'+shop+'" type="number" oninput="pchomeAddRecalc(\''+shop+'\')" style="'+_MOMO_INP+'"></div>'
-    +'<div><label style="'+_MOMO_LB+'">PChome 售價(含稅)<span style="color:#9ca3af">·僅參考</span></label><input id="pch-add-price-'+shop+'" type="number" style="'+_MOMO_INP+'"></div></div>'
+    +'<div><label style="'+_MOMO_LB+'">供貨價(含稅)（必填）</label><input id="pch-add-supply-'+shop+'" type="number" oninput="pchomeAddSupplyChanged(\''+shop+'\')" style="'+_MOMO_INP+'"></div>'
+    +'<div><label style="'+_MOMO_LB+'">PChome 售價(含稅)<span style="color:#9ca3af">·僅參考</span></label><input id="pch-add-price-'+shop+'" type="number" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">填供貨價後自動帶入（供貨價 ÷ 0.75），可自行修改</div></div></div>'
     +'<div id="pch-add-preview-'+shop+'" style="min-height:22px;margin-bottom:4px"></div>'
-    +'<div style="font-size:11px;color:#9ca3af;margin-bottom:10px">估計淨利率 ＝（供貨價÷1.05 − 成本 − 供貨價÷1.05 × 估計費率）÷（供貨價÷1.05）；估計費率＝最近已對帳月的 費用÷營收。毛利率為未扣費用的上限、次要參考。<b>售價不進計算</b>（僅參考）。總表的校正照舊（上傳對帳/訂單後自動轉實際值）。</div>'
     +'<button onclick="pchomeBatchSubmitAdd(\''+shop+'\')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">＋ 建立商品</button>'
     +'</div>';
   pchomeAddRecalc(shop);
@@ -25333,6 +25334,8 @@ function pchomeAddRecalc(shop){ var prev=document.getElementById('pch-add-previe
   var cost=parseFloat((document.getElementById('pch-add-cost-'+shop)||{}).value)||0, supply=parseFloat((document.getElementById('pch-add-supply-'+shop)||{}).value)||0;
   prev.innerHTML=pchomeBatchPreviewHTML(cost, supply, _pchomeEstFeeRateCache[shop]);
 }
+// 改供貨價 → 售價欄自動帶 供貨價÷0.75（四捨五入、可覆寫；0.75 寫死）→ 再重算估計淨利率。
+function pchomeAddSupplyChanged(shop){ var spEl=document.getElementById('pch-add-price-'+shop), su=parseFloat((document.getElementById('pch-add-supply-'+shop)||{}).value)||0; if(spEl && su>0) spEl.value=Math.round(su/0.75); pchomeAddRecalc(shop); }
 function pchomeAddOriginChanged(shop){ var src=document.getElementById('pch-add-cost-src-'+shop), costEl=document.getElementById('pch-add-cost-'+shop); if(!src) return;
   var origin=((document.getElementById('pch-add-origin-'+shop)||{}).value||'').trim();
   if(!origin){ src.innerHTML=''; return; }
@@ -26737,7 +26740,7 @@ function pchomeExportExcel(shop){
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
 Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBatchSetMode, pchomeAddOptlog, pchomeAddHistory,
-  pchomeBatchSelect, pchomeBatchSearch, pchomeBatchSetFilter, pchomeBatchToggleDisc, pchomeBatchSplitDrag, pchomeEditRecalc, pchomeEditOriginHint, pchomeBatchSubmitEdit, pchomeDeleteProduct, pchomeAddRecalc, pchomeAddOriginChanged, pchomeBatchSubmitAdd, pchomeListingFile, pchomeCostFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeReconFile, pchomeReconManualSave, pchomeStatementHtmFile, pchomeOrderPick, pchomeOrderRemove, pchomeOrderGenerate, pchomeOrderApply, pchomeOrderCancel, pchomeSetProfitMonth, pchomeSetViewMode, pchomeSetCalMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc, pchomeCalendarCalc, pchomeCalendarMonths,
+  pchomeBatchSelect, pchomeBatchSearch, pchomeBatchSetFilter, pchomeBatchToggleDisc, pchomeBatchSplitDrag, pchomeEditRecalc, pchomeEditSupplyChanged, pchomeEditOriginHint, pchomeBatchSubmitEdit, pchomeDeleteProduct, pchomeAddRecalc, pchomeAddSupplyChanged, pchomeAddOriginChanged, pchomeBatchSubmitAdd, pchomeListingFile, pchomeCostFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeReconFile, pchomeReconManualSave, pchomeStatementHtmFile, pchomeOrderPick, pchomeOrderRemove, pchomeOrderGenerate, pchomeOrderApply, pchomeOrderCancel, pchomeSetProfitMonth, pchomeSetViewMode, pchomeSetCalMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc, pchomeCalendarCalc, pchomeCalendarMonths,
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel,
   pchomeOptlogTypeToggle, pchomeOptlogTimeSet, pchomeOptlogBySet, pchomeOptlogSysToggle,
