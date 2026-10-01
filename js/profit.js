@@ -1986,6 +1986,16 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         else{ skippedProblem.push({key:pk,reason:'PChome 商品歷程雲端層未就緒'}); }
         return;
       }
+      if(pk==='ec_pchome_products'){   // 商品主檔：獨立 doc app/pchome_products（整包 list 一欄、整份覆蓋；語意同搬出前的 app/profit 欄位）
+        if(window.__cloudPchomeProducts){ tasks.push({key:pk, run:()=>pchomeSyncProducts()}); }
+        else{ skippedProblem.push({key:pk,reason:'PChome 商品主檔雲端層未就緒'}); }
+        return;
+      }
+      if(pk==='ec_pchome_recon'){   // 對帳資料：獨立 doc app/pchome_recon（整包 data 一欄＝帳務月 map、整份覆蓋；語意同搬出前）
+        if(window.__cloudPchomeRecon){ tasks.push({key:pk, run:()=>pchomeSyncRecon()}); }
+        else{ skippedProblem.push({key:pk,reason:'PChome 對帳資料雲端層未就緒'}); }
+        return;
+      }
       if(_notesUsesMerge(pk)){   // ec_notes：dirty-scoped merge（逐品號、只覆蓋你改過的、不刪同事的）→ 兩人各改各的品號可共存
         //   ⚠ 實務上【只有 _growth 會走到這裡】。廣告調整 ec_notes|{通路}|{月}|{半月} 雖然
         //     saveNotes 也會把它加進 _pendingSyncKeys，但它在本迴圈【之前】就已由當期閘門排進
@@ -23910,9 +23920,12 @@ function pchomeVanished(p, latestExport){ if(!p||(p.source||'listing')==='manual
 // 上架清單來源、每次上傳會更新的欄位（合併時只碰這些；cost 另由 costMap 重查、其餘我方欄位不碰）。
 var PCHOME_LISTING_FIELDS=['商品名','規格','商品編號','供貨價','售價','毛利率PC','可賣量','缺貨','出貨方式','shop','商品狀態'];
 // ── PChome 待推 dirty 持久化（跨重整）──
-//   ec_pchome_recon / ec_pchome_products 是 app/profit 泛用欄位，bounce-back 守衛 __profitShouldSkipCloudOverwrite
-//   讀的是 _pendingSyncKeys（in-memory、重整即歸零）。這份持久 dirty 讓「本機已存未推」在重整後仍：
-//   (a) 擋得住雲端 app/profit echo 覆蓋（守衛加讀這份）、(b) 正確計入待推數（_realPendingCount 加讀這份）。
+//   ec_pchome_recon / ec_pchome_products 現已搬到各自獨立 doc（app/pchome_recon / app/pchome_products），
+//   由 __pchomeApplyCloudRecon / __pchomeApplyCloudProducts 的 dirty 檢查擋雲端 echo（同 orders）。
+//   過渡期 app/profit 仍可能有舊欄位殘影（未跑 cleanup 前）→ bounce-back 守衛 __profitShouldSkipCloudOverwrite
+//   仍保留對這兩 key 的字面比對，雙重保險（mergeAndNotify 對這兩 key 已改成「只在未填時 fallback」）。
+//   dirty 讀的是 _pendingSyncKeys（in-memory、重整即歸零）。這份持久 dirty 讓「本機已存未推」在重整後仍：
+//   (a) 擋得住雲端 echo 覆蓋、(b) 正確計入待推數（_realPendingCount 加讀這份）。
 //   形狀照 ec_momo_cost_dirty（本檔搜 momoCostDirtyKey）：localStorage JSON 陣列、存時 add、推成功才 del。
 function pchomeDirtyKey(){ return 'ec_pchome_dirty'; }
 function pchomeDirtyGet(){ try{ var l=localStorage.getItem(pchomeDirtyKey()); var a=l?JSON.parse(l):[]; return Array.isArray(a)?a:[]; }catch(e){ return []; } }
@@ -24014,6 +24027,107 @@ window.addEventListener('pchomeOrdersReady', function(){
 //   __pchomeApplyCloudOrders 尚未定義時就觸發過了（會漏掉初次 hydrate）。firebase.js 把最新快照緩存在
 //   window.__pchomeOrdersCloudLatest；此處在 apply 定義後立刻補套一次 → 換機/清快取後訂單能從雲端讀回。
 try{ if(typeof window.__pchomeOrdersCloudLatest!=='undefined') window.__pchomeApplyCloudOrders(window.__pchomeOrdersCloudLatest); }catch(e){}
+
+// ══════════ 商品主檔 / 對帳資料 → 各自獨立 doc（app/pchome_products / app/pchome_recon）══════════
+//   背景：這兩個原本是 app/profit 的泛用欄位，體積最大（products ~150KB、recon ~50KB/月）→ 把 app/profit 推向 1MB
+//   （全公司淨利表同步共用 app/profit，撞上限就全站同步失敗）。搬到各自獨立 doc、各吃自己的 1MB。
+//   語意【不變】＝整份覆蓋（products 整個陣列寫 `list` 欄；recon 整個帳務月 map 寫 `data` 欄）；只是換了 doc。
+//   寫：走既有 syncToCloud task 迴圈（ec_pchome_products / ec_pchome_recon 分支，見上方），不另開寫入路徑。
+//   讀：firebase.js 訂閱 app/pchome_products / app/pchome_recon → 下方 apply（過渡期 app/profit 舊欄位只當 fallback）。
+async function pchomeSyncProducts(){
+  if(!window.__cloudPchomeProducts) throw new Error('PChome 商品主檔雲端層未就緒');
+  var arr=pchomeLoadProducts()||[];
+  await window.__cloudPchomeProducts.setField('list', momoFsSanitizeDeep(arr));   // 整份覆蓋（同搬出前）；雲端較新的保護在同步預覽（pchomeOpenSyncPreview）
+  return 0;
+}
+async function pchomeSyncRecon(){
+  if(!window.__cloudPchomeRecon) throw new Error('PChome 對帳資料雲端層未就緒');
+  var map=pchomeLoadRecon()||{};
+  await window.__cloudPchomeRecon.setField('data', momoFsSanitizeDeep(map));   // 整份覆蓋（同搬出前）；雲端較新的保護在同步預覽
+  return 0;
+}
+// app/pchome_products 訂閱 → 套用（list 欄＝整個陣列）。bounce-back：本機 dirty（剛存未推）→ 不覆蓋；乾淨 → 採雲端。
+//   🔴 遷移前新 doc 尚空（list 不是陣列）→ return 不動，讓 app/profit fallback（mergeAndNotify）供資料、數字不變。
+window.__pchomeApplyCloudProducts=function(docData){
+  try{
+    var arr=(docData&&docData.list)||null;
+    if(!Array.isArray(arr)) return;   // 遷移前／無資料 → 走 app/profit fallback
+    var localArr=pchomeLoadProducts()||[];
+    if(arr.length===0 && localArr.length>0) return;   // 雲端空、本機有 → 保住本機
+    if(pchomeDirtyGet().indexOf('ec_pchome_products')>=0) return;   // 本機未推 → 不覆蓋
+    var prev=null; try{ prev=(Store._profitMem&&Store._profitMem['ec_pchome_products'])||null; }catch(e){}
+    if(prev && JSON.stringify(prev)===JSON.stringify(arr)) return;   // 無變化 → 不動不重繪
+    try{ Store._profitMem=Store._profitMem||{}; Store._profitMem['ec_pchome_products']=arr; }catch(e){}
+    try{ Store._mem=Store._mem||{}; Store._mem['ec_pchome_products']=arr; }catch(e){}
+    try{ localStorage.setItem('ec_pchome_products', JSON.stringify(arr)); }catch(e){}
+    pchomeApplyCloudRerender();
+  }catch(e){ console.error('[pchome products] 套用雲端失敗：',e); }
+};
+// app/pchome_recon 訂閱 → 套用（data 欄＝帳務月 map）。整份覆蓋語意：dirty → 保住本機；乾淨 → 採雲端（經帳務月正規化）。
+window.__pchomeApplyCloudRecon=function(docData){
+  try{
+    var map=(docData&&docData.data)||null;
+    if(!map || typeof map!=='object') return;   // 遷移前／無資料 → 走 app/profit fallback
+    var localMap=pchomeLoadRecon()||{};
+    if(Object.keys(map).length===0 && Object.keys(localMap).length>0) return;   // 雲端空、本機有 → 保住本機
+    if(pchomeDirtyGet().indexOf('ec_pchome_recon')>=0) return;   // 本機未推 → 不覆蓋
+    var result=map; try{ var nz=pchomeNormalizeReconKeys(map); result=nz.map; }catch(e){}   // 舊字串 key → 帳務月（冪等）
+    var prev=null; try{ prev=(Store._profitMem&&Store._profitMem['ec_pchome_recon'])||null; }catch(e){}
+    if(prev && JSON.stringify(prev)===JSON.stringify(result)) return;
+    try{ Store._profitMem=Store._profitMem||{}; Store._profitMem['ec_pchome_recon']=result; }catch(e){}
+    try{ Store._mem=Store._mem||{}; Store._mem['ec_pchome_recon']=result; }catch(e){}
+    try{ localStorage.setItem('ec_pchome_recon', JSON.stringify(result)); }catch(e){}
+    pchomeApplyCloudRerender();
+  }catch(e){ console.error('[pchome recon] 套用雲端失敗：',e); }
+};
+// 雲端 products/recon 到達 → 若正在看某 PChome 賣場、且不在「批次維護」（有輸入格）→ 重繪當前子分頁（總表/月對帳皆唯讀、重繪安全）。
+function pchomeApplyCloudRerender(){
+  try{ ['轉單','寄倉'].forEach(function(shop){
+    var el=document.getElementById('pchome-content-'+shop);
+    if(el && el.classList.contains('active') && (_pchomeSub[shop]||'profit')!=='batch') pchomeRenderSub(shop);
+  }); }catch(e){}
+}
+// 🔴 drain（profit.js 動態載入，boot 訂閱早於這裡就緒、首個快照在 apply 未定義時就觸發過）：apply 定義後補套一次。
+try{ if(typeof window.__pchomeProductsCloudLatest!=='undefined') window.__pchomeApplyCloudProducts(window.__pchomeProductsCloudLatest); }catch(e){}
+try{ if(typeof window.__pchomeReconCloudLatest!=='undefined') window.__pchomeApplyCloudRecon(window.__pchomeReconCloudLatest); }catch(e){}
+
+// ── 遷移 / 清理（正式站 console 手動跑；都冪等）──────────────────────────────────────────
+//   __pchomeMigrateProductsRecon()：讀 app/profit 現值（權威，不依賴本機）→ 寫入新 doc。重跑不重複（內容相同即跳過）。
+//   __pchomeCleanupOldProfitFields()：確認新 doc 讀得到資料後，才從 app/profit 移除舊欄位（獨立一步、預設有安全閘）。
+//   ⚠ 兩者都是 profit.js 的函式 → 要先進 PChome 淨利表（觸發 profit.js 動態載入）才叫得到。
+window.__pchomeMigrateProductsRecon=async function(){
+  if(!window.__cloudProfit||!window.__cloudPchomeProducts||!window.__cloudPchomeRecon){ console.error('[pchome migrate] 雲端層未就緒'); return; }
+  var snap=await window.__cloudProfit.getDoc();
+  var prof=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{};
+  var srcP=prof['ec_pchome_products'], srcR=prof['ec_pchome_recon'];
+  var report={products:'(skip)', recon:'(skip)'};
+  if(Array.isArray(srcP)){
+    var ps=await window.__cloudPchomeProducts.getDoc();
+    var cur=(ps&&ps.exists&&ps.exists())?((ps.data()||{}).list):undefined;
+    if(JSON.stringify(cur)===JSON.stringify(srcP)) report.products='已是最新（'+srcP.length+' 筆）→ 跳過';
+    else { await window.__cloudPchomeProducts.setField('list', momoFsSanitizeDeep(srcP)); report.products='已寫入 '+srcP.length+' 筆 → app/pchome_products.list'; }
+  } else report.products='app/profit 無 ec_pchome_products（跳過）';
+  if(srcR && typeof srcR==='object'){
+    var rs=await window.__cloudPchomeRecon.getDoc();
+    var rcur=(rs&&rs.exists&&rs.exists())?((rs.data()||{}).data):undefined;
+    if(JSON.stringify(rcur)===JSON.stringify(srcR)) report.recon='已是最新（'+Object.keys(srcR).length+' 月）→ 跳過';
+    else { await window.__cloudPchomeRecon.setField('data', momoFsSanitizeDeep(srcR)); report.recon='已寫入 '+Object.keys(srcR).length+' 月 → app/pchome_recon.data'; }
+  } else report.recon='app/profit 無 ec_pchome_recon（跳過）';
+  console.log('%c[pchome migrate] 完成','color:#fff;background:#10b981;font-size:14px;font-weight:700;padding:3px 8px', report);
+  return report;
+};
+window.__pchomeCleanupOldProfitFields=async function(opts){
+  opts=opts||{};
+  if(!window.__cloudProfit||!window.__cloudPchomeProducts||!window.__cloudPchomeRecon){ console.error('[pchome cleanup] 雲端層未就緒'); return; }
+  var ps=await window.__cloudPchomeProducts.getDoc(); var plist=(ps&&ps.exists&&ps.exists())?((ps.data()||{}).list):undefined;
+  var rs=await window.__cloudPchomeRecon.getDoc();   var rdata=(rs&&rs.exists&&rs.exists())?((rs.data()||{}).data):undefined;
+  var okP=Array.isArray(plist)&&plist.length>0, okR=rdata&&typeof rdata==='object'&&Object.keys(rdata).length>0;
+  if(!opts.force && !(okP&&okR)){ console.error('[pchome cleanup] 中止：新 doc 尚未就緒（products '+(okP?'OK '+plist.length+'筆':'空')+' / recon '+(okR?'OK '+Object.keys(rdata).length+'月':'空')+'）。先跑 __pchomeMigrateProductsRecon() 驗證後再清；確定要強清用 __pchomeCleanupOldProfitFields({force:true})'); return; }
+  await window.__cloudProfit.removeFields(['ec_pchome_products','ec_pchome_recon']);
+  try{ pchomeDirtyDel('ec_pchome_products'); pchomeDirtyDel('ec_pchome_recon'); }catch(e){}
+  console.log('%c[pchome cleanup] 已從 app/profit 移除 ec_pchome_products / ec_pchome_recon','color:#fff;background:#10b981;font-size:14px;font-weight:700;padding:3px 8px', {productsInNewDoc:okP, reconInNewDoc:okR});
+  return {removed:['ec_pchome_products','ec_pchome_recon'], productsInNewDoc:okP, reconInNewDoc:okR};
+};
 
 // ══════════ 批次維護資料層：優化紀錄(optlog) + 商品歷程(history)（照 momo 複製；各自獨立 doc，v711 基建已就位）══════════
 //   optlog：Store key ec_pchome_optlog|<shop> → app/pchome_optlog（doc 內每 shop 一欄＝{sku:[entry]}）。entry 形狀完全照 momo。
@@ -24488,11 +24602,16 @@ async function pchomeOpenSyncPreview(shop){
   var keys=pchomePendingKeys();
   if(!keys.length){ if(typeof showToast==='function') showToast('目前沒有待同步的 PChome 資料',''); return; }
   var recon=pchomeLoadRecon(), prods=pchomeLoadProducts();
-  var cloud={}; try{ var snap=await window.__cloudProfit.getDoc(); cloud=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{}; }
+  // 對帳/主檔已搬到獨立 doc（app/pchome_recon / app/pchome_products）→ 讀各自雲端（非 app/profit）比對新舊
+  var cloudRecon={}, cloudProds=[];
+  try{
+    if(keys.indexOf('ec_pchome_recon')>=0){ var _rs=await window.__cloudPchomeRecon.getDoc(); cloudRecon=(_rs&&_rs.exists&&_rs.exists())?((_rs.data()||{}).data||{}):{}; }
+    if(keys.indexOf('ec_pchome_products')>=0){ var _ps=await window.__cloudPchomeProducts.getDoc(); cloudProds=(_ps&&_ps.exists&&_ps.exists())?((_ps.data()||{}).list||[]):[]; }
+  }
   catch(e){ if(typeof showToast==='function') showToast('讀取雲端失敗，請稍後再試','error'); return; }
   var items=[];
   if(keys.indexOf('ec_pchome_recon')>=0){
-    var cr=cloud['ec_pchome_recon']||{}, hasCloud=cloud['ec_pchome_recon']!=null && Object.keys(cr).length>0;
+    var cr=cloudRecon||{}, hasCloud=Object.keys(cr).length>0;
     var status=!hasCloud?'new':(JSON.stringify(recon)===JSON.stringify(cr)?'same':'diff');
     var cf=(status==='diff')?pchomeReconConflict(recon, cr):{conflict:false,reasons:[]};
     var months=Object.keys(recon).concat(Object.keys(cr)).filter(function(m,i,a){return a.indexOf(m)===i;}).sort();
@@ -24501,7 +24620,7 @@ async function pchomeOpenSyncPreview(shop){
     items.push({key:'ec_pchome_recon', kind:'PChome對帳', name:'對帳資料', localCount:pchomeReconTotalRows(recon), cloudCount:(hasCloud?pchomeReconTotalRows(cr):0), status:status, conflict:cf.conflict, conflictReasons:cf.reasons, diffSamples:samples, diffSummary:samples.length+' 個帳務月'});
   }
   if(keys.indexOf('ec_pchome_products')>=0){
-    var cp=cloud['ec_pchome_products']; var hasCP=Array.isArray(cp)&&cp.length>0;
+    var cp=cloudProds; var hasCP=Array.isArray(cp)&&cp.length>0;
     var st2=!hasCP?'new':(JSON.stringify(prods)===JSON.stringify(cp)?'same':'diff');
     // 商品主檔衝突判準＝與對帳同一套（檔名匯出時間；cloud>local 或任一缺→衝突、拿不準預設不勾）。數量比對只當輔助資訊、不當判準（下架汰換數量本就會變少）。
     var lpt=String(((prods||[])[0]||{}).匯出時間||''), cpt=String((hasCP?(cp[0]||{}).匯出時間:'')||'');
