@@ -1748,6 +1748,27 @@
   }
   .role-admin { background: var(--primary-soft); color: var(--primary); }
   .role-staff { background: var(--bg); color: var(--text-muted); }
+  /* 帳號停用／恢復／刪除（#252） */
+  .badge-disabled { background: var(--danger-soft); color: var(--danger); }
+  .user-row.is-disabled .employee-avatar,
+  .user-row.is-disabled .info .meta { opacity: .55; }
+  .user-row.is-disabled .info .name { color: var(--text-muted); }
+  .user-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .user-act-btn {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .user-act-btn:hover { background: var(--bg); }
+  .user-act-btn.danger { color: var(--danger); }
+  .user-act-btn.danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+  .user-act-btn:disabled { opacity: .5; cursor: not-allowed; }
 
   /* ========== 工作週曆 — 備註懸停 tooltip ========== */
   .cal-task-card { position: relative; }

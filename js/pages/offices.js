@@ -1,6 +1,6 @@
 ﻿/* js/pages/offices.js -- methods extracted from original App, merged back via Object.assign(App, ...) */
 const App = window.App;
-const { Store, escapeHtml, showToast, toDateStr, addDays, OFFICE_CONFIG, OFFICE_FEATURES, hasOfficeFeature, canAccessOffice, getUserDepts, computeScore, getQuarterScore } = window;
+const { Store, escapeHtml, showToast, toDateStr, addDays, OFFICE_CONFIG, OFFICE_FEATURES, hasOfficeFeature, canAccessOffice, getUserDepts, computeScore, getQuarterScore, isUserActive } = window;
 
 Object.assign(App, {
   bindOfficeTabs(deptId) {
@@ -763,7 +763,8 @@ Object.assign(App, {
         <p style="font-size:13px;color:var(--text-muted);margin-top:8px">請聯絡管理員開啟「跨辦公室檢視」權限</p>
       </div>`;
     }
-    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
+    // 停用／刪除的帳號（#252）不列入成員表與「共 N 人」
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => isUserActive(u) && getUserDepts(u).includes(dept.name));
     const color = dept.color;
 
     const statCards = cfg.stats.map(s => `

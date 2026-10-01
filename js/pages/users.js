@@ -1,6 +1,6 @@
 /* js/pages/users.js -- methods extracted from original App, merged back via Object.assign(App, ...) */
 const App = window.App;
-const { Store, escapeHtml, showToast, hashPassword, computeScore, OFFICE_CONFIG, OFFICE_FEATURES } = window;
+const { Store, escapeHtml, showToast, hashPassword, computeScore, OFFICE_CONFIG, OFFICE_FEATURES, isUserActive } = window;
 
 // 姓名／帳號互撞規則（之後要靠姓名與 username 認人，兩者在全部帳號間都不能混淆）。
 //   比對一律「去頭尾空白＋不分大小寫」；「其他帳號」用原本的 username 排除自己，
@@ -9,6 +9,8 @@ const { Store, escapeHtml, showToast, hashPassword, computeScore, OFFICE_CONFIG,
 //   checkName：編輯時只有姓名真的改了才檢查，避免舊資料或系統自動建的帳號（如「陳大明」）
 //   本來就重名、讓整個帳號連改權限都存不了。
 //   回傳錯誤訊息；沒撞到回 null。
+//   🔴 list 刻意包含「已停用」與「已刪除」的帳號（#252）：username 與姓名永久佔用，
+//   否則舊紀錄（存 username 的 by / createdBy 等）會被歸到新人身上。呼叫端不可先 filter。
 const normId = s => String(s || '').trim().toLowerCase();
 function userIdentityClash(list, { name, username, selfUsername, checkName }) {
   const others = list.filter(x => x.username !== selfUsername);
@@ -40,26 +42,36 @@ Object.assign(App, {
     const ro = role === 'view';   // 唯讀檢視：顯示清單但停用新增/編輯/刪除
     const roAttr = ro ? 'disabled title="唯讀帳號無此權限"' : '';
     const roleName = r => r === 'admin' ? '管理員' : (r === 'view' ? '檢視' : '員工');
-    const users = Store.get(Store.KEYS.users, []);
+    // 已刪除的帳號（#252）不顯示；資料仍留在 ec.users 裡佔住 username 與姓名
+    const users = Store.get(Store.KEYS.users, []).filter(u => !u.deleted);
     const rows = users.map(u => {
       const isAdmin = u.role === 'admin';
+      const off = !isUserActive(u);
+      const uq = escapeHtml(u.username);
+      const roTitle = '唯讀帳號無此權限';
+      // 停用中：恢復＋刪除（username 為 admin 的帳號只能停用、不能刪除）；使用中：停用。自己的帳號不給任何狀態按鈕。
+      const statusBtns = u.username === this.currentUser.username ? ''
+        : off
+          ? `<button class="user-act-btn" title="${ro ? roTitle : '恢復後可以登入'}" ${roAttr} onclick="App.restoreUser('${uq}')">恢復</button>`
+            + (u.username.toLowerCase() === 'admin' ? ''
+              : `<button class="user-act-btn danger" title="${ro ? roTitle : '從清單隱藏，無法從畫面恢復'}" ${roAttr} onclick="App.deleteUser('${uq}')">刪除</button>`)
+          : `<button class="user-act-btn" title="${ro ? roTitle : '停用後不能登入，可恢復'}" ${roAttr} onclick="App.disableUser('${uq}')">停用</button>`;
       const crossBadge = (isAdmin || u.crossOfficeAccess === true)
         ? `<span class="badge-role" style="background:var(--success-soft);color:var(--success)">🌐 跨辦公室</span>`
         : `<span class="badge-role" style="background:var(--warn-soft);color:var(--warn)">僅本辦公室</span>`;
       return `
-        <div class="user-row">
+        <div class="user-row${off ? ' is-disabled' : ''}">
           <div class="employee-avatar">${escapeHtml(u.name.slice(0,1))}</div>
           <div class="info">
             <div class="name">${escapeHtml(u.name)}
               <span class="badge-role ${isAdmin?'role-admin':'role-staff'}">${roleName(u.role)}</span>
               ${crossBadge}
+              ${off ? '<span class="badge-role badge-disabled">已停用</span>' : ''}
             </div>
             <div class="meta">@${escapeHtml(u.username)} · ${escapeHtml(getUserDeptLabel(u))}</div>
           </div>
           <button class="icon-btn" title="${ro?'唯讀帳號無此權限':'編輯'}" ${roAttr} onclick="App.openUserModal('${escapeHtml(u.username)}')">✏️</button>
-          ${u.username === this.currentUser.username
-            ? ''
-            : `<button class="icon-btn danger" title="${ro?'唯讀帳號無此權限':'刪除'}" ${roAttr} onclick="App.deleteUser('${escapeHtml(u.username)}')">🗑️</button>`}
+          ${statusBtns ? `<div class="user-actions">${statusBtns}</div>` : ''}
         </div>
       `;
     }).join('');
@@ -204,6 +216,7 @@ Object.assign(App, {
         if (!name || !usernameVal) { showToast('請填寫姓名與帳號', 'error'); return false; }
         const list = Store.get(Store.KEYS.users, []);
         // 撞名檢查只在新增時做（編輯不改 username，沒有撞名問題）
+        //   🔴 list 刻意包含已停用與已刪除的帳號（#252），不可先 filter——username 永久佔用。
         if (!isEdit && list.some(x => x.username.toLowerCase() === usernameVal.toLowerCase())) {
           showToast('帳號已存在（不分大小寫）', 'error'); return false;
         }
@@ -261,6 +274,63 @@ Object.assign(App, {
       },
     });
   },
+  // 帳號狀態（#252）：停用／恢復／刪除都只在原帳號上加減欄位、不移出 ec.users，
+  //   陣列長度不變（Store.set 的防誤刪保護不會誤擋），username 與姓名永久佔用。
+  //   patch 收到的是該帳號的「複本」（Store.get 在雲端模式回傳的是記憶體本身，原地改會在寫入被擋時留下髒值），
+  //   改完整份寫回；寫入被擋（防護或唯讀）時不顯示成功。
+  _setUserStatus(username, patch, okMsg) {
+    const list = Store.get(Store.KEYS.users, []);
+    const next = list.map(u => {
+      if (u.username !== username) return u;
+      const c = { ...u };
+      patch(c);
+      return c;
+    });
+    Store.set(Store.KEYS.users, next);
+    const want = next.find(u => u.username === username);
+    const saved = (Store.get(Store.KEYS.users, []) || []).find(u => u.username === username);
+    if (!saved || !!saved.disabled !== !!want.disabled || !!saved.deleted !== !!want.deleted) {
+      showToast('沒有存進去，請重新整理後再試一次', 'error', 4000);
+      return false;
+    }
+    showToast(okMsg, 'success');
+    this.render();
+    return true;
+  },
+  // 停用：不能登入，清單仍顯示「已停用」、可恢復。不動 role（seedData 靠 role 判斷有沒有管理員）。
+  disableUser(username) {
+    if (this.isReadOnly && this.isReadOnly()) { showToast('🔒 檢視帳號為唯讀，無法修改資料', 'error'); return; }
+    if (username === this.currentUser.username) { showToast('不能停用自己的帳號', 'error'); return; }
+    const list = Store.get(Store.KEYS.users, []);
+    const user = list.find(u => u.username === username);
+    if (!user || !isUserActive(user)) return;
+    if (user.role === 'admin' && list.filter(u => u.role === 'admin' && isUserActive(u)).length <= 1) {
+      showToast('不能停用最後一位可用的管理員', 'error', 4000);
+      return;
+    }
+    if (!confirm(`確定要停用帳號「${user.name}」（@${user.username}）？\n\n・停用後不能登入；對方若正在使用，會被自動登出\n・帳號仍留在清單、標示「已停用」，可以隨時恢復\n・帳號名稱與姓名仍保留給此人，不能給別人用`)) return;
+    const by = this.currentUser.username;
+    this._setUserStatus(username, u => {
+      u.disabled = true;
+      u.disabledAt = new Date().toISOString();
+      u.disabledBy = by;
+    }, '已停用');
+  },
+  // 恢復：拿掉停用的三個欄位（delete，不設成 false），可以用原本的密碼登入
+  restoreUser(username) {
+    if (this.isReadOnly && this.isReadOnly()) { showToast('🔒 檢視帳號為唯讀，無法修改資料', 'error'); return; }
+    const list = Store.get(Store.KEYS.users, []);
+    const user = list.find(u => u.username === username);
+    if (!user || !user.disabled || user.deleted) return;
+    if (!confirm(`確定要恢復帳號「${user.name}」（@${user.username}）？\n恢復後可以用原本的密碼登入。`)) return;
+    this._setUserStatus(username, u => {
+      delete u.disabled;
+      delete u.disabledAt;
+      delete u.disabledBy;
+    }, '已恢復');
+  },
+  // 刪除：只能刪「已停用」的帳號（先停用、再刪除）。從清單隱藏、畫面上無法恢復；
+  //   資料仍留在 ec.users（username 與姓名永久佔用、舊紀錄仍查得到姓名）。username 為 admin 的帳號不能刪。
   deleteUser(username) {
     if (this.isReadOnly && this.isReadOnly()) { showToast('🔒 檢視帳號為唯讀，無法修改資料', 'error'); return; }
     if (username === this.currentUser.username) {
@@ -269,11 +339,16 @@ Object.assign(App, {
     }
     const list = Store.get(Store.KEYS.users, []);
     const user = list.find(u => u.username === username);
-    if (!user) return;
-    if (!confirm(`確定要刪除帳號「${user.name}」？`)) return;
-    Store.set(Store.KEYS.users, list.filter(u => u.username !== username));
-    showToast('已刪除', 'success');
-    this.render();
+    if (!user || user.deleted) return;
+    if (user.username.toLowerCase() === 'admin') { showToast('admin 帳號不能刪除，只能停用', 'error', 4000); return; }
+    if (!user.disabled) { showToast('請先停用此帳號，再刪除', 'error'); return; }
+    if (!confirm(`確定要刪除帳號「${user.name}」（@${user.username}）？\n\n・刪除後從帳號清單隱藏，無法從畫面恢復\n・帳號名稱與姓名仍不能給別人用（避免舊紀錄被算到新人頭上）\n・過去的紀錄仍會顯示此人的姓名`)) return;
+    const by = this.currentUser.username;
+    this._setUserStatus(username, u => {
+      u.deleted = true;
+      u.deletedAt = new Date().toISOString();
+      u.deletedBy = by;
+    }, '已刪除');
   },
   openChangePasswordModal() {
     if (this.isReadOnly && this.isReadOnly()) { showToast('🔒 檢視帳號為唯讀，無法修改資料', 'error'); return; }
