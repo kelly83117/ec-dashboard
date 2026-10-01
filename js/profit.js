@@ -3495,7 +3495,15 @@ function checkAdsReconcile(shop,built){
   const csvTotal=Object.values(adsById).reduce((a,b)=>a+b,0);
   const reportTotal=built.reduce((acc,r)=>acc+(r.adsFee||0),0);
   const diff=Math.round((reportTotal-csvTotal)*100)/100;
-  if(Math.abs(diff)<0.5)return;
+  // 漏傳檢查：上面的對帳只比「已上傳的檔案」vs 報表，漏傳一整個群組檔時兩邊一起少、差額是 0，
+  //   在下一行就 return 了（2026-10-01 森之旅 9 月漏傳 ROI 7 群組 160.06，完全沒提醒）。
+  //   所以要在 return 之前算，且兩件事都沒有才 return。
+  //   ⚠ 只提醒「總體檔多、已上傳少」（少傳）這個方向；反方向（多傳、期間錯）只在明細裡看得到。
+  //   ⚠ 包 try：這是附加檢查，算壞了只印 console，不可以連累原本的對帳橫幅。
+  let gap=null;
+  try{gap=_noSidGap(shop);}catch(e){console.error('[漏傳檢查] _noSidGap 失敗，略過漏傳提醒',e);}
+  const missing=gap&&gap.gap>=1?gap.gap:0;
+  if(Math.abs(diff)<0.5&&!missing)return;
   // 找出未對應的 SID，並在【同一趟】建立 sid→codes 反向索引（供下方「重複對應」用）。
   //   刻意從 Object.values 換成 Object.entries：多拿一個 code 就能順手建 sidToCodes，
   //   不必為了重複對應再遍歷一次 rawMap。mapped 的內容與行為完全不變。
@@ -3550,8 +3558,40 @@ function checkAdsReconcile(shop,built){
   //   同一個數字兩邊會長得不一樣，故一併補上 '−'（U+2212，與 modal 一致）。
   //   ⚠ 只改顯示的符號，上方 csvTotal / reportTotal / diff 的計算一個字不動。
   const sign=diff>0?'+':diff<0?'−':'';
-  const msg=`[${shop}] 廣告費對帳差異：CSV 總計 ${fmtAds(csvTotal)}，報表合計 ${fmtAds(reportTotal)}（差 ${sign}${fmtAds(diff)}）\n${srcLine}`;
-  showMapWarnBanner(msg,()=>showReconcileDetail(shop,{diff,unmapped,dups,src}));
+  // 橫幅是單例（#map-warn-banner），兩件事只能合成一則、只呼叫一次 showMapWarnBanner，否則後者蓋前者。
+  //   有幾段印幾段；只有對帳差額時，組出來的字串與改前一字不差。
+  //   ⚠ 漏傳那段只放金額（數字），廣告名稱是使用者資料，只進明細 modal（理由同上方 gray 那段註解）。
+  const parts=[];
+  if(Math.abs(diff)>=0.5)parts.push(`廣告費對帳差異：CSV 總計 ${fmtAds(csvTotal)}，報表合計 ${fmtAds(reportTotal)}（差 ${sign}${fmtAds(diff)}）`);
+  if(missing)parts.push(`總體檔裡有 NT$${fmtAds(missing)} 的廣告費找不到對應的選品廣告或廣告群組檔，可能漏傳了某個廣告群組（含已暫停的）。`);
+  const msg=`[${shop}] ${parts.join('\n\n')}\n${srcLine}`;
+  showMapWarnBanner(msg,()=>showReconcileDetail(shop,{diff,unmapped,dups,src,gap}));
+}
+// 漏傳檢查：總體檔裡【沒有商品 ID】的列（自動選品廣告、各廣告群組）的花費，要靠選品檔／群組檔
+//   才分得到商品上。比「總體檔這些列的合計」vs「已上傳選品＋群組檔分得到商品的合計」，差額就是
+//   找不到對應檔案的錢。刻意比金額不比個數：群組檔檔名是 ID、總體檔寫名稱，對不起來。
+// ⚠ 排除用「廣告類型 === 賣場廣告」，不用名稱：名稱是同事自取（玩樂有群組叫「ROI 15」，沒有「廣告群組」字樣）。
+//   賣場廣告本來就不分到商品、也沒有對應檔可傳，算進來會永遠對不上。自動選品廣告的類型是空白，照算。
+// ⚠ 已上傳合計照 buildShop 的口徑（有商品 ID 且花費 > 0 的列才算）：只有這些錢真的進了報表。
+//   xlsx 不會被 parseAdsCsv 過濾，合計列（SID 空白）靠同一個口徑排除。
+//   String() 包一層是防 xlsx 數字格的 SID（buildShop 那邊不動，見 checkAdsReconcile 上方的分工）。
+// ⚠ 唯讀、現算、不存：結果只活在這次呼叫裡（衍生資料不持久化，理由同 parseAdsCsv 的 _noSid）。
+// 回傳 null = 沒有總體檔，無從比對。
+function _noSidGap(shop){
+  const s=state[shop]||{};
+  if(!s.rawAds||!s.rawAds.length)return null;
+  const r2=v=>Math.round(v*100)/100;
+  const list=(s.rawAds._noSid||[]).map(r=>({name:r.name,type:r.type,spend:r.spend,excluded:r.type==='賣場廣告'}));
+  const mainTotal=r2(list.filter(r=>!r.excluded).reduce((a,r)=>a+r.spend,0));
+  const excludedTotal=r2(list.filter(r=>r.excluded).reduce((a,r)=>a+r.spend,0));
+  const sumRows=rows=>(rows||[]).reduce((a,r)=>{
+    const sid=String(r['商品 ID']||r['商品ID']||'').trim();
+    if(!sid||sid==='-')return a;
+    const spend=num(r['花費']||r['廣告費']||0);
+    return spend>0?a+spend:a;
+  },0);
+  const uploaded=r2(sumRows(s.rawSelAds)+(s.rawGroupAdsList||[]).reduce((a,g)=>a+sumRows(g.rows),0));
+  return {mainTotal,uploaded,gap:r2(mainTotal-uploaded),excludedTotal,list};
 }
 // 2026-08-17 擴充：明細改成兩張表（重複對應 / 未對應）＋ 結算列 ＋ 三個來源筆數。
 //   簽章改成物件參數 detail={diff,unmapped,dups,src}：全檔唯一呼叫點是 checkAdsReconcile
@@ -3594,6 +3634,29 @@ function showReconcileDetail(shop,detail){
       <td style="${TD};max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(u.name)}">${esc(u.name)||'—'}</td>
       <td style="${TD};text-align:right;font-weight:600;color:#b45309">${amt(u.spend)}</td>
     </tr>`).join(''):`<tr><td colspan="3" style="padding:16px;text-align:center;color:#9ca3af;font-size:12px">無未對應的 SID（差異可能來自重複對應）</td></tr>`;
+  // 沒有商品 ID 的廣告（漏傳檢查，見 _noSidGap）。樣式全在 css/profit.css 的 .rc-nosid-*（不寫 inline）。
+  //   有漏傳（≥ 1 元）時放在最上面，否則放最下面當參考。名稱是使用者資料，一律過 esc。
+  const g=detail&&detail.gap;
+  const gMissing=!!(g&&g.gap>=1);
+  let noSidHtml='';
+  if(g&&g.list.length){
+    const st=gMissing?`<span class="rc-nosid-bad">還差 ${amt(g.gap)}（可能漏傳）</span>`
+      :g.gap<=-1?`<span class="rc-nosid-muted">已上傳多 ${amt(g.gap)}（不列入提醒）</span>`
+      :`<span class="rc-nosid-ok">相符</span>`;
+    const rows=g.list.map(r=>`<tr${r.excluded?' class="rc-nosid-ex"':''}>
+        <td class="rc-nosid-name" title="${esc(r.name)}">${esc(r.name)||'—'}</td>
+        <td>${esc(r.type)||'—'}${r.excluded?'<div class="rc-nosid-exnote">不分到商品，不列入比對</div>':''}</td>
+        <td class="rc-nosid-num">${amt(r.spend)}</td>
+      </tr>`).join('');
+    noSidHtml=`<div class="rc-nosid${gMissing?' is-missing':''}">
+      <div class="rc-nosid-hd">▼ 沒有商品 ID 的廣告（${g.list.length} 筆）</div>
+      <div class="rc-nosid-sum">需分到商品 <b>${amt(g.mainTotal)}</b>　／　已上傳檔案合計 <b>${amt(g.uploaded)}</b>　／　${st}${g.excludedTotal?`<span class="rc-nosid-muted">　（賣場廣告 ${amt(g.excludedTotal)} 不列入）</span>`:''}</div>
+      <table class="rc-nosid-tbl">
+        <thead><tr><th>廣告名稱</th><th>廣告類型</th><th class="rc-nosid-num">花費</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  }
   ov.innerHTML=`<div class="ana-modal" style="width:min(860px,95vw);max-height:85vh;display:flex;flex-direction:column">
     <div class="ana-modal-hdr"><span>廣告費對帳明細｜${shop}</span><button class="ana-close-btn" onclick="document.getElementById('reconcile-detail-ov').remove()">✕</button></div>
     <div style="padding:12px 20px;background:#fff8e6;border-bottom:1px solid #fde68a;font-size:12px;color:#92400e">
@@ -3603,6 +3666,7 @@ function showReconcileDetail(shop,detail){
       ${srcLine?`<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #fde68a">${srcLine}</div>${groupList}`:''}
     </div>
     <div style="overflow-y:auto;flex:1">
+      ${gMissing?noSidHtml:''}
       <div style="padding:10px 20px 4px;font-size:12px;font-weight:600;color:#b45309">▼ 重複對應（${dups.length} 筆，多算 ${signed(over)}）</div>
       <table style="width:100%;border-collapse:collapse">
         <thead><tr style="background:#f9fafb;position:sticky;top:0">
@@ -3624,10 +3688,12 @@ function showReconcileDetail(shop,detail){
         </tr></thead>
         <tbody>${unRows}</tbody>
       </table>
+      ${gMissing?'':noSidHtml}
     </div>
     <div style="padding:10px 20px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;line-height:1.6">
       ・重複對應：到「商品對照表」讓同一個 SID 只留在一個商品編號下（該併到哪個是業務判斷，系統不自動處理）<br>
-      ・未對應：到「商品對照表」為這些 SID 加入對應的商品編號
+      ・未對應：到「商品對照表」為這些 SID 加入對應的商品編號${g&&g.list.length?`<br>
+      ・沒有商品 ID 的廣告：「還差」時請補傳漏掉的廣告群組檔（含已暫停的）或選品廣告檔，再重新產生報表`:''}
     </div>
   </div>`;
   ov.onclick=e=>{if(e.target===ov)ov.remove();};
@@ -3844,10 +3910,23 @@ function parseAdsCsv(text){
   const lines=text.split('\n');
   let hi=lines.findIndex(l=>l.includes('花費')&&(l.includes('商品 ID')||l.includes('商品ID')));if(hi<0)hi=7;
   const headers=splitCSV(lines[hi]).map(h=>h.replace(/^"|"$/g,'').trim());
-  return lines.slice(hi+1).filter(l=>l.trim()).map(line=>{
+  // 被丟掉的無商品 ID 列（自動選品廣告、各廣告群組、賣場廣告）收成清單，掛在回傳陣列【自己身上】，
+  //   給 _noSidGap 比對「總體檔裡這些列的花費」vs「已上傳的選品＋群組檔」，抓漏傳（理由見 _noSidGap）。
+  // ⚠ 回傳陣列的索引元素與改前一字不差，只多一個非索引屬性 _noSid（同 _period / _name 的做法與理由，
+  //   見 _mobicPeriod 上方註解）：不持久化、重整就沒、JSON.stringify 帶不走。
+  //   選品 / 群組的 CSV 也走這支，它們身上也會有 _noSid，沒人讀、無害。
+  const noSid=[];
+  const out=lines.slice(hi+1).filter(l=>l.trim()).map(line=>{
     const vals=splitCSV(line).map(v=>v.replace(/^"|"$/g,'').trim());
     const obj={};headers.forEach((h,i)=>{obj[h]=vals[i]||'';});return obj;
-  }).filter(r=>{const sid=(r['商品 ID']||r['商品ID']||'').trim();return sid&&sid!=='-';});
+  }).filter(r=>{
+    const sid=(r['商品 ID']||r['商品ID']||'').trim();
+    if(sid&&sid!=='-')return true;
+    noSid.push({name:r['廣告名稱']||'',type:r['廣告類型']||'',spend:num(r['花費']||0)});
+    return false;
+  });
+  out._noSid=noSid;
+  return out;
 }
 function splitCSV(line){const res=[];let cur='';let q=false;for(let c of line){if(c==='"'){q=!q;}else if(c===','&&!q){res.push(cur);cur='';}else{cur+=c;}}res.push(cur);return res;}
 

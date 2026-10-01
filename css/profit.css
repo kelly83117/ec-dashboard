@@ -1713,3 +1713,25 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 @media (max-width:900px){
   .km-big{grid-template-columns:1fr 1fr;}
 }
+
+/* 廣告費對帳明細：「沒有商品 ID 的廣告」段（漏傳檢查，見 profit.js 的 _noSidGap / showReconcileDetail）。
+   顏色一律走 :root 變數，不寫死色碼、不碰 --bg。有漏傳時（.is-missing）放在明細最上方並加警示底色。 */
+.rc-nosid{padding:10px 20px 8px;border-top:1px solid var(--border);}
+.rc-nosid.is-missing{border-top:none;border-bottom:1px solid var(--border);background:var(--warn-soft);}
+.rc-nosid-hd{font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;}
+.rc-nosid.is-missing .rc-nosid-hd{color:var(--danger);}
+.rc-nosid-sum{font-size:12px;color:var(--text);line-height:1.7;margin-bottom:6px;}
+.rc-nosid-bad{color:var(--danger);font-weight:700;}
+.rc-nosid-ok{color:var(--success);font-weight:600;}
+.rc-nosid-muted{color:var(--text-muted);}
+.rc-nosid-tbl{width:100%;border-collapse:collapse;background:var(--surface);}
+.rc-nosid-tbl th{padding:7px 10px;font-size:11px;color:var(--text-muted);font-weight:600;text-align:left;border-bottom:1px solid var(--border);}
+.rc-nosid-tbl td{padding:5px 10px;font-size:12px;color:var(--text);vertical-align:top;text-align:left;}   /* 全站有 td{text-align:right}，這裡要自己拉回左 */
+.rc-nosid-tbl .rc-nosid-num{text-align:right;white-space:nowrap;}
+.rc-nosid-name{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rc-nosid-ex td{color:var(--text-muted);text-decoration:line-through;text-decoration-color:var(--text-faint);}
+.rc-nosid-ex .rc-nosid-exnote{text-decoration:none;display:block;font-size:11px;color:var(--text-muted);}
+@media (max-width:600px){
+  .rc-nosid{padding:10px 12px 8px;}
+  .rc-nosid-name{max-width:150px;}
+}
