@@ -11372,8 +11372,10 @@ window.__kpiYearChartData=()=>_kpiYearChartData;
 let _kpiYearCharts=[];
 function kpiYearDestroyCharts(){ _kpiYearCharts.forEach(c=>{try{c.destroy();}catch(e){}}); _kpiYearCharts=[]; }
 const _KPI_NOW=new Date();
-let _kpiCurYear=_KPI_NOW.getFullYear();
-let _kpiCurMonthNum=_KPI_NOW.getMonth()+1;
+// 預設停在【上個月】（2026-10-01）：當月通常還沒開始填，預設當月一進月結表就是空白頁。一月 → 去年 12 月。
+const _KPI_DEF=new Date(_KPI_NOW.getFullYear(),_KPI_NOW.getMonth()-1,1);
+let _kpiCurYear=_KPI_DEF.getFullYear();
+let _kpiCurMonthNum=_KPI_DEF.getMonth()+1;
 function _kpiYM(){return `${_kpiCurYear}-${String(_kpiCurMonthNum).padStart(2,'0')}`;}
 function _kpiYearOptions(){
   const cur=_KPI_NOW.getFullYear();
@@ -11492,13 +11494,15 @@ function _kpiShopAnnualTotal(rows,year,group,shop,pureKey){
 //   版面：頂列（年份＋已結算標籤）→ 四張大卡 → 左「每月營收與純利」堆疊長條＋純利折線／右「各通路全年」表 → 各通路純利率走勢。
 //   🔴 計算一律沿用既有函式：每個通路每個月＝_kpiGroupTotals(row,g)（內含 _kpiRawForCalc 合併/不適用欄位歸零、
 //     實際營收口徑、整組共同費用扣除）；全年＝已結算月份逐月相加。跟月結表各月的合計是同一套。
-//   「已結算月份」＝該月 row 存在（與 _kpiVisibleMonthNums 規則③同一個判準，不看值）。
+//   「已結算月份」＝該月 row 存在且填寫進度填滿（見 _kpiYearModel 的 settled）。
 //   「較去年同期」只比去年【同樣那幾個月】（今年 1～8 月就比去年 1～8 月）；去年那幾個月一個 row 都沒有就不顯示。
 function _kpiYearModel(year){
   const rows=getKpiRows();
   const rowOf=(y,m)=>rows.find(r=>r.month===`${y}-${String(m).padStart(2,'0')}`)||null;
   const months=[1,2,3,4,5,6,7,8,9,10,11,12];
-  const settled=months.filter(m=>rowOf(year,m));
+  // 「已結算」＝該月 row 存在【且填寫進度填滿】（月結表「✓ 填寫進度 N / N」；2026-10-01 使用者決定：沒填完的月份不算，例如只填一半的 9 月）。
+  //   沒結算的月份不進全年數字、圖表當未結算（灰底），填滿後自動算進來。
+  const settled=months.filter(m=>{const r=rowOf(year,m);if(!r)return false;const c=_kpiFillCountAll(r);return c.total>0&&c.missing===0;});
   const prevRows=settled.map(m=>rowOf(year-1,m)).filter(Boolean);
   const groups=KPI_GROUPS.map(g=>{
     const monthRev=Array(12).fill(null),monthPure=Array(12).fill(null),monthRate=Array(12).fill(null);
