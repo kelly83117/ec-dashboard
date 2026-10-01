@@ -25045,6 +25045,84 @@ function pchomeOpenAnalysis(shop, 料號){
   pchomeRenderAnalysis(shop, p);
 }
 function pchomeCloseAnalysis(){ var ov=document.getElementById('pchome-analysis-overlay'); if(ov) ov.remove(); }
+// ───────── PChome 總表「📊 階層圖」淨利率分佈 modal（照 momoOpenHierarchy 原樣複製；PChome 口徑）─────────
+function pchomeHierarchyStats(shop){
+  // 期別模式＋選中月份跟著總表（帳務月 billing / 日曆月 calendar）；bins 直接吃總表同一支 calc 的
+  // calc.skus[].淨利率（與總表每一列同值、同函式，不另開計算路徑）。淨利率是「分數」(0.xx)。
+  var mode=_pchomeViewMode[shop]||'billing', key='', skus=[];
+  if(mode==='calendar'){
+    var cm=pchomeCalendarMonths();
+    key=_pchomeCalMonth[shop]; if(!key||cm.indexOf(key)<0) key=cm.length?cm[cm.length-1]:'';
+    var cc=key?pchomeCalendarCalc(key, shop):null; skus=(cc&&cc.skus)||[];
+  } else {
+    var ms=pchomeAllMonths();
+    key=_pchomeProfitMonth[shop]; if(!key||ms.indexOf(key)<0) key=ms.length?ms[ms.length-1]:'';
+    var pc=key?pchomeProfitCalc(pchomeMonthEntry(key), shop):null; skus=(pc&&pc.skus)||[];
+  }
+  // 母體＝該賣場全部商品（calc.skus 已含零銷上架品、已做賣場過濾），刻意不套任何表格篩選
+  //（搜尋／上下架／標籤／數值）——階層圖固定看全站分佈、不隨篩選變動。
+  var bins={b_lt0:0,b0_10:0,b10_20:0,b20_30:0,b30_40:0,b40_50:0,b50_60:0,b_ge60:0};
+  var withMargin=0, zeroRev=0, noCost=0;
+  skus.forEach(function(x){
+    if(!x.hasBiz){ zeroRev++; return; }        // 本期無銷售／整批退貨 → 零營收（淨利率「—」）→ 不列入級距
+    if(!x.costKnown){ noCost++; return; }       // 有業績但缺成本 → 無法計算（總表顯「—」）→ 不當 0%、不進級距
+    if(x.淨利率==null){ zeroRev++; return; }     // 有業績有成本但營收≤0（負營收退貨淨額）→ 淨利率 null → 歸零營收（口徑定案）
+    var m=x.淨利率; withMargin++;                // 分數門檻：m<0 / <0.10 / <0.20 … / ≥0.60
+    if(m<0) bins.b_lt0++; else if(m<0.10) bins.b0_10++; else if(m<0.20) bins.b10_20++;
+    else if(m<0.30) bins.b20_30++; else if(m<0.40) bins.b30_40++; else if(m<0.50) bins.b40_50++;
+    else if(m<0.60) bins.b50_60++; else bins.b_ge60++;
+  });
+  return {mode:mode, key:key, total:skus.length, withMargin:withMargin, zeroRev:zeroRev, noCost:noCost, bins:bins};
+}
+function pchomeCloseHierarchy(){ var ov=document.getElementById('pchome-hier-ov'); if(ov) ov.remove(); }
+function pchomeOpenHierarchy(shop){
+  var s=pchomeHierarchyStats(shop);
+  pchomeCloseHierarchy();
+  var ov=document.createElement('div');
+  ov.id='pchome-hier-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=function(e){ if(e.target===ov) pchomeCloseHierarchy(); };
+  var den=s.withMargin;
+  var fmtN=function(n){ return Number(n||0).toLocaleString(); };
+  var pct=function(n){ return den>0?(n/den*100).toFixed(1)+'%':'—'; };
+  var bar=function(label,n,color){ return '<div style="display:flex;align-items:center;gap:10px;font-size:12px;padding:3px 0">'
+    +'<span style="width:66px;color:#6b7280">'+label+'</span>'
+    +'<span style="width:52px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums">'+fmtN(n)+'</span>'
+    +'<span style="width:54px;text-align:right;color:#9ca3af">'+pct(n)+'</span>'
+    +'<span style="flex:1;height:10px;background:#f1f5f9;border-radius:5px;overflow:hidden"><span style="display:block;height:100%;width:'+(den>0?(n/den*100):0)+'%;background:'+color+'"></span></span>'
+    +'</div>'; };
+  var colHead='<div style="display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;color:#94a3b8;padding:0 0 4px;border-bottom:1px solid #eef0f2;margin-bottom:4px">'
+    +'<span style="width:66px">淨利率</span><span style="width:52px;text-align:right">數量</span><span style="width:54px;text-align:right">佔比</span><span style="flex:1"></span></div>';
+  var B=s.bins;
+  var bandsHtml=colHead+[
+    ['&lt;0%',B.b_lt0,'#dc2626'],['0–10%',B.b0_10,'#f97316'],['10–20%',B.b10_20,'#fb923c'],
+    ['20–30%',B.b20_30,'#fbbf24'],['30–40%',B.b30_40,'#a3e635'],['40–50%',B.b40_50,'#4ade80'],
+    ['50–60%',B.b50_60,'#34d399'],['≥60%',B.b_ge60,'#10b981']
+  ].map(function(x){ return bar(x[0],x[1],x[2]); }).join('');
+  var sideRow=function(label,n,note){ return n>0?('<div style="display:flex;align-items:center;gap:10px;font-size:12px;padding:3px 0;color:#64748b">'
+    +'<span style="width:66px">'+label+'</span><span style="width:52px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums">'+fmtN(n)+'</span><span style="flex:1;font-size:11px;color:#9ca3af">'+note+'</span></div>'):''; };
+  var totalAll=s.withMargin+s.zeroRev+s.noCost;
+  var modeLbl=(s.mode==='calendar')?'日曆月':'帳務月';
+  var periodLbl=s.key?(s.key+' '+modeLbl):modeLbl;
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:560px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid #eef0f2;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'
+      +'<div>'
+        +'<div style="font-size:16px;font-weight:800;color:#1e293b">淨利率分佈 · '+shop+(periodLbl?' · '+periodLbl:'')+'</div>'
+        +'<div style="font-size:12px;color:#94a3b8;margin-top:3px">統計全部商品 <b>'+fmtN(s.total)+'</b>（不隨表格篩選變動）· 有淨利率 <b>'+fmtN(s.withMargin)+'</b></div>'
+      +'</div>'
+      +'<button onclick="pchomeCloseHierarchy()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:18px;cursor:pointer;line-height:1">✕</button>'
+    +'</div>'
+    +'<div style="padding:16px 20px;max-height:calc(100vh - 180px);overflow:auto">'
+      +(s.withMargin===0?'<div style="font-size:13px;color:#94a3b8;text-align:center;padding:20px">此期別沒有可計算淨利率的商品。</div>':bandsHtml)
+      +((s.zeroRev||s.noCost)?('<div style="margin-top:12px;padding-top:10px;border-top:1px solid #f1f5f9">'
+        +sideRow('零營收',s.zeroRev,'本期無銷售／整批退貨（淨利率「—」）→ 不列入級距')
+        +sideRow('無法計算',s.noCost,'缺成本 → 淨利率無法計算（不當 0%、不進任何級距）')
+      +'</div>'):'')
+      +'<div style="font-size:10.5px;color:#9ca3af;margin-top:12px;line-height:1.6">淨利率＝總表同口徑（淨利 ÷ 營收）；級距左閉右開（例：0–10% 表示 0 ≤ x &lt; 10、≥60% 為 x ≥ 60）。佔比分母＝有淨利率的 '+fmtN(s.withMargin)+' 筆。<br>八級距 '+fmtN(s.withMargin)+' ＋ 零營收 '+fmtN(s.zeroRev)+' ＋ 無法計算 '+fmtN(s.noCost)+' ＝ 全部 '+fmtN(totalAll)+' 個商品。（帳務級費用按營收分攤後個別 SKU 可能在邊界微移。）</div>'
+    +'</div>'
+  +'</div>';
+  document.body.appendChild(ov);
+}
 function pchomeRenderAnalysis(shop, p){
   var ov=document.getElementById('pchome-analysis-overlay'); if(!ov) return;
   var esc=_momoEsc, m=pchomeCalcMargin(p.cost, p.供貨價);
@@ -26470,6 +26548,7 @@ function pchomeCalendarTabHTML(shop, months, key, modeToggle){
     +'<span class="mm-stat"><span class="mm-stat-item">上架 <b>'+pchomeNum(calc.activeCount||0)+'</b></span><span class="mm-stat-item">有售 <b>'+pchomeNum(calc.bizCount||0)+'</b></span></span>'
     +discToggle
     +'<span class="col-picker-wrap" style="position:relative;margin-left:auto"><button id="pchome-filter-chip-'+shop+'" class="mm-chip'+(fc?' on':'')+'" style="'+(fc?'background:#5b5fcf;border-color:#5b5fcf;color:#fff':'')+'" onclick="pchomeOpenFilterPanel(\''+shop+'\',this)">🏷 標籤 / 篩選'+(fc?'（'+fc+'）':'')+'</button></span>'
+    +'<button class="mm-chip" onclick="pchomeOpenHierarchy(\''+shop+'\')">📊 階層圖</button>'
     +'<span class="col-picker-wrap" style="position:relative"><button class="mm-chip" onclick="pchomeOpenColPicker(\''+shop+'\',this)">☰ 欄位</button></span></div>';
   var tagsRes=pchomeTagsFor(shop), tagBy=tagsRes.bySku||{};
   var COLS=pchomeDisplayCols(shop);
@@ -26608,6 +26687,7 @@ function pchomeProfitTabHTML(shop){
     +'<span class="mm-stat"><span class="mm-stat-item">上架 <b>'+pchomeNum(calc.activeCount||0)+'</b></span><span class="mm-stat-item">有售 <b>'+pchomeNum(calc.bizCount||0)+'</b></span></span>'
     +discToggle
     +'<span class="col-picker-wrap" style="position:relative;margin-left:auto"><button id="pchome-filter-chip-'+shop+'" class="mm-chip'+(fc?' on':'')+'" style="'+(fc?'background:#5b5fcf;border-color:#5b5fcf;color:#fff':'')+'" onclick="pchomeOpenFilterPanel(\''+shop+'\',this)">🏷 標籤 / 篩選'+(fc?'（'+fc+'）':'')+'</button></span>'
+    +'<button class="mm-chip" onclick="pchomeOpenHierarchy(\''+shop+'\')">📊 階層圖</button>'
     +'<span class="col-picker-wrap" style="position:relative"><button class="mm-chip" onclick="pchomeOpenColPicker(\''+shop+'\',this)">☰ 欄位</button></span>'
     +'</div>';
   // 表格：欄位動態（pchomeDisplayCols，含顯隱/排序）+ 標籤欄 + 欄寬拖曳；colgroup/thead/tbody/未分攤/合計 一律走同一份 COLS。
@@ -26744,5 +26824,5 @@ Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBat
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel,
   pchomeOptlogTypeToggle, pchomeOptlogTimeSet, pchomeOptlogBySet, pchomeOptlogSysToggle,
-  pchomeOpenAnalysis, pchomeCloseAnalysis, pchomeAddOptlogModal, pchomeDeleteOptlog,
+  pchomeOpenHierarchy, pchomeCloseHierarchy, pchomeOpenAnalysis, pchomeCloseAnalysis, pchomeAddOptlogModal, pchomeDeleteOptlog,
   pchomeUpdateDailyProgress, pchomeOpenDpDetailFromEl, pchomeOpenDpDetail, pchomeCloseDpDetail });
