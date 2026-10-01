@@ -1,6 +1,6 @@
 /* js/pages/daily.js -- methods extracted from original App, merged back via Object.assign(App, ...) */
 const App = window.App;
-const { Store, escapeHtml, showToast, toDateStr, addDays, todayStr, genId, DAILY_TASK_STATUS, DAILY_TASK_STATUS_LIST, TASK_CATEGORIES, TASK_CATEGORY_NAMES, TASK_CATEGORY_ALIASES, getCategoryMeta, getCategoryItems } = window;
+const { Store, escapeHtml, showToast, toDateStr, addDays, todayStr, genId, DAILY_TASK_STATUS, DAILY_TASK_STATUS_LIST, TASK_CATEGORIES, TASK_CATEGORY_NAMES, TASK_CATEGORY_ALIASES, getCategoryMeta, getCategoryItems, isUserActive } = window;
 
 Object.assign(App, {
   renderWeeklyCalendarTab(deptId, color, dept) {
@@ -1485,11 +1485,14 @@ Object.assign(App, {
 
     const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
     if (!dept) { showToast('找不到此辦公室', 'error'); return; }
-    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
-    // 若是新增，預設員工 = 當前登入者（若是該辦公室成員），否則第一位成員
+    // 停用／刪除的帳號（#252）不列入；但編輯既有紀錄時保留原負責人——下拉少了這個選項，
+    //   被鎖住的 <select> 會讀到第一個選項，存檔時負責人就被默默換掉。
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name)
+      && (isUserActive(u) || (existing && u.username === existing.employee)));
+    // 若是新增，預設員工 = 當前登入者（若是該辦公室成員），否則第一位「使用中」的成員
     const defaultEmp = (this.currentUser && getUserDepts(this.currentUser).includes(dept.name))
       ? this.currentUser.username
-      : (members[0]?.username || '');
+      : (members.find(isUserActive)?.username || '');
 
     const t = existing || {
       employee: defaultEmp,
@@ -1744,14 +1747,22 @@ Object.assign(App, {
     const showDelete = !!(opts && opts.showDelete);
     const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
     if (!dept) { showToast('找不到此辦公室', 'error'); return; }
-    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
+    // 停用／刪除的帳號（#252）不列入；但編輯既有待辦時保留它原本的負責人與參與人，
+    //   否則選單少了這些人，存檔時會被默默換掉或少算。
+    const _editTask = taskId ? (Store.get(Store.KEYS.dailyTasks, [])).find(x => x.id === taskId) : null;
+    const _td0 = (_editTask && _editTask.todos && _editTask.todos[0]) || {};
+    const _keepUsernames = _editTask
+      ? [_editTask.employee, _td0.assignee, ...(Array.isArray(_td0.assignees) ? _td0.assignees : [])]
+      : [];
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name)
+      && (isUserActive(u) || _keepUsernames.includes(u.username)));
     if (members.length === 0) {
       showToast(`${dept.name}辦公室尚無成員，請先至帳號管理新增`, 'error');
       return;
     }
     const defaultEmp = (this.currentUser && getUserDepts(this.currentUser).includes(dept.name))
       ? this.currentUser.username
-      : (members[0]?.username || '');
+      : (members.find(isUserActive)?.username || '');
 
     // 編輯模式：讀現有任務並填入預設值
     let editing = null;

@@ -91,6 +91,13 @@ function hashPassword(pw) {
   return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
 }
 
+/* ------------- 帳號狀態（#252）-------------
+ * 停用（disabled）與刪除（deleted）都留在 ec.users 裡（username 與姓名永久佔用、舊紀錄仍查得到姓名），
+ * 只是不能登入、不列入人員清單。舊資料沒有這兩個欄位 → 視為使用中。 */
+function isUserActive(u) {
+  return !!u && !u.disabled && !u.deleted;
+}
+
 /* ------------- 種子資料（冪等，只補缺漏，不覆蓋使用者輸入） -------------
  * 每次載入都會跑，但只在某個鍵不存在時才寫入預設值；
  * 加上對舊版員工資料 schema（orders/items/...）的就地遷移。
@@ -763,7 +770,9 @@ const App = {
         this.enterApp(admin);
         return;
       }
-      if (admin.password === hashPassword('admin123')) {
+      // 停用／刪除中的 admin（#252）：仍在清單＝「存在」，所以不會走 Case 1 建新管理員；
+      //   Case 2 也不放行（不登入、不改寫 role、不寫入），交給下方正常流程比對密碼後拒絕。
+      if (isUserActive(admin) && admin.password === hashPassword('admin123')) {
         // Case 2：admin 存在且密碼還是預設 → 修復 role + 登入（不覆蓋密碼）
         admin.role = 'admin';
         Store.set(Store.KEYS.users, users);
@@ -779,6 +788,8 @@ const App = {
     if (!user) { this.showAuthError('帳號不存在'); return; }
     const hash = hashPassword(password);
     if (hash !== user.password) { this.showAuthError('密碼錯誤'); return; }
+    // 停用／刪除的帳號（#252）：放在比對密碼之後，沒有密碼的人看不出帳號狀態
+    if (!isUserActive(user)) { this.showAuthError('此帳號已停用'); return; }
     Store.set(Store.KEYS.session, { username: user.username });
     this.enterApp(user);
   },
@@ -792,8 +803,30 @@ const App = {
     this.showLogin();
   },
 
+  // 帳號被停用／刪除時強制登出（#252）：不問確認、只清本機 session（不寫雲端），回登入頁並顯示原因
+  _forceLogout(msg) {
+    try { Store.remove(Store.KEYS.session); } catch {}
+    this.currentUser = null;
+    try { if (typeof this.closeModal === 'function') this.closeModal(); } catch {}
+    try { document.getElementById('login-password').value = ''; } catch {}
+    this.showLogin();
+    if (msg) { try { this.showAuthError(msg); } catch {} }
+  },
+
+  // 雲端 users 更新後檢查目前登入者（#252）：已被停用或刪除 → 登出，回傳 true。
+  //   找不到這個帳號（舊版真刪）維持原狀，與既有行為一致。
+  _logoutIfInactive() {
+    if (!this.currentUser) return false;
+    const fresh = (Store.get(Store.KEYS.users, []) || []).find(u => u.username === this.currentUser.username);
+    if (!fresh || isUserActive(fresh)) return false;
+    this._forceLogout('你的帳號已被停用');
+    return true;
+  },
+
   /* ------------- 進入主應用 ------------- */
   enterApp(user) {
+    // 最後防線（#252）：登入、開站還原 session、雲端回來後重試還原都經過這裡；停用／刪除的帳號一律不進站
+    if (!isUserActive(user)) { this._forceLogout('此帳號已停用'); return; }
     this.currentUser = user;
     // 1) 先把使用者資訊套到側欄（avatar / 名字 / 權限），讓 view-app 一顯示就是正確的樣子
     this.applyUserPerms(user);
@@ -3333,12 +3366,16 @@ async function __setupCloud() {
         try {
           if (App.currentUser && typeof App.applyUserPerms === 'function') {
             const freshUser = (Store.get(Store.KEYS.users, []) || []).find(u => u.username === App.currentUser.username);
+            // 雲端顯示此帳號已停用／刪除（#252；常見於 5 秒 fallback 用本機舊快照登入）→ 登出，不重繪
+            if (freshUser && !isUserActive(freshUser)) { App._forceLogout('你的帳號已被停用'); return; }
             if (freshUser) { App.currentUser = freshUser; App.applyUserPerms(freshUser); }
           }
         } catch (e) { console.warn('post-snapshot perms refresh failed', e); }
         try { App.render(); } catch (e) { console.warn('first cloud snapshot render failed', e); }
         return;
       }
+      // 即時登出（#252）：別人剛把目前登入者停用／刪除 → 這次更新就登出，不再重繪
+      try { if (App._logoutIfInactive()) return; } catch (e) { console.warn('inactive-user check failed', e); }
       const active = document.activeElement;
       // dp-todo-add-input = 工作日誌「新增待辦」輸入框（daily.js 的 <input type="text">，
       //   打字後要按 Enter 才進 Store）。原本不在這個清單裡 → 打到一半 snapshot 一來就整頁重繪、
@@ -3429,7 +3466,7 @@ function mapAnaLabel(l) { return ANA_LABEL_DISPLAY[l] || l; }  // 未列的（�
  * 採【允許為主 + 攔截寫入】：view 的檢視動作（切賣場/季別/排序/篩選/匯出/看帳號）一律放行，
  * 只攔明確的寫入 handler；漏網的仍由資料層擋下（不會改到資料，只是少了灰底提示）。 */
 // 明確「會改資料」的 inline handler 名稱片段（不含匯出 doExport/momoExport/cupExport、不含檢視狀態 setShop/tab/filter）
-const __RO_WRITE_RE = /\b(generate|generateAffRpt|generateCoupang|syncToCloud|cupSyncToCloud|pchomeMasterCommit|momoOpenSyncPreview|momoConfirmSync|momoUpload|momoMoPlus(Upload|Batch|Master|CostInline|EditRecalc|AddOne|SetOtherFee|PriceDiff|ClearPrice|AddFeeExc)|momoE001(Apply|File|Remove|Clear)|momoRecon(Pick|Generate|Store)|momoRebuild|momoSyncFile|momoSyncApplyReactivate|momoBatchSubmit|momoDeleteProduct|momoDeleteOptlog|momoAddOptlog|momoMissingCostSave|momoAddPickCost|onGlobalFile|onAffFile|onCoupangFile|cupMissCostSave|onCupNoteChange|startEdit|confirmAdsEdit|startNote|submitProfitNote|_pnmEditNote|editKpi(CommonCost|MergedField)|confirmAddSummaryRow|openAddSummaryRowModal|_sumRestoreRow|saveAnaSettings|saveTestSettings|saveGrowthSettings|onPlatformRateChange|confirmBatchTag|openBatchTagPanel|confirmDeleteFile|openDeleteFileModal|openUserModal|deleteUser|openChangePasswordModal|openBossTaskModal|_?deleteBossTask|openDailyTaskModal|deleteDailyTask|openQuickTodoModal|openBossLineConfigModal|openInsightNoteModal|openInsightSettingsModal|openScoreModal|addTodoItem|restorePlatformsBackup|openPlatformModal|saveSplitDraft|openSheetSync|confirmSheetSync|sheetSyncReload)\b/;
+const __RO_WRITE_RE = /\b(generate|generateAffRpt|generateCoupang|syncToCloud|cupSyncToCloud|pchomeMasterCommit|momoOpenSyncPreview|momoConfirmSync|momoUpload|momoMoPlus(Upload|Batch|Master|CostInline|EditRecalc|AddOne|SetOtherFee|PriceDiff|ClearPrice|AddFeeExc)|momoE001(Apply|File|Remove|Clear)|momoRecon(Pick|Generate|Store)|momoRebuild|momoSyncFile|momoSyncApplyReactivate|momoBatchSubmit|momoDeleteProduct|momoDeleteOptlog|momoAddOptlog|momoMissingCostSave|momoAddPickCost|onGlobalFile|onAffFile|onCoupangFile|cupMissCostSave|onCupNoteChange|startEdit|confirmAdsEdit|startNote|submitProfitNote|_pnmEditNote|editKpi(CommonCost|MergedField)|confirmAddSummaryRow|openAddSummaryRowModal|_sumRestoreRow|saveAnaSettings|saveTestSettings|saveGrowthSettings|onPlatformRateChange|confirmBatchTag|openBatchTagPanel|confirmDeleteFile|openDeleteFileModal|openUserModal|deleteUser|disableUser|restoreUser|openChangePasswordModal|openBossTaskModal|_?deleteBossTask|openDailyTaskModal|deleteDailyTask|openQuickTodoModal|openBossLineConfigModal|openInsightNoteModal|openInsightSettingsModal|openScoreModal|addTodoItem|restorePlatformsBackup|openPlatformModal|saveSplitDraft|openSheetSync|confirmSheetSync|sheetSyncReload)\b/;
 // ⚠ 這是【白名單】：新功能的寫入 handler 沒加進來就【不會】被擋 —— view 角色照樣點得動、
 //   照樣寫進自己的 localStorage、還會看到同步鈕亮起（本檔的三道防線只有防線②
 //   __installReadonlyCloudGuard 擋得住雲端，本機那一步已經寫下去了），使用者會以為存好了。
@@ -3509,7 +3546,7 @@ if (document.readyState === 'loading') {
 Object.assign(window, {
   App, Store, mapAnaLabel, ANA_LABEL_DISPLAY,
   canWrite: () => !__isReadOnly(), isReadOnly: __isReadOnly,
-  hashPassword, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
+  hashPassword, isUserActive, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
   canAccessOffice, hasOfficeFeature, trendFromQuarters,
   toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms,
   todayStr, genId, escapeHtml, showToast, fmtNTD, marketplaceBadgeHtml,
