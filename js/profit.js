@@ -3603,7 +3603,10 @@ function showReconcileDetail(shop,detail){
   const {diff=0,unmapped=[],dups=[],src=null}=detail||{};
   let old=document.getElementById('reconcile-detail-ov');if(old)old.remove();
   const ov=document.createElement('div');
-  ov.className='ana-overlay open';ov.id='reconcile-detail-ov';ov.style.zIndex='3100';
+  // 層級走 css/profit.css 的 #reconcile-detail-ov（--z-reconcile-detail，高於 #map-warn-banner 的 9999）。
+  //   原本 inline 3100 → 開明細時橫幅疊在上面、蓋住標題與 ✕（2026-10-01 v728 實測）。
+  //   刻意【不】在開明細時收起橫幅：關掉明細後橫幅還在，同事才找得回提醒、能再按一次「查看明細」。
+  ov.className='ana-overlay open';ov.id='reconcile-detail-ov';
   const esc=escapeHtmlLike;
   const amt=v=>'$'+fmtAds(v);                                   // 絕對值金額（表格用）
   const signed=v=>(v>0?'+':v<0?'−':'')+'$'+fmtAds(v);           // 帶號金額 —— 符號自己補
