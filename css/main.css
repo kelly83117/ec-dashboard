@@ -1890,3 +1890,67 @@
   opacity: .45 !important;
   cursor: not-allowed !important;
 }
+
+/* ===== 洞察表調整紀錄彈窗：逐筆編輯 / 逐筆刪除（js/pages/marketing.js openInsightNoteModal，技術債 #259） ===== */
+/* 一天一格的列本身仍是既有 inline 樣式（回歸快照要求逐字不變）；這裡只管點兩下 / 按 ✕ 後才出現的元素。 */
+/* 用 #note-adj-list 加權：要蓋過 .field input 的 10px 內距、14px 字級。 */
+#note-adj-list .ins-adj-edit,
+#note-adj-list .ins-adj-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#note-adj-list .ins-adj-edit-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--primary-dark);
+  background: var(--surface);
+}
+#note-adj-list .ins-adj-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+#note-adj-list .ins-adj-pick-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+#note-adj-list .ins-adj-pick-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+  font-weight: 500;
+  color: var(--primary-dark);
+  overflow-wrap: anywhere;
+}
+#note-adj-list .ins-adj-pick-del {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--danger);
+}
+#note-adj-list .ins-adj-pick-del:hover { background: var(--danger-soft); color: var(--danger); }
+#note-adj-list .ins-adj-pick-cancel {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+/* 展開逐筆刪除時把該格原本的整格 ✕ 藏起來（.icon-btn 的 display:inline-flex 會蓋掉 [hidden]） */
+#note-adj-list .icon-btn[hidden] { display: none; }
