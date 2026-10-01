@@ -155,7 +155,10 @@ try {
       // 非報表 key（notes/edits 等）直接覆蓋；報表 key（ec|shop|month|half）與 MOMO 商品主檔（ec_momo_products|）
       //   只在 collection 尚未填該 key 時才填入（collection 權威、app/profit 舊欄位只當遷移過渡的 fallback）
       Object.keys(data).forEach(k => {
-        if (k.startsWith('ec|') || k.startsWith('ec_momo_products|')) {
+        // ec_pchome_products / ec_pchome_recon 已搬到 app/pchome_products / app/pchome_recon 獨立 doc
+        //   （照 ec_momo_products 搬 collection 的先例）：新 doc 權威，app/profit 舊欄位只當【遷移過渡的 fallback】
+        //   —— 只在新 doc 尚未填該 key（Store._profitMem 還沒值）時才填入，避免 app/profit echo 蓋掉新 doc 的值。
+        if (k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k === 'ec_pchome_products' || k === 'ec_pchome_recon') {
           if (Store._profitMem[k] === undefined) Store._profitMem[k] = data[k];
         } else {
           // 本機有未同步變更 / 剛存過 → 不讓雲端快照覆蓋，保住使用者正在編輯的內容
@@ -896,6 +899,8 @@ try {
   const pchomeOrdersRef  = doc(db, 'app', 'pchome_orders');
   const pchomeOptlogRef  = doc(db, 'app', 'pchome_optlog');
   const pchomeHistoryRef = doc(db, 'app', 'pchome_history');
+  const pchomeProductsRef= doc(db, 'app', 'pchome_products');   // 商品主檔（整包 list 一欄）：從 app/profit 搬出、避開 1MB
+  const pchomeReconRef   = doc(db, 'app', 'pchome_recon');      // 對帳資料（整包 data 一欄＝帳務月 map）：同上
   const pchomeRestDelete = (docPath) => async (keys) => {
     const params = keys.map(k => 'updateMask.fieldPaths=' + encodeURIComponent('`' + k + '`')).join('&');
     const url = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId + '/databases/(default)/documents/' + docPath + '?' + params;
@@ -921,6 +926,20 @@ try {
     removeFields:(keys) => pchomeRestDelete('app/pchome_history')(keys),
     subscribe:   (cb) => onSnapshot(pchomeHistoryRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
   };
+  // 商品主檔 / 對帳資料：各一份獨立 doc、整包寫一個欄位（products→`list` 陣列、recon→`data` 帳務月 map）。
+  //   語意與搬出前的 app/profit 泛用欄位一致（整份覆蓋）；只是改放獨立 doc、各自吃自己的 1MB。
+  window.__cloudPchomeProducts = {
+    getDoc:      () => getDoc(pchomeProductsRef),
+    setField:    (key, value) => safeSetField(pchomeProductsRef, key, value),
+    removeFields:(keys) => pchomeRestDelete('app/pchome_products')(keys),
+    subscribe:   (cb) => onSnapshot(pchomeProductsRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
+  };
+  window.__cloudPchomeRecon = {
+    getDoc:      () => getDoc(pchomeReconRef),
+    setField:    (key, value) => safeSetField(pchomeReconRef, key, value),
+    removeFields:(keys) => pchomeRestDelete('app/pchome_recon')(keys),
+    subscribe:   (cb) => onSnapshot(pchomeReconRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
+  };
   // 訂閱：把雲端資料交給 profit.js 的套用函式（bounce-back 守衛在那裡）。
   //   🔴 profit.js 是【動態載入】（進淨利表才 import，見 main.js）→ boot 時本訂閱先於 profit.js 就緒，
   //   首個快照觸發時 __pchomeApplyCloud* 還不存在（會漏掉初次 hydrate）。所以【一律先把最新快照緩存到 window】，
@@ -930,6 +949,8 @@ try {
     window.__cloudPchomeOrders.subscribe(data => { window.__pchomeOrdersCloudLatest = data; if (typeof window.__pchomeApplyCloudOrders === 'function') window.__pchomeApplyCloudOrders(data); });
     window.__cloudPchomeOptlog.subscribe(data => { window.__pchomeOptlogCloudLatest = data; if (typeof window.__pchomeApplyCloudOptlog === 'function') window.__pchomeApplyCloudOptlog(data); });
     window.__cloudPchomeHistory.subscribe(data => { window.__pchomeHistoryCloudLatest = data; if (typeof window.__pchomeApplyCloudHistory === 'function') window.__pchomeApplyCloudHistory(data); });
+    window.__cloudPchomeProducts.subscribe(data => { window.__pchomeProductsCloudLatest = data; if (typeof window.__pchomeApplyCloudProducts === 'function') window.__pchomeApplyCloudProducts(data); });
+    window.__cloudPchomeRecon.subscribe(data => { window.__pchomeReconCloudLatest = data; if (typeof window.__pchomeApplyCloudRecon === 'function') window.__pchomeApplyCloudRecon(data); });
   } catch (e) { console.error('[pchome cloud] 訂閱失敗：', e); }
 
   window.dispatchEvent(new Event('cloudStoreReady'));
