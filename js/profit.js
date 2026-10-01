@@ -11697,9 +11697,63 @@ function momoTagsFor(shop, recompute){
   _momoTagsCache[shop]={period, result};
   return result;
 }
-function momoFilterActiveCount(shop){ return (_momoTagFilter[shop]?_momoTagFilter[shop].size:0)+(_momoNumFilter[shop]?_momoNumFilter[shop].length:0); }
-// 逐商品是否通過「標籤 + 數值」篩選（搜尋/上下架在總表既有篩選處理）。r=aggregate 回傳的 row、rowTags=該商品標籤陣列。
+// ══════ 優化紀錄篩選（optlog 篩選：查另一份資料算出「符合條件的 SKU 集合」，再對總表 set.has(r.sku)）══════
+//   與標籤(條件式)/數值(逐列值)機制不同：這是集合成員判定。type 多選 OR、時間+操作者 AND；時間用 entry.date 絕對值、與總表 period 脫鉤（「6月優化看8月表現」）。
+const MOMO_OPTLOG_SYS_TYPES=['新增商品','刪除商品','主檔匯入'];   // 系統自動事件（非人工優化）→ 面板收在可展開「系統事件」小節、預設收合
+const _momoOptlogFilter={};        // shop → {types:Set, timeKey:'', by:''}
+const _momoOptlogMatchCache={};    // shop → {sig, set}（sig 含資料簽章→資料變動自動失效）
+function _momoOptlogF(shop){ return _momoOptlogFilter[shop] || (_momoOptlogFilter[shop]={types:new Set(), timeKey:'', by:''}); }
+// entry.date（YYYY-MM-DD）是否落在時間範圍（本月/上月/近30/近90；空＝全部）。用 today 絕對值、非總表 period。
+function momoOptlogDateHit(dateStr, timeKey){
+  if(!timeKey) return true; if(!dateStr) return false;
+  let now; try{ now=new Date(); }catch(e){ return true; }
+  const ym=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  if(timeKey==='thisMonth') return String(dateStr).slice(0,7)===ym(now);
+  if(timeKey==='lastMonth'){ const d=new Date(now.getFullYear(),now.getMonth()-1,1); return String(dateStr).slice(0,7)===ym(d); }
+  if(timeKey==='30d'||timeKey==='90d'){ const days=timeKey==='30d'?30:90; const f=new Date(now.getTime()-days*86400000); const fs=f.getFullYear()+'-'+String(f.getMonth()+1).padStart(2,'0')+'-'+String(f.getDate()).padStart(2,'0'); return String(dateStr)>=fs; }
+  return true;
+}
+// 符合優化紀錄條件、且「總表有對應列」的 SKU 集合（斷鏈：已刪/哨兵/TEMP- 無列→排除）。無條件→null（不篩）。快取（含資料簽章）。
+function momoOptlogMatchSkus(shop){
+  const f=_momoOptlogFilter[shop];
+  if(!f || (!(f.types&&f.types.size) && !f.timeKey && !f.by)) return null;
+  const om=momoLoadOptlog(shop)||{};
+  const dataSig=Object.keys(om).length+':'+Object.values(om).reduce((s,a)=>s+(Array.isArray(a)?a.length:0),0);
+  const sig=[...(f.types||[])].sort().join('|')+'::'+f.timeKey+'::'+f.by+'::'+dataSig;
+  const cc=_momoOptlogMatchCache[shop]; if(cc && cc.sig===sig) return cc.set;
+  const prod=new Set(momoLoadProducts(shop).map(p=>String(p.sku)));
+  const set=new Set();
+  Object.keys(om).forEach(sku=>{ if(!prod.has(String(sku))) return;   // 斷鏈→無列→排除
+    const arr=Array.isArray(om[sku])?om[sku]:[];
+    if(arr.some(e=>{
+      if(f.types&&f.types.size && !f.types.has(e.type||'其他')) return false;   // type OR
+      if(f.by && (e.by||'')!==f.by) return false;                                // 操作者 AND
+      return momoOptlogDateHit(e.date, f.timeKey);                               // 時間 AND
+    })) set.add(String(sku));
+  });
+  _momoOptlogMatchCache[shop]={sig, set}; return set;
+}
+// 面板用統計：各 type 的 {紀錄筆數, 可篩選商品數(在總表), 全部商品數} + 操作者清單。尊重當前 時間+操作者 子篩、但不尊重 type 自己（各 type 數字獨立可見）。
+function momoOptlogStats(shop){
+  const f=_momoOptlogF(shop), om=momoLoadOptlog(shop)||{};
+  const prod=new Set(momoLoadProducts(shop).map(p=>String(p.sku)));
+  const tm={}, bySet=new Set();
+  Object.keys(om).forEach(sku=>{ const inProd=prod.has(String(sku)); (Array.isArray(om[sku])?om[sku]:[]).forEach(e=>{
+    const t=e.type||'其他'; if(e.by) bySet.add(e.by);
+    if(!momoOptlogDateHit(e.date, f.timeKey)) return; if(f.by && (e.by||'')!==f.by) return;
+    const m=tm[t]||(tm[t]={entries:0, filterable:new Set(), total:new Set()});
+    m.entries++; m.total.add(String(sku)); if(inProd) m.filterable.add(String(sku));
+  }); });
+  const types=Object.keys(tm).map(t=>({type:t, entries:tm[t].entries, filterable:tm[t].filterable.size, total:tm[t].total.size, isSystem:MOMO_OPTLOG_SYS_TYPES.includes(t)}))
+    .sort((a,b)=>b.filterable-a.filterable);
+  return { types, operators:[...bySet].sort() };
+}
+function momoOptlogActiveCount(shop){ const f=_momoOptlogFilter[shop]; if(!f) return 0; return (f.types&&f.types.size?f.types.size:0)+(f.timeKey?1:0)+(f.by?1:0); }
+function momoFilterActiveCount(shop){ return (_momoTagFilter[shop]?_momoTagFilter[shop].size:0)+(_momoNumFilter[shop]?_momoNumFilter[shop].length:0)+momoOptlogActiveCount(shop); }
+// 逐商品是否通過「標籤 + 數值 + 優化紀錄」篩選（搜尋/上下架在總表既有篩選處理）。r=aggregate 回傳的 row、rowTags=該商品標籤陣列。
 function momoRowPassesFilter(shop, r, rowTags){
+  const os=momoOptlogMatchSkus(shop);   // 優化紀錄集合（null＝不篩）；與標籤/數值 AND
+  if(os && !os.has(String(r.sku))) return false;
   const tf=_momoTagFilter[shop];
   if(tf && tf.size){ if(!(rowTags && rowTags.some(t=>tf.has(t)))) return false; }   // 標籤 OR
   const nf=_momoNumFilter[shop];
@@ -11770,8 +11824,13 @@ function momoNumRemove(shop,idx){
 function momoClearFilters(shop){
   if(_momoTagFilter[shop]) _momoTagFilter[shop].clear();
   _momoNumFilter[shop]=[];
+  const f=_momoOptlogFilter[shop]; if(f){ f.types.clear(); f.timeKey=''; f.by=''; } _momoOptlogMatchCache[shop]=null;   // 優化紀錄篩選一併清
   momoRenderProfitBody(shop,false); momoRenderFilterPanel(shop);   // 面板沒開→momoRenderFilterPanel no-op，只重繪表格
 }
+// 優化紀錄篩選：type 多選 OR、時間單選、操作者單選。變更後清快取 + 重繪表格與面板。
+function momoOptlogTypeToggle(shop,type){ const f=_momoOptlogF(shop); if(f.types.has(type)) f.types.delete(type); else f.types.add(type); _momoOptlogMatchCache[shop]=null; momoRenderProfitBody(shop,false); momoRenderFilterPanel(shop); }
+function momoOptlogTimeSet(shop,timeKey){ const f=_momoOptlogF(shop); f.timeKey=(f.timeKey===timeKey?'':timeKey); _momoOptlogMatchCache[shop]=null; momoRenderProfitBody(shop,false); momoRenderFilterPanel(shop); }   // 再點同一個＝取消
+function momoOptlogBySet(shop,by){ const f=_momoOptlogF(shop); f.by=by||''; _momoOptlogMatchCache[shop]=null; momoRenderProfitBody(shop,false); momoRenderFilterPanel(shop); }
 function momoRenderFilterPanel(shop){
   const m=document.getElementById('momo-filter-'+shop); if(!m) return;
   const tagsRes=momoTagsFor(shop);
@@ -11819,6 +11878,20 @@ function momoRenderFilterPanel(shop){
     <span id="momo-nf-pending-${shop}" class="mm-fp-pending" style="display:none">↵ 按 Enter 或「加入」才套用</span>
   </div>
   <div class="mm-fp-hint">值格可直接按 Enter 套用。「區間」需填兩格（左＝下限、右＝上限）；&gt; / &lt; 只用左格。⚠ 無值（零營收毛利率「—」）不會被撈進條件。</div>`;
+  // ── 優化紀錄篩選（做過某類優化的商品·type OR、時間/操作者 AND；時間脫鉤總表 period）──
+  const olf=_momoOptlogF(shop), olStat=momoOptlogStats(shop);
+  const olTimeBtns=[['thisMonth','本月'],['lastMonth','上月'],['30d','近30天'],['90d','近90天']].map(([k,lbl])=>`<button class="mm-fp-tag${olf.timeKey===k?' on':''}" onclick="momoOptlogTimeSet('${shop}','${k}')">${lbl}</button>`).join('');
+  const olByOpts=['<option value="">全部操作者</option>'].concat(olStat.operators.map(b=>`<option value="${_momoEsc(b)}"${olf.by===b?' selected':''}>${_momoEsc(b)}</option>`)).join('');
+  const olTypeChip=t=>{ const on=olf.types.has(t.type), off=(t.filterable===0&&!on); const j=String(t.type).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return `<button class="mm-fp-tag${on?' on':''}${off?' dis':''}"${off?' disabled':''} onclick="momoOptlogTypeToggle('${shop}','${j}')" title="${_momoEsc(t.type)}｜${t.entries} 筆紀錄、${t.filterable} 個商品仍在總表（可篩選）${t.total>t.filterable?('；另有 '+(t.total-t.filterable)+' 個商品已不在總表（已刪／TEMP-／哨兵）、無法在總表顯示'):''}">${_momoEsc(t.type)} <span class="mm-fp-cnt">${t.filterable}</span></button>`; };
+  const olOpt=olStat.types.filter(t=>!t.isSystem), olSys=olStat.types.filter(t=>t.isSystem);
+  const olTypesHtml=(olOpt.length?olOpt.map(olTypeChip).join(''):'<span class="mm-fp-note">此時間／操作者範圍內無優化紀錄</span>')
+    +(olSys.length?`<details class="mm-fp-sys" style="margin-top:6px"><summary style="font-size:11px;color:#9ca3af;cursor:pointer">系統事件（${olSys.length} 類 · 新增／刪除／主檔匯入 · 非人工優化）</summary><div class="mm-fp-tags" style="margin-top:4px">${olSys.map(olTypeChip).join('')}</div></details>`:'');
+  const optlogHTML=`
+      <div class="mm-fp-sec-h" style="margin-top:12px">優化紀錄（做過某類優化的商品 · 類型多選 OR、時間／操作者 AND）</div>
+      <div class="mm-fp-gp"><div class="mm-fp-gp-h">時間 <span class="mm-fp-gp-note">· 與總表月份脫鉤（可看「6 月做的優化·8 月表現」）</span></div><div class="mm-fp-tags">${olTimeBtns}</div></div>
+      <div class="mm-fp-gp"><div class="mm-fp-gp-h">操作者</div><div class="mm-fp-tags"><select class="mm-sel mm-fp-sel" style="max-width:160px" onchange="momoOptlogBySet('${shop}',this.value)">${olByOpts}</select></div></div>
+      <div class="mm-fp-gp"><div class="mm-fp-gp-h">類型 <span class="mm-fp-gp-note">· 數字＝可篩選商品數（在總表）</span></div><div class="mm-fp-tags">${olTypesHtml}</div></div>`;
   m.innerHTML=`
     <div class="mm-fp-top"><b>🏷 標籤 / 篩選</b><span class="mm-fp-total">共 ${total} 項${active?` · 已套用 ${active} 條`:''}${tagsRes.estimated?' · 🟡估算月':''}</span></div>
     <div class="mm-fp-body">
@@ -11827,6 +11900,7 @@ function momoRenderFilterPanel(shop){
       <div class="mm-fp-sec-h" style="margin-top:12px">數值條件（多條 AND）</div>
       <div class="mm-fp-conds">${condHTML}</div>
       ${addRow}
+      ${optlogHTML}
     </div>
     <div class="mm-fp-foot">
       <button class="mm-linkbtn" onclick="momoClearFilters('${shop}')"${active?'':' disabled'}>清除全部</button>
