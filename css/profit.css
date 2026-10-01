@@ -1735,3 +1735,7 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
   .rc-nosid{padding:10px 12px 8px;}
   .rc-nosid-name{max-width:150px;}
 }
+
+/* 廣告費對帳明細彈窗的層級：高過 #map-warn-banner（9999），開明細時橫幅不再蓋住標題與 ✕。
+   用 id 選擇器才壓得過 .ana-overlay 的通用層級；值在 main.css 的 --z-reconcile-detail。 */
+#reconcile-detail-ov{z-index:var(--z-reconcile-detail);}

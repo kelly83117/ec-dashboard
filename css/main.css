@@ -42,6 +42,10 @@
        最後一個子元素、DOM 順序在後 → 同分時 toast 勝。搭配 .toast 的 pointer-events:none，
        月份鈕照樣點得到，這個平手無害。 */
     --z-toast: 100000;
+    /* 淨利表「廣告費對帳明細」彈窗（#reconcile-detail-ov）。要高過開它的那條 #map-warn-banner
+       （profit.js showMapWarnBanner 的 inline z-index:9999），否則橫幅蓋住明細標題與 ✕；
+       又要低於 --z-toast，彈窗開著時 toast 照樣看得見。 */
+    --z-reconcile-detail: 10000;
   }
 
   * { box-sizing: border-box; }
