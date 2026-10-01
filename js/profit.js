@@ -24743,7 +24743,7 @@ function pchomeRenderSub(shop){
   var sub=_pchomeSub[shop]||'profit';
   if(sub==='upload'){ c.innerHTML=pchomeOrderTabHTML(shop); return; }   // 訂單明細＝純上傳入口（照 momo）；資料餵總表未對帳月即時營收
   if(sub==='recon'){ c.innerHTML=pchomeReconTabHTML(shop); pchomeRenderReconInfo(shop); return; }
-  if(sub==='sync'){ c.innerHTML=pchomeSyncTabHTML(shop); pchomeRenderMaster(shop); return; }
+  if(sub==='sync'){ c.innerHTML=pchomeSyncTabHTML(shop); return; }
   if(sub==='batch'){ pchomeRenderBatch(shop); return; }   // 批次維護（照 momoRenderBatch：容器 innerHTML 由 pchomeRenderBatch 自己寫）
   c.innerHTML=pchomeProfitTabHTML(shop);   // profit（總表：KPI 卡＋逐列淨利＋未分攤/合計）
 }
@@ -25142,21 +25142,37 @@ function pchomeOrderTabHTML(shop){
     +'<div id="pchome-order-msg-'+shop+'" style="font-size:12px;margin-top:8px"></div></div>';
 }
 
-// ── 商品同步：上架清單上傳 → 全商品主檔（整份覆蓋）＋✎成本編輯＋三態＋缺貨標記 ──
-// 成本三態（來源）：無值＝miss；_meta 最近一筆 src 含 PChome＝pchome；否則＝mobic（顯示「莫筆克」，成本表存的是莫筆克成本、"momo" 只是表的歷史命名，不對使用者顯示）
-function pchomeCostState(料號, costMap, meta){
-  if(costMap[料號]==null) return 'miss';
-  var m=meta&&meta[料號], last=(m&&m.changes&&m.changes.length)?m.changes[m.changes.length-1]:null;
-  if(last && String(last.src||'').indexOf('PChome')>=0) return 'pchome';
-  return 'mobic';
-}
+// ── 商品同步＝純上傳入口（兩個：上架清單、莫筆克成本檔）。補成本/改成本已移到批次維護（v718/v719）。版面照 momo momoRenderProductSync 檔案格。──
 function pchomeSyncTabHTML(shop){
-  return '<div class="pf-pchome-upbox">'
-    +'<div style="font-weight:600;margin-bottom:4px">上傳 PChome 上架商品清單（.xls，實際為 xlsx）</div>'
-    +'<div style="font-size:12px;color:#6b7280;margin-bottom:8px">商品主檔來源（全品項）。定期更新上傳 → <b>合併</b>（新增／更新清單欄位／消失標下架不刪除），解析後<b>先預覽差異、確認才寫入</b>；出貨方式自動分派轉單／寄倉；供貨價/售價由清單帶入，我方成本查莫筆克成本表、缺的在下方 ✎ 補（成本持久層是共用表、重傳不遺失）。</div>'
-    +'<input type="file" accept=".xls,.xlsx" onchange="pchomeListingFile(\''+shop+'\',event)">'
-    +'<div id="pchome-listing-msg-'+shop+'" style="font-size:12px;margin-top:8px"></div></div>'
-    +'<div id="pchome-master-'+shop+'"></div>';
+  var fileRow=function(id,label,hint,accept,handler){
+    return '<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:12px">'
+      +'<div style="width:200px;font-size:13px;color:#374151;flex-shrink:0">'+label+(hint?'<div style="font-size:11px;color:#9ca3af;margin-top:2px;line-height:1.5">'+hint+'</div>':'')+'</div>'
+      +'<div style="flex:1;min-width:0"><input type="file" accept="'+accept+'" onchange="'+handler+'(\''+shop+'\',event)" style="font-size:12px">'
+      +'<div id="'+id+'-'+shop+'" style="font-size:12px;margin-top:6px"></div></div></div>';
+  };
+  return '<div class="pf-pchome-upbox" style="max-width:860px">'
+    +'<div style="font-size:12px;color:#6b7280;background:#f9fafb;border:1px solid #eef0f2;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.6">兩個上傳入口。<b>上架商品清單</b>＝商品主檔來源（名稱／供貨價／售價／出貨方式／上下架），上傳後<b>先預覽差異、確認才合併</b>（消失標下架、不刪除）。<b>莫筆克成本檔</b>＝各倉商品列表，匯入<b>四賣場共用成本表</b>（原廠編號→成本；人工維護值保留不覆蓋）。補成本／改成本請到<b>批次維護</b>。</div>'
+    +fileRow('pchome-listing-msg','上架商品清單','.xls（實為 xlsx）· 商品主檔，差異預覽後合併','.xls,.xlsx','pchomeListingFile')
+    +fileRow('pchome-cost-msg','莫筆克成本檔','元創數位_各倉_商品列表 .xlsx · 匯入共用成本表','.xlsx,.xls','pchomeCostFile')
+    +'</div>';
+}
+// 莫筆克成本檔匯入（照甲配 momoSyncGenerate 的 cost 分支：momoParseCostList → momoPersistCostByOrigin，寫四賣場共用成本表、人工值不覆蓋）。
+function pchomeCostFile(shop,e){
+  var f=e&&e.target&&e.target.files&&e.target.files[0];
+  try{ if(e&&e.target) e.target.value=''; }catch(_){}   // 允許重傳同檔
+  if(!f) return;
+  var msg=document.getElementById('pchome-cost-msg-'+shop);
+  if(msg){ msg.textContent='解析中…'; msg.style.color='#6b7280'; }
+  momoReadWorkbook(f).then(function(wb){
+    var rows=wb.sheet('商品資料')||wb.firstSheet();
+    var cost=momoParseCostList(rows);
+    var r=momoPersistCostByOrigin(cost.costByOrigin)||{};
+    var added=r.added||0, updated=r.updated||0, prot=(r.protected&&r.protected.length)||0;
+    if(msg){ msg.textContent='已匯入共用成本表：新增 '+added+'、更新 '+updated+(prot?('、保留人工值 '+prot):'')+'（四賣場共用）。到「☁ 同步雲端」推上雲（成本表隨 MOMO 同步）。'; msg.style.color='#059669'; }
+  }).catch(function(err){
+    var m=(err&&err.message)||String(err);
+    if(msg){ msg.textContent='解析失敗：'+(/password/i.test(m)?'檔案有密碼保護，請先解密再上傳。':m); msg.style.color='#dc2626'; }
+  });
 }
 var _pchomeListingPending={};   // {shop:{newList, 匯出時間, plan}}（解析後暫存，確認才合併寫入；不直接落地）
 function pchomeListingFile(shop,e){
@@ -25271,62 +25287,7 @@ function pchomeConfirmListingMerge(shop){
   var o=document.getElementById('pchome-listing-ov'); if(o) o.remove();
   var msg=document.getElementById('pchome-listing-msg-'+shop);
   if(msg){ msg.textContent='已合併寫入（新增 '+plan.adds.length+'／更新 '+plan.updates.length+'／標下架 '+plan.vanishes.length+'）｜主檔 '+((out||[]).length)+' 料號、匯出時間 '+(匯出t||'未知')+'。到「☁ 同步雲端」推上雲。'; msg.style.color='#059669'; }
-  pchomeRenderMaster(shop);
 }
-function pchomeRenderMaster(shop){
-  var m=document.getElementById('pchome-master-'+shop); if(!m) return;
-  var all=pchomeLoadProducts();
-  var products=all.filter(function(p){ return (p.shop||'轉單')===shop; });   // 按出貨方式分派到本賣場
-  if(!products.length){ m.innerHTML='<div style="color:#9ca3af;font-size:13px">此賣場（'+shop+'）尚無商品主檔。上傳上架清單後，出貨方式＝'+shop+' 的品項會列在這裡。</div>'; return; }
-  var costMap=(typeof momoLoadCostByOrigin==='function'?momoLoadCostByOrigin():{})||{};
-  var meta=(typeof momoLoadCostMeta==='function'?momoLoadCostMeta():{})||{};
-  var miss=products.filter(function(p){return p.cost==null;}).length, oos=products.filter(function(p){return p.缺貨;}).length;
-  var tr=products.slice().sort(function(a,b){return String(a.料號)<String(b.料號)?-1:1;}).map(function(p,i){
-    var st=(p.cost==null)?'miss':pchomeCostState(p.料號,costMap,meta);
-    var src=st==='pchome'?'<span style="color:#E60012">PChome</span>':st==='mobic'?'<span style="color:#059669">莫筆克</span>':'<span style="color:#dc2626">—</span>';
-    var orig=(p.cost!=null?p.cost:'');
-    var disp='<span id="pcm-disp-'+shop+'-'+i+'" style="color:'+(st==='pchome'?'#E60012':(st==='mobic'?'#059669':'#dc2626'))+'">'+(p.cost!=null?p.cost:'缺')+'</span>';
-    var cell=disp+'<input id="pchome-mcost-'+shop+'-'+i+'" data-code="'+_momoEsc(p.料號)+'" data-orig="'+orig+'" value="'+orig+'" style="display:none;width:80px;border:1px solid #f59e0b;border-radius:5px;padding:2px 6px">'
-      +'<span class="pf-pchome-edit" onclick="pchomeMasterEdit(\''+shop+'\','+i+')" title="編輯成本">✎</span>';
-    var stock=p.缺貨?'<span style="color:#dc2626;font-weight:600">0（缺貨）</span>':(p.可賣量!=null?p.可賣量:'');
-    return '<tr style="border-top:1px solid #f3f4f6"><td style="padding:4px 8px;font-family:monospace">'+_momoEsc(p.料號)+'</td>'
-      +'<td style="padding:4px 8px">'+_momoEsc(p.商品名||'')+(p.規格?'（'+_momoEsc(p.規格)+'）':'')+'</td>'
-      +'<td style="padding:4px 8px;text-align:right">'+(p.供貨價!=null?p.供貨價:'')+'</td>'
-      +'<td style="padding:4px 8px;text-align:right;color:#9ca3af">'+(p.售價!=null?p.售價:'')+'</td>'
-      +'<td style="padding:4px 8px;text-align:right;white-space:nowrap">'+cell+'</td>'
-      +'<td style="padding:4px 8px;text-align:right">'+stock+'</td>'
-      +'<td style="padding:4px 8px">'+src+'</td></tr>';
-  }).join('');
-  m.innerHTML='<div style="font-size:12px;color:#6b7280;margin-bottom:8px">商品主檔／供貨價／售價／庫存來源＝<b>上架清單上傳</b>；成本查莫筆克成本表，點 <b>✎</b> 編輯（只寫改過的、命中清空＝不改、擋 0/文字）。售價為 PChome 零售價（僅供參考、不進我方淨利）。</div>'
-    +'<div style="font-weight:600;margin:6px 0">'+shop+' 商品主檔（'+products.length+' 料號'+(miss?'、缺成本 '+miss:'')+(oos?'、缺貨 '+oos:'')+'）· 成本為建檔凍結值</div>'
-    +'<div style="max-height:420px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:#6b7280"><th style="padding:4px 8px">料號</th><th style="padding:4px 8px">商品</th><th style="padding:4px 8px;text-align:right">供貨價</th><th style="padding:4px 8px;text-align:right">售價(網路價)</th><th style="padding:4px 8px;text-align:right">成本</th><th style="padding:4px 8px;text-align:right">可賣量</th><th style="padding:4px 8px">來源</th></tr></thead><tbody>'+tr+'</tbody></table></div>'
-    +'<div style="margin-top:10px;display:flex;gap:10px;align-items:center"><button class="pf-pchome-btn" onclick="pchomeMasterCommit(\''+shop+'\')">儲存成本異動</button><span id="pchome-master-msg-'+shop+'" style="font-size:12px"></span></div>';
-}
-function pchomeMasterEdit(shop,i){
-  var disp=document.getElementById('pcm-disp-'+shop+'-'+i), inp=document.getElementById('pchome-mcost-'+shop+'-'+i);
-  if(disp) disp.style.display='none';
-  if(inp){ inp.style.display=''; try{ inp.focus(); inp.select(); }catch(e){} }
-}
-function pchomeMasterCommit(shop){
-  var products=pchomeLoadProducts(), byCode={}; products.forEach(function(p){ byCode[p.料號]=p; });
-  var msg=document.getElementById('pchome-master-msg-'+shop);
-  var changes={}, i=0, inp;
-  while((inp=document.getElementById('pchome-mcost-'+shop+'-'+i))){ i++;
-    var code=inp.getAttribute('data-code'), orig=(inp.getAttribute('data-orig')||''), raw=(inp.value||'').trim();
-    if(raw===orig||raw==='') continue;                 // 沒動 / 清空 → 不寫（保留原值）
-    var n=Number(raw);
-    if(!isFinite(n)||n<=0){ if(msg){msg.textContent='「'+code+'」成本要填 >0 的數字（不能是 0 或文字）。';msg.style.color='#dc2626';} inp.style.display=''; inp.focus(); inp.style.borderColor='#dc2626'; return; }
-    changes[code]=n;
-  }
-  var codes=Object.keys(changes);
-  if(!codes.length){ if(msg){msg.textContent='沒有成本異動。';msg.style.color='#6b7280';} return; }
-  var by=(typeof momoCurrentUserName==='function'?momoCurrentUserName():'')||'PChome';
-  codes.forEach(function(code){ if(byCode[code]) byCode[code].cost=changes[code]; try{ momoSetCostByOrigin(code, changes[code], {manual:true, src:'PChome', by:by, shop:'PChome', note:'PChome 商品同步改成本'}); }catch(e){} });
-  pchomeSaveProducts(products);
-  if(msg){ msg.textContent='已更新 '+codes.length+' 筆成本（manual, src=PChome）。'; msg.style.color='#059669'; }
-  pchomeRenderMaster(shop);
-}
-
 // ── 月對帳：對帳明細 CSV → 存營收/費用/訂單明細（snapshot 覆蓋）＋費用卡＋(F)勾稽＋料號 diff 警告。不建商品主檔（主檔改由上架清單負責）──
 function pchomeReconTabHTML(shop){
   return '<div class="pf-pchome-upbox">'
@@ -26303,7 +26264,7 @@ function pchomeExportExcel(shop){
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
 Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBatchSetMode, pchomeAddOptlog, pchomeAddHistory,
-  pchomeBatchSelect, pchomeBatchSearch, pchomeBatchSetFilter, pchomeBatchToggleDisc, pchomeBatchSplitDrag, pchomeEditRecalc, pchomeEditOriginHint, pchomeBatchSubmitEdit, pchomeDeleteProduct, pchomeAddRecalc, pchomeAddOriginChanged, pchomeBatchSubmitAdd, pchomeListingFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeMasterEdit, pchomeMasterCommit, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeStatementHtmFile, pchomeOrderPick, pchomeOrderRemove, pchomeOrderGenerate, pchomeOrderApply, pchomeOrderCancel, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc,
+  pchomeBatchSelect, pchomeBatchSearch, pchomeBatchSetFilter, pchomeBatchToggleDisc, pchomeBatchSplitDrag, pchomeEditRecalc, pchomeEditOriginHint, pchomeBatchSubmitEdit, pchomeDeleteProduct, pchomeAddRecalc, pchomeAddOriginChanged, pchomeBatchSubmitAdd, pchomeListingFile, pchomeCostFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeStatementHtmFile, pchomeOrderPick, pchomeOrderRemove, pchomeOrderGenerate, pchomeOrderApply, pchomeOrderCancel, pchomeSetProfitMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc,
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel,
   pchomeOptlogTypeToggle, pchomeOptlogTimeSet, pchomeOptlogBySet, pchomeOptlogSysToggle,
