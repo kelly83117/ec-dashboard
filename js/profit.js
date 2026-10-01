@@ -25540,7 +25540,7 @@ function pchomeRenderReconInfo(shop){
   }).join('') : '<tr><td colspan="11" style="padding:6px 8px;color:#9ca3af">本期無'+shop+'訂單明細</td></tr>';
   var odCard='<div style="border:1px solid #eee;border-radius:10px;padding:12px;margin-top:12px">'
     +'<div style="font-weight:600;margin-bottom:6px">訂單貨款明細（'+(shop==='寄倉'?'寄倉訂單':'一般轉單')+'，'+orows.length+' 列）<span style="font-weight:400;color:#9ca3af;font-size:12px"> · 來源：對帳資料（段 '+PCHOME_SEG[shop]+'）</span></div>'
-    +'<div style="max-height:360px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="text-align:left;color:#6b7280"><th style="padding:3px 6px">訂單編號-序號</th><th style="padding:3px 6px">商品編號</th><th style="padding:3px 6px">商品名稱</th><th style="padding:3px 6px">規格</th><th style="padding:3px 6px;text-align:right">數量</th><th style="padding:3px 6px;text-align:right">單位成本</th><th style="padding:3px 6px;text-align:right">應付金額</th><th style="padding:3px 6px">單號確認日</th><th style="padding:3px 6px">轉單日期</th><th style="padding:3px 6px">出貨單號</th><th style="padding:3px 6px">廠商料號</th></tr></thead><tbody>'+odRows+'</tbody></table></div>'
+    +'<div style="max-height:360px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="text-align:left;color:#6b7280"><th style="padding:3px 6px">訂單編號-序號</th><th style="padding:3px 6px">商品編號</th><th style="padding:3px 6px">商品名稱</th><th style="padding:3px 6px">規格</th><th style="padding:3px 6px;text-align:right">數量</th><th style="padding:3px 6px;text-align:right">單位成本</th><th style="padding:3px 6px;text-align:right">應付金額</th><th style="padding:3px 6px">單號確認日</th><th style="padding:3px 6px">轉單日期</th><th style="padding:3px 6px">出貨單號</th><th style="padding:3px 6px">原廠編號</th></tr></thead><tbody>'+odRows+'</tbody></table></div>'
     +'<div style="font-size:11px;color:#9ca3af;margin-top:6px">帳務月由對帳資料的<b>列帳日期區間</b>決定（逐列日期基準為<b>轉單日期</b>）；出貨單號為 12 位字串；同單多序相鄰排列（分組＝最後一個連字號前）。「單號確認日」欄為檔案原值、僅顯示、不決定歸期。</div></div>';
   var listRows=months.map(function(k){ var r=all[k]; return '<li style="padding:2px 0">'+_momoEsc(k)+' 期（'+_momoEsc(r.期間||'')+'；匯出 '+_momoEsc(r.匯出時間||'未知')+'）</li>'; }).join('');
   box.innerHTML=timeHdr+diffCard+feeCard+manualCard+odCard
@@ -26476,7 +26476,7 @@ function pchomeExportExcel(shop){
   if(!snap || !snap.sorted || !snap.calc || !snap.sorted.length){ alert('目前沒有可匯出的資料，請先切到「總表」開啟商品獲利總表。'); return; }
   if(typeof XLSX==='undefined' || !XLSX.utils || typeof XLSX.writeFile!=='function'){ alert('匯出元件未載入，請重新整理後再試。'); return; }
   var calc=snap.calc, T=calc.合計, key=snap.key;
-  var header=['商品編號','料號','商品名稱','規格','成本(單價)','供貨價(未稅)','售價(含稅)','營收(未稅)','銷量','費用(未稅)','淨利','淨利率(%)'];
+  var header=['商品編號','原廠編號','商品名稱','規格','成本(單價)','供貨價(未稅)','售價(含稅)','營收(未稅)','銷量','費用(未稅)','淨利','淨利率(%)'];
   var aoa=[header];
   snap.sorted.forEach(function(x){
     aoa.push([
