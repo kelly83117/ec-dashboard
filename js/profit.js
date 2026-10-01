@@ -11355,7 +11355,7 @@ function _kpiShopeeFeeRate(shop){
 function _kpiIsAutoFill(group,shop,k){return !!(group.autoFill&&group.autoFill[k]&&group.autoFill[k].shops.includes(shop));}
 // ── 檢視狀態：月結表／年度總表 切換、目前選的年月（預設今天所在的年月）──
 let _kpiViewMode='month';
-// 年度月營收堆疊圖的資料（由 _kpiYearViewHtml 產生、renderKpiYearChart 消費）。
+// 年度圖表的資料（由 _kpiYearViewHtml 產生；觀測點 __kpiYearChartData()，圖表本身改吃 _kpiYearModelCur）。
 //   ⚠ 全年無資料時必須明確設成 null，不能留著上一個年份的值——否則切到空年份後
 //     若建圖函式仍被呼叫，會畫出前一年的圖，這種狀態殘留極難查。
 let _kpiYearChartData=null;
@@ -11366,7 +11366,7 @@ let _kpiYearChartData=null;
 //     之後 _kpiYearViewHtml 再怎麼重新賦值，window 上那份都會永遠停在 null。
 //   只有 getter，沒有 setter：這是觀測點，不是外部改狀態的入口。
 window.__kpiYearChartData=()=>_kpiYearChartData;
-// 年度總表的 Chart 實例（①全站折線 + ②五張小折線，共六張）。
+// 年度總表的 Chart 實例（2026-10-01 改版後：①每月營收堆疊長條＋純利折線 ②各通路純利率折線，共兩張）。
 //   寫法比照本檔的 momoOv 那組（搜 _momoOvCharts / momoOvDestroyCharts）：
 //   陣列 + 單一清理函式；建圖一律走 renderKpiYearChart 裡的 mk()，才不會漏 push。
 let _kpiYearCharts=[];
@@ -11476,10 +11476,6 @@ function setKpiYM(v){
   _kpiCurYear=+m[1];_kpiCurMonthNum=+m[2];
   renderKpiTab();
 }
-// 年度總表：統一成一張表，列＝各賣場（依組別分段），欄＝12個月＋全年營收/純利/純利率，
-// 不再是「月份 x 組別」趨勢表跟「各賣場全年統計」上下兩張表並存。
-// 每個賣場固定顯示兩排：上面營收、下面純利（方案 F 的兩排版本，不用展開/切換）。
-// 全年欄位固定同時顯示營收+純利，並附上跟去年全年比的成長率。
 // 算某個賣場在指定年度的全年營收/純利（沿用月結表明細排除合併/不適用欄位的邏輯）。
 function _kpiShopAnnualTotal(rows,year,group,shop,pureKey){
   let rev=0,pure=0;
@@ -11492,270 +11488,197 @@ function _kpiShopAnnualTotal(rows,year,group,shop,pureKey){
   }
   return{rev,pure};
 }
-// 年增率（年度總表專用）。
-//   ⚠ 2026-08-14 起，年度總表那張 12 個月大表的純利一律使用中性深灰 #374151
-//     （負值紅 #dc2626），綠色 #059669 刻意只保留給本函式輸出的年增率。
-//     判準：絕對值不上色，變化率才上色 —— 顏色只用來標示訊號，不標示常態。
-//     若日後看到「純利深灰、年增率綠」，那是刻意的，不是漏改。
-function _kpiYoyHtml(cur,prev){
-  if(!prev)return '';
-  const pct=(cur-prev)/prev*100;
-  const color=pct>=0?'#059669':'#dc2626';
-  const sign=pct>=0?'+':'';
-  return ` <span style="font-weight:400;font-size:11px;color:${color}">(${sign}${pct.toFixed(1)}%)</span>`;
-}
-// 每個賣場給一個淺色底色（同品牌不同平台的變體共用同一色，例如「好麻吉」「商城-好麻吉」「mo+0號店(好麻吉)」都算橘色）。
-const KPI_SHOP_COLORS=[
-  {key:'好麻吉',bg:'#FFF1E0'},
-  {key:'玩樂',bg:'#F1EAFB'},
-  {key:'維克',bg:'#E8F1FC'},
-  {key:'森之旅',bg:'#E9F7EC'},
-  {key:'酷澎買斷',bg:'#FDECEF'},
-  {key:'MOMO-甲配',bg:'#EEF0FA'},
-  {key:'露營館',bg:'#FBEAF0'},
-];
-function _kpiShopBgColor(shop){
-  const found=KPI_SHOP_COLORS.find(c=>shop.includes(c.key));
-  return found?found.bg:'#ffffff';
-}
-function _kpiYearViewHtml(){
-  const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===_kpiCurYear?' selected':''}>${y}年</option>`).join('');
+// ── 年度總表（2026-10-01 改版）──
+//   版面：頂列（年份＋已結算標籤）→ 四張大卡 → 左「每月營收與純利」堆疊長條＋純利折線／右「各通路全年」表 → 各通路純利率走勢。
+//   🔴 計算一律沿用既有函式：每個通路每個月＝_kpiGroupTotals(row,g)（內含 _kpiRawForCalc 合併/不適用欄位歸零、
+//     實際營收口徑、整組共同費用扣除）；全年＝已結算月份逐月相加。跟月結表各月的合計是同一套。
+//   「已結算月份」＝該月 row 存在（與 _kpiVisibleMonthNums 規則③同一個判準，不看值）。
+//   「較去年同期」只比去年【同樣那幾個月】（今年 1～8 月就比去年 1～8 月）；去年那幾個月一個 row 都沒有就不顯示。
+function _kpiYearModel(year){
   const rows=getKpiRows();
-  const prevYear=_kpiCurYear-1;
-  // 只顯示「該月份的 row 存在」的月份。判準刻意用 row 存不存在、不是數字是否全為 0——
-  //   0 元營收跟根本沒填是兩回事，而且這樣不必為了判斷先把 16 個賣場全算一遍。
-  //   ⚠ visibleMonths 只影響「顯示幾欄」。全年金額（共同費用扣除、_kpiShopAnnualTotal 的
-  //     去年同期基準）一律仍掃滿 12 個月，不可跟著縮，否則會跟上方大卡／摘要表對不上。
-  //   ⚠ monthGrandRev / monthGrandPure 的索引從此對應 visibleMonths[i]，【不是】第 i+1 月。
-  //     下游要用這兩個陣列（例如日後的圖表）必須一起取得 visibleMonths，否則會把 7 月的
-  //     數字畫到 1 月的位置。
-  const visibleMonths=[];
-  for(let m=1;m<=12;m++){
-    if(rows.some(r=>r.month===`${_kpiCurYear}-${String(m).padStart(2,'0')}`))visibleMonths.push(m);
-  }
-  const monthCount=visibleMonths.length;
-  const monthGrandRev=Array(monthCount).fill(0),monthGrandPure=Array(monthCount).fill(0);
-  let grandRev=0,grandPure=0,grandPrevRev=0,grandPrevPure=0;
-  // 通路摘要表用：只裝下面那個 map 已經算完的既有變數，不在這裡做任何新的加總。
-  const groupSummaries=[];
-  const groupBlocks=KPI_GROUPS.map(g=>{
-    const pureKey=g.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))?.k;
-    let groupRev=0,groupPure=0,groupPrevRev=0,groupPrevPure=0;
-    // 堆疊圖用：這一組在每個【可見月份】的營收。索引對應 visibleMonths[i]，不是第 i+1 月。
-    //   掛在下面既有的月份迴圈上，不新增迴圈、不多呼叫一次 _kpiCalcAll。
-    const gMonthRev=Array(monthCount).fill(0);
-    const shopTrs=g.shops.map(shop=>{
-      let annualRev=0,annualPure=0;
-      const monthRevTds=[],monthPureTds=[];
-      for(let i=0;i<monthCount;i++){
-        const month=`${_kpiCurYear}-${String(visibleMonths[i]).padStart(2,'0')}`;
-        const row=rows.find(r=>r.month===month);
-        // ⚠ 這個分支在目前的判準下【不可達】：visibleMonths 只收錄 row 存在的月份。
-        //   刻意保留不刪——若日後判準改成「數字全為 0 也隱藏」，它會立刻重新有用。
-        //   不是死碼，請勿清理。
-        if(!row){
-          monthRevTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:#d1d5db">—</td>`);
-          monthPureTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:#d1d5db">—</td>`);
-          continue;
-        }
-        // 合併／不適用欄位歸零，與月結表明細、單店全年共用同一支（原本三處各寫一份、逐字相同）。
-        const d=_kpiCalcAll(_kpiRawForCalc(row[g.key]?.[shop]||{},g,shop,row),g);
-        const pureV=d[pureKey]||0,revV=_kpiRealRev(d);   // 實際營收（同 _kpiGroupTotals）
-        annualRev+=revV;annualPure+=pureV;
-        monthGrandRev[i]+=revV;monthGrandPure[i]+=pureV;gMonthRev[i]+=revV;
-        monthRevTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:#6b7280">${revV?fmtN(Math.round(revV)):'—'}</td>`);
-        monthPureTds.push(`<td style="padding:5px 6px;text-align:right;font-size:11.5px;color:${pureV<0?'#dc2626':'#374151'}">${pureV?fmtN(Math.round(pureV)):'—'}</td>`);
-      }
-      groupRev+=annualRev;groupPure+=annualPure;grandRev+=annualRev;grandPure+=annualPure;
-      const prev=_kpiShopAnnualTotal(rows,prevYear,g,shop,pureKey);
-      groupPrevRev+=prev.rev;groupPrevPure+=prev.pure;grandPrevRev+=prev.rev;grandPrevPure+=prev.pure;
-      const rate=annualRev>0?annualPure/annualRev*100:null;
-      const bg=_kpiShopBgColor(shop);
-      return `<tr style="border-top:1px solid #f0f0f0;background:${bg}">
-        <td rowspan="2" style="padding:6px 12px 6px 20px;font-size:12.5px;font-weight:600;color:#374151;text-align:left;white-space:nowrap;vertical-align:middle">${_kpiShopLabel(shop)}</td>
-        <td style="padding:5px 8px;text-align:left;font-size:10.5px;color:#9ca3af;white-space:nowrap">營收</td>
-        ${monthRevTds.join('')}
-        <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;color:#6b7280;vertical-align:middle">${annualRev?fmtN(Math.round(annualRev)):'—'}${_kpiYoyHtml(annualRev,prev.rev)}</td>
-        <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;font-weight:700;color:${annualPure<0?'#dc2626':'#374151'};vertical-align:middle">${annualRev||annualPure?fmtN(Math.round(annualPure)):'—'}${_kpiYoyHtml(annualPure,prev.pure)}</td>
-        <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;vertical-align:middle">${rate!==null?rate.toFixed(2)+'%':'—'}</td>
-      </tr>
-      <tr style="background:${bg}">
-        <td style="padding:5px 8px;text-align:left;font-size:10.5px;color:#9ca3af;white-space:nowrap">純利</td>
-        ${monthPureTds.join('')}
-      </tr>`;
-    }).join('');
-    // 整組共同費用（如物流運費）全年加總要扣掉，跟通路明細頁的小計邏輯一致（今年、去年都要扣）。
-    if(g.commonCostLabel){
-      for(let m=1;m<=12;m++){
-        const monthCur=`${_kpiCurYear}-${String(m).padStart(2,'0')}`;
-        const rowCur=rows.find(r=>r.month===monthCur);
-        const cCur=rowCur?.[g.key+'Common']||0;
-        groupPure-=cCur;grandPure-=cCur;
-        // 逐月那一排（全年總計/純利）也要扣，否則「12 個月橫向加總」跟右邊的全年純利、
-        //   以及上方大卡對不起來，差額正好是全年共同費用（2026 年實測 160,875）。
-        //   🔴 索引【必須換算】，不可以寫 monthGrandPure[m-1]：本迴圈的 m 是【日曆月份】1~12，
-        //     而 monthGrandPure 的索引對應 visibleMonths[i]（見本函式開頭 visibleMonths 上方那段
-        //     警告）—— 只有「該年每個月都有 row」時兩者才剛好相等。2026 年資料是連續的 1~6 月，
-        //     所以寫錯也測不出來；換成「1、3、5 月有資料」的年份就會把 5 月的費用扣到 3 月頭上。
-        //   ⚠ mi<0 代表這個月沒有 row → 不會出現在大表上。此時 rowCur 必為 undefined ⇒ cCur 已經
-        //     是 0，本來就沒東西要扣；這道守衛是為了不去寫 monthGrandPure[-1]（那會在陣列上長出
-        //     一個 -1 屬性，.map() 雖然不會迭代到，但是髒的）。
-        //   ⚠ 取數【沿用上面同一個 cCur】，不另外再讀一次 row —— 兩處讀法若分岔，日後改一邊就漏。
-        const mi=visibleMonths.indexOf(m);
-        if(mi>=0)monthGrandPure[mi]-=cCur;
-        const monthPrev=`${prevYear}-${String(m).padStart(2,'0')}`;
-        const rowPrev=rows.find(r=>r.month===monthPrev);
-        const cPrev=rowPrev?.[g.key+'Common']||0;
-        groupPrevPure-=cPrev;grandPrevPure-=cPrev;
-      }
+  const rowOf=(y,m)=>rows.find(r=>r.month===`${y}-${String(m).padStart(2,'0')}`)||null;
+  const months=[1,2,3,4,5,6,7,8,9,10,11,12];
+  const settled=months.filter(m=>rowOf(year,m));
+  const prevRows=settled.map(m=>rowOf(year-1,m)).filter(Boolean);
+  const groups=KPI_GROUPS.map(g=>{
+    const monthRev=Array(12).fill(null),monthPure=Array(12).fill(null),monthRate=Array(12).fill(null);
+    let rev=0,pure=0,prevRev=0,prevPure=0;
+    settled.forEach(m=>{
+      const t=_kpiGroupTotals(rowOf(year,m),g);
+      monthRev[m-1]=t.totalRev;monthPure[m-1]=t.totalPure;monthRate[m-1]=t.totalRev>0?t.totalPure/t.totalRev*100:null;
+      rev+=t.totalRev;pure+=t.totalPure;
+      const pr=rowOf(year-1,m);if(pr){const tp=_kpiGroupTotals(pr,g);prevRev+=tp.totalRev;prevPure+=tp.totalPure;}
+    });
+    return{key:g.key,title:g.title,color:g.color,monthRev,monthPure,monthRate,rev,pure,rate:rev>0?pure/rev*100:null,prevRev,prevPure};
+  });
+  const monthTotal=months.map(m=>{if(!settled.includes(m))return null;let rev=0,pure=0;groups.forEach(g=>{rev+=g.monthRev[m-1]||0;pure+=g.monthPure[m-1]||0;});return{rev,pure,rate:rev>0?pure/rev*100:null};});
+  const sum=(k)=>groups.reduce((a,g)=>a+g[k],0);
+  const grandRev=sum('rev'),grandPure=sum('pure'),prevRev=sum('prevRev'),prevPure=sum('prevPure');
+  return{year,months,settled,groups,monthTotal,grandRev,grandPure,grandRate:grandRev>0?grandPure/grandRev*100:null,prevRev,prevPure,hasPrev:prevRows.length>0};
+}
+// 自動重點句：每個通路 Δ＝最新月純利率 − 前面各月平均；|Δ| 最大且 ≥3pp →「{通路} 純利率 {月份} 月起從 {前期平均}% {升到/掉到} {最新}%，其他通路大致持平」。
+//   月份＝連續偏離的第一個月：從最新月往前找，只要那個月與「它之前各月平均」同方向偏離 ≥3pp 就往前延伸。
+//   都沒超過 3pp →「各通路純利率大致持平，最高為 {通路} {x}%」。已結算月份 < 2 → 不顯示（回 null）。
+function _kpiYearHeadline(model){
+  if(model.settled.length<2)return null;
+  const avg=a=>a.reduce((x,y)=>x+y,0)/a.length;
+  let best=null;
+  model.groups.forEach(g=>{
+    const pts=model.settled.map(m=>({m,r:g.monthRate[m-1]})).filter(p=>p.r!=null);
+    if(pts.length<2)return;
+    const last=pts[pts.length-1],d=last.r-avg(pts.slice(0,-1).map(p=>p.r));
+    if(!best||Math.abs(d)>Math.abs(best.d))best={g,pts,last,d};
+  });
+  if(best&&Math.abs(best.d)>=3){
+    const {g,pts,last}=best,dir=Math.sign(best.d);
+    let s=pts.length-1;   // 偏離起點（pts 的索引）
+    while(s>1){
+      const before=avg(pts.slice(0,s-1).map(p=>p.r));
+      const okPrev=Math.sign(pts[s-1].r-before)===dir&&Math.abs(pts[s-1].r-before)>=3;
+      const okLast=Math.sign(last.r-before)===dir&&Math.abs(last.r-before)>=3;
+      if(!(okPrev&&okLast))break;
+      s--;
     }
-    const groupRate=groupRev>0?groupPure/groupRev*100:null;
-    // 摘要表與堆疊圖用：把這一組已經算完的既有變數收集起來，不重算、不新增加總。
-    //   ⚠ 必須放在共同費用扣除（上面的 g.commonCostLabel 區塊）與 groupRate 之後，
-    //     放前面會拿到還沒扣共同費用的中途值，跟下方群組表頭印出來的數字對不起來。
-    //   monthRev 是給堆疊圖的，摘要表不讀它。
-    groupSummaries.push({title:g.title,color:g.color,rev:groupRev,pure:groupPure,rate:groupRate,monthRev:gMonthRev});
-    const headerRow=`<tr style="background:#f8f9fc;border-top:1px solid #e5e7eb">
-      <td colspan="${monthCount+5}" style="padding:7px 12px;font-size:12.5px;font-weight:700;color:#1e293b;border-left:3px solid ${g.color};text-align:left;white-space:nowrap">${g.title}
-        <span style="font-weight:400;color:#9ca3af;margin-left:10px">全年純利 <b style="font-weight:700;color:${groupPure>=0?'#374151':'#dc2626'}">${fmtN(Math.round(groupPure))}</b>${_kpiYoyHtml(groupPure,groupPrevPure)}${groupRate!==null?`　純利率 ${groupRate.toFixed(2)}%`:''}</span>
-      </td>
-    </tr>`;
-    return headerRow+shopTrs;
-  }).join('');
-  // 月營收圖的資料：只在有可見月份時才產生；空狀態一律設 null，避免留著上一個年份的資料。
-  //   ⚠ 只放營收，純利【目前不放】。
-  //     ⚠ 舊理由（monthGrandPure 不扣共同費用、grandPure 有扣，混進同一張圖會跟大卡對不上）
-  //       在 2026-08-26 補扣之後【已經不成立】—— 兩者現在同口徑。
-  //     現在不放純利的理由只剩「還沒做」：把純利畫進圖是新功能，不是這次補扣的附帶結果。
-  //     要加的話請當成獨立需求評估（雙 Y 軸、負值、五組共用刻度都要重想），不要因為
-  //     「反正口徑已經一致了」就順手加進來。
-  //   ⚠ datasets 這個欄位名沿用 Chart.js 術語，但它【不會】原封不動餵給 Chart.js——
-  //     renderKpiYearChart 會自己組 dataset：①五組相加成一條全站折線、②五組各畫一張小圖。
-  //   ⚠ backgroundColor（通路識別色）目前是【閒置欄位】：①用 #5b5fcf、②統一 #2a78d6，
-  //     兩張圖都不讀它，只有觀測點 __kpiYearChartData() 看得到。
-  //     保留是為了日後若改回按通路上色不用再加回來，不是漏刪。
-  //   ⚠ 各通路的「全年營收」不放這裡：那是卡片標題的 HTML，直接用 groupSummaries 的 rev
-  //     （與通路摘要表那一格逐字相同的運算式），要顯示同一個數字就用同一個變數，不另存副本。
-  _kpiYearChartData=monthCount===0?null:{
-    labels:visibleMonths.map(m=>m+'月'),
-    datasets:groupSummaries.map(s=>({label:s.title,data:s.monthRev,backgroundColor:s.color})),
+    const base=avg(pts.slice(0,s).map(p=>p.r));
+    return{key:g.key,text:`${g.title} 純利率 ${pts[s].m} 月起從 ${base.toFixed(1)}% ${dir>0?'升到':'掉到'} ${last.r.toFixed(1)}%，其他通路大致持平`};
+  }
+  // 持平：最新月份純利率最高的通路
+  let top=null;
+  model.groups.forEach(g=>{const pts=model.settled.map(m=>g.monthRate[m-1]).filter(r=>r!=null);if(!pts.length)return;const r=pts[pts.length-1];if(!top||r>top.r)top={g,r};});
+  return top?{key:top.g.key,text:`各通路純利率大致持平，最高為 ${top.g.title} ${top.r.toFixed(1)}%`}:null;
+}
+const _kyMoney=v=>'NT$'+fmtN(Math.round(v));
+const _kyWan=v=>{const w=v/1e4;return (Math.abs(w)>=100?Math.round(w).toLocaleString():w.toFixed(1))+'萬';};
+function _kyYoy(cur,prev,show){
+  if(!show||!prev)return '';
+  const p=(cur-prev)/Math.abs(prev)*100;
+  return `<span class="ky-yoy ${p>=0?'up':'down'}">${p>=0?'▲':'▼'} ${Math.abs(p).toFixed(1)}%</span>`;
+}
+// 圖表與互動要用的資料（renderKpiYearChart 消費）；全年無資料時一律設 null（避免留著上一個年份的值）。
+let _kpiYearModelCur=null,_kpiYearHL=null;
+function _kpiYearViewHtml(){
+  const year=_kpiCurYear;
+  const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===year?' selected':''}>${y}年</option>`).join('');
+  const model=_kpiYearModel(year),N=model.settled.length;
+  const headline=_kpiYearHeadline(model);
+  _kpiYearModelCur=N?Object.assign(model,{headline}):null;
+  _kpiYearChartData=N?{labels:model.months.map(m=>m+'月'),settled:model.settled,datasets:model.groups.map(g=>({label:g.title,data:g.monthRev,backgroundColor:g.color})),pure:model.monthTotal.map(t=>t?t.pure:null)}:null;
+  _kpiYearHL=null;
+  const tag=N?`<span class="ky-tag">已結算 ${model.settled[0]}～${model.settled[N-1]} 月（${N} / 12）</span>`:'';
+  const top=`<div class="ky-top"><span class="ky-top-r"><select class="mm-sel" onchange="setKpiYear(this.value)" title="選年份">${yearOpts}</select>${tag}</span></div>`;
+  if(!N)return top+`<div class="ky-empty">本年度尚無資料</div>`;
+  // ── 四張大卡 ──
+  const showYoy=model.hasPrev;
+  const avgPure=model.grandPure/N;
+  const pm=model.settled.map(m=>({m,p:model.monthTotal[m-1].pure}));
+  const hi=pm.reduce((a,b)=>b.p>a.p?b:a),lo=pm.reduce((a,b)=>b.p<a.p?b:a);
+  const card=(label,val,cls,sub)=>`<div class="ky-card"><div class="ky-card-l">${label}</div><div class="ky-card-v ${cls||''}">${val}</div><div class="ky-card-s">${sub||'&nbsp;'}</div></div>`;
+  const yoyTxt=(c,p)=>showYoy&&p?`${_kyYoy(c,p,true)} <span class="ky-muted">較去年同期</span>`:'';
+  const cards=`<div class="ky-cards">
+    ${card('全年營收',_kyMoney(model.grandRev),'',yoyTxt(model.grandRev,model.prevRev))}
+    ${card('全年純利',_kyMoney(model.grandPure),model.grandPure>=0?'pos':'neg',[yoyTxt(model.grandPure,model.prevPure),model.grandRate!=null?`<span class="ky-muted">純利率 ${model.grandRate.toFixed(1)}%</span>`:''].filter(Boolean).join(' · '))}
+    ${card('月平均純利',_kyMoney(avgPure),avgPure>=0?'':'neg',`<span class="ky-muted">最高 ${hi.m} 月 · 最低 ${lo.m} 月</span>`)}
+    ${card('全年預估',_kyMoney(avgPure*12),avgPure>=0?'':'neg','<span class="ky-muted">純利 · 僅供參考</span>')}
+  </div>`;
+  // ── 左：每月營收與純利 ──
+  const legend=model.groups.map(g=>`<span class="ky-lg"><i style="background:${g.color}"></i>${g.title}</span>`).join('')+`<span class="ky-lg"><i class="ky-lg-line"></i>全通路純利</span>`;
+  const chartPanel=`<div class="ky-panel ky-p-chart"><div class="ky-p-t">每月營收與純利</div><div class="ky-c1"><canvas id="kpi-year-bar"></canvas></div><div class="ky-legend">${legend}</div></div>`;
+  // ── 右：各通路全年 ──
+  const share=g=>model.grandRev>0?g.rev/model.grandRev*100:0;
+  const tr=model.groups.map(g=>`<tr data-key="${g.key}"><td class="ky-t-name"><i style="background:${g.color}"></i>${g.title}<small>${share(g).toFixed(1)}%</small></td>
+    <td class="ky-n">${fmtN(Math.round(g.rev))}</td><td class="ky-n ${g.pure<0?'neg':''}">${fmtN(Math.round(g.pure))}</td>
+    <td class="ky-n">${g.rate!=null?g.rate.toFixed(1)+'%':'—'}</td><td class="ky-n">${_kyYoy(g.rev,g.prevRev,showYoy)||'<span class="ky-muted">—</span>'}</td></tr>`).join('');
+  const tot=`<tr class="ky-t-tot"><td class="ky-t-name">合計</td><td class="ky-n">${fmtN(Math.round(model.grandRev))}</td><td class="ky-n ${model.grandPure<0?'neg':''}">${fmtN(Math.round(model.grandPure))}</td><td class="ky-n">${model.grandRate!=null?model.grandRate.toFixed(1)+'%':'—'}</td><td class="ky-n">${_kyYoy(model.grandRev,model.prevRev,showYoy)||'<span class="ky-muted">—</span>'}</td></tr>`;
+  const bar=model.groups.filter(g=>share(g)>0).map(g=>`<span style="width:${share(g).toFixed(3)}%;background:${g.color}" title="${g.title} ${share(g).toFixed(1)}%"></span>`).join('');
+  const tblPanel=`<div class="ky-panel ky-p-tbl"><div class="ky-p-t">各通路全年</div>
+    <table class="ky-tbl"><thead><tr><th>通路</th><th class="ky-n">營收</th><th class="ky-n">純利</th><th class="ky-n">純利率</th><th class="ky-n" title="營收，跟去年同樣那幾個月比">較去年</th></tr></thead><tbody>${tr}${tot}</tbody></table>
+    <div class="ky-share" title="各通路營收佔比">${bar}</div></div>`;
+  // ── 各通路純利率走勢 ──
+  const lastM=model.settled[N-1],firstM=model.settled[0];
+  const rcard=(key,title,color,series,dashed)=>{
+    const pts=model.settled.map(m=>series[m-1]).filter(r=>r!=null);
+    const last=pts.length?pts[pts.length-1]:null,first=pts.length?pts[0]:null;
+    const d=(last!=null&&first!=null&&pts.length>1)?last-first:null;
+    return `<div class="ky-rc${dashed?' ky-rc-avg':''}" data-key="${key}" style="--c:${color}"><div class="ky-rc-h"><i class="${dashed?'dash':''}"></i>${title}</div>
+      <div class="ky-rc-v">${last!=null?last.toFixed(1)+'%':'—'}</div>
+      <div class="ky-rc-d ${d==null?'':d>=0?'up':'down'}">${d==null?'&nbsp;':(d>=0?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+' pp'}</div></div>`;
   };
-  const grandRate=grandRev>0?grandPure/grandRev*100:null;
-  // 沒累加過的月份在這兩個陣列裡是 fill(0) 的初始值，不是「算出來的零」。
-  //   印 0 等於宣稱量過、結果是零；改成 — 與上方賣場列一致（判斷寫法刻意逐字相同）。
-  const monthGrandRevTds=monthGrandRev.map(v=>`<td style="padding:6px 6px;text-align:right;font-size:11.5px;font-weight:700;color:#6b7280">${v?fmtN(Math.round(v)):'—'}</td>`).join('');
-  const monthGrandPureTds=monthGrandPure.map(v=>`<td style="padding:6px 6px;text-align:right;font-size:11.5px;font-weight:700;color:${v<0?'#dc2626':'#374151'}">${v?fmtN(Math.round(v)):'—'}</td>`).join('');
-  const grandRow=`<tr style="border-top:2px solid #e5e7eb;background:#f8f9fc">
-    <td rowspan="2" style="padding:7px 12px;text-align:left;font-size:12.5px;font-weight:700;vertical-align:middle">全年總計</td>
-    <td style="padding:5px 8px;text-align:left;font-size:10.5px;color:#9ca3af">營收</td>
-    ${monthGrandRevTds}
-    <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;font-weight:700;vertical-align:middle">${fmtN(Math.round(grandRev))}${_kpiYoyHtml(grandRev,grandPrevRev)}</td>
-    <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;font-weight:700;color:${grandPure>=0?'#374151':'#dc2626'};vertical-align:middle">${fmtN(Math.round(grandPure))}${_kpiYoyHtml(grandPure,grandPrevPure)}</td>
-    <td rowspan="2" style="padding:6px 8px;text-align:right;font-size:11.5px;font-weight:700;vertical-align:middle">${grandRate!==null?grandRate.toFixed(2)+'%':'—'}</td>
-  </tr>
-  <tr style="background:#f8f9fc">
-    <td style="padding:5px 8px;text-align:left;font-size:10.5px;color:#9ca3af">純利</td>
-    ${monthGrandPureTds}
-  </tr>`;
-  const monthHeaders=visibleMonths.map(m=>`<th style="padding:7px 6px;color:#6b7280;font-size:11px;font-weight:700;text-align:right;white-space:nowrap;cursor:default">${m}月</th>`).join('');
-  // ── 年度摘要卡＋通路摘要表（純版面重組：數字全部沿用上面已算完的既有變數，不重算）──
-  //   ⚠ grandRate / groupRate 已經是百分比數值（19.25），直接 toFixed，不要再乘 100。
-  //     （_kpiSummaryCardsHtml 的 pureRateAgg 是小數 0.1925、口徑相反，不要照抄那邊的 *100 寫法。）
-  //   ⚠ 本卡的「全年純利」取自 grandPure —— 那是【已扣共同費用】的數字
-  //     （共同費用在上面 g.commonCostLabel 區塊逐月從 grandPure 減掉）。
-  //     下方大表 12 個月的 monthGrandPure 【同一個區塊、同一個 cCur 也扣了】（2026-08-26 補），
-  //     所以「12 個月純利橫向加總」現在等於本卡的全年純利。
-  //     ⚠ 舊註解記載的「差額就是全年共同費用、2026-08-14 判定不修」已經處理掉了，不要再拿
-  //       那段描述當現況。
-  //     ⚠ 仍然【刻意不加畫面說明文字】：橫向現在加得起來，但同一欄【直向】加不起來 ——
-  //       上方各通路的純利格不分攤共同費用（那是單一通路的數字），所以 14 格相加會比
-  //       「全年總計」那格多出當月的共同費用。這與群組分隔列早就存在的落差同一性質
-  //       （蝦皮各通路全年純利相加 7,475,473 vs 群組列 7,314,598），是這張表的既定慣例。
-  const bigCard=(label,valueHtml,color)=>`<div style="flex:1;min-width:180px;background:#f8f9fc;border-radius:10px;padding:18px 20px">
-    <div style="font-size:12px;color:#9ca3af;font-weight:600;letter-spacing:.03em">${label}</div>
-    <div style="font-size:30px;font-weight:700;margin-top:6px;line-height:1.15;font-variant-numeric:tabular-nums;color:${color}">${valueHtml}</div>
+  const rcards=model.groups.map(g=>rcard(g.key,g.title,g.color,g.monthRate,false)).join('')+rcard('__avg','全通路平均','#9ca3af',model.monthTotal.map(t=>t?t.rate:null),true);
+  const trend=`<div class="ky-panel ky-p-trend">
+    <div class="ky-tr-t">各通路純利率走勢</div>
+    ${headline?`<div class="ky-tr-h">${headline.text}</div>`:''}
+    <div class="ky-rcards" title="最新月份（${lastM} 月）純利率；變化＝跟 ${firstM} 月比">${rcards}</div>
+    <div class="ky-c2"><canvas id="kpi-year-rate"></canvas></div>
   </div>`;
-  const summaryCardsHtml=`<div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-    ${bigCard('全年營收','NT$'+fmtN(Math.round(grandRev)),'#1f2937')}
-    ${bigCard('全年純利','NT$'+fmtN(Math.round(grandPure)),grandPure>=0?'#059669':'#dc2626')}
-    ${bigCard('純利率',grandRate!==null?grandRate.toFixed(2)+'%':'—','#1f2937')}
-  </div>`;
-  const groupSummaryRows=groupSummaries.map(s=>{
-    // 本次唯一的新計算：該組全年營收 ÷ 全年總營收。兩個數字都是既有變數，沒有重新加總。
-    const share=grandRev>0?s.rev/grandRev*100:null;
-    // 橫條一律中性灰：五條不同顏色並排會讓人去比顏色而不是比長度。通路識別交給左邊的圓點。
-    return `<tr style="border-top:1px solid #f0f0f0">
-      <td style="padding:9px 12px;font-size:12.5px;font-weight:600;color:#374151;text-align:left;white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${s.color};margin-right:7px"></span>${s.title}</td>
-      <td style="padding:9px 10px;text-align:right;font-size:12.5px;color:#6b7280;font-variant-numeric:tabular-nums">${fmtN(Math.round(s.rev))}</td>
-      <td style="padding:9px 10px;text-align:right;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;color:${s.pure>=0?'#059669':'#dc2626'}">${fmtN(Math.round(s.pure))}</td>
-      <td style="padding:9px 10px;text-align:right;font-size:12.5px;color:#374151;font-variant-numeric:tabular-nums">${s.rate!==null?s.rate.toFixed(2)+'%':'—'}</td>
-      <td style="padding:9px 12px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="flex:1;min-width:60px;height:6px;border-radius:3px;background:#eef0f4;overflow:hidden"><div style="width:${share!==null?share.toFixed(2):0}%;height:100%;background:#9ca3af;border-radius:3px"></div></div>
-          <span style="font-size:11.5px;color:#6b7280;font-variant-numeric:tabular-nums;min-width:44px;text-align:right">${share!==null?share.toFixed(1)+'%':'—'}</span>
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
-  const groupSummaryHtml=`<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
-    <table style="border-collapse:collapse;width:100%">
-      <thead><tr style="background:#f8f9fc">
-        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700">通路</th>
-        <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">全年營收</th>
-        <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">全年純利</th>
-        <th style="text-align:right;padding:7px 10px;color:#6b7280;font-size:11.5px;font-weight:700">純利率</th>
-        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;width:200px">佔全年營收</th>
-      </tr></thead>
-      <tbody>${groupSummaryRows}</tbody>
-    </table>
-  </div>`;
-  // 全年一個月都沒有資料時，通路摘要表與 12 個月大表【一起】換成一行訊息：
-  //   五列全 0 的摘要表提供零資訊；而三張大卡留著維持版面骨架，
-  //   讓人知道「這裡本來有東西」，不至於整個畫面空掉。
-  //   不輸出 <details> 的理由：它預設收合，包在裡面等於要使用者點一下才知道「沒有」，
-  //   而且點開前分不出「這一年沒資料」和「有資料但我還沒展開」。
-  //   ⚠ 刻意用單一變數承載「摘要表 + 大表」兩塊，不寫成兩個各自判斷 monthCount 的三元——
-  //     兩個條件必須永遠同步，日後只改一邊就會變成「摘要表沒了但大表還在」，而且不會報錯。
-  const bodyBlock=monthCount===0
-    ? `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:28px 16px;text-align:center;font-size:12.5px;color:#9ca3af">本年度尚無資料</div>`
-    : `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:16px">
-    <div style="height:200px;position:relative"><canvas id="kpi-year-total-chart"></canvas></div>
-  </div>
-  ${groupSummaryHtml}
-  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:16px">
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
-      ${groupSummaries.map((s,i)=>`<div>
-        <div style="font-size:12px;color:#9ca3af;font-weight:600">${s.title}</div>
-        <div style="font-size:15px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;margin-bottom:4px">${fmtN(Math.round(s.rev))}</div>
-        <div style="height:70px;position:relative"><canvas id="kpi-year-g${i}"></canvas></div>
-      </div>`).join('')}
-    </div>
-    <div style="font-size:11px;color:#9ca3af;margin-top:8px">每張圖各自縮放，只看形狀不能互相比高度；規模看上方數字</div>
-  </div>
-  <details style="margin-bottom:4px">
-    <summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:#5b5fcf;padding:6px 2px;user-select:none">查看完整明細</summary>
-    <div style="margin-top:10px">
-  <div style="border:1px solid #e5e7eb;border-radius:8px;overflow-x:auto">
-    <table style="border-collapse:collapse;table-layout:fixed;width:100%;min-width:${424+52*monthCount}px">
-      <colgroup><col style="width:110px"><col style="width:44px">${visibleMonths.map(()=>'<col style="width:52px">').join('')}<col style="width:100px"><col style="width:100px"><col style="width:70px"></colgroup>
-      <thead><tr style="background:#f8f9fc">
-        <th style="text-align:left;padding:7px 12px;color:#6b7280;font-size:11.5px;font-weight:700;cursor:default">通路</th>
-        <th></th>
-        ${monthHeaders}
-        <th style="text-align:right;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700;cursor:default">全年營收</th>
-        <th style="text-align:right;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700;cursor:default">全年純利</th>
-        <th style="text-align:right;padding:7px 8px;color:#6b7280;font-size:11px;font-weight:700;cursor:default">純利率</th>
-      </tr></thead>
-      <tbody>${groupBlocks}${grandRow}</tbody>
-    </table>
-  </div>
-    </div>
-  </details>`;
-  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
-    <select onchange="setKpiYear(this.value)" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;font-weight:600;outline:none;cursor:pointer;font-variant-numeric:tabular-nums">${yearOpts}</select>
-  </div>
-  ${summaryCardsHtml}
-  ${bodyBlock}`;
+  return `<div class="ky-wrap">${top}${cards}<div class="ky-mid">${chartPanel}${tblPanel}</div>${trend}</div>`;
+}
+const _kyRgba=(hex,a)=>{const h=hex.replace('#','');const n=parseInt(h.length===3?h.split('').map(c=>c+c).join(''):h,16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;};
+// 年度總表的兩張圖：①每月營收堆疊長條＋全通路純利折線 ②各通路純利率折線（hover/點擊高亮）
+//   ⚠ 這裡【不做】destroy 舊實例：那是 renderKpiTab 開頭 kpiYearDestroyCharts() 的責任。
+function renderKpiYearChart(){
+  const M=_kpiYearModelCur;
+  if(!M)return;
+  if(typeof Chart==='undefined')return;
+  const mk=(id,cfg)=>{const c=document.getElementById(id);if(!c)return null;const o=Chart.getChart(c);if(o){try{o.destroy();}catch{}}const ch=new Chart(c.getContext('2d'),cfg);_kpiYearCharts.push(ch);return ch;};
+  const labels=M.months.map(m=>m+'月');
+  const unsettled=M.months.map(m=>!M.settled.includes(m));
+  // ① 堆疊長條（各通路營收）＋全通路純利折線（同一個 Y 軸）；長條上方標總營收（萬）
+  const topLabel={id:'kyTop',afterDatasetsDraw(ch){
+    const {ctx,scales:{x,y}}=ch;ctx.save();ctx.font='600 11px system-ui,sans-serif';ctx.fillStyle='#374151';ctx.textAlign='center';ctx.textBaseline='bottom';
+    M.months.forEach((m,i)=>{const t=M.monthTotal[i];if(!t)return;ctx.fillText(_kyWan(t.rev),x.getPixelForValue(i),y.getPixelForValue(Math.max(t.rev,0))-4);});
+    ctx.restore();}};
+  mk('kpi-year-bar',{type:'bar',data:{labels,datasets:[
+      ...M.groups.map(g=>({type:'bar',label:g.title,data:g.monthRev,backgroundColor:g.color,stack:'rev',order:2,borderRadius:2,maxBarThickness:34})),
+      {type:'line',label:'全通路純利',data:M.monthTotal.map(t=>t?t.pure:null),borderColor:'#059669',backgroundColor:'#059669',borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#fff',pointBorderWidth:2,tension:.3,order:1,spanGaps:false}]},
+    options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:20}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+'：'+fmtN(Math.round(c.parsed.y||0))}}},
+      scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,beginAtZero:true,ticks:{callback:v=>_kyWan(v)},grid:{color:'#f1f2f5'}}}},
+    plugins:[topLabel]});
+  // ② 純利率折線：每個通路一條＋全通路平均（灰虛線）；未結算月份灰底＋「尚未結算」
+  const band={id:'kyBand',beforeDatasetsDraw(ch){
+    const {ctx,chartArea:a,scales:{x}}=ch;const w=x.getPixelForValue(1)-x.getPixelForValue(0);
+    ctx.save();ctx.fillStyle='#f3f4f6';
+    let runs=[],cur=null;unsettled.forEach((u,i)=>{if(u){if(!cur)cur={s:i,e:i};else cur.e=i;}else if(cur){runs.push(cur);cur=null;}});if(cur)runs.push(cur);
+    runs.forEach(r=>{const l=Math.max(a.left,x.getPixelForValue(r.s)-w/2),rr=Math.min(a.right,x.getPixelForValue(r.e)+w/2);ctx.fillRect(l,a.top,rr-l,a.bottom-a.top);});
+    const big=runs.reduce((p,r)=>(!p||(r.e-r.s)>(p.e-p.s))?r:p,null);
+    if(big){ctx.fillStyle='#9ca3af';ctx.font='12px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('尚未結算',(x.getPixelForValue(big.s)+x.getPixelForValue(big.e))/2,(a.top+a.bottom)/2);}
+    ctx.restore();}};
+  const series=M.groups.map(g=>({key:g.key,label:g.title,color:g.color,data:g.monthRate,dash:[]})).concat([{key:'__avg',label:'全通路平均',color:'#9ca3af',data:M.monthTotal.map(t=>t?t.rate:null),dash:[6,4]}]);
+  const ch2=mk('kpi-year-rate',{type:'line',data:{labels,datasets:series.map(s=>({label:s.label,_key:s.key,_color:s.color,data:s.data,borderColor:s.color,backgroundColor:s.color,borderDash:s.dash,borderWidth:2,pointRadius:2.5,pointHoverRadius:2.5,tension:.25,spanGaps:true}))},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,events:[],plugins:{legend:{display:false},tooltip:{enabled:false}},
+      scales:{x:{grid:{display:false}},y:{ticks:{callback:v=>v+'%'},grid:{color:'#f1f2f5'}}}},
+    plugins:[band]});
+  if(!ch2)return;
+  // ── 高亮：滑鼠移到線上（看不見的感應範圍 14px）或數字卡 → 該線加粗、其他淡到 12%；對應卡亮起。點擊（手機）＝鎖定／再點取消。
+  const defKey=M.headline?M.headline.key:null;
+  const cards=[...document.querySelectorAll('.ky-rc')];
+  const apply=key=>{
+    ch2.data.datasets.forEach(ds=>{
+      const on=key?ds._key===key:(defKey?ds._key===defKey:true);
+      const alpha=key?(on?1:0.12):(defKey?(on?1:0.5):1);
+      ds.borderColor=ds.backgroundColor=ds.pointBackgroundColor=ds.pointBorderColor=_kyRgba(ds._color,alpha);
+      ds.borderWidth=on&&(key||defKey)?3.5:2;ds.pointRadius=on&&(key||defKey)?3:2;
+    });
+    ch2.update();   // 不用 update('none')：那樣點（point）的樣式不會重新解析，淡掉的線上還會留著實心點（本圖 animation:false，不會有動畫）
+    cards.forEach(c=>{c.classList.toggle('is-on',!!key&&c.dataset.key===key);c.classList.toggle('is-dim',!!key&&c.dataset.key!==key);});
+  };
+  let locked=null;
+  const show=key=>apply(key||locked);
+  const nearest=(evt,tol)=>{
+    const r=ch2.canvas.getBoundingClientRect(),px=evt.clientX-r.left,py=evt.clientY-r.top;let best=null;
+    ch2.data.datasets.forEach((ds,i)=>{const pts=ch2.getDatasetMeta(i).data.filter((p,j)=>ds.data[j]!=null);
+      for(let j=0;j<pts.length;j++){const a=pts[j],b=pts[j+1]||pts[j];const dx=b.x-a.x,dy=b.y-a.y,L=dx*dx+dy*dy;let t=L?((px-a.x)*dx+(py-a.y)*dy)/L:0;t=Math.max(0,Math.min(1,t));const d=Math.hypot(px-(a.x+t*dx),py-(a.y+t*dy));if(d<=tol&&(!best||d<best.d))best={d,key:ds._key};}});
+    return best&&best.key;};
+  const cv=ch2.canvas;
+  cv.addEventListener('mousemove',e=>show(nearest(e,14)));
+  cv.addEventListener('mouseleave',()=>show(null));
+  cv.addEventListener('click',e=>{const k=nearest(e,24);locked=(k&&k!==locked)?k:null;show(null);});
+  cards.forEach(c=>{
+    c.addEventListener('mouseenter',()=>show(c.dataset.key));
+    c.addEventListener('mouseleave',()=>show(null));
+    c.addEventListener('click',()=>{locked=locked===c.dataset.key?null:c.dataset.key;show(null);});
+  });
+  apply(null);
 }
 function renderKpiTab(){
   const el=document.getElementById('kpi-tab-content');
@@ -11809,64 +11732,6 @@ function _kpiFillFitWatch(el){
 }
 // 保險：視窗縮放也重算（ResizeObserver 在背景分頁不送通知；切回來時 RO 會補送，這條只是雙保險）
 window.addEventListener('resize',()=>{if(!_kpiFillMode||!document.querySelector('#kpi-tab-content table.km-ftable'))return;clearTimeout(_kpiFillROt);_kpiFillROt=setTimeout(_kpiFillFit,80);});
-// 年度總表的兩組折線圖：
-//   ① 全站月營收（一條線＝五個通路相加），緊接三張大卡，補充大卡的全年數字。
-//   ② 五個通路各一張小折線，緊接通路摘要表，補充摘要表的各通路數字。
-//   ⚠ ② 五張圖【各自獨立 Y 軸】，這是整個設計的重點：蝦皮全年 3800 萬、官網 21,574，
-//     差約 1700 倍，共用刻度就是官網永遠貼著 0、看不見。代價是五張圖不能互相比高度，
-//     所以圖下方那行「每張圖各自縮放…」的小字【不能拿掉】。
-//   ⚠ 2026-08-14 前後試過兩種都退場，不要再繞回去：
-//     堆疊長條 → 蝦皮 89.5%、官網 0.05%，畫面上只看得到蝦皮與 MOMO 兩色，legend 卻列著五個顏色。
-//     單色長條 + tooltip 拆分 → 「還要滑過去看」。tooltip 是查詢不是顯示。
-//     也不要把小通路併成「其他」：官網與業外是有人在看的。
-//   只畫營收，純利【目前不畫】。
-//   ⚠ 舊理由（monthGrandPure 不扣共同費用、grandPure 有扣，會跟上方三張大卡對不上）在
-//     2026-08-26 補扣之後【已經不成立】。現在不畫的理由只剩「還沒做」——見
-//     _kpiYearChartData 上方同一件事的說明，要加請當成獨立需求評估。
-//   ⚠ 這裡【不做】destroy 舊實例：那是 renderKpiTab 開頭 kpiYearDestroyCharts() 的責任。
-//     在這裡也做會變成兩個地方各管一半，日後改一邊就漏。
-function renderKpiYearChart(){
-  const d=_kpiYearChartData;
-  if(!d)return;                                  // 空狀態：bodyBlock 本來就沒輸出 canvas
-  if(typeof Chart==='undefined')return;          // CDN 掛掉（寫法比照 momoOvBuildCharts / momoRenderAnalysis）
-  // 建圖統一走這裡：撈 canvas → 孤兒清理 → push 進 _kpiYearCharts。
-  //   ⚠ new Chart 只出現在這一個地方，才不會有哪張圖忘記 push、destroy 時漏掉。
-  //   ⚠ Chart.getChart 必須在上面 typeof Chart 檢查之後——Chart 不存在時它本身就會炸。
-  const mk=(id,cfg)=>{
-    const c=document.getElementById(id);
-    if(!c)return;
-    const o=Chart.getChart(c);
-    if(o){try{o.destroy();}catch{}}
-    _kpiYearCharts.push(new Chart(c.getContext('2d'),cfg));
-  };
-  const tip={callbacks:{label:c=>fmtN(Math.round(c.parsed.y))}};
-  // ① 五組逐月相加＝當月總營收。與表格「全年總計」列的每月營收同源同值。
-  const totals=d.labels.map((_,i)=>d.datasets.reduce((a,s)=>a+(s.data[i]||0),0));
-  mk('kpi-year-total-chart',{
-    type:'line',
-    data:{labels:d.labels,datasets:[{label:'月營收',data:totals,borderColor:'#5b5fcf',backgroundColor:'rgba(91,95,207,.1)',fill:true,tension:.3}]},
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:tip},
-      scales:{y:{ticks:{callback:v=>fmtN(v)}}},
-    },
-  });
-  // ② 每個通路一張。y 軸整條隱藏、格線關掉，只留形狀與 x 軸月份。
-  d.datasets.forEach((s,i)=>{
-    mk('kpi-year-g'+i,{
-      type:'line',
-      data:{labels:d.labels,datasets:[{label:s.label,data:s.data,borderColor:'#2a78d6',backgroundColor:'rgba(42,120,214,.1)',fill:true,tension:.3,pointRadius:2.5}]},
-      options:{
-        responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{display:false},tooltip:tip},
-        scales:{
-          x:{grid:{display:false},ticks:{font:{size:10}}},
-          y:{display:false,grid:{display:false}},
-        },
-      },
-    });
-  });
-}
 function buildKpiTabHtml(){
   return `<div style="background:white;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
     <div id="kpi-tab-content"></div>

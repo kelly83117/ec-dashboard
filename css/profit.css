@@ -1739,3 +1739,61 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 /* 廣告費對帳明細彈窗的層級：高過 #map-warn-banner（9999），開明細時橫幅不再蓋住標題與 ✕。
    用 id 選擇器才壓得過 .ana-overlay 的通用層級；值在 main.css 的 --z-reconcile-detail。 */
 #reconcile-detail-ov{z-index:var(--z-reconcile-detail);}
+/* ── KPI 年度總表（2026-10-01 改版）── 白底卡片、通路顏色由 KPI_GROUPS.color 帶入 */
+.ky-top{display:flex;align-items:center;margin-bottom:14px;}
+.ky-top-r{margin-left:auto;display:inline-flex;align-items:center;gap:10px;}
+.ky-tag{display:inline-block;padding:4px 10px;border-radius:999px;background:#f3f4f6;color:#4b5563;font-size:12px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.ky-empty{border:1px solid #e5e7eb;border-radius:10px;padding:32px 16px;text-align:center;font-size:13px;color:#9ca3af;}
+.ky-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px;}
+.ky-card{background:#fff;border:1px solid #eef0f4;border-radius:12px;padding:16px 18px;min-width:0;container-type:inline-size;}
+.ky-card-l{font-size:12px;font-weight:600;color:#6b7280;}
+/* 金額字級跟著卡片寬度縮（12cqw），最大 26px：1280 寬四張卡並排時「NT$64,216,817」才不會被截掉 */
+.ky-card-v{margin-top:6px;font-size:min(26px,12cqw);font-weight:800;color:#1a1a2e;line-height:1.15;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.ky-card-v.pos{color:#059669;}.ky-card-v.neg{color:#dc2626;}
+.ky-card-s{margin-top:6px;font-size:12px;color:#6b7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ky-muted{color:#9ca3af;font-weight:500;}
+.ky-yoy{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.ky-yoy.up{color:#059669;}.ky-yoy.down{color:#dc2626;}
+.ky-mid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(410px,1fr);gap:12px;margin-bottom:14px;}
+.ky-wrap{container-type:inline-size;}
+.ky-panel{background:#fff;border:1px solid #eef0f4;border-radius:12px;padding:14px 16px;min-width:0;}
+.ky-p-t{font-size:13px;font-weight:700;color:#1a1a2e;margin-bottom:10px;}
+.ky-c1{position:relative;height:270px;}
+.ky-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-size:11.5px;color:#6b7280;}
+.ky-lg{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
+.ky-lg i{display:inline-block;width:10px;height:10px;border-radius:2px;}
+.ky-lg i.ky-lg-line{width:16px;height:0;border-top:2.5px solid #059669;border-radius:0;}
+.ky-tbl{width:100%;border-collapse:collapse;font-size:12.5px;color:#374151;font-variant-numeric:tabular-nums;}
+.ky-tbl th{text-align:left;font-size:11px;font-weight:600;color:#9ca3af;padding:6px 5px;border-bottom:1px solid #eef0f4;white-space:nowrap;}
+.ky-tbl td{padding:7px 5px;border-top:1px solid #f3f4f6;white-space:nowrap;text-align:left;}
+.ky-tbl .ky-n{text-align:right;}
+.ky-tbl td.neg{color:#dc2626;}
+.ky-t-name{font-weight:600;color:#1a1a2e;}
+.ky-t-name i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px;}
+.ky-t-name small{margin-left:6px;font-size:11px;font-weight:500;color:#9ca3af;}
+.ky-tbl tr.ky-t-tot td{font-weight:800;color:#1a1a2e;border-top:1px solid #d1d5db;background:#f8f9fc;}
+.ky-share{display:flex;height:10px;border-radius:5px;overflow:hidden;margin-top:12px;background:#f3f4f6;}
+.ky-share span{display:block;height:100%;}
+.ky-tr-t{font-size:12px;font-weight:600;color:#9ca3af;}
+.ky-tr-h{margin-top:4px;font-size:22px;font-weight:800;color:#1a1a2e;line-height:1.35;}
+.ky-rcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;margin:12px 0;}
+.ky-rc{border:1px solid #eef0f4;border-radius:10px;padding:8px 10px;cursor:pointer;transition:opacity .15s,background .15s,border-color .15s;background:#fff;user-select:none;}
+.ky-rc-avg{border-style:dashed;border-color:#cbd5e1;}
+.ky-rc-h{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:#6b7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ky-rc-h i{display:inline-block;width:14px;height:0;border-top:3px solid var(--c);flex-shrink:0;}
+.ky-rc-h i.dash{border-top-style:dashed;}
+.ky-rc-v{margin-top:4px;font-size:18px;font-weight:800;color:#1a1a2e;font-variant-numeric:tabular-nums;}
+.ky-rc-d{font-size:11.5px;font-weight:700;font-variant-numeric:tabular-nums;}
+.ky-rc-d.up{color:#059669;}.ky-rc-d.down{color:#dc2626;}
+.ky-rc.is-on{border-color:var(--c);box-shadow:0 0 0 1px var(--c) inset;background:color-mix(in srgb,var(--c) 8%,#fff);}
+.ky-rc.is-dim{opacity:.4;}
+.ky-c2{position:relative;height:260px;}
+/* 左圖右表放不下（內容區 < 900px）→ 上下排，表格不被截 */
+@container (max-width:900px){
+  .ky-mid{grid-template-columns:minmax(0,1fr);}
+}
+@media (max-width:760px){
+  .ky-cards{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .ky-p-tbl{overflow-x:auto;}   /* 手機：表格比面板寬時在面板內左右捲，不截字 */
+  .ky-tr-h{font-size:18px;}
+}
