@@ -10648,7 +10648,15 @@ function _kpiMoPlusCost(ms,month){
 }
 const _KPI_AUTO_STATUS={write:['會寫入','km-au-w'],same:['相同，不寫','km-au-s'],keep:['已手填，不覆蓋','km-au-s'],wait:['等上傳','km-au-x'],reupload:['需重新上傳對帳單','km-au-x']};
 // 有黃色警示的列（MO+ 商品成本：缺成本／未建檔品號／舊月份沒有未建檔統計）→ 預設不勾
-function _kpiAutoWarn(it){return !!((it.warn&&it.warn.length)||(it.unreg&&it.unreg.n)||it.unregMissing||it.warnNote);}
+function _kpiAutoWarn(it){return !!((it.warn&&it.warn.length)||(it.unreg&&it.unreg.n)||it.unregMissing||it.warnNote||_kpiAutoBigDiff(it));}
+// 通用防呆（2026-10-01）：這格目前已經有值、新值和目前值差 >10% → 黃字「與目前值差 X%」、預設不勾（來源檔有問題、又沒被其他檢查抓到時的最後一道）。
+//   目前格子空著不受限制。目前值是 0、新值不是 0 → 算超過（百分比無法計算，顯示「目前值 0」）。回傳 {pct} 或 null。
+function _kpiAutoBigDiff(it){
+  if(it.status!=='write'||it.val==null||it.cur==null||it.cur==='')return null;
+  const c=Number(it.cur),v=Number(it.val);if(!Number.isFinite(c)||!Number.isFinite(v))return null;
+  if(c===0)return v===0?null:{pct:null};
+  const p=(v-c)/Math.abs(c);return Math.abs(p)>0.10?{pct:p}:null;
+}
 // 勾選改變 → 更新「會寫入 N 格」與確認鈕文字
 function kpiAutoChk(){
   const n=document.querySelectorAll('.km-au-chk:checked').length;
@@ -10674,6 +10682,7 @@ function _kpiAutoPreviewHtml(month,plan){
         <table class="km-au-warn-tbl"><thead><tr><th>品號</th><th class="km-n">數量</th></tr></thead><tbody>${it.unreg.list.map(w=>`<tr><td>${_kpiEscAttr(w.sku)}</td><td class="km-n">${fmtN(w.qty)}</td></tr>`).join('')}</tbody></table></td></tr>`:'')
       +(it.unregMissing?`<tr class="km-au-warn"><td></td><td></td><td colspan="6"><div class="km-au-warn-t">⚠ 未建檔統計：需重傳對帳明細（這個月的對帳明細是舊版上傳的，沒有存「不在商品主檔的品號」）</div></td></tr>`:'')
       // 通用黃字：warnNote 預設不勾（例：蝦皮廣告費資料天數不足）；hintNote 只提示、照樣勾（例：蝦皮上下半月合計和整月差 >3%，仍以整月為準）
+      +(_kpiAutoBigDiff(it)?(()=>{const b=_kpiAutoBigDiff(it);return `<tr class="km-au-warn"><td></td><td></td><td colspan="6"><div class="km-au-warn-t">⚠ 與目前值差 ${b.pct==null?'—（目前值 0）':(b.pct>0?'+':'')+(b.pct*100).toFixed(1)+'%'}（差超過 10%，預設不寫；確認來源沒問題再勾）</div></td></tr>`;})():'')
       +((it.warnNote||it.hintNote)?`<tr class="km-au-warn"><td></td><td></td><td colspan="6"><div class="km-au-warn-t">⚠ ${_kpiEscAttr(it.warnNote||it.hintNote)}</div></td></tr>`:'');
   }).join('');
   const c=plan.checks;
@@ -10738,16 +10747,24 @@ async function kpiMomoAutoFill(){
 //   訂單數、各項費用、物流運費：不帶入（淨利表沒有訂單層資料）。手續費＝KPI_GROUPS.shopee.autoFill 自動算、不帶入。
 //   快照存 snapshots.{月}.preAutofillShopee（MOMO 已占用 preAutofill、而且只存第一次 → 共用會存不到蝦皮的舊值），還原用 __kpiShopeeRestore。
 const KPI_SHOPEE_PLATFORM={'好麻吉':'生活好麻吉','玩樂':'玩樂盒子','維克':'維克生活','森之旅':'森之旅'};
-function _kpiShopeeDataLoaded(){try{return !!(window.__loadedSubGroups&&window.__loadedSubGroups.has('shopee'))&&lsHasAny('好麻吉');}catch{return false;}}
+// profits collection 到了沒：記憶體裡有任何蝦皮店的「整月檔」key（ec|店|YYYY/MM|full）。
+//   ⚠ 不能用 lsHasAny：archive doc／app/profit 也有 ec|店|… 的 key（只有上下半月），profits 還沒到就會誤判成已載入 → 每個月都變「等上傳」。
+function _kpiShopeeDataLoaded(){
+  try{
+    if(!(window.__loadedSubGroups&&window.__loadedSubGroups.has('shopee')))return false;
+    const shops=KPI_GROUPS.find(g=>g.key==='shopee').shops;
+    return Object.keys(Store._profitMem||{}).some(k=>/^ec\|[^|]+\|\d{4}\/\d{2}\|full$/.test(k)&&shops.includes(k.split('|')[1]));
+  }catch{return false;}
+}
 async function _kpiEnsureShopeeData(month){
   try{if(typeof window.__loadShopeeSubs==='function')window.__loadShopeeSubs();}catch{}
   try{if(typeof window.__loadArchiveSubs==='function')window.__loadArchiveSubs();}catch{}
-  const t0=Date.now(),ym=month.replace('-','/');
-  while(Date.now()-t0<15000){
-    if(lsHasAny('好麻吉')&&(lsLoad('好麻吉',ym,'full')||Date.now()-t0>3000))return true;
+  const t0=Date.now();
+  while(Date.now()-t0<20000){
+    if(_kpiShopeeDataLoaded())return true;
     await new Promise(r=>setTimeout(r,300));
   }
-  return lsHasAny('好麻吉');
+  return _kpiShopeeDataLoaded();
 }
 function _kpiShopeeProfitSum(doc){
   if(!doc||!Array.isArray(doc.built))return null;
@@ -10759,7 +10776,12 @@ function _kpiShopeeAdsDays(shop,month){
   const p=plats.find(x=>x&&x.name===KPI_SHOPEE_PLATFORM[shop]);
   const [y,mo]=month.split('-').map(Number),total=new Date(y,mo,0).getDate();
   if(!p)return{sum:null,days:0,total,missing:true};
-  let sum=0,days=0;Object.keys(p.dailyAdSpend||{}).forEach(d=>{if(d.slice(0,7)!==month)return;const v=p.dailyAdSpend[d];if(v==null||v==='')return;days++;sum+=Number(v)||0;});
+  // 資料天數：那天有廣告費紀錄，或有營收紀錄（有營收、沒廣告費＝當天 0 元廣告費）都算有資料；兩者都沒有才算缺
+  const has=v=>!(v==null||v==='');const ad=p.dailyAdSpend||{},rv=p.daily||{};
+  let sum=0,days=0;
+  new Set(Object.keys(ad).concat(Object.keys(rv)).filter(d=>d.slice(0,7)===month)).forEach(d=>{
+    if(has(ad[d])){days++;sum+=Number(ad[d])||0;}else if(has(rv[d]))days++;
+  });
   return{sum,days,total};
 }
 function _kpiShopeeAutoPlan(month,row){
@@ -10792,9 +10814,9 @@ function _kpiShopeeAutoPlan(month,row){
     });
     {
       const it=base('ads'),a=_kpiShopeeAdsDays(shop,month);
-      if(a.missing||!a.days)Object.assign(it,{status:'wait',note:'等上傳：首頁沒有這個月的每日廣告費'});
+      if(a.missing||!a.days)Object.assign(it,{status:'wait',note:'等上傳：首頁這個月沒有每日營收／廣告費紀錄'});
       else Object.assign(it,{status:'write',val:Math.round(a.sum),src:'platforms-ads:'+month,
-        comp:'首頁每日廣告費加總，資料天數 '+a.days+' / '+a.total,
+        comp:'首頁每日廣告費加總，資料天數 '+a.days+' / '+a.total+'（有營收沒廣告費的日子算 0 元）',
         warnNote:a.days<a.total?'廣告費資料天數 '+a.days+' / '+a.total+'（不足，預設不寫；補齊首頁每日廣告費後再帶入）':null});
       push(it);
     }
@@ -10824,8 +10846,10 @@ async function kpiShopeeAutoFill(){
   const month=_kpiYM();
   if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法修改資料','error');return;}
   const btn=document.getElementById('km-au-btn');if(btn){btn.disabled=true;btn.textContent='載入淨利表資料中…';}
-  await _kpiEnsureShopeeData(month);
-  if(btn){btn.disabled=false;}
+  const ready=await _kpiEnsureShopeeData(month);
+  if(btn){btn.disabled=false;btn.textContent='從淨利表帶入 '+month.replace('-','/');}
+  // 淨利表資料沒載到 → 不開預覽（否則每一格都會誤顯示「等上傳」）
+  if(!ready){if(typeof showToast==='function')showToast('淨利表資料還沒載入完成（網路慢？），請稍後再按一次','error',6000);return;}
   const plan=_kpiShopeeAutoPlan(month);
   const writes=plan.items.filter(x=>x.status==='write');
   const row0=getOrCreateKpiRow(month);
