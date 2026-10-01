@@ -24562,7 +24562,7 @@ function pchomeEstimateUnreconFees(month, shop){
   var revThis=orders.reduce(function(a,o){return a+(Number(o['成本小計'])||0);},0)/1.05;   // 本期營收（未稅）＝Σ成本小計÷1.05
   var smsShip=orders.reduce(function(a,o){ return a+(((Number(o['應出貨'])||0)>0)?1:0); },0);   // 出貨列數＝應出貨>0 的訂單列（計費筆數，×1 元含稅）
   var sms含稅=smsShip;   // 退貨物流筆數＝0（訂單明細無此資料）
-  // 近 3 期已對帳月（有貼對帳單 D）；排除本月；新→舊
+  // 近 3 期已對帳月（有上傳對帳單 D）；排除本月；新→舊
   var rm=Object.keys(recon).filter(function(m){ return m!==month && recon[m] && recon[m].對帳單 && recon[m].對帳單.D!=null; }).sort().reverse().slice(0,3);
   var fixList=[], mktR=[], retR=[], penR=[];
   rm.forEach(function(m){
@@ -24662,48 +24662,7 @@ function pchomeBuildMarketingSeg(seg){
 // (D) 子項代號→名稱（fallback；解析時優先用貼上內容自帶的品名）。D1-D15 完整 15 項，CSV 只有其中 7 項有對應段。
 var PCHOME_D_LABELS={ D1:'退貨物流費',D2:'罰金',D3:'分攤運費',D4:'行銷獎勵金(PChome開發票)',D5:'簡訊費',D6:'包材費',D7:'倉儲費',D8:'倉庫作業處理費',D9:'進貨退出運費',D10:'分攤安裝費',D11:'產品責任險',D12:'專案獎勵金(PChome開發票)',D13:'廣告費',D14:'加值服務',D15:'第三方廣告代收款' };
 var _pchomePastePreview={};   // {shop: 解析結果}（解析後暫存，按儲存才寫入 store；不直接落地）
-// ── 對帳單頁面整塊貼上 → 解析 (A)(B)(C)(D)(F) 主值 + (D1..D15) 子項 + (A1/A2) 轉單/寄倉拆分 + 本期期別 ──
-//   真實樣本從 PChome 後台複製：多數列是「(X) 標籤 值…」單行；但 (A1)/(A2) 是【多行】——代號那行只有標籤、
-//   值在後面數行（先所有子項標籤、再依序對應的值、最後一堆按鈕文字雜訊）。所以：
-//     • 代號行上若有數字/破折號 → 單行列，取該行第一個值（'---'/'—'=0；逗號去掉；label 尾巴多「公式」不影響）。
-//     • 代號行上沒有值 → 多行列：往後掃到下一個代號前，前段非數字 token＝子項標籤、緊接的連續數字/破折號＝各子項值、
-//       其餘（天天/檢查/申訴…無阿拉伯數字）＝雜訊丟掉；主值＝各子項值加總，子項另存（(A1) 轉單/寄倉＝日後賣場營收拆分依據）。
-//   期別行「本期(YYYY/MM/DD~YYYY/MM/DD)」：全形引號包著、~ 前後可有可無空白都吃。
-function pchomeParseStatement(text){
-  var lines=String(text||'').split(/\r?\n/);
-  var period=null;
-  for(var pi=0;pi<lines.length && !period;pi++){ var pm=lines[pi].match(/本期\s*[（(]\s*(\d{4}\/\d{1,2}\/\d{1,2})\s*[~～\-－]\s*(\d{4}\/\d{1,2}\/\d{1,2})\s*[）)]/); if(pm) period={start:pm[1],end:pm[2]}; }
-  // 代號列：括號版「（D11）標題」照舊；放寬也吃裸碼「D11⇥標題」（複製過程括號常掉；裸碼要求緊接 tab 界定，避免誤吃 DEBWN3 之類）。
-  var CODE_RE=/^\s*(?:[（(]\s*([A-Fa-f]\s*\d{0,2})\s*[）)]|([A-Fa-f]\d{0,2})(?=\t))\s*(.*)$/;
-  var isNum=function(t){ return /^-?[\d,]+(?:\.\d+)?$/.test(t); };
-  var isDash=function(t){ return /^[-—─]+$/.test(t); };
-  var toNum=function(t){ return Number(String(t).replace(/,/g,'')); };
-  // 先蒐集所有代號列（含所在行號），多行列要靠「下一個代號行」界定範圍
-  var starts=[];
-  lines.forEach(function(ln,idx){ var m=ln.match(CODE_RE); if(m) starts.push({code:(m[1]||m[2]).replace(/\s+/g,'').toUpperCase(), rest:(m[3]||''), idx:idx}); });
-  var codes={}, labels={}, subitems={}, order=[];
-  starts.forEach(function(row, ri){
-    var code=row.code;
-    var lineToks=row.rest.split('\t').map(function(x){return x.trim();}).filter(function(x){return x!=='';});
-    var label=lineToks.length?lineToks[0]:'';
-    var val=null;
-    for(var i=1;i<lineToks.length;i++){ var t=lineToks[i]; if(isNum(t)){ val=toNum(t); break; } if(isDash(t)){ val=0; break; } }   // 跳過 label(0)，找該行第一個值
-    if(val==null){
-      // 多行列：往後掃到下一個代號前
-      var endIdx=(ri+1<starts.length)?starts[ri+1].idx:lines.length, toks=[];
-      for(var j=row.idx+1;j<endIdx;j++){ String(lines[j]).split('\t').forEach(function(x){ x=x.trim(); if(x!=='') toks.push(x); }); }
-      var subLabels=[], subVals=[], k=0;
-      while(k<toks.length && !isNum(toks[k]) && !isDash(toks[k])){ subLabels.push(toks[k]); k++; }   // 前段＝子項標籤
-      while(k<toks.length && (isNum(toks[k])||isDash(toks[k]))){ subVals.push(isDash(toks[k])?0:toNum(toks[k])); k++; }   // 緊接＝各子項值
-      if(subVals.length){ val=subVals.reduce(function(s,x){return s+x;},0); }   // 主值＝子項加總
-      if(subLabels.length){ subitems[code]=subLabels.map(function(l,ii){ return {label:l, v:(ii<subVals.length?subVals[ii]:null)}; }); }
-    }
-    if(val==null) return;   // 真的抓不到 → 不放進 codes（不猜）
-    codes[code]=val; labels[code]=label||PCHOME_D_LABELS[code]||''; if(order.indexOf(code)<0) order.push(code);
-  });
-  return { codes:codes, labels:labels, subitems:subitems, order:order, period:period };
-}
-// 對帳單 .htm 上傳解析（真實檔權威來源；比貼上文字可靠——括號在複製時常掉）。輸出格式與 pchomeParseStatement 相容 + 多回 untax/tax（交叉檢查）。
+// 對帳單 .htm 上傳解析（真實檔權威來源、唯一解析路徑；整塊貼上解析已移除）。輸出 codes/labels/subitems/order/period + 多回 untax/tax（交叉檢查）。
 //   結構（見 docs §4）：單一 table.table_box；代號在 span.s_parenthesis（同 class 也用在「含稅/寄倉商品」等非代號 → 用 ^[A-F]\d{0,2}$ 篩）；
 //   金額＝該列最後一個 td；(A1)/(A2) 用 rowspan、續列無代號 span 累加到上一子碼；未稅/稅額/期間在 table 外（ul.right / ul.info_box）。
 function pchomeParseStatementHtm(html){
@@ -25571,10 +25530,10 @@ function pchomeReconFile(shop,e){
 // 金額格式照 momo momoMoney：$ 前綴、四捨五入到整數、千分位、負數 -$X（跨平台一致）。⚠ 只顯示層四捨五入；計算層一律保留完整精度，合計由完整精度加總後才 round（逐列相加與合計差 ±1 屬正常）。
 function pchomeMoney(n){ if(n==null||(typeof n==='number'&&!isFinite(n))) return '—'; var r=Math.round(Number(n)); return (r<0?'-$':'$')+Math.abs(r).toLocaleString(); }
 function pchomeNum(n){ return (n==null||!isFinite(Number(n)))?'—':Math.round(Number(n)).toLocaleString(); }   // 件數等純數字（無 $）
-// ── 對帳單數字：整塊貼上解析（主）＋解析後可修正（副）──
+// ── 對帳單數字：.htm 上傳解析（主）＋解析後可修正（副）──（整塊貼上解析已移除，.htm 取代；見 docs）
 //   CSV 明細不完整（(D5)簡訊費等 8 項無段，docs §2/§5）→ 以對帳單「頁面」為準。使用者已有頁面、不該手打：
-//   貼上整塊表格 → 按「解析」→ 解析 (A)(B)(C)(D)(F)＋(D1..D15) 子項＋本期期別，顯示結果供確認 → 按「儲存」才寫入。
-//   (A)-(F) 五欄保留為「解析後可修正」；(D) 子項供費用卡顯示完整 (D) 組（不再只有 CSV 那幾段）。含稅口徑。跟帳務月 snapshot 存。
+//   上傳對帳單 .htm → 解析 (A)(B)(C)(D)(F)＋(D1..D15) 子項＋本期期別，顯示結果供確認 → 按「儲存」才寫入。
+//   (A)-(F) 五欄保留為「解析後可修正」＋可純手動輸入；(D) 子項供費用卡顯示完整 (D) 組。含稅口徑。跟帳務月 snapshot 存。
 function pchomeReconManualCard(shop, latest, csvHuo, csvFees){
   var af=(latest&&latest.對帳單)||{};
   var nz=function(x){ return (typeof x==='number'&&isFinite(x))?x:null; };
@@ -25603,13 +25562,11 @@ function pchomeReconManualCard(shop, latest, csvHuo, csvFees){
   var srcTag=af.來源==='paste'?'<span style="color:#059669;font-size:11px">（目前值來自貼上解析）</span>':(af.更新時間?'<span style="color:#9ca3af;font-size:11px">（手動輸入）</span>':'');
   return '<div style="border:1px solid #eee;border-radius:10px;padding:12px;margin-top:12px">'
     +'<div style="font-weight:600;margin-bottom:2px">對帳單數字（頁面 (A)(B)(C)(D)(F)）'+srcTag+'</div>'
-    +'<div style="font-size:11px;color:#6b7280;margin-bottom:8px">建議<b>上傳對帳單 .htm</b>（最可靠）；或把對帳單頁面表格整塊複製貼下面按「解析」。兩者都只<b>預覽</b>、確認無誤再按「儲存」才寫入。「---」視為 0。含稅。</div>'
+    +'<div style="font-size:11px;color:#6b7280;margin-bottom:8px"><b>上傳對帳單 .htm</b>（PChome 對帳單頁面「另存 .htm」）自動解析 (A)-(F)＋(D) 明細＋期間，只<b>預覽</b>、確認無誤再按「儲存」才寫入；也可直接在下方欄位手動輸入。「---」視為 0。含稅。</div>'
     +'<div style="margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
       +'<label class="pf-pchome-btn" style="cursor:pointer;display:inline-block">⬆ 上傳對帳單 .htm<input type="file" accept=".htm,.html" style="display:none" onchange="pchomeStatementHtmFile(\''+shop+'\',this)"></label>'
       +'<span style="font-size:11px;color:#9ca3af">PChome 對帳單頁面「另存 .htm」上傳 → 自動解析 (A)-(F)＋(D) 明細＋期間，並跑期別／未稅稅額／(F) 驗算檢查</span>'
     +'</div>'
-    +'<textarea id="pchome-paste-'+shop+'" rows="3" placeholder="（備案）從對帳單頁面整塊複製貼上（含「編號 項目 應付金額…」那幾列與「本期(…~…)」）" style="width:100%;border:1px solid #d1d5db;border-radius:5px;padding:6px 8px;font-size:12px;box-sizing:border-box;font-family:monospace"></textarea>'
-    +'<div style="margin:6px 0 10px;display:flex;gap:10px;align-items:center"><button class="pf-pchome-btn" onclick="pchomeReconParsePaste(\''+shop+'\')">解析</button><span style="font-size:11px;color:#9ca3af">解析只預覽、不寫入；確認後按下方「儲存」才存</span></div>'
     +'<div id="pchome-paste-preview-'+shop+'"></div>'
     +'<div style="font-size:11px;color:#6b7280;margin:10px 0 4px">解析後可在此修正（留空＝未填、不猜）：</div>'
     +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
@@ -25619,7 +25576,7 @@ function pchomeReconManualCard(shop, latest, csvHuo, csvFees){
     +'<div style="margin-top:8px;display:flex;gap:10px;align-items:center"><button class="pf-pchome-btn" onclick="pchomeReconManualSave(\''+shop+'\')">儲存對帳單數字</button><span id="pchome-af-msg-'+shop+'" style="font-size:12px"></span></div>'
     +chipHtml+'</div>';
 }
-// 上傳/貼上解析的五道檢查（預覽與存檔共用同一份判斷，單一真相）：
+// .htm 上傳解析的五道檢查（預覽與存檔共用同一份判斷，單一真相）：
 //   1. 期間一致性（對帳單 vs 編輯帳務月 vs CSV 對帳明細期間）— 不合 = 硬擋（9/21 錯期寫入事故的直接防線）
 //   3. 未稅＋稅額 === (A) — 免費的解析正確性驗證
 //   4. (F) 驗算 (A)−(B)−(C)−(D) === (F) — 不合最可能解析錯
@@ -25666,15 +25623,7 @@ function pchomeReconPastePreviewHTML(shop, parsed){
     +'<div style="margin-top:6px"><b>(D) 子項</b>（'+dcodes.length+' 項，合計 '+pchomeMoney(dsum)+'）<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px"><tbody>'+drows+'</tbody></table></div>'
     +'</div>';
 }
-function pchomeReconParsePaste(shop){
-  var ta=document.getElementById('pchome-paste-'+shop); if(!ta) return;
-  var prevBox=document.getElementById('pchome-paste-preview-'+shop);
-  if(!ta.value.trim()){ if(prevBox) prevBox.innerHTML='<div style="color:#dc2626;font-size:12px">貼上內容是空的。請把對帳單頁面表格整塊複製貼上。</div>'; return; }
-  var parsed=pchomeParseStatement(ta.value);
-  _pchomePastePreview[shop]=parsed;
-  ['A','B','C','D','F'].forEach(function(code){ var el=document.getElementById('pchome-af-'+code+'-'+shop); if(el && parsed.codes[code]!=null) el.value=parsed.codes[code]; });   // 解析後填入可修正欄（未解析到的不動、不猜）
-  if(prevBox) prevBox.innerHTML=pchomeReconPastePreviewHTML(shop, parsed);
-}
+
 // 對帳單 .htm 上傳 → 解析 → 填入 (A)-(F) 欄 + 預覽（含五道檢查）；只暫存不寫入，按「儲存」才落地（沿用 pchomeReconManualSave 的期別硬擋 + F confirm + 既有覆蓋/同步保護）。
 function pchomeStatementHtmFile(shop, inputEl){
   var f=inputEl&&inputEl.files&&inputEl.files[0]; if(!f) return;
@@ -25710,7 +25659,7 @@ function pchomeReconManualSave(shop){
     if(Math.abs(fc-F)>0.5 && !confirm('(F) 驗算不符：(A)−(B)−(C)−(D) = '+pchomeMoney(fc)+'，但 (F) = '+pchomeMoney(F)+'（差 '+pchomeMoney(F-fc)+'）。\n最可能是解析或輸入有誤。確定仍要寫入嗎？')){ if(msg){ msg.textContent='已取消寫入（(F) 驗算不符）。'; msg.style.color='#d97706'; } return; } }
   var obj={A:A,B:B,C:C,D:D,F:F,備註:String(note||''),更新時間:Date.now()};
   var mismatch=false;
-  if(pv){   // 這次有貼上解析 → 帶入 (D) 子項明細 + (A1/A2) 轉單寄倉拆分 + 期別 + 來源
+  if(pv){   // 這次有 .htm 解析 → 帶入 (D) 子項明細 + (A1/A2) 轉單寄倉拆分 + 期別 + 來源
     var dmap={}; Object.keys(pv.codes).forEach(function(code){ if(/^D\d+$/.test(code)) dmap[code]={v:pv.codes[code], label:(pv.labels[code]||PCHOME_D_LABELS[code]||'')}; });
     obj.明細=dmap; obj.期間=pv.period||null; obj.來源='paste';
     if(pv.subitems && Object.keys(pv.subitems).length) obj.子項=pv.subitems;   // (A1)一般轉單/寄倉訂單拆分 → 日後賣場營收拆分依據（現在先存）
@@ -25723,7 +25672,7 @@ function pchomeReconManualSave(shop){
   _pchomePastePreview[shop]=null;   // 清掉暫存（已落地）
   pchomeRenderSub(shop);            // 整段重繪（顯示驗算結果 + 完整 (D) 費用卡），比照上傳流程
   var m2=document.getElementById('pchome-af-msg-'+shop);   // 重繪後的新元素
-  if(m2){ m2.textContent='對帳單數字已存（'+key+' 期，snapshot 覆蓋）。'+(mismatch?' ⚠ 注意：貼上的對帳單期別與 CSV 帳務月不同，請確認沒貼錯期。':''); m2.style.color=mismatch?'#dc2626':'#059669'; }
+  if(m2){ m2.textContent='對帳單數字已存（'+key+' 期，snapshot 覆蓋）。'+(mismatch?' ⚠ 注意：對帳單期別與 CSV 帳務月不同，請確認沒選/傳錯期。':''); m2.style.color=mismatch?'#dc2626':'#059669'; }
 }
 function pchomeRenderReconInfo(shop){
   var box=document.getElementById('pchome-recon-info-'+shop); if(!box) return;
@@ -25752,19 +25701,19 @@ function pchomeRenderReconInfo(shop){
   var csvFeesD=feeSegsD.reduce(function(t,s){ return t+(Number(s.總額)||0); },0);   // (D) 差額只減 (D) 組
   // 安全網：CSV 出現對照表未知的段且有值 → 不靜默吞掉（PChome 可能新增段、或名稱改動導致對應失效）
   var unknownSegs=segs.filter(function(s){ return (Number(s.總額)||0)>0 && !pchomeSegGroup(s.對帳項目); });
-  // 費用卡優先顯示「對帳單貼上解析」的完整 (D) 組（含 CSV 無段的簡訊費等）；沒貼上過才退回只顯示 CSV 有明細的 (D) 段。
+  // 費用卡優先顯示「對帳單 .htm 解析」的完整 (D) 組（含 CSV 無段的簡訊費等）；沒上傳過才退回只顯示 CSV 有明細的 (D) 段。
   var pastedD=(latest.對帳單&&latest.對帳單.明細&&Object.keys(latest.對帳單.明細).length)?latest.對帳單.明細:null;
   var feeRows, feeSrcNote, feeTitle;
   if(pastedD){
     var dks=Object.keys(pastedD).sort(function(a,b){ return Number(a.slice(1))-Number(b.slice(1)); });
     feeRows=dks.map(function(code){ var d=pastedD[code]||{}; return '<tr style="border-top:1px solid #f3f4f6"><td style="padding:4px 8px">'+_momoEsc(d.label||PCHOME_D_LABELS[code]||'')+'<span style="color:#9ca3af"> ('+code+')</span></td><td style="padding:4px 8px;text-align:right">'+pchomeMoney(d.v)+'</td></tr>'; }).join('');
     feeTitle='費用明細（完整 (D) 組，'+_momoEsc(latest.期間||'')+'）';
-    feeSrcNote='完整 (D) 組來自<b>對帳單貼上解析</b>（含 CSV 無區段的 (D5)簡訊費等）。CSV 段僅供逐 SKU 歸屬（如罰金），總額以此為準。';
+    feeSrcNote='完整 (D) 組來自<b>對帳單 .htm 上傳解析</b>（含 CSV 無區段的 (D5)簡訊費等）。CSV 段僅供逐 SKU 歸屬（如罰金），總額以此為準。';
   }else{
     feeRows=fees.length? fees.map(function(s){ return '<tr style="border-top:1px solid #f3f4f6"><td style="padding:4px 8px">'+_momoEsc(s.對帳項目)+'<span style="color:#9ca3af"> ('+pchomeSegGroup(s.對帳項目)+')</span></td><td style="padding:4px 8px;text-align:right">'+s.總額+'</td></tr>'; }).join('')
       : '<tr><td colspan="2" style="padding:6px 8px;color:#9ca3af">本期 CSV (D) 組費用段皆無值</td></tr>';
     feeTitle='費用明細（CSV (D) 段，'+_momoEsc(latest.期間||'')+'）';
-    feeSrcNote='目前只顯示 <b>CSV 有明細</b>的 (D) 段；<b>貼上對帳單解析</b>後會顯示完整 (D) 組（含簡訊費等無區段項）。';
+    feeSrcNote='目前只顯示 <b>CSV 有明細</b>的 (D) 段；<b>上傳對帳單 .htm 解析</b>後會顯示完整 (D) 組（含簡訊費等無區段項）。';
   }
   var feeCard='<div style="border:1px solid #eee;border-radius:10px;padding:12px;margin-top:12px">'
     +'<div style="font-weight:600;margin-bottom:6px">'+feeTitle+'</div>'
@@ -25801,7 +25750,7 @@ function pchomeRenderReconInfo(shop){
 //   單位＝帳務月 snapshot；本賣場訂單貨款段逐「廠商料號」彙總。營收未稅=應付金額/1.05；成本=product.cost（建檔凍結值）×銷量；
 //   淨利=營收未稅−成本−費用未稅；成本 null → 該列淨利/淨利率顯「—」。加權淨利率＝總淨利÷總營收（照 momo、含缺成本列營收 → 缺成本時偏高、由 missBanner 警示）。歸期依單號確認日（見 docs §4；此 snapshot 內各列已屬此帳務月）。
 //   費用：罰金(有商品編號)歸 SKU（商品編號→料號 map，罰金段本身無廠商料號）；其他(D)組無 SKU 明細→未分攤；
-//   未分攤(D) 有貼上解析用對帳單(D)（完整、含簡訊費等 8 項）、否則退回 CSV(D)組加總(標不完整)。不按營收比例分攤罰金。
+//   未分攤(D) 有上傳解析用對帳單(D)（完整、含簡訊費等 8 項）、否則退回 CSV(D)組加總(標不完整)。不按營收比例分攤罰金。
 // 上架判定：商品狀態以「上架」開頭（實測值有「上架」「上架(啟用)」）＝上架；其餘（下架/停用…）＝已下架。無主檔/無狀態（有售但不在清單）→ 當上架。
 function pchomeIsActive(p){ var s=String(p&&p.商品狀態||'').trim(); return !s || /^上架/.test(s); }
 function pchomeProfitCalc(entry, shop){
@@ -26570,10 +26519,10 @@ function pchomeProfitTabHTML(shop){
   // 期別控制列（.mm-row + .mm-field + .mm-sel；狀態 slot 放本期未完 chip）
   var monthOpts=months.slice().reverse().map(function(m){ return '<option value="'+esc(m)+'"'+(m===key?' selected':'')+'>'+esc(m)+' 期</option>'; }).join('');
   var feeChip=(calc.feeState==='已對帳')
-    ? '<span class="mm-status ok" title="'+esc('費用以貼上的對帳單 (D) 為權威值。'+(act!=null?'簡訊費實際 (D5) '+pchomeMoney(act)+'／逐筆推算 '+e.推算+' 筆（出貨列 '+e.列數+'＋退貨物流 '+e.退貨物流筆數+'）'+pchomeMoney(e.含稅)+'（差 '+pchomeMoney(act-e.含稅)+'）':'（對帳單未帶 D5 明細）'))+'">已對帳</span>'
+    ? '<span class="mm-status ok" title="'+esc('費用以上傳的對帳單 (D) 為權威值。'+(act!=null?'簡訊費實際 (D5) '+pchomeMoney(act)+'／逐筆推算 '+e.推算+' 筆（出貨列 '+e.列數+'＋退貨物流 '+e.退貨物流筆數+'）'+pchomeMoney(e.含稅)+'（差 '+pchomeMoney(act-e.含稅)+'）':'（對帳單未帶 D5 明細）'))+'">已對帳</span>'
     : (calc.feeState==='估算'
-      ? '<span class="mm-status no" title="對帳單未貼上；未對帳月費用為估算（固定費按已過天數比例＋簡訊費精算＋行銷/退貨物流/罰金近期比率）→ 到月對帳貼對帳單轉權威值">未對帳</span>'
-      : '<span class="mm-status no" title="對帳單未貼上；費用＝CSV(D)實際＋簡訊費推算（即時值，誤差個位數元）→ 到月對帳貼對帳單轉權威">未對帳</span>');   // 比照 momo 已對帳/未對帳
+      ? '<span class="mm-status no" title="對帳單未上傳；未對帳月費用為估算（固定費按已過天數比例＋簡訊費精算＋行銷/退貨物流/罰金近期比率）→ 到月對帳上傳對帳單 .htm 轉權威值">未對帳</span>'
+      : '<span class="mm-status no" title="對帳單未上傳；費用＝CSV(D)實際＋簡訊費推算（即時值，誤差個位數元）→ 到月對帳上傳對帳單 .htm 轉權威">未對帳</span>');   // 比照 momo 已對帳/未對帳
   var openChip=open?'<span class="mm-status no" title="今天仍在帳務區間內，資料每天會變、不與上期比成長">本期未完</span>':'';
   var ctrl='<div class="mm-row" style="margin-bottom:10px">'+modeToggle
     +'<span class="mm-field"><span class="mm-lbl">帳務月</span><select class="mm-sel" onchange="pchomeSetProfitMonth(\''+shop+'\',this.value)">'+monthOpts+'</select></span>'
@@ -26616,7 +26565,7 @@ function pchomeProfitTabHTML(shop){
             +'到「月對帳」上傳對帳資料即轉<b>權威值</b>。</span>'
           : '<br><span style="font-weight:400">費用估算資料不足。到「月對帳」上傳對帳資料即轉權威值。</span>')
         +'</div>'
-      : '<div class="mm-banner mm-banner-warn">⚠ <b>未對帳</b>（'+esc(key)+'）· 費用＝CSV (D) 實際 ＋ 簡訊推算 <b>'+pchomeMoney(e.含稅)+'</b>（'+e.推算+' 計費筆數×1，已計入合計）→ 到「月對帳」貼上對帳單轉權威值<br><span style="font-weight:400">簡訊費推算＝出貨明細列 '+e.列數+' 筆＋退貨物流 '+e.退貨物流筆數+' 筆，各 ×1 元（是計費筆數不是簡訊封數；一箱一出貨單號、同訂單多序號共用單號）。⚠ 單價 1 元 PChome 未公告、僅單一樣本佐證；取消訂單簡訊不在明細→算不到→推算偏低。<br>⚠ 只在對帳單出現、CSV 沒有的費用（如<b>產品責任險 D11</b>）此時尚未計入 → 費用偏低、<b>淨利可能略偏高</b>；貼上對帳單即補齊。</span></div>');
+      : '<div class="mm-banner mm-banner-warn">⚠ <b>未對帳</b>（'+esc(key)+'）· 費用＝CSV (D) 實際 ＋ 簡訊推算 <b>'+pchomeMoney(e.含稅)+'</b>（'+e.推算+' 計費筆數×1，已計入合計）→ 到「月對帳」上傳對帳單 .htm 轉權威值<br><span style="font-weight:400">簡訊費推算＝出貨明細列 '+e.列數+' 筆＋退貨物流 '+e.退貨物流筆數+' 筆，各 ×1 元（是計費筆數不是簡訊封數；一箱一出貨單號、同訂單多序號共用單號）。⚠ 單價 1 元 PChome 未公告、僅單一樣本佐證；取消訂單簡訊不在明細→算不到→推算偏低。<br>⚠ 只在對帳單出現、CSV 沒有的費用（如<b>產品責任險 D11</b>）此時尚未計入 → 費用偏低、<b>淨利可能略偏高</b>；上傳對帳單 .htm 即補齊。</span></div>');
   var missBanner=(miss>0)?'<div class="mm-banner mm-banner-err">⚠ 有 <b>'+miss+'</b> 個有營收的料號缺成本——其營收已計入、成本未計 → <b>總淨利／加權淨利率偏高（可能高估）</b>；該列逐項淨利/淨利率顯「—」。到「商品同步」補成本即對齊。</div>':'';
   var pnMis=calc.skus.filter(function(x){return x.pnMismatch;});
   var pnBanner=pnMis.length?'<div class="mm-banner mm-banner-err">⚠ 有 <b>'+pnMis.length+'</b> 個料號的商品編號在對帳資料與上架清單不一致：'+pnMis.map(function(x){return esc(x.料號)+'（對帳 '+esc(x.reconPN)+' / 清單 '+esc(x.listPN)+'）';}).join('、')+'。請確認上架清單是否為最新（未靜默挑值，兩邊都列出）。</div>':'';
@@ -26761,7 +26710,7 @@ function pchomeExportExcel(shop){
   }catch(e){ alert('匯出失敗：'+(e&&e.message||e)); }
 }
 Object.assign(window,{ setPChomeShop, pchomeSetSub, pchomeRenderBatch, pchomeBatchSetMode, pchomeAddOptlog, pchomeAddHistory,
-  pchomeBatchSelect, pchomeBatchSearch, pchomeBatchSetFilter, pchomeBatchToggleDisc, pchomeBatchSplitDrag, pchomeEditRecalc, pchomeEditOriginHint, pchomeBatchSubmitEdit, pchomeDeleteProduct, pchomeAddRecalc, pchomeAddOriginChanged, pchomeBatchSubmitAdd, pchomeListingFile, pchomeCostFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeReconFile, pchomeReconManualSave, pchomeReconParsePaste, pchomeStatementHtmFile, pchomeOrderPick, pchomeOrderRemove, pchomeOrderGenerate, pchomeOrderApply, pchomeOrderCancel, pchomeSetProfitMonth, pchomeSetViewMode, pchomeSetCalMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatement, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc, pchomeCalendarCalc, pchomeCalendarMonths,
+  pchomeBatchSelect, pchomeBatchSearch, pchomeBatchSetFilter, pchomeBatchToggleDisc, pchomeBatchSplitDrag, pchomeEditRecalc, pchomeEditOriginHint, pchomeBatchSubmitEdit, pchomeDeleteProduct, pchomeAddRecalc, pchomeAddOriginChanged, pchomeBatchSubmitAdd, pchomeListingFile, pchomeCostFile, pchomeConfirmListingMerge, pchomeCancelListingMerge, pchomeReconFile, pchomeReconManualSave, pchomeStatementHtmFile, pchomeOrderPick, pchomeOrderRemove, pchomeOrderGenerate, pchomeOrderApply, pchomeOrderCancel, pchomeSetProfitMonth, pchomeSetViewMode, pchomeSetCalMonth, pchomeProfitSetSort, pchomeOpenSyncPreview, pchomeConfirmSync, pchomeSyncToggleAll, pchomeSyncUpdateCount, pchomeCloseSyncPreview, pchomeExportExcel, parsePChomeReconcile, pchomeParseStatementHtm, pchomeParseListing, pchomeLoadProducts, pchomeProfitCalc, pchomeCalendarCalc, pchomeCalendarMonths,
   pchomeColToggle, pchomeColDragStart, pchomeColDragOver, pchomeColDragEnter, pchomeColDragLeave, pchomeColDrop, pchomeColDragEnd, pchomeColResetOrder, pchomeColShowAll, pchomeOpenColPicker, pchomeColResizeDrag,
   pchomeTagToggle, pchomeNumAdd, pchomeNumRemove, pchomeNumPendingSync, pchomeClearFilters, pchomeToggleDisc, pchomeOpenFilterPanel, pchomeCloseFilterPanel,
   pchomeOptlogTypeToggle, pchomeOptlogTimeSet, pchomeOptlogBySet, pchomeOptlogSysToggle,
