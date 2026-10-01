@@ -735,6 +735,7 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .mm-uplbl .req{color:#ef4444;font-weight:600;font-size:12px;margin-left:5px;}
 .mm-uplbl .opt{color:#9ca3af;font-weight:500;font-size:12px;margin-left:5px;}
 .mm-uplbl .mm-hint{font-weight:400;margin-top:1px;}
+.mm-hint code{font-family:'DM Mono',monospace;font-size:11px;color:#6b7280;background:#f3f4f6;border-radius:4px;padding:1px 5px;overflow-wrap:anywhere;}
 .mm-code{font-family:'DM Mono',monospace;font-size:11px;color:#6b7280;background:#f3f4f6;border-radius:4px;padding:1px 6px;font-weight:600;}
 .mm-upctl{flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:#6b7280;}
 .mm-upctl input[type=file]{font-size:12px;max-width:210px;font-family:'Noto Sans TC',sans-serif;}

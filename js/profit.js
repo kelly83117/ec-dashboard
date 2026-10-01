@@ -16618,12 +16618,18 @@ function momoRenderProfitBody(shop, tableOnly){
       } else {
         const h=momoHistoricalFeeRate(shop);
         statusChip=`<span class="mm-status no">⚠ 未對帳</span>`;
-        const feeTxt=(h&&h.reliable)
-          ? `費用用近 <b>${h.n}</b> 月均費率 <b>${(h.rate*100).toFixed(1)}%</b> 估算（σ${(h.sd*100).toFixed(1)}pp）`
-          : `費用僅估 <b>6.8%</b>，<b>淨利偏高約 19pp</b>（歷史樣本不足）`;
+        // 橫幅只留一句＋重點；估算明細（費率／退貨率／營收來源）放 title（純文字、"→&quot;、換行&#10;）。
+        const _t=x=>String(x).replace(/"/g,'&quot;');
         const hr=momoHistoricalReturnRate(shop);
-        const costTxt=hr?`、成本按近 ${hr.n} 月均退貨率 <b>${(hr.rate*100).toFixed(1)}%</b> 估回沖（與已對帳月同基準）`:'、成本暫用出貨數量（無退貨率樣本可估）';
-        statusBanner=`<div class="mm-banner mm-banner-warn">⚠ <b>未對帳</b>（${mo}）· 營收 C1105 暫估、${feeTxt}${costTxt} → 到「月對帳」上傳當月對帳單轉權威值</div>`;
+        const tipLines=[
+          (h&&h.reliable)
+            ? `費用＝近 ${h.n} 個月平均費率 ${(h.rate*100).toFixed(1)}%（標準差 ${(h.sd*100).toFixed(1)}pp）`
+            : '費率不可靠：費用暫抓 6.8%，實際通常更高，淨利率約偏高 19 個百分點',
+          hr ? `成本已扣回預估退貨 ${(hr.rate*100).toFixed(1)}%（近 ${hr.n} 個月平均）` : '成本照出貨數量算（尚無退貨資料）',
+          '營收：用 C1105 出貨資料暫估'
+        ].map(_t).join('&#10;');
+        const highWarn=(h&&h.reliable)?'':' <b>淨利率可能偏高</b>';   // 原碼刻意保留的虛高警示，不能只藏在 title
+        statusBanner=`<div class="mm-banner mm-banner-warn" title="${tipLines}">⚠ <b>${String(mo).replace('-','/')} 未對帳，目前皆為估算數字。</b> 到「月對帳」上傳帳單後將自動校正${highWarn}</div>`;
       }
     } else if(momoIsMoPlus(shop) && period){
       // MO+ 狀態晶片：已對帳→沿用甲乙配綠標「✓ 已對帳」（同 mm-status ok 值/樣式/容器）；未結算(E001)→沿用甲配「⚠ 未對帳」。二態互斥（_e001Est 需該期別全未結算）。
@@ -19911,7 +19917,7 @@ function momoRenderUpload(shop){
   const jiaFiles=f.jia||[];
   // ⚠ 甲配運費(C1202) 只在甲配頁收——甲乙運費檔不同(甲 C1202／乙 C1204)，放一起容易傳錯。乙配頁不顯示此格。C1202 解析/儲存不動。
   const jiaRow=(shop==='甲配')?`<div class="mm-uprow">
-    <div class="mm-uplbl">甲配運費 <span class="mm-code">C1202</span><span class="opt">選填·可多檔</span><div class="mm-hint">甲配一般販售的第三方物流＋超商取貨運費（逐訂單）→ 逐SKU分攤進甲配淨利 · 上傳時程：每月 11 號</div></div>
+    <div class="mm-uplbl">甲配運費 <span class="mm-code">C1202</span><span class="opt">選填·可多檔</span><div class="mm-hint">甲配一般販售的第三方物流＋超商取貨運費 · 上傳時程：每月 11 號 · 檔名：<code>[C1202]-超商_YYMM</code>、<code>[C1202]-第三方_YYMM</code></div></div>
     <div class="mm-upctl" style="align-items:flex-start;min-width:0">
       <input type="file" accept=".xlsx,.xls" multiple onchange="momoUploadFile('${shop}','jia',event)" style="flex-shrink:0">
       <div style="min-width:0;flex:1;display:flex;flex-direction:column;gap:3px">
@@ -19930,7 +19936,7 @@ function momoRenderUpload(shop){
     _momoUpYiMonth = (rec && yiMonths.indexOf(rec)>=0) ? rec : (yiMonths.length?yiMonths[yiMonths.length-1]:'');
   }
   const yiRow=showYi?`<div class="mm-uprow">
-      <div class="mm-uplbl">乙配運費 <span class="mm-code">C1204</span><span class="opt">選填</span><div class="mm-hint">乙配寄倉的分攤運費（出貨＋回收，逐SKU）→ 逐SKU分攤進乙配淨利 · 需選寫入月份（檔內無日期）· 上傳時程：每月 11 號</div></div>
+      <div class="mm-uplbl">乙配運費 <span class="mm-code">C1204</span><span class="opt">選填</span><div class="mm-hint">乙配寄倉的分攤運費 · 需選寫入月份 · 上傳時程：每月 11 號 · 檔名：<code>[C1204]_YYMM</code></div></div>
       <div class="mm-upctl" style="flex-wrap:wrap;gap:8px">
         <input type="file" accept=".xlsx,.xls" onchange="momoUploadFile('${shop}','yi',event)">
         <span class="${f.yi?'mm-ok':'mm-muted'}">${f.yi?'✓ '+_momoEsc(f.yi.name):'未選'}</span>${f.yi?`<a onclick="momoUploadRemove('${shop}','yi')" title="移除此檔" style="color:#ef4444;cursor:pointer;font-weight:700">✕</a>`:''}
@@ -19939,7 +19945,7 @@ function momoRenderUpload(shop){
     </div>`:'';
   // 乙配倉租（C1212 寄倉逐SKU倉租）：只在乙配頁收。檔內含「計算日期」→ 自動分月（不需月份下拉）。逐月×SKU精算取代營收攤。
   const rentRow=showYi?`<div class="mm-uprow">
-      <div class="mm-uplbl">乙配倉租 <span class="mm-code">C1212</span><span class="opt">選填</span><div class="mm-hint">乙配寄倉的逐SKU倉租（檔內含計算日期、自動分月）→ 逐月×SKU精算、取代營收比例攤、呆滯品現形 · 寫入前核對＝對帳單寄倉倉租費</div></div>
+      <div class="mm-uplbl">乙配倉租 <span class="mm-code">C1212</span><span class="opt">選填</span><div class="mm-hint">乙配寄倉的逐 SKU 倉租 · 上傳時程：每月 11 號 · 檔名：<code>C1212_020987_YYMM</code></div></div>
       <div class="mm-upctl" style="flex-wrap:wrap;gap:8px">
         <input type="file" accept=".xlsx,.xls" onchange="momoUploadFile('${shop}','rent',event)">
         <span class="${f.rent?'mm-ok':'mm-muted'}">${f.rent?'✓ '+_momoEsc(f.rent.name):'未選'}</span>${f.rent?`<a onclick="momoUploadRemove('${shop}','rent')" title="移除此檔" style="color:#ef4444;cursor:pointer;font-weight:700">✕</a>`:''}
@@ -19947,7 +19953,7 @@ function momoRenderUpload(shop){
     </div>`:'';
   // 乙配寄倉即時庫存（F1102）：只在乙配頁收。帳號級最新快照（by品號），庫存欄改用「可賣量」。檔名含時間戳、可隨時匯出重傳（整包取代）。
   const f1102Row=showYi?`<div class="mm-uprow">
-      <div class="mm-uplbl">乙配寄倉庫存 <span class="mm-code">F1102</span><span class="opt">選填</span><div class="mm-hint">乙配寄倉即時庫存快照（by品號）→ 庫存欄改用「可賣量」(寄倉數−已訂購)、取代莫筆克估算 · 隨時可匯出重傳、整包取代最新一份</div></div>
+      <div class="mm-uplbl">乙配寄倉庫存 <span class="mm-code">F1102</span><span class="opt">選填</span><div class="mm-hint">乙配寄倉即時庫存快照 · 隨時可重傳，整包取代最新一份 · 檔名：<code>F1102_xxxxxxxxxx</code>（下載預設檔名）</div></div>
       <div class="mm-upctl" style="flex-wrap:wrap;gap:8px">
         <input type="file" accept=".xlsx,.xls" onchange="momoUploadFile('${shop}','f1102',event)">
         <span class="${f.f1102?'mm-ok':'mm-muted'}">${f.f1102?'✓ '+_momoEsc(f.f1102.name):'未選'}</span>${f.f1102?`<a onclick="momoUploadRemove('${shop}','f1102')" title="移除此檔" style="color:#ef4444;cursor:pointer;font-weight:700">✕</a>`:''}
@@ -19970,13 +19976,13 @@ function momoRenderUpload(shop){
           ? '此頁可傳（各走各路徑、<b>至少擇一</b>）：<b>C1105</b> 訂單明細→銷量、<b>C1204</b> 乙配運費、<b>C1212</b> 乙配倉租、<b>F1102</b> 乙配寄倉庫存、<b>S1103</b> 排行榜。<br><span class="mm-muted">乙配運費/倉租/庫存都是乙配自己的檔（甲配運費 C1202 請到甲配頁傳、不在此）。只傳運費／倉租／庫存／排行榜<b>不會動銷量</b>。退貨走月對帳頁對帳單。</span>'
           : '此頁可傳（各走各路徑、<b>至少擇一</b>）：<b>C1105</b> 訂單明細→銷量、<b>C1202</b> 甲配運費、<b>S1103</b> 排行榜。<br><span class="mm-muted">C1202 可跨月多檔（依訂編日期自動落到各月）。乙配運費/倉租/庫存請到乙配頁傳。只傳運費／排行榜<b>不會動銷量</b>。退貨走月對帳頁對帳單。</span>'}
       </div>
-      ${fileRow('c1105','訂單商品明細','C1105','any','帳號級訂單明細，依配送類型自動分流至甲配（一般販售）／乙配（寄倉販售）→ 更新兩店銷量 · 上傳時程：每月 1、16 號')}
+      ${fileRow('c1105','訂單商品明細','C1105','any','帳號級訂單明細，依配送類型自動分流至甲配（一般販售）／乙配（寄倉販售）→ 更新兩店銷量 · 上傳時程：每週一 · 檔名：<code>C1105_020987_YYMM</code>')}
       ${f.c1105?`<div class="mm-uprow"><div class="mm-uplbl"></div><div class="mm-upctl"><label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" ${_momoUpKpiOnly?'checked':''} onchange="momoUploadKpiOnly('${shop}',this.checked)">只更新 KPI 訂單數<span class="mm-muted" style="font-size:12px">（不更新淨利表銷量，給舊月份補傳用）</span></label></div></div>`:''}
       ${jiaRow}
       ${yiRow}
       ${rentRow}
       ${f1102Row}
-      ${fileRow('s1103','銷售排行榜','S1103',false,'MOMO 銷售排行榜→瀏覽量／成交率（可單獨上傳補期別）· 上傳時程：每週一')}
+      ${fileRow('s1103','銷售排行榜','S1103',false,'MOMO 銷售排行榜 · 上傳時程：每週一 · 檔名：<code>[S1103]銷售排行榜_YYMM</code>')}
       <button class="mm-btn-primary" style="margin-top:10px" onclick="momoUploadGenerate('${shop}')" ${anyFile?'':'disabled'}>▶ 產生預覽</button>
       <span class="mm-gen-hint">${genHint}</span>
       <div id="momo-up-preview-${shop}" style="margin-top:16px"></div>
