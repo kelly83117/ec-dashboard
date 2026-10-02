@@ -1858,8 +1858,10 @@ Object.assign(App, {
     const pushToCloud = opts && opts.pushToCloud;
     const hasContent = anyInsight || Object.keys(profitCounts).length > 0;
 
-    // 若這次是由「☁ 同步雲端」按鈕觸發的，把工作日誌也一起推到雲端
-    // 避免使用者按完 sync 後切頁還是被提醒「工作日誌未同步」
+    // pushToCloud：把工作日誌也一起推到雲端（洞察表調整彈窗關窗時、淨利表同步時），
+    //   避免切頁時還被提醒「工作日誌未同步」。
+    // ⚠ 過渡做法：ec.dailyProgress 仍是整把覆蓋所有人 × 所有日期（app.js「保護本機未同步的工作日誌」那段註解），
+    //   每推一次都可能蓋掉別人在雲端的工作日誌改動；根治待需求 3 第 3 段改成即時計算。
     if (pushToCloud && typeof Store.pushKeyToCloud === 'function') {
       Store.pushKeyToCloud('ec.dailyProgress').then(() => {
         affectedPersons.forEach(p => window.__dpPendingNames.delete(p));
@@ -1868,7 +1870,7 @@ Object.assign(App, {
     }
 
     if (hasContent && !silent) {
-      const tail = pushToCloud ? '（已連同推給老闆）' : '（記得按「☁ 同步雲端」推給老闆）';
+      const tail = pushToCloud ? '（已連同推給老闆）' : '（尚未推給老闆，請到工作日誌頁按「☁ 同步雲端」）';
       showToast(`已自動更新工作日誌${tail}`, 'info');
     }
   },
@@ -1878,7 +1880,8 @@ Object.assign(App, {
       ? this.filter.insightShop : '玩樂';
     const notesKey = `ec.insight_${currentShop}_notes`;
     const all = Store.get(notesKey, {}) || {};
-    const note = all[code] || { text: '', adjustments: [] };
+    // 彈窗自己的一份拷貝（#269）：不再直接改 Store._mem 裡的物件；寫入成功後換成雲端回來的內容
+    let note = JSON.parse(JSON.stringify(all[code] || { text: '', adjustments: [] }));
 
     // 查商品名稱：先看母表（莫筆克名 > 商品名稱），再 fallback 到本週銷售
     const master = Store.get(`ec.insight_${currentShop}_master`, null);
@@ -1948,41 +1951,99 @@ Object.assign(App, {
         </div>`;
     };
 
-    // 多人協作策略：先 local-only 儲存，不直接推雲端
-    // 使用者按 header 的「☁ 同步雲端」鈕才一次推上去，避免多人同時編輯互蓋
-    const autoSave = () => {
-      const textareaEl = document.getElementById('note-text');
-      const longText = textareaEl ? textareaEl.value.trim() : (note.text || '');
-      note.text = longText;
-      const allNotes = Store.get(notesKey, {}) || {};
-      if (!longText && (!note.adjustments || note.adjustments.length === 0)) {
-        delete allNotes[code];
-      } else {
-        allNotes[code] = { text: longText, adjustments: note.adjustments || [] };
+    // ── #269 存一筆寫一筆 ──
+    // 每個動作都用 updateNoteTx 在交易裡讀雲端上【這個商品】的最新值、只套這一次的操作、只寫回這個商品
+    //   （取代舊的 autoSave：整份通路寫本機待同步、按「☁ 同步雲端」才整份蓋上去，兩人寫同通路會互蓋）。
+    // 同一個彈窗的寫入排成佇列依序送，避免自己的兩個交易互撞重跑。
+    const cloneEntry = (e) => (e ? JSON.parse(JSON.stringify(e)) : null);
+    const lsSafe = () => { try { return window.localStorage; } catch { return { getItem: () => null, setItem() {}, removeItem() {} }; } };
+    const draftKey = `${currentShop}|${code}`;
+    const draftGet = () => _insNoteDraftsLoad(lsSafe())[draftKey] || null;
+    const draftSet = (d) => {
+      const drafts = _insNoteDraftsLoad(lsSafe());
+      if (d) drafts[draftKey] = d; else delete drafts[draftKey];
+      _insNoteDraftsSave(lsSafe(), drafts);
+    };
+    let textBase = note.text || '';   // 長期備註：最後一次從雲端看到的值（compare-and-set 的基準）
+    let textSending = null;           // 送出中的長期備註（避免失焦與關窗各送一次，第二次被自己的第一次判成衝突）
+    let wroteAny = false;             // 這次開窗是否有成功寫入 → 關窗時推一次工作日誌
+    let adding = false;               // 新增送出中
+    let queue = Promise.resolve();
+    const enqueue = (fn) => (queue = queue.then(fn, fn));
+    const writeOps = (ops, kind, ctx) => enqueue(async () => {
+      const api = window.__cloudInsightByShop;
+      const fail = (error) => ({ ok: false, missing: false, changed: false, already: false, entry: null, error, unknown: false });
+      let r;
+      if (!api || typeof api.updateNoteTx !== 'function') r = fail('no-cloud');
+      else {
+        try { r = await api.updateNoteTx(currentShop, code, (e) => _insNoteApplyOps(e, ops)); }
+        catch (e) { console.warn('[洞察表] updateNoteTx 例外', e); r = fail('tx-error:client'); }
       }
-      if (typeof Store.setLocalOnly === 'function') {
-        Store.setLocalOnly(notesKey, allNotes);
-        window.__insightPendingNotes = window.__insightPendingNotes || new Set();
-        window.__insightPendingNotes.add(notesKey);
-        if (typeof window.__updateInsightSyncBadge === 'function') window.__updateInsightSyncBadge();
-      } else {
-        Store.set(notesKey, allNotes); // 後備：本機 API 還沒準備好就走舊路徑
+      // r 是 undefined = 被唯讀 / 本機測試防護擋下（一律 r && r.ok 判斷）
+      const m = _insNoteResultMsg(r, kind, ctx);
+      if (kind === 'text' || kind === 'add+text') textSending = null;
+      if (r && m.refresh) {
+        note = cloneEntry(r.entry) || { text: '', adjustments: [] };
+        if (kind === 'text' || kind === 'add+text') textBase = note.text || '';
       }
+      if (ctx && ctx.addText && !m.keepDraft) draftSet(null);
+      if (r && r.ok && (r.changed || r.already)) {
+        wroteAny = true;
+        // 本機先反映（只動這一個商品）。交易沒有本機先行的 snapshot，稍後抵達的雲端 snapshot 已含這次寫入，直接覆蓋即可
+        try {
+          const notes = Object.assign({}, Store._mem[notesKey] || {});
+          if (r.entry === null) delete notes[code]; else notes[code] = cloneEntry(r.entry);
+          Store._mem[notesKey] = notes;
+        } catch (e) { console.warn('[洞察表] 本機反映失敗', e); }
+        try { this._updateDailyProgressFromAdjustments({ silent: true }); } catch (e) { console.warn('[note->dp]', e); }
+      }
+      if (m.text) showToast(m.text, m.level, m.ms);
+      return { r, m };
+    });
+    // 長期備註有未存變動 → 回傳 text op（帶 base 做 compare-and-set）；沒變動或同一個值已在送出中 → null
+    const takeTextOp = () => {
+      const ta = document.getElementById('note-text');
+      if (!ta) return null;
+      const v = ta.value.trim();
+      if (v === String(textBase).trim() || v === textSending) return null;
+      textSending = v;
+      return { type: 'text', text: v, base: textBase };
+    };
+    const adjDateStr = () => {
+      const d = new Date();
+      return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+    };
+    // 新增 op：沒確認的同一段文字重送時沿用草稿裡的 opId（交易重跑 / 使用者重按都不會重複新增）
+    const buildAddOp = (text) => {
+      const opId = _insNoteDraftOpId(draftGet(), text, _insNoteNewOpId);
+      draftSet({ addText: text, opId });
+      const op = { type: 'add', date: adjDateStr(), text, opId };
+      const by = this.currentUser && this.currentUser.username;
+      if (by) op.by = by;   // 有登入才帶；_insNoteApplyOp 會再 trim、空的不放
+      return op;
     };
 
-    // 給 onCancel 用：關閉前把還在輸入框的文字也存成紀錄，避免遺失
-    const flushPendingInput = () => {
+    // 關窗（✕ / ESC / 關閉鈕）：輸入框還沒送的文字補送一筆新增、長期備註有變動就一起送；彈窗立刻關，結果用 toast 告知。
+    //   佇列裡的寫入都結束後，若這次開窗有任何一次成功寫入 → 推一次工作日誌。
+    //   ⚠ 工作日誌連動是【過渡做法】：ec.dailyProgress 仍是整把覆蓋所有人 × 所有日期
+    //     （app.js「保護本機未同步的工作日誌 ec.dailyProgress」那段註解），每推一次都可能蓋掉別人在雲端的工作日誌改動；
+    //     根治待需求 3 第 3 段改成即時計算。舊的「☁ 同步雲端」按鈕已拆，關窗是唯一的推送時機。
+    const flushOnClose = () => {
       const inp = document.getElementById('note-new-adj');
-      if (!inp) return;
-      const text = inp.value.trim();
-      if (!text) return;
-      const now = new Date();
-      const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
-      note.adjustments = note.adjustments || [];
-      note.adjustments.push(_insAdjNewEntry(dateStr, text, this.currentUser?.username));
-      inp.value = '';
-      autoSave();
-      this.render();
+      const text = (inp && !adding) ? inp.value.trim() : '';
+      const ops = [];
+      const tOp = takeTextOp();
+      if (tOp) ops.push(tOp);
+      if (text) ops.push(buildAddOp(text));
+      const kind = text ? (tOp ? 'add+text' : 'add') : 'text';
+      if (ops.length) writeOps(ops, kind, text ? { addText: text } : null);
+      queue.then(() => {
+        if (wroteAny) {
+          try { this._updateDailyProgressFromAdjustments({ pushToCloud: true }); } catch (e) { console.warn('[close->dp]', e); }
+          this.render();
+          restoreRowOrder();
+        }
+      });
     };
 
     // 開 modal 前記下商品「在容器內」的相對位置（像素值不可靠，重繪後高度會變）
@@ -2066,7 +2127,7 @@ Object.assign(App, {
       width: '560px',
       hideFooter: true,
       enableEsc: true, // 洞察表備註專用：填完按 ESC 直接關閉視窗
-      onCancel: () => { flushPendingInput(); scrollBackToProduct(); }, // X 按鈕 / ESC 關閉
+      onCancel: () => { flushOnClose(); scrollBackToProduct(); }, // X 按鈕 / ESC 關閉
       bodyHtml: `
         <div class="field">
           <label><span>調整紀錄 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">（按 Enter 或「送出」新增，自動加日期、自動儲存。打了字直接關閉也會自動存）</span></span></label>
@@ -2092,6 +2153,10 @@ Object.assign(App, {
         const textareaEl = document.getElementById('note-text');
         const closeBtn = document.getElementById('note-close-btn');
 
+        // 上次沒送成（失敗 / 未確認）的新增 → 預填回輸入框，重送時沿用同一個 opId
+        const draft0 = draftGet();
+        if (draft0 && draft0.addText) newAdjInput.value = draft0.addText;
+
         // 打開即可直接輸入
         setTimeout(() => newAdjInput.focus(), 30);
 
@@ -2100,41 +2165,20 @@ Object.assign(App, {
           bindDelButtons();
           bindEditChips();
         };
+        // 編輯 / 刪除送出中：列表加 .is-busy（css/main.css），停用雙擊與 ✕
+        const isBusy = () => adjList.classList.contains('is-busy');
+        const setBusy = (on) => adjList.classList.toggle('is-busy', on);
 
-        // 刪除單一筆（ref 是 note.adjustments 裡的原物件）。確認框寫出刪的是哪一筆文字。
-        const deleteAdjEntry = (ref) => {
+        // 刪除單一筆。target 是開窗時看到的那一筆內容（快照），交易裡用全欄位比對雲端最新值定位；
+        //   別人剛改過那一筆 → missing、不刪，畫面換成雲端最新內容。確認框寫出刪的是哪一筆文字。
+        const deleteAdjEntry = async (ref) => {
+          if (isBusy()) return;
           if (!confirm(`確定刪除這筆調整紀錄？\n\n${ref.date || '（無日期）'}　${ref.text || ''}`)) return;
-          const r = _insAdjRemove(note.adjustments, ref);
-          if (!r.removed) {
-            showToast('這筆紀錄剛剛被更新過，沒有刪除，請再確認一次', 'error');
-            rebindAdjList();
-            return;
-          }
-          note.adjustments = r.list;
-          // 除了 mutate 本地 `note` 也直接改 _mem[notesKey][code]（避免 subscribe 換過參照後 note 是孤兒）
-          // 這條路是保險：即使 `note` 已經跟 _mem 脫鉤，_mem 仍然反映刪除。
-          //   只用物件參照過濾（重跑也不會多刪）；_mem 若是另一份拷貝（參照對不到）就不動它，
-          //   下面 autoSave 會用 note.adjustments 整筆寫回。
-          try {
-            if (Store._mem[notesKey] && Store._mem[notesKey][code]) {
-              const memAdj = Store._mem[notesKey][code].adjustments || [];
-              const memFiltered = memAdj.filter(a => a !== ref);
-              const memText = Store._mem[notesKey][code].text || '';
-              if (memFiltered.length === 0 && !memText) {
-                delete Store._mem[notesKey][code];
-              } else {
-                Store._mem[notesKey][code].adjustments = memFiltered;
-              }
-            }
-          } catch (e) { console.warn('[洞察表] _mem 直接寫入失敗', e); }
-          adjList.innerHTML = renderAdjList();
-          autoSave();
-          // 重新計算工作日誌摘要 → 該人員的「【洞察表 · 今日調整】」區塊立刻反映本次刪除
-          // silent:true 不跳 toast；不直接推雲端，等使用者按「☁ 同步雲端」一次推完
-          try { this._updateDailyProgressFromAdjustments({ silent: true }); } catch (e) { console.warn('[del->dp]', e); }
-          this.render();
-          bindDelButtons();
-          bindEditChips();
+          setBusy(true);
+          const { m } = await writeOps([{ type: 'remove', target: cloneEntry(ref) }], 'remove');
+          setBusy(false);
+          rebindAdjList();
+          if (m.success) this.render();
         };
 
         // ✕：當天只有一筆 → 確認後刪那一筆；多筆 → 該格展開成逐筆清單，每筆各一顆 ✕，指定刪哪一筆。
@@ -2143,6 +2187,7 @@ Object.assign(App, {
             // renderAdjList 的 HTML 刻意不改（回歸快照要求逐字相同），提示文字在這裡換成新語意
             b.title = '刪除紀錄（同一天有多筆時可指定刪哪一筆）';
             b.addEventListener('click', () => {
+              if (isBusy()) return;
               const entries = _insAdjEntriesOfDate(note.adjustments, b.dataset.delDate);
               if (entries.length === 0) return;
               if (entries.length === 1) { deleteAdjEntry(entries[0]); return; }
@@ -2186,9 +2231,11 @@ Object.assign(App, {
         // 雙擊調整記錄 → 該格每一筆各一個輸入框（一筆就一個），只改被改的那一筆：
         //   date 與原作者 by 不動；有登入者才在被改的那筆加 editedBy / editedAt。
         //   Enter 或焦點離開這一格 = 儲存，Esc = 取消；在同一格的輸入框之間切換不算離開。
+        //   一格一批送出（全有或全無）；target 是開窗時的快照，別人剛改過其中一筆 → 整批不存、畫面換成雲端最新內容。
         const bindEditChips = () => {
           adjList.querySelectorAll('[data-edit-date]').forEach(span => {
             span.addEventListener('dblclick', () => {
+              if (isBusy()) return;
               const entries = _insAdjEntriesOfDate(note.adjustments, span.dataset.editDate);
               if (entries.length === 0) return;
               const box = document.createElement('div');
@@ -2211,19 +2258,22 @@ Object.assign(App, {
               inputs[0].focus();
               inputs[0].select();
               let done = false;
-              const finish = (save) => {
+              const finish = async (save) => {
                 if (done) return; done = true;
                 if (save) {
-                  const r = _insAdjApplyEdits(note.adjustments,
-                    entries.map((ref, i) => ({ ref, text: inputs[i].value })),
-                    this.currentUser?.username, new Date().toISOString());
-                  if (r.missing) {
-                    showToast('這筆紀錄剛剛被更新過，沒有儲存，請再確認一次', 'error');
-                  } else if (r.changed) {
-                    note.adjustments = r.list;
-                    autoSave();
-                    try { this._updateDailyProgressFromAdjustments({ silent: true }); } catch (e) { console.warn('[edit->dp]', e); }
-                    this.render();
+                  const op = {
+                    type: 'edit',
+                    edits: entries.map((ref, i) => ({ target: cloneEntry(ref), text: inputs[i].value })),
+                    at: new Date().toISOString(),   // 編輯一定帶 at；有登入才帶 by（才會寫 editedBy / editedAt）
+                  };
+                  const by = this.currentUser && this.currentUser.username;
+                  if (by) op.by = by;
+                  // 先用彈窗手上的內容判斷有沒有真的改（空字串 / 沒改的略過）→ 都沒改就不送交易
+                  if (_insNoteApplyOp(note, op).changed) {
+                    setBusy(true);
+                    const { m } = await writeOps([op], 'edit');
+                    setBusy(false);
+                    if (m.success) this.render();
                   }
                 }
                 rebindAdjList();
@@ -2240,73 +2290,58 @@ Object.assign(App, {
           });
         };
 
-        let lastCommittedText = '';
-        let lastCommittedAt = 0;
-        const commitAdj = () => {
+        // 新增：送出中送出鈕停用、輸入框唯讀，成功才清空（失敗 / 未確認保留文字與草稿 opId，重按不會重複新增）。
+        //   長期備註有未存變動 → 跟這筆新增合成同一個交易一起寫。
+        let lastFailedText = null;   // 失敗過的文字：失焦時不自動重送（避免每次點別處就跳一次錯誤），按 Enter / 送出才重送
+        const commitAdj = async () => {
           const text = newAdjInput.value.trim();
-          if (!text) return;
-          // 防呆：800ms 內相同文字不重複加入
-          const now = Date.now();
-          if (text === lastCommittedText && (now - lastCommittedAt) < 800) return;
-          lastCommittedText = text;
-          lastCommittedAt = now;
-
-          const d = new Date();
-          const dateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
-          note.adjustments = note.adjustments || [];
-          note.adjustments.push(_insAdjNewEntry(dateStr, text, this.currentUser?.username));
-          adjList.innerHTML = renderAdjList();
-
-          // 視覺確認：輸入框變綠色 + 顯示 ✓ 已加入；0.5 秒後清空換下一筆
-          newAdjInput.style.transition = 'background-color .15s, border-color .15s';
-          newAdjInput.style.background = '#dcfce7';
-          newAdjInput.style.borderColor = '#10b981';
-          const flashTimer = window.__noteFlashTimer;
-          if (flashTimer) clearTimeout(flashTimer);
-          window.__noteFlashTimer = setTimeout(() => {
-            if (newAdjInput && newAdjInput.value.trim() === text) {
-              newAdjInput.value = '';
-            }
-            newAdjInput.style.background = '';
-            newAdjInput.style.borderColor = '';
-            newAdjInput.focus();
-          }, 500);
-
-          autoSave();
-          try { this._updateDailyProgressFromAdjustments({ silent: true }); } catch (e) { console.warn('[add->dp]', e); }
-          this.render();
-          bindDelButtons();
-          bindEditChips();
-          showToast(`✓ 已加入：${text.length > 20 ? text.slice(0, 20) + '…' : text}`, 'success');
+          if (!text || adding) return;
+          adding = true;
+          saveAdjBtn.disabled = true;
+          newAdjInput.readOnly = true;
+          const tOp = takeTextOp();
+          const ops = tOp ? [tOp, buildAddOp(text)] : [buildAddOp(text)];
+          const { m } = await writeOps(ops, tOp ? 'add+text' : 'add', { addText: text });
+          adding = false;
+          saveAdjBtn.disabled = false;
+          newAdjInput.readOnly = false;
+          lastFailedText = m.success ? null : text;
+          if (m.success) {
+            newAdjInput.value = '';
+            // 視覺確認：輸入框閃一下綠色（.is-added，css/main.css）
+            newAdjInput.classList.add('is-added');
+            setTimeout(() => newAdjInput.classList.remove('is-added'), 500);
+            this.render();
+          }
+          rebindAdjList();
+          newAdjInput.focus();
         };
         saveAdjBtn.addEventListener('click', commitAdj);
         newAdjInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') commitAdj(); });
 
-        // 長期備註：失焦 / input 時自動儲存（input 用 debounce 避免每打一字就寫 Store）
-        let textDebounce = null;
-        textareaEl.addEventListener('input', () => {
-          if (textDebounce) clearTimeout(textDebounce);
-          textDebounce = setTimeout(() => { autoSave(); this.render(); }, 400);
-        });
-        textareaEl.addEventListener('blur', () => {
-          if (textDebounce) { clearTimeout(textDebounce); textDebounce = null; }
-          autoSave();
-          this.render();
+        // 長期備註：只在失焦（與關窗）時寫一次（不再每 400ms 寫），compare-and-set：別人剛改過 → 不蓋、提示
+        textareaEl.addEventListener('blur', async () => {
+          const tOp = takeTextOp();
+          if (!tOp) return;
+          const { m } = await writeOps([tOp], 'text');
+          if (m.success) this.render();
         });
 
-        // 額外保護：失焦時也把還沒按 Enter 的文字存起來
+        // 額外保護：失焦時也把還沒按 Enter 的文字存起來（彈窗已關、或這段文字剛失敗過就不自動重送）
+        const modalOpen = () => {
+          const bd = document.getElementById('modal-backdrop');
+          return !!(bd && bd.classList.contains('show')) && document.getElementById('note-new-adj') === newAdjInput;
+        };
         newAdjInput.addEventListener('blur', () => {
           // 避免 commitAdj 重複（按送出時也會 blur）
           setTimeout(() => {
-            if (document.getElementById('note-new-adj') === newAdjInput && newAdjInput.value.trim()) {
-              commitAdj();
-            }
+            const text = newAdjInput.value.trim();
+            if (modalOpen() && text && text !== lastFailedText) commitAdj();
           }, 150);
         });
 
         closeBtn.addEventListener('click', () => {
-          flushPendingInput();
-          autoSave();
+          flushOnClose();
           this.render();
           restoreRowOrder(); // 讓剛編輯的商品保持在原本位置，不會跳到最上方
           this.closeModal();

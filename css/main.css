@@ -1954,3 +1954,16 @@
 }
 /* 展開逐筆刪除時把該格原本的整格 ✕ 藏起來（.icon-btn 的 display:inline-flex 會蓋掉 [hidden]） */
 #note-adj-list .icon-btn[hidden] { display: none; }
+/* #269 存一筆寫一筆：編輯 / 刪除送出中 → 整個列表變淡、停用雙擊與 ✕（JS 也會擋，這裡是視覺 + 第二道） */
+#note-adj-list.is-busy {
+  opacity: .55;
+  pointer-events: none;
+  cursor: progress;
+}
+/* 新增成功：輸入框閃一下綠色。輸入框本身是既有 inline 樣式（含 border），border-color 要 !important 才蓋得過 */
+#note-new-adj { transition: background-color .15s, border-color .15s; }
+#note-new-adj.is-added {
+  background: var(--success-soft);
+  border-color: var(--success) !important;
+}
+#note-new-adj[readonly] { background: var(--border); color: var(--text-muted); }   /* 新增送出中 */
