@@ -177,8 +177,12 @@ ESM 有個致命陷阱必須牢記：
   調整紀錄（`_notes`，形狀 `{ 品號: { text, adjustments:[{date,text,by?,editedBy?,editedAt?,opId?}] } }`）
   另有 `updateNoteTx(shop, code, applyFn)`：runTransaction 讀這個商品 → `applyFn` 算新內容 → **只寫回這一個商品**
   （`FieldPath(notesKey, code)` 兩段，notesKey 必須當單一段）。回傳 `{ ok, missing, changed, already, entry, error, unknown }`；
-  被唯讀 / 本機防護擋下時回 `undefined`，呼叫端一律 `r && r.ok`。`applyFn` 用 marketing.js 的純函式 `_insNoteApplyOp`。
-  （#269 進行中：第 2 塊時尚無呼叫端，彈窗仍走舊的整份 `setLocalOnly` + 「☁ 同步」。）
+  被唯讀 / 本機防護擋下時回 `undefined`，呼叫端一律 `r && r.ok`。`applyFn` 用 marketing.js 的純函式
+  `_insNoteApplyOps`（一次交易套多個 op，底層是 `_insNoteApplyOp`）。
+  **洞察表調整彈窗（`openInsightNoteModal`）存一筆寫一筆**（#269）：新增 / 編輯 / 刪除 / 長期備註各自一個交易，
+  沒有「本機待同步」、也沒有洞察表的「☁ 同步雲端」鈕了。新增帶 `opId`（沒確認的輸入重按沿用同一個，交易重跑不會重複）；
+  長期備註只在失焦 / 關窗時寫，帶 `base` 做 compare-and-set（別人剛改過就不蓋、提示）。
+  詳細的寫入期間畫面、提示文字、草稿（`ec.insightNoteDrafts`）見 marketing.js `openInsightNoteModal` 與 `_insNoteResultMsg`。
 - `profits` collection — 每月每賣場一份獨立 doc（doc id 用 `__` 取代 `/`）。
 - 含 `.` 的字面欄位用 Firestore **REST API + backtick escape** 刪除
   （SDK 的 `updateDoc` 搭 `FieldPath` 不一定刪得掉），見 `firebase.js`
@@ -190,6 +194,15 @@ ESM 有個致命陷阱必須牢記：
 - 首批快照 (`__firstCloudSnapshot`) 一律強制重繪，否則手機開頁會卡在空資料。
 - 本機剛存過 (`_platformJustSaved` 等 2 秒內) 跳過雲端 bounce-back 重複重繪。
 - `session` 是本機獨有、**不上雲**的 key（避免一人登入別人也跟著登入）。
+- 洞察表（#269 起）：per-shop 訂閱把 `app/insight_{shop}` 合併進 `Store._mem` 後呼叫
+  `window.__insightNotesCloudUpdated(shop)`，開著的調整彈窗跟著更新（編輯中那一格延後、新增輸入框不動、
+  長期備註聚焦或有未存變動時只顯示「雲端已有更新」）；整頁重繪只限目前看的通路。訂閱不再跳過任何「待同步」key。
+- 舊版洞察表待同步（`ec.insightPendingNotes` + 本機 `ec.insight_{shop}_notes` 副本）：新版開機、雲端就緒、登入後
+  只備份到 `ec.insightLegacyBackup.v1`（不自動刪、不補回雲端）再清掉，console 打 `__insightLegacyBackupShow()` 只讀查看。
+- ⚠ 部署 #269 這版時：`version.js` 只在開頁時比版號、不會輪詢，**已經開著的舊分頁仍跑舊程式**，按舊的「☁ 同步雲端」
+  會整份蓋掉通路 notes（含新版剛寫進去的紀錄）。部署後要請所有人重新整理。
+- 工作日誌連動（過渡做法）：洞察表調整彈窗關窗時，本次有成功寫入就推一次 `ec.dailyProgress`（`pushToCloud:true`），
+  仍是**整把覆蓋所有人 × 所有日期**；根治待需求 3 第 3 段改成即時計算。
 
 ### localStorage / `Store`
 - `Store` 是 localStorage 包裝層（含 `_mem` / `_profitMem` 記憶體鏡像）。
@@ -262,6 +275,8 @@ localStorage 啟動。
 
 **「產生報表」和「同步」之間是斷的，靠人手動接。** 產完報表**一定要按
 「☁ 同步雲端」**，否則資料只在本機 localStorage / 記憶體，不會上 Firestore。
+（例外：洞察表的**調整紀錄 / 長期備註**自 #269 起存一筆寫一筆，按下就直接寫雲端，沒有同步鈕；
+洞察表的上傳檔案（母表 / 銷售 / 商品表現）不在此列。）
 
 ## 工作流程
 
