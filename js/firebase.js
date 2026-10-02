@@ -1,6 +1,6 @@
 /* ===================== Firebase Firestore 雲端同步層 ===================== */
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
-import { getFirestore, doc, collection, getDoc, getDocFromServer, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import { getFirestore, doc, collection, getDoc, getDocFromServer, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp, runTransaction } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
@@ -782,6 +782,76 @@ try {
     subscribeShop: (shop, cb) => {
       if (!insightShopRefs[shop]) return () => {};
       return onSnapshot(insightShopRefs[shop], snap => cb(snap.exists() ? snap.data() : {}));
+    },
+    // ── #269 第 2 塊：洞察表調整紀錄「逐商品交易寫入」（目前尚無呼叫端）──
+    // runTransaction 讀 app/insight_{shop} 的 [ec.insight_{shop}_notes][code] → applyFn(目前內容) 算出
+    //   { entry, missing, changed, already? } → 只寫回這一個商品（FieldPath 兩段：notesKey 含點，必須是單一段）。
+    //   applyFn 由呼叫端傳（第 3 塊傳 (e) => _insNoteApplyOp(e, op)），本檔不依賴 marketing.js。
+    // 回傳 { ok, missing, changed, already, entry, error, unknown }：
+    //   ok:true  = 雲端已是期望狀態（寫入成功 / 不需要改 / already 已寫過）
+    //   missing  = 要改或刪的那一筆找不到 → ok:false、不寫（可能是別人改過，也可能是自己上一輪 commit 已成功）
+    //   unknown  = 逾時或網路錯誤：寫入可能已經成功、也可能沒有 → 提示不可寫成「沒有儲存」
+    //   error    = 'bad-shop' | 'bad-code' | 'bad-applyFn' | 'doc-missing' | 'notes-not-map' | 'apply-error'
+    //              | 'apply-bad-result' | 'invalid-value' | 'timeout' | 'tx-error:{code}'
+    // ⚠ 被唯讀角色防護（app.js __installReadonlyCloudGuard）或本機測試防護擋下時會回 undefined，
+    //   呼叫端一律用 r && r.ok 判斷，不可寫 r.ok。
+    // ⚠ applyFn 在交易衝突時會被重跑（SDK 預設最多 5 輪），必須是純函式；結果一律取最後一輪。
+    // ⚠ 文件不存在就回 doc-missing、不自己建（四份 per-shop doc 都已存在；建文件走 setDoc 帶點 key 有雷，見 perShopSetField）。
+    updateNoteTx: async (shop, code, applyFn) => {
+      const result = (o) => Object.assign({ ok: false, missing: false, changed: false, already: false, entry: null, error: null, unknown: false }, o);
+      if (INSIGHT_SHOPS.indexOf(shop) < 0 || !insightShopRefs[shop]) return result({ error: 'bad-shop' });
+      if (typeof code !== 'string' || !code) return result({ error: 'bad-code' });
+      if (typeof applyFn !== 'function') return result({ error: 'bad-applyFn' });
+      const ref = insightShopRefs[shop];
+      const notesKey = 'ec.insight_' + shop + '_notes';
+      // Firestore 存不了 undefined / 函式（getFirestore 沒開 ignoreUndefinedProperties）→ 寫前先擋，回清楚的錯誤
+      const storable = (v) => {
+        if (v === undefined || typeof v === 'function' || typeof v === 'symbol') return false;
+        if (Array.isArray(v)) return v.every(storable);
+        if (v && typeof v === 'object') return Object.keys(v).every(k => storable(v[k]));
+        return true;
+      };
+      const TIMEOUT_MS = 15000;
+      const ABORT_MSG = 'updateNoteTx: 已逾時，不再重跑';
+      let aborted = false;
+      const work = runTransaction(db, async (tx) => {
+        // 逾時後的下一輪：丟非 FirebaseError → SDK 不重試（transaction_runner 的 isRetryableTransactionError）
+        if (aborted) throw new Error(ABORT_MSG);
+        const snap = await tx.get(ref);
+        if (!snap.exists()) return result({ error: 'doc-missing' });
+        const notes = snap.get(new FieldPath(notesKey));
+        if (notes !== undefined && (!notes || typeof notes !== 'object' || Array.isArray(notes))) {
+          return result({ error: 'notes-not-map' });
+        }
+        const cur = snap.get(new FieldPath(notesKey, code));
+        if (aborted) throw new Error(ABORT_MSG);
+        let r;
+        try { r = applyFn(cur); }
+        catch (e) { console.warn('[updateNoteTx] applyFn 丟錯', e); return result({ error: 'apply-error' }); }
+        if (!r || typeof r !== 'object') return result({ error: 'apply-bad-result' });
+        const out = {
+          missing: !!r.missing, changed: !!r.changed, already: !!r.already,
+          entry: r.entry === undefined ? null : r.entry,
+        };
+        if (out.missing) return result(out);
+        if (!out.changed) return result(Object.assign(out, { ok: true }));   // 沒改到 / already → 不寫
+        if (out.entry !== null && !storable(out.entry)) return result(Object.assign(out, { error: 'invalid-value' }));
+        tx.update(ref, new FieldPath(notesKey, code), out.entry === null ? deleteField() : out.entry);
+        return result(Object.assign(out, { ok: true }));
+      }).catch(e => {
+        if (e && e.message === ABORT_MSG) return result({ error: 'timeout', unknown: true });
+        console.warn('[updateNoteTx] 交易失敗', e);
+        // 網路類錯誤（SDK 視為非永久性）可能發生在 commit 已送出之後 → 標 unknown
+        const code2 = (e && e.code) || 'unknown';
+        const transient = ['unavailable', 'deadline-exceeded', 'unknown', 'cancelled', 'internal', 'resource-exhausted', 'unauthenticated'];
+        return result({ error: 'tx-error:' + code2, unknown: transient.indexOf(code2) >= 0 });
+      });
+      let timer = null;
+      const timeout = new Promise(res => {
+        timer = setTimeout(() => { aborted = true; res(result({ error: 'timeout', unknown: true })); }, TIMEOUT_MS);
+      });
+      try { return await Promise.race([work, timeout]); }
+      finally { clearTimeout(timer); }
     },
   };
 

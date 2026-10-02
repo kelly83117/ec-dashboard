@@ -61,11 +61,14 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    ⚠ 這段防護碼**刻意不存在於 repo 裡**：`grep TEST_NOWRITE` 零命中是**正確狀態**，不是異常，
    不要因為搜不到就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「TEST_NOWRITE v2 已啟用：21 個物件 / 33 個寫入方法已停用」**，才能放心測。
-   **判斷標準是「物件數對不對」：必須是 21**（2026-09-30 實測：PChome #314 加了 `__cloudPchomeOrders` /
-   `__cloudPchomeOptlog` / `__cloudPchomeHistory`（各 `setField` + `removeFields`）之後；加之前是 18 物件 / 27 方法，
-   再之前 2026-09-23 加 `__cloudKpi` 前是 17 / 25）。
-   方法數 33 同日實測，只當參考；下方 table 的條數**以工具實際印出的為準**。
+   **「TEST_NOWRITE v2 已啟用：23 個物件 / 38 個寫入方法已停用」**，才能放心測。
+   **判斷標準是「物件數對不對」：必須是 23**（2026-10-02 離線重數：`56f8aa1`（2026-10-01）加了
+   `__cloudPchomeProducts` / `__cloudPchomeRecon`（各 `setField` + `removeFields`）→ 21 變 23，當時這裡沒跟著改；
+   #269 第 2 塊在 `__cloudInsightByShop` 第一層加了 `updateNoteTx`（物件數不變、寫入方法 +1）。
+   再之前：2026-09-30 PChome #314 加 `__cloudPchomeOrders` / `__cloudPchomeOptlog` / `__cloudPchomeHistory` 後是 21 / 33，
+   加之前是 18 物件 / 27 方法；2026-09-23 加 `__cloudKpi` 前是 17 / 25）。
+   方法數 38 是**推算**（21 / 33 時的實測值 + PChome 兩物件 4 支 + `updateNoteTx` 1 支），還沒用防護碼實際跑過，
+   **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
    開機時會攔到 2 筆既有寫入（`__cloudStore.removeFields` 清 `ec.insight_*` 殘留、`setField` `ec.seeded.v5`），屬正常。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
@@ -77,13 +80,16 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    ⚠ v2 防護碼的 MUST 清單要含 `['__cloudKpi', 'writePaths']`、`['__cloudKpi', 'smokeWritePaths']`，
    以及 `['__cloudPchomeOrders', 'setField']`、`['__cloudPchomeOrders', 'removeFields']`、
    `['__cloudPchomeOptlog', 'setField']`、`['__cloudPchomeOptlog', 'removeFields']`、
-   `['__cloudPchomeHistory', 'setField']`、`['__cloudPchomeHistory', 'removeFields']`，
-   物件下限改 21，否則新物件沒有 fail-loud 保護。
+   `['__cloudPchomeHistory', 'setField']`、`['__cloudPchomeHistory', 'removeFields']`、
+   `['__cloudPchomeProducts', 'setField']`、`['__cloudPchomeProducts', 'removeFields']`、
+   `['__cloudPchomeRecon', 'setField']`、`['__cloudPchomeRecon', 'removeFields']`、
+   `['__cloudInsightByShop', 'updateNoteTx']`，
+   物件下限改 23，否則新物件沒有 fail-loud 保護。
    ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
    （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
    `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
    放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
-3. 沒看到這行紅字、或**物件數不是 21** → **絕對不要繼續操作，立刻關閉分頁**。
+3. 沒看到這行紅字、或**物件數不是 23** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 
 ⚠ **物件數會隨著新增雲端物件而變**（曾經是 4 物件 / 9 方法，早就過期）。不要當常數背，
@@ -96,7 +102,7 @@ grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js
 **這不是理論上的可能性 —— 2026-08-12 的實例**：當天 17:39 這份文件才把物件數更正成 13
 （commit `465a799`），**同一天** 23:31 同事的 `__cloudE001` 就 merge 進 main（PR #146，
 commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**。所以永遠當場重數，
-不要相信文件上的數字（包括上面那個 21）。
+不要相信文件上的數字（包括上面那個 23）。
 
 🔴 字元集一定要用 `[A-Za-z0-9_]`，**不能**寫成 `[A-Za-z_]` —— 舊寫法吃不到數字，會漏掉
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
@@ -166,6 +172,13 @@ ESM 有個致命陷阱必須牢記：
 - `app/kpi` — KPI 月結表（`months.{YYYY-MM}.{路徑}` + `meta.{YYYY-MM}.{路徑}={by,at}`）。
   透過 `window.__cloudKpi.writePaths` **逐格 FieldPath 寫入**、多人同時填不互蓋；記憶體仍轉回
   `Store._profitMem._kpi_v1` 陣列供讀取端用。舊的 `app/profit._kpi_v1` 是搬移前的備份，**不要再寫它**。
+- `app/insight_{shop}`（玩樂 / 好麻吉 / 森之旅 / 維克）— 洞察表資料，每通路一份 doc，欄位名是**含點的字面 key**
+  `ec.insight_{shop}_{master|weeks|notes|perf}`，透過 `window.__cloudInsightByShop` 存取。
+  調整紀錄（`_notes`，形狀 `{ 品號: { text, adjustments:[{date,text,by?,editedBy?,editedAt?,opId?}] } }`）
+  另有 `updateNoteTx(shop, code, applyFn)`：runTransaction 讀這個商品 → `applyFn` 算新內容 → **只寫回這一個商品**
+  （`FieldPath(notesKey, code)` 兩段，notesKey 必須當單一段）。回傳 `{ ok, missing, changed, already, entry, error, unknown }`；
+  被唯讀 / 本機防護擋下時回 `undefined`，呼叫端一律 `r && r.ok`。`applyFn` 用 marketing.js 的純函式 `_insNoteApplyOp`。
+  （#269 進行中：第 2 塊時尚無呼叫端，彈窗仍走舊的整份 `setLocalOnly` + 「☁ 同步」。）
 - `profits` collection — 每月每賣場一份獨立 doc（doc id 用 `__` 取代 `/`）。
 - 含 `.` 的字面欄位用 Firestore **REST API + backtick escape** 刪除
   （SDK 的 `updateDoc` 搭 `FieldPath` 不一定刪得掉），見 `firebase.js`
