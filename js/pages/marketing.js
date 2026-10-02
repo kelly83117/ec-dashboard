@@ -2489,6 +2489,108 @@ function _insAdjRemove(list, ref) {
   return { list: src.slice(0, i).concat(src.slice(i + 1)), removed: true };
 }
 
+// ── #269 第 1 塊：洞察表調整紀錄「一次操作」純函式（目前尚無呼叫端）────────────────
+// 之後要在 Firestore 交易裡用：讀雲端上【這一個商品】的最新值 → 套用這一次操作 → 只寫回這個商品。
+// 交易衝突會重跑，同一個輸入可能被呼叫好幾次 → 一定要純：不改傳入物件、不讀 Store / DOM / 時間，
+// 時間（date / at）與登入者（by）由呼叫端放進 op。欄位規則比照上面 _insAdj*（v738）。
+//   op：{ type:'add',    date, text, by? }               date 由呼叫端格式化好（YYYY/MM/DD）
+//       { type:'edit',   edits:[{ target, text }], by?, at? }
+//       { type:'remove', target }
+//       { type:'text',   text }                         長期備註
+//   target 是開窗時看到的那一筆內容（快照，不是參照）。紀錄沒有 id → 用【全欄位、與 key 順序無關】比對；
+//   別人改過那一筆（text / editedAt 不同）就比對不到 → missing，不套用（不拿舊快照蓋別人的修改）。
+//   完全相同的多筆分不出差別：依序認領還沒被認領的 index。
+//   edit 同 _insAdjApplyEdits：先略過空字串 / 沒改的、再檢查找不找得到，任一筆 missing 就整批不套用。
+// 回傳 { entry, missing, changed }：entry 是套用後的新商品（深拷貝，不共用輸入的參照）；
+//   text 與 adjustments 都空、且沒有其他欄位 → null（代表刪掉這個商品，同 autoSave 的 delete）。
+//   商品層的未知欄位原樣帶過去（autoSave 會丟掉它們，那是舊碼副作用，這裡不跟）。
+//   adjustments 存在但不是陣列 → throw（當成 [] 寫回去會把資料抹掉）。
+// ⚠ 給第 3 塊呼叫端：add 不碰 text、text 不碰 adjustments。舊 autoSave 每次存都順手寫入 textarea 的
+//   長期備註；改用本函式後「新增一筆」不再順便存還沒失焦 / debounce 中的長期備註，呼叫端要自己處理。
+function _insNoteApplyOp(entry, op) {
+  const clone = (v) => {
+    if (Array.isArray(v)) return v.map(clone);
+    if (v && typeof v === 'object') {
+      const o = {};
+      Object.keys(v).forEach(k => { o[k] = clone(v[k]); });
+      return o;
+    }
+    return v;
+  };
+  const same = (a, b) => {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    return ka.every(k => Object.prototype.hasOwnProperty.call(b, k) && same(a[k], b[k]));
+  };
+  if (entry !== undefined && entry !== null && (typeof entry !== 'object' || Array.isArray(entry))) {
+    throw new Error('_insNoteApplyOp: 商品內容不是物件');
+  }
+  const src = entry || {};
+  if (src.adjustments !== undefined && src.adjustments !== null && !Array.isArray(src.adjustments)) {
+    throw new Error('_insNoteApplyOp: adjustments 不是陣列，不套用');
+  }
+  if (!op || typeof op !== 'object') throw new Error('_insNoteApplyOp: 缺 op');
+  const out = clone(src);
+  out.text = (src.text === undefined || src.text === null) ? '' : out.text;
+  let list = clone(src.adjustments || []);
+  let missing = false;
+  let changed = false;
+  const by = String(op.by || '').trim();
+  // 由前往後找第一筆跟 target 全欄位相同、且還沒被認領的
+  const findIdx = (target, claimed) => {
+    for (let i = 0; i < list.length; i++) {
+      if (!claimed.has(i) && same(list[i], target)) return i;
+    }
+    return -1;
+  };
+
+  if (op.type === 'add') {
+    const t = String(op.text || '').trim();
+    if (t) {
+      const a = { date: op.date, text: t };
+      if (by) a.by = by;
+      list.push(a);
+      changed = true;
+    }
+  } else if (op.type === 'edit') {
+    const claimed = new Set();
+    const repl = new Map();   // index → 新內容
+    (op.edits || []).forEach(({ target, text }) => {
+      const v = String(text || '').trim();
+      const skip = !v || v === String((target && target.text) || '');
+      const i = findIdx(target, claimed);
+      // 略過的那筆找得到也要認領，讓同內容多筆的對應位置跟畫面上的順序一致；找不到不算 missing
+      if (i >= 0) claimed.add(i);
+      if (skip) return;
+      if (i < 0) { missing = true; return; }
+      const next = Object.assign(clone(list[i]), { text: v });
+      if (by) { next.editedBy = by; next.editedAt = op.at; }
+      repl.set(i, next);
+    });
+    if (!missing && repl.size > 0) {
+      list = list.map((a, i) => (repl.has(i) ? repl.get(i) : a));
+      changed = true;
+    }
+  } else if (op.type === 'remove') {
+    const i = findIdx(op.target, new Set());
+    if (i < 0) missing = true;
+    else { list = list.slice(0, i).concat(list.slice(i + 1)); changed = true; }
+  } else if (op.type === 'text') {
+    const t = String(op.text || '').trim();
+    if (t !== String(out.text || '')) { out.text = t; changed = true; }
+  } else {
+    throw new Error('_insNoteApplyOp: 未知的 op.type ' + op.type);
+  }
+
+  out.adjustments = list;
+  const onlyKnown = Object.keys(out).every(k => k === 'text' || k === 'adjustments');
+  const empty = !String(out.text || '').trim() && list.length === 0 && onlyKnown;
+  return { entry: empty ? null : out, missing, changed };
+}
+
 // 洞察表分類判定：原本內嵌在 _updateDailyProgressFromAdjustments，抽到模組層
 // 讓 daily.js 的洞察 chip 明細彈窗共用（判定邏輯逐字保留；門檻 T 改為每次呼叫現算）
 window.__insightClassify = function (shop, code) {
