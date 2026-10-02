@@ -1967,3 +1967,10 @@
   border-color: var(--success) !important;
 }
 #note-new-adj[readonly] { background: var(--border); color: var(--text-muted); }   /* 新增送出中 */
+/* 長期備註聚焦中 / 有未存變動時，雲端有別人的新版本 → 只顯示這行小字，不動輸入框內容 */
+.ins-note-cloud-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--warn);
+}
+.ins-note-cloud-hint[hidden] { display: none; }

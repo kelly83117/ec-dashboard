@@ -1984,7 +1984,11 @@ Object.assign(App, {
       if (kind === 'text' || kind === 'add+text') textSending = null;
       if (r && m.refresh) {
         note = cloneEntry(r.entry) || { text: '', adjustments: [] };
-        if (kind === 'text' || kind === 'add+text') textBase = note.text || '';
+        if (kind === 'text' || kind === 'add+text') {
+          textBase = note.text || '';
+          const hint = document.getElementById('note-text-cloud-hint');
+          if (hint) hint.hidden = true;   // base 已換成雲端值，「雲端已有更新」小字收起
+        }
       }
       if (ctx && ctx.addText && !m.keepDraft) draftSet(null);
       if (r && r.ok && (r.changed || r.already)) {
@@ -2029,6 +2033,8 @@ Object.assign(App, {
     //     （app.js「保護本機未同步的工作日誌 ec.dailyProgress」那段註解），每推一次都可能蓋掉別人在雲端的工作日誌改動；
     //     根治待需求 3 第 3 段改成即時計算。舊的「☁ 同步雲端」按鈕已拆，關窗是唯一的推送時機。
     const flushOnClose = () => {
+      const live = window.__insightNoteModalLive;
+      if (live && live.shop === currentShop && live.code === code) window.__insightNoteModalLive = null;   // 關窗後不再跟雲端更新
       const inp = document.getElementById('note-new-adj');
       const text = (inp && !adding) ? inp.value.trim() : '';
       const ops = [];
@@ -2140,6 +2146,7 @@ Object.assign(App, {
         <div class="field">
           <label style="font-size:12px">長期備註<span style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:4px">（商品特性、注意事項，自動儲存）</span></label>
           <textarea id="note-text" rows="2" placeholder="例：主圖偏暗需重拍 / 競品有 PD 認證" style="font-family:inherit;resize:vertical;font-size:12px;padding:6px 8px;min-height:50px">${escapeHtml(note.text || '')}</textarea>
+          <div id="note-text-cloud-hint" class="ins-note-cloud-hint" hidden>雲端已有更新</div>
         </div>
         ${renderProfitHistory()}
         <div style="display:flex;justify-content:flex-end;margin-top:16px">
@@ -2350,6 +2357,29 @@ Object.assign(App, {
 
         bindDelButtons();
         bindEditChips();
+
+        // ── #269 第 5 塊：彈窗開著時跟著雲端更新（不再只用開窗那一刻的快照）──
+        // app.js 的 per-shop 訂閱合併進 Store._mem 後呼叫 window.__insightNotesCloudUpdated(shop) → 這裡的 onCloud。
+        //   列表：某一格正在編輯 / 選要刪哪一筆、或寫入中 → 先不重繪（那格結束時本來就會 rebindAdjList，會用到最新的 note）；
+        //   新增輸入框：從不動；長期備註：沒聚焦且沒未存變動 → 直接換成雲端值；聚焦中或有未存變動 → 只顯示小字「雲端已有更新」，
+        //   不動內容，存的時候 compare-and-set 會擋下並提示。
+        const cloudHint = document.getElementById('note-text-cloud-hint');
+        const live = { shop: currentShop, code, onCloud: null };
+        live.onCloud = () => {
+          if (!modalOpen()) { if (window.__insightNoteModalLive === live) window.__insightNoteModalLive = null; return; }
+          note = cloneEntry((Store._mem[notesKey] || {})[code]) || { text: '', adjustments: [] };
+          if (!isBusy() && !adjList.querySelector('.ins-adj-edit, .ins-adj-pick')) rebindAdjList();
+          const cloudText = note.text || '';
+          const dirty = textareaEl.value.trim() !== String(textBase).trim();
+          if (document.activeElement !== textareaEl && !dirty && textSending === null) {
+            textareaEl.value = cloudText;
+            textBase = cloudText;
+            if (cloudHint) cloudHint.hidden = true;
+          } else if (cloudText !== textBase && cloudHint) {
+            cloudHint.hidden = false;
+          }
+        };
+        window.__insightNoteModalLive = live;
       },
     });
   },
@@ -2760,6 +2790,14 @@ function _insightLegacyBackupRun(ls, user, nowIso) {
       : '',
   };
 }
+
+// #269 第 5 塊：app.js 的 per-shop 訂閱把 app/insight_{shop} 合併進 Store._mem 之後呼叫這裡；
+//   開著的調整彈窗（openInsightNoteModal 註冊在 window.__insightNoteModalLive）是同一個通路才更新。
+window.__insightNotesCloudUpdated = function (shop) {
+  const live = window.__insightNoteModalLive;
+  if (!live || live.shop !== shop || typeof live.onCloud !== 'function') return;
+  try { live.onCloud(); } catch (e) { console.warn('[洞察表] 彈窗跟雲端更新失敗', e); }
+};
 
 // 洞察表分類判定：原本內嵌在 _updateDailyProgressFromAdjustments，抽到模組層
 // 讓 daily.js 的洞察 chip 明細彈窗共用（判定邏輯逐字保留；門檻 T 改為每次呼叫現算）

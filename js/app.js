@@ -3409,7 +3409,7 @@ async function __setupCloud() {
     //     （Kelly 案：刪保冰壺清倉 → 同步 → 重整後清倉又出現。v166 加 source pref、
     //       v167 主動刪 app/insight 舊拷貝都試過，還是有 case → 直接不訂閱最乾淨。）
     //   - per-shop subscribe：正常合併進 _mem（跳過 pending 未同步的 key）
-    const perShopMergeHandler = (idata) => {
+    const perShopMergeHandler = (idata, shop) => {
       if (!idata) return;
       try {
         const pending = window.__insightPendingNotes;
@@ -3419,16 +3419,24 @@ async function __setupCloud() {
           if (Store._mem) Store._mem[k] = idata[k];
         });
         if (skipped.length) console.warn('[insight subscribe][per-shop] 跳過 pending:', skipped);
+        // #269 第 5 塊：洞察表調整彈窗開著、而且是這個通路 → 彈窗跟著雲端更新（js/pages/marketing.js）
+        try { if (typeof window.__insightNotesCloudUpdated === 'function') window.__insightNotesCloudUpdated(shop); }
+        catch (e) { console.warn('[insight subscribe per-shop] 彈窗更新失敗', e); }
         if (window.App && App.currentUser && typeof App.render === 'function') {
           const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
-          if (!inputInProgress) { try { App.renderFromCloud('insight'); } catch {} }   // 只在洞察表頁才重繪，別頁不被踢（見 CLOUD_RENDER_ROUTES）
+          // #269：只重繪【目前看的通路】。存一筆寫一筆之後每存一筆就推來一次 snapshot，看好麻吉時不必因為玩樂的寫入整頁重建；
+          //   資料一樣全部合併進 Store._mem，切過去時就是最新的。目前通路的判定比照 marketing.js（不在名單 → 玩樂）。
+          const shops = (window.__cloudInsightByShop && window.__cloudInsightByShop.shops) || [];
+          const f = App.filter && App.filter.insightShop;
+          const curShop = shops.indexOf(f) >= 0 ? f : '玩樂';
+          if (!inputInProgress && (!shop || shop === curShop)) { try { App.renderFromCloud('insight'); } catch {} }   // 只在洞察表頁才重繪，別頁不被踢（見 CLOUD_RENDER_ROUTES）
         }
       } catch (e) { console.warn('[insight subscribe per-shop] merge 失敗', e); }
     };
     try {
       if (window.__cloudInsightByShop && Array.isArray(window.__cloudInsightByShop.shops)) {
         window.__cloudInsightByShop.shops.forEach(s => {
-          try { window.__cloudInsightByShop.subscribeShop(s, perShopMergeHandler); }
+          try { window.__cloudInsightByShop.subscribeShop(s, (idata) => perShopMergeHandler(idata, s)); }
           catch (e) { console.warn('[insight subscribe app/insight_' + s + ']', e); }
         });
       }
