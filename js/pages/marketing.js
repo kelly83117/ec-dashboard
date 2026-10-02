@@ -2493,7 +2493,7 @@ function _insAdjRemove(list, ref) {
 // 之後要在 Firestore 交易裡用：讀雲端上【這一個商品】的最新值 → 套用這一次操作 → 只寫回這個商品。
 // 交易衝突會重跑，同一個輸入可能被呼叫好幾次 → 一定要純：不改傳入物件、不讀 Store / DOM / 時間，
 // 時間（date / at）與登入者（by）由呼叫端放進 op。欄位規則比照上面 _insAdj*（v738）。
-//   op：{ type:'add',    date, text, by? }               date 由呼叫端格式化好（YYYY/MM/DD）
+//   op：{ type:'add',    date, text, by?, opId? }        date 由呼叫端格式化好（YYYY/MM/DD）
 //       { type:'edit',   edits:[{ target, text }], by?, at? }
 //       { type:'remove', target }
 //       { type:'text',   text }                         長期備註
@@ -2505,6 +2505,10 @@ function _insAdjRemove(list, ref) {
 //   text 與 adjustments 都空、且沒有其他欄位 → null（代表刪掉這個商品，同 autoSave 的 delete）。
 //   商品層的未知欄位原樣帶過去（autoSave 會丟掉它們，那是舊碼副作用，這裡不跟）。
 //   adjustments 存在但不是陣列 → throw（當成 [] 寫回去會把資料抹掉）。
+// opId（呼叫端產生的字串，本函式不產生亂數）：add 帶 opId 時新紀錄多存 opId 欄位；list 裡已有同 opId → 不再 push，
+//   回 { changed:false, missing:false, already:true }。為的是「commit 已成功但回應遺失、交易重跑」時不重複新增。
+//   edit / remove 在同樣情況會回 missing（target 已經被自己上一輪改掉）→ 呼叫端的提示不可寫成「沒有儲存」。
+//   沒帶 opId 的 add 行為不變；已存了 opId 的紀錄，target 快照也帶著 opId，全欄位比對照常對得上。
 // ⚠ 給第 3 塊呼叫端：add 不碰 text、text 不碰 adjustments。舊 autoSave 每次存都順手寫入 textarea 的
 //   長期備註；改用本函式後「新增一筆」不再順便存還沒失焦 / debounce 中的長期備註，呼叫端要自己處理。
 function _insNoteApplyOp(entry, op) {
@@ -2547,11 +2551,19 @@ function _insNoteApplyOp(entry, op) {
     return -1;
   };
 
+  let already = false;
+
   if (op.type === 'add') {
+    if (op.opId !== undefined && op.opId !== null && (typeof op.opId !== 'string' || !op.opId)) {
+      throw new Error('_insNoteApplyOp: opId 必須是非空字串');
+    }
     const t = String(op.text || '').trim();
-    if (t) {
+    if (t && op.opId && list.some(a => a && a.opId === op.opId)) {
+      already = true;   // 這次新增已經寫過了（交易重跑讀到自己上一輪的成果）
+    } else if (t) {
       const a = { date: op.date, text: t };
       if (by) a.by = by;
+      if (op.opId) a.opId = op.opId;
       list.push(a);
       changed = true;
     }
@@ -2588,7 +2600,9 @@ function _insNoteApplyOp(entry, op) {
   out.adjustments = list;
   const onlyKnown = Object.keys(out).every(k => k === 'text' || k === 'adjustments');
   const empty = !String(out.text || '').trim() && list.length === 0 && onlyKnown;
-  return { entry: empty ? null : out, missing, changed };
+  const res = { entry: empty ? null : out, missing, changed };
+  if (already) res.already = true;
+  return res;
 }
 
 // 洞察表分類判定：原本內嵌在 _updateDailyProgressFromAdjustments，抽到模組層
