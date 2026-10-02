@@ -2605,6 +2605,127 @@ function _insNoteApplyOp(entry, op) {
   return res;
 }
 
+// ── #269 第 3 塊：彈窗寫入用的小工具（純函式為主）──────────────────────────────
+// 一次交易套多個 op（例：長期備註有未存變動時，[text, add] 合成一筆一起寫，不會半套）。
+//   依序套用 _insNoteApplyOp；任一個 missing → 整批不套用，entry 回目前內容（正規化後）。
+//   text op 帶 base（彈窗最後一次看到的雲端長期備註）→ compare-and-set：雲端目前 text 跟 base 不同就回 missing，
+//   不拿我的版本蓋掉別人剛改的長期備註。呼叫端約定：text op 只會單獨送、或跟 add 一起送（不跟 edit / remove 混），
+//   所以「ops 含 text 又回 missing」就是長期備註衝突（add 不會 missing）。
+function _insNoteApplyOps(entry, ops) {
+  const blank = _insNoteApplyOp(entry, { type: 'edit', edits: [] });   // 不改任何東西，只取正規化後的目前內容
+  let cur = entry;
+  let last = blank.entry;
+  let changed = false;
+  let already = false;
+  for (const op of (ops || [])) {
+    if (op && op.type === 'text' && op.base !== undefined) {
+      const now = (cur && cur.text !== undefined && cur.text !== null) ? String(cur.text) : '';
+      if (now !== String(op.base)) return { entry: blank.entry, missing: true, changed: false };
+    }
+    const r = _insNoteApplyOp(cur, op);
+    if (r.missing) return { entry: blank.entry, missing: true, changed: false };
+    if (r.changed) changed = true;
+    if (r.already) already = true;
+    last = r.entry;
+    cur = r.entry === null ? undefined : r.entry;
+  }
+  const res = { entry: last, missing: false, changed };
+  if (already) res.already = true;
+  return res;
+}
+
+// updateNoteTx 的結果 → 畫面要怎麼反應。kind：'add' | 'add+text' | 'edit' | 'remove' | 'text'；ctx.addText 是新增的文字。
+// 回傳 { level, text, ms, success, keepDraft, refresh }：level 是 showToast 的 type（null = 不提示）；
+//   success = 雲端已是期望狀態；keepDraft = 輸入框 / 草稿要保留；refresh = 用 r.entry（雲端目前內容）刷新彈窗。
+// r 是 undefined = 被唯讀角色防護或本機測試防護擋下（唯讀防護自己會跳提示）→ 這裡不再提示、保留輸入。
+function _insNoteResultMsg(r, kind, ctx) {
+  const short = (s, n) => { const t = String(s || ''); return t.length > n ? t.slice(0, n) + '…' : t; };
+  const hasText = kind === 'text' || kind === 'add+text';
+  const isAdd = kind === 'add' || kind === 'add+text';
+  if (!r) return { level: null, text: '', ms: 0, success: false, keepDraft: true, refresh: false };
+  if (r.ok) {
+    if (!r.changed && !r.already) return { level: null, text: '', ms: 0, success: true, keepDraft: false, refresh: true };
+    const text = isAdd ? `✓ 已加入：${short(ctx && ctx.addText, 20)}` : '✓ 已儲存';
+    return { level: 'success', text, ms: 2200, success: true, keepDraft: false, refresh: true };
+  }
+  if (r.missing) {
+    const text = hasText
+      ? `長期備註剛被別人改過（雲端：『${short(r.entry && r.entry.text, 40)}』）。你的內容還在輸入框，再離開一次輸入框就會以你的為準`
+      : '這筆紀錄剛剛被別人改過或刪除，畫面已更新為最新內容，請再確認一次';
+    return { level: 'error', text, ms: 6000, success: false, keepDraft: true, refresh: true };
+  }
+  if (r.unknown) {
+    const text = isAdd
+      ? '網路不穩，這次儲存未確認，畫面稍後會依雲端更新。若一陣子後沒出現，可以再按一次（不會重複新增）'
+      : '網路不穩，這次儲存未確認，畫面稍後會依雲端更新';
+    return { level: 'info', text, ms: 6000, success: false, keepDraft: true, refresh: false };
+  }
+  const REASON = {
+    'no-cloud': '雲端尚未就緒', 'bad-shop': '通路不正確', 'bad-code': '商品編號不正確', 'bad-applyFn': '程式參數錯誤',
+    'doc-missing': '雲端找不到這個通路的資料', 'notes-not-map': '雲端調整紀錄格式異常',
+    'apply-error': '資料格式異常', 'apply-bad-result': '資料格式異常', 'invalid-value': '內容含無法儲存的值',
+  };
+  const err = String(r.error || '');
+  const reason = REASON[err] || (err.indexOf('tx-error:') === 0 ? '雲端錯誤 ' + err.slice(9) : (err || '未知錯誤'));
+  const admin = ['doc-missing', 'notes-not-map', 'apply-error', 'apply-bad-result'].indexOf(err) >= 0 ? '，請通知管理員' : '';
+  return { level: 'error', text: `儲存失敗（${reason}），內容已保留，請稍後再試${admin}`, ms: 6000, success: false, keepDraft: true, refresh: false };
+}
+
+// 新增的草稿：{ [`${shop}|${code}`]: { addText, opId } }。沒確認（失敗 / 未確認）的輸入重按時沿用同一個 opId，
+//   搭配 _insNoteApplyOp 的 opId 冪等 → 第一次其實寫成功了也不會重複新增。文字改了就是另一筆、換新 opId。
+function _insNoteDraftOpId(draft, text, makeId) {
+  return (draft && draft.addText === text && typeof draft.opId === 'string' && draft.opId) ? draft.opId : makeId();
+}
+function _insNoteNewOpId() {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+const INS_NOTE_DRAFTS_KEY = 'ec.insightNoteDrafts';   // 刻意不以 ec.insight_ 開頭：不被「清除全部」與舊副本清理掃到
+function _insNoteDraftsLoad(ls) {
+  try {
+    const v = JSON.parse(ls.getItem(INS_NOTE_DRAFTS_KEY) || '{}');
+    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+  } catch { return {}; }
+}
+function _insNoteDraftsSave(ls, drafts) {
+  try {
+    if (drafts && Object.keys(drafts).length) ls.setItem(INS_NOTE_DRAFTS_KEY, JSON.stringify(drafts));
+    else ls.removeItem(INS_NOTE_DRAFTS_KEY);
+  } catch (e) { console.warn('[洞察表] 草稿存不進本機', e); }
+}
+
+// ── #269 第 4 塊：舊版「本機待同步」的處理（方案 B：只備份、不自動補）────────────────
+// ls 由呼叫端注入（正式用 localStorage）。pending 名單非空 → 名單內每個 key 的本機副本整包備份到
+//   ec.insightLegacyBackup.v1（{ savedAt, user, data }；已有舊備份就放進 previous，不覆蓋、不自動刪），
+//   再清掉名單與四個通路的本機副本 key。名單空 → 只清殘留副本、不提示。不碰任何雲端。
+//   備份寫入失敗（例：配額滿）會丟錯 → 名單與副本都不清，下次開機再試。
+const INS_LEGACY_BACKUP_KEY = 'ec.insightLegacyBackup.v1';
+function _insightLegacyBackupRun(ls, user, nowIso) {
+  const read = (k) => {
+    try { const raw = ls.getItem(k); return raw === null ? undefined : JSON.parse(raw); }
+    catch { return undefined; }
+  };
+  const listed = read('ec.insightPendingNotes');
+  const pending = (Array.isArray(listed) ? listed : []).filter(k => typeof k === 'string' && k.indexOf('ec.insight_') === 0);
+  const copyKeys = new Set(['玩樂', '好麻吉', '森之旅', '維克'].map(s => 'ec.insight_' + s + '_notes'));
+  pending.forEach(k => copyKeys.add(k));
+  if (pending.length) {
+    const data = {};
+    pending.forEach(k => { const v = read(k); data[k] = v === undefined ? null : v; });
+    const rec = { savedAt: nowIso, user: user || '', data };
+    const prev = read(INS_LEGACY_BACKUP_KEY);
+    if (prev !== undefined) rec.previous = prev;
+    ls.setItem(INS_LEGACY_BACKUP_KEY, JSON.stringify(rec));
+  }
+  ls.removeItem('ec.insightPendingNotes');
+  copyKeys.forEach(k => ls.removeItem(k));
+  return {
+    count: pending.length,
+    message: pending.length
+      ? `你有 ${pending.length} 個通路的洞察表修改在舊版沒同步上雲端，已備份在這台電腦，請通知 Keani 協助補回`
+      : '',
+  };
+}
+
 // 洞察表分類判定：原本內嵌在 _updateDailyProgressFromAdjustments，抽到模組層
 // 讓 daily.js 的洞察 chip 明細彈窗共用（判定邏輯逐字保留；門檻 T 改為每次呼叫現算）
 window.__insightClassify = function (shop, code) {
