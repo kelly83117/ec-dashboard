@@ -582,10 +582,6 @@ Object.assign(App, {
               </div>
             ` : ''}
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-              <button id="insight-sync-cloud" class="btn-add" title="把這台機器上未同步的調整紀錄一次推到雲端" style="padding:6px 12px;font-size:12px;background:#fff;color:#475569;border:1px solid #cbd5e1;display:inline-flex;align-items:center;gap:6px">
-                <span>☁ 同步雲端</span>
-                <span id="insight-sync-badge" style="display:none;min-width:18px;height:18px;padding:0 5px;background:#ef4444;color:white;border-radius:9px;font-size:10px;font-weight:700;align-items:center;justify-content:center;line-height:1">0</span>
-              </button>
               <button id="insight-upload-open" class="btn-add" style="padding:6px 14px;font-size:12px">📤 上傳檔案</button>
               ${sales ? `<button id="insight-export" class="btn-add" style="padding:6px 12px;font-size:12px">⬇ 匯出 Excel</button>` : ''}
             </div>
@@ -1250,97 +1246,9 @@ Object.assign(App, {
     const settingsBtn = document.getElementById('insight-settings');
     if (settingsBtn) settingsBtn.addEventListener('click', () => this.openInsightSettingsModal());
 
-    // ☁ 同步雲端：把本機累積的洞察表調整紀錄一次推上雲
-    const syncBtn = document.getElementById('insight-sync-cloud');
-    const syncBadge = document.getElementById('insight-sync-badge');
-    // pending set 從 localStorage 還原（避免重整後遺失，導致雲端 snapshot 蓋掉未同步的本機刪除）
-    if (!window.__insightPendingNotes) {
-      window.__insightPendingNotes = new Set(
-        (() => { try { return JSON.parse(localStorage.getItem('ec.insightPendingNotes') || '[]'); } catch { return []; } })()
-      );
-    }
-    // 讓 add/delete 都同步寫回 localStorage
-    if (!window.__insightPendingNotes.__persistWrapped) {
-      const origAdd = window.__insightPendingNotes.add.bind(window.__insightPendingNotes);
-      const origDel = window.__insightPendingNotes.delete.bind(window.__insightPendingNotes);
-      const persist = () => { try { localStorage.setItem('ec.insightPendingNotes', JSON.stringify(Array.from(window.__insightPendingNotes))); } catch {} };
-      window.__insightPendingNotes.add = (k) => { const r = origAdd(k); persist(); return r; };
-      window.__insightPendingNotes.delete = (k) => { const r = origDel(k); persist(); return r; };
-      window.__insightPendingNotes.__persistWrapped = true;
-    }
-    window.__updateInsightSyncBadge = () => {
-      const btn = document.getElementById('insight-sync-cloud');
-      const badge = document.getElementById('insight-sync-badge');
-      if (!btn || !badge) return;
-      const n = window.__insightPendingNotes ? window.__insightPendingNotes.size : 0;
-      if (n > 0) {
-        badge.textContent = n;
-        badge.style.display = 'inline-flex';
-        btn.style.background = '#fef3c7';
-        btn.style.borderColor = '#f59e0b';
-        btn.style.color = '#92400e';
-      } else {
-        badge.style.display = 'none';
-        btn.style.background = '#fff';
-        btn.style.borderColor = '#cbd5e1';
-        btn.style.color = '#475569';
-      }
-    };
-    window.__updateInsightSyncBadge();
-    if (syncBtn) {
-      syncBtn.addEventListener('click', async () => {
-        const pending = window.__insightPendingNotes;
-        if (!pending || pending.size === 0) {
-          showToast('沒有待同步的調整', 'info');
-          return;
-        }
-        if (typeof Store.pushKeyToCloud !== 'function') {
-          this.showAlertModal({ title: '雲端尚未就緒', message: '請重新整理後再試。', kind: 'warn' });
-          return;
-        }
-        syncBtn.disabled = true;
-        const originalHtml = syncBtn.innerHTML;
-        syncBtn.innerHTML = '<span>☁ 同步中…</span>';
-        const failed = [];
-        for (const key of Array.from(pending)) {
-          try {
-            await Store.pushKeyToCloud(key);
-            pending.delete(key);
-          } catch (e) {
-            failed.push(key + ': ' + (e && e.message || e));
-          }
-        }
-        syncBtn.disabled = false;
-        syncBtn.innerHTML = originalHtml;
-        window.__updateInsightSyncBadge();
-        if (failed.length === 0) {
-          showToast('已同步到雲端 ✓', 'success');
-          // 同步成功後，把今天的調整摘要自動寫入該同事的工作日誌（含洞察表與淨利表）
-          // pushToCloud:true → 連同工作日誌也一起推給老闆，避免切頁時還跳「未同步」提醒
-          try { this._updateDailyProgressFromAdjustments({ pushToCloud: true }); } catch (e) { console.warn('[autoSummary]', e); }
-        } else {
-          this.showAlertModal({
-            title: '部分同步失敗',
-            message: failed.length + ' 個 key 沒推上雲端。請看下方詳情，必要時重試一次。',
-            detail: failed.join('\n'),
-            kind: 'error',
-          });
-        }
-      });
-    }
-
-    // 離開頁面前若有未同步，提醒（瀏覽器原生確認框）
-    if (!window.__insightUnloadGuardInstalled) {
-      window.__insightUnloadGuardInstalled = true;
-      window.addEventListener('beforeunload', (e) => {
-        const n = window.__insightPendingNotes ? window.__insightPendingNotes.size : 0;
-        if (n > 0) {
-          e.preventDefault();
-          e.returnValue = '';
-          return '';
-        }
-      });
-    }
+    // #269：舊的「☁ 同步雲端」鈕、待同步徽章、離開提醒、__insightPendingNotes 已拆。調整彈窗改成存一筆寫一筆
+    //   （openInsightNoteModal → __cloudInsightByShop.updateNoteTx），不再有「本機待同步」；舊版留下的待同步
+    //   在開機時只備份不補（window.__insightLegacyMigrate，見本檔 _insightLegacyBackupRun）。
 
     // 📤 上傳檔案：開啟浮窗
     const uploadOpenBtn = document.getElementById('insight-upload-open');
@@ -2797,6 +2705,33 @@ window.__insightNotesCloudUpdated = function (shop) {
   const live = window.__insightNoteModalLive;
   if (!live || live.shop !== shop || typeof live.onCloud !== 'function') return;
   try { live.onCloud(); } catch (e) { console.warn('[洞察表] 彈窗跟雲端更新失敗', e); }
+};
+
+// #269 第 4 塊：新版開機、雲端就緒、登入確定後跑一次舊版待同步的處理（方案 B：只備份、不自動補，見 _insightLegacyBackupRun）。
+//   app.js 在 __setupCloud 結尾與 enterApp 都會呼叫，條件不齊就先略過、等下一次呼叫；跑過一次就不再跑。
+//   刻意不放在 bindInsightTab：舊版 pending 的漏洞之一就是「重整後沒先進洞察表就不處理」。
+//   必須等雲端就緒（window.__insightCloudReady）：5 秒 fallback 離線開站時 localStorage 就是資料本身，不能清。
+window.__insightLegacyMigrate = function () {
+  if (window.__insightLegacyMigrated || !window.__insightCloudReady) return;
+  const app = window.App;
+  const user = app && app.currentUser;
+  if (!user) return;
+  window.__insightLegacyMigrated = true;
+  let res;
+  try { res = _insightLegacyBackupRun(window.localStorage, user.name || user.username || '', new Date().toISOString()); }
+  catch (e) { console.error('[洞察表] 舊版待同步備份失敗，名單與本機副本都沒清，下次開機再試', e); return; }
+  if (res.count) console.warn('[洞察表] 舊版待同步已備份到 ' + INS_LEGACY_BACKUP_KEY + '（' + res.count + ' 個通路），console 打 __insightLegacyBackupShow() 查看');
+  if (res.message) showToast(res.message, 'error', 10000);
+};
+// 只讀：在 console 印出舊版待同步的備份（給 Keani 協助補回時查看），不寫任何東西
+window.__insightLegacyBackupShow = function () {
+  let raw = null;
+  try { raw = window.localStorage.getItem(INS_LEGACY_BACKUP_KEY); } catch {}
+  if (!raw) { console.log('[洞察表] 這台電腦沒有舊版待同步的備份'); return null; }
+  let v;
+  try { v = JSON.parse(raw); } catch { console.log('[洞察表] 備份內容（無法解析，原文）', raw); return raw; }
+  console.log('%c[洞察表] 舊版待同步備份（只讀）', 'color:#b45309;font-weight:700', v);
+  return v;
 };
 
 // 洞察表分類判定：原本內嵌在 _updateDailyProgressFromAdjustments，抽到模組層

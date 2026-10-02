@@ -866,6 +866,10 @@ const App = {
       window.__pendingFirstRender = false;
       setTimeout(() => { try { this.render(); } catch {} }, 0);
     }
+    // 6) #269 第 4 塊：舊版洞察表待同步只備份不補（登入、開站還原 session 都經過這裡；雲端還沒就緒會自己略過，
+    //    等 __setupCloud 結尾再叫一次；跑過一次就不再跑）
+    try { if (typeof window.__insightLegacyMigrate === 'function') window.__insightLegacyMigrate(); }
+    catch (e) { console.warn('[insight legacy]', e); }
   },
 
   _isRouteAllowed(route, user) {
@@ -967,12 +971,10 @@ const App = {
   },
 
   /* ------------- 路由 ------------- */
-  // 偵測目前是否有任何「本機已寫但還沒推雲端」的內容（洞察表 / 淨利表 / 工作日誌）
+  // 偵測目前是否有任何「本機已寫但還沒推雲端」的內容（淨利表 / 工作日誌 / 每日營收）
+  //   洞察表已改成存一筆寫一筆（#269），沒有本機待同步，不再列入
   _checkUnsyncedSources() {
     const reasons = [];
-    if (window.__insightPendingNotes && window.__insightPendingNotes.size > 0) {
-      reasons.push(`洞察表（${window.__insightPendingNotes.size} 個賣場）`);
-    }
     // 淨利表：讀真實 pending 計數（排除 shop marker）
     const profitPending = typeof window.__profitPendingCount === 'function' ? window.__profitPendingCount() : 0;
     if (profitPending > 0) {
@@ -994,17 +996,18 @@ const App = {
     return reasons;
   },
 
-  // 側欄未同步圓點：直接讀三個記憶體旗標（不呼叫 _checkUnsyncedSources，避免它連帶做 DOM 查詢）。
+  // 側欄未同步圓點：直接讀記憶體旗標（不呼叫 _checkUnsyncedSources，避免它連帶做 DOM 查詢）。
   //   每項都防禦性檢查：物件/函式可能還沒定義；讀取失敗一律當「沒有待同步」，例外絕不外拋。
   //   dashboard（每日營收）刻意不做：它靠 DOM dirty 判斷、跨頁偵測不到。
+  //   洞察表（#269 起存一筆寫一筆、沒有本機待同步）固定不亮；仍呼叫 setDot(…, false) 把舊版殘留的圓點關掉。
   updateSidebarSyncDots() {
     const setDot = (route, on) => {
       const btn = document.querySelector(`.nav-item[data-route="${route}"]`);
       const dot = btn && btn.querySelector('.nav-dot');
       if (dot) dot.hidden = !on;
     };
-    let insight = false, profit = false, dp = false;
-    try { insight = !!(window.__insightPendingNotes && window.__insightPendingNotes.size > 0); } catch {}
+    const insight = false;
+    let profit = false, dp = false;
     try { profit = typeof window.__profitPendingCount === 'function' && window.__profitPendingCount() > 0; } catch {}
     try { dp = !!(window.__dpPendingNames && window.__dpPendingNames.size > 0); } catch {}
     setDot('office-d1-insight', insight);
@@ -2941,22 +2944,9 @@ async function __setupCloud() {
     // 保險：雲端若殘留 session 就忽略，避免授權外洩
     delete cloudData[Store.KEYS.session];
 
-    // 初次雲端載入：若 localStorage 有 pending 未同步的 key，用本機版本覆蓋雲端（否則
-    // 使用者上次本機刪除的內容會被雲端舊資料蓋回來）
-    try {
-      const pendingRaw = localStorage.getItem('ec.insightPendingNotes');
-      if (pendingRaw) {
-        const pending = JSON.parse(pendingRaw);
-        if (Array.isArray(pending)) {
-          pending.forEach(pk => {
-            try {
-              const localRaw = localStorage.getItem(pk);
-              if (localRaw !== null) cloudData[pk] = JSON.parse(localRaw);
-            } catch {}
-          });
-        }
-      }
-    } catch {}
+    // #269：這裡原本會把 localStorage 的洞察表待同步版本（ec.insightPendingNotes）放進 cloudData，已拆。
+    //   它其實早就沒效：下面「3：per-shop docs」的 Object.assign(cloudData, insightPerShopData) 會再蓋回雲端版本。
+    //   舊版留下的待同步改由 window.__insightLegacyMigrate（js/pages/marketing.js）在開機時只備份、不補回。
 
     // ============== 洞察表資料：多來源合併進 Store._mem ==============
     // 讀取優先序（後面覆蓋前面 → per-shop 最新）：
@@ -3069,6 +3059,7 @@ async function __setupCloud() {
 
     Store._mem = cloudData;
     Store._useMem = true;
+    window.__insightCloudReady = true;   // #269：雲端資料已就緒（舊版待同步的備份要等到這之後才跑，見 __insightLegacyMigrate）
 
     // 蓋掉 Store.get/set/remove：
     //   - session 一律走 localStorage（避免跨裝置共用登入狀態）
@@ -3241,30 +3232,14 @@ async function __setupCloud() {
         }
       });
       if (filteredOut.length) console.warn('[subscribe] filtered out recently deleted:', filteredOut);
-      // 保護本機未同步的洞察表 notes：若 pending 中的 key 在 next 也有，保留本機版本
-      // 否則使用者編輯到一半就被別人雲端版本蓋掉
-      const pending = window.__insightPendingNotes;
-      if (pending && pending.size > 0) {
-        pending.forEach(k => {
-          if (Store._mem && Store._mem[k] !== undefined) next[k] = Store._mem[k];
-        });
-      }
+      // #269：原本這裡前後各有一段「洞察表 pending 未同步的 notes 保留本機版本」，已拆（洞察表改成存一筆寫一筆，
+      //   沒有本機待同步）。中間的 _platformJustSaved 保護與洞察表無關，原樣保留。
       // 保護「剛剛在本機存的營收 / 廣告費」：若 2 秒內剛 commit 過，
       //   雲端 snapshot 可能還沒包含我們的寫入 → 用本機 _mem 覆蓋 next，避免值消失
       const justSavedPlatforms = window._platformJustSaved && (Date.now() - window._platformJustSaved < 2000);
       if (justSavedPlatforms && Store._mem && Store._mem[Store.KEYS.platforms] !== undefined) {
         next[Store.KEYS.platforms] = Store._mem[Store.KEYS.platforms];
       }
-      // 保護「洞察表 pending 未同步的 note key」：使用者已本機刪過調整但還沒按☁同步，
-      //   雲端還有舊資料，若讓 next 覆蓋會讓「已刪除」的調整跑回來
-      try {
-        const pending = window.__insightPendingNotes;
-        if (pending && pending.size > 0 && Store._mem) {
-          pending.forEach(pk => {
-            if (Store._mem[pk] !== undefined) next[pk] = Store._mem[pk];
-          });
-        }
-      } catch {}
       // 保留 ec.insight_* — v154 起 insight 資料住在 app/insight_{shop} 獨立 doc，
       //   不在 next（app/main）裡。直接 Store._mem = next 會把 insight 全部清掉，
       //   洞察表變空白直到使用者重新整理再走一次 __setupCloud 合併三個來源才恢復。
@@ -3281,6 +3256,7 @@ async function __setupCloud() {
       //   只要任何人動了 app/main 任何一個欄位，這個 subscribe 就 fire，_mem 被雲端版整個取代，
       //   那些字在「按同步之前」就已經沒了。（更糟的是按下去推的是已被洗掉的版本，還會跳「已同步 ✓」。）
       //
+      // （#269 起洞察表的 __insightPendingNotes 機制已整套拆掉；下面兩段提到它的地方保留當歷史對照。）
       // 🔴 這【不是】照抄上面 __insightPendingNotes 那段，語義不一樣，review 時請不要當成等價改動：
       //   ・__insightPendingNotes 裝的是【key】（'ec.insight_玩樂_notes'）→ 一個 pending 只凍結
       //     一個賣場的 notes，其他賣場照常收雲端更新，傷害被 key 的粒度框住。
@@ -3412,13 +3388,10 @@ async function __setupCloud() {
     const perShopMergeHandler = (idata, shop) => {
       if (!idata) return;
       try {
-        const pending = window.__insightPendingNotes;
-        const skipped = [];
+        // #269：不再跳過「待同步」的 key（洞察表改成存一筆寫一筆，沒有本機待同步），雲端一律合併進來
         Object.keys(idata).forEach(k => {
-          if (pending && pending.has && pending.has(k)) { skipped.push(k); return; }
           if (Store._mem) Store._mem[k] = idata[k];
         });
-        if (skipped.length) console.warn('[insight subscribe][per-shop] 跳過 pending:', skipped);
         // #269 第 5 塊：洞察表調整彈窗開著、而且是這個通路 → 彈窗跟著雲端更新（js/pages/marketing.js）
         try { if (typeof window.__insightNotesCloudUpdated === 'function') window.__insightNotesCloudUpdated(shop); }
         catch (e) { console.warn('[insight subscribe per-shop] 彈窗更新失敗', e); }
@@ -3445,6 +3418,9 @@ async function __setupCloud() {
     console.error('Cloud setup failed, falling back to localStorage', e);
   }
   __bootApp();
+  // #269 第 4 塊：舊版洞察表待同步只備份不補（條件不齊會自己略過；已登入的情況在這裡跑，否則等 enterApp）
+  try { if (typeof window.__insightLegacyMigrate === 'function') window.__insightLegacyMigrate(); }
+  catch (e) { console.warn('[insight legacy]', e); }
 }
 
 if (window.__cloudStore) {
