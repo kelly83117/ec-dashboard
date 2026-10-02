@@ -61,11 +61,14 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    ⚠ 這段防護碼**刻意不存在於 repo 裡**：`grep TEST_NOWRITE` 零命中是**正確狀態**，不是異常，
    不要因為搜不到就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「TEST_NOWRITE v2 已啟用：21 個物件 / 33 個寫入方法已停用」**，才能放心測。
-   **判斷標準是「物件數對不對」：必須是 21**（2026-09-30 實測：PChome #314 加了 `__cloudPchomeOrders` /
-   `__cloudPchomeOptlog` / `__cloudPchomeHistory`（各 `setField` + `removeFields`）之後；加之前是 18 物件 / 27 方法，
-   再之前 2026-09-23 加 `__cloudKpi` 前是 17 / 25）。
-   方法數 33 同日實測，只當參考；下方 table 的條數**以工具實際印出的為準**。
+   **「TEST_NOWRITE v2 已啟用：23 個物件 / 38 個寫入方法已停用」**，才能放心測。
+   **判斷標準是「物件數對不對」：必須是 23**（2026-10-02 離線重數：`56f8aa1`（2026-10-01）加了
+   `__cloudPchomeProducts` / `__cloudPchomeRecon`（各 `setField` + `removeFields`）→ 21 變 23，當時這裡沒跟著改；
+   #269 第 2 塊在 `__cloudInsightByShop` 第一層加了 `updateNoteTx`（物件數不變、寫入方法 +1）。
+   再之前：2026-09-30 PChome #314 加 `__cloudPchomeOrders` / `__cloudPchomeOptlog` / `__cloudPchomeHistory` 後是 21 / 33，
+   加之前是 18 物件 / 27 方法；2026-09-23 加 `__cloudKpi` 前是 17 / 25）。
+   方法數 38 是**推算**（21 / 33 時的實測值 + PChome 兩物件 4 支 + `updateNoteTx` 1 支），還沒用防護碼實際跑過，
+   **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
    開機時會攔到 2 筆既有寫入（`__cloudStore.removeFields` 清 `ec.insight_*` 殘留、`setField` `ec.seeded.v5`），屬正常。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
@@ -77,13 +80,16 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    ⚠ v2 防護碼的 MUST 清單要含 `['__cloudKpi', 'writePaths']`、`['__cloudKpi', 'smokeWritePaths']`，
    以及 `['__cloudPchomeOrders', 'setField']`、`['__cloudPchomeOrders', 'removeFields']`、
    `['__cloudPchomeOptlog', 'setField']`、`['__cloudPchomeOptlog', 'removeFields']`、
-   `['__cloudPchomeHistory', 'setField']`、`['__cloudPchomeHistory', 'removeFields']`，
-   物件下限改 21，否則新物件沒有 fail-loud 保護。
+   `['__cloudPchomeHistory', 'setField']`、`['__cloudPchomeHistory', 'removeFields']`、
+   `['__cloudPchomeProducts', 'setField']`、`['__cloudPchomeProducts', 'removeFields']`、
+   `['__cloudPchomeRecon', 'setField']`、`['__cloudPchomeRecon', 'removeFields']`、
+   `['__cloudInsightByShop', 'updateNoteTx']`，
+   物件下限改 23，否則新物件沒有 fail-loud 保護。
    ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
    （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
    `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
    放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
-3. 沒看到這行紅字、或**物件數不是 21** → **絕對不要繼續操作，立刻關閉分頁**。
+3. 沒看到這行紅字、或**物件數不是 23** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 
 ⚠ **物件數會隨著新增雲端物件而變**（曾經是 4 物件 / 9 方法，早就過期）。不要當常數背，
@@ -96,7 +102,7 @@ grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js
 **這不是理論上的可能性 —— 2026-08-12 的實例**：當天 17:39 這份文件才把物件數更正成 13
 （commit `465a799`），**同一天** 23:31 同事的 `__cloudE001` 就 merge 進 main（PR #146，
 commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**。所以永遠當場重數，
-不要相信文件上的數字（包括上面那個 21）。
+不要相信文件上的數字（包括上面那個 23）。
 
 🔴 字元集一定要用 `[A-Za-z0-9_]`，**不能**寫成 `[A-Za-z_]` —— 舊寫法吃不到數字，會漏掉
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
@@ -166,6 +172,17 @@ ESM 有個致命陷阱必須牢記：
 - `app/kpi` — KPI 月結表（`months.{YYYY-MM}.{路徑}` + `meta.{YYYY-MM}.{路徑}={by,at}`）。
   透過 `window.__cloudKpi.writePaths` **逐格 FieldPath 寫入**、多人同時填不互蓋；記憶體仍轉回
   `Store._profitMem._kpi_v1` 陣列供讀取端用。舊的 `app/profit._kpi_v1` 是搬移前的備份，**不要再寫它**。
+- `app/insight_{shop}`（玩樂 / 好麻吉 / 森之旅 / 維克）— 洞察表資料，每通路一份 doc，欄位名是**含點的字面 key**
+  `ec.insight_{shop}_{master|weeks|notes|perf}`，透過 `window.__cloudInsightByShop` 存取。
+  調整紀錄（`_notes`，形狀 `{ 品號: { text, adjustments:[{date,text,by?,editedBy?,editedAt?,opId?}] } }`）
+  另有 `updateNoteTx(shop, code, applyFn)`：runTransaction 讀這個商品 → `applyFn` 算新內容 → **只寫回這一個商品**
+  （`FieldPath(notesKey, code)` 兩段，notesKey 必須當單一段）。回傳 `{ ok, missing, changed, already, entry, error, unknown }`；
+  被唯讀 / 本機防護擋下時回 `undefined`，呼叫端一律 `r && r.ok`。`applyFn` 用 marketing.js 的純函式
+  `_insNoteApplyOps`（一次交易套多個 op，底層是 `_insNoteApplyOp`）。
+  **洞察表調整彈窗（`openInsightNoteModal`）存一筆寫一筆**（#269）：新增 / 編輯 / 刪除 / 長期備註各自一個交易，
+  沒有「本機待同步」、也沒有洞察表的「☁ 同步雲端」鈕了。新增帶 `opId`（沒確認的輸入重按沿用同一個，交易重跑不會重複）；
+  長期備註只在失焦 / 關窗時寫，帶 `base` 做 compare-and-set（別人剛改過就不蓋、提示）。
+  詳細的寫入期間畫面、提示文字、草稿（`ec.insightNoteDrafts`）見 marketing.js `openInsightNoteModal` 與 `_insNoteResultMsg`。
 - `profits` collection — 每月每賣場一份獨立 doc（doc id 用 `__` 取代 `/`）。
 - 含 `.` 的字面欄位用 Firestore **REST API + backtick escape** 刪除
   （SDK 的 `updateDoc` 搭 `FieldPath` 不一定刪得掉），見 `firebase.js`
@@ -177,6 +194,15 @@ ESM 有個致命陷阱必須牢記：
 - 首批快照 (`__firstCloudSnapshot`) 一律強制重繪，否則手機開頁會卡在空資料。
 - 本機剛存過 (`_platformJustSaved` 等 2 秒內) 跳過雲端 bounce-back 重複重繪。
 - `session` 是本機獨有、**不上雲**的 key（避免一人登入別人也跟著登入）。
+- 洞察表（#269 起）：per-shop 訂閱把 `app/insight_{shop}` 合併進 `Store._mem` 後呼叫
+  `window.__insightNotesCloudUpdated(shop)`，開著的調整彈窗跟著更新（編輯中那一格延後、新增輸入框不動、
+  長期備註聚焦或有未存變動時只顯示「雲端已有更新」）；整頁重繪只限目前看的通路。訂閱不再跳過任何「待同步」key。
+- 舊版洞察表待同步（`ec.insightPendingNotes` + 本機 `ec.insight_{shop}_notes` 副本）：新版開機、雲端就緒、登入後
+  只備份到 `ec.insightLegacyBackup.v1`（不自動刪、不補回雲端）再清掉，console 打 `__insightLegacyBackupShow()` 只讀查看。
+- ⚠ 部署 #269 這版時：`version.js` 只在開頁時比版號、不會輪詢，**已經開著的舊分頁仍跑舊程式**，按舊的「☁ 同步雲端」
+  會整份蓋掉通路 notes（含新版剛寫進去的紀錄）。部署後要請所有人重新整理。
+- 工作日誌連動（過渡做法）：洞察表調整彈窗關窗時，本次有成功寫入就推一次 `ec.dailyProgress`（`pushToCloud:true`），
+  仍是**整把覆蓋所有人 × 所有日期**；根治待需求 3 第 3 段改成即時計算。
 
 ### localStorage / `Store`
 - `Store` 是 localStorage 包裝層（含 `_mem` / `_profitMem` 記憶體鏡像）。
@@ -249,6 +275,8 @@ localStorage 啟動。
 
 **「產生報表」和「同步」之間是斷的，靠人手動接。** 產完報表**一定要按
 「☁ 同步雲端」**，否則資料只在本機 localStorage / 記憶體，不會上 Firestore。
+（例外：洞察表的**調整紀錄 / 長期備註**自 #269 起存一筆寫一筆，按下就直接寫雲端，沒有同步鈕；
+洞察表的上傳檔案（母表 / 銷售 / 商品表現）不在此列。）
 
 ## 工作流程
 
