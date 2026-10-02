@@ -2920,7 +2920,18 @@ async function __setupCloud() {
   try {
     const cs = window.__cloudStore;
     if (!cs) throw new Error('cloudStore not available');
-    const snap = await cs.getDoc();
+    // #274：開站的 6 份讀取（app/main、app/insight、4 家 app/insight_{shop}）在這裡【同時送出】，
+    //   下面仍照原本的順序逐一取用 → 合併順序、誰蓋誰、遷移 A/B、清舊欄位、失敗處理（warn 的位置）全都跟串行時一樣。
+    //   不用 Promise.all：它一份失敗就整批失敗（原本是某一家失敗只略過那一家）；app/main 先失敗時其餘幾份也會變成沒人接的 rejection。
+    //   所以每份先用 __settle 把成敗收起來（同步拋出的例外也收），取用時 __take 才把錯誤丟回原本的 try/catch。
+    //   代價：app/main 讀失敗時，其餘 5 份照樣讀了（結果丟掉）。
+    const __settle = (f) => { let p; try { p = Promise.resolve(f()); } catch (e) { p = Promise.reject(e); } return p.then(v => ({ v }), e => ({ e })); };
+    const __take = async (p) => { const r = await p; if ('e' in r) throw r.e; return r.v; };
+    const __byShop = window.__cloudInsightByShop;
+    const pMain = __settle(() => cs.getDoc());
+    const pInsight = window.__cloudInsight ? __settle(() => window.__cloudInsight.getDoc()) : null;
+    const pShops = (__byShop && Array.isArray(__byShop.shops)) ? __byShop.shops.map(s => __settle(() => __byShop.getDocForShop(s))) : null;
+    const snap = await __take(pMain);
     let cloudData = snap.exists() ? (snap.data() || {}) : {};
 
     // 首次遷移：雲端無資料但本機有 → 將本機 localStorage 上傳到雲端（session 除外）
@@ -2956,8 +2967,8 @@ async function __setupCloud() {
     // → 舊資料自動讀得到 + 新寫入走 per-shop
     let insightData = {};
     try {
-      if (window.__cloudInsight) {
-        const iSnap = await window.__cloudInsight.getDoc();
+      if (pInsight) {   // #274：讀取已在開頭送出，這裡只取用
+        const iSnap = await __take(pInsight);
         insightData = iSnap.exists() ? (iSnap.data() || {}) : {};
       }
     } catch (e) { console.warn('[insight] app/insight 讀取失敗', e); }
@@ -2966,10 +2977,11 @@ async function __setupCloud() {
     // 3：per-shop docs（優先，覆蓋 1 & 2）
     const insightPerShopData = {};
     try {
-      if (window.__cloudInsightByShop && Array.isArray(window.__cloudInsightByShop.shops)) {
-        for (const s of window.__cloudInsightByShop.shops) {
+      if (pShops) {
+        // #274：讀取已在開頭同時送出；這裡仍照 shops 順序取用、合併（後面的店蓋前面），跟回來的先後無關
+        for (const [i, s] of __byShop.shops.entries()) {
           try {
-            const snap = await window.__cloudInsightByShop.getDocForShop(s);
+            const snap = await __take(pShops[i]);
             if (snap.exists && snap.exists()) {
               const d = snap.data() || {};
               Object.assign(insightPerShopData, d);
