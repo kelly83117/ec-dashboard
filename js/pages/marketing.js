@@ -1953,7 +1953,8 @@ Object.assign(App, {
       if (ops.length) writeOps(ops, kind, text ? { addText: text } : null);
       queue.then(() => {
         if (wroteAny) {
-          try { this._updateDailyProgressFromAdjustments({ pushToCloud: true }); } catch (e) { console.warn('[close->dp]', e); }
+          // silent：不跳「已自動更新工作日誌」，避免蓋掉剛才的「✓ 已加入／已儲存」（toast 只有一個位置）；推送照常
+          try { this._updateDailyProgressFromAdjustments({ pushToCloud: true, silent: true }); } catch (e) { console.warn('[close->dp]', e); }
           this.render();
           restoreRowOrder();
         }
