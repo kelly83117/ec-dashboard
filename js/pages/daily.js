@@ -2005,7 +2005,7 @@ Object.assign(App, {
 // collectAdjustments() — 純函式：把淨利表報表 built[]/rows[] 裡 row.note 的
 //   自由文字，依內嵌「月/日」切成一段一段的調整紀錄。不經 ec.dailyProgress
 //   摘要層、不碰任何 render / bind，只掛 window 供 Console / 日後功能取用。
-//   回傳：[{ date:'YYYY/MM/DD'|null, shop, code, name, text }]
+//   回傳：[{ date:'YYYY/MM/DD'|null, shop, code, name, text, src, by? }]（by＝登入 username，非姓名；沒有就不帶）
 //   ⚠ date 為 null（note 裡沒有可辨識日期）的段一律保留，不丟。
 // ============================================================================
 function collectAdjustments() {
@@ -2020,10 +2020,13 @@ function collectAdjustments() {
   let labelErrCount = 0;   // calc throw 的列數，迴圈後統一 warn 一次（別每列洗版）
   const repIdx = {};   // 第二趟用：{ 'shop|month|half': { code: row } }，第一趟順手建、不重掃
   const nameIdx = {};  // 通路級：'通路' → {code: 商品名}。名字與期間無關，所有來源共用
-  // 所有來源的唯一出口：統一去重 + push。dk 公式與原本完全相同。
+  // 所有來源的唯一出口：統一去重 + push。dk 前面加了欄位（#270，見下方）。
   const _pushRec = (rec) => {
     if (!rec.text) return;
-    const dk = rec.shop + '␟' + (rec.code || '') + '␟' + (rec.date || '') + '␟' + rec.text;
+    // #270：商品調整(growth)與廣告調整欄是兩個欄位，同 shop/code/date/text 不算重複；
+    //   廣告調整欄內 report/ads/import 互撞仍合併（2026/06 舊版匯入的重複副本）。
+    const col = rec.src === 'growth' ? 'growth' : 'ads';
+    const dk = col + '␟' + rec.shop + '␟' + (rec.code || '') + '␟' + (rec.date || '') + '␟' + rec.text;
     if (seen.has(dk)) return;
     seen.add(dk);
     out.push(rec);
@@ -2143,11 +2146,12 @@ function collectAdjustments() {
         const period = isGrowth ? window._growthPeriodOf(a) : fixedPeriod;
         const row = (period && repIdx[shop + '|' + period]) ? repIdx[shop + '|' + period][code] : null;
         const L = _labelsOf(row);
+        const by = (a && typeof a.by === 'string') ? a.by.trim() : '';
         _pushRec({
           date, shop, code, name: (row && row.name) || (nameIdx[shop] && nameIdx[shop][code]) || '', text,
           anaAll: L.anaAll, anaLabel: L.anaLabel, anaCls: L.anaCls,
           growthLabel: L.growthLabel, growthCls: L.growthCls,
-          period: period || '', src
+          period: period || '', src, ...(by ? { by } : {})
         });
       });
     });
