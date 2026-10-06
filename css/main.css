@@ -46,6 +46,22 @@
        （profit.js showMapWarnBanner 的 inline z-index:9999），否則橫幅蓋住明細標題與 ✕；
        又要低於 --z-toast，彈窗開著時 toast 照樣看得見。 */
     --z-reconcile-detail: 10000;
+    /* 首頁「歷年營收比較 · 趨勢比較」：年份線條色，依全部年份「新到舊」固定對應（第 6 年起沿用 5）。
+       dashboard.js _revHistInitChart 以 getComputedStyle 讀出後傳給 Chart.js；年份按鈕前的色條也用這組。 */
+    --rh-yr-1: #4f46e5;
+    --rh-yr-2: #0ea5e9;
+    --rh-yr-3: #f59e0b;
+    --rh-yr-4: #a855f7;
+    --rh-yr-5: #94a3b8;
+    /* 淡旺季 7 級色塊（≤70 / 71–85 / 86–95 / 96–104 / 105–114 / 115–129 / ≥130）：
+       低於 100 藍、高於 100 橘、中間淺灰；刻意不用紅綠（那是漲跌色）。文字一律 --text。 */
+    --rh-season-1: #93c5fd;
+    --rh-season-2: #bfdbfe;
+    --rh-season-3: #dbeafe;
+    --rh-season-4: #f1f5f9;
+    --rh-season-5: #ffedd5;
+    --rh-season-6: #fed7aa;
+    --rh-season-7: #fdba74;
   }
 
   * { box-sizing: border-box; }
@@ -1410,6 +1426,93 @@
     text-align: center;
     font-size: 13px;
     color: var(--text-muted);
+  }
+  .rev-hist-empty.is-compact { padding: 12px; }
+
+  /* ── 歷年營收比較 · 趨勢比較（塊 3）── 表格沿用上面 .rev-hist-table（含 profit.css 全域 th/td 的覆寫） */
+  /* 年度總表表頭的通路名：連結樣式，點了跳趨勢比較 */
+  .rev-hist-chlink {
+    border: 0;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-weight: 700;
+    color: var(--primary);
+    cursor: pointer;
+  }
+  .rev-hist-chlink:hover { text-decoration: underline; }
+  /* 年份按鈕：前面一小段線條色；選中用淺底（實心主色底會蓋掉最新年份的同色色條） */
+  .rev-hist-yr-1 { --rh-line: var(--rh-yr-1); }
+  .rev-hist-yr-2 { --rh-line: var(--rh-yr-2); }
+  .rev-hist-yr-3 { --rh-line: var(--rh-yr-3); }
+  .rev-hist-yr-4 { --rh-line: var(--rh-yr-4); }
+  .rev-hist-yr-5 { --rh-line: var(--rh-yr-5); }
+  .rev-hist-swatch {
+    display: inline-block;
+    width: 14px;
+    height: 3px;
+    margin-right: 6px;
+    border-radius: 2px;
+    vertical-align: middle;
+    background: var(--rh-line, var(--text-muted));
+    opacity: .35;
+  }
+  .rev-hist-chip.rev-hist-yrchip.is-active {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .rev-hist-yrchip.is-active .rev-hist-swatch { opacity: 1; }
+  .rev-hist-yrchip.is-locked { cursor: not-allowed; }
+  /* 淡旺季卡片 */
+  .rev-hist-season {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin-bottom: 12px;
+  }
+  .rev-hist-season-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .rev-hist-season-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    margin-right: 2px;
+  }
+  .rev-hist-tag {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .rev-hist-tag.is-peak { background: var(--rh-season-6); }
+  .rev-hist-tag.is-low { background: var(--rh-season-2); }
+  .rev-hist-season-table td { text-align: center; font-variant-numeric: tabular-nums; }
+  .rev-hist-season-table thead th { text-align: center; }
+  .rev-hist-season-table thead .rev-hist-month { text-align: left; }
+  .rev-hist-season-table tr.is-avg > * { font-weight: 700; }
+  .rev-hist-season-table tr.is-avg > * { border-top: 2px solid var(--border); }
+  /* 色階：選擇器要壓過 .rev-hist-table tbody tr:hover > *（hover 時維持色塊） */
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-1 { background: var(--rh-season-1); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-2 { background: var(--rh-season-2); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-3 { background: var(--rh-season-3); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-4 { background: var(--rh-season-4); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-5 { background: var(--rh-season-5); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-6 { background: var(--rh-season-6); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-7 { background: var(--rh-season-7); }
+  /* 並排表：月份欄固定約 72px，剩下寬度由各年份欄分（只勾一年時月份欄不會被撐到一半寬）。
+     維持 auto 版面（不用 table-layout:fixed）：窄螢幕時欄位仍以內容寬為下限，交給 .rev-hist-scroll 左右捲動。 */
+  .rev-hist-trend-table .rev-hist-month { width: 72px; }
+  .rev-hist-trend-chart { margin-bottom: 12px; }
+  .rev-hist-chart-wrap {
+    position: relative;
+    height: 280px;
   }
 
   /* 篩選列 */

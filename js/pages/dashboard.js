@@ -83,6 +83,160 @@ function _rhTableModel(built, year, cmp, cutoff) {
     + (partialIdx != null ? '（' + (partialIdx + 1) + ' 月尚未結束' + (cmp != null ? '，不比較' : '') + '）' : '');
   return { year, cmp, columns, rows, foot, caption, partialIdx };
 }
+
+/* ── 趨勢比較（塊 3）── ch 為通路名，或 _RH_ALL＝全通路（各通路逐月加總） */
+const _RH_ALL = '__all__';
+const _RH_MONTHS = Object.freeze(['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']);
+function _rhSeries(built, year, ch) {
+  const row = (built.data && built.data[year]) || {};
+  if (ch === _RH_ALL) {
+    const arrs = Object.values(row);
+    return Array.from({ length: 12 }, (_, m) => _rhSum(arrs.map(a => a[m])));
+  }
+  return row[ch] ? row[ch].slice() : new Array(12).fill(null);
+}
+// 淡旺季用的「完整年度」：整年已結束，且
+//   單一通路 → 12 個月都有值且 > 0；全通路 → 「不滿 12 個月的通路」合計佔該年總額 < 5%
+function _rhIsCompleteYear(built, year, ch, cutoff) {
+  if (!_rhIsFullYear(cutoff, year)) return false;
+  const full12 = a => a.every(v => v != null && v > 0);
+  if (ch !== _RH_ALL) return full12(_rhSeries(built, year, ch));
+  let total = 0, partial = 0;
+  Object.values((built.data && built.data[year]) || {}).forEach(a => {
+    const s = _rhSum(a) || 0;
+    total += s;
+    if (!full12(a)) partial += s;
+  });
+  return total > 0 && partial / total < 0.05;
+}
+// 月份索引 → 「1–2月、10–12月」；連續合併、不連續用頓號；空 → 不明顯
+function _rhMonthRanges(idxs) {
+  const s = [...new Set(idxs)].sort((a, b) => a - b);
+  if (!s.length) return '不明顯';
+  const out = [];
+  let st = s[0], pv = s[0];
+  for (let i = 1; i <= s.length; i++) {
+    if (s[i] === pv + 1) { pv = s[i]; continue; }
+    out.push(st === pv ? (st + 1) + '月' : (st + 1) + '–' + (pv + 1) + '月');
+    st = pv = s[i];
+  }
+  return out.join('、');
+}
+// 淡旺季指數 → 色階 1～7（≤70 / 71–85 / 86–95 / 96–104 / 105–114 / 115–129 / ≥130）
+function _rhSeasonLevel(v) {
+  if (v <= 70) return 1;
+  if (v <= 85) return 2;
+  if (v <= 95) return 3;
+  if (v <= 104) return 4;
+  if (v <= 114) return 5;
+  if (v <= 129) return 6;
+  return 7;
+}
+// 淡旺季：指數＝該月 ÷ 該年月平均 × 100。歷年平均＝各年「未四捨五入」指數取平均後才四捨五入
+function _rhSeasonModel(built, yrs, ch, cutoff) {
+  const full = [...yrs].sort((a, b) => b - a).filter(y => _rhIsCompleteYear(built, y, ch, cutoff));
+  if (!full.length) return { empty: true, rows: [], peak: '', low: '', basis: [] };
+  const raws = full.map(y => {
+    const a = _rhSeries(built, y, ch);
+    const avg = _rhSum(a) / 12;
+    return a.map(v => (v / avg) * 100);
+  });
+  const rows = full.map((y, i) => ({ label: String(y), avg: false, values: raws[i].map(Math.round) }));
+  let ref = raws[0];
+  if (full.length >= 2) {
+    ref = Array.from({ length: 12 }, (_, m) => raws.reduce((s, r) => s + r[m], 0) / raws.length);
+    rows.push({ label: '歷年平均', avg: true, values: ref.map(Math.round) });
+  }
+  const refR = ref.map(Math.round);
+  const pick = test => refR.map((v, m) => (test(v) ? m : -1)).filter(m => m >= 0);
+  return {
+    empty: false,
+    rows: rows.map(r => ({ ...r, levels: r.values.map(_rhSeasonLevel) })),
+    peak: _rhMonthRanges(pick(v => v >= 110)),
+    low: _rhMonthRanges(pick(v => v <= 90)),
+    basis: full,
+  };
+}
+// this.filter 的通路 / 勾選年份 → 合法值（預設全通路、最新 4 年；年份新到舊）
+function _rhPickTrend(built, fCh, fYrs) {
+  const ch = (fCh === _RH_ALL || (built.channels || []).includes(fCh)) ? fCh : _RH_ALL;
+  let yrs = Array.isArray(fYrs) ? fYrs.filter(y => built.years.includes(y)) : [];
+  if (!yrs.length) yrs = built.years.slice(0, 4);
+  return { ch, yrs: [...new Set(yrs)].sort((a, b) => b - a) };
+}
+// 折線圖資料：每個勾選年份一條線；累計中 / 未來月份（索引 ≥ 已結束月數 N）一律 null 不畫
+function _rhTrendChartData(built, yrs, ch, cutoff) {
+  const lines = yrs.map((y, i) => {
+    const N = _rhClosedMonths(cutoff, y);
+    const s = _rhSeries(built, y, ch);
+    return {
+      year: y,
+      data: s.map((v, m) => (m < N ? v : null)),
+      colorIdx: Math.min(built.years.indexOf(y) + 1, 5),   // 依「全部年份新到舊」固定配色，取消勾選不換色
+      newest: i === 0,
+    };
+  });
+  const cutY = typeof cutoff === 'string' ? +cutoff.slice(0, 4) : null;
+  const p = cutY != null && yrs.includes(cutY) && built.partial ? built.partial[cutY] : null;
+  return { labels: _RH_MONTHS.slice(), lines, partialIdx: p != null ? p : null };
+}
+// 並排表：欄＝勾選年份（新到舊），每格與「前一年同月」比（前一年沒勾也比）。
+//   前一年不在 build 年份裡 → 該年整欄不顯示成長率；前一年在但沒資料 → 照 _rhGrowth 顯示「新」或不顯示
+function _rhTrendTableModel(built, yrs, ch, cutoff) {
+  const cutY = typeof cutoff === 'string' ? +cutoff.slice(0, 4) : null;
+  const cols = yrs.map(y => {
+    const hasPrev = built.years.includes(y - 1);
+    return {
+      year: y, hasPrev,
+      cur: _rhSeries(built, y, ch),
+      base: hasPrev ? _rhSeries(built, y - 1, ch) : null,
+      N: _rhClosedMonths(cutoff, y),
+      baseN: _rhClosedMonths(cutoff, y - 1),
+      partialIdx: (built.partial && built.partial[y] != null) ? built.partial[y] : null,
+    };
+  });
+  const gr = (c, cur, base) => (c.hasPrev ? _rhGrowth(cur, base) : null);
+  const rows = Array.from({ length: 12 }, (_, m) => {
+    const partial = cols.some(c => c.partialIdx === m);
+    return {
+      label: _RH_MONTHS[m] + (partial ? '＊' : ''), partial,
+      cells: cols.map(c => {
+        const v = c.cur[m];
+        if (c.partialIdx === m) return { value: v, growth: v == null ? null : { kind: 'partial', text: '累計中' } };
+        return { value: v, growth: gr(c, v, c.base && c.base[m]) };
+      }),
+    };
+  });
+  const foot = [];
+  const Ncut = cutY != null ? _rhClosedMonths(cutoff, cutY) : 12;
+  if (cutY != null && yrs.includes(cutY) && Ncut >= 1 && Ncut <= 11) {
+    foot.push({ key: 'cum', label: '1～' + Ncut + '月累計', cells: cols.map(c => {
+      const v = _rhSum(c.cur.slice(0, Ncut));
+      return { value: v, growth: gr(c, v, c.base && _rhSum(c.base.slice(0, Ncut))) };
+    }) });
+  }
+  foot.push({ key: 'full', label: '全年合計', cells: cols.map(c => {
+    const v = _rhSum(c.cur);
+    if (!_rhIsFullYear(cutoff, c.year)) return { value: v, growth: { kind: 'flat', text: '進行中' } };
+    return { value: v, growth: _rhIsFullYear(cutoff, c.year - 1) ? gr(c, v, c.base && _rhSum(c.base)) : null };
+  }) });
+  // 月平均：只算已結束且有值的月份
+  const mAvg = (arr, N) => {
+    const vs = arr.slice(0, N).filter(v => v != null);
+    return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null;
+  };
+  foot.push({ key: 'avg', label: '月平均', cells: cols.map(c => {
+    const v = mAvg(c.cur, c.N);
+    return { value: v, growth: gr(c, v, c.base && mAvg(c.base, c.baseN)) };
+  }) });
+  return { years: yrs.slice(), rows, foot };
+}
+// Y 軸：≥ 1 萬用「萬」（最多一位小數），其餘照原數字
+function _rhWan(v) {
+  if (v == null || !isFinite(v)) return '';
+  if (Math.abs(v) >= 10000) return (Math.round(v / 1000) / 10).toLocaleString() + '萬';
+  return Math.round(v).toLocaleString();
+}
 /* @rev-hist-view-end */
 
 Object.assign(App, {
@@ -1321,28 +1475,31 @@ Object.assign(App, {
   /* 歷年營收比較（年度總表）— 插在甜甜圈列下方、每日營收折線圖上方
      - 資料：RevHist（app.js）。歷史檔第一次顯示「載入中…」，載完只重畫 #rev-hist。
        this._revHistData：undefined = 還沒載 / null = 載入失敗（只顯示 daily 年份）/ 物件 = 歷史資料
-     - 選擇存 this.filter.revHistYear / revHistCmp / revHistTab（記憶體，雲端快照重繪不會打回預設；F5 回預設）
+     - 選擇存 this.filter.revHistYear / revHistCmp / revHistTab（'table' | 'trend'）/ revHistCh / revHistYrs
+       （記憶體，雲端快照重繪不會打回預設；F5 回預設）
      - 點按鈕只換 #rev-hist 的 innerHTML（revHistRedraw），⚠ 不要呼叫 this.render()：會洗掉填寫面板打到一半的數字
      - 全部包 try/catch：首頁 render 不能因為這一塊壞掉而白畫面 */
   revHistSectionHtml() {
+    const tab = this.filter.revHistTab === 'trend' ? 'trend' : 'table';
+    const tabBtn = (key, label) =>
+      `<button type="button" class="rev-hist-tab${tab === key ? ' is-active' : ''}" data-rh-tab="${key}" aria-pressed="${tab === key ? 'true' : 'false'}">${label}</button>`;
     const head = `
       <div class="rev-hist-head">
         <div class="rev-hist-titles">
           <h3 class="rev-hist-title">歷年營收比較</h3>
           <span class="rev-hist-sub">每日營收月加總 · MOMO 含 MO+</span>
         </div>
-        <div class="rev-hist-tabs">
-          <button type="button" class="rev-hist-tab is-active" data-rh-tab="table" aria-pressed="true">年度總表</button>
-          <button type="button" class="rev-hist-tab" disabled title="下一版開放">趨勢比較</button>
-        </div>
+        <div class="rev-hist-tabs">${tabBtn('table', '年度總表')}${tabBtn('trend', '趨勢比較')}</div>
       </div>`;
+    // 折線圖資料只在趨勢分頁產生；其他狀態一律清掉 → _revHistInitChart 只會銷毀、不會建圖
+    this._revHistChartState = null;
     try {
       if (!RevHist) return head + '<div class="rev-hist-empty">歷年營收比較元件未載入 — 重新整理後再試</div>';
       if (this._revHistData === undefined) {
         this._revHistEnsureLoad();
         return head + '<div class="rev-hist-empty">載入中…</div>';
       }
-      return head + this._revHistBodyHtml();
+      return head + (tab === 'trend' ? this._revHistTrendHtml() : this._revHistBodyHtml());
     } catch (e) {
       console.warn('歷年營收比較 render 失敗：', e);
       return head + '<div class="rev-hist-empty">歷年營收比較暫時無法顯示</div>';
@@ -1370,7 +1527,9 @@ Object.assign(App, {
     const lastIdx = model.columns.length;   // 最後一格 = 總計
     const tdCls = i => (i === lastIdx ? ' class="is-total"' : '');
 
-    const thead = `<tr><th class="rev-hist-month">月份</th>${model.columns.map(ch => `<th>${escapeHtml(ch)}</th>`).join('')}<th class="is-total">總計</th></tr>`;
+    // 表頭通路名可點 → 切到趨勢比較並選該通路；「總計」→ 全通路
+    const chLink = (val, label) => `<button type="button" class="rev-hist-chlink" data-rh-goch="${escapeHtml(val)}" title="看${escapeHtml(val === _RH_ALL ? '全通路' : label)}的趨勢">${escapeHtml(label)}</button>`;
+    const thead = `<tr><th class="rev-hist-month">月份</th>${model.columns.map(ch => `<th>${chLink(ch, ch)}</th>`).join('')}<th class="is-total">${chLink(_RH_ALL, '總計')}</th></tr>`;
     const rowHtml = r => `<tr${r.partial ? ' class="is-partial"' : ''}><th class="rev-hist-month">${escapeHtml(r.label)}</th>${
       r.cells.map((c, i) => `<td${tdCls(i)}>${amt(c.value)}${gr(c.growth)}</td>`).join('')}</tr>`;
     const footHtml = f => `<tr class="rev-hist-foot-${f.key}"><th class="rev-hist-month">${escapeHtml(f.label)}</th>${
@@ -1395,6 +1554,172 @@ Object.assign(App, {
       <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表，核對中。</p>
       ${failNote}`;
   },
+  /* 趨勢比較分頁：通路（單選）＋年份（複選）→ 淡旺季卡片 → 折線圖 → 並排表
+     選擇存 this.filter.revHistCh / revHistYrs；折線圖資料放 this._revHistChartState，實際建圖在 _revHistInitChart() */
+  _revHistTrendHtml() {
+    const built = RevHist.build(this._revHistData, this._revHistPlatforms || [], this._dataCutoff);
+    const failNote = this._revHistData === null
+      ? `<p class="rev-hist-note is-warn">歷年資料載入失敗，只顯示 ${built.years.join('、') || '目前年份'}</p>` : '';
+    if (!built.years.length) return '<div class="rev-hist-empty">尚無營收資料</div>' + failNote;
+
+    const cutoff = this._dataCutoff;
+    const { ch, yrs } = _rhPickTrend(built, this.filter.revHistCh, this.filter.revHistYrs);
+    this._revHistTrendYrs = yrs;   // 給點擊時的勾選切換用（與畫面同一份）
+
+    const chChip = (val, label) => {
+      const on = ch === val;
+      return `<button type="button" class="rev-hist-chip${on ? ' is-active' : ''}" data-rh-ch="${escapeHtml(val)}" aria-pressed="${on ? 'true' : 'false'}">${escapeHtml(label)}</button>`;
+    };
+    const chChips = chChip(_RH_ALL, '全通路') + built.channels.map(c => chChip(c, c)).join('');
+    const yrChips = built.years.map(y => {
+      const on = yrs.includes(y);
+      const locked = on && yrs.length === 1;
+      return `<button type="button" class="rev-hist-chip rev-hist-yrchip rev-hist-yr-${Math.min(built.years.indexOf(y) + 1, 5)}${on ? ' is-active' : ''}${locked ? ' is-locked' : ''}" data-rh-yr="${y}" aria-pressed="${on ? 'true' : 'false'}"${locked ? ' title="至少保留一個年份"' : ''}><span class="rev-hist-swatch"></span>${y} 年</button>`;
+    }).join('');
+
+    // ① 淡旺季
+    const season = _rhSeasonModel(built, yrs, ch, cutoff);
+    let seasonHtml;
+    if (season.empty) {
+      seasonHtml = `
+        <div class="rev-hist-season">
+          <div class="rev-hist-season-head"><span class="rev-hist-season-title">淡旺季</span></div>
+          <div class="rev-hist-empty is-compact">勾選的年份中沒有完整 12 個月的資料，無法計算淡旺季</div>
+        </div>`;
+    } else {
+      const sRows = season.rows.map(r => `<tr${r.avg ? ' class="is-avg"' : ''}><th class="rev-hist-month">${escapeHtml(r.label)}</th>${
+        r.values.map((v, m) => `<td class="rev-hist-lv-${r.levels[m]}">${v}</td>`).join('')}</tr>`).join('');
+      seasonHtml = `
+        <div class="rev-hist-season">
+          <div class="rev-hist-season-head">
+            <span class="rev-hist-season-title">淡旺季</span>
+            <span class="rev-hist-tag is-peak">旺季 ${escapeHtml(season.peak)}</span>
+            <span class="rev-hist-tag is-low">淡季 ${escapeHtml(season.low)}</span>
+          </div>
+          <p class="rev-hist-caption">依 ${season.basis.join('、')} 完整年度計算（高於平常 10% 以上＝旺、低於 10% 以上＝淡）</p>
+          <div class="rev-hist-scroll">
+            <table class="rev-hist-table rev-hist-season-table">
+              <thead><tr><th class="rev-hist-month">年份</th>${_RH_MONTHS.map(m => `<th>${m}</th>`).join('')}</tr></thead>
+              <tbody>${sRows}</tbody>
+            </table>
+          </div>
+          <p class="rev-hist-note">數字＝該月營收是那年月平均的幾 %（100＝跟平常一樣）。用比例而不是金額，所以就算每年規模不同，也能比較季節起伏。</p>
+        </div>`;
+    }
+
+    // ② 折線圖
+    const chart = _rhTrendChartData(built, yrs, ch, cutoff);
+    let chartBox;
+    if (typeof window.Chart === 'undefined') {
+      chartBox = '<div class="rev-hist-empty">圖表元件尚未載入 — 重新整理後即會顯示</div>';
+    } else {
+      this._revHistChartState = chart;
+      chartBox = '<div class="rev-hist-chart-wrap"><canvas id="rev-hist-chart"></canvas></div>';
+    }
+    const chartNote = '每條線是一個年份（粗線＝最新），看各年規模與成長；季節起伏看上方淡旺季。'
+      + (chart.partialIdx != null ? (chart.partialIdx + 1) + ' 月尚未結束，不畫進線。' : '');
+
+    // ③ 並排表
+    const tm = _rhTrendTableModel(built, yrs, ch, cutoff);
+    const amt = v => (v == null
+      ? '<span class="rev-hist-amt is-empty">—</span>'
+      : `<span class="rev-hist-amt">${Math.round(v).toLocaleString()}</span>`);
+    const gr = g => (g && g.text ? `<span class="rev-hist-g is-${g.kind}">${escapeHtml(g.text)}</span>` : '');
+    const tRow = r => `<tr${r.partial ? ' class="is-partial"' : ''}><th class="rev-hist-month">${escapeHtml(r.label)}</th>${
+      r.cells.map(c => `<td>${amt(c.value)}${gr(c.growth)}</td>`).join('')}</tr>`;
+    const tFoot = f => `<tr class="rev-hist-foot-${f.key}"><th class="rev-hist-month">${escapeHtml(f.label)}</th>${
+      f.cells.map(c => `<td>${amt(c.value)}${gr(c.growth)}</td>`).join('')}</tr>`;
+    const chName = ch === _RH_ALL ? '全通路' : ch;
+
+    return `
+      <div class="rev-hist-pickers">
+        <div class="rev-hist-pick"><span class="rev-hist-pick-label">通路</span>${chChips}</div>
+        <div class="rev-hist-pick"><span class="rev-hist-pick-label">年份</span>${yrChips}</div>
+      </div>
+      ${seasonHtml}
+      <div class="rev-hist-trend-chart">
+        ${chartBox}
+        <p class="rev-hist-note">${escapeHtml(chartNote)}</p>
+      </div>
+      <p class="rev-hist-caption">${escapeHtml(chName)} 各年每月營收，小字為與前一年同月相比</p>
+      <div class="rev-hist-scroll">
+        <table class="rev-hist-table rev-hist-trend-table">
+          <thead><tr><th class="rev-hist-month">月份</th>${tm.years.map(y => `<th>${y} 年</th>`).join('')}</tr></thead>
+          <tbody>${tm.rows.map(tRow).join('')}</tbody>
+          <tfoot>${tm.foot.map(tFoot).join('')}</tfoot>
+        </table>
+      </div>
+      <p class="rev-hist-note">成長率超過 200% 多半是去年同期金額很小（例如通路剛上線），只顯示「&gt;+200%」，僅供參考。</p>
+      <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表，核對中。</p>
+      ${failNote}`;
+  },
+  /* 建立趨勢折線圖 — revHistRedraw()（局部重畫）與 bindRevHist()（整頁 render 後）都會呼叫。
+     ⚠ 每次都先 destroy 舊實例，再清同一 canvas 上的孤兒實例（照 initChannelPie），
+       局部重畫 / 整頁重畫 / 切分頁都不會疊圖、不會出「Canvas is already in use」。
+       沒有 canvas（年度總表分頁、載入中）或 Chart 沒載入 → 銷毀完就結束。 */
+  _revHistInitChart() {
+    if (this._revHistChart) {
+      try { this._revHistChart.destroy(); } catch {}
+      this._revHistChart = null;
+    }
+    const canvas = document.getElementById('rev-hist-chart');
+    const st = this._revHistChartState;
+    if (!canvas || !st || typeof window.Chart === 'undefined') return;
+    const orphan = window.Chart.getChart && window.Chart.getChart(canvas);
+    if (orphan) { try { orphan.destroy(); } catch {} }
+
+    // 顏色一律讀 :root 變數，不在這裡寫死（fallback 只在變數讀不到時用）
+    const css = getComputedStyle(document.documentElement);
+    const cv = (name, fb) => css.getPropertyValue(name).trim() || fb;
+    const cMuted = cv('--text-muted', '#6b7280');
+    const cBorder = cv('--border', '#e5e7eb');
+    const font = '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif';
+    try {
+      this._revHistChart = new window.Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: st.labels,
+          datasets: st.lines.map(l => {
+            const c = cv('--rh-yr-' + l.colorIdx, '#94a3b8');
+            return {
+              label: l.year + ' 年', data: l.data,
+              borderColor: c, backgroundColor: c,
+              borderWidth: l.newest ? 3.5 : 1.75,
+              pointRadius: l.newest ? 3 : 2, pointHoverRadius: 5,
+              tension: 0, spanGaps: false, fill: false,   // 直線連接，不做平滑曲線
+            };
+          }),
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },   // 上方年份按鈕就是圖例
+            tooltip: {
+              filter: item => item.raw != null,
+              callbacks: {
+                title: () => '',
+                label: item => `${st.lines[item.datasetIndex].year} 年 ${item.dataIndex + 1} 月：${Math.round(item.raw).toLocaleString()}`,
+              },
+            },
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: cMuted, font: { family: font, size: 11 } } },
+            y: {
+              beginAtZero: true,
+              grid: { color: cBorder },
+              ticks: { color: cMuted, font: { family: font, size: 11 }, callback: v => _rhWan(v) },
+            },
+          },
+        },
+      });
+    } catch (e) {
+      console.warn('歷年營收趨勢圖建立失敗：', e);
+      this._revHistChart = null;
+    }
+  },
   _revHistEnsureLoad() {
     if (this._revHistLoading) return;
     this._revHistLoading = true;
@@ -1406,17 +1731,36 @@ Object.assign(App, {
   // 只重畫 #rev-hist（不在首頁時沒有容器 → 什麼都不做）
   revHistRedraw() {
     const box = document.getElementById('rev-hist');
-    if (box) box.innerHTML = this.revHistSectionHtml();
+    if (!box) return;
+    box.innerHTML = this.revHistSectionHtml();
+    this._revHistInitChart();
   },
   // 事件委派：每次 render 後 #rev-hist 是新元素，綁一次；局部重畫只換 innerHTML，委派仍有效
   bindRevHist() {
     const box = document.getElementById('rev-hist');
+    // 整頁 render 後：沒有 #rev-hist 也要跑，才會銷毀上一輪的圖
+    this._revHistInitChart();
     if (!box) return;
     box.addEventListener('click', (e) => {
-      const btn = e.target.closest('button[data-rh-year], button[data-rh-cmp], button[data-rh-tab]');
+      const btn = e.target.closest('button[data-rh-year], button[data-rh-cmp], button[data-rh-tab], button[data-rh-ch], button[data-rh-yr], button[data-rh-goch]');
       if (!btn || btn.disabled || !box.contains(btn)) return;
       const f = this.filter;
-      if (btn.dataset.rhYear) {
+      if (btn.dataset.rhGoch) {
+        f.revHistTab = 'trend';
+        f.revHistCh = btn.dataset.rhGoch;
+      } else if (btn.dataset.rhCh) {
+        if (f.revHistCh === btn.dataset.rhCh) return;
+        f.revHistCh = btn.dataset.rhCh;
+      } else if (btn.dataset.rhYr) {
+        const y = +btn.dataset.rhYr;
+        const cur = Array.isArray(this._revHistTrendYrs) ? this._revHistTrendYrs.slice() : [];
+        if (cur.includes(y)) {
+          if (cur.length <= 1) return;   // 最後一個年份不能取消
+          f.revHistYrs = cur.filter(x => x !== y);
+        } else {
+          f.revHistYrs = [...cur, y].sort((a, b) => b - a);
+        }
+      } else if (btn.dataset.rhYear) {
         const y = +btn.dataset.rhYear;
         if (f.revHistYear === y) return;
         f.revHistYear = y;
