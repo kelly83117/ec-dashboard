@@ -1228,6 +1228,190 @@
     color: var(--text-muted);
   }
 
+  /* ------------- 儀表板首頁 · 歷年營收比較（年度總表） -------------
+     外框 / 標題比照 .rank-card / .pie-card。markup 在 dashboard.js revHistSectionHtml()，不帶任何 inline style。
+     成長率：成長紅（--danger）、衰退綠（--success）、±0% / 新 / 累計中 灰。
+     窄螢幕：.rev-hist-scroll 左右捲動，第一欄（月份）sticky 固定，背景要實色才蓋得住捲過去的格子。 */
+  .rev-hist-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .rev-hist-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .rev-hist-titles {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .rev-hist-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .rev-hist-sub {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  .rev-hist-tabs {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .rev-hist-tab {
+    border: 0;
+    background: var(--surface);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    cursor: pointer;
+  }
+  .rev-hist-tab + .rev-hist-tab { border-left: 1px solid var(--border); }
+  .rev-hist-tab.is-active { background: var(--primary-soft); color: var(--primary); }
+  .rev-hist-tab:disabled { color: var(--text-faint); cursor: not-allowed; }
+  .rev-hist-pickers {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .rev-hist-pick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .rev-hist-pick-label {
+    min-width: 32px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .rev-hist-chip {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    border-radius: 999px;
+    padding: 3px 10px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+  .rev-hist-chip:hover { border-color: var(--primary); color: var(--primary); }
+  .rev-hist-chip.is-active { background: var(--primary); border-color: var(--primary); color: var(--surface); }
+  .rev-hist-caption {
+    margin: 0 0 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .rev-hist-note {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .rev-hist-note.is-warn { color: var(--danger); font-weight: 600; }
+  .rev-hist-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .rev-hist-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13px;
+  }
+  /* ⚠ css/profit.css 有全域 th / td（td 14px、th 大寫＋字距＋手指游標、thead tr sticky），main.css 有全域 td border-top；
+     這裡逐項蓋掉，字級與行高寫死，月份欄（th）才會跟同列金額（td 第一行）對齊。 */
+  .rev-hist-table th,
+  .rev-hist-table td {
+    padding: 4px 8px;
+    font-size: 13px;   /* 金額 / 月份標籤比照 .rank-name-text */
+    line-height: 1.3;
+    text-align: right;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: nowrap;
+    vertical-align: top;
+    color: var(--text);
+    background: var(--surface);
+    border-top: 0;
+    border-bottom: 1px solid var(--border);
+    cursor: default;
+    user-select: auto;
+  }
+  .rev-hist-table thead tr { position: static; background: none; }
+  .rev-hist-table thead th,
+  .rev-hist-table thead th:hover {
+    padding-top: 5px;
+    padding-bottom: 5px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+  }
+  .rev-hist-table tbody tr:hover > * { background: var(--surface); }
+  .rev-hist-table .rev-hist-month {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text);
+    border-right: 1px solid var(--border);
+  }
+  .rev-hist-table thead .rev-hist-month { color: var(--text-muted); }
+  .rev-hist-table .is-total { border-left: 1px solid var(--border); }
+  .rev-hist-table tfoot tr:first-child > * { border-top: 2px solid var(--border); }
+  .rev-hist-table tbody tr:last-child > * { border-bottom: 0; }
+  .rev-hist-table tfoot tr:last-child > * { border-bottom: 0; }
+  .rev-hist-amt {
+    display: block;
+    color: var(--text);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .rev-hist-amt.is-empty { color: var(--text-faint); }
+  .rev-hist-foot-cum .rev-hist-amt,
+  .rev-hist-foot-full .rev-hist-amt { font-weight: 700; }
+  .rev-hist-g {
+    display: block;
+    font-size: 11px;
+    line-height: 1.2;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+  }
+  .rev-hist-g.is-up { color: var(--danger); }
+  .rev-hist-g.is-down { color: var(--success); }
+  .rev-hist-share {
+    color: var(--text-muted);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .rev-hist-empty {
+    padding: 24px 12px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
   /* 篩選列 */
   .filter-bar {
     display: flex;

@@ -1,6 +1,89 @@
 /* js/pages/dashboard.js -- methods extracted from original App, merged back via Object.assign(App, ...) */
 const App = window.App;
 const { Store, escapeHtml, showToast, fmtNTD, toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORMS_EXCLUDED_FROM_CUTOFF, PLATFORM_MARKETPLACE, MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, marketplaceBadgeHtml } = window;
+const { RevHist } = window;
+
+/* ------------- 歷年營收比較 · 年度總表的純計算（給資料就回結果，不碰 DOM / Store / 雲端）-------------
+ * 畫面組裝在下方 App.revHistSectionHtml()。
+ * @rev-hist-view-begin（node 測試靠這兩個標記切出本段，勿刪） */
+// 成長率：cur / base 為數字或 null。本期 null → 不顯示；基期 null 或 0 → 本期 > 0 才標「新」；四捨五入後 0 → ±0%
+//   四捨五入後 > 200 → 「>+200%」（去年同期太小時數字沒意義）；衰退不設下限
+function _rhGrowth(cur, base) {
+  if (cur == null) return { kind: 'none', text: '' };
+  if (base == null || base === 0) {
+    if (cur > 0) return { kind: 'new', text: '新' };
+    return base === 0 ? { kind: 'flat', text: '±0%' } : { kind: 'none', text: '' };
+  }
+  const pct = Math.round((cur / base - 1) * 100);
+  if (pct === 0) return { kind: 'flat', text: '±0%' };
+  if (pct > 200) return { kind: 'up', text: '>+200%' };
+  return pct > 0 ? { kind: 'up', text: '+' + pct + '%' } : { kind: 'down', text: '−' + Math.abs(pct) + '%' };
+}
+// 該年「已結束」的月份數 N（0～12）。cutoff 'YYYY-MM-DD'；cutoff 是月底 → 該月算結束
+function _rhClosedMonths(cutoff, year) {
+  if (typeof cutoff !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(cutoff)) return 12;
+  const cy = +cutoff.slice(0, 4), cm = +cutoff.slice(5, 7) - 1, cd = +cutoff.slice(8, 10);
+  if (year < cy) return 12;
+  if (year > cy) return 0;
+  return cd >= new Date(cy, cm + 1, 0).getDate() ? cm + 1 : cm;
+}
+const _rhIsFullYear = (cutoff, year) => _rhClosedMonths(cutoff, year) === 12;
+// 全 null → null，否則略過 null 加總
+const _rhSum = arr => arr.reduce((s, v) => (v == null ? s : (s || 0) + v), null);
+// 依 this.filter 的值挑出實際要顯示的年份 / 比較年（不合法就回預設：最新年 / 前一年 / 沒有前一年就不比較）
+function _rhPick(years, fYear, fCmp) {
+  const year = years.includes(fYear) ? fYear : (years[0] ?? null);
+  let cmp;
+  if (fCmp === 'none') cmp = null;
+  else if (years.includes(fCmp) && fCmp !== year) cmp = fCmp;
+  else cmp = years.includes(year - 1) ? year - 1 : null;
+  return { year, cmp };
+}
+// RevHist.build 的結果 → 表格模型。cmp 為 null = 不比較（growth 一律 null）
+function _rhTableModel(built, year, cmp, cutoff) {
+  const curRow = (built.data && built.data[year]) || {};
+  const cmpRow = cmp != null ? ((built.data && built.data[cmp]) || {}) : null;
+  const columns = (built.channels || []).filter(ch => curRow[ch] || (cmpRow && cmpRow[ch]));
+  const partialIdx = (built.partial && built.partial[year] != null) ? built.partial[year] : null;
+  const curArr = ch => curRow[ch] || new Array(12).fill(null);
+  const cmpArr = ch => (cmpRow && cmpRow[ch]) || new Array(12).fill(null);
+  const totalAt = (getArr, m) => _rhSum(columns.map(ch => getArr(ch)[m]));
+  const curTotalArr = Array.from({ length: 12 }, (_, m) => totalAt(curArr, m));
+  const cmpTotalArr = Array.from({ length: 12 }, (_, m) => totalAt(cmpArr, m));
+  const series = [...columns.map(ch => ({ cur: curArr(ch), base: cmpArr(ch) })), { cur: curTotalArr, base: cmpTotalArr }];
+  const cell = (cur, base, opts) => {
+    let growth = null;
+    if (opts && opts.partial) growth = cur == null ? null : { kind: 'partial', text: '累計中' };
+    else if (cmpRow && !(opts && opts.noGrowth)) growth = _rhGrowth(cur, base);
+    return { value: cur, growth };
+  };
+  const rows = Array.from({ length: 12 }, (_, m) => ({
+    label: (m + 1) + '月' + (m === partialIdx ? '＊' : ''),
+    partial: m === partialIdx,
+    cells: series.map(s => cell(s.cur[m], s.base[m], { partial: m === partialIdx })),
+  }));
+  const foot = [];
+  const isCutYear = typeof cutoff === 'string' && +cutoff.slice(0, 4) === year;
+  const N = _rhClosedMonths(cutoff, year);
+  if (isCutYear && N >= 1 && N <= 11) {
+    foot.push({ key: 'cum', label: '1～' + N + '月累計',
+      cells: series.map(s => cell(_rhSum(s.cur.slice(0, N)), _rhSum(s.base.slice(0, N)))) });
+  }
+  const fullBoth = cmp != null && _rhIsFullYear(cutoff, year) && _rhIsFullYear(cutoff, cmp);
+  foot.push({ key: 'full', label: '全年合計',
+    cells: series.map(s => cell(_rhSum(s.cur), _rhSum(s.base), { noGrowth: !fullBoth })) });
+  const grand = _rhSum(curTotalArr);
+  foot.push({ key: 'share', label: '佔比',
+    cells: series.map((s, i) => {
+      const v = _rhSum(s.cur);
+      if (v == null || !grand) return { value: null, text: '—' };
+      return { value: v, text: (i === series.length - 1 ? 100 : (v / grand) * 100).toFixed(1) + '%' };
+    }) });
+  const caption = year + ' 年各通路每月營收' + (cmp != null ? '，小字為與 ' + cmp + ' 年同月相比' : '')
+    + (partialIdx != null ? '（' + (partialIdx + 1) + ' 月尚未結束' + (cmp != null ? '，不比較' : '') + '）' : '');
+  return { year, cmp, columns, rows, foot, caption, partialIdx };
+}
+/* @rev-hist-view-end */
 
 Object.assign(App, {
   viewDashboard() {
@@ -511,6 +594,9 @@ Object.assign(App, {
       </div>
     `;
 
+    // 歷年營收比較：局部重畫（點年份 / 比較年）沿用這份已讀好的 platforms，不再 Store.get
+    this._revHistPlatforms = platforms;
+
     return `
       <div class="page-header" style="margin-bottom:10px">
         <h2 style="font-size:22px;margin:0">儀表板首頁 <span class="live-dot">即時資料</span></h2>
@@ -526,6 +612,7 @@ Object.assign(App, {
           ${this.channelPieHtml(platforms, rangeInfo)}
         </div>
       </div>
+      <div id="rev-hist" class="rev-hist-card">${this.revHistSectionHtml()}</div>
       <div class="dash-chart-row">${this.dailyLineChartHtml(platforms)}</div>
     `;
   },
@@ -1231,9 +1318,121 @@ Object.assign(App, {
       </div>
     `;
   },
+  /* 歷年營收比較（年度總表）— 插在甜甜圈列下方、每日營收折線圖上方
+     - 資料：RevHist（app.js）。歷史檔第一次顯示「載入中…」，載完只重畫 #rev-hist。
+       this._revHistData：undefined = 還沒載 / null = 載入失敗（只顯示 daily 年份）/ 物件 = 歷史資料
+     - 選擇存 this.filter.revHistYear / revHistCmp / revHistTab（記憶體，雲端快照重繪不會打回預設；F5 回預設）
+     - 點按鈕只換 #rev-hist 的 innerHTML（revHistRedraw），⚠ 不要呼叫 this.render()：會洗掉填寫面板打到一半的數字
+     - 全部包 try/catch：首頁 render 不能因為這一塊壞掉而白畫面 */
+  revHistSectionHtml() {
+    const head = `
+      <div class="rev-hist-head">
+        <div class="rev-hist-titles">
+          <h3 class="rev-hist-title">歷年營收比較</h3>
+          <span class="rev-hist-sub">每日營收月加總 · MOMO 含 MO+</span>
+        </div>
+        <div class="rev-hist-tabs">
+          <button type="button" class="rev-hist-tab is-active" data-rh-tab="table" aria-pressed="true">年度總表</button>
+          <button type="button" class="rev-hist-tab" disabled title="下一版開放">趨勢比較</button>
+        </div>
+      </div>`;
+    try {
+      if (!RevHist) return head + '<div class="rev-hist-empty">歷年營收比較元件未載入 — 重新整理後再試</div>';
+      if (this._revHistData === undefined) {
+        this._revHistEnsureLoad();
+        return head + '<div class="rev-hist-empty">載入中…</div>';
+      }
+      return head + this._revHistBodyHtml();
+    } catch (e) {
+      console.warn('歷年營收比較 render 失敗：', e);
+      return head + '<div class="rev-hist-empty">歷年營收比較暫時無法顯示</div>';
+    }
+  },
+  _revHistBodyHtml() {
+    const built = RevHist.build(this._revHistData, this._revHistPlatforms || [], this._dataCutoff);
+    const failNote = this._revHistData === null
+      ? `<p class="rev-hist-note is-warn">歷年資料載入失敗，只顯示 ${built.years.join('、') || '目前年份'}</p>` : '';
+    if (!built.years.length) return '<div class="rev-hist-empty">尚無營收資料</div>' + failNote;
+
+    const { year, cmp } = _rhPick(built.years, this.filter.revHistYear, this.filter.revHistCmp);
+    const model = _rhTableModel(built, year, cmp, this._dataCutoff);
+
+    const chip = (attr, val, label, active) =>
+      `<button type="button" class="rev-hist-chip${active ? ' is-active' : ''}" ${attr}="${val}" aria-pressed="${active ? 'true' : 'false'}">${label}</button>`;
+    const yearChips = built.years.map(y => chip('data-rh-year', y, y + ' 年', y === year)).join('');
+    const cmpChips = chip('data-rh-cmp', 'none', '不比較', cmp == null)
+      + built.years.filter(y => y !== year).map(y => chip('data-rh-cmp', y, y + ' 年', y === cmp)).join('');
+
+    const amt = v => (v == null
+      ? '<span class="rev-hist-amt is-empty">—</span>'
+      : `<span class="rev-hist-amt">${Math.round(v).toLocaleString()}</span>`);
+    const gr = g => (g && g.text ? `<span class="rev-hist-g is-${g.kind}">${escapeHtml(g.text)}</span>` : '');
+    const lastIdx = model.columns.length;   // 最後一格 = 總計
+    const tdCls = i => (i === lastIdx ? ' class="is-total"' : '');
+
+    const thead = `<tr><th class="rev-hist-month">月份</th>${model.columns.map(ch => `<th>${escapeHtml(ch)}</th>`).join('')}<th class="is-total">總計</th></tr>`;
+    const rowHtml = r => `<tr${r.partial ? ' class="is-partial"' : ''}><th class="rev-hist-month">${escapeHtml(r.label)}</th>${
+      r.cells.map((c, i) => `<td${tdCls(i)}>${amt(c.value)}${gr(c.growth)}</td>`).join('')}</tr>`;
+    const footHtml = f => `<tr class="rev-hist-foot-${f.key}"><th class="rev-hist-month">${escapeHtml(f.label)}</th>${
+      f.cells.map((c, i) => (f.key === 'share'
+        ? `<td${tdCls(i)}><span class="rev-hist-share">${escapeHtml(c.text)}</span></td>`
+        : `<td${tdCls(i)}>${amt(c.value)}${gr(c.growth)}</td>`)).join('')}</tr>`;
+
+    return `
+      <div class="rev-hist-pickers">
+        <div class="rev-hist-pick"><span class="rev-hist-pick-label">年份</span>${yearChips}</div>
+        <div class="rev-hist-pick"><span class="rev-hist-pick-label">比較</span>${cmpChips}</div>
+      </div>
+      <p class="rev-hist-caption">${escapeHtml(model.caption)}</p>
+      <div class="rev-hist-scroll">
+        <table class="rev-hist-table">
+          <thead>${thead}</thead>
+          <tbody>${model.rows.map(rowHtml).join('')}</tbody>
+          <tfoot>${model.foot.map(footHtml).join('')}</tfoot>
+        </table>
+      </div>
+      <p class="rev-hist-note">成長率超過 200% 多半是去年同期金額很小（例如通路剛上線），只顯示「&gt;+200%」，僅供參考。</p>
+      <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表，核對中。</p>
+      ${failNote}`;
+  },
+  _revHistEnsureLoad() {
+    if (this._revHistLoading) return;
+    this._revHistLoading = true;
+    Promise.resolve()
+      .then(() => RevHist.load())
+      .then(d => { this._revHistData = d || null; }, () => { this._revHistData = null; })
+      .then(() => { this._revHistLoading = false; this.revHistRedraw(); });
+  },
+  // 只重畫 #rev-hist（不在首頁時沒有容器 → 什麼都不做）
+  revHistRedraw() {
+    const box = document.getElementById('rev-hist');
+    if (box) box.innerHTML = this.revHistSectionHtml();
+  },
+  // 事件委派：每次 render 後 #rev-hist 是新元素，綁一次；局部重畫只換 innerHTML，委派仍有效
+  bindRevHist() {
+    const box = document.getElementById('rev-hist');
+    if (!box) return;
+    box.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-rh-year], button[data-rh-cmp], button[data-rh-tab]');
+      if (!btn || btn.disabled || !box.contains(btn)) return;
+      const f = this.filter;
+      if (btn.dataset.rhYear) {
+        const y = +btn.dataset.rhYear;
+        if (f.revHistYear === y) return;
+        f.revHistYear = y;
+        f.revHistCmp = undefined;   // 換年份 → 比較年回到新年份的前一年（_rhPick 的預設）
+      } else if (btn.dataset.rhCmp) {
+        f.revHistCmp = btn.dataset.rhCmp === 'none' ? 'none' : +btn.dataset.rhCmp;
+      } else if (btn.dataset.rhTab) {
+        f.revHistTab = btn.dataset.rhTab;
+      }
+      this.revHistRedraw();
+    });
+  },
   bindDashboardPills() {
     // 甜甜圈圖：每次 render 後重建（含銷毀舊實例），不是事件綁定
     this.initChannelPie();
+    this.bindRevHist();
 
     // 每日營收填寫的展開 / 收合。
     // ⚠ 只切 class，絕對不要在這裡呼叫 this.render()：
