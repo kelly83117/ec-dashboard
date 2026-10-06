@@ -98,6 +98,67 @@ function isUserActive(u) {
   return !!u && !u.disabled && !u.deleted;
 }
 
+/* ------------- 身分轉換（需求 3）-------------
+ * 「誰做的」可能寫帳號（inna）也可能寫姓名（洪嘉蓮）→ 轉成同一個人。
+ * 比對順序：帳號 → 姓名 → opts.aliases；trim（含全形空白）＋不分大小寫，與 users.js normId 一致。
+ * users 必須傳完整 ec.users（不可先過濾停用／刪除，舊紀錄仍要對得到人；status 會標出來）。
+ * 永遠回傳凍結物件。對不到 → ok:false、display 為原字（10/06 決定：sheet-import、陳大明不做對照，
+ * 由呼叫端標「未對到帳號」）。同名不猜 → ok:false、reason 'ambiguous'＋candidates。 */
+const _idNorm = s => String(s).trim().toLowerCase();
+function makeUserIdentityResolver(users, opts) {
+  const aliases = (opts && opts.aliases) || {};
+  const byU = new Map(), byN = new Map();
+  const add = (m, k, u) => { if (!k) return; const a = m.get(k) || []; if (!a.includes(u)) a.push(u); m.set(k, a); };
+  (Array.isArray(users) ? users : []).forEach(u => {
+    if (!u || typeof u.username !== 'string' || !u.username.trim()) return;
+    add(byU, _idNorm(u.username), u);
+    if (typeof u.name === 'string') add(byN, _idNorm(u.name), u);
+  });
+  const statusOf = u => u.deleted ? 'deleted' : (u.disabled ? 'disabled' : 'active');
+  const hit = (input, u, matchedBy, n) => {
+    const others = [...(byU.get(n) || []), ...(byN.get(n) || [])].filter(x => x !== u);
+    const name = typeof u.name === 'string' ? u.name.trim() : '';
+    return Object.freeze({
+      ok: true, input, username: u.username, name, role: u.role || null, status: statusOf(u),
+      matchedBy, reason: null, display: name || u.username,
+      conflict: others.length > 0, candidates: Object.freeze(others.map(x => x.username)),
+    });
+  };
+  const miss = (input, reason, display, cands) => Object.freeze({
+    ok: false, input, username: null, name: null, role: null, status: null,
+    matchedBy: null, reason, display, conflict: false, candidates: Object.freeze(cands || []),
+  });
+  const resolve = (raw, depth) => {
+    if (raw == null) return miss(raw, 'empty', '');
+    if (typeof raw !== 'string') return miss(raw, 'not-string', '');
+    const n = _idNorm(raw);
+    if (!n) return miss(raw, 'empty', '');
+    const us = byU.get(n) || [];
+    if (us.length === 1) return hit(raw, us[0], 'username', n);
+    if (us.length > 1) {
+      const exact = us.filter(u => u.username === raw.trim());
+      if (exact.length === 1) return hit(raw, exact[0], 'username', n);
+      return miss(raw, 'ambiguous', raw.trim(), us.map(u => u.username));
+    }
+    const ns = byN.get(n) || [];
+    if (ns.length === 1) return hit(raw, ns[0], 'name', n);
+    if (ns.length > 1) return miss(raw, 'ambiguous', raw.trim(), ns.map(u => u.username));
+    if (!depth) {
+      const ak = Object.keys(aliases).find(k => _idNorm(k) === n);
+      if (ak) {
+        const r = resolve(String(aliases[ak]), 1);
+        if (r.ok) return Object.freeze({ ...r, input: raw, matchedBy: 'alias' });
+      }
+    }
+    return miss(raw, 'unmatched', raw.trim());
+  };
+  return raw => resolve(raw, 0);
+}
+function resolveUserIdentity(raw, users, opts) {
+  const list = users || ((typeof window !== 'undefined' && window.Store && window.Store.get) ? (window.Store.get(window.Store.KEYS.users, []) || []) : []);
+  return makeUserIdentityResolver(list, opts)(raw);
+}
+
 /* ------------- 種子資料（冪等，只補缺漏，不覆蓋使用者輸入） -------------
  * 每次載入都會跑，但只在某個鍵不存在時才寫入預設值；
  * 加上對舊版員工資料 schema（orders/items/...）的就地遷移。
@@ -3542,7 +3603,7 @@ if (document.readyState === 'loading') {
 Object.assign(window, {
   App, Store, mapAnaLabel, ANA_LABEL_DISPLAY,
   canWrite: () => !__isReadOnly(), isReadOnly: __isReadOnly,
-  hashPassword, isUserActive, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
+  hashPassword, isUserActive, makeUserIdentityResolver, resolveUserIdentity, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
   canAccessOffice, hasOfficeFeature, trendFromQuarters,
   toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms,
   todayStr, genId, escapeHtml, showToast, fmtNTD, marketplaceBadgeHtml,
