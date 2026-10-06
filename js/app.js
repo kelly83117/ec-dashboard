@@ -1273,10 +1273,10 @@ const App = {
       return;
     }
     switch (this.route) {
-      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip(); break;
+      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); break;
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
-      default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip();
+      default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs();
     }
   },
 

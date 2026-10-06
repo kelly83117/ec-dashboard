@@ -1165,8 +1165,6 @@
   .dash-main > .rank-card,
   .dash-main .alert-card,
   .dash-main .pie-card { margin-bottom: 0; }
-  /* 折線圖：整條獨立一列 */
-  .dash-chart-row { display: flex; }
 
   @media (max-width: 900px) {
     .dash-main { grid-template-columns: 1fr; }
@@ -1978,14 +1976,6 @@
     }
     .main { padding: 56px 10px 20px; }
   }
-  .chart-card {
-    background: var(--surface);
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    padding: 20px;
-    box-shadow: none;
-  }
-  .chart-card h3 { margin: 0 0 16px; font-size: 14px; font-weight: 600; }
   .dept-list { display: flex; flex-direction: column; gap: 12px; }
   .dept-row {
     display: flex;
