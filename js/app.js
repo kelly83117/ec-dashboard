@@ -159,6 +159,118 @@ function resolveUserIdentity(raw, users, opts) {
   return makeUserIdentityResolver(list, opts)(raw);
 }
 
+/* ------------- 歷年營收比較（首頁，塊 1：資料＋純函式，尚未接畫面）-------------
+ * 來源：≤2025 讀 data/revenue-history.json 的 years；≥2026 用 ec.platforms 各通路 p.daily 按月加總（同首頁 +v || 0）。
+ * 同一年只用一個來源：history 有的年份完全不看 daily。MO+ 一律併入 MOMO。不改傳入的 platforms / daily。
+ * cutoff（'YYYY-MM-DD'，畫面會傳 _dataCutoff）：daily 只算到 cutoff 當天（含），之後的日期與月份一律不算／null，
+ *   與首頁「資料截止日」口徑一致（避免同一個月各通路填到不同天）。
+ * @rev-hist-begin（node 測試靠這兩個標記切出本段，勿刪） */
+const _RH_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const _RH_ORDER = Object.freeze(['生活好麻吉', '玩樂盒子', '森之旅', '維克生活', 'MOMO', '酷澎', 'PChome', '博客來', 'Friday']);
+const _rhName = n => (n === 'MO+' ? 'MOMO' : n);
+// 每通路只掃一次 daily → { byYear: { 'YYYY': { 通路: [12] } }, names: 通路出現順序（已併 MO+） }
+//   該月沒有任何日期 key → null；有 key 但值是空字串 / 非數字 → 算 0。until（選填）之後的日期略過。
+function _rhScan(platforms, until, onlyYear) {
+  const byYear = {}, names = [];
+  (Array.isArray(platforms) ? platforms : []).forEach(p => {
+    if (!p || typeof p.name !== 'string' || !p.name) return;
+    const name = _rhName(p.name);
+    if (!names.includes(name)) names.push(name);
+    const daily = (p.daily && typeof p.daily === 'object') ? p.daily : {};
+    Object.keys(daily).forEach(d => {
+      if (!_RH_DATE.test(d) || (until && d > until)) return;
+      const y = d.slice(0, 4);
+      if (onlyYear != null && y !== onlyYear) return;
+      const m = +d.slice(5, 7) - 1;
+      if (!(m >= 0 && m < 12)) return;
+      const yo = byYear[y] || (byYear[y] = {});
+      const arr = yo[name] || (yo[name] = new Array(12).fill(null));
+      arr[m] = (arr[m] || 0) + (+daily[d] || 0);
+    });
+  });
+  return { byYear, names };
+}
+// { 通路: [12 個月] }；until 選填（'YYYY-MM-DD'，晚於它的日期不算）
+function revHistMonthlyByChannel(platforms, year, until) {
+  const y = String(year);
+  const { byYear, names } = _rhScan(platforms, until, y);
+  const yo = byYear[y] || {}, out = {};
+  names.forEach(n => { out[n] = yo[n] || new Array(12).fill(null); });
+  return out;
+}
+// → { years: 新到舊, channels, data: { 年: { 通路: [12] } }（整年全 null 的通路省略）, partial: { 年: 月索引 | null } }
+function revHistBuild(history, platforms, cutoff) {
+  const hy = (history && history.years && typeof history.years === 'object') ? history.years : {};
+  const cut = (typeof cutoff === 'string' && _RH_DATE.test(cutoff)) ? cutoff : null;
+  const cutY = cut ? +cut.slice(0, 4) : null, cutM = cut ? +cut.slice(5, 7) - 1 : null;
+  const { byYear, names } = _rhScan(platforms, cut);
+  const histYears = Object.keys(hy).filter(k => /^\d{4}$/.test(k));
+  const years = [...new Set([...histYears, ...Object.keys(byYear)])].map(Number)
+    .filter(y => cutY == null || y <= cutY).sort((a, b) => b - a);
+  const data = {}, partial = {}, seen = [];
+  years.forEach(y => {
+    const fromHist = histYears.includes(String(y));
+    const src = (fromHist ? hy[String(y)] : byYear[String(y)]) || {};
+    const row = {};
+    Object.keys(src).forEach(ch => {
+      const raw = Array.isArray(src[ch]) ? src[ch] : [];
+      const name = _rhName(ch);
+      const arr = row[name] || (row[name] = new Array(12).fill(null));
+      for (let m = 0; m < 12; m++) {
+        const v = raw[m];
+        if (v == null || v === '') continue;
+        arr[m] = (arr[m] || 0) + (+v || 0);
+      }
+    });
+    let pIdx = null;
+    if (y === cutY) {
+      const lastDay = new Date(cutY, cutM + 1, 0).getDate();
+      if (+cut.slice(8, 10) < lastDay) pIdx = cutM;
+      Object.values(row).forEach(arr => { for (let m = cutM + 1; m < 12; m++) arr[m] = null; });
+    }
+    Object.keys(row).forEach(n => {
+      if (row[n].every(v => v == null)) delete row[n];
+      else if (!seen.includes(n)) seen.push(n);
+    });
+    data[y] = row;
+    partial[y] = pIdx;
+  });
+  const channels = [
+    ..._RH_ORDER.filter(n => seen.includes(n)),
+    ...names.filter(n => !_RH_ORDER.includes(n) && seen.includes(n)),
+    ...seen.filter(n => !_RH_ORDER.includes(n) && !names.includes(n)),
+  ];
+  return { years, channels, data, partial };
+}
+// 讀 data/revenue-history.json（?v=版號，同 offices.js 讀 pricing.json）。成功快取、失敗 console.warn 回 null（不快取，下次重試）。
+let _rhLoading = null;
+function revHistLoad() {
+  if (_rhLoading) return _rhLoading;
+  const p = (async () => {
+    try {
+      const ver = document.querySelector('meta[name="app-version"]')?.content || '';
+      const res = await fetch(`data/revenue-history.json?v=${ver}`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      if (!json || typeof json.years !== 'object' || !json.years) throw new Error('格式不符（缺 years）');
+      return json;
+    } catch (e) {
+      console.warn('revenue-history.json 載入失敗：', e);
+      return null;
+    }
+  })();
+  _rhLoading = p;
+  p.then(r => { if (!r && _rhLoading === p) _rhLoading = null; });
+  return p;
+}
+const RevHist = Object.freeze({
+  CHANNEL_ORDER: _RH_ORDER,
+  monthlyByChannel: revHistMonthlyByChannel,
+  build: revHistBuild,
+  load: revHistLoad,
+});
+/* @rev-hist-end */
+
 /* ------------- 種子資料（冪等，只補缺漏，不覆蓋使用者輸入） -------------
  * 每次載入都會跑，但只在某個鍵不存在時才寫入預設值；
  * 加上對舊版員工資料 schema（orders/items/...）的就地遷移。
@@ -1161,10 +1273,10 @@ const App = {
       return;
     }
     switch (this.route) {
-      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip(); break;
+      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); break;
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
-      default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip();
+      default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs();
     }
   },
 
@@ -3603,7 +3715,7 @@ if (document.readyState === 'loading') {
 Object.assign(window, {
   App, Store, mapAnaLabel, ANA_LABEL_DISPLAY,
   canWrite: () => !__isReadOnly(), isReadOnly: __isReadOnly,
-  hashPassword, isUserActive, makeUserIdentityResolver, resolveUserIdentity, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
+  hashPassword, isUserActive, makeUserIdentityResolver, resolveUserIdentity, RevHist, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
   canAccessOffice, hasOfficeFeature, trendFromQuarters,
   toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms,
   todayStr, genId, escapeHtml, showToast, fmtNTD, marketplaceBadgeHtml,

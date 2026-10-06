@@ -1,6 +1,243 @@
 /* js/pages/dashboard.js -- methods extracted from original App, merged back via Object.assign(App, ...) */
 const App = window.App;
 const { Store, escapeHtml, showToast, fmtNTD, toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORMS_EXCLUDED_FROM_CUTOFF, PLATFORM_MARKETPLACE, MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, marketplaceBadgeHtml } = window;
+const { RevHist } = window;
+
+/* ------------- 歷年營收比較 · 年度總表的純計算（給資料就回結果，不碰 DOM / Store / 雲端）-------------
+ * 畫面組裝在下方 App.revHistSectionHtml()。
+ * @rev-hist-view-begin（node 測試靠這兩個標記切出本段，勿刪） */
+// 成長率：cur / base 為數字或 null。本期 null → 不顯示；基期 null 或 0 → 本期 > 0 才標「新」；四捨五入後 0 → ±0%
+//   四捨五入後 > 200 → 「>+200%」（去年同期太小時數字沒意義）；衰退不設下限
+function _rhGrowth(cur, base) {
+  if (cur == null) return { kind: 'none', text: '' };
+  if (base == null || base === 0) {
+    if (cur > 0) return { kind: 'new', text: '新' };
+    return base === 0 ? { kind: 'flat', text: '±0%' } : { kind: 'none', text: '' };
+  }
+  const pct = Math.round((cur / base - 1) * 100);
+  if (pct === 0) return { kind: 'flat', text: '±0%' };
+  if (pct > 200) return { kind: 'up', text: '>+200%' };
+  return pct > 0 ? { kind: 'up', text: '+' + pct + '%' } : { kind: 'down', text: '−' + Math.abs(pct) + '%' };
+}
+// 該年「已結束」的月份數 N（0～12）。cutoff 'YYYY-MM-DD'；cutoff 是月底 → 該月算結束
+function _rhClosedMonths(cutoff, year) {
+  if (typeof cutoff !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(cutoff)) return 12;
+  const cy = +cutoff.slice(0, 4), cm = +cutoff.slice(5, 7) - 1, cd = +cutoff.slice(8, 10);
+  if (year < cy) return 12;
+  if (year > cy) return 0;
+  return cd >= new Date(cy, cm + 1, 0).getDate() ? cm + 1 : cm;
+}
+const _rhIsFullYear = (cutoff, year) => _rhClosedMonths(cutoff, year) === 12;
+// 全 null → null，否則略過 null 加總
+const _rhSum = arr => arr.reduce((s, v) => (v == null ? s : (s || 0) + v), null);
+// 依 this.filter 的值挑出實際要顯示的年份 / 比較年（不合法就回預設：最新年 / 前一年 / 沒有前一年就不比較）
+function _rhPick(years, fYear, fCmp) {
+  const year = years.includes(fYear) ? fYear : (years[0] ?? null);
+  let cmp;
+  if (fCmp === 'none') cmp = null;
+  else if (years.includes(fCmp) && fCmp !== year) cmp = fCmp;
+  else cmp = years.includes(year - 1) ? year - 1 : null;
+  return { year, cmp };
+}
+// RevHist.build 的結果 → 表格模型。cmp 為 null = 不比較（growth 一律 null）
+function _rhTableModel(built, year, cmp, cutoff) {
+  const curRow = (built.data && built.data[year]) || {};
+  const cmpRow = cmp != null ? ((built.data && built.data[cmp]) || {}) : null;
+  const columns = (built.channels || []).filter(ch => curRow[ch] || (cmpRow && cmpRow[ch]));
+  const partialIdx = (built.partial && built.partial[year] != null) ? built.partial[year] : null;
+  const curArr = ch => curRow[ch] || new Array(12).fill(null);
+  const cmpArr = ch => (cmpRow && cmpRow[ch]) || new Array(12).fill(null);
+  const totalAt = (getArr, m) => _rhSum(columns.map(ch => getArr(ch)[m]));
+  const curTotalArr = Array.from({ length: 12 }, (_, m) => totalAt(curArr, m));
+  const cmpTotalArr = Array.from({ length: 12 }, (_, m) => totalAt(cmpArr, m));
+  const series = [...columns.map(ch => ({ cur: curArr(ch), base: cmpArr(ch) })), { cur: curTotalArr, base: cmpTotalArr }];
+  const cell = (cur, base, opts) => {
+    let growth = null;
+    if (opts && opts.partial) growth = cur == null ? null : { kind: 'partial', text: '累計中' };
+    else if (cmpRow && !(opts && opts.noGrowth)) growth = _rhGrowth(cur, base);
+    return { value: cur, growth };
+  };
+  const rows = Array.from({ length: 12 }, (_, m) => ({
+    label: (m + 1) + '月' + (m === partialIdx ? '＊' : ''),
+    partial: m === partialIdx,
+    cells: series.map(s => cell(s.cur[m], s.base[m], { partial: m === partialIdx })),
+  }));
+  const foot = [];
+  const isCutYear = typeof cutoff === 'string' && +cutoff.slice(0, 4) === year;
+  const N = _rhClosedMonths(cutoff, year);
+  if (isCutYear && N >= 1 && N <= 11) {
+    foot.push({ key: 'cum', label: '1～' + N + '月累計',
+      cells: series.map(s => cell(_rhSum(s.cur.slice(0, N)), _rhSum(s.base.slice(0, N)))) });
+  }
+  const fullBoth = cmp != null && _rhIsFullYear(cutoff, year) && _rhIsFullYear(cutoff, cmp);
+  foot.push({ key: 'full', label: '全年合計',
+    cells: series.map(s => cell(_rhSum(s.cur), _rhSum(s.base), { noGrowth: !fullBoth })) });
+  const grand = _rhSum(curTotalArr);
+  foot.push({ key: 'share', label: '佔比',
+    cells: series.map((s, i) => {
+      const v = _rhSum(s.cur);
+      if (v == null || !grand) return { value: null, text: '—' };
+      return { value: v, text: (i === series.length - 1 ? 100 : (v / grand) * 100).toFixed(1) + '%' };
+    }) });
+  const caption = year + ' 年各通路每月營收' + (cmp != null ? '，小字為與 ' + cmp + ' 年同月相比' : '')
+    + (partialIdx != null ? '（' + (partialIdx + 1) + ' 月尚未結束' + (cmp != null ? '，不比較' : '') + '）' : '');
+  return { year, cmp, columns, rows, foot, caption, partialIdx };
+}
+
+/* ── 趨勢比較（塊 3）── ch 為通路名，或 _RH_ALL＝全通路（各通路逐月加總） */
+const _RH_ALL = '__all__';
+const _RH_MONTHS = Object.freeze(['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']);
+function _rhSeries(built, year, ch) {
+  const row = (built.data && built.data[year]) || {};
+  if (ch === _RH_ALL) {
+    const arrs = Object.values(row);
+    return Array.from({ length: 12 }, (_, m) => _rhSum(arrs.map(a => a[m])));
+  }
+  return row[ch] ? row[ch].slice() : new Array(12).fill(null);
+}
+// 淡旺季用的「完整年度」：整年已結束，且
+//   單一通路 → 12 個月都有值且 > 0；全通路 → 「不滿 12 個月的通路」合計佔該年總額 < 5%
+function _rhIsCompleteYear(built, year, ch, cutoff) {
+  if (!_rhIsFullYear(cutoff, year)) return false;
+  const full12 = a => a.every(v => v != null && v > 0);
+  if (ch !== _RH_ALL) return full12(_rhSeries(built, year, ch));
+  let total = 0, partial = 0;
+  Object.values((built.data && built.data[year]) || {}).forEach(a => {
+    const s = _rhSum(a) || 0;
+    total += s;
+    if (!full12(a)) partial += s;
+  });
+  return total > 0 && partial / total < 0.05;
+}
+// 月份索引 → 「1–2月、10–12月」；連續合併、不連續用頓號；空 → 不明顯
+function _rhMonthRanges(idxs) {
+  const s = [...new Set(idxs)].sort((a, b) => a - b);
+  if (!s.length) return '不明顯';
+  const out = [];
+  let st = s[0], pv = s[0];
+  for (let i = 1; i <= s.length; i++) {
+    if (s[i] === pv + 1) { pv = s[i]; continue; }
+    out.push(st === pv ? (st + 1) + '月' : (st + 1) + '–' + (pv + 1) + '月');
+    st = pv = s[i];
+  }
+  return out.join('、');
+}
+// 淡旺季指數 → 色階 1～7（≤70 / 71–85 / 86–95 / 96–104 / 105–114 / 115–129 / ≥130）
+function _rhSeasonLevel(v) {
+  if (v <= 70) return 1;
+  if (v <= 85) return 2;
+  if (v <= 95) return 3;
+  if (v <= 104) return 4;
+  if (v <= 114) return 5;
+  if (v <= 129) return 6;
+  return 7;
+}
+// 淡旺季：指數＝該月 ÷ 該年月平均 × 100。歷年平均＝各年「未四捨五入」指數取平均後才四捨五入
+function _rhSeasonModel(built, yrs, ch, cutoff) {
+  const full = [...yrs].sort((a, b) => b - a).filter(y => _rhIsCompleteYear(built, y, ch, cutoff));
+  if (!full.length) return { empty: true, rows: [], peak: '', low: '', basis: [] };
+  const raws = full.map(y => {
+    const a = _rhSeries(built, y, ch);
+    const avg = _rhSum(a) / 12;
+    return a.map(v => (v / avg) * 100);
+  });
+  const rows = full.map((y, i) => ({ label: String(y), avg: false, values: raws[i].map(Math.round) }));
+  let ref = raws[0];
+  if (full.length >= 2) {
+    ref = Array.from({ length: 12 }, (_, m) => raws.reduce((s, r) => s + r[m], 0) / raws.length);
+    rows.push({ label: '歷年平均', avg: true, values: ref.map(Math.round) });
+  }
+  const refR = ref.map(Math.round);
+  const pick = test => refR.map((v, m) => (test(v) ? m : -1)).filter(m => m >= 0);
+  return {
+    empty: false,
+    rows: rows.map(r => ({ ...r, levels: r.values.map(_rhSeasonLevel) })),
+    peak: _rhMonthRanges(pick(v => v >= 110)),
+    low: _rhMonthRanges(pick(v => v <= 90)),
+    basis: full,
+  };
+}
+// this.filter 的通路 / 勾選年份 → 合法值（預設全通路、最新 4 年；年份新到舊）
+function _rhPickTrend(built, fCh, fYrs) {
+  const ch = (fCh === _RH_ALL || (built.channels || []).includes(fCh)) ? fCh : _RH_ALL;
+  let yrs = Array.isArray(fYrs) ? fYrs.filter(y => built.years.includes(y)) : [];
+  if (!yrs.length) yrs = built.years.slice(0, 4);
+  return { ch, yrs: [...new Set(yrs)].sort((a, b) => b - a) };
+}
+// 折線圖資料：每個勾選年份一條線；累計中 / 未來月份（索引 ≥ 已結束月數 N）一律 null 不畫
+function _rhTrendChartData(built, yrs, ch, cutoff) {
+  const lines = yrs.map((y, i) => {
+    const N = _rhClosedMonths(cutoff, y);
+    const s = _rhSeries(built, y, ch);
+    return {
+      year: y,
+      data: s.map((v, m) => (m < N ? v : null)),
+      colorIdx: Math.min(built.years.indexOf(y) + 1, 5),   // 依「全部年份新到舊」固定配色，取消勾選不換色
+      newest: i === 0,
+    };
+  });
+  const cutY = typeof cutoff === 'string' ? +cutoff.slice(0, 4) : null;
+  const p = cutY != null && yrs.includes(cutY) && built.partial ? built.partial[cutY] : null;
+  return { labels: _RH_MONTHS.slice(), lines, partialIdx: p != null ? p : null };
+}
+// 並排表：欄＝勾選年份（新到舊），每格與「前一年同月」比（前一年沒勾也比）。
+//   前一年不在 build 年份裡 → 該年整欄不顯示成長率；前一年在但沒資料 → 照 _rhGrowth 顯示「新」或不顯示
+function _rhTrendTableModel(built, yrs, ch, cutoff) {
+  const cutY = typeof cutoff === 'string' ? +cutoff.slice(0, 4) : null;
+  const cols = yrs.map(y => {
+    const hasPrev = built.years.includes(y - 1);
+    return {
+      year: y, hasPrev,
+      cur: _rhSeries(built, y, ch),
+      base: hasPrev ? _rhSeries(built, y - 1, ch) : null,
+      N: _rhClosedMonths(cutoff, y),
+      baseN: _rhClosedMonths(cutoff, y - 1),
+      partialIdx: (built.partial && built.partial[y] != null) ? built.partial[y] : null,
+    };
+  });
+  const gr = (c, cur, base) => (c.hasPrev ? _rhGrowth(cur, base) : null);
+  const rows = Array.from({ length: 12 }, (_, m) => {
+    const partial = cols.some(c => c.partialIdx === m);
+    return {
+      label: _RH_MONTHS[m] + (partial ? '＊' : ''), partial,
+      cells: cols.map(c => {
+        const v = c.cur[m];
+        if (c.partialIdx === m) return { value: v, growth: v == null ? null : { kind: 'partial', text: '累計中' } };
+        return { value: v, growth: gr(c, v, c.base && c.base[m]) };
+      }),
+    };
+  });
+  const foot = [];
+  const Ncut = cutY != null ? _rhClosedMonths(cutoff, cutY) : 12;
+  if (cutY != null && yrs.includes(cutY) && Ncut >= 1 && Ncut <= 11) {
+    foot.push({ key: 'cum', label: '1～' + Ncut + '月累計', cells: cols.map(c => {
+      const v = _rhSum(c.cur.slice(0, Ncut));
+      return { value: v, growth: gr(c, v, c.base && _rhSum(c.base.slice(0, Ncut))) };
+    }) });
+  }
+  foot.push({ key: 'full', label: '全年合計', cells: cols.map(c => {
+    const v = _rhSum(c.cur);
+    if (!_rhIsFullYear(cutoff, c.year)) return { value: v, growth: { kind: 'flat', text: '進行中' } };
+    return { value: v, growth: _rhIsFullYear(cutoff, c.year - 1) ? gr(c, v, c.base && _rhSum(c.base)) : null };
+  }) });
+  // 月平均：只算已結束且有值的月份
+  const mAvg = (arr, N) => {
+    const vs = arr.slice(0, N).filter(v => v != null);
+    return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null;
+  };
+  foot.push({ key: 'avg', label: '月平均', cells: cols.map(c => {
+    const v = mAvg(c.cur, c.N);
+    return { value: v, growth: gr(c, v, c.base && mAvg(c.base, c.baseN)) };
+  }) });
+  return { years: yrs.slice(), rows, foot };
+}
+// Y 軸：≥ 1 萬用「萬」（最多一位小數），其餘照原數字
+function _rhWan(v) {
+  if (v == null || !isFinite(v)) return '';
+  if (Math.abs(v) >= 10000) return (Math.round(v / 1000) / 10).toLocaleString() + '萬';
+  return Math.round(v).toLocaleString();
+}
+/* @rev-hist-view-end */
 
 Object.assign(App, {
   viewDashboard() {
@@ -511,6 +748,9 @@ Object.assign(App, {
       </div>
     `;
 
+    // 歷年營收比較：局部重畫（點年份 / 比較年）沿用這份已讀好的 platforms，不再 Store.get
+    this._revHistPlatforms = platforms;
+
     return `
       <div class="page-header" style="margin-bottom:10px">
         <h2 style="font-size:22px;margin:0">儀表板首頁 <span class="live-dot">即時資料</span></h2>
@@ -526,7 +766,7 @@ Object.assign(App, {
           ${this.channelPieHtml(platforms, rangeInfo)}
         </div>
       </div>
-      <div class="dash-chart-row">${this.dailyLineChartHtml(platforms)}</div>
+      <div id="rev-hist" class="rev-hist-card">${this.revHistSectionHtml()}</div>
     `;
   },
   /* 各通路指標的單一計算來源 —— KPI 卡、排名長條、需要留意、圓餅圖共用，
@@ -736,7 +976,7 @@ Object.assign(App, {
   },
   /* 各通路營收佔比（甜甜圈）— 沿用 index.html 既有的 Chart.js CDN，不引新套件
      - 指標走 channelMetrics()，與排名長條 / 需要留意同一份計算
-     - 比照既有 _chartState 的做法：這裡只產生 markup + 把資料放進 _pieState，
+     - markup 與建圖分開：這裡只產生 markup + 把資料放進 _pieState，
        實際建圖在 initChannelPie()（DOM 進場後才有 canvas 可用）
      - 純 render、無事件綁定：跟著既有重繪路徑更新 */
   channelPieHtml(platforms, rangeInfo) {
@@ -864,324 +1104,6 @@ Object.assign(App, {
       plugins: [centerText],
     });
   },
-  dailyLineChartHtml(platforms /* days param ignored now */) {
-    const now = new Date();
-    const curY = now.getFullYear();
-    const curM = now.getMonth() + 1;
-    // 年/月分開記：預設本月；不允許未來
-    let yMonth = this.filter.chartYear || curY;
-    let mMonth = this.filter.chartMonth || curM;
-    if (yMonth > curY || (yMonth === curY && mMonth > curM)) {
-      yMonth = curY; mMonth = curM;
-    }
-    const monthStart = new Date(yMonth, mMonth - 1, 1);
-    const lastOfMonth = new Date(yMonth, mMonth, 0);
-    const isCurrent = (yMonth === curY && mMonth === curM);
-    // 本月只顯示到昨日；過去月份顯示整月
-    const endDate = isCurrent ? addDays(now, -1) : lastOfMonth;
-    const endStr = toDateStr(endDate);
-    const monthLabel = isCurrent ? '本月' : `${mMonth}月`;
-    // 給下拉選單用：年份從 2024 到當年；月份永遠 1-12（含禁用判斷由 JS 過濾或 disabled）
-    const yearOpts = [];
-    for (let y = curY; y >= 2024; y--) yearOpts.push(y);
-    const monthOpts = Array.from({length:12}, (_,i)=>i+1);
-
-    const dates = [];
-    for (let d = new Date(monthStart); toDateStr(d) <= endStr; d = addDays(d, 1)) {
-      dates.push(toDateStr(d));
-    }
-
-    // 切換：null = 總計（全部加總），string = 單一平台
-    const activeName = this.filter.chartPlatform || null;
-
-    // 圖例（全通路 + 7 個平台）
-    const allPill = `
-      <button class="line-legend" data-name="" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:${activeName === null ? '#0f172a' : 'var(--bg)'};border:1px solid ${activeName === null ? '#0f172a' : 'var(--border)'};border-radius:999px;font-size:11px;color:${activeName === null ? 'white' : 'var(--text-muted)'};cursor:pointer;font-weight:500">🏪 全通路</button>
-    `;
-    const platformPills = platforms.map(p => {
-      const isActive = activeName === p.name;
-      const isDimmed = activeName !== null && !isActive;
-      const market = PLATFORM_MARKETPLACE[p.name] || 'shopee';
-      const logoSrc = MARKETPLACE_BADGE[market].src;
-      return `
-        <button class="line-legend" data-name="${escapeHtml(p.name)}"
-          style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px 3px 3px;background:${isActive ? p.color : p.color + '14'};border:1px solid ${isActive ? p.color : p.color + '40'};border-radius:999px;font-size:11px;color:${isActive ? 'white' : p.color};cursor:pointer;font-weight:600;opacity:${isDimmed ? '0.45' : '1'};transition:opacity .15s">
-          <img src="${logoSrc}" alt="" style="width:16px;height:16px;border-radius:50%;object-fit:contain;background:white;flex-shrink:0">
-          ${escapeHtml(p.name)}
-        </button>
-      `;
-    }).join('');
-
-    // 計算每日資料
-    // 全通路模式（activeName == null）：7 條平台曲線同時顯示
-    // 單一平台模式：只顯示該平台一條線
-    const logoImgHtml = (platformName) => {
-      const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
-      const s = MARKETPLACE_BADGE[m];
-      return `<img src="${s.src}" alt="${escapeHtml(s.name)}" style="width:18px;height:18px;border-radius:4px;object-fit:contain;background:white;padding:1px;vertical-align:middle;margin-right:6px;box-shadow:0 1px 2px rgba(0,0,0,0.06)">`;
-    };
-
-    let series, lineLabel, lineLabelHtml, lineColor, isMulti;
-    if (activeName) {
-      const p = platforms.find(x => x.name === activeName);
-      if (p) {
-        series = [{ name: p.name, color: p.color, icon: p.icon,
-                    values: dates.map(d => +(p.daily?.[d]) || 0) }];
-        lineLabel = p.name;
-        lineLabelHtml = `${logoImgHtml(p.name)}<span style="vertical-align:middle">${escapeHtml(p.name)}</span>`;
-        lineColor = p.color;
-        isMulti = false;
-      } else {
-        series = platforms.map(pp => ({
-          name: pp.name, color: pp.color, icon: pp.icon,
-          values: dates.map(d => +(pp.daily?.[d]) || 0),
-        }));
-        lineLabel = '全通路';
-        lineLabelHtml = '<span style="vertical-align:middle">🏪 全通路</span>';
-        lineColor = '#0f172a';
-        isMulti = true;
-      }
-    } else {
-      series = platforms.map(pp => ({
-        name: pp.name, color: pp.color, icon: pp.icon,
-        values: dates.map(d => +(pp.daily?.[d]) || 0),
-      }));
-      lineLabel = '全通路';
-      lineLabelHtml = '<span style="vertical-align:middle">🏪 全通路</span>';
-      lineColor = '#0f172a';
-      isMulti = true;
-    }
-
-    // 每日全平台資料供 tooltip 取用
-    const dailyData = dates.map(d => ({
-      date: d,
-      total: platforms.reduce((s, pp) => s + (+pp.daily?.[d] || 0), 0),
-      breakdown: platforms.map(pp => ({
-        name: pp.name, icon: pp.icon, color: pp.color,
-        value: +pp.daily?.[d] || 0,
-      })),
-    }));
-
-    // 沒資料的空狀態
-    if (dates.length === 0) {
-      return `
-        <div class="chart-card" style="margin-top:16px">
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
-            <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
-              <select id="chart-year-sel" style="border:1px solid var(--border);background:white;border-radius:6px;height:26px;padding:0 6px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text)">
-                ${yearOpts.map(y => `<option value="${y}" ${y===yMonth?'selected':''}>${y} 年</option>`).join('')}
-              </select>
-              <select id="chart-month-sel" style="border:1px solid var(--border);background:white;border-radius:6px;height:26px;padding:0 6px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text)">
-                ${monthOpts.map(m => {
-                  const isFuture = (yMonth===curY && m>curM);
-                  return `<option value="${m}" ${m===mMonth?'selected':''} ${isFuture?'disabled':''}>${m} 月</option>`;
-                }).join('')}
-              </select>
-              ${!isCurrent ? '<button id="chart-month-reset" title="回到本月" style="border:1px solid var(--border);background:white;border-radius:6px;padding:0 10px;height:26px;cursor:pointer;font-size:11px;color:var(--text-muted)">回本月</button>' : ''}
-              <span style="margin-left:4px">每日營收</span>
-            </h3>
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${allPill}${platformPills}</div>
-          <div style="text-align:center;padding:60px 20px;color:var(--text-muted);font-size:14px">
-            ${monthLabel}還沒有資料 ${isCurrent ? '— 等行銷團隊進系統填入昨日數字後，這裡會顯示曲線' : ''}
-          </div>
-        </div>
-      `;
-    }
-
-    const maxV = Math.max(1, ...series.flatMap(s => s.values));
-
-    const W = 1000, H = 280;
-    const padL = 60, padR = 20, padT = 20, padB = 32;
-    const cw = W - padL - padR;
-    const ch = H - padT - padB;
-    const xStep = dates.length > 1 ? cw / (dates.length - 1) : cw / 2;
-
-    // Y 軸刻度
-    const yTicks = [];
-    for (let i = 0; i <= 4; i++) {
-      const y = padT + ch - (i / 4) * ch;
-      const v = (maxV / 4) * i;
-      yTicks.push(`
-        <line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="#e2e8f0" stroke-dasharray="3,3"/>
-        <text x="${padL - 10}" y="${y + 4}" font-size="11" fill="#94a3b8" text-anchor="end">${this.fmtTick(v)}</text>
-      `);
-    }
-
-    // X 軸日期標籤
-    const xLabelEvery = Math.max(1, Math.round(dates.length / 8));
-    const xLabels = dates.map((d, i) => {
-      if (i % xLabelEvery !== 0 && i !== dates.length - 1 && i !== 0) return '';
-      const x = padL + i * xStep;
-      const label = d.slice(5).replace('-', '/');
-      return `<text x="${x}" y="${H - padB + 18}" font-size="11" fill="#64748b" text-anchor="middle">${label}</text>`;
-    }).join('');
-
-    // 折線（每個 series 一條）
-    const polylines = series.map(s => {
-      const pts = s.values.map((v, i) => {
-        const x = padL + i * xStep;
-        const y = padT + ch - (v / maxV) * ch;
-        return `${x},${y}`;
-      }).join(' ');
-      return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="${isMulti ? 2 : 2.5}" stroke-linejoin="round" stroke-linecap="round" />`;
-    }).join('');
-
-    // 資料點圓圈（每個 series 每天一個）
-    const circles = series.map(s => s.values.map((v, i) => {
-      const x = padL + i * xStep;
-      const y = padT + ch - (v / maxV) * ch;
-      return `<circle cx="${x}" cy="${y}" r="${isMulti ? 2.5 : 3}" fill="white" stroke="${s.color}" stroke-width="${isMulti ? 1.5 : 2}" />`;
-    }).join('')).join('');
-
-    // 保存 chart 狀態供 hover handler 使用
-    this._chartState = { dates, dailyData, series, padL, xStep, W, H, padT, ch, maxV, lineColor, lineLabel, isMulti, activeName };
-
-    // 計算目前選中的 series 累計：全通路 = 7 個通路全部加總；單一通路 = 該通路本月加總
-    const seriesTotal = series.reduce((s, ss) => s + ss.values.reduce((a, b) => a + b, 0), 0);
-    const daysWithData = dates.filter(d =>
-      series.some(s => s.values[dates.indexOf(d)] > 0)
-    ).length;
-    const totalLabel = isMulti ? `${monthLabel}全通路累計` : `${monthLabel}「${lineLabel}」累計`;
-
-    return `
-      <div class="chart-card" style="margin:0;padding:12px 14px;width:100%;display:flex;flex-direction:column">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px;flex-shrink:0">
-          <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <select id="chart-year-sel" style="border:1px solid var(--border);background:white;border-radius:6px;height:26px;padding:0 6px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text)">
-              ${yearOpts.map(y => `<option value="${y}" ${y===yMonth?'selected':''}>${y} 年</option>`).join('')}
-            </select>
-            <select id="chart-month-sel" style="border:1px solid var(--border);background:white;border-radius:6px;height:26px;padding:0 6px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text)">
-              ${monthOpts.map(m => {
-                const isFuture = (yMonth===curY && m>curM);
-                return `<option value="${m}" ${m===mMonth?'selected':''} ${isFuture?'disabled':''}>${m} 月</option>`;
-              }).join('')}
-            </select>
-            ${!isCurrent ? '<button id="chart-month-reset" title="回到本月" style="border:1px solid var(--border);background:white;border-radius:6px;padding:0 10px;height:26px;cursor:pointer;font-size:11px;color:var(--text-muted)">回本月</button>' : ''}
-            <span style="margin-left:4px">${lineLabelHtml} 每日營收</span>
-          </h3>
-          <span style="font-size:11px;color:var(--text-muted)">滑鼠移上去看當日</span>
-        </div>
-        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-shrink:0">
-          <span style="font-size:11px;color:var(--text-muted);font-weight:600;letter-spacing:.05em">${escapeHtml(totalLabel)}</span>
-          <span style="font-size:20px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.01em">NT$ ${seriesTotal.toLocaleString()}</span>
-          <span style="font-size:11px;color:var(--text-muted)">· ${daysWithData} 天有資料</span>
-        </div>
-        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;flex-shrink:0">${allPill}${platformPills}</div>
-        <div id="line-chart-container" style="position:relative;flex:1;min-height:240px;display:flex">
-          <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:100%;display:block">
-            ${yTicks.join('')}
-            ${polylines}
-            ${circles}
-            ${xLabels}
-            <line id="chart-guide" x1="0" y1="${padT}" x2="0" y2="${padT + ch}" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3" style="opacity:0;transition:opacity .1s" />
-            ${isMulti ? '' : `<circle id="chart-active-dot" cx="0" cy="0" r="6" fill="${lineColor}" stroke="white" stroke-width="2" style="opacity:0;transition:opacity .1s" />`}
-          </svg>
-          <div id="line-chart-tooltip" style="position:absolute;display:none;background:#1e293b;color:white;padding:10px 14px;border-radius:8px;font-size:13px;pointer-events:none;box-shadow:0 8px 24px rgba(15,23,42,0.2);z-index:10;transform:translate(-50%, calc(-100% - 10px));min-width:200px"></div>
-        </div>
-      </div>
-    `;
-  },
-  bindLineChartTooltip() {
-    const container = document.getElementById('line-chart-container');
-    if (!container || !this._chartState) return;
-    const svg = container.querySelector('svg');
-    const tooltip = document.getElementById('line-chart-tooltip');
-    const guide   = document.getElementById('chart-guide');
-    const activeDot = document.getElementById('chart-active-dot'); // 只有單一平台模式才有
-    if (!svg || !tooltip || !guide) return;
-
-    const { dates, dailyData, series, padL, xStep, W, H, padT, ch, maxV, isMulti, activeName } = this._chartState;
-
-    const logoFor = (name) => {
-      const m = PLATFORM_MARKETPLACE[name] || 'shopee';
-      return MARKETPLACE_BADGE[m].src;
-    };
-
-    const fmtTooltip = (i) => {
-      const data = dailyData[i];
-      const dateStr = data.date.replace(/-/g, '/');
-      if (isMulti) {
-        // 全通路模式：顯示日期 + 總計 + 7 個平台明細
-        return `
-          <div style="font-size:11px;opacity:0.7;margin-bottom:6px">${dateStr}</div>
-          <div style="font-size:11px;opacity:0.7">全通路總計</div>
-          <div style="font-size:18px;font-weight:700;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.18);font-variant-numeric:tabular-nums">NT$ ${Math.round(data.total).toLocaleString()}</div>
-          <div style="font-size:12px;line-height:1.7">
-            ${data.breakdown.map(p => `
-              <div style="display:flex;justify-content:space-between;gap:18px;align-items:center">
-                <span style="opacity:0.9;display:inline-flex;align-items:center;gap:6px">
-                  <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${p.color}"></span>
-                  <img src="${logoFor(p.name)}" alt="" style="width:16px;height:16px;border-radius:3px;object-fit:contain;background:white;flex-shrink:0">
-                  ${escapeHtml(p.name)}
-                </span>
-                <span style="font-variant-numeric:tabular-nums;opacity:${p.value > 0 ? 1 : 0.4}">${p.value > 0 ? p.value.toLocaleString() : '—'}</span>
-              </div>
-            `).join('')}
-          </div>
-        `;
-      } else {
-        // 單一平台模式
-        const p = data.breakdown.find(x => x.name === activeName);
-        const v = p ? p.value : 0;
-        return `
-          <div style="font-size:11px;opacity:0.7;margin-bottom:4px">${dateStr}</div>
-          ${p ? `<div style="font-size:12px;opacity:0.9;margin-bottom:4px;display:inline-flex;align-items:center;gap:6px">
-            <img src="${logoFor(p.name)}" alt="" style="width:16px;height:16px;border-radius:3px;object-fit:contain;background:white;flex-shrink:0">
-            ${escapeHtml(p.name)}
-          </div>` : ''}
-          <div style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">NT$ ${Math.round(v).toLocaleString()}</div>
-        `;
-      }
-    };
-
-    const update = (e) => {
-      const svgRect = svg.getBoundingClientRect();
-      const x = e.clientX - svgRect.left;
-      const scaleX = svgRect.width / W;
-      const scaleY = svgRect.height / H;
-      const svgX = x / scaleX;
-
-      let i = Math.round((svgX - padL) / xStep);
-      i = Math.max(0, Math.min(dates.length - 1, i));
-
-      const cx = padL + i * xStep;
-      // 多線：tooltip 對齊到該日最高線；單線：對齊到該線
-      const yVal = isMulti
-        ? Math.max(...series.map(s => s.values[i]))
-        : series[0].values[i];
-      const cy = padT + ch - (yVal / maxV) * ch;
-
-      tooltip.innerHTML = fmtTooltip(i);
-      tooltip.style.left = `${cx * scaleX}px`;
-      tooltip.style.top  = `${cy * scaleY}px`;
-      tooltip.style.display = 'block';
-
-      guide.setAttribute('x1', cx);
-      guide.setAttribute('x2', cx);
-      guide.style.opacity = '1';
-
-      if (activeDot && !isMulti) {
-        activeDot.setAttribute('cx', cx);
-        activeDot.setAttribute('cy', cy);
-        activeDot.style.opacity = '1';
-      }
-    };
-
-    const hide = () => {
-      tooltip.style.display = 'none';
-      guide.style.opacity = '0';
-      if (activeDot) activeDot.style.opacity = '0';
-    };
-
-    container.addEventListener('mousemove', update);
-    container.addEventListener('mouseleave', hide);
-  },
-  fmtTick(v) {
-    if (v >= 1000000) return (v / 1000000).toFixed(1) + 'M';
-    if (v >= 1000) return Math.round(v / 1000) + 'K';
-    return Math.round(v).toString();
-  },
   revenueEntrySectionHtml(platforms) {
     const now = new Date();
     const todayStr = toDateStr(now);
@@ -1231,9 +1153,311 @@ Object.assign(App, {
       </div>
     `;
   },
+  /* 歷年營收比較（年度總表）— 插在甜甜圈列下方、每日營收折線圖上方
+     - 資料：RevHist（app.js）。歷史檔第一次顯示「載入中…」，載完只重畫 #rev-hist。
+       this._revHistData：undefined = 還沒載 / null = 載入失敗（只顯示 daily 年份）/ 物件 = 歷史資料
+     - 選擇存 this.filter.revHistYear / revHistCmp / revHistTab（'table' | 'trend'）/ revHistCh / revHistYrs
+       （記憶體，雲端快照重繪不會打回預設；F5 回預設）
+     - 點按鈕只換 #rev-hist 的 innerHTML（revHistRedraw），⚠ 不要呼叫 this.render()：會洗掉填寫面板打到一半的數字
+     - 全部包 try/catch：首頁 render 不能因為這一塊壞掉而白畫面 */
+  revHistSectionHtml() {
+    const tab = this.filter.revHistTab === 'trend' ? 'trend' : 'table';
+    const tabBtn = (key, label) =>
+      `<button type="button" class="rev-hist-tab${tab === key ? ' is-active' : ''}" data-rh-tab="${key}" aria-pressed="${tab === key ? 'true' : 'false'}">${label}</button>`;
+    const head = `
+      <div class="rev-hist-head">
+        <div class="rev-hist-titles">
+          <h3 class="rev-hist-title">歷年營收比較</h3>
+          <span class="rev-hist-sub">每日營收月加總 · MOMO 含 MO+</span>
+        </div>
+        <div class="rev-hist-tabs">${tabBtn('table', '年度總表')}${tabBtn('trend', '趨勢比較')}</div>
+      </div>`;
+    // 折線圖資料只在趨勢分頁產生；其他狀態一律清掉 → _revHistInitChart 只會銷毀、不會建圖
+    this._revHistChartState = null;
+    try {
+      if (!RevHist) return head + '<div class="rev-hist-empty">歷年營收比較元件未載入 — 重新整理後再試</div>';
+      if (this._revHistData === undefined) {
+        this._revHistEnsureLoad();
+        return head + '<div class="rev-hist-empty">載入中…</div>';
+      }
+      return head + (tab === 'trend' ? this._revHistTrendHtml() : this._revHistBodyHtml());
+    } catch (e) {
+      console.warn('歷年營收比較 render 失敗：', e);
+      return head + '<div class="rev-hist-empty">歷年營收比較暫時無法顯示</div>';
+    }
+  },
+  _revHistBodyHtml() {
+    const built = RevHist.build(this._revHistData, this._revHistPlatforms || [], this._dataCutoff);
+    const failNote = this._revHistData === null
+      ? `<p class="rev-hist-note is-warn">歷年資料載入失敗，只顯示 ${built.years.join('、') || '目前年份'}</p>` : '';
+    if (!built.years.length) return '<div class="rev-hist-empty">尚無營收資料</div>' + failNote;
+
+    const { year, cmp } = _rhPick(built.years, this.filter.revHistYear, this.filter.revHistCmp);
+    const model = _rhTableModel(built, year, cmp, this._dataCutoff);
+
+    const chip = (attr, val, label, active) =>
+      `<button type="button" class="rev-hist-chip${active ? ' is-active' : ''}" ${attr}="${val}" aria-pressed="${active ? 'true' : 'false'}">${label}</button>`;
+    const yearChips = built.years.map(y => chip('data-rh-year', y, y + ' 年', y === year)).join('');
+    const cmpChips = chip('data-rh-cmp', 'none', '不比較', cmp == null)
+      + built.years.filter(y => y !== year).map(y => chip('data-rh-cmp', y, y + ' 年', y === cmp)).join('');
+
+    const amt = v => (v == null
+      ? '<span class="rev-hist-amt is-empty">—</span>'
+      : `<span class="rev-hist-amt">${Math.round(v).toLocaleString()}</span>`);
+    const gr = g => (g && g.text ? `<span class="rev-hist-g is-${g.kind}">${escapeHtml(g.text)}</span>` : '');
+    const lastIdx = model.columns.length;   // 最後一格 = 總計
+    const tdCls = i => (i === lastIdx ? ' class="is-total"' : '');
+
+    // 表頭通路名可點 → 切到趨勢比較並選該通路；「總計」→ 全通路
+    const chLink = (val, label) => `<button type="button" class="rev-hist-chlink" data-rh-goch="${escapeHtml(val)}" title="看${escapeHtml(val === _RH_ALL ? '全通路' : label)}的趨勢">${escapeHtml(label)}</button>`;
+    const thead = `<tr><th class="rev-hist-month">月份</th>${model.columns.map(ch => `<th>${chLink(ch, ch)}</th>`).join('')}<th class="is-total">${chLink(_RH_ALL, '總計')}</th></tr>`;
+    const rowHtml = r => `<tr${r.partial ? ' class="is-partial"' : ''}><th class="rev-hist-month">${escapeHtml(r.label)}</th>${
+      r.cells.map((c, i) => `<td${tdCls(i)}>${amt(c.value)}${gr(c.growth)}</td>`).join('')}</tr>`;
+    const footHtml = f => `<tr class="rev-hist-foot-${f.key}"><th class="rev-hist-month">${escapeHtml(f.label)}</th>${
+      f.cells.map((c, i) => (f.key === 'share'
+        ? `<td${tdCls(i)}><span class="rev-hist-share">${escapeHtml(c.text)}</span></td>`
+        : `<td${tdCls(i)}>${amt(c.value)}${gr(c.growth)}</td>`)).join('')}</tr>`;
+
+    return `
+      <div class="rev-hist-pickers">
+        <div class="rev-hist-pick"><span class="rev-hist-pick-label">年份</span>${yearChips}</div>
+        <div class="rev-hist-pick"><span class="rev-hist-pick-label">比較</span>${cmpChips}</div>
+      </div>
+      <p class="rev-hist-caption">${escapeHtml(model.caption)}</p>
+      <div class="rev-hist-scroll">
+        <table class="rev-hist-table">
+          <thead>${thead}</thead>
+          <tbody>${model.rows.map(rowHtml).join('')}</tbody>
+          <tfoot>${model.foot.map(footHtml).join('')}</tfoot>
+        </table>
+      </div>
+      <p class="rev-hist-note">成長率超過 200% 多半是去年同期金額很小（例如通路剛上線），只顯示「&gt;+200%」，僅供參考。</p>
+      <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表，核對中。</p>
+      ${failNote}`;
+  },
+  /* 趨勢比較分頁：通路（單選）＋年份（複選）→ 淡旺季卡片 → 折線圖 → 並排表
+     選擇存 this.filter.revHistCh / revHistYrs；折線圖資料放 this._revHistChartState，實際建圖在 _revHistInitChart() */
+  _revHistTrendHtml() {
+    const built = RevHist.build(this._revHistData, this._revHistPlatforms || [], this._dataCutoff);
+    const failNote = this._revHistData === null
+      ? `<p class="rev-hist-note is-warn">歷年資料載入失敗，只顯示 ${built.years.join('、') || '目前年份'}</p>` : '';
+    if (!built.years.length) return '<div class="rev-hist-empty">尚無營收資料</div>' + failNote;
+
+    const cutoff = this._dataCutoff;
+    const { ch, yrs } = _rhPickTrend(built, this.filter.revHistCh, this.filter.revHistYrs);
+    this._revHistTrendYrs = yrs;   // 給點擊時的勾選切換用（與畫面同一份）
+
+    const chChip = (val, label) => {
+      const on = ch === val;
+      return `<button type="button" class="rev-hist-chip${on ? ' is-active' : ''}" data-rh-ch="${escapeHtml(val)}" aria-pressed="${on ? 'true' : 'false'}">${escapeHtml(label)}</button>`;
+    };
+    const chChips = chChip(_RH_ALL, '全通路') + built.channels.map(c => chChip(c, c)).join('');
+    const yrChips = built.years.map(y => {
+      const on = yrs.includes(y);
+      const locked = on && yrs.length === 1;
+      return `<button type="button" class="rev-hist-chip rev-hist-yrchip rev-hist-yr-${Math.min(built.years.indexOf(y) + 1, 5)}${on ? ' is-active' : ''}${locked ? ' is-locked' : ''}" data-rh-yr="${y}" aria-pressed="${on ? 'true' : 'false'}"${locked ? ' title="至少保留一個年份"' : ''}><span class="rev-hist-swatch"></span>${y} 年</button>`;
+    }).join('');
+
+    // ① 淡旺季
+    const season = _rhSeasonModel(built, yrs, ch, cutoff);
+    let seasonHtml;
+    if (season.empty) {
+      seasonHtml = `
+        <div class="rev-hist-season">
+          <div class="rev-hist-season-head"><span class="rev-hist-season-title">淡旺季</span></div>
+          <div class="rev-hist-empty is-compact">勾選的年份中沒有完整 12 個月的資料，無法計算淡旺季</div>
+        </div>`;
+    } else {
+      const sRows = season.rows.map(r => `<tr${r.avg ? ' class="is-avg"' : ''}><th class="rev-hist-month">${escapeHtml(r.label)}</th>${
+        r.values.map((v, m) => `<td class="rev-hist-lv-${r.levels[m]}">${v}</td>`).join('')}</tr>`).join('');
+      seasonHtml = `
+        <div class="rev-hist-season">
+          <div class="rev-hist-season-head">
+            <span class="rev-hist-season-title">淡旺季</span>
+            <span class="rev-hist-tag is-peak">旺季 ${escapeHtml(season.peak)}</span>
+            <span class="rev-hist-tag is-low">淡季 ${escapeHtml(season.low)}</span>
+          </div>
+          <p class="rev-hist-caption">依 ${season.basis.join('、')} 完整年度計算（高於平常 10% 以上＝旺、低於 10% 以上＝淡）</p>
+          <div class="rev-hist-scroll">
+            <table class="rev-hist-table rev-hist-season-table">
+              <thead><tr><th class="rev-hist-month">年份</th>${_RH_MONTHS.map(m => `<th>${m}</th>`).join('')}</tr></thead>
+              <tbody>${sRows}</tbody>
+            </table>
+          </div>
+          <p class="rev-hist-note">數字＝該月營收是那年月平均的幾 %（100＝跟平常一樣）。用比例而不是金額，所以就算每年規模不同，也能比較季節起伏。</p>
+        </div>`;
+    }
+
+    // ② 折線圖
+    const chart = _rhTrendChartData(built, yrs, ch, cutoff);
+    let chartBox;
+    if (typeof window.Chart === 'undefined') {
+      chartBox = '<div class="rev-hist-empty">圖表元件尚未載入 — 重新整理後即會顯示</div>';
+    } else {
+      this._revHistChartState = chart;
+      chartBox = '<div class="rev-hist-chart-wrap"><canvas id="rev-hist-chart"></canvas></div>';
+    }
+    const chartNote = '每條線是一個年份（粗線＝最新），看各年規模與成長；季節起伏看上方淡旺季。'
+      + (chart.partialIdx != null ? (chart.partialIdx + 1) + ' 月尚未結束，不畫進線。' : '');
+
+    // ③ 並排表
+    const tm = _rhTrendTableModel(built, yrs, ch, cutoff);
+    const amt = v => (v == null
+      ? '<span class="rev-hist-amt is-empty">—</span>'
+      : `<span class="rev-hist-amt">${Math.round(v).toLocaleString()}</span>`);
+    const gr = g => (g && g.text ? `<span class="rev-hist-g is-${g.kind}">${escapeHtml(g.text)}</span>` : '');
+    const tRow = r => `<tr${r.partial ? ' class="is-partial"' : ''}><th class="rev-hist-month">${escapeHtml(r.label)}</th>${
+      r.cells.map(c => `<td>${amt(c.value)}${gr(c.growth)}</td>`).join('')}</tr>`;
+    const tFoot = f => `<tr class="rev-hist-foot-${f.key}"><th class="rev-hist-month">${escapeHtml(f.label)}</th>${
+      f.cells.map(c => `<td>${amt(c.value)}${gr(c.growth)}</td>`).join('')}</tr>`;
+    const chName = ch === _RH_ALL ? '全通路' : ch;
+
+    return `
+      <div class="rev-hist-pickers">
+        <div class="rev-hist-pick"><span class="rev-hist-pick-label">通路</span>${chChips}</div>
+        <div class="rev-hist-pick"><span class="rev-hist-pick-label">年份</span>${yrChips}</div>
+      </div>
+      ${seasonHtml}
+      <div class="rev-hist-trend-chart">
+        ${chartBox}
+        <p class="rev-hist-note">${escapeHtml(chartNote)}</p>
+      </div>
+      <p class="rev-hist-caption">${escapeHtml(chName)} 各年每月營收，小字為與前一年同月相比</p>
+      <div class="rev-hist-scroll">
+        <table class="rev-hist-table rev-hist-trend-table">
+          <thead><tr><th class="rev-hist-month">月份</th>${tm.years.map(y => `<th>${y} 年</th>`).join('')}</tr></thead>
+          <tbody>${tm.rows.map(tRow).join('')}</tbody>
+          <tfoot>${tm.foot.map(tFoot).join('')}</tfoot>
+        </table>
+      </div>
+      <p class="rev-hist-note">成長率超過 200% 多半是去年同期金額很小（例如通路剛上線），只顯示「&gt;+200%」，僅供參考。</p>
+      <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表，核對中。</p>
+      ${failNote}`;
+  },
+  /* 建立趨勢折線圖 — revHistRedraw()（局部重畫）與 bindRevHist()（整頁 render 後）都會呼叫。
+     ⚠ 每次都先 destroy 舊實例，再清同一 canvas 上的孤兒實例（照 initChannelPie），
+       局部重畫 / 整頁重畫 / 切分頁都不會疊圖、不會出「Canvas is already in use」。
+       沒有 canvas（年度總表分頁、載入中）或 Chart 沒載入 → 銷毀完就結束。 */
+  _revHistInitChart() {
+    if (this._revHistChart) {
+      try { this._revHistChart.destroy(); } catch {}
+      this._revHistChart = null;
+    }
+    const canvas = document.getElementById('rev-hist-chart');
+    const st = this._revHistChartState;
+    if (!canvas || !st || typeof window.Chart === 'undefined') return;
+    const orphan = window.Chart.getChart && window.Chart.getChart(canvas);
+    if (orphan) { try { orphan.destroy(); } catch {} }
+
+    // 顏色一律讀 :root 變數，不在這裡寫死（fallback 只在變數讀不到時用）
+    const css = getComputedStyle(document.documentElement);
+    const cv = (name, fb) => css.getPropertyValue(name).trim() || fb;
+    const cMuted = cv('--text-muted', '#6b7280');
+    const cBorder = cv('--border', '#e5e7eb');
+    const font = '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif';
+    try {
+      this._revHistChart = new window.Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: st.labels,
+          datasets: st.lines.map(l => {
+            const c = cv('--rh-yr-' + l.colorIdx, '#94a3b8');
+            return {
+              label: l.year + ' 年', data: l.data,
+              borderColor: c, backgroundColor: c,
+              borderWidth: l.newest ? 3.5 : 1.75,
+              pointRadius: l.newest ? 3 : 2, pointHoverRadius: 5,
+              tension: 0, spanGaps: false, fill: false,   // 直線連接，不做平滑曲線
+            };
+          }),
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },   // 上方年份按鈕就是圖例
+            tooltip: {
+              filter: item => item.raw != null,
+              callbacks: {
+                title: () => '',
+                label: item => `${st.lines[item.datasetIndex].year} 年 ${item.dataIndex + 1} 月：${Math.round(item.raw).toLocaleString()}`,
+              },
+            },
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: cMuted, font: { family: font, size: 11 } } },
+            y: {
+              beginAtZero: true,
+              grid: { color: cBorder },
+              ticks: { color: cMuted, font: { family: font, size: 11 }, callback: v => _rhWan(v) },
+            },
+          },
+        },
+      });
+    } catch (e) {
+      console.warn('歷年營收趨勢圖建立失敗：', e);
+      this._revHistChart = null;
+    }
+  },
+  _revHistEnsureLoad() {
+    if (this._revHistLoading) return;
+    this._revHistLoading = true;
+    Promise.resolve()
+      .then(() => RevHist.load())
+      .then(d => { this._revHistData = d || null; }, () => { this._revHistData = null; })
+      .then(() => { this._revHistLoading = false; this.revHistRedraw(); });
+  },
+  // 只重畫 #rev-hist（不在首頁時沒有容器 → 什麼都不做）
+  revHistRedraw() {
+    const box = document.getElementById('rev-hist');
+    if (!box) return;
+    box.innerHTML = this.revHistSectionHtml();
+    this._revHistInitChart();
+  },
+  // 事件委派：每次 render 後 #rev-hist 是新元素，綁一次；局部重畫只換 innerHTML，委派仍有效
+  bindRevHist() {
+    const box = document.getElementById('rev-hist');
+    // 整頁 render 後：沒有 #rev-hist 也要跑，才會銷毀上一輪的圖
+    this._revHistInitChart();
+    if (!box) return;
+    box.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-rh-year], button[data-rh-cmp], button[data-rh-tab], button[data-rh-ch], button[data-rh-yr], button[data-rh-goch]');
+      if (!btn || btn.disabled || !box.contains(btn)) return;
+      const f = this.filter;
+      if (btn.dataset.rhGoch) {
+        f.revHistTab = 'trend';
+        f.revHistCh = btn.dataset.rhGoch;
+      } else if (btn.dataset.rhCh) {
+        if (f.revHistCh === btn.dataset.rhCh) return;
+        f.revHistCh = btn.dataset.rhCh;
+      } else if (btn.dataset.rhYr) {
+        const y = +btn.dataset.rhYr;
+        const cur = Array.isArray(this._revHistTrendYrs) ? this._revHistTrendYrs.slice() : [];
+        if (cur.includes(y)) {
+          if (cur.length <= 1) return;   // 最後一個年份不能取消
+          f.revHistYrs = cur.filter(x => x !== y);
+        } else {
+          f.revHistYrs = [...cur, y].sort((a, b) => b - a);
+        }
+      } else if (btn.dataset.rhYear) {
+        const y = +btn.dataset.rhYear;
+        if (f.revHistYear === y) return;
+        f.revHistYear = y;
+        f.revHistCmp = undefined;   // 換年份 → 比較年回到新年份的前一年（_rhPick 的預設）
+      } else if (btn.dataset.rhCmp) {
+        f.revHistCmp = btn.dataset.rhCmp === 'none' ? 'none' : +btn.dataset.rhCmp;
+      } else if (btn.dataset.rhTab) {
+        f.revHistTab = btn.dataset.rhTab;
+      }
+      this.revHistRedraw();
+    });
+  },
   bindDashboardPills() {
     // 甜甜圈圖：每次 render 後重建（含銷毀舊實例），不是事件綁定
     this.initChannelPie();
+    this.bindRevHist();
 
     // 每日營收填寫的展開 / 收合。
     // ⚠ 只切 class，絕對不要在這裡呼叫 this.render()：
@@ -1249,33 +1473,6 @@ Object.assign(App, {
         document.getElementById('revenue-entry-panel')?.classList.toggle('is-collapsed', !open);
       });
     }
-    // 曲線圖圖例：點哪個平台就單獨顯示，點「全部」回到所有平台
-    document.querySelectorAll('.line-legend').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const name = btn.dataset.name;
-        const next = name || null;
-        // 點到同一個 → 也回到全部
-        this.filter.chartPlatform = (this.filter.chartPlatform === next) ? null : next;
-        this.render();
-      });
-    });
-    // 折線圖年/月下拉：分開選
-    const yearSel = document.getElementById('chart-year-sel');
-    if (yearSel) yearSel.addEventListener('change', () => {
-      this.filter.chartYear = +yearSel.value;
-      this.render();
-    });
-    const monthSel = document.getElementById('chart-month-sel');
-    if (monthSel) monthSel.addEventListener('change', () => {
-      this.filter.chartMonth = +monthSel.value;
-      this.render();
-    });
-    const resetBtn = document.getElementById('chart-month-reset');
-    if (resetBtn) resetBtn.addEventListener('click', () => {
-      this.filter.chartYear = null;
-      this.filter.chartMonth = null;
-      this.render();
-    });
     // 總覽卡日期切換：昨日 / 前日 / 本月 / 上月
     document.querySelectorAll('#summary-pills [data-summary-range]').forEach(btn => {
       btn.addEventListener('click', () => {
