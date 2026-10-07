@@ -150,6 +150,10 @@ Object.assign(App, {
     // 塊 3-A：再併入「當天有淨利表調整歸給他」的人（adjPersonOf：by 對到的帳號姓名，含停用帳號），
     //   做法同 _dpExtraNames（名單後、穩定排序、預設灰）；「未對到帳號」不是人，固定排最後。
     const _adjWhoDay = _adjPeopleOn(viewDate);
+    // 塊 3-C：洞察表 chip 也依 by 歸屬（_insCardSummaryOn），歸到的人（含停用、名單外、未對到）同樣併進來長卡；
+    //   只併「有分類、chip 有東西可顯示」的人，免得長出空卡。帳號狀態：淨利表那邊沒有才補洞察表的。
+    const _insDay = _insCardSummaryOn(viewDate);
+    _insDay.forEach((v, n) => { if (!_adjWhoDay.has(n) || (!_adjWhoDay.get(n) && v.status)) _adjWhoDay.set(n, v.status); });
     const _extraNames = _dpExtraNames
       .concat([..._adjWhoDay.keys()].filter(n => n && ALLOWED_NAMES.indexOf(n) < 0 && _dpExtraNames.indexOf(n) < 0))
       .filter(n => n !== ADJ_UNMATCHED_NAME)
@@ -162,7 +166,8 @@ Object.assign(App, {
         avatar: u && (u.avatar || u.avatarUrl) || '',
         items: normItems(dayProgress[name]),
         accountStatus: _adjWhoDay.get(name) || null,   // by 對到的帳號狀態（停用 / 刪除 → 卡名旁標籤）
-        unmatched: name === ADJ_UNMATCHED_NAME,         // 「未對到帳號」卡：只放淨利表調整，不給待辦
+        unmatched: name === ADJ_UNMATCHED_NAME,         // 「未對到帳號」卡：只放淨利表 / 洞察表調整，不給待辦
+        insight: _insDay.get(name) || null,             // 洞察表 · 今日調整（render 時即時算，不讀 dailyProgress 快照）
       };
     });
 
@@ -218,10 +223,12 @@ Object.assign(App, {
           <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:${c.bg};color:${c.fg};font-size:12px;font-weight:600;line-height:1.4;white-space:nowrap">
             ${chipInner(c)}
           </span>`).join('');
+        // noteHtml（選填）：接在標題後面的附註（洞察表「共 N 個商品（含推算 M）」），沒有就維持原本單一標題
+        const titleHtml = `<span style="font-size:11px;font-weight:700;color:${opts.headColor};letter-spacing:.02em">${escapeHtml(opts.title)}</span>`;
         return `
           <div class="dp-summary-card" style="background:${opts.headBg};border-left:3px solid ${opts.headColor};border-radius:6px;padding:8px 10px 9px;margin:2px 0 4px">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
-              <span style="font-size:11px;font-weight:700;color:${opts.headColor};letter-spacing:.02em">${escapeHtml(opts.title)}</span>
+              ${opts.noteHtml ? `<span class="dp-summary-head-l">${titleHtml}${opts.noteHtml}</span>` : titleHtml}
               <span style="font-size:10px;color:${opts.headColor};opacity:.7;font-weight:500">自動更新</span>
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:5px">${chipsHtml}</div>
@@ -233,14 +240,26 @@ Object.assign(App, {
       (Store.get('ec.bossTasks', []) || []).forEach(t => {
         if (t && t.id && Array.isArray(t.images) && t.images.length) _btImageCount[t.id] = t.images.length;
       });
-      const renderItem = (it) => {
-        if (it && it.kind === 'insight-summary') {
-          const counts = it.counts || {};
-          const keys = INSIGHT_ORDER.filter(k => counts[k]);
-          if (keys.length === 0) return '';
-          const chips = keys.map(k => ({ label:k, count:counts[k], ...(INSIGHT_STYLE[k]||{}) }));
-          return renderSummaryCard({ title:'洞察表 · 今日調整', headBg:'#faf5ff', headColor:'#7e22ce', chips, clickable:true });
+      // 塊 3-C：洞察表 · 今日調整 改成 render 時即時算（p.insight ← _insCardSummaryOn，依紀錄 by 歸屬），
+      //   chip 樣式 / 順序 / 點擊同舊版；推算的商品數接在標題後「共 N 個商品（含推算 M）」，沒有推算就不出。
+      //   dailyProgress 裡 marketing.js 照寫的 insight-summary 快照不再拿來顯示（renderItem 遇到直接略過）。
+      const insightCardHtml = (() => {
+        const s = p.insight;
+        if (!s) return '';
+        const noteHtml = s.inferred ? `<span class="adj-inferred-note">共 ${s.total} 個商品（含推算 ${s.inferred}）</span>` : '';
+        if (!s.ready) {
+          // 分類函式還沒掛上（理論上不會）：先顯示商品數，下次 render 補上分類
+          return renderSummaryCard({ title:'洞察表 · 今日調整', headBg:'#faf5ff', headColor:'#7e22ce', noteHtml,
+            chips: [{ label:'分類載入中', count:s.total, ...GROUP_GROW }] });
         }
+        const keys = INSIGHT_ORDER.filter(k => s.counts[k]);
+        if (keys.length === 0) return '';
+        const chips = keys.map(k => ({ label:k, count:s.counts[k], ...(INSIGHT_STYLE[k]||{}) }));
+        return renderSummaryCard({ title:'洞察表 · 今日調整', headBg:'#faf5ff', headColor:'#7e22ce', chips, clickable:true, noteHtml });
+      })();
+      const renderItem = (it) => {
+        if (it && it.kind === 'insight-summary') return '';   // 舊快照：改由上方 insightCardHtml 即時算
+
         if (it && it.kind === 'profit-summary') {
           const counts = it.counts || {};
           const orderedKeys = [...PROFIT_ORDER.filter(k => counts[k]), ...Object.keys(counts).filter(k => !PROFIT_ORDER.includes(k))];
@@ -278,7 +297,9 @@ Object.assign(App, {
         </div>`;
       };
       const itemRows = p.items.map(renderItem).join('');
-      const emptyHint = p.items.length === 0 ? `<div style="padding:10px 2px;color:var(--text-muted);font-size:12.5px">${isEditable ? '還沒有待辦事項' : '這天沒有紀錄'}</div>` : '';
+      // 「沒有紀錄」提示：舊快照已不顯示，所以不把它算進「有東西」；改看即時的洞察表卡
+      const hasShown = !!insightCardHtml || p.items.some(it => !(it && it.kind === 'insight-summary'));
+      const emptyHint = !hasShown ? `<div style="padding:10px 2px;color:var(--text-muted);font-size:12.5px">${isEditable ? '還沒有待辦事項' : '這天沒有紀錄'}</div>` : '';
       return `
         <div class="dp-card" data-dp-name="${escapeHtml(p.name)}" style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:8px;min-width:0">
           <div style="display:flex;align-items:center;gap:10px;min-width:0">
@@ -289,7 +310,7 @@ Object.assign(App, {
             </div>
             <span class="dp-saved-flag" style="display:none;color:#10b981;font-size:11px;font-weight:600;letter-spacing:.04em">✓ 已存</span>
           </div>
-          ${p.unmatched ? '' : `<div class="dp-todo-list">${itemRows}${emptyHint}</div>`}
+          ${p.unmatched ? insightCardHtml : `<div class="dp-todo-list">${insightCardHtml}${itemRows}${emptyHint}</div>`}
           ${isEditable && !p.unmatched ? `
             <div style="display:flex;gap:6px;margin-top:2px">
               <input type="text" class="dp-todo-add-input" data-dp-name="${escapeHtml(p.name)}" placeholder="新增待辦事項，按 Enter 加入"
@@ -347,14 +368,14 @@ Object.assign(App, {
       // 第三塊：當日「處理的商品數」，每人一行，置於 todo 橫條上方。來源 = 淨利表(getAdjIndex，
       //   自帶快取) + 洞察表(insIndexForCal，迴圈外建一次)，同商品跨來源去重（key = shop|code；
       //   code 空時用「來源前綴+#index」保筆數，不讓多筆塌成一筆、也不讓兩來源的無碼列互撞）。
-      //   依該格日期的負責人（adjOwnerOf）歸人，ALLOWED_NAMES 順序，只顯示有數字的人（天然上限 3，不與 MAX_CAL_BARS 合併）。
+      //   依紀錄歸人（見下方 adjPersonOf），ALLOWED_NAMES 在前，只顯示有數字的人（不與 MAX_CAL_BARS 合併）。
       //   顏色走 PERSON_COLORS / PERSON_LIGHT，用 CSS 變數傳給 css/daily-adjustments.css 的排版規則。
       const slash = dateStr.replace(/-/g, '/');
       const keySet = {};   // person -> Set(商品 key)
-      // 塊 3-B：淨利表('p') 歸屬改走 adjPersonOf（同人員卡：有 by 依操作者、沒 by 推算負責人）；
-      //   洞察表('i') 這次不動，維持 adjOwnerOf（塊 3-C 範圍）。去重規則不變（每人各自 通路|品號）。
+      // 塊 3-B / 3-C：淨利表('p')、洞察表('i') 歸屬都走 adjPersonOf（同人員卡：有 by 依操作者、沒 by 推算負責人）。
+      //   去重規則不變（每人各自 通路|品號，淨利表＋洞察表合併）。洞察表這裡不分類（照舊每個有調整的商品都算）。
       const addRecs = (recs, srcTag) => recs.forEach((r, i) => {
-        const person = srcTag === 'p' ? adjPersonOf(r, dateStr, calWhoResolve).person : adjOwnerOf(r.shop, dateStr);
+        const person = adjPersonOf(r, dateStr, calWhoResolve).person;
         if (!person) return;
         const key = r.code ? (r.shop + '|' + r.code) : (r.shop + '|#' + srcTag + i);
         (keySet[person] = keySet[person] || new Set()).add(key);
@@ -1337,13 +1358,8 @@ Object.assign(App, {
         </details>`;
     };
 
-    // 推算的標「推算」；對不到帳號的直接顯示原始 by 字串（「未對到帳號」卡靠它看出是誰）
-    const whoTagHtml = (who) => {
-      if (!who) return '';
-      if (who.how === 'inferred') return `<span class="adj-who-tag" title="這筆沒有記錄操作者，依當天通路負責人推算">推算</span>`;
-      if (who.how === 'unmatched') return `<span class="adj-who-tag" title="這筆記錄的操作者對不到任何帳號">${escapeHtml(who.raw)}</span>`;
-      return '';
-    };
+    // 推算的標「推算」；對不到帳號的直接顯示原始 by 字串（模組層 _adjWhoTagHtml，洞察表明細共用）
+    const whoTagHtml = _adjWhoTagHtml;
     const itemHtml = (r, muted) => `
       <div class="adj-modal-item${muted ? ' adj-modal-item-muted' : ''}">
         <div class="adj-modal-item-hd">
@@ -1372,30 +1388,28 @@ Object.assign(App, {
   },
   openInsightDetailModal(person, viewDate, label) {
     // 洞察表「今日調整」chip 明細：純唯讀，只讀 Store，不寫任何東西。
-    //   通路歸屬用模組層 adjShopsOf(person, viewDate)（查 ADJ_OWNER_TIMELINE，單一來源；用「查看的那天」歸屬）；
+    //   塊 3-C：歸屬與卡片 chip 同一支（_insWhoOn → adjPersonOf：有 by 依操作者、沒 by 推算負責人），
+    //   只列歸給這個人的那幾筆；推算的標「推算」、對不到帳號的標原始 by（_adjWhoTagHtml，同淨利表明細）。
     //   分類用 window.__insightClassify（marketing.js 抽出的共用判定）＝「依目前資料重算」，
     //   所以歷史日期若門檻 / 銷售資料已變動，明細可能與當日 chip 數字不同。
-    const slashDate = String(viewDate || '').replace(/-/g, '/');
-    const shops = adjShopsOf(person, viewDate);
+    const mine = _insWhoOn(viewDate).get(person);
+    const masters = {};
     const rows = [];
-    shops.forEach(shop => {
-      const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
-      const master = Store.get(`ec.insight_${shop}_master`, null);
-      Object.keys(notes).forEach(code => {
-        const adjustments = (notes[code] && notes[code].adjustments) || [];
-        const hits = adjustments.filter(a => {
-          const d = (a.date || '').slice(0, 10);
-          return d === viewDate || d === slashDate;
-        });
-        if (hits.length === 0) return;
-        const cls = window.__insightClassify ? window.__insightClassify(shop, code) : null;
-        if (cls !== label) return;
-        // 品名 fallback：mocbicName 優先，順序對齊洞察表 marketing.js 彈窗的取名邏輯
-        //（玩樂主檔的 name 是空字串、品名在 mocbicName，實測 C150/E142/H333）
-        const m = (master && master.byCode) ? master.byCode[code] : null;
-        const prodName = m ? (m.mocbicName || m.name || '') : '';
-        rows.push({ shop, code, name: prodName, texts: hits.map(a => a.text || '') });
-      });
+    (mine ? [...mine.items.values()] : []).forEach(it => {
+      const { shop, code } = it;
+      const cls = window.__insightClassify ? window.__insightClassify(shop, code) : null;
+      if (cls !== label) return;
+      if (!(shop in masters)) masters[shop] = Store.get(`ec.insight_${shop}_master`, null);
+      const master = masters[shop];
+      // 品名 fallback：mocbicName 優先，順序對齊洞察表 marketing.js 彈窗的取名邏輯
+      //（玩樂主檔的 name 是空字串、品名在 mocbicName，實測 C150/E142/H333）
+      const m = (master && master.byCode) ? master.byCode[code] : null;
+      const prodName = m ? (m.mocbicName || m.name || '') : '';
+      // 標籤：整個商品都是推算的 → 一個「推算」；對不到帳號 → 每個不同的原始 by 各一個
+      const tags = it.inferred
+        ? [_adjWhoTagHtml({ how: 'inferred' })]
+        : [...new Map(it.hits.filter(h => h.who.how === 'unmatched').map(h => [h.who.raw, h.who])).values()].map(_adjWhoTagHtml);
+      rows.push({ shop, code, name: prodName, texts: it.hits.map(h => h.a.text || ''), tagsHtml: tags.join('') });
     });
 
     const parts = String(viewDate).split('-');
@@ -1426,6 +1440,7 @@ Object.assign(App, {
           <span class="adj-modal-shop">${escapeHtml(r.shop || '')}</span>
           <span class="adj-modal-code">${escapeHtml(r.code || '')}</span>
           <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
+          ${r.tagsHtml}
         </div>
         ${r.texts.map(t => `<div class="adj-modal-text">${escapeHtml(t)}</div>`).join('')}
         ${crossProfitHtml(r)}
@@ -2283,11 +2298,17 @@ function _adjWhoResolver() {
   _adjWhoCache = { users, resolve };
   return resolve;
 }
+// 共用帳號（以 username 比對，trim＋小寫）：by 對到這些帳號＝不知道實際是誰操作的（例：admin 曾被多人共用調通路），
+//   當成「沒有可信的 by」→ 跟沒有 by 同一套：adjOwnerOf(通路, 當天) 推算、how:'inferred'（畫面標「推算」），raw 保留原值。
+//   其他停用 / 刪除的【個人】帳號不在此列，維持依 by 歸屬（照樣長卡、標已停用 / 已刪除）。
+const SHARED_ACCOUNTS = ['admin'];
+const _isSharedAccount = (username) => SHARED_ACCOUNTS.includes(String(username || '').trim().toLowerCase());
 function adjPersonOf(rec, date, resolve) {
   const raw = (rec && typeof rec.by === 'string') ? rec.by.trim() : '';
   if (raw) {
     const fn = resolve || _adjWhoResolver();
     const id = fn ? fn(raw) : null;
+    if (id && id.ok && _isSharedAccount(id.username)) return { person: adjOwnerOf(rec && rec.shop, date), how: 'inferred', raw, status: null };
     if (id && id.ok) return { person: id.display, how: 'by', raw, status: id.status };
     return { person: ADJ_UNMATCHED_NAME, how: 'unmatched', raw, status: null };
   }
@@ -2314,6 +2335,73 @@ function _adjPeopleOn(viewDate) {
     if (!m.has(who.person) || (!m.get(who.person) && who.status)) m.set(who.person, who.status);
   });
   return m;
+}
+// 明細彈窗那筆的小標籤（淨利表 / 洞察表兩個明細共用）：推算的標「推算」；對不到帳號的直接顯示原始 by 字串
+//   （「未對到帳號」卡靠它看出是誰）；by 對到帳號的不標。
+function _adjWhoTagHtml(who) {
+  if (!who) return '';
+  if (who.how === 'inferred') return `<span class="adj-who-tag" title="這筆沒有記錄操作者，依當天通路負責人推算">推算</span>`;
+  if (who.how === 'unmatched') return `<span class="adj-who-tag" title="這筆記錄的操作者對不到任何帳號">${escapeHtml(who.raw)}</span>`;
+  return '';
+}
+// 需求 3 塊 3-C：某日的洞察表調整依紀錄上的 by 歸屬（卡片 chip、明細彈窗、人員卡聯集共用這一支）。
+//   掃法逐字對齊 marketing.js _updateDailyProgressFromAdjustments 的洞察表段（快照算法）：
+//   ADJ_ALL_SHOPS × ec.insight_{通路}_notes × 當天的 adjustments（日期取前 10 碼，dash / slash 都算）；
+//   唯一的差別是歸屬：快照一律歸通路負責人，這裡每筆走 adjPersonOf（有 by 依操作者、沒 by 推算負責人）。
+//   以「通路|品號」去重：同一商品同一人當天幾筆都只算一個商品；不同人各算各的。
+//   回傳 Map(姓名 → { status, items: Map('通路|品號' → { shop, code, hits:[{ a, who }], inferred }) })，
+//   inferred＝這個人在這個商品上的紀錄全是推算的（有任一筆 by 對到他就不算推算）。純唯讀。
+function _insWhoOn(viewDate, resolve) {
+  const out = new Map();
+  const dash = _adjDateKey(viewDate);
+  if (!dash) return out;
+  const slash = dash.replace(/-/g, '/');
+  const fn = resolve || _adjWhoResolver();
+  ADJ_ALL_SHOPS.forEach(shop => {
+    const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
+    Object.keys(notes).forEach(code => {
+      const adjustments = notes[code] && notes[code].adjustments;
+      if (!Array.isArray(adjustments)) return;
+      adjustments.forEach(a => {
+        const d = ((a && a.date) || '').slice(0, 10);
+        if (d !== dash && d !== slash) return;
+        const who = adjPersonOf({ shop, by: a.by }, dash, fn);
+        if (!who.person) return;
+        if (!out.has(who.person)) out.set(who.person, { status: null, items: new Map() });
+        const p = out.get(who.person);
+        if (!p.status && who.status) p.status = who.status;
+        const key = shop + '|' + code;
+        if (!p.items.has(key)) p.items.set(key, { shop, code, hits: [], inferred: true });
+        const it = p.items.get(key);
+        it.hits.push({ a, who });
+        if (who.how !== 'inferred') it.inferred = false;
+      });
+    });
+  });
+  return out;
+}
+// 卡片「洞察表 · 今日調整」chip：Map(姓名 → { status, counts, total, inferred, ready })。
+//   分類同快照算法：每個商品呼叫一次 window.__insightClassify（依目前資料重算），分不出類的不計；
+//   total / inferred 只算有分類的商品（＝chip 數字加總）。
+//   __insightClassify 在 marketing.js（main.js 比本檔先 import，正常一定在）；萬一還沒掛上 →
+//   ready:false、total 先給商品數，卡片顯示總數不顯示分類（比照淨利表 calc 未就緒的容錯，下次 render 自然補上）。
+function _insCardSummaryOn(viewDate) {
+  const classify = typeof window.__insightClassify === 'function' ? window.__insightClassify : null;
+  if (!classify) console.warn('[insight chip] window.__insightClassify 尚未就緒，本次只顯示商品數');
+  const out = new Map();
+  _insWhoOn(viewDate).forEach((p, person) => {
+    const counts = {};
+    let total = 0, inferred = 0;
+    p.items.forEach(it => {
+      const cls = classify ? classify(it.shop, it.code) : '';
+      if (classify && !cls) return;
+      if (cls) counts[cls] = (counts[cls] || 0) + 1;
+      total++;
+      if (it.inferred) inferred++;
+    });
+    if (total > 0) out.set(person, { status: p.status, counts, total, inferred, ready: !!classify });
+  });
+  return out;
 }
 // 開發期檢查：同一 label 若出現不同 cls，warn 一次（cls 取「該組第一筆」是推論，這裡驗證它）
 const _adjClsWarned = new Set();
@@ -2430,7 +2518,7 @@ window.addEventListener('profitDataReady', () => {
   //   其他頁不動（資料已進 Store，切過去自然渲染）。route 判斷沿用 app.js 既有慣例（App.render 重繪當前 route）。
   if (window.App && window.App.route === 'office-d1' && typeof window.App.render === 'function') window.App.render();
 });
-// 洞察表調整索引：{ 'YYYY/MM/DD': [{shop, code}] }。來源 = ADJ_ALL_SHOPS 各通路的
+// 洞察表調整索引：{ 'YYYY/MM/DD': [{shop, code, by}] }（by＝紀錄上的操作者，塊 3-C 月曆歸屬用）。來源 = ADJ_ALL_SHOPS 各通路的
 // ec.insight_{shop}_notes；日期同時支援 dash/slash，一律正規化成斜線（與 getAdjIndex 一致）；
 // date 空的跳過。純唯讀。
 // 🔴 刻意不做模組層快取：getAdjIndex 的快取靠 profitDataReady 事件失效，洞察資料沒有對應事件，
@@ -2446,7 +2534,7 @@ function getInsIndex() {
           const d = ((a && a.date) || '').slice(0, 10);
           if (!d) return;
           const slash = d.replace(/-/g, '/');
-          (idx[slash] = idx[slash] || []).push({ shop, code });
+          (idx[slash] = idx[slash] || []).push({ shop, code, by: a.by });
         });
       });
     });
