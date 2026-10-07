@@ -310,6 +310,9 @@ Object.assign(App, {
     // 第三塊資料源之二：洞察表索引。🔴 只在月曆迴圈外建一次（迴圈內會重跑 31 次）；
     // getAdjIndex() 自帶快取，維持在格子內呼叫的既有寫法。
     const insIndexForCal = getInsIndex();
+    const calWhoResolve = _adjWhoResolver();   // 塊 3-B：resolver 迴圈外取一次（自帶快取，這裡只省掉每格的 Store.get）
+    // 名單外排序：同人員卡，「未對到帳號」不是人、固定排最後，其餘 localeCompare
+    const calExtraSort = (a, b) => (a === ADJ_UNMATCHED_NAME) - (b === ADJ_UNMATCHED_NAME) || a.localeCompare(b, 'zh-Hant');
     const calCells = [];
     const calExtraPeople = new Set();   // 月曆/圖例出現過的非名單人（例如 MOMO by-login 操作者）→ 圖例帶到他們、色用 fallback
     for (let i = 0; i < firstWeekday; i++) calCells.push('<div></div>');
@@ -348,8 +351,10 @@ Object.assign(App, {
       //   顏色走 PERSON_COLORS / PERSON_LIGHT，用 CSS 變數傳給 css/daily-adjustments.css 的排版規則。
       const slash = dateStr.replace(/-/g, '/');
       const keySet = {};   // person -> Set(商品 key)
+      // 塊 3-B：淨利表('p') 歸屬改走 adjPersonOf（同人員卡：有 by 依操作者、沒 by 推算負責人）；
+      //   洞察表('i') 這次不動，維持 adjOwnerOf（塊 3-C 範圍）。去重規則不變（每人各自 通路|品號）。
       const addRecs = (recs, srcTag) => recs.forEach((r, i) => {
-        const person = adjOwnerOf(r.shop, dateStr);
+        const person = srcTag === 'p' ? adjPersonOf(r, dateStr, calWhoResolve).person : adjOwnerOf(r.shop, dateStr);
         if (!person) return;
         const key = r.code ? (r.shop + '|' + r.code) : (r.shop + '|#' + srcTag + i);
         (keySet[person] = keySet[person] || new Set()).add(key);
@@ -372,7 +377,7 @@ Object.assign(App, {
       const totalCalCount = {};
       [...Object.keys(adjCountByPerson), ...Object.keys(momoCountByPerson)].forEach(n => { totalCalCount[n] = (adjCountByPerson[n] || 0) + (momoCountByPerson[n] || 0); });
       const calCountRoster = ALLOWED_NAMES.concat(
-        Object.keys(totalCalCount).filter(n => n && ALLOWED_NAMES.indexOf(n) < 0).sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+        Object.keys(totalCalCount).filter(n => n && ALLOWED_NAMES.indexOf(n) < 0).sort(calExtraSort)
       );
       const adjRowsHtml = calCountRoster
         .filter(n => totalCalCount[n])
@@ -396,7 +401,7 @@ Object.assign(App, {
         </button>
       `);
     }
-    const legendHtml = ALLOWED_NAMES.concat([...calExtraPeople].sort((a, b) => a.localeCompare(b, 'zh-Hant')))
+    const legendHtml = ALLOWED_NAMES.concat([...calExtraPeople].sort(calExtraSort))
       .map(n => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted)"><span style="width:7px;height:7px;border-radius:50%;background:${PERSON_COLORS[n] || '#6b7280'}"></span>${escapeHtml(n)}</span>`).join('');
     const calendarHtml = `
       <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:20px;min-width:0">
