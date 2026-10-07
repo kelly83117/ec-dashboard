@@ -13347,7 +13347,7 @@ function momoAggregatePeriods(product,periodKeys,shop,opts){
           const ls=_lean?null:momoMoPlusLatestSaleForSku(shop, product.sku);
           const lp=_lean?{}:momoMoPlusListPriceForSku(shop, product.sku, ls?ls.sp:null, (product.listPriceManual ?? null));
           const fr=momoFeeRateForSku(shop, product.sku);
-          return { qty:eQty, revenue:eRev, profit, margin:marginPct, cost:cogs, feeD:feeAmt,
+          return { qty:eQty, revenue:eRev, revenueA:eRev, revenueAB:eRev, profit, margin:marginPct, cost:cogs, feeD:feeAmt,   // E001 估算只有 A 口徑（無 B 明細可併）→ 營收未含運費代收
             returnRate:null, retQty:0, retKnown:false,   // 未結算估算（E001）：無結算退貨資料 → 退貨率「—」
             coverage:covered?1:0, covered, missingOrigins:covered?[]:[origin||'(無原廠編號)'],
             latestSale:(ls?ls.sp:null), latestSaleDate:(ls?ls.d:null),
@@ -13366,7 +13366,8 @@ function momoAggregatePeriods(product,periodKeys,shop,opts){
     const lp=_lean?{}:momoMoPlusListPriceForSku(shop, product.sku, ls?ls.sp:null, (product.listPriceManual ?? null));   // 掛牌價（商品主檔、銷售最多規格）+ 各規格 + 落差；lean 跳過
     const fr=momoFeeRateForSku(shop, product.sku);   // 成交費率反推結論（跨月交集，純顯示/排序、不進毛利）
     return {
-      qty, revenue:revA, profit:m.margin, margin:m.marginPct, cost:m.cogs, feeD:m.feeD, feeC:m.feeC, feeB:m.feeB, freightNet:m.freightNet,
+      // 2026-10 第二段：營收欄＝含稅 A＋B（同 KPI 月結表「營收」＝PDF 商店開立發票金額）；revenueA 保留純 A 貨款供提示用
+      qty, revenue:m.revAB, revenueA:revA, revenueAB:m.revAB, tax:m.tax, profit:m.margin, margin:m.marginPct, cost:m.cogs, feeD:m.feeD, feeC:m.feeC, feeB:m.feeB, freightNet:m.freightNet,
       // 退貨率＝回收確認 qty ÷ (已送達+回收確認)。本期銷量 qty 已排除回收確認（＝已送達）→ 分母＝qty+retQty（值與含回收確認時相同、語意正確）。
       //   舊 doc 無 ret 欄→retKnown false→null(「—」需重傳)。
       returnRate: retKnown ? ((qty+retQty)>0?Math.round((retQty/(qty+retQty))*1000)/10:0) : null, retQty, retKnown,
@@ -14987,9 +14988,14 @@ function momoMoPlusMarginCalc(inp){   // 純函式：{qty, revA, originsQty:{ori
   });
   const coverage = allAbs>0 ? costedAbs/allAbs : 1;            // 涵蓋率用絕對量（避免退貨負量把比例弄壞）；無量→視為完整
   const covered = coverage>=0.9999 && missingOrigins.length===0;
-  const margin = revA - cogs - feeD - feeC + feeB;            // 已知部分毛利：再扣運費淨 (C 代扣運費 − B 運費代收)；未涵蓋單位有營收無成本→偏高，靠 coverage 標示
-  const marginPct = revA>0 ? (margin/revA)*100 : null;        // 負/零營收 → null（畫面「—」），不假設正
-  return { qty:Number(inp.qty)||0, revA, cogs:Math.round(cogs), feeD, feeC:Math.round(feeC), feeB:Math.round(feeB), freightNet:Math.round(feeC-feeB), margin:Math.round(margin), marginPct,
+  // 2026-10 口徑修正（比照 KPI 月結表 _KPI 稅金＝實際營收×5/105）：A 貨款、B 運費代收都是【含稅】收入（對帳單 PDF 含稅三條＝A_i＋B_i，5 個月實測逐條相等），
+  //   營業稅＝(A＋B)×5/105（＝PDF 營業稅欄）。淨利＝(A＋B)×100/105 − 成本(未稅) − C − D；C／D 直接減、不抵進項稅（同 KPI）。
+  //   分母＝A＋B（含稅營收，同 KPI 純利率）。舊式 A − 成本 − D − C ＋ B 沒扣稅且分母只有 A → 虛高約 5 個百分點。
+  const revAB = revA + feeB;                                   // 含稅營收 A＋B（B 不再是 +feeB，而是併進營收一起扣稅）
+  const tax = revAB*5/105;
+  const margin = revAB - tax - cogs - feeD - feeC;             // 已知部分淨利；未涵蓋單位有營收無成本→偏高，靠 coverage 標示
+  const marginPct = revAB>0 ? (margin/revAB)*100 : null;       // 負/零營收 → null（畫面「—」），不假設正
+  return { qty:Number(inp.qty)||0, revA, revAB, tax, cogs:Math.round(cogs), feeD, feeC:Math.round(feeC), feeB:Math.round(feeB), freightNet:Math.round(feeC-feeB), margin:Math.round(margin), marginPct,
     coverage, covered, costedQty:costedAbs, uncostedQty:allAbs-costedAbs, missingOrigins };
 }
 // 運費行（逐期別）：跨來源月 doc 的 ΣB(收入) − ΣC(代扣運費) + Σ免運活動服務費。periodKeys=展開後的期別鍵。
@@ -15005,6 +15011,24 @@ function momoPeriodSettleDue(periodKey, nowTs){
   const endDay = half==='H1'?15:new Date(y,mo,0).getDate();   // H1→15、H2/FULL→月底
   const dueTs = new Date(y,mo-1,endDay,23,59,59).getTime() + 12*86400000;   // 期別末 +12 天
   return { dueTs, due: (nowTs||Date.now())>=dueTs };
+}
+// 部分結算期別偵測（2026-10 第三段，只標示、不改任何數字、不混 E001 估算）：
+//   某期別「已有結算資料（對帳明細 origins／products 有該期別）」但「結算尚未完整」＝部分結算。
+//   ⚠ 為什麼會發生：對帳明細 M 月檔只含「到月底前已結清」的訂單，M 月下半月的大部分要等 M+1 月檔。M+1 檔上傳前，該半月只會有零星已結算列
+//     （例：好麻吉 2026-09 下半月只有 8 個 SKU／18 件），而 momoSettledPeriods 判「任一 SKU 出現＝已結算」→ E001 估算（需全未結算才覆蓋）被擋 → 畫面只顯示那零星數字。
+//   判斷：settled.has(期別) 且 期別末 +12 天尚未到（momoPeriodSettleDue.due===false）。已過期仍零星的歷史期別不標（那是對帳明細本身就少，不是結算中）。
+//   回傳 [{pk,label,qty}]，qty＝該期別已結算件數（products 該期別 cell 的對帳數量合計）。
+function momoMoPlusPartialSettle(shop, period){
+  const out=[]; if(!momoIsMoPlus(shop)||!period) return out;
+  let settled; try{ settled=momoMoPlusE001Ctx(shop).settled; }catch(e){ return out; }
+  const prods=momoLoadProducts(shop)||[];
+  momoExpandPeriod(period).forEach(pk=>{
+    if(!settled.has(pk)) return;
+    const d=momoPeriodSettleDue(pk); if(!d||d.due) return;
+    let qty=0; prods.forEach(p=>{ const c=p&&p.periods&&p.periods[pk]; if(c) qty+=Number(momoReadCell(c,p.sku).qty)||0; });
+    out.push({pk, label:momoPeriodLabel(pk), qty});
+  });
+  return out;
 }
 function momoMoPlusMargin(shop, sku, period){   // 包裝：讀 cell(qty/revA) + origins(origin/D) + cost_by_origin(live)
   const prod=momoLoadProducts(shop).find(p=>p.sku===sku);
@@ -15642,11 +15666,11 @@ const MOMO_PROFIT_COLS=[
   {k:'salePrice',label:'售價',fmt:'money',w:110,info:'MOMO 賣給消費者的單價，此金額不進帳，僅供參考。（含稅）',noMoPlus:true},
   {k:'listPrice',label:'售價',fmt:'money',w:118,info:'主顯示＝掛牌價（商品主檔、涵蓋全商品含零銷量、預設顯示銷售最多規格）。多規格點 ⊕ 展開看全部。與「最新成交價」（對帳明細、消費者實付含折扣）不同→標落差。⚠ 掛牌價＝最近一次上傳商品主檔的值（快照、無生效日）、成交價是累積歷史，時間基準不同；落差可能是折扣、也可能只是資料新舊。無主檔→回退顯示最新成交價。',moPlusOnly:true},
   {k:'view',label:'瀏覽量',fmt:'num',w:96,info:'S1103 銷售排行榜（熱銷）當期瀏覽量。沒進榜的商品顯示空白（無資料）。',noMoPlus:true},
-  {k:'qty',label:'本期銷量',fmt:'num',w:100,info:'對帳數量＝賣出−客退。進價×銷量即為營收。',infoMoPlus:'對帳明細逐列數量合計。營收＝A 貨款（非進價×銷量）。'},
+  {k:'qty',label:'本期銷量',fmt:'num',w:100,info:'對帳數量＝賣出−客退。進價×銷量即為營收。',infoMoPlus:'對帳明細逐列數量合計。營收＝A 貨款＋B 運費代收（含稅，非進價×銷量）。'},
   {k:'convRate',label:'成交率',fmt:'pct1',w:96,info:'對帳數量 ÷ 瀏覽量。',noMoPlus:true},
-  {k:'revenue',label:'營收',fmt:'money',w:130,info:'未稅進價 × 對帳數量。已扣客退。（未稅）',infoMoPlus:'A 貨款合計（代收金額＋mo點支付＋全站抵用券支付）。代收代付平台代收，非進價×銷量。'},
-  {k:'margin',label:'淨利率',fmt:'pct1',w:100,info:'淨利 ÷ 未稅營收。淨利＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無）。',infoMoPlus:'淨利 ÷ 營收。淨利＝營收 − 成本 − D手續費(逐列15項) − C代扣運費 + B運費代收(同訂單營收攤估)。'},
-  {k:'profit',label:'淨利貢獻',fmt:'money',w:130,info:'該商品淨利金額＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無）。（未稅）',infoMoPlus:'該商品淨利金額＝營收 − 成本 − D手續費 − C代扣運費 + B運費代收。'},
+  {k:'revenue',label:'營收',fmt:'money',w:130,info:'未稅進價 × 對帳數量。已扣客退。（未稅）',infoMoPlus:'含稅營收 ＝ A 貨款（代收金額＋mo點支付＋全站抵用券支付）＋ B 運費代收（消費者支付運費、mo點、商店免運券補貼）。同 KPI 月結表「營收」（＝對帳單商店開立發票金額），非進價×銷量。B 按同訂單商品營收攤到各商品。'},
+  {k:'margin',label:'淨利率',fmt:'pct1',w:100,info:'淨利 ÷ 未稅營收。淨利＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無）。',infoMoPlus:'淨利 ÷ 營收(A＋B)。淨利＝營收×100/105(扣營業稅) − 成本(未稅) − D手續費(逐列15項) − C代扣運費。C/D 不抵進項稅（同 KPI）。'},
+  {k:'profit',label:'淨利貢獻',fmt:'money',w:130,info:'該商品淨利金額＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無）。（未稅）',infoMoPlus:'該商品淨利金額＝營收(A＋B)×100/105 − 成本(未稅) − D手續費 − C代扣運費。'},
   {k:'feeRate',label:'成交費率',fmt:'pct1',w:128,info:'MO+ 成交手續費反推的費率（非檔期）。逐列 round(售價×數量×費率%)=手續費、跨月取交集。唯一解=粗體深色；多解=淡色範圍+「待收斂」（月份越多越收斂）；異常=紅（跨月候選互斥、代表有問題）；無成交手續費資料=「—」。排序與篩選皆依「範圍下界」＝能保證的最低費率（撈高費率商品）：篩「>10%」＝下界都 >10% 才算。多解列的下界即篩選/排序值。⚠ 僅供顯示與異常偵測，毛利一律走逐筆實際手續費、不用反推值。',moPlusOnly:true},
   {k:'returnRate',label:'退貨率',fmt:'pct1',w:96,info:'客退數量 ÷ 賣出數量（賣出=對帳數量+客退數量），來源=對帳單逐SKU、月顆粒。未對帳月顯示「—」。hover 看退貨件數/金額。',infoMoPlus:'回收確認件數 ÷（已送達+回收確認），來源=對帳明細逐列、月顆粒。未結算/舊資料顯「—」（需重傳對帳明細）。hover 看退貨件數。'},
   {k:'stock',label:'庫存',fmt:'num',w:112,info:'乙配＝F1102 寄倉即時「可賣量」(寄倉數−已訂購待出庫)、未涵蓋顯示「—」、在途量與資料時間見 tooltip；甲配／MO+＝莫筆克庫存×分配比例。兩套來源、tooltip 各自標明。'},
@@ -15861,6 +15885,7 @@ function momoPeriodTotals(shop, periodKey){
   let soldActive=0, activeTotal=0;   // 動銷率用：soldActive=本期有銷售（不論上下架，分子）、activeTotal=目前上架 ∪ 本期有銷售（分母；賣過卻已下架的也算現役池，避免漏算）
   let revMiss=0, revMissQty=0;   // 有銷量(qty>0)但營收≈0 → 缺營收（多半缺進價，估不出未稅進價×qty）→ 淨利假性大虧，畫面要標
   let revCov=0, profitCov=0;   // MO+：成本涵蓋 100% 的 SKU 才計入加權毛利率（分母/分子）；未涵蓋的營收/淨利仍進 KPI 總額但不進毛利率
+  let revAB=0, revABCov=0;   // MO+：含稅營收 A＋B（淨利率分母，比照 KPI）；revAB＝全部有銷售 SKU、revABCov＝僅成本涵蓋 100% 的 SKU
   let cost=0, unreconciled=0;   // cost：Σ商品成本（甲乙＝product.cost×對帳數量，同總表）；unreconciled：本期有銷售但不在對帳單的品號數（KPI 自動帶入用）
   momoLoadProducts(shop).forEach(p=>{
     const isActive = p.discontinued!==true;   // 上架
@@ -15871,30 +15896,33 @@ function momoPeriodTotals(shop, periodKey){
     if(isActive || active) activeTotal++;   // 動銷率分母＝目前上架 ∪ 本期有銷售（賣過卻已下架的也算現役池；只算「目前上架」會漏掉這批）
     if(active){ any=true; rev+=a.revenue; profit+=a.profit; qty+=a.qty; soldActive++;   // 分子＝本期有銷售（不論上下架）
       cost+=Number(a.cost)||0; if(a.reconciled===false) unreconciled++;
+      if(isMoPlus){ const _ab=(a.revenueAB!=null?a.revenueAB:a.revenue); revAB+=_ab; if(a.covered) revABCov+=_ab; }   // E001 估算列無 revenueAB → 退回 revenue（估算路徑口徑未動）
       if(isMoPlus){   // MO+ 缺成本＝成本涵蓋<100%（非 product.cost）；covered 才進加權毛利率
         if(a.covered){ revCov+=a.revenue; profitCov+=a.profit; }
         else { missCost++; if(p.discontinued===true) missCostDisc++; }
       } else {
         if(!(Number(p.cost)>0)){ missCost++; if(p.discontinued===true) missCostDisc++; }
       }
-      if(!isMoPlus && g>0 && Math.abs(a.revenue)<0.5){ revMiss++; revMissQty+=g; } }   // MO+ 營收=A 實際值、非進價估算 → 「缺進價」橫幅對 MO+ 無意義、排除
+      if(!isMoPlus && g>0 && Math.abs(a.revenue)<0.5){ revMiss++; revMissQty+=g; } }   // MO+ 營收=A＋B 實際值（含稅）、非進價估算 → 「缺進價」橫幅對 MO+ 無意義、排除
   });
-  const margin = isMoPlus ? (revCov>0?(profitCov/revCov)*100:0) : (rev>0?(profit/rev)*100:0);
-  return { hasData:any, rev, profit, qty, margin, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty, revCov, profitCov, cost, unreconciled };
+  const margin = isMoPlus ? (revABCov>0?(profitCov/revABCov)*100:0) : (rev>0?(profit/rev)*100:0);   // MO+：淨利 ÷ (A＋B)（比照 KPI），甲乙不動
+  // revBase＝淨利率分母（總覽加總用）：MO+＝含稅 A＋B（全部 SKU，同 sumT 既有「含缺成本列」口徑）；甲乙＝rev
+  return { hasData:any, rev, profit, qty, margin, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty, revCov, profitCov, revAB, revABCov, revBase:(isMoPlus?revAB:rev), cost, unreconciled };
 }
 // 從「已篩選後的顯示列」算總覽（口徑與 momoPeriodTotals 完全一致，只是母體換成 rows）→ 篩選時卡片跟著變。
 //   rows 已帶 revenue/profit/qty/grossQty/cost/discontinued（cost=未稅前的商品成本欄，缺成本判定同總覽）。
 function momoTotalsFromRows(rows){
+  let revBase=0;   // 淨利率分母：MO+ 列帶 revenueAB（A＋B），其餘列＝revenue
   let rev=0, profit=0, qty=0, any=false, missCost=0, missCostDisc=0, soldActive=0, activeTotal=0, revMiss=0, revMissQty=0;
   rows.forEach(r=>{
     const isActive=r.discontinued!==true;
     const g=(r.grossQty!=null?r.grossQty:r.qty);
     const active=g>0 || Math.abs(r.revenue)>0.5;   // 本期有銷售
     if(isActive || active) activeTotal++;   // 分母＝目前上架 ∪ 本期有銷售（口徑同 momoPeriodTotals）
-    if(active){ any=true; rev+=r.revenue||0; profit+=r.profit||0; qty+=r.qty||0; if(!(Number(r.cost)>0)){ missCost++; if(r.discontinued===true) missCostDisc++; } soldActive++;   // 分子＝本期有銷售（不論上下架）
+    if(active){ any=true; rev+=r.revenue||0; revBase+=(r.revenueAB!=null?r.revenueAB:(r.revenue||0)); profit+=r.profit||0; qty+=r.qty||0; if(!(Number(r.cost)>0)){ missCost++; if(r.discontinued===true) missCostDisc++; } soldActive++;   // 分子＝本期有銷售（不論上下架）
       if(g>0 && Math.abs(r.revenue)<0.5){ revMiss++; revMissQty+=g; } }
   });
-  return { hasData:any, rev, profit, qty, margin:rev>0?(profit/rev)*100:0, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty };
+  return { hasData:any, rev, profit, qty, margin:revBase>0?(profit/revBase)*100:0, revBase, missCost, missCostDisc, soldActive, activeTotal, revMiss, revMissQty };
 }
 // 自驗用：把該期別「有銷量」的品號分成「在對帳單」(reconRev，嚴格=E) 與「不在對帳單」(漏品，營收供應商口徑估算)。
 //   自驗只比對帳品號 Σ 是否 = 對帳單該店金額；漏品獨立列出（有銷量卻沒進對帳單、營收估算），避免估算品把自驗誤判成不一致。
@@ -16127,7 +16155,7 @@ function momoRenderProfitBody(shop, tableOnly){
         // MO+：毛利組成 tooltip（營收 − 成本 − 手續費D − 代扣運費C + 運費代收B）。C 逐筆掛列（精算）、B 按同訂單商品營收攤（攤估）。
         let mTip='';
         if(r.moPlus){
-          mTip=` title="毛利 ${momoMoney(r.profit||0)} ＝ 營收 ${momoMoney(r.revenue||0)} − 成本 ${momoMoney(r.cost||0)} − 手續費D ${momoMoney(r.feeD||0)}（逐筆）− 代扣運費C ${momoMoney(r.feeC||0)}（逐筆）+ 運費代收B ${momoMoney(r.feeB||0)}（同訂單營收攤估）"`;
+          mTip=` title="淨利 ${momoMoney(r.profit||0)} ＝ 營收 ${momoMoney(r.revenue||0)}（A貨款 ${momoMoney(r.revenueA||0)} ＋ B運費代收 ${momoMoney(r.feeB||0)}，B 同訂單營收攤估）×100/105（扣營業稅 ${momoMoney(r.tax||0)}）− 成本 ${momoMoney(r.cost||0)}（未稅）− 手續費D ${momoMoney(r.feeD||0)}（逐筆）− 代扣運費C ${momoMoney(r.feeC||0)}（逐筆）；淨利率 ÷ (A＋B)"`;
         }
         return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:${m>=25?'#10b981':(m<0?'#dc2626':'#374151')}"${mTip}>${momoPct(m)}${momoRowCmp('margin',r,r._prev)}</td>`;
       }
@@ -16262,12 +16290,12 @@ function momoRenderProfitBody(shop, tableOnly){
       const _moSettled=(()=>{ try{ const c=momoMoPlusE001Ctx(shop), pk=momoExpandPeriod(period); return pk.length>0 && pk.some(k=>c.settled.has(k)); }catch(e){ return false; } })();
       if(_moSettled){
         // 沿用甲乙配晶片值/樣式/容器；tooltip 用 MO+ 自己的口徑（不沿用甲乙的「÷1.05 按營收攤」，套 MO+ 會誤導）。
-        const _okTip=('資料來源＝對帳明細（逐訂單逐 SKU）。營收＝A 貨款合計；費用＝D 手續費逐列 + C 代扣運費逐列 − B 運費代收（同訂單營收攤）。').replace(/"/g,'&quot;');
+        const _okTip=('資料來源＝對帳明細（逐訂單逐 SKU）。營收＝A 貨款＋B 運費代收（含稅）；淨利＝營收×100/105 − 成本 − D 手續費逐列 − C 代扣運費逐列（B 同訂單營收攤）。').replace(/"/g,'&quot;');
         statusChip=`<span class="mm-status ok" title="${_okTip}">✓ 已對帳</span>`;
       } else if(_e001Est){
         // MO+ 未結算（E001）：沿用甲配未對帳狀態晶片「⚠ 未對帳」（同 mm-status no 樣式、同容器）；估算費率與來源月放 tooltip、不佔版面、不另做橫幅。
         const _efr=momoMoPlusE001Ctx(shop).estFee;
-        const _tip=('未結算估算（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑）；淨利率用估算平台費率 '+(_efr?(_efr.rate*100).toFixed(1)+'%（'+_efr.mode+(_efr.months?' '+_efr.months.join('/'):'')+'、含成交手續費+其他D+運費淨）':'—')+'。待該期別對帳明細上傳後由結算值完全取代（不並存不相加）。').replace(/"/g,'&quot;');
+        const _tip=('未結算估算（E001）：營收＝售價×數量（實測＝對帳明細 A 貨款口徑，未含 B 運費代收、估算亦未扣營業稅）；淨利率用估算平台費率 '+(_efr?(_efr.rate*100).toFixed(1)+'%（'+_efr.mode+(_efr.months?' '+_efr.months.join('/'):'')+'、含成交手續費+其他D+運費淨）':'—')+'。待該期別對帳明細上傳後由結算值完全取代（不並存不相加）。').replace(/"/g,'&quot;');
         statusChip=`<span class="mm-status no" title="${_tip}">⚠ 未對帳</span>`;
       }
     }
@@ -16307,7 +16335,10 @@ function momoRenderProfitBody(shop, tableOnly){
     if(momoIsMoPlus(shop) && period){
       const parts=[];
       const sd=momoPeriodSettleDue(period, Date.now());
-      if(sd && !sd.due){ const dd=new Date(sd.dueTs); parts.push(`🕐 <b>本期結算中</b>（期別末 +12 天、${dd.getMonth()+1}/${dd.getDate()} 後才完整；momo 猶豫期滿+撥入信託才計入）→ 數字會隨後續對帳明細補齊，本期偏低是正常`); }
+      if(sd && !sd.due){ const dd=new Date(sd.dueTs);
+        const _ps=momoMoPlusPartialSettle(shop, period);   // 部分結算半月（有已結算資料但期別末+12天未到）→ 標「僅含已結算 N 件」；不改數字、不混 E001 估算
+        const _psTxt=_ps.length?('：'+_ps.map(x=>`${x.label}僅含已結算 <b>${x.qty.toLocaleString()}</b> 件`).join('；')):'';
+        parts.push(`🕐 <b>本期結算中</b>${_psTxt}（期別末 +12 天、${dd.getMonth()+1}/${dd.getDate()} 後才完整；momo 猶豫期滿+撥入信託才計入）→ 數字會隨後續對帳明細補齊，本期偏低是正常${_ps.length?'；未混入 E001 估算':''}`); }
       const inc=momoMoPlusCompleteness(shop);
       if(inc.length){ const srcs=[...new Set(inc.flatMap(x=>x.missingSrc))].sort(); parts.push(`⚠ <b>資料不完整</b>：${inc.length} 個 SKU×期別 缺來源 ${_momoEsc(srcs.join('、'))} 的逐列成本 → 該期別毛利不可信，補上傳對應對帳明細`); }
       const mm=momoMoPlusConsistency(shop);
@@ -16822,7 +16853,7 @@ function momoOverviewHTML(shop, period, cur, prev, prevKey, verifyTxt){
   const marginColor=m=> m>=25?'#059669':m>=15?'#d97706':'#dc2626';   // 淨利率看絕對值：≥25綠 / ≥15橘 / <15紅
   const marginDelta=hasPrev?((cur.margin-prev.margin>=0?'+':'')+(cur.margin-prev.margin).toFixed(1)+'pp'):'—';
   const _netMarginTip=momoIsMoPlus(shop)
-    ? '加權淨利率 ＝ 總淨利 ÷ 總營收。淨利＝營收 − 商品成本 − 平台費用(D手續費逐列15項) − C代扣運費 + B運費代收。'
+    ? '加權淨利率 ＝ 總淨利 ÷ (A＋B)（含稅營收，比照 KPI 月結表）。淨利＝(A貨款＋B運費代收)×100/105（扣營業稅）− 商品成本(未稅) − D手續費 − C代扣運費；C/D 不抵進項稅（同 KPI）。僅計成本涵蓋 100% 的商品。'
     : '加權淨利率 ＝ 總淨利 ÷ 總營收。淨利＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無寄倉物流/倉租）。';
   // 動銷率＝本期有銷售 ÷（目前上架 ∪ 本期有銷售）；環比用 pp 差、上升=好(綠)
   const rate = cur.activeTotal>0 ? cur.soldActive/cur.activeTotal*100 : null;
@@ -21009,7 +21040,7 @@ function momoRenderSummary(){
   // 各賣場本期合計
   const perShop={}; _MOMO_OV_SHOPS.forEach(s=>{ perShop[s]=momoPeriodTotals(s, period); });
   const moPlusEmpty=_MOMO_OV_SHOPS.filter(s=>s.startsWith('MO+')&&momoLoadProducts(s).length===0);
-  const sumT=list=>{ let rev=0,profit=0,qty=0,soldActive=0,activeTotal=0; list.forEach(t=>{rev+=t.rev;profit+=t.profit;qty+=t.qty;soldActive+=t.soldActive;activeTotal+=t.activeTotal;}); return {rev,profit,qty,soldActive,activeTotal,margin:rev>0?profit/rev*100:0,hasData:rev>0}; };
+  const sumT=list=>{ let rev=0,base=0,profit=0,qty=0,soldActive=0,activeTotal=0; list.forEach(t=>{rev+=t.rev;base+=(t.revBase!=null?t.revBase:t.rev);profit+=t.profit;qty+=t.qty;soldActive+=t.soldActive;activeTotal+=t.activeTotal;}); return {rev,profit,qty,soldActive,activeTotal,margin:base>0?profit/base*100:0,hasData:rev>0}; };   // 淨利率分母＝各賣場 revBase（MO+＝含稅 A＋B、甲乙＝rev）
   const T=sumT(Object.values(perShop));
   let prevKey=momoPrevPeriodKey(period); if(prevKey&&prevKey.slice(0,7)<MOMO_FIRST_PERIOD) prevKey='';
   const prevT= prevKey? sumT(_MOMO_OV_SHOPS.map(s=>momoPeriodTotals(s,prevKey))) : {hasData:false,rev:0,profit:0,qty:0,soldActive:0,activeTotal:0,margin:0};
@@ -21064,7 +21095,7 @@ function momoOvBuildCharts(period, perShop){
   const months=momoOvMonthsRange(mo);   // 2026-01 → 本月，全部顯示
   const labels=months.map(m=>+m.slice(5)+'月');
   const revArr=[], profitArr=[], marginByShop={}; _MOMO_OV_SHOPS.forEach(s=>marginByShop[s]=[]);
-  months.forEach(m=>{ let rev=0,profit=0; _MOMO_OV_SHOPS.forEach(s=>{ const t=momoPeriodTotals(s,m+'-FULL'); rev+=t.rev; profit+=t.profit; marginByShop[s].push(t.rev>0?+(t.profit/t.rev*100).toFixed(1):null); }); revArr.push(Math.round(rev)); profitArr.push(Math.round(profit)); });
+  months.forEach(m=>{ let rev=0,profit=0; _MOMO_OV_SHOPS.forEach(s=>{ const t=momoPeriodTotals(s,m+'-FULL'); rev+=t.rev; profit+=t.profit; marginByShop[s].push((t.revBase!=null?t.revBase:t.rev)>0?+(t.profit/(t.revBase!=null?t.revBase:t.rev)*100).toFixed(1):null); }); revArr.push(Math.round(rev)); profitArr.push(Math.round(profit)); });
   const mk=(id,cfg)=>{ const c=document.getElementById(id); if(c) _momoOvCharts.push(new Chart(c.getContext('2d'),cfg)); };
   const baseOpt=extra=>Object.assign({responsive:true,maintainAspectRatio:false},extra);
   // 1. 營收+淨利趨勢
