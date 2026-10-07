@@ -683,8 +683,8 @@
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
-  .summary-card-delta.up   { background: var(--success-soft); color: var(--success); }
-  .summary-card-delta.down { background: var(--danger-soft);  color: var(--danger); }
+  .summary-card-delta.up   { background: var(--danger-soft);  color: var(--danger); }
+  .summary-card-delta.down { background: var(--success-soft); color: var(--success); }
   /* flat = 沒有比較基準（前期為 0），不顯示假的 0.0% */
   .summary-card-delta.flat { background: var(--bg); color: var(--text-muted); }
   .summary-card-compare {
@@ -1007,8 +1007,8 @@
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
-  .rank-delta.up   { color: var(--success); }
-  .rank-delta.down { color: var(--danger); }
+  .rank-delta.up   { color: var(--danger); }
+  .rank-delta.down { color: var(--success); }
   .rank-delta.flat { color: var(--text-muted); }
   .rank-empty {
     padding: 28px 12px;
