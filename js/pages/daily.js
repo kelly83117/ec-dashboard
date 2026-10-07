@@ -147,12 +147,22 @@ Object.assign(App, {
       .filter(name => name && ALLOWED_NAMES.indexOf(name) < 0)
       .filter(name => { const v = dayProgress[name]; return Array.isArray(v) ? v.length > 0 : !!(v && String(v).trim()); })
       .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    const personInfos = ALLOWED_NAMES.concat(_dpExtraNames).map(name => {
+    // 塊 3-A：再併入「當天有淨利表調整歸給他」的人（adjPersonOf：by 對到的帳號姓名，含停用帳號），
+    //   做法同 _dpExtraNames（名單後、穩定排序、預設灰）；「未對到帳號」不是人，固定排最後。
+    const _adjWhoDay = _adjPeopleOn(viewDate);
+    const _extraNames = _dpExtraNames
+      .concat([..._adjWhoDay.keys()].filter(n => n && ALLOWED_NAMES.indexOf(n) < 0 && _dpExtraNames.indexOf(n) < 0))
+      .filter(n => n !== ADJ_UNMATCHED_NAME)
+      .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    const _hasUnmatched = _adjWhoDay.has(ADJ_UNMATCHED_NAME) || _dpExtraNames.indexOf(ADJ_UNMATCHED_NAME) >= 0;
+    const personInfos = ALLOWED_NAMES.concat(_extraNames, _hasUnmatched ? [ADJ_UNMATCHED_NAME] : []).map(name => {
       const u = users.find(uu => uu.name === name || uu.username === name);
       return {
         name,
         avatar: u && (u.avatar || u.avatarUrl) || '',
         items: normItems(dayProgress[name]),
+        accountStatus: _adjWhoDay.get(name) || null,   // by 對到的帳號狀態（停用 / 刪除 → 卡名旁標籤）
+        unmatched: name === ADJ_UNMATCHED_NAME,         // 「未對到帳號」卡：只放淨利表調整，不給待辦
       };
     });
 
@@ -274,13 +284,13 @@ Object.assign(App, {
           <div style="display:flex;align-items:center;gap:10px;min-width:0">
             ${avatarHtml}
             <div style="flex:1;min-width:0">
-              <div style="font-size:14px;font-weight:600;color:var(--text)">${escapeHtml(p.name)}</div>
-              <div style="margin-top:2px">${statusChip}</div>
+              <div style="font-size:14px;font-weight:600;color:var(--text)">${escapeHtml(p.name)}${p.accountStatus === 'disabled' ? '<span class="adj-who-tag">已停用</span>' : p.accountStatus === 'deleted' ? '<span class="adj-who-tag">已刪除</span>' : ''}</div>
+              ${p.unmatched ? '' : `<div style="margin-top:2px">${statusChip}</div>`}
             </div>
             <span class="dp-saved-flag" style="display:none;color:#10b981;font-size:11px;font-weight:600;letter-spacing:.04em">✓ 已存</span>
           </div>
-          <div class="dp-todo-list">${itemRows}${emptyHint}</div>
-          ${isEditable ? `
+          ${p.unmatched ? '' : `<div class="dp-todo-list">${itemRows}${emptyHint}</div>`}
+          ${isEditable && !p.unmatched ? `
             <div style="display:flex;gap:6px;margin-top:2px">
               <input type="text" class="dp-todo-add-input" data-dp-name="${escapeHtml(p.name)}" placeholder="新增待辦事項，按 Enter 加入"
                 style="flex:1;min-width:0;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;color:var(--text)">
@@ -300,6 +310,9 @@ Object.assign(App, {
     // 第三塊資料源之二：洞察表索引。🔴 只在月曆迴圈外建一次（迴圈內會重跑 31 次）；
     // getAdjIndex() 自帶快取，維持在格子內呼叫的既有寫法。
     const insIndexForCal = getInsIndex();
+    const calWhoResolve = _adjWhoResolver();   // 塊 3-B：resolver 迴圈外取一次（自帶快取，這裡只省掉每格的 Store.get）
+    // 名單外排序：同人員卡，「未對到帳號」不是人、固定排最後，其餘 localeCompare
+    const calExtraSort = (a, b) => (a === ADJ_UNMATCHED_NAME) - (b === ADJ_UNMATCHED_NAME) || a.localeCompare(b, 'zh-Hant');
     const calCells = [];
     const calExtraPeople = new Set();   // 月曆/圖例出現過的非名單人（例如 MOMO by-login 操作者）→ 圖例帶到他們、色用 fallback
     for (let i = 0; i < firstWeekday; i++) calCells.push('<div></div>');
@@ -338,8 +351,10 @@ Object.assign(App, {
       //   顏色走 PERSON_COLORS / PERSON_LIGHT，用 CSS 變數傳給 css/daily-adjustments.css 的排版規則。
       const slash = dateStr.replace(/-/g, '/');
       const keySet = {};   // person -> Set(商品 key)
+      // 塊 3-B：淨利表('p') 歸屬改走 adjPersonOf（同人員卡：有 by 依操作者、沒 by 推算負責人）；
+      //   洞察表('i') 這次不動，維持 adjOwnerOf（塊 3-C 範圍）。去重規則不變（每人各自 通路|品號）。
       const addRecs = (recs, srcTag) => recs.forEach((r, i) => {
-        const person = adjOwnerOf(r.shop, dateStr);
+        const person = srcTag === 'p' ? adjPersonOf(r, dateStr, calWhoResolve).person : adjOwnerOf(r.shop, dateStr);
         if (!person) return;
         const key = r.code ? (r.shop + '|' + r.code) : (r.shop + '|#' + srcTag + i);
         (keySet[person] = keySet[person] || new Set()).add(key);
@@ -362,7 +377,7 @@ Object.assign(App, {
       const totalCalCount = {};
       [...Object.keys(adjCountByPerson), ...Object.keys(momoCountByPerson)].forEach(n => { totalCalCount[n] = (adjCountByPerson[n] || 0) + (momoCountByPerson[n] || 0); });
       const calCountRoster = ALLOWED_NAMES.concat(
-        Object.keys(totalCalCount).filter(n => n && ALLOWED_NAMES.indexOf(n) < 0).sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+        Object.keys(totalCalCount).filter(n => n && ALLOWED_NAMES.indexOf(n) < 0).sort(calExtraSort)
       );
       const adjRowsHtml = calCountRoster
         .filter(n => totalCalCount[n])
@@ -386,7 +401,7 @@ Object.assign(App, {
         </button>
       `);
     }
-    const legendHtml = ALLOWED_NAMES.concat([...calExtraPeople].sort((a, b) => a.localeCompare(b, 'zh-Hant')))
+    const legendHtml = ALLOWED_NAMES.concat([...calExtraPeople].sort(calExtraSort))
       .map(n => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted)"><span style="width:7px;height:7px;border-radius:50%;background:${PERSON_COLORS[n] || '#6b7280'}"></span>${escapeHtml(n)}</span>`).join('');
     const calendarHtml = `
       <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:20px;min-width:0">
@@ -1294,8 +1309,10 @@ Object.assign(App, {
     }
   },
   openAdjustmentDetailModal(person, viewDate, kind, group) {
-    const slashDate = String(viewDate || '').replace(/-/g, '/');
-    const recs = (getAdjIndex()[slashDate] || []).filter(r => adjOwnerOf(r.shop, viewDate) === person);
+    // 塊 3-A：歸屬與卡片同一支（_adjRecsWhoOf → adjPersonOf），who 用來標「推算」/ 原始 by
+    const recsWho = _adjRecsWhoOf(person, viewDate);
+    const whoOf = new Map(recsWho.map(x => [x.r, x.who]));
+    const recs = recsWho.map(x => x.r);
     const list = _adjRecsForGroup(recs, kind, group);   // ← 與 pill 計數同一個函式，數字保證一致
     const parts = String(viewDate).split('-');
     const md = `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
@@ -1320,6 +1337,13 @@ Object.assign(App, {
         </details>`;
     };
 
+    // 推算的標「推算」；對不到帳號的直接顯示原始 by 字串（「未對到帳號」卡靠它看出是誰）
+    const whoTagHtml = (who) => {
+      if (!who) return '';
+      if (who.how === 'inferred') return `<span class="adj-who-tag" title="這筆沒有記錄操作者，依當天通路負責人推算">推算</span>`;
+      if (who.how === 'unmatched') return `<span class="adj-who-tag" title="這筆記錄的操作者對不到任何帳號">${escapeHtml(who.raw)}</span>`;
+      return '';
+    };
     const itemHtml = (r, muted) => `
       <div class="adj-modal-item${muted ? ' adj-modal-item-muted' : ''}">
         <div class="adj-modal-item-hd">
@@ -1327,6 +1351,7 @@ Object.assign(App, {
           <span class="adj-modal-code">${escapeHtml(r.code || '')}</span>
           <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
           <span class="adj-src adj-src-${r.src||'report'}">${r.src==='ads'?'廣告調整':r.src==='growth'?'商品調整':r.src==='import'?'舊版匯入':'報表匯入'}</span>
+          ${whoTagHtml(whoOf.get(r))}
         </div>
         <div class="adj-modal-text">${escapeHtml(r.text || '')}</div>
         ${crossInsightHtml(r)}
@@ -2241,6 +2266,55 @@ function adjShopsOf(person, date) {
   const m = _adjMapOn(date);
   return m ? ADJ_ALL_SHOPS.filter(shop => m[shop] === person) : [];
 }
+// 需求 3 塊 3-A：一筆淨利表調整歸給誰（卡片、明細彈窗、人員卡聯集共用這一支，不要各自寫一套）。
+//   有 by（登入帳號）→ makeUserIdentityResolver 轉成姓名（含停用 / 刪除帳號，status 帶出來）；
+//   by 對不到帳號（含同名不猜的 ambiguous）→ 歸「未對到帳號」，raw 留原字給明細顯示；
+//   沒有 by → 照舊用 adjOwnerOf(通路, 查看的那天) 推算（how:'inferred'，畫面標「推算」）。
+//   回傳 { person, how: 'by' | 'inferred' | 'unmatched', raw, status }；推算查不到負責人時 person 為 undefined（不歸任何人，同舊行為）。
+const ADJ_UNMATCHED_NAME = '未對到帳號';
+// resolver 只建一次：以 Store 的 ec.users 陣列參照當快取依據（雲端模式下 Store.get 回同一個參照，
+//   雲端快照換新陣列時自然重建）。🔴 姓名不要存進 getAdjIndex 的快取 —— 帳號改名 / 停用要即時反映。
+let _adjWhoCache = { users: null, resolve: null };
+function _adjWhoResolver() {
+  const users = Store.get(Store.KEYS.users, []);
+  if (_adjWhoCache.resolve && _adjWhoCache.users === users) return _adjWhoCache.resolve;
+  const mk = window.makeUserIdentityResolver;
+  const resolve = typeof mk === 'function' ? mk(Array.isArray(users) ? users : []) : null;
+  _adjWhoCache = { users, resolve };
+  return resolve;
+}
+function adjPersonOf(rec, date, resolve) {
+  const raw = (rec && typeof rec.by === 'string') ? rec.by.trim() : '';
+  if (raw) {
+    const fn = resolve || _adjWhoResolver();
+    const id = fn ? fn(raw) : null;
+    if (id && id.ok) return { person: id.display, how: 'by', raw, status: id.status };
+    return { person: ADJ_UNMATCHED_NAME, how: 'unmatched', raw, status: null };
+  }
+  return { person: adjOwnerOf(rec && rec.shop, date), how: 'inferred', raw: '', status: null };
+}
+// 某人某日（'YYYY-MM-DD'）歸給他的淨利表調整：[{ r, who }]，順序同 getAdjIndex。
+function _adjRecsWhoOf(person, viewDate) {
+  const resolve = _adjWhoResolver();
+  const out = [];
+  (getAdjIndex()[String(viewDate || '').replace(/-/g, '/')] || []).forEach(r => {
+    const who = adjPersonOf(r, viewDate, resolve);
+    if (who.person === person) out.push({ r, who });
+  });
+  return out;
+}
+// 某日有淨利表調整歸到的人：Map(姓名 → 帳號狀態 'active'|'disabled'|'deleted'|null)。
+//   status 只有 by 對到帳號時才有（推算的沒有帳號可查 → null）。給人員卡聯集 + 「已停用」標籤用。
+function _adjPeopleOn(viewDate) {
+  const resolve = _adjWhoResolver();
+  const m = new Map();
+  (getAdjIndex()[String(viewDate || '').replace(/-/g, '/')] || []).forEach(r => {
+    const who = adjPersonOf(r, viewDate, resolve);
+    if (!who.person) return;
+    if (!m.has(who.person) || (!m.get(who.person) && who.status)) m.set(who.person, who.status);
+  });
+  return m;
+}
 // 開發期檢查：同一 label 若出現不同 cls，warn 一次（cls 取「該組第一筆」是推論，這裡驗證它）
 const _adjClsWarned = new Set();
 function _warnAdjClsMismatch(label, a, b) {
@@ -2538,8 +2612,10 @@ function _buildProgressHtmlInner(person){
 //   pill 為 <button>，click 由 bindWeeklyCalendar 綁 → openAdjustmentDetailModal。
 //   pill 計數一律走 _adjRecsForGroup（與 modal 明細同源，數字保證一致）。
 function buildCardAdjustmentsHtml(person, viewDate) {
-  const slashDate = String(viewDate || '').replace(/-/g, '/');
-  const recs = (getAdjIndex()[slashDate] || []).filter(r => adjOwnerOf(r.shop, viewDate) === person);
+  // 塊 3-A：歸屬改走 adjPersonOf（有 by 依操作者、沒 by 才推算），推算的筆數另外標在總數後面
+  const recsWho = _adjRecsWhoOf(person, viewDate);
+  const recs = recsWho.map(x => x.r);
+  const inferredCount = recsWho.filter(x => x.who.how === 'inferred').length;
 
   // 空狀態：當日 0 筆 → 只留進度區塊，沒有進度就整塊不顯示
   // （原 person === '郭雅琪' 的「無淨利表」特例已移除：那是郭雅琪負責維克時期寫的，
@@ -2614,7 +2690,7 @@ function buildCardAdjustmentsHtml(person, viewDate) {
     <div class="adj-sec">
       <div class="adj-sec-head">
         <span class="adj-sec-title">淨利表調整</span>
-        <span class="adj-sec-total">${total}</span>
+        <span class="adj-sec-count"><span class="adj-sec-total">${total}</span>${inferredCount ? `<span class="adj-inferred-note">（含推算 ${inferredCount}）</span>` : ''}</span>
       </div>
       ${anaPills ? `<div class="adj-pill-group"><div class="adj-pills-label">廣告分析</div><div class="adj-pills">${anaPills}</div></div>` : ''}
       ${growthPills ? `<div class="adj-pill-group"><div class="adj-pills-label">成長分析</div><div class="adj-pills">${growthPills}</div></div>` : ''}
