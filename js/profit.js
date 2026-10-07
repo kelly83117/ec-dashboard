@@ -13351,7 +13351,7 @@ function momoAggregatePeriods(product,periodKeys,shop,opts){
           const ls=_lean?null:momoMoPlusLatestSaleForSku(shop, product.sku);
           const lp=_lean?{}:momoMoPlusListPriceForSku(shop, product.sku, ls?ls.sp:null, (product.listPriceManual ?? null));
           const fr=momoFeeRateForSku(shop, product.sku);
-          return { qty:eQty, revenue:eRev, revenueA:eRev, revenueAB:eRev, profit, margin:marginPct, cost:cogs, feeD:feeAmt,   // E001 估算只有 A 口徑（無 B 明細可併）→ 營收未含運費代收
+          return { qty:eQty, revenue:eRev, revenueA:eRev, revenueAB:eRev, itemProfit:null, itemMargin:null, profit, margin:marginPct, cost:cogs, feeD:feeAmt,   // E001 估算只有 A 口徑（無 B 明細可併）→ 營收未含運費代收
             returnRate:null, retQty:0, retKnown:false,   // 未結算估算（E001）：無結算退貨資料 → 退貨率「—」
             coverage:covered?1:0, covered, missingOrigins:covered?[]:[origin||'(無原廠編號)'],
             latestSale:(ls?ls.sp:null), latestSaleDate:(ls?ls.d:null),
@@ -13371,7 +13371,7 @@ function momoAggregatePeriods(product,periodKeys,shop,opts){
     const fr=momoFeeRateForSku(shop, product.sku);   // 成交費率反推結論（跨月交集，純顯示/排序、不進毛利）
     return {
       // 2026-10 第二段：營收欄＝含稅 A＋B（同 KPI 月結表「營收」＝PDF 商店開立發票金額）；revenueA 保留純 A 貨款供提示用
-      qty, revenue:m.revAB, revenueA:revA, revenueAB:m.revAB, tax:m.tax, profit:m.margin, margin:m.marginPct, cost:m.cogs, feeD:m.feeD, feeC:m.feeC, feeB:m.feeB, freightNet:m.freightNet,
+      qty, revenue:m.revAB, revenueA:revA, revenueAB:m.revAB, tax:m.tax, profit:m.margin, margin:m.marginPct, itemProfit:m.itemProfit, itemMargin:m.itemMarginPct, cost:m.cogs, feeD:m.feeD, feeC:m.feeC, feeB:m.feeB, freightNet:m.freightNet,
       // 退貨率＝回收確認 qty ÷ (已送達+回收確認)。本期銷量 qty 已排除回收確認（＝已送達）→ 分母＝qty+retQty（值與含回收確認時相同、語意正確）。
       //   舊 doc 無 ret 欄→retKnown false→null(「—」需重傳)。
       returnRate: retKnown ? ((qty+retQty)>0?Math.round((retQty/(qty+retQty))*1000)/10:0) : null, retQty, retKnown,
@@ -14999,7 +14999,12 @@ function momoMoPlusMarginCalc(inp){   // 純函式：{qty, revA, originsQty:{ori
   const tax = revAB*5/105;
   const margin = revAB - tax - cogs - feeD - feeC;             // 已知部分淨利；未涵蓋單位有營收無成本→偏高，靠 coverage 標示
   const marginPct = revAB>0 ? (margin/revAB)*100 : null;       // 負/零營收 → null（畫面「—」），不假設正
-  return { qty:Number(inp.qty)||0, revA, revAB, tax, cogs:Math.round(cogs), feeD, feeC:Math.round(feeC), feeB:Math.round(feeB), freightNet:Math.round(feeC-feeB), margin:Math.round(margin), marginPct,
+  // 商品淨利／商品淨利率（單品優化用，2026-10）：運費整層拿掉——B 不加、C 不扣、免運活動服務費留在 D（D 全額扣）。
+  //   商品淨利 ＝ A×100/105 − 成本(未稅) − D；商品淨利率 ＝ 商品淨利 ÷ A（含稅 A、不含 B）。缺成本（未涵蓋）→ 兩者 null（畫面「—」、不頂 0 避免虛高）。
+  const itemProfitRaw = revA*100/105 - cogs - feeD;
+  const itemProfit = covered ? Math.round(itemProfitRaw) : null;
+  const itemMarginPct = (covered && revA>0) ? (itemProfitRaw/revA)*100 : null;
+  return { qty:Number(inp.qty)||0, revA, revAB, tax, cogs:Math.round(cogs), feeD, feeC:Math.round(feeC), feeB:Math.round(feeB), freightNet:Math.round(feeC-feeB), margin:Math.round(margin), marginPct, itemProfit, itemMarginPct,
     coverage, covered, costedQty:costedAbs, uncostedQty:allAbs-costedAbs, missingOrigins };
 }
 // 運費行（逐期別）：跨來源月 doc 的 ΣB(收入) − ΣC(代扣運費) + Σ免運活動服務費。periodKeys=展開後的期別鍵。
@@ -15673,6 +15678,8 @@ const MOMO_PROFIT_COLS=[
   {k:'qty',label:'本期銷量',fmt:'num',w:100,info:'對帳數量＝賣出−客退。進價×銷量即為營收。',infoMoPlus:'對帳明細逐列數量合計。營收＝A 貨款＋B 運費代收（含稅，非進價×銷量）。'},
   {k:'convRate',label:'成交率',fmt:'pct1',w:96,info:'對帳數量 ÷ 瀏覽量。',noMoPlus:true},
   {k:'revenue',label:'營收',fmt:'money',w:130,info:'未稅進價 × 對帳數量。已扣客退。（未稅）',infoMoPlus:'含稅營收 ＝ A 貨款（代收金額＋mo點支付＋全站抵用券支付）＋ B 運費代收（消費者支付運費、mo點、商店免運券補貼）。同 KPI 月結表「營收」（＝對帳單商店開立發票金額），非進價×銷量。B 按同訂單商品營收攤到各商品。'},
+  {k:'itemProfit',label:'商品淨利',fmt:'money',w:118,moPlusOnly:true,info:'單品優化用（運費整層拿掉）：商品淨利 ＝ A 貨款×100/105（扣營業稅）− 商品成本(未稅) − D 手續費（含免運活動服務費）。B 運費代收不加、C 代扣運費不扣。缺成本顯「—」。'},
+  {k:'itemMargin',label:'商品淨利率',fmt:'pct1',w:116,moPlusOnly:true,info:'單品優化用：商品淨利 ÷ A 貨款（含稅 A、不含 B）。運費整層拿掉，不被運費代收墊高。與右邊「淨利率」（對帳口徑：含 B、扣 C、÷(A＋B)）用途不同。缺成本顯「—」。'},
   {k:'margin',label:'淨利率',fmt:'pct1',w:100,info:'淨利 ÷ 未稅營收。淨利＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無）。',infoMoPlus:'淨利 ÷ 營收(A＋B)。淨利＝營收×100/105(扣營業稅) − 成本(未稅) − D手續費(逐列15項) − C代扣運費。C/D 不抵進項稅（同 KPI）。'},
   {k:'profit',label:'淨利貢獻',fmt:'money',w:130,info:'該商品淨利金額＝營收 − 商品成本 − 平台費用 − 物流 − 倉租（乙配逐SKU、甲配無）。（未稅）',infoMoPlus:'該商品淨利金額＝營收(A＋B)×100/105 − 成本(未稅) − D手續費 − C代扣運費。'},
   {k:'feeRate',label:'成交費率',fmt:'pct1',w:128,info:'MO+ 成交手續費反推的費率（非檔期）。逐列 round(售價×數量×費率%)=手續費、跨月取交集。唯一解=粗體深色；多解=淡色範圍+「待收斂」（月份越多越收斂）；異常=紅（跨月候選互斥、代表有問題）；無成交手續費資料=「—」。排序與篩選皆依「範圍下界」＝能保證的最低費率（撈高費率商品）：篩「>10%」＝下界都 >10% 才算。多解列的下界即篩選/排序值。⚠ 僅供顯示與異常偵測，毛利一律走逐筆實際手續費、不用反推值。',moPlusOnly:true},
@@ -15701,7 +15708,7 @@ function momoColDefKeys(shop){ return momoColAvail(shop).filter(c=>!c.fixed).map
 // 「新欄位」提示：既有使用者的欄位順序是自己拖過的（不強制插入），但要讓人知道多了一欄。
 //   作法：記已看過的欄 key；本次釋出新增的欄（_MOMO_NEW_COLS）對既有使用者標「新」+ 首次一次性 toast；開過欄位面板即視為看過、之後不再提示。
 const _MOMO_COLS_SEEN_LS='momo_cols_seen';
-const _MOMO_NEW_COLS=['feeRate','unitCost'];   // 本次釋出新增的欄；下次釋出把新 key 加進來、把不再算新的移走
+const _MOMO_NEW_COLS=['feeRate','unitCost','itemProfit','itemMargin'];   // 本次釋出新增的欄；下次釋出把新 key 加進來、把不再算新的移走
 function momoColsSeenSet(){
   try{ const raw=localStorage.getItem(_MOMO_COLS_SEEN_LS); if(raw){ const a=JSON.parse(raw); if(Array.isArray(a)) return new Set(a); } }catch{}
   // 首次：把「非本次新增」的欄都當已看過 → 既有使用者只會對新欄跳提示，不會整排標新
@@ -15719,7 +15726,7 @@ function momoLoadColCfg(shop){
   } }catch(e){}
   const defk=momoColDefKeys(shop);
   cfg.order=cfg.order.filter(k=>defk.includes(k));               // 濾掉已不存在的殘鍵
-  defk.forEach(k=>{ if(!cfg.order.includes(k)){ if(k==='unitCost') cfg.order.unshift(k); else cfg.order.push(k); } });   // 新增的欄補位：unitCost 補到最前(品號 fixed 之後第一欄，符合驗收位置)，其餘（如「進價」）補到尾端；舊 cfg 不會漏
+  defk.forEach(k=>{ if(!cfg.order.includes(k)){ if(k==='unitCost') cfg.order.unshift(k); else if(k==='itemProfit'||k==='itemMargin'){ const _i=cfg.order.indexOf('margin'); if(_i>=0) cfg.order.splice(_i,0,k); else cfg.order.push(k); } else cfg.order.push(k); } });   // 新增的欄補位：unitCost 補到最前(品號 fixed 之後第一欄，符合驗收位置)，其餘（如「進價」）補到尾端；舊 cfg 不會漏
   return cfg;
 }
 function momoSaveColCfg(shop,cfg){ try{ localStorage.setItem(_MOMO_COLCFG_LS+shop, JSON.stringify({order:cfg.order, hidden:cfg.hidden})); }catch(e){} }
@@ -16162,6 +16169,16 @@ function momoRenderProfitBody(shop, tableOnly){
           mTip=` title="淨利 ${momoMoney(r.profit||0)} ＝ 營收 ${momoMoney(r.revenue||0)}（A貨款 ${momoMoney(r.revenueA||0)} ＋ B運費代收 ${momoMoney(r.feeB||0)}，B 同訂單營收攤估）×100/105（扣營業稅 ${momoMoney(r.tax||0)}）− 成本 ${momoMoney(r.cost||0)}（未稅）− 手續費D ${momoMoney(r.feeD||0)}（逐筆）− 代扣運費C ${momoMoney(r.feeC||0)}（逐筆）；淨利率 ÷ (A＋B)"`;
         }
         return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:${m>=25?'#10b981':(m<0?'#dc2626':'#374151')}"${mTip}>${momoPct(m)}${momoRowCmp('margin',r,r._prev)}</td>`;
+      }
+      if(c.k==='itemProfit' || c.k==='itemMargin'){   // MO+ 商品淨利／商品淨利率（運費整層拿掉）：缺成本或營收≤0 → 「—」
+        const v=r[c.k];
+        if(v==null){
+          const why=(r.covered===false)?'缺成本（原廠編號查無莫筆克成本）→ 不顯示，避免成本記 0 造成虛高':'營收為 0 → 無法計算';
+          return `<td style="text-align:right;color:#c7cad1" title="${why}">—</td>`;
+        }
+        const tip=`商品淨利 ${momoMoney(r.itemProfit)} ＝ A貨款 ${momoMoney(r.revenueA||0)}×100/105 − 成本 ${momoMoney(r.cost||0)} − D ${momoMoney(r.feeD||0)}（B 運費代收不加、C 代扣運費不扣）；商品淨利率 ＝ ÷ A（含稅）`.replace(/"/g,'&quot;');
+        if(c.k==='itemProfit') return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;color:${v<0?'#dc2626':'#374151'}" title="${tip}">${momoMoney(v)}</td>`;
+        return `<td style="text-align:right;overflow:hidden;text-overflow:ellipsis;font-weight:700;color:${v>=25?'#10b981':(v<0?'#dc2626':'#374151')}" title="${tip}">${momoPct(v)}</td>`;
       }
       if(c.k==='stock'){
         // 乙配＋F1102：庫存欄＝寄倉即時「可賣量」（＝寄倉數−已訂購待出庫）。未涵蓋→「—」不猜、不回退莫筆克；tooltip 含在途量＋資料時間。
