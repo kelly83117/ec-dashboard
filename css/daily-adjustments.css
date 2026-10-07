@@ -419,3 +419,13 @@
   cursor:pointer;
 }
 .boss-task-imgs:hover{background:var(--primary);color:#fff;}
+
+/* 需求 3 塊 3-C：洞察表「今日調整」摘要卡標題後的「共 N 個商品（含推算 M）」。
+   標題與附註包成一組靠左（右邊仍是「自動更新」）；附註本身沿用 .adj-inferred-note。 */
+.dp-summary-head-l {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
