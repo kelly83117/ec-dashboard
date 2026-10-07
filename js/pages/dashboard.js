@@ -1232,7 +1232,7 @@ Object.assign(App, {
         </table>
       </div>
       <p class="rev-hist-note">成長率超過 200% 多半是去年同期金額很小（例如通路剛上線），只顯示「&gt;+200%」，僅供參考。</p>
-      <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表，核對中。</p>
+      <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表（每日營收加總，與 2026 年同口徑）。</p>
       ${failNote}`;
   },
   /* 趨勢比較分頁：通路（單選）＋年份（複選）→ 淡旺季卡片 → 折線圖 → 並排表
@@ -1331,7 +1331,7 @@ Object.assign(App, {
         </table>
       </div>
       <p class="rev-hist-note">成長率超過 200% 多半是去年同期金額很小（例如通路剛上線），只顯示「&gt;+200%」，僅供參考。</p>
-      <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表，核對中。</p>
+      <p class="rev-hist-note">2025 年以前的數字來自蝦皮每日營收試算表（每日營收加總，與 2026 年同口徑）。</p>
       ${failNote}`;
   },
   /* 建立趨勢折線圖 — revHistRedraw()（局部重畫）與 bindRevHist()（整頁 render 後）都會呼叫。
