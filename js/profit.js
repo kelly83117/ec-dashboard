@@ -14421,6 +14421,33 @@ function momoParseMoPlusMaster(rows){
 // 批次 upsert 主檔：新商品 create、既有補「原廠對照」（origin 主 + origins[]），**不覆蓋** periods/history/feeRateExpected。
 //   ⚠ specs/掛牌價/市價（~370KB、含中文規格名）**不進 momo_products**（該 doc 已 ~432KB 且每月長 periods、逼近 1MB）→
 //     規格層資料留給 P2 專門的精簡儲存（獨立 doc/localStorage，見計畫）。P1 只做原廠對照 + 批次建檔（自動帶成本/缺成本用）。
+// MO+ 主檔＝「目前在架完整快照」：主檔沒有的 SKU → 標下架、主檔重新出現 → 復架、近 30 天批次新增（還沒進主檔）→ 暫不標。
+//   純計算、不寫入、不刪任何商品；上傳預覽與實際寫入共用（單一事實來源）。products 傳入陣列（可含本次新增）、parsed＝已解析主檔。
+function momoMoPlusDiscontinuePlan(products, parsed){
+  const masterSet=new Set(((parsed&&parsed.products)||[]).map(m=>String(m.sku)));
+  const hasData=p=>Object.keys((p&&p.periods)||{}).length>0;
+  const DAY=864e5, now=Date.now();
+  const recentAdd=p=>{   // 批次新增訊號（listPriceManualMeta.src===add 暫估 或 history 首筆為新增）＋近 30 天 → 暫不標（主檔匯出早於新增的時間差）
+    const meta=p.listPriceManualMeta, h0=(p.history&&p.history[0])||null;
+    const isAdd=(meta&&meta.src==='add')||(h0&&/新增/.test(h0.note||''));
+    if(!isAdd) return false;
+    const d=String((meta&&meta.at)||(h0&&h0.date)||'').slice(0,10);   // 'YYYY-MM-DD'
+    const t=Date.parse(d);
+    if(isNaN(t)) return true;   // 有新增訊號但日期不明 → 保守暫不標（不誤殺新品）
+    return (now-t)<=30*DAY;
+  };
+  const toDiscontinue=[], toReactivate=[], skippedNew=[];
+  (products||[]).forEach(p=>{
+    if(masterSet.has(String(p.sku))){
+      if(p.discontinued===true) toReactivate.push({sku:p.sku, name:p.name||''});
+    }else{
+      if(recentAdd(p)){ skippedNew.push({sku:p.sku, name:p.name||''}); return; }
+      if(p.discontinued!==true) toDiscontinue.push({sku:p.sku, name:p.name||'', hasData:hasData(p)});
+    }
+  });
+  return { total:(products||[]).length, masterN:masterSet.size,
+    toDiscontinue, toReactivate, skippedNew, discWithSales:toDiscontinue.filter(x=>x.hasData).length };
+}
 function momoMoPlusApplyMaster(shop, parsed){
   const products=momoLoadProducts(shop);
   const bySku=new Map(products.map(p=>[p.sku,p]));
@@ -14433,6 +14460,18 @@ function momoMoPlusApplyMaster(shop, parsed){
     p.origins=(m.origins||[]).slice();               // 該商品編號所有原廠編號（缺成本/多原廠用）
     p.origin=(m.origins&&m.origins[0])||p.origin||''; // 主原廠編號（自動帶成本）；銷售最多規格由 origins doc specQty 於聚合時決定
   });
+  // 標下架/復架（主檔＝目前在架完整快照）：主檔沒有的既有商品標下架、主檔重新出現的復架；近 30 天批次新增暫不標。
+  //   絕不刪商品、不動 periods / origins / 手動售價 / 既有歷程；只翻 discontinued 旗標 + 加一筆 history 稽核。
+  const _discPlan=momoMoPlusDiscontinuePlan(products, parsed);
+  const _dnp=momoNowParts();
+  const _dset=new Set(_discPlan.toDiscontinue.map(x=>String(x.sku)));
+  const _rset=new Set(_discPlan.toReactivate.map(x=>String(x.sku)));
+  let discontinuedN=0, reactivatedN=0;
+  products.forEach(p=>{
+    if(_rset.has(String(p.sku))){ p.discontinued=false; p.history=p.history||[]; p.history.push({..._dnp,cost:p.cost,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品主檔匯入：主檔重新出現→復架'}); reactivatedN++; }
+    else if(_dset.has(String(p.sku))){ p.discontinued=true; p.history=p.history||[]; p.history.push({..._dnp,cost:p.cost,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品主檔匯入：不在商品主檔→標記下架'}); discontinuedN++; }
+  });
+  const skippedNew=_discPlan.skippedNew.length;
   momoSaveProducts(shop, products);
   // 規格層（掛牌價/市價/規格名，~370KB 顯示用）→ master doc（momo_moplus_origins 的 src='master'），不擠 momo_products。整份取代。
   const masterProducts={};
@@ -14463,7 +14502,7 @@ function momoMoPlusApplyMaster(shop, parsed){
       priceDiffs.push({sku:p.sku, name:p.name||'', manual:Number(p.listPriceManual), master:Number(master), spec:info.listSpec||''});
     }
   }); if(_chg) momoSaveProducts(shop, products); }catch(e){}
-  return { added, updated, total:products.length, masterOk, masterSkuN:Object.keys(masterProducts).length, priceDiffs, autoReplaced };
+  return { added, updated, total:products.length, masterOk, masterSkuN:Object.keys(masterProducts).length, priceDiffs, autoReplaced, discontinuedN, reactivatedN, skippedNew, discWithSales:_discPlan.discWithSales };
 }
 // ══════ MO+ 商品髒資料掃描/清理（只限指定賣場，不碰別的）══════
 //  掃描（唯讀）：品號重複 / 名稱空或「—」/ 品號含空格中文隱形字（批次貼上解析錯誤殘留）/ TEMP- 測試品。
@@ -19054,7 +19093,7 @@ function momoRenderMoPlusProductSync(shop){
     <div style="max-width:820px">
       <div class="mm-note" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-bottom:12px;line-height:1.7;color:#065f46">
         上傳 <b>mo+${({'MO+麻吉':'好麻吉','MO+森之旅':'森之旅','MO+玩樂':'玩樂'})[shop]}商品資訊.xls</b>（「匯出商品價格資料」分頁）＝商品主檔。<br>
-        <span class="mm-muted">補齊<b>商品編號→原廠編號完整對照</b>（含零銷量商品）+ <b>掛牌售價/市價</b>。可一次批次建檔（新品自動帶成本靠這個）。當前快照、重傳取代主檔欄位，<b>不動</b>既有銷售/期別資料。</span>
+        <span class="mm-muted">補齊<b>商品編號→原廠編號完整對照</b>（含零銷量商品）+ <b>掛牌售價/市價</b>。可一次批次建檔（新品自動帶成本靠這個）。當前快照、重傳取代主檔欄位，<b>不動</b>既有銷售/期別資料。<b>主檔沒有的商品會自動標成已下架</b>（可隨時重傳復原）。</span>
       </div>
       <div class="mm-uprow">
         <div class="mm-uplbl">商品主檔 <span class="mm-code">商品資訊</span><div class="mm-hint">分頁「匯出商品價格資料」</div></div>
@@ -19082,14 +19121,31 @@ async function momoMoPlusMasterGenerate(shop){
   const existing=new Set(momoLoadProducts(shop).map(p=>p.sku));
   let willAdd=0, willUpd=0; parsed.products.forEach(m=>{ existing.has(m.sku)?willUpd++:willAdd++; });
   const multi=parsed.products.filter(p=>p.origins.length>1).length;
+  // 標下架/復架計畫（純計算、不寫入；與寫入端共用同一支，數字一致）
+  const _curProducts=momoLoadProducts(shop);
+  const _plan=momoMoPlusDiscontinuePlan(_curProducts, parsed);
+  const _curTotal=_curProducts.length;
+  const _overHalf=_curTotal>0 && (_plan.toDiscontinue.length/_curTotal)>0.6;
+  const _esc=_momoEsc;
+  const _listBlock=(label,arr,color)=> arr.length?`<details style="margin-top:4px"><summary style="cursor:pointer;color:${color};font-size:12px">${label}（${arr.length}）</summary><div style="max-height:170px;overflow:auto;font-size:11px;color:#6b7280;line-height:1.7;margin-top:4px;padding-left:8px">${arr.slice(0,500).map(x=>'· '+_esc(x.name||'')+' <span style="color:#9ca3af">'+_esc(x.sku)+'</span>'+(x.hasData?' <span style="color:#d97706">有銷售</span>':'')).join('<br>')}${arr.length>500?'<br>…共 '+arr.length+' 筆':''}</div></details>`:'';
+  const _btnId='moplus-master-apply-'+shop, _chkId='moplus-master-chk-'+shop;
+  const _warnBlock=_overHalf?`<div style="margin-top:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;color:#b91c1c;font-size:12px;line-height:1.6">⚠ <b>將標下架 ${_plan.toDiscontinue.length.toLocaleString()} 個，超過現有商品的 60%</b>（現有 ${_curTotal.toLocaleString()} 個）。這份主檔可能不完整（傳錯店、或檔案被篩選過）。確認無誤請勾選下方再寫入。</div>`:'';
+  const _applyBtn=_overHalf
+    ? `<label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:#b91c1c;font-weight:600"><input type="checkbox" id="${_chkId}" onchange="var b=document.getElementById('${_btnId}');if(b)b.disabled=!this.checked"> 我確定這是完整的在架清單</label><button class="mm-btn-primary" id="${_btnId}" style="margin-top:8px" disabled onclick="momoMoPlusMasterApply('${shop}')">✔ 確認寫入</button>`
+    : `<button class="mm-btn-primary" id="${_btnId}" style="margin-top:10px" onclick="momoMoPlusMasterApply('${shop}')">✔ 確認寫入</button>`;
   if(prev) prev.innerHTML=`<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;background:#fff">
     <div style="font-size:14px;font-weight:700;margin-bottom:8px">商品主檔預覽</div>
     <div style="font-size:13px;line-height:1.9">
       解析 <b>${parsed.rowN.toLocaleString()}</b> 列 → <b>${parsed.skuN.toLocaleString()}</b> 個商品編號、<b>${parsed.originN.toLocaleString()}</b> 個原廠編號（${multi} 個商品有多原廠編號）。<br>
       將 <b style="color:#10b981">新增 ${willAdd.toLocaleString()}</b> 個商品、<b style="color:#5b5fcf">更新 ${willUpd.toLocaleString()}</b> 個既有商品的主檔欄位（原廠對照/掛牌價/市價）。<br>
-      <span class="mm-muted">⚠ 只補主檔欄位，<b>不覆蓋</b>既有銷售/期別/歷程。生效日期全空＝當前快照、可重傳取代。</span>
+      <b style="color:#9a3412">將標下架 ${_plan.toDiscontinue.length.toLocaleString()}</b> 個（其中 6～9 月有銷售的 <b>${_plan.discWithSales.toLocaleString()}</b> 個：仍保留歷史數字）、<b style="color:#059669">將復架 ${_plan.toReactivate.length.toLocaleString()}</b> 個、<span class="mm-muted">近 30 天新增、暫不標下架 ${_plan.skippedNew.length.toLocaleString()} 個</span>。<br>
+      <span class="mm-muted">⚠ 只補主檔欄位，<b>不覆蓋</b>既有銷售/期別/歷程；標下架只翻旗標、<b>不刪</b>任何資料（可隨時重傳復原）。生效日期全空＝當前快照、可重傳取代。</span>
     </div>
-    <button class="mm-btn-primary" style="margin-top:10px" onclick="momoMoPlusMasterApply('${shop}')">✔ 確認寫入</button>
+    ${_listBlock('將標下架明細', _plan.toDiscontinue, '#9a3412')}
+    ${_listBlock('將復架明細', _plan.toReactivate, '#059669')}
+    ${_listBlock('近 30 天新增、暫不標下架明細', _plan.skippedNew, '#6b7280')}
+    ${_warnBlock}
+    ${_applyBtn}
   </div>`;
 }
 function momoMoPlusMasterApply(shop){
@@ -19124,7 +19180,8 @@ function momoMoPlusMasterApply(shop){
   window.__moPlusPriceAutoReplaced={shop, list:auto};   // 供查詢（不靜默取代）
   const autoNote=auto.length?('\n\n✅ '+auto.length+' 個新建商品的暫估售價已由主檔掛牌價取代（詳見下方清單）。'):'';
   const autoDetail=auto.length?('暫估售價 → 主檔掛牌價（新增時填的試算值已被官方掛牌價取代）：\n'+auto.map(x=>'・'+(x.name||x.sku)+'（'+x.sku+'）：'+x.estimate+' → '+x.master).join('\n')):'';
-  const msg='商品主檔已寫入：新增 '+res.added+' 個、更新 '+res.updated+' 個（共 '+res.total+' 個商品，讀回 '+persistedN+'）。原廠對照 '+parsed.originN+' 個。'+cloudNote+(lsNote?'\n'+lsNote:'')+diffNote+autoNote;
+  const discNote='標下架 '+(res.discontinuedN||0)+' 個、復架 '+(res.reactivatedN||0)+' 個'+((res.skippedNew||0)?'（近 30 天新增暫不標 '+res.skippedNew+' 個）':'')+'。';
+  const msg='商品主檔已寫入：新增 '+res.added+' 個、更新 '+res.updated+' 個（共 '+res.total+' 個商品，讀回 '+persistedN+'）。'+discNote+'原廠對照 '+parsed.originN+' 個。'+cloudNote+(lsNote?'\n'+lsNote:'')+diffNote+autoNote;
   if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品主檔已寫入', message:msg, detail:(autoDetail||undefined), kind:'info'}); else if(typeof showToast==='function') showToast('主檔已寫入 '+res.total+' 個商品','success');
   if(diffs.length){ try{ momoMoPlusShowPriceDiffs(shop); }catch(e){} }   // 有落差 → 開清單
   momoRenderMoPlusProductSync(shop);
