@@ -14468,10 +14468,13 @@ function momoMoPlusApplyMaster(shop, parsed){
   const _rset=new Set(_discPlan.toReactivate.map(x=>String(x.sku)));
   let discontinuedN=0, reactivatedN=0;
   products.forEach(p=>{
-    if(_rset.has(String(p.sku))){ p.discontinued=false; p.history=p.history||[]; p.history.push({..._dnp,cost:p.cost,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品主檔匯入：主檔重新出現→復架'}); reactivatedN++; }
-    else if(_dset.has(String(p.sku))){ p.discontinued=true; p.history=p.history||[]; p.history.push({..._dnp,cost:p.cost,purchasePrice:p.purchasePrice,salePrice:p.salePrice,note:'商品主檔匯入：不在商品主檔→標記下架'}); discontinuedN++; }
+    if(_rset.has(String(p.sku))){ p.discontinued=false; p.history=p.history||[]; p.history.push({..._dnp,note:'商品主檔匯入：主檔重新出現→復架'}); reactivatedN++; }
+    else if(_dset.has(String(p.sku))){ p.discontinued=true; p.history=p.history||[]; p.history.push({..._dnp,note:'商品主檔匯入：不在商品主檔→標記下架'}); discontinuedN++; }
   });
   const skippedNew=_discPlan.skippedNew.length;
+  // 防呆：清掉歷程項目裡值為 undefined 的欄位——MO+ 商品沒有 cost/purchasePrice/salePrice，v753 曾把它們寫進 history（值 undefined）
+  //   → Firestore setDoc 不接受 undefined、會拒整份 momo_products 文件（同步失敗）。這裡一併清掉既有髒資料，之後只寫 note。
+  products.forEach(p=>{ if(Array.isArray(p.history)) p.history.forEach(h=>{ if(h&&typeof h==='object') Object.keys(h).forEach(k=>{ if(h[k]===undefined) delete h[k]; }); }); });
   momoSaveProducts(shop, products);
   // 規格層（掛牌價/市價/規格名，~370KB 顯示用）→ master doc（momo_moplus_origins 的 src='master'），不擠 momo_products。整份取代。
   const masterProducts={};
