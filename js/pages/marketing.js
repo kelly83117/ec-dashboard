@@ -1107,59 +1107,6 @@ Object.assign(App, {
       });
     }
 
-    const clearAllBtn = document.getElementById('insight-clear-all');
-    if (clearAllBtn) {
-      clearAllBtn.addEventListener('click', () => {
-        // 一按即清，無確認彈窗。
-        // 1) 重設下拉狀態
-        this.filter.insightCompare = '';
-
-        const prefix = `ec.insight_${currentShop}_`;
-        const keysToClear = [
-          prefix + 'master',
-          prefix + 'weeks',
-          prefix + 'perf',
-          prefix + 'notes',
-        ];
-
-        // 2) 先掃 Store._mem，把所有此賣場相關的 key（包括上面 4 個 + 任何遺漏的）一次刪掉
-        const allShopKeys = new Set(keysToClear);
-        try {
-          if (Store._mem && typeof Store._mem === 'object') {
-            Object.keys(Store._mem).forEach(k => {
-              if (k.startsWith(prefix)) {
-                allShopKeys.add(k);
-                delete Store._mem[k];
-              }
-            });
-          }
-        } catch {}
-
-        // 3) 掃 localStorage 同樣處理
-        try {
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (k && k.startsWith(prefix)) allShopKeys.add(k);
-          }
-          allShopKeys.forEach(k => { try { localStorage.removeItem(k); } catch {} });
-        } catch {}
-
-        // 4) ✨ 關鍵：一次 atomic 刪掉雲端所有相關欄位（不要逐一刪、避免訂閱 race 把舊資料回填）
-        if (window.__cloudStore && typeof window.__cloudStore.removeFields === 'function') {
-          window.__cloudStore.removeFields(Array.from(allShopKeys))
-            .catch(err => console.warn('cloud batch clear failed', err));
-        } else if (window.__cloudStore) {
-          // fallback：舊版 cloudStore 沒 removeFields，逐個 remove
-          allShopKeys.forEach(k => {
-            try { window.__cloudStore.removeField(k); } catch (e) { console.warn(e); }
-          });
-        }
-
-        showToast(`已清除 ${currentShop} 全部資料`, 'success');
-        this.render();
-      });
-    }
-
     // 個別清除按鈕（每張上傳卡的小 ✕）— 使用 document 級事件代理，避免重繪後綁定失效
     if (!this._clearPieceBound) {
       this._clearPieceBound = true;
@@ -2455,7 +2402,7 @@ function _insNoteDraftOpId(draft, text, makeId) {
 function _insNoteNewOpId() {
   return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 }
-const INS_NOTE_DRAFTS_KEY = 'ec.insightNoteDrafts';   // 刻意不以 ec.insight_ 開頭：不被「清除全部」與舊副本清理掃到
+const INS_NOTE_DRAFTS_KEY = 'ec.insightNoteDrafts';   // 刻意不以 ec.insight_ 開頭：不被舊副本清理、讀取端忽略（app.js _dropInsightKeys）等依前綴掃的邏輯掃到
 function _insNoteDraftsLoad(ls) {
   try {
     const v = JSON.parse(ls.getItem(INS_NOTE_DRAFTS_KEY) || '{}');
