@@ -1107,59 +1107,6 @@ Object.assign(App, {
       });
     }
 
-    const clearAllBtn = document.getElementById('insight-clear-all');
-    if (clearAllBtn) {
-      clearAllBtn.addEventListener('click', () => {
-        // 一按即清，無確認彈窗。
-        // 1) 重設下拉狀態
-        this.filter.insightCompare = '';
-
-        const prefix = `ec.insight_${currentShop}_`;
-        const keysToClear = [
-          prefix + 'master',
-          prefix + 'weeks',
-          prefix + 'perf',
-          prefix + 'notes',
-        ];
-
-        // 2) 先掃 Store._mem，把所有此賣場相關的 key（包括上面 4 個 + 任何遺漏的）一次刪掉
-        const allShopKeys = new Set(keysToClear);
-        try {
-          if (Store._mem && typeof Store._mem === 'object') {
-            Object.keys(Store._mem).forEach(k => {
-              if (k.startsWith(prefix)) {
-                allShopKeys.add(k);
-                delete Store._mem[k];
-              }
-            });
-          }
-        } catch {}
-
-        // 3) 掃 localStorage 同樣處理
-        try {
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (k && k.startsWith(prefix)) allShopKeys.add(k);
-          }
-          allShopKeys.forEach(k => { try { localStorage.removeItem(k); } catch {} });
-        } catch {}
-
-        // 4) ✨ 關鍵：一次 atomic 刪掉雲端所有相關欄位（不要逐一刪、避免訂閱 race 把舊資料回填）
-        if (window.__cloudStore && typeof window.__cloudStore.removeFields === 'function') {
-          window.__cloudStore.removeFields(Array.from(allShopKeys))
-            .catch(err => console.warn('cloud batch clear failed', err));
-        } else if (window.__cloudStore) {
-          // fallback：舊版 cloudStore 沒 removeFields，逐個 remove
-          allShopKeys.forEach(k => {
-            try { window.__cloudStore.removeField(k); } catch (e) { console.warn(e); }
-          });
-        }
-
-        showToast(`已清除 ${currentShop} 全部資料`, 'success');
-        this.render();
-      });
-    }
-
     // 個別清除按鈕（每張上傳卡的小 ✕）— 使用 document 級事件代理，避免重繪後綁定失效
     if (!this._clearPieceBound) {
       this._clearPieceBound = true;
@@ -1589,199 +1536,6 @@ Object.assign(App, {
       },
     });
   },
-  _updateDailyProgressFromAdjustments(opts) {
-    // 洞察表：每個通路的調整動作自動連動到對應「通路負責人」的工作日誌
-    //   ⚠️ 2026-09-04 更正：本行原本複寫了一份對照（玩樂→洪嘉蓮、維克→郭雅琪），那是 2026-07-29
-    //      之前的舊資料、已錯一個多月。現行對應【一律以 daily.js 的 ADJ_OWNER_TIMELINE 為準】，這裡不再複寫。
-    //   不管是誰做的調整（Kelly 或員工本人），一律歸給該通路負責人
-    //   調整全刪光 → 重新統計得 0 個 → 該日誌段落自動被清空
-    // 淨利表：仍以「登入者」為對象（未變），只有 ALLOWED_NAMES 名單內的員工登入時才寫
-    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
-    // ⚠️ 通路 → 負責人的對照表【只在 daily.js 的 ADJ_OWNER_TIMELINE】（依生效日的清單，單一來源），
-    //    本檔不再複寫一份；一律經 window.adjOwnerOf(shop, 今天) / window.ADJ_ALL_SHOPS 讀。
-    //    換負責人去那份清單最後加一段，不要在這裡加表。
-    //    daily.js 比本檔晚 import，但本函式只在使用者按同步 / 改備註時才執行，那時 window 上已掛好。
-    // ⚠️ 維克這個通路是老闆指定要保留的，不可以從 daily.js 的清單移除 ——
-    //    INSIGHT_SHOPS = window.ADJ_ALL_SHOPS 由該清單推導，
-    //    少一個通路 = 該通路的洞察活動完全不被統計，而且不報錯。
-    // ⚠️ 2026-09-04 更正（舊註解已錯，勿再引用）：舊版寫「'未指派' 不在硬寫的 ALLOWED_NAMES 裡，
-    //    工作日誌月曆/卡片不會顯示它」。那句自 2026-07-31 起就不成立 —— daily.js 的 _dpExtraNames
-    //    聯集會把「該日有資料的非名單人」一併顯示（月曆與圖例走同一份聯集 calExtraPeople）。
-    // 防呆：對照表沒掛好就【在任何寫入之前】停下 —— 寧可今天不更新摘要，也不要用錯的歸屬寫進工作日誌。
-    if (typeof window.adjOwnerOf !== 'function' || typeof window.adjShopsOf !== 'function' || !Array.isArray(window.ADJ_ALL_SHOPS)) {
-      console.error('[autoSummary] daily.js 的通路負責人對照（window.adjOwnerOf / window.adjShopsOf / window.ADJ_ALL_SHOPS）尚未就緒，本次不更新工作日誌摘要');
-      return;
-    }
-    const userName = this.currentUser && this.currentUser.name;
-    const usernameId = this.currentUser && this.currentUser.username;
-    if (!userName) return;
-
-    const now = new Date();
-    const todayDash  = toDateStr(now);              // 2026-06-18
-    const todaySlash = todayDash.replace(/-/g, '/'); // 2026/06/18
-
-    // 對某商品判定分類（門檻計算 + 判定邏輯已抽到模組層 window.__insightClassify 共用）
-    const classify = (shop, code) => window.__insightClassify(shop, code);
-
-    // ======== 1. 洞察表：per-shop 累計 → attribute 給該賣場對應的人 ========
-    // 不看 `a.by`（不管誰改）：Kelly 或員工做的都算給該賣場負責人
-    // 結構：insightCountsByPerson[person] = { '成長品': N, ... }
-    const INSIGHT_SHOPS = window.ADJ_ALL_SHOPS; // ['好麻吉','玩樂','森之旅','維克']
-    const insightCountsByPerson = {};
-    INSIGHT_SHOPS.forEach(shop => {
-      const person = window.adjOwnerOf(shop, todayDash);   // 用「今天」歸屬（本函式只寫今天）
-      if (!person) return;
-      const counts = insightCountsByPerson[person] = insightCountsByPerson[person] || {};
-      const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
-      Object.keys(notes).forEach(code => {
-        const adjustments = (notes[code] && notes[code].adjustments) || [];
-        const hit = adjustments.some(a => {
-          const d = (a.date || '').slice(0, 10);
-          return d === todayDash || d === todaySlash;
-        });
-        if (hit) {
-          const cls = classify(shop, code);
-          if (cls) counts[cls] = (counts[cls] || 0) + 1;
-        }
-      });
-    });
-
-    // ======== 2. 淨利表：跨所有賣場統計，依 analysisLabel tally ========
-    // 淨利表仍以「登入者」為對象；Kelly (admin) 登入時不寫（維持原行為）
-    const profitPerson = ALLOWED_NAMES.includes(userName) ? userName : null;
-    const profitCounts = {};
-    if (profitPerson) {
-      try {
-        if (typeof state === 'object' && state) {
-          Object.keys(state).forEach(shopId => {
-            const s = state[shopId];
-            if (!s) return;
-            // 商品碼 → 分析標籤
-            const codeToLabel = {};
-            if (Array.isArray(s._built)) {
-              s._built.forEach(p => {
-                codeToLabel[p.code] = p.analysisLabel || (p.analysis && p.analysis.label) || '';
-              });
-            }
-            const k = 'ec_notes|' + shopId;
-            const notes = (window.Store && Store._profitMem && Store._profitMem[k])
-              || (typeof getNotes === 'function' ? getNotes(shopId) : {});
-            Object.keys(notes || {}).forEach(code => {
-              const adjustments = (notes[code] && notes[code].adjustments) || [];
-              const hit = adjustments.some(a => {
-                const d = (a.date || '').slice(0, 10);
-                const dateOk = d === todayDash || d === todaySlash;
-                const byOk = !a.by || a.by === usernameId || a.by === userName;
-                return dateOk && byOk;
-              });
-              if (hit) {
-                const lbl = codeToLabel[code] || '其他';
-                profitCounts[lbl] = (profitCounts[lbl] || 0) + 1;
-              }
-            });
-          });
-        }
-      } catch (e) { console.warn('[profit count]', e); }
-    }
-
-    // ======== 3. 更新工作日誌 — 寫成結構化 item（daily.js 有專用 render） ========
-    // 資料型別：day[person] 是 Array<{id,text,done}> 或 legacy 字串
-    //   自動摘要 item 特徵：kind:'insight-summary' | 'profit-summary'，攜帶 counts 物件
-    //   daily.js 看到 kind → 用 chip 卡片 render（沒 checkbox / ✕）
-    // legacy 字串裡若含【洞察表·今日調整】等段落，先剝掉留下純使用者文字
-    const stripLegacyAutoBlocks = (text) => text
-      .replace(/【洞察表 · 今日調整】[\s\S]*?(?=\n\n【|$)/g, '')
-      .replace(/【淨利表 · 今日調整】[\s\S]*?(?=\n\n【|$)/g, '')
-      .replace(/\s+$/, '');
-    const toItemsArray = (v) => {
-      if (Array.isArray(v)) return v.slice();
-      if (v && String(v).trim()) {
-        const cleaned = stripLegacyAutoBlocks(String(v).trim());
-        return cleaned ? [{ id: 'legacy', text: cleaned, done: false }] : [];
-      }
-      return [];
-    };
-
-    // 受影響 = 3 位賣場負責人（insight 一定要重算，即便今天沒調整也要跑一次，
-    //   舊自動段落才會被清掉）+ 若登入者是 profit 對象也算
-    const affectedPersons = new Set(INSIGHT_SHOPS.map(s => window.adjOwnerOf(s, todayDash)).filter(Boolean));
-    if (profitPerson) affectedPersons.add(profitPerson);
-
-    const all = Store.get('ec.dailyProgress', {}) || {};
-    const day = Object.assign({}, all[todayDash] || {});
-    let anyInsight = false;
-
-    affectedPersons.forEach(person => {
-      // 拿出既有 items → 移除舊的自動摘要（kind 標記）
-      const existing = toItemsArray(day[person]);
-      const userItems = existing.filter(it => it && it.kind !== 'insight-summary' && it.kind !== 'profit-summary');
-
-      // 產生新的自動 item（順序：淨利表在前、洞察表在後 → 反向 push 讓洞察表在上面）
-      const iCounts = insightCountsByPerson[person] || {};
-      const iHasCount = Object.keys(iCounts).length > 0;
-      const pHasCount = (person === profitPerson) && Object.keys(profitCounts).length > 0;
-      if (iHasCount) anyInsight = true;
-
-      const autoItems = [];
-      if (iHasCount) autoItems.push({
-        id: 'auto-insight-' + person,
-        kind: 'insight-summary',
-        counts: iCounts,
-        done: false,
-        auto: true,
-      });
-      if (pHasCount) autoItems.push({
-        id: 'auto-profit-' + person,
-        kind: 'profit-summary',
-        counts: profitCounts,
-        done: false,
-        auto: true,
-      });
-
-      const merged = [...autoItems, ...userItems];
-      if (merged.length > 0) day[person] = merged;
-      else delete day[person]; // 都沒了 → 該員該日紀錄整筆刪掉
-    });
-
-    const next = Object.assign({}, all);
-    if (Object.keys(day).length === 0) delete next[todayDash];
-    else next[todayDash] = day;
-
-    if (typeof Store.setLocalOnly === 'function') {
-      Store.setLocalOnly('ec.dailyProgress', next);
-    } else {
-      Store.set('ec.dailyProgress', next);
-    }
-    window.__dpPendingNames = window.__dpPendingNames || new Set();
-    affectedPersons.forEach(p => window.__dpPendingNames.add(p));
-
-    // 若工作日誌頁的 textarea 還在畫面上，同步 UI（但別蓋掉使用者正在打字的內容）
-    affectedPersons.forEach(person => {
-      const ta = document.querySelector(`.dp-textarea[data-dp-name="${person}"]`);
-      if (ta && document.activeElement !== ta) ta.value = day[person] || '';
-    });
-    if (typeof window.__updateDpSyncBadge === 'function') window.__updateDpSyncBadge();
-
-    const silent = opts && opts.silent;
-    const pushToCloud = opts && opts.pushToCloud;
-    const hasContent = anyInsight || Object.keys(profitCounts).length > 0;
-
-    // pushToCloud：把工作日誌也一起推到雲端（洞察表調整彈窗關窗時、淨利表同步時），
-    //   避免切頁時還被提醒「工作日誌未同步」。
-    // ⚠ 過渡做法：ec.dailyProgress 仍是整把覆蓋所有人 × 所有日期（app.js「保護本機未同步的工作日誌」那段註解），
-    //   每推一次都可能蓋掉別人在雲端的工作日誌改動；根治待需求 3 第 3 段改成即時計算。
-    if (pushToCloud && typeof Store.pushKeyToCloud === 'function') {
-      Store.pushKeyToCloud('ec.dailyProgress').then(() => {
-        affectedPersons.forEach(p => window.__dpPendingNames.delete(p));
-        if (typeof window.__updateDpSyncBadge === 'function') window.__updateDpSyncBadge();
-      }).catch(e => { console.warn('[autoSummary push]', e); });
-    }
-
-    if (hasContent && !silent) {
-      const tail = pushToCloud ? '（已連同推給老闆）' : '（尚未推給老闆，請到工作日誌頁按「☁ 同步雲端」）';
-      showToast(`已自動更新工作日誌${tail}`, 'info');
-    }
-  },
   openInsightNoteModal(code) {
     const INSIGHT_SHOPS = ['玩樂', '好麻吉', '森之旅', '維克'];
     const currentShop = (this.filter.insightShop && INSIGHT_SHOPS.indexOf(this.filter.insightShop) >= 0)
@@ -1874,7 +1628,7 @@ Object.assign(App, {
     };
     let textBase = note.text || '';   // 長期備註：最後一次從雲端看到的值（compare-and-set 的基準）
     let textSending = null;           // 送出中的長期備註（避免失焦與關窗各送一次，第二次被自己的第一次判成衝突）
-    let wroteAny = false;             // 這次開窗是否有成功寫入 → 關窗時推一次工作日誌
+    let wroteAny = false;             // 這次開窗是否有成功寫入 → 關窗時重繪洞察表
     let adding = false;               // 新增送出中
     let queue = Promise.resolve();
     const enqueue = (fn) => (queue = queue.then(fn, fn));
@@ -1907,7 +1661,6 @@ Object.assign(App, {
           if (r.entry === null) delete notes[code]; else notes[code] = cloneEntry(r.entry);
           Store._mem[notesKey] = notes;
         } catch (e) { console.warn('[洞察表] 本機反映失敗', e); }
-        try { this._updateDailyProgressFromAdjustments({ silent: true }); } catch (e) { console.warn('[note->dp]', e); }
       }
       if (m.text) showToast(m.text, m.level, m.ms);
       return { r, m };
@@ -1936,10 +1689,8 @@ Object.assign(App, {
     };
 
     // 關窗（✕ / ESC / 關閉鈕）：輸入框還沒送的文字補送一筆新增、長期備註有變動就一起送；彈窗立刻關，結果用 toast 告知。
-    //   佇列裡的寫入都結束後，若這次開窗有任何一次成功寫入 → 推一次工作日誌。
-    //   ⚠ 工作日誌連動是【過渡做法】：ec.dailyProgress 仍是整把覆蓋所有人 × 所有日期
-    //     （app.js「保護本機未同步的工作日誌 ec.dailyProgress」那段註解），每推一次都可能蓋掉別人在雲端的工作日誌改動；
-    //     根治待需求 3 第 3 段改成即時計算。舊的「☁ 同步雲端」按鈕已拆，關窗是唯一的推送時機。
+    //   佇列裡的寫入都結束後，若這次開窗有任何一次成功寫入 → 重繪洞察表。
+    //   塊3-D：關窗不再寫 / 推 ec.dailyProgress（工作日誌的洞察表 chip 改在 daily.js render 時依紀錄 by 即時算）。
     const flushOnClose = () => {
       const live = window.__insightNoteModalLive;
       if (live && live.shop === currentShop && live.code === code) window.__insightNoteModalLive = null;   // 關窗後不再跟雲端更新
@@ -1953,8 +1704,6 @@ Object.assign(App, {
       if (ops.length) writeOps(ops, kind, text ? { addText: text } : null);
       queue.then(() => {
         if (wroteAny) {
-          // silent：不跳「已自動更新工作日誌」，避免蓋掉剛才的「✓ 已加入／已儲存」（toast 只有一個位置）；推送照常
-          try { this._updateDailyProgressFromAdjustments({ pushToCloud: true, silent: true }); } catch (e) { console.warn('[close->dp]', e); }
           this.render();
           restoreRowOrder();
         }
@@ -2653,7 +2402,7 @@ function _insNoteDraftOpId(draft, text, makeId) {
 function _insNoteNewOpId() {
   return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 }
-const INS_NOTE_DRAFTS_KEY = 'ec.insightNoteDrafts';   // 刻意不以 ec.insight_ 開頭：不被「清除全部」與舊副本清理掃到
+const INS_NOTE_DRAFTS_KEY = 'ec.insightNoteDrafts';   // 刻意不以 ec.insight_ 開頭：不被舊副本清理、讀取端忽略（app.js _dropInsightKeys）等依前綴掃的邏輯掃到
 function _insNoteDraftsLoad(ls) {
   try {
     const v = JSON.parse(ls.getItem(INS_NOTE_DRAFTS_KEY) || '{}');
@@ -2735,8 +2484,8 @@ window.__insightLegacyBackupShow = function () {
   return v;
 };
 
-// 洞察表分類判定：原本內嵌在 _updateDailyProgressFromAdjustments，抽到模組層
-// 讓 daily.js 的洞察 chip 明細彈窗共用（判定邏輯逐字保留；門檻 T 改為每次呼叫現算）
+// 洞察表分類判定：原本內嵌在舊的工作日誌快照函式（塊3-D 已刪），抽到模組層
+// 讓 daily.js 的洞察 chip 與明細彈窗共用（判定邏輯逐字保留；門檻 T 改為每次呼叫現算）
 window.__insightClassify = function (shop, code) {
   // 共用門檻
   const T = Object.assign({}, window.INSIGHT_DEFAULT_THRESHOLDS || {
