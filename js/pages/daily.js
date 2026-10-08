@@ -202,15 +202,6 @@ Object.assign(App, {
         '弱轉換':   { emoji:'🟢', ...GROUP_CONV },
         '轉換偏低': { emoji:'🟩', ...GROUP_CONV },
       };
-      const PROFIT_ORDER = ['高利潤商品', '賠錢中', '低淨利', '危險商品', '低效廣告'];
-      const PROFIT_STYLE = {
-        '高利潤商品': { bg:'#dcfce7', fg:'#166534' },
-        '賠錢中':     { bg:'#fee2e2', fg:'#991b1b' },
-        '低淨利':     { bg:'#fef3c7', fg:'#92400e' },
-        '危險商品':   { bg:'#fecaca', fg:'#7f1d1d' },
-        '低效廣告':   { bg:'#e0e7ff', fg:'#3730a3' },
-        '其他':       { bg:'#f3f4f6', fg:'#374151' },
-      };
       const renderSummaryCard = (opts) => {
         // clickable（預設 false）：chip 改成 <button class="ins-chip">，點擊由 bindWeeklyCalendar
         //   的既有委派接手開 openInsightDetailModal；顏色只經 --chip-bg / --chip-fg CSS 變數傳
@@ -259,14 +250,7 @@ Object.assign(App, {
       })();
       const renderItem = (it) => {
         if (it && it.kind === 'insight-summary') return '';   // 舊快照：改由上方 insightCardHtml 即時算
-
-        if (it && it.kind === 'profit-summary') {
-          const counts = it.counts || {};
-          const orderedKeys = [...PROFIT_ORDER.filter(k => counts[k]), ...Object.keys(counts).filter(k => !PROFIT_ORDER.includes(k))];
-          if (orderedKeys.length === 0) return '';
-          const chips = orderedKeys.map(k => ({ label:k, count:counts[k], emoji:'', ...(PROFIT_STYLE[k]||PROFIT_STYLE['其他']) }));
-          return renderSummaryCard({ title:'淨利表 · 今日調整', headBg:'#eff6ff', headColor:'#1d4ed8', chips });
-        }
+        if (it && it.kind === 'profit-summary') return '';    // 舊快照（塊3-D 起不再寫入）：改由卡片下方「淨利表調整」區塊即時算
         // MOMO optlog 今日調整（by-login 歸屬）。additive：跟上面 insight/profit 兩支並列，不改它們的邏輯。
         //   counts 依實際出現的 type 動態渲染、容忍未知 type（不寫死、不當掉）；chip 點擊回 optlog 現算明細，處理函式在 profit.js（momoOpenDpDetailFromEl）。
         if (it && it.kind === 'momo-summary') {
@@ -297,8 +281,8 @@ Object.assign(App, {
         </div>`;
       };
       const itemRows = p.items.map(renderItem).join('');
-      // 「沒有紀錄」提示：舊快照已不顯示，所以不把它算進「有東西」；改看即時的洞察表卡
-      const hasShown = !!insightCardHtml || p.items.some(it => !(it && it.kind === 'insight-summary'));
+      // 「沒有紀錄」提示：舊快照（insight-summary / profit-summary）已不顯示，所以不把它算進「有東西」；改看即時的洞察表卡
+      const hasShown = !!insightCardHtml || p.items.some(it => !(it && (it.kind === 'insight-summary' || it.kind === 'profit-summary')));
       const emptyHint = !hasShown ? `<div style="padding:10px 2px;color:var(--text-muted);font-size:12.5px">${isEditable ? '還沒有待辦事項' : '這天沒有紀錄'}</div>` : '';
       return `
         <div class="dp-card" data-dp-name="${escapeHtml(p.name)}" style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:8px;min-width:0">
@@ -2218,12 +2202,11 @@ function collectAdjustments() {
 // 🔴 死碼：ADJ_ALLOWED_NAMES 全 repo 零消費者（grep 只有這一行宣告），改它的值【不會生效】。
 //    真正決定「固定顯示 / 可被指派 / 收 LINE 通知」的是各處的 ALLOWED_NAMES —— 本檔的
 //    renderWeeklyCalendarTab、openBossLineConfigModal、openBossTaskModal 及其儲存 handler，
-//    加上 marketing.js 的 _updateDailyProgressFromAdjustments，共五份。
+//    加上 marketing.js 舊的工作日誌快照函式，共五份（塊3-D 已刪掉那支，現在是四份）。
 //    2026-09-04 加入楊心雨時刻意【不動】這一行的值，避免後人誤以為改這裡就有效；移除它超出當次範圍。
 const ADJ_ALLOWED_NAMES  = ['陳君葳', '洪嘉蓮', '郭雅琪'];              // 顯示順序
 // 通路 → 負責人：【單一來源】就是下方的 ADJ_OWNER_TIMELINE（依生效日的清單）。
-//    marketing.js 的 _updateDailyProgressFromAdjustments 不再自己複寫一份，改經 window 讀
-//    adjOwnerOf / ADJ_ALL_SHOPS（本檔結尾 Object.assign(window, …) 掛出）。
+//    其他檔不要自己複寫一份，一律經 window 讀 adjOwnerOf / ADJ_ALL_SHOPS（本檔結尾 Object.assign(window, …) 掛出）。
 // ⚠️ 換負責人 = 在清單【最後】加一段 { from:'YYYY-MM-DD', map:{…} }，【不要改舊段】——
 //    紀錄本身不存負責人，歸屬是「用紀錄日期查這份清單」算出來的；改舊段會讓歷史跟著變成新負責人。
 // ⚠️ 2026-07-29 更正：玩樂是郭雅琪 2026/04 起接手，先前寫成洪嘉蓮是錯的。
@@ -2345,7 +2328,7 @@ function _adjWhoTagHtml(who) {
   return '';
 }
 // 需求 3 塊 3-C：某日的洞察表調整依紀錄上的 by 歸屬（卡片 chip、明細彈窗、人員卡聯集共用這一支）。
-//   掃法逐字對齊 marketing.js _updateDailyProgressFromAdjustments 的洞察表段（快照算法）：
+//   掃法逐字對齊 marketing.js 舊快照函式（塊3-D 已刪）的洞察表段：
 //   ADJ_ALL_SHOPS × ec.insight_{通路}_notes × 當天的 adjustments（日期取前 10 碼，dash / slash 都算）；
 //   唯一的差別是歸屬：快照一律歸通路負責人，這裡每筆走 adjPersonOf（有 by 依操作者、沒 by 推算負責人）。
 //   以「通路|品號」去重：同一商品同一人當天幾筆都只算一個商品；不同人各算各的。
