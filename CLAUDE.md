@@ -70,7 +70,7 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    方法數 38 是**推算**（21 / 33 時的實測值 + PChome 兩物件 4 支 + `updateNoteTx` 1 支），還沒用防護碼實際跑過，
    **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
-   開機時會攔到 2 筆既有寫入（`__cloudStore.removeFields` 清 `ec.insight_*` 殘留、`setField` `ec.seeded.v5`），屬正常。
+   開機時會攔到 1 筆既有寫入（`__cloudStore.setField` `['ec.seeded.v5', true]`），屬正常；開機不會有任何 `removeFields`。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
    （觸發 profit.js 動態載入）才會存在；還沒進就打會 `is not defined`。
    🔴 **起 server 前，要在同一條指令裡確認防護碼真的在檔案裡**（例：`grep -c "TEST_NOWRITE v2 結束" js/firebase.js`
@@ -174,6 +174,9 @@ ESM 有個致命陷阱必須牢記：
   `Store._profitMem._kpi_v1` 陣列供讀取端用。舊的 `app/profit._kpi_v1` 是搬移前的備份，**不要再寫它**。
 - `app/insight_{shop}`（玩樂 / 好麻吉 / 森之旅 / 維克）— 洞察表資料，每通路一份 doc，欄位名是**含點的字面 key**
   `ec.insight_{shop}_{master|weeks|notes|perf}`，透過 `window.__cloudInsightByShop` 存取。
+  **洞察表正式資料只在這四份 doc。** `app/main`、`app/insight` 裡若有 `ec.insight_*` 欄位，一律在讀取端忽略
+  （app.js `_dropInsightKeys`：開站合併與 app/main 訂閱都先濾掉，訂閱再從 `Store._mem` 補回通路版），不會被讀進來、
+  開站也不會去刪它們。只濾 `ec.insight_`（含底線）開頭；`ec.insightMigrated` 這類沒有底線的 key 照常讀。
   調整紀錄（`_notes`，形狀 `{ 品號: { text, adjustments:[{date,text,by?,editedBy?,editedAt?,opId?}] } }`）
   另有 `updateNoteTx(shop, code, applyFn)`：runTransaction 讀這個商品 → `applyFn` 算新內容 → **只寫回這一個商品**
   （`FieldPath(notesKey, code)` 兩段，notesKey 必須當單一段）。回傳 `{ ok, missing, changed, already, entry, error, unknown }`；
@@ -201,8 +204,14 @@ ESM 有個致命陷阱必須牢記：
   只備份到 `ec.insightLegacyBackup.v1`（不自動刪、不補回雲端）再清掉，console 打 `__insightLegacyBackupShow()` 只讀查看。
 - ⚠ 部署 #269 這版時：`version.js` 只在開頁時比版號、不會輪詢，**已經開著的舊分頁仍跑舊程式**，按舊的「☁ 同步雲端」
   會整份蓋掉通路 notes（含新版剛寫進去的紀錄）。部署後要請所有人重新整理。
-- 工作日誌連動（過渡做法）：洞察表調整彈窗關窗時，本次有成功寫入就推一次 `ec.dailyProgress`（`pushToCloud:true`），
-  仍是**整把覆蓋所有人 × 所有日期**；根治待需求 3 第 3 段改成即時計算。
+- 工作日誌（`ec.dailyProgress`）：人員卡上的淨利表、洞察表數字是 daily.js render 時依調整紀錄的 `by` **即時計算**，
+  不寫進 `ec.dailyProgress`；洞察表調整彈窗關窗、淨利表「☁ 同步雲端」都不會寫或推它。
+  `ec.dailyProgress` 仍是一把 key 裝**所有人 × 所有日期**，下列寫入都是**整份覆蓋**：
+  - 手打待辦：只寫本機（`setLocalOnly`），由工作日誌頁的「☁ 同步雲端」鈕 `pushKeyToCloud` 上雲。
+  - MOMO／PChome 同步預覽按確認：`syncToCloud` 成功後 `momoUpdateDailyProgress` / `pchomeUpdateDailyProgress`
+    （`pushToCloud:true`）整份推送（profit.js）。
+  - 老闆任務新增 / 刪除 / 勾選完成：daily.js 用 `Store.set` 整份寫入（雲端模式下即時上雲）。
+  - `ec.dailyProgress` 裡可能還留著舊版寫的 `insight-summary` / `profit-summary` 快照物件：不顯示、也不清除。
 
 ### localStorage / `Store`
 - `Store` 是 localStorage 包裝層（含 `_mem` / `_profitMem` 記憶體鏡像）。
