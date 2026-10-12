@@ -2,6 +2,13 @@
 const App = window.App;
 const { Store, escapeHtml, showToast, toDateStr, addDays, todayStr, genId, DAILY_TASK_STATUS, DAILY_TASK_STATUS_LIST, TASK_CATEGORIES, TASK_CATEGORY_NAMES, TASK_CATEGORY_ALIASES, getCategoryMeta, getCategoryItems, isUserActive } = window;
 
+// 人員固定名單【唯一一份】：決定 ① 工作日誌人員卡 / 月曆固定顯示哪些人（順序即顯示順序）
+//   ② 老闆任務能指派給誰（含「全體」展開的對象）③ LINE 通知設定列出誰、發給誰。
+//   放檔頭：在所有使用處之前宣告，避開 const 的暫時死區（TDZ）。
+//   Object.freeze：各處只讀（concat / indexOf / map / 展開），凍結防止任何一處意外改到全檔共用的這份。
+//   2026-09-04 楊心雨接手維克後加入。
+const ALLOWED_NAMES = Object.freeze(['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨']);
+
 Object.assign(App, {
   renderWeeklyCalendarTab(deptId, color, dept) {
     // ⚡ profit.js 動態載入 + 懶載工作日誌需要的雲端組：工作日誌用 collectAdjustments（calcAnalysis 等 profit.js 匯出）算
@@ -23,8 +30,7 @@ Object.assign(App, {
       } catch {}
     }
     // 老闆指示：移除月曆/週曆/甘特圖，每位同事下班前 5 分鐘寫今日工作進度即可
-    // 只保留 4 位同事：陳君葳、洪嘉蓮、郭雅琪、楊心雨（2026-09-04 楊心雨接手維克後加入）
-    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
+    // 名單見檔頭 ALLOWED_NAMES
     // 月曆上用來標示「這天誰填過」的顏色點：陳君葳(Vivian)紫、洪嘉蓮(inna)藍、郭雅琪(Kelly)黃、楊心雨(Astrid)桃紅
     //   🔴 新增人員的選色規則：① 不可與上列既有色同色系 ② 不可用灰色系 —— 灰(#6b7280)是「查無此人設定」
     //   的 fallback（見本檔 avatarHtml 與月曆計數列的 `|| '#6b7280'`），用灰會分不出「有設定」與「漏設定」。
@@ -454,7 +460,6 @@ Object.assign(App, {
     `;
   },
   openBossLineConfigModal() {
-    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     const canManageLine = isAdmin
       || hasOfficeFeature(this.currentUser, '行銷', 'lineNotify')
@@ -655,7 +660,6 @@ Object.assign(App, {
     });
   },
   openBossTaskModal(taskId) {
-    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
     const todayStr = toDateStr(new Date());
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     if (!isAdmin) { showToast('沒有權限', 'error'); return; }
@@ -849,7 +853,6 @@ Object.assign(App, {
         const text = (descEl && descEl.value || '').trim();
         if (!text) { showToast('請輸入任務內容', 'error'); return false; }
         const list = (Store.get('ec.bossTasks', []) || []).slice();
-        const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
         const assigneeVal = assigneeEl ? assigneeEl.value : '全體';
         const dueVal = dueEl ? dueEl.value : '';
         if (existing) {
@@ -2200,12 +2203,6 @@ function collectAdjustments() {
 //   資料源：collectAdjustments()，依日期索引後查表。純唯讀，不寫任何 Store。
 //   通路→人 對應寫在本檔（不引 marketing.js；洞察表日後將廢除）。
 // ============================================================================
-// 🔴 死碼：ADJ_ALLOWED_NAMES 全 repo 零消費者（grep 只有這一行宣告），改它的值【不會生效】。
-//    真正決定「固定顯示 / 可被指派 / 收 LINE 通知」的是各處的 ALLOWED_NAMES —— 本檔的
-//    renderWeeklyCalendarTab、openBossLineConfigModal、openBossTaskModal 及其儲存 handler，
-//    加上 marketing.js 舊的工作日誌快照函式，共五份（塊3-D 已刪掉那支，現在是四份）。
-//    2026-09-04 加入楊心雨時刻意【不動】這一行的值，避免後人誤以為改這裡就有效；移除它超出當次範圍。
-const ADJ_ALLOWED_NAMES  = ['陳君葳', '洪嘉蓮', '郭雅琪'];              // 顯示順序
 // 通路 → 負責人：【單一來源】就是下方的 ADJ_OWNER_TIMELINE（依生效日的清單）。
 //    其他檔不要自己複寫一份，一律經 window 讀 adjOwnerOf / ADJ_ALL_SHOPS（本檔結尾 Object.assign(window, …) 掛出）。
 // ⚠️ 換負責人 = 在清單【最後】加一段 { from:'YYYY-MM-DD', map:{…} }，【不要改舊段】——
