@@ -215,6 +215,13 @@ try {
       __markSubsMaybeAllLoaded();
     };
 
+    // #315：profits collection 是否已從【伺服器】收到過快照（唯讀觀測點，給 js/profit.js 的 _progHeavyLoaded 判「載入中 / 尚無報表」）。
+    //   比照 __profitArchivesReady 只認 metadata.fromCache===false；空 collection 的伺服器快照也算（不能因為沒文件就永遠 false）。
+    //   錯誤 callback 不設 → 維持 false（＝載入中，保守）。一旦收到過就維持 true（黏住）：本訂閱沒開 includeMetadataChanges，
+    //   退回 false 之後「fromCache 轉回 false」這種純 metadata 變化不會再送快照，會卡在載入中直到下次資料變動。
+    //   ⚠ 刻意不以 __cloud 開頭（同 __profitArchivesReady）：純讀取，不被 __installReadonlyCloudGuard 包、不算進 TEST_NOWRITE 物件數。
+    let profitsCollectionServerSeen = false;
+    window.__profitsCollectionReady = () => profitsCollectionServerSeen;
     // ══ 蝦皮組成員①：profits collection（每月每賣場獨立 doc）。與 aff_rpt 同屬蝦皮組，由 __loadShopeeSubs 一起呼叫。══
     const __subProfits = () => {
       // profits collection (每月每賣場獨立 doc)
@@ -222,6 +229,7 @@ try {
         const profitsColRef = collection(db, 'profits');
         const fromDocId = id => id.replace(/__/g, '/');
         onSnapshot(profitsColRef, snap => {
+          if (snap && snap.metadata && snap.metadata.fromCache === false) profitsCollectionServerSeen = true;   // #315 唯讀旗標，不影響下方任何邏輯
           Store._profitMem = Store._profitMem || {};
           const incoming = {};
           snap.forEach(d => { incoming[fromDocId(d.id)] = d.data(); });

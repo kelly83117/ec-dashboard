@@ -7137,13 +7137,23 @@ function _periodLabelProgress(shop,month,half){
 
 // 淨利表的報表資料是否「已經可能載入完成」。🔴 未知一律當成【還沒載入】——
 //   寧可多顯示一次「載入中」,也不要在訂閱還沒回來時斬釘截鐵說「尚無報表」。
-//   依據:js/firebase.js 的 __heavyProfitSubsLoaded(profits collection + archive 分片是延後訂閱,
-//   開站 1.5 秒後或使用者切進淨利表才接)。用 ===true,undefined / 未定義都回 false。
-//   ⚠ 極限:這個旗標的語義是「訂閱【已發出】」,不是「首批快照【已回來】」,
-//     所以 loaded===true 之後仍可能有短暫空窗期;它也不涵蓋 app/profit 本身那條輕量訂閱。
-function _progHeavyLoaded(){return window.__heavyProfitSubsLoaded===true;}
+//   #315:進度只需要【蝦皮組(shopee:profits collection) + 舊月組(archive)】,跟 MOMO / 酷澎無關。四個條件都要成立:
+//     ① window.__loadedSubGroups 有 'shopee' 與 'archive'(訂閱已發出)
+//     ② window.__profitsCollectionReady()——profits collection 已收到伺服器快照(資料真的回來了)
+//     ③ window.__profitArchivesReady()——封存分片都已收到伺服器快照
+//     (只看 ① 會在資料回來前就當成已載入,「尚無報表」閃約 15 秒——已實測排除。)
+//   任一函式不存在 / 不是 Set 一律回 false。刻意【不】用 __heavyProfitSubsLoaded 當後備:它只代表 shopee/archive/momo/coupang
+//     四組的訂閱【已發出】,不代表資料已回來——同一次開頁先逛過 MOMO、酷澎再進工作日誌,它就是 true,「尚無報表」又會閃。
+//   ⚠ 不涵蓋 app/profit 本身那條輕量訂閱。
+function _progHeavyLoaded(){
+  const g=window.__loadedSubGroups;
+  const subscribed=!!(g&&typeof g.has==='function'&&g.has('shopee')&&g.has('archive'));
+  const ready=f=>{try{return typeof f==='function'&&f()===true;}catch{return false;}};
+  if(subscribed&&ready(window.__profitsCollectionReady)&&ready(window.__profitArchivesReady))return true;
+  return false;
+}
 
-// 通路的「工作流本月」兩期進度 —— 對外唯一入口(消費者:js/pages/daily.js 的 buildProgressHtml)。
+// 通路的「工作流本月」兩期進度 —— 對外唯一入口(消費者:js/pages/daily.js 的 buildProgressCardHtml)。
 //   月份來自【今天】(_growthPeriodOf 的工作流推算),與淨利表當前選擇的期間【脫鉤】——
 //   顯示端要用回傳的 month,不可以改讀 state[shop].curMonth,否則四個通路會顯示不同月份。
 //
