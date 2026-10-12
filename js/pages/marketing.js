@@ -1136,9 +1136,9 @@ Object.assign(App, {
             width: '420px',
             bodyHtml: `
               <div style="font-size:13px;line-height:1.6;color:var(--text)">
-                即將清除 <strong style="color:#dc2626">${escapeHtml(curShop)} · ${escapeHtml(label)}</strong> 的檔案。
+                即將清除 <strong style="color:#dc2626">${escapeHtml(curShop)} · ${escapeHtml(label)}</strong>：這份報表會<strong>從雲端刪除，所有人都看不到</strong>。
                 <div style="margin-top:10px;padding:10px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px;color:#92400e">
-                  ⚠️ 此動作<strong>無法復原</strong>。清除後若要使用，需要重新上傳檔案。
+                  ⚠️ 此動作<strong>無法復原</strong>，要恢復只能重新上傳原始檔案。<br>商品的調整紀錄不受影響。
                 </div>
               </div>
             `,
@@ -1150,40 +1150,18 @@ Object.assign(App, {
         });
         if (!confirmed) return;
 
-        if (piece === 'sales' || piece === 'salesPrev' || piece === 'salesPrevPrev') {
-          const ws = (Store.get(k2('weeks'), []) || []).slice();
-          if (piece === 'sales') ws[0] = null;
-          else if (piece === 'salesPrev' && ws.length > 1) ws[1] = null;
-          else if (piece === 'salesPrevPrev' && ws.length > 2) ws[2] = null;
-          if (ws.every(w => !w)) {
-            try { delete Store._mem[k2('weeks')]; } catch {}
-            try { localStorage.removeItem(k2('weeks')); } catch {}
-            if (window.__markRecentlyDeleted) window.__markRecentlyDeleted(k2('weeks'));
-          } else {
-            try { Store._mem[k2('weeks')] = ws; } catch {}
-            try { localStorage.setItem(k2('weeks'), JSON.stringify(ws)); } catch {}
-          }
-          if (window.__cloudStore) {
-            try {
-              if (ws.every(w => !w)) {
-                await window.__cloudStore.removeFields([k2('weeks')]);
-              } else {
-                await window.__cloudStore.setField(k2('weeks'), ws);
-              }
-            } catch (err) { console.warn('cloud clear failed', err); }
-          }
-        } else {
-          const k = k2(piece);
-          try { delete Store._mem[k]; } catch {}
-          try { localStorage.removeItem(k); } catch {}
-          if (window.__markRecentlyDeleted) window.__markRecentlyDeleted(k);
-          if (window.__cloudStore && typeof window.__cloudStore.removeFields === 'function') {
-            try { await window.__cloudStore.removeFields([k]); }
-            catch (err) { console.warn('cloud clear failed', err); }
-          } else if (window.__cloudStore) {
-            try { window.__cloudStore.removeField(k); } catch {}
-          }
-        }
+        // #300：改走 Store.set(key, 計畫值)。雲端模式下 Store.set 對 ec.insight_* 經 __cloudInsightByShop.forKey 路由，
+        //   寫進 app/insight_{通路}（原本寫 app/main / app/insight，v759 起讀取端忽略那兩份 → 等於沒刪、重整又回來）。
+        //   null 在 Firestore 端是「欄位存成 null」不是刪欄位；讀取端都把 null 當成沒上傳（master?.byCode、weeks || [] …）。
+        //   計畫只會碰 master / weeks / perf，_notes（人工調整紀錄）與未知項目一律不動（見 _insClearPiecePlan）。
+        //   唯讀角色由 Store.set 的閘門擋下；雲端寫入失敗由 Store.set 內建的 __notifyCloudFail 通報。
+        const ops = _insClearPiecePlan(curShop, piece, Store.get(k2('weeks'), []) || [], INSIGHT_SHOPS);
+        if (!ops.length) { showToast(`沒有清除：不認得的項目（${label}）`, 'error'); return; }
+        ops.forEach(op => {
+          Store.set(op.key, op.value);
+          // 本機副本跟著同步（離線 5 秒 fallback 開站時讀的是 localStorage）
+          try { if (op.value === null) localStorage.removeItem(op.key); else localStorage.setItem(op.key, JSON.stringify(op.value)); } catch {}
+        });
         showToast(`已清除 ${curShop} · ${label}`, 'success');
         this.render();
       }, true); // capture phase 確保比 label 的預設 click 行為更早處理
@@ -2401,6 +2379,28 @@ function _insNoteDraftOpId(draft, text, makeId) {
 }
 function _insNoteNewOpId() {
   return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+// #300：上傳卡片 ✕ 的清除計畫。純函式：不讀全域、不改輸入，可在 node vm 單獨測。
+//   shop：目前通路；piece：卡片 key；weeks：目前的 ec.insight_{shop}_weeks（陣列，新→舊）；shops：允許的通路清單。
+//   回傳 [{ key, value }]，呼叫端逐一 Store.set(key, value)（雲端模式經 forKey 路由寫進 app/insight_{通路}）。
+//   ・master / perf → 該 key 設成 null。
+//   ・sales / salesPrev / salesPrevPrev 是同一個 weeks 陣列的第 0 / 1 / 2 槽 → 只把那一槽設成 null、其他槽原位保留
+//     （不移位；隱藏的第 4 週 weeks[3] 也保留）；整個陣列都空了才把 weeks 設成 null。
+//   🔴 白名單外的 piece、不在清單的通路、key 以 _notes 結尾（人工調整紀錄）一律不輸出 → 回 []。
+const INS_CLEAR_PIECES = Object.freeze({ master: 'master', perf: 'perf', sales: 0, salesPrev: 1, salesPrevPrev: 2 });
+function _insClearPiecePlan(shop, piece, weeks, shops) {
+  if (typeof shop !== 'string' || !shop || !Array.isArray(shops) || shops.indexOf(shop) < 0) return [];
+  if (typeof piece !== 'string' || !Object.prototype.hasOwnProperty.call(INS_CLEAR_PIECES, piece)) return [];
+  const t = INS_CLEAR_PIECES[piece];
+  let out;
+  if (typeof t === 'string') {
+    out = [{ key: `ec.insight_${shop}_${t}`, value: null }];
+  } else {
+    const ws = Array.isArray(weeks) ? weeks.slice() : [];
+    if (t < ws.length) ws[t] = null;   // 槽位不存在就不補長度（同舊行為）
+    out = [{ key: `ec.insight_${shop}_weeks`, value: ws.every(w => !w) ? null : ws }];
+  }
+  return out.filter(op => /^ec\.insight_.+_(master|weeks|perf)$/.test(op.key) && !/_notes$/.test(op.key));
 }
 const INS_NOTE_DRAFTS_KEY = 'ec.insightNoteDrafts';   // 刻意不以 ec.insight_ 開頭：不被舊副本清理、讀取端忽略（app.js _dropInsightKeys）等依前綴掃的邏輯掃到
 function _insNoteDraftsLoad(ls) {
