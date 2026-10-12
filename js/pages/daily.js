@@ -441,7 +441,7 @@ Object.assign(App, {
           ${calendarHtml}
           <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
             ${bossCardHtml}
-            ${/* 需求 3 塊 4：通路進度（今天）。不論看哪一天都顯示（內容一律依今天）；跟人員卡上的舊進度暫時並排。 */''}
+            ${/* 需求 3 塊 4：通路進度（今天）。不論看哪一天都顯示（內容一律依今天）；人員卡上已不再畫進度。 */''}
             ${buildProgressCardHtml()}
             ${/* 進度說明：整頁一份。只在看「今天」時出現——進度條永遠算今天推出的期別，
                   看過去日期時它跟畫面上那天無關，常駐一塊卡片只是佔掉垂直空間。
@@ -1009,14 +1009,15 @@ Object.assign(App, {
       this._adjPillDelegated = true;
       const host = document.getElementById('main-content');
       if (host) host.addEventListener('click', (e) => {
-        // 本期優化進度：點通路列 → 展開/收折同卡片內對應明細（同委派，讀當下 DOM）
+        // 通路進度：點期間列 → 展開/收折同卡片內對應明細（同委派，讀當下 DOM）
         const toggle = e.target.closest && e.target.closest('.adj-prog-toggle');
         if (toggle) {
-          // 🔴 key 是【複合的】「通路|月份」（見 buildProgressHtml 的 key），不是單純通路名。
+          // 🔴 key 是【複合的】「通路|月份|期別」（見 _progCardModel 的 key），不是單純通路名。
           //   下面用的是 querySelector（單數）：key 撞號時會靜默展開錯的那一個、不報錯，
           //   所以 key 的唯一性是正確性要求，不是命名習慣。
+          //   範圍取被點的 toggle 所在的卡（右欄「通路進度（今天）」是 .dp-prog-card），只在卡內找，跟卡片排列順序無關。
           const key = toggle.dataset.progKey || '';
-          const card = toggle.closest('.dp-card') || document;
+          const card = toggle.closest('.dp-card, .dp-prog-card') || document;
           const sel = (window.CSS && CSS.escape) ? CSS.escape(key) : key;
           const detail = card.querySelector(`[data-prog-detail="${sel}"]`);
           if (detail) {
@@ -2554,7 +2555,7 @@ function _progRank(label,kind){
   if(n==='高利潤商品')return 90;       // 好事墊底
   return 50;
 }
-// 進度區塊的說明文字。🔴 整頁只出現【一份】(渲染在人員卡片欄的最上方,見 renderDailyProgress),
+// 進度區塊的說明文字。🔴 整頁只出現【一份】(渲染在人員卡片欄的最上方,見 renderWeeklyCalendarTab),
 //   不再每張人員卡片各印一次(四個人 = 同樣的字重複四次)。
 //   ⚠ 文案要跟著計算層走:2026-09-10 起【上半月 / 下半月各自一條、互不相加】——
 //     舊版那兩句「月層 = 上半月 + 下半月,每一格都是相加」與「分母不是商品數,是兩輪各要看一次」
@@ -2563,132 +2564,15 @@ function _progRank(label,kind){
 function buildProgressNoteHtml(){
   return`<details class="adj-prog-note adj-prog-note-host"><summary>❓ 進度條怎麼算的？</summary><div class="adj-prog-note-body">依通路負責人歸屬，非個人操作紀錄；點期間列展開明細<br>上半月、下半月<b>各自一條、分開算</b>，兩條不相加<br>每條的分母是<b>該期報表的商品列數</b>，分子是「這個商品本期被碰過沒有」<br>在「整月」畫面打的調整，上半月、下半月<b>兩期都算完成</b><br>廣告分析看你在「廣告調整」欄有沒有打字，成長分析看「商品調整」欄 —— 兩邊分開算，在廣告欄打字不會讓成長標籤算完成<br>一個商品可能有多個廣告標籤，打一筆調整那幾個標籤都算完成（系統不知道你是為了哪個標籤打的）</div></details>`;
 }
-// 進度區塊。🔴 外層包 try/catch:這支要逐列重算標籤(好麻吉單期 800+ 列),
-//   任何一列的欄位異常都可能 throw,而它被內插在人員卡片的 HTML 字串裡 ——
-//   沒有這層保護,一個通路的髒資料會炸掉【整張人員卡片】(待辦事項、老闆任務全部不見)。
-function buildProgressHtml(person){
-  try{
-    return _buildProgressHtmlInner(person);
-  }catch(e){
-    console.warn('[buildProgressHtml] 進度區塊算不出來，改顯示「—」：',person,e);
-    if(!adjShopsOf(person,toDateStr(new Date())).length)return'';
-    return`<div class="adj-prog"><div class="adj-prog-head"><div class="adj-prog-title">優化進度</div></div>`
-      +`<div class="adj-prog-row"><span class="adj-prog-na">—</span></div></div>`;
-  }
-}
-function _buildProgressHtmlInner(person){
-  const shops=adjShopsOf(person,toDateStr(new Date()));
-  if(!shops.length)return'';
-  const hasSLP=typeof window.shopLabelProgress==='function';
-  const results=shops.map(shop=>({shop,p:hasSLP?window.shopLabelProgress(shop):null}));
-  // 標題【不帶期別】:月份與期別都印在每一列上(好麻吉 · 2026/08 上半月),
-  //   四個通路各自的月份 / 期別才不會混成一句看不出對象的標題。
-  //   也不再叫「本期優化進度」—— 畫面上同時列出兩期,「本期」是哪一期改由每一列自己的
-  //   ● 標記講(見 curMark);標題再說一次「本期」只會自相矛盾。
-  const pt='優化進度';
-  // 🔴 t===0 守衛(bar / flat 都要):0/0 會算出 NaN → 畫面出現「NaN%」而且
-  //   style="width:NaN%" 讓長條整條消失,不報錯。
-  //   ⚠ 2026-09-10 移除月層相加之後,「沒有報表」在資料層已經是 data===null 而不是 total:0,
-  //     但這層守衛【不拿掉】—— 分組 / 細項桶的 t 仍是當場算出來的,而守衛的成本是零。
-  const bar=(d,t)=>{if(!t)return`<span class="adj-prog-na">—</span>`;
-    const pct=Math.round(d/t*100);
-    // 門檻/符號與 flat() 完全一致（p100/p50/p0、✓/!），bar 只是補上它缺的那半。
-    // class 用完整字面（不動態拼字串），grep 才找得到、也跟 flat() 寫法一致。
-    const cls=pct>=100?'adj-prog-p100':pct>=50?'adj-prog-p50':'adj-prog-p0';
-    const fillCls=pct>=100?'adj-prog-fill-p100':pct>=50?'adj-prog-fill-p50':'adj-prog-fill-p0';
-    const mark=pct>=100?'✓ ':pct<50?'! ':'';
-    return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-bar"><span class="adj-prog-fill ${fillCls}" style="width:${pct}%"></span></span><span class="adj-prog-pct ${cls}">${mark}${pct}%</span>`;};
-  // 明細列(小標籤)不畫條:數字 + 符號 + %。
-  // ✓=100% 完成(綠)、無符號=進行中(藍)、!=低於50%(琥珀)。
-  // 符號是主判讀(不依賴色覺)、顏色是輔助;刻意不用紅——期中偏低是常態不是過錯。
-  const flat=(d,t)=>{if(!t)return`<span class="adj-prog-na">—</span>`;
-    const pct=Math.round(d/t*100);
-    const cls=pct>=100?'adj-prog-p100':pct>=50?'adj-prog-p50':'adj-prog-p0';
-    const mark=pct>=100?'✓ ':pct<50?'! ':'';
-    return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-pct ${cls}">${mark}${pct}%</span>`;};
-  // 「本期」標記。🔴 兩條期間列【都】掛同一個 ●,非本期那個用 .adj-prog-cur-off 隱形
-  //   (visibility:hidden 保留佔位寬度,不是 display:none) —— 對齊因此由「兩條都有同一個
-  //   元素撐著」保證,不會因為只有一條多長出一個標記而錯位。
-  //   ⚠ 標記【不進 .adj-prog-shop 裡】:進去會改變那個 span 的寬度,而數字欄的位置正是
-  //     跟著它走的。放在它前面、當 flex 的兄弟,兩條各加同一段寬度,相對關係不變。
-  //   ⚠ 符號(●)是主判讀、顏色是輔助 —— 與本檔 flat() 的 ✓/! 同一個原則,不做純色相區分。
-  const curMark=on=>`<span class="adj-prog-cur${on?'':' adj-prog-cur-off'}"${on?' title="本期"':' aria-hidden="true"'}>●</span>`;
-  const rows=results.map(({shop,p})=>{
-    if(!p)return`<div class="adj-prog-row">${curMark(false)}<span class="adj-prog-shop">${escapeHtml(shop)}</span><span class="adj-prog-na">—</span></div>`;
-    // 缺報表【必須看得出來】——「這期是 0」和「這期還沒產報表」看起來一樣的話,
-    //   分母少一半而數字仍然合理,沒有人會發現。判別式(資料層已驗過、不要在這裡自己再推一套):
-    //     data===null              ⇒ 尚無報表 / 載入中
-    //     data.total>0&&doneTotal===0 ⇒ 照常畫成 0/N 0%(那是真的一個都沒碰,不是沒報表)
-    // 🔴 loaded=false 代表 profits collection 的延後訂閱還沒回來(不是「沒有報表」)→ 顯示「載入中」。
-    const na=p.loaded?'尚無報表':'載入中';
-    const naRow=(titleHtml,cur)=>`<div class="adj-prog-row">${curMark(!!cur)}<span class="adj-prog-shop">${titleHtml}</span><span class="adj-prog-na">${na}</span></div>`;
-    // 🔴 兩期都沒報表 → 收成【一條】(只帶月份、不帶期別)。完全沒產過報表的通路,負責人每天會
-    //   看到兩條一模一樣的「尚無報表」,比一條更吵而且沒有多給任何資訊。逐期顯示只在
-    //   「一期有、一期沒有」時才有意義 —— 那時候少的那一期是真的在講一件事。
-    if(p.periods.every(pr=>!pr.data))return naRow(`${escapeHtml(shop)} · ${escapeHtml(p.month)}`);
-    const grp=(title,obj,kind)=>{
-      const keys=Object.keys(obj).sort((a,b)=>{
-        const ra=_progRank(a,kind),rb=_progRank(b,kind);
-        return ra!==rb?ra-rb:obj[b].t-obj[a].t;
-      });
-      if(!keys.length)return'';
-      let gd=0,gt=0;keys.forEach(l=>{gd+=obj[l].d;gt+=obj[l].t;});
-      // 未完成直接列、已完成收進 <details>（原生收折，無 JS 事件、預設收折）。
-      // pct 算法與 flat() 一致（Math.round(d/t*100)、>=100 為完成）；排序沿用上面 _progRank 的結果。
-      const pending=keys.filter(l=>Math.round(obj[l].d/obj[l].t*100)<100);
-      const done=keys.filter(l=>Math.round(obj[l].d/obj[l].t*100)>=100);
-      const sub=l=>{
-        const{t,d}=obj[l];
-        return`<div class="adj-prog-row adj-prog-sub"><span class="adj-prog-shop">${escapeHtml(window.mapAnaLabel?window.mapAnaLabel(l):l)}</span>${flat(d,t)}</div>`;
-      };
-      // 分組小總結:該組所有標籤桶的加總(一商品多標籤會重複計,語意為「標籤完成度」)。
-      //   ⚠ 多標籤化(calcAnalysisAll)之後,重複計【不只發生在跨組】(廣告標籤+成長標籤):
-      //     廣告分析【組內部也會】——一個商品同時有「低效廣告」和「減300」,gt 就 +2。
-      // 不畫條:分組分母是「標籤數」、期間列分母是「商品列數」，兩者不可比，
-      // 並排長條會誘導無效比較（例:好麻吉單期 822 列，廣告分析標籤 483 個（多標籤化前 403））。
-      //   ⚠ 這組數字是 2026-08-06 多標籤化當天量的，之後報表更新會變，拿來對帳前先自己重量一次。
-      //   ⚠ 這也正是成長分析設定彈窗那句說明要講清楚的事:排除條件動得了這裡的分母,
-      //     動不了期間列那條長條的分母(見 js/profit.js 的 .grx-notes)。
-      return`<div class="adj-prog-row adj-prog-grp"><span class="adj-prog-shop">${escapeHtml(title)}</span>${flat(gd,gt)}</div>`
-        +(pending.length?`<div class="adj-prog-subs">`+pending.map(sub).join('')+`</div>`:'')
-        +(done.length?`<details class="adj-prog-done"><summary>已完成 ${done.length} 項</summary><div class="adj-prog-subs">`+done.map(sub).join('')+`</div></details>`:'');
-    };
-    // 上半月、下半月【各自一條】,各自長條、各自 ▾ 展開明細,兩條的數字互不相加。
-    //   順序固定 first → second(由資料層的 periods 決定),這裡不排序也不要排。
-    return p.periods.map(pr=>{
-      const titleHtml=`${escapeHtml(shop)} · ${escapeHtml(pr.periodLabel)}`;
-      const d=pr.data;
-      if(!d)return naRow(titleHtml,pr.isCurrent);
-      // 🔴 複合 key(通路|月份|期別):委派用的是 card.querySelector（單數），key 撞號時會
-      //   靜默展開錯的那一個【而且不報錯】,所以 key 的唯一性是正確性要求,不是命名習慣。
-      //   ⚠ 期別自 2026-09-10 起是【必要的】,不是預留:同一張卡片必定同時出現同通路、
-      //     同月份的兩條,key 少了期別就一定撞號 —— 點下半月會展開上半月的明細。
-      const key=shop+'|'+p.month+'|'+pr.half;
-      return`<button type="button" class="adj-prog-row adj-prog-toggle" data-prog-key="${escapeHtml(key)}">
-          ${curMark(pr.isCurrent)}<span class="adj-prog-shop">${titleHtml}</span>${bar(d.doneTotal,d.total)}<span class="adj-prog-caret">▾</span>
-        </button>
-        <div class="adj-prog-detail" data-prog-detail="${escapeHtml(key)}" hidden>
-          ${grp('廣告分析',d.ana,'ana')}${grp('成長分析',d.growth,'growth')}
-        </div>`;
-    }).join('');
-  }).join('');
-  return`<div class="adj-prog">
-    <div class="adj-prog-head">
-      <div class="adj-prog-title">${pt}</div>
-      <span class="adj-prog-legend"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span></span>
-    </div>
-    ${rows}
-  </div>`;
-}
 // 需求 3 塊 4：「通路進度（今天）」卡片的資料層。純函式：不碰 DOM、不讀全域，全部從參數進來（node vm 可單獨切出來測）。
 //   shops：通路陣列（字串，或 { shop, kind }；kind 預設 'shopee'，留給之後的 MOMO）
 //   progOf(shop)：回傳 profit.js shopLabelProgress 的結果（拿不到回 null）；ownerOf(shop)：今天的負責人姓名。
-//   計算口徑逐條對齊 _buildProgressHtmlInner（t=0 → —、兩期都 null 收成一條、只有一期 null 那期顯示「尚無報表 / 載入中」）。
+//   計算口徑沿用人員卡舊「優化進度」（塊4-3 已拆）：t=0 → —、兩期都 null 收成一條、只有一期 null 那期顯示「尚無報表 / 載入中」。
 //   「載入中」的判斷照舊只看 p.loaded（#315 另修）。
 //   每列：{ shop, kind, ownerName, month, status, naText, periods }
 //     status：'ok' 至少一期有報表（看 periods）｜'none' 兩期都沒報表｜'loading' 兩期都 null 且還在載入｜'unavailable' progOf 回 null
 //     periods[]：{ half, periodLabel, isCurrent, key, status:'ok'|'none'|'loading', naText, done, total, pct, pctText, cls, fillCls, data }
-//       key＝「通路|月份|期別」，跟舊卡的 data-prog-key 一模一樣；沒報表的期 key 為 null（舊卡那期也沒有 key）。
+//       key＝「通路|月份|期別」（data-prog-key / data-prog-detail 用）；沒報表的期 key 為 null（那期不畫 ▾）。
 //       pctText＝畫面上那段字（含 ✓ / ! 符號，例「✓ 100%」「! 12%」）；total 為 0 時是「—」、pct 為 null。
 function _progCardModel(shops, progOf, ownerOf) {
   const pctOf = (d, t) => {
@@ -2721,11 +2605,10 @@ function _progCardModel(shops, progOf, ownerOf) {
   });
 }
 // 需求 3 塊 4：「通路進度（今天）」卡片（右欄、老闆指派任務卡下面）。不論檢視哪一天都顯示：月份、期別、負責人都依「今天」。
-//   進度條沿用 .adj-prog-* 的結構與 data-prog-key，▾ 展開走 bindWeeklyCalendar 既有的委派。
-//   ⚠ 那段委派用 toggle.closest('.dp-card') || document 找明細；本卡不是 .dp-card → 走 document.querySelector（取第一個），
-//     本卡排在人員卡上面所以找到的是自己的明細。舊的人員卡進度拆掉前，不要把本卡挪到人員卡下面。
+//   進度條沿用 .adj-prog-* 的結構與 data-prog-key，▾ 展開走 bindWeeklyCalendar 既有的委派
+//   （範圍取 toggle.closest('.dp-card, .dp-prog-card')，只在本卡內找明細，跟卡片排列順序無關）。
 //   🔴 每個通路各自 try/catch：shopLabelProgress 逐列重算標籤，一個通路的髒資料不能讓整張卡消失。
-//   ⚠ 明細（grp / flat / curMark）跟 _buildProgressHtmlInner 是同一套，舊的人員卡進度拆掉時一併收成一份。
+//   明細（grp / flat / curMark）只剩本卡一份（人員卡舊「優化進度」塊4-3 已拆）。
 function buildProgressCardHtml() {
   const today = toDateStr(new Date());
   const hasSLP = typeof window.shopLabelProgress === 'function';
@@ -2806,18 +2689,9 @@ function buildCardAdjustmentsHtml(person, viewDate) {
   const recs = recsWho.map(x => x.r);
   const inferredCount = recsWho.filter(x => x.who.how === 'inferred').length;
 
-  // 空狀態：當日 0 筆 → 只留進度區塊，沒有進度就整塊不顯示
-  // （原 person === '郭雅琪' 的「無淨利表」特例已移除：那是郭雅琪負責維克時期寫的，
-  //   2026/07/29 改為負責玩樂後該提示變成事實錯誤，且與下方進度區塊矛盾）
-  if (recs.length === 0) {
-    // 🔴 先存變數再用，【不要】改回 `buildProgressHtml(person)?…${buildProgressHtml(person)}…` 那種
-    //   三元寫法：它會把同一個人的進度整個算【兩次】（條件判斷一次、模板內插一次）。
-    //   buildProgressHtml 內部對負責的每個通路各呼叫一次 shopLabelProgress，而那支要逐列重算標籤
-    //   （好麻吉單期就 800+ 列，每列各跑一次 calcAnalysisAll + calcGrowthAnalysis）。
-    //   「當日 0 筆調整」是常見狀態（週末、剛開站），這條正好是最慢的那條路徑。
-    const prog = buildProgressHtml(person);
-    return prog ? `<div class="adj-sec">${prog}</div>` : '';
-  }
+  // 空狀態：當日 0 筆 → 整塊不顯示（連分隔線都不出）。
+  //   需求 3 塊 4：人員卡上的「優化進度」已拆，通路進度改看右欄「通路進度（今天）」卡（buildProgressCardHtml）。
+  if (recs.length === 0) return '';
 
   const total = recs.length;
   const personAttr = escapeHtml(person);
@@ -2883,7 +2757,6 @@ function buildCardAdjustmentsHtml(person, viewDate) {
       </div>
       ${anaPills ? `<div class="adj-pill-group"><div class="adj-pills-label">廣告分析</div><div class="adj-pills">${anaPills}</div></div>` : ''}
       ${growthPills ? `<div class="adj-pill-group"><div class="adj-pills-label">成長分析</div><div class="adj-pills">${growthPills}</div></div>` : ''}
-      ${buildProgressHtml(person)}
     </div>`;
 }
 
