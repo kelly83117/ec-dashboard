@@ -1136,9 +1136,9 @@ Object.assign(App, {
             width: '420px',
             bodyHtml: `
               <div style="font-size:13px;line-height:1.6;color:var(--text)">
-                即將清除 <strong style="color:#dc2626">${escapeHtml(curShop)} · ${escapeHtml(label)}</strong> 的檔案。
+                即將清除 <strong style="color:#dc2626">${escapeHtml(curShop)} · ${escapeHtml(label)}</strong>：這份報表會<strong>從雲端刪除，所有人都看不到</strong>。
                 <div style="margin-top:10px;padding:10px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px;color:#92400e">
-                  ⚠️ 此動作<strong>無法復原</strong>。清除後若要使用，需要重新上傳檔案。
+                  ⚠️ 此動作<strong>無法復原</strong>，要恢復只能重新上傳原始檔案。<br>商品的調整紀錄不受影響。
                 </div>
               </div>
             `,
