@@ -441,14 +441,12 @@ Object.assign(App, {
           ${calendarHtml}
           <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
             ${bossCardHtml}
-            ${/* 需求 3 塊 4：通路進度（今天）。不論看哪一天都顯示（內容一律依今天）；人員卡上已不再畫進度。 */''}
-            ${buildProgressCardHtml()}
-            ${/* 進度說明：整頁一份。只在看「今天」時出現——進度條永遠算今天推出的期別，
-                  看過去日期時它跟畫面上那天無關，常駐一塊卡片只是佔掉垂直空間。
-                  ⚠ adjShopsOf 讀的 ADJ_OWNER_TIMELINE 是本檔【底部】的 top-level const，這裡（檔案上半部）
-                    引用得到，是因為 render 只在模組載入完成後才被呼叫。若日後有人把渲染改成
+            ${/* 需求 3 塊 4：通路進度（今天）。不論看哪一天都顯示（內容一律依今天）；人員卡上已不再畫進度。
+                  「進度條怎麼算的？」說明面板在卡內最下面（buildProgressCardHtml 裡），跟著卡片一起出現。
+                  ⚠ buildProgressCardHtml 讀的 ADJ_ALL_SHOPS / ADJ_OWNER_TIMELINE 是本檔【底部】的 top-level const，
+                    這裡（檔案上半部）引用得到，是因為 render 只在模組載入完成後才被呼叫。若日後有人把渲染改成
                     模組載入期就執行，這行會炸 Cannot access ... before initialization。 */''}
-            ${isEditable && personInfos.some(p => adjShopsOf(p.name, todayStr).length) ? buildProgressNoteHtml() : ''}
+            ${buildProgressCardHtml()}
             ${cards}
           </div>
         </div>
@@ -2555,14 +2553,14 @@ function _progRank(label,kind){
   if(n==='高利潤商品')return 90;       // 好事墊底
   return 50;
 }
-// 進度區塊的說明文字。🔴 整頁只出現【一份】(渲染在人員卡片欄的最上方,見 renderWeeklyCalendarTab),
-//   不再每張人員卡片各印一次(四個人 = 同樣的字重複四次)。
+// 進度區塊的說明文字。🔴 整頁只出現【一份】:渲染在右欄「通路進度（今天）」卡內、四個通路列的最下面
+//   (buildProgressCardHtml 呼叫),卡片在任何日期都顯示,說明跟著一起出現。
 //   ⚠ 文案要跟著計算層走:2026-09-10 起【上半月 / 下半月各自一條、互不相加】——
 //     舊版那兩句「月層 = 上半月 + 下半月,每一格都是相加」與「分母不是商品數,是兩輪各要看一次」
 //     已作廢並移除。現在每一條的分母就是該期報表的商品列數,直白到不需要解釋,
 //     那兩句【沒有替代品、不要補回來】。
 function buildProgressNoteHtml(){
-  return`<details class="adj-prog-note adj-prog-note-host"><summary>❓ 進度條怎麼算的？</summary><div class="adj-prog-note-body">依通路負責人歸屬，非個人操作紀錄；點期間列展開明細<br>上半月、下半月<b>各自一條、分開算</b>，兩條不相加<br>每條的分母是<b>該期報表的商品列數</b>，分子是「這個商品本期被碰過沒有」<br>在「整月」畫面打的調整，上半月、下半月<b>兩期都算完成</b><br>廣告分析看你在「廣告調整」欄有沒有打字，成長分析看「商品調整」欄 —— 兩邊分開算，在廣告欄打字不會讓成長標籤算完成<br>一個商品可能有多個廣告標籤，打一筆調整那幾個標籤都算完成（系統不知道你是為了哪個標籤打的）</div></details>`;
+  return`<details class="adj-prog-note adj-prog-note-host"><summary>❓ 進度條怎麼算的？</summary><div class="adj-prog-note-body">這是通路的進度，誰調整都算；「負責 X」只是標示這個通路目前的負責人；點期間列展開明細<br>負責人與月份都依今天決定，跟月曆選的日期無關<br>上半月、下半月<b>各自一條、分開算</b>，兩條不相加<br>每條的分母是<b>該期報表的商品列數</b>，分子是「這個商品本期被碰過沒有」<br>在「整月」畫面打的調整，上半月、下半月<b>兩期都算完成</b><br>廣告分析看「廣告調整」欄有沒有打字，成長分析看「商品調整」欄 —— 兩邊分開算，在廣告欄打字不會讓成長標籤算完成<br>一個商品可能有多個廣告標籤，打一筆調整那幾個標籤都算完成（系統不知道這筆調整是為了哪個標籤打的）</div></details>`;
 }
 // 需求 3 塊 4：「通路進度（今天）」卡片的資料層。純函式：不碰 DOM、不讀全域，全部從參數進來（node vm 可單獨切出來測）。
 //   shops：通路陣列（字串，或 { shop, kind }；kind 預設 'shopee'，留給之後的 MOMO）
@@ -2676,6 +2674,7 @@ function buildProgressCardHtml() {
         <span class="adj-prog-legend"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span></span>
       </div>
       ${rows}
+      ${buildProgressNoteHtml()}
     </div>
   </div>`;
 }

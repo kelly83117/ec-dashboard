@@ -321,6 +321,10 @@
 /* 通路名跟進度列文字（.adj-prog-shop 13px）同級；「負責 X」小一級、次要文字色。 */
 .dp-prog-card .dp-prog-shop-name{font-size:13px;font-weight:600;color:var(--text,#111827);}
 .dp-prog-card .dp-prog-owner{font-size:12px;color:var(--text-muted,#6b7280);}
+/* 塊4-4：「進度條怎麼算的？」說明面板搬進卡內最下面，跟上方最後一個通路留 10px（外觀沿用 .adj-prog-note-host）。 */
+.dp-prog-card .adj-prog-note-host{margin-top:10px;}
+/* 說明內文放大加深（原本繼承 .adj-prog-note 的 10px / #9ca3af、body 的 line-height 1.5）；標題 summary 與外框不動，<b> 照常粗體。 */
+.dp-prog-card .adj-prog-note-body{font-size:12px;color:var(--text-muted,#6b7280);line-height:1.7;}
 
 /* 人員卡片：洞察表「今日調整」chip（<button>，點開明細彈窗）。視覺沿用 .adj-pill 的語彙，
    顏色由 JS 經 --chip-bg / --chip-fg CSS 變數傳入（單一來源 = daily.js INSIGHT_STYLE）。不碰 --bg。 */
