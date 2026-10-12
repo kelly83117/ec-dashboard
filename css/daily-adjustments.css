@@ -299,6 +299,29 @@
 }
 .adj-prog-note-host:hover{border-color:var(--primary,#4f46e5);}
 
+/* 需求 3 塊 4：右欄「通路進度（今天）」卡（daily.js buildProgressCardHtml）。選擇器一律以 .dp-prog-card 開頭，
+   不影響人員卡上的舊「優化進度」。
+   外框對齊「老闆指派任務」卡（它是 inline style：background:white、1px solid var(--border)、圓角 10px、
+   padding 14px 14px 12px、無陰影）；卡與卡的 12px 間距由右欄容器的 gap 給，這裡不另加 margin。
+   進度列沿用 .adj-prog-* 原樣，字級 / 顏色自然跟人員卡一致。不碰 --bg。 */
+.dp-prog-card{
+  background:var(--surface,#fff);
+  border:1px solid var(--border,#e5e7eb);
+  border-radius:10px;
+  padding:14px 14px 12px;
+  min-width:0;
+}
+/* 人員卡裡的 .adj-prog 帶上分隔線與間距（接在 pill 下面用）；卡片自己當外框時不需要。 */
+.dp-prog-card .adj-prog{margin-top:0;padding-top:0;border-top:0}
+/* 卡片標題對齊「老闆指派任務」卡標題（daily.js inline：font-size:14px;font-weight:600;color:var(--text)）。
+   圖例 .adj-prog-legend 是標題的【兄弟】不是子元素，不受影響。 */
+.dp-prog-card .adj-prog-title{font-size:14px;font-weight:600;color:var(--text,#111827);}
+.dp-prog-card .dp-prog-shop + .dp-prog-shop{margin-top:10px;}
+.dp-prog-card .dp-prog-shop-head{display:flex;align-items:baseline;gap:8px;min-width:0;}
+/* 通路名跟進度列文字（.adj-prog-shop 13px）同級；「負責 X」小一級、次要文字色。 */
+.dp-prog-card .dp-prog-shop-name{font-size:13px;font-weight:600;color:var(--text,#111827);}
+.dp-prog-card .dp-prog-owner{font-size:12px;color:var(--text-muted,#6b7280);}
+
 /* 人員卡片：洞察表「今日調整」chip（<button>，點開明細彈窗）。視覺沿用 .adj-pill 的語彙，
    顏色由 JS 經 --chip-bg / --chip-fg CSS 變數傳入（單一來源 = daily.js INSIGHT_STYLE）。不碰 --bg。 */
 .ins-chip {
