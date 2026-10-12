@@ -2203,9 +2203,19 @@ function collectAdjustments() {
 //   資料源：collectAdjustments()，依日期索引後查表。純唯讀，不寫任何 Store。
 //   通路→人 對應寫在本檔（不引 marketing.js；洞察表日後將廢除）。
 // ============================================================================
-// 通路 → 負責人：【單一來源】就是下方的 ADJ_OWNER_TIMELINE（依生效日的清單）。
+// 通路 → 負責人：由兩份資料一起決定（#306），查詢一律走 _adjMapOn / adjOwnerOf / adjShopsOf。
 //    其他檔不要自己複寫一份，一律經 window 讀 adjOwnerOf / ADJ_ALL_SHOPS（本檔結尾 Object.assign(window, …) 掛出）。
-// ⚠️ 換負責人 = 在清單【最後】加一段 { from:'YYYY-MM-DD', map:{…} }，【不要改舊段】——
+//    ① BASE＝下方寫死的 ADJ_OWNER_TIMELINE：每段是「四通路完整對照」，永遠參與計算。
+//    ② 雲端＝Store key 'ec.adjOwnerTimeline'（app/main 的一個欄位）：
+//       { v:1, segs:[ { shop, from:'YYYY-MM-DD', owner:<username>, ownerName:<存檔當下姓名>, by, at } ] }，一段只管一個通路。
+//    規則：某通路某天的負責人＝該通路「生效日 ≤ 那天」的段裡（BASE 段與雲端段一起看）from 最新的那段。
+//    🔴 雲端只能影響 2026-10-01 以後：雲端段的 from 必須是真實存在的日期且【大於】'2026-10-01'。
+//       合法條件（v===1、segs 是陣列、shop 在 ADJ_ALL_SHOPS、from 合法、owner 非空字串、同通路同 from 不重複）
+//       只要有一段不合法 → 整份雲端資料不用、只用 BASE（console.warn 同一份內容只印一次），不部分採用。
+//    顯示：雲端段存的是 username，經 _adjWhoResolver 轉成「目前姓名」（帳號改名即時反映）；對不到人 → ownerName → owner 原字。
+//    ADJ_ALL_SHOPS 只從 BASE 推導，不從雲端推導（雲端不能新增通路）。
+//    驗證 / 合併 / 轉姓名是純函式（_adjValidateOwnerCloud / _adjOwnerDisplay / _adjBuildOwnerLookup），可在 node vm 單獨測。
+// ⚠️ 改 BASE 換負責人 = 在清單【最後】加一段 { from:'YYYY-MM-DD', map:{…} }，【不要改舊段】——
 //    紀錄本身不存負責人，歸屬是「用紀錄日期查這份清單」算出來的；改舊段會讓歷史跟著變成新負責人。
 // ⚠️ 2026-07-29 更正：玩樂是郭雅琪 2026/04 起接手，先前寫成洪嘉蓮是錯的。
 // ⚠️ 2026-09-04 更正：維克由楊心雨(Astrid)接手，值從 '未指派' 改為 '楊心雨'。
@@ -2219,6 +2229,7 @@ function collectAdjustments() {
 //    （calExtraPeople）。正確描述是：不在 ALLOWED_NAMES 的人，只要當天有資料就會長出一張
 //    fallback 灰底卡片；ALLOWED_NAMES 決定的是「固定顯示 + 可被老闆指派 + 收 LINE 通知」。
 //    from 由小到大；第一段 from:'' 代表「最早以前」。日期一律用 YYYY-MM-DD 比字串大小。
+// BASE（寫死，永遠參與計算；雲端段只疊在它上面）
 const ADJ_OWNER_TIMELINE = [
   { from: '',           map: { '好麻吉': '洪嘉蓮', '玩樂': '郭雅琪', '森之旅': '陳君葳', '維克': '楊心雨' } },
   { from: '2026-10-01', map: { '好麻吉': '郭雅琪', '玩樂': '洪嘉蓮', '森之旅': '陳君葳', '維克': '楊心雨' } },
@@ -2247,10 +2258,106 @@ function _adjMapOn(date) {
     }
     return null;
   }
-  for (let i = ADJ_OWNER_TIMELINE.length - 1; i >= 0; i--) {
-    if (k >= ADJ_OWNER_TIMELINE[i].from) return ADJ_OWNER_TIMELINE[i].map;
+  return _adjOwnerLookup()(k);
+}
+// ── 雲端負責人段（#306）。規則見上方 ADJ_OWNER_TIMELINE 前的說明。──
+const ADJ_OWNER_CLOUD_KEY = 'ec.adjOwnerTimeline';
+const ADJ_OWNER_CLOUD_MIN_FROM = '2026-10-01';   // 雲端段 from 必須【大於】這天
+// 'YYYY-MM-DD' 且真實存在（擋 2026-02-30）。
+function _adjIsRealDate(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+}
+// 純函式：驗證雲端值。raw 為 undefined / null ＝沒有雲端資料 → { ok:true, segs:[] }；
+//   不合法 → { ok:false, reason }（呼叫端整份不用，不部分採用）。
+function _adjValidateOwnerCloud(raw, shops, minFrom) {
+  if (raw === undefined || raw === null) return { ok: true, segs: [] };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: '整個值不是物件' };
+  if (raw.v !== 1) return { ok: false, reason: 'v 不是 1' };
+  if (!Array.isArray(raw.segs)) return { ok: false, reason: 'segs 不是陣列' };
+  const seen = new Set();
+  for (let i = 0; i < raw.segs.length; i++) {
+    const s = raw.segs[i];
+    const at = 'segs[' + i + ']：';
+    if (!s || typeof s !== 'object') return { ok: false, reason: at + '不是物件' };
+    if (typeof s.shop !== 'string' || shops.indexOf(s.shop) < 0) return { ok: false, reason: at + '不明通路 ' + s.shop };
+    if (!_adjIsRealDate(s.from)) return { ok: false, reason: at + 'from 不是真實日期 ' + s.from };
+    if (!(s.from > minFrom)) return { ok: false, reason: at + 'from 必須晚於 ' + minFrom };
+    if (typeof s.owner !== 'string' || !s.owner.trim()) return { ok: false, reason: at + 'owner 空白' };
+    const key = s.shop + '|' + s.from;
+    if (seen.has(key)) return { ok: false, reason: at + '同通路同一天重複 ' + key };
+    seen.add(key);
   }
-  return null;
+  return { ok: true, segs: raw.segs.slice() };
+}
+// 純函式：雲端段的顯示姓名。resolve(owner) 對到人 → 目前姓名；對不到 → ownerName；再沒有 → owner 原字。
+function _adjOwnerDisplay(seg, resolve) {
+  const id = typeof resolve === 'function' ? resolve(seg.owner) : null;
+  if (id && id.ok && id.display) return id.display;
+  const nm = typeof seg.ownerName === 'string' ? seg.ownerName.trim() : '';
+  return nm || seg.owner;
+}
+// 純函式：建查詢器 'YYYY-MM-DD' → { 通路: 姓名 } | null。base＝ADJ_OWNER_TIMELINE 形狀，segs＝驗證過的雲端段。
+//   沒有雲端段 → 回 BASE 那段的 map 物件本身（跟加雲端前同一個參照，行為零差異）。
+//   有雲端段 → 每通路取「生效日 ≤ k」裡 from 最新的（BASE 段同天以上較新時 BASE 為準），合併成新物件（凍結、依日期記憶）。
+function _adjBuildOwnerLookup(base, segs, shops, resolve) {
+  const baseOn = k => {
+    for (let i = base.length - 1; i >= 0; i--) if (k >= base[i].from) return base[i];
+    return null;
+  };
+  if (!segs.length) return k => { const b = baseOn(k); return b ? b.map : null; };
+  const byShop = {};
+  segs.forEach(s => { (byShop[s.shop] = byShop[s.shop] || []).push({ from: s.from, name: _adjOwnerDisplay(s, resolve) }); });
+  Object.keys(byShop).forEach(sh => byShop[sh].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0)));
+  const memo = new Map();
+  return k => {
+    if (memo.has(k)) return memo.get(k);
+    const b = baseOn(k);
+    let out = b ? b.map : null;
+    let copied = false;
+    shops.forEach(shop => {
+      const list = byShop[shop];
+      if (!list) return;
+      let hit = null;
+      for (let i = list.length - 1; i >= 0; i--) if (k >= list[i].from) { hit = list[i]; break; }
+      if (!hit || (b && b.from > hit.from)) return;
+      if (!copied) { out = Object.assign({}, out || {}); copied = true; }
+      out[shop] = hit.name;
+    });
+    if (copied) Object.freeze(out);
+    memo.set(k, out);
+    return out;
+  };
+}
+// 查詢器快取：依「雲端值的參照 + ec.users 陣列的參照」，任一換了就重建（雲端模式下 Store.get 回同一個參照）。
+//   沒有雲端值時不讀 ec.users、不建 resolver，直接走 BASE。
+let _adjOwnerCache = { cloud: null, users: null, lookup: null };
+let _adjOwnerWarnedSig = null;   // 不合法的雲端值：同一份內容只 warn 一次
+function _adjOwnerLookup() {
+  const cloud = Store.get(ADJ_OWNER_CLOUD_KEY, null);
+  const c = _adjOwnerCache;
+  if (cloud === undefined || cloud === null) {
+    if (c.lookup && c.cloud === null) return c.lookup;
+    _adjOwnerCache = { cloud: null, users: null, lookup: _adjBuildOwnerLookup(ADJ_OWNER_TIMELINE, [], ADJ_ALL_SHOPS, null) };
+    return _adjOwnerCache.lookup;
+  }
+  const users = Store.get(Store.KEYS.users, []);
+  if (c.lookup && c.cloud === cloud && c.users === users) return c.lookup;
+  const v = _adjValidateOwnerCloud(cloud, ADJ_ALL_SHOPS, ADJ_OWNER_CLOUD_MIN_FROM);
+  if (!v.ok) {
+    let sig;
+    try { sig = typeof cloud + ':' + JSON.stringify(cloud); } catch { sig = typeof cloud + ':?'; }
+    if (_adjOwnerWarnedSig !== sig) {
+      _adjOwnerWarnedSig = sig;
+      console.warn('[adjOwner] 雲端負責人設定（' + ADJ_OWNER_CLOUD_KEY + '）不合法，整份不用、只用寫死的 BASE：', v.reason, cloud);
+    }
+  }
+  const segs = v.ok ? v.segs : [];
+  const lookup = _adjBuildOwnerLookup(ADJ_OWNER_TIMELINE, segs, ADJ_ALL_SHOPS, segs.length ? _adjWhoResolver() : null);
+  _adjOwnerCache = { cloud, users, lookup };
+  return lookup;
 }
 // 通路 → 某天的負責人；查不到回 undefined。
 function adjOwnerOf(shop, date) {
