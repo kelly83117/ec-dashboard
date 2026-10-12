@@ -441,6 +441,8 @@ Object.assign(App, {
           ${calendarHtml}
           <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
             ${bossCardHtml}
+            ${/* 需求 3 塊 4：通路進度（今天）。不論看哪一天都顯示（內容一律依今天）；跟人員卡上的舊進度暫時並排。 */''}
+            ${buildProgressCardHtml()}
             ${/* 進度說明：整頁一份。只在看「今天」時出現——進度條永遠算今天推出的期別，
                   看過去日期時它跟畫面上那天無關，常駐一塊卡片只是佔掉垂直空間。
                   ⚠ adjShopsOf 讀的 ADJ_OWNER_TIMELINE 是本檔【底部】的 top-level const，這裡（檔案上半部）
@@ -2676,6 +2678,122 @@ function _buildProgressHtmlInner(person){
       <span class="adj-prog-legend"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span></span>
     </div>
     ${rows}
+  </div>`;
+}
+// 需求 3 塊 4：「通路進度（今天）」卡片的資料層。純函式：不碰 DOM、不讀全域，全部從參數進來（node vm 可單獨切出來測）。
+//   shops：通路陣列（字串，或 { shop, kind }；kind 預設 'shopee'，留給之後的 MOMO）
+//   progOf(shop)：回傳 profit.js shopLabelProgress 的結果（拿不到回 null）；ownerOf(shop)：今天的負責人姓名。
+//   計算口徑逐條對齊 _buildProgressHtmlInner（t=0 → —、兩期都 null 收成一條、只有一期 null 那期顯示「尚無報表 / 載入中」）。
+//   「載入中」的判斷照舊只看 p.loaded（#315 另修）。
+//   每列：{ shop, kind, ownerName, month, status, naText, periods }
+//     status：'ok' 至少一期有報表（看 periods）｜'none' 兩期都沒報表｜'loading' 兩期都 null 且還在載入｜'unavailable' progOf 回 null
+//     periods[]：{ half, periodLabel, isCurrent, key, status:'ok'|'none'|'loading', naText, done, total, pct, pctText, cls, fillCls, data }
+//       key＝「通路|月份|期別」，跟舊卡的 data-prog-key 一模一樣；沒報表的期 key 為 null（舊卡那期也沒有 key）。
+//       pctText＝畫面上那段字（含 ✓ / ! 符號，例「✓ 100%」「! 12%」）；total 為 0 時是「—」、pct 為 null。
+function _progCardModel(shops, progOf, ownerOf) {
+  const pctOf = (d, t) => {
+    if (!t) return { pct: null, pctText: '—', cls: '', fillCls: '' };
+    const pct = Math.round(d / t * 100);
+    const mark = pct >= 100 ? '✓ ' : pct < 50 ? '! ' : '';
+    return {
+      pct,
+      pctText: `${mark}${pct}%`,
+      cls: pct >= 100 ? 'adj-prog-p100' : pct >= 50 ? 'adj-prog-p50' : 'adj-prog-p0',
+      fillCls: pct >= 100 ? 'adj-prog-fill-p100' : pct >= 50 ? 'adj-prog-fill-p50' : 'adj-prog-fill-p0',
+    };
+  };
+  return (shops || []).map(s => {
+    const shop = (s && typeof s === 'object') ? s.shop : s;
+    const kind = (s && typeof s === 'object' && s.kind) || 'shopee';
+    const p = progOf(shop);
+    const row = { shop, kind, ownerName: ownerOf(shop), month: p ? p.month : null, status: 'ok', naText: '', periods: [] };
+    if (!p) { row.status = 'unavailable'; row.naText = '—'; return row; }
+    const na = p.loaded ? '尚無報表' : '載入中';
+    const naStatus = p.loaded ? 'none' : 'loading';
+    if (p.periods.every(pr => !pr.data)) { row.status = naStatus; row.naText = na; return row; }
+    row.periods = p.periods.map(pr => {
+      const base = { half: pr.half, periodLabel: pr.periodLabel, isCurrent: !!pr.isCurrent };
+      const d = pr.data;
+      if (!d) return Object.assign(base, { key: null, status: naStatus, naText: na, done: null, total: null, pct: null, pctText: na, cls: '', fillCls: '', data: null });
+      return Object.assign(base, { key: shop + '|' + p.month + '|' + pr.half, status: 'ok', naText: '', done: d.doneTotal, total: d.total, data: d }, pctOf(d.doneTotal, d.total));
+    });
+    return row;
+  });
+}
+// 需求 3 塊 4：「通路進度（今天）」卡片（右欄、老闆指派任務卡下面）。不論檢視哪一天都顯示：月份、期別、負責人都依「今天」。
+//   進度條沿用 .adj-prog-* 的結構與 data-prog-key，▾ 展開走 bindWeeklyCalendar 既有的委派。
+//   ⚠ 那段委派用 toggle.closest('.dp-card') || document 找明細；本卡不是 .dp-card → 走 document.querySelector（取第一個），
+//     本卡排在人員卡上面所以找到的是自己的明細。舊的人員卡進度拆掉前，不要把本卡挪到人員卡下面。
+//   🔴 每個通路各自 try/catch：shopLabelProgress 逐列重算標籤，一個通路的髒資料不能讓整張卡消失。
+//   ⚠ 明細（grp / flat / curMark）跟 _buildProgressHtmlInner 是同一套，舊的人員卡進度拆掉時一併收成一份。
+function buildProgressCardHtml() {
+  const today = toDateStr(new Date());
+  const hasSLP = typeof window.shopLabelProgress === 'function';
+  const progOf = shop => hasSLP ? window.shopLabelProgress(shop) : null;
+  const ownerOf = shop => adjOwnerOf(shop, today);
+  const curMark = on => `<span class="adj-prog-cur${on ? '' : ' adj-prog-cur-off'}"${on ? ' title="本期"' : ' aria-hidden="true"'}>●</span>`;
+  const flat = (d, t) => {
+    if (!t) return `<span class="adj-prog-na">—</span>`;
+    const pct = Math.round(d / t * 100);
+    const cls = pct >= 100 ? 'adj-prog-p100' : pct >= 50 ? 'adj-prog-p50' : 'adj-prog-p0';
+    const mark = pct >= 100 ? '✓ ' : pct < 50 ? '! ' : '';
+    return `<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-pct ${cls}">${mark}${pct}%</span>`;
+  };
+  const grp = (title, obj, kind) => {
+    const keys = Object.keys(obj).sort((a, b) => {
+      const ra = _progRank(a, kind), rb = _progRank(b, kind);
+      return ra !== rb ? ra - rb : obj[b].t - obj[a].t;
+    });
+    if (!keys.length) return '';
+    let gd = 0, gt = 0; keys.forEach(l => { gd += obj[l].d; gt += obj[l].t; });
+    const pending = keys.filter(l => Math.round(obj[l].d / obj[l].t * 100) < 100);
+    const done = keys.filter(l => Math.round(obj[l].d / obj[l].t * 100) >= 100);
+    const sub = l => {
+      const { t, d } = obj[l];
+      return `<div class="adj-prog-row adj-prog-sub"><span class="adj-prog-shop">${escapeHtml(window.mapAnaLabel ? window.mapAnaLabel(l) : l)}</span>${flat(d, t)}</div>`;
+    };
+    return `<div class="adj-prog-row adj-prog-grp"><span class="adj-prog-shop">${escapeHtml(title)}</span>${flat(gd, gt)}</div>`
+      + (pending.length ? `<div class="adj-prog-subs">` + pending.map(sub).join('') + `</div>` : '')
+      + (done.length ? `<details class="adj-prog-done"><summary>已完成 ${done.length} 項</summary><div class="adj-prog-subs">` + done.map(sub).join('') + `</div></details>` : '');
+  };
+  const naRow = (titleHtml, cur, text) => `<div class="adj-prog-row">${curMark(!!cur)}<span class="adj-prog-shop">${titleHtml}</span><span class="adj-prog-na">${escapeHtml(text)}</span></div>`;
+  const periodHtml = pr => {
+    const titleHtml = escapeHtml(pr.periodLabel);
+    if (pr.status !== 'ok') return naRow(titleHtml, pr.isCurrent, pr.naText);
+    const barHtml = pr.pct === null
+      ? `<span class="adj-prog-na">—</span>`
+      : `<span class="adj-prog-num">${pr.done}/${pr.total}</span><span class="adj-prog-bar"><span class="adj-prog-fill ${pr.fillCls}" style="width:${pr.pct}%"></span></span><span class="adj-prog-pct ${pr.cls}">${pr.pctText}</span>`;
+    return `<button type="button" class="adj-prog-row adj-prog-toggle" data-prog-key="${escapeHtml(pr.key)}">
+          ${curMark(pr.isCurrent)}<span class="adj-prog-shop">${titleHtml}</span>${barHtml}<span class="adj-prog-caret">▾</span>
+        </button>
+        <div class="adj-prog-detail" data-prog-detail="${escapeHtml(pr.key)}" hidden>
+          ${grp('廣告分析', pr.data.ana, 'ana')}${grp('成長分析', pr.data.growth, 'growth')}
+        </div>`;
+  };
+  const shopHead = (shop, owner) => `<div class="dp-prog-shop-head"><span class="dp-prog-shop-name">${escapeHtml(shop)}</span><span class="dp-prog-owner">負責 ${escapeHtml(owner || '—')}</span></div>`;
+  const rows = ADJ_ALL_SHOPS.map(shop => {
+    try {
+      const r = _progCardModel([shop], progOf, ownerOf)[0];
+      let body;
+      if (r.status === 'unavailable') body = naRow('', false, '—');
+      else if (r.status !== 'ok') body = naRow(escapeHtml(r.month), false, r.naText);
+      else body = r.periods.map(periodHtml).join('');
+      return `<div class="dp-prog-shop">${shopHead(r.shop, r.ownerName)}${body}</div>`;
+    } catch (e) {
+      console.warn('[buildProgressCardHtml] 通路進度算不出來，改顯示「—」：', shop, e);
+      let owner = '';
+      try { owner = ownerOf(shop); } catch {}
+      return `<div class="dp-prog-shop">${shopHead(shop, owner)}${naRow('', false, '—')}</div>`;
+    }
+  }).join('');
+  return `<div class="dp-prog-card">
+    <div class="adj-prog">
+      <div class="adj-prog-head">
+        <div class="adj-prog-title">通路進度（今天）</div>
+        <span class="adj-prog-legend"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span></span>
+      </div>
+      ${rows}
+    </div>
   </div>`;
 }
 // 第六塊：某人某日的「淨利表調整」區塊，注入人員卡片底部。只留標題 + 兩排 pill，明細改走彈窗。
