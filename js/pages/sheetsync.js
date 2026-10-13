@@ -141,6 +141,7 @@ function buildDiff(rows, platforms, opts) {
   opts = opts || {};
   const adSet = opts.adSet || PLATFORMS_WITH_AD_SPEND;
   const op = opts.operatorName || '';
+  const opUser = { name: op, username: opts.operatorUsername || '' };
   if (!Array.isArray(platforms)) return { error: '雲端 ec.platforms 不是陣列' };
   const byName = {}, dup = [];
   platforms.forEach((p, i) => { const nm = p && p.name; if (nm in byName) dup.push(nm); else byName[nm] = i; });
@@ -183,11 +184,19 @@ function buildDiff(rows, platforms, opts) {
   cells.forEach(c => {
     if (c.cat === 'same' || !c.oldBy) return;
     const k = c.ch + '|' + c.date;
-    if (seenSig[k] || (c.oldBy.name || '') === op) return;
+    if (seenSig[k] || ssSameSigner(c.oldBy, opUser)) return;
     seenSig[k] = true;
     sigChanges.push({ ch: c.ch, date: c.date, from: c.oldBy.name || '（無名）', to: op });
   });
   return { cells, counts, bad, dayFails, sigChanges };
+}
+
+// 需求 3 塊 5-A：署名是不是同一個人。雙方都有 username → 比 username（trim、不分大小寫）；否則退回比 name（同舊行為）。
+function ssSameSigner(sig, op) {
+  const a = String((sig && sig.username) || '').trim().toLowerCase();
+  const b = String((op && op.username) || '').trim().toLowerCase();
+  if (a && b) return a === b;
+  return ((sig && sig.name) || '') === ((op && op.name) || '');
 }
 
 // 預覽之後，被勾選的格子在伺服器上有沒有被改過（有就整次中止）
@@ -217,7 +226,10 @@ function apply(freshPlatforms, selected, by) {
   Object.keys(touched).forEach(k => {
     const p = touched[k], date = k.slice(k.lastIndexOf('|') + 1);
     if (!p.dailyBy || typeof p.dailyBy !== 'object') p.dailyBy = {};
-    p.dailyBy[date] = { name: by.name, at: by.at, src: by.src };
+    // 🔴 欄位必須跟 precheck 的 opts.by（同一份 by）逐欄相同，否則「署名內容不符」誤報；username 有才寫（Firestore 不收 undefined）
+    const sig = { name: by.name, at: by.at, src: by.src };
+    if (by.username) sig.username = by.username;
+    p.dailyBy[date] = sig;
   });
   return merged;
 }
@@ -345,7 +357,7 @@ function jsonp(url, params, env) {
 
 const SheetSync = {
   SHEET_SYNC_URL, SHEET_SYNC_USERS, SS_DATA_KEYS, SS_CHECK_KEYS,
-  range, classifyCell, validateResponse, buildDiff, checkDayTotals, findStale, apply, precheck, verify, stableStringify,
+  range, classifyCell, validateResponse, buildDiff, ssSameSigner, checkDayTotals, findStale, apply, precheck, verify, stableStringify,
   jsonp, taipeiToday, addDaysStr, utf8Len,
 };
 
@@ -489,7 +501,7 @@ Object.assign(App, {
       const { platforms } = ssPlatformsOf(await window.__cloudStore.getDoc('server'));
       if (token !== st.token) return;
       const opName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
-      const diff = SheetSync.buildDiff(v.rows, platforms, { operatorName: opName });
+      const diff = SheetSync.buildDiff(v.rows, platforms, { operatorName: opName, operatorUsername: String((this.currentUser && this.currentUser.username) || '').trim() });
       if (diff.error) throw new Error(diff.error);
       st.preview = platforms;
       st.diff = diff;
@@ -512,6 +524,8 @@ Object.assign(App, {
     const cs = window.__cloudStore;
     const yesterday = SheetSync.addDaysStr(SheetSync.taipeiToday(), -1);
     const by = { name: (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '', at: Date.now(), src: 'sheet' };
+    const _byUser = String((this.currentUser && this.currentUser.username) || '').trim();
+    if (_byUser) by.username = _byUser;   // 這份 by 同時給 apply 寫入與 precheck 比對（同一份，見 apply 註解）
     st.busy = true; st.msg = null; ssMount(st);
     const stop = (kind, text) => { st.busy = false; st.msg = { kind, text }; ssMount(st); };
     try {

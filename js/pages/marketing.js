@@ -1541,17 +1541,26 @@ Object.assign(App, {
       const groups = new Map(); // date -> { date, texts: [] }
       all.forEach(a => {
         const d = a.date || '';
-        if (!groups.has(d)) groups.set(d, { date: d, texts: [] });
+        if (!groups.has(d)) groups.set(d, { date: d, texts: [], entries: [] });
         groups.get(d).texts.push(a.text || '');
+        groups.get(d).entries.push(a);
       });
       // 最新日期排最上面
       const sortedKeys = Array.from(groups.keys()).sort((a, b) => b.localeCompare(a));
+      let byResolve;   // 填寫人 resolver：第一個有 by 的列才建，整份清單共用
+      const resolveBy = (raw) => {
+        if (byResolve === undefined) {
+          const mk = window.makeUserIdentityResolver, users = Store.get(Store.KEYS.users, []);
+          byResolve = typeof mk === 'function' ? mk(Array.isArray(users) ? users : []) : null;
+        }
+        return byResolve ? byResolve(raw) : null;
+      };
       return sortedKeys.map(k => {
         const g = groups.get(k);
         const joined = g.texts.join('、');
         return `
           <div style="padding:7px 11px;background:#eef2ff;border-left:3px solid #6366f1;border-radius:5px;margin-bottom:5px;font-size:12px;display:flex;gap:8px;align-items:flex-start">
-            <span style="color:#6366f1;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;min-width:80px">${escapeHtml(g.date)}</span>
+            <span style="color:#6366f1;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;min-width:80px">${escapeHtml(g.date)}${_insAdjByHtml(g.entries, resolveBy)}</span>
             <span data-edit-date="${escapeHtml(g.date)}" title="點兩下編輯" style="flex:1;line-height:1.4;color:#312e81;font-weight:500;cursor:pointer">${escapeHtml(joined)}</span>
             <button class="icon-btn" data-del-date="${escapeHtml(g.date)}" title="刪除這一天的所有紀錄" style="width:20px;height:20px;font-size:10px;color:#6366f1">✕</button>
           </div>`;
@@ -2158,6 +2167,26 @@ function _insAdjNewEntry(date, text, username) {
   const by = String(username || '').trim();
   if (by) entry.by = by;
   return entry;
+}
+// 需求 3 塊 5-C：洞察表調整彈窗日期下方的填寫人灰字（樣式沿用淨利表彈窗的 .pnm-entry-by，見 profit.js _pnmByHtml）。
+//   同一天的多筆在畫面上併成一列 → 每筆有 by 的轉成目前姓名（停用 / 刪除加「（已停用）」，對不到用原字），
+//   editedBy 跟 by 不同（trim、不分大小寫）時加「（○○ 修改）」，去重後用「、」串起。
+//   🔴 沒有 by 的筆不顯示任何東西（不推算、不寫「未記錄」）；整天都沒有 by → 回空字串，該列 HTML 與改前逐字相同。
+function _insAdjByHtml(entries, resolve) {
+  const nameOf = (raw) => {
+    const id = resolve ? resolve(raw) : null;
+    return (id && id.ok) ? id.display + (id.status !== 'active' ? '（已停用）' : '') : raw;
+  };
+  const norm = s => s.toLowerCase();
+  const labels = [];
+  (entries || []).forEach(a => {
+    const by = (a && typeof a.by === 'string') ? a.by.trim() : '';
+    if (!by) return;
+    const ed = (typeof a.editedBy === 'string') ? a.editedBy.trim() : '';
+    const label = nameOf(by) + ((ed && norm(ed) !== norm(by)) ? '（' + nameOf(ed) + ' 修改）' : '');
+    if (!labels.includes(label)) labels.push(label);
+  });
+  return labels.length ? `<span class="pnm-entry-by">${escapeHtml(labels.join('、'))}</span>` : '';
 }
 // 某一格（同一個 date 字串）底下的所有紀錄，依原陣列順序
 function _insAdjEntriesOfDate(list, date) {
