@@ -452,7 +452,7 @@ Object.assign(App, {
                   ⚠ buildProgressCardHtml 讀的 ADJ_ALL_SHOPS / ADJ_OWNER_TIMELINE 是本檔【底部】的 top-level const，
                     這裡（檔案上半部）引用得到，是因為 render 只在模組載入完成後才被呼叫。若日後有人把渲染改成
                     模組載入期就執行，這行會炸 Cannot access ... before initialization。 */''}
-            ${buildProgressCardHtml()}
+            ${buildProgressCardHtml({ canEditOwners: isAdmin })}
             ${cards}
           </div>
         </div>
@@ -598,6 +598,196 @@ Object.assign(App, {
         showToast('LINE 通知設定已儲存', 'success');
         return true;
       },
+    });
+  },
+  // #306：通路負責人設定（只有管理員）。彈窗內的改動只動記憶體裡的草稿，按「儲存」才走下面的存檔流程；
+  //   「取消」什麼都不寫。存檔不經 Store.set：直接 __cloudStore.setField，畫面由 app/main 訂閱更新後重畫
+  //   （工作日誌 office-d1 在 CLOUD_RENDER_ROUTES.main 裡）。
+  //   ⚠ openModal 的 onSave 是同步的（回 truthy 就關窗），所以 onSave 一律回 false、存檔自己跑 async，成功才 closeModal。
+  openAdjOwnerConfigModal() {
+    if (!(this.currentUser && this.currentUser.role === 'admin')) { showToast('只有管理員可以設定負責人', 'error'); return; }
+    const today = _adjTaipeiToday();
+    const raw = Store.get(ADJ_OWNER_CLOUD_KEY, null);
+    const openVal = (raw === undefined || raw === null) ? null : JSON.parse(JSON.stringify(raw));   // 開窗時的值
+    const openCheck = _adjValidateOwnerCloud(openVal, ADJ_ALL_SHOPS, ADJ_OWNER_CLOUD_MIN_FROM);
+    const openSegs = openCheck.ok ? openCheck.segs : [];
+    const st = {
+      draft: JSON.parse(JSON.stringify(openSegs)), editKey: null, busy: false, box: null,
+      msgs: [], msgKind: '', addShop: '', addFrom: '', addOwner: '',
+    };
+    const usersNow = () => Store.get(Store.KEYS.users, []);
+    const sel = (cur, list) => list.map(o => `<option value="${escapeHtml(o.value)}"${o.value === cur ? ' selected' : ''}>${escapeHtml(o.text)}</option>`).join('');
+    // 負責人下拉：只列可選帳號；目前負責人不在可選名單（例：已停用）→ 停在「請選擇」。
+    const ownerOpts = (cur, pick) => {
+      const hit = _adjOwnerNorm(cur) ? pick.find(p => _adjOwnerNorm(p.username) === _adjOwnerNorm(cur)) : null;
+      return sel(hit ? hit.username : '', [{ value: '', text: '請選擇' }].concat(pick.map(p => ({ value: p.username, text: p.label }))));
+    };
+    const actBtn = (act, text, shop, from, ghost) =>
+      `<button type="button" class="adj-owner-btn${ghost ? ' adj-owner-btn-ghost' : ''}" data-act="${act}" data-shop="${escapeHtml(shop || '')}" data-from="${escapeHtml(from || '')}">${escapeHtml(text)}</button>`;
+    const inner = () => {
+      const us = usersNow();
+      const pick = _adjOwnerSelectableUsers(us, SHARED_ACCOUNTS);
+      const resolve = _adjWhoResolver();
+      const view = _adjOwnerSegRows(ADJ_OWNER_TIMELINE, { v: 1, segs: st.draft }, today, us, ADJ_ALL_SHOPS, ADJ_OWNER_CLOUD_MIN_FROM, resolve);
+      const diff = _adjOwnerDraftDiff(openSegs, st.draft);
+      const rowHtml = r => {
+        if (r.kind === 'cloud' && st.editKey === r.key) {
+          return `<li class="adj-owner-row adj-owner-editing">
+            <span class="adj-owner-from">${escapeHtml(r.fromLabel)}</span>
+            <select class="adj-owner-select adj-owner-edit-sel">${ownerOpts(r.owner, pick)}</select>
+            <span class="adj-owner-acts">${actBtn('edit-ok', '確定', r.key.split('|')[0], r.from)}${actBtn('edit-cancel', '取消', '', '', true)}</span>
+          </li>`;
+        }
+        const dirty = diff.added.includes(r.key) ? '新增（未儲存）' : (diff.changed.includes(r.key) ? '修改（未儲存）' : '');
+        const shop = r.key.split('|')[r.kind === 'base' ? 1 : 0];
+        return `<li class="adj-owner-row">
+            <span class="adj-owner-from">${escapeHtml(r.fromLabel)}</span>
+            <span class="adj-owner-name">${escapeHtml(r.name || '—')}</span>${r.warn ? `<span class="adj-owner-warn">${escapeHtml(r.warn)}</span>` : ''}
+            <span class="adj-owner-tag adj-owner-tag-${r.status}">${escapeHtml(r.statusLabel)}</span>${dirty ? `<span class="adj-owner-dirty">${escapeHtml(dirty)}</span>` : ''}
+            ${r.editable ? `<span class="adj-owner-acts">${actBtn('edit', '改', shop, r.from, true)}${actBtn('remove', '刪', shop, r.from, true)}</span>` : ''}
+          </li>`;
+      };
+      const removedHtml = shop => diff.removed.filter(s => s.shop === shop).map(s => `<li class="adj-owner-row adj-owner-removed">
+            <span class="adj-owner-from">${escapeHtml(s.from)}</span>
+            <span class="adj-owner-name">${escapeHtml(_adjOwnerDisplay(s, resolve))}</span>
+            <span class="adj-owner-dirty">刪除（未儲存）</span>
+          </li>`).join('');
+      const msgHtml = st.msgs.length
+        ? `<div class="adj-owner-msg adj-owner-msg-${st.msgKind === 'err' ? 'err' : 'info'}"><ul class="adj-owner-msg-list">${st.msgs.map(m => `<li>${escapeHtml(m)}</li>`).join('')}</ul></div>`
+        : '';
+      return `
+        <p class="adj-owner-hint">已生效的段落不能修改；換負責人請新增一段並設定生效日，生效日當天結束前都可以改或刪。</p>
+        ${openCheck.ok ? '' : `<div class="adj-owner-msg adj-owner-msg-err">雲端上現有的負責人設定格式不對（${escapeHtml(openCheck.reason)}），目前只用程式內建的設定，這個狀態下無法存檔，請找開發人員處理。</div>`}
+        ${view.shops.map(g => `<section class="adj-owner-shop">
+          <div class="adj-owner-shop-name">${escapeHtml(g.shop)}</div>
+          <ul class="adj-owner-list">${g.rows.map(rowHtml).join('')}${removedHtml(g.shop)}</ul>
+        </section>`).join('')}
+        <div class="adj-owner-add">
+          <div class="adj-owner-add-title">新增一段</div>
+          <div class="adj-owner-add-fields">
+            <label class="adj-owner-field"><span class="adj-owner-field-label">通路</span>
+              <select class="adj-owner-select" id="adj-owner-add-shop">${sel(st.addShop, [{ value: '', text: '請選擇' }].concat(ADJ_ALL_SHOPS.map(s => ({ value: s, text: s }))))}</select></label>
+            <label class="adj-owner-field"><span class="adj-owner-field-label">生效日</span>
+              <input type="date" class="adj-owner-date" id="adj-owner-add-from" min="${escapeHtml(today)}" value="${escapeHtml(st.addFrom)}"></label>
+            <label class="adj-owner-field"><span class="adj-owner-field-label">負責人</span>
+              <select class="adj-owner-select" id="adj-owner-add-owner">${ownerOpts(st.addOwner, pick)}</select></label>
+            ${actBtn('add', '新增', '', '')}
+          </div>
+        </div>
+        ${msgHtml}`;
+    };
+    // 彈窗是否仍開著：onMount 記下的這個 box 還在 document 裡（沒被別的彈窗換掉），且背景仍顯示。
+    //   closeModal 只拿掉 .show、不清內容，所以兩個條件都要看。存檔進行中可能被點背景關掉，
+    //   之後的結果、按鈕狀態、關窗都只對「這一個」彈窗做，不碰之後才開的別的彈窗。
+    const isOpen = () => {
+      const bd = document.getElementById('modal-backdrop');
+      return !!(st.box && st.box.isConnected && bd && bd.classList.contains('show'));
+    };
+    const paint = () => { if (st.box) st.box.innerHTML = inner(); };
+    const setMsg = (kind, msgs) => { st.msgKind = kind; st.msgs = msgs; paint(); };
+    // 顯示存檔結果：彈窗開著 → 寫在彈窗內（成功不寫，直接 toast＋關窗）；已關閉 → 改用 toast。
+    //   kind：'err' → error toast；'info' → info toast；'success' → success toast。
+    const report = (kind, msgs) => {
+      if (kind !== 'success' && isOpen()) { setMsg(kind, msgs); return; }
+      showToast(msgs.join('\n'), kind === 'err' ? 'error' : kind);
+    };
+    const setBusy = (on) => {
+      st.busy = on;
+      if (!isOpen()) return;
+      ['modal-save', 'modal-cancel', 'modal-close-x'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = on; });
+    };
+    const applyOp = (op) => {
+      const r = _adjOwnerDraftApply(st.draft, op, today);
+      if (!r.ok) { setMsg('err', [r.msg]); return false; }
+      st.draft = r.segs; st.msgs = []; return true;
+    };
+    // 讀 getDoc('server') 回來的 snapshot 裡的負責人欄位（app/main 欄位名是含點的字面 key）；沒有 → null。
+    const readField = snap => {
+      if (!snap || typeof snap.exists !== 'function' || !snap.exists()) return null;
+      const v = (snap.data() || {})[ADJ_OWNER_CLOUD_KEY];
+      return v === undefined ? null : v;
+    };
+    const save = async () => {
+      if (st.busy) return;
+      if (!(this.currentUser && this.currentUser.role === 'admin')) { report('err', ['只有管理員可以設定負責人。']); return; }
+      if (st.editKey) { report('err', ['還有一段正在修改，請先按「確定」或「取消」。']); return; }
+      if (!(window.__firstMainSnapshotDone && window.__cloudStore)) { report('err', ['雲端尚未連線，沒有存檔，請重新整理後再試。']); return; }
+      const cs = window.__cloudStore;
+      setBusy(true);
+      setMsg('info', ['儲存中…']);
+      try {
+        let server;
+        try { server = readField(await cs.getDoc('server')); }
+        catch (e) { report('err', ['讀取雲端現值失敗，沒有存檔：' + ((e && e.message) || e)]); return; }
+        if (_adjStableJson(server) !== _adjStableJson(openVal)) {
+          report('err', ['這段時間有其他人改過負責人設定，請關閉後重新打開再改。']); return;
+        }
+        const users = usersNow();
+        const serverSegs = (server && Array.isArray(server.segs)) ? server.segs : [];
+        const newVal = _adjOwnerBuildNewVal(serverSegs, st.draft, users, this.currentUser.username, Date.now());
+        const chk = _adjOwnerPlanCheck(server, newVal, _adjTaipeiToday(), users,
+          { shops: ADJ_ALL_SHOPS, minFrom: ADJ_OWNER_CLOUD_MIN_FROM, sharedAdminNames: SHARED_ACCOUNTS });
+        if (!chk.ok) {
+          const onlyNoChange = chk.errors.every(e => e.code === 'no-change');
+          report(onlyNoChange ? 'info' : 'err', chk.errors.map(e => e.msg)); return;
+        }
+        try { await cs.setField(ADJ_OWNER_CLOUD_KEY, newVal); }
+        catch (e) { report('err', ['寫入雲端失敗，沒有存檔：' + ((e && e.message) || e)]); return; }
+        let back;
+        try { back = readField(await cs.getDoc('server')); } catch { back = undefined; }
+        if (_adjStableJson(back) !== _adjStableJson(newVal)) {
+          report('err', ['沒有寫進雲端（可能是本機防寫或網路問題），畫面上的負責人不會改變。']); return;
+        }
+        st.msgs = [];
+        const wasOpen = isOpen();
+        report('success', ['已儲存負責人設定']);
+        if (wasOpen) this.closeModal();   // 已被關掉就不再 closeModal（避免關到之後才開的別的彈窗）
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    this.openModal({
+      title: '設定通路負責人',
+      width: '640px',
+      bodyHtml: `<div id="adj-owner-box" class="adj-owner-box">${inner()}</div>`,
+      saveLabel: '儲存',
+      cancelLabel: '取消',
+      onMount: () => {
+        const box = document.getElementById('adj-owner-box');
+        if (!box) return;
+        st.box = box;
+        box.addEventListener('change', (e) => {
+          const id = e.target && e.target.id;
+          if (id === 'adj-owner-add-shop') st.addShop = e.target.value;
+          else if (id === 'adj-owner-add-from') st.addFrom = e.target.value;
+          else if (id === 'adj-owner-add-owner') st.addOwner = e.target.value;
+        });
+        box.addEventListener('click', (e) => {
+          const b = e.target.closest && e.target.closest('[data-act]');
+          if (!b || st.busy) return;
+          const act = b.dataset.act, shop = b.dataset.shop, from = b.dataset.from;
+          if (act === 'add') {
+            const v = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+            st.addShop = v('adj-owner-add-shop'); st.addFrom = v('adj-owner-add-from'); st.addOwner = v('adj-owner-add-owner');
+            if (applyOp({ type: 'add', shop: st.addShop, from: st.addFrom, owner: st.addOwner })) {
+              st.addShop = ''; st.addFrom = ''; st.addOwner = '';
+            }
+          } else if (act === 'edit') {
+            st.editKey = shop + '|' + from; st.msgs = [];
+          } else if (act === 'edit-cancel') {
+            st.editKey = null;
+          } else if (act === 'edit-ok') {
+            const row = b.closest('.adj-owner-row');
+            const s = row && row.querySelector('.adj-owner-edit-sel');
+            if (applyOp({ type: 'edit', shop, from, owner: s ? s.value : '' })) st.editKey = null;
+          } else if (act === 'remove') {
+            if (applyOp({ type: 'remove', shop, from }) && st.editKey === shop + '|' + from) st.editKey = null;
+          }
+          paint();
+        });
+      },
+      onSave: () => { save(); return false; },
     });
   },
   openBossTaskHistoryModal() {
@@ -1010,6 +1200,10 @@ Object.assign(App, {
       this._adjPillDelegated = true;
       const host = document.getElementById('main-content');
       if (host) host.addEventListener('click', (e) => {
+        // #306：通路進度卡標題旁的「⚙ 設定負責人」（只有管理員才輸出；開窗函式開頭會再擋一次）。
+        //   按鈕在 .adj-prog-head 裡、不在 .adj-prog-toggle 裡，不會被下面的 ▾ 展開吃掉；放最前面先判斷。
+        const ownerCfg = e.target.closest && e.target.closest('.adj-owner-cfg-btn');
+        if (ownerCfg) { this.openAdjOwnerConfigModal(); return; }
         // 通路進度：點期間列 → 展開/收折同卡片內對應明細（同委派，讀當下 DOM）
         const toggle = e.target.closest && e.target.closest('.adj-prog-toggle');
         if (toggle) {
@@ -2439,6 +2633,113 @@ function _adjOwnerPlanCheck(oldVal, newVal, today, users, opts) {
   });
   return done();
 }
+// ── #306 設定彈窗用的純函式（不讀全域，全部參數傳入，可在 node vm 單獨測）──
+const ADJ_OWNER_STATUS_LABEL = { base: '程式內建', locked: '已生效・鎖住', today: '今天生效・可改', future: '尚未生效・可改' };
+const _adjOwnerNorm = s => String(s == null ? '' : s).trim().toLowerCase();
+// 用 username 找帳號（trim、不分大小寫；對到不只一個就當找不到）。
+function _adjOwnerFindUser(users, username) {
+  const u = _adjOwnerNorm(username);
+  const hits = (Array.isArray(users) ? users : []).filter(x => x && _adjOwnerNorm(x.username) === u);
+  return hits.length === 1 ? hits[0] : null;
+}
+// 負責人下拉可選的帳號：未停用、未刪除、role 不是 view、不是共用帳號。回 [{ username, name, label:'姓名（username）' }]，順序同 users。
+function _adjOwnerSelectableUsers(users, sharedNames) {
+  const shared = (Array.isArray(sharedNames) ? sharedNames : []).map(_adjOwnerNorm);
+  return (Array.isArray(users) ? users : [])
+    .filter(u => u && typeof u.username === 'string' && u.username.trim()
+      && !u.disabled && !u.deleted && u.role !== 'view' && !shared.includes(_adjOwnerNorm(u.username)))
+    .map(u => {
+      const name = (typeof u.name === 'string' && u.name.trim()) || u.username;
+      return { username: u.username, name, label: name + '（' + u.username + '）' };
+    });
+}
+// BASE＋雲端 → 每通路的段落清單（依生效日排序）與狀態標籤。
+//   回 { cloudOk, cloudReason, shops:[{ shop, rows:[{ key, kind:'base'|'cloud', from, fromLabel, owner, name, status, statusLabel, editable, warn }] }] }。
+//   雲端值不合法 → 只列 BASE（同讀取端「整份不用」），cloudOk:false。warn：雲端段負責人帳號已停用 / 已刪除 → '已停用'。
+//   resolve＝makeUserIdentityResolver 產生的函式（可省略：只用 ownerName / owner 顯示）。
+function _adjOwnerSegRows(base, cloudVal, today, users, shops, minFrom, resolve) {
+  const v = _adjValidateOwnerCloud(cloudVal, shops, minFrom);
+  const segs = v.ok ? v.segs : [];
+  return {
+    cloudOk: v.ok,
+    cloudReason: v.ok ? '' : v.reason,
+    shops: shops.map(shop => {
+      const rows = [];
+      base.forEach(b => {
+        if (!(shop in b.map)) return;
+        rows.push({ key: 'base|' + shop + '|' + b.from, kind: 'base', from: b.from, fromLabel: b.from || '最早', owner: '', name: b.map[shop],
+          status: 'base', statusLabel: ADJ_OWNER_STATUS_LABEL.base, editable: false, warn: '' });
+      });
+      segs.filter(s => s.shop === shop).forEach(s => {
+        const status = s.from < today ? 'locked' : (s.from === today ? 'today' : 'future');
+        const u = _adjOwnerFindUser(users, s.owner);
+        rows.push({ key: s.shop + '|' + s.from, kind: 'cloud', from: s.from, fromLabel: s.from, owner: s.owner, name: _adjOwnerDisplay(s, resolve),
+          status, statusLabel: ADJ_OWNER_STATUS_LABEL[status], editable: status !== 'locked', warn: u && (u.disabled || u.deleted) ? '已停用' : '' });
+      });
+      rows.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : (a.kind === 'base' ? -1 : 1)));
+      return { shop, rows };
+    }),
+  };
+}
+// 草稿操作（不改傳入的陣列，回新陣列）。op：
+//   { type:'add', shop, from, owner } / { type:'edit', shop, from, owner }（只換負責人）/ { type:'remove', shop, from }。
+//   回 { ok, segs, msg }。這裡只做方便操作的前置檢查，存檔時一律再跑 _adjOwnerPlanCheck。
+function _adjOwnerDraftApply(segs, op, today) {
+  const list = Array.isArray(segs) ? segs : [];
+  const fail = msg => ({ ok: false, segs: list, msg });
+  const idx = list.findIndex(s => s && op && s.shop === op.shop && s.from === op.from);
+  if (!op || !op.shop) return fail('請選擇通路。');
+  if (op.type === 'add') {
+    if (!_adjIsRealDate(op.from)) return fail('請選擇生效日。');
+    if (op.from < today) return fail('生效日只能選今天（' + today + '）或以後。');
+    if (!op.owner || !String(op.owner).trim()) return fail('請選擇負責人。');
+    if (idx >= 0) return fail(op.shop + ' 在 ' + op.from + ' 已經有一段了，請直接修改那一段。');
+    return { ok: true, segs: list.concat([{ shop: op.shop, from: op.from, owner: String(op.owner).trim() }]), msg: '' };
+  }
+  if (idx < 0) return fail('找不到這一段。');
+  if (list[idx].from < today) return fail('這一段已經生效，不能修改或刪除。');
+  if (op.type === 'edit') {
+    if (!op.owner || !String(op.owner).trim()) return fail('請選擇負責人。');
+    const next = list.slice();
+    next[idx] = Object.assign({}, list[idx], { owner: String(op.owner).trim() });
+    return { ok: true, segs: next, msg: '' };
+  }
+  if (op.type === 'remove') return { ok: true, segs: list.filter((_, i) => i !== idx), msg: '' };
+  return fail('不明的操作。');
+}
+// 草稿和開窗時比：{ added:[key], changed:[key], removed:[seg] }（key＝'通路|生效日'；只比 owner，草稿只會改 owner）。
+function _adjOwnerDraftDiff(openSegs, draftSegs) {
+  const keyOf = s => s.shop + '|' + s.from;
+  const o = new Map((openSegs || []).map(s => [keyOf(s), s]));
+  const d = new Map((draftSegs || []).map(s => [keyOf(s), s]));
+  const added = [], changed = [], removed = [];
+  d.forEach((s, k) => { if (!o.has(k)) added.push(k); else if (o.get(k).owner !== s.owner) changed.push(k); });
+  o.forEach((s, k) => { if (!d.has(k)) removed.push(s); });
+  return { added, changed, removed };
+}
+// 組出要存的新值：未變動的段落沿用開窗時那一筆（一個欄位都不動）；新增 / 改過的補 ownerName（當下姓名）、by、at。
+function _adjOwnerBuildNewVal(openSegs, draftSegs, users, byUsername, at) {
+  const keyOf = s => s.shop + '|' + s.from;
+  const o = new Map((openSegs || []).map(s => [keyOf(s), s]));
+  return {
+    v: 1,
+    segs: (draftSegs || []).map(s => {
+      const prev = o.get(keyOf(s));
+      if (prev && prev.owner === s.owner) return prev;
+      const u = _adjOwnerFindUser(users, s.owner);
+      const ownerName = (u && typeof u.name === 'string' && u.name.trim()) || (u && u.username) || s.owner;
+      return { shop: s.shop, from: s.from, owner: s.owner, ownerName, by: byUsername, at };
+    }),
+  };
+}
+// key 排序後的 JSON（比對伺服器值用：Firestore 回來的物件 key 順序不保證跟寫進去的一樣）。undefined 一律當 null。
+function _adjStableJson(x) {
+  if (x === undefined || x === null) return 'null';
+  if (Array.isArray(x)) return '[' + x.map(_adjStableJson).join(',') + ']';
+  if (typeof x === 'object') return '{' + Object.keys(x).sort().filter(k => x[k] !== undefined)
+    .map(k => JSON.stringify(k) + ':' + _adjStableJson(x[k])).join(',') + '}';
+  return JSON.stringify(x);
+}
 // 通路 → 某天的負責人；查不到回 undefined。
 function adjOwnerOf(shop, date) {
   const m = _adjMapOn(date);
@@ -2791,7 +3092,9 @@ function _progCardModel(shops, progOf, ownerOf) {
 //   （範圍取 toggle.closest('.dp-card, .dp-prog-card')，只在本卡內找明細，跟卡片排列順序無關）。
 //   🔴 每個通路各自 try/catch：shopLabelProgress 逐列重算標籤，一個通路的髒資料不能讓整張卡消失。
 //   明細（grp / flat / curMark）只剩本卡一份（人員卡舊「優化進度」塊4-3 已拆）。
-function buildProgressCardHtml() {
+//   opts.canEditOwners（#306）：true（管理員）才在標題旁輸出「⚙ 設定負責人」；其他人的輸出跟加這功能前逐字相同。
+function buildProgressCardHtml(opts) {
+  const canEditOwners = !!(opts && opts.canEditOwners);
   const today = toDateStr(new Date());
   const hasSLP = typeof window.shopLabelProgress === 'function';
   const progOf = shop => hasSLP ? window.shopLabelProgress(shop) : null;
@@ -2854,7 +3157,8 @@ function buildProgressCardHtml() {
   return `<div class="dp-prog-card">
     <div class="adj-prog">
       <div class="adj-prog-head">
-        <div class="adj-prog-title">通路進度（今天）</div>
+        <div class="adj-prog-title">通路進度（今天）</div>${canEditOwners ? `
+        <button type="button" class="adj-owner-cfg-btn" title="設定各通路的負責人">⚙ 設定負責人</button>` : ''}
         <span class="adj-prog-legend"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span></span>
       </div>
       ${rows}

@@ -456,3 +456,70 @@
   gap: 6px;
   min-width: 0;
 }
+
+/* #306 通路負責人設定：通路進度卡標題旁的 ⚙ 入口（只有管理員才輸出）＋設定彈窗。
+   選擇器一律 .adj-owner- 開頭，不影響其他元件；顏色走既有 :root 變數，不寫死色碼、不碰 --bg 底色。 */
+.adj-owner-cfg-btn{
+  margin-right:auto;            /* .adj-prog-head 是 space-between：把圖例推到最右，按鈕貼著標題 */
+  padding:2px 8px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--surface);
+  color:var(--text-muted);
+  font-size:11px;
+  font-family:inherit;
+  line-height:1.6;
+  cursor:pointer;
+}
+.adj-owner-cfg-btn:hover{border-color:var(--primary);color:var(--primary);}
+
+.adj-owner-box{display:flex;flex-direction:column;gap:12px;}
+.adj-owner-hint{margin:0;font-size:12px;line-height:1.6;color:var(--text-muted);}
+.adj-owner-shop{border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;}
+.adj-owner-shop-name{font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px;}
+.adj-owner-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;}
+.adj-owner-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12.5px;color:var(--text);min-height:26px;}
+.adj-owner-from{flex:0 0 88px;color:var(--text-muted);font-variant-numeric:tabular-nums;}
+.adj-owner-name{font-weight:600;}
+.adj-owner-warn{font-size:11px;font-weight:700;color:var(--danger);background:var(--danger-soft);border-radius:999px;padding:0 7px;}
+.adj-owner-tag{font-size:11px;border-radius:999px;padding:0 7px;line-height:1.7;}
+.adj-owner-tag-base{background:var(--primary-soft);color:var(--primary-dark);}
+.adj-owner-tag-locked{background:var(--border);color:var(--text-muted);}
+.adj-owner-tag-today{background:var(--warn-soft);color:var(--text);}
+.adj-owner-tag-future{background:var(--info-soft);color:var(--text);}
+.adj-owner-dirty{font-size:11px;font-weight:700;color:var(--primary);}
+.adj-owner-removed .adj-owner-from,
+.adj-owner-removed .adj-owner-name{text-decoration:line-through;color:var(--text-muted);}
+.adj-owner-acts{margin-left:auto;display:inline-flex;gap:4px;}
+.adj-owner-btn{
+  padding:3px 10px;
+  border:1px solid var(--primary);
+  border-radius:6px;
+  background:var(--primary);
+  color:var(--surface);
+  font-size:12px;
+  font-family:inherit;
+  cursor:pointer;
+}
+.adj-owner-btn:hover{background:var(--primary-dark);}
+.adj-owner-btn-ghost{background:var(--surface);color:var(--primary);}
+.adj-owner-btn-ghost:hover{background:var(--primary-soft);}
+.adj-owner-select,
+.adj-owner-date{
+  padding:4px 8px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--surface);
+  color:var(--text);
+  font-size:12.5px;
+  font-family:inherit;
+}
+.adj-owner-add{border:1px dashed var(--border);border-radius:var(--radius-sm);padding:8px 10px;}
+.adj-owner-add-title{font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:6px;}
+.adj-owner-add-fields{display:flex;align-items:flex-end;flex-wrap:wrap;gap:8px;}
+.adj-owner-field{display:flex;flex-direction:column;gap:2px;}
+.adj-owner-field-label{font-size:11px;color:var(--text-muted);}
+.adj-owner-msg{border-radius:var(--radius-sm);padding:8px 10px;font-size:12.5px;line-height:1.6;}
+.adj-owner-msg-err{background:var(--danger-soft);color:var(--danger);font-weight:600;}
+.adj-owner-msg-info{background:var(--info-soft);color:var(--text);}
+.adj-owner-msg-list{margin:0;padding-left:18px;}
