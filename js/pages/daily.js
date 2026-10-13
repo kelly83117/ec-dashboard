@@ -9,6 +9,32 @@ const { Store, escapeHtml, showToast, toDateStr, addDays, todayStr, genId, DAILY
 //   2026-09-04 楊心雨接手維克後加入。
 const ALLOWED_NAMES = Object.freeze(['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨']);
 
+// 需求 3 塊 5-B：老闆任務的完成者。doneBy＝卡片主人姓名（舊資料只有這個）；doneByUser＝實際勾選的登入帳號 username。
+//   顯示：有 doneByUser → 轉成目前姓名（對不到顯示原字）；沒有 → 照舊顯示 doneBy。
+const _bossTaskDoneByName = (t) => {
+  const u = (t && typeof t.doneByUser === 'string') ? t.doneByUser.trim() : '';
+  if (!u) return (t && t.doneBy) || '';
+  const fn = _adjWhoResolver();
+  const id = fn ? fn(u) : null;
+  return (id && id.display) || u;
+};
+// 勾完成時的新物件：doneByUser trim 後非空才寫，否則拿掉（不留舊值）。
+const _bossTaskDone = (t, ownerName, username) => {
+  const next = { ...t, status: 'done', doneAt: Date.now(), doneBy: ownerName };
+  delete next.doneByUser;
+  const u = String(username || '').trim();
+  if (u) next.doneByUser = u;
+  return next;
+};
+// LINE 訊息的完成者：卡片主人；勾選的人（轉成姓名）跟卡片主人不同時加「（由 ○○ 勾選）」。
+const _bossTaskLineWho = (ownerName, username) => {
+  const u = String(username || '').trim();
+  const fn = u ? _adjWhoResolver() : null;
+  const id = fn ? fn(u) : null;
+  const who = u ? ((id && id.display) || u) : '';
+  return (who && who !== ownerName) ? ownerName + '（由 ' + who + ' 勾選）' : ownerName;
+};
+
 Object.assign(App, {
   renderWeeklyCalendarTab(deptId, color, dept) {
     // ⚡ profit.js 動態載入 + 懶載工作日誌需要的雲端組：工作日誌用 collectAdjustments（calcAnalysis 等 profit.js 匯出）算
@@ -810,7 +836,8 @@ Object.assign(App, {
         ? '<span style="padding:2px 8px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700">全體</span>'
         : `<span style="padding:2px 8px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:700">${escapeHtml(t.assignee || '—')}</span>`;
       const dueLine = t.due ? `<span style="font-size:11px;color:var(--text-muted)">📅 預計 ${escapeHtml(t.due.replace(/-/g, '/'))}</span>` : '';
-      const doneByLine = t.doneBy ? `<span style="font-size:11px;color:#10b981;font-weight:600">✓ ${escapeHtml(t.doneBy)}</span>` : '';
+      const _doneWho = _bossTaskDoneByName(t);
+      const doneByLine = _doneWho ? `<span style="font-size:11px;color:#10b981;font-weight:600">✓ ${escapeHtml(_doneWho)}</span>` : '';
       return `
         <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:#f9fafb;border:1px solid var(--border);border-radius:8px">
           <div style="width:22px;height:22px;border-radius:6px;background:#10b981;color:white;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✓</div>
@@ -1191,6 +1218,7 @@ Object.assign(App, {
     const todayStr = toDateStr(new Date());
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
+    const myUsername = (this.currentUser && this.currentUser.username) || '';
 
     // 第六塊：淨利表調整 pill → 開明細彈窗。用「事件委派」掛在持久容器 #main-content 上，
     //   且只掛一次（旗標守衛，避免每次 render 重複掛而觸發多次）。放函式開頭：下方 748 行
@@ -1272,9 +1300,9 @@ Object.assign(App, {
         if (!canToggle) { showToast('沒有權限', 'error'); return; }
         const wasNotDone = t.status !== 'done';
         if (t.status === 'done') {
-          list[idx] = { ...t, status: 'todo', doneAt: null, doneBy: null };
+          list[idx] = { ...t, status: 'todo', doneAt: null, doneBy: null, doneByUser: null };
         } else {
-          list[idx] = { ...t, status: 'done', doneAt: Date.now(), doneBy: myName };
+          list[idx] = _bossTaskDone(t, myName, myUsername);
         }
         Store.set('ec.bossTasks', list);
         // 同步更新同事待辦清單中，從這筆老闆任務複製過去的項目勾選狀態
@@ -1306,7 +1334,7 @@ Object.assign(App, {
         if (wasNotDone) {
           const dueLine = t.due ? '\n📅 預計完成日：' + t.due.replace(/-/g, '/') : '';
           const msg = '✅ 任務完成通知\n' + (t.desc || '')
-            + '\n👤 完成者：' + (myName || '未知')
+            + '\n👤 完成者：' + _bossTaskLineWho(myName || '未知', myUsername)
             + dueLine
             + '\n→ 前往儀表板查看 https://kelly83117.github.io/ec-dashboard/';
           this.pushLineNotifyToBoss(msg).then(r => {
@@ -1424,14 +1452,15 @@ Object.assign(App, {
           if (idx >= 0) {
             const t = list[idx];
             const wasNotDone = t.status !== 'done';
+            const _me = this.currentUser && this.currentUser.username;
             list[idx] = cb.checked
-              ? { ...t, status: 'done', doneAt: Date.now(), doneBy: name }
-              : { ...t, status: 'todo', doneAt: null, doneBy: null };
+              ? _bossTaskDone(t, name, _me)
+              : { ...t, status: 'todo', doneAt: null, doneBy: null, doneByUser: null };
             Store.set('ec.bossTasks', list);
             if (cb.checked && wasNotDone) {
               const dueLine = t.due ? '\n📅 預計完成日：' + t.due.replace(/-/g, '/') : '';
               const msg = '✅ 任務完成通知\n' + (t.desc || '')
-                + '\n👤 完成者：' + name
+                + '\n👤 完成者：' + _bossTaskLineWho(name, _me)
                 + dueLine
                 + '\n→ 前往儀表板查看 https://kelly83117.github.io/ec-dashboard/';
               this.pushLineNotifyToBoss(msg).then(r => {
