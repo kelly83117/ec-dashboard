@@ -1811,13 +1811,15 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .ky-mt thead th.ky-mt-g{text-align:center;background:#eef2f7;color:#374151;font-weight:700;border-left:1.5px solid #cbd5e1;}
 .ky-mt thead th.ky-mt-g.tot{background:#dfe6ef;}
 .ky-mt thead th.tot{background:#eef2f7;}
+.ky-mt thead tr:nth-child(2) th{text-align:center;}   /* 營收／純利／率 欄位標題置中 */
 .ky-mt thead th.ky-mt-g i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:0;}
 .ky-mt .ky-mt-gs{border-left:1.5px solid #cbd5e1;}
 .ky-mt th.ky-mt-m{position:sticky;left:0;z-index:1;text-align:left;background:#fff;font-weight:600;color:#1a1a2e;font-size:13px;}
 .ky-mt thead th.ky-mt-m{z-index:2;background:#f8f9fc;font-size:11px;color:#6b7280;vertical-align:bottom;}
-.ky-mt td.ky-mt-p{font-weight:700;color:#1a1a2e;}
+.ky-mt tbody td{font-size:12px;}
+.ky-mt td.ky-mt-p{font-weight:400;color:#1a1a2e;}
 .ky-mt td.ky-mt-p.neg{color:#dc2626;}
-.ky-mt td.ky-mt-r{font-size:11.5px;color:#9ca3af;}
+.ky-mt td.ky-mt-r{font-size:10.5px;color:#9ca3af;}
 .ky-mt tbody tr:hover td,.ky-mt tbody tr:hover th{background:#f5f7ff;}
 .ky-mt tr.ky-mt-year td,.ky-mt tr.ky-mt-year th{background:#f3f4f6;font-weight:800;border-top:2px solid #cbd5e1;}
 .ky-mt tr.ky-mt-year td.ky-mt-r{font-weight:700;}
