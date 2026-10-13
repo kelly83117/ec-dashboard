@@ -23,7 +23,7 @@ ec-dashboard/
 │  │  ├─ dashboard.js  ← 儀表板首頁
 │  │  ├─ marketing.js  ← 行銷：工作日誌 / 洞察表 / 本月明細 / 卡片輸入
 │  │  ├─ employees.js  ← 績效管理
-│  │  ├─ daily.js      ← 每日工作進度
+│  │  ├─ daily.js      ← 每日工作進度 / 通路負責人（BASE＋雲端 ec.adjOwnerTimeline、⚙ 設定彈窗）
 │  │  ├─ offices.js    ← 各辦公室（採購 / 商開 / 設計）
 │  │  ├─ users.js      ← 帳號管理
 │  │  └─ modal.js      ← 通用 Modal
@@ -81,6 +81,7 @@ escapeHtml…）、全站設定常數（`OFFICE_CONFIG`、`PLATFORMS`…），�
 文件）與 `window.__cloudProfit` / `window.__cloudProfitCol`（淨利表的
 `app/profit` 文件、`profits` collection、archive docs），訂閱快照並寫入
 `Store._profitMem`，就緒後 dispatch `cloudStoreReady` 事件。
+另提供唯讀觀測函式 `__profitArchivesReady()` / `__profitsCollectionReady()`（不以 `__cloud` 開頭、不算進 TEST_NOWRITE 物件數）。
 **注意：** 唯一含第三方 `import` 的檔，必須最後載入（觸發 `app.js` 啟動）。
 
 ### `js/version.js` — 版本檢查

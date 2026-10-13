@@ -70,6 +70,9 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    方法數 38 是**推算**（21 / 33 時的實測值 + PChome 兩物件 4 支 + `updateNoteTx` 1 支），還沒用防護碼實際跑過，
    **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
+   唯讀觀測點**不算**進物件數：`window.__profitArchivesReady()`、`window.__profitsCollectionReady()`（#315，profits collection
+   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 23 / 38 這個基準。
+   #306 通路負責人存檔走既有的 `__cloudStore.setField`（寫 `ec.adjOwnerTimeline`），**沒有新增雲端物件**。
    開機時會攔到 1 筆既有寫入（`__cloudStore.setField` `['ec.seeded.v5', true]`），屬正常；開機不會有任何 `removeFields`。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
    （觸發 profit.js 動態載入）才會存在；還沒進就打會 `is not defined`。
@@ -186,6 +189,23 @@ ESM 有個致命陷阱必須牢記：
   沒有「本機待同步」、也沒有洞察表的「☁ 同步雲端」鈕了。新增帶 `opId`（沒確認的輸入重按沿用同一個，交易重跑不會重複）；
   長期備註只在失焦 / 關窗時寫，帶 `base` 做 compare-and-set（別人剛改過就不蓋、提示）。
   詳細的寫入期間畫面、提示文字、草稿（`ec.insightNoteDrafts`）見 marketing.js `openInsightNoteModal` 與 `_insNoteResultMsg`。
+- `app/main` 欄位 `ec.adjOwnerTimeline` — 通路負責人的雲端設定（#306），
+  形狀 `{ v:1, segs:[ { shop, from:'YYYY-MM-DD', owner:<username>, ownerName, by, at:<數字> } ] }`，一段只管一個通路。
+  - **讀取**：daily.js 寫死的 `ADJ_OWNER_TIMELINE` 是 BASE，永遠參與；雲端段疊在上面，某通路某天＝生效日 ≤ 那天裡最新的一段。
+    雲端只能存 `from > '2026-10-01'`，**不可能改到 9/30 以前**。雲端任一段不合法 ⇒ **整份不用、退回 BASE**（不部分採用）。
+    `owner` 存 username，顯示時轉成目前姓名（對不到 → `ownerName` → `owner` 原字）。查詢一律走 `adjOwnerOf` / `adjShopsOf`。
+  - **寫入**：只有 daily.js `openAdjOwnerConfigModal` 的存檔流程（工作日誌「通路進度（今天）」卡標題旁的 ⚙，admin 才看得到、才開得了）。
+    **不經 `Store.set`**：讀伺服器現值（`getDoc('server')`）跟開窗時比對 → `_adjOwnerPlanCheck` → `__cloudStore.setField` → 再讀回比對，
+    不一致就紅字、不關窗。畫面靠 app/main 訂閱更新重畫。
+  - **規則**：只有管理員；已生效的段落鎖住，生效日當天可改可刪、隔天鎖住；生效日只能今天或以後（**台灣時間**，`_adjTaipeiToday`）；
+    每通路同一天一段；負責人只能是未停用、未刪除、非 view、非共用帳號（`SHARED_ACCOUNTS`）的人；負責人後來被停用**不會自動換人**（只顯示「已停用」）。
+  - 🔴 **不要做「可以改已生效段落」的功能**：沒有 by 的紀錄是用日期推算負責人，改舊段落會讓 9/30 以前靠推算的紀錄**整批換人**，
+    畫面上不會有任何提示。要更正歷史請改程式（`ADJ_OWNER_TIMELINE`）並留紀錄。
+  - **換通路負責人**＝管理員在工作日誌「通路進度（今天）」卡的 ⚙ 設定，不用改程式、不用開 PR。
+    `ADJ_OWNER_TIMELINE` 只在要更正 2026-10-01 以前的歷史時才改。
+  - `ADJ_ALL_SHOPS` 維持寫死（由 BASE 推導），**不要從雲端推導**。注意它不是唯一一份通路清單：marketing.js 另有多份寫死的
+    `INSIGHT_SHOPS`、firebase.js 也有一份，新增通路時要一起改。
+  - ⚠ 「只有管理員」只是**前端防呆**，Firestore 規則全開；`_adjOwnerPlanCheck` 是寫入前最後一道把關，畫面限制只是方便操作。
 - `profits` collection — 每月每賣場一份獨立 doc（doc id 用 `__` 取代 `/`）。
 - 含 `.` 的字面欄位用 Firestore **REST API + backtick escape** 刪除
   （SDK 的 `updateDoc` 搭 `FieldPath` 不一定刪得掉），見 `firebase.js`
