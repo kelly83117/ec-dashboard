@@ -3,6 +3,33 @@ const App = window.App;
 const { Store, escapeHtml, showToast, fmtNTD, toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORMS_EXCLUDED_FROM_CUTOFF, PLATFORM_MARKETPLACE, MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, marketplaceBadgeHtml } = window;
 const { RevHist } = window;
 
+// 需求 3 塊 5-A：首頁營收署名 dailyBy[日期] = { name, username?, at }（username＝登入帳號，trim 後非空才有）。
+//   _dailyBySig：寫入用；_dailyByName：顯示用（username || name 經 resolver 轉目前姓名，對不到顯示原 name）；
+//   _dailyBySameUser：覆蓋他人判斷，雙方都有 username 比 username（trim、不分大小寫），否則退回比 name（同舊行為）。
+const _dailyBySig = (u) => {
+  const sig = { name: (u && (u.name || u.username)) || '', at: Date.now() };
+  const un = String((u && u.username) || '').trim();
+  if (un) sig.username = un;
+  return sig;
+};
+const _dailyByUserResolver = () => {
+  const mk = window.makeUserIdentityResolver;
+  const users = Store.get(Store.KEYS.users, []);
+  return typeof mk === 'function' ? mk(Array.isArray(users) ? users : []) : null;
+};
+const _dailyByName = (sig, resolve) => {
+  if (!sig) return '';
+  const key = (typeof sig.username === 'string' && sig.username.trim()) || sig.name;
+  const id = (resolve && key) ? resolve(key) : null;
+  return (id && id.ok) ? id.display : (sig.name || '');
+};
+const _dailyBySameUser = (sig, u) => {
+  const a = String((sig && sig.username) || '').trim().toLowerCase();
+  const b = String((u && u.username) || '').trim().toLowerCase();
+  if (a && b) return a === b;
+  return (sig && sig.name) === ((u && (u.name || u.username)) || '');
+};
+
 /* ------------- 歷年營收比較 · 年度總表的純計算（給資料就回結果，不碰 DOM / Store / 雲端）-------------
  * 畫面組裝在下方 App.revHistSectionHtml()。
  * @rev-hist-view-begin（node 測試靠這兩個標記切出本段，勿刪） */
@@ -597,6 +624,7 @@ Object.assign(App, {
     platforms.forEach((p, i) => { grouped[marketplaceSectionOf(p.name).key].push({ p, i }); });
 
     // 單一通路列
+    let _sigResolve;   // 署名顯示用 resolver：第一個有署名的列才建，整次 render 共用
     const buildPlatformRow = (p, i) => {
       const td = inputOf(p);
       const yd = prevOf(p);
@@ -634,9 +662,10 @@ Object.assign(App, {
       const _sig = p.dailyBy && p.dailyBy[inputDateStr];
       let sigText = '—';
       if (_sig && _sig.name) {
+        if (_sigResolve === undefined) _sigResolve = _dailyByUserResolver();
         const _d = new Date(_sig.at);
         const _pad = n => String(n).padStart(2, '0');
-        sigText = `${escapeHtml(_sig.name)} · ${_pad(_d.getMonth() + 1)}/${_pad(_d.getDate())} ${_pad(_d.getHours())}:${_pad(_d.getMinutes())}`;
+        sigText = `${escapeHtml(_dailyByName(_sig, _sigResolve))} · ${_pad(_d.getMonth() + 1)}/${_pad(_d.getDate())} ${_pad(_d.getHours())}:${_pad(_d.getMinutes())}`;
       }
 
       return `
@@ -2055,10 +2084,7 @@ Object.assign(App, {
 
       // 署名：營收與廣告費共用同一筆 dailyBy（平行兄弟欄位，🔴 絕不塞進 daily 值裡，也不走 writeField 的 Math.round）
       list[idx].dailyBy = list[idx].dailyBy || {};
-      list[idx].dailyBy[inputDateStr] = {
-        name: this.currentUser?.name || this.currentUser?.username || '',
-        at: Date.now()
-      };
+      list[idx].dailyBy[inputDateStr] = _dailyBySig(this.currentUser);
       // 這一天營收與廣告費都被清空時，署名一起刪；只清其一時保留（兩者共用同一筆署名）
       const stillHasValue =
         (list[idx].daily && list[idx].daily[inputDateStr] != null) ||
@@ -2135,7 +2161,7 @@ Object.assign(App, {
         const _bd = new Date(_by.at);
         const _bpad = n => String(n).padStart(2, '0');
         const _bwhen = `${_bpad(_bd.getMonth() + 1)}/${_bpad(_bd.getDate())} ${_bpad(_bd.getHours())}:${_bpad(_bd.getMinutes())}`;
-        byNotice = `<div style="margin-bottom:10px;padding:10px 12px;background:#f59e0b14;border-left:3px solid #f59e0b;border-radius:6px;font-size:12.5px;color:var(--text)">⚠️ 這格是 <strong>${escapeHtml(_by.name)}</strong> 於 <strong>${_bwhen}</strong> 填的，你正要覆蓋。</div>`;
+        byNotice = `<div style="margin-bottom:10px;padding:10px 12px;background:#f59e0b14;border-left:3px solid #f59e0b;border-radius:6px;font-size:12.5px;color:var(--text)">⚠️ 這格是 <strong>${escapeHtml(_dailyByName(_by, _dailyByUserResolver()))}</strong> 於 <strong>${_bwhen}</strong> 填的，你正要覆蓋。</div>`;
       }
 
       const revOldN = parseAmount(revEl?.dataset.original);
@@ -2193,7 +2219,6 @@ Object.assign(App, {
       const platforms = Store.get(Store.KEYS.platforms, null) || [];
       const p = platforms[idx];
       if (!p) return false;
-      const me = this.currentUser?.name || this.currentUser?.username || '';
       const isOverwrite = (el, dailyObj) => {
         if (!el) return false;
         const oldRaw = dailyObj && dailyObj[inputDateStr];
@@ -2203,7 +2228,7 @@ Object.assign(App, {
         if ((oldN || 0) === (newN || 0)) return false;        // ② 值沒變 → 不攔
         const by = p.dailyBy && p.dailyBy[inputDateStr];
         if (!by || !by.name) return false;                    // ③ 沒署名（舊資料）→ 不攔
-        if (by.name === me) return false;                     //    是自己填的 → 不攔
+        if (_dailyBySameUser(by, this.currentUser)) return false; // 是自己填的 → 不攔（雙方有 username 比 username，否則比 name）
         return true;                                          // 三條件同時成立 → 攔
       };
       const revEl = document.querySelector(`.card-rev[data-idx="${idx}"]`);
@@ -2351,7 +2376,6 @@ Object.assign(App, {
       });
 
       // 署名：營收與廣告費在上面兩個獨立 forEach 各自處理，dailyBy 一律等兩迴圈都跑完再統一寫/刪一次
-      const _byName = this.currentUser?.name || this.currentUser?.username || '';
       const _touchedIdxs = new Set();
       document.querySelectorAll('.entry-rev, .entry-ads').forEach(el => {
         const idx = +el.dataset.idx;
@@ -2359,7 +2383,7 @@ Object.assign(App, {
       });
       _touchedIdxs.forEach(idx => {
         list[idx].dailyBy = list[idx].dailyBy || {};
-        list[idx].dailyBy[entryDate] = { name: _byName, at: Date.now() };
+        list[idx].dailyBy[entryDate] = _dailyBySig(this.currentUser);
         // 這一天營收與廣告費都空了才刪署名（兩者共用同一筆）
         const stillHasValue =
           (list[idx].daily && list[idx].daily[entryDate] != null) ||
@@ -2486,10 +2510,7 @@ Object.assign(App, {
 
         // 署名：營收與廣告費共用同一筆 dailyBy（平行兄弟欄位，🔴 不塞進 daily 值裡）
         p.dailyBy = p.dailyBy || {};
-        p.dailyBy[dateStr] = {
-          name: this.currentUser?.name || this.currentUser?.username || '',
-          at: Date.now()
-        };
+        p.dailyBy[dateStr] = _dailyBySig(this.currentUser);
         // 這一天營收與廣告費都空了才刪署名（廣告費僅 hasAds 時會被寫入，dailyAdSpend 可能不存在，用 && 防呆）
         const stillHasValue =
           (p.daily && p.daily[dateStr] != null) ||
