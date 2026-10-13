@@ -7984,7 +7984,10 @@ function openNotePopup(shopKey,code){
 //   姓名一律經 escapeHtmlLike 跳脫（ec.users 的 name 是使用者輸入）。
 function _pnmByHtml(by){
   if(typeof by!=='string'||!by.trim()) return '';
-  return `<span class="pnm-entry-by">${escapeHtmlLike(momoOptlogUserToName(by)||by)}</span>`;
+  // 需求 3 塊 5-C：經 resolveUserIdentity 轉目前姓名（帳號 trim＋不分大小寫）；對不到用原字；帳號停用 / 刪除加「（已停用）」。
+  const id=(typeof window.resolveUserIdentity==='function')?window.resolveUserIdentity(by):null;
+  const nm=(id&&id.ok)?(id.display+(id.status!=='active'?'（已停用）':'')):by;
+  return `<span class="pnm-entry-by">${escapeHtmlLike(nm)}</span>`;
 }
 function renderPnmList(){
   if(!_pnm)return;
