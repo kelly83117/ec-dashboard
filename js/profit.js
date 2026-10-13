@@ -11593,7 +11593,7 @@ function _kpiYearViewHtml(){
     <div class="ky-rcards" style="--n:${model.groups.length+1}" title="最新月份（${lastM} 月）純利率；變化＝跟 ${firstM} 月比">${rcards}</div>
     <div class="ky-c2"><canvas id="kpi-year-rate"></canvas></div>
   </div>`;
-  return `<div class="ky-wrap">${top}${cards}<div class="ky-mid">${chartPanel}${tblPanel}</div>${_kpiYearMonthlyHtml(model)}${trend}</div>`;
+  return `<div class="ky-wrap">${top}${cards}<div class="ky-mid">${tblPanel}${chartPanel}</div>${_kpiYearMonthlyHtml(model)}${trend}</div>`;
 }
 // ── 各通路每月明細（2026-10-13）──
 //   數字＝上方長條圖／「各通路全年」同一份 _kpiYearModel（_kpiGroupTotals，營收＝實際營收、共同費用已扣），不另算。
