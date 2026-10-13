@@ -2215,6 +2215,11 @@ function collectAdjustments() {
 //    顯示：雲端段存的是 username，經 _adjWhoResolver 轉成「目前姓名」（帳號改名即時反映）；對不到人 → ownerName → owner 原字。
 //    ADJ_ALL_SHOPS 只從 BASE 推導，不從雲端推導（雲端不能新增通路）。
 //    驗證 / 合併 / 轉姓名是純函式（_adjValidateOwnerCloud / _adjOwnerDisplay / _adjBuildOwnerLookup），可在 node vm 單獨測。
+//    存檔（之後的 ⚙ 設定彈窗）：_adjOwnerPlanCheck(伺服器現值, 新值, 台灣今天, ec.users, opts) 是寫入前的【最後一道把關】，
+//       用存檔「當下」的 _adjTaipeiToday() 判斷（23:59 開窗、00:01 才存，以 00:01 那天為準）。
+//       規則：已生效（from < 今天）的段落鎖住、原封不動；from 是今天的當天還能改 / 刪；新增 / 修改的 from 只能 ≥ 今天；
+//       負責人須是存在、未停用、未刪除、非 view、非共用 admin 的帳號（已鎖住沒動的段落不重查）。
+//       畫面上的限制（日期下拉、帳號清單、鎖頭）只是方便操作，不能取代這支檢查。
 // ⚠️ 改 BASE 換負責人 = 在清單【最後】加一段 { from:'YYYY-MM-DD', map:{…} }，【不要改舊段】——
 //    紀錄本身不存負責人，歸屬是「用紀錄日期查這份清單」算出來的；改舊段會讓歷史跟著變成新負責人。
 // ⚠️ 2026-07-29 更正：玩樂是郭雅琪 2026/04 起接手，先前寫成洪嘉蓮是錯的。
@@ -2358,6 +2363,81 @@ function _adjOwnerLookup() {
   const lookup = _adjBuildOwnerLookup(ADJ_OWNER_TIMELINE, segs, ADJ_ALL_SHOPS, segs.length ? _adjWhoResolver() : null);
   _adjOwnerCache = { cloud, users, lookup };
   return lookup;
+}
+// 純函式：台灣時間（Asia/Taipei）的今天 'YYYY-MM-DD'；now 可傳入方便測試，預設現在。
+//   同 sheetsync.js 的 taipeiToday 邏輯，但自帶一份：sheetsync.js 在 main.js 排在本檔之後、只掛 window.SheetSync，
+//   本檔不依賴另一個頁面模組（也讓這支能單獨在 node vm 測）。
+function _adjTaipeiToday(now) {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(now || new Date());
+  const g = t => (p.find(x => x.type === t) || {}).value;
+  return g('year') + '-' + g('month') + '-' + g('day');
+}
+// 純函式：存檔前檢查（最後一道把關，規則見 ADJ_OWNER_TIMELINE 前的說明）。不讀全域，全部從參數傳入：
+//   oldVal＝存檔前從伺服器讀到的現值（null / undefined ＝沒有雲端段）；newVal＝要存的新值；today＝台灣今天 'YYYY-MM-DD'；
+//   users＝ec.users 陣列；opts＝{ shops, minFrom, sharedAdminNames }。
+//   回傳 { ok, errors:[{ code, shop, from, msg }] }；msg 給管理員看。沒有任何變動 → ok:false、code 'no-change'。
+const ADJ_OWNER_SEG_FIELDS = ['shop', 'from', 'owner', 'ownerName', 'by', 'at'];
+function _adjOwnerPlanCheck(oldVal, newVal, today, users, opts) {
+  const o = opts || {};
+  const shops = Array.isArray(o.shops) ? o.shops : [];
+  const minFrom = o.minFrom;
+  const errors = [];
+  const err = (code, shop, from, msg) => errors.push({ code, shop: shop == null ? null : shop, from: from == null ? null : from, msg });
+  const done = () => ({ ok: errors.length === 0, errors });
+  const norm = s => String(s == null ? '' : s).trim().toLowerCase();
+
+  if (!shops.length || !_adjIsRealDate(minFrom)) { err('bad-opts', null, null, '檢查設定不完整（通路清單或最早日期），無法存檔。'); return done(); }
+  if (!_adjIsRealDate(today)) { err('bad-today', null, null, '取不到正確的「今天」日期，無法存檔，請重新整理後再試。'); return done(); }
+
+  // a. 新值格式
+  if (newVal === undefined || newVal === null) { err('format', null, null, '要存的資料是空的，無法存檔。'); return done(); }
+  const nv = _adjValidateOwnerCloud(newVal, shops, minFrom);
+  if (!nv.ok) { err('format', null, null, '要存的資料格式不對（' + nv.reason + '），沒有存檔。'); return done(); }
+  // 伺服器現值不合法時讀取端整份不用；這裡不在看不懂的資料上疊改，擋下來交給人處理。
+  const ov = _adjValidateOwnerCloud(oldVal, shops, minFrom);
+  if (!ov.ok) { err('old-invalid', null, null, '雲端上現有的負責人設定格式不對（' + ov.reason + '），請先找開發人員處理，沒有存檔。'); return done(); }
+
+  const keyOf = s => s.shop + '|' + s.from;
+  const same = (a, b) => ADJ_OWNER_SEG_FIELDS.every(f => JSON.stringify(a[f]) === JSON.stringify(b[f]));
+  const oldBy = new Map(ov.segs.map(s => [keyOf(s), s]));
+  const newBy = new Map(nv.segs.map(s => [keyOf(s), s]));
+
+  // e. 沒有任何變動
+  if (oldBy.size === newBy.size && [...oldBy].every(([k, s]) => newBy.has(k) && same(s, newBy.get(k)))) {
+    err('no-change', null, null, '沒有任何變更。');
+    return done();
+  }
+
+  // b. 已生效（from < 今天）的段落鎖住：必須原封不動
+  ov.segs.forEach(s => {
+    if (!(s.from < today)) return;
+    const n = newBy.get(keyOf(s));
+    if (!n) err('locked-removed', s.shop, s.from, s.shop + ' 從 ' + s.from + ' 起的負責人已經生效，不能刪除。');
+    else if (!same(s, n)) err('locked-changed', s.shop, s.from, s.shop + ' 從 ' + s.from + ' 起的負責人已經生效，不能修改。');
+  });
+
+  // c、d. 新增或修改的段落
+  const users0 = Array.isArray(users) ? users : [];
+  const shared = (Array.isArray(o.sharedAdminNames) ? o.sharedAdminNames : []).map(norm);
+  nv.segs.forEach(s => {
+    const prev = oldBy.get(keyOf(s));
+    if (prev && same(prev, s)) return;                 // 沒動的段落不重查（含已鎖住、負責人後來停用的）
+    if (prev && prev.from < today) return;             // 已鎖住被改，b 已報過
+    const where = s.shop + ' ' + s.from;
+    if (s.from < today) { err('past-date', s.shop, s.from, where + '：生效日已經過了，只能選今天（' + today + '）或以後。'); return; }
+    const u = norm(s.owner);
+    if (shared.includes(u)) { err('owner-shared', s.shop, s.from, where + '：' + s.owner.trim() + ' 是共用帳號，不能當負責人，請選個人帳號。'); return; }
+    const hits = users0.filter(x => x && norm(x.username) === u);
+    if (!hits.length) { err('owner-not-found', s.shop, s.from, where + '：找不到帳號 ' + s.owner.trim() + '。'); return; }
+    if (hits.length > 1) { err('owner-ambiguous', s.shop, s.from, where + '：帳號 ' + s.owner.trim() + ' 對到不只一個人，無法判斷是誰。'); return; }
+    const x = hits[0];
+    const name = (typeof x.name === 'string' && x.name.trim()) || x.username;
+    if (x.deleted) { err('owner-deleted', s.shop, s.from, where + '：' + name + ' 的帳號已刪除，不能當負責人。'); return; }
+    if (x.disabled) { err('owner-disabled', s.shop, s.from, where + '：' + name + ' 的帳號已停用，不能當負責人。'); return; }
+    if (x.role === 'view') { err('owner-view', s.shop, s.from, where + '：' + name + ' 是唯讀檢視帳號，不能當負責人。'); return; }
+  });
+  return done();
 }
 // 通路 → 某天的負責人；查不到回 undefined。
 function adjOwnerOf(shop, date) {
