@@ -1797,3 +1797,27 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
   .ky-rcards{grid-template-columns:repeat(2,minmax(0,1fr));}
   .ky-p-tbl{overflow-x:auto;}   /* 手機：表格比面板寬時在面板內左右捲，不截字 */
 }
+
+/* ── 年度總表：各通路每月明細（2026-10-13）── 組間 1.5px #cbd5e1（同月結表各通路表）；月份欄固定在左、表格可左右捲 */
+.ky-p-mtbl{margin-bottom:14px;}
+.ky-mt-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.ky-mt-head .ky-p-t{margin-bottom:0;}
+.ky-mt-note{font-size:11px;font-weight:500;color:#9ca3af;white-space:nowrap;}
+.ky-mt-dl{margin-left:auto;}
+.ky-mt-wrap{overflow-x:auto;}
+.ky-mt{border-collapse:separate;border-spacing:0;width:100%;font-size:13px;color:#374151;font-variant-numeric:tabular-nums;}
+.ky-mt th,.ky-mt td{white-space:nowrap;padding:6px 8px;text-align:right;border-bottom:1px solid #f3f4f6;text-transform:none;letter-spacing:normal;}
+.ky-mt thead th{font-size:11px;font-weight:600;color:#6b7280;background:#f8f9fc;}
+.ky-mt thead th.ky-mt-g{text-align:center;background:#eef2f7;color:#374151;font-weight:700;border-left:1.5px solid #cbd5e1;}
+.ky-mt thead th.ky-mt-g.tot{background:#dfe6ef;}
+.ky-mt thead th.tot{background:#eef2f7;}
+.ky-mt thead th.ky-mt-g i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:0;}
+.ky-mt .ky-mt-gs{border-left:1.5px solid #cbd5e1;}
+.ky-mt th.ky-mt-m{position:sticky;left:0;z-index:1;text-align:left;background:#fff;font-weight:600;color:#1a1a2e;font-size:13px;}
+.ky-mt thead th.ky-mt-m{z-index:2;background:#f8f9fc;font-size:11px;color:#6b7280;vertical-align:bottom;}
+.ky-mt td.ky-mt-p{font-weight:700;color:#1a1a2e;}
+.ky-mt td.ky-mt-p.neg{color:#dc2626;}
+.ky-mt td.ky-mt-r{font-size:11.5px;color:#9ca3af;}
+.ky-mt tbody tr:hover td,.ky-mt tbody tr:hover th{background:#f5f7ff;}
+.ky-mt tr.ky-mt-year td,.ky-mt tr.ky-mt-year th{background:#f3f4f6;font-weight:800;border-top:2px solid #cbd5e1;}
+.ky-mt tr.ky-mt-year td.ky-mt-r{font-weight:700;}
