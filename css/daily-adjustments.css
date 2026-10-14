@@ -120,7 +120,7 @@
 .adj-modal-item-muted .adj-modal-text { color: var(--text-muted); }
 
 /* 第三塊：月曆格內「當日各人調整筆數」橫條。結構鏡射既有 todo 橫條（daily.js:257-259），
-   顏色由 JS 經 --adj-cal-* CSS 變數傳入（單一來源 = PERSON_COLORS / PERSON_LIGHT）。 */
+   顏色由 JS 經 --adj-cal-* CSS 變數傳入（單一來源 = daily.js 檔頭 PEOPLE，衍生 PERSON_COLORS / PERSON_LIGHT）。 */
 .adj-cal-row {
   display: flex;
   align-items: stretch;

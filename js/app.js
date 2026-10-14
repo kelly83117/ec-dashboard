@@ -1344,7 +1344,7 @@ const App = {
     if (ids.length === 0) return { skipped: true, reason: '指派對象沒有 LINE userId' };
     return this._pushLineRaw(cfg, ids, message, opts);
   },
-  // 直接用 userId 推（給「通知老闆」這類情境用，因為老闆 userId 跟 3 位同事分開存）
+  // 直接用 userId 推（給「通知老闆」這類情境用，因為老闆 userId 跟同事分開存）
   async pushLineNotifyToBoss(message, opts) {
     const cfg = Store.get('ec.lineConfig', null);
     if (!cfg || !cfg.workerUrl || !cfg.secret) return { skipped: true, reason: '尚未設定 LINE 通知' };
@@ -1403,7 +1403,7 @@ const App = {
 
 
   /* ------------- 工作週曆事件綁定 ------------- */
-  /* ------------- 每日工作進度（新版：3 人卡片 + 老闆任務） ------------- */
+  /* ------------- 每日工作進度（新版：固定 4 人卡片 + 老闆任務） ------------- */
 
 
 

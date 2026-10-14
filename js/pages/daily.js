@@ -2,12 +2,27 @@
 const App = window.App;
 const { Store, escapeHtml, showToast, toDateStr, addDays, todayStr, genId, DAILY_TASK_STATUS, DAILY_TASK_STATUS_LIST, TASK_CATEGORIES, TASK_CATEGORY_NAMES, TASK_CATEGORY_ALIASES, getCategoryMeta, getCategoryItems, isUserActive } = window;
 
-// 人員固定名單【唯一一份】：決定 ① 工作日誌人員卡 / 月曆固定顯示哪些人（順序即顯示順序）
-//   ② 老闆任務能指派給誰（含「全體」展開的對象）③ LINE 通知設定列出誰、發給誰。
+// 人員表【唯一一份】：工作日誌人員的名字與顏色都從這裡來。🔴 加人只要在 PEOPLE 加一行（名字 + 深色 + 淡色），
+//   下面三份由它衍生，不要再另寫一份名單或色表（#321：以前名單與色表分三處寫，加人只改名單 → 新人變成 fallback 灰）。
+//   ALLOWED_NAMES：決定 ① 工作日誌人員卡 / 月曆固定顯示哪些人（順序＝PEOPLE 的順序＝顯示順序）
+//     ② 老闆任務能指派給誰（含「全體」展開的對象）③ LINE 通知設定列出誰、發給誰。
+//   PERSON_COLORS：深色（頭像底色、月曆「這天誰填過」的顏色點、圖例、月曆計數列）。
+//   PERSON_LIGHT：月曆待辦事項條的淡色底 { bg, text }：左邊一條深色，底色用淡色，不要整條實色。
 //   放檔頭：在所有使用處之前宣告，避開 const 的暫時死區（TDZ）。
-//   Object.freeze：各處只讀（concat / indexOf / map / 展開），凍結防止任何一處意外改到全檔共用的這份。
+//   Object.freeze（含 PEOPLE 每一列與 light 內層）：各處只讀，凍結防止任何一處意外改到全檔共用的這份。
 //   2026-09-04 楊心雨接手維克後加入。
-const ALLOWED_NAMES = Object.freeze(['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨']);
+// 顏色：陳君葳(Vivian)紫、洪嘉蓮(inna)藍、郭雅琪(Kelly)黃、楊心雨(Astrid)桃紅
+//   🔴 新增人員的選色規則：① 不可與上列既有色同色系 ② 不可用灰色系 —— 灰(#6b7280)是「查無此人設定」
+//   的 fallback（見本檔 avatarHtml 與月曆計數列的 `|| '#6b7280'`），用灰會分不出「有設定」與「漏設定」。
+const PEOPLE = Object.freeze([
+  Object.freeze({ name: '陳君葳', color: '#8b5cf6', light: Object.freeze({ bg: '#ede9fe', text: '#6d28d9' }) }),
+  Object.freeze({ name: '洪嘉蓮', color: '#3b82f6', light: Object.freeze({ bg: '#dbeafe', text: '#1d4ed8' }) }),
+  Object.freeze({ name: '郭雅琪', color: '#f59e0b', light: Object.freeze({ bg: '#fef3c7', text: '#92400e' }) }),
+  Object.freeze({ name: '楊心雨', color: '#db2777', light: Object.freeze({ bg: '#fce7f3', text: '#9d174d' }) }),
+]);
+const ALLOWED_NAMES = Object.freeze(PEOPLE.map(p => p.name));
+const PERSON_COLORS = Object.freeze(Object.fromEntries(PEOPLE.map(p => [p.name, p.color])));
+const PERSON_LIGHT = Object.freeze(Object.fromEntries(PEOPLE.map(p => [p.name, p.light])));   // 內層 light 已在 PEOPLE 凍結
 
 // 需求 3 塊 5-B：老闆任務的完成者。doneBy＝卡片主人姓名（舊資料只有這個）；doneByUser＝實際勾選的登入帳號 username。
 //   顯示：有 doneByUser → 轉成目前姓名（對不到顯示原字）；沒有 → 照舊顯示 doneBy。
@@ -56,18 +71,7 @@ Object.assign(App, {
       } catch {}
     }
     // 老闆指示：移除月曆/週曆/甘特圖，每位同事下班前 5 分鐘寫今日工作進度即可
-    // 名單見檔頭 ALLOWED_NAMES
-    // 月曆上用來標示「這天誰填過」的顏色點：陳君葳(Vivian)紫、洪嘉蓮(inna)藍、郭雅琪(Kelly)黃、楊心雨(Astrid)桃紅
-    //   🔴 新增人員的選色規則：① 不可與上列既有色同色系 ② 不可用灰色系 —— 灰(#6b7280)是「查無此人設定」
-    //   的 fallback（見本檔 avatarHtml 與月曆計數列的 `|| '#6b7280'`），用灰會分不出「有設定」與「漏設定」。
-    const PERSON_COLORS = { '陳君葳': '#8b5cf6', '洪嘉蓮': '#3b82f6', '郭雅琪': '#f59e0b', '楊心雨': '#db2777' };
-    // 月曆待辦事項條的淡色底：左邊一條深色，底色用淡色，不要整條實色
-    const PERSON_LIGHT = {
-      '陳君葳': { bg: '#ede9fe', text: '#6d28d9' },
-      '洪嘉蓮': { bg: '#dbeafe', text: '#1d4ed8' },
-      '郭雅琪': { bg: '#fef3c7', text: '#92400e' },
-      '楊心雨': { bg: '#fce7f3', text: '#9d174d' },
-    };
+    // 名單與顏色（ALLOWED_NAMES / PERSON_COLORS / PERSON_LIGHT）見檔頭 PEOPLE，加人與選色規則也寫在那裡
     const users = Store.get(Store.KEYS.users, []);
     const now = new Date();
     const todayStr = toDateStr(now);
@@ -172,8 +176,8 @@ Object.assign(App, {
       return [];
     };
 
-    // 聯集：固定 3 人 ∪ 當天有資料的其他人（例如 MOMO by-login 操作者不在 ALLOWED_NAMES）→ 解「寫入卻不顯示」的靜默失效。
-    //   ALLOWED_NAMES 在前、順序不變（蝦皮那 3 人顯示一字不變）；其餘按 localeCompare 穩定排序（不因誰先有資料就跳動）；沒人有資料的日子＝原行為。
+    // 聯集：固定 4 人（ALLOWED_NAMES）∪ 當天有資料的其他人（例如 MOMO by-login 操作者不在 ALLOWED_NAMES）→ 解「寫入卻不顯示」的靜默失效。
+    //   ALLOWED_NAMES 在前、順序不變（固定 4 人顯示一字不變）；其餘按 localeCompare 穩定排序（不因誰先有資料就跳動）；沒人有資料的日子＝原行為。
     //   （by DP-worklog 這輪：只擴充 personInfos + 下方月曆那圈，其餘 ALLOWED_NAMES 用途[老闆任務指派/LINE設定/調整面板]不動。）
     const _dpExtraNames = Object.keys(dayProgress || {})
       .filter(name => name && ALLOWED_NAMES.indexOf(name) < 0)
@@ -359,7 +363,7 @@ Object.assign(App, {
       const isCellSelected = dateStr === viewDate;
       const dayEntries = allProgressForCal[dateStr] || {};
       const dayItems = [];
-      // 月曆同 personInfos 聯集：固定 3 人 ∪ 該格有資料的其他人（穩定排序）；未在色表的人給預設灰。
+      // 月曆同 personInfos 聯集：固定 4 人 ∪ 該格有資料的其他人（穩定排序）；未在色表的人給預設灰。
       const _calRoster = ALLOWED_NAMES.concat(
         Object.keys(dayEntries).filter(n => n && ALLOWED_NAMES.indexOf(n) < 0).sort((a, b) => a.localeCompare(b, 'zh-Hant'))
       );
@@ -410,7 +414,7 @@ Object.assign(App, {
         const ps = v.find(it => it && it.kind === 'pchome-summary');
         if (ps && ps.counts) { const s = Object.values(ps.counts).reduce((a, b) => a + (b || 0), 0); if (s > 0) momoCountByPerson[n] = (momoCountByPerson[n] || 0) + s; }
       });
-      // 合併計數 + 名單聯集（同 personInfos：3 人在前不變、其餘穩定排序）。3 人無 MOMO → totalCalCount=adjCount、色/標題/數字一字不變。
+      // 合併計數 + 名單聯集（同 personInfos：固定 4 人在前不變、其餘穩定排序）。固定 4 人無 MOMO → totalCalCount=adjCount、色/標題/數字一字不變。
       const totalCalCount = {};
       [...Object.keys(adjCountByPerson), ...Object.keys(momoCountByPerson)].forEach(n => { totalCalCount[n] = (adjCountByPerson[n] || 0) + (momoCountByPerson[n] || 0); });
       const calCountRoster = ALLOWED_NAMES.concat(
@@ -424,7 +428,7 @@ Object.assign(App, {
           const lt = PERSON_LIGHT[n] || { bg: '#eef0f2', text: '#6b7280' };
           const title = momoCountByPerson[n]
             ? `${escapeHtml(n)} · ${adjCountByPerson[n] ? adjCountByPerson[n] + ' 個商品（含洞察表調整）、' : ''}${momoCountByPerson[n]} 筆 MOMO 優化`
-            : `${escapeHtml(n)} · ${adjCountByPerson[n]} 個商品（含洞察表調整）`;   // 3 人(無 MOMO)：標題與原本逐字相同
+            : `${escapeHtml(n)} · ${adjCountByPerson[n]} 個商品（含洞察表調整）`;   // 固定 4 人(無 MOMO)：標題與原本逐字相同
           return `<div class="adj-cal-row" title="${title}" style="--adj-cal-c:${c};--adj-cal-bg:${lt.bg};--adj-cal-fg:${lt.text}"><span class="adj-cal-stripe"></span><span class="adj-cal-label"><span class="adj-cal-name">${escapeHtml(n.slice(0, 1))}</span><span class="adj-cal-num">${totalCalCount[n]}</span></span></div>`;
         })
         .join('');
