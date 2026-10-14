@@ -24882,17 +24882,21 @@ function pchomeEstFeeRate(shop){
 }
 // 批次維護即時預覽（新增/編輯共用）：只正向、兩行以內、白話。第 1 行＝估計淨利率＋30% 把關；第 2 行＝一句話說明。
 //   毛利率與「偏保守」原理只放估計淨利率的 title tooltip、不攤在畫面上。售價由供貨價÷0.75 回推（填進售價欄、可覆寫）。
-function pchomeBatchPreviewHTML(cost, supply, est){
+// 批次維護定價試算的「運費+包材」預設值（PChome 自付宅配通運費、PChome 對帳單沒有這筆 → 必須真的進估計淨利率）。
+//   暫定值；宅配通對帳單上傳上線後改為由實際資料計算近期每箱平均 + 包材 3。（運費 84 + 包材 3；包材固定 3、不開輸入格，比照 momo）
+var PCHOME_DEFAULT_SHIP_PACK=87;
+function pchomeBatchPreviewHTML(cost, supply, est, shipPack){
   var esc=_momoEsc, net=(Number(supply)||0)/1.05, c=Number(cost)||0;
+  var sp=Number(shipPack); if(!(sp>=0)) sp=0;   // 空/0/NaN → 0，預覽不壞（運費包材每件一份、未稅不除 1.05）
   if(!(net>0)||!(c>0)) return '<span style="color:#9ca3af;font-size:12px">填成本與供貨價即算估計淨利率</span>';
   var gross=(net-c)/net;   // 毛利率（未扣費用）→ 只進 tooltip
   var badge=function(v){ return v>=0.30?'<span style="color:#10b981;font-weight:600">✓ 超過 30%</span>':'<span style="color:#f97316;font-weight:600">⚠ 未達 30%</span>'; };
   if(est&&est.rate!=null){
-    var estNet=(net-c-net*est.rate)/net;   // 估計淨利率
+    var estNet=(net-c-net*est.rate-sp)/net;   // 估計淨利率（扣平台費用＋運費包材每件一份）
     var col=estNet>=0.15?'#10b981':(estNet>=0?'#d97706':'#ef4444');
-    var tip='毛利率（未扣平台費用）'+pchomePct(gross)+'。估計偏保守：費率含每月固定費攤在小量上，量增後會降、真實淨利率通常更高。';
+    var tip='毛利率（未扣平台費用）'+pchomePct(gross)+'。估計偏保守：費率含每月固定費攤在小量上，量增後會降、真實淨利率通常更高。運費包材 '+sp+' 假設商品單獨一箱寄出，若常與其他商品併箱，實際每件運費會低於此值，故偏保守。';
     return '估計淨利率 <b style="color:'+col+';font-size:18px" title="'+esc(tip)+'">'+pchomePct(estNet)+'</b>　'+badge(estNet)
-      +'<div style="font-size:11px;color:#9ca3af;margin-top:3px">已扣平台費用（費率 '+pchomePct(est.rate)+'，取自 '+esc(est.month)+' 已對帳）。售價為供貨價 ÷ 0.75 回推，可自行修改。</div>';
+      +'<div style="font-size:11px;color:#9ca3af;margin-top:3px">已扣平台費用（費率 '+pchomePct(est.rate)+'，取自 '+esc(est.month)+' 已對帳）與運費包材 '+sp+'。售價為供貨價 ÷ 0.75 回推，可自行修改。</div>';
   }
   // 無已對帳月 → 無法估平台費用，只顯毛利率
   return '毛利率 <b style="color:'+(gross>=0.30?'#10b981':'#f97316')+';font-size:18px">'+pchomePct(gross)+'</b>　'+badge(gross)
@@ -25179,10 +25183,11 @@ function pchomeRenderBatchEditForm(shop){
   el.innerHTML='<div style="font-size:14px;font-weight:700;margin-bottom:10px">編輯商品</div>'
     +'<div style="margin-bottom:10px"><label style="'+_MOMO_LB+'">商品名稱</label><input id="pch-edit-name-'+shop+'" type="text" value="'+_momoEsc(p.商品名||'')+'" style="'+_MOMO_INP+'"></div>'
     +'<div style="margin-bottom:10px">'+keyFields+'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:6px">'
     +'<div><label style="'+_MOMO_LB+'">成本</label><input id="pch-edit-cost-'+shop+'" type="number" oninput="pchomeEditRecalc(\''+shop+'\')" value="'+(p.cost==null?'':p.cost)+'" style="'+_MOMO_INP+'"></div>'
     +'<div><label style="'+_MOMO_LB+'">供貨價(含稅)</label><input id="pch-edit-supply-'+shop+'" type="number" oninput="pchomeEditSupplyChanged(\''+shop+'\')" value="'+(p.供貨價==null?'':p.供貨價)+'" style="'+_MOMO_INP+'"></div>'
-    +'<div><label style="'+_MOMO_LB+'">PChome 售價(含稅)<span style="color:#9ca3af">·僅參考</span></label><input id="pch-edit-price-'+shop+'" type="number" value="'+(p.售價==null?'':p.售價)+'" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">填供貨價後自動帶入（供貨價 ÷ 0.75），可自行修改</div></div></div>'
+    +'<div><label style="'+_MOMO_LB+'">PChome 售價(含稅)<span style="color:#9ca3af">·僅參考</span></label><input id="pch-edit-price-'+shop+'" type="number" value="'+(p.售價==null?'':p.售價)+'" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">填供貨價後自動帶入（供貨價 ÷ 0.75），可自行修改</div></div>'
+    +'<div><label style="'+_MOMO_LB+'">運費+包材</label><input id="pch-edit-ship-'+shop+'" type="number" oninput="pchomeEditRecalc(\''+shop+'\')" value="'+(p.shippingPackaging==null?PCHOME_DEFAULT_SHIP_PACK:p.shippingPackaging)+'" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">自付宅配通運費＋包材（未稅、每件一份）；預設 '+PCHOME_DEFAULT_SHIP_PACK+'、可改</div></div></div>'
     +'<div id="pch-edit-preview-'+shop+'" style="min-height:22px;margin-bottom:4px"></div>'
     +'<div style="margin-bottom:10px"><label style="'+_MOMO_LB+'">異動原因（必填）</label><input id="pch-edit-note-'+shop+'" type="text" placeholder="例：補上成本 / 供應商調漲供貨價" style="'+_MOMO_INP+'"></div>'
     +'<button onclick="pchomeBatchSubmitEdit(\''+shop+'\')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">送出（新增一筆歷程）</button>'
@@ -25197,7 +25202,8 @@ function pchomeDeleteZoneHTML(shop, lock){ var locked=!!(lock&&lock.has);
 }
 function pchomeEditRecalc(shop){ var prev=document.getElementById('pch-edit-preview-'+shop); if(!prev) return;
   var cost=parseFloat((document.getElementById('pch-edit-cost-'+shop)||{}).value)||0, supply=parseFloat((document.getElementById('pch-edit-supply-'+shop)||{}).value)||0;
-  prev.innerHTML=pchomeBatchPreviewHTML(cost, supply, _pchomeEstFeeRateCache[shop]);
+  var ship=parseFloat((document.getElementById('pch-edit-ship-'+shop)||{}).value); if(!(ship>=0)) ship=0;
+  prev.innerHTML=pchomeBatchPreviewHTML(cost, supply, _pchomeEstFeeRateCache[shop], ship);
 }
 // 改供貨價 → 售價欄自動帶 供貨價÷0.75（四捨五入、可覆寫；0.75 寫死）→ 再重算估計淨利率。初次 render 不呼叫、不蓋既有售價。
 function pchomeEditSupplyChanged(shop){ var spEl=document.getElementById('pch-edit-price-'+shop), su=parseFloat((document.getElementById('pch-edit-supply-'+shop)||{}).value)||0; if(spEl && su>0) spEl.value=Math.round(su/0.75); pchomeEditRecalc(shop); }
@@ -25228,6 +25234,7 @@ function pchomeBatchSubmitEdit(shop){
   if(!p) return;
   var cost=parseFloat((document.getElementById('pch-edit-cost-'+shop)||{}).value);
   var supply=parseFloat((document.getElementById('pch-edit-supply-'+shop)||{}).value);
+  var shipRaw=parseFloat((document.getElementById('pch-edit-ship-'+shop)||{}).value); var shipPack=(shipRaw>=0)?shipRaw:0;
   var price=parseFloat((document.getElementById('pch-edit-price-'+shop)||{}).value);
   if(isNaN(price)) price=(p.售價==null?0:p.售價);
   var note=((document.getElementById('pch-edit-note-'+shop)||{}).value||'').trim();
@@ -25249,9 +25256,9 @@ function pchomeBatchSubmitEdit(shop){
   if(newName!==(p.商品名||'')) changes.push({field:'商品名稱',from:p.商品名||'',to:newName});
   if(skuChanged) changes.push({field:'原廠編號',from:p.料號,to:newSku});
   if(!lock.has){ var oldPn=(p.商品編號||[]).join('、'), newPn=newPnArr.join('、'); if(oldPn!==newPn) changes.push({field:'PChome商品編號',from:oldPn||'—',to:newPn||'—'}); }
-  var costCh=(Number(p.cost)||0)!==cost, supCh=(Number(p.供貨價)||0)!==supply, priceCh=(Number(p.售價)||0)!==price;
+  var costCh=(Number(p.cost)||0)!==cost, supCh=(Number(p.供貨價)||0)!==supply, priceCh=(Number(p.售價)||0)!==price, shipCh=(Number(p.shippingPackaging)||0)!==shipPack;
   var oldSku=p.料號;
-  p.商品名=newName; p.cost=cost; p.供貨價=supply; p.售價=price;
+  p.商品名=newName; p.cost=cost; p.供貨價=supply; p.售價=price; p.shippingPackaging=shipPack;
   if(!lock.has){ p.商品編號=newPnArr; if(skuChanged){ p.料號=newSku; } }
   p.原廠編號=p.料號;   // 原廠編號＝料號，恆同值
   pchomeSaveProducts(products);
@@ -25261,12 +25268,12 @@ function pchomeBatchSubmitEdit(shop){
     _pchomeBatchSel[shop]=newSku; }
   var curSku=p.料號;
   // 歷程：一筆（含成本/供貨價/售價 + changes）
-  var hEntry={cost:cost, 供貨價:supply, 售價:price, note:note}; if(changes.length) hEntry.changes=changes;
+  var hEntry={cost:cost, 供貨價:supply, 售價:price, 運費包材:shipPack, note:note}; if(changes.length) hEntry.changes=changes;
   pchomeAddHistory(curSku, hEntry);
   // optlog：調價（成本/供貨價變）或編輯資料（名稱/原廠/編號變）
-  var optType=(costCh||supCh)?'調價':'商品內容優化';
+  var optType=(costCh||supCh||shipCh)?'調價':'商品內容優化';
   var optNote=changes.filter(function(c){return c.field!=='廠商料號';}).map(function(c){return c.field+' '+(c.from||'—')+'→'+(c.to||'—');}).join('；');
-  if(costCh) optNote=(optNote?optNote+'；':'')+'成本→'+cost; if(supCh) optNote=(optNote?optNote+'；':'')+'供貨價→'+supply;
+  if(costCh) optNote=(optNote?optNote+'；':'')+'成本→'+cost; if(supCh) optNote=(optNote?optNote+'；':'')+'供貨價→'+supply; if(shipCh) optNote=(optNote?optNote+'；':'')+'運費包材→'+shipPack;
   pchomeAddOptlog(shop, curSku, {type:optType, note:(optNote?optNote+' · ':'')+note});
   pchomeRefreshSyncBtn(shop);
   pchomeRenderBatchEditList(shop); pchomeRenderBatchEditForm(shop);
@@ -25297,9 +25304,10 @@ function pchomeRenderBatchAdd(shop){
     +'<div><label style="'+_MOMO_LB+'">原廠編號（必填·自動帶成本）</label><input id="pch-add-origin-'+shop+'" type="text" placeholder="例：A94-01" oninput="pchomeAddOriginChanged(\''+shop+'\')" style="'+_MOMO_INP+'"><div id="pch-add-cost-src-'+shop+'" style="font-size:11px;margin-top:2px;line-height:1.4"></div></div>'
     +'<div><label style="'+_MOMO_LB+'">PChome 商品編號</label><input id="pch-add-pn-'+shop+'" type="text" style="'+_MOMO_INP+'"></div>'
     +'<div><label style="'+_MOMO_LB+'">成本</label><input id="pch-add-cost-'+shop+'" type="number" oninput="pchomeAddRecalc(\''+shop+'\')" style="'+_MOMO_INP+'"></div></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px">'
     +'<div><label style="'+_MOMO_LB+'">供貨價(含稅)（必填）</label><input id="pch-add-supply-'+shop+'" type="number" oninput="pchomeAddSupplyChanged(\''+shop+'\')" style="'+_MOMO_INP+'"></div>'
-    +'<div><label style="'+_MOMO_LB+'">PChome 售價(含稅)<span style="color:#9ca3af">·僅參考</span></label><input id="pch-add-price-'+shop+'" type="number" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">填供貨價後自動帶入（供貨價 ÷ 0.75），可自行修改</div></div></div>'
+    +'<div><label style="'+_MOMO_LB+'">PChome 售價(含稅)<span style="color:#9ca3af">·僅參考</span></label><input id="pch-add-price-'+shop+'" type="number" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">填供貨價後自動帶入（供貨價 ÷ 0.75），可自行修改</div></div>'
+    +'<div><label style="'+_MOMO_LB+'">運費+包材</label><input id="pch-add-ship-'+shop+'" type="number" value="'+PCHOME_DEFAULT_SHIP_PACK+'" oninput="pchomeAddRecalc(\''+shop+'\')" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">自付宅配通運費＋包材（未稅、每件一份）；預設 '+PCHOME_DEFAULT_SHIP_PACK+'、可改</div></div></div>'
     +'<div id="pch-add-preview-'+shop+'" style="min-height:22px;margin-bottom:4px"></div>'
     +'<button onclick="pchomeBatchSubmitAdd(\''+shop+'\')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">＋ 建立商品</button>'
     +'</div>';
@@ -25307,7 +25315,8 @@ function pchomeRenderBatchAdd(shop){
 }
 function pchomeAddRecalc(shop){ var prev=document.getElementById('pch-add-preview-'+shop); if(!prev) return;
   var cost=parseFloat((document.getElementById('pch-add-cost-'+shop)||{}).value)||0, supply=parseFloat((document.getElementById('pch-add-supply-'+shop)||{}).value)||0;
-  prev.innerHTML=pchomeBatchPreviewHTML(cost, supply, _pchomeEstFeeRateCache[shop]);
+  var ship=parseFloat((document.getElementById('pch-add-ship-'+shop)||{}).value); if(!(ship>=0)) ship=0;
+  prev.innerHTML=pchomeBatchPreviewHTML(cost, supply, _pchomeEstFeeRateCache[shop], ship);
 }
 // 改供貨價 → 售價欄自動帶 供貨價÷0.75（四捨五入、可覆寫；0.75 寫死）→ 再重算估計淨利率。
 function pchomeAddSupplyChanged(shop){ var spEl=document.getElementById('pch-add-price-'+shop), su=parseFloat((document.getElementById('pch-add-supply-'+shop)||{}).value)||0; if(spEl && su>0) spEl.value=Math.round(su/0.75); pchomeAddRecalc(shop); }
@@ -25323,6 +25332,7 @@ function pchomeBatchSubmitAdd(shop){
   var name=(g('name').value||'').trim(), sku=(g('origin').value||'').trim();   // 原廠編號＝廠商料號＝料號（同一 join key）
   var cost=parseFloat(g('cost').value), supply=parseFloat(g('supply').value), price=parseFloat(g('price').value);
   if(isNaN(price)) price=0;
+  var shipRaw=parseFloat(g('ship').value); var shipPack=(shipRaw>=0)?shipRaw:0;
   var noteEl=g('note'); var note=(noteEl?(noteEl.value||''):'').trim()||'新增商品';   // 異動原因欄已移除→預設「新增商品」；optlog/history 照樣寫
   var pnArr=(g('pn').value||'').split(/[、,\s]+/).map(function(s){return s.trim();}).filter(Boolean);
   if(!name){ alert('商品名稱必填'); return; }
@@ -25330,9 +25340,9 @@ function pchomeBatchSubmitAdd(shop){
   if(!(cost>=0)||!(supply>=0)||!(price>=0)){ alert('成本 / 供貨價 / 售價需為 ≥0 的數字'); return; }
   var products=pchomeLoadProducts()||[];
   if(products.some(function(x){ return String(x.料號||'').trim()===sku; })){ alert('原廠編號重複：'+sku+'（已存在，請到「編輯現有商品」修改，或換一個）'); return; }
-  products.push({ 料號:sku, 商品名:name, 規格:'', 商品編號:pnArr, 原廠編號:sku, cost:cost, 供貨價:supply, 售價:price, 商品狀態:'上架', source:'manual' });
+  products.push({ 料號:sku, 商品名:name, 規格:'', 商品編號:pnArr, 原廠編號:sku, cost:cost, 供貨價:supply, 售價:price, shippingPackaging:shipPack, 商品狀態:'上架', source:'manual' });
   pchomeSaveProducts(products);
-  pchomeAddHistory(sku, {cost:cost, 供貨價:supply, 售價:price, note:note});
+  pchomeAddHistory(sku, {cost:cost, 供貨價:supply, 售價:price, 運費包材:shipPack, note:note});
   pchomeAddOptlog(shop, sku, {type:'新增商品', note:'新增商品：'+name+'（原廠編號 '+sku+'）'+(note!=='新增商品'?' · '+note:'')});
   pchomeRefreshSyncBtn(shop);
   if(typeof showToast==='function') showToast('已新增商品 '+sku,'success');
