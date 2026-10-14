@@ -365,7 +365,22 @@ const SheetSync = {
 
 const fmtN = v => (v === null || v === undefined ? '—' : Number(v).toLocaleString());
 const cellLabel = c => escapeHtml(c.date.slice(5).replace('-', '/')) + ' ' + escapeHtml(c.ch) + ' ' + escapeHtml(c.metric);
-const byLabel = b => (b ? escapeHtml(b.name || '（無名）') + (b.src === 'sheet' ? '（試算表）' : '') : '—');
+// #326：署名顯示跟首頁 dashboard.js _dailyByName 同一套規則 —— 有 username 拿 username、沒有拿 name 交給 resolver，
+//   對到（ok）顯示目前姓名，對不到（含同名不猜 ambiguous）顯示存下來的 name。不加「（已停用）」（首頁沒加）。
+//   只影響顯示；ssSameSigner / precheck / apply / by 物件都不經過這裡。
+//   resolver 每次渲染建一次；makeUserIdentityResolver 不存在時為 null → 一律顯示存下來的 name（同改前）。
+const ssByResolver = () => {
+  const mk = window.makeUserIdentityResolver;
+  const users = Store.get(Store.KEYS.users, []);
+  return typeof mk === 'function' ? mk(Array.isArray(users) ? users : []) : null;
+};
+const ssByName = (sig, resolve) => {
+  if (!sig) return '';
+  const key = (typeof sig.username === 'string' && sig.username.trim()) || sig.name;
+  const id = (resolve && key) ? resolve(key) : null;
+  return (id && id.ok) ? id.display : (sig.name || '');
+};
+const byLabel = (b, resolve) => (b ? escapeHtml(ssByName(b, resolve) || '（無名）') + (b.src === 'sheet' ? '（試算表）' : '') : '—');
 
 function ssSelectedCount(st) { return st.sel ? st.sel.size : 0; }
 
@@ -383,6 +398,11 @@ function ssRenderHtml(st) {
   if (st.error) return h + `<div class="ss-error">${escapeHtml(st.error)}</div>` + ssMsgHtml(st);
   const d = st.diff;
   if (!d) return h + ssMsgHtml(st);
+  // 署名顯示（#326）：sigChanges.from 是 buildDiff 存下來的原 name，顯示時改用同一（通路, 日期）格子的 oldBy 轉目前姓名
+  const resolve = ssByResolver();
+  const oldByOf = {};
+  d.cells.forEach(x => { const k = x.ch + '|' + x.date; if (x.oldBy && !(k in oldByOf)) oldByOf[k] = x.oldBy; });
+  const fromOf = s => { const b = oldByOf[s.ch + '|' + s.date]; return b ? (ssByName(b, resolve) || '（無名）') : s.from; };
   const c = d.counts;
   const dayBadDates = Object.keys(d.dayFails);
   const compact = !c.diff && !d.bad.length && !dayBadDates.length;
@@ -390,13 +410,13 @@ function ssRenderHtml(st) {
   const btn = st.done ? '' : `<div class="ss-actions"><button type="button" class="btn-primary ss-confirm" onclick="App.confirmSheetSync()"${N === 0 || st.busy ? ' disabled' : ''}>${st.busy ? '寫入中…' : '寫入 ' + N + ' 格'}</button></div>`;
   const blankNote = c.blankKeep ? `、試算表空白但儀表板有值 ${c.blankKeep} 格（不動）` : '';
   const sigNote = d.sigChanges.length
-    ? `；${d.sigChanges.length} 列署名將改為 ${escapeHtml(d.sigChanges[0].to)}（原：${escapeHtml([...new Set(d.sigChanges.map(s => s.from))].join('、'))}）` : '';
+    ? `；${d.sigChanges.length} 列署名將改為 ${escapeHtml(d.sigChanges[0].to)}（原：${escapeHtml([...new Set(d.sigChanges.map(fromOf))].join('、'))}）` : '';
   if (compact) {
     return h + `<div class="ss-summary-line">新增 ${c.add} 格、相同 ${c.same} 格${blankNote}${sigNote}</div>` + btn + ssMsgHtml(st);
   }
   const sigOf = {};
   d.sigChanges.forEach(s => { sigOf[s.ch + '|' + s.date] = s; });
-  const sigCell = x => { const s = sigOf[x.ch + '|' + x.date]; return s ? `此列署名將由 ${escapeHtml(s.from)} 改為 ${escapeHtml(s.to)}` : ''; };
+  const sigCell = x => { const s = sigOf[x.ch + '|' + x.date]; return s ? `此列署名將由 ${escapeHtml(fromOf(s))} 改為 ${escapeHtml(s.to)}` : ''; };
   const cb = x => `<input type="checkbox" class="ss-cb" data-id="${escapeHtml(x.id)}"${st.sel.has(x.id) ? ' checked' : ''}${st.done || st.busy ? ' disabled' : ''}>`;
   const rowCls = x => (x.dayBad ? ' class="ss-daybad"' : '');
 
@@ -418,7 +438,7 @@ function ssRenderHtml(st) {
   }
   if (diffs.length) {
     h += `<div class="ss-section"><div class="ss-section-title">不同 ${diffs.length} 格（預設不勾，勾了才覆蓋）</div><table class="ss-table"><thead><tr><th></th><th>格子</th><th class="ss-num">儀表板原值</th><th class="ss-num">試算表</th><th>原署名</th><th></th></tr></thead><tbody>`
-      + diffs.map(x => `<tr${rowCls(x)}><td class="ss-td-cb">${cb(x)}</td><td>${cellLabel(x)}</td><td class="ss-num">${fmtN(x.old)}</td><td class="ss-num">${fmtN(x.value)}${x.rounded ? ' <span class="ss-tag">已四捨五入</span>' : ''}</td><td>${byLabel(x.oldBy)}</td><td class="ss-note">${sigCell(x)}</td></tr>`).join('')
+      + diffs.map(x => `<tr${rowCls(x)}><td class="ss-td-cb">${cb(x)}</td><td>${cellLabel(x)}</td><td class="ss-num">${fmtN(x.old)}</td><td class="ss-num">${fmtN(x.value)}${x.rounded ? ' <span class="ss-tag">已四捨五入</span>' : ''}</td><td>${byLabel(x.oldBy, resolve)}</td><td class="ss-note">${sigCell(x)}</td></tr>`).join('')
       + '</tbody></table></div>';
   }
   h += `<div class="ss-muted">相同 ${c.same} 格（不變動）${blankNote}</div>`;
