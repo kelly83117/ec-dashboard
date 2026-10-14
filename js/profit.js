@@ -17480,11 +17480,13 @@ function momoHierarchyStats(shop){
     const a=momoAggregatePeriods(p, keys, shop);
     // 無業績（零營收/無銷售）→ margin 對 R=0 回 0，不可被當 0% 撈進級距；整批退貨→margin null。一律歸「零營收」。
     const hasBiz = a.qty>0 || Math.abs(a.revenue)>0.5;
-    if(!hasBiz || a.margin==null){ zeroRev++; return; }
+    // MO+：階層圖改抓「商品淨利率」欄（a.itemMargin，÷A 含稅、運費整層拿掉）；甲乙配維持總表「淨利率」(a.margin)。
+    const mv = isMoPlus ? a.itemMargin : a.margin;
+    if(!hasBiz || (isMoPlus ? (a.covered!==false && mv==null) : a.margin==null)){ zeroRev++; return; }   // MO+ 已涵蓋成本卻無商品淨利率＝營收≤0（退貨抵銷等）→ 零營收
     // 缺成本：MO+ 成本涵蓋<100%（a.covered===false）／甲乙 product.cost 缺。毛利率虛高（1−費率）不可信 → 單獨「無法計算」，不進任何級距、不當 0%。
     const missCost = isMoPlus ? (a.covered===false) : !(Number(p.cost)>0);
     if(missCost){ noCost++; return; }
-    const m=a.margin; withMargin++;
+    const m=mv; withMargin++;
     if(m<0) bins.b_lt0++; else if(m<10) bins.b0_10++; else if(m<20) bins.b10_20++;
     else if(m<30) bins.b20_30++; else if(m<40) bins.b30_40++; else if(m<50) bins.b40_50++;
     else if(m<60) bins.b50_60++; else bins.b_ge60++;   // ≥60
@@ -17510,7 +17512,7 @@ function momoOpenHierarchy(shop){
     <span style="flex:1;height:10px;background:#f1f5f9;border-radius:5px;overflow:hidden"><span style="display:block;height:100%;width:${den>0?(n/den*100):0}%;background:${color}"></span></span>
   </div>`;
   const colHead=`<div style="display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;color:#94a3b8;padding:0 0 4px;border-bottom:1px solid #eef0f2;margin-bottom:4px">
-    <span style="width:66px">淨利率</span><span style="width:52px;text-align:right">數量</span><span style="width:54px;text-align:right">佔比</span><span style="flex:1"></span>
+    <span style="width:66px">${momoIsMoPlus(shop)?'商品淨利率':'淨利率'}</span><span style="width:52px;text-align:right">數量</span><span style="width:54px;text-align:right">佔比</span><span style="flex:1"></span>
   </div>`;
   const B=s.bins;
   const bandsHtml=colHead+[
@@ -17526,8 +17528,8 @@ function momoOpenHierarchy(shop){
   ov.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:560px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden">
     <div style="padding:16px 20px;border-bottom:1px solid #eef0f2;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
       <div>
-        <div style="font-size:16px;font-weight:800;color:#1e293b">淨利率分佈 · ${momoShopDisplay(shop)}${periodLbl?' · '+periodLbl:''}</div>
-        <div style="font-size:12px;color:#94a3b8;margin-top:3px">統計全部商品 <b>${fmtN(s.total)}</b>（不隨表格篩選變動）· 有淨利率 <b>${fmtN(s.withMargin)}</b></div>
+        <div style="font-size:16px;font-weight:800;color:#1e293b">${momoIsMoPlus(shop)?'商品淨利率':'淨利率'}分佈 · ${momoShopDisplay(shop)}${periodLbl?' · '+periodLbl:''}</div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:3px">統計全部商品 <b>${fmtN(s.total)}</b>（不隨表格篩選變動）· 有${momoIsMoPlus(shop)?'商品淨利率':'淨利率'} <b>${fmtN(s.withMargin)}</b></div>
       </div>
       <button onclick="momoCloseHierarchy()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:18px;cursor:pointer;line-height:1">✕</button>
     </div>
@@ -17537,7 +17539,7 @@ function momoOpenHierarchy(shop){
         ${sideRow('零營收',s.zeroRev,'本期無銷售／整批退貨（淨利率「—」）→ 不列入級距')}
         ${sideRow('無法計算',s.noCost,'缺成本 → 淨利率無法計算（不當 0%、不進任何級距）')}
       </div>`:''}
-      <div style="font-size:10.5px;color:#9ca3af;margin-top:12px;line-height:1.6">淨利率＝總表同口徑（淨利 ÷ 營收）；級距左閉右開（例：0–10% 表示 0 ≤ x &lt; 10、≥60% 為 x ≥ 60）。佔比分母＝有淨利率的 ${fmtN(s.withMargin)} 筆。<br>八級距 ${fmtN(s.withMargin)} ＋ 零營收 ${fmtN(s.zeroRev)} ＋ 無法計算 ${fmtN(s.noCost)} ＝ 全部 ${fmtN(totalAll)} 個商品。${shop==='甲配'?'（甲配物流重分配後個別 SKU 可能在邊界微移。）':''}</div>
+      <div style="font-size:10.5px;color:#9ca3af;margin-top:12px;line-height:1.6">${momoIsMoPlus(shop)?'商品淨利率＝總表「商品淨利率」欄同口徑（商品淨利 ÷ A 貨款含稅；運費整層拿掉）':'淨利率＝總表同口徑（淨利 ÷ 營收）'}；級距左閉右開（例：0–10% 表示 0 ≤ x &lt; 10、≥60% 為 x ≥ 60）。佔比分母＝有淨利率的 ${fmtN(s.withMargin)} 筆。<br>八級距 ${fmtN(s.withMargin)} ＋ 零營收 ${fmtN(s.zeroRev)} ＋ 無法計算 ${fmtN(s.noCost)} ＝ 全部 ${fmtN(totalAll)} 個商品。${shop==='甲配'?'（甲配物流重分配後個別 SKU 可能在邊界微移。）':''}</div>
     </div>
   </div>`;
   document.body.appendChild(ov);
