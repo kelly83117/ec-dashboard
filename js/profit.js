@@ -1409,6 +1409,8 @@ window.__profitShouldSkipCloudOverwrite=function(k){
   //   _kpi_v1 也不再被 _markPending（kpiWriteCell 直寫 app/kpi）。
   if(k==='_kpi_v1' && _kpiV2.installed) return true;
   try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
+  // 優化紀錄墓碑：對應的 optlog 還在待推 → 不讓雲端快照把本機尚未推的墓碑蓋掉（墓碑隨 optlog 同步一起推）
+  try{ if(k.startsWith('ec_momo_optlog_del|') && _pendingSyncKeys.has('ec_momo_optlog|'+k.slice('ec_momo_optlog_del|'.length))) return true; }catch{}
   if(window._shopJustSaved && (Date.now()-window._shopJustSaved < 5000)) return true;
   // PChome recon/主檔：dirty 持久化（跨重整）→ 本機已存未推時擋掉雲端 app/profit echo 覆蓋，避免資料被舊雲端值蓋回。
   //   🔴 字面等值比對（非 startsWith 前綴）：這是唯一風險點，寫死才能結構上保證碰不到 momo/蝦皮/酷澎的任何 key。
@@ -15616,7 +15618,7 @@ async function momoOpenSyncPreview(shop, opts){
   //   products/原廠成本（商品主檔/MO+逐列成本）不套：它們有自己的 updatedAt 版本比對（conflict），行為不變。
   items.forEach(it=>{ it.willDelete=0; it.willMerge=0;
     if(it.status==='diff'){
-      if(it.key && it.key.startsWith('ec_momo_optlog|')){ try{ it.willMerge=momoMergeOptlog(it._cloudVal, it.localVal).addedFromCloud; }catch(e){} }   // optlog 走 read-merge-write：不刪除、不套 willDelete；willMerge＝會併回本機沒有的雲端筆數
+      if(it.key && it.key.startsWith('ec_momo_optlog|')){ try{ const _sh=it.key.slice('ec_momo_optlog|'.length); it.willMerge=momoMergeOptlog(it._cloudVal, it.localVal, Object.assign({}, cloud['ec_momo_optlog_del|'+_sh]||{}, momoLoadOptlogDel(_sh))).addedFromCloud; }catch(e){} }   // optlog 走 read-merge-write：不刪除、不套 willDelete；willMerge＝會併回本機沒有的雲端筆數
       else if(_notesUsesMerge(it.key)){
         // ec_notes（商品調整+廣告調整）走 dirty-scoped merge：同樣不刪除同事的、【不可套 willDelete】——套了會顯示紅字
         //   「會刪掉雲端 N 筆、預設不推」，與實際行為不符，會把使用者嚇到不敢推。
@@ -16537,38 +16539,71 @@ function momoSaveOptlog(shop,map){ const k=momoOptlogKey(shop);
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=map; }catch{}
   try{ _markPending(k); }catch{}   // 走既有 pending → 同步時 momoSyncOptlog（read-merge-write，見下）
 }
-// optlog 逐 SKU 依 entry id union 合併（read-merge-write，比照 cost_by_origin；不覆蓋、不刪除同事的）。
-//   刪除策略：接受復活、不做 tombstone（append log 刪除罕見）。同 id 保留雲端（保守·不覆蓋別人；同 id≈同一筆、內容本應相同）。
-//   回 { merged, addedFromCloud }：addedFromCloud＝雲端有、本機沒有、這次併回來的 entry 數（供「已合併雲端 N 筆」不靜默報告）。
-function momoMergeOptlog(cloud, local){
+// ── 刪除墓碑（tombstone）：ec_momo_optlog_del|<shop> → { <entry 身分>: { at, by } }。存在 app/profit 同一個 field 機制（走 __cloudProfit.setField，跟 optlog 一樣；不新增 __cloud* 物件）。
+//   為什麼要有：optlog 同步是「雲端 ∪ 本機」依 id 聯集，沒有墓碑的話本機刪掉的會在下次同步被雲端併回來（復活）。
+//   墓碑永久保留、不清理（量很小）；墓碑只跟著 optlog 同步（momoSyncOptlog）一起讀寫，不另外進待推清單。
+//   身分＝entry.id；舊資料沒有 id → 'sig:'＋穩定序列化的雜湊（兩台機器算出同一個值）。
+function _momoHash36(str){ let h=5381; for(let i=0;i<str.length;i++) h=((h<<5)+h+str.charCodeAt(i))|0; return (h>>>0).toString(36); }
+function momoOptlogTombId(e){ return (e&&e.id!=null)?String(e.id):'sig:'+_momoHash36(_momoStableStr(e)); }
+function momoOptlogDelKey(shop){ return 'ec_momo_optlog_del|'+shop; }
+function momoLoadOptlogDel(shop){   // 三個來源取聯集（墓碑只增不減，聯集最安全）
+  const k=momoOptlogDelKey(shop), out={};
+  const take=v=>{ if(v&&typeof v==='object'&&!Array.isArray(v)) Object.keys(v).forEach(id=>{ if(!out[id]) out[id]=v[id]; }); };
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) take(Store._profitMem[k]); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) take(Store._mem[k]); }catch{}
+  try{ const l=localStorage.getItem(k); if(l) take(JSON.parse(l)); }catch{}
+  return out;
+}
+function momoSaveOptlogDel(shop,map){   // 只寫本機三鏡像、【不】_markPending（隨 optlog 的待推一起，由 momoSyncOptlog 推雲）
+  const k=momoOptlogDelKey(shop);
+  try{ localStorage.setItem(k,JSON.stringify(map)); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=map; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=map; }catch{}
+}
+// optlog 逐 SKU 依 entry 身分 union 合併（read-merge-write，比照 cost_by_origin；不覆蓋同事新加的）。
+//   ① 墓碑（tomb，已是「雲端墓碑 ∪ 本機墓碑」）裡的身分一律濾掉 → 本機刪除不會被雲端併回來（取代舊的「接受復活」）。
+//   ② 同 id：editedAt 大的贏；兩邊都沒有 editedAt → 保留雲端（保守，同 id≈同一筆）。
+//   回 { merged, addedFromCloud, affectedDates }：addedFromCloud＝雲端有、本機沒有、這次併回來的 entry 數；
+//   affectedDates＝因墓碑被移除、或被較新編輯改到 type 的紀錄日期（供工作日誌逐日重算）。
+function momoMergeOptlog(cloud, local, tomb){
   const c=(cloud&&typeof cloud==='object'&&!Array.isArray(cloud))?cloud:{}, l=(local&&typeof local==='object'&&!Array.isArray(local))?local:{};
-  const out={}; let addedFromCloud=0;
-  const eid=e=>(e&&e.id!=null)?String(e.id):_momoStableStr(e);   // 無 id 的舊資料以穩定序列化當身分
+  const t=(tomb&&typeof tomb==='object'&&!Array.isArray(tomb))?tomb:{};
+  const out={}; let addedFromCloud=0; const affectedDates=new Set();
+  const eid=momoOptlogTombId;
   const skey=e=>String((e&&e.date)||'')+' '+String((e&&e.time)||'')+' '+eid(e);   // 排序鍵：日期+時間+id（決定性→冪等；render 會 reverse 成新在上）
   new Set([...Object.keys(c),...Object.keys(l)]).forEach(sku=>{
     const ca=Array.isArray(c[sku])?c[sku]:[], la=Array.isArray(l[sku])?l[sku]:[];
-    const localIds=new Set(la.map(eid)), byId=new Map();
-    ca.forEach(e=>byId.set(eid(e),e));                                   // 雲端先：同 id 保留雲端（保守）
-    la.forEach(e=>{ const id=eid(e); if(!byId.has(id)) byId.set(id,e); });  // 本機獨有的補上（本機新加的）
-    ca.forEach(e=>{ if(!localIds.has(eid(e))) addedFromCloud++; });        // 雲端有本機無＝這次併回來的
+    const localById=new Map(la.map(e=>[eid(e),e])), byId=new Map();
+    ca.forEach(e=>byId.set(eid(e),e));                                   // 雲端先
+    la.forEach(e=>{ const id=eid(e), ce=byId.get(id);
+      if(!ce){ byId.set(id,e); return; }                                  // 本機獨有的補上（本機新加的）
+      if((Number(e.editedAt)||0)>(Number(ce.editedAt)||0)) byId.set(id,e);   // 同 id：本機編輯較新才蓋；都沒有 editedAt → 保留雲端
+    });
+    [...byId.keys()].forEach(id=>{ if(t[id]){ const e=byId.get(id); if(e&&e.date) affectedDates.add(e.date); byId.delete(id); } });   // 墓碑過濾
+    byId.forEach((e,id)=>{ const le=localById.get(id); if(le && (le.type||'其他')!==(e.type||'其他') && le.date) affectedDates.add(le.date); });   // 勝出版 type 與本機不同（雲端較新編輯）
+    ca.forEach(e=>{ const id=eid(e); if(!localById.has(id) && byId.has(id)) addedFromCloud++; });   // 雲端有本機無（且沒被墓碑濾掉）＝這次併回來的
     const arr=[...byId.values()].sort((a,b)=>skey(a).localeCompare(skey(b)));
     if(arr.length) out[sku]=arr;
   });
-  return { merged:out, addedFromCloud };
+  return { merged:out, addedFromCloud, affectedDates:[...affectedDates] };
 }
-// optlog 同步（read-merge-write）：讀雲端 optlog 欄 → 合併 → 寫回雲端 + 本機更新成合併結果（不重 _markPending）。回 addedFromCloud。
+// optlog 同步（read-merge-write）：讀雲端 optlog 欄＋雲端墓碑 → 墓碑取聯集 → 合併（濾掉墓碑）→ optlog、墓碑都寫回雲端 + 本機更新成合併結果（不重 _markPending）。回 addedFromCloud。
 async function momoSyncOptlog(shop){
-  const k=momoOptlogKey(shop);
+  const k=momoOptlogKey(shop), dk=momoOptlogDelKey(shop);
   const snap=await window.__cloudProfit.getDoc();
   const cd=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{};
   const cloudOpt=(cd[k]&&typeof cd[k]==='object')?cd[k]:{};
-  const { merged, addedFromCloud }=momoMergeOptlog(cloudOpt, momoLoadOptlog(shop)||{});
+  const cloudDel=(cd[dk]&&typeof cd[dk]==='object'&&!Array.isArray(cd[dk]))?cd[dk]:{};
+  const tomb=Object.assign({}, cloudDel, momoLoadOptlogDel(shop));   // 墓碑聯集（只增不減）
+  const { merged, addedFromCloud, affectedDates }=momoMergeOptlog(cloudOpt, momoLoadOptlog(shop)||{}, tomb);
   await window.__cloudProfit.setField(k, momoFsSanitizeDeep(merged));   // 寫回合併結果（雲端）
+  if(Object.keys(tomb).length) await window.__cloudProfit.setField(dk, momoFsSanitizeDeep(tomb));   // 墓碑寫回（空的不建欄位）
   // 本機三鏡像同步成合併結果（否則下次同步又出現差異）；⚠ 不 _markPending（剛推完、避免立刻又進待推）
   try{ localStorage.setItem(k,JSON.stringify(merged)); }catch{}
   try{ if(Store._profitMem) Store._profitMem[k]=merged; }catch{}
   try{ if(Store._mem) Store._mem[k]=merged; }catch{}
-  try{ momoUpdateDailyProgress({silent:true}); }catch(e){}   // 工作日誌 counts 跟著合併結果更新
+  momoSaveOptlogDel(shop, tomb);
+  try{ momoUpdateDailyProgress({silent:true, dates:[momoNowParts().date, ...affectedDates]}); }catch(e){}   // 工作日誌 counts：今天照舊 + 因墓碑／雲端較新編輯改到的日期逐日重算
   return addedFromCloud;
 }
 // 一次性遷移：把前後雙底線的舊合成 key（__master_import__/__sync_new__）改成合法形式（Firestore 拒 __..__ → 同步炸）。
@@ -16604,12 +16639,47 @@ function momoAddOptlog(shop,sku){
   momoUpdateDailyProgress({silent:true});   // optlog 新增 → 同步工作日誌摘要（silent 不跳 toast）
   momoRenderOptlogSection(shop,sku);   // 只重繪紀錄區塊，不動圖表
 }
-function momoDeleteOptlog(shop,sku,idx){
-  const map=momoLoadOptlog(shop); if(!map[sku]) return;
-  map[sku].splice(idx,1); if(!map[sku].length) delete map[sku];
+// 刪除：以 entry 身分（id；舊資料用 sig 雜湊）定位，不用 idx（render 有 reverse）。有墓碑 → 同步後不會被雲端併回來。
+function momoDeleteOptlog(shop,sku,tid){
+  const map=momoLoadOptlog(shop); const arr=map[sku]; if(!Array.isArray(arr)) return;
+  const i=arr.findIndex(e=>momoOptlogTombId(e)===String(tid)); if(i<0) return;
+  if(!confirm('刪除這筆優化紀錄？工作日誌的次數也會一起扣掉。')) return;
+  const e=arr[i]; arr.splice(i,1); if(!arr.length) delete map[sku];   // 照舊從 map 移除（其他讀 optlog 的地方不用改）
+  const by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
+  const tomb=momoLoadOptlogDel(shop); tomb[String(tid)]={ at:Date.now(), by }; momoSaveOptlogDel(shop,tomb);   // 同時寫墓碑
+  momoSaveOptlog(shop,map);   // 標 pending → 同步鈕亮；同步時 momoSyncOptlog 一起推 optlog + 墓碑
+  if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop);
+  momoUpdateDailyProgress({silent:true, dates:[e&&e.date]});   // 重算【該筆紀錄日期】那天的工作日誌（不只今天）
+  if(_momoOptlogEdit && _momoOptlogEdit.tid===String(tid)) _momoOptlogEdit=null;
+  momoRenderOptlogSection(shop,sku);
+}
+// 編輯：只改 type 與 note；日期/時間/操作者不動。加 editedAt/editedBy；舊資料沒有 id → 補新 id、舊身分寫墓碑（雲端那筆舊版才會被移掉、不會變兩筆）。
+let _momoOptlogEdit=null;   // {shop, sku, tid}：目前在原地編輯的那一列（同時只編一列）
+function momoEditOptlog(shop,sku,tid){
+  _momoOptlogEdit={shop, sku, tid:String(tid)};
+  momoRenderOptlogSection(shop,sku);
+  const n=document.getElementById('momo-optlog-edit-note'); if(n){ n.focus(); try{ n.setSelectionRange(n.value.length,n.value.length); }catch{} }
+}
+function momoCancelOptlogEdit(shop,sku){ _momoOptlogEdit=null; momoRenderOptlogSection(shop,sku); }
+function momoSaveOptlogEdit(shop,sku,tid){
+  const tsel=document.getElementById('momo-optlog-edit-type'), ninp=document.getElementById('momo-optlog-edit-note');
+  if(!tsel||!ninp) return;
+  const type=tsel.value, note=ninp.value.trim();
+  if(!note){ ninp.style.borderColor='#dc2626'; ninp.focus(); return; }   // note 空白不能存
+  const map=momoLoadOptlog(shop); const arr=map[sku]; if(!Array.isArray(arr)) return;
+  const e=arr.find(x=>momoOptlogTombId(x)===String(tid)); if(!e) return;
+  const oldType=e.type||'其他';
+  if(type===oldType && note===(e.note||'')){ _momoOptlogEdit=null; momoRenderOptlogSection(shop,sku); return; }   // 沒改任何東西 → 不寫入
+  const by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
+  if(e.id==null){   // 舊資料無 id：補新 id，舊身分（sig）寫墓碑
+    const tomb=momoLoadOptlogDel(shop); tomb[String(tid)]={ at:Date.now(), by }; momoSaveOptlogDel(shop,tomb);
+    e.id='opt_'+Date.now()+'_'+Math.floor(Math.random()*100000);
+  }
+  e.type=type; e.note=note; e.editedAt=Date.now(); e.editedBy=by;
   momoSaveOptlog(shop,map);
   if(typeof momoRefreshSyncBtn==='function') momoRefreshSyncBtn(shop);
-  momoUpdateDailyProgress({silent:true});   // optlog 刪除 → 同步工作日誌摘要（silent 不跳 toast）
+  if(type!==oldType) momoUpdateDailyProgress({silent:true, dates:[e.date]});   // type 是工作日誌計數的 key → 重算該筆日期；只改 note 不影響次數
+  _momoOptlogEdit=null;
   momoRenderOptlogSection(shop,sku);
 }
 // 新增商品 → 寫一筆 optlog（工作日誌連動；比照 momoAddOptlog 的 by/欄位/pipeline，但不需 DOM 選單、不重繪紀錄區塊）。
@@ -16688,8 +16758,8 @@ function momoOptlogUserToName(by){   // optlog 存 username → 工作日誌以�
   return by;
 }
 // 掃當天 optlog → { 人名: { '甲配·調價':N, ... } }（type 動態、不寫死）
-function momoOptlogTodayCounts(){
-  const today=momoNowParts().date;
+function momoOptlogTodayCounts(date){
+  const today=date||momoNowParts().date;
   const byPerson={};
   MOMO_OPTLOG_DP_SHOPS.forEach(shop=>{
     const map=momoLoadOptlog(shop)||{};
@@ -16710,23 +16780,30 @@ function momoUpdateDailyProgress(opts){
   opts=opts||{};
   if(!(window.Store&&Store.get)) return;
   const today=momoNowParts().date;
-  const countsByPerson=momoOptlogTodayCounts();
+  // opts.dates：要重算的日期清單（刪除/編輯過去日期的紀錄用）；沒給 → 只算今天（既有呼叫端行為不變）
+  const dates=(opts.dates&&opts.dates.length)?[...new Set(opts.dates.filter(Boolean))]:[today];
+  if(!dates.length) return;
   const all=Store.get('ec.dailyProgress',{})||{};
-  const day=Object.assign({}, all[today]||{});
-  // 受影響 = 今天有新 counts 的人 ∪ 今天已有 momo-summary 的人（後者要能在刪光後被清掉）
-  const affected=new Set(Object.keys(countsByPerson));
-  Object.keys(day).forEach(person=>{ const v=day[person]; if(Array.isArray(v)&&v.some(it=>it&&it.kind==='momo-summary')) affected.add(person); });
-  if(affected.size===0){ if(opts.pushToCloud) return; return; }
-  const toItems=v=>Array.isArray(v)?v.slice():(v&&String(v).trim()?[{id:'legacy',text:String(v).trim(),done:false}]:[]);
-  let anyContent=false;
-  affected.forEach(person=>{
-    const kept=toItems(day[person]).filter(it=>it&&it.kind!=='momo-summary');   // 保留其他 item（蝦皮 insight/profit 摘要、待辦）只換掉 momo-summary
-    const c=countsByPerson[person];
-    if(c&&Object.keys(c).length){ kept.unshift({id:'auto-momo-'+person, kind:'momo-summary', counts:c, done:false, auto:true}); anyContent=true; }
-    if(kept.length) day[person]=kept; else delete day[person];
-  });
   const next=Object.assign({}, all);
-  if(Object.keys(day).length===0) delete next[today]; else next[today]=day;
+  const toItems=v=>Array.isArray(v)?v.slice():(v&&String(v).trim()?[{id:'legacy',text:String(v).trim(),done:false}]:[]);
+  const affected=new Set(); let anyContent=false;
+  dates.forEach(date=>{
+    const countsByPerson=momoOptlogTodayCounts(date);
+    const day=Object.assign({}, all[date]||{});
+    // 受影響 = 該日有新 counts 的人 ∪ 該日已有 momo-summary 的人（後者要能在刪光後被清掉）
+    const dayAffected=new Set(Object.keys(countsByPerson));
+    Object.keys(day).forEach(person=>{ const v=day[person]; if(Array.isArray(v)&&v.some(it=>it&&it.kind==='momo-summary')) dayAffected.add(person); });
+    if(dayAffected.size===0) return;
+    dayAffected.forEach(person=>{
+      const kept=toItems(day[person]).filter(it=>it&&it.kind!=='momo-summary');   // 保留其他 item（蝦皮 insight/profit 摘要、待辦）只換掉 momo-summary
+      const c=countsByPerson[person];
+      if(c&&Object.keys(c).length){ kept.unshift({id:'auto-momo-'+person, kind:'momo-summary', counts:c, done:false, auto:true}); anyContent=true; }
+      if(kept.length) day[person]=kept; else delete day[person];
+      affected.add(person);
+    });
+    if(Object.keys(day).length===0) delete next[date]; else next[date]=day;
+  });
+  if(affected.size===0) return;
   if(typeof Store.setLocalOnly==='function') Store.setLocalOnly('ec.dailyProgress', next); else Store.set('ec.dailyProgress', next);   // 本機寫入；silent 時不立刻推雲（比照蝦皮）
   try{ window.__dpPendingNames=window.__dpPendingNames||new Set(); affected.forEach(p=>window.__dpPendingNames.add(p)); if(typeof window.__updateDpSyncBadge==='function') window.__updateDpSyncBadge(); }catch(e){}
   if(opts.pushToCloud && typeof Store.pushKeyToCloud==='function'){   // 按「☁ 同步雲端」成功時：連同 ec.dailyProgress 推上雲
@@ -16946,12 +17023,29 @@ function momoCrossChannelHTML(shop,otherShop,p){
 function momoRenderOptlogSection(shop,sku){
   const el=document.getElementById('momo-optlog-sec'); if(!el) return;
   const list=(momoLoadOptlog(shop)[sku])||[];
-  const rows=list.length ? [...list].map((e,i)=>({e,i})).reverse().map(({e,i})=>`<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid #f1f5f9">
+  const fmtTs=ms=>{ try{ return new Date(Number(ms)).toLocaleString('zh-TW',{hour12:false}); }catch{ return String(ms); } };
+  const editing=(_momoOptlogEdit&&_momoOptlogEdit.shop===shop&&_momoOptlogEdit.sku===sku)?_momoOptlogEdit.tid:null;
+  const rows=list.length ? [...list].reverse().map(e=>{
+    const tid=momoOptlogTombId(e), q=_momoEsc(tid);
+    if(editing===tid){   // 原地編輯：type 下拉（舊紀錄 type 不在清單裡也放進去並選中）＋ note ＋ 儲存/取消；Enter 儲存、Esc 取消
+      const cur=e.type||'其他'; const types=MOMO_OPTLOG_TYPES.includes(cur)?MOMO_OPTLOG_TYPES:[cur,...MOMO_OPTLOG_TYPES];
+      return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0;border-top:1px solid #f1f5f9">
+      <span style="flex-shrink:0;font-size:11px;color:#94a3b8;width:74px">${_momoEsc(e.date||'')}</span>
+      <select id="momo-optlog-edit-type" class="mm-sel" style="font-size:12px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:7px">${types.map(t=>`<option value="${_momoEsc(t)}"${t===cur?' selected':''}>${_momoEsc(t)}</option>`).join('')}</select>
+      <input id="momo-optlog-edit-note" type="text" value="${_momoEsc(e.note||'')}" style="flex:1;min-width:140px;font-size:12px;padding:5px 8px;border:1px solid #e5e7eb;border-radius:7px" onkeydown="if(event.key==='Enter'){event.preventDefault();momoSaveOptlogEdit('${shop}','${sku}','${q}')}else if(event.key==='Escape'){momoCancelOptlogEdit('${shop}','${sku}')}">
+      <button onclick="momoSaveOptlogEdit('${shop}','${sku}','${q}')" class="mm-btn-primary" style="font-size:12px;padding:5px 12px">儲存</button>
+      <a onclick="momoCancelOptlogEdit('${shop}','${sku}')" style="color:#6b7280;cursor:pointer;font-size:12px">取消</a>
+    </div>`;
+    }
+    const edTip=e.editedAt?`已編輯：${e.editedBy||'（未記錄）'}　${fmtTs(e.editedAt)}`:'';
+    return `<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid #f1f5f9">
       <span style="flex-shrink:0;font-size:11px;color:#94a3b8;width:74px">${_momoEsc(e.date||'')}</span>
       <span style="flex-shrink:0;font-size:11px;font-weight:700;color:#4f46e5;background:#eef2ff;border-radius:5px;padding:1px 7px">${_momoEsc(e.type||'其他')}</span>
-      <span style="flex:1;font-size:12px;color:#334155;min-width:0;word-break:break-word">${_momoEsc(e.note||'')}</span>
-      <a onclick="momoDeleteOptlog('${shop}','${sku}',${i})" title="刪除" style="flex-shrink:0;color:#ef4444;cursor:pointer;font-weight:700">✕</a>
-    </div>`).join('') : `<div style="font-size:12px;color:#94a3b8;padding:4px 0">尚無優化紀錄。記下調價/調成本/下架/補貨等人工動作，之後跟銷量圖並看因果。</div>`;
+      <span style="flex:1;font-size:12px;color:#334155;min-width:0;word-break:break-word">${_momoEsc(e.note||'')}${e.editedAt?` <span style="color:#9ca3af;font-size:10px;cursor:help" title="${_momoEsc(edTip)}">已編輯</span>`:''}</span>
+      <a onclick="momoEditOptlog('${shop}','${sku}','${q}')" title="編輯" style="flex-shrink:0;color:#6b7280;cursor:pointer;font-weight:700">✎</a>
+      <a onclick="momoDeleteOptlog('${shop}','${sku}','${q}')" title="刪除" style="flex-shrink:0;color:#ef4444;cursor:pointer;font-weight:700">✕</a>
+    </div>`;
+  }).join('') : `<div style="font-size:12px;color:#94a3b8;padding:4px 0">尚無優化紀錄。記下調價/調成本/下架/補貨等人工動作，之後跟銷量圖並看因果。</div>`;
   el.innerHTML=`<div class="mm-ana-h">優化紀錄${list.length?`（${list.length}）`:''}</div>
     <div style="margin-bottom:8px">${rows}</div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -23861,7 +23955,7 @@ Object.assign(window, {
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,momoReconStoreDecide,
   momoRenderMoPlusRecon,momoMoPlusReconSetMonth,momoMoPlusReconToggle,momoClearMoPlusReconPdf,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
-  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoOpenDpDetailFromEl,momoCloseDpDetail,momoShopDisplay,
+  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoEditOptlog,momoCancelOptlogEdit,momoSaveOptlogEdit,momoOpenDpDetailFromEl,momoCloseDpDetail,momoShopDisplay,
   momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoOvSetMonth,
   momoOptlogTypeToggle,momoOptlogTimeSet,momoOptlogBySet,momoOptlogSysToggle,
   momoSearchClear,momoSearchClearToggle,
