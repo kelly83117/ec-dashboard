@@ -10068,7 +10068,7 @@ function _kpiChannelTableHtml(row,prevRow){
     ]);
     if(open){
       g.shops.forEach((s,i)=>{
-        const d=_kpiShopCalc(row,g,s);const rev=_kpiRealRev(d),pure=Number(d[cur.pureKey])||0;   // 實際營收（同通路列）
+        const d=_kpiShopCalc(row,g,s),gt=_kpiCommonColTotals(row,g);const rev=_kpiRealRev(d),pure=gt?gt.totalPure:(Number(d[cur.pureKey])||0);   // 實際營收（同通路列）；共同費用當欄位的單店通路（PChome）純利已扣物流運費
         html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','','']);
       });
     }
