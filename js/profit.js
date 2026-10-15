@@ -11764,23 +11764,34 @@ function _kpiShopAnnualTotal(rows,year,group,shop,pureKey){
   return{rev,pure};
 }
 // ── 年度總表（2026-10-01 改版）──
-//   版面：頂列（年份＋已結算標籤）→ 四張大卡 → 左「每月營收與純利」堆疊長條＋純利折線／右「各通路全年」表 → 各通路純利率走勢。
+//   版面：頂列（年份＋已填月份標籤）→ 四張大卡 → 左「每月營收與純利」堆疊長條＋純利折線／右「各通路全年」表 → 各通路純利率走勢。
 //   🔴 計算一律沿用既有函式：每個通路每個月＝_kpiGroupTotals(row,g)（內含 _kpiRawForCalc 合併/不適用欄位歸零、
-//     實際營收口徑、整組共同費用扣除）；全年＝已結算月份逐月相加。跟月結表各月的合計是同一套。
-//   「已結算月份」＝該月 row 存在且填寫進度填滿（見 _kpiYearModel 的 settled）。
+//     實際營收口徑、整組共同費用扣除）；全年＝有資料月份逐月相加。跟月結表各月的合計是同一套。
+//   「有資料月份」＝該月月結表任何一格有值（見 _kpiYearModel 的 filled）；月結表填多少就顯示多少，不看填寫進度（2026-10-15 使用者決定）。
 //   「較去年同期」只比去年【同樣那幾個月】（今年 1～8 月就比去年 1～8 月）；去年那幾個月一個 row 都沒有就不顯示。
+// 該月月結表有沒有任何一格有值：各通路各店存的欄位（含公式覆蓋）、共同費用、合併欄位。存的 0 也算有值。
+//   ⚠ 不能用 _kpiFillCountAll：關站通路（官網）的格子一律算已填，會讓完全沒填的月份也被當成有資料。
+function _kpiRowHasData(r){
+  if(!r)return false;
+  const has=v=>v!=null&&v!=='';
+  return KPI_GROUPS.some(g=>{
+    if(has(r[g.key+'Common']))return true;
+    const box=r[g.key]||{};
+    return Object.keys(box).some(shop=>{const sd=box[shop];return sd&&typeof sd==='object'&&Object.values(sd).some(has);});
+  })||Object.values(r.kpiFieldMerges||{}).some(has);
+}
 function _kpiYearModel(year){
   const rows=getKpiRows();
   const rowOf=(y,m)=>rows.find(r=>r.month===`${y}-${String(m).padStart(2,'0')}`)||null;
   const months=[1,2,3,4,5,6,7,8,9,10,11,12];
-  // 「已結算」＝該月 row 存在【且填寫進度填滿】（月結表「✓ 填寫進度 N / N」；2026-10-01 使用者決定：沒填完的月份不算，例如只填一半的 9 月）。
-  //   沒結算的月份不進全年數字、圖表當未結算（灰底），填滿後自動算進來。
-  const settled=months.filter(m=>{const r=rowOf(year,m);if(!r)return false;const c=_kpiFillCountAll(r);return c.total>0&&c.missing===0;});
-  const prevRows=settled.map(m=>rowOf(year-1,m)).filter(Boolean);
+  // 「有資料」＝該月月結表任何一格有值（_kpiRowHasData）。2026-10-15 起不再只算填寫進度填滿的月份：月結表填多少就顯示多少。
+  //   完全沒填的月份＝無資料（不進全年數字、圖表灰底）。月結表自己的 ✓ 填寫進度不受影響。
+  const filled=months.filter(m=>_kpiRowHasData(rowOf(year,m)));
+  const prevRows=filled.map(m=>rowOf(year-1,m)).filter(Boolean);
   const groups=KPI_GROUPS.map(g=>{
     const monthRev=Array(12).fill(null),monthPure=Array(12).fill(null),monthRate=Array(12).fill(null);
     let rev=0,pure=0,prevRev=0,prevPure=0;
-    settled.forEach(m=>{
+    filled.forEach(m=>{
       const t=_kpiGroupTotals(rowOf(year,m),g);
       monthRev[m-1]=t.totalRev;monthPure[m-1]=t.totalPure;monthRate[m-1]=t.totalRev>0?t.totalPure/t.totalRev*100:null;
       rev+=t.totalRev;pure+=t.totalPure;
@@ -11788,10 +11799,10 @@ function _kpiYearModel(year){
     });
     return{key:g.key,title:g.title,color:g.color,monthRev,monthPure,monthRate,rev,pure,rate:rev>0?pure/rev*100:null,prevRev,prevPure};
   });
-  const monthTotal=months.map(m=>{if(!settled.includes(m))return null;let rev=0,pure=0;groups.forEach(g=>{rev+=g.monthRev[m-1]||0;pure+=g.monthPure[m-1]||0;});return{rev,pure,rate:rev>0?pure/rev*100:null};});
+  const monthTotal=months.map(m=>{if(!filled.includes(m))return null;let rev=0,pure=0;groups.forEach(g=>{rev+=g.monthRev[m-1]||0;pure+=g.monthPure[m-1]||0;});return{rev,pure,rate:rev>0?pure/rev*100:null};});
   const sum=(k)=>groups.reduce((a,g)=>a+g[k],0);
   const grandRev=sum('rev'),grandPure=sum('pure'),prevRev=sum('prevRev'),prevPure=sum('prevPure');
-  return{year,months,settled,groups,monthTotal,grandRev,grandPure,grandRate:grandRev>0?grandPure/grandRev*100:null,prevRev,prevPure,hasPrev:prevRows.length>0};
+  return{year,months,filled,groups,monthTotal,grandRev,grandPure,grandRate:grandRev>0?grandPure/grandRev*100:null,prevRev,prevPure,hasPrev:prevRows.length>0};
 }
 const _kyMoney=v=>_kpiMoney(Math.round(v));   // 金額格式跟月結表一致（$、負數 −$）
 // 圖表用：以「萬元」為單位的數字（不帶「萬」字，單位寫在 Y 軸標題）
@@ -11806,17 +11817,17 @@ let _kpiYearModelCur=null,_kpiYearHL=null;
 function _kpiYearViewHtml(){
   const year=_kpiCurYear;
   const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===year?' selected':''}>${y}年</option>`).join('');
-  const model=_kpiYearModel(year),N=model.settled.length;
+  const model=_kpiYearModel(year),N=model.filled.length;
   _kpiYearModelCur=N?model:null;
-  _kpiYearChartData=N?{labels:model.months.map(m=>m+'月'),settled:model.settled,datasets:model.groups.map(g=>({label:g.title,data:g.monthRev,backgroundColor:g.color})),pure:model.monthTotal.map(t=>t?t.pure:null)}:null;
+  _kpiYearChartData=N?{labels:model.months.map(m=>m+'月'),filled:model.filled,datasets:model.groups.map(g=>({label:g.title,data:g.monthRev,backgroundColor:g.color})),pure:model.monthTotal.map(t=>t?t.pure:null)}:null;
   _kpiYearHL=null;
-  const tag=N?`<span class="ky-tag">已結算 ${model.settled[0]}～${model.settled[N-1]} 月（${N} / 12）</span>`:'';
+  const tag=N?`<span class="ky-tag">已填 ${N} 個月（${model.filled[0]}～${model.filled[N-1]} 月）</span>`:'';
   const top=`<div class="ky-top"><select class="mm-sel" onchange="setKpiYear(this.value)" title="選年份">${yearOpts}</select>${tag}</div>`;
   if(!N)return top+`<div class="ky-empty">本年度尚無資料</div>`;
   // ── 四張大卡 ──
   const showYoy=model.hasPrev;
   const avgPure=model.grandPure/N;
-  const pm=model.settled.map(m=>({m,p:model.monthTotal[m-1].pure}));
+  const pm=model.filled.map(m=>({m,p:model.monthTotal[m-1].pure}));
   const hi=pm.reduce((a,b)=>b.p>a.p?b:a),lo=pm.reduce((a,b)=>b.p<a.p?b:a);
   const card=(label,val,cls,sub)=>`<div class="ky-card"><div class="ky-card-l">${label}</div><div class="ky-card-v ${cls||''}">${val}</div><div class="ky-card-s">${sub||'&nbsp;'}</div></div>`;
   const yoyTxt=(c,p)=>showYoy&&p?`${_kyYoy(c,p,true)} <span class="ky-muted">較去年同期</span>`:'';
@@ -11840,10 +11851,10 @@ function _kpiYearViewHtml(){
     <table class="ky-tbl"><thead><tr><th>通路</th><th class="ky-n">營收</th><th class="ky-n">純利</th><th class="ky-n">純利率</th><th class="ky-n" title="營收，跟去年同樣那幾個月比">較去年</th></tr></thead><tbody>${tr}${tot}</tbody></table>
     <div class="ky-share" title="各通路營收佔比">${bar}</div></div>`;
   // ── 各通路純利率走勢 ──
-  const lastM=model.settled[N-1],firstM=model.settled[0];
+  const lastM=model.filled[N-1],firstM=model.filled[0];
   const rcard=(key,title,color,series,dashed,closed)=>{
     if(closed)return `<div class="ky-rc" data-key="${key}" style="--c:${color}" title="${_kpiEscAttr(closed)}"><div class="ky-rc-h"><i></i>${title}</div><div class="ky-rc-v ky-rc-closed">已關站</div><div class="ky-rc-d">&nbsp;</div></div>`;
-    const pts=model.settled.map(m=>series[m-1]).filter(r=>r!=null);
+    const pts=model.filled.map(m=>series[m-1]).filter(r=>r!=null);
     const last=pts.length?pts[pts.length-1]:null,first=pts.length?pts[0]:null;
     const d=(last!=null&&first!=null&&pts.length>1)?last-first:null;
     return `<div class="ky-rc${dashed?' ky-rc-avg':''}" data-key="${key}" style="--c:${color}"><div class="ky-rc-h"><i class="${dashed?'dash':''}"></i>${title}</div>
@@ -11861,7 +11872,7 @@ function _kpiYearViewHtml(){
 }
 // ── 各通路每月明細（2026-10-13）──
 //   數字＝上方長條圖／「各通路全年」同一份 _kpiYearModel（_kpiGroupTotals，營收＝實際營收、共同費用已扣），不另算。
-//   列＝已結算月份（model.settled，跟長條圖、已結算標籤同一份）＋全年；欄＝KPI_GROUPS 每個通路 營收｜純利｜率，最後一組合計。
+//   列＝有資料月份（model.filled，跟長條圖、已填月份標籤同一份）＋全年；欄＝KPI_GROUPS 每個通路 營收｜純利｜率，最後一組合計。
 const _kyN=v=>{const r=Math.round(v||0);return r<0?'−'+fmtN(-r):fmtN(r);};   // 千分位、不加 $，負數用「−」
 const _kyRate=(pure,rev)=>rev>0?(pure/rev*100).toFixed(1)+'%':'—';
 function _kpiYearMonthlyCols(M){
@@ -11874,21 +11885,21 @@ function _kpiYearMonthlyHtml(M){
   const h1=cols.map(g=>`<th colspan="3" class="ky-mt-g${g.tot?' tot':''}">${g.color?`<i style="background:${g.color}"></i>`:''}${g.title}</th>`).join('');
   const h2=cols.map(g=>`<th class="ky-mt-gs${g.tot?' tot':''}">營收</th><th class="${g.tot?'tot':''}">純利</th><th class="${g.tot?'tot':''}">率</th>`).join('');
   const tds=(m)=>cols.map(g=>{const v=g.cell(m);return `<td class="ky-mt-gs">${_kyN(v.rev)}</td><td class="ky-mt-p${v.pure<0?' neg':''}">${_kyN(v.pure)}</td><td class="ky-mt-r">${_kyRate(v.pure,v.rev)}</td>`;}).join('');
-  const rows=M.settled.map(m=>`<tr><th class="ky-mt-m">${m} 月</th>${tds(m)}</tr>`).join('')+`<tr class="ky-mt-year"><th class="ky-mt-m">全年</th>${tds('year')}</tr>`;
+  const rows=M.filled.map(m=>`<tr><th class="ky-mt-m">${m} 月</th>${tds(m)}</tr>`).join('')+`<tr class="ky-mt-year"><th class="ky-mt-m">全年</th>${tds('year')}</tr>`;
   return `<div class="ky-panel ky-p-mtbl">
-    <div class="ky-mt-head"><span class="ky-p-t">各通路每月明細</span><span class="ky-mt-note">上方長條圖的數字 · 金額單位：元 · 只列已結算月份</span><button class="km-dl ky-mt-dl" onclick="kpiYearDownloadExcel()" title="下載這張表（一個工作表，數字存成數值）">⬇ 下載 Excel</button></div>
+    <div class="ky-mt-head"><span class="ky-p-t">各通路每月明細</span><span class="ky-mt-note">上方長條圖的數字 · 金額單位：元 · 只列有填資料的月份</span><button class="km-dl ky-mt-dl" onclick="kpiYearDownloadExcel()" title="下載這張表（一個工作表，數字存成數值）">⬇ 下載 Excel</button></div>
     <div class="ky-mt-wrap"><table class="ky-mt"><thead><tr><th rowspan="2" class="ky-mt-m">月份</th>${h1}</tr><tr>${h2}</tr></thead><tbody>${rows}</tbody></table></div>
   </div>`;
 }
 // 下載「各通路每月明細」：一個工作表、結構同畫面（兩層表頭）；金額存整數（同畫面），純利率存比例＋百分比格式。
 //   SheetJS 是 index.html 的 defer script（專案既有載入方式）；沒載到 → 退回 CSV（同樣的欄位）。
 function kpiYearDownloadExcel(){
-  const M=_kpiYearModelCur;if(!M){alert('這個年度沒有已結算的月份可以下載');return;}
+  const M=_kpiYearModelCur;if(!M){alert('這個年度還沒有任何月份有資料可以下載');return;}
   const cols=_kpiYearMonthlyCols(M);
   const head1=['月份'],head2=[''];
   cols.forEach(g=>{head1.push(g.title,'','');head2.push('營收','純利','純利率');});
-  const body=M.settled.map(m=>[m+' 月']).concat([['全年']]);
-  M.settled.concat(['year']).forEach((m,i)=>cols.forEach(g=>{const v=g.cell(m);body[i].push(Math.round(v.rev||0),Math.round(v.pure||0),v.rev>0?v.pure/v.rev:'');}));
+  const body=M.filled.map(m=>[m+' 月']).concat([['全年']]);
+  M.filled.concat(['year']).forEach((m,i)=>cols.forEach(g=>{const v=g.cell(m);body[i].push(Math.round(v.rev||0),Math.round(v.pure||0),v.rev>0?v.pure/v.rev:'');}));
   const aoa=[head1,head2].concat(body), name='KPI年度明細_'+M.year;
   if(typeof XLSX==='undefined'||!XLSX.utils||typeof XLSX.writeFile!=='function'){
     const esc=x=>{const t=typeof x==='number'?String(x):String(x==null?'':x);return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;};
@@ -11915,7 +11926,7 @@ function renderKpiYearChart(){
   if(typeof Chart==='undefined')return;
   const mk=(id,cfg)=>{const c=document.getElementById(id);if(!c)return null;const o=Chart.getChart(c);if(o){try{o.destroy();}catch{}}const ch=new Chart(c.getContext('2d'),cfg);_kpiYearCharts.push(ch);return ch;};
   const labels=M.months.map(m=>m+'月');
-  const unsettled=M.months.map(m=>!M.settled.includes(m));
+  const unsettled=M.months.map(m=>!M.filled.includes(m));   // 沒有資料的月份（灰底）
   // ① 堆疊長條（各通路營收）＋全通路純利折線（同一個 Y 軸）；長條上方標總營收（萬）
   const topLabel={id:'kyTop',afterDatasetsDraw(ch){
     const {ctx,scales:{x,y}}=ch;ctx.save();ctx.font='600 11px system-ui,sans-serif';ctx.fillStyle='#374151';ctx.textAlign='center';ctx.textBaseline='bottom';
@@ -11928,14 +11939,14 @@ function renderKpiYearChart(){
       plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+'：'+_kyMoney(c.parsed.y||0)}}},
       scales:{x:{stacked:true,grid:{display:false},ticks:{maxRotation:0,autoSkip:false,font:{size:10.5}}},y:{stacked:true,beginAtZero:true,suggestedMax:Math.max(0,...M.monthTotal.map(t=>t?t.rev:0))*1.12,title:{display:true,text:'單位：萬元',color:'#9ca3af',font:{size:11}},ticks:{callback:v=>_kyWan(v)},grid:{color:'#f1f2f5'}}}},
     plugins:[topLabel]});
-  // ② 純利率折線：每個通路一條＋全通路平均（灰虛線）；未結算月份灰底＋「尚未結算」
+  // ② 純利率折線：每個通路一條＋全通路平均（灰虛線）；沒資料的月份灰底＋「尚無資料」
   const band={id:'kyBand',beforeDatasetsDraw(ch){
     const {ctx,chartArea:a,scales:{x}}=ch;const w=x.getPixelForValue(1)-x.getPixelForValue(0);
     ctx.save();ctx.fillStyle='#f3f4f6';
     let runs=[],cur=null;unsettled.forEach((u,i)=>{if(u){if(!cur)cur={s:i,e:i};else cur.e=i;}else if(cur){runs.push(cur);cur=null;}});if(cur)runs.push(cur);
     runs.forEach(r=>{const l=Math.max(a.left,x.getPixelForValue(r.s)-w/2),rr=Math.min(a.right,x.getPixelForValue(r.e)+w/2);ctx.fillRect(l,a.top,rr-l,a.bottom-a.top);});
     const big=runs.reduce((p,r)=>(!p||(r.e-r.s)>(p.e-p.s))?r:p,null);
-    if(big){ctx.fillStyle='#9ca3af';ctx.font='12px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('尚未結算',(x.getPixelForValue(big.s)+x.getPixelForValue(big.e))/2,(a.top+a.bottom)/2);}
+    if(big){ctx.fillStyle='#9ca3af';ctx.font='12px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('尚無資料',(x.getPixelForValue(big.s)+x.getPixelForValue(big.e))/2,(a.top+a.bottom)/2);}
     ctx.restore();}};
   const series=M.groups.map(g=>({key:g.key,label:g.title,color:g.color,data:g.monthRate,dash:[]})).concat([{key:'__avg',label:'全通路平均',color:'#9ca3af',data:M.monthTotal.map(t=>t?t.rate:null),dash:[6,4]}]);
   const ch2=mk('kpi-year-rate',{type:'line',data:{labels,datasets:series.map(s=>({label:s.label,_key:s.key,_color:s.color,data:s.data,borderColor:s.color,backgroundColor:s.color,borderDash:s.dash,borderWidth:2,pointRadius:2.5,pointHoverRadius:2.5,tension:.25,spanGaps:true}))},
