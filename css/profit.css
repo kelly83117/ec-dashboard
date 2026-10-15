@@ -1741,8 +1741,7 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
    用 id 選擇器才壓得過 .ana-overlay 的通用層級；值在 main.css 的 --z-reconcile-detail。 */
 #reconcile-detail-ov{z-index:var(--z-reconcile-detail);}
 /* ── KPI 年度總表（2026-10-01 改版）── 白底卡片、通路顏色由 KPI_GROUPS.color 帶入 */
-.ky-top{display:flex;align-items:center;margin-bottom:14px;}
-.ky-top-r{margin-left:auto;display:inline-flex;align-items:center;gap:10px;}
+.ky-top{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
 .ky-tag{display:inline-block;padding:4px 10px;border-radius:999px;background:#f3f4f6;color:#4b5563;font-size:12px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums;}
 .ky-empty{border:1px solid #e5e7eb;border-radius:10px;padding:32px 16px;text-align:center;font-size:13px;color:#9ca3af;}
 .ky-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px;}

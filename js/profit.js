@@ -9496,9 +9496,12 @@ const KPI_GROUPS=[
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
     commonCostLabel:'宅配通運費（我方自付的出貨運費；整組一個數字）',
     commonCostShortLabel:'物流運費',
-    order:['qty','rev','cost','fee','ret','tax','material','_common','pure','pureRate'],
+    // commonAsColumn（2026-10-15）：填寫模式不另切「共同費用」列，直接當一欄（order 裡 '_common' 的位置）。
+    //   資料照舊存 row.pchomeCommon（pchomeKpiShipByMonth 讀它）；只有一家店，那一列的純利／純利率改用整組數字（已扣運費）。
+    commonAsColumn:true,
+    order:['qty','rev','cost','fee','ret','tax','_common','material','pure','pureRate'],
     formula:[
-      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material,desc:'純利 = 營收 − 商品成本 − 手續費 − 退貨運費 − 稅金 − 耗材'},
+      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material,desc:'純利 = 營收 − 商品成本 − 手續費 − 退貨運費 − 稅金 − 物流運費 − 耗材'},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ret-d.tax-d.material)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
     ]},
   {key:'friday',since:'2026-08',title:'FriDay',color:'#0891b2',shops:['FriDay'],
@@ -10065,7 +10068,7 @@ function _kpiChannelTableHtml(row,prevRow){
     ]);
     if(open){
       g.shops.forEach((s,i)=>{
-        const d=_kpiShopCalc(row,g,s);const rev=_kpiRealRev(d),pure=Number(d[cur.pureKey])||0;   // 實際營收（同通路列）
+        const d=_kpiShopCalc(row,g,s),gt=_kpiCommonColTotals(row,g);const rev=_kpiRealRev(d),pure=gt?gt.totalPure:(Number(d[cur.pureKey])||0);   // 實際營收（同通路列）；共同費用當欄位的單店通路（PChome）純利已扣物流運費
         html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','','']);
       });
     }
@@ -10102,11 +10105,13 @@ function kpiFillPickGroup(groupKey){_kpiFillGroup=groupKey;renderKpiTab();}
 function _kpiFillGroupObj(){return KPI_GROUPS.find(g=>g.key===_kpiFillGroup)||KPI_GROUPS[0];}
 // 欄位＝該組 manual 欄位，順序照 group.order（order 裡的公式欄位跳過；沒排到的 manual 接在後面）。
 //   例外：group.fillFormula 列的公式欄（MOMO 實際營收）也放進來，回傳的物件帶 fx:true（灰底、可覆蓋、不算填寫進度）。
+//   group.commonAsColumn：共同費用也當一欄（k:'_common'、common:true），位置照 order。
 function _kpiFillCols(group){
-  const man=group.manual.map(f=>f.k), fx=group.fillFormula||[];
-  const ord=(group.order||man).filter(k=>man.includes(k)||fx.includes(k));
+  const man=group.manual.map(f=>f.k), fx=group.fillFormula||[], cm=!!(group.commonAsColumn&&group.commonCostLabel);
+  const ord=(group.order||man).filter(k=>man.includes(k)||fx.includes(k)||(cm&&k==='_common'));
   man.forEach(k=>{if(!ord.includes(k))ord.push(k);});
-  return ord.map(k=>man.includes(k)?group.manual.find(f=>f.k===k):Object.assign({},group.formula.find(f=>f.k===k),{fx:true}));
+  if(cm&&!ord.includes('_common'))ord.push('_common');
+  return ord.map(k=>k==='_common'?{k:'_common',l:group.commonCostShortLabel||'共同費用',common:true}:man.includes(k)?group.manual.find(f=>f.k===k):Object.assign({},group.formula.find(f=>f.k===k),{fx:true}));
 }
 // 公式欄「不覆蓋時」的值（placeholder 用）：把這一格的覆蓋值拿掉再跑一次 _kpiCalcAll。
 function _kpiFxDefault(row,group,shop,k){
@@ -10115,6 +10120,7 @@ function _kpiFxDefault(row,group,shop,k){
 }
 // 一格的種類：cell 一般｜merge 合併欄位領頭店（存總額）｜share 合併欄位其他店（唯讀份額）｜na 不適用｜common 共同費用
 function _kpiFillCell(group,shop,f,month){
+  if(f.common)return{kind:'common',segs:[group.key+'Common']};
   const st=_kpiFieldMergeStatus(group,f.k,shop,month);
   if(st&&st.type==='na')return{kind:'na'};
   if(st&&st.type==='merged'){
@@ -10197,6 +10203,8 @@ function _kpiAovOf(d,group){
 function _kpiShortSub(full,short){
   return [...full].length<=4?`<div class="km-sublabel">${_kpiEscAttr(full)}</div>`:`<div class="km-sublabel" title="${_kpiEscAttr(full)}">${_kpiEscAttr(short)}</div>`;
 }
+// 共同費用當欄位、而且整組只有一家店（PChome）：那一列的純利／純利率用整組數字（已扣共同費用），否則回 null。
+function _kpiCommonColTotals(row,group){return group.commonAsColumn&&group.commonCostLabel&&group.shops.length===1?_kpiGroupTotals(row,group):null;}
 function _kpiFillHtml(row){
   const month=row.month;
   const group=_kpiFillGroupObj();
@@ -10214,6 +10222,7 @@ function _kpiFillHtml(row){
     const note=KPI_NOTEABLE_FIELDS.has(f.k)?(row.kpiFieldNotes||{})[group.key+':'+f.k]:null;
     const noteBtn=KPI_NOTEABLE_FIELDS.has(f.k)
       ?`<span class="km-note${note?' has':''}" onclick="editKpiFieldNote('${month}','${group.key}','${f.k}',this)" title="${note?'備註：'+_kpiEscAttr(note)+'（點擊修改）':'備註'}">${note?'●':'✎'}</span>`:'';
+    if(f.common)return `<th><div class="km-th">${f.l}${_kpiInfoHtml(group.title+' '+f.l,[group.commonCostLabel])}</div></th>`;
     if(f.fx)return `<th><div class="km-th">${f.l}${_kpiInfoHtml(group.title+' '+f.l,[f.desc])}</div></th>`;
     const af=group.autoFill&&group.autoFill[f.k];
     if(af)return `<th><div class="km-th">${f.l}${noteBtn}${_kpiInfoHtml(group.title+' '+f.l,[af.desc,'自動計算：'+af.shops.map(_kpiShopLabel).join('、')+(group.shops.every(x=>af.shops.includes(x))?'':'（其他店照原本方式）')])}</div></th>`;
@@ -10237,8 +10246,9 @@ function _kpiFillHtml(row){
         +(_kpiIsAutoMeta(_kpiMetaAt(month,cell.segs))?`<div class="km-sublabel"><span class="km-au-tag" title="從對帳單自動帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；手動改這格後標籤會消失">自動</span></div>`:'');
       return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填${['','一','兩','三','四'][cell.st.shops.length]||cell.st.shops.length}家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
     }).join('');
-    const pure=Number(d[pureKey])||0;
-    const rate=d.pureRate!=null?Number(d.pureRate):(d.rev>0?pure/d.rev:0);
+    const gt=_kpiCommonColTotals(row,group);
+    const pure=gt?gt.totalPure:(Number(d[pureKey])||0);
+    const rate=gt?gt.pureRateAgg:(d.pureRate!=null?Number(d.pureRate):(d.rev>0?pure/d.rev:0));
     const tmp=tmpShops.has(shop)?`<span class="km-tmp" title="這家店還有欄位沒填，純利是暫時的">暫</span>`:'';
     const aov=_kpiAovOf(d,group);
     return `<tr><td class="km-f-shop">${_kpiShopLabel(shop)}</td><td class="km-n km-f-ro km-f-aov"${aov==null&&(Number(d.qty)>0||_kpiRealRev(d)>0)?' title="訂單數或營收未填，不算客單價"':''}><div class="km-roval">${aov==null?'—':_kpiMoney(aov)}</div></td>${cells}
@@ -10246,7 +10256,7 @@ function _kpiFillHtml(row){
       <td class="km-n km-f-ro"><div class="km-roval">${Number(d.rev)>0?_kpiRatePct(rate):'—'}</div></td></tr>`;
   }).join('');
   let commonRow='';
-  if(group.commonCostLabel){
+  if(group.commonCostLabel&&!group.commonAsColumn){
     const cell={kind:'common',segs:[group.key+'Common']};
     const cv=Number(row[group.key+'Common'])||0;
     commonRow=`<tr class="km-f-common"><td class="km-f-shop" title="${group.commonCostLabel}">共同費用<div class="km-sublabel">${group.commonCostShortLabel||''}</div></td><td class="km-f-ro km-f-aov"></td>
@@ -10437,7 +10447,7 @@ function kpiFillPaste(e,inp){
   const r0=+inp.dataset.r,c0=+inp.dataset.c;
   const at=(r,c)=>{
     if(r<group.shops.length)return c<cols.length?{cell:_kpiFillCell(group,group.shops[r],cols[c],month),label:_kpiShopLabel(group.shops[r])+' '+cols[c].l}:null;
-    if(r===group.shops.length&&group.commonCostLabel&&c===0)return{cell:{kind:'common',segs:[group.key+'Common']},label:'共同費用'};
+    if(r===group.shops.length&&group.commonCostLabel&&!group.commonAsColumn&&c===0)return{cell:{kind:'common',segs:[group.key+'Common']},label:'共同費用'};
     return null;
   };
   const pairs=[],preview=[],skipped=[];const seen=new Set();
@@ -11232,12 +11242,13 @@ function kpiFillDownloadExcel(){
         const v=_kpiFillCur(row,cell).v;
         return v==null?'':Number(v);
       });
-      const pure=Number(d[pureKey])||0;
-      const rate=d.pureRate!=null?Number(d.pureRate):(Number(d.rev)>0?pure/Number(d.rev):'');
+      const gt=_kpiCommonColTotals(row,g);
+      const pure=gt?gt.totalPure:(Number(d[pureKey])||0);
+      const rate=gt?gt.pureRateAgg:(d.pureRate!=null?Number(d.pureRate):(Number(d.rev)>0?pure/Number(d.rev):''));
       aoa.push([_kpiShopLabel(shop),aov==null?'':aov].concat(vals,[pure,Number(d.rev)>0?rate:'']));
       fmt.push([null,MONEY].concat(cols.map(colFmt),[MONEY,PCT]));
     });
-    if(g.commonCostLabel){
+    if(g.commonCostLabel&&!g.commonAsColumn){
       const has=row[g.key+'Common']!=null;
       aoa.push(['共同費用（'+(g.commonCostShortLabel||'')+'）',''].concat(cols.map(()=>''),[has?-(Number(row[g.key+'Common'])||0):'','']));
       fmt.push([null,null].concat(cols.map(()=>null),[MONEY,null]));
@@ -11567,7 +11578,7 @@ function _kpiYearViewHtml(){
   _kpiYearChartData=N?{labels:model.months.map(m=>m+'月'),settled:model.settled,datasets:model.groups.map(g=>({label:g.title,data:g.monthRev,backgroundColor:g.color})),pure:model.monthTotal.map(t=>t?t.pure:null)}:null;
   _kpiYearHL=null;
   const tag=N?`<span class="ky-tag">已結算 ${model.settled[0]}～${model.settled[N-1]} 月（${N} / 12）</span>`:'';
-  const top=`<div class="ky-top"><span class="ky-top-r"><select class="mm-sel" onchange="setKpiYear(this.value)" title="選年份">${yearOpts}</select>${tag}</span></div>`;
+  const top=`<div class="ky-top"><select class="mm-sel" onchange="setKpiYear(this.value)" title="選年份">${yearOpts}</select>${tag}</div>`;
   if(!N)return top+`<div class="ky-empty">本年度尚無資料</div>`;
   // ── 四張大卡 ──
   const showYoy=model.hasPrev;
