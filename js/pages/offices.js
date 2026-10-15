@@ -1049,7 +1049,7 @@ Object.assign(App, {
       <div style="background:#1a7a6e;color:#fff;padding:12px 16px">
         <div style="font-size:15px;font-weight:700;margin-bottom:5px">📊 採購績效 KPI 計分架構</div>
         <div style="font-size:11px;opacity:.85;line-height:1.9">
-          每月總分 ＝ 選品季分 ÷ 3 ＋ 當月議價（40）＋ 當月出錯率（10）＋ 加分 − 扣分 &nbsp;｜&nbsp; 季累計 ＝ 三個月當月總分合計
+          每月總分 ＝ 選品季分（達標當月即給滿分，不均分）＋ 當月議價（40）＋ 當月出錯率（10）＋ 加分 − 扣分 &nbsp;｜&nbsp; 季累計 ＝ 三個月當月總分合計
         </div>
       </div>
       <div style="display:flex;gap:14px;padding:14px;flex-wrap:wrap;background:#f9fafb">
@@ -1362,7 +1362,7 @@ Object.assign(App, {
     const _actual8k  = _mgProfits.filter(p => p > 8000 && p <= 10000).length;
     const _actual5k  = _mgProfits.filter(p => p > 5000 && p <= 8000).length;
     const _selScore  = (_mgList.length >= 50 ? 30 : 0) + (_actual10k >= 2 ? 10 : 0) + (_actual8k >= 5 ? 6 : 0) + (_actual5k >= 5 ? 4 : 0);
-    const _selPerMonth = Math.round(_selScore / 3);
+    const _selPerMonth = _selScore;
 
     const nowM = new Date().getMonth() + 1;
     const curIdx = activeMonths.findIndex(m => parseInt(m) === nowM);
@@ -3212,6 +3212,7 @@ Object.assign(App, {
     // 統計
     const profits = list.map(r => { const c = Number(r.cost||0), v = Number(r.rev||0); return v - c; });
     const totalProfit = profits.reduce((s, p) => s + p, 0);
+    const totalRev = list.reduce((s, r) => s + Number(r.rev||0), 0);
     const cnt10k = profits.filter(p => p > 10000).length;
     const cnt8k  = profits.filter(p => p > 8000 && p <= 10000).length;
     const cnt5k  = profits.filter(p => p > 5000 && p <= 8000).length;
@@ -3224,6 +3225,7 @@ Object.assign(App, {
     const statsHtml = list.length === 0 ? '' :
       `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
         ${statCard('新品總數', list.length + ' 筆', '#374151')}
+        ${statCard('總營收', 'NT$' + Math.round(totalRev).toLocaleString(), '#2563eb')}
         ${statCard('總毛利', 'NT$' + Math.round(totalProfit).toLocaleString(), totalProfitColor)}
         ${statCard('毛利 > 10,000', cnt10k + ' 筆', cnt10k > 0 ? '#059669' : '#9ca3af')}
         ${statCard('毛利 8,001~10,000', cnt8k + ' 筆', cnt8k > 0 ? '#2563eb' : '#9ca3af')}
