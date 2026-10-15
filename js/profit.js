@@ -9492,18 +9492,30 @@ const KPI_GROUPS=[
   // 2026-09-23 新增三個通路，欄位與公式照酷澎（訂單數／營收／商品成本／手續費／退貨運費／稅金／耗材）。
   //   key 用英文（寫進 app/kpi 的路徑），畫面名稱在 title／shops。
   //   since：從這個月起才算進填寫進度（之前的月份不把它們算成缺格；數字照樣可以填、照樣算進合計）。
-  {key:'pchome',since:'2026-08',title:'PChome',color:'#d97706',shops:['PChome'],
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
+  // 2026-10-15：since 改 2026-09（帳務月 2026-08 沒有任何 PChome 資料）；拿掉退貨運費（(D1) 已含在對帳單 (D)）；
+  //   手續費只改顯示名稱「平台費」（存的 key 還是 fee）。欄位型別照 MOMO：訂單數／營收／商品成本／平台費／耗材＝一般手填格，
+  //   由「從對帳單帶入」寫入（pchomeKpiFromRecon，見下方「PChome 自動帶入」），寫了才算已填；稅金＝公式欄（同 MOMO：可覆蓋、不算格數）；物流運費手填。
+  //   雲端 2026-01～07 存的 0（含 ret）不動。
+  {key:'pchome',since:'2026-09',title:'PChome',color:'#d97706',shops:['PChome'],
+    // fee 的 desc：表頭 ⓘ 說明（手填欄位有 desc 才顯示 ⓘ；目前只有這一格）
+    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'平台費',desc:'平台費 = 對帳單 (B)+(C)+(D)，含退貨物流費、罰金、固定費（含稅原值）'},{k:'material',l:'耗材'}],
     commonCostLabel:'宅配通運費（我方自付的出貨運費；整組一個數字）',
     commonCostShortLabel:'物流運費',
     // commonAsColumn（2026-10-15）：填寫模式不另切「共同費用」列，直接當一欄（order 裡 '_common' 的位置）。
     //   資料照舊存 row.pchomeCommon（pchomeKpiShipByMonth 讀它）；只有一家店，那一列的純利／純利率改用整組數字（已扣運費）。
     commonAsColumn:true,
-    order:['qty','rev','cost','fee','ret','tax','_common','material','pure','pureRate'],
+    // 只有一家店，小計列跟那一列重複 → 填寫模式與月結表 Excel 都不出小計列
+    noSubtotal:true,
+    order:['qty','rev','cost','fee','tax','_common','material','pure','pureRate'],
     formula:[
-      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material,desc:'純利 = 營收 − 商品成本 − 手續費 − 退貨運費 − 稅金 − 物流運費 − 耗材'},
-      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ret-d.tax-d.material)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
-    ]},
+      // 物流運費是共同費用（row.pchomeCommon），在 _kpiGroupTotals 扣；單店列的純利用整組數字（_kpiCommonColTotals）。
+      // 稅金照 MOMO：公式欄（填寫模式灰底、placeholder＝公式值、可手動覆蓋、不算填寫格數）。⚠ 要排在 pure 前面（_kpiCalcAll 依序算）
+      {k:'tax',l:'稅金',fmt:'money',calc:d=>d.rev*5/105,desc:'稅金 = 營收 × 5/105（含稅金額內含的營業稅，可手動覆蓋）'},
+      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.tax-d.material,desc:'純利 = 營收 − 商品成本 − 平台費 − 稅金 − 物流運費 − 耗材'},
+      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.tax-d.material)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
+    ],
+    fillFormula:['tax'],
+  },
   {key:'friday',since:'2026-08',title:'FriDay',color:'#0891b2',shops:['FriDay'],
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
     formula:[
@@ -10226,6 +10238,7 @@ function _kpiFillHtml(row){
     if(f.fx)return `<th><div class="km-th">${f.l}${_kpiInfoHtml(group.title+' '+f.l,[f.desc])}</div></th>`;
     const af=group.autoFill&&group.autoFill[f.k];
     if(af)return `<th><div class="km-th">${f.l}${noteBtn}${_kpiInfoHtml(group.title+' '+f.l,[af.desc,'自動計算：'+af.shops.map(_kpiShopLabel).join('、')+(group.shops.every(x=>af.shops.includes(x))?'':'（其他店照原本方式）')])}</div></th>`;
+    if(f.desc)return `<th><div class="km-th">${f.l}${noteBtn}${_kpiInfoHtml(group.title+' '+f.l,[f.desc])}</div></th>`;
     return `<th><div class="km-th">${f.l}${noteBtn}</div></th>`;
   }).join('')}<th class="km-n km-f-rohead km-f-ro-first" title="依公式自動計算，不能直接改">純利${_kpiInfoHtml(group.title+' 純利',[_kpiDesc(group,pureKey),_kpiDesc(group,'tax'),_kpiDesc(group,'actualRev')].concat(Object.values(group.autoFill||{}).map(a=>a.desc)))}</th><th class="km-n km-f-rohead" title="依公式自動計算，不能直接改">純利率${_kpiInfoHtml(group.title+' 純利率',[_kpiDesc(group,'pureRate')])}</th></tr>`;
   const body=group.shops.map((shop,ri)=>{
@@ -10300,11 +10313,17 @@ function _kpiFillHtml(row){
     const h=_kpiShopeeAutoHint(month,row);
     autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}<button id="km-au-btn" class="km-au-btn" onclick="kpiShopeeAutoFill()" title="四家店的實際營收、商品成本（淨利表整月檔）、廣告費（首頁每日廣告費加總）。按下去會先預覽，確認後才寫入。訂單數、各項費用、物流運費維持手填。">從淨利表帶入 ${month.replace('-','/')}</button></span>`;
   }
+  // PChome：訂單數／營收／商品成本／平台費／耗材從月對帳（對帳明細＋對帳單）與商品主檔帶入；未對帳 → 鈕 disabled、標「等對帳」、不做估算
+  if(group.key==='pchome'){
+    const pr=pchomeKpiFromRecon(month);
+    const h=pr.ok?_kpiPchomeAutoHint(month,row):null;
+    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${pr.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(pr.why)}">等對帳</span>`}<button id="km-au-btn" class="km-au-btn${pr.ok?'':' km-au-off'}"${pr.ok?'':' disabled'} onclick="kpiPchomeAutoFill()" title="${_kpiEscAttr(pr.ok?'訂單數／營收／商品成本／平台費／耗材，從 PChome 月對帳（帳務月 '+month+'）與商品主檔帶入。按下去會先預覽，確認後才寫入。稅金是公式（營收×5/105）；物流運費維持手填。':pr.why)}">從對帳單帶入 ${month.replace('-','/')}</button></span>`;
+  }
   return `<div class="km-fill">
     <aside class="km-side">${side}</aside>
     <div class="km-fill-main">
       <div class="km-fill-title"><span class="km-dot" style="background:${group.color}"></span>${group.title}<span class="km-fill-sub">${month.replace('-','/')} · ${fc.total?`已填 ${fc.filled} / ${fc.total} 格`:`${group.since.replace('-','/')} 起才列入填寫進度（這個月可以填，但不算缺格）`}</span>${autoBtn}</div>
-      ${_kpiGroupClosed(group,month)?`<div class="km-closed">${_kpiClosedLabel(group)}，這個月不用填</div>`:`<div class="km-tablewrap"><table class="km-table km-ftable"><thead>${head}</thead><tbody>${body}${commonRow}${subRow}</tbody></table></div>`}
+      ${_kpiGroupClosed(group,month)?`<div class="km-closed">${_kpiClosedLabel(group)}，這個月不用填</div>`:`<div class="km-tablewrap"><table class="km-table km-ftable"><thead>${head}</thead><tbody>${body}${commonRow}${group.noSubtotal?'':subRow}</tbody></table></div>`}
       <div class="km-foot"><span class="km-foot-l">每格打完就存到雲端 · 最後編輯：${le?_kpiEscAttr(le.by||'?')+' '+_kpiFmtTime(le.t):'—'}</span>${nextBtn}</div>
     </div>
   </div>`;
@@ -10729,7 +10748,7 @@ function _kpiAutoPreviewHtml(month,plan){
     :`<div class="km-au-snap">寫入前會先保留這個月 ${gName} 所有格子的舊值快照（${plan.snapCells} 格，只存第一次），之後可用 ${rFn}('${month}') 還原</div>`;
   return `<div class="km-au">
     <div class="km-au-sub">${month.replace('-','/')} · ${plan.subLabel||'MOMO 甲配／乙配'} · 會寫入 <b id="km-au-n">${nW}</b> 格（只寫有勾選的列；沒有來源資料的格子不寫、不會寫 0）</div>
-    ${snapLine}
+    ${snapLine}${plan.topHtml||''}
     <div class="km-tablewrap"><table class="km-au-tbl"><thead><tr><th class="km-au-c" title="勾選＝確認時寫入">寫入</th><th>店</th><th>欄位</th><th class="km-n">目前值</th><th></th><th class="km-n">帶入值</th><th>狀態</th><th>來源／組成</th></tr></thead><tbody>${rows}</tbody></table></div>
     ${eLine}${cLine}</div>`;
 }
@@ -10944,6 +10963,218 @@ async function __kpiShopeeRestore(month){
       onSave:()=>{
         kpiWriteCell(month,changes.map(c=>[c.p,c.to,c.to===undefined?undefined:{src:'restore'}])).then(ok=>{
           if(typeof showToast==='function')showToast(ok?'已還原蝦皮 '+month+'（'+changes.length+' 格）':'還原失敗，請看紅色格子',ok?'success':'error');
+          resolve({changes:changes.length,ok});
+        });
+        if(document.getElementById('kpi-tab-content'))renderKpiTab();
+        return true;
+      }});
+  });
+}
+// ══ PChome 自動帶入（2026-10-15）══
+//   KPI 月份 M ＝ 帳務月 M（前月 26 日～當月 25 日）；跟淨利表 pchomeBoxFreightRate 讀 KPI 物流運費的月份是同一個 key。
+//   🔴 依賴方向只能 KPI → 淨利表的【原始資料】：只讀 ec_pchome_recon（對帳明細段0／段2、對帳單 A～D）＋ ec_pchome_products（product.cost）。
+//     不呼叫 pchomeProfitCalc、不讀任何含自付運費／包材的計算結果——淨利表會讀 KPI 的物流運費（pchomeKpiShipByMonth）推每箱費率，
+//     KPI 再讀淨利表的淨利就變成循環。物流運費維持手填。
+//   口徑（含稅，跟 MOMO KPI 一樣；淨利表是未稅，所以兩邊純利差＝平台費內含的營業稅）：
+//     訂單數＝段0 不重複訂單編號（訂單編號-序號 最後一個連字號之前）
+//     營收＝對帳單 (A)（含稅，＝段0 − 段2 退貨）
+//     商品成本＝Σ product.cost × 淨數量（段0 − 段2；退貨回沖成本，同淨利表）
+//     平台費＝對帳單 (B)+(C)+(D)（含稅原值）
+//     稅金＝營收 × 5/105（公式欄，同 MOMO；帶入不寫，跟著營收算）
+//     耗材＝段0 出貨件數（gross，退貨不回沖）× PCHOME_PACKAGING_COST
+//   這五格（訂單數／營收／商品成本／平台費／耗材）是一般手填格，「從對帳單帶入」寫進去才有值、才算已填（同 MOMO）。
+//   沒有對帳明細或對帳單 → {ok:false}：帶入鈕 disabled＋「等對帳」、格子維持空白、不做估算 → 該月自然未完成。
+//   快照存 snapshots.{月}.preAutofillPchome，還原用 __kpiPchomeRestore。
+const KPI_PCHOME_AUTO_FIELDS=['qty','rev','cost','fee','material'];
+const _kpiPchomeCache=new Map();
+// 直接讀存的對帳資料（不用 pchomeLoadRecon：它遇到舊格式 key 會就地存回、標待同步，這裡要純讀）
+function _kpiPchomeReconRaw(){
+  const k='ec_pchome_recon';
+  try{if(Store._profitMem&&Store._profitMem[k]!=null)return Store._profitMem[k];}catch{}
+  try{if(Store._mem&&Store._mem[k]!=null)return Store._mem[k];}catch{}
+  try{const l=localStorage.getItem(k);if(l)return JSON.parse(l);}catch{}
+  return null;
+}
+// 純函式：帳務月 → KPI 六欄。記憶體裡的對帳資料／商品主檔物件沒換就用快取（render 會呼叫很多次）。
+function pchomeKpiFromRecon(month){
+  const raw=_kpiPchomeReconRaw(),prods=pchomeLoadProducts();
+  const c=_kpiPchomeCache.get(month);
+  if(c&&c.raw===raw&&c.prods===prods)return c.out;
+  let out;
+  try{out=_pchomeKpiCompute(month,raw,prods);}catch(e){console.error('[KPI PChome] 計算失敗',e);out={ok:false,reason:'等對帳',why:'計算失敗：'+e.message};}
+  _kpiPchomeCache.set(month,{raw,prods,out});
+  return out;
+}
+function _pchomeKpiCompute(month,raw,prods){
+  const e=raw?(pchomeNormalizeReconKeys(raw).map||{})[month]:null;
+  if(!e||!Array.isArray(e.segments))return{ok:false,reason:'等對帳',why:'帳務月 '+month+' 還沒有對帳資料（到 PChome 月對帳上傳對帳明細＋對帳單後才帶得出來）'};
+  const st=e.對帳單;
+  if(!st||st.A==null||st.D==null)return{ok:false,reason:'等對帳',why:'帳務月 '+month+' 有對帳明細、還沒上傳對帳單（營收、平台費要用對帳單 A～D）'};
+  const nm=x=>String((x&&x.對帳項目)||'').trim(), seg=n=>e.segments.find(x=>nm(x)===n);
+  const s0=((seg('訂單貨款明細 - 一般轉單')||e.segments[0]||{}).rows)||[];
+  const s2=((seg('退貨貨款明細 - 一般轉單')||{}).rows)||[];
+  // 商品主檔：料號 → 商品（同淨利表：後面的蓋前面）；商品編號 → 料號（退貨對料號用，先出現的優先）
+  const pBy={},pnP={};
+  (prods||[]).forEach(p=>{const cd=String(p.料號||'').trim();if(!cd)return;pBy[cd]=p;
+    (Array.isArray(p.商品編號)?p.商品編號:[p.商品編號]).forEach(pn=>{pn=String(pn||'').trim();if(pn&&!pnP[pn])pnP[pn]=cd;});});
+  const orders=new Set(),ships=new Set(),pn0={},q={},amt={};let gross=0,s0Amt=0;
+  s0.forEach(r=>{
+    const on=String(r['訂單編號-序號']||'').trim();if(on){const i=on.lastIndexOf('-');orders.add(i>0?on.slice(0,i):on);}
+    const sh=String(r['出貨單號']||'').trim();if(sh)ships.add(sh);
+    const cd=String(r['廠商料號']||'').trim(),pn=String(r['商品編號']||'').trim(),n=Number(r['數量'])||0,a=Number(r['應付金額'])||0;
+    s0Amt+=a;if(pn&&cd&&!pn0[pn])pn0[pn]=cd;if(!cd)return;
+    gross+=n;q[cd]=(q[cd]||0)+n;amt[cd]=(amt[cd]||0)+a;
+  });
+  let retAmt=0,retQty=0;const retUn=[];
+  s2.forEach(r=>{const a=Number(r['應付金額'])||0,n=Number(r['數量'])||0;if(!a&&!n)return;retAmt+=a;retQty+=n;
+    const pn=String(r['商品編號']||'').trim(),cd=pn0[pn]||pnP[pn]||'';
+    if(cd){q[cd]=(q[cd]||0)-n;amt[cd]=(amt[cd]||0)-a;}else retUn.push({pn:pn||'（空白）',qty:n,amt:a});});
+  let cost=0;const missing=[];
+  Object.keys(q).forEach(cd=>{const p=pBy[cd],u=(p&&p.cost!=null&&p.cost!=='')?Number(p.cost):null;
+    if(u==null||!Number.isFinite(u)){if(q[cd]||amt[cd])missing.push({code:cd,qty:q[cd],amt:amt[cd]||0});return;}
+    cost+=u*q[cd];});
+  const A=Number(st.A)||0,B=Number(st.B)||0,C=Number(st.C)||0,D=Number(st.D)||0;
+  const notes=[];
+  if(Math.abs(A-(s0Amt-retAmt))>1)notes.push('對帳單 (A) '+fmtN(A)+' 和對帳明細（訂單貨款 '+fmtN(s0Amt)+' − 退貨 '+fmtN(retAmt)+'）差 '+fmtN(A-(s0Amt-retAmt))+'：營收以對帳單為準；成本／訂單數／耗材用對帳明細（重傳對帳明細後 (A) 沒更新也會這樣）');
+  const cons=e.segments.filter(x=>/寄倉/.test(nm(x))&&((x.rows||[]).length||Number(x.總額)));
+  if(cons.length)notes.push('寄倉段有資料（'+cons.map(nm).join('、')+'）：營收、平台費在對帳單裡有算，訂單數／成本／耗材只算一般轉單');
+  if(retUn.length)notes.push('退貨對不到料號 '+retUn.length+' 筆（'+retUn.map(x=>x.pn).join('、')+'）：沒從成本扣');
+  return{ok:true,month,qty:orders.size,rev:A,cost,fee:B+C+D,tax:A*5/105,material:PCHOME_PACKAGING_COST*gross,
+    detail:{lines:s0.length,ships:ships.size,gross,netQty:gross-retQty,s0Amt,retAmt,retQty,A,B,C,D,missing,
+      missAmt:missing.reduce((t,x)=>t+x.amt,0),exportTime:e.匯出時間||'',period:e.期間||''},notes};
+}
+// 對帳資料／商品主檔從雲端更新 → KPI 畫面在的話重畫（帶入鈕、等對帳、來源已更新提示跟著變）
+function _kpiPchomeRefreshIfVisible(){if(document.getElementById('kpi-tab-content'))_kpiRefreshViews();}
+function _kpiPchomeAutoPlan(month,row){
+  row=row||getOrCreateKpiRow(month);
+  const group=KPI_GROUPS.find(g=>g.key==='pchome'),shop='PChome';
+  const sd=((row.pchome||{})[shop])||{},items=[],pr=pchomeKpiFromRecon(month),m0=v=>_kpiMoney(v),src='pchome-recon:'+month;
+  const push=(it)=>{
+    const meta=_kpiMetaAt(month,it.segs);
+    it.auto=_kpiIsAutoMeta(meta);it.metaVal=meta&&meta.val;
+    if(it.status==='write'){
+      if(it.cur===it.val&&it.auto&&it.metaVal===it.val)it.status='same';
+      it.srcChanged=it.auto&&it.metaVal!=null&&it.metaVal!==it.val;
+    }
+    items.push(it);
+  };
+  const d=pr.ok?pr.detail:null;
+  const comp=d?{
+    qty:'對帳明細 訂單貨款 '+d.lines+' 列 → 不重複訂單編號（出貨單號 '+d.ships+' 個，僅供對照）',
+    rev:'對帳單 (A)（含稅）＝訂單貨款 '+m0(d.s0Amt)+' − 退貨 '+m0(d.retAmt),
+    cost:'Σ 商品主檔成本 × 淨數量（'+fmtN(d.gross)+' − 退貨 '+fmtN(d.retQty)+' ＝ '+fmtN(d.netQty)+' 件）',
+    fee:'對帳單 (B) '+m0(d.B)+' ＋ (C) '+m0(d.C)+' ＋ (D) '+m0(d.D)+'（含稅）',
+    material:'出貨件數 '+fmtN(d.gross)+' × $'+PCHOME_PACKAGING_COST+'（退貨不回沖）',
+  }:{};
+  KPI_PCHOME_AUTO_FIELDS.forEach(f=>{
+    const it={shop,ms:shop,field:f,label:group.manual.find(x=>x.k===f).l,segs:['pchome',shop,f],cur:sd[f]};
+    if(!pr.ok)Object.assign(it,{status:'wait',note:pr.why});
+    else Object.assign(it,{status:'write',val:Math.round(pr[f]),src,comp:comp[f],
+      hintNote:(f==='cost'&&d.missing.length)?'缺成本 '+d.missing.length+' 個原廠編號（見上方），這些件數沒算進成本':null});
+    push(it);
+  });
+  let topHtml='';
+  if(d&&d.missing.length)topHtml+=`<div class="km-au-warn-box"><div class="km-au-warn-t">⚠ 缺成本 ${d.missing.length} 個原廠編號（影響營收 ${m0(d.missAmt)}，含稅）：這些件數沒算進商品成本，照樣可以帶入；到 PChome 商品主檔補成本後重新帶入才會算</div>
+    <table class="km-au-warn-tbl"><thead><tr><th>原廠編號</th><th class="km-n">淨數量</th><th class="km-n">影響營收</th></tr></thead><tbody>${d.missing.map(w=>`<tr><td>${_kpiEscAttr(w.code)}</td><td class="km-n">${fmtN(w.qty)}</td><td class="km-n">${m0(w.amt)}</td></tr>`).join('')}</tbody></table></div>`;
+  if(pr.ok&&pr.notes.length)topHtml+=pr.notes.map(n=>`<div class="km-au-warn-box"><div class="km-au-warn-t">⚠ ${_kpiEscAttr(n)}</div></div>`).join('');
+  return{items,checks:{},groupName:'PChome',restoreFn:'__kpiPchomeRestore',topHtml,
+    subLabel:'PChome（帳務月 '+month+(d&&d.period?'：'+d.period:'')+'）'};
+}
+// 已帶入過的月份，對帳資料／商品主檔之後有更新 → 按鈕旁提示（不自動改）
+function _kpiPchomeAutoHint(month,row){
+  if(!KPI_PCHOME_AUTO_FIELDS.some(f=>_kpiIsAutoMeta(_kpiMetaAt(month,['pchome','PChome',f]))))return null;
+  try{return _kpiPchomeAutoPlan(month,row).items.some(x=>x.srcChanged)?'changed':null;}catch(e){console.warn('[KPI] PChome 帶入提示計算失敗',e);return null;}
+}
+const _kpiPchomeSnapLocal=new Map();
+function _kpiPchomeCells(row){
+  const cells=[];
+  _kpiLeaves((row&&row.pchome)||{},[],[]).forEach(([p,v])=>{if(v!=null)cells.push([['pchome'].concat(p),v]);});
+  const o=(row&&row.kpiFieldNotes)||{};Object.keys(o).forEach(x=>{if(x.startsWith('pchome:')&&o[x]!=null)cells.push([['kpiFieldNotes',x],o[x]]);});
+  return cells;
+}
+function _kpiPchomeSnapGet(month){
+  const c=_kpiV2.cloud&&_kpiV2.cloud.snapshots&&_kpiV2.cloud.snapshots[month]&&_kpiV2.cloud.snapshots[month].preAutofillPchome;
+  if(_kpiIsMap(c))return Object.assign({},c,{atMs:_kpiTsMs(c.at)});
+  return _kpiPchomeSnapLocal.get(month)||null;
+}
+// 雲端對帳資料／商品主檔的第一個快照到了沒（boot 就訂閱；剛開站可能還沒到 → 等一下，最多 8 秒）
+async function _kpiEnsurePchomeData(){
+  const t0=Date.now();
+  while(Date.now()-t0<8000){
+    if(typeof window.__pchomeReconCloudLatest!=='undefined'&&typeof window.__pchomeProductsCloudLatest!=='undefined')return true;
+    await new Promise(r=>setTimeout(r,300));
+  }
+  return false;
+}
+async function kpiPchomeAutoFill(){
+  const month=_kpiYM();
+  if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法修改資料','error');return;}
+  const btn=document.getElementById('km-au-btn');if(btn){btn.disabled=true;btn.textContent='載入 PChome 資料中…';}
+  const ready=await _kpiEnsurePchomeData();
+  if(btn){btn.disabled=false;btn.textContent='從對帳單帶入 '+month.replace('-','/');}
+  if(!ready){if(typeof showToast==='function')showToast('PChome 對帳資料還沒載入完成（網路慢？），請稍後再按一次','error',6000);return;}
+  const pr=pchomeKpiFromRecon(month);
+  if(!pr.ok){if(typeof showToast==='function')showToast(pr.why,'error',6000);renderKpiTab();return;}
+  const plan=_kpiPchomeAutoPlan(month);
+  const writes=plan.items.filter(x=>x.status==='write');
+  const row0=getOrCreateKpiRow(month);
+  plan.snap=_kpiPchomeSnapGet(month);
+  const snapCells=plan.snap?null:_kpiPchomeCells(row0);
+  plan.snapCells=snapCells?snapCells.length:0;
+  App.openModal({title:'從對帳單帶入 '+month.replace('-','/')+'（PChome）',width:'980px',bodyHtml:_kpiAutoPreviewHtml(month,plan),
+    saveLabel:(()=>{const n=writes.filter(it=>!_kpiAutoWarn(it)).length;return n?'確認寫入 '+n+' 格':(writes.length?'沒有勾選的格子':'沒有可寫入的格子');})(),
+    onSave:()=>{
+      const sel=new Set([...document.querySelectorAll('.km-au-chk:checked')].map(x=>+x.dataset.i));
+      const chosen=writes.filter(it=>sel.has(plan.items.indexOf(it)));
+      if(!chosen.length)return true;
+      // 第一次帶入這個月：舊值快照跟帶入值【同一次 updateDoc】寫進 snapshots.{月}.preAutofillPchome（只存一次）
+      let extra=null;
+      if(snapCells&&!_kpiPchomeSnapGet(month)){
+        const by=_kpiWho();
+        extra=[[['snapshots',month,'preAutofillPchome'],{by,at:window.__cloudKpi.TS,n:snapCells.length,cells:snapCells.map(([p,v])=>({p,v}))}]];
+        _kpiPchomeSnapLocal.set(month,{by,atMs:Date.now(),n:snapCells.length,cells:snapCells.map(([p,v])=>({p,v}))});
+      }
+      const pairs=[];
+      chosen.forEach(it=>{
+        pairs.push([it.segs,it.val,{src:'auto',from:it.src,val:it.val}]);
+        const sd=((getOrCreateKpiRow(month).pchome||{})[it.segs[1]])||{};if(sd[it.segs[2]+'Formula']!=null)pairs.push([[it.segs[0],it.segs[1],it.segs[2]+'Formula'],undefined]);
+      });
+      kpiWriteCell(month,pairs,undefined,{extra}).then(ok=>{
+        if(!ok&&extra)_kpiPchomeSnapLocal.delete(month);
+        if(ok&&typeof showToast==='function')showToast('已帶入 '+chosen.length+' 格（PChome '+month+'）'+(extra?'，已保留舊值快照':''),'success');
+      });
+      _kpiFillRerender();
+      return true;
+    }});
+  renderKpiTab();
+}
+// __kpiPchomeRestore('2026-09')：用 preAutofillPchome 快照把該月 PChome 還原回帶入前的值。先預覽，確認後一次原子寫入。
+async function __kpiPchomeRestore(month){
+  if(!/^\d{4}-\d{2}$/.test(month||'')){console.error('用法：__kpiPchomeRestore("2026-09")');return null;}
+  const snap=_kpiPchomeSnapGet(month);
+  if(!snap){console.warn('[KPI 還原] '+month+' 沒有 PChome 帶入前快照（這個月還沒用「從對帳單帶入」寫過）');if(typeof showToast==='function')showToast(month+' 沒有 PChome 帶入前快照','error');return null;}
+  const key=p=>p.join('\u0001');
+  const cur=new Map(_kpiPchomeCells(getOrCreateKpiRow(month)).map(([p,v])=>[key(p),{p,v}]));
+  const want=new Map((snap.cells||[]).map(c=>[key(c.p),{p:c.p,v:c.v}]));
+  const changes=[];
+  want.forEach((w,k)=>{const c=cur.get(k);if(!c||c.v!==w.v)changes.push({p:w.p,from:c?c.v:undefined,to:w.v});
+    else if(_kpiIsAutoMeta(_kpiMetaAt(month,w.p)))changes.push({p:w.p,from:c.v,to:w.v,tagOnly:true});});
+  cur.forEach((c,k)=>{if(!want.has(k))changes.push({p:c.p,from:c.v,to:undefined});});
+  console.table(changes.map(c=>({格子:c.p.join(' › '),目前值:c.from===undefined?'（空白）':c.from,還原成:c.to===undefined?'（刪除）':c.to})));
+  if(!changes.length){if(typeof showToast==='function')showToast(month+' PChome 已經和快照相同，不用還原','success');return{changes:0};}
+  const fmt=x=>x===undefined?'<span class="km-au-nil">空白</span>':_kpiEscAttr(typeof x==='number'?fmtN(x):x);
+  const fl=k=>((KPI_GROUPS.find(g=>g.key==='pchome').manual.find(f=>f.k===k)||{}).l)||({ret:'退貨運費（已移除的欄位）'})[k]||k;
+  const lbl=p=>p[0]==='pchome'?_kpiShopLabel(p[1])+' '+fl(p[2]):p.join(' › ');
+  const rows=changes.map(c=>`<tr><td>${_kpiEscAttr(lbl(c.p))}</td><td class="km-n">${fmt(c.from)}</td><td class="km-au-arrow">→</td><td class="km-n km-au-val">${c.to===undefined?'（刪除）':c.tagOnly?fmt(c.to)+'<div class="km-au-note">值不變，只清「自動」標籤</div>':fmt(c.to)}</td></tr>`).join('');
+  return new Promise(resolve=>{
+    App.openModal({title:'還原 PChome '+month.replace('-','/')+' 到帶入前',width:'720px',
+      bodyHtml:`<div class="km-au"><div class="km-au-sub">快照：${_kpiEscAttr(snap.by||'?')} ${snap.atMs?_kpiFmtTime(snap.atMs):''} · 會改 <b>${changes.length}</b> 格（一次寫入）</div>
+        <div class="km-tablewrap"><table class="km-au-tbl"><thead><tr><th>格子</th><th class="km-n">目前值</th><th></th><th class="km-n">還原成</th></tr></thead><tbody>${rows}</tbody></table></div></div>`,
+      saveLabel:'確認還原 '+changes.length+' 格',
+      onCancel:()=>resolve({cancelled:true}),
+      onSave:()=>{
+        kpiWriteCell(month,changes.map(c=>[c.p,c.to,c.to===undefined?undefined:{src:'restore'}])).then(ok=>{
+          if(typeof showToast==='function')showToast(ok?'已還原 PChome '+month+'（'+changes.length+' 格）':'還原失敗，請看紅色格子',ok?'success':'error');
           resolve({changes:changes.length,ok});
         });
         if(document.getElementById('kpi-tab-content'))renderKpiTab();
@@ -11266,8 +11497,10 @@ function kpiFillDownloadExcel(){
       });
       return any?sum:'';
     });
-    aoa.push(['小計',ap.aov!=null?ap.aov:''].concat(sums,[t.totalPure,t.totalRev>0?t.pureRateAgg:'']));
-    fmt.push([null,MONEY].concat(cols.map(colFmt),[MONEY,PCT]));
+    if(!g.noSubtotal){   // 只有一家店的通路（PChome）：小計跟那一列重複，不出
+      aoa.push(['小計',ap.aov!=null?ap.aov:''].concat(sums,[t.totalPure,t.totalRev>0?t.pureRateAgg:'']));
+      fmt.push([null,MONEY].concat(cols.map(colFmt),[MONEY,PCT]));
+    }
     const name=g.title.replace(/[\\\/?*\[\]:]/g,'').slice(0,31);   // 工作表名稱不能有 \ / ? * [ ] :、最長 31 字
     XLSX.utils.book_append_sheet(wb,mkSheet(aoa,fmt,[16,11].concat(cols.map(()=>13),[13,9])),name);
   });
@@ -11531,23 +11764,34 @@ function _kpiShopAnnualTotal(rows,year,group,shop,pureKey){
   return{rev,pure};
 }
 // ── 年度總表（2026-10-01 改版）──
-//   版面：頂列（年份＋已結算標籤）→ 四張大卡 → 左「每月營收與純利」堆疊長條＋純利折線／右「各通路全年」表 → 各通路純利率走勢。
+//   版面：頂列（年份＋已填月份標籤）→ 四張大卡 → 左「每月營收與純利」堆疊長條＋純利折線／右「各通路全年」表 → 各通路純利率走勢。
 //   🔴 計算一律沿用既有函式：每個通路每個月＝_kpiGroupTotals(row,g)（內含 _kpiRawForCalc 合併/不適用欄位歸零、
-//     實際營收口徑、整組共同費用扣除）；全年＝已結算月份逐月相加。跟月結表各月的合計是同一套。
-//   「已結算月份」＝該月 row 存在且填寫進度填滿（見 _kpiYearModel 的 settled）。
+//     實際營收口徑、整組共同費用扣除）；全年＝有資料月份逐月相加。跟月結表各月的合計是同一套。
+//   「有資料月份」＝該月月結表任何一格有值（見 _kpiYearModel 的 filled）；月結表填多少就顯示多少，不看填寫進度（2026-10-15 使用者決定）。
 //   「較去年同期」只比去年【同樣那幾個月】（今年 1～8 月就比去年 1～8 月）；去年那幾個月一個 row 都沒有就不顯示。
+// 該月月結表有沒有任何一格有值：各通路各店存的欄位（含公式覆蓋）、共同費用、合併欄位。存的 0 也算有值。
+//   ⚠ 不能用 _kpiFillCountAll：關站通路（官網）的格子一律算已填，會讓完全沒填的月份也被當成有資料。
+function _kpiRowHasData(r){
+  if(!r)return false;
+  const has=v=>v!=null&&v!=='';
+  return KPI_GROUPS.some(g=>{
+    if(has(r[g.key+'Common']))return true;
+    const box=r[g.key]||{};
+    return Object.keys(box).some(shop=>{const sd=box[shop];return sd&&typeof sd==='object'&&Object.values(sd).some(has);});
+  })||Object.values(r.kpiFieldMerges||{}).some(has);
+}
 function _kpiYearModel(year){
   const rows=getKpiRows();
   const rowOf=(y,m)=>rows.find(r=>r.month===`${y}-${String(m).padStart(2,'0')}`)||null;
   const months=[1,2,3,4,5,6,7,8,9,10,11,12];
-  // 「已結算」＝該月 row 存在【且填寫進度填滿】（月結表「✓ 填寫進度 N / N」；2026-10-01 使用者決定：沒填完的月份不算，例如只填一半的 9 月）。
-  //   沒結算的月份不進全年數字、圖表當未結算（灰底），填滿後自動算進來。
-  const settled=months.filter(m=>{const r=rowOf(year,m);if(!r)return false;const c=_kpiFillCountAll(r);return c.total>0&&c.missing===0;});
-  const prevRows=settled.map(m=>rowOf(year-1,m)).filter(Boolean);
+  // 「有資料」＝該月月結表任何一格有值（_kpiRowHasData）。2026-10-15 起不再只算填寫進度填滿的月份：月結表填多少就顯示多少。
+  //   完全沒填的月份＝無資料（不進全年數字、圖表灰底）。月結表自己的 ✓ 填寫進度不受影響。
+  const filled=months.filter(m=>_kpiRowHasData(rowOf(year,m)));
+  const prevRows=filled.map(m=>rowOf(year-1,m)).filter(Boolean);
   const groups=KPI_GROUPS.map(g=>{
     const monthRev=Array(12).fill(null),monthPure=Array(12).fill(null),monthRate=Array(12).fill(null);
     let rev=0,pure=0,prevRev=0,prevPure=0;
-    settled.forEach(m=>{
+    filled.forEach(m=>{
       const t=_kpiGroupTotals(rowOf(year,m),g);
       monthRev[m-1]=t.totalRev;monthPure[m-1]=t.totalPure;monthRate[m-1]=t.totalRev>0?t.totalPure/t.totalRev*100:null;
       rev+=t.totalRev;pure+=t.totalPure;
@@ -11555,10 +11799,10 @@ function _kpiYearModel(year){
     });
     return{key:g.key,title:g.title,color:g.color,monthRev,monthPure,monthRate,rev,pure,rate:rev>0?pure/rev*100:null,prevRev,prevPure};
   });
-  const monthTotal=months.map(m=>{if(!settled.includes(m))return null;let rev=0,pure=0;groups.forEach(g=>{rev+=g.monthRev[m-1]||0;pure+=g.monthPure[m-1]||0;});return{rev,pure,rate:rev>0?pure/rev*100:null};});
+  const monthTotal=months.map(m=>{if(!filled.includes(m))return null;let rev=0,pure=0;groups.forEach(g=>{rev+=g.monthRev[m-1]||0;pure+=g.monthPure[m-1]||0;});return{rev,pure,rate:rev>0?pure/rev*100:null};});
   const sum=(k)=>groups.reduce((a,g)=>a+g[k],0);
   const grandRev=sum('rev'),grandPure=sum('pure'),prevRev=sum('prevRev'),prevPure=sum('prevPure');
-  return{year,months,settled,groups,monthTotal,grandRev,grandPure,grandRate:grandRev>0?grandPure/grandRev*100:null,prevRev,prevPure,hasPrev:prevRows.length>0};
+  return{year,months,filled,groups,monthTotal,grandRev,grandPure,grandRate:grandRev>0?grandPure/grandRev*100:null,prevRev,prevPure,hasPrev:prevRows.length>0};
 }
 const _kyMoney=v=>_kpiMoney(Math.round(v));   // 金額格式跟月結表一致（$、負數 −$）
 // 圖表用：以「萬元」為單位的數字（不帶「萬」字，單位寫在 Y 軸標題）
@@ -11573,17 +11817,17 @@ let _kpiYearModelCur=null,_kpiYearHL=null;
 function _kpiYearViewHtml(){
   const year=_kpiCurYear;
   const yearOpts=_kpiYearOptions().map(y=>`<option value="${y}"${y===year?' selected':''}>${y}年</option>`).join('');
-  const model=_kpiYearModel(year),N=model.settled.length;
+  const model=_kpiYearModel(year),N=model.filled.length;
   _kpiYearModelCur=N?model:null;
-  _kpiYearChartData=N?{labels:model.months.map(m=>m+'月'),settled:model.settled,datasets:model.groups.map(g=>({label:g.title,data:g.monthRev,backgroundColor:g.color})),pure:model.monthTotal.map(t=>t?t.pure:null)}:null;
+  _kpiYearChartData=N?{labels:model.months.map(m=>m+'月'),filled:model.filled,datasets:model.groups.map(g=>({label:g.title,data:g.monthRev,backgroundColor:g.color})),pure:model.monthTotal.map(t=>t?t.pure:null)}:null;
   _kpiYearHL=null;
-  const tag=N?`<span class="ky-tag">已結算 ${model.settled[0]}～${model.settled[N-1]} 月（${N} / 12）</span>`:'';
+  const tag=N?`<span class="ky-tag">已填 ${N} 個月（${model.filled[0]}～${model.filled[N-1]} 月）</span>`:'';
   const top=`<div class="ky-top"><select class="mm-sel" onchange="setKpiYear(this.value)" title="選年份">${yearOpts}</select>${tag}</div>`;
   if(!N)return top+`<div class="ky-empty">本年度尚無資料</div>`;
   // ── 四張大卡 ──
   const showYoy=model.hasPrev;
   const avgPure=model.grandPure/N;
-  const pm=model.settled.map(m=>({m,p:model.monthTotal[m-1].pure}));
+  const pm=model.filled.map(m=>({m,p:model.monthTotal[m-1].pure}));
   const hi=pm.reduce((a,b)=>b.p>a.p?b:a),lo=pm.reduce((a,b)=>b.p<a.p?b:a);
   const card=(label,val,cls,sub)=>`<div class="ky-card"><div class="ky-card-l">${label}</div><div class="ky-card-v ${cls||''}">${val}</div><div class="ky-card-s">${sub||'&nbsp;'}</div></div>`;
   const yoyTxt=(c,p)=>showYoy&&p?`${_kyYoy(c,p,true)} <span class="ky-muted">較去年同期</span>`:'';
@@ -11607,10 +11851,10 @@ function _kpiYearViewHtml(){
     <table class="ky-tbl"><thead><tr><th>通路</th><th class="ky-n">營收</th><th class="ky-n">純利</th><th class="ky-n">純利率</th><th class="ky-n" title="營收，跟去年同樣那幾個月比">較去年</th></tr></thead><tbody>${tr}${tot}</tbody></table>
     <div class="ky-share" title="各通路營收佔比">${bar}</div></div>`;
   // ── 各通路純利率走勢 ──
-  const lastM=model.settled[N-1],firstM=model.settled[0];
+  const lastM=model.filled[N-1],firstM=model.filled[0];
   const rcard=(key,title,color,series,dashed,closed)=>{
     if(closed)return `<div class="ky-rc" data-key="${key}" style="--c:${color}" title="${_kpiEscAttr(closed)}"><div class="ky-rc-h"><i></i>${title}</div><div class="ky-rc-v ky-rc-closed">已關站</div><div class="ky-rc-d">&nbsp;</div></div>`;
-    const pts=model.settled.map(m=>series[m-1]).filter(r=>r!=null);
+    const pts=model.filled.map(m=>series[m-1]).filter(r=>r!=null);
     const last=pts.length?pts[pts.length-1]:null,first=pts.length?pts[0]:null;
     const d=(last!=null&&first!=null&&pts.length>1)?last-first:null;
     return `<div class="ky-rc${dashed?' ky-rc-avg':''}" data-key="${key}" style="--c:${color}"><div class="ky-rc-h"><i class="${dashed?'dash':''}"></i>${title}</div>
@@ -11628,7 +11872,7 @@ function _kpiYearViewHtml(){
 }
 // ── 各通路每月明細（2026-10-13）──
 //   數字＝上方長條圖／「各通路全年」同一份 _kpiYearModel（_kpiGroupTotals，營收＝實際營收、共同費用已扣），不另算。
-//   列＝已結算月份（model.settled，跟長條圖、已結算標籤同一份）＋全年；欄＝KPI_GROUPS 每個通路 營收｜純利｜率，最後一組合計。
+//   列＝有資料月份（model.filled，跟長條圖、已填月份標籤同一份）＋全年；欄＝KPI_GROUPS 每個通路 營收｜純利｜率，最後一組合計。
 const _kyN=v=>{const r=Math.round(v||0);return r<0?'−'+fmtN(-r):fmtN(r);};   // 千分位、不加 $，負數用「−」
 const _kyRate=(pure,rev)=>rev>0?(pure/rev*100).toFixed(1)+'%':'—';
 function _kpiYearMonthlyCols(M){
@@ -11641,21 +11885,21 @@ function _kpiYearMonthlyHtml(M){
   const h1=cols.map(g=>`<th colspan="3" class="ky-mt-g${g.tot?' tot':''}">${g.color?`<i style="background:${g.color}"></i>`:''}${g.title}</th>`).join('');
   const h2=cols.map(g=>`<th class="ky-mt-gs${g.tot?' tot':''}">營收</th><th class="${g.tot?'tot':''}">純利</th><th class="${g.tot?'tot':''}">率</th>`).join('');
   const tds=(m)=>cols.map(g=>{const v=g.cell(m);return `<td class="ky-mt-gs">${_kyN(v.rev)}</td><td class="ky-mt-p${v.pure<0?' neg':''}">${_kyN(v.pure)}</td><td class="ky-mt-r">${_kyRate(v.pure,v.rev)}</td>`;}).join('');
-  const rows=M.settled.map(m=>`<tr><th class="ky-mt-m">${m} 月</th>${tds(m)}</tr>`).join('')+`<tr class="ky-mt-year"><th class="ky-mt-m">全年</th>${tds('year')}</tr>`;
+  const rows=M.filled.map(m=>`<tr><th class="ky-mt-m">${m} 月</th>${tds(m)}</tr>`).join('')+`<tr class="ky-mt-year"><th class="ky-mt-m">全年</th>${tds('year')}</tr>`;
   return `<div class="ky-panel ky-p-mtbl">
-    <div class="ky-mt-head"><span class="ky-p-t">各通路每月明細</span><span class="ky-mt-note">上方長條圖的數字 · 金額單位：元 · 只列已結算月份</span><button class="km-dl ky-mt-dl" onclick="kpiYearDownloadExcel()" title="下載這張表（一個工作表，數字存成數值）">⬇ 下載 Excel</button></div>
+    <div class="ky-mt-head"><span class="ky-p-t">各通路每月明細</span><span class="ky-mt-note">上方長條圖的數字 · 金額單位：元 · 只列有填資料的月份</span><button class="km-dl ky-mt-dl" onclick="kpiYearDownloadExcel()" title="下載這張表（一個工作表，數字存成數值）">⬇ 下載 Excel</button></div>
     <div class="ky-mt-wrap"><table class="ky-mt"><thead><tr><th rowspan="2" class="ky-mt-m">月份</th>${h1}</tr><tr>${h2}</tr></thead><tbody>${rows}</tbody></table></div>
   </div>`;
 }
 // 下載「各通路每月明細」：一個工作表、結構同畫面（兩層表頭）；金額存整數（同畫面），純利率存比例＋百分比格式。
 //   SheetJS 是 index.html 的 defer script（專案既有載入方式）；沒載到 → 退回 CSV（同樣的欄位）。
 function kpiYearDownloadExcel(){
-  const M=_kpiYearModelCur;if(!M){alert('這個年度沒有已結算的月份可以下載');return;}
+  const M=_kpiYearModelCur;if(!M){alert('這個年度還沒有任何月份有資料可以下載');return;}
   const cols=_kpiYearMonthlyCols(M);
   const head1=['月份'],head2=[''];
   cols.forEach(g=>{head1.push(g.title,'','');head2.push('營收','純利','純利率');});
-  const body=M.settled.map(m=>[m+' 月']).concat([['全年']]);
-  M.settled.concat(['year']).forEach((m,i)=>cols.forEach(g=>{const v=g.cell(m);body[i].push(Math.round(v.rev||0),Math.round(v.pure||0),v.rev>0?v.pure/v.rev:'');}));
+  const body=M.filled.map(m=>[m+' 月']).concat([['全年']]);
+  M.filled.concat(['year']).forEach((m,i)=>cols.forEach(g=>{const v=g.cell(m);body[i].push(Math.round(v.rev||0),Math.round(v.pure||0),v.rev>0?v.pure/v.rev:'');}));
   const aoa=[head1,head2].concat(body), name='KPI年度明細_'+M.year;
   if(typeof XLSX==='undefined'||!XLSX.utils||typeof XLSX.writeFile!=='function'){
     const esc=x=>{const t=typeof x==='number'?String(x):String(x==null?'':x);return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;};
@@ -11682,7 +11926,7 @@ function renderKpiYearChart(){
   if(typeof Chart==='undefined')return;
   const mk=(id,cfg)=>{const c=document.getElementById(id);if(!c)return null;const o=Chart.getChart(c);if(o){try{o.destroy();}catch{}}const ch=new Chart(c.getContext('2d'),cfg);_kpiYearCharts.push(ch);return ch;};
   const labels=M.months.map(m=>m+'月');
-  const unsettled=M.months.map(m=>!M.settled.includes(m));
+  const unsettled=M.months.map(m=>!M.filled.includes(m));   // 沒有資料的月份（灰底）
   // ① 堆疊長條（各通路營收）＋全通路純利折線（同一個 Y 軸）；長條上方標總營收（萬）
   const topLabel={id:'kyTop',afterDatasetsDraw(ch){
     const {ctx,scales:{x,y}}=ch;ctx.save();ctx.font='600 11px system-ui,sans-serif';ctx.fillStyle='#374151';ctx.textAlign='center';ctx.textBaseline='bottom';
@@ -11695,14 +11939,14 @@ function renderKpiYearChart(){
       plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+'：'+_kyMoney(c.parsed.y||0)}}},
       scales:{x:{stacked:true,grid:{display:false},ticks:{maxRotation:0,autoSkip:false,font:{size:10.5}}},y:{stacked:true,beginAtZero:true,suggestedMax:Math.max(0,...M.monthTotal.map(t=>t?t.rev:0))*1.12,title:{display:true,text:'單位：萬元',color:'#9ca3af',font:{size:11}},ticks:{callback:v=>_kyWan(v)},grid:{color:'#f1f2f5'}}}},
     plugins:[topLabel]});
-  // ② 純利率折線：每個通路一條＋全通路平均（灰虛線）；未結算月份灰底＋「尚未結算」
+  // ② 純利率折線：每個通路一條＋全通路平均（灰虛線）；沒資料的月份灰底＋「尚無資料」
   const band={id:'kyBand',beforeDatasetsDraw(ch){
     const {ctx,chartArea:a,scales:{x}}=ch;const w=x.getPixelForValue(1)-x.getPixelForValue(0);
     ctx.save();ctx.fillStyle='#f3f4f6';
     let runs=[],cur=null;unsettled.forEach((u,i)=>{if(u){if(!cur)cur={s:i,e:i};else cur.e=i;}else if(cur){runs.push(cur);cur=null;}});if(cur)runs.push(cur);
     runs.forEach(r=>{const l=Math.max(a.left,x.getPixelForValue(r.s)-w/2),rr=Math.min(a.right,x.getPixelForValue(r.e)+w/2);ctx.fillRect(l,a.top,rr-l,a.bottom-a.top);});
     const big=runs.reduce((p,r)=>(!p||(r.e-r.s)>(p.e-p.s))?r:p,null);
-    if(big){ctx.fillStyle='#9ca3af';ctx.font='12px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('尚未結算',(x.getPixelForValue(big.s)+x.getPixelForValue(big.e))/2,(a.top+a.bottom)/2);}
+    if(big){ctx.fillStyle='#9ca3af';ctx.font='12px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('尚無資料',(x.getPixelForValue(big.s)+x.getPixelForValue(big.e))/2,(a.top+a.bottom)/2);}
     ctx.restore();}};
   const series=M.groups.map(g=>({key:g.key,label:g.title,color:g.color,data:g.monthRate,dash:[]})).concat([{key:'__avg',label:'全通路平均',color:'#9ca3af',data:M.monthTotal.map(t=>t?t.rate:null),dash:[6,4]}]);
   const ch2=mk('kpi-year-rate',{type:'line',data:{labels,datasets:series.map(s=>({label:s.label,_key:s.key,_color:s.color,data:s.data,borderColor:s.color,backgroundColor:s.color,borderDash:s.dash,borderWidth:2,pointRadius:2.5,pointHoverRadius:2.5,tension:.25,spanGaps:true}))},
@@ -23938,7 +24182,7 @@ Object.assign(window, {
   buildKpiTabHtml,renderKpiTab,getKpiRows,kpiWriteCell,__kpiMigrateToV2,setKpiViewMode,setKpiYear,
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
   kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillDownloadExcel,
-  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,
+  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,
@@ -24256,6 +24500,7 @@ window.__pchomeApplyCloudRecon=function(docData){
 };
 // 雲端 products/recon 到達 → 若正在看某 PChome 賣場、且不在「批次維護」（有輸入格）→ 重繪當前子分頁（總表/月對帳皆唯讀、重繪安全）。
 function pchomeApplyCloudRerender(){
+  try{ _kpiPchomeRefreshIfVisible(); }catch(e){}   // KPI PChome 自動欄位讀同一份原始資料（單向：只通知 KPI 重讀）
   try{ ['轉單','寄倉'].forEach(function(shop){
     var el=document.getElementById('pchome-content-'+shop);
     if(el && el.classList.contains('active') && (_pchomeSub[shop]||'profit')!=='batch') pchomeRenderSub(shop);
