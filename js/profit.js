@@ -25151,11 +25151,22 @@ var _pchomeEstFeeRateCache={};
 function pchomeEstFeeRate(shop){
   var recon=pchomeLoadRecon();
   var rm=Object.keys(recon).filter(function(m){ return recon[m]&&recon[m].對帳單&&recon[m].對帳單.D!=null; }).sort();
-  if(!rm.length) return {rate:null, month:null};
-  var m=rm[rm.length-1];   // 最近一個已對帳月
+  if(!rm.length) return {rate:null, month:null, shipPack:null};
+  var m=rm[rm.length-1];   // 最近一個已對帳月（平台費率與每件平均運費包材【同一期】，兩者不可取不同期否則估算自相矛盾）
   try{ var c=pchomeProfitCalc(recon[m], shop); var rev=(c.合計&&c.合計.營收)||0, fee=(c.合計&&c.合計.費用)||0;
-    if(rev>0.5) return {rate:fee/rev, month:m}; }catch(e){}
-  return {rate:null, month:m};
+    // 每件平均運費包材 ＝ (當期運費+當期包材) ÷ 當期出貨件數（只讀總表 calc 的 宅配通，不動計算）；合理範圍外→不採用
+    var z=c.宅配通||{}, qty=Number(z.出貨件數)||0, sptot=(Number(z.運費)||0)+(Number(z.包材)||0);
+    var sp=(qty>0)?(sptot/qty):null;
+    if(sp!=null && !(sp>=PCHOME_ITEM_SHIP_PACK_MIN && sp<=PCHOME_ITEM_SHIP_PACK_MAX)) sp=null;
+    var rate=(rev>0.5)?(fee/rev):null;
+    return {rate:rate, month:m, shipPack:sp, shipQty:qty, shipTot:sptot}; }catch(e){}
+  return {rate:null, month:m, shipPack:null};
+}
+// 批次維護「運費+包材」動態預設值＋來源文案（從 est 快取拿每件平均；無則退回 PCHOME_DEFAULT_SHIP_PACK=87）。
+function _pchomeShipPackDefault(shop){
+  var e=_pchomeEstFeeRateCache[shop];
+  if(e&&e.shipPack!=null) return {v:Math.round(e.shipPack), src:'取自 '+e.month+' 實際，每件平均'};
+  return {v:PCHOME_DEFAULT_SHIP_PACK, src:'無已對帳月，單件單箱假設'};
 }
 // 批次維護即時預覽（新增/編輯共用）：只正向、兩行以內、白話。第 1 行＝估計淨利率＋30% 把關；第 2 行＝一句話說明。
 //   毛利率與「偏保守」原理只放估計淨利率的 title tooltip、不攤在畫面上。售價由供貨價÷0.75 回推（填進售價欄、可覆寫）。
@@ -25174,6 +25185,11 @@ var PCHOME_MIN_MARGIN=0.15;
 //   來源：2026-09 宅配通實際每箱 73~184（S60 為主）；取 40~200 當寬鬆護欄。
 var PCHOME_FREIGHT_RATE_MIN=40;
 var PCHOME_FREIGHT_RATE_MAX=200;
+// 每件平均運費包材合理範圍（批次維護定價試算用：(當期運費+當期包材)÷當期出貨件數 落此區間外＝資料異常，退回預設 87）。
+//   依據：2026-09 實際約 58（47 件裝 32 箱、平均一箱約 1.5 件）；單件單箱約 87（每箱 84＋包材 3）；大件每箱費率更高（最高 200）→ 單件大件可達約 203。
+//   上限 200＝接每箱費率上限。下限 10（非 20）：之後推多入組合／併箱，一箱 4 件每件約 24、6 件約 17，下限 20 會把「成功併箱」誤判成異常退回 87＝懲罰我們要的結果；包材本身就佔 3，<10 才不可能。
+var PCHOME_ITEM_SHIP_PACK_MIN=10;
+var PCHOME_ITEM_SHIP_PACK_MAX=200;
 function pchomeBatchPreviewHTML(cost, supply, est, shipPack){
   var esc=_momoEsc, net=(Number(supply)||0)/1.05, c=Number(cost)||0;
   var sp=Number(shipPack); if(!(sp>=0)) sp=0;   // 空/0/NaN → 0，預覽不壞（運費包材每件一份、未稅不除 1.05）
@@ -25184,7 +25200,7 @@ function pchomeBatchPreviewHTML(cost, supply, est, shipPack){
   if(est&&est.rate!=null){
     var estNet=(net-c-net*est.rate-sp)/net;   // 估計淨利率（扣平台費用＋運費包材每件一份）
     var col=estNet>=0.15?'#10b981':(estNet>=0?'#d97706':'#ef4444');
-    var tip='毛利率（未扣平台費用）'+pchomePct(gross)+'。估計偏保守：費率含每月固定費攤在小量上，量增後會降、真實淨利率通常更高。運費包材 '+sp+' 假設商品單獨一箱寄出，若常與其他商品併箱，實際每件運費會低於此值，故偏保守。';
+    var tip='毛利率（未扣平台費用）'+pchomePct(gross)+'。估計偏保守：費率含每月固定費攤在小量上，量增後會降、真實淨利率通常更高。運費包材 '+sp+'（每件一份，未稅）；預設＝當期平均每件（運費包材總額÷出貨件數），此為平均值——總是單獨一箱寄出的商品會被低估、常與其他商品併箱的會被高估。';
     return '估計淨利率 <b style="color:'+col+';font-size:18px" title="'+esc(tip)+'">'+pchomePct(estNet)+'</b>　'+badge(estNet)
       +'<div style="font-size:11px;color:#9ca3af;margin-top:3px">已扣平台費用（費率 '+pchomePct(est.rate)+'，取自 '+esc(est.month)+' 已對帳）與運費包材 '+sp+'。售價為供貨價 ÷ 0.75 回推，可自行修改。</div>';
   }
@@ -25199,7 +25215,8 @@ function pchomeSuggestSupply(cost, est){
   var c=Number(cost)||0; if(!(c>0)) return null;
   if(!(est&&est.rate!=null)) return null;
   var denom=1-est.rate-PCHOME_TARGET_MARGIN; if(!(denom>0)) return null;
-  var untax=(c+PCHOME_BOX_FREIGHT+PCHOME_PACKAGING_COST)/denom;
+  var sp=(est.shipPack!=null)?est.shipPack:(PCHOME_BOX_FREIGHT+PCHOME_PACKAGING_COST);   // 與預覽/欄位同一個每件平均運費包材（三處同步，不然建議價算出的淨利率對不起預覽）
+  var untax=(c+sp)/denom;
   return Math.round(untax*1.05);
 }
 // 新增商品自動帶建議供貨價：【只新增、且供貨價欄為空時才帶】（編輯頁不呼叫此函式、不會蓋既有值）。帶完連動售價(÷0.75)+重算估計淨利率。
@@ -25488,6 +25505,7 @@ function pchomeRenderBatchEditForm(shop){
   var p=pchomeBatchProducts(shop).find(function(x){ return x.料號===_pchomeBatchSel[shop]; });
   if(!p){ el.innerHTML='<div style="font-size:13px;color:#9ca3af;padding:20px;text-align:center">← 從左側選一個商品來編輯</div>'; return; }
   _pchomeEstFeeRateCache[shop]=pchomeEstFeeRate(shop);   // 估計費率算一次、recalc 讀快取（oninput 不重算）
+  var _spd=_pchomeShipPackDefault(shop);   // 運費+包材動態預設（每件平均；既有值不覆蓋）
   var lock=pchomeProductKeyLocked(p);
   var 商品編號str=(p.商品編號||[]).join('、');
   // 原廠編號＝廠商料號＝料號／sku／origin（同一值，同一個 join key）。自動查莫筆克成本、鎖定、重複判定都以它為準。
@@ -25506,7 +25524,7 @@ function pchomeRenderBatchEditForm(shop){
     +'<div><label style="'+_MOMO_LB+'">成本</label><input id="pch-edit-cost-'+shop+'" type="number" oninput="pchomeEditRecalc(\''+shop+'\')" value="'+(p.cost==null?'':p.cost)+'" style="'+_MOMO_INP+'"></div>'
     +'<div><label style="'+_MOMO_LB+'">供貨價(含稅)</label><input id="pch-edit-supply-'+shop+'" type="number" oninput="pchomeEditSupplyChanged(\''+shop+'\')" value="'+(p.供貨價==null?'':p.供貨價)+'" style="'+_MOMO_INP+'"></div>'
     +'<div><label style="'+_MOMO_LB+'">PChome 售價(含稅)<span style="color:#9ca3af">·僅參考</span></label><input id="pch-edit-price-'+shop+'" type="number" value="'+(p.售價==null?'':p.售價)+'" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">填供貨價後自動帶入（供貨價 ÷ 0.75），可自行修改</div></div>'
-    +'<div><label style="'+_MOMO_LB+'">運費+包材</label><input id="pch-edit-ship-'+shop+'" type="number" oninput="pchomeEditRecalc(\''+shop+'\')" value="'+(p.shippingPackaging==null?PCHOME_DEFAULT_SHIP_PACK:p.shippingPackaging)+'" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">自付宅配通運費＋包材（未稅、每件一份）；預設 '+PCHOME_DEFAULT_SHIP_PACK+'、可改</div></div></div>'
+    +'<div><label style="'+_MOMO_LB+'">運費+包材</label><input id="pch-edit-ship-'+shop+'" type="number" oninput="pchomeEditRecalc(\''+shop+'\')" value="'+(p.shippingPackaging==null?_spd.v:p.shippingPackaging)+'" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">自付宅配通運費＋包材（未稅、每件一份）；預設 '+_spd.v+'（'+_spd.src+'）、可改</div></div></div>'
     +'<div id="pch-edit-preview-'+shop+'" style="min-height:22px;margin-bottom:4px"></div>'
     +'<div style="margin-bottom:10px"><label style="'+_MOMO_LB+'">異動原因（必填）</label><input id="pch-edit-note-'+shop+'" type="text" placeholder="例：補上成本 / 供應商調漲供貨價" style="'+_MOMO_INP+'"></div>'
     +'<button onclick="pchomeBatchSubmitEdit(\''+shop+'\')" style="padding:7px 18px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:13px;font-weight:600;cursor:pointer">送出（新增一筆歷程）</button>'
@@ -25617,6 +25635,7 @@ function pchomeDeleteProduct(shop){
 function pchomeRenderBatchAdd(shop){
   var body=document.getElementById('pchome-batch-body-'+shop); if(!body) return;
   _pchomeEstFeeRateCache[shop]=pchomeEstFeeRate(shop);   // 估計費率算一次、recalc 讀快取
+  var _spd=_pchomeShipPackDefault(shop);   // 運費+包材動態預設（每件平均）
   body.innerHTML='<div style="max-width:640px">'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
     +'<div style="grid-column:1/3"><label style="'+_MOMO_LB+'">商品名稱（必填）</label><input id="pch-add-name-'+shop+'" type="text" style="'+_MOMO_INP+'"></div>'
@@ -25624,9 +25643,9 @@ function pchomeRenderBatchAdd(shop){
     +'<div><label style="'+_MOMO_LB+'">PChome 商品編號</label><input id="pch-add-pn-'+shop+'" type="text" style="'+_MOMO_INP+'"></div>'
     +'<div><label style="'+_MOMO_LB+'">成本</label><input id="pch-add-cost-'+shop+'" type="number" oninput="pchomeAddSuggestSupply(\''+shop+'\')" style="'+_MOMO_INP+'"></div></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px">'
-    +'<div><label style="'+_MOMO_LB+'">供貨價(含稅)（必填）</label><input id="pch-add-supply-'+shop+'" type="number" oninput="pchomeAddSupplyChanged(\''+shop+'\')" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px" title="口訣：約等於（成本 ＋ '+PCHOME_DEFAULT_SHIP_PACK+'）× 3.2 ＝ 售價">依成本自動建議，已含平台費與運費包材。可自行修改。</div></div>'
+    +'<div><label style="'+_MOMO_LB+'">供貨價(含稅)（必填）</label><input id="pch-add-supply-'+shop+'" type="number" oninput="pchomeAddSupplyChanged(\''+shop+'\')" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px" title="口訣：約等於（成本 ＋ '+_spd.v+'）× 3.2 ＝ 售價">依成本自動建議，已含平台費與運費包材。可自行修改。</div></div>'
     +'<div><label style="'+_MOMO_LB+'">PChome 售價(含稅)<span style="color:#9ca3af">·僅參考</span></label><input id="pch-add-price-'+shop+'" type="number" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">填供貨價後自動帶入（供貨價 ÷ 0.75），可自行修改</div></div>'
-    +'<div><label style="'+_MOMO_LB+'">運費+包材</label><input id="pch-add-ship-'+shop+'" type="number" value="'+PCHOME_DEFAULT_SHIP_PACK+'" oninput="pchomeAddRecalc(\''+shop+'\')" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">自付宅配通運費＋包材（未稅、每件一份）；預設 '+PCHOME_DEFAULT_SHIP_PACK+'、可改</div></div></div>'
+    +'<div><label style="'+_MOMO_LB+'">運費+包材</label><input id="pch-add-ship-'+shop+'" type="number" value="'+_spd.v+'" oninput="pchomeAddRecalc(\''+shop+'\')" style="'+_MOMO_INP+'"><div style="font-size:10px;color:#9ca3af;margin-top:2px">自付宅配通運費＋包材（未稅、每件一份）；預設 '+_spd.v+'（'+_spd.src+'）、可改</div></div></div>'
     +'<div id="pch-add-preview-'+shop+'" style="min-height:22px;margin-bottom:4px"></div>'
     +'<button onclick="pchomeBatchSubmitAdd(\''+shop+'\')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">＋ 建立商品</button>'
     +'</div>';
