@@ -42,6 +42,26 @@
        最後一個子元素、DOM 順序在後 → 同分時 toast 勝。搭配 .toast 的 pointer-events:none，
        月份鈕照樣點得到，這個平手無害。 */
     --z-toast: 100000;
+    /* 淨利表「廣告費對帳明細」彈窗（#reconcile-detail-ov）。要高過開它的那條 #map-warn-banner
+       （profit.js showMapWarnBanner 的 inline z-index:9999），否則橫幅蓋住明細標題與 ✕；
+       又要低於 --z-toast，彈窗開著時 toast 照樣看得見。 */
+    --z-reconcile-detail: 10000;
+    /* 首頁「歷年營收比較 · 趨勢比較」：年份線條色，依全部年份「新到舊」固定對應（第 6 年起沿用 5）。
+       dashboard.js _revHistInitChart 以 getComputedStyle 讀出後傳給 Chart.js；年份按鈕前的色條也用這組。 */
+    --rh-yr-1: #4f46e5;
+    --rh-yr-2: #0ea5e9;
+    --rh-yr-3: #f59e0b;
+    --rh-yr-4: #a855f7;
+    --rh-yr-5: #94a3b8;
+    /* 淡旺季 7 級色塊（≤70 / 71–85 / 86–95 / 96–104 / 105–114 / 115–129 / ≥130）：
+       低於 100 藍、高於 100 橘、中間淺灰；刻意不用紅綠（那是漲跌色）。文字一律 --text。 */
+    --rh-season-1: #93c5fd;
+    --rh-season-2: #bfdbfe;
+    --rh-season-3: #dbeafe;
+    --rh-season-4: #f1f5f9;
+    --rh-season-5: #ffedd5;
+    --rh-season-6: #fed7aa;
+    --rh-season-7: #fdba74;
   }
 
   * { box-sizing: border-box; }
@@ -163,6 +183,15 @@
     border-color: var(--primary);
     box-shadow: 0 0 0 3px rgba(99, 102, 241, .15);
   }
+  /* 帳號管理「編輯帳號」的帳號欄：username 建立後不可修改（js/pages/users.js），做成看得出鎖住的樣子 */
+  .field input.user-field-locked,
+  .field input.user-field-locked:focus {
+    background: var(--bg);
+    color: var(--text-muted);
+    border-color: var(--border);
+    box-shadow: none;
+    cursor: not-allowed;
+  }
   .btn-primary {
     width: 100%;
     background: var(--primary);
@@ -209,7 +238,7 @@
 
   /* 側欄 */
   .sidebar {
-    width: 240px;
+    width: var(--sidebar-w, 240px);   /* 可拖曳調整（sidebarResizeDrag 更新 --sidebar-w、存 localStorage）；預設 240、範圍 200~360。收合規則 width:0 仍勝出（見下） */
     background: var(--sidebar);
     color: var(--sidebar-text);
     display: flex;
@@ -218,7 +247,9 @@
     transition: width .25s ease;
     overflow: hidden;
   }
-  body.sidebar-collapsed .sidebar { width: 0; }
+  body.sidebar-collapsed .sidebar { width: 0; }   /* 選擇器比 `.sidebar` specific → 收合時勝過 var，寬度歸 0。⚠ 拖曳只更新 --sidebar-w、絕不寫 .sidebar 的 inline width（inline 會贏過本規則、導致收合失效） */
+  body.sidebar-resizing .sidebar,
+  body.sidebar-resizing .sidebar-toggle { transition: none; }   /* 拖曳中關掉 width/left 動畫，才跟手（收合切換時才要 .25s） */
   body.sidebar-collapsed .sidebar > * { opacity: 0; pointer-events: none; }
   /* 收合後右側畫面整體等比放大（zoom 兼容性更好，不會破壞 flex/fixed） */
   .main { transition: zoom .25s ease; }
@@ -227,7 +258,7 @@
   .sidebar-toggle {
     position: fixed;
     top: 18px;
-    left: 226px; /* 240 - 14 = 226，按鈕剛好騎在邊緣 */
+    left: calc(var(--sidebar-w, 240px) - 14px); /* 騎在側欄右緣（隨 --sidebar-w 移動；14＝按鈕半徑） */
     width: 28px;
     height: 28px;
     border-radius: 50%;
@@ -253,6 +284,21 @@
   }
   .sidebar-toggle:active { transform: translateY(1px); }
   body.sidebar-collapsed .sidebar-toggle { left: 8px; }
+  /* 側欄寬度拖曳把手：騎在側欄右緣的細直條（fixed → 不受 .sidebar overflow:hidden 裁切）。
+     拖曳更新 --sidebar-w（範圍 200~360）、存 localStorage。收合態與手機抽屜一律隱藏（無寬可調）。 */
+  .sidebar-resizer {
+    position: fixed;
+    top: 0;
+    left: calc(var(--sidebar-w, 240px) - 3px);
+    width: 6px;
+    height: 100vh;
+    cursor: col-resize;
+    z-index: 150;              /* 內容之上、收合鈕(200)之下 */
+    background: transparent;
+  }
+  .sidebar-resizer:hover,
+  .sidebar-resizer.dragging { background: rgba(99, 102, 241, .28); }
+  body.sidebar-collapsed .sidebar-resizer { display: none; }
   .sidebar-header {
     padding: 16px 20px 14px;
     display: flex;
@@ -563,27 +609,35 @@
   }
 
   /* ------------- 儀表板首頁 · 總覽卡 (summary-card) -------------
-     四張一排：主卡「全通路總營收」放大，其餘三張為通路卡。
-     窄螢幕由下方 @media (max-width:460px) 的 .stat-grid 規則收成 1 欄。 */
+     五張一排：主卡「全通路總營收」放大，其餘四張為通路卡（蝦皮 / MOMO / 酷澎 / 其他通路）。
+     ⚠ 這組尺寸是「剛好塞下 1280 寬」的最小組合（2026-09-18 device toolbar 實測）：
+       側欄 240 + 內距 28×2 + 捲軸 15 之後主內容只有 1025px，五張各 189px、內寬 171px。
+       gap 10→6、內距 14/16→8、主卡金額 30→22、通路卡金額 20→18、標題 13/12→12、
+       佔比與 ROAS 行 11→10、logo 22→18、head gap 8→6，每一項再放大一級就折行。
+       1280 本月模式的 ROAS 行（「ROAS 28.65 · 廣告 NT$ 1,172,450」= 168px）只剩 3px 餘裕，
+       廣告費月累計到八位數就會溢出；標題與漲跌 pill 之間也只剩 8px（pill 出現 ↓ 100.0% 時會撞）。
+       🔴 未來新增的小通路一律併進 app.js PLATFORM_GROUPS 的「其他通路」members，不要開第六張卡——
+         第六張會把每張壓到 157px，主卡金額（本月 160px）與標題列（163px）直接溢出，而且已經沒有字級和內距可以再縮。
+     窄螢幕由下方 @media (max-width:768px) 的 .stat-grid 規則收成 2 欄、(max-width:460px) 收成 1 欄。 */
   .summary-grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
     margin-bottom: 12px;
   }
   .summary-card {
     display: flex;
     flex-direction: column;
-    padding: 14px 16px;
+    padding: 8px;
     box-shadow: none;
   }
   .summary-card-head {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: 6px;
     margin-bottom: 10px;
   }
   .summary-card-logo {
-    width: 22px; height: 22px;
+    width: 18px; height: 18px;
     object-fit: contain;
     border-radius: 4px;
     display: block;
@@ -629,8 +683,8 @@
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
-  .summary-card-delta.up   { background: var(--success-soft); color: var(--success); }
-  .summary-card-delta.down { background: var(--danger-soft);  color: var(--danger); }
+  .summary-card-delta.up   { background: var(--danger-soft);  color: var(--danger); }
+  .summary-card-delta.down { background: var(--success-soft); color: var(--success); }
   /* flat = 沒有比較基準（前期為 0），不顯示假的 0.0% */
   .summary-card-delta.flat { background: var(--bg); color: var(--text-muted); }
   .summary-card-compare {
@@ -640,7 +694,7 @@
     white-space: nowrap;
   }
   .summary-card-value {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 700;
     color: var(--text);
     line-height: 1.15;
@@ -648,8 +702,8 @@
     font-variant-numeric: tabular-nums;
   }
   /* 主卡（全通路總營收）：放大字級做出主從層級 */
-  .summary-card-main .summary-card-title { font-size: 13px; color: var(--text); }
-  .summary-card-main .summary-card-value { font-size: 30px; letter-spacing: -.02em; }
+  .summary-card-main .summary-card-title { font-size: 12px; color: var(--text); }
+  .summary-card-main .summary-card-value { font-size: 22px; letter-spacing: -.02em; }
   /* 通路卡底部：佔比 + ROAS / 廣告費，靠 margin-top:auto 對齊各卡底部 */
   .summary-card-foot {
     margin-top: auto;
@@ -660,7 +714,7 @@
   }
   .summary-card-share,
   .summary-card-ads {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 500;
     color: var(--text-muted);
     white-space: nowrap;
@@ -718,6 +772,57 @@
     border-color: var(--primary);
     color: var(--primary);
   }
+  /* 從試算表同步（只有 SHEET_SYNC_USERS 看得到）：跟本月明細同層級的次要鈕，字色用 --primary 區分。
+     雲端首批快照前 disabled。預覽彈窗的 .ss-* 樣式在下面。只用既有 :root 變數，不碰儀表板底色。 */
+  .entry-sync-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--primary);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .entry-sync-btn:hover:not(:disabled) {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+  }
+  .entry-sync-btn:disabled {
+    color: var(--text-muted);
+    cursor: not-allowed;
+    opacity: .6;
+  }
+  .ss-root { font-size: 13px; color: var(--text); }
+  .ss-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .ss-mode { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  .ss-month { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); font: inherit; }
+  .ss-reload { margin-left: auto; }
+  .ss-range { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; }
+  .ss-loading, .ss-info { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--info); }
+  .ss-error { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--danger-soft); color: var(--danger); margin-top: 8px; }
+  .ss-ok { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--success-soft); color: var(--success); margin-top: 8px; }
+  .ss-summary-line { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .ss-section { margin-bottom: 12px; }
+  .ss-section-title { font-weight: 700; margin-bottom: 6px; }
+  .ss-section-bad .ss-section-title, .ss-bad-text { color: var(--danger); }
+  .ss-list { margin: 0; padding-left: 18px; }
+  .ss-table { width: 100%; border-collapse: collapse; }
+  .ss-table th, .ss-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+  .ss-table th { color: var(--text-muted); font-weight: 600; font-size: 12px; }
+  .ss-table .ss-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ss-td-cb { width: 24px; }
+  .ss-note { color: var(--warn); font-size: 12px; }
+  .ss-tag { font-size: 11px; color: var(--text-muted); }
+  .ss-daybad td { background: var(--danger-soft); color: var(--danger); }
+  .ss-muted { color: var(--text-muted); font-size: 12px; margin: 6px 0 10px; }
+  .ss-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+  .ss-actions .ss-confirm { width: auto; padding: 10px 20px; }
   .entry-toggle-btn {
     display: inline-flex;
     align-items: center;
@@ -902,8 +1007,8 @@
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
-  .rank-delta.up   { color: var(--success); }
-  .rank-delta.down { color: var(--danger); }
+  .rank-delta.up   { color: var(--danger); }
+  .rank-delta.down { color: var(--success); }
   .rank-delta.flat { color: var(--text-muted); }
   .rank-empty {
     padding: 28px 12px;
@@ -1060,8 +1165,6 @@
   .dash-main > .rank-card,
   .dash-main .alert-card,
   .dash-main .pie-card { margin-bottom: 0; }
-  /* 折線圖：整條獨立一列 */
-  .dash-chart-row { display: flex; }
 
   @media (max-width: 900px) {
     .dash-main { grid-template-columns: 1fr; }
@@ -1137,6 +1240,277 @@
     text-align: center;
     font-size: 13px;
     color: var(--text-muted);
+  }
+
+  /* ------------- 儀表板首頁 · 歷年營收比較（年度總表） -------------
+     外框 / 標題比照 .rank-card / .pie-card。markup 在 dashboard.js revHistSectionHtml()，不帶任何 inline style。
+     成長率：成長紅（--danger）、衰退綠（--success）、±0% / 新 / 累計中 灰。
+     窄螢幕：.rev-hist-scroll 左右捲動，第一欄（月份）sticky 固定，背景要實色才蓋得住捲過去的格子。 */
+  .rev-hist-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .rev-hist-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .rev-hist-titles {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .rev-hist-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .rev-hist-sub {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  .rev-hist-tabs {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .rev-hist-tab {
+    border: 0;
+    background: var(--surface);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    cursor: pointer;
+  }
+  .rev-hist-tab + .rev-hist-tab { border-left: 1px solid var(--border); }
+  .rev-hist-tab.is-active { background: var(--primary-soft); color: var(--primary); }
+  .rev-hist-tab:disabled { color: var(--text-faint); cursor: not-allowed; }
+  .rev-hist-pickers {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .rev-hist-pick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .rev-hist-pick-label {
+    min-width: 32px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .rev-hist-chip {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    border-radius: 999px;
+    padding: 3px 10px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+  .rev-hist-chip:hover { border-color: var(--primary); color: var(--primary); }
+  .rev-hist-chip.is-active { background: var(--primary); border-color: var(--primary); color: var(--surface); }
+  .rev-hist-caption {
+    margin: 0 0 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .rev-hist-note {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .rev-hist-note.is-warn { color: var(--danger); font-weight: 600; }
+  .rev-hist-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .rev-hist-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13px;
+  }
+  /* ⚠ css/profit.css 有全域 th / td（td 14px、th 大寫＋字距＋手指游標、thead tr sticky），main.css 有全域 td border-top；
+     這裡逐項蓋掉，字級與行高寫死，月份欄（th）才會跟同列金額（td 第一行）對齊。 */
+  .rev-hist-table th,
+  .rev-hist-table td {
+    padding: 4px 8px;
+    font-size: 13px;   /* 金額 / 月份標籤比照 .rank-name-text */
+    line-height: 1.3;
+    text-align: right;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: nowrap;
+    vertical-align: top;
+    color: var(--text);
+    background: var(--surface);
+    border-top: 0;
+    border-bottom: 1px solid var(--border);
+    cursor: default;
+    user-select: auto;
+  }
+  .rev-hist-table thead tr { position: static; background: none; }
+  .rev-hist-table thead th,
+  .rev-hist-table thead th:hover {
+    padding-top: 5px;
+    padding-bottom: 5px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+  }
+  .rev-hist-table tbody tr:hover > * { background: var(--surface); }
+  .rev-hist-table .rev-hist-month {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text);
+    border-right: 1px solid var(--border);
+  }
+  .rev-hist-table thead .rev-hist-month { color: var(--text-muted); }
+  .rev-hist-table .is-total { border-left: 1px solid var(--border); }
+  .rev-hist-table tfoot tr:first-child > * { border-top: 2px solid var(--border); }
+  .rev-hist-table tbody tr:last-child > * { border-bottom: 0; }
+  .rev-hist-table tfoot tr:last-child > * { border-bottom: 0; }
+  .rev-hist-amt {
+    display: block;
+    color: var(--text);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .rev-hist-amt.is-empty { color: var(--text-faint); }
+  .rev-hist-foot-cum .rev-hist-amt,
+  .rev-hist-foot-full .rev-hist-amt { font-weight: 700; }
+  .rev-hist-g {
+    display: block;
+    font-size: 11px;
+    line-height: 1.2;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+  }
+  .rev-hist-g.is-up { color: var(--danger); }
+  .rev-hist-g.is-down { color: var(--success); }
+  .rev-hist-share {
+    color: var(--text-muted);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .rev-hist-empty {
+    padding: 24px 12px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .rev-hist-empty.is-compact { padding: 12px; }
+
+  /* ── 歷年營收比較 · 趨勢比較（塊 3）── 表格沿用上面 .rev-hist-table（含 profit.css 全域 th/td 的覆寫） */
+  /* 年度總表表頭的通路名：連結樣式，點了跳趨勢比較 */
+  .rev-hist-chlink {
+    border: 0;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-weight: 700;
+    color: var(--primary);
+    cursor: pointer;
+  }
+  .rev-hist-chlink:hover { text-decoration: underline; }
+  /* 年份按鈕：前面一小段線條色；選中用淺底（實心主色底會蓋掉最新年份的同色色條） */
+  .rev-hist-yr-1 { --rh-line: var(--rh-yr-1); }
+  .rev-hist-yr-2 { --rh-line: var(--rh-yr-2); }
+  .rev-hist-yr-3 { --rh-line: var(--rh-yr-3); }
+  .rev-hist-yr-4 { --rh-line: var(--rh-yr-4); }
+  .rev-hist-yr-5 { --rh-line: var(--rh-yr-5); }
+  .rev-hist-swatch {
+    display: inline-block;
+    width: 14px;
+    height: 3px;
+    margin-right: 6px;
+    border-radius: 2px;
+    vertical-align: middle;
+    background: var(--rh-line, var(--text-muted));
+    opacity: .35;
+  }
+  .rev-hist-chip.rev-hist-yrchip.is-active {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .rev-hist-yrchip.is-active .rev-hist-swatch { opacity: 1; }
+  .rev-hist-yrchip.is-locked { cursor: not-allowed; }
+  /* 淡旺季卡片 */
+  .rev-hist-season {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin-bottom: 12px;
+  }
+  .rev-hist-season-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .rev-hist-season-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    margin-right: 2px;
+  }
+  .rev-hist-tag {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .rev-hist-tag.is-peak { background: var(--rh-season-6); }
+  .rev-hist-tag.is-low { background: var(--rh-season-2); }
+  .rev-hist-season-table td { text-align: center; font-variant-numeric: tabular-nums; }
+  .rev-hist-season-table thead th { text-align: center; }
+  .rev-hist-season-table thead .rev-hist-month { text-align: left; }
+  .rev-hist-season-table tr.is-avg > * { font-weight: 700; }
+  .rev-hist-season-table tr.is-avg > * { border-top: 2px solid var(--border); }
+  /* 色階：選擇器要壓過 .rev-hist-table tbody tr:hover > *（hover 時維持色塊） */
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-1 { background: var(--rh-season-1); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-2 { background: var(--rh-season-2); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-3 { background: var(--rh-season-3); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-4 { background: var(--rh-season-4); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-5 { background: var(--rh-season-5); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-6 { background: var(--rh-season-6); }
+  .rev-hist-table.rev-hist-season-table tbody tr > td.rev-hist-lv-7 { background: var(--rh-season-7); }
+  /* 並排表：月份欄固定約 72px，剩下寬度由各年份欄分（只勾一年時月份欄不會被撐到一半寬）。
+     維持 auto 版面（不用 table-layout:fixed）：窄螢幕時欄位仍以內容寬為下限，交給 .rev-hist-scroll 左右捲動。 */
+  .rev-hist-trend-table .rev-hist-month { width: 72px; }
+  .rev-hist-trend-chart { margin-bottom: 12px; }
+  .rev-hist-chart-wrap {
+    position: relative;
+    height: 280px;
   }
 
   /* 篩選列 */
@@ -1458,6 +1832,7 @@
       transition: transform .22s ease;
       box-shadow: 6px 0 28px rgba(0,0,0,.22);
     }
+    .sidebar-resizer { display: none; }   /* 手機抽屜模式無寬度拖曳（側欄=82vw 抽屜） */
     body.mobile-drawer-open .sidebar { transform: translateX(0); }
     body.mobile-drawer-open::before {
       content: '';
@@ -1601,14 +1976,6 @@
     }
     .main { padding: 56px 10px 20px; }
   }
-  .chart-card {
-    background: var(--surface);
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    padding: 20px;
-    box-shadow: none;
-  }
-  .chart-card h3 { margin: 0 0 16px; font-size: 14px; font-weight: 600; }
   .dept-list { display: flex; flex-direction: column; gap: 12px; }
   .dept-row {
     display: flex;
@@ -1658,6 +2025,27 @@
   }
   .role-admin { background: var(--primary-soft); color: var(--primary); }
   .role-staff { background: var(--bg); color: var(--text-muted); }
+  /* 帳號停用／恢復／刪除（#252） */
+  .badge-disabled { background: var(--danger-soft); color: var(--danger); }
+  .user-row.is-disabled .employee-avatar,
+  .user-row.is-disabled .info .meta { opacity: .55; }
+  .user-row.is-disabled .info .name { color: var(--text-muted); }
+  .user-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .user-act-btn {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .user-act-btn:hover { background: var(--bg); }
+  .user-act-btn.danger { color: var(--danger); }
+  .user-act-btn.danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+  .user-act-btn:disabled { opacity: .5; cursor: not-allowed; }
 
   /* ========== 工作週曆 — 備註懸停 tooltip ========== */
   .cal-task-card { position: relative; }
@@ -1779,3 +2167,87 @@
   opacity: .45 !important;
   cursor: not-allowed !important;
 }
+
+/* ===== 洞察表調整紀錄彈窗：逐筆編輯 / 逐筆刪除（js/pages/marketing.js openInsightNoteModal，技術債 #259） ===== */
+/* 一天一格的列本身仍是既有 inline 樣式（回歸快照要求逐字不變）；這裡只管點兩下 / 按 ✕ 後才出現的元素。 */
+/* 用 #note-adj-list 加權：要蓋過 .field input 的 10px 內距、14px 字級。 */
+#note-adj-list .ins-adj-edit,
+#note-adj-list .ins-adj-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#note-adj-list .ins-adj-edit-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--primary-dark);
+  background: var(--surface);
+}
+#note-adj-list .ins-adj-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+#note-adj-list .ins-adj-pick-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+#note-adj-list .ins-adj-pick-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+  font-weight: 500;
+  color: var(--primary-dark);
+  overflow-wrap: anywhere;
+}
+#note-adj-list .ins-adj-pick-del {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--danger);
+}
+#note-adj-list .ins-adj-pick-del:hover { background: var(--danger-soft); color: var(--danger); }
+#note-adj-list .ins-adj-pick-cancel {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+/* 展開逐筆刪除時把該格原本的整格 ✕ 藏起來（.icon-btn 的 display:inline-flex 會蓋掉 [hidden]） */
+#note-adj-list .icon-btn[hidden] { display: none; }
+/* #269 存一筆寫一筆：編輯 / 刪除送出中 → 整個列表變淡、停用雙擊與 ✕（JS 也會擋，這裡是視覺 + 第二道） */
+#note-adj-list.is-busy {
+  opacity: .55;
+  pointer-events: none;
+  cursor: progress;
+}
+/* 新增成功：輸入框閃一下綠色。輸入框本身是既有 inline 樣式（含 border），border-color 要 !important 才蓋得過 */
+#note-new-adj { transition: background-color .15s, border-color .15s; }
+#note-new-adj.is-added {
+  background: var(--success-soft);
+  border-color: var(--success) !important;
+}
+#note-new-adj[readonly] { background: var(--border); color: var(--text-muted); }   /* 新增送出中 */
+/* 長期備註聚焦中 / 有未存變動時，雲端有別人的新版本 → 只顯示這行小字，不動輸入框內容 */
+.ins-note-cloud-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--warn);
+}
+.ins-note-cloud-hint[hidden] { display: none; }

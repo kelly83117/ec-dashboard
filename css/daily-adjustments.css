@@ -33,6 +33,34 @@
 }
 .adj-none { font-size: 12px; color: var(--text-muted); padding: 2px 0; }
 
+/* 需求 3 塊 3-A：依紀錄上的 by 歸屬。總數後面的「（含推算 M）」、明細 / 卡名旁的小標籤
+   （推算 / 已停用 / 原始 by 字串）。背景用 --border（:root 既有的淡灰）。 */
+.adj-sec-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.adj-inferred-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.adj-who-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+  color: var(--text-muted);
+  background: var(--border);
+  white-space: nowrap;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
 /* 兩排 pill：各排上方一個 muted 小標（表頭原詞「分析」/「成長分析」，非粗體、無框，僅分隔用）。
    label + pills 包成 group 讓小標緊貼自己那排；group 之間由 .adj-sec 的 gap 分隔。 */
 .adj-pill-group { display: flex; flex-direction: column; gap: 4px; }
@@ -92,7 +120,7 @@
 .adj-modal-item-muted .adj-modal-text { color: var(--text-muted); }
 
 /* 第三塊：月曆格內「當日各人調整筆數」橫條。結構鏡射既有 todo 橫條（daily.js:257-259），
-   顏色由 JS 經 --adj-cal-* CSS 變數傳入（單一來源 = PERSON_COLORS / PERSON_LIGHT）。 */
+   顏色由 JS 經 --adj-cal-* CSS 變數傳入（單一來源 = daily.js 檔頭 PEOPLE，衍生 PERSON_COLORS / PERSON_LIGHT）。 */
 .adj-cal-row {
   display: flex;
   align-items: stretch;
@@ -155,7 +183,16 @@
 .adj-prog{margin-top:8px;padding-top:8px;border-top:1px solid var(--border,#e5e7eb);}
 .adj-prog-title{font-size:12px;font-weight:700;color:var(--text-muted,#6b7280);margin-bottom:4px;}
 .adj-prog-row{display:flex;align-items:center;gap:6px;margin:3px 0;}
-.adj-prog-shop{font-size:13px;min-width:44px;}   /* 通路列（grp/sub 各自有覆蓋，層級靠這個拉開） */
+.adj-prog-shop{font-size:13px;min-width:44px;}   /* 期間列（grp/sub 各自有覆蓋，層級靠這個拉開） */
+/* 「本期」標記：兩條期間列【都】掛一個 ●，非本期那個只是隱形。
+   🔴 用 visibility:hidden，【不可】改成 display:none 或 [hidden] —— 那會讓佔位寬度塌掉，
+   本期那條的標籤與數字欄就會比另一條往右偏一整個標記寬，兩條對不齊。
+   隱形那個的存在【就是】對齊機制本身，不是可有可無的裝飾。
+   ⚠ 標記是 .adj-prog-shop 的【兄弟】不是子元素：進到裡面會改變那個 span 的寬度，
+     而數字欄的位置是跟著它走的。
+   色值走既有的 --prog-doing（靛，同「進行中」語意），不新增色碼、不碰 --bg。 */
+.adj-prog-cur{font-size:9px;color:var(--prog-doing);flex-shrink:0;}
+.adj-prog-cur-off{visibility:hidden;}
 .adj-prog-num{font-size:12px;color:var(--text-muted,#6b7280);font-variant-numeric:tabular-nums;}
 .adj-prog-bar{flex:1;height:6px;border-radius:3px;background:#f3f4f6;overflow:hidden;}
 .adj-prog-fill{display:block;height:100%;border-radius:3px;background:#6366f1;}
@@ -211,7 +248,7 @@
    這裡只剩 shop 要蓋掉 168/169 行的 11px。層級改由標籤字級承擔：通路 13px > 分組/細項 12px。 */
 .adj-prog-subs .adj-prog-shop{font-size:12px;}
 .adj-prog-grp .adj-prog-shop{font-size:12px;}   /* 顏色維持 168 行既有的 muted #6b7280 */
-/* 進度條只留通路列（分組列不畫條:分母是標籤數、與通路列的商品數不可比）：通路列 7px > 基準 6px */
+/* 進度條只留期間列（分組列不畫條:分母是標籤數、與期間列的商品列數不可比）：期間列 7px > 基準 6px */
 .adj-prog-toggle .adj-prog-bar{height:7px;}
 /* 通路列展開箭頭：整區唯一的「可點」提示，放大加深；hover 再加深。色碼皆為本檔既有
    （#6b7280 同 .adj-prog-grp .adj-prog-shop、#374151 同 .adj-pill-plain），不改既有 .adj-prog-caret。 */
@@ -241,26 +278,6 @@
 .adj-prog-done > summary::before{content:'▸ ';}
 .adj-prog-done[open] > summary::before{content:'▾ ';}
 
-/* ── 月層底下的兩條半月列（唯讀、不可展開，【預設可見】）────────────────────
-   DOM 上是月層 button 的兄弟節點，也在 .adj-prog-detail 外面（見 daily.js 的紅字註解）。
-   欄寬 1fr 60px 46px 與 .adj-prog-grp / .adj-prog-subs .adj-prog-sub 完全一致，
-   月層長條、半月列、標籤明細三層的數字才會連成同一條直線。
-   🔴 border-left / margin-left 刻意與 .adj-prog-detail 的【完全相同】（2px var(--prog-rail) / 4px）：
-   半月列已不在 detail 內，兩塊各畫各的，只有幾何一致時展開後才連成同一條直線軌，
-   不會出現一段左移一段右移的斷階。顏色已抽成 --prog-rail 讓兩處不可能各改各的，
-   但寬度與 margin 仍是兩份字面值，改任一邊的數字都要同步改另一邊。
-   ⚠ 不碰 --bg（底色由老闆指定，不得更動）。 */
-.adj-prog-halves{padding:0 0 0 8px;margin:0 0 2px 4px;border-left:2px solid var(--prog-rail);}
-.adj-prog-half{display:grid;grid-template-columns:1fr 60px 46px;column-gap:10px;align-items:center;}
-.adj-prog-half .adj-prog-shop{font-size:11px;color:var(--text-muted,#6b7280);min-width:0;}
-/* 樹狀前綴：固定兩列（上半月 / 下半月），所以 first/last 就是 ├ / └ */
-.adj-prog-half:first-child .adj-prog-shop::before{content:'├ ';color:#d1d5db;}
-.adj-prog-half:last-child  .adj-prog-shop::before{content:'└ ';color:#d1d5db;}
-.adj-prog-half .adj-prog-num,
-.adj-prog-half .adj-prog-pct{text-align:right;min-width:0;}
-/* 「尚無報表」/「載入中」：占滿數字那兩欄並靠右，與有數字的那列對齊，不會孤零零卡在左邊 */
-.adj-prog-half .adj-prog-na{grid-column:2 / -1;text-align:right;font-size:11px;}
-
 /* 說明區（整頁一份，渲染在人員卡片欄最上方，不再每張卡片各印一次）。
    收合狀態要看得出來「這是可以點的」，不能像一條細分隔線 ——
    用全站既有的可點擊語意色（--primary / --primary-soft，同 .dp-todo-add-btn 那組），
@@ -281,6 +298,33 @@
   color:var(--primary,#4f46e5);
 }
 .adj-prog-note-host:hover{border-color:var(--primary,#4f46e5);}
+
+/* 需求 3 塊 4：右欄「通路進度（今天）」卡（daily.js buildProgressCardHtml）。選擇器一律以 .dp-prog-card 開頭，
+   不影響人員卡上的舊「優化進度」。
+   外框對齊「老闆指派任務」卡（它是 inline style：background:white、1px solid var(--border)、圓角 10px、
+   padding 14px 14px 12px、無陰影）；卡與卡的 12px 間距由右欄容器的 gap 給，這裡不另加 margin。
+   進度列沿用 .adj-prog-* 原樣，字級 / 顏色自然跟人員卡一致。不碰 --bg。 */
+.dp-prog-card{
+  background:var(--surface,#fff);
+  border:1px solid var(--border,#e5e7eb);
+  border-radius:10px;
+  padding:14px 14px 12px;
+  min-width:0;
+}
+/* 人員卡裡的 .adj-prog 帶上分隔線與間距（接在 pill 下面用）；卡片自己當外框時不需要。 */
+.dp-prog-card .adj-prog{margin-top:0;padding-top:0;border-top:0}
+/* 卡片標題對齊「老闆指派任務」卡標題（daily.js inline：font-size:14px;font-weight:600;color:var(--text)）。
+   圖例 .adj-prog-legend 是標題的【兄弟】不是子元素，不受影響。 */
+.dp-prog-card .adj-prog-title{font-size:14px;font-weight:600;color:var(--text,#111827);}
+.dp-prog-card .dp-prog-shop + .dp-prog-shop{margin-top:10px;}
+.dp-prog-card .dp-prog-shop-head{display:flex;align-items:baseline;gap:8px;min-width:0;}
+/* 通路名跟進度列文字（.adj-prog-shop 13px）同級；「負責 X」小一級、次要文字色。 */
+.dp-prog-card .dp-prog-shop-name{font-size:13px;font-weight:600;color:var(--text,#111827);}
+.dp-prog-card .dp-prog-owner{font-size:12px;color:var(--text-muted,#6b7280);}
+/* 塊4-4：「進度條怎麼算的？」說明面板搬進卡內最下面，跟上方最後一個通路留 10px（外觀沿用 .adj-prog-note-host）。 */
+.dp-prog-card .adj-prog-note-host{margin-top:10px;}
+/* 說明內文放大加深（原本繼承 .adj-prog-note 的 10px / #9ca3af、body 的 line-height 1.5）；標題 summary 與外框不動，<b> 照常粗體。 */
+.dp-prog-card .adj-prog-note-body{font-size:12px;color:var(--text-muted,#6b7280);line-height:1.7;}
 
 /* 人員卡片：洞察表「今日調整」chip（<button>，點開明細彈窗）。視覺沿用 .adj-pill 的語彙，
    顏色由 JS 經 --chip-bg / --chip-fg CSS 變數傳入（單一來源 = daily.js INSIGHT_STYLE）。不碰 --bg。 */
@@ -318,11 +362,13 @@
   --prog-done: #10b981;    /* 綠：100% 完成，沿用既有 .adj-prog-p100 */
   --prog-doing: #6366f1;   /* 靛：進行中，沿用既有 .adj-prog-p50 與 .adj-prog-fill */
   --prog-low: #d97706;     /* 琥珀：低於 50%，沿用既有 .adj-prog-p0；刻意不用紅：期中偏低是常態不是過錯 */
-  /* 進度條的「縮排軌」：月層底下那條把半月列與標籤明細串起來的直線。
-     🔴 .adj-prog-halves 與 .adj-prog-detail 是【兩塊分開的 DOM】（半月列在 detail 外面），
-     各畫各的 border-left，只有色值與幾何完全一致時才會連成同一條線、不出現斷階。
-     抽成變數就是為了讓那兩處不可能各改各的。色值 #f3f4f6 與抽變數前完全相同。
-     ⚠ 只給那兩條 border 用。同色碼的 .adj-prog-bar（長條底槽）語意不同，刻意不套。 */
+  /* 進度條的「縮排軌」：期間列展開 ▾ 之後，把標籤明細縮排出來的那條直線。
+     🔴 2026-09-10 移除月層合併之後，用它的只剩 .adj-prog-detail 【一處】——
+     原本還有 .adj-prog-halves 那兩條半月列（兩塊分開的 DOM 各畫各的 border-left，
+     抽成變數正是為了讓那兩處不可能各改各的），半月列已隨月層一起移除。
+     只剩一個使用者仍保留變數：--prog-* 這組是成套的，色值集中比散回規則裡好改。
+     色值 #f3f4f6 與抽變數前完全相同。
+     ⚠ 只給那條 border 用。同色碼的 .adj-prog-bar（長條底槽）語意不同，刻意不套。 */
   --prog-rail: #f3f4f6;
 }
 .adj-x { margin-top: 4px; }
@@ -400,3 +446,80 @@
   cursor:pointer;
 }
 .boss-task-imgs:hover{background:var(--primary);color:#fff;}
+
+/* 需求 3 塊 3-C：洞察表「今日調整」摘要卡標題後的「共 N 個商品（含推算 M）」。
+   標題與附註包成一組靠左（右邊仍是「自動更新」）；附註本身沿用 .adj-inferred-note。 */
+.dp-summary-head-l {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* #306 通路負責人設定：通路進度卡標題旁的 ⚙ 入口（只有管理員才輸出）＋設定彈窗。
+   選擇器一律 .adj-owner- 開頭，不影響其他元件；顏色走既有 :root 變數，不寫死色碼、不碰 --bg 底色。 */
+.adj-owner-cfg-btn{
+  margin-right:auto;            /* .adj-prog-head 是 space-between：把圖例推到最右，按鈕貼著標題 */
+  padding:2px 8px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--surface);
+  color:var(--text-muted);
+  font-size:11px;
+  font-family:inherit;
+  line-height:1.6;
+  cursor:pointer;
+}
+.adj-owner-cfg-btn:hover{border-color:var(--primary);color:var(--primary);}
+
+.adj-owner-box{display:flex;flex-direction:column;gap:12px;}
+.adj-owner-hint{margin:0;font-size:12px;line-height:1.6;color:var(--text-muted);}
+.adj-owner-shop{border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;}
+.adj-owner-shop-name{font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px;}
+.adj-owner-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;}
+.adj-owner-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12.5px;color:var(--text);min-height:26px;}
+.adj-owner-from{flex:0 0 88px;color:var(--text-muted);font-variant-numeric:tabular-nums;}
+.adj-owner-name{font-weight:600;}
+.adj-owner-warn{font-size:11px;font-weight:700;color:var(--danger);background:var(--danger-soft);border-radius:999px;padding:0 7px;}
+.adj-owner-tag{font-size:11px;border-radius:999px;padding:0 7px;line-height:1.7;}
+.adj-owner-tag-base{background:var(--primary-soft);color:var(--primary-dark);}
+.adj-owner-tag-locked{background:var(--border);color:var(--text-muted);}
+.adj-owner-tag-today{background:var(--warn-soft);color:var(--text);}
+.adj-owner-tag-future{background:var(--info-soft);color:var(--text);}
+.adj-owner-dirty{font-size:11px;font-weight:700;color:var(--primary);}
+.adj-owner-removed .adj-owner-from,
+.adj-owner-removed .adj-owner-name{text-decoration:line-through;color:var(--text-muted);}
+.adj-owner-acts{margin-left:auto;display:inline-flex;gap:4px;}
+.adj-owner-btn{
+  padding:3px 10px;
+  border:1px solid var(--primary);
+  border-radius:6px;
+  background:var(--primary);
+  color:var(--surface);
+  font-size:12px;
+  font-family:inherit;
+  cursor:pointer;
+}
+.adj-owner-btn:hover{background:var(--primary-dark);}
+.adj-owner-btn-ghost{background:var(--surface);color:var(--primary);}
+.adj-owner-btn-ghost:hover{background:var(--primary-soft);}
+.adj-owner-select,
+.adj-owner-date{
+  padding:4px 8px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--surface);
+  color:var(--text);
+  font-size:12.5px;
+  font-family:inherit;
+}
+.adj-owner-add{border:1px dashed var(--border);border-radius:var(--radius-sm);padding:8px 10px;}
+.adj-owner-add-title{font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:6px;}
+.adj-owner-add-fields{display:flex;align-items:flex-end;flex-wrap:wrap;gap:8px;}
+.adj-owner-field{display:flex;flex-direction:column;gap:2px;}
+.adj-owner-field-label{font-size:11px;color:var(--text-muted);}
+.adj-owner-msg{border-radius:var(--radius-sm);padding:8px 10px;font-size:12.5px;line-height:1.6;}
+.adj-owner-msg-err{background:var(--danger-soft);color:var(--danger);font-weight:600;}
+.adj-owner-msg-info{background:var(--info-soft);color:var(--text);}
+.adj-owner-msg-list{margin:0;padding-left:18px;}

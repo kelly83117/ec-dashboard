@@ -1,23 +1,77 @@
 /* js/pages/daily.js -- methods extracted from original App, merged back via Object.assign(App, ...) */
 const App = window.App;
-const { Store, escapeHtml, showToast, toDateStr, addDays, todayStr, genId, DAILY_TASK_STATUS, DAILY_TASK_STATUS_LIST, TASK_CATEGORIES, TASK_CATEGORY_NAMES, TASK_CATEGORY_ALIASES, getCategoryMeta, getCategoryItems } = window;
+const { Store, escapeHtml, showToast, toDateStr, addDays, todayStr, genId, DAILY_TASK_STATUS, DAILY_TASK_STATUS_LIST, TASK_CATEGORIES, TASK_CATEGORY_NAMES, TASK_CATEGORY_ALIASES, getCategoryMeta, getCategoryItems, isUserActive } = window;
+
+// 人員表【唯一一份】：工作日誌人員的名字與顏色都從這裡來。🔴 加人只要在 PEOPLE 加一行（名字 + 深色 + 淡色），
+//   下面三份由它衍生，不要再另寫一份名單或色表（#321：以前名單與色表分三處寫，加人只改名單 → 新人變成 fallback 灰）。
+//   ALLOWED_NAMES：決定 ① 工作日誌人員卡 / 月曆固定顯示哪些人（順序＝PEOPLE 的順序＝顯示順序）
+//     ② 老闆任務能指派給誰（含「全體」展開的對象）③ LINE 通知設定列出誰、發給誰。
+//   PERSON_COLORS：深色（頭像底色、月曆「這天誰填過」的顏色點、圖例、月曆計數列）。
+//   PERSON_LIGHT：月曆待辦事項條的淡色底 { bg, text }：左邊一條深色，底色用淡色，不要整條實色。
+//   放檔頭：在所有使用處之前宣告，避開 const 的暫時死區（TDZ）。
+//   Object.freeze（含 PEOPLE 每一列與 light 內層）：各處只讀，凍結防止任何一處意外改到全檔共用的這份。
+//   2026-09-04 楊心雨接手維克後加入。
+// 顏色：陳君葳(Vivian)紫、洪嘉蓮(inna)藍、郭雅琪(Kelly)黃、楊心雨(Astrid)桃紅
+//   🔴 新增人員的選色規則：① 不可與上列既有色同色系 ② 不可用灰色系 —— 灰(#6b7280)是「查無此人設定」
+//   的 fallback（見本檔 avatarHtml 與月曆計數列的 `|| '#6b7280'`），用灰會分不出「有設定」與「漏設定」。
+const PEOPLE = Object.freeze([
+  Object.freeze({ name: '陳君葳', color: '#8b5cf6', light: Object.freeze({ bg: '#ede9fe', text: '#6d28d9' }) }),
+  Object.freeze({ name: '洪嘉蓮', color: '#3b82f6', light: Object.freeze({ bg: '#dbeafe', text: '#1d4ed8' }) }),
+  Object.freeze({ name: '郭雅琪', color: '#f59e0b', light: Object.freeze({ bg: '#fef3c7', text: '#92400e' }) }),
+  Object.freeze({ name: '楊心雨', color: '#db2777', light: Object.freeze({ bg: '#fce7f3', text: '#9d174d' }) }),
+]);
+const ALLOWED_NAMES = Object.freeze(PEOPLE.map(p => p.name));
+const PERSON_COLORS = Object.freeze(Object.fromEntries(PEOPLE.map(p => [p.name, p.color])));
+const PERSON_LIGHT = Object.freeze(Object.fromEntries(PEOPLE.map(p => [p.name, p.light])));   // 內層 light 已在 PEOPLE 凍結
+
+// 需求 3 塊 5-B：老闆任務的完成者。doneBy＝卡片主人姓名（舊資料只有這個）；doneByUser＝實際勾選的登入帳號 username。
+//   顯示：有 doneByUser → 轉成目前姓名（對不到顯示原字）；沒有 → 照舊顯示 doneBy。
+const _bossTaskDoneByName = (t) => {
+  const u = (t && typeof t.doneByUser === 'string') ? t.doneByUser.trim() : '';
+  if (!u) return (t && t.doneBy) || '';
+  const fn = _adjWhoResolver();
+  const id = fn ? fn(u) : null;
+  return (id && id.display) || u;
+};
+// 勾完成時的新物件：doneByUser trim 後非空才寫，否則拿掉（不留舊值）。
+const _bossTaskDone = (t, ownerName, username) => {
+  const next = { ...t, status: 'done', doneAt: Date.now(), doneBy: ownerName };
+  delete next.doneByUser;
+  const u = String(username || '').trim();
+  if (u) next.doneByUser = u;
+  return next;
+};
+// LINE 訊息的完成者：卡片主人；勾選的人（轉成姓名）跟卡片主人不同時加「（由 ○○ 勾選）」。
+const _bossTaskLineWho = (ownerName, username) => {
+  const u = String(username || '').trim();
+  const fn = u ? _adjWhoResolver() : null;
+  const id = fn ? fn(u) : null;
+  const who = u ? ((id && id.display) || u) : '';
+  return (who && who !== ownerName) ? ownerName + '（由 ' + who + ' 勾選）' : ownerName;
+};
 
 Object.assign(App, {
   renderWeeklyCalendarTab(deptId, color, dept) {
+    // ⚡ profit.js 動態載入 + 懶載工作日誌需要的雲端組：工作日誌用 collectAdjustments（calcAnalysis 等 profit.js 匯出）算
+    //   調整標籤 + 讀報表/舊月的調整備註。需要的組＝蝦皮（collectAdjustments 第一趟掃 ec| 報表 key，含 profits collection 近月）
+    //   + archive（舊月調整備註）。★不需 MOMO 組：右側「MOMO · 今日調整」卡讀的 counts 是同步時就預算好、存進
+    //     ec.dailyProgress（app/main、boot 已載）的 momo-summary，render 不讀 momo_products；只有點 chip 看明細
+    //     （momoOpenDpDetail）才回 optlog 現算 → 那條路徑自己補載 MOMO 組（見 profit.js）。也不需酷澎（工作日誌無酷澎卡）。
+    //   🔴 風險3（同 offices）：__ensureProfit 要【先 resolve】（profit.js 載完、momo 守衛掛好）才呼叫任何 __load*Subs
+    //     （守衛未掛就訂閱＝雲端可能覆蓋本機＝資料事故）。
+    if (!window.__profitReady) {
+      // 未載：先動態載 profit.js，載完 App.render 重繪 → 本函式重跑走 else（標籤那時才算得出）。
+      //   此分支【不】訂閱；本次先渲染（collectAdjustments 對 calc 未就緒已有容錯，見本檔內註解）。
+      try { window.__ensureProfit().then(() => this.render()).catch(() => {}); } catch {}
+    } else {
+      // 已 ready → 懶載蝦皮組 + archive 組（各組 Set 守衛保證只訂一次、切頁進出不重訂）。
+      try {
+        if (typeof window.__loadShopeeSubs === 'function') window.__loadShopeeSubs();
+        if (typeof window.__loadArchiveSubs === 'function') window.__loadArchiveSubs();
+      } catch {}
+    }
     // 老闆指示：移除月曆/週曆/甘特圖，每位同事下班前 5 分鐘寫今日工作進度即可
-    // 只保留 4 位同事：陳君葳、洪嘉蓮、郭雅琪、楊心雨（2026-09-04 楊心雨接手維克後加入）
-    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
-    // 月曆上用來標示「這天誰填過」的顏色點：陳君葳(Vivian)紫、洪嘉蓮(inna)藍、郭雅琪(Kelly)黃、楊心雨(Astrid)桃紅
-    //   🔴 新增人員的選色規則：① 不可與上列既有色同色系 ② 不可用灰色系 —— 灰(#6b7280)是「查無此人設定」
-    //   的 fallback（見本檔 avatarHtml 與月曆計數列的 `|| '#6b7280'`），用灰會分不出「有設定」與「漏設定」。
-    const PERSON_COLORS = { '陳君葳': '#8b5cf6', '洪嘉蓮': '#3b82f6', '郭雅琪': '#f59e0b', '楊心雨': '#db2777' };
-    // 月曆待辦事項條的淡色底：左邊一條深色，底色用淡色，不要整條實色
-    const PERSON_LIGHT = {
-      '陳君葳': { bg: '#ede9fe', text: '#6d28d9' },
-      '洪嘉蓮': { bg: '#dbeafe', text: '#1d4ed8' },
-      '郭雅琪': { bg: '#fef3c7', text: '#92400e' },
-      '楊心雨': { bg: '#fce7f3', text: '#9d174d' },
-    };
+    // 名單與顏色（ALLOWED_NAMES / PERSON_COLORS / PERSON_LIGHT）見檔頭 PEOPLE，加人與選色規則也寫在那裡
     const users = Store.get(Store.KEYS.users, []);
     const now = new Date();
     const todayStr = toDateStr(now);
@@ -122,19 +176,34 @@ Object.assign(App, {
       return [];
     };
 
-    // 聯集：固定 3 人 ∪ 當天有資料的其他人（例如 MOMO by-login 操作者不在 ALLOWED_NAMES）→ 解「寫入卻不顯示」的靜默失效。
-    //   ALLOWED_NAMES 在前、順序不變（蝦皮那 3 人顯示一字不變）；其餘按 localeCompare 穩定排序（不因誰先有資料就跳動）；沒人有資料的日子＝原行為。
+    // 聯集：固定 4 人（ALLOWED_NAMES）∪ 當天有資料的其他人（例如 MOMO by-login 操作者不在 ALLOWED_NAMES）→ 解「寫入卻不顯示」的靜默失效。
+    //   ALLOWED_NAMES 在前、順序不變（固定 4 人顯示一字不變）；其餘按 localeCompare 穩定排序（不因誰先有資料就跳動）；沒人有資料的日子＝原行為。
     //   （by DP-worklog 這輪：只擴充 personInfos + 下方月曆那圈，其餘 ALLOWED_NAMES 用途[老闆任務指派/LINE設定/調整面板]不動。）
     const _dpExtraNames = Object.keys(dayProgress || {})
       .filter(name => name && ALLOWED_NAMES.indexOf(name) < 0)
       .filter(name => { const v = dayProgress[name]; return Array.isArray(v) ? v.length > 0 : !!(v && String(v).trim()); })
       .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    const personInfos = ALLOWED_NAMES.concat(_dpExtraNames).map(name => {
+    // 塊 3-A：再併入「當天有淨利表調整歸給他」的人（adjPersonOf：by 對到的帳號姓名，含停用帳號），
+    //   做法同 _dpExtraNames（名單後、穩定排序、預設灰）；「未對到帳號」不是人，固定排最後。
+    const _adjWhoDay = _adjPeopleOn(viewDate);
+    // 塊 3-C：洞察表 chip 也依 by 歸屬（_insCardSummaryOn），歸到的人（含停用、名單外、未對到）同樣併進來長卡；
+    //   只併「有分類、chip 有東西可顯示」的人，免得長出空卡。帳號狀態：淨利表那邊沒有才補洞察表的。
+    const _insDay = _insCardSummaryOn(viewDate);
+    _insDay.forEach((v, n) => { if (!_adjWhoDay.has(n) || (!_adjWhoDay.get(n) && v.status)) _adjWhoDay.set(n, v.status); });
+    const _extraNames = _dpExtraNames
+      .concat([..._adjWhoDay.keys()].filter(n => n && ALLOWED_NAMES.indexOf(n) < 0 && _dpExtraNames.indexOf(n) < 0))
+      .filter(n => n !== ADJ_UNMATCHED_NAME)
+      .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    const _hasUnmatched = _adjWhoDay.has(ADJ_UNMATCHED_NAME) || _dpExtraNames.indexOf(ADJ_UNMATCHED_NAME) >= 0;
+    const personInfos = ALLOWED_NAMES.concat(_extraNames, _hasUnmatched ? [ADJ_UNMATCHED_NAME] : []).map(name => {
       const u = users.find(uu => uu.name === name || uu.username === name);
       return {
         name,
         avatar: u && (u.avatar || u.avatarUrl) || '',
         items: normItems(dayProgress[name]),
+        accountStatus: _adjWhoDay.get(name) || null,   // by 對到的帳號狀態（停用 / 刪除 → 卡名旁標籤）
+        unmatched: name === ADJ_UNMATCHED_NAME,         // 「未對到帳號」卡：只放淨利表 / 洞察表調整，不給待辦
+        insight: _insDay.get(name) || null,             // 洞察表 · 今日調整（render 時即時算，不讀 dailyProgress 快照）
       };
     });
 
@@ -169,15 +238,6 @@ Object.assign(App, {
         '弱轉換':   { emoji:'🟢', ...GROUP_CONV },
         '轉換偏低': { emoji:'🟩', ...GROUP_CONV },
       };
-      const PROFIT_ORDER = ['高利潤商品', '賠錢中', '低淨利', '危險商品', '低效廣告'];
-      const PROFIT_STYLE = {
-        '高利潤商品': { bg:'#dcfce7', fg:'#166534' },
-        '賠錢中':     { bg:'#fee2e2', fg:'#991b1b' },
-        '低淨利':     { bg:'#fef3c7', fg:'#92400e' },
-        '危險商品':   { bg:'#fecaca', fg:'#7f1d1d' },
-        '低效廣告':   { bg:'#e0e7ff', fg:'#3730a3' },
-        '其他':       { bg:'#f3f4f6', fg:'#374151' },
-      };
       const renderSummaryCard = (opts) => {
         // clickable（預設 false）：chip 改成 <button class="ins-chip">，點擊由 bindWeeklyCalendar
         //   的既有委派接手開 openInsightDetailModal；顏色只經 --chip-bg / --chip-fg CSS 變數傳
@@ -190,10 +250,12 @@ Object.assign(App, {
           <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:${c.bg};color:${c.fg};font-size:12px;font-weight:600;line-height:1.4;white-space:nowrap">
             ${chipInner(c)}
           </span>`).join('');
+        // noteHtml（選填）：接在標題後面的附註（洞察表「共 N 個商品（含推算 M）」），沒有就維持原本單一標題
+        const titleHtml = `<span style="font-size:11px;font-weight:700;color:${opts.headColor};letter-spacing:.02em">${escapeHtml(opts.title)}</span>`;
         return `
           <div class="dp-summary-card" style="background:${opts.headBg};border-left:3px solid ${opts.headColor};border-radius:6px;padding:8px 10px 9px;margin:2px 0 4px">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
-              <span style="font-size:11px;font-weight:700;color:${opts.headColor};letter-spacing:.02em">${escapeHtml(opts.title)}</span>
+              ${opts.noteHtml ? `<span class="dp-summary-head-l">${titleHtml}${opts.noteHtml}</span>` : titleHtml}
               <span style="font-size:10px;color:${opts.headColor};opacity:.7;font-weight:500">自動更新</span>
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:5px">${chipsHtml}</div>
@@ -205,21 +267,26 @@ Object.assign(App, {
       (Store.get('ec.bossTasks', []) || []).forEach(t => {
         if (t && t.id && Array.isArray(t.images) && t.images.length) _btImageCount[t.id] = t.images.length;
       });
+      // 塊 3-C：洞察表 · 今日調整 改成 render 時即時算（p.insight ← _insCardSummaryOn，依紀錄 by 歸屬），
+      //   chip 樣式 / 順序 / 點擊同舊版；推算的商品數接在標題後「共 N 個商品（含推算 M）」，沒有推算就不出。
+      //   dailyProgress 裡 marketing.js 照寫的 insight-summary 快照不再拿來顯示（renderItem 遇到直接略過）。
+      const insightCardHtml = (() => {
+        const s = p.insight;
+        if (!s) return '';
+        const noteHtml = s.inferred ? `<span class="adj-inferred-note">共 ${s.total} 個商品（含推算 ${s.inferred}）</span>` : '';
+        if (!s.ready) {
+          // 分類函式還沒掛上（理論上不會）：先顯示商品數，下次 render 補上分類
+          return renderSummaryCard({ title:'洞察表 · 今日調整', headBg:'#faf5ff', headColor:'#7e22ce', noteHtml,
+            chips: [{ label:'分類載入中', count:s.total, ...GROUP_GROW }] });
+        }
+        const keys = INSIGHT_ORDER.filter(k => s.counts[k]);
+        if (keys.length === 0) return '';
+        const chips = keys.map(k => ({ label:k, count:s.counts[k], ...(INSIGHT_STYLE[k]||{}) }));
+        return renderSummaryCard({ title:'洞察表 · 今日調整', headBg:'#faf5ff', headColor:'#7e22ce', chips, clickable:true, noteHtml });
+      })();
       const renderItem = (it) => {
-        if (it && it.kind === 'insight-summary') {
-          const counts = it.counts || {};
-          const keys = INSIGHT_ORDER.filter(k => counts[k]);
-          if (keys.length === 0) return '';
-          const chips = keys.map(k => ({ label:k, count:counts[k], ...(INSIGHT_STYLE[k]||{}) }));
-          return renderSummaryCard({ title:'洞察表 · 今日調整', headBg:'#faf5ff', headColor:'#7e22ce', chips, clickable:true });
-        }
-        if (it && it.kind === 'profit-summary') {
-          const counts = it.counts || {};
-          const orderedKeys = [...PROFIT_ORDER.filter(k => counts[k]), ...Object.keys(counts).filter(k => !PROFIT_ORDER.includes(k))];
-          if (orderedKeys.length === 0) return '';
-          const chips = orderedKeys.map(k => ({ label:k, count:counts[k], emoji:'', ...(PROFIT_STYLE[k]||PROFIT_STYLE['其他']) }));
-          return renderSummaryCard({ title:'淨利表 · 今日調整', headBg:'#eff6ff', headColor:'#1d4ed8', chips });
-        }
+        if (it && it.kind === 'insight-summary') return '';   // 舊快照：改由上方 insightCardHtml 即時算
+        if (it && it.kind === 'profit-summary') return '';    // 舊快照（塊3-D 起不再寫入）：改由卡片下方「淨利表調整」區塊即時算
         // MOMO optlog 今日調整（by-login 歸屬）。additive：跟上面 insight/profit 兩支並列，不改它們的邏輯。
         //   counts 依實際出現的 type 動態渲染、容忍未知 type（不寫死、不當掉）；chip 點擊回 optlog 現算明細，處理函式在 profit.js（momoOpenDpDetailFromEl）。
         if (it && it.kind === 'momo-summary') {
@@ -230,6 +297,14 @@ Object.assign(App, {
           const dispCombo = k => k.replace(/^([^·]+)·/, (m, sh) => ((window.momoShopDisplay ? window.momoShopDisplay(sh) : sh) + '·'));
           const chips = keys.map(k => `<button type="button" class="mm-dp-chip" data-mm-person="${escapeHtml(p.name)}" data-mm-date="${escapeHtml(viewDate)}" data-mm-combo="${escapeHtml(k)}" onclick="momoOpenDpDetailFromEl(this)"><span>${escapeHtml(dispCombo(k))}</span><span style="opacity:.6">·</span><b>${counts[k]}</b></button>`).join('');
           return `<div class="mm-dp-card"><div class="mm-dp-card-h"><span class="mm-dp-card-t">MOMO · 今日調整</span><span class="mm-dp-card-auto">自動更新</span></div><div class="mm-dp-chips">${chips}</div></div>`;
+        }
+        // PChome optlog 今日調整（照 MOMO 那支並列；chip 點擊回 optlog 現算明細，處理函式 pchomeOpenDpDetailFromEl 在 profit.js）
+        if (it && it.kind === 'pchome-summary') {
+          const counts = it.counts || {};
+          const keys = Object.keys(counts).filter(k => counts[k]);
+          if (keys.length === 0) return '';
+          const chips = keys.map(k => `<button type="button" class="mm-dp-chip" data-pch-person="${escapeHtml(p.name)}" data-pch-date="${escapeHtml(viewDate)}" data-pch-combo="${escapeHtml(k)}" onclick="pchomeOpenDpDetailFromEl(this)"><span>${escapeHtml(k)}</span><span style="opacity:.6">·</span><b>${counts[k]}</b></button>`).join('');
+          return `<div class="mm-dp-card"><div class="mm-dp-card-h"><span class="mm-dp-card-t">PChome · 今日調整</span><span class="mm-dp-card-auto">自動更新</span></div><div class="mm-dp-chips">${chips}</div></div>`;
         }
         return `
         <div class="dp-todo-row" data-item-id="${escapeHtml(it.id)}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f3f4f6">
@@ -242,19 +317,21 @@ Object.assign(App, {
         </div>`;
       };
       const itemRows = p.items.map(renderItem).join('');
-      const emptyHint = p.items.length === 0 ? `<div style="padding:10px 2px;color:var(--text-muted);font-size:12.5px">${isEditable ? '還沒有待辦事項' : '這天沒有紀錄'}</div>` : '';
+      // 「沒有紀錄」提示：舊快照（insight-summary / profit-summary）已不顯示，所以不把它算進「有東西」；改看即時的洞察表卡
+      const hasShown = !!insightCardHtml || p.items.some(it => !(it && (it.kind === 'insight-summary' || it.kind === 'profit-summary')));
+      const emptyHint = !hasShown ? `<div style="padding:10px 2px;color:var(--text-muted);font-size:12.5px">${isEditable ? '還沒有待辦事項' : '這天沒有紀錄'}</div>` : '';
       return `
         <div class="dp-card" data-dp-name="${escapeHtml(p.name)}" style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:8px;min-width:0">
           <div style="display:flex;align-items:center;gap:10px;min-width:0">
             ${avatarHtml}
             <div style="flex:1;min-width:0">
-              <div style="font-size:14px;font-weight:600;color:var(--text)">${escapeHtml(p.name)}</div>
-              <div style="margin-top:2px">${statusChip}</div>
+              <div style="font-size:14px;font-weight:600;color:var(--text)">${escapeHtml(p.name)}${p.accountStatus === 'disabled' ? '<span class="adj-who-tag">已停用</span>' : p.accountStatus === 'deleted' ? '<span class="adj-who-tag">已刪除</span>' : ''}</div>
+              ${p.unmatched ? '' : `<div style="margin-top:2px">${statusChip}</div>`}
             </div>
             <span class="dp-saved-flag" style="display:none;color:#10b981;font-size:11px;font-weight:600;letter-spacing:.04em">✓ 已存</span>
           </div>
-          <div class="dp-todo-list">${itemRows}${emptyHint}</div>
-          ${isEditable ? `
+          ${p.unmatched ? insightCardHtml : `<div class="dp-todo-list">${insightCardHtml}${itemRows}${emptyHint}</div>`}
+          ${isEditable && !p.unmatched ? `
             <div style="display:flex;gap:6px;margin-top:2px">
               <input type="text" class="dp-todo-add-input" data-dp-name="${escapeHtml(p.name)}" placeholder="新增待辦事項，按 Enter 加入"
                 style="flex:1;min-width:0;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;color:var(--text)">
@@ -274,6 +351,9 @@ Object.assign(App, {
     // 第三塊資料源之二：洞察表索引。🔴 只在月曆迴圈外建一次（迴圈內會重跑 31 次）；
     // getAdjIndex() 自帶快取，維持在格子內呼叫的既有寫法。
     const insIndexForCal = getInsIndex();
+    const calWhoResolve = _adjWhoResolver();   // 塊 3-B：resolver 迴圈外取一次（自帶快取，這裡只省掉每格的 Store.get）
+    // 名單外排序：同人員卡，「未對到帳號」不是人、固定排最後，其餘 localeCompare
+    const calExtraSort = (a, b) => (a === ADJ_UNMATCHED_NAME) - (b === ADJ_UNMATCHED_NAME) || a.localeCompare(b, 'zh-Hant');
     const calCells = [];
     const calExtraPeople = new Set();   // 月曆/圖例出現過的非名單人（例如 MOMO by-login 操作者）→ 圖例帶到他們、色用 fallback
     for (let i = 0; i < firstWeekday; i++) calCells.push('<div></div>');
@@ -283,7 +363,7 @@ Object.assign(App, {
       const isCellSelected = dateStr === viewDate;
       const dayEntries = allProgressForCal[dateStr] || {};
       const dayItems = [];
-      // 月曆同 personInfos 聯集：固定 3 人 ∪ 該格有資料的其他人（穩定排序）；未在色表的人給預設灰。
+      // 月曆同 personInfos 聯集：固定 4 人 ∪ 該格有資料的其他人（穩定排序）；未在色表的人給預設灰。
       const _calRoster = ALLOWED_NAMES.concat(
         Object.keys(dayEntries).filter(n => n && ALLOWED_NAMES.indexOf(n) < 0).sort((a, b) => a.localeCompare(b, 'zh-Hant'))
       );
@@ -308,12 +388,14 @@ Object.assign(App, {
       // 第三塊：當日「處理的商品數」，每人一行，置於 todo 橫條上方。來源 = 淨利表(getAdjIndex，
       //   自帶快取) + 洞察表(insIndexForCal，迴圈外建一次)，同商品跨來源去重（key = shop|code；
       //   code 空時用「來源前綴+#index」保筆數，不讓多筆塌成一筆、也不讓兩來源的無碼列互撞）。
-      //   依 ADJ_SHOP_TO_PERSON 歸人，ALLOWED_NAMES 順序，只顯示有數字的人（天然上限 3，不與 MAX_CAL_BARS 合併）。
+      //   依紀錄歸人（見下方 adjPersonOf），ALLOWED_NAMES 在前，只顯示有數字的人（不與 MAX_CAL_BARS 合併）。
       //   顏色走 PERSON_COLORS / PERSON_LIGHT，用 CSS 變數傳給 css/daily-adjustments.css 的排版規則。
       const slash = dateStr.replace(/-/g, '/');
       const keySet = {};   // person -> Set(商品 key)
+      // 塊 3-B / 3-C：淨利表('p')、洞察表('i') 歸屬都走 adjPersonOf（同人員卡：有 by 依操作者、沒 by 推算負責人）。
+      //   去重規則不變（每人各自 通路|品號，淨利表＋洞察表合併）。洞察表這裡不分類（照舊每個有調整的商品都算）。
       const addRecs = (recs, srcTag) => recs.forEach((r, i) => {
-        const person = ADJ_SHOP_TO_PERSON[r.shop];
+        const person = adjPersonOf(r, dateStr, calWhoResolve).person;
         if (!person) return;
         const key = r.code ? (r.shop + '|' + r.code) : (r.shop + '|#' + srcTag + i);
         (keySet[person] = keySet[person] || new Set()).add(key);
@@ -322,18 +404,21 @@ Object.assign(App, {
       addRecs(insIndexForCal[slash] || [], 'i');
       const adjCountByPerson = {};
       Object.keys(keySet).forEach(n => { adjCountByPerson[n] = keySet[n].size; });
-      // MOMO 優化紀錄計數：口徑跟卡片一致＝該人 momo-summary 的 counts「總和」（不是 item 數）。歸屬用 by(登入者)、非蝦皮 ADJ_SHOP_TO_PERSON。
+      // MOMO 優化紀錄計數：口徑跟卡片一致＝該人 momo-summary 的 counts「總和」（不是 item 數）。歸屬用 by(登入者)、非蝦皮 adjOwnerOf。
       const momoCountByPerson = {};
       Object.keys(dayEntries).forEach(n => {
         const v = dayEntries[n]; if (!Array.isArray(v)) return;
         const ms = v.find(it => it && it.kind === 'momo-summary');
         if (ms && ms.counts) { const s = Object.values(ms.counts).reduce((a, b) => a + (b || 0), 0); if (s > 0) momoCountByPerson[n] = s; }
+        // PChome 優化紀錄計數（同 MOMO 口徑：該人 pchome-summary counts 總和）→ 併進當日處理商品數
+        const ps = v.find(it => it && it.kind === 'pchome-summary');
+        if (ps && ps.counts) { const s = Object.values(ps.counts).reduce((a, b) => a + (b || 0), 0); if (s > 0) momoCountByPerson[n] = (momoCountByPerson[n] || 0) + s; }
       });
-      // 合併計數 + 名單聯集（同 personInfos：3 人在前不變、其餘穩定排序）。3 人無 MOMO → totalCalCount=adjCount、色/標題/數字一字不變。
+      // 合併計數 + 名單聯集（同 personInfos：固定 4 人在前不變、其餘穩定排序）。固定 4 人無 MOMO → totalCalCount=adjCount、色/標題/數字一字不變。
       const totalCalCount = {};
       [...Object.keys(adjCountByPerson), ...Object.keys(momoCountByPerson)].forEach(n => { totalCalCount[n] = (adjCountByPerson[n] || 0) + (momoCountByPerson[n] || 0); });
       const calCountRoster = ALLOWED_NAMES.concat(
-        Object.keys(totalCalCount).filter(n => n && ALLOWED_NAMES.indexOf(n) < 0).sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+        Object.keys(totalCalCount).filter(n => n && ALLOWED_NAMES.indexOf(n) < 0).sort(calExtraSort)
       );
       const adjRowsHtml = calCountRoster
         .filter(n => totalCalCount[n])
@@ -343,7 +428,7 @@ Object.assign(App, {
           const lt = PERSON_LIGHT[n] || { bg: '#eef0f2', text: '#6b7280' };
           const title = momoCountByPerson[n]
             ? `${escapeHtml(n)} · ${adjCountByPerson[n] ? adjCountByPerson[n] + ' 個商品（含洞察表調整）、' : ''}${momoCountByPerson[n]} 筆 MOMO 優化`
-            : `${escapeHtml(n)} · ${adjCountByPerson[n]} 個商品（含洞察表調整）`;   // 3 人(無 MOMO)：標題與原本逐字相同
+            : `${escapeHtml(n)} · ${adjCountByPerson[n]} 個商品（含洞察表調整）`;   // 固定 4 人(無 MOMO)：標題與原本逐字相同
           return `<div class="adj-cal-row" title="${title}" style="--adj-cal-c:${c};--adj-cal-bg:${lt.bg};--adj-cal-fg:${lt.text}"><span class="adj-cal-stripe"></span><span class="adj-cal-label"><span class="adj-cal-name">${escapeHtml(n.slice(0, 1))}</span><span class="adj-cal-num">${totalCalCount[n]}</span></span></div>`;
         })
         .join('');
@@ -357,7 +442,7 @@ Object.assign(App, {
         </button>
       `);
     }
-    const legendHtml = ALLOWED_NAMES.concat([...calExtraPeople].sort((a, b) => a.localeCompare(b, 'zh-Hant')))
+    const legendHtml = ALLOWED_NAMES.concat([...calExtraPeople].sort(calExtraSort))
       .map(n => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted)"><span style="width:7px;height:7px;border-radius:50%;background:${PERSON_COLORS[n] || '#6b7280'}"></span>${escapeHtml(n)}</span>`).join('');
     const calendarHtml = `
       <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:20px;min-width:0">
@@ -392,12 +477,12 @@ Object.assign(App, {
           ${calendarHtml}
           <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
             ${bossCardHtml}
-            ${/* 進度說明：整頁一份。只在看「今天」時出現——進度條永遠算今天推出的期別，
-                  看過去日期時它跟畫面上那天無關，常駐一塊卡片只是佔掉垂直空間。
-                  ⚠ ADJ_PERSON_TO_SHOPS 是本檔【底部】的 top-level const，這裡（檔案上半部）
-                    引用得到，是因為 render 只在模組載入完成後才被呼叫。若日後有人把渲染改成
+            ${/* 需求 3 塊 4：通路進度（今天）。不論看哪一天都顯示（內容一律依今天）；人員卡上已不再畫進度。
+                  「進度條怎麼算的？」說明面板在卡內最下面（buildProgressCardHtml 裡），跟著卡片一起出現。
+                  ⚠ buildProgressCardHtml 讀的 ADJ_ALL_SHOPS / ADJ_OWNER_TIMELINE 是本檔【底部】的 top-level const，
+                    這裡（檔案上半部）引用得到，是因為 render 只在模組載入完成後才被呼叫。若日後有人把渲染改成
                     模組載入期就執行，這行會炸 Cannot access ... before initialization。 */''}
-            ${isEditable && personInfos.some(p => (ADJ_PERSON_TO_SHOPS[p.name] || []).length) ? buildProgressNoteHtml() : ''}
+            ${buildProgressCardHtml({ canEditOwners: isAdmin })}
             ${cards}
           </div>
         </div>
@@ -405,7 +490,6 @@ Object.assign(App, {
     `;
   },
   openBossLineConfigModal() {
-    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     const canManageLine = isAdmin
       || hasOfficeFeature(this.currentUser, '行銷', 'lineNotify')
@@ -546,6 +630,196 @@ Object.assign(App, {
       },
     });
   },
+  // #306：通路負責人設定（只有管理員）。彈窗內的改動只動記憶體裡的草稿，按「儲存」才走下面的存檔流程；
+  //   「取消」什麼都不寫。存檔不經 Store.set：直接 __cloudStore.setField，畫面由 app/main 訂閱更新後重畫
+  //   （工作日誌 office-d1 在 CLOUD_RENDER_ROUTES.main 裡）。
+  //   ⚠ openModal 的 onSave 是同步的（回 truthy 就關窗），所以 onSave 一律回 false、存檔自己跑 async，成功才 closeModal。
+  openAdjOwnerConfigModal() {
+    if (!(this.currentUser && this.currentUser.role === 'admin')) { showToast('只有管理員可以設定負責人', 'error'); return; }
+    const today = _adjTaipeiToday();
+    const raw = Store.get(ADJ_OWNER_CLOUD_KEY, null);
+    const openVal = (raw === undefined || raw === null) ? null : JSON.parse(JSON.stringify(raw));   // 開窗時的值
+    const openCheck = _adjValidateOwnerCloud(openVal, ADJ_ALL_SHOPS, ADJ_OWNER_CLOUD_MIN_FROM);
+    const openSegs = openCheck.ok ? openCheck.segs : [];
+    const st = {
+      draft: JSON.parse(JSON.stringify(openSegs)), editKey: null, busy: false, box: null,
+      msgs: [], msgKind: '', addShop: '', addFrom: '', addOwner: '',
+    };
+    const usersNow = () => Store.get(Store.KEYS.users, []);
+    const sel = (cur, list) => list.map(o => `<option value="${escapeHtml(o.value)}"${o.value === cur ? ' selected' : ''}>${escapeHtml(o.text)}</option>`).join('');
+    // 負責人下拉：只列可選帳號；目前負責人不在可選名單（例：已停用）→ 停在「請選擇」。
+    const ownerOpts = (cur, pick) => {
+      const hit = _adjOwnerNorm(cur) ? pick.find(p => _adjOwnerNorm(p.username) === _adjOwnerNorm(cur)) : null;
+      return sel(hit ? hit.username : '', [{ value: '', text: '請選擇' }].concat(pick.map(p => ({ value: p.username, text: p.label }))));
+    };
+    const actBtn = (act, text, shop, from, ghost) =>
+      `<button type="button" class="adj-owner-btn${ghost ? ' adj-owner-btn-ghost' : ''}" data-act="${act}" data-shop="${escapeHtml(shop || '')}" data-from="${escapeHtml(from || '')}">${escapeHtml(text)}</button>`;
+    const inner = () => {
+      const us = usersNow();
+      const pick = _adjOwnerSelectableUsers(us, SHARED_ACCOUNTS);
+      const resolve = _adjWhoResolver();
+      const view = _adjOwnerSegRows(ADJ_OWNER_TIMELINE, { v: 1, segs: st.draft }, today, us, ADJ_ALL_SHOPS, ADJ_OWNER_CLOUD_MIN_FROM, resolve);
+      const diff = _adjOwnerDraftDiff(openSegs, st.draft);
+      const rowHtml = r => {
+        if (r.kind === 'cloud' && st.editKey === r.key) {
+          return `<li class="adj-owner-row adj-owner-editing">
+            <span class="adj-owner-from">${escapeHtml(r.fromLabel)}</span>
+            <select class="adj-owner-select adj-owner-edit-sel">${ownerOpts(r.owner, pick)}</select>
+            <span class="adj-owner-acts">${actBtn('edit-ok', '確定', r.key.split('|')[0], r.from)}${actBtn('edit-cancel', '取消', '', '', true)}</span>
+          </li>`;
+        }
+        const dirty = diff.added.includes(r.key) ? '新增（未儲存）' : (diff.changed.includes(r.key) ? '修改（未儲存）' : '');
+        const shop = r.key.split('|')[r.kind === 'base' ? 1 : 0];
+        return `<li class="adj-owner-row">
+            <span class="adj-owner-from">${escapeHtml(r.fromLabel)}</span>
+            <span class="adj-owner-name">${escapeHtml(r.name || '—')}</span>${r.warn ? `<span class="adj-owner-warn">${escapeHtml(r.warn)}</span>` : ''}
+            <span class="adj-owner-tag adj-owner-tag-${r.status}">${escapeHtml(r.statusLabel)}</span>${dirty ? `<span class="adj-owner-dirty">${escapeHtml(dirty)}</span>` : ''}
+            ${r.editable ? `<span class="adj-owner-acts">${actBtn('edit', '改', shop, r.from, true)}${actBtn('remove', '刪', shop, r.from, true)}</span>` : ''}
+          </li>`;
+      };
+      const removedHtml = shop => diff.removed.filter(s => s.shop === shop).map(s => `<li class="adj-owner-row adj-owner-removed">
+            <span class="adj-owner-from">${escapeHtml(s.from)}</span>
+            <span class="adj-owner-name">${escapeHtml(_adjOwnerDisplay(s, resolve))}</span>
+            <span class="adj-owner-dirty">刪除（未儲存）</span>
+          </li>`).join('');
+      const msgHtml = st.msgs.length
+        ? `<div class="adj-owner-msg adj-owner-msg-${st.msgKind === 'err' ? 'err' : 'info'}"><ul class="adj-owner-msg-list">${st.msgs.map(m => `<li>${escapeHtml(m)}</li>`).join('')}</ul></div>`
+        : '';
+      return `
+        <p class="adj-owner-hint">已生效的段落不能修改；換負責人請新增一段並設定生效日，生效日當天結束前都可以改或刪。</p>
+        ${openCheck.ok ? '' : `<div class="adj-owner-msg adj-owner-msg-err">雲端上現有的負責人設定格式不對（${escapeHtml(openCheck.reason)}），目前只用程式內建的設定，這個狀態下無法存檔，請找開發人員處理。</div>`}
+        ${view.shops.map(g => `<section class="adj-owner-shop">
+          <div class="adj-owner-shop-name">${escapeHtml(g.shop)}</div>
+          <ul class="adj-owner-list">${g.rows.map(rowHtml).join('')}${removedHtml(g.shop)}</ul>
+        </section>`).join('')}
+        <div class="adj-owner-add">
+          <div class="adj-owner-add-title">新增一段</div>
+          <div class="adj-owner-add-fields">
+            <label class="adj-owner-field"><span class="adj-owner-field-label">通路</span>
+              <select class="adj-owner-select" id="adj-owner-add-shop">${sel(st.addShop, [{ value: '', text: '請選擇' }].concat(ADJ_ALL_SHOPS.map(s => ({ value: s, text: s }))))}</select></label>
+            <label class="adj-owner-field"><span class="adj-owner-field-label">生效日</span>
+              <input type="date" class="adj-owner-date" id="adj-owner-add-from" min="${escapeHtml(today)}" value="${escapeHtml(st.addFrom)}"></label>
+            <label class="adj-owner-field"><span class="adj-owner-field-label">負責人</span>
+              <select class="adj-owner-select" id="adj-owner-add-owner">${ownerOpts(st.addOwner, pick)}</select></label>
+            ${actBtn('add', '新增', '', '')}
+          </div>
+        </div>
+        ${msgHtml}`;
+    };
+    // 彈窗是否仍開著：onMount 記下的這個 box 還在 document 裡（沒被別的彈窗換掉），且背景仍顯示。
+    //   closeModal 只拿掉 .show、不清內容，所以兩個條件都要看。存檔進行中可能被點背景關掉，
+    //   之後的結果、按鈕狀態、關窗都只對「這一個」彈窗做，不碰之後才開的別的彈窗。
+    const isOpen = () => {
+      const bd = document.getElementById('modal-backdrop');
+      return !!(st.box && st.box.isConnected && bd && bd.classList.contains('show'));
+    };
+    const paint = () => { if (st.box) st.box.innerHTML = inner(); };
+    const setMsg = (kind, msgs) => { st.msgKind = kind; st.msgs = msgs; paint(); };
+    // 顯示存檔結果：彈窗開著 → 寫在彈窗內（成功不寫，直接 toast＋關窗）；已關閉 → 改用 toast。
+    //   kind：'err' → error toast；'info' → info toast；'success' → success toast。
+    const report = (kind, msgs) => {
+      if (kind !== 'success' && isOpen()) { setMsg(kind, msgs); return; }
+      showToast(msgs.join('\n'), kind === 'err' ? 'error' : kind);
+    };
+    const setBusy = (on) => {
+      st.busy = on;
+      if (!isOpen()) return;
+      ['modal-save', 'modal-cancel', 'modal-close-x'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = on; });
+    };
+    const applyOp = (op) => {
+      const r = _adjOwnerDraftApply(st.draft, op, today);
+      if (!r.ok) { setMsg('err', [r.msg]); return false; }
+      st.draft = r.segs; st.msgs = []; return true;
+    };
+    // 讀 getDoc('server') 回來的 snapshot 裡的負責人欄位（app/main 欄位名是含點的字面 key）；沒有 → null。
+    const readField = snap => {
+      if (!snap || typeof snap.exists !== 'function' || !snap.exists()) return null;
+      const v = (snap.data() || {})[ADJ_OWNER_CLOUD_KEY];
+      return v === undefined ? null : v;
+    };
+    const save = async () => {
+      if (st.busy) return;
+      if (!(this.currentUser && this.currentUser.role === 'admin')) { report('err', ['只有管理員可以設定負責人。']); return; }
+      if (st.editKey) { report('err', ['還有一段正在修改，請先按「確定」或「取消」。']); return; }
+      if (!(window.__firstMainSnapshotDone && window.__cloudStore)) { report('err', ['雲端尚未連線，沒有存檔，請重新整理後再試。']); return; }
+      const cs = window.__cloudStore;
+      setBusy(true);
+      setMsg('info', ['儲存中…']);
+      try {
+        let server;
+        try { server = readField(await cs.getDoc('server')); }
+        catch (e) { report('err', ['讀取雲端現值失敗，沒有存檔：' + ((e && e.message) || e)]); return; }
+        if (_adjStableJson(server) !== _adjStableJson(openVal)) {
+          report('err', ['這段時間有其他人改過負責人設定，請關閉後重新打開再改。']); return;
+        }
+        const users = usersNow();
+        const serverSegs = (server && Array.isArray(server.segs)) ? server.segs : [];
+        const newVal = _adjOwnerBuildNewVal(serverSegs, st.draft, users, this.currentUser.username, Date.now());
+        const chk = _adjOwnerPlanCheck(server, newVal, _adjTaipeiToday(), users,
+          { shops: ADJ_ALL_SHOPS, minFrom: ADJ_OWNER_CLOUD_MIN_FROM, sharedAdminNames: SHARED_ACCOUNTS });
+        if (!chk.ok) {
+          const onlyNoChange = chk.errors.every(e => e.code === 'no-change');
+          report(onlyNoChange ? 'info' : 'err', chk.errors.map(e => e.msg)); return;
+        }
+        try { await cs.setField(ADJ_OWNER_CLOUD_KEY, newVal); }
+        catch (e) { report('err', ['寫入雲端失敗，沒有存檔：' + ((e && e.message) || e)]); return; }
+        let back;
+        try { back = readField(await cs.getDoc('server')); } catch { back = undefined; }
+        if (_adjStableJson(back) !== _adjStableJson(newVal)) {
+          report('err', ['沒有寫進雲端（可能是本機防寫或網路問題），畫面上的負責人不會改變。']); return;
+        }
+        st.msgs = [];
+        const wasOpen = isOpen();
+        report('success', ['已儲存負責人設定']);
+        if (wasOpen) this.closeModal();   // 已被關掉就不再 closeModal（避免關到之後才開的別的彈窗）
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    this.openModal({
+      title: '設定通路負責人',
+      width: '640px',
+      bodyHtml: `<div id="adj-owner-box" class="adj-owner-box">${inner()}</div>`,
+      saveLabel: '儲存',
+      cancelLabel: '取消',
+      onMount: () => {
+        const box = document.getElementById('adj-owner-box');
+        if (!box) return;
+        st.box = box;
+        box.addEventListener('change', (e) => {
+          const id = e.target && e.target.id;
+          if (id === 'adj-owner-add-shop') st.addShop = e.target.value;
+          else if (id === 'adj-owner-add-from') st.addFrom = e.target.value;
+          else if (id === 'adj-owner-add-owner') st.addOwner = e.target.value;
+        });
+        box.addEventListener('click', (e) => {
+          const b = e.target.closest && e.target.closest('[data-act]');
+          if (!b || st.busy) return;
+          const act = b.dataset.act, shop = b.dataset.shop, from = b.dataset.from;
+          if (act === 'add') {
+            const v = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+            st.addShop = v('adj-owner-add-shop'); st.addFrom = v('adj-owner-add-from'); st.addOwner = v('adj-owner-add-owner');
+            if (applyOp({ type: 'add', shop: st.addShop, from: st.addFrom, owner: st.addOwner })) {
+              st.addShop = ''; st.addFrom = ''; st.addOwner = '';
+            }
+          } else if (act === 'edit') {
+            st.editKey = shop + '|' + from; st.msgs = [];
+          } else if (act === 'edit-cancel') {
+            st.editKey = null;
+          } else if (act === 'edit-ok') {
+            const row = b.closest('.adj-owner-row');
+            const s = row && row.querySelector('.adj-owner-edit-sel');
+            if (applyOp({ type: 'edit', shop, from, owner: s ? s.value : '' })) st.editKey = null;
+          } else if (act === 'remove') {
+            if (applyOp({ type: 'remove', shop, from }) && st.editKey === shop + '|' + from) st.editKey = null;
+          }
+          paint();
+        });
+      },
+      onSave: () => { save(); return false; },
+    });
+  },
   openBossTaskHistoryModal() {
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     const all = (Store.get('ec.bossTasks', []) || []).slice();
@@ -566,7 +840,8 @@ Object.assign(App, {
         ? '<span style="padding:2px 8px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700">全體</span>'
         : `<span style="padding:2px 8px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:700">${escapeHtml(t.assignee || '—')}</span>`;
       const dueLine = t.due ? `<span style="font-size:11px;color:var(--text-muted)">📅 預計 ${escapeHtml(t.due.replace(/-/g, '/'))}</span>` : '';
-      const doneByLine = t.doneBy ? `<span style="font-size:11px;color:#10b981;font-weight:600">✓ ${escapeHtml(t.doneBy)}</span>` : '';
+      const _doneWho = _bossTaskDoneByName(t);
+      const doneByLine = _doneWho ? `<span style="font-size:11px;color:#10b981;font-weight:600">✓ ${escapeHtml(_doneWho)}</span>` : '';
       return `
         <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:#f9fafb;border:1px solid var(--border);border-radius:8px">
           <div style="width:22px;height:22px;border-radius:6px;background:#10b981;color:white;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✓</div>
@@ -606,7 +881,6 @@ Object.assign(App, {
     });
   },
   openBossTaskModal(taskId) {
-    const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
     const todayStr = toDateStr(new Date());
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     if (!isAdmin) { showToast('沒有權限', 'error'); return; }
@@ -800,7 +1074,6 @@ Object.assign(App, {
         const text = (descEl && descEl.value || '').trim();
         if (!text) { showToast('請輸入任務內容', 'error'); return false; }
         const list = (Store.get('ec.bossTasks', []) || []).slice();
-        const ALLOWED_NAMES = ['陳君葳', '洪嘉蓮', '郭雅琪', '楊心雨'];
         const assigneeVal = assigneeEl ? assigneeEl.value : '全體';
         const dueVal = dueEl ? dueEl.value : '';
         if (existing) {
@@ -949,6 +1222,7 @@ Object.assign(App, {
     const todayStr = toDateStr(new Date());
     const isAdmin = this.currentUser && this.currentUser.role === 'admin';
     const myName = (this.currentUser && (this.currentUser.name || this.currentUser.username)) || '';
+    const myUsername = (this.currentUser && this.currentUser.username) || '';
 
     // 第六塊：淨利表調整 pill → 開明細彈窗。用「事件委派」掛在持久容器 #main-content 上，
     //   且只掛一次（旗標守衛，避免每次 render 重複掛而觸發多次）。放函式開頭：下方 748 行
@@ -958,14 +1232,19 @@ Object.assign(App, {
       this._adjPillDelegated = true;
       const host = document.getElementById('main-content');
       if (host) host.addEventListener('click', (e) => {
-        // 本期優化進度：點通路列 → 展開/收折同卡片內對應明細（同委派，讀當下 DOM）
+        // #306：通路進度卡標題旁的「⚙ 設定負責人」（只有管理員才輸出；開窗函式開頭會再擋一次）。
+        //   按鈕在 .adj-prog-head 裡、不在 .adj-prog-toggle 裡，不會被下面的 ▾ 展開吃掉；放最前面先判斷。
+        const ownerCfg = e.target.closest && e.target.closest('.adj-owner-cfg-btn');
+        if (ownerCfg) { this.openAdjOwnerConfigModal(); return; }
+        // 通路進度：點期間列 → 展開/收折同卡片內對應明細（同委派，讀當下 DOM）
         const toggle = e.target.closest && e.target.closest('.adj-prog-toggle');
         if (toggle) {
-          // 🔴 key 是【複合的】「通路|月份」（見 buildProgressHtml 的 key），不是單純通路名。
+          // 🔴 key 是【複合的】「通路|月份|期別」（見 _progCardModel 的 key），不是單純通路名。
           //   下面用的是 querySelector（單數）：key 撞號時會靜默展開錯的那一個、不報錯，
           //   所以 key 的唯一性是正確性要求，不是命名習慣。
+          //   範圍取被點的 toggle 所在的卡（右欄「通路進度（今天）」是 .dp-prog-card），只在卡內找，跟卡片排列順序無關。
           const key = toggle.dataset.progKey || '';
-          const card = toggle.closest('.dp-card') || document;
+          const card = toggle.closest('.dp-card, .dp-prog-card') || document;
           const sel = (window.CSS && CSS.escape) ? CSS.escape(key) : key;
           const detail = card.querySelector(`[data-prog-detail="${sel}"]`);
           if (detail) {
@@ -1025,9 +1304,9 @@ Object.assign(App, {
         if (!canToggle) { showToast('沒有權限', 'error'); return; }
         const wasNotDone = t.status !== 'done';
         if (t.status === 'done') {
-          list[idx] = { ...t, status: 'todo', doneAt: null, doneBy: null };
+          list[idx] = { ...t, status: 'todo', doneAt: null, doneBy: null, doneByUser: null };
         } else {
-          list[idx] = { ...t, status: 'done', doneAt: Date.now(), doneBy: myName };
+          list[idx] = _bossTaskDone(t, myName, myUsername);
         }
         Store.set('ec.bossTasks', list);
         // 同步更新同事待辦清單中，從這筆老闆任務複製過去的項目勾選狀態
@@ -1059,7 +1338,7 @@ Object.assign(App, {
         if (wasNotDone) {
           const dueLine = t.due ? '\n📅 預計完成日：' + t.due.replace(/-/g, '/') : '';
           const msg = '✅ 任務完成通知\n' + (t.desc || '')
-            + '\n👤 完成者：' + (myName || '未知')
+            + '\n👤 完成者：' + _bossTaskLineWho(myName || '未知', myUsername)
             + dueLine
             + '\n→ 前往儀表板查看 https://kelly83117.github.io/ec-dashboard/';
           this.pushLineNotifyToBoss(msg).then(r => {
@@ -1177,14 +1456,15 @@ Object.assign(App, {
           if (idx >= 0) {
             const t = list[idx];
             const wasNotDone = t.status !== 'done';
+            const _me = this.currentUser && this.currentUser.username;
             list[idx] = cb.checked
-              ? { ...t, status: 'done', doneAt: Date.now(), doneBy: name }
-              : { ...t, status: 'todo', doneAt: null, doneBy: null };
+              ? _bossTaskDone(t, name, _me)
+              : { ...t, status: 'todo', doneAt: null, doneBy: null, doneByUser: null };
             Store.set('ec.bossTasks', list);
             if (cb.checked && wasNotDone) {
               const dueLine = t.due ? '\n📅 預計完成日：' + t.due.replace(/-/g, '/') : '';
               const msg = '✅ 任務完成通知\n' + (t.desc || '')
-                + '\n👤 完成者：' + name
+                + '\n👤 完成者：' + _bossTaskLineWho(name, _me)
                 + dueLine
                 + '\n→ 前往儀表板查看 https://kelly83117.github.io/ec-dashboard/';
               this.pushLineNotifyToBoss(msg).then(r => {
@@ -1265,8 +1545,10 @@ Object.assign(App, {
     }
   },
   openAdjustmentDetailModal(person, viewDate, kind, group) {
-    const slashDate = String(viewDate || '').replace(/-/g, '/');
-    const recs = (getAdjIndex()[slashDate] || []).filter(r => ADJ_SHOP_TO_PERSON[r.shop] === person);
+    // 塊 3-A：歸屬與卡片同一支（_adjRecsWhoOf → adjPersonOf），who 用來標「推算」/ 原始 by
+    const recsWho = _adjRecsWhoOf(person, viewDate);
+    const whoOf = new Map(recsWho.map(x => [x.r, x.who]));
+    const recs = recsWho.map(x => x.r);
     const list = _adjRecsForGroup(recs, kind, group);   // ← 與 pill 計數同一個函式，數字保證一致
     const parts = String(viewDate).split('-');
     const md = `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
@@ -1291,6 +1573,8 @@ Object.assign(App, {
         </details>`;
     };
 
+    // 推算的標「推算」；對不到帳號的直接顯示原始 by 字串（模組層 _adjWhoTagHtml，洞察表明細共用）
+    const whoTagHtml = _adjWhoTagHtml;
     const itemHtml = (r, muted) => `
       <div class="adj-modal-item${muted ? ' adj-modal-item-muted' : ''}">
         <div class="adj-modal-item-hd">
@@ -1298,6 +1582,7 @@ Object.assign(App, {
           <span class="adj-modal-code">${escapeHtml(r.code || '')}</span>
           <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
           <span class="adj-src adj-src-${r.src||'report'}">${r.src==='ads'?'廣告調整':r.src==='growth'?'商品調整':r.src==='import'?'舊版匯入':'報表匯入'}</span>
+          ${whoTagHtml(whoOf.get(r))}
         </div>
         <div class="adj-modal-text">${escapeHtml(r.text || '')}</div>
         ${crossInsightHtml(r)}
@@ -1318,30 +1603,28 @@ Object.assign(App, {
   },
   openInsightDetailModal(person, viewDate, label) {
     // 洞察表「今日調整」chip 明細：純唯讀，只讀 Store，不寫任何東西。
-    //   通路歸屬用模組層 ADJ_PERSON_TO_SHOPS（由 ADJ_SHOP_TO_PERSON 反查，單一來源）；
+    //   塊 3-C：歸屬與卡片 chip 同一支（_insWhoOn → adjPersonOf：有 by 依操作者、沒 by 推算負責人），
+    //   只列歸給這個人的那幾筆；推算的標「推算」、對不到帳號的標原始 by（_adjWhoTagHtml，同淨利表明細）。
     //   分類用 window.__insightClassify（marketing.js 抽出的共用判定）＝「依目前資料重算」，
     //   所以歷史日期若門檻 / 銷售資料已變動，明細可能與當日 chip 數字不同。
-    const slashDate = String(viewDate || '').replace(/-/g, '/');
-    const shops = ADJ_PERSON_TO_SHOPS[person] || [];
+    const mine = _insWhoOn(viewDate).get(person);
+    const masters = {};
     const rows = [];
-    shops.forEach(shop => {
-      const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
-      const master = Store.get(`ec.insight_${shop}_master`, null);
-      Object.keys(notes).forEach(code => {
-        const adjustments = (notes[code] && notes[code].adjustments) || [];
-        const hits = adjustments.filter(a => {
-          const d = (a.date || '').slice(0, 10);
-          return d === viewDate || d === slashDate;
-        });
-        if (hits.length === 0) return;
-        const cls = window.__insightClassify ? window.__insightClassify(shop, code) : null;
-        if (cls !== label) return;
-        // 品名 fallback：mocbicName 優先，順序對齊洞察表 marketing.js 彈窗的取名邏輯
-        //（玩樂主檔的 name 是空字串、品名在 mocbicName，實測 C150/E142/H333）
-        const m = (master && master.byCode) ? master.byCode[code] : null;
-        const prodName = m ? (m.mocbicName || m.name || '') : '';
-        rows.push({ shop, code, name: prodName, texts: hits.map(a => a.text || '') });
-      });
+    (mine ? [...mine.items.values()] : []).forEach(it => {
+      const { shop, code } = it;
+      const cls = window.__insightClassify ? window.__insightClassify(shop, code) : null;
+      if (cls !== label) return;
+      if (!(shop in masters)) masters[shop] = Store.get(`ec.insight_${shop}_master`, null);
+      const master = masters[shop];
+      // 品名 fallback：mocbicName 優先，順序對齊洞察表 marketing.js 彈窗的取名邏輯
+      //（玩樂主檔的 name 是空字串、品名在 mocbicName，實測 C150/E142/H333）
+      const m = (master && master.byCode) ? master.byCode[code] : null;
+      const prodName = m ? (m.mocbicName || m.name || '') : '';
+      // 標籤：整個商品都是推算的 → 一個「推算」；對不到帳號 → 每個不同的原始 by 各一個
+      const tags = it.inferred
+        ? [_adjWhoTagHtml({ how: 'inferred' })]
+        : [...new Map(it.hits.filter(h => h.who.how === 'unmatched').map(h => [h.who.raw, h.who])).values()].map(_adjWhoTagHtml);
+      rows.push({ shop, code, name: prodName, texts: it.hits.map(h => h.a.text || ''), tagsHtml: tags.join('') });
     });
 
     const parts = String(viewDate).split('-');
@@ -1372,6 +1655,7 @@ Object.assign(App, {
           <span class="adj-modal-shop">${escapeHtml(r.shop || '')}</span>
           <span class="adj-modal-code">${escapeHtml(r.code || '')}</span>
           <span class="adj-modal-name">${escapeHtml(r.name || '')}</span>
+          ${r.tagsHtml}
         </div>
         ${r.texts.map(t => `<div class="adj-modal-text">${escapeHtml(t)}</div>`).join('')}
         ${crossProfitHtml(r)}
@@ -1456,11 +1740,14 @@ Object.assign(App, {
 
     const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
     if (!dept) { showToast('找不到此辦公室', 'error'); return; }
-    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
-    // 若是新增，預設員工 = 當前登入者（若是該辦公室成員），否則第一位成員
+    // 停用／刪除的帳號（#252）不列入；但編輯既有紀錄時保留原負責人——下拉少了這個選項，
+    //   被鎖住的 <select> 會讀到第一個選項，存檔時負責人就被默默換掉。
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name)
+      && (isUserActive(u) || (existing && u.username === existing.employee)));
+    // 若是新增，預設員工 = 當前登入者（若是該辦公室成員），否則第一位「使用中」的成員
     const defaultEmp = (this.currentUser && getUserDepts(this.currentUser).includes(dept.name))
       ? this.currentUser.username
-      : (members[0]?.username || '');
+      : (members.find(isUserActive)?.username || '');
 
     const t = existing || {
       employee: defaultEmp,
@@ -1715,14 +2002,22 @@ Object.assign(App, {
     const showDelete = !!(opts && opts.showDelete);
     const dept = (Store.get(Store.KEYS.departments, [])).find(d => d.id === deptId);
     if (!dept) { showToast('找不到此辦公室', 'error'); return; }
-    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name));
+    // 停用／刪除的帳號（#252）不列入；但編輯既有待辦時保留它原本的負責人與參與人，
+    //   否則選單少了這些人，存檔時會被默默換掉或少算。
+    const _editTask = taskId ? (Store.get(Store.KEYS.dailyTasks, [])).find(x => x.id === taskId) : null;
+    const _td0 = (_editTask && _editTask.todos && _editTask.todos[0]) || {};
+    const _keepUsernames = _editTask
+      ? [_editTask.employee, _td0.assignee, ...(Array.isArray(_td0.assignees) ? _td0.assignees : [])]
+      : [];
+    const members = (Store.get(Store.KEYS.users, [])).filter(u => getUserDepts(u).includes(dept.name)
+      && (isUserActive(u) || _keepUsernames.includes(u.username)));
     if (members.length === 0) {
       showToast(`${dept.name}辦公室尚無成員，請先至帳號管理新增`, 'error');
       return;
     }
     const defaultEmp = (this.currentUser && getUserDepts(this.currentUser).includes(dept.name))
       ? this.currentUser.username
-      : (members[0]?.username || '');
+      : (members.find(isUserActive)?.username || '');
 
     // 編輯模式：讀現有任務並填入預設值
     let editing = null;
@@ -1965,7 +2260,7 @@ Object.assign(App, {
 // collectAdjustments() — 純函式：把淨利表報表 built[]/rows[] 裡 row.note 的
 //   自由文字，依內嵌「月/日」切成一段一段的調整紀錄。不經 ec.dailyProgress
 //   摘要層、不碰任何 render / bind，只掛 window 供 Console / 日後功能取用。
-//   回傳：[{ date:'YYYY/MM/DD'|null, shop, code, name, text }]
+//   回傳：[{ date:'YYYY/MM/DD'|null, shop, code, name, text, src, by? }]（by＝登入 username，非姓名；沒有就不帶）
 //   ⚠ date 為 null（note 裡沒有可辨識日期）的段一律保留，不丟。
 // ============================================================================
 function collectAdjustments() {
@@ -1980,10 +2275,13 @@ function collectAdjustments() {
   let labelErrCount = 0;   // calc throw 的列數，迴圈後統一 warn 一次（別每列洗版）
   const repIdx = {};   // 第二趟用：{ 'shop|month|half': { code: row } }，第一趟順手建、不重掃
   const nameIdx = {};  // 通路級：'通路' → {code: 商品名}。名字與期間無關，所有來源共用
-  // 所有來源的唯一出口：統一去重 + push。dk 公式與原本完全相同。
+  // 所有來源的唯一出口：統一去重 + push。dk 前面加了欄位（#270，見下方）。
   const _pushRec = (rec) => {
     if (!rec.text) return;
-    const dk = rec.shop + '␟' + (rec.code || '') + '␟' + (rec.date || '') + '␟' + rec.text;
+    // #270：商品調整(growth)與廣告調整欄是兩個欄位，同 shop/code/date/text 不算重複；
+    //   廣告調整欄內 report/ads/import 互撞仍合併（2026/06 舊版匯入的重複副本）。
+    const col = rec.src === 'growth' ? 'growth' : 'ads';
+    const dk = col + '␟' + rec.shop + '␟' + (rec.code || '') + '␟' + (rec.date || '') + '␟' + rec.text;
     if (seen.has(dk)) return;
     seen.add(dk);
     out.push(rec);
@@ -2103,11 +2401,12 @@ function collectAdjustments() {
         const period = isGrowth ? window._growthPeriodOf(a) : fixedPeriod;
         const row = (period && repIdx[shop + '|' + period]) ? repIdx[shop + '|' + period][code] : null;
         const L = _labelsOf(row);
+        const by = (a && typeof a.by === 'string') ? a.by.trim() : '';
         _pushRec({
           date, shop, code, name: (row && row.name) || (nameIdx[shop] && nameIdx[shop][code]) || '', text,
           anaAll: L.anaAll, anaLabel: L.anaLabel, anaCls: L.anaCls,
           growthLabel: L.growthLabel, growthCls: L.growthCls,
-          period: period || '', src
+          period: period || '', src, ...(by ? { by } : {})
         });
       });
     });
@@ -2131,32 +2430,481 @@ function collectAdjustments() {
 //   資料源：collectAdjustments()，依日期索引後查表。純唯讀，不寫任何 Store。
 //   通路→人 對應寫在本檔（不引 marketing.js；洞察表日後將廢除）。
 // ============================================================================
-// 🔴 死碼：ADJ_ALLOWED_NAMES 全 repo 零消費者（grep 只有這一行宣告），改它的值【不會生效】。
-//    真正決定「固定顯示 / 可被指派 / 收 LINE 通知」的是各處的 ALLOWED_NAMES —— 本檔的
-//    renderWeeklyCalendarTab、openBossLineConfigModal、openBossTaskModal 及其儲存 handler，
-//    加上 marketing.js 的 _updateDailyProgressFromAdjustments，共五份。
-//    2026-09-04 加入楊心雨時刻意【不動】這一行的值，避免後人誤以為改這裡就有效；移除它超出當次範圍。
-const ADJ_ALLOWED_NAMES  = ['陳君葳', '洪嘉蓮', '郭雅琪'];              // 顯示順序
-// ⚠️ 這份表在 marketing.js 的 _updateDailyProgressFromAdjustments 內有一份 SHOP_TO_PERSON，
-//    內容必須一致。改這裡一定要一起改那裡（刻意不寫行號：行號會漂移，以符號名為準）。
+// 通路 → 負責人：由兩份資料一起決定（#306），查詢一律走 _adjMapOn / adjOwnerOf / adjShopsOf。
+//    其他檔不要自己複寫一份，一律經 window 讀 adjOwnerOf / ADJ_ALL_SHOPS（本檔結尾 Object.assign(window, …) 掛出）。
+//    ① BASE＝下方寫死的 ADJ_OWNER_TIMELINE：每段是「四通路完整對照」，永遠參與計算。
+//    ② 雲端＝Store key 'ec.adjOwnerTimeline'（app/main 的一個欄位）：
+//       { v:1, segs:[ { shop, from:'YYYY-MM-DD', owner:<username>, ownerName:<存檔當下姓名>, by, at } ] }，一段只管一個通路。
+//    規則：某通路某天的負責人＝該通路「生效日 ≤ 那天」的段裡（BASE 段與雲端段一起看）from 最新的那段。
+//    🔴 雲端只能影響 2026-10-01 以後：雲端段的 from 必須是真實存在的日期且【大於】'2026-10-01'。
+//       合法條件（v===1、segs 是陣列、shop 在 ADJ_ALL_SHOPS、from 合法、owner 非空字串、同通路同 from 不重複）
+//       只要有一段不合法 → 整份雲端資料不用、只用 BASE（console.warn 同一份內容只印一次），不部分採用。
+//    顯示：雲端段存的是 username，經 _adjWhoResolver 轉成「目前姓名」（帳號改名即時反映）；對不到人 → ownerName → owner 原字。
+//    ADJ_ALL_SHOPS 只從 BASE 推導，不從雲端推導（雲端不能新增通路）。
+//    驗證 / 合併 / 轉姓名是純函式（_adjValidateOwnerCloud / _adjOwnerDisplay / _adjBuildOwnerLookup），可在 node vm 單獨測。
+//    存檔（之後的 ⚙ 設定彈窗）：_adjOwnerPlanCheck(伺服器現值, 新值, 台灣今天, ec.users, opts) 是寫入前的【最後一道把關】，
+//       用存檔「當下」的 _adjTaipeiToday() 判斷（23:59 開窗、00:01 才存，以 00:01 那天為準）。
+//       規則：已生效（from < 今天）的段落鎖住、原封不動；from 是今天的當天還能改 / 刪；新增 / 修改的 from 只能 ≥ 今天；
+//       負責人須是存在、未停用、未刪除、非 view、非共用 admin 的帳號（已鎖住沒動的段落不重查）。
+//       畫面上的限制（日期下拉、帳號清單、鎖頭）只是方便操作，不能取代這支檢查。
+// ⚠️ 改 BASE 換負責人 = 在清單【最後】加一段 { from:'YYYY-MM-DD', map:{…} }，【不要改舊段】——
+//    紀錄本身不存負責人，歸屬是「用紀錄日期查這份清單」算出來的；改舊段會讓歷史跟著變成新負責人。
 // ⚠️ 2026-07-29 更正：玩樂是郭雅琪 2026/04 起接手，先前寫成洪嘉蓮是錯的。
 // ⚠️ 2026-09-04 更正：維克由楊心雨(Astrid)接手，值從 '未指派' 改為 '楊心雨'。
-// ⚠️ 維克這個通路是老闆指定要保留的，不可以從表裡移除 ——
-//    marketing.js 的 INSIGHT_SHOPS = Object.keys(SHOP_TO_PERSON) 由本表 key 推導，
+// ⚠️ 2026-10-01 起好麻吉（洪嘉蓮 → 郭雅琪）、玩樂（郭雅琪 → 洪嘉蓮）交換；9/30（含）以前維持原負責人。
+// ⚠️ 維克這個通路是老闆指定要保留的，不可以從清單裡移除 ——
+//    ADJ_ALL_SHOPS（marketing.js 的 INSIGHT_SHOPS 也是它）由各段 map 的 key 推導，
 //    少一個通路 = 該通路的洞察活動完全不被統計，而且不報錯。
 // ⚠️ 2026-09-04 更正（舊註解已錯，勿再引用）：舊版寫「'未指派' 不在硬寫的 ALLOWED_NAMES 裡，
 //    工作日誌月曆/卡片不會顯示它」。那句自 2026-07-31 起就不成立 —— 當天加入的 _dpExtraNames
 //    聯集會把「該日有資料的非名單人」一併排進 personInfos，月曆計數列與圖例走同一份聯集
 //    （calExtraPeople）。正確描述是：不在 ALLOWED_NAMES 的人，只要當天有資料就會長出一張
 //    fallback 灰底卡片；ALLOWED_NAMES 決定的是「固定顯示 + 可被老闆指派 + 收 LINE 通知」。
-const ADJ_SHOP_TO_PERSON = { '好麻吉': '洪嘉蓮', '玩樂': '郭雅琪', '森之旅': '陳君葳', '維克': '楊心雨' };
+//    from 由小到大；第一段 from:'' 代表「最早以前」。日期一律用 YYYY-MM-DD 比字串大小。
+// BASE（寫死，永遠參與計算；雲端段只疊在它上面）
+const ADJ_OWNER_TIMELINE = [
+  { from: '',           map: { '好麻吉': '洪嘉蓮', '玩樂': '郭雅琪', '森之旅': '陳君葳', '維克': '楊心雨' } },
+  { from: '2026-10-01', map: { '好麻吉': '郭雅琪', '玩樂': '洪嘉蓮', '森之旅': '陳君葳', '維克': '楊心雨' } },
+];
 const ADJ_MAX_ROWS = 10;                                              // 每人預設顯示筆數（死碼，未被引用）
-// 人 → 通路（反查）：{ 洪嘉蓮:['好麻吉'], 郭雅琪:['玩樂'], 陳君葳:['森之旅'], 楊心雨:['維克'] }
-const ADJ_PERSON_TO_SHOPS = Object.keys(ADJ_SHOP_TO_PERSON).reduce((m, shop) => {
-  const p = ADJ_SHOP_TO_PERSON[shop];
-  (m[p] = m[p] || []).push(shop);
+// 所有時段通路的聯集，依第一次出現的順序（＝舊 Object.keys(對照表) 的順序：好麻吉、玩樂、森之旅、維克）
+const ADJ_ALL_SHOPS = Object.freeze(ADJ_OWNER_TIMELINE.reduce((out, t) => {
+  Object.keys(t.map).forEach(shop => { if (out.indexOf(shop) < 0) out.push(shop); });
+  return out;
+}, []));
+// 日期 → 'YYYY-MM-DD'。接受 'YYYY-MM-DD' / 'YYYY/MM/DD'（可帶時間字尾）；不合法回 null。
+function _adjDateKey(d) {
+  const k = String(d == null ? '' : d).slice(0, 10).replace(/\//g, '-');
+  return /^\d{4}-\d{2}-\d{2}$/.test(k) ? k : null;
+}
+// 某天生效的那份 map。日期不合法 → null（每個不同的壞值只 warn 一次）。
+//   未知一律不歸屬（比照 profit.js _inPeriod「未知一律 false」），不猜今天、不猜最新。
+const _adjBadDateWarned = new Set();
+function _adjMapOn(date) {
+  const k = _adjDateKey(date);
+  if (!k) {
+    const tag = String(date);
+    if (!_adjBadDateWarned.has(tag)) {
+      _adjBadDateWarned.add(tag);
+      console.warn('[adjOwner] 日期不合法，這筆不歸屬任何人：', date);
+    }
+    return null;
+  }
+  return _adjOwnerLookup()(k);
+}
+// ── 雲端負責人段（#306）。規則見上方 ADJ_OWNER_TIMELINE 前的說明。──
+const ADJ_OWNER_CLOUD_KEY = 'ec.adjOwnerTimeline';
+const ADJ_OWNER_CLOUD_MIN_FROM = '2026-10-01';   // 雲端段 from 必須【大於】這天
+// 'YYYY-MM-DD' 且真實存在（擋 2026-02-30）。
+function _adjIsRealDate(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+}
+// 純函式：驗證雲端值。raw 為 undefined / null ＝沒有雲端資料 → { ok:true, segs:[] }；
+//   不合法 → { ok:false, reason }（呼叫端整份不用，不部分採用）。
+function _adjValidateOwnerCloud(raw, shops, minFrom) {
+  if (raw === undefined || raw === null) return { ok: true, segs: [] };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: '整個值不是物件' };
+  if (raw.v !== 1) return { ok: false, reason: 'v 不是 1' };
+  if (!Array.isArray(raw.segs)) return { ok: false, reason: 'segs 不是陣列' };
+  const seen = new Set();
+  for (let i = 0; i < raw.segs.length; i++) {
+    const s = raw.segs[i];
+    const at = 'segs[' + i + ']：';
+    if (!s || typeof s !== 'object') return { ok: false, reason: at + '不是物件' };
+    if (typeof s.shop !== 'string' || shops.indexOf(s.shop) < 0) return { ok: false, reason: at + '不明通路 ' + s.shop };
+    if (!_adjIsRealDate(s.from)) return { ok: false, reason: at + 'from 不是真實日期 ' + s.from };
+    if (!(s.from > minFrom)) return { ok: false, reason: at + 'from 必須晚於 ' + minFrom };
+    if (typeof s.owner !== 'string' || !s.owner.trim()) return { ok: false, reason: at + 'owner 空白' };
+    const key = s.shop + '|' + s.from;
+    if (seen.has(key)) return { ok: false, reason: at + '同通路同一天重複 ' + key };
+    seen.add(key);
+  }
+  return { ok: true, segs: raw.segs.slice() };
+}
+// 純函式：雲端段的顯示姓名。resolve(owner) 對到人 → 目前姓名；對不到 → ownerName；再沒有 → owner 原字。
+function _adjOwnerDisplay(seg, resolve) {
+  const id = typeof resolve === 'function' ? resolve(seg.owner) : null;
+  if (id && id.ok && id.display) return id.display;
+  const nm = typeof seg.ownerName === 'string' ? seg.ownerName.trim() : '';
+  return nm || seg.owner;
+}
+// 純函式：建查詢器 'YYYY-MM-DD' → { 通路: 姓名 } | null。base＝ADJ_OWNER_TIMELINE 形狀，segs＝驗證過的雲端段。
+//   沒有雲端段 → 回 BASE 那段的 map 物件本身（跟加雲端前同一個參照，行為零差異）。
+//   有雲端段 → 每通路取「生效日 ≤ k」裡 from 最新的（BASE 段同天以上較新時 BASE 為準），合併成新物件（凍結、依日期記憶）。
+function _adjBuildOwnerLookup(base, segs, shops, resolve) {
+  const baseOn = k => {
+    for (let i = base.length - 1; i >= 0; i--) if (k >= base[i].from) return base[i];
+    return null;
+  };
+  if (!segs.length) return k => { const b = baseOn(k); return b ? b.map : null; };
+  const byShop = {};
+  segs.forEach(s => { (byShop[s.shop] = byShop[s.shop] || []).push({ from: s.from, name: _adjOwnerDisplay(s, resolve) }); });
+  Object.keys(byShop).forEach(sh => byShop[sh].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0)));
+  const memo = new Map();
+  return k => {
+    if (memo.has(k)) return memo.get(k);
+    const b = baseOn(k);
+    let out = b ? b.map : null;
+    let copied = false;
+    shops.forEach(shop => {
+      const list = byShop[shop];
+      if (!list) return;
+      let hit = null;
+      for (let i = list.length - 1; i >= 0; i--) if (k >= list[i].from) { hit = list[i]; break; }
+      if (!hit || (b && b.from > hit.from)) return;
+      if (!copied) { out = Object.assign({}, out || {}); copied = true; }
+      out[shop] = hit.name;
+    });
+    if (copied) Object.freeze(out);
+    memo.set(k, out);
+    return out;
+  };
+}
+// 查詢器快取：依「雲端值的參照 + ec.users 陣列的參照」，任一換了就重建（雲端模式下 Store.get 回同一個參照）。
+//   沒有雲端值時不讀 ec.users、不建 resolver，直接走 BASE。
+let _adjOwnerCache = { cloud: null, users: null, lookup: null };
+let _adjOwnerWarnedSig = null;   // 不合法的雲端值：同一份內容只 warn 一次
+function _adjOwnerLookup() {
+  const cloud = Store.get(ADJ_OWNER_CLOUD_KEY, null);
+  const c = _adjOwnerCache;
+  if (cloud === undefined || cloud === null) {
+    if (c.lookup && c.cloud === null) return c.lookup;
+    _adjOwnerCache = { cloud: null, users: null, lookup: _adjBuildOwnerLookup(ADJ_OWNER_TIMELINE, [], ADJ_ALL_SHOPS, null) };
+    return _adjOwnerCache.lookup;
+  }
+  const users = Store.get(Store.KEYS.users, []);
+  if (c.lookup && c.cloud === cloud && c.users === users) return c.lookup;
+  const v = _adjValidateOwnerCloud(cloud, ADJ_ALL_SHOPS, ADJ_OWNER_CLOUD_MIN_FROM);
+  if (!v.ok) {
+    let sig;
+    try { sig = typeof cloud + ':' + JSON.stringify(cloud); } catch { sig = typeof cloud + ':?'; }
+    if (_adjOwnerWarnedSig !== sig) {
+      _adjOwnerWarnedSig = sig;
+      console.warn('[adjOwner] 雲端負責人設定（' + ADJ_OWNER_CLOUD_KEY + '）不合法，整份不用、只用寫死的 BASE：', v.reason, cloud);
+    }
+  }
+  const segs = v.ok ? v.segs : [];
+  const lookup = _adjBuildOwnerLookup(ADJ_OWNER_TIMELINE, segs, ADJ_ALL_SHOPS, segs.length ? _adjWhoResolver() : null);
+  _adjOwnerCache = { cloud, users, lookup };
+  return lookup;
+}
+// 純函式：台灣時間（Asia/Taipei）的今天 'YYYY-MM-DD'；now 可傳入方便測試，預設現在。
+//   同 sheetsync.js 的 taipeiToday 邏輯，但自帶一份：sheetsync.js 在 main.js 排在本檔之後、只掛 window.SheetSync，
+//   本檔不依賴另一個頁面模組（也讓這支能單獨在 node vm 測）。
+function _adjTaipeiToday(now) {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(now || new Date());
+  const g = t => (p.find(x => x.type === t) || {}).value;
+  return g('year') + '-' + g('month') + '-' + g('day');
+}
+// 純函式：存檔前檢查（最後一道把關，規則見 ADJ_OWNER_TIMELINE 前的說明）。不讀全域，全部從參數傳入：
+//   oldVal＝存檔前從伺服器讀到的現值（null / undefined ＝沒有雲端段）；newVal＝要存的新值；today＝台灣今天 'YYYY-MM-DD'；
+//   users＝ec.users 陣列；opts＝{ shops, minFrom, sharedAdminNames }。
+//   回傳 { ok, errors:[{ code, shop, from, msg }] }；msg 給管理員看。沒有任何變動 → ok:false、code 'no-change'。
+const ADJ_OWNER_SEG_FIELDS = ['shop', 'from', 'owner', 'ownerName', 'by', 'at'];
+function _adjOwnerPlanCheck(oldVal, newVal, today, users, opts) {
+  const o = opts || {};
+  const shops = Array.isArray(o.shops) ? o.shops : [];
+  const minFrom = o.minFrom;
+  const errors = [];
+  const err = (code, shop, from, msg) => errors.push({ code, shop: shop == null ? null : shop, from: from == null ? null : from, msg });
+  const done = () => ({ ok: errors.length === 0, errors });
+  const norm = s => String(s == null ? '' : s).trim().toLowerCase();
+
+  if (!shops.length || !_adjIsRealDate(minFrom)) { err('bad-opts', null, null, '檢查設定不完整（通路清單或最早日期），無法存檔。'); return done(); }
+  if (!_adjIsRealDate(today)) { err('bad-today', null, null, '取不到正確的「今天」日期，無法存檔，請重新整理後再試。'); return done(); }
+
+  // a. 新值格式
+  if (newVal === undefined || newVal === null) { err('format', null, null, '要存的資料是空的，無法存檔。'); return done(); }
+  const nv = _adjValidateOwnerCloud(newVal, shops, minFrom);
+  if (!nv.ok) { err('format', null, null, '要存的資料格式不對（' + nv.reason + '），沒有存檔。'); return done(); }
+  // 伺服器現值不合法時讀取端整份不用；這裡不在看不懂的資料上疊改，擋下來交給人處理。
+  const ov = _adjValidateOwnerCloud(oldVal, shops, minFrom);
+  if (!ov.ok) { err('old-invalid', null, null, '雲端上現有的負責人設定格式不對（' + ov.reason + '），請先找開發人員處理，沒有存檔。'); return done(); }
+
+  const keyOf = s => s.shop + '|' + s.from;
+  const same = (a, b) => ADJ_OWNER_SEG_FIELDS.every(f => JSON.stringify(a[f]) === JSON.stringify(b[f]));
+  const oldBy = new Map(ov.segs.map(s => [keyOf(s), s]));
+  const newBy = new Map(nv.segs.map(s => [keyOf(s), s]));
+
+  // e. 沒有任何變動
+  if (oldBy.size === newBy.size && [...oldBy].every(([k, s]) => newBy.has(k) && same(s, newBy.get(k)))) {
+    err('no-change', null, null, '沒有任何變更。');
+    return done();
+  }
+
+  // b. 已生效（from < 今天）的段落鎖住：必須原封不動
+  ov.segs.forEach(s => {
+    if (!(s.from < today)) return;
+    const n = newBy.get(keyOf(s));
+    if (!n) err('locked-removed', s.shop, s.from, s.shop + ' 從 ' + s.from + ' 起的負責人已經生效，不能刪除。');
+    else if (!same(s, n)) err('locked-changed', s.shop, s.from, s.shop + ' 從 ' + s.from + ' 起的負責人已經生效，不能修改。');
+  });
+
+  // c、d. 新增或修改的段落
+  const users0 = Array.isArray(users) ? users : [];
+  const shared = (Array.isArray(o.sharedAdminNames) ? o.sharedAdminNames : []).map(norm);
+  nv.segs.forEach(s => {
+    const prev = oldBy.get(keyOf(s));
+    if (prev && same(prev, s)) return;                 // 沒動的段落不重查（含已鎖住、負責人後來停用的）
+    if (prev && prev.from < today) return;             // 已鎖住被改，b 已報過
+    const where = s.shop + ' ' + s.from;
+    if (s.from < today) { err('past-date', s.shop, s.from, where + '：生效日已經過了，只能選今天（' + today + '）或以後。'); return; }
+    const u = norm(s.owner);
+    if (shared.includes(u)) { err('owner-shared', s.shop, s.from, where + '：' + s.owner.trim() + ' 是共用帳號，不能當負責人，請選個人帳號。'); return; }
+    const hits = users0.filter(x => x && norm(x.username) === u);
+    if (!hits.length) { err('owner-not-found', s.shop, s.from, where + '：找不到帳號 ' + s.owner.trim() + '。'); return; }
+    if (hits.length > 1) { err('owner-ambiguous', s.shop, s.from, where + '：帳號 ' + s.owner.trim() + ' 對到不只一個人，無法判斷是誰。'); return; }
+    const x = hits[0];
+    const name = (typeof x.name === 'string' && x.name.trim()) || x.username;
+    if (x.deleted) { err('owner-deleted', s.shop, s.from, where + '：' + name + ' 的帳號已刪除，不能當負責人。'); return; }
+    if (x.disabled) { err('owner-disabled', s.shop, s.from, where + '：' + name + ' 的帳號已停用，不能當負責人。'); return; }
+    if (x.role === 'view') { err('owner-view', s.shop, s.from, where + '：' + name + ' 是唯讀檢視帳號，不能當負責人。'); return; }
+  });
+  return done();
+}
+// ── #306 設定彈窗用的純函式（不讀全域，全部參數傳入，可在 node vm 單獨測）──
+const ADJ_OWNER_STATUS_LABEL = { base: '程式內建', locked: '已生效・鎖住', today: '今天生效・可改', future: '尚未生效・可改' };
+const _adjOwnerNorm = s => String(s == null ? '' : s).trim().toLowerCase();
+// 用 username 找帳號（trim、不分大小寫；對到不只一個就當找不到）。
+function _adjOwnerFindUser(users, username) {
+  const u = _adjOwnerNorm(username);
+  const hits = (Array.isArray(users) ? users : []).filter(x => x && _adjOwnerNorm(x.username) === u);
+  return hits.length === 1 ? hits[0] : null;
+}
+// 負責人下拉可選的帳號：未停用、未刪除、role 不是 view、不是共用帳號。回 [{ username, name, label:'姓名（username）' }]，順序同 users。
+function _adjOwnerSelectableUsers(users, sharedNames) {
+  const shared = (Array.isArray(sharedNames) ? sharedNames : []).map(_adjOwnerNorm);
+  return (Array.isArray(users) ? users : [])
+    .filter(u => u && typeof u.username === 'string' && u.username.trim()
+      && !u.disabled && !u.deleted && u.role !== 'view' && !shared.includes(_adjOwnerNorm(u.username)))
+    .map(u => {
+      const name = (typeof u.name === 'string' && u.name.trim()) || u.username;
+      return { username: u.username, name, label: name + '（' + u.username + '）' };
+    });
+}
+// BASE＋雲端 → 每通路的段落清單（依生效日排序）與狀態標籤。
+//   回 { cloudOk, cloudReason, shops:[{ shop, rows:[{ key, kind:'base'|'cloud', from, fromLabel, owner, name, status, statusLabel, editable, warn }] }] }。
+//   雲端值不合法 → 只列 BASE（同讀取端「整份不用」），cloudOk:false。warn：雲端段負責人帳號已停用 / 已刪除 → '已停用'。
+//   resolve＝makeUserIdentityResolver 產生的函式（可省略：只用 ownerName / owner 顯示）。
+function _adjOwnerSegRows(base, cloudVal, today, users, shops, minFrom, resolve) {
+  const v = _adjValidateOwnerCloud(cloudVal, shops, minFrom);
+  const segs = v.ok ? v.segs : [];
+  return {
+    cloudOk: v.ok,
+    cloudReason: v.ok ? '' : v.reason,
+    shops: shops.map(shop => {
+      const rows = [];
+      base.forEach(b => {
+        if (!(shop in b.map)) return;
+        rows.push({ key: 'base|' + shop + '|' + b.from, kind: 'base', from: b.from, fromLabel: b.from || '最早', owner: '', name: b.map[shop],
+          status: 'base', statusLabel: ADJ_OWNER_STATUS_LABEL.base, editable: false, warn: '' });
+      });
+      segs.filter(s => s.shop === shop).forEach(s => {
+        const status = s.from < today ? 'locked' : (s.from === today ? 'today' : 'future');
+        const u = _adjOwnerFindUser(users, s.owner);
+        rows.push({ key: s.shop + '|' + s.from, kind: 'cloud', from: s.from, fromLabel: s.from, owner: s.owner, name: _adjOwnerDisplay(s, resolve),
+          status, statusLabel: ADJ_OWNER_STATUS_LABEL[status], editable: status !== 'locked', warn: u && (u.disabled || u.deleted) ? '已停用' : '' });
+      });
+      rows.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : (a.kind === 'base' ? -1 : 1)));
+      return { shop, rows };
+    }),
+  };
+}
+// 草稿操作（不改傳入的陣列，回新陣列）。op：
+//   { type:'add', shop, from, owner } / { type:'edit', shop, from, owner }（只換負責人）/ { type:'remove', shop, from }。
+//   回 { ok, segs, msg }。這裡只做方便操作的前置檢查，存檔時一律再跑 _adjOwnerPlanCheck。
+function _adjOwnerDraftApply(segs, op, today) {
+  const list = Array.isArray(segs) ? segs : [];
+  const fail = msg => ({ ok: false, segs: list, msg });
+  const idx = list.findIndex(s => s && op && s.shop === op.shop && s.from === op.from);
+  if (!op || !op.shop) return fail('請選擇通路。');
+  if (op.type === 'add') {
+    if (!_adjIsRealDate(op.from)) return fail('請選擇生效日。');
+    if (op.from < today) return fail('生效日只能選今天（' + today + '）或以後。');
+    if (!op.owner || !String(op.owner).trim()) return fail('請選擇負責人。');
+    if (idx >= 0) return fail(op.shop + ' 在 ' + op.from + ' 已經有一段了，請直接修改那一段。');
+    return { ok: true, segs: list.concat([{ shop: op.shop, from: op.from, owner: String(op.owner).trim() }]), msg: '' };
+  }
+  if (idx < 0) return fail('找不到這一段。');
+  if (list[idx].from < today) return fail('這一段已經生效，不能修改或刪除。');
+  if (op.type === 'edit') {
+    if (!op.owner || !String(op.owner).trim()) return fail('請選擇負責人。');
+    const next = list.slice();
+    next[idx] = Object.assign({}, list[idx], { owner: String(op.owner).trim() });
+    return { ok: true, segs: next, msg: '' };
+  }
+  if (op.type === 'remove') return { ok: true, segs: list.filter((_, i) => i !== idx), msg: '' };
+  return fail('不明的操作。');
+}
+// 草稿和開窗時比：{ added:[key], changed:[key], removed:[seg] }（key＝'通路|生效日'；只比 owner，草稿只會改 owner）。
+function _adjOwnerDraftDiff(openSegs, draftSegs) {
+  const keyOf = s => s.shop + '|' + s.from;
+  const o = new Map((openSegs || []).map(s => [keyOf(s), s]));
+  const d = new Map((draftSegs || []).map(s => [keyOf(s), s]));
+  const added = [], changed = [], removed = [];
+  d.forEach((s, k) => { if (!o.has(k)) added.push(k); else if (o.get(k).owner !== s.owner) changed.push(k); });
+  o.forEach((s, k) => { if (!d.has(k)) removed.push(s); });
+  return { added, changed, removed };
+}
+// 組出要存的新值：未變動的段落沿用開窗時那一筆（一個欄位都不動）；新增 / 改過的補 ownerName（當下姓名）、by、at。
+function _adjOwnerBuildNewVal(openSegs, draftSegs, users, byUsername, at) {
+  const keyOf = s => s.shop + '|' + s.from;
+  const o = new Map((openSegs || []).map(s => [keyOf(s), s]));
+  return {
+    v: 1,
+    segs: (draftSegs || []).map(s => {
+      const prev = o.get(keyOf(s));
+      if (prev && prev.owner === s.owner) return prev;
+      const u = _adjOwnerFindUser(users, s.owner);
+      const ownerName = (u && typeof u.name === 'string' && u.name.trim()) || (u && u.username) || s.owner;
+      return { shop: s.shop, from: s.from, owner: s.owner, ownerName, by: byUsername, at };
+    }),
+  };
+}
+// key 排序後的 JSON（比對伺服器值用：Firestore 回來的物件 key 順序不保證跟寫進去的一樣）。undefined 一律當 null。
+function _adjStableJson(x) {
+  if (x === undefined || x === null) return 'null';
+  if (Array.isArray(x)) return '[' + x.map(_adjStableJson).join(',') + ']';
+  if (typeof x === 'object') return '{' + Object.keys(x).sort().filter(k => x[k] !== undefined)
+    .map(k => JSON.stringify(k) + ':' + _adjStableJson(x[k])).join(',') + '}';
+  return JSON.stringify(x);
+}
+// 通路 → 某天的負責人；查不到回 undefined。
+function adjOwnerOf(shop, date) {
+  const m = _adjMapOn(date);
+  return m ? m[shop] : undefined;
+}
+// 人 → 某天負責的通路（ADJ_ALL_SHOPS 順序）；每次回新陣列，查不到回 []。
+function adjShopsOf(person, date) {
+  const m = _adjMapOn(date);
+  return m ? ADJ_ALL_SHOPS.filter(shop => m[shop] === person) : [];
+}
+// 需求 3 塊 3-A：一筆淨利表調整歸給誰（卡片、明細彈窗、人員卡聯集共用這一支，不要各自寫一套）。
+//   有 by（登入帳號）→ makeUserIdentityResolver 轉成姓名（含停用 / 刪除帳號，status 帶出來）；
+//   by 對不到帳號（含同名不猜的 ambiguous）→ 歸「未對到帳號」，raw 留原字給明細顯示；
+//   沒有 by → 照舊用 adjOwnerOf(通路, 查看的那天) 推算（how:'inferred'，畫面標「推算」）。
+//   回傳 { person, how: 'by' | 'inferred' | 'unmatched', raw, status }；推算查不到負責人時 person 為 undefined（不歸任何人，同舊行為）。
+const ADJ_UNMATCHED_NAME = '未對到帳號';
+// resolver 只建一次：以 Store 的 ec.users 陣列參照當快取依據（雲端模式下 Store.get 回同一個參照，
+//   雲端快照換新陣列時自然重建）。🔴 姓名不要存進 getAdjIndex 的快取 —— 帳號改名 / 停用要即時反映。
+let _adjWhoCache = { users: null, resolve: null };
+function _adjWhoResolver() {
+  const users = Store.get(Store.KEYS.users, []);
+  if (_adjWhoCache.resolve && _adjWhoCache.users === users) return _adjWhoCache.resolve;
+  const mk = window.makeUserIdentityResolver;
+  const resolve = typeof mk === 'function' ? mk(Array.isArray(users) ? users : []) : null;
+  _adjWhoCache = { users, resolve };
+  return resolve;
+}
+// 共用帳號（以 username 比對，trim＋小寫）：by 對到這些帳號＝不知道實際是誰操作的（例：admin 曾被多人共用調通路），
+//   當成「沒有可信的 by」→ 跟沒有 by 同一套：adjOwnerOf(通路, 當天) 推算、how:'inferred'（畫面標「推算」），raw 保留原值。
+//   其他停用 / 刪除的【個人】帳號不在此列，維持依 by 歸屬（照樣長卡、標已停用 / 已刪除）。
+const SHARED_ACCOUNTS = ['admin'];
+const _isSharedAccount = (username) => SHARED_ACCOUNTS.includes(String(username || '').trim().toLowerCase());
+function adjPersonOf(rec, date, resolve) {
+  const raw = (rec && typeof rec.by === 'string') ? rec.by.trim() : '';
+  if (raw) {
+    const fn = resolve || _adjWhoResolver();
+    const id = fn ? fn(raw) : null;
+    if (id && id.ok && _isSharedAccount(id.username)) return { person: adjOwnerOf(rec && rec.shop, date), how: 'inferred', raw, status: null };
+    if (id && id.ok) return { person: id.display, how: 'by', raw, status: id.status };
+    return { person: ADJ_UNMATCHED_NAME, how: 'unmatched', raw, status: null };
+  }
+  return { person: adjOwnerOf(rec && rec.shop, date), how: 'inferred', raw: '', status: null };
+}
+// 某人某日（'YYYY-MM-DD'）歸給他的淨利表調整：[{ r, who }]，順序同 getAdjIndex。
+function _adjRecsWhoOf(person, viewDate) {
+  const resolve = _adjWhoResolver();
+  const out = [];
+  (getAdjIndex()[String(viewDate || '').replace(/-/g, '/')] || []).forEach(r => {
+    const who = adjPersonOf(r, viewDate, resolve);
+    if (who.person === person) out.push({ r, who });
+  });
+  return out;
+}
+// 某日有淨利表調整歸到的人：Map(姓名 → 帳號狀態 'active'|'disabled'|'deleted'|null)。
+//   status 只有 by 對到帳號時才有（推算的沒有帳號可查 → null）。給人員卡聯集 + 「已停用」標籤用。
+function _adjPeopleOn(viewDate) {
+  const resolve = _adjWhoResolver();
+  const m = new Map();
+  (getAdjIndex()[String(viewDate || '').replace(/-/g, '/')] || []).forEach(r => {
+    const who = adjPersonOf(r, viewDate, resolve);
+    if (!who.person) return;
+    if (!m.has(who.person) || (!m.get(who.person) && who.status)) m.set(who.person, who.status);
+  });
   return m;
-}, {});
+}
+// 明細彈窗那筆的小標籤（淨利表 / 洞察表兩個明細共用）：推算的標「推算」；對不到帳號的直接顯示原始 by 字串
+//   （「未對到帳號」卡靠它看出是誰）；by 對到帳號的不標。
+function _adjWhoTagHtml(who) {
+  if (!who) return '';
+  if (who.how === 'inferred') return `<span class="adj-who-tag" title="這筆沒有記錄操作者，依當天通路負責人推算">推算</span>`;
+  if (who.how === 'unmatched') return `<span class="adj-who-tag" title="這筆記錄的操作者對不到任何帳號">${escapeHtml(who.raw)}</span>`;
+  return '';
+}
+// 需求 3 塊 3-C：某日的洞察表調整依紀錄上的 by 歸屬（卡片 chip、明細彈窗、人員卡聯集共用這一支）。
+//   掃法逐字對齊 marketing.js 舊快照函式（塊3-D 已刪）的洞察表段：
+//   ADJ_ALL_SHOPS × ec.insight_{通路}_notes × 當天的 adjustments（日期取前 10 碼，dash / slash 都算）；
+//   唯一的差別是歸屬：快照一律歸通路負責人，這裡每筆走 adjPersonOf（有 by 依操作者、沒 by 推算負責人）。
+//   以「通路|品號」去重：同一商品同一人當天幾筆都只算一個商品；不同人各算各的。
+//   回傳 Map(姓名 → { status, items: Map('通路|品號' → { shop, code, hits:[{ a, who }], inferred }) })，
+//   inferred＝這個人在這個商品上的紀錄全是推算的（有任一筆 by 對到他就不算推算）。純唯讀。
+function _insWhoOn(viewDate, resolve) {
+  const out = new Map();
+  const dash = _adjDateKey(viewDate);
+  if (!dash) return out;
+  const slash = dash.replace(/-/g, '/');
+  const fn = resolve || _adjWhoResolver();
+  ADJ_ALL_SHOPS.forEach(shop => {
+    const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
+    Object.keys(notes).forEach(code => {
+      const adjustments = notes[code] && notes[code].adjustments;
+      if (!Array.isArray(adjustments)) return;
+      adjustments.forEach(a => {
+        const d = ((a && a.date) || '').slice(0, 10);
+        if (d !== dash && d !== slash) return;
+        const who = adjPersonOf({ shop, by: a.by }, dash, fn);
+        if (!who.person) return;
+        if (!out.has(who.person)) out.set(who.person, { status: null, items: new Map() });
+        const p = out.get(who.person);
+        if (!p.status && who.status) p.status = who.status;
+        const key = shop + '|' + code;
+        if (!p.items.has(key)) p.items.set(key, { shop, code, hits: [], inferred: true });
+        const it = p.items.get(key);
+        it.hits.push({ a, who });
+        if (who.how !== 'inferred') it.inferred = false;
+      });
+    });
+  });
+  return out;
+}
+// 卡片「洞察表 · 今日調整」chip：Map(姓名 → { status, counts, total, inferred, ready })。
+//   分類同快照算法：每個商品呼叫一次 window.__insightClassify（依目前資料重算），分不出類的不計；
+//   total / inferred 只算有分類的商品（＝chip 數字加總）。
+//   __insightClassify 在 marketing.js（main.js 比本檔先 import，正常一定在）；萬一還沒掛上 →
+//   ready:false、total 先給商品數，卡片顯示總數不顯示分類（比照淨利表 calc 未就緒的容錯，下次 render 自然補上）。
+function _insCardSummaryOn(viewDate) {
+  const classify = typeof window.__insightClassify === 'function' ? window.__insightClassify : null;
+  if (!classify) console.warn('[insight chip] window.__insightClassify 尚未就緒，本次只顯示商品數');
+  const out = new Map();
+  _insWhoOn(viewDate).forEach((p, person) => {
+    const counts = {};
+    let total = 0, inferred = 0;
+    p.items.forEach(it => {
+      const cls = classify ? classify(it.shop, it.code) : '';
+      if (classify && !cls) return;
+      if (cls) counts[cls] = (counts[cls] || 0) + 1;
+      total++;
+      if (it.inferred) inferred++;
+    });
+    if (total > 0) out.set(person, { status: p.status, counts, total, inferred, ready: !!classify });
+  });
+  return out;
+}
 // 開發期檢查：同一 label 若出現不同 cls，warn 一次（cls 取「該組第一筆」是推論，這裡驗證它）
 const _adjClsWarned = new Set();
 function _warnAdjClsMismatch(label, a, b) {
@@ -2272,7 +3020,7 @@ window.addEventListener('profitDataReady', () => {
   //   其他頁不動（資料已進 Store，切過去自然渲染）。route 判斷沿用 app.js 既有慣例（App.render 重繪當前 route）。
   if (window.App && window.App.route === 'office-d1' && typeof window.App.render === 'function') window.App.render();
 });
-// 洞察表調整索引：{ 'YYYY/MM/DD': [{shop, code}] }。來源 = ADJ_SHOP_TO_PERSON 各通路的
+// 洞察表調整索引：{ 'YYYY/MM/DD': [{shop, code, by}] }（by＝紀錄上的操作者，塊 3-C 月曆歸屬用）。來源 = ADJ_ALL_SHOPS 各通路的
 // ec.insight_{shop}_notes；日期同時支援 dash/slash，一律正規化成斜線（與 getAdjIndex 一致）；
 // date 空的跳過。純唯讀。
 // 🔴 刻意不做模組層快取：getAdjIndex 的快取靠 profitDataReady 事件失效，洞察資料沒有對應事件，
@@ -2280,7 +3028,7 @@ window.addEventListener('profitDataReady', () => {
 function getInsIndex() {
   const idx = {};
   try {
-    Object.keys(ADJ_SHOP_TO_PERSON).forEach(shop => {
+    ADJ_ALL_SHOPS.forEach(shop => {
       const notes = Store.get(`ec.insight_${shop}_notes`, {}) || {};
       Object.keys(notes).forEach(code => {
         const adjustments = (notes[code] && notes[code].adjustments) || [];
@@ -2288,7 +3036,7 @@ function getInsIndex() {
           const d = ((a && a.date) || '').slice(0, 10);
           if (!d) return;
           const slash = d.replace(/-/g, '/');
-          (idx[slash] = idx[slash] || []).push({ shop, code });
+          (idx[slash] = idx[slash] || []).push({ shop, code, by: a.by });
         });
       });
     });
@@ -2323,113 +3071,132 @@ function _progRank(label,kind){
   if(n==='高利潤商品')return 90;       // 好事墊底
   return 50;
 }
-// 進度區塊的說明文字。🔴 整頁只出現【一份】(渲染在人員卡片欄的最上方,見 renderDailyProgress),
-//   不再每張人員卡片各印一次(四個人 = 同樣的字重複四次)。
-//   ⚠ 文案要跟著計算層走:月層是「兩輪相加」,不是「相異商品數」——
-//     舊版那句「通路列的大數字是『這個商品被調整過沒有』」在月層是【假的】,已移除。
+// 進度區塊的說明文字。🔴 整頁只出現【一份】:渲染在右欄「通路進度（今天）」卡內、四個通路列的最下面
+//   (buildProgressCardHtml 呼叫),卡片在任何日期都顯示,說明跟著一起出現。
+//   ⚠ 文案要跟著計算層走:2026-09-10 起【上半月 / 下半月各自一條、互不相加】——
+//     舊版那兩句「月層 = 上半月 + 下半月,每一格都是相加」與「分母不是商品數,是兩輪各要看一次」
+//     已作廢並移除。現在每一條的分母就是該期報表的商品列數,直白到不需要解釋,
+//     那兩句【沒有替代品、不要補回來】。
 function buildProgressNoteHtml(){
-  return`<details class="adj-prog-note adj-prog-note-host"><summary>❓ 進度條怎麼算的？</summary><div class="adj-prog-note-body">依通路負責人歸屬，非個人操作紀錄；點通路列展開明細<br>月層 = 上半月 + 下半月，<b>每一格都是相加</b>（分子分母都是）<br>分母不是商品數，是「兩輪各要看一次」—— 同一個商品上半月看一次、下半月再看一次<br>在「整月」畫面打的調整，上半月、下半月、月層<b>三處都算完成</b><br>廣告分析看你在「廣告調整」欄有沒有打字，成長分析看「商品調整」欄 —— 兩邊分開算，在廣告欄打字不會讓成長標籤算完成<br>一個商品可能有多個廣告標籤，打一筆調整那幾個標籤都算完成（系統不知道你是為了哪個標籤打的）</div></details>`;
+  return`<details class="adj-prog-note adj-prog-note-host"><summary>❓ 進度條怎麼算的？</summary><div class="adj-prog-note-body">這是通路的進度，誰調整都算；「負責 X」只是標示這個通路目前的負責人；點期間列展開明細<br>負責人與月份都依今天決定，跟月曆選的日期無關<br>上半月、下半月<b>各自一條、分開算</b>，兩條不相加<br>每條的分母是<b>該期報表的商品列數</b>，分子是「這個商品本期被碰過沒有」<br>在「整月」畫面打的調整，上半月、下半月<b>兩期都算完成</b><br>廣告分析看「廣告調整」欄有沒有打字，成長分析看「商品調整」欄 —— 兩邊分開算，在廣告欄打字不會讓成長標籤算完成<br>一個商品可能有多個廣告標籤，打一筆調整那幾個標籤都算完成（系統不知道這筆調整是為了哪個標籤打的）</div></details>`;
 }
-// 進度區塊。🔴 外層包 try/catch:這支要逐列重算標籤(好麻吉月層 1500+ 列),
-//   任何一列的欄位異常都可能 throw,而它被內插在人員卡片的 HTML 字串裡 ——
-//   沒有這層保護,一個通路的髒資料會炸掉【整張人員卡片】(待辦事項、老闆任務全部不見)。
-function buildProgressHtml(person){
-  try{
-    return _buildProgressHtmlInner(person);
-  }catch(e){
-    console.warn('[buildProgressHtml] 進度區塊算不出來，改顯示「—」：',person,e);
-    if(!(ADJ_PERSON_TO_SHOPS[person]||[]).length)return'';
-    return`<div class="adj-prog"><div class="adj-prog-head"><div class="adj-prog-title">本期優化進度</div></div>`
-      +`<div class="adj-prog-row"><span class="adj-prog-na">—</span></div></div>`;
-  }
+// 需求 3 塊 4：「通路進度（今天）」卡片的資料層。純函式：不碰 DOM、不讀全域，全部從參數進來（node vm 可單獨切出來測）。
+//   shops：通路陣列（字串，或 { shop, kind }；kind 預設 'shopee'，留給之後的 MOMO）
+//   progOf(shop)：回傳 profit.js shopLabelProgress 的結果（拿不到回 null）；ownerOf(shop)：今天的負責人姓名。
+//   計算口徑沿用人員卡舊「優化進度」（塊4-3 已拆）：t=0 → —、兩期都 null 收成一條、只有一期 null 那期顯示「尚無報表 / 載入中」。
+//   「載入中」的判斷照舊只看 p.loaded（#315 另修）。
+//   每列：{ shop, kind, ownerName, month, status, naText, periods }
+//     status：'ok' 至少一期有報表（看 periods）｜'none' 兩期都沒報表｜'loading' 兩期都 null 且還在載入｜'unavailable' progOf 回 null
+//     periods[]：{ half, periodLabel, isCurrent, key, status:'ok'|'none'|'loading', naText, done, total, pct, pctText, cls, fillCls, data }
+//       key＝「通路|月份|期別」（data-prog-key / data-prog-detail 用）；沒報表的期 key 為 null（那期不畫 ▾）。
+//       pctText＝畫面上那段字（含 ✓ / ! 符號，例「✓ 100%」「! 12%」）；total 為 0 時是「—」、pct 為 null。
+function _progCardModel(shops, progOf, ownerOf) {
+  const pctOf = (d, t) => {
+    if (!t) return { pct: null, pctText: '—', cls: '', fillCls: '' };
+    const pct = Math.round(d / t * 100);
+    const mark = pct >= 100 ? '✓ ' : pct < 50 ? '! ' : '';
+    return {
+      pct,
+      pctText: `${mark}${pct}%`,
+      cls: pct >= 100 ? 'adj-prog-p100' : pct >= 50 ? 'adj-prog-p50' : 'adj-prog-p0',
+      fillCls: pct >= 100 ? 'adj-prog-fill-p100' : pct >= 50 ? 'adj-prog-fill-p50' : 'adj-prog-fill-p0',
+    };
+  };
+  return (shops || []).map(s => {
+    const shop = (s && typeof s === 'object') ? s.shop : s;
+    const kind = (s && typeof s === 'object' && s.kind) || 'shopee';
+    const p = progOf(shop);
+    const row = { shop, kind, ownerName: ownerOf(shop), month: p ? p.month : null, status: 'ok', naText: '', periods: [] };
+    if (!p) { row.status = 'unavailable'; row.naText = '—'; return row; }
+    const na = p.loaded ? '尚無報表' : '載入中';
+    const naStatus = p.loaded ? 'none' : 'loading';
+    if (p.periods.every(pr => !pr.data)) { row.status = naStatus; row.naText = na; return row; }
+    row.periods = p.periods.map(pr => {
+      const base = { half: pr.half, periodLabel: pr.periodLabel, isCurrent: !!pr.isCurrent };
+      const d = pr.data;
+      if (!d) return Object.assign(base, { key: null, status: naStatus, naText: na, done: null, total: null, pct: null, pctText: na, cls: '', fillCls: '', data: null });
+      return Object.assign(base, { key: shop + '|' + p.month + '|' + pr.half, status: 'ok', naText: '', done: d.doneTotal, total: d.total, data: d }, pctOf(d.doneTotal, d.total));
+    });
+    return row;
+  });
 }
-function _buildProgressHtmlInner(person){
-  const shops=ADJ_PERSON_TO_SHOPS[person]||[];
-  if(!shops.length)return'';
-  const hasSLP=typeof window.shopLabelProgress==='function';
-  const results=shops.map(shop=>({shop,p:hasSLP?window.shopLabelProgress(shop):null}));
-  // 標題不再帶期別:月份改印在每一列通路上(好麻吉 · 2026/08),四個通路各自的月份才不會混。
-  const pt='本期優化進度';
-  // 🔴 t===0 守衛(bar / flat 都要):月層是兩期相加,某個組合下分母可能是 0,
-  //   0/0 會算出 NaN → 畫面出現「NaN%」而且 style="width:NaN%" 讓長條整條消失,不報錯。
-  const bar=(d,t)=>{if(!t)return`<span class="adj-prog-na">—</span>`;
-    const pct=Math.round(d/t*100);
-    // 門檻/符號與 flat() 完全一致（p100/p50/p0、✓/!），bar 只是補上它缺的那半。
-    // class 用完整字面（不動態拼字串），grep 才找得到、也跟 flat() 寫法一致。
-    const cls=pct>=100?'adj-prog-p100':pct>=50?'adj-prog-p50':'adj-prog-p0';
-    const fillCls=pct>=100?'adj-prog-fill-p100':pct>=50?'adj-prog-fill-p50':'adj-prog-fill-p0';
-    const mark=pct>=100?'✓ ':pct<50?'! ':'';
-    return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-bar"><span class="adj-prog-fill ${fillCls}" style="width:${pct}%"></span></span><span class="adj-prog-pct ${cls}">${mark}${pct}%</span>`;};
-  // 明細列(小標籤)不畫條:數字 + 符號 + %。
-  // ✓=100% 完成(綠)、無符號=進行中(藍)、!=低於50%(琥珀)。
-  // 符號是主判讀(不依賴色覺)、顏色是輔助;刻意不用紅——期中偏低是常態不是過錯。
-  const flat=(d,t)=>{if(!t)return`<span class="adj-prog-na">—</span>`;
-    const pct=Math.round(d/t*100);
-    const cls=pct>=100?'adj-prog-p100':pct>=50?'adj-prog-p50':'adj-prog-p0';
-    const mark=pct>=100?'✓ ':pct<50?'! ':'';
-    return`<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-pct ${cls}">${mark}${pct}%</span>`;};
-  const rows=results.map(({shop,p})=>{
-    if(!p)return`<div class="adj-prog-row"><span class="adj-prog-shop">${escapeHtml(shop)}</span><span class="adj-prog-na">—</span></div>`;
-    const m=p.monthly;
-    // 半月列:唯讀、不可展開。缺報表【必須看得出來】——
-    //   「這期是 0」和「這期還沒產報表」看起來一樣的話，分母少一半而數字仍然合理，沒有人會發現。
-    //   🔴 loaded=false 代表 profits collection 的延後訂閱還沒回來(不是「沒有報表」)→ 顯示「載入中」。
-    const halfRow=(h)=>{
-      const raw=h==='first'?p.first:p.second;
-      const label=h==='first'?'上半月':'下半月';
-      const cell=raw?flat(raw.doneTotal,raw.total)
-                    :`<span class="adj-prog-na">${p.loaded?'尚無報表':'載入中'}</span>`;
-      return`<div class="adj-prog-row adj-prog-half"><span class="adj-prog-shop">${label}</span>${cell}</div>`;
+// 需求 3 塊 4：「通路進度（今天）」卡片（右欄、老闆指派任務卡下面）。不論檢視哪一天都顯示：月份、期別、負責人都依「今天」。
+//   進度條沿用 .adj-prog-* 的結構與 data-prog-key，▾ 展開走 bindWeeklyCalendar 既有的委派
+//   （範圍取 toggle.closest('.dp-card, .dp-prog-card')，只在本卡內找明細，跟卡片排列順序無關）。
+//   🔴 每個通路各自 try/catch：shopLabelProgress 逐列重算標籤，一個通路的髒資料不能讓整張卡消失。
+//   明細（grp / flat / curMark）只剩本卡一份（人員卡舊「優化進度」塊4-3 已拆）。
+//   opts.canEditOwners（#306）：true（管理員）才在標題旁輸出「⚙ 設定負責人」；其他人的輸出跟加這功能前逐字相同。
+function buildProgressCardHtml(opts) {
+  const canEditOwners = !!(opts && opts.canEditOwners);
+  const today = toDateStr(new Date());
+  const hasSLP = typeof window.shopLabelProgress === 'function';
+  const progOf = shop => hasSLP ? window.shopLabelProgress(shop) : null;
+  const ownerOf = shop => adjOwnerOf(shop, today);
+  const curMark = on => `<span class="adj-prog-cur${on ? '' : ' adj-prog-cur-off'}"${on ? ' title="本期"' : ' aria-hidden="true"'}>●</span>`;
+  const flat = (d, t) => {
+    if (!t) return `<span class="adj-prog-na">—</span>`;
+    const pct = Math.round(d / t * 100);
+    const cls = pct >= 100 ? 'adj-prog-p100' : pct >= 50 ? 'adj-prog-p50' : 'adj-prog-p0';
+    const mark = pct >= 100 ? '✓ ' : pct < 50 ? '! ' : '';
+    return `<span class="adj-prog-num">${d}/${t}</span><span class="adj-prog-pct ${cls}">${mark}${pct}%</span>`;
+  };
+  const grp = (title, obj, kind) => {
+    const keys = Object.keys(obj).sort((a, b) => {
+      const ra = _progRank(a, kind), rb = _progRank(b, kind);
+      return ra !== rb ? ra - rb : obj[b].t - obj[a].t;
+    });
+    if (!keys.length) return '';
+    let gd = 0, gt = 0; keys.forEach(l => { gd += obj[l].d; gt += obj[l].t; });
+    const pending = keys.filter(l => Math.round(obj[l].d / obj[l].t * 100) < 100);
+    const done = keys.filter(l => Math.round(obj[l].d / obj[l].t * 100) >= 100);
+    const sub = l => {
+      const { t, d } = obj[l];
+      return `<div class="adj-prog-row adj-prog-sub"><span class="adj-prog-shop">${escapeHtml(window.mapAnaLabel ? window.mapAnaLabel(l) : l)}</span>${flat(d, t)}</div>`;
     };
-    const grp=(title,obj,kind)=>{
-      const keys=Object.keys(obj).sort((a,b)=>{
-        const ra=_progRank(a,kind),rb=_progRank(b,kind);
-        return ra!==rb?ra-rb:obj[b].t-obj[a].t;
-      });
-      if(!keys.length)return'';
-      let gd=0,gt=0;keys.forEach(l=>{gd+=obj[l].d;gt+=obj[l].t;});
-      // 未完成直接列、已完成收進 <details>（原生收折，無 JS 事件、預設收折）。
-      // pct 算法與 flat() 一致（Math.round(d/t*100)、>=100 為完成）；排序沿用上面 _progRank 的結果。
-      const pending=keys.filter(l=>Math.round(obj[l].d/obj[l].t*100)<100);
-      const done=keys.filter(l=>Math.round(obj[l].d/obj[l].t*100)>=100);
-      const sub=l=>{
-        const{t,d}=obj[l];
-        return`<div class="adj-prog-row adj-prog-sub"><span class="adj-prog-shop">${escapeHtml(window.mapAnaLabel?window.mapAnaLabel(l):l)}</span>${flat(d,t)}</div>`;
-      };
-      // 分組小總結:該組所有標籤桶的加總(一商品多標籤會重複計,語意為「標籤完成度」)。
-      //   ⚠ 多標籤化(calcAnalysisAll)之後,重複計【不只發生在跨組】(廣告標籤+成長標籤):
-      //     廣告分析【組內部也會】——一個商品同時有「低效廣告」和「減300」,gt 就 +2。
-      // 不畫條:分組分母是「標籤數」、通路列分母是「商品數」，兩者不可比，
-      // 並排長條會誘導無效比較（例:好麻吉 822 列，廣告分析標籤 483 個（多標籤化前 403））。
-      //   ⚠ 這組數字是 2026-08-06 多標籤化當天量的，之後報表更新會變，拿來對帳前先自己重量一次。
-      return`<div class="adj-prog-row adj-prog-grp"><span class="adj-prog-shop">${escapeHtml(title)}</span>${flat(gd,gt)}</div>`
-        +(pending.length?`<div class="adj-prog-subs">`+pending.map(sub).join('')+`</div>`:'')
-        +(done.length?`<details class="adj-prog-done"><summary>已完成 ${done.length} 項</summary><div class="adj-prog-subs">`+done.map(sub).join('')+`</div></details>`:'');
-    };
-    // 🔴 複合 key(通路|月份):委派用的是 card.querySelector（單數），key 只有通路名時
-    //   一旦同卡片出現第二個同名 data-prog-detail，點下面那個會展開上面那個【而且不報錯】。
-    //   半月列現在是唯讀的 div、不帶這個屬性，但 key 先做成唯一的，日後加可展開的列才不會踩雷。
-    const key=shop+'|'+p.month;
-    // 🔴 .adj-prog-halves 在 button【外面】、也在 detail【外面】—— 三行永遠同時可見。
-    //   在 button 外:button 套 button 是無效 HTML，而且委派的 closest('.adj-prog-toggle')
-    //     會把半月列的點擊算成「點了月層」→ 誤觸展開。
-    //   在 detail 外:月層亮琥珀色警示時（例：上半月 70% + 下半月剛產 0% → 月層 35%）,
-    //     底下兩行要當場說明原因；藏進收折等於第一眼只看得到那個誤導性的百分比。
-    //   展開鈕只控制標籤明細。
-    return`<button type="button" class="adj-prog-row adj-prog-toggle" data-prog-key="${escapeHtml(key)}">
-        <span class="adj-prog-shop">${escapeHtml(shop)} · ${escapeHtml(p.month)}</span>${bar(m.doneTotal,m.total)}<span class="adj-prog-caret">▾</span>
-      </button>
-      <div class="adj-prog-halves">${halfRow('first')}${halfRow('second')}</div>
-      <div class="adj-prog-detail" data-prog-detail="${escapeHtml(key)}" hidden>
-        ${grp('廣告分析',m.ana,'ana')}${grp('成長分析',m.growth,'growth')}
-      </div>`;
+    return `<div class="adj-prog-row adj-prog-grp"><span class="adj-prog-shop">${escapeHtml(title)}</span>${flat(gd, gt)}</div>`
+      + (pending.length ? `<div class="adj-prog-subs">` + pending.map(sub).join('') + `</div>` : '')
+      + (done.length ? `<details class="adj-prog-done"><summary>已完成 ${done.length} 項</summary><div class="adj-prog-subs">` + done.map(sub).join('') + `</div></details>` : '');
+  };
+  const naRow = (titleHtml, cur, text) => `<div class="adj-prog-row">${curMark(!!cur)}<span class="adj-prog-shop">${titleHtml}</span><span class="adj-prog-na">${escapeHtml(text)}</span></div>`;
+  const periodHtml = pr => {
+    const titleHtml = escapeHtml(pr.periodLabel);
+    if (pr.status !== 'ok') return naRow(titleHtml, pr.isCurrent, pr.naText);
+    const barHtml = pr.pct === null
+      ? `<span class="adj-prog-na">—</span>`
+      : `<span class="adj-prog-num">${pr.done}/${pr.total}</span><span class="adj-prog-bar"><span class="adj-prog-fill ${pr.fillCls}" style="width:${pr.pct}%"></span></span><span class="adj-prog-pct ${pr.cls}">${pr.pctText}</span>`;
+    return `<button type="button" class="adj-prog-row adj-prog-toggle" data-prog-key="${escapeHtml(pr.key)}">
+          ${curMark(pr.isCurrent)}<span class="adj-prog-shop">${titleHtml}</span>${barHtml}<span class="adj-prog-caret">▾</span>
+        </button>
+        <div class="adj-prog-detail" data-prog-detail="${escapeHtml(pr.key)}" hidden>
+          ${grp('廣告分析', pr.data.ana, 'ana')}${grp('成長分析', pr.data.growth, 'growth')}
+        </div>`;
+  };
+  const shopHead = (shop, owner) => `<div class="dp-prog-shop-head"><span class="dp-prog-shop-name">${escapeHtml(shop)}</span><span class="dp-prog-owner">負責 ${escapeHtml(owner || '—')}</span></div>`;
+  const rows = ADJ_ALL_SHOPS.map(shop => {
+    try {
+      const r = _progCardModel([shop], progOf, ownerOf)[0];
+      let body;
+      if (r.status === 'unavailable') body = naRow('', false, '—');
+      else if (r.status !== 'ok') body = naRow(escapeHtml(r.month), false, r.naText);
+      else body = r.periods.map(periodHtml).join('');
+      return `<div class="dp-prog-shop">${shopHead(r.shop, r.ownerName)}${body}</div>`;
+    } catch (e) {
+      console.warn('[buildProgressCardHtml] 通路進度算不出來，改顯示「—」：', shop, e);
+      let owner = '';
+      try { owner = ownerOf(shop); } catch {}
+      return `<div class="dp-prog-shop">${shopHead(shop, owner)}${naRow('', false, '—')}</div>`;
+    }
   }).join('');
-  return`<div class="adj-prog">
-    <div class="adj-prog-head">
-      <div class="adj-prog-title">${pt}</div>
-      <span class="adj-prog-legend"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span></span>
+  return `<div class="dp-prog-card">
+    <div class="adj-prog">
+      <div class="adj-prog-head">
+        <div class="adj-prog-title">通路進度（今天）</div>${canEditOwners ? `
+        <button type="button" class="adj-owner-cfg-btn" title="設定各通路的負責人">⚙ 設定負責人</button>` : ''}
+        <span class="adj-prog-legend"><span class="adj-prog-p100">✓ 完成</span>　<span class="adj-prog-p50">進行中</span>　<span class="adj-prog-p0">! 低於50%</span></span>
+      </div>
+      ${rows}
+      ${buildProgressNoteHtml()}
     </div>
-    ${rows}
   </div>`;
 }
 // 第六塊：某人某日的「淨利表調整」區塊，注入人員卡片底部。只留標題 + 兩排 pill，明細改走彈窗。
@@ -2437,21 +3204,14 @@ function _buildProgressHtmlInner(person){
 //   pill 為 <button>，click 由 bindWeeklyCalendar 綁 → openAdjustmentDetailModal。
 //   pill 計數一律走 _adjRecsForGroup（與 modal 明細同源，數字保證一致）。
 function buildCardAdjustmentsHtml(person, viewDate) {
-  const slashDate = String(viewDate || '').replace(/-/g, '/');
-  const recs = (getAdjIndex()[slashDate] || []).filter(r => ADJ_SHOP_TO_PERSON[r.shop] === person);
+  // 塊 3-A：歸屬改走 adjPersonOf（有 by 依操作者、沒 by 才推算），推算的筆數另外標在總數後面
+  const recsWho = _adjRecsWhoOf(person, viewDate);
+  const recs = recsWho.map(x => x.r);
+  const inferredCount = recsWho.filter(x => x.who.how === 'inferred').length;
 
-  // 空狀態：當日 0 筆 → 只留進度區塊，沒有進度就整塊不顯示
-  // （原 person === '郭雅琪' 的「無淨利表」特例已移除：那是郭雅琪負責維克時期寫的，
-  //   2026/07/29 改為負責玩樂後該提示變成事實錯誤，且與下方進度區塊矛盾）
-  if (recs.length === 0) {
-    // 🔴 先存變數再用，【不要】改回 `buildProgressHtml(person)?…${buildProgressHtml(person)}…` 那種
-    //   三元寫法：它會把同一個人的進度整個算【兩次】（條件判斷一次、模板內插一次）。
-    //   buildProgressHtml 內部對負責的每個通路各呼叫一次 shopLabelProgress，而那支要逐列重算標籤
-    //   （好麻吉單期就 800+ 列，每列各跑一次 calcAnalysisAll + calcGrowthAnalysis）。
-    //   「當日 0 筆調整」是常見狀態（週末、剛開站），這條正好是最慢的那條路徑。
-    const prog = buildProgressHtml(person);
-    return prog ? `<div class="adj-sec">${prog}</div>` : '';
-  }
+  // 空狀態：當日 0 筆 → 整塊不顯示（連分隔線都不出）。
+  //   需求 3 塊 4：人員卡上的「優化進度」已拆，通路進度改看右欄「通路進度（今天）」卡（buildProgressCardHtml）。
+  if (recs.length === 0) return '';
 
   const total = recs.length;
   const personAttr = escapeHtml(person);
@@ -2513,11 +3273,10 @@ function buildCardAdjustmentsHtml(person, viewDate) {
     <div class="adj-sec">
       <div class="adj-sec-head">
         <span class="adj-sec-title">淨利表調整</span>
-        <span class="adj-sec-total">${total}</span>
+        <span class="adj-sec-count"><span class="adj-sec-total">${total}</span>${inferredCount ? `<span class="adj-inferred-note">（含推算 ${inferredCount}）</span>` : ''}</span>
       </div>
       ${anaPills ? `<div class="adj-pill-group"><div class="adj-pills-label">廣告分析</div><div class="adj-pills">${anaPills}</div></div>` : ''}
       ${growthPills ? `<div class="adj-pill-group"><div class="adj-pills-label">成長分析</div><div class="adj-pills">${growthPills}</div></div>` : ''}
-      ${buildProgressHtml(person)}
     </div>`;
 }
 
@@ -2719,4 +3478,4 @@ window.__taskImageCleanup = async function () {
   console.log('建議再跑一次 __taskImageAudit() 確認結果');
 };
 
-Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES, _tiListAll });
+Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, adjOwnerOf, adjShopsOf, ADJ_ALL_SHOPS, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES, _tiListAll });

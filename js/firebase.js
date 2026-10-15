@@ -1,6 +1,6 @@
 /* ===================== Firebase Firestore 雲端同步層 ===================== */
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js';
-import { getFirestore, doc, collection, getDoc, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import { getFirestore, doc, collection, getDoc, getDocFromServer, setDoc, deleteDoc, updateDoc, deleteField, onSnapshot, FieldPath, serverTimestamp, runTransaction } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCyPRKrBGGoRddkGEhjQ3TQzkNBFyVaxK0",
@@ -62,7 +62,8 @@ try {
   };
 
   window.__cloudStore = {
-    getDoc: () => getDoc(docRef),
+    // getDoc('server')：強制讀伺服器現值（不吃本機快取）；無參數呼叫行為不變
+    getDoc: (src) => src === 'server' ? getDocFromServer(docRef) : getDoc(docRef),
     setField: (key, value) => safeSetField(docRef, key, value),
     removeField: (key) => restDeleteFields([key]),
     removeFields: (keys) => restDeleteFields(keys),
@@ -96,6 +97,45 @@ try {
   try {
     Store._profitMem = Store._profitMem || {};
     const profitParts = { current: {}, archives: {} };
+    // ── 封存分片狀態的唯讀觀測點（給 js/profit.js 判「這把 key 是否已封存」用）──
+    //   本區【只提供讀取】、不接任何呼叫端；上線後使用者行為零變化。
+    //   ⚠ 掛的是【函式】不是值：module 內的 let/const 掛上 window 會變成當下快照，讀不到即時值
+    //     （先例：js/profit.js 的 window.__profitPendingCount 也是掛函式）。
+    //   ⚠ 刻意不以 __cloud 開頭：app.js 的 __installReadonlyCloudGuard 只包 __cloud* 物件的非白名單方法，
+    //     這三支是純讀取，不該被包、也不該被算進 TEST_NOWRITE 的雲端物件數。
+    //   ⚠ 適用範圍：只給 mergeAndNotify 走「直接覆蓋」分支的 key 用（ec_notes|、ec_edits| 這類）。
+    //     【不適用】ec| 報表 key —— 報表的權威在 profits collection，mergeAndNotify 對 ec| 只在
+    //     _profitMem 無值時才填入（見下方 mergeAndNotify），「在封存分片」對報表不代表「唯讀」。
+    //   🔴 本區【只回傳布林值與錯誤紀錄，不回傳封存內容】。「讀封存整把當同步基準」的做法
+    //     （改了就解封存）已被否決；不要在這裡加 __profitArchiveValue 之類的取值函式。
+    //   profitArchiveMeta[doc]   = { at, exists, fromCache }  每片最近一次快照的 metadata（onSnapshot 成功 callback 寫入）
+    //   profitArchiveErrors[doc] = { at, code, message }      onSnapshot 錯誤 callback 寫入；不自動清除
+    //     （SDK 的 onSnapshot 出錯後該監聽即終止、不會再送快照，「錯誤已解除」不會有任何訊號，清了等於說謊）
+    const profitArchiveMeta = {};
+    const profitArchiveErrors = {};
+    // 這把 key 是否存在於任一封存分片的【最新快照】。
+    //   快照未到 → false，與「確定不在」無法區分 → 呼叫端要先看 __profitArchivesReady()。
+    window.__profitArchiveHas = (key) => PROFIT_ARCHIVE_DOCS.some(n => {
+      const d = profitParts.archives[n];
+      return !!d && Object.prototype.hasOwnProperty.call(d, key);
+    });
+    // 所有封存分片是否都已從【伺服器】收到過快照（嚴格版）：
+    //   每片都要 (1) profitParts.archives 有那片的 key（訂閱 callback 對 exists()===false 也會寫入 {}，
+    //   所以 doc 不存在也算已到達），且 (2) 最近一次快照 metadata.fromCache 為 false。
+    //   (2) 的理由：本專案沒開 IndexedDB persistence，離線時 SDK 可能送出 exists()===false + fromCache 的
+    //   快照，若只看 (1) 會在離線時把所有封存期別誤判成「未封存」。離線 → ready 永遠 false（fail-closed）。
+    //   ⚠ 已 ready 後若又收到 fromCache=true 的快照（連線中斷、SDK 切到快取），ready 會退回 false，
+    //     等重新連上收到伺服器快照才恢復 —— 這是刻意的，離線期間不該相信封存判斷。
+    window.__profitArchivesReady = () => PROFIT_ARCHIVE_DOCS.every(n =>
+      Object.prototype.hasOwnProperty.call(profitParts.archives, n)
+      && !!profitArchiveMeta[n] && profitArchiveMeta[n].fromCache === false);
+    // 封存分片訂閱錯誤（回傳拷貝，呼叫端改不到內部狀態）。{} ＝ 目前沒有錯誤。
+    window.__profitArchiveErrors = () => JSON.parse(JSON.stringify(profitArchiveErrors));
+    // app/profit【最新快照】裡是否有這把 key（讀 profitParts.current；首批快照未到時是 {} → 一律 false）。
+    //   與 __profitArchiveHas 搭配用（js/profit.js 的 _notesWriteBlockReason）：app/profit 有 → 不可能是「被搬走」的封存 key。
+    //   刻意不另設「app/profit 首批已到」狀態：它只會讓提示文字更細，不改變任何放行／擋下結果
+    //   （首批未到 → false → 由封存 ready 判斷接手；離線 fromCache 空快照也是 false → 方向正確）。同樣不回傳內容。
+    window.__profitCurrentHas = (key) => Object.prototype.hasOwnProperty.call(profitParts.current || {}, key);
     const mergeAndNotify = () => {
       const data = {};
       Object.values(profitParts.archives).forEach(d => Object.assign(data, d));
@@ -115,7 +155,10 @@ try {
       // 非報表 key（notes/edits 等）直接覆蓋；報表 key（ec|shop|month|half）與 MOMO 商品主檔（ec_momo_products|）
       //   只在 collection 尚未填該 key 時才填入（collection 權威、app/profit 舊欄位只當遷移過渡的 fallback）
       Object.keys(data).forEach(k => {
-        if (k.startsWith('ec|') || k.startsWith('ec_momo_products|')) {
+        // ec_pchome_products / ec_pchome_recon 已搬到 app/pchome_products / app/pchome_recon 獨立 doc
+        //   （照 ec_momo_products 搬 collection 的先例）：新 doc 權威，app/profit 舊欄位只當【遷移過渡的 fallback】
+        //   —— 只在新 doc 尚未填該 key（Store._profitMem 還沒值）時才填入，避免 app/profit echo 蓋掉新 doc 的值。
+        if (k.startsWith('ec|') || k.startsWith('ec_momo_products|') || k === 'ec_pchome_products' || k === 'ec_pchome_recon') {
           if (Store._profitMem[k] === undefined) Store._profitMem[k] = data[k];
         } else {
           // 本機有未同步變更 / 剛存過 → 不讓雲端快照覆蓋，保住使用者正在編輯的內容
@@ -147,23 +190,46 @@ try {
     //   mergeAndNotify 合併 archive 用的 Object.values(profitParts.archives)，順序等於哪個
     //   onSnapshot 先回來，是【非決定性】的。兩片若出現同名 key，誰蓋掉誰每次載入都可能不同，
     //   而且不會報錯、不會有任何徵兆。新增分片前先確認它的 key 前綴與既有各片都不重疊。
+    // ⚡ 進淨利表不再一次訂滿 13 collection（手機首批 ~10MB → renderer OOM 根因）→ 按平台分四組懶載。
+    //   各組首次呼叫才訂閱、__loadedSubGroups 記已訂、切回同平台不重訂；四組到齊才把相容旗標 __heavyProfitSubsLoaded 設 true。
+    window.__loadedSubGroups = window.__loadedSubGroups || new Set();
     window.__heavyProfitSubsLoaded = false;
-    window.__loadHeavyProfitSubs = () => {
-      if (window.__heavyProfitSubsLoaded) return;
-      window.__heavyProfitSubsLoaded = true;
-      console.log('[profit] 開始載入 archive doc + profits collection');
+    const __markSubsMaybeAllLoaded = () => { if (['shopee','archive','momo','coupang'].every(g => window.__loadedSubGroups.has(g))) window.__heavyProfitSubsLoaded = true; };
+    // ══ 蝦皮舊月組：archive docs（個別蝦皮賣場看舊月 + 工作日誌讀調整備註；獨立成組→工作日誌可只載這組、不拖 profits 4.4MB）══
+    window.__loadArchiveSubs = () => {
+      if (window.__loadedSubGroups.has('archive')) return;
+      window.__loadedSubGroups.add('archive');
+      console.log('[profit] 載入 archive 組（舊月份歷史 doc）');
       // archive docs (舊月份歷史資料)
       profitArchiveRefs.forEach((ref, idx) => {
         onSnapshot(ref, snap => {
+          // ⚠ 下一行對 exists()===false 仍寫入 {}：window.__profitArchivesReady 的「已到達」判準依賴這個行為（有 key＝到過）。改成 delete 會讓 ready 無聲退回 false。
           profitParts.archives[PROFIT_ARCHIVE_DOCS[idx]] = snap.exists() ? (snap.data() || {}) : {};
+          profitArchiveMeta[PROFIT_ARCHIVE_DOCS[idx]] = { at: Date.now(), exists: snap.exists(), fromCache: !!(snap.metadata && snap.metadata.fromCache) };   // 嚴格版 ready 用；不 includeMetadataChanges，只記每次資料快照附帶的 metadata
           mergeAndNotify();
-        }, err => { console.error('[profit archive subscribe 失敗]', PROFIT_ARCHIVE_DOCS[idx], err); });
+        }, err => {
+          profitArchiveErrors[PROFIT_ARCHIVE_DOCS[idx]] = { at: Date.now(), code: (err && err.code) || '', message: String((err && err.message) || err) };
+          console.error('[profit archive subscribe 失敗]', PROFIT_ARCHIVE_DOCS[idx], err);
+        });
       });
+      __markSubsMaybeAllLoaded();
+    };
+
+    // #315：profits collection 是否已從【伺服器】收到過快照（唯讀觀測點，給 js/profit.js 的 _progHeavyLoaded 判「載入中 / 尚無報表」）。
+    //   比照 __profitArchivesReady 只認 metadata.fromCache===false；空 collection 的伺服器快照也算（不能因為沒文件就永遠 false）。
+    //   錯誤 callback 不設 → 維持 false（＝載入中，保守）。一旦收到過就維持 true（黏住）：本訂閱沒開 includeMetadataChanges，
+    //   退回 false 之後「fromCache 轉回 false」這種純 metadata 變化不會再送快照，會卡在載入中直到下次資料變動。
+    //   ⚠ 刻意不以 __cloud 開頭（同 __profitArchivesReady）：純讀取，不被 __installReadonlyCloudGuard 包、不算進 TEST_NOWRITE 物件數。
+    let profitsCollectionServerSeen = false;
+    window.__profitsCollectionReady = () => profitsCollectionServerSeen;
+    // ══ 蝦皮組成員①：profits collection（每月每賣場獨立 doc）。與 aff_rpt 同屬蝦皮組，由 __loadShopeeSubs 一起呼叫。══
+    const __subProfits = () => {
       // profits collection (每月每賣場獨立 doc)
       try {
         const profitsColRef = collection(db, 'profits');
         const fromDocId = id => id.replace(/__/g, '/');
         onSnapshot(profitsColRef, snap => {
+          if (snap && snap.metadata && snap.metadata.fromCache === false) profitsCollectionServerSeen = true;   // #315 唯讀旗標，不影響下方任何邏輯
           Store._profitMem = Store._profitMem || {};
           const incoming = {};
           snap.forEach(d => { incoming[fromDocId(d.id)] = d.data(); });
@@ -195,7 +261,13 @@ try {
           }
         }, err => { console.error('[profits collection subscribe 失敗]', err); });
       } catch (e) { console.warn('profits collection subscribe failed', e); }
+    };
 
+    // ══ MOMO 組：products/origins/reconcile/s1103/stock/e001/cost（MOMO 任一分頁含總表都要全載→總表逐 SKU 加總才完整）══
+    window.__loadMomoSubs = () => {
+      if (window.__loadedSubGroups.has('momo')) return;
+      window.__loadedSubGroups.add('momo');
+      console.log('[profit] 載入 MOMO 組（products/origins/reconcile/s1103/stock/e001/cost）');
       // momo_products collection（每賣場一 doc）→ 併回 Store._profitMem['ec_momo_products|<shop>']（維持 momoLoadProducts 讀取順序）
       try {
         onSnapshot(momoProductsColRef, snap => {
@@ -336,7 +408,15 @@ try {
           if (changed.length) { console.log('[momo_e001] 收到更新：', changed); window.dispatchEvent(new CustomEvent('momoE001Ready', { detail: { changed } })); }
         }, err => { console.error('[momo_e001 subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_e001 subscribe failed', e); }
+      __subMomoCost();
+      __markSubsMaybeAllLoaded();
+    };
 
+    // ══ 酷澎組：coupang_reports/msf/note ══
+    window.__loadCoupangSubs = () => {
+      if (window.__loadedSubGroups.has('coupang')) return;
+      window.__loadedSubGroups.add('coupang');
+      console.log('[profit] 載入酷澎組（coupang_reports/msf/note）');
       // PR-4：coupang_reports collection（每賣場每月一 doc）→ Store._profitMem['ec_coupang|<shop>|<month>']（cupLoadReport 讀取順序一致）
       //   ⚠ setReport 存的 doc 沒有 shop 欄位（只有 {month,rows,ts,updatedAt}）→ 賣場靠 docId 前綴反查（比照 momo_reconcile 的 lastIndexOf('_') 切法；月份 'YYYY-MM' 不含 '_'）。
       try {
@@ -408,7 +488,11 @@ try {
           if (changed.length) { console.log('[coupang_note] 收到更新：', changed); window.dispatchEvent(new CustomEvent('coupangNoteReady', { detail: { changed } })); }
         }, err => { console.error('[coupang_note subscribe 失敗]', err); });
       } catch (e) { console.warn('coupang_note subscribe failed', e); }
+      __markSubsMaybeAllLoaded();
+    };
 
+    // ══ MOMO 組成員（成本）：momo_cost_by_origin。定義在酷澎組後、由 __loadMomoSubs 呼叫（原廠編號→成本，MO+ 毛利依賴）══
+    const __subMomoCost = () => {
       // momo_cost_by_origin（帳號級單一 doc）→ Store._profitMem['ec_momo_cost_by_origin'] + '..._meta'。原廠編號→成本，MO+ 毛利依賴、需跨人跨機。
       try {
         onSnapshot(costByOriginDocRef, snap => {
@@ -461,10 +545,13 @@ try {
           if (changed) { console.log('[momo_cost_by_origin] 收到更新'); window.dispatchEvent(new CustomEvent('momoCostByOriginReady')); }
         }, err => { console.error('[momo_cost_by_origin subscribe 失敗]', err); });
       } catch (e) { console.warn('momo_cost_by_origin subscribe failed', e); }
+    };
 
+    // ══ 蝦皮組成員②：aff_rpt（好麻吉聯盟行銷分頁）。由 __loadShopeeSubs 呼叫。══
+    const __subAff = () => {
       // aff_rpt collection（每通路一 doc）→ Store._profitMem['ec_aff_rpt|<shop>']。
-      //   為什麼掛在 __loadHeavyProfitSubs 裡而不是開站就訂：聯盟行銷分頁位在「淨利表 → 好麻吉賣場」內，
-      //   使用者一定要先進淨利表才看得到，180KB 的 doc 不該在開站瞬間跟首頁搶頻寬。
+      //   為什麼懶載而不是開站就訂：聯盟行銷分頁位在「淨利表 → 好麻吉賣場」內，使用者一定要先進淨利表才看得到，
+      //   180KB 的 doc 不該在開站瞬間跟首頁搶頻寬。
       //   ⚠ 下面讀的 window._affJustSaved 是由 js/profit.js 的 affRptLsSave 設定的（塊 2 才會加）。
       //     在塊 2 落地之前這個守衛恆為 falsy＝永遠不跳過，這是分塊施工的中間狀態，不是漏寫。
       AFF_SHOPS.forEach(shop => {
@@ -481,6 +568,19 @@ try {
         } catch (e) { console.warn('aff_rpt subscribe failed', shop, e); }
       });
     };
+
+    // ══ 蝦皮組：profits collection + aff_rpt（個別蝦皮賣場淨利表 / 聯盟行銷分頁；蝦皮總表只吃 boot 的 _summary_v1、不需這組）══
+    window.__loadShopeeSubs = () => {
+      if (window.__loadedSubGroups.has('shopee')) return;
+      window.__loadedSubGroups.add('shopee');
+      console.log('[profit] 載入蝦皮組（profits collection + aff_rpt）');
+      __subProfits();
+      __subAff();
+      __markSubsMaybeAllLoaded();
+    };
+
+    // 相容 shim：舊碼/除錯若呼叫 __loadHeavyProfitSubs → 一次載滿四組（＝還原成 ~10MB，正常流程不該再走這條；保留只為相容）。
+    window.__loadHeavyProfitSubs = () => { window.__loadShopeeSubs(); window.__loadArchiveSubs(); window.__loadMomoSubs(); window.__loadCoupangSubs(); };
   } catch (e) { console.warn('profit subscribe failed', e); }
 
   // setReport 立刻建好（寫入用），讀取（getDoc / onSnapshot）才延後
@@ -512,7 +612,7 @@ try {
   //   每賣場一 doc 各自 1MB 額度，也把「整包 last-write-wins」的覆蓋範圍縮小到單一賣場。
   // doc id 用 ASCII 代號（中文/+ 在 URL/REST/Console 難查）；doc 內存 { shop:'甲配', items:[...] }（保留原名、反查用）。
   // payload 包 {items}：Firestore 一份 doc 是 map、不能頂層存陣列（同 setReport 對陣列 reject 的原因）。
-  const MOMO_SHOP_DOCID = { '甲配':'jia', '乙配':'yi', 'MO+麻吉':'mo_maji', 'MO+森之旅':'mo_senzhilu' };
+  const MOMO_SHOP_DOCID = { '甲配':'jia', '乙配':'yi', 'MO+麻吉':'mo_maji', 'MO+森之旅':'mo_senzhilu', 'MO+玩樂':'mo_wanle' };
   const MOMO_DOCID_SHOP = Object.fromEntries(Object.entries(MOMO_SHOP_DOCID).map(([k,v]) => [v, k]));   // 反查 fallback
   const momoProductsColRef = collection(db, 'momo_products');
   window.__cloudMomo = {
@@ -691,6 +791,76 @@ try {
       if (!insightShopRefs[shop]) return () => {};
       return onSnapshot(insightShopRefs[shop], snap => cb(snap.exists() ? snap.data() : {}));
     },
+    // ── #269 第 2 塊：洞察表調整紀錄「逐商品交易寫入」（目前尚無呼叫端）──
+    // runTransaction 讀 app/insight_{shop} 的 [ec.insight_{shop}_notes][code] → applyFn(目前內容) 算出
+    //   { entry, missing, changed, already? } → 只寫回這一個商品（FieldPath 兩段：notesKey 含點，必須是單一段）。
+    //   applyFn 由呼叫端傳（第 3 塊傳 (e) => _insNoteApplyOp(e, op)），本檔不依賴 marketing.js。
+    // 回傳 { ok, missing, changed, already, entry, error, unknown }：
+    //   ok:true  = 雲端已是期望狀態（寫入成功 / 不需要改 / already 已寫過）
+    //   missing  = 要改或刪的那一筆找不到 → ok:false、不寫（可能是別人改過，也可能是自己上一輪 commit 已成功）
+    //   unknown  = 逾時或網路錯誤：寫入可能已經成功、也可能沒有 → 提示不可寫成「沒有儲存」
+    //   error    = 'bad-shop' | 'bad-code' | 'bad-applyFn' | 'doc-missing' | 'notes-not-map' | 'apply-error'
+    //              | 'apply-bad-result' | 'invalid-value' | 'timeout' | 'tx-error:{code}'
+    // ⚠ 被唯讀角色防護（app.js __installReadonlyCloudGuard）或本機測試防護擋下時會回 undefined，
+    //   呼叫端一律用 r && r.ok 判斷，不可寫 r.ok。
+    // ⚠ applyFn 在交易衝突時會被重跑（SDK 預設最多 5 輪），必須是純函式；結果一律取最後一輪。
+    // ⚠ 文件不存在就回 doc-missing、不自己建（四份 per-shop doc 都已存在；建文件走 setDoc 帶點 key 有雷，見 perShopSetField）。
+    updateNoteTx: async (shop, code, applyFn) => {
+      const result = (o) => Object.assign({ ok: false, missing: false, changed: false, already: false, entry: null, error: null, unknown: false }, o);
+      if (INSIGHT_SHOPS.indexOf(shop) < 0 || !insightShopRefs[shop]) return result({ error: 'bad-shop' });
+      if (typeof code !== 'string' || !code) return result({ error: 'bad-code' });
+      if (typeof applyFn !== 'function') return result({ error: 'bad-applyFn' });
+      const ref = insightShopRefs[shop];
+      const notesKey = 'ec.insight_' + shop + '_notes';
+      // Firestore 存不了 undefined / 函式（getFirestore 沒開 ignoreUndefinedProperties）→ 寫前先擋，回清楚的錯誤
+      const storable = (v) => {
+        if (v === undefined || typeof v === 'function' || typeof v === 'symbol') return false;
+        if (Array.isArray(v)) return v.every(storable);
+        if (v && typeof v === 'object') return Object.keys(v).every(k => storable(v[k]));
+        return true;
+      };
+      const TIMEOUT_MS = 15000;
+      const ABORT_MSG = 'updateNoteTx: 已逾時，不再重跑';
+      let aborted = false;
+      const work = runTransaction(db, async (tx) => {
+        // 逾時後的下一輪：丟非 FirebaseError → SDK 不重試（transaction_runner 的 isRetryableTransactionError）
+        if (aborted) throw new Error(ABORT_MSG);
+        const snap = await tx.get(ref);
+        if (!snap.exists()) return result({ error: 'doc-missing' });
+        const notes = snap.get(new FieldPath(notesKey));
+        if (notes !== undefined && (!notes || typeof notes !== 'object' || Array.isArray(notes))) {
+          return result({ error: 'notes-not-map' });
+        }
+        const cur = snap.get(new FieldPath(notesKey, code));
+        if (aborted) throw new Error(ABORT_MSG);
+        let r;
+        try { r = applyFn(cur); }
+        catch (e) { console.warn('[updateNoteTx] applyFn 丟錯', e); return result({ error: 'apply-error' }); }
+        if (!r || typeof r !== 'object') return result({ error: 'apply-bad-result' });
+        const out = {
+          missing: !!r.missing, changed: !!r.changed, already: !!r.already,
+          entry: r.entry === undefined ? null : r.entry,
+        };
+        if (out.missing) return result(out);
+        if (!out.changed) return result(Object.assign(out, { ok: true }));   // 沒改到 / already → 不寫
+        if (out.entry !== null && !storable(out.entry)) return result(Object.assign(out, { error: 'invalid-value' }));
+        tx.update(ref, new FieldPath(notesKey, code), out.entry === null ? deleteField() : out.entry);
+        return result(Object.assign(out, { ok: true }));
+      }).catch(e => {
+        if (e && e.message === ABORT_MSG) return result({ error: 'timeout', unknown: true });
+        console.warn('[updateNoteTx] 交易失敗', e);
+        // 網路類錯誤（SDK 視為非永久性）可能發生在 commit 已送出之後 → 標 unknown
+        const code2 = (e && e.code) || 'unknown';
+        const transient = ['unavailable', 'deadline-exceeded', 'unknown', 'cancelled', 'internal', 'resource-exhausted', 'unauthenticated'];
+        return result({ error: 'tx-error:' + code2, unknown: transient.indexOf(code2) >= 0 });
+      });
+      let timer = null;
+      const timeout = new Promise(res => {
+        timer = setTimeout(() => { aborted = true; res(result({ error: 'timeout', unknown: true })); }, TIMEOUT_MS);
+      });
+      try { return await Promise.race([work, timeout]); }
+      finally { clearTimeout(timer); }
+    },
   };
 
   // ============== 任務附圖獨立 collection task_images（避免 app/main 撞 1MB 上限） ==============
@@ -712,7 +882,7 @@ try {
   //     orderNos 存本月全部訂單編號（Option A：退貨 MSF.訂單編號→下單月 讀取端解析用；跟報表同生共死、不留孤兒索引；~15KB/月/賣場、A1 每月一 doc 有界）。
   //   msf doc id = shopDocId + '_' + msfSrc；doc 內 { shop, src, byOrder:{oid:{returnAmt,confirmDate,hasDeliveryFee}}, returnTotal }。
   //   getDoc/subscribe 命名【必須】保留（落本機防護讀取白名單、自動放行）；setReport/setSrc 唯一寫入。report 帶 updatedAt serverTimestamp 供推送前版本比對（比照 momo_products/origins）；msf 整包取代冪等（重傳同檔覆蓋、不累加，比照 s1103）。
-  //   ⚠ 各同步枚舉點要處理【三個】key 前綴：ec_coupang|（報表）＋ ec_coupang_msf|（退貨）＋ ec_coupang_note|（備註，PR-4b 從報表拆出）。本機測試防護掃到的雲端物件數為 17。
+  //   ⚠ 各同步枚舉點要處理【三個】key 前綴：ec_coupang|（報表）＋ ec_coupang_msf|（退貨）＋ ec_coupang_note|（備註，PR-4b 從報表拆出）。本機測試防護掃到的雲端物件數為 17（其後加 __cloudKpi 變 18，見下方 app/kpi 段）。
   const COUPANG_SHOP_DOCID = { '麻吉':'maji', '露營館':'luying' };
   const COUPANG_DOCID_SHOP = Object.fromEntries(Object.entries(COUPANG_SHOP_DOCID).map(([k,v]) => [v, k]));   // 反查 docId 前綴→賣場（setReport/setSrc 存的 doc 沒有 shop 欄，onSnapshot 靠這個還原 key）
   const coupangReportsColRef = collection(db, 'coupang_reports');
@@ -740,13 +910,140 @@ try {
     subscribe: (cb) => onSnapshot(coupangNoteColRef, cb),
   };
 
+  // ============== KPI 月結表獨立文件 app/kpi（每格一條 FieldPath 寫入，多人同時填不互蓋） ==============
+  //   舊版把整個 _kpi_v1 陣列（所有月份）整包 setField 進 app/profit → 最後存的人蓋掉所有人。
+  //   結構：months.{YYYY-MM}.{與舊 _kpi_v1 row 相同的巢狀路徑}（{group}.{shop}.{field}、*Formula、
+  //         kpiFieldNotes.{key}、kpiFieldMerges.{key}、{group}Common）
+  //         meta.{YYYY-MM}.{同一條路徑} = { by, at }；搬移完成後頂層有 migratedAt。
+  //   writePaths(pairs)：pairs = [[segments[], value], …]，一次 updateDoc 原子寫入多格。
+  //     每條路徑都是 new FieldPath(...segments)：店名含 + ( ) 中文、備註 key 含 : 都不必跳脫。
+  //     value === DELETE → deleteField()；物件值裡（任意層）=== TS → serverTimestamp()。
+  //   ⚠ getDoc/subscribe 命名【必須】保留：本機防護碼與唯讀角色的讀取白名單是字串比對。writePaths 是唯一寫入。
+  //   ⚠ 新增這顆後本機防護掃到的雲端物件數為 18、寫入方法 27（writePaths + smokeWritePaths；見 CLAUDE.md TEST_NOWRITE 段）。
+  //   回滾：profit.js 的讀寫改回 _kpi_v1 即可，app/profit._kpi_v1 搬移時保留不刪。
+  const kpiDocRef = doc(db, 'app', 'kpi');
+  const KPI_DELETE = Symbol('kpiDelete');
+  const KPI_TS = Symbol('kpiServerTimestamp');
+  const kpiVal = (v) => {
+    if (v === KPI_DELETE) return deleteField();
+    if (v === KPI_TS) return serverTimestamp();
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const o = {};
+      Object.keys(v).forEach(k => { o[k] = kpiVal(v[k]); });
+      return o;
+    }
+    return v;
+  };
+  const kpiUpdate = (ref, pairs) => {
+    const args = [];
+    pairs.forEach(([segs, v]) => { args.push(new FieldPath(...segs), kpiVal(v)); });
+    return updateDoc(ref, ...args);
+  };
+  // 文件不存在的處理比照 safeSetField，但建空文件用 merge:true —— 兩個人同時第一次寫入時，
+  //   後建的那個 setDoc({}) 不帶 merge 會把先寫進去的格子整份清掉。
+  const kpiWriteTo = async (ref, pairs) => {
+    if (!Array.isArray(pairs) || !pairs.length) return;
+    try {
+      await kpiUpdate(ref, pairs);
+    } catch (e) {
+      if (e && (e.code === 'not-found' || String(e).includes('No document to update'))) {
+        await setDoc(ref, {}, { merge: true });
+        await kpiUpdate(ref, pairs);
+      } else {
+        throw e;
+      }
+    }
+  };
+  // app/kpi_smoke：只給 __kpiSmokeTest（js/profit.js）驗「真的寫進 Firestore」那一段用，跟 app/kpi 同一支 kpiWriteTo。
+  //   ⚠ smokeWritePaths【寫死】這份文件、不收文件參數 ⇒ 它不可能寫到 app/kpi 或任何正式資料。
+  //   ⚠ 本機 TEST_NOWRITE 會照樣把它 no-op（它不在讀取白名單）；要真跑 smoke test，本機另貼「只放行這一支」的放行碼，
+  //     放行碼【不進 repo】。getDoc('smoke') 讀這份文件（getDoc 在讀取白名單內，防護碼開著也讀得到）。
+  const kpiSmokeRef = doc(db, 'app', 'kpi_smoke');
+  window.__cloudKpi = {
+    DELETE: KPI_DELETE,
+    TS: KPI_TS,
+    getDoc: (which) => getDoc(which === 'smoke' ? kpiSmokeRef : kpiDocRef),
+    subscribe: (cb, onErr) => onSnapshot(kpiDocRef, snap => cb(snap.exists() ? (snap.data() || {}) : null), onErr),
+    writePaths: (pairs) => kpiWriteTo(kpiDocRef, pairs),
+    smokeWritePaths: (pairs) => kpiWriteTo(kpiSmokeRef, pairs),
+  };
+
+  // ══════════ PChome 獨立雲端 doc（三份，成長速率不同→各自一 doc，不擠 app/profit 的 1MB）══════════
+  //   照 __cloudProfit 慣例：單 doc + getDoc/setField/removeFields/subscribe，per-field 寫入
+  //   （setField 走 safeSetField＝updateDoc+FieldPath，逐格寫、不整包覆蓋、多人各改各欄不互蓋）。
+  //   訂閱層把雲端資料交給 js/profit.js 的 __pchomeApplyCloud*（那裡才讀得到 pchomeLoadOrders/pchomeDirtyGet
+  //   ＝bounce-back 守衛的依據）；沒定義就 no-op ＝ 該功能（optlog/history 表單）未上線時 infra 先就位。
+  //   🔴 寫入端一律走既有 syncToCloud task 迴圈（不另開寫入路徑）；本層只提供雲端存取物件與訂閱。
+  const pchomeOrdersRef  = doc(db, 'app', 'pchome_orders');
+  const pchomeOptlogRef  = doc(db, 'app', 'pchome_optlog');
+  const pchomeHistoryRef = doc(db, 'app', 'pchome_history');
+  const pchomeProductsRef= doc(db, 'app', 'pchome_products');   // 商品主檔（整包 list 一欄）：從 app/profit 搬出、避開 1MB
+  const pchomeReconRef   = doc(db, 'app', 'pchome_recon');      // 對帳資料（整包 data 一欄＝帳務月 map）：同上
+  const pchomeRestDelete = (docPath) => async (keys) => {
+    const params = keys.map(k => 'updateMask.fieldPaths=' + encodeURIComponent('`' + k + '`')).join('&');
+    const url = 'https://firestore.googleapis.com/v1/projects/' + firebaseConfig.projectId + '/databases/(default)/documents/' + docPath + '?' + params;
+    const resp = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{"fields":{}}' });
+    if (!resp.ok) throw new Error('REST delete failed: ' + resp.status);
+    return resp.json();
+  };
+  window.__cloudPchomeOrders = {
+    getDoc:      () => getDoc(pchomeOrdersRef),
+    setField:    (key, value) => safeSetField(pchomeOrdersRef, key, value),
+    removeFields:(keys) => pchomeRestDelete('app/pchome_orders')(keys),
+    subscribe:   (cb) => onSnapshot(pchomeOrdersRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
+  };
+  window.__cloudPchomeOptlog = {
+    getDoc:      () => getDoc(pchomeOptlogRef),
+    setField:    (key, value) => safeSetField(pchomeOptlogRef, key, value),
+    removeFields:(keys) => pchomeRestDelete('app/pchome_optlog')(keys),
+    subscribe:   (cb) => onSnapshot(pchomeOptlogRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
+  };
+  window.__cloudPchomeHistory = {
+    getDoc:      () => getDoc(pchomeHistoryRef),
+    setField:    (key, value) => safeSetField(pchomeHistoryRef, key, value),
+    removeFields:(keys) => pchomeRestDelete('app/pchome_history')(keys),
+    subscribe:   (cb) => onSnapshot(pchomeHistoryRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
+  };
+  // 商品主檔 / 對帳資料：各一份獨立 doc、整包寫一個欄位（products→`list` 陣列、recon→`data` 帳務月 map）。
+  //   語意與搬出前的 app/profit 泛用欄位一致（整份覆蓋）；只是改放獨立 doc、各自吃自己的 1MB。
+  window.__cloudPchomeProducts = {
+    getDoc:      () => getDoc(pchomeProductsRef),
+    setField:    (key, value) => safeSetField(pchomeProductsRef, key, value),
+    removeFields:(keys) => pchomeRestDelete('app/pchome_products')(keys),
+    subscribe:   (cb) => onSnapshot(pchomeProductsRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
+  };
+  window.__cloudPchomeRecon = {
+    getDoc:      () => getDoc(pchomeReconRef),
+    setField:    (key, value) => safeSetField(pchomeReconRef, key, value),
+    removeFields:(keys) => pchomeRestDelete('app/pchome_recon')(keys),
+    subscribe:   (cb) => onSnapshot(pchomeReconRef, snap => cb(snap.exists() ? (snap.data() || {}) : {})),
+  };
+  // 訂閱：把雲端資料交給 profit.js 的套用函式（bounce-back 守衛在那裡）。
+  //   🔴 profit.js 是【動態載入】（進淨利表才 import，見 main.js）→ boot 時本訂閱先於 profit.js 就緒，
+  //   首個快照觸發時 __pchomeApplyCloud* 還不存在（會漏掉初次 hydrate）。所以【一律先把最新快照緩存到 window】，
+  //   profit.js 載入時從緩存 drain（見 profit.js `__pchomeOrdersCloudLatest`），保證換機/清快取後初次讀回不漏。
+  //   沒定義套用函式（optlog/history 表單未上線）＝只緩存、不套用，infra 先就位。
+  try {
+    window.__cloudPchomeOrders.subscribe(data => { window.__pchomeOrdersCloudLatest = data; if (typeof window.__pchomeApplyCloudOrders === 'function') window.__pchomeApplyCloudOrders(data); });
+    window.__cloudPchomeOptlog.subscribe(data => { window.__pchomeOptlogCloudLatest = data; if (typeof window.__pchomeApplyCloudOptlog === 'function') window.__pchomeApplyCloudOptlog(data); });
+    window.__cloudPchomeHistory.subscribe(data => { window.__pchomeHistoryCloudLatest = data; if (typeof window.__pchomeApplyCloudHistory === 'function') window.__pchomeApplyCloudHistory(data); });
+    window.__cloudPchomeProducts.subscribe(data => { window.__pchomeProductsCloudLatest = data; if (typeof window.__pchomeApplyCloudProducts === 'function') window.__pchomeApplyCloudProducts(data); });
+    window.__cloudPchomeRecon.subscribe(data => { window.__pchomeReconCloudLatest = data; if (typeof window.__pchomeApplyCloudRecon === 'function') window.__pchomeApplyCloudRecon(data); });
+  } catch (e) { console.error('[pchome cloud] 訂閱失敗：', e); }
+
   window.dispatchEvent(new Event('cloudStoreReady'));
 
-  // 首頁渲染完後 1.5 秒（給 dashboard / 圖表時間），背景把重量級訂閱接上
-  // 進淨利表如果還沒接上，會主動觸發
-  setTimeout(() => {
-    if (typeof window.__loadHeavyProfitSubs === 'function') window.__loadHeavyProfitSubs();
-  }, 1500);
+  // ⚡ 重量級訂閱（profits + momo_products/origins/… 全部訂完初次快照約 10MB）：
+  //   【不再】開站後無條件預抓（那會讓每個人 boot 就拉 10MB → 桌機 channel congest 卡 boot timeout、手機分頁記憶體爆），
+  //   而且【不再一次訂滿 13 個】（那是手機進淨利表 renderer OOM 的根因）。改成【按平台分四組懶載】，各組的 loader 在本檔上方定義：
+  //     __loadShopeeSubs  ── profits collection + aff_rpt。觸發：setShop 到個別蝦皮賣場、工作日誌。
+  //     __loadArchiveSubs ── profits archive docs（舊月）。觸發：setShop 到蝦皮賣場（看舊月）、工作日誌。
+  //     __loadMomoSubs    ── momo_products/origins/reconcile/s1103/stock/e001/cost。觸發：setMomoShop（含總表→逐 SKU 加總全賣場）、工作日誌點 MOMO chip 明細。
+  //     __loadCoupangSubs ── coupang_reports/msf/note。觸發：setCoupangShop。
+  //   各組 __loadedSubGroups(Set) 守衛：只訂一次、切頁/切回不重訂；四組到齊才把相容旗標 __heavyProfitSubsLoaded 設 true。
+  //   保留 __loadHeavyProfitSubs shim（一次載滿四組）僅為相容/除錯，正常流程不再呼叫。
+  //   ⚠ 洞察/首頁/蝦皮總表/KPI月結不需任何重量級組：洞察讀 app/profit（本檔 boot 立即訂的當月 doc）ec_notes、
+  //     首頁 dashboard 讀 app/main platforms、蝦皮總表讀 boot 的 _summary_v1、KPI月結讀 getKpiRows——皆 boot 已載。
 } catch (e) {
   console.error('Firebase init failed:', e);
 }

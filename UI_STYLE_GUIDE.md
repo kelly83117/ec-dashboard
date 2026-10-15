@@ -49,7 +49,11 @@
 
 - **側欄 (`.sidebar`)**：深色 (`--sidebar`)，含品牌 logo、分組導覽
   （`.sidebar-group` 標題 + `.nav-item`，可收合的 `.nav-parent` / `.nav-sub`）、
-  底部使用者資訊與登出鈕。可用 `#sidebar-toggle-btn` 收合。
+  底部使用者資訊與登出鈕。可用 `#sidebar-toggle-btn` **收合**（`body.sidebar-collapsed`、存 `localStorage['ec.sidebarCollapsed']`）。
+  - **寬度可拖曳調整**（`#sidebar-resizer` 右緣把手 → `app.js` 的 `bindSidebarResize`）：寬度存 **CSS 變數 `--sidebar-w`**（`.sidebar{width:var(--sidebar-w,240px)}`、`.sidebar-toggle{left:calc(var(--sidebar-w,240px)-14px)}`），範圍 **min 200 / max 360**，持久化 `localStorage['ec.sidebarWidth']`（per-browser、**不上雲**、與收合同慣例）。
+  - 🔴 **拖曳只更新 `--sidebar-w`，絕不寫 `.sidebar` 的 inline width**——inline 會贏過 `body.sidebar-collapsed .sidebar{width:0}` 導致**收合失效**（最易踩的地雷；改動側欄寬邏輯必測「拉寬→收合→展開」序列）。收合態/手機抽屜（≤768）把手隱藏、不可拖。
+  - ⚠ **與既有 RWD 的互動**：`@media(max-width:900px) .sidebar{width:200px}` 仍在 → 拖曳寬只在**視窗 >900px** 生效，≤900 側欄固定 200（var 保留、回到 >900 還原）。
+  - ⚠ **平台分頁列（淨利表）風險採 (c) cap max 處理**：側欄變寬→`.main`（flex 自動 reflow）變窄→平台列 `.pf-tabrow`（已 `nowrap`+`overflow-x:auto`）**只會提早橫向捲動、不會換行破版**（實測 1440/1280＋側欄 360 皆單排橫捲）。故 **cap max=360** 讓最壞情況 `.main` 只少 120px、既有 overflow-x 吞得掉，**不動已硬化的平台列 @media**。**升級路徑**（若日後嫌 360 太窄）：走 **(b) ResizeObserver 依 `.main` 實際寬降級平台列**，**不要**改回 (a) container query（為邊際效益改寫已驗收 CSS＋賭瀏覽器支援，投報不對等）。
 - **主內容 (`.main` / `#main-content`)**：白底卡片式內容，由路由動態 render。
 - **卡片**：白底 (`--surface`) + `--border` 細框 + `--radius` 圓角 +
   `--shadow`；內距常用 16–24px。
@@ -89,3 +93,20 @@
 3. **數字對齊**：所有金額 / KPI / 表格數字用 monospace + `tabular-nums`。
 4. **克制特效**：維持淺色、輕陰影、細圓角的 SaaS 質感；避免霓虹光暈、
    濃重漸層與過度動畫。
+
+---
+
+## 5. 技術債清單 (Known Tech Debt)
+
+改到相關區塊時順手還債；還不了也要知道它為什麼在那。
+
+- **平台分頁列字級用 `!important`（`css/profit.css` 的 `.pf-tabrow` 降級 @media）**
+  平台列（蝦皮 / MOMO / 酷澎 / PChome…）每顆按鈕的字級是 **inline 寫死**在
+  `js/profit.js` 的 `__profitTabHtml` 模板字串裡（18 顆 `.stab`，`style="font-size:15px"`）。
+  RWD 降級要在窄螢幕縮字級，@media 規則得蓋過 inline，只能用 `!important`
+  （author `!important` > inline normal）。
+  - **為什麼沒直接還**：`__profitTabHtml` 是一大段模板字串，為了搬 18 處 inline 去動它，
+    風險與收益不對等（易誤傷平台按鈕、且會跟其他人的平台程式碼混在一起）。
+  - **要還的話**：先把那 18 顆按鈕的 inline `font-size` 移進 `.stab`（CSS base），
+    再把 @media 裡的 `!important` 拿掉即可。**在還清之前，改平台列字級一律改
+    @media 的 `!important` 值，不要去動 js 的 inline**（兩邊不同步只會更難查）。

@@ -1,13 +1,13 @@
 /* js/pages/employees.js -- methods extracted from original App, merged back via Object.assign(App, ...) */
 const App = window.App;
-const { Store, escapeHtml, computeScore, getQuarterScore, getUserDeptLabel, trendFromQuarters, DEPT_COLORS } = window;
+const { Store, escapeHtml, computeScore, getQuarterScore, getUserDeptLabel, trendFromQuarters, DEPT_COLORS, isUserActive } = window;
 
 Object.assign(App, {
   viewEmployees() {
     const departments = Store.get(Store.KEYS.departments, []);
     const allUsers = Store.get(Store.KEYS.users, []);
-    // 員工績效明細：排除管理員、以及未指派辦公室（全公司）的帳號
-    const users = allUsers.filter(u => u.role !== 'admin' && getUserDepts(u).length > 0);
+    // 員工績效明細：排除管理員、以及未指派辦公室（全公司）的帳號；停用／刪除的帳號（#252）也不列入
+    const users = allUsers.filter(u => isUserActive(u) && u.role !== 'admin' && getUserDepts(u).length > 0);
     const deptById = Object.fromEntries(departments.map(d => [d.id, d]));
     const filterDept = this.filter.dept === 'all' ? null : deptById[this.filter.dept];
     const filtered = !filterDept

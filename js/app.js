@@ -14,6 +14,23 @@ window.addEventListener('error', function(e) {
   else console.error('JS error before DOM ready:', e);
 });
 
+// ⚡ profit.js（~1.9MB）動態載入器：main.js 已拿掉靜態 import（登入不再等 1.9MB，手機到得了登入畫面）。
+//   在「進淨利表 / 工作日誌」時 await window.__ensureProfit() → 載完才 render／才用 profit.js 的 window 匯出。
+//   · 只載一次：promise 快取（__profitLoaded），切頁進出不重載；失敗會清掉、可重試。
+//   · ?v= 讀 <meta app-version>（單一版號源、跟部署版號一致、不會漂；同 offices.js fetch pricing.json 的招式）。
+//   · import('./profit.js') 在本模組（js/app.js）解析 → js/profit.js（相對路徑正確）。
+window.__profitLoaded = null;    // 載入 promise（第一次 __ensureProfit 呼叫時建立；≠已載完）
+window.__profitReady = false;    // 🔴 true = profit.js 模組【已執行完、window 匯出/__profitTabHtml 都掛好】。判「已載」一律看這個，不要看 __profitLoaded（那只代表 promise 已建、可能還沒 resolve）
+window.__ensureProfit = function () {
+  if (window.__profitLoaded) return window.__profitLoaded;
+  var ver = '';
+  try { ver = (document.querySelector('meta[name="app-version"]') || {}).content || ''; } catch (e) {}
+  window.__profitLoaded = import('./profit.js?v=' + ver)
+    .then(function (m) { window.__profitReady = true; return m; })   // resolve 後才算 ready
+    .catch(function (e) { window.__profitLoaded = null; console.error('[profit] 動態載入失敗（可重試）', e); throw e; });
+  return window.__profitLoaded;
+};
+
 const Store = {
   KEYS: {
     users: 'ec.users',
@@ -73,6 +90,186 @@ function hashPassword(pw) {
   }
   return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
 }
+
+/* ------------- 帳號狀態（#252）-------------
+ * 停用（disabled）與刪除（deleted）都留在 ec.users 裡（username 與姓名永久佔用、舊紀錄仍查得到姓名），
+ * 只是不能登入、不列入人員清單。舊資料沒有這兩個欄位 → 視為使用中。 */
+function isUserActive(u) {
+  return !!u && !u.disabled && !u.deleted;
+}
+
+/* ------------- 身分轉換（需求 3）-------------
+ * 「誰做的」可能寫帳號（inna）也可能寫姓名（洪嘉蓮）→ 轉成同一個人。
+ * 比對順序：帳號 → 姓名 → opts.aliases；trim（含全形空白）＋不分大小寫，與 users.js normId 一致。
+ * users 必須傳完整 ec.users（不可先過濾停用／刪除，舊紀錄仍要對得到人；status 會標出來）。
+ * 永遠回傳凍結物件。對不到 → ok:false、display 為原字（10/06 決定：sheet-import、陳大明不做對照，
+ * 由呼叫端標「未對到帳號」）。同名不猜 → ok:false、reason 'ambiguous'＋candidates。 */
+const _idNorm = s => String(s).trim().toLowerCase();
+function makeUserIdentityResolver(users, opts) {
+  const aliases = (opts && opts.aliases) || {};
+  const byU = new Map(), byN = new Map();
+  const add = (m, k, u) => { if (!k) return; const a = m.get(k) || []; if (!a.includes(u)) a.push(u); m.set(k, a); };
+  (Array.isArray(users) ? users : []).forEach(u => {
+    if (!u || typeof u.username !== 'string' || !u.username.trim()) return;
+    add(byU, _idNorm(u.username), u);
+    if (typeof u.name === 'string') add(byN, _idNorm(u.name), u);
+  });
+  const statusOf = u => u.deleted ? 'deleted' : (u.disabled ? 'disabled' : 'active');
+  const hit = (input, u, matchedBy, n) => {
+    const others = [...(byU.get(n) || []), ...(byN.get(n) || [])].filter(x => x !== u);
+    const name = typeof u.name === 'string' ? u.name.trim() : '';
+    return Object.freeze({
+      ok: true, input, username: u.username, name, role: u.role || null, status: statusOf(u),
+      matchedBy, reason: null, display: name || u.username,
+      conflict: others.length > 0, candidates: Object.freeze(others.map(x => x.username)),
+    });
+  };
+  const miss = (input, reason, display, cands) => Object.freeze({
+    ok: false, input, username: null, name: null, role: null, status: null,
+    matchedBy: null, reason, display, conflict: false, candidates: Object.freeze(cands || []),
+  });
+  const resolve = (raw, depth) => {
+    if (raw == null) return miss(raw, 'empty', '');
+    if (typeof raw !== 'string') return miss(raw, 'not-string', '');
+    const n = _idNorm(raw);
+    if (!n) return miss(raw, 'empty', '');
+    const us = byU.get(n) || [];
+    if (us.length === 1) return hit(raw, us[0], 'username', n);
+    if (us.length > 1) {
+      const exact = us.filter(u => u.username === raw.trim());
+      if (exact.length === 1) return hit(raw, exact[0], 'username', n);
+      return miss(raw, 'ambiguous', raw.trim(), us.map(u => u.username));
+    }
+    const ns = byN.get(n) || [];
+    if (ns.length === 1) return hit(raw, ns[0], 'name', n);
+    if (ns.length > 1) return miss(raw, 'ambiguous', raw.trim(), ns.map(u => u.username));
+    if (!depth) {
+      const ak = Object.keys(aliases).find(k => _idNorm(k) === n);
+      if (ak) {
+        const r = resolve(String(aliases[ak]), 1);
+        if (r.ok) return Object.freeze({ ...r, input: raw, matchedBy: 'alias' });
+      }
+    }
+    return miss(raw, 'unmatched', raw.trim());
+  };
+  return raw => resolve(raw, 0);
+}
+function resolveUserIdentity(raw, users, opts) {
+  const list = users || ((typeof window !== 'undefined' && window.Store && window.Store.get) ? (window.Store.get(window.Store.KEYS.users, []) || []) : []);
+  return makeUserIdentityResolver(list, opts)(raw);
+}
+
+/* ------------- 歷年營收比較（首頁，塊 1：資料＋純函式，尚未接畫面）-------------
+ * 來源：≤2025 讀 data/revenue-history.json 的 years；≥2026 用 ec.platforms 各通路 p.daily 按月加總（同首頁 +v || 0）。
+ * 同一年只用一個來源：history 有的年份完全不看 daily。MO+ 一律併入 MOMO。不改傳入的 platforms / daily。
+ * cutoff（'YYYY-MM-DD'，畫面會傳 _dataCutoff）：daily 只算到 cutoff 當天（含），之後的日期與月份一律不算／null，
+ *   與首頁「資料截止日」口徑一致（避免同一個月各通路填到不同天）。
+ * @rev-hist-begin（node 測試靠這兩個標記切出本段，勿刪） */
+const _RH_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const _RH_ORDER = Object.freeze(['生活好麻吉', '玩樂盒子', '森之旅', '維克生活', 'MOMO', '酷澎', 'PChome', '博客來', 'Friday']);
+const _rhName = n => (n === 'MO+' ? 'MOMO' : n);
+// 每通路只掃一次 daily → { byYear: { 'YYYY': { 通路: [12] } }, names: 通路出現順序（已併 MO+） }
+//   該月沒有任何日期 key → null；有 key 但值是空字串 / 非數字 → 算 0。until（選填）之後的日期略過。
+function _rhScan(platforms, until, onlyYear) {
+  const byYear = {}, names = [];
+  (Array.isArray(platforms) ? platforms : []).forEach(p => {
+    if (!p || typeof p.name !== 'string' || !p.name) return;
+    const name = _rhName(p.name);
+    if (!names.includes(name)) names.push(name);
+    const daily = (p.daily && typeof p.daily === 'object') ? p.daily : {};
+    Object.keys(daily).forEach(d => {
+      if (!_RH_DATE.test(d) || (until && d > until)) return;
+      const y = d.slice(0, 4);
+      if (onlyYear != null && y !== onlyYear) return;
+      const m = +d.slice(5, 7) - 1;
+      if (!(m >= 0 && m < 12)) return;
+      const yo = byYear[y] || (byYear[y] = {});
+      const arr = yo[name] || (yo[name] = new Array(12).fill(null));
+      arr[m] = (arr[m] || 0) + (+daily[d] || 0);
+    });
+  });
+  return { byYear, names };
+}
+// { 通路: [12 個月] }；until 選填（'YYYY-MM-DD'，晚於它的日期不算）
+function revHistMonthlyByChannel(platforms, year, until) {
+  const y = String(year);
+  const { byYear, names } = _rhScan(platforms, until, y);
+  const yo = byYear[y] || {}, out = {};
+  names.forEach(n => { out[n] = yo[n] || new Array(12).fill(null); });
+  return out;
+}
+// → { years: 新到舊, channels, data: { 年: { 通路: [12] } }（整年全 null 的通路省略）, partial: { 年: 月索引 | null } }
+function revHistBuild(history, platforms, cutoff) {
+  const hy = (history && history.years && typeof history.years === 'object') ? history.years : {};
+  const cut = (typeof cutoff === 'string' && _RH_DATE.test(cutoff)) ? cutoff : null;
+  const cutY = cut ? +cut.slice(0, 4) : null, cutM = cut ? +cut.slice(5, 7) - 1 : null;
+  const { byYear, names } = _rhScan(platforms, cut);
+  const histYears = Object.keys(hy).filter(k => /^\d{4}$/.test(k));
+  const years = [...new Set([...histYears, ...Object.keys(byYear)])].map(Number)
+    .filter(y => cutY == null || y <= cutY).sort((a, b) => b - a);
+  const data = {}, partial = {}, seen = [];
+  years.forEach(y => {
+    const fromHist = histYears.includes(String(y));
+    const src = (fromHist ? hy[String(y)] : byYear[String(y)]) || {};
+    const row = {};
+    Object.keys(src).forEach(ch => {
+      const raw = Array.isArray(src[ch]) ? src[ch] : [];
+      const name = _rhName(ch);
+      const arr = row[name] || (row[name] = new Array(12).fill(null));
+      for (let m = 0; m < 12; m++) {
+        const v = raw[m];
+        if (v == null || v === '') continue;
+        arr[m] = (arr[m] || 0) + (+v || 0);
+      }
+    });
+    let pIdx = null;
+    if (y === cutY) {
+      const lastDay = new Date(cutY, cutM + 1, 0).getDate();
+      if (+cut.slice(8, 10) < lastDay) pIdx = cutM;
+      Object.values(row).forEach(arr => { for (let m = cutM + 1; m < 12; m++) arr[m] = null; });
+    }
+    Object.keys(row).forEach(n => {
+      if (row[n].every(v => v == null)) delete row[n];
+      else if (!seen.includes(n)) seen.push(n);
+    });
+    data[y] = row;
+    partial[y] = pIdx;
+  });
+  const channels = [
+    ..._RH_ORDER.filter(n => seen.includes(n)),
+    ...names.filter(n => !_RH_ORDER.includes(n) && seen.includes(n)),
+    ...seen.filter(n => !_RH_ORDER.includes(n) && !names.includes(n)),
+  ];
+  return { years, channels, data, partial };
+}
+// 讀 data/revenue-history.json（?v=版號，同 offices.js 讀 pricing.json）。成功快取、失敗 console.warn 回 null（不快取，下次重試）。
+let _rhLoading = null;
+function revHistLoad() {
+  if (_rhLoading) return _rhLoading;
+  const p = (async () => {
+    try {
+      const ver = document.querySelector('meta[name="app-version"]')?.content || '';
+      const res = await fetch(`data/revenue-history.json?v=${ver}`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      if (!json || typeof json.years !== 'object' || !json.years) throw new Error('格式不符（缺 years）');
+      return json;
+    } catch (e) {
+      console.warn('revenue-history.json 載入失敗：', e);
+      return null;
+    }
+  })();
+  _rhLoading = p;
+  p.then(r => { if (!r && _rhLoading === p) _rhLoading = null; });
+  return p;
+}
+const RevHist = Object.freeze({
+  CHANNEL_ORDER: _RH_ORDER,
+  monthlyByChannel: revHistMonthlyByChannel,
+  build: revHistBuild,
+  load: revHistLoad,
+});
+/* @rev-hist-end */
 
 /* ------------- 種子資料（冪等，只補缺漏，不覆蓋使用者輸入） -------------
  * 每次載入都會跑，但只在某個鍵不存在時才寫入預設值；
@@ -190,24 +387,49 @@ const PLATFORMS = [
   { name: 'MOMO',       icon: '🛒', color: '#ec4899', today: 612800, yesterday: 517131, week: 4050000, month: 15240000 },
   { name: 'MO+',        icon: '💎', color: '#db2777', today: 245400, yesterday: 230856, week: 1620000, month: 6120000 },
   { name: '酷澎',       icon: '🚀', color: '#3b82f6', today: 421900, yesterday: 367829, week: 2810000, month: 10580000 },
+  // 2026-09 新增三通路：只有營收、沒有廣告費 / ROAS（不進 PLATFORMS_WITH_AD_SPEND）。
+  //   ⚠ 這裡只是雲端 ec.platforms 為 null 時的種子；正式環境要另外把三筆物件 append 進 Firestore 才會出現。
+  { name: 'PChome',     icon: '🅿️', color: '#dc2626' },
+  { name: '博客來',     icon: '📚', color: '#0891b2' },
+  { name: 'Friday',     icon: '🛍️', color: '#8b5cf6' },
 ];
 const fmtNTD = n => 'NT$ ' + Math.round(n).toLocaleString();
 
 // 有廣告費的平台（其他平台不填、不顯示廣告費欄位）
 const PLATFORMS_WITH_AD_SPEND = new Set(['生活好麻吉', '玩樂盒子', '森之旅', '維克生活']);
 
+// 不參與「資料截止日」判斷的平台：小量通路常整天 0 營收，不能讓它們把全站預設檢視日往回拖
+//   （dashboard.js 的 activePlatforms 會先剔除這些）。與 PLATFORMS_WITH_AD_SPEND 同款白名單寫法。
+const PLATFORMS_EXCLUDED_FROM_CUTOFF = new Set(['PChome', '博客來', 'Friday']);
+
 // 平台所屬通路（卡片上的色標用）
 const PLATFORM_MARKETPLACE = {
   '生活好麻吉': 'shopee', '玩樂盒子': 'shopee', '森之旅': 'shopee', '維克生活': 'shopee',
   'MOMO': 'momo', 'MO+': 'momo',
   '酷澎': 'coupang',
+  'PChome': 'pchome', '博客來': 'books', 'Friday': 'friday',
 };
-// 通路 logo 圖檔（檔案放在 logos/ 資料夾）
+// 通路 logo 圖檔（檔案放在 logos/ 資料夾；檔名大小寫要與 assets/ 一致，GitHub Pages 區分大小寫）
 const MARKETPLACE_BADGE = {
   shopee:  { src: 'assets/logos/shopee.png',  name: '蝦皮' },
   momo:    { src: 'assets/logos/momo.png',    name: 'MOMO' },
   coupang: { src: 'assets/logos/coupang.png', name: '酷澎' },
+  pchome:  { src: 'assets/logos/PChome.png',  name: 'PChome' },
+  books:   { src: 'assets/logos/books.png',   name: '博客來' },
+  friday:  { src: 'assets/logos/friday.png',  name: 'Friday' },
 };
+// 每日營收填寫表格 / 本月明細的分群「區段」：一個區段可含多個 marketplace（其他通路 = 3 個）。
+//   區段沒有任何平台在資料裡時，兩處都不畫（程式先上、資料後補的空窗期畫面與現在完全一樣）。
+const MARKETPLACE_SECTIONS = [
+  { key: 'shopee',  name: '蝦皮',     tint: '#ee4d2d', markets: ['shopee'] },
+  { key: 'momo',    name: 'MOMO',     tint: '#ec4899', markets: ['momo'] },
+  { key: 'coupang', name: '酷澎',     tint: '#3b82f6', markets: ['coupang'] },
+  { key: 'other',   name: '其他通路', tint: '#64748b', markets: ['pchome', 'books', 'friday'] },
+];
+function marketplaceSectionOf(platformName) {
+  const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
+  return MARKETPLACE_SECTIONS.find(s => s.markets.includes(m)) || MARKETPLACE_SECTIONS[0];
+}
 function marketplaceBadgeHtml(platformName) {
   const m = PLATFORM_MARKETPLACE[platformName] || 'shopee';
   const s = MARKETPLACE_BADGE[m];
@@ -218,12 +440,14 @@ function marketplaceBadgeHtml(platformName) {
   </div>`;
 }
 
-// 平台分組（用於儀表板上方 4 張總覽卡）
+// 平台分組（用於儀表板上方 5 張總覽卡；成員都不在資料裡的群組不畫）
+//   ⚠ 未來新增的小通路一律併進「其他通路」的 members，不要開第六張卡：五張一排已是 1280 寬的極限（見 css/main.css .summary-grid）。
 const PLATFORM_GROUPS = [
-  { name: '全通路總營收', icon: '🏪', color: '#0f172a', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活','MOMO','MO+','酷澎'] },
+  { name: '全通路總營收', icon: '🏪', color: '#0f172a', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活','MOMO','MO+','酷澎','PChome','博客來','Friday'] },
   { name: '蝦皮營收',     logo: 'assets/logos/shopee.png',  color: '#ee4d2d', members: ['生活好麻吉','玩樂盒子','森之旅','維克生活'] },
   { name: 'MOMO營收',     logo: 'assets/logos/momo.png',    color: '#e6007e', members: ['MOMO','MO+'] },
   { name: '酷澎營收',     logo: 'assets/logos/coupang.png', color: '#3b82f6', members: ['酷澎'] },
+  { name: '其他通路',     icon: '🏬',                        color: '#64748b', members: ['PChome','博客來','Friday'] },
 ];
 
 /* ------------- 日期工具 ------------- */
@@ -499,6 +723,7 @@ const App = {
     this.ensureAdmin();
     this.bindNav();
     this.bindSidebarToggle();
+    this.bindSidebarResize();
     this._checkMemFallbackAtBoot();
     // 整個應用層級的「離開頁面警告」：偵測所有未同步來源
     //   洞察表 / 淨利表 / 工作日誌 / 儀表板營收卡片
@@ -632,6 +857,44 @@ const App = {
     window.addEventListener('resize', updateIcon);
   },
 
+  /* ------------- 側欄寬度拖曳（全站共用；與收合共存）-------------
+     ⚠ 只更新 CSS 變數 --sidebar-w，【絕不】寫 .sidebar 的 inline width——inline 會贏過
+        `body.sidebar-collapsed .sidebar{width:0}`、導致收合失效（見 css 註解）。
+     範圍 min 200 / max 360（RWD 選 (c)：cap max、不動平台列 nowrap+overflow-x，最壞 .main 只少 120px）。
+     升級路徑：若日後嫌 360 太窄→走 (b) ResizeObserver 依容器寬降級平台列，不要改回 (a) container query。 */
+  bindSidebarResize() {
+    const MIN = 200, MAX = 360, KEY = 'ec.sidebarWidth';
+    const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
+    const clamp = (w) => Math.max(MIN, Math.min(MAX, Math.round(w)));
+    const setW = (w) => document.documentElement.style.setProperty('--sidebar-w', clamp(w) + 'px');
+    // 還原上次寬度（桌機才套；手機抽屜寬度由 @media 82vw 決定、不受此影響）
+    try {
+      const saved = parseInt(localStorage.getItem(KEY), 10);
+      if (isFinite(saved) && !isMobile()) setW(saved);
+    } catch {}
+    const handle = document.getElementById('sidebar-resizer');
+    if (!handle) return;
+    handle.addEventListener('mousedown', (e) => {
+      if (isMobile() || document.body.classList.contains('sidebar-collapsed')) return;   // 手機/收合態無寬可拖
+      e.preventDefault();
+      let lastW = clamp(e.clientX);
+      handle.classList.add('dragging');
+      document.body.classList.add('sidebar-resizing');   // → css 關掉 .sidebar 的 width transition，拖曳才跟手
+      document.body.style.userSelect = 'none';
+      const move = (ev) => { lastW = clamp(ev.clientX); setW(lastW); };   // 側欄左緣=視窗 x0 → 游標 x 即寬度
+      const up = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        handle.classList.remove('dragging');
+        document.body.classList.remove('sidebar-resizing');
+        document.body.style.userSelect = '';
+        try { localStorage.setItem(KEY, String(lastW)); } catch {}
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+  },
+
   /* ------------- 登入 ------------- */
   showLogin(opts) {
     document.getElementById('view-login').style.display = 'flex';
@@ -680,7 +943,9 @@ const App = {
         this.enterApp(admin);
         return;
       }
-      if (admin.password === hashPassword('admin123')) {
+      // 停用／刪除中的 admin（#252）：仍在清單＝「存在」，所以不會走 Case 1 建新管理員；
+      //   Case 2 也不放行（不登入、不改寫 role、不寫入），交給下方正常流程比對密碼後拒絕。
+      if (isUserActive(admin) && admin.password === hashPassword('admin123')) {
         // Case 2：admin 存在且密碼還是預設 → 修復 role + 登入（不覆蓋密碼）
         admin.role = 'admin';
         Store.set(Store.KEYS.users, users);
@@ -696,6 +961,8 @@ const App = {
     if (!user) { this.showAuthError('帳號不存在'); return; }
     const hash = hashPassword(password);
     if (hash !== user.password) { this.showAuthError('密碼錯誤'); return; }
+    // 停用／刪除的帳號（#252）：放在比對密碼之後，沒有密碼的人看不出帳號狀態
+    if (!isUserActive(user)) { this.showAuthError('此帳號已停用'); return; }
     Store.set(Store.KEYS.session, { username: user.username });
     this.enterApp(user);
   },
@@ -709,8 +976,30 @@ const App = {
     this.showLogin();
   },
 
+  // 帳號被停用／刪除時強制登出（#252）：不問確認、只清本機 session（不寫雲端），回登入頁並顯示原因
+  _forceLogout(msg) {
+    try { Store.remove(Store.KEYS.session); } catch {}
+    this.currentUser = null;
+    try { if (typeof this.closeModal === 'function') this.closeModal(); } catch {}
+    try { document.getElementById('login-password').value = ''; } catch {}
+    this.showLogin();
+    if (msg) { try { this.showAuthError(msg); } catch {} }
+  },
+
+  // 雲端 users 更新後檢查目前登入者（#252）：已被停用或刪除 → 登出，回傳 true。
+  //   找不到這個帳號（舊版真刪）維持原狀，與既有行為一致。
+  _logoutIfInactive() {
+    if (!this.currentUser) return false;
+    const fresh = (Store.get(Store.KEYS.users, []) || []).find(u => u.username === this.currentUser.username);
+    if (!fresh || isUserActive(fresh)) return false;
+    this._forceLogout('你的帳號已被停用');
+    return true;
+  },
+
   /* ------------- 進入主應用 ------------- */
   enterApp(user) {
+    // 最後防線（#252）：登入、開站還原 session、雲端回來後重試還原都經過這裡；停用／刪除的帳號一律不進站
+    if (!isUserActive(user)) { this._forceLogout('此帳號已停用'); return; }
     this.currentUser = user;
     // 1) 先把使用者資訊套到側欄（avatar / 名字 / 權限），讓 view-app 一顯示就是正確的樣子
     this.applyUserPerms(user);
@@ -750,6 +1039,10 @@ const App = {
       window.__pendingFirstRender = false;
       setTimeout(() => { try { this.render(); } catch {} }, 0);
     }
+    // 6) #269 第 4 塊：舊版洞察表待同步只備份不補（登入、開站還原 session 都經過這裡；雲端還沒就緒會自己略過，
+    //    等 __setupCloud 結尾再叫一次；跑過一次就不再跑）
+    try { if (typeof window.__insightLegacyMigrate === 'function') window.__insightLegacyMigrate(); }
+    catch (e) { console.warn('[insight legacy]', e); }
   },
 
   _isRouteAllowed(route, user) {
@@ -787,7 +1080,7 @@ const App = {
       this._lastInputDate = nowYesterday;
       if (this.route === 'dashboard' && typeof this.render === 'function') {
         this.render();
-        showToast(`已跨日，自動切換至 ${nowYesterday}`, 'success');
+        showToast(`已跨日，填寫日期已切換至 ${nowYesterday}`, 'success');   // 檢視範圍預設是資料截止日，跨日不會跟著換
       }
     }, 60000); // 每 60 秒檢查一次
   },
@@ -851,12 +1144,10 @@ const App = {
   },
 
   /* ------------- 路由 ------------- */
-  // 偵測目前是否有任何「本機已寫但還沒推雲端」的內容（洞察表 / 淨利表 / 工作日誌）
+  // 偵測目前是否有任何「本機已寫但還沒推雲端」的內容（淨利表 / 工作日誌 / 每日營收）
+  //   洞察表已改成存一筆寫一筆（#269），沒有本機待同步，不再列入
   _checkUnsyncedSources() {
     const reasons = [];
-    if (window.__insightPendingNotes && window.__insightPendingNotes.size > 0) {
-      reasons.push(`洞察表（${window.__insightPendingNotes.size} 個賣場）`);
-    }
     // 淨利表：讀真實 pending 計數（排除 shop marker）
     const profitPending = typeof window.__profitPendingCount === 'function' ? window.__profitPendingCount() : 0;
     if (profitPending > 0) {
@@ -878,17 +1169,18 @@ const App = {
     return reasons;
   },
 
-  // 側欄未同步圓點：直接讀三個記憶體旗標（不呼叫 _checkUnsyncedSources，避免它連帶做 DOM 查詢）。
+  // 側欄未同步圓點：直接讀記憶體旗標（不呼叫 _checkUnsyncedSources，避免它連帶做 DOM 查詢）。
   //   每項都防禦性檢查：物件/函式可能還沒定義；讀取失敗一律當「沒有待同步」，例外絕不外拋。
   //   dashboard（每日營收）刻意不做：它靠 DOM dirty 判斷、跨頁偵測不到。
+  //   洞察表（#269 起存一筆寫一筆、沒有本機待同步）固定不亮；仍呼叫 setDot(…, false) 把舊版殘留的圓點關掉。
   updateSidebarSyncDots() {
     const setDot = (route, on) => {
       const btn = document.querySelector(`.nav-item[data-route="${route}"]`);
       const dot = btn && btn.querySelector('.nav-dot');
       if (dot) dot.hidden = !on;
     };
-    let insight = false, profit = false, dp = false;
-    try { insight = !!(window.__insightPendingNotes && window.__insightPendingNotes.size > 0); } catch {}
+    const insight = false;
+    let profit = false, dp = false;
     try { profit = typeof window.__profitPendingCount === 'function' && window.__profitPendingCount() > 0; } catch {}
     try { dp = !!(window.__dpPendingNames && window.__dpPendingNames.size > 0); } catch {}
     setDot('office-d1-insight', insight);
@@ -981,10 +1273,10 @@ const App = {
       return;
     }
     switch (this.route) {
-      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip(); break;
+      case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); break;
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
-      default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); this.bindLineChartTooltip();
+      default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs();
     }
   },
 
@@ -1052,7 +1344,7 @@ const App = {
     if (ids.length === 0) return { skipped: true, reason: '指派對象沒有 LINE userId' };
     return this._pushLineRaw(cfg, ids, message, opts);
   },
-  // 直接用 userId 推（給「通知老闆」這類情境用，因為老闆 userId 跟 3 位同事分開存）
+  // 直接用 userId 推（給「通知老闆」這類情境用，因為老闆 userId 跟同事分開存）
   async pushLineNotifyToBoss(message, opts) {
     const cfg = Store.get('ec.lineConfig', null);
     if (!cfg || !cfg.workerUrl || !cfg.secret) return { skipped: true, reason: '尚未設定 LINE 通知' };
@@ -1111,7 +1403,7 @@ const App = {
 
 
   /* ------------- 工作週曆事件綁定 ------------- */
-  /* ------------- 每日工作進度（新版：3 人卡片 + 老闆任務） ------------- */
+  /* ------------- 每日工作進度（新版：固定 4 人卡片 + 老闆任務） ------------- */
 
 
 
@@ -2797,11 +3089,34 @@ function __notifyStoreMemFallback(kind, reason, key, err) {
   } catch {}
 }
 
+// 需求3 塊3-D：洞察表資料（ec.insight_* key）只認 app/insight_{shop}。app/main / app/insight 若有殘留（例：舊版分頁
+//   按洞察表上傳卡 ✕ 會用 __cloudStore.setField 把 weeks 寫進 app/main），讀取時一律忽略，不再靠開站清理刪雲端。
+//   前綴含底線：ec.insightMigrated 這類沒有底線的 key 不受影響。回傳淺拷貝，不改動輸入；null / undefined 回 {}。
+function _dropInsightKeys(obj) {
+  const out = {};
+  if (!obj || typeof obj !== 'object') return out;
+  for (const k of Object.keys(obj)) {
+    if (!k.startsWith('ec.insight_')) out[k] = obj[k];
+  }
+  return out;
+}
+
 async function __setupCloud() {
   try {
     const cs = window.__cloudStore;
     if (!cs) throw new Error('cloudStore not available');
-    const snap = await cs.getDoc();
+    // #274：開站的 6 份讀取（app/main、app/insight、4 家 app/insight_{shop}）在這裡【同時送出】，
+    //   下面仍照原本的順序逐一取用 → 合併順序、誰蓋誰、遷移 A/B、清舊欄位、失敗處理（warn 的位置）全都跟串行時一樣。
+    //   不用 Promise.all：它一份失敗就整批失敗（原本是某一家失敗只略過那一家）；app/main 先失敗時其餘幾份也會變成沒人接的 rejection。
+    //   所以每份先用 __settle 把成敗收起來（同步拋出的例外也收），取用時 __take 才把錯誤丟回原本的 try/catch。
+    //   代價：app/main 讀失敗時，其餘 5 份照樣讀了（結果丟掉）。
+    const __settle = (f) => { let p; try { p = Promise.resolve(f()); } catch (e) { p = Promise.reject(e); } return p.then(v => ({ v }), e => ({ e })); };
+    const __take = async (p) => { const r = await p; if ('e' in r) throw r.e; return r.v; };
+    const __byShop = window.__cloudInsightByShop;
+    const pMain = __settle(() => cs.getDoc());
+    const pInsight = window.__cloudInsight ? __settle(() => window.__cloudInsight.getDoc()) : null;
+    const pShops = (__byShop && Array.isArray(__byShop.shops)) ? __byShop.shops.map(s => __settle(() => __byShop.getDocForShop(s))) : null;
+    const snap = await __take(pMain);
     let cloudData = snap.exists() ? (snap.data() || {}) : {};
 
     // 首次遷移：雲端無資料但本機有 → 將本機 localStorage 上傳到雲端（session 除外）
@@ -2822,48 +3137,39 @@ async function __setupCloud() {
       }
     }
 
+    // 塊3-D：app/main 的 ec.insight_* 殘留一律忽略（放在首次遷移之後：「app/main 是否為空」的判斷維持原樣）
+    cloudData = _dropInsightKeys(cloudData);
+
     // 保險：雲端若殘留 session 就忽略，避免授權外洩
     delete cloudData[Store.KEYS.session];
 
-    // 初次雲端載入：若 localStorage 有 pending 未同步的 key，用本機版本覆蓋雲端（否則
-    // 使用者上次本機刪除的內容會被雲端舊資料蓋回來）
-    try {
-      const pendingRaw = localStorage.getItem('ec.insightPendingNotes');
-      if (pendingRaw) {
-        const pending = JSON.parse(pendingRaw);
-        if (Array.isArray(pending)) {
-          pending.forEach(pk => {
-            try {
-              const localRaw = localStorage.getItem(pk);
-              if (localRaw !== null) cloudData[pk] = JSON.parse(localRaw);
-            } catch {}
-          });
-        }
-      }
-    } catch {}
+    // #269：這裡原本會把 localStorage 的洞察表待同步版本（ec.insightPendingNotes）放進 cloudData，已拆。
+    //   它其實早就沒效：下面「3：per-shop docs」的 Object.assign(cloudData, insightPerShopData) 會再蓋回雲端版本。
+    //   舊版留下的待同步改由 window.__insightLegacyMigrate（js/pages/marketing.js）在開機時只備份、不補回。
 
-    // ============== 洞察表資料：多來源合併進 Store._mem ==============
-    // 讀取優先序（後面覆蓋前面 → per-shop 最新）：
-    //   1. app/main 內殘留（v81 之前）
-    //   2. app/insight 內殘留（v81 拆到這裡）
-    //   3. app/insight_{shop} 每個賣場獨立 doc（v134 拆到這裡）→ 最權威
-    // → 舊資料自動讀得到 + 新寫入走 per-shop
+    // ============== 洞察表資料：只認 app/insight_{shop} ==============
+    // 塊3-D（#294＋#301）：原本這裡合併 app/main → app/insight → per-shop 三個來源，接著開站清理（對 app/insight、app/main
+    //   送 removeFields）＋遷移 A（app/main → per-shop，寫失敗也照刪）＋遷移 B（app/insight → per-shop），已全部拆掉。
+    //   2026-10-08 正式站唯讀確認：app/main 無 ec.insight_* 欄位、app/insight 整份 0 欄位。
+    //   改成讀取端忽略：app/main（上面）與 app/insight 的 ec.insight_* 都用 _dropInsightKeys 濾掉，下面 app/main 訂閱同理。
+    //   v166 加的「來源偏好」全域標記只有寫入、全 repo 零讀取（app/insight 訂閱早在 v167 停用），開站與 pushKeyToCloud 的寫入一併拆。
     let insightData = {};
     try {
-      if (window.__cloudInsight) {
-        const iSnap = await window.__cloudInsight.getDoc();
+      if (pInsight) {   // #274：讀取已在開頭送出，這裡只取用
+        const iSnap = await __take(pInsight);
         insightData = iSnap.exists() ? (iSnap.data() || {}) : {};
       }
     } catch (e) { console.warn('[insight] app/insight 讀取失敗', e); }
-    Object.assign(cloudData, insightData); // 2
+    Object.assign(cloudData, _dropInsightKeys(insightData));
 
-    // 3：per-shop docs（優先，覆蓋 1 & 2）
+    // per-shop docs：洞察表資料唯一來源
     const insightPerShopData = {};
     try {
-      if (window.__cloudInsightByShop && Array.isArray(window.__cloudInsightByShop.shops)) {
-        for (const s of window.__cloudInsightByShop.shops) {
+      if (pShops) {
+        // #274：讀取已在開頭同時送出；這裡仍照 shops 順序取用、合併（後面的店蓋前面），跟回來的先後無關
+        for (const [i, s] of __byShop.shops.entries()) {
           try {
-            const snap = await window.__cloudInsightByShop.getDocForShop(s);
+            const snap = await __take(pShops[i]);
             if (snap.exists && snap.exists()) {
               const d = snap.data() || {};
               Object.assign(insightPerShopData, d);
@@ -2874,85 +3180,9 @@ async function __setupCloud() {
     } catch (e) { console.warn('[insight per-shop] 例外', e); }
     Object.assign(cloudData, insightPerShopData);
 
-    // 標記「這些 key 目前以 per-shop 為權威來源」→ 稍後 app/insight subscribe 的
-    //   初始 snapshot 帶著舊資料回來時，會被下面 insightMergeHandler 依這個標記擋掉。
-    //   否則 race 順序不對時，剛存的刪除會被 app/insight 舊資料 replay 蓋回來
-    //   （Kelly 案：刪保冰壺清倉 → 同步 per-shop 成功 → 重整後清倉又出現）
-    window.__insightSourcePref = window.__insightSourcePref || {};
-    Object.keys(insightPerShopData).forEach(k => { window.__insightSourcePref[k] = 'per-shop'; });
-
-    // 主動清 app/insight & app/main 裡「已在 per-shop 有的」舊拷貝（fire-and-forget）
-    //   遷移 A/B 只搬「per-shop 沒有」的 key，per-shop 已有時 app/insight 舊資料一直留著。
-    //   留著的話下次重整時 app/insight subscribe fire 帶著 stale 資料，就算 pref 擋掉，
-    //   資料還在雲端就是隱患。這裡直接把它清乾淨，一了百了。
-    try {
-      const perShopKeys = Object.keys(insightPerShopData);
-      const staleInInsight = perShopKeys.filter(k => insightData[k] !== undefined);
-      if (staleInInsight.length > 0 && window.__cloudInsight && window.__cloudInsight.removeFields) {
-        console.warn('[insight cleanup] app/insight 裡已在 per-shop 的過期 key：', staleInInsight);
-        window.__cloudInsight.removeFields(staleInInsight).catch(e => console.warn('[insight cleanup app/insight]', e));
-      }
-      // app/main：cloudData 一開始就是 mainDoc，此時已被 insightData 跟 perShopData 覆蓋。
-      //   用「per-shop 有 & cloudData 一開始就有這個 key」判斷太麻煩，改用 REST 直接 remove
-      //   （安全：removeFields 只刪指定 field，其他資料不動；不存在的 field 也不會報錯）
-      if (perShopKeys.length > 0 && window.__cloudStore && window.__cloudStore.removeFields) {
-        window.__cloudStore.removeFields(perShopKeys).catch(e => console.warn('[insight cleanup app/main]', e));
-      }
-    } catch (e) { console.warn('[insight cleanup] 例外', e); }
-
-    // 一次性 migration A：ec.insight_* 從 app/main 搬到 per-shop doc（沒有的先搬到 app/insight fallback）
-    try {
-      const mainInsightKeys = Object.keys(cloudData).filter(k =>
-        k.startsWith('ec.insight_') && !insightData[k] && !insightPerShopData[k]
-      );
-      if (mainInsightKeys.length > 0) {
-        console.warn('[insight migration A] 搬', mainInsightKeys.length, '個 key 從 app/main → per-shop / app/insight');
-        for (const k of mainInsightKeys) {
-          try {
-            const perShop = window.__cloudInsightByShop && window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(k);
-            if (perShop) await perShop.setField(k, cloudData[k]);
-            else if (window.__cloudInsight) await window.__cloudInsight.setField(k, cloudData[k]);
-          } catch (e) { console.error('[insight migration A]', k, '失敗', e); }
-        }
-        try {
-          const cs0 = window.__cloudStore;
-          if (cs0 && typeof cs0.removeFields === 'function') {
-            await cs0.removeFields(mainInsightKeys);
-            console.warn('[insight migration A] app/main 已清掉', mainInsightKeys.length, '個');
-          }
-        } catch (e) { console.error('[insight migration A] app/main 刪除失敗', e); }
-      }
-    } catch (e) { console.warn('[insight migration A] 例外', e); }
-
-    // 一次性 migration B：ec.insight_* 從 app/insight 搬到 per-shop doc
-    // → 讓 app/insight 縮小，避免它再撞 1 MiB
-    try {
-      const oldInsightKeys = Object.keys(insightData).filter(k =>
-        k.startsWith('ec.insight_') && !insightPerShopData[k]
-      );
-      if (oldInsightKeys.length > 0 && window.__cloudInsightByShop) {
-        console.warn('[insight migration B] 搬', oldInsightKeys.length, '個 key 從 app/insight → per-shop');
-        const migrated = [];
-        for (const k of oldInsightKeys) {
-          try {
-            const perShop = window.__cloudInsightByShop.forKey && window.__cloudInsightByShop.forKey(k);
-            if (perShop) {
-              await perShop.setField(k, insightData[k]);
-              migrated.push(k);
-            }
-          } catch (e) { console.error('[insight migration B]', k, '失敗', e); }
-        }
-        if (migrated.length > 0 && window.__cloudInsight && window.__cloudInsight.removeFields) {
-          try {
-            await window.__cloudInsight.removeFields(migrated);
-            console.warn('[insight migration B] app/insight 已清掉', migrated.length, '個');
-          } catch (e) { console.error('[insight migration B] app/insight 刪除失敗', e); }
-        }
-      }
-    } catch (e) { console.warn('[insight migration B] 例外', e); }
-
     Store._mem = cloudData;
     Store._useMem = true;
+    window.__insightCloudReady = true;   // #269：雲端資料已就緒（舊版待同步的備份要等到這之後才跑，見 __insightLegacyMigrate）
 
     // 蓋掉 Store.get/set/remove：
     //   - session 一律走 localStorage（避免跨裝置共用登入狀態）
@@ -3061,8 +3291,6 @@ async function __setupCloud() {
         }
         // per-shop 寫成功 → 順手刪掉 app/insight 跟 app/main 裡的同 key 舊資料
         if (wentToPerShop) {
-          window.__insightSourcePref = window.__insightSourcePref || {};
-          window.__insightSourcePref[key] = 'per-shop';
           if (window.__cloudInsight && window.__cloudInsight.removeFields) {
             window.__cloudInsight.removeFields([key]).catch(e => console.warn('[pushKeyToCloud] cleanup app/insight 失敗', key, e));
           }
@@ -3111,7 +3339,8 @@ async function __setupCloud() {
     // 但如果使用者正在 input 裡打字、或有尚未確認儲存的更動，跳過重繪避免覆蓋
     let __firstCloudSnapshot = true;
     cs.subscribe((data) => {
-      const next = data || {};
+      // 塊3-D：app/main 的 ec.insight_* 殘留一律忽略 → 下面「保留 ec.insight_*」迴圈會全數從 Store._mem（per-shop 版）補回
+      const next = _dropInsightKeys(data);
       delete next[Store.KEYS.session];  // 不接受雲端的 session
       // 過濾掉「最近 30 秒內剛刪掉」的 key（避免 race 把它們又帶回來；給足網路 / 雲端延遲）
       const now = Date.now();
@@ -3125,30 +3354,14 @@ async function __setupCloud() {
         }
       });
       if (filteredOut.length) console.warn('[subscribe] filtered out recently deleted:', filteredOut);
-      // 保護本機未同步的洞察表 notes：若 pending 中的 key 在 next 也有，保留本機版本
-      // 否則使用者編輯到一半就被別人雲端版本蓋掉
-      const pending = window.__insightPendingNotes;
-      if (pending && pending.size > 0) {
-        pending.forEach(k => {
-          if (Store._mem && Store._mem[k] !== undefined) next[k] = Store._mem[k];
-        });
-      }
+      // #269：原本這裡前後各有一段「洞察表 pending 未同步的 notes 保留本機版本」，已拆（洞察表改成存一筆寫一筆，
+      //   沒有本機待同步）。中間的 _platformJustSaved 保護與洞察表無關，原樣保留。
       // 保護「剛剛在本機存的營收 / 廣告費」：若 2 秒內剛 commit 過，
       //   雲端 snapshot 可能還沒包含我們的寫入 → 用本機 _mem 覆蓋 next，避免值消失
       const justSavedPlatforms = window._platformJustSaved && (Date.now() - window._platformJustSaved < 2000);
       if (justSavedPlatforms && Store._mem && Store._mem[Store.KEYS.platforms] !== undefined) {
         next[Store.KEYS.platforms] = Store._mem[Store.KEYS.platforms];
       }
-      // 保護「洞察表 pending 未同步的 note key」：使用者已本機刪過調整但還沒按☁同步，
-      //   雲端還有舊資料，若讓 next 覆蓋會讓「已刪除」的調整跑回來
-      try {
-        const pending = window.__insightPendingNotes;
-        if (pending && pending.size > 0 && Store._mem) {
-          pending.forEach(pk => {
-            if (Store._mem[pk] !== undefined) next[pk] = Store._mem[pk];
-          });
-        }
-      } catch {}
       // 保留 ec.insight_* — v154 起 insight 資料住在 app/insight_{shop} 獨立 doc，
       //   不在 next（app/main）裡。直接 Store._mem = next 會把 insight 全部清掉，
       //   洞察表變空白直到使用者重新整理再走一次 __setupCloud 合併三個來源才恢復。
@@ -3165,6 +3378,7 @@ async function __setupCloud() {
       //   只要任何人動了 app/main 任何一個欄位，這個 subscribe 就 fire，_mem 被雲端版整個取代，
       //   那些字在「按同步之前」就已經沒了。（更糟的是按下去推的是已被洗掉的版本，還會跳「已同步 ✓」。）
       //
+      // （#269 起洞察表的 __insightPendingNotes 機制已整套拆掉；下面兩段提到它的地方保留當歷史對照。）
       // 🔴 這【不是】照抄上面 __insightPendingNotes 那段，語義不一樣，review 時請不要當成等價改動：
       //   ・__insightPendingNotes 裝的是【key】（'ec.insight_玩樂_notes'）→ 一個 pending 只凍結
       //     一個賣場的 notes，其他賣場照常收雲端更新，傷害被 key 的粒度框住。
@@ -3250,12 +3464,16 @@ async function __setupCloud() {
         try {
           if (App.currentUser && typeof App.applyUserPerms === 'function') {
             const freshUser = (Store.get(Store.KEYS.users, []) || []).find(u => u.username === App.currentUser.username);
+            // 雲端顯示此帳號已停用／刪除（#252；常見於 5 秒 fallback 用本機舊快照登入）→ 登出，不重繪
+            if (freshUser && !isUserActive(freshUser)) { App._forceLogout('你的帳號已被停用'); return; }
             if (freshUser) { App.currentUser = freshUser; App.applyUserPerms(freshUser); }
           }
         } catch (e) { console.warn('post-snapshot perms refresh failed', e); }
         try { App.render(); } catch (e) { console.warn('first cloud snapshot render failed', e); }
         return;
       }
+      // 即時登出（#252）：別人剛把目前登入者停用／刪除 → 這次更新就登出，不再重繪
+      try { if (App._logoutIfInactive()) return; } catch (e) { console.warn('inactive-user check failed', e); }
       const active = document.activeElement;
       // dp-todo-add-input = 工作日誌「新增待辦」輸入框（daily.js 的 <input type="text">，
       //   打字後要按 Enter 才進 Store）。原本不在這個清單裡 → 打到一半 snapshot 一來就整頁重繪、
@@ -3289,26 +3507,31 @@ async function __setupCloud() {
     //     （Kelly 案：刪保冰壺清倉 → 同步 → 重整後清倉又出現。v166 加 source pref、
     //       v167 主動刪 app/insight 舊拷貝都試過，還是有 case → 直接不訂閱最乾淨。）
     //   - per-shop subscribe：正常合併進 _mem（跳過 pending 未同步的 key）
-    const perShopMergeHandler = (idata) => {
+    const perShopMergeHandler = (idata, shop) => {
       if (!idata) return;
       try {
-        const pending = window.__insightPendingNotes;
-        const skipped = [];
+        // #269：不再跳過「待同步」的 key（洞察表改成存一筆寫一筆，沒有本機待同步），雲端一律合併進來
         Object.keys(idata).forEach(k => {
-          if (pending && pending.has && pending.has(k)) { skipped.push(k); return; }
           if (Store._mem) Store._mem[k] = idata[k];
         });
-        if (skipped.length) console.warn('[insight subscribe][per-shop] 跳過 pending:', skipped);
+        // #269 第 5 塊：洞察表調整彈窗開著、而且是這個通路 → 彈窗跟著雲端更新（js/pages/marketing.js）
+        try { if (typeof window.__insightNotesCloudUpdated === 'function') window.__insightNotesCloudUpdated(shop); }
+        catch (e) { console.warn('[insight subscribe per-shop] 彈窗更新失敗', e); }
         if (window.App && App.currentUser && typeof App.render === 'function') {
           const inputInProgress = document.activeElement && document.activeElement.tagName === 'INPUT';
-          if (!inputInProgress) { try { App.renderFromCloud('insight'); } catch {} }   // 只在洞察表頁才重繪，別頁不被踢（見 CLOUD_RENDER_ROUTES）
+          // #269：只重繪【目前看的通路】。存一筆寫一筆之後每存一筆就推來一次 snapshot，看好麻吉時不必因為玩樂的寫入整頁重建；
+          //   資料一樣全部合併進 Store._mem，切過去時就是最新的。目前通路的判定比照 marketing.js（不在名單 → 玩樂）。
+          const shops = (window.__cloudInsightByShop && window.__cloudInsightByShop.shops) || [];
+          const f = App.filter && App.filter.insightShop;
+          const curShop = shops.indexOf(f) >= 0 ? f : '玩樂';
+          if (!inputInProgress && (!shop || shop === curShop)) { try { App.renderFromCloud('insight'); } catch {} }   // 只在洞察表頁才重繪，別頁不被踢（見 CLOUD_RENDER_ROUTES）
         }
       } catch (e) { console.warn('[insight subscribe per-shop] merge 失敗', e); }
     };
     try {
       if (window.__cloudInsightByShop && Array.isArray(window.__cloudInsightByShop.shops)) {
         window.__cloudInsightByShop.shops.forEach(s => {
-          try { window.__cloudInsightByShop.subscribeShop(s, perShopMergeHandler); }
+          try { window.__cloudInsightByShop.subscribeShop(s, (idata) => perShopMergeHandler(idata, s)); }
           catch (e) { console.warn('[insight subscribe app/insight_' + s + ']', e); }
         });
       }
@@ -3317,6 +3540,9 @@ async function __setupCloud() {
     console.error('Cloud setup failed, falling back to localStorage', e);
   }
   __bootApp();
+  // #269 第 4 塊：舊版洞察表待同步只備份不補（條件不齊會自己略過；已登入的情況在這裡跑，否則等 enterApp）
+  try { if (typeof window.__insightLegacyMigrate === 'function') window.__insightLegacyMigrate(); }
+  catch (e) { console.warn('[insight legacy]', e); }
 }
 
 if (window.__cloudStore) {
@@ -3346,7 +3572,14 @@ function mapAnaLabel(l) { return ANA_LABEL_DISPLAY[l] || l; }  // 未列的（�
  * 採【允許為主 + 攔截寫入】：view 的檢視動作（切賣場/季別/排序/篩選/匯出/看帳號）一律放行，
  * 只攔明確的寫入 handler；漏網的仍由資料層擋下（不會改到資料，只是少了灰底提示）。 */
 // 明確「會改資料」的 inline handler 名稱片段（不含匯出 doExport/momoExport/cupExport、不含檢視狀態 setShop/tab/filter）
-const __RO_WRITE_RE = /\b(generate|generateAffRpt|generateCoupang|syncToCloud|syncCoupangToCloud|momoOpenSyncPreview|momoConfirmSync|momoUpload|momoMoPlus(Upload|Batch|Master|CostInline|EditRecalc|AddOne|SetOtherFee|PriceDiff|ClearPrice|AddFeeExc)|momoE001(Apply|File|Remove|Clear)|momoRecon(Pick|Generate|Store)|momoRebuild|momoSyncFile|momoSyncApplyReactivate|momoBatchSubmit|momoDeleteProduct|momoDeleteOptlog|momoAddOptlog|momoMissingCostSave|momoAddPickCost|onGlobalFile|onAffFile|onCoupangFile|cupMissCostSave|onCupNoteChange|startEdit|confirmAdsEdit|startNote|submitProfitNote|_pnmEditNote|editKpi(CommonCost|MergedField)|confirmAddSummaryRow|openAddSummaryRowModal|_sumRestoreRow|saveAnaSettings|saveTestSettings|saveGrowthSettings|onPlatformRateChange|confirmBatchTag|openBatchTagPanel|confirmDeleteFile|openDeleteFileModal|openUserModal|deleteUser|openChangePasswordModal|openBossTaskModal|_?deleteBossTask|openDailyTaskModal|deleteDailyTask|openQuickTodoModal|openBossLineConfigModal|openInsightNoteModal|openInsightSettingsModal|openScoreModal|addTodoItem|restorePlatformsBackup|openPlatformModal)\b/;
+const __RO_WRITE_RE = /\b(generate|generateAffRpt|generateCoupang|syncToCloud|cupSyncToCloud|pchomeMasterCommit|momoOpenSyncPreview|momoConfirmSync|momoUpload|momoMoPlus(Upload|Batch|Master|CostInline|EditRecalc|AddOne|SetOtherFee|PriceDiff|ClearPrice|AddFeeExc)|momoE001(Apply|File|Remove|Clear)|momoRecon(Pick|Generate|Store)|momoSyncFile|momoSyncApplyReactivate|momoBatchSubmit|momoDeleteProduct|momoDeleteOptlog|momoAddOptlog|momoEditOptlog|momoSaveOptlogEdit|momoMissingCostSave|momoAddPickCost|onGlobalFile|onAffFile|onCoupangFile|cupMissCostSave|onCupNoteChange|startEdit|confirmAdsEdit|startNote|submitProfitNote|_pnmEditNote|editKpi(CommonCost|MergedField)|confirmAddSummaryRow|openAddSummaryRowModal|_sumRestoreRow|saveAnaSettings|saveTestSettings|saveGrowthSettings|onPlatformRateChange|confirmBatchTag|openBatchTagPanel|confirmDeleteFile|openDeleteFileModal|openUserModal|deleteUser|disableUser|restoreUser|openChangePasswordModal|openBossTaskModal|_?deleteBossTask|openDailyTaskModal|deleteDailyTask|openQuickTodoModal|openBossLineConfigModal|openInsightNoteModal|openInsightSettingsModal|openScoreModal|addTodoItem|restorePlatformsBackup|openPlatformModal|saveSplitDraft|openSheetSync|confirmSheetSync|sheetSyncReload)\b/;
+// ⚠ 這是【白名單】：新功能的寫入 handler 沒加進來就【不會】被擋 —— view 角色照樣點得動、
+//   照樣寫進自己的 localStorage、還會看到同步鈕亮起（本檔的三道防線只有防線②
+//   __installReadonlyCloudGuard 擋得住雲端，本機那一步已經寫下去了），使用者會以為存好了。
+//   淨利表「拆分試算」的寫入端只有 saveSplitDraft 一支（js/profit.js 搜 `function saveSplitDraft`）：
+//   它是全檔唯一會 localStorage.setItem + _pendingSyncKeys.add 的拆分入口，
+//   其餘的 splitSearch / splitSelect / splitNumInput / splitAddRow / splitRemoveRow
+//   全部只動記憶體草稿與畫面，view 角色照樣可以試算（那是檢視行為，刻意放行）。
 function __roIsWriteEl(el) {
   if (!el || !el.getAttribute) return false;
   if (el.matches && el.matches('input[type="file"]')) return true;
@@ -3419,13 +3652,13 @@ if (document.readyState === 'loading') {
 Object.assign(window, {
   App, Store, mapAnaLabel, ANA_LABEL_DISPLAY,
   canWrite: () => !__isReadOnly(), isReadOnly: __isReadOnly,
-  hashPassword, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
+  hashPassword, isUserActive, makeUserIdentityResolver, resolveUserIdentity, RevHist, seedData, computeScore, getQuarterScore, getUserDepts, getUserDeptLabel,
   canAccessOffice, hasOfficeFeature, trendFromQuarters,
   toDateStr, addDays, eachDay, sumDaily, getRangeDates, migratePlatforms,
   todayStr, genId, escapeHtml, showToast, fmtNTD, marketplaceBadgeHtml,
   getCategoryMeta, getCategoryItems,
-  uid, DEPT_COLORS, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORM_MARKETPLACE,
-  MARKETPLACE_BADGE, PLATFORM_GROUPS, OFFICE_CONFIG, OFFICE_FEATURES,
+  uid, DEPT_COLORS, PLATFORMS, PLATFORMS_WITH_AD_SPEND, PLATFORMS_EXCLUDED_FROM_CUTOFF, PLATFORM_MARKETPLACE,
+  MARKETPLACE_BADGE, MARKETPLACE_SECTIONS, marketplaceSectionOf, PLATFORM_GROUPS, OFFICE_CONFIG, OFFICE_FEATURES,
   DAILY_TASK_STATUS, DAILY_TASK_STATUS_LIST, TASK_CATEGORIES, TASK_CATEGORY_NAMES,
   TASK_CATEGORY_ALIASES,
 });
