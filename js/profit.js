@@ -25271,7 +25271,7 @@ function pchomeOpenAnalysis(shop, 料號){
   ov.onclick=function(e){ if(e.target===ov) pchomeCloseAnalysis(); };
   pchomeRenderAnalysis(shop, p);
 }
-function pchomeCloseAnalysis(){ var ov=document.getElementById('pchome-analysis-overlay'); if(ov) ov.remove(); }
+function pchomeCloseAnalysis(){ try{ _pchomeAnalysisCharts.forEach(function(c){try{c.destroy();}catch(e){}}); _pchomeAnalysisCharts=[]; }catch(e){} var ov=document.getElementById('pchome-analysis-overlay'); if(ov) ov.remove(); }
 // ───────── PChome 總表「📊 階層圖」淨利率分佈 modal（照 momoOpenHierarchy 原樣複製；PChome 口徑）─────────
 function pchomeHierarchyStats(shop){
   // 期別模式＋選中月份跟著總表（帳務月 billing / 日曆月 calendar）；bins 直接吃總表同一支 calc 的
@@ -25360,12 +25360,35 @@ function pchomeOpenHierarchy(shop){
   +'</div>';
   document.body.appendChild(ov);
 }
+var _pchomeAnalysisCharts=[];   // 單品分析 modal 的 Chart.js 實例，關窗時 destroy（比照 momo _momoAnalysisCharts，避免記憶體洩漏/重複 canvas）
+// 月銷量圖資料：逐月取「總表那列同一個銷量」（pchomeProfitCalc / pchomeCalendarCalc 的 skus[].銷量），不另開計算路徑。
+//   橫軸跟總表當下模式（帳務月／日曆月）。每月 calc 只算一次（forEach 內，非每根 bar 重算）。
+//   🔴 刻意偏離 momo（momoSkuMonthly 只留有生意的月）：改成「第一個有銷量的月 → 最新有資料的月」，中間零銷量月也畫 bar=0；
+//      第一次有銷量之前的月不補。理由：PChome 目前月份少，九月有賣十月沒賣若濾掉空月只剩一根 bar，會像「只有一個月資料」
+//      而非「賣不動了」，後者正是要看的訊號（momo 有很多月歷史、濾空月較清爽，情境不同）。
+function pchomeSkuMonthly(shop, code){
+  var mode=_pchomeViewMode[shop]||'billing';
+  var months=(mode==='calendar')?pchomeCalendarMonths():pchomeAllMonths();   // 已升冪排序
+  var out=[];
+  months.forEach(function(m){
+    var calc=null, unrecon=false;
+    if(mode==='calendar'){ calc=pchomeCalendarCalc(m, shop); unrecon=!(calc&&calc.fixedKnown); }
+    else { var entry=pchomeMonthEntry(m); calc=entry?pchomeProfitCalc(entry, shop):null; unrecon=!!(entry&&entry.__fromOrders); }
+    var qty=0;
+    if(calc&&calc.skus){ var row=calc.skus.filter(function(x){return String(x.料號)===String(code);})[0]; if(row) qty=Number(row.銷量)||0; }
+    out.push({ mo:m, label:m.slice(2,4)+'/'+m.slice(5,7), qty:qty, unrecon:unrecon });
+  });
+  var firstIdx=-1; for(var i=0;i<out.length;i++){ if(out[i].qty>0){ firstIdx=i; break; } }
+  if(firstIdx<0) return [];   // 從未有銷量 → 空（呼叫端顯空狀態、不畫空圖）
+  return out.slice(firstIdx);   // 第一個有銷量的月 → 最新有資料的月（含中間零銷量月，bar=0）
+}
 function pchomeRenderAnalysis(shop, p){
   var ov=document.getElementById('pchome-analysis-overlay'); if(!ov) return;
   var esc=_momoEsc, m=pchomeCalcMargin(p.cost, p.供貨價);
   var mtxt=(m!=null&&Number(p.cost)>0)?pchomePct(m):'—';
   var disc=!pchomeIsActive(p)?' <span style="font-size:12px;color:#9ca3af;font-weight:600">· 已下架</span>':'';
   var pnstr=(p.商品編號||[]).join('、');
+  var series=pchomeSkuMonthly(shop, p.料號), modeLbl=(_pchomeViewMode[shop]==='calendar')?'日曆月':'帳務月', hasUnrecon=series.some(function(s){return s.unrecon;});
   ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:720px;width:100%;box-shadow:0 16px 50px rgba(0,0,0,.3);overflow:hidden">'
     +'<div style="padding:16px 20px;border-bottom:1px solid #eef0f2;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'
     +'<div style="min-width:0"><div style="font-size:16px;font-weight:800;color:#1e293b;line-height:1.35">'+esc(p.商品名||p.料號)+disc+'</div>'
@@ -25373,9 +25396,20 @@ function pchomeRenderAnalysis(shop, p){
     +'<button onclick="pchomeCloseAnalysis()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#64748b;font-size:18px;cursor:pointer;line-height:1">✕</button></div>'
     +'<div style="padding:16px 20px;max-height:calc(100vh - 140px);overflow:auto">'
     +'<div class="mm-ana-sec"><div class="mm-ana-h">目前值</div><div style="font-size:13px;color:#334155;line-height:1.9">成本 <b>'+pchomeMoney(p.cost||0)+'</b> ｜ 供貨價(含稅) <b>'+pchomeMoney(p.供貨價||0)+'</b> ｜ PChome 售價 '+(p.售價?pchomeMoney(p.售價):'—')+' ｜ 淨利率 <b>'+mtxt+'</b> <span style="color:#9ca3af;font-size:11px">（供貨價÷1.05 − 成本）÷（供貨價÷1.05）</span></div></div>'
+    +'<div class="mm-ana-sec"><div class="mm-ana-h">月銷量（件）· '+modeLbl+'</div>'
+      +(series.length
+        ? '<div style="position:relative;height:180px"><canvas id="pch-ana-qty"></canvas></div>'+(hasUnrecon?'<div style="font-size:11px;color:#94a3b8;margin-top:4px"><span style="color:#c7d2fe">■</span> 淺色＝未對帳月（銷量為應出貨估算）</div>':'')
+        : '<div style="font-size:12px;color:#94a3b8;padding:16px;text-align:center;background:#f8fafc;border-radius:8px">此商品尚無銷量資料。</div>')
+    +'</div>'
     +'<div class="mm-ana-sec"><div class="mm-ana-h">商品異動時間軸</div>'+pchomeHistoryTimelineHTML(p.料號)+'</div>'
     +'<div class="mm-ana-sec" id="pchome-optlog-sec"></div>'
     +'</div></div>';
+  // 月銷量長條（innerHTML 後建立；存實例供關窗 destroy）。外觀全照 momo：bar/180px/borderRadius4/y整數/無圖例/無數字標示/hover tooltip。
+  _pchomeAnalysisCharts.forEach(function(c){try{c.destroy();}catch(e){}}); _pchomeAnalysisCharts=[];
+  if(typeof Chart!=='undefined' && series.length){ var cv=document.getElementById('pch-ana-qty');
+    if(cv) _pchomeAnalysisCharts.push(new Chart(cv.getContext('2d'),{ type:'bar',
+      data:{labels:series.map(function(s){return s.label;}), datasets:[{label:'月銷量', data:series.map(function(s){return s.qty;}), backgroundColor:series.map(function(s){return s.unrecon?'#c7d2fe':'#5b5fcf';}), borderRadius:4}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}} })); }
   pchomeRenderOptlogSection(shop, p.料號);
 }
 // 優化紀錄區塊（檢視/新增/刪除；照 momoRenderOptlogSection）
