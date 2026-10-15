@@ -9501,7 +9501,7 @@ const KPI_GROUPS=[
     commonAsColumn:true,
     order:['qty','rev','cost','fee','ret','tax','_common','material','pure','pureRate'],
     formula:[
-      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material,desc:'純利 = 營收 − 商品成本 − 手續費 − 退貨運費 − 稅金 − 耗材'},
+      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material,desc:'純利 = 營收 − 商品成本 − 手續費 − 退貨運費 − 稅金 − 物流運費 − 耗材'},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ret-d.tax-d.material)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
     ]},
   {key:'friday',since:'2026-08',title:'FriDay',color:'#0891b2',shops:['FriDay'],
