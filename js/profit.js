@@ -24316,6 +24316,7 @@ function pchomeAddOptlog(shop, sku, entry){ if(!shop||!sku) return;
   var by=(window.App&&window.App.currentUser&&window.App.currentUser.username)||'';
   map[sku].push({ id:'popt_'+Date.now()+'_'+Math.floor(Math.random()*100000), date:momoNowParts().date, time:momoNowParts().time, shop:shop, sku:sku, by:by, type:(entry&&entry.type)||'其他', note:(entry&&entry.note)||'' });
   pchomeSaveOptlog(shop, map);
+  try{ pchomeUpdateDailyProgress({silent:true}); }catch(e){}   // optlog 新增 → 工作日誌 pchome-summary 即時更新（照 momoAddOptlog 16639；編輯/新增/手動優化都經此 pchomeAddOptlog）
 }
 async function pchomeSyncOptlog(shop){   // read-merge-write：讀 app/pchome_optlog 的 shop 欄 → 合併 → 寫回；本機鏡像成合併結果（不重 _markPending）
   if(!window.__cloudPchomeOptlog) throw new Error('PChome 優化紀錄雲端層未就緒');
