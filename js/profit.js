@@ -24424,7 +24424,7 @@ function pchomeOrdersByBillingMonth(){ var map=pchomeLoadOrders(), out={};
   return out; }
 // 訂單明細合成「即時」entry（段0 rows；只未對帳月用）→ 給 pchomeProfitCalc（即時模式：營收=Σ成本小計/1.05、銷量=Σ下訂）
 function pchomeSynthEntryFromOrders(month, orders){
-  var rows=orders.map(function(o){ return { '廠商料號':o['料號']||'', '應付金額':(o['成本小計']||0), '數量':(o['下訂']||0), '商品名稱':o['商品名']||'', '規格名稱':o['規格']||'', '單位成本':(o['單位成本']||0), '商品編號':'', '出貨單號':'', '訂單編號-序號':o.key||'' }; });
+  var rows=orders.map(function(o){ return { '廠商料號':o['料號']||'', '應付金額':(o['成本小計']||0), '數量':(o['下訂']||0), '應出貨':(Number(o['應出貨'])||0), '商品名稱':o['商品名']||'', '規格名稱':o['規格']||'', '單位成本':(o['單位成本']||0), '商品編號':'', '出貨單號':'', '訂單編號-序號':o.key||'' }; });   // 應出貨＝已扣取消的可出貨量，供運費箱數/包材件數母體（未對帳估算排除取消/零出貨列）
   var 總額=rows.reduce(function(a,r){return a+(r['應付金額']||0);},0);
   return { 帳務月:month, 期間:'', segments:[{對帳項目:'訂單貨款明細 - 一般轉單', 總額:總額, rows:rows}], 對帳單:null, __fromOrders:true, __orderCount:orders.length };
 }
@@ -24882,9 +24882,13 @@ function pchomeEstFeeRate(shop){
 }
 // 批次維護即時預覽（新增/編輯共用）：只正向、兩行以內、白話。第 1 行＝估計淨利率＋30% 把關；第 2 行＝一句話說明。
 //   毛利率與「偏保守」原理只放估計淨利率的 title tooltip、不攤在畫面上。售價由供貨價÷0.75 回推（填進售價欄、可覆寫）。
-// 批次維護定價試算的「運費+包材」預設值（PChome 自付宅配通運費、PChome 對帳單沒有這筆 → 必須真的進估計淨利率）。
-//   暫定值；宅配通對帳單上傳上線後改為由實際資料計算近期每箱平均 + 包材 3。（運費 84 + 包材 3；包材固定 3、不開輸入格，比照 momo）
-var PCHOME_DEFAULT_SHIP_PACK=87;
+// PChome 自付物流成本常數（宅配通運費＋包材；PChome 對帳單沒有這兩筆，必須另算進淨利）。
+//   PCHOME_BOX_FREIGHT：每箱運費（未稅）。來源＝2026-09 宅配通實際 S60 最新費率。宅配通對帳單上傳上線後改為由實際資料計算近期每箱平均。
+//   PCHOME_PACKAGING_COST：每件包材（未稅）。
+//   PCHOME_DEFAULT_SHIP_PACK：批次維護定價試算「運費+包材」預設值＝每箱運費＋每件包材（單件單箱假設）；不再寫死 87。
+var PCHOME_BOX_FREIGHT=84;
+var PCHOME_PACKAGING_COST=3;
+var PCHOME_DEFAULT_SHIP_PACK=PCHOME_BOX_FREIGHT+PCHOME_PACKAGING_COST;
 function pchomeBatchPreviewHTML(cost, supply, est, shipPack){
   var esc=_momoEsc, net=(Number(supply)||0)/1.05, c=Number(cost)||0;
   var sp=Number(shipPack); if(!(sp>=0)) sp=0;   // 空/0/NaN → 0，預覽不壞（運費包材每件一份、未稅不除 1.05）
@@ -25895,6 +25899,23 @@ function pchomeProfitCalc(entry, shop){
   products.forEach(function(p){ var code=String(p.料號||'').trim(); if(!code) return;
     var psh=/寄倉/.test(String(p.shop||p.出貨方式||''))?'寄倉':'轉單'; if(psh!==shop) return;
     if(!bySku[code]) order.push(code); });
+  // ── 自付物流（宅配通運費 按箱＋包材 按件）：只「轉單」有；寄倉＝PChome 倉出貨、我方未付→兩項皆 0。退貨不減箱、不回沖包材。皆未稅、不除 1.05。
+  //   運費：一箱＝段0 一個不重複出貨單號；每箱 PCHOME_BOX_FREIGHT 按箱內各列營收比例分（單列全給、箱內皆0營收則均分）。無出貨單號列不算箱、不分運費。
+  //   包材：逐列 PCHOME_PACKAGING_COST × 該列出貨件數（段0 數量＝gross）。
+  var 運費By={}, 包材By={}, _boxN=0, _noShipRows=0, _packQty=0;
+  var _useOrderBox=!!(entry&&entry.__fromOrders);   // 未對帳合成月：synth 段0 無出貨單號 → 用訂單編號當箱（既有 __fromOrders 判定、與日曆月未對帳一致）
+  if(shop==='轉單'){ var _boxes={};
+    rows.forEach(function(r){ var code=String(r['廠商料號']||'').trim(); if(!code) return;
+      var packQ=_useOrderBox ? (Number(r['應出貨'])||0) : (Number(r['數量'])||0);   // 出貨件數：未對帳用應出貨(已扣取消)、已對帳用段0數量(已出貨)
+      if(packQ>0){ 包材By[code]=(包材By[code]||0)+PCHOME_PACKAGING_COST*packQ; _packQty+=packQ; }
+      if(_useOrderBox && !(packQ>0)){ _noShipRows++; return; }   // 未對帳：取消/零出貨列不算箱、不列包材（對齊段0 只含真的會出貨並列帳的）
+      var boxId=_useOrderBox ? String(r['訂單編號-序號']||'').trim().replace(/-[^-]*$/,'') : String(r['出貨單號']||'').trim();
+      if(!boxId){ _noShipRows++; return; }
+      (_boxes[boxId]=_boxes[boxId]||[]).push({code:code, rev:(Number(r['應付金額'])||0)/1.05}); });
+    Object.keys(_boxes).forEach(function(ship){ _boxN++; var list=_boxes[ship];
+      var sum=list.reduce(function(a,x){return a+Math.max(x.rev,0);},0);
+      list.forEach(function(x){ var share=(sum>0)?(PCHOME_BOX_FREIGHT*Math.max(x.rev,0)/sum):(PCHOME_BOX_FREIGHT/list.length); 運費By[x.code]=(運費By[x.code]||0)+share; }); });
+  }
   var skus=order.map(function(code){
     var o=bySku[code]||{料號:code,商品名:'',規格:'',營收:0,銷量:0,罰金:0,reconPN:'',單位成本:0};   // 零銷（不在 recon）→ 空業績殼
     var p=pBy[code], unit=(p&&p.cost!=null)?Number(p.cost):null, ck=(unit!=null);
@@ -25905,9 +25926,10 @@ function pchomeProfitCalc(entry, shop){
     // 逐列費用（未稅）＝罰金＋行銷推廣費＋退貨物流費＋簡訊費（皆逐筆歸屬、含稅）＋攤提（固定費/責任險/無法歸屬按營收比例攤、含稅）÷1.05。
     var 罰金HK=(o.罰金||0), 行銷HK=(o.行銷推廣費||0), 退物HK=(o.退貨物流費||0), 簡訊HK=(o.簡訊費||0), 攤提HK=(o.攤提||0);
     var 費用含稅=罰金HK+行銷HK+退物HK+簡訊HK+攤提HK, feeUntax=費用含稅/1.05;
+    var 運費_sku=運費By[code]||0, 包材_sku=包材By[code]||0, 費用合計=feeUntax+運費_sku+包材_sku;   // 平台費(未稅)＋自付運費(按箱)＋包材(按件)
     var costTotal=ck?unit*costQty:null;
     // 無業績（零銷）列：淨利/淨利率一律「—」——沒有營收就沒有淨利，比照缺成本口徑，不顯示誤導的 $0/0%。
-    var profit=(hasBiz&&ck)?(o.營收-costTotal-feeUntax):null, margin=(hasBiz&&ck&&o.營收>0)?profit/o.營收:null;
+    var profit=(hasBiz&&ck)?(o.營收-costTotal-費用合計):null, margin=(hasBiz&&ck&&o.營收>0)?profit/o.營收:null;
     var name=(p&&p.商品名)?p.商品名:o.商品名, spec=(p&&p.規格)?p.規格:o.規格;
     var reconPN=o.reconPN||'', listPN=(p&&p.商品編號)?String(p.商品編號).trim():'';   // 商品編號兩來源：對帳明細 vs 上架清單
     var pnMismatch=!!(reconPN&&listPN&&reconPN!==listPN);                                // 不一致→標示、不靜默挑一個
@@ -25917,7 +25939,7 @@ function pchomeProfitCalc(entry, shop){
     var discontinued=!!(p&&(!pchomeIsActive(p)||pchomeVanished(p,_latestExport)));   // 已下架＝商品狀態非上架 或 消失於清單（顯示層 toggle 控制；有售的下架品仍計入合計）
     return { 料號:code,商品名:name,規格:spec,商品編號:(reconPN||listPN),reconPN:reconPN,listPN:listPN,pnMismatch:pnMismatch,unitCost:unit,costKnown:ck,hasBiz:hasBiz,discontinued:discontinued,成本:costTotal,供貨價:supplyUntax,售價:price,營收:o.營收,銷量:o.銷量,退貨數量:retQty,費用:feeUntax,
       費用明細:{罰金:罰金HK,行銷推廣費:行銷HK,退貨物流費:退物HK,簡訊費:簡訊HK,攤提:攤提HK,含稅合計:費用含稅},   // tooltip 用（含稅、逐項；值 0 顯示層不列）
-      罰金含稅:o.罰金,淨利:profit,淨利率:margin };
+      運費:運費_sku,包材:包材_sku,費用合計:費用合計,罰金含稅:o.罰金,淨利:profit,淨利率:margin };
   });
   var totRev=skus.reduce(function(s,x){return s+x.營收;},0), totQty=skus.reduce(function(s,x){return s+x.銷量;},0);   // 零銷列 0 → 合計不變
   var totCost=skus.reduce(function(s,x){return s+(x.成本||0);},0);   // 零銷列 costTotal=unit×0=0 → 合計不變
@@ -25926,7 +25948,13 @@ function pchomeProfitCalc(entry, shop){
   var sumRowHK=skus.reduce(function(s,x){return s+((x.費用明細&&x.費用明細.含稅合計)||0);},0);
   var 守恆差=Math.round((sumRowHK+unalloc-dTotal)*100)/100;
   if(Math.abs(守恆差)>0.05) console.error('[PChome 費用守恆失敗] Σ逐列費用含稅('+sumRowHK.toFixed(2)+') + 未分攤('+unalloc.toFixed(2)+') − D('+dTotal.toFixed(2)+') = '+守恆差+'，請查攤提/歸屬邏輯');
-  var totProfit=totRev-totCost-feeUntaxTotal;   // 合計＝真實聚合（缺成本料號的營收計入、成本未計→偏樂觀，用缺成本數提示）
+  var totFreight=skus.reduce(function(s,x){return s+(x.運費||0);},0), totPack=skus.reduce(function(s,x){return s+(x.包材||0);},0);
+  var 費用合計Total=feeUntaxTotal+totFreight+totPack;   // 平台費(未稅)＋Σ運費＋Σ包材
+  if(shop==='轉單'){ var _fExp=_boxN*PCHOME_BOX_FREIGHT, _pExp=PCHOME_PACKAGING_COST*_packQty;
+    if(Math.abs(totFreight-_fExp)>0.05) console.error('[PChome 運費守恆失敗] Σ運費 '+totFreight.toFixed(2)+' ≠ 箱數×'+PCHOME_BOX_FREIGHT+' = '+_fExp);
+    if(Math.abs(totPack-_pExp)>0.05) console.error('[PChome 包材守恆失敗] Σ包材 '+totPack+' ≠ '+PCHOME_PACKAGING_COST+'×件數 = '+_pExp);
+    try{ console.log('%c[PChome 自付物流 '+shop+']','color:#0369a1;font-weight:700','箱數',_boxN,'｜無出貨單號列',_noShipRows,'｜運費',Math.round(totFreight),'(='+_boxN+'×'+PCHOME_BOX_FREIGHT+')','｜包材',totPack,'(='+PCHOME_PACKAGING_COST+'×'+_packQty+'件)'); }catch(e){} }
+  var totProfit=totRev-totCost-費用合計Total;   // 含自付物流（宅配通運費＋包材）
   // 缺成本數/納入占比：只算「有業績」列（零銷上架品不算缺成本）。缺成本＝有營收但無成本。
   var biz=skus.filter(function(x){return x.hasBiz;});
   var known=biz.filter(function(x){return x.costKnown;});
@@ -25934,7 +25962,7 @@ function pchomeProfitCalc(entry, shop){
   // 加權淨利率＝總淨利 ÷ 總營收（完全照 momo momoPeriodTotals 的 margin＝profit/rev；含未分攤費用、與總淨利卡同基準、兩卡對得起來）。
   //   ⚠ 口徑變更（2026-09）：舊版用 knownProfit/knownRev（缺成本不進分母），已改為 momo 公式 → 缺成本>0 時營收計入、成本未計 → 加權會偏高，由 missBanner 警示「可能高估」（不再說「不進分母」）。
   return { skus:skus, 未分攤:unalloc, 未分攤未稅:unalloc/1.05, dTotal:dTotal, dSource:dSource, feeState:feeState, penaltyUnattributed:penaltyUnattributed,
-    合計:{營收:totRev,銷量:totQty,成本:totCost,費用:feeUntaxTotal,淨利:totProfit},
+    合計:{營收:totRev,銷量:totQty,成本:totCost,費用:feeUntaxTotal,費用合計:費用合計Total,運費:totFreight,包材:totPack,淨利:totProfit},
     加權淨利率:(totRev>0?totProfit/totRev:null), 納入占比:(totRev>0?knownRev/totRev:null), 缺成本數:(biz.length-known.length),
     bizCount:biz.length, discCount:skus.filter(function(x){return x.discontinued;}).length, activeCount:skus.filter(function(x){return !x.discontinued;}).length,
     簡訊費推算:{列數:smsShipLineCount, 退貨物流筆數:smsReturnLogisticsCount, 推算:smsEst, 含稅:smsEst, 未稅:smsEst/1.05}, 簡訊費實際:smsActual,
@@ -25943,7 +25971,7 @@ function pchomeProfitCalc(entry, shop){
     費用池:{固定費:fixedPool, 責任險:責任險, 無法歸屬:unallocPool, 攤提池:攤提池, 攤提項目:攤提項目, 可歸屬含稅:attribHK, fixedKnown:fixedKnown}, mktWarnings:mktWarnings,   // 月對帳核對報告 + tooltip
     退貨未歸屬含稅:returnUnattributed,   // 段2 退貨對不到料號的金額（含稅、警示用；本期應為 0）
     estBreakdown:estBreakdown,   // 未對帳月費用估算明細（feeState==='估算' 時非 null；狀態橫幅用）
-    即時費用含稅:dTotal, 即時費用未稅:dTotal/1.05 };
+    即時費用含稅:dTotal, 即時費用未稅:dTotal/1.05, 宅配通:{箱數:_boxN,無出貨單號列:_noShipRows,運費:totFreight,包材:totPack,出貨件數:_packQty} };
 }
 // ── 總表渲染（完全照 momo 甲配：.mm-row/.mm-sel 期別控制、.mm-kpi 卡+vs上期 delta、.tscroll+.mm-ptbl+.mm-sticky-col 表、.tr-total 合計、$整數/1位%）──
 //   PChome 特有元素一律用 momo 既有 class 表達：未分攤=輕小計列、缺成本=.mm-banner-err、多入=.mm-cell-tag、本期未完=.mm-status、簡訊費推算=.mm-banner-warn。品牌色只在 .pf-pchome（pills/按鈕），表格/KPI 走 momo 中性色。
@@ -25951,6 +25979,11 @@ var _pchomeProfitMonth={};   // shop → 選中的帳務月（預設 latest）
 var _pchomeProfitSort={};    // shop → {col,dir} | null
 var _pchomeRenderedRows={};  // shop → {key,sorted,calc}：最近一次總表渲染結果，供「匯出 Excel」讀（匯出==畫面所見，照 momo _momoRenderedRows）
 function pchomePct(r){ return (r==null||!isFinite(r))?'—':((r*100).toFixed(1)+'%'); }
+// 費用 tooltip 的自付物流尾段（運費/包材；值 0 不列）。假設單件單箱＝偏保守（常併箱時每件運費更低）。
+function pchomeLogiTipLines(x){ var L=[];
+  if((x.運費||0)>0.005) L.push('運費 '+pchomeMoney(x.運費)+'（宅配通，按箱營收比例分攤；單獨一箱寄出之假設，併箱時更低）');
+  if((x.包材||0)>0.005) L.push('包材 '+pchomeMoney(x.包材)+'（'+PCHOME_PACKAGING_COST+' × 出貨 '+Math.round((x.包材||0)/PCHOME_PACKAGING_COST)+' 件）');
+  return L.length?('\n───────\n'+L.join('\n')+'\n＝ 費用合計 '+pchomeMoney(x.費用合計)+'（未稅）'):''; }
 function pchomeSetProfitMonth(shop,key){ _pchomeProfitMonth[shop]=key; pchomeRenderSub(shop); }
 function pchomeProfitSetSort(shop,col){ var c=_pchomeProfitSort[shop]; _pchomeProfitSort[shop]=(!c||c.col!==col)?{col:col,dir:'desc'}:(c.dir==='desc'?{col:col,dir:'asc'}:null); pchomeRenderSub(shop); }   // 點欄名切換 desc→asc→取消（比照 momoProfitSetSort）
 // ══════════ PChome 總表：欄位管理 + 標籤 + 篩選（全部照 momo 甲配，pchome- 前綴、沿用共用 col-picker/mm-fp CSS 與 momoUiW 欄寬 helper）══════════
@@ -25962,7 +25995,7 @@ var PCHOME_PROFIT_COLS=[
   {k:'price',label:'售價',w:100,fmt:'money',info:'消費者看到的網路價（上架清單，含稅、不進帳僅參考）；清單無此料號顯示「—」'},
   {k:'revenue',label:'營收',w:118,fmt:'money',info:'未稅＝應付金額÷1.05'},
   {k:'qty',label:'銷量',w:78,fmt:'num'},
-  {k:'fee',label:'費用',w:110,fmt:'money',info:'未稅；含歸該 SKU 的罰金'},
+  {k:'fee',label:'費用',w:110,fmt:'money',info:'未稅；平台費（罰金/行銷/退物/簡訊/攤提）＋自付運費（宅配通按箱分攤）＋包材（每件 3）'},
   {k:'profit',label:'淨利',w:118,fmt:'money',info:'營收未稅−成本−費用未稅；本期零銷或缺成本顯「—」'},
   {k:'margin',label:'淨利率',w:90,fmt:'pct1'},
   {k:'tags',label:'標籤',w:150,left:true,info:'依嚴重度顯示最該注意的一個標籤，其餘收「+N」、hover 看全部。用上方「🏷 標籤 / 篩選」可依標籤篩選。'},
@@ -26313,7 +26346,7 @@ function pchomeCalendarCalc(calMonth, shop){
   if(shop==='轉單'){
     Object.keys(orders).forEach(function(k){ var o=orders[k]||{}; if(pchomeCalMonthOf(o['轉單日期'])!==calMonth) return;
       var code=String(o['料號']||'').trim(); if(!code) return; var s=ensure(code);
-      s.營收+=(Number(o['成本小計'])||0)/1.05; s.銷量+=(Number(o['下訂'])||0);
+      s.營收+=(Number(o['成本小計'])||0)/1.05; s.銷量+=(Number(o['下訂'])||0); s.出貨=(s.出貨||0)+(Number(o['應出貨'])||0);   // 出貨件數(應出貨)供包材；銷量(下訂)口徑不動
       if(!s.商品名){ s.商品名=o['商品名']||''; s.規格=o['規格']||''; }
       if(!s.單位成本) s.單位成本=Number(o['單位成本'])||0;
       if((Number(o['應出貨'])||0)>0) s.簡訊費+=1;   // 出貨列 ×1（甲公式，與未對帳估算同源；含稅、×1 元）
@@ -26372,6 +26405,21 @@ function pchomeCalendarCalc(calMonth, shop){
     var psh=/寄倉/.test(String(p.shop||p.出貨方式||''))?'寄倉':'轉單'; if(psh!==shop) return;
     if(!bySku[code]){ order.push(code); } });
 
+  // ── 自付運費（混合）：已對帳→段0 出貨單號當箱（權威）；未對帳→訂單明細不重複訂單編號當箱（估算）。
+  //   每箱 PCHOME_BOX_FREIGHT 按箱內各列營收比例分，各列份額依自己的轉單日期落日曆月（跨月的箱自然 split、守恆）。只「轉單」。寄倉＝0。
+  var 運費By={}, _boxCount=0;
+  if(shop==='轉單'){ var reconKeys=pchomeReconOrderKeys(), boxMonth={};
+    Object.keys(recon).forEach(function(bm){ var segs=(recon[bm]||{}).segments||[]; var rws=((segs[PCHOME_SEG['轉單']]||{rows:[]}).rows)||[];
+      rws.forEach(function(r){ var ship=String(r['出貨單號']||'').trim(), code=String(r['廠商料號']||'').trim(); if(!ship||!code) return;
+        var cm=pchomeCalMonthOf(r['轉單日期'])||bm; (boxMonth['S:'+ship]=boxMonth['S:'+ship]||[]).push({code:code,rev:(Number(r['應付金額'])||0)/1.05,cm:cm}); }); });
+    Object.keys(orders).forEach(function(k){ if(reconKeys[k]) return; var o=orders[k]||{}; var code=String(o['料號']||'').trim(); if(!code) return;
+      if(!((Number(o['應出貨'])||0)>0)) return;   // 排除取消/零出貨訂單（對齊段0 母體）
+      var cm=pchomeCalMonthOf(o['轉單日期']); if(!cm) return; var ordNo=String(o['訂單編號']||'').trim()||k;
+      (boxMonth['O:'+ordNo]=boxMonth['O:'+ordNo]||[]).push({code:code,rev:(Number(o['成本小計'])||0)/1.05,cm:cm}); });
+    Object.keys(boxMonth).forEach(function(bid){ _boxCount++; var list=boxMonth[bid];
+      var sum=list.reduce(function(a,x){return a+Math.max(x.rev,0);},0);
+      list.forEach(function(x){ if(x.cm!==calMonth) return; var share=(sum>0)?(PCHOME_BOX_FREIGHT*Math.max(x.rev,0)/sum):(PCHOME_BOX_FREIGHT/list.length); 運費By[x.code]=(運費By[x.code]||0)+share; }); }); }
+
   // 逐列（照 pchomeProfitCalc 的 skus.map；費用含稅÷1.05）
   var skus=order.map(function(code){
     var o=bySku[code]||{料號:code,商品名:'',規格:'',營收:0,銷量:0,單位成本:0,reconPN:'',罰金:0,行銷推廣費:0,退貨物流費:0,簡訊費:0,攤提:0,退貨數量:0};
@@ -26381,8 +26429,9 @@ function pchomeCalendarCalc(calMonth, shop){
     var costQty=PCHOME_RETURN_COST_REVERSAL?(o.銷量||0):grossQty;
     var 罰金HK=(o.罰金||0),行銷HK=(o.行銷推廣費||0),退物HK=(o.退貨物流費||0),簡訊HK=(o.簡訊費||0),攤提HK=(o.攤提||0);
     var 費用含稅=罰金HK+行銷HK+退物HK+簡訊HK+攤提HK, feeUntax=費用含稅/1.05;
+    var 運費_sku=運費By[code]||0, 包材_sku=(shop==='轉單')?PCHOME_PACKAGING_COST*(o.出貨||0):0, 費用合計=feeUntax+運費_sku+包材_sku;   // 包材＝3×出貨件數(應出貨)、非下訂
     var costTotal=ck?unit*costQty:null;
-    var profit=(hasBiz&&ck)?(o.營收-costTotal-feeUntax):null, margin=(hasBiz&&ck&&o.營收>0)?profit/o.營收:null;
+    var profit=(hasBiz&&ck)?(o.營收-costTotal-費用合計):null, margin=(hasBiz&&ck&&o.營收>0)?profit/o.營收:null;
     var name=(p&&p.商品名)?p.商品名:o.商品名, spec=(p&&p.規格)?p.規格:o.規格;
     var listPN=(p&&p.商品編號)?String(p.商品編號).trim():''; var reconPN=o.reconPN||'';
     var supplyUntax=(o.單位成本>0)?o.單位成本/1.05:((p&&Number(p.供貨價)>0)?Number(p.供貨價)/1.05:null);
@@ -26390,18 +26439,21 @@ function pchomeCalendarCalc(calMonth, shop){
     var discontinued=!!(p&&(!pchomeIsActive(p)||pchomeVanished(p,_latestExport)));
     return { 料號:code,商品名:name,規格:spec,商品編號:(reconPN||listPN),reconPN:reconPN,listPN:listPN,pnMismatch:false,unitCost:unit,costKnown:ck,hasBiz:hasBiz,discontinued:discontinued,成本:costTotal,供貨價:supplyUntax,售價:price,營收:o.營收,銷量:o.銷量,退貨數量:retQty,費用:feeUntax,
       費用明細:{罰金:罰金HK,行銷推廣費:行銷HK,退貨物流費:退物HK,簡訊費:簡訊HK,攤提:攤提HK,含稅合計:費用含稅},
-      罰金含稅:o.罰金,淨利:profit,淨利率:margin };
+      運費:運費_sku,包材:包材_sku,費用合計:費用合計,罰金含稅:o.罰金,淨利:profit,淨利率:margin };
   });
   var totRev=skus.reduce(function(s,x){return s+x.營收;},0), totQty=skus.reduce(function(s,x){return s+x.銷量;},0);
   var totCost=skus.reduce(function(s,x){return s+(x.成本||0);},0);
   var dTotalHK=skus.reduce(function(s,x){return s+((x.費用明細&&x.費用明細.含稅合計)||0);},0);   // Σ逐列費用含稅（含攤提）
   var feeUntaxTotal=dTotalHK/1.05;
-  var totProfit=totRev-totCost-feeUntaxTotal;
+  var totFreight=skus.reduce(function(s,x){return s+(x.運費||0);},0), totPack=skus.reduce(function(s,x){return s+(x.包材||0);},0);
+  var 費用合計Total=feeUntaxTotal+totFreight+totPack;
+  if(shop==='轉單'){ try{ console.log('%c[PChome 自付物流·日曆月 '+calMonth+']','color:#0369a1','箱估計',_boxCount,'｜運費',Math.round(totFreight),'｜包材',totPack); }catch(e){} }
+  var totProfit=totRev-totCost-費用合計Total;
   var biz=skus.filter(function(x){return x.hasBiz;});
   var known=biz.filter(function(x){return x.costKnown;});
   var knownRev=known.reduce(function(s,x){return s+x.營收;},0);
   return { skus:skus, 未分攤:0, 未分攤未稅:0, dTotal:dTotalHK, dSource:'calendar', feeState:(fixedKnown?'日曆月':'日曆月未完'), penaltyUnattributed:0,
-    合計:{營收:totRev,銷量:totQty,成本:totCost,費用:feeUntaxTotal,淨利:totProfit},
+    合計:{營收:totRev,銷量:totQty,成本:totCost,費用:feeUntaxTotal,費用合計:費用合計Total,運費:totFreight,包材:totPack,淨利:totProfit},
     加權淨利率:(totRev>0?totProfit/totRev:null), 納入占比:(totRev>0?knownRev/totRev:null), 缺成本數:(biz.length-known.length),
     bizCount:biz.length, discCount:skus.filter(function(x){return x.discontinued;}).length, activeCount:skus.filter(function(x){return !x.discontinued;}).length,
     費用池:{固定費:fixedHK, 責任險:0, 無法歸屬:unallocHK, 攤提池:攤提池, 攤提項目:攤提項目, 可歸屬含稅:(dTotalHK-攤提池), fixedKnown:fixedKnown},
@@ -26481,7 +26533,7 @@ function pchomeCalendarTabHTML(shop, months, key, modeToggle){
     if(m.退貨物流費>0) parts.push('退貨物流費 '+pchomeMoney(m.退貨物流費)+'（逐筆）');
     if(m.簡訊費>0) parts.push('簡訊費 '+pchomeMoney(m.簡訊費)+'（逐筆）');
     if(m.攤提>0){ parts.push('攤提 '+pchomeMoney(m.攤提)+'（固定費按營收比例攤）'); var items=(calc.費用池&&calc.費用池.攤提項目)||[]; if(items.length) parts.push('　　'+items.join('・')); }
-    if(!parts.length) return '本月無平台費用'; return parts.join('\n')+'\n───────\n含稅合計 '+pchomeMoney(m.含稅合計)+' ÷ 1.05 ＝ '+pchomeMoney(x.費用)+'（未稅）'; };
+    var plat=parts.length?(parts.join('\n')+'\n───────\n平台費含稅合計 '+pchomeMoney(m.含稅合計)+' ÷ 1.05 ＝ '+pchomeMoney(x.費用)+'（未稅）'):'本月無平台費用'; return plat+pchomeLogiTipLines(x); };
   var cell=function(c,x){ switch(c.k){
       case 'name': return nameCell(x);
       case 'unitCost': return x.costKnown?('<td style="text-align:right" title="單價 '+pchomeMoney(x.unitCost)+' × 銷量 '+x.銷量+' ＝ '+pchomeMoney(x.成本)+'">'+pchomeMoney(x.unitCost)+'</td>'):dashCell;
@@ -26489,7 +26541,7 @@ function pchomeCalendarTabHTML(shop, months, key, modeToggle){
       case 'price': return x.售價!=null?num(x.售價):dashCell;
       case 'revenue': return num(x.營收);
       case 'qty': return '<td style="text-align:right">'+pchomeNum(x.銷量)+'</td>';
-      case 'fee': return (x.費用>0.005)?('<td style="text-align:right" title="'+esc(feeTip(x))+'">'+pchomeMoney(x.費用)+'</td>'):dashCell;
+      case 'fee': return (x.費用合計>0.005)?('<td style="text-align:right" title="'+esc(feeTip(x))+'">'+pchomeMoney(x.費用合計)+'</td>'):dashCell;
       case 'profit': return x.淨利==null?dashCell:num(x.淨利, x.淨利<0?'#ef4444':'');
       case 'margin': var mg=(x.淨利率==null)?'#c7cad1':(x.淨利率<0?'#ef4444':(x.淨利率>=0.25?'#10b981':'#374151')); return '<td style="text-align:right;color:'+mg+'">'+pchomePct(x.淨利率)+'</td>';
       case 'tags': return '<td class="tl">'+pchomeTagChipHTML(tagBy[x.料號]||[])+'</td>';
@@ -26501,7 +26553,7 @@ function pchomeCalendarTabHTML(shop, months, key, modeToggle){
       case 'unitCost': return '<td style="text-align:right">'+(T.成本?pchomeMoney(T.成本):'—')+'</td>';
       case 'revenue': return num(T.營收);
       case 'qty': return '<td style="text-align:right">'+pchomeNum(T.銷量)+'</td>';
-      case 'fee': return num(T.費用);
+      case 'fee': return num(T.費用合計);
       case 'profit': return num(T.淨利, T.淨利<0?'#ef4444':'');
       case 'margin': return '<td style="text-align:right;color:'+(totMargin==null?'#c7cad1':(totMargin<0?'#ef4444':'#374151'))+'">'+pchomePct(totMargin)+'</td>';
       default: return dashCell; } };
@@ -26563,7 +26615,7 @@ function pchomeProfitTabHTML(shop){
   var kc=function(label,info,val,valColor,d){ return '<div class="mm-kpi"><div class="mm-kpi-l">'+label+(info?' <span class="mm-info" title="'+esc(info)+'">?</span>':'')+'</div><div class="mm-kpi-v"'+(valColor?' style="color:'+valColor+'"':'')+'>'+val+'</div><div class="mm-kpi-d" style="color:'+d.color+'">'+d.txt+'<span class="base"> vs '+esc(prevLbl)+'</span></div></div>'; };
   var kpi='<div class="mm-kpis">'
     +kc('總營收', '該期所有商品營收合計。（未稅）', pchomeMoney(T.營收), '', kdPct(T.營收, prevT?prevT.營收:null))
-    +kc('總淨利', '該期所有商品淨利合計。已扣 PChome 平台費用（D 手續費＋罰金）與商品成本。（未稅）', pchomeMoney(T.淨利), '', kdPct(T.淨利, prevT?prevT.淨利:null))
+    +kc('總淨利', '該期所有商品淨利合計。已扣 PChome 平台費用（D 手續費＋罰金）、商品成本、與我方自付的宅配通運費（按箱）＋包材（按件）。（未稅）', pchomeMoney(T.淨利), '', kdPct(T.淨利, prevT?prevT.淨利:null))
     +kc('加權淨利率', wmTip, (wm==null)?'—':pchomePct(wm), wmColor, wmDelta)
     +kc('總銷量', '', pchomeNum(T.銷量)+' 件', '', kdPct(T.銷量, prevT?prevT.銷量:null))
     +kc('動銷率', '本期有銷售的商品數 ÷（目前上架 ∪ 本期有售）。分子＝本期有賣出（不論上下架）；分母＝目前上架＋「本期有賣但已下架」；長期下架又沒賣的不進分母。分子必為分母子集、不超過 100%。', dxVal, '', dxDelta)
@@ -26633,8 +26685,7 @@ function pchomeProfitTabHTML(shop){
     if(m.攤提>0){ parts.push('攤提 '+pchomeMoney(m.攤提)+'（按營收比例攤）');
       var items=(calc.費用池&&calc.費用池.攤提項目)||[];   // 攤提含哪些費用（只名稱、當期 0 不列）
       if(items.length) parts.push('　　'+items.join('・')); }
-    if(!parts.length) return '本期無平台費用';
-    return parts.join('\n')+'\n───────\n含稅合計 '+pchomeMoney(m.含稅合計)+' ÷ 1.05 ＝ '+pchomeMoney(x.費用)+'（未稅）'; };
+    var plat=parts.length?(parts.join('\n')+'\n───────\n平台費含稅合計 '+pchomeMoney(m.含稅合計)+' ÷ 1.05 ＝ '+pchomeMoney(x.費用)+'（未稅）'):'本期無平台費用'; return plat+pchomeLogiTipLines(x); };
   // 逐欄 cell renderer（key→td），body/未分攤/合計 共用；重排/隱藏都對得上（保留原本的缺成本→—、淨利率上色邏輯）。
   var cell=function(c,x){
     switch(c.k){
@@ -26644,7 +26695,7 @@ function pchomeProfitTabHTML(shop){
       case 'price': return x.售價!=null?num(x.售價):dashCell;
       case 'revenue': return num(x.營收);
       case 'qty': return '<td style="text-align:right">'+pchomeNum(x.銷量)+'</td>';
-      case 'fee': return (x.費用>0.005)?('<td style="text-align:right" title="'+esc(feeTip(x))+'">'+pchomeMoney(x.費用)+'</td>'):dashCell;
+      case 'fee': return (x.費用合計>0.005)?('<td style="text-align:right" title="'+esc(feeTip(x))+'">'+pchomeMoney(x.費用合計)+'</td>'):dashCell;
       case 'profit': return x.淨利==null?dashCell:num(x.淨利, x.淨利<0?'#ef4444':'');
       case 'margin': var mg=(x.淨利率==null)?'#c7cad1':(x.淨利率<0?'#ef4444':(x.淨利率>=0.25?'#10b981':'#374151')); return '<td style="text-align:right;color:'+mg+'">'+pchomePct(x.淨利率)+'</td>';
       case 'tags': return '<td class="tl">'+pchomeTagChipHTML(tagBy[x.料號]||[])+'</td>';
@@ -26670,7 +26721,7 @@ function pchomeProfitTabHTML(shop){
       case 'unitCost': return '<td style="text-align:right">'+(T.成本?pchomeMoney(T.成本):'—')+'</td>';
       case 'revenue': return num(T.營收);
       case 'qty': return '<td style="text-align:right">'+pchomeNum(T.銷量)+'</td>';
-      case 'fee': return num(T.費用);
+      case 'fee': return num(T.費用合計);
       case 'profit': return num(T.淨利, T.淨利<0?'#ef4444':'');
       case 'margin': return '<td style="text-align:right;color:'+(totMargin==null?'#c7cad1':(totMargin<0?'#ef4444':'#374151'))+'">'+pchomePct(totMargin)+'</td>';
       default: return dashCell;
@@ -26703,7 +26754,7 @@ function pchomeExportExcel(shop){
       (x.售價!=null)?x.售價:'',
       x.營收,                                // 完整精度未稅營收
       x.銷量,
-      (x.罰金含稅>0)?x.費用:'',              // 逐列費用＝歸該 SKU 罰金(未稅)；無罰金→空（畫面顯「—」）
+      (x.費用合計>0.005)?x.費用合計:'',       // 逐列費用（未稅）＝平台費＋自付運費(按箱)＋包材(按件)；比照畫面費用欄
       (x.淨利!=null)?x.淨利:'',
       (x.淨利率!=null)?x.淨利率*100:''        // 比率→百分比數值（完整精度，非四捨五入到一位）
     ]);
@@ -26717,7 +26768,7 @@ function pchomeExportExcel(shop){
   }
   // 合計列（供貨價/售價是單價、加總無意義→空；淨利率＝合計淨利÷合計營收）
   var totMargin=(T.營收>0)?T.淨利/T.營收*100:'';
-  aoa.push(['','','合計','', (T.成本>0?T.成本:''), '', '', T.營收, T.銷量, T.費用, T.淨利, totMargin]);
+  aoa.push(['','','合計','', (T.成本>0?T.成本:''), '', '', T.營收, T.銷量, T.費用合計, T.淨利, totMargin]);
   try{
     var ws=XLSX.utils.aoa_to_sheet(aoa);
     var wb=XLSX.utils.book_new();
