@@ -9428,7 +9428,9 @@ const KPI_GROUPS=[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ship,desc:'純利 = 營收 − 商品成本 − 手續費 − 運費'},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ship)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
     ]},
-  {key:'website',title:'官網',color:'#2f9e5c',shops:['官網'],
+  // closedFrom（2026-10-15）：官網 2026-05 起關站。這個月（含）以後：計算一律當 0（不讀存的值）、填寫進度算已完成、
+  //   填寫模式顯示「已關站」、總覽列顯示「已關站」。之前的月份完全不變。見 _kpiGroupClosed。
+  {key:'website',title:'官網',color:'#2f9e5c',shops:['官網'],closedFrom:'2026-05',
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ship',l:'運費'}],
     formula:[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ship,desc:'純利 = 營收 − 商品成本 − 手續費 − 運費'},
@@ -9830,6 +9832,8 @@ function _kpiFillSlots(row,group){
   const slots=[];const seen=new Set();
   // group.since（例：新通路 '2026-08'）之前的月份 → 0 格（不列入進度，也不會顯示「暫」「未完成」）
   if(group.since&&row&&row.month&&row.month<group.since)return slots;
+  // 關站之後的月份：格子照算、一律算已填（不會出現待填／琥珀色虛線）
+  if(row&&_kpiGroupClosed(group,row.month)){group.shops.forEach(shop=>group.manual.forEach(f=>slots.push({shops:[shop],field:f.k,filled:true})));return slots;}
   const box=(row&&row[group.key])||{};
   group.shops.forEach(shop=>{
     // shopSince：這家店在 shopSince 之前的月份 0 格（只影響進度計算與共用格生效；
@@ -10049,14 +10053,15 @@ function _kpiChannelTableHtml(row,prevRow){
     +'<div class="kc-c"></div></div>'
     +line('kc-h2','',['通路','本月','較上月','本月','較上月','本月','較上月','填寫進度']);
   const body=KPI_GROUPS.map(g=>{
-    const cur=_kpiGroupT(row,g),prev=_kpiGroupT(prevRow,g),cc=cmpCells(cur,prev);
+    const closed=_kpiGroupClosed(g,month);
+    const cur=_kpiGroupT(row,g),prev=_kpiGroupT(prevRow,g),cc=closed?{rev:'',pure:'',pp:''}:cmpCells(cur,prev);
     const open=_kpiExpandedGroups.has(month+':'+g.key);
     let html=line('kc-ch'+(open?' open':''),' onclick="toggleKpiGroup(\''+month+'\',\''+g.key+'\')" title="點擊展開／收合各店"',[
       '<span class="kc-caret">▸</span><span class="km-dot" style="background:'+g.color+'"></span>'+g.title,
       '<span class="'+neg(cur.rev).trim()+'">'+_kpiMoney(cur.rev)+'</span>',cc.rev,
       '<span class="'+neg(cur.pure).trim()+'">'+_kpiMoney(cur.pure)+'</span>',cc.pure,
       cur.rev>0?_kpiRatePct(cur.rate):'—',cc.pp,
-      _kpiFillBadge(_kpiFillCount(row,g)),
+      closed?`<span class="km-badge km-badge-off" title="${_kpiClosedLabel(g)}">已關站</span>`:_kpiFillBadge(_kpiFillCount(row,g)),
     ]);
     if(open){
       g.shops.forEach((s,i)=>{
@@ -10289,7 +10294,7 @@ function _kpiFillHtml(row){
     <aside class="km-side">${side}</aside>
     <div class="km-fill-main">
       <div class="km-fill-title"><span class="km-dot" style="background:${group.color}"></span>${group.title}<span class="km-fill-sub">${month.replace('-','/')} · ${fc.total?`已填 ${fc.filled} / ${fc.total} 格`:`${group.since.replace('-','/')} 起才列入填寫進度（這個月可以填，但不算缺格）`}</span>${autoBtn}</div>
-      <div class="km-tablewrap"><table class="km-table km-ftable"><thead>${head}</thead><tbody>${body}${commonRow}${subRow}</tbody></table></div>
+      ${_kpiGroupClosed(group,month)?`<div class="km-closed">${_kpiClosedLabel(group)}，這個月不用填</div>`:`<div class="km-tablewrap"><table class="km-table km-ftable"><thead>${head}</thead><tbody>${body}${commonRow}${subRow}</tbody></table></div>`}
       <div class="km-foot"><span class="km-foot-l">每格打完就存到雲端 · 最後編輯：${le?_kpiEscAttr(le.by||'?')+' '+_kpiFmtTime(le.t):'—'}</span>${nextBtn}</div>
     </div>
   </div>`;
@@ -11349,7 +11354,12 @@ function _kpiMergeShare(row,group,field,st,shop){
 //     2026-08-26 之前兩者【都】無條件歸 0，那時 mo+ 那筆寄倉運費全站一格都沒扣。
 //   ⚠ 多收 row：攤提必須知道同群組其他通路的分母欄位，而公式求值當下拿不到
 //     （KPI_GROUPS 裡的 calc 只收單一通路的 d）。四個呼叫端都已經有 row 在 scope。
+// 通路關站：month >= group.closedFrom（例：官網 2026-05 起）。
+function _kpiGroupClosed(group,month){return !!(group&&group.closedFrom&&month&&month>=group.closedFrom);}
+function _kpiClosedLabel(group){return '已關站（'+group.closedFrom.replace('-','/')+' 起）';}
 function _kpiRawForCalc(raw,group,shop,row){
+  // 關站之後的月份：所有手填欄位一律當 0（不讀雲端存的值）→ 營收、成本、純利都是 0
+  if(row&&_kpiGroupClosed(group,row.month)){const z={};group.manual.forEach(f=>{z[f.k]=0;});return z;}
   if(!group.fieldMerge&&!group.autoFill)return raw;
   const patch={};
   Object.keys(group.fieldMerge||{}).forEach(f=>{
@@ -11587,7 +11597,8 @@ function _kpiYearViewHtml(){
     <div class="ky-share" title="各通路營收佔比">${bar}</div></div>`;
   // ── 各通路純利率走勢 ──
   const lastM=model.settled[N-1],firstM=model.settled[0];
-  const rcard=(key,title,color,series,dashed)=>{
+  const rcard=(key,title,color,series,dashed,closed)=>{
+    if(closed)return `<div class="ky-rc" data-key="${key}" style="--c:${color}" title="${_kpiEscAttr(closed)}"><div class="ky-rc-h"><i></i>${title}</div><div class="ky-rc-v ky-rc-closed">已關站</div><div class="ky-rc-d">&nbsp;</div></div>`;
     const pts=model.settled.map(m=>series[m-1]).filter(r=>r!=null);
     const last=pts.length?pts[pts.length-1]:null,first=pts.length?pts[0]:null;
     const d=(last!=null&&first!=null&&pts.length>1)?last-first:null;
@@ -11595,7 +11606,8 @@ function _kpiYearViewHtml(){
       <div class="ky-rc-v">${last!=null?last.toFixed(1)+'%':'—'}</div>
       <div class="ky-rc-d ${d==null?'':d>=0?'up':'down'}">${d==null?'&nbsp;':(d>=0?'▲ ':'▼ ')+Math.abs(d).toFixed(1)+' pp'}</div></div>`;
   };
-  const rcards=model.groups.map(g=>rcard(g.key,g.title,g.color,g.monthRate,false)).join('')+rcard('__avg','全通路平均','#9ca3af',model.monthTotal.map(t=>t?t.rate:null),true);
+  const lastYM=`${model.year}-${String(lastM).padStart(2,'0')}`;
+  const rcards=model.groups.map(g=>{const kg=KPI_GROUPS.find(x=>x.key===g.key);return rcard(g.key,g.title,g.color,g.monthRate,false,_kpiGroupClosed(kg,lastYM)?_kpiClosedLabel(kg):null);}).join('')+rcard('__avg','全通路平均','#9ca3af',model.monthTotal.map(t=>t?t.rate:null),true);
   const trend=`<div class="ky-panel ky-p-trend">
     <div class="ky-tr-t">各通路純利率走勢</div>
     <div class="ky-rcards" style="--n:${model.groups.length+1}" title="最新月份（${lastM} 月）純利率；變化＝跟 ${firstM} 月比">${rcards}</div>

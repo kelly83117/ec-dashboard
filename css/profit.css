@@ -1825,3 +1825,7 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .ky-mt tbody tr:hover td,.ky-mt tbody tr:hover th{background:#f5f7ff;}
 .ky-mt tr.ky-mt-year td,.ky-mt tr.ky-mt-year th{background:#f3f4f6;font-weight:800;border-top:2px solid #cbd5e1;}
 .ky-mt tr.ky-mt-year td.ky-mt-r{font-weight:700;}
+
+/* 通路關站（2026-10-15，官網 2026-05 起）：填寫模式整區灰底提示、年度總表數字卡 */
+.km-closed{padding:28px 16px;border:1px dashed #d1d5db;border-radius:10px;background:#f3f4f6;color:#6b7280;font-size:13px;font-weight:600;text-align:center;}
+.ky-rc-v.ky-rc-closed{font-size:14px;font-weight:700;color:#9ca3af;}
