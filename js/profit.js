@@ -24422,9 +24422,13 @@ function pchomeOrderCancel(shop){ _pchomeOrderPending[shop]=null; var box=docume
 function pchomeOrdersByBillingMonth(){ var map=pchomeLoadOrders(), out={};
   Object.keys(map).forEach(function(k){ var o=map[k]; var bm=pchomeBillingMonth(o['轉單日期']||''); if(!bm) return; (out[bm]=out[bm]||[]).push(o); });
   return out; }
-// 訂單明細合成「即時」entry（段0 rows；只未對帳月用）→ 給 pchomeProfitCalc（即時模式：營收=Σ成本小計/1.05、銷量=Σ下訂）
+// 訂單明細合成「即時」entry（段0 rows；只未對帳月用）→ 給 pchomeProfitCalc（即時模式：營收/銷量＝應出貨口徑＝下訂−取消）
 function pchomeSynthEntryFromOrders(month, orders){
-  var rows=orders.map(function(o){ return { '廠商料號':o['料號']||'', '應付金額':(o['成本小計']||0), '數量':(o['下訂']||0), '應出貨':(Number(o['應出貨'])||0), '商品名稱':o['商品名']||'', '規格名稱':o['規格']||'', '單位成本':(o['單位成本']||0), '商品編號':'', '出貨單號':'', '訂單編號-序號':o.key||'' }; });   // 應出貨＝已扣取消的可出貨量，供運費箱數/包材件數母體（未對帳估算排除取消/零出貨列）
+  // 未對帳合成月口徑：營收/銷量用【應出貨＝下訂−取消】（與運費箱母體同一套），整筆取消→0、不灌高淨利率。
+  //   成本小計＝單位成本×下訂（未扣取消，實測），故營收＝成本小計×應出貨/下訂（非取消列 factor=1、數字不變；取消列歸 0）。
+  var rows=orders.map(function(o){ var _dz=Number(o['下訂'])||0, _sh=Number(o['應出貨'])||0;
+    return { '廠商料號':o['料號']||'', '應付金額':((_dz>0)?(Number(o['成本小計'])||0)*_sh/_dz:0), '數量':_sh, '應出貨':_sh, '商品名稱':o['商品名']||'', '規格名稱':o['規格']||'', '單位成本':(o['單位成本']||0), '商品編號':'', '出貨單號':'', '訂單編號-序號':o.key||'' }; });
+  try{ var _td=0,_tx=0,_excl=0; orders.forEach(function(o){ _td+=Number(o['下訂'])||0; _tx+=Number(o['取消'])||0; if(!((Number(o['應出貨'])||0)>0)) _excl++; }); var _tsh=rows.reduce(function(a,r){return a+(r['數量']||0);},0); console.log('%c[PChome 合成月 '+month+']','color:#0369a1;font-weight:700','銷量(應出貨)',_tsh,'｜下訂',_td,'−取消',_tx,'=',(_td-_tx),'｜排除(應出貨≤0)列',_excl); }catch(e){}
   var 總額=rows.reduce(function(a,r){return a+(r['應付金額']||0);},0);
   return { 帳務月:month, 期間:'', segments:[{對帳項目:'訂單貨款明細 - 一般轉單', 總額:總額, rows:rows}], 對帳單:null, __fromOrders:true, __orderCount:orders.length };
 }
@@ -26346,7 +26350,8 @@ function pchomeCalendarCalc(calMonth, shop){
   if(shop==='轉單'){
     Object.keys(orders).forEach(function(k){ var o=orders[k]||{}; if(pchomeCalMonthOf(o['轉單日期'])!==calMonth) return;
       var code=String(o['料號']||'').trim(); if(!code) return; var s=ensure(code);
-      s.營收+=(Number(o['成本小計'])||0)/1.05; s.銷量+=(Number(o['下訂'])||0); s.出貨=(s.出貨||0)+(Number(o['應出貨'])||0);   // 出貨件數(應出貨)供包材；銷量(下訂)口徑不動
+      var _dz=Number(o['下訂'])||0, _sh=Number(o['應出貨'])||0;   // 日曆月(訂單明細)口徑＝應出貨(下訂−取消)；與帳務月段0(已對帳)無關、不碰段0
+      s.營收+=((_dz>0)?(Number(o['成本小計'])||0)*_sh/_dz:0)/1.05; s.銷量+=_sh; s.出貨=(s.出貨||0)+_sh;
       if(!s.商品名){ s.商品名=o['商品名']||''; s.規格=o['規格']||''; }
       if(!s.單位成本) s.單位成本=Number(o['單位成本'])||0;
       if((Number(o['應出貨'])||0)>0) s.簡訊費+=1;   // 出貨列 ×1（甲公式，與未對帳估算同源；含稅、×1 元）
@@ -26624,7 +26629,7 @@ function pchomeProfitTabHTML(shop){
   var bd=calc.estBreakdown;
   var statusBanner=(calc.feeState==='已對帳') ? ''
     : (entry.__fromOrders
-      ? '<div class="mm-banner mm-banner-warn">⚠ <b>未對帳（'+esc(key)+'）· 對帳單出來前的估算</b>。營收＝訂單明細 Σ成本小計÷1.05、銷量＝Σ下訂（暫估）。'
+      ? '<div class="mm-banner mm-banner-warn">⚠ <b>未對帳（'+esc(key)+'）· 對帳單出來前的估算</b>。營收／銷量＝訂單明細 Σ應出貨（下訂−取消）÷1.05（暫估；已排除取消單）。'
         +(bd
           ? '<br><span style="font-weight:400">'
             +(bd.hasRecon
