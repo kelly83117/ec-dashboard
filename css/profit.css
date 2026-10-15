@@ -1828,3 +1828,8 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 /* 通路關站（2026-10-15，官網 2026-05 起）：填寫模式整區灰底提示、年度總表數字卡 */
 .km-closed{padding:28px 16px;border:1px dashed #d1d5db;border-radius:10px;background:#f3f4f6;color:#6b7280;font-size:13px;font-weight:600;text-align:center;}
 .ky-rc-v.ky-rc-closed{font-size:14px;font-weight:700;color:#9ca3af;}
+
+/* KPI PChome 自動帶入（2026-10-15）：未對帳時鈕停用；預覽上方整體警示（缺成本等） */
+.km-au-btn.km-au-off:disabled{cursor:not-allowed;}
+.km-au-warn-box{margin:0 0 10px;padding:8px 10px;border-radius:8px;background:var(--warn-soft);}
+.km-au-warn-box .km-au-warn-tbl{margin-top:6px;}
