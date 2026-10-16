@@ -34,7 +34,7 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
                  ⚠ title 文字是常數字串，不含雙引號 / 角括號 / & / 反引號 / 插值符號 ⇒【不做跳脫】，
                     與本檔其他靜態 title 同寫法；escapeHtmlLike 只用在動態值上。
                     🔴 這整段註解在 __profitTabHtml 這個【模板字串】裡，寫註解時也要避開反引號與插值符號。 -->
-            <span class="stab-sep"></span><button class="stab stab-recon" style="font-size:15px" title="上傳蝦皮進帳報表 PDF 對帳用，只顯示不寫入任何資料" onclick="setReconTab('shopee',this)"><span class="sdot sdot-hollow"></span>對帳</button>
+            <span class="stab-sep"></span><button class="stab stab-recon" style="font-size:15px" title="上傳蝦皮進帳報表 PDF，按各店「存檔」才會存到雲端（供 KPI 月結表蝦皮帶入）" onclick="setReconTab('shopee',this)"><span class="sdot sdot-hollow"></span>對帳</button>
           </div>
         </div>
         <div class="pf-tabgrp">
@@ -21781,8 +21781,8 @@ function setCoupangShop(shop,btn){
 }
 
 // ═══════════ 淨利表 · 對帳分頁（蝦皮進帳報表 PDF 解析）═══════════
-// 🔴 這一整區【沒有任何寫入路徑】：不寫 localStorage、不寫 Firestore、不碰任何既有 key。
-//   解析結果只活在下面的 _reconFiles，重新整理就沒了 —— 這是規格，不是缺陷。
+// 🔴 唯一的寫入路徑是各店的「存檔」鈕（reconSaveShop → app/kpi sources.{月}.shopee.payout.{店}，見下方「存檔上雲」段）。
+//   不寫 localStorage、不碰任何既有 key。沒按存檔的解析結果只活在 _reconFiles，重新整理就沒了。
 //   （唯一會碰 localStorage 的是 setReconTab 裡的 _saveProfitView，那是【分頁位置】不是解析資料，
 //     與其他三個平台走同一支既有機制。）
 // ⚠ 對帳是【功能】不是平台：按鈕用中性灰（.stab-recon）、單顆不做兩層，
@@ -21831,6 +21831,7 @@ function _reconMonthOptions(){ return MONTHS.map(m=>m.replace('/','-')).reverse(
 function setReconMonth(v){
   _reconMonth=v||'';
   _reconMonthTouched=!!_reconMonth;   // 選回空白 ⇒ 重置成 false（見上方 _reconMonthTouched 的說明）
+  _reconReadyReset();   // 等雲端就緒的重試次數歸零（見 _reconReadyTick）
   renderReconTab();
   try{ const el=document.getElementById('recon-month-sel'); if(el)el.focus(); }catch{}
 }
@@ -22014,6 +22015,164 @@ function _reconCell(hit){
   if(!hit)return '<span class="recon-miss">抓不到</span>';
   return _reconPayoutFmt(hit.v);
 }
+
+// ── 存檔上雲（KPI 蝦皮帶入的來源，2026-10-16 第 1 塊）──
+// 存在 app/kpi → sources.{YYYY-MM}.shopee.payout.{店}，走既有的 __cloudKpi.writePaths（不新增雲端物件）。
+//   一店一條 FieldPath、值是整個物件 ⇒ 這一店整份換掉，不會殘留舊欄位，也不碰別店／別月。
+// 🔴 存的是 PDF 上的【原始含稅數字、照 PDF 正負號】，不除 1.05 —— 換算留給 KPI 帶入那一端（第 5 塊）。
+// ⚠ KPI 讀寫層只看 months / meta / snapshots / migratedAt（見 _kpiCompose、__kpiMigrateToV2），
+//   sources 不會被組進 rows、不會被搬移或清掉，也不影響填寫進度。
+// ⚠ 已存狀態讀 _kpiV2.cloud（KPI 既有的 app/kpi 訂閱），不另開訂閱。
+const RECON_SAVE_NUM_KEYS=['buyerPaid','coupon','shipTotal','fee','feeDeal','feeOther','feeFlow','feeAms'];
+function _reconSaveLabel(k){
+  const f=[...RECON_PAYOUT_FIELDS,...RECON_PAYOUT_FEE_SUBS].find(x=>x.k===k);
+  return f?f.l:k;
+}
+// 這一店能不能存：回 {ok, reasons[]}。純函式，全部條件由呼叫端帶進來。
+//   c = {d:_reconFiles[店], month:_reconMonth, readOnly, ready, busy}
+function _reconSaveCheck(c){
+  const reasons=[];
+  const d=c&&c.d;
+  if(c&&c.readOnly)reasons.push('檢視帳號為唯讀');
+  if(!(c&&c.ready))reasons.push('雲端尚未就緒');
+  if(!d)reasons.push('尚未上傳 PDF');
+  else if(!d.ok)reasons.push('PDF 解析失敗');
+  if(!(c&&c.month))reasons.push('上方月份未選');
+  if(d&&d.ok){
+    const p=d.period;
+    if(!p)reasons.push('PDF 期間抓不到');
+    else{
+      const ym=_reconMonthOf(p);
+      if(!ym)reasons.push('PDF 期間跨月（'+p.from+' ~ '+p.to+'）');
+      else if(c.month&&ym!==c.month)reasons.push('PDF 是 '+ym+'，與所選 '+c.month+' 不符');
+    }
+    const miss=RECON_PAYOUT_FIELDS.filter(f=>!(d.fields&&d.fields[f.k])).map(f=>f.l);
+    if(miss.length)reasons.push('抓不到：'+miss.join('、'));
+  }
+  if(c&&c.busy)reasons.push('存檔中');
+  return{ok:!reasons.length,reasons};
+}
+// 要寫上雲的內容（不含 at；at 由 reconSaveShop 寫入時補 serverTimestamp）。
+//   PDF 沒有的子項（例：AMS推廣費用）存 null，不存 0 —— 0 是合法值，兩者要分得開。
+function _reconSavePayload(d,user){
+  const o={};
+  RECON_SAVE_NUM_KEYS.forEach(k=>{o[k]=(d.fields&&d.fields[k])?d.fields[k].v:null;});
+  o.period={from:d.period.from,to:d.period.to};
+  o.file=d.name||'';
+  o.by={username:(user&&user.username)||'',name:(user&&user.name)||''};
+  return o;
+}
+// 舊存檔 vs 新內容：數字與期間不同的地方 → [{l,a,b}]。沒有舊存檔回 []（不用確認）。
+function _reconSaveDiff(oldRec,neu){
+  if(!oldRec||typeof oldRec!=='object')return [];
+  const out=[];
+  const f=v=>v==null?'（無）':_reconPayoutFmt(v);
+  RECON_SAVE_NUM_KEYS.forEach(k=>{
+    const a=oldRec[k]==null?null:oldRec[k],b=neu[k]==null?null:neu[k];
+    if(a!==b)out.push({l:_reconSaveLabel(k),a:f(a),b:f(b)});
+  });
+  const op=oldRec.period||{},np=neu.period||{};
+  if(op.from!==np.from||op.to!==np.to)out.push({l:'期間',a:(op.from||'?')+' ~ '+(op.to||'?'),b:np.from+' ~ '+np.to});
+  return out;
+}
+// 寫入後讀回比對：回不一致的欄位名稱陣列（[]＝一致）。at 只要求存在（serverTimestamp 讀回是 Timestamp）。
+function _reconSaveVerify(got,want){
+  if(!got||typeof got!=='object')return ['（雲端沒有這筆）'];
+  const bad=[];
+  RECON_SAVE_NUM_KEYS.forEach(k=>{const a=got[k]==null?null:got[k];if(a!==want[k])bad.push(_reconSaveLabel(k));});
+  if(!got.period||got.period.from!==want.period.from||got.period.to!==want.period.to)bad.push('期間');
+  if(got.file!==want.file)bad.push('檔名');
+  if(!got.by||got.by.username!==want.by.username||got.by.name!==want.by.name)bad.push('存檔人');
+  if(got.at==null)bad.push('時間');
+  return bad;
+}
+function _reconSavedOf(cloud,month,shop){
+  const s=cloud&&cloud.sources&&cloud.sources[month];
+  const r=s&&s.shopee&&s.shopee.payout&&s.shopee.payout[shop];
+  return (r&&typeof r==='object')?r:null;
+}
+function _reconFmtAt(at){
+  let d=null;
+  if(at&&typeof at.toDate==='function')d=at.toDate();
+  else if(at instanceof Date)d=at;
+  else if(typeof at==='number')d=new Date(at);
+  if(!d||isNaN(d))return '';
+  const p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+// 逐店的存檔中鎖與最後一次結果（{month,file,kind:'ok'|'err',text}），只在記憶體。
+let _reconSaving={};
+let _reconSaveMsg={};
+function _reconSaveCtx(shop){
+  return{d:_reconFiles[shop],month:_reconMonth,
+    readOnly:!!(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()),
+    ready:!!(window.__cloudKpi&&typeof window.__cloudKpi.writePaths==='function'&&_kpiReady()),
+    busy:!!_reconSaving[shop]};
+}
+async function reconSaveShop(shop){
+  if(RECON_SHOPS.indexOf(shop)<0)return;
+  const chk=_reconSaveCheck(_reconSaveCtx(shop));
+  if(!chk.ok){if(typeof showToast==='function')showToast('無法存檔：'+chk.reasons.join('；'),'error',5000);return;}
+  const ck=window.__cloudKpi;
+  const d=_reconFiles[shop],month=_reconMonth;
+  const u=(window.App&&App.currentUser)||{};
+  const want=_reconSavePayload(d,u);
+  const path=['sources',month,'shopee','payout',shop];
+  const done=(kind,text)=>{_reconSaveMsg[shop]={month,file:d.name,kind,text};_reconSaving[shop]=false;renderReconTab();};
+  _reconSaving[shop]=true;renderReconTab();
+  // 寫入前：讀雲端現值（不用畫面上的快照，可能晚一步），已有存檔且數字不同 ⇒ 列出舊 → 新，確認才寫。
+  let old=null;
+  try{const s=await ck.getDoc();old=_reconSavedOf((s&&s.exists&&s.exists())?(s.data()||{}):null,month,shop);}
+  catch(err){console.error('[對帳] 讀取雲端現值失敗',err);done('err','❌ 讀不到雲端現值，沒有存檔：'+((err&&(err.code||err.message))||err));return;}
+  const diff=_reconSaveDiff(old,want);
+  if(diff.length){
+    const who=old.by&&(old.by.name||old.by.username);
+    const msg=shop+' '+month+' 已經有存檔'+(who?'（'+who+(_reconFmtAt(old.at)?' · '+_reconFmtAt(old.at):'')+'）':'')
+      +'，以下數字不同：\n\n'+diff.map(x=>x.l+'：'+x.a+' → '+x.b).join('\n')+'\n\n確定用這份 PDF（'+d.name+'）覆蓋嗎？';
+    if(!confirm(msg)){done('info','已取消，雲端維持原本的存檔');return;}
+  }
+  try{await ck.writePaths([[path,Object.assign({},want,{at:ck.TS})]]);}
+  catch(err){console.error('[對帳] 寫入 app/kpi 失敗',err);done('err','❌ 沒有寫進雲端：'+((err&&(err.code||err.message))||err));return;}
+  // 寫入後讀回比對。🔴 被擋下（本機防寫、唯讀層）時 writePaths 不會丟錯，只有讀回才看得出來 ——
+  //   不一致一律當失敗，不可以顯示成功。
+  let bad;
+  try{const s=await ck.getDoc();bad=_reconSaveVerify(_reconSavedOf((s&&s.exists&&s.exists())?(s.data()||{}):null,month,shop),want);}
+  catch(err){console.error('[對帳] 讀回驗證失敗',err);done('err','⚠ 已送出但讀不回雲端確認，請重新整理後看「已存」狀態');return;}
+  if(bad.length){
+    console.warn('[對帳] 讀回不一致',shop,month,bad);
+    done('err','❌ 沒有寫進雲端（讀回不一致：'+bad.join('、')+'）');
+    return;
+  }
+  done('ok','✓ 已存進雲端');
+}
+// 存檔列：每店一格「已存狀態 + 存檔鈕 + 不能存的原因 + 上次結果」。沒上傳 PDF 也照樣顯示已存狀態。
+function _reconSaveRowHtml(){
+  const cloud=_kpiV2.cloud;
+  return '<tr class="recon-saverow"><th class="recon-rowhead">雲端存檔</th>'+RECON_SHOPS.map(s=>{
+    let st;
+    if(_reconReadyGaveUp&&!_kpiReady())st='<span class="recon-save-st recon-bad">雲端尚未就緒，請重新整理頁面</span>';
+    else if(!_reconMonth)st='<span class="recon-save-st">選月份後顯示</span>';
+    else if(cloud===undefined)st='<span class="recon-save-st">讀取雲端中…</span>';
+    else{
+      const r=_reconSavedOf(cloud,_reconMonth,s);
+      if(!r)st='<span class="recon-save-st">尚未存檔</span>';
+      else{
+        const who=(r.by&&(r.by.name||r.by.username))||'?';
+        const at=_reconFmtAt(r.at)||'時間確認中';
+        st='<span class="recon-save-st recon-save-has" title="'+escapeHtmlLike((r.file||'')+'｜'+((r.period&&r.period.from)||'?')+' ~ '+((r.period&&r.period.to)||'?'))+'">已存：'+escapeHtmlLike(who)+'・'+escapeHtmlLike(at)+'</span>';
+      }
+    }
+    const chk=_reconSaveCheck(_reconSaveCtx(s));
+    const btn='<button type="button" class="recon-btn recon-save-btn"'+(chk.ok?'':' disabled')
+      +' onclick="reconSaveShop(\''+s+'\')">'+(_reconSaving[s]?'存檔中…':'存檔')+'</button>';
+    const why=(!chk.ok&&!_reconSaving[s])?'<span class="recon-save-why">'+escapeHtmlLike(chk.reasons.join('；'))+'</span>':'';
+    const m=_reconSaveMsg[s];
+    const d=_reconFiles[s];
+    const msg=(m&&m.month===_reconMonth&&d&&m.file===d.name)
+      ?'<span class="recon-save-msg '+(m.kind==='ok'?'recon-ok':m.kind==='err'?'recon-bad':'recon-note')+'">'+escapeHtmlLike(m.text)+'</span>':'';
+    return '<td class="recon-save-cell">'+st+btn+why+msg+'</td>';
+  }).join('')+'</tr>';
+}
 function reconShopeeHtml(){
   const has=RECON_SHOPS.some(s=>_reconFiles[s]);
   // 期間一致性：只比對【已經解析出期間】的欄。四欄期間不同 ⇒ 全部標紅 + 上方掛一條警告。
@@ -22104,20 +22263,50 @@ function reconShopeeHtml(){
     +'<div class="recon-hd"><span class="recon-title">蝦皮進帳報表 · 對帳</span>'
     +monthSel
     +(has?'<button type="button" class="recon-btn" onclick="clearRecon()">全部清除</button>':'')
-    +'<span class="recon-note">四家各自上傳當月「進帳報表」PDF。<b>解析結果只顯示在這裡</b>，不會寫進任何報表、不會上雲，重新整理就消失。</span></div>'
+    +'<span class="recon-note">四家各自上傳當月「進帳報表」PDF。<b>按各店的「存檔」才會存到雲端</b>，供 KPI 月結表蝦皮帶入使用；存的是 PDF 上的原始含稅數字（照 PDF 正負號）。沒按存檔，重新整理就消失。</span></div>'
     +(periodBad?'<div class="recon-warn">⚠ 四欄的報表期間不一致（'+escapeHtmlLike(keys.join('　/　'))+'），請確認是不是傳到不同月份的檔。</div>':'')
     +'<div class="recon-scroll"><table class="recon-tbl">'
     +'<thead><tr><th class="recon-rowhead">欄位</th>'+th+'</tr></thead>'
-    +'<tbody>'+upRow+dataRows+'</tbody></table></div>'
+    +'<tbody>'+upRow+dataRows+_reconSaveRowHtml()+'</tbody></table></div>'
     +(has?'':'<div class="recon-note" style="margin-top:10px">尚未上傳任何檔案 —— 在上面任一欄選檔就會出現解析結果。</div>')
     +dumps
     +'</div>';
+}
+// 等 KPI 雲端就緒的輪詢狀態。🔴 一定要有上限：離線 / localStorage 後備模式下雲端永遠不會就緒，
+//   沒上限就是無限每秒整頁重畫（innerHTML 重建 ⇒ 打開中的月份下拉被關掉）。
+//   次數在切換月份（setReconMonth）與重新進入對帳分頁（setReconTab）時歸零（_reconReadyReset）。
+const RECON_READY_MAX_TRIES=30;
+let _reconReadyTimer=null;
+let _reconReadyTries=0;
+let _reconReadyGaveUp=false;   // true ＝ 已放棄輪詢，雲端存檔列顯示「請重新整理頁面」
+function _reconReadyReset(){
+  clearTimeout(_reconReadyTimer);_reconReadyTimer=null;
+  _reconReadyTries=0;_reconReadyGaveUp=false;
+}
+// 每秒一輪：就緒 ⇒ 重畫一次就停；用滿 RECON_READY_MAX_TRIES 次 ⇒ 放棄並重畫出提示；
+//   月份下拉有焦點 ⇒ 這輪不重畫（仍計次），下一秒再試。
+function _reconReadyTick(){
+  _reconReadyTimer=null;
+  const el=document.getElementById('recon-content-shopee');
+  if(!el||!el.classList.contains('active'))return;
+  _reconReadyTries++;
+  if(_kpiReady()){renderReconTab();return;}
+  if(_reconReadyTries>=RECON_READY_MAX_TRIES){_reconReadyGaveUp=true;renderReconTab();return;}
+  const sel=document.getElementById('recon-month-sel');
+  if(sel&&document.activeElement===sel){_reconReadyTimer=setTimeout(_reconReadyTick,1000);return;}
+  renderReconTab();
 }
 function renderReconTab(){
   const el=document.getElementById('recon-content-shopee');
   if(!el)return;
   el.innerHTML=reconShopeeHtml();
+  // 雲端（app/kpi 第一個快照）還沒到 ⇒ 已存狀態與存檔鈕都還不能判斷，每秒再看一次（有上限，見 _reconReadyTick）。
+  //   ⚠ 只輪詢記憶體裡的 _kpiV2，不另開 Firestore 訂閱；分頁不在畫面上（未 active）就停。
+  clearTimeout(_reconReadyTimer);_reconReadyTimer=null;
+  if(!_kpiReady()&&!_reconReadyGaveUp&&el.classList.contains('active'))_reconReadyTimer=setTimeout(_reconReadyTick,1000);
 }
+// 對帳存檔鈕的 inline onclick 用（另起一行，不動下方主匯流排那一行）。
+Object.assign(window,{reconSaveShop});
 // 對帳分頁的切換。骨架比照 setCoupangShop，但【補上它缺的三件事】：
 //   ① 失效分頁防護（setShop 有、setMomoShop/setCoupangShop 都沒有）：
 //      2026-08-28 實測 setMomoShop('不存在的店') → .shop-content.active 與 .stab.active
@@ -22142,6 +22331,7 @@ function setReconTab(id,btn){
   const el=document.getElementById('recon-content-'+id);
   if(el){
     el.classList.add('active');
+    _reconReadyReset();   // 重新進入對帳分頁 ⇒ 等雲端就緒的重試次數歸零
     renderReconTab();   // lazy fill：進來才畫（state 在 _reconFiles，重畫不會掉資料）
   }
   const wrapRow=document.getElementById('profit-period-wrap-row');

@@ -1367,6 +1367,26 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 }
 .recon-err{color:var(--danger);font-size:12px;padding:6px 0;}
 
+/* 雲端存檔列（每店一格：已存狀態 → 存檔鈕 → 不能存的原因 → 上次結果）。
+   存到 app/kpi sources.{月}.shopee.payout.{店}，供 KPI 月結表蝦皮帶入。
+   ⚠ 沒上傳 PDF 也照樣畫這一列（要看得到「已存：誰、何時」）。 */
+.recon-tbl td.recon-save-cell{
+  text-align:center;
+  white-space:normal;
+  vertical-align:top;
+  min-width:150px;
+}
+.recon-save-st{display:block;font-size:11.5px;color:var(--text-muted);margin-bottom:5px;}
+.recon-save-has{color:var(--text);font-weight:600;}
+.recon-save-btn:disabled{
+  cursor:not-allowed;
+  color:var(--text-faint);
+  border-color:var(--border);
+}
+.recon-save-btn:disabled:hover{color:var(--text-faint);border-color:var(--border);}
+.recon-save-why{display:block;font-size:11px;color:var(--text-muted);margin-top:4px;line-height:1.5;}
+.recon-save-msg{display:block;font-size:11.5px;margin-top:4px;line-height:1.5;}
+
 /* ── 標籤成效彈窗（tagfx，js/profit.js 的 openTagFxModal / buildTagFxHtml）──
    全部走 :root 變數。dist-modal 模板裡的 inline style 是既有的，這裡刻意不抄。 */
 .tagfx-btn{margin-left:2px;}
