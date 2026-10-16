@@ -1367,6 +1367,111 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 }
 .recon-err{color:var(--danger);font-size:12px;padding:6px 0;}
 
+/* 雲端存檔列（每店一格：已存狀態 → 存檔鈕 → 不能存的原因 → 上次結果）。
+   存到 app/kpi sources.{月}.shopee.payout.{店}，供 KPI 月結表蝦皮帶入。
+   ⚠ 沒上傳 PDF 也照樣畫這一列（要看得到「已存：誰、何時」）。 */
+.recon-tbl td.recon-save-cell{
+  text-align:center;
+  white-space:normal;
+  vertical-align:top;
+  min-width:150px;
+}
+.recon-save-st{display:block;font-size:11.5px;color:var(--text-muted);margin-bottom:5px;}
+.recon-save-has{color:var(--text);font-weight:600;}
+.recon-save-btn:disabled{
+  cursor:not-allowed;
+  color:var(--text-faint);
+  border-color:var(--border);
+}
+.recon-save-btn:disabled:hover{color:var(--text-faint);border-color:var(--border);}
+.recon-save-why{display:block;font-size:11px;color:var(--text-muted);margin-top:4px;line-height:1.5;}
+.recon-save-msg{display:block;font-size:11.5px;margin-top:4px;line-height:1.5;}
+
+/* 莫筆克銷售金額明細（全賣場）：放在進帳報表表格下方，一份檔四店一起存（sources.{月}.shopee.mobic）。 */
+.recon-mobic{margin-top:22px;padding-top:14px;border-top:1px solid var(--border);}
+.recon-file.recon-mobic-file{width:auto;max-width:260px;}
+.recon-mobic-info{
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px 16px;
+  font-size:12px;
+  color:var(--text-muted);
+  margin-bottom:8px;
+}
+.recon-mobic-busy{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:12.5px;
+  color:var(--text-muted);
+  margin-bottom:8px;
+}
+/* 轉圈：沿用本檔既有的 @keyframes spin。 */
+.recon-spin{
+  width:14px;
+  height:14px;
+  border:2px solid var(--border);
+  border-top-color:var(--primary);
+  border-radius:50%;
+  animation:spin .8s linear infinite;
+  flex:none;
+}
+.recon-mobic-tbl{min-width:560px;}
+.recon-mobic-save{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px 12px;
+  margin-top:10px;
+}
+.recon-mobic-save .recon-save-st,
+.recon-mobic-save .recon-save-why,
+.recon-mobic-save .recon-save-msg{display:inline;margin:0;}
+
+/* 廣告與各項費用（每店）：放在莫筆克區塊下方，一店一欄、一顆存檔（sources.{月}.shopee.ads / manual.{店}）。 */
+.recon-ads{margin-top:22px;padding-top:14px;border-top:1px solid var(--border);}
+.recon-ads-hint{font-size:11.5px;color:var(--text-muted);margin:-4px 0 8px;}
+.recon-ads-tbl{min-width:720px;}
+.recon-tbl td.recon-ads-cell{white-space:normal;vertical-align:top;min-width:150px;}
+.recon-ads-inp{
+  width:100%;
+  box-sizing:border-box;
+  padding:4px 8px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--surface);
+  color:var(--text);
+  font-size:12.5px;
+  font-family:inherit;
+  font-variant-numeric:tabular-nums;
+  text-align:right;
+  outline:none;
+}
+.recon-ads-inp.recon-ads-note{text-align:left;}
+.recon-ads-inp:focus{border-color:var(--primary);}
+.recon-ads-inp:disabled{color:var(--text-muted);background:var(--primary-soft);cursor:not-allowed;}
+/* 「雲端」小標：這格數字是雲端已存的值，不是這次上傳的檔。 */
+.recon-ads-src{
+  display:inline-block;
+  margin-left:6px;
+  padding:0 5px;
+  border:1px solid var(--border);
+  border-radius:4px;
+  font-size:10.5px;
+  color:var(--text-muted);
+  vertical-align:1px;
+}
+.recon-ads-clear{margin-top:4px;padding:2px 8px;font-size:11px;}
+.recon-ads-shopname{
+  display:inline-block;
+  max-width:170px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  vertical-align:bottom;
+  font-size:11.5px;
+}
+
 /* ── 標籤成效彈窗（tagfx，js/profit.js 的 openTagFxModal / buildTagFxHtml）──
    全部走 :root 變數。dist-modal 模板裡的 inline style 是既有的，這裡刻意不抄。 */
 .tagfx-btn{margin-left:2px;}
