@@ -22272,6 +22272,288 @@ function reconShopeeHtml(){
     +dumps
     +'</div>';
 }
+
+// ═══ 對帳分頁 · 莫筆克銷售金額明細（全賣場）（KPI 蝦皮帶入的來源，2026-10-16 第 2 塊）═══
+// 一份 xlsx（莫筆克匯出，約 15MB、6 個分頁）四店一起算、一起存一次：
+//   app/kpi → sources.{YYYY-MM}.shopee.mobic ＝ {shops:{店:{orders,ordersPlain,ordersNoPack,cost,discount,rows}},
+//                                               unmapped:{店名:列數}, range:{from,to}, file, fileModified, by, at}
+// 🔴 只存彙總數字：訂單編號、買家姓名、會員帳號、逐筆資料【一個都不上雲】（訂單編號只在記憶體裡去重用）。
+// ⚠ 月份下拉、雲端就緒判斷與輪詢上限、存檔→讀回驗證，全部沿用上面進帳報表那一套（_reconMonth / _kpiReady / _reconReadyGaveUp）。
+// ⚠ 莫筆克數字會隨退貨回溯 ⇒ 用檔案的 lastModified 當「下載時間」一起存、一起顯示，看得出是哪天的資料。
+const RECON_MOBIC_SHOP_MAP={'生活好麻吉':'好麻吉','玩樂盒子':'玩樂','維克生活':'維克','森之旅小舖':'森之旅'};
+// 必要欄位：依【表頭名稱】找位置，不寫死欄位順序。缺任何一個 ⇒ 報錯、不准存。
+const RECON_MOBIC_REQ_COLS=['店鋪名稱','平台訂單編號','出貨方式','商品成本','折扣','是否出貨'];
+const RECON_MOBIC_NUM_KEYS=[
+  {k:'orders',l:'訂單數'},{k:'ordersPlain',l:'　一般'},{k:'ordersNoPack',l:'　無包裝'},
+  {k:'cost',l:'商品成本'},{k:'discount',l:'折扣'},{k:'rows',l:'列數'},
+];
+// 分頁名稱前段「YYYYMMDDhhmm-YYYYMMDDhhmm」→ {from,to,month}。
+//   month 只在【剛好是某月 1 日 00:00 到次月 1 日 00:00】時有值，否則 null（呼叫端據此不准存）。
+function _reconMobicRange(sheetName){
+  const m=/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/.exec(String(sheetName||''));
+  if(!m)return null;
+  const f=m.slice(1,6),t=m.slice(6,11);
+  const from=f[0]+'-'+f[1]+'-'+f[2]+' '+f[3]+':'+f[4],to=t[0]+'-'+t[1]+'-'+t[2]+' '+t[3]+':'+t[4];
+  const y=+f[0],mo=+f[1];
+  const ny=mo===12?y+1:y,nm=mo===12?1:mo+1;
+  const whole=f[2]==='01'&&f[3]==='00'&&f[4]==='00'&&+t[0]===ny&&+t[1]===nm&&t[2]==='01'&&t[3]==='00'&&t[4]==='00';
+  return{from,to,month:whole?(f[0]+'-'+f[1]):null};
+}
+// 一格數字：number 原樣；字串去千分位後轉；空白或轉不出來回 null（呼叫端當錯誤，【不可】當 0）。
+function _reconMobicNum(v){
+  if(typeof v==='number')return isFinite(v)?v:null;
+  const s=String(v==null?'':v).replace(/,/g,'').trim();
+  if(!s)return null;
+  const n=Number(s);
+  return isFinite(n)?n:null;
+}
+// 純函式：sheet_to_json(ws,{header:1}) 的二維陣列 → 四店彙總。
+//   回 {ok:true, shops, unmapped, overlap:{店:筆}, totalRows, shippedRows} 或 {ok:false, err}。
+//   ⚠ 一列＝一個商品、同一訂單多列：cost / discount 逐列加總，orders 用平台訂單編號去重。
+//   ⚠ ordersNoPack＝該訂單任一列出貨方式含「無包裝」；ordersPlain＝該訂單任一列不含。
+//     同一訂單兩種都有時兩邊都算 ⇒ orders < 兩者相加，差額記在 overlap（只回報、不改規則）。
+function _reconMobicCalc(aoa){
+  if(!Array.isArray(aoa)||!aoa.length)return{ok:false,err:'分頁是空的'};
+  const H=(aoa[0]||[]).map(h=>String(h==null?'':h).trim());
+  const ix={};
+  RECON_MOBIC_REQ_COLS.forEach(k=>{ix[k]=H.indexOf(k);});
+  const miss=RECON_MOBIC_REQ_COLS.filter(k=>ix[k]<0);
+  if(miss.length)return{ok:false,err:'缺少必要欄位：'+miss.join('、')};
+  const acc={};
+  RECON_SHOPS.forEach(s=>{acc[s]={all:new Set(),plain:new Set(),noPack:new Set(),cost:0,discount:0,rows:0};});
+  const unmapped={};
+  const bad=[];
+  let totalRows=0,shippedRows=0;
+  for(let i=1;i<aoa.length;i++){
+    const r=aoa[i];
+    if(!r||!r.some(v=>v!=null&&String(v).trim()!==''))continue;   // 整列空白
+    totalRows++;
+    if(String(r[ix['是否出貨']]==null?'':r[ix['是否出貨']]).trim()!=='已出貨')continue;
+    shippedRows++;
+    const raw=String(r[ix['店鋪名稱']]==null?'':r[ix['店鋪名稱']]).trim();
+    const shop=RECON_MOBIC_SHOP_MAP[raw];
+    if(!shop){const k=raw||'（空白）';unmapped[k]=(unmapped[k]||0)+1;continue;}
+    const oid=String(r[ix['平台訂單編號']]==null?'':r[ix['平台訂單編號']]).trim();
+    const cost=_reconMobicNum(r[ix['商品成本']]),disc=_reconMobicNum(r[ix['折扣']]);
+    if(!oid||cost===null||disc===null){
+      if(bad.length<5)bad.push('第 '+(i+1)+' 列'+(!oid?'（平台訂單編號空白）':cost===null?'（商品成本不是數字）':'（折扣不是數字）'));
+      else bad.push(null);
+      continue;
+    }
+    const a=acc[shop];
+    a.all.add(oid);
+    if(String(r[ix['出貨方式']]==null?'':r[ix['出貨方式']]).indexOf('無包裝')>=0)a.noPack.add(oid);else a.plain.add(oid);
+    a.cost+=cost;a.discount+=disc;a.rows++;
+  }
+  if(bad.length)return{ok:false,err:'有 '+bad.length+' 列資料不完整：'+bad.filter(Boolean).join('、')+(bad.length>5?'…':'')};
+  const shops={},overlap={};
+  RECON_SHOPS.forEach(s=>{
+    const a=acc[s];
+    // 浮點加總尾差（例 0.1+0.2）收到小數 2 位；整數資料不受影響。
+    shops[s]={orders:a.all.size,ordersPlain:a.plain.size,ordersNoPack:a.noPack.size,
+      cost:Math.round(a.cost*100)/100,discount:Math.round(a.discount*100)/100,rows:a.rows};
+    const ov=a.plain.size+a.noPack.size-a.all.size;
+    if(ov)overlap[s]=ov;
+  });
+  return{ok:true,shops,unmapped,overlap,totalRows,shippedRows};
+}
+// 莫筆克的狀態（只在記憶體）：{name, modified(ms), sheet, range, ok, err, res}
+let _reconMobic=null;
+let _reconMobicBusy=false;
+let _reconMobicSaving=false;
+let _reconMobicMsg=null;   // {month, file, modified, kind:'ok'|'err'|'info', text}
+// 能不能存：回 {ok, reasons[]}。c = {m:_reconMobic, month, readOnly, ready, busy}
+function _reconMobicCheck(c){
+  const reasons=[];
+  const m=c&&c.m;
+  if(c&&c.readOnly)reasons.push('檢視帳號為唯讀');
+  if(!(c&&c.ready))reasons.push('雲端尚未就緒');
+  if(!m)reasons.push('尚未上傳檔案');
+  else if(!m.ok)reasons.push('檔案解析失敗');
+  if(!(c&&c.month))reasons.push('上方月份未選');
+  if(m&&m.ok){
+    if(!m.range)reasons.push('分頁名稱抓不到期間');
+    else if(!m.range.month)reasons.push('期間不是整月（'+m.range.from+' ~ '+m.range.to+'）');
+    else if(c.month&&m.range.month!==c.month)reasons.push('檔案是 '+m.range.month+'，與所選 '+c.month+' 不符');
+  }
+  if(c&&c.busy)reasons.push('存檔中');
+  return{ok:!reasons.length,reasons};
+}
+// 要寫上雲的內容（不含 at）。🔴 只放彙總數字，絕不放訂單編號 / 買家 / 會員帳號 / 逐筆資料。
+function _reconMobicPayload(m,user){
+  const shops={};
+  RECON_SHOPS.forEach(s=>{const x=m.res.shops[s];shops[s]={orders:x.orders,ordersPlain:x.ordersPlain,ordersNoPack:x.ordersNoPack,cost:x.cost,discount:x.discount,rows:x.rows};});
+  return{shops,unmapped:Object.assign({},m.res.unmapped),range:{from:m.range.from,to:m.range.to},
+    file:m.name||'',fileModified:m.modified==null?null:m.modified,
+    by:{username:(user&&user.username)||'',name:(user&&user.name)||''}};
+}
+// 舊存檔 vs 新內容：四店數字、未對應店名、期間不同的地方 → [{l,a,b}]。沒有舊存檔回 []。
+function _reconMobicDiff(oldRec,neu){
+  if(!oldRec||typeof oldRec!=='object')return [];
+  const out=[];
+  const f=v=>v==null?'（無）':_reconPayoutFmt(v);
+  RECON_SHOPS.forEach(s=>{
+    const a=(oldRec.shops&&oldRec.shops[s])||{},b=neu.shops[s];
+    RECON_MOBIC_NUM_KEYS.forEach(({k,l})=>{
+      const x=a[k]==null?null:a[k];
+      if(x!==b[k])out.push({l:s+' '+l.trim(),a:f(x),b:f(b[k])});
+    });
+  });
+  const ou=JSON.stringify(Object.entries(oldRec.unmapped||{}).sort()),nu=JSON.stringify(Object.entries(neu.unmapped||{}).sort());
+  if(ou!==nu)out.push({l:'對不到的店名',a:ou,b:nu});
+  const or=oldRec.range||{};
+  if(or.from!==neu.range.from||or.to!==neu.range.to)out.push({l:'期間',a:(or.from||'?')+' ~ '+(or.to||'?'),b:neu.range.from+' ~ '+neu.range.to});
+  return out;
+}
+// 寫入後讀回比對：回不一致的項目名稱（[]＝一致）。at 只要求存在。
+function _reconMobicVerify(got,want){
+  if(!got||typeof got!=='object')return ['（雲端沒有這筆）'];
+  const bad=[];
+  RECON_SHOPS.forEach(s=>{
+    const a=got.shops&&got.shops[s];
+    if(!a){bad.push(s);return;}
+    RECON_MOBIC_NUM_KEYS.forEach(({k,l})=>{if((a[k]==null?null:a[k])!==want.shops[s][k])bad.push(s+' '+l.trim());});
+  });
+  if(JSON.stringify(Object.entries(got.unmapped||{}).sort())!==JSON.stringify(Object.entries(want.unmapped||{}).sort()))bad.push('對不到的店名');
+  if(!got.range||got.range.from!==want.range.from||got.range.to!==want.range.to)bad.push('期間');
+  if(got.file!==want.file)bad.push('檔名');
+  if((got.fileModified==null?null:got.fileModified)!==want.fileModified)bad.push('檔案時間');
+  if(!got.by||got.by.username!==want.by.username||got.by.name!==want.by.name)bad.push('存檔人');
+  if(got.at==null)bad.push('時間');
+  return bad;
+}
+function _reconMobicSavedOf(cloud,month){
+  const s=cloud&&cloud.sources&&cloud.sources[month];
+  const r=s&&s.shopee&&s.shopee.mobic;
+  return (r&&typeof r==='object')?r:null;
+}
+function _reconMobicCtx(){
+  return{m:_reconMobic,month:_reconMonth,
+    readOnly:!!(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()),
+    ready:!!(window.__cloudKpi&&typeof window.__cloudKpi.writePaths==='function'&&_kpiReady()),
+    busy:_reconMobicSaving};
+}
+// 選檔 → 解析 → 重畫。⚠ XLSX.read 是同步的、15MB 要好幾秒：先畫出「解析中…」再讓出一拍才開始讀，轉圈才看得到。
+async function reconMobicPick(e){
+  const f=(e&&e.target&&e.target.files||[])[0];
+  try{e.target.value='';}catch{}
+  if(!f||_reconMobicBusy)return;
+  _reconMobicBusy=true;renderReconTab();
+  const base={name:f.name,modified:(typeof f.lastModified==='number'&&f.lastModified>0)?f.lastModified:null};
+  try{
+    const X=window.XLSX;
+    if(!X||!X.read)throw new Error('XLSX 函式庫尚未載入，請硬重整（Ctrl+F5）後再試');
+    await new Promise(r=>setTimeout(r,50));
+    const buf=await new Promise((res,rej)=>{const rd=new FileReader();rd.onload=()=>res(rd.result);rd.onerror=()=>rej(rd.error||new Error('讀檔失敗'));rd.readAsArrayBuffer(f);});
+    const book=X.read(buf,{type:'array',bookSheets:true});
+    const names=(book.SheetNames||[]).filter(n=>/建立$/.test(String(n)));
+    if(!names.length)throw new Error('找不到名稱結尾為「建立」的分頁（這份檔的分頁：'+(book.SheetNames||[]).join('、')+'）');
+    if(names.length>1)throw new Error('有 '+names.length+' 個「…建立」分頁，不知道該用哪一個：'+names.join('、'));
+    const wb=X.read(buf,{type:'array',dense:true,sheets:[names[0]]});
+    const ws=wb.Sheets[names[0]];
+    if(!ws)throw new Error('讀不到分頁「'+names[0]+'」');
+    const res=_reconMobicCalc(X.utils.sheet_to_json(ws,{header:1}));
+    if(!res.ok)throw new Error(res.err);
+    const range=_reconMobicRange(names[0]);
+    _reconMobic=Object.assign(base,{sheet:names[0],range,ok:true,err:'',res});
+    // 自動帶月份：規則同進帳報表（使用者沒動過、而且目前空白才帶；不是整月不帶）。
+    if(!_reconMonthTouched&&!_reconMonth&&range&&range.month)_reconMonth=range.month;
+    if(Object.keys(res.overlap).length)console.warn('[對帳·莫筆克] 有訂單同時出現無包裝與其他出貨方式',res.overlap);
+  }catch(err){
+    console.warn('[對帳·莫筆克] 解析失敗',f.name,err);
+    _reconMobic=Object.assign(base,{sheet:'',range:null,ok:false,err:(err&&err.message)||String(err),res:null});
+  }
+  _reconMobicBusy=false;
+  renderReconTab();
+}
+function clearReconMobic(){if(_reconMobicBusy)return;_reconMobic=null;renderReconTab();}
+async function reconMobicSave(){
+  const chk=_reconMobicCheck(_reconMobicCtx());
+  if(!chk.ok){if(typeof showToast==='function')showToast('無法存檔：'+chk.reasons.join('；'),'error',5000);return;}
+  const ck=window.__cloudKpi;
+  const m=_reconMobic,month=_reconMonth;
+  const want=_reconMobicPayload(m,(window.App&&App.currentUser)||{});
+  const done=(kind,text)=>{_reconMobicMsg={month,file:m.name,modified:m.modified,kind,text};_reconMobicSaving=false;renderReconTab();};
+  _reconMobicSaving=true;renderReconTab();
+  let old=null;
+  try{const s=await ck.getDoc();old=_reconMobicSavedOf((s&&s.exists&&s.exists())?(s.data()||{}):null,month);}
+  catch(err){console.error('[對帳·莫筆克] 讀取雲端現值失敗',err);done('err','❌ 讀不到雲端現值，沒有存檔：'+((err&&(err.code||err.message))||err));return;}
+  const diff=_reconMobicDiff(old,want);
+  if(diff.length){
+    const who=old.by&&(old.by.name||old.by.username);
+    const msg='莫筆克 '+month+' 已經有存檔'+(who?'（'+who+(_reconFmtAt(old.at)?' · '+_reconFmtAt(old.at):'')+(old.fileModified?'，檔案時間 '+_reconFmtAt(old.fileModified):'')+'）':'')
+      +'，以下數字不同：\n\n'+diff.map(x=>x.l+'：'+x.a+' → '+x.b).join('\n')+'\n\n確定用這份檔（'+m.name+'）覆蓋嗎？';
+    if(!confirm(msg)){done('info','已取消，雲端維持原本的存檔');return;}
+  }
+  try{await ck.writePaths([[['sources',month,'shopee','mobic'],Object.assign({},want,{at:ck.TS})]]);}
+  catch(err){console.error('[對帳·莫筆克] 寫入 app/kpi 失敗',err);done('err','❌ 沒有寫進雲端：'+((err&&(err.code||err.message))||err));return;}
+  // 🔴 被擋下時 writePaths 不會丟錯，只有讀回看得出來 —— 不一致一律當失敗。
+  let bad;
+  try{const s=await ck.getDoc();bad=_reconMobicVerify(_reconMobicSavedOf((s&&s.exists&&s.exists())?(s.data()||{}):null,month),want);}
+  catch(err){console.error('[對帳·莫筆克] 讀回驗證失敗',err);done('err','⚠ 已送出但讀不回雲端確認，請重新整理後看「已存」狀態');return;}
+  if(bad.length){console.warn('[對帳·莫筆克] 讀回不一致',month,bad);done('err','❌ 沒有寫進雲端（讀回不一致：'+bad.join('、')+'）');return;}
+  done('ok','✓ 已存進雲端');
+}
+function reconMobicHtml(){
+  const m=_reconMobic;
+  const cloud=_kpiV2.cloud;
+  const saved=(_reconMonth&&cloud)?_reconMobicSavedOf(cloud,_reconMonth):null;
+  // 已存狀態
+  let st;
+  if(_reconReadyGaveUp&&!_kpiReady())st='<span class="recon-bad">雲端尚未就緒，請重新整理頁面</span>';
+  else if(!_reconMonth)st='選月份後顯示已存狀態';
+  else if(cloud===undefined)st='讀取雲端中…';
+  else if(!saved)st=_reconMonth+' 尚未存檔';
+  else{
+    const who=(saved.by&&(saved.by.name||saved.by.username))||'?';
+    st='<span class="recon-save-has">'+escapeHtmlLike(_reconMonth)+' 已存：'+escapeHtmlLike(who)+'・'+escapeHtmlLike(_reconFmtAt(saved.at)||'時間確認中')
+      +'（檔案時間 '+escapeHtmlLike(_reconFmtAt(saved.fileModified)||'—')+'）</span>';
+  }
+  // 檔案列
+  let info='';
+  if(_reconMobicBusy)info='<div class="recon-mobic-busy"><span class="recon-spin"></span>解析中…（請用電腦上傳）</div>';
+  else if(m&&!m.ok)info='<div class="recon-err">❌ '+escapeHtmlLike(m.name)+' 解析失敗：'+escapeHtmlLike(m.err)+'</div>';
+  else if(m){
+    const r=m.range;
+    const rBad=!r||!r.month||(_reconMonth&&r.month!==_reconMonth);
+    info='<div class="recon-mobic-info">'
+      +'<span>檔案：'+escapeHtmlLike(m.name)+'</span>'
+      +'<span>分頁：'+escapeHtmlLike(m.sheet)+'</span>'
+      +'<span class="'+(rBad?'recon-period-bad':'')+'">期間：'+(r?escapeHtmlLike(r.from+' ~ '+r.to):'抓不到')+'</span>'
+      +'<span>檔案時間（下載時間）：'+escapeHtmlLike(_reconFmtAt(m.modified)||'抓不到')+'</span>'
+      +'<span>已出貨 '+_reconPayoutFmt(m.res.shippedRows)+' / 全部 '+_reconPayoutFmt(m.res.totalRows)+' 列</span>'
+      +'</div>';
+    const um=Object.entries(m.res.unmapped);
+    if(um.length)info+='<div class="recon-warn">⚠ 有店名對不到四店、沒有算進去：'+escapeHtmlLike(um.map(([k,v])=>k+' '+v+' 列').join('、'))+'</div>';
+    const ov=Object.entries(m.res.overlap);
+    if(ov.length)info+='<div class="recon-warn">⚠ 有訂單同時出現「無包裝」與其他出貨方式（一般＋無包裝會大於訂單數）：'+escapeHtmlLike(ov.map(([k,v])=>k+' '+v+' 筆').join('、'))+'</div>';
+  }
+  // 數字表：有解析結果用解析結果；沒有就顯示雲端已存的數字（標明來源）。
+  const src=(m&&m.ok)?m.res.shops:(saved&&saved.shops)||null;
+  const srcLbl=(m&&m.ok)?'這份檔的計算結果':(src?'雲端已存的數字（'+escapeHtmlLike(_reconMonth)+'）':'');
+  let tbl='';
+  if(src){
+    tbl='<div class="recon-scroll"><table class="recon-tbl recon-mobic-tbl"><thead><tr><th class="recon-rowhead">'+srcLbl+'</th>'
+      +RECON_SHOPS.map(s=>'<th>'+escapeHtmlLike(s)+'</th>').join('')+'</tr></thead><tbody>'
+      +RECON_MOBIC_NUM_KEYS.map(({k,l})=>'<tr><th class="recon-rowhead'+(l.indexOf('　')===0?' recon-sub':'')+'">'+escapeHtmlLike(l.trim())+'</th>'
+        +RECON_SHOPS.map(s=>'<td>'+((src[s]&&src[s][k]!=null)?_reconPayoutFmt(src[s][k]):'<span class="recon-miss">—</span>')+'</td>').join('')+'</tr>').join('')
+      +'</tbody></table></div>';
+  }
+  const chk=_reconMobicCheck(_reconMobicCtx());
+  const btn='<button type="button" class="recon-btn recon-save-btn"'+(chk.ok?'':' disabled')+' onclick="reconMobicSave()">'+(_reconMobicSaving?'存檔中…':'存檔（四店一起）')+'</button>';
+  const why=(!chk.ok&&!_reconMobicSaving)?'<span class="recon-save-why">'+escapeHtmlLike(chk.reasons.join('；'))+'</span>':'';
+  const mm=_reconMobicMsg;
+  const msg=(mm&&m&&mm.month===_reconMonth&&mm.file===m.name&&mm.modified===m.modified)
+    ?'<span class="recon-save-msg '+(mm.kind==='ok'?'recon-ok':mm.kind==='err'?'recon-bad':'recon-note')+'">'+escapeHtmlLike(mm.text)+'</span>':'';
+  return '<div class="recon-wrap recon-mobic">'
+    +'<div class="recon-hd"><span class="recon-title">莫筆克銷售金額明細（全賣場）</span>'
+    +'<input type="file" accept=".xlsx" class="recon-file recon-mobic-file" onchange="reconMobicPick(event)"'+(_reconMobicBusy?' disabled':'')+'>'
+    +(m&&!_reconMobicBusy?'<button type="button" class="recon-btn" onclick="clearReconMobic()">清除</button>':'')
+    +'<span class="recon-note">上傳莫筆克匯出的 xlsx（只讀「…建立」分頁、只算「已出貨」）。月份用上方同一個下拉。<b>按「存檔」才會存到雲端</b>，只存四店彙總數字（訂單數、商品成本、折扣），不存任何訂單或買家資料。</span></div>'
+    +info+tbl
+    +'<div class="recon-mobic-save"><span class="recon-save-st">'+st+'</span>'+btn+why+msg+'</div>'
+    +'</div>';
+}
 // 等 KPI 雲端就緒的輪詢狀態。🔴 一定要有上限：離線 / localStorage 後備模式下雲端永遠不會就緒，
 //   沒上限就是無限每秒整頁重畫（innerHTML 重建 ⇒ 打開中的月份下拉被關掉）。
 //   次數在切換月份（setReconMonth）與重新進入對帳分頁（setReconTab）時歸零（_reconReadyReset）。
@@ -22299,7 +22581,7 @@ function _reconReadyTick(){
 function renderReconTab(){
   const el=document.getElementById('recon-content-shopee');
   if(!el)return;
-  el.innerHTML=reconShopeeHtml();
+  el.innerHTML=reconShopeeHtml()+reconMobicHtml();
   // 雲端（app/kpi 第一個快照）還沒到 ⇒ 已存狀態與存檔鈕都還不能判斷，每秒再看一次（有上限，見 _reconReadyTick）。
   //   ⚠ 只輪詢記憶體裡的 _kpiV2，不另開 Firestore 訂閱；分頁不在畫面上（未 active）就停。
   clearTimeout(_reconReadyTimer);_reconReadyTimer=null;
@@ -22307,6 +22589,8 @@ function renderReconTab(){
 }
 // 對帳存檔鈕的 inline onclick 用（另起一行，不動下方主匯流排那一行）。
 Object.assign(window,{reconSaveShop});
+// 莫筆克區塊的 inline handler（選檔 onchange / 清除 / 存檔）。
+Object.assign(window,{reconMobicPick,clearReconMobic,reconMobicSave});
 // 對帳分頁的切換。骨架比照 setCoupangShop，但【補上它缺的三件事】：
 //   ① 失效分頁防護（setShop 有、setMomoShop/setCoupangShop 都沒有）：
 //      2026-08-28 實測 setMomoShop('不存在的店') → .shop-content.active 與 .stab.active
