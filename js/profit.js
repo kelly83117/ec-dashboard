@@ -22554,6 +22554,345 @@ function reconMobicHtml(){
     +'<div class="recon-mobic-save"><span class="recon-save-st">'+st+'</span>'+btn+why+msg+'</div>'
     +'</div>';
 }
+// ═══ 對帳分頁 · 廣告與各項費用（每店）（KPI 蝦皮帶入的來源，2026-10-16 第 3 塊）═══
+// 每店一欄、一顆存檔，一次 writePaths 寫兩條：
+//   sources.{YYYY-MM}.shopee.ads.{店}    ＝ {spend, shopAdSpend, noSidSpend, rows, period, exportedAt, file, rebate, by, at}
+//                                           （這次沒上傳廣告報表 CSV ⇒ 這一條【不寫】，雲端舊值原封不動）
+//   sources.{YYYY-MM}.shopee.manual.{店} ＝ {noPackPerOrder, returnSubsidy, other, otherNote, by, at}（四個都可為 null）
+// 🔴 金額全是含稅原值、保留 2 位小數，不四捨五入成整數、不除 1.05 —— 換算留給 KPI 帶入那一端。
+// 🔴 空白＝未填，存 null，【不可】存成 0（0 是合法值，兩者要分得開）。
+// ⚠ 不碰淨利表既有的廣告上傳（onFile / parseAdsCsv / rawAds）：這裡另寫一支只算總額的純函式，只借用 splitCSV。
+// ⚠ 月份下拉、雲端就緒判斷與輪詢上限、存檔→讀回驗證，全部沿用進帳報表那一套。
+const RECON_ADS_MANUAL_KEYS=[
+  {k:'noPackPerOrder',l:'無包裝 $1／筆 金額'},
+  {k:'returnSubsidy', l:'退貨運費補助（減項，填正數）'},
+  {k:'other',         l:'其他金額'},
+];
+const RECON_ADS_NOTE_MAX=100;
+// 一格花費：'-' 或空白 ⇒ {v:0,dash:true}；數字（可有千分位）⇒ {v}；其他 ⇒ null（呼叫端當錯誤）。
+function _reconAdsSpendCell(s){
+  const t=String(s==null?'':s).replace(/^"|"$/g,'').trim();
+  if(t===''||t==='-')return{v:0,dash:true};
+  const u=t.replace(/,/g,'');
+  if(!/^-?\d+(\.\d+)?$/.test(u))return null;
+  return{v:parseFloat(u)};
+}
+// 純函式：整份 CSV 文字 → 總額。回 {ok:true, spend, shopAdSpend, noSidSpend, rows, dashRows, period, exportedAt, shopName} 或 {ok:false, err}。
+//   表頭列＝第一個同時含「花費」與「商品 ID」的列（不寫死行號、依表頭名稱找欄位：森之旅的檔就少一欄「目標客群」）。
+//   spend＝表頭以下所有資料列的花費（含賣場廣告、沒有商品 ID 的列）；用「分」整數累加，避開浮點尾差。
+function _reconAdsParseCsv(text){
+  const lines=String(text||'').replace(/^﻿/,'').split('\n').map(l=>l.replace(/\r$/,''));
+  const cellsOf=l=>splitCSV(l).map(c=>c.replace(/^"|"$/g,'').trim());
+  let hi=-1;
+  for(let i=0;i<lines.length;i++){const c=cellsOf(lines[i]);if(c.indexOf('花費')>=0&&c.indexOf('商品 ID')>=0){hi=i;break;}}
+  if(hi<0)return{ok:false,err:'找不到含「花費」與「商品 ID」的表頭列，不是蝦皮廣告「所有CPC成效報告」'};
+  const H=cellsOf(lines[hi]);
+  if(H.indexOf('關鍵字/版位層級')>=0)return{ok:false,err:'這是「關鍵字/版位層級」報表，請改上傳「總體」數據'};
+  const iS=H.indexOf('花費'),iP=H.indexOf('商品 ID'),iT=H.indexOf('廣告類型');
+  if(iT<0)return{ok:false,err:'表頭缺少「廣告類型」欄'};
+  // 檔頭（表頭列以上）：key,value
+  let period=null,exportedAt=null,shopName='';
+  for(let i=0;i<hi;i++){
+    const c=cellsOf(lines[i]);
+    if(c[0]==='期間'){
+      const m=/(\d{4})\/(\d{2})\/(\d{2})\s*[-–~]\s*(\d{4})\/(\d{2})\/(\d{2})/.exec(c.slice(1).join(','));
+      if(m)period={from:m[1]+'-'+m[2]+'-'+m[3],to:m[4]+'-'+m[5]+'-'+m[6]};
+    }else if(c[0]==='報表匯出時間'){
+      const m=/(\d{4})\/(\d{2})\/(\d{2})\s+(\d{1,2}):(\d{2})/.exec(c.slice(1).join(','));
+      if(m)exportedAt=m[1]+'-'+m[2]+'-'+m[3]+' '+m[4].padStart(2,'0')+':'+m[5];
+    }else if(c[0]==='賣場名稱'){
+      shopName=c.slice(1).join(',');
+    }
+  }
+  let spend=0,shopAd=0,noSid=0,rows=0,dashRows=0;
+  const bad=[];
+  for(let i=hi+1;i<lines.length;i++){
+    if(!lines[i].trim())continue;
+    const c=cellsOf(lines[i]);
+    const s=_reconAdsSpendCell(c[iS]);
+    if(!s){bad.push(i+1);continue;}
+    rows++;
+    if(s.dash)dashRows++;
+    const cents=Math.round(s.v*100);
+    spend+=cents;
+    if((c[iT]||'')==='賣場廣告')shopAd+=cents;
+    const pid=c[iP]||'';
+    if(pid===''||pid==='-')noSid+=cents;
+  }
+  if(bad.length)return{ok:false,err:'花費欄有 '+bad.length+' 列不是數字（第 '+bad.slice(0,5).join('、')+(bad.length>5?'…':'')+' 行）'};
+  if(!rows)return{ok:false,err:'表頭下面沒有任何資料列'};
+  return{ok:true,spend:spend/100,shopAdSpend:shopAd/100,noSidSpend:noSid/100,rows,dashRows,period,exportedAt,shopName};
+}
+// 'YYYY-MM' 的月底日 'YYYY-MM-DD'
+function _reconMonthLastDay(ym){
+  const y=+ym.slice(0,4),m=+ym.slice(5,7);
+  return ym+'-'+String(new Date(Date.UTC(y,m,0)).getUTCDate()).padStart(2,'0');
+}
+// 手填金額：空白 ⇒ {ok:true,v:null}；≥0 的數字（可千分位、最多 2 位小數）⇒ {ok:true,v}；其他 ⇒ {ok:false}。
+function _reconAdsMoney(s){
+  const t=String(s==null?'':s).replace(/,/g,'').trim();
+  if(t==='')return{ok:true,v:null};
+  if(!/^\d+(\.\d{1,2})?$/.test(t))return{ok:false,v:null};
+  return{ok:true,v:parseFloat(t)};
+}
+// 能不能存 + 要寫的內容（不含 by/at）。純函式。
+//   c = {shop, a:_reconAds[店]（沒傳 CSV 為 null）, vals:{rebate,noPackPerOrder,returnSubsidy,other,otherNote}（輸入框原字串）,
+//        month, readOnly, ready, busy}
+//   回 {ok, reasons[], ads:物件|null（null＝這次不寫 ads 那條）, manual:物件}
+function _reconAdsCheck(c){
+  const reasons=[];
+  const a=c&&c.a,v=(c&&c.vals)||{};
+  if(c&&c.readOnly)reasons.push('檢視帳號為唯讀');
+  if(!(c&&c.ready))reasons.push('雲端尚未就緒');
+  if(!(c&&c.month))reasons.push('上方月份未選');
+  let ads=null;
+  if(a&&!a.ok)reasons.push('廣告報表無法使用（'+a.err+'），請清除或重新上傳');
+  else if(a&&a.ok){
+    const r=a.res;
+    if(!r.period)reasons.push('廣告報表抓不到期間');
+    else if(c.month&&(r.period.from!==c.month+'-01'||r.period.to!==_reconMonthLastDay(c.month)))
+      reasons.push('廣告報表期間 '+r.period.from+' ~ '+r.period.to+' 不是 '+(c.month||'')+' 整月');
+    if(c.shop&&String(r.shopName||'').indexOf(c.shop)<0)reasons.push('報表的賣場名稱「'+(r.shopName||'（空白）')+'」不含「'+c.shop+'」');
+    ads={spend:r.spend,shopAdSpend:r.shopAdSpend,noSidSpend:r.noSidSpend,rows:r.rows,
+      period:r.period?{from:r.period.from,to:r.period.to}:null,exportedAt:r.exportedAt||null,file:a.name||'',rebate:null};
+  }
+  // 回饋金屬於 ads 那一條：沒有 CSV ⇒ 這次不寫 ads，回饋金整個不看（畫面上那格也是 disabled）。
+  if(ads){
+    const rb=_reconAdsMoney(v.rebate);
+    if(!rb.ok)reasons.push('廣告回饋金要填 0 以上的數字');
+    else if(rb.v!=null&&rb.v>ads.spend)reasons.push('廣告回饋金 '+_reconAdsFmt(rb.v)+' 大於廣告花費 '+_reconAdsFmt(ads.spend));
+    ads.rebate=rb.ok?rb.v:null;
+  }
+  const manual={};
+  RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{
+    const m=_reconAdsMoney(v[k]);
+    if(!m.ok)reasons.push(l.replace(/（.*$/,'')+' 要填 0 以上的數字');
+    manual[k]=m.v;
+  });
+  const note=String(v.otherNote==null?'':v.otherNote).trim();
+  if(note.length>RECON_ADS_NOTE_MAX)reasons.push('其他備註最多 '+RECON_ADS_NOTE_MAX+' 字（目前 '+note.length+'）');
+  manual.otherNote=note===''?null:note;
+  if(c&&c.busy)reasons.push('存檔中');
+  return{ok:!reasons.length,reasons,ads,manual};
+}
+const _RECON_ADS_CMP=[
+  {k:'spend',l:'廣告花費'},{k:'shopAdSpend',l:'賣場廣告'},{k:'noSidSpend',l:'沒有商品 ID'},{k:'rows',l:'列數'},{k:'rebate',l:'廣告回饋金'},
+];
+function _reconAdsFmt(v){
+  if(v==null)return '（未填）';
+  const n=Number(v);
+  return (n<0?'-':'')+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:2});
+}
+// 舊存檔 vs 這次要寫的：只比這次【會寫】的那幾條（ads 為 null 就不比 ads）。→ [{l,a,b}]
+function _reconAdsDiff(oldAds,oldManual,ads,manual){
+  const out=[];
+  if(ads&&oldAds&&typeof oldAds==='object'){
+    _RECON_ADS_CMP.forEach(({k,l})=>{const a=oldAds[k]==null?null:oldAds[k];if(a!==ads[k])out.push({l,a:_reconAdsFmt(a),b:_reconAdsFmt(ads[k])});});
+    const op=oldAds.period||{},np=ads.period||{};
+    if(op.from!==np.from||op.to!==np.to)out.push({l:'廣告報表期間',a:(op.from||'?')+' ~ '+(op.to||'?'),b:(np.from||'?')+' ~ '+(np.to||'?')});
+  }
+  if(oldManual&&typeof oldManual==='object'){
+    RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{const a=oldManual[k]==null?null:oldManual[k];if(a!==manual[k])out.push({l:l.replace(/（.*$/,''),a:_reconAdsFmt(a),b:_reconAdsFmt(manual[k])});});
+    const a=oldManual.otherNote==null?null:oldManual.otherNote;
+    if(a!==manual.otherNote)out.push({l:'其他備註',a:a==null?'（未填）':a,b:manual.otherNote==null?'（未填）':manual.otherNote});
+  }
+  return out;
+}
+// 寫入後讀回比對：回不一致的項目（[]＝一致）。ads 為 null ⇒ 只驗 manual。
+function _reconAdsVerify(gotAds,gotManual,ads,manual,by){
+  const bad=[];
+  const byOk=g=>g&&g.by&&g.by.username===by.username&&g.by.name===by.name&&g.at!=null;
+  if(ads){
+    if(!gotAds||typeof gotAds!=='object')bad.push('廣告（雲端沒有這筆）');
+    else{
+      _RECON_ADS_CMP.forEach(({k,l})=>{if((gotAds[k]==null?null:gotAds[k])!==ads[k])bad.push(l);});
+      const gp=gotAds.period||{},np=ads.period||{};
+      if(gp.from!==np.from||gp.to!==np.to)bad.push('廣告報表期間');
+      if((gotAds.exportedAt==null?null:gotAds.exportedAt)!==ads.exportedAt)bad.push('匯出時間');
+      if(gotAds.file!==ads.file)bad.push('檔名');
+      if(!byOk(gotAds))bad.push('廣告的存檔人／時間');
+    }
+  }
+  if(!gotManual||typeof gotManual!=='object')bad.push('手填（雲端沒有這筆）');
+  else{
+    RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{if((gotManual[k]==null?null:gotManual[k])!==manual[k])bad.push(l.replace(/（.*$/,''));});
+    if((gotManual.otherNote==null?null:gotManual.otherNote)!==manual.otherNote)bad.push('其他備註');
+    if(!byOk(gotManual))bad.push('手填的存檔人／時間');
+  }
+  return bad;
+}
+function _reconAdsSavedOf(cloud,month,shop){
+  const s=cloud&&cloud.sources&&cloud.sources[month]&&cloud.sources[month].shopee;
+  const pick=x=>(x&&typeof x==='object')?x:null;
+  return{ads:pick(s&&s.ads&&s.ads[shop]),manual:pick(s&&s.manual&&s.manual[shop])};
+}
+// 狀態（只在記憶體）
+let _reconAds={};        // 店 → {name, ok, err, res}
+let _reconAdsBusy={};    // 店 → true（讀檔中）
+let _reconAdsSaving={};  // 店 → true（存檔中）
+let _reconAdsMsg={};     // 店 → {month, kind, text}
+let _reconAdsForm={};    // 店 → {month, dirty, vals:{rebate,noPackPerOrder,returnSubsidy,other,otherNote}}（輸入框原字串）
+const _RECON_ADS_FIELDS=['rebate','noPackPerOrder','returnSubsidy','other','otherNote'];
+// 雲端值 → 輸入框字串（null ⇒ ''）
+function _reconAdsValsFromSaved(sv){
+  const o={};
+  const f=x=>x==null?'':String(x);
+  o.rebate=f(sv.ads&&sv.ads.rebate);
+  RECON_ADS_MANUAL_KEYS.forEach(({k})=>{o[k]=f(sv.manual&&sv.manual[k]);});
+  o.otherNote=f(sv.manual&&sv.manual.otherNote);
+  return o;
+}
+// 這一店目前輸入框該顯示的值：使用者這個月改過（dirty）就用他的；否則跟著雲端已存的值走。
+function _reconAdsVals(shop){
+  const f=_reconAdsForm[shop];
+  if(f&&f.month===_reconMonth&&f.dirty)return f.vals;
+  const vals=_reconAdsValsFromSaved(_reconAdsSavedOf(_kpiV2.cloud,_reconMonth,shop));
+  _reconAdsForm[shop]={month:_reconMonth,dirty:false,vals};
+  return vals;
+}
+function _reconAdsCtx(shop){
+  return{shop,a:_reconAds[shop]||null,vals:_reconAdsVals(shop),month:_reconMonth,
+    readOnly:!!(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()),
+    ready:!!(window.__cloudKpi&&typeof window.__cloudKpi.writePaths==='function'&&_kpiReady()),
+    busy:!!_reconAdsSaving[shop]};
+}
+async function reconAdsPick(e,shop){
+  const f=(e&&e.target&&e.target.files||[])[0];
+  try{e.target.value='';}catch{}
+  if(!f||RECON_SHOPS.indexOf(shop)<0||_reconAdsBusy[shop])return;
+  _reconAdsBusy[shop]=true;renderReconTab();
+  try{
+    const text=await new Promise((res,rej)=>{const rd=new FileReader();rd.onload=()=>res(rd.result);rd.onerror=()=>rej(rd.error||new Error('讀檔失敗'));rd.readAsText(f);});
+    const r=_reconAdsParseCsv(text);
+    _reconAds[shop]=r.ok?{name:f.name,ok:true,err:'',res:r}:{name:f.name,ok:false,err:r.err,res:null};
+    // 自動帶月份：同進帳報表（使用者沒動過、目前空白、而且是整月才帶）。
+    if(r.ok&&r.period&&!_reconMonthTouched&&!_reconMonth){
+      const ym=r.period.from.slice(0,7);
+      if(r.period.from===ym+'-01'&&r.period.to===_reconMonthLastDay(ym))_reconMonth=ym;
+    }
+  }catch(err){
+    console.warn('[對帳·廣告] 讀檔失敗',shop,f.name,err);
+    _reconAds[shop]={name:f.name,ok:false,err:(err&&err.message)||String(err),res:null};
+  }
+  _reconAdsBusy[shop]=false;
+  renderReconTab();
+}
+function clearReconAds(shop){if(_reconAdsBusy[shop])return;delete _reconAds[shop];renderReconTab();}
+// 輸入框 oninput：只更新記憶體與這一店的「存檔」那一格，【不整頁重畫】（重畫會把打到一半的輸入框焦點弄掉）。
+function reconAdsInput(shop,key,val){
+  if(RECON_SHOPS.indexOf(shop)<0||_RECON_ADS_FIELDS.indexOf(key)<0)return;
+  const vals=Object.assign({},_reconAdsVals(shop),{[key]:String(val==null?'':val)});
+  _reconAdsForm[shop]={month:_reconMonth,dirty:true,vals};
+  const el=document.getElementById('recon-ads-act-'+RECON_SHOPS.indexOf(shop));
+  if(el)el.innerHTML=_reconAdsActHtml(shop);
+}
+async function reconAdsSave(shop){
+  if(RECON_SHOPS.indexOf(shop)<0)return;
+  const chk=_reconAdsCheck(_reconAdsCtx(shop));
+  if(!chk.ok){if(typeof showToast==='function')showToast('無法存檔：'+chk.reasons.join('；'),'error',5000);return;}
+  const ck=window.__cloudKpi,month=_reconMonth;
+  const u=(window.App&&App.currentUser)||{};
+  const by={username:u.username||'',name:u.name||''};
+  const done=(kind,text)=>{_reconAdsMsg[shop]={month,kind,text};_reconAdsSaving[shop]=false;renderReconTab();};
+  _reconAdsSaving[shop]=true;renderReconTab();
+  const readSaved=async()=>{const s=await ck.getDoc();return _reconAdsSavedOf((s&&s.exists&&s.exists())?(s.data()||{}):null,month,shop);};
+  let old;
+  try{old=await readSaved();}
+  catch(err){console.error('[對帳·廣告] 讀取雲端現值失敗',err);done('err','❌ 讀不到雲端現值，沒有存檔：'+((err&&(err.code||err.message))||err));return;}
+  const diff=_reconAdsDiff(old.ads,old.manual,chk.ads,chk.manual);
+  if(diff.length){
+    const w=x=>x&&x.by&&(x.by.name||x.by.username);
+    const who=[old.ads&&chk.ads?'廣告：'+(w(old.ads)||'?')+(_reconFmtAt(old.ads.at)?' · '+_reconFmtAt(old.ads.at):''):'',
+               old.manual?'手填：'+(w(old.manual)||'?')+(_reconFmtAt(old.manual.at)?' · '+_reconFmtAt(old.manual.at):''):''].filter(Boolean).join('；');
+    const msg=shop+' '+month+' 已經有存檔'+(who?'（'+who+'）':'')+'，以下數字不同：\n\n'
+      +diff.map(x=>x.l+'：'+x.a+' → '+x.b).join('\n')+'\n\n確定覆蓋嗎？';
+    if(!confirm(msg)){done('info','已取消，雲端維持原本的存檔');return;}
+  }
+  const base=['sources',month,'shopee'];
+  const pairs=[];
+  if(chk.ads)pairs.push([base.concat('ads',shop),Object.assign({},chk.ads,{by,at:ck.TS})]);
+  pairs.push([base.concat('manual',shop),Object.assign({},chk.manual,{by,at:ck.TS})]);
+  try{await ck.writePaths(pairs);}
+  catch(err){console.error('[對帳·廣告] 寫入 app/kpi 失敗',err);done('err','❌ 沒有寫進雲端：'+((err&&(err.code||err.message))||err));return;}
+  // 🔴 被擋下時 writePaths 不會丟錯，只有讀回看得出來 —— 不一致一律當失敗。
+  let bad;
+  try{const g=await readSaved();bad=_reconAdsVerify(g.ads,g.manual,chk.ads,chk.manual,by);}
+  catch(err){console.error('[對帳·廣告] 讀回驗證失敗',err);done('err','⚠ 已送出但讀不回雲端確認，請重新整理後看「已存」狀態');return;}
+  if(bad.length){console.warn('[對帳·廣告] 讀回不一致',shop,month,bad);done('err','❌ 沒有寫進雲端（讀回不一致：'+bad.join('、')+'）');return;}
+  delete _reconAdsForm[shop];   // 存好了 ⇒ 輸入框改回跟著雲端已存的值走
+  done('ok','✓ 已存進雲端'+(chk.ads?'（廣告＋手填）':'（手填）'));
+}
+// 一店的「存檔」那一格：已存狀態 + 鈕 + 不能存的原因 + 上次結果。reconAdsInput 會單獨重畫這一格。
+function _reconAdsActHtml(shop){
+  const cloud=_kpiV2.cloud;
+  let st;
+  if(_reconReadyGaveUp&&!_kpiReady())st='<span class="recon-save-st recon-bad">雲端尚未就緒，請重新整理頁面</span>';
+  else if(!_reconMonth)st='<span class="recon-save-st">選月份後顯示</span>';
+  else if(cloud===undefined)st='<span class="recon-save-st">讀取雲端中…</span>';
+  else{
+    const sv=_reconAdsSavedOf(cloud,_reconMonth,shop);
+    const line=(lbl,x)=>x?'<span class="recon-save-st recon-save-has">'+lbl+'已存：'+escapeHtmlLike((x.by&&(x.by.name||x.by.username))||'?')+'・'+escapeHtmlLike(_reconFmtAt(x.at)||'時間確認中')+'</span>'
+                         :'<span class="recon-save-st">'+lbl+'尚未存檔</span>';
+    st=line('廣告 ',sv.ads)+line('手填 ',sv.manual);
+  }
+  const chk=_reconAdsCheck(_reconAdsCtx(shop));
+  const btn='<button type="button" class="recon-btn recon-save-btn"'+(chk.ok?'':' disabled')+' onclick="reconAdsSave(\''+shop+'\')">'+(_reconAdsSaving[shop]?'存檔中…':'存檔')+'</button>';
+  const why=(!chk.ok&&!_reconAdsSaving[shop])?'<span class="recon-save-why">'+escapeHtmlLike(chk.reasons.join('；'))+'</span>':'';
+  const m=_reconAdsMsg[shop];
+  const msg=(m&&m.month===_reconMonth)?'<span class="recon-save-msg '+(m.kind==='ok'?'recon-ok':m.kind==='err'?'recon-bad':'recon-note')+'">'+escapeHtmlLike(m.text)+'</span>':'';
+  return st+btn+why+msg;
+}
+function reconAdsHtml(){
+  const cloud=_kpiV2.cloud;
+  const sv={};RECON_SHOPS.forEach(s=>{sv[s]=(_reconMonth&&cloud)?_reconAdsSavedOf(cloud,_reconMonth,s):{ads:null,manual:null};});
+  const cell=(s,body)=>'<td class="recon-ads-cell">'+body+'</td>';
+  const row=(lbl,fn,cls)=>'<tr><th class="recon-rowhead'+(cls?' '+cls:'')+'">'+lbl+'</th>'+RECON_SHOPS.map((s,i)=>cell(s,fn(s,i))).join('')+'</tr>';
+  // 上傳列
+  let h=row('廣告報表 CSV',(s,i)=>{
+    const a=_reconAds[s];
+    return '<input type="file" accept=".csv" class="recon-file" onchange="reconAdsPick(event,\''+s+'\')"'+(_reconAdsBusy[s]?' disabled':'')+'>'
+      +(_reconAdsBusy[s]?'<span class="recon-fname">讀取中…</span>'
+        :a?'<span class="recon-fname" title="'+escapeHtmlLike(a.name)+'">'+escapeHtmlLike(a.name)+'</span>'
+          +(a.ok?'':'<span class="recon-miss">'+escapeHtmlLike(a.err)+'</span>')
+          +'<button type="button" class="recon-btn recon-ads-clear" onclick="clearReconAds(\''+s+'\')">清除</button>':'');
+  });
+  // 數字：這次上傳的檔優先；沒有就顯示雲端已存的（標「雲端」）
+  const src=s=>{const a=_reconAds[s];if(a&&a.ok)return{x:a.res,cloud:false};if(sv[s].ads)return{x:sv[s].ads,cloud:true};return null;};
+  const tag=o=>o.cloud?'<span class="recon-ads-src">雲端</span>':'';
+  h+=row('期間',s=>{const o=src(s);if(!o)return '<span class="recon-empty">—</span>';
+    const p=o.x.period;const bad=!o.cloud&&_reconMonth&&p&&(p.from!==_reconMonth+'-01'||p.to!==_reconMonthLastDay(_reconMonth));
+    return '<span class="'+(bad||!p?'recon-period-bad':'recon-period')+'">'+(p?escapeHtmlLike(p.from+' ~ '+p.to):'抓不到')+'</span>'+tag(o);});
+  h+=row('匯出時間',s=>{const o=src(s);return o?escapeHtmlLike(o.x.exportedAt||'抓不到')+tag(o):'<span class="recon-empty">—</span>';});
+  h+=row('賣場名稱',s=>{const a=_reconAds[s];if(!(a&&a.ok))return '<span class="recon-empty">—</span>';
+    const okN=String(a.res.shopName||'').indexOf(s)>=0;
+    return '<span class="recon-ads-shopname'+(okN?'':' recon-period-bad')+'" title="'+escapeHtmlLike(a.res.shopName||'')+'">'+escapeHtmlLike(a.res.shopName||'（空白）')+'</span>';});
+  h+=row('廣告花費',s=>{const o=src(s);return o?_reconAdsFmt(o.x.spend)+tag(o):'<span class="recon-empty">—</span>';},'');
+  h+=row('└ 賣場廣告',s=>{const o=src(s);return o?_reconAdsFmt(o.x.shopAdSpend):'<span class="recon-empty">—</span>';},'recon-sub');
+  h+=row('└ 沒有商品 ID',s=>{const o=src(s);return o?_reconAdsFmt(o.x.noSidSpend):'<span class="recon-empty">—</span>';},'recon-sub');
+  h+=row('列數',s=>{const o=src(s);if(!o)return '<span class="recon-empty">—</span>';
+    return _reconPayoutFmt(o.x.rows)+(!o.cloud&&o.x.dashRows?'<span class="recon-note">（花費「-」或空白 '+o.x.dashRows+' 列，以 0 計）</span>':'');});
+  // 手填
+  const inp=(s,i,k,type)=>{
+    const vals=_reconAdsVals(s);
+    const dis=(k==='rebate'&&!(_reconAds[s]&&_reconAds[s].ok));
+    return '<input id="recon-ads-'+i+'-'+k+'" class="recon-ads-inp'+(type==='text'?' recon-ads-note':'')+'"'
+      +(type==='text'?' type="text" maxlength="'+RECON_ADS_NOTE_MAX+'"':' type="text" inputmode="decimal"')
+      +' value="'+escapeHtmlLike(vals[k])+'"'+(dis?' disabled title="要先上傳這個月的廣告報表 CSV 才能改"':'')
+      +' oninput="reconAdsInput(\''+s+'\',\''+k+'\',this.value)">';
+  };
+  h+=row('廣告回饋金（含稅）',(s,i)=>inp(s,i,'rebate'));
+  RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{h+=row(l+'（含稅）',(s,i)=>inp(s,i,k));});
+  h+=row('其他備註',(s,i)=>inp(s,i,'otherNote','text'));
+  h+='<tr class="recon-saverow"><th class="recon-rowhead">雲端存檔</th>'
+    +RECON_SHOPS.map((s,i)=>'<td class="recon-save-cell" id="recon-ads-act-'+i+'">'+_reconAdsActHtml(s)+'</td>').join('')+'</tr>';
+  return '<div class="recon-wrap recon-ads">'
+    +'<div class="recon-hd"><span class="recon-title">廣告與各項費用（每店）</span>'
+    +'<span class="recon-note">廣告報表請上傳蝦皮廣告「所有CPC成效報告」的<b>總體</b>數據（整月）。金額一律含稅、空白＝未填。<b>按各店「存檔」才會存到雲端</b>，供 KPI 月結表蝦皮帶入使用。回饋金要有廣告報表才能存；手填項沒有 CSV 也能存。</span></div>'
+    +'<div class="recon-ads-hint">包裝費（一般 $2.5／無包裝 $2）、折扣、聯盟行銷由系統自動帶入，不用填</div>'
+    +'<div class="recon-scroll"><table class="recon-tbl recon-ads-tbl"><thead><tr><th class="recon-rowhead">欄位</th>'
+    +RECON_SHOPS.map(s=>'<th>'+escapeHtmlLike(s)+'</th>').join('')+'</tr></thead><tbody>'+h+'</tbody></table></div>'
+    +'</div>';
+}
 // 等 KPI 雲端就緒的輪詢狀態。🔴 一定要有上限：離線 / localStorage 後備模式下雲端永遠不會就緒，
 //   沒上限就是無限每秒整頁重畫（innerHTML 重建 ⇒ 打開中的月份下拉被關掉）。
 //   次數在切換月份（setReconMonth）與重新進入對帳分頁（setReconTab）時歸零（_reconReadyReset）。
@@ -22576,12 +22915,22 @@ function _reconReadyTick(){
   if(_reconReadyTries>=RECON_READY_MAX_TRIES){_reconReadyGaveUp=true;renderReconTab();return;}
   const sel=document.getElementById('recon-month-sel');
   if(sel&&document.activeElement===sel){_reconReadyTimer=setTimeout(_reconReadyTick,1000);return;}
+  // 廣告與各項費用的輸入框正在打字 ⇒ 同樣跳過這輪（仍計次）。
+  if(_reconAdsTyping()){_reconReadyTimer=setTimeout(_reconReadyTick,1000);return;}
   renderReconTab();
+}
+function _reconAdsTyping(){
+  const a=document.activeElement;
+  return !!(a&&typeof a.id==='string'&&/^recon-ads-\d+-/.test(a.id));
 }
 function renderReconTab(){
   const el=document.getElementById('recon-content-shopee');
   if(!el)return;
-  el.innerHTML=reconShopeeHtml()+reconMobicHtml();
+  // 廣告區輸入框有焦點時，重畫後把焦點與游標放回同一格（值本來就存在 _reconAdsForm，不會掉）。
+  const fa=_reconAdsTyping()?document.activeElement:null;
+  const fid=fa?fa.id:'',fs=fa?fa.selectionStart:null,fe=fa?fa.selectionEnd:null;
+  el.innerHTML=reconShopeeHtml()+reconMobicHtml()+reconAdsHtml();
+  if(fid){try{const n=document.getElementById(fid);if(n&&!n.disabled){n.focus();if(fs!=null)n.setSelectionRange(fs,fe);}}catch{}}
   // 雲端（app/kpi 第一個快照）還沒到 ⇒ 已存狀態與存檔鈕都還不能判斷，每秒再看一次（有上限，見 _reconReadyTick）。
   //   ⚠ 只輪詢記憶體裡的 _kpiV2，不另開 Firestore 訂閱；分頁不在畫面上（未 active）就停。
   clearTimeout(_reconReadyTimer);_reconReadyTimer=null;
@@ -22591,6 +22940,8 @@ function renderReconTab(){
 Object.assign(window,{reconSaveShop});
 // 莫筆克區塊的 inline handler（選檔 onchange / 清除 / 存檔）。
 Object.assign(window,{reconMobicPick,clearReconMobic,reconMobicSave});
+// 廣告與各項費用區塊的 inline handler（選檔 onchange / 清除 / 輸入框 oninput / 存檔）。
+Object.assign(window,{reconAdsPick,clearReconAds,reconAdsInput,reconAdsSave});
 // 對帳分頁的切換。骨架比照 setCoupangShop，但【補上它缺的三件事】：
 //   ① 失效分頁防護（setShop 有、setMomoShop/setCoupangShop 都沒有）：
 //      2026-08-28 實測 setMomoShop('不存在的店') → .shop-content.active 與 .stab.active
