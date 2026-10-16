@@ -1762,6 +1762,12 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-au-btn:disabled{opacity:.6;cursor:wait;}
 .km-au-hint{font-size:11.5px;font-weight:600;color:#92400e;background:var(--warn-soft);padding:2px 8px;border-radius:999px;white-space:nowrap;}
 .km-au-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:0 5px;border-radius:4px;background:var(--primary-soft);color:var(--primary);line-height:1.6;}
+/* 同一格同時有「手動」與「自動」兩個小字（人手改過帶入值、或其他組公式欄被帶入）：並排成一行，不要上下兩行把整列撐高。
+   ⚠ 只用 CSS（:has），不改 HTML：其他組的填寫模式輸出一個字都不變。 */
+.km-ftable td:has(> .km-sublabel > .km-fx-tag):has(> .km-sublabel > .km-au-tag){text-align:right;}
+.km-ftable td > .km-sublabel:has(> .km-fx-tag):has(~ .km-sublabel > .km-au-tag),
+.km-ftable td > .km-sublabel:has(> .km-fx-tag) ~ .km-sublabel:has(> .km-au-tag){display:inline-block;vertical-align:top;}
+.km-ftable td > .km-sublabel:has(> .km-fx-tag):has(~ .km-sublabel > .km-au-tag){padding-right:0;margin-right:4px;}
 .km-au-sub{font-size:12px;color:#6b7280;margin-bottom:10px;}
 .km-au-tbl{width:100%;border-collapse:collapse;font-size:12.5px;color:#374151;font-variant-numeric:tabular-nums;}
 .km-au-tbl th{text-align:left;padding:6px 8px;color:#6b7280;font-size:11px;font-weight:600;background:#f8f9fc;white-space:nowrap;border-bottom:1px solid #eef0f4;}
