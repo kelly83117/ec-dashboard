@@ -9421,6 +9421,9 @@ const KPI_GROUPS=[
     ],
     commonCostLabel:'倉儲運費+便利袋+宅配通+大榮（整組共同費用，只影響小計純利）',
     commonCostShortLabel:'物流運費',
+    // 共同費用是手填、系統不換算：2026/09 起蝦皮改未稅（從對帳單帶入），同事要自己 ÷1.05。填寫模式共同費用列的 placeholder 與 ⓘ。
+    commonCostPlaceholder:'未稅金額（含稅 ÷ 1.05）',
+    commonCostInfo:'倉儲運費＋便利袋＋宅配通＋大榮，整組共同費用，只扣在蝦皮小計純利。2026/09 起蝦皮改為未稅，請填未稅金額（含稅 ÷ 1.05）；2026/08 以前為含稅。',
     // 手續費（2026-10-01）：自動預設＝實際營收 × 該店費率（淨利表「平台費率」設定 ec_shop_rate，讀不到用預設 好麻吉／玩樂／森之旅 20.5%、維克 17.5%）。
     //   存了值＝手動覆蓋；實際營收空著 → 不補（維持空，純利不變）。舊手填值的整理見 __kpiShopeeFeeMigrate。
     autoFill:{
@@ -10166,6 +10169,14 @@ function _kpiMergeHint(group,st,field){
   const byL=by?(group.manual.find(f=>f.k===by)?.l||by):'';
   return names+'共用'+(byL?'，按'+byL+'攤':'');
 }
+// 蝦皮（2026-10-16）：這一格存的值就是「從對帳單帶入」的值嗎（蝦皮組、一般格、meta 自動、meta.val＝目前值）。
+//   是 ⇒ 填寫模式只標「自動」、不標「手動」，輸入框 title 寫「從對帳單帶入（自動）」（手續費是 autoFill 欄，原本會被當成「手動覆蓋」）。
+//   人手改過（值≠meta.val，或根本沒有 auto meta）⇒ 照舊。⚠ 只限蝦皮組：其他組（MOMO 實際營收／耗材…）的標籤與 title 照舊。
+function _kpiShopeeAutoSame(month,row,cell){
+  if(!(cell&&cell.kind==='cell'&&cell.group&&cell.group.key==='shopee'))return false;
+  const am=_kpiMetaAt(month,cell.segs);
+  return _kpiIsAutoMeta(am)&&am.val===_kpiFillCur(row,cell).v;
+}
 function _kpiFillInputHtml(month,row,cell,r,c){
   const cur=_kpiFillCur(row,cell);
   const has=cur.v!=null;
@@ -10177,7 +10188,8 @@ function _kpiFillInputHtml(month,row,cell,r,c){
   if(cur.formula!=null)cls+=' km-has-formula';
   let ph='',ttl=cur.formula!=null?`公式：${raw}`:'';
   if(cell.fx){const dv=_kpiFxDefault(row,cell.group,cell.shop,cell.segs[2]);ph=_kpiMoney(dv);
-    ttl=has?`手動覆蓋（公式值 ${ph}）。清空後按 Enter 回到公式`:`公式值 ${ph}（直接打數字可以覆蓋）`;}
+    ttl=has?(_kpiShopeeAutoSame(month,row,cell)?'從對帳單帶入（自動）':`手動覆蓋（公式值 ${ph}）。清空後按 Enter 回到公式`):`公式值 ${ph}（直接打數字可以覆蓋）`;}
+  if(cell.kind==='common'&&cell.ph)ph=cell.ph;   // 共同費用列的提示字（目前只有蝦皮：未稅）
   return `<input class="km-in${cls}" type="text" inputmode="decimal" autocomplete="off"
     data-k="${_kpiEscAttr(JSON.stringify(cell.segs))}" data-kind="${cell.kind}" data-r="${r}" data-c="${c}"
     data-raw="${_kpiEscAttr(raw)}" data-disp="${_kpiEscAttr(disp)}" value="${_kpiEscAttr(disp)}"
@@ -10265,8 +10277,9 @@ function _kpiFillHtml(row){
       }
       // 小字一律放在輸入框【下方】：放上方會把框往下推，跟同一列其他格的框線對不齊。
       // 小字超過 4 個字會撐寬整欄（1280 寬 MOMO 放不下）→ 畫面只顯示短字，完整說明放 title（滑鼠移過去看）
+      const autoSame=_kpiShopeeAutoSame(month,row,cell);   // 是 ⇒ 只標「自動」、不標「手動」
       const hint=(cell.kind==='merge'?`<div class="km-sublabel km-sublabel-hint" title="${_kpiEscAttr(group.fieldMerge?.[f.k]?.fillHint||'共用・填總額')}">共用</div>`:'')
-        +(cell.fx&&_kpiFillCur(row,cell).v!=null?`<div class="km-sublabel"><span class="km-fx-tag" title="手動覆蓋公式；清空後按 Enter 回到公式">手動</span></div>`:'')
+        +(cell.fx&&_kpiFillCur(row,cell).v!=null&&!autoSame?`<div class="km-sublabel"><span class="km-fx-tag" title="手動覆蓋公式；清空後按 Enter 回到公式">手動</span></div>`:'')
         +(_kpiIsAutoMeta(_kpiMetaAt(month,cell.segs))?`<div class="km-sublabel"><span class="km-au-tag" title="從對帳單自動帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；手動改這格後標籤會消失">自動</span></div>`:'');
       return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填${['','一','兩','三','四'][cell.st.shops.length]||cell.st.shops.length}家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
     }).join('');
@@ -10281,9 +10294,9 @@ function _kpiFillHtml(row){
   }).join('');
   let commonRow='';
   if(group.commonCostLabel&&!group.commonAsColumn){
-    const cell={kind:'common',segs:[group.key+'Common']};
+    const cell={kind:'common',segs:[group.key+'Common'],ph:group.commonCostPlaceholder||''};
     const cv=Number(row[group.key+'Common'])||0;
-    commonRow=`<tr class="km-f-common"><td class="km-f-shop" title="${group.commonCostLabel}">共同費用<div class="km-sublabel">${group.commonCostShortLabel||''}</div></td><td class="km-f-ro km-f-aov"></td>
+    commonRow=`<tr class="km-f-common"><td class="km-f-shop" title="${group.commonCostLabel}">共同費用${group.commonCostInfo?_kpiInfoHtml(group.title+' 共同費用',[group.commonCostInfo]):''}<div class="km-sublabel">${group.commonCostShortLabel||''}</div></td><td class="km-f-ro km-f-aov"></td>
       <td colspan="${cols.length}"><div class="km-common-in">${_kpiFillInputHtml(month,row,cell,group.shops.length,0)}</div></td>
       <td class="km-n km-f-ro km-f-ro-first"><div class="km-roval">${cv?'−$'+fmtN(cv):'—'}</div></td><td class="km-f-ro"></td></tr>`;
   }
@@ -22134,7 +22147,11 @@ function _reconSaveDiff(oldRec,neu){
   if(op.from!==np.from||op.to!==np.to)out.push({l:'期間',a:(op.from||'?')+' ~ '+(op.to||'?'),b:np.from+' ~ '+np.to});
   return out;
 }
-// 寫入後讀回比對：回不一致的欄位名稱陣列（[]＝一致）。at 只要求存在（serverTimestamp 讀回是 Timestamp）。
+// 讀回的 at 合不合格：null（serverTimestamp 寫完立刻讀回，SDK 對還沒確認的伺服器時間回 null）或 Firestore Timestamp 都算過。
+//   🔴 不能要求「必須有值」：2026-10-16 正式站實測，寫完立刻 getDoc 讀回 at 一定是 null，結果每次都誤報「沒有寫進雲端」
+//      （REST 讀回 at 有值、其他欄位全對）。被擋下的寫入靠「整筆不存在 / 數字不同」抓，不靠 at。
+function _reconAtOk(at){return at===null||!!(at&&typeof at==='object'&&typeof at.toDate==='function');}
+// 寫入後讀回比對：回不一致的欄位名稱陣列（[]＝一致）。at 照 _reconAtOk（null 或 Timestamp）。
 function _reconSaveVerify(got,want){
   if(!got||typeof got!=='object')return ['（雲端沒有這筆）'];
   const bad=[];
@@ -22142,7 +22159,7 @@ function _reconSaveVerify(got,want){
   if(!got.period||got.period.from!==want.period.from||got.period.to!==want.period.to)bad.push('期間');
   if(got.file!==want.file)bad.push('檔名');
   if(!got.by||got.by.username!==want.by.username||got.by.name!==want.by.name)bad.push('存檔人');
-  if(got.at==null)bad.push('時間');
+  if(!_reconAtOk(got.at))bad.push('時間');
   return bad;
 }
 function _reconSavedOf(cloud,month,shop){
@@ -22464,7 +22481,7 @@ function _reconMobicDiff(oldRec,neu){
   if(or.from!==neu.range.from||or.to!==neu.range.to)out.push({l:'期間',a:(or.from||'?')+' ~ '+(or.to||'?'),b:neu.range.from+' ~ '+neu.range.to});
   return out;
 }
-// 寫入後讀回比對：回不一致的項目名稱（[]＝一致）。at 只要求存在。
+// 寫入後讀回比對：回不一致的項目名稱（[]＝一致）。at 照 _reconAtOk（null 或 Timestamp）。
 function _reconMobicVerify(got,want){
   if(!got||typeof got!=='object')return ['（雲端沒有這筆）'];
   const bad=[];
@@ -22478,7 +22495,7 @@ function _reconMobicVerify(got,want){
   if(got.file!==want.file)bad.push('檔名');
   if((got.fileModified==null?null:got.fileModified)!==want.fileModified)bad.push('檔案時間');
   if(!got.by||got.by.username!==want.by.username||got.by.name!==want.by.name)bad.push('存檔人');
-  if(got.at==null)bad.push('時間');
+  if(!_reconAtOk(got.at))bad.push('時間');
   return bad;
 }
 function _reconMobicSavedOf(cloud,month){
@@ -22760,7 +22777,7 @@ function _reconAdsDiff(oldAds,oldManual,ads,manual){
 // 寫入後讀回比對：回不一致的項目（[]＝一致）。ads 為 null ⇒ 只驗 manual。
 function _reconAdsVerify(gotAds,gotManual,ads,manual,by){
   const bad=[];
-  const byOk=g=>g&&g.by&&g.by.username===by.username&&g.by.name===by.name&&g.at!=null;
+  const byOk=g=>g&&g.by&&g.by.username===by.username&&g.by.name===by.name;   // at 另外照 _reconAtOk 驗（null 或 Timestamp）
   if(ads){
     if(!gotAds||typeof gotAds!=='object')bad.push('廣告（雲端沒有這筆）');
     else{
@@ -22769,14 +22786,16 @@ function _reconAdsVerify(gotAds,gotManual,ads,manual,by){
       if(gp.from!==np.from||gp.to!==np.to)bad.push('廣告報表期間');
       if((gotAds.exportedAt==null?null:gotAds.exportedAt)!==ads.exportedAt)bad.push('匯出時間');
       if(gotAds.file!==ads.file)bad.push('檔名');
-      if(!byOk(gotAds))bad.push('廣告的存檔人／時間');
+      if(!byOk(gotAds))bad.push('廣告的存檔人');
+      if(!_reconAtOk(gotAds.at))bad.push('廣告的時間');
     }
   }
   if(!gotManual||typeof gotManual!=='object')bad.push('手填（雲端沒有這筆）');
   else{
     RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{if((gotManual[k]==null?null:gotManual[k])!==manual[k])bad.push(l.replace(/（.*$/,''));});
     if((gotManual.otherNote==null?null:gotManual.otherNote)!==manual.otherNote)bad.push('其他備註');
-    if(!byOk(gotManual))bad.push('手填的存檔人／時間');
+    if(!byOk(gotManual))bad.push('手填的存檔人');
+    if(!_reconAtOk(gotManual.at))bad.push('手填的時間');
   }
   return bad;
 }
