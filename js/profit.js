@@ -1409,6 +1409,7 @@ window.__profitShouldSkipCloudOverwrite=function(k){
   //   _kpi_v1 也不再被 _markPending（kpiWriteCell 直寫 app/kpi）。
   if(k==='_kpi_v1' && _kpiV2.installed) return true;
   try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
+  try{ if(_momoRfIsKey(k) && _momoRfDirtyHas(k)) return true; }catch{}   // 運費：本機存了還沒推 → 不讓 app/profit 快照蓋掉
   // 優化紀錄墓碑：對應的 optlog 還在待推 → 不讓雲端快照把本機尚未推的墓碑蓋掉（墓碑隨 optlog 同步一起推）
   try{ if(k.startsWith('ec_momo_optlog_del|') && _pendingSyncKeys.has('ec_momo_optlog|'+k.slice('ec_momo_optlog_del|'.length))) return true; }catch{}
   if(window._shopJustSaved && (Date.now()-window._shopJustSaved < 5000)) return true;
@@ -1540,22 +1541,9 @@ function _sweepAllLocalReportsIntoPending(){
       // PChome 優化紀錄／商品歷程（獨立 doc，走專屬 pchomeSyncOptlog／pchomeSyncHistory 分支）：dirty 才撿回。
       if(k&&(k==='ec_pchome_history'||k.indexOf('ec_pchome_optlog|')===0)){ if(pchomeDirtyGet().indexOf(k)>=0) _pendingSyncKeys.add(k); continue; }
       // MOMO 倉租費分頁已移除(v315)：不再把 ec_momo_rent_records 補進 pending 推送（雲端既有 field 不動、只停止再推）。
-      // MOMO 月對帳（階段二）：ec_momo_reconcile|<shop>|<YYYY-MM> → momo_reconcile collection（每 shop 每月一 doc）
-      if(k&&k.startsWith('ec_momo_reconcile|')){
-        _pendingSyncKeys.add(k);
-        if(!(Store._mem&&Store._mem[k])){
-          try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
-        }
-        continue;
-      }
-      // MOMO 運費（階段四）：ec_momo_freight|<shop>|<YYYY-MM> → 走 __cloudProfit.setField field 分支（不開新雲端物件，EXPECT 維持 7/12）
-      if(k&&k.startsWith('ec_momo_freight|')){
-        _pendingSyncKeys.add(k);
-        if(!(Store._mem&&Store._mem[k])){
-          try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
-        }
-        continue;
-      }
+      // MOMO 月對帳／運費：不再「localStorage 有就算待推」（那會讓每次同步都整批重寫、且可能用舊上傳蓋雲端）。
+      //   改成只撿「本機待推註冊表」（_momoRfDirtyHas：存檔才登記、推成功才清）；撿法在迴圈結束後的 registry 段。
+      if(k&&_momoRfIsKey(k)) continue;
       // MOMO C1105 每日配送單數（KPI 月結表訂單數來源）：ec_momo_c1105_ship|<YYYY-MM> → 同 freight 走 setField field 分支（不開新雲端物件）
       if(k&&(k.startsWith('ec_momo_c1105_ship|')||k.startsWith('ec_momo_moplus_orders|')||k.startsWith('ec_momo_moplus_unreg|'))){
         _pendingSyncKeys.add(k);
@@ -1688,6 +1676,16 @@ function _sweepAllLocalReportsIntoPending(){
         }
       }
     }
+  }catch{}
+  // MOMO 月對帳／運費：只撿「本機待推註冊表」（存檔才登記、推成功才清；上面 localStorage 迴圈刻意跳過這兩類）。
+  //   本機已經沒有這把 key 的值（被清掉）→ 從註冊表拿掉，不留一個永遠讀不到的懸空待推。
+  try{
+    _momoRfDirtyGet().forEach(k=>{
+      let raw=null; try{ raw=localStorage.getItem(k); }catch{}
+      if(raw==null && !(Store._mem&&Store._mem[k])){ _momoRfDirtyDel(k); return; }
+      _pendingSyncKeys.add(k);
+      if(!(Store._mem&&Store._mem[k])){ try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(raw); }catch{} }
+    });
   }catch{}
 }
 
@@ -1911,8 +1909,26 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         const parts=pk.split('|');   // ['ec_momo_reconcile', shop, 'YYYY-MM']
         const rShop=parts[1], rMonth=parts[2];
         const data=momoLoadReconcile(rShop, rMonth);   // _profitMem → _mem → localStorage
-        if(window.__cloudReconcile && data && rShop && rMonth){ tasks.push({key:pk,run:()=>window.__cloudReconcile.setMonth(rShop,rMonth,momoFsSanitizeDeep(data))}); }   // 統一 key 檢核
+        if(window.__cloudReconcile && data && rShop && rMonth){   // 統一 key 檢核；推之前先讀雲端那一份比 updatedAt（_momoRfPush：雲端較新／讀失敗都不推、進 failed）
+          tasks.push({key:pk,run:()=>_momoRfPush(pk, data,
+            async()=>{ const sn=await window.__cloudReconcile.getDoc(rShop,rMonth); return (sn&&sn.exists&&sn.exists())?(sn.data()||null):null; },
+            ()=>window.__cloudReconcile.setMonth(rShop,rMonth,momoFsSanitizeDeep(data)), momoFsSanitizeDeep)});
+        }
         else{ skippedProblem.push({key:pk,reason:'MOMO 月對帳讀不到，或雲端層未就緒'}); }
+        return;
+      }
+      if(pk.startsWith('ec_momo_freight|')){   // MOMO 運費 → app/profit 欄位（setField）。推之前先讀雲端（app/profit 整份只讀一次、本輪共用）比 updatedAt
+        let fval=null;
+        try{ if(Store._mem && Store._mem[pk]!==undefined) fval=Store._mem[pk]; }catch{}
+        if(fval===null){ try{ const raw=localStorage.getItem(pk); if(raw) fval=JSON.parse(raw); }catch{} }
+        if(fval!==null && fval!==undefined){
+          const badKeys=momoFsInvalidFieldKeys(fval);
+          if(badKeys.length){ skippedProblem.push({key:pk, reason:'Firestore 欄位名不合法 → '+badKeys.slice(0,3).map(b=>'`'+b.key+'`（'+b.reason+'）').join('、')}); }
+          else tasks.push({key:pk,run:()=>_momoRfPush(pk, fval,
+            async()=>{ if(!_rfProfitDocP) _rfProfitDocP=window.__cloudProfit.getDoc().then(sn=>(sn&&sn.exists&&sn.exists())?(sn.data()||{}):{}); const d=await _rfProfitDocP; return (d[pk]&&typeof d[pk]==='object')?d[pk]:null; },
+            ()=>window.__cloudProfit.setField(pk,fval))});
+        }
+        else skippedProblem.push({key:pk,reason:'運費資料讀不到'});
         return;
       }
       if(pk.startsWith('ec_momo_s1103|')){   // MOMO S1103 排行榜 → momo_s1103 collection（每期別一 doc）。搬離 app/profit，避 Firestore 單文件 40000 索引項上限
@@ -2102,6 +2118,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     //     下一次同步會再推一次同 key，結果一樣。也順便接住晚到的 reject，免得變成 unhandled rejection。
     //   ⚠ 第一筆逾時後【剩下的不再嘗試】：逾時幾乎只在網路斷時發生，逐筆再等 30 秒只是 N×30 秒的空等
     //     （實測 2 筆就 61 秒才彈窗）。剩下的 task 直接記進 failed（key 一樣留在 pending）並 break，走同一條失敗出口。
+    let _rfProfitDocP=null;   // 運費：app/profit 整份雲端 doc 本輪只讀一次（讀失敗的 rejected promise 也共用 → 本輪所有運費都「讀雲端失敗、不推」，下輪重試）
     const _TASK_TIMEOUT_MS=30000;
     for(let i=0;i<tasks.length;i++){
       if(btn) btn.textContent='同步中 '+(i+1)+'/'+tasks.length;
@@ -2113,7 +2130,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         await Promise.race([ _p, new Promise((_,rej)=>{ _tmo=setTimeout(()=>{ _timedOut=true; rej(new Error('逾時（'+(_TASK_TIMEOUT_MS/1000)+' 秒沒有回應），可能是網路不穩；資料還在本機，請稍後再按一次同步')); },_TASK_TIMEOUT_MS); }) ]);
         ok.push(_k); console.log('[PUSH] ✓',_k);   // collection(momo_products/reconcile)寫入分支現在也有 log，路徑不再是黑的
       }
-      catch(e){ failed.push({key:_k,msg:(e&&e.message)||String(e)}); console.error('[PUSH] ✗',_k,e); }
+      catch(e){ failed.push({key:_k,msg:(e&&e.message)||String(e),rfKind:e&&e.rfKind}); console.error('[PUSH] ✗',_k,e); }
       finally{ clearTimeout(_tmo); }
       if(_timedOut){
         for(let j=i+1;j<tasks.length;j++){ failed.push({key:tasks[j].key,msg:'前一筆逾時，這筆這次未嘗試；資料還在本機，請稍後再按一次同步'}); console.warn('[PUSH] ⏭ 前一筆逾時、未嘗試：',tasks[j].key); }
@@ -2133,6 +2150,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     //     同一次迭代、相鄰兩個語句 → 結構上無法只清一邊。不要把品號級搬進 syncEditsMerge
     //     （搬回去會製造「key 級沒清、品號級清了」＝下次 _editsPushGate 判 problem 的難查狀態）。
     ok.forEach(k=>{ if(k.startsWith('ec_edits|')){ try{ _editsDirtyDel(k); }catch{} try{ _editsItemsDirtyClear(k); }catch{} } });   // 編輯覆蓋值同理：真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
+    ok.forEach(k=>{ if(_momoRfIsKey(k)){ try{ _momoRfDirtyDel(k); }catch{} } });   // 對帳／運費：真的推成功才清註冊表；雲端較新／讀失敗／推失敗的留著（進 failed、彈窗列出）
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     ok.forEach(k=>{ if(cupIsNoteKey(k)){ try{ _cupNoteKeyDirtyDel(k); _cupNoteItemsDirtyClear(k); }catch{} } });   // 酷澎備註：兩層 dirty 同一迴圈相鄰清（只清推成功的 key；失敗留著下次再推）
@@ -2169,13 +2187,17 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       if(btn){btn.disabled=false;btn.textContent=(problems>0?('⚠ '+ok.length+' 成功 / '+problems+' 未完成'):'⚠ 商品主檔未上雲');btn.style.background='#f59e0b';btn.style.color='#fff';btn.style.borderColor='#f59e0b';}
       const lines=[];
       if(_prodWarn) lines.push('［未上雲·商品主檔］'+_prodDirtyShops.join('、')+'：期別/銷售留在本機、未推上雲');   // 根治 2b：products 專屬（不混進下面通用項）
-      failed.forEach(f=>lines.push('［失敗］'+f.key+'：'+f.msg));
+      failed.forEach(f=>lines.push(f.rfKind==='undetermined' ? ('［本機與雲端不同·未覆蓋］'+f.key+'：無法判斷新舊，請負責的同事重新上傳正確的檔案') : ((f.rfKind==='cloudnewer'?'［雲端較新·未覆蓋］':'［失敗］')+f.key+'：'+f.msg)));
       skippedProblem.forEach(p=>lines.push('［讀不到］'+p.key+'：'+p.reason));
       skippedWillDelete.forEach(x=>lines.push('［保護未推］'+x.key+'：會刪雲端 '+x.willDelete+' 筆（可能是同事的更新）'));
       dirtyFailKeys.forEach(k=>lines.push('［登記失敗］'+k+(ok.indexOf(k)>=0?'（本次已重新推送，警告不再出現）':'（尚未重新推送，警告會持續出現）')));
       let msg='成功 '+ok.length+' 筆。';
       if(_prodWarn) msg+='\n\n⚠ '+_prodWarn;   // 根治 2b：products 未上雲擺最前面、最顯眼（這正是 2026-08 靜默漏掉的那條）
-      if(failed.length) msg+='\n'+failed.length+' 筆沒推上雲端，資料還在本機 → 重整前請先匯出 Excel 備份，稍後再按同步重試。';
+      const _rfUndet=failed.filter(f=>f.rfKind==='undetermined');   // 對帳／運費：兩邊都沒時間戳、內容不同 → 沒覆蓋、本機不動
+      if(_rfUndet.length) msg+='\n'+_rfUndet.length+' 份對帳／運費本機與雲端內容不同、又都沒有時間戳，無法判斷新舊，沒有覆蓋（本機沒動）→ 請負責的同事重新上傳正確的檔案。';
+      const _rfNewer=failed.filter(f=>f.rfKind==='cloudnewer');   // 對帳／運費：雲端比本機新 → 沒覆蓋（已把雲端版本寫回本機）
+      if(_rfNewer.length) msg+='\n'+_rfNewer.length+' 份對帳／運費雲端比你本機新，沒有覆蓋（已把雲端版本寫回本機，畫面重新整理就是新版）；若確定要用自己的版本，請重新上傳後再同步。';
+      if(failed.length-_rfNewer.length-_rfUndet.length>0) msg+='\n'+(failed.length-_rfNewer.length-_rfUndet.length)+' 筆沒推上雲端，資料還在本機 → 重整前請先匯出 Excel 備份，稍後再按同步重試。';
       if(skippedProblem.length) msg+='\n'+skippedProblem.length+' 筆在本機讀不到（可能損毀）→ 請到淨利表重新產生這些報表。';
       if(skippedWillDelete.length) msg+='\n'+skippedWillDelete.length+' 項因會刪除雲端資料（可能是同事的更新）而未推送 → 請到該賣場的「同步預覽」逐項確認後再推。';
       if(dirtyFailKeys.length){
@@ -13304,6 +13326,7 @@ function momoPendingProducts(pk){
 //   本機有未同步變更（pending）或剛存過 → 雲端 echo 不覆蓋 _profitMem，保住本機版本。
 window.__momoShouldSkipCloudOverwrite=function(k){
   try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
+  try{ if(_momoRfIsKey(k) && _momoRfDirtyHas(k)) return true; }catch{}   // 對帳：本機存了還沒推 → 不讓雲端快照蓋掉（跨重整也擋；推成功才清）
   if(window._momoJustSaved && (Date.now()-window._momoJustSaved < 5000)) return true;
   return false;
 };
@@ -14015,6 +14038,8 @@ function momoLoadReconcile(shop,month){
 }
 function momoSaveReconcile(shop,month,data){
   const k=momoReconcileKey(shop,month);
+  if(data && typeof data==='object' && !Array.isArray(data)) data=Object.assign({}, data, { updatedAt:Date.now() });   // 每次存檔都更新時間戳（推送前拿來跟雲端比新舊；見 _momoRfPush）
+  try{ _momoRfDirtyAdd(k); }catch{}   // 本機真的存過 → 進待推註冊表（推成功才清）
   try{ localStorage.setItem(k,JSON.stringify(data)); }catch{}
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=data; }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=data; }catch{}
@@ -14300,9 +14325,75 @@ function momoLoadFreight(shop,month){ const k=momoFreightKey(shop,month);
   try{ const l=localStorage.getItem(k); if(l) return JSON.parse(l); }catch{}
   return null; }
 function momoSaveFreight(shop,month,data){ const k=momoFreightKey(shop,month);
+  if(data && typeof data==='object' && !Array.isArray(data)) data=Object.assign({}, data, { updatedAt:Date.now() });   // 同 momoSaveReconcile：每次存檔更新時間戳
+  try{ _momoRfDirtyAdd(k); }catch{}   // 本機真的存過 → 進待推註冊表（推成功才清）
   try{ localStorage.setItem(k,JSON.stringify(data)); }catch{}
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=data; }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=data; }catch{} }
+// ══════ MOMO 月對帳／運費 的「本機待推註冊表」（2026-10）══════
+//  背景：這兩種 key 存檔時原本不登記待推，sweep 只好把「localStorage 裡有這個 key」當待推 → 每次任何人按「☁ 同步雲端」
+//        （含蝦皮頁那顆）都把本機所有對帳／運費整份重寫一遍；若這台沒載 MOMO 訂閱，推出去的還是舊上傳 → 可能蓋掉雲端較新版本。
+//  做法（比照 products 的 dirty 註冊表）：存檔（momoSaveReconcile / momoSaveFreight）才登記、推成功才清；sweep／同步鈕計數／雲端快照守衛都改讀它。
+//  ⚠ sweep 與 _momoSyncPendingCount 兩處的判準必須逐字一致（都是 _momoRfDirtyHas）。
+const _MOMO_RF_DIRTY_LS='ec_momo_rf_dirty';        // JSON array：存過還沒成功推雲端的 reconcile／freight full key
+const _MOMO_RF_BOOT_LS='ec_momo_rf_dirty_boot_v1'; // 一次性過渡旗標
+function _momoRfIsKey(k){ return typeof k==='string' && (k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|')); }
+function _momoRfDirtyGet(){ const a=_momoReadJson(_MOMO_RF_DIRTY_LS,[]); return Array.isArray(a)?a:[]; }
+function _momoRfDirtyAdd(k){ try{ const a=_momoRfDirtyGet(); if(!a.includes(k)){ a.push(k); localStorage.setItem(_MOMO_RF_DIRTY_LS,JSON.stringify(a)); } }catch{} }
+function _momoRfDirtyDel(k){ try{ const a=_momoRfDirtyGet(); if(a.includes(k)) localStorage.setItem(_MOMO_RF_DIRTY_LS,JSON.stringify(a.filter(x=>x!==k))); }catch{} }
+function _momoRfDirtyHas(k){ try{ return _momoRfDirtyGet().includes(k); }catch{ return false; } }
+// 過渡（只做一次）：部署前本機已存在、但沒有註冊紀錄的 reconcile／freight，一次性全部登記成待推 → 下次同步照舊推一次，不會「本機改了卻沒推」。
+//   之後只靠存檔登記。旗標存在 localStorage；沒登記成功（例外）就不寫旗標，下次載入再試。
+function _momoRfBootstrapOnce(){
+  try{
+    if(localStorage.getItem(_MOMO_RF_BOOT_LS)==='1') return 0;
+    const keys=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(_momoRfIsKey(k)) keys.push(k); }
+    const a=_momoRfDirtyGet(); let n=0; keys.forEach(k=>{ if(!a.includes(k)){ a.push(k); n++; } });
+    localStorage.setItem(_MOMO_RF_DIRTY_LS,JSON.stringify(a));
+    localStorage.setItem(_MOMO_RF_BOOT_LS,'1');
+    if(n){ try{ console.log('[MOMO 對帳/運費待推] 過渡：把本機既有 '+n+' 份登記成待推（只做一次）'); }catch{} }
+    return n;
+  }catch{ return 0; }
+}
+try{ _momoRfBootstrapOnce(); }catch{}
+// 推送前先讀雲端那一份比新舊（updatedAt，毫秒）：
+//   雲端沒有→推；雲端較新→不推、把雲端版本寫回本機、丟錯（進 failed、註冊表不清）；讀雲端失敗→不推、丟錯（註冊表不清），不盲推。
+//   兩邊都沒有 updatedAt（舊資料，過渡期每台電腦都會遇到）＝無法判斷新舊：內容相同（穩定序列化、排除 updatedAt）→ 不推、清註冊表；
+//     內容不同 → 不推、不改本機、註冊表保留、丟錯（rfKind='undetermined'，同步結果單獨一類，請負責的同事重傳）。
+//   本機較新或相同：內容跟雲端完全相同 → 不寫入、只清註冊表（正常 return＝算成功→呼叫端清註冊表）；不同 → 推。
+//   cloudGetter：()=>Promise<物件|null>（null＝雲端沒有這份）；writer：()=>Promise 實際寫入；normalize：推出去前會做的轉換（比內容時本機也要套，才跟雲端同形）。
+function _momoRfStoreLocal(k,data){
+  try{ localStorage.setItem(k,JSON.stringify(data)); }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=data; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=data; }catch{}
+}
+function _momoRfStripTs(o){ if(!o || typeof o!=='object' || Array.isArray(o)) return o; const c=Object.assign({},o); delete c.updatedAt; return c; }
+function _momoRfSameContent(local, cloud, normalize){
+  try{
+    const l=_momoNorm(normalize?normalize(local):local);   // _momoNorm：過 JSON（去掉 undefined 等），跟雲端讀回來的形狀一致
+    return _momoStableStr(_momoRfStripTs(l))===_momoStableStr(_momoRfStripTs(_momoNorm(cloud)));
+  }catch{ return false; }
+}
+async function _momoRfPush(k, local, cloudGetter, writer, normalize){
+  let cloud;
+  try{ cloud=await cloudGetter(); }
+  catch(e){ const err=new Error('讀雲端失敗，這份沒推（資料還在本機、仍在待同步清單）：'+((e&&e.message)||e)); err.rfKind='readfail'; throw err; }
+  if(cloud && typeof cloud==='object'){
+    const cu=Number(cloud.updatedAt)||0, lu=Number(local&&local.updatedAt)||0;
+    const f=ms=>{ try{ return new Date(ms).toLocaleString('zh-TW',{hour12:false}); }catch{ return String(ms); } };
+    if(cu>lu){
+      _momoRfStoreLocal(k,cloud);   // 本機三鏡像一起更新成雲端版本
+      const err=new Error('雲端較新（雲端 '+f(cu)+'、本機 '+(lu?f(lu):'無時間戳')+'），未覆蓋；已把雲端版本寫回本機'); err.rfKind='cloudnewer'; throw err;
+    }
+    const same=_momoRfSameContent(local, cloud, normalize);
+    if(same) return 'same';   // 內容跟雲端完全相同：不寫入；正常 return → 呼叫端把它算成功、清註冊表
+    if(cu===0 && lu===0){
+      const err=new Error('無法判斷新舊（本機與雲端都沒有時間戳、內容不同），未覆蓋；請負責的同事重新上傳正確的檔案'); err.rfKind='undetermined'; throw err;
+    }
+  }
+  await writer();
+  return 'pushed';
+}
 // C1212 倉租費（乙配寄倉，逐SKU）：儲存比照 C1204 freight，走 ec_momo_rent|<shop>|<月> field（不開新 collection）。
 //   doc 形狀：{ month, rentSku:{sku:raw應付倉租}, daysSku:{sku:該月最大在庫天數}, total:Σraw, skuN, source:'C1212' }。
 function momoRentKey(shop,month){ return 'ec_momo_rent|'+shop+'|'+month; }
@@ -15616,7 +15707,7 @@ function _momoSyncPendingCount(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
-      if(k.startsWith('ec_momo_products|') || k.startsWith('ec_momo_reconcile|') || k.startsWith('ec_momo_freight|') || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_moplus_unreg|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
+      if(k.startsWith('ec_momo_products|') || (_momoRfIsKey(k) && _momoRfDirtyHas(k)) || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_moplus_unreg|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
          || (k.startsWith('ec_notes|') && /_growth$/.test(k) && notesDirtyHas(k))   /* 商品調整：與 sweep 逐條同條件（dirty 才算）。廣告調整不算——它走 syncToCloud 的當期閘門，不經 sweep */
          || k.startsWith('ec_split|')   /* 拆分試算：與 sweep 逐條同條件（只看前綴、沒有 dirty 閘）。判準要與那邊逐字相同，見 _sweepAllLocalReportsIntoPending 的 ec_split 分支 */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
