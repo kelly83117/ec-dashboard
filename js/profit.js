@@ -17301,10 +17301,13 @@ function momoRenderAnalysis(shop,p){
 
       <div class="mm-ana-sec" id="momo-optlog-sec"></div>
 
+      <div class="mm-ana-sec" id="momo-estmargin-sec"></div>
+
       <div class="mm-ana-sec"><div class="mm-ana-h">跨通路關聯（同原廠編號）</div>${momoCrossChannelHTML(shop,otherShop,p)}</div>
     </div>
   </div>`;
   momoRenderOptlogSection(shop,p.sku);
+  momoRenderEstMarginSection(shop,p.sku);
   // 圖表（innerHTML 後同步建立；存實例供關閉時 destroy）
   _momoAnalysisCharts.forEach(c=>{ try{c.destroy();}catch{} }); _momoAnalysisCharts=[];
   if(typeof Chart==='undefined') return;
@@ -17362,6 +17365,126 @@ function momoCrossChannelHTML(shop,otherShop,p){
       <div style="color:#94a3b8;font-size:11px;margin-top:1px">品號 ${_momoEsc(x.sku)} · ${momoShopDisplay(otherShop)} · 成本 ${x.cost!=null?Math.round(x.cost*100)/100:'—'} / 售價 ${x.salePrice!=null?Math.round(x.salePrice):'—'}</div></div>`).join('')}`;
 }
 // 優化紀錄區塊（只重繪這塊，不動圖表）
+// ── 分析彈窗「試算淨利率」（純試算、不寫入任何資料：不 momoSaveProducts、不寫 history、不 _markPending）──
+//   算法一律呼叫批次維護同一批純函式（單一事實來源，相同輸入→相同輸出）：
+//   甲乙配＝momoCalcMarginSupplier（只吃成本＋含稅進價；售價不影響）；
+//   MO+＝momoMoPlusDualMargin（成本依原廠查 momoMoPlusCostMapCached、售價 momoMoPlusListPriceForSku、費率 momoFeeRateForSku 三態、其他費用率 momoMoPlusOtherFeeRate）。
+//   預設值（「目前」）＝該商品目前的值；輸入框可改，「重設」回到目前值。
+function _momoEstNum(id){ const el=document.getElementById(id); if(!el) return null; const s=String(el.value).trim(); if(s==='') return null; const v=parseFloat(s); return isFinite(v)?v:null; }
+function _momoEstDefaults(shop,p){
+  if(momoIsMoPlus(shop)){
+    const cm=momoMoPlusCostMapCached(); const origin=String(p.origin||'').trim();
+    const cost=(origin && Number(cm[origin])>0)?Number(cm[origin]):null;
+    const spv=momoMoPlusListPriceForSku(shop, p.sku, null).listPrice;
+    const fr=momoFeeRateForSku(shop, p.sku);
+    let fee=null, feeNote='';
+    if(fr.status==='unique'){ fee=fr.cand[0]; feeNote='實際反推 '+fee+'%（唯一解）'; }
+    else if(fr.status==='multi'){ fee=Math.max(...fr.cand); feeNote='費率未收斂，預設取候選上界 '+fee+'%（最保守）'; }
+    else if(fr.status==='anomaly') feeNote='成交費率反推異常（跨月候選互斥）→ 請自行填入費率';
+    else feeNote='尚無實際反推費率（無非檔期成交手續費資料）→ 請自行填入費率';
+    return { mp:true, cost, sp:(spv>0?Number(spv):null), fee, feeNote };
+  }
+  const n=x=>(x!=null && x!=='' && isFinite(Number(x)))?Number(x):null;
+  return { mp:false, cost:n(p.cost), pp:n(p.purchasePrice), sp:n(p.salePrice) };
+}
+// 依一組輸入算淨利率。甲乙→{pct,feeRate,feeMode}｜MO+→{a,b}；輸入不足回 null（不硬算、不用 0 代替）。
+function _momoEstCalc(shop,d){
+  if(d.mp){
+    if(!(d.sp>0) || d.cost==null || d.fee==null) return null;
+    const r=momoMoPlusDualMargin({cost:d.cost, salePrice:d.sp, fee:d.fee, otherPct:momoMoPlusOtherFeeRate().pct});
+    return (r.a==null)?null:r;
+  }
+  if(!(d.cost>0 && d.pp>0)) return null;
+  const r=momoCalcMarginSupplier(shop,{cost:d.cost, purchasePrice:d.pp});
+  return { pct:r.marginPct, feeRate:r.feeRate, feeMode:r.feeMode };
+}
+function _momoEstInputs(shop){
+  return momoIsMoPlus(shop)
+    ? { mp:true, sp:_momoEstNum('momo-est-sp'), cost:_momoEstNum('momo-est-cost'), fee:_momoEstNum('momo-est-fee') }
+    : { mp:false, cost:_momoEstNum('momo-est-cost'), pp:_momoEstNum('momo-est-pp'), sp:null };
+}
+function momoRenderEstMarginSection(shop,sku){
+  const el=document.getElementById('momo-estmargin-sec'); if(!el) return;
+  const p=momoLoadProducts(shop).find(x=>x.sku===sku); if(!p){ el.innerHTML=''; return; }
+  const d=_momoEstDefaults(shop,p);
+  const v=x=>(x==null?'':_momoEsc(String(x)));
+  const inp=(id,val,extra)=>`<input id="${id}" type="number" step="any" value="${v(val)}" oninput="momoEstRecalc('${shop}','${_momoEsc(sku)}')" style="${_MOMO_INP}${extra||''}">`;
+  const fld=(label,html,note)=>`<div style="flex:1;min-width:120px"><label style="${_MOMO_LB}">${label}</label>${html}${note?`<div style="font-size:11px;margin-top:3px">${note}</div>`:''}</div>`;
+  let fields;
+  if(d.mp){
+    fields=fld('售價(含稅)', inp('momo-est-sp',d.sp), d.sp==null?'<span style="color:#dc2626">查無售價（主檔無掛牌、也未手動設定）</span>':'<span style="color:#9ca3af">手動優先、否則主檔掛牌價</span>')
+      +fld('成本', inp('momo-est-cost',d.cost), d.cost==null?'<span style="color:#dc2626">查無成本（原廠編號不在莫筆克成本表）</span>':'<span style="color:#9ca3af">依原廠編號帶入</span>')
+      +fld('成交費率(%)', inp('momo-est-fee',d.fee), `<span style="color:${d.fee==null?'#dc2626':'#9ca3af'}">${_momoEsc(d.feeNote)}</span>`);
+  } else {
+    fields=fld('成本', inp('momo-est-cost',d.cost))
+      +fld('進價(含稅)', inp('momo-est-pp',d.pp))
+      +fld('售價(含稅，唯讀參考)', `<div style="${_MOMO_INP};background:#f8fafc;color:#64748b">${d.sp!=null?_momoEsc(String(d.sp)):'—'}</div>`, '<span style="color:#9ca3af">淨利率只隨成本／進價變動，改售價不影響</span>');
+  }
+  el.innerHTML=`<div class="mm-ana-h">試算淨利率</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">${fields}</div>
+    <div id="momo-est-out" style="margin-bottom:8px"></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button onclick="momoEstReset('${shop}','${_momoEsc(sku)}')" style="padding:5px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:12px;cursor:pointer">重設</button>
+      <button onclick="momoEstToOptlog('${shop}','${_momoEsc(sku)}')" style="padding:5px 14px;border-radius:7px;border:none;background:#5b5fcf;color:#fff;font-size:12px;font-weight:600;cursor:pointer">帶入優化紀錄</button>
+    </div>
+    <div style="font-size:11px;color:#9ca3af;margin-top:8px">僅試算，不會修改商品。要正式調整請到批次維護送出。</div>`;
+  momoEstRecalc(shop,sku);
+}
+function momoEstReset(shop,sku){ momoRenderEstMarginSection(shop,sku); }
+function momoEstRecalc(shop,sku){
+  const out=document.getElementById('momo-est-out'); if(!out) return;
+  const p=momoLoadProducts(shop).find(x=>x.sku===sku); if(!p) return;
+  const d0=_momoEstDefaults(shop,p), d1=_momoEstInputs(shop);
+  const c0=_momoEstCalc(shop,d0), c1=_momoEstCalc(shop,d1);
+  const dpp=(a,b)=>{ const x=b-a; return (x>=0?'+':'')+x.toFixed(1)+' 個百分點'; };
+  const row=(label,cur,trial,col)=>`<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:3px">
+      <span style="${_MOMO_LB};min-width:120px">${label}</span>
+      <span style="font-size:13px;color:#6b7280">目前 ${momoPct(cur)}</span><span style="color:#9ca3af">→</span>
+      <span style="font-size:16px;font-weight:800;color:${col}">試算 ${momoPct(trial)}</span>
+      ${cur!=null?`<span style="font-size:12px;color:#6b7280">（${dpp(cur,trial)}）</span>`:''}</div>`;
+  if(d1.mp){
+    const miss=[];
+    if(!(d1.sp>0)) miss.push('售價：'+(d0.sp==null?'查無售價（主檔無掛牌、也未手動設定）':'請填售價'));
+    if(d1.cost==null) miss.push('成本：'+(d0.cost==null?'查無成本（原廠編號不在莫筆克成本表）':'請填成本'));
+    if(d1.fee==null) miss.push('成交費率：'+d0.feeNote.replace(/→.*$/,'').replace(/^成交費率/,'').trim()+'，請填費率');
+    if(!c1){ out.innerHTML=`<div style="font-size:12px;color:#dc2626;line-height:1.7">${miss.length?miss.map(_momoEsc).join('<br>'):'輸入不足，無法試算'}<br><span style="color:#9ca3af">不硬算、不用 0 代替</span></div>`; return; }
+    const col=x=>x>=20?'#10b981':(x>=0?'#d97706':'#dc2626');
+    const other=momoMoPlusOtherFeeRate();
+    out.innerHTML=row('(a) 商品層淨利率', c0?c0.a:null, c1.a, col(c1.a))+row('(b) 預估實際淨利率', c0?c0.b:null, c1.b, col(c1.b))
+      +`<div style="font-size:11px;color:#9ca3af;margin-top:4px">(b) 再扣其他平台費用率 <b>${other.pct}%</b>（取自 ${_momoEsc(other.month)}；彈窗內不可改，請到批次維護）</div>`;
+    return;
+  }
+  if(!c1){ out.innerHTML=`<span style="color:#9ca3af;font-size:12px">成本 / 進價 填齊（需 &gt; 0）即時計算淨利率</span>`; return; }
+  const ok=c1.pct>=30, col=ok?'#10b981':'#f97316';
+  out.innerHTML=row('淨利率', c0?c0.pct:null, c1.pct, col)
+    +`<div style="margin-top:2px"><span style="color:${col};font-weight:600;font-size:12px">${ok?'✓ 超過 30%':'⚠ 未達 30%'}</span> <span style="color:#9ca3af;font-size:11px;margin-left:6px">（費率 ${(c1.feeRate*100).toFixed(1)}%${c1.feeMode==='hist'?'·近月對帳':'·預設'}）</span></div>`;
+}
+// 把這次試算組成一句話填進上方優化紀錄輸入框（type 預設「調價」）；只填、不送出，不新增紀錄。
+function momoEstToOptlog(shop,sku){
+  const p=momoLoadProducts(shop).find(x=>x.sku===sku); if(!p) return;
+  const d0=_momoEstDefaults(shop,p), d1=_momoEstInputs(shop);
+  const c0=_momoEstCalc(shop,d0), c1=_momoEstCalc(shop,d1);
+  if(!c1){ if(typeof showToast==='function') showToast('試算資料不足，無法帶入','error'); return; }
+  const money=x=>'$'+(Math.round(x*100)/100);
+  const chg=[], same=(a,b)=>(a==null&&b==null)||(a!=null&&b!=null&&Math.abs(a-b)<1e-9);
+  let txt;
+  if(d1.mp){
+    if(!same(d0.sp,d1.sp)) chg.push('售價 '+(d0.sp==null?'—':money(d0.sp))+'→'+money(d1.sp));
+    if(!same(d0.cost,d1.cost)) chg.push('成本 '+(d0.cost==null?'—':money(d0.cost))+'→'+money(d1.cost));
+    if(!same(d0.fee,d1.fee)) chg.push('費率 '+(d0.fee==null?'—':d0.fee+'%')+'→'+d1.fee+'%');
+    if(!chg.length){ if(typeof showToast==='function') showToast('試算值與目前相同，沒有可帶入的調整','info'); return; }
+    txt='試算：'+chg.join('，')+'，商品層淨利率 '+momoPct(c0?c0.a:null)+'→'+momoPct(c1.a)+'，預估實際淨利率 '+momoPct(c0?c0.b:null)+'→'+momoPct(c1.b);
+  } else {
+    if(!same(d0.pp,d1.pp)) chg.push('進價 '+(d0.pp==null?'—':money(d0.pp))+'→'+money(d1.pp));
+    if(!same(d0.cost,d1.cost)) chg.push('成本 '+(d0.cost==null?'—':money(d0.cost))+'→'+money(d1.cost));
+    if(!chg.length){ if(typeof showToast==='function') showToast('試算值與目前相同，沒有可帶入的調整','info'); return; }
+    txt='試算：'+chg.join('，')+'，淨利率 '+momoPct(c0?c0.pct:null)+'→'+momoPct(c1.pct);
+  }
+  const ts=document.getElementById('momo-optlog-type'), ni=document.getElementById('momo-optlog-note');
+  if(!ni) return;
+  if(ts) ts.value='調價';
+  ni.value=txt; ni.focus();
+}
 function momoRenderOptlogSection(shop,sku){
   const el=document.getElementById('momo-optlog-sec'); if(!el) return;
   const list=(momoLoadOptlog(shop)[sku])||[];
@@ -25130,7 +25253,7 @@ Object.assign(window, {
   momoReadPdfText,momoRenderRecon,momoReconSetMonth,momoReconPick,momoReconGenerate,momoReconStore,momoReconStoreDecide,
   momoRenderMoPlusRecon,momoMoPlusReconSetMonth,momoMoPlusReconToggle,momoClearMoPlusReconPdf,
   momoJumpBatchFilter,momoBatchSetFilter,momoBatchToggleDisc,momoBatchSplitDrag,momoColResizeDrag,
-  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoEditOptlog,momoCancelOptlogEdit,momoSaveOptlogEdit,momoOpenDpDetailFromEl,momoCloseDpDetail,momoShopDisplay,
+  momoOpenAnalysis,momoCloseAnalysis,momoAddOptlog,momoDeleteOptlog,momoRenderEstMarginSection,momoEstRecalc,momoEstReset,momoEstToOptlog,momoEditOptlog,momoCancelOptlogEdit,momoSaveOptlogEdit,momoOpenDpDetailFromEl,momoCloseDpDetail,momoShopDisplay,
   momoOpenFilterPanel,momoCloseFilterPanel,momoTagToggle,momoNumAdd,momoNumRemove,momoNumPendingSync,momoClearFilters,momoRenderFilterPanel,momoSyncFilterChip,momoOvSetMonth,
   momoOptlogTypeToggle,momoOptlogTimeSet,momoOptlogBySet,momoOptlogSysToggle,
   momoSearchClear,momoSearchClearToggle,
