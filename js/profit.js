@@ -13465,6 +13465,37 @@ window.__momoNotifyOriginsSkip=function(k){   // 訂閱因 dirty 跳過覆蓋 �
 const MOMO_SNAP_RERENDER_DEBOUNCE_MS=200;   // 可調：快照重繪合併窗口（首個快照起算的固定窗口，非 trailing，載入延遲有上界）
 let _momoSnapTimer=null;                     // 窗口計時器（null＝目前無排程）
 const _momoSnapPending={};                    // shop -> {tableOnly}；窗口內只要有一次「完整重繪」(false)就以完整為準
+// 快照觸發重繪時保住使用者的位置：重繪前記下、重繪後還原（比照蝦皮 applyFilters 的 keepScroll；只套用在這條「雲端快照」路徑，
+//   使用者自己切期別／賣場／排序／篩選走各自的 momoRenderProfitBody 直呼、維持原行為）。
+//   記：表格外框 .tscroll 的 scrollTop／scrollLeft（重繪會重建它→歸零）、整頁 window 與 .main-content 的捲動位置；
+//   若焦點在總表表格區內的輸入框（有 id）→ 一併記下值與游標，重繪後補回（目前表格區內沒有輸入框，是保險）。
+//   搜尋框、篩選面板在殼裡、不在 momo-tbl 內 → 整表重繪不會動到；分析彈窗掛在 body、也不受影響。
+function _momoSnapKeepSave(shop){
+  const tbl=document.getElementById('momo-tbl-'+shop);
+  const sc=tbl&&tbl.querySelector('.tscroll');
+  const mc=document.querySelector('.main-content');
+  const ae=document.activeElement;
+  let focus=null;
+  if(tbl && ae && ae!==document.body && tbl.contains(ae) && ae.id && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)){
+    focus={ id:ae.id, value:ae.value, ss:ae.selectionStart, se:ae.selectionEnd };
+  }
+  return { top:sc?sc.scrollTop:0, left:sc?sc.scrollLeft:0, hasSc:!!sc, winY:window.scrollY, winX:window.scrollX, mcTop:mc?mc.scrollTop:0, focus };
+}
+function _momoSnapKeepRestore(shop, st){
+  if(!st) return;
+  const tbl=document.getElementById('momo-tbl-'+shop);
+  const sc=tbl&&tbl.querySelector('.tscroll');
+  if(sc && st.hasSc){ sc.scrollTop=st.top; sc.scrollLeft=st.left; }
+  const mc=document.querySelector('.main-content');
+  if(mc && mc.scrollTop!==st.mcTop) mc.scrollTop=st.mcTop;
+  if(window.scrollY!==st.winY || window.scrollX!==st.winX) window.scrollTo(st.winX, st.winY);
+  if(st.focus){
+    const el=document.getElementById(st.focus.id);
+    if(el && document.activeElement!==el){
+      try{ if(el.value!==st.focus.value) el.value=st.focus.value; el.focus(); if(st.focus.ss!=null) el.setSelectionRange(st.focus.ss, st.focus.se); }catch(e){}
+    }
+  }
+}
 function momoScheduleSnapshotRerender(shop, tableOnly){
   if(!shop) return;
   const prev=_momoSnapPending[shop];
@@ -13478,7 +13509,7 @@ function momoScheduleSnapshotRerender(shop, tableOnly){
     for(const s in batch){
       // flush 時重驗守衛：200ms 內使用者可能已切走賣場/子分頁 → 該表不在就跳過（比照原各 handler 的終端守衛）
       if((_momoSub[s]||'profit')!=='profit') continue;
-      if(document.getElementById('momo-tbl-'+s)) momoRenderProfitBody(s, batch[s].tableOnly);
+      if(document.getElementById('momo-tbl-'+s)){ const _ks=_momoSnapKeepSave(s); momoRenderProfitBody(s, batch[s].tableOnly); _momoSnapKeepRestore(s,_ks); }   // 快照重繪：保捲動位置／輸入焦點
     }
   }, MOMO_SNAP_RERENDER_DEBOUNCE_MS);
 }
