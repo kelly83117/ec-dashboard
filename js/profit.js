@@ -17578,7 +17578,7 @@ function momoPCInit(shop,p){
   if(!momoIsMoPlus(shop)){
     const n=x=>(x!=null&&x!==''&&isFinite(Number(x)))?Number(x):null;
     const o={cost:n(p.cost), pp:n(p.purchasePrice), sp:n(p.salePrice)};
-    return { shop, sku:p.sku, mp:false, orig:o, cur:Object.assign({},o) };
+    return { shop, sku:p.sku, mp:false, orig:o, cur:Object.assign({},o), ppOverride:false };   // ppOverride：這次編輯中使用者是否手動改過進價（改過就不再被「售價×75%」蓋掉）
   }
   const master=(momoMoPlusMasterCached(shop)||{})[p.sku]||{};
   const mspecs=Array.isArray(master.specs)?master.specs:[];
@@ -17791,7 +17791,7 @@ function _momoPCRefreshSupplier(S){
   ['cost','pp','sp'].forEach(k=>{ const el=document.getElementById('momo-pc-'+k), nt=document.getElementById('momo-pc-'+k+'-n'); if(!el) return;
     const ch=!_momoPCSame(S.cur[k],S.orig[k]);
     _momoPCStyle(el,ch);
-    if(nt) nt.innerHTML=ch?`<span style="color:#92400e">原 ${S.orig[k]==null?'—':'$'+S.orig[k]}</span>`:(k==='sp'?'<span style="color:#64748b">參考用，不影響淨利率</span>':''); });
+    if(nt) nt.innerHTML=(ch?`<span style="color:#92400e">原 ${S.orig[k]==null?'—':'$'+S.orig[k]}</span>`:'')+(k==='pp'?`<div style="color:#64748b">${MOMO_SUPPLY_HINT}</div>`:'')+((k==='sp'&&!ch)?'<span style="color:#64748b">售價本身不進淨利率；改它會連動進價</span>':''); });
   if(!c1){ card.innerHTML='<span style="color:#9ca3af;font-size:13px">成本 / 進價 填齊（需 &gt; 0）即時計算淨利率</span>'; }
   else{
     const ok=c1.marginPct>=30, col=ok?'#047857':'#d97706', chg=c0&&Math.abs(c1.marginPct-c0.marginPct)>1e-9;
@@ -17807,7 +17807,12 @@ function _momoPCRefreshSupplier(S){
 // ── 事件 ──
 function momoPCInput(kind,val,i){
   const S=_momoPC; if(!S) return; const v=_momoPCNum(val);
-  if(!S.mp){ S.cur[kind]=v; momoPCRefresh(); return; }
+  if(!S.mp){
+    S.cur[kind]=v;
+    if(kind==='pp') S.ppOverride=true;
+    else if(kind==='sp' && !S.ppOverride){ const pp=momoSupplyPpFromSp(v); if(pp!=null){ S.cur.pp=pp; const el=document.getElementById('momo-pc-pp'); if(el) el.value=pp; } }   // 改售價 → 進價自動帶 售價×75%
+    momoPCRefresh(); return;
+  }
   if(kind==='fee'){ S.cur.fee=v; }
   else if(kind==='price'){ S.cur.price[S.rows[i].id]=v; if(S.roundNote) delete S.roundNote[S.rows[i].id]; }
   else if(kind==='cost'){ const o=S.rows[i].origin; if(!o) return; S.cur.cost[o]=v; }   // 成本是原廠層：同原廠的列一起變
@@ -17829,7 +17834,7 @@ function momoPCBulkApply(){
   momoPCRefresh();
 }
 function momoPCReset(){
-  const S=_momoPC; if(!S) return; S.roundNote={}; S.cur=S.mp?{price:Object.assign({},S.orig.price),cost:Object.assign({},S.orig.cost),fee:S.orig.fee}:Object.assign({},S.orig);
+  const S=_momoPC; if(!S) return; S.roundNote={}; S.ppOverride=false; S.cur=S.mp?{price:Object.assign({},S.orig.price),cost:Object.assign({},S.orig.cost),fee:S.orig.fee}:Object.assign({},S.orig);
   if(S.mp){ momoPCBuildRows(); } else { ['cost','pp','sp'].forEach(k=>{ const el=document.getElementById('momo-pc-'+k); if(el) el.value=S.orig[k]==null?'':S.orig[k]; }); }
   momoPCRefresh();
 }
@@ -18558,7 +18563,13 @@ function momoBatchSplitDrag(ev, shop){
   const up=()=>{ document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up); if(grid.dataset.w) momoUiWSet('batch|'+shop, grid.dataset.w); };
   document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
 }
+// 甲配／乙配：改售價時進價自動 = 售價 × 75%（含稅）。三處共用：批次維護「新增商品」、批次維護「編輯商品」、分析彈窗「定價與成本」。
+//   只套用甲乙配；MO+ 沒有進價；PChome 是供貨價÷0.75 回推售價（方向相反），都不走這個。
+const MOMO_SUPPLY_RATIO=0.75;
+function momoSupplyPpFromSp(sp){ const v=Number(sp); return (isFinite(v)&&v>0)?Math.round(v*MOMO_SUPPLY_RATIO):null; }   // 售價無效（空／0）→ null（不自動帶）
+const MOMO_SUPPLY_HINT='改售價時自動帶入 售價×'+Math.round(MOMO_SUPPLY_RATIO*100)+'%，可自行修改';
 const _momoAddPpOverride={}; // shop -> 進價是否被手動覆蓋（add 模式）
+const _momoEditPpOverride={}; // shop -> 進價是否被手動覆蓋（編輯模式；開表單／換商品時重設）
 const _MOMO_INP='width:100%;padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;font-size:13px;outline:none;box-sizing:border-box';
 const _MOMO_LB='font-size:11px;color:#6b7280;font-weight:600';
 function momoDefaultShip(shop){ return shop==='乙配'?0:77; }   // fallback：無對帳資料可估時退回的寫死值（甲77/乙0）
@@ -18708,6 +18719,7 @@ function momoRenderBatchEditForm(shop){
   const p=momoLoadProducts(shop).find(x=>x.sku===_momoBatchSel[shop]);
   if(!p){ el.innerHTML=`<div style="font-size:13px;color:#9ca3af;padding:20px;text-align:center">← 從左側選一個商品來編輯</div>`; return; }
   if(momoIsMoPlus(shop)) return momoRenderMoPlusBatchEditForm(shop, p);   // MO+：無進價、成本靠原廠自動帶、售價來自商品主檔（甲乙走下方原路徑不變）
+  _momoEditPpOverride[shop]=false;   // 開表單／換商品 → 進價「手動覆蓋」旗標重設（初次 render 不自動帶，既有進價維持原值）
   const _chTxt=h=>(h.changes&&h.changes.length)?h.changes.map(c=>c.field+' '+(c.from||'—')+'→'+(c.to||'—')).join('；'):'';
   const hist=(p.history&&p.history.length)? [...p.history].reverse().map(h=>{ const ch=_chTxt(h); return `
     <div style="font-size:12px;padding:6px 10px;border-left:2px solid #e5e7eb;margin-bottom:4px">
@@ -18727,8 +18739,8 @@ function momoRenderBatchEditForm(shop){
     <div style="margin-bottom:10px">${skuField}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px">
       <div><label style="${_MOMO_LB}">成本</label><input id="momo-edit-cost-${shop}" type="number" oninput="momoEditRecalc('${shop}')" value="${p.cost??''}" style="${_MOMO_INP}"></div>
-      <div><label style="${_MOMO_LB}">進價(含稅)</label><input id="momo-edit-pp-${shop}" type="number" oninput="momoEditRecalc('${shop}')" value="${p.purchasePrice??''}" style="${_MOMO_INP}"></div>
-      <div><label style="${_MOMO_LB}">售價(含稅)</label><input id="momo-edit-sp-${shop}" type="number" oninput="momoEditRecalc('${shop}')" value="${p.salePrice??''}" style="${_MOMO_INP}"></div>
+      <div><label style="${_MOMO_LB}">進價(含稅)</label><input id="momo-edit-pp-${shop}" type="number" oninput="momoEditPpInput('${shop}')" value="${p.purchasePrice??''}" style="${_MOMO_INP}"><div id="momo-edit-ppnote-${shop}" style="font-size:11px;color:#64748b;margin-top:3px">${MOMO_SUPPLY_HINT}</div></div>
+      <div><label style="${_MOMO_LB}">售價(含稅)</label><input id="momo-edit-sp-${shop}" type="number" oninput="momoEditSpInput('${shop}')" value="${p.salePrice??''}" style="${_MOMO_INP}"></div>
     </div>
     <div id="momo-edit-preview-${shop}" style="min-height:22px;margin-bottom:4px"></div>
     <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">淨利率＝供應商口徑（1 − 費率 − 成本÷未稅進價），與「新增商品」同一支算式。<b>只隨成本／進價變動；改售價不影響此淨利率</b>（售價不進帳、非營收基準——這是預期行為，非故障）。</div>
@@ -18741,7 +18753,22 @@ function momoRenderBatchEditForm(shop){
   momoEditRecalc(shop);   // 初次渲染即顯示當前淨利率（甲乙供應商口徑）
 }
 // 甲乙配「編輯現有商品」即時淨利率：與新增表單同一支純函式 momoCalcMarginSupplier（決策③公式一致）。只吃成本+進價；售價不影響（口徑如此）。
+// 改售價 → 進價自動帶 售價×75%（除非這次編輯中使用者手動改過進價）→ 重算淨利率。初次 render 不呼叫。
+function momoEditSpInput(shop){
+  if(!_momoEditPpOverride[shop]){ const el=document.getElementById('momo-edit-pp-'+shop), pp=momoSupplyPpFromSp((document.getElementById('momo-edit-sp-'+shop)||{}).value); if(el&&pp!=null) el.value=pp; }
+  momoEditRecalc(shop);
+}
+function momoEditPpInput(shop){ _momoEditPpOverride[shop]=true; momoEditRecalc(shop); }   // 手動改過進價 → 之後改售價不再蓋掉
+// 進價格子：跟原值不同就變橘並顯示原值（編輯表單本來沒有「改過」標示；自動帶入後要看得出來）
+function _momoEditPpDecor(shop){
+  const el=document.getElementById('momo-edit-pp-'+shop), nt=document.getElementById('momo-edit-ppnote-'+shop); if(!el) return;
+  const p=momoLoadProducts(shop).find(x=>x.sku===_momoBatchSel[shop]); const orig=(p&&p.purchasePrice!=null&&p.purchasePrice!=='')?Number(p.purchasePrice):null; const cur=parseFloat(el.value);
+  const ch=!((isNaN(cur)&&orig==null)||(orig!=null&&cur===orig));
+  el.style.border=ch?'2px solid #d97706':'1px solid #e5e7eb'; el.style.background=ch?'#fffbeb':'#fff';
+  if(nt) nt.innerHTML=(ch?'<span style="color:#92400e">原 '+(orig==null?'—':'$'+orig)+'</span><br>':'')+MOMO_SUPPLY_HINT;
+}
 function momoEditRecalc(shop){
+  _momoEditPpDecor(shop);
   const prev=document.getElementById('momo-edit-preview-'+shop); if(!prev) return;
   const cost=parseFloat((document.getElementById('momo-edit-cost-'+shop)||{}).value)||0;
   const pp=parseFloat((document.getElementById('momo-edit-pp-'+shop)||{}).value)||0;
@@ -19092,7 +19119,7 @@ function momoAddRecalc(shop){
   const shipRaw=parseFloat(g('ship').value);
   const ship=(shipRaw>=0)?shipRaw:momoDefaultShip(shop);
   const ppEl=g('pp');
-  if(!_momoAddPpOverride[shop]) ppEl.value= sp? Math.round(sp*0.75):'';   // 進價自動 = 售價×75%（未覆蓋時）
+  if(!_momoAddPpOverride[shop]) ppEl.value= sp? momoSupplyPpFromSp(sp):'';   // 進價自動 = 售價×75%（未覆蓋時；共用 momoSupplyPpFromSp）
   const pp=parseFloat(ppEl.value)||0;
   const prev=g('preview');
   if(!prev) return;
@@ -25769,7 +25796,7 @@ Object.assign(window, {
   momoOpenHierarchy,momoCloseHierarchy,
   momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,momoDeleteProduct,
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
-  momoEditRecalc,momoMoPlusEditRecalc,momoMoPlusDualMargin,momoMoPlusClearPrice,momoMoPlusShowPriceDiffs,momoMoPlusPriceDiffApplyOne,momoMoPlusPriceDiffApplyAll,
+  momoEditRecalc,momoEditSpInput,momoEditPpInput,momoMoPlusEditRecalc,momoMoPlusDualMargin,momoMoPlusClearPrice,momoMoPlusShowPriceDiffs,momoMoPlusPriceDiffApplyOne,momoMoPlusPriceDiffApplyAll,
   momoUploadFile,momoUploadKpiOnly,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,momoUploadYiMonth,
   momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyReactivate,momoSyncApplyNew,momoJumpShop,
   momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,momoMigrateS1103ToCollection,momoMigrateOptlogBadKeys,momoFsInvalidFieldKeys,
