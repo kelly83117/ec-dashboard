@@ -17368,9 +17368,13 @@ function momoProductFieldModel(shop){
     hasS1103: !mp,                      // 瀏覽量/成交率/成交均價（S1103 熱銷榜）：甲乙有、MO+ 無此報表
   };
 }
+// 單品分析的逐月序列。月份範圍：
+//   起點 ＝ max( min(a 此商品第一個有生意的月份, b 建檔月份＝product.history 第一筆的 date), MOMO_FIRST_PERIOD )；a、b 只存在一個就取那個；兩個都沒有 → 只顯示最新月份一列。
+//   終點 ＝ 該賣場資料的最新月份。起點到終點每個月都要有一列（沒賣＝qty 0；淨利率／成交均價維持 null＝不畫點，不把「算不出來」畫成 0%）。
+//   上線首月（MOMO_FIRST_PERIOD）之前的月份（例 2025 延遲結算期別）：只有「此商品該月有生意」才保留，不補 0。
 function momoSkuMonthly(shop,product){
   const months=[...new Set(momoAllPeriods(shop).map(k=>k.slice(0,7)))].sort();
-  const rows=months.map(mo=>{
+  const mk=mo=>{
     const agg=momoAggregatePeriods(product,[mo+'-H1',mo+'-H2'],shop);
     const sv=momoS1103ForPeriod(product.sku, mo+'-FULL');
     const inR=sv&&sv.inReport;
@@ -17378,15 +17382,30 @@ function momoSkuMonthly(shop,product){
     return {
       mo, label: mo.slice(2,4)+'/'+mo.slice(5,7),   // YY/MM 含年份，跨年不誤讀（例 25/11、26/01）；不再只「11月」
       qty:agg.qty, active,
-      margin: active ? agg.margin : null,   // 沒生意的月份 → 毛利率不畫點（同總表「營收0顯示—」原則）
+      margin: active ? agg.margin : null,   // 沒生意的月份 → 淨利率不畫點（同總表「營收0顯示—」原則；沒營收算不出來、畫 0 會誤導成「有賣但沒賺」）
       reconciled:!!agg.reconciled,
-      view: inR?sv.view:null, ord: inR?sv.ord:null,
-      avgPrice: (inR&&sv.ord>0)?sv.amt/sv.ord:null,
+      view: inR?sv.view:null, ord: inR?sv.ord:null,   // 沒賣但有 S1103 瀏覽量的月份照實顯示（有曝光沒轉單的訊號）
+      avgPrice: (active&&inR&&sv.ord>0)?sv.amt/sv.ord:null,   // 沒生意的月份 → 成交均價也不畫點、不計入（維持改動前「只算有生意的月份」的判斷；S1103 偶有沒對到 C1105 銷量的月份）
       viewEst: !!(sv&&sv.estimated),
       half: momoMonthHalfState(mo)   // both / H1only / H2only（全站該月完整度）
     };
-  });
-  return rows.filter(r=>r.active);   // ⭐ 只留「此商品有資料」的月份（空月不畫、不占版面）；2025 延遲結算期別若有資料仍保留、不當異常過濾
+  };
+  // 賣場完全沒有任何期別資料（例：MO+玩樂尚未上傳）→ 終點用「當月」（今天所在月份）；之後該賣場有資料就自動改用資料的最新月份
+  const _d=new Date(), nowMo=_d.getFullYear()+'-'+String(_d.getMonth()+1).padStart(2,'0');
+  const latest=months.length?months[months.length-1]:nowMo;
+  const byMo={}; months.forEach(mo=>{ byMo[mo]=mk(mo); });
+  const firstActive=months.find(mo=>byMo[mo].active)||null;                                  // a
+  const h0=(product.history&&product.history[0]&&String(product.history[0].date||'').slice(0,7))||null;   // b（YYYY-MM）
+  const bOk=(h0&&/^[0-9]{4}-[0-9]{2}$/.test(h0))?h0:null;
+  let start=null;
+  if(firstActive&&bOk) start=firstActive<bOk?firstActive:bOk; else start=firstActive||bOk||null;
+  if(start==null) start=latest;                                                              // 沒歷程、也沒賣過 → 只顯示最新月份
+  if(start<MOMO_FIRST_PERIOD) start=MOMO_FIRST_PERIOD;
+  if(start>latest) start=latest;
+  const next=m=>{ let y=+m.slice(0,4), mo=+m.slice(5,7)+1; if(mo>12){ y++; mo=1; } return y+'-'+String(mo).padStart(2,'0'); };
+  const out=months.filter(mo=>mo<MOMO_FIRST_PERIOD && byMo[mo].active).map(mo=>byMo[mo]);   // 上線首月前：有生意才留
+  for(let mo=start; mo<=latest; mo=next(mo)) out.push(byMo[mo]||mk(mo));                      // 起點～最新月份：每月一列（沒資料的月份也補）
+  return out;
 }
 
 function momoOpenAnalysis(shop,sku){
@@ -17478,9 +17497,11 @@ function momoRenderAnalysis(shop,p){
   const labels=series.map(s=>s.label);
   const barColor=series.map(s=>s.half==='both'?'#5b5fcf':'#c7d2fe');   // 半月月份淡色
   const qtyCv=document.getElementById('mm-ana-qty');
-  if(qtyCv) _momoAnalysisCharts.push(new Chart(qtyCv.getContext('2d'),{ type:'bar',
+  // 每根長條上方標數字（含 0：0 的長條看不見，沒賣的月份要看得到「0」）。小型 inline plugin，不引入套件。
+  const barLabels={ id:'momoBarLabels', afterDatasetsDraw(chart){ const ctx=chart.ctx; chart.data.datasets.forEach((ds,di)=>{ const meta=chart.getDatasetMeta(di); if(!meta||meta.hidden) return; meta.data.forEach((bar,i)=>{ const v=ds.data[i]; if(v==null) return; ctx.save(); ctx.fillStyle=v===0?'#94a3b8':'#475569'; ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText(String(v), bar.x, bar.y-3); ctx.restore(); }); }); } };
+  if(qtyCv) _momoAnalysisCharts.push(new Chart(qtyCv.getContext('2d'),{ type:'bar', plugins:[barLabels],
     data:{labels,datasets:[{label:'月銷量',data:series.map(s=>s.qty),backgroundColor:barColor,borderRadius:4}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}} }));
+    options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:16}},plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}} }));
   const viewCv=document.getElementById('mm-ana-view');
   if(viewCv) _momoAnalysisCharts.push(new Chart(viewCv.getContext('2d'),{ type:'bar',
     data:{labels,datasets:[
