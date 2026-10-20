@@ -279,6 +279,11 @@ tbody tr:hover td[style*="position:sticky"]{background:#fafbff !important;}
 .sub-id{font-size:11px;color:#9ca3af;font-family:'DM Mono',monospace;margin-top:1px;line-height:1.2;}
 .td-pos{color:#10b981;font-weight:700;}.td-neg{color:#ef4444;font-weight:700;}.td-amber{color:#f59e0b;}
 .tr-total td{background:#f0f4ff !important;font-weight:700;border-top:2px solid #c7d2fe;}
+/* #340 小計列正下方「賣場廣告（不分商品）」說明行（_storeAdsNoteHtml）：跨整列、灰色小字、只是說明。
+   文字包在 sticky 的 span 裡：表格很寬、往右捲時說明仍貼在可視區左邊。hover 不變色（不是資料列）。 */
+.tscroll .tr-store-ads td{padding:6px 18px;font-size:12px;color:var(--text-muted);background:var(--surface);}
+.tr-store-ads:hover td{background:var(--surface);}
+.store-ads-note{position:sticky;left:18px;display:inline-block;cursor:help;}
 .tr-no-rev td{color:#9ca3af;}
 
 /* Analysis tags */

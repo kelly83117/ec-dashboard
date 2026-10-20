@@ -1308,9 +1308,14 @@ function _stripDerived(built){
   if(!Array.isArray(built))return built;
   return built.map(({analysisAll:_omit,profitPct:_omit2,...rest})=>rest);
 }
-function lsSave(shop,month,half,built,period,days){
+function lsSave(shop,month,half,built,period,days,storeAds){
   // 只存本機；同步雲端需手動按「☁ 同步雲端」
+  // storeAds（#340，賣場廣告，見 _storeAdsOf）：只有「產生報表」會傳。其他重存（recalcRow 改廣告費）不傳 ⇒
+  //   沿用這份報表【已存的】storeAds（先讀回再覆蓋），改一格廣告費不會把它弄丟、也不會變成「沒記錄」。
+  //   舊報表本來就沒有這個欄位 → 重存後照樣沒有（不補 0）。
+  if(storeAds===undefined){const old=lsLoad(shop,month,half);if(old&&old.storeAds!==undefined)storeAds=old.storeAds;}
   const payload={built:_stripDerived(built),period,days,rate:getPlatformRate(shop),ts:Date.now()};
+  if(storeAds!==undefined)payload.storeAds=storeAds;
   const k=lsKey(shop,month,half);
   let saveErr=null;
   try{localStorage.setItem(k,JSON.stringify(payload));}catch(e){saveErr=e;}
@@ -3273,7 +3278,7 @@ function tryLoadSaved(shop){
   const s=state[shop];const rep=lsLoad(shop,s.curMonth,s.curHalf);
   // 每次切換區間都重置上傳卡片，避免誤以為已上傳
   resetUploadCards(shop);
-  if(rep){loadIntoUI(shop,rep.built,rep.period,rep.days);}
+  if(rep){loadIntoUI(shop,rep.built,rep.period,rep.days,rep.storeAds);}
   else{
     state[shop]._built=null;
     // 🔴 _built 被清掉就必須連 _filtered 與批次選取一起清。這條路【不會】走 loadIntoUI，
@@ -3361,7 +3366,9 @@ function clearPeriod(shop){
   const groupList=document.getElementById('upm-groupads-list');if(groupList)groupList.innerHTML='';
   _showSyncBtn(shop);
 }
-function loadIntoUI(shop,built,period,days){
+// storeAds（#340）：這份報表的賣場廣告（見 _storeAdsOf）。舊報表沒有這個欄位 → undefined（「還沒有記錄」），不當 0。
+//   測試通路（testTryLoadSaved / _doGenerateTest）不傳 → 一律 undefined，小計列下方也不顯示（見 _storeAdsNoteHtml）。
+function loadIntoUI(shop,built,period,days,storeAds){
   if(built&&Array.isArray(built)){
     built.forEach(r=>{
       // ⚠ 下行 calcAnalysisAll 的 r.pureRate||0 刻意保留：它的 null/0 語意沒驗證過，不要跟下兩行的 ??null 統一
@@ -3372,7 +3379,7 @@ function loadIntoUI(shop,built,period,days){
       r.profitPct=(r.rev>0)?(r.pureRate+r.adsPct):null;
     });
   }
-  state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;
+  state[shop]._built=built;state[shop]._period=period;state[shop]._days=days;state[shop]._storeAds=storeAds;
   // _filtered 是 _built 的衍生快取（見 applyFilters），跟著 _built 無條件失效。
   //   🔴 刻意放在下面那個 if(!_cloudRefreshing) 的【外面】，跟 filters/sorts 不同批：
   //     filters/sorts/tagFilters 是【使用者的設定】，不該被別人按同步清掉，所以有條件重置；
@@ -3626,6 +3633,31 @@ function _noSidGap(shop){
   },0);
   const uploaded=r2(sumRows(s.rawSelAds)+(s.rawGroupAdsList||[]).reduce((a,g)=>a+sumRows(g.rows),0));
   return {mainTotal,uploaded,gap:r2(mainTotal-uploaded),excludedTotal,list};
+}
+// ── 賣場廣告（不分商品）#340 ──
+//   蝦皮總體廣告 CSV 裡「廣告類型＝賣場廣告」那一列沒有商品 ID，parseAdsCsv 會把它收進 rawAds._noSid、不進任何商品。
+//   淨利表【不扣、不攤】：各商品、小計、頂端 KPI、較上月同期、匯出一律不變，只在小計列下方多一行說明（_storeAdsNoteHtml）。
+//   金額在「產生報表」當下算好存進報表 payload.storeAds（原始 CSV 只活在記憶體，重整就沒了，事後無從現查）：
+//     有廣告檔 → {spend:花費合計（原始小數、不四捨五入）, n:列數}（沒有賣場廣告列＝{spend:0,n:0}）
+//     沒有廣告檔（rawAds 是 null）→ {spend:null, noFile:true}
+//   ⚠ 判斷「有沒有廣告檔」看 rawAds 是不是陣列，不看長度：整份檔只有賣場廣告時 rawAds 是空陣列，但 _noSid 裡有那一列。
+function _storeAdsOf(rawAds){
+  if(!Array.isArray(rawAds))return {spend:null,noFile:true};
+  const rows=(rawAds._noSid||[]).filter(r=>r.type==='賣場廣告');
+  return {spend:rows.reduce((a,r)=>a+(Number(r.spend)||0),0),n:rows.length};
+}
+// 小計列正下方那一行（renderTable 用）。只是說明：有篩選也照樣顯示、文字不變，不影響任何數字。
+//   金額用 fmtAds（到元以下兩位，跟對帳明細「賣場廣告 $X 不列入」同一支）；fmtAds 內含 Math.abs，賣場廣告花費不會是負數。
+//   測試通路不顯示（它不記錄 storeAds）。
+const STORE_ADS_TITLE='蝦皮廣告後台的賣場廣告（綜合搜尋）不屬於單一商品，所以不算進各商品的廣告費與 ROI，也不從淨利表純利扣除。整月經營數字（KPI 月結表）的廣告費已含這筆。';
+function _storeAdsNoteHtml(shop,sa,colspan){
+  if(shop===TEST_SHOP_ID)return '';
+  let body;
+  if(sa===undefined||sa===null)body='—　這份報表產生時還沒有記錄，重新產生報表後才會顯示';
+  else if(sa.noFile)body='—　這份報表產生時沒有上傳廣告報表';
+  else if(!(Number(sa.spend)>0))body='$0';
+  else body='$'+fmtAds(Number(sa.spend))+'　不屬於任何商品，未計入上方各商品與小計';
+  return `<tr class="tr-store-ads"><td class="tl" colspan="${colspan}"><span class="store-ads-note" title="${STORE_ADS_TITLE}">賣場廣告（不分商品）${body}</span></td></tr>`;
 }
 // 2026-08-17 擴充：明細改成兩張表（重複對應 / 未對應）＋ 結算列 ＋ 三個來源筆數。
 //   簽章改成物件參數 detail={diff,unmapped,dups,src}：全檔唯一呼叫點是 checkAdsReconcile
@@ -4273,9 +4305,10 @@ function _doGenerate(shop){
       const period=getPeriodLabel(s.curMonth,s.curHalf);
       const days=s.days;
       const built=buildShop(shop,days);
-      lsSave(shop,s.curMonth,s.curHalf,built,period,days);
+      const storeAds=_storeAdsOf(s.rawAds);   // #340 賣場廣告：產生當下存進報表（原始 CSV 重整就沒了，事後查不到）
+      lsSave(shop,s.curMonth,s.curHalf,built,period,days,storeAds);
       const dotEl=document.getElementById('dot-'+shop);if(dotEl)dotEl.classList.add('on');
-      loadIntoUI(shop,built,period,days);
+      loadIntoUI(shop,built,period,days,storeAds);
       if(curShop==='總表')renderSummary();
       checkAdsReconcile(shop,built);
     }catch(err){alert('['+shop+'] 產生失敗：'+err.message+'\n\n'+err.stack);}
@@ -8674,7 +8707,7 @@ function renderTable(shop,list,opts){
   html+=`<tr class="tr-total">
     <td class="tl" colspan="2">小計（${list.length}筆）</td>
     ${orderedCols.map(c=>totalCell[c.key]||'<td></td>').join('')}
-  </tr></tbody></table></div>`;
+  </tr>${_storeAdsNoteHtml(shop,s._storeAds,2+orderedCols.length)}</tbody></table></div>`;
   const _tblHost=document.getElementById('tbl-'+shop);
   // keepScroll：覆蓋 innerHTML 會重建 .tscroll，捲動位置歸零。先存舊值、重繪後還原（含 scrollLeft，商品調整欄在最右）。
   let _prevScTop=null,_prevScLeft=null;
