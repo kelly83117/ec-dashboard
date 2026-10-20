@@ -9441,13 +9441,15 @@ const KPI_GROUPS=[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.ads-d.fee-d.misc,desc:'純利 = 實際營收 − 商品成本 − 廣告費 − 手續費 − 各項費用（物流運費是整組共同費用，只從蝦皮小計扣，不進各店純利）'},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.ads-d.fee-d.misc)/d.rev:0,desc:'純利率 = 純利 ÷ 實際營收'},
     ],
-    commonCostLabel:'倉儲運費+便利袋+宅配通+大榮（整組共同費用，只影響小計純利）',
+    // commonCostLabel：只出現在填寫模式「共同費用」那一格店名欄的 title（滑鼠提示）；Excel 用的是 commonCostShortLabel。
+    commonCostLabel:'新竹＋佶俐＋便利袋＋蝦皮上收＋宅配通（整組共同費用，只影響小計純利）',
     commonCostShortLabel:'物流運費',
-    // commonTaxIn（#330）：共同費用照帳單填【含稅】，系統存未稅（Math.round(含稅÷1.05)）＋含稅原數放 meta.taxIn。
-    //   shopeeCommon 存的值仍是未稅 ⇒ 所有讀取端不改。見 _kpiCommonTaxIn。填寫模式共同費用列的 placeholder（沒存值時）與 ⓘ。
+    // commonTaxIn（#330）：共同費用照帳單填【含稅】，系統自動換算存未稅（Math.round(含稅÷1.05)）＋含稅原數放 meta.taxIn。
+    //   shopeeCommon 存的值一律是未稅（2026 年已存的月份也是）⇒ 所有讀取端不改。見 _kpiCommonTaxIn。
+    //   commonCostPlaceholder＝沒存值時的提示字；commonCostInfo＝共同費用列的 ⓘ。
     commonTaxIn:true,
     commonCostPlaceholder:'照帳單填含稅金額',
-    commonCostInfo:'倉儲運費＋便利袋＋宅配通＋大榮，整組共同費用，只扣在蝦皮小計純利。2026/09 起蝦皮改為未稅，請填未稅金額（含稅 ÷ 1.05）；2026/08 以前為含稅。',
+    commonCostInfo:'新竹＋佶俐＋便利袋＋蝦皮上收＋宅配通，整組共同費用，只扣在蝦皮小計純利。請照帳單填含稅金額，系統自動換算未稅（÷1.05，四捨五入到元）。2026 年已存的月份都是未稅。',
     // 手續費（2026-10-01）：自動預設＝實際營收 × 該店費率（淨利表「平台費率」設定 ec_shop_rate，讀不到用預設 好麻吉／玩樂／森之旅 20.5%、維克 17.5%）。
     //   存了值＝手動覆蓋；實際營收空著 → 不補（維持空，純利不變）。舊手填值的整理見 __kpiShopeeFeeMigrate。
     autoFill:{
@@ -10219,6 +10221,30 @@ function _kpiCommonTaxIn(month,row,groupKey){
   const net=row&&row[groupKey+'Common'];
   return (net!=null&&_kpiCommonTaxNet(t)===Number(net))?t:null;
 }
+// 含稅格下方那一行（#330 塊 2）：有效 taxIn ⇒「含稅 X」；舊月份（沒有有效 taxIn）不顯示字，但這一行照樣佔高度
+//   （.km-common-sub 有 min-height），打字預覽出現時共同費用列不會忽高忽低。不是 commonTaxIn 的組（PChome）回 ''。
+//   預覽（.km-taxin-pv）只在這格聚焦時顯示（CSS :focus-within），失焦自動退回「含稅 X」；寫入後整表重畫會重產這一段。
+function _kpiCommonTaxSubHtml(month,row,group){
+  if(!group.commonTaxIn)return '';
+  const t=_kpiCommonTaxIn(month,row,group.key);
+  return `<div class="km-sublabel km-common-sub">${t!=null?`<span class="km-taxin-tag">含稅 ${_kpiNum(t)}</span>`:''}<span class="km-taxin-pv"></span></div>`;
+}
+// 打字時的即時預覽文字。空白，或跟聚焦時的原值（data-raw）／顯示值（data-disp，Enter 沒變時 kpiFillKey 會放回它）相同 ⇒ ''（退回「含稅 X」）；
+//   整數 ⇒「→ 未稅 X」；其他 ⇒「請輸入整數」。解析、換算沿用 _kpiParseNum／_kpiCommonTaxNet（跟存檔同一套）。
+function _kpiTaxPreviewText(v,raw,disp){
+  v=String(v==null?'':v).trim();
+  if(v===''||v===(raw||'')||v===(disp||''))return '';
+  const n=_kpiParseNum(v);
+  return (n!=null&&Number.isInteger(n))?'→ 未稅 '+_kpiNum(_kpiCommonTaxNet(n)):'請輸入整數';
+}
+// inline handler（只掛在含稅格的 oninput／onkeyup；kpiFillFocus 也會叫一次，把上次留下的預覽清掉）。找不到預覽元素就什麼都不做。
+//   onkeyup：Esc 由 kpiFillKey 用程式把值改回原值，不會觸發 input 事件，靠 keyup 重算。
+function kpiFillTaxPreview(inp){
+  const td=inp&&inp.closest&&inp.closest('td');
+  const pv=td&&td.querySelector('.km-taxin-pv');
+  if(!pv)return;
+  pv.textContent=_kpiTaxPreviewText(inp.value,inp.dataset.raw,inp.dataset.disp);
+}
 function _kpiFillInputHtml(month,row,cell,r,c){
   const cur=_kpiFillCur(row,cell);
   const has=cur.v!=null;
@@ -10239,14 +10265,14 @@ function _kpiFillInputHtml(month,row,cell,r,c){
   // 舊月份：聚焦後輸入框是空的 → placeholder 短句提示已存的未稅值（框窄，長句會被截），完整說明放 title。
   //   共同費用格沒有公式、不是 fx ⇒ 走到這裡 ttl 一定是 ''；保險起見仍用接在後面的寫法，不蓋掉既有 title。
   if(tg&&has&&tIn==null){
-    ph=`已存未稅 ${_kpiNum(cur.v)}，改請填含稅`;
+    ph=`已存未稅 ${_kpiNum(cur.v)}，請填含稅`;
     ttl=(ttl?ttl+'\n':'')+`這個月已存的是未稅 ${_kpiNum(cur.v)}（舊資料）。要修改請照帳單填含稅金額，系統會自動換算未稅。`;
   }
   return `<input class="km-in${cls}" type="text" inputmode="decimal" autocomplete="off"
     data-k="${_kpiEscAttr(JSON.stringify(cell.segs))}" data-kind="${cell.kind}" data-r="${r}" data-c="${c}"
     data-raw="${_kpiEscAttr(raw)}" data-disp="${_kpiEscAttr(disp)}" value="${_kpiEscAttr(disp)}"
     ${ph?`placeholder="${_kpiEscAttr(ph)}"`:''} ${ttl?`title="${_kpiEscAttr(ttl)}"`:''}
-    onfocus="kpiFillFocus(this)" onblur="kpiFillBlur(this)" onkeydown="kpiFillKey(event,this)" onpaste="kpiFillPaste(event,this)">${(disp||ph)?`<div class="km-sizer" aria-hidden="true">${_kpiEscAttr(disp||ph)}</div>`:''}`;
+    onfocus="kpiFillFocus(this)" onblur="kpiFillBlur(this)" onkeydown="kpiFillKey(event,this)" onpaste="kpiFillPaste(event,this)"${tg?' oninput="kpiFillTaxPreview(this)" onkeyup="kpiFillTaxPreview(this)"':''}>${(disp||ph)?`<div class="km-sizer" aria-hidden="true">${_kpiEscAttr(disp||ph)}</div>`:''}`;
 }
 function _kpiTsMs(at){
   if(at==null)return null;
@@ -10349,7 +10375,7 @@ function _kpiFillHtml(row){
     const cell={kind:'common',segs:[group.key+'Common'],ph:group.commonCostPlaceholder||''};
     const cv=Number(row[group.key+'Common'])||0;
     commonRow=`<tr class="km-f-common"><td class="km-f-shop" title="${group.commonCostLabel}">共同費用${group.commonCostInfo?_kpiInfoHtml(group.title+' 共同費用',[group.commonCostInfo]):''}<div class="km-sublabel">${group.commonCostShortLabel||''}</div></td><td class="km-f-ro km-f-aov"></td>
-      <td colspan="${cols.length}"><div class="km-common-in">${_kpiFillInputHtml(month,row,cell,group.shops.length,0)}</div></td>
+      <td colspan="${cols.length}"><div class="km-common-in">${_kpiFillInputHtml(month,row,cell,group.shops.length,0)}</div>${_kpiCommonTaxSubHtml(month,row,group)}</td>
       <td class="km-n km-f-ro km-f-ro-first"><div class="km-roval">${cv?'−$'+fmtN(cv):'—'}</div></td><td class="km-f-ro"></td></tr>`;
   }
   // 小計：manual 欄位直接加總（合併欄位只算總額一次、不適用略過）；純利／純利率＝_kpiGroupTotals。
@@ -10428,6 +10454,7 @@ function kpiFillFocus(inp){
   inp.dataset.done='';
   inp.value=inp.dataset.raw||'';
   try{inp.select();}catch{}
+  if(inp.dataset.kind==='common')kpiFillTaxPreview(inp);   // 含稅格：清掉上次聚焦留下的預覽（其他共同費用格找不到預覽元素，不做事）
 }
 // 「1,234」「NT$1,234」「$ 1234」→ 1234；不是純數字回 null（交給公式或報錯）。
 function _kpiParseNum(s){
@@ -25828,7 +25855,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   buildKpiTabHtml,renderKpiTab,getKpiRows,kpiWriteCell,__kpiMigrateToV2,setKpiViewMode,setKpiYear,
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
-  kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillDownloadExcel,
+  kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillTaxPreview,kpiFillDownloadExcel,
   kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
