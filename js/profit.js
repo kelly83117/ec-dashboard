@@ -10236,6 +10236,24 @@ function _kpiShopeeAutoSame(month,row,cell){
   const am=_kpiMetaAt(month,cell.segs);
   return _kpiIsAutoMeta(am)&&am.val===_kpiFillCur(row,cell).v;
 }
+// 蝦皮（#331）：2026-10-01 舊版「從淨利表帶入」（b79c27c）寫的 meta.from 前綴。之後的對帳單帶入若是「等上傳」不會寫那一格，
+//   舊 meta 就留著 ⇒ 不能標成「從對帳單自動帶入」。
+const KPI_SHOPEE_LEGACY_FROM=['profit:','platforms-ads:'];
+// 這一格「自動」類標籤要怎麼標：'legacy' 舊版帶入｜'auto' 自動｜null 不標。
+//   蝦皮組多要求 Number(meta.val)＝Number(現值)（兩邊轉 Number 再比，字串 "0" 跟 0 算一樣）；不一致就都不標。
+//   ⚠ 其他組（MOMO／PChome…）照舊：只看 _kpiIsAutoMeta。
+function _kpiAutoTagKind(month,row,cell){
+  const am=_kpiMetaAt(month,cell.segs);
+  if(!_kpiIsAutoMeta(am))return null;
+  if(!(cell.kind==='cell'&&cell.group&&cell.group.key==='shopee'))return 'auto';
+  const cur=_kpiFillCur(row,cell).v;
+  if(cur==null||cur===''||Number(am.val)!==Number(cur))return null;
+  return KPI_SHOPEE_LEGACY_FROM.some(p=>String(am.from||'').startsWith(p))?'legacy':'auto';
+}
+// 蝦皮 autoFill 欄（手續費）：不覆蓋時是「實際營收×費率」估算（#336 的 title／「手動」標籤用）。
+function _kpiShopeeFeeLike(cell){
+  return !!(cell&&cell.kind==='cell'&&cell.group&&cell.group.key==='shopee'&&_kpiIsAutoFill(cell.group,cell.shop,cell.segs[2]));
+}
 // 共同費用「照帳單填含稅」（#330，group.commonTaxIn，目前只有蝦皮）：
 //   months.{月}.{key}Common 照舊存【未稅】＝Math.round(含稅÷1.05)（所有讀取端不改）；含稅原數存在這一格的 meta.taxIn
 //   （kpiWriteCell 第三元素）。任何其他寫入（舊版分頁、別的路徑）都會把 meta 整筆換成 {by,at} → taxIn 自動消失。
@@ -10293,7 +10311,11 @@ function _kpiFillInputHtml(month,row,cell,r,c){
   if(cur.formula!=null)cls+=' km-has-formula';
   let ph='',ttl=cur.formula!=null?`公式：${raw}`:'';
   if(cell.fx){const dv=_kpiFxDefault(row,cell.group,cell.shop,cell.segs[2]);ph=_kpiMoney(dv);
-    ttl=has?(_kpiShopeeAutoSame(month,row,cell)?'從對帳單帶入（自動）':`手動覆蓋（公式值 ${ph}）。清空後按 Enter 回到公式`):`公式值 ${ph}（直接打數字可以覆蓋）`;}
+    // 蝦皮手續費（#336）：清空回去的是「費率估算」、不是對帳單值 ⇒ 不用「公式」的說法。其他組照舊。
+    const sp=_kpiShopeeFeeLike(cell);
+    ttl=has?(_kpiShopeeAutoSame(month,row,cell)?'從對帳單帶入（自動）'
+        :(sp?`手動輸入（不是這次對帳單帶入的值）。清空後按 Enter 會改用費率估算 ${ph}（實際營收×費率），不會回到對帳單值；要回對帳單值請重按「從對帳單帶入」`:`手動覆蓋（公式值 ${ph}）。清空後按 Enter 回到公式`))
+      :(sp?`費率估算 ${ph}（實際營收×費率；尚未從對帳單帶入，直接打數字可以覆蓋）`:`公式值 ${ph}（直接打數字可以覆蓋）`);}
   if(cell.kind==='common'&&cell.ph)ph=cell.ph;   // 共同費用列的提示字（目前只有蝦皮：照帳單填含稅）
   // 舊月份：聚焦後輸入框是空的 → placeholder 短句提示已存的未稅值（框窄，長句會被截），完整說明放 title。
   //   共同費用格沒有公式、不是 fx ⇒ 走到這裡 ttl 一定是 ''；保險起見仍用接在後面的寫法，不蓋掉既有 title。
@@ -10366,8 +10388,9 @@ function _kpiFillHtml(row){
   }).join('');
   const head=`<tr><th class="km-f-shop">${group.shops.length>1?'通路':'名稱'}</th><th class="km-n km-f-rohead km-f-aov" title="實際營收 ÷ 訂單數（自動計算，不能直接改）">客單價</th>${cols.map(f=>{
     const note=KPI_NOTEABLE_FIELDS.has(f.k)?(row.kpiFieldNotes||{})[group.key+':'+f.k]:null;
+    // 有備註：蝦皮（#332）保留可點的鉛筆＋旁邊「備註」小標（整個 span 都可點）；其他組照舊用 ●。
     const noteBtn=KPI_NOTEABLE_FIELDS.has(f.k)
-      ?`<span class="km-note${note?' has':''}" onclick="editKpiFieldNote('${month}','${group.key}','${f.k}',this)" title="${note?'備註：'+_kpiEscAttr(note)+'（點擊修改）':'備註'}">${note?'●':'✎'}</span>`:'';
+      ?`<span class="km-note${note?' has':''}${note&&group.key==='shopee'?' km-note-pen':''}" onclick="editKpiFieldNote('${month}','${group.key}','${f.k}',this)" title="${note?'備註：'+_kpiEscAttr(note)+'（點擊修改）':'備註'}">${note?(group.key==='shopee'?'✎<span class="km-note-tag">備註</span>':'●'):'✎'}</span>`:'';
     if(f.common)return `<th><div class="km-th">${f.l}${_kpiInfoHtml(group.title+' '+f.l,[group.commonCostLabel])}</div></th>`;
     if(f.fx)return `<th><div class="km-th">${f.l}${_kpiInfoHtml(group.title+' '+f.l,[f.desc])}</div></th>`;
     const af=group.autoFill&&group.autoFill[f.k];
@@ -10389,9 +10412,12 @@ function _kpiFillHtml(row){
       // 小字一律放在輸入框【下方】：放上方會把框往下推，跟同一列其他格的框線對不齊。
       // 小字超過 4 個字會撐寬整欄（1280 寬 MOMO 放不下）→ 畫面只顯示短字，完整說明放 title（滑鼠移過去看）
       const autoSame=_kpiShopeeAutoSame(month,row,cell);   // 是 ⇒ 只標「自動」、不標「手動」
+      const auKind=_kpiAutoTagKind(month,row,cell);   // 'auto'｜'legacy'（蝦皮舊版帶入，#331）｜null
+      const fxTtl=_kpiShopeeFeeLike(cell)?'手動輸入（不是這次對帳單帶入的值）；清空後按 Enter 會改用費率估算，不會回到對帳單值':'手動覆蓋公式；清空後按 Enter 回到公式';
       const hint=(cell.kind==='merge'?`<div class="km-sublabel km-sublabel-hint" title="${_kpiEscAttr(group.fieldMerge?.[f.k]?.fillHint||'共用・填總額')}">共用</div>`:'')
-        +(cell.fx&&_kpiFillCur(row,cell).v!=null&&!autoSame?`<div class="km-sublabel"><span class="km-fx-tag" title="手動覆蓋公式；清空後按 Enter 回到公式">手動</span></div>`:'')
-        +(_kpiIsAutoMeta(_kpiMetaAt(month,cell.segs))?`<div class="km-sublabel"><span class="km-au-tag" title="從對帳單自動帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；手動改這格後標籤會消失">自動</span></div>`:'');
+        +(cell.fx&&_kpiFillCur(row,cell).v!=null&&!autoSame?`<div class="km-sublabel"><span class="km-fx-tag" title="${fxTtl}">手動</span></div>`:'')
+        +(auKind==='auto'?`<div class="km-sublabel"><span class="km-au-tag" title="從對帳單自動帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；手動改這格後標籤會消失">自動</span></div>`:'')
+        +(auKind==='legacy'?`<div class="km-sublabel"><span class="km-legacy-tag" title="2026/10/01 舊版從淨利表帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；之後的對帳單帶入沒有寫這一格">舊版帶入</span></div>`:'');
       return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填${['','一','兩','三','四'][cell.st.shops.length]||cell.st.shops.length}家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
     }).join('');
     const gt=_kpiCommonColTotals(row,group);
