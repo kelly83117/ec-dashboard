@@ -1768,6 +1768,14 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-ftable td > .km-sublabel:has(> .km-fx-tag):has(~ .km-sublabel > .km-au-tag),
 .km-ftable td > .km-sublabel:has(> .km-fx-tag) ~ .km-sublabel:has(> .km-au-tag){display:inline-block;vertical-align:top;}
 .km-ftable td > .km-sublabel:has(> .km-fx-tag):has(~ .km-sublabel > .km-au-tag){padding-right:0;margin-right:4px;}
+/* #330 塊 2：蝦皮共同費用（含稅格）輸入框下方那一行（_kpiCommonTaxSubHtml）。版位沿用 .km-sublabel（「自動」標籤那一排），
+   但共同費用列是 colspan 寬格、輸入框靠左 → 改成靠左對齊輸入框的文字起點。
+   一律佔一行高（舊月份沒字也是），打字預覽出現時列高不跳。預覽只在這格聚焦時顯示，失焦自動退回「含稅 X」。 */
+.km-ftable .km-common-sub{text-align:left;padding-right:0;padding-left:var(--km-r);min-height:1.35em;}
+.km-taxin-tag,.km-taxin-pv{color:var(--text-muted);}
+.km-taxin-pv{display:none;}
+.km-f-common td:focus-within .km-taxin-pv{display:inline;}
+.km-f-common td:focus-within .km-common-sub:has(.km-taxin-pv:not(:empty)) .km-taxin-tag{display:none;}
 .km-au-sub{font-size:12px;color:#6b7280;margin-bottom:10px;}
 .km-au-tbl{width:100%;border-collapse:collapse;font-size:12.5px;color:#374151;font-variant-numeric:tabular-nums;}
 .km-au-tbl th{text-align:left;padding:6px 8px;color:#6b7280;font-size:11px;font-weight:600;background:#f8f9fc;white-space:nowrap;border-bottom:1px solid #eef0f4;}

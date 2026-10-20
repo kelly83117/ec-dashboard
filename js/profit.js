@@ -9441,11 +9441,15 @@ const KPI_GROUPS=[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.ads-d.fee-d.misc,desc:'純利 = 實際營收 − 商品成本 − 廣告費 − 手續費 − 各項費用（物流運費是整組共同費用，只從蝦皮小計扣，不進各店純利）'},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.ads-d.fee-d.misc)/d.rev:0,desc:'純利率 = 純利 ÷ 實際營收'},
     ],
-    commonCostLabel:'倉儲運費+便利袋+宅配通+大榮（整組共同費用，只影響小計純利）',
+    // commonCostLabel：只出現在填寫模式「共同費用」那一格店名欄的 title（滑鼠提示）；Excel 用的是 commonCostShortLabel。
+    commonCostLabel:'新竹＋佶俐＋便利袋＋蝦皮上收＋宅配通（整組共同費用，只影響小計純利）',
     commonCostShortLabel:'物流運費',
-    // 共同費用是手填、系統不換算：2026/09 起蝦皮改未稅（從對帳單帶入），同事要自己 ÷1.05。填寫模式共同費用列的 placeholder 與 ⓘ。
-    commonCostPlaceholder:'未稅金額（含稅 ÷ 1.05）',
-    commonCostInfo:'倉儲運費＋便利袋＋宅配通＋大榮，整組共同費用，只扣在蝦皮小計純利。2026/09 起蝦皮改為未稅，請填未稅金額（含稅 ÷ 1.05）；2026/08 以前為含稅。',
+    // commonTaxIn（#330）：共同費用照帳單填【含稅】，系統自動換算存未稅（Math.round(含稅÷1.05)）＋含稅原數放 meta.taxIn。
+    //   shopeeCommon 存的值一律是未稅（2026 年已存的月份也是）⇒ 所有讀取端不改。見 _kpiCommonTaxIn。
+    //   commonCostPlaceholder＝沒存值時的提示字；commonCostInfo＝共同費用列的 ⓘ。
+    commonTaxIn:true,
+    commonCostPlaceholder:'照帳單填含稅金額',
+    commonCostInfo:'新竹＋佶俐＋便利袋＋蝦皮上收＋宅配通，整組共同費用，只扣在蝦皮小計純利。請照帳單填含稅金額，系統自動換算未稅（÷1.05，四捨五入到元）。2026 年已存的月份都是未稅。',
     // 手續費（2026-10-01）：自動預設＝實際營收 × 該店費率（淨利表「平台費率」設定 ec_shop_rate，讀不到用預設 好麻吉／玩樂／森之旅 20.5%、維克 17.5%）。
     //   存了值＝手動覆蓋；實際營收空著 → 不補（維持空，純利不變）。舊手填值的整理見 __kpiShopeeFeeMigrate。
     autoFill:{
@@ -10199,10 +10203,56 @@ function _kpiShopeeAutoSame(month,row,cell){
   const am=_kpiMetaAt(month,cell.segs);
   return _kpiIsAutoMeta(am)&&am.val===_kpiFillCur(row,cell).v;
 }
+// 共同費用「照帳單填含稅」（#330，group.commonTaxIn，目前只有蝦皮）：
+//   months.{月}.{key}Common 照舊存【未稅】＝Math.round(含稅÷1.05)（所有讀取端不改）；含稅原數存在這一格的 meta.taxIn
+//   （kpiWriteCell 第三元素）。任何其他寫入（舊版分頁、別的路徑）都會把 meta 整筆換成 {by,at} → taxIn 自動消失。
+//   2026/01～09 已存的值都是未稅、沒有 taxIn ⇒ 一律當舊資料，不會被再除一次 1.05。
+//   ⚠ 只認 group.commonTaxIn：PChome 的 pchomeCommon 走同一段 kind==='common' 程式，行為不變。
+function _kpiCommonTaxGroup(kind,segs){
+  if(kind!=='common'||!Array.isArray(segs)||segs.length!==1)return null;
+  return KPI_GROUPS.find(g=>g.commonTaxIn&&segs[0]===g.key+'Common')||null;
+}
+function _kpiCommonTaxNet(taxIn){return Math.round(taxIn/KPI_SHOPEE_TAX);}
+// 有效的含稅原數：taxIn 是整數、而且 Math.round(taxIn÷1.05)＝目前存的未稅值；否則 null（舊資料，或被其他路徑改過）。
+function _kpiCommonTaxIn(month,row,groupKey){
+  const m=_kpiMetaAt(month,[groupKey+'Common']);
+  const t=m&&m.taxIn;
+  if(!Number.isInteger(t))return null;
+  const net=row&&row[groupKey+'Common'];
+  return (net!=null&&_kpiCommonTaxNet(t)===Number(net))?t:null;
+}
+// 含稅格下方那一行（#330 塊 2）：有效 taxIn ⇒「含稅 X」；舊月份（沒有有效 taxIn）不顯示字，但這一行照樣佔高度
+//   （.km-common-sub 有 min-height），打字預覽出現時共同費用列不會忽高忽低。不是 commonTaxIn 的組（PChome）回 ''。
+//   預覽（.km-taxin-pv）只在這格聚焦時顯示（CSS :focus-within），失焦自動退回「含稅 X」；寫入後整表重畫會重產這一段。
+function _kpiCommonTaxSubHtml(month,row,group){
+  if(!group.commonTaxIn)return '';
+  const t=_kpiCommonTaxIn(month,row,group.key);
+  return `<div class="km-sublabel km-common-sub">${t!=null?`<span class="km-taxin-tag">含稅 ${_kpiNum(t)}</span>`:''}<span class="km-taxin-pv"></span></div>`;
+}
+// 打字時的即時預覽文字。空白，或跟聚焦時的原值（data-raw）／顯示值（data-disp，Enter 沒變時 kpiFillKey 會放回它）相同 ⇒ ''（退回「含稅 X」）；
+//   整數 ⇒「→ 未稅 X」；其他 ⇒「請輸入整數」。解析、換算沿用 _kpiParseNum／_kpiCommonTaxNet（跟存檔同一套）。
+function _kpiTaxPreviewText(v,raw,disp){
+  v=String(v==null?'':v).trim();
+  if(v===''||v===(raw||'')||v===(disp||''))return '';
+  const n=_kpiParseNum(v);
+  return (n!=null&&Number.isInteger(n))?'→ 未稅 '+_kpiNum(_kpiCommonTaxNet(n)):'請輸入整數';
+}
+// inline handler（只掛在含稅格的 oninput／onkeyup；kpiFillFocus 也會叫一次，把上次留下的預覽清掉）。找不到預覽元素就什麼都不做。
+//   onkeyup：Esc 由 kpiFillKey 用程式把值改回原值，不會觸發 input 事件，靠 keyup 重算。
+function kpiFillTaxPreview(inp){
+  const td=inp&&inp.closest&&inp.closest('td');
+  const pv=td&&td.querySelector('.km-taxin-pv');
+  if(!pv)return;
+  pv.textContent=_kpiTaxPreviewText(inp.value,inp.dataset.raw,inp.dataset.disp);
+}
 function _kpiFillInputHtml(month,row,cell,r,c){
   const cur=_kpiFillCur(row,cell);
   const has=cur.v!=null;
-  const raw=cur.formula!=null?String(cur.formula):(has?String(cur.v):'');
+  const tg=_kpiCommonTaxGroup(cell.kind,cell.segs);
+  // 含稅格：輸入框（聚焦時）放含稅原數。🔴 舊月份（只有未稅、沒有有效 taxIn）刻意是【空的】：
+  //   避免使用者把未稅值當含稅改、被除兩次 1.05。這不是 bug，不要改回顯示未稅值。
+  const tIn=tg?_kpiCommonTaxIn(month,row,tg.key):null;
+  const raw=tg?(tIn!=null?String(tIn):''):(cur.formula!=null?String(cur.formula):(has?String(cur.v):''));
   const disp=has?(_kpiCellIsMoney(cell)?_kpiMoney(cur.v):_kpiNum(cur.v)):'';
   // 公式欄（fx）：沒覆蓋＝空框＋灰底＋placeholder 顯示公式值（不標琥珀色虛線）；覆蓋過＝白底粗體＋下方「手動」
   let cls=cell.fx?(has?' km-fx km-fx-over':' km-fx'):(has?'':' km-empty');
@@ -10211,12 +10261,18 @@ function _kpiFillInputHtml(month,row,cell,r,c){
   let ph='',ttl=cur.formula!=null?`公式：${raw}`:'';
   if(cell.fx){const dv=_kpiFxDefault(row,cell.group,cell.shop,cell.segs[2]);ph=_kpiMoney(dv);
     ttl=has?(_kpiShopeeAutoSame(month,row,cell)?'從對帳單帶入（自動）':`手動覆蓋（公式值 ${ph}）。清空後按 Enter 回到公式`):`公式值 ${ph}（直接打數字可以覆蓋）`;}
-  if(cell.kind==='common'&&cell.ph)ph=cell.ph;   // 共同費用列的提示字（目前只有蝦皮：未稅）
+  if(cell.kind==='common'&&cell.ph)ph=cell.ph;   // 共同費用列的提示字（目前只有蝦皮：照帳單填含稅）
+  // 舊月份：聚焦後輸入框是空的 → placeholder 短句提示已存的未稅值（框窄，長句會被截），完整說明放 title。
+  //   共同費用格沒有公式、不是 fx ⇒ 走到這裡 ttl 一定是 ''；保險起見仍用接在後面的寫法，不蓋掉既有 title。
+  if(tg&&has&&tIn==null){
+    ph=`已存未稅 ${_kpiNum(cur.v)}，請填含稅`;
+    ttl=(ttl?ttl+'\n':'')+`這個月已存的是未稅 ${_kpiNum(cur.v)}（舊資料）。要修改請照帳單填含稅金額，系統會自動換算未稅。`;
+  }
   return `<input class="km-in${cls}" type="text" inputmode="decimal" autocomplete="off"
     data-k="${_kpiEscAttr(JSON.stringify(cell.segs))}" data-kind="${cell.kind}" data-r="${r}" data-c="${c}"
     data-raw="${_kpiEscAttr(raw)}" data-disp="${_kpiEscAttr(disp)}" value="${_kpiEscAttr(disp)}"
     ${ph?`placeholder="${_kpiEscAttr(ph)}"`:''} ${ttl?`title="${_kpiEscAttr(ttl)}"`:''}
-    onfocus="kpiFillFocus(this)" onblur="kpiFillBlur(this)" onkeydown="kpiFillKey(event,this)" onpaste="kpiFillPaste(event,this)">${(disp||ph)?`<div class="km-sizer" aria-hidden="true">${_kpiEscAttr(disp||ph)}</div>`:''}`;
+    onfocus="kpiFillFocus(this)" onblur="kpiFillBlur(this)" onkeydown="kpiFillKey(event,this)" onpaste="kpiFillPaste(event,this)"${tg?' oninput="kpiFillTaxPreview(this)" onkeyup="kpiFillTaxPreview(this)"':''}>${(disp||ph)?`<div class="km-sizer" aria-hidden="true">${_kpiEscAttr(disp||ph)}</div>`:''}`;
 }
 function _kpiTsMs(at){
   if(at==null)return null;
@@ -10319,7 +10375,7 @@ function _kpiFillHtml(row){
     const cell={kind:'common',segs:[group.key+'Common'],ph:group.commonCostPlaceholder||''};
     const cv=Number(row[group.key+'Common'])||0;
     commonRow=`<tr class="km-f-common"><td class="km-f-shop" title="${group.commonCostLabel}">共同費用${group.commonCostInfo?_kpiInfoHtml(group.title+' 共同費用',[group.commonCostInfo]):''}<div class="km-sublabel">${group.commonCostShortLabel||''}</div></td><td class="km-f-ro km-f-aov"></td>
-      <td colspan="${cols.length}"><div class="km-common-in">${_kpiFillInputHtml(month,row,cell,group.shops.length,0)}</div></td>
+      <td colspan="${cols.length}"><div class="km-common-in">${_kpiFillInputHtml(month,row,cell,group.shops.length,0)}</div>${_kpiCommonTaxSubHtml(month,row,group)}</td>
       <td class="km-n km-f-ro km-f-ro-first"><div class="km-roval">${cv?'−$'+fmtN(cv):'—'}</div></td><td class="km-f-ro"></td></tr>`;
   }
   // 小計：manual 欄位直接加總（合併欄位只算總額一次、不適用略過）；純利／純利率＝_kpiGroupTotals。
@@ -10398,6 +10454,7 @@ function kpiFillFocus(inp){
   inp.dataset.done='';
   inp.value=inp.dataset.raw||'';
   try{inp.select();}catch{}
+  if(inp.dataset.kind==='common')kpiFillTaxPreview(inp);   // 含稅格：清掉上次聚焦留下的預覽（其他共同費用格找不到預覽元素，不做事）
 }
 // 「1,234」「NT$1,234」「$ 1234」→ 1234；不是純數字回 null（交給公式或報錯）。
 function _kpiParseNum(s){
@@ -10415,6 +10472,9 @@ function _kpiFillCommit(inp,fromBlur){
   const raw=inp.value.trim();
   const orig=inp.dataset.raw||'';
   inp.classList.remove('km-invalid');
+  // 含稅共同費用格（蝦皮）另走一支：⚠ 必須排在 raw===orig 之前——舊月份 orig 是 ''，清空＋Enter 會在那行被當成沒變。
+  const tg=_kpiCommonTaxGroup(inp.dataset.kind,JSON.parse(inp.dataset.k));
+  if(tg)return _kpiFillCommitTaxIn(inp,raw,fromBlur,tg);
   if(raw===orig)return 'same';
   if(raw===''&&fromBlur)return 'same';
   const month=_kpiYM();
@@ -10454,6 +10514,26 @@ function _kpiFillCommit(inp,fromBlur){
     }
   }
   kpiWriteCell(month,pairs);
+  return 'written';
+}
+// 含稅共同費用格的存檔：輸入＝含稅整數 → 存未稅 Math.round(含稅÷1.05)，meta 帶 {taxIn}。回傳值同 _kpiFillCommit。
+//   清空：blur／Tab／方向鍵＝取消；Enter＝刪除（只限輸入框原本有含稅原數的月份）。0 照樣存（未稅 0、taxIn 0）。
+function _kpiFillCommitTaxIn(inp,raw,fromBlur,group){
+  const month=_kpiYM();
+  const segs=[group.key+'Common'];
+  const row=getOrCreateKpiRow(month);
+  if(raw===''){
+    // 🔴 只有「輸入框原本有含稅原數」（data-raw 非空＝這個月有有效 taxIn）＋Enter 才刪除。
+    //   舊月份（或 taxIn 無效）輸入框聚焦時本來就是空的，而 Enter 是常用的「存檔、往下一格」，
+    //   不能當成刪除——這不是 bug，不要改回。舊月份要刪除＝先填一次含稅、再清空按 Enter。
+    if(fromBlur||!(inp.dataset.raw||''))return 'same';
+    kpiWriteCell(month,[[segs,undefined]]);
+    return 'written';
+  }
+  const n=_kpiParseNum(raw);
+  if(n==null||!Number.isInteger(n))return _kpiFillInvalid(inp,'請輸入整數（含稅金額）：'+raw);
+  if(n===_kpiCommonTaxIn(month,row,group.key))return 'same';
+  kpiWriteCell(month,[[segs,_kpiCommonTaxNet(n),{taxIn:n}]]);
   return 'written';
 }
 function kpiFillBlur(inp){
@@ -10523,7 +10603,15 @@ function kpiFillPaste(e,inp){
     if(g.cell.kind==='na'||g.cell.kind==='share'){skipped.push(`${g.label}「${t}」：這格不能填`);return;}
     const n=_kpiParseNum(t);
     if(n==null){skipped.push(`${g.label}「${t}」：不是數字`);return;}
+    // 含稅共同費用格（蝦皮）：貼上的值也當含稅 → 存未稅＋meta.taxIn（同 _kpiFillCommitTaxIn）
+    const tg=_kpiCommonTaxGroup(g.cell.kind,g.cell.segs);
+    if(tg&&!Number.isInteger(n)){skipped.push(`${g.label}「${t}」：請輸入整數（含稅金額）`);return;}
     const key=JSON.stringify(g.cell.segs);if(seen.has(key))return;seen.add(key);
+    if(tg){
+      pairs.push([g.cell.segs,_kpiCommonTaxNet(n),{taxIn:n}]);
+      preview.push(`${g.label} = 含稅 ${n.toLocaleString()} → 未稅 ${_kpiCommonTaxNet(n).toLocaleString()}`);
+      return;
+    }
     pairs.push([g.cell.segs,n]);
     if(g.cell.kind==='cell'&&_kpiFillCur(row,g.cell).formula!=null)pairs.push([[g.cell.segs[0],g.cell.segs[1],g.cell.segs[2]+'Formula'],undefined]);
     preview.push(`${g.label} = ${n.toLocaleString(undefined,{maximumFractionDigits:6})}`);   // 預覽照原值顯示，不四捨五入（1.5 不能顯示成 2）
@@ -25767,7 +25855,7 @@ Object.assign(window, {
   renderTable,resetHiddenCols,resetUploadCards,restoreAnaTag,restoreGrowthTag,saveAnaSettings,
   buildKpiTabHtml,renderKpiTab,getKpiRows,kpiWriteCell,__kpiMigrateToV2,setKpiViewMode,setKpiYear,
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
-  kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillDownloadExcel,
+  kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillTaxPreview,kpiFillDownloadExcel,
   kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
