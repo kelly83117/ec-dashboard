@@ -10472,7 +10472,7 @@ function _kpiFillHtml(row){
   // 蝦皮：六格從淨利表「對帳」分頁存的對帳單資料帶入（app/kpi sources；先預覽、確認才寫）
   if(group.key==='shopee'){
     const h=_kpiShopeeAutoHint(month,row);
-    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}<button id="km-au-btn" class="km-au-btn" onclick="kpiShopeeAutoFill()" title="${_kpiEscAttr(KPI_SHOPEE_AUTO_TITLE)}">從對帳單帶入 ${month.replace('-','/')}</button></span>`;
+    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${RECON_GUIDE_BTN}<button id="km-au-btn" class="km-au-btn" onclick="kpiShopeeAutoFill()" title="${_kpiEscAttr(KPI_SHOPEE_AUTO_TITLE)}">從對帳單帶入 ${month.replace('-','/')}</button></span>`;
   }
   // PChome：訂單數／營收／商品成本／平台費／耗材從月對帳（對帳明細＋對帳單）與商品主檔帶入；未對帳 → 鈕 disabled、標「等對帳」、不做估算
   if(group.key==='pchome'){
@@ -23168,6 +23168,7 @@ function reconShopeeHtml(){
   return '<div class="recon-wrap">'
     +'<div class="recon-hd"><span class="recon-title">蝦皮進帳報表 · 對帳</span>'
     +monthSel
+    +RECON_GUIDE_BTN
     +(has?'<button type="button" class="recon-btn" onclick="clearRecon()">全部清除</button>':'')
     +'<span class="recon-note">四家各自上傳當月「進帳報表」PDF。<b>按各店的「存檔」才會存到雲端</b>，供 KPI 月結表蝦皮帶入使用；存的是 PDF 上的原始含稅數字（照 PDF 正負號）。沒按存檔，重新整理就消失。</span></div>'
     +(periodBad?'<div class="recon-warn">⚠ 四欄的報表期間不一致（'+escapeHtmlLike(keys.join('　/　'))+'），請確認是不是傳到不同月份的檔。</div>':'')
@@ -23464,6 +23465,9 @@ function reconMobicHtml(){
 // 每店一欄、一顆存檔，一次 writePaths 寫兩條：
 //   sources.{YYYY-MM}.shopee.ads.{店}    ＝ {spend, shopAdSpend, noSidSpend, rows, period, exportedAt, file, rebate, by, at}
 //                                           （這次沒上傳廣告報表 CSV ⇒ 這一條【不寫】，雲端舊值原封不動）
+//     例外（2026-10-27）：沒上傳 CSV、但雲端已存過這筆（有 spend）而且回饋金改了 ⇒ 只寫
+//       sources.{YYYY-MM}.shopee.ads.{店}.rebate / .by / .at 三格（_reconAdsCheck 的 rebateOnly），
+//       spend 等其他欄位不碰；回饋金沒改就跟上面一樣不寫 ads。
 //   sources.{YYYY-MM}.shopee.manual.{店} ＝ {noPackPerOrder, returnSubsidy, other, otherNote, by, at}（四個都可為 null）
 // 🔴 金額全是含稅原值、保留 2 位小數，不四捨五入成整數、不除 1.05 —— 換算留給 KPI 帶入那一端。
 // 🔴 空白＝未填，存 null，【不可】存成 0（0 是合法值，兩者要分得開）。
@@ -23562,12 +23566,25 @@ function _reconAdsCheck(c){
     ads={spend:r.spend,shopAdSpend:r.shopAdSpend,noSidSpend:r.noSidSpend,rows:r.rows,
       period:r.period?{from:r.period.from,to:r.period.to}:null,exportedAt:r.exportedAt||null,file:a.name||'',rebate:null};
   }
-  // 回饋金屬於 ads 那一條：沒有 CSV ⇒ 這次不寫 ads，回饋金整個不看（畫面上那格也是 disabled）。
+  // 回饋金屬於 ads 那一條：這次有 CSV ⇒ 跟著整筆 ads 寫。
   if(ads){
     const rb=_reconAdsMoney(v.rebate);
     if(!rb.ok)reasons.push('廣告回饋金要填 0 以上的數字');
     else if(rb.v!=null&&rb.v>ads.spend)reasons.push('廣告回饋金 '+_reconAdsFmt(rb.v)+' 大於廣告花費 '+_reconAdsFmt(ads.spend));
     ads.rebate=rb.ok?rb.v:null;
+  }
+  // 沒有 CSV、但雲端這家這個月已存過廣告報表（spend 是數字）⇒ 回饋金可以單獨改（rebateOnly）。
+  //   回饋金跟雲端那筆一樣 ⇒ 不寫 ads（by/at 不會被無故改成這次存檔的人），只寫 manual，跟改版前相同。
+  let rebateOnly=null;
+  const sv=c&&c.saved;
+  if(!a&&_reconAdsHasSpend(sv)){
+    const rb=_reconAdsMoney(v.rebate);
+    const old=sv.rebate==null?null:sv.rebate;
+    if(!rb.ok)reasons.push('廣告回饋金要填 0 以上的數字');
+    else if(rb.v!==old){
+      if(rb.v!=null&&rb.v>sv.spend)reasons.push('廣告回饋金 '+_reconAdsFmt(rb.v)+' 大於廣告花費 '+_reconAdsFmt(sv.spend));
+      else rebateOnly={rebate:rb.v};
+    }
   }
   const manual={};
   RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{
@@ -23579,8 +23596,12 @@ function _reconAdsCheck(c){
   if(note.length>RECON_ADS_NOTE_MAX)reasons.push('其他備註最多 '+RECON_ADS_NOTE_MAX+' 字（目前 '+note.length+'）');
   manual.otherNote=note===''?null:note;
   if(c&&c.busy)reasons.push('存檔中');
-  return{ok:!reasons.length,reasons,ads,manual};
+  return{ok:!reasons.length,reasons,ads,manual,rebateOnly};
 }
+// 雲端已存的 ads.{店} 有沒有廣告花費（rebateOnly 的前提）
+function _reconAdsHasSpend(x){return !!(x&&typeof x==='object'&&typeof x.spend==='number'&&Number.isFinite(x.spend));}
+// rebateOnly 寫入時不可動到的欄位（寫前讀到的值 vs 寫後讀回的值逐欄比）
+const _RECON_ADS_KEEP=['spend','shopAdSpend','noSidSpend','rows','period','exportedAt','file'];
 const _RECON_ADS_CMP=[
   {k:'spend',l:'廣告花費'},{k:'shopAdSpend',l:'賣場廣告'},{k:'noSidSpend',l:'沒有商品 ID'},{k:'rows',l:'列數'},{k:'rebate',l:'廣告回饋金'},
 ];
@@ -23590,8 +23611,10 @@ function _reconAdsFmt(v){
   return (n<0?'-':'')+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:2});
 }
 // 舊存檔 vs 這次要寫的：只比這次【會寫】的那幾條（ads 為 null 就不比 ads）。→ [{l,a,b}]
-function _reconAdsDiff(oldAds,oldManual,ads,manual){
+//   rebateOnly（沒重傳 CSV、只改回饋金）⇒ ads 只比回饋金那一項。CSV 模式不傳這個參數 ⇒ 輸出跟改版前相同。
+function _reconAdsDiff(oldAds,oldManual,ads,manual,rebateOnly){
   const out=[];
+  if(!ads&&rebateOnly){const a=(oldAds&&oldAds.rebate!=null)?oldAds.rebate:null;if(a!==rebateOnly.rebate)out.push({l:'廣告回饋金',a:_reconAdsFmt(a),b:_reconAdsFmt(rebateOnly.rebate)});}
   if(ads&&oldAds&&typeof oldAds==='object'){
     _RECON_ADS_CMP.forEach(({k,l})=>{const a=oldAds[k]==null?null:oldAds[k];if(a!==ads[k])out.push({l,a:_reconAdsFmt(a),b:_reconAdsFmt(ads[k])});});
     const op=oldAds.period||{},np=ads.period||{};
@@ -23605,9 +23628,20 @@ function _reconAdsDiff(oldAds,oldManual,ads,manual){
   return out;
 }
 // 寫入後讀回比對：回不一致的項目（[]＝一致）。ads 為 null ⇒ 只驗 manual。
-function _reconAdsVerify(gotAds,gotManual,ads,manual,by){
+//   rebateOnly ⇒ 另驗 ads 的回饋金與 by/at，而且 _RECON_ADS_KEEP 七個欄位要跟寫入前讀到的 keep 完全一樣（證明沒被清掉）。
+function _reconAdsVerify(gotAds,gotManual,ads,manual,by,rebateOnly,keep){
   const bad=[];
   const byOk=g=>g&&g.by&&g.by.username===by.username&&g.by.name===by.name;   // at 另外照 _reconAtOk 驗（null 或 Timestamp）
+  if(!ads&&rebateOnly){
+    if(!gotAds||typeof gotAds!=='object')bad.push('廣告（雲端沒有這筆）');
+    else{
+      if((gotAds.rebate==null?null:gotAds.rebate)!==rebateOnly.rebate)bad.push('廣告回饋金');
+      const k0=keep||{};
+      _RECON_ADS_KEEP.forEach(k=>{if(JSON.stringify(gotAds[k]==null?null:gotAds[k])!==JSON.stringify(k0[k]==null?null:k0[k]))bad.push('廣告的 '+k+'（不該變卻變了）');});
+      if(!byOk(gotAds))bad.push('廣告的存檔人');
+      if(!_reconAtOk(gotAds.at))bad.push('廣告的時間');
+    }
+  }
   if(ads){
     if(!gotAds||typeof gotAds!=='object')bad.push('廣告（雲端沒有這筆）');
     else{
@@ -23660,6 +23694,7 @@ function _reconAdsVals(shop){
 }
 function _reconAdsCtx(shop){
   return{shop,a:_reconAds[shop]||null,vals:_reconAdsVals(shop),month:_reconMonth,
+    saved:(_reconMonth&&_kpiV2.cloud)?_reconAdsSavedOf(_kpiV2.cloud,_reconMonth,shop).ads:null,
     readOnly:!!(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()),
     ready:!!(window.__cloudKpi&&typeof window.__cloudKpi.writePaths==='function'&&_kpiReady()),
     busy:!!_reconAdsSaving[shop]};
@@ -23707,7 +23742,13 @@ async function reconAdsSave(shop){
   let old;
   try{old=await readSaved();}
   catch(err){console.error('[對帳·廣告] 讀取雲端現值失敗',err);done('err','❌ 讀不到雲端現值，沒有存檔：'+((err&&(err.code||err.message))||err));return;}
-  const diff=_reconAdsDiff(old.ads,old.manual,chk.ads,chk.manual);
+  // rebateOnly：寫前用剛讀到的雲端現值再把關一次（別人可能剛重傳 CSV 改了花費、或這筆被清掉）。
+  const ro=chk.rebateOnly;
+  if(ro){
+    if(!_reconAdsHasSpend(old.ads)){done('err','❌ 雲端已經沒有這家這個月的廣告報表，沒有存檔；請重新整理後再試');return;}
+    if(ro.rebate!=null&&ro.rebate>old.ads.spend){done('err','❌ 廣告回饋金 '+_reconAdsFmt(ro.rebate)+' 大於雲端目前的廣告花費 '+_reconAdsFmt(old.ads.spend)+'，沒有存檔');return;}
+  }
+  const diff=_reconAdsDiff(old.ads,old.manual,chk.ads,chk.manual,ro);
   if(diff.length){
     const w=x=>x&&x.by&&(x.by.name||x.by.username);
     const who=[old.ads&&chk.ads?'廣告：'+(w(old.ads)||'?')+(_reconFmtAt(old.ads.at)?' · '+_reconFmtAt(old.ads.at):''):'',
@@ -23719,16 +23760,32 @@ async function reconAdsSave(shop){
   const base=['sources',month,'shopee'];
   const pairs=[];
   if(chk.ads)pairs.push([base.concat('ads',shop),Object.assign({},chk.ads,{by,at:ck.TS})]);
+  // 🔴 rebateOnly 只寫 ads.{店} 底下的 rebate / by / at 三格：寫整個 ads.{店} 會把 spend 等欄位整筆換掉。
+  else if(ro){
+    pairs.push([base.concat('ads',shop,'rebate'),ro.rebate]);
+    pairs.push([base.concat('ads',shop,'by'),by]);
+    pairs.push([base.concat('ads',shop,'at'),ck.TS]);
+  }
   pairs.push([base.concat('manual',shop),Object.assign({},chk.manual,{by,at:ck.TS})]);
   try{await ck.writePaths(pairs);}
   catch(err){console.error('[對帳·廣告] 寫入 app/kpi 失敗',err);done('err','❌ 沒有寫進雲端：'+((err&&(err.code||err.message))||err));return;}
   // 🔴 被擋下時 writePaths 不會丟錯，只有讀回看得出來 —— 不一致一律當失敗。
   let bad;
-  try{const g=await readSaved();bad=_reconAdsVerify(g.ads,g.manual,chk.ads,chk.manual,by);}
+  try{const g=await readSaved();bad=_reconAdsVerify(g.ads,g.manual,chk.ads,chk.manual,by,ro,old.ads);}
   catch(err){console.error('[對帳·廣告] 讀回驗證失敗',err);done('err','⚠ 已送出但讀不回雲端確認，請重新整理後看「已存」狀態');return;}
   if(bad.length){console.warn('[對帳·廣告] 讀回不一致',shop,month,bad);done('err','❌ 沒有寫進雲端（讀回不一致：'+bad.join('、')+'）');return;}
   delete _reconAdsForm[shop];   // 存好了 ⇒ 輸入框改回跟著雲端已存的值走
+  if(ro){
+    const kpiNote=_reconAdsKpiImported(month,shop)?'回饋金已更新；KPI 要重新按『從對帳單帶入』才會套用':'';
+    done('ok','✓ 已存進雲端（回饋金＋手填）'+(kpiNote?'。'+kpiNote:''));
+    if(kpiNote&&typeof showToast==='function')showToast(kpiNote,'',6000);
+    return;
+  }
   done('ok','✓ 已存進雲端'+(chk.ads?'（廣告＋手填）':'（手填）'));
+}
+// 這一家這個月 KPI 已經「從對帳單帶入」過嗎（六格任一格的 meta 是自動）。判斷同 _kpiShopeeAutoHint。
+function _reconAdsKpiImported(month,shop){
+  try{return KPI_SHOPEE_AUTO_FIELDS.some(f=>_kpiIsAutoMeta(_kpiMetaAt(month,['shopee',shop,f])));}catch{return false;}
 }
 // 一店的「存檔」那一格：已存狀態 + 鈕 + 不能存的原因 + 上次結果。reconAdsInput 會單獨重畫這一格。
 function _reconAdsActHtml(shop){
@@ -23782,10 +23839,13 @@ function reconAdsHtml(){
   // 手填
   const inp=(s,i,k,type)=>{
     const vals=_reconAdsVals(s);
-    const dis=(k==='rebate'&&!(_reconAds[s]&&_reconAds[s].ok));
+    // 回饋金：這次有 CSV（解析 OK）或雲端已存過廣告報表（有 spend）就能改；兩者都沒有 ⇒ 鎖住。
+    const a=_reconAds[s],hasSaved=_reconAdsHasSpend(sv[s].ads);
+    const dis=(k==='rebate'&&!(a&&a.ok)&&!(!a&&hasSaved));
+    const disTip=(!a&&!hasSaved)?'這個月這家還沒有廣告報表；沒投廣告就不用填回饋金':'要先上傳這個月的廣告報表 CSV 才能改';
     return '<input id="recon-ads-'+i+'-'+k+'" class="recon-ads-inp'+(type==='text'?' recon-ads-note':'')+'"'
       +(type==='text'?' type="text" maxlength="'+RECON_ADS_NOTE_MAX+'"':' type="text" inputmode="decimal"')
-      +' value="'+escapeHtmlLike(vals[k])+'"'+(dis?' disabled title="要先上傳這個月的廣告報表 CSV 才能改"':'')
+      +' value="'+escapeHtmlLike(vals[k])+'"'+(dis?' disabled title="'+escapeHtmlLike(disTip)+'"':'')
       +' oninput="reconAdsInput(\''+s+'\',\''+k+'\',this.value)">';
   };
   h+=row('廣告回饋金（含稅）',(s,i)=>inp(s,i,'rebate'));
@@ -23795,7 +23855,7 @@ function reconAdsHtml(){
     +RECON_SHOPS.map((s,i)=>'<td class="recon-save-cell" id="recon-ads-act-'+i+'">'+_reconAdsActHtml(s)+'</td>').join('')+'</tr>';
   return '<div class="recon-wrap recon-ads">'
     +'<div class="recon-hd"><span class="recon-title">廣告與各項費用（每店）</span>'
-    +'<span class="recon-note">廣告報表請上傳蝦皮廣告「所有CPC成效報告」的<b>總體</b>數據（整月）。金額一律含稅、空白＝未填。<b>按各店「存檔」才會存到雲端</b>，供 KPI 月結表蝦皮帶入使用。回饋金要有廣告報表才能存；手填項沒有 CSV 也能存。</span></div>'
+    +'<span class="recon-note">廣告報表請上傳蝦皮廣告「所有CPC成效報告」的<b>總體</b>數據（整月）。金額一律含稅、空白＝未填。<b>按各店「存檔」才會存到雲端</b>，供 KPI 月結表蝦皮帶入使用。回饋金要有廣告報表（這次上傳，或雲端已存過）才能存；已存過的月份改回饋金不用重傳 CSV。手填項沒有 CSV 也能存。</span></div>'
     +'<div class="recon-ads-hint">包裝費（一般 $2.5／無包裝 $2）、折扣、聯盟行銷由系統自動帶入，不用填</div>'
     +'<div class="recon-scroll"><table class="recon-tbl recon-ads-tbl"><thead><tr><th class="recon-rowhead">欄位</th>'
     +RECON_SHOPS.map(s=>'<th>'+escapeHtmlLike(s)+'</th>').join('')+'</tr></thead><tbody>'+h+'</tbody></table></div>'
@@ -23850,6 +23910,49 @@ Object.assign(window,{reconSaveShop});
 Object.assign(window,{reconMobicPick,clearReconMobic,reconMobicSave});
 // 廣告與各項費用區塊的 inline handler（選檔 onchange / 清除 / 輸入框 oninput / 存檔）。
 Object.assign(window,{reconAdsPick,clearReconAds,reconAdsInput,reconAdsSave});
+// ═══ 蝦皮對帳 · 每月操作說明（2026-10-27）═══
+//   對帳分頁第一個標題列、KPI 填寫模式「蝦皮」組標題各一顆，開同一份（App.openModal，hideFooter，只有 ✕ 和底部「關閉」）。
+//   文字是使用者提供的定稿，改內容要先問；結構：p＝段落、h＝小標、ol＝編號清單（項目可用 \n 分行）、warn＝⚠ 提醒。
+//   🔴 「已存過的月份要改回饋金…」那句依附在回饋金可事後修改（_reconAdsCheck 的 rebateOnly）；那個功能拿掉時這句要一起拿掉。
+const RECON_GUIDE=[
+  {p:'每月 5 號以後再做（莫筆克會因為退貨、取消回頭改數字，太早下載會不準）。'},
+  {h:'一、先準備 9 個檔（都是整月）',ol:[
+    '蝦皮進帳報表 PDF × 4（好麻吉、玩樂、維克、森之旅）',
+    '莫筆克「銷售金額明細」xlsx × 1（全通路，系統只讀「建立」分頁的已出貨）',
+    '蝦皮廣告「所有CPC成效報告」總體 CSV × 4（不要用關鍵字層級的報表）；該月沒投廣告的通路不用傳。',
+  ]},
+  {h:'二、淨利表 → 蝦皮 → 「對帳」',ol:[
+    '上方月份選要做的月份。',
+    '上傳四家進帳 PDF，確認「小計 − 子項加總」是 ✓0，四家各按「存檔」，看到「✓ 已存進雲端」。',
+    '上傳莫筆克 xlsx，按「存檔（四店一起）」。',
+    '廣告區：上傳四家廣告 CSV，再填手填項目（都填「含稅原數」，不用自己除 1.05）：廣告回饋金、無包裝 $1／筆 金額、退貨運費補助（填正數，系統會扣掉）、其他金額＋備註（沒有就空白）。四家各按「存檔」。沒投廣告的通路只填手填項目也可以存。\n已存過的月份要改回饋金，直接改數字再按該店『存檔』即可，不用重傳 CSV；改完記得到 KPI 重新帶入。',
+  ]},
+  {h:'三、KPI → 選月份 → 填寫模式 → 蝦皮',ol:[
+    '按右上「從對帳單帶入 YYYY/MM」。',
+    '檢查視窗裡的數字；跟目前值差超過 10% 的格子預設不勾，確認來源沒問題再勾。',
+    '按「確認寫入」。',
+    '共同費用（物流運費）：照帳單填「含稅」金額，系統會自動換算成未稅，不用自己除 1.05。框下會顯示換算後的金額，存好後會標「含稅 X」。',
+  ]},
+  {warn:'⚠ 營收照撥款日、成本照下單日，所以月與月之間會有起伏（例如過年撥款延後）。'},
+  {warn:'⚠ 每格滑鼠移上去可以看到算式。'},
+];
+const RECON_GUIDE_BTN='<button type="button" class="recon-btn recon-guide-btn" onclick="openReconGuide()">📖 每月操作說明</button>';
+function _reconGuideHtml(){
+  const e=t=>escapeHtmlLike(t);
+  return '<div class="recon-guide">'+RECON_GUIDE.map(b=>{
+    if(b.p)return '<p class="recon-guide-p">'+e(b.p)+'</p>';
+    if(b.warn)return '<p class="recon-guide-warn">'+e(b.warn)+'</p>';
+    return '<h4 class="recon-guide-h">'+e(b.h)+'</h4><ol class="recon-guide-ol">'
+      +b.ol.map(x=>'<li>'+x.split('\n').map(e).join('<br>')+'</li>').join('')+'</ol>';
+  }).join('')
+    +'<div class="recon-guide-ftr"><button type="button" class="recon-btn recon-guide-close" onclick="App.closeModal()">關閉</button></div>'
+    +'</div>';
+}
+function openReconGuide(){
+  if(!(window.App&&typeof App.openModal==='function'))return;
+  App.openModal({title:'📖 蝦皮對帳 · 每月操作說明',width:'640px',hideFooter:true,bodyHtml:_reconGuideHtml()});
+}
+Object.assign(window,{openReconGuide});
 // 對帳分頁的切換。骨架比照 setCoupangShop，但【補上它缺的三件事】：
 //   ① 失效分頁防護（setShop 有、setMomoShop/setCoupangShop 都沒有）：
 //      2026-08-28 實測 setMomoShop('不存在的店') → .shop-content.active 與 .stab.active
