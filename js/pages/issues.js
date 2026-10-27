@@ -14,6 +14,7 @@
  *   用量 / 孤兒：Console 打 __issueImageAudit()（只報告）、__issueImageCleanup('確定刪除')。
  * 第 4 塊：後續處理紀錄，存 issue_notes（window.__cloudIssueNotes），一則一份 doc；紀錄照片也存 issue_images（多帶 noteId）。
  *   卡片上同時只展開一個紀錄輸入框（_issComposer），全頁最多一個 paste 監聽；草稿存在記憶體，整頁重畫不會掉。
+ * 第 5 塊：匯入舊需求表 CSV，Console 打 __issuesImportLegacy()（只限管理員）；資料不進程式碼，source:'legacy-sheet' 的卡片標「舊需求表匯入」。
  * 本機模擬：Console 打 __issuesMock(true)，只在 localhost 生效、資料只在記憶體（見檔尾）。
  */
 const App = window.App;
@@ -88,6 +89,13 @@ function _issName(username, resolve) {
   if (!raw) return '—';
   const id = resolve ? resolve(raw) : null;
   return (id && id.ok) ? id.display : raw;
+}
+// 舊需求表匯入的問題（source==='legacy-sheet'）：帳號對不到時 username 是 null，改顯示試算表原字（legacyRequester / legacyHandler）。
+//   有對到帳號 → 照常顯示姓名；對不到但有原字 → 「原字（舊需求表）」；原字也空白 → 「舊需求表未填」。不是舊資料就跟 _issName 一樣。
+function _issPersonLabel(it, username, legacyRaw, resolve) {
+  if (String(username == null ? '' : username).trim() || !it || it.source !== 'legacy-sheet') return _issName(username, resolve);
+  const raw = String(legacyRaw == null ? '' : legacyRaw).trim();
+  return raw ? raw + '（舊需求表）' : '舊需求表未填';
 }
 // 負責人顯示：同 _issName，帳號停用 / 刪除時加註
 function _issAssigneeName(username, resolve) {
@@ -650,7 +658,7 @@ function _issCardHtml(it, resolve) {
   const isAdmin = _issIsAdmin(), ro = _issIsRO();
   const resolvedLine = (label, extraCls) => `
       <div class="iss-resolution${extraCls}">
-        <div class="iss-resolution-label">${escapeHtml(label)}・${escapeHtml(_issName(it.resolvedBy, resolve))}・${escapeHtml(_issFmt(it.resolvedAt))}</div>
+        <div class="iss-resolution-label">${escapeHtml(label)}・${escapeHtml(_issPersonLabel(it, it.resolvedBy, it.legacyHandler, resolve))}・${escapeHtml(_issFmt(it.resolvedAt))}</div>
         <div class="iss-resolution-text">${escapeHtml(it.resolution)}</div>
       </div>`;
   let resolution = '';
@@ -660,7 +668,8 @@ function _issCardHtml(it, resolve) {
   const hasAsg = _issHasAssignee(it);
   const assignee = hasAsg
     ? `<div class="iss-assignee">負責人：${escapeHtml(_issAssigneeName(it.assignee, resolve))}</div>`
-    : (st !== 'done' ? `<div class="iss-assignee"><span class="iss-tag iss-unassigned">未指派</span></div>` : `<div class="iss-assignee">負責人：—</div>`);
+    : (st !== 'done' ? `<div class="iss-assignee"><span class="iss-tag iss-unassigned">未指派</span></div>`
+      : `<div class="iss-assignee">負責人：${escapeHtml(it.source === 'legacy-sheet' && String(it.legacyHandler || '').trim() ? _issPersonLabel(it, null, it.legacyHandler, resolve) : '—')}</div>`);
   const acts = [];
   if (isAdmin && !hasAsg && st !== 'done') acts.push(_issBtn('claim', it.id, '我來處理', 'btn-ghost iss-btn iss-btn-claim'));
   if (isAdmin) acts.push(_issBtn('assign', it.id, hasAsg ? '改負責人' : '指派', 'btn-ghost iss-btn'));
@@ -676,11 +685,12 @@ function _issCardHtml(it, resolve) {
         <span class="iss-tag iss-st-${st}">${escapeHtml(ISS_STATUS_LABEL[st])}</span>
         <span class="iss-tag iss-pr-${pr}">${escapeHtml(_issPrLabel(pr))}</span>
         <span class="iss-tag iss-area">${escapeHtml(_issAreaLabel(it.area))}</span>
+        ${it.source === 'legacy-sheet' ? '<span class="iss-tag iss-legacy">舊需求表匯入</span>' : ''}
       </div>
       <div class="iss-title">${escapeHtml(it.title)}</div>
       ${String(it.desc || '').trim() ? `<div class="iss-desc">${escapeHtml(it.desc)}</div>` : ''}
       ${_issPhotosHtml(it)}
-      <div class="iss-meta">提出：${escapeHtml(_issName(it.createdBy, resolve))}・${escapeHtml(_issFmt(it.createdAt))}<span class="iss-updated">・最後更新：${escapeHtml(_issFmt(it.updatedAt || it.createdAt))}</span></div>
+      <div class="iss-meta">提出：${escapeHtml(_issPersonLabel(it, it.createdBy, it.legacyRequester, resolve))}・${escapeHtml(_issFmt(it.createdAt))}<span class="iss-updated">・最後更新：${escapeHtml(_issFmt(it.updatedAt || it.createdAt))}</span></div>
       ${assignee}
       ${resolution}
       ${acts.length ? `<div class="iss-actions">${acts.join('')}</div>` : ''}
@@ -1305,6 +1315,238 @@ function _issOnChange(e) {
   _issArea = (v === '' || ISS_AREAS.some(a => a.key === v)) ? v : '';
   App.render();
 }
+
+/* ---------- 第 5 塊：匯入舊 Google 試算表「辦公室儀表板調整需求表」（只給管理員，Console 打 __issuesImportLegacy()） ----------
+ * 資料不進程式碼：使用者自己從試算表「檔案 → 下載 → CSV」存檔，在彈窗裡選檔 → 解析 → 預覽 → 按「寫入 N 筆」才寫。
+ * 每列一份 issues doc，id 固定 'iss-legacy-r' + 試算表列號（可重跑；已存在的一律略過、不覆蓋）。
+ * 試算表列號＝CSV 記錄序號（欄位內換行不算新列）。表頭不一定在第 1 列（實際下載的檔前面有說明文字列，
+ *   而且說明文字裡就含「完成日期」），所以在前 10 列找「8 個關鍵字都各自命中不同欄」的那一列。
+ * 下面三個 _issLegacy* 是純函式（不碰 DOM、不碰雲端），工具與測試共用。 */
+const ISS_LEGACY_KEYS = Object.freeze(['提出日期', '需求人員', '調整區塊', '調整內容', '處理人員', '完成日期', '調整前備註', '調整完成備註']);
+const ISS_LEGACY_HEADER_SCAN = 10;
+const ISS_LEGACY_YEAR = 2026;
+const ISS_LEGACY_NO_RESOLUTION = '已完成（舊需求表無完成備註）';
+
+// RFC 4180：雙引號包住的欄位可含逗號、換行，"" 代表一個 "；CRLF / LF / 單獨 CR 都當換行；去 BOM。
+//   回 { ok:true, rows:[{ row: 試算表列號（從 1）, cells }] } 或 { ok:false, error }
+function _issLegacyParseCsv(text) {
+  let s = String(text == null ? '' : text);
+  if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1);
+  const rows = [];
+  let row = [], cell = '', q = false;
+  const endRow = () => { row.push(cell); rows.push(row); row = []; cell = ''; };
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (q) {
+      if (ch === '"') { if (s[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\r') { if (s[i + 1] === '\n') i++; endRow(); }
+    else if (ch === '\n') endRow();
+    else cell += ch;
+  }
+  if (q) return { ok: false, error: 'CSV 格式錯誤：有引號沒有閉合（檔案可能不完整）' };
+  if (cell !== '' || row.length) endRow();
+  return { ok: true, rows: rows.map((cells, i) => ({ row: i + 1, cells })) };
+}
+// 在前 10 列找表頭：8 個關鍵字依序各找一個「包含關鍵字、還沒被用過」的欄。
+//   回 { ok:true, headerRow, col:{ 關鍵字: 欄位索引 } } 或 { ok:false, missing:[最接近的那列缺的關鍵字] }
+function _issLegacyFindHeader(rows) {
+  let best = null;
+  for (const r of (rows || []).slice(0, ISS_LEGACY_HEADER_SCAN)) {
+    const used = new Set(), col = {}, missing = [];
+    for (const k of ISS_LEGACY_KEYS) {
+      const j = r.cells.findIndex((c, x) => !used.has(x) && String(c).includes(k));
+      if (j < 0) missing.push(k); else { used.add(j); col[k] = j; }
+    }
+    if (!missing.length) return { ok: true, headerRow: r.row, col };
+    if (!best || missing.length < best.missing.length) best = { missing };
+  }
+  return { ok: false, missing: best ? best.missing : ISS_LEGACY_KEYS.slice() };
+}
+const _issLegacyNames = s => String(s == null ? '' : s).split(/[,，、/／;；\s]+/).map(x => x.trim()).filter(Boolean);
+// 「M/D」（或「YYYY/M/D」）→ 台灣時間當天 12:00 的毫秒數（台灣 UTC+8 → UTC 04:00）；空白回 null；看不懂回 NaN
+function _issLegacyDate(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return null;
+  const m = /^(?:(\d{4})\/)?(\d{1,2})\/(\d{1,2})$/.exec(s);
+  if (!m) return NaN;
+  const y = m[1] ? +m[1] : ISS_LEGACY_YEAR, mo = +m[2], d = +m[3];
+  const t = Date.UTC(y, mo - 1, d, 4, 0, 0);
+  const chk = new Date(t);
+  return (chk.getUTCFullYear() === y && chk.getUTCMonth() === mo - 1 && chk.getUTCDate() === d) ? t : NaN;
+}
+function _issLegacyArea(s) {
+  const v = String(s == null ? '' : s);
+  if (v.includes('首頁')) return 'dashboard';
+  if (v.includes('淨利表')) return 'profit';
+  if (v.includes('洞察表')) return 'insight';
+  if (v.includes('工作日誌')) return 'daily';
+  if (v.toUpperCase().includes('KPI')) return 'kpi';
+  return 'other';
+}
+// 逐列套對應規則。users＝完整帳號清單（給 makeUserIdentityResolver：trim、不分大小寫，比 username 再比姓名，同名不猜）。
+//   回 { items:[issues doc], skipped:[{ row, reason }], unmatched:{ 原字: 次數 }, warnings:[文字], preview:[{ row, date, who, whoOk, area, title, status, resolution }] }
+function _issLegacyMap(rows, header, users, now) {
+  const mk = window.makeUserIdentityResolver;
+  const resolve = typeof mk === 'function' ? mk(Array.isArray(users) ? users : []) : null;
+  const match = raw => { if (!raw || !resolve) return null; const id = resolve(raw); return (id && id.ok) ? id.username : null; };
+  const out = { items: [], skipped: [], unmatched: {}, warnings: [], preview: [] };
+  const miss = name => { out.unmatched[name] = (out.unmatched[name] || 0) + 1; };
+  const t0 = Number(now) || Date.now();
+  for (const r of rows) {
+    if (r.row <= header.headerRow) continue;
+    const get = k => String(r.cells[header.col[k]] == null ? '' : r.cells[header.col[k]]).replace(/\r\n?/g, '\n');
+    const whoRaw = get('需求人員').trim(), content = get('調整內容').trim();
+    if (r.cells.every(c => !String(c).trim())) { out.skipped.push({ row: r.row, reason: '整列空白' }); continue; }
+    if (/^e\.g\./i.test(whoRaw)) { out.skipped.push({ row: r.row, reason: '範例列（需求人員以 e.g. 開頭）' }); continue; }
+    if (!content) { out.skipped.push({ row: r.row, reason: '調整內容空白' }); continue; }
+    const requesters = _issLegacyNames(whoRaw), handlerRaw = get('處理人員').trim(), handlers = _issLegacyNames(handlerRaw);
+    const createdBy = match(requesters[0]), assignee = match(handlers[0]);
+    if (requesters[0] && !createdBy) miss(requesters[0]);
+    if (handlers[0] && !assignee) miss(handlers[0]);
+    const line1 = content.split('\n')[0].trim(), chars = Array.from(line1);
+    const title = chars.length > 40 ? chars.slice(0, 40).join('') + '…' : line1;
+    const before = get('調整前備註').trim();
+    const desc = (requesters.length > 1 ? '需求人員：' + requesters.join('、') + '\n\n' : '') + content
+      + (before ? '\n\n【調整前備註】\n' + before : '');
+    const tCreate = _issLegacyDate(get('提出日期')), tDone = _issLegacyDate(get('完成日期'));
+    if (Number.isNaN(tCreate)) out.warnings.push('第 ' + r.row + ' 列提出日期看不懂，改用完成日期或匯入時間');
+    if (Number.isNaN(tDone)) out.warnings.push('第 ' + r.row + ' 列完成日期看不懂，當成未完成');
+    const done = Number.isFinite(tDone);
+    const createdAt = Number.isFinite(tCreate) ? tCreate : (done ? tDone : t0);
+    const resolution = done ? (get('調整完成備註').trim() || ISS_LEGACY_NO_RESOLUTION) : '';
+    const doc = {
+      id: 'iss-legacy-r' + r.row, title, area: _issLegacyArea(get('調整區塊')),
+      priority: (get('調整區塊') + '\n' + content).includes('優先') ? 'urgent' : 'normal',
+      desc, status: done ? 'done' : 'open', resolution,
+      createdAt, createdBy, updatedAt: done ? tDone : createdAt, updatedBy: createdBy,
+      resolvedAt: done ? tDone : null, resolvedBy: done ? assignee : '',
+      assignee, images: [], thumbs: {}, deleted: false,
+      source: 'legacy-sheet', legacyRow: r.row, legacyRequester: whoRaw, legacyHandler: handlerRaw,
+    };
+    out.items.push(doc);
+    out.preview.push({
+      row: r.row, date: get('提出日期').trim() || get('完成日期').trim(), who: whoRaw, whoOk: !!createdBy,   // 空白也算對不到（卡片會顯示「舊需求表未填」）
+      area: _issAreaLabel(doc.area), title, status: ISS_STATUS_LABEL[doc.status], resolution: Array.from(resolution).slice(0, 20).join(''),
+    });
+  }
+  return out;
+}
+
+// 匯入彈窗的畫面（狀態 st 由 _issOpenLegacyImport 管；每次狀態變了整塊重畫）
+function _issLegacyPreviewHtml(st) {
+  if (st.error) return `<div class="iss-form-err">${escapeHtml(st.error)}</div>`;
+  if (!st.plan) return '';
+  const p = st.plan, res = st.results || {};
+  const toWrite = p.items.filter(d => !st.exists.has(d.id)).length;
+  const unm = Object.entries(p.unmatched).sort((a, b) => b[1] - a[1]);
+  const head = `
+      <div class="iss-imp-summary">讀到 ${escapeHtml(String(p.items.length + p.skipped.length))} 列資料：要寫入 <b>${escapeHtml(String(toWrite))}</b> 筆、已存在略過 ${escapeHtml(String(p.items.length - toWrite))} 筆、跳過 ${escapeHtml(String(p.skipped.length))} 列（表頭在第 ${escapeHtml(String(st.headerRow))} 列）</div>
+      ${unm.length ? `<div class="iss-imp-warn">對不到帳號（提出人 / 負責人會存成空白，畫面顯示原字）：${unm.map(([n, c]) => escapeHtml(n) + ' ×' + escapeHtml(String(c))).join('、')}</div>` : ''}
+      ${p.skipped.length ? `<div class="iss-imp-skip">跳過：${p.skipped.map(s => '第 ' + escapeHtml(String(s.row)) + ' 列（' + escapeHtml(s.reason) + '）').join('、')}</div>` : ''}
+      ${p.warnings.length ? `<div class="iss-imp-warn">${p.warnings.map(w => escapeHtml(w)).join('<br>')}</div>` : ''}
+      ${st.summary ? `<div class="iss-imp-summary iss-imp-done">${escapeHtml(st.summary)}</div>` : ''}`;
+  const rows = p.preview.map((v, i) => {
+    const id = p.items[i].id;
+    const r = res[id] || (st.exists.has(id) ? { cls: 'skip', text: '已存在，略過' } : { cls: '', text: '' });
+    return `<tr${r.cls ? ` class="iss-imp-r-${r.cls}"` : ''}>
+          <td>${escapeHtml(String(v.row))}</td><td>${escapeHtml(v.date)}</td>
+          <td${v.whoOk ? '' : ' class="iss-imp-bad"'}>${escapeHtml(v.who || '（空白）')}</td>
+          <td>${escapeHtml(v.area)}</td><td>${escapeHtml(v.title)}</td><td>${escapeHtml(v.status)}</td>
+          <td>${escapeHtml(v.resolution)}</td><td class="iss-imp-result">${escapeHtml(r.text)}</td></tr>`;
+  }).join('');
+  return head + `
+      <div class="iss-imp-scroll"><table class="iss-imp-table">
+        <thead><tr><th>列號</th><th>日期</th><th>提出人</th><th>區塊</th><th>標題</th><th>狀態</th><th>完成說明</th><th>結果</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+}
+
+Object.assign(App, {
+  _issOpenLegacyImport() {
+    const st = { phase: 'pick', plan: null, error: '', exists: new Set(), results: {}, summary: '', headerRow: 0 };
+    const draw = () => {
+      const out = document.getElementById('iss-imp-out');
+      if (out) out.innerHTML = _issLegacyPreviewHtml(st);
+      const b = document.getElementById('modal-save');
+      if (!b) return;
+      if (st.phase === 'done') { b.textContent = '關閉'; b.disabled = false; return; }
+      const n = st.plan ? st.plan.items.filter(d => !st.exists.has(d.id)).length : 0;
+      b.textContent = '寫入 ' + n + ' 筆';
+      b.disabled = st.phase !== 'ready' || n === 0;
+    };
+    const load = (text) => {
+      st.error = ''; st.plan = null; st.results = {}; st.summary = '';
+      const parsed = _issLegacyParseCsv(text);
+      if (!parsed.ok) { st.error = parsed.error; st.phase = 'pick'; draw(); return; }
+      const header = _issLegacyFindHeader(parsed.rows);
+      if (!header.ok) { st.error = '找不到表頭：前 ' + ISS_LEGACY_HEADER_SCAN + ' 列都沒有同時包含這些欄位 → 缺「' + header.missing.join('」「') + '」'; st.phase = 'pick'; draw(); return; }
+      st.headerRow = header.headerRow;
+      st.plan = _issLegacyMap(parsed.rows, header, Store.get(Store.KEYS.users, []), Date.now());
+      st.exists = new Set(_issList.map(x => x.id));   // 含軟刪除的：刪過的舊資料也不會被重新匯入
+      st.phase = 'ready';
+      draw();
+    };
+    this.openModal({
+      title: '匯入舊需求表（CSV）',
+      width: 'min(1100px, 94vw)',
+      saveLabel: '寫入 0 筆',
+      bodyHtml: `
+      <p class="iss-modal-note">選從 Google 試算表「檔案 → 下載 → 逗號分隔值（.csv）」存下來的檔案。只會新增，已存在的問題一律略過、不覆蓋。</p>
+      <div class="field"><input type="file" id="iss-imp-file" class="iss-imp-file" accept=".csv,text/csv"></div>
+      <div id="iss-imp-out" class="iss-imp-out"></div>`,
+      onMount: () => {
+        const inp = document.getElementById('iss-imp-file');
+        if (inp) inp.addEventListener('change', () => {
+          const f = inp.files && inp.files[0];
+          if (!f || st.phase === 'writing' || st.phase === 'done') return;
+          const r = new FileReader();
+          r.onload = () => load(String(r.result || ''));
+          r.onerror = () => { st.error = '讀檔失敗'; draw(); };
+          r.readAsText(f, 'utf-8');
+        });
+        draw();
+      },
+      onSave: () => {
+        if (st.phase === 'done') return true;   // 寫完後按「關閉」
+        if (st.phase !== 'ready' || !st.plan) return false;
+        if (!_issIsAdmin()) { st.error = '只有管理員可以匯入'; draw(); return false; }
+        const be = _issBackend();
+        if (!be || typeof be.create !== 'function') { st.error = '雲端尚未就緒，請稍後再試'; draw(); return false; }
+        st.phase = 'writing'; draw();
+        (async () => {
+          const n = { ok: 0, blocked: 0, fail: 0, skip: 0 };
+          for (const d of st.plan.items) {
+            // 寫入當下再查一次：中途雲端推播可能已經帶進同一筆
+            if (st.exists.has(d.id) || _issList.some(x => x.id === d.id)) { st.results[d.id] = { cls: 'skip', text: '已存在，略過' }; n.skip++; draw(); continue; }
+            try {
+              const r = await be.create(d.id, d);
+              if (r && r.ok) { st.results[d.id] = { cls: 'ok', text: '成功' }; n.ok++; }
+              else { st.results[d.id] = { cls: 'fail', text: '未寫入雲端' }; n.blocked++; }
+            } catch (e) {
+              st.results[d.id] = { cls: 'fail', text: '失敗：' + ((e && e.message) || e) }; n.fail++;
+            }
+            draw();
+          }
+          st.summary = '完成：成功 ' + n.ok + ' 筆、未寫入雲端 ' + n.blocked + ' 筆、失敗 ' + n.fail + ' 筆、已存在略過 ' + n.skip + ' 筆、跳過 ' + st.plan.skipped.length + ' 列';
+          st.phase = 'done';
+          draw();
+          if (this.route === 'issues') this.render();
+        })();
+        return false;
+      },
+    });
+  },
+});
+window.__issuesImportLegacy = function () {
+  const me = App.currentUser;
+  if (!me || me.role !== 'admin') { console.warn('[issues] 只有管理員可以匯入舊需求表'); return false; }
+  if (!_issLoaded) { console.warn('[issues] 問題清單還沒載入（先進一次「問題追蹤」頁），為了判斷哪些已經匯入過，這次不執行'); return false; }
+  App._issOpenLegacyImport();
+  return true;
+};
 
 /* ---------- 問題照片的用量 / 孤兒稽核（只給 Console 用，比照 daily.js 的 __taskImageAudit） ----------
  * 為什麼不併進 __taskImageAudit：那組寫死 task_images 與 ec.bossTasks，要算進來就得改老闆任務的稽核；分開算也看得出各自用量。

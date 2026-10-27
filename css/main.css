@@ -2473,3 +2473,19 @@
 .iss-composer-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .iss-note-add { width: auto; }
 .iss-note-add[disabled] { opacity: .5; cursor: not-allowed; }
+/* 第 5 塊：舊需求表匯入（卡片小標、匯入彈窗的預覽） */
+.iss-legacy { background: var(--surface); color: var(--text-muted); border-color: var(--border); font-weight: 500; }
+.iss-imp-out { display: flex; flex-direction: column; gap: 8px; }
+.iss-imp-summary { font-size: 13px; color: var(--text); }
+.iss-imp-done { padding: 8px 10px; border-radius: var(--radius-sm); background: var(--success-soft); color: var(--success); font-weight: 600; }
+.iss-imp-warn, .iss-imp-skip { padding: 6px 10px; border-radius: var(--radius-sm); font-size: 12px; line-height: 1.6; }
+.iss-imp-warn { background: var(--danger-soft); color: var(--danger); }
+.iss-imp-skip { background: var(--warn-soft); color: var(--warn); }
+.iss-imp-scroll { max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.iss-imp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.iss-imp-table th, .iss-imp-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; color: var(--text); }
+.iss-imp-table th { position: sticky; top: 0; background: var(--surface); color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+.iss-imp-table td.iss-imp-bad { color: var(--danger); font-weight: 600; }
+.iss-imp-r-ok .iss-imp-result { color: var(--success); }
+.iss-imp-table tr.iss-imp-r-skip td { color: var(--text-muted); }
+.iss-imp-r-fail .iss-imp-result { color: var(--danger); font-weight: 600; }

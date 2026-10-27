@@ -222,6 +222,13 @@ ESM 有個致命陷阱必須牢記：
   寫入成功回 `{ ok:true }`，被唯讀 / 本機防護擋下回 `undefined` → 呼叫端一律 `r && r.ok`。
   權限（前端防呆）：看＝所有登入者；新增＝非 view；編輯＝提出人或 admin；狀態切換、刪除＝admin。
   本機測試用 `__issuesMock(true)`（只在 localhost 生效、資料只在記憶體），見 js/pages/issues.js 檔尾。
+  匯入舊需求表（第 5 塊）：管理員在 Console 打 `__issuesImportLegacy()` → 彈窗選從 Google 試算表下載的 CSV → 預覽 → 按「寫入 N 筆」。
+  **資料不進 repo**：程式只有解析與對應規則，CSV 由使用者自己下載、在瀏覽器讀，不要把 CSV 放進 repo 或貼進程式 / 測試。
+  表頭在前 10 列找「8 個欄位關鍵字都各自命中不同欄」的那一列；試算表列號＝CSV 記錄序號（欄位內換行不算新列）。
+  每列一份 doc，id 固定 `iss-legacy-r{列號}`（可重跑）；已存在的 id（含軟刪除）一律略過、不覆蓋；逐筆寫入、逐筆顯示結果。
+  匯入的 doc 多三個欄位：`source:'legacy-sheet'`（卡片顯示灰色小標「舊需求表匯入」）、`legacyRow`（試算表列號）、
+  `legacyRequester` / `legacyHandler`（需求人員 / 處理人員原字，**只用來顯示**：帳號對不到時 `createdBy` / `assignee` / `resolvedBy` 是 null，
+  畫面改顯示「原字（舊需求表）」，原字也空白才顯示「舊需求表未填」）。
   問題照片（第 3 塊）：問題文件另有 `images:[圖片 id…]`（順序＝顯示順序）與 `thumbs:{ 圖片 id: 小縮圖 dataURL }`（卡片只用縮圖）。
 - `issue_images` collection — 問題與後續處理紀錄的照片，一張圖一份 doc（id `iim-…`），`{ issueId, data(base64), mime, bytes, createdAt, createdBy }`，
   另有選填 `noteId`（紀錄的照片才有）、`part:{ i, n }`（長圖分段的第 i 段 / 共 n 段，只有分段照片才有）。
