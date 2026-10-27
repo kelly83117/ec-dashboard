@@ -12,6 +12,8 @@
  * 第 3 塊：問題附照片（最多 6 張、每張 200KB 以下），存 issue_images（window.__cloudIssueImage），
  *   問題文件 images:[id…] ＋ thumbs:{ id: 小縮圖 }。挑選元件 _issPhotoPicker / 存取層 _issPhotoStore 跟問題無關，時間軸共用。
  *   用量 / 孤兒：Console 打 __issueImageAudit()（只報告）、__issueImageCleanup('確定刪除')。
+ * 第 4 塊：後續處理紀錄，存 issue_notes（window.__cloudIssueNotes），一則一份 doc；紀錄照片也存 issue_images（多帶 noteId）。
+ *   卡片上同時只展開一個紀錄輸入框（_issComposer），全頁最多一個 paste 監聽；草稿存在記憶體，整頁重畫不會掉。
  * 本機模擬：Console 打 __issuesMock(true)，只在 localhost 生效、資料只在記憶體（見檔尾）。
  */
 const App = window.App;
@@ -140,8 +142,20 @@ function _issOnSnap(snap) {
   const docs = (snap && Array.isArray(snap.docs)) ? snap.docs : [];
   _issList = docs.map(d => ({ ...(typeof d.data === 'function' ? (d.data() || {}) : {}), id: d.id }));
   _issLoaded = true;
-  // 訂閱當下同步回呼（模擬模式會這樣）時不重畫：呼叫端 viewIssues 正在 render，重畫會遞迴
-  if (!_issSubscribing && typeof App.renderFromCloud === 'function') App.renderFromCloud('issues');
+  _issCloudRender();
+}
+// 雲端推播觸發的重畫（問題、紀錄兩個訂閱共用）。
+//   ① 訂閱當下同步回呼（模擬模式會這樣）時不重畫：呼叫端 viewIssues 正在 render，重畫會遞迴
+//   ② 焦點在紀錄輸入框裡（正在打字）→ 先記下、等失焦再補畫，避免游標跳掉；草稿另外存在 _issComposer，重畫也不會掉
+let _issPendingCloudRender = false;
+function _issCloudRender() {
+  if (_issSubscribing) return;
+  if (_issComposerFocused()) { _issPendingCloudRender = true; return; }
+  _issPendingCloudRender = false;
+  if (typeof App.renderFromCloud === 'function') App.renderFromCloud('issues');
+}
+function _issFlushCloudRender() {
+  if (_issPendingCloudRender && !_issComposerFocused()) { _issPendingCloudRender = false; if (typeof App.renderFromCloud === 'function') App.renderFromCloud('issues'); }
 }
 let _issSubscribing = false;
 function _issEnsureSub() {
@@ -168,10 +182,61 @@ function _issResetSub() {
   _issUnsub = null;
   _issList = [];
   _issLoaded = false;
+  if (_issNotesUnsub) { try { _issNotesUnsub(); } catch {} }
+  _issNotesUnsub = null;
+  _issNotes = [];
+  _issNotesLoaded = false;
 }
+
+/* ---------- 後續處理紀錄（第 4 塊）：issue_notes collection，一則一份 doc ---------- */
+let _issNotes = [];          // 全部紀錄（含 deleted）
+let _issNotesLoaded = false; // 收過紀錄的第一份快照
+let _issNotesUnsub = null;
+function _issNotesBackend() {
+  return _issMock ? _issMock.notesApi : (window.__cloudIssueNotes || null);
+}
+function _issOnNotesSnap(snap) {
+  const docs = (snap && Array.isArray(snap.docs)) ? snap.docs : [];
+  _issNotes = docs.map(d => ({ ...(typeof d.data === 'function' ? (d.data() || {}) : {}), id: d.id }));
+  _issNotesLoaded = true;
+  _issCloudRender();
+}
+function _issEnsureNotesSub() {
+  if (_issNotesUnsub) return true;
+  const be = _issNotesBackend();
+  if (!be || typeof be.subscribe !== 'function') return false;
+  _issSubscribing = true;
+  try {
+    const un = be.subscribe(_issOnNotesSnap, err => {
+      console.error('[issues] 紀錄訂閱失敗', err);
+      showToast('⚠ 後續處理紀錄讀取失敗：' + ((err && err.message) || err), 'error', 6000);
+    });
+    _issNotesUnsub = typeof un === 'function' ? un : () => {};
+  } catch (e) {
+    console.error('[issues] 紀錄訂閱失敗', e);
+    return false;
+  } finally {
+    _issSubscribing = false;
+  }
+  return true;
+}
+// 某個問題沒刪除的紀錄，由舊到新（新的在下）
+function _issNotesOf(issueId) {
+  return _issNotes.filter(n => n && n.issueId === issueId && n.deleted !== true)
+    .sort((a, b) => ((Number(a.createdAt) || 0) - (Number(b.createdAt) || 0)) || String(a.id).localeCompare(String(b.id)));
+}
+function _issNoteGenId() {
+  return 'ino-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
 // 寫入統一包一層：回傳 true＝確定寫入；false＝失敗或被防護擋下（no-op 回 undefined）
 async function _issWrite(kind, id, payload) {
-  const be = _issBackend();
+  return _issWriteTo(_issBackend(), kind, id, payload);
+}
+async function _issNoteWrite(kind, id, payload) {
+  return _issWriteTo(_issNotesBackend(), kind, id, payload);
+}
+async function _issWriteTo(be, kind, id, payload) {
   if (!be || typeof be[kind] !== 'function') { showToast('⚠ 雲端尚未就緒，請稍後再試', 'error', 5000); return false; }
   try {
     const r = await be[kind](id, payload);
@@ -326,7 +391,8 @@ async function _issCompressPhoto(file) {
 
 // 存取層：依模擬模式切換雲端 / 記憶體。upload 失敗丟錯；remove 是 best-effort（回 true / false、不丟錯）；get 回 dataURL 或 null
 const _issPhotoStore = {
-  async upload(ownerId, item) {
+  // extra 選填：{ noteId }（紀錄照片多記所屬紀錄；問題本身的照片不帶，文件格式跟第 3 塊一樣）
+  async upload(ownerId, item, extra) {
     if (!_issCanCreate()) throw new Error(ISS_RO_MSG);
     const id = _issPhotoGenId();
     const data = {
@@ -334,6 +400,7 @@ const _issPhotoStore = {
       createdAt: Date.now(), createdBy: (_issMe() && _issMe().username) || '',
     };
     if (item.part) { data.part = { i: item.part.i, n: item.part.n }; _issPhotoPart.set(id, data.part); }   // 長圖分段：第幾段 / 共幾段
+    if (extra && extra.noteId) data.noteId = extra.noteId;
     if (_issMock) { _issMock.photos.set(id, data); _issPhotoCache.set(id, item.dataUrl); return id; }
     const c = window.__cloudIssueImage;
     if (!c || typeof c.setImage !== 'function') throw new Error('雲端尚未就緒');
@@ -370,20 +437,31 @@ const _issIsTextField = t => !!t && (t.tagName === 'TEXTAREA' || t.isContentEdit
   || (t.tagName === 'INPUT' && /^(text|search|url|email|tel|number|)$/i.test(t.type || '')));
 
 // 照片挑選元件：選檔 / Ctrl+V / 壓縮 / 預覽 / 移除 / 上限。
-//   opts：{ root（含 .ti-list / .ti-status / [data-iss-photo="pick"] 的容器）, max, existing:[{ id, thumb }] }
-//   回傳：{ items(), added(), removed(), busy(), destroy() }；items 依顯示順序，既有的 { key, id, thumb, isNew:false }、新的 { key, dataUrl, thumb, bytes, mime, isNew:true }
+//   opts：{ root（含 .ti-list / .ti-status / [data-iss-photo="pick"] 的容器）, max, existing:[{ id, thumb }],
+//           initialItems（選填：還原草稿用，picker.items() 的回傳值）, accept（選填：貼上判斷）, onChange（選填：清單變了就呼叫） }
+//   回傳：{ items(), added(), removed(), busy(), alive(), attach(newRoot), destroy() }；items 依顯示順序，
+//     既有的 { key, id, thumb, isNew:false }、新的 { key, dataUrl, thumb, bytes, mime, part?, isNew:true }
 // paste 監聽綁在 document（焦點不在輸入框時貼上事件只到 body，綁在彈窗上收不到；同老闆任務 daily.js），三道保險不殘留到別頁：
 //   ① 送出成功 / 取消 / ✕ → 呼叫端 destroy()
-//   ② 點背景關窗不會呼叫 onCancel（modal.js closeModalOnBackdrop）→ 每次觸發先檢查「彈窗開著、照片區還在畫面上」，不在就自己 destroy、不處理
-//   ③ 開新的挑選元件前，先 destroy 上一個（_issActivePicker）
+//   ② 每次貼上先問 accept(e, root)：回 'ok' 處理、'skip' 不處理、'destroy' 自己拆掉不處理。
+//      預設（彈窗用）＝「彈窗開著、照片區還在畫面上」才 'ok'，否則 'destroy'（點背景關窗不會呼叫 onCancel，靠這條）。
+//      卡片上的紀錄輸入框另給一套（_issComposerAccept）。
+//   ③ 開新的挑選元件前，先 destroy 上一個（_issActivePicker）→ 全頁同時最多一個 paste 監聽
+// attach(newRoot)：整頁重畫後把同一個元件（含處理中的照片）接到新的照片區，不用拆掉重建。
 let _issActivePicker = null;
+const _issModalAccept = (e, root) => ((_issModalOpen() && document.body.contains(root)) ? 'ok' : 'destroy');
 function _issPhotoPicker(opts) {
   if (_issActivePicker) _issActivePicker.destroy();
-  const root = opts.root, max = opts.max || ISS_PHOTO_MAX;
-  const listEl = root.querySelector('.ti-list'), statusEl = root.querySelector('.ti-status');
+  let root = opts.root;
+  const max = opts.max || ISS_PHOTO_MAX, accept = opts.accept || _issModalAccept;
+  let listEl = root.querySelector('.ti-list'), statusEl = root.querySelector('.ti-status');
   let items = (opts.existing || []).map(e => ({ key: e.id, id: e.id, thumb: e.thumb || '', isNew: false }));
+  if (Array.isArray(opts.initialItems)) items = items.concat(opts.initialItems.map(x => ({ ...x })));
   const removed = [];
-  let pending = 0, seq = 0, destroyed = false;
+  // 新照片的 key 從還原進來的最大編號往後接，避免撞號（草稿可能移除過中間幾張）
+  let pending = 0, destroyed = false;
+  let seq = items.reduce((m, x) => { const n = /^new-(\d+)$/.exec(String(x.key || '')); return n ? Math.max(m, +n[1]) : m; }, 0);
+  const changed = () => { if (typeof opts.onChange === 'function') { try { opts.onChange(items.slice()); } catch (e) { console.error(e); } } };
   const setStatus = (msg, isErr) => {
     if (!statusEl) return;
     statusEl.textContent = msg || '';
@@ -421,12 +499,12 @@ function _issPhotoPicker(opts) {
             continue;
           }
           c.parts.forEach(p => items.push({ key: 'new-' + (++seq), dataUrl: p.dataUrl, thumb: p.thumb, bytes: p.bytes, mime: p.mime, part: p.part, isNew: true }));
-          draw();
+          draw(); changed();
           setStatus('已加入（' + c.note + '）');
           continue;
         }
         items.push({ key: 'new-' + (++seq), dataUrl: c.dataUrl, thumb: c.thumb, bytes: c.bytes, mime: c.mime, isNew: true });
-        draw();
+        draw(); changed();
         setStatus('已加入（' + c.note + '）');
       } catch (e) {
         if (!destroyed) setStatus('照片處理失敗：' + ((e && e.message) || '未知錯誤'), true);
@@ -438,7 +516,10 @@ function _issPhotoPicker(opts) {
     else if (notImg && !imgs.length) setStatus('只能加入圖片檔', true);
   };
   const onPaste = (e) => {
-    if (destroyed || !_issModalOpen() || !document.body.contains(root)) { api.destroy(); return; }   // 保險 ②
+    if (destroyed) return;
+    const verdict = accept(e, root);   // 保險 ②
+    if (verdict === 'destroy') { api.destroy(); return; }
+    if (verdict !== 'ok') return;
     const cd = e.clipboardData;
     if (!cd) return;
     const files = Array.from(cd.items || []).filter(it => it.kind === 'file' && String(it.type || '').startsWith('image/'))
@@ -456,7 +537,7 @@ function _issPhotoPicker(opts) {
       if (idx < 0) return;
       const [x] = items.splice(idx, 1);
       if (!x.isNew) removed.push(x.id);   // 既有的只標記，等呼叫端寫入成功才刪雲端
-      draw(); setStatus('');
+      draw(); setStatus(''); changed();
       return;
     }
     const pick = e.target && e.target.closest ? e.target.closest('[data-iss-photo="pick"]') : null;
@@ -473,7 +554,16 @@ function _issPhotoPicker(opts) {
     added: () => items.filter(x => x.isNew),
     removed: () => removed.slice(),
     busy: () => pending > 0,
+    alive: () => !destroyed,
     addFiles,
+    attach(newRoot) {
+      if (destroyed || !newRoot || newRoot === root) return;
+      root.removeEventListener('click', onClick);
+      root = newRoot;
+      listEl = root.querySelector('.ti-list'); statusEl = root.querySelector('.ti-status');
+      root.addEventListener('click', onClick);
+      draw();
+    },
     destroy() {
       if (destroyed) return;
       destroyed = true;
@@ -485,6 +575,57 @@ function _issPhotoPicker(opts) {
   _issActivePicker = api;
   draw();
   return api;
+}
+
+/* ---------- 紀錄輸入框（composer）：全頁同時只展開一個 ----------
+ * 只有展開中的輸入框掛照片挑選元件（＝全頁最多一個 paste 監聽，卡片之間不會互搶）。
+ * 另一張卡片的輸入框有內容時不讓切換（請先送出或取消），草稿才不會不見。
+ * 整頁重畫（雲端推播、切篩選）會換掉 #main-content：文字與照片存在 _issComposer，bindIssues 重畫後放回去；
+ *   照片挑選元件還活著就 attach 到新的照片區（處理中的照片也保住），被彈窗的挑選元件接手過（已拆）就用 initialItems 重建。 */
+let _issComposer = null;   // { issueId, text, items, picker, saving }
+const _issComposerHasContent = () => !!_issComposer && (!!String(_issComposer.text || '').trim()
+  || ((_issComposer.picker && _issComposer.picker.alive()) ? _issComposer.picker.items().length : (_issComposer.items || []).length) > 0
+  || !!(_issComposer.picker && _issComposer.picker.alive() && _issComposer.picker.busy()));
+function _issComposerFocused() {
+  const ta = document.getElementById('iss-note-text');
+  return !!ta && !!document.activeElement && document.activeElement === ta;
+}
+const _issIsInputEl = t => !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable === true);
+// 卡片輸入框的貼上規則：在問題追蹤頁、沒開彈窗、照片區在畫面上；焦點在這個輸入框裡，或不在任何輸入元件上（點了空白處）。
+//   不符合時只「不處理」，不拆掉（可能只是暫時被彈窗蓋住）；離開問題追蹤頁後第一次貼上才自己拆掉。
+function _issComposerAccept(e, root) {
+  if (App.route !== 'issues') return 'destroy';
+  if (_issModalOpen() || !document.body.contains(root)) return 'skip';
+  const box = document.getElementById('iss-composer');
+  const t = e && e.target;
+  const inBox = !!(box && t && typeof box.contains === 'function' && box.contains(t));
+  if (!inBox && _issIsInputEl(t)) return 'skip';
+  return 'ok';
+}
+function _issComposerSync() {
+  const st = _issComposer;
+  const btn = document.getElementById('iss-note-add');
+  if (btn) btn.disabled = !st || !!st.saving || !_issComposerHasContent();
+}
+function _issComposerClose() {
+  if (_issComposer && _issComposer.picker) _issComposer.picker.destroy();
+  _issComposer = null;
+}
+// 重畫後把草稿放回新的輸入框（bindIssues 呼叫）
+function _issComposerMount() {
+  const st = _issComposer;
+  if (!st) return;
+  const ta = document.getElementById('iss-note-text'), zone = document.getElementById('iss-note-zone');
+  if (!ta || !zone) return;   // 那張卡片目前不在畫面上（被篩掉）：草稿留著，回來再放
+  if (ta.value !== st.text) ta.value = st.text || '';
+  if (st.picker && st.picker.alive()) st.picker.attach(zone);
+  else {
+    st.picker = _issPhotoPicker({
+      root: zone, max: ISS_PHOTO_MAX, initialItems: st.items || [], accept: _issComposerAccept,
+      onChange: list => { if (_issComposer === st) { st.items = list; _issComposerSync(); } },
+    });
+  }
+  _issComposerSync();
 }
 
 /* ---------- 排序 / 篩選 ---------- */
@@ -539,22 +680,73 @@ function _issCardHtml(it, resolve) {
       <div class="iss-title">${escapeHtml(it.title)}</div>
       ${String(it.desc || '').trim() ? `<div class="iss-desc">${escapeHtml(it.desc)}</div>` : ''}
       ${_issPhotosHtml(it)}
-      <div class="iss-meta">提出：${escapeHtml(_issName(it.createdBy, resolve))}・${escapeHtml(_issFmt(it.createdAt))}</div>
+      <div class="iss-meta">提出：${escapeHtml(_issName(it.createdBy, resolve))}・${escapeHtml(_issFmt(it.createdAt))}<span class="iss-updated">・最後更新：${escapeHtml(_issFmt(it.updatedAt || it.createdAt))}</span></div>
       ${assignee}
       ${resolution}
       ${acts.length ? `<div class="iss-actions">${acts.join('')}</div>` : ''}
+      ${_issNotesHtml(it, resolve)}
     </div>`;
 }
-// 卡片縮圖列：只用問題文件裡的 thumbs（小縮圖），點了開放大檢視才讀全尺寸圖；沒有縮圖的顯示 📷
-function _issPhotosHtml(it) {
+// 卡片縮圖列：只用文件裡的 thumbs（小縮圖），點了開放大檢視才讀全尺寸圖；沒有縮圖的顯示 📷
+//   問題本身的照片（act='photo'）與紀錄的照片（act='note-photo'）共用
+function _issPhotosHtml(it, act) {
   const ids = Array.isArray(it.images) ? it.images.filter(x => typeof x === 'string' && x) : [];
   if (!ids.length) return '';
   const thumbs = (it.thumbs && typeof it.thumbs === 'object') ? it.thumbs : {};
   return `<div class="iss-photos">${ids.map((pid, i) => {
     const t = typeof thumbs[pid] === 'string' ? thumbs[pid] : '';
-    return `<button type="button" class="iss-photo" data-iss-act="photo" data-id="${escapeHtml(it.id)}" data-idx="${i}" title="點開放大（${i + 1} / ${ids.length}）">`
+    return `<button type="button" class="iss-photo" data-iss-act="${act || 'photo'}" data-id="${escapeHtml(it.id)}" data-idx="${i}" title="點開放大（${i + 1} / ${ids.length}）">`
       + (t ? `<img src="${escapeHtml(t)}" alt="照片 ${i + 1}">` : '<span class="iss-photo-missing">📷</span>') + '</button>';
   }).join('')}</div>`;
+}
+const _issCanDeleteNote = n => _issCanCreate() && (_issIsAdmin()
+  || (!!_issNorm(n && n.createdBy) && _issNorm(n.createdBy) === _issNorm((_issMe() || {}).username)));
+// 最新一則的摘要（收合時顯示）：文字前 40 字；只有照片 → 「📷 N 張照片」
+function _issNoteSummary(n) {
+  const text = String(n.text || '').replace(/\s+/g, ' ').trim();
+  const pics = Array.isArray(n.images) ? n.images.length : 0;
+  if (!text) return pics ? '📷 ' + pics + ' 張照片' : '';
+  return (text.length > 40 ? text.slice(0, 40) + '…' : text) + (pics ? '（📷 ' + pics + '）' : '');
+}
+// 卡片下方的「後續處理紀錄」：預設收合（標題＋最新一則摘要），點開看全部；展開狀態只在記憶體
+const _issNotesOpen = new Set();
+function _issNotesHtml(it, resolve) {
+  const notes = _issNotesOf(it.id);
+  const open = _issNotesOpen.has(it.id);
+  const last = notes[notes.length - 1];
+  const head = `<button type="button" class="iss-notes-head" data-iss-act="notes-toggle" data-id="${escapeHtml(it.id)}" aria-expanded="${open ? 'true' : 'false'}">
+          <span class="iss-notes-title">${open ? '▾' : '▸'} 後續處理紀錄（${notes.length}）</span>
+          ${!open && last ? `<span class="iss-notes-latest">${escapeHtml(_issName(last.createdBy, resolve) + '・' + _issFmt(last.createdAt) + '：' + _issNoteSummary(last))}</span>` : ''}
+        </button>`;
+  let body = '';
+  if (open) {
+    const list = notes.length ? `<ol class="iss-timeline">${notes.map(n => `
+          <li class="iss-note" data-note="${escapeHtml(n.id)}">
+            <div class="iss-note-meta">${escapeHtml(_issName(n.createdBy, resolve))}・${escapeHtml(_issFmt(n.createdAt))}
+              ${_issCanDeleteNote(n) ? _issBtn('note-del', n.id, '刪除', 'iss-note-del') : ''}</div>
+            ${String(n.text || '').trim() ? `<div class="iss-note-text">${escapeHtml(n.text)}</div>` : ''}
+            ${_issPhotosHtml(n, 'note-photo')}
+          </li>`).join('')}</ol>` : (_issNotesLoaded ? '<div class="iss-notes-empty">還沒有紀錄</div>' : '<div class="iss-notes-empty">紀錄載入中…</div>');
+    body = list + (_issIsRO() ? `<div class="iss-notes-ro">僅檢視帳號無法新增紀錄</div>` : '');
+  }
+  let composer = '';
+  if (_issCanCreate()) {
+    composer = (_issComposer && _issComposer.issueId === it.id) ? `
+        <div class="iss-composer" id="iss-composer">
+          <textarea id="iss-note-text" class="iss-note-input" rows="3" placeholder="補充資訊或處理進度（Ctrl+Enter 送出）"></textarea>
+          <div class="ti-zone" id="iss-note-zone">
+            <div class="ti-hint">在這裡按 Ctrl+V 貼上截圖，或 <button type="button" class="ti-pick" data-iss-photo="pick">＋ 選擇圖片</button>（最多 ${ISS_PHOTO_MAX} 張）</div>
+            <div class="ti-list"></div>
+            <div class="ti-status" hidden></div>
+          </div>
+          <div class="iss-form-err" id="iss-note-err" hidden></div>
+          <div class="iss-composer-actions">
+            <button type="button" class="btn-ghost iss-btn" data-iss-act="note-cancel" data-id="${escapeHtml(it.id)}">取消</button>
+            <button type="button" class="btn-primary iss-btn iss-note-add" id="iss-note-add" data-iss-act="note-add" data-id="${escapeHtml(it.id)}" disabled>新增</button>
+          </div>
+        </div>` : `<button type="button" class="iss-note-open" data-iss-act="note-open" data-id="${escapeHtml(it.id)}">＋ 新增紀錄</button>`;
+  }
+  return `<div class="iss-notes${open ? ' is-open' : ''}">${head}${body}${composer}</div>`;
 }
 function _issFormHtml(it) {
   const cur = it || {};
@@ -605,6 +797,7 @@ const _issSaveBtnBusy = (busy) => {
 Object.assign(App, {
   viewIssues() {
     const subOk = _issEnsureSub();
+    _issEnsureNotesSub();   // 紀錄另一個訂閱；還沒就緒時卡片顯示「紀錄載入中…」
     const resolve = _issResolver();
     const all = _issVisible();
     // 組合：未刪除 AND 篩選列（只看我負責的、區塊）AND 計數卡（若有）。卡上數字只依篩選列算。
@@ -650,12 +843,17 @@ Object.assign(App, {
     const main = document.getElementById('main-content');
     // 🔴 只綁一次：#main-content 不會被換掉，render 只換 innerHTML；旗標記在元素上，
     //   每次 render 都會呼叫 bindIssues，但第二次起直接略過 → 一次點擊只觸發一次。
-    //   click 與 change（只給區塊下拉）在同一個 if 裡一起掛，共用同一個旗標。
+    //   click、change（區塊下拉）、keydown（紀錄 Ctrl+Enter）、input（記住紀錄草稿）、focusout（打字中延後的重畫）
+    //   都在同一個 if 裡一起掛，共用同一個旗標。
     if (main && !main.__issBound) {
       main.addEventListener('click', _issOnClick);
       main.addEventListener('change', _issOnChange);
+      main.addEventListener('keydown', _issOnKeydown);
+      main.addEventListener('input', _issOnInput);
+      main.addEventListener('focusout', _issOnFocusout);
       main.__issBound = true;
     }
+    _issComposerMount();   // 整頁重畫後把紀錄草稿（文字、照片）放回去
     // 雲端物件晚於 render 才就緒（firebase.js 在 pages 之後載入）：就緒後補訂閱並重畫
     if (!_issUnsub && !_issMock && !window.__issWaitCloud) {
       window.__issWaitCloud = true;
@@ -909,14 +1107,122 @@ Object.assign(App, {
     });
   },
 
+  // 展開某張卡片的紀錄輸入框（全頁同時只一個；另一張有內容時不讓切換）
+  _issNoteOpen(id) {
+    if (!_issCanCreate()) { showToast('僅檢視帳號無法新增紀錄', 'error'); return; }
+    const it = _issList.find(x => x.id === id && x.deleted !== true);
+    if (!it) { showToast('找不到這筆問題（可能已被刪除）', 'error'); return; }
+    if (_issComposer && _issComposer.issueId === id) return;
+    if (_issComposer) {
+      if (_issComposerHasContent()) { showToast('另一張卡片還有沒送出的紀錄，請先送出或取消', 'error', 4000); return; }
+      _issComposerClose();
+    }
+    _issComposer = { issueId: id, text: '', items: [], picker: null, saving: false };
+    _issNotesOpen.add(id);   // 一起展開時間軸，寫的時候看得到前文
+    this.render();
+    const ta = document.getElementById('iss-note-text');
+    if (ta && typeof ta.focus === 'function') ta.focus();
+  },
+
+  // 新增紀錄：先傳照片 → 寫紀錄 → 更新問題的 updatedAt / updatedBy。
+  //   照片上傳失敗 / 紀錄寫入失敗 → 回收剛傳的照片、草稿保留；問題更新失敗 → 紀錄已存好、不回滾，只提示。
+  async _issNoteSubmit() {
+    const st = _issComposer;
+    if (!st || st.saving) return;
+    const setErr = msg => _issSetErr('iss-note-err', msg);
+    if (!_issCanCreate()) { setErr('僅檢視帳號無法新增紀錄'); return; }
+    const it = _issList.find(x => x.id === st.issueId && x.deleted !== true);
+    if (!it) { setErr('找不到這筆問題（可能已被刪除）'); return; }
+    const picker = st.picker && st.picker.alive() ? st.picker : null;
+    if (picker && picker.busy()) { setErr('照片還在處理中，請稍候'); return; }
+    const text = String(st.text || '').trim();
+    const items = picker ? picker.items() : (st.items || []);
+    if (!text && !items.length) { setErr('請輸入內容或附上照片'); return; }
+    setErr('');
+    st.saving = true; _issComposerSync();
+    const me = _issMe(), noteId = _issNoteGenId();
+    const uploaded = [];
+    try {
+      try {
+        for (const p of items) uploaded.push({ key: p.key, id: await _issPhotoStore.upload(it.id, p, { noteId }) });
+      } catch (e) {
+        await Promise.all(uploaded.map(u => _issPhotoStore.remove(u.id)));
+        setErr('照片上傳失敗：' + ((e && e.message) || '未知錯誤') + '（紀錄沒有送出，可以再按一次）');
+        return;
+      }
+      const images = uploaded.map(u => u.id), thumbs = {};
+      items.forEach((p, i) => { if (images[i] && p.thumb) thumbs[images[i]] = p.thumb; });
+      const now = Date.now();
+      const ok = await _issNoteWrite('create', noteId, {
+        id: noteId, issueId: it.id, text, images, thumbs, createdAt: now, createdBy: me.username, deleted: false,
+      });
+      if (!ok) {
+        await Promise.all(uploaded.map(u => _issPhotoStore.remove(u.id)));
+        setErr('紀錄沒有寫入（內容還在，可以再按一次）');
+        return;
+      }
+      const ok2 = await _issWrite('update', it.id, { updatedAt: now, updatedBy: me.username });
+      if (!ok2) showToast('紀錄已新增，但問題的最後更新時間沒更新', 'error', 5000);
+      else showToast('已新增紀錄', 'success');
+      if (_issComposer === st) _issComposerClose();
+      if (this.route === 'issues') this.render();
+      _issFlushCloudRender();
+    } finally {
+      st.saving = false;
+      if (_issComposer === st) _issComposerSync();
+    }
+  },
+
+  // 刪除紀錄：作者本人或管理員；App.openModal 確認；軟刪除，照片保留；不更新問題的「最後更新」
+  openIssueNoteDeleteModal(noteId) {
+    const n = _issNotes.find(x => x.id === noteId && x.deleted !== true);
+    if (!n) { showToast('找不到這則紀錄（可能已被刪除）', 'error'); return; }
+    if (!_issCanDeleteNote(n)) { showToast('只有紀錄作者或管理員可以刪除', 'error'); return; }
+    let saving = false;
+    const resolve = _issResolver();
+    this.openModal({
+      title: '刪除紀錄',
+      bodyHtml: `
+      <div class="iss-modal-target">${escapeHtml(_issName(n.createdBy, resolve) + '・' + _issFmt(n.createdAt))}</div>
+      <p class="iss-modal-note">${escapeHtml(_issNoteSummary(n) || '（空白紀錄）')}</p>
+      <p class="iss-modal-note">確定要刪除這則紀錄嗎？刪除後時間軸上不再顯示。</p>`,
+      saveLabel: '刪除',
+      onMount: () => { const b = document.getElementById('modal-save'); if (b) b.classList.add('iss-btn-confirm-danger'); },
+      onSave: () => {
+        if (saving) return false;
+        const me = _issMe();
+        saving = true; _issSaveBtnBusy(true);
+        _issNoteWrite('update', n.id, { deleted: true, deletedAt: Date.now(), deletedBy: me.username }).then(ok => {
+          saving = false; _issSaveBtnBusy(false);
+          if (!ok) return;
+          this.closeModal();
+          showToast('已刪除紀錄', 'success');
+          if (this.route === 'issues') this.render();
+        });
+        return false;
+      },
+    });
+  },
+
   // 照片放大檢視：版面沿用老闆任務附圖的 .tiv-*（css/daily-adjustments.css），行為一樣（點圖切換原始尺寸）。
   //   daily.js 的 openTaskImagesModal 寫死讀 ec.bossTasks，不能直接共用，所以另寫一個。所有人都能看（同老闆任務）。
   openIssueImagesModal(id, startIdx) {
     const it = _issList.find(x => x.id === id && x.deleted !== true);
     const ids = (it && Array.isArray(it.images)) ? it.images.filter(x => typeof x === 'string' && x) : [];
     if (!ids.length) { showToast('這筆問題沒有照片', 'info'); return; }
+    this._issOpenPhotoViewer('問題照片 · ' + (it.title || ''), ids, startIdx);
+  },
+  // 紀錄的照片：同一個檢視彈窗，只是照片清單換成那則紀錄的
+  openIssueNoteImagesModal(noteId, startIdx) {
+    const n = _issNotes.find(x => x.id === noteId && x.deleted !== true);
+    const ids = (n && Array.isArray(n.images)) ? n.images.filter(x => typeof x === 'string' && x) : [];
+    if (!ids.length) { showToast('這則紀錄沒有照片', 'info'); return; }
+    const it = _issList.find(x => x.id === n.issueId);
+    this._issOpenPhotoViewer('紀錄照片 · ' + ((it && it.title) || ''), ids, startIdx);
+  },
+  _issOpenPhotoViewer(title, ids, startIdx) {
     this.openModal({
-      title: '問題照片 · ' + (it.title || ''),
+      title,
       width: 'min(1400px, 94vw)',
       hideFooter: true,
       bodyHtml: `<div id="iss-viewer" class="tiv-body"><div class="tiv-loading">載入中…</div></div>`,
@@ -932,7 +1238,7 @@ Object.assign(App, {
             + okList.map((x, n) => `
               <figure class="tiv-item" data-idx="${x.i}">
                 <img src="${escapeHtml(x.d)}" alt="照片 ${x.i + 1}" class="tiv-img" title="點圖切換原始尺寸">
-                <figcaption class="tiv-cap">${(() => { const p = _issPhotoPart.get(ids[x.i]); return p && p.n > 1 ? escapeHtml('長圖 ' + p.i + '/' + p.n) + ' · ' : ''; })()}${n + 1} / ${okList.length} · 點圖切換原始尺寸</figcaption>
+                <figcaption class="tiv-cap">${(() => { const p = _issPhotoPart.get(ids[x.i]); return p && p.n > 1 ? escapeHtml('長圖 ' + p.i + '/' + p.n) : escapeHtml((n + 1) + ' / ' + okList.length); })()} · 點圖切換原始尺寸</figcaption>
               </figure>`).join('');
           box.querySelectorAll('.tiv-img').forEach(im => im.addEventListener('click', () => im.classList.toggle('is-full')));
           const target = box.querySelector(`.tiv-item[data-idx="${Number(startIdx) || 0}"]`);
@@ -964,7 +1270,31 @@ function _issOnClick(e) {
     case 'resolve': App.openIssueResolveModal(id); break;
     case 'delete':  App.openIssueDeleteModal(id); break;
     case 'photo':   App.openIssueImagesModal(id, btn.dataset.idx); break;
+    case 'notes-toggle':
+      if (_issNotesOpen.has(id)) _issNotesOpen.delete(id); else _issNotesOpen.add(id);
+      App.render();
+      break;
+    case 'note-open':   App._issNoteOpen(id); break;
+    case 'note-cancel': _issComposerClose(); App.render(); _issFlushCloudRender(); break;
+    case 'note-add':    App._issNoteSubmit(); break;
+    case 'note-del':    App.openIssueNoteDeleteModal(id); break;
+    case 'note-photo':  App.openIssueNoteImagesModal(id, btn.dataset.idx); break;
   }
+}
+// 紀錄輸入框：Ctrl+Enter（Mac Cmd+Enter）送出；input 即時記住草稿；失焦後補做打字中延後的重畫
+function _issOnKeydown(e) {
+  if (App.route !== 'issues' || !e.target || e.target.id !== 'iss-note-text') return;
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); App._issNoteSubmit(); }
+}
+function _issOnInput(e) {
+  if (App.route !== 'issues' || !e.target || e.target.id !== 'iss-note-text' || !_issComposer) return;
+  _issComposer.text = String(e.target.value || '');
+  _issComposerSync();
+}
+function _issOnFocusout(e) {
+  if (!e.target || e.target.id !== 'iss-note-text' || !_issPendingCloudRender) return;
+  // 延後一下：失焦可能是因為正要按「新增 / 取消」，立刻重畫會把那顆按鈕換掉、點擊就落空
+  setTimeout(_issFlushCloudRender, 300);
 }
 // #main-content 的 change 委派（只給篩選列的區塊下拉；跟 _issOnClick 一起在 bindIssues 掛一次）
 function _issOnChange(e) {
@@ -978,7 +1308,7 @@ function _issOnChange(e) {
 
 /* ---------- 問題照片的用量 / 孤兒稽核（只給 Console 用，比照 daily.js 的 __taskImageAudit） ----------
  * 為什麼不併進 __taskImageAudit：那組寫死 task_images 與 ec.bossTasks，要算進來就得改老闆任務的稽核；分開算也看得出各自用量。
- * 孤兒＝issue_images 裡、沒有任何問題（含軟刪除的，軟刪除保留照片）的 images 指向的圖。
+ * 孤兒＝issue_images 裡、沒有任何問題或後續處理紀錄（兩者都含軟刪除的，軟刪除保留照片）的 images 指向的圖。
  * 稽核只報告；清理要先跑稽核、且帶確認字串 __issueImageCleanup('確定刪除') 才會刪。
  * Firestore 免費額度 1 GiB 由所有 collection 共用，總用量只有 Firebase Console 看得到；這裡只算 issue_images。 */
 const ISS_IMG_REST_BASE = 'https://firestore.googleapis.com/v1/projects/yc-dashboard-9aa6c/databases/(default)/documents/issue_images';
@@ -1008,10 +1338,12 @@ let _issImgAuditResult = null;
 window.__issueImageAudit = async function () {
   if (_issMock) { console.log('模擬模式中，照片只在記憶體，不需要稽核'); return null; }
   if (!_issLoaded) { console.log('問題清單還沒載入（先進一次「問題追蹤」頁），為了不把全部照片誤判成孤兒，這次不執行'); return null; }
+  if (!_issNotesLoaded) { console.log('後續處理紀錄還沒載入，為了不把紀錄的照片誤判成孤兒，這次不執行'); return null; }
   console.log('掃描 issue_images 中…');
   const imgs = await _issImgListAll();
   const referenced = new Set();
   _issList.forEach(it => { (Array.isArray(it && it.images) ? it.images : []).forEach(pid => referenced.add(pid)); });   // 含軟刪除
+  _issNotes.forEach(n => { (Array.isArray(n && n.images) ? n.images : []).forEach(pid => referenced.add(pid)); });     // 紀錄照片也算（含軟刪除的紀錄）
   const orphans = imgs.filter(im => !referenced.has(im.id));
   const mb = list => list.reduce((s, i) => s + i.bytes, 0) / 1048576;
   console.log('issue_images 總計 ' + imgs.length + ' 張、' + mb(imgs).toFixed(1) + ' MB');
@@ -1051,8 +1383,21 @@ function _issMakeMock() {
       items.set(id, { ...items.get(id), ...(fields || {}) }); emit(); return Promise.resolve({ ok: true });
     },
   };
-  // photos：模擬模式的照片（id → 同 issue_images 的 doc 內容，data 是 dataURL），只在記憶體
-  return { items, listeners, api, photos: new Map() };
+  // 紀錄：介面同 __cloudIssueNotes，只在記憶體
+  const notes = new Map(), notesListeners = new Set();
+  const notesSnap = () => ({ docs: [...notes.values()].map(v => ({ id: v.id, data: () => ({ ...v }) })) });
+  const notesEmit = () => { const s = notesSnap(); notesListeners.forEach(cb => { try { cb(s); } catch (e) { console.error(e); } }); };
+  const notesApi = {
+    subscribe: (cb) => { notesListeners.add(cb); cb(notesSnap()); return () => notesListeners.delete(cb); },
+    getDoc: (id) => Promise.resolve({ exists: () => notes.has(id), data: () => (notes.has(id) ? { ...notes.get(id) } : undefined) }),
+    create: (id, data) => { notes.set(id, { ...(data || {}), id }); notesEmit(); return Promise.resolve({ ok: true }); },
+    update: (id, fields) => {
+      if (!notes.has(id)) return Promise.reject(new Error('模擬紀錄找不到 ' + id));
+      notes.set(id, { ...notes.get(id), ...(fields || {}) }); notesEmit(); return Promise.resolve({ ok: true });
+    },
+  };
+  // photos：模擬模式的照片（id → 同 issue_images 的 doc 內容，data 是 dataURL），只在記憶體（問題與紀錄的照片共用）
+  return { items, listeners, api, photos: new Map(), notes, notesApi };
 }
 window.__issuesMock = function (on) {
   if (!_issIsLocalHost()) {
@@ -1061,6 +1406,7 @@ window.__issuesMock = function (on) {
   }
   const want = !!on;
   if (want === !!_issMock) return want;
+  _issComposerClose();      // 資料來源換了，草稿不跨模擬 / 雲端
   _issResetSub();
   _issPhotoCache.clear();   // 模擬 / 雲端的照片不混用
   _issPhotoPart.clear();

@@ -2343,6 +2343,7 @@
 .iss-stat-unassigned .stat-icon { background: var(--warn-soft); }
 .iss-stat-unassigned .stat-value { color: var(--warn); }
 .iss-stat-open .stat-icon { background: var(--warn-soft); }
+.iss-stat-open .stat-value { color: var(--warn); }
 .iss-stat-doing .stat-icon { background: var(--info-soft); }
 .iss-stat-doing .stat-value { color: var(--info); }
 .iss-stat-done .stat-icon { background: var(--success-soft); }
@@ -2382,3 +2383,93 @@
   font-size: 12px;
   font-family: inherit;
 }
+/* 第 4 塊：卡片「最後更新」、後續處理紀錄（收合標題 / 時間軸 / 輸入框）；輸入框的照片區沿用 .ti-* */
+.iss-updated { color: var(--text-muted); }
+.iss-notes {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.iss-notes-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.iss-notes-title { font-size: 13px; font-weight: 600; }
+.iss-notes-latest {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iss-timeline {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0 0 0 14px;
+  border-left: 2px solid var(--border);
+}
+.iss-note { position: relative; padding: 0 0 12px 10px; }
+.iss-note::before {
+  content: '';
+  position: absolute;
+  left: -20px;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--primary);
+}
+.iss-note-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
+.iss-note-del {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.iss-note-del:hover { text-decoration: underline; }
+.iss-note-text { margin-top: 2px; font-size: 13px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.iss-notes-empty, .iss-notes-ro { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.iss-note-open {
+  margin-top: 8px;
+  padding: 4px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--primary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.iss-note-open:hover { border-color: var(--primary); background: var(--primary-soft); }
+.iss-composer { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.iss-note-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+.iss-note-input:focus { outline: none; border-color: var(--primary); }
+.iss-composer-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.iss-note-add { width: auto; }
+.iss-note-add[disabled] { opacity: .5; cursor: not-allowed; }

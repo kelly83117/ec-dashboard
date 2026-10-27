@@ -901,6 +901,20 @@ try {
     removeImage: (imgId) => deleteDoc(doc(db, 'issue_images', imgId)).then(() => ({ ok: true })),
   };
 
+  // ============== 問題後續處理紀錄 collection issue_notes（一則一份 doc） ==============
+  // 為什麼不放在問題文件的陣列裡：陣列元素不能單獨軟刪除（只能整個陣列重寫）、每則帶縮圖會讓問題文件逼近 1MB、
+  //   每加一則就把整份問題文件重送給所有人；一則一份 doc 這三個問題都沒有，兩人同時寫也各寫各的。
+  // doc 內容：{ id, issueId, text, images:[圖片 id…], thumbs:{ id: 小縮圖 }, createdAt, createdBy, deleted, deletedAt?, deletedBy? }
+  //   照片存 issue_images（__cloudIssueImage），照片文件多帶 noteId。
+  // 命名注意：讀取只能叫 subscribe / getDoc（防護碼讀取白名單完全字串比對）；寫入 create / update 成功回 { ok:true }，
+  //   被唯讀守衛 / 本機防護換成 no-op 時回 undefined → 呼叫端一律 r && r.ok。刪除＝update({ deleted:true })，沒有真刪。
+  window.__cloudIssueNotes = {
+    subscribe: (cb, onErr) => onSnapshot(collection(db, 'issue_notes'), cb, onErr),
+    getDoc:    (id) => getDoc(doc(db, 'issue_notes', id)),
+    create:    (id, data) => setDoc(doc(db, 'issue_notes', id), data || {}).then(() => ({ ok: true })),
+    update:    (id, fields) => updateDoc(doc(db, 'issue_notes', id), fields || {}).then(() => ({ ok: true })),
+  };
+
   // ============== 酷澎重建 PR-2 ── 報表 coupang_reports（每賣場每月一 doc，比照 momo_reconcile）＋ 退貨 coupang_msf（每份 MSF 一 doc，比照 momo_e001） ==============
   //   ⚠ 內部賣場 key 用 '麻吉'/'露營館'（顯示名 '好麻吉'/'露營館' 由 cupShopDisplay 處理，PR-3）；doc id 用 maji/luying，與 MOMO 的 mo_maji 天然不同命名空間 → 跨平台可分。
   //   report doc id = shopDocId + '_' + 'YYYY-MM'（例 maji_2026-07）；doc 內 { shop, month, skus:{code:{qty,rev,cost,...費用}}, orderNos:[訂單編號…], updatedAt }。

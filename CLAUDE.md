@@ -61,8 +61,10 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    ⚠ 這段防護碼**刻意不存在於 repo 裡**：`grep TEST_NOWRITE` 零命中是**正確狀態**，不是異常，
    不要因為搜不到就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「TEST_NOWRITE v2 已啟用：25 個物件 / 42 個寫入方法已停用」**，才能放心測。
-   **判斷標準是「物件數對不對」：必須是 25**（問題追蹤第 3 塊加 `__cloudIssueImage`（寫入 `setImage` + `removeImage`）→ 24 變 25、方法 40 變 42（推算）；
+   **「TEST_NOWRITE v2 已啟用：26 個物件 / 44 個寫入方法已停用」**，才能放心測。
+   **判斷標準是「物件數對不對」：必須是 26**（問題追蹤第 4 塊加 `__cloudIssueNotes`（寫入 `create` + `update`）→ 25 變 26、方法 42 變 44（推算）；
+   唯讀守衛規則離線實數是 25 / 41 → 26 / 43，一樣差 1，以防護碼實際輸出為準。
+   再之前：問題追蹤第 3 塊加 `__cloudIssueImage`（寫入 `setImage` + `removeImage`）→ 24 變 25、方法 40 變 42（推算）；
    同時用唯讀守衛規則離線實數是 24 / 39 → 25 / 41，一樣差 1，以防護碼實際輸出為準。
    再之前：2026-10-27 問題追蹤第 1 塊加 `__cloudIssues`（寫入 `create` + `update`）→ 23 變 24、方法 38 變 40（推算）。
    ⚠ 同日離線用 `__installReadonlyCloudGuard` 的規則（讀取白名單 getDoc/subscribe/getDocForShop/subscribeShop/forKey）在 node 裡跑 firebase.js 實數：
@@ -76,7 +78,7 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
    唯讀觀測點**不算**進物件數：`window.__profitArchivesReady()`、`window.__profitsCollectionReady()`（#315，profits collection
-   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 25 / 42 這個基準。
+   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 26 / 44 這個基準。
    #306 通路負責人存檔走既有的 `__cloudStore.setField`（寫 `ec.adjOwnerTimeline`），**沒有新增雲端物件**。
    開機時會攔到 1 筆既有寫入（`__cloudStore.setField` `['ec.seeded.v5', true]`），屬正常；開機不會有任何 `removeFields`。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
@@ -92,13 +94,14 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    `['__cloudPchomeProducts', 'setField']`、`['__cloudPchomeProducts', 'removeFields']`、
    `['__cloudPchomeRecon', 'setField']`、`['__cloudPchomeRecon', 'removeFields']`、
    `['__cloudInsightByShop', 'updateNoteTx']`、`['__cloudIssues', 'create']`、`['__cloudIssues', 'update']`、
-   `['__cloudIssueImage', 'setImage']`、`['__cloudIssueImage', 'removeImage']`，
-   物件下限改 25，否則新物件沒有 fail-loud 保護。
+   `['__cloudIssueImage', 'setImage']`、`['__cloudIssueImage', 'removeImage']`、
+   `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`，
+   物件下限改 26，否則新物件沒有 fail-loud 保護。
    ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
    （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
    `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
    放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
-3. 沒看到這行紅字、或**物件數不是 25** → **絕對不要繼續操作，立刻關閉分頁**。
+3. 沒看到這行紅字、或**物件數不是 26** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 
 ⚠ **物件數會隨著新增雲端物件而變**（曾經是 4 物件 / 9 方法，早就過期）。不要當常數背，
@@ -111,7 +114,7 @@ grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js
 **這不是理論上的可能性 —— 2026-08-12 的實例**：當天 17:39 這份文件才把物件數更正成 13
 （commit `465a799`），**同一天** 23:31 同事的 `__cloudE001` 就 merge 進 main（PR #146，
 commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**。所以永遠當場重數，
-不要相信文件上的數字（包括上面那個 25）。
+不要相信文件上的數字（包括上面那個 26）。
 
 🔴 字元集一定要用 `[A-Za-z0-9_]`，**不能**寫成 `[A-Za-z_]` —— 舊寫法吃不到數字，會漏掉
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
@@ -220,12 +223,23 @@ ESM 有個致命陷阱必須牢記：
   權限（前端防呆）：看＝所有登入者；新增＝非 view；編輯＝提出人或 admin；狀態切換、刪除＝admin。
   本機測試用 `__issuesMock(true)`（只在 localhost 生效、資料只在記憶體），見 js/pages/issues.js 檔尾。
   問題照片（第 3 塊）：問題文件另有 `images:[圖片 id…]`（順序＝顯示順序）與 `thumbs:{ 圖片 id: 小縮圖 dataURL }`（卡片只用縮圖）。
-- `issue_images` collection — 問題照片，一張圖一份 doc（id `iim-…`），`{ issueId, data(base64), mime, bytes, createdAt, createdBy }`。
+- `issue_images` collection — 問題與後續處理紀錄的照片，一張圖一份 doc（id `iim-…`），`{ issueId, data(base64), mime, bytes, createdAt, createdBy }`，
+  另有選填 `noteId`（紀錄的照片才有）、`part:{ i, n }`（長圖分段的第 i 段 / 共 n 段，只有分段照片才有）。
   透過 `window.__cloudIssueImage`：讀 `getDoc(id)`；寫 `setImage(id, data)` / `removeImage(id)`，成功回 `{ ok:true }`。
   🔴 **不放 `task_images`**：老闆任務的 `__taskImageAudit` 把 task_images 裡不在 `ec.bossTasks[].images` 的圖都算孤兒，
   放進去會被 `__taskImageCleanup` 整批刪掉。按送出才上傳；先傳照片、成功才寫問題，寫入失敗就回收剛傳的照片；
   軟刪除問題保留照片。每張壓到 200KB 以下（daily.js `_tiCompress(file, 200KB)`，老闆任務不帶第二參數、仍是 500KB）。
-  用量 / 孤兒：Console 打 `__issueImageAudit()`（只報告，含軟刪除問題的照片都算使用中）、`__issueImageCleanup('確定刪除')`。
+  長圖（高 > 寬 × 2 或寬 > 高 × 2）：短邊縮到最多 1000px、JPEG 80 → 70 → 60、每張 ≤ 500KB；直式長圖整張壓不下時自動分段
+  （寬 min(原寬,1000)，段高依序試 2000 → 1000 → 600，每段 JPEG 80 → 70 → 60 取第一個 ≤ 500KB；段數算進 6 張上限、不夠就一段都不加；
+  超寬圖不分段）。一般圖仍是 200KB。實作在 js/pages/issues.js `_issCompressPhoto` / `_issSegmentLong`。
+  用量 / 孤兒：Console 打 `__issueImageAudit()`（只報告；問題與紀錄的照片——兩者都含軟刪除的——都算使用中；
+  兩邊的快照都收到才執行）、`__issueImageCleanup('確定刪除')`。
+- `issue_notes` collection — 問題的後續處理紀錄（第 4 塊），一則一份 doc（id `ino-…`），**不放進問題文件的陣列**
+  （陣列元素不能單獨軟刪除、會逼近 1MB、每加一則就重送整份問題文件）。
+  `{ id, issueId, text, images:[圖片 id…], thumbs:{ id: 小縮圖 }, createdAt, createdBy, deleted, deletedAt?, deletedBy? }`。
+  透過 `window.__cloudIssueNotes`：讀 `subscribe` / `getDoc`；寫 `create` / `update`，成功回 `{ ok:true }`。
+  新增：先傳照片 → 寫紀錄 → 問題 `update({ updatedAt, updatedBy })`（這步失敗不回滾紀錄）。刪除＝軟刪除（作者本人或 admin），照片保留、
+  不更新問題的 updatedAt。卡片上同時只展開一個紀錄輸入框（全頁最多一個 paste 監聽），草稿存在記憶體、整頁重畫不會掉。
 - 含 `.` 的字面欄位用 Firestore **REST API + backtick escape** 刪除
   （SDK 的 `updateDoc` 搭 `FieldPath` 不一定刪得掉），見 `firebase.js`
   的 `restDeleteFields`。
