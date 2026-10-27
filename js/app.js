@@ -1049,6 +1049,7 @@ const App = {
     if (route === 'dashboard') return true;
     if (route === 'employees') return true;
     if (route === 'issues') return true;   // 問題追蹤：所有登入者可看（寫入權限由 issues.js 判斷）
+    if (route === 'inventory') return true;   // 庫存：所有登入者可看（不是部門、不走 office-；寫入權限由 inventory.js 判斷）
     if (route === 'users') return user.role === 'admin' || user.role === 'view';  // view：唯讀檢視帳號頁
     if (route.startsWith('office-')) {
       const rest = route.slice('office-'.length);
@@ -1278,6 +1279,7 @@ const App = {
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
       case 'issues': main.innerHTML = this.viewIssues(); this.bindIssues(); break;
+      case 'inventory': main.innerHTML = this.viewInventory(); this.bindInventory(); break;
       default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs();
     }
   },
@@ -1292,6 +1294,7 @@ const App = {
   CLOUD_RENDER_ROUTES: {
     insight: ['office-d1-insight'],
     issues:  ['issues'],   // 問題追蹤：issues collection 訂閱（js/pages/issues.js）；不放進 main，app/main 推播不重畫這頁
+    inventory: ['inventory'],   // 庫存：app/inventory 訂閱（js/pages/inventory.js）；不放進 main
     main:    ['dashboard','employees','users',
               'office-d1','office-d1-kpi','office-d2','office-d2-kpi',
               'office-d2-pricing','office-d2-margin','office-d3','office-d4'],

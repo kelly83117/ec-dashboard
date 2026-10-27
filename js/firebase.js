@@ -1007,6 +1007,22 @@ try {
     smokeWritePaths: (pairs) => kpiWriteTo(kpiSmokeRef, pairs),
   };
 
+  // ============== 庫存 app/inventory（每月一筆，逐格 FieldPath 寫入，多人同時改不同格不互蓋） ==============
+  //   結構：{ schema:1, months:{ 'YYYY-MM':{ companyWh, inTransit, momoWh, countNoteShopee, countNoteMomo,
+  //           orderAmount, note, createdAt, createdBy, updatedAt, updatedBy } } }；總計、較上月不存（js/pages/inventory.js 即時算）。
+  //   不放 app/main：Store.set 整把覆蓋會互蓋，而且財務儀表板之後只需讀這一份、不必碰含帳號資料的 app/main。
+  //   writePaths 共用上面的 kpiWriteTo（文件不存在時 merge:true 建空文件再寫）；值 === TS → serverTimestamp()。
+  //   ⚠ 讀取名稱只能叫 getDoc / subscribe（防護碼與唯讀守衛的讀取白名單是字串比對）；寫入只有 writePaths。
+  //   寫入成功回 { ok:true }；被唯讀守衛 / 本機防護換成 no-op 時回 undefined → 呼叫端一律 r && r.ok，再讀回比對。
+  //   ⚠ 新增這顆後本機防護物件數 26 → 27、寫入方法 +1（見 CLAUDE.md TEST_NOWRITE 段）。
+  const invDocRef = doc(db, 'app', 'inventory');
+  window.__cloudInventory = {
+    TS: KPI_TS,
+    getDoc: () => getDoc(invDocRef),
+    subscribe: (cb, onErr) => onSnapshot(invDocRef, snap => cb(snap.exists() ? (snap.data() || {}) : null), onErr),
+    writePaths: (pairs) => kpiWriteTo(invDocRef, pairs).then(() => ({ ok: true })),
+  };
+
   // ══════════ PChome 獨立雲端 doc（三份，成長速率不同→各自一 doc，不擠 app/profit 的 1MB）══════════
   //   照 __cloudProfit 慣例：單 doc + getDoc/setField/removeFields/subscribe，per-field 寫入
   //   （setField 走 safeSetField＝updateDoc+FieldPath，逐格寫、不整包覆蓋、多人各改各欄不互蓋）。

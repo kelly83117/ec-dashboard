@@ -7,11 +7,11 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
 ## 目錄結構
 
 - `index.html` — 應用骨架（HTML 版面 + 資源載入標籤），不放邏輯或樣式
-- `css/main.css` — 全站主樣式（含問題追蹤 `iss-*`）　`css/profit.css` — 淨利表樣式
+- `css/main.css` — 全站主樣式（含問題追蹤 `iss-*`、庫存 `inv-*`）　`css/profit.css` — 淨利表樣式
 - `js/version.js` — 版本檢查 + 清快取（head 早載，classic script）
 - `js/app.js` — 主程式核心：Store、工具、設定、`App` 核心（boot/路由/render/登入）
 - `js/pages/*.js` — 各頁面方法（dashboard / marketing / employees / daily /
-  offices / users / modal / sheetsync / issues），以 `Object.assign(App, …)` 合併回 App
+  offices / users / modal / sheetsync / issues / inventory），以 `Object.assign(App, …)` 合併回 App
 - `js/profit.js` — 淨利表功能（蝦皮多店 / 上傳 / 匯出 / 雲端 / 對帳）
 - `js/firebase.js` — Firestore 雲端同步層（唯一含第三方 import）
 - `js/main.js` — ES Module 進入點，依序載入 app → pages/* → profit → firebase
@@ -61,8 +61,10 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    ⚠ 這段防護碼**刻意不存在於 repo 裡**：`grep TEST_NOWRITE` 零命中是**正確狀態**，不是異常，
    不要因為搜不到就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「TEST_NOWRITE v2 已啟用：26 個物件 / 44 個寫入方法已停用」**，才能放心測。
-   **判斷標準是「物件數對不對」：必須是 26**（問題追蹤第 4 塊加 `__cloudIssueNotes`（寫入 `create` + `update`）→ 25 變 26、方法 42 變 44（推算）；
+   **「TEST_NOWRITE v2 已啟用：27 個物件 / 45 個寫入方法已停用」**，才能放心測。
+   **判斷標準是「物件數對不對」：必須是 27**（2026-10-27 庫存第 1 塊加 `__cloudInventory`（寫入只有 `writePaths`）→ 26 變 27、方法 44 變 45（推算）；
+   唯讀守衛規則離線實數是 26 / 43 → 27 / 44，一樣差 1，以防護碼實際輸出為準。
+   再之前：問題追蹤第 4 塊加 `__cloudIssueNotes`（寫入 `create` + `update`）→ 25 變 26、方法 42 變 44（推算）；
    唯讀守衛規則離線實數是 25 / 41 → 26 / 43，一樣差 1，以防護碼實際輸出為準。
    再之前：問題追蹤第 3 塊加 `__cloudIssueImage`（寫入 `setImage` + `removeImage`）→ 24 變 25、方法 40 變 42（推算）；
    同時用唯讀守衛規則離線實數是 24 / 39 → 25 / 41，一樣差 1，以防護碼實際輸出為準。
@@ -78,7 +80,7 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
    唯讀觀測點**不算**進物件數：`window.__profitArchivesReady()`、`window.__profitsCollectionReady()`（#315，profits collection
-   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 26 / 44 這個基準。
+   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 27 / 45 這個基準。
    #306 通路負責人存檔走既有的 `__cloudStore.setField`（寫 `ec.adjOwnerTimeline`），**沒有新增雲端物件**。
    開機時會攔到 1 筆既有寫入（`__cloudStore.setField` `['ec.seeded.v5', true]`），屬正常；開機不會有任何 `removeFields`。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
@@ -95,13 +97,13 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    `['__cloudPchomeRecon', 'setField']`、`['__cloudPchomeRecon', 'removeFields']`、
    `['__cloudInsightByShop', 'updateNoteTx']`、`['__cloudIssues', 'create']`、`['__cloudIssues', 'update']`、
    `['__cloudIssueImage', 'setImage']`、`['__cloudIssueImage', 'removeImage']`、
-   `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`，
-   物件下限改 26，否則新物件沒有 fail-loud 保護。
+   `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`、`['__cloudInventory', 'writePaths']`，
+   物件下限改 27，否則新物件沒有 fail-loud 保護。
    ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
    （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
    `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
    放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
-3. 沒看到這行紅字、或**物件數不是 26** → **絕對不要繼續操作，立刻關閉分頁**。
+3. 沒看到這行紅字、或**物件數不是 27** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 
 ⚠ **物件數會隨著新增雲端物件而變**（曾經是 4 物件 / 9 方法，早就過期）。不要當常數背，
@@ -114,7 +116,7 @@ grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js
 **這不是理論上的可能性 —— 2026-08-12 的實例**：當天 17:39 這份文件才把物件數更正成 13
 （commit `465a799`），**同一天** 23:31 同事的 `__cloudE001` 就 merge 進 main（PR #146，
 commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**。所以永遠當場重數，
-不要相信文件上的數字（包括上面那個 26）。
+不要相信文件上的數字（包括上面那個 27）。
 
 🔴 字元集一定要用 `[A-Za-z0-9_]`，**不能**寫成 `[A-Za-z_]` —— 舊寫法吃不到數字，會漏掉
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
@@ -216,6 +218,16 @@ ESM 有個致命陷阱必須牢記：
     `INSIGHT_SHOPS`、firebase.js 也有一份，新增通路時要一起改。
   - ⚠ 「只有管理員」只是**前端防呆**，Firestore 規則全開；`_adjOwnerPlanCheck` 是寫入前最後一道把關，畫面限制只是方便操作。
 - `profits` collection — 每月每賣場一份獨立 doc（doc id 用 `__` 取代 `/`）。
+- `app/inventory` — 庫存（取代 Google 試算表「元創數位公司庫存&MOMO庫存統計表」），**不放 app/main**。透過 `window.__cloudInventory`：
+  讀 `subscribe(cb, onErr)` / `getDoc()`；寫只有 `writePaths(pairs)`（同 `__cloudKpi` 的 FieldPath 逐格寫入、共用 `kpiWriteTo`），
+  成功回 `{ ok:true }`，被唯讀 / 本機防護擋下回 `undefined` → 呼叫端 `r && r.ok`，再讀回比對。
+  形狀 `{ schema:1, months:{ 'YYYY-MM':{ companyWh, inTransit, momoWh, countNoteShopee, countNoteMomo, orderAmount, note,
+  createdAt, createdBy, updatedAt, updatedBy } } }`（三倉與叫貨金額是數字或 null；盤點備註、備註是字串）。
+  每次只寫改到的那一格＋該月 `updatedAt` / `updatedBy`；清空數字＝寫 null（不刪欄位）；**不能刪除月份**。
+  **總計、較上月不存**，一律即時算（js/pages/inventory.js `_invTotal` / `_invDiff`）：總計＝三倉加總、空白當 0，三格都空白 ⇒ 空白；
+  較上月＝本月總計 − 上一個日曆月總計，任一邊空白 ⇒ 空白。🔴 財務儀表板之後改讀這份文件時要用**同一條規則**，改規則兩邊一起改。
+  頁面是獨立路由 `inventory`（**不是部門**，不碰 `ec.departments` / `canAccessOffice`）：所有登入者可看、非 view 可編輯。
+  本機測試用 `__inventoryMock(true)`（空資料）或 `__inventoryMock('demo')`（假資料），只在 localhost 生效、資料只在記憶體。
 - `issues` collection — 問題追蹤，一筆問題一份 doc（doc id `iss-…`），**不放 app/main**。透過 `window.__cloudIssues`：
   讀 `subscribe(cb, onErr)`（整個 collection onSnapshot）/ `getDoc(id)`；寫 `create(id, data)`（setDoc，只用在新建）/
   `update(id, fields)`（updateDoc，**只送有變的欄位**，不整份覆蓋）。刪除＝軟刪除 `update({ deleted:true })`，沒有真刪。
@@ -279,8 +291,8 @@ ESM 有個致命陷阱必須牢記：
 
 ### 版本號 bump 規則（🔴 分兩條：動 runtime 走本機原子合併、純文件用按鈕）
 
-版號散在 **16 處**（下列）。**為什麼要有流程**：每支 feature PR 若各自 bump，就會在這
-16 行互相衝突（天天在收的合併稅），還常手動漏改一兩處。**根治＝feature 分支一律不碰
+版號散在 **17 處**（下列）。**為什麼要有流程**：每支 feature PR 若各自 bump，就會在這
+17 行互相衝突（天天在收的合併稅），還常手動漏改一兩處。**根治＝feature 分支一律不碰
 版號，改由合併端統一 bump。** 但 bump 若晚於部署就出事，見下方空窗實測。
 
 ⚠️ **空窗風險（實測，不是理論）**：feature 合併進 `main` 後、bump 前，`main` 是
@@ -299,22 +311,22 @@ git push                          # merge + bump 同一次 push
 ```
 → merge 與 bump 在**同一次 push** 送上去，Pages 部署到的必定是「新 code + 新版號」，
 **零空窗**，不管部署 40 秒還 5 分鐘都安全。`bump-version.js`（repo 根目錄）自動偵測
-index.html 現版號 → 換全部 16 處（index.html 5＋js/main.js 11）→ **自動 grep 驗證**
+index.html 現版號 → 換全部 17 處（index.html 5＋js/main.js 12）→ **自動 grep 驗證**
 （次數對＝5/10、舊版號零殘留），任一項不符就非零離開、不留半套；`--check` 可單獨複查。
 版號**比 `main` 現值大**即可（不要憑記憶，`--check` 或搜 `app-version` 看現值）。
 
 **B. 純文件 / 腳本 PR（不動 `js/`、`css/`）→ 用 GitHub 按鈕合併即可，不需 bump。**
 沒動 runtime 就沒有快取失效問題，也就沒有空窗；這支 PR 本身就是 B 類。
 
-**16 處是哪些**（`bump-version.js` 自動處理，人工不用逐一改）：`index.html` 的
-app-version meta ×1、main.js `?v=` ×1、3 個 CSS `?v=` ×3；`js/main.js` 11 個 import `?v=` ×11。
+**17 處是哪些**（`bump-version.js` 自動處理，人工不用逐一改）：`index.html` 的
+app-version meta ×1、main.js `?v=` ×1、3 個 CSS `?v=` ×3；`js/main.js` 12 個 import `?v=` ×12。
 
 ⚠️ **CSS 的 `?v=` 一定要一起改（2026-07-29 血淚教訓 v226→227）**：CSS `<link>`
 沒有 `?v=` 時，`version.js` 只清 Cache API（Service Worker）、碰不到瀏覽器
 HTTP 磁碟快取，`location.reload()` 又是同一個 URL → 改了 CSS 卻餵回舊的，
 使用者（尤其不清快取的同事）整批 `.mm-*` 樣式看不到、版面全跑掉。CSS 帶
 `?v=` 後才跟 JS 一樣改版即刷新。這也是版號存在的唯一理由——每次部署每個資源
-都要換 URL 炸 disk cache；`bump-version.js` 保證 16 處同步、不漏。
+都要換 URL 炸 disk cache；`bump-version.js` 保證 17 處同步、不漏。
 
 ### 舊版 Apps Script
 - `apps-script.gs` 的自動同步已停用，僅保留空函式避免殘留觸發報錯。新功能
