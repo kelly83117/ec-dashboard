@@ -2532,7 +2532,12 @@
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }
-.inv-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+/* 固定欄寬（<colgroup> 的 .inv-col-*）：六個數字欄等寬；比 1100px 窄時不再壓縮，交給 .inv-table-wrap 左右捲動 */
+.inv-table { width: 100%; min-width: 1100px; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.inv-col-ym { width: 68px; }
+.inv-col-num { width: 10%; }
+.inv-col-cnt { width: 9%; }
+/* .inv-col-note 不設寬度：拿剩下的 */
 .inv-table th, .inv-table td { padding: 0; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
 .inv-table thead th {
   position: sticky; top: 0; z-index: 1;
@@ -2544,6 +2549,9 @@
   text-align: right;
 }
 .inv-table thead th.inv-ym { text-align: left; }
+/* 內縮 11px＝輸入框文字的位置（1px 邊框＋10px padding）：數字欄表頭右邊、文字欄表頭左邊都跟輸入框文字對齊 */
+.inv-table thead th.inv-th-num { padding-right: 11px; }
+.inv-table thead th.inv-th-txt { padding-left: 11px; text-align: left; }
 .inv-th-auto { color: var(--text-muted); }
 .inv-auto-tag {
   margin-left: 4px;
@@ -2571,12 +2579,13 @@
 .inv-year-btn:hover { color: var(--primary); }
 .inv-year-n { margin-left: 8px; font-size: 11px; font-weight: 500; color: var(--text-muted); }
 /* 總計、較上月：跟輸入格同字級、不加粗（第 3 塊起；原本 600 看起來跟其他數字欄大小不一） */
-.inv-auto { padding: 6px 10px; text-align: right; color: var(--text); font-size: 13px; font-weight: 400; }
-.inv-auto.inv-neg { color: var(--danger); }
-.inv-auto.inv-pos { color: var(--success); }
+/*   選擇器要寫成 .inv-table td.inv-auto：只寫 .inv-auto 權重比 .inv-table td { padding:0 } 低，padding 會被蓋成 0（v805 實測）；
+     右內縮 11px 跟輸入框文字、表頭對齊。紅綠色的規則也跟著提高權重，不然會被這條的 color 蓋掉。 */
+.inv-table td.inv-auto { padding: 6px 11px; text-align: right; color: var(--text); font-size: 13px; font-weight: 400; }
+.inv-table td.inv-auto.inv-neg { color: var(--danger); }
+.inv-table td.inv-auto.inv-pos { color: var(--success); }
 .inv-in {
   width: 100%;
-  min-width: 96px;
   box-sizing: border-box;
   padding: 6px 10px;
   border: 1px solid transparent;
@@ -2588,8 +2597,7 @@
   font-variant-numeric: tabular-nums;
 }
 .inv-in-num { text-align: right; }
-.inv-in-txt { min-width: 110px; }
-.inv-cell-txt:last-child .inv-in { min-width: 180px; }
+/* 輸入框不設 min-width：欄寬由 <colgroup> 決定（固定欄寬），min-width 只會讓輸入框超出格子 */
 .inv-in:hover:not([readonly]) { border-color: var(--border); }
 .inv-in:focus { outline: none; border-color: var(--primary); background: var(--surface); }
 .inv-in[readonly] { cursor: default; }
