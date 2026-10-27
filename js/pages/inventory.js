@@ -22,6 +22,8 @@
  *   圖表在焦點放回去【之後】才畫，new Chart 不會搶焦點。切換鈕狀態（_invSeriesOn）只在記憶體。
  * 第 3 塊：匯入舊 Google 試算表，Console 打 __inventoryImportLegacy()（只限管理員；先預覽，再 { commit: true } 才寫）。
  *   資料不進程式碼；匯入的月份多 source:'legacy-sheet'、legacyRow 兩個欄位（畫面不顯示）。
+ * 盤點欄只留日期：兩個盤點欄存檔時先經過 _invCleanCountNote（「蝦皮04/30填」→「4/30」，整理不了照原文存）；
+ *   舊資料用 Console 打 __inventoryCleanCountNotes()（只限管理員；先預覽，再 { commit: true } 才寫）。
  */
 const App = window.App;
 const { escapeHtml, showToast } = window;
@@ -140,8 +142,24 @@ function _invCur(months, ym, f) {
 }
 // 這一格這次要不要寫、寫什麼。純函式。回 {kind:'write', v} / {kind:'same'} / {kind:'cancel'} / {kind:'invalid', msg}
 //   fromBlur：失焦觸發（空白＝取消，不清空）；Enter 觸發時空白＝清空。
+// 盤點欄只留日期（純函式）。ch＝這一欄的通路：'shopee'（盤點（蝦皮））或 'momo'（盤點（MOMO））。回 { v, ok }：
+//   去頭尾空白（含全形空白）→ 只去掉【這一欄自己的】通路名（蝦皮欄：蝦皮；MOMO 欄：MOMO / MO，不分大小寫）及後面的空白、冒號
+//   → 去掉結尾的「填」→ 剩下是 M/D（M 1～12、D 1～31，可有前導 0）⇒ { v:'M/D'（不帶前導 0）, ok:true }。
+//   剩下不是 M/D（例如「失真」「13/1」）⇒ 原文不改（只去頭尾空白）、ok:false（無法整理）。
+//   開頭是【另一個】通路名（資料可能放錯欄，例如蝦皮欄的「MO 9/30」）不會被剝掉，剩下的就不是 M/D ⇒ 自然落到「無法整理」，不必另外判斷。
+//   空白 ⇒ { v:'', ok:true }。D 不檢查大小月（2/30 照樣整理），只是備註、沒有年份可判斷閏年。
+const INV_CN_OWN = { shopee: /^蝦皮[\s\u3000:：]*/, momo: /^(momo|mo)[\s\u3000:：]*/i };
+function _invCleanCountNote(s, ch) {
+  const orig = String(s == null ? '' : s).replace(/^[\s\u3000]+|[\s\u3000]+$/g, '');
+  if (orig === '') return { v: '', ok: true };
+  const t = orig.replace(INV_CN_OWN[ch] || /^$/, '').replace(/[\s\u3000]*填[\s\u3000]*$/, '').replace(/^[\s\u3000]+|[\s\u3000]+$/g, '');
+  const m = /^(\d{1,2})\/(\d{1,2})$/.exec(t);
+  if (m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31) return { v: (+m[1]) + '/' + (+m[2]), ok: true };
+  return { v: orig, ok: false };
+}
+const INV_CN_FIELDS = Object.freeze({ countNoteShopee: 'shopee', countNoteMomo: 'momo' });
 function _invDecide(col, raw, cur, fromBlur) {
-  const t = String(raw == null ? '' : raw).trim();
+  let t = String(raw == null ? '' : raw).trim();
   if (col.t === 'num') {
     if (t === '') {
       if (cur == null) return { kind: 'same' };
@@ -152,6 +170,8 @@ function _invDecide(col, raw, cur, fromBlur) {
     return n.v === cur ? { kind: 'same' } : { kind: 'write', v: n.v };
   }
   if (t.length > INV_TXT_MAX) return { kind: 'invalid', msg: col.l + '最多 ' + INV_TXT_MAX + ' 字（目前 ' + t.length + '）' };
+  // 盤點欄：先整理成日期再比對、再存（整理不了就照原文存，不擋）
+  if (INV_CN_FIELDS[col.k]) t = _invCleanCountNote(t, INV_CN_FIELDS[col.k]).v;
   if (t === '') {
     if (cur === '') return { kind: 'same' };
     return fromBlur ? { kind: 'cancel' } : { kind: 'write', v: '' };
@@ -183,11 +203,19 @@ function _invLatestCount(months) {
 }
 // 「最近盤點」那行的文字（未 escape）。備註本身已含通路名（蝦皮 / MO）就原樣顯示，不含才加前綴；沒填的那一邊不顯示。
 //   例：蝦皮10/1、MO 9/30填 ⇒「最近盤點：蝦皮10/1／MO 9/30填（2026/09）」；10/1、9/30 ⇒「最近盤點：蝦皮 10/1／MOMO 9/30（2026/09）」
+//   （盤點欄只留日期起）先經過 _invCleanCountNote 整理成日期，再一律加「蝦皮 」/「MOMO 」前綴；沒填的那一邊不顯示。
+//   整理不了的照原文顯示：原文已含這一欄的通路名就不再加前綴（避免「蝦皮 蝦皮盤點延後」），不含才加。
+//   例：蝦皮10/1、MO 9/30填 ⇒「最近盤點：蝦皮 10/1／MOMO 9/30（2026/09）」；失真 ⇒「蝦皮 失真」
 function _invCountNoteText(cnt) {
   if (!cnt) return '';
   const parts = [];
-  if (cnt.shopee) parts.push(/蝦皮/.test(cnt.shopee) ? cnt.shopee : '蝦皮 ' + cnt.shopee);
-  if (cnt.momo) parts.push(/mo/i.test(cnt.momo) ? cnt.momo : 'MOMO ' + cnt.momo);
+  const one = (raw, ch, label, own) => {
+    if (!raw) return;
+    const c = _invCleanCountNote(raw, ch);
+    parts.push(c.ok ? label + ' ' + c.v : (own.test(c.v) ? c.v : label + ' ' + c.v));
+  };
+  one(cnt.shopee, 'shopee', '蝦皮', /蝦皮/);
+  one(cnt.momo, 'momo', 'MOMO', /mo/i);
   return '最近盤點：' + parts.join('／') + '（' + _invYmLabel(cnt.ym) + '）';
 }
 // 圖表資料：X 軸＝最早到最新的每一個日曆月（中間沒有的月份也列出、值 null ⇒ 斷線）；
@@ -1080,6 +1108,109 @@ window.__inventoryImportLegacy = function (opts) {
   return true;
 };
 
+/* ---------- 盤點欄只留日期：舊資料一次性清理（只給管理員，Console 打 __inventoryCleanCountNotes()） ----------
+ * 兩段式同匯入：__inventoryCleanCountNotes() 只預覽（console.table：月份、欄位、改前、改後、狀態）、不寫；
+ *   __inventoryCleanCountNotes({ commit: true }) 才拿上一次預覽寫入。
+ * 只寫「會改」的格子：每格只送那一個欄位路徑，每個有寫到的月份各加一組 updatedAt / updatedBy；不動 createdAt / createdBy、不動其他欄位。
+ * 依年份分批；每批寫入前用雲端現值重比，跟預覽時的「改前」不同（有人剛改過）就跳過並列出，不蓋掉；寫完用 _invDocData（estimate）讀回逐格比對。
+ * 寫入前先清掉預覽（連按兩次只寫一次）；切換模擬 / 雲端時清掉預覽（__inventoryMock）。 */
+const INV_CN_LABEL = { countNoteShopee: '盤點（蝦皮）', countNoteMomo: '盤點（MOMO）' };
+const INV_CN_STATUS = { change: '會改', same: '不用改', unclean: '無法整理' };
+// 預覽清單（純函式）：只列有內容的盤點格。回 [{ ym, f, before, after, status:'change'|'same'|'unclean' }]，依月份、蝦皮→MOMO 排序
+function _invCleanBuild(months) {
+  const rows = [];
+  Object.keys(months || {}).filter(_invIsYm).sort().forEach(ym => {
+    const r = months[ym];
+    if (!r || typeof r !== 'object') return;
+    Object.keys(INV_CN_FIELDS).forEach(f => {
+      const before = typeof r[f] === 'string' ? r[f] : '';
+      if (before.replace(/[\s\u3000]/g, '') === '') return;
+      const c = _invCleanCountNote(before, INV_CN_FIELDS[f]);
+      rows.push({ ym, f, before, after: c.ok ? c.v : before, status: !c.ok ? 'unclean' : (c.v === before ? 'same' : 'change') });
+    });
+  });
+  return rows;
+}
+let _invCleanPlan = null;   // 上一次預覽：{ rows, backend, at }；寫入或切換模擬 / 雲端時清掉
+function _invCleanSummary(rows) {
+  const n = k => rows.filter(x => x.status === k).length;
+  return { change: n('change'), same: n('same'), unclean: n('unclean') };
+}
+function _invCleanPreview() {
+  const rows = _invCleanBuild(_invMonths());
+  _invCleanPlan = { rows, backend: _invBackend(), at: Date.now() };
+  console.table(rows.map(x => ({ 月份: _invYmLabel(x.ym), 欄位: INV_CN_LABEL[x.f], 改前: x.before, 改後: x.after, 狀態: INV_CN_STATUS[x.status] })));
+  const s = _invCleanSummary(rows);
+  console.log('[inventory] 盤點欄只留日期：會改 ' + s.change + ' 格、不用改 ' + s.same + ' 格、無法整理 ' + s.unclean + ' 格。'
+    + (s.change ? '要寫入請在 Console 打 __inventoryCleanCountNotes({ commit: true })' : '沒有要改的格子'));
+  return s;
+}
+async function _invCleanCommit() {
+  const st = _invCleanPlan;
+  const none = { ok: false, changed: 0, skipped: 0, failed: 0 };
+  if (!st) { console.warn('[inventory] 沒有預覽結果：請先不帶參數呼叫 __inventoryCleanCountNotes()'); return none; }
+  const be = _invBackend();
+  if (!be || typeof be.writePaths !== 'function' || typeof be.getDoc !== 'function') { console.warn('[inventory] 雲端尚未就緒，這次不寫'); return none; }
+  if (be !== st.backend) { _invCleanPlan = null; console.warn('[inventory] 預覽之後切換過模擬 / 雲端，請重新預覽'); return none; }
+  _invCleanPlan = null;   // 先清掉：寫入中再呼叫一次 commit 也不會重寫
+  const by = _invBy();
+  const readDoc = async () => _invDocData(await be.getDoc()) || {};
+  const results = [], diag = [];
+  const n = { changed: 0, skipped: 0, failed: 0 };
+  const res = (x, text) => results.push({ 月份: _invYmLabel(x.ym), 欄位: INV_CN_LABEL[x.f], 改前: x.before, 改後: x.after, 結果: text });
+  const todoAll = st.rows.filter(x => x.status === 'change');
+  for (const batch of _invLegacyBatches(todoAll)) {
+    let doc;
+    try { doc = await readDoc(); }
+    catch (e) { batch.items.forEach(x => { res(x, '失敗：讀不到雲端現值 ' + ((e && (e.code || e.message)) || e)); n.failed++; }); continue; }
+    const months = (doc.months && typeof doc.months === 'object') ? doc.months : {};
+    // 寫入前重比：雲端現值跟預覽時的「改前」不同 ⇒ 有人剛改過，跳過、不蓋掉
+    const todo = batch.items.filter(x => {
+      const cur = months[x.ym] && typeof months[x.ym][x.f] === 'string' ? months[x.ym][x.f] : '';
+      if (cur === x.before) return true;
+      res(x, '跳過（雲端已被改過：現值「' + cur + '」）'); n.skipped++; return false;
+    });
+    if (!todo.length) continue;
+    const pairs = todo.map(x => [['months', x.ym, x.f], x.after]);
+    [...new Set(todo.map(x => x.ym))].forEach(ym => pairs.push([['months', ym, 'updatedAt'], be.TS], [['months', ym, 'updatedBy'], by]));
+    let bad = null;
+    try {
+      const r = await be.writePaths(pairs);
+      if (!(r && r.ok)) bad = '未寫入雲端（被擋下：唯讀帳號或本機防護）';
+      else {
+        const gm = ((await readDoc()).months) || {};
+        todo.forEach(x => {
+          const got = gm[x.ym] ? gm[x.ym][x.f] : undefined;
+          if (got === x.after) { res(x, '✓ 已改'); n.changed++; }
+          else {
+            res(x, '失敗：讀回不一致'); n.failed++;
+            diag.push({ 月份: _invYmLabel(x.ym), 欄位: INV_CN_LABEL[x.f], 寫入值: x.after, 讀回值: got, 讀回型別: got === null ? 'null' : typeof got });
+          }
+        });
+      }
+    } catch (e) {
+      bad = '失敗：' + ((e && (e.code || e.message)) || e);
+      console.warn('[inventory] 清理盤點欄 ' + batch.year + ' 年寫入或讀回時出錯', { code: e && e.code, message: e && e.message, error: e });
+    }
+    if (bad) todo.forEach(x => { res(x, bad); n.failed++; });
+  }
+  results.sort((a, b) => (a.月份 < b.月份 ? -1 : a.月份 > b.月份 ? 1 : 0));
+  console.table(results);
+  if (diag.length) { console.warn('[inventory] 讀回不一致明細（' + diag.length + ' 格' + (diag.length > 20 ? '，只列前 20 格' : '') + '）：'); console.table(diag.slice(0, 20)); }
+  const msg = '[inventory] 盤點欄清理完成：已改 ' + n.changed + ' 格、跳過 ' + n.skipped + ' 格、失敗 ' + n.failed + ' 格' + (n.failed ? '。失敗的格子可以重新預覽後再 commit 一次（已改好的會變成「不用改」）' : '');
+  (n.failed ? console.warn : console.log)(msg);
+  if (App.route === 'inventory') App.render();
+  return { ok: n.failed === 0, ...n };
+}
+window.__inventoryCleanCountNotes = function (opts) {
+  const me = App.currentUser;
+  if (!me || me.role !== 'admin') { console.warn('[inventory] 只有管理員可以清理盤點欄'); return false; }
+  if (opts && opts.commit === true) return _invCleanCommit();
+  _invEnsureSub();
+  if (!_invLoaded) { console.warn('[inventory] 庫存資料還沒載入（先進一次「庫存」頁），這次不執行'); return false; }
+  return _invCleanPreview();
+};
+
 /* ---------- 本機模擬開關：__inventoryMock(true / 'demo' / false) ----------
  * 只在 localhost / 127.0.0.1 / [::1] / *.localhost 生效；正式站呼叫只印警告、回 false、什麼都不改。
  * 開啟後資料來源換成記憶體 mock（介面同 __cloudInventory，writePaths 照 FieldPath 語意），不碰 Firestore / Store / localStorage。
@@ -1146,6 +1277,7 @@ window.__inventoryMock = function (on) {
   _invResetSub();
   _invYearOpen.clear();
   _invLegacy = null;   // 匯入預覽不跨模擬 / 雲端
+  _invCleanPlan = null;   // 盤點欄清理的預覽也是
   _invMock = want ? _invMakeMock(on === 'demo') : null;
   console.warn(want ? '[inventory] 模擬模式已開啟：資料只在本機記憶體' : '[inventory] 模擬模式已關閉，改回雲端');
   if (App.route === 'inventory') App.render();
