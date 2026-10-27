@@ -2511,3 +2511,136 @@
   cursor: pointer;
 }
 .iss-expand:hover { text-decoration: underline; }
+/* ══ 庫存頁 inv-*（js/pages/inventory.js）══
+   全部用 :root 變數、不碰 --bg；輸入框外觀照 KPI 填寫模式（平常像文字、聚焦才出框）。 */
+.inv-ro-hint, .inv-mock-banner {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.inv-ro-hint { background: var(--info-soft); color: var(--info); }
+.inv-mock-banner { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.inv-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.inv-unit { font-size: 12px; color: var(--text-muted); }
+.inv-add { white-space: nowrap; }
+.inv-add:disabled { opacity: .55; cursor: not-allowed; }
+.inv-table-wrap {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.inv-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.inv-table th, .inv-table td { padding: 0; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+.inv-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+}
+.inv-table thead th.inv-ym { text-align: left; }
+.inv-th-auto { color: var(--text-muted); }
+.inv-auto-tag {
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 600;
+}
+.inv-table th.inv-ym { padding: 6px 10px; text-align: left; font-weight: 600; }
+.inv-year-row th { padding: 0; background: var(--primary-soft); text-align: left; }
+.inv-year-btn {
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.inv-year-btn:hover { color: var(--primary); }
+.inv-year-n { margin-left: 8px; font-size: 11px; font-weight: 500; color: var(--text-muted); }
+/* 總計、較上月：跟輸入格同字級、不加粗（第 3 塊起；原本 600 看起來跟其他數字欄大小不一） */
+.inv-auto { padding: 6px 10px; text-align: right; color: var(--text); font-size: 13px; font-weight: 400; }
+.inv-auto.inv-neg { color: var(--danger); }
+.inv-auto.inv-pos { color: var(--success); }
+.inv-in {
+  width: 100%;
+  min-width: 96px;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.inv-in-num { text-align: right; }
+.inv-in-txt { min-width: 110px; }
+.inv-cell-txt:last-child .inv-in { min-width: 180px; }
+.inv-in:hover:not([readonly]) { border-color: var(--border); }
+.inv-in:focus { outline: none; border-color: var(--primary); background: var(--surface); }
+.inv-in[readonly] { cursor: default; }
+.inv-in.inv-invalid { border-color: var(--danger); background: var(--danger-soft); }
+.inv-in.inv-saving { color: var(--text-muted); }
+/* 第 2 塊：4 張卡（沿用 .stat-card）＋最近盤點小字＋折線圖 */
+.inv-stat-grid { margin-bottom: 8px; }
+.inv-stat .stat-value { font-variant-numeric: tabular-nums; }
+.inv-stat-ym {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.inv-count-note { margin: 0 0 16px; font-size: 12px; color: var(--text-muted); }
+.inv-chart-card {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.inv-chart-hd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.inv-chart-title { font-size: 14px; font-weight: 700; color: var(--text); }
+/* 切換鈕前面的小圓點＝那條線的顏色（圖例關掉了，靠這個對應） */
+.inv-series-btn::before {
+  content: "";
+  display: inline-block;
+  width: 8px; height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.inv-series-total::before { background: var(--primary); }
+.inv-series-companyWh::before { background: var(--info); }
+.inv-series-inTransit::before { background: var(--warn); }
+.inv-series-momoWh::before { background: var(--success); }
+.inv-chart-box { position: relative; height: 260px; }
+.inv-chart-fail {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+/* 第 3 塊：匯入舊試算表的彈窗（__inventoryImportLegacy；明細在 Console，彈窗只放說明與摘要） */
+.inv-imp-note { margin: 0 0 12px; font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+.inv-imp-out { margin-top: 10px; }
+.inv-imp-msg { padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.6; }
+.inv-imp-sum { background: var(--info-soft); color: var(--info); }
+.inv-imp-err { background: var(--danger-soft); color: var(--danger); font-weight: 600; }
