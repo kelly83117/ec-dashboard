@@ -224,6 +224,21 @@ function _invIsLocalHost() {
 function _invBackend() {
   return _invMock ? _invMock.api : (window.__cloudInventory || null);
 }
+// be.getDoc() 的結果 → 資料物件（文件不存在 ⇒ null）。所有讀 getDoc 結果的地方一律走這裡。
+//   Firestore DocumentSnapshot：exists() 為 false ⇒ null；否則 data({ serverTimestamps:'estimate' })。
+//   🔴 一定要帶 estimate（#376）：寫完立刻讀回時，serverTimestamp 可能還沒從伺服器回到本機，
+//     不帶參數的 data() 會把它讀成 null ⇒ 匯入的讀回比對 57 個月全部「讀回不一致（createdAt）」，其實資料都寫對了。
+//     estimate 會給本機估計的時間（Timestamp），伺服器回來後就是正式值。
+//   一般物件照用（舊寫法 / 測試替身）；null、undefined ⇒ null。
+function _invDocData(s) {
+  if (s == null) return null;
+  if (typeof s.data === 'function') {
+    const ex = typeof s.exists === 'function' ? s.exists() : s.exists !== false;
+    if (!ex) return null;
+    return s.data({ serverTimestamps: 'estimate' }) || {};
+  }
+  return typeof s === 'object' ? s : null;
+}
 const _invMe = () => App.currentUser || null;
 const _invIsRO = () => (typeof App.isReadOnly === 'function' ? !!App.isReadOnly() : !!(_invMe() && _invMe().role === 'view'));
 const _invCanEdit = () => !!_invMe() && !_invIsRO();
@@ -294,7 +309,12 @@ function _invRowHtml(ym, months, ro) {
 function _invTableHtml(months, ro) {
   const keys = Object.keys(months).filter(_invIsYm).sort().reverse();
   const years = [...new Set(keys.map(k => k.slice(0, 4)))];
-  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${c.t === 'auto' ? 'inv-th-auto' : ''}">${escapeHtml(c.l)}${c.t === 'auto' ? '<span class="inv-auto-tag">自動</span>' : ''}</th>`).join('')}</tr>`;
+  // 表頭：數字欄（含總計、較上月）靠右、文字欄靠左，內縮都跟輸入框文字一樣（css .inv-th-num / .inv-th-txt）
+  const thCls = c => (c.t === 'txt' ? 'inv-th-txt' : 'inv-th-num') + (c.t === 'auto' ? ' inv-th-auto' : '');
+  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}">${escapeHtml(c.l)}${c.t === 'auto' ? '<span class="inv-auto-tag">自動</span>' : ''}</th>`).join('')}</tr>`;
+  // 固定欄寬（css .inv-table 是 table-layout:fixed）：月份、六個數字欄、兩個盤點各有寬度，備註拿剩下的
+  const colCls = c => (c.k === 'note' ? 'inv-col-note' : c.t === 'txt' ? 'inv-col-cnt' : 'inv-col-num');
+  const cols = `<colgroup><col class="inv-col-ym">${INV_COLS.map(c => `<col class="${colCls(c)}">`).join('')}</colgroup>`;
   const body = years.map((y, rank) => {
     const open = _invYearOpenOf(y, rank);
     const ms = keys.filter(k => k.startsWith(y + '-'));
@@ -303,7 +323,7 @@ function _invTableHtml(months, ro) {
       + (open ? ms.map(k => _invRowHtml(k, months, ro)).join('') : '')
       + '</tbody>';
   }).join('');
-  return `<div class="inv-table-wrap"><table class="inv-table"><thead>${head}</thead>${body}</table></div>`;
+  return `<div class="inv-table-wrap"><table class="inv-table">${cols}<thead>${head}</thead>${body}</table></div>`;
 }
 function _invAddBtnHtml(months) {
   const t = _invAddTarget(months, _invThisYm());
@@ -456,10 +476,12 @@ async function _invWriteCell(ym, f, v, inp) {
     if (!(r && r.ok)) fail('被擋下（唯讀帳號或本機防護）');
     else {
       // 🔴 讀回比對才算數（寫入路徑或值有任何差錯都會在這裡現形）
-      const s = await be.getDoc();
-      const data = (s && typeof s.exists === 'function' && s.exists()) ? (s.data() || {}) : {};
+      const data = _invDocData(await be.getDoc()) || {};
       const got = data.months && data.months[ym] ? data.months[ym][f] : undefined;
-      if ((got === undefined ? null : got) !== v) fail('讀回不一致');
+      if ((got === undefined ? null : got) !== v) {
+        console.warn('[inventory] 讀回不一致', { 月份: ym, 欄位: f, 寫入值: v, 讀回值: got, 讀回型別: got === null ? 'null' : typeof got });
+        fail('讀回不一致');
+      }
     }
   } catch (e) {
     fail((e && (e.code || e.message)) || String(e));
@@ -497,10 +519,13 @@ async function _invAddMonth(ym) {
     const r = await be.writePaths([[['months', ym, 'createdAt'], be.TS], [['months', ym, 'createdBy'], _invBy()]]);
     if (!(r && r.ok)) showToast('❌ 沒有新增：被擋下（唯讀帳號或本機防護）', 'error', 6000);
     else {
-      const s = await be.getDoc();
-      const data = (s && typeof s.exists === 'function' && s.exists()) ? (s.data() || {}) : {};
+      // 讀回只檢查這個月份存在（不檢查 createdAt 的值）；仍走 _invDocData，跟其他讀回一致
+      const data = _invDocData(await be.getDoc()) || {};
       if (data.months && data.months[ym]) showToast('✓ 已新增 ' + _invYmLabel(ym), 'success');
-      else showToast('❌ 沒有新增（讀回找不到 ' + _invYmLabel(ym) + '）', 'error', 6000);
+      else {
+        console.warn('[inventory] 新增月份讀回找不到', { 月份: ym, 讀回的月份數: data.months ? Object.keys(data.months).length : 0 });
+        showToast('❌ 沒有新增（讀回找不到 ' + _invYmLabel(ym) + '）', 'error', 6000);
+      }
     }
   } catch (e) {
     console.error('[inventory] 新增月份失敗', e);
@@ -896,6 +921,15 @@ function _invLegacyBatches(items) {
   items.forEach(it => { const y = it.ym.slice(0, 4); if (!m.has(y)) m.set(y, []); m.get(y).push(it); });
   return [...m.keys()].sort().map(year => ({ year, items: m.get(year) }));
 }
+// 讀回比對時「應該讀到什麼」（診斷表用）：七個欄位是寫入值；createdAt 是「時間（不能是 null）」
+function _invLegacyWant(it, by, k) {
+  if (INV_LEGACY_FIELDS.includes(k)) return it.fields[k];
+  if (k === 'source') return 'legacy-sheet';
+  if (k === 'legacyRow') return it.row;
+  if (k === 'createdBy') return by.username;
+  if (k === 'createdAt') return '伺服器時間（不能是 null）';
+  return '';
+}
 // 讀回比對一個月：回不一致的欄位清單
 function _invLegacyVerify(got, it, by) {
   const bad = [];
@@ -952,7 +986,8 @@ async function _invLegacyCommit() {
   if (be !== st.backend) { _invLegacy = null; console.warn('[inventory] 預覽之後切換過模擬 / 雲端，請重新預覽'); return { ok: false, wrote: 0, skipped: 0, failed: 0 }; }
   _invLegacy = null;   // 先清掉：寫入中再呼叫一次 commit 也不會重寫
   const by = _invBy();
-  const readDoc = async () => { const s = await be.getDoc(); return (s && typeof s.exists === 'function' && s.exists()) ? (s.data() || {}) : {}; };
+  const readDoc = async () => _invDocData(await be.getDoc()) || {};   // 寫入前重查、補 schema 判斷、寫完讀回都用它（#376：要 estimate）
+  const diag = [];   // 讀回不一致的明細（最多印 20 列）：月份、欄位、寫入值、讀回值、讀回型別
   const results = [];
   const n = { wrote: 0, skipped: 0, failed: 0 };
   st.build.items.filter(it => it.status !== 'write').forEach(it => { results.push({ 月份: _invYmLabel(it.ym), 結果: it.status === 'blank' ? '略過（空白月份）' : '跳過（預覽時已存在）' }); n.skipped++; });
@@ -978,15 +1013,27 @@ async function _invLegacyCommit() {
         const gm = (got.months && typeof got.months === 'object') ? got.months : {};
         todo.forEach(it => {
           const diff = _invLegacyVerify(gm[it.ym], it, by);
-          if (diff.length) { results.push({ 月份: _invYmLabel(it.ym), 結果: '失敗：讀回不一致（' + diff.join('、') + '）' }); n.failed++; }
+          if (diff.length) {
+            results.push({ 月份: _invYmLabel(it.ym), 結果: '失敗：讀回不一致（' + diff.join('、') + '）' }); n.failed++;
+            const g = gm[it.ym] || {};
+            diff.forEach(k => { const want = _invLegacyWant(it, by, k), v = g[k];
+              diag.push({ 月份: _invYmLabel(it.ym), 欄位: k, 寫入值: want, 讀回值: v && typeof v.toDate === 'function' ? '時間 ' + _invFmtAt(v) : v, 讀回型別: v === null ? 'null' : typeof v }); });
+          }
           else { results.push({ 月份: _invYmLabel(it.ym), 結果: '✓ 已寫入' }); n.wrote++; }
         });
       }
-    } catch (e) { bad = '失敗：' + ((e && (e.code || e.message)) || e); }
+    } catch (e) {
+      bad = '失敗：' + ((e && (e.code || e.message)) || e);
+      console.warn('[inventory] 匯入 ' + batch.year + ' 年寫入或讀回時出錯', { code: e && e.code, message: e && e.message, error: e });
+    }
     if (bad) todo.forEach(it => { results.push({ 月份: _invYmLabel(it.ym), 結果: bad }); n.failed++; });
   }
   results.sort((a, b) => (a.月份 < b.月份 ? -1 : 1));
   console.table(results);
+  if (diag.length) {
+    console.warn('[inventory] 讀回不一致明細（' + diag.length + ' 格' + (diag.length > 20 ? '，只列前 20 格' : '') + '）：');
+    console.table(diag.slice(0, 20));
+  }
   const msg = '[inventory] 匯入完成：寫入 ' + n.wrote + ' 個月、跳過 ' + n.skipped + ' 個月、失敗 ' + n.failed + ' 個月' + (n.failed ? '。失敗的月份可以重新預覽後再 commit 一次（已寫入的會被跳過）' : '');
   (n.failed ? console.warn : console.log)(msg);
   if (App.route === 'inventory') App.render();
@@ -1042,14 +1089,23 @@ function _invMakeMock(demo) {
   const doc = { schema: 1, months: {} };
   const listeners = new Set();
   const clone = o => JSON.parse(JSON.stringify(o));
-  const tsOf = ms => ({ toDate: () => new Date(ms) });
-  const reviveAt = o => {   // JSON clone 會丟掉 toDate，讀出時補回
-    Object.values(o.months || {}).forEach(r => { ['createdAt', 'updatedAt'].forEach(k => { if (r && _invIsNum(r[k + 'Ms'])) { r[k] = tsOf(r[k + 'Ms']); delete r[k + 'Ms']; } }); });
+  const tsOf = ms => ({ toDate: () => new Date(ms) });   // 像 Firestore Timestamp（有 toDate）
+  // 剛寫入、「伺服器還沒回來」的時間欄位（'YYYY-MM\u0001欄位'）。照 Firestore 的行為（#376）：
+  //   這段期間 data() 不帶參數 ⇒ null；data({ serverTimestamps:'estimate' }) ⇒ 本機估計的時間。
+  //   下一輪（推播之前）才算伺服器回來，所以「寫完立刻 getDoc 讀回」一定會碰到這段期間。
+  const pending = new Set();
+  const reviveAt = (o, estimate) => {   // JSON clone 會丟掉 toDate，讀出時補回
+    Object.entries(o.months || {}).forEach(([ym, r]) => { ['createdAt', 'updatedAt'].forEach(k => {
+      if (r && _invIsNum(r[k + 'Ms'])) { r[k] = (pending.has(ym + '\u0001' + k) && !estimate) ? null : tsOf(r[k + 'Ms']); delete r[k + 'Ms']; }
+    }); });
     return o;
   };
-  const snap = () => reviveAt(clone(doc));
-  // 推播放到下一輪（同 Firestore：本機寫入的快照事件不會在 writePaths 的呼叫堆疊裡同步觸發）
-  const emit = () => setTimeout(() => { const s = snap(); listeners.forEach(cb => { try { cb(s); } catch (e) { console.error(e); } }); }, 0);
+  const snap = (opts) => reviveAt(clone(doc), !!(opts && opts.serverTimestamps === 'estimate'));
+  // 推播放到下一輪（同 Firestore：本機寫入的快照事件不會在 writePaths 的呼叫堆疊裡同步觸發）；推播前伺服器時間已經回來
+  const emit = () => setTimeout(() => { pending.clear(); const s = snap(); listeners.forEach(cb => { try { cb(s); } catch (e) { console.error(e); } }); }, 0);
+  // getDoc 回傳跟 Firestore DocumentSnapshot 一樣的形狀：id、exists()、data(options)；snapshot 本身沒有 months 等欄位
+  const snapshot = () => { const ex = Object.keys(doc).length > 0;
+    return { id: 'inventory', exists: () => ex, data: (opts) => (ex ? snap(opts) : undefined) }; };
   if (demo) {
     const end = _invPrevYm(_invThisYm());
     let ym = '2024-01', i = 0;
@@ -1065,14 +1121,14 @@ function _invMakeMock(demo) {
   const api = {
     TS,
     subscribe: (cb) => { listeners.add(cb); cb(snap()); return () => listeners.delete(cb); },
-    getDoc: () => Promise.resolve({ exists: () => true, data: () => snap() }),
+    getDoc: () => Promise.resolve(snapshot()),
     writePaths: (pairs) => {
       if (!Array.isArray(pairs) || !pairs.length) return Promise.resolve({ ok: true });
       for (const [segs, v] of pairs) {
         let o = doc;
         for (let i = 0; i < segs.length - 1; i++) { if (!o[segs[i]] || typeof o[segs[i]] !== 'object') o[segs[i]] = {}; o = o[segs[i]]; }
         const last = segs[segs.length - 1];
-        if (v === TS) { o[last + 'Ms'] = Date.now(); delete o[last]; }
+        if (v === TS) { o[last + 'Ms'] = Date.now(); delete o[last]; if (segs[0] === 'months' && segs.length === 3) pending.add(segs[1] + '\u0001' + last); }
         else o[last] = v && typeof v === 'object' ? clone(v) : v;
       }
       emit();
