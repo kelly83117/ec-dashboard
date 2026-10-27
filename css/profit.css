@@ -1476,6 +1476,16 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   vertical-align:bottom;
   font-size:11.5px;
 }
+/* 蝦皮對帳 · 每月操作說明（js/profit.js openReconGuide / _reconGuideHtml；對帳標題列與 KPI 蝦皮組各一顆鈕）
+   外觀沿用 .recon-btn，只補不換行；彈窗殼是 App.openModal，這裡只管內文。全部用 :root 變數。 */
+.recon-guide-btn{white-space:nowrap;}
+.recon-guide{font-size:13.5px;line-height:1.7;color:var(--text);}
+.recon-guide-p{margin:0 0 12px;}
+.recon-guide-h{margin:16px 0 6px;font-size:14px;font-weight:700;color:var(--text);}
+.recon-guide-ol{margin:0;padding-left:22px;}
+.recon-guide-ol li{margin-bottom:4px;}
+.recon-guide-warn{margin:10px 0 0;padding:6px 10px;border-radius:6px;background:var(--warn-soft);color:var(--text);}
+.recon-guide-ftr{display:flex;justify-content:flex-end;margin-top:18px;padding-top:12px;border-top:1px solid var(--border);}
 
 /* ── 標籤成效彈窗（tagfx，js/profit.js 的 openTagFxModal / buildTagFxHtml）──
    全部走 :root 變數。dist-modal 模板裡的 inline style 是既有的，這裡刻意不抄。 */
