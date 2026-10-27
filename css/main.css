@@ -2489,3 +2489,25 @@
 .iss-imp-r-ok .iss-imp-result { color: var(--success); }
 .iss-imp-table tr.iss-imp-r-skip td { color: var(--text-muted); }
 .iss-imp-r-fail .iss-imp-result { color: var(--danger); font-weight: 600; }
+/* 已解決卡片精簡顯示（完成說明第一行、▸ 展開 / ▾ 收合） */
+.iss-card-compact { padding-top: 10px; padding-bottom: 10px; }
+.iss-card-compact .iss-meta { margin-top: 4px; }
+.iss-compact-res {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iss-expand {
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.iss-expand:hover { text-decoration: underline; }

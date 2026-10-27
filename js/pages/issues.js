@@ -679,24 +679,45 @@ function _issCardHtml(it, resolve) {
   if (ro) acts.push(_issBtn('edit', it.id, '編輯', 'btn-ghost iss-btn', { disabled: true, title: ISS_RO_MSG }));
   else if (_issCanEdit(it)) acts.push(_issBtn('edit', it.id, '編輯', 'btn-ghost iss-btn'));
   if (isAdmin) acts.push(_issBtn('delete', it.id, '刪除', 'btn-ghost iss-btn iss-btn-danger'));
-  return `
-    <div class="iss-card iss-card-${st}" data-id="${escapeHtml(it.id)}">
+  const head = `
       <div class="iss-card-head">
         <span class="iss-tag iss-st-${st}">${escapeHtml(ISS_STATUS_LABEL[st])}</span>
         <span class="iss-tag iss-pr-${pr}">${escapeHtml(_issPrLabel(pr))}</span>
         <span class="iss-tag iss-area">${escapeHtml(_issAreaLabel(it.area))}</span>
         ${it.source === 'legacy-sheet' ? '<span class="iss-tag iss-legacy">舊需求表匯入</span>' : ''}
       </div>
-      <div class="iss-title">${escapeHtml(it.title)}</div>
-      ${String(it.desc || '').trim() ? `<div class="iss-desc">${escapeHtml(it.desc)}</div>` : ''}
+      <div class="iss-title">${escapeHtml(it.title)}</div>`;
+  // 已解決的卡片預設精簡顯示（標籤、標題、提出 / 完成日期、完成說明第一行、「▸ 展開」）；展開狀態只在記憶體，每張各自記。
+  //   有紀錄輸入框在這張卡片上時一律展開（草稿不能藏起來）。未解決的卡片不受影響。
+  if (st === 'done' && !_issDoneExpanded(it.id)) {
+    const first = String(it.resolution || '').split(/\r?\n/)[0].trim(), chars = Array.from(first);
+    const firstShown = chars.length > ISS_COMPACT_RES_MAX ? chars.slice(0, ISS_COMPACT_RES_MAX).join('') + '…' : first;
+    return `
+    <div class="iss-card iss-card-${st} iss-card-compact" data-id="${escapeHtml(it.id)}">${head}
+      <div class="iss-meta">提出：${escapeHtml(_issPersonLabel(it, it.createdBy, it.legacyRequester, resolve))}・完成：${escapeHtml(_issFmtDate(it.resolvedAt))}</div>
+      ${firstShown ? `<div class="iss-compact-res">${escapeHtml(firstShown)}</div>` : ''}
+      <button type="button" class="iss-expand" data-iss-act="expand" data-id="${escapeHtml(it.id)}" aria-expanded="false">▸ 展開</button>
+    </div>`;
+  }
+  // 描述跟標題完全相同（去前後空白）時不重複顯示
+  const descT = String(it.desc || '').trim();
+  return `
+    <div class="iss-card iss-card-${st}" data-id="${escapeHtml(it.id)}">${head}
+      ${descT && descT !== String(it.title || '').trim() ? `<div class="iss-desc">${escapeHtml(it.desc)}</div>` : ''}
       ${_issPhotosHtml(it)}
       <div class="iss-meta">提出：${escapeHtml(_issPersonLabel(it, it.createdBy, it.legacyRequester, resolve))}・${escapeHtml(_issFmt(it.createdAt))}<span class="iss-updated">・最後更新：${escapeHtml(_issFmt(it.updatedAt || it.createdAt))}</span></div>
       ${assignee}
       ${resolution}
       ${acts.length ? `<div class="iss-actions">${acts.join('')}</div>` : ''}
-      ${_issNotesHtml(it, resolve)}
+      ${_issNotesHtml(it, resolve)}${st === 'done' ? `
+      <button type="button" class="iss-expand" data-iss-act="collapse" data-id="${escapeHtml(it.id)}" aria-expanded="true">▾ 收合</button>` : ''}
     </div>`;
 }
+// 已解決卡片的展開狀態（只在記憶體）。紀錄輸入框開在這張卡片上時一律當成展開，重畫後草稿還看得到。
+const _issDoneOpen = new Set();
+const ISS_COMPACT_RES_MAX = 60;
+const _issDoneExpanded = id => _issDoneOpen.has(id) || !!(_issComposer && _issComposer.issueId === id);
+const _issFmtDate = ts => { const s = _issFmt(ts); return s === '—' ? s : s.slice(0, 10); };
 // 卡片縮圖列：只用文件裡的 thumbs（小縮圖），點了開放大檢視才讀全尺寸圖；沒有縮圖的顯示 📷
 //   問題本身的照片（act='photo'）與紀錄的照片（act='note-photo'）共用
 function _issPhotosHtml(it, act) {
@@ -1280,6 +1301,15 @@ function _issOnClick(e) {
     case 'resolve': App.openIssueResolveModal(id); break;
     case 'delete':  App.openIssueDeleteModal(id); break;
     case 'photo':   App.openIssueImagesModal(id, btn.dataset.idx); break;
+    case 'expand': _issDoneOpen.add(id); App.render(); break;
+    case 'collapse':
+      // 這張卡片上有紀錄輸入框：有內容就不收（草稿不能藏起來），空的就一起收掉
+      if (_issComposer && _issComposer.issueId === id) {
+        if (_issComposerHasContent()) { showToast('這張卡片還有沒送出的紀錄，請先送出或取消', 'error', 4000); break; }
+        _issComposerClose();
+      }
+      _issDoneOpen.delete(id); App.render(); _issFlushCloudRender();
+      break;
     case 'notes-toggle':
       if (_issNotesOpen.has(id)) _issNotesOpen.delete(id); else _issNotesOpen.add(id);
       App.render();
