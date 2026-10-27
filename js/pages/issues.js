@@ -199,6 +199,21 @@ const ISS_PHOTO_EXTRA_STEPS = Object.freeze([
   { maxEdge: 1024, q: 0.7,  note: '長邊 1024 JPEG 70' },
   { maxEdge: 800,  q: 0.65, note: '長邊 800 JPEG 65' },
 ]);
+// 長圖（高 > 寬 × 2，或寬 > 高 × 2）：限制長邊會把短邊縮到看不清字（1280×6000 縮到長邊 800 只剩寬 170px），
+//   改成「短邊最多 1000px、等比縮放（不放大）」，依序試 JPEG 80 / 70 / 60，上限放寬到 500KB（同老闆任務）。
+const ISS_LONG_RATIO = 2;
+const ISS_LONG_SHORT_EDGE = 1000;
+const ISS_LONG_BYTES = 500 * 1024;
+const ISS_LONG_QUALITIES = Object.freeze([0.8, 0.7, 0.6]);
+const _issIsLongImage = (w, h) => w > 0 && h > 0 && (h > w * ISS_LONG_RATIO || w > h * ISS_LONG_RATIO);
+// 直式長圖整張壓不到 500KB 時自動分段：寬縮到 min(原寬, 1000)，由上往下切，每段先試高 2000，
+//   JPEG 80 → 70 → 60 取第一個 ≤ 500KB；某段三級都不行就段高減半重試（2000 → 1000 → 600，最低 600），仍不行才放棄。
+//   每段是獨立一張照片（各自上傳、各自縮圖），算進 6 張上限。超寬圖不分段。
+const ISS_SEG_FIRST_H = 2000;
+const ISS_SEG_MIN_H = 600;
+// 依序嘗試的段高：從 2000 起每次減半，低於 600 就用 600 → [2000, 1000, 600]
+const ISS_SEG_TRY_H = Object.freeze((() => { const a = []; for (let x = ISS_SEG_FIRST_H; ; x = Math.floor(x / 2)) { const v = Math.max(ISS_SEG_MIN_H, x); a.push(v); if (v === ISS_SEG_MIN_H) return a; } })());
+const _issPhotoPart = new Map();   // 分段照片的「第幾段 / 共幾段」（id → { i, n }），給放大檢視標「長圖 1/3」
 const _issPhotoCache = new Map();   // 全尺寸 dataURL 快取（id → dataURL），切模擬 / 雲端時清空
 
 function _issPhotoGenId() {
@@ -222,19 +237,89 @@ function _issLoadImage(blob) {
     i.src = url;
   }).finally(() => URL.revokeObjectURL(url));
 }
-// 壓縮：沿用 daily.js 的 window._tiCompress（給 200KB 上限）＋ window._tiDraw；回 { dataUrl, mime, bytes, note, thumb } 或 null（壓不下來）
+// 從原圖切一塊畫到 dw×dh 的 canvas（白底，同 _tiDraw），輸出 Blob。sx/sy/sw/sh 是原圖座標（可以是小數）
+function _issDrawSlice(img, sx, sy, sw, sh, dw, dh, type, quality) {
+  return new Promise(resolve => {
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, dw); cv.height = Math.max(1, dh);
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+    cv.toBlob(b => resolve(b), type, quality);
+  });
+}
+// 直式長圖自動分段。座標一律用「縮放後」的整數像素切（每段 [y, y+segH)，合計＝縮放後總高，不漏不重疊），
+//   再換算回原圖座標去畫。回 { parts:[…], note } 或 null（有一段在 600 高、JPEG 60 仍超過 500KB）
+async function _issSegmentLong(img, w, h) {
+  const scale = Math.min(1, ISS_LONG_SHORT_EDGE / w);
+  const W = Math.max(1, Math.round(w * scale)), H = Math.max(1, Math.round(h * scale));
+  const ky = h / H;   // 縮放後 1px 對應原圖的高度
+  const segs = [];
+  for (let y = 0; y < H;) {
+    let got = null, lastH = 0;
+    for (const tryH of ISS_SEG_TRY_H) {
+      const segH = Math.min(tryH, H - y);   // 最後一段可以比較矮
+      if (segH === lastH) continue;          // 剩下的比這次段高還矮 → 跟上一次同一段，不重試
+      lastH = segH;
+      for (const q of ISS_LONG_QUALITIES) {
+        const b = await _issDrawSlice(img, 0, y * ky, w, segH * ky, W, segH, 'image/jpeg', q);
+        if (b && b.size <= ISS_LONG_BYTES) { got = { blob: b, q, y, segH }; break; }
+      }
+      if (got) break;
+    }
+    if (!got) return null;   // 這一段縮到最低段高、JPEG 60 仍超過 500KB
+    segs.push(got);
+    y += got.segH;
+  }
+  const n = segs.length;
+  const qMin = Math.round(Math.min(...segs.map(s => s.q)) * 100);   // 狀態文字寫各段裡最低的品質（不誇大）
+  const parts = [];
+  for (let i = 0; i < n; i++) {
+    const s = segs[i];
+    const t = Math.min(1, ISS_THUMB_EDGE / Math.max(W, s.segH));
+    const tb = await _issDrawSlice(img, 0, s.y * ky, w, s.segH * ky, Math.max(1, Math.round(W * t)), Math.max(1, Math.round(s.segH * t)), 'image/jpeg', ISS_THUMB_Q);
+    parts.push({
+      dataUrl: await _issBlobToDataUrl(s.blob), mime: 'image/jpeg', bytes: s.blob.size,
+      note: '長圖 ' + (i + 1) + '/' + n + '：寬 ' + W + ' JPEG ' + Math.round(s.q * 100),
+      thumb: tb ? await _issBlobToDataUrl(tb) : '', part: { i: i + 1, n }, segY: s.y, segH: s.segH, width: W,
+    });
+  }
+  return { parts, note: '長圖分 ' + n + ' 段：寬 ' + W + ' JPEG ' + qMin, totalH: H };
+}
+// 壓縮：沿用 daily.js 的 window._tiCompress（給 200KB 上限）＋ window._tiDraw。
+//   回 { dataUrl, mime, bytes, note, thumb }；一般圖壓不下來回 null；長圖壓不下來回 { fail: 提示文字 }。
 async function _issCompressPhoto(file) {
   const comp = window._tiCompress, draw = window._tiDraw;
   if (typeof comp !== 'function' || typeof draw !== 'function') throw new Error('壓縮功能未載入');
-  let c = await comp(file, ISS_PHOTO_BYTES);
   const img = await _issLoadImage(file);
-  if (!c) {
-    for (const s of ISS_PHOTO_EXTRA_STEPS) {
-      const b = await draw(img, s.maxEdge, 'image/jpeg', s.q);
-      if (b && b.size <= ISS_PHOTO_BYTES) { c = { blob: b, mime: 'image/jpeg', bytes: b.size, note: s.note }; break; }
+  const w = img.naturalWidth, h = img.naturalHeight;
+  let c = null;
+  if (_issIsLongImage(w, h)) {
+    // 短邊縮到最多 1000（不放大）。_tiDraw 吃的是「長邊上限」→ 傳「長邊 × 縮放比」就得到同一個縮放比
+    const shortE = Math.min(w, h), longE = Math.max(w, h);
+    const scale = Math.min(1, ISS_LONG_SHORT_EDGE / shortE);
+    const label = (h > w ? '寬 ' : '高 ') + Math.max(1, Math.round(shortE * scale));
+    for (const q of ISS_LONG_QUALITIES) {
+      const b = await draw(img, longE * scale, 'image/jpeg', q);
+      if (b && b.size <= ISS_LONG_BYTES) { c = { blob: b, mime: 'image/jpeg', bytes: b.size, note: '長圖：' + label + ' JPEG ' + Math.round(q * 100) }; break; }
     }
+    if (!c) {
+      // 整張壓不下來：直式長圖自動分段（超寬圖不分段，維持現狀）
+      if (h > w) { const seg = await _issSegmentLong(img, w, h); if (seg) return seg; }
+      return { fail: '圖太長，請分段截圖' };
+    }
+  } else {
+    // 一般圖：照舊（200KB 上限＋兩級補救）
+    c = await comp(file, ISS_PHOTO_BYTES);
+    if (!c) {
+      for (const s of ISS_PHOTO_EXTRA_STEPS) {
+        const b = await draw(img, s.maxEdge, 'image/jpeg', s.q);
+        if (b && b.size <= ISS_PHOTO_BYTES) { c = { blob: b, mime: 'image/jpeg', bytes: b.size, note: s.note }; break; }
+      }
+    }
+    if (!c) return null;
   }
-  if (!c) return null;
   const tb = await draw(img, ISS_THUMB_EDGE, 'image/jpeg', ISS_THUMB_Q);
   return { dataUrl: await _issBlobToDataUrl(c.blob), mime: c.mime, bytes: c.bytes, note: c.note, thumb: tb ? await _issBlobToDataUrl(tb) : '' };
 }
@@ -248,6 +333,7 @@ const _issPhotoStore = {
       issueId: ownerId || '', data: item.dataUrl, mime: item.mime || '', bytes: item.bytes || 0,
       createdAt: Date.now(), createdBy: (_issMe() && _issMe().username) || '',
     };
+    if (item.part) { data.part = { i: item.part.i, n: item.part.n }; _issPhotoPart.set(id, data.part); }   // 長圖分段：第幾段 / 共幾段
     if (_issMock) { _issMock.photos.set(id, data); _issPhotoCache.set(id, item.dataUrl); return id; }
     const c = window.__cloudIssueImage;
     if (!c || typeof c.setImage !== 'function') throw new Error('雲端尚未就緒');
@@ -266,12 +352,13 @@ const _issPhotoStore = {
   },
   async get(id) {
     if (_issPhotoCache.has(id)) return _issPhotoCache.get(id);
-    if (_issMock) { const d = _issMock.photos.get(id); return d ? d.data : null; }
+    if (_issMock) { const d = _issMock.photos.get(id); if (d && d.part) _issPhotoPart.set(id, d.part); return d ? d.data : null; }
     const c = window.__cloudIssueImage;
     if (!c || typeof c.getDoc !== 'function') return null;
     try {
       const s = await c.getDoc(id);
       const d = (s && typeof s.exists === 'function' && s.exists()) ? (s.data() || {}) : null;
+      if (d && d.part && d.part.n > 1) _issPhotoPart.set(id, { i: Number(d.part.i) || 0, n: Number(d.part.n) || 0 });
       if (d && d.data) { _issPhotoCache.set(id, d.data); return d.data; }
       return null;
     } catch { return null; }
@@ -309,7 +396,7 @@ function _issPhotoPicker(opts) {
             <div class="ti-thumb" data-key="${escapeHtml(it.key)}">
               ${(it.thumb || it.dataUrl) ? `<img src="${escapeHtml(it.thumb || it.dataUrl)}" alt="照片">` : '<span class="iss-photo-missing">📷</span>'}
               <button type="button" class="ti-del" data-key="${escapeHtml(it.key)}" title="移除">✕</button>
-              ${it.isNew ? `<span class="ti-size">${escapeHtml(String(Math.round((it.bytes || 0) / 1024)))} KB</span>` : ''}
+              ${it.isNew ? `<span class="ti-size">${it.part ? escapeHtml(it.part.i + '/' + it.part.n) + '・' : ''}${escapeHtml(String(Math.round((it.bytes || 0) / 1024)))} KB</span>` : ''}
             </div>`).join('');
   };
   const addFiles = async (files) => {
@@ -325,6 +412,19 @@ function _issPhotoPicker(opts) {
         const c = await _issCompressPhoto(f);
         if (destroyed) return;
         if (!c) { setStatus('有一張圖太大，壓縮後仍超過 200KB，請先裁切', true); continue; }
+        if (c.fail) { setStatus(c.fail, true); continue; }   // 長圖縮到短邊 1000、JPEG 60 仍超過 500KB（分段也不行）
+        if (c.parts) {
+          // 長圖分段：每段一張，段數算進上限；格數不夠就一段都不加
+          const free = max - items.length - (pending - 1);   // 扣掉其他還在處理中的
+          if (c.parts.length > free) {
+            setStatus('這張長圖需要 ' + c.parts.length + ' 格，目前只剩 ' + Math.max(0, free) + ' 格，請先移除幾張或分段截圖', true);
+            continue;
+          }
+          c.parts.forEach(p => items.push({ key: 'new-' + (++seq), dataUrl: p.dataUrl, thumb: p.thumb, bytes: p.bytes, mime: p.mime, part: p.part, isNew: true }));
+          draw();
+          setStatus('已加入（' + c.note + '）');
+          continue;
+        }
         items.push({ key: 'new-' + (++seq), dataUrl: c.dataUrl, thumb: c.thumb, bytes: c.bytes, mime: c.mime, isNew: true });
         draw();
         setStatus('已加入（' + c.note + '）');
@@ -832,7 +932,7 @@ Object.assign(App, {
             + okList.map((x, n) => `
               <figure class="tiv-item" data-idx="${x.i}">
                 <img src="${escapeHtml(x.d)}" alt="照片 ${x.i + 1}" class="tiv-img" title="點圖切換原始尺寸">
-                <figcaption class="tiv-cap">${n + 1} / ${okList.length} · 點圖切換原始尺寸</figcaption>
+                <figcaption class="tiv-cap">${(() => { const p = _issPhotoPart.get(ids[x.i]); return p && p.n > 1 ? escapeHtml('長圖 ' + p.i + '/' + p.n) + ' · ' : ''; })()}${n + 1} / ${okList.length} · 點圖切換原始尺寸</figcaption>
               </figure>`).join('');
           box.querySelectorAll('.tiv-img').forEach(im => im.addEventListener('click', () => im.classList.toggle('is-full')));
           const target = box.querySelector(`.tiv-item[data-idx="${Number(startIdx) || 0}"]`);
@@ -963,6 +1063,7 @@ window.__issuesMock = function (on) {
   if (want === !!_issMock) return want;
   _issResetSub();
   _issPhotoCache.clear();   // 模擬 / 雲端的照片不混用
+  _issPhotoPart.clear();
   _issMock = want ? _issMakeMock() : null;
   console.warn(want ? '[issues] 模擬模式已開啟：資料只在本機記憶體' : '[issues] 模擬模式已關閉，改回雲端');
   if (App.route === 'issues') App.render();
