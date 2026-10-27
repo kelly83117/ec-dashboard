@@ -2251,3 +2251,75 @@
   color: var(--warn);
 }
 .ins-note-cloud-hint[hidden] { display: none; }
+
+/* ===== 問題追蹤（js/pages/issues.js）===== */
+/* 狀態色：待處理 warn、處理中 info、已解決 success；優先度：緊急 danger、一般 / 低 用中性色。只用 :root 既有變數。 */
+.iss-list { display: flex; flex-direction: column; gap: 12px; }
+.iss-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warn);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+}
+.iss-card-doing { border-left-color: var(--info); }
+.iss-card-done { border-left-color: var(--success); }
+.iss-card-head { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.iss-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  border: 1px solid transparent;
+}
+.iss-st-open  { background: var(--warn-soft);    color: var(--warn); }
+.iss-st-doing { background: var(--info-soft);    color: var(--info); }
+.iss-st-done  { background: var(--success-soft); color: var(--success); }
+.iss-pr-urgent { background: var(--danger-soft); color: var(--danger); }
+.iss-pr-normal { background: var(--surface); color: var(--text-muted); border-color: var(--border); }
+.iss-pr-low    { background: var(--surface); color: var(--text-faint); border-color: var(--border); }
+.iss-area { background: var(--primary-soft); color: var(--primary-dark); }
+.iss-title { font-size: 15px; font-weight: 600; color: var(--text); word-break: break-word; }
+.iss-desc {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.iss-meta { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.iss-resolution {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--success-soft);
+}
+.iss-resolution-prev { background: var(--surface); border: 1px dashed var(--border); }
+.iss-resolution-label { font-size: 11px; font-weight: 600; color: var(--success); margin-bottom: 2px; }
+.iss-resolution-prev .iss-resolution-label { color: var(--text-muted); }
+.iss-resolution-text { font-size: 13px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.iss-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.iss-btn { padding: 6px 12px; font-size: 12px; }
+.iss-btn-done { color: var(--success); }
+.iss-btn-danger { color: var(--danger); }
+.iss-btn[disabled], .btn-add[disabled] { opacity: .5; cursor: not-allowed; }
+.iss-ro-hint, .iss-mock-banner {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.iss-ro-hint { background: var(--info-soft); color: var(--info); }
+.iss-mock-banner { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.iss-radio-group { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+/* 要蓋過 .field label 的 display:block / margin-bottom，所以加 .field 前綴 */
+.field .iss-radio { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 0; font-size: 13px; font-weight: 400; color: var(--text); cursor: pointer; }
+.field .iss-radio input { width: auto; padding: 0; }
+.iss-form-err { margin-top: -6px; font-size: 12px; color: var(--danger); }
+.iss-form-err[hidden] { display: none; }
+.iss-modal-target { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 12px; word-break: break-word; }
+.iss-modal-note { margin: 0; font-size: 13px; color: var(--text-muted); }

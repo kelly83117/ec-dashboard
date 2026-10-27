@@ -10,6 +10,7 @@ import './pages/daily.js?v=2026-10-20-802';
 import './pages/offices.js?v=2026-10-20-802';
 import './pages/users.js?v=2026-10-20-802';
 import './pages/sheetsync.js?v=2026-10-20-802';
+import './pages/issues.js?v=2026-10-20-802';
 // ⚡ profit.js（~1.9MB）【不再靜態 import】——ESM 整包 graph 下載+解析完才 render 登入，
 //   手機卡在這、連登入畫面都到不了。改由 js/app.js 的 window.__ensureProfit() 在「進淨利表 / 工作日誌」
 //   時【動態 import】（await 後才 render／才用 profit.js 的 window 匯出）。

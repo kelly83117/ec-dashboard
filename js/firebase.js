@@ -876,6 +876,19 @@ try {
     removeImage: (imgId) => deleteDoc(doc(db, 'task_images', imgId)),
   };
 
+  // ============== 問題追蹤 collection issues（一筆問題一份 doc，不擠 app/main 的 1MB） ==============
+  // doc 內容：{ id, title, area, priority, desc, status, resolution, createdAt, createdBy,
+  //             updatedAt, updatedBy, resolvedAt, resolvedBy, deleted }
+  // 命名注意：讀取方法只能叫 subscribe / getDoc（防護碼讀取白名單是完全字串比對）；寫入只有 create / update。
+  //   沒有真刪：刪除＝update({ deleted:true })。update 只送有變的欄位（updateDoc），兩人同時改不同欄位不互蓋。
+  //   寫入成功回 { ok:true }；被唯讀守衛 / 本機防護換成 no-op 時回 undefined → 呼叫端一律 r && r.ok。
+  window.__cloudIssues = {
+    subscribe: (cb, onErr) => onSnapshot(collection(db, 'issues'), cb, onErr),
+    getDoc:    (id) => getDoc(doc(db, 'issues', id)),
+    create:    (id, data) => setDoc(doc(db, 'issues', id), data || {}).then(() => ({ ok: true })),
+    update:    (id, fields) => updateDoc(doc(db, 'issues', id), fields || {}).then(() => ({ ok: true })),
+  };
+
   // ============== 酷澎重建 PR-2 ── 報表 coupang_reports（每賣場每月一 doc，比照 momo_reconcile）＋ 退貨 coupang_msf（每份 MSF 一 doc，比照 momo_e001） ==============
   //   ⚠ 內部賣場 key 用 '麻吉'/'露營館'（顯示名 '好麻吉'/'露營館' 由 cupShopDisplay 處理，PR-3）；doc id 用 maji/luying，與 MOMO 的 mo_maji 天然不同命名空間 → 跨平台可分。
   //   report doc id = shopDocId + '_' + 'YYYY-MM'（例 maji_2026-07）；doc 內 { shop, month, skus:{code:{qty,rev,cost,...費用}}, orderNos:[訂單編號…], updatedAt }。
