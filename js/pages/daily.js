@@ -3313,11 +3313,13 @@ function _tiDraw(img, maxEdge, type, quality) {
 }
 
 // 階梯降級壓縮。回傳 { blob, mime, bytes, note } ；壓不下來回傳 null。
-async function _tiCompress(file) {
+// targetBytes 選填：不給＝TI_TARGET_BYTES（老闆任務一律不給，結果不變）；問題追蹤照片給 200KB（js/pages/issues.js）。
+async function _tiCompress(file, targetBytes) {
+  const limit = (Number(targetBytes) > 0) ? Number(targetBytes) : TI_TARGET_BYTES;
   if (!file || !String(file.type || '').startsWith('image/')) {
     throw new Error('不是圖片檔');
   }
-  if (file.size <= TI_TARGET_BYTES) {
+  if (file.size <= limit) {
     return { blob: file, mime: file.type, bytes: file.size, note: '原檔未壓縮' };
   }
   const url = URL.createObjectURL(file);
@@ -3346,7 +3348,7 @@ async function _tiCompress(file) {
     ];
     for (const s of steps) {
       const blob = await _tiDraw(img, s.maxEdge, s.type, s.q);
-      if (blob && blob.size <= TI_TARGET_BYTES) {
+      if (blob && blob.size <= limit) {
         return { blob, mime: s.type, bytes: blob.size, note: s.note };
       }
     }

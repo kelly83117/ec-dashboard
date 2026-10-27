@@ -889,6 +889,18 @@ try {
     update:    (id, fields) => updateDoc(doc(db, 'issues', id), fields || {}).then(() => ({ ok: true })),
   };
 
+  // ============== 問題照片 collection issue_images（一張圖一份 doc） ==============
+  // 為什麼不放 task_images：老闆任務的 __taskImageAudit 把 task_images 裡「不在 ec.bossTasks[].images」的圖都算孤兒，
+  //   問題照片放進去會被 __taskImageCleanup 整批刪掉；分開放，老闆任務那組完全不用改。
+  // doc 內容：{ issueId, data(base64 dataURL), mime, bytes, createdAt, createdBy }；issueId 是反向索引（之後時間軸放紀錄所屬的問題 id）。
+  // 命名注意：讀取只能叫 getDoc（防護碼讀取白名單完全字串比對）；寫入 setImage / removeImage 成功回 { ok:true }，
+  //   被唯讀守衛 / 本機防護換成 no-op 時回 undefined → 呼叫端一律 r && r.ok。
+  window.__cloudIssueImage = {
+    getDoc:      (imgId) => getDoc(doc(db, 'issue_images', imgId)),
+    setImage:    (imgId, data) => setDoc(doc(db, 'issue_images', imgId), data || {}).then(() => ({ ok: true })),
+    removeImage: (imgId) => deleteDoc(doc(db, 'issue_images', imgId)).then(() => ({ ok: true })),
+  };
+
   // ============== 酷澎重建 PR-2 ── 報表 coupang_reports（每賣場每月一 doc，比照 momo_reconcile）＋ 退貨 coupang_msf（每份 MSF 一 doc，比照 momo_e001） ==============
   //   ⚠ 內部賣場 key 用 '麻吉'/'露營館'（顯示名 '好麻吉'/'露營館' 由 cupShopDisplay 處理，PR-3）；doc id 用 maji/luying，與 MOMO 的 mo_maji 天然不同命名空間 → 跨平台可分。
   //   report doc id = shopDocId + '_' + 'YYYY-MM'（例 maji_2026-07）；doc 內 { shop, month, skus:{code:{qty,rev,cost,...費用}}, orderNos:[訂單編號…], updatedAt }。
