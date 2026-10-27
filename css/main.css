@@ -2594,3 +2594,46 @@
 .inv-in[readonly] { cursor: default; }
 .inv-in.inv-invalid { border-color: var(--danger); background: var(--danger-soft); }
 .inv-in.inv-saving { color: var(--text-muted); }
+/* 第 2 塊：4 張卡（沿用 .stat-card）＋最近盤點小字＋折線圖 */
+.inv-stat-grid { margin-bottom: 8px; }
+.inv-stat .stat-value { font-variant-numeric: tabular-nums; }
+.inv-stat-ym {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.inv-count-note { margin: 0 0 16px; font-size: 12px; color: var(--text-muted); }
+.inv-chart-card {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.inv-chart-hd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.inv-chart-title { font-size: 14px; font-weight: 700; color: var(--text); }
+/* 切換鈕前面的小圓點＝那條線的顏色（圖例關掉了，靠這個對應） */
+.inv-series-btn::before {
+  content: "";
+  display: inline-block;
+  width: 8px; height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.inv-series-total::before { background: var(--primary); }
+.inv-series-companyWh::before { background: var(--info); }
+.inv-series-inTransit::before { background: var(--warn); }
+.inv-series-momoWh::before { background: var(--success); }
+.inv-chart-box { position: relative; height: 260px; }
+.inv-chart-fail {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 13px;
+}

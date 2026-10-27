@@ -17,6 +17,9 @@
  * 事件：data-inv-* ＋ #main-content 上【只綁一次】的具名委派，不寫 inline handler，所以本檔函式不必掛 window。
  * 雲端推播重畫時，若正在某格打字：重畫後把焦點、打到一半的字、游標放回同一格（_invFocus），不會被洗掉。
  * 本機模擬：Console 打 __inventoryMock(true)（空資料）或 __inventoryMock('demo')（假資料），只在 localhost 生效、資料只在記憶體（見檔尾）。
+ * 第 2 塊：表格上方 4 張卡（_invCardsHtml）＋最近盤點小字＋折線圖（_invDrawChart，Chart.js 4.4.0，index.html 已載入）。
+ *   卡片與圖表跟表格在同一次 viewInventory 裡畫：雲端推播重畫、打字中保留焦點（_invCaptureFocus / _invRestoreFocus）都一起涵蓋；
+ *   圖表在焦點放回去【之後】才畫，new Chart 不會搶焦點。切換鈕狀態（_invSeriesOn）只在記憶體。
  */
 const App = window.App;
 const { escapeHtml, showToast } = window;
@@ -37,6 +40,15 @@ const INV_FIELDS = Object.freeze(INV_COLS.filter(c => c.t !== 'auto').map(c => c
 const INV_TXT_MAX = 200;
 const INV_RO_MSG = '僅檢視帳號無法修改庫存';
 const INV_OPEN_YEARS = 2;   // 預設展開最新幾個年份（收合狀態只在記憶體）
+const INV_UNIT = '單位：元（成本，含進口稅費與運費）';
+// 圖表的線（順序＝切換鈕順序）。color＝:root 變數名，畫圖當下用 getComputedStyle 取值，不寫死色碼。
+const INV_SERIES = Object.freeze([
+  { k: 'total',     l: '總計',     color: '--primary' },
+  { k: 'companyWh', l: '公司倉',   color: '--info' },
+  { k: 'inTransit', l: '在途存貨', color: '--warn' },
+  { k: 'momoWh',    l: 'MOMO倉',   color: '--success' },
+]);
+const INV_CHART_ID = 'inv-chart';
 
 let _invData = null;       // 最新快照（app/inventory 的內容；文件不存在＝{}）
 let _invLoaded = false;    // 收過第一份快照
@@ -48,6 +60,8 @@ const _invYearOpen = new Map();     // 使用者手動展開 / 收合過的年�
 let _invAdding = false;             // 新增月份寫入中（防連點）
 let _invRendering = false;          // viewInventory → bindInventory 之間（舊輸入框被移除時不當成失焦存檔）
 let _invFocus = null;               // 重畫前焦點所在的格子 {ym, f, value, s, e, invalid}
+const _invSeriesOn = new Set(['total']);   // 圖表顯示哪幾條線（預設只有總計；只在記憶體）
+let _invChart = null;               // 目前的 Chart 實例（重畫前 destroy）
 
 /* ---------- 純函式（測試直接呼叫） ---------- */
 const _invIsYm = s => typeof s === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
@@ -146,6 +160,50 @@ function _invDecide(col, raw, cur, fromBlur) {
 function _invCellPairs(ym, f, v, by, TS) {
   return [[['months', ym, f], v], [['months', ym, 'updatedAt'], TS], [['months', ym, 'updatedBy'], by]];
 }
+// 卡片的「本月」＝最新一個三倉有任何數字（總計不是空白）的月份；全部都空 ⇒ null（不顯示卡片）
+function _invLatestYm(months) {
+  const keys = Object.keys(months || {}).filter(_invIsYm).sort().reverse();
+  return keys.find(k => _invTotal(months[k]) != null) || null;
+}
+function _invCardsData(months) {
+  const ym = _invLatestYm(months);
+  if (!ym) return null;
+  const row = months[ym];
+  const v = k => (_invIsNum(row[k]) ? row[k] : null);
+  return { ym, total: _invTotal(row), diff: _invDiff(months, ym), companyWh: v('companyWh'), inTransit: v('inTransit'), momoWh: v('momoWh') };
+}
+// 最近盤點＝最新一個「蝦皮或 MOMO 盤點備註有字」的月份；沒有 ⇒ null
+function _invLatestCount(months) {
+  const keys = Object.keys(months || {}).filter(_invIsYm).sort().reverse();
+  const t = v => (typeof v === 'string' ? v.trim() : '');
+  const ym = keys.find(k => months[k] && (t(months[k].countNoteShopee) || t(months[k].countNoteMomo)));
+  return ym ? { ym, shopee: t(months[ym].countNoteShopee), momo: t(months[ym].countNoteMomo) } : null;
+}
+// 圖表資料：X 軸＝最早到最新的每一個日曆月（中間沒有的月份也列出、值 null ⇒ 斷線）；
+//   每條線的值：總計用 _invTotal，三倉用原數字；不是數字 ⇒ null。
+function _invChartData(months) {
+  const keys = Object.keys(months || {}).filter(_invIsYm).sort();
+  if (!keys.length) return { labels: [], yms: [], series: {} };
+  const yms = [];
+  for (let ym = keys[0]; ym <= keys[keys.length - 1]; ym = _invNextYm(ym)) yms.push(ym);
+  const series = {};
+  INV_SERIES.forEach(sr => {
+    series[sr.k] = yms.map(ym => {
+      const row = months[ym];
+      if (sr.k === 'total') return _invTotal(row);
+      return row && _invIsNum(row[sr.k]) ? row[sr.k] : null;
+    });
+  });
+  return { labels: yms.map(_invYmLabel), yms, series };
+}
+// Chart.js 的 datasets（只放切換鈕選中的；順序照 INV_SERIES）。colorOf(變數名) → 顏色字串。
+function _invDatasets(data, on, colorOf) {
+  return INV_SERIES.filter(sr => on.has(sr.k)).map(sr => {
+    const c = colorOf(sr.color) || undefined;
+    return { label: sr.l, data: data.series[sr.k] || [], borderColor: c, backgroundColor: c,
+      borderWidth: sr.k === 'total' ? 2.5 : 1.5, pointRadius: 2, pointHoverRadius: 4, tension: 0, spanGaps: false };
+  });
+}
 
 /* ---------- 資料來源（雲端 / 本機模擬）唯一入口 ---------- */
 function _invIsLocalHost() {
@@ -241,6 +299,84 @@ function _invAddBtnHtml(months) {
   const lbl = '＋ 新增 ' + _invYmLabel(t.ym);
   if (!t.allowed) return `<button type="button" class="btn-ghost inv-add" disabled title="${escapeHtml('還沒到 ' + _invYmLabel(t.ym))}">${escapeHtml(lbl)}</button>`;
   return `<button type="button" class="btn-ghost inv-add" data-inv-act="add" data-ym="${escapeHtml(t.ym)}"${_invAdding ? ' disabled' : ''}>${escapeHtml(_invAdding ? '新增中…' : lbl)}</button>`;
+}
+
+function _invCardsHtml(months) {
+  const c = _invCardsData(months);
+  if (!c) return '';
+  const ymTag = `<span class="inv-stat-ym">${escapeHtml(_invYmLabel(c.ym))}</span>`;
+  const val = v => escapeHtml(v == null ? '—' : _invFmtNum(v));
+  const diff = c.diff == null ? '<span>—</span>'
+    : c.diff < 0 ? `<span class="down">▼ ${escapeHtml(_invFmtNum(-c.diff))}</span>`
+    : c.diff > 0 ? `<span class="up">▲ ${escapeHtml(_invFmtNum(c.diff))}</span>`
+    : '<span>0</span>';
+  const card = (cls, label, v, meta) => `<div class="stat-card inv-stat inv-stat-${cls}">
+          <div class="stat-label">${escapeHtml(label)}${ymTag}</div>
+          <div class="stat-value">${val(v)}</div>${meta ? `
+          <div class="stat-meta">${meta}</div>` : ''}
+        </div>`;
+  const cnt = _invLatestCount(months);
+  const cntHtml = cnt ? `<p class="inv-count-note">最近盤點：蝦皮 ${escapeHtml(cnt.shopee || '—')}／MOMO ${escapeHtml(cnt.momo || '—')}（${escapeHtml(_invYmLabel(cnt.ym))}）</p>` : '';
+  return `<div class="stat-grid inv-stat-grid">
+        ${card('total', '本月總庫存', c.total, '較上月 ' + diff)}
+        ${card('company', '公司倉', c.companyWh)}
+        ${card('transit', '在途存貨', c.inTransit)}
+        ${card('momo', 'MOMO倉', c.momoWh)}
+      </div>${cntHtml}`;
+}
+function _invChartHtml() {
+  const btns = INV_SERIES.map(sr => {
+    const on = _invSeriesOn.has(sr.k);
+    return `<button type="button" class="pill inv-series-btn inv-series-${escapeHtml(sr.k)}${on ? ' active' : ''}" data-inv-act="series" data-series="${escapeHtml(sr.k)}" aria-pressed="${on ? 'true' : 'false'}">${escapeHtml(sr.l)}</button>`;
+  }).join('');
+  const box = (typeof window.Chart === 'function')
+    ? `<canvas id="${INV_CHART_ID}" aria-label="庫存走勢圖" role="img"></canvas>`
+    : '<div class="inv-chart-fail">圖表載入失敗（表格照常可用）</div>';
+  return `<div class="inv-chart-card">
+        <div class="inv-chart-hd"><span class="inv-chart-title">庫存走勢</span><span class="filter-spacer"></span>${btns}</div>
+        <div class="inv-chart-box">${box}</div>
+      </div>`;
+}
+function _invCssVar(name) {
+  try { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); } catch { return ''; }
+}
+function _invDestroyChart() {
+  if (_invChart) { try { _invChart.destroy(); } catch {} }
+  _invChart = null;
+}
+// innerHTML 換完之後才畫（bindInventory 呼叫）。canvas 不在（沒資料 / Chart 不存在 / 不在這頁）就只清掉舊的。
+function _invDrawChart() {
+  _invDestroyChart();
+  const Chart = window.Chart;
+  const cv = document.getElementById(INV_CHART_ID);
+  if (!cv || typeof Chart !== 'function') return;
+  try {
+    const old = typeof Chart.getChart === 'function' ? Chart.getChart(cv) : null;
+    if (old) old.destroy();
+    const data = _invChartData(_invMonths());
+    const grid = _invCssVar('--border'), muted = _invCssVar('--text-muted');
+    _invChart = new Chart(cv.getContext('2d'), {
+      type: 'line',
+      data: { labels: data.labels, datasets: _invDatasets(data, _invSeriesOn, _invCssVar) },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ctx.dataset.label + '：' + (ctx.parsed.y == null ? '—' : _invFmtNum(ctx.parsed.y)) } },
+        },
+        scales: {
+          x: { ticks: { color: muted || undefined, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+          y: { ticks: { color: muted || undefined, callback: v => _invFmtNum(v) }, grid: { color: grid || undefined } },
+        },
+      },
+    });
+  } catch (e) {
+    console.error('[inventory] 畫圖失敗', e);
+    _invChart = null;
+    const box = cv.parentNode;
+    if (box) box.innerHTML = '<div class="inv-chart-fail">圖表載入失敗（表格照常可用）</div>';
+  }
 }
 
 /* ---------- 焦點保留（雲端推播重畫時） ---------- */
@@ -378,6 +514,12 @@ function _invOnClick(e) {
     App.render();
   } else if (act === 'add') {
     _invAddMonth(b.dataset.ym);
+  } else if (act === 'series') {
+    const k = b.dataset.series;
+    if (!INV_SERIES.some(sr => sr.k === k)) return;
+    if (_invSeriesOn.has(k)) { if (_invSeriesOn.size > 1) _invSeriesOn.delete(k); }   // 至少留一條，不讓圖變空白
+    else _invSeriesOn.add(k);
+    App.render();
   }
 }
 function _invIsIn(t) { return !!(t && t.classList && t.classList.contains('inv-in')); }
@@ -423,11 +565,11 @@ Object.assign(App, {
     const ro = !_invCanEdit();
     const months = _invMonths();
     const n = Object.keys(months).filter(_invIsYm).length;
-    let body;
+    let body, top = '';
     if (!subOk && !_invLoaded) body = `<div class="empty"><div class="emoji">⏳</div>雲端連線中…</div>`;
     else if (!_invLoaded) body = `<div class="empty"><div class="emoji">⏳</div>載入中…</div>`;
     else if (!n) body = `<div class="empty"><div class="emoji">📦</div>還沒有任何月份${ro ? '' : '，按右上「新增」開始'}</div>`;
-    else body = _invTableHtml(months, ro);
+    else { top = _invCardsHtml(months) + _invChartHtml(); body = _invTableHtml(months, ro); }
     return `
       <div class="inv-page">
         <div class="page-header">
@@ -436,8 +578,9 @@ Object.assign(App, {
         </div>
         ${_invMock ? `<div class="inv-mock-banner">模擬模式：資料只在本機記憶體，重新整理就消失（__inventoryMock(false) 關閉）</div>` : ''}
         ${ro ? `<div class="inv-ro-hint">${escapeHtml(INV_RO_MSG)}</div>` : ''}
+        ${top}
         <div class="inv-toolbar">
-          <span class="inv-unit">單位：元</span>
+          <span class="inv-unit">${escapeHtml(INV_UNIT)}</span>
           <span class="filter-spacer"></span>
           ${!ro && _invLoaded ? _invAddBtnHtml(months) : ''}
         </div>
@@ -458,6 +601,7 @@ Object.assign(App, {
     }
     _invRendering = false;
     _invRestoreFocus();
+    _invDrawChart();   // 焦點放回去之後才畫：new Chart 不會搶焦點，打字中的格子不受影響
     // 雲端物件晚於 render 才就緒（firebase.js 在 pages 之後載入）：就緒後補訂閱並重畫
     if (!_invUnsub && !_invMock && !window.__invWaitCloud) {
       window.__invWaitCloud = true;
