@@ -20,6 +20,8 @@
  * 第 2 塊：表格上方 4 張卡（_invCardsHtml）＋最近盤點小字＋折線圖（_invDrawChart，Chart.js 4.4.0，index.html 已載入）。
  *   卡片與圖表跟表格在同一次 viewInventory 裡畫：雲端推播重畫、打字中保留焦點（_invCaptureFocus / _invRestoreFocus）都一起涵蓋；
  *   圖表在焦點放回去【之後】才畫，new Chart 不會搶焦點。切換鈕狀態（_invSeriesOn）只在記憶體。
+ *   期間（_invRange：近 12／近 24 個月／全部，預設 24）一律停在最新一個有數字的月份（同統計卡「本月」，_invLatestYm），
+ *   只在記憶體；切換時只重畫圖表。
  * 第 3 塊：匯入舊 Google 試算表，Console 打 __inventoryImportLegacy()（只限管理員；先預覽，再 { commit: true } 才寫）。
  *   資料不進程式碼；匯入的月份多 source:'legacy-sheet'、legacyRow 兩個欄位（畫面不顯示）。
  * 盤點欄只留日期：兩個盤點欄存檔時先經過 _invCleanCountNote（「蝦皮04/30填」→「4/30」，整理不了照原文存）；
@@ -65,6 +67,9 @@ let _invAdding = false;             // 新增月份寫入中（防連點）
 let _invRendering = false;          // viewInventory → bindInventory 之間（舊輸入框被移除時不當成失焦存檔）
 let _invFocus = null;               // 重畫前焦點所在的格子 {ym, f, value, s, e, invalid}
 const _invSeriesOn = new Set(['total']);   // 圖表顯示哪幾條線（預設只有總計；只在記憶體）
+// 圖表期間：以「資料中最新的月份」往回算（不是今天），資料不足就顯示全部有的月份。只在記憶體（切頁保留、重新整理回預設）。
+const INV_RANGES = Object.freeze([{ k: '12', n: 12, l: '近 12 個月' }, { k: '24', n: 24, l: '近 24 個月' }, { k: 'all', n: 0, l: '全部' }]);
+let _invRange = '24';
 let _invChart = null;               // 目前的 Chart 實例（重畫前 destroy）
 
 /* ---------- 純函式（測試直接呼叫） ---------- */
@@ -220,11 +225,19 @@ function _invCountNoteText(cnt) {
 }
 // 圖表資料：X 軸＝最早到最新的每一個日曆月（中間沒有的月份也列出、值 null ⇒ 斷線）；
 //   每條線的值：總計用 _invTotal，三倉用原數字；不是數字 ⇒ null。
-function _invChartData(months) {
+//   range：'12' / '24' / 'all'（沒給＝全部）。
+//   終點一律是「最新一個有數字的月份」——跟統計卡的「本月」同一個判斷（_invLatestYm：三倉至少一格有數字），
+//     所以月初剛新增、還沒填的月份不會被算進去（不會出現最後一點是空的）。「全部」也一樣。
+//     三倉都沒有數字（_invLatestYm 是 null）⇒ 照原本以最新月份 key 為終點（圖上全是空的，同之前的空狀態）。
+//   近 12／近 24 個月：從終點往回取 N 個日曆月；資料不足 N 個月就從最早的月份開始。全部：最早的月份到終點。
+function _invChartData(months, range) {
   const keys = Object.keys(months || {}).filter(_invIsYm).sort();
   if (!keys.length) return { labels: [], yms: [], series: {} };
-  const yms = [];
+  let yms = [];
   for (let ym = keys[0]; ym <= keys[keys.length - 1]; ym = _invNextYm(ym)) yms.push(ym);
+  yms = yms.slice(0, yms.indexOf(_invLatestYm(months) || keys[keys.length - 1]) + 1);
+  const r = INV_RANGES.find(x => x.k === range);
+  if (r && r.n && yms.length > r.n) yms = yms.slice(yms.length - r.n);
   const series = {};
   INV_SERIES.forEach(sr => {
     series[sr.k] = yms.map(ym => {
@@ -320,7 +333,7 @@ function _invCellHtml(col, ym, months, ro) {
   const raw = col.t === 'num' ? (cur == null ? '' : String(cur)) : cur;
   const disp = col.t === 'num' ? _invFmtNum(cur) : cur;
   const saving = _invSaving.has(ym + '|' + col.k);
-  return `<td class="inv-cell inv-cell-${col.t}"><input class="inv-in inv-in-${col.t}${saving ? ' inv-saving' : ''}" type="text"`
+  return `<td class="inv-cell inv-cell-${col.t}"><input class="inv-in inv-in-${col.t}${INV_CN_FIELDS[col.k] ? ' inv-in-cnt' : ''}${saving ? ' inv-saving' : ''}" type="text"`
     + (col.t === 'num' ? ' inputmode="decimal"' : ` maxlength="${INV_TXT_MAX}"`)
     + ` autocomplete="off" aria-label="${escapeHtml(_invYmLabel(ym) + ' ' + col.l)}"`
     + ` data-inv-ym="${escapeHtml(ym)}" data-inv-f="${escapeHtml(col.k)}" data-raw="${escapeHtml(raw)}" data-disp="${escapeHtml(disp)}"`
@@ -338,8 +351,10 @@ function _invTableHtml(months, ro) {
   const keys = Object.keys(months).filter(_invIsYm).sort().reverse();
   const years = [...new Set(keys.map(k => k.slice(0, 4)))];
   // 表頭：數字欄（含總計、較上月）靠右、文字欄靠左，內縮都跟輸入框文字一樣（css .inv-th-num / .inv-th-txt）
-  const thCls = c => (c.t === 'txt' ? 'inv-th-txt' : 'inv-th-num') + (c.t === 'auto' ? ' inv-th-auto' : '');
-  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}">${escapeHtml(c.l)}${c.t === 'auto' ? '<span class="inv-auto-tag">自動</span>' : ''}</th>`).join('')}</tr>`;
+  //   表頭跟著該欄內容的對齊方向：數字欄靠右（inv-th-num）、兩個盤點欄置中（inv-th-cnt）、備註靠左（inv-th-txt）
+  //   「自動」標籤放在字【前面】：靠右時切齊數字右緣的是「總計」「較上月」這幾個字，不是標籤
+  const thCls = c => (c.t === 'txt' ? (INV_CN_FIELDS[c.k] ? 'inv-th-cnt' : 'inv-th-txt') : 'inv-th-num') + (c.t === 'auto' ? ' inv-th-auto' : '');
+  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}">${c.t === 'auto' ? '<span class="inv-auto-tag">自動</span>' : ''}${escapeHtml(c.l)}</th>`).join('')}</tr>`;
   // 固定欄寬（css .inv-table 是 table-layout:fixed）：月份、六個數字欄、兩個盤點各有寬度，備註拿剩下的
   const colCls = c => (c.k === 'note' ? 'inv-col-note' : c.t === 'txt' ? 'inv-col-cnt' : 'inv-col-num');
   const cols = `<colgroup><col class="inv-col-ym">${INV_COLS.map(c => `<col class="${colCls(c)}">`).join('')}</colgroup>`;
@@ -383,6 +398,13 @@ function _invCardsHtml(months) {
         ${card('momo', 'MOMO倉', c.momoWh)}
       </div>${cntHtml}`;
 }
+// 期間鈕（樣式同線條切換鈕）。切換時只換這一塊（#inv-range-btns）並重畫圖表，不整頁重畫
+function _invRangeBtnsHtml() {
+  return INV_RANGES.map(r => {
+    const on = _invRange === r.k;
+    return `<button type="button" class="pill inv-range-btn${on ? ' active' : ''}" data-inv-act="range" data-range="${escapeHtml(r.k)}" aria-pressed="${on ? 'true' : 'false'}">${escapeHtml(r.l)}</button>`;
+  }).join('');
+}
 function _invChartHtml() {
   const btns = INV_SERIES.map(sr => {
     const on = _invSeriesOn.has(sr.k);
@@ -392,7 +414,7 @@ function _invChartHtml() {
     ? `<canvas id="${INV_CHART_ID}" aria-label="庫存走勢圖" role="img"></canvas>`
     : '<div class="inv-chart-fail">圖表載入失敗（表格照常可用）</div>';
   return `<div class="inv-chart-card">
-        <div class="inv-chart-hd"><span class="inv-chart-title">庫存走勢</span><span class="filter-spacer"></span>${btns}</div>
+        <div class="inv-chart-hd"><span class="inv-chart-title">庫存走勢</span><span class="filter-spacer"></span><span class="inv-range" id="inv-range-btns">${_invRangeBtnsHtml()}</span>${btns}</div>
         <div class="inv-chart-box">${box}</div>
       </div>`;
 }
@@ -412,7 +434,7 @@ function _invDrawChart() {
   try {
     const old = typeof Chart.getChart === 'function' ? Chart.getChart(cv) : null;
     if (old) old.destroy();
-    const data = _invChartData(_invMonths());
+    const data = _invChartData(_invMonths(), _invRange);
     const grid = _invCssVar('--border'), muted = _invCssVar('--text-muted');
     _invChart = new Chart(cv.getContext('2d'), {
       type: 'line',
@@ -425,7 +447,8 @@ function _invDrawChart() {
           tooltip: { callbacks: { label: ctx => ctx.dataset.label + '：' + (ctx.parsed.y == null ? '—' : _invFmtNum(ctx.parsed.y)) } },
         },
         scales: {
-          x: { ticks: { color: muted || undefined, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+          // 月份標籤自動間隔：autoSkip，另外最多 12 個標籤（「全部」五年多 60 個月時不會擠在一起）
+          x: { ticks: { color: muted || undefined, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 }, grid: { display: false } },
           y: { ticks: { color: muted || undefined, callback: v => _invFmtNum(v) }, grid: { color: grid || undefined } },
         },
       },
@@ -584,6 +607,14 @@ function _invOnClick(e) {
     if (_invSeriesOn.has(k)) { if (_invSeriesOn.size > 1) _invSeriesOn.delete(k); }   // 至少留一條，不讓圖變空白
     else _invSeriesOn.add(k);
     App.render();
+  } else if (act === 'range') {
+    // 期間：只換期間鈕那一塊、重畫圖表；不整頁重畫（表格、卡片、較上月都不動）
+    const k = b.dataset.range;
+    if (!INV_RANGES.some(r => r.k === k) || k === _invRange) return;
+    _invRange = k;
+    const box = document.getElementById('inv-range-btns');
+    if (box) box.innerHTML = _invRangeBtnsHtml();
+    _invDrawChart();
   }
 }
 function _invIsIn(t) { return !!(t && t.classList && t.classList.contains('inv-in')); }

@@ -2549,12 +2549,16 @@
   text-align: right;
 }
 .inv-table thead th.inv-ym { text-align: left; }
-/* 內縮 11px＝輸入框文字的位置（1px 邊框＋10px padding）：數字欄表頭右邊、文字欄表頭左邊都跟輸入框文字對齊 */
-.inv-table thead th.inv-th-num { padding-right: 11px; }
+/* 表頭跟著該欄內容的對齊方向：
+     數字欄靠右、右內縮 16px＝數字輸入框文字的位置（1px 邊框＋15px padding-right，見 .inv-in-num）、＝總計／較上月 td 的 16px；
+     兩個盤點欄置中（th 與輸入框左右 padding 都對稱，中心點自然重合）；備註靠左、左內縮 11px＝輸入框文字（1px 邊框＋10px padding）。 */
+.inv-table thead th.inv-th-num { padding-right: 16px; }
+.inv-table thead th.inv-th-cnt { text-align: center; }
 .inv-table thead th.inv-th-txt { padding-left: 11px; text-align: left; }
 .inv-th-auto { color: var(--text-muted); }
+/* 「自動」標籤放在「總計」「較上月」字的前面（表頭靠右時切齊數字的是字），所以間距在右邊 */
 .inv-auto-tag {
-  margin-left: 4px;
+  margin-right: 4px;
   padding: 0 5px;
   border-radius: 4px;
   background: var(--primary-soft);
@@ -2580,8 +2584,8 @@
 .inv-year-n { margin-left: 8px; font-size: 11px; font-weight: 500; color: var(--text-muted); }
 /* 總計、較上月：跟輸入格同字級、不加粗（第 3 塊起；原本 600 看起來跟其他數字欄大小不一） */
 /*   選擇器要寫成 .inv-table td.inv-auto：只寫 .inv-auto 權重比 .inv-table td { padding:0 } 低，padding 會被蓋成 0（v805 實測）；
-     右內縮 11px 跟輸入框文字、表頭對齊。紅綠色的規則也跟著提高權重，不然會被這條的 color 蓋掉。 */
-.inv-table td.inv-auto { padding: 6px 11px; text-align: right; color: var(--text); font-size: 13px; font-weight: 400; }
+     右內縮 16px 跟數字輸入框文字、表頭對齊。紅綠色的規則也跟著提高權重，不然會被這條的 color 蓋掉。 */
+.inv-table td.inv-auto { padding: 6px 16px; text-align: right; color: var(--text); font-size: 13px; font-weight: 400; }
 .inv-table td.inv-auto.inv-neg { color: var(--danger); }
 .inv-table td.inv-auto.inv-pos { color: var(--success); }
 .inv-in {
@@ -2596,7 +2600,10 @@
   font-family: inherit;
   font-variant-numeric: tabular-nums;
 }
-.inv-in-num { text-align: right; }
+/* 數字輸入框：文字右邊界＝1px 邊框＋15px＝16px，跟表頭、總計／較上月對齊，也跟右邊下一欄的文字拉開距離 */
+.inv-in-num { text-align: right; padding-right: 15px; }
+/* 兩個盤點欄：內容置中（表頭 .inv-th-cnt 也置中） */
+.inv-in-cnt { text-align: center; }
 /* 輸入框不設 min-width：欄寬由 <colgroup> 決定（固定欄寬），min-width 只會讓輸入框超出格子 */
 .inv-in:hover:not([readonly]) { border-color: var(--border); }
 .inv-in:focus { outline: none; border-color: var(--primary); background: var(--surface); }
@@ -2625,6 +2632,8 @@
   box-shadow: var(--shadow-sm);
 }
 .inv-chart-hd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+/* 期間鈕（近 12／近 24 個月／全部）：跟線條切換鈕同一列，用一條直線隔開 */
+.inv-range { display: inline-flex; flex-wrap: wrap; gap: 6px; padding-right: 8px; margin-right: 2px; border-right: 1px solid var(--border); }
 .inv-chart-title { font-size: 14px; font-weight: 700; color: var(--text); }
 /* 切換鈕前面的小圓點＝那條線的顏色（圖例關掉了，靠這個對應） */
 .inv-series-btn::before {
