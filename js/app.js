@@ -1048,6 +1048,7 @@ const App = {
   _isRouteAllowed(route, user) {
     if (route === 'dashboard') return true;
     if (route === 'employees') return true;
+    if (route === 'issues') return true;   // 問題追蹤：所有登入者可看（寫入權限由 issues.js 判斷）
     if (route === 'users') return user.role === 'admin' || user.role === 'view';  // view：唯讀檢視帳號頁
     if (route.startsWith('office-')) {
       const rest = route.slice('office-'.length);
@@ -1276,6 +1277,7 @@ const App = {
       case 'dashboard': main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs(); break;
       case 'employees': main.innerHTML = this.viewEmployees(); this.bindFilterBar(); break;
       case 'users': main.innerHTML = this.viewUsers(); break;
+      case 'issues': main.innerHTML = this.viewIssues(); this.bindIssues(); break;
       default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs();
     }
   },
@@ -1289,6 +1291,7 @@ const App = {
   //   - office-d1-profit（淨利表）刻意不在任何清單：它走 profitDataReady 精準更新，不經整頁 App.render。
   CLOUD_RENDER_ROUTES: {
     insight: ['office-d1-insight'],
+    issues:  ['issues'],   // 問題追蹤：issues collection 訂閱（js/pages/issues.js）；不放進 main，app/main 推播不重畫這頁
     main:    ['dashboard','employees','users',
               'office-d1','office-d1-kpi','office-d2','office-d2-kpi',
               'office-d2-pricing','office-d2-margin','office-d3','office-d4'],

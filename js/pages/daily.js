@@ -3313,11 +3313,13 @@ function _tiDraw(img, maxEdge, type, quality) {
 }
 
 // 階梯降級壓縮。回傳 { blob, mime, bytes, note } ；壓不下來回傳 null。
-async function _tiCompress(file) {
+// targetBytes 選填：不給＝TI_TARGET_BYTES（老闆任務一律不給，結果不變）；問題追蹤照片給 200KB（js/pages/issues.js）。
+async function _tiCompress(file, targetBytes) {
+  const limit = (Number(targetBytes) > 0) ? Number(targetBytes) : TI_TARGET_BYTES;
   if (!file || !String(file.type || '').startsWith('image/')) {
     throw new Error('不是圖片檔');
   }
-  if (file.size <= TI_TARGET_BYTES) {
+  if (file.size <= limit) {
     return { blob: file, mime: file.type, bytes: file.size, note: '原檔未壓縮' };
   }
   const url = URL.createObjectURL(file);
@@ -3346,7 +3348,7 @@ async function _tiCompress(file) {
     ];
     for (const s of steps) {
       const blob = await _tiDraw(img, s.maxEdge, s.type, s.q);
-      if (blob && blob.size <= TI_TARGET_BYTES) {
+      if (blob && blob.size <= limit) {
         return { blob, mime: s.type, bytes: blob.size, note: s.note };
       }
     }
@@ -3478,4 +3480,9 @@ window.__taskImageCleanup = async function () {
   console.log('建議再跑一次 __taskImageAudit() 確認結果');
 };
 
-Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, adjOwnerOf, adjShopsOf, ADJ_ALL_SHOPS, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES, _tiListAll });
+// 給其他頁共用「可當負責人的帳號」規則（#306 同一份）：未停用、未刪除、非 view、非共用帳號（SHARED_ACCOUNTS）。
+//   包一層而不是直接掛 _adjOwnerSelectableUsers + SHARED_ACCOUNTS：共用帳號清單留在本檔、別頁拿不到也改不到。
+//   目前用在：問題追蹤（js/pages/issues.js）的指派下拉。
+function adjOwnerSelectableUsers(users) { return _adjOwnerSelectableUsers(users, SHARED_ACCOUNTS); }
+
+Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, adjOwnerOf, adjShopsOf, ADJ_ALL_SHOPS, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES, _tiListAll, adjOwnerSelectableUsers });
