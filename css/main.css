@@ -2307,6 +2307,9 @@
 .iss-btn-done { color: var(--success); }
 .iss-btn-danger { color: var(--danger); }
 .iss-btn[disabled], .btn-add[disabled] { opacity: .5; cursor: not-allowed; }
+/* 刪除確認彈窗的確認鈕：蓋過 .btn-primary 的主色（含 hover），專案沒有實心危險鈕 class，所以在這裡新增 */
+.btn-primary.iss-btn-confirm-danger { background: var(--danger); }
+.btn-primary.iss-btn-confirm-danger:hover { background: var(--danger); filter: brightness(.92); }
 .iss-ro-hint, .iss-mock-banner {
   margin-bottom: 12px;
   padding: 8px 12px;

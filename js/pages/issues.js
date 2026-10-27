@@ -302,9 +302,10 @@ Object.assign(App, {
         const desc = String((document.getElementById('iss-f-desc') || {}).value || '').trim();
         const areaEl = document.querySelector('input[name="iss-f-area"]:checked');
         const prEl = document.querySelector('input[name="iss-f-pr"]:checked');
-        const area = areaEl ? areaEl.value : 'other';
+        const area = (areaEl && ISS_AREAS.some(a => a.key === areaEl.value)) ? areaEl.value : '';
         const priority = _issPrKey(prEl ? prEl.value : 'normal');
         if (!title) { _issSetErr('iss-f-err', '請填寫問題標題'); return false; }
+        if (!area) { _issSetErr('iss-f-err', '請選擇區塊'); return false; }   // 區塊必填（不再自動存成「其他」）
         _issSetErr('iss-f-err', '');
         const me = _issMe(), now = Date.now();
         let job;
@@ -385,6 +386,11 @@ Object.assign(App, {
       <div class="iss-modal-target">${escapeHtml(it.title)}</div>
       <p class="iss-modal-note">確定要刪除這筆問題嗎？刪除後清單上不再顯示。</p>`,
       saveLabel: '刪除',
+      // 共用 openModal 的確認鈕固定是 .btn-primary（主色），刪除改用危險色：只加 class，不寫 inline style
+      onMount: () => {
+        const b = document.getElementById('modal-save');
+        if (b) b.classList.add('iss-btn-confirm-danger');
+      },
       onSave: () => {
         if (saving) return false;
         const me = _issMe();
