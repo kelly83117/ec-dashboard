@@ -6,7 +6,9 @@
  * 事件：data-iss-act ＋ #main-content 上【只綁一次】的具名委派（_issOnClick），不寫 inline onclick，
  *   所以本檔函式不必掛 window。#main-content 本身不會被 render 換掉，只換 innerHTML。
  * 權限：看清單＝所有登入者；新增＝非 view；編輯＝提出人本人或 admin（且非 view）；
- *   狀態切換、刪除＝只有 admin。真正防線仍是資料層（Store 閘門＋__installReadonlyCloudGuard）。
+ *   狀態切換、指派負責人、刪除＝只有 admin。真正防線仍是資料層（Store 閘門＋__installReadonlyCloudGuard）。
+ * 第 2 塊：負責人 assignee（username，未指派＝null）；頁首 4 張計數卡（取代狀態分頁）＋篩選列（只看我負責的、區塊），
+ *   篩選狀態只在記憶體。指派人選共用 daily.js 的 window.adjOwnerSelectableUsers（#306 同一份規則）。
  * 本機模擬：Console 打 __issuesMock(true)，只在 localhost 生效、資料只在記憶體（見檔尾）。
  */
 const App = window.App;
@@ -36,11 +38,12 @@ const ISS_PRIORITIES = Object.freeze([
 ]);
 const ISS_PR_RANK = { urgent: 0, normal: 1, low: 2 };
 const ISS_STATUS_LABEL = { open: '待處理', doing: '處理中', done: '已解決' };
-const ISS_TABS = Object.freeze([
-  { key: 'all',   label: '全部' },
-  { key: 'open',  label: '待處理' },
-  { key: 'doing', label: '處理中' },
-  { key: 'done',  label: '已解決' },
+// 計數卡（第 2 塊取代第 1 塊的狀態分頁）：未指派只算未解決的
+const ISS_CARDS = Object.freeze([
+  { key: 'unassigned', label: '未指派', icon: '🙋' },
+  { key: 'open',       label: '待處理', icon: '📥' },
+  { key: 'doing',      label: '處理中', icon: '🔧' },
+  { key: 'done',       label: '已解決', icon: '✅' },
 ]);
 const ISS_RO_MSG = '僅檢視帳號無法提出問題';
 
@@ -48,7 +51,9 @@ let _issList = [];        // 目前資料來源（雲端或模擬）最新快照
 let _issLoaded = false;   // 收過第一份快照
 let _issUnsub = null;     // 目前訂閱的取消函式
 let _issMock = null;      // 模擬模式：{ items: Map, listeners: Set, api }；null＝走雲端
-let _issTab = 'all';      // 狀態分頁（只在記憶體）
+let _issCard = null;      // 選中的計數卡（null＝不篩）；再點同一張＝取消。只在記憶體
+let _issMine = false;     // 篩選列「只看我負責的」
+let _issArea = '';        // 篩選列區塊（''＝全部）
 let _issBusy = false;     // 卡片按鈕寫入中（防連點）
 
 /* ---------- 小工具 ---------- */
@@ -78,6 +83,35 @@ function _issName(username, resolve) {
   if (!raw) return '—';
   const id = resolve ? resolve(raw) : null;
   return (id && id.ok) ? id.display : raw;
+}
+// 負責人顯示：同 _issName，帳號停用 / 刪除時加註
+function _issAssigneeName(username, resolve) {
+  const raw = String(username == null ? '' : username).trim();
+  if (!raw) return '';
+  const id = resolve ? resolve(raw) : null;
+  if (!id || !id.ok) return raw;
+  return id.display + (id.status === 'disabled' ? '（已停用）' : (id.status === 'deleted' ? '（已刪除）' : ''));
+}
+const _issHasAssignee = it => !!String((it && it.assignee) || '').trim();
+const _issIsMine = it => { const me = App.currentUser; return !!me && _issHasAssignee(it) && _issNorm(it.assignee) === _issNorm(me.username); };
+// 計數卡條件
+function _issMatchCard(it, card) {
+  const st = _issStKey(it.status);
+  if (card === 'unassigned') return st !== 'done' && !_issHasAssignee(it);
+  if (card === 'open' || card === 'doing' || card === 'done') return st === card;
+  return true;
+}
+// 篩選列條件（只看我負責的、區塊）
+function _issMatchFilter(it) {
+  if (_issMine && !_issIsMine(it)) return false;
+  if (_issArea && it.area !== _issArea) return false;
+  return true;
+}
+// 計數卡數字：依篩選列算，不受目前選中的卡片影響（點下去列表筆數＝卡上數字）
+function _issCounts(list) {
+  const c = { unassigned: 0, open: 0, doing: 0, done: 0 };
+  list.forEach(it => ISS_CARDS.forEach(k => { if (_issMatchCard(it, k.key)) c[k.key]++; }));
+  return c;
 }
 
 /* ---------- 權限 ---------- */
@@ -176,7 +210,14 @@ function _issCardHtml(it, resolve) {
   let resolution = '';
   if (st === 'done') resolution = resolvedLine('完成說明', '');
   else if (String(it.resolution || '').trim()) resolution = resolvedLine('上次完成說明', ' iss-resolution-prev');
+  // 負責人：已指派顯示姓名；未指派且未解決＝醒目標籤；未指派但已解決＝「—」（未指派只對未解決的有意義）
+  const hasAsg = _issHasAssignee(it);
+  const assignee = hasAsg
+    ? `<div class="iss-assignee">負責人：${escapeHtml(_issAssigneeName(it.assignee, resolve))}</div>`
+    : (st !== 'done' ? `<div class="iss-assignee"><span class="iss-tag iss-unassigned">未指派</span></div>` : `<div class="iss-assignee">負責人：—</div>`);
   const acts = [];
+  if (isAdmin && !hasAsg && st !== 'done') acts.push(_issBtn('claim', it.id, '我來處理', 'btn-ghost iss-btn iss-btn-claim'));
+  if (isAdmin) acts.push(_issBtn('assign', it.id, hasAsg ? '改負責人' : '指派', 'btn-ghost iss-btn'));
   if (isAdmin && st === 'open')  acts.push(_issBtn('start', it.id, '開始處理', 'btn-ghost iss-btn'));
   if (isAdmin && st !== 'done')  acts.push(_issBtn('resolve', it.id, '標記已解決', 'btn-ghost iss-btn iss-btn-done'));
   if (isAdmin && st === 'done')  acts.push(_issBtn('reopen', it.id, '重新開啟', 'btn-ghost iss-btn'));
@@ -193,6 +234,7 @@ function _issCardHtml(it, resolve) {
       <div class="iss-title">${escapeHtml(it.title)}</div>
       ${String(it.desc || '').trim() ? `<div class="iss-desc">${escapeHtml(it.desc)}</div>` : ''}
       <div class="iss-meta">提出：${escapeHtml(_issName(it.createdBy, resolve))}・${escapeHtml(_issFmt(it.createdAt))}</div>
+      ${assignee}
       ${resolution}
       ${acts.length ? `<div class="iss-actions">${acts.join('')}</div>` : ''}
     </div>`;
@@ -240,17 +282,27 @@ Object.assign(App, {
     const subOk = _issEnsureSub();
     const resolve = _issResolver();
     const all = _issVisible();
-    const count = { all: all.length, open: 0, doing: 0, done: 0 };
-    all.forEach(it => { count[_issStKey(it.status)]++; });
-    const shown = _issSorted(_issTab === 'all' ? all : all.filter(it => _issStKey(it.status) === _issTab));
-    const pills = ISS_TABS.map(t =>
-      `<button type="button" class="pill${_issTab === t.key ? ' active' : ''}" data-iss-act="tab" data-tab="${t.key}">${escapeHtml(t.label)}（${count[t.key]}）</button>`).join('');
+    // 組合：未刪除 AND 篩選列（只看我負責的、區塊）AND 計數卡（若有）。卡上數字只依篩選列算。
+    const filtered = all.filter(_issMatchFilter);
+    const count = _issCounts(filtered);
+    const shown = _issSorted(_issCard ? filtered.filter(it => _issMatchCard(it, _issCard)) : filtered);
+    const cards = ISS_CARDS.map(c => {
+      const on = _issCard === c.key;
+      return `<button type="button" class="stat-card iss-stat iss-stat-${c.key}${on ? ' iss-stat-active' : ''}" data-iss-act="card" data-card="${c.key}" aria-pressed="${on ? 'true' : 'false'}">
+          <div class="stat-icon">${c.icon}</div>
+          <div class="stat-label">${escapeHtml(c.label)}</div>
+          <div class="stat-value">${count[c.key]}</div>
+        </button>`;
+    }).join('');
+    const areaOpts = [{ key: '', label: '全部區塊' }].concat(ISS_AREAS).map(a =>
+      `<option value="${escapeHtml(a.key)}"${_issArea === a.key ? ' selected' : ''}>${escapeHtml(a.label)}</option>`).join('');
     const ro = _issIsRO();
     const addBtn = _issBtn('new', '', '＋ 提出問題', 'btn-add', ro ? { disabled: true, title: ISS_RO_MSG } : null);
     let body;
     if (!subOk) body = `<div class="empty"><div class="emoji">⏳</div>雲端尚未就緒，稍後會自動載入</div>`;
     else if (!_issLoaded) body = `<div class="empty"><div class="emoji">⏳</div>載入中…</div>`;
-    else if (!shown.length) body = `<div class="empty"><div class="emoji">✅</div>${all.length ? '這個分頁沒有問題' : '目前沒有任何問題'}</div>`;
+    else if (!all.length) body = `<div class="empty"><div class="emoji">✅</div>目前沒有任何問題</div>`;
+    else if (!shown.length) body = `<div class="empty"><div class="emoji">🔍</div>沒有符合條件的問題</div>`;
     else body = `<div class="iss-list">${shown.map(it => _issCardHtml(it, resolve)).join('')}</div>`;
     return `
       <div class="page-header">
@@ -259,8 +311,10 @@ Object.assign(App, {
       </div>
       ${_issMock ? `<div class="iss-mock-banner">模擬模式：資料只在本機記憶體，重新整理就消失（__issuesMock(false) 關閉）</div>` : ''}
       ${ro ? `<div class="iss-ro-hint">${escapeHtml(ISS_RO_MSG)}</div>` : ''}
-      <div class="filter-bar">
-        ${pills}
+      <div class="stat-grid iss-stat-grid">${cards}</div>
+      <div class="filter-bar iss-filter-bar">
+        <button type="button" class="pill iss-mine${_issMine ? ' active' : ''}" data-iss-act="mine" aria-pressed="${_issMine ? 'true' : 'false'}">只看我負責的</button>
+        <select class="iss-area-select" data-iss-act="area" aria-label="區塊">${areaOpts}</select>
         <span class="filter-spacer"></span>
         ${addBtn}
       </div>
@@ -271,8 +325,10 @@ Object.assign(App, {
     const main = document.getElementById('main-content');
     // 🔴 只綁一次：#main-content 不會被換掉，render 只換 innerHTML；旗標記在元素上，
     //   每次 render 都會呼叫 bindIssues，但第二次起直接略過 → 一次點擊只觸發一次。
+    //   click 與 change（只給區塊下拉）在同一個 if 裡一起掛，共用同一個旗標。
     if (main && !main.__issBound) {
       main.addEventListener('click', _issOnClick);
+      main.addEventListener('change', _issOnChange);
       main.__issBound = true;
     }
     // 雲端物件晚於 render 才就緒（firebase.js 在 pages 之後載入）：就緒後補訂閱並重畫
@@ -314,7 +370,7 @@ Object.assign(App, {
           job = _issWrite('create', newId, {
             id: newId, title, area, priority, desc, status: 'open', resolution: '',
             createdAt: now, createdBy: me.username, updatedAt: now, updatedBy: me.username,
-            resolvedAt: null, resolvedBy: '', deleted: false,
+            resolvedAt: null, resolvedBy: '', assignee: null, deleted: false,
           });
         } else {
           const fields = {};
@@ -416,11 +472,77 @@ Object.assign(App, {
     _issBusy = true;
     try {
       // 重新開啟：resolution / resolvedAt / resolvedBy 保留不清，畫面標成「上次完成說明」
-      const ok = await _issWrite('update', it.id, { status, updatedAt: Date.now(), updatedBy: me.username });
+      const fields = { status, updatedAt: Date.now(), updatedBy: me.username };
+      // 開始處理時尚未指派 → 同一次 update 一起指派給自己
+      if (status === 'doing' && !_issHasAssignee(it)) fields.assignee = me.username;
+      const ok = await _issWrite('update', it.id, fields);
       if (ok && this.route === 'issues') this.render();
     } finally {
       _issBusy = false;
     }
+  },
+
+  // 我來處理：未指派、未解決的問題一鍵指派給自己
+  async _issClaim(id) {
+    if (!_issIsAdmin() || _issBusy) return;
+    const it = _issList.find(x => x.id === id && x.deleted !== true);
+    if (!it) { showToast('找不到這筆問題（可能已被刪除）', 'error'); return; }
+    if (_issHasAssignee(it) || _issStKey(it.status) === 'done') return;
+    const me = _issMe();
+    _issBusy = true;
+    try {
+      const ok = await _issWrite('update', it.id, { assignee: me.username, updatedAt: Date.now(), updatedBy: me.username });
+      if (ok) { showToast('已指派給自己', 'success'); if (this.route === 'issues') this.render(); }
+    } finally {
+      _issBusy = false;
+    }
+  },
+
+  // 指派 / 改負責人：人選共用 daily.js 的 adjOwnerSelectableUsers（#306 同一份規則）
+  openIssueAssignModal(id) {
+    if (!_issIsAdmin()) return;
+    const it = _issList.find(x => x.id === id && x.deleted !== true);
+    if (!it) { showToast('找不到這筆問題（可能已被刪除）', 'error'); return; }
+    const pickFn = window.adjOwnerSelectableUsers;
+    const users = Store.get(Store.KEYS.users, []);
+    const pick = typeof pickFn === 'function' ? pickFn(Array.isArray(users) ? users : []) : [];
+    const cur = String(it.assignee || '').trim();
+    const inPick = cur && pick.some(p => _issNorm(p.username) === _issNorm(cur));
+    const opts = [{ value: '', text: '未指派' }].concat(pick.map(p => ({ value: p.username, text: p.label })));
+    // 目前負責人不在可選名單（例：已停用）→ 額外列出並預選，按儲存沒改就不會被誤清
+    if (cur && !inPick) opts.push({ value: cur, text: _issAssigneeName(cur, _issResolver()) || cur });
+    const selVal = inPick ? pick.find(p => _issNorm(p.username) === _issNorm(cur)).username : cur;
+    let saving = false;
+    this.openModal({
+      title: '指派負責人',
+      bodyHtml: `
+      <div class="iss-modal-target">${escapeHtml(it.title)}</div>
+      <div class="field">
+        <label for="iss-f-assignee">負責人</label>
+        <select id="iss-f-assignee">${opts.map(o =>
+          `<option value="${escapeHtml(o.value)}"${o.value === selVal ? ' selected' : ''}>${escapeHtml(o.text)}</option>`).join('')}</select>
+      </div>
+      ${typeof pickFn === 'function' ? '' : '<p class="iss-modal-note">讀不到帳號清單，只能設為未指派。</p>'}
+      <div class="iss-form-err" id="iss-a-err" hidden></div>`,
+      saveLabel: '儲存',
+      onSave: () => {
+        if (saving) return false;
+        const v = String((document.getElementById('iss-f-assignee') || {}).value || '').trim();
+        const next = v || null;
+        if (_issNorm(next) === _issNorm(cur)) { this.closeModal(); return false; }   // 沒改就不送
+        if (next && !opts.some(o => o.value === next)) { _issSetErr('iss-a-err', '請從清單選擇負責人'); return false; }
+        const me = _issMe();
+        saving = true; _issSaveBtnBusy(true);
+        _issWrite('update', it.id, { assignee: next, updatedAt: Date.now(), updatedBy: me.username }).then(ok => {
+          saving = false; _issSaveBtnBusy(false);
+          if (!ok) return;
+          this.closeModal();
+          showToast(next ? '已指派' : '已改為未指派', 'success');
+          if (this.route === 'issues') this.render();
+        });
+        return false;
+      },
+    });
   },
 });
 
@@ -431,16 +553,29 @@ function _issOnClick(e) {
   if (!btn || btn.disabled) return;
   const act = btn.dataset.issAct, id = btn.dataset.id || '';
   switch (act) {
-    case 'tab':
-      if (ISS_TABS.some(t => t.key === btn.dataset.tab)) { _issTab = btn.dataset.tab; App.render(); }
+    case 'card':
+      // 點一張＝套用、再點同一張＝取消、點另一張＝換過去（同時最多一張）
+      if (ISS_CARDS.some(c => c.key === btn.dataset.card)) { _issCard = (_issCard === btn.dataset.card) ? null : btn.dataset.card; App.render(); }
       break;
+    case 'mine':    _issMine = !_issMine; App.render(); break;
     case 'new':     App.openIssueModal(null); break;
+    case 'claim':   App._issClaim(id); break;
+    case 'assign':  App.openIssueAssignModal(id); break;
     case 'edit':    App.openIssueModal(id); break;
     case 'start':   App._issSetStatus(id, 'doing'); break;
     case 'reopen':  App._issSetStatus(id, 'open'); break;
     case 'resolve': App.openIssueResolveModal(id); break;
     case 'delete':  App.openIssueDeleteModal(id); break;
   }
+}
+// #main-content 的 change 委派（只給篩選列的區塊下拉；跟 _issOnClick 一起在 bindIssues 掛一次）
+function _issOnChange(e) {
+  if (App.route !== 'issues') return;
+  const el = e.target;
+  if (!el || !el.dataset || el.dataset.issAct !== 'area') return;
+  const v = String(el.value || '');
+  _issArea = (v === '' || ISS_AREAS.some(a => a.key === v)) ? v : '';
+  App.render();
 }
 
 /* ---------- 本機模擬開關：__issuesMock(true / false) ----------

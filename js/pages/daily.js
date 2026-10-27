@@ -3478,4 +3478,9 @@ window.__taskImageCleanup = async function () {
   console.log('建議再跑一次 __taskImageAudit() 確認結果');
 };
 
-Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, adjOwnerOf, adjShopsOf, ADJ_ALL_SHOPS, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES, _tiListAll });
+// 給其他頁共用「可當負責人的帳號」規則（#306 同一份）：未停用、未刪除、非 view、非共用帳號（SHARED_ACCOUNTS）。
+//   包一層而不是直接掛 _adjOwnerSelectableUsers + SHARED_ACCOUNTS：共用帳號清單留在本檔、別頁拿不到也改不到。
+//   目前用在：問題追蹤（js/pages/issues.js）的指派下拉。
+function adjOwnerSelectableUsers(users) { return _adjOwnerSelectableUsers(users, SHARED_ACCOUNTS); }
+
+Object.assign(window, { collectAdjustments, getAdjIndex, buildCardAdjustmentsHtml, adjOwnerOf, adjShopsOf, ADJ_ALL_SHOPS, _tiGenId, _tiDraw, _tiCompress, _tiUpload, TI_MAX_IMAGES, TI_TARGET_BYTES, _tiListAll, adjOwnerSelectableUsers });
