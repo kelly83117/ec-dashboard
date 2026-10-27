@@ -20,6 +20,8 @@
  * 第 2 塊：表格上方 4 張卡（_invCardsHtml）＋最近盤點小字＋折線圖（_invDrawChart，Chart.js 4.4.0，index.html 已載入）。
  *   卡片與圖表跟表格在同一次 viewInventory 裡畫：雲端推播重畫、打字中保留焦點（_invCaptureFocus / _invRestoreFocus）都一起涵蓋；
  *   圖表在焦點放回去【之後】才畫，new Chart 不會搶焦點。切換鈕狀態（_invSeriesOn）只在記憶體。
+ * 第 3 塊：匯入舊 Google 試算表，Console 打 __inventoryImportLegacy()（只限管理員；先預覽，再 { commit: true } 才寫）。
+ *   資料不進程式碼；匯入的月份多 source:'legacy-sheet'、legacyRow 兩個欄位（畫面不顯示）。
  */
 const App = window.App;
 const { escapeHtml, showToast } = window;
@@ -179,6 +181,15 @@ function _invLatestCount(months) {
   const ym = keys.find(k => months[k] && (t(months[k].countNoteShopee) || t(months[k].countNoteMomo)));
   return ym ? { ym, shopee: t(months[ym].countNoteShopee), momo: t(months[ym].countNoteMomo) } : null;
 }
+// 「最近盤點」那行的文字（未 escape）。備註本身已含通路名（蝦皮 / MO）就原樣顯示，不含才加前綴；沒填的那一邊不顯示。
+//   例：蝦皮10/1、MO 9/30填 ⇒「最近盤點：蝦皮10/1／MO 9/30填（2026/09）」；10/1、9/30 ⇒「最近盤點：蝦皮 10/1／MOMO 9/30（2026/09）」
+function _invCountNoteText(cnt) {
+  if (!cnt) return '';
+  const parts = [];
+  if (cnt.shopee) parts.push(/蝦皮/.test(cnt.shopee) ? cnt.shopee : '蝦皮 ' + cnt.shopee);
+  if (cnt.momo) parts.push(/mo/i.test(cnt.momo) ? cnt.momo : 'MOMO ' + cnt.momo);
+  return '最近盤點：' + parts.join('／') + '（' + _invYmLabel(cnt.ym) + '）';
+}
 // 圖表資料：X 軸＝最早到最新的每一個日曆月（中間沒有的月份也列出、值 null ⇒ 斷線）；
 //   每條線的值：總計用 _invTotal，三倉用原數字；不是數字 ⇒ null。
 function _invChartData(months) {
@@ -316,7 +327,7 @@ function _invCardsHtml(months) {
           <div class="stat-meta">${meta}</div>` : ''}
         </div>`;
   const cnt = _invLatestCount(months);
-  const cntHtml = cnt ? `<p class="inv-count-note">最近盤點：蝦皮 ${escapeHtml(cnt.shopee || '—')}／MOMO ${escapeHtml(cnt.momo || '—')}（${escapeHtml(_invYmLabel(cnt.ym))}）</p>` : '';
+  const cntHtml = cnt ? `<p class="inv-count-note">${escapeHtml(_invCountNoteText(cnt))}</p>` : '';
   return `<div class="stat-grid inv-stat-grid">
         ${card('total', '本月總庫存', c.total, '較上月 ' + diff)}
         ${card('company', '公司倉', c.companyWh)}
@@ -613,6 +624,415 @@ Object.assign(App, {
   },
 });
 
+/* ---------- 第 3 塊：匯入舊 Google 試算表「元創數位公司庫存&MOMO庫存統計表」（只給管理員，Console 打 __inventoryImportLegacy()） ----------
+ * 資料不進程式碼：使用者自己從試算表「檔案 → 下載 → CSV」存檔，在彈窗裡選檔 → 解析 → Console 預覽（console.table）。
+ * 兩段式：__inventoryImportLegacy() 只預覽、不寫；__inventoryImportLegacy({ commit: true }) 才拿上一次預覽結果寫入。
+ * 已存在的月份（months 裡有這個 key，不管有沒有數字）一律跳過、不覆蓋；寫入前再用雲端現值確認一次。
+ * 寫入：一個年份一次 writePaths（同一批原子成功或失敗），寫完讀回逐月逐欄比對；一批失敗不中斷。重跑時已寫入的月份會被跳過，可以安全接續。
+ * 每月寫入 7 個欄位＋source:'legacy-sheet'＋legacyRow（試算表列號）＋createdAt/By、updatedAt/By（執行者、伺服器時間）；文件頂層沒有 schema 時補 schema:1。
+ * 試算表的「總計」「前月份比較」不寫（畫面即時算），只拿來對帳：差超過 INV_LEGACY_TOL 元列出來，照樣寫入。
+ * 下面 _invLegacy* 是純函式（不碰 DOM、不碰雲端），工具與測試共用。 */
+const INV_LEGACY_TOL = 1;   // 對帳容許差（元）：差超過 1 元才算不一致
+const INV_LEGACY_FIELDS = Object.freeze(['companyWh', 'inTransit', 'momoWh', 'countNoteShopee', 'countNoteMomo', 'orderAmount', 'note']);
+
+// RFC 4180（同 issues.js _issLegacyParseCsv）：引號內可含逗號與換行，"" 代表一個 "；CRLF / LF / CR 都當換行；去 BOM。
+//   回 { ok:true, rows:[{ row: 試算表列號（從 1）, cells }] } 或 { ok:false, error }
+function _invLegacyParseCsv(text) {
+  let s = String(text == null ? '' : text);
+  if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1);
+  const rows = [];
+  let row = [], cell = '', q = false;
+  const endRow = () => { row.push(cell); rows.push(row); row = []; cell = ''; };
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (q) {
+      if (ch === '"') { if (s[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\r') { if (s[i + 1] === '\n') i++; endRow(); }
+    else if (ch === '\n') endRow();
+    else cell += ch;
+  }
+  if (q) return { ok: false, error: 'CSV 格式錯誤：有引號沒有閉合（檔案可能不完整）' };
+  if (cell !== '' || row.length) endRow();
+  return { ok: true, rows: rows.map((cells, i) => ({ row: i + 1, cells })) };
+}
+const _invLegacyTrim = v => String(v == null ? '' : v).replace(/[\s　 ]+/g, ' ').trim();
+// 數字格 → { v: 數字或 null, warn: 字串或 null }。看不懂一律 null＋警告，不猜。
+function _invLegacyNum(raw) {
+  const orig = _invLegacyTrim(raw);
+  if (orig === '') return { v: null, warn: null };
+  if (/^#[A-Z0-9\/]+[!?]?$/i.test(orig)) return { v: null, warn: '試算表錯誤值 ' + orig };
+  let t = orig.replace(/NT\$|\$|,|\s/g, '').replace(/[－−]/g, '-');
+  if (t === '-') return { v: null, warn: '只有「-」，不確定是 0 還是沒填，當空白' };
+  let neg = false;
+  const p = /^\((.+)\)$/.exec(t);
+  if (p) { neg = true; t = p[1]; }
+  if (!/^-?\d+(\.\d+)?$/.test(t) || (neg && t[0] === '-')) return { v: null, warn: '看不懂：' + orig };
+  let v = parseFloat(t);
+  if (neg) v = -v;
+  const dec = (t.split('.')[1] || '').length;
+  // 四捨五入用十進位字串位移（'2200.555e2'），避開 2200.555*100＝220055.49999… 的浮點誤差；負數照絕對值進位
+  if (dec > 2) return { v: (v < 0 ? -1 : 1) * Math.round(parseFloat(t.replace('-', '') + 'e2')) / 100, warn: '超過 2 位小數，四捨五入：' + orig };
+  return { v, warn: null };
+}
+// 月份格 → { ok:true, ym } 或 { ok:false, reason }。接受 2022/01、2022/1、2022-01、2022.01、2022年1月、2022/1/1（日期只接受 1 號）。
+function _invLegacyYm(raw) {
+  const t = _invLegacyTrim(raw).replace(/\s/g, '');
+  if (t === '') return { ok: false, reason: '月份空白' };
+  let m = /^(\d{4})[\/\-.](\d{1,2})$/.exec(t) || /^(\d{4})年(\d{1,2})月$/.exec(t);
+  let day = null;
+  if (!m) { const d = /^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/.exec(t); if (d) { m = d; day = +d[3]; } }
+  if (!m) return { ok: false, reason: '月份看不懂：' + _invLegacyTrim(raw) };
+  const y = +m[1], mo = +m[2];
+  if (y < 2000 || y > 2099) return { ok: false, reason: '年份不合理：' + _invLegacyTrim(raw) };
+  if (mo < 1 || mo > 12) return { ok: false, reason: '月份不合理：' + _invLegacyTrim(raw) };
+  if (day != null && day !== 1) return { ok: false, reason: '月份是日期但不是 1 號：' + _invLegacyTrim(raw) };
+  return { ok: true, ym: y + '-' + String(mo).padStart(2, '0') };
+}
+// 表頭列 → 欄位對應；不是表頭回 null。必要欄：月份、公司倉、在途、MOMO倉、總計。
+//   盤點備註：表頭寫「蝦皮」「MOMO」就照表頭（named）；只有一個「盤點」欄（合併儲存格）⇒ 它＋右邊表頭空白那欄，看內容判斷（merged）。
+function _invLegacyHeader(cells) {
+  const c = (cells || []).map(_invLegacyTrim);
+  const find = (re, used) => c.findIndex((x, i) => !used.has(i) && re.test(x));
+  const used = new Set(), col = {};
+  const take = (k, re) => { const i = find(re, used); if (i >= 0) { used.add(i); col[k] = i; } return i; };
+  take('ym', /月份/);
+  take('companyWh', /公司倉/);
+  take('inTransit', /在途/);
+  take('momoWh', /MOMO\s*倉/i);
+  take('total', /總計/);
+  if (['ym', 'companyWh', 'inTransit', 'momoWh', 'total'].some(k => col[k] == null)) return null;
+  take('prevDiff', /前月|比較/);
+  take('orderAmount', /叫貨/);
+  const notes = c.map((x, i) => (!used.has(i) && /盤點/.test(x)) ? i : -1).filter(i => i >= 0);
+  const sh = notes.find(i => /蝦皮/.test(c[i])), mo = notes.find(i => /MO/i.test(c[i]) && !/蝦皮/.test(c[i]));
+  if (sh != null && mo != null) { col.noteA = sh; col.noteB = mo; col.noteMode = 'named'; }
+  else if (notes.length === 1) {
+    col.noteA = notes[0];
+    if (notes[0] + 1 < c.length && c[notes[0] + 1] === '' && !used.has(notes[0] + 1)) col.noteB = notes[0] + 1;
+    col.noteMode = 'merged';
+  } else if (notes.length >= 2) { col.noteA = notes[0]; col.noteB = notes[1]; col.noteMode = 'merged'; }
+  return col;
+}
+// 盤點備註兩格 → { shopee, momo, warn }。named：照表頭；merged：含 MO ⇒ MOMO、含蝦皮 ⇒ 蝦皮，都不含照位置（左蝦皮、右 MOMO）。
+function _invLegacyNotes(a, b, mode) {
+  a = _invLegacyTrim(a); b = _invLegacyTrim(b);
+  if (mode === 'named') return { shopee: a, momo: b, warn: null };
+  const tag = x => { if (!x) return null; const s = /蝦皮/.test(x), m = /mo/i.test(x); return s && !m ? 'shopee' : m && !s ? 'momo' : null; };
+  const ta = tag(a), tb = tag(b);
+  const other = t => (t === 'shopee' ? 'momo' : 'shopee');
+  let ca = 'shopee', cb = 'momo', warn = null;
+  if (ta && tb && ta === tb) warn = '兩格盤點備註看起來都是' + (ta === 'shopee' ? '蝦皮' : 'MOMO') + '，照欄位順序放（左蝦皮、右 MOMO）';
+  else if (ta) { ca = ta; cb = other(ta); }
+  else if (tb) { cb = tb; ca = other(tb); }
+  const out = { shopee: '', momo: '', warn };
+  if (a) out[ca] = a;
+  if (b) out[cb] = b;
+  return out;
+}
+// 叫貨金額 → { v, noteText, warn }：整格是數字就用；否則抽數字，剛好一個就用；抽不到或兩個以上 ⇒ null，原文放 note。
+function _invLegacyOrder(raw) {
+  const t = _invLegacyTrim(raw);
+  if (t === '') return { v: null, noteText: '', warn: null };
+  const n = _invLegacyNum(t);
+  if (n.v != null && !n.warn) return { v: n.v, noteText: '', warn: null };
+  const nums = t.match(/\d[\d,]*(?:\.\d+)?/g) || [];
+  if (nums.length === 1) return { v: parseFloat(nums[0].replace(/,/g, '')), noteText: '', warn: null };
+  return { v: null, noteText: '叫貨金額原文：' + t, warn: '叫貨金額' + (nums.length ? '有 ' + nums.length + ' 個數字' : '沒有數字') + '，原文放備註：' + t };
+}
+// 一列裡「盤點備註、叫貨金額、備註」的判斷（純函式）。回 { shopee, momo, orderAmount, note, warns[] }。
+//   ① 有表頭名稱的欄照既有規則：盤點日備註 / 蝦皮 / MOMO 欄走 _invLegacyNotes；叫貨欄（例如「當月新增叫貨總計」）走 _invLegacyOrder。
+//   ② 「前月份比較」（沒有就「總計」）右邊、表頭空白的欄（包含超出表頭長度的欄），逐格看內容（trim 後空白略過）：
+//      開頭 MO（不分大小寫）⇒ MOMO 盤點；開頭「蝦皮」⇒ 蝦皮盤點；
+//      含「叫貨」：以冒號結尾的標籤（例如「2/27叫貨金額:」）⇒ 取右邊緊鄰那格，是單純數字就當候選（那格不再判斷）；
+//                  否則抽數字，剛好一個 ⇒ 候選，零個或兩個以上 ⇒ 不明確；
+//      單純數字 ⇒ 叫貨金額候選；單獨一個「-」略過；其他文字 ⇒ 備註。
+//   ③ 叫貨金額只有「剛好一個候選、而且沒有任何不明確」才採用；否則 null，相關原文全部放進備註「叫貨金額原文：…」並警告。
+//      同類盤點備註兩格以上 ⇒ 用「／」串起來並警告；備註多段用「；」串起來。
+function _invLegacyExtras(cells, col, hdr) {
+  cells = cells || []; hdr = hdr || [];
+  const warns = [], shopee = [], momo = [], texts = [], cands = [], unclear = [], orderRaw = [];
+  const get = k => (col[k] == null ? '' : cells[col[k]]);
+  if (col.noteA != null || col.noteB != null) {
+    const nt = _invLegacyNotes(get('noteA'), get('noteB'), col.noteMode);
+    if (nt.shopee) shopee.push(nt.shopee);
+    if (nt.momo) momo.push(nt.momo);
+    if (nt.warn) warns.push(nt.warn);
+  }
+  const fixed = new Set(['ym', 'companyWh', 'inTransit', 'momoWh', 'total', 'prevDiff', 'orderAmount', 'noteA', 'noteB'].map(k => col[k]).filter(v => v != null));
+  const anchor = col.prevDiff != null ? col.prevDiff : col.total;
+  const consumed = new Set();
+  const isPureNum = t => { const n = _invLegacyNum(t); return n.v != null && !n.warn ? n.v : null; };
+  const last = Math.max(cells.length, hdr.length);
+  for (let i = anchor + 1; i < last; i++) {
+    if (fixed.has(i) || consumed.has(i) || _invLegacyTrim(hdr[i]) !== '') continue;
+    const t = _invLegacyTrim(cells[i]);
+    if (!t || t === '-') continue;
+    if (/^mo/i.test(t)) { momo.push(t); continue; }
+    if (/^蝦皮/.test(t)) { shopee.push(t); continue; }
+    if (/叫貨/.test(t)) {
+      if (/[:：]\s*$/.test(t)) {
+        const nb = _invLegacyTrim(cells[i + 1]);
+        const v = nb ? isPureNum(nb) : null;
+        if (v != null) { cands.push(v); orderRaw.push(t + nb); consumed.add(i + 1); }
+        else { unclear.push(t); orderRaw.push(t); warns.push('叫貨金額標籤右邊不是數字：' + t + (nb ? ' ' + nb : '')); }
+        continue;
+      }
+      const nums = t.match(/\d[\d,]*(?:\.\d+)?/g) || [];
+      if (nums.length === 1) { cands.push(parseFloat(nums[0].replace(/,/g, ''))); orderRaw.push(t); }
+      else { unclear.push(t); orderRaw.push(t); warns.push('叫貨金額不明確（' + (nums.length ? nums.length + ' 個數字' : '沒有數字') + '）：' + t); }
+      continue;
+    }
+    const v = isPureNum(t);
+    if (v != null) { cands.push(v); orderRaw.push(t); continue; }
+    texts.push(t);
+  }
+  // 有表頭的叫貨欄（照既有 _invLegacyOrder 規則）；被左邊標籤取走的那格不再判斷
+  if (col.orderAmount != null && !consumed.has(col.orderAmount)) {
+    const raw = _invLegacyTrim(get('orderAmount'));
+    if (raw) {
+      const od = _invLegacyOrder(raw);
+      if (od.v != null) { cands.push(od.v); orderRaw.push(raw); }
+      else { unclear.push(raw); orderRaw.push(raw); if (od.warn) warns.push(od.warn); }
+    }
+  }
+  let orderAmount = null, orderNote = '';
+  if (cands.length === 1 && !unclear.length) orderAmount = cands[0];
+  else if (orderRaw.length) {
+    orderNote = '叫貨金額原文：' + orderRaw.join('、');
+    if (cands.length) warns.push('叫貨金額不採用（候選 ' + cands.length + ' 個、不明確 ' + unclear.length + ' 個），原文放備註');
+  }
+  if (shopee.length > 1) warns.push('蝦皮盤點備註有 ' + shopee.length + ' 格，用「／」串起來');
+  if (momo.length > 1) warns.push('MOMO 盤點備註有 ' + momo.length + ' 格，用「／」串起來');
+  return { shopee: shopee.join('／'), momo: momo.join('／'), orderAmount, note: texts.concat(orderNote ? [orderNote] : []).join('；'), warns };
+}
+// 這個月是不是整列沒有資料（三倉、兩個盤點備註、叫貨金額、備註全部空白）⇒ 不寫入
+function _invLegacyIsBlank(f) {
+  return ['companyWh', 'inTransit', 'momoWh', 'orderAmount'].every(k => f[k] == null)
+    && ['countNoteShopee', 'countNoteMomo', 'note'].every(k => !f[k]);
+}
+// 整份 CSV 的列 → 匯入計畫（純函式）。existing＝雲端已有的 months（判斷「已存在」與對帳時的上個月）。
+//   回 { ok, error?, headers, items:[{ ym, row, status:'write'|'exists'|'blank', fields, sheetTotal, sheetPrev, warns[], recon[] }], skipped:[{ row, reason, text }], ignored }
+function _invLegacyBuild(rows, existing) {
+  existing = existing || {};
+  let col = null, hdr = null, headers = 0, ignored = 0;
+  const raw = [], skipped = [];
+  for (const r of rows || []) {
+    const cells = r.cells || [];
+    const h = _invLegacyHeader(cells);
+    if (h) { col = h; hdr = cells; headers++; continue; }
+    const blank = cells.every(x => _invLegacyTrim(x) === '');
+    if (!col || blank) { ignored++; continue; }   // 第一個表頭之前（大標題）、空白列
+    const get = k => (col[k] == null ? '' : cells[col[k]]);
+    const y = _invLegacyYm(get('ym'));
+    if (!y.ok) {
+      const others = cells.filter((x, i) => i !== col.ym && _invLegacyTrim(x) !== '');
+      if (!others.length) { ignored++; continue; }   // 只有年份分組字樣（例如「2023 年」）
+      skipped.push({ row: r.row, reason: y.reason, text: cells.map(_invLegacyTrim).join(',').slice(0, 40) });
+      continue;
+    }
+    const warns = [];
+    const fields = {};
+    ['companyWh', 'inTransit', 'momoWh'].forEach(k => {
+      const n = _invLegacyNum(get(k));
+      fields[k] = n.v;
+      if (n.warn) warns.push(({ companyWh: '公司倉', inTransit: '在途存貨', momoWh: 'MOMO倉' })[k] + '：' + n.warn);
+    });
+    const ex = _invLegacyExtras(cells, col, hdr);
+    fields.countNoteShopee = ex.shopee;
+    fields.countNoteMomo = ex.momo;
+    fields.orderAmount = ex.orderAmount;
+    fields.note = ex.note;
+    warns.push(...ex.warns);
+    raw.push({ ym: y.ym, row: r.row, fields, sheetTotal: _invLegacyNum(get('total')), sheetPrev: _invLegacyNum(get('prevDiff')), warns, hasPrevCol: col.prevDiff != null });
+  }
+  if (!headers) return { ok: false, error: '找不到表頭：沒有任何一列同時有「月份」「公司倉」「在途」「MOMO倉」「總計」', headers, items: [], skipped, ignored };
+  // 同一個月份出現兩次以上 ⇒ 全部跳過，不猜要用哪一列
+  const byYm = new Map();
+  raw.forEach(it => { if (!byYm.has(it.ym)) byYm.set(it.ym, []); byYm.get(it.ym).push(it); });
+  const items = [];
+  byYm.forEach((list, ym) => {
+    if (list.length > 1) { list.forEach(it => skipped.push({ row: it.row, reason: _invYmLabel(ym) + ' 重複（第 ' + list.map(x => x.row).join('、') + ' 列）', text: '' })); return; }
+    items.push(list[0]);
+  });
+  items.sort((a, b) => (a.ym < b.ym ? -1 : 1));
+  skipped.sort((a, b) => a.row - b.row);
+  // 對帳：上一個月優先用這次 CSV，其次雲端已存在的
+  const csvMap = new Map(items.map(it => [it.ym, it.fields]));
+  const fmt = v => _invFmtNum(v) || '空白';
+  items.forEach(it => {
+    it.recon = [];
+    // 空白月份（例如試算表先排好、還沒填的 2026/10～12）：不寫、不對帳、不算錯誤
+    if (_invLegacyIsBlank(it.fields)) { it.status = 'blank'; delete it.hasPrevCol; return; }
+    it.status = Object.prototype.hasOwnProperty.call(existing, it.ym) ? 'exists' : 'write';
+    const tot = _invTotal(it.fields);
+    if (it.sheetTotal.v == null) it.recon.push('試算表沒有總計' + (it.sheetTotal.warn ? '（' + it.sheetTotal.warn + '）' : '') + '，略過比對');
+    else if (tot == null || Math.abs(tot - it.sheetTotal.v) > INV_LEGACY_TOL) it.recon.push('總計：試算表 ' + fmt(it.sheetTotal.v) + '／算出 ' + fmt(tot));
+    if (it.hasPrevCol) {
+      const pym = _invPrevYm(it.ym);
+      const prevRow = csvMap.has(pym) ? csvMap.get(pym) : existing[pym];
+      const pt = _invTotal(prevRow);
+      if (it.sheetPrev.v == null) { if (_invLegacyTrim(it.sheetPrev.warn)) it.recon.push('試算表前月份比較：' + it.sheetPrev.warn + '，略過比對'); }
+      else if (tot == null || pt == null) it.recon.push('前月份比較無法比對（' + (tot == null ? '本月' : _invYmLabel(pym)) + '沒有總計）');
+      else if (Math.abs((tot - pt) - it.sheetPrev.v) > INV_LEGACY_TOL) it.recon.push('前月份比較：試算表 ' + fmt(it.sheetPrev.v) + '／算出 ' + fmt(Math.round((tot - pt) * 100) / 100));
+    }
+    delete it.hasPrevCol;
+  });
+  return { ok: true, headers, items, skipped, ignored };
+}
+// 一個月的寫入路徑（每個欄位一條；月份 key 原本不存在 ⇒ 等於新建）
+function _invLegacyMonthPairs(it, by, TS) {
+  const base = ['months', it.ym];
+  const pairs = INV_LEGACY_FIELDS.map(k => [base.concat(k), it.fields[k]]);
+  pairs.push([base.concat('source'), 'legacy-sheet'], [base.concat('legacyRow'), it.row],
+    [base.concat('createdAt'), TS], [base.concat('createdBy'), by], [base.concat('updatedAt'), TS], [base.concat('updatedBy'), by]);
+  return pairs;
+}
+// 要寫的月份依年份分批：[{ year, items }]，年份由舊到新
+function _invLegacyBatches(items) {
+  const m = new Map();
+  items.forEach(it => { const y = it.ym.slice(0, 4); if (!m.has(y)) m.set(y, []); m.get(y).push(it); });
+  return [...m.keys()].sort().map(year => ({ year, items: m.get(year) }));
+}
+// 讀回比對一個月：回不一致的欄位清單
+function _invLegacyVerify(got, it, by) {
+  const bad = [];
+  if (!got || typeof got !== 'object') return ['整個月份'];
+  INV_LEGACY_FIELDS.forEach(k => { if ((got[k] === undefined ? null : got[k]) !== it.fields[k]) bad.push(k); });
+  if (got.source !== 'legacy-sheet') bad.push('source');
+  if (got.legacyRow !== it.row) bad.push('legacyRow');
+  if (!got.createdBy || got.createdBy.username !== by.username) bad.push('createdBy');
+  if (got.createdAt == null) bad.push('createdAt');
+  return bad;
+}
+
+let _invLegacy = null;   // 上一次預覽：{ build, fileName, at, backend }；寫入或切換模擬 / 雲端時清掉
+const _invLegacyStatusLabel = s => (s === 'write' ? '寫入' : s === 'blank' ? '略過（空白月份）' : '跳過（已存在）');
+function _invLegacyPrintPreview(st) {
+  const b = st.build;
+  console.table(b.items.map(it => ({
+    月份: _invYmLabel(it.ym), 列: it.row, 狀態: _invLegacyStatusLabel(it.status),
+    公司倉: it.fields.companyWh, 在途存貨: it.fields.inTransit, MOMO倉: it.fields.momoWh,
+    算出總計: _invTotal(it.fields), 試算表總計: it.sheetTotal.v,
+    對帳: it.recon.join('；') || '✓', 盤點蝦皮: it.fields.countNoteShopee, 盤點MOMO: it.fields.countNoteMomo,
+    叫貨金額: it.fields.orderAmount, 備註: it.fields.note, 警告: it.warns.join('；'),
+  })));
+  if (b.skipped.length) { console.warn('[inventory] 整列跳過 ' + b.skipped.length + ' 列：'); console.table(b.skipped.map(s => ({ 列: s.row, 原因: s.reason, 原文: s.text }))); }
+  const bad = b.items.filter(it => it.recon.some(x => /：試算表/.test(x)));
+  if (bad.length) { console.warn('[inventory] 對帳不一致 ' + bad.length + ' 個月（照樣寫入）：'); console.table(bad.map(it => ({ 月份: _invYmLabel(it.ym), 對帳: it.recon.join('；') }))); }
+  console.log('[inventory] ' + _invLegacySummary(b) + '。要寫入請在 Console 打 __inventoryImportLegacy({ commit: true })');
+}
+function _invLegacySummary(b) {
+  const w = b.items.filter(it => it.status === 'write').length, bl = b.items.filter(it => it.status === 'blank').length, ex = b.items.length - w - bl;
+  const warns = b.items.reduce((s, it) => s + it.warns.length, 0);
+  const bad = b.items.filter(it => it.recon.some(x => /：試算表/.test(x))).length;
+  return '要寫入 ' + w + ' 個月、已存在跳過 ' + ex + ' 個月、整列跳過 ' + b.skipped.length + ' 列、空白月份略過 ' + bl + ' 個、警告 ' + warns + ' 格、對帳不一致 ' + bad + ' 個月';
+}
+function _invLegacyOutHtml(msg, cls) {
+  return `<div class="inv-imp-msg${cls ? ' ' + cls : ''}">${escapeHtml(msg)}</div>`;
+}
+// 解析 CSV 文字 → 存預覽 → 印 Console（彈窗與測試共用）。回 _invLegacy 或 { error }
+function _invLegacyLoad(text, fileName) {
+  _invLegacy = null;
+  const parsed = _invLegacyParseCsv(text);
+  if (!parsed.ok) return { error: parsed.error };
+  const build = _invLegacyBuild(parsed.rows, _invMonths());
+  if (!build.ok) return { error: build.error };
+  _invLegacy = { build, fileName: fileName || '', at: Date.now(), backend: _invBackend() };
+  _invLegacyPrintPreview(_invLegacy);
+  return _invLegacy;
+}
+async function _invLegacyCommit() {
+  const st = _invLegacy;
+  if (!st) { console.warn('[inventory] 沒有預覽結果：請先不帶參數呼叫 __inventoryImportLegacy() 選檔預覽'); return { ok: false, wrote: 0, skipped: 0, failed: 0 }; }
+  const be = _invBackend();
+  if (!be || typeof be.writePaths !== 'function' || typeof be.getDoc !== 'function') { console.warn('[inventory] 雲端尚未就緒，這次不寫'); return { ok: false, wrote: 0, skipped: 0, failed: 0 }; }
+  if (be !== st.backend) { _invLegacy = null; console.warn('[inventory] 預覽之後切換過模擬 / 雲端，請重新預覽'); return { ok: false, wrote: 0, skipped: 0, failed: 0 }; }
+  _invLegacy = null;   // 先清掉：寫入中再呼叫一次 commit 也不會重寫
+  const by = _invBy();
+  const readDoc = async () => { const s = await be.getDoc(); return (s && typeof s.exists === 'function' && s.exists()) ? (s.data() || {}) : {}; };
+  const results = [];
+  const n = { wrote: 0, skipped: 0, failed: 0 };
+  st.build.items.filter(it => it.status !== 'write').forEach(it => { results.push({ 月份: _invYmLabel(it.ym), 結果: it.status === 'blank' ? '略過（空白月份）' : '跳過（預覽時已存在）' }); n.skipped++; });
+  for (const batch of _invLegacyBatches(st.build.items.filter(it => it.status === 'write'))) {
+    let doc;
+    try { doc = await readDoc(); }
+    catch (e) { batch.items.forEach(it => { results.push({ 月份: _invYmLabel(it.ym), 結果: '失敗：讀不到雲端現值 ' + ((e && (e.code || e.message)) || e) }); n.failed++; }); continue; }
+    const months = (doc.months && typeof doc.months === 'object') ? doc.months : {};
+    const todo = batch.items.filter(it => {
+      if (!Object.prototype.hasOwnProperty.call(months, it.ym)) return true;
+      results.push({ 月份: _invYmLabel(it.ym), 結果: '跳過（預覽後才出現，已存在）' }); n.skipped++; return false;
+    });
+    if (!todo.length) continue;
+    const pairs = [];
+    if (doc.schema === undefined) pairs.push([['schema'], 1]);
+    todo.forEach(it => pairs.push(..._invLegacyMonthPairs(it, by, be.TS)));
+    let bad = null;
+    try {
+      const r = await be.writePaths(pairs);
+      if (!(r && r.ok)) bad = '未寫入雲端（被擋下：唯讀帳號或本機防護）';
+      else {
+        const got = await readDoc();
+        const gm = (got.months && typeof got.months === 'object') ? got.months : {};
+        todo.forEach(it => {
+          const diff = _invLegacyVerify(gm[it.ym], it, by);
+          if (diff.length) { results.push({ 月份: _invYmLabel(it.ym), 結果: '失敗：讀回不一致（' + diff.join('、') + '）' }); n.failed++; }
+          else { results.push({ 月份: _invYmLabel(it.ym), 結果: '✓ 已寫入' }); n.wrote++; }
+        });
+      }
+    } catch (e) { bad = '失敗：' + ((e && (e.code || e.message)) || e); }
+    if (bad) todo.forEach(it => { results.push({ 月份: _invYmLabel(it.ym), 結果: bad }); n.failed++; });
+  }
+  results.sort((a, b) => (a.月份 < b.月份 ? -1 : 1));
+  console.table(results);
+  const msg = '[inventory] 匯入完成：寫入 ' + n.wrote + ' 個月、跳過 ' + n.skipped + ' 個月、失敗 ' + n.failed + ' 個月' + (n.failed ? '。失敗的月份可以重新預覽後再 commit 一次（已寫入的會被跳過）' : '');
+  (n.failed ? console.warn : console.log)(msg);
+  if (App.route === 'inventory') App.render();
+  return { ok: n.failed === 0, ...n };
+}
+
+Object.assign(App, {
+  _invOpenLegacyImport() {
+    this.openModal({
+      title: '匯入舊庫存試算表（CSV）',
+      width: 'min(640px, 94vw)',
+      hideFooter: true,
+      bodyHtml: `
+      <p class="inv-imp-note">選從 Google 試算表「檔案 → 下載 → 逗號分隔值（.csv）」存下來的檔案。這一步<b>只預覽、不寫入</b>，結果印在 Console（console.table）。已存在的月份一律跳過、不覆蓋。</p>
+      <div class="field"><input type="file" id="inv-imp-file" class="inv-imp-file" accept=".csv,text/csv"></div>
+      <div id="inv-imp-out" class="inv-imp-out"></div>`,
+      onMount: () => {
+        const inp = document.getElementById('inv-imp-file');
+        const out = () => document.getElementById('inv-imp-out');
+        if (inp) inp.addEventListener('change', () => {
+          const f = inp.files && inp.files[0];
+          if (!f) return;
+          const r = new FileReader();
+          r.onload = () => {
+            const st = _invLegacyLoad(String(r.result || ''), f.name);
+            const o = out(); if (!o) return;
+            o.innerHTML = st.error ? _invLegacyOutHtml(st.error, 'inv-imp-err')
+              : _invLegacyOutHtml(_invLegacySummary(st.build) + '。明細在 Console；要寫入請在 Console 打 __inventoryImportLegacy({ commit: true })', 'inv-imp-sum');
+          };
+          r.onerror = () => { const o = out(); if (o) o.innerHTML = _invLegacyOutHtml('讀檔失敗', 'inv-imp-err'); };
+          r.readAsText(f, 'utf-8');
+        });
+      },
+    });
+  },
+});
+window.__inventoryImportLegacy = function (opts) {
+  const me = App.currentUser;
+  if (!me || me.role !== 'admin') { console.warn('[inventory] 只有管理員可以匯入舊庫存試算表'); return false; }
+  if (opts && opts.commit === true) return _invLegacyCommit();
+  _invEnsureSub();
+  if (!_invLoaded) { console.warn('[inventory] 庫存資料還沒載入（先進一次「庫存」頁），為了判斷哪些月份已經存在，這次不執行'); return false; }
+  App._invOpenLegacyImport();
+  return true;
+};
+
 /* ---------- 本機模擬開關：__inventoryMock(true / 'demo' / false) ----------
  * 只在 localhost / 127.0.0.1 / [::1] / *.localhost 生效；正式站呼叫只印警告、回 false、什麼都不改。
  * 開啟後資料來源換成記憶體 mock（介面同 __cloudInventory，writePaths 照 FieldPath 語意），不碰 Firestore / Store / localStorage。
@@ -669,6 +1089,7 @@ window.__inventoryMock = function (on) {
   const want = !!on;
   _invResetSub();
   _invYearOpen.clear();
+  _invLegacy = null;   // 匯入預覽不跨模擬 / 雲端
   _invMock = want ? _invMakeMock(on === 'demo') : null;
   console.warn(want ? '[inventory] 模擬模式已開啟：資料只在本機記憶體' : '[inventory] 模擬模式已關閉，改回雲端');
   if (App.route === 'inventory') App.render();

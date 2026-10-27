@@ -2570,7 +2570,8 @@
 }
 .inv-year-btn:hover { color: var(--primary); }
 .inv-year-n { margin-left: 8px; font-size: 11px; font-weight: 500; color: var(--text-muted); }
-.inv-auto { padding: 6px 10px; text-align: right; color: var(--text); font-weight: 600; }
+/* 總計、較上月：跟輸入格同字級、不加粗（第 3 塊起；原本 600 看起來跟其他數字欄大小不一） */
+.inv-auto { padding: 6px 10px; text-align: right; color: var(--text); font-size: 13px; font-weight: 400; }
 .inv-auto.inv-neg { color: var(--danger); }
 .inv-auto.inv-pos { color: var(--success); }
 .inv-in {
@@ -2637,3 +2638,9 @@
   color: var(--text-muted);
   font-size: 13px;
 }
+/* 第 3 塊：匯入舊試算表的彈窗（__inventoryImportLegacy；明細在 Console，彈窗只放說明與摘要） */
+.inv-imp-note { margin: 0 0 12px; font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+.inv-imp-out { margin-top: 10px; }
+.inv-imp-msg { padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.6; }
+.inv-imp-sum { background: var(--info-soft); color: var(--info); }
+.inv-imp-err { background: var(--danger-soft); color: var(--danger); font-weight: 600; }
