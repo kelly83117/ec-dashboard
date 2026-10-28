@@ -186,6 +186,8 @@ ESM 有個致命陷阱必須牢記：
 - `app/kpi` — KPI 月結表（`months.{YYYY-MM}.{路徑}` + `meta.{YYYY-MM}.{路徑}={by,at}`）。
   透過 `window.__cloudKpi.writePaths` **逐格 FieldPath 寫入**、多人同時填不互蓋；記憶體仍轉回
   `Store._profitMem._kpi_v1` 陣列供讀取端用。舊的 `app/profit._kpi_v1` 是搬移前的備份，**不要再寫它**。
+  填寫模式的**異常警示**（格子下方「⚠」、標題「⚠ 有 N 格請再確認」、左側清單 ⚠、「ⓘ 警示規則」）是純前端即時算、
+  **不寫雲端、不擋存檔**；門檻只改 profit.js `KPI_ANOMALY_RULES`（說明彈窗從它產生），Console 只讀查看 `__kpiAnomalyReport('YYYY-MM')`。
 - `app/insight_{shop}`（玩樂 / 好麻吉 / 森之旅 / 維克）— 洞察表資料，每通路一份 doc，欄位名是**含點的字面 key**
   `ec.insight_{shop}_{master|weeks|notes|perf}`，透過 `window.__cloudInsightByShop` 存取。
   **洞察表正式資料只在這四份 doc。** `app/main`、`app/insight` 裡若有 `ec.insight_*` 欄位，一律在讀取端忽略

@@ -1792,6 +1792,25 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-ftable td > .km-sublabel:has(> .km-fx-tag):has(~ .km-sublabel > .km-au-tag),
 .km-ftable td > .km-sublabel:has(> .km-fx-tag) ~ .km-sublabel:has(> .km-au-tag){display:inline-block;vertical-align:top;}
 .km-ftable td > .km-sublabel:has(> .km-fx-tag):has(~ .km-sublabel > .km-au-tag){padding-right:0;margin-right:4px;}
+/* 異常警示（2026-10-28，KPI_ANOMALY_RULES）：格子下方琥珀小標籤，只有「⚠」一個符號（完整原因在 title 與標題列展開的清單）。
+   🔴 不可撐寬欄位：不跟「自動」「手動」並排（並排實測讓 MOMO 表格寬 904 → 949）；同一格有其他小字時自己換到下一行。
+     contain:inline-size ⇒ 這一行不參與欄寬計算（欄寬只由輸入框與原本的小字決定，有沒有警示欄寬都一樣）。
+   只用 :root 變數。 */
+.km-anom-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:0 4px;border-radius:4px;border:1px solid var(--warn);background:var(--warn-soft);color:var(--text);line-height:1.5;cursor:help;white-space:nowrap;}
+.km-ftable .km-anom-sub{contain:inline-size;}
+.km-ftable td.km-f-ro > .km-anom-sub{padding-right:var(--km-r);}
+.km-anom-bar{display:inline-flex;align-items:baseline;gap:8px;}
+.km-anom-btn{padding:2px 9px;border-radius:999px;border:1px solid var(--warn);background:var(--warn-soft);color:var(--text);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
+.km-anom-btn:hover,.km-anom-btn.open{border-color:var(--text-muted);}
+.km-anom-help{padding:0;border:none;background:none;color:var(--text-muted);font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.km-anom-help:hover{color:var(--primary);text-decoration:underline;}
+.km-anom-list{margin-top:10px;padding:10px 12px;border:1px solid var(--warn);border-radius:var(--radius-sm);background:var(--warn-soft);}
+.km-anom-list-t{font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px;}
+.km-anom-list ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:3px;}
+.km-anom-item{padding:2px 0;border:none;background:none;text-align:left;font-size:12px;color:var(--text);cursor:pointer;line-height:1.5;}
+.km-anom-item:hover{color:var(--primary);text-decoration:underline;}
+.km-anom-item-w{font-weight:700;}
+.km-side-anom{font-size:11px;font-weight:700;padding:1px 6px;border-radius:999px;border:1px solid var(--warn);background:var(--warn-soft);color:var(--text);white-space:nowrap;}
 /* #330 塊 2：蝦皮共同費用（含稅格）輸入框下方那一行（_kpiCommonTaxSubHtml）。版位沿用 .km-sublabel（「自動」標籤那一排），
    但共同費用列是 colspan 寬格、輸入框靠左 → 改成靠左對齊輸入框的文字起點。
    一律佔一行高（舊月份沒字也是），打字預覽出現時列高不跳。預覽只在這格聚焦時顯示，失焦自動退回「含稅 X」。 */
