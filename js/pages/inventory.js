@@ -46,7 +46,31 @@ const INV_FIELDS = Object.freeze(INV_COLS.filter(c => c.t !== 'auto').map(c => c
 const INV_TXT_MAX = 200;
 const INV_RO_MSG = '僅檢視帳號無法修改庫存';
 const INV_OPEN_YEARS = 2;   // 預設展開最新幾個年份（收合狀態只在記憶體）
-const INV_UNIT = '單位：元（成本，含進口稅費與運費）';
+const INV_UNIT = '單位：元（成本，含進口稅費與運費，不含 5% 營業稅）';
+// 「📖 使用說明」彈窗內容（App.openGuide，結構同對帳 RECON_GUIDE：p / h＋ol / warn；只有一句的段落用 h＋p，不編號）。所有登入者都看得到。
+//   🔴 寫到程式行為的句子（盤點自動整理、卡片月份、走勢圖期間）改程式時要一起改。
+const INV_GUIDE = Object.freeze([
+  { h: '這頁是什麼', p: '取代舊的「庫存統計表」，記錄每月公司倉、在途存貨、MOMO倉的庫存金額。' },
+  { h: '單位', p: '元（成本，含進口稅費與運費，不含 5% 營業稅）。' },
+  { h: '每月什麼時候填', ol: [
+    '每月 1 日早上莫筆克匯出庫存後，填上個月的數字。',
+    '表裡還沒有那個月份時，按右上「＋ 新增 YYYY/MM」。',
+  ] },
+  { h: '各欄怎麼填', ol: [
+    '公司倉、在途存貨、MOMO倉：填當月月底的庫存金額（數字）。',
+    '叫貨金額：填當月新增叫貨的總金額（數字）。',
+    '盤點（蝦皮）、盤點（MOMO）：只填日期，例如 10/1。打「蝦皮10/1填」也會自動整理成 10/1。',
+    '備註：自由填。',
+    '點格子直接改，Enter 存檔、Esc 取消。',
+  ] },
+  { h: '自動算的欄位', p: '總計、較上月是自動算的，不能改。' },
+  { h: '上方卡片與走勢圖', ol: [
+    '卡片顯示最新一個有填庫存數字的月份。',
+    '走勢圖可切換近 12 個月／近 24 個月／全部。',
+  ] },
+  { warn: '⚠ 過渡期：財務儀表板目前仍讀舊的庫存統計表（E 欄總計、I 欄叫貨金額），所以舊表也要照常填，直到另行通知。' },
+]);
+const INV_GUIDE_TITLE = '📖 庫存 · 使用說明';
 // 圖表的線（順序＝切換鈕順序）。color＝:root 變數名，畫圖當下用 getComputedStyle 取值，不寫死色碼。
 const INV_SERIES = Object.freeze([
   { k: 'total',     l: '總計',     color: '--primary' },
@@ -599,6 +623,8 @@ function _invOnClick(e) {
     const years = [...new Set(Object.keys(_invMonths()).filter(_invIsYm).map(k => k.slice(0, 4)))].sort().reverse();
     _invYearOpen.set(y, !_invYearOpenOf(y, years.indexOf(y)));
     App.render();
+  } else if (act === 'guide') {
+    App.openGuide({ title: INV_GUIDE_TITLE, blocks: INV_GUIDE });
   } else if (act === 'add') {
     _invAddMonth(b.dataset.ym);
   } else if (act === 'series') {
@@ -667,9 +693,12 @@ Object.assign(App, {
     else { top = _invCardsHtml(months) + _invChartHtml(); body = _invTableHtml(months, ro); }
     return `
       <div class="inv-page">
-        <div class="page-header">
-          <h2>庫存</h2>
-          <p>公司倉、在途存貨、MOMO倉每月庫存。總計與較上月自動計算；直接點格子修改，Enter 存檔、Esc 取消。</p>
+        <div class="page-header inv-hd">
+          <div>
+            <h2>庫存</h2>
+            <p>公司倉、在途存貨、MOMO倉每月庫存。總計與較上月自動計算；直接點格子修改，Enter 存檔、Esc 取消。</p>
+          </div>
+          <button type="button" class="btn-ghost inv-guide-btn" data-inv-act="guide">📖 使用說明</button>
         </div>
         ${_invMock ? `<div class="inv-mock-banner">模擬模式：資料只在本機記憶體，重新整理就消失（__inventoryMock(false) 關閉）</div>` : ''}
         ${ro ? `<div class="inv-ro-hint">${escapeHtml(INV_RO_MSG)}</div>` : ''}

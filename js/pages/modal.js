@@ -72,6 +72,26 @@ Object.assign(App, {
     if (e.target.id === 'modal-backdrop') this.closeModal();
   },
 
+  /* 操作說明彈窗（對帳「📖 每月操作說明」、庫存「📖 使用說明」共用）
+   *   App.openGuide({ title, blocks, width })；blocks 每一項：{p}＝段落（可加 h＝小標＋一段文字，只有一句不用編號時用）、{h, ol:[…]}＝小標＋編號清單（項目可用 \n 分行）、{warn}＝⚠ 提醒。
+   *   class 沿用 .recon-guide*（css/profit.css，開機就載）——對帳說明的 HTML 跟搬過來之前逐字相同，改這裡兩邊一起變。
+   *   profit.js 是動態載入，庫存頁拿不到它的函式，所以渲染放在這支一直會載的檔。
+   */
+  guideHtml(blocks) {
+    const e = t => escapeHtml(t);
+    return '<div class="recon-guide">' + (blocks || []).map(b => {
+      if (b.p) return (b.h ? '<h4 class="recon-guide-h">' + e(b.h) + '</h4>' : '') + '<p class="recon-guide-p">' + e(b.p) + '</p>';
+      if (b.warn) return '<p class="recon-guide-warn">' + e(b.warn) + '</p>';
+      return '<h4 class="recon-guide-h">' + e(b.h) + '</h4><ol class="recon-guide-ol">'
+        + b.ol.map(x => '<li>' + x.split('\n').map(e).join('<br>') + '</li>').join('') + '</ol>';
+    }).join('')
+      + '<div class="recon-guide-ftr"><button type="button" class="recon-btn recon-guide-close" onclick="App.closeModal()">關閉</button></div>'
+      + '</div>';
+  },
+  openGuide({ title, blocks, width }) {
+    this.openModal({ title, width: width || '640px', hideFooter: true, bodyHtml: this.guideHtml(blocks) });
+  },
+
   /* 通用警示彈窗 — 取代原生 alert()，用儀表板現行 modal 風格
    *   App.showAlertModal({ title, message, kind: 'error'|'warn'|'info', detail, onClose })
    *   kind 控制左側色帶與 emoji；detail 是可選的小字補充說明
