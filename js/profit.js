@@ -23479,6 +23479,7 @@ const RECON_ADS_MANUAL_KEYS=[
   {k:'other',         l:'其他金額'},
 ];
 const RECON_ADS_NOTE_MAX=100;
+const RECON_ADS_LOCK_PH='需先上傳廣告 CSV';   // 回饋金鎖住時格子內的提示（reconAdsHtml 的 inp）
 // 一格花費：'-' 或空白 ⇒ {v:0,dash:true}；數字（可有千分位）⇒ {v}；其他 ⇒ null（呼叫端當錯誤）。
 function _reconAdsSpendCell(s){
   const t=String(s==null?'':s).replace(/^"|"$/g,'').trim();
@@ -23843,10 +23844,13 @@ function reconAdsHtml(){
     const a=_reconAds[s],hasSaved=_reconAdsHasSpend(sv[s].ads);
     const dis=(k==='rebate'&&!(a&&a.ok)&&!(!a&&hasSaved));
     const disTip=(!a&&!hasSaved)?'這個月這家還沒有廣告報表；沒投廣告就不用填回饋金':'要先上傳這個月的廣告報表 CSV 才能改';
-    return '<input id="recon-ads-'+i+'-'+k+'" class="recon-ads-inp'+(type==='text'?' recon-ads-note':'')+'"'
+    // 鎖住時：格子內 placeholder 直接看得到原因；title 放外層 span（disabled 的 input 不顯示 title，
+    //   CSS 讓 disabled input pointer-events:none，滑鼠才會落在外層）。解鎖時輸出跟改版前逐字相同。
+    const el='<input id="recon-ads-'+i+'-'+k+'" class="recon-ads-inp'+(type==='text'?' recon-ads-note':'')+'"'
       +(type==='text'?' type="text" maxlength="'+RECON_ADS_NOTE_MAX+'"':' type="text" inputmode="decimal"')
-      +' value="'+escapeHtmlLike(vals[k])+'"'+(dis?' disabled title="'+escapeHtmlLike(disTip)+'"':'')
+      +' value="'+escapeHtmlLike(vals[k])+'"'+(dis?' disabled placeholder="'+RECON_ADS_LOCK_PH+'"':'')
       +' oninput="reconAdsInput(\''+s+'\',\''+k+'\',this.value)">';
+    return dis?'<span class="recon-ads-lock" title="'+escapeHtmlLike(disTip)+'">'+el+'</span>':el;
   };
   h+=row('廣告回饋金（含稅）',(s,i)=>inp(s,i,'rebate'));
   RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{h+=row(l+'（含稅）',(s,i)=>inp(s,i,k));});
@@ -23911,7 +23915,7 @@ Object.assign(window,{reconMobicPick,clearReconMobic,reconMobicSave});
 // 廣告與各項費用區塊的 inline handler（選檔 onchange / 清除 / 輸入框 oninput / 存檔）。
 Object.assign(window,{reconAdsPick,clearReconAds,reconAdsInput,reconAdsSave});
 // ═══ 蝦皮對帳 · 每月操作說明（2026-10-27）═══
-//   對帳分頁第一個標題列、KPI 填寫模式「蝦皮」組標題各一顆，開同一份（App.openModal，hideFooter，只有 ✕ 和底部「關閉」）。
+//   對帳分頁第一個標題列、KPI 填寫模式「蝦皮」組標題各一顆，開同一份（App.openGuide → App.openModal，hideFooter，只有 ✕ 和底部「關閉」）。
 //   文字是使用者提供的定稿，改內容要先問；結構：p＝段落、h＝小標、ol＝編號清單（項目可用 \n 分行）、warn＝⚠ 提醒。
 //   🔴 「已存過的月份要改回饋金…」那句依附在回饋金可事後修改（_reconAdsCheck 的 rebateOnly）；那個功能拿掉時這句要一起拿掉。
 const RECON_GUIDE=[
@@ -23925,7 +23929,7 @@ const RECON_GUIDE=[
     '上方月份選要做的月份。',
     '上傳四家進帳 PDF，確認「小計 − 子項加總」是 ✓0，四家各按「存檔」，看到「✓ 已存進雲端」。',
     '上傳莫筆克 xlsx，按「存檔（四店一起）」。',
-    '廣告區：上傳四家廣告 CSV，再填手填項目（都填「含稅原數」，不用自己除 1.05）：廣告回饋金、無包裝 $1／筆 金額、退貨運費補助（填正數，系統會扣掉）、其他金額＋備註（沒有就空白）。四家各按「存檔」。沒投廣告的通路只填手填項目也可以存。\n已存過的月份要改回饋金，直接改數字再按該店『存檔』即可，不用重傳 CSV；改完記得到 KPI 重新帶入。',
+    '廣告區：上傳四家廣告 CSV，再填手填項目（都填「含稅原數」，不用自己除 1.05）：廣告回饋金、無包裝 $1／筆 金額、退貨運費補助（填正數，系統會扣掉）、其他金額＋備註（沒有就空白）。四家各按「存檔」。\n廣告回饋金要先上傳該店的廣告 CSV 才能填；格子是灰色＝這個月這家還沒有廣告報表，沒投廣告就不用填回饋金。\n沒投廣告的通路不用傳 CSV，只填無包裝、退貨運費補助、其他這幾項也可以存。\n已存過的月份要改回饋金，直接改數字再按該店『存檔』即可，不用重傳 CSV；改完記得到 KPI 重新帶入。',
   ]},
   {h:'三、KPI → 選月份 → 填寫模式 → 蝦皮',ol:[
     '按右上「從對帳單帶入 YYYY/MM」。',
@@ -23937,20 +23941,11 @@ const RECON_GUIDE=[
   {warn:'⚠ 每格滑鼠移上去可以看到算式。'},
 ];
 const RECON_GUIDE_BTN='<button type="button" class="recon-btn recon-guide-btn" onclick="openReconGuide()">📖 每月操作說明</button>';
-function _reconGuideHtml(){
-  const e=t=>escapeHtmlLike(t);
-  return '<div class="recon-guide">'+RECON_GUIDE.map(b=>{
-    if(b.p)return '<p class="recon-guide-p">'+e(b.p)+'</p>';
-    if(b.warn)return '<p class="recon-guide-warn">'+e(b.warn)+'</p>';
-    return '<h4 class="recon-guide-h">'+e(b.h)+'</h4><ol class="recon-guide-ol">'
-      +b.ol.map(x=>'<li>'+x.split('\n').map(e).join('<br>')+'</li>').join('')+'</ol>';
-  }).join('')
-    +'<div class="recon-guide-ftr"><button type="button" class="recon-btn recon-guide-close" onclick="App.closeModal()">關閉</button></div>'
-    +'</div>';
-}
+// 渲染與開窗走 js/pages/modal.js 的 App.guideHtml / App.openGuide（庫存使用說明共用同一套）。
+function _reconGuideHtml(){return App.guideHtml(RECON_GUIDE);}
 function openReconGuide(){
-  if(!(window.App&&typeof App.openModal==='function'))return;
-  App.openModal({title:'📖 蝦皮對帳 · 每月操作說明',width:'640px',hideFooter:true,bodyHtml:_reconGuideHtml()});
+  if(!(window.App&&typeof App.openGuide==='function'))return;
+  App.openGuide({title:'📖 蝦皮對帳 · 每月操作說明',blocks:RECON_GUIDE});
 }
 Object.assign(window,{openReconGuide});
 // 對帳分頁的切換。骨架比照 setCoupangShop，但【補上它缺的三件事】：

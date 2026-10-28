@@ -1455,6 +1455,10 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
 .recon-ads-inp.recon-ads-note{text-align:left;}
 .recon-ads-inp:focus{border-color:var(--primary);}
 .recon-ads-inp:disabled{color:var(--text-muted);background:var(--primary-soft);cursor:not-allowed;}
+.recon-ads-inp:disabled::placeholder{color:var(--text-muted);opacity:1;}
+/* 回饋金鎖住：title 掛在這層。disabled 的 input 不顯示 title、也會吃掉滑鼠，所以讓它 pointer-events:none、游標改由外層顯示。 */
+.recon-ads-lock{display:block;cursor:not-allowed;}
+.recon-ads-lock .recon-ads-inp:disabled{pointer-events:none;}
 /* 「雲端」小標：這格數字是雲端已存的值，不是這次上傳的檔。 */
 .recon-ads-src{
   display:inline-block;
