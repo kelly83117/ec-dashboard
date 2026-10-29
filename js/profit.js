@@ -10140,7 +10140,11 @@ function _kpiChannelTableHtml(row,prevRow){
     +'<div class="kc-c kc-glabel kc-g1 kc-gend kc-s3">純利率'+_kpiInfoHtml('這張表的純利率＝純利 ÷ 實際營收（通路各店加總後再除）',KPI_GROUPS.map(g=>g.title+'：純利 ÷ '+(((g.formula.find(f=>f.k==='actualRev')||g.manual.find(f=>f.k==='rev'))||{}).l||'營收')).concat(['合計的純利率 = 合計純利 ÷ 合計實際營收']))+'</div>'
     +'<div class="kc-c"></div></div>'
     +line('kc-h2','',['通路','本月','較上月','本月','較上月','本月','較上月','填寫進度']);
-  const body=KPI_GROUPS.map(g=>{
+  // 2026-10-29：通路列照本月營收由高到低（sort 是穩定排序 → 營收相同維持 KPI_GROUPS 順序）；已關站的通路固定排最後。
+  //   只影響這張表的顯示順序；填寫模式、年度總表、Excel 都還是 KPI_GROUPS 順序。
+  const _ord=KPI_GROUPS.map(g=>({g,closed:_kpiGroupClosed(g,month),rev:(_kpiGroupT(row,g)||{}).rev||0}))
+    .sort((a,b)=>(a.closed-b.closed)||(b.rev-a.rev));
+  const body=_ord.map(({g})=>{
     const closed=_kpiGroupClosed(g,month);
     const cur=_kpiGroupT(row,g),prev=_kpiGroupT(prevRow,g),cc=closed?{rev:'',pure:'',pp:''}:cmpCells(cur,prev);
     const open=_kpiExpandedGroups.has(month+':'+g.key);
@@ -10152,8 +10156,10 @@ function _kpiChannelTableHtml(row,prevRow){
       closed?`<span class="km-badge km-badge-off" title="${_kpiClosedLabel(g)}">已關站</span>`:_kpiFillBadge(_kpiFillCount(row,g)),
     ]);
     if(open){
-      g.shops.forEach((s,i)=>{
-        const d=_kpiShopCalc(row,g,s),gt=_kpiCommonColTotals(row,g);const rev=_kpiRealRev(d),pure=gt?gt.totalPure:(Number(d[cur.pureKey])||0);   // 實際營收（同通路列）；共同費用當欄位的單店通路（PChome）純利已扣物流運費
+      // 各店明細也照本月營收由高到低（穩定排序，營收相同維持原順序）
+      const gt=_kpiCommonColTotals(row,g);
+      g.shops.map(s=>{const d=_kpiShopCalc(row,g,s);return{s,d,rev:_kpiRealRev(d)};}).sort((a,b)=>b.rev-a.rev).forEach(({s,d,rev},i)=>{
+        const pure=gt?gt.totalPure:(Number(d[cur.pureKey])||0);   // 實際營收（同通路列）；共同費用當欄位的單店通路（PChome）純利已扣物流運費
         html+=line('kc-sub'+(i===g.shops.length-1?' kc-sub-last':''),'',[_kpiShopLabel(s),_kpiMoney(rev),'','<span class="'+neg(pure).trim()+'">'+_kpiMoney(pure)+'</span>','',rev>0?_kpiRatePct(pure/rev):'—','','']);
       });
     }
