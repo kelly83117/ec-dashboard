@@ -289,6 +289,16 @@ ESM 有個致命陷阱必須牢記：
 
 ### localStorage / `Store`
 - `Store` 是 localStorage 包裝層（含 `_mem` / `_profitMem` 記憶體鏡像）。
+- 淨利表報表快取（localStorage `ec|通路|YYYY/MM|半月`，B-3 #173）存成壓縮格式 `LZ1:<原始字元數>:<LZString.compressToUTF16(JSON)>`
+  （lz-string 1.5.0 放在 `js/vendor/`，index.html 以 classic script 在 main.js 前載入，檔名帶版號、不加 `?v=`）。
+  - 讀：一律走 profit.js `_reportCacheParse`（沒前綴＝舊 JSON；解不開、長度不符、形狀不對 ⇒ null＝當作沒有本機快取）。
+    🔴 新增讀 `ec|` 報表值的地方不准直接 `JSON.parse(localStorage.getItem(...))`。
+  - 寫：只有 `lsSave` → `_reportCacheWrite`（壓縮 → setItem → 讀回比對；不成就寫未壓縮 JSON，再不成照舊彈「本機空間已滿」）。
+    編輯一格（`recalcRow` 傳 `{defer:true}`）延後 1.5 秒才寫；pagehide、分頁隱藏、`tryLoadSaved`（切期間）、`setShop`（切通路）、
+    同步前（sweep）、backfill 前會 flush。`JSON.stringify` 永遠在 lsSave 當下同步做，`_profitMem` 永遠是物件，壓縮只發生在 localStorage 這層。
+  - 開站就地壓縮：profit.js 載入 3 秒後逐把把未壓縮的報表快取覆寫成 LZ1（只碰 4 段報表 key，覆寫前重讀比對、寫完讀回、不一致寫回原值），
+    console.info 印統計，結果在 `window.__reportCacheMigrateReport`（只讀觀測點，不以 `__cloud` 開頭）。
+  - 回滾開關：profit.js 開頭 `_LS_COMPRESS_WRITE` / `_LS_COMPRESS_MIGRATE` 改 false 再部署（讀取端照樣讀得懂已寫下的 LZ1）。
 - 版本號 `<meta app-version>` 每次部署都要更新，`version.js` 才會清舊快取。
 
 ### 版本號 bump 規則（🔴 分兩條：動 runtime 走本機原子合併、純文件用按鈕）
