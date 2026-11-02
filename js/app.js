@@ -1051,6 +1051,7 @@ const App = {
     if (route === 'employees') return true;
     if (route === 'issues') return true;   // 問題追蹤：所有登入者可看（寫入權限由 issues.js 判斷）
     if (route === 'inventory') return true;   // 庫存：所有登入者可看（不是部門、不走 office-；寫入權限由 inventory.js 判斷）
+    if (route === 'health') return true;   // 通路健診：所有登入者可看（老闆指示不鎖權限；不是部門、不走 office-；純讀取頁，見 js/pages/health.js）
     if (route === 'users') return user.role === 'admin' || user.role === 'view';  // view：唯讀檢視帳號頁
     if (route.startsWith('office-')) {
       const rest = route.slice('office-'.length);
@@ -1281,6 +1282,8 @@ const App = {
       case 'users': main.innerHTML = this.viewUsers(); break;
       case 'issues': main.innerHTML = this.viewIssues(); this.bindIssues(); break;
       case 'inventory': main.innerHTML = this.viewInventory(); this.bindInventory(); break;
+      // 通路健診：刻意不加進 CLOUD_RENDER_ROUTES（雲端推播不重畫這頁；畫面上有「↻ 重新計算」）
+      case 'health': main.innerHTML = this.viewHealth(); this.bindHealth(); break;
       default: main.innerHTML = this.viewDashboard(); this.bindDashboardPills(); this.bindCardInputs();
     }
   },

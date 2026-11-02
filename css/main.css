@@ -2709,3 +2709,128 @@
 .inv-imp-msg { padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.6; }
 .inv-imp-sum { background: var(--info-soft); color: var(--info); }
 .inv-imp-err { background: var(--danger-soft); color: var(--danger); font-weight: 600; }
+
+/* ===================== 通路健診 hl-*（js/pages/health.js） =====================
+   顏色一律走 :root 變數，不寫死色碼、不碰 --bg 底色；燈號：綠 --success、黃 --warn、紅 --danger、沒分數灰 --text-muted。 */
+.hl-page .page-header p { max-width: 820px; }
+/* 標題列：左邊標題＋說明、右邊「📖 怎麼看這頁」；窄螢幕按鈕掉到下一行（同庫存頁 .inv-hd） */
+.hl-hd { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.hl-guide-btn { white-space: nowrap; }
+/* 子指標「參考，不計分」（毛利率）：整列淡一階，得分欄換成灰色標章 */
+.hl-sub-ref td { color: var(--text-muted); }
+.hl-ref-tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; color: var(--text-muted); background: var(--bg); border: 1px dashed var(--border); }
+.hl-mock-banner, .hl-warn { margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 12px; }
+.hl-mock-banner { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.hl-warn { background: var(--info-soft); color: var(--info); }
+/* 頁頂「⚠ KPI 尚未填完」：琥珀色提示列；可跳轉的項目是按鈕外觀的文字連結，沒權限時是純文字 */
+.hl-pending { display: flex; flex-wrap: wrap; align-items: baseline; row-gap: 4px; margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-sm);
+  background: var(--warn-soft); color: var(--text); font-size: 12px; line-height: 1.6; }
+.hl-pending-h { font-weight: 600; color: var(--warn); margin-right: 4px; }
+.hl-pending-sep { color: var(--text-muted); }
+.hl-pending-item { padding: 0; border: 0; background: none; font: inherit; color: var(--text); white-space: nowrap; }
+button.hl-pending-item { cursor: pointer; color: var(--primary-dark); text-decoration: underline; text-underline-offset: 2px; }
+button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(--primary); }
+.hl-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; font-size: 13px; }
+.hl-month { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.hl-month select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
+.hl-chip-ver, .hl-asof { font-size: 12px; color: var(--text-muted); }
+.hl-chip-ver { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+.hl-table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.hl-table { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+/* 🔴 css/profit.css 有全域 th / td（靠右、不換行、大寫、th 可點的游標與 hover 色），全站都會載入。
+   這裡把健診兩張表（.hl-table、.hl-sub）的 th / td 全部明確設回：文字靠左、數字欄（.hl-num／分數／比上月）靠右，表頭跟內容同一個對齊。 */
+.hl-table th, .hl-sub th { text-align: left; text-transform: none; letter-spacing: normal; cursor: default; user-select: auto; background: none; }
+.hl-table th:hover, .hl-sub th:hover { color: var(--text-muted); }
+.hl-table td, .hl-sub td { text-align: left; white-space: normal; }
+.hl-table th { padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.hl-table td { padding: 9px 12px; border-top: 0; border-bottom: 1px solid var(--border); color: var(--text); font-size: 13px; vertical-align: middle; }
+.hl-type-row td { padding: 6px 12px; background: var(--bg); font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.hl-row { cursor: pointer; }
+.hl-row:hover, .hl-row:focus-visible { background: var(--primary-soft); outline: none; }
+.hl-row.open { background: var(--primary-soft); }
+.hl-row-closed td { color: var(--text-muted); }
+.hl-caret { display: inline-block; width: 14px; color: var(--text-muted); }
+/* 通路名稱欄只佔內容寬（width:1%＋不換行），多出來的寬度留給「主要扣分原因」 */
+.hl-table .hl-c-name { width: 1%; white-space: nowrap; font-weight: 600; }
+/* 類型、排名標章放第二行，通路名稱欄才不會被撐寬 */
+.hl-sub-line { display: block; margin: 2px 0 0 14px; }
+.hl-type { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+.hl-rank, .hl-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 400; white-space: nowrap; }
+.hl-rank { background: var(--primary-soft); color: var(--primary-dark); }
+.hl-tag { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
+.hl-table .hl-c-score { text-align: right; width: 84px; }
+.hl-table .hl-c-nm, .hl-table .hl-c-dims { white-space: nowrap; }
+.hl-table .hl-c-delta { width: 64px; text-align: right; white-space: nowrap; }
+.hl-table td.hl-c-nm, .hl-table td.hl-c-delta { color: var(--text-muted); }
+.hl-c-reason { color: var(--text-muted); font-size: 12px; }
+.hl-score { display: inline-flex; flex-direction: column; align-items: center; min-width: 44px; padding: 3px 8px; border-radius: var(--radius-sm); font-size: 16px; font-weight: 700; line-height: 1.15; }
+.hl-score small, .hl-ring small { font-size: 10px; font-weight: 400; }
+/* 燈號：底色 -soft、字色主色；沒分數灰 */
+.hl-l-green { background: var(--success-soft); color: var(--success); }
+.hl-l-yellow { background: var(--warn-soft); color: var(--warn); }
+.hl-l-red { background: var(--danger-soft); color: var(--danger); }
+.hl-l-none { background: var(--bg); color: var(--text-muted); }
+/* 參考分：灰色斜體＋虛線框，不排名 */
+.hl-ref { background: var(--bg); color: var(--text-muted); font-style: italic; border: 1px dashed var(--border); }
+.hl-chip { display: inline-block; margin-right: 4px; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.hl-chip-off { background: repeating-linear-gradient(135deg, var(--bg) 0 4px, var(--border) 4px 5px); color: var(--text-muted); font-weight: 400; }
+.hl-delta-up { color: var(--success); font-weight: 600; }
+.hl-delta-down { color: var(--danger); font-weight: 600; }
+.hl-detail > td { padding: 0; background: var(--bg); }
+.hl-card { margin: 10px 12px 14px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.hl-card-closed { color: var(--text-muted); }
+.hl-card-hd { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+.hl-ring { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 0 0 auto; width: 72px; height: 72px; border-radius: 50%; font-size: 26px; font-weight: 700; line-height: 1.1; }
+.hl-card-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.hl-card-nm { margin-top: 2px; font-size: 13px; color: var(--text-muted); }
+.hl-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.hl-badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
+.hl-badge-ok { background: var(--success-soft); color: var(--success); border-color: var(--success-soft); }
+.hl-badge-note { font-size: 11px; color: var(--text-muted); }
+.hl-dim { padding: 10px 0; border-top: 1px solid var(--border); }
+.hl-dim-hd { display: flex; align-items: center; gap: 10px; }
+.hl-dim-name { font-weight: 700; color: var(--text); min-width: 64px; }
+.hl-w { margin-left: 6px; font-size: 11px; color: var(--text-muted); }
+.hl-dim-hd .hl-w { margin-left: 0; min-width: 48px; }
+.hl-dim-score { font-weight: 700; min-width: 28px; text-align: right; }
+.hl-dim-off { font-size: 12px; color: var(--text-muted); padding: 2px 8px; background: var(--bg); border-radius: var(--radius-sm); }
+/* 分數條：<progress>，各瀏覽器的填色選擇器分開寫 */
+.hl-bar { flex: 1; max-width: 360px; height: 8px; border: 0; border-radius: 999px; background: var(--bg); overflow: hidden; appearance: none; -webkit-appearance: none; }
+.hl-bar::-webkit-progress-bar { background: var(--bg); border-radius: 999px; }
+.hl-bar-green::-webkit-progress-value { background: var(--success); border-radius: 999px; }
+.hl-bar-yellow::-webkit-progress-value { background: var(--warn); border-radius: 999px; }
+.hl-bar-red::-webkit-progress-value { background: var(--danger); border-radius: 999px; }
+.hl-bar-green::-moz-progress-bar { background: var(--success); }
+.hl-bar-yellow::-moz-progress-bar { background: var(--warn); }
+.hl-bar-red::-moz-progress-bar { background: var(--danger); }
+.hl-sub { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 12px; }
+.hl-sub th { padding: 4px 8px; font-size: 11px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.hl-sub td { padding: 5px 8px; border-top: 0; border-bottom: 1px solid var(--border); color: var(--text); font-size: 12px; vertical-align: top; }
+.hl-sub .hl-num { width: 84px; text-align: right; white-space: nowrap; }
+.hl-sub .hl-c-info { width: 28px; text-align: center; }
+.hl-sub-off { color: var(--text-muted); background: var(--bg); }
+.hl-sscore { display: inline-block; min-width: 30px; padding: 1px 6px; border-radius: 4px; text-align: center; font-weight: 700; }
+.hl-info summary { cursor: pointer; list-style: none; color: var(--info); }
+.hl-info summary::-webkit-details-marker { display: none; }
+.hl-info-body { margin-top: 4px; padding: 6px 8px; max-width: 420px; white-space: pre-line; font-size: 11px; line-height: 1.6; color: var(--text); background: var(--info-soft); border-radius: var(--radius-sm); }
+/* 名稱旁的 ⓘ（毛利率「為什麼不計分」）：summary 跟名稱同一行，展開的說明掉到下一行、換行顯示 */
+.hl-info-inline { display: inline; margin-left: 4px; }
+.hl-info-inline summary { display: inline; }
+.hl-info-inline[open] .hl-info-body { display: block; white-space: normal; }
+.hl-trend-hd { margin-top: 12px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.hl-trend { position: relative; height: 220px; margin-top: 6px; }
+.hl-chart-fail { padding: 20px; text-align: center; font-size: 12px; color: var(--text-muted); }
+.hl-next { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+.hl-foot { margin-top: 10px; font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+/* 手機：總覽只留「通路、總分、主要扣分原因」三欄，展開的卡片跟著變窄；子指標表收掉零分線、滿分線兩欄（ⓘ 裡照樣看得到公式） */
+@media (max-width: 768px) {
+  .hl-table { min-width: 0; }
+  .hl-table .hl-c-nm, .hl-table .hl-c-dims, .hl-table .hl-c-delta { display: none; }
+  .hl-table td, .hl-table th { padding-left: 8px; padding-right: 8px; }
+  .hl-table .hl-c-name { width: auto; white-space: normal; }
+  .hl-card { margin: 8px 4px 12px; padding: 12px; }
+  .hl-card-hd { align-items: flex-start; gap: 12px; }
+  .hl-ring { width: 56px; height: 56px; font-size: 20px; }
+  .hl-sub .hl-lim { display: none; }
+  .hl-info-body { max-width: 200px; }
+}

@@ -27034,6 +27034,56 @@ Object.assign(window, {
   _splitCalc,_splitRowsOf,_splitKey,_splitCount,getSplits,saveSplits,updateSplitBtn,SPLIT_SHOPS,
 });
 
+// ══════ 通路健診（js/pages/health.js）唯讀轉接：KPI 月結 → 純資料（docs/plan-channel-health.md §1-1）══════
+//  health.js 碰不到本檔模組內的 _kpi* 私有函式，由這支把指定月份算好交出去。口徑＝KPI 頁：
+//    每店數字＝_kpiShopCalc（已套 _kpiRawForCalc：合併欄、不適用欄、autoFill、關站歸 0）；營收＝_kpiRealRev（MOMO＝實際營收）；
+//    PChome 這種 commonAsColumn 單店組，純利用 _kpiCommonColTotals（已扣物流運費，同 KPI 頁單店列）；
+//    蝦皮各店純利【不含】整組共同運費 shopeeCommon（同 KPI 頁，ⓘ 由 health.js 說明）。
+//  填寫進度＝_kpiFillSlots 裡含這家店的格子（單店 commonAsColumn 組另含 _common 那一格）。
+//  資料時間只回 _kpiLastEdit 的時間，不回 by（健診不顯示人名）。
+//  只讀：不寫入、不訂閱、不碰 DOM。名稱刻意不以 __cloud 開頭（本機防寫不掃它、不影響 27 / 45）。失敗回 {ready:false, error}。
+window.__healthKpiSnapshot=function(months){
+  const out={ready:false,months:{},groups:[],error:null};
+  try{
+    out.ready=_kpiReady();
+    out.groups=KPI_GROUPS.map(g=>({key:g.key,title:g.title,shops:g.shops.slice(),since:g.since||null,
+      shopSince:Object.assign({},g.shopSince||{}),closedFrom:g.closedFrom||null}));
+    const byMonth={};
+    (getKpiRows()||[]).forEach(r=>{if(r&&r.month)byMonth[r.month]=r;});
+    (Array.isArray(months)?months:[]).forEach(m=>{
+      const row=byMonth[m]||_kpiEmptyRow(m);
+      const mo={exists:!!byMonth[m],asOf:null,groups:{}};
+      KPI_GROUPS.forEach(g=>{
+        const slots=_kpiFillSlots(row,g);
+        const colT=_kpiCommonColTotals(row,g);
+        const pureKey=(g.formula.find(f=>f.l.includes('純利')&&!f.l.includes('率'))||{}).k;
+        const last=_kpiLastEdit(m,g.key);
+        if(last&&(mo.asOf==null||last.t>mo.asOf))mo.asOf=last.t;
+        const box={};
+        g.shops.forEach(shop=>{
+          const raw=((row[g.key]||{})[shop])||{};
+          const d=_kpiShopCalc(row,g,shop);
+          const mine=slots.filter(s=>s.shops.includes(shop)||(colT&&s.field==='_common'));
+          box[shop]={
+            rev:_kpiRealRev(d),cost:Number(d.cost)||0,ads:d.ads!=null?(Number(d.ads)||0):null,
+            pure:colT?colT.totalPure:(Number(d[pureKey])||0),qty:Number(d.qty)||0,
+            revFilled:raw.rev!=null&&raw.rev!=='',
+            fill:{filled:mine.filter(s=>s.filled).length,total:mine.length},
+            closed:_kpiGroupClosed(g,m),
+            beforeSince:!!((g.since&&m<g.since)||(g.shopSince&&g.shopSince[shop]&&m<g.shopSince[shop])),
+          };
+        });
+        mo.groups[g.key]=box;
+      });
+      out.months[m]=mo;
+    });
+  }catch(e){
+    console.warn('[health] __healthKpiSnapshot 失敗',e);
+    out.ready=false;out.error=String((e&&e.message)||e);
+  }
+  return out;
+};
+
 /* ═══════════ PChome 淨利表（供貨模式，框架照甲配）· 商品同步分頁 ═══════════ */
 // 對帳明細檔：UTF-16LE+BOM / Tab / 16 段 / Excel 公式跳脫。解析器與 scratchpad 驗證版同源。
 function pchomeDecode(buf){ var u8=(buf instanceof Uint8Array)?buf:new Uint8Array(buf); return new TextDecoder('utf-16le').decode(u8).replace(/^﻿/,''); }

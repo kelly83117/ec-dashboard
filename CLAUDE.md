@@ -11,7 +11,7 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
 - `js/version.js` — 版本檢查 + 清快取（head 早載，classic script）
 - `js/app.js` — 主程式核心：Store、工具、設定、`App` 核心（boot/路由/render/登入）
 - `js/pages/*.js` — 各頁面方法（dashboard / marketing / employees / daily /
-  offices / users / modal / sheetsync / issues / inventory），以 `Object.assign(App, …)` 合併回 App
+  offices / users / modal / sheetsync / issues / inventory / health），以 `Object.assign(App, …)` 合併回 App
 - `js/profit.js` — 淨利表功能（蝦皮多店 / 上傳 / 匯出 / 雲端 / 對帳）
 - `js/firebase.js` — Firestore 雲端同步層（唯一含第三方 import）
 - `js/main.js` — ES Module 進入點，依序載入 app → pages/* → profit → firebase
@@ -230,6 +230,12 @@ ESM 有個致命陷阱必須牢記：
   較上月＝本月總計 − 上一個日曆月總計，任一邊空白 ⇒ 空白。🔴 財務儀表板之後改讀這份文件時要用**同一條規則**，改規則兩邊一起改。
   頁面是獨立路由 `inventory`（**不是部門**，不碰 `ec.departments` / `canAccessOffice`）：所有登入者可看、非 view 可編輯。
   本機測試用 `__inventoryMock(true)`（空資料）或 `__inventoryMock('demo')`（假資料），只在 localhost 生效、資料只在記憶體。
+- 通路健診（路由 `health`，js/pages/health.js，方案 docs/plan-channel-health.md）——**純讀取頁，不存任何資料、沒有雲端物件**。
+  目前（塊 A）只讀 KPI 月結：經 profit.js 的唯讀轉接 `window.__healthKpiSnapshot(months)`（口徑＝KPI 頁 `_kpiShopCalc` / `_kpiRealRev` / `_kpiCommonColTotals`）。
+  分數一律依 health.js `HEALTH_RULES` 當場重算；改任何門檻要升 `version`（目前 `v2-2026-11`，校準紀錄在方案 §2-7-1；毛利率只顯示、不計分）。
+  沒資料的面向一律帶 status（不適用／資料不足／尚未上傳／營收過小／已關站），**不得算成 0 分**。
+  頁首「📖 怎麼看這頁」內容由 `_hlGuideBlocks(HEALTH_RULES)` 產生，門檻數字不寫死——改規則說明自動跟著變，不必另外改文字。
+  不是部門、所有登入者可看；不在 `CLOUD_RENDER_ROUTES`。Console：`__healthBacktest()`（唯讀回測）、`__healthMock('demo'|'empty'|false)`（只在 localhost）。
 - `issues` collection — 問題追蹤，一筆問題一份 doc（doc id `iss-…`），**不放 app/main**。透過 `window.__cloudIssues`：
   讀 `subscribe(cb, onErr)`（整個 collection onSnapshot）/ `getDoc(id)`；寫 `create(id, data)`（setDoc，只用在新建）/
   `update(id, fields)`（updateDoc，**只送有變的欄位**，不整份覆蓋）。刪除＝軟刪除 `update({ deleted:true })`，沒有真刪。
@@ -346,8 +352,8 @@ ESM 有個致命陷阱必須牢記：
 
 ### 版本號 bump 規則（🔴 分兩條：動 runtime 走本機原子合併、純文件用按鈕）
 
-版號散在 **17 處**（下列）。**為什麼要有流程**：每支 feature PR 若各自 bump，就會在這
-17 行互相衝突（天天在收的合併稅），還常手動漏改一兩處。**根治＝feature 分支一律不碰
+版號散在 **18 處**（下列）。**為什麼要有流程**：每支 feature PR 若各自 bump，就會在這
+18 行互相衝突（天天在收的合併稅），還常手動漏改一兩處。**根治＝feature 分支一律不碰
 版號，改由合併端統一 bump。** 但 bump 若晚於部署就出事，見下方空窗實測。
 
 ⚠️ **空窗風險（實測，不是理論）**：feature 合併進 `main` 後、bump 前，`main` 是
@@ -366,22 +372,22 @@ git push                          # merge + bump 同一次 push
 ```
 → merge 與 bump 在**同一次 push** 送上去，Pages 部署到的必定是「新 code + 新版號」，
 **零空窗**，不管部署 40 秒還 5 分鐘都安全。`bump-version.js`（repo 根目錄）自動偵測
-index.html 現版號 → 換全部 17 處（index.html 5＋js/main.js 12）→ **自動 grep 驗證**
-（次數對＝5/10、舊版號零殘留），任一項不符就非零離開、不留半套；`--check` 可單獨複查。
+index.html 現版號 → 換全部 18 處（index.html 5＋js/main.js 13）→ **自動 grep 驗證**
+（次數對＝5/13、舊版號零殘留），任一項不符就非零離開、不留半套；`--check` 可單獨複查。
 版號**比 `main` 現值大**即可（不要憑記憶，`--check` 或搜 `app-version` 看現值）。
 
 **B. 純文件 / 腳本 PR（不動 `js/`、`css/`）→ 用 GitHub 按鈕合併即可，不需 bump。**
 沒動 runtime 就沒有快取失效問題，也就沒有空窗；這支 PR 本身就是 B 類。
 
-**17 處是哪些**（`bump-version.js` 自動處理，人工不用逐一改）：`index.html` 的
-app-version meta ×1、main.js `?v=` ×1、3 個 CSS `?v=` ×3；`js/main.js` 12 個 import `?v=` ×12。
+**18 處是哪些**（`bump-version.js` 自動處理，人工不用逐一改）：`index.html` 的
+app-version meta ×1、main.js `?v=` ×1、3 個 CSS `?v=` ×3；`js/main.js` 13 個 import `?v=` ×13。
 
 ⚠️ **CSS 的 `?v=` 一定要一起改（2026-07-29 血淚教訓 v226→227）**：CSS `<link>`
 沒有 `?v=` 時，`version.js` 只清 Cache API（Service Worker）、碰不到瀏覽器
 HTTP 磁碟快取，`location.reload()` 又是同一個 URL → 改了 CSS 卻餵回舊的，
 使用者（尤其不清快取的同事）整批 `.mm-*` 樣式看不到、版面全跑掉。CSS 帶
 `?v=` 後才跟 JS 一樣改版即刷新。這也是版號存在的唯一理由——每次部署每個資源
-都要換 URL 炸 disk cache；`bump-version.js` 保證 17 處同步、不漏。
+都要換 URL 炸 disk cache；`bump-version.js` 保證 18 處同步、不漏。
 
 ### 舊版 Apps Script
 - `apps-script.gs` 的自動同步已停用，僅保留空函式避免殘留觸發報錯。新功能

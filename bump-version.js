@@ -1,22 +1,22 @@
 #!/usr/bin/env node
 /* ═══════════════════════════════════════════════════════════════════════════
-   bump-version.js — 一鍵更新全站版本號（17 處），取代手動改 + grep 驗證。
+   bump-version.js — 一鍵更新全站版本號（18 處），取代手動改 + grep 驗證。
    （profit.js 動態 import 的 ?v= 由 app.js __ensureProfit 讀 <meta app-version> runtime 帶，不是字面值、不在此管理。）
 
    用法：
      node bump-version.js <新版號>        例：node bump-version.js 2026-09-09-658
-     node bump-version.js --check          只驗證目前 17 處一致、不改
+     node bump-version.js --check          只驗證目前 18 處一致、不改
 
    作用：把 index.html <meta app-version> 目前的版號，換成 <新版號>，並同步
-   index.html + js/main.js 裡全部 16 個 `?v=`（共 17 處）。改完自動驗證：
+   index.html + js/main.js 裡全部 17 個 `?v=`（共 18 處）。改完自動驗證：
      · index.html 5 處（app-version×1 + 3 CSS ?v= + main.js ?v=）
-     · js/main.js 12 處（12 個 import ?v=；profit.js 靜態 import 已移除、改 app.js 動態 import；pages/sheetsync.js、pages/issues.js、pages/inventory.js 新增）
-     · 舊版號零殘留、全 17 處都是新版號
+     · js/main.js 13 處（13 個 import ?v=；profit.js 靜態 import 已移除、改 app.js 動態 import；pages/sheetsync.js、pages/issues.js、pages/inventory.js、pages/health.js 新增）
+     · 舊版號零殘留、全 18 處都是新版號
    任一項不符 → 非零離開、印錯誤，不留半套。
 
    ⚠ 只改字串、不動任何 runtime 邏輯 / 啟動順序 / 快取機制。
    ⚠ 流程（見 CLAUDE.md）：feature 分支【不要】bump；合併進 main 後才跑這支、
-      單一 `chore: bump version to <新版號>` commit。這樣 PR 之間不碰版號那 17 行、
+      單一 `chore: bump version to <新版號>` commit。這樣 PR 之間不碰版號那 18 行、
       不再互相衝突。
    ═══════════════════════════════════════════════════════════════════════════ */
 'use strict';
@@ -26,7 +26,7 @@ const path = require('path');
 const ROOT = __dirname;                 // 腳本放 repo 根目錄
 const INDEX = path.join(ROOT, 'index.html');
 const MAIN  = path.join(ROOT, 'js', 'main.js');
-const EXPECT = { index: 5, main: 12 };  // 各檔應出現的版號次數（合計 17）。main.js 曾從 10→9（profit.js 靜態 import 移除、改由 app.js __ensureProfit 動態 import，?v= 讀 <meta app-version> runtime、不需 bump 管理），新增 pages/sheetsync.js 後回到 10，再新增 pages/issues.js 後變 11，再新增 pages/inventory.js 後變 12
+const EXPECT = { index: 5, main: 13 };  // 各檔應出現的版號次數（合計 18）。main.js 曾從 10→9（profit.js 靜態 import 移除、改由 app.js __ensureProfit 動態 import，?v= 讀 <meta app-version> runtime、不需 bump 管理），新增 pages/sheetsync.js 後回到 10，再新增 pages/issues.js 後變 11，再新增 pages/inventory.js 後變 12，再新增 pages/health.js 後變 13
 const VER_RE = /^\d{4}-\d{2}-\d{2}-\d+$/;                 // YYYY-MM-DD-N
 const META_RE = /<meta\s+name="app-version"\s+content="([^"]+)"\s*\/?>/;
 
@@ -75,7 +75,7 @@ if (!NEW) die('請給新版號。用法：node bump-version.js 2026-09-09-658（
 if (!VER_RE.test(NEW)) die('新版號格式需為 YYYY-MM-DD-N：「' + NEW + '」');
 if (NEW === CUR) die('新版號與目前相同（' + CUR + '），無需 bump');
 
-// 改前先確認目前是乾淨的 17 處（避免在半套狀態上再改）
+// 改前先確認目前是乾淨的 18 處（避免在半套狀態上再改）
 const pre = verify(CUR);
 if (pre.problems.length) die('改前驗證未過（目前狀態就不一致，先修）：\n  - ' + pre.problems.join('\n  - '));
 
