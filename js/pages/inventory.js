@@ -31,6 +31,11 @@ const App = window.App;
 const { escapeHtml, showToast } = window;
 
 // 表格欄位（順序＝畫面順序）。num＝數字格；txt＝文字格；auto＝即時計算、不能編輯。
+// 表頭也標「自動」的欄（標籤＋「!」說明資料來源，滑鼠移到「!」看）
+const INV_AUTO_HEAD = Object.freeze({
+  momoWh: '資料來源：淨利表上傳 F1102（乙配寄倉即時庫存）後自動計算＝寄倉數 × 乙配成本（不含在途）。每月 1～5 號上傳會填入上個月；標「自動」的月份可手動修改，改過就變手填。格子上移過去可看該月的 F1102 匯出時間與寄倉數。',
+  countNoteMomo: '資料來源：上傳 F1102 當天的日期，自動填入。每月 1～5 號上傳會填入上個月那一列；可手動修改。',
+});
 const INV_COLS = Object.freeze([
   { k: 'companyWh',       l: '公司倉',       t: 'num' },
   { k: 'inTransit',       l: '在途存貨',     t: 'num' },
@@ -64,7 +69,7 @@ const INV_GUIDE = Object.freeze([
     '點格子直接改，Enter 存檔、Esc 取消。',
   ] },
   { h: '自動算的欄位', p: '總計、較上月是自動算的，不能改。' },
-  { h: 'MOMO倉旁的「自動」', p: 'MOMO倉旁的「自動」是每月 1 號上傳 F1102 後系統算的（寄倉數×成本），驗證期間只供對照。' },
+  { h: '標「自動」的格子', p: 'MOMO倉、盤點（MOMO）會在每月 1～5 號上傳 F1102 後自動填入上個月（標「自動」），可手動修改。' },
   { h: '上方卡片與走勢圖', ol: [
     '卡片顯示最新一個有填庫存數字的月份。',
     '走勢圖可切換近 12 個月／近 24 個月／全部。',
@@ -209,8 +214,11 @@ function _invDecide(col, raw, cur, fromBlur) {
   return t === cur ? { kind: 'same' } : { kind: 'write', v: t };
 }
 // 一格的寫入內容（只送這一格＋這個月的 updatedAt / updatedBy）
+//   MOMO倉 / 盤點（MOMO）手動改 → 同時把 {f}Src 改成 { src:'manual', by, at }，「自動」標籤就消失（比照 KPI 手動覆寫）
 function _invCellPairs(ym, f, v, by, TS) {
-  return [[['months', ym, f], v], [['months', ym, 'updatedAt'], TS], [['months', ym, 'updatedBy'], by]];
+  const pairs = [[['months', ym, f], v], [['months', ym, 'updatedAt'], TS], [['months', ym, 'updatedBy'], by]];
+  if (f === 'momoWh' || f === 'countNoteMomo') pairs.push([['months', ym, f + 'Src'], { src: 'manual', by, at: Date.now() }]);
+  return pairs;
 }
 // 卡片的「本月」＝最新一個三倉有任何數字（總計不是空白）的月份；全部都空 ⇒ null（不顯示卡片）
 function _invLatestYm(months) {
@@ -348,17 +356,17 @@ function _invResetSub() {
 function _invYearOpenOf(year, rank) {
   return _invYearOpen.has(year) ? _invYearOpen.get(year) : rank < INV_OPEN_YEARS;
 }
-// MOMO倉旁的「自動」值（F1102 寄倉數×乙配成本，並行驗證期只供對照；總計／較上月／卡片／走勢圖都不用它）。差距超過 5% 標橘色。
-function _invAutoHintHtml(row) {
-  if (!row || !_invIsNum(row.momoWhAuto)) return '';
-  const auto = row.momoWhAuto, src = row.momoWhAutoSrc || {};
-  const md = src.exportedAt ? String(src.exportedAt).slice(5, 10) : '';   // 'YYYY/MM/DD HH:mm' → 'MM/DD'
-  const hand = row.momoWh;
-  const pct = (_invIsNum(hand) && hand > 0) ? (auto - hand) / hand * 100 : null;
-  const pTxt = pct == null ? '' : (pct > 0 ? '+' : '') + pct.toFixed(1) + '%';
-  const warn = pct != null && Math.abs(pct) > 5;
-  const tip = '自動：$' + _invFmtNum(auto) + (md ? '（F1102 ' + md + ' 匯出）' : '') + (pct != null ? '・差 ' + pTxt : '');
-  return `<div class="inv-auto-hint${warn ? ' inv-auto-warn' : ''}" title="${escapeHtml(tip)}">自動 ${escapeHtml(_invFmtNum(auto))}${pTxt ? ' · ' + escapeHtml(pTxt) : ''}</div>`;
+// 這格是 F1102 上傳時自動填的（Src.src==='F1102'）且目前有值 → 回來源說明（放在格子的 title，滑鼠移上去看）；否則 ''。
+//   「自動」標籤放在表頭（MOMO倉、盤點（MOMO）欄標題前面，同總計／較上月）；手動改這格後 Src 變 manual、來源說明就不再出現。
+function _invSrcTip(row, k) {
+  if (!row || (k !== 'momoWh' && k !== 'countNoteMomo')) return '';
+  const src = row[k + 'Src'];
+  if (!src || src.src !== 'F1102') return '';
+  if (k === 'momoWh' ? !_invIsNum(row.momoWh) : !String(row.countNoteMomo == null ? '' : row.countNoteMomo).trim()) return '';
+  const at = src.exportedAt || '';
+  return k === 'momoWh'
+    ? '自動：F1102 ' + (at || '時間不明') + ' 匯出・寄倉數 ' + (_invIsNum(src.qty) ? _invFmtNum(src.qty) : '?') + ' 件 × 乙配成本；手動改這格後會變成手填'
+    : '自動：上傳 F1102（' + (at || '時間不明') + ' 匯出）當天自動填入；手動改這格後會變成手填';
 }
 function _invCellHtml(col, ym, months, ro) {
   if (col.k === '_total') return `<td class="inv-auto">${escapeHtml(_invFmtNum(_invTotal(months[ym])))}</td>`;
@@ -374,8 +382,8 @@ function _invCellHtml(col, ym, months, ro) {
     + (col.t === 'num' ? ' inputmode="decimal"' : ` maxlength="${INV_TXT_MAX}"`)
     + ` autocomplete="off" aria-label="${escapeHtml(_invYmLabel(ym) + ' ' + col.l)}"`
     + ` data-inv-ym="${escapeHtml(ym)}" data-inv-f="${escapeHtml(col.k)}" data-raw="${escapeHtml(raw)}" data-disp="${escapeHtml(disp)}"`
-    + ` value="${escapeHtml(disp)}"${ro || saving ? ' readonly' : ''}>`
-    + (col.k === 'momoWh' ? _invAutoHintHtml(months[ym]) : '') + '</td>';
+    + ` value="${escapeHtml(disp)}"${ro || saving ? ' readonly' : ''}${_invSrcTip(months[ym], col.k) ? ` title="${escapeHtml(_invSrcTip(months[ym], col.k))}"` : ''}>`
+    + '</td>';
 }
 function _invRowHtml(ym, months, ro) {
   const row = months[ym] || {};
@@ -392,7 +400,7 @@ function _invTableHtml(months, ro) {
   //   表頭跟著該欄內容的對齊方向：數字欄靠右（inv-th-num）、兩個盤點欄置中（inv-th-cnt）、備註靠左（inv-th-txt）
   //   「自動」標籤放在字【前面】：靠右時切齊數字右緣的是「總計」「較上月」這幾個字，不是標籤
   const thCls = c => (c.t === 'txt' ? (INV_CN_FIELDS[c.k] ? 'inv-th-cnt' : 'inv-th-txt') : 'inv-th-num') + (c.t === 'auto' ? ' inv-th-auto' : '');
-  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}">${c.t === 'auto' ? '<span class="inv-auto-tag">自動</span>' : ''}${escapeHtml(c.l)}</th>`).join('')}</tr>`;
+  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}">${c.t === 'auto' ? '<span class="inv-auto-tag">自動</span>' : INV_AUTO_HEAD[c.k] ? '<span class="inv-auto-tag">自動</span>' : ''}${escapeHtml(c.l)}${INV_AUTO_HEAD[c.k] ? `<span class="inv-info" tabindex="0" aria-label="資料來源說明" title="${escapeHtml(INV_AUTO_HEAD[c.k])}">!</span>` : ''}</th>`).join('')}</tr>`;
   // 固定欄寬（css .inv-table 是 table-layout:fixed）：月份、六個數字欄、兩個盤點各有寬度，備註拿剩下的
   const colCls = c => (c.k === 'note' ? 'inv-col-note' : c.t === 'txt' ? 'inv-col-cnt' : 'inv-col-num');
   const cols = `<colgroup><col class="inv-col-ym">${INV_COLS.map(c => `<col class="${colCls(c)}">`).join('')}</colgroup>`;

@@ -14853,10 +14853,10 @@ function momoSaveF1102(shop,data){ const k=momoF1102Key(shop);
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=data; }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=data; }catch{} }
 // F1102 檔名時間戳 → 「資料時間」顯示字串（F1102_YYYYMMDDHHMMSS → YYYY/MM/DD HH:MM）
-// ══════ F1102 → 庫存頁 MOMO倉「自動」值（並行驗證期：只寫 months.{月}.momoWhAuto，不動手填的 momoWh）══════
+// ══════ F1102 → 庫存頁 MOMO倉＋盤點（MOMO）自動填入（比照 KPI 自動帶入：直接填格子、標「自動」、手動改後標籤消失）══════
 //   金額 ＝ Σ（F1102 寄倉數 consigned × 乙配 product.cost）；不含寄倉在途量。缺成本、F1102 品號不在乙配主檔的列出來，不默默少算。
 //   歸屬月份看檔名時間戳（momoF1102TimeFromName）：檔案時間在每月 1～MOMO_INV_AUTO_DAY_MAX 號 → 預設上個月（月初匯出代表月底）；
-//   檔名沒有時間戳 → 不預設、要使用者選月份才寫；其他日期 → 不寫入，只顯示「目前寄倉庫存金額」。寫進 app/inventory 後固定，不回頭重算。
+//   檔名沒有時間戳 → 不預設、要使用者選月份才寫；其他日期 → 不寫入，只顯示「目前寄倉庫存金額」。寫進 app/inventory 後固定，不回頭重算。舊的並行欄位 momoWhAuto / momoWhAutoSrc 不再寫入、不搬移、不刪（畫面不顯示）。
 const MOMO_INV_AUTO_DAY_MAX=5;
 const _momoPad2=n=>String(n).padStart(2,'0');
 let _momoUpF1102Month='';   // 使用者在上傳頁選的庫存月份：''＝用預設、'none'＝明確選「不寫入」、'YYYY-MM'
@@ -14893,35 +14893,66 @@ function momoInvCanEdit(){   // 庫存表編輯權限：跟庫存頁 _invCanEdit
   const u=window.App&&window.App.currentUser; if(!u) return false;
   return typeof window.App.isReadOnly==='function'?!window.App.isReadOnly():u.role!=='view';
 }
-// 寫進 app/inventory（逐格 writePaths，不整份覆蓋）。回 {state:'written'|'skipped'|'denied'|'cancel'|'error', msg}。
+// 覆蓋確認視窗：每個「已有值」的欄位一列，預設【不覆蓋】（手填值）；舊的自動值預設覆蓋。回 {momoWh:bool,count:bool} 或 null（取消）。
+function _momoInvAskOverwrite(ym, rows){
+  return new Promise(res=>{
+    const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px';
+    const body=rows.map(r=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-top:1px solid #e5e7eb;cursor:pointer"><input type="checkbox" data-k="${r.k}" ${r.def?'checked':''} style="margin-top:3px"><span><b>${_momoEsc(r.label)}</b>：目前${_momoEsc(r.curKind)} <b>${_momoEsc(r.cur)}</b> → 自動 <b>${_momoEsc(r.next)}</b><br><span style="color:#6b7280;font-size:12px">${r.def?'勾選＝用自動值取代':'勾選＝覆蓋手填值（預設不覆蓋）'}</span></span></label>`).join('');
+    ov.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:460px;width:100%;padding:18px 20px;font-size:14px;line-height:1.6;box-shadow:0 10px 30px rgba(0,0,0,.25)"><div style="font-weight:700;margin-bottom:6px">庫存表 ${_momoEsc(ym)} 已有值，要覆蓋嗎？</div>${body}<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button type="button" data-a="no" style="padding:6px 14px;border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer">取消，不寫入</button><button type="button" data-a="ok" style="padding:6px 14px;border:0;background:#2563eb;color:#fff;border-radius:6px;cursor:pointer">確定</button></div></div>`;
+    ov.addEventListener('click',e=>{ const a=e.target&&e.target.getAttribute&&e.target.getAttribute('data-a'); if(!a) return;
+      const out={}; ov.querySelectorAll('input[data-k]').forEach(i=>{ out[i.getAttribute('data-k')]=i.checked; });
+      ov.remove(); res(a==='ok'?out:null); });
+    document.body.appendChild(ov);
+  });
+}
+// 寫進 app/inventory（逐格 writePaths，不整份覆蓋）：momoWh（＋momoWhSrc）與 countNoteMomo（＋countNoteMomoSrc，上傳當天 M/D）。
+//   欄位已有「手填值」（沒有 Src、或 Src.src 是 manual）→ 先問、預設不覆蓋；已有舊自動值（Src.src==='F1102'）→ 問、預設覆蓋。
+//   回 {state:'written'|'skipped'|'denied'|'cancel'|'error', msg}。
 async function momoF1102InvWrite(inv){
   if(!inv || !inv.ym) return { state:'skipped', msg:'' };
-  if(!momoInvCanEdit()) return { state:'denied', msg:'沒有庫存表編輯權限，未寫入（只計算：MOMO倉自動值 $'+inv.amount.toLocaleString()+'）' };
+  if(!momoInvCanEdit()) return { state:'denied', msg:'沒有庫存表編輯權限，未寫入庫存表（只計算：MOMO倉 $'+inv.amount.toLocaleString()+'）' };
   const be=window.__cloudInventory;
   if(!be || typeof be.writePaths!=='function' || typeof be.getDoc!=='function') return { state:'error', msg:'庫存雲端尚未就緒，未寫入庫存表' };
   let months={};
   try{ const sn=await be.getDoc(); const d=(sn&&sn.exists&&sn.exists())?(sn.data()||{}):{}; months=(d.months&&typeof d.months==='object')?d.months:{}; }
   catch(e){ return { state:'error', msg:'讀取庫存表失敗，未寫入：'+((e&&e.message)||e) }; }
   const cur=months[inv.ym];
-  if(cur && cur.momoWhAuto!=null){   // 同一個月重傳 → 先確認，不默默蓋掉
-    const s=cur.momoWhAutoSrc||{};
-    if(!confirm('庫存表 '+inv.ym+' 已有自動值 $'+Math.round(Number(cur.momoWhAuto)).toLocaleString()+(s.exportedAt?'（F1102 '+s.exportedAt+' 匯出）':'')+'。\n\n要覆蓋 '+inv.ym+' 的自動值嗎？\n新值 $'+inv.amount.toLocaleString()+'（F1102 '+(inv.exportedAt||'時間不明')+' 匯出）\n\n（手填的 MOMO倉 不會動）')) return { state:'cancel', msg:'已取消覆蓋庫存表 '+inv.ym+' 的自動值' };
+  const nd=new Date(); const today=(nd.getMonth()+1)+'/'+nd.getDate();   // 同庫存頁 _invCleanCountNote 的日期格式（不補零）
+  const isAutoSrc=o=>!!(o && o.src==='F1102');
+  const rows=[];
+  const hasWh=!!(cur && typeof cur.momoWh==='number' && isFinite(cur.momoWh));
+  const hasCn=!!(cur && typeof cur.countNoteMomo==='string' && cur.countNoteMomo.trim()!=='');
+  if(hasWh){ const auto=isAutoSrc(cur.momoWhSrc); rows.push({ k:'momoWh', label:'MOMO倉', curKind:auto?'自動':'手填', cur:'$'+Math.round(cur.momoWh).toLocaleString(), next:'$'+inv.amount.toLocaleString(), def:auto }); }
+  if(hasCn){ const auto=isAutoSrc(cur.countNoteMomoSrc); rows.push({ k:'count', label:'盤點（MOMO）', curKind:auto?'自動':'手填', cur:cur.countNoteMomo, next:today, def:auto }); }
+  let pick={ momoWh:true, count:true };
+  if(rows.length){
+    const ans=await _momoInvAskOverwrite(inv.ym, rows);
+    if(!ans) return { state:'cancel', msg:'已取消寫入庫存表 '+inv.ym };
+    if(hasWh) pick.momoWh=!!ans.momoWh; if(hasCn) pick.count=!!ans.count;
   }
-  const u=window.App.currentUser||{}; const by=(typeof window.__invBy==='function')?window.__invBy():{ username:u.username||'', name:u.name||'' }; const TS=be.TS;
-  const src={ src:'F1102', exportedAt:inv.exportedAt||'', qty:inv.qty, skuN:inv.skuN, missingCost:inv.missingCost||[], notInMaster:inv.notInMaster||[], by, at:Date.now() };   // 只放有值的欄位（不留 undefined）
-  const pairs=[ [['months',inv.ym,'momoWhAuto'], inv.amount], [['months',inv.ym,'momoWhAutoSrc'], src], [['months',inv.ym,'updatedAt'], TS], [['months',inv.ym,'updatedBy'], by] ];
+  if(!pick.momoWh && !pick.count) return { state:'skipped', msg:'庫存表 '+inv.ym+' 的手填值都保留，沒有寫入' };
+  const u=window.App.currentUser||{}; const by=(typeof window.__invBy==='function')?window.__invBy():{ username:u.username||'', name:u.name||'' }; const TS=be.TS; const at=Date.now();
+  const pairs=[];
+  if(pick.momoWh){
+    const src={ src:'F1102', exportedAt:inv.exportedAt||'', qty:inv.qty, skuN:inv.skuN, missingCost:inv.missingCost||[], notInMaster:inv.notInMaster||[], by, at };   // 只放有值的欄位（不留 undefined）
+    pairs.push([['months',inv.ym,'momoWh'], inv.amount], [['months',inv.ym,'momoWhSrc'], src]);
+  }
+  if(pick.count) pairs.push([['months',inv.ym,'countNoteMomo'], today], [['months',inv.ym,'countNoteMomoSrc'], { src:'F1102', exportedAt:inv.exportedAt||'', by, at }]);
+  pairs.push([['months',inv.ym,'updatedAt'], TS], [['months',inv.ym,'updatedBy'], by]);
   if(!cur) pairs.push([['months',inv.ym,'createdAt'], TS], [['months',inv.ym,'createdBy'], by]);   // 這個月還不存在 → 一併補建檔記號（同庫存頁「新增月份」）
   let r; try{ r=await be.writePaths(pairs); }catch(e){ return { state:'error', msg:'寫入庫存表失敗：'+((e&&e.message)||e) }; }
   if(!(r && r.ok)) return { state:'error', msg:'寫入庫存表沒有成功（可能是唯讀或連線問題），未寫入' };
-  try{ const sn=await be.getDoc(); const d=(sn&&sn.data&&sn.data())||{}; const got=d.months&&d.months[inv.ym]&&d.months[inv.ym].momoWhAuto; if(got!==inv.amount) return { state:'error', msg:'寫入庫存表後讀回不一致，請到庫存頁確認 '+inv.ym }; }catch(e){}
-  return { state:'written', msg:'已寫入庫存表 '+inv.ym+' 的 MOMO倉自動值 $'+inv.amount.toLocaleString()+'（手填值未動）' };
+  try{ const sn=await be.getDoc(); const d=(sn&&sn.data&&sn.data())||{}; const row=(d.months&&d.months[inv.ym])||{};
+    if((pick.momoWh && row.momoWh!==inv.amount) || (pick.count && row.countNoteMomo!==today)) return { state:'error', msg:'寫入庫存表後讀回不一致，請到庫存頁確認 '+inv.ym }; }catch(e){}
+  const parts=[]; if(pick.momoWh) parts.push('MOMO倉 $'+inv.amount.toLocaleString()); if(pick.count) parts.push('盤點（MOMO）'+today);
+  return { state:'written', msg:'已寫入庫存表 '+inv.ym+'：'+parts.join('、')+'（標「自動」）' };
 }
 function momoF1102InvCtlHtml(shop,name){   // 上傳列：F1102 檔選了以後顯示「寫入庫存月份」
   const m=momoF1102InvMode(name);
   if(m.mode==='viewOnly') return `<div class="mm-hint" style="width:100%">檔案時間 ${m.time}（非月初 1～${MOMO_INV_AUTO_DAY_MAX} 號）→ <b>不寫入庫存表</b>，預覽只顯示「目前寄倉庫存金額」。</div>`;
   const sel=momoF1102InvEffYm(name); const opts=momoF1102InvMonthOptions(m.baseYm);
   const note=(m.mode==='auto')?`將寫入 <b>${sel||'（不寫入）'}</b>（依 F1102 檔案時間 ${m.time.slice(5)}）`:'檔名沒有時間戳：請選月份才會寫入庫存表（不選＝只更新總表庫存欄）';
-  return `<span class="mm-field"><span class="mm-lbl">寫入庫存表月份</span><select class="mm-sel" onchange="momoUploadF1102InvMonth('${shop}',this.value)"><option value="none"${sel?'':' selected'}>（不寫入庫存表）</option>${opts.map(o=>`<option value="${o}"${o===sel?' selected':''}>${o}</option>`).join('')}</select></span><div class="mm-hint" style="width:100%">${note}　· 庫存頁 MOMO倉旁只放「自動」值供對照，不動手填的數字。</div>`;
+  return `<span class="mm-field"><span class="mm-lbl">寫入庫存表月份</span><select class="mm-sel" onchange="momoUploadF1102InvMonth('${shop}',this.value)"><option value="none"${sel?'':' selected'}>（不寫入庫存表）</option>${opts.map(o=>`<option value="${o}"${o===sel?' selected':''}>${o}</option>`).join('')}</select></span><div class="mm-hint" style="width:100%">${note}　· 寫入後 MOMO倉、盤點（MOMO）格子標「自動」；格子已有手填值時會先問要不要覆蓋（預設不覆蓋）。</div>`;
 }
 function momoUploadF1102InvMonth(shop,val){ _momoUpF1102Month=val||'none'; _momoUpPlan=null; const pv=document.getElementById('momo-up-preview-'+shop); if(pv) pv.innerHTML=''; momoRenderUpload(shop); }   // 換月份→清舊預覽（同 C1204 寫入月份）
 function momoF1102InvPreviewHtml(P){
@@ -14930,10 +14961,10 @@ function momoF1102InvPreviewHtml(P){
   const miss=(iv.missingCost.length||iv.notInMaster.length)?`<div style="color:#b91c1c;margin-top:4px">⚠ 缺成本 ${iv.missingCost.length} 個${iv.missingCost.length?'（'+_momoEsc(iv.missingCost.slice(0,8).join('、'))+(iv.missingCost.length>8?'…':'')+'）':''}、不在乙配主檔 ${iv.notInMaster.length} 個${iv.notInMaster.length?'（'+_momoEsc(iv.notInMaster.slice(0,8).join('、'))+(iv.notInMaster.length>8?'…':'')+'）':''}：這些品號沒算進金額。</div>`:'';
   let line;
   if(m.mode==='viewOnly') line=`目前寄倉庫存金額 <b>$${iv.amount.toLocaleString()}</b>（F1102 ${(iv.exportedAt||'').slice(0,10)}）。非月初上傳，不寫入庫存表。`;
-  else if(!ym) line=`MOMO倉自動值 <b>$${iv.amount.toLocaleString()}</b>：${m.mode==='needMonth'?'檔名沒有時間戳、尚未選月份':'已選擇不寫入'}，<b>不會寫入庫存表</b>。`;
-  else line=`將寫入庫存表 <b>${ym}</b> 的 MOMO倉自動值 <b>$${iv.amount.toLocaleString()}</b>${m.mode==='auto'&&ym===m.defYm?`（依 F1102 檔案時間 ${m.time.slice(5)}）`:''}。${canEdit?'':'<span style="color:#b45309">沒有庫存表編輯權限，只計算、不寫入。</span>'}`;
+  else if(!ym) line=`MOMO倉 <b>$${iv.amount.toLocaleString()}</b>：${m.mode==='needMonth'?'檔名沒有時間戳、尚未選月份':'已選擇不寫入'}，<b>不會寫入庫存表</b>。`;
+  else line=`將寫入庫存表 <b>${ym}</b> 的 MOMO倉 <b>$${iv.amount.toLocaleString()}</b>與盤點（MOMO）日期（上傳當天）${m.mode==='auto'&&ym===m.defYm?`（依 F1102 檔案時間 ${m.time.slice(5)}）`:''}。${canEdit?'':'<span style="color:#b45309">沒有庫存表編輯權限，只計算、不寫入。</span>'}`;
   return `<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#78350f;line-height:1.6">
-    📊 <b>庫存頁 MOMO倉「自動」值</b>（並行驗證，不動手填值）：寄倉數 ${iv.qty.toLocaleString()} × 乙配成本（${iv.skuN} 個品號，不含在途）
+    📊 <b>庫存頁 MOMO倉自動填入</b>：寄倉數 ${iv.qty.toLocaleString()} × 乙配成本（${iv.skuN} 個品號，不含在途）
     <div style="margin-top:2px">${line}</div>${miss}</div>`;
 }
 function momoF1102TimeFromName(name){ const m=String(name||'').match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/); return m?(m[1]+'/'+m[2]+'/'+m[3]+' '+m[4]+':'+m[5]):''; }
@@ -16830,7 +16861,7 @@ function momoColDefKeys(shop){ return momoColAvail(shop).filter(c=>!c.fixed).map
 // 「新欄位」提示：既有使用者的欄位順序是自己拖過的（不強制插入），但要讓人知道多了一欄。
 //   作法：記已看過的欄 key；本次釋出新增的欄（_MOMO_NEW_COLS）對既有使用者標「新」+ 首次一次性 toast；開過欄位面板即視為看過、之後不再提示。
 const _MOMO_COLS_SEEN_LS='momo_cols_seen';
-const _MOMO_NEW_COLS=['feeRate','unitCost','itemProfit','itemMargin'];   // 本次釋出新增的欄；下次釋出把新 key 加進來、把不再算新的移走
+const _MOMO_NEW_COLS=[];   // 本次釋出新增的欄；下次釋出把新 key 加進來、把不再算新的移走。feeRate／unitCost／itemProfit／itemMargin 都已上線多時、不再是新欄 → 清空（否則每次進淨利表都會重跳「總表新增欄位」toast）
 function momoColsSeenSet(){
   try{ const raw=localStorage.getItem(_MOMO_COLS_SEEN_LS); if(raw){ const a=JSON.parse(raw); if(Array.isArray(a)) return new Set(a); } }catch{}
   // 首次：把「非本次新增」的欄都當已看過 → 既有使用者只會對新欄跳提示，不會整排標新
@@ -16838,7 +16869,7 @@ function momoColsSeenSet(){
   try{ localStorage.setItem(_MOMO_COLS_SEEN_LS, JSON.stringify(seed)); }catch{}
   return new Set(seed);
 }
-function momoColIsNew(k){ return !momoColsSeenSet().has(k); }
+function momoColIsNew(k){ return _MOMO_NEW_COLS.includes(k) && !momoColsSeenSet().has(k); }   // 只有列在 _MOMO_NEW_COLS 的欄才可能算「新」（已存的「看過」清單缺這些 key 的使用者，也不會再被誤標新）
 function momoColMarkAllSeen(){ try{ localStorage.setItem(_MOMO_COLS_SEEN_LS, JSON.stringify(MOMO_PROFIT_COLS.map(c=>c.k))); }catch{} }
 function momoLoadColCfg(shop){
   let cfg={order:momoColDefKeys(shop), hidden:[]};
@@ -21802,7 +21833,7 @@ function momoUploadApply(shop, allowedPeriods){
     if(!confirm('即將寫入乙配寄倉即時庫存（F1102）\n\n'+(f.skuN||0)+' 個品號、可賣量合計 '+((f.totals&&f.totals.sellable)||0).toLocaleString()+'\n資料時間 '+(fi.exportedAt||'（判不出）')+'\n\n當前快照，整包取代舊庫存（無月份維度）。')) return;   // 取消→整批不寫
     momoSaveF1102('乙配', { skus:f.skus, totals:f.totals, skuN:f.skuN, exportedAt:fi.exportedAt||'', source:'F1102' });
     f1102Wrote=true; momoClearFeeRateCache();
-    if(P.f1102Inv){   // 庫存頁 MOMO倉自動值（並行驗證期、只寫 momoWhAuto）：寫入前先確認；無編輯權限只算不寫；失敗都用 toast 講清楚
+    if(P.f1102Inv){   // 庫存頁 MOMO倉＋盤點（MOMO）自動填入：格子已有值先問覆蓋；無編輯權限只算不寫；失敗都用 toast 講清楚
       const _inv=Object.assign({}, P.f1102Inv, { ym:momoF1102InvEffYm(P.f1102Inv.fileName||'') });
       momoF1102InvWrite(_inv).then(r=>{ if(r && r.msg && typeof showToast==='function') showToast(r.msg, r.state==='written'?'success':(r.state==='error'?'error':'warn'), r.state==='written'?4000:7000); }).catch(e=>{ try{ console.error('[F1102→庫存]',e); }catch(_){} if(typeof showToast==='function') showToast('F1102 → 庫存表發生例外：'+((e&&e.message)||e),'error'); });
     }
