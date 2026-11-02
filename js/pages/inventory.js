@@ -239,7 +239,7 @@ function _invCardsData(months) {
   if (!ym) return null;
   const row = months[ym];
   const v = k => (_invIsNum(row[k]) ? row[k] : null);
-  return { ym, total: _invTotal(row), diff: _invDiff(months, ym), companyWh: v('companyWh'), inTransit: v('inTransit'), momoWh: v('momoWh') };
+  return { ym, total: _invTotal(row), diff: _invDiff(months, ym), companyWh: v('companyWh'), inTransit: v('inTransit'), momoWh: v('momoWh'), coupangWh: v('coupangWh'), pchomeWh: v('pchomeWh') };
 }
 // 最近盤點＝最新一個「蝦皮或 MOMO 盤點備註有字」的月份；沒有 ⇒ null
 function _invLatestCount(months) {
@@ -460,6 +460,8 @@ function _invCardsHtml(months) {
         ${card('company', '公司倉', c.companyWh)}
         ${card('transit', '在途存貨', c.inTransit)}
         ${card('momo', 'MOMO倉', c.momoWh)}
+        ${card('coupang', '酷澎倉', c.coupangWh)}
+        ${card('pchome', 'PChome倉', c.pchomeWh)}
       </div>${cntHtml}`;
 }
 // 期間鈕（樣式同線條切換鈕）。切換時只換這一塊（#inv-range-btns）並重畫圖表，不整頁重畫

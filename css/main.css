@@ -2678,7 +2678,8 @@
 .inv-in.inv-invalid { border-color: var(--danger); background: var(--danger-soft); }
 .inv-in.inv-saving { color: var(--text-muted); }
 /* 第 2 塊：4 張卡（沿用 .stat-card）＋最近盤點小字＋折線圖 */
-.inv-stat-grid { margin-bottom: 8px; }
+.inv-stat-grid { margin-bottom: 8px; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }   /* 6 張卡（總庫存＋五個倉）：視窗 ≥1750px（內容區 ≥約 1400px，大字 28px 才放得下 9 位數）一排六張，否則 3×2（更窄由全站 stat-grid 規則收 2／1 欄） */
+@media (max-width: 1749px) { .inv-stat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .inv-stat .stat-value { font-variant-numeric: tabular-nums; }
 .inv-stat-ym {
   margin-left: 6px;
