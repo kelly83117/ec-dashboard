@@ -27084,6 +27084,197 @@ window.__healthKpiSnapshot=function(months){
   return out;
 };
 
+// ══════ 通路健診塊 B：商品層唯讀轉接（docs/plan-channel-health.md §1-2）══════
+//  全部只讀：不寫雲端、不寫 Store；名稱不以 __cloud 開頭（不影響本機防寫的 27 / 45）。
+//  口徑一律沿用各頁現有函式：蝦皮＝淨利表報表（lsLoad：雲端記憶體 → 本機快取，LZ1 也解得開）；
+//    MOMO＝momoAggregatePeriods（lean，同 momoPeriodTotals 的動銷判定：grossQty>0 或 |營收|>0.5；分母＝上架 ∪ 有銷售）；
+//    PChome＝pchomeCalendarCalc（日曆月，轉單＋寄倉；hasBiz＝淨值為正）。
+//  「已調整」只回日期（不回人名、不回內文）：蝦皮＝淨利表備註 ec_notes＋洞察表調整紀錄；MOMO／PChome＝優化紀錄。
+
+// 各平台「資料有更新」的事件（firebase.js / profit.js 收到雲端快照、內容有變才發）。通路健診用來判斷「到齊而且安靜了」與之後自動重算。
+window.__healthProductEvents={
+  shopee:['profitDataReady','affRptReady'],
+  momo:['momoDataReady','momoReconcileReady','momoMoPlusOriginsReady','momoE001Ready','momoCostByOriginReady'],
+  pchome:['pchomeOrdersReady'],
+};
+// 載入該平台的雲端訂閱組並等資料到齊。回 { ready, timeout?, archivesReady? }。
+//   等待上限：預設 5 分鐘（Console 直接呼叫用）；通路健診頁自己傳 30 分鐘，60 秒以上顯示「仍在載入（已等 N 秒）」、5 分鐘以上提示先進淨利表，
+//   但不放棄——資料一到就自動重算（2026-11-02 實測：蝦皮在辦公室電腦 39 秒～2 分鐘才到齊，60 秒上限會誤判逾時）。
+//   「到齊」＝ ①雲端第一個快照真的到了（不是本機 localStorage 的舊資料）＋ ②最後一次資料更新事件之後安靜 QUIET 毫秒：
+//     ・蝦皮：profits collection 與舊月份分片都收過「伺服器」快照（__profitsCollectionReady／__profitArchivesReady，離線不算）。
+//     ・MOMO：momoLoadProducts 會退回讀 localStorage，所以不能拿它判斷；改看雲端快照一定會寫的 Store._profitMem：
+//       甲配、乙配商品主檔＋至少一份月對帳（firebase.js 的訂閱第一次收到一定寫 _profitMem 並發 momoDataReady／momoReconcileReady）。
+//       2026-11-02 實測：只看商品數 > 0 時，甲配 2026-09 先算出 264/563，幾秒後雲端到齊才變 273/563 → 所以要等。
+//     ・PChome：訂單、商品清單、對帳三份雲端快照都到了（firebase.js 開站就訂，快照緩存在 window.__pchome*CloudLatest）。
+//   🔴 呼叫端必須在 __ensureProfit resolve 之後才叫（本函式在 profit.js 裡，叫得到就代表已載入、守衛已掛）。
+window.__healthLoadProducts=async function(platform,opts){
+  const o=opts||{},LIMIT=o.limitMs||300000,QUIET=o.quietMs==null?3000:o.quietMs;
+  const t0=Date.now(),wait=ms=>new Promise(r=>setTimeout(r,ms));
+  let last=t0;
+  const evs=(window.__healthProductEvents||{})[platform]||[];
+  const bump=()=>{ last=Date.now(); };
+  evs.forEach(e=>window.addEventListener(e,bump));
+  const until=async ok=>{
+    while(Date.now()-t0<LIMIT){ let v=false; try{ v=!!ok(); }catch{} if(v&&Date.now()-last>=QUIET)return true; await wait(300); }
+    try{ return !!ok(); }catch{ return false; }
+  };
+  const mem=k=>{ try{ return typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]!=null; }catch{ return false; } };
+  const memPrefix=p=>{ try{ return Object.keys(Store._profitMem||{}).some(k=>k.indexOf(p)===0); }catch{ return false; } };
+  try{
+    if(platform==='shopee'){
+      if(typeof window.__loadShopeeSubs==='function')window.__loadShopeeSubs();
+      if(typeof window.__loadArchiveSubs==='function')window.__loadArchiveSubs();
+      const col=()=>typeof window.__profitsCollectionReady==='function'&&window.__profitsCollectionReady();
+      const arch=()=>typeof window.__profitArchivesReady==='function'&&window.__profitArchivesReady();
+      const ok=await until(()=>col()&&arch());
+      return {ready:ok,timeout:!ok,archivesReady:!!arch()};
+    }
+    if(platform==='momo'){
+      if(typeof window.__loadMomoSubs==='function')window.__loadMomoSubs();
+      const ok=await until(()=>mem('ec_momo_products|甲配')&&mem('ec_momo_products|乙配')&&memPrefix('ec_momo_reconcile|'));
+      return {ready:ok,timeout:!ok};
+    }
+    if(platform==='pchome'){
+      const ok=await until(()=>typeof window.__pchomeReconCloudLatest!=='undefined'&&typeof window.__pchomeProductsCloudLatest!=='undefined'
+        &&typeof window.__pchomeOrdersCloudLatest!=='undefined');
+      return {ready:ok,timeout:!ok};
+    }
+  }catch(e){ console.warn('[health] __healthLoadProducts 失敗',platform,e); }
+  finally{ evs.forEach(e=>window.removeEventListener(e,bump)); }
+  return {ready:false,timeout:false};
+};
+
+// 某平台某通路某整月的商品層資料（month＝'YYYY-MM'）。shop：蝦皮＝好麻吉…；MOMO＝甲配／乙配／MO+麻吉…；PChome＝'PChome'（轉單＋寄倉一起回）。
+//   回 { platform, shop, month, ... } ；讀不到回 { …, error }。各平台形狀見 js/pages/health.js 的 _hlProdNormalize。
+//   「已調整」日期每個通路快取 20 秒（蝦皮要讀淨利表備註＋洞察表調整紀錄，資料大；同一輪 3～13 個月不用重讀）。
+const _healthAdjCache={};
+window.__healthProductSnapshot=function(platform,shop,month){
+  const out={platform,shop,month,error:null};
+  const ck=platform+'|'+shop, hit=_healthAdjCache[ck];
+  const cached=hit&&(Date.now()-hit.t<20000)?hit.map:null;
+  const lastAdj=cached?Object.assign({},cached):{};
+  const bump=(k,d)=>{ if(cached)return; k=String(k||'').trim(); d=String(d||'').trim().slice(0,10).replace(/-/g,'/'); if(!k||!/^\d{4}\/\d{2}\/\d{2}$/.test(d))return; if(!lastAdj[k]||d>lastAdj[k])lastAdj[k]=d; };
+  try{
+    if(!/^\d{4}-\d{2}$/.test(month||''))throw new Error('bad month');
+    if(platform==='shopee'){
+      const ym=month.replace('-','/');
+      out.halves=[];
+      ['full','first','second'].forEach(h=>{
+        const d=lsLoad(shop,ym,h);
+        const rows=d&&typeof d==='object'?(d.built||d.rows||[]):[];
+        if(!Array.isArray(rows)||!rows.length)return;
+        out.halves.push({half:h,ts:(d&&d.ts)||null,rows:rows.map(r=>({code:String(r.code||''),name:String(r.name||''),qty:+r.qty||0,rev:+r.rev||0,
+          gross:+r.gross||0,adsFee:+r.adsFee||0,platFee:+r.platFee||0,pureProfit:+r.pureProfit||0,roi:+r.roi||0,directROI:+r.directROI||0,clicks:+r.clicks||0}))});
+      });
+      const addNotes=n=>Object.keys(n||{}).forEach(c=>{ const v=n[c]; ((v&&typeof v==='object'&&v.adjustments)||[]).forEach(a=>bump(c,a&&a.date)); });
+      if(!cached){
+        try{ addNotes(getNotes(shop)); }catch{}
+        try{ addNotes(Store.get('ec.insight_'+shop+'_notes',{})); }catch{}
+      }
+    }else if(platform==='momo'){
+      // 🔴 逐商品利潤＝MOMO 總表「淨利貢獻」同一套（2026-11-02 驗收：只用 momoAggregatePeriods 時，甲配 2026-09 有 254／262 個商品金額跟畫面不同，整家合計相同）：
+      //   跟 momoRenderProfitBody 一樣先 momoClearFeeRateCache（吃最新對帳單），逐商品 momoAggregatePeriods，
+      //   再 momoStage4Redistribute（甲配／乙配：物流按逐 SKU 出貨形狀重分配、乙配倉租用 C1212 逐 SKU 實際值；整家合計不變）。
+      //   lean：只跳過畫面用的 latestSale／listPrice（逐 SKU 掃描熱點），profit、skuFreightPeriod、skuRentPeriod 照算（同 momoRentEatsMarginList）。
+      const period=month+'-FULL',keys=momoExpandPeriod(period),isMoPlus=momoIsMoPlus(shop);
+      try{ momoClearFeeRateCache(); }catch{}
+      const prods=momoLoadProducts(shop);
+      const rows=prods.map(p=>{
+        const a=momoAggregatePeriods(p,keys,shop,{lean:true});
+        return { sku:p.sku||'', revenue:a.revenue||0, qty:a.qty||0, cost:a.cost||0, skuFreightPeriod:a.skuFreightPeriod, skuRentPeriod:a.skuRentPeriod,
+          profit:a.profit, margin:a.margin, _g:(a.grossQty!=null?a.grossQty:a.qty), _covered:!!a.covered };
+      });
+      try{ out.freightMode=momoStage4Redistribute(shop,period,rows); }catch(e){ out.freightMode='error'; }
+      out.rows=prods.map((p,i)=>{
+        const r=rows[i];
+        const sold=r._g>0||Math.abs(r.revenue)>0.5;
+        return {key:String(p.sku||''),origin:String(p.origin||'').trim(),name:String(p.name||''),rev:+r.revenue||0,profit:+r.profit||0,qty:+r.qty||0,
+          sold,active:p.discontinued!==true,costKnown:isMoPlus?r._covered:Number(p.cost)>0};
+      });
+      try{ out.recon=!!momoLoadReconcile(shop,month); }catch{ out.recon=null; }
+      if(!cached){ try{ const ol=momoLoadOptlog(shop)||{}; Object.keys(ol).forEach(s=>(Array.isArray(ol[s])?ol[s]:[]).forEach(x=>bump(s,x&&x.date))); }catch{} }
+    }else if(platform==='pchome'){
+      const products=pchomeLoadProducts()||[];
+      out.latestExport=pchomeLatestExport(products)||'';
+      out.months=pchomeCalendarMonths();
+      out.rows=[];out.subTotals={};
+      if(out.months.indexOf(month)>=0){
+        const pages={};
+        products.forEach(p=>{ const c=String(p.料號||'').trim(); if(!c)return;
+          (Array.isArray(p.商品編號)?p.商品編號:(p.商品編號==null?[]:[p.商品編號])).forEach(v=>{ v=String(v||'').trim(); if(!v)return;
+            const seg=v.split('-'),b=seg.length>1?seg.slice(0,-1).join('-'):v; (pages[c]=pages[c]||[]); if(pages[c].indexOf(b)<0)pages[c].push(b); }); });
+        ['轉單','寄倉'].forEach(sub=>{
+          const calc=pchomeCalendarCalc(month,sub),skus=(calc&&calc.skus)||[];
+          out.subTotals[sub]={sold:calc.bizCount||0,total:skus.filter(x=>!x.discontinued||x.hasBiz).length};
+          skus.forEach(x=>{ const c=String(x.料號||'').trim();
+            out.rows.push({key:c,sub,pages:pages[c]||[],name:String(x.商品名||''),rev:+x.營收||0,profit:x.淨利==null?null:+x.淨利,qty:+x.銷量||0,
+              sold:!!x.hasBiz,active:!x.discontinued,costKnown:!!x.costKnown}); });
+          try{ const ol=pchomeLoadOptlog(sub)||{}; Object.keys(ol).forEach(s=>(Array.isArray(ol[s])?ol[s]:[]).forEach(e=>bump(s,e&&e.date))); }catch{}
+        });
+      }
+    }else throw new Error('bad platform');
+  }catch(e){ out.error=String((e&&e.message)||e); }
+  out.lastAdjust=lastAdj;
+  // 存「已調整」快取（PChome 只有那個月在日曆月清單裡才真的讀過優化紀錄，沒讀過不存）
+  if(!cached&&!out.error&&(platform!=='pchome'||(out.rows&&out.rows.length)))_healthAdjCache[ck]={t:Date.now(),map:Object.assign({},lastAdj)};
+  return out;
+};
+
+// 從通路健診跳到淨利表某通路某月、並用搜尋框定位到那個商品。
+//   o＝{ platform:'shopee'|'momo'|'pchome', shop（淨利表的通路名：好麻吉／甲配／轉單…）, month:'YYYY-MM', code }
+//   🔴 不寫持久狀態（照 tagFxJump「只切不記」）：
+//     ・蝦皮切月份用 onMonthChange(…, byUser=false)：不設 _userPickedPeriod 鎖；它會寫 ec_lastMonth_{通路} → 先存後還原。
+//       搜尋只改 state[shop].search＋applyFilters，不走 setSearch（那支會 _saveFilterState 寫 ec_filterstate）。
+//     ・MOMO／PChome 的期間、子分頁、搜尋都是模組記憶體變數（_momoPeriodSel / _momoSub / _momoSearch、_pchome*），本來就不持久化。
+//     ・切到哪個通路＝寫 ec_profitView（＋蝦皮 ec_curShop），跟使用者自己點通路一樣（本機、不上雲）。
+//   流程：寫 ec_profitView → App.navigate('office-d1-profit') → 淨利表重建時 restoreProfitView 切到該通路
+//     → 這裡每 250ms 檢查那個通路的分頁亮了沒，亮了才切期間＋搜尋；8 秒沒亮就提示「請在表中搜尋」。
+window.__profitOpenAt=function(o){
+  o=o||{};
+  const plat=o.platform,shop=o.shop,month=o.month,code=String(o.code||'').trim();
+  if(['shopee','momo','pchome'].indexOf(plat)<0||!shop||!/^\d{4}-\d{2}$/.test(month||''))return false;
+  try{ _saveProfitView(plat,shop); }catch{}
+  if(plat==='shopee'){ try{ localStorage.setItem('ec_curShop',shop); }catch{} }
+  const apply=()=>{
+    if(plat==='shopee'){
+      const el=document.getElementById('content-'+shop);
+      if(!el||!el.classList.contains('active')||!state[shop]||!document.getElementById('month-sel-'+shop))return false;
+      const ym=month.replace('-','/');
+      const half=lsLoad(shop,ym,'full')?'full':'first';
+      const k='ec_lastMonth_'+shop;let saved=null;try{saved=localStorage.getItem(k);}catch{}
+      onMonthChange(shop,false,ym,half);
+      try{ if(saved===null)localStorage.removeItem(k);else localStorage.setItem(k,saved); }catch{}
+      state[shop].search=code;
+      const se=document.getElementById('search-'+shop);if(se)se.value=code;
+      applyFilters(shop);
+      return true;
+    }
+    if(plat==='momo'){
+      const el=document.getElementById('momo-content-'+shop);
+      if(!el||!el.classList.contains('active'))return false;
+      _momoSub[shop]='profit';_momoSearch[shop]=code;_momoPeriodSel[shop]=month+'-FULL';
+      momoRenderShop(shop);
+      return true;
+    }
+    const el=document.getElementById('pchome-content-'+shop);
+    if(!el||!el.classList.contains('active'))return false;
+    _pchomeSub[shop]='profit';_pchomeViewMode[shop]='calendar';_pchomeCalMonth[shop]=month;_pchomeSearch[shop]=code;
+    pchomeRenderShop(shop);
+    return true;
+  };
+  try{ if(window.App&&typeof App.navigate==='function')App.navigate('office-d1-profit'); }catch(e){ console.error('[health] 跳淨利表失敗',e); }
+  const t0=Date.now();
+  const tick=()=>{
+    let done=false;
+    try{ done=apply(); }catch(e){ console.warn('[health] 淨利表定位失敗',e); done=true; }
+    if(done)return;
+    if(Date.now()-t0>8000){ try{ if(typeof showToast==='function')showToast('已切到淨利表，請在表中搜尋 '+code,'info',6000); }catch{} return; }
+    setTimeout(tick,250);
+  };
+  setTimeout(tick,300);
+  return true;
+};
+
 /* ═══════════ PChome 淨利表（供貨模式，框架照甲配）· 商品同步分頁 ═══════════ */
 // 對帳明細檔：UTF-16LE+BOM / Tab / 16 段 / Excel 公式跳脫。解析器與 scratchpad 驗證版同源。
 function pchomeDecode(buf){ var u8=(buf instanceof Uint8Array)?buf:new Uint8Array(buf); return new TextDecoder('utf-16le').decode(u8).replace(/^﻿/,''); }

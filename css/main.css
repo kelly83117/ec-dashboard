@@ -2795,7 +2795,7 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-dim-score { font-weight: 700; min-width: 28px; text-align: right; }
 .hl-dim-off { font-size: 12px; color: var(--text-muted); padding: 2px 8px; background: var(--bg); border-radius: var(--radius-sm); }
 /* 分數條：<progress>，各瀏覽器的填色選擇器分開寫 */
-.hl-bar { flex: 1; max-width: 360px; height: 8px; border: 0; border-radius: 999px; background: var(--bg); overflow: hidden; appearance: none; -webkit-appearance: none; }
+.hl-bar { flex: 1 1 0; min-width: 48px; max-width: 360px; height: 8px; border: 0; border-radius: 999px; background: var(--bg); overflow: hidden; appearance: none; -webkit-appearance: none; }
 .hl-bar::-webkit-progress-bar { background: var(--bg); border-radius: 999px; }
 .hl-bar-green::-webkit-progress-value { background: var(--success); border-radius: 999px; }
 .hl-bar-yellow::-webkit-progress-value { background: var(--warn); border-radius: 999px; }
@@ -2822,6 +2822,36 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-chart-fail { padding: 20px; text-align: center; font-size: 12px; color: var(--text-muted); }
 .hl-next { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
 .hl-foot { margin-top: 10px; font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+/* ── 塊 B：商品層 ── */
+/* 總分欄：商品層還沒載好（載入中／未載入／逾時）不給分數，只顯示狀態字 */
+.hl-score-wait { font-size: 12px; font-weight: 600; color: var(--info); background: var(--info-soft); }
+.hl-score-timeout { color: var(--warn); background: var(--warn-soft); }
+/* 面向標題旁「起始值・待回測校準」 */
+.hl-uncal { margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; white-space: nowrap; color: var(--warn); background: var(--warn-soft); }
+.hl-badge-warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-soft); }
+/* 頁頂「商品層資料：蝦皮 ✓、MOMO 尚未載入…」 */
+.hl-prodnote { margin-bottom: 12px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--info); font-size: 12px; line-height: 1.6; }
+/* 卡片裡「載入商品資料」列 */
+.hl-prodbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 12px; padding: 8px 12px; border-radius: var(--radius-sm);
+  background: var(--bg); border: 1px dashed var(--border); font-size: 12px; color: var(--text-muted); }
+.hl-load-btn { white-space: nowrap; }
+/* 拖累商品清單 */
+.hl-drag { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.hl-drag-hd { font-weight: 700; color: var(--text); }
+.hl-drag-hd .hl-w { margin-left: 8px; }
+.hl-drag-off { margin-top: 6px; padding: 6px 10px; font-size: 12px; color: var(--text-muted); background: var(--bg); border-radius: var(--radius-sm); }
+.hl-drag-wrap { overflow-x: auto; }
+.hl-drag-table { min-width: 640px; }
+.hl-drag-table .hl-drag-name { max-width: 260px; }
+.hl-drag-jump { padding: 0; border: 0; background: none; font: inherit; font-variant-numeric: tabular-nums; color: var(--primary-dark); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+.hl-drag-jump:hover, .hl-drag-jump:focus-visible { color: var(--primary); }
+.hl-reason-tag { display: inline-block; margin: 0 4px 2px 0; padding: 1px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; background: var(--danger-soft); color: var(--danger); }
+.hl-adj { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; background: var(--success-soft); color: var(--success); }
+.hl-drag-more { display: block; margin: 6px 0 0; }
+.hl-drag-info { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.hl-drag-info summary { cursor: pointer; }
+.hl-drag-info ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.8; }
 /* 手機：總覽只留「通路、總分、主要扣分原因」三欄，展開的卡片跟著變窄；子指標表收掉零分線、滿分線兩欄（ⓘ 裡照樣看得到公式） */
 @media (max-width: 768px) {
   .hl-table { min-width: 0; }
@@ -2832,5 +2862,14 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
   .hl-card-hd { align-items: flex-start; gap: 12px; }
   .hl-ring { width: 56px; height: 56px; font-size: 20px; }
   .hl-sub .hl-lim { display: none; }
+  /* 拖累清單：手機不設最小寬度（否則整張展開卡片會被撐寬、外層表格左右捲），商品名可換行 */
+  .hl-drag-table { min-width: 0; }
+  /* 表格儲存格會被內容撐寬：限制拖累清單容器不超過畫面寬，放不下的在自己框裡左右捲，不撐寬整張卡片 */
+  .hl-drag-wrap { max-width: calc(100vw - 72px); }
+  /* 面向標題列（名稱、權重、分數條、分數、待校準標章）放不下時換行，不撐寬卡片 */
+  .hl-dim-hd { flex-wrap: wrap; row-gap: 4px; }
+  .hl-drag-table .hl-drag-name { max-width: none; }
+  .hl-drag-table td, .hl-drag-table th { padding-left: 4px; padding-right: 4px; }
+  .hl-drag-table .hl-drag-opt { display: none; }   /* 手機只留品號、商品、原因、拖累金額、調整；營收／純利／廣告費在桌機看 */
   .hl-info-body { max-width: 200px; }
 }
