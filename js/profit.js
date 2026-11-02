@@ -16822,7 +16822,7 @@ function momoColDefKeys(shop){ return momoColAvail(shop).filter(c=>!c.fixed).map
 // 「新欄位」提示：既有使用者的欄位順序是自己拖過的（不強制插入），但要讓人知道多了一欄。
 //   作法：記已看過的欄 key；本次釋出新增的欄（_MOMO_NEW_COLS）對既有使用者標「新」+ 首次一次性 toast；開過欄位面板即視為看過、之後不再提示。
 const _MOMO_COLS_SEEN_LS='momo_cols_seen';
-const _MOMO_NEW_COLS=['feeRate','unitCost','itemProfit','itemMargin'];   // 本次釋出新增的欄；下次釋出把新 key 加進來、把不再算新的移走
+const _MOMO_NEW_COLS=[];   // 本次釋出新增的欄；下次釋出把新 key 加進來、把不再算新的移走。feeRate／unitCost／itemProfit／itemMargin 都已上線多時、不再是新欄 → 清空（否則每次進淨利表都會重跳「總表新增欄位」toast）
 function momoColsSeenSet(){
   try{ const raw=localStorage.getItem(_MOMO_COLS_SEEN_LS); if(raw){ const a=JSON.parse(raw); if(Array.isArray(a)) return new Set(a); } }catch{}
   // 首次：把「非本次新增」的欄都當已看過 → 既有使用者只會對新欄跳提示，不會整排標新
@@ -16830,7 +16830,7 @@ function momoColsSeenSet(){
   try{ localStorage.setItem(_MOMO_COLS_SEEN_LS, JSON.stringify(seed)); }catch{}
   return new Set(seed);
 }
-function momoColIsNew(k){ return !momoColsSeenSet().has(k); }
+function momoColIsNew(k){ return _MOMO_NEW_COLS.includes(k) && !momoColsSeenSet().has(k); }   // 只有列在 _MOMO_NEW_COLS 的欄才可能算「新」（已存的「看過」清單缺這些 key 的使用者，也不會再被誤標新）
 function momoColMarkAllSeen(){ try{ localStorage.setItem(_MOMO_COLS_SEEN_LS, JSON.stringify(MOMO_PROFIT_COLS.map(c=>c.k))); }catch{} }
 function momoLoadColCfg(shop){
   let cfg={order:momoColDefKeys(shop), hidden:[]};
