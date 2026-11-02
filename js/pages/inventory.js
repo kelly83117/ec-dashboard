@@ -9,10 +9,9 @@
  *   寫入只送有變的那一格：writePaths([[['months',月,欄位],值], [['months',月,'updatedAt'],TS], [['months',月,'updatedBy'],{…}]])，
  *   兩人同時改不同格不互蓋。清空數字＝寫 null（不刪欄位）。不能刪除月份。
  * 總計、較上月一律即時算、不存（_invTotal / _invDiff）：
- *   總計＝公司倉＋在途存貨＋MOMO倉＋酷澎倉＋PChome倉，空白當 0（用「分」整數加總）。
- *   🔴 但「公司倉」空白的月份＝「未填齊」：總計、較上月都不算（_invTotal 回 null、格子顯示灰色「未填齊」）。
- *   較上月＝本月總計 − 上一個日曆月總計，任一邊「未填齊」或沒有 ⇒ 不算。
- *   上方卡片的「本月」與走勢圖只用「已填齊」（公司倉有數字）的月份：_invLatestYm＝最新一個公司倉有數字的月份，未填齊的月份不畫點。
+ *   總計＝公司倉＋在途存貨＋MOMO倉＋酷澎倉＋PChome倉，空白當 0（用「分」整數加總）——填了多少就加總多少，不等其他倉填完，隨時看得到最新數字。
+ *   五格都空白 ⇒ 總計空白。較上月＝本月總計 − 上一個日曆月總計，任一邊空白 ⇒ 空白。
+ *   上方卡片的「本月」與走勢圖終點：_invLatestYm＝最新一個「總計有數字」（五個倉任一格有數字）的月份。
  *   ⚠ 財務儀表板之後讀 app/inventory 自己算總計，規則必須跟這裡一樣（見 CLAUDE.md）。
  * 編輯：照 KPI 填寫模式（profit.js kpiFillKey / kpiFillBlur）——Enter 存檔並往下一列、Esc 還原、值有變失焦就存；
  *   清空只有 Enter 算數（失焦時空白＝取消）。打錯（不是數字）紅框、不存。總計與較上月不是輸入框。
@@ -76,10 +75,10 @@ const INV_GUIDE = Object.freeze([
     '備註：自由填。',
     '點格子直接改，Enter 存檔、Esc 取消。',
   ] },
-  { h: '自動算的欄位', p: '總計（五個倉加總，空白當 0）、較上月是自動算的，不能改。公司倉還沒填時，總計與較上月顯示「未填齊」。' },
+  { h: '自動算的欄位', p: '總計（公司、在途存貨、MOMO、酷澎、PChome 加總，空白當 0，填了多少就加總多少）、較上月是自動算的，不能改。' },
   { h: '右上角有小圓點的格子', p: 'MOMO倉、盤點（MOMO）會在每月 1～5 號上傳 F1102 後自動填入上個月（格子右上角有小圓點，滑鼠移上去看來源），可手動修改；手動改過小圓點就消失。' },
   { h: '上方卡片與走勢圖', ol: [
-    '卡片顯示最新一個公司倉已填的月份；走勢圖也只畫公司倉已填的月份（未填齊的月份不畫點）。',
+    '卡片顯示最新一個有填庫存數字的月份。',
     '走勢圖可切換近 12 個月／近 24 個月／全部，線可選總計、公司倉、在途存貨、MOMO倉、酷澎倉、PChome倉。',
   ] },
   { warn: '⚠ 過渡期：財務儀表板目前仍讀舊的庫存統計表（E 欄總計、I 欄叫貨金額），所以舊表也要照常填，直到另行通知。' },
@@ -124,13 +123,12 @@ function _invNextYm(ym) {
   return m === 12 ? (y + 1) + '-01' : y + '-' + String(m + 1).padStart(2, '0');
 }
 const _invIsNum = v => typeof v === 'number' && Number.isFinite(v);
-// 「已填齊」＝公司倉有數字。公司倉空白的月份＝「未填齊」：總計、較上月都不算，卡片與走勢圖也不用它。
-const _invIsComplete = row => !!row && typeof row === 'object' && _invIsNum(row.companyWh);
 const INV_TOTAL_FIELDS = Object.freeze(['companyWh', 'inTransit', 'momoWh', 'coupangWh', 'pchomeWh']);
-// 總計：未填齊（公司倉空白）⇒ null；否則五個倉加總（不是數字的當 0）。用「分」整數加總，避開浮點尾差。
+// 總計：五格都不是數字 ⇒ null；否則加總（不是數字的當 0）——填了多少就加總多少。用「分」整數加總，避開浮點尾差。
 function _invTotal(row) {
-  if (!_invIsComplete(row)) return null;
-  return INV_TOTAL_FIELDS.reduce((s, k) => s + (_invIsNum(row[k]) ? Math.round(row[k] * 100) : 0), 0) / 100;
+  if (!row || typeof row !== 'object') return null;
+  if (!INV_TOTAL_FIELDS.some(k => _invIsNum(row[k]))) return null;
+  return INV_TOTAL_FIELDS.reduce((sum, k) => sum + (_invIsNum(row[k]) ? Math.round(row[k] * 100) : 0), 0) / 100;
 }
 // 較上月：本月與上一個日曆月都有總計才算
 function _invDiff(months, ym) {
@@ -231,10 +229,10 @@ function _invCellPairs(ym, f, v, by, TS) {
   if (f === 'momoWh' || f === 'countNoteMomo') pairs.push([['months', ym, f + 'Src'], { src: 'manual', by, at: Date.now() }]);
   return pairs;
 }
-// 卡片的「本月」＝最新一個「已填齊」（公司倉有數字）的月份；全部都沒有 ⇒ null（不顯示卡片）
+// 卡片的「本月」＝最新一個總計有數字（五個倉任一格有數字）的月份；全部都空 ⇒ null（不顯示卡片）
 function _invLatestYm(months) {
   const keys = Object.keys(months || {}).filter(_invIsYm).sort().reverse();
-  return keys.find(k => _invIsComplete(months[k])) || null;
+  return keys.find(k => _invTotal(months[k]) != null) || null;
 }
 function _invCardsData(months) {
   const ym = _invLatestYm(months);
@@ -268,11 +266,11 @@ function _invCountNoteText(cnt) {
   return '最近盤點：' + parts.join('／') + '（' + _invYmLabel(cnt.ym) + '）';
 }
 // 圖表資料：X 軸＝最早到最新的每一個日曆月（中間沒有的月份也列出、值 null ⇒ 斷線）；
-//   每條線的值：總計用 _invTotal，各倉用原數字；不是數字 ⇒ null。未填齊（公司倉空白）的月份所有線都是 null（不畫點）。
+//   每條線的值：總計用 _invTotal，各倉用原數字；不是數字 ⇒ null。
 //   range：'12' / '24' / 'all'（沒給＝全部）。
-//   終點一律是「最新一個已填齊的月份」——跟統計卡的「本月」同一個判斷（_invLatestYm：公司倉有數字），
+//   終點一律是「最新一個有數字的月份」——跟統計卡的「本月」同一個判斷（_invLatestYm：總計有數字），
 //     所以月初剛新增、還沒填的月份不會被算進去（不會出現最後一點是空的）。「全部」也一樣。
-//     沒有任何已填齊的月份（_invLatestYm 是 null）⇒ 照原本以最新月份 key 為終點（圖上全是空的，同之前的空狀態）。
+//     沒有任何有數字的月份（_invLatestYm 是 null）⇒ 照原本以最新月份 key 為終點（圖上全是空的，同之前的空狀態）。
 //   近 12／近 24 個月：從終點往回取 N 個日曆月；資料不足 N 個月就從最早的月份開始。全部：最早的月份到終點。
 function _invChartData(months, range) {
   const keys = Object.keys(months || {}).filter(_invIsYm).sort();
@@ -286,9 +284,8 @@ function _invChartData(months, range) {
   INV_SERIES.forEach(sr => {
     series[sr.k] = yms.map(ym => {
       const row = months[ym];
-      if (!_invIsComplete(row)) return null;
       if (sr.k === 'total') return _invTotal(row);
-      return _invIsNum(row[sr.k]) ? row[sr.k] : null;
+      return row && _invIsNum(row[sr.k]) ? row[sr.k] : null;
     });
   });
   return { labels: yms.map(_invYmLabel), yms, series };
@@ -381,9 +378,6 @@ function _invSrcTip(row, k) {
     : '自動：上傳 F1102（' + (at || '時間不明') + ' 匯出）當天自動填入；手動改這格後會變成手填';
 }
 function _invCellHtml(col, ym, months, ro) {
-  if ((col.k === '_total' || col.k === '_diff') && !_invIsComplete(months[ym])) {
-    return '<td class="inv-auto inv-incomplete" title="公司倉還沒填">未填齊</td>';
-  }
   if (col.k === '_total') return `<td class="inv-auto">${escapeHtml(_invFmtNum(_invTotal(months[ym])))}</td>`;
   if (col.k === '_diff') {
     const d = _invDiff(months, ym);
@@ -417,7 +411,7 @@ function _invTableHtml(months, ro) {
   const thCls = c => (c.t === 'txt' ? (INV_CN_FIELDS[c.k] ? 'inv-th-cnt' : 'inv-th-txt') : 'inv-th-num') + (c.t === 'auto' ? ' inv-th-auto' : '');
   //   版面（不要出現左右捲軸）：表頭【不放「自動」小字】——總計／較上月的說明放在表頭 title；MOMO倉、盤點（MOMO）標題後面的「!」說明資料來源；
   //   自動填入的格子在格子右上角用一顆小圓點標示（_invCellHtml，.inv-cell-autofill）。盤點欄標題拆成「盤點」＋通路名兩行，欄寬才縮得下。
-  const INV_AUTO_COL_TIP = { _total: '自動計算：公司倉＋在途存貨＋MOMO倉＋酷澎倉＋PChome倉（空白當 0）。公司倉還沒填時顯示「未填齊」。', _diff: '自動計算：本月總計 − 上個月總計。本月或上月未填齊時不算。' };
+  const INV_AUTO_COL_TIP = { _total: '自動計算：公司倉＋在途存貨＋MOMO倉＋酷澎倉＋PChome倉（空白當 0，填了多少就加總多少）。', _diff: '自動計算：本月總計 − 上個月總計。' };
   const thLabel = c => {
     const m = INV_CN_FIELDS[c.k] && /^盤點（(.+)）$/.exec(c.l);
     const info = INV_AUTO_HEAD[c.k] ? `<span class="inv-info" tabindex="0" aria-label="資料來源說明" title="${escapeHtml(INV_AUTO_HEAD[c.k])}">!</span>` : '';

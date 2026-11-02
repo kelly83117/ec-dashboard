@@ -2655,8 +2655,6 @@
 .inv-table td.inv-auto { padding: 6px 12px; text-align: right; color: var(--text); font-size: 13px; font-weight: 400; }
 .inv-table td.inv-auto.inv-neg { color: var(--danger); }
 .inv-table td.inv-auto.inv-pos { color: var(--success); }
-/* 公司倉還沒填 ⇒ 總計／較上月不算：灰色「未填齊」（title＝公司倉還沒填） */
-.inv-table td.inv-auto.inv-incomplete { color: var(--text-muted); font-size: 12px; cursor: help; }
 .inv-in {
   width: 100%;
   box-sizing: border-box;
