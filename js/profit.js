@@ -6,6 +6,14 @@ const Store = window.Store;
 //     常數放後面會撞 TDZ、整個模組載入失敗。
 const TEST_SHOP_ID='測試通路';
 
+// 報表快取（localStorage ec|通路|月|半月）LZ1 壓縮的開關與延後寫入狀態（B-3 #173 第 2 塊，見 _reportCacheWrite）。
+//   回滾＝把開關改 false 再部署：寫回未壓縮 JSON、不做就地壓縮；讀取端（_reportCacheParse）照樣讀得懂已寫下的 LZ1。
+//   ⚠ 放在模組最前面：函式會 hoist、const 不會，放後面會在呼叫時撞 TDZ（理由同上面的 TEST_SHOP_ID）。
+const _LS_COMPRESS_WRITE=true;
+const _LS_COMPRESS_MIGRATE=true;
+const _REPORT_CACHE_DEFER_MS=1500;
+const _reportCacheDeferred=new Map();   // key → { json, meta:{shop,month,half}, timer }
+
 // 🔴 最外層卡片刻意【沒有】overflow:hidden（2026-09-04 移除）：它會把「🏷 標籤」與「☰ 欄位」
 //   這兩個 position:absolute 的面板整個裁掉，沒有捲軸、也沒有任何提示。完整理由與副作用
 //   見 css/profit.css 的 .col-picker-menu 上方註解。要回滾就把 overflow:hidden 加回這一行。
@@ -1184,7 +1192,8 @@ function _notifyLsSaveFail(shop, month, half, err){
     who + ' 的報表沒有存進這台電腦。\n' +
     '資料目前只在記憶體裡，重整或關掉分頁就會消失。\n\n' +
     '請現在按「☁ 同步雲端」把它推上去（推得上去，不受這個問題影響）。\n' +
-    '保險起見也可以先按「匯出 Excel」留一份（如有篩選請先清除，才會匯出全部商品）。';
+    '保險起見也可以先按「匯出 Excel」留一份（如有篩選請先清除，才會匯出全部商品）。' +
+    (quota ? '\n\n同步完成後再重新整理一次，系統會自動把這台電腦裡的舊報表壓小、釋出空間。\n⚠ 一定要先同步再重新整理，順序反過來會丟掉這份報表。' : '');
   const detail = (err && (err.name || err.message))
     ? ('錯誤：' + (err.name||'') + ' ' + (err.message||'')) : '';
 
@@ -1196,7 +1205,7 @@ function _notifyLsSaveFail(shop, month, half, err){
     }
   }
   if(typeof showToast === 'function'){
-    showToast('報表沒存進本機，請先按同步雲端再重整', 'error');
+    showToast(quota ? '報表沒存進本機，請先按同步雲端再重整（重整後會自動釋出空間）' : '報表沒存進本機，請先按同步雲端再重整', 'error');
   }
 }
 
@@ -1308,8 +1317,12 @@ function _stripDerived(built){
   if(!Array.isArray(built))return built;
   return built.map(({analysisAll:_omit,profitPct:_omit2,...rest})=>rest);
 }
-function lsSave(shop,month,half,built,period,days,storeAds){
+function lsSave(shop,month,half,built,period,days,storeAds,opts){
   // 只存本機；同步雲端需手動按「☁ 同步雲端」
+  // opts.defer（只有 recalcRow 編輯一格會傳）：localStorage 那份延後 _REPORT_CACHE_DEFER_MS 才壓縮寫入（壓縮 800K 約 0.4～0.6 秒，
+  //   每格都壓會卡）。_profitMem / pending / 同步鈕仍在這裡同步更新，畫面與推雲端都讀 _profitMem，不受延後影響。
+  //   🔴 JSON.stringify 一定在這裡同步做、不可移進計時器：之後 loadIntoUI 會把衍生欄位加回 _profitMem 這個物件，
+  //     延後才序列化就會把被 _stripDerived 剝掉的欄位寫進本機。
   // storeAds（#340，賣場廣告，見 _storeAdsOf）：只有「產生報表」會傳。其他重存（recalcRow 改廣告費）不傳 ⇒
   //   沿用這份報表【已存的】storeAds（先讀回再覆蓋），改一格廣告費不會把它弄丟、也不會變成「沒記錄」。
   //   舊報表本來就沒有這個欄位 → 重存後照樣沒有（不補 0）。
@@ -1317,14 +1330,173 @@ function lsSave(shop,month,half,built,period,days,storeAds){
   const payload={built:_stripDerived(built),period,days,rate:getPlatformRate(shop),ts:Date.now()};
   if(storeAds!==undefined)payload.storeAds=storeAds;
   const k=lsKey(shop,month,half);
-  let saveErr=null;
-  try{localStorage.setItem(k,JSON.stringify(payload));}catch(e){saveErr=e;}
+  const json=JSON.stringify(payload);
   try{if(typeof Store!=='undefined'&&Store._profitMem)Store._profitMem[k]=payload;}catch{}
   // 記完整的 lsKey 到 pending set — 這樣使用者切到別的月份/賣場再產生報表，
   //   舊的月份/賣場也還在 pending 裡，按同步時會一起推上雲端（避免只推當前顯示那份）
   _pendingSyncKeys.add(k);
   _showSyncBtn(shop);
-  if(saveErr){ try{ _notifyLsSaveFail(shop, month, half, saveErr); }catch(e2){ console.error('[lsSave] 通報失敗', e2); } }
+  // 寫 localStorage 放最後：寫入失敗的通報（_notifyLsSaveFail）跟改版前一樣是 lsSave 做的最後一件事
+  const meta={shop,month,half};
+  if(opts&&opts.defer===true) _reportCacheDefer(k,json,meta);
+  else _reportCacheWrite(k,json,meta);   // 產生報表：立刻寫
+}
+
+// ── 報表快取寫入：LZ1 壓縮 → setItem → 讀回驗證；任何一步不成就退回寫未壓縮 JSON（＝改版前的行為）──
+//   格式見 _reportCacheParse。這裡只碰 localStorage，絕不碰 _profitMem（_profitMem 永遠是 lsSave 的 payload 物件）。
+// 回傳 LZ1 字串；沒有 lz-string / 開關關閉 / 壓縮丟錯 / 記憶體內解不回原字串 → null（呼叫端改寫未壓縮 JSON）
+function _reportCacheEncode(json){
+  try{
+    const LZ=window.LZString;
+    if(!_LS_COMPRESS_WRITE||!LZ||typeof LZ.compressToUTF16!=='function'||typeof LZ.decompressFromUTF16!=='function') return null;
+    if(typeof json!=='string'||json==='') return null;
+    const c=LZ.compressToUTF16(json);
+    if(typeof c!=='string'||LZ.decompressFromUTF16(c)!==json) return null;
+    return 'LZ1:'+json.length+':'+c;
+  }catch(e){ return null; }
+}
+// 立刻寫入一把報表快取。meta={shop,month,half} 只用來通報失敗。回傳 'lz' | 'json' | 'fail'。
+function _reportCacheWrite(k,json,meta){
+  const pend=_reportCacheDeferred.get(k);
+  if(pend){ clearTimeout(pend.timer); _reportCacheDeferred.delete(k); }   // 新的蓋舊的
+  let why='';
+  const enc=_reportCacheEncode(json);
+  if(enc!==null){
+    let wrote=false;
+    try{ localStorage.setItem(k,enc); wrote=true; }catch(e){ why='寫入壓縮格式失敗（'+(e&&e.name||e)+'）'; }
+    if(wrote){
+      let ok=false;
+      try{ const back=_reportCacheParse(localStorage.getItem(k)); ok=(back!==null&&JSON.stringify(back)===json); }catch(e){}
+      if(ok) return 'lz';
+      why='寫入後讀回不一致';
+    }
+  }
+  // 寫未壓縮 JSON（＝改版前 lsSave 的那一行）
+  let saveErr=null;
+  try{ localStorage.setItem(k,json); }catch(e){ saveErr=e; }
+  if(!saveErr){ if(why) console.warn('[報表快取] '+k+' 沒有壓縮、改寫未壓縮：'+why); return 'json'; }
+  // 兩種都寫不進去：如果剛才壓縮格式寫進去了卻讀回不對，那份就是壞的 → 刪掉，讓重整後明確變成「沒有本機快取」。
+  //   刪的只是剛寫壞的本機快取；_profitMem 與雲端不受影響。
+  if(why==='寫入後讀回不一致'){ try{ localStorage.removeItem(k); console.error('[報表快取] '+k+' 讀回不一致又寫不進未壓縮版，已移除這把本機快取'); }catch(e){} }
+  try{ _notifyLsSaveFail(meta.shop, meta.month, meta.half, saveErr); }catch(e2){ console.error('[lsSave] 通報失敗', e2); }
+  return 'fail';
+}
+// 延後寫入：每把 key 只留最新一份 json，停手 _REPORT_CACHE_DEFER_MS 後才寫。
+function _reportCacheDefer(k,json,meta){
+  const old=_reportCacheDeferred.get(k);
+  if(old) clearTimeout(old.timer);
+  const ent={json,meta,timer:null};
+  ent.timer=setTimeout(()=>{
+    if(_reportCacheDeferred.get(k)!==ent) return;
+    _reportCacheDeferred.delete(k);
+    try{ _reportCacheWrite(k,ent.json,ent.meta); }catch(e){ console.error('[報表快取] 延後寫入失敗 '+k,e); }
+  },_REPORT_CACHE_DEFER_MS);
+  _reportCacheDeferred.set(k,ent);
+}
+// 把排隊中的延後寫入全部立刻寫掉。觸發點：pagehide、visibilitychange=hidden、tryLoadSaved（切期間）、setShop（切通路）、
+//   _sweepAllLocalReportsIntoPending（同步前）、backfill 讀 localStorage 前。沒有排隊時什麼都不做。
+function _reportCacheFlush(reason){
+  if(!_reportCacheDeferred.size) return 0;
+  const ents=[..._reportCacheDeferred.entries()];
+  let n=0;
+  ents.forEach(([k,ent])=>{
+    try{ clearTimeout(ent.timer); }catch(e){}
+    if(_reportCacheDeferred.get(k)!==ent) return;
+    _reportCacheDeferred.delete(k);
+    try{ _reportCacheWrite(k,ent.json,ent.meta); n++; }catch(e){ console.error('[報表快取] flush（'+reason+'）寫入失敗 '+k,e); }
+  });
+  return n;
+}
+// ── 開站就地壓縮：把既有未壓縮的報表快取逐把壓成 LZ1 覆寫（B-3 #173 第 2 塊）──
+//   為什麼要做：配額全滿時，用更小的內容覆寫既有 key 會成功、而且立刻釋出空間（新增 key 才會失敗），
+//   所以已經爆掉的機器開一次頁面就會恢復空間。
+//   只碰 4 段的 ec|通路|YYYY/MM|半月；ec_momo_* / ec_notes|* / ec_edits|* / ec_split|* / ectest|* / filemeta / dirty、pending 註冊表都不符合，一律不碰。
+//   不登記 pending、不動 _profitMem、不推雲端；壓的是原字串，解開後逐字相同（ts 也不變）。
+//   一次一把、把與把之間讓出主執行緒（單把的壓縮本身切不開，800K 約 0.4～0.6 秒）。
+//   結果另存 window.__reportCacheMigrateReport（只讀觀測用，不以 __cloud 開頭）。
+const _REPORT_CACHE_KEY_RE=/^ec\|[^|]+\|\d{4}\/\d{2}\|(first|second|full)$/;
+function _reportCacheMigrate(opts){
+  const gap=(opts&&opts.gapMs!=null)?opts.gapMs:50;
+  const st={done:0,skip:{},beforeChars:0,afterChars:0,stopped:''};
+  const skip=r=>{ st.skip[r]=(st.skip[r]||0)+1; };
+  const finish=()=>{
+    const kb=x=>Math.round(x/100)/10;
+    const nSkip=Object.values(st.skip).reduce((a,b)=>a+b,0);
+    console.info('[報表快取] 就地壓縮：處理 '+st.done+' 把、跳過 '+nSkip+' 把'+(nSkip?' '+JSON.stringify(st.skip):'')
+      +'、省下 '+kb(st.beforeChars-st.afterChars)+' KB 字元（原本 '+kb(st.beforeChars)+' → 現在 '+kb(st.afterChars)+'）'+(st.stopped?'；提前停止：'+st.stopped:''));
+    try{ window.__reportCacheMigrateReport=st; }catch(e){}
+    return st;
+  };
+  const LZ=window.LZString;
+  if(!_LS_COMPRESS_MIGRATE||!_LS_COMPRESS_WRITE||!LZ){
+    st.stopped=!LZ?'lz-string 沒有載入':'開關關閉';
+    return Promise.resolve(finish());
+  }
+  let keys=[];
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(!k||!_REPORT_CACHE_KEY_RE.test(k)||k.startsWith('ec|filemeta|')) continue;
+      const v=localStorage.getItem(k);
+      if(typeof v!=='string'||v.startsWith('LZ1:')) continue;
+      keys.push([k,v.length]);
+    }
+  }catch(e){ st.stopped='列舉 localStorage 失敗'; return Promise.resolve(finish()); }
+  keys.sort((a,b)=>b[1]-a[1]);   // 先壓最大的，最快釋出空間
+  keys=keys.map(x=>x[0]);
+  const one=k=>{
+    if(_reportCacheDeferred.has(k)) return skip('有延後寫入排隊中');
+    let raw=null;
+    try{ raw=localStorage.getItem(k); }catch(e){ return skip('讀取失敗'); }
+    if(typeof raw!=='string'||raw.startsWith('LZ1:')) return skip('已是壓縮格式');
+    let obj=null;
+    try{ obj=JSON.parse(raw); }catch(e){ return skip('JSON 壞'); }
+    if(!(obj!==null&&typeof obj==='object'&&!Array.isArray(obj)&&Array.isArray(obj.built))) return skip('不是報表形狀');
+    if(JSON.stringify(obj)!==raw) return skip('不是標準格式');
+    const enc=_reportCacheEncode(raw);
+    if(enc===null) return skip('壓縮失敗');
+    if(enc.length>=raw.length) return skip('壓縮後沒有變小');
+    // b～f 是同一段同步程式：重讀比對 → 覆寫 → 讀回驗證
+    let now=null;
+    try{ now=localStorage.getItem(k); }catch(e){}
+    if(now!==raw) return skip('別的分頁剛寫過');
+    try{ localStorage.setItem(k,enc); }
+    catch(e){ st.stopped='覆寫失敗（'+(e&&e.name||e)+'）'; console.warn('[報表快取] 就地壓縮覆寫失敗，停止這一輪：'+k,e); return; }
+    let ok=false;
+    try{ const back=_reportCacheParse(localStorage.getItem(k)); ok=(back!==null&&JSON.stringify(back)===raw); }catch(e){}
+    if(!ok){
+      try{ localStorage.setItem(k,raw); console.error('[報表快取] 就地壓縮讀回不一致，已寫回原值：'+k); }
+      catch(e){ console.error('[報表快取] 就地壓縮讀回不一致，而且寫回原值也失敗：'+k,e); }
+      return skip('讀回不一致已還原');
+    }
+    st.done++; st.beforeChars+=raw.length; st.afterChars+=enc.length;
+  };
+  return new Promise(resolve=>{
+    let i=0;
+    const step=()=>{
+      if(st.stopped||i>=keys.length){ resolve(finish()); return; }
+      try{ one(keys[i]); }catch(e){ skip('未預期錯誤'); console.error('[報表快取] 就地壓縮未預期錯誤',e); }
+      i++;
+      setTimeout(step,gap);
+    };
+    step();
+  });
+}
+if(!window.__reportCacheMigrateStarted){
+  window.__reportCacheMigrateStarted=true;
+  try{
+    setTimeout(()=>{
+      const go=()=>{ try{ _reportCacheMigrate(); }catch(e){ console.error('[報表快取] 就地壓縮啟動失敗',e); } };
+      if(typeof window.requestIdleCallback==='function') window.requestIdleCallback(go,{timeout:5000}); else setTimeout(go,0);
+    },3000);
+  }catch(e){}
+}
+if(!window.__reportCacheFlushInstalled){
+  window.__reportCacheFlushInstalled=true;
+  try{
+    window.addEventListener('pagehide',()=>{ try{ _reportCacheFlush('pagehide'); }catch(e){} });
+    document.addEventListener('visibilitychange',()=>{ try{ if(document.visibilityState==='hidden') _reportCacheFlush('hidden'); }catch(e){} });
+  }catch(e){}
 }
 
 // ══════ 測試通路：日期區間期間模型 + 雲端直寫 ══════
@@ -1504,6 +1676,7 @@ function _editsMigrateItemsDirty(){
 //   讓 syncToCloud 不只推「本次會話新增」的，也把 localStorage 裡累積
 //   （包含前次重整前留下、pending set 已清空）的一併推上雲端。
 function _sweepAllLocalReportsIntoPending(){
+  try{ _reportCacheFlush('sweep'); }catch(e){}   // 同步前先把延後寫入寫掉，讓 localStorage 跟 _profitMem 一致
   // ⚠️ 這裡的白名單前綴（ec_momo_products| / ec_momo_rent_records / ec| 非 filemeta）若改動，
   //    _momoSyncPendingCount()（本檔搜 `function _momoSyncPendingCount`）的唯讀版也要一起改，否則 MOMO 同步鈕亮暗會對不上。
   // 塊B：拿掉原本「掃 Store._profitMem 塞進 pending」那段。它會把雲端載回的報表
@@ -3128,6 +3301,7 @@ window.addEventListener('profitDataReady', (e)=>{
       }
 
       // 3) 本地有但雲端兩邊都沒有的 → 推到 app/profit
+      try{ _reportCacheFlush('backfill'); }catch(e){}   // 先把延後寫入寫掉，下面讀到的 localStorage 才是最新的
       const localKeys=[];
       for(let i=0;i<localStorage.length;i++){
         const k=localStorage.key(i);
@@ -3314,6 +3488,7 @@ function resetUploadCards(shop){
 }
 
 function tryLoadSaved(shop){
+  try{ _reportCacheFlush('tryLoadSaved'); }catch(e){}   // 切期間 / 切半月前，把剛編輯的報表寫進本機（見 _reportCacheFlush）
   const s=state[shop];const rep=lsLoad(shop,s.curMonth,s.curHalf);
   // 每次切換區間都重置上傳卡片，避免誤以為已上傳
   resetUploadCards(shop);
@@ -7108,7 +7283,7 @@ function recalcRow(shop,code,ov){
   const growthRate=r.growthRate;
   const growthAnalysis=calcGrowthAnalysis(growthRate,rev,r.prevRev,pureRate,adsFee??null,r.clicks??null);   // adsFee＝本函式開頭 ov.adsFee 那個含剛編輯值的區域變數（同 calcAnalysisAll 的慣例），不是編輯前的 r.adsFee
   Object.assign(built[idx],{adsFee,platFee,pureProfit,pureRate,adsPct,profitPct,targetROI,roiDiff,dayBudget,...ana,testTags,growthAnalysis});
-  const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days);
+  const s=state[shop];lsSave(shop,s.curMonth,s.curHalf,built,s._period,s._days,undefined,{defer:true});   // 編輯一格：本機那份延後寫（見 lsSave 的 opts）
 }
 
 // ── 建議（併入測試標籤，統一由 r.testTags 驅動，不再獨立維護一套規則）──
@@ -13260,6 +13435,7 @@ function saveScoreTargetsModal(btn){
 // ── (legacy unused) ──
 // ── Tab switch ──
 function setShop(shop,btn){
+  try{ _reportCacheFlush('setShop'); }catch(e){}   // 切通路前，把剛編輯的報表寫進本機。刻意放在下面「不在淨利表就 return」之前：多寫一次無害
   // 🔴 不在淨利表頁面 → 直接 return，什麼都不做（2026-08-07 新增）
   //   「不在淨利表頁還會呼叫 setShop」乍看很莫名，成因在 offices.js：
   //   - offices.js:820 那顆 200ms 計時器（內含 restoreProfitView）的排程條件是 activeTab.key==='profit'，
