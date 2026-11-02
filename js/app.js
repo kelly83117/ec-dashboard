@@ -3777,6 +3777,7 @@ async function __lsTidyClick(btn, other) {
   if (still) lines.push('\n還是快滿了，請通知 Keani（把這個視窗截圖給她）。');
   const detail = [
     '壓縮：' + ((r.compressed && r.compressed.done) || 0) + ' 把',
+    '壓縮 MOMO 商品主檔：' + ((r.momoCompressed && r.momoCompressed.done) || 0) + ' 把',
     '刪除舊報表：' + r.deleted.length + ' 把' + (r.deleted.length ? '（' + r.deleted.map(d => d.key + ' ' + d.kb + 'KB').join('、') + '）' : ''),
     '刪除洞察表本機副本：' + r.insight.deleted.length + ' 把' + (r.insight.skippedAll ? '（' + r.insight.skippedAll + '）' : ''),
     keptOld.length ? '保留：' + keptOld.map(x => x.key + '＝' + x.reason).join('；') : '',
