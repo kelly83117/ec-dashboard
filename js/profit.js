@@ -17184,6 +17184,7 @@ function _momoCollectPending(shop){
   }catch{}
   _pendingSyncKeys.forEach(pk=>{
     if(pk.startsWith('__shop__|')) return;               // marker，不推
+    if(pk.startsWith('ec_pchome_')) return;              // PChome 有自己的同步鈕與預覽（走專屬分支與正確的雲端 doc）；這裡列出會讀錯雲端位置顯示「雲端 0、新增」。判準與 _momoSyncPendingCount 的 session 迴圈排除一致
     // 第 3 塊：封存期別的 ec_notes 殘留不列入預覽（syncToCloud 的 pending 迴圈對同一把 key 用同一支判準丟棄／延後）。非 ec_notes、_growth 恆 'push'、不受影響。
     //   ⚠ 只呼叫 _notesSyncDisposition、不附加任何條件。
     if(_notesSyncDisposition(pk)!=='push'){ console.log('[syncPreview] 封存期別的廣告調整不列入預覽（同步時會依 _notesSyncDisposition 丟棄或延後）：',pk); return; }
