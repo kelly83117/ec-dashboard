@@ -1946,10 +1946,15 @@ function _sweepAllLocalReportsIntoPending(){
         continue;
       }
       // MO+ 逐列成本：ec_momo_moplus_origins|<shop>|<src> → momo_moplus_origins collection（每賣場每來源月一 doc）
+      //   ⚠ 只有 dirty（真正經 momoSaveMoPlusOriginsDoc 存檔、還沒成功推）才撿（2026-11-02 F2，比照 ec_momo_products|）：
+      //     存檔必標 dirty、推成功才清，所以「沒 dirty 的本機副本」＝已推過或來自雲端，不需要再推；舊碼只看 localStorage 存在，
+      //     會把舊副本一再撿進待推（見 PR 說明路徑 2）。⚠ 計數端 _momoSyncPendingCount 的判準要逐字相同（_momoOIsDirty）。
       if(k&&k.startsWith('ec_momo_moplus_origins|')){
-        _pendingSyncKeys.add(k);
-        if(!(Store._mem&&Store._mem[k])){
-          try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+        if(_momoOIsDirty(k)){
+          _pendingSyncKeys.add(k);
+          if(!(Store._mem&&Store._mem[k])){
+            try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+          }
         }
         continue;
       }
@@ -14589,6 +14594,42 @@ window.__momoOriginsShadowExport=function(){
   try{ console.log('%c[origins SHADOW] 現行 accept、新模型 keep-local：'+(counts['accept→keep-local']||0)+' 次（自 '+(out.since||'尚無紀錄')+' 起）','color:#2563eb;font-weight:700'); }catch{}
   return out;
 };
+// 唯讀稽核（master key 診斷用，也適用任何 origins doc）：逐份列出 localStorage 副本／記憶體版本／dirty／待推凍結 vs 雲端，並給出「為什麼本機≠雲端」的分類。不寫任何東西。
+//   用法：await __momoOriginsDirtyAudit()　或帶篩選字　await __momoOriginsDirtyAudit('master')
+//   分類（對應程式路徑，見 PR 說明）：
+//     A 卡住的 dirty　＝ dirty 且 記憶體≠雲端：雲端的更新被擋在外面；下次同步會用本機版整份覆蓋雲端（可能蓋掉同事的更新）
+//     B dirty 但已一致 ＝ dirty 但 記憶體==雲端：無害，下次雲端快照或同步後自動清除
+//     C 待推凍結　　　 ＝ 沒 dirty、但被同步預覽／sweep 撿進本 session 待推：此後雲端更新被略過（直到重整），記憶體已落後雲端
+//     D localStorage 舊副本 ＝ 沒 dirty、localStorage 那份≠雲端：sweep 仍會把這個 key 列進待推（重整後記憶體會被雲端覆蓋，但 localStorage 不會自己更新）
+window.__momoOriginsDirtyAudit=async function(filter){
+  const pref='ec_momo_moplus_origins|'; const keys=new Set();
+  try{ if(Store._profitMem) Object.keys(Store._profitMem).forEach(x=>{ if(x.indexOf(pref)===0) keys.add(x); }); }catch{}
+  try{ for(let i=0;i<localStorage.length;i++){ const x=localStorage.key(i); if(x&&x.indexOf(pref)===0) keys.add(x); } }catch{}
+  try{ (_momoReadJson(_MOMO_ODIRTY_LS,[])||[]).forEach(x=>{ if(typeof x==='string'&&x.indexOf(pref)===0) keys.add(x); }); }catch{}
+  const out=[];
+  for(const k of [...keys].sort()){
+    if(filter && k.indexOf(filter)<0) continue;
+    const pp=k.split('|'); let cloud=null, err='';
+    try{ const snap=await window.__cloudMoPlusOrigins.getDoc(pp[1],pp[2]); cloud=snap.exists()?(snap.data()||{}):null; }catch(e){ err=String((e&&e.message)||e); }
+    if(err){ out.push({key:k,分類:'?',說明:'讀雲端失敗：'+err}); continue; }
+    const mem=(Store._profitMem&&Store._profitMem[k])||null; let ls=null, lsRaw=null; try{ lsRaw=localStorage.getItem(k); if(lsRaw!=null) ls=JSON.parse(lsRaw); }catch{}
+    const dirty=_momoOIsDirty(k); const guard=!!(window.__momoShouldSkipCloudOverwrite&&window.__momoShouldSkipCloudOverwrite(k));
+    const cr=momoOriginsRecords(cloud);
+    const pm=mem?momoOriginsPlanMerge(cr, momoOriginsRecords(mem), null):null, pl=ls?momoOriginsPlanMerge(cr, momoOriginsRecords(ls), null):null;
+    const memSame=!mem||pm.identical, lsSame=!ls||pl.identical;
+    let cls='OK', why='';
+    if(dirty && !memSame){ cls='A'; why='dirty 且本機≠雲端：雲端更新被擋；下次同步會整份覆蓋雲端'; }
+    else if(dirty){ cls='B'; why='dirty 但本機==雲端：無害（下次快照／同步後自動清除）'; }
+    else if(guard && !memSame){ cls='C'; why='沒 dirty、被撿進本 session 待推而凍結：記憶體已落後雲端（重整可解）'; }
+    else if(!lsSame){ cls='D'; why='localStorage 舊副本≠雲端：sweep 仍會把它列進待推（重整後記憶體會跟上雲端，localStorage 不會）'; }
+    const cut=(p)=>p?{ 只本機:p.onlyLocal.length, 只雲端:p.onlyCloud.length, 值不同:p.differ.length }:null;
+    const diffs=(pm&&!pm.identical?pm:(pl&&!pl.identical?pl:null)); const src=(pm&&!pm.identical)?mem:ls;
+    out.push({ key:k, 分類:cls, 說明:why, dirty, 待推凍結:(guard&&!dirty), 有localStorage副本:ls!=null, 記憶體vs雲端:cut(pm), localStorage_vs雲端:cut(pl),
+      差異前5筆: diffs?diffs.differ.concat(diffs.onlyLocal,diffs.onlyCloud).slice(0,5).map(rk=>({record:rk, 本機:momoOriginsRecordValue(src,rk), 雲端:momoOriginsRecordValue(cloud,rk)})):[] });
+  }
+  try{ console.table(out.map(r=>({key:r.key,分類:r.分類,dirty:r.dirty,待推凍結:r.待推凍結,localStorage副本:r.有localStorage副本,說明:r.說明}))); }catch{}
+  return out;
+};
 // 唯讀逐 doc 比對：本機（_profitMem→localStorage）vs 雲端（getDoc）vs baseline。回每份 doc 一列 + 差異記錄的實際值（前 5 筆）。不寫任何東西。
 window.__momoOriginsShadowCompare=async function(filter){
   const keys=new Set(); const pref='ec_momo_moplus_origins|';
@@ -16993,7 +17034,7 @@ function _momoSyncPendingCount(){
   try{
     for(let i=0;i<localStorage.length;i++){
       const k=localStorage.key(i); if(!k) continue;
-      if(k.startsWith('ec_momo_products|') || (_momoRfIsKey(k) && _momoRfDirtyHas(k)) || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_moplus_unreg|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || k.startsWith('ec_momo_moplus_origins|') || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
+      if(k.startsWith('ec_momo_products|') || (_momoRfIsKey(k) && _momoRfDirtyHas(k)) || k.startsWith('ec_momo_c1105_ship|') || k.startsWith('ec_momo_moplus_orders|') || k.startsWith('ec_momo_moplus_unreg|') || k.startsWith('ec_momo_rent|') || k.startsWith('ec_momo_f1102|') || k.startsWith('ec_momo_s1103|') || k.startsWith('ec_momo_optlog|') || (k.startsWith('ec_momo_moplus_origins|') && _momoOIsDirty(k)) /* origins：與 sweep 逐條同條件（dirty 才算，F2） */ || momoIsShardedE001Key(k) || cupIsReportKey(k) || cupIsMsfKey(k) || (cupIsNoteKey(k) && _cupNoteKeyDirty(k)) || k==='ec_momo_cost_by_origin'   /* cost 已上雲：計入待推數（meta 隨 cost 一起、不單列）；E001 用 sharded 判準擋 2 段殘留；酷澎報表/退貨用 3 段守衛；酷澎備註另加 dirty 閘（localStorage 存在≠待推、只有真編輯過還沒推才亮鈕） */
          || (k.startsWith('ec_notes|') && /_growth$/.test(k) && notesDirtyHas(k))   /* 商品調整：與 sweep 逐條同條件（dirty 才算）。廣告調整不算——它走 syncToCloud 的當期閘門，不經 sweep */
          || k.startsWith('ec_split|')   /* 拆分試算：與 sweep 逐條同條件（只看前綴、沒有 dirty 閘）。判準要與那邊逐字相同，見 _sweepAllLocalReportsIntoPending 的 ec_split 分支 */
          || (k.startsWith('ec|') && !k.startsWith('ec|filemeta|'))) keys.add(k);
@@ -21575,6 +21616,23 @@ async function momoMoPlusMasterGenerate(shop){
     ${_applyBtn}
   </div>`;
 }
+// F1（2026-11-02）：主檔匯入直推成功後，讀回雲端確認「跟剛送出的一致」才清 dirty、並從 _pendingSyncKeys 移除。
+//   背景：momoSaveMoPlusOriginsDoc 存檔必標 dirty；直推原本成功後沒人清 → dirty 一直留著 → 之後同事匯入較新主檔時，雲端快照被當「本機較新」略過（見 PR 說明路徑 1）。
+//   🔴 直推失敗（rejected）不會走到這裡 → dirty 維持（照舊）；讀回不一致／讀不到 → 也維持 dirty，等同步鈕處理。
+//   讀回比對用 momoOriginsRecords（逐筆雜湊，不含 shop/src/updatedAt/masterAt）＋ masterAt 另比；比的是「剛送出的內容」，不是本機原版（sanitize 可能改 key）。
+async function momoMoPlusMasterClearDirtyIfSynced(shop, pushed){
+  const k=momoMoPlusOriginsKey(shop,'master'); const be=window.__cloudMoPlusOrigins;
+  if(!be||typeof be.getDoc!=='function') return false;
+  const snap=await be.getDoc(shop,'master'); const cloud=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):null;
+  const same=!!cloud && cloud.masterAt===pushed.masterAt && momoOriginsPlanMerge(momoOriginsRecords(cloud), momoOriginsRecords(pushed), null).identical;
+  if(!same){ try{ console.warn('[MO+ master] 直推後讀回與送出內容不一致 → 保留 dirty，請按 ☁ 同步雲端確認：',k); }catch{} return false; }
+  try{ _momoODirtyDel(k); }catch{}
+  try{ _pendingSyncKeys.delete(k); }catch{}
+  try{ momoOriginsShadowPushed(k); }catch{}
+  try{ momoRefreshSyncBtn(shop); }catch{}
+  try{ console.log('%c[MO+ master] 直推已讀回確認一致 → 已清 dirty／待推：'+k,'color:#16a34a;font-weight:700'); }catch{}
+  return true;
+}
 function momoMoPlusMasterApply(shop){
   const parsed=_moPlusMasterParsed; if(!parsed){ return; }
   const res=momoMoPlusApplyMaster(shop, parsed);
@@ -21594,8 +21652,9 @@ function momoMoPlusMasterApply(shop){
   try{
     if(window.__cloudMoPlusOrigins && typeof window.__cloudMoPlusOrigins.setSrc==='function'){
       cloudNote='（同時直推雲端保存中…）';
-      Promise.resolve(window.__cloudMoPlusOrigins.setSrc(shop,'master',momoSanitizeMoPlusDoc(check)))
-        .then(()=>{ try{ if(typeof showToast==='function') showToast('商品主檔已存雲端（'+persistedN+' 個商品）','success'); }catch{} },
+      const _pushedMaster=momoSanitizeMoPlusDoc(check);   // 實際送出的內容（讀回比對用）
+      Promise.resolve(window.__cloudMoPlusOrigins.setSrc(shop,'master',_pushedMaster))
+        .then(()=>{ try{ if(typeof showToast==='function') showToast('商品主檔已存雲端（'+persistedN+' 個商品）','success'); }catch{} try{ momoMoPlusMasterClearDirtyIfSynced(shop,_pushedMaster); }catch(e){ try{ console.warn('[MO+ master] 讀回確認例外（dirty 保留）：',e); }catch{} } },
               e=>{ const em=(e&&e.message)||String(e); try{ console.error('[MO+ master] 雲端寫入失敗：',em); }catch{} try{ if(window.App&&App.showAlertModal) App.showAlertModal({title:'⚠ 商品主檔雲端寫入失敗',message:'主檔推雲端被拒：\n'+em+'\n\n（本機 lsOk='+res.masterOk+'、讀回 '+persistedN+' 個）。請截圖此訊息回報 —— 這就是先前靜默失敗的真因。',kind:'error'}); }catch{} });
     } else { cloudNote='（雲端層未就緒，請稍後按 ☁ 同步雲端）'; }
   }catch(e){ cloudNote='（雲端直推發生例外：'+((e&&e.message)||e)+'）'; }
