@@ -725,6 +725,7 @@ const App = {
     this.bindSidebarToggle();
     this.bindSidebarResize();
     this._checkMemFallbackAtBoot();
+    __lsSpaceSchedule();   // 本機空間快滿預警：開站 20 秒後檢查一次、之後每 30 分鐘（見 __lsSpaceCheck）
     // 整個應用層級的「離開頁面警告」：偵測所有未同步來源
     //   洞察表 / 淨利表 / 工作日誌 / 儀表板營收卡片
     if (!window.__appUnloadGuardInstalled) {
@@ -3655,6 +3656,135 @@ if (document.readyState === 'loading') {
 }
 
 /* ===================== window 匯流排 ===================== */
+/* ═══════════ 本機空間快滿預警＋一鍵釋出空間（docs/plan-ls-space-tidy.md）═══════════
+ * 量法：所有 key＋value 的字元數加總（UTF-16，跟瀏覽器算配額同單位）。只在排程與按鈕時量，不掛在任何寫入路徑上。
+ * 刪除邏輯在 js/profit.js 的 __lsTidy（待同步清單、延後寫入、報表解碼都在那裡）；這裡只負責提醒與按鈕。
+ * 🔴 這裡不寫雲端；同日提醒的記錄 ec.lsWarnDay 直接寫 localStorage、不經 Store（不上雲）。 */
+const LS_LIMIT_KB = 5120;
+const LS_WARN_RATIO = 0.85;
+const LS_WARN_DAY_KEY = 'ec.lsWarnDay';
+let __lsWarnShownDay = '';   // 同分頁同日不重複：ec.lsWarnDay 寫不進去（多半就是因為快滿）時，靠這個擋住每 30 分鐘重跳
+// 唯讀觀測點：{ usedKB, limitKB, ratio, top:[{ key, kb }]×10 }。不以 __cloud 開頭（不被防寫防護包、不算進物件數）。
+window.__lsUsage = function () {
+  const r1 = x => Math.round(x * 10) / 10;
+  try {
+    let used = 0; const all = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i); if (k == null) continue;
+      const n = k.length + (localStorage.getItem(k) || '').length;
+      used += n; all.push([k, n]);
+    }
+    all.sort((a, b) => b[1] - a[1]);
+    const usedKB = r1(used / 1024);
+    return { usedKB, limitKB: LS_LIMIT_KB, ratio: Math.round(used / 1024 / LS_LIMIT_KB * 1000) / 1000,
+      top: all.slice(0, 10).map(([key, n]) => ({ key, kb: r1(n / 1024) })) };
+  } catch (e) {
+    return { usedKB: null, limitKB: LS_LIMIT_KB, ratio: null, top: [], error: String((e && e.message) || e) };
+  }
+};
+function __lsTaipeiDay(now) {
+  try {
+    const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now || new Date());
+    const g = t => (p.find(x => x.type === t) || {}).value;
+    return g('year') + '-' + g('month') + '-' + g('day');
+  } catch (e) { return ''; }
+}
+// 檢查一次。opts：{ ratio（暫時改門檻，localhost 驗收用）, ignoreDay（忽略今天提醒過）}。回傳 { shown, reason, usage }，不丟錯。
+window.__lsSpaceCheck = function (opts) {
+  opts = opts || {};
+  try {
+    if (!App.currentUser) return { shown: false, reason: '沒有登入' };
+    const u = window.__lsUsage();
+    const th = (typeof opts.ratio === 'number') ? opts.ratio : LS_WARN_RATIO;
+    if (u.ratio == null) return { shown: false, reason: '量不到', usage: u };
+    if (u.ratio < th) return { shown: false, reason: '沒到門檻', usage: u };
+    const today = __lsTaipeiDay();
+    if (!opts.ignoreDay) {
+      let saved = ''; try { saved = localStorage.getItem(LS_WARN_DAY_KEY) || ''; } catch (e) {}
+      if (saved === today || __lsWarnShownDay === today) return { shown: false, reason: '今天提醒過', usage: u };
+    }
+    __lsWarnShownDay = today;
+    try { localStorage.setItem(LS_WARN_DAY_KEY, today); } catch (e) {}   // 記不進去 ⇒ 只靠上面的記憶體旗標
+    __lsWarnShow(u);
+    return { shown: true, reason: '', usage: u };
+  } catch (e) { return { shown: false, reason: '檢查失敗：' + ((e && e.message) || e) }; }
+};
+function __lsSpaceSchedule() {
+  if (window.__lsSpaceTimerInstalled) return;
+  window.__lsSpaceTimerInstalled = true;
+  try {
+    setTimeout(() => { window.__lsSpaceCheck(); }, 20 * 1000);
+    setInterval(() => { window.__lsSpaceCheck(); }, 30 * 60 * 1000);
+  } catch (e) {}
+}
+function __lsWarnHide() { try { const el = document.getElementById('ls-warn'); if (el) el.remove(); } catch (e) {} }
+function __lsWarnShow(u) {
+  __lsWarnHide();
+  const el = document.createElement('div');
+  el.id = 'ls-warn'; el.className = 'ls-warn'; el.setAttribute('role', 'status');
+  const t = document.createElement('div'); t.className = 'ls-warn-title';
+  t.textContent = '這台電腦的瀏覽器空間快滿了（已用 ' + Math.round(u.ratio * 100) + '%）';
+  const p = document.createElement('div'); p.className = 'ls-warn-text';
+  p.textContent = '滿了之後報表會存不進這台電腦。可以按下面的按鈕安全釋出空間：只會壓縮報表、刪掉雲端已經有同一份的舊報表，不會動到沒同步的資料。';
+  const a = document.createElement('div'); a.className = 'ls-warn-actions';
+  const go = document.createElement('button'); go.type = 'button'; go.className = 'ls-warn-go'; go.textContent = LS_TIDY_BTN_IDLE;
+  const later = document.createElement('button'); later.type = 'button'; later.className = 'ls-warn-later'; later.textContent = '稍後';
+  go.addEventListener('click', () => { __lsTidyClick(go, later); });
+  later.addEventListener('click', __lsWarnHide);
+  a.append(go, later); el.append(t, p, a);
+  document.body.appendChild(el);
+}
+const LS_TIDY_BTN_IDLE = '一鍵釋出空間';
+const LS_TIDY_BTN_BUSY = '處理中…';
+const LS_TIDY_BTN_WAIT = '正在等雲端資料…';
+// 按鈕狀態：busy＝處理中、wait＝等雲端報表（profit.js __lsTidy 的 onPhase('wait-cloud')）、idle＝恢復。只換文字、disabled 與 class，不寫 inline style。
+function __lsTidyBtnState(btn, other, state) {
+  try {
+    const on = state !== 'idle';
+    btn.disabled = on; if (other) other.disabled = on;
+    btn.textContent = state === 'wait' ? LS_TIDY_BTN_WAIT : (state === 'busy' ? LS_TIDY_BTN_BUSY : LS_TIDY_BTN_IDLE);
+    if (btn.classList) btn.classList.toggle('ls-warn-go--waiting', state === 'wait');
+  } catch (e) {}
+}
+async function __lsTidyClick(btn, other) {
+  if (btn.disabled) return;
+  __lsTidyBtnState(btn, other, 'busy');
+  const before = window.__lsUsage();
+  let r = null, loadErr = '';
+  try {
+    await window.__ensureProfit();
+    if (typeof window.__lsTidy !== 'function') throw new Error('__lsTidy 不存在');
+    r = await window.__lsTidy({ onPhase: p => { if (p === 'wait-cloud') __lsTidyBtnState(btn, other, 'wait'); } });
+  } catch (e) { loadErr = String((e && e.message) || e); }
+  finally { __lsTidyBtnState(btn, other, 'idle'); }   // 完成或失敗都恢復（卡片接著會關掉，但不留在停用狀態）
+  const after = window.__lsUsage();
+  __lsWarnHide();
+  const show = (title, message, detail, kind) => {
+    if (typeof App.showAlertModal === 'function') App.showAlertModal({ title, message, detail, kind });
+    else showToast(message, kind === 'error' ? 'error' : '', 8000);
+  };
+  if (!r) { show('釋出空間沒有完成', '載入失敗，什麼都沒刪。請重新整理後再試一次。', loadErr, 'error'); return; }
+  const freed = (before.usedKB != null && after.usedKB != null) ? Math.max(0, Math.round((before.usedKB - after.usedKB) * 10) / 10) : null;
+  const pct = after.ratio != null ? Math.round(after.ratio * 100) : null;
+  const lines = [];
+  lines.push('已釋出 ' + (freed == null ? '?' : freed) + ' KB，現在用了 ' + (pct == null ? '?' : pct) + '%。');
+  if (r.planError) lines.push('舊報表沒有清理（' + r.skippedAll + '），什麼都沒刪。');
+  else if (r.skippedAll === '雲端報表還沒載入') lines.push('舊報表要等雲端資料載入完才能安全刪除：請先進「淨利表」，等報表出現後再按一次。');
+  else if (r.skippedAll) lines.push('舊報表這次沒有清理：' + r.skippedAll + '。');
+  const keptOld = (r.kept || []).filter(x => !/^保留期內/.test(x.reason));
+  if (!r.skippedAll && keptOld.length) lines.push('有 ' + keptOld.length + ' 份舊報表因為還不能確定雲端有最新版而保留。');
+  const still = after.ratio != null && after.ratio >= LS_WARN_RATIO;
+  if (still) lines.push('\n還是快滿了，請通知 Keani（把這個視窗截圖給她）。');
+  const detail = [
+    '壓縮：' + ((r.compressed && r.compressed.done) || 0) + ' 把',
+    '刪除舊報表：' + r.deleted.length + ' 把' + (r.deleted.length ? '（' + r.deleted.map(d => d.key + ' ' + d.kb + 'KB').join('、') + '）' : ''),
+    '刪除洞察表本機副本：' + r.insight.deleted.length + ' 把' + (r.insight.skippedAll ? '（' + r.insight.skippedAll + '）' : ''),
+    keptOld.length ? '保留：' + keptOld.map(x => x.key + '＝' + x.reason).join('；') : '',
+    still ? '佔空間前 5 名：' + (after.top || []).slice(0, 5).map(x => x.key + ' ' + x.kb + 'KB').join('、') : '',
+  ].filter(Boolean).join('\n');
+  show(still ? '已清理，但還是快滿了' : '已釋出空間', lines.join('\n'), detail, still ? 'warn' : 'info');
+}
+
 Object.assign(window, {
   App, Store, mapAnaLabel, ANA_LABEL_DISPLAY,
   canWrite: () => !__isReadOnly(), isReadOnly: __isReadOnly,

@@ -299,6 +299,18 @@ ESM 有個致命陷阱必須牢記：
   - 開站就地壓縮：profit.js 載入 3 秒後逐把把未壓縮的報表快取覆寫成 LZ1（只碰 4 段報表 key，覆寫前重讀比對、寫完讀回、不一致寫回原值），
     console.info 印統計，結果在 `window.__reportCacheMigrateReport`（只讀觀測點，不以 `__cloud` 開頭）。
   - 回滾開關：profit.js 開頭 `_LS_COMPRESS_WRITE` / `_LS_COMPRESS_MIGRATE` 改 false 再部署（讀取端照樣讀得懂已寫下的 LZ1）。
+- 本機空間快滿預警＋一鍵釋出空間（docs/plan-ls-space-tidy.md）：
+  - app.js：`window.__lsUsage()`（唯讀，`{usedKB, limitKB, ratio, top}`，量法＝所有 key＋value 字元數，上限 `LS_LIMIT_KB=5120`）；
+    開站 20 秒後、之後每 30 分鐘 `__lsSpaceCheck`，`ratio ≥ LS_WARN_RATIO(0.85)` 且已登入才在左下角顯示 `.ls-warn` 卡片；
+    同一台電腦同一天一次（`ec.lsWarnDay`，台灣日期，直接寫 localStorage、不上雲），寫不進去就靠記憶體旗標做到同分頁同日一次。
+    Console 驗收可用 `__lsSpaceCheck({ ratio:0, ignoreDay:true })` 強制顯示。
+  - 按鈕 → `__ensureProfit()` → profit.js `window.__lsTidy(opts)`：(a) `_reportCacheMigrate` 壓縮；(b) 刪 3 個月以前（`LS_TIDY_KEEP_MONTHS`，台灣月份）
+    且通過 `_lsTidyPlan` 全部關卡的報表快取（雲端記憶體有、雲端 ts ≥ 本機 ts、列數相同、不在 pending / 延後寫入 / 任何 dirty 登記、10 秒內沒存過、刪前重讀一致）；
+    (c) 刪 `ec.insight_{通路}_{master|weeks|perf}` 本機副本（`__insightCloudReady===true` 且 `Store._mem` 有非空值；`*_notes` 不碰）。
+    雲端報表 15 秒內沒載入 ⇒ (b) 一把不刪、提示先進淨利表。計畫出錯 ⇒ 一把不刪。`__lsTidy({dryRun:true})` 只回計畫。
+  - 🔴 `_LS_TIDY_DENY_PREFIX` 是第二道防呆（ec_notes / ec_edits / ec_split / ec_momo / PChome / 酷澎 / filemeta / 帳號 / 訂價 / dailyProgress / 備份 / 含 dirty、pending、lastpushed）；
+    新增會寫 localStorage 的資料種類時，若不准被清就加進來。
+  - 🔴 (b) 的 ts 關卡依賴 `syncToCloud` 推的 `outbound.ts === payload.ts`（存檔當下的時間）。**不可改成推送當下的時間**，否則會誤刪沒推的本機修改。
 - 版本號 `<meta app-version>` 每次部署都要更新，`version.js` 才會清舊快取。
 
 ### 版本號 bump 規則（🔴 分兩條：動 runtime 走本機原子合併、純文件用按鈕）
