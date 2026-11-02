@@ -1796,6 +1796,49 @@
   .toast.success { background: var(--success); }
   .toast.error { background: var(--danger); }
 
+  /* 本機空間快滿提醒（js/app.js __lsWarnShow）：左下角浮動卡片，不遮操作、不是彈窗。
+     放左下角是為了避開右下角的 .toast 與彈窗 footer；z-index 低於 .modal-backdrop（99999），結果彈窗開著時蓋得過它。
+     只用 :root 變數，不碰 --bg。 */
+  .ls-warn {
+    position: fixed;
+    left: 24px;
+    bottom: 24px;
+    z-index: 1000;
+    width: min(360px, calc(100vw - 48px));
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--warn);
+    border-left-width: 4px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 14px 16px;
+    font-size: 13px;
+  }
+  .ls-warn-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+  .ls-warn-text { color: var(--text-muted); line-height: 1.5; }
+  .ls-warn-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .ls-warn-go {
+    background: var(--warn);
+    color: var(--surface);
+    border: 0;
+    padding: 8px 14px;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .ls-warn-later {
+    background: var(--warn-soft);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .ls-warn-go:disabled, .ls-warn-later:disabled { opacity: .6; cursor: not-allowed; }
+  /* 等雲端報表期間（最多 40 秒）：換成淺底，跟「處理中」區分；停用時不再變淡，讓等待文字看得清楚 */
+  .ls-warn-go.ls-warn-go--waiting,
+  .ls-warn-go.ls-warn-go--waiting:disabled { background: var(--warn-soft); color: var(--text); border: 1px solid var(--warn); opacity: 1; cursor: progress; }
+
   /* Dashboard overview */
   .overview-grid {
     display: grid;

@@ -1499,6 +1499,161 @@ if(!window.__reportCacheFlushInstalled){
   }catch(e){}
 }
 
+// ══════ 一鍵釋出本機空間（「本機空間快滿」提醒的按鈕，見 js/app.js __lsTidyClick；方案 docs/plan-ls-space-tidy.md）══════
+//   (a) 未壓縮的報表快取就地壓縮（直接用 _reportCacheMigrate，不另寫一套）
+//   (b) 刪 3 個月以前、而且確定雲端已有同一份（ts 不比本機新、列數相同、不在待同步 / 延後寫入 / dirty 登記）的報表快取
+//   (c) 刪洞察表本機副本 ec.insight_{通路}_{master|weeks|perf}（雲端已載入同一份才刪；*_notes 不碰）
+//   兩階段：先用 _lsTidyPlan 算整份計畫（純函式、只讀），算的途中出任何錯 ⇒ 一把都不刪；刪每一把前再重讀比對一次。
+//   只動符合白名單的 key；_lsTidyDenied 是第二道防呆，命中就整個計畫作廢。
+//   🔴 不寫雲端、不動 _profitMem / Store._mem（刪的只是本機副本，畫面與期別清單照讀記憶體）。
+const LS_TIDY_KEEP_MONTHS=3;   // 保留當月起算的 3 個月（上月報表的上期在上上月，刪了會讓重新產生時上期營收靜默變空）
+const LS_TIDY_ARCHIVE_MONTHS=['2026/05'];   // 雲端副本只在 app/profit_2026_05 分片的月份：要等 __profitArchivesReady 才判斷
+const _LS_TIDY_INSIGHT_RE=/^ec\.insight_[^_|.]+_(master|weeks|perf)$/;
+const _LS_TIDY_DENY_PREFIX=['ec_notes','ec_edits','ec_split','ec_momo','momo_','ec_pchome','pchome_','ec_coupang','ec|filemeta|','ec.session',
+  'ec.users','ec.employees','ec.departments','ec.platforms','ec.d2.pricing.','ec.dailyProgress','ec.insightLegacyBackup','ec_d3_'];
+function _lsTidyDenied(k){
+  if(typeof k!=='string') return true;
+  if(_LS_TIDY_DENY_PREFIX.some(p=>k.startsWith(p))) return true;
+  const low=k.toLowerCase();
+  if(low.includes('dirty')||low.includes('pending')||low.includes('lastpushed')||low.includes('last_pushed')) return true;
+  if(/^ec\.insight_[^_|.]+_notes$/.test(k)) return true;
+  return false;
+}
+function _lsTaipeiMonth(now){   // 'YYYY/MM'（台灣時間）
+  const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit'}).formatToParts(new Date(now));
+  const g=t=>(p.find(x=>x.type===t)||{}).value;
+  return g('year')+'/'+g('month');
+}
+// 'YYYY/MM' 往前推 n 個月
+function _lsMonthMinus(ym,n){
+  const y=+ym.slice(0,4), m=+ym.slice(5,7);
+  if(!(y>2000)||!(m>=1&&m<=12)) throw new Error('月份格式不對：'+ym);
+  const t=y*12+(m-1)-n;
+  return Math.floor(t/12)+'/'+String(t%12+1).padStart(2,'0');
+}
+// 純函式：輸入快照，輸出計畫。不讀任何全域、不寫任何東西（測試直接餵快照）。
+//   snap = { entries:[[key,raw]…], profitMem, mem, pending:Set, deferred:Set|Map, justSavedAt, now(ms),
+//            collectionsReady, archivesReady, insightReady, parse:fn(raw)→物件或 null }
+function _lsTidyPlan(snap){
+  const plan={reports:{del:[],kept:[],skippedAll:''},insight:{del:[],kept:[],skippedAll:''}};
+  const entries=snap.entries||[];
+  const isObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
+  const kb=(k,raw)=>Math.round((k.length+raw.length)/102.4)/10;
+  // 關卡 6 用：key 名含 dirty 的註冊表原文（只做子字串比對，parse 不了也照樣比得到）
+  const dirtyRaw=entries.filter(([k])=>typeof k==='string'&&k.toLowerCase().includes('dirty')).map(([,v])=>String(v==null?'':v));
+  // ── (b) 報表快取 ──
+  const R=plan.reports;
+  const cutoff=_lsMonthMinus(_lsTaipeiMonth(snap.now),LS_TIDY_KEEP_MONTHS-1);   // 這個月份（含）以後保留
+  if(!snap.collectionsReady) R.skippedAll='雲端報表還沒載入';
+  else if(typeof snap.justSavedAt==='number'&&snap.now-snap.justSavedAt<10000) R.skippedAll='剛存過報表（10 秒內）';
+  entries.forEach(([k,raw])=>{
+    if(typeof k!=='string'||!_REPORT_CACHE_KEY_RE.test(k)) return;
+    const keep=reason=>R.kept.push({key:k,reason});
+    if(R.skippedAll) return keep(R.skippedAll);
+    const month=k.split('|')[2];
+    if(!/^\d{4}\/(0[1-9]|1[0-2])$/.test(month)) return keep('月份格式不對');
+    if(month>=cutoff) return keep('保留期內（'+cutoff+' 以後）');
+    if(LS_TIDY_ARCHIVE_MONTHS.indexOf(month)>=0&&!snap.archivesReady) return keep('封存分片還沒載入');
+    const cloud=snap.profitMem?snap.profitMem[k]:undefined;
+    if(!(isObj(cloud)&&Array.isArray(cloud.built))) return keep('雲端記憶體沒有這份');
+    if(snap.pending&&snap.pending.has(k)) return keep('待同步');
+    if(snap.deferred&&snap.deferred.has(k)) return keep('延後寫入排隊中');
+    if(dirtyRaw.some(s=>s.indexOf(k)>=0)) return keep('在 dirty 登記裡');
+    const local=snap.parse(raw);
+    if(!(isObj(local)&&Array.isArray(local.built))) return keep('本機讀不出來');
+    if(local.built.length!==cloud.built.length) return keep('列數不同（本機 '+local.built.length+'／雲端 '+cloud.built.length+'）');
+    if(typeof local.ts!=='number'||typeof cloud.ts!=='number') return keep('缺少時間戳');
+    if(!(cloud.ts>=local.ts)) return keep('本機比雲端新（可能有沒推的修改）');
+    R.del.push({key:k,raw,kb:kb(k,raw)});
+  });
+  // ── (c) 洞察表本機副本 ──
+  const I=plan.insight;
+  if(!snap.insightReady) I.skippedAll='洞察表雲端資料還沒載入';
+  entries.forEach(([k,raw])=>{
+    if(typeof k!=='string'||!_LS_TIDY_INSIGHT_RE.test(k)) return;
+    if(I.skippedAll) return I.kept.push({key:k,reason:I.skippedAll});
+    const v=snap.mem?snap.mem[k]:undefined;
+    const has=v!=null&&(Array.isArray(v)?v.length>0:(typeof v==='object'?Object.keys(v).length>0:String(v)!==''));
+    if(!has) return I.kept.push({key:k,reason:'雲端記憶體沒有這份'});
+    I.del.push({key:k,raw,kb:kb(k,raw)});
+  });
+  // 第二道防呆：白名單出錯也不准刪到黑名單 → 整份計畫作廢
+  [...R.del,...I.del].forEach(d=>{ if(_lsTidyDenied(d.key)) throw new Error('計畫裡出現不准刪的 key：'+d.key); });
+  return plan;
+}
+// 執行。opts：{ dryRun, waitMs(預設 LS_TIDY_WAIT_MS), pollMs(預設 250), onPhase(phase) }。回傳結果物件（見方案 §4.5），任何情況都不丟錯。
+//   onPhase：'wait-cloud'＝開始等雲端報表（已經 ready 就不會呼叫）、'done'＝結束（不論成敗都會呼叫一次）。給按鈕切換文字用，丟錯一律吞掉。
+//   等待上限 40 秒：2026-11 localhost 實測，不在淨利表頁時 profits collection 要 25 秒以上才 ready，原本的 15 秒會逾時。
+const LS_TIDY_WAIT_MS=40000;
+async function __lsTidy(opts){
+  opts=opts||{};
+  const dryRun=opts.dryRun===true;
+  const waitMs=opts.waitMs!=null?opts.waitMs:LS_TIDY_WAIT_MS, pollMs=opts.pollMs||250;
+  const phase=p=>{ try{ if(typeof opts.onPhase==='function') opts.onPhase(p); }catch(e){} };
+  try{ return await _lsTidyRun(opts,dryRun,waitMs,pollMs,phase); }
+  finally{ phase('done'); }
+}
+async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
+  const res={dryRun,compressed:null,deleted:[],kept:[],skippedAll:'',insight:{deleted:[],kept:[],skippedAll:''},planError:''};
+  try{
+    // (a) 壓縮
+    if(!dryRun){ try{ res.compressed=await _reportCacheMigrate({gapMs:0}); }catch(e){ res.compressed={error:String(e&&e.message||e)}; } }
+    // 等雲端報表（不在淨利表頁時先訂閱，跟工作日誌頁同一組唯讀訂閱）
+    const ready=()=>{ try{ return !!(window.__profitsCollectionReady&&window.__profitsCollectionReady()); }catch(e){ return false; } };
+    if(!ready()){
+      phase('wait-cloud');
+      try{ window.__loadShopeeSubs&&window.__loadShopeeSubs(); window.__loadArchiveSubs&&window.__loadArchiveSubs(); }catch(e){}
+      const t0=Date.now();
+      while(!ready()&&Date.now()-t0<waitMs) await new Promise(r=>setTimeout(r,pollMs));
+    }
+    // 計畫
+    let plan=null;
+    try{
+      const entries=[];
+      for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k!=null) entries.push([k,localStorage.getItem(k)]); }
+      let archivesReady=false; try{ archivesReady=!!(window.__profitArchivesReady&&window.__profitArchivesReady()); }catch(e){}
+      plan=_lsTidyPlan({entries,profitMem:Store._profitMem||{},mem:Store._mem||{},pending:_pendingSyncKeys,deferred:_reportCacheDeferred,
+        justSavedAt:window._shopJustSaved,now:Date.now(),collectionsReady:ready(),archivesReady,insightReady:window.__insightCloudReady===true,parse:_reportCacheParse});
+    }catch(e){
+      res.planError=String(e&&e.message||e); res.skippedAll='計畫失敗：'+res.planError; res.insight.skippedAll=res.skippedAll;
+      console.error('[釋出空間] 計畫失敗，什麼都沒刪',e); return res;
+    }
+    res.skippedAll=plan.reports.skippedAll; res.kept=plan.reports.kept.slice();
+    res.insight.skippedAll=plan.insight.skippedAll; res.insight.kept=plan.insight.kept.slice();
+    if(dryRun){ res.deleted=plan.reports.del.map(d=>({key:d.key,kb:d.kb})); res.insight.deleted=plan.insight.del.map(d=>({key:d.key,kb:d.kb})); return res; }
+    // 刪：每把再重讀比對、再過一次會變動的關卡
+    plan.reports.del.forEach(d=>{
+      const keep=reason=>res.kept.push({key:d.key,reason});
+      try{
+        if(_lsTidyDenied(d.key)) return keep('不准刪');
+        if(_pendingSyncKeys.has(d.key)) return keep('待同步');
+        if(_reportCacheDeferred.has(d.key)) return keep('延後寫入排隊中');
+        if(typeof window._shopJustSaved==='number'&&Date.now()-window._shopJustSaved<10000) return keep('剛存過報表（10 秒內）');
+        if(localStorage.getItem(d.key)!==d.raw) return keep('別的分頁剛寫過');
+        localStorage.removeItem(d.key);
+        res.deleted.push({key:d.key,kb:d.kb});
+      }catch(e){ keep('刪除失敗：'+(e&&e.message||e)); }
+    });
+    plan.insight.del.forEach(d=>{
+      const keep=reason=>res.insight.kept.push({key:d.key,reason});
+      try{
+        if(_lsTidyDenied(d.key)) return keep('不准刪');
+        if(window.__insightCloudReady!==true) return keep('洞察表雲端資料還沒載入');
+        if(localStorage.getItem(d.key)!==d.raw) return keep('別的分頁剛寫過');
+        localStorage.removeItem(d.key);
+        res.insight.deleted.push({key:d.key,kb:d.kb});
+      }catch(e){ keep('刪除失敗：'+(e&&e.message||e)); }
+    });
+    console.info('[釋出空間] 壓縮 '+((res.compressed&&res.compressed.done)||0)+' 把；刪舊報表 '+res.deleted.length+' 把、保留 '+res.kept.length+' 把'
+      +(res.skippedAll?'（'+res.skippedAll+'）':'')+'；刪洞察表副本 '+res.insight.deleted.length+' 把',res);
+  }catch(e){
+    res.planError=res.planError||String(e&&e.message||e);
+    console.error('[釋出空間] 未預期錯誤',e);
+  }
+  return res;
+}
+window.__lsTidy=__lsTidy;
+
 // ══════ 測試通路：日期區間期間模型 + 雲端直寫 ══════
 // 🔴 為什麼【絕對不能】走 lsSave / _pendingSyncKeys：
 //    lsSave 會 _pendingSyncKeys.add(k)，而 syncToCloud 推送時的報表分支條件是
@@ -2070,6 +2225,9 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         //   ⚠ 只產一份新物件給 setReport，【不可】改寫 Store._profitMem[pk] 本身 ——
         //     那是活的、畫面正在用它渲染（lsLoad 直接回傳它，tryLoadSaved 拿去 loadIntoUI）。
         //   isPlainObj 仍然驗原始 payload（判斷「讀不到 / 損毀」要看原件，不是拷貝）。
+        // 🔴 outbound.ts 必須等於 payload.ts（lsSave 存檔當下的時間），不可改成「推送當下」：
+        //   「一鍵釋出空間」（_lsTidyPlan 關卡 9）靠「雲端 ts ≥ 本機 ts」判斷本機那份已經推上去、可以刪。
+        //   推送時改寫 ts → 雲端 ts 一律比本機新 → 本機沒推的修改會被誤刪。
         if(isPlainObj(payload)){
           const outbound=Object.assign({},payload,{built:_stripDerived(payload.built)});
           tasks.push({key:pk,run:()=>window.__cloudProfitCol.setReport(pk,outbound)});
