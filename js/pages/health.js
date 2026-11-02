@@ -1,4 +1,4 @@
-/* js/pages/health.js -- 通路健診，以 Object.assign(App, ...) 合併回 App
+/* js/pages/health.js -- 通路健檢，以 Object.assign(App, ...) 合併回 App
  *   塊 A：全通路「獲利、成長」（KPI 月結）。
  *   塊 B：蝦皮「廣告效率」、蝦皮／MOMO／PChome「商品結構」（含動銷率）、拖累商品前 10 名（商品層資料，只在展開卡片時載入）。
  *
@@ -40,7 +40,7 @@ function _hlDeepFreeze(o) {
 //     純利率零分線固定 0%（損益兩平）、滿分線＝該類型 P75 四捨五入到整數 %（買斷／小通路、業外沒有樣本，維持 10%）；
 //     毛利率改成「只顯示不計分」（幾乎不動、由平台價格結構決定，分數只會反映門檻畫在哪裡），獲利面向只用純利率；
 //     成長全通路共用一套：(P75 − P10) × 1.25、中位數 65 分、捨入 0.5pp（蝦皮窗口含 2026-02／03 的 12 筆不列入校準樣本，照常評分）。
-//   健診凍結自己的一份門檻，不讀淨利表的 getAnaThresh / getGrowthThresh（那邊被改時，健診分數不該悄悄跟著變）。
+//   健檢凍結自己的一份門檻，不讀淨利表的 getAnaThresh / getGrowthThresh（那邊被改時，健檢分數不該悄悄跟著變）。
 //   比率一律是小數（0.15＝15%）。zero＝零分線、full＝滿分線；zero > full 代表越低越好（同一支 _hlLinear 處理）。
 //   子指標 scored:false＝只顯示原始值、不計分（不進面向分數、不進主要扣分原因）。
 //   「📖 怎麼看這頁」的門檻數字從這張表產生（_hlGuideBlocks），改這裡說明會自動跟著變。
@@ -155,7 +155,7 @@ const HEALTH_RULES = _hlDeepFreeze({
   },
 });
 
-// 健診通路對照表（盤點 §1-0）。group / shop＝KPI_GROUPS 的 key 與店名（profit.js），寫錯會整列「尚未上傳」。
+// 健檢通路對照表（盤點 §1-0）。group / shop＝KPI_GROUPS 的 key 與店名（profit.js），寫錯會整列「尚未上傳」。
 //   ranked:false＝列出、照算分，但不參加排名（業外不是真正的銷售通路；官網已關站）。
 //   prod＝商品層資料來源（塊 B）：platform＋淨利表上的通路名（__healthProductSnapshot／__profitOpenAt 用）。沒有 prod ⇒ 廣告效率、商品結構「不適用」。
 const HEALTH_CHANNELS = _hlDeepFreeze([
@@ -198,7 +198,7 @@ function _hlTaipeiYm(ms) { return new Date(ms + 8 * 3600 * 1000).toISOString().s
 /* ---------- 數字 ---------- */
 function _hlFinite(v) { return typeof v === 'number' && isFinite(v); }
 // 線性給分：v 在零分線＝0、滿分線＝100、中間線性、兩端截斷。zero > full＝越低越好。
-//   🔴 v 不是有限數字 ⇒ 回 null（沒資料），【絕不回 0】—— 這是健診跟 KPI 評分表 scoreCalcMetric 最大的差別。
+//   🔴 v 不是有限數字 ⇒ 回 null（沒資料），【絕不回 0】—— 這是健檢跟 KPI 評分表 scoreCalcMetric 最大的差別。
 function _hlLinear(v, zero, full) {
   if (!_hlFinite(v) || !_hlFinite(zero) || !_hlFinite(full)) return null;
   if (zero === full) return v >= full ? 100 : 0;
@@ -639,7 +639,7 @@ function _hlTopReason(dims) {
   return `${s.label} ${_hlFmtRaw(s.raw, s.unit)}（滿分線 ${dir} ${_hlFmtRaw(s.full, s.unit)}）`;
 }
 
-// 🔴 一個通路一個月的健診。純函式：同樣的 (ch, month, snap, rules) 一定得到同樣的結果。
+// 🔴 一個通路一個月的健檢。純函式：同樣的 (ch, month, snap, rules) 一定得到同樣的結果。
 //   回 { id, label, type, month, status, reason, score, light, isReference, ranked, dimsUsed:N, dimsTotal:M, dims:[…], next:[…], topReason, fill }
 function computeChannelHealth(ch, month, snap, rules) {
   const R = rules || HEALTH_RULES;
@@ -1025,7 +1025,7 @@ const _hlProd = { state: {}, cache: {}, queue: [], queued: {}, running: false };
 function _hlIsNarrow() {
   try { return !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches); } catch { return false; }
 }
-// 等待上限：健診頁傳 30 分鐘（實際上就是「一直等」；60 秒、5 分鐘只改提示字，見 _hlLoadingMsg）
+// 等待上限：健檢頁傳 30 分鐘（實際上就是「一直等」；60 秒、5 分鐘只改提示字，見 _hlLoadingMsg）
 const HL_LOAD_LIMIT_MS = 30 * 60 * 1000;
 function _hlProdSource() {
   if (_hlMock) return _hlMockProdSource;
@@ -1080,7 +1080,7 @@ function _hlStartTicker() {
     } catch {}
   }, 5000);
 }
-// 🔴 桌機：打開健診頁就在背景「依序」載入蝦皮 → MOMO → PChome（一次一個平台，不同時拉約 10MB），載完自動重算整頁。
+// 🔴 桌機：打開健檢頁就在背景「依序」載入蝦皮 → MOMO → PChome（一次一個平台，不同時拉約 10MB），載完自動重算整頁。
 //   分數不能因為有沒有展開卡片而不同（2026-11-02）。手機（≤768px）不自動載，維持卡片裡的「載入商品資料」按鈕。
 //   只排一次；逾時的平台按「↻ 重新計算」會回到 idle，下一次 render 再排。
 const _HL_PLATFORMS = ['shopee', 'momo', 'pchome'];
@@ -1100,7 +1100,7 @@ function _hlAutoLoad() {
   })().then(() => { _hlAutoRunning = false; });
 }
 // 資料更新自動重算：各平台的「資料有更新」事件（profit.js window.__healthProductEvents）→ 1.5 秒防抖 → 已算過的快照重算（舊數字留到新的算好才換）。
-//   PChome 的商品清單、對帳更新沒有事件 → 每 3 秒比一次 window.__pchome*CloudLatest 是不是換了一份（只在健診頁、PChome 已載入時）。
+//   PChome 的商品清單、對帳更新沒有事件 → 每 3 秒比一次 window.__pchome*CloudLatest 是不是換了一份（只在健檢頁、PChome 已載入時）。
 let _hlListening = false;
 const _hlRefreshTimer = {};
 const _hlPchomeRefs = { p: undefined, r: undefined, o: undefined };
@@ -1519,7 +1519,7 @@ function _hlOnClick(e) {
   const act = e.target.closest && e.target.closest('[data-hl-act]');
   if (act) {
     if (act.dataset.hlAct === 'refresh') { _hlProdReset(); App.render(); }
-    else if (act.dataset.hlAct === 'guide' && typeof App.openGuide === 'function') App.openGuide({ title: '📖 通路健診 · 怎麼看這頁', blocks: _hlGuideBlocks() });
+    else if (act.dataset.hlAct === 'guide' && typeof App.openGuide === 'function') App.openGuide({ title: '📖 通路健檢 · 怎麼看這頁', blocks: _hlGuideBlocks() });
     else if (act.dataset.hlAct === 'loadprod' && act.dataset.hlPlatform) {
       if (_hlProd.state[act.dataset.hlPlatform] === 'timeout') _hlProd.state[act.dataset.hlPlatform] = 'idle';
       _hlEnsurePlatform(act.dataset.hlPlatform); App.render();
@@ -1567,7 +1567,7 @@ Object.assign(App, {
   viewHealth() {
     // 「📖 怎麼看這頁」在載入中、錯誤畫面也要按得到（說明內容只讀 HEALTH_RULES，不需要資料）
     const header = `<div class="page-header hl-hd">
-        <div><h2>通路健診</h2>
+        <div><h2>通路健檢</h2>
         <p>每個通路每月的體檢分數。分數依固定規則計算，同樣的資料一定得到同樣的分數；沒有資料的面向不計分、不算 0 分。</p></div>
         <button type="button" class="btn-ghost hl-guide-btn" data-hl-act="guide">📖 怎麼看這頁</button></div>`;
     // profit.js 動態載入：沒載完先載，載完再 render（本頁不叫任何 __load*Subs，只用開站就訂閱的 app/kpi）
@@ -1664,7 +1664,7 @@ Object.assign(App, {
 /* ---------- Console：唯讀回測 ---------- */
 //   opts：{ from, to, products:true（也算商品層面向；只算「已經載入」的平台，其他平台當成只算 KPI）, adsRules:true（蝦皮廣告致虧三條候選規則逐通路逐月比較） }
 //   沒有 products ⇒ 跟塊 A 一樣只算 KPI（商品層面向「不適用」，不會因為商品層沒載入而沒有總分）。
-//   商品層要先載入：電腦打開健診頁會自動依序載入；或在 Console 先跑 await __healthLoadProducts('shopee')（以及 'momo'、'pchome'）。
+//   商品層要先載入：電腦打開健檢頁會自動依序載入；或在 Console 先跑 await __healthLoadProducts('shopee')（以及 'momo'、'pchome'）。
 //   商品層在這裡是同步逐月算（不走畫面的排隊），MOMO 5 個通路 × 10 個月可能要幾秒，跑完才印。
 function _hlBacktestSnap(o) {
   const snap = _hlCollect();
@@ -1678,7 +1678,7 @@ function _hlBacktestSnap(o) {
   if (!_hlMock && !window.__healthLoadProducts) console.warn('[health] 讀不到商品層轉接（profit.js 版本不一致）');
   const need = _HL_PLATFORMS.filter(p => ready[p] === 'ready');
   const miss = _HL_PLATFORMS.filter(p => ready[p] !== 'ready');
-  if (miss.length) console.warn(`[health] 這些平台的商品層還沒載入，回測當成只算 KPI：${miss.join('、')}（電腦打開健診頁會自動載入；或先跑 await __healthLoadProducts('${miss[0]}')）`);
+  if (miss.length) console.warn(`[health] 這些平台的商品層還沒載入，回測當成只算 KPI：${miss.join('、')}（電腦打開健檢頁會自動載入；或先跑 await __healthLoadProducts('${miss[0]}')）`);
   HEALTH_CHANNELS.forEach(ch => {
     if (!ch.prod || need.indexOf(ch.prod.platform) < 0) return;
     _hlMonthRange(_hlAddMonth(from, -1), to).forEach(m => {
@@ -1694,7 +1694,7 @@ function _hlBacktestSnap(o) {
 }
 window.__healthBacktest = function (opts) {
   const o = opts || {};
-  if (!_hlMock && !window.__profitReady) { console.warn('[health] profit.js 還沒載入：先進「通路健診」頁或 KPI 頁再跑'); return null; }
+  if (!_hlMock && !window.__profitReady) { console.warn('[health] profit.js 還沒載入：先進「通路健檢」頁或 KPI 頁再跑'); return null; }
   const { snap, months, from, to, need } = _hlBacktestSnap(o);
   const res = healthBacktest(snap, months);
   console.log(`[health] 回測 ${from}～${to}，規則 ${HEALTH_RULES.version}（只讀，不寫任何資料）${need.length ? '，含商品層：' + need.join('、') : '，只算 KPI'}`);
@@ -1719,7 +1719,7 @@ window.__healthBacktest = function (opts) {
 //   印兩張表（提案、現行 vs 建議中位分），最後一段 Markdown 可以整段複製貼回。只是提案：不會改 HEALTH_RULES。
 window.__healthCalibrate = function (opts) {
   const o = Object.assign({ products: true }, opts || {});
-  if (!_hlMock && !window.__profitReady) { console.warn('[health] profit.js 還沒載入：先進「通路健診」頁再跑'); return null; }
+  if (!_hlMock && !window.__profitReady) { console.warn('[health] profit.js 還沒載入：先進「通路健檢」頁再跑'); return null; }
   const { snap, months, from, to, need } = _hlBacktestSnap(o);
   if (!need.length) { console.warn('[health] 沒有任何平台的商品層資料，算不出塊 B 的校準'); return null; }
   const bt = healthBacktest(snap, months);

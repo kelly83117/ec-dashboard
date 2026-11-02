@@ -230,12 +230,12 @@ ESM 有個致命陷阱必須牢記：
   較上月＝本月總計 − 上一個日曆月總計，任一邊空白 ⇒ 空白。🔴 財務儀表板之後改讀這份文件時要用**同一條規則**，改規則兩邊一起改。
   頁面是獨立路由 `inventory`（**不是部門**，不碰 `ec.departments` / `canAccessOffice`）：所有登入者可看、非 view 可編輯。
   本機測試用 `__inventoryMock(true)`（空資料）或 `__inventoryMock('demo')`（假資料），只在 localhost 生效、資料只在記憶體。
-- 通路健診（路由 `health`，js/pages/health.js，方案 docs/plan-channel-health.md）——**純讀取頁，不存任何資料、沒有雲端物件**。
+- 通路健檢（路由 `health`，js/pages/health.js，方案 docs/plan-channel-health.md）——**純讀取頁，不存任何資料、沒有雲端物件**。
   KPI 月結經 profit.js 的唯讀轉接 `window.__healthKpiSnapshot(months)`（口徑＝KPI 頁 `_kpiShopCalc` / `_kpiRealRev` / `_kpiCommonColTotals`）。
   商品層（塊 B：蝦皮廣告效率、蝦皮／MOMO／PChome 商品結構與拖累商品）經 profit.js 的 `__healthLoadProducts(平台)`＋`__healthProductSnapshot(平台, 通路, 月)`，
   🔴 **電腦寬度開頁就在背景「依序」載入**蝦皮 → MOMO → PChome（一次一個平台）；**手機寬度（≤768px）不自動載**，改成卡片裡的「載入商品資料」按鈕（約 10MB，手機會爆）。
   商品層還沒載好的通路**不給總分、不排名**（分數不得因有沒有展開卡片而改變）。就緒＝雲端快照真的到了＋資料更新事件安靜 3 秒；
-  **不放棄**：健診頁一直等（60 秒起顯示「仍在載入（已等 N 秒）」，5 分鐘起加「請先進淨利表點一下再回來」），到了自動重算。
+  **不放棄**：健檢頁一直等（60 秒起顯示「仍在載入（已等 N 秒）」，5 分鐘起加「請先進淨利表點一下再回來」），到了自動重算。
   🔴 **載入期間不重算**（更新事件只記「待重算」，平台到齊才各算一次），重算一次一份、用 requestIdleCallback 讓出主執行緒；Console 印 `[health] …重算 X ms`。
   ⚠ 不能用 `momoLoadProducts().length` 判斷 MOMO 到齊（它會退回讀 localStorage 舊資料），要看 `Store._profitMem`。之後的資料更新事件會自動重算。
   MOMO 逐商品利潤＝MOMO 總表「淨利貢獻」欄：`momoAggregatePeriods` 之後一定要再跑 `momoStage4Redistribute`（同總表 render），只用前者逐列會對不上。

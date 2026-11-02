@@ -1,4 +1,4 @@
-# 通路健診：實作方案（第一版，塊 A／B／C）
+# 通路健檢：實作方案（第一版，塊 A／B／C）
 
 > 基準：分支 `feat/channel-health`，從 `main` `19c532b` 開出（v818，含 MOMO 壓縮第 1 塊）。
 > 這次**只寫方案**：沒改任何程式、沒 commit、沒讀正式 Firestore。行號都是 `19c532b` 的行號。
@@ -10,7 +10,7 @@
 1. **三塊的寫入性質**：
    - **塊 A、B 完全不寫雲端，也不新增雲端物件**。TEST_NOWRITE 基準維持 **27 / 45**。
    - **塊 C** 建議新開一個 collection，**會新增 1 個雲端物件**，基準變 **28 / 46（推算）**。
-2. **健診頁是純讀取頁**：
+2. **健檢頁是純讀取頁**：
    - 只讀 KPI 月結、淨利表報表、MOMO 商品主檔、PChome 對帳／商品清單。
    - 所有分數當場用固定規則重算，不存檔。
 3. **profit.js 只「加」不「改」**：
@@ -35,10 +35,10 @@
 |---|---|---|
 | 路由 | `health`，**不走 `office-`、不是部門**，不碰 `ec.departments`、`canAccessOffice`、`OFFICE_FEATURES` | 比照 `inventory`（`js/app.js:1053`、`:1283`） |
 | 權限 | 所有登入者都能看（老闆已確認不鎖），`_isRouteAllowed` 直接 `return true` | 同上 |
-| 雲端推播重畫 | **不加進 `CLOUD_RENDER_ROUTES`**（`js/app.js:1295`）。白名單設計，新路由預設不重畫。健診頁自己顯示「資料時間」和「↻ 重新計算」按鈕 | 該處註解：「新增 route 預設不重繪（安全）」 |
+| 雲端推播重畫 | **不加進 `CLOUD_RENDER_ROUTES`**（`js/app.js:1295`）。白名單設計，新路由預設不重畫。健檢頁自己顯示「資料時間」和「↻ 重新計算」按鈕 | 該處註解：「新增 route 預設不重繪（安全）」 |
 | profit.js | 進頁時 `await window.__ensureProfit()`（`js/app.js:24`），**resolve 之後**才叫任何 `__load*Subs`（風險 3：守衛沒掛好就訂閱，雲端可能蓋掉本機） | `js/pages/daily.js:60-71`、`js/pages/offices.js:32-43` 的同一套寫法 |
-| 樣式 | 放進 `css/main.css` 檔尾新段 `/* ===== 通路健診 hl-* ===== */`，顏色一律用 `:root` 變數（`--success/-soft`、`--warn/-soft`、`--danger/-soft`、`--border`、`--text-muted`），**不動 `--bg`**、不新增 CSS 檔 | UI_STYLE_GUIDE §1；新 CSS 檔會讓 index.html 的 `?v=` 從 5 處變 6 處 |
-| 計分函式 | **不直接沿用** `scoreCalcMetric`（`js/profit.js:13045`）：它對 `null` 回 0，健診規定「沒資料不得算 0」。在 health.js 寫一支 `_hlLinear(v, zero, full)`：`v==null` 回 `null`，「越低越好」用 `zero > full` 表示，同一支處理 | 盤點 §4-1 |
+| 樣式 | 放進 `css/main.css` 檔尾新段 `/* ===== 通路健檢 hl-* ===== */`，顏色一律用 `:root` 變數（`--success/-soft`、`--warn/-soft`、`--danger/-soft`、`--border`、`--text-muted`），**不動 `--bg`**、不新增 CSS 檔 | UI_STYLE_GUIDE §1；新 CSS 檔會讓 index.html 的 `?v=` 從 5 處變 6 處 |
+| 計分函式 | **不直接沿用** `scoreCalcMetric`（`js/profit.js:13045`）：它對 `null` 回 0，健檢規定「沒資料不得算 0」。在 health.js 寫一支 `_hlLinear(v, zero, full)`：`v==null` 回 `null`，「越低越好」用 `zero > full` 表示，同一支處理 | 盤點 §4-1 |
 | 燈號 | ≥80 綠、50–79 黃、<50 紅、沒資料灰。顯示分數用 `Math.floor`（理由同 `scoreFmt`（`js/profit.js:13075`）上方註解：顯示值不可高於實際值，免得 79.6 顯示成 80 卻是黃燈）。**不沿用 `scoreColor` 的寫死色碼**（`:13090`） | — |
 | 雲端物件 | 塊 A、B：**0 個新物件**。只讀的觀測點一律**不以 `__cloud` 開頭**（`__healthBacktest`、`__healthKpiSnapshot`…），不被防護碼包、不影響 27 / 45 | CLAUDE.md TEST_NOWRITE 段 |
 
@@ -58,7 +58,7 @@
 
 | 檔案 | 位置 | 改什麼 |
 |---|---|---|
-| `index.html` | `:85-88`（「總覽」群組，績效管理之後） | 加一行 `<button class="nav-item" data-route="health"><span class="icon">🩺</span><span>通路健診</span></button>`（骨架 HTML，不含邏輯） |
+| `index.html` | `:85-88`（「總覽」群組，績效管理之後） | 加一行 `<button class="nav-item" data-route="health"><span class="icon">🩺</span><span>通路健檢</span></button>`（骨架 HTML，不含邏輯） |
 | `js/main.js` | `:15` 之後 | 加 `import './pages/health.js?v=…';` |
 | `bump-version.js` | `:29` `EXPECT` 與 `:3`、`:11`、`:13` 註解 | `main: 12 → 13`，合計 17 → 18 處。**不改版號本身**，版號由合併端 bump |
 | `CLAUDE.md` | 目錄結構、版號「17 處」段 | 加 `health`、改成 18 處 |
@@ -136,9 +136,9 @@
 **對既有功能的影響**
 - 側欄多一顆按鈕；`main.js` 多 import 一個小檔，登入前就會下載，大約 30–40KB。
 - 其他頁面行為零變化：
-  - profit.js 只多一支沒有人呼叫的函式，健診頁以外不會用到。
-  - 不加進 `CLOUD_RENDER_ROUTES`，所以 app/main 推播不會重畫健診頁，健診頁也不會影響別頁。
-- 進健診頁會觸發 profit.js 動態載入，跟進 KPI 頁一樣，沒有新增下載量。**塊 A 不叫任何 `__load*Subs`**。
+  - profit.js 只多一支沒有人呼叫的函式，健檢頁以外不會用到。
+  - 不加進 `CLOUD_RENDER_ROUTES`，所以 app/main 推播不會重畫健檢頁，健檢頁也不會影響別頁。
+- 進健檢頁會觸發 profit.js 動態載入，跟進 KPI 頁一樣，沒有新增下載量。**塊 A 不叫任何 `__load*Subs`**。
 
 **快照／指紋（動手前拍）**
 
@@ -155,7 +155,7 @@
    - 在你的 localhost（防護下），開 KPI 月結 → 2026-09、2026-10 總覽。
    - 截圖「通路表」各店的營收、純利、純利率（`_kpiChannelTableHtml` 那張表）。
    - 改完後同月份再截一次，必須逐字相同。
-   - 健診卡上的「獲利」原始值也必須跟這張表逐店相同，這就是驗收的對帳。
+   - 健檢卡上的「獲利」原始值也必須跟這張表逐店相同，這就是驗收的對帳。
 
 ### 1-2. 塊 B：蝦皮廣告效率、商品結構、拖累前 10；MOMO／PChome 動銷率（不寫雲端）
 
@@ -178,7 +178,7 @@
 |---|---|---|---|
 | `momoPeriodTotals(shop, 'YYYY-MM-FULL')` | `:17581` | 只依賴 `momoLoadProducts`（`:14151`，讀 `_profitMem` → `_mem` → localStorage，經 `_momoLsReadNote`）和 `momoAggregatePeriods`（`:14757`）。在 `:14757-14908` 裡用 grep 找 `momoState` / `state.` / `document.`，**零命中**。用到的是對帳、運費、E001、成本對照，這些都是資料鏡像，不是畫面選擇 | ✅ 可以直接呼叫。前提是 `__loadMomoSubs` 已載完；判斷條件照抄 `_kpiEnsureMomoData`（`:11375`）。`lean:true` 時 MO+ 每次約 40ms（`:17592` 註解） |
 | `pchomeCalendarCalc(calMonth, '轉單'\|'寄倉')` | `:29505` | 讀 `pchomeLoadProducts`、`pchomeLoadOrders`、`pchomeLoadRecon`，三者都由 boot 訂閱緩存在 `window.__pchome*CloudLatest`，profit.js 載入時接手（`js/firebase.js:1080-1086`）。轉單會 `console.log` 一行運費摘要（`:29624`），只是記錄、沒有寫入 | ✅ 可以直接呼叫，而且**已經在 window 上**（`:30010`）。判斷就緒照抄 `_kpiEnsurePchomeData`（`:11993`） |
-| `pchomeBaseCount(shop, calc)` | `:29697` | 純函式，吃 `calc` 和 `pchomeLoadProducts()` | ✅ 但它只回「在架商品頁數」，**沒有分子**，健診要另外算（見 §3） |
+| `pchomeBaseCount(shop, calc)` | `:29697` | 純函式，吃 `calc` 和 `pchomeLoadProducts()` | ✅ 但它只回「在架商品頁數」，**沒有分子**，健檢要另外算（見 §3） |
 | 蝦皮報表 `lsLoad(shop,'YYYY/MM',half)` | `:2626` | 讀 `_profitMem` → `_mem` → `_reportCacheParse(localStorage)`（`:2618`，LZ1 也解得開）。**已經在 window 上** | ✅ 但要先叫 `__loadShopeeSubs` 和 `__loadArchiveSubs`，並等 `__profitsCollectionReady()`、`__profitArchivesReady()`（`js/firebase.js:224`、`:129`），否則「還沒載到」會被誤判成「沒資料」 |
 | `momoAggregatePeriods` 逐商品 | `:14757` | 同第一列 | ✅ 拖累清單和長期虧損要逐商品，不經 momoPeriodTotals |
 
@@ -193,7 +193,7 @@
 | `css/main.css` | `hl-*` 段 | 拖累清單、原因標章 |
 
 **對既有功能的影響**
-- 健診頁打開蝦皮或 MOMO 卡片時，會載入該平台的訂閱組。這跟使用者自己點進淨利表的蝦皮或 MOMO 一樣，各組有 `__loadedSubGroups` 守衛，只會訂一次。
+- 健檢頁打開蝦皮或 MOMO 卡片時，會載入該平台的訂閱組。這跟使用者自己點進淨利表的蝦皮或 MOMO 一樣，各組有 `__loadedSubGroups` 守衛，只會訂一次。
 - 唯一的新風險是**手機記憶體**（盤點 §8 風險 5），所以手機寬度（≤768px）不自動載，改顯示「載入商品層資料」按鈕。
 - `__profitOpenAt` 切淨利表期間時**不寫持久狀態**。做法照 `tagFxJump`（`:5554-5569`）：先存 `ec_lastHalf_{shop}`，叫完 `onHalfChange(…, false)` 再還原。
   - 寫入 `ec_profitView` 只是本機 localStorage，不上雲，跟使用者自己點通路一樣。
@@ -202,10 +202,10 @@
 
 1. 程式：同塊 A，profit.js 仍然只能是新增。
 2. **MOMO 對帳**（最重要）：
-   - 健診卡上「商品頁口徑」的動銷率（分子／分母），必須跟 MOMO 總覽右側淨利率／動銷率比較圖（`:23467-23471`，也是 `momoPeriodTotals`）的同一家、同一個月**完全一致**。
+   - 健檢卡上「商品頁口徑」的動銷率（分子／分母），必須跟 MOMO 總覽右側淨利率／動銷率比較圖（`:23467-23471`，也是 `momoPeriodTotals`）的同一家、同一個月**完全一致**。
    - 動手前先記下 2026-09、2026-10 五家的數字。
-3. **PChome 對帳**：健診的「料號口徑」分子／分母，必須等於 PChome 總覽 KPI 卡的動銷率（`:29917`，`calc.bizCount ÷ skus.filter(!disc||hasBiz)`），同一個日曆月、轉單＋寄倉分別比。
-4. **蝦皮對帳**：健診「虧損商品數」必須等於淨利表同月整月篩「賠錢中」標籤的筆數加上沒投廣告但虧損的筆數（`calcAnalysisAll` `:5100` 的 D>0&&P<0 只涵蓋有廣告的）。動手前用淨利表篩選數記下來。
+3. **PChome 對帳**：健檢的「料號口徑」分子／分母，必須等於 PChome 總覽 KPI 卡的動銷率（`:29917`，`calc.bizCount ÷ skus.filter(!disc||hasBiz)`），同一個日曆月、轉單＋寄倉分別比。
+4. **蝦皮對帳**：健檢「虧損商品數」必須等於淨利表同月整月篩「賠錢中」標籤的筆數加上沒投廣告但虧損的筆數（`calcAnalysisAll` `:5100` 的 D>0&&P<0 只涵蓋有廣告的）。動手前用淨利表篩選數記下來。
 5. 效能：在 Console 記錄 `performance.now()`，看一次重算 17 通路 × 12 月花多久，寫進驗收紀錄。
 6. 三段對帳程式（MOMO、PChome、蝦皮）寫在 §5-2-1，只讀。
 
@@ -234,7 +234,7 @@
 **驗收後修正（2026-11-02，localhost 真實資料驗收發現）**
 
 1. **分數不得因有沒有展開卡片而改變**：
-   - 電腦寬度打開健診頁，就在背景**依序**載入蝦皮 → MOMO → PChome（`_hlAutoLoad`，一次一個平台），載完自動重算整頁。
+   - 電腦寬度打開健檢頁，就在背景**依序**載入蝦皮 → MOMO → PChome（`_hlAutoLoad`，一次一個平台），載完自動重算整頁。
    - 載入中、未載入、逾時的蝦皮／MOMO／PChome 通路**不給總分、不排名**（`computeChannelHealth` 回 `prodLoading`／`prodIdle`／`prodTimeout`），總分欄顯示「載入中」「未載入」「逾時」。
    - 手機寬度維持卡片裡的「載入商品資料」按鈕。展開卡片不再觸發載入。
    - 商品結構的「上個月」還在算時，整個面向是「載入中」，不先用少一個子指標的分數。
@@ -259,13 +259,13 @@
    - 「已調整」日期（解析蝦皮備註＋洞察表調整紀錄）每個通路快取 20 秒（profit.js `_healthAdjCache`），同一批重算不會每個月重解析一次。
    - ⚠ 這些都是依讀碼判斷的卡頓來源，**真實環境卡在哪裡要看 Console 的耗時紀錄確認**。
 2. **不放棄**：
-   - `__healthLoadProducts` 預設上限 60 秒 → 5 分鐘；健診頁傳 30 分鐘（等於一直等）。
+   - `__healthLoadProducts` 預設上限 60 秒 → 5 分鐘；健檢頁傳 30 分鐘（等於一直等）。
    - 60 秒起，畫面寫「仍在載入（已等 N 秒）」，資料一到自動重算。5 分鐘起再加「請先進淨利表點一下這個平台再回來」，**照樣繼續等**。
    - 秒數每 5 秒更新一次（`_hlStartTicker`），只改頁頂「商品層資料」那一列，不整頁重算；跨過 60 秒、5 分鐘時才整頁重畫一次換提示字。排隊還沒開始的平台寫「排隊中」。
 3. **MOMO 逐商品利潤＝MOMO 總表「淨利貢獻」欄**（驗收：只用 `momoAggregatePeriods` 時，甲配 2026-09 有 254／262 個商品金額跟畫面不同，整家合計相同）：
    - 原因：總表 render（`:17762`）在逐商品彙總之後，還會跑 `momoStage4Redistribute`。甲配／乙配依各商品的出貨型態重分運費，乙配倉租用 C1212 的逐商品實際值。整家合計不變，逐列會變。
    - 改成：`__healthProductSnapshot('momo', …)` 跟總表走同一條：`momoClearFeeRateCache()` → 逐商品 `momoAggregatePeriods(…, {lean:true})` → `momoStage4Redistribute(通路, 'YYYY-MM-FULL', rows)`。回傳多一個 `freightMode`（precise／proportional／none／error）。重分失敗不 throw，退回彙總值。
-   - **逐列加總跟總表合計為什麼會不同**：健診只算「本月有銷售、有成本」的商品。沒賣出的商品不算進來，乙配會掛倉租、淨利是負的；缺成本的商品也不算。卡片「商品結構」三個占比的 ⓘ、拖累清單標題的 ⓘ 都寫了這段口徑（`_hlMomoProfitNote`）。
+   - **逐列加總跟總表合計為什麼會不同**：健檢只算「本月有銷售、有成本」的商品。沒賣出的商品不算進來，乙配會掛倉租、淨利是負的；缺成本的商品也不算。卡片「商品結構」三個占比的 ⓘ、拖累清單標題的 ⓘ 都寫了這段口徑（`_hlMomoProfitNote`）。
    - 這段是讀碼推論，沒有用真實資料比過合計。§5-2-1 ④ 可以照樣用來比逐列金額。
 4. **門檻 v4**：見 §2-5、§2-6、§2-7-2。
 
@@ -301,7 +301,7 @@
 | | (甲) 塞進現有 `app/insight_{通路}` | (乙) 新 collection `shopee_perf_months`，一通路一月一份 doc（**建議**） |
 |---|---|---|
 | 大小 | 每月約 437～1,200 個商品 × 每筆約 45～60 bytes（商品 ID 當 key，值是 `[狀態碼,銷量,加購件數,加購訪客,訪客]` 短陣列）≈ **25～70KB／月**。12 個月 ≈ 0.3～0.85MB，**加在既有的 master／weeks／notes／perf 上面，好麻吉一年內就可能撞 1MB** | 一份 doc 只有 25～70KB，離 1MB 很遠，永遠不會長大 |
-| 對既有功能 | 要改 `firebase.js` `insightShopFromKey` 的 regex（`:754-757`，只認 `master\|weeks\|notes\|perf`）、`app.js` `_dropInsightKeys`（`:3102`）、`_insClearPiecePlan`（`marketing.js:2432`）、`__lsTidy` 的洞察表副本規則（`profit.js:1532`）。洞察表訂閱每次推播都會多帶整年快照，**每個打開洞察表的人都要多下載** | 不碰任何既有 key 和訂閱；健診頁需要時才 `getDoc` 該月 |
+| 對既有功能 | 要改 `firebase.js` `insightShopFromKey` 的 regex（`:754-757`，只認 `master\|weeks\|notes\|perf`）、`app.js` `_dropInsightKeys`（`:3102`）、`_insClearPiecePlan`（`marketing.js:2432`）、`__lsTidy` 的洞察表副本規則（`profit.js:1532`）。洞察表訂閱每次推播都會多帶整年快照，**每個打開洞察表的人都要多下載** | 不碰任何既有 key 和訂閱；健檢頁需要時才 `getDoc` 該月 |
 | 雲端物件 | 不增加物件，但 `__cloudInsightByShop` 要加方法 → 方法數 +1 | **新增 1 個物件** `__cloudShopeePerf` → **28 / 46（推算）** |
 | 本機 | 會經 `Store.set` 進 localStorage，占本機空間（現在已經有快滿的預警） | **不經 Store、不進 localStorage**（照 `__cloudInventory`／`__cloudIssues` 的寫法） |
 
@@ -345,7 +345,7 @@
   - 月快照失敗**不影響**既有 perf，各自用各自的 toast。
 - **狀態時效**：檔案裡的狀態是**匯出當下**的狀態。
   - 上傳時間晚於該月結束後 10 天，就在快照加 `stLate:true`。
-  - 健診卡片顯示「狀態為 11/15 匯出，可能不代表 10 月底」。
+  - 健檢卡片顯示「狀態為 11/15 匯出，可能不代表 10 月底」。
 - **本機測試**：`__shopeePerfMock(true)`，只在 localhost 生效、只放記憶體，照 `__inventoryMock`。
 - **CLAUDE.md 要同步改**：「資料與後端」加一段 `shopee_perf_months`；TEST_NOWRITE 物件數 27 → 28；MUST 清單加 `['__cloudShopeePerf', 'setMonth']`；物件下限改 28。
   - ⚠ 防護碼不在 repo 裡，**你本機的防護碼 MUST 清單和下限要你自己更新**，否則新物件沒有 fail-loud 保護。
@@ -513,7 +513,7 @@
    - MOMO 動銷率要跟現有比較圖一致。
    - 蝦皮 2～3 月：營收照撥款日入帳，2 月農曆年撥款延後、3 月補回。成長分在這兩個月的跳動要單獨看，不能拿來定門檻。
 4. 定版寫進 `HEALTH_RULES`，`version` 改成 `v1-2026-11`。之後改任何一個門檻都要升版本。卡片顯示版本號。
-5. 健診**凍結自己的一份門檻**，不讀 `getAnaThresh()`、`getGrowthThresh()`。淨利表門檻被改時，健診分數不能悄悄跟著變。ⓘ 裡寫明兩者的關係。
+5. 健檢**凍結自己的一份門檻**，不讀 `getAnaThresh()`、`getGrowthThresh()`。淨利表門檻被改時，健檢分數不能悄悄跟著變。ⓘ 裡寫明兩者的關係。
 
 ### 2-7-1. 第一次門檻校準（已完成 2026-11-02，套用為 `v2-2026-11`）
 
@@ -549,7 +549,7 @@
   - 這樣可以避免甲配某月純利率 33%（仍是全公司最賺的通路）卻亮紅燈。
   - 用 v1 的「中位數 65 分」算法，甲配 33% 是 6 分；新規則下滿分線約 38～39%，33% 約 85 分。
   - 代價：獲利面向的歷史中位分不一定落在 60～70（分布高的類型會偏高），這是刻意的。
-- **樣本**：2026-01 到上個月、所有**會排名**的通路的月份。業外、官網不列入；營收過小、資料不足、尚未上傳的月份不列入（口徑同健診頁）。
+- **樣本**：2026-01 到上個月、所有**會排名**的通路的月份。業外、官網不列入；營收過小、資料不足、尚未上傳的月份不列入（口徑同健檢頁）。
   - 業外沒有樣本 ⇒ 維持現值。
 - **蝦皮 2026-02、03 排除（只排除成長的校準樣本，照常評分）**：
   - 成長要前後各 2 個月，最早從 2026-04 起才算得出來，所以「2 月、3 月本身」沒有成長樣本，照字面排除等於什麼都沒排除。
@@ -568,7 +568,7 @@
 | 其他類型 × 子指標、成長兩列 | | | 待跑 | 待跑 | |
 
 **請在 localhost Console 跑（只讀）**：
-1. 登入後先進「通路健診」頁，讓 profit.js 載入、KPI 就緒。
+1. 登入後先進「通路健檢」頁，讓 profit.js 載入、KPI 就緒。
 2. 貼上下面整段。
 
 它會印出：
@@ -577,7 +577,7 @@
 - 2026-09 各通路分數預覽：現行 vs 建議。
 - 一段 Markdown：整段複製貼回給我，我把它填進這一節，取代上面的試算表。
 
-自我檢查：預覽表的「**現行總分**」必須等於健診頁 2026-09 的分數。對不上，代表這段程式跟 health.js 算法不一致，先別信「建議」欄。
+自我檢查：預覽表的「**現行總分**」必須等於健檢頁 2026-09 的分數。對不上，代表這段程式跟 health.js 算法不一致，先別信「建議」欄。
 
 node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
 - 17 個通路的「現行總分」都等於 health.js。
@@ -590,9 +590,9 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
 
 ```js
 (() => {
-  // 通路健診門檻校準（只讀）：讀 window.__healthKpiSnapshot（記憶體裡的 KPI 月結），不寫任何資料、不連網。
-  // 先進「通路健診」頁（讓 profit.js 載入、KPI 就緒）再貼。印三張表，最後一段 Markdown 可以整段複製貼回。
-  if (typeof window.__healthKpiSnapshot !== 'function') { console.warn('先進「通路健診」頁再跑'); return; }
+  // 通路健檢門檻校準（只讀）：讀 window.__healthKpiSnapshot（記憶體裡的 KPI 月結），不寫任何資料、不連網。
+  // 先進「通路健檢」頁（讓 profit.js 載入、KPI 就緒）再貼。印三張表，最後一段 Markdown 可以整段複製貼回。
+  if (typeof window.__healthKpiSnapshot !== 'function') { console.warn('先進「通路健檢」頁再跑'); return; }
   const ym = ms => new Date(ms + 8 * 3600e3).toISOString().slice(0, 7);
   const add = (m, n) => { const y = +m.slice(0, 4), k = +m.slice(5, 7) - 1 + n; return (y + Math.floor(k / 12)) + '-' + String(((k % 12) + 12) % 12 + 1).padStart(2, '0'); };
   const FROM = '2026-01', TO = add(ym(Date.now()), -1), PREVIEW = '2026-09';
@@ -719,7 +719,7 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
       建議滿分比例: xs.length ? Math.round(xs.filter(v => lin(v, p.zero, p.full) >= 100).length / xs.length * 100) + '%' : '—' });
   });
   // 預覽：PREVIEW 月各通路分數（現行 vs 建議）。計分同 health.js：獲利＝純利率 70%＋毛利率 30%；成長＝各 50%；總分＝(獲利×30＋成長×20)÷有分數的權重；
-  //   有獲利＋成長兩個面向才是正式分，否則「參考」。「現行」欄應該要等於健診頁該月的分數（對不上＝這段程式寫錯，先別信建議欄）。
+  //   有獲利＋成長兩個面向才是正式分，否則「參考」。「現行」欄應該要等於健檢頁該月的分數（對不上＝這段程式寫錯，先別信建議欄）。
   const score = (o, th, thg) => {
     const dim = (subs) => { const ok = subs.filter(s => fin(s[0])); if (!ok.length) return null; return ok.reduce((a, s) => a + s[0] * s[1], 0) / ok.reduce((a, s) => a + s[1], 0); };
     const pf = dim([[lin(o.pureRate, th.pureRate[0], th.pureRate[1]), 0.7], [lin(o.grossRate, th.grossRate[0], th.grossRate[1]), 0.3]]);
@@ -740,7 +740,7 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
   console.table(table);
   console.log(`[health 校準] 成長樣本排除 ${excluded.length} 筆（窗口含 ${JSON.stringify(GROWTH_EXCLUDE)}；這些月份照常評分）`);
   if (excluded.length) console.table(excluded);
-  console.log(`[health 校準] ${PREVIEW} 預覽（「現行總分」應等於健診頁 ${PREVIEW} 的分數）`);
+  console.log(`[health 校準] ${PREVIEW} 預覽（「現行總分」應等於健檢頁 ${PREVIEW} 的分數）`);
   console.table(preview);
   const md = rows => { const ks = Object.keys(rows.reduce((a, r) => Object.assign(a, r), {})); return ['| ' + ks.join(' | ') + ' |', '|' + ks.map(() => '---').join('|') + '|'].concat(rows.map(r => '| ' + ks.map(k => r[k] == null ? '' : String(r[k])).join(' | ') + ' |')).join('\n'); };
   const text = '### 門檻校準\n\n' + md(table) + '\n\n### 成長樣本排除（' + excluded.length + ' 筆）\n\n' + (excluded.length ? md(excluded) : '（無）')
@@ -750,7 +750,7 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
 })();
 ```
 
-**2026-09 各通路分數預覽**：實跑時的預覽表沒有貼回 repo。v2 套用後的分數直接看健診頁（選 2026/09），不另存。
+**2026-09 各通路分數預覽**：實跑時的預覽表沒有貼回 repo。v2 套用後的分數直接看健檢頁（選 2026/09），不另存。
 
 
 ### 2-7-2. 塊 B 門檻校準（2026-11-02 審查決定，**已套用為 `v4-2026-11`**）
@@ -835,7 +835,7 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
 - 拍板前可以先跑 §5-2-1 ⑤，看 5%、10%、15% 三條線下各平台的分布。
 
 **MOMO、PChome 的商品結構與動銷率回測**
-- 你上次跑的回測只有蝦皮，因為那時只有蝦皮的商品層載入。現在電腦打開健診頁會自動依序載入三個平台。
+- 你上次跑的回測只有蝦皮，因為那時只有蝦皮的商品層載入。現在電腦打開健檢頁會自動依序載入三個平台。
 - 載完後在 Console 跑：
   ```js
   __healthCalibrate({ from: '2026-01', to: '2026-10' })
@@ -986,7 +986,7 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
 - 「料號_現有畫面」要等於 PChome 總覽 KPI 卡的動銷率。對不上，就是這段程式寫錯了。
 - 「商品頁」與「公司商品」兩欄差幾個百分點，就是 §6-1 要拍板的差距。
 - ⚠ PChome 的「有賣」用 `hasBiz`，是**淨值為正**（`:29088-29089`，只有退貨不算有賣）。MOMO 用 `grossQty`，賣出後全退也算有賣。
-  兩家口徑不同，健診照各自既有的口徑，不另外統一，ⓘ 裡寫明。
+  兩家口徑不同，健檢照各自既有的口徑，不另外統一，ⓘ 裡寫明。
 
 ---
 
@@ -994,7 +994,7 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
 
 ### 4-1. 頁首
 
-- 標題「通路健診」。
+- 標題「通路健檢」。
 - 月份下拉，加上「評分月份：2026/10（整月）」。
 - 規則版本 `v1-2026-11`。
 - 「資料時間：KPI 11/02 14:05」，取 KPI meta 最新的 `at`。
@@ -1148,9 +1148,9 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
 3. 開 `http://localhost:8765/`，Ctrl+F5，F12 Console 要看到紅字 **「TEST_NOWRITE v2 已啟用：27 個物件 / 45 個寫入方法已停用」**。
    - 塊 C 上線後是 28 / 46，要先更新你本機防護碼的 MUST 清單和下限；**物件數不對就關分頁**。
 4. 逐條驗：
-   - **共同路徑**：登入 → 首頁 render → 淨利表（通路分頁出現）→ 洞察表 → 帳號管理 → **通路健診**。每條都要正確 render，Console 沒有紅字錯誤。
+   - **共同路徑**：登入 → 首頁 render → 淨利表（通路分頁出現）→ 洞察表 → 帳號管理 → **通路健檢**。每條都要正確 render，Console 沒有紅字錯誤。
    - **塊 A**：
-     1. 健診總覽 17 列（15 個營運中通路＋業外＋官網）。官網灰色「已關站」。
+     1. 健檢總覽 17 列（15 個營運中通路＋業外＋官網）。官網灰色「已關站」。
      2. 選 2026-10：每通路「獲利」原始值跟 KPI 月結通路表**逐店相同**（§1-1 指紋）。
      3. PChome 成長顯示「資料不足」，不是 0。
      4. 切到 2026-04：官網有分數。
@@ -1160,7 +1160,7 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
      8. view 帳號登入也看得到。
    - **塊 B**：
      1. 展開好麻吉：「載入中」→ 出現廣告效率、商品結構、拖累前 10。
-     2. 點一列 → 跳到淨利表好麻吉 2026/10 整月，並定位到該品號。回到健診 → 再開淨利表：期別還是你原本選的（沒被跳轉改掉）。
+     2. 點一列 → 跳到淨利表好麻吉 2026/10 整月，並定位到該品號。回到健檢 → 再開淨利表：期別還是你原本選的（沒被跳轉改掉）。
      3. 展開甲配：商品頁口徑動銷率等於 MOMO 總覽比較圖（§1-2 指紋 2）。
      4. PChome 料號口徑等於 PChome KPI 卡（指紋 3）。
      5. 手機寬度（DevTools 375px）：不自動載商品層，按鈕可以載。
@@ -1169,7 +1169,7 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
      2. 洞察表維克上傳 10 月商品表現 → 確認窗顯示 437／正常 370／有賣 276。
      3. 按確認 → mock 收到 1 筆 `setMonth`。
      4. `ec.insight_維克_perf` 內容跟改版前逐字相同（§1-3 指紋 1）。
-     5. 健診維克卡出現動銷率「74%（參考）」。
+     5. 健檢維克卡出現動銷率「74%（參考）」。
      6. 關掉 mock 再傳一次：防護攔下 `setMonth`，畫面顯示「沒有寫入」，不能顯示「已存」。
 5. 測完，順序不能顛倒：先關分頁 → 停 server → `ec-nowrite-off`。
 6. `git diff js/firebase.js` **必須空白**（塊 A、B）。
@@ -1179,7 +1179,7 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
 
 三段都只呼叫 profit.js 的唯讀轉接 `window.__healthProductSnapshot`（塊 B 新增）和既有的唯讀函式，不寫任何資料、不連網。**我沒有在真實資料上跑過**，跑出錯誤請把訊息貼回來。
 
-**① MOMO：健診「商品頁口徑」動銷率 vs MOMO 總覽的比較圖**
+**① MOMO：健檢「商品頁口徑」動銷率 vs MOMO 總覽的比較圖**
 
 在哪裡跑：淨利表 → MOMO → 總表（總覽），期間切到「M 整月」，等右邊的「淨利率／動銷率」比較圖畫出來再貼。
 
@@ -1194,7 +1194,7 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
     const it = r.rows || [];
     const sold = it.filter(x => x.sold).length, total = it.filter(x => x.active || x.sold).length;
     const rev = it.filter(x => x.sold).reduce((a, x) => a + x.rev, 0);
-    return { 通路: s, 健診分子: sold, 健診分母: total, 健診動銷率: total ? +(sold / total * 100).toFixed(1) : null, rev };
+    return { 通路: s, 健檢分子: sold, 健檢分母: total, 健檢動銷率: total ? +(sold / total * 100).toFixed(1) : null, rev };
   });
   const ch = window.Chart && Chart.getChart && Chart.getChart(document.getElementById('momo-ov-cmp'));
   const ds = ch && ch.data.datasets.find(d => /動銷率/.test(d.label));
@@ -1202,15 +1202,15 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
   rows.filter(r => r.rev > 0.5).forEach((r, i) => {
     r.圖上標籤 = ch ? ch.data.labels[i] : '（沒找到比較圖）';
     r.圖上動銷率 = ds ? ds.data[i] : null;
-    r.一致 = ds ? (r.健診動銷率 === ds.data[i] ? '✓' : '✗') : '—';
+    r.一致 = ds ? (r.健檢動銷率 === ds.data[i] ? '✓' : '✗') : '—';
   });
   console.table(rows.map(({ rev, ...x }) => x));
 })();
 ```
 
-看法：每一列「一致」都要是 ✓，而且「圖上標籤」要對到同一家。比較圖跟健診都四捨五入到小數 1 位。
+看法：每一列「一致」都要是 ✓，而且「圖上標籤」要對到同一家。比較圖跟健檢都四捨五入到小數 1 位。
 
-**② PChome：健診「料號口徑」vs PChome 總覽 KPI 卡的動銷率**
+**② PChome：健檢「料號口徑」vs PChome 總覽 KPI 卡的動銷率**
 
 在哪裡跑：淨利表 → PChome → 轉單（再切寄倉各看一次），總表切「日曆月」並選同一個月。
 
@@ -1220,22 +1220,22 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
   if (typeof window.__healthProductSnapshot !== 'function') { console.warn('先進淨利表 PChome（讓 profit.js 載入）'); return; }
   const r = window.__healthProductSnapshot('pchome', 'PChome', M);
   if (r.error) { console.warn(r.error); return; }
-  if (!(r.months || []).includes(M)) console.warn(M + ' 不在 PChome 日曆月清單裡（還沒有訂單／對帳資料），健診會當成「尚未上傳」');
+  if (!(r.months || []).includes(M)) console.warn(M + ' 不在 PChome 日曆月清單裡（還沒有訂單／對帳資料），健檢會當成「尚未上傳」');
   const out = ['轉單', '寄倉'].map(sub => {
     const t = (r.subTotals || {})[sub] || { sold: 0, total: 0 };
     const c = window.pchomeCalendarCalc(M, sub);   // PChome 總覽 KPI 卡用的同一支
     const den = c.skus.filter(x => !x.discontinued || x.hasBiz).length;
-    return { 子通路: sub, 健診分子: t.sold, 健診分母: t.total,
-      健診動銷率: t.total ? (t.sold / t.total * 100).toFixed(1) + '%' : '—',
+    return { 子通路: sub, 健檢分子: t.sold, 健檢分母: t.total,
+      健檢動銷率: t.total ? (t.sold / t.total * 100).toFixed(1) + '%' : '—',
       總覽卡分子: c.bizCount || 0, 總覽卡分母: den,
       一致: (t.sold === (c.bizCount || 0) && t.total === den) ? '✓' : '✗' };
   });
   console.table(out);
-  console.log('再看一次畫面：PChome 總覽 KPI 卡「動銷率」的百分比，要等於上表的「健診動銷率」（轉單、寄倉各自）。');
+  console.log('再看一次畫面：PChome 總覽 KPI 卡「動銷率」的百分比，要等於上表的「健檢動銷率」（轉單、寄倉各自）。');
 })();
 ```
 
-**③ 蝦皮：健診「虧損商品數」vs 淨利表篩「賠錢中」**
+**③ 蝦皮：健檢「虧損商品數」vs 淨利表篩「賠錢中」**
 
 在哪裡跑：淨利表 → 蝦皮某一家，切到要對的月份。
 
@@ -1248,21 +1248,21 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
   const name = { full: '整月', first: '上半月', second: '下半月' };
   console.table((r.halves || []).map(h => ({
     期別: name[h.half], 商品列數: h.rows.length,
-    '純利<0（健診的虧損）': h.rows.filter(x => x.pureProfit < 0).length,
+    '純利<0（健檢的虧損）': h.rows.filter(x => x.pureProfit < 0).length,
     '其中有廣告費（＝淨利表「賠錢中」）': h.rows.filter(x => x.pureProfit < 0 && x.adsFee > 0).length,
     '其中沒廣告費': h.rows.filter(x => x.pureProfit < 0 && !(x.adsFee > 0)).length,
   })));
-  console.log('對法：淨利表切到同一期別、標籤篩「賠錢中」，筆數要等於「其中有廣告費」。健診的虧損數＝有廣告費＋沒廣告費。');
-  console.log('健診用整月；沒有整月報表時把上下半月合併，合併後的數字不會等於任何一個半月，請逐半月對。');
-  console.log('⚠ 若淨利表「賠錢中」標籤被停用，或有人手動改過格子（畫面數字跟報表存檔不同），會對不上；健診用的是報表存檔的值。');
+  console.log('對法：淨利表切到同一期別、標籤篩「賠錢中」，筆數要等於「其中有廣告費」。健檢的虧損數＝有廣告費＋沒廣告費。');
+  console.log('健檢用整月；沒有整月報表時把上下半月合併，合併後的數字不會等於任何一個半月，請逐半月對。');
+  console.log('⚠ 若淨利表「賠錢中」標籤被停用，或有人手動改過格子（畫面數字跟報表存檔不同），會對不上；健檢用的是報表存檔的值。');
 })();
 ```
 
-**④ MOMO：健診的逐商品利潤 vs MOMO 淨利表的「淨利貢獻」欄（查甲配 2026-09「虧損占比 0%」是真的還是欄位取錯）**
+**④ MOMO：健檢的逐商品利潤 vs MOMO 淨利表的「淨利貢獻」欄（查甲配 2026-09「虧損占比 0%」是真的還是欄位取錯）**
 
 在哪裡跑：淨利表 → MOMO → 甲配 → 總表，期間切「2026/9 整月」。先清掉搜尋框和篩選，打開「顯示已下架」，讓表格列出全部商品；「淨利貢獻」欄不要隱藏。
 
-健診這邊用的是 `__healthProductSnapshot`，它逐商品呼叫 `momoAggregatePeriods(…, {lean:true})`。畫面那邊直接讀表格。
+健檢這邊用的是 `__healthProductSnapshot`，它逐商品呼叫 `momoAggregatePeriods(…, {lean:true})`。畫面那邊直接讀表格。
 
 ```js
 (() => {
@@ -1288,37 +1288,37 @@ node 驗證（假資料，`__healthMock('demo')`，15 項全過）：
   sold.forEach(r => {
     const p = page[r.key]; if (!p) return; both++;
     if (p.profit != null && p.profit < 0) pageLossBoth++;
-    if (p.profit != null && Math.abs(p.profit - r.profit) > 1) diff.push({ 品號: r.key, 畫面淨利貢獻: p.profit, 健診利潤: Math.round(r.profit), 畫面營收: p.rev, 健診營收: Math.round(r.rev), 健診算有成本: r.costKnown });
+    if (p.profit != null && Math.abs(p.profit - r.profit) > 1) diff.push({ 品號: r.key, 畫面淨利貢獻: p.profit, 健檢利潤: Math.round(r.profit), 畫面營收: p.rev, 健檢營收: Math.round(r.rev), 健檢算有成本: r.costKnown });
   });
   console.table([{
-    月份: M, 通路: SHOP, 健診有銷售商品: sold.length, 畫面列數: Object.keys(page).length, 兩邊對到: both,
-    '健診 利潤<0（全部）': sold.filter(r => r.profit < 0).length,
-    '健診 利潤<0 且有成本（＝算進虧損占比）': sold.filter(r => r.profit < 0 && r.costKnown).length,
+    月份: M, 通路: SHOP, 健檢有銷售商品: sold.length, 畫面列數: Object.keys(page).length, 兩邊對到: both,
+    '健檢 利潤<0（全部）': sold.filter(r => r.profit < 0).length,
+    '健檢 利潤<0 且有成本（＝算進虧損占比）': sold.filter(r => r.profit < 0 && r.costKnown).length,
     '畫面 淨利貢獻<0（全部列）': Object.values(page).filter(p => p.profit != null && p.profit < 0).length,
     '對到的列裡 畫面<0': pageLossBoth, 金額對不上的列: diff.length,
   }]);
   if (diff.length) console.table(diff.slice(0, 20));
-  console.log('看法：①「金額對不上的列」是 0，而且兩邊 <0 的數量一樣 ⇒ 健診取的欄位沒錯，虧損占比 0% 是真的。');
-  console.log('②「畫面 <0」比「健診 <0 且有成本」多 ⇒ 看多出來的是不是「健診算有成本＝false」（缺成本的商品健診不算進虧損，畫面照樣顯示）。');
+  console.log('看法：①「金額對不上的列」是 0，而且兩邊 <0 的數量一樣 ⇒ 健檢取的欄位沒錯，虧損占比 0% 是真的。');
+  console.log('②「畫面 <0」比「健檢 <0 且有成本」多 ⇒ 看多出來的是不是「健檢算有成本＝false」（缺成本的商品健檢不算進虧損，畫面照樣顯示）。');
   console.log('③「金額對不上的列」不是 0 ⇒ 欄位取錯或口徑不同，把上表貼回來。');
 })();
 ```
 
 **⑤ 低利線要畫在哪：各平台商品純利率的分布（給 §2-7-2「低利商品營收占比」拍板用）**
 
-在哪裡跑：健診頁，三個平台的商品層都載好之後（頁頂「商品層資料」那一列消失）。
+在哪裡跑：健檢頁，三個平台的商品層都載好之後（頁頂「商品層資料」那一列消失）。
 
 ```js
 (() => {
   const M = '2026-09';   // 要看的月份
-  if (typeof window.__healthProductSnapshot !== 'function') { console.warn('先進通路健診頁，等商品層載好'); return; }
+  if (typeof window.__healthProductSnapshot !== 'function') { console.warn('先進通路健檢頁，等商品層載好'); return; }
   const list = [['shopee', '好麻吉'], ['shopee', '玩樂'], ['shopee', '森之旅'], ['shopee', '維克'], ['momo', '甲配'], ['momo', '乙配'],
     ['momo', 'MO+麻吉'], ['momo', 'MO+森之旅'], ['momo', 'MO+玩樂'], ['pchome', 'PChome']];
   const out = list.map(([p, s]) => {
     const r = window.__healthProductSnapshot(p, s, M);
     if (r.error) return { 平台: p, 通路: s, 錯誤: r.error };
     let rows;
-    if (p === 'shopee') {   // 有整月用整月，沒有就上下半月相加（同健診）
+    if (p === 'shopee') {   // 有整月用整月，沒有就上下半月相加（同健檢）
       const hs = r.halves || [], full = hs.find(h => h.half === 'full'), use = full ? [full] : hs, by = {};
       use.forEach(h => h.rows.forEach(x => { const e = by[x.code] || (by[x.code] = { rev: 0, profit: 0, qty: 0 }); e.rev += x.rev; e.profit += x.pureProfit; e.qty += x.qty; }));
       rows = Object.values(by).filter(x => x.qty > 0).map(x => ({ rev: x.rev, profit: x.profit, costKnown: true }));

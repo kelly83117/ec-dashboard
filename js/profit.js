@@ -27034,13 +27034,13 @@ Object.assign(window, {
   _splitCalc,_splitRowsOf,_splitKey,_splitCount,getSplits,saveSplits,updateSplitBtn,SPLIT_SHOPS,
 });
 
-// ══════ 通路健診（js/pages/health.js）唯讀轉接：KPI 月結 → 純資料（docs/plan-channel-health.md §1-1）══════
+// ══════ 通路健檢（js/pages/health.js）唯讀轉接：KPI 月結 → 純資料（docs/plan-channel-health.md §1-1）══════
 //  health.js 碰不到本檔模組內的 _kpi* 私有函式，由這支把指定月份算好交出去。口徑＝KPI 頁：
 //    每店數字＝_kpiShopCalc（已套 _kpiRawForCalc：合併欄、不適用欄、autoFill、關站歸 0）；營收＝_kpiRealRev（MOMO＝實際營收）；
 //    PChome 這種 commonAsColumn 單店組，純利用 _kpiCommonColTotals（已扣物流運費，同 KPI 頁單店列）；
 //    蝦皮各店純利【不含】整組共同運費 shopeeCommon（同 KPI 頁，ⓘ 由 health.js 說明）。
 //  填寫進度＝_kpiFillSlots 裡含這家店的格子（單店 commonAsColumn 組另含 _common 那一格）。
-//  資料時間只回 _kpiLastEdit 的時間，不回 by（健診不顯示人名）。
+//  資料時間只回 _kpiLastEdit 的時間，不回 by（健檢不顯示人名）。
 //  只讀：不寫入、不訂閱、不碰 DOM。名稱刻意不以 __cloud 開頭（本機防寫不掃它、不影響 27 / 45）。失敗回 {ready:false, error}。
 window.__healthKpiSnapshot=function(months){
   const out={ready:false,months:{},groups:[],error:null};
@@ -27084,21 +27084,21 @@ window.__healthKpiSnapshot=function(months){
   return out;
 };
 
-// ══════ 通路健診塊 B：商品層唯讀轉接（docs/plan-channel-health.md §1-2）══════
+// ══════ 通路健檢塊 B：商品層唯讀轉接（docs/plan-channel-health.md §1-2）══════
 //  全部只讀：不寫雲端、不寫 Store；名稱不以 __cloud 開頭（不影響本機防寫的 27 / 45）。
 //  口徑一律沿用各頁現有函式：蝦皮＝淨利表報表（lsLoad：雲端記憶體 → 本機快取，LZ1 也解得開）；
 //    MOMO＝momoAggregatePeriods（lean，同 momoPeriodTotals 的動銷判定：grossQty>0 或 |營收|>0.5；分母＝上架 ∪ 有銷售）；
 //    PChome＝pchomeCalendarCalc（日曆月，轉單＋寄倉；hasBiz＝淨值為正）。
 //  「已調整」只回日期（不回人名、不回內文）：蝦皮＝淨利表備註 ec_notes＋洞察表調整紀錄；MOMO／PChome＝優化紀錄。
 
-// 各平台「資料有更新」的事件（firebase.js / profit.js 收到雲端快照、內容有變才發）。通路健診用來判斷「到齊而且安靜了」與之後自動重算。
+// 各平台「資料有更新」的事件（firebase.js / profit.js 收到雲端快照、內容有變才發）。通路健檢用來判斷「到齊而且安靜了」與之後自動重算。
 window.__healthProductEvents={
   shopee:['profitDataReady','affRptReady'],
   momo:['momoDataReady','momoReconcileReady','momoMoPlusOriginsReady','momoE001Ready','momoCostByOriginReady'],
   pchome:['pchomeOrdersReady'],
 };
 // 載入該平台的雲端訂閱組並等資料到齊。回 { ready, timeout?, archivesReady? }。
-//   等待上限：預設 5 分鐘（Console 直接呼叫用）；通路健診頁自己傳 30 分鐘，60 秒以上顯示「仍在載入（已等 N 秒）」、5 分鐘以上提示先進淨利表，
+//   等待上限：預設 5 分鐘（Console 直接呼叫用）；通路健檢頁自己傳 30 分鐘，60 秒以上顯示「仍在載入（已等 N 秒）」、5 分鐘以上提示先進淨利表，
 //   但不放棄——資料一到就自動重算（2026-11-02 實測：蝦皮在辦公室電腦 39 秒～2 分鐘才到齊，60 秒上限會誤判逾時）。
 //   「到齊」＝ ①雲端第一個快照真的到了（不是本機 localStorage 的舊資料）＋ ②最後一次資料更新事件之後安靜 QUIET 毫秒：
 //     ・蝦皮：profits collection 與舊月份分片都收過「伺服器」快照（__profitsCollectionReady／__profitArchivesReady，離線不算）。
@@ -27220,7 +27220,7 @@ window.__healthProductSnapshot=function(platform,shop,month){
   return out;
 };
 
-// 從通路健診跳到淨利表某通路某月、並用搜尋框定位到那個商品。
+// 從通路健檢跳到淨利表某通路某月、並用搜尋框定位到那個商品。
 //   o＝{ platform:'shopee'|'momo'|'pchome', shop（淨利表的通路名：好麻吉／甲配／轉單…）, month:'YYYY-MM', code }
 //   🔴 不寫持久狀態（照 tagFxJump「只切不記」）：
 //     ・蝦皮切月份用 onMonthChange(…, byUser=false)：不設 _userPickedPeriod 鎖；它會寫 ec_lastMonth_{通路} → 先存後還原。
