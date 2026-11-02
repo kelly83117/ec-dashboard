@@ -1,0 +1,32 @@
+lz-string 1.5.0 — js/vendor/lz-string-1.5.0.min.js
+================================================
+來源：npm 套件 lz-string@1.5.0 的 libs/lz-string.min.js（未修改，逐位元組相同）
+      同檔 https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js
+專案：https://github.com/pieroxy/lz-string
+sha384：0d+Gr7vM4Drod8E3hXKgciWJSWbjD/opKLLygI9ktiWbuvlDwQLzU46wJ9s5gsp7
+用途：淨利表報表快取（localStorage ec|通路|期間）的 LZ1: 壓縮格式解碼，見 docs/plan-report-cache-compress.md
+載入：index.html classic <script defer>，排在 js/main.js 之前；檔名帶版號、內容永不變 → 不加 ?v=、不列入 bump-version.js
+升級：換新版要用新檔名（例 lz-string-1.5.1.min.js），不要覆蓋這個檔案
+
+------------------------------------------------
+MIT License
+
+Copyright (c) 2013 pieroxy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

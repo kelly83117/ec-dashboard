@@ -1676,8 +1676,9 @@ function _sweepAllLocalReportsIntoPending(){
       if(k&&k.startsWith('ec|')&&!k.startsWith('ec|filemeta|')){
         _pendingSyncKeys.add(k);
         // localStorage 有但 _profitMem 沒有 → 撈回 _profitMem 讓推送流程拿得到
+        //   值可能是 LZ1 壓縮格式 → 走共用解碼；解不開（null）就【不放】，syncToCloud 會列為「讀不到或損毀」，不會把字串推上雲
         if(!(Store._profitMem&&Store._profitMem[k])){
-          try{ Store._profitMem=Store._profitMem||{}; Store._profitMem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+          try{ Store._profitMem=Store._profitMem||{}; const _rep=_reportCacheParse(localStorage.getItem(k)); if(_rep!==null) Store._profitMem[k]=_rep; }catch{}
         }
       }
     }
@@ -2228,12 +2229,42 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     if(btn){btn.disabled=false; _showSyncBtn();}
   }
 }
+// ── 報表快取（localStorage 的 ec|通路|月|半月）讀取解碼：B-3 #173，見 docs/plan-report-cache-compress.md ──
+//   新格式 'LZ1:'+json.length+':'+LZString.compressToUTF16(json)；沒有前綴＝舊格式 JSON（第 1 塊時 lsSave 仍只寫舊格式）。
+//   🔴 只看顯式前綴 'LZ1:'，不要改成「開頭是不是 {」：compressToUTF16 的輸出碼位 0x20～0x8020，可能出現 {。
+//   長度欄位＝壓縮前 JSON 的字元數（十進位、只准數字），解壓後長度對不上 ⇒ null。用來擋截斷 / 多字少字；
+//     ⚠ 擋不住「同長度換字」（LZ 沒有校驗碼，這是已知限制，見 docs/report-report-cache-compress-1.md）。
+//     長度跟資料之間只認第一個 ':'（長度只有數字，壓縮資料裡就算有 ':' 也不影響）。沒有長度欄位的 'LZ1:…' 一律不認。
+//   回傳物件或 null，絕不回傳字串、絕不丟錯：lz-string 沒載入 / 解壓失敗 / 長度不符 / 形狀不對 ⇒ null ＝「當作沒有本機快取」，
+//     呼叫端照舊改讀雲端；那把 key 不刪、不覆寫（下次 lz-string 載入成功就讀得回來）。
+//   ⚠ 舊格式路徑刻意【不加形狀檢查】，跟改版前各讀取點的 JSON.parse 逐字同結果；推雲端前的把關仍在 syncToCloud 的 isPlainObj。
+//     LZ1 路徑一定要檢查：decompressFromUTF16 吃到壞資料不一定丟例外（截斷回 ''、亂碼會回一串垃圾字）。
+//   ⚠ 前綴寫成字面值、不抽 const：function 會 hoist，但模組頂層 const 在執行到之前呼叫會 TDZ 丟錯。
+function _reportCacheParse(raw){
+  if(typeof raw!=='string'||raw==='') return null;
+  if(raw.startsWith('LZ1:')){
+    const sep=raw.indexOf(':',4);
+    const lenStr=sep>4?raw.slice(4,sep):'';
+    if(!/^(0|[1-9]\d{0,8})$/.test(lenStr)) return null;   // 沒有長度欄位、非數字、前導 0、超過 9 位 ⇒ 不認
+    let json=null;
+    try{
+      const LZ=window.LZString;
+      if(!LZ||typeof LZ.decompressFromUTF16!=='function') return null;
+      json=LZ.decompressFromUTF16(raw.slice(sep+1));
+    }catch(e){ return null; }
+    if(typeof json!=='string'||json===''||json.length!==Number(lenStr)) return null;
+    let v=null;
+    try{ v=JSON.parse(json); }catch(e){ return null; }
+    return (v!==null&&typeof v==='object'&&!Array.isArray(v)&&Array.isArray(v.built))?v:null;
+  }
+  try{ return JSON.parse(raw); }catch(e){ return null; }
+}
 function lsLoad(shop,month,half){
   const k=lsKey(shop,month,half);
   // 雲端優先：先看新的 profit doc，再 fallback 到舊的 main doc（過渡期相容）
   try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[k]) return Store._profitMem[k]; }catch{}
   try{ if(typeof Store!='undefined' && Store._mem && Store._mem[k]) return Store._mem[k]; }catch{}
-  try{const d=localStorage.getItem(k);return d?JSON.parse(d):null;}catch{return null;}
+  try{ return _reportCacheParse(localStorage.getItem(k)); }catch{ return null; }
 }
 function lsHasAny(shop){
   try{
@@ -3106,7 +3137,15 @@ window.addEventListener('profitDataReady', (e)=>{
       for(const k of localKeys){
         if(profitData[k]!==undefined || mainData[k]!==undefined) continue;
         try{
-          const val=JSON.parse(localStorage.getItem(k));
+          // ec| 報表快取可能是 LZ1 壓縮格式 → 走共用解碼；其他前綴照舊 JSON.parse。
+          // 🔴 型別守衛：__cloudProfit.setField 沒有 setReport 那種「非物件就 reject」的保護，
+          //   ec| 的值不是純物件（解不開＝null、字串、陣列…）一律跳過，絕不把壓縮字串推上雲端。
+          const raw=localStorage.getItem(k);
+          const val=k.startsWith('ec|')?_reportCacheParse(raw):JSON.parse(raw);
+          if(k.startsWith('ec|')&&!(val!==null&&typeof val==='object'&&!Array.isArray(val))){
+            console.warn('[淨利表] backfill v3 略過 '+k+'：本機值不是物件（可能是壓縮格式解不開或資料損毀），不推上雲端');
+            continue;
+          }
           await window.__cloudProfit.setField(k,val);
           pushed++;
         }catch{}
@@ -4200,7 +4239,7 @@ function getPrevPeriodMap(shop, month, half) {
   try{ if(typeof Store!='undefined' && Store._profitMem && Store._profitMem[key]) rep = Store._profitMem[key]; }catch{}
   try{ if(!rep && typeof Store!='undefined' && Store._mem && Store._mem[key]) rep = Store._mem[key]; }catch{}
   if(!rep){
-    try { rep = JSON.parse(localStorage.getItem(key) || 'null'); } catch {}
+    try { rep = _reportCacheParse(localStorage.getItem(key)); } catch {}   // 可能是 LZ1 壓縮格式，一律走共用解碼（直接 JSON.parse 會讓上期營收靜默變空）
   }
   if (!rep || !rep.built) return {rev:{}, ads:{}};
   const rev = {}, ads = {};

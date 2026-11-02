@@ -29,6 +29,8 @@
 <!-- 月對帳：解析 MOMO 對帳單摘要 PDF 的文字層（js/profit.js momoReadPdfText）；只在月對帳分頁用，defer -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
 <script src="js/version.js"></script>
+<!-- 淨利表報表快取 LZ1: 解碼（js/profit.js _reportCacheParse），必須排在 main.js 前面。檔名帶版號、內容永不變，所以不加 ?v=，見 js/vendor/LICENSE-lz-string.txt -->
+<script src="js/vendor/lz-string-1.5.0.min.js" defer></script>
 <!-- ?v= 版本號要跟上面 app-version 及 js/main.js 裡各 import 的 ?v= 一起改，不然 GitHub Pages 的 10 分鐘 JS 快取會讓使用者看不到新版功能 -->
 <script type="module" src="js/main.js?v=2026-11-02-811"></script>
 </head>
