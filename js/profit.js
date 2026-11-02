@@ -1343,18 +1343,45 @@ function lsSave(shop,month,half,built,period,days,storeAds,opts){
 }
 
 // ── 報表快取寫入：LZ1 壓縮 → setItem → 讀回驗證；任何一步不成就退回寫未壓縮 JSON（＝改版前的行為）──
-//   格式見 _reportCacheParse。這裡只碰 localStorage，絕不碰 _profitMem（_profitMem 永遠是 lsSave 的 payload 物件）。
-// 回傳 LZ1 字串；沒有 lz-string / 開關關閉 / 壓縮丟錯 / 記憶體內解不回原字串 → null（呼叫端改寫未壓縮 JSON）
-function _reportCacheEncode(json){
+//   格式見 _lz1Unwrap。這裡只碰 localStorage，絕不碰 _profitMem（_profitMem 永遠是 lsSave 的 payload 物件）。
+// ── LZ1 共用底層（報表快取與 MOMO 商品主檔共用；只處理字串，資料形狀由呼叫端檢查）──
+//   格式 'LZ1:'+json.length+':'+LZString.compressToUTF16(json)；沒有前綴＝舊格式 JSON。
+//   🔴 只看顯式前綴 'LZ1:'，不要改成「開頭是不是 {」：compressToUTF16 的輸出碼位 0x20～0x8020，可能出現 {。
+//   長度欄位＝壓縮前 JSON 的字元數（十進位、只准數字），解壓後長度對不上 ⇒ 'bad'。用來擋截斷 / 多字少字；
+//     ⚠ 擋不住「同長度換字」（LZ 沒有校驗碼，這是已知限制，見 docs/report-report-cache-compress-1.md）。
+//     長度跟資料之間只認第一個 ':'（長度只有數字，壓縮資料裡就算有 ':' 也不影響）。沒有長度欄位的 'LZ1:…' 一律不認。
+//   ⚠ 前綴寫成字面值、不抽 const：function 會 hoist，但模組頂層 const 在執行到之前呼叫會 TDZ 丟錯。
+// 回 { kind, json }：'none'＝非字串或空字串；'json'＝沒有前綴（原樣交回）；'lz'＝解壓成功且長度相符；
+//   'bad'＝有前綴但不認 / 解不開 / lz-string 沒載入。絕不丟錯。「bad 之後怎麼辦」由呼叫端決定
+//   （報表＝當作沒有本機快取；MOMO 商品主檔＝可能有沒推的修改，要停手，見 _momoLsRead）。
+function _lz1Unwrap(raw){
+  if(typeof raw!=='string'||raw==='') return {kind:'none',json:null};
+  if(!raw.startsWith('LZ1:')) return {kind:'json',json:raw};
+  const sep=raw.indexOf(':',4);
+  const lenStr=sep>4?raw.slice(4,sep):'';
+  if(!/^(0|[1-9]\d{0,8})$/.test(lenStr)) return {kind:'bad',json:null};   // 沒有長度欄位、非數字、前導 0、超過 9 位 ⇒ 不認
+  let json=null;
   try{
     const LZ=window.LZString;
-    if(!_LS_COMPRESS_WRITE||!LZ||typeof LZ.compressToUTF16!=='function'||typeof LZ.decompressFromUTF16!=='function') return null;
+    if(!LZ||typeof LZ.decompressFromUTF16!=='function') return {kind:'bad',json:null};
+    json=LZ.decompressFromUTF16(raw.slice(sep+1));
+  }catch(e){ return {kind:'bad',json:null}; }
+  if(typeof json!=='string'||json===''||json.length!==Number(lenStr)) return {kind:'bad',json:null};
+  return {kind:'lz',json};
+}
+// 回傳 LZ1 字串；沒有 lz-string / 壓縮丟錯 / 記憶體內解不回原字串 → null（呼叫端改寫未壓縮 JSON）。開關由呼叫端判斷。
+function _lz1Encode(json){
+  try{
+    const LZ=window.LZString;
+    if(!LZ||typeof LZ.compressToUTF16!=='function'||typeof LZ.decompressFromUTF16!=='function') return null;
     if(typeof json!=='string'||json==='') return null;
     const c=LZ.compressToUTF16(json);
     if(typeof c!=='string'||LZ.decompressFromUTF16(c)!==json) return null;
     return 'LZ1:'+json.length+':'+c;
   }catch(e){ return null; }
 }
+// 報表快取：同 _lz1Encode，另受 _LS_COMPRESS_WRITE 開關控制（開關關閉 → null）
+function _reportCacheEncode(json){ return _LS_COMPRESS_WRITE?_lz1Encode(json):null; }
 // 立刻寫入一把報表快取。meta={shop,month,half} 只用來通報失敗。回傳 'lz' | 'json' | 'fail'。
 function _reportCacheWrite(k,json,meta){
   const pend=_reportCacheDeferred.get(k);
@@ -1859,7 +1886,8 @@ function _sweepAllLocalReportsIntoPending(){
         if(_momoIsDirty(k)){
           _pendingSyncKeys.add(k);
           if(!(Store._mem&&Store._mem[k])){
-            try{ Store._mem=Store._mem||{}; Store._mem[k]=JSON.parse(localStorage.getItem(k)); }catch{}
+            // 讀得懂 LZ1；解不開／JSON 壞 ⇒ 不補 _mem（同改版前 parse 失敗），記成讀壞 → 同步分派會列為問題、不推
+            try{ Store._mem=Store._mem||{}; const r=_momoLsReadNote(k,'array'); if(r.state==='ok') Store._mem[k]=r.value; }catch{}
           }
         }
         continue;
@@ -2238,6 +2266,8 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       if(pk.startsWith('ec_momo_products|')){   // MOMO 商品主檔 → momo_products collection（逐 SKU merge：getDoc 雲端 → 只覆蓋 dirty SKU → 保留雲端其餘/獨有）
         const shop=pk.split('|')[1];
         if(!window.__cloudMomo){ skippedProblem.push({key:pk,reason:'MOMO 商品主檔雲端層未就緒'}); return; }
+        // 🛡 本機那份解不開（LZ1 / JSON 壞）→ 不推：推下去等於用不完整的資料（甚至 []）刪掉雲端。那把 key 不刪不改。
+        if(_momoProductsPendingUnreadable(pk)){ skippedProblem.push({key:pk,label:'本機讀不到',reason:'本機商品主檔解不開，這次不推（避免用不完整的資料刪掉雲端）；請通知 Keani'}); return; }
         if(window.__MOMO_MERGE_ENFORCE===true){ tasks.push({key:pk,run:()=>momoSyncProductsMerge(shop)}); }   // B2 enforce：真 merge 寫入（getDoc→plan→setShop merged→更新 last-pushed）
         else{ momoSyncProductsMerge(shop,{shadow:true}).catch(()=>{}); skippedProblem.push({key:pk,reason:'products 逐 SKU merge 為 SHADOW 模式（未寫雲端）；Console 已印 merge 對照，確認後在 Console 設 window.__MOMO_MERGE_ENFORCE=true 再同步'}); }   // B1 shadow：算+log 不寫、fail-safe（沒設 enforce 就絕不寫雲端）
         return;
@@ -2402,6 +2432,23 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         }
       }catch(e){ console.warn('[syncToCloud] 刪除防護計算失敗（保守起見不阻擋、照推）：',e); }
     }
+    // 🛡 MOMO 商品主檔大量刪除防線：預檢（全推、逐項勾選兩條路都套）。理由與門檻見 _momoDelGuardLevel 上方。
+    //   要確認的在這裡就問完（推送迴圈有 30 秒逾時，不能在 task 裡等使用者）；核准清單交給 task 再驗一次。
+    //   預檢讀雲端失敗 → 不擋，交給 task 照原本的方式失敗（進 failed）。
+    for(const t of tasks.filter(x=>x.key.startsWith('ec_momo_products|'))){
+      const gShop=t.key.split('|')[1];
+      let g=null;
+      try{ g=await _momoDelGuardPreflight(gShop); }catch(e){ g=null; console.warn('[syncToCloud] 刪除防線預檢讀雲端失敗（交給推送本身處理）：',t.key,e); }
+      if(!g||g.level==='ok') continue;
+      const drop=()=>{ const i=tasks.indexOf(t); if(i>=0) tasks.splice(i,1); };
+      if(g.level==='abort'){ drop(); skippedProblem.push({key:t.key,label:'已停止',reason:_momoDelGuardAbortMsg(g)}); console.error('[syncToCloud] 刪除防線中止：',t.key,g.n+'/'+g.m); continue; }
+      if(btn) btn.textContent='等待確認刪除…';
+      const ok=await _momoDelGuardConfirm({shop:gShop, n:g.n, m:g.m, skus:g.skus});
+      if(btn) btn.textContent='同步中…';
+      if(!ok){ drop(); skippedProblem.push({key:t.key,label:'已取消',reason:'要從雲端刪除 '+g.n+' 筆，你按了取消，這個通路這次沒有推'}); continue; }
+      const approved=new Set(g.skus);
+      t.run=()=>momoSyncProductsMerge(gShop,{approvedDeletes:approved});
+    }
     console.log('[syncToCloud] tasks:',tasks.length,'skippedProblem:',skippedProblem.length,'skippedByDesign:',skippedByDesign.length,'skippedWillDelete:',skippedWillDelete.length,'｜要推 keys:',tasks.map(t=>t.key));
     // ── E-0a 第三塊：dirty 登記失敗的快照 ──
     //   problems / modal / __lastSyncReport 全部吃這份快照，而清除（_dirtyFailClear，鍵在 ok 上）
@@ -2415,7 +2462,9 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         else if(typeof showToast==='function') showToast(skippedWillDelete.length+' 項會刪雲端資料、未推送，請到同步預覽確認','error');
         _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty,skippedWillDelete,dirtyWriteFailures:dirtyFailSnap});
       }else if(skippedProblem.length>0){
-        if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:'有 '+skippedProblem.length+' 筆資料在本機讀不到、沒推上去（可能損毀）。\n請到淨利表重新產生這些報表。',detail:skippedProblem.map(x=>x.key+'：'+x.reason).join('\n'),kind:'error'});
+        // 帶 label 的（MOMO 刪除防線「已停止／已取消」、商品主檔「本機讀不到」）不是「報表損毀」→ 改用通用文案；沒有 label 時文案完全照舊
+        if(skippedProblem.some(x=>x.label)){ if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'同步未完成',message:'有 '+skippedProblem.length+' 項沒有推上去，原因逐項列在下方。',detail:skippedProblem.map(x=>'［'+(x.label||'讀不到')+'］'+x.key+'：'+x.reason).join('\n'),kind:'error'}); }
+        else if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'淨利表同步未完成',message:'有 '+skippedProblem.length+' 筆資料在本機讀不到、沒推上去（可能損毀）。\n請到淨利表重新產生這些報表。',detail:skippedProblem.map(x=>x.key+'：'+x.reason).join('\n'),kind:'error'});
         else if(typeof showToast==='function') showToast('有 '+skippedProblem.length+' 筆資料讀不到','error');
         _report('nothing',{skippedProblem,skippedByDesign,skippedNotDirty,dirtyWriteFailures:dirtyFailSnap});
       }else if(dirtyFailSnap.length>0){
@@ -2525,7 +2574,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
       const lines=[];
       if(_prodWarn) lines.push('［未上雲·商品主檔］'+_prodDirtyShops.join('、')+'：期別/銷售留在本機、未推上雲');   // 根治 2b：products 專屬（不混進下面通用項）
       failed.forEach(f=>lines.push(f.rfKind==='undetermined' ? ('［本機與雲端不同·未覆蓋］'+f.key+'：無法判斷新舊，請負責的同事重新上傳正確的檔案') : ((f.rfKind==='cloudnewer'?'［雲端較新·未覆蓋］':'［失敗］')+f.key+'：'+f.msg)));
-      skippedProblem.forEach(p=>lines.push('［讀不到］'+p.key+'：'+p.reason));
+      skippedProblem.forEach(p=>lines.push('［'+(p.label||'讀不到')+'］'+p.key+'：'+p.reason));   // label：MOMO 刪除防線／商品主檔讀不到；其餘照舊「讀不到」
       skippedWillDelete.forEach(x=>lines.push('［保護未推］'+x.key+'：會刪雲端 '+x.willDelete+' 筆（可能是同事的更新）'));
       dirtyFailKeys.forEach(k=>lines.push('［登記失敗］'+k+(ok.indexOf(k)>=0?'（本次已重新推送，警告不再出現）':'（尚未重新推送，警告會持續出現）')));
       let msg='成功 '+ok.length+' 筆。';
@@ -2561,34 +2610,18 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
   }
 }
 // ── 報表快取（localStorage 的 ec|通路|月|半月）讀取解碼：B-3 #173，見 docs/plan-report-cache-compress.md ──
-//   新格式 'LZ1:'+json.length+':'+LZString.compressToUTF16(json)；沒有前綴＝舊格式 JSON（第 1 塊時 lsSave 仍只寫舊格式）。
-//   🔴 只看顯式前綴 'LZ1:'，不要改成「開頭是不是 {」：compressToUTF16 的輸出碼位 0x20～0x8020，可能出現 {。
-//   長度欄位＝壓縮前 JSON 的字元數（十進位、只准數字），解壓後長度對不上 ⇒ null。用來擋截斷 / 多字少字；
-//     ⚠ 擋不住「同長度換字」（LZ 沒有校驗碼，這是已知限制，見 docs/report-report-cache-compress-1.md）。
-//     長度跟資料之間只認第一個 ':'（長度只有數字，壓縮資料裡就算有 ':' 也不影響）。沒有長度欄位的 'LZ1:…' 一律不認。
+//   格式與「解不開」的判準在 _lz1Unwrap（跟 MOMO 商品主檔共用）。這裡只管報表的形狀：
 //   回傳物件或 null，絕不回傳字串、絕不丟錯：lz-string 沒載入 / 解壓失敗 / 長度不符 / 形狀不對 ⇒ null ＝「當作沒有本機快取」，
 //     呼叫端照舊改讀雲端；那把 key 不刪、不覆寫（下次 lz-string 載入成功就讀得回來）。
 //   ⚠ 舊格式路徑刻意【不加形狀檢查】，跟改版前各讀取點的 JSON.parse 逐字同結果；推雲端前的把關仍在 syncToCloud 的 isPlainObj。
 //     LZ1 路徑一定要檢查：decompressFromUTF16 吃到壞資料不一定丟例外（截斷回 ''、亂碼會回一串垃圾字）。
-//   ⚠ 前綴寫成字面值、不抽 const：function 會 hoist，但模組頂層 const 在執行到之前呼叫會 TDZ 丟錯。
 function _reportCacheParse(raw){
-  if(typeof raw!=='string'||raw==='') return null;
-  if(raw.startsWith('LZ1:')){
-    const sep=raw.indexOf(':',4);
-    const lenStr=sep>4?raw.slice(4,sep):'';
-    if(!/^(0|[1-9]\d{0,8})$/.test(lenStr)) return null;   // 沒有長度欄位、非數字、前導 0、超過 9 位 ⇒ 不認
-    let json=null;
-    try{
-      const LZ=window.LZString;
-      if(!LZ||typeof LZ.decompressFromUTF16!=='function') return null;
-      json=LZ.decompressFromUTF16(raw.slice(sep+1));
-    }catch(e){ return null; }
-    if(typeof json!=='string'||json===''||json.length!==Number(lenStr)) return null;
-    let v=null;
-    try{ v=JSON.parse(json); }catch(e){ return null; }
-    return (v!==null&&typeof v==='object'&&!Array.isArray(v)&&Array.isArray(v.built))?v:null;
-  }
-  try{ return JSON.parse(raw); }catch(e){ return null; }
+  const u=_lz1Unwrap(raw);
+  if(u.kind==='none'||u.kind==='bad') return null;
+  let v=null;
+  try{ v=JSON.parse(u.json); }catch(e){ return null; }
+  if(u.kind==='json') return v;
+  return (v!==null&&typeof v==='object'&&!Array.isArray(v)&&Array.isArray(v.built))?v:null;
 }
 function lsLoad(shop,month,half){
   const k=lsKey(shop,month,half);
@@ -14051,18 +14084,90 @@ function momoShopHTML(shop,platform='momo'){
 
 // ── §1 商品主檔（持續性資料，獨立於月份）──
 function momoProductsKey(shop){ return 'ec_momo_products|'+shop; }
+// ── 商品主檔 / lastpushed 的本機讀取層（MOMO 本機壓縮第 1 塊，docs/plan-momo-compress.md §8）──
+//   讀得懂 LZ1（_lz1Unwrap）；第 1 塊還不寫 LZ1。回 { state:'absent'|'ok'|'bad', value, why }。
+//   shape：'array'（ec_momo_products|<通路>）／'sigmap'（ec_momo_products_lastpushed|<通路>，值全是字串的物件）。
+//   ⚠ 舊格式（沒有前綴）刻意【不檢查形狀】→ 跟改版前 JSON.parse 的結果逐字相同；只有 LZ1 路徑檢查形狀。
+//   🔴 'bad' 跟報表的「當作沒有快取」意思相反：商品主檔解不開＝裡面可能有沒推的修改。
+//     所以讀壞時：不准存檔（momoSaveProducts）、同步不推（syncToCloud 分派 / momoSyncProductsMerge），那把 key 不刪不改。
+//     JSON 壞掉也算 bad（同一種風險）。不是 dirty 的通路讀壞時，firebase.js 的 momo_products 訂閱會用雲端整份蓋回、自己就好。
+function _momoLsRead(k, shape){
+  let raw=null;
+  try{ raw=localStorage.getItem(k); }catch(e){ return {state:'absent',value:undefined,why:'getItem 丟錯'}; }   // 同改版前：讀不到＝沒有
+  const u=_lz1Unwrap(raw);
+  if(u.kind==='none') return {state:'absent',value:undefined};
+  if(u.kind==='bad') return {state:'bad',value:undefined,why:'LZ1 解不開'};
+  let v;
+  try{ v=JSON.parse(u.json); }catch(e){ return {state:'bad',value:undefined,why:(u.kind==='lz'?'LZ1 解出來不是 JSON':'JSON 壞掉')}; }
+  if(u.kind==='json') return {state:'ok',value:v};
+  const okShape = shape==='array' ? Array.isArray(v)
+    : (v!==null&&typeof v==='object'&&!Array.isArray(v)&&Object.values(v).every(x=>typeof x==='string'));
+  return okShape?{state:'ok',value:v}:{state:'bad',value:undefined,why:'LZ1 形狀不對'};
+}
+// 讀壞登記（只在記憶體）：每次讀都重算，讀到 ok / absent 就移除。console 只印 key、原因、字元數，不印內容。
+//   ⚠ 用函式屬性懶建立、不用模組頂層 const：這些函式可能在執行到宣告那行之前被呼叫（TDZ，理由同檔頭 TEST_SHOP_ID）。
+function _momoLsBadMap(){ if(!_momoLsBadMap.m) _momoLsBadMap.m=new Map(); return _momoLsBadMap.m; }
+function _momoLsReadNote(k, shape){
+  const r=_momoLsRead(k, shape);
+  const m=_momoLsBadMap();
+  if(r.state!=='bad'){ m.delete(k); return r; }
+  let chars=null; try{ const raw=localStorage.getItem(k); chars=(raw==null)?null:raw.length; }catch{}
+  const prev=m.get(k);
+  const ent={why:r.why||'', chars, at:Date.now(), toasted:!!(prev&&prev.toasted)};
+  m.set(k, ent);
+  if(!prev){ try{ console.error('[MOMO 本機讀取] '+k+' 讀不到（'+ent.why+'，'+chars+' 字元）→ 商品主檔不准存檔、同步不推；lastpushed 當作沒有基準。本機那份不刪不改'); }catch{} }
+  if(!ent.toasted && k.startsWith('ec_momo_products|') && _momoLoggedIn()){   // 同一把 key 一個分頁只跳一次、登入後才跳
+    ent.toasted=true;
+    try{ if(typeof showToast==='function') showToast(momoShopDisplay(k.slice('ec_momo_products|'.length))+' 的本機商品資料讀不到（可能損毀），請先不要編輯這個通路，並通知 Keani','error',8000); }catch{}
+  }
+  return r;
+}
+// 唯讀觀測點（Console）：列出商品主檔 / lastpushed 本機各把的格式、字元數、讀取狀態。不回傳內容、不寫任何東西。
+window.__momoLsState=function(){
+  const rows=[];
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(!k||!/^ec_momo_products(_lastpushed)?\|[^|]+$/.test(k)) continue;
+      const raw=localStorage.getItem(k)||'';
+      const r=_momoLsRead(k, k.startsWith('ec_momo_products|')?'array':'sigmap');
+      rows.push({key:k, 格式:raw.startsWith('LZ1:')?'LZ1':'JSON', 字元數:raw.length, 狀態:r.state, 原因:r.why||''});
+    }
+  }catch(e){ rows.push({error:String(e&&e.message||e)}); }
+  try{ console.table(rows); }catch{}
+  return rows;
+};
+// 商品主檔「手上沒有可信的值」：兩份鏡像都沒值，而且 localStorage 那份解不開 → 這時手上的資料是從 [] 長出來的，不能存。
+function _momoProductsSaveBlocked(k){
+  try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return false; }catch{}
+  try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]) return false; }catch{}
+  return _momoLsReadNote(k,'array').state==='bad';
+}
+// 同步要推的本機值（momoPendingProducts）會讀到 localStorage、而那份解不開 → 不推。判斷順序同 momoPendingProducts（_mem 有值就不看 localStorage）。
+function _momoProductsPendingUnreadable(pk){
+  try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[pk]!==undefined) return false; }catch{}
+  return _momoLsReadNote(pk,'array').state==='bad';
+}
 function momoLoadProducts(shop){
   // 讀取順序照 ec_edits/ec_notes 慣例：_profitMem（雲端權威，跨裝置）→ _mem → localStorage。
   //   ec_momo_products 是 app/profit 的 field，雲端快照回來灌進 _profitMem；只讀 _mem 會漏（換台電腦讀不到）。
   const k=momoProductsKey(shop);
   try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[k]) return Store._profitMem[k]; }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[k]) return Store._mem[k]; }catch{}
-  try{ const local=localStorage.getItem(k); if(local) return JSON.parse(local); }catch{}
+  try{ const r=_momoLsReadNote(k,'array'); if(r.state==='ok') return r.value; }catch{}   // 讀壞 → 記錄後一樣回 []（存檔會被擋，見 momoSaveProducts）
   return [];
 }
 const MOMO_DOC_WARN_KB=700;   // Firestore 單 doc 1MB 上限；此 doc 每月長 periods → 700KB 畫面預警（撞牆前遷移比撞牆後便宜）
+// 回 true＝存了；false＝本機那份讀不到（解不開／JSON 壞）而且鏡像都沒值 → 拒存（見 _momoProductsSaveBlocked）。今天的呼叫端都沒用回傳值。
 function momoSaveProducts(shop,products){
   const k=momoProductsKey(shop);
+  // 🛡 讀壞拒存：手上這份是從 [] 長出來的，存下去會蓋掉本機那份（可能有沒推的修改），同步時再被當成「刪掉其他全部」推上雲端。
+  if(_momoProductsSaveBlocked(k)){
+    const msg=momoShopDisplay(shop)+' 的本機商品資料讀不到（可能損毀），為了不覆蓋還沒同步的修改，這次的修改沒有存。\n請不要再編輯這個通路，並通知 Keani。';
+    try{ console.error('[MOMO 存檔] 拒存 '+k+'：本機那份讀不到、鏡像也沒有值'); }catch{}
+    try{ if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'商品資料沒有存',message:msg,kind:'error',dedupeKey:'momo-save-blocked|'+k}); else if(typeof showToast==='function') showToast(msg,'error'); }catch{}
+    return false;
+  }
   const _json=JSON.stringify(products);
   // ⚠ 寫入前大小監控（畫面警告、非只 console）：超 700KB 即提醒精簡/分片，別再塞非必要欄位
   try{ const _kb=(new TextEncoder().encode(_json).length)/1024; if(_kb>MOMO_DOC_WARN_KB){
@@ -14081,12 +14186,13 @@ function momoSaveProducts(shop,products){
   try{ window._momoJustSaved=Date.now(); }catch{}   // bounce-back 守衛：剛存過 5 秒內、momo_products 訂閱 echo 回來不覆蓋
   _markPending(k);   // 走既有 pending → 手動同步時 __cloudMomo.setShop 上雲（momo_products collection，每賣場一 doc）
   try{ _momoDirtyAdd(k); }catch{}   // 真正編輯過 → 進 dirty 註冊表（persisted）；雲端訂閱不再覆蓋、直到成功推雲端才清（見 syncToCloud 成功分支）
+  return true;
 }
 // 「待同步的本機值」：_mem → localStorage（保留使用者編輯）。⚠ 不讀 _profitMem——它會被 momo_products 雲端 snapshot 洗回舊值，
 //   若同步/預覽讀它就會拿到 stale。同步推送(syncToCloud)與預覽比對(_momoCollectPending)都走這個 → 保證「看到的==推的」。
 function momoPendingProducts(pk){
   try{ if(typeof Store!=='undefined'&&Store._mem&&Store._mem[pk]!==undefined) return Store._mem[pk]; }catch{}
-  try{ const raw=localStorage.getItem(pk); if(raw) return JSON.parse(raw); }catch{}
+  try{ const r=_momoLsReadNote(pk,'array'); if(r.state==='ok') return r.value; }catch{}   // 讀壞 → 記錄後往下退回（同改版前 parse 失敗）；同步分派另外擋（_momoProductsPendingUnreadable）
   try{ if(typeof Store!=='undefined'&&Store._profitMem&&Store._profitMem[pk]) return Store._profitMem[pk]; }catch{}   // 最後退回（無 pending 編輯時＝雲端值）
   return null;
 }
@@ -14127,9 +14233,10 @@ const _MOMO_PLP_LS='ec_momo_products_lastpushed';   // localStorage 前綴：ec_
 function momoProductsLastPushedKey(shop){ return _MOMO_PLP_LS+'|'+shop; }
 function _momoProductsBuildSig(items){ const m={}; (Array.isArray(items)?items:[]).forEach(p=>{ if(p&&p.sku!=null) m[String(p.sku)]=_momoStableStr(p); }); return m; }
 function _momoProductsLastPushedGet(shop){   // 回 {sku:sig} 或 null（不存在／損毀）→ null 觸發 bootstrap
-  let raw; try{ raw=localStorage.getItem(momoProductsLastPushedKey(shop)); }catch(e){ return null; }
-  if(raw==null) return null;
-  try{ const m=JSON.parse(raw); if(m&&typeof m==='object'&&!Array.isArray(m)) return m; }catch(e){ try{ console.error('[products lastpushed] JSON 損毀，當無 baseline（bootstrap）：',shop,raw); }catch{} }
+  //   讀得懂 LZ1；解不開／JSON 損毀 → console.error（_momoLsReadNote，不印內容）後回 null＝bootstrap（removed 一律空、不刪雲端），同改版前 JSON 損毀。
+  const r=_momoLsReadNote(momoProductsLastPushedKey(shop),'sigmap');
+  if(r.state!=='ok') return null;
+  const m=r.value; if(m&&typeof m==='object'&&!Array.isArray(m)) return m;
   return null;
 }
 function _momoProductsLastPushedSet(shop, items){ try{ localStorage.setItem(momoProductsLastPushedKey(shop), JSON.stringify(_momoProductsBuildSig(items))); }catch(e){ try{ console.error('[products lastpushed] 寫入失敗：',shop,e); }catch{} } }
@@ -14177,10 +14284,91 @@ function momoProductsPlanMerge(shop, cloudItems, localItems, lastPushedSig){
 }
 window.__momoProductsPlanMerge=momoProductsPlanMerge;   // 合成測/診斷可直呼
 window.__MOMO_MERGE_ENFORCE=true;   // 🟢 B2 閘：products 同步走逐 SKU merge 真寫（getDoc→plan→setShop merged；保留雲端獨有、只覆蓋 dirty、本機空+雲端有→中止防呆）。2026-09-09 stage-1 四賣場在真實資料驗過（甲配推155/乙配推26、deleteSkus 全 0、雲端獨有保留正確；MO+ 無變更跳過）→ 正式啟用。要臨時退回「只 log 不寫」改 false。
+// ══════ 大量刪除防線（MOMO 本機壓縮第 1 塊，docs/plan-momo-compress.md §8-5）══════
+//   擋的是「本機讀壞 → 從 [] 長出一份小清單 → 同步把雲端其他商品全刪掉」這條路。正常下架是打旗標、不是刪除；
+//   畫面上沒有批次刪除商品的流程（唯一一次刪很多的是 Console 工具 momoMoPlusCleanDirty，它自己直接推雲端）。
+//   N＝這次 deleteSkus 裡【雲端現在還有】的筆數（雲端早就沒有的刪了等於沒刪，不算）；M＝雲端有 sku 的筆數。
+//     N ≤ MIN                      → 放行
+//     N > max(MIN, M × ABORT)      → 直接中止該通路（不給確認）
+//     N > max(MIN, M × CONFIRM)    → 跳確認視窗，預設按鈕是「取消」；取消＝該通路不推、列為問題
+//   🔴 確認視窗不能在推送 task 裡跳：推送迴圈每筆 30 秒逾時、逾時後剩下的不再嘗試，按確定後那筆還會晚到寫入。
+//     所以 syncToCloud 在迴圈前先預檢、問完；task 裡再算一次，要刪的必須都在核准清單內才寫（opts.approvedDeletes）。
+const MOMO_DEL_GUARD_MIN=20;              // 刪除筆數在這以下一律放行（「中止」也套這個最低值，小通路不會被誤停）
+const MOMO_DEL_GUARD_CONFIRM_RATIO=0.10;  // 超過 max(MIN, 雲端筆數 × 10%) → 要確認
+const MOMO_DEL_GUARD_ABORT_RATIO=0.50;    // 超過 max(MIN, 雲端筆數 × 50%) → 直接中止
+const MOMO_DEL_GUARD_SHOW=10;             // 確認視窗列出前幾個 SKU
+// 純函式：plan＝momoProductsPlanMerge 的結果、cloudItems＝雲端陣列 → { level:'ok'|'confirm'|'abort', n, m, skus }
+function _momoDelGuardLevel(plan, cloudItems){
+  const cloudSkus=new Set();
+  (Array.isArray(cloudItems)?cloudItems:[]).forEach(p=>{ if(p&&p.sku!=null) cloudSkus.add(String(p.sku)); });
+  const skus=((plan&&plan.deleteSkus)||[]).map(String).filter(s=>cloudSkus.has(s));
+  const n=skus.length, m=cloudSkus.size;
+  let level='ok';
+  if(n>MOMO_DEL_GUARD_MIN){
+    if(n>Math.max(MOMO_DEL_GUARD_MIN, m*MOMO_DEL_GUARD_ABORT_RATIO)) level='abort';
+    else if(n>Math.max(MOMO_DEL_GUARD_MIN, m*MOMO_DEL_GUARD_CONFIRM_RATIO)) level='confirm';
+  }
+  return {level, n, m, skus};
+}
+function _momoDelGuardAbortMsg(g){ return '刪除數量異常（'+g.n+' 筆，雲端共 '+g.m+' 筆），已停止同步，請通知 Keani'; }
+// syncToCloud 迴圈前的預檢：跟 momoSyncProductsMerge 同一套輸入（pending、lastpushed、雲端現值）算等級。只讀、不寫。
+//   本機讀壞 / 不是陣列 → 回 null（交給 task 自己 throw，不在這裡重複判斷）。
+async function _momoDelGuardPreflight(shop){
+  const pk=momoProductsKey(shop);
+  if(_momoProductsPendingUnreadable(pk)) return null;
+  const local=momoPendingProducts(pk)||[];
+  if(!Array.isArray(local)) return null;
+  const lp=_momoProductsLastPushedGet(shop);
+  const snap=await window.__cloudMomo.getDoc(shop); const dd=snap.exists()?(snap.data()||{}):{}; const cloudItems=dd.items||[];
+  return _momoDelGuardLevel(momoProductsPlanMerge(shop, cloudItems, local, lp), cloudItems);
+}
+// 確認視窗 → Promise<boolean>（true＝使用者按「確定刪除並同步」）。預設焦點在「取消」；Esc、點背景、✕ 一律＝取消。
+//   ⚠ 不用原生 confirm()（預設按鈕是確定）、也不用 App.openModal（點背景直接關窗、不呼叫 onCancel → Promise 永遠不 resolve）。
+//   同一時間只開一個：再開新的會先把舊的當取消關掉。樣式在 css/profit.css 的 .mm-delg-*。
+function _momoDelGuardConfirm(o){
+  return new Promise(resolve=>{
+    const old=document.getElementById('mm-delg-ov');
+    if(old){ try{ if(typeof old._mmCancel==='function') old._mmCancel(); else old.remove(); }catch{} }
+    const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const skus=(o&&o.skus)||[], n=(o&&o.n)||skus.length, m=(o&&o.m)||0;
+    const shown=skus.slice(0,MOMO_DEL_GUARD_SHOW), more=skus.length-shown.length;
+    const ov=document.createElement('div');
+    ov.id='mm-delg-ov'; ov.className='mm-delg-ov';
+    ov.innerHTML='<div class="mm-delg-box" role="dialog" aria-modal="true" aria-labelledby="mm-delg-title">'
+      +'<div class="mm-delg-head"><h3 id="mm-delg-title">⚠ 確認從雲端刪除商品</h3><button type="button" class="mm-delg-x" data-act="x" aria-label="關閉（等於取消）">✕</button></div>'
+      +'<div class="mm-delg-body">'
+      +'<p class="mm-delg-msg"><b>'+esc(momoShopDisplay(o&&o.shop))+'</b> 這次同步會從雲端刪除 <b>'+n+'</b> 筆商品（雲端共 '+m+' 筆）。</p>'
+      +'<div class="mm-delg-skus"><div class="mm-delg-skus-h">前 '+shown.length+' 個 SKU：</div>'+shown.map(s=>'<code>'+esc(s)+'</code>').join('')+(more>0?'<div class="mm-delg-more">…還有 '+more+' 個</div>':'')+'</div>'
+      +'<p class="mm-delg-hint">正常下架是打旗標、不會刪除商品。如果你沒有刻意刪這些商品，請按「取消」並通知 Keani。</p>'
+      +'</div>'
+      +'<div class="mm-delg-foot"><button type="button" class="mm-delg-ok" data-act="ok">確定刪除並同步</button><button type="button" class="mm-delg-cancel" data-act="cancel">取消</button></div>'
+      +'</div>';
+    let done=false;
+    const onKey=e=>{ if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); finish(false); } };
+    const finish=v=>{ if(done) return; done=true; try{ document.removeEventListener('keydown',onKey,true); }catch{} try{ ov.remove(); }catch{} resolve(v===true); };
+    ov.addEventListener('click',e=>{
+      if(e.target===ov){ finish(false); return; }   // 點背景＝取消
+      const b=e.target&&e.target.closest?e.target.closest('[data-act]'):null;
+      if(b) finish(b.getAttribute('data-act')==='ok');   // ✕ / 取消 → false；只有「確定刪除並同步」→ true
+    });
+    document.addEventListener('keydown',onKey,true);
+    ov._mmCancel=()=>finish(false);
+    document.body.appendChild(ov);
+    try{ ov.querySelector('.mm-delg-cancel').focus(); }catch{}   // 預設按鈕＝取消（按 Enter 也是取消）
+  });
+}
+// Console 示範（驗收用）：只用假資料打開確認視窗、印出按了什麼。不讀不寫任何資料（localStorage / 雲端都不碰）。
+window.__momoDelGuardDemo=function(){
+  return _momoDelGuardConfirm({shop:'（示範）', n:200, m:1300, skus:Array.from({length:200},(_,i)=>'DEMO-'+(i+1))})
+    .then(v=>{ try{ console.log('[刪除防線示範] 結果：'+(v?'確定（會推送）':'取消（不推送）')); }catch{} return v; });
+};
 // 實際推送（syncToCloud 分派呼叫；opts.shadow=true 供 __momoMergeShadow 診斷）：getDoc 雲端 → plan → log →（非 shadow 才寫 + 更新 last-pushed）。
+//   opts.approvedDeletes（Set）：syncToCloud 預檢時使用者已確認過的刪除清單；沒帶（Console 直接呼叫）而需要確認時，這裡自己跳確認視窗。
 async function momoSyncProductsMerge(shop, opts){
   const shadow = !!(opts&&opts.shadow===true);
   const pk=momoProductsKey(shop);
+  // 🛡 本機那份解不開 → 中止不寫（Console 的 __momoMergeEnforce 不經 syncToCloud 分派，這裡自己擋）
+  if(!shadow && _momoProductsPendingUnreadable(pk)){ const msg='[products merge] '+shop+' 本機商品主檔解不開 → 中止不寫（避免用不完整的資料刪掉雲端；請通知 Keani）'; try{ console.error(msg); }catch{} throw new Error(msg); }
   const local=momoPendingProducts(pk)||[];
   const lp=_momoProductsLastPushedGet(shop);
   const snap=await window.__cloudMomo.getDoc(shop); const dd=snap.exists()?(snap.data()||{}):{}; const cloudItems=dd.items||[];
@@ -14193,9 +14381,24 @@ async function momoSyncProductsMerge(shop, opts){
     +(plan.conflictSkus.length?'\n   ⚠ 同事在我推後也動過同一 SKU(last-write-wins、用我的值) '+plan.conflictSkus.length+' 筆：'+plan.conflictSkus.slice(0,20).join(','):''),
     'color:'+(shadow?'#2563eb':'#16a34a')+';font-weight:700'); }catch{}
   try{ window.__momoLastMergePlan={shop, at:Date.now(), shadow, mode:plan.mode, pushSkus:plan.pushSkus, changed:plan.changed, added:plan.added, deleteSkus:plan.deleteSkus, preserveCount:plan.preserveCount, conflictSkus:plan.conflictSkus, cloudCount:plan.cloudCount, mergedCount:plan.mergedCount, wholeOverwritePush:plan.wholeOverwritePush, cloudOnly:plan.cloudOnly}; }catch{}
+  const guard=_momoDelGuardLevel(plan, cloudItems);
+  try{ window.__momoLastDelGuard={shop, at:Date.now(), shadow, level:guard.level, n:guard.n, m:guard.m, skus:guard.skus.slice(0,50)}; }catch{}   // 唯讀觀測（不併進 __momoLastMergePlan，保持它跟改版前同形狀）
+  if(guard.level!=='ok'){ try{ console.warn('[products merge] '+shop+' 刪除防線＝'+guard.level+'：實際會刪雲端 '+guard.n+' 筆／雲端共 '+guard.m+' 筆'); }catch{} }
   if(shadow) return { shadow:true, plan };
   // 🛡 清空防呆：本機空但雲端有資料 → 幾乎必是本機讀取異常，不是「清空整店」的真實意圖 → 中止不寫（fail-loud）
   if((!Array.isArray(local) || local.length===0) && cloudItems.length>0){ const msg='[products merge] '+shop+' 本機為空、雲端有 '+cloudItems.length+' 筆 → 中止不寫（避免清空整店；請確認本機資料後再推）'; try{ console.error(msg); }catch{} throw new Error(msg); }
+  if(!Array.isArray(local)){ const msg='[products merge] '+shop+' 本機商品主檔不是陣列 → 中止不寫（請通知 Keani）'; try{ console.error(msg); }catch{} throw new Error(msg); }
+  // 🛡 大量刪除防線（見 _momoDelGuardLevel 上方）
+  if(guard.level==='abort'){ const msg=_momoDelGuardAbortMsg(guard); try{ console.error('[products merge] '+shop+' '+msg); }catch{} throw new Error(msg); }
+  if(guard.level==='confirm'){
+    const ap=opts&&opts.approvedDeletes;
+    if(ap instanceof Set){
+      if(!guard.skus.every(s=>ap.has(s))){ const msg='確認後雲端內容變了（要刪的商品跟你確認的不一樣），這次沒推，請重按同步'; try{ console.error('[products merge] '+shop+' '+msg); }catch{} throw new Error(msg); }
+    }else{
+      const ok=await _momoDelGuardConfirm({shop, n:guard.n, m:guard.m, skus:guard.skus});
+      if(!ok){ const msg='要從雲端刪除 '+guard.n+' 筆，你按了取消，這次沒推'; try{ console.warn('[products merge] '+shop+' '+msg); }catch{} throw new Error(msg); }
+    }
+  }
   await window.__cloudMomo.setShop(shop, momoFsSanitizeDeep(plan.merged));   // 整包寫回 merged（已保留雲端獨有、只覆蓋 dirty、bootstrap 不刪）
   _momoProductsLastPushedSet(shop, plan.merged);   // 🔴 推成功才更新 baseline → 下輪 dirty 歸零
   return { shadow:false, plan };

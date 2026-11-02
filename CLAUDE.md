@@ -291,6 +291,8 @@ ESM 有個致命陷阱必須牢記：
 - `Store` 是 localStorage 包裝層（含 `_mem` / `_profitMem` 記憶體鏡像）。
 - 淨利表報表快取（localStorage `ec|通路|YYYY/MM|半月`，B-3 #173）存成壓縮格式 `LZ1:<原始字元數>:<LZString.compressToUTF16(JSON)>`
   （lz-string 1.5.0 放在 `js/vendor/`，index.html 以 classic script 在 main.js 前載入，檔名帶版號、不加 `?v=`）。
+  - 格式與「解不開」的判準只有一份：profit.js `_lz1Unwrap`（回 `{kind:'none'|'json'|'lz'|'bad', json}`）/ `_lz1Encode`，報表與 MOMO 商品主檔共用；
+    `_reportCacheParse` / `_reportCacheEncode` 是薄包裝（形狀檢查、`_LS_COMPRESS_WRITE` 開關留在包裝層）。
   - 讀：一律走 profit.js `_reportCacheParse`（沒前綴＝舊 JSON；解不開、長度不符、形狀不對 ⇒ null＝當作沒有本機快取）。
     🔴 新增讀 `ec|` 報表值的地方不准直接 `JSON.parse(localStorage.getItem(...))`。
   - 寫：只有 `lsSave` → `_reportCacheWrite`（壓縮 → setItem → 讀回比對；不成就寫未壓縮 JSON，再不成照舊彈「本機空間已滿」）。
@@ -299,6 +301,35 @@ ESM 有個致命陷阱必須牢記：
   - 開站就地壓縮：profit.js 載入 3 秒後逐把把未壓縮的報表快取覆寫成 LZ1（只碰 4 段報表 key，覆寫前重讀比對、寫完讀回、不一致寫回原值），
     console.info 印統計，結果在 `window.__reportCacheMigrateReport`（只讀觀測點，不以 `__cloud` 開頭）。
   - 回滾開關：profit.js 開頭 `_LS_COMPRESS_WRITE` / `_LS_COMPRESS_MIGRATE` 改 false 再部署（讀取端照樣讀得懂已寫下的 LZ1）。
+- MOMO 商品主檔本機壓縮（docs/plan-momo-compress.md §8；**目前只到第 1 塊＝讀取端相容 LZ1，寫入仍是未壓縮 JSON**）：
+  - 範圍只有 `ec_momo_products|<通路>` 與 `ec_momo_products_lastpushed|<通路>`；`ec_momo_cost_by_origin`（含 `_meta`）不壓（#175，firebase.js 直接 `JSON.parse` 它）。
+  - 讀：一律走 `_momoLsRead(k, 'array'|'sigmap')` / `_momoLsReadNote`（回 `{state:'absent'|'ok'|'bad'}`；舊 JSON 不檢查形狀＝跟改版前逐字相同）。
+    讀點：`momoLoadProducts`、`momoPendingProducts`、sweep（`_sweepAllLocalReportsIntoPending`）、`_momoProductsLastPushedGet`。
+    🔴 新增讀這兩類 key 的地方不准直接 `JSON.parse(localStorage.getItem(...))`（第 2 塊開始寫 LZ1 後會讀成 `[]`）。
+  - 🔴 「讀壞」（LZ1 解不開，或 JSON 壞掉）跟報表的「當作沒有快取」**意思相反**：商品主檔讀壞＝裡面可能有沒推的修改。
+    - `momoSaveProducts`：`_profitMem` 與 `_mem` 都沒值、本機又讀壞 ⇒ **拒存**（回 false、紅色彈窗「…沒有存…請通知 Keani」、不標 pending / dirty），
+      免得從 `[]` 長出一份小清單蓋掉本機。正常存檔回 true（現有呼叫端都不用回傳值）。
+    - `syncToCloud` 分派：`_mem` 沒值且本機讀壞 ⇒ 不推，列為問題（label「本機讀不到」）；`momoSyncProductsMerge` 自己也再擋一次（Console 呼叫不經分派）。
+    - lastpushed 讀壞 ⇒ 回 null＝bootstrap（removed 一律空、不刪雲端），同改版前 JSON 損毀。
+    - 那把 key 一律不刪不改；不是 dirty 的通路，firebase.js 的 `momo_products` 訂閱會用雲端整份蓋回、自己就好。
+  - **大量刪除兩段防線**（`momoSyncProductsMerge` 寫入前；常數在 profit.js `MOMO_DEL_GUARD_*`）：
+    N＝這次 `deleteSkus` 裡**雲端現在還有**的筆數（雲端早沒有的刪了等於沒刪，不算）；M＝雲端有 sku 的筆數。
+    - N ≤ 20 ⇒ 放行。
+    - N > max(20, M × 50%) ⇒ **直接中止該通路**、不給確認，列為問題（label「已停止」）：「刪除數量異常（N 筆，雲端共 M 筆），已停止同步，請通知 Keani」。
+    - N > max(20, M × 10%) ⇒ 跳確認視窗（`_momoDelGuardConfirm`，樣式 css/profit.css `.mm-delg-*`），**預設按鈕是「取消」**；
+      Esc、點背景、✕、取消一律＝不推，列為問題（label「已取消」）。只有紅框「確定刪除並同步」才推。
+    - 🔴 確認視窗**不能**在推送 task 裡跳：`syncToCloud` 推送迴圈每筆 30 秒逾時、逾時後剩下的不再嘗試。所以 `syncToCloud` 在迴圈前預檢
+      （`_momoDelGuardPreflight`）、問完；task 裡（`momoSyncProductsMerge(shop,{approvedDeletes})`）寫入前再算一次，要刪的不在核准清單內就 throw、不推。
+      Console 直接呼叫 `momoSyncProductsMerge` / `__momoMergeEnforce` 時由函式自己跳視窗；`shadow` 只算不擋。
+    - 也不能改用原生 `confirm()`（預設是確定）或 `App.openModal`（點背景直接關窗、不呼叫 onCancel，Promise 永遠不 resolve）。
+    - 畫面上沒有合法的批次刪除商品流程（下架是打旗標）。唯一一次刪很多的是 Console 工具 `momoMoPlusCleanDirty`，它自己直接 `setShop` 推雲端；
+      推成功後雲端已沒有那些 SKU ⇒ 下一次同步 N＝0、不會被擋。
+    - 收尾彈窗的 skippedProblem 依 `label` 顯示（沒有 label 時文案照舊「讀不到」）。
+  - 除錯（都是唯讀，不以 `__cloud` 開頭、不影響本機防寫物件數）：
+    `__momoLsState()`＝列出這兩類 key 的格式（LZ1 / JSON）、字元數、讀取狀態，不回傳內容；
+    `__momoDelGuardDemo()`＝用假資料開刪除確認視窗、Console 印按了什麼，不讀不寫任何資料；
+    `window.__momoLastDelGuard`＝最近一次 merge 的防線等級 / N / M（刻意不併進 `__momoLastMergePlan`，那個維持原形狀）。
+  - 第 2 塊（寫入 LZ1、就地壓縮）上線前，第 1 塊必須已部署並請大家重新整理過；🔴 第 1 塊的讀取碼永遠不回滾（舊碼讀到 LZ1 會得到 `[]`）。
 - 本機空間快滿預警＋一鍵釋出空間（docs/plan-ls-space-tidy.md）：
   - app.js：`window.__lsUsage()`（唯讀，`{usedKB, limitKB, ratio, top}`，量法＝所有 key＋value 字元數，上限 `LS_LIMIT_KB=5120`）；
     開站 20 秒後、之後每 30 分鐘 `__lsSpaceCheck`，`ratio ≥ LS_WARN_RATIO(0.85)` 且已登入才在左下角顯示 `.ls-warn` 卡片；
