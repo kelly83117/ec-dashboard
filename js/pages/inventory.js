@@ -64,6 +64,7 @@ const INV_GUIDE = Object.freeze([
     '點格子直接改，Enter 存檔、Esc 取消。',
   ] },
   { h: '自動算的欄位', p: '總計、較上月是自動算的，不能改。' },
+  { h: 'MOMO倉旁的「自動」', p: 'MOMO倉旁的「自動」是每月 1 號上傳 F1102 後系統算的（寄倉數×成本），驗證期間只供對照。' },
   { h: '上方卡片與走勢圖', ol: [
     '卡片顯示最新一個有填庫存數字的月份。',
     '走勢圖可切換近 12 個月／近 24 個月／全部。',
@@ -347,6 +348,18 @@ function _invResetSub() {
 function _invYearOpenOf(year, rank) {
   return _invYearOpen.has(year) ? _invYearOpen.get(year) : rank < INV_OPEN_YEARS;
 }
+// MOMO倉旁的「自動」值（F1102 寄倉數×乙配成本，並行驗證期只供對照；總計／較上月／卡片／走勢圖都不用它）。差距超過 5% 標橘色。
+function _invAutoHintHtml(row) {
+  if (!row || !_invIsNum(row.momoWhAuto)) return '';
+  const auto = row.momoWhAuto, src = row.momoWhAutoSrc || {};
+  const md = src.exportedAt ? String(src.exportedAt).slice(5, 10) : '';   // 'YYYY/MM/DD HH:mm' → 'MM/DD'
+  const hand = row.momoWh;
+  const pct = (_invIsNum(hand) && hand > 0) ? (auto - hand) / hand * 100 : null;
+  const pTxt = pct == null ? '' : (pct > 0 ? '+' : '') + pct.toFixed(1) + '%';
+  const warn = pct != null && Math.abs(pct) > 5;
+  const tip = '自動：$' + _invFmtNum(auto) + (md ? '（F1102 ' + md + ' 匯出）' : '') + (pct != null ? '・差 ' + pTxt : '');
+  return `<div class="inv-auto-hint${warn ? ' inv-auto-warn' : ''}" title="${escapeHtml(tip)}">自動 ${escapeHtml(_invFmtNum(auto))}${pTxt ? ' · ' + escapeHtml(pTxt) : ''}</div>`;
+}
 function _invCellHtml(col, ym, months, ro) {
   if (col.k === '_total') return `<td class="inv-auto">${escapeHtml(_invFmtNum(_invTotal(months[ym])))}</td>`;
   if (col.k === '_diff') {
@@ -361,7 +374,8 @@ function _invCellHtml(col, ym, months, ro) {
     + (col.t === 'num' ? ' inputmode="decimal"' : ` maxlength="${INV_TXT_MAX}"`)
     + ` autocomplete="off" aria-label="${escapeHtml(_invYmLabel(ym) + ' ' + col.l)}"`
     + ` data-inv-ym="${escapeHtml(ym)}" data-inv-f="${escapeHtml(col.k)}" data-raw="${escapeHtml(raw)}" data-disp="${escapeHtml(disp)}"`
-    + ` value="${escapeHtml(disp)}"${ro || saving ? ' readonly' : ''}></td>`;
+    + ` value="${escapeHtml(disp)}"${ro || saving ? ' readonly' : ''}>`
+    + (col.k === 'momoWh' ? _invAutoHintHtml(months[ym]) : '') + '</td>';
 }
 function _invRowHtml(ym, months, ro) {
   const row = months[ym] || {};
@@ -676,6 +690,10 @@ function _invOnKeydown(e) {
     if (n) n.focus();
   }
 }
+
+// 給 profit.js（F1102 上傳寫 MOMO倉自動值）用：編輯權限與署名跟庫存頁同一支（以後收緊 _invCanEdit 時這裡自動跟上）
+window.__invCanEdit = () => _invCanEdit();
+window.__invBy = () => _invBy();
 
 Object.assign(App, {
   viewInventory() {

@@ -14814,6 +14814,89 @@ function momoSaveF1102(shop,data){ const k=momoF1102Key(shop);
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=data; }catch{}
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=data; }catch{} }
 // F1102 檔名時間戳 → 「資料時間」顯示字串（F1102_YYYYMMDDHHMMSS → YYYY/MM/DD HH:MM）
+// ══════ F1102 → 庫存頁 MOMO倉「自動」值（並行驗證期：只寫 months.{月}.momoWhAuto，不動手填的 momoWh）══════
+//   金額 ＝ Σ（F1102 寄倉數 consigned × 乙配 product.cost）；不含寄倉在途量。缺成本、F1102 品號不在乙配主檔的列出來，不默默少算。
+//   歸屬月份看檔名時間戳（momoF1102TimeFromName）：檔案時間在每月 1～MOMO_INV_AUTO_DAY_MAX 號 → 預設上個月（月初匯出代表月底）；
+//   檔名沒有時間戳 → 不預設、要使用者選月份才寫；其他日期 → 不寫入，只顯示「目前寄倉庫存金額」。寫進 app/inventory 後固定，不回頭重算。
+const MOMO_INV_AUTO_DAY_MAX=5;
+const _momoPad2=n=>String(n).padStart(2,'0');
+let _momoUpF1102Month='';   // 使用者在上傳頁選的庫存月份：''＝用預設、'none'＝明確選「不寫入」、'YYYY-MM'
+function momoF1102InvMode(name){
+  const t=momoF1102TimeFromName(name);   // 'YYYY/MM/DD HH:mm' 或 ''
+  const now=new Date();
+  if(!t) return { mode:'needMonth', time:'', defYm:'', baseYm:now.getFullYear()+'-'+_momoPad2(now.getMonth()+1) };
+  const y=+t.slice(0,4), m=+t.slice(5,7), d=+t.slice(8,10), baseYm=y+'-'+_momoPad2(m);
+  if(d>=1 && d<=MOMO_INV_AUTO_DAY_MAX){ const py=(m===1)?y-1:y, pm=(m===1)?12:m-1; return { mode:'auto', time:t, defYm:py+'-'+_momoPad2(pm), baseYm }; }
+  return { mode:'viewOnly', time:t, defYm:'', baseYm };
+}
+function momoF1102InvMonthOptions(baseYm){   // 以檔案所在月份往前 12 個月（含），最新在前
+  let y=+baseYm.slice(0,4), m=+baseYm.slice(5,7); const out=[];
+  for(let i=0;i<12;i++){ out.push(y+'-'+_momoPad2(m)); m--; if(m<1){ m=12; y--; } }
+  return out;
+}
+function momoF1102InvEffYm(name){   // 目前實際會寫入的庫存月份（'' ＝不寫）
+  const m=momoF1102InvMode(name);
+  if(m.mode==='viewOnly') return '';
+  if(_momoUpF1102Month==='none') return '';
+  if(_momoUpF1102Month) return _momoUpF1102Month;
+  return m.mode==='auto'?m.defYm:'';
+}
+function momoF1102InvCalc(f){
+  const by={}; momoLoadProducts('乙配').forEach(p=>{ by[p.sku]=p; });
+  let sum=0, qty=0; const missingCost=[], notInMaster=[]; const skus=(f&&f.skus)||{};
+  Object.keys(skus).forEach(sku=>{ const q=Number(skus[sku]&&skus[sku].consigned)||0; if(!(q>0)) return; qty+=q;
+    const p=by[sku]; if(!p){ notInMaster.push(sku+'×'+q); return; }
+    const c=Number(p.cost); if(c>0) sum+=q*c; else missingCost.push(sku+'×'+q); });
+  return { amount:Math.round(sum), qty, skuN:Object.keys(skus).length, missingCost, notInMaster };
+}
+function momoInvCanEdit(){   // 庫存表編輯權限：跟庫存頁 _invCanEdit 同一支（inventory.js 掛 window.__invCanEdit）；沒載到就用同樣的判斷
+  try{ if(typeof window.__invCanEdit==='function') return !!window.__invCanEdit(); }catch(e){}
+  const u=window.App&&window.App.currentUser; if(!u) return false;
+  return typeof window.App.isReadOnly==='function'?!window.App.isReadOnly():u.role!=='view';
+}
+// 寫進 app/inventory（逐格 writePaths，不整份覆蓋）。回 {state:'written'|'skipped'|'denied'|'cancel'|'error', msg}。
+async function momoF1102InvWrite(inv){
+  if(!inv || !inv.ym) return { state:'skipped', msg:'' };
+  if(!momoInvCanEdit()) return { state:'denied', msg:'沒有庫存表編輯權限，未寫入（只計算：MOMO倉自動值 $'+inv.amount.toLocaleString()+'）' };
+  const be=window.__cloudInventory;
+  if(!be || typeof be.writePaths!=='function' || typeof be.getDoc!=='function') return { state:'error', msg:'庫存雲端尚未就緒，未寫入庫存表' };
+  let months={};
+  try{ const sn=await be.getDoc(); const d=(sn&&sn.exists&&sn.exists())?(sn.data()||{}):{}; months=(d.months&&typeof d.months==='object')?d.months:{}; }
+  catch(e){ return { state:'error', msg:'讀取庫存表失敗，未寫入：'+((e&&e.message)||e) }; }
+  const cur=months[inv.ym];
+  if(cur && cur.momoWhAuto!=null){   // 同一個月重傳 → 先確認，不默默蓋掉
+    const s=cur.momoWhAutoSrc||{};
+    if(!confirm('庫存表 '+inv.ym+' 已有自動值 $'+Math.round(Number(cur.momoWhAuto)).toLocaleString()+(s.exportedAt?'（F1102 '+s.exportedAt+' 匯出）':'')+'。\n\n要覆蓋 '+inv.ym+' 的自動值嗎？\n新值 $'+inv.amount.toLocaleString()+'（F1102 '+(inv.exportedAt||'時間不明')+' 匯出）\n\n（手填的 MOMO倉 不會動）')) return { state:'cancel', msg:'已取消覆蓋庫存表 '+inv.ym+' 的自動值' };
+  }
+  const u=window.App.currentUser||{}; const by=(typeof window.__invBy==='function')?window.__invBy():{ username:u.username||'', name:u.name||'' }; const TS=be.TS;
+  const src={ src:'F1102', exportedAt:inv.exportedAt||'', qty:inv.qty, skuN:inv.skuN, missingCost:inv.missingCost||[], notInMaster:inv.notInMaster||[], by, at:Date.now() };   // 只放有值的欄位（不留 undefined）
+  const pairs=[ [['months',inv.ym,'momoWhAuto'], inv.amount], [['months',inv.ym,'momoWhAutoSrc'], src], [['months',inv.ym,'updatedAt'], TS], [['months',inv.ym,'updatedBy'], by] ];
+  if(!cur) pairs.push([['months',inv.ym,'createdAt'], TS], [['months',inv.ym,'createdBy'], by]);   // 這個月還不存在 → 一併補建檔記號（同庫存頁「新增月份」）
+  let r; try{ r=await be.writePaths(pairs); }catch(e){ return { state:'error', msg:'寫入庫存表失敗：'+((e&&e.message)||e) }; }
+  if(!(r && r.ok)) return { state:'error', msg:'寫入庫存表沒有成功（可能是唯讀或連線問題），未寫入' };
+  try{ const sn=await be.getDoc(); const d=(sn&&sn.data&&sn.data())||{}; const got=d.months&&d.months[inv.ym]&&d.months[inv.ym].momoWhAuto; if(got!==inv.amount) return { state:'error', msg:'寫入庫存表後讀回不一致，請到庫存頁確認 '+inv.ym }; }catch(e){}
+  return { state:'written', msg:'已寫入庫存表 '+inv.ym+' 的 MOMO倉自動值 $'+inv.amount.toLocaleString()+'（手填值未動）' };
+}
+function momoF1102InvCtlHtml(shop,name){   // 上傳列：F1102 檔選了以後顯示「寫入庫存月份」
+  const m=momoF1102InvMode(name);
+  if(m.mode==='viewOnly') return `<div class="mm-hint" style="width:100%">檔案時間 ${m.time}（非月初 1～${MOMO_INV_AUTO_DAY_MAX} 號）→ <b>不寫入庫存表</b>，預覽只顯示「目前寄倉庫存金額」。</div>`;
+  const sel=momoF1102InvEffYm(name); const opts=momoF1102InvMonthOptions(m.baseYm);
+  const note=(m.mode==='auto')?`將寫入 <b>${sel||'（不寫入）'}</b>（依 F1102 檔案時間 ${m.time.slice(5)}）`:'檔名沒有時間戳：請選月份才會寫入庫存表（不選＝只更新總表庫存欄）';
+  return `<span class="mm-field"><span class="mm-lbl">寫入庫存表月份</span><select class="mm-sel" onchange="momoUploadF1102InvMonth('${shop}',this.value)"><option value="none"${sel?'':' selected'}>（不寫入庫存表）</option>${opts.map(o=>`<option value="${o}"${o===sel?' selected':''}>${o}</option>`).join('')}</select></span><div class="mm-hint" style="width:100%">${note}　· 庫存頁 MOMO倉旁只放「自動」值供對照，不動手填的數字。</div>`;
+}
+function momoUploadF1102InvMonth(shop,val){ _momoUpF1102Month=val||'none'; _momoUpPlan=null; const pv=document.getElementById('momo-up-preview-'+shop); if(pv) pv.innerHTML=''; momoRenderUpload(shop); }   // 換月份→清舊預覽（同 C1204 寫入月份）
+function momoF1102InvPreviewHtml(P){
+  const iv=P.f1102Inv; if(!iv) return '';
+  const name=iv.fileName||''; const m=momoF1102InvMode(name); const ym=momoF1102InvEffYm(name); const canEdit=momoInvCanEdit();
+  const miss=(iv.missingCost.length||iv.notInMaster.length)?`<div style="color:#b91c1c;margin-top:4px">⚠ 缺成本 ${iv.missingCost.length} 個${iv.missingCost.length?'（'+_momoEsc(iv.missingCost.slice(0,8).join('、'))+(iv.missingCost.length>8?'…':'')+'）':''}、不在乙配主檔 ${iv.notInMaster.length} 個${iv.notInMaster.length?'（'+_momoEsc(iv.notInMaster.slice(0,8).join('、'))+(iv.notInMaster.length>8?'…':'')+'）':''}：這些品號沒算進金額。</div>`:'';
+  let line;
+  if(m.mode==='viewOnly') line=`目前寄倉庫存金額 <b>$${iv.amount.toLocaleString()}</b>（F1102 ${(iv.exportedAt||'').slice(0,10)}）。非月初上傳，不寫入庫存表。`;
+  else if(!ym) line=`MOMO倉自動值 <b>$${iv.amount.toLocaleString()}</b>：${m.mode==='needMonth'?'檔名沒有時間戳、尚未選月份':'已選擇不寫入'}，<b>不會寫入庫存表</b>。`;
+  else line=`將寫入庫存表 <b>${ym}</b> 的 MOMO倉自動值 <b>$${iv.amount.toLocaleString()}</b>${m.mode==='auto'&&ym===m.defYm?`（依 F1102 檔案時間 ${m.time.slice(5)}）`:''}。${canEdit?'':'<span style="color:#b45309">沒有庫存表編輯權限，只計算、不寫入。</span>'}`;
+  return `<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#78350f;line-height:1.6">
+    📊 <b>庫存頁 MOMO倉「自動」值</b>（並行驗證，不動手填值）：寄倉數 ${iv.qty.toLocaleString()} × 乙配成本（${iv.skuN} 個品號，不含在途）
+    <div style="margin-top:2px">${line}</div>${miss}</div>`;
+}
 function momoF1102TimeFromName(name){ const m=String(name||'').match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/); return m?(m[1]+'/'+m[2]+'/'+m[3]+' '+m[4]+':'+m[5]):''; }
 // 從 C1105 + C1202(第三方+超商) 建甲配逐SKU逐期別出貨運費（reuse 既有解析：訂編 join、排除非「出貨」列）
 // 對帳單甲配物流總額(第三方+超商)含稅原值（2026-10 起不再 ÷1.05，與 momoMonthFeeSplit.甲物流 同口徑）
@@ -21246,7 +21329,7 @@ function momoRenderUpload(shop){
       <div class="mm-uplbl">乙配寄倉庫存 <span class="mm-code">F1102</span><span class="opt">選填</span><div class="mm-hint">乙配寄倉即時庫存快照 · 隨時可重傳，整包取代最新一份 · 檔名：<code>F1102_xxxxxxxxxx</code>（下載預設檔名）</div></div>
       <div class="mm-upctl" style="flex-wrap:wrap;gap:8px">
         <input type="file" accept=".xlsx,.xls" onchange="momoUploadFile('${shop}','f1102',event)">
-        <span class="${f.f1102?'mm-ok':'mm-muted'}">${f.f1102?'✓ '+_momoEsc(f.f1102.name):'未選'}</span>${f.f1102?`<a onclick="momoUploadRemove('${shop}','f1102')" title="移除此檔" style="color:#ef4444;cursor:pointer;font-weight:700">✕</a>`:''}
+        <span class="${f.f1102?'mm-ok':'mm-muted'}">${f.f1102?'✓ '+_momoEsc(f.f1102.name):'未選'}</span>${f.f1102?`<a onclick="momoUploadRemove('${shop}','f1102')" title="移除此檔" style="color:#ef4444;cursor:pointer;font-weight:700">✕</a>`:''}${f.f1102?momoF1102InvCtlHtml(shop,f.f1102.name):''}
       </div>
     </div>`:'';
   const anyFile=!!(f.c1105||f.s1103||f.yi||f.rent||f.f1102||(f.jia&&f.jia.length));
@@ -21285,6 +21368,7 @@ function momoUploadFile(shop,type,e){
     Array.from(files).forEach(fl=>{ if(!_momoUpFiles.jia.some(x=>x.name===fl.name&&x.size===fl.size)) _momoUpFiles.jia.push(fl); });
   }else{
     _momoUpFiles[type]=files[0];
+    if(type==='f1102') _momoUpF1102Month='';   // 換檔 → 庫存月份回預設
   }
   momoRenderUpload(shop);
 }
@@ -21297,7 +21381,7 @@ function momoLatestReconciledMonth(shop){
   }catch(e){}
   return latest;
 }
-function momoUploadRemove(shop,type){ _momoUpFiles[type]=null; _momoUpPlan=null; if(type==='c1105') _momoUpKpiOnly=false; if(type==='yi') _momoUpYiMonth=''; momoRenderUpload(shop); }   // 清該檔 + 清預覽；移除 C1204 一併清月份(下拉隨之隱藏、下次重算預設)
+function momoUploadRemove(shop,type){ _momoUpFiles[type]=null; _momoUpPlan=null; if(type==='c1105') _momoUpKpiOnly=false; if(type==='yi') _momoUpYiMonth=''; if(type==='f1102') _momoUpF1102Month=''; momoRenderUpload(shop); }   // 清該檔 + 清預覽；移除 C1204 一併清月份(下拉隨之隱藏、下次重算預設)
 function momoUploadRemoveJia(shop,i){ if(_momoUpFiles.jia) _momoUpFiles.jia.splice(i,1); _momoUpPlan=null; momoRenderUpload(shop); }
 function momoUploadClearJia(shop){ _momoUpFiles.jia=[]; _momoUpPlan=null; momoRenderUpload(shop); }   // 修：補清 _momoUpPlan（既有鬼影）
 function momoUploadYiMonth(shop,val){ _momoUpYiMonth=val; _momoUpPlan=null; const p=document.getElementById('momo-up-preview-'+shop); if(p)p.innerHTML=''; }   // 換月份→清舊預覽避免月份對不上
@@ -21373,10 +21457,11 @@ function momoUploadGenerate(shop){
     }
     // 乙配寄倉即時庫存 F1102：讀 by品號分頁，逐 SKU 可賣量(=寄倉數−已訂購待出庫)＋在途/滯銷/出庫/迴轉。當前快照、重傳取代。
     //   時間戳取自檔名 F1102_YYYYMMDDHHMMSS（tooltip 顯示資料時間）；判不出→空字串（tooltip 略過時間段）。
-    let f1102=null, f1102Info=null;
+    let f1102=null, f1102Info=null, f1102Inv=null;
     if(f1102wb){
       f1102=momoParseF1102(f1102wb);
       f1102Info={ skuN:f1102.skuN, totals:f1102.totals, exportedAt:momoF1102TimeFromName((_momoUpFiles.f1102&&_momoUpFiles.f1102.name)||'') };
+      f1102Inv=Object.assign(momoF1102InvCalc(f1102), { exportedAt:f1102Info.exportedAt, fileName:(_momoUpFiles.f1102&&_momoUpFiles.f1102.name)||'' });   // 庫存頁 MOMO倉自動值：上傳時算一次
     }
     // ── 甲配運費 C1202（可多檔、可跨月）：逐檔統計落點月份（供核對「哪個檔進哪個月」）＋合併訂編→運費 → 混合分攤 ──
     //   有同月 C1105 → 逐SKU精算；沒有（只傳 C1202 回補）→ 按期別已存銷量估算。各走各的、不需重傳 C1105。
@@ -21405,7 +21490,7 @@ function momoUploadGenerate(shop){
       _momoUpPlan={ noSales:true, shops:{}, overwrite:[], unknownChannel:[],
         badPeriod:(jiaResult?jiaResult.badPeriod.slice():[]),
         s1103, s1103Sanity, s1103Error, yiInfo, yiFreight:yi, yiMonth:yiInfo?yiInfo.month:'',
-        rentInfo, rentData:rent, f1102Info, f1102Data:f1102,
+        rentInfo, rentData:rent, f1102Info, f1102Data:f1102, f1102Inv,
         jiaFreight:(jia&&jia.freight)||null, jiaMonths:jiaResult?jiaResult.months:null, jiaFiles:jiaFilesBreakdown,
         jiaUnmatchedOrders:jiaResult?jiaResult.unmatchedOrders:[] };
       momoRenderUploadPreview(shop);
@@ -21413,7 +21498,7 @@ function momoUploadGenerate(shop){
     }
     _momoUpPlan=momoBuildUploadPlan({c1105,jia,yi,s1105});
     _momoUpPlan.rentInfo=rentInfo; _momoUpPlan.rentData=rent;   // C1212 倉租：月×SKU 一致性已過閘、附進 plan 供預覽/寫入
-    _momoUpPlan.f1102Info=f1102Info; _momoUpPlan.f1102Data=f1102;   // F1102 乙配寄倉即時庫存：當前快照，附進 plan 供預覽/寫入
+    _momoUpPlan.f1102Info=f1102Info; _momoUpPlan.f1102Data=f1102; _momoUpPlan.f1102Inv=f1102Inv;   // F1102 乙配寄倉即時庫存：當前快照，附進 plan 供預覽/寫入
     _momoUpPlan.srcCode=momoRebuildSrcFromName((_momoUpFiles.c1105&&_momoUpFiles.c1105.name)||'');   // 本檔月份代號(2608)＝增量 compact writer 的來源鍵；判不出→writer 退回各期別自身月份
     _momoUpPlan.yiInfo=yiInfo; _momoUpPlan.yiFreight=yi; _momoUpPlan.yiMonth=yiInfo?yiInfo.month:'';   // 乙配 C1204 逐SKU運費 + 目標月份(存 ec_momo_freight|乙配|<月>)
     _momoUpPlan.s1105Error=s1105Error;
@@ -21618,6 +21703,7 @@ function momoRenderUploadPreview(shop){
       <div style="font-size:11px;color:#4f46e5;margin-top:2px">資料時間 ${fi.exportedAt||'（檔名判不出時間）'}。庫存欄改顯示可賣量、未涵蓋品號顯示「—」；重傳直接取代（無時間維度）。</div>
     </div>`;
   }
+  const f1102InvHtml=momoF1102InvPreviewHtml(P);
   // 沒有 C1105（只傳運費／排行榜／倉租／庫存）：不動銷量，只顯示各自的寫入摘要（各走各的路徑）
   if(P.noSales){
     const canWrite=!!(P.jiaFreight || (P.yiFreight&&P.yiMonth) || P.s1103 || P.rentData || P.f1102Data);
@@ -21626,14 +21712,14 @@ function momoRenderUploadPreview(shop){
       <div class="mm-note" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#1e40af">
         沒有訂單明細（C1105）→ <b>不動銷量</b>，只更新下列各自的資料（各走各的寫入路徑）。
       </div>
-      ${jiaHtml}${yiHtml}${rentHtml}${f1102Html}${s1103Html}${badHtml}
+      ${jiaHtml}${yiHtml}${rentHtml}${f1102Html}${f1102InvHtml}${s1103Html}${badHtml}
       ${canWrite?`<button onclick="momoUploadApply('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#10b981;color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認寫入</button>`:'<div style="color:#ef4444;font-size:13px">沒有可寫入的內容</div>'}
       <button onclick="momoUploadCancel('${shop}')" style="margin-left:8px;padding:7px 14px;border-radius:7px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;cursor:pointer">取消</button>`;
     return;
   }
   el.innerHTML=`
     <div style="font-size:13px;font-weight:700;margin-bottom:8px">預覽（尚未寫入）</div>
-    ${shopBlock('甲配')}${shopBlock('乙配')}${jiaHtml}${yiHtml}${rentHtml}${f1102Html}${owHtml}${badHtml}${s1105ErrHtml}${s1103Html}${shipHtml}${skipHtml}
+    ${shopBlock('甲配')}${shopBlock('乙配')}${jiaHtml}${yiHtml}${rentHtml}${f1102Html}${f1102InvHtml}${owHtml}${badHtml}${s1105ErrHtml}${s1103Html}${shipHtml}${skipHtml}
     ${(P._guard&&P._guard.hasDanger)
       ? `<button onclick="momoUploadOpenGuard('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer">⚠ 逐期別檢視並寫入 →</button>`
       : `<button onclick="momoUploadApply('${shop}')" style="padding:7px 18px;border-radius:7px;border:none;background:${_shrink.length?'#dc2626':'#10b981'};color:#fff;font-size:13px;font-weight:600;cursor:pointer">確認寫入${_shrink.length?'（⚠️ '+_shrink.length+' 筆會變小）':(P.overwrite.length?'（含覆蓋 '+P.overwrite.length+' 筆）':'')}</button>`}
@@ -21677,6 +21763,10 @@ function momoUploadApply(shop, allowedPeriods){
     if(!confirm('即將寫入乙配寄倉即時庫存（F1102）\n\n'+(f.skuN||0)+' 個品號、可賣量合計 '+((f.totals&&f.totals.sellable)||0).toLocaleString()+'\n資料時間 '+(fi.exportedAt||'（判不出）')+'\n\n當前快照，整包取代舊庫存（無月份維度）。')) return;   // 取消→整批不寫
     momoSaveF1102('乙配', { skus:f.skus, totals:f.totals, skuN:f.skuN, exportedAt:fi.exportedAt||'', source:'F1102' });
     f1102Wrote=true; momoClearFeeRateCache();
+    if(P.f1102Inv){   // 庫存頁 MOMO倉自動值（並行驗證期、只寫 momoWhAuto）：寫入前先確認；無編輯權限只算不寫；失敗都用 toast 講清楚
+      const _inv=Object.assign({}, P.f1102Inv, { ym:momoF1102InvEffYm(P.f1102Inv.fileName||'') });
+      momoF1102InvWrite(_inv).then(r=>{ if(r && r.msg && typeof showToast==='function') showToast(r.msg, r.state==='written'?'success':(r.state==='error'?'error':'warn'), r.state==='written'?4000:7000); }).catch(e=>{ try{ console.error('[F1102→庫存]',e); }catch(_){} if(typeof showToast==='function') showToast('F1102 → 庫存表發生例外：'+((e&&e.message)||e),'error'); });
+    }
   }
   // ⓪-c 甲配運費 C1202：獨立 freight key（不寫 cell → 不受 qty compact 防呆影響，已對帳月份也能灌運費）。逐月標 source（精算/估算）。
   let freightMonths=[];
@@ -21688,7 +21778,7 @@ function momoUploadApply(shop, allowedPeriods){
   }
   // 沒有 C1105（只寫運費/排行榜）：收工，不碰銷量 cell
   if(P.noSales){
-    _momoUpPlan=null; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.s1103=null; _momoUpFiles.yi=null; _momoUpYiMonth=''; _momoUpFiles.rent=null; _momoUpRentMonth=''; _momoUpFiles.f1102=null;
+    _momoUpPlan=null; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.s1103=null; _momoUpFiles.yi=null; _momoUpYiMonth=''; _momoUpFiles.rent=null; _momoUpRentMonth=''; _momoUpFiles.f1102=null; _momoUpF1102Month='';
     const parts=[]; if(freightMonths.length) parts.push('甲配運費 '+freightMonths.join('、')); if(yiMonthWrote) parts.push('乙配運費 '+yiMonthWrote); if(rentMonthsWrote.length) parts.push('乙配倉租 '+rentMonthsWrote.join('、')); if(f1102Wrote) parts.push('乙配寄倉庫存'); if(s1103Month) parts.push('排行榜 '+s1103Month);
     if(typeof showToast==='function') showToast(parts.length?('已寫入 '+parts.join('　+　')+'（記得按 ☁ 同步雲端）'):'未寫入任何資料','success');
     momoRenderUpload(shop);
@@ -21700,7 +21790,7 @@ function momoUploadApply(shop, allowedPeriods){
   const res=momoApplyUploadPlan(P, allowedPeriods||null);
   // KPI 訂單數來源：跟銷量同一次上傳一起落盤（逐日覆蓋、冪等；不受期別閘門影響——它不動銷量 cell）
   const shipMonths=momoMergeC1105Ship(P.c1105Ship);
-  _momoUpPlan=null; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.s1103=null; _momoUpFiles.yi=null; _momoUpFiles.rent=null; _momoUpRentMonth=''; _momoUpFiles.f1102=null;
+  _momoUpPlan=null; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.s1103=null; _momoUpFiles.yi=null; _momoUpFiles.rent=null; _momoUpRentMonth=''; _momoUpFiles.f1102=null; _momoUpF1102Month='';
   const lines=[momoPeriodReportLine('已寫入', res.wroteBy),
     momoPeriodReportLine('　其中累加到既有期別', res.accumBy),   // ① 舊期別行為從「跳過」變「累加」→ 逐期別列出，不靜默
     momoPeriodReportLine('已跳過（你未勾選）', res.gatedBy)].filter(Boolean);
@@ -21743,7 +21833,7 @@ function momoUploadOpenGuard(shop){
     subtitle:`本檔主要月份：<b>${g.mainMonth?g.mainMonth.replace('-','/'):'（判不出）'}</b>${g.mainGuessed?'（檔名判不出，用筆數多數決<b>推測</b>——請自行核對）':'（來自檔名代號）'}。早於主月且「覆蓋既有又變小」的期別預設不勾。`,
     cls:g.merged, onConfirm:(allowed)=>momoUploadApply(shop, allowed) });
 }
-function momoUploadCancel(shop){ _momoUpPlan=null; _momoUpKpiOnly=false; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.s1103=null; _momoUpFiles.yi=null; _momoUpYiMonth=''; _momoUpFiles.rent=null; _momoUpRentMonth=''; _momoUpFiles.f1102=null; momoRenderUpload(shop); }   // 取消＝整批不寫、狀態清乾淨（含 C1204/C1212/F1102 檔+月份重設）
+function momoUploadCancel(shop){ _momoUpPlan=null; _momoUpKpiOnly=false; _momoUpFiles.c1105=null; _momoUpFiles.jia=[]; _momoUpFiles.s1103=null; _momoUpFiles.yi=null; _momoUpYiMonth=''; _momoUpFiles.rent=null; _momoUpRentMonth=''; _momoUpFiles.f1102=null; _momoUpF1102Month=''; momoRenderUpload(shop); }   // 取消＝整批不寫、狀態清乾淨（含 C1204/C1212/F1102 檔+月份重設）
 
 // ── 畫面四：商品資料同步（莫筆克成本 各倉商品列表 + MOMO商品資訊 → 差異預覽 5 類）──
 //  莫筆克(各倉「商品資料」分頁)：品項條碼→origin、銷售成本→cost（origin 對照表）
@@ -26291,7 +26381,7 @@ Object.assign(window, {
   momoBatchSetMode,momoBatchSearch,momoBatchSelect,momoBatchSubmitEdit,momoBatchSubmitAdd,momoDeleteProduct,
   momoAddRecalc,momoAddPpInput,momoAddRevertPp,momoAddOriginLookup,momoAddPickCost,
   momoEditRecalc,momoEditSpInput,momoEditPpInput,momoMoPlusEditRecalc,momoMoPlusDualMargin,momoMoPlusClearPrice,momoMoPlusShowPriceDiffs,momoMoPlusPriceDiffApplyOne,momoMoPlusPriceDiffApplyAll,
-  momoUploadFile,momoUploadKpiOnly,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,momoUploadYiMonth,
+  momoUploadFile,momoUploadF1102InvMonth,momoUploadKpiOnly,momoUploadClearJia,momoUploadRemove,momoUploadRemoveJia,momoUploadGenerate,momoUploadApply,momoUploadCancel,momoUploadYiMonth,
   momoSyncFile,momoSyncRemove,momoSyncGenerate,momoSyncApplyCost,momoSyncApplyPrice,momoSyncApplyName,momoSyncApplyDiscontinued,momoSyncApplyReactivate,momoSyncApplyNew,momoJumpShop,
   momoCleanDirtyPeriodKeys,momoMigrateProductsToCollection,momoMigrateS1103ToCollection,momoMigrateOptlogBadKeys,momoFsInvalidFieldKeys,
   momoParseReconcile,momoSplitRevenueToPeriods,momoParseReconcileSummary,momoLoadReconcile,momoSaveReconcile,
