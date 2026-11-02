@@ -2309,7 +2309,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
         const parts=pk.split('|');   // ['ec_momo_moplus_origins', shop, src]
         const oShop=parts[1], oSrc=parts[2];
         const data=momoLoadMoPlusOriginsDoc(oShop, oSrc);   // 與預覽同源
-        if(window.__cloudMoPlusOrigins && data && oShop && oSrc){ tasks.push({key:pk,run:()=>window.__cloudMoPlusOrigins.setSrc(oShop,oSrc,momoSanitizeMoPlusDoc(data))}); }   // 寫前把 '' origin key 改哨兵 → 舊 doc 不必重傳
+        if(window.__cloudMoPlusOrigins && data && oShop && oSrc){ tasks.push({key:pk,run:async()=>{ try{ await momoOriginsShadowPrePush(pk); }catch(e){} return window.__cloudMoPlusOrigins.setSrc(oShop,oSrc,momoSanitizeMoPlusDoc(data)); }}); }   // 寫前把 '' origin key 改哨兵 → 舊 doc 不必重傳。（SHADOW：推送前先唯讀記錄比對，失敗全吞、寫入內容與順序不變）
         else{ skippedProblem.push({key:pk,reason:'MO+ 逐列成本讀不到，或雲端層未就緒'}); }
         return;
       }
@@ -2538,7 +2538,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     ok.forEach(k=>{ if(k.startsWith('ec_edits|')){ try{ _editsDirtyDel(k); }catch{} try{ _editsItemsDirtyClear(k); }catch{} } });   // 編輯覆蓋值同理：真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
     ok.forEach(k=>{ if(_momoRfIsKey(k)){ try{ _momoRfDirtyDel(k); }catch{} } });   // 對帳／運費：真的推成功才清註冊表；雲端較新／讀失敗／推失敗的留著（進 failed、彈窗列出）
     ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
-    ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
+    ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} try{ momoOriginsShadowPushed(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     ok.forEach(k=>{ if(cupIsNoteKey(k)){ try{ _cupNoteKeyDirtyDel(k); _cupNoteItemsDirtyClear(k); }catch{} } });   // 酷澎備註：兩層 dirty 同一迴圈相鄰清（只清推成功的 key；失敗留著下次再推）
     ok.forEach(k=>{ if(k==='ec_pchome_recon'||k==='ec_pchome_products'||k==='ec_pchome_orders'||k==='ec_pchome_history'||k.indexOf('ec_pchome_optlog|')===0){ try{ pchomeDirtyDel(k); }catch{} } });   // PChome recon/主檔/訂單明細/優化紀錄/歷程：真的推成功才清持久 dirty（失敗留著繼續保護＋繼續算待推）
     ok.forEach(k=>{ _dirtyFailClear(k); });   // E-0a 第三塊：這把 key 真的推成功 → 清失敗記錄。報告吃 dirtyFailSnap（上方快照），本行蓋不掉本次報告；殘餘風險（同 key 別筆編輯也會洗綠）已在 modal 文案明示
@@ -14428,7 +14428,7 @@ window.__momoOriginsBaseGet=function(k){ return _momoOBaseGet(k); };            
 //     → 推已落地（前一 session／他台裝置）或本機 doc 已被逐出(orphan) 的 dirty key 永遠留著 → 每次快照都跳「本機較新未推」提示，永不消失。
 //   ⚠ 不放寬防護：只有「雲端已等於本機(推已落地) 或 本機根本不存在(orphan)」才判定 dirty 過期並清掉；
 //     「dirty 且雲端≠本機且本機存在」＝本機確實較新未推 → 仍照舊跳過覆蓋、保護本機（與 #169 原行為完全相同）。
-function momoOriginsCloudDecision(k, cloudData){
+function _momoOriginsDecideLegacy(k, cloudData){
   let local = (typeof Store!=='undefined' && Store._profitMem) ? Store._profitMem[k] : undefined;
   // ⚠ reload gap 修：_profitMem 於 reload 後可能尚未補水 → 改由 localStorage 取本機權威值（persisted、跨重整），
   //   避免 dirty 未推的逐列成本被下方「localMissing 自癒」誤判為孤兒而清 dirty＋接受雲端（＝未推值被覆蓋）。
@@ -14443,7 +14443,171 @@ function momoOriginsCloudDecision(k, cloudData){
   }
   return equal ? {action:'noop'} : {action:'accept'};                                          // 非 dirty：等值 noop / 不等接受
 }
+// 對外入口：結果【一律】是 legacy 決策（行為與改版前逐字相同）；shadow 只旁路記錄「若用 last-pushed 模型會怎麼決定」，不影響回傳值。
+function momoOriginsCloudDecision(k, cloudData){
+  const res=_momoOriginsDecideLegacy(k, cloudData);
+  try{ _momoOShadowOnSnapshot(k, cloudData, res); }catch(e){ try{ console.warn('[origins shadow] 例外（不影響行為）：',e); }catch{} }
+  return res;
+}
 window.__momoOriginsCloudDecision=momoOriginsCloudDecision;
+// ═══════════ origins last-pushed merge 模型 — SHADOW 版（2026-11-02）═══════════
+//  目標（之後才可能切換、本版【不切換】）：把 origins 從「updatedAt 較新就接受／dirty 旗標」改成 products 同款的 last-pushed 模型——
+//    只有「本機 == 我上次成功推的版本（lastPushed）」才可以安全接受雲端；本機有自己的改動就保留本機、不被雲端覆蓋。
+//  🔴 絕不使用「雲端 updatedAt 較新就自動接受」。
+//  本版 SHADOW：只讀、只記錄。不改任何寫入、不改任何接受／略過決策（回傳值永遠是 legacy 的結果）。
+//    記錄方式：記憶體 + localStorage（ec_momo_origins_shadow_log，最近 40 筆摘要）；唯一新增的持久化狀態是 baseline（ec_momo_origins_lastpushed|<key>，只存每筆的短雜湊）。
+//    baseline 只跟著「實際發生的事」走：推成功 → 設為剛推的本機版；legacy 接受雲端 → 設為該雲端版；本機==雲端 → 設為雲端版。
+//  record 粒度：doc 第一層的每個子項（skus/<sku>、freight/<期別>、products/<sku>(master)…）一筆；shop/src/updatedAt/masterAt 不算。
+//  Console：__momoOriginsShadowReport() 看紀錄與統計；await __momoOriginsShadowCompare([篩選字]) 逐 doc 唯讀比對本機 vs 雲端（不寫）。
+window.__MOMO_ORIGINS_MERGE_ENFORCE=false;   // 刻意固定 false：本版沒有任何 enforce 分支，這個旗標只是給日後切換用的標記
+const _MOMO_OLP_LS='ec_momo_origins_lastpushed';
+const _MOMO_OSHADOW_LOG_LS='ec_momo_origins_shadow_log';
+const _MOMO_O_META=new Set(['shop','src','updatedAt','masterAt']);
+let _momoOShadowLog=[];
+function _momoOHash(v){   // cyrb53（53-bit）→ base36；只用來比對相等、不是安全用途
+  const str=_momoStableStr(v); let h1=0xdeadbeef, h2=0x41c6ce57;
+  for(let i=0;i<str.length;i++){ const ch=str.charCodeAt(i); h1=Math.imul(h1^ch,2654435761); h2=Math.imul(h2^ch,1597334677); }
+  h1=Math.imul(h1^(h1>>>16),2246822507)^Math.imul(h2^(h2>>>13),3266489909); h2=Math.imul(h2^(h2>>>16),2246822507)^Math.imul(h1^(h1>>>13),3266489909);
+  return (4294967296*(2097151&h2)+(h1>>>0)).toString(36);
+}
+function momoOriginsRecords(doc){   // doc → { 'skus/ABC':hash, 'freight/2610':hash, … }
+  const out={}; if(!doc||typeof doc!=='object') return out;
+  Object.keys(doc).forEach(top=>{
+    if(_MOMO_O_META.has(top)) return;
+    const v=doc[top];
+    if(v&&typeof v==='object'&&!Array.isArray(v)) Object.keys(v).forEach(c=>{ out[top+'/'+c]=_momoOHash(v[c]); });
+    else out[top]=_momoOHash(v);
+  });
+  return out;
+}
+function momoOriginsRecordValue(doc, rk){ try{ const i=rk.indexOf('/'); return i<0?doc[rk]:(doc[rk.slice(0,i)]||{})[rk.slice(i+1)]; }catch{ return undefined; } }
+function _momoOLpGet(k){ try{ const raw=localStorage.getItem(_MOMO_OLP_LS+'|'+k); if(raw==null) return null; const m=JSON.parse(raw); return (m&&typeof m==='object'&&!Array.isArray(m))?m:null; }catch{ return null; } }
+let _momoOLpFailed=false;
+function _momoOLpSet(k, rec){ if(_momoOLpFailed) return; try{ localStorage.setItem(_MOMO_OLP_LS+'|'+k, JSON.stringify(rec)); }catch(e){ _momoOLpFailed=true; try{ console.warn('[origins shadow] baseline 存不進 localStorage（配額？）→ 本 session 不再寫 baseline（shadow 記錄會標 bootstrap），不影響任何功能：',k); }catch{} } }   // 失敗就整個 session 停手，不去擠其他功能要用的 localStorage 空間
+// 純函式：三方比對。baseRec=null ⇒ bootstrap（沒有 lastPushed，無法證明本機沒動過）。
+function momoOriginsPlanMerge(cloudRec, localRec, baseRec){
+  const bootstrap=(baseRec===null||baseRec===undefined);
+  const keys=new Set([...Object.keys(cloudRec||{}),...Object.keys(localRec||{}),...(bootstrap?[]:Object.keys(baseRec))]);
+  const onlyLocal=[], onlyCloud=[], differ=[], localChanged=[], cloudChanged=[], conflicts=[];
+  keys.forEach(k=>{
+    const l=(localRec||{})[k], c=(cloudRec||{})[k];
+    if(l===undefined&&c!==undefined) onlyCloud.push(k); else if(c===undefined&&l!==undefined) onlyLocal.push(k); else if(l!==c) differ.push(k);
+    if(!bootstrap){ const b=baseRec[k]; const lc=(l!==b), cc=(c!==b); if(lc) localChanged.push(k); if(cc) cloudChanged.push(k); if(lc&&cc&&l!==c) conflicts.push(k); }
+  });
+  const identical=!onlyLocal.length&&!onlyCloud.length&&!differ.length;
+  const cloudOnlyChange=cloudChanged.filter(k=>!localChanged.includes(k));   // 純雲端改動（可安全併入）
+  // 現行整 doc 覆蓋推送會蓋掉／刪掉的雲端內容：非 bootstrap ＝ 雲端有改、本機沒改的記錄；bootstrap ＝ 無法分辨，只能列出所有差異
+  const clobber=bootstrap?onlyCloud.concat(differ):cloudOnlyChange;
+  return { mode:bootstrap?'bootstrap':'lastpushed', identical, onlyLocal, onlyCloud, differ, localChanged, cloudChanged, conflicts, cloudOnlyChange, clobber };
+}
+// 若採 last-pushed 模型，收到雲端快照時會怎麼決定（純函式）：noop｜accept｜keep-local
+function momoOriginsNewDecision(plan, localMissing){
+  if(plan.identical) return {action:'noop'};
+  if(localMissing) return {action:'accept', why:'本機沒有這份'};
+  if(plan.mode==='lastpushed' && plan.localChanged.length===0) return {action:'accept', why:'本機==lastPushed'};
+  return {action:'keep-local', why: plan.mode==='bootstrap'?'沒有 lastPushed，無法證明本機沒動過':'本機有自己的改動（'+plan.localChanged.length+' 筆）'+(plan.conflicts.length?'，其中 '+plan.conflicts.length+' 筆雲端也改了不同值':'')};
+}
+function _momoOLocalDoc(k){
+  let local=(typeof Store!=='undefined'&&Store._profitMem)?Store._profitMem[k]:undefined;
+  if(local==null){ try{ const t=localStorage.getItem(k); if(t!=null) local=JSON.parse(t); }catch{} }
+  return local;
+}
+const _MOMO_OEQ={ noop:'noop', accept:'accept', skip:'keep-local' };   // legacy 動作 ↔ 新模型動作（對得上＝一致）
+function _momoOShadowPush(e){   // 記錄（記憶體 + localStorage 摘要）；不一致或有風險的才印 console
+  _momoOShadowLog.push(e); if(_momoOShadowLog.length>200) _momoOShadowLog.shift();
+  try{ const keep=_momoOShadowLog.slice(-40).map(x=>({t:x.t,k:x.k,event:x.event,old:x.old,nu:x.nu,diverge:x.diverge,why:x.why,n:x.n})); localStorage.setItem(_MOMO_OSHADOW_LOG_LS, JSON.stringify(keep)); }catch{}
+  _momoOShadowStat(e);
+  if(e.diverge||(e.n&&(e.n.clobber||e.n.conflicts))){ try{ console.log('%c[origins SHADOW] '+e.k+'｜'+e.event+'｜現行='+e.old+' → last-pushed 模型='+e.nu+(e.why?'（'+e.why+'）':'')+(e.diverge?'　⚠ 不一致':''),'color:#2563eb;font-weight:700',e.n); }catch{} }
+}
+// 長期累計（給「跑兩週再看」＋各人匯出用）：每台電腦自己存在 localStorage，不上雲。
+//   stats＝快照事件的 現行→新模型 次數（含一致的，當分母）；diverges＝不一致事件（精簡、最近 100 筆）。體積固定很小（< 50KB）。
+const _MOMO_OSHADOW_STAT_LS='ec_momo_origins_shadow_stats', _MOMO_OSHADOW_DIV_LS='ec_momo_origins_shadow_diverge';
+function _momoOShadowStat(e){
+  if(e.event!=='snapshot') return;
+  try{
+    const st=JSON.parse(localStorage.getItem(_MOMO_OSHADOW_STAT_LS)||'null')||{ since:Date.now(), counts:{} };
+    const key=String(e.old).replace('(healed)','')+'→'+e.nu; st.counts[key]=(st.counts[key]||0)+1;
+    localStorage.setItem(_MOMO_OSHADOW_STAT_LS, JSON.stringify(st));
+    if(e.diverge){
+      const a=JSON.parse(localStorage.getItem(_MOMO_OSHADOW_DIV_LS)||'[]'); const n=e.n||{}, sm=n.sample||{};
+      a.push({ t:e.t, k:e.k, old:e.old, nu:e.nu, why:e.why, mode:n.mode, localChanged:n.localChanged, cloudChanged:n.cloudChanged, conflicts:n.conflicts, onlyLocal:n.onlyLocal, onlyCloud:n.onlyCloud, differ:n.differ, sample:{ onlyLocal:(sm.onlyLocal||[]).slice(0,3), onlyCloud:(sm.onlyCloud||[]).slice(0,3), differ:(sm.differ||[]).slice(0,3), conflicts:(sm.conflicts||[]).slice(0,3) } });
+      while(a.length>100) a.shift();
+      localStorage.setItem(_MOMO_OSHADOW_DIV_LS, JSON.stringify(a));
+    }
+  }catch{}
+}
+function _momoOSummary(plan){ const cut=a=>a.slice(0,10); return { mode:plan.mode, onlyLocal:plan.onlyLocal.length, onlyCloud:plan.onlyCloud.length, differ:plan.differ.length, localChanged:plan.localChanged.length, cloudChanged:plan.cloudChanged.length, conflicts:plan.conflicts.length, clobber:plan.clobber.length, sample:{ onlyLocal:cut(plan.onlyLocal), onlyCloud:cut(plan.onlyCloud), differ:cut(plan.differ), conflicts:cut(plan.conflicts) } }; }
+const _momoOQueue=[]; let _momoOQueueBusy=false;
+function _momoOQueueRun(fn){ _momoOQueue.push(fn); if(_momoOQueueBusy) return; _momoOQueueBusy=true; const step=()=>{ const f=_momoOQueue.shift(); if(!f){ _momoOQueueBusy=false; return; } try{ f(); }catch(e){} setTimeout(step,40); }; setTimeout(step,300); }   // 開站十幾份 doc 一起來：錯開算、別卡主執行緒
+// 雲端快照到：legacy 已決定 res；這裡算「新模型會怎麼決定」並記下，baseline 跟著實際發生的事走。
+function _momoOShadowOnSnapshot(k, cloudData, res){
+  if(window.__MOMO_ORIGINS_SHADOW===false) return;
+  if(res && res.action==='skip'){   // 現行判定「本機較新未推」→ 本機不動；順便記錄新模型的看法（需要同步算本機）
+    const local=_momoOLocalDoc(k); const cloudRec=momoOriginsRecords(cloudData), localRec=momoOriginsRecords(local);
+    const plan=momoOriginsPlanMerge(cloudRec, localRec, _momoOLpGet(k)); const nd=momoOriginsNewDecision(plan, local==null);
+    _momoOShadowPush({ t:Date.now(), k, event:'snapshot', old:'skip', nu:nd.action, why:nd.why, diverge:nd.action!==_MOMO_OEQ.skip, n:_momoOSummary(plan) });
+    return;
+  }
+  if(res && res.action==='accept'){   // 現行會用雲端覆蓋本機：必須在覆蓋前（同步）取本機版本來比
+    const local=_momoOLocalDoc(k); const cloudRec=momoOriginsRecords(cloudData), localRec=momoOriginsRecords(local);
+    const plan=momoOriginsPlanMerge(cloudRec, localRec, _momoOLpGet(k)); const nd=momoOriginsNewDecision(plan, local==null);
+    _momoOShadowPush({ t:Date.now(), k, event:'snapshot', old:'accept'+(res.healed?'(healed)':''), nu:nd.action, why:nd.why, diverge:nd.action==='keep-local', n:_momoOSummary(plan) });
+    _momoOLpSet(k, cloudRec);   // 現實：本機即將等於雲端 → baseline 同步（即使新模型會保留本機，baseline 仍反映實際發生的事）
+    return;
+  }
+  // noop（本機==雲端）：只需讓 baseline 對上雲端（沒有就建、過期就更新）；錯開執行
+  _momoOQueueRun(()=>{ const cr=momoOriginsRecords(cloudData); const lp=_momoOLpGet(k); if(!lp||JSON.stringify(lp)!==JSON.stringify(cr)) _momoOLpSet(k, cr); });
+}
+// 推送前（syncToCloud 的 origins 任務會先呼叫；最多等 2 秒、錯誤全吞）：讀雲端現值，記錄「現行整 doc 覆蓋」會蓋掉什麼。只讀。
+async function momoOriginsShadowPrePush(k){
+  if(window.__MOMO_ORIGINS_SHADOW===false) return;
+  const pp=k.split('|'); const shop=pp[1], src=pp[2]; if(!window.__cloudMoPlusOrigins) return;
+  const snap=await Promise.race([window.__cloudMoPlusOrigins.getDoc(shop,src), new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),2000))]);   // 同步是逐份序列推：卡網路時每份最多多 2 秒
+  const cloud=snap&&snap.exists&&snap.exists()?(snap.data()||{}):null; const local=_momoOLocalDoc(k);
+  const plan=momoOriginsPlanMerge(momoOriginsRecords(cloud), momoOriginsRecords(local), _momoOLpGet(k));
+  _momoOShadowPush({ t:Date.now(), k, event:'push-pre', old:'整doc覆蓋', nu:plan.clobber.length?'merge會保留 '+plan.clobber.length+' 筆雲端內容':'無差異', why:plan.mode, diverge:false, n:_momoOSummary(plan) });
+}
+function momoOriginsShadowPushed(k){   // 推成功：baseline＝剛推上去的本機版
+  if(window.__MOMO_ORIGINS_SHADOW===false) return;
+  const local=_momoOLocalDoc(k); if(local) _momoOLpSet(k, momoOriginsRecords(local));
+}
+window.__momoOriginsShadowPrePush=momoOriginsShadowPrePush; window.__momoOriginsShadowPushed=momoOriginsShadowPushed;   // 診斷／驗證用（推送路徑內部也直接呼叫這兩支）
+window.__momoOriginsShadowReport=function(){
+  const rows=_momoOShadowLog.map(x=>({時間:new Date(x.t).toLocaleTimeString(),key:x.k,事件:x.event,現行:x.old,新模型:x.nu,不一致:x.diverge?'⚠':'',說明:x.why||'',差異:x.n?('只本機'+x.n.onlyLocal+'／只雲端'+x.n.onlyCloud+'／值不同'+x.n.differ+'／衝突'+x.n.conflicts):''}));
+  try{ console.table(rows); }catch{}
+  return { total:_momoOShadowLog.length, diverge:_momoOShadowLog.filter(x=>x.diverge).length, persisted:(()=>{ try{ return JSON.parse(localStorage.getItem(_MOMO_OSHADOW_LOG_LS)||'[]').length; }catch{ return 0; } })(), log:_momoOShadowLog };
+};
+// 匯出本機累計紀錄成檔案（每位會上傳 MO+ 對帳明細的同事各自在自己的電腦跑一次）：重點數字＝「現行 accept、新模型 keep-local」筆數。
+//   檔案只含統計與不一致事件摘要（key／筆數／最多 3 筆 record 名稱），不含任何成本或銷售數值；不上傳雲端，只存成下載檔。
+window.__momoOriginsShadowExport=function(){
+  let st=null, div=[]; try{ st=JSON.parse(localStorage.getItem(_MOMO_OSHADOW_STAT_LS)||'null'); }catch{} try{ div=JSON.parse(localStorage.getItem(_MOMO_OSHADOW_DIV_LS)||'[]'); }catch{}
+  const counts=(st&&st.counts)||{}; const u=(window.App&&window.App.currentUser)||{};
+  const out={ user:u.username||'', name:u.name||'', exportedAt:new Date().toISOString(), appVersion:(document.querySelector('meta[name=app-version]')||{}).content||'',
+    since:st&&st.since?new Date(st.since).toISOString():'', 現行accept_新模型keepLocal:(counts['accept→keep-local']||0), 現行skip_新模型keepLocal:(counts['skip→keep-local']||0),
+    counts, 不一致事件_最近100筆:div, 本session紀錄:_momoOShadowLog.length };
+  try{ const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='origins-shadow_'+(u.username||'unknown')+'_'+new Date().toISOString().slice(0,10)+'.json'; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },500); }catch(e){ try{ console.warn('[origins shadow] 下載檔案失敗，請手動複製下方物件',e); }catch{} }
+  try{ console.log('%c[origins SHADOW] 現行 accept、新模型 keep-local：'+(counts['accept→keep-local']||0)+' 次（自 '+(out.since||'尚無紀錄')+' 起）','color:#2563eb;font-weight:700'); }catch{}
+  return out;
+};
+// 唯讀逐 doc 比對：本機（_profitMem→localStorage）vs 雲端（getDoc）vs baseline。回每份 doc 一列 + 差異記錄的實際值（前 5 筆）。不寫任何東西。
+window.__momoOriginsShadowCompare=async function(filter){
+  const keys=new Set(); const pref='ec_momo_moplus_origins|';
+  try{ if(Store._profitMem) Object.keys(Store._profitMem).forEach(x=>{ if(x.indexOf(pref)===0) keys.add(x); }); }catch{}
+  try{ for(let i=0;i<localStorage.length;i++){ const x=localStorage.key(i); if(x&&x.indexOf(pref)===0) keys.add(x); } }catch{}
+  const out=[];
+  for(const k of [...keys].sort()){
+    if(filter && k.indexOf(filter)<0) continue;
+    const pp=k.split('|'); let cloud=null, err='';
+    try{ const snap=await window.__cloudMoPlusOrigins.getDoc(pp[1],pp[2]); cloud=snap.exists()?(snap.data()||{}):null; }catch(e){ err=String((e&&e.message)||e); }
+    const local=_momoOLocalDoc(k);
+    if(err){ out.push({key:k,error:err}); continue; }
+    const plan=momoOriginsPlanMerge(momoOriginsRecords(cloud), momoOriginsRecords(local), _momoOLpGet(k)); const nd=momoOriginsNewDecision(plan, local==null);
+    const diffs=plan.differ.concat(plan.onlyLocal,plan.onlyCloud).slice(0,5).map(rk=>({record:rk, local:momoOriginsRecordValue(local,rk), cloud:momoOriginsRecordValue(cloud,rk)}));
+    out.push({ key:k, 模式:plan.mode, 新模型:nd.action, 說明:nd.why||'', 只本機:plan.onlyLocal.length, 只雲端:plan.onlyCloud.length, 值不同:plan.differ.length, 本機改動:plan.localChanged.length, 雲端改動:plan.cloudChanged.length, 衝突:plan.conflicts.length, 差異前5筆:diffs });
+  }
+  try{ console.table(out.map(r=>Object.assign({},r,{差異前5筆:undefined}))); }catch{}
+  return out;
+};
 const _momoOSkipShown={};   // 本機較新提示：同一 key 一個 session 只跳一次（key -> 1）
 function _momoLoggedIn(){ try{ return !!(window.App && window.App.currentUser); }catch{ return false; } }
 window.__momoNotifyOriginsSkip=function(k){   // 訂閱因 dirty 跳過覆蓋 → 不靜默、通知使用者
