@@ -3,12 +3,16 @@
  * 取代 Google 試算表「元創數位公司庫存&MOMO庫存統計表」。選單在「辦公室」群組的採購與商開之間，
  *   但【不是部門】：路由 'inventory'（不走 office-），所以不碰 ec.departments / canAccessOffice / OFFICE_FEATURES。
  * 資料：Firestore 文件 app/inventory，經 window.__cloudInventory（firebase.js）讀寫，不進 Store / app/main。
- *   { schema:1, months:{ 'YYYY-MM':{ companyWh, inTransit, momoWh, countNoteShopee, countNoteMomo, orderAmount, note,
- *     createdAt, createdBy, updatedAt, updatedBy } } }
+ *   { schema:1, months:{ 'YYYY-MM':{ companyWh, inTransit, momoWh, coupangWh, pchomeWh, countNoteShopee, countNoteMomo,
+ *     countNoteCoupang, countNotePchome, orderAmount, note, createdAt, createdBy, updatedAt, updatedBy } } }
+ *   （coupangWh / pchomeWh / countNoteCoupang / countNotePchome 是 2026-11 加的；2026 以前的月份留空、不補 0）
  *   寫入只送有變的那一格：writePaths([[['months',月,欄位],值], [['months',月,'updatedAt'],TS], [['months',月,'updatedBy'],{…}]])，
  *   兩人同時改不同格不互蓋。清空數字＝寫 null（不刪欄位）。不能刪除月份。
  * 總計、較上月一律即時算、不存（_invTotal / _invDiff）：
- *   總計＝公司倉＋在途存貨＋MOMO倉，空白當 0；三格都空白 ⇒ 總計空白。較上月＝本月總計 − 上一個日曆月總計，任一邊空白 ⇒ 空白。
+ *   總計＝公司倉＋在途存貨＋MOMO倉＋酷澎倉＋PChome倉，空白當 0（用「分」整數加總）。
+ *   🔴 但「公司倉」空白的月份＝「未填齊」：總計、較上月都不算（_invTotal 回 null、格子顯示灰色「未填齊」）。
+ *   較上月＝本月總計 − 上一個日曆月總計，任一邊「未填齊」或沒有 ⇒ 不算。
+ *   上方卡片的「本月」與走勢圖只用「已填齊」（公司倉有數字）的月份：_invLatestYm＝最新一個公司倉有數字的月份，未填齊的月份不畫點。
  *   ⚠ 財務儀表板之後讀 app/inventory 自己算總計，規則必須跟這裡一樣（見 CLAUDE.md）。
  * 編輯：照 KPI 填寫模式（profit.js kpiFillKey / kpiFillBlur）——Enter 存檔並往下一列、Esc 還原、值有變失焦就存；
  *   清空只有 Enter 算數（失焦時空白＝取消）。打錯（不是數字）紅框、不存。總計與較上月不是輸入框。
@@ -24,7 +28,7 @@
  *   只在記憶體；切換時只重畫圖表。
  * 第 3 塊：匯入舊 Google 試算表，Console 打 __inventoryImportLegacy()（只限管理員；先預覽，再 { commit: true } 才寫）。
  *   資料不進程式碼；匯入的月份多 source:'legacy-sheet'、legacyRow 兩個欄位（畫面不顯示）。
- * 盤點欄只留日期：兩個盤點欄存檔時先經過 _invCleanCountNote（「蝦皮04/30填」→「4/30」，整理不了照原文存）；
+ * 盤點欄只留日期：四個盤點欄（蝦皮／MOMO／酷澎／PChome）存檔時先經過 _invCleanCountNote（「蝦皮04/30填」→「4/30」，整理不了照原文存）；
  *   舊資料用 Console 打 __inventoryCleanCountNotes()（只限管理員；先預覽，再 { commit: true } 才寫）。
  */
 const App = window.App;
@@ -37,13 +41,17 @@ const INV_AUTO_HEAD = Object.freeze({
   countNoteMomo: '資料來源：上傳 F1102 當天的日期，自動填入。每月 1～5 號上傳會填入上個月那一列；可手動修改。',
 });
 const INV_COLS = Object.freeze([
-  { k: 'companyWh',       l: '公司倉',       t: 'num' },
+  { k: 'companyWh',       l: '公司',         t: 'num' },   // 表頭標題不寫「倉」（欄位意思一樣、省寬度）
   { k: 'inTransit',       l: '在途存貨',     t: 'num' },
-  { k: 'momoWh',          l: 'MOMO倉',       t: 'num' },
+  { k: 'momoWh',          l: 'MOMO',         t: 'num' },
+  { k: 'coupangWh',       l: '酷澎',         t: 'num' },
+  { k: 'pchomeWh',        l: 'PChome',       t: 'num' },
   { k: '_total',          l: '總計',         t: 'auto' },
   { k: '_diff',           l: '較上月',       t: 'auto' },
   { k: 'countNoteShopee', l: '盤點（蝦皮）', t: 'txt' },
   { k: 'countNoteMomo',   l: '盤點（MOMO）', t: 'txt' },
+  { k: 'countNoteCoupang', l: '盤點（酷澎）', t: 'txt' },
+  { k: 'countNotePchome', l: '盤點（PChome）', t: 'txt' },
   { k: 'orderAmount',     l: '叫貨金額',     t: 'num' },
   { k: 'note',            l: '備註',         t: 'txt' },
 ]);
@@ -55,24 +63,24 @@ const INV_UNIT = '單位：元（成本，含進口稅費與運費，不含 5% �
 // 「📖 使用說明」彈窗內容（App.openGuide，結構同對帳 RECON_GUIDE：p / h＋ol / warn；只有一句的段落用 h＋p，不編號）。所有登入者都看得到。
 //   🔴 寫到程式行為的句子（盤點自動整理、卡片月份、走勢圖期間）改程式時要一起改。
 const INV_GUIDE = Object.freeze([
-  { h: '這頁是什麼', p: '取代舊的「庫存統計表」，記錄每月公司倉、在途存貨、MOMO倉的庫存金額。' },
+  { h: '這頁是什麼', p: '取代舊的「庫存統計表」，記錄每月公司倉、在途存貨、MOMO倉、酷澎倉、PChome倉的庫存金額。' },
   { h: '單位', p: '元（成本，含進口稅費與運費，不含 5% 營業稅）。' },
   { h: '每月什麼時候填', ol: [
     '每月 1 日早上莫筆克匯出庫存後，填上個月的數字。',
     '表裡還沒有那個月份時，按右上「＋ 新增 YYYY/MM」。',
   ] },
   { h: '各欄怎麼填', ol: [
-    '公司倉、在途存貨、MOMO倉：填當月月底的庫存金額（數字）。',
+    '公司倉、在途存貨、MOMO倉、酷澎倉、PChome倉：填當月月底的庫存金額（數字）。',
     '叫貨金額：填當月新增叫貨的總金額（數字）。',
-    '盤點（蝦皮）、盤點（MOMO）：只填日期，例如 10/1。打「蝦皮10/1填」也會自動整理成 10/1。',
+    '盤點（蝦皮）、盤點（MOMO）、盤點（酷澎）、盤點（PChome）：只填日期，例如 10/1。打「蝦皮10/1填」「酷澎11/2」也會自動整理成日期（各欄只會去掉自己通路的名字）。',
     '備註：自由填。',
     '點格子直接改，Enter 存檔、Esc 取消。',
   ] },
-  { h: '自動算的欄位', p: '總計、較上月是自動算的，不能改。' },
-  { h: '標「自動」的格子', p: 'MOMO倉、盤點（MOMO）會在每月 1～5 號上傳 F1102 後自動填入上個月（標「自動」），可手動修改。' },
+  { h: '自動算的欄位', p: '總計（五個倉加總，空白當 0）、較上月是自動算的，不能改。公司倉還沒填時，總計與較上月顯示「未填齊」。' },
+  { h: '右上角有小圓點的格子', p: 'MOMO倉、盤點（MOMO）會在每月 1～5 號上傳 F1102 後自動填入上個月（格子右上角有小圓點，滑鼠移上去看來源），可手動修改；手動改過小圓點就消失。' },
   { h: '上方卡片與走勢圖', ol: [
-    '卡片顯示最新一個有填庫存數字的月份。',
-    '走勢圖可切換近 12 個月／近 24 個月／全部。',
+    '卡片顯示最新一個公司倉已填的月份；走勢圖也只畫公司倉已填的月份（未填齊的月份不畫點）。',
+    '走勢圖可切換近 12 個月／近 24 個月／全部，線可選總計、公司倉、在途存貨、MOMO倉、酷澎倉、PChome倉。',
   ] },
   { warn: '⚠ 過渡期：財務儀表板目前仍讀舊的庫存統計表（E 欄總計、I 欄叫貨金額），所以舊表也要照常填，直到另行通知。' },
 ]);
@@ -83,6 +91,8 @@ const INV_SERIES = Object.freeze([
   { k: 'companyWh', l: '公司倉',   color: '--info' },
   { k: 'inTransit', l: '在途存貨', color: '--warn' },
   { k: 'momoWh',    l: 'MOMO倉',   color: '--success' },
+  { k: 'coupangWh', l: '酷澎倉',   color: '--danger' },
+  { k: 'pchomeWh',  l: 'PChome倉', color: '--sidebar-2' },
 ]);
 const INV_CHART_ID = 'inv-chart';
 
@@ -114,12 +124,13 @@ function _invNextYm(ym) {
   return m === 12 ? (y + 1) + '-01' : y + '-' + String(m + 1).padStart(2, '0');
 }
 const _invIsNum = v => typeof v === 'number' && Number.isFinite(v);
-// 總計：三格都不是數字 ⇒ null；否則加總（不是數字的當 0）。用「分」整數加總，避開浮點尾差。
+// 「已填齊」＝公司倉有數字。公司倉空白的月份＝「未填齊」：總計、較上月都不算，卡片與走勢圖也不用它。
+const _invIsComplete = row => !!row && typeof row === 'object' && _invIsNum(row.companyWh);
+const INV_TOTAL_FIELDS = Object.freeze(['companyWh', 'inTransit', 'momoWh', 'coupangWh', 'pchomeWh']);
+// 總計：未填齊（公司倉空白）⇒ null；否則五個倉加總（不是數字的當 0）。用「分」整數加總，避開浮點尾差。
 function _invTotal(row) {
-  if (!row || typeof row !== 'object') return null;
-  const vs = [row.companyWh, row.inTransit, row.momoWh];
-  if (!vs.some(_invIsNum)) return null;
-  return vs.reduce((s, v) => s + (_invIsNum(v) ? Math.round(v * 100) : 0), 0) / 100;
+  if (!_invIsComplete(row)) return null;
+  return INV_TOTAL_FIELDS.reduce((s, k) => s + (_invIsNum(row[k]) ? Math.round(row[k] * 100) : 0), 0) / 100;
 }
 // 較上月：本月與上一個日曆月都有總計才算
 function _invDiff(months, ym) {
@@ -177,13 +188,13 @@ function _invCur(months, ym, f) {
 }
 // 這一格這次要不要寫、寫什麼。純函式。回 {kind:'write', v} / {kind:'same'} / {kind:'cancel'} / {kind:'invalid', msg}
 //   fromBlur：失焦觸發（空白＝取消，不清空）；Enter 觸發時空白＝清空。
-// 盤點欄只留日期（純函式）。ch＝這一欄的通路：'shopee'（盤點（蝦皮））或 'momo'（盤點（MOMO））。回 { v, ok }：
-//   去頭尾空白（含全形空白）→ 只去掉【這一欄自己的】通路名（蝦皮欄：蝦皮；MOMO 欄：MOMO / MO，不分大小寫）及後面的空白、冒號
+// 盤點欄只留日期（純函式）。ch＝這一欄的通路：'shopee' / 'momo' / 'coupang' / 'pchome'（對應四個盤點欄）。回 { v, ok }：
+//   去頭尾空白（含全形空白）→ 只去掉【這一欄自己的】通路名（蝦皮欄：蝦皮；MOMO 欄：MOMO / MO；酷澎欄：酷澎 / Coupang；PChome 欄：PChome / PC，不分大小寫）及後面的空白、冒號
 //   → 去掉結尾的「填」→ 剩下是 M/D（M 1～12、D 1～31，可有前導 0）⇒ { v:'M/D'（不帶前導 0）, ok:true }。
 //   剩下不是 M/D（例如「失真」「13/1」）⇒ 原文不改（只去頭尾空白）、ok:false（無法整理）。
 //   開頭是【另一個】通路名（資料可能放錯欄，例如蝦皮欄的「MO 9/30」）不會被剝掉，剩下的就不是 M/D ⇒ 自然落到「無法整理」，不必另外判斷。
 //   空白 ⇒ { v:'', ok:true }。D 不檢查大小月（2/30 照樣整理），只是備註、沒有年份可判斷閏年。
-const INV_CN_OWN = { shopee: /^蝦皮[\s\u3000:：]*/, momo: /^(momo|mo)[\s\u3000:：]*/i };
+const INV_CN_OWN = { shopee: /^蝦皮[\s\u3000:：]*/, momo: /^(momo|mo)[\s\u3000:：]*/i, coupang: /^(酷澎|coupang)[\s\u3000:：]*/i, pchome: /^(pchome|pc)[\s\u3000:：]*/i };
 function _invCleanCountNote(s, ch) {
   const orig = String(s == null ? '' : s).replace(/^[\s\u3000]+|[\s\u3000]+$/g, '');
   if (orig === '') return { v: '', ok: true };
@@ -192,7 +203,7 @@ function _invCleanCountNote(s, ch) {
   if (m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31) return { v: (+m[1]) + '/' + (+m[2]), ok: true };
   return { v: orig, ok: false };
 }
-const INV_CN_FIELDS = Object.freeze({ countNoteShopee: 'shopee', countNoteMomo: 'momo' });
+const INV_CN_FIELDS = Object.freeze({ countNoteShopee: 'shopee', countNoteMomo: 'momo', countNoteCoupang: 'coupang', countNotePchome: 'pchome' });
 function _invDecide(col, raw, cur, fromBlur) {
   let t = String(raw == null ? '' : raw).trim();
   if (col.t === 'num') {
@@ -220,10 +231,10 @@ function _invCellPairs(ym, f, v, by, TS) {
   if (f === 'momoWh' || f === 'countNoteMomo') pairs.push([['months', ym, f + 'Src'], { src: 'manual', by, at: Date.now() }]);
   return pairs;
 }
-// 卡片的「本月」＝最新一個三倉有任何數字（總計不是空白）的月份；全部都空 ⇒ null（不顯示卡片）
+// 卡片的「本月」＝最新一個「已填齊」（公司倉有數字）的月份；全部都沒有 ⇒ null（不顯示卡片）
 function _invLatestYm(months) {
   const keys = Object.keys(months || {}).filter(_invIsYm).sort().reverse();
-  return keys.find(k => _invTotal(months[k]) != null) || null;
+  return keys.find(k => _invIsComplete(months[k])) || null;
 }
 function _invCardsData(months) {
   const ym = _invLatestYm(months);
@@ -257,11 +268,11 @@ function _invCountNoteText(cnt) {
   return '最近盤點：' + parts.join('／') + '（' + _invYmLabel(cnt.ym) + '）';
 }
 // 圖表資料：X 軸＝最早到最新的每一個日曆月（中間沒有的月份也列出、值 null ⇒ 斷線）；
-//   每條線的值：總計用 _invTotal，三倉用原數字；不是數字 ⇒ null。
+//   每條線的值：總計用 _invTotal，各倉用原數字；不是數字 ⇒ null。未填齊（公司倉空白）的月份所有線都是 null（不畫點）。
 //   range：'12' / '24' / 'all'（沒給＝全部）。
-//   終點一律是「最新一個有數字的月份」——跟統計卡的「本月」同一個判斷（_invLatestYm：三倉至少一格有數字），
+//   終點一律是「最新一個已填齊的月份」——跟統計卡的「本月」同一個判斷（_invLatestYm：公司倉有數字），
 //     所以月初剛新增、還沒填的月份不會被算進去（不會出現最後一點是空的）。「全部」也一樣。
-//     三倉都沒有數字（_invLatestYm 是 null）⇒ 照原本以最新月份 key 為終點（圖上全是空的，同之前的空狀態）。
+//     沒有任何已填齊的月份（_invLatestYm 是 null）⇒ 照原本以最新月份 key 為終點（圖上全是空的，同之前的空狀態）。
 //   近 12／近 24 個月：從終點往回取 N 個日曆月；資料不足 N 個月就從最早的月份開始。全部：最早的月份到終點。
 function _invChartData(months, range) {
   const keys = Object.keys(months || {}).filter(_invIsYm).sort();
@@ -275,8 +286,9 @@ function _invChartData(months, range) {
   INV_SERIES.forEach(sr => {
     series[sr.k] = yms.map(ym => {
       const row = months[ym];
+      if (!_invIsComplete(row)) return null;
       if (sr.k === 'total') return _invTotal(row);
-      return row && _invIsNum(row[sr.k]) ? row[sr.k] : null;
+      return _invIsNum(row[sr.k]) ? row[sr.k] : null;
     });
   });
   return { labels: yms.map(_invYmLabel), yms, series };
@@ -369,6 +381,9 @@ function _invSrcTip(row, k) {
     : '自動：上傳 F1102（' + (at || '時間不明') + ' 匯出）當天自動填入；手動改這格後會變成手填';
 }
 function _invCellHtml(col, ym, months, ro) {
+  if ((col.k === '_total' || col.k === '_diff') && !_invIsComplete(months[ym])) {
+    return '<td class="inv-auto inv-incomplete" title="公司倉還沒填">未填齊</td>';
+  }
   if (col.k === '_total') return `<td class="inv-auto">${escapeHtml(_invFmtNum(_invTotal(months[ym])))}</td>`;
   if (col.k === '_diff') {
     const d = _invDiff(months, ym);
@@ -378,7 +393,7 @@ function _invCellHtml(col, ym, months, ro) {
   const raw = col.t === 'num' ? (cur == null ? '' : String(cur)) : cur;
   const disp = col.t === 'num' ? _invFmtNum(cur) : cur;
   const saving = _invSaving.has(ym + '|' + col.k);
-  return `<td class="inv-cell inv-cell-${col.t}"><input class="inv-in inv-in-${col.t}${INV_CN_FIELDS[col.k] ? ' inv-in-cnt' : ''}${saving ? ' inv-saving' : ''}" type="text"`
+  return `<td class="inv-cell inv-cell-${col.t}${_invSrcTip(months[ym], col.k) ? ' inv-cell-autofill' : ''}"><input class="inv-in inv-in-${col.t}${INV_CN_FIELDS[col.k] ? ' inv-in-cnt' : ''}${saving ? ' inv-saving' : ''}" type="text"`
     + (col.t === 'num' ? ' inputmode="decimal"' : ` maxlength="${INV_TXT_MAX}"`)
     + ` autocomplete="off" aria-label="${escapeHtml(_invYmLabel(ym) + ' ' + col.l)}"`
     + ` data-inv-ym="${escapeHtml(ym)}" data-inv-f="${escapeHtml(col.k)}" data-raw="${escapeHtml(raw)}" data-disp="${escapeHtml(disp)}"`
@@ -400,9 +415,18 @@ function _invTableHtml(months, ro) {
   //   表頭跟著該欄內容的對齊方向：數字欄靠右（inv-th-num）、兩個盤點欄置中（inv-th-cnt）、備註靠左（inv-th-txt）
   //   「自動」標籤放在字【前面】：靠右時切齊數字右緣的是「總計」「較上月」這幾個字，不是標籤
   const thCls = c => (c.t === 'txt' ? (INV_CN_FIELDS[c.k] ? 'inv-th-cnt' : 'inv-th-txt') : 'inv-th-num') + (c.t === 'auto' ? ' inv-th-auto' : '');
-  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}">${c.t === 'auto' ? '<span class="inv-auto-tag">自動</span>' : INV_AUTO_HEAD[c.k] ? '<span class="inv-auto-tag">自動</span>' : ''}${escapeHtml(c.l)}${INV_AUTO_HEAD[c.k] ? `<span class="inv-info" tabindex="0" aria-label="資料來源說明" title="${escapeHtml(INV_AUTO_HEAD[c.k])}">!</span>` : ''}</th>`).join('')}</tr>`;
-  // 固定欄寬（css .inv-table 是 table-layout:fixed）：月份、六個數字欄、兩個盤點各有寬度，備註拿剩下的
-  const colCls = c => (c.k === 'note' ? 'inv-col-note' : c.t === 'txt' ? 'inv-col-cnt' : 'inv-col-num');
+  //   版面（不要出現左右捲軸）：表頭【不放「自動」小字】——總計／較上月的說明放在表頭 title；MOMO倉、盤點（MOMO）標題後面的「!」說明資料來源；
+  //   自動填入的格子在格子右上角用一顆小圓點標示（_invCellHtml，.inv-cell-autofill）。盤點欄標題拆成「盤點」＋通路名兩行，欄寬才縮得下。
+  const INV_AUTO_COL_TIP = { _total: '自動計算：公司倉＋在途存貨＋MOMO倉＋酷澎倉＋PChome倉（空白當 0）。公司倉還沒填時顯示「未填齊」。', _diff: '自動計算：本月總計 − 上個月總計。本月或上月未填齊時不算。' };
+  const thLabel = c => {
+    const m = INV_CN_FIELDS[c.k] && /^盤點（(.+)）$/.exec(c.l);
+    const info = INV_AUTO_HEAD[c.k] ? `<span class="inv-info" tabindex="0" aria-label="資料來源說明" title="${escapeHtml(INV_AUTO_HEAD[c.k])}">!</span>` : '';
+    if (m) return '<span class="inv-th-l">盤點</span><span class="inv-th-l">' + escapeHtml(m[1]) + info + '</span>';
+    return '<span class="inv-th-l">' + escapeHtml(c.l) + info + '</span>';
+  };
+  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}"${INV_AUTO_COL_TIP[c.k] ? ` title="${escapeHtml(INV_AUTO_COL_TIP[c.k])}"` : ''}>${thLabel(c)}</th>`).join('')}</tr>`;
+  // 固定欄寬（css .inv-table 是 table-layout:fixed）：月份、八個數字欄、四個盤點各有寬度，備註拿剩下的；整張表最窄約 1190px（視窗內容區 ≥ 此寬就不會有左右捲軸）
+  const colCls = c => (c.k === 'note' ? 'inv-col-note' : c.t === 'txt' ? (INV_AUTO_HEAD[c.k] ? 'inv-col-cnt inv-col-cnt-auto' : c.k === 'countNotePchome' ? 'inv-col-cnt inv-col-cnt-pc' : 'inv-col-cnt') : (c.k === '_total' ? 'inv-col-num inv-col-num-total' : c.k === '_diff' ? 'inv-col-num inv-col-num-diff' : c.k === 'companyWh' ? 'inv-col-num inv-col-num-co' : c.k === 'momoWh' ? 'inv-col-num inv-col-num-momo' : (c.k === 'coupangWh' || c.k === 'pchomeWh') ? 'inv-col-num inv-col-num-sm' : 'inv-col-num'));   // 表頭有「自動」標籤＋「!」的盤點欄（MOMO）要寬一點
   const cols = `<colgroup><col class="inv-col-ym">${INV_COLS.map(c => `<col class="${colCls(c)}">`).join('')}</colgroup>`;
   const body = years.map((y, rank) => {
     const open = _invYearOpenOf(y, rank);
@@ -1200,7 +1224,7 @@ window.__inventoryImportLegacy = function (opts) {
  * 只寫「會改」的格子：每格只送那一個欄位路徑，每個有寫到的月份各加一組 updatedAt / updatedBy；不動 createdAt / createdBy、不動其他欄位。
  * 依年份分批；每批寫入前用雲端現值重比，跟預覽時的「改前」不同（有人剛改過）就跳過並列出，不蓋掉；寫完用 _invDocData（estimate）讀回逐格比對。
  * 寫入前先清掉預覽（連按兩次只寫一次）；切換模擬 / 雲端時清掉預覽（__inventoryMock）。 */
-const INV_CN_LABEL = { countNoteShopee: '盤點（蝦皮）', countNoteMomo: '盤點（MOMO）' };
+const INV_CN_LABEL = { countNoteShopee: '盤點（蝦皮）', countNoteMomo: '盤點（MOMO）', countNoteCoupang: '盤點（酷澎）', countNotePchome: '盤點（PChome）' };
 const INV_CN_STATUS = { change: '會改', same: '不用改', unclean: '無法整理' };
 // 預覽清單（純函式）：只列有內容的盤點格。回 [{ ym, f, before, after, status:'change'|'same'|'unclean' }]，依月份、蝦皮→MOMO 排序
 function _invCleanBuild(months) {
