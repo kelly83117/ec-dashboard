@@ -31,6 +31,11 @@ const App = window.App;
 const { escapeHtml, showToast } = window;
 
 // 表格欄位（順序＝畫面順序）。num＝數字格；txt＝文字格；auto＝即時計算、不能編輯。
+// 表頭也標「自動」的欄（標籤＋「!」說明資料來源，滑鼠移到「!」看）
+const INV_AUTO_HEAD = Object.freeze({
+  momoWh: '資料來源：淨利表上傳 F1102（乙配寄倉即時庫存）後自動計算＝寄倉數 × 乙配成本（不含在途）。每月 1～5 號上傳會填入上個月；標「自動」的月份可手動修改，改過就變手填。格子上移過去可看該月的 F1102 匯出時間與寄倉數。',
+  countNoteMomo: '資料來源：上傳 F1102 當天的日期，自動填入。每月 1～5 號上傳會填入上個月那一列；可手動修改。',
+});
 const INV_COLS = Object.freeze([
   { k: 'companyWh',       l: '公司倉',       t: 'num' },
   { k: 'inTransit',       l: '在途存貨',     t: 'num' },
@@ -351,18 +356,17 @@ function _invResetSub() {
 function _invYearOpenOf(year, rank) {
   return _invYearOpen.has(year) ? _invYearOpen.get(year) : rank < INV_OPEN_YEARS;
 }
-// 「自動」小標（比照 KPI 月結表 km-au-tag）：這格是 F1102 上傳時自動填的（Src.src==='F1102'）且目前有值才顯示；手動改過 Src 會變 manual → 標籤消失。
-//   momoWh：F1102 YYYY/MM/DD HH:MM 匯出・寄倉數 N 件 × 乙配成本；countNoteMomo：上傳 F1102 當天自動填入。
-function _invSrcTagHtml(row, k) {
+// 這格是 F1102 上傳時自動填的（Src.src==='F1102'）且目前有值 → 回來源說明（放在格子的 title，滑鼠移上去看）；否則 ''。
+//   「自動」標籤放在表頭（MOMO倉、盤點（MOMO）欄標題前面，同總計／較上月）；手動改這格後 Src 變 manual、來源說明就不再出現。
+function _invSrcTip(row, k) {
   if (!row || (k !== 'momoWh' && k !== 'countNoteMomo')) return '';
   const src = row[k + 'Src'];
   if (!src || src.src !== 'F1102') return '';
   if (k === 'momoWh' ? !_invIsNum(row.momoWh) : !String(row.countNoteMomo == null ? '' : row.countNoteMomo).trim()) return '';
   const at = src.exportedAt || '';
-  const tip = k === 'momoWh'
-    ? 'F1102 ' + (at || '時間不明') + ' 匯出・寄倉數 ' + (_invIsNum(src.qty) ? _invFmtNum(src.qty) : '?') + ' 件 × 乙配成本；手動改這格後標籤會消失'
-    : '上傳 F1102（' + (at || '時間不明') + ' 匯出）當天自動填入；手動改這格後標籤會消失';
-  return `<div class="inv-src"><span class="inv-src-tag" title="${escapeHtml(tip)}">自動</span></div>`;
+  return k === 'momoWh'
+    ? '自動：F1102 ' + (at || '時間不明') + ' 匯出・寄倉數 ' + (_invIsNum(src.qty) ? _invFmtNum(src.qty) : '?') + ' 件 × 乙配成本；手動改這格後會變成手填'
+    : '自動：上傳 F1102（' + (at || '時間不明') + ' 匯出）當天自動填入；手動改這格後會變成手填';
 }
 function _invCellHtml(col, ym, months, ro) {
   if (col.k === '_total') return `<td class="inv-auto">${escapeHtml(_invFmtNum(_invTotal(months[ym])))}</td>`;
@@ -378,8 +382,8 @@ function _invCellHtml(col, ym, months, ro) {
     + (col.t === 'num' ? ' inputmode="decimal"' : ` maxlength="${INV_TXT_MAX}"`)
     + ` autocomplete="off" aria-label="${escapeHtml(_invYmLabel(ym) + ' ' + col.l)}"`
     + ` data-inv-ym="${escapeHtml(ym)}" data-inv-f="${escapeHtml(col.k)}" data-raw="${escapeHtml(raw)}" data-disp="${escapeHtml(disp)}"`
-    + ` value="${escapeHtml(disp)}"${ro || saving ? ' readonly' : ''}>`
-    + _invSrcTagHtml(months[ym], col.k) + '</td>';
+    + ` value="${escapeHtml(disp)}"${ro || saving ? ' readonly' : ''}${_invSrcTip(months[ym], col.k) ? ` title="${escapeHtml(_invSrcTip(months[ym], col.k))}"` : ''}>`
+    + '</td>';
 }
 function _invRowHtml(ym, months, ro) {
   const row = months[ym] || {};
@@ -396,7 +400,7 @@ function _invTableHtml(months, ro) {
   //   表頭跟著該欄內容的對齊方向：數字欄靠右（inv-th-num）、兩個盤點欄置中（inv-th-cnt）、備註靠左（inv-th-txt）
   //   「自動」標籤放在字【前面】：靠右時切齊數字右緣的是「總計」「較上月」這幾個字，不是標籤
   const thCls = c => (c.t === 'txt' ? (INV_CN_FIELDS[c.k] ? 'inv-th-cnt' : 'inv-th-txt') : 'inv-th-num') + (c.t === 'auto' ? ' inv-th-auto' : '');
-  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}">${c.t === 'auto' ? '<span class="inv-auto-tag">自動</span>' : ''}${escapeHtml(c.l)}</th>`).join('')}</tr>`;
+  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}">${c.t === 'auto' ? '<span class="inv-auto-tag">自動</span>' : INV_AUTO_HEAD[c.k] ? '<span class="inv-auto-tag">自動</span>' : ''}${escapeHtml(c.l)}${INV_AUTO_HEAD[c.k] ? `<span class="inv-info" tabindex="0" aria-label="資料來源說明" title="${escapeHtml(INV_AUTO_HEAD[c.k])}">!</span>` : ''}</th>`).join('')}</tr>`;
   // 固定欄寬（css .inv-table 是 table-layout:fixed）：月份、六個數字欄、兩個盤點各有寬度，備註拿剩下的
   const colCls = c => (c.k === 'note' ? 'inv-col-note' : c.t === 'txt' ? 'inv-col-cnt' : 'inv-col-num');
   const cols = `<colgroup><col class="inv-col-ym">${INV_COLS.map(c => `<col class="${colCls(c)}">`).join('')}</colgroup>`;
