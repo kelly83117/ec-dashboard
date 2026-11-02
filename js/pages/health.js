@@ -968,6 +968,12 @@ function _hlGuideBlocks(rules) {
     gross ? { h: '毛利率為什麼不計分', p: gross.why + '卡片上「毛利率（參考，不計分）」旁的 ⓘ 也有這段說明。' } : null,
     R.notes.shopee && R.notes.shopee.rev ? { warn: R.notes.shopee.rev } : null,
     notes.length ? { h: '其他口徑提醒', ol: notes } : null,
+    { h: '總覽表的純利率、毛利率、動銷率', ol: [
+      ...HL_OVERVIEW_COLS.map(c => c.info),
+      '這三欄只顯示、不計分（評分照各面向的規則），數字跟展開卡片裡的原始值一樣；下面小字是「比上月」差幾個百分點。',
+      '沒資料不會顯示成零：KPI 沒填完寫「尚未上傳」；動銷率的商品資料還在載入寫「載入中」，蝦皮要等商品表現按月保存才有、先寫「待上傳」，沒有商品層資料的通路寫「—」。',
+      '手機上總覽表只留總分和動銷率，其他欄位展開卡片看。',
+    ] },
     { h: '比上月、主要扣分原因、走勢圖', ol: [
       '比上月：這個月總分減上個月總分。',
       '主要扣分原因：最拉低總分的那一個子指標，以及它離滿分線還差多少。',
@@ -1204,6 +1210,7 @@ function _hlProdReset() {
 /* ================================================================
  * ③ 畫面區
  * ================================================================ */
+const _HL_TABLE_COLS = 9;   // 總覽表欄數（通路、總分、純利率、毛利率、動銷率、面向數、面向、比上月、主要扣分原因）
 const _HL_STATUS_TEXT = { na: '不適用', insufficient: '資料不足', pending: '尚未上傳', smallRev: '營收過小', closed: '已關站',
   notLoaded: '尚未載入', loading: '載入中', timeout: '載入逾時' };
 // 總覽列「總分」那一格，商品層還沒好時的字（不顯示分數）
@@ -1230,6 +1237,46 @@ function _hlDeltaHtml(r, prev) {
   const cls = d > 0 ? 'hl-delta-up' : d < 0 ? 'hl-delta-down' : '';
   return `<span class="hl-delta ${cls}">${d > 0 ? '+' : d < 0 ? '−' : '±'}${Math.abs(d)}</span>`;
 }
+// 總覽表的三個數字欄（純利率、毛利率、動銷率）：只顯示、不計分，值＝面向裡子指標的原始值（同卡片），評分不受影響。
+//   pick＝[面向 key, 子指標 key]；info＝表頭 ⓘ 與「📖 怎麼看這頁」共用的一句白話定義。
+const HL_OVERVIEW_COLS = _hlDeepFreeze([
+  { key: 'pure', cls: 'hl-c-pure', label: '純利率', pick: ['profit', 'pureRate'],
+    info: '純利率＝扣完商品成本、廣告、手續費、各項費用後，每 100 元營收最後留下多少錢（KPI 純利 ÷ 實際營收）。' },
+  { key: 'gross', cls: 'hl-c-gross', label: '毛利率', pick: ['profit', 'grossRate'],
+    info: '毛利率＝只扣商品成本，每 100 元營收剩多少，用來看訂價合不合理（（實際營收 − 商品成本）÷ 實際營收）。只顯示、不計分。' },
+  { key: 'st', cls: 'hl-c-st', label: '動銷率', pick: ['structure', 'sellThrough'],
+    info: '動銷率＝這個月有賣出的商品 ÷ 在架商品，以商品數計、不以規格數計（雨衣四色算 1 個商品）。' },
+]);
+// 一格的內容：{ text, sub, cls }。沒資料一律狀態字或「—」，不顯示 0%。
+//   動銷率：沒有商品層的通路「—」；蝦皮（還沒有上架清單）「待上傳」；商品層在載入「載入中」。
+function _hlOverviewCell(r, prev, col) {
+  if (r.status === 'closed') return { text: '', sub: '', cls: '' };
+  const find = x => { const d = x && (x.dims || []).find(y => y.key === col.pick[0]); return d ? d.subs.find(s => s.key === col.pick[1]) || null : null; };
+  const s = find(r);
+  if (!s) return { text: '—', sub: '', cls: 'hl-ov-off' };
+  if (s.status !== 'ok' || !_hlFinite(s.raw)) {
+    let t = _HL_STATUS_TEXT[s.status] || '—';
+    if (col.key === 'st') t = s.status === 'na' ? '—' : s.status === 'pending' ? '待上傳' : (s.status === 'loading' ? '載入中' : t);
+    else if (s.status === 'na') t = '—';
+    return { text: t, sub: '', cls: 'hl-ov-off' };
+  }
+  const p = find(prev);
+  let sub = '比上月 —';
+  if (p && p.status === 'ok' && _hlFinite(p.raw)) {
+    const d = Math.round((s.raw - p.raw) * 1000) / 10;   // 百分點，捨入到 0.1
+    sub = `比上月 ${d > 0 ? '+' : d < 0 ? '−' : '±'}${Math.abs(d).toFixed(1)}pp`;
+  }
+  return { text: _hlFmtPct(s.raw), sub, cls: '' };
+}
+function _hlOverviewCellsHtml(r, prev) {
+  return HL_OVERVIEW_COLS.map(col => {
+    const c = _hlOverviewCell(r, prev, col);
+    return `<td class="hl-num hl-ov ${col.cls}${c.cls ? ' ' + c.cls : ''}">${escapeHtml(c.text)}${c.sub ? `<span class="hl-ov-sub">${escapeHtml(c.sub)}</span>` : ''}</td>`;
+  }).join('');
+}
+function _hlOverviewHeadHtml() {
+  return HL_OVERVIEW_COLS.map(col => `<th class="hl-num hl-ov ${col.cls}">${escapeHtml(col.label)}<details class="hl-info hl-info-inline hl-th-info"><summary aria-label="${escapeHtml(col.label)}是什麼">ⓘ</summary><div class="hl-info-body">${escapeHtml(col.info)}</div></details></th>`).join('');
+}
 function _hlRowHtml(r, prev, rank, open) {
   const t = HEALTH_RULES.types[r.type] || {};
   const nm = r.status === 'closed' ? '' : `依 ${r.dimsUsed}/${r.dimsTotal} 面向`;
@@ -1241,6 +1288,7 @@ function _hlRowHtml(r, prev, rank, open) {
   return `<tr class="hl-row${open ? ' open' : ''}${r.status === 'closed' ? ' hl-row-closed' : ''}" data-hl-row="${escapeHtml(r.id)}" tabindex="0" aria-expanded="${open ? 'true' : 'false'}">
       <td class="hl-c-name"><span class="hl-caret">${open ? '▾' : '▸'}</span>${escapeHtml(r.label)}<span class="hl-sub-line"><span class="hl-type">${escapeHtml(t.label || '')}</span>${tags.join('')}</span></td>
       <td class="hl-c-score">${_hlScoreHtml(r)}</td>
+      ${_hlOverviewCellsHtml(r, prev)}
       <td class="hl-c-nm">${escapeHtml(nm)}</td>
       <td class="hl-c-dims">${_hlChipsHtml(r)}</td>
       <td class="hl-c-delta">${r.status === 'closed' ? '' : _hlDeltaHtml(r, prev)}</td>
@@ -1615,10 +1663,10 @@ Object.assign(App, {
       if (tKey !== lastType) {
         lastType = tKey;
         const tl = tKey === '_closed' ? '已關站' : (HEALTH_RULES.types[r.type] || {}).label || r.type;
-        typeRow = `<tr class="hl-type-row"><td colspan="6">${escapeHtml(tl)}</td></tr>`;
+        typeRow = `<tr class="hl-type-row"><td colspan="${_HL_TABLE_COLS}">${escapeHtml(tl)}</td></tr>`;
       }
       const open = _hlState.open === r.id;
-      const detail = open ? `<tr class="hl-detail"><td colspan="6">${_hlCardHtml(r, snap)}</td></tr>` : '';
+      const detail = open ? `<tr class="hl-detail"><td colspan="${_HL_TABLE_COLS}">${_hlCardHtml(r, snap)}</td></tr>` : '';
       return typeRow + _hlRowHtml(r, prev[r.id], rank[r.id], open) + detail;
     }).join('');
     const mo = snap.months && snap.months[month];
@@ -1640,7 +1688,7 @@ Object.assign(App, {
         </div>
         <div class="hl-table-wrap">
           <table class="hl-table">
-            <thead><tr><th>通路</th><th class="hl-c-score">總分</th><th class="hl-c-nm">面向數</th><th class="hl-c-dims">面向</th><th class="hl-c-delta">比上月</th><th>主要扣分原因</th></tr></thead>
+            <thead><tr><th>通路</th><th class="hl-c-score">總分</th>${_hlOverviewHeadHtml()}<th class="hl-c-nm">面向數</th><th class="hl-c-dims">面向</th><th class="hl-c-delta">比上月</th><th class="hl-c-reason">主要扣分原因</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>

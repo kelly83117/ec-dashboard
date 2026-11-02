@@ -2736,7 +2736,7 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-chip-ver, .hl-asof { font-size: 12px; color: var(--text-muted); }
 .hl-chip-ver { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
 .hl-table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
-.hl-table { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.hl-table { width: 100%; min-width: 1040px; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
 /* 🔴 css/profit.css 有全域 th / td（靠右、不換行、大寫、th 可點的游標與 hover 色），全站都會載入。
    這裡把健檢兩張表（.hl-table、.hl-sub）的 th / td 全部明確設回：文字靠左、數字欄（.hl-num／分數／比上月）靠右，表頭跟內容同一個對齊。 */
 .hl-table th, .hl-sub th { text-align: left; text-transform: none; letter-spacing: normal; cursor: default; user-select: auto; background: none; }
@@ -2763,6 +2763,13 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-table .hl-c-delta { width: 64px; text-align: right; white-space: nowrap; }
 .hl-table td.hl-c-nm, .hl-table td.hl-c-delta { color: var(--text-muted); }
 .hl-c-reason { color: var(--text-muted); font-size: 12px; }
+/* 總覽的純利率、毛利率、動銷率（只顯示、不計分）：數字靠右，下方小字「比上月 ±pp」；沒資料的狀態字用淡色 */
+.hl-table .hl-ov { width: 92px; text-align: right; white-space: nowrap; }
+.hl-ov-sub { display: block; margin-top: 2px; font-size: 11px; color: var(--text-muted); font-weight: 400; }
+.hl-table td.hl-ov-off { color: var(--text-muted); font-size: 12px; }
+/* 表頭 ⓘ：點開的說明浮在表頭下方，不撐寬欄位 */
+.hl-th-info { position: relative; }
+.hl-th-info[open] .hl-info-body { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; width: 240px; text-align: left; font-weight: 400; white-space: normal; box-shadow: var(--shadow-sm); }
 .hl-score { display: inline-flex; flex-direction: column; align-items: center; min-width: 44px; padding: 3px 8px; border-radius: var(--radius-sm); font-size: 16px; font-weight: 700; line-height: 1.15; }
 .hl-score small, .hl-ring small { font-size: 10px; font-weight: 400; }
 /* 燈號：底色 -soft、字色主色；沒分數灰 */
@@ -2852,10 +2859,13 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-drag-info { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
 .hl-drag-info summary { cursor: pointer; }
 .hl-drag-info ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.8; }
-/* 手機：總覽只留「通路、總分、主要扣分原因」三欄，展開的卡片跟著變窄；子指標表收掉零分線、滿分線兩欄（ⓘ 裡照樣看得到公式） */
+/* 手機：總覽只留「通路、總分、動銷率」三欄（老闆指示 2026-11-02），展開的卡片跟著變窄；子指標表收掉零分線、滿分線兩欄（ⓘ 裡照樣看得到公式） */
 @media (max-width: 768px) {
   .hl-table { min-width: 0; }
-  .hl-table .hl-c-nm, .hl-table .hl-c-dims, .hl-table .hl-c-delta { display: none; }
+  .hl-table .hl-c-nm, .hl-table .hl-c-dims, .hl-table .hl-c-delta, .hl-table .hl-c-reason,
+  .hl-table .hl-c-pure, .hl-table .hl-c-gross { display: none; }
+  .hl-table .hl-ov { width: auto; }
+  .hl-th-info[open] .hl-info-body { width: 180px; }
   .hl-table td, .hl-table th { padding-left: 8px; padding-right: 8px; }
   .hl-table .hl-c-name { width: auto; white-space: normal; }
   .hl-card { margin: 8px 4px 12px; padding: 12px; }
