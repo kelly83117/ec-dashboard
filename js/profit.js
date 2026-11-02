@@ -14204,7 +14204,15 @@ function momoPendingProducts(pk){
 // bounce-back 守衛（給 firebase.js 的 momo_products 訂閱呼叫；邏輯放這裡才讀得到私有 _pendingSyncKeys）：
 //   本機有未同步變更（pending）或剛存過 → 雲端 echo 不覆蓋 _profitMem，保住本機版本。
 window.__momoShouldSkipCloudOverwrite=function(k){
-  try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
+  //   F3（2026-11-02）：origins（ec_momo_moplus_origins|）只認「dirty」（持久化註冊表，或本 session 存過還沒推的記憶體標記），不再因為「在 _pendingSyncKeys」就略過：
+  //     pending 可能只是被同步預覽／舊版 sweep 撿進來、或 dirty 已自癒清掉但 pending 還留著 → 之後雲端更新被整個 session 擋掉、本機記憶體落後雲端。
+  //     真有未推的本機編輯一定是 dirty（momoSaveMoPlusOriginsDoc 存檔必標），照樣受保護；其他 key 類型行為不變。
+  if(typeof k==='string' && k.indexOf('ec_momo_moplus_origins|')===0){
+    try{ if(_momoOIsDirty(k) || _momoODirtyMem.has(k)) return true; }catch{}
+    if(_momoODirtyRegistryCorrupt()) return true;   // 註冊表壞掉＝不知道哪些 key 有未推編輯 → fail-safe：一律當 dirty、略過雲端更新（同 momoOriginsCloudDecision 讀 localStorage 失敗就 skip）
+  } else {
+    try{ if(_pendingSyncKeys.has(k)) return true; }catch{}
+  }
   try{ if(_momoRfIsKey(k) && _momoRfDirtyHas(k)) return true; }catch{}   // 對帳：本機存了還沒推 → 不讓雲端快照蓋掉（跨重整也擋；推成功才清）
   if(window._momoJustSaved && (Date.now()-window._momoJustSaved < 5000)) return true;
   return false;
@@ -14418,8 +14426,18 @@ window.__momoMergeEnforce=function(shop){ return momoSyncProductsMerge(shop); };
 //  改：① 持久化 dirty 註冊表（跨重整）＝「本機有未推重傳」的權威訊號；② updatedAt base ＝推送前擋「雲端較新」。
 const _MOMO_ODIRTY_LS='ec_momo_origins_dirty';   // JSON array：真正重傳過還沒成功推的 origins full key
 const _MOMO_OBASE_LS ='ec_momo_origins_base';     // JSON map：full key → 雲端 updatedAt(ms)
-function _momoODirtyAdd(k){ try{ const a=_momoReadJson(_MOMO_ODIRTY_LS,[]); if(Array.isArray(a)&&!a.includes(k)){ a.push(k); localStorage.setItem(_MOMO_ODIRTY_LS,JSON.stringify(a)); } }catch{} }
-function _momoODirtyDel(k){ try{ let a=_momoReadJson(_MOMO_ODIRTY_LS,[]); if(Array.isArray(a)&&a.includes(k)){ a=a.filter(x=>x!==k); localStorage.setItem(_MOMO_ODIRTY_LS,JSON.stringify(a)); } }catch{} }
+// F3：本 session 內存過還沒推成功的 origins key（記憶體）。localStorage 寫入失敗（配額）時 dirty 註冊表會寫不進去，這份讓 __momoShouldSkipCloudOverwrite 仍能保護本機編輯。
+const _momoODirtyMem=new Set();
+function _momoODirtyAdd(k){ try{ _momoODirtyMem.add(k); }catch{} try{ const a=_momoReadJson(_MOMO_ODIRTY_LS,[]); if(Array.isArray(a)&&!a.includes(k)){ a.push(k); localStorage.setItem(_MOMO_ODIRTY_LS,JSON.stringify(a)); } }catch{} }
+function _momoODirtyDel(k){ try{ _momoODirtyMem.delete(k); }catch{} try{ let a=_momoReadJson(_MOMO_ODIRTY_LS,[]); if(Array.isArray(a)&&a.includes(k)){ a=a.filter(x=>x!==k); localStorage.setItem(_MOMO_ODIRTY_LS,JSON.stringify(a)); } }catch{} }
+let _momoODirtyCorruptWarned=false;
+// 註冊表存在但不是合法 JSON 陣列（損毀）→ true。不存在（從沒存過）不算損毀。讀 localStorage 本身丟例外也當損毀（不確定 → 保守）。
+function _momoODirtyRegistryCorrupt(){
+  let bad=false;
+  try{ const raw=localStorage.getItem(_MOMO_ODIRTY_LS); if(raw!==null){ const a=JSON.parse(raw); if(!Array.isArray(a)) bad=true; } }catch{ bad=true; }
+  if(bad && !_momoODirtyCorruptWarned){ _momoODirtyCorruptWarned=true; try{ console.warn('[origins] '+_MOMO_ODIRTY_LS+' 內容損毀（不是合法 JSON 陣列）→ 無法判斷哪些 origins 有未推編輯，為保護本機：origins 一律當作 dirty、暫時略過雲端更新。請把這行與該 key 的內容回報；下次存檔 origins 時註冊表會重建。'); }catch{} }
+  return bad;
+}
 function _momoOIsDirty(k){ try{ const a=_momoReadJson(_MOMO_ODIRTY_LS,[]); return Array.isArray(a)&&a.includes(k); }catch{ return false; } }
 function _momoOBaseGet(k){ try{ const m=_momoReadJson(_MOMO_OBASE_LS,{}); return (m&&m[k])||0; }catch{ return 0; } }
 function _momoOBaseSet(k, ts){ try{ const m=_momoReadJson(_MOMO_OBASE_LS,{})||{}; m[k]=ts||0; localStorage.setItem(_MOMO_OBASE_LS,JSON.stringify(m)); }catch{} }
@@ -14599,7 +14617,7 @@ window.__momoOriginsShadowExport=function(){
 //   分類（對應程式路徑，見 PR 說明）：
 //     A 卡住的 dirty　＝ dirty 且 記憶體≠雲端：雲端的更新被擋在外面；下次同步會用本機版整份覆蓋雲端（可能蓋掉同事的更新）
 //     B dirty 但已一致 ＝ dirty 但 記憶體==雲端：無害，下次雲端快照或同步後自動清除
-//     C 待推凍結　　　 ＝ 沒 dirty、但被同步預覽／sweep 撿進本 session 待推：此後雲端更新被略過（直到重整），記憶體已落後雲端
+//     C 待推凍結　　　 ＝ 沒進 dirty 註冊表、但仍被略過雲端更新（F3 之後 origins 只剩「剛存 5 秒內」或「本 session 存過、註冊表寫不進去」兩種）：記憶體落後雲端
 //     D localStorage 舊副本 ＝ 沒 dirty、localStorage 那份≠雲端：sweep 仍會把這個 key 列進待推（重整後記憶體會被雲端覆蓋，但 localStorage 不會自己更新）
 window.__momoOriginsDirtyAudit=async function(filter){
   const pref='ec_momo_moplus_origins|'; const keys=new Set();
@@ -14620,7 +14638,7 @@ window.__momoOriginsDirtyAudit=async function(filter){
     let cls='OK', why='';
     if(dirty && !memSame){ cls='A'; why='dirty 且本機≠雲端：雲端更新被擋；下次同步會整份覆蓋雲端'; }
     else if(dirty){ cls='B'; why='dirty 但本機==雲端：無害（下次快照／同步後自動清除）'; }
-    else if(guard && !memSame){ cls='C'; why='沒 dirty、被撿進本 session 待推而凍結：記憶體已落後雲端（重整可解）'; }
+    else if(guard && !memSame){ cls='C'; why='沒進 dirty 註冊表、但仍被略過雲端更新（剛存 5 秒內，或註冊表寫入失敗）：記憶體落後雲端'; }
     else if(!lsSame){ cls='D'; why='localStorage 舊副本≠雲端：sweep 仍會把它列進待推（重整後記憶體會跟上雲端，localStorage 不會）'; }
     const cut=(p)=>p?{ 只本機:p.onlyLocal.length, 只雲端:p.onlyCloud.length, 值不同:p.differ.length }:null;
     const diffs=(pm&&!pm.identical?pm:(pl&&!pl.identical?pl:null)); const src=(pm&&!pm.identical)?mem:ls;
