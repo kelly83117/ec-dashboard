@@ -932,8 +932,9 @@ function _hlGuideBlocks(rules) {
       '蝦皮的動銷率現在是「尚未上傳」：要等洞察表的商品表現按月保存（下一塊）才有上架清單當分母。',
       'MOMO、PChome 只有「目前」的上下架狀態，回頭看舊月份時，分母用的是今天的上架狀態，會有落差。',
     ] } : null,
-    D.topN ? { h: `拖累商品前 ${D.topN} 名`, ol: [
-      '在蝦皮、MOMO、PChome 通路的細項裡（點通路卡片展開）。依「拖累金額」由大到小；一件商品可以命中好幾個原因，金額取其中最大的那個（不重複加總）。',
+    D.topN ? { h: `要處理的商品（拖累商品前 ${D.topN} 名）`, ol: [
+      '在蝦皮、MOMO、PChome 通路細項的最上面（點通路卡片展開）。依「拖累金額」（影響金額）由大到小；一件商品可以命中好幾個原因，金額取其中最大的那個（不重複加總）。',
+      '卡片上的「⚠ 待處理商品 N 個」：這個月所有拖累商品（不只前 ' + D.topN + ' 名）裡，還沒有調整紀錄的商品數；都調整過或沒有拖累商品就寫「✓ 沒有待處理商品」。點這一行會展開細項、直接捲到清單。清單裡已調整的商品淡化顯示、順序不變。',
       ...dragLines,
       `「🔥 廣告燒錢」的前段＝廣告費排在這個通路前 ${P0(D.adsBurnTopPct)}。`,
       `「✓ 日期 已調整」：這件商品在評分月份的前 ${D.adjustMonthsBack} 個月 1 號以後有調整紀錄（蝦皮看淨利表備註與洞察表調整紀錄，MOMO／PChome 看優化紀錄）。只顯示日期，不顯示是誰。`,
@@ -970,11 +971,12 @@ function _hlGuideBlocks(rules) {
     notes.length ? { h: '其他口徑提醒', ol: notes } : null,
     { h: '主看板（卡片牆）怎麼看', ol: [
       '依通路類型分組，一張卡片一個通路：通路名、類型排名、大字總分（綠／黃／紅燈號；灰色斜體標「參考」是參考分）、總分旁的比上月分數差、一句主要扣分原因。',
-      '卡片最下面一行「純利 x% · 毛利 x% · 動銷 x%」：只顯示、不計分（評分照各面向的規則），數字跟細項裡的一樣。箭頭跟上個月比：↑ 比上月高、↓ 比上月低、→ 一樣，滑鼠移到箭頭上看上個月的數字；上個月沒資料就沒有箭頭。',
+      '卡片最下面的「純利／毛利／動銷」三小欄：只顯示、不計分（評分照各面向的規則），數字跟細項裡的一樣。箭頭跟上個月比：↑ 比上月高、↓ 比上月低、→ 一樣，滑鼠移到箭頭上看上個月的數字；上個月沒資料就沒有箭頭。',
       ...HL_OVERVIEW_COLS.map(c => c.info),
       '沒資料不會顯示成零：KPI 沒填完寫「尚未上傳」；動銷率的商品資料還在載入寫「載入中」，蝦皮要等商品表現按月保存才有、先寫「待上傳」，沒有商品層資料的通路寫「—」。',
       '這個月沒有總分的通路（KPI 還沒填、資料不足、營收太小、已關站）不做卡片，收在頁面最下方「未評分：…」那一行，括號是原因；點通路名一樣可以看細項。',
-      '點卡片：在那一組卡片下方展開細項；再點一次收起來。同一時間只展開一個。',
+      '點卡片：在那一組卡片下方展開細項；再點一次收起來。同一時間只展開一個。細項最上面是「要處理的商品」；各面向分數條與子指標收在「看評分細節」，點了才展開。',
+      '總分旁的「比上月 +8」是這個月總分減上個月總分；上個月沒有總分就不顯示。',
     ] },
     { h: '比上月、主要扣分原因、走勢圖', ol: [
       '比上月：這個月總分減上個月總分。',
@@ -988,6 +990,30 @@ function _hlGuideBlocks(rules) {
     { h: '規則版本', p: `目前是 ${R.version}。門檻有改就會升版本。分數不存檔，每次打開都用目前的規則重算，所以改版後舊月份的分數也會跟著變。` },
   ].filter(Boolean);
 }
+// 「📖 怎麼看這頁」第一層（塊 3b）：最多 5 行、每行 25 字內的白話；燈號門檻從規則產生
+function _hlGuideIntro(rules) {
+  const L = (rules || HEALTH_RULES).lights;
+  return [
+    `分數顏色：綠 ≥${L.green}、黃 ${L.yellow}–${L.green - 1}、紅 <${L.yellow}。`,
+    '卡片：總分、比上月、主要扣分原因、待處理商品。',
+    '點卡片：看要處理的商品，再看評分細節。',
+    '灰色「參考」：評分面向不夠，只供參考、不排名。',
+    '最下方「未評分」：這個月沒有總分的通路。',
+  ];
+}
+// 說明彈窗：第一層 5 行；第二層「看完整規則」預設收合，內容＝_hlGuideBlocks(HEALTH_RULES)（門檻、權重都從規則產生）。
+//   樣式沿用 recon-guide（App.guideHtml 同一套 class），不改共用的 modal.js。
+function _hlGuideModalHtml(rules) {
+  const e = t => escapeHtml(t);
+  const full = _hlGuideBlocks(rules).map(b => {
+    if (b.p) return (b.h ? '<h4 class="recon-guide-h">' + e(b.h) + '</h4>' : '') + '<p class="recon-guide-p">' + e(b.p) + '</p>';
+    if (b.warn) return '<p class="recon-guide-warn">' + e(b.warn) + '</p>';
+    return '<h4 class="recon-guide-h">' + e(b.h) + '</h4><ol class="recon-guide-ol">' + b.ol.map(x => '<li>' + x.split('\n').map(e).join('<br>') + '</li>').join('') + '</ol>';
+  }).join('');
+  return `<div class="recon-guide hl-guide"><ul class="hl-guide-intro">${_hlGuideIntro(rules).map(x => `<li>${e(x)}</li>`).join('')}</ul>
+    <details class="hl-guide-more"><summary>看完整規則</summary><div class="hl-guide-full">${full}</div></details>
+    <div class="recon-guide-ftr"><button type="button" class="recon-btn recon-guide-close" onclick="App.closeModal()">關閉</button></div></div>`;
+}
 
 /* ================================================================
  * ② 資料收集區（只有這一區碰 window）
@@ -996,7 +1022,8 @@ let _hlMock = null;          // __healthMock 開著時的假 snapshot 產生器�
 let _hlWaitTries = 0;        // KPI 還沒就緒時的重畫次數（最多 _HL_WAIT_MAX 次，之後照本機鏡像畫，並標示）
 const _HL_WAIT_MAX = 20;     // × 600ms ≈ 12 秒
 const _HL_TREND_N = 12;
-const _hlState = { month: null, open: null, pendingOpen: false };   // 只在記憶體：選的月份、展開的通路、「KPI 尚未填完」有沒有展開
+// 只在記憶體：選的月份、展開的通路、「KPI 尚未填完」有沒有展開、「看評分細節」有沒有展開、重畫後要不要捲到商品清單
+const _hlState = { month: null, open: null, pendingOpen: false, scoreOpen: false, scrollTo: null };
 let _hlChart = null;
 
 function _hlIsLocalHost() {
@@ -1290,15 +1317,40 @@ function _hlFpText(r, prev) {
     closed ? '' : r.dims.map(d => _hlChipTip(d).replace(/（權重 [^）]*）$/, '')).join(','),
     closed ? '' : txt(_hlDeltaHtml(r, prev))].join(' | ');
 }
+// 待處理商品（塊 3b）：拖累清單「全部」商品（不是前 N 名）裡還沒有調整紀錄（adjusted 是 null）的數目。
+//   用同一支 healthDragList、同一套規則，只把 topN 換成不限：判斷、排序、拖累金額都不變。沒有商品層的通路回 null（卡片不顯示這一行）。
+const _HL_DRAG_ALL = _hlDeepFreeze(Object.assign({}, HEALTH_RULES, { drag: Object.assign({}, HEALTH_RULES.drag, { topN: Infinity }) }));
+function _hlTodo(ch, month, snap) {
+  if (!ch || !ch.prod) return null;
+  const D = healthDragList(ch, month, snap, _HL_DRAG_ALL);
+  if (D.status === 'ok') return { state: 'ok', n: D.items.filter(it => !it.adjusted).length, total: D.items.length };
+  if (D.status === 'loading' || D.status === 'notLoaded') return { state: D.status };
+  return null;
+}
+function _hlTodoHtml(r, snap) {
+  const ch = HEALTH_CHANNELS.find(c => c.id === r.id);
+  const t = _hlTodo(ch, r.month, snap);
+  if (!t) return '<div class="hl-tile-todo hl-todo-none" aria-hidden="true"></div>';   // 佔位：卡片才一樣高
+  if (t.state !== 'ok') return `<div class="hl-tile-todo hl-todo-wait">待處理商品：${t.state === 'loading' ? '載入中…' : '商品資料未載入'}</div>`;
+  const attrs = `role="button" tabindex="0" data-hl-todo="${escapeHtml(r.id)}"`;
+  if (!t.n) return `<div class="hl-tile-todo hl-todo-ok" ${attrs} title="${t.total ? `這個月 ${t.total} 個拖累商品都有調整紀錄` : '這個月沒有拖累商品'}；點一下看清單">✓ 沒有待處理商品</div>`;
+  return `<div class="hl-tile-todo hl-todo-warn" ${attrs} title="這個月拖累商品 ${t.total} 個，其中 ${t.n} 個還沒有調整紀錄；點一下看清單">⚠ 待處理商品 ${t.n} 個</div>`;
+}
+// 卡片總分旁「比上月 +8」：上月沒有總分就不顯示（文字取 _hlDeltaHtml，跟指紋同一份）
+function _hlTileDeltaHtml(r, prev) {
+  if (!prev || r.score == null || prev.score == null) return '';
+  return `<span class="hl-tile-delta">比上月 ${_hlDeltaHtml(r, prev)}</span>`;
+}
 // 卡片牆（塊 3）：有總分（含參考分）或商品層還在載入的通路做卡片；其餘（總分「—」、已關站）收進最下方「未評分」那一行
 function _hlTileRated(r) { return r.status !== 'closed' && (r.score != null || !!_HL_WAIT_SCORE[r.status]); }
 const _HL_TILE_MET = { pure: '純利', gross: '毛利', st: '動銷' };
 function _hlTileMetsHtml(r, prev) {
   return HL_OVERVIEW_COLS.map(col => {
     const c = _hlOverviewCell(r, prev, col);
-    const arrow = c.dir ? ` <span class="hl-tile-arrow hl-ov-${c.dir}" title="${escapeHtml(c.sub.replace(/^[↑↓→] /, ''))}">${c.dir === 'up' ? '↑' : c.dir === 'down' ? '↓' : '→'}</span>` : '';
-    return `<span class="hl-tile-met${c.cls ? ' hl-tile-met-off' : ''}"><span class="hl-tile-met-k" title="${escapeHtml(col.label + '：' + col.short)}">${_HL_TILE_MET[col.key]}</span> ${escapeHtml(c.text)}${arrow}</span>`;
-  }).join('<span class="hl-tile-sep" aria-hidden="true"> · </span>');
+    const arrow = c.dir ? `<span class="hl-tile-arrow hl-ov-${c.dir}" title="${escapeHtml(c.sub.replace(/^[↑↓→] /, ''))}">${c.dir === 'up' ? '↑' : c.dir === 'down' ? '↓' : '→'}</span>` : '';
+    // 塊 3b：三個指標各佔一小欄（上面名稱、下面數值＋箭頭），永遠兩行高，卡片才一樣高
+    return `<span class="hl-tile-met${c.cls ? ' hl-tile-met-off' : ''}"><span class="hl-tile-met-k" title="${escapeHtml(col.label + '：' + col.short)}">${_HL_TILE_MET[col.key]}</span><span class="hl-tile-met-v">${escapeHtml(c.text)}${arrow}</span></span>`;
+  }).join('');
 }
 function _hlTileHtml(r, prev, rank, open, snap) {
   const ch = HEALTH_CHANNELS.find(c => c.id === r.id) || {};
@@ -1309,8 +1361,9 @@ function _hlTileHtml(r, prev, rank, open, snap) {
   const full = r.score == null ? String(r.reason || reason) : reason;
   return `<div class="hl-tile${open ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" data-hl-row="${escapeHtml(r.id)}" data-hl-fp="${escapeHtml(_hlFpText(r, prev))}">
       <div class="hl-tile-hd"><span class="hl-tile-name">${escapeHtml(r.label)}</span>${tags.join('')}</div>
-      <div class="hl-tile-score">${_hlScoreHtml(r)}${_hlDeltaHtml(r, prev)}</div>
+      <div class="hl-tile-score">${_hlScoreHtml(r)}${_hlTileDeltaHtml(r, prev)}</div>
       <div class="hl-tile-reason" title="${escapeHtml(full)}">${escapeHtml(reason)}</div>
+      ${_hlTodoHtml(r, snap)}
       <div class="hl-tile-mets">${_hlTileMetsHtml(r, prev)}</div>
     </div>`;
 }
@@ -1494,8 +1547,10 @@ function _hlCardHtml(r, snap) {
         </div>
       </div>
       ${_hlProdBarHtml(ch, r.month, snap)}
-      ${r.dims.map(d => _hlDimHtml(d, d.key === 'growth' ? _hlGrowthEnds(ch, r.month, snap) : null)).join('')}
       ${_hlDragHtml(ch, r.month, snap)}
+      <details class="hl-score-more"${_hlState.scoreOpen ? ' open' : ''}><summary>看評分細節</summary>
+        ${r.dims.map(d => _hlDimHtml(d, d.key === 'growth' ? _hlGrowthEnds(ch, r.month, snap) : null)).join('')}
+      </details>
       <div class="hl-trend-hd">近 12 個月分數走勢（當場重算；空心點＝參考分）</div>
       <div class="hl-trend"><canvas id="hl-trend" aria-label="${escapeHtml(r.label)} 近 12 個月分數走勢" role="img"></canvas></div>
       ${r.next.length ? `<div class="hl-next">之後加入：${escapeHtml(r.next.join('、'))}</div>` : ''}
@@ -1537,14 +1592,15 @@ function _hlDragHtml(ch, month, snap) {
   const ps = ch.prod.platform === 'momo' ? _hlProdOf(ch, month, snap) : null;
   const mInfo = ps && ps.state === 'ready' && ps.snap
     ? _hlInfoHtml('純利＝MOMO 總表的「淨利貢獻」', _hlMomoProfitNote(ch.prod.shop, ps.snap.freightMode), { cls: 'hl-info-inline', aria: '純利口徑' }) : '';
-  const hd = `<div class="hl-drag-hd">拖累商品前 ${HEALTH_RULES.drag.topN} 名${mInfo}<span class="hl-w">依拖累金額排序；點品號跳到淨利表</span></div>`;
+  const hd = `<div class="hl-drag-hd">要處理的商品${mInfo}<span class="hl-w">依影響金額排序，點品號跳到淨利表</span></div>`;
   if (D.status !== 'ok') return `<div class="hl-drag">${hd}<div class="hl-drag-off">${escapeHtml(D.reason)}</div></div>`;
   const shopee = ch.prod.platform === 'shopee';
   const tag = c => { const x = HEALTH_DRAG_REASONS[c] || { icon: '', label: c, desc: '' };
     return `<span class="hl-reason-tag" title="${escapeHtml(x.desc)}">${x.icon} ${escapeHtml(x.label)}</span>`; };
   const jump = it => `data-hl-jump-plat="${escapeHtml(ch.prod.platform)}" data-hl-jump-shop="${escapeHtml(ch.prod.platform === 'pchome' ? (it.sub || '轉單') : ch.prod.shop)}" data-hl-jump-month="${escapeHtml(month)}" data-hl-jump-code="${escapeHtml(it.key)}"`;
   const adj = d => (d ? `<span class="hl-adj">✓ ${escapeHtml(d.slice(5))} 已調整</span>` : '');
-  const rows = D.items.map(it => `<tr>
+  // 已調整的商品淡化顯示、順序不變（照影響金額排；不搬到後面，免得金額大的已調整商品被當成不重要）
+  const rows = D.items.map(it => `<tr${it.adjusted ? ' class="hl-drag-done"' : ''}>
       <td><button type="button" class="hl-drag-jump" ${jump(it)} title="到淨利表 ${escapeHtml(_hlYmLabel(month))} 搜尋這個商品">${escapeHtml(it.key)} ↗</button>${it.sub ? `<span class="hl-w">${escapeHtml(it.sub)}</span>` : ''}</td>
       <td class="hl-drag-name">${escapeHtml(it.name)}</td>
       <td>${it.reasons.map(tag).join('')}</td>
@@ -1555,7 +1611,7 @@ function _hlDragHtml(ch, month, snap) {
       <td>${adj(it.adjusted)}</td></tr>`).join('');
   const table = D.items.length
     ? `<div class="hl-drag-wrap"><table class="hl-sub hl-drag-table"><thead><tr><th>品號</th><th>商品</th><th>原因</th><th class="hl-num hl-drag-opt">營收</th><th class="hl-num hl-drag-opt">純利</th>${shopee ? '<th class="hl-num hl-drag-opt">廣告費</th>' : ''}<th class="hl-num">拖累金額</th><th>調整</th></tr></thead><tbody>${rows}</tbody></table></div>`
-    : '<div class="hl-drag-off">這個月沒有拖累商品。</div>';
+    : '<div class="hl-drag-off">這個月沒有要處理的商品。</div>';
   const more = D.more ? `<div class="hl-w hl-drag-more">另有 ${D.more} 個商品也有命中原因，只列前 ${HEALTH_RULES.drag.topN} 名。</div>` : '';
   const prevNote = D.prevMissing ? `<div class="hl-w hl-drag-more">上個月沒有商品資料，「長期虧損」${shopee ? '' : '、「連續零動銷」'}這次判斷不了。</div>` : '';
   const info = D.infoCount
@@ -1699,7 +1755,7 @@ function _hlOnClick(e) {
   if (act) {
     if (act.dataset.hlAct === 'refresh') { _hlProdReset(); App.render(); }
     else if (act.dataset.hlAct === 'pending') { _hlState.pendingOpen = !_hlState.pendingOpen; App.render(); }
-    else if (act.dataset.hlAct === 'guide' && typeof App.openGuide === 'function') App.openGuide({ title: '📖 通路健檢 · 怎麼看這頁', blocks: _hlGuideBlocks() });
+    else if (act.dataset.hlAct === 'guide' && typeof App.openModal === 'function') App.openModal({ title: '📖 通路健檢 · 怎麼看這頁', width: '640px', hideFooter: true, bodyHtml: _hlGuideModalHtml() });
     else if (act.dataset.hlAct === 'loadprod' && act.dataset.hlPlatform) {
       if (_hlProd.state[act.dataset.hlPlatform] === 'timeout') _hlProd.state[act.dataset.hlPlatform] = 'idle';
       _hlEnsurePlatform(act.dataset.hlPlatform); App.render();
@@ -1708,6 +1764,10 @@ function _hlOnClick(e) {
   }
   const kpi = e.target.closest && e.target.closest('[data-hl-kpi]');
   if (kpi) { _hlGoKpi(kpi.dataset.hlKpi); return; }
+  const todo = e.target.closest && e.target.closest('[data-hl-todo]');
+  if (todo) { _hlOpenTodo(todo.dataset.hlTodo); return; }
+  // 「看評分細節」：記住展開與否，整頁重畫（資料更新）時不會自己收起來
+  if (e.target.closest && e.target.closest('details.hl-score-more > summary')) { _hlState.scoreOpen = !_hlState.scoreOpen; return; }
   const jump = e.target.closest && e.target.closest('[data-hl-jump-plat]');
   if (jump) { _hlGoProfit(jump.dataset); return; }
   if (e.target.closest('details.hl-info') || e.target.closest('details.hl-drag-info')) return;   // 點 ⓘ／展開清單只展開，不收合整列
@@ -1726,8 +1786,25 @@ function _hlGoProfit(d) {
   try { window.__profitOpenAt({ platform: d.hlJumpPlat, shop: d.hlJumpShop, month: d.hlJumpMonth, code: d.hlJumpCode }); }
   catch (e) { console.error('[health] 跳淨利表失敗', e); }
 }
+// 卡片上「待處理商品」：展開那個通路的細項（已展開就不收合），重畫後捲到「要處理的商品」清單
+function _hlOpenTodo(id) {
+  _hlState.open = id;
+  _hlState.scrollTo = 'drag';
+  App.render();
+}
+//   展開時會補算走勢月份，算的期間頁頂多一列「商品層分數計算中…」、算完又消失，內容會上下移；
+//   所以算完之前每次重畫都再對齊一次，算完才清掉（期間只有一兩秒）。
+function _hlScrollPending() {
+  if (_hlState.scrollTo !== 'drag') return;
+  if (!_hlProd.running) _hlState.scrollTo = null;
+  const el = document.querySelector('.hl-tile-detail .hl-drag');
+  // 用直接跳（不用 smooth）：重畫會換掉整頁 HTML，平滑捲動做到一半會被打斷
+  if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start' });
+}
 function _hlOnKeydown(e) {
   if (App.route !== 'health' || (e.key !== 'Enter' && e.key !== ' ')) return;
+  const todo = e.target.closest && e.target.closest('[data-hl-todo]');
+  if (todo && e.target === todo) { e.preventDefault(); _hlOpenTodo(todo.dataset.hlTodo); return; }
   const row = e.target.closest && e.target.closest('[data-hl-row]');
   if (!row || e.target !== row) return;
   e.preventDefault();
@@ -1788,7 +1865,9 @@ Object.assign(App, {
     const rank = _hlRank(results);
     const sorted = _hlSortResults(results);
     const _tScore = _hlNow() - _t0 - _tKpi;
-    // 卡片牆（塊 3）：依通路類型分組（順序同 _hlSortResults），每組一排卡片；展開的細項放在該組卡片下方、全寬
+    // 卡片牆（塊 3）：依通路類型分組（順序同 _hlSortResults）；展開的細項放在該組卡片下方、全寬
+    //   塊 3b：每組是一個帶小標題的區塊，寬度＝卡片數（最多 5 張）× 卡寬，區塊之間依視窗寬度自動並排（只有 1、2 張的小組不再各佔一整排）；
+    //   展開的細項是寬 100% 的項目，排在那一組所在那一排的下面。
     const groups = [];
     sorted.filter(_hlTileRated).forEach(r => {
       let g = groups[groups.length - 1];
@@ -1798,9 +1877,9 @@ Object.assign(App, {
     const wall = groups.map(g => {
       const tl = (HEALTH_RULES.types[g.type] || {}).label || g.type;
       const det = g.items.find(r => r.id === _hlState.open);
-      return `<section class="hl-group" aria-label="${escapeHtml(tl)}"><div class="hl-group-hd">${escapeHtml(tl)}</div>
-        <div class="hl-tiles">${g.items.map(r => _hlTileHtml(r, prev[r.id], rank[r.id], _hlState.open === r.id, snap)).join('')}</div>
-        ${det ? `<div class="hl-tile-detail">${_hlCardHtml(det, snap)}</div>` : ''}</section>`;
+      return `<section class="hl-group hl-group-n${Math.min(g.items.length, 5)}" aria-label="${escapeHtml(tl)}"><div class="hl-group-hd">${escapeHtml(tl)}</div>
+        <div class="hl-tiles">${g.items.map(r => _hlTileHtml(r, prev[r.id], rank[r.id], _hlState.open === r.id, snap)).join('')}</div></section>
+        ${det ? `<div class="hl-tile-detail">${_hlCardHtml(det, snap)}</div>` : ''}`;
     }).join('');
     const unrated = _hlUnratedHtml(sorted.filter(r => !_hlTileRated(r)), prev, _hlState.open, snap);
     const mo = snap.months && snap.months[month];
@@ -1836,6 +1915,7 @@ Object.assign(App, {
       main.__hlBound = true;
     }
     _hlDrawChart();
+    _hlScrollPending();
   },
 });
 

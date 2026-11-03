@@ -2764,37 +2764,69 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-sub th { text-align: left; text-transform: none; letter-spacing: normal; cursor: default; user-select: auto; background: none; }
 .hl-sub th:hover { color: var(--text-muted); }
 .hl-sub td { text-align: left; white-space: normal; }
-/* 卡片牆（塊 3，2026-11-03）：依通路類型分組，一組一排卡片；點卡片在該組卡片下方展開細項（全寬），同一時間只展開一個 */
-.hl-wall { display: flex; flex-direction: column; gap: 18px; }
-.hl-group-hd { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
-/* 每張卡最小 200px：1200px（含 240px 側欄，內容約 887px）一排 4 張；1440px（內容約 1127px）一排 5 張；手機一排 1 張（見下方手機區塊）。卡片等高 */
-.hl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; align-items: stretch; }
-.hl-tile { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); cursor: pointer; }
+/* 卡片牆（塊 3，2026-11-03）：依通路類型分組；點卡片在該組下方展開細項（全寬），同一時間只展開一個 */
+/* 塊 3b：每組是一個帶小標題的區塊，寬度＝卡片數（最多 5 張）× 卡寬，區塊依視窗寬度自動並排；展開的細項佔滿一整排、排在那一排下面 */
+.hl-wall { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 16px; }
+.hl-group { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.hl-group-n1 { width: 166px; }
+.hl-group-n2 { width: 342px; }
+.hl-group-n3 { width: 518px; }
+.hl-group-n4 { width: 694px; }
+.hl-group-n5 { width: 870px; }
+.hl-group-hd { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+/* 組內卡片：每張最小 156px（組寬 166 × 張數 + 間距，正好一張一欄；1200px 時蝦皮 4 張＋1 張剛好一排）；組被視窗擠窄時在組內換行；手機一排 1 張（見下方手機區塊）。卡片等高 */
+.hl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 10px; align-items: stretch; }
+.hl-tile { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); cursor: pointer; }
 .hl-tile:hover { border-color: var(--primary); }
 .hl-tile:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .hl-tile.open { border-color: var(--primary); background: var(--primary-soft); }
 /* 名稱列、底部指標列各留兩行高：名稱長（MOMO 乙配（寄倉）＋類型第 N）或指標換行的卡片，跟其他組的卡片一樣高 */
-.hl-tile-hd { display: flex; flex-wrap: wrap; align-content: flex-start; align-items: center; row-gap: 4px; min-height: 44px; }
-.hl-tile-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.hl-tile-hd { display: flex; flex-wrap: wrap; align-content: flex-start; align-items: center; row-gap: 2px; min-height: 40px; }
+.hl-tile-name { font-size: 13px; font-weight: 600; color: var(--text); }
 /* 大字總分＋旁邊比上月分數差 */
-.hl-tile-score { display: flex; align-items: center; gap: 10px; min-height: 40px; }
+.hl-tile-score { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-height: 32px; }
 /* 卡片上的參考分：「參考」放在數字右邊（不疊在下面），卡片才一樣高 */
-.hl-tile-score .hl-score { flex-direction: row; align-items: baseline; gap: 4px; min-width: 64px; padding: 4px 10px; font-size: 26px; }
+.hl-tile-score .hl-score { flex-direction: row; align-items: baseline; gap: 4px; min-width: 52px; padding: 2px 8px; font-size: 22px; }
 .hl-tile-score .hl-score-wait { font-size: 14px; }
 .hl-tile-score .hl-delta { font-size: 13px; color: var(--text-muted); }
 /* 主要扣分原因：最多兩行、超過用 … 截斷（完整原文在 title）；固定兩行高，卡片才等高 */
-.hl-tile-reason { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 3em; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
-/* 底部一行「純利 22.9% ↑ · 毛利 50.3% ↑ · 動銷 待上傳」：箭頭顏色同塊 2 的「上月」 */
-.hl-tile-mets { margin-top: auto; min-height: calc(3.2em + 7px); padding-top: 6px; border-top: 1px dashed var(--border); font-size: 11px; line-height: 1.6; color: var(--text); }
-.hl-tile-met { white-space: nowrap; }
-.hl-tile-met-off { color: var(--text-muted); }
-.hl-tile-sep { color: var(--text-muted); }
+.hl-tile-reason { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.9em; font-size: 12px; line-height: 1.45; color: var(--text-muted); }
+/* 底部「純利／毛利／動銷」三小欄（上面名稱、下面數值＋箭頭，永遠兩行）：箭頭顏色同塊 2 的「上月」 */
+.hl-tile-mets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 2px; margin-top: auto; padding-top: 5px; border-top: 1px dashed var(--border); font-size: 11px; line-height: 1.4; color: var(--text); }
+.hl-tile-met { display: flex; flex-direction: column; min-width: 0; white-space: nowrap; }
+.hl-tile-met-off, .hl-tile-met-off .hl-tile-met-v { color: var(--text-muted); font-weight: 400; }
+.hl-tile-met-k { color: var(--text-muted); }
+.hl-tile-met-v { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .hl-tile-met-k, .hl-tile-arrow { cursor: help; }
-.hl-tile-arrow { font-weight: 600; }
+.hl-tile-arrow { margin-left: 2px; font-weight: 600; }
 .hl-tile-arrow.hl-ov-up { color: var(--success); }
 .hl-tile-arrow.hl-ov-down { color: var(--danger); }
 .hl-tile-arrow.hl-ov-flat { color: var(--text-muted); }
-.hl-tile-detail { margin-top: 12px; }
+.hl-tile-detail { flex: 0 0 100%; min-width: 0; }
+/* 卡片上「⚠ 待處理商品 N 個」（紅、可點）／「✓ 沒有待處理商品」（灰綠）；沒有商品層的通路是空的佔位列，卡片才一樣高 */
+.hl-tile-todo { min-height: 18px; font-size: 12px; line-height: 1.5; }
+.hl-todo-warn { color: var(--danger); font-weight: 600; cursor: pointer; }
+.hl-todo-ok { color: var(--success); opacity: .75; cursor: pointer; }
+.hl-todo-warn:hover, .hl-todo-ok:hover { text-decoration: underline; text-underline-offset: 2px; }
+.hl-todo-warn:focus-visible, .hl-todo-ok:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.hl-todo-wait { color: var(--text-muted); }
+/* 總分旁「比上月 +8」 */
+.hl-tile-delta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+/* 細項：「看評分細節」預設收合 */
+.hl-score-more { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.hl-score-more > summary { cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--info); }
+.hl-score-more > summary::-webkit-details-marker { display: none; }
+.hl-score-more > summary::after { content: ' ▸'; }
+.hl-score-more[open] > summary::after { content: ' ▾'; }
+/* 要處理的商品：已調整的淡化（順序不變） */
+.hl-drag-done td { opacity: .55; }
+/* 「📖 怎麼看這頁」：第一層 5 行白話；「看完整規則」預設收合 */
+.hl-guide-intro { margin: 0 0 14px; padding-left: 20px; font-size: 14px; line-height: 1.9; color: var(--text); }
+.hl-guide-more > summary { cursor: pointer; list-style: none; font-weight: 600; color: var(--info); }
+.hl-guide-more > summary::-webkit-details-marker { display: none; }
+.hl-guide-more > summary::after { content: ' ▸'; }
+.hl-guide-more[open] > summary::after { content: ' ▾'; }
+.hl-guide-full { margin-top: 8px; }
 .hl-tile-detail .hl-card { margin: 0; }
 /* 頁面最下方「未評分：…」：通路名可點（展開細項） */
 .hl-unrated { margin-top: 18px; font-size: 12px; line-height: 1.8; color: var(--text-muted); }
@@ -2888,7 +2920,7 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
   background: var(--bg); border: 1px dashed var(--border); font-size: 12px; color: var(--text-muted); }
 .hl-load-btn { white-space: nowrap; }
 /* 拖累商品清單 */
-.hl-drag { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.hl-drag { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); scroll-margin-top: 12px; }
 .hl-drag-hd { font-weight: 700; color: var(--text); }
 .hl-drag-hd .hl-w { margin-left: 8px; }
 .hl-drag-off { margin-top: 6px; padding: 6px 10px; font-size: 12px; color: var(--text-muted); background: var(--bg); border-radius: var(--radius-sm); }
@@ -2907,6 +2939,7 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 /* 手機：卡片牆一排一張；展開的細項跟著變窄；子指標表收掉滿分標準欄（ⓘ 裡照樣看得到公式） */
 @media (max-width: 768px) {
   .hl-tiles { grid-template-columns: 1fr; }
+  .hl-group { width: 100%; }
   .hl-card { margin: 8px 4px 12px; padding: 12px; }
   .hl-card-hd { align-items: flex-start; gap: 12px; }
   .hl-ring { width: 56px; height: 56px; font-size: 20px; }
