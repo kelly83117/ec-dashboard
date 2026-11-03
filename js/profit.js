@@ -7428,7 +7428,14 @@ function patchRow(shop,code,ov){
   }
   // pureProfit
   const pureEl=document.getElementById(`td-${shop}-${code}-pureProfit`);
-  if(pureEl){pureEl.textContent=_fSigned(r.pureProfit);pureEl.className='td-num '+(r.pureProfit>=0?'td-pos':'td-neg');}
+  //   🔴 只寫內層 .pure-val，【不可】對 <td> 設 textContent —— 會把「上期 $X」副標一起抹掉（同下方 dayBudget 那段）。
+  //   ⚠ 副標不跟著更新：它是上一期的淨利，編輯本期廣告費不會改變它。正負色仍設在 <td> 上（副標 .sub-ads 自帶灰色）。
+  //   ⚠ .pure-val 找不到（結構被改回沒有 span）就靜默不更新，不 throw 打斷後面的更新。
+  if(pureEl){
+    const pureVal=pureEl.querySelector('.pure-val');
+    if(pureVal)pureVal.textContent=_fSigned(r.pureProfit);
+    pureEl.className='td-num '+(r.pureProfit>=0?'td-pos':'td-neg');
+  }
   // pureRate
   const rateEl=document.getElementById(`td-${shop}-${code}-pureRate`);
   if(rateEl)rateEl.innerHTML=pill(!(r.rev>0)?null:r.pureRate*100);
@@ -8753,7 +8760,7 @@ function _subAdsHtml(r){
 }
 // 日預算格下方的副標「上期 $X」。與 _subAdsHtml 是同一族，差別只在值的來源：
 //   廣告費走 r.prevAdsFee（產生報表時算好、落地在 built[]）；
-//   日預算【不落地】，值由 renderTable 現查的 prevBudRead(code) 傳進來。
+//   日預算【不落地】，值由 renderTable 現查的 prevRead.dayBudget(code) 傳進來。
 //   → 所以參數是【值】不是【整列 r】，這個差異是刻意的：簽名長得不一樣，
 //     日後不會有人誤以為可以直接 r.prevDayBudget 而去找一個不存在的欄位。
 //
@@ -8800,22 +8807,35 @@ function _subDayBudgetHtml(v){
 //       新增的「上月同期」基準，與本函式要的滾動基準不同。表格逐列的「上期」一律走這一套。
 //   ⚠ 回傳的 reader 綁著預讀當下的那份上期報表快照 → 只在同一次同步 render 內使用，
 //     不要跨 render 快取（理由同 _prodTagsReaderFor）。
+//
+//   ▸ 淨利（2026-11 加）：同一份上期報表順便讀出 pureProfit，回傳 { dayBudget(code), pureProfit(code) }。
+//     ⚠ 刻意【併在這裡】而不是另寫一支 _prevPureReaderFor：兩欄要的是同一份上期報表、
+//       同一套 getPrevPeriodKey 基準，分兩支等於 lsLoad 兩次，日後也可能有人只改到其中一支的基準。
+//     ⚠ 淨利同樣只看 r.code 建表、不塌成 0：上期淨利 0 與負數都是有意義的值。
+//       三態呈現交給 _subPureHtml（數字含 0 / 負數 →「上期 ±$X」；null / undefined →「—」）。
+//     ⚠ pureProfit 同樣【不寫進 built[]】，理由同上方 dayBudget 那段（_stripDerived 不需要動）。
 function _prevDayBudgetReaderFor(shop){
   const s=state[shop];
   // Object.create(null) 而不是 {}：商品編號是外部資料，萬一有人取名 constructor /
   //   __proto__ / toString，普通物件會從 Object.prototype 拿到東西、渲染成「上期 $NaN」。
   //   （getPrevPeriodMap 用的是 {}，有同一個理論缺陷；那邊不在本次範圍，這裡先做對。）
-  const map=Object.create(null);
+  const budMap=Object.create(null), pureMap=Object.create(null);
   try{
     const parts=getPrevPeriodKey(shop,s.curMonth,s.curHalf).split('|');
     if(parts.length>=4){
       const rep=lsLoad(shop,parts[2],parts[3]);
       if(rep&&Array.isArray(rep.built)){
-        rep.built.forEach(r=>{ if(r.code)map[r.code]=r.dayBudget; });
+        rep.built.forEach(r=>{ if(r.code){ budMap[r.code]=r.dayBudget; pureMap[r.code]=r.pureProfit; } });
       }
     }
   }catch{}
-  return function(code){ return map[code]; };
+  return { dayBudget:(code)=>budMap[code], pureProfit:(code)=>pureMap[code] };
+}
+// 淨利格下方的副標「上期 $X」／「上期 -$X」。同 _subDayBudgetHtml 一族（參數是【值】）。
+//   🔴 金額一律走 _fSigned、不可用 fmtN（會吃掉負號）；但 null / undefined 要先擋成「—」，
+//     _fSigned 會把 undefined 變成 $0 ——「上期沒這商品」不能謊報成「上期淨利 $0」。
+function _subPureHtml(v){
+  return `<div class="sub-ads">${(v!==null&&v!==undefined)?'上期 '+_fSigned(v):'—'}</div>`;
 }
 
 // ── 調整欄那行小字要用的兩個計數（一次算全表，逐列 O(1) 取用）──
@@ -8943,7 +8963,7 @@ function renderTable(shop,list,opts){
   const si=(col)=>ss.col===col?(ss.dir==='asc'?' ▲':' ▼'):'';
   const hasF=(col)=>!!(s.filters?.[col])||(col==='name'&&!!_nameExclLetters(s.filters?.nameExcl?.val))||ss.col===col;   // 名稱欄：排除 C/W/H 任一顆開著也算有篩選
   // help：欄名與 ▾ 之間的一顆 ?，點開「比較基準說明」彈窗。預設空字串 → 其餘欄位輸出逐字不變。
-  //   🔴 只有帶「/ 上期」副標的三欄會傳（adsFee / rev / dayBudget，見 buildColHeader）。
+  //   🔴 只有帶「/ 上期」副標的四欄會傳（adsFee / rev / pureProfit / dayBudget，見 buildColHeader）。
   //   🔴 【不用】MOMO 的 .mm-info：那套是原生 title tooltip —— hover 才出現、手機完全看不到、
   //     不能分段。這裡要講的是兩套基準的差別，一句話塞不下。改成真的 <button> 開既有彈窗。
   //   ⚠ event.stopPropagation()：<th> 帶 draggable + 拖曳 handler（見 dragAttrs），
@@ -8958,23 +8978,24 @@ function renderTable(shop,list,opts){
   // 拖曳表頭調整欄位順序：拖曳來源/目標都用 data-colkey 標記的欄位鍵
   const dragAttrs=(key)=>`draggable="true" ondragstart="colDragStart(event,'${shop}','${key}')" ondragover="colDragOver(event)" ondragenter="colDragEnter(event)" ondragleave="colDragLeave(event)" ondrop="colDrop(event,'${shop}','${key}')" ondragend="colDragEnd(event)"`;
   const HEADER_LABEL={
-    adsFee:'廣告費 / 上期', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利',
+    adsFee:'廣告費 / 上期', rev:'營收 / 上期', gross:'毛利', pureProfit:'淨利 / 上期',
     pureRate:'淨利率%', adsPct:'廣告佔比', profitPct:'利潤%', stock:'可用庫存', targetROI:'目標ROI', directROI:'直接ROI',
     roi:'投入產出', roiDiff:'實際-目標', clicks:'點擊數', dayBudget:'日預算 / 上期',
     analysisLabel:'廣告分析', note:'廣告調整',
     growthRate:'成長比', growthAnalysis:'成長分析', growthNote:'商品調整',
     prodTags:'測試標籤',
   };
-  // 「/ 上期」三欄的說明入口。開的是【短版】彈窗（只講那一欄自己的事），不是頂端 ⓘ 的完整五段 ——
+  // 「/ 上期」四欄（營收、廣告費、淨利、日預算）的說明入口。開的是【短版】彈窗（只講那一欄自己的事），不是頂端 ⓘ 的完整五段 ——
   //   點表頭問號的人在問「這一欄的上期是什麼」，範圍就是那一欄。入口的位置決定問題的範圍，
   //   完整判準見 openKpiCmpHelp 上方那段。
   //   🔴 日預算走【專屬的 'col-budget'】，多一段講「副標是上一期的日預算、不是廣告費總額」與
-  //     $340 / $0 / — 三種顯示的差別。這欄最容易誤解，也是三欄裡唯一需要額外解釋的。
+  //     $340 / $0 / — 三種顯示的差別。這欄最容易誤解，也是四欄裡唯一需要額外解釋的。
   //     （老闆的示意圖只畫了營收與廣告費兩欄，日預算是補上的 —— 同一種副標不該有的有、有的沒有。）
-  const _CMP_HELP_MODE={adsFee:'col', rev:'col', dayBudget:'col-budget'};
+  const _CMP_HELP_MODE={adsFee:'col', rev:'col', pureProfit:'col', dayBudget:'col-budget'};
   const _CMP_HELP_TIP={
     adsFee:'這一欄的「上期」是跟上一期比，跟頂端三格的「上月同期」不是同一套 —— 點開看說明',
     rev:'這一欄的「上期」是跟上一期比，跟頂端三格的「上月同期」不是同一套 —— 點開看說明',
+    pureProfit:'這一欄的「上期」是上一期的淨利，跟頂端三格的「上月同期」不是同一套 —— 點開看說明',
     dayBudget:'副標是【上一期的日預算】、不是上一期的廣告費總額 —— 點開看說明',
   };
   const _hdrQ=(key)=>_CMP_HELP_MODE[key]
@@ -9009,7 +9030,8 @@ function renderTable(shop,list,opts){
   // 🔴 建在 forEach 【外面】。建在裡面等於每列重讀一次上期報表（見 _prevDayBudgetReaderFor
   //   上方註解），800 列就是 800 次。同一個坑本檔已經踩過兩次，兩處都留了同樣的警告：
   //   updateTagFilterBar 與 applyFilters 裡的 prodRead。
-  const prevBudRead=_prevDayBudgetReaderFor(shop);
+  //   ⚠ 一次讀出日預算與淨利兩份（同一份上期報表），見 _prevDayBudgetReaderFor 的「淨利」段。
+  const prevRead=_prevDayBudgetReaderFor(shop);
   // 🔴 同上一條，理由完全相同：商品調整（ec_notes|{通路}_growth）整個通路共用一把 key，
   //   而 getNotes 命中記憶體時做的是 JSON.parse(JSON.stringify(…))【整份深拷貝】（見該函式）。
   //   原本這一行寫在 forEach 裡的兩個分支各一次（mobic / 非 mobic），好麻吉 822 列
@@ -9051,7 +9073,7 @@ function renderTable(shop,list,opts){
       const MOBIC_BLANK=new Set(['growthRate','growthAnalysis']);
       const mobicCell={
         adsFee:`<td class="td-num td-amber ${isEdited('adsFee')?'cell-edited':''}" id="${adsId}" onclick="startEdit('${shop}','${r.code}','adsFee','${adsId}')" style="cursor:pointer" title="點擊編輯"><span class="cell-val">$${fmtN(r.adsFee)}</span>${_subAdsHtml(r)}</td>`,
-        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
+        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}"><span class="pure-val">${_fSigned(r.pureProfit)}</span>${_subPureHtml(prevRead.pureProfit(r.code))}</td>`,
         note:noteCellHtml,
         growthNote:buildNoteCell(shop+'_growth',r.code,gnoteId,growthNotesAll[r.code],{insight:crossRead.m(r.code)}),
         prodTags:buildProdTagCell(shop,r.code),
@@ -9071,7 +9093,7 @@ function renderTable(shop,list,opts){
         adsFee:editTd('adsFee','$'+fmtN(r.adsFee),'td-amber',_subAdsHtml(r)),
         rev:`<td class="td-num">$${fmtN(r.rev)}<div class="sub-rev">${r.prevRev!==null?'上期 $'+fmtN(r.prevRev):'—'}</div></td>`,
         gross:`<td class="td-num">${_fSigned(r.gross)}</td>`,
-        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}">${_fSigned(r.pureProfit)}</td>`,
+        pureProfit:`<td id="td-${shop}-${r.code}-pureProfit" class="td-num ${pc}"><span class="pure-val">${_fSigned(r.pureProfit)}</span>${_subPureHtml(prevRead.pureProfit(r.code))}</td>`,
         pureRate:`<td id="td-${shop}-${r.code}-pureRate">${pill(!(r.rev>0)?null:r.pureRate*100)}</td>`,
         adsPct:`<td id="td-${shop}-${r.code}-adsPct" class="td-num">${(r.adsPct*100).toFixed(2)}%</td>`,
         profitPct:`<td id="td-${shop}-${r.code}-profitPct" class="td-num">${!(r.rev>0)?'—':(r.profitPct*100).toFixed(2)+'%'}</td>`,
@@ -9088,7 +9110,7 @@ function renderTable(shop,list,opts){
         //     日後有人拿 .cell-val 當「這格可編輯」的判準時寫出靜默錯誤的程式碼。
         //   ⚠ .bud-val 刻意【沒有任何 CSS】：span 預設 display:inline、完全繼承父層 td 的
         //     字級/字重/顏色 → 數字外觀與加 span 之前一模一樣。它純粹是 patchRow 的定位錨點。
-        dayBudget:`<td id="td-${shop}-${r.code}-dayBudget" class="td-num"><span class="bud-val">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</span>${_subDayBudgetHtml(prevBudRead(r.code))}</td>`,
+        dayBudget:`<td id="td-${shop}-${r.code}-dayBudget" class="td-num"><span class="bud-val">${r.dayBudget>0?'$'+fmtN(r.dayBudget):'—'}</span>${_subDayBudgetHtml(prevRead.dayBudget(r.code))}</td>`,
         analysisLabel:_anaCellHtml(shop,r.code,r.analysisAll),
         note:noteCellHtml,
         growthRate:`<td class="td-num" style="text-align:center">${r.growthRate===null?'<span style="color:#9ca3af">—</span>':`<span style="color:${r.growthRate>=0?'#10b981':'#ef4444'};font-weight:700">${r.growthRate>=0?'↑':'↓'} ${Math.abs(r.growthRate*100).toFixed(0)}%</span>`}</td>`,
@@ -26647,7 +26669,7 @@ const KPI_CMP_HELP=[
   {q:'① 上面三個大數字：跟上個月的同一段期間比',
    a:'7 月下半 → 比 6 月下半\n7 月上半 → 比 6 月上半\n整月 → 比上個月整月'},
   {q:'② 下面表格每一列的「上期」：跟上一期比',
-   a:'7 月下半 → 比 7 月上半\n7 月上半 → 比 6 月下半\n整月 → 比上個月整月\n營收、廣告費、日預算三欄的副標都是這一套。'},
+   a:'7 月下半 → 比 7 月上半\n7 月上半 → 比 6 月下半\n整月 → 比上個月整月\n營收、廣告費、淨利、日預算四欄的副標都是這一套。'},
   {q:'③ 兩者不同是刻意的',
    a:'上面看的是月對月的整體趨勢，下面看的是單一商品上一次的表現。\n整月的時候兩套剛好是同一段期間，數字會一樣；只有上半月／下半月才會分岔。'},
   {q:'④ 有篩選的時候，上面三格的比較會整個消失',
@@ -26655,10 +26677,10 @@ const KPI_CMP_HELP=[
   {q:'⑤ 基期沒有報表的時候也不顯示',
    a:'例如通路剛開始經營的第一個月，或那一期沒有產生過報表。'},
 ];
-// 表頭 ? 的短版（'col'）。營收 / 廣告費那兩顆用這個。
+// 表頭 ? 的短版（'col'）。營收 / 廣告費 / 淨利那三顆用這個。
 const KPI_CMP_HELP_COL=[
   {q:'這一欄的「上期」',
-   a:'跟上一期比：7 月下半比 7 月上半、7 月上半比 6 月下半、整月比上個月整月。\n營收、廣告費、日預算三欄都是這一套。'},
+   a:'跟上一期比：7 月下半比 7 月上半、7 月上半比 6 月下半、整月比上個月整月。\n營收、廣告費、淨利、日預算四欄都是這一套。'},
   {q:'⚠ 跟上面三個大數字的「上月同期」不是同一套',
    a:'完整說明請點上方的「ⓘ 比較基準」。'},
 ];
