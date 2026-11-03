@@ -2969,8 +2969,64 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-drag-info { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
 .hl-drag-info summary { cursor: pointer; }
 .hl-drag-info ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.8; }
+/* 卡片「★ 亮點 N　⚠ 警訊 N」（塊 4，取代待處理商品那行）：符號＋文字，不只靠顏色 */
+.hl-tag-line { display: flex; gap: 12px; cursor: pointer; font-weight: 600; }
+.hl-tag-line:hover { text-decoration: underline; text-underline-offset: 2px; }
+.hl-tag-line:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.hl-tl-good { color: var(--success); }
+.hl-tl-bad { color: var(--danger); }
+/* 商品標籤小燈：綠▲ 灰● 黃▽ 紅▼ */
+.hl-ptag { display: inline-block; margin: 0 3px 2px 0; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; line-height: 18px; white-space: nowrap; color: var(--text-muted); }
+.hl-pt-green { border-color: var(--success); background: var(--success-soft); color: var(--success); }
+.hl-pt-yellow { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
+.hl-pt-red { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+/* 細項：亮點／警訊兩張清單，寬螢幕左右並排、窄螢幕上下 */
+.hl-tags { margin-top: 12px; }
+.hl-tags-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; font-size: 11px; color: var(--text-muted); }
+.hl-tags-legend .hl-w { margin-left: 4px; }
+.hl-tags-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 8px; }
+.hl-tags-col { min-width: 0; }
+.hl-tags-ttl { font-size: 13px; font-weight: 700; }
+.hl-tags-ttl .hl-w { margin-left: 6px; font-weight: 400; }
+.hl-tags-good { color: var(--success); }
+.hl-tags-bad { color: var(--danger); }
+.hl-tags-msg { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+.hl-tags-wrap { overflow-x: auto; }
+/* 清單：固定欄寬（1200px 含側欄時一欄約 420px 也放得下、不出現左右捲軸）。第一格兩行：名稱（截斷）＋燈號 */
+.hl-tags-tbl { table-layout: fixed; }
+.hl-tags-tbl th, .hl-tags-tbl td { padding: 4px 4px; }
+.hl-sub th.hl-tags-rev, .hl-sub td.hl-tags-rev { width: 68px; }
+.hl-sub th.hl-tags-pr, .hl-sub td.hl-tags-pr { width: 52px; }
+.hl-sub th.hl-tags-g, .hl-sub td.hl-tags-g { width: 66px; }
+.hl-tags-item { min-width: 0; }
+.hl-tags-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; }
+.hl-tags-chips { line-height: 16px; }
+.hl-tags-chips .hl-ptag { margin: 0 2px 0 0; padding: 0 3px; font-size: 10px; line-height: 15px; }
+/* 指標逐月變化表（塊 5）：格子底色＝燈號，旁邊有分數或符號 */
+.hl-mtable { margin-top: 16px; }
+.hl-mt-hd { font-size: 13px; font-weight: 700; color: var(--text); }
+.hl-mt-pick { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+.hl-mt-opt { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.hl-mt-wrap { overflow-x: auto; }
+.hl-mt-tbl th[scope="row"] { white-space: nowrap; color: var(--text); font-size: 12px; }
+.hl-mt-row { cursor: pointer; }
+.hl-mt-row:hover th[scope="row"], .hl-mt-row.open th[scope="row"] { color: var(--primary-dark); }
+.hl-mt-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.hl-mt-k { margin-left: 6px; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 10px; font-weight: 400; color: var(--text-muted); }
+.hl-mt-scored { border-color: var(--primary); color: var(--primary-dark); }
+.hl-sub .hl-mc { width: auto; min-width: 72px; }
+.hl-mc-s { margin-left: 4px; font-size: 10px; }
+.hl-mc-green { background: var(--success-soft); color: var(--success); }
+.hl-mc-yellow { background: var(--warn-soft); color: var(--warn); }
+.hl-mc-red { background: var(--danger-soft); color: var(--danger); }
+.hl-mc-gray { color: var(--text-muted); }
+.hl-mt-chart { margin-top: 8px; }
 /* 手機：卡片牆一排一張；展開的細項跟著變窄；子指標表收掉滿分標準欄（ⓘ 裡照樣看得到公式） */
 @media (max-width: 768px) {
+  .hl-tags-cols { grid-template-columns: 1fr; }
+  /* 手機：清單只留「商品名稱／燈號」與「營收比上月」，營收、純利率收掉（滑鼠／長按名稱看 title） */
+  .hl-tags-tbl .hl-tags-rev, .hl-tags-tbl .hl-tags-pr { display: none; }
+  .hl-tags-wrap, .hl-mt-wrap { max-width: calc(100vw - 72px); }
   .hl-tiles { grid-template-columns: 1fr; }
   .hl-group { width: 100%; }
   .hl-card { margin: 8px 4px 12px; padding: 12px; }
