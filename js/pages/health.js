@@ -926,7 +926,7 @@ function _hlGuideBlocks(rules) {
     S.subs ? { h: '動銷率怎麼算「1 個商品」', ol: [
       '分數用「公司商品」：原廠編號／料號去掉最後一段規格碼（例：同一款雨衣的四個顏色算 1 個）。同一個公司商品只要有一頁、一個規格有賣，就算有動。',
       '分母＝期末上架的商品，加上這個月有賣但已經下架的商品（避免分子比分母大）。',
-      '卡片另外列「動銷率（商品頁口徑）」：每個通路商品頁各算一個，跟 MOMO／PChome 總覽畫面同口徑，給你對照，不計分。',
+      '卡片面向最下面的「未計分」小字另外列「動銷率（商品頁口徑）」：每個通路商品頁各算一個，跟 MOMO／PChome 總覽畫面同口徑，給你對照，不計分。',
       '「多頁商品中零動銷的頁」：同一個公司商品開了好幾頁、這個月有賣，其中沒賣出的頁數。公司商品口徑會把它們藏起來，所以另外列出，不計分。',
       '編號格式不符（不是「英文字母＋數字－數字」）的商品，改用商品頁自己算一個，ⓘ 裡會寫有幾個。',
       '蝦皮的動銷率現在是「尚未上傳」：要等洞察表的商品表現按月保存（下一塊）才有上架清單當分母。',
@@ -965,21 +965,23 @@ function _hlGuideBlocks(rules) {
       '排名只在同一類型裡比（例：「類型第 1」）。不同類型的門檻、營收口徑都不同，跨類型的分數高低只供參考。',
       '業外、官網會列出來，但不參加排名。',
     ] },
-    gross ? { h: '毛利率為什麼不計分', p: gross.why + '卡片上「毛利率（參考，不計分）」旁的 ⓘ 也有這段說明。' } : null,
+    gross ? { h: '毛利率為什麼不計分', p: gross.why + '卡片「獲利」面向最下面的「未計分：毛利率」，滑鼠移上去也看得到這段說明。' } : null,
     R.notes.shopee && R.notes.shopee.rev ? { warn: R.notes.shopee.rev } : null,
     notes.length ? { h: '其他口徑提醒', ol: notes } : null,
     { h: '總覽表的純利率、毛利率、動銷率', ol: [
       ...HL_OVERVIEW_COLS.map(c => c.info),
-      '這三欄只顯示、不計分（評分照各面向的規則），數字跟展開卡片裡的原始值一樣；下面小字是「比上月」差幾個百分點。',
+      '這三欄只顯示、不計分（評分照各面向的規則），數字跟展開卡片裡的一樣；下面小字是上個月的數字：↑ 比上月高、↓ 比上月低、→ 一樣，上個月沒資料就不顯示。',
       '沒資料不會顯示成零：KPI 沒填完寫「尚未上傳」；動銷率的商品資料還在載入寫「載入中」，蝦皮要等商品表現按月保存才有、先寫「待上傳」，沒有商品層資料的通路寫「—」。',
       '手機上總覽表只留總分和動銷率，其他欄位展開卡片看。',
     ] },
     { h: '比上月、主要扣分原因、走勢圖', ol: [
       '比上月：這個月總分減上個月總分。',
+      `「上月」跟「成長」不一樣：總覽純利率、毛利率、動銷率下面的「上月」是單一個月跟單一個月比；「成長」面向和扣分原因裡的「近 ${R.growth.window} 個月 vs 前 ${R.growth.window} 個月」是近 ${R.growth.window} 個月加起來跟再往前 ${R.growth.window} 個月加起來比，所以兩邊數字不同是正常的。`,
       '主要扣分原因：最拉低總分的那一個子指標，用白話寫它現在的數字（例：「營收比前期少 …%」「賠錢商品占營收 …%」）。門檻和得分展開卡片看。',
       '頁頂「KPI 尚未填完」平常收成一行，點一下展開，可以直接點通路跳到 KPI 月結表去填。',
-      '點通路那一列展開卡片：看每個子指標的原始值、零分線、滿分線、得分，以及近 12 個月分數走勢（空心點＝參考分）。',
-      '每個子指標旁的 ⓘ：公式、實際的分子分母數字、資料來源。',
+      '點通路那一列展開卡片：看每個子指標的本月數字、滿分標準（到這裡就滿分）、得分，以及近 12 個月分數走勢（空心點＝參考分）。成長兩項的本月寫「前期 → 近期」，滿分標準是近期要到多少。',
+      '沒有分數的子指標（只供參考、尚未上傳、不適用）不各佔一列，收在每個面向最下面的「未計分」那一行。',
+      '每個 ⓘ：第一行是一句白話；點「看算法」才看公式、實際的分子分母數字、資料來源與提醒。',
     ] },
     { h: '規則版本', p: `目前是 ${R.version}。門檻有改就會升版本。分數不存檔，每次打開都用目前的規則重算，所以改版後舊月份的分數也會跟著變。` },
   ].filter(Boolean);
@@ -1241,13 +1243,21 @@ function _hlDeltaHtml(r, prev) {
 // 總覽表的三個數字欄（純利率、毛利率、動銷率）：只顯示、不計分，值＝面向裡子指標的原始值（同卡片），評分不受影響。
 //   pick＝[面向 key, 子指標 key]；info＝表頭 ⓘ 與「📖 怎麼看這頁」共用的一句白話定義。
 const HL_OVERVIEW_COLS = _hlDeepFreeze([
-  { key: 'pure', cls: 'hl-c-pure', label: '純利率', pick: ['profit', 'pureRate'],
+  { key: 'pure', cls: 'hl-c-pure', label: '純利率', pick: ['profit', 'pureRate'], short: '每 100 元營收最後留下多少錢',
     info: '純利率＝扣完商品成本、廣告、手續費、各項費用後，每 100 元營收最後留下多少錢（KPI 純利 ÷ 實際營收）。' },
-  { key: 'gross', cls: 'hl-c-gross', label: '毛利率', pick: ['profit', 'grossRate'],
+  { key: 'gross', cls: 'hl-c-gross', label: '毛利率', pick: ['profit', 'grossRate'], short: '只扣商品成本，看訂價合不合理',
     info: '毛利率＝只扣商品成本，每 100 元營收剩多少，用來看訂價合不合理（（實際營收 − 商品成本）÷ 實際營收）。只顯示、不計分。' },
-  { key: 'st', cls: 'hl-c-st', label: '動銷率', pick: ['structure', 'sellThrough'],
+  { key: 'st', cls: 'hl-c-st', label: '動銷率', pick: ['structure', 'sellThrough'], short: '在架商品這個月有賣出的比例',
     info: '動銷率＝這個月有賣出的商品 ÷ 在架商品，以商品數計、不以規格數計（雨衣四色算 1 個商品）。' },
 ]);
+// ⓘ 的共用樣子（2026-11-03）：展開後第一行只放一句白話（short），公式、來源、提醒收進下一層「看算法」，點了才展開。
+function _hlInfoHtml(short, more, opts) {
+  const o = opts || {};
+  const moreHtml = more ? `<details class="hl-more"><summary>看算法</summary><div class="hl-more-body">${escapeHtml(more)}</div></details>` : '';
+  return `<details class="hl-info${o.cls ? ' ' + o.cls : ''}"><summary aria-label="${escapeHtml(o.aria || '說明')}">ⓘ</summary><div class="hl-info-body"><div class="hl-info-short">${escapeHtml(short)}</div>${moreHtml}</div></details>`;
+}
+// 百分比去掉多餘的 .0（滿分標準用：24%、0.5%、62%）
+function _hlPctTrim(v) { return _hlFinite(v) ? String(Math.round(v * 1000) / 10) + '%' : '—'; }
 // 一格的內容：{ text, sub, cls }。沒資料一律狀態字或「—」，不顯示 0%。
 //   動銷率：沒有商品層的通路「—」；蝦皮（還沒有上架清單）「待上傳」；商品層在載入「載入中」。
 function _hlOverviewCell(r, prev, col) {
@@ -1261,22 +1271,24 @@ function _hlOverviewCell(r, prev, col) {
     else if (s.status === 'na') t = '—';
     return { text: t, sub: '', cls: 'hl-ov-off' };
   }
+  // 下方小字（2026-11-03）：不再寫 pp，改成「↓ 上月 50.7%」；方向用顯示的 0.1 位比較（看起來一樣就是 →）；上月沒資料就不顯示
   const p = find(prev);
-  let sub = '比上月 —';
+  let sub = '', dir = '';
   if (p && p.status === 'ok' && _hlFinite(p.raw)) {
-    const d = Math.round((s.raw - p.raw) * 1000) / 10;   // 百分點，捨入到 0.1
-    sub = `比上月 ${d > 0 ? '+' : d < 0 ? '−' : '±'}${Math.abs(d).toFixed(1)}pp`;
+    const a = Math.round(s.raw * 1000), b = Math.round(p.raw * 1000);
+    dir = a > b ? 'up' : a < b ? 'down' : 'flat';
+    sub = `${dir === 'up' ? '↑' : dir === 'down' ? '↓' : '→'} 上月 ${_hlFmtPct(p.raw)}`;
   }
-  return { text: _hlFmtPct(s.raw), sub, cls: '' };
+  return { text: _hlFmtPct(s.raw), sub, cls: '', dir };
 }
 function _hlOverviewCellsHtml(r, prev) {
   return HL_OVERVIEW_COLS.map(col => {
     const c = _hlOverviewCell(r, prev, col);
-    return `<td class="hl-num hl-ov ${col.cls}${c.cls ? ' ' + c.cls : ''}">${escapeHtml(c.text)}${c.sub ? `<span class="hl-ov-sub">${escapeHtml(c.sub)}</span>` : ''}</td>`;
+    return `<td class="hl-num hl-ov ${col.cls}${c.cls ? ' ' + c.cls : ''}">${escapeHtml(c.text)}${c.sub ? `<span class="hl-ov-sub hl-ov-${c.dir}">${escapeHtml(c.sub)}</span>` : ''}</td>`;
   }).join('');
 }
 function _hlOverviewHeadHtml() {
-  return HL_OVERVIEW_COLS.map(col => `<th class="hl-num hl-ov ${col.cls}">${escapeHtml(col.label)}<details class="hl-info hl-info-inline hl-th-info"><summary aria-label="${escapeHtml(col.label)}是什麼">ⓘ</summary><div class="hl-info-body">${escapeHtml(col.info)}</div></details></th>`).join('');
+  return HL_OVERVIEW_COLS.map(col => `<th class="hl-num hl-ov ${col.cls}">${escapeHtml(col.label)}${_hlInfoHtml(col.short, col.info, { cls: 'hl-info-inline hl-th-info', aria: col.label + '是什麼' })}</th>`).join('');
 }
 // 總分下方小字「依 N/M」：只在有分數、而且面向不齊（N < M）時顯示；齊全時不顯示
 function _hlDimsNoteHtml(r) {
@@ -1285,11 +1297,20 @@ function _hlDimsNoteHtml(r) {
 }
 // 總覽「主要扣分原因」白話版（2026-11-03）：只換說法，不碰計分。
 //   挑哪一個子指標＝跟 _hlTopReason 同一條規則（(100 − 得分) × 子指標權重 × 面向權重 最大）；_hlTopReason 本身不動（computeChannelHealth 的 topReason 照舊）。
-//   文字不出現「滿分線」「零分線」「pp」。沒有對應模板的子指標退回「名稱 數值」。
+//   文字不出現「滿分線」「零分線」「pp」「個百分點」。沒有對應模板的子指標退回「名稱 數值」。
+//   🔴 成長類一律寫出期間「近 N 個月 vs 前 N 個月」（合計對合計，N＝HEALTH_RULES.growth.window），免得跟總覽的單月「上月」看起來矛盾。
+//   純利率變化寫兩期的實際數字：近、前＝計分時用的近期、前期合計純利率（_hlGrowthEnds 重算，算法同 _hlGrowthDim）；拿不到就退回不帶數字的說法。
+const _hlWinTxt = () => { const n = HEALTH_RULES.growth.window; return { near: `近 ${n} 個月`, prior: `前 ${n} 個月` }; };
 const HL_PLAIN_REASON = {
   pureRate: (v) => `純利率 ${_hlFmtPct(v)}，偏低`,
-  purePp: (v) => _hlPlainChange(v, '純利率比前期低', '純利率只比前期高', '純利率跟前期持平', x => `${(Math.abs(x) * 100).toFixed(1)} 個百分點`),
-  revGrowth: (v) => _hlPlainChange(v, '營收比前期少', '營收只比前期多', '營收跟前期持平', x => `${(Math.abs(x) * 100).toFixed(1)}%`),
+  purePp: (v, e) => {
+    const w = _hlWinTxt();
+    if (!e) return _hlPlainChange(v, `${w.near}純利率比${w.prior}低`, `${w.near}純利率只比${w.prior}高一點`, `${w.near}純利率跟${w.prior}持平`, () => '');
+    const a = _hlFmtPct(e.priorRate), b = _hlFmtPct(e.recentRate);
+    return a === b ? `${w.near}純利率 ${b}，跟${w.prior}一樣`
+      : e.recentRate < e.priorRate ? `${w.near}純利率 ${b}，比${w.prior} ${a} 低` : `${w.near}純利率 ${b}，只比${w.prior} ${a} 高一點`;
+  },
+  revGrowth: (v) => { const w = _hlWinTxt(); return _hlPlainChange(v, `${w.near}營收比${w.prior}少`, `${w.near}營收只比${w.prior}多`, `${w.near}營收跟${w.prior}持平`, x => `${(Math.abs(x) * 100).toFixed(1)}%`); },
   adsPct: (v) => `廣告費占營收 ${_hlFmtPct(v)}，偏高`,
   adsQualified: (v) => `廣告費只有 ${_hlFmtPct(v)} 花在本身夠賺的商品上`,
   adsLoss: (v) => `廣告讓商品由賺轉賠，占廣告費 ${_hlFmtPct(v)}`,
@@ -1298,10 +1319,24 @@ const HL_PLAIN_REASON = {
   longLoss: (v) => `連續兩個月賠錢的商品占 ${_hlFmtPct(v)}`,
 };
 function _hlPlainChange(v, down, up, flat, amt) {
-  const r = Math.round(v * 1000) / 1000;   // 跟顯示同一個捨入（0.1 個百分點），四捨五入後是 0 就寫持平
-  return r < 0 ? `${down} ${amt(r)}` : r > 0 ? `${up} ${amt(r)}` : flat;
+  const r = Math.round(v * 1000) / 1000;   // 跟顯示同一個捨入（0.1 位），四捨五入後是 0 就寫持平
+  const tail = x => { const t = amt(x); return t ? ' ' + t : ''; };
+  return r < 0 ? `${down}${tail(r)}` : r > 0 ? `${up}${tail(r)}` : flat;
 }
-function _hlPlainReason(dims) {
+// 成長的前期／近期合計（只給畫面用，不參與計分）：跟 _hlGrowthDim 同一個窗口、同一個加總；任何一格不能用就回 null。
+function _hlGrowthEnds(ch, m, snap) {
+  if (!ch || !snap) return null;
+  const N = HEALTH_RULES.growth.window, W = [];
+  for (let i = 2 * N - 1; i >= 0; i--) W.push(_hlAddMonth(m, -i));
+  const cells = W.map(x => _hlCell(snap, x, ch));
+  if (cells.some(c => !_hlCellUsable(c))) return null;
+  const sum = (arr, k) => arr.reduce((a, c) => a + (Number(c[k]) || 0), 0);
+  const prior = cells.slice(0, N), recent = cells.slice(N);
+  const pr = sum(prior, 'rev'), rr = sum(recent, 'rev'), pp = sum(prior, 'pure'), rp = sum(recent, 'pure');
+  if (!(pr > 0) || !(rr > 0)) return null;
+  return { priorRev: pr, recentRev: rr, priorRate: pp / pr, recentRate: rp / rr };
+}
+function _hlPlainReason(dims, ends) {
   let best = null;
   (dims || []).forEach(d => (d.status === 'ok' ? d.subs : []).forEach(s => {
     if (s.scored === false || s.status !== 'ok' || !_hlFinite(s.score)) return;
@@ -1310,12 +1345,26 @@ function _hlPlainReason(dims) {
   }));
   if (!best) return '';
   const s = best.s, f = HL_PLAIN_REASON[s.key];
-  return f ? f(s.raw) : `${s.label} ${_hlFmtRaw(s.raw, s.unit)}`;
+  return f ? f(s.raw, ends) : `${s.label} ${_hlFmtRaw(s.raw, s.unit)}`;
 }
-function _hlRowHtml(r, prev, rank, open) {
+// 沒有總分時「主要扣分原因」那格的短字（完整原文放 title）。只看 status／reason 字串，不改計分。
+function _hlShortReason(r) {
+  const t = String(r.reason || '');
+  switch (r.status) {
+    case 'smallRev': return '營收太小，不評分';
+    case 'pending': { const m = /已填 (\d+)\/(\d+)/.exec(t); return m && +m[1] > 0 ? `KPI 還沒填完（${m[1]}/${m[2]}）` : 'KPI 還沒填'; }
+    case 'insufficient': { const m = /從 (\d{4}\/\d{2}) 起/.exec(t); return m ? `資料不足（${m[1]} 起才有）` : '資料不足'; }
+    case 'prodLoading': { const m = /已等 (\d+) 秒/.exec(t); return m ? `仍在載入（已等 ${m[1]} 秒）` : '商品資料載入中'; }
+    case 'prodIdle': return '商品資料未載入';
+    case 'prodTimeout': return '商品資料載入逾時';
+    default: return t;
+  }
+}
+function _hlRowHtml(r, prev, rank, open, snap) {
   const t = HEALTH_RULES.types[r.type] || {};
-  const reason = r.status === 'closed' ? r.reason : (r.score == null ? r.reason : (_hlPlainReason(r.dims) || '—'));
   const ch = HEALTH_CHANNELS.find(c => c.id === r.id) || {};
+  const full = r.status === 'closed' || r.score == null ? String(r.reason || '') : '';
+  const reason = r.status === 'closed' ? r.reason : (r.score == null ? _hlShortReason(r) : (_hlPlainReason(r.dims, _hlGrowthEnds(ch, r.month, snap)) || '—'));
   const tags = [];
   if (rank) tags.push(`<span class="hl-rank">類型第 ${rank}</span>`);
   if (ch.ranked === false && r.status !== 'closed') tags.push('<span class="hl-tag">不排名</span>');
@@ -1325,7 +1374,7 @@ function _hlRowHtml(r, prev, rank, open) {
       ${_hlOverviewCellsHtml(r, prev)}
       <td class="hl-c-dims">${_hlChipsHtml(r)}</td>
       <td class="hl-c-delta">${r.status === 'closed' ? '' : _hlDeltaHtml(r, prev)}</td>
-      <td class="hl-c-reason">${escapeHtml(reason)}</td>
+      <td class="hl-c-reason"${full && full !== reason ? ` title="${escapeHtml(full)}"` : ''}>${escapeHtml(reason)}</td>
     </tr>`;
 }
 function _hlTraceText(s) {
@@ -1342,32 +1391,61 @@ function _hlFlagInfo(s) {
   if (s.flag === 'uncal') return '待校準：這個類型還沒有實測資料，門檻仍是起始值。';
   return '';
 }
-function _hlSubRowHtml(s, uncal) {
+// 卡片子指標 ⓘ 第一行的白話（20 字內）；公式、來源等放「看算法」
+const HL_SUB_SHORT = {
+  pureRate: '每 100 元營收最後留下多少錢', grossRate: '只扣商品成本後剩多少',
+  purePp: '近 2 個月純利率跟前 2 個月比', revGrowth: '近 2 個月營收跟前 2 個月比',
+  adsPct: '每 100 元營收花多少在廣告', adsQualified: '廣告費花在夠賺商品上的比例', adsLoss: '廣告把商品從賺變賠的比例',
+  sellThrough: '在架商品這個月有賣出的比例', lossShare: '賠錢商品賣出的營收占多少', lowShare: '有賺但賺很少的商品占多少',
+  longLoss: '連續兩個月賠錢的商品比例', sellThroughPage: '每個商品頁分開算的動銷率', deadDupPages: '重複商品頁裡沒賣出的頁數',
+};
+// 卡片子指標表（2026-11-03）：只列「有分數」的子指標，欄位＝子指標｜本月｜滿分標準｜得分｜ⓘ（拿掉零分線）。
+//   成長兩項的「本月」寫「前期 → 近期」，滿分標準換算成近期要到多少（ends＝_hlGrowthEnds；拿不到就退回原始值與門檻）。
+function _hlSubRowHtml(s, uncal, ends) {
   const unit = s.unit;
-  const unscored = s.scored === false;
-  const info = [`公式：${s.formula}`, s.desc ? `意思：${s.desc}` : '', s.status === 'ok' ? _hlTraceText(s) : s.reason, s.note,
-    uncal && !unscored ? '門檻是起始值，待回測校準。' : '', _hlFlagInfo(s)].filter(Boolean).join('\n');
-  const val = s.status !== 'ok'
-    ? `<td class="hl-sub-off" colspan="4">${escapeHtml(_HL_STATUS_TEXT[s.status] || s.status)}</td>`
-    : unscored
-      ? `<td class="hl-num">${escapeHtml(_hlFmtRaw(s.raw, unit))}</td><td class="hl-num hl-lim">—</td><td class="hl-num hl-lim">—</td><td class="hl-num"><span class="hl-ref-tag">參考，不計分</span></td>`
-      : `<td class="hl-num">${escapeHtml(_hlFmtRaw(s.raw, unit))}</td><td class="hl-num hl-lim">${escapeHtml(_hlFmtRaw(s.zero, unit))}</td><td class="hl-num hl-lim">${escapeHtml(_hlFmtRaw(s.full, unit))}</td><td class="hl-num"><span class="hl-sscore hl-l-${_hlLight(s.score)}">${_hlFmtScore(s.score)}</span></td>`;
-  // 不計分的子指標（毛利率）：名稱寫成「毛利率（參考，不計分）」，旁邊多一顆 ⓘ 說明為什麼不計分（最右邊的 ⓘ 仍是公式與數字）
-  const name = unscored
-    ? `${escapeHtml(s.label)}（參考，不計分）<details class="hl-info hl-info-inline"><summary aria-label="為什麼不計分">ⓘ</summary><div class="hl-info-body">${escapeHtml(s.why || '')}</div></details>`
-    : `${escapeHtml(s.label)}<span class="hl-w">${Math.round(s.w * 100)}%</span>${s.flag ? `<span class="hl-uncal">${_HL_FLAG_TEXT[s.flag] || ''}</span>` : ''}`;
-  return `<tr${unscored ? ' class="hl-sub-ref"' : ''}><td>${name}</td>${val}
-      <td class="hl-c-info"><details class="hl-info"><summary aria-label="說明">ⓘ</summary><div class="hl-info-body">${escapeHtml(info)}</div></details></td></tr>`;
+  const more = [`公式：${s.formula}`, s.desc ? `意思：${s.desc}` : '', _hlTraceText(s), s.note,
+    uncal ? '門檻是起始值，待回測校準。' : '', _hlFlagInfo(s)].filter(Boolean).join('\n');
+  const dir = s.zero > s.full ? '≤' : '≥';
+  let now = _hlFmtRaw(s.raw, unit), goal = `${dir} ${unit === 'pct' ? _hlPctTrim(s.full) : _hlFmtRaw(s.full, unit)}`;
+  if (s.key === 'purePp' && ends) { now = `${_hlFmtPct(ends.priorRate)} → ${_hlFmtPct(ends.recentRate)}`; goal = `≥ ${_hlFmtPct(ends.priorRate + s.full)}`; }
+  if (s.key === 'revGrowth' && ends) { now = `${_hlFmtMoney(ends.priorRev)} → ${_hlFmtMoney(ends.recentRev)}`; goal = `≥ ${_hlFmtMoney(ends.priorRev * (1 + s.full))}`; }
+  const name = `${escapeHtml(s.label)}<span class="hl-w">${Math.round(s.w * 100)}%</span>${s.flag ? `<span class="hl-uncal">${_HL_FLAG_TEXT[s.flag] || ''}</span>` : ''}`;
+  return `<tr><td>${name}</td><td class="hl-num">${escapeHtml(now)}</td><td class="hl-num hl-lim">${escapeHtml(goal)}</td>
+      <td class="hl-num"><span class="hl-sscore hl-l-${_hlLight(s.score)}">${_hlFmtScore(s.score)}</span></td>
+      <td class="hl-c-info">${_hlInfoHtml(HL_SUB_SHORT[s.key] || s.desc || s.label, more)}</td></tr>`;
 }
-function _hlDimHtml(d) {
+// 「未計分」那一行的附屬項目：跟主指標是同一件事的另一種算法，同一個指標不出現兩次（2026-11-03）。
+//   主指標本身也沒有數字（例：蝦皮動銷率「尚未上傳」）⇒ 附屬項目不列；主指標有數字 ⇒ 用一般人看得懂的名稱列出。
+const HL_FOOT_CHILD = { sellThroughPage: 'sellThrough', deadDupPages: 'sellThrough' };
+const HL_FOOT_LABEL = { sellThroughPage: '動銷率（以商品頁計）', deadDupPages: '沒賣出的重複商品頁' };
+// 沒有分數的子指標（只供參考、尚未上傳、不適用…）不各佔一列，收成面向最下面一行小字；滑鼠移上去看原因
+function _hlDimFootHtml(d) {
+  const by = k => d.subs.find(s => s.key === k);
+  const items = d.subs.filter(s => s.scored === false || s.status !== 'ok' || !_hlFinite(s.score)).filter(s => {
+    const p = HL_FOOT_CHILD[s.key] && by(HL_FOOT_CHILD[s.key]);
+    return !(p && (p.status !== 'ok' || s.status !== 'ok'));
+  }).map(s => {
+    const what = s.status !== 'ok' ? (_HL_STATUS_TEXT[s.status] || s.status)
+      : '只供參考';
+    const val = s.status === 'ok' && _hlFinite(s.raw) ? ' ' + _hlFmtRaw(s.raw, s.unit) : '';
+    const tip = s.status !== 'ok' ? s.reason : (s.why || s.desc || '');
+    return `<span class="hl-dim-foot-item"${tip ? ` title="${escapeHtml(tip)}"` : ''}>${escapeHtml((HL_FOOT_LABEL[s.key] || s.label) + val)}（${escapeHtml(what)}）</span>`;
+  });
+  return items.length ? `<div class="hl-dim-foot">未計分：${items.join('、')}</div>` : '';
+}
+function _hlDimHtml(d, ends) {
   const head = d.status === 'ok'
     ? `<progress class="hl-bar hl-bar-${_hlLight(d.score)}" max="100" value="${Math.max(0, Math.min(100, d.score)).toFixed(1)}"></progress><span class="hl-dim-score">${_hlFmtScore(d.score)}</span>`
     : `<span class="hl-dim-off">${escapeHtml(d.reason)}</span>`;
   // 塊 B 的面向（廣告效率、商品結構）門檻還是起始值：面向標題旁標「起始值・待回測校準」，子指標 ⓘ 也寫
   const uncal = !!(HEALTH_RULES[d.key] && HEALTH_RULES[d.key].calibrated === false);
-  const subs = d.status === 'ok' || d.subs.some(s => s.status === 'ok')
-    ? `<table class="hl-sub"><thead><tr><th>子指標</th><th class="hl-num">原始值</th><th class="hl-num hl-lim">零分線</th><th class="hl-num hl-lim">滿分線</th><th class="hl-num">得分</th><th class="hl-c-info"></th></tr></thead>
-        <tbody>${d.subs.map(s => _hlSubRowHtml(s, uncal)).join('')}</tbody></table>`
+  const scored = d.subs.filter(s => s.scored !== false && s.status === 'ok' && _hlFinite(s.score));
+  // 成長面向比的是兩段合計，欄名直接寫期間（不叫「本月」），免得跟總覽的單月數字混在一起
+  const n = HEALTH_RULES.growth.window;
+  const cols = d.key === 'growth' ? [`前 ${n} 月 → 近 ${n} 月`, `近 ${n} 月滿分標準`] : ['本月', '滿分標準'];
+  const subs = scored.length
+    ? `<table class="hl-sub"><thead><tr><th>子指標</th><th class="hl-num">${escapeHtml(cols[0])}</th><th class="hl-num hl-lim">${escapeHtml(cols[1])}</th><th class="hl-num">得分</th><th class="hl-c-info"></th></tr></thead>
+        <tbody>${scored.map(s => _hlSubRowHtml(s, uncal, d.key === 'growth' ? ends : null)).join('')}</tbody></table>${_hlDimFootHtml(d)}`
     : '';
   return `<div class="hl-dim${d.status === 'ok' ? '' : ' hl-dim-na'}">
       <div class="hl-dim-hd"><span class="hl-dim-name">${escapeHtml(d.label)}</span><span class="hl-w">權重 ${d.w}</span>${head}${uncal && d.status !== 'na' ? '<span class="hl-uncal">起始值・待回測校準</span>' : ''}</div>
@@ -1401,7 +1479,7 @@ function _hlCardHtml(r, snap) {
         </div>
       </div>
       ${_hlProdBarHtml(ch, r.month, snap)}
-      ${r.dims.map(_hlDimHtml).join('')}
+      ${r.dims.map(d => _hlDimHtml(d, d.key === 'growth' ? _hlGrowthEnds(ch, r.month, snap) : null)).join('')}
       ${_hlDragHtml(ch, r.month, snap)}
       <div class="hl-trend-hd">近 12 個月分數走勢（當場重算；空心點＝參考分）</div>
       <div class="hl-trend"><canvas id="hl-trend" aria-label="${escapeHtml(r.label)} 近 12 個月分數走勢" role="img"></canvas></div>
@@ -1443,7 +1521,7 @@ function _hlDragHtml(ch, month, snap) {
   // MOMO：純利欄＝MOMO 總表「淨利貢獻」，標題旁 ⓘ 說明口徑
   const ps = ch.prod.platform === 'momo' ? _hlProdOf(ch, month, snap) : null;
   const mInfo = ps && ps.state === 'ready' && ps.snap
-    ? `<details class="hl-info hl-info-inline"><summary aria-label="純利口徑">ⓘ</summary><div class="hl-info-body">${escapeHtml(_hlMomoProfitNote(ch.prod.shop, ps.snap.freightMode))}</div></details>` : '';
+    ? _hlInfoHtml('純利＝MOMO 總表的「淨利貢獻」', _hlMomoProfitNote(ch.prod.shop, ps.snap.freightMode), { cls: 'hl-info-inline', aria: '純利口徑' }) : '';
   const hd = `<div class="hl-drag-hd">拖累商品前 ${HEALTH_RULES.drag.topN} 名${mInfo}<span class="hl-w">依拖累金額排序；點品號跳到淨利表</span></div>`;
   if (D.status !== 'ok') return `<div class="hl-drag">${hd}<div class="hl-drag-off">${escapeHtml(D.reason)}</div></div>`;
   const shopee = ch.prod.platform === 'shopee';
@@ -1706,7 +1784,7 @@ Object.assign(App, {
       }
       const open = _hlState.open === r.id;
       const detail = open ? `<tr class="hl-detail"><td colspan="${_HL_TABLE_COLS}">${_hlCardHtml(r, snap)}</td></tr>` : '';
-      return typeRow + _hlRowHtml(r, prev[r.id], rank[r.id], open) + detail;
+      return typeRow + _hlRowHtml(r, prev[r.id], rank[r.id], open, snap) + detail;
     }).join('');
     const mo = snap.months && snap.months[month];
     try { console.info(`[health] 整頁重算 ${Math.round(_hlNow() - _t0)} ms（KPI 快照 ${Math.round(_tKpi)} ms、評分 ${Math.round(_tScore)} ms）`); } catch {}
