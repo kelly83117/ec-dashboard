@@ -50,13 +50,31 @@ function _hlDeepFreeze(o) {
 //     廣告佔比 18.5%→4.5%、合格率 22.5%→62.0%、致虧占比 17.0%→2.5%；虧損占比 5.5%→0.5%、長期虧損 4.0%→0.0%（全通路共用一套）；
 //     低利商品營收占比改成只顯示不計分；商品結構權重 動銷率 30%／虧損 40%／長期虧損 30%；
 //     動銷率依類型（__healthCalibrate 的建議值），樣本 < 6 用最小間距並標「樣本少」（stFlag:'few'），蝦皮等塊 C 資料再校準（stFlag:'uncal'）。
+//   🔴 v5-2026-11（2026-11-03 老闆開會決定）：總分只看 score 這一段——「純利率」「動銷率」兩項級距計分，各占 50%。
+//     級距 100／80／60／0（沒有 40 分、不做線性內插）；達到 100 分線＝100，否則達到 80 分線＝80，否則達到 60 分線＝60，否則 0。
+//     下面的 dims／profit／growth／ads／structure／types 是 v4 以前的線性計分設定：舊面向函式照樣讀（之後做商品標籤會用到），
+//     但成長、廣告效率、商品結構、毛利率都不再算進總分。新規則套用到所有月份。
 const HEALTH_RULES = _hlDeepFreeze({
-  version: 'v4-2026-11',
+  version: 'v5-2026-11',
   firstMonth: '2026-01',               // 月份下拉最早到這個月（KPI 月結從 2026-01 開始）
   lights: { green: 80, yellow: 50 },   // ≥80 綠、50–79 黃、<50 紅（同 KPI 評分表 scoreColor 的門檻）
   minRev: 30000,                       // 月營收 < 3 萬 ⇒ 比率類子指標不評分（同 profit.js KPI_ANOMALY_RULES.minRev）
   defaultMonthFillRatio: 0.9,          // 預設評分月份：上個月全通路 KPI 填寫率 ≥ 90% 才用，否則再往前一個月
   pendingLookback: 3,                  // 頁頂「KPI 尚未填完」列：評分月份＋往前幾個月（只影響提示，不影響分數）
+  // v5 計分（只有這一段決定總分）。lines＝[100 分線, 80 分線, 60 分線]（比率小數），依通路類型、同類型共用；
+  //   沒列到的類型＝「標準未設定」：不給分、不算 0 分。取值口徑沿用畫面上的數字：
+  //   純利率＝獲利面向的「純利 ÷ 實際營收」（KPI）、動銷率＝商品結構面向的動銷率（公司商品口徑）。
+  //   比較用畫面顯示的 0.1% 精度（_hlTier）：畫面寫 20.0% 就算達到 20% 線，手算核對跟畫面一致。
+  //   provisional＝暫定（畫面標「暫定」）。之後做「標準設定頁」時才改成可設定；現在寫死在這裡，改數字要升 version。
+  score: {
+    tiers: [100, 80, 60],
+    items: [
+      { key: 'pureRate', label: '純利率', short: '純利', w: 0.5, dim: 'profit', provisional: false,
+        lines: { shopee: [0.25, 0.20, 0.18], momoJia: [0.38, 0.30, 0.20], momoYi: [0.38, 0.30, 0.20], moplus: [0.28, 0.24, 0.20] } },
+      { key: 'sellThrough', label: '動銷率', short: '動銷', w: 0.5, dim: 'structure', provisional: true,
+        lines: { momoJia: [0.60, 0.56, 0.50], momoYi: [0.82, 0.78, 0.74], moplus: [0.35, 0.23, 0.15] } },
+    ],
+  },
   // 面向（權重合計 100）。impl＝這個規則版本已實作；沒實作的不算進「依 N/M」的 M，卡片底部灰字列出。
   dims: [
     // scope＝頁尾與說明用的「哪些通路、資料從哪來」（只是文字，不影響計分）
@@ -639,43 +657,70 @@ function _hlTopReason(dims) {
   return `${s.label} ${_hlFmtRaw(s.raw, s.unit)}（滿分線 ${dir} ${_hlFmtRaw(s.full, s.unit)}）`;
 }
 
+// v5 級距：v 用畫面顯示的 0.1% 精度跟各分數線比（剛好 20.0% ⇒ 達到 20% 線）。
+//   2026-11-03 確認維持這樣：原始值 19.96% 畫面寫 20.0%、得 80 分（不改成用沒四捨五入的原始值比）。lines＝[100 分線, 80 分線, 60 分線]，都沒達到 ⇒ 0。
+function _hlTier(v, lines, tiers) {
+  const x = Math.round(v * 1000);
+  for (let i = 0; i < lines.length; i++) if (x >= Math.round(lines[i] * 1000)) return tiers[i];
+  return 0;
+}
+// v5 計分項目：從面向（取值口徑＝畫面上的數字）拿原始值，依通路類型的分數線給級距分。
+//   status：ok／nostd（標準未設定）／其他沿用子指標狀態（pending、smallRev、insufficient、loading、notLoaded、timeout、na…）。
+function _hlScoreItems(ch, dims, R) {
+  return R.score.items.map(it => {
+    const lines = (it.lines && it.lines[ch.type]) || null;
+    const d = dims.find(x => x.key === it.dim), s = d ? d.subs.find(x => x.key === it.key) : null;
+    const out = { key: it.key, label: it.label, short: it.short, w: it.w, provisional: !!it.provisional, lines, raw: s && _hlFinite(s.raw) ? s.raw : null, score: null };
+    if (!lines) return Object.assign(out, { status: 'nostd', reason: '標準未設定' });
+    if (!s || s.status !== 'ok' || !_hlFinite(s.raw)) return Object.assign(out, { status: s ? s.status : 'na', reason: s ? s.reason : '' });
+    return Object.assign(out, { status: 'ok', reason: '', score: _hlTier(s.raw, lines, R.score.tiers) });
+  });
+}
+// 計分項目的一句話（回歸指紋 data-hl-fp 的「各項 title」用；格式同以前的面向 title：「純利率 80 分」或「動銷率：標準未設定」）
+function _hlItemTip(it) {
+  return it.status === 'ok' ? `${it.label} ${it.score} 分` : `${it.label}：${it.reason || _HL_STATUS_TEXT[it.status] || it.status}`;
+}
+const _HL_WAIT_ITEM = { loading: 'prodLoading', notLoaded: 'prodIdle', timeout: 'prodTimeout' };
+
 // 🔴 一個通路一個月的健檢。純函式：同樣的 (ch, month, snap, rules) 一定得到同樣的結果。
+//   v5：總分只看 R.score 的兩項（純利率、動銷率，級距分、各占權重）。只算計分用得到的面向（獲利、商品結構），
+//   成長、廣告效率不再在這裡算（函式留著，之後做商品標籤用）。
+//   - 純利率沒有分數（標準未設定、營收過小、KPI 未填、資料不足）⇒ 沒有總分（列到「未評分」）。
+//   - 動銷率有標準、但還在等商品層 ⇒ 先不給總分（載入中）；動銷率沒標準或沒資料 ⇒ 總分＝純利率分數（pureOnly，卡片標「只看純利率」）。
+//   - 蝦皮沒有動銷率標準 ⇒ 不等蝦皮淨利表，一開頁就有分數。
 //   回 { id, label, type, month, status, reason, score, light, isReference, ranked, dimsUsed:N, dimsTotal:M, dims:[…], next:[…], topReason, fill }
 function computeChannelHealth(ch, month, snap, rules) {
   const R = rules || HEALTH_RULES;
-  const base = { id: ch.id, label: ch.label, type: ch.type, month, rulesVersion: R.version,
-    next: R.dims.filter(d => !d.impl).map(d => d.label) };
+  const base = { id: ch.id, label: ch.label, type: ch.type, month, rulesVersion: R.version, next: [], isReference: false, pureOnly: false };
   const c = _hlCell(snap, month, ch);
   const closedFrom = _hlClosedFrom(snap, ch);
   if ((c && c.closed) || (closedFrom && month >= closedFrom)) {
     return Object.assign(base, { status: 'closed', reason: `已關站（${_hlYmLabel(closedFrom)} 起）`, score: null, light: 'none',
-      isReference: false, ranked: false, dimsUsed: 0, dimsTotal: 0, dims: [], topReason: '', fill: c ? c.fill : null });
+      ranked: false, dimsUsed: 0, dimsTotal: 0, dims: [], items: [], topReason: '', fill: c ? c.fill : null });
   }
-  const dims = R.dims.filter(d => d.impl && _HL_DIM_FNS[d.key]).map(d => _HL_DIM_FNS[d.key](ch, month, snap, R));
-  // 🔴 分數不得因為「商品層載好了沒」而改變（2026-11-02）：還有面向在等商品層（沒載入／載入中／逾時）⇒ 不給總分、不排名，
-  //   總覽顯示「商品資料載入中」等狀態，而不是用比較少的面向算出一個之後會變的分數。面向本身照樣算（卡片看得到 KPI 那幾個面向）。
-  const wait = dims.find(d => d.status === 'loading') || dims.find(d => d.status === 'notLoaded') || dims.find(d => d.status === 'timeout');
+  const dimKeys = R.score.items.map(it => it.dim).filter((k, i, a) => a.indexOf(k) === i);
+  const dims = dimKeys.map(k => _HL_DIM_FNS[k](ch, month, snap, R));
+  const items = _hlScoreItems(ch, dims, R);
+  const pure = items.find(it => it.key === 'pureRate');
+  const counts = { dimsUsed: items.filter(it => it.status === 'ok').length, dimsTotal: items.filter(it => it.lines).length };
+  const common = Object.assign(counts, { dims, items, topReason: _hlTopReason(dims), fill: c ? c.fill : null });
+  // 純利率沒有分數 ⇒ 沒有總分（狀態＝純利率的狀態：標準未設定、營收過小、尚未上傳、資料不足）
+  if (!pure || pure.status !== 'ok') {
+    return Object.assign(base, common, { status: pure ? pure.status : 'insufficient', reason: pure ? pure.reason : '', score: null, light: 'none', ranked: false });
+  }
+  // 只等計分用得到的資料：動銷率有標準、還在等商品層 ⇒ 先不給總分（不先用純利率算一個之後會變的分數）
+  const wait = items.find(it => it.lines && _HL_WAIT_ITEM[it.status]);
   if (wait) {
-    const st = wait.status === 'loading' ? 'prodLoading' : wait.status === 'notLoaded' ? 'prodIdle' : 'prodTimeout';
+    const st = _HL_WAIT_ITEM[wait.status];
     const reason = st === 'prodLoading' ? (wait.reason || '商品資料載入中…') : st === 'prodIdle' ? '商品資料尚未載入（手機請展開卡片按「載入商品資料」）' : HL_TIMEOUT_MSG;
-    return Object.assign(base, { status: st, reason, score: null, light: 'none', isReference: false, ranked: false,
-      dimsUsed: dims.filter(d => d.status === 'ok' && _hlFinite(d.score)).length, dimsTotal: dims.filter(d => d.status !== 'na').length,
-      dims, topReason: '', fill: c ? c.fill : null });
+    return Object.assign(base, common, { status: st, reason, score: null, light: 'none', ranked: false });
   }
-  const applicable = dims.filter(d => d.status !== 'na');
-  const ok = dims.filter(d => d.status === 'ok' && _hlFinite(d.score));
-  const sw = ok.reduce((a, d) => a + d.w, 0);
-  const score = ok.length ? ok.reduce((a, d) => a + d.score * d.w, 0) / sw : null;
-  const hasProfit = ok.some(d => d.key === 'profit');
-  const isReference = score != null && !(hasProfit && ok.length >= R.formalMinDims);
-  const ranked = ch.ranked !== false && score != null && !isReference;
-  const profitDim = dims.find(d => d.key === 'profit');
-  return Object.assign(base, {
-    status: score != null ? 'ok' : (profitDim ? profitDim.status : 'insufficient'),
-    reason: score != null ? '' : (profitDim ? profitDim.reason : ''),
-    score, light: _hlLight(score, R), isReference, ranked,
-    dimsUsed: ok.length, dimsTotal: applicable.length, dims,
-    topReason: _hlTopReason(dims), fill: c ? c.fill : null,
+  const ok = items.filter(it => it.status === 'ok');
+  const sw = ok.reduce((a, it) => a + it.w, 0);
+  const score = ok.reduce((a, it) => a + it.score * it.w, 0) / sw;
+  return Object.assign(base, common, {
+    status: 'ok', reason: '', score, light: _hlLight(score, R), ranked: ch.ranked !== false,
+    pureOnly: ok.length === 1,
   });
 }
 
@@ -733,9 +778,10 @@ function _hlPercentiles(vals) {
 }
 
 // 回測（純函式）：逐通路逐月算原始值與分數；另依類型算各子指標的百分位。vals＝原始數字（校準 healthCalibrate 用）。
+//   raws＝每列計分項目的原始值（沒四捨五入）、得分、分數線（Console 對邊界用，不印出來）。
 function healthBacktest(snap, months, channels, rules) {
   const R = rules || HEALTH_RULES;
-  const rows = [], vals = {};
+  const rows = [], vals = {}, raws = [];
   (channels || HEALTH_CHANNELS).forEach(ch => months.forEach(m => {
     const r = computeChannelHealth(ch, m, snap, R);
     const row = { 通路: ch.label, 月: m, 類型: (R.types[ch.type] || {}).label || ch.type, 狀態: r.status };
@@ -748,14 +794,16 @@ function healthBacktest(snap, months, channels, rules) {
       }
     }));
     r.dims.forEach(d => { row[d.label + '分'] = d.status === 'ok' ? _hlFmtScore(d.score) : d.status; });
+    (r.items || []).forEach(it => { row[it.label + '得分'] = it.status === 'ok' ? String(it.score) : it.status; });   // v5 計分項目
     row.總分 = r.score == null ? '—' : _hlFmtScore(r.score) + (r.isReference ? '（參考）' : '');
     rows.push(row);
+    raws.push({ 通路: ch.label, 月: m, 狀態: r.status, 總分: r.score, items: (r.items || []).map(it => ({ key: it.key, label: it.label, raw: it.raw, score: it.score, status: it.status, lines: it.lines })) });
   }));
   const pct = Object.keys(vals).map(k => {
     const v = vals[k], q = _hlPercentiles(v.xs), f = x => _hlFmtRaw(x, v.unit);
     return { 類型: v.類型, 子指標: v.子指標, 筆數: q.n, P10: f(q.p10), P25: f(q.p25), P50: f(q.p50), P75: f(q.p75) };
   });
-  return { rows, pct, vals };
+  return { rows, pct, vals, raws };
 }
 
 // 校準參數（塊 A §2-7-1 的方法，用在塊 B 的面向；只是提案用，不影響計分）：
@@ -846,59 +894,83 @@ function _hlRangeLabel(from, to) {
 // 頁尾一段話：由規則產生（計分面向、各自涵蓋哪些通路與資料來源、之後加入的面向），不寫死。
 function _hlFootText(rules) {
   const R = rules || HEALTH_RULES;
-  const live = R.dims.filter(d => d.impl), later = R.dims.filter(d => !d.impl);
-  return '排名只在同一類型內比較；跨類型的分數高低僅供參考（各類型門檻不同、營收口徑也不同）。灰色斜體是參考分，不排名。'
-    + `規則 ${R.version} 計分的面向：` + live.map(d => `${d.label}（權重 ${d.w}${d.scope ? '；' + d.scope : ''}）`).join('、') + '。'
-    + (later.length ? `之後加入：${later.map(d => d.label).join('、')}。` : '')
-    + '商品層資料還沒載好的通路先不給總分。';
+  const scope = { pureRate: 'KPI 月結', sellThrough: '商品層' };
+  return '排名只在同一類型內比較（卡片上不顯示名次）；跨類型的分數高低僅供參考（各類型的分數線不同、營收口徑也不同）。'
+    + `規則 ${R.version} 計分的項目：` + R.score.items.map(it => `${it.label}（${Math.round(it.w * 100)}%；${scope[it.key] || ''}${it.provisional ? '；暫定' : ''}）`).join('、') + '。'
+    + '毛利率、成長、廣告效率、商品結構目前不計分。';
+}
+// v5 說明用：一個項目在某類型的分數線文字「100 分 ≥25%、80 分 ≥20%、60 分 ≥18%」（從規則產生）
+function _hlLinesText(lines, tiers) {
+  return lines.map((l, i) => `${tiers[i]} 分 ≥${_hlPctTrim(l)}`).join('、');
 }
 
 // 「📖 怎麼看這頁」內容（App.openGuide 的 blocks：{h,p}／{h,ol}／{warn}）。寫給非工程師看。
-//   🔴 門檻、權重、燈號、營收門檻、版本一律從 rules 產生，不在文字裡寫死；改 HEALTH_RULES 說明自動跟著變。
+//   🔴 分數線、權重、燈號、營收門檻、版本一律從 rules 產生，不在文字裡寫死；改 HEALTH_RULES 說明自動跟著變。
+//   v5：只說明純利率、動銷率兩項級距計分；舊的線性門檻（零分線／滿分線）不再出現在說明裡。
 function _hlGuideBlocks(rules) {
-  const R = rules || HEALTH_RULES;
-  const live = R.dims.filter(d => d.impl), later = R.dims.filter(d => !d.impl);
-  const P0 = v => (Math.round(v * 1000) / 10).toString() + '%';
-  const subLine = (s, lims) => {
-    if (s.scored === false) return `${s.label}（參考，不計分）：${s.desc}。\n公式：${s.formula}。`;
-    return `${s.label}（佔這個面向的 ${Math.round(s.w * 100)}%）：${s.desc}。\n公式：${s.formula}。\n${lims}`;
-  };
-  const types = Object.keys(R.types).map(k => R.types[k]).sort((a, b) => a.order - b.order);
-  // 零分線各類型都一樣時合併成一句（v2 全部是損益兩平）；不一樣就逐類型列
-  const zeros = [...new Set(types.map(t => t.pureRate[0]))];
-  const pureLims = (zeros.length === 1
-    ? `零分線一律 ${P0(zeros[0])}${zeros[0] === 0 ? '（損益兩平）' : ''}；滿分線依通路類型：` + types.map(t => `${t.label} ${P0(t.pureRate[1])}`).join('、')
-    : '零分線→滿分線依通路類型：' + types.map(t => `${t.label} ${P0(t.pureRate[0])}→${P0(t.pureRate[1])}`).join('、')) + '。';
-  const pure = R.profit.subs.find(s => s.key === 'pureRate') || R.profit.subs[0];
-  const ex = pure && R.types.shopee ? { full: R.types.shopee.pureRate[1], zero: R.types.shopee.pureRate[0] } : null;
-  const gross = R.profit.subs.find(s => s.scored === false);
+  const R = rules || HEALTH_RULES, SC = R.score, T = SC.tiers;
+  const types = Object.keys(R.types).sort((a, b) => R.types[a].order - R.types[b].order);
+  const item = k => SC.items.find(it => it.key === k);
+  const pure = item('pureRate'), st = item('sellThrough');
+  const labels = SC.items.map(it => it.label).join('、');
+  const weights = [...new Set(SC.items.map(it => Math.round(it.w * 100)))];
+  const P1 = v => (Math.round(v * 1000) / 10).toFixed(1) + '%';
+  // 例子從規則挑：第一個有純利率分數線的類型的「80 分線」
+  const exType = pure ? types.find(t => pure.lines[t]) : null;
+  const ex = exType ? pure.lines[exType][1] : null;
+  const waitTypes = _hlWaitTypeLabels(R);
+  const loadOrder = _HL_LOAD_ORDER.map(p => _HL_PLATFORM_LABEL[p]).join(' → ');
+  // 商品層不影響分數的平台（例：蝦皮動銷率沒有分數線）：說明「只用在待處理商品」
+  const scoreFree = _HL_LOAD_ORDER.filter(p => !HEALTH_CHANNELS.some(ch => ch.prod && ch.prod.platform === p && waitTypes.indexOf((R.types[ch.type] || {}).label) >= 0))
+    .map(p => _HL_PLATFORM_LABEL[p]);
+  const linesOl = it => types.map(t => `${R.types[t].label}：${it.lines[t] ? _hlLinesText(it.lines[t], T) : '標準未設定（不給分，不算 0 分）'}`);
+  const pureDef = R.profit.subs.find(x => x.key === 'pureRate');
   const notes = [];
   Object.keys(R.notes).forEach(g => Object.keys(R.notes[g]).forEach(k => { if (!(g === 'shopee' && k === 'rev')) notes.push(R.notes[g][k]); }));
-  const lim = s => `零分線 ${_hlFmtRaw(s.zero, s.unit)}、滿分線 ${_hlFmtRaw(s.full, s.unit)}${s.zero > s.full ? '（越低越好）' : ''}。`;
-  const uncal = blk => (blk && blk.calibrated === false ? '（門檻是起始值，待回測校準）' : '');
-  const stTypes = types.filter(t => t.sellThrough);
-  const stLims = '零分線→滿分線依通路類型：' + stTypes.map(t => `${t.label} ${P0(t.sellThrough[0])}→${P0(t.sellThrough[1])}${t.stFlag ? `（${_HL_FLAG_TEXT[t.stFlag]}）` : ''}`).join('、') + '。'
-    + (stTypes.some(t => t.stFlag) ? '「樣本少」＝校準時資料不到 ' + HEALTH_CALIB.minN + ' 筆、門檻先用最小間距；「待校準」＝還沒有實測資料、仍是起始值。' : '');
-  const S = R.structure || {}, A = R.ads || {}, D = R.drag || {};
-  const qual = (A.subs || []).find(s => s.key === 'adsQualified');
-  const structLine = s => {
-    if (s.key === 'sellThrough') return subLine(s, stLims);
-    if (s.key === 'lowShare') {
-      const def = `低利線＝商品純利率 ${P0(S.lowMargin)}，只算營收 ${_hlFmtMoney(S.lowMinRev)} 以上的商品。`;
-      return s.scored === false ? `${subLine(s)}\n${def}${s.why ? '\n為什麼不計分：' + s.why : ''}` : subLine(s, def + lim(s));
-    }
-    return subLine(s, lim(s));
-  };
+  const D = R.drag || {};
+  const P0 = v => (Math.round(v * 1000) / 10).toString() + '%';
   const dragLines = Object.keys(HEALTH_DRAG_REASONS).map(k => { const x = HEALTH_DRAG_REASONS[k]; return `${x.icon} ${x.label}：${x.desc}。`; });
   return [
-    { h: '這頁在做什麼', p: '每個月幫每個通路做一次「體檢」，用分數和燈號看出哪個通路賺得好、哪個在退步。分數全部由固定規則算出來，沒有人手動打分數；同樣的資料一定得到同樣的分數；沒有資料的面向不計分、不算 0 分。主看板一張卡片一個通路，點卡片可以看細項。' },
+    { h: '這頁在做什麼', p: '每個月幫每個通路做一次「體檢」，用分數和燈號看出哪個通路賺得好、哪個要注意。分數全部由固定規則算出來，沒有人手動打分數；同樣的資料一定得到同樣的分數；沒有資料或還沒有標準的項目不計分、不算 0 分。主看板一張卡片一個通路，點卡片可以看細項。' },
+    { h: '總分怎麼算', ol: [
+      `只看${labels}兩項` + (weights.length === 1 ? `，各占 ${weights[0]}%` : '：' + SC.items.map(it => `${it.label} ${Math.round(it.w * 100)}%`).join('、')) + '；毛利率、成長、廣告效率、商品結構目前不計分（之後會改成商品標籤）。',
+      `每一項看它達到哪一條分數線：達到 ${T[0]} 分線＝${T[0]} 分，否則達到 ${T[1]} 分線＝${T[1]} 分，否則達到 ${T[2]} 分線＝${T[2]} 分，都沒達到＝0 分；沒有中間分數。`,
+      ex != null ? `比的時候用畫面上顯示的數字（小數一位）：畫面寫 ${P1(ex)} 就算達到 ${_hlPctTrim(ex)} 那條線。` : '',
+      `只有${pure ? pure.label : '純利率'}有分數時（${st ? st.label : '動銷率'}沒有標準，或這個月沒有資料），總分＝${pure ? pure.label : '純利率'}分數，卡片寫「只看${pure ? pure.label : '純利率'}」。`,
+      `${pure ? pure.label : '純利率'}沒有分數（標準未設定、營收過小、KPI 還沒填、資料不足）時，整張卡沒有總分，收到最下方「另有 N 個通路沒有分數」。`,
+      waitTypes.length ? `${waitTypes.join('、')}的${st ? st.label : '動銷率'}要用商品資料，載好之前先不給總分（卡片寫「載入中」）；其他通路的分數只看 KPI，一開頁就算好。` : '',
+    ].filter(Boolean) },
+    pure ? { h: `${pure.label}分數線（依通路類型）`, ol: [
+      pureDef ? `${pure.label}：${pureDef.desc}。公式：${pureDef.formula}（KPI 月結）。` : '',
+      ...linesOl(pure),
+      `營收未滿 ${_hlFmtMoney(R.minRev)} 的月份不評分（比率波動太大）。`,
+    ].filter(Boolean) } : null,
+    st ? { h: `${st.label}分數線（依通路類型${st.provisional ? '，暫定' : ''}）`, ol: [
+      st.provisional ? `畫面上標「暫定」：這組${st.label}分數線之後還會再調。` : '',
+      '動銷率：這個月有賣出的商品 ÷ 在架商品，以公司商品計（下一段）。',
+      ...linesOl(st),
+    ].filter(Boolean) } : null,
+    { h: '動銷率怎麼算「1 個商品」', ol: [
+      '用「公司商品」：原廠編號／料號去掉最後一段規格碼（例：同一款雨衣的四個顏色算 1 個）。同一個公司商品只要有一頁、一個規格有賣，就算有動。',
+      '分母＝期末上架的商品，加上這個月有賣但已經下架的商品（避免分子比分母大）。',
+      '編號格式不符（不是「英文字母＋數字－數字」）的商品，改用商品頁自己算一個。',
+      '蝦皮的動銷率現在是「待上傳」：要等洞察表的商品表現按月保存才有上架清單當分母。',
+      'MOMO、PChome 只有「目前」的上下架狀態，回頭看舊月份時，分母用的是今天的上架狀態，會有落差。',
+      `本月有銷售且有成本的商品少於 ${(R.structure || {}).minSold} 個時，動銷率寫「資料不足」。`,
+    ] },
     { h: '資料從哪裡來', ol: [
-      '獲利、成長、蝦皮的廣告佔比：KPI 月結裡各通路每個月的營收、商品成本、廣告費、純利。某個通路某個月的 KPI 還沒填完，就顯示「尚未上傳」，不會亂算。',
-      '廣告效率、商品結構、拖累商品：商品層資料（蝦皮＝淨利表報表；MOMO＝商品主檔＋對帳；PChome＝日曆月總表），口徑跟各自的淨利表頁面一樣。',
-      '電腦上打開這頁，就會在背景依序載入蝦皮、MOMO、PChome 的商品層資料（資料量大，可能要一到兩分鐘）；手機上不會自動載入，要按卡片裡的「載入商品資料」。',
-      '商品層資料還沒載好的通路（蝦皮、MOMO、PChome）先不給總分，卡片上的分數寫「載入中」或「未載入」，載好後整頁自動重算；分數不會因為你有沒有展開細項而不同。之後雲端資料有更新也會自動重算。',
-      '載入超過 60 秒，會顯示「仍在載入（已等 N 秒）」，這頁會一直等，資料一到自動重算；超過 5 分鐘還沒好，會再提示「請先進淨利表點一下那個平台再回來」（這頁照樣繼續等）。',
-      '卡片上方的灰色小標章是資料時間（KPI 填寫進度、淨利表更新時間、MOMO 對帳單有沒有上傳、PChome 商品清單最新匯出日），只供參考，不算分。',
+      '純利率、毛利率：KPI 月結裡各通路每個月的營收、商品成本、純利。某個通路某個月的 KPI 還沒填完，就顯示「尚未上傳」，不會亂算。',
+      '動銷率、要處理的商品：商品層資料（蝦皮＝淨利表報表；MOMO＝商品主檔＋對帳；PChome＝日曆月總表），口徑跟各自的淨利表頁面一樣。',
+      `電腦上打開這頁，就會在背景依序載入${loadOrder}的商品層資料（一次一個平台；資料量大，可能要一到兩分鐘）；手機上不會自動載入，要按卡片裡的「載入商品資料」。分數不會因為你有沒有展開細項而不同；之後雲端資料有更新也會自動重算。`,
+      '細項上方的灰色小標章是資料時間（KPI 填寫進度、淨利表更新時間、MOMO 對帳單有沒有上傳、PChome 商品清單最新匯出日），只供參考，不算分。',
+    ] },
+    { h: '頁首的「商品資料載入中」', ol: [
+      '商品資料還沒到齊時，頁首有一行藍字，例：「商品資料載入中，MOMO、MO+ 的分數稍後出現」；只剩待處理商品數在等時寫「待處理商品數稍後出現」。全部載完、分數都算好，這行就消失。',
+      waitTypes.length ? `${waitTypes.join('、')}的${st ? st.label : '動銷率'}要用商品資料，載好之前這些卡片寫「載入中」、先不給總分；其他通路的分數只看 KPI，一開頁就算好。` : '分數只看 KPI，不用等商品資料；商品資料只用在待處理商品。',
+      `載入順序：${loadOrder}。分數要用到的平台排前面` + (scoreFree.length ? `；${scoreFree.join('、')}的商品資料只用在待處理商品清單、不影響分數，所以排最後。` : '。'),
+      `載入超過 ${HL_WAIT_SLOW} 秒，這行會加「已等 N 秒」，這頁會一直等，資料一到自動重算；超過 ${HL_WAIT_HINT / 60} 分鐘還沒好，會再提示「請先進淨利表點一下再回來」（這頁照樣繼續等）。`,
+      '某個平台載入逾時：先進淨利表點一下那個平台讓資料載入，再回來按「↻ 重新計算」。',
+      '手機上不會自動載入商品資料（約 10MB），這行會寫「手機不自動載入商品資料」，要展開卡片按「載入商品資料」。',
     ] },
     { h: '頁面上方的「KPI 尚未填完」', ol: [
       `列出評分月份與往前 ${R.pendingLookback} 個月內，KPI 月結還沒填完的通路與月份；括號是「已填格數／應填格數」。`,
@@ -906,100 +978,65 @@ function _hlGuideBlocks(rules) {
       '點一項會跳到 KPI 月結表那一段的第一個月；沒有權限開 KPI 月結表時只顯示文字。',
       '全部填完時這一列不顯示。這一列只是提醒，本身不影響分數；沒填完的月份照「尚未上傳」處理。',
     ] },
-    { h: '總分怎麼算', ol: [
-      '總分＝各面向分數按權重平均（0～100 分）。',
-      '目前計分的面向：' + live.map(d => `${d.label}（權重 ${d.w}）`).join('、') + '。',
-      later.length ? '之後才會加入、現在不算分的面向：' + later.map(d => d.label).join('、') + '。' : '',
-      '廣告效率只有蝦皮有（只有蝦皮有逐商品廣告資料）；商品結構只有蝦皮、MOMO、PChome 有。其他通路這兩個面向是「不適用」，不算進「依 N/M」的 M。',
-      '某個面向這個月沒有資料時，不算 0 分，改用其他有資料的面向重新平均。',
-    ].filter(Boolean) },
-    { h: '每個面向、子指標的意思', ol: [
-      '【獲利】這個通路賺不賺錢。',
-      ...R.profit.subs.map(s => subLine(s, s.key === 'pureRate' ? pureLims : '')),
-      `【成長】跟自己前一段時間比，有沒有變好（近 ${R.growth.window} 個月合計 vs 前 ${R.growth.window} 個月合計，全通路共用同一套門檻）。`,
-      ...R.growth.subs.map(s => subLine(s, lim(s))),
-      A.subs ? `【廣告效率】廣告費花得值不值得（只有蝦皮）${uncal(A)}。` : '',
-      ...(A.subs || []).map(s => subLine(s, (s.key === 'adsQualified' && qual ? `合格線＝商品純利率 ${P0(qual.minPure)}。` : '') + lim(s))),
-      S.subs ? `【商品結構】商品組成健不健康：有沒有在賣、有沒有賠錢貨（蝦皮、MOMO、PChome）${uncal(S)}。商品利潤率一律用「商品純利 ÷ 商品營收」；缺成本的商品不算進虧損、低利、長期虧損。本月有銷售且有成本的商品少於 ${S.minSold} 個時，整個面向「資料不足」。` : '',
-      ...(S.subs || []).map(structLine),
-    ].filter(Boolean) },
-    S.subs ? { h: '動銷率怎麼算「1 個商品」', ol: [
-      '分數用「公司商品」：原廠編號／料號去掉最後一段規格碼（例：同一款雨衣的四個顏色算 1 個）。同一個公司商品只要有一頁、一個規格有賣，就算有動。',
-      '分母＝期末上架的商品，加上這個月有賣但已經下架的商品（避免分子比分母大）。',
-      '卡片面向最下面的「未計分」小字另外列「動銷率（商品頁口徑）」：每個通路商品頁各算一個，跟 MOMO／PChome 總覽畫面同口徑，給你對照，不計分。',
-      '「多頁商品中零動銷的頁」：同一個公司商品開了好幾頁、這個月有賣，其中沒賣出的頁數。公司商品口徑會把它們藏起來，所以另外列出，不計分。',
-      '編號格式不符（不是「英文字母＋數字－數字」）的商品，改用商品頁自己算一個，ⓘ 裡會寫有幾個。',
-      '蝦皮的動銷率現在是「尚未上傳」：要等洞察表的商品表現按月保存（下一塊）才有上架清單當分母。',
-      'MOMO、PChome 只有「目前」的上下架狀態，回頭看舊月份時，分母用的是今天的上架狀態，會有落差。',
-    ] } : null,
     D.topN ? { h: '要處理的商品（拖累商品）', ol: [
-      '在蝦皮、MOMO、PChome 通路細項的最上面（點通路卡片展開）。依「拖累金額」（影響金額）由大到小；一件商品可以命中好幾個原因，金額取其中最大的那個（不重複加總）。',
-      '卡片上的「⚠ 待處理商品 N 個」：這個月所有拖累商品裡，還沒有調整紀錄的商品數；都調整過或沒有拖累商品就寫「✓ 沒有待處理商品」。點這一行會展開細項、直接捲到清單最上面。',
+      '在蝦皮、MOMO、PChome 通路細項的最上面（點通路卡片展開）。依「拖累金額」（影響金額）由大到小；一件商品可以命中好幾個原因，金額取其中最大的那個（不重複加總）。這份清單不影響分數。',
+      '卡片上的「⚠ 待處理商品 N 個」：這個月所有拖累商品裡，還沒有調整紀錄的商品數；都調整過或沒有拖累商品就寫「✓ 沒有待處理商品」。點這一行會展開細項、直接捲到清單最上面。商品資料還沒載好時寫「載入中…」，不影響分數顯示。',
       `清單先列待處理的商品（依拖累金額由大到小），預設顯示前 ${D.topN} 個，超過時按「顯示全部待處理（N 個）」看全部；清單裡待處理的總數一定等於卡片上的 N。已調整的商品排在所有待處理之後、淡化顯示，平常收成一行「已調整 N 個」，點了才展開。`,
       ...dragLines,
       `「🔥 廣告燒錢」的前段＝廣告費排在這個通路前 ${P0(D.adsBurnTopPct)}。`,
       `「✓ 日期 已調整」：這件商品在評分月份的前 ${D.adjustMonthsBack} 個月 1 號以後有調整紀錄（蝦皮看淨利表備註與洞察表調整紀錄，MOMO／PChome 看優化紀錄）。只顯示日期，不顯示是誰。`,
       '點品號會跳到淨利表那個通路、那個月，並在搜尋框填入品號；只切換畫面，不會改你淨利表上記住的期間與篩選。',
     ] } : null,
-    { h: '零分線與滿分線', p: '原始值到滿分線（含以上）＝100 分；在零分線（含以下）＝0 分；中間照比例給分。'
-      + (ex ? `例：蝦皮自營的純利率零分線 ${P0(ex.zero)}、滿分線 ${P0(ex.full)}，純利率 ${P0((ex.zero + ex.full) / 2)} 就是 50 分。` : '') },
     { h: '燈號顏色', ol: [
       `綠：${R.lights.green} 分以上。`,
       `黃：${R.lights.yellow}～${R.lights.green - 1} 分。`,
       `紅：未滿 ${R.lights.yellow} 分。`,
       '灰：沒有分數（原因見下一段）。',
-      `分數一律無條件捨去：${R.lights.green - 1}.6 分顯示 ${R.lights.green - 1}，仍是黃燈，不會出現「顯示 ${R.lights.green} 卻是黃燈」。`,
     ] },
     { h: '灰色狀態各代表什麼（都不算 0 分）', ol: [
-      '不適用：這個通路本來就沒有這種資料（例：沒有逐商品廣告的通路，不會有廣告面向）。',
-      '資料不足：期數還不夠（例：成長要前後各 ' + R.growth.window + ' 個月，新通路要等資料累積夠了才評分；畫面會寫從哪個月起評分）。',
-      '尚未上傳：這個月的 KPI 還沒填完（畫面會寫已填幾格），或這個月還沒有商品層資料（淨利表報表、商品主檔）。',
-      `營收過小：當月營收未滿 ${_hlFmtMoney(R.minRev)}，比率類指標波動太大，不評分。`,
+      '標準未設定：這個通路類型還沒有這一項的分數線，不給分。',
+      '尚未上傳：這個月的 KPI 還沒填完（畫面會寫已填幾格），或這個月還沒有商品層資料。',
+      `營收過小：當月營收未滿 ${_hlFmtMoney(R.minRev)}，比率波動太大，不評分。`,
+      '資料不足：KPI 還沒開始有資料的月份，或商品太少、算不出動銷率。',
       '已關站：關站月份起不評分、不排名，走勢只畫到關站前。',
-      '尚未載入：商品層資料還沒載入（手機要按卡片裡的「載入商品資料」）。',
-      '載入中：商品層資料正在載入或計算，等一下會自己更新。',
-      '仍在載入（已等 N 秒）：商品層資料超過 60 秒還沒載好，還在等，到了自動重算；超過 5 分鐘會提示先進淨利表點一下那個平台。',
+      '尚未載入／載入中：商品層資料還沒載好（只有要等動銷率的通路會因此暫時沒有總分）。',
+      '仍在載入（已等 N 秒）：商品層資料超過 60 秒還沒載好，還在等，到了自動重算。',
     ] },
-    { h: '細項最上面的「依 N/M 個面向評分」', p: 'M＝這個通路目前能評的面向數；N＝這個月實際有分數的面向數。例：「依 1/2 個面向評分」代表只有一個面向有分數，另一個是灰色狀態。' },
-    { h: '參考分', p: `要有「獲利」分數，而且總共至少 ${R.formalMinDims} 個面向有分數，才是正式分。不夠的話，總分顯示灰色斜體並標「參考」，不參加排名。` },
     { h: '通路類型與排名', ol: [
-      ...types.map(t => `${t.label}：${t.members}`),
-      '排名只在同一類型裡比（卡片上不顯示名次）。不同類型的門檻、營收口徑都不同，跨類型的分數高低只供參考。',
+      ...types.map(t => `${R.types[t].label}：${R.types[t].members}`),
+      '排名只在同一類型裡比（卡片上不顯示名次）。不同類型的分數線、營收口徑都不同，跨類型的分數高低只供參考。',
       '業外、官網會列出來，但不參加排名。',
     ] },
-    gross ? { h: '毛利率為什麼不計分', p: gross.why + '卡片「獲利」面向最下面的「未計分：毛利率」，滑鼠移上去也看得到這段說明。' } : null,
+    { h: '毛利率、成長、廣告效率、商品結構', p: '目前都不計分。卡片下面的毛利率只顯示供參考（由各平台的價格結構決定，月與月幾乎不動）；成長、廣告效率、商品結構之後會改成商品標籤與月份變化表。' },
     R.notes.shopee && R.notes.shopee.rev ? { warn: R.notes.shopee.rev } : null,
     notes.length ? { h: '其他口徑提醒', ol: notes } : null,
     { h: '主看板（卡片牆）怎麼看', ol: [
-      '依通路類型分組，一張卡片一個通路：通路名、大字總分（綠／黃／紅燈號；灰色斜體標「參考」是參考分）、總分旁的比上月分數差、待處理商品數，以及純利率、毛利率、動銷率三欄。',
-      '卡片最下面的「純利率／毛利率／動銷率」三欄：只顯示、不計分（評分照各面向的規則），數字跟細項裡的一樣。下面一行「↑ 上月 x%」是上個月的數字：↑ 比上月高、↓ 比上月低、→ 一樣；上個月沒資料就沒有這一行。',
+      `依通路類型分組，一張卡片一個通路：通路名、大字總分（綠／黃／紅燈號）、總分旁的比上月分數差，下面一行「${pure ? pure.short : '純利'} 80 · ${st ? st.short : '動銷'} 60」是兩項各自的得分（只有一項時寫「只看${pure ? pure.label : '純利率'}」），再下面是待處理商品數，以及純利率、毛利率、動銷率三欄。`,
+      '卡片最下面的「純利率／毛利率／動銷率」三欄是原始數字，下面一行「↑ 上月 x%」是上個月的數字：↑ 比上月高、↓ 比上月低、→ 一樣；上個月沒資料就沒有這一行。',
       ...HL_OVERVIEW_COLS.map(c => c.info),
-      '沒資料不會顯示成零：KPI 沒填完寫「尚未上傳」；動銷率的商品資料還在載入寫「載入中」，蝦皮要等商品表現按月保存才有、先寫「待上傳」，沒有商品層資料的通路寫「—」。',
-      '這個月沒有總分的通路（KPI 還沒填、資料不足、營收太小、已關站）不做卡片，收在頁面最下方「另有 N 個通路沒有分數」，點一下展開清單，括號是原因；點通路名一樣可以看細項。',
-      '點卡片：在那一組卡片下方展開細項；再點一次收起來。同一時間只展開一個。細項最上面是「要處理的商品」；各面向分數條與子指標收在「看評分細節」，點了才展開。',
-      '總分旁的「比上月 +8」是這個月總分減上個月總分；上個月沒有總分就不顯示。',
+      '這個月沒有總分的通路不做卡片，收在頁面最下方「另有 N 個通路沒有分數」，點一下展開清單，括號是原因；點通路名一樣可以看細項。',
+      '點卡片：在那一組卡片下方展開細項；再點一次收起來。同一時間只展開一個。細項最上面是「要處理的商品」；計分的兩項收在「看評分細節」，點了才展開。',
     ] },
-    { h: '比上月、主要扣分原因、走勢圖', ol: [
-      '比上月：這個月總分減上個月總分。',
-      `「上月」跟「成長」不一樣：卡片最下面純利、毛利、動銷的箭頭是單一個月跟單一個月比；「成長」面向和扣分原因裡的「近 ${R.growth.window} 個月 vs 前 ${R.growth.window} 個月」是近 ${R.growth.window} 個月加起來跟再往前 ${R.growth.window} 個月加起來比，所以兩邊數字不同是正常的。`,
-      '最拉低總分的是哪一項：點卡片展開細項，在「看評分細節」裡看每個子指標的數字、滿分標準和得分。',
+    { h: '比上月、評分細節、走勢圖', ol: [
+      '總分旁的「比上月 +8」是這個月總分減上個月總分（上個月也用同一套規則重算）；上個月沒有總分就不顯示。',
+      `「看評分細節」：只列${labels}兩項——本月數值、分數線（達到的那一級會標出來）、得分；${st && st.provisional ? st.label + '旁標「暫定」。' : ''}`,
+      `近 12 個月走勢：總分、${SC.items.map(it => it.label + '分').join('、')}三條線，每個月都用目前的規則重算。`,
       '頁頂「KPI 尚未填完」平常收成一行，點一下展開，可以直接點通路跳到 KPI 月結表去填。',
-      '點通路卡片展開細項：看每個面向的分數條、每個子指標的本月數字、滿分標準（到這裡就滿分）、得分，以及近 12 個月分數走勢（空心點＝參考分）。成長兩項寫「前期 → 近期」，滿分標準是近期要到多少。',
-      '沒有分數的子指標（只供參考、尚未上傳、不適用）不各佔一列，收在每個面向最下面的「未計分」那一行。',
-      '每個 ⓘ：第一行是一句白話；點「看算法」才看公式、實際的分子分母數字、資料來源與提醒。',
     ] },
-    { h: '排名、計分面向與範圍', p: _hlFootText(R) },
-    { h: '規則版本', p: `目前是 ${R.version}。門檻有改就會升版本。分數不存檔，每次打開都用目前的規則重算，所以改版後舊月份的分數也會跟著變。` },
+    { h: '排名、計分項目與範圍', p: _hlFootText(R) },
+    { h: '規則版本', p: `目前是 ${R.version}。分數線有改就會升版本。分數不存檔，每次打開都用目前的規則重算，所以改版後舊月份的分數也會跟著變（新規則套用到所有月份）。` },
   ].filter(Boolean);
 }
-// 「📖 怎麼看這頁」第一層（塊 3b）：最多 5 行、每行 25 字內的白話；燈號門檻從規則產生
+// 「📖 怎麼看這頁」第一層：最多 5 行、每行 25 字內的白話；燈號、權重、分數線、暫定項目都從規則產生
 function _hlGuideIntro(rules) {
-  const L = (rules || HEALTH_RULES).lights;
+  const R = rules || HEALTH_RULES, L = R.lights, SC = R.score, T = SC.tiers;
+  const w = [...new Set(SC.items.map(it => Math.round(it.w * 100)))];
+  const prov = SC.items.filter(it => it.provisional).map(it => it.label).join('、');
   return [
     `分數顏色：綠 ≥${L.green}、黃 ${L.yellow}–${L.green - 1}、紅 <${L.yellow}。`,
-    '卡片：總分、比上月、待處理商品、三個比率。',
-    '點卡片：看要處理的商品，再看評分細節。',
-    '灰色「參考」：評分面向不夠，只供參考、不排名。',
+    `只看${SC.items.map(it => it.label).join('、')}` + (w.length === 1 ? `，各占 ${w[0]}%。` : '。'),
+    `分數線：${T.join('／')}，沒達到就 0 分。`,
+    prov ? `${prov}標「暫定」；沒標準的寫「標準未設定」。` : '沒標準的項目寫「標準未設定」，不算分。',
     '最下方「另有 N 個通路沒有分數」：點了看清單。',
   ];
 }
@@ -1117,14 +1154,18 @@ function _hlStartTicker() {
     if (bump) { App.render(); return; }
     try {
       const el = document.querySelector('#main-content .hl-prodnote');
-      if (el) el.outerHTML = _hlProdNoteHtml({ prodState: Object.assign({}, _hlProd.state), prodWaitSec: secs });
+      if (el) el.outerHTML = _hlProdNoteHtml({ prodState: Object.assign({}, _hlProd.state), prodWaitSec: secs }, _hlNoteWait);
     } catch {}
   }, 5000);
 }
-// 🔴 桌機：打開健檢頁就在背景「依序」載入蝦皮 → MOMO → PChome（一次一個平台，不同時拉約 10MB），載完自動重算整頁。
+// 🔴 桌機：打開健檢頁就在背景「依序」載入 MOMO → PChome → 蝦皮（一次一個平台，不同時拉約 10MB），載完自動重算整頁。
+//   v5 起蝦皮的商品層只用在待處理商品清單（動銷率沒有分數線、不影響分數），又要 60 秒以上，所以排最後；
+//   MOMO、MO+ 的動銷率要等商品層才有總分，排第一（2026-11-03）。
 //   分數不能因為有沒有展開卡片而不同（2026-11-02）。手機（≤768px）不自動載，維持卡片裡的「載入商品資料」按鈕。
 //   只排一次；逾時的平台按「↻ 重新計算」會回到 idle，下一次 render 再排。
 const _HL_PLATFORMS = ['shopee', 'momo', 'pchome'];
+const _HL_LOAD_ORDER = ['momo', 'pchome', 'shopee'];
+const _HL_PLATFORM_LABEL = { shopee: '蝦皮', momo: 'MOMO', pchome: 'PChome' };
 let _hlAutoRunning = false;
 function _hlAutoLoad() {
   if (_hlAutoRunning || _hlIsNarrow()) return;
@@ -1133,7 +1174,7 @@ function _hlAutoLoad() {
   // 排在後面的平台也先標「載入中」（畫面上就是在排隊載入，不是「沒載」）；_hlEnsurePlatform 看到沒有進行中的 Promise 會真的開始載
   _HL_PLATFORMS.forEach(p => { if ((_hlProd.state[p] || 'idle') === 'idle') _hlProd.state[p] = 'loading'; });
   (async () => {
-    for (const p of _HL_PLATFORMS) {
+    for (const p of _HL_LOAD_ORDER) {
       if ((_hlProd.state[p] || 'idle') === 'idle' || _hlProd.state[p] === 'loading') {
         try { await _hlEnsurePlatform(p); } catch (e) { console.warn('[health] 自動載入失敗', p, e); }
       }
@@ -1247,7 +1288,7 @@ function _hlProdReset() {
  * ================================================================ */
 
 const _HL_STATUS_TEXT = { na: '不適用', insufficient: '資料不足', pending: '尚未上傳', smallRev: '營收過小', closed: '已關站',
-  notLoaded: '尚未載入', loading: '載入中', timeout: '載入逾時' };
+  notLoaded: '尚未載入', loading: '載入中', timeout: '載入逾時', nostd: '標準未設定' };
 // 總覽列「總分」那一格，商品層還沒好時的字（不顯示分數）
 const _HL_WAIT_SCORE = { prodLoading: '載入中', prodIdle: '未載入', prodTimeout: '逾時' };
 
@@ -1317,7 +1358,7 @@ function _hlFpText(r, prev) {
   const closed = r.status === 'closed';
   return [r.id, txt(_hlScoreHtml(r)),
     ...HL_OVERVIEW_COLS.map(col => String(_hlOverviewCell(r, prev, col).text).trim()),
-    closed ? '' : r.dims.map(d => _hlChipTip(d).replace(/（權重 [^）]*）$/, '')).join(','),
+    closed ? '' : (r.items || []).map(_hlItemTip).join(','),   // v5：各項＝兩個計分項目（以前是各面向色塊的 title）
     closed ? '' : txt(_hlDeltaHtml(r, prev))].join(' | ');
 }
 // 待處理商品（塊 3b）：拖累清單「全部」商品（不是前 N 名）裡還沒有調整紀錄（adjusted 是 null）的數目。
@@ -1364,9 +1405,27 @@ function _hlTileHtml(r, prev, rank, open, snap) {
   return `<div class="hl-tile${open ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" data-hl-row="${escapeHtml(r.id)}" data-hl-fp="${escapeHtml(_hlFpText(r, prev))}">
       <div class="hl-tile-hd"${tip}><span class="hl-tile-name">${escapeHtml(r.label)}</span>${tag}</div>
       <div class="hl-tile-score">${_hlScoreHtml(r)}${_hlTileDeltaHtml(r, prev)}</div>
+      ${_hlTilePartsHtml(r)}
       ${_hlTodoHtml(r, snap)}
       <div class="hl-tile-mets">${_hlTileMetsHtml(r, prev)}</div>
     </div>`;
+}
+// 哪些通路類型的總分要等商品層（v5）：有商品層、而且「不是純利率」的計分項目（動銷率）有分數線的類型。從規則產生，不寫死。
+function _hlWaitTypeLabels(rules) {
+  const R = rules || HEALTH_RULES;
+  const types = [...new Set(HEALTH_CHANNELS.filter(ch => ch.prod).map(ch => ch.type))]
+    .filter(t => R.score.items.some(it => it.key !== 'pureRate' && it.lines && it.lines[t]));
+  return types.sort((a, b) => (R.types[a].order - R.types[b].order)).map(t => R.types[t].label);
+}
+// 卡片分數下面一行（v5）：「純利 80 · 動銷 60」；只有純利率算分時「純利 80 · 只看純利率」；動銷率在等商品層時「純利 80 · 動銷 載入中…」。
+//   沒有總分的卡片（只剩載入中這種）也留這一行的位置，卡片才等高。
+function _hlTilePartsHtml(r) {
+  const pure = (r.items || []).find(it => it.key === 'pureRate'), st = (r.items || []).find(it => it.key === 'sellThrough');
+  if (!pure || pure.status !== 'ok') return '<div class="hl-tile-parts" aria-hidden="true"></div>';
+  const waitTxt = { loading: '載入中…', notLoaded: '未載入', timeout: '載入逾時' };
+  const right = st && st.status === 'ok' ? `${st.short} ${st.score}`
+    : st && st.lines && waitTxt[st.status] ? `${st.short} ${waitTxt[st.status]}` : '只看純利率';
+  return `<div class="hl-tile-parts">${escapeHtml(pure.short)} ${pure.score} · ${escapeHtml(right)}</div>`;
 }
 // 「未評分：酷澎 商城-好麻吉（KPI 還沒填）、…、官網（已關站）」：通路名可點（Enter／Space 也可以），點了展開細項
 function _hlUnratedHtml(list, prev, open, snap) {
@@ -1441,6 +1500,7 @@ function _hlShortReason(r) {
   const t = String(r.reason || '');
   switch (r.status) {
     case 'smallRev': return '營收太小，不評分';
+    case 'nostd': return '標準未設定';
     case 'pending': { const m = /已填 (\d+)\/(\d+)/.exec(t); return m && +m[1] > 0 ? `KPI 還沒填完（${m[1]}/${m[2]}）` : 'KPI 還沒填'; }
     case 'insufficient': { const m = /從 (\d{4}\/\d{2}) 起/.exec(t); return m ? `資料不足（${m[1]} 起才有）` : '資料不足'; }
     case 'prodLoading': { const m = /已等 (\d+) 秒/.exec(t); return m ? `仍在載入（已等 ${m[1]} 秒）` : '商品資料載入中'; }
@@ -1547,24 +1607,48 @@ function _hlCardHtml(r, snap) {
         ${ring}
         <div class="hl-card-meta">
           <div class="hl-card-title">${escapeHtml(r.label)} · ${escapeHtml(_hlYmLabel(r.month))}</div>
-          <div class="hl-card-nm">${r.score == null ? escapeHtml(r.reason) : `依 ${r.dimsUsed}/${r.dimsTotal} 個面向評分`}</div>
+          <div class="hl-card-nm">${r.score == null ? escapeHtml(r.reason) : escapeHtml(_hlScoreHow(r))}</div>
           <div class="hl-badges">${badges.join('')}<span class="hl-badge-note">資料完整度只供參考，不算分</span></div>
         </div>
       </div>
       ${_hlProdBarHtml(ch, r.month, snap)}
       ${_hlDragHtml(ch, r.month, snap)}
       <details class="hl-score-more"${_hlState.scoreOpen ? ' open' : ''}><summary>看評分細節</summary>
-        ${r.dims.map(d => _hlDimHtml(d, d.key === 'growth' ? _hlGrowthEnds(ch, r.month, snap) : null)).join('')}
+        ${_hlScoreDetailHtml(r)}
       </details>
       <div class="hl-trend-hd">近 12 個月分數走勢（當場重算；空心點＝參考分）</div>
       <div class="hl-trend"><canvas id="hl-trend" aria-label="${escapeHtml(r.label)} 近 12 個月分數走勢" role="img"></canvas></div>
       ${r.next.length ? `<div class="hl-next">之後加入：${escapeHtml(r.next.join('、'))}</div>` : ''}
     </div>`;
 }
+// 總分怎麼來的一句話（v5，權重從規則來）：「純利率 50%＋動銷率 50%」或「只看純利率」
+function _hlScoreHow(r) {
+  if (r.pureOnly) return '這個月只看純利率（動銷率沒有分數）';
+  return (r.items || []).filter(it => it.status === 'ok').map(it => `${it.label} ${Math.round(it.w * 100)}%`).join('＋');
+}
+// 細項「看評分細節」（v5）：只列計分的兩項——本月數值、分數線（100／80／60，達到的那一級標出來）、得分；暫定的項目標「暫定」。
+//   以前的成長、廣告效率、商品結構面向表格不在這裡顯示了（面向函式還在，之後改成月份變化表）。
+function _hlScoreDetailHtml(r) {
+  const T = HEALTH_RULES.score.tiers;
+  const rows = (r.items || []).map(it => {
+    const val = _hlFinite(it.raw) ? _hlFmtPct(it.raw) : (_HL_STATUS_TEXT[it.status] || '—');
+    const lines = it.lines
+      ? it.lines.map((l, i) => `<span class="hl-tier${it.status === 'ok' && it.score === T[i] ? ' hl-tier-hit' : ''}">${T[i]} 分 ≥${escapeHtml(_hlPctTrim(l))}</span>`).join('')
+        + (it.status === 'ok' && it.score === 0 ? `<span class="hl-tier hl-tier-miss">未達 ${T[T.length - 1]} 分線</span>` : '')
+      : '<span class="hl-tier-none">標準未設定</span>';
+    const sc = it.status === 'ok'
+      ? `<span class="hl-sscore hl-l-${_hlLight(it.score)}">${it.score}</span>`
+      : `<span class="hl-w">${escapeHtml(it.status === 'nostd' ? '不計分' : (_HL_STATUS_TEXT[it.status] || it.status))}</span>`;
+    return `<tr><td>${escapeHtml(it.label)}<span class="hl-w">${Math.round(it.w * 100)}%</span>${it.provisional ? '<span class="hl-uncal">暫定</span>' : ''}</td>
+      <td class="hl-num">${escapeHtml(val)}</td><td class="hl-tiers">${lines}</td><td class="hl-num">${sc}</td></tr>`;
+  }).join('');
+  const how = r.score == null ? '' : `<div class="hl-dim-foot">總分＝${escapeHtml(_hlScoreHow(r))}。分數線達到幾分就是幾分（${T.join('／')}／0），不做中間分數。</div>`;
+  return `<table class="hl-sub hl-score-tbl"><thead><tr><th>計分項目</th><th class="hl-num">本月</th><th>分數線</th><th class="hl-num">得分</th></tr></thead><tbody>${rows}</tbody></table>${how}`;
+}
 // 商品層資料的狀態列：資料時間標章＋（還沒載／逾時時）「載入商品資料」按鈕。沒有商品層的通路回空字串。
 function _hlProdBadges(ch, month, snap) {
   const p = _hlProdOf(ch, month, snap);
-  if (p.state === 'na') return [];
+  if (p.state === 'na' || p.state === 'off') return [];   // off＝只算 KPI（沒有商品層狀態）
   if (p.state === 'notLoaded') return ['<span class="hl-badge">商品資料：尚未載入</span>'];
   if (p.state === 'loading') return ['<span class="hl-badge">商品資料：載入中…</span>'];
   if (p.state === 'timeout') return ['<span class="hl-badge hl-badge-warn">商品資料：讀不到（逾時）</span>'];
@@ -1664,14 +1748,15 @@ function _hlDrawChart() {
     const labels = tr.map(r => _hlYmLabel(r.month));
     // 面向線條的顏色依序取 :root 變數（不寫死色碼）；總分用主色
     const DIM_COLORS = ['--success', '--warn', '--info', '--text-muted'];
+    // v5：總分、純利率分、動銷率分三條（計分項目從規則來）
     const series = [{ k: null, label: '總分', color: _hlCssVar('--primary') }]
-      .concat(HEALTH_RULES.dims.filter(d => d.impl).map((d, i) => ({ k: d.key, label: d.label, color: _hlCssVar(DIM_COLORS[i % DIM_COLORS.length]) })));
+      .concat(HEALTH_RULES.score.items.map((it, i) => ({ k: it.key, label: it.label + '分', color: _hlCssVar(DIM_COLORS[i % DIM_COLORS.length]) })));
     const muted = _hlCssVar('--text-muted'), grid = _hlCssVar('--border'), surface = _hlCssVar('--surface');
     const datasets = series.map(sr => {
       const ys = tr.map(r => {
         if (!sr.k) return r.score == null ? null : Math.floor(r.score);
-        const d = r.dims.find(x => x.key === sr.k);
-        return d && d.status === 'ok' ? Math.floor(d.score) : null;
+        const it = (r.items || []).find(x => x.key === sr.k);
+        return it && it.status === 'ok' ? it.score : null;
       });
       return {
         label: sr.label, data: ys, borderColor: sr.color || undefined, backgroundColor: sr.color || undefined,
@@ -1741,26 +1826,37 @@ function _hlPendingHtml(items) {
   return `<div class="hl-pending" role="status">${head}<div class="hl-pending-list">${items.map(one).join('<span class="hl-pending-sep">、</span>')}</div></div>`;
 }
 
-// 頁頂「商品層資料」狀態：三個平台都載好、也算完就不顯示。
-function _hlProdNoteHtml(snap) {
-  const P = { shopee: '蝦皮', momo: 'MOMO', pchome: 'PChome' };
+// 頁頂「商品資料載入中」：只一行短字；三個平台都載好、卡片也都有分數就整段不顯示（完整說明在「怎麼看這頁」）。
+//   wait＝這個月還在等商品層的卡片的類型短名（_hlNoteWaitLabels，例 ['MOMO', 'MO+']）；有就說「…的分數稍後出現」，沒有就說「待處理商品數稍後出現」。
+let _hlNoteWait = [];   // 上一次整頁重畫算出來的 wait（5 秒更新秒數時沿用，不重算）
+function _hlNoteWaitLabels(results) {
+  const out = [];
+  results.forEach(r => {
+    if (!_HL_WAIT_STATUS[r.status]) return;
+    const s = String(((HEALTH_RULES.types[r.type] || {}).label) || r.type).split(' ')[0];
+    if (out.indexOf(s) < 0) out.push(s);
+  });
+  return out;
+}
+const _HL_WAIT_STATUS = { prodLoading: 1, prodIdle: 1, prodTimeout: 1 };
+function _hlProdNoteHtml(snap, wait) {
   const st = snap.prodState || {};
-  const txt = { idle: '尚未載入', loading: '載入中…', timeout: '載入逾時', ready: '✓' };
-  if (Object.keys(P).every(p => st[p] === 'ready') && !_hlProd.running) return '';
   const w = snap.prodWaitSec || {};
-  // 正在載入的平台：已等 60 秒以上就寫「仍在載入（已等 N 秒）」；排隊還沒開始的（_hlLoading 沒有）只寫「排隊中」
-  const one = p => {
-    if (st[p] !== 'loading') return `${P[p]} ${txt[st[p] || 'idle']}`;
-    if (!(p in w) || !_hlLoading[p]) return `${P[p]} 排隊中`;
-    return w[p] >= HL_WAIT_SLOW ? `${P[p]} 仍在載入（已等 ${Math.floor(w[p])} 秒）` : `${P[p]} 載入中…`;
-  };
-  const parts = Object.keys(P).map(one);
-  const busy = _hlProd.running ? '；商品層分數計算中…' : '';
-  const how = _hlIsNarrow() ? '手機請展開卡片按「載入商品資料」' : '電腦會在背景依序自動載入，可能要一到兩分鐘，資料一到會自動重算';
-  const slow = Object.keys(P).some(p => st[p] === 'loading' && (w[p] || 0) >= HL_WAIT_HINT)
-    ? '已經等超過 5 分鐘的平台：請先進淨利表點一下那個平台讓資料載入，再回來（這裡會繼續等，到了自動重算）。' : '';
-  const to = (Object.keys(P).some(p => st[p] === 'timeout') ? '逾時的平台請先進淨利表點一下那個平台，再回來按「↻ 重新計算」。' : '') + slow;
-  return `<div class="hl-prodnote">商品層資料：${escapeHtml(parts.join('、'))}${busy}。${how}；還沒載好的蝦皮、MOMO、PChome 通路先不給總分。${to}</div>`;
+  const W = wait || [];
+  const notReady = _HL_LOAD_ORDER.filter(p => st[p] !== 'ready');
+  if (!notReady.length && !W.length) return '';
+  const what = W.length ? `${W.join('、')} 的分數稍後出現` : '待處理商品數稍後出現';
+  if (_hlIsNarrow() && !notReady.some(p => st[p] === 'loading') && notReady.some(p => (st[p] || 'idle') === 'idle')) {
+    return `<div class="hl-prodnote">${escapeHtml(`手機不自動載入商品資料：${W.length ? W.join('、') + ' 的分數' : '待處理商品數'}請展開卡片按「載入商品資料」`)}</div>`;
+  }
+  const to = notReady.filter(p => st[p] === 'timeout').map(p => _HL_PLATFORM_LABEL[p]);
+  // 正在載入、已等最久的那個平台（排隊還沒開始的 _hlLoading 沒有，不算）
+  const secs = notReady.filter(p => st[p] === 'loading' && _hlLoading[p] && (p in w)).map(p => w[p]);
+  const max = secs.length ? Math.max(...secs) : 0;
+  const extra = to.length ? `（${to.join('、')} 載入逾時：先進淨利表點一下，再按「↻ 重新計算」）`
+    : max >= HL_WAIT_HINT ? `（已等 ${Math.floor(max)} 秒，請先進淨利表點一下再回來）`
+    : max >= HL_WAIT_SLOW ? `（已等 ${Math.floor(max)} 秒）` : '';
+  return `<div class="hl-prodnote">${escapeHtml(`商品資料載入中，${what}${extra}`)}</div>`;
 }
 
 function _hlOnClick(e) {
@@ -1914,7 +2010,7 @@ Object.assign(App, {
         ${_hlMock ? `<div class="hl-mock-banner">模擬模式：假資料只在本機記憶體（__healthMock(false) 關閉）</div>` : ''}
         ${staleNote}
         ${_hlPendingHtml(healthPendingKpi(snap, month))}
-        ${_hlProdNoteHtml(snap)}
+        ${_hlProdNoteHtml(snap, _hlNoteWait = _hlNoteWaitLabels(results))}
         <div class="hl-toolbar">
           <label class="hl-month">評分月份
             <select data-hl-month>${_hlMonthOptions(month)}</select>
