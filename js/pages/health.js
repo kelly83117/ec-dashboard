@@ -141,7 +141,7 @@ const HEALTH_RULES = _hlDeepFreeze({
     momoYi:  { label: 'MOMO 寄倉',    order: 3, pureRate: [0, 0.26], sellThrough: [0.725, 0.81], members: 'MOMO 乙配（寄倉）' },
     moplus:  { label: 'MO+',          order: 4, pureRate: [0, 0.29], sellThrough: [0.08, 0.315], members: 'MO+ 麻吉、MO+ 森之旅、MO+ 玩樂' },
     coupang: { label: '酷澎商城',     order: 5, pureRate: [0, 0.34], sellThrough: null, members: '酷澎 商城-好麻吉、商城-露營館' },
-    small:   { label: '買斷／小通路', order: 6, pureRate: [0, 0.10], sellThrough: [0.10, 0.18], stFlag: 'few', stN: 2, members: '酷澎買斷、PChome、FriDay、博客來' },
+    small:   { label: '小通路',       order: 6, pureRate: [0, 0.10], sellThrough: [0.10, 0.18], stFlag: 'few', stN: 2, members: '酷澎買斷、PChome、FriDay、博客來' },
     other:   { label: '業外',         order: 7, pureRate: [0, 0.10], sellThrough: null, members: '業外（不排名）' },
   },
   // ⓘ 固定說明（依 KPI 群組）
