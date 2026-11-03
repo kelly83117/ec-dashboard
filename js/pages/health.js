@@ -891,12 +891,12 @@ function _hlGuideBlocks(rules) {
   };
   const dragLines = Object.keys(HEALTH_DRAG_REASONS).map(k => { const x = HEALTH_DRAG_REASONS[k]; return `${x.icon} ${x.label}：${x.desc}。`; });
   return [
-    { h: '這頁在做什麼', p: '每個月幫每個通路做一次「體檢」，用分數和燈號看出哪個通路賺得好、哪個在退步。分數全部由固定規則算出來，沒有人手動打分數；同樣的資料一定得到同樣的分數；沒有資料的面向不計分、不算 0 分。點通路那一列可以看細項。' },
+    { h: '這頁在做什麼', p: '每個月幫每個通路做一次「體檢」，用分數和燈號看出哪個通路賺得好、哪個在退步。分數全部由固定規則算出來，沒有人手動打分數；同樣的資料一定得到同樣的分數；沒有資料的面向不計分、不算 0 分。主看板一張卡片一個通路，點卡片可以看細項。' },
     { h: '資料從哪裡來', ol: [
       '獲利、成長、蝦皮的廣告佔比：KPI 月結裡各通路每個月的營收、商品成本、廣告費、純利。某個通路某個月的 KPI 還沒填完，就顯示「尚未上傳」，不會亂算。',
       '廣告效率、商品結構、拖累商品：商品層資料（蝦皮＝淨利表報表；MOMO＝商品主檔＋對帳；PChome＝日曆月總表），口徑跟各自的淨利表頁面一樣。',
       '電腦上打開這頁，就會在背景依序載入蝦皮、MOMO、PChome 的商品層資料（資料量大，可能要一到兩分鐘）；手機上不會自動載入，要按卡片裡的「載入商品資料」。',
-      '商品層資料還沒載好的通路（蝦皮、MOMO、PChome）先不給總分，總分欄顯示「載入中」或「未載入」，載好後整頁自動重算；分數不會因為你有沒有展開卡片而不同。之後雲端資料有更新也會自動重算。',
+      '商品層資料還沒載好的通路（蝦皮、MOMO、PChome）先不給總分，卡片上的分數寫「載入中」或「未載入」，載好後整頁自動重算；分數不會因為你有沒有展開細項而不同。之後雲端資料有更新也會自動重算。',
       '載入超過 60 秒，會顯示「仍在載入（已等 N 秒）」，這頁會一直等，資料一到自動重算；超過 5 分鐘還沒好，會再提示「請先進淨利表點一下那個平台再回來」（這頁照樣繼續等）。',
       '卡片上方的灰色小標章是資料時間（KPI 填寫進度、淨利表更新時間、MOMO 對帳單有沒有上傳、PChome 商品清單最新匯出日），只供參考，不算分。',
     ] },
@@ -933,7 +933,7 @@ function _hlGuideBlocks(rules) {
       'MOMO、PChome 只有「目前」的上下架狀態，回頭看舊月份時，分母用的是今天的上架狀態，會有落差。',
     ] } : null,
     D.topN ? { h: `拖累商品前 ${D.topN} 名`, ol: [
-      '在蝦皮、MOMO、PChome 通路的卡片裡（點通路那一列展開）。依「拖累金額」由大到小；一件商品可以命中好幾個原因，金額取其中最大的那個（不重複加總）。',
+      '在蝦皮、MOMO、PChome 通路的細項裡（點通路卡片展開）。依「拖累金額」由大到小；一件商品可以命中好幾個原因，金額取其中最大的那個（不重複加總）。',
       ...dragLines,
       `「🔥 廣告燒錢」的前段＝廣告費排在這個通路前 ${P0(D.adsBurnTopPct)}。`,
       `「✓ 日期 已調整」：這件商品在評分月份的前 ${D.adjustMonthsBack} 個月 1 號以後有調整紀錄（蝦皮看淨利表備註與洞察表調整紀錄，MOMO／PChome 看優化紀錄）。只顯示日期，不顯示是誰。`,
@@ -958,7 +958,7 @@ function _hlGuideBlocks(rules) {
       '載入中：商品層資料正在載入或計算，等一下會自己更新。',
       '仍在載入（已等 N 秒）：商品層資料超過 60 秒還沒載好，還在等，到了自動重算；超過 5 分鐘會提示先進淨利表點一下那個平台。',
     ] },
-    { h: '總分下方的「依 N/M」', p: 'M＝這個通路目前能評的面向數；N＝這個月實際有分數的面向數。只有面向不齊時才會在總分下方出現，例：「依 1/2」代表只有一個面向有分數，另一個是灰色狀態；面向齊全時不顯示。' },
+    { h: '細項最上面的「依 N/M 個面向評分」', p: 'M＝這個通路目前能評的面向數；N＝這個月實際有分數的面向數。例：「依 1/2 個面向評分」代表只有一個面向有分數，另一個是灰色狀態。' },
     { h: '參考分', p: `要有「獲利」分數，而且總共至少 ${R.formalMinDims} 個面向有分數，才是正式分。不夠的話，總分顯示灰色斜體並標「參考」，不參加排名。` },
     { h: '通路類型與排名', ol: [
       ...types.map(t => `${t.label}：${t.members}`),
@@ -968,18 +968,20 @@ function _hlGuideBlocks(rules) {
     gross ? { h: '毛利率為什麼不計分', p: gross.why + '卡片「獲利」面向最下面的「未計分：毛利率」，滑鼠移上去也看得到這段說明。' } : null,
     R.notes.shopee && R.notes.shopee.rev ? { warn: R.notes.shopee.rev } : null,
     notes.length ? { h: '其他口徑提醒', ol: notes } : null,
-    { h: '總覽表的純利率、毛利率、動銷率', ol: [
+    { h: '主看板（卡片牆）怎麼看', ol: [
+      '依通路類型分組，一張卡片一個通路：通路名、類型排名、大字總分（綠／黃／紅燈號；灰色斜體標「參考」是參考分）、總分旁的比上月分數差、一句主要扣分原因。',
+      '卡片最下面一行「純利 x% · 毛利 x% · 動銷 x%」：只顯示、不計分（評分照各面向的規則），數字跟細項裡的一樣。箭頭跟上個月比：↑ 比上月高、↓ 比上月低、→ 一樣，滑鼠移到箭頭上看上個月的數字；上個月沒資料就沒有箭頭。',
       ...HL_OVERVIEW_COLS.map(c => c.info),
-      '這三欄只顯示、不計分（評分照各面向的規則），數字跟展開卡片裡的一樣；下面小字是上個月的數字：↑ 比上月高、↓ 比上月低、→ 一樣，上個月沒資料就不顯示。',
       '沒資料不會顯示成零：KPI 沒填完寫「尚未上傳」；動銷率的商品資料還在載入寫「載入中」，蝦皮要等商品表現按月保存才有、先寫「待上傳」，沒有商品層資料的通路寫「—」。',
-      '手機上總覽表只留總分和動銷率，其他欄位展開卡片看。',
+      '這個月沒有總分的通路（KPI 還沒填、資料不足、營收太小、已關站）不做卡片，收在頁面最下方「未評分：…」那一行，括號是原因；點通路名一樣可以看細項。',
+      '點卡片：在那一組卡片下方展開細項；再點一次收起來。同一時間只展開一個。',
     ] },
     { h: '比上月、主要扣分原因、走勢圖', ol: [
       '比上月：這個月總分減上個月總分。',
-      `「上月」跟「成長」不一樣：總覽純利率、毛利率、動銷率下面的「上月」是單一個月跟單一個月比；「成長」面向和扣分原因裡的「近 ${R.growth.window} 個月 vs 前 ${R.growth.window} 個月」是近 ${R.growth.window} 個月加起來跟再往前 ${R.growth.window} 個月加起來比，所以兩邊數字不同是正常的。`,
-      '主要扣分原因：最拉低總分的那一個子指標，用白話寫它現在的數字（例：「營收比前期少 …%」「賠錢商品占營收 …%」）。門檻和得分展開卡片看。',
+      `「上月」跟「成長」不一樣：卡片最下面純利、毛利、動銷的箭頭是單一個月跟單一個月比；「成長」面向和扣分原因裡的「近 ${R.growth.window} 個月 vs 前 ${R.growth.window} 個月」是近 ${R.growth.window} 個月加起來跟再往前 ${R.growth.window} 個月加起來比，所以兩邊數字不同是正常的。`,
+      '主要扣分原因：最拉低總分的那一個子指標，用白話寫它現在的數字（例：「營收比前期少 …%」「賠錢商品占營收 …%」）；太長會用 … 截斷，滑鼠移上去看完整文字。門檻和得分展開細項看。',
       '頁頂「KPI 尚未填完」平常收成一行，點一下展開，可以直接點通路跳到 KPI 月結表去填。',
-      '點通路那一列展開卡片：看每個子指標的本月數字、滿分標準（到這裡就滿分）、得分，以及近 12 個月分數走勢（空心點＝參考分）。成長兩項的本月寫「前期 → 近期」，滿分標準是近期要到多少。',
+      '點通路卡片展開細項：看每個面向的分數條、每個子指標的本月數字、滿分標準（到這裡就滿分）、得分，以及近 12 個月分數走勢（空心點＝參考分）。成長兩項寫「前期 → 近期」，滿分標準是近期要到多少。',
       '沒有分數的子指標（只供參考、尚未上傳、不適用）不各佔一列，收在每個面向最下面的「未計分」那一行。',
       '每個 ⓘ：第一行是一句白話；點「看算法」才看公式、實際的分子分母數字、資料來源與提醒。',
     ] },
@@ -1213,7 +1215,7 @@ function _hlProdReset() {
 /* ================================================================
  * ③ 畫面區
  * ================================================================ */
-const _HL_TABLE_COLS = 8;   // 總覽表欄數（通路、總分、純利率、毛利率、動銷率、面向、比上月、主要扣分原因）；「面向數」2026-11-03 拿掉，不齊時寫在總分下方
+
 const _HL_STATUS_TEXT = { na: '不適用', insufficient: '資料不足', pending: '尚未上傳', smallRev: '營收過小', closed: '已關站',
   notLoaded: '尚未載入', loading: '載入中', timeout: '載入逾時' };
 // 總覽列「總分」那一格，商品層還沒好時的字（不顯示分數）
@@ -1226,13 +1228,9 @@ function _hlScoreHtml(r) {
   if (r.isReference) return `<span class="hl-score hl-ref" title="參考分：要有「獲利」再加至少 1 個面向有分數才算正式分，參考分不排名">${_hlFmtScore(r.score)}<small>參考</small></span>`;
   return `<span class="hl-score hl-l-${r.light}">${_hlFmtScore(r.score)}</span>`;
 }
-function _hlChipsHtml(r) {
-  if (r.status === 'closed') return '';
-  return r.dims.map(d => {
-    const cls = d.status === 'ok' ? 'hl-l-' + _hlLight(d.score) : 'hl-chip-off';
-    const tip = d.status === 'ok' ? `${d.label} ${_hlFmtScore(d.score)} 分（權重 ${d.w}）` : `${d.label}：${d.reason}`;
-    return `<span class="hl-chip ${cls}" title="${escapeHtml(tip)}">${escapeHtml(d.label)}</span>`;
-  }).join('');
+// 面向色塊的 title 文字（塊 2 表格的格式）。卡片牆（塊 3）不再畫色塊，只給回歸指紋 data-hl-fp 用。
+function _hlChipTip(d) {
+  return d.status === 'ok' ? `${d.label} ${_hlFmtScore(d.score)} 分（權重 ${d.w}）` : `${d.label}：${d.reason}`;
 }
 function _hlDeltaHtml(r, prev) {
   if (!prev || r.score == null || prev.score == null) return '<span class="hl-delta">—</span>';
@@ -1281,19 +1279,52 @@ function _hlOverviewCell(r, prev, col) {
   }
   return { text: _hlFmtPct(s.raw), sub, cls: '', dir };
 }
-function _hlOverviewCellsHtml(r, prev) {
+// 回歸指紋（只給驗收比對用，不顯示）：跟塊 2 表格列抓出來的字串逐字相同（2026-11-03）。
+//   [key, 總分文字, 純利率, 毛利率, 動銷率, 面向 title 去「（權重 N）」以半形逗號串接, 比上月].join(' | ')
+//   各段都從塊 2 畫面用的同一支函式產生：_hlScoreHtml／_hlOverviewCell／_hlChipTip／_hlDeltaHtml（取文字＝textContent）。
+function _hlFpText(r, prev) {
+  const txt = h => String(h).replace(/<[^>]*>/g, '').trim();
+  const closed = r.status === 'closed';
+  return [r.id, txt(_hlScoreHtml(r)),
+    ...HL_OVERVIEW_COLS.map(col => String(_hlOverviewCell(r, prev, col).text).trim()),
+    closed ? '' : r.dims.map(d => _hlChipTip(d).replace(/（權重 [^）]*）$/, '')).join(','),
+    closed ? '' : txt(_hlDeltaHtml(r, prev))].join(' | ');
+}
+// 卡片牆（塊 3）：有總分（含參考分）或商品層還在載入的通路做卡片；其餘（總分「—」、已關站）收進最下方「未評分」那一行
+function _hlTileRated(r) { return r.status !== 'closed' && (r.score != null || !!_HL_WAIT_SCORE[r.status]); }
+const _HL_TILE_MET = { pure: '純利', gross: '毛利', st: '動銷' };
+function _hlTileMetsHtml(r, prev) {
   return HL_OVERVIEW_COLS.map(col => {
     const c = _hlOverviewCell(r, prev, col);
-    return `<td class="hl-num hl-ov ${col.cls}${c.cls ? ' ' + c.cls : ''}">${escapeHtml(c.text)}${c.sub ? `<span class="hl-ov-sub hl-ov-${c.dir}">${escapeHtml(c.sub)}</span>` : ''}</td>`;
-  }).join('');
+    const arrow = c.dir ? ` <span class="hl-tile-arrow hl-ov-${c.dir}" title="${escapeHtml(c.sub.replace(/^[↑↓→] /, ''))}">${c.dir === 'up' ? '↑' : c.dir === 'down' ? '↓' : '→'}</span>` : '';
+    return `<span class="hl-tile-met${c.cls ? ' hl-tile-met-off' : ''}"><span class="hl-tile-met-k" title="${escapeHtml(col.label + '：' + col.short)}">${_HL_TILE_MET[col.key]}</span> ${escapeHtml(c.text)}${arrow}</span>`;
+  }).join('<span class="hl-tile-sep" aria-hidden="true"> · </span>');
 }
-function _hlOverviewHeadHtml() {
-  return HL_OVERVIEW_COLS.map(col => `<th class="hl-num hl-ov ${col.cls}">${escapeHtml(col.label)}${_hlInfoHtml(col.short, col.info, { cls: 'hl-info-inline hl-th-info', aria: col.label + '是什麼' })}</th>`).join('');
+function _hlTileHtml(r, prev, rank, open, snap) {
+  const ch = HEALTH_CHANNELS.find(c => c.id === r.id) || {};
+  const tags = [];
+  if (rank) tags.push(`<span class="hl-rank">類型第 ${rank}</span>`);
+  if (ch.ranked === false) tags.push('<span class="hl-tag">不排名</span>');
+  const reason = r.score == null ? _hlShortReason(r) : (_hlPlainReason(r.dims, _hlGrowthEnds(ch, r.month, snap)) || '—');
+  const full = r.score == null ? String(r.reason || reason) : reason;
+  return `<div class="hl-tile${open ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" data-hl-row="${escapeHtml(r.id)}" data-hl-fp="${escapeHtml(_hlFpText(r, prev))}">
+      <div class="hl-tile-hd"><span class="hl-tile-name">${escapeHtml(r.label)}</span>${tags.join('')}</div>
+      <div class="hl-tile-score">${_hlScoreHtml(r)}${_hlDeltaHtml(r, prev)}</div>
+      <div class="hl-tile-reason" title="${escapeHtml(full)}">${escapeHtml(reason)}</div>
+      <div class="hl-tile-mets">${_hlTileMetsHtml(r, prev)}</div>
+    </div>`;
 }
-// 總分下方小字「依 N/M」：只在有分數、而且面向不齊（N < M）時顯示；齊全時不顯示
-function _hlDimsNoteHtml(r) {
-  if (r.status === 'closed' || r.score == null || !(r.dimsUsed < r.dimsTotal)) return '';
-  return `<span class="hl-score-nm" title="這個月 ${r.dimsTotal} 個面向裡只有 ${r.dimsUsed} 個有分數">依 ${r.dimsUsed}/${r.dimsTotal}</span>`;
+// 「未評分：酷澎 商城-好麻吉（KPI 還沒填）、…、官網（已關站）」：通路名可點（Enter／Space 也可以），點了展開細項
+function _hlUnratedHtml(list, prev, open, snap) {
+  if (!list.length) return '';
+  const items = list.map(r => {
+    // 括號裡不再套括號：「KPI 還沒填完（4/6）」→「KPI 還沒填完 4/6」
+    const why = r.status === 'closed' ? '已關站' : _hlShortReason(r).replace(/（([^（）]*)）$/, ' $1');
+    const isOpen = open === r.id;
+    return `<span class="hl-unrated-item${isOpen ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${isOpen ? 'true' : 'false'}" data-hl-row="${escapeHtml(r.id)}" data-hl-fp="${escapeHtml(_hlFpText(r, prev[r.id]))}" title="${escapeHtml(String(r.reason || why))}">${escapeHtml(r.label)}</span>（${escapeHtml(why)}）`;
+  });
+  const det = list.find(r => r.id === open);
+  return `<div class="hl-unrated"><span class="hl-unrated-h">未評分：</span>${items.join('、')}</div>${det ? `<div class="hl-tile-detail">${_hlCardHtml(det, snap)}</div>` : ''}`;
 }
 // 總覽「主要扣分原因」白話版（2026-11-03）：只換說法，不碰計分。
 //   挑哪一個子指標＝跟 _hlTopReason 同一條規則（(100 − 得分) × 子指標權重 × 面向權重 最大）；_hlTopReason 本身不動（computeChannelHealth 的 topReason 照舊）。
@@ -1360,23 +1391,7 @@ function _hlShortReason(r) {
     default: return t;
   }
 }
-function _hlRowHtml(r, prev, rank, open, snap) {
-  const t = HEALTH_RULES.types[r.type] || {};
-  const ch = HEALTH_CHANNELS.find(c => c.id === r.id) || {};
-  const full = r.status === 'closed' || r.score == null ? String(r.reason || '') : '';
-  const reason = r.status === 'closed' ? r.reason : (r.score == null ? _hlShortReason(r) : (_hlPlainReason(r.dims, _hlGrowthEnds(ch, r.month, snap)) || '—'));
-  const tags = [];
-  if (rank) tags.push(`<span class="hl-rank">類型第 ${rank}</span>`);
-  if (ch.ranked === false && r.status !== 'closed') tags.push('<span class="hl-tag">不排名</span>');
-  return `<tr class="hl-row${open ? ' open' : ''}${r.status === 'closed' ? ' hl-row-closed' : ''}" data-hl-row="${escapeHtml(r.id)}" tabindex="0" aria-expanded="${open ? 'true' : 'false'}">
-      <td class="hl-c-name"><span class="hl-caret">${open ? '▾' : '▸'}</span>${escapeHtml(r.label)}<span class="hl-sub-line"><span class="hl-type">${escapeHtml(t.label || '')}</span>${tags.join('')}</span></td>
-      <td class="hl-c-score">${_hlScoreHtml(r)}${_hlDimsNoteHtml(r)}</td>
-      ${_hlOverviewCellsHtml(r, prev)}
-      <td class="hl-c-dims">${_hlChipsHtml(r)}</td>
-      <td class="hl-c-delta">${r.status === 'closed' ? '' : _hlDeltaHtml(r, prev)}</td>
-      <td class="hl-c-reason"${full && full !== reason ? ` title="${escapeHtml(full)}"` : ''}>${escapeHtml(reason)}</td>
-    </tr>`;
-}
+
 function _hlTraceText(s) {
   if (!s.trace) return '';
   const t = s.trace, lines = [`來源：${t.src}`];
@@ -1773,19 +1788,21 @@ Object.assign(App, {
     const rank = _hlRank(results);
     const sorted = _hlSortResults(results);
     const _tScore = _hlNow() - _t0 - _tKpi;
-    let lastType = null;
-    const rows = sorted.map(r => {
-      let typeRow = '';
-      const tKey = r.status === 'closed' ? '_closed' : r.type;
-      if (tKey !== lastType) {
-        lastType = tKey;
-        const tl = tKey === '_closed' ? '已關站' : (HEALTH_RULES.types[r.type] || {}).label || r.type;
-        typeRow = `<tr class="hl-type-row"><td colspan="${_HL_TABLE_COLS}">${escapeHtml(tl)}</td></tr>`;
-      }
-      const open = _hlState.open === r.id;
-      const detail = open ? `<tr class="hl-detail"><td colspan="${_HL_TABLE_COLS}">${_hlCardHtml(r, snap)}</td></tr>` : '';
-      return typeRow + _hlRowHtml(r, prev[r.id], rank[r.id], open, snap) + detail;
+    // 卡片牆（塊 3）：依通路類型分組（順序同 _hlSortResults），每組一排卡片；展開的細項放在該組卡片下方、全寬
+    const groups = [];
+    sorted.filter(_hlTileRated).forEach(r => {
+      let g = groups[groups.length - 1];
+      if (!g || g.type !== r.type) groups.push(g = { type: r.type, items: [] });
+      g.items.push(r);
+    });
+    const wall = groups.map(g => {
+      const tl = (HEALTH_RULES.types[g.type] || {}).label || g.type;
+      const det = g.items.find(r => r.id === _hlState.open);
+      return `<section class="hl-group" aria-label="${escapeHtml(tl)}"><div class="hl-group-hd">${escapeHtml(tl)}</div>
+        <div class="hl-tiles">${g.items.map(r => _hlTileHtml(r, prev[r.id], rank[r.id], _hlState.open === r.id, snap)).join('')}</div>
+        ${det ? `<div class="hl-tile-detail">${_hlCardHtml(det, snap)}</div>` : ''}</section>`;
     }).join('');
+    const unrated = _hlUnratedHtml(sorted.filter(r => !_hlTileRated(r)), prev, _hlState.open, snap);
     const mo = snap.months && snap.months[month];
     try { console.info(`[health] 整頁重算 ${Math.round(_hlNow() - _t0)} ms（KPI 快照 ${Math.round(_tKpi)} ms、評分 ${Math.round(_tScore)} ms）`); } catch {}
     return `<div class="hl-page">
@@ -1803,12 +1820,8 @@ Object.assign(App, {
           <span class="filter-spacer"></span>
           <button type="button" class="btn-ghost" data-hl-act="refresh">↻ 重新計算</button>
         </div>
-        <div class="hl-table-wrap">
-          <table class="hl-table">
-            <thead><tr><th>通路</th><th class="hl-c-score">總分</th>${_hlOverviewHeadHtml()}<th class="hl-c-dims">面向</th><th class="hl-c-delta">比上月</th><th class="hl-c-reason">主要扣分原因</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
+        <div class="hl-wall">${wall}</div>
+        ${unrated}
         <div class="hl-foot">${escapeHtml(_hlFootText())}</div>
       </div>`;
   },
