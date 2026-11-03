@@ -27445,7 +27445,7 @@ window.__healthProductSnapshot=function(platform,shop,month){
         const r=rows[i];
         const sold=r._g>0||Math.abs(r.revenue)>0.5;
         return {key:String(p.sku||''),origin:String(p.origin||'').trim(),name:String(p.name||''),rev:+r.revenue||0,profit:+r.profit||0,qty:+r.qty||0,
-          sold,active:p.discontinued!==true,costKnown:isMoPlus?r._covered:Number(p.cost)>0};
+          sold,active:p.discontinued!==true,costKnown:isMoPlus?r._covered:Number(p.cost)>0,cost:+r.cost||0};   // cost：健檢商品標籤算毛利率用（momoAggregatePeriods 的成本）
       });
       try{ out.recon=!!momoLoadReconcile(shop,month); }catch{ out.recon=null; }
       if(!cached){ try{ const ol=momoLoadOptlog(shop)||{}; Object.keys(ol).forEach(s=>(Array.isArray(ol[s])?ol[s]:[]).forEach(x=>bump(s,x&&x.date))); }catch{} }
@@ -27464,7 +27464,7 @@ window.__healthProductSnapshot=function(platform,shop,month){
           out.subTotals[sub]={sold:calc.bizCount||0,total:skus.filter(x=>!x.discontinued||x.hasBiz).length};
           skus.forEach(x=>{ const c=String(x.料號||'').trim();
             out.rows.push({key:c,sub,pages:pages[c]||[],name:String(x.商品名||''),rev:+x.營收||0,profit:x.淨利==null?null:+x.淨利,qty:+x.銷量||0,
-              sold:!!x.hasBiz,active:!x.discontinued,costKnown:!!x.costKnown}); });
+              sold:!!x.hasBiz,active:!x.discontinued,costKnown:!!x.costKnown,cost:x.成本==null?null:+x.成本}); });   // cost：健檢商品標籤算毛利率用
           try{ const ol=pchomeLoadOptlog(sub)||{}; Object.keys(ol).forEach(s=>(Array.isArray(ol[s])?ol[s]:[]).forEach(e=>bump(s,e&&e.date))); }catch{}
         });
       }

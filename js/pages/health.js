@@ -389,7 +389,7 @@ function _hlProdNormalize(raw) {
     base.recon = raw.recon; base.freightMode = raw.freightMode || 'none';
     rows = (raw.rows || []).map(r => { const ck = _hlCompanyKey(r.origin, r.key);
       return { key: r.key, name: r.name, company: ck.key, fallback: ck.fallback, pages: [r.key], rev: +r.rev || 0, profit: +r.profit || 0,
-        costKnown: !!r.costKnown, sold: !!r.sold, active: !!r.active, qty: +r.qty || 0 }; });
+        costKnown: !!r.costKnown, sold: !!r.sold, active: !!r.active, qty: +r.qty || 0, cost: _hlFinite(+r.cost) && r.cost != null ? +r.cost : null }; });
     // 商品頁口徑＝momoPeriodTotals 同口徑：分子＝有銷售、分母＝上架 ∪ 有銷售（逐商品編號）
     base.pageCount = { sold: rows.filter(r => r.sold).length, total: rows.filter(r => r.active || r.sold).length };
   } else if (raw.platform === 'pchome') {
@@ -397,7 +397,8 @@ function _hlProdNormalize(raw) {
     rows = (raw.rows || []).map(r => { const pages = (r.pages && r.pages.length) ? r.pages.slice() : ['code:' + r.key];
       const ck = _hlCompanyKey(r.key, 'code:' + r.key);
       return { key: r.key, sub: r.sub, name: r.name, company: ck.key, fallback: ck.fallback, pages,
-        rev: +r.rev || 0, profit: r.profit == null ? null : +r.profit, costKnown: !!r.costKnown && r.profit != null, sold: !!r.sold, active: !!r.active, qty: +r.qty || 0 }; });
+        rev: +r.rev || 0, profit: r.profit == null ? null : +r.profit, costKnown: !!r.costKnown && r.profit != null, sold: !!r.sold, active: !!r.active, qty: +r.qty || 0,
+        cost: r.cost == null || !_hlFinite(+r.cost) ? null : +r.cost }; });
   }
   base.rows = rows;
   const any = rows.some(r => r.sold || Math.abs(r.rev) > 0.5);
@@ -627,7 +628,7 @@ function healthDragList(ch, month, snap, rules) {
   items.sort((a, b) => (b.amount - a.amount) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   const info = [];
   if (!shopee && prevRows) rows.forEach(r => { const pr = prevBy[pk(r)];
-    if (r.active && !r.sold && pr && !pr.sold) info.push({ key: r.key, sub: r.sub || null, name: r.name, reasons: ['deadLong'] }); });
+    if (_hlDeadLongHit(r, pr)) info.push({ key: r.key, sub: r.sub || null, name: r.name, reasons: ['deadLong'] }); });
   info.sort((a, b) => (a.key < b.key ? -1 : 1));
   return { status: 'ok', reason: '', items: items.slice(0, D.topN), more: Math.max(0, items.length - D.topN),
     info: info.slice(0, D.topN), infoCount: info.length, prevMissing: !prevRows };
@@ -641,7 +642,122 @@ const HEALTH_DRAG_REASONS = _hlDeepFreeze({
   deadLong: { icon: '⏸', label: '連續零動銷', desc: '上架中，但這個月和上個月都沒賣出（MOMO／PChome）；不算金額，另外列出' },
 });
 
+// 連續零動銷（MOMO／PChome；蝦皮沒有上架狀態）：上架中、這個月沒賣、上個月也沒賣（拖累清單與商品標籤共用）
+function _hlDeadLongHit(r, pr) { return !!(r.active && !r.sold && pr && !pr.sold); }
+
 const _HL_DIM_FNS = { profit: _hlProfitDim, growth: _hlGrowthDim, ads: _hlAdsDim, structure: _hlStructureDim };
+
+/* ---------- 商品紅綠燈標籤（塊 4；只是呈現，不計分、不影響任何分數）----------
+ * 每個商品每月最多 5 個標籤：營收、純利、毛利率、廣告（蝦皮）、動銷（MOMO／PChome）。沒資料的標籤不顯示（不當灰色）。
+ *   營收、純利的成長門檻＝淨利表「成長分析」的爆發品／重跌品門檻（profit.js GROWTH_THRESH_DEF＋雲端設定，經 window.getGrowthThresh 讀現值，
+ *   跟淨利表同一份；成長率 > risePct% ＝綠、< −fallPct% ＝紅，同 calcGrowthAnalysis 用嚴格 > ／ <）。
+ *   廣告＝_hlAdsLossHit（拖累清單同一條「廣告致虧」）；動銷＝_hlDeadLongHit（拖累清單同一條「連續零動銷」）。
+ *   毛利率與月份變化表的「持平」範圍是健檢自己的（HEALTH_TAG_RULES）。只看整月：蝦皮要有整月報表，半月拼的月份當作沒資料。
+ * 亮點＝綠燈數 > 紅燈數；警訊＝紅燈數 > 綠燈數（灰、黃不算）。排序：燈數多 → 營收高 → 品號。 */
+const HEALTH_TAG_RULES = _hlDeepFreeze({
+  gm: { window: 3, minMonths: 2, flat: 0.01, warn: 0.03 },   // 跟前 3 個月平均：≥ +1pp 綠、±1pp 內灰、−1～−3pp 黃、低超過 3pp 紅；前 3 個月有資料少於 2 個月不顯示
+  topN: 10,
+  minRev: 3000,   // 亮點／警訊（數量與清單）只算本月或上月營收 ≥ 3,000 元的商品；燈號本身照算（items 全部都有，只是不進亮點／警訊）
+  flat: { rate: 0.005, money: 0.03 },   // 月份變化表跟前一個月比的「持平」：比率 ±0.5 個百分點以內、金額 ±3% 以內
+});
+const HL_LIGHT_SYM = { green: '▲', gray: '●', yellow: '▽', red: '▼' };
+const HL_LIGHT_TEXT = { green: '變好', gray: '持平', yellow: '留意', red: '警示' };
+// 淨利表「成長分析」門檻現值（同一份設定；讀不到 ⇒ null，標籤顯示「讀不到門檻」，不自己補一份數字）
+function _hlGrowthThresh() {
+  try {
+    if (typeof window.getGrowthThresh !== 'function') return null;
+    const t = window.getGrowthThresh() || {}, rise = Number(t.risePct), fall = Number(t.fallPct);
+    return isFinite(rise) && isFinite(fall) ? { rise: rise / 100, fall: fall / 100, risePct: rise, fallPct: fall } : null;
+  } catch { return null; }
+}
+// 商品毛利率：蝦皮＝淨利表毛利 ÷ 營收；MOMO／PChome＝(營收 − 成本) ÷ 營收。沒成本、營收 ≤ 0 ⇒ null
+function _hlRowGm(r) {
+  if (!r || !(r.rev > 0) || !r.costKnown) return null;
+  if (_hlFinite(r.gross)) return r.gross / r.rev;
+  if (_hlFinite(r.cost)) return (r.rev - r.cost) / r.rev;
+  return null;
+}
+// 某通路某月拿來算標籤的商品列：{ state, rows|null, why }。state 不是 ready ⇒ 還在等；rows null ⇒ 那個月沒有整月資料
+function _hlTagMonth(ch, m, snap) {
+  const p = _hlProdOf(ch, m, snap);
+  if (p.state !== 'ready') return { state: p.state };
+  const s = p.snap;
+  if (s.status !== 'ok') return { state: 'ready', rows: null, why: s.status, snap: s };
+  if (ch.prod.platform === 'shopee' && !(Array.isArray(s.halves) && s.halves.length === 1 && s.halves[0] === 'full')) return { state: 'ready', rows: null, why: 'half', snap: s };
+  return { state: 'ready', rows: s.rows, snap: s };
+}
+// 一個商品的標籤（純函式）。r＝本月、pr＝上月同一個商品（沒有＝null）、gmPrev＝前 3 個月有資料的毛利率、T＝成長門檻
+function _hlProductTags(r, pr, gmPrev, T, platform, rules) {
+  const G = (rules || HEALTH_TAG_RULES).gm, tags = [];
+  const add = (k, label, light, title) => tags.push({ k, label, light, title });
+  const thr = `爆發品門檻 > +${T.risePct}%、重跌品門檻 < −${T.fallPct}%（淨利表成長分析）`;
+  if (pr && pr.rev > 0) {
+    const g = (r.rev - pr.rev) / pr.rev;
+    add('rev', '營收', g > T.rise ? 'green' : g < -T.fall ? 'red' : 'gray', `營收比上月 ${_hlFmtSignedPct(g)}；${thr}`);
+  }
+  if (r.costKnown && _hlFinite(r.profit)) {
+    if (r.profit < 0) add('pure', '純利', 'red', `這個月賠錢（純利 ${_hlFmtMoney(r.profit)}）`);
+    else if (pr && pr.costKnown && _hlFinite(pr.profit) && pr.profit > 0) {
+      const g = (r.profit - pr.profit) / pr.profit;
+      add('pure', '純利', g > T.rise ? 'green' : g < -T.fall ? 'red' : 'gray', `純利比上月 ${_hlFmtSignedPct(g)}；${thr}`);
+    }
+  }
+  const gm = _hlRowGm(r);
+  if (gm != null && gmPrev.length >= G.minMonths) {
+    const avg = gmPrev.reduce((a, x) => a + x, 0) / gmPrev.length;
+    const bp = Math.round((gm - avg) * 10000), f = Math.round(G.flat * 10000), w = Math.round(G.warn * 10000);   // 用萬分點比，避免小數誤差
+    const light = bp >= f ? 'green' : bp > -f ? 'gray' : bp >= -w ? 'yellow' : 'red';
+    add('gm', '毛利率', light, `毛利率 ${_hlFmtPct(gm)}，前 ${gmPrev.length} 個月平均 ${_hlFmtPct(avg)}（${_hlFmtPp(gm - avg)}）`
+      + (light === 'red' ? '；低很多，可能是進價漲了' : ''));
+  }
+  if (platform === 'shopee' && _hlAdsLossHit(r)) add('ads', '廣告', 'red', `廣告致虧：不投廣告本來會賺，投了變賠（廣告費 ${_hlFmtMoney(r.adsFee)}）`);
+  if (platform !== 'shopee' && _hlDeadLongHit(r, pr)) add('dead', '動銷', 'red', '上架中，這個月和上個月都沒賣出（連續零動銷）');
+  return tags;
+}
+// 某通路某月的商品標籤（純函式）。回 { status, reason, thresh, items, good:[前 N], bad:[前 N], goodN, badN, prevMissing }
+//   good／bad／goodN／badN 只算 eligible（本月或上月營收 ≥ minRev）的商品；items 是全部有燈的商品（各帶 eligible）。
+//   status：ok／na（沒有商品層）／loading／notLoaded／timeout／none（這個月沒有整月商品資料）／nothresh（讀不到成長分析門檻）
+//   items 每個商品帶算標籤用的原始數字（Console 對帳用）：rev／prevRev／profit／prevProfit／gm／gmAvg／gmPrev（＋gmMonths 對應月份）／revG。
+const _hlTagMemo = {};
+function healthProductTags(ch, month, snap, rules) {
+  if (!ch || !ch.prod) return { status: 'na', reason: '這個通路沒有商品層資料' };
+  const TR = rules || HEALTH_TAG_RULES, W = TR.gm.window;
+  const ms = [];
+  for (let i = 0; i <= W; i++) ms.push(_hlTagMonth(ch, _hlAddMonth(month, -i), snap));
+  const wait = ms.find(x => x.state !== 'ready');
+  if (wait) return { status: wait.state === 'off' || wait.state === 'na' ? 'na' : wait.state, reason: '' };
+  if (!ms[0].rows) return { status: 'none', reason: ms[0].why === 'half' ? '這個月還沒有整月報表（商品標籤只看整月）' : '這個月沒有商品資料' };
+  const T = _hlGrowthThresh();
+  if (!T) return { status: 'nothresh', reason: '讀不到淨利表「成長分析」的門檻（profit.js 沒載入）' };
+  const memoK = ch.id + '|' + month, sig = JSON.stringify(T), refs = ms.map(x => x.snap);
+  const hit = _hlTagMemo[memoK];
+  if (hit && hit.rules === TR && hit.sig === sig && hit.refs.every((x, i) => x === refs[i])) return hit.res;
+  const pk = r => r.key + '|' + (r.sub || '');
+  const maps = ms.map(x => { const o = {}; (x.rows || []).forEach(r => { o[pk(r)] = r; }); return o; });
+  const items = [];
+  ms[0].rows.forEach(r => {
+    const k = pk(r), pr = ms[1].rows ? (maps[1][k] || null) : null;
+    const gmPrev = [], gmMonths = [];
+    for (let i = 1; i <= W; i++) { const g = _hlRowGm(maps[i][k]); if (g != null) { gmPrev.push(g); gmMonths.push(_hlAddMonth(month, -i)); } }
+    const tags = _hlProductTags(r, pr, gmPrev, T, ch.prod.platform, TR);
+    if (!tags.length) return;
+    const g = tags.filter(t => t.light === 'green').length, red = tags.filter(t => t.light === 'red').length;
+    items.push({ key: r.key, sub: r.sub || null, name: r.name, rev: r.rev, profit: r.costKnown && _hlFinite(r.profit) ? r.profit : null,
+      prevRev: pr ? pr.rev : null, prevProfit: pr && pr.costKnown && _hlFinite(pr.profit) ? pr.profit : null,
+      revG: pr && pr.rev > 0 ? (r.rev - pr.rev) / pr.rev : null,
+      pureRate: r.costKnown && _hlFinite(r.profit) && r.rev > 0 ? r.profit / r.rev : null,
+      gm: _hlRowGm(r), gmPrev, gmMonths, gmAvg: gmPrev.length ? gmPrev.reduce((a, x) => a + x, 0) / gmPrev.length : null,
+      tags, green: g, red });
+  });
+  const by = n => (a, b) => (b[n] - a[n]) || (b.rev - a.rev) || (pk(a) < pk(b) ? -1 : pk(a) > pk(b) ? 1 : 0);
+  items.forEach(x => { x.eligible = x.rev >= TR.minRev || (_hlFinite(x.prevRev) && x.prevRev >= TR.minRev); });
+  const pool = items.filter(x => x.eligible);
+  const good = pool.filter(x => x.green > x.red).sort(by('green')), bad = pool.filter(x => x.red > x.green).sort(by('red'));
+  const res = { status: 'ok', reason: '', thresh: T, items, good: good.slice(0, TR.topN), bad: bad.slice(0, TR.topN), goodN: good.length, badN: bad.length,
+    prevMissing: !ms[1].rows };
+  _hlTagMemo[memoK] = { rules: TR, sig, refs, res };
+  return res;
+}
 
 // 主要扣分原因：(100 − 得分) × 子指標權重 × 面向權重 最大的那一個子指標（規則產生，不是 AI）
 function _hlTopReason(dims) {
@@ -927,9 +1043,7 @@ function _hlGuideBlocks(rules) {
   const pureDef = R.profit.subs.find(x => x.key === 'pureRate');
   const notes = [];
   Object.keys(R.notes).forEach(g => Object.keys(R.notes[g]).forEach(k => { if (!(g === 'shopee' && k === 'rev')) notes.push(R.notes[g][k]); }));
-  const D = R.drag || {};
-  const P0 = v => (Math.round(v * 1000) / 10).toString() + '%';
-  const dragLines = Object.keys(HEALTH_DRAG_REASONS).map(k => { const x = HEALTH_DRAG_REASONS[k]; return `${x.icon} ${x.label}：${x.desc}。`; });
+  const TR = HEALTH_TAG_RULES, TG = _hlGrowthThresh();   // 商品標籤：健檢自己的毛利率／持平門檻＋淨利表成長分析門檻現值
   return [
     { h: '這頁在做什麼', p: '每個月幫每個通路做一次「體檢」，用分數和燈號看出哪個通路賺得好、哪個要注意。分數全部由固定規則算出來，沒有人手動打分數；同樣的資料一定得到同樣的分數；沒有資料或還沒有標準的項目不計分、不算 0 分。主看板一張卡片一個通路，點卡片可以看細項。' },
     { h: '總分怎麼算', ol: [
@@ -978,15 +1092,17 @@ function _hlGuideBlocks(rules) {
       '點一項會跳到 KPI 月結表那一段的第一個月；沒有權限開 KPI 月結表時只顯示文字。',
       '全部填完時這一列不顯示。這一列只是提醒，本身不影響分數；沒填完的月份照「尚未上傳」處理。',
     ] },
-    D.topN ? { h: '要處理的商品（拖累商品）', ol: [
-      '在蝦皮、MOMO、PChome 通路細項的最上面（點通路卡片展開）。依「拖累金額」（影響金額）由大到小；一件商品可以命中好幾個原因，金額取其中最大的那個（不重複加總）。這份清單不影響分數。',
-      '卡片上的「⚠ 待處理商品 N 個」：這個月所有拖累商品裡，還沒有調整紀錄的商品數；都調整過或沒有拖累商品就寫「✓ 沒有待處理商品」。點這一行會展開細項、直接捲到清單最上面。商品資料還沒載好時寫「載入中…」，不影響分數顯示。',
-      `清單先列待處理的商品（依拖累金額由大到小），預設顯示前 ${D.topN} 個，超過時按「顯示全部待處理（N 個）」看全部；清單裡待處理的總數一定等於卡片上的 N。已調整的商品排在所有待處理之後、淡化顯示，平常收成一行「已調整 N 個」，點了才展開。`,
-      ...dragLines,
-      `「🔥 廣告燒錢」的前段＝廣告費排在這個通路前 ${P0(D.adsBurnTopPct)}。`,
-      `「✓ 日期 已調整」：這件商品在評分月份的前 ${D.adjustMonthsBack} 個月 1 號以後有調整紀錄（蝦皮看淨利表備註與洞察表調整紀錄，MOMO／PChome 看優化紀錄）。只顯示日期，不顯示是誰。`,
-      '點品號會跳到淨利表那個通路、那個月，並在搜尋框填入品號；只切換畫面，不會改你淨利表上記住的期間與篩選。',
-    ] } : null,
+    { h: '商品標籤（亮點、警訊；不計分）', ol: [
+      '有商品資料的通路（蝦皮、MOMO 甲配、MOMO 寄倉、MO+、PChome）每個商品每個月最多 5 個燈；只看整月資料（蝦皮要有整月報表）。沒資料的燈不顯示，不當成灰色。',
+      `燈號：${['green', 'gray', 'yellow', 'red'].map(l => `${HL_LIGHT_SYM[l]} ${{ green: '綠', gray: '灰', yellow: '黃', red: '紅' }[l]}＝${HL_LIGHT_TEXT[l]}`).join('、')}。顏色旁邊一定有符號，不靠顏色分辨。`,
+      `營收：比上月成長超過「爆發品」門檻＝綠、下滑超過「重跌品」門檻＝紅、其他＝灰；上個月沒有營收（新品）不顯示。門檻跟淨利表「成長分析」同一份設定${TG ? `（目前爆發品 > +${TG.risePct}%、重跌品 < −${TG.fallPct}%）` : ''}，那邊改了這裡跟著變。`,
+      '純利：同營收的門檻比上個月純利；這個月賠錢（純利 < 0）一律紅。上個月純利 ≤ 0 時不算成長率，只看這個月有沒有賠錢。',
+      `毛利率：跟這個商品自己前 ${TR.gm.window} 個月的平均毛利率比：高 ${_hlPctTrim(TR.gm.flat).replace('%', '')} 個百分點以上＝綠、±${_hlPctTrim(TR.gm.flat).replace('%', '')} 個百分點以內＝灰、低 ${_hlPctTrim(TR.gm.flat).replace('%', '')}～${_hlPctTrim(TR.gm.warn).replace('%', '')} 個百分點＝黃、低超過 ${_hlPctTrim(TR.gm.warn).replace('%', '')} 個百分點＝紅（可能是進價漲了）。前 ${TR.gm.window} 個月有資料的月份少於 ${TR.gm.minMonths} 個就不顯示。`,
+      `廣告（只有蝦皮）：${HEALTH_DRAG_REASONS.adsLoss.label}——不投廣告本來會賺、投了變賠（有廣告費、純利 < 0、純利＋廣告費 > 0）＝紅，其他不顯示。`,
+      `動銷（MOMO、MO+、PChome；蝦皮沒有上架狀態）：上架中、這個月和上個月都沒賣出＝紅（同「${HEALTH_DRAG_REASONS.deadLong.label}」）。`,
+      `亮點商品＝綠燈比紅燈多；警訊商品＝紅燈比綠燈多（灰、黃不算）；只算本月或上月營收 ${_hlFmtMoney(TR.minRev).replace('$', '')} 元以上的商品（營收太小的燈照算，只是不列）。清單依燈數多、再依營收高排序，各列前 ${TR.topN} 個；卡片上的「★ 亮點 N　⚠ 警訊 N」是符合條件的全部商品數。點這一行會展開細項、捲到清單。`,
+      '清單欄位：商品名稱（太長會截斷，滑鼠移上去看全名）、燈號、營收、純利率、營收比上月；滑鼠移到燈號上看算法與數字。商品資料還沒載好時卡片寫「商品標籤載入中…」，不影響分數。',
+    ] },
     { h: '燈號顏色', ol: [
       `綠：${R.lights.green} 分以上。`,
       `黃：${R.lights.yellow}～${R.lights.green - 1} 分。`,
@@ -1007,20 +1123,22 @@ function _hlGuideBlocks(rules) {
       '排名只在同一類型裡比（卡片上不顯示名次）。不同類型的分數線、營收口徑都不同，跨類型的分數高低只供參考。',
       '業外、官網會列出來，但不參加排名。',
     ] },
-    { h: '毛利率、成長、廣告效率、商品結構', p: '目前都不計分。卡片下面的毛利率只顯示供參考（由各平台的價格結構決定，月與月幾乎不動）；成長、廣告效率、商品結構之後會改成商品標籤與月份變化表。' },
+    { h: '毛利率、成長、廣告效率、商品結構', p: '目前都不計分。卡片下面的毛利率只顯示供參考（由各平台的價格結構決定，月與月幾乎不動）；成長、廣告、動銷改成上面的商品標籤，通路整體的變化看細項裡的「指標逐月變化」表。' },
     R.notes.shopee && R.notes.shopee.rev ? { warn: R.notes.shopee.rev } : null,
     notes.length ? { h: '其他口徑提醒', ol: notes } : null,
     { h: '主看板（卡片牆）怎麼看', ol: [
-      `依通路類型分組，一張卡片一個通路：通路名、大字總分（綠／黃／紅燈號）、總分旁的比上月分數差，下面一行「${pure ? pure.short : '純利'} 80 · ${st ? st.short : '動銷'} 60」是兩項各自的得分（只有一項時寫「只看${pure ? pure.label : '純利率'}」），再下面是待處理商品數，以及純利率、毛利率、動銷率三欄。`,
+      `依通路類型分組，一張卡片一個通路：通路名、大字總分（綠／黃／紅燈號）、總分旁的比上月分數差，下面一行「${pure ? pure.short : '純利'} 80 · ${st ? st.short : '動銷'} 60」是兩項各自的得分（只有一項時寫「只看${pure ? pure.label : '純利率'}」），再下面是「★ 亮點 N　⚠ 警訊 N」（有商品資料的通路才有），以及純利率、毛利率、動銷率三欄。`,
       '卡片最下面的「純利率／毛利率／動銷率」三欄是原始數字，下面一行「↑ 上月 x%」是上個月的數字：↑ 比上月高、↓ 比上月低、→ 一樣；上個月沒資料就沒有這一行。',
       ...HL_OVERVIEW_COLS.map(c => c.info),
       '這個月沒有總分的通路不做卡片，收在頁面最下方「另有 N 個通路沒有分數」，點一下展開清單，括號是原因；點通路名一樣可以看細項。',
-      '點卡片：在那一組卡片下方展開細項；再點一次收起來。同一時間只展開一個。細項最上面是「要處理的商品」；計分的兩項收在「看評分細節」，點了才展開。',
+      '點卡片：在那一組卡片下方展開細項；再點一次收起來。同一時間只展開一個。細項最上面是「★ 亮點商品」「⚠ 警訊商品」兩張清單（寬螢幕左右並排、窄螢幕上下），下面是「指標逐月變化」表。',
     ] },
-    { h: '比上月、評分細節、走勢圖', ol: [
+    { h: '比上月、指標逐月變化表', ol: [
       '總分旁的「比上月 +8」是這個月總分減上個月總分（上個月也用同一套規則重算）；上個月沒有總分就不顯示。',
-      `「看評分細節」：只列${labels}兩項——本月數值、分數線（達到的那一級會標出來）、得分；${st && st.provisional ? st.label + '旁標「暫定」。' : ''}`,
-      `近 12 個月走勢：總分、${SC.items.map(it => it.label + '分').join('、')}三條線，每個月都用目前的規則重算。`,
+      `指標逐月變化：每列一個指標、每欄一個月（最近 ${HL_MONTH_N} 個月，舊→新，最右是選的月份）。表格上方勾選要看的指標（記在這台電腦），預設勾 ${HL_MONTH_DEFAULT.map(k => HL_MONTH_METRICS.find(d => d.key === k).label).join('、')}。`,
+      `標「計分」的${labels}依那個月的得分上色：100／80 綠、60 黃、0 紅，格子裡寫幾分；標準未設定或沒資料＝空白。${st && st.provisional ? st.label + '的分數線是暫定。' : ''}`,
+      `標「參考」的${HL_MONTH_METRICS.filter(d => !d.scored).map(d => d.label).join('、')}跟前一個月比：▲ 變好＝綠、● 持平＝灰、▼ 變差＝紅（廣告佔比越低越好）。持平＝比率差 ${_hlPctTrim(TR.flat.rate).replace('%', '')} 個百分點以內、金額差 ${_hlPctTrim(TR.flat.money)} 以內。`,
+      `點表格的某一列：下面展開那個指標近 ${_HL_TREND_N} 個月的折線圖，再點一次收起。`,
       '頁頂「KPI 尚未填完」平常收成一行，點一下展開，可以直接點通路跳到 KPI 月結表去填。',
     ] },
     { h: '排名、計分項目與範圍', p: _hlFootText(R) },
@@ -1063,7 +1181,7 @@ const _HL_WAIT_MAX = 20;     // × 600ms ≈ 12 秒
 const _HL_TREND_N = 12;
 // 只在記憶體：選的月份、展開的通路、「KPI 尚未填完」有沒有展開、「看評分細節」有沒有展開、重畫後要不要捲到商品清單、
 //   哪個通路按了「顯示全部待處理」、哪個通路展開了「已調整 N 個」、最下方「另有 N 個通路沒有分數」有沒有展開
-const _hlState = { month: null, open: null, pendingOpen: false, scoreOpen: false, scrollTo: null, todoAll: null, doneOpen: null, unratedOpen: false };
+const _hlState = { month: null, open: null, pendingOpen: false, scoreOpen: false, scrollTo: null, todoAll: null, doneOpen: null, unratedOpen: false, metOpen: null, metCols: null };
 let _hlChart = null;
 
 function _hlIsLocalHost() {
@@ -1225,19 +1343,25 @@ function _hlRefreshPlatform(platform) {
   if (_hlProd.queue.length && !_hlProd.running) _hlRunQueue();
 }
 function _hlProdKey(p, s, m) { return p + '|' + s + '|' + m; }
+//   商品標籤（塊 4）要再往前一個月（毛利率比前 3 個月平均）：分數用得到的月份全部算完、畫面重畫之後才排（第二批），
+//   分數出現的時間不會因為標籤變慢；第二批算完再重畫一次，卡片的「★ 亮點／⚠ 警訊」那一行才補上。
 function _hlWantProd(month, openId) {
   const today = _hlTodayYm();
-  HEALTH_CHANNELS.forEach(ch => {
-    if (!ch.prod || _hlProd.state[ch.prod.platform] !== 'ready') return;
+  const want = (ch, m) => {
+    const k = _hlProdKey(ch.prod.platform, ch.prod.shop, m);
+    if (_hlProd.cache[k] || _hlProd.queued[k]) return;
+    if (m < HEALTH_RULES.firstMonth || m > today) { _hlProd.cache[k] = { status: 'none', rows: [], lastAdjust: {} }; return; }
+    _hlProd.queued[k] = true; _hlProd.queue.push([ch.prod.platform, ch.prod.shop, m]);
+  };
+  const ready = HEALTH_CHANNELS.filter(ch => ch.prod && _hlProd.state[ch.prod.platform] === 'ready');
+  ready.forEach(ch => {
     const ms = [month, _hlAddMonth(month, -1), _hlAddMonth(month, -2)];
     if (ch.id === openId) for (let i = 3; i <= _HL_TREND_N; i++) ms.push(_hlAddMonth(month, -i));
-    ms.forEach(m => {
-      const k = _hlProdKey(ch.prod.platform, ch.prod.shop, m);
-      if (_hlProd.cache[k] || _hlProd.queued[k]) return;
-      if (m < HEALTH_RULES.firstMonth || m > today) { _hlProd.cache[k] = { status: 'none', rows: [], lastAdjust: {} }; return; }
-      _hlProd.queued[k] = true; _hlProd.queue.push([ch.prod.platform, ch.prod.shop, m]);
-    });
+    ms.forEach(m => want(ch, m));
   });
+  if (!_hlProd.queue.length && !_hlProd.running) {
+    ready.forEach(ch => { for (let i = 3; i <= HEALTH_TAG_RULES.gm.window; i++) want(ch, _hlAddMonth(month, -i)); });
+  }
   if (_hlProd.queue.length && !_hlProd.running) _hlRunQueue();
 }
 // 一筆一筆算，每筆之間讓出主執行緒：有 requestIdleCallback 就等瀏覽器有空（最多等 500ms），沒有就 setTimeout 16ms。
@@ -1380,6 +1504,143 @@ function _hlTodoHtml(r, snap) {
   if (!t.n) return `<div class="hl-tile-todo hl-todo-ok" ${attrs} title="${t.total ? `這個月 ${t.total} 個拖累商品都有調整紀錄` : '這個月沒有拖累商品'}；點一下看清單">✓ 沒有待處理商品</div>`;
   return `<div class="hl-tile-todo hl-todo-warn" ${attrs} title="這個月拖累商品 ${t.total} 個，其中 ${t.n} 個還沒有調整紀錄；點一下看清單">⚠ 待處理商品 ${t.n} 個</div>`;
 }
+// 卡片上「★ 亮點 N　⚠ 警訊 N」（塊 4，取代「待處理商品 N 個」；_hlTodoHtml 留著不用）。N＝符合條件的商品總數（不是只算前 10）。
+//   沒有商品層的通路＝空的佔位（卡片才一樣高）；資料還在載入＝「商品標籤載入中…」（不影響分數顯示）。點一下展開細項、捲到清單。
+const _HL_TAG_WAIT = { loading: '商品標籤載入中…', notLoaded: '商品標籤：商品資料未載入', timeout: '商品標籤：商品資料逾時' };
+function _hlTagLineHtml(r, snap) {
+  const ch = HEALTH_CHANNELS.find(c => c.id === r.id);
+  const t = healthProductTags(ch, r.month, snap);
+  if (t.status === 'na') return '<div class="hl-tile-todo hl-todo-none" aria-hidden="true"></div>';
+  if (_HL_TAG_WAIT[t.status]) return `<div class="hl-tile-todo hl-todo-wait">${_HL_TAG_WAIT[t.status]}</div>`;
+  if (t.status !== 'ok') return `<div class="hl-tile-todo hl-todo-wait" title="${escapeHtml(t.reason)}">商品標籤：${t.status === 'none' ? '這個月沒有整月資料' : '讀不到門檻'}</div>`;
+  return `<div class="hl-tile-todo hl-tag-line" role="button" tabindex="0" data-hl-todo="${escapeHtml(r.id)}" title="亮點商品 ${t.goodN} 個（綠燈多於紅燈）、警訊商品 ${t.badN} 個（紅燈多於綠燈）；只算本月或上月營收 ${_hlFmtMoney(HEALTH_TAG_RULES.minRev).replace('$', '')} 元以上的商品；點一下看清單">`
+    + `<span class="hl-tl-good">★ 亮點 ${t.goodN}</span><span class="hl-tl-bad">⚠ 警訊 ${t.badN}</span></div>`;
+}
+function _hlPtagHtml(t) {
+  return `<span class="hl-ptag hl-pt-${t.light}" title="${escapeHtml(HL_LIGHT_TEXT[t.light] + '：' + t.title)}">${escapeHtml(t.label)} ${HL_LIGHT_SYM[t.light]}</span>`;
+}
+// 細項最上面：「★ 亮點商品（前 10）」「⚠ 警訊商品（前 10）」兩張清單（寬螢幕左右、窄螢幕上下，見 css .hl-tags-cols）。
+//   欄位：商品名稱＋燈號（同一格兩行：上＝名稱、太長截斷、title 全名；下＝燈號小標籤）、營收、純利率、營收比上月。不放品號、調整紀錄、廣告費。
+//   1200px（含側欄）一欄約 420px：表格 table-layout:fixed、數字欄固定寬，不出現左右捲軸；手機（≤768px）收掉營收、純利率兩欄（數字放在名稱的 title）。
+function _hlTagListsHtml(ch, month, snap) {
+  if (!ch || !ch.prod) return '';
+  const t = healthProductTags(ch, month, snap);
+  if (t.status === 'na') return '';
+  const legend = `<div class="hl-tags-legend">燈號：${['green', 'gray', 'yellow', 'red'].map(l => `<span class="hl-ptag hl-pt-${l}">${HL_LIGHT_SYM[l]} ${HL_LIGHT_TEXT[l]}</span>`).join('')}`
+    + '<span class="hl-w">每個商品最多 5 個燈：營收、純利（比上月）、毛利率（比前 3 個月平均）、廣告（蝦皮）、動銷（MOMO／PChome）；沒資料的不顯示。不計分。'
+    + `只列本月或上月營收 ${_hlFmtMoney(HEALTH_TAG_RULES.minRev).replace('$', '')} 元以上的商品。</span></div>`;
+  if (t.status !== 'ok') {
+    const msg = _HL_TAG_WAIT[t.status] || ('商品標籤：' + t.reason);
+    return `<section class="hl-tags">${legend}<div class="hl-tags-msg">${escapeHtml(msg)}</div></section>`;
+  }
+  const N = HEALTH_TAG_RULES.topN;
+  const row = it => {
+    const nm = it.name || it.key, full = nm + (it.sub ? `（${it.sub}）` : '');
+    const tip = `${full}｜營收 ${_hlFmtMoney(it.rev)}｜純利率 ${_hlFmtPct(it.pureRate)}`;
+    return `<tr><td class="hl-tags-item"><div class="hl-tags-name" title="${escapeHtml(tip)}">${escapeHtml(full)}</div><div class="hl-tags-chips">${it.tags.map(_hlPtagHtml).join('')}</div></td>
+      <td class="hl-num hl-tags-rev">${escapeHtml(_hlFmtMoney(it.rev))}</td><td class="hl-num hl-tags-pr">${escapeHtml(_hlFmtPct(it.pureRate))}</td>
+      <td class="hl-num hl-tags-g"${it.revG == null ? ' title="上個月沒有營收（新品或上月沒賣）"' : ''}>${escapeHtml(it.revG == null ? '—' : _hlFmtSignedPct(it.revG))}</td></tr>`;
+  };
+  const list = (title, cls, arr, n, none) => `<div class="hl-tags-col">
+      <div class="hl-tags-ttl ${cls}">${title}（前 ${N}）<span class="hl-w">共 ${n} 個</span></div>
+      ${arr.length ? `<div class="hl-tags-wrap"><table class="hl-sub hl-tags-tbl"><thead><tr><th class="hl-tags-item">商品名稱／燈號</th><th class="hl-num hl-tags-rev">營收</th><th class="hl-num hl-tags-pr">純利率</th><th class="hl-num hl-tags-g">營收比上月</th></tr></thead>
+        <tbody>${arr.map(row).join('')}</tbody></table></div>` : `<div class="hl-tags-msg">${none}</div>`}
+    </div>`;
+  const prevNote = t.prevMissing ? '<div class="hl-w">上個月沒有商品資料：營收、純利、動銷的燈這次判斷不了。</div>' : '';
+  return `<section class="hl-tags">${legend}${prevNote}<div class="hl-tags-cols">
+      ${list('★ 亮點商品', 'hl-tags-good', t.good, t.goodN, '這個月沒有綠燈多於紅燈的商品')}
+      ${list('⚠ 警訊商品', 'hl-tags-bad', t.bad, t.badN, '這個月沒有紅燈多於綠燈的商品')}
+    </div></section>`;
+}
+
+/* ---------- 指標逐月變化表（塊 5；取代「看評分細節」與 12 個月分數走勢圖）----------
+ * 列＝指標、欄＝最近 6 個月（舊→新，最右＝選的月份）。計分的兩項依該月得分上色（100／80 綠、60 黃、0 紅；沒分數＝空白）；
+ * 參考指標跟前一個月比（變好綠、持平灰、變差紅；廣告佔比越低越好；持平＝HEALTH_TAG_RULES.flat）。
+ * 勾選要看的指標記在這台電腦（localStorage，讀寫失敗就用預設，不上雲）。點一列＝下面展開那個指標近 12 個月折線圖。 */
+const HL_MONTH_METRICS = _hlDeepFreeze([
+  { key: 'pureRate', label: '純利率', scored: true, unit: 'pct' },
+  { key: 'sellThrough', label: '動銷率', scored: true, unit: 'pct' },
+  { key: 'grossRate', label: '毛利率', unit: 'pct', better: 'up' },
+  { key: 'rev', label: '營收', unit: 'money', better: 'up' },
+  { key: 'pure', label: '純利', unit: 'money', better: 'up' },
+  { key: 'adsPct', label: '廣告佔比', unit: 'pct', better: 'down' },
+]);
+const HL_MONTH_DEFAULT = ['pureRate', 'sellThrough', 'grossRate', 'rev'];
+const HL_MONTH_N = 6;
+const HL_METCOLS_KEY = 'ec_health_metcols';   // 只在這台電腦（不經 Store、不上雲）
+function _hlMetCols() {
+  if (_hlState.metCols) return _hlState.metCols;
+  let v = null;
+  try { v = JSON.parse(localStorage.getItem(HL_METCOLS_KEY)); } catch { v = null; }
+  const keys = HL_MONTH_METRICS.map(m => m.key);
+  _hlState.metCols = Array.isArray(v) && v.every(k => keys.indexOf(k) >= 0) ? v.slice() : HL_MONTH_DEFAULT.slice();
+  return _hlState.metCols;
+}
+function _hlSetMetCol(key, on) {
+  const cur = _hlMetCols().filter(k => k !== key);
+  if (on) cur.push(key);
+  _hlState.metCols = HL_MONTH_METRICS.map(m => m.key).filter(k => cur.indexOf(k) >= 0);   // 照指標順序
+  try { localStorage.setItem(HL_METCOLS_KEY, JSON.stringify(_hlState.metCols)); } catch {}
+}
+// 某指標某月的值（r＝那個月的 computeChannelHealth）。回 { v, score }（score 只有計分項目才有）
+function _hlMetricVal(ch, r, key, snap) {
+  if (key === 'pureRate' || key === 'sellThrough') {
+    const it = (r.items || []).find(x => x.key === key);
+    return { v: it && _hlFinite(it.raw) ? it.raw : null, score: it && it.status === 'ok' ? it.score : null };
+  }
+  const c = _hlCell(snap, r.month, ch);
+  if (!c || c.beforeSince || c.closed || !_hlFillDone(c)) return { v: null };
+  if (key === 'rev') return { v: _hlFinite(c.rev) ? c.rev : null };
+  if (key === 'pure') return { v: _hlFinite(c.pure) ? c.pure : null };
+  if (!(c.rev > 0)) return { v: null };
+  if (key === 'grossRate') return { v: (c.rev - c.cost) / c.rev };
+  if (key === 'adsPct') return { v: _hlFinite(c.ads) ? c.ads / c.rev : null };
+  return { v: null };
+}
+// 參考指標跟前一個月比的燈號；比不了 ⇒ null
+function _hlMetricLight(def, v, pv, rules) {
+  if (!_hlFinite(v) || !_hlFinite(pv)) return null;
+  const F = (rules || HEALTH_TAG_RULES).flat;
+  let d;
+  if (def.unit === 'pct') { const bp = Math.round((v - pv) * 10000); d = Math.abs(bp) < Math.round(F.rate * 10000) ? 0 : bp; }
+  else { const rel = pv !== 0 ? (v - pv) / Math.abs(pv) : (v === pv ? 0 : v > pv ? 1 : -1); d = Math.abs(rel) < F.money ? 0 : rel; }
+  if (d === 0) return 'gray';
+  return (d > 0) === (def.better !== 'down') ? 'green' : 'red';
+}
+function _hlScoreLight(s) { return s == null ? null : s >= 80 ? 'green' : s >= 60 ? 'yellow' : 'red'; }
+function _hlMetricFmt(def, v) { return v == null ? '—' : def.unit === 'pct' ? _hlFmtPct(v) : _hlFmtMoney(v); }
+// 表格本體（純函式；trend＝舊→新的 computeChannelHealth，至少 HL_MONTH_N + 1 個月才比得到第一欄的前一個月）
+function _hlMonthTableHtml(ch, trend, snap, cols, openKey) {
+  const shown = trend.slice(-HL_MONTH_N);
+  const pick = HL_MONTH_METRICS.map(d => `<label class="hl-mt-opt"><input type="checkbox" data-hl-metcol="${d.key}"${cols.indexOf(d.key) >= 0 ? ' checked' : ''}> ${escapeHtml(d.label)}</label>`).join('');
+  const defs = HL_MONTH_METRICS.filter(d => cols.indexOf(d.key) >= 0);
+  const head = `<tr><th>指標</th>${shown.map(r => `<th class="hl-num">${escapeHtml(_hlYmLabel(r.month))}</th>`).join('')}</tr>`;
+  const rows = defs.map(d => {
+    const vals = trend.map(r => _hlMetricVal(ch, r, d.key, snap));
+    const off = trend.length - shown.length;
+    const cells = shown.map((r, i) => {
+      const x = vals[off + i], pv = off + i > 0 ? vals[off + i - 1].v : null;
+      const light = d.scored ? _hlScoreLight(x.score) : _hlMetricLight(d, x.v, pv);
+      const mark = d.scored ? (x.score != null ? `<span class="hl-mc-s">${x.score} 分</span>` : '')
+        : (light ? `<span class="hl-mc-s" title="跟上個月比：${HL_LIGHT_TEXT[light]}">${HL_LIGHT_SYM[light]}</span>` : '');
+      return `<td class="hl-num hl-mc${light ? ' hl-mc-' + light : ''}">${escapeHtml(_hlMetricFmt(d, x.v))}${mark}</td>`;
+    }).join('');
+    const open = openKey === d.key;
+    return `<tr class="hl-mt-row${open ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" data-hl-met="${d.key}">
+      <th scope="row">${escapeHtml(d.label)}<span class="hl-mt-k${d.scored ? ' hl-mt-scored' : ''}">${d.scored ? '計分' : '參考'}</span></th>${cells}</tr>`;
+  }).join('');
+  const openDef = defs.find(d => d.key === openKey);
+  const chart = openDef ? `<div class="hl-mt-chart"><div class="hl-trend-hd">${escapeHtml(openDef.label)} 近 ${_HL_TREND_N} 個月（再點一次那一列收起）</div>
+      <div class="hl-trend"><canvas id="hl-trend" aria-label="${escapeHtml(openDef.label)} 近 ${_HL_TREND_N} 個月折線圖" role="img"></canvas></div></div>` : '';
+  const F = HEALTH_TAG_RULES.flat;
+  return `<section class="hl-mtable">
+      <div class="hl-mt-hd">指標逐月變化（近 ${HL_MONTH_N} 個月，最右是 ${escapeHtml(_hlYmLabel(trend[trend.length - 1].month))}）</div>
+      <div class="hl-mt-pick" role="group" aria-label="要看的指標">${pick}</div>
+      ${defs.length ? `<div class="hl-mt-wrap"><table class="hl-sub hl-mt-tbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<div class="hl-tags-msg">沒有勾選指標</div>'}
+      ${chart}
+      <div class="hl-dim-foot">計分：依該月得分上色（100／80 綠、60 黃、0 紅；標準未設定或沒資料＝空白）。參考：跟前一個月比（▲ 變好綠、● 持平灰、▼ 變差紅；廣告佔比越低越好；持平＝比率 ±${_hlPctTrim(F.rate).replace('%', '')} 個百分點、金額 ±${_hlPctTrim(F.money)} 以內）。點一列看近 ${_HL_TREND_N} 個月折線圖。</div>
+    </section>`;
+}
 // 卡片總分旁「比上月 +8」：上月沒有總分就不顯示（文字取 _hlDeltaHtml，跟指紋同一份）
 function _hlTileDeltaHtml(r, prev) {
   if (!prev || r.score == null || prev.score == null) return '';
@@ -1406,7 +1667,7 @@ function _hlTileHtml(r, prev, rank, open, snap) {
       <div class="hl-tile-hd"${tip}><span class="hl-tile-name">${escapeHtml(r.label)}</span>${tag}</div>
       <div class="hl-tile-score">${_hlScoreHtml(r)}${_hlTileDeltaHtml(r, prev)}</div>
       ${_hlTilePartsHtml(r)}
-      ${_hlTodoHtml(r, snap)}
+      ${_hlTagLineHtml(r, snap)}
       <div class="hl-tile-mets">${_hlTileMetsHtml(r, prev)}</div>
     </div>`;
 }
@@ -1585,6 +1846,8 @@ function _hlDimHtml(d, ends) {
       ${subs}
     </div>`;
 }
+// 細項卡片：總分圈 → 商品標籤兩張清單（塊 4）→ 指標逐月變化表（塊 5）。
+//   塊 4／5 拿掉「要處理的商品」（_hlDragHtml）、「看評分細節」（_hlScoreDetailHtml）與 12 個月分數走勢圖；函式都留著。已關站的通路照舊畫分數走勢。
 function _hlCardHtml(r, snap) {
   if (r.status === 'closed') {
     return `<div class="hl-card hl-card-closed">${escapeHtml(r.reason)}：不評分、不排名、不併進平均。走勢只畫到關站前一個月。
@@ -1612,12 +1875,8 @@ function _hlCardHtml(r, snap) {
         </div>
       </div>
       ${_hlProdBarHtml(ch, r.month, snap)}
-      ${_hlDragHtml(ch, r.month, snap)}
-      <details class="hl-score-more"${_hlState.scoreOpen ? ' open' : ''}><summary>看評分細節</summary>
-        ${_hlScoreDetailHtml(r)}
-      </details>
-      <div class="hl-trend-hd">近 12 個月分數走勢（當場重算；空心點＝參考分）</div>
-      <div class="hl-trend"><canvas id="hl-trend" aria-label="${escapeHtml(r.label)} 近 12 個月分數走勢" role="img"></canvas></div>
+      ${_hlTagListsHtml(ch, r.month, snap)}
+      ${ch ? _hlMonthTableHtml(ch, computeHealthTrend(ch, r.month, HL_MONTH_N + 1, snap), snap, _hlMetCols(), _hlState.metOpen) : ''}
       ${r.next.length ? `<div class="hl-next">之後加入：${escapeHtml(r.next.join('、'))}</div>` : ''}
     </div>`;
 }
@@ -1670,7 +1929,7 @@ function _hlProdBarHtml(ch, month, snap) {
   if (st !== 'idle' && st !== 'timeout') return '';
   const label = st === 'timeout' ? '重新載入商品資料' : '載入商品資料';
   const why = st === 'timeout' ? HL_TIMEOUT_MSG + '。' : (_hlIsNarrow() ? '手機上不會自動載入商品層資料（資料量大）。' : '商品層資料還沒開始載入。');
-  return `<div class="hl-prodbar"><span>${escapeHtml(why)}廣告效率、商品結構、拖累商品要用到。</span>
+  return `<div class="hl-prodbar"><span>${escapeHtml(why)}動銷率分數、商品標籤要用到。</span>
       <button type="button" class="btn-ghost hl-load-btn" data-hl-act="loadprod" data-hl-platform="${escapeHtml(ch.prod.platform)}">${label}</button></div>`;
 }
 // 要處理的商品（塊 3c）＋連續零動銷（另列、不算金額）。點品號跳淨利表該通路該月、搜尋那個商品。
@@ -1745,6 +2004,28 @@ function _hlDrawChart() {
     const old = typeof Chart.getChart === 'function' ? Chart.getChart(cv) : null;
     if (old) old.destroy();
     const tr = computeHealthTrend(ch, _hlLast.month, _HL_TREND_N, _hlLast.snap);
+    // 塊 5：月份變化表點開的那一列 ⇒ 畫那個指標近 12 個月的數值（同一張 canvas、同一套樣式）
+    const metDef = cv.closest && cv.closest('.hl-mt-chart') ? HL_MONTH_METRICS.find(d => d.key === _hlState.metOpen) : null;
+    if (metDef) {
+      const color = _hlCssVar('--primary'), muted = _hlCssVar('--text-muted'), grid = _hlCssVar('--border');
+      const ys = tr.map(r => { const v = _hlMetricVal(ch, r, metDef.key, _hlLast.snap).v; return v == null ? null : (metDef.unit === 'pct' ? Math.round(v * 1000) / 10 : Math.round(v)); });
+      const fmt = y => (y == null ? '沒有資料' : metDef.unit === 'pct' ? y.toFixed(1) + '%' : _hlFmtMoney(y));
+      _hlChart = new Chart(cv.getContext('2d'), {
+        type: 'line',
+        data: { labels: tr.map(r => _hlYmLabel(r.month)), datasets: [{ label: metDef.label, data: ys, borderColor: color || undefined, backgroundColor: color || undefined,
+          borderWidth: 2.5, spanGaps: false, tension: 0.2, pointRadius: 3 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => metDef.label + '：' + fmt(c.parsed.y) } } },
+          scales: {
+            x: { ticks: { color: muted || undefined, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+            y: { ticks: { color: muted || undefined, callback: v => fmt(v) }, grid: { color: grid || undefined } },
+          },
+        },
+      });
+      return;
+    }
     const labels = tr.map(r => _hlYmLabel(r.month));
     // 面向線條的顏色依序取 :root 變數（不寫死色碼）；總分用主色
     const DIM_COLORS = ['--success', '--warn', '--info', '--text-muted'];
@@ -1882,6 +2163,9 @@ function _hlOnClick(e) {
   }
   const kpi = e.target.closest && e.target.closest('[data-hl-kpi]');
   if (kpi) { _hlGoKpi(kpi.dataset.hlKpi); return; }
+  if (e.target.closest && e.target.closest('.hl-mt-pick')) return;   // 勾選指標：交給 change 事件
+  const met = e.target.closest && e.target.closest('[data-hl-met]');
+  if (met) { _hlToggleMet(met.dataset.hlMet); return; }
   const todo = e.target.closest && e.target.closest('[data-hl-todo]');
   if (todo) { _hlOpenTodo(todo.dataset.hlTodo); return; }
   // 「看評分細節」：記住展開與否，整頁重畫（資料更新）時不會自己收起來
@@ -1901,6 +2185,11 @@ function _hlToggle(id) {
   _hlState.open = _hlState.open === id ? null : id;
   App.render();
 }
+// 月份變化表：點一列展開／收起那個指標的 12 個月折線圖
+function _hlToggleMet(key) {
+  _hlState.metOpen = _hlState.metOpen === key ? null : key;
+  App.render();
+}
 // 拖累清單 → 淨利表（profit.js __profitOpenAt：切通路／整月、搜尋那個商品；不寫持久狀態）
 function _hlGoProfit(d) {
   if (typeof window.__profitOpenAt !== 'function') { if (typeof window.showToast === 'function') window.showToast('淨利表還沒載入，請重新整理頁面', 'error'); return; }
@@ -1918,7 +2207,7 @@ function _hlOpenTodo(id) {
 function _hlScrollPending() {
   if (_hlState.scrollTo !== 'drag') return;
   if (!_hlProd.running) _hlState.scrollTo = null;
-  const el = document.querySelector('.hl-tile-detail .hl-drag');
+  const el = document.querySelector('.hl-tile-detail .hl-tags');   // 塊 4：捲到商品標籤清單（以前是「要處理的商品」）
   // 用直接跳（不用 smooth）：重畫會換掉整頁 HTML，平滑捲動做到一半會被打斷
   if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start' });
 }
@@ -1926,6 +2215,12 @@ function _hlOnKeydown(e) {
   if (App.route !== 'health' || (e.key !== 'Enter' && e.key !== ' ')) return;
   const todo = e.target.closest && e.target.closest('[data-hl-todo]');
   if (todo && e.target === todo) { e.preventDefault(); _hlOpenTodo(todo.dataset.hlTodo); return; }
+  const met = e.target.closest && e.target.closest('[data-hl-met]');
+  if (met && e.target === met) {
+    e.preventDefault(); const k = met.dataset.hlMet; _hlToggleMet(k);
+    const again = document.querySelector(`[data-hl-met="${CSS.escape(k)}"]`); if (again) again.focus();
+    return;
+  }
   const row = e.target.closest && e.target.closest('[data-hl-row]');
   if (!row || e.target !== row) return;
   e.preventDefault();
@@ -1935,6 +2230,8 @@ function _hlOnKeydown(e) {
 }
 function _hlOnChange(e) {
   if (App.route !== 'health') return;
+  const col = e.target.closest && e.target.closest('[data-hl-metcol]');
+  if (col) { _hlSetMetCol(col.dataset.hlMetcol, !!col.checked); if (!col.checked && _hlState.metOpen === col.dataset.hlMetcol) _hlState.metOpen = null; App.render(); return; }
   const sel = e.target.closest && e.target.closest('[data-hl-month]');
   if (!sel || !_hlIsYm(sel.value)) return;
   _hlState.month = sel.value;
@@ -2094,6 +2391,23 @@ window.__healthBacktest = function (opts) {
   }
   return res;
 };
+// 商品標籤（塊 4，只讀）：__healthTags('2026-10', 'momo-jia' 或 '好麻吉')。直接向轉接層要這個月與前 3 個月的商品資料（不經畫面的排隊），
+//   回 healthProductTags 的結果：good／bad（前 10）、goodN／badN、items（每個商品帶 rev／prevRev／profit／prevProfit／gm／gmAvg／gmPrev／revG／tags）。
+//   平台的商品資料要先載入（電腦打開健檢頁會自動載；或先 await __healthLoadProducts('momo')）。
+window.__healthTags = function (month, id) {
+  const ch = HEALTH_CHANNELS.find(c => c.id === id || c.label === id);
+  if (!ch) { console.warn('[health] 找不到通路：' + id + '。可用：' + HEALTH_CHANNELS.map(c => `${c.id}（${c.label}）`).join('、')); return null; }
+  if (!_hlIsYm(month)) { console.warn('[health] 月份要寫成 YYYY-MM'); return null; }
+  if (!ch.prod) return { status: 'na', reason: '這個通路沒有商品層資料' };
+  if (!_hlMock && _hlProd.state[ch.prod.platform] !== 'ready') { console.warn(`[health] ${_HL_PLATFORM_LABEL[ch.prod.platform]} 商品資料還沒載入：先打開健檢頁等載完，或 await __healthLoadProducts('${ch.prod.platform}')`); return null; }
+  const src = _hlProdSource(), prod = {};
+  for (let i = 0; i <= HEALTH_TAG_RULES.gm.window; i++) {
+    const m = _hlAddMonth(month, -i), k = _hlProdKey(ch.prod.platform, ch.prod.shop, m);
+    try { prod[k] = m < HEALTH_RULES.firstMonth ? { status: 'none', rows: [], lastAdjust: {} } : _hlProdNormalize(src.snapshot(ch.prod.platform, ch.prod.shop, m)); }
+    catch (e) { prod[k] = _hlProdNormalize({ error: String((e && e.message) || e) }); }
+  }
+  return healthProductTags(ch, month, { prod, prodState: { [ch.prod.platform]: 'ready' } });
+};
 // 塊 B 門檻校準提案（只讀，方案 §2-7-2）：用已載入的商品層跑回測，依 HEALTH_CALIB 算每個「類型 × 子指標」的建議零分線／滿分線。
 //   印兩張表（提案、現行 vs 建議中位分），最後一段 Markdown 可以整段複製貼回。只是提案：不會改 HEALTH_RULES。
 window.__healthCalibrate = function (opts) {
@@ -2183,7 +2497,8 @@ function _hlMockProdSnapshot(p, s, m) {
     out.rows = Array.from({ length: 60 }, (_, i) => {
       const sold = on && (i + mi) % 4 !== 0, rev = sold ? 1500 + ((i * 373 + si * 11) % 9000) : 0;
       return { key: '1' + String(100000 + i * 37 + si), origin: i % 19 === 0 ? 'TEMP' + i : `H${300 + Math.floor(i / 2)}-0${(i % 2) + 1}`, name: 'MOMO 假商品 ' + i,
-        rev, profit: Math.round(rev * (((i % 10) - 2) / 20)), qty: sold ? 1 + (i % 6) : 0, sold, active: i % 13 !== 0, costKnown: i % 17 !== 0 };
+        rev, profit: Math.round(rev * (((i % 10) - 2) / 20)), qty: sold ? 1 + (i % 6) : 0, sold, active: i % 13 !== 0, costKnown: i % 17 !== 0,
+        cost: Math.round(rev * (0.45 + ((i * 3 + mi) % 8) * 0.01)) };   // 毛利率每月 47%～55% 之間變動（商品標籤的毛利率燈用）
     });
     out.recon = on && m <= '2026-09';
     if (on) out.lastAdjust = { [out.rows[2].key]: m.replace('-', '/') + '/20' };
@@ -2192,7 +2507,8 @@ function _hlMockProdSnapshot(p, s, m) {
     out.rows = on ? Array.from({ length: 30 }, (_, i) => {
       const sold = (i + mi) % 3 !== 0, rev = sold ? 2000 + ((i * 911) % 7000) : 0, ck = i % 7 !== 0;
       return { key: `F${200 + Math.floor(i / 3)}-${10 + (i % 3)}`, sub: i % 4 === 0 ? '寄倉' : '轉單', pages: [`DGAB-${Math.floor(i / 2)}`], name: 'PChome 假商品 ' + i,
-        rev, profit: ck ? Math.round(rev * (((i % 8) - 2) / 16)) : null, qty: sold ? 1 + (i % 4) : 0, sold, active: i % 11 !== 0, costKnown: ck };
+        rev, profit: ck ? Math.round(rev * (((i % 8) - 2) / 16)) : null, qty: sold ? 1 + (i % 4) : 0, sold, active: i % 11 !== 0, costKnown: ck,
+        cost: ck ? Math.round(rev * (0.5 + ((i * 5 + mi) % 7) * 0.01)) : null };
     }) : [];
     ['轉單', '寄倉'].forEach(sub => { const rs = out.rows.filter(r => r.sub === sub); out.subTotals[sub] = { sold: rs.filter(r => r.sold).length, total: rs.filter(r => r.active || r.sold).length }; });
   }
