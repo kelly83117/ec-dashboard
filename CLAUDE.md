@@ -238,7 +238,7 @@ ESM 有個致命陷阱必須牢記：
 - 通路健檢（路由 `health`，js/pages/health.js，方案 docs/plan-channel-health.md）——**純讀取頁，不存任何資料、沒有雲端物件**。
   KPI 月結經 profit.js 的唯讀轉接 `window.__healthKpiSnapshot(months)`（口徑＝KPI 頁 `_kpiShopCalc` / `_kpiRealRev` / `_kpiCommonColTotals`）。
   商品層（塊 B：蝦皮廣告效率、蝦皮／MOMO／PChome 商品結構與拖累商品）經 profit.js 的 `__healthLoadProducts(平台)`＋`__healthProductSnapshot(平台, 通路, 月)`，
-  🔴 **電腦寬度開頁就在背景「依序」載入**蝦皮 → MOMO → PChome（一次一個平台）；**手機寬度（≤768px）不自動載**，改成卡片裡的「載入商品資料」按鈕（約 10MB，手機會爆）。
+  🔴 **電腦寬度開頁就在背景「依序」載入**MOMO → PChome → 蝦皮（一次一個平台；v5 起蝦皮商品層只用在待處理商品、不影響分數，排最後）；**手機寬度（≤768px）不自動載**，改成卡片裡的「載入商品資料」按鈕（約 10MB，手機會爆）。
   商品層還沒載好的通路**不給總分、不排名**（分數不得因有沒有展開卡片而改變）。就緒＝雲端快照真的到了＋資料更新事件安靜 3 秒；
   **不放棄**：健檢頁一直等（60 秒起顯示「仍在載入（已等 N 秒）」，5 分鐘起加「請先進淨利表點一下再回來」），到了自動重算。
   🔴 **載入期間不重算**（更新事件只記「待重算」，平台到齊才各算一次），重算一次一份、用 requestIdleCallback 讓出主執行緒；Console 印 `[health] …重算 X ms`。
