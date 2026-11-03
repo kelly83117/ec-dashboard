@@ -223,15 +223,15 @@ ESM 有個致命陷阱必須牢記：
 - `app/inventory` — 庫存（取代 Google 試算表「元創數位公司庫存&MOMO庫存統計表」），**不放 app/main**。透過 `window.__cloudInventory`：
   讀 `subscribe(cb, onErr)` / `getDoc()`；寫只有 `writePaths(pairs)`（同 `__cloudKpi` 的 FieldPath 逐格寫入、共用 `kpiWriteTo`），
   成功回 `{ ok:true }`，被唯讀 / 本機防護擋下回 `undefined` → 呼叫端 `r && r.ok`，再讀回比對。
-  形狀 `{ schema:1, months:{ 'YYYY-MM':{ companyWh, inTransit, momoWh, coupangWh, pchomeWh, countNoteShopee, countNoteMomo,
-  countNoteCoupang, countNotePchome, orderAmount, note, createdAt, createdBy, updatedAt, updatedBy } } }`（五個倉與叫貨金額是數字或 null；四個盤點欄、備註是字串；
-  `coupangWh` / `pchomeWh` / `countNoteCoupang` / `countNotePchome` 是 2026-11 加的，2026 以前的月份留空、不補 0）。
+  形狀 `{ schema:1, months:{ 'YYYY-MM':{ companyWh, inTransit, momoWh, coupangWh, pchomeWh, booksWh, countNoteShopee, countNoteMomo,
+  countNoteCoupang, countNotePchome, orderAmount, note, createdAt, createdBy, updatedAt, updatedBy } } }`（六個倉與叫貨金額是數字或 null；四個盤點欄、備註是字串；
+  `coupangWh` / `pchomeWh` / `booksWh`（博客來）/ `countNoteCoupang` / `countNotePchome` 是 2026-11 加的，2026 以前的月份留空、不補 0）。
   另有自動填入的來源標記 `momoWhSrc` / `countNoteMomoSrc`（上傳 F1102 後寫入，`src:'F1102'`；手動改後變 `src:'manual'`）。
   每次只寫改到的那一格＋該月 `updatedAt` / `updatedBy`；清空數字＝寫 null（不刪欄位）；**不能刪除月份**。
-  **總計、較上月不存**，一律即時算（js/pages/inventory.js `_invTotal` / `_invDiff`）：總計＝公司倉＋在途存貨＋MOMO倉＋酷澎倉＋PChome倉，空白當 0（用「分」整數加總）；
-  **填了多少就加總多少**：不等其他倉填完，隨時看得到最新數字；五格都空白 ⇒ 總計空白。
+  **總計、較上月不存**，一律即時算（js/pages/inventory.js `_invTotal` / `_invDiff`）：總計＝公司倉＋在途存貨＋MOMO倉＋酷澎倉＋PChome倉＋博客來倉，空白當 0（用「分」整數加總）；
+  **填了多少就加總多少**：不等其他倉填完，隨時看得到最新數字；六格都空白 ⇒ 總計空白。
   較上月＝本月總計 − 上一個日曆月總計，任一邊空白（或沒有那個月）⇒ 不算。
-  上方卡片的「本月」與走勢圖終點：`_invLatestYm`＝最新一個總計有數字（五個倉任一格有數字）的月份。
+  上方卡片的「本月」與走勢圖終點：`_invLatestYm`＝最新一個總計有數字（六個倉任一格有數字）的月份。
   🔴 財務儀表板之後改讀這份文件時要用**同一條規則**，改規則兩邊一起改。財務儀表板目前仍讀舊的 Google 試算表，沒動。
   頁面是獨立路由 `inventory`（**不是部門**，不碰 `ec.departments` / `canAccessOffice`）：所有登入者可看、非 view 可編輯。
   本機測試用 `__inventoryMock(true)`（空資料）或 `__inventoryMock('demo')`（假資料），只在 localhost 生效、資料只在記憶體。

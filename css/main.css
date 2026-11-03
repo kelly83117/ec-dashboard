@@ -2579,21 +2579,21 @@
   box-shadow: var(--shadow-sm);
 }
 /* 固定欄寬（<colgroup> 的 .inv-col-*）：目標＝內容區 ≥ 約 1050px 時沒有左右捲軸（側欄展開時 1366px 以上的螢幕；側欄收起的 1280px 也夠）。
-   月份 70 + 公司 94 + 在途 82 + MOMO 80 + 酷澎 78 + PChome 78 + 總計 90 + 較上月 94 + 盤點 56＋68（MOMO，第二行含「!」）＋56＋58（PChome）+ 叫貨 82 + 備註（至少 60）≈ 1046px。
-   月份、公司比別欄寬一點（數字不要貼著月份）；酷澎／PChome／MOMO 值小，窄一點。表頭標題不寫「倉」、不放「自動」小字、盤點標題拆兩行，欄位才縮得下。
-   整張表最窄 1046px；更窄才由 .inv-table-wrap 左右捲動。
+   月份 66 + 公司 84 + 在途 76 + MOMO 76 + 酷澎 72 + PChome 72 + 博客來 72 + 總計 84 + 較上月 92 + 盤點 50＋66（MOMO，第二行含「!」）＋50＋54（PChome）+ 叫貨 76 + 備註（至少 60）≈ 1050px。
+   公司比別欄寬一點（數字不要貼著月份）；酷澎／PChome／博客來值小，窄一點。表頭標題不寫「倉」、不放「自動」小字、盤點標題拆兩行，欄位才縮得下。
+   整張表最窄 1050px；更窄才由 .inv-table-wrap 左右捲動。
    ⚠ 數字格最多容得下 9 個字元（例如 8,095,624）；單一倉位超過 1,000 萬會被截，到時要加寬對應的欄。 */
-.inv-table { width: 100%; min-width: 1046px; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
-.inv-col-ym { width: 70px; }
-.inv-col-num { width: 82px; }
-.inv-col-num.inv-col-num-co { width: 94px; }
-.inv-col-num.inv-col-num-momo { width: 80px; }
-.inv-col-num.inv-col-num-sm { width: 78px; }
-.inv-col-num.inv-col-num-total { width: 90px; }
-.inv-col-num.inv-col-num-diff { width: 94px; }
-.inv-col-cnt { width: 56px; }
-.inv-col-cnt.inv-col-cnt-auto { width: 68px; }
-.inv-col-cnt.inv-col-cnt-pc { width: 58px; }
+.inv-table { width: 100%; min-width: 1050px; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.inv-col-ym { width: 66px; }
+.inv-col-num { width: 76px; }
+.inv-col-num.inv-col-num-co { width: 84px; }
+.inv-col-num.inv-col-num-momo { width: 76px; }
+.inv-col-num.inv-col-num-sm { width: 72px; }
+.inv-col-num.inv-col-num-total { width: 84px; }
+.inv-col-num.inv-col-num-diff { width: 92px; }
+.inv-col-cnt { width: 50px; }
+.inv-col-cnt.inv-col-cnt-auto { width: 66px; }
+.inv-col-cnt.inv-col-cnt-pc { width: 54px; }
 /* .inv-col-note 不設寬度：拿剩下的 */
 .inv-table th, .inv-table td { padding: 0; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
 .inv-table thead th {
@@ -2612,7 +2612,7 @@
 /* 表頭跟著該欄內容的對齊方向：
      數字欄靠右、右內縮 16px＝數字輸入框文字的位置（1px 邊框＋15px padding-right，見 .inv-in-num）、＝總計／較上月 td 的 16px；
      兩個盤點欄置中（th 與輸入框左右 padding 都對稱，中心點自然重合）；備註靠左、左內縮 11px＝輸入框文字（1px 邊框＋10px padding）。 */
-.inv-table thead th.inv-th-num { padding-left: 4px; padding-right: 16px; }
+.inv-table thead th.inv-th-num { padding-left: 2px; padding-right: 11px; }
 .inv-table thead th.inv-th-cnt { text-align: center; padding-left: 2px; padding-right: 2px; }
 .inv-table thead th .inv-th-l { display: block; }
 /* 自動填入（F1102）的格子：右上角一顆小圓點，來源說明在輸入框 title */
@@ -2633,7 +2633,7 @@
   font-size: 10px;
   font-weight: 600;
 }
-.inv-table th.inv-ym { padding: 6px 10px; text-align: left; font-weight: 600; }
+.inv-table th.inv-ym { padding: 6px 8px; text-align: left; font-weight: 600; }
 .inv-year-row th { padding: 0; background: var(--primary-soft); text-align: left; }
 .inv-year-btn {
   width: 100%;
@@ -2652,7 +2652,7 @@
 /* 總計、較上月：跟輸入格同字級、不加粗（第 3 塊起；原本 600 看起來跟其他數字欄大小不一） */
 /*   選擇器要寫成 .inv-table td.inv-auto：只寫 .inv-auto 權重比 .inv-table td { padding:0 } 低，padding 會被蓋成 0（v805 實測）；
      右內縮 16px 跟數字輸入框文字、表頭對齊。紅綠色的規則也跟著提高權重，不然會被這條的 color 蓋掉。 */
-.inv-table td.inv-auto { padding: 6px 12px; text-align: right; color: var(--text); font-size: 13px; font-weight: 400; }
+.inv-table td.inv-auto { padding: 6px 11px; text-align: right; color: var(--text); font-size: 13px; font-weight: 400; }
 .inv-table td.inv-auto.inv-neg { color: var(--danger); }
 .inv-table td.inv-auto.inv-pos { color: var(--success); }
 .inv-in {
@@ -2668,7 +2668,7 @@
   font-variant-numeric: tabular-nums;
 }
 /* 數字輸入框：文字右邊界＝1px 邊框＋15px＝16px，跟表頭、總計／較上月對齊，也跟右邊下一欄的文字拉開距離 */
-.inv-in-num { text-align: right; padding-left: 4px; padding-right: 12px; }
+.inv-in-num { text-align: right; padding-left: 2px; padding-right: 10px; }
 /* 兩個盤點欄：內容置中（表頭 .inv-th-cnt 也置中） */
 .inv-in-cnt { text-align: center; padding-left: 2px; padding-right: 2px; }
 /* 輸入框不設 min-width：欄寬由 <colgroup> 決定（固定欄寬），min-width 只會讓輸入框超出格子 */
@@ -2678,8 +2678,12 @@
 .inv-in.inv-invalid { border-color: var(--danger); background: var(--danger-soft); }
 .inv-in.inv-saving { color: var(--text-muted); }
 /* 第 2 塊：4 張卡（沿用 .stat-card）＋最近盤點小字＋折線圖 */
-.inv-stat-grid { margin-bottom: 8px; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }   /* 6 張卡（總庫存＋五個倉）：視窗 ≥1750px（內容區 ≥約 1400px，大字 28px 才放得下 9 位數）一排六張，否則 3×2（更窄由全站 stat-grid 規則收 2／1 欄） */
-@media (max-width: 1749px) { .inv-stat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* 卡片 7 張：上排 3 張（本月總庫存、公司倉、在途存貨）、下排 4 張（MOMO／酷澎／PChome／博客來倉）。12 欄格線：上排每張佔 4、下排每張佔 3。
+   手機寬度沿用全站 stat-grid 規則（2 欄／1 欄，那邊用 !important），這裡把跨欄取消。 */
+.inv-stat-grid { margin-bottom: 8px; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; }
+.inv-stat-grid .inv-stat:nth-child(-n+3) { grid-column: span 4; }
+.inv-stat-grid .inv-stat:nth-child(n+4) { grid-column: span 3; }
+@media (max-width: 768px) { .inv-stat-grid .inv-stat { grid-column: auto !important; } }
 .inv-stat .stat-value { font-variant-numeric: tabular-nums; }
 .inv-stat-ym {
   margin-left: 6px;
@@ -2718,6 +2722,7 @@
 .inv-series-momoWh::before { background: var(--success); }
 .inv-series-coupangWh::before { background: var(--danger); }
 .inv-series-pchomeWh::before { background: var(--sidebar-2); }
+.inv-series-booksWh::before { background: var(--text-muted); }
 .inv-chart-box { position: relative; height: 260px; }
 .inv-chart-fail {
   display: flex; align-items: center; justify-content: center;
