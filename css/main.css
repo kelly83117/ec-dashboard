@@ -2578,22 +2578,24 @@
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }
-/* 固定欄寬（<colgroup> 的 .inv-col-*）：目標＝內容區 ≥ 約 1050px 時沒有左右捲軸（側欄展開時 1366px 以上的螢幕；側欄收起的 1280px 也夠）。
-   月份 66 + 公司 84 + 在途 76 + MOMO 76 + 酷澎 72 + PChome 72 + 博客來 72 + 總計 84 + 較上月 92 + 盤點 50＋66（MOMO，第二行含「!」）＋50＋54（PChome）+ 叫貨 76 + 備註（至少 60）≈ 1050px。
+/* 固定欄寬（<colgroup> 的 .inv-col-*）：目標＝內容區 ≥ 約 1052px 時沒有左右捲軸（側欄展開時 1366px 以上的螢幕；側欄收起的 1280px 也夠）。
+   月份 64 + 公司 82 + 在途 76 + MOMO 76 + 酷澎／PChome／博客來 66×3 + 總計 84 + 較上月 92 + 盤點 46（蝦皮）＋66（MOMO，第二行含「!」）＋46（酷澎）＋58（PChome）＋48（博客來）+ 叫貨 76 + 備註（至少 40）≈ 1052px。
+   備註是唯一沒指定寬度的欄、拿剩下的；整張表另外限制最寬 1130px（備註最多約 120px），寬螢幕不會把備註撐大、右側留白。
    公司比別欄寬一點（數字不要貼著月份）；酷澎／PChome／博客來值小，窄一點。表頭標題不寫「倉」、不放「自動」小字、盤點標題拆兩行，欄位才縮得下。
-   整張表最窄 1050px；更窄才由 .inv-table-wrap 左右捲動。
-   ⚠ 數字格最多容得下 9 個字元（例如 8,095,624）；單一倉位超過 1,000 萬會被截，到時要加寬對應的欄。 */
-.inv-table { width: 100%; min-width: 1050px; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
-.inv-col-ym { width: 66px; }
+   整張表最窄 1052px；更窄才由 .inv-table-wrap 左右捲動。
+   ⚠ 數字格最多容得下 9 個字元（例如 8,095,624）；酷澎／PChome／博客來只容得下 7 個字元（999,999），超過要加寬對應的欄。 */
+.inv-table { width: 100%; min-width: 1052px; max-width: 1130px; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.inv-col-ym { width: 64px; }
 .inv-col-num { width: 76px; }
-.inv-col-num.inv-col-num-co { width: 84px; }
+.inv-col-num.inv-col-num-co { width: 82px; }
 .inv-col-num.inv-col-num-momo { width: 76px; }
-.inv-col-num.inv-col-num-sm { width: 72px; }
+.inv-col-num.inv-col-num-sm { width: 66px; }
 .inv-col-num.inv-col-num-total { width: 84px; }
 .inv-col-num.inv-col-num-diff { width: 92px; }
-.inv-col-cnt { width: 50px; }
+.inv-col-cnt { width: 46px; }
 .inv-col-cnt.inv-col-cnt-auto { width: 66px; }
-.inv-col-cnt.inv-col-cnt-pc { width: 54px; }
+.inv-col-cnt.inv-col-cnt-pc { width: 58px; }
+.inv-col-cnt.inv-col-cnt-bk { width: 48px; }
 /* .inv-col-note 不設寬度：拿剩下的 */
 .inv-table th, .inv-table td { padding: 0; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
 .inv-table thead th {

@@ -4,8 +4,8 @@
  *   但【不是部門】：路由 'inventory'（不走 office-），所以不碰 ec.departments / canAccessOffice / OFFICE_FEATURES。
  * 資料：Firestore 文件 app/inventory，經 window.__cloudInventory（firebase.js）讀寫，不進 Store / app/main。
  *   { schema:1, months:{ 'YYYY-MM':{ companyWh, inTransit, momoWh, coupangWh, pchomeWh, booksWh, countNoteShopee, countNoteMomo,
- *     countNoteCoupang, countNotePchome, orderAmount, note, createdAt, createdBy, updatedAt, updatedBy } } }
- *   （coupangWh / pchomeWh / booksWh（博客來）/ countNoteCoupang / countNotePchome 是 2026-11 加的；2026 以前的月份留空、不補 0）
+ *     countNoteCoupang, countNotePchome, countNoteBooks, orderAmount, note, createdAt, createdBy, updatedAt, updatedBy } } }
+ *   （coupangWh / pchomeWh / booksWh（博客來）/ countNoteCoupang / countNotePchome / countNoteBooks 是 2026-11 加的；2026 以前的月份留空、不補 0）
  *   寫入只送有變的那一格：writePaths([[['months',月,欄位],值], [['months',月,'updatedAt'],TS], [['months',月,'updatedBy'],{…}]])，
  *   兩人同時改不同格不互蓋。清空數字＝寫 null（不刪欄位）。不能刪除月份。
  * 總計、較上月一律即時算、不存（_invTotal / _invDiff）：
@@ -27,7 +27,7 @@
  *   只在記憶體；切換時只重畫圖表。
  * 第 3 塊：匯入舊 Google 試算表，Console 打 __inventoryImportLegacy()（只限管理員；先預覽，再 { commit: true } 才寫）。
  *   資料不進程式碼；匯入的月份多 source:'legacy-sheet'、legacyRow 兩個欄位（畫面不顯示）。
- * 盤點欄只留日期：四個盤點欄（蝦皮／MOMO／酷澎／PChome）存檔時先經過 _invCleanCountNote（「蝦皮04/30填」→「4/30」，整理不了照原文存）；
+ * 盤點欄只留日期：五個盤點欄（蝦皮／MOMO／酷澎／PChome／博客來）存檔時先經過 _invCleanCountNote（「蝦皮04/30填」→「4/30」，整理不了照原文存）；
  *   舊資料用 Console 打 __inventoryCleanCountNotes()（只限管理員；先預覽，再 { commit: true } 才寫）。
  */
 const App = window.App;
@@ -52,6 +52,7 @@ const INV_COLS = Object.freeze([
   { k: 'countNoteMomo',   l: '盤點（MOMO）', t: 'txt' },
   { k: 'countNoteCoupang', l: '盤點（酷澎）', t: 'txt' },
   { k: 'countNotePchome', l: '盤點（PChome）', t: 'txt' },
+  { k: 'countNoteBooks', l: '盤點（博客來）', t: 'txt' },
   { k: 'orderAmount',     l: '叫貨金額',     t: 'num' },
   { k: 'note',            l: '備註',         t: 'txt' },
 ]);
@@ -72,7 +73,7 @@ const INV_GUIDE = Object.freeze([
   { h: '各欄怎麼填', ol: [
     '公司倉、在途存貨、MOMO倉、酷澎倉、PChome倉、博客來倉：填當月月底的庫存金額（數字）。',
     '叫貨金額：填當月新增叫貨的總金額（數字）。',
-    '盤點（蝦皮）、盤點（MOMO）、盤點（酷澎）、盤點（PChome）：只填日期，例如 10/1。打「蝦皮10/1填」「酷澎11/2」也會自動整理成日期（各欄只會去掉自己通路的名字）。',
+    '盤點（蝦皮）、盤點（MOMO）、盤點（酷澎）、盤點（PChome）、盤點（博客來）：只填日期，例如 10/1。打「蝦皮10/1填」「酷澎11/2」也會自動整理成日期（各欄只會去掉自己通路的名字）。',
     '備註：自由填。',
     '點格子直接改，Enter 存檔、Esc 取消。',
   ] },
@@ -194,7 +195,7 @@ function _invCur(months, ym, f) {
 //   剩下不是 M/D（例如「失真」「13/1」）⇒ 原文不改（只去頭尾空白）、ok:false（無法整理）。
 //   開頭是【另一個】通路名（資料可能放錯欄，例如蝦皮欄的「MO 9/30」）不會被剝掉，剩下的就不是 M/D ⇒ 自然落到「無法整理」，不必另外判斷。
 //   空白 ⇒ { v:'', ok:true }。D 不檢查大小月（2/30 照樣整理），只是備註、沒有年份可判斷閏年。
-const INV_CN_OWN = { shopee: /^蝦皮[\s\u3000:：]*/, momo: /^(momo|mo)[\s\u3000:：]*/i, coupang: /^(酷澎|coupang)[\s\u3000:：]*/i, pchome: /^(pchome|pc)[\s\u3000:：]*/i };
+const INV_CN_OWN = { shopee: /^蝦皮[\s\u3000:：]*/, momo: /^(momo|mo)[\s\u3000:：]*/i, coupang: /^(酷澎|coupang)[\s\u3000:：]*/i, pchome: /^(pchome|pc)[\s\u3000:：]*/i, books: /^(博客來|books)[\s\u3000:：]*/i };
 function _invCleanCountNote(s, ch) {
   const orig = String(s == null ? '' : s).replace(/^[\s\u3000]+|[\s\u3000]+$/g, '');
   if (orig === '') return { v: '', ok: true };
@@ -203,7 +204,7 @@ function _invCleanCountNote(s, ch) {
   if (m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31) return { v: (+m[1]) + '/' + (+m[2]), ok: true };
   return { v: orig, ok: false };
 }
-const INV_CN_FIELDS = Object.freeze({ countNoteShopee: 'shopee', countNoteMomo: 'momo', countNoteCoupang: 'coupang', countNotePchome: 'pchome' });
+const INV_CN_FIELDS = Object.freeze({ countNoteShopee: 'shopee', countNoteMomo: 'momo', countNoteCoupang: 'coupang', countNotePchome: 'pchome', countNoteBooks: 'books' });
 function _invDecide(col, raw, cur, fromBlur) {
   let t = String(raw == null ? '' : raw).trim();
   if (col.t === 'num') {
@@ -422,7 +423,7 @@ function _invTableHtml(months, ro) {
   };
   const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}"${INV_AUTO_COL_TIP[c.k] ? ` title="${escapeHtml(INV_AUTO_COL_TIP[c.k])}"` : ''}>${thLabel(c)}</th>`).join('')}</tr>`;
   // 固定欄寬（css .inv-table 是 table-layout:fixed）：月份、九個數字欄、四個盤點各有寬度，備註拿剩下的；整張表最窄約 1052px（視窗內容區 ≥ 此寬就不會有左右捲軸）
-  const colCls = c => (c.k === 'note' ? 'inv-col-note' : c.t === 'txt' ? (INV_AUTO_HEAD[c.k] ? 'inv-col-cnt inv-col-cnt-auto' : c.k === 'countNotePchome' ? 'inv-col-cnt inv-col-cnt-pc' : 'inv-col-cnt') : (c.k === '_total' ? 'inv-col-num inv-col-num-total' : c.k === '_diff' ? 'inv-col-num inv-col-num-diff' : c.k === 'companyWh' ? 'inv-col-num inv-col-num-co' : c.k === 'momoWh' ? 'inv-col-num inv-col-num-momo' : (c.k === 'coupangWh' || c.k === 'pchomeWh' || c.k === 'booksWh') ? 'inv-col-num inv-col-num-sm' : 'inv-col-num'));   // 表頭有「自動」標籤＋「!」的盤點欄（MOMO）要寬一點
+  const colCls = c => (c.k === 'note' ? 'inv-col-note' : c.t === 'txt' ? (INV_AUTO_HEAD[c.k] ? 'inv-col-cnt inv-col-cnt-auto' : c.k === 'countNotePchome' ? 'inv-col-cnt inv-col-cnt-pc' : c.k === 'countNoteBooks' ? 'inv-col-cnt inv-col-cnt-bk' : 'inv-col-cnt') : (c.k === '_total' ? 'inv-col-num inv-col-num-total' : c.k === '_diff' ? 'inv-col-num inv-col-num-diff' : c.k === 'companyWh' ? 'inv-col-num inv-col-num-co' : c.k === 'momoWh' ? 'inv-col-num inv-col-num-momo' : (c.k === 'coupangWh' || c.k === 'pchomeWh' || c.k === 'booksWh') ? 'inv-col-num inv-col-num-sm' : 'inv-col-num'));   // 表頭有「自動」標籤＋「!」的盤點欄（MOMO）要寬一點
   const cols = `<colgroup><col class="inv-col-ym">${INV_COLS.map(c => `<col class="${colCls(c)}">`).join('')}</colgroup>`;
   const body = years.map((y, rank) => {
     const open = _invYearOpenOf(y, rank);
@@ -1223,7 +1224,7 @@ window.__inventoryImportLegacy = function (opts) {
  * 只寫「會改」的格子：每格只送那一個欄位路徑，每個有寫到的月份各加一組 updatedAt / updatedBy；不動 createdAt / createdBy、不動其他欄位。
  * 依年份分批；每批寫入前用雲端現值重比，跟預覽時的「改前」不同（有人剛改過）就跳過並列出，不蓋掉；寫完用 _invDocData（estimate）讀回逐格比對。
  * 寫入前先清掉預覽（連按兩次只寫一次）；切換模擬 / 雲端時清掉預覽（__inventoryMock）。 */
-const INV_CN_LABEL = { countNoteShopee: '盤點（蝦皮）', countNoteMomo: '盤點（MOMO）', countNoteCoupang: '盤點（酷澎）', countNotePchome: '盤點（PChome）' };
+const INV_CN_LABEL = { countNoteShopee: '盤點（蝦皮）', countNoteMomo: '盤點（MOMO）', countNoteCoupang: '盤點（酷澎）', countNotePchome: '盤點（PChome）', countNoteBooks: '盤點（博客來）' };
 const INV_CN_STATUS = { change: '會改', same: '不用改', unclean: '無法整理' };
 // 預覽清單（純函式）：只列有內容的盤點格。回 [{ ym, f, before, after, status:'change'|'same'|'unclean' }]，依月份、蝦皮→MOMO 排序
 function _invCleanBuild(months) {
