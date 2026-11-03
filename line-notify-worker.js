@@ -230,7 +230,7 @@ async function sendMorningDigest(env) {
 
   let text;
   if (incomplete.length === 0) {
-    text = '☀️ 早安老闆！\n\n目前沒有未完成的任務 🎉';
+    return;
   } else {
     const todayStr = new Date().toISOString().slice(0, 10);
     const lines = incomplete.map((t, i) => {
