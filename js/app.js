@@ -3782,6 +3782,7 @@ async function __lsTidyClick(btn, other) {
     '壓縮：' + ((r.compressed && r.compressed.done) || 0) + ' 把',
     '刪除舊報表：' + r.deleted.length + ' 把' + (r.deleted.length ? '（' + r.deleted.map(d => d.key + ' ' + d.kb + 'KB').join('、') + '）' : ''),
     '刪除洞察表本機副本：' + r.insight.deleted.length + ' 把' + (r.insight.skippedAll ? '（' + r.insight.skippedAll + '）' : ''),
+    '刪除舊版訂價表殘留：' + ((r.pricing && r.pricing.deleted.length) || 0) + ' 把' + (r.pricing && r.pricing.deleted.length ? '（' + r.pricing.deleted.map(d => d.key + ' ' + d.kb + 'KB').join('、') + '）' : ''),
     keptOld.length ? '保留：' + keptOld.map(x => x.key + '＝' + x.reason).join('；') : '',
     still ? '佔空間前 5 名：' + (after.top || []).slice(0, 5).map(x => x.key + ' ' + x.kb + 'KB').join('、') : '',
   ].filter(Boolean).join('\n');
