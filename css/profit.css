@@ -62,11 +62,12 @@ body{background:#f0f2f7;color:#1a1a2e;font-family:'Noto Sans TC',sans-serif;font
 .shop-content.active{display:block;}
 /* 主數字下方的副標小字（.sub-rev / .sub-ads 併在同一條規則）。
    這條規則定義的分類是「本期主數字 + 上期參照」—— 凡屬於這個分類的副標，視覺層級
-   刻意完全一致，所以共用規則、不各自開 class。目前有五個輸出點、兩種文案
+   刻意完全一致，所以共用規則、不各自開 class。目前有六個輸出點、兩種文案
    （都在 js/profit.js，搜下列函式名或直接搜 class 名）：
      商品列 · 營收欄    .sub-rev  「上期 $X」／無上期時「—」   rowCell 裡 inline 寫死
      商品列 · 廣告費欄  .sub-ads  「上期 $X」／無上期時「—」   _subAdsHtml（兩個呼叫點共用）
      商品列 · 日預算欄  .sub-ads  「上期 $X」／無上期時「—」   _subDayBudgetHtml
+     商品列 · 淨利欄    .sub-ads  「上期 ±$X」／無上期時「—」  _subPureHtml（可能是負數，走 _fSigned）
      小計列 · 營收欄    .sub-rev  「$X」                       totalCell 裡 inline 寫死
      小計列 · 廣告費欄  .sub-ads  「$X」                       totalCell 裡 inline 寫死
    ⚠ 小計列那兩個【不寫「上期」兩個字、也不做 null 處理】，0 就直接顯示 $0。這是刻意的，
