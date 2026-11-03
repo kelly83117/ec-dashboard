@@ -2580,11 +2580,11 @@
 }
 /* 固定欄寬（<colgroup> 的 .inv-col-*）：目標＝內容區 ≥ 約 1052px 時沒有左右捲軸（側欄展開時 1366px 以上的螢幕；側欄收起的 1280px 也夠）。
    月份 64 + 公司 82 + 在途 76 + MOMO 76 + 酷澎／PChome／博客來 66×3 + 總計 84 + 較上月 92 + 盤點 46（蝦皮）＋66（MOMO，第二行含「!」）＋46（酷澎）＋58（PChome）＋48（博客來）+ 叫貨 76 + 備註（至少 40）≈ 1052px。
-   備註是唯一沒指定寬度的欄、拿剩下的；整張表另外限制最寬 1130px（備註最多約 120px），寬螢幕不會把備註撐大、右側留白。
+   表格滿版：寬螢幕多出來的寬度由瀏覽器按各欄比例分給所有欄（備註只分到很小一份），不留白。
    公司比別欄寬一點（數字不要貼著月份）；酷澎／PChome／博客來值小，窄一點。表頭標題不寫「倉」、不放「自動」小字、盤點標題拆兩行，欄位才縮得下。
    整張表最窄 1052px；更窄才由 .inv-table-wrap 左右捲動。
    ⚠ 數字格最多容得下 9 個字元（例如 8,095,624）；酷澎／PChome／博客來只容得下 7 個字元（999,999），超過要加寬對應的欄。 */
-.inv-table { width: 100%; min-width: 1052px; max-width: 1130px; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.inv-table { width: 100%; min-width: 1052px; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
 .inv-col-ym { width: 64px; }
 .inv-col-num { width: 76px; }
 .inv-col-num.inv-col-num-co { width: 82px; }
@@ -2596,7 +2596,9 @@
 .inv-col-cnt.inv-col-cnt-auto { width: 66px; }
 .inv-col-cnt.inv-col-cnt-pc { width: 58px; }
 .inv-col-cnt.inv-col-cnt-bk { width: 48px; }
-/* .inv-col-note 不設寬度：拿剩下的 */
+/* 備註也指定寬度（40px＝最窄時剩下的）：每一欄都有寬度時，比最窄還寬的螢幕多出來的寬度由瀏覽器【按各欄寬度比例】分給所有欄，表格滿版、備註只分到很小一份。
+   ⚠ 不要把備註改回「不設寬度」（那樣多出來的寬度會全部給備註）也不要加 max-width（會右側留白）。 */
+.inv-col-note { width: 40px; }
 .inv-table th, .inv-table td { padding: 0; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
 .inv-table thead th {
   position: sticky; top: 0; z-index: 1;
