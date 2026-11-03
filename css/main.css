@@ -2820,6 +2820,13 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-score-more[open] > summary::after { content: ' ▾'; }
 /* 要處理的商品：已調整的淡化（順序不變） */
 .hl-drag-done td { opacity: .55; }
+/* 待處理超過 topN 個：「顯示全部待處理（N 個）」；已調整收成一行「已調整 N 個 ▸」 */
+.hl-drag-all { margin-top: 8px; font-size: 12px; }
+.hl-drag-donebox { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+.hl-drag-donebox > summary { cursor: pointer; list-style: none; font-weight: 600; }
+.hl-drag-donebox > summary::-webkit-details-marker { display: none; }
+.hl-drag-donebox > summary::after { content: ' ▸'; }
+.hl-drag-donebox[open] > summary::after { content: ' ▾'; }
 /* 「📖 怎麼看這頁」：第一層 5 行白話；「看完整規則」預設收合 */
 .hl-guide-intro { margin: 0 0 14px; padding-left: 20px; font-size: 14px; line-height: 1.9; color: var(--text); }
 .hl-guide-more > summary { cursor: pointer; list-style: none; font-weight: 600; color: var(--info); }
@@ -2905,7 +2912,7 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-trend { position: relative; height: 220px; margin-top: 6px; }
 .hl-chart-fail { padding: 20px; text-align: center; font-size: 12px; color: var(--text-muted); }
 .hl-next { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
-.hl-foot { margin-top: 10px; font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+
 /* ── 塊 B：商品層 ── */
 /* 總分欄：商品層還沒載好（載入中／未載入／逾時）不給分數，只顯示狀態字 */
 .hl-score-wait { font-size: 12px; font-weight: 600; color: var(--info); background: var(--info-soft); }
