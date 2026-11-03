@@ -2579,8 +2579,9 @@
   box-shadow: var(--shadow-sm);
 }
 /* 固定欄寬（<colgroup> 的 .inv-col-*）：目標＝內容區 ≥ 約 1052px 時沒有左右捲軸（側欄展開時 1366px 以上的螢幕；側欄收起的 1280px 也夠）。
-   月份 64 + 公司 82 + 在途 76 + MOMO 76 + 酷澎／PChome／博客來 66×3 + 總計 84 + 較上月 92 + 盤點 46（蝦皮）＋66（MOMO，第二行含「!」）＋46（酷澎）＋58（PChome）＋48（博客來）+ 叫貨 76 + 備註（至少 40）≈ 1052px。
-   表格滿版：寬螢幕多出來的寬度由瀏覽器按各欄比例分給所有欄（備註只分到很小一份），不留白。
+   月份 64 + 公司 82 + 在途 76 + MOMO 76 + 酷澎／PChome／博客來 66×3 + 總計 84 + 較上月 92 + 盤點 40（蝦皮）＋52（MOMO）＋40（酷澎）＋54（PChome）＋42（博客來）+ 叫貨 76 + 備註 76 ≈ 1052px。
+   表格滿版：寬螢幕多出來的寬度由瀏覽器按各欄比例分給所有欄，不留白。
+   盤點欄內容只有「11/2」，所以很窄；省下的寬度給備註。備註還是窄：滑鼠移上去（title）看全文、點進去輸入框往左展開成寬框（.inv-in-note:focus）。
    公司比別欄寬一點（數字不要貼著月份）；酷澎／PChome／博客來值小，窄一點。表頭標題不寫「倉」、不放「自動」小字、盤點標題拆兩行，欄位才縮得下。
    整張表最窄 1052px；更窄才由 .inv-table-wrap 左右捲動。
    ⚠ 數字格最多容得下 9 個字元（例如 8,095,624）；酷澎／PChome／博客來只容得下 7 個字元（999,999），超過要加寬對應的欄。 */
@@ -2592,13 +2593,13 @@
 .inv-col-num.inv-col-num-sm { width: 66px; }
 .inv-col-num.inv-col-num-total { width: 84px; }
 .inv-col-num.inv-col-num-diff { width: 92px; }
-.inv-col-cnt { width: 46px; }
-.inv-col-cnt.inv-col-cnt-auto { width: 66px; }
-.inv-col-cnt.inv-col-cnt-pc { width: 58px; }
-.inv-col-cnt.inv-col-cnt-bk { width: 48px; }
-/* 備註也指定寬度（40px＝最窄時剩下的）：每一欄都有寬度時，比最窄還寬的螢幕多出來的寬度由瀏覽器【按各欄寬度比例】分給所有欄，表格滿版、備註只分到很小一份。
-   ⚠ 不要把備註改回「不設寬度」（那樣多出來的寬度會全部給備註）也不要加 max-width（會右側留白）。 */
-.inv-col-note { width: 40px; }
+.inv-col-cnt { width: 40px; }
+.inv-col-cnt.inv-col-cnt-auto { width: 52px; }
+.inv-col-cnt.inv-col-cnt-pc { width: 54px; }
+.inv-col-cnt.inv-col-cnt-bk { width: 42px; }
+/* 備註也指定寬度（76px）：每一欄都有寬度時，比最窄還寬的螢幕多出來的寬度由瀏覽器【按各欄寬度比例】分給所有欄，表格滿版。
+   ⚠ 不要把備註改回「不設寬度」（多出來的寬度會全部給備註）也不要加 max-width（會右側留白）。 */
+.inv-col-note { width: 76px; }
 .inv-table th, .inv-table td { padding: 0; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
 .inv-table thead th {
   position: sticky; top: 0; z-index: 1;
@@ -2674,7 +2675,10 @@
 /* 數字輸入框：文字右邊界＝1px 邊框＋15px＝16px，跟表頭、總計／較上月對齊，也跟右邊下一欄的文字拉開距離 */
 .inv-in-num { text-align: right; padding-left: 2px; padding-right: 10px; }
 /* 兩個盤點欄：內容置中（表頭 .inv-th-cnt 也置中） */
-.inv-in-cnt { text-align: center; padding-left: 2px; padding-right: 2px; }
+.inv-in-cnt { text-align: center; padding-left: 1px; padding-right: 1px; }
+/* 備註：平常窄、只看得到開頭（title 有全文）；點進去時輸入框往左展開成 360px 寬框蓋在別欄上面，打字看得到全文 */
+.inv-cell-note { position: relative; }
+.inv-in-note:focus { position: absolute; top: 0; right: 0; bottom: 0; width: 360px; z-index: 6; background: var(--surface); box-shadow: 0 4px 14px rgba(15,23,42,.18); }
 /* 輸入框不設 min-width：欄寬由 <colgroup> 決定（固定欄寬），min-width 只會讓輸入框超出格子 */
 .inv-in:hover:not([readonly]) { border-color: var(--border); }
 .inv-in:focus { outline: none; border-color: var(--primary); background: var(--surface); }

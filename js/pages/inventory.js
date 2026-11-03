@@ -390,11 +390,13 @@ function _invCellHtml(col, ym, months, ro) {
   const raw = col.t === 'num' ? (cur == null ? '' : String(cur)) : cur;
   const disp = col.t === 'num' ? _invFmtNum(cur) : cur;
   const saving = _invSaving.has(ym + '|' + col.k);
-  return `<td class="inv-cell inv-cell-${col.t}${_invSrcTip(months[ym], col.k) ? ' inv-cell-autofill' : ''}"><input class="inv-in inv-in-${col.t}${INV_CN_FIELDS[col.k] ? ' inv-in-cnt' : ''}${saving ? ' inv-saving' : ''}" type="text"`
+  // 備註欄很窄：滑鼠移上去（title）看全文；點進去時輸入框往左展開成寬框（css .inv-in-note:focus）
+  const tip = _invSrcTip(months[ym], col.k) || (col.k === 'note' ? disp : '');
+  return `<td class="inv-cell inv-cell-${col.t}${col.k === 'note' ? ' inv-cell-note' : ''}${_invSrcTip(months[ym], col.k) ? ' inv-cell-autofill' : ''}"><input class="inv-in inv-in-${col.t}${INV_CN_FIELDS[col.k] ? ' inv-in-cnt' : ''}${col.k === 'note' ? ' inv-in-note' : ''}${saving ? ' inv-saving' : ''}" type="text"`
     + (col.t === 'num' ? ' inputmode="decimal"' : ` maxlength="${INV_TXT_MAX}"`)
     + ` autocomplete="off" aria-label="${escapeHtml(_invYmLabel(ym) + ' ' + col.l)}"`
     + ` data-inv-ym="${escapeHtml(ym)}" data-inv-f="${escapeHtml(col.k)}" data-raw="${escapeHtml(raw)}" data-disp="${escapeHtml(disp)}"`
-    + ` value="${escapeHtml(disp)}"${ro || saving ? ' readonly' : ''}${_invSrcTip(months[ym], col.k) ? ` title="${escapeHtml(_invSrcTip(months[ym], col.k))}"` : ''}>`
+    + ` value="${escapeHtml(disp)}"${ro || saving ? ' readonly' : ''}${tip ? ` title="${escapeHtml(tip)}"` : ''}>`
     + '</td>';
 }
 function _invRowHtml(ym, months, ro) {
@@ -418,10 +420,10 @@ function _invTableHtml(months, ro) {
   const thLabel = c => {
     const m = INV_CN_FIELDS[c.k] && /^盤點（(.+)）$/.exec(c.l);
     const info = INV_AUTO_HEAD[c.k] ? `<span class="inv-info" tabindex="0" aria-label="資料來源說明" title="${escapeHtml(INV_AUTO_HEAD[c.k])}">!</span>` : '';
-    if (m) return '<span class="inv-th-l">盤點</span><span class="inv-th-l">' + escapeHtml(m[1]) + info + '</span>';
+    if (m) return '<span class="inv-th-l">盤點</span><span class="inv-th-l">' + escapeHtml(m[1]) + '</span>';   // 盤點欄太窄放不下「!」→ 資料來源說明改放表頭 title
     return '<span class="inv-th-l">' + escapeHtml(c.l) + info + '</span>';
   };
-  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}"${INV_AUTO_COL_TIP[c.k] ? ` title="${escapeHtml(INV_AUTO_COL_TIP[c.k])}"` : ''}>${thLabel(c)}</th>`).join('')}</tr>`;
+  const head = `<tr><th class="inv-ym" scope="col">月份</th>${INV_COLS.map(c => `<th scope="col" class="${thCls(c)}"${(INV_AUTO_COL_TIP[c.k] || (INV_CN_FIELDS[c.k] && INV_AUTO_HEAD[c.k])) ? ` title="${escapeHtml(INV_AUTO_COL_TIP[c.k] || INV_AUTO_HEAD[c.k])}"` : ''}>${thLabel(c)}</th>`).join('')}</tr>`;
   // 固定欄寬（css .inv-table 是 table-layout:fixed）：月份、九個數字欄、四個盤點各有寬度，備註拿剩下的；整張表最窄約 1052px（視窗內容區 ≥ 此寬就不會有左右捲軸）
   const colCls = c => (c.k === 'note' ? 'inv-col-note' : c.t === 'txt' ? (INV_AUTO_HEAD[c.k] ? 'inv-col-cnt inv-col-cnt-auto' : c.k === 'countNotePchome' ? 'inv-col-cnt inv-col-cnt-pc' : c.k === 'countNoteBooks' ? 'inv-col-cnt inv-col-cnt-bk' : 'inv-col-cnt') : (c.k === '_total' ? 'inv-col-num inv-col-num-total' : c.k === '_diff' ? 'inv-col-num inv-col-num-diff' : c.k === 'companyWh' ? 'inv-col-num inv-col-num-co' : c.k === 'momoWh' ? 'inv-col-num inv-col-num-momo' : (c.k === 'coupangWh' || c.k === 'pchomeWh' || c.k === 'booksWh') ? 'inv-col-num inv-col-num-sm' : 'inv-col-num'));   // 表頭有「自動」標籤＋「!」的盤點欄（MOMO）要寬一點
   const cols = `<colgroup><col class="inv-col-ym">${INV_COLS.map(c => `<col class="${colCls(c)}">`).join('')}</colgroup>`;
