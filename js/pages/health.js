@@ -891,7 +891,7 @@ function _hlGuideBlocks(rules) {
   };
   const dragLines = Object.keys(HEALTH_DRAG_REASONS).map(k => { const x = HEALTH_DRAG_REASONS[k]; return `${x.icon} ${x.label}：${x.desc}。`; });
   return [
-    { h: '這頁在做什麼', p: '每個月幫每個通路做一次「體檢」，用分數和燈號看出哪個通路賺得好、哪個在退步。分數全部由固定規則算出來，沒有人手動打分數；同樣的資料一定得到同樣的分數。' },
+    { h: '這頁在做什麼', p: '每個月幫每個通路做一次「體檢」，用分數和燈號看出哪個通路賺得好、哪個在退步。分數全部由固定規則算出來，沒有人手動打分數；同樣的資料一定得到同樣的分數；沒有資料的面向不計分、不算 0 分。點通路那一列可以看細項。' },
     { h: '資料從哪裡來', ol: [
       '獲利、成長、蝦皮的廣告佔比：KPI 月結裡各通路每個月的營收、商品成本、廣告費、純利。某個通路某個月的 KPI 還沒填完，就顯示「尚未上傳」，不會亂算。',
       '廣告效率、商品結構、拖累商品：商品層資料（蝦皮＝淨利表報表；MOMO＝商品主檔＋對帳；PChome＝日曆月總表），口徑跟各自的淨利表頁面一樣。',
@@ -958,7 +958,7 @@ function _hlGuideBlocks(rules) {
       '載入中：商品層資料正在載入或計算，等一下會自己更新。',
       '仍在載入（已等 N 秒）：商品層資料超過 60 秒還沒載好，還在等，到了自動重算；超過 5 分鐘會提示先進淨利表點一下那個平台。',
     ] },
-    { h: '「依 N/M 個面向」', p: 'M＝這個通路目前能評的面向數；N＝這個月實際有分數的面向數。例：「依 1/2 個面向」代表只有一個面向有分數，另一個是灰色狀態。' },
+    { h: '總分下方的「依 N/M」', p: 'M＝這個通路目前能評的面向數；N＝這個月實際有分數的面向數。只有面向不齊時才會在總分下方出現，例：「依 1/2」代表只有一個面向有分數，另一個是灰色狀態；面向齊全時不顯示。' },
     { h: '參考分', p: `要有「獲利」分數，而且總共至少 ${R.formalMinDims} 個面向有分數，才是正式分。不夠的話，總分顯示灰色斜體並標「參考」，不參加排名。` },
     { h: '通路類型與排名', ol: [
       ...types.map(t => `${t.label}：${t.members}`),
@@ -976,7 +976,8 @@ function _hlGuideBlocks(rules) {
     ] },
     { h: '比上月、主要扣分原因、走勢圖', ol: [
       '比上月：這個月總分減上個月總分。',
-      '主要扣分原因：最拉低總分的那一個子指標，以及它離滿分線還差多少。',
+      '主要扣分原因：最拉低總分的那一個子指標，用白話寫它現在的數字（例：「營收比前期少 …%」「賠錢商品占營收 …%」）。門檻和得分展開卡片看。',
+      '頁頂「KPI 尚未填完」平常收成一行，點一下展開，可以直接點通路跳到 KPI 月結表去填。',
       '點通路那一列展開卡片：看每個子指標的原始值、零分線、滿分線、得分，以及近 12 個月分數走勢（空心點＝參考分）。',
       '每個子指標旁的 ⓘ：公式、實際的分子分母數字、資料來源。',
     ] },
@@ -991,7 +992,7 @@ let _hlMock = null;          // __healthMock 開著時的假 snapshot 產生器�
 let _hlWaitTries = 0;        // KPI 還沒就緒時的重畫次數（最多 _HL_WAIT_MAX 次，之後照本機鏡像畫，並標示）
 const _HL_WAIT_MAX = 20;     // × 600ms ≈ 12 秒
 const _HL_TREND_N = 12;
-const _hlState = { month: null, open: null };   // 只在記憶體：選的月份、展開的通路
+const _hlState = { month: null, open: null, pendingOpen: false };   // 只在記憶體：選的月份、展開的通路、「KPI 尚未填完」有沒有展開
 let _hlChart = null;
 
 function _hlIsLocalHost() {
@@ -1210,7 +1211,7 @@ function _hlProdReset() {
 /* ================================================================
  * ③ 畫面區
  * ================================================================ */
-const _HL_TABLE_COLS = 9;   // 總覽表欄數（通路、總分、純利率、毛利率、動銷率、面向數、面向、比上月、主要扣分原因）
+const _HL_TABLE_COLS = 8;   // 總覽表欄數（通路、總分、純利率、毛利率、動銷率、面向、比上月、主要扣分原因）；「面向數」2026-11-03 拿掉，不齊時寫在總分下方
 const _HL_STATUS_TEXT = { na: '不適用', insufficient: '資料不足', pending: '尚未上傳', smallRev: '營收過小', closed: '已關站',
   notLoaded: '尚未載入', loading: '載入中', timeout: '載入逾時' };
 // 總覽列「總分」那一格，商品層還沒好時的字（不顯示分數）
@@ -1277,19 +1278,51 @@ function _hlOverviewCellsHtml(r, prev) {
 function _hlOverviewHeadHtml() {
   return HL_OVERVIEW_COLS.map(col => `<th class="hl-num hl-ov ${col.cls}">${escapeHtml(col.label)}<details class="hl-info hl-info-inline hl-th-info"><summary aria-label="${escapeHtml(col.label)}是什麼">ⓘ</summary><div class="hl-info-body">${escapeHtml(col.info)}</div></details></th>`).join('');
 }
+// 總分下方小字「依 N/M」：只在有分數、而且面向不齊（N < M）時顯示；齊全時不顯示
+function _hlDimsNoteHtml(r) {
+  if (r.status === 'closed' || r.score == null || !(r.dimsUsed < r.dimsTotal)) return '';
+  return `<span class="hl-score-nm" title="這個月 ${r.dimsTotal} 個面向裡只有 ${r.dimsUsed} 個有分數">依 ${r.dimsUsed}/${r.dimsTotal}</span>`;
+}
+// 總覽「主要扣分原因」白話版（2026-11-03）：只換說法，不碰計分。
+//   挑哪一個子指標＝跟 _hlTopReason 同一條規則（(100 − 得分) × 子指標權重 × 面向權重 最大）；_hlTopReason 本身不動（computeChannelHealth 的 topReason 照舊）。
+//   文字不出現「滿分線」「零分線」「pp」。沒有對應模板的子指標退回「名稱 數值」。
+const HL_PLAIN_REASON = {
+  pureRate: (v) => `純利率 ${_hlFmtPct(v)}，偏低`,
+  purePp: (v) => _hlPlainChange(v, '純利率比前期低', '純利率只比前期高', '純利率跟前期持平', x => `${(Math.abs(x) * 100).toFixed(1)} 個百分點`),
+  revGrowth: (v) => _hlPlainChange(v, '營收比前期少', '營收只比前期多', '營收跟前期持平', x => `${(Math.abs(x) * 100).toFixed(1)}%`),
+  adsPct: (v) => `廣告費占營收 ${_hlFmtPct(v)}，偏高`,
+  adsQualified: (v) => `廣告費只有 ${_hlFmtPct(v)} 花在本身夠賺的商品上`,
+  adsLoss: (v) => `廣告讓商品由賺轉賠，占廣告費 ${_hlFmtPct(v)}`,
+  sellThrough: (v) => `動銷率 ${_hlFmtPct(v)}，有賣出的商品偏少`,
+  lossShare: (v) => `賠錢商品占營收 ${_hlFmtPct(v)}`,
+  longLoss: (v) => `連續兩個月賠錢的商品占 ${_hlFmtPct(v)}`,
+};
+function _hlPlainChange(v, down, up, flat, amt) {
+  const r = Math.round(v * 1000) / 1000;   // 跟顯示同一個捨入（0.1 個百分點），四捨五入後是 0 就寫持平
+  return r < 0 ? `${down} ${amt(r)}` : r > 0 ? `${up} ${amt(r)}` : flat;
+}
+function _hlPlainReason(dims) {
+  let best = null;
+  (dims || []).forEach(d => (d.status === 'ok' ? d.subs : []).forEach(s => {
+    if (s.scored === false || s.status !== 'ok' || !_hlFinite(s.score)) return;
+    const loss = (100 - s.score) * s.w * d.w;
+    if (loss > 0 && (!best || loss > best.loss)) best = { loss, s };
+  }));
+  if (!best) return '';
+  const s = best.s, f = HL_PLAIN_REASON[s.key];
+  return f ? f(s.raw) : `${s.label} ${_hlFmtRaw(s.raw, s.unit)}`;
+}
 function _hlRowHtml(r, prev, rank, open) {
   const t = HEALTH_RULES.types[r.type] || {};
-  const nm = r.status === 'closed' ? '' : `依 ${r.dimsUsed}/${r.dimsTotal} 面向`;
-  const reason = r.status === 'closed' ? r.reason : (r.score == null ? r.reason : (r.topReason || '—'));
+  const reason = r.status === 'closed' ? r.reason : (r.score == null ? r.reason : (_hlPlainReason(r.dims) || '—'));
   const ch = HEALTH_CHANNELS.find(c => c.id === r.id) || {};
   const tags = [];
   if (rank) tags.push(`<span class="hl-rank">類型第 ${rank}</span>`);
   if (ch.ranked === false && r.status !== 'closed') tags.push('<span class="hl-tag">不排名</span>');
   return `<tr class="hl-row${open ? ' open' : ''}${r.status === 'closed' ? ' hl-row-closed' : ''}" data-hl-row="${escapeHtml(r.id)}" tabindex="0" aria-expanded="${open ? 'true' : 'false'}">
       <td class="hl-c-name"><span class="hl-caret">${open ? '▾' : '▸'}</span>${escapeHtml(r.label)}<span class="hl-sub-line"><span class="hl-type">${escapeHtml(t.label || '')}</span>${tags.join('')}</span></td>
-      <td class="hl-c-score">${_hlScoreHtml(r)}</td>
+      <td class="hl-c-score">${_hlScoreHtml(r)}${_hlDimsNoteHtml(r)}</td>
       ${_hlOverviewCellsHtml(r, prev)}
-      <td class="hl-c-nm">${escapeHtml(nm)}</td>
       <td class="hl-c-dims">${_hlChipsHtml(r)}</td>
       <td class="hl-c-delta">${r.status === 'closed' ? '' : _hlDeltaHtml(r, prev)}</td>
       <td class="hl-c-reason">${escapeHtml(reason)}</td>
@@ -1528,8 +1561,13 @@ function _hlGoKpi(ym) {
     App.navigate('office-d1-kpi');
   } catch (e) { console.error('[health] 跳到 KPI 月結表失敗', e); }
 }
+// 頁頂「KPI 尚未填完」：平常收成一行「⚠ N 個通路 KPI 尚未填完 ▸」，點了才展開清單（清單裡的連結照舊跳 KPI 月結表）。
+//   展開狀態只放記憶體（_hlState.pendingOpen），整頁重畫不會自己收起來。
 function _hlPendingHtml(items) {
   if (!items.length) return '';
+  const n = new Set(items.map(it => it.id)).size, open = !!_hlState.pendingOpen;
+  const head = `<button type="button" class="hl-pending-toggle" data-hl-act="pending" aria-expanded="${open ? 'true' : 'false'}">⚠ ${n} 個通路 KPI 尚未填完 <span class="hl-pending-caret">${open ? '▾' : '▸'}</span></button>`;
+  if (!open) return `<div class="hl-pending hl-pending-closed" role="status">${head}</div>`;
   const link = _hlCanGoKpi();
   const one = it => {
     const txt = `${it.label} ${_hlRangeLabel(it.from, it.to)}（${it.filled}/${it.total}）`;
@@ -1537,7 +1575,7 @@ function _hlPendingHtml(items) {
       ? `<button type="button" class="hl-pending-item" data-hl-kpi="${escapeHtml(it.from)}" title="到 KPI 月結表 ${escapeHtml(_hlYmLabel(it.from))}">${escapeHtml(txt)}</button>`
       : `<span class="hl-pending-item hl-pending-text">${escapeHtml(txt)}</span>`;
   };
-  return `<div class="hl-pending" role="status"><span class="hl-pending-h">⚠ KPI 尚未填完：</span>${items.map(one).join('<span class="hl-pending-sep">、</span>')}</div>`;
+  return `<div class="hl-pending" role="status">${head}<div class="hl-pending-list">${items.map(one).join('<span class="hl-pending-sep">、</span>')}</div></div>`;
 }
 
 // 頁頂「商品層資料」狀態：三個平台都載好、也算完就不顯示。
@@ -1567,6 +1605,7 @@ function _hlOnClick(e) {
   const act = e.target.closest && e.target.closest('[data-hl-act]');
   if (act) {
     if (act.dataset.hlAct === 'refresh') { _hlProdReset(); App.render(); }
+    else if (act.dataset.hlAct === 'pending') { _hlState.pendingOpen = !_hlState.pendingOpen; App.render(); }
     else if (act.dataset.hlAct === 'guide' && typeof App.openGuide === 'function') App.openGuide({ title: '📖 通路健檢 · 怎麼看這頁', blocks: _hlGuideBlocks() });
     else if (act.dataset.hlAct === 'loadprod' && act.dataset.hlPlatform) {
       if (_hlProd.state[act.dataset.hlPlatform] === 'timeout') _hlProd.state[act.dataset.hlPlatform] = 'idle';
@@ -1616,7 +1655,7 @@ Object.assign(App, {
     // 「📖 怎麼看這頁」在載入中、錯誤畫面也要按得到（說明內容只讀 HEALTH_RULES，不需要資料）
     const header = `<div class="page-header hl-hd">
         <div><h2>通路健檢</h2>
-        <p>每個通路每月的體檢分數。分數依固定規則計算，同樣的資料一定得到同樣的分數；沒有資料的面向不計分、不算 0 分。</p></div>
+        <p>每個通路每月的體檢分數，點通路可看細項。</p></div>
         <button type="button" class="btn-ghost hl-guide-btn" data-hl-act="guide">📖 怎麼看這頁</button></div>`;
     // profit.js 動態載入：沒載完先載，載完再 render（本頁不叫任何 __load*Subs，只用開站就訂閱的 app/kpi）
     if (!_hlMock && !window.__profitReady) {
@@ -1688,7 +1727,7 @@ Object.assign(App, {
         </div>
         <div class="hl-table-wrap">
           <table class="hl-table">
-            <thead><tr><th>通路</th><th class="hl-c-score">總分</th>${_hlOverviewHeadHtml()}<th class="hl-c-nm">面向數</th><th class="hl-c-dims">面向</th><th class="hl-c-delta">比上月</th><th class="hl-c-reason">主要扣分原因</th></tr></thead>
+            <thead><tr><th>通路</th><th class="hl-c-score">總分</th>${_hlOverviewHeadHtml()}<th class="hl-c-dims">面向</th><th class="hl-c-delta">比上月</th><th class="hl-c-reason">主要扣分原因</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
