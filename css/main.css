@@ -2992,40 +2992,51 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-tags-bad { color: var(--danger); }
 .hl-tags-msg { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
 .hl-tags-wrap { overflow-x: auto; }
-/* 清單：固定欄寬（1200px 含側欄時一欄約 420px 也放得下、不出現左右捲軸）。第一格兩行：名稱（截斷）＋燈號 */
+/* 清單（精簡版）：固定欄寬（1200px 含 240px 側欄時一欄約 420px 也放得下、不出現左右捲軸）。
+   第一格一行：名稱（截斷）＋同色燈號接在後面；營收（萬）、營收比上月兩欄。字級整張一致 12px */
 .hl-tags-tbl { table-layout: fixed; }
-.hl-tags-tbl th, .hl-tags-tbl td { padding: 4px 4px; }
-.hl-sub th.hl-tags-rev, .hl-sub td.hl-tags-rev { width: 68px; }
-.hl-sub th.hl-tags-pr, .hl-sub td.hl-tags-pr { width: 52px; }
-.hl-sub th.hl-tags-g, .hl-sub td.hl-tags-g { width: 66px; }
-.hl-tags-item { min-width: 0; }
-.hl-tags-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; }
-.hl-tags-chips { line-height: 16px; }
-.hl-tags-chips .hl-ptag { margin: 0 2px 0 0; padding: 0 3px; font-size: 10px; line-height: 15px; }
-/* 指標逐月變化表（塊 5）：格子底色＝燈號，旁邊有分數或符號 */
+.hl-tags-tbl th, .hl-tags-tbl td { padding: 5px 4px; font-size: 12px; line-height: 18px; }
+.hl-sub th.hl-tags-rev, .hl-sub td.hl-tags-rev { width: 64px; }
+.hl-sub th.hl-tags-g, .hl-sub td.hl-tags-g { width: 72px; }
+.hl-tags-item { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.hl-tags-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hl-tags-chips { flex: 0 0 auto; white-space: nowrap; }
+.hl-tags-chips .hl-ptag { margin: 0 2px 0 0; padding: 0 3px; font-size: 10px; line-height: 16px; }
+.hl-tags-more { margin-top: 4px; padding: 2px 8px; font-size: 12px; }
+/* 口徑變更提醒（HEALTH_NOTICES）：一行短字＋ⓘ，點了看完整說明 */
+.hl-notice { margin-top: 6px; font-size: 12px; line-height: 1.6; color: var(--warn); }
+.hl-notice-txt { font-weight: 600; }
+.hl-notice-i { display: inline; margin-left: 4px; }
+.hl-notice-i summary { display: inline; }
+.hl-notice-i[open] .hl-info-body { display: block; white-space: normal; color: var(--text); font-weight: 400; }
+/* 指標逐月變化表（塊 5 精簡版）：每格一個短數字、底色＝燈號（紅、黃格加底線，不只靠顏色）；分數、比上月在 title */
 .hl-mtable { margin-top: 16px; }
 .hl-mt-hd { font-size: 13px; font-weight: 700; color: var(--text); }
 .hl-mt-pick { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
 .hl-mt-opt { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .hl-mt-wrap { overflow-x: auto; }
-.hl-mt-tbl th[scope="row"] { white-space: nowrap; color: var(--text); font-size: 12px; }
+.hl-mt-tbl th, .hl-mt-tbl td { font-size: 12px; }
+.hl-mt-tbl th[scope="row"] { white-space: nowrap; color: var(--text); }
+.hl-sub .hl-mt-trend { min-width: 150px; white-space: nowrap; color: var(--text); }
+.hl-mt-note td { padding-top: 0; border-bottom: 1px solid var(--border); }
+.hl-mt-note .hl-notice { margin-top: 0; }
 .hl-mt-row { cursor: pointer; }
 .hl-mt-row:hover th[scope="row"], .hl-mt-row.open th[scope="row"] { color: var(--primary-dark); }
 .hl-mt-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .hl-mt-k { margin-left: 6px; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 10px; font-weight: 400; color: var(--text-muted); }
 .hl-mt-scored { border-color: var(--primary); color: var(--primary-dark); }
-.hl-sub .hl-mc { width: auto; min-width: 72px; }
-.hl-mc-s { margin-left: 4px; font-size: 10px; }
+.hl-sub .hl-mc { width: auto; min-width: 64px; }
 .hl-mc-green { background: var(--success-soft); color: var(--success); }
-.hl-mc-yellow { background: var(--warn-soft); color: var(--warn); }
-.hl-mc-red { background: var(--danger-soft); color: var(--danger); }
+.hl-mc-yellow { background: var(--warn-soft); color: var(--warn); text-decoration: underline dotted; text-underline-offset: 3px; }
+.hl-mc-red { background: var(--danger-soft); color: var(--danger); text-decoration: underline; text-underline-offset: 3px; }
 .hl-mc-gray { color: var(--text-muted); }
 .hl-mt-chart { margin-top: 8px; }
 /* 手機：卡片牆一排一張；展開的細項跟著變窄；子指標表收掉滿分標準欄（ⓘ 裡照樣看得到公式） */
 @media (max-width: 768px) {
   .hl-tags-cols { grid-template-columns: 1fr; }
-  /* 手機：清單只留「商品名稱／燈號」與「營收比上月」，營收、純利率收掉（滑鼠／長按名稱看 title） */
-  .hl-tags-tbl .hl-tags-rev, .hl-tags-tbl .hl-tags-pr { display: none; }
+  /* 手機：清單上下排；燈號放不下時換到名稱下一行（三欄都留） */
+  .hl-tags-item { flex-wrap: wrap; }
+  .hl-tags-name { flex: 1 1 96px; }   /* 名稱至少留 96px，燈號擠不下才換行 */
   .hl-tags-wrap, .hl-mt-wrap { max-width: calc(100vw - 72px); }
   .hl-tiles { grid-template-columns: 1fr; }
   .hl-group { width: 100%; }
