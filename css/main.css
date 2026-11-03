@@ -2781,20 +2781,22 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 /* 塊 3b：每組是一個帶小標題的區塊，寬度＝卡片數（最多 5 張）× 卡寬，區塊依視窗寬度自動並排；展開的細項佔滿一整排、排在那一排下面 */
 .hl-wall { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 16px; }
 .hl-group { flex: 0 1 auto; min-width: 0; max-width: 100%; }
-.hl-group-n1 { width: 166px; }
-.hl-group-n2 { width: 342px; }
-.hl-group-n3 { width: 518px; }
-.hl-group-n4 { width: 694px; }
-.hl-group-n5 { width: 870px; }
+.hl-group-n1 { width: 215px; }
+.hl-group-n2 { width: 440px; }
+.hl-group-n3 { width: 665px; }
+.hl-group-n4 { width: 890px; }
+.hl-group-n5 { width: 1115px; }
 .hl-group-hd { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
-/* 組內卡片：每張最小 156px（組寬 166 × 張數 + 間距，正好一張一欄；1200px 時蝦皮 4 張＋1 張剛好一排）；組被視窗擠窄時在組內換行；手機一排 1 張（見下方手機區塊）。卡片等高 */
-.hl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 10px; align-items: stretch; }
-.hl-tile { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); cursor: pointer; }
+/* 組內卡片：每張最小 205px（組寬 215 × 張數 + 間距，正好一張一欄）；卡寬要放得下三欄「↑ 上月 22.2%」不截斷；組被視窗擠窄時在組內換行；手機一排 1 張（見下方手機區塊）。同一排卡片等高 */
+.hl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(205px, 1fr)); gap: 10px; align-items: stretch; }
+.hl-tile { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 10px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); cursor: pointer; }
 .hl-tile:hover { border-color: var(--primary); }
 .hl-tile:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .hl-tile.open { border-color: var(--primary); background: var(--primary-soft); }
-/* 名稱列、底部指標列各留兩行高：名稱長（MOMO 乙配（寄倉）＋類型第 N）或指標換行的卡片，跟其他組的卡片一樣高 */
-.hl-tile-hd { display: flex; flex-wrap: wrap; align-content: flex-start; align-items: center; row-gap: 2px; min-height: 40px; }
+/* 名稱列：一行（卡片改版塊 1 拿掉「類型第 N」後不再留兩行高） */
+.hl-tile-hd { display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; min-height: 20px; line-height: 20px; }
+/* 「不排名」標章不能比名稱高（否則業外那張會高 1px，同一排就不等高） */
+.hl-tile-hd .hl-tag { padding: 0 6px; line-height: 18px; }
 .hl-tile-name { font-size: 13px; font-weight: 600; color: var(--text); }
 /* 大字總分＋旁邊比上月分數差 */
 .hl-tile-score { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-height: 32px; }
@@ -2802,19 +2804,17 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-tile-score .hl-score { flex-direction: row; align-items: baseline; gap: 4px; min-width: 52px; padding: 2px 8px; font-size: 22px; }
 .hl-tile-score .hl-score-wait { font-size: 14px; }
 .hl-tile-score .hl-delta { font-size: 13px; color: var(--text-muted); }
-/* 主要扣分原因：最多兩行、超過用 … 截斷（完整原文在 title）；固定兩行高，卡片才等高 */
-.hl-tile-reason { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.9em; font-size: 12px; line-height: 1.45; color: var(--text-muted); }
-/* 底部「純利／毛利／動銷」三小欄（上面名稱、下面數值＋箭頭，永遠兩行）：箭頭顏色同塊 2 的「上月」 */
-.hl-tile-mets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 2px; margin-top: auto; padding-top: 5px; border-top: 1px dashed var(--border); font-size: 11px; line-height: 1.4; color: var(--text); }
-.hl-tile-met { display: flex; flex-direction: column; min-width: 0; white-space: nowrap; }
-.hl-tile-met-off, .hl-tile-met-off .hl-tile-met-v { color: var(--text-muted); font-weight: 400; }
-.hl-tile-met-k { color: var(--text-muted); }
-.hl-tile-met-v { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
-.hl-tile-met-k, .hl-tile-arrow { cursor: help; }
-.hl-tile-arrow { margin-left: 2px; font-weight: 600; }
-.hl-tile-arrow.hl-ov-up { color: var(--success); }
-.hl-tile-arrow.hl-ov-down { color: var(--danger); }
-.hl-tile-arrow.hl-ov-flat { color: var(--text-muted); }
+/* 底部三欄（卡片改版塊 1）：上＝小標、中＝大字數值、下＝「↑ 上月 x%」（上月沒資料是空行，卡片才一樣高）；一律不截斷（沒有 …）。
+   卡寬 215、左右 padding 8、欄距 3 ⇒ 每欄約 64px，放得下「↓ 上月 18.0%」；更寬的（例：上月 100.0%）在空白處換行，不切字 */
+.hl-tile-mets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 3px; margin-top: auto; padding-top: 6px; border-top: 1px dashed var(--border); color: var(--text); }
+.hl-tile-met { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.hl-tile-met-k { font-size: 11px; line-height: 16px; color: var(--text-muted); white-space: nowrap; cursor: help; }
+.hl-tile-met-v { font-size: 18px; line-height: 24px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.hl-tile-met-off .hl-tile-met-v { font-size: 13px; font-weight: 400; color: var(--text-muted); }
+.hl-tile-met-p { min-height: 15px; font-size: 10px; line-height: 15px; color: var(--text-muted); white-space: normal; word-break: keep-all; }
+.hl-tile-met-p.hl-ov-up { color: var(--success); }
+.hl-tile-met-p.hl-ov-down { color: var(--danger); }
+.hl-tile-met-p.hl-ov-flat { color: var(--text-muted); }
 .hl-tile-detail { flex: 0 0 100%; min-width: 0; }
 /* 卡片上「⚠ 待處理商品 N 個」（紅、可點）／「✓ 沒有待處理商品」（灰綠）；沒有商品層的通路是空的佔位列，卡片才一樣高 */
 .hl-tile-todo { min-height: 18px; font-size: 12px; line-height: 1.5; }
@@ -2848,14 +2848,18 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-guide-more[open] > summary::after { content: ' ▾'; }
 .hl-guide-full { margin-top: 8px; }
 .hl-tile-detail .hl-card { margin: 0; }
-/* 頁面最下方「未評分：…」：通路名可點（展開細項） */
+/* 頁面最下方「另有 N 個通路沒有分數」：展開後通路名可點（展開細項） */
 .hl-unrated { margin-top: 18px; font-size: 12px; line-height: 1.8; color: var(--text-muted); }
-.hl-unrated-h { font-weight: 600; }
+/* 卡片改版塊 1：平常收成一行「另有 N 個通路沒有分數 ▸」，點了展開清單（清單收合時用 hidden） */
+.hl-unrated-toggle { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--text-muted); cursor: pointer; }
+.hl-unrated-toggle:hover, .hl-unrated-toggle:focus-visible { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.hl-unrated-toggle::after { content: ' ▸'; }
+.hl-unrated-toggle[aria-expanded="true"]::after { content: ' ▾'; }
+.hl-unrated-list { margin-top: 4px; }
 .hl-unrated-item { color: var(--primary-dark); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .hl-unrated-item:hover, .hl-unrated-item:focus-visible { color: var(--primary); outline: none; }
 .hl-unrated-item.open { font-weight: 600; }
-.hl-rank, .hl-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 400; white-space: nowrap; }
-.hl-rank { background: var(--primary-soft); color: var(--primary-dark); }
+.hl-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 400; white-space: nowrap; }
 .hl-tag { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
 .hl-score { display: inline-flex; flex-direction: column; align-items: center; min-width: 44px; padding: 3px 8px; border-radius: var(--radius-sm); font-size: 16px; font-weight: 700; line-height: 1.15; }
 .hl-score small, .hl-ring small { font-size: 10px; font-weight: 400; }
