@@ -1538,6 +1538,9 @@ const LS_TIDY_ARCHIVE_MONTHS=['2026/05'];   // 雲端副本只在 app/profit_202
 const _LS_TIDY_INSIGHT_RE=/^ec\.insight_[^_|.]+_(master|weeks|perf)$/;
 const _LS_TIDY_DENY_PREFIX=['ec_notes','ec_edits','ec_split','ec_momo','momo_','ec_pchome','pchome_','ec_coupang','ec|filemeta|','ec.session',
   'ec.users','ec.employees','ec.departments','ec.platforms','ec.d2.pricing.','ec.dailyProgress','ec.insightLegacyBackup','ec_d3_'];
+// (d) 舊版訂價表（54cfe8f / v154 移除）的整表資料：現行訂價表讀 data/pricing.json，這 10 把沒有任何讀寫端。
+//   只認完整名稱；ec.d2.pricing.{sheet,q,cols.*,sort.*,numfilters.*,colpanel,filterpanel,custom.*} 是現行在用的（custom.* 是自訂列唯一一份），不准刪。
+const _LS_TIDY_PRICING_LEGACY=new Set(['訂價','導流品','Victor','inna','Vivian','官網','FB訂價表','運費試算表','loaded','ver'].map(s=>'ec.d2.pricing.'+s));
 function _lsTidyDenied(k){
   if(typeof k!=='string') return true;
   if(_LS_TIDY_DENY_PREFIX.some(p=>k.startsWith(p))) return true;
@@ -1562,7 +1565,7 @@ function _lsMonthMinus(ym,n){
 //   snap = { entries:[[key,raw]…], profitMem, mem, pending:Set, deferred:Set|Map, justSavedAt, now(ms),
 //            collectionsReady, archivesReady, insightReady, parse:fn(raw)→物件或 null }
 function _lsTidyPlan(snap){
-  const plan={reports:{del:[],kept:[],skippedAll:''},insight:{del:[],kept:[],skippedAll:''}};
+  const plan={reports:{del:[],kept:[],skippedAll:''},insight:{del:[],kept:[],skippedAll:''},pricing:{del:[]}};
   const entries=snap.entries||[];
   const isObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
   const kb=(k,raw)=>Math.round((k.length+raw.length)/102.4)/10;
@@ -1604,8 +1607,11 @@ function _lsTidyPlan(snap){
     if(!has) return I.kept.push({key:k,reason:'雲端記憶體沒有這份'});
     I.del.push({key:k,raw,kb:kb(k,raw)});
   });
+  // ── (d) 舊版訂價表殘留（不需要雲端就緒：沒有雲端副本、也沒有讀寫端）──
+  entries.forEach(([k,raw])=>{ if(typeof k==='string'&&_LS_TIDY_PRICING_LEGACY.has(k)) plan.pricing.del.push({key:k,raw,kb:kb(k,raw)}); });
   // 第二道防呆：白名單出錯也不准刪到黑名單 → 整份計畫作廢
   [...R.del,...I.del].forEach(d=>{ if(_lsTidyDenied(d.key)) throw new Error('計畫裡出現不准刪的 key：'+d.key); });
+  plan.pricing.del.forEach(d=>{ if(!_LS_TIDY_PRICING_LEGACY.has(d.key)) throw new Error('計畫裡出現不准刪的 key：'+d.key); });
   return plan;
 }
 // 執行。opts：{ dryRun, waitMs(預設 LS_TIDY_WAIT_MS), pollMs(預設 250), onPhase(phase) }。回傳結果物件（見方案 §4.5），任何情況都不丟錯。
@@ -1621,7 +1627,7 @@ async function __lsTidy(opts){
   finally{ phase('done'); }
 }
 async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
-  const res={dryRun,compressed:null,deleted:[],kept:[],skippedAll:'',insight:{deleted:[],kept:[],skippedAll:''},planError:''};
+  const res={dryRun,compressed:null,deleted:[],kept:[],skippedAll:'',insight:{deleted:[],kept:[],skippedAll:''},pricing:{deleted:[]},planError:''};
   try{
     // (a) 壓縮
     if(!dryRun){ try{ res.compressed=await _reportCacheMigrate({gapMs:0}); }catch(e){ res.compressed={error:String(e&&e.message||e)}; } }
@@ -1647,7 +1653,7 @@ async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
     }
     res.skippedAll=plan.reports.skippedAll; res.kept=plan.reports.kept.slice();
     res.insight.skippedAll=plan.insight.skippedAll; res.insight.kept=plan.insight.kept.slice();
-    if(dryRun){ res.deleted=plan.reports.del.map(d=>({key:d.key,kb:d.kb})); res.insight.deleted=plan.insight.del.map(d=>({key:d.key,kb:d.kb})); return res; }
+    if(dryRun){ res.deleted=plan.reports.del.map(d=>({key:d.key,kb:d.kb})); res.insight.deleted=plan.insight.del.map(d=>({key:d.key,kb:d.kb})); res.pricing.deleted=plan.pricing.del.map(d=>({key:d.key,kb:d.kb})); return res; }
     // 刪：每把再重讀比對、再過一次會變動的關卡
     plan.reports.del.forEach(d=>{
       const keep=reason=>res.kept.push({key:d.key,reason});
@@ -1670,6 +1676,14 @@ async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
         localStorage.removeItem(d.key);
         res.insight.deleted.push({key:d.key,kb:d.kb});
       }catch(e){ keep('刪除失敗：'+(e&&e.message||e)); }
+    });
+    plan.pricing.del.forEach(d=>{
+      try{
+        if(!_LS_TIDY_PRICING_LEGACY.has(d.key)) return;
+        if(localStorage.getItem(d.key)!==d.raw) return;   // 別的分頁剛寫過（理論上沒有寫入端）
+        localStorage.removeItem(d.key);
+        res.pricing.deleted.push({key:d.key,kb:d.kb});
+      }catch(e){}
     });
     console.info('[釋出空間] 壓縮 '+((res.compressed&&res.compressed.done)||0)+' 把；刪舊報表 '+res.deleted.length+' 把、保留 '+res.kept.length+' 把'
       +(res.skippedAll?'（'+res.skippedAll+'）':'')+'；刪洞察表副本 '+res.insight.deleted.length+' 把',res);
