@@ -2042,3 +2042,8 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .kv-st-vs{margin-left:10px;font-weight:500;}
 .kv-st-d.kv-st-up{color:var(--success);}
 .kv-st-d.kv-st-down{color:var(--danger);}
+
+/* FriDay 報表上傳（2026-11-04）：站別選擇（i站尚未支援） */
+.km-fr-site{margin:0 0 10px;font-size:13px;font-weight:600;display:flex;gap:14px;align-items:center;}
+.km-fr-site label{display:inline-flex;gap:4px;align-items:center;cursor:pointer;}
+.km-fr-site .km-fr-off{color:#9ca3af;cursor:not-allowed;}
