@@ -15949,13 +15949,17 @@ window.addEventListener('momoStockReady',()=>{
   if(document.getElementById('momo-tbl-'+shop)) momoScheduleSnapshotRerender(shop, true);
 });
 // MO+ 逐列成本雲端更新（momo_moplus_origins 推來）→ 若正在看 MO+ 總表則重繪（毛利/涵蓋率/運費行跟上）
+let _momoOriginsArrived=false;   // momo_moplus_origins 雲端快照是否已到（晚於商品主檔）。未到前 MO+ 總表算不出正確成本（會偏高）→ momoRenderProfitBody 整頁擋成「載入中」，到了自動重繪。
 window.addEventListener('momoMoPlusOriginsReady',()=>{
+  _momoOriginsArrived=true;   // 不管當下在不在 MO+ 頁，origins 一到就算數（旗標設在早退之前）
   try{ momoBumpMoPlusEpoch(); }catch{}   // 雲端 origins 更新 → 快取失效（bump 便宜；index 只在 debounce 那一次重繪重建）
   const shop=curMomoShop;
   if(!momoIsMoPlus(shop)) return;
   if((_momoSub[shop]||'profit')!=='profit') return;
   if(document.getElementById('momo-tbl-'+shop)) momoScheduleSnapshotRerender(shop, true);
 });
+// 保險：某賣場 origins 全為 noop/skip（不會 dispatch momoMoPlusOriginsReady）→ 頁面載入 20 秒後也視為「已到」，照原邏輯顯示（避免永遠卡在載入中）。
+setTimeout(()=>{ if(_momoOriginsArrived) return; _momoOriginsArrived=true; try{ const shop=curMomoShop; if(momoIsMoPlus(shop) && (_momoSub[shop]||'profit')==='profit' && document.getElementById('momo-tbl-'+shop)) momoScheduleSnapshotRerender(shop, true); }catch(e){} }, 20000);
 // E001 未結算銷量雲端更新（同事推來）→ 快取失效 + 若正在看 MO+ 總表就重繪（未結算期別的估算數字與「未對帳」晶片跟上）
 window.addEventListener('momoE001Ready',()=>{
   try{ momoBumpMoPlusEpoch(); }catch{}   // 雲端 E001 更新 → E001 ctx 快取失效
@@ -19087,6 +19091,8 @@ let _momoRenderedRows={};   // shop → { period, rows, cols }：最近一次總
 let _momoBaseRows={};   // shop → { period, rows, stock:{at,stale,dateStr,ageDays} }
 // 總表匯出 Excel：用最近渲染的那份（已套當前期別/搜尋/篩選/排序），欄位＝畫面顯示欄；另補 品號/原廠編號 兩欄。
 function momoExportExcel(shop){
+  // MO+ origins 未到前總表還沒算（整頁載入中）→ 擋匯出，避免匯出偏高/空白數字。
+  if(momoIsMoPlus(shop) && !_momoOriginsArrived){ if(typeof showToast==='function') showToast('逐列成本載入中，請稍後再匯出','error'); else alert('逐列成本載入中，請稍後再匯出'); return; }
   const snap=_momoRenderedRows[shop];
   if(!snap || !snap.rows || !snap.rows.length){ alert('目前沒有可匯出的資料，請先開啟「商品獲利總表」。'); return; }
   if(typeof XLSX==='undefined' || !XLSX.utils || typeof XLSX.writeFile!=='function'){ alert('匯出元件未載入，請重新整理後再試。'); return; }
@@ -19115,6 +19121,13 @@ function momoExportExcel(shop){
 function momoRenderProfitBody(shop, tableOnly){
   const tbl=document.getElementById('momo-tbl-'+shop);
   if(!tbl) return;
+  // MO+ origins（逐列成本雲端快照）晚於商品主檔到達。未到前算 KPI／畫表格會得到「沒扣成本」的偏高淨利（momoMoPlusMarginCalc：空 originsQty→coverage=1→covered=true→cogs=0）→ 整個總表區只顯示載入中、不算不畫、return。
+  //   上方賣場分頁／月份／子分頁（批次維護／商品同步…）由殼渲染、照常可用；momoMoPlusOriginsReady 監聽 + 20 秒 fallback 到了會自動重繪成正確數字。
+  if(momoIsMoPlus(shop) && !_momoOriginsArrived){
+    tbl.innerHTML=`<div style="padding:40px 20px;text-align:center;color:#6b7280;font-size:14px">⏳ 逐列成本載入中（通常幾秒），載完自動顯示</div>`;
+    const _ov=document.getElementById('momo-ov-'+shop); if(_ov) _ov.innerHTML='';
+    return;
+  }
   const period=_momoPeriodSel[shop];
   // E001 未結算估算期別旗標：整期別皆無對帳明細且 E001 有售價資料 → 全列走估算覆蓋。用於「不與結算期別環比/對比」（口徑不同、point 四）。
   const _e001Est = (momoIsMoPlus(shop) && period) ? (()=>{ try{ const c=momoMoPlusE001Ctx(shop), pk=momoExpandPeriod(period); return !!(pk.length && pk.every(k=>!c.settled.has(k)) && c.doc && c.doc.hasPrice && pk.some(k=>c.doc.byPeriodSold&&c.doc.byPeriodSold[k])); }catch(e){ return false; } })() : false;
