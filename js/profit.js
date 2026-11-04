@@ -108,6 +108,14 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
              ⚠ 帶文字、不做純圓圈：PR #108 實測 14px 灰圓圈在期間列完全被忽略（見 css 的 .tp-info 註解）。
                 表頭那三顆 .hdr-help 才是圓的 —— 那裡沒有橫向空間，而且它們是這顆的補充入口、不是主入口。 -->
         <button type="button" class="kpi-info" onclick="openKpiCmpHelp()" title="上面三格跟「上個月同一段期間」比，表格每一列的「上期」跟「上一期」比 —— 點開看完整說明">ⓘ 比較基準</button>
+        <!-- 動銷率格（蝦皮四家，_stCellSync 填）。不是頂端三格的第四格：只讀整月商品表現，不進 built、不進 lsSave、不進推送。
+             跟三格不同，樣式走 css/profit.css 的 .kv-st-*。 -->
+        <div id="kv-st-cell" class="kv-st" hidden>
+          <div class="kv-st-hd"><span id="kv-st-title" class="kv-st-title">動銷率</span><details class="kv-st-info"><summary aria-label="動銷率怎麼算" title="動銷率怎麼算">ⓘ</summary><div class="kv-st-info-body">正常商品裡這個月有賣出的比例，來自洞察表每月上傳的整月商品表現；上、下半月也顯示整月數字。</div></details></div>
+          <div id="kv-st-value" class="kv-st-value">…</div>
+          <div id="kv-st-sub" class="kv-st-sub"></div>
+          <div id="kv-st-cmp" class="kv-st-cmp"></div>
+        </div>
       </div>
       <div id="header-btn-block" style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto">
         <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
@@ -27979,6 +27987,79 @@ function _lmSamePeriodParts(month,half){
 //     ② 就算修好，那串日期每格要 14 個字元 ×3 格；實測 #header-kpi-block 已達 1037.2px、
 //        1280px 螢幕上三格自己就在換行，那些像素花在使用者不會逐日核對的日期上。
 //     ⇒ 期別用短寫法，但【金額保留】（見 setKpis 的說明）。
+// ══════ 頂端「動銷率」格（蝦皮四家；資料＝洞察表每月上傳的整月商品表現 shopee_perf_month）══════
+//   🔴 只讀（__cloudShopeePerf.getDoc），不寫雲端、不進 built、不進 lsSave、不進推送，也不影響旁邊三格的任何數字。
+//   _stCache['好麻吉|2026-10']＝{ state:'loading'|'none'|'ok'|'failed', normal, soldNormal }：同一個通路月份只讀一次。
+//   setKpis 會被 renderTable 一直呼叫，這裡只查快取，所以不會在 render 迴圈裡重讀；切通路、切月份才會遇到新的 key。
+//   ⚠ 讀到本機快取當讀取失敗。雲端物件還沒好時不寫快取，下次 setKpis 再試。
+const _ST_SHOPS=['好麻吉','玩樂','森之旅','維克'];
+const _stCache={};
+let _stWarned=false,_stBound=false;
+// 洞察表上傳成功（marketing.js 發 shopee-perf-saved）：清掉那一格（state 不管是什麼，尤其是 'none'）。淨利表開著而且是那一家才重讀；
+//   淨利表不在畫面上時 _stCellSync 找不到格子、什麼都不做，下次進頁 setKpis 會重讀。監聽在第一次讀之前綁、只綁一次（沒讀過就沒有快取要清）。
+function _stOnSaved(e){
+  const d=e&&e.detail;
+  if(!d||!d.shop||!d.month)return;
+  delete _stCache[d.shop+'|'+d.month];
+  if(d.shop===curShop)_stCellSync(d.shop);
+}
+function _stRead(shop,ym){
+  if(!_stBound&&typeof window.addEventListener==='function'){_stBound=true;window.addEventListener('shopee-perf-saved',_stOnSaved);}
+  const k=shop+'|'+ym;
+  if(_stCache[k])return _stCache[k];
+  const be=window.__cloudShopeePerf;
+  if(!be||typeof be.getDoc!=='function')return {state:'loading'};
+  const box=_stCache[k]={state:'loading'};
+  Promise.resolve().then(()=>be.getDoc(shop,ym)).then(snap=>{
+    if(!snap||typeof snap.exists!=='function')throw new Error('讀不到文件');
+    if(snap.metadata&&snap.metadata.fromCache)throw new Error('連不到伺服器（讀到的是本機快取）');
+    if(!snap.exists()){box.state='none';return;}
+    const c=(snap.data()||{}).counts||{};
+    box.state='ok';box.normal=Number(c.normal)||0;box.soldNormal=Number(c.soldNormal)||0;
+  }).catch(e=>{
+    box.state='failed';
+    if(!_stWarned){_stWarned=true;console.warn('[淨利表] 整月商品表現讀取失敗：',e&&e.message||e);}
+  }).then(()=>{if(shop===curShop)_stCellSync(shop);});
+  return box;
+}
+function _stPrevYm(ym){
+  const y=+ym.slice(0,4),m=+ym.slice(5,7);
+  return m===1?(y-1)+'-12':y+'-'+String(m-1).padStart(2,'0');
+}
+// 比率用畫面上的 0.1% 比，較上月才會跟兩個月顯示的數字對得起來
+const _stPct10=e=>Math.round(e.soldNormal/e.normal*1000);
+// 這一格要顯示什麼（純函式）。month＝'YYYY/MM'、half＝'full'|'first'|'second'；cur、prev＝_stRead 的結果。
+function _stCellView(month,half,cur,prev){
+  const mm=Number(month.slice(5,7));
+  const title=half==='first'||half==='second'?`動銷率（${mm} 月整月）`:'動銷率';
+  const out={title,value:'—',sub:'',cmp:'',dir:''};
+  if(cur.state==='loading'){out.value='…';return out;}
+  if(cur.state==='failed'){out.sub='讀取失敗';return out;}
+  if(cur.state==='none'){out.sub=`尚未上傳 ${mm} 月整月商品表現（洞察表）`;return out;}
+  if(!(cur.normal>0)){out.sub='資料不足';return out;}
+  const a=_stPct10(cur);
+  out.value=(a/10).toFixed(1)+'%';
+  out.sub=`${cur.soldNormal}／${cur.normal}`;
+  if(prev&&prev.state==='ok'&&prev.normal>0){
+    const d=a-_stPct10(prev);
+    out.cmp=`較上月 ${d>0?'+':d<0?'−':'±'}${(Math.abs(d)/10).toFixed(1)}pp`;
+    out.dir=d>0?'up':d<0?'down':'flat';
+  }
+  return out;
+}
+function _stCellSync(shop){
+  const cell=document.getElementById('kv-st-cell');
+  if(!cell)return;
+  const s=state[shop],month=s&&s.curMonth;
+  if(_ST_SHOPS.indexOf(shop)<0||!/^\d{4}\/\d{2}$/.test(month||'')){cell.hidden=true;return;}
+  const ym=month.replace('/','-');
+  const v=_stCellView(month,s.curHalf,_stRead(shop,ym),_stRead(shop,_stPrevYm(ym)));
+  cell.hidden=false;
+  const put=(id,text)=>{const el=document.getElementById(id);if(el)el.textContent=text;};
+  put('kv-st-title',v.title);put('kv-st-value',v.value);put('kv-st-sub',v.sub);put('kv-st-cmp',v.cmp);
+  const c=document.getElementById('kv-st-cmp');
+  if(c)c.className='kv-st-cmp'+(v.dir?' kv-st-'+v.dir:'');
+}
 function _lmPeriodShort(month,half){
   const m=/^\d{4}\/(\d{2})$/.exec(month||'');
   if(!m) return '';
@@ -28082,6 +28163,7 @@ function setKpis(shop,rev,gross,ads,pure,cmp){
   const deadAdsHtml='NT$ '+fmtN(ads)+(rev?` <span style="font-size:13px;color:#6b7280;font-weight:500">(${(ads/rev*100).toFixed(2)}%)</span>`:'');
   const adsEl=document.getElementById('kv-ads-'+shop);if(adsEl)adsEl.innerHTML=deadAdsHtml;
   if(shop!==curShop)return;
+  _stCellSync(shop);   // 動銷率格：只讀快取，沒有才去雲端拿，不影響下面三格
 
   // ── 第二行：主數字 ＋【具名】比率 ──
   //   具名是這次改版的核心：改版前純利那格是裸的「(22.7%)」、廣告費是裸的「(10.41%)」，

@@ -3115,3 +3115,7 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .ins-pm-facts dd { margin: 0; font-weight: 600; }
 .ins-pm-warn { margin-top: 10px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--text); font-size: 12px; }
 .ins-pm-replace { margin-top: 10px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--text); font-size: 12px; }
+/* 通路健檢：蝦皮動銷率沒有數字時，細項裡的那行原因 */
+.hl-st-note { margin: 8px 0 0; font-size: 12px; color: var(--text-muted); }
+/* 通路健檢逐月表：MOMO 動銷率列下面的「以商品頁算」對照小字 */
+.hl-mt-page { font-size: 12px; line-height: 1.6; color: var(--text-muted); }

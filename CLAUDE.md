@@ -266,6 +266,7 @@ ESM 有個致命陷阱必須牢記：
   形狀 `{ schema:1, shop, month:'YYYY-MM', from:'YYYY-MM-DD', to:'YYYY-MM-DD', fileName, items:{ 商品ID:[狀態碼, 數量] }, counts:{ products, normal, soldNormal, soldAll, byStatus:{ 狀態原文:n } }, uploadedAt, uploadedBy, uploadedByName, prev:{ uploadedAt, uploadedBy, uploadedByName, counts }|null }`。狀態碼：正常 N、未上架 U、已刪除 D、已違規 B，其他存原文；數量＝`數量(全部訂單)`，只算商品列（`商品規格ID` 是 -）。動銷率＝`soldNormal / normal`。
   **寫入只有 marketing.js `insPerfMonthSave`**（洞察表上傳視窗的「整月商品表現（健檢用）」卡片，通路＝目前看的通路 `currentShop`，非唯讀帳號可傳）：檢查檔名是整月（`insPerfMonthPeriodFromName`）與內容（`insPerfMonthFromRows`）→ 讀舊資料 → 確認窗（母表重疊率低於 50% 只警告、不擋）→ `setMonth` 一次寫入 → 讀回比對 counts、items 筆數、uploadedAt。失敗都留在卡片上。
   ⚠ 狀態是**匯出當下**的狀態，不是月底的；檔案裡也沒有期間和店名，只能靠檔名與目前通路。
+  **讀取只有兩處，都只用 `getDoc`、各自快取（同一個「通路|月份」只讀一次，`fromCache` 當讀取失敗）**：通路健檢（health.js `_hlSpWant` → `snap.shopeePerf`，純函式 `_hlShopeeStApply` 只讀這份；「↻ 重新計算」清快取）、淨利表頂端的動銷率格（profit.js `_stRead` / `_stCellSync`，蝦皮四家，掛在 `setKpis`，只查快取；不進 built、lsSave、推送）。上傳成功（只有讀回比對成功）`insPerfMonthSave` 發 `window` 事件 `shopee-perf-saved`（`detail:{ shop, month }`），兩邊清掉那一格快取再重讀，所以同一個分頁不用重新整理；其他分頁、其他人不會收到。蝦皮動銷率不走商品層；商品標籤、拖累清單維持原本的商品層。
 - 通路健檢（路由 `health`，js/pages/health.js，方案 docs/plan-channel-health.md）——**只讀頁，不存任何資料**；評分標準版本讀 `app/health_rules`（`__cloudHealthRules`）。
   KPI 月結經 profit.js 的唯讀轉接 `window.__healthKpiSnapshot(months)`（口徑＝KPI 頁 `_kpiShopCalc` / `_kpiRealRev` / `_kpiCommonColTotals`）。
   商品層（塊 B：蝦皮廣告效率、蝦皮／MOMO／PChome 商品結構與拖累商品）經 profit.js 的 `__healthLoadProducts(平台)`＋`__healthProductSnapshot(平台, 通路, 月)`，
