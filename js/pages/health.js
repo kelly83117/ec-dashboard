@@ -191,7 +191,7 @@ const HEALTH_CHANNELS = _hlDeepFreeze([
   { id: 'coupang-luying', label: '酷澎 商城-露營館', type: 'coupang', group: 'coupang', shop: '商城-露營館' },
   { id: 'coupang-buyout', label: '酷澎買斷',        type: 'small',   group: 'coupang', shop: '酷澎買斷' },
   { id: 'pchome',         label: 'PChome',          type: 'small',   group: 'pchome',  shop: 'PChome', prod: { platform: 'pchome', shop: 'PChome' } },
-  { id: 'friday',         label: 'FriDay',          type: 'small',   group: 'friday',  shop: 'FriDay' },
+  { id: 'friday',         label: 'FriDay',          type: 'small',   group: 'friday',  shop: 'FriDay-主站', shops: ['FriDay-主站', 'FriDay-i站'] },   // 2026-11-04 KPI 拆主站／i站 → 兩店加總（_hlCell）
   { id: 'books',          label: '博客來',          type: 'small',   group: 'books',   shop: '博客來-寄倉' },   // 2026-11-04 KPI 博客來拆寄倉／轉單；轉單目前沒銷量
   { id: 'other',          label: '業外',            type: 'other',   group: 'other',   shop: '業外',  ranked: false },
   { id: 'website',        label: '官網',            type: 'small',   group: 'website', shop: '官網',  ranked: false },
@@ -404,8 +404,24 @@ function _hlFmtRaw(v, unit) {
 function _hlCell(snap, m, ch) {
   const mo = snap && snap.months && snap.months[m];
   const g = mo && mo.groups && mo.groups[ch.group];
+  if (ch.shops) return _hlSumCells(ch.shops.map(s => g && g[s]));   // 一個通路多家店（FriDay 主站＋i站）→ 加總
   return (g && g[ch.shop]) || null;
 }
+// 多家店的 KPI 格加總成一格（形狀同 __healthKpiSnapshot 的單店格）：金額／件數相加、填寫進度相加；
+//   廣告費任一店有值才算（都沒有＝null）；關站／since 之前要全部都是才算。
+function _hlSumCells(cells) {
+  const cs = cells.filter(Boolean);
+  if (!cs.length) return null;
+  const sum = k => cs.reduce((a, c) => a + (Number(c[k]) || 0), 0);
+  return {
+    rev: sum('rev'), cost: sum('cost'), ads: cs.some(c => c.ads != null) ? sum('ads') : null, pure: sum('pure'), qty: sum('qty'),
+    revFilled: cs.some(c => c.revFilled),
+    fill: { filled: cs.reduce((a, c) => a + ((c.fill && c.fill.filled) || 0), 0), total: cs.reduce((a, c) => a + ((c.fill && c.fill.total) || 0), 0) },
+    closed: cs.every(c => c.closed), beforeSince: cs.every(c => c.beforeSince),
+  };
+}
+// 來源說明用的店名（多店＝用 + 串起來）
+function _hlShopText(ch) { return ch.shops ? ch.shops.join('+') : ch.shop; }
 function _hlGroupMeta(snap, ch) { return ((snap && snap.groups) || []).find(g => g.key === ch.group) || null; }
 // 這家店從哪個月起才有 KPI（group.since 或 shopSince 取較晚的那個）
 function _hlSince(snap, ch) {
@@ -452,7 +468,7 @@ function _hlProfitDim(ch, m, snap, R) {
   if (!_hlFillDone(c)) return fail('pending', _hlPendingReason(m, c));
   if (!(c.rev >= R.minRev)) return fail('smallRev', `營收過小（${_hlFmtMoney(c.rev)}，未滿 ${_hlFmtMoney(R.minRev)}），本月比率類指標不評分`);
   const notes = R.notes[ch.group] || {};
-  const src = `app/kpi ${m} ${ch.group}.${ch.shop}`;
+  const src = `app/kpi ${m} ${ch.group}.${_hlShopText(ch)}`;
   const subs = _hlSubs(R.profit.subs, 'ok', '', s => {
     const raw = s.key === 'pureRate' ? c.pure / c.rev : (c.rev - c.cost) / c.rev;
     const num = s.key === 'pureRate' ? c.pure : c.rev - c.cost;
@@ -495,7 +511,7 @@ function _hlGrowthDim(ch, m, snap, R) {
   }
   const notes = R.notes[ch.group] || {};
   const range = (a) => `${_hlYmLabel(a[0])}～${_hlYmLabel(a[a.length - 1])}`;
-  const src = `app/kpi ${ch.group}.${ch.shop}：近 ${range(W.slice(N))} vs 前 ${range(W.slice(0, N))}`;
+  const src = `app/kpi ${ch.group}.${_hlShopText(ch)}：近 ${range(W.slice(N))} vs 前 ${range(W.slice(0, N))}`;
   const subs = _hlSubs(R.growth.subs, 'ok', '', s => {
     const raw = s.key === 'purePp' ? (rp / rr - pp / pr) : (rr / pr - 1);
     const trace = s.key === 'purePp'
@@ -661,7 +677,7 @@ function _hlAdsDim(ch, m, snap, R) {
   else if (!_hlFinite(c.ads)) set(pct, 'pending', `尚未上傳：${_hlYmLabel(m)} KPI 沒有廣告費`);
   else {
     pct.raw = c.ads / c.rev; pct.score = _hlLinear(pct.raw, pct.zero, pct.full);
-    pct.trace = { src: `app/kpi ${m} ${ch.group}.${ch.shop}（廣告費 ÷ 實際營收）`, num: c.ads, den: c.rev };
+    pct.trace = { src: `app/kpi ${m} ${ch.group}.${_hlShopText(ch)}（廣告費 ÷ 實際營收）`, num: c.ads, den: c.rev };
   }
   const p = _hlProdOf(ch, m, snap), fail = _hlProdFail(p, m);
   const prodSubs = subs.filter(s => s.key !== 'adsPct');
@@ -3159,7 +3175,7 @@ const _HL_MOCK_GROUPS = [
   { key: 'website', title: '官網', shops: ['官網'], since: null, shopSince: {}, closedFrom: '2026-05' },
   { key: 'momo', title: 'MOMO', shops: ['MOMO-甲配', 'MOMO-寄倉', 'mo+0號店(好麻吉)', 'mo+1號店(森之旅)', 'mo+2號店(玩樂)'], since: null, shopSince: { 'mo+2號店(玩樂)': '2026-10' }, closedFrom: null },
   { key: 'pchome', title: 'PChome', shops: ['PChome'], since: '2026-09', shopSince: {}, closedFrom: null },
-  { key: 'friday', title: 'FriDay', shops: ['FriDay'], since: '2026-08', shopSince: {}, closedFrom: null },
+  { key: 'friday', title: 'FriDay', shops: ['FriDay-主站', 'FriDay-i站'], since: '2026-08', shopSince: {}, closedFrom: null },
   { key: 'books', title: '博客來', shops: ['博客來-寄倉', '博客來-轉單'], since: '2026-08', shopSince: {}, closedFrom: null },
 ];
 function _hlMakeMock(kind) {
