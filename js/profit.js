@@ -10359,10 +10359,10 @@ function _kpiMoney(v){v=Number(v)||0;return (v<0?'−':'')+'$'+fmtN(v);}
 //   滑鼠移上去或點一下（手機）都會顯示：CSS :hover / :focus 控制顯示，kpiInfoPos 把氣泡定位到視窗座標
 //   （position:fixed，才不會被表格外層 overflow 捲動框裁掉）。
 function _kpiDesc(group,k){return ((group.formula||[]).find(f=>f.k===k)||{}).desc||'';}
-function _kpiInfoHtml(title,lines){
+function _kpiInfoHtml(title,lines,cls){
   const ls=lines.filter(Boolean);
   if(!ls.length)return '';
-  return `<span class="km-info" tabindex="0" role="button" aria-label="計算說明" onmouseenter="kpiInfoPos(this)" onfocus="kpiInfoPos(this)" onclick="event.stopPropagation();kpiInfoPos(this)">ⓘ<span class="km-info-pop" role="tooltip"><span class="km-info-t">${_kpiEscAttr(title)}</span>${ls.map(l=>`<span class="km-info-l">${_kpiEscAttr(l)}</span>`).join('')}</span></span>`;
+  return `<span class="km-info" tabindex="0" role="button" aria-label="計算說明" onmouseenter="kpiInfoPos(this)" onfocus="kpiInfoPos(this)" onclick="event.stopPropagation();kpiInfoPos(this)">ⓘ<span class="km-info-pop${cls?' '+cls:''}" role="tooltip"><span class="km-info-t">${_kpiEscAttr(title)}</span>${ls.map(l=>`<span class="km-info-l">${_kpiEscAttr(l)}</span>`).join('')}</span></span>`;
 }
 function kpiInfoPos(el){
   requestAnimationFrame(()=>{
@@ -11237,7 +11237,7 @@ function _kpiFillHtml(row){
   if(group.key==='friday'){
     const fr=fridayKpiFromRecon(month);
     const h=fr.ok?_kpiFridayAutoHint(month,row):null;
-    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${fr.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(fr.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiFridayUpload()" title="一次可以選多個檔：SCM 訂單匯出、結帳單費用明細（促銷折扣負擔；活動贊助費／銷售獎勵金只核對），會自動辨識。先預覽、確認才寫入。">上傳 FriDay 報表</button><button id="km-au-btn" class="km-au-btn${fr.ok?'':' km-au-off'}"${fr.ok?'':' disabled'} onclick="kpiFridayAutoFill()" title="${_kpiEscAttr(fr.ok?'主站的訂單數、營收、商品成本、平台費，從已上傳的 FriDay 報表帶入。按下去會先預覽，確認後才寫入。物流運費、耗材手填，i站全部手填。':fr.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
+    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${fr.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(fr.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiFridayUpload()" title="一次可以選多個檔：SCM 訂單匯出、結帳單費用明細（促銷折扣負擔；活動贊助費／銷售獎勵金只核對），會自動辨識。先預覽、確認才寫入。">上傳 FriDay 報表</button><span class="km-howto">怎麼傳？${_kpiInfoHtml('FriDay 主站要傳 2 種：',FRIDAY_HOWTO_LINES,'km-info-pre')}</span><button id="km-au-btn" class="km-au-btn${fr.ok?'':' km-au-off'}"${fr.ok?'':' disabled'} onclick="kpiFridayAutoFill()" title="${_kpiEscAttr(fr.ok?'主站的訂單數、營收、商品成本、平台費，從已上傳的 FriDay 報表帶入。按下去會先預覽，確認後才寫入。物流運費、耗材手填，i站全部手填。':fr.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
   }
   // 博客來：上傳三種報表（存 app/books_recon）＋從報表帶入營收／商品成本／平台費；完全沒有報表 → 帶入鈕 disabled
   if(group.key==='books'){
@@ -12751,6 +12751,8 @@ function _friParsePayable(a,hi,type,amtCol,file){
   return{type,file,amtCol,month:months[0]||'',months,byTx,n,sum:_booksR2(sum),total,errs};
 }
 const FRIDAY_RECON_KEY='ec_friday_recon';
+// 填寫模式「上傳 FriDay 報表」旁的「怎麼傳？」ⓘ（2026-11-04 使用者給的原文，照抄、不加字；開頭空白是縮排，靠 .km-info-pre 保留）
+const FRIDAY_HOWTO_LINES=['① 訂單匯出｜每月 1 次','   訂單管理 → 匯出，日期選整個月','② 促銷折扣負擔｜每張結帳單 1 次','   撥款作業 → 點結帳單 → 促銷折扣負擔「詳」→ 匯出Excel','重傳不會重複計算。','物流運費、耗材請手填。'];
 // 雲端 → 記憶體（照博客來：firebase.js boot 就訂閱、先緩存在 window.__fridayReconCloudLatest；這裡定義後立刻 drain）
 window.__fridayApplyCloudRecon=function(data){
   try{

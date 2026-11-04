@@ -2050,3 +2050,7 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .km-fr-site{margin:0 0 10px;font-size:13px;font-weight:600;display:flex;gap:14px;align-items:center;}
 .km-fr-site label{display:inline-flex;gap:4px;align-items:center;cursor:pointer;}
 .km-fr-site .km-fr-off{color:#9ca3af;cursor:not-allowed;}
+
+/* FriDay「上傳 FriDay 報表」旁「怎麼傳？」ⓘ（2026-11-04）：說明框保留縮排換行 */
+.km-howto{display:inline-flex;align-items:center;font-size:12px;font-weight:600;color:#6b7280;white-space:nowrap;}
+.km-info-pre .km-info-l{white-space:pre-wrap;}
