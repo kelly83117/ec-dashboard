@@ -245,7 +245,8 @@ ESM 有個致命陷阱必須牢記：
   ⚠ 不能用 `momoLoadProducts().length` 判斷 MOMO 到齊（它會退回讀 localStorage 舊資料），要看 `Store._profitMem`。之後的資料更新事件會自動重算。
   MOMO 逐商品利潤＝MOMO 總表「淨利貢獻」欄：`momoAggregatePeriods` 之後一定要再跑 `momoStage4Redistribute`（同總表 render），只用前者逐列會對不上。
   拖累清單跳淨利表走 `__profitOpenAt`：不寫持久狀態（蝦皮的 ec_lastMonth 先存後還原、搜尋不走 setSearch），只寫跟使用者點通路一樣的 ec_profitView／ec_curShop。
-  分數一律依 health.js `HEALTH_RULES` 當場重算；改任何門檻要升 `version`（目前 `v4-2026-11`；獲利、成長是 v2 校準值，校準紀錄在方案 §2-7-1；
+  評分標準依月份查版本：`healthRulesForMonth(month, versions)`；BASE＝寫死的 `HEALTH_RULES`（從 `firstMonth` 起適用）；通路可各自覆蓋（`linesByChannel`），查線順序＝通路自己的 → 類型的 → 標準未設定。每版要寫完整（兩項都要有 `w`、`lines`），不沿用前一版：沒寫到的類型／通路就是標準未設定。目前雲端還沒有版本清單（`snap.healthRuleVersions` 是空的），所有月份都用 BASE。
+  分數一律依規則當場重算；改 BASE 任何門檻要升 `version`（目前 `v5-2026-11`：總分只看 `score` 的純利率、動銷率兩項；舊面向的門檻：獲利、成長是 v2 校準值，校準紀錄在方案 §2-7-1；
   廣告效率、商品結構是 v4 校準值（方案 §2-5、§2-7-2）；毛利率、低利商品營收占比只顯示、不計分；
   動銷率依類型，樣本少於 6 筆的類型標「樣本少」（`stFlag:'few'`），蝦皮等塊 C 資料標「待校準」（`stFlag:'uncal'`））。
   沒資料的面向一律帶 status（不適用／資料不足／尚未上傳／營收過小／已關站／尚未載入／載入中），**不得算成 0 分**。

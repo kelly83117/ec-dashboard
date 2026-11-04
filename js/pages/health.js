@@ -4,7 +4,7 @@
  *
  * 方案：docs/plan-channel-health.md（§1-1／§1-2 範圍、§2 規則、§3 動銷率口徑、§4 畫面）。
  * 路由 'health'：【不是部門】（不走 office-），不碰 ec.departments / canAccessOffice / OFFICE_FEATURES；所有登入者都能看（app.js _isRouteAllowed）。
- * 純讀取頁：不寫雲端、不寫 Store、不新增 __cloud 物件。分數一律當場用 HEALTH_RULES 重算，不存檔；同樣的資料一定得到同樣的分數。
+ * 純讀取頁：不寫雲端、不寫 Store、不新增 __cloud 物件。分數一律當場依「那個月適用的評分標準」（healthRulesForMonth）重算，不存檔；同樣的資料一定得到同樣的分數。
  * 資料：KPI 月結經 profit.js 的唯讀轉接 window.__healthKpiSnapshot(months)（口徑＝KPI 頁：_kpiShopCalc／_kpiRealRev／_kpiCommonColTotals）。
  *   商品層（塊 B）經 window.__healthLoadProducts(平台)（載訂閱組並等到齊）＋ window.__healthProductSnapshot(平台, 通路, 月)（同步、只讀）。
  *   profit.js 是動態載入：進頁先 await window.__ensureProfit()，載完再 render（同 daily.js / offices.js）。
@@ -56,6 +56,7 @@ function _hlDeepFreeze(o) {
 //     但成長、廣告效率、商品結構、毛利率都不再算進總分。新規則套用到所有月份。
 const HEALTH_RULES = _hlDeepFreeze({
   version: 'v5-2026-11',
+  from: '2026-01',                     // 這份規則從哪個月起適用（第一版＝firstMonth；之後的版本見 healthRulesForMonth）
   firstMonth: '2026-01',               // 月份下拉最早到這個月（KPI 月結從 2026-01 開始）
   lights: { green: 80, yellow: 50 },   // ≥80 綠、50–79 黃、<50 紅（同 KPI 評分表 scoreColor 的門檻）
   minRev: 30000,                       // 月營收 < 3 萬 ⇒ 比率類子指標不評分（同 profit.js KPI_ANOMALY_RULES.minRev）
@@ -212,6 +213,122 @@ function _hlMonthRange(from, to) {
 function _hlYmLabel(ym) { return _hlIsYm(ym) ? ym.replace('-', '/') : String(ym); }
 // 台灣時間的年月（UTC+8，台灣沒有夏令時間）。傳 ms 進來，本函式不讀時鐘。
 function _hlTaipeiYm(ms) { return new Date(ms + 8 * 3600 * 1000).toISOString().slice(0, 7); }
+
+/* ---------- 評分標準版本：某個月用哪份規則 ---------- */
+// 一個通路某一項的三條分數線：通路自己的 → 類型的 → 沒有（null＝標準未設定）。
+function _hlLinesFor(it, ch) {
+  return (it.linesByChannel && it.linesByChannel[ch.id]) || (it.lines && it.lines[ch.type]) || null;
+}
+const _hlHas = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const _hlIsObj = o => !!o && typeof o === 'object' && !Array.isArray(o);
+// 這個類型本來就不算動銷率（types[*].sellThrough 是 null：酷澎商城、業外）
+function _hlNoSellThrough(type) { return !(HEALTH_RULES.types[type] || {}).sellThrough; }
+// 一版裡「要忽略」的線：動銷率的酷澎、業外（類型或屬於它們的通路）。其他項目、其他類型一律不忽略。
+function _hlIgnoredLine(itemKey, key, byChannel) {
+  if (itemKey !== 'sellThrough') return false;
+  if (!byChannel) return _hlHas(HEALTH_RULES.types, key) && _hlNoSellThrough(key);
+  const ch = HEALTH_CHANNELS.find(c => c.id === key);
+  return !!ch && _hlNoSellThrough(ch.type);
+}
+// 三條線：[100 分線, 80 分線, 60 分線]，都在 0～1、由高到低（等號可）
+function _hlLinesBad(a) {
+  if (!Array.isArray(a) || a.length !== 3) return '要是三個數字';
+  if (!a.every(x => _hlFinite(x) && x >= 0 && x <= 1)) return '數值要在 0～1';
+  if (!(a[0] >= a[1] && a[1] >= a[2])) return '要由高到低';
+  return '';
+}
+// 一版本身的問題（回字串陣列，空＝沒問題）。每版要寫完整：每個計分項目都要有 w 和 lines（linesByChannel 可省略＝沒有通路覆蓋）。
+function _hlVersionProblems(v) {
+  if (!_hlIsObj(v)) return ['不是物件'];
+  const out = [];
+  if (!_hlIsYm(v.from)) out.push(`from 格式錯（${v.from}）`);
+  else if (v.from < HEALTH_RULES.firstMonth) out.push(`from 早於 ${HEALTH_RULES.firstMonth}`);
+  if (!_hlIsObj(v.items)) return out.concat('items 不是物件');
+  HEALTH_RULES.score.items.forEach(x => { if (!_hlHas(v.items, x.key)) out.push(`缺 ${x.key}（每版要寫完整）`); });
+  Object.keys(v.items).forEach(k => {
+    const it = v.items[k];
+    if (!HEALTH_RULES.score.items.some(x => x.key === k)) { out.push(`items 的 key 不認得（${k}）`); return; }
+    if (!_hlIsObj(it)) { out.push(`${k} 不是物件`); return; }
+    Object.keys(it).forEach(f => { if (['w', 'lines', 'linesByChannel'].indexOf(f) < 0) out.push(`${k} 有不認得的欄位（${f}）`); });
+    if (!_hlHas(it, 'w')) out.push(`${k} 缺權重（每版要寫完整）`);
+    else if (!(_hlFinite(it.w) && it.w > 0)) out.push(`${k} 權重要 > 0（${it.w}）`);
+    if (!_hlHas(it, 'lines')) out.push(`${k} 缺 lines（每版要寫完整）`);
+    [['lines', false], ['linesByChannel', true]].forEach(([f, byChannel]) => {
+      if (!_hlHas(it, f)) return;
+      if (!_hlIsObj(it[f])) { out.push(`${k}.${f} 不是物件`); return; }
+      Object.keys(it[f]).forEach(key => {
+        if (!(byChannel ? HEALTH_CHANNELS.some(c => c.id === key) : _hlHas(HEALTH_RULES.types, key))) { out.push(`${k}.${f} 不認得（${key}）`); return; }
+        if (_hlIgnoredLine(k, key, byChannel)) return;   // 要忽略的線內容不管對錯都不看
+        const bad = _hlLinesBad(it[f][key]);
+        if (bad) out.push(`${k}.${f}.${key} ${bad}（${JSON.stringify(it[f][key])}）`);
+      });
+    });
+  });
+  return out;
+}
+// 一版 → 完整、深凍結的規則：權重與分數線全部來自這一版，【不沿用前一版】；這版沒寫到的類型／通路＝沒有線（標準未設定）。
+//   其他欄位（燈號、標籤、門檻說明…）版本改不到，沿用 BASE。
+function _hlRulesFromVersion(v) {
+  const pick = (itemKey, src, byChannel) => {
+    const o = {};
+    Object.keys(src || {}).forEach(key => { if (!_hlIgnoredLine(itemKey, key, byChannel)) o[key] = src[key].slice(); });
+    return o;
+  };
+  const items = HEALTH_RULES.score.items.map(it => {
+    const o = v.items[it.key];
+    return Object.assign({}, it, { w: o.w, lines: pick(it.key, o.lines, false), linesByChannel: pick(it.key, o.linesByChannel, true) });
+  });
+  return _hlDeepFreeze(Object.assign({}, HEALTH_RULES, {
+    from: v.from, version: `${HEALTH_RULES.version}+${v.from}`, score: Object.assign({}, HEALTH_RULES.score, { items }),
+  }));
+}
+// 驗證＋依起始月排序。回 { chain:[由舊到新的完整規則], problems:[] }；有任何問題 chain 一律空（整份不用）。
+function _hlBuildRuleChain(versions) {
+  if (!Array.isArray(versions)) return { chain: [], problems: ['版本清單不是陣列'] };
+  const tag = (v, i) => `第 ${i + 1} 版（from=${_hlIsObj(v) ? v.from : v}）`;
+  const problems = [], seen = {};
+  versions.forEach((v, i) => {
+    _hlVersionProblems(v).forEach(p => problems.push(`${tag(v, i)}：${p}`));
+    if (_hlIsObj(v) && _hlIsYm(v.from)) {
+      if (seen[v.from]) problems.push(`${tag(v, i)}：起始月跟另一版重複`);
+      seen[v.from] = true;
+    }
+  });
+  if (problems.length) return { chain: [], problems };
+  const chain = [];
+  versions.map((v, i) => ({ v, i })).sort((a, b) => (a.v.from < b.v.from ? -1 : 1)).forEach(({ v, i }) => {
+    const R = _hlRulesFromVersion(v);
+    const sum = R.score.items.reduce((a, it) => a + it.w, 0);
+    if (Math.abs(sum - 1) > 1e-9) problems.push(`${tag(v, i)}：權重加總要等於 1（現在是 ${sum}）`);
+    chain.push(R);
+  });
+  return problems.length ? { chain: [], problems } : { chain, problems };
+}
+// 記憶化：內容相同的版本清單只驗證、只建一次，同一版永遠回同一個物件；不合法也只 warn 一次。
+const _hlRuleChains = new Map();
+const _HL_RULE_CHAINS_MAX = 32;   // 版本清單極少變動；防萬一無限長大，滿了清掉重來
+function _hlRuleChain(versions) {
+  let sig;
+  try { sig = JSON.stringify(versions); } catch { sig = '!unserializable'; }
+  let hit = _hlRuleChains.get(sig);
+  if (!hit) {
+    hit = _hlBuildRuleChain(versions);
+    if (hit.problems.length) console.warn(`[health] 評分標準版本不合法，整份不用、全部退回 ${HEALTH_RULES.version}：${hit.problems.join('；')}`);
+    if (_hlRuleChains.size >= _HL_RULE_CHAINS_MAX) _hlRuleChains.clear();
+    _hlRuleChains.set(sig, hit);
+  }
+  return hit;
+}
+// 🔴 某個月適用的完整規則（凍結物件）：所有 from ≤ month 的版本裡最新的那一版，沒有就是 HEALTH_RULES（BASE）。純函式，不碰 window／DOM。
+//   versions＝[{ from:'YYYY-MM', items:{ pureRate:{ w, lines:{ 類型:[a,b,c] }, linesByChannel:{ 通路 id:[a,b,c] } }, sellThrough:{…} } }]，順序不拘；
+//   🔴 每版寫完整、不沿用前一版：沒寫到的類型／通路就是沒有線（標準未設定）。任何一版不合法 ⇒ 整份不用、退回 BASE。動銷率替酷澎、業外設的線一律忽略。
+function healthRulesForMonth(month, versions) {
+  if (versions == null || (Array.isArray(versions) && !versions.length)) return HEALTH_RULES;
+  const { chain } = _hlRuleChain(versions);
+  if (!_hlIsYm(month)) return HEALTH_RULES;
+  for (let i = chain.length - 1; i >= 0; i--) if (chain[i].from <= month) return chain[i];
+  return HEALTH_RULES;
+}
 
 /* ---------- 數字 ---------- */
 function _hlFinite(v) { return typeof v === 'number' && isFinite(v); }
@@ -814,7 +931,7 @@ function _hlTier(v, lines, tiers) {
 //   status：ok／nostd（標準未設定）／其他沿用子指標狀態（pending、smallRev、insufficient、loading、notLoaded、timeout、na…）。
 function _hlScoreItems(ch, dims, R) {
   return R.score.items.map(it => {
-    const lines = (it.lines && it.lines[ch.type]) || null;
+    const lines = _hlLinesFor(it, ch);
     const d = dims.find(x => x.key === it.dim), s = d ? d.subs.find(x => x.key === it.key) : null;
     const out = { key: it.key, label: it.label, short: it.short, w: it.w, provisional: !!it.provisional, lines, raw: s && _hlFinite(s.raw) ? s.raw : null, score: null };
     if (!lines) return Object.assign(out, { status: 'nostd', reason: '標準未設定' });
@@ -835,9 +952,10 @@ const _HL_WAIT_ITEM = { loading: 'prodLoading', notLoaded: 'prodIdle', timeout: 
 //   - 動銷率有標準、但還在等商品層 ⇒ 先不給總分（載入中）；動銷率沒標準或沒資料 ⇒ 總分＝純利率分數（pureOnly，卡片標「只看純利率」）。
 //   - 蝦皮沒有動銷率標準 ⇒ 不等蝦皮淨利表，一開頁就有分數。
 //   回 { id, label, type, month, status, reason, score, light, isReference, ranked, dimsUsed:N, dimsTotal:M, dims:[…], next:[…], topReason, fill }
+//   沒傳 rules ⇒ 用這個月適用的標準（healthRulesForMonth，版本清單從 snap.healthRuleVersions 來）。
 function computeChannelHealth(ch, month, snap, rules) {
-  const R = rules || HEALTH_RULES;
-  const base = { id: ch.id, label: ch.label, type: ch.type, month, rulesVersion: R.version, next: [], isReference: false, pureOnly: false };
+  const R = rules || healthRulesForMonth(month, snap && snap.healthRuleVersions);
+  const base = { id: ch.id, label: ch.label, type: ch.type, month, rulesVersion: R.version, rulesFrom: R.from || R.firstMonth, next: [], isReference: false, pureOnly: false };
   const c = _hlCell(snap, month, ch);
   const closedFrom = _hlClosedFrom(snap, ch);
   if ((c && c.closed) || (closedFrom && month >= closedFrom)) {
@@ -870,13 +988,13 @@ function computeChannelHealth(ch, month, snap, rules) {
   });
 }
 
-// 近 n 個月走勢（含 month 本身，舊→新）
+// 近 n 個月走勢（含 month 本身，舊→新）。沒傳 rules ⇒ 每個月各用自己適用的標準（computeChannelHealth 自己查）。
 function computeHealthTrend(ch, month, n, snap, rules) {
   const out = [];
+  const first = (rules || HEALTH_RULES).firstMonth;
   for (let i = n - 1; i >= 0; i--) {
     const m = _hlAddMonth(month, -i);
-    const R = rules || HEALTH_RULES;
-    if (m < R.firstMonth) continue;
+    if (m < first) continue;
     out.push(computeChannelHealth(ch, m, snap, rules));
   }
   return out;
@@ -925,10 +1043,11 @@ function _hlPercentiles(vals) {
 
 // 回測（純函式）：逐通路逐月算原始值與分數；另依類型算各子指標的百分位。vals＝原始數字（校準 healthCalibrate 用）。
 //   raws＝每列計分項目的原始值（沒四捨五入）、得分、分數線（Console 對邊界用，不印出來）。
+//   呼叫端明確傳 rules ⇒ 全部月份都用那份；沒傳 ⇒ 每個月各用自己適用的標準。
 function healthBacktest(snap, months, channels, rules) {
-  const R = rules || HEALTH_RULES;
   const rows = [], vals = {}, raws = [];
   (channels || HEALTH_CHANNELS).forEach(ch => months.forEach(m => {
+    const R = rules || healthRulesForMonth(m, snap && snap.healthRuleVersions);
     const r = computeChannelHealth(ch, m, snap, R);
     const row = { 通路: ch.label, 月: m, 類型: (R.types[ch.type] || {}).label || ch.type, 狀態: r.status };
     r.dims.forEach(d => d.subs.forEach(s => {
@@ -1041,7 +1160,7 @@ function _hlRangeLabel(from, to) {
 function _hlFootText(rules) {
   const R = rules || HEALTH_RULES;
   const scope = { pureRate: 'KPI 月結', sellThrough: '商品層' };
-  return `規則 ${R.version} 計分的項目：` + R.score.items.map(it => `${it.label}（${Math.round(it.w * 100)}%；${scope[it.key] || ''}${it.provisional ? '；暫定' : ''}）`).join('、') + '。'
+  return `評分標準：${_hlYmLabel(R.from || R.firstMonth)} 起適用。計分的項目：` + R.score.items.map(it => `${it.label}（${Math.round(it.w * 100)}%；${scope[it.key] || ''}${it.provisional ? '；暫定' : ''}）`).join('、') + '。'
     + '毛利率、營收、純利、廣告佔比只顯示、不計分；不同通路類型的分數線、營收口徑都不同，跨類型的分數高低只供參考。';
 }
 // v5 說明用：一個項目在某類型的分數線文字「100 分 ≥25%、80 分 ≥20%、60 分 ≥18%」（從規則產生）
@@ -1193,9 +1312,9 @@ function _hlGuideIntro(rules) {
     '最下方「另有 N 個通路沒有分數」：點了看清單。',
   ];
 }
-// 說明彈窗：第一層 5 行；第二層「看完整規則」預設收合，內容＝_hlGuideBlocks(HEALTH_RULES)（門檻、權重都從規則產生）。
+// 說明彈窗：第一層 5 行；第二層「看完整規則」預設收合（opts.openFull＝直接展開），內容＝_hlGuideBlocks(rules)（門檻、權重都從傳進來的規則產生）。
 //   樣式沿用 recon-guide（App.guideHtml 同一套 class），不改共用的 modal.js。
-function _hlGuideModalHtml(rules) {
+function _hlGuideModalHtml(rules, opts) {
   const e = t => escapeHtml(t);
   const full = _hlGuideBlocks(rules).map(b => {
     if (b.p) return (b.h ? '<h4 class="recon-guide-h">' + e(b.h) + '</h4>' : '') + '<p class="recon-guide-p">' + e(b.p) + '</p>';
@@ -1203,7 +1322,7 @@ function _hlGuideModalHtml(rules) {
     return '<h4 class="recon-guide-h">' + e(b.h) + '</h4><ol class="recon-guide-ol">' + b.ol.map(x => '<li>' + x.split('\n').map(e).join('<br>') + '</li>').join('') + '</ol>';
   }).join('');
   return `<div class="recon-guide hl-guide"><ul class="hl-guide-intro">${_hlGuideIntro(rules).map(x => `<li>${e(x)}</li>`).join('')}</ul>
-    <details class="hl-guide-more"><summary>看完整規則</summary><div class="hl-guide-full">${full}</div></details>
+    <details class="hl-guide-more"${opts && opts.openFull ? ' open' : ''}><summary>看完整規則</summary><div class="hl-guide-full">${full}</div></details>
     <div class="recon-guide-ftr"><button type="button" class="recon-btn recon-guide-close" onclick="App.closeModal()">關閉</button></div></div>`;
 }
 
@@ -1767,11 +1886,12 @@ function _hlTileHtml(r, prev, rank, open, snap) {
       <div class="hl-tile-mets">${_hlTileMetsHtml(r, prev)}</div>
     </div>`;
 }
-// 哪些通路類型的總分要等商品層（v5）：有商品層、而且「不是純利率」的計分項目（動銷率）有分數線的類型。從規則產生，不寫死。
+// 哪些通路類型的總分要等商品層（v5）：有商品層、而且「不是純利率」的計分項目（動銷率）有分數線的通路（含通路自己的線）所屬的類型。從規則產生，不寫死。
 function _hlWaitTypeLabels(rules) {
   const R = rules || HEALTH_RULES;
-  const types = [...new Set(HEALTH_CHANNELS.filter(ch => ch.prod).map(ch => ch.type))]
-    .filter(t => R.score.items.some(it => it.key !== 'pureRate' && it.lines && it.lines[t]));
+  const types = [...new Set(HEALTH_CHANNELS
+    .filter(ch => ch.prod && R.score.items.some(it => it.key !== 'pureRate' && _hlLinesFor(it, ch)))
+    .map(ch => ch.type))];
   return types.sort((a, b) => (R.types[a].order - R.types[b].order)).map(t => R.types[t].label);
 }
 // 卡片分數下面一行（v5）：「純利 80 · 動銷 60」；只有純利率算分時「純利 80 · 只看純利率」；動銷率在等商品層時「純利 80 · 動銷 載入中…」。
@@ -2167,6 +2287,10 @@ function _hlDrawChart() {
 }
 
 let _hlLast = null;   // 最近一次畫面用的 { month, snap }（畫圖用）
+// 選定月份適用的規則（說明彈窗用）。還沒選月份（載入中、錯誤畫面也按得到說明）⇒ BASE。
+function _hlSelectedRules() {
+  return healthRulesForMonth(_hlState.month, _hlLast && _hlLast.snap && _hlLast.snap.healthRuleVersions);
+}
 
 /* ---------- 頁頂「KPI 尚未填完」列 ---------- */
 // 能不能跳到 KPI 月結表：profit.js 的 setKpiYM 在、而且這個帳號開得了 office-d1-kpi（行銷部門頁，走 _isRouteAllowed）。不行就只顯示文字。
@@ -2206,11 +2330,13 @@ function _hlPendingHtml(items) {
 // 頁頂「商品資料載入中」：只一行短字；三個平台都載好、卡片也都有分數就整段不顯示（完整說明在「怎麼看這頁」）。
 //   wait＝這個月還在等商品層的卡片的類型短名（_hlNoteWaitLabels，例 ['MOMO', 'MO+']）；有就說「…的分數稍後出現」，沒有就說「待處理商品數稍後出現」。
 let _hlNoteWait = [];   // 上一次整頁重畫算出來的 wait（5 秒更新秒數時沿用，不重算）
-function _hlNoteWaitLabels(results) {
+//   results 的狀態已經是依選定月份的規則（含通路自己的線）算出來的；這裡的類型名稱也讀同一份。
+function _hlNoteWaitLabels(results, rules) {
+  const R = rules || HEALTH_RULES;
   const out = [];
   results.forEach(r => {
     if (!_HL_WAIT_STATUS[r.status]) return;
-    const s = String(((HEALTH_RULES.types[r.type] || {}).label) || r.type).split(' ')[0];
+    const s = String(((R.types[r.type] || {}).label) || r.type).split(' ')[0];
     if (out.indexOf(s) < 0) out.push(s);
   });
   return out;
@@ -2251,7 +2377,7 @@ function _hlOnClick(e) {
     }
     else if (act.dataset.hlAct === 'tagsmore' && act.dataset.hlList) { _hlState.tagsMore = Object.assign({}, _hlState.tagsMore, { [act.dataset.hlList]: !(_hlState.tagsMore || {})[act.dataset.hlList] }); App.render(); }
     else if (act.dataset.hlAct === 'todoall' && act.dataset.hlCh) { _hlState.todoAll = _hlState.todoAll === act.dataset.hlCh ? null : act.dataset.hlCh; App.render(); }
-    else if (act.dataset.hlAct === 'guide' && typeof App.openModal === 'function') App.openModal({ title: '📖 通路健檢 · 怎麼看這頁', width: '640px', hideFooter: true, bodyHtml: _hlGuideModalHtml() });
+    else if (act.dataset.hlAct === 'guide' && typeof App.openModal === 'function') App.openModal({ title: '📖 通路健檢 · 怎麼看這頁', width: '640px', hideFooter: true, bodyHtml: _hlGuideModalHtml(_hlSelectedRules(), { openFull: act.dataset.hlGuideFull === '1' }) });
     else if (act.dataset.hlAct === 'loadprod' && act.dataset.hlPlatform) {
       if (_hlProd.state[act.dataset.hlPlatform] === 'timeout') _hlProd.state[act.dataset.hlPlatform] = 'idle';
       _hlEnsurePlatform(act.dataset.hlPlatform); App.render();
@@ -2338,7 +2464,7 @@ function _hlOnChange(e) {
 
 Object.assign(App, {
   viewHealth() {
-    // 「📖 怎麼看這頁」在載入中、錯誤畫面也要按得到（說明內容只讀 HEALTH_RULES，不需要資料）
+    // 「📖 怎麼看這頁」在載入中、錯誤畫面也要按得到（說明內容只讀規則，不需要資料；還沒選月份時讀 BASE）
     const header = `<div class="page-header hl-hd">
         <div><h2>通路健檢</h2>
         <p>每個通路每月的體檢分數，點通路可看細項。</p></div>
@@ -2374,9 +2500,10 @@ Object.assign(App, {
     if (!_hlState.month) _hlState.month = month;
     _hlWantProd(month, _hlState.open);   // 已載入的平台：補排這次要用到的商品層快照（算完會再重畫一次）
     _hlLast = { month, snap };
+    const monthRules = healthRulesForMonth(month, snap.healthRuleVersions);
     const results = HEALTH_CHANNELS.map(ch => computeChannelHealth(ch, month, snap));
     const prevM = _hlAddMonth(month, -1);
-    const prev = {};
+    const prev = {};   // 上個月的分數用上個月自己的標準（computeChannelHealth 依 prevM 查），「比上月」才不會拿新標準重算舊月份
     if (prevM >= HEALTH_RULES.firstMonth) HEALTH_CHANNELS.forEach(ch => { prev[ch.id] = computeChannelHealth(ch, prevM, snap); });
     const rank = _hlRank(results);
     const sorted = _hlSortResults(results);
@@ -2405,12 +2532,12 @@ Object.assign(App, {
         ${_hlMock ? `<div class="hl-mock-banner">模擬模式：假資料只在本機記憶體（__healthMock(false) 關閉）</div>` : ''}
         ${staleNote}
         ${_hlPendingHtml(healthPendingKpi(snap, month))}
-        ${_hlProdNoteHtml(snap, _hlNoteWait = _hlNoteWaitLabels(results))}
+        ${_hlProdNoteHtml(snap, _hlNoteWait = _hlNoteWaitLabels(results, monthRules))}
         <div class="hl-toolbar">
           <label class="hl-month">評分月份
             <select data-hl-month>${_hlMonthOptions(month)}</select>
           </label>
-          <span class="hl-chip-ver">規則 ${escapeHtml(HEALTH_RULES.version)}</span>
+          <button type="button" class="hl-chip-ver" data-hl-act="guide" data-hl-guide-full="1" title="${escapeHtml(monthRules.version)}">評分標準：${escapeHtml(_hlYmLabel(monthRules.from))} 起適用 ⓘ</button>
           ${mo && _hlFinite(mo.asOf) ? `<span class="hl-asof">KPI 最後更新 ${escapeHtml(_hlFmtTime(mo.asOf))}</span>` : ''}
           <span class="filter-spacer"></span>
           <button type="button" class="btn-ghost" data-hl-act="refresh">↻ 重新計算</button>

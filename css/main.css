@@ -2771,7 +2771,8 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-month { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
 .hl-month select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
 .hl-chip-ver, .hl-asof { font-size: 12px; color: var(--text-muted); }
-.hl-chip-ver { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+.hl-chip-ver { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-family: inherit; cursor: pointer; }
+.hl-chip-ver:hover, .hl-chip-ver:focus-visible { border-color: var(--primary); color: var(--primary); }
 /* 🔴 css/profit.css 有全域 th / td（靠右、不換行、大寫、th 可點的游標與 hover 色），全站都會載入。
    這裡把健檢細項裡的表（.hl-sub：子指標表、拖累清單）的 th / td 全部明確設回：文字靠左、數字欄（.hl-num）靠右，表頭跟內容同一個對齊。 */
 .hl-sub th { text-align: left; text-transform: none; letter-spacing: normal; cursor: default; user-select: auto; background: none; }
