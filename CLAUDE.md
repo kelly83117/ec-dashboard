@@ -323,11 +323,34 @@ ESM 有個致命陷阱必須牢記：
   - 開站就地壓縮：profit.js 載入 3 秒後逐把把未壓縮的報表快取覆寫成 LZ1（只碰 4 段報表 key，覆寫前重讀比對、寫完讀回、不一致寫回原值），
     console.info 印統計，結果在 `window.__reportCacheMigrateReport`（只讀觀測點，不以 `__cloud` 開頭）。
   - 回滾開關：profit.js 開頭 `_LS_COMPRESS_WRITE` / `_LS_COMPRESS_MIGRATE` 改 false 再部署（讀取端照樣讀得懂已寫下的 LZ1）。
-- MOMO 商品主檔本機壓縮（docs/plan-momo-compress.md §8；**目前只到第 1 塊＝讀取端相容 LZ1，寫入仍是未壓縮 JSON**）：
+- MOMO 商品主檔本機壓縮（docs/plan-momo-compress.md §8 第 1 塊＝讀取端相容 LZ1、§9 第 2 塊＝寫入壓縮＋就地壓縮；firebase.js 的 hook 是可選的第 3 塊，還沒做）：
   - 範圍只有 `ec_momo_products|<通路>` 與 `ec_momo_products_lastpushed|<通路>`；`ec_momo_cost_by_origin`（含 `_meta`）不壓（#175，firebase.js 直接 `JSON.parse` 它）。
   - 讀：一律走 `_momoLsRead(k, 'array'|'sigmap')` / `_momoLsReadNote`（回 `{state:'absent'|'ok'|'bad'}`；舊 JSON 不檢查形狀＝跟改版前逐字相同）。
     讀點：`momoLoadProducts`、`momoPendingProducts`、sweep（`_sweepAllLocalReportsIntoPending`）、`_momoProductsLastPushedGet`。
-    🔴 新增讀這兩類 key 的地方不准直接 `JSON.parse(localStorage.getItem(...))`（第 2 塊開始寫 LZ1 後會讀成 `[]`）。
+    🔴 新增讀這兩類 key 的地方不准直接 `JSON.parse(localStorage.getItem(...))`（本機已經有 LZ1，直接 parse 會讀成 `[]`）。
+    `_momoLsRead` 有解碼快取（`_momoLzUnwrapCached`，每把 key 一格 {raw, json}）：raw 沒變就不再解壓，但每次仍重新 `JSON.parse`（每次拿到新物件）。
+  - 寫（第 2 塊）：只有三個地方會寫這兩類 key。
+    - `momoSaveProducts`、`_momoProductsLastPushedSet` 走 `_momoLsWrite`：照舊先同步寫 JSON；寫不進去（空間滿）才當場改寫 LZ1、讀回逐字驗證，
+      不一致就還原成改寫前的內容（原本沒有就移除）、還原也失敗就保留（之後讀成 bad，由讀壞防護接手）。
+      商品主檔兩種都寫不進去 ⇒ 紅色彈窗「本機空間不足…請先按同步雲端」（同一把 key 一個分頁只跳一次），鏡像 / pending / dirty 照常更新。
+    - `_momoProductsLastPushedSet` 內容跟本機現值一樣就**不寫**（firebase.js 的 `momo_products` 訂閱每個 snapshot 都會呼叫它）。
+    - firebase.js:291 的訂閱照舊把不是 dirty 的通路整份寫回 JSON（每次開站第一次進 MOMO）；第 2 塊不動它，改成聽 `momoDataReady` 排延後壓縮。
+  - 開關（profit.js 開頭，跟報表的 `_LS_COMPRESS_WRITE` / `_LS_COMPRESS_MIGRATE` 各自回滾）：
+    `_LS_COMPRESS_MOMO_WRITE`（寫不進去改寫 LZ1、延後壓縮、lastpushed 不重寫同內容）、`_LS_COMPRESS_MOMO_MIGRATE`（就地壓縮；WRITE 關掉時它也不做）。
+    兩個都改 false 再部署 ⇒ 每條寫入路徑都走第 1 塊原本的程式碼（node 驗過 setItem 紀錄逐字相同），讀取端照樣讀得懂已寫下的 LZ1。
+  - 就地壓縮（`_momoLsCompressOne` 單把、`_momoLsMigrate` 一輪、`_momoLsCompressSoon` 延後一把＝同 key 去抖 3 秒再等閒置）：
+    - 時機：開站（等報表那一輪的 `__reportCacheMigrateReport` 出現再開始，最多等 60 秒）；`momoDataReady` 之後（對 changedShops）；
+      `syncToCloud` 推送成功清掉 products dirty 之後；「一鍵釋出空間」（`_lsTidyRun` 的 (a2)，結果在 `res.momoCompressed`）。
+    - 一次一把、把與把之間讓出主執行緒（630K 字元單把約 0.5～1.2 秒，切不開）；同一時間只跑一輪。順序：lastpushed 全部先，再 products 由大到小。
+    - 條件（任一不符就跳過）：讀壞的一律不碰（不刪、不覆寫、不修）；形狀對（products 陣列、lastpushed 值全是字串的物件）而且是標準格式 JSON；
+      🔴 **dirty 通路的商品主檔不壓**（未推的修改留 JSON，舊分頁風險見下）；5 秒內剛存過不壓；壓了沒變小不壓；覆寫前重讀不一致（別的分頁剛寫）不壓。
+      覆寫 → 讀回逐字比對 → 不一致寫回原值；覆寫丟錯 ⇒ 這一輪停止。不登記 pending、不動 `_profitMem` / `_mem`、不推雲端、不改 dirty。
+    - 🔴 **不變式：products 是 LZ1 ⇒ 同通路 lastpushed 一定是 LZ1 或不存在**（「lastpushed 一定先壓」）。
+      理由：v817 以前的舊分頁讀不懂 LZ1——讀到 LZ1 的 products 會當成 `[]`，但讀到 LZ1 的 lastpushed 會走 bootstrap（removed 一律空、**不刪雲端**）；
+      如果 products 是 LZ1 而 lastpushed 還是 JSON，舊分頁「從空表新增一筆再同步」就會把雲端刪到只剩那一筆（node 用 a229a47 的程式模擬過）。
+      維持方式：products 壓之前檢查同通路 lastpushed；`_momoLsCompressSoon` 對 products 會先壓 lastpushed；
+      `momoSaveProducts` 寫不進去、要改寫 LZ1 之前先把 lastpushed 壓掉（`beforeLz`，`ignoreRecent`）。lastpushed 本身不受「dirty 不壓」限制。
+      ⚠ 這些只保護雲端；舊分頁仍可能用小清單蓋掉本機那份，所以部署前要請大家把分頁全部關掉重開。
   - 🔴 「讀壞」（LZ1 解不開，或 JSON 壞掉）跟報表的「當作沒有快取」**意思相反**：商品主檔讀壞＝裡面可能有沒推的修改。
     - `momoSaveProducts`：`_profitMem` 與 `_mem` 都沒值、本機又讀壞 ⇒ **拒存**（回 false、紅色彈窗「…沒有存…請通知 Keani」、不標 pending / dirty），
       免得從 `[]` 長出一份小清單蓋掉本機。正常存檔回 true（現有呼叫端都不用回傳值）。
@@ -350,8 +373,11 @@ ESM 有個致命陷阱必須牢記：
   - 除錯（都是唯讀，不以 `__cloud` 開頭、不影響本機防寫物件數）：
     `__momoLsState()`＝列出這兩類 key 的格式（LZ1 / JSON）、字元數、讀取狀態，不回傳內容；
     `__momoDelGuardDemo()`＝用假資料開刪除確認視窗、Console 印按了什麼，不讀不寫任何資料；
-    `window.__momoLastDelGuard`＝最近一次 merge 的防線等級 / N / M（刻意不併進 `__momoLastMergePlan`，那個維持原形狀）。
-  - 第 2 塊（寫入 LZ1、就地壓縮）上線前，第 1 塊必須已部署並請大家重新整理過；🔴 第 1 塊的讀取碼永遠不回滾（舊碼讀到 LZ1 會得到 `[]`）。
+    `window.__momoLastDelGuard`＝最近一次 merge 的防線等級 / N / M（刻意不併進 `__momoLastMergePlan`，那個維持原形狀）；
+    `window.__momoLsMigrateReport`＝最近一輪就地壓縮的結果 `{done, skip:{原因:把數}, beforeChars, afterChars, stopped}`，Console 也會印一行
+    「[MOMO 本機] 就地壓縮：處理 N 把…」。
+  - 🔴 第 1 塊的讀取碼永遠不回滾（舊碼讀到 LZ1 會得到 `[]`）。部署寫入 LZ1 的版本前，要請大家把所有分頁關掉重開（`version.js` 只在載入時比版號、
+    不會提醒開著的分頁）。
 - 本機空間快滿預警＋一鍵釋出空間（docs/plan-ls-space-tidy.md）：
   - app.js：`window.__lsUsage()`（唯讀，`{usedKB, limitKB, ratio, top}`，量法＝所有 key＋value 字元數，上限 `LS_LIMIT_KB=5120`）；
     開站 20 秒後、之後每 30 分鐘 `__lsSpaceCheck`，`ratio ≥ LS_WARN_RATIO(0.85)` 且已登入才在左下角顯示 `.ls-warn` 卡片；

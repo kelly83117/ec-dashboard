@@ -11,6 +11,12 @@ const TEST_SHOP_ID='測試通路';
 //   ⚠ 放在模組最前面：函式會 hoist、const 不會，放後面會在呼叫時撞 TDZ（理由同上面的 TEST_SHOP_ID）。
 const _LS_COMPRESS_WRITE=true;
 const _LS_COMPRESS_MIGRATE=true;
+// MOMO 商品主檔 / lastpushed 的 LZ1 壓縮開關（MOMO 本機壓縮第 2 塊，docs/plan-momo-compress.md §9；跟報表的開關各自回滾）。
+//   _LS_COMPRESS_MOMO_WRITE：寫不進去時改寫 LZ1、寫成功後延後壓縮、lastpushed 內容沒變就不重寫。
+//   _LS_COMPRESS_MOMO_MIGRATE：就地壓縮（開站、momoDataReady 之後、一鍵釋出空間）；WRITE 關掉時它也不做。
+//   回滾＝兩個都改 false 再部署 → 每條寫入路徑都走第 1 塊原本的程式碼；讀取端（_momoLsRead）照樣讀得懂已寫下的 LZ1，🔴 讀取端永遠不回滾。
+const _LS_COMPRESS_MOMO_WRITE=true;
+const _LS_COMPRESS_MOMO_MIGRATE=true;
 const _REPORT_CACHE_DEFER_MS=1500;
 const _reportCacheDeferred=new Map();   // key → { json, meta:{shop,month,half}, timer }
 
@@ -1518,6 +1524,20 @@ if(!window.__reportCacheMigrateStarted){
     },3000);
   }catch(e){}
 }
+// MOMO 商品主檔 / lastpushed 開站就地壓縮（第 2 塊，§9-2）：等報表那一輪跑完（__reportCacheMigrateReport 出現，最多等 60 秒）再開始，
+//   兩者不同時卡主執行緒。進 MOMO 後 firebase.js 的訂閱會把不是 dirty 的通路寫回 JSON，那部分靠下面 momoDataReady 那個 listener 再壓。
+if(!window.__momoLsMigrateStarted){
+  window.__momoLsMigrateStarted=true;
+  try{
+    const t0=Date.now();
+    const wait=()=>{
+      if(!window.__reportCacheMigrateReport&&Date.now()-t0<60000){ setTimeout(wait,500); return; }
+      const go=()=>{ try{ _momoLsMigrate(); }catch(e){ console.error('[MOMO 本機] 就地壓縮啟動失敗',e); } };
+      if(typeof window.requestIdleCallback==='function') window.requestIdleCallback(go,{timeout:5000}); else setTimeout(go,0);
+    };
+    setTimeout(wait,3000);
+  }catch(e){}
+}
 if(!window.__reportCacheFlushInstalled){
   window.__reportCacheFlushInstalled=true;
   try{
@@ -1631,6 +1651,8 @@ async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
   try{
     // (a) 壓縮
     if(!dryRun){ try{ res.compressed=await _reportCacheMigrate({gapMs:0}); }catch(e){ res.compressed={error:String(e&&e.message||e)}; } }
+    // (a2) MOMO 商品主檔 / lastpushed 就地壓縮（第 2 塊）：只壓縮、不刪；條件同開站那一輪（讀壞不碰、dirty 的商品主檔不壓）
+    if(!dryRun){ try{ res.momoCompressed=await _momoLsMigrate({gapMs:0}); }catch(e){ res.momoCompressed={error:String(e&&e.message||e)}; } }
     // 等雲端報表（不在淨利表頁時先訂閱，跟工作日誌頁同一組唯讀訂閱）
     const ready=()=>{ try{ return !!(window.__profitsCollectionReady&&window.__profitsCollectionReady()); }catch(e){ return false; } };
     if(!ready()){
@@ -1685,7 +1707,7 @@ async function _lsTidyRun(opts,dryRun,waitMs,pollMs,phase){
         res.pricing.deleted.push({key:d.key,kb:d.kb});
       }catch(e){}
     });
-    console.info('[釋出空間] 壓縮 '+((res.compressed&&res.compressed.done)||0)+' 把；刪舊報表 '+res.deleted.length+' 把、保留 '+res.kept.length+' 把'
+    console.info('[釋出空間] 壓縮 '+((res.compressed&&res.compressed.done)||0)+' 把（MOMO 商品主檔 '+((res.momoCompressed&&res.momoCompressed.done)||0)+' 把）；刪舊報表 '+res.deleted.length+' 把、保留 '+res.kept.length+' 把'
       +(res.skippedAll?'（'+res.skippedAll+'）':'')+'；刪洞察表副本 '+res.insight.deleted.length+' 把',res);
   }catch(e){
     res.planError=res.planError||String(e&&e.message||e);
@@ -2556,7 +2578,7 @@ async function syncToCloud(shop, allowKeys){   // allowKeys=Set → 只推選中
     //     （搬回去會製造「key 級沒清、品號級清了」＝下次 _editsPushGate 判 problem 的難查狀態）。
     ok.forEach(k=>{ if(k.startsWith('ec_edits|')){ try{ _editsDirtyDel(k); }catch{} try{ _editsItemsDirtyClear(k); }catch{} } });   // 編輯覆蓋值同理：真的推成功才清 dirty → 下次同步不再重推同一把；失敗留著繼續當待同步
     ok.forEach(k=>{ if(_momoRfIsKey(k)){ try{ _momoRfDirtyDel(k); }catch{} } });   // 對帳／運費：真的推成功才清註冊表；雲端較新／讀失敗／推失敗的留著（進 failed、彈窗列出）
-    ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護
+    ok.forEach(k=>{ if(k.startsWith('ec_momo_products|')){ try{ _momoDirtyDel(k); }catch{} try{ _momoLsCompressSoon(k); }catch{} } });   // 真的推成功才清 dirty → 之後雲端訂閱可正常跟上（stale 防護解除）；失敗留著繼續保護。清掉 dirty 後才排延後壓縮（第 2 塊：dirty 的商品主檔不壓）
     ok.forEach(k=>{ if(k.startsWith('ec_momo_moplus_origins|')){ try{ _momoODirtyDel(k); }catch{} try{ momoOriginsShadowPushed(k); }catch{} } });   // origins 同理：真的推成功才清持久化 dirty；失敗留著繼續保護本機
     ok.forEach(k=>{ if(cupIsNoteKey(k)){ try{ _cupNoteKeyDirtyDel(k); _cupNoteItemsDirtyClear(k); }catch{} } });   // 酷澎備註：兩層 dirty 同一迴圈相鄰清（只清推成功的 key；失敗留著下次再推）
     ok.forEach(k=>{ if(k==='ec_pchome_recon'||k==='ec_pchome_products'||k==='ec_pchome_orders'||k==='ec_pchome_history'||k.indexOf('ec_pchome_optlog|')===0){ try{ pchomeDirtyDel(k); }catch{} } });   // PChome recon/主檔/訂單明細/優化紀錄/歷程：真的推成功才清持久 dirty（失敗留著繼續保護＋繼續算待推）
@@ -14135,7 +14157,7 @@ function momoProductsKey(shop){ return 'ec_momo_products|'+shop; }
 function _momoLsRead(k, shape){
   let raw=null;
   try{ raw=localStorage.getItem(k); }catch(e){ return {state:'absent',value:undefined,why:'getItem 丟錯'}; }   // 同改版前：讀不到＝沒有
-  const u=_lz1Unwrap(raw);
+  const u=_momoLzUnwrapCached(k, raw);
   if(u.kind==='none') return {state:'absent',value:undefined};
   if(u.kind==='bad') return {state:'bad',value:undefined,why:'LZ1 解不開'};
   let v;
@@ -14144,6 +14166,165 @@ function _momoLsRead(k, shape){
   const okShape = shape==='array' ? Array.isArray(v)
     : (v!==null&&typeof v==='object'&&!Array.isArray(v)&&Object.values(v).every(x=>typeof x==='string'));
   return okShape?{state:'ok',value:v}:{state:'bad',value:undefined,why:'LZ1 形狀不對'};
+}
+// ── 解碼快取（第 2 塊）：每把 key 只記一格 {raw, json}。raw 跟上次一樣就直接用上次解出來的 JSON 字串，不再解壓。
+//   為什麼要：momoRefreshSyncBtn（16 個呼叫點）每次都對 dirty 通路讀一次 lastpushed，LZ1 每次解壓 80～140 ms。
+//   只快取「字串」，呼叫端（_momoLsRead）每次仍重新 JSON.parse → 維持「每次讀都拿到新物件」的語意。只快取解得開的（kind:'lz'）。
+//   ⚠ 用函式屬性懶建立（理由同 _momoLsBadMap）。
+function _momoLzCacheMap(){ if(!_momoLzCacheMap.m) _momoLzCacheMap.m=new Map(); return _momoLzCacheMap.m; }
+function _momoLzUnwrapCached(k, raw){
+  if(typeof raw!=='string'||!raw.startsWith('LZ1:')) return _lz1Unwrap(raw);
+  const c=_momoLzCacheMap(), hit=c.get(k);
+  if(hit&&hit.raw===raw) return {kind:'lz',json:hit.json};
+  const u=_lz1Unwrap(raw);
+  if(u.kind==='lz') c.set(k,{raw,json:u.json}); else c.delete(k);
+  return u;
+}
+// ── 寫入（第 2 塊，docs/plan-momo-compress.md §9-1）：W1 momoSaveProducts、W2 _momoProductsLastPushedSet 共用 ──
+//   先照舊同步寫 JSON（可靠度跟以前一樣）；寫不進去（多半是空間滿）而且 _LS_COMPRESS_MOMO_WRITE 開著 → 當場改寫 LZ1、讀回逐字驗證。
+//   回 'json' | 'lz' | 'fail'。LZ1 讀回不一致 → 寫回改寫前的原字串（原本沒有就移除＝回到原狀）；寫回也失敗 → 保留、不刪
+//   （之後會讀成 bad，由第 1 塊的防護接手：不准存檔、同步不推）。'fail' 時 localStorage 留著的仍是改寫前那份（同第 1 塊）。
+//   opts.beforeLz：確定要改寫 LZ1 之前呼叫一次（W1 用來先壓同通路的 lastpushed）。
+function _momoLsWrite(k, json, opts){
+  try{ localStorage.setItem(k,json); return 'json'; }catch(e){}
+  if(!_LS_COMPRESS_MOMO_WRITE) return 'fail';
+  try{ if(opts&&typeof opts.beforeLz==='function') opts.beforeLz(); }catch(e){}
+  const enc=_lz1Encode(json);
+  if(enc===null) return 'fail';
+  let prev=null; try{ prev=localStorage.getItem(k); }catch(e){}
+  try{ localStorage.setItem(k,enc); }catch(e){ return 'fail'; }
+  let ok=false; try{ ok=(_lz1Unwrap(localStorage.getItem(k)).json===json); }catch(e){}
+  if(ok){ try{ console.warn('[MOMO 本機] '+k+' 未壓縮的寫不進去（空間不足），已改存壓縮格式'); }catch{} return 'lz'; }
+  try{ if(prev===null) localStorage.removeItem(k); else localStorage.setItem(k,prev); console.error('[MOMO 本機] '+k+' 壓縮格式讀回不一致，已還原成改寫前的內容'); }
+  catch(e){ try{ console.error('[MOMO 本機] '+k+' 壓縮格式讀回不一致，而且還原失敗：保留現狀（之後會讀成損毀 → 不准存檔、同步不推）'); }catch{} }
+  return 'fail';
+}
+// 內容跟本機現值一樣嗎（W2 先比再寫用）：現值是 JSON 就直接比字串；是 LZ1 就先比標頭的長度欄位，一樣才解壓比（走解碼快取）。
+function _momoLsSameContent(k, json){
+  let raw=null; try{ raw=localStorage.getItem(k); }catch(e){ return false; }
+  if(typeof raw!=='string') return false;
+  if(raw===json) return true;
+  if(!raw.startsWith('LZ1:')) return false;
+  const sep=raw.indexOf(':',4);
+  if(sep<=4||raw.slice(4,sep)!==String(json.length)) return false;
+  const u=_momoLzUnwrapCached(k, raw);
+  return u.kind==='lz'&&u.json===json;
+}
+// 商品主檔兩種都寫不進去 → 紅色彈窗（同一把 key 一個分頁只跳一次）。鏡像、pending、dirty 照樣更新，同步仍可從記憶體推。
+function _momoLsNotifyWriteFail(shop, k){
+  if(!_momoLsNotifyWriteFail.seen) _momoLsNotifyWriteFail.seen=new Set();
+  if(_momoLsNotifyWriteFail.seen.has(k)) return;
+  _momoLsNotifyWriteFail.seen.add(k);
+  const msg='本機空間不足，'+momoShopDisplay(shop)+' 的修改只存在這個分頁裡。\n請先按「☁ 同步雲端」，再關閉或重新整理。';
+  try{ console.error('[MOMO 本機] '+k+' 未壓縮與壓縮格式都寫不進去（空間不足）'); }catch{}
+  try{ if(window.App&&typeof App.showAlertModal==='function') App.showAlertModal({title:'本機空間不足，修改沒有存進電腦',message:msg,kind:'error',dedupeKey:'momo-ls-write-fail|'+k}); else if(typeof showToast==='function') showToast(msg,'error'); }catch{}
+}
+// ── 就地壓縮（第 2 塊，§9-2）：單把處理。回 {done,before,after} | {skip:原因} | {stop:原因}。只在最後一步覆寫，前面全是只讀檢查。
+//   🔴 讀壞的 key 一律不碰；dirty 通路的商品主檔不壓（舊分頁風險，§9-3）；商品主檔要等同通路 lastpushed 已是 LZ1（或不存在）才壓
+//     ⇒ 永遠維持「products 是 LZ1 ⇒ lastpushed 是 LZ1 或不存在」：v817 以前的舊分頁讀到 LZ1 的 lastpushed 會走 bootstrap、不刪雲端。
+//   不登記 pending、不動 _profitMem / _mem、不推雲端、不改 dirty。
+//   opts.ignoreRecent：不看「5 秒內剛存過」（只有 W1 寫不進去、要先壓 lastpushed 時用；那個條件只是避免編輯中重複壓縮，不影響正確性）。
+function _momoLsCompressOne(k, opts){
+  const isP=/^ec_momo_products\|[^|]+$/.test(k), isLp=/^ec_momo_products_lastpushed\|[^|]+$/.test(k);
+  if(!isP&&!isLp) return {skip:'不是商品主檔 / lastpushed'};
+  let raw=null; try{ raw=localStorage.getItem(k); }catch(e){ return {skip:'讀取失敗'}; }
+  if(typeof raw!=='string'||raw==='') return {skip:'不存在'};
+  if(raw.startsWith('LZ1:')) return {skip:'已是壓縮格式'};
+  const r=_momoLsRead(k, isP?'array':'sigmap');
+  if(r.state==='bad') return {skip:'讀壞（不碰）'};
+  if(r.state!=='ok') return {skip:'不存在'};
+  const v=r.value;
+  const okShape=isP?Array.isArray(v):(v!==null&&typeof v==='object'&&!Array.isArray(v)&&Object.values(v).every(x=>typeof x==='string'));
+  if(!okShape) return {skip:'形狀不對'};
+  if(JSON.stringify(v)!==raw) return {skip:'不是標準格式'};
+  if(isP){
+    if(_momoIsDirty(k)) return {skip:'未推（dirty）不壓'};
+    let lpRaw=null; try{ lpRaw=localStorage.getItem(momoProductsLastPushedKey(k.slice('ec_momo_products|'.length))); }catch(e){ return {skip:'讀 lastpushed 失敗'}; }
+    if(typeof lpRaw==='string'&&lpRaw!==''&&!lpRaw.startsWith('LZ1:')) return {skip:'同通路 lastpushed 還不是壓縮格式'};
+  }
+  try{ if(!(opts&&opts.ignoreRecent)&&window._momoJustSaved&&(Date.now()-window._momoJustSaved<5000)) return {skip:'5 秒內剛存過'}; }catch{}
+  const enc=_lz1Encode(raw);
+  if(enc===null) return {skip:'壓縮失敗'};
+  if(enc.length>=raw.length) return {skip:'壓縮後沒有變小'};
+  let now=null; try{ now=localStorage.getItem(k); }catch(e){}
+  if(now!==raw) return {skip:'別的分頁剛寫過'};
+  try{ localStorage.setItem(k,enc); }
+  catch(e){ try{ console.warn('[MOMO 本機] 就地壓縮覆寫失敗，停止這一輪：'+k,e); }catch{} return {stop:'覆寫失敗（'+(e&&e.name||e)+'）'}; }
+  let ok=false; try{ ok=(_lz1Unwrap(localStorage.getItem(k)).json===raw); }catch(e){}
+  if(!ok){
+    try{ localStorage.setItem(k,raw); console.error('[MOMO 本機] 就地壓縮讀回不一致，已寫回原值：'+k); }
+    catch(e){ try{ console.error('[MOMO 本機] 就地壓縮讀回不一致，而且寫回原值也失敗：'+k,e); }catch{} }
+    return {skip:'讀回不一致已還原'};
+  }
+  return {done:true, before:raw.length, after:enc.length};
+}
+// 就地壓縮一輪：lastpushed 全部先處理、再處理商品主檔，各自由大到小；一次一把、把與把之間讓出主執行緒（單把壓縮切不開）。
+//   同一時間只跑一輪（正在跑就回同一個 Promise）。結果另存 window.__momoLsMigrateReport（唯讀觀測點，不以 __cloud 開頭）。
+function _momoLsMigrate(opts){
+  if(_momoLsMigrate.running) return _momoLsMigrate.running;
+  const gap=(opts&&opts.gapMs!=null)?opts.gapMs:50;
+  const st={done:0,skip:{},beforeChars:0,afterChars:0,stopped:''};
+  const skip=r=>{ st.skip[r]=(st.skip[r]||0)+1; };
+  const finish=()=>{
+    const kb=x=>Math.round(x/100)/10;
+    const nSkip=Object.values(st.skip).reduce((a,b)=>a+b,0);
+    try{ console.info('[MOMO 本機] 就地壓縮：處理 '+st.done+' 把、跳過 '+nSkip+' 把'+(nSkip?' '+JSON.stringify(st.skip):'')
+      +'、省下 '+kb(st.beforeChars-st.afterChars)+' KB 字元（原本 '+kb(st.beforeChars)+' → 現在 '+kb(st.afterChars)+'）'+(st.stopped?'；提前停止：'+st.stopped:'')); }catch{}
+    try{ window.__momoLsMigrateReport=st; }catch(e){}
+    _momoLsMigrate.running=null;
+    return st;
+  };
+  if(!_LS_COMPRESS_MOMO_MIGRATE||!_LS_COMPRESS_MOMO_WRITE||!window.LZString){
+    st.stopped=!window.LZString?'lz-string 沒有載入':'開關關閉';
+    return Promise.resolve(finish());
+  }
+  let lps=[], ps=[];
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(!k) continue;
+      const v=localStorage.getItem(k);
+      if(typeof v!=='string'||v===''||v.startsWith('LZ1:')) continue;
+      if(/^ec_momo_products_lastpushed\|[^|]+$/.test(k)) lps.push([k,v.length]);
+      else if(/^ec_momo_products\|[^|]+$/.test(k)) ps.push([k,v.length]);
+    }
+  }catch(e){ st.stopped='列舉 localStorage 失敗'; return Promise.resolve(finish()); }
+  const bySize=(a,b)=>b[1]-a[1];
+  const keys=lps.sort(bySize).map(x=>x[0]).concat(ps.sort(bySize).map(x=>x[0]));
+  _momoLsMigrate.running=new Promise(resolve=>{
+    let i=0;
+    const step=()=>{
+      if(st.stopped||i>=keys.length){ resolve(finish()); return; }
+      try{
+        const r=_momoLsCompressOne(keys[i]);
+        if(r.done){ st.done++; st.beforeChars+=r.before; st.afterChars+=r.after; }
+        else if(r.stop) st.stopped=r.stop;
+        else skip(r.skip||'未知');
+      }catch(e){ skip('未預期錯誤'); try{ console.error('[MOMO 本機] 就地壓縮未預期錯誤',e); }catch{} }
+      i++;
+      setTimeout(step,gap);
+    };
+    step();
+  });
+  return _momoLsMigrate.running;
+}
+// 延後壓縮一把（寫成功之後、momoDataReady 之後、推送成功之後）：同一把 key 去抖 3 秒，再等閒置（timeout 5 秒）。
+//   商品主檔會先處理同通路的 lastpushed（維持「products 是 LZ1 ⇒ lastpushed 是 LZ1」）。只由 _LS_COMPRESS_MOMO_WRITE 控制。
+function _momoLsCompressSoon(k){
+  if(!_LS_COMPRESS_MOMO_WRITE) return;
+  if(!_momoLsCompressSoon.t) _momoLsCompressSoon.t=new Map();
+  const timers=_momoLsCompressSoon.t;
+  try{ clearTimeout(timers.get(k)); }catch(e){}
+  timers.set(k, setTimeout(()=>{
+    timers.delete(k);
+    const go=()=>{
+      try{
+        if(/^ec_momo_products\|[^|]+$/.test(k)) _momoLsCompressOne(momoProductsLastPushedKey(k.slice('ec_momo_products|'.length)));
+        _momoLsCompressOne(k);
+      }catch(e){ try{ console.error('[MOMO 本機] 延後壓縮失敗 '+k,e); }catch{} }
+    };
+    if(typeof window.requestIdleCallback==='function') window.requestIdleCallback(go,{timeout:5000}); else setTimeout(go,0);
+  },3000));
 }
 // 讀壞登記（只在記憶體）：每次讀都重算，讀到 ok / absent 就移除。console 只印 key、原因、字元數，不印內容。
 //   ⚠ 用函式屬性懶建立、不用模組頂層 const：這些函式可能在執行到宣告那行之前被呼叫（TDZ，理由同檔頭 TEST_SHOP_ID）。
@@ -14221,7 +14402,12 @@ function momoSaveProducts(shop,products){
   // last-pushed 模型（2026-09-08 取代 A0 品號註冊表）：dirty 純即時算 diff(本機, 上次成功推的版本)，
   //   【不】在存檔時標任何品號註冊表 → 少一套狀態。改回原值＝下次算 diff 自動不 dirty。
   //   見下方 momoProductsDirtySkus / momoProductsPlanMerge / momoSyncProductsMerge。
-  try{ localStorage.setItem(k,_json); }catch{}
+  // 寫 localStorage：照舊同步寫 JSON。第 2 塊：寫不進去（空間不足）→ 當場改寫 LZ1；兩種都不行 → 紅色彈窗（只跳一次），其餘照舊。
+  //   ⚠ 這裡不排延後壓縮：存檔一定會標 dirty（下面），dirty 通路的商品主檔不壓（§9-3），推送成功清掉 dirty 時才排（syncToCloud 收尾）。
+  if(!_LS_COMPRESS_MOMO_WRITE){ try{ localStorage.setItem(k,_json); }catch{} }   // 開關關閉＝第 1 塊原樣
+  else if(_momoLsWrite(k,_json,{beforeLz:()=>{ try{ _momoLsCompressOne(momoProductsLastPushedKey(shop),{ignoreRecent:true}); }catch(e){} }})==='fail'){ _momoLsNotifyWriteFail(shop,k); }
+  //   ↑ beforeLz：要改寫 LZ1 之前先把同通路 lastpushed 壓成 LZ1，盡量維持「products 是 LZ1 ⇒ lastpushed 是 LZ1」（§9-3）；
+  //     lastpushed 壓不了（例如它本身讀壞）也照樣寫 products 的 LZ1——資料能存下來優先。
   try{ if(typeof Store!=='undefined'&&Store._profitMem) Store._profitMem[k]=products; }catch{}  // 權威鏡像（跨裝置：momo_products 訂閱也灌這裡）
   try{ if(typeof Store!=='undefined'&&Store._mem) Store._mem[k]=products; }catch{}              // 保留三鏡像一致
   try{ window._momoJustSaved=Date.now(); }catch{}   // bounce-back 守衛：剛存過 5 秒內、momo_products 訂閱 echo 回來不覆蓋
@@ -14288,7 +14474,19 @@ function _momoProductsLastPushedGet(shop){   // 回 {sku:sig} 或 null（不存�
   const m=r.value; if(m&&typeof m==='object'&&!Array.isArray(m)) return m;
   return null;
 }
-function _momoProductsLastPushedSet(shop, items){ try{ localStorage.setItem(momoProductsLastPushedKey(shop), JSON.stringify(_momoProductsBuildSig(items))); }catch(e){ try{ console.error('[products lastpushed] 寫入失敗：',shop,e); }catch{} } }
+function _momoProductsLastPushedSet(shop, items){
+  if(!_LS_COMPRESS_MOMO_WRITE){ try{ localStorage.setItem(momoProductsLastPushedKey(shop), JSON.stringify(_momoProductsBuildSig(items))); }catch(e){ try{ console.error('[products lastpushed] 寫入失敗：',shop,e); }catch{} } return; }   // 開關關閉＝第 1 塊原樣
+  // 第 2 塊（§9-1 W2）：內容沒變就不寫（firebase.js 的 momo_products 訂閱每個 snapshot 都會呼叫這裡）；要寫就先寫 JSON、寫不進去改寫 LZ1；
+  //   之後排延後壓縮。lastpushed 不受「dirty 不壓」限制，越早變 LZ1 越好（舊分頁讀到 LZ1 的 lastpushed 會走 bootstrap、不刪雲端）。
+  //   寫入失敗：同第 1 塊只印 console.error、舊基準留著（最壞是重推同值 SKU、對雲端早沒有的 SKU 再刪一次，刪除防線本來就不算）。
+  const k=momoProductsLastPushedKey(shop);
+  let json;
+  try{ json=JSON.stringify(_momoProductsBuildSig(items)); }catch(e){ try{ console.error('[products lastpushed] 寫入失敗：',shop,e); }catch{} return; }
+  if(_momoLsSameContent(k,json)){ _momoLsCompressSoon(k); return; }
+  const w=_momoLsWrite(k,json);
+  if(w==='fail'){ try{ console.error('[products lastpushed] 寫入失敗：',shop,'（未壓縮與壓縮格式都寫不進去）'); }catch{} return; }
+  _momoLsCompressSoon(k);
+}
 window.__momoProductsLastPushedGet=function(shop){ return _momoProductsLastPushedGet(shop); };   // Console 檢視／Vanessa 驗收
 window.__momoProductsLastPushedSet=function(shop, items){ _momoProductsLastPushedSet(shop, items||momoPendingProducts(momoProductsKey(shop))||[]); };
 // dirty SKU 即時推導（同步、給 UI／預覽）：本機 pending(_mem→localStorage) vs last-pushed 基準。
@@ -14777,6 +14975,11 @@ window.addEventListener('momoDataReady',(e)=>{
   if(!activeEl || !activeEl.id.startsWith('momo-content-')) return;
   if((_momoSub[shop]||'profit')!=='profit') return;
   if(document.getElementById('momo-tbl-'+shop)) momoScheduleSnapshotRerender(shop, false);
+});
+// 第 2 塊（§9-2）：firebase.js 的 momo_products 訂閱只在真的把雲端寫回本機 JSON 時才發 momoDataReady（每次開站第一次進 MOMO
+//   都會把不是 dirty 的通路整份寫回）→ 對這些通路排延後壓縮（_momoLsCompressSoon 會先壓同通路的 lastpushed）。
+window.addEventListener('momoDataReady',(e)=>{
+  try{ ((e.detail&&e.detail.changedShops)||[]).forEach(s=>_momoLsCompressSoon(momoProductsKey(s))); }catch(err){}
 });
 // 自家庫存雲端更新（同事上傳莫筆克後 momo_stock 推來）→ 若正在看任一 MOMO 總表則重繪，讓庫存欄跟上
 window.addEventListener('momoStockReady',()=>{
