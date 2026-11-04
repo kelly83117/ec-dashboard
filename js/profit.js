@@ -101,13 +101,6 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-rev-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-net-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-net-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
         <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-ads-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-ads-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
-        <!-- 比較基準說明入口。放在三格【之後】、#header-kpi-block 之內：這裡到 #header-btn-block
-             之間是彈性空白（後者 margin-left:auto），加它不會擠到任何人。
-             實測（2026-08-18，innerWidth 1600）：本區 1037.2px、這顆 +102.7px（84.7 按鈕 + 18 gap），
-             改前改後都是斷行狀態、列高不變（按鈕 28px < 本區 68.5px，align-items:center 吃得下）。
-             ⚠ 帶文字、不做純圓圈：PR #108 實測 14px 灰圓圈在期間列完全被忽略（見 css 的 .tp-info 註解）。
-                表頭那三顆 .hdr-help 才是圓的 —— 那裡沒有橫向空間，而且它們是這顆的補充入口、不是主入口。 -->
-        <button type="button" class="kpi-info" onclick="openKpiCmpHelp()" title="上面三格跟「上個月同一段期間」比，表格每一列的「上期」跟「上一期」比 —— 點開看完整說明">ⓘ 比較基準</button>
         <!-- 動銷率格（蝦皮四家，_stCellSync 填）。不是頂端三格的第四格：只讀整月商品表現，不進 built、不進 lsSave、不進推送。
              跟三格不同，樣式走 css/profit.css 的 .kv-st-*。 -->
         <div id="kv-st-cell" class="kv-st" hidden>
@@ -116,6 +109,13 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
           <div id="kv-st-sub" class="kv-st-sub"></div>
           <div id="kv-st-cmp" class="kv-st-cmp"></div>
         </div>
+        <!-- 比較基準說明入口。放在三格【之後】、#header-kpi-block 之內：這裡到 #header-btn-block
+             之間是彈性空白（後者 margin-left:auto），加它不會擠到任何人。
+             實測（2026-08-18，innerWidth 1600）：本區 1037.2px、這顆 +102.7px（84.7 按鈕 + 18 gap），
+             改前改後都是斷行狀態、列高不變（按鈕 28px < 本區 68.5px，align-items:center 吃得下）。
+             ⚠ 帶文字、不做純圓圈：PR #108 實測 14px 灰圓圈在期間列完全被忽略（見 css 的 .tp-info 註解）。
+                表頭那三顆 .hdr-help 才是圓的 —— 那裡沒有橫向空間，而且它們是這顆的補充入口、不是主入口。 -->
+        <button type="button" class="kpi-info" onclick="openKpiCmpHelp()" title="上面三格跟「上個月同一段期間」比，表格每一列的「上期」跟「上一期」比 —— 點開看完整說明">ⓘ 比較基準</button>
       </div>
       <div id="header-btn-block" style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto">
         <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
@@ -27841,6 +27841,7 @@ function initShopUI(shop){
   if(shop===TEST_SHOP_ID){ testInitShopUI(shop); return; }
   if(_userPickedPeriod[shop]) onMonthChange(shop);   // 已介入 → 只重載當前選擇（不跳）
   else _applyLatestPeriod(shop);                     // 沒介入 → 自動跳最新（內部完整渲染）
+  if(shop===curShop)_stCellSync(shop);   // 這一通路還沒有任何報表時上面兩條都不會走到 setKpis；動銷率格照樣要畫
   // 還原上次離開時的篩選狀態（只走「進入淨利表分頁」這一條路）。
   //   🔴 刻意做在這裡、不做進 loadIntoUI：那是全站共用路徑（切月份/切半月/產生報表/雲端刷新
   //     都會經過），在那裡還原等於連「切月份」也不重置，超出需求範圍。
@@ -27991,10 +27992,23 @@ function _lmSamePeriodParts(month,half){
 //   🔴 只讀（__cloudShopeePerf.getDoc），不寫雲端、不進 built、不進 lsSave、不進推送，也不影響旁邊三格的任何數字。
 //   _stCache['好麻吉|2026-10']＝{ state:'loading'|'none'|'ok'|'failed', normal, soldNormal }：同一個通路月份只讀一次。
 //   setKpis 會被 renderTable 一直呼叫，這裡只查快取，所以不會在 render 迴圈裡重讀；切通路、切月份才會遇到新的 key。
-//   ⚠ 讀到本機快取當讀取失敗。雲端物件還沒好時不寫快取，下次 setKpis 再試。
+//   ⚠ 讀到本機快取當讀取失敗。雲端物件還沒好時不寫快取，自己每 0.5 秒重試、最多 20 秒，之後顯示讀取失敗（下次 setKpis 還會再試）。
+//   🔴 沒有報表的月份 setKpis 只呼叫一次，不能靠「下次 setKpis」收尾：所以重試與讀取逾時都要自己重畫，格子才不會停在「…」。
 const _ST_SHOPS=['好麻吉','玩樂','森之旅','維克'];
 const _stCache={};
-let _stWarned=false,_stBound=false;
+const _ST_READ_TIMEOUT_MS=10000,_ST_RETRY_MS=500,_ST_RETRY_MAX=40;
+let _stWarned=false,_stBound=false,_stRetryT=0,_stRetryN=0;
+function _stWarnOnce(why){
+  if(_stWarned)return;
+  _stWarned=true;
+  console.warn('[淨利表] 整月商品表現讀取失敗：',why);
+}
+// 雲端物件還沒好：過一下再畫一次（同一時間只排一個）
+function _stRetrySoon(){
+  if(_stRetryT)return;
+  _stRetryN++;
+  _stRetryT=setTimeout(()=>{_stRetryT=0;_stCellSync(curShop);},_ST_RETRY_MS);
+}
 // 洞察表上傳成功（marketing.js 發 shopee-perf-saved）：清掉那一格（state 不管是什麼，尤其是 'none'）。淨利表開著而且是那一家才重讀；
 //   淨利表不在畫面上時 _stCellSync 找不到格子、什麼都不做，下次進頁 setKpis 會重讀。監聽在第一次讀之前綁、只綁一次（沒讀過就沒有快取要清）。
 function _stOnSaved(e){
@@ -28008,8 +28022,19 @@ function _stRead(shop,ym){
   const k=shop+'|'+ym;
   if(_stCache[k])return _stCache[k];
   const be=window.__cloudShopeePerf;
-  if(!be||typeof be.getDoc!=='function')return {state:'loading'};
+  if(!be||typeof be.getDoc!=='function'){
+    if(_stRetryN>=_ST_RETRY_MAX){_stWarnOnce('雲端物件不在');return {state:'failed'};}
+    _stRetrySoon();
+    return {state:'loading'};
+  }
   const box=_stCache[k]={state:'loading'};
+  // 逾時只改顯示；真的回來了下面照樣更新
+  const timer=setTimeout(()=>{
+    if(box.state!=='loading')return;
+    box.state='failed';
+    _stWarnOnce('讀取逾時');
+    if(shop===curShop)_stCellSync(shop);
+  },_ST_READ_TIMEOUT_MS);
   Promise.resolve().then(()=>be.getDoc(shop,ym)).then(snap=>{
     if(!snap||typeof snap.exists!=='function')throw new Error('讀不到文件');
     if(snap.metadata&&snap.metadata.fromCache)throw new Error('連不到伺服器（讀到的是本機快取）');
@@ -28018,8 +28043,8 @@ function _stRead(shop,ym){
     box.state='ok';box.normal=Number(c.normal)||0;box.soldNormal=Number(c.soldNormal)||0;
   }).catch(e=>{
     box.state='failed';
-    if(!_stWarned){_stWarned=true;console.warn('[淨利表] 整月商品表現讀取失敗：',e&&e.message||e);}
-  }).then(()=>{if(shop===curShop)_stCellSync(shop);});
+    _stWarnOnce(e&&e.message||e);
+  }).then(()=>{clearTimeout(timer);if(shop===curShop)_stCellSync(shop);});
   return box;
 }
 function _stPrevYm(ym){
