@@ -9932,7 +9932,7 @@ const KPI_GROUPS=[
       {k:'cost',l:'商品成本',desc:'商品成本：從對帳單帶入＝莫筆克「建立」分頁、已出貨的商品成本逐列加總（不除 1.05）'},
       {k:'ads',l:'廣告費',desc:'廣告費：從對帳單帶入＝（廣告報表「總體」數據的花費加總，含賣場廣告與沒有商品 ID 的列 − 廣告回饋金）÷1.05'},
       {k:'fee',l:'手續費'},
-      {k:'misc',l:'各項費用',desc:'各項費用：從對帳單帶入＝（一般訂單數×'+KPI_SHOPEE_PACK_PLAIN+' ＋ 無包裝訂單數×'+KPI_SHOPEE_PACK_NOPACK+' 包裝費 ＋ 莫筆克折扣 ＋ 聯盟行銷 AMS（進帳報表）＋ 無包裝 $1／筆 ＋ 其他 − 退貨運費補助）÷1.05；包裝費單價與折扣皆含稅'},
+      {k:'misc',l:'各項費用',desc:'各項費用：從對帳單帶入＝（一般訂單數×'+KPI_SHOPEE_PACK_PLAIN+' ＋ 無包裝訂單數×'+KPI_SHOPEE_PACK_NOPACK+' 包裝費 ＋ 莫筆克折扣 ＋ 聯盟行銷 AMS（進帳報表）＋ 無包裝 $1／筆（媒合費用報表的環保無包裝筆數×$1，沒上傳的月份用手填）＋ 其他 − 退貨運費補助）÷1.05；包裝費單價與折扣皆含稅'},
     ],
     formula:[
       // desc：純顯示用的白話公式（ⓘ 說明從這裡產生），必須跟 calc 一字不差；改 calc 要同步改 desc。
@@ -11712,6 +11712,7 @@ async function kpiMomoAutoFill(){
 //     手續費 fee   ＝ −(feeDeal ＋ feeOther ＋ feeFlow ＋ shipTotal) ÷ 1.05（照 PDF 正負號；不含 feeAms、不含 coupon；shipTotal 正數自然抵減）
 //     廣告費 ads   ＝ (ads[S].spend − (ads[S].rebate ?? 0)) ÷ 1.05
 //     各項費用 misc＝ (一般筆數×2.5 ＋ 無包裝筆數×2 ＋ 莫筆克折扣 ＋ (−feeAms ?? 0) ＋ 無包裝$1 ＋ 其他 − 退貨運費補助) ÷ 1.05
+//       無包裝$1＝nopack.shops[S].amount（媒合費用報表，2026-11-04）；沒有 nopack 才用 manual.noPackPerOrder。
 //   缺來源 → status:'wait'、note「等上傳：對帳分頁的○○」，不寫 0。手填項（manual）沒存過 → 以 0 計、warnNote 預設不勾。
 //   payout.feeAms 為 null（PDF 沒有 AMS 那行）→ 以 0 計，不算缺。物流運費（共同費用）不帶入、維持手填。
 //   快照存 snapshots.{月}.preAutofillShopee（MOMO 已占用 preAutofill、而且只存第一次 → 共用會存不到蝦皮的舊值），還原用 __kpiShopeeRestore。
@@ -11723,7 +11724,7 @@ const KPI_SHOPEE_AUTO_TITLE='六格從淨利表「對帳」分頁存的對帳單
   +'實際營收＝進帳報表 買家支付商品金額÷1.05；'
   +'手續費＝進帳報表（成交手續費＋其他服務費＋金流與系統處理費＋賣家運費）÷1.05；'
   +'廣告費＝（廣告報表花費−廣告回饋金）÷1.05；'
-  +'各項費用＝（包裝費＋折扣＋聯盟行銷 AMS＋手填項）÷1.05。'
+  +'各項費用＝（包裝費＋折扣＋聯盟行銷 AMS＋無包裝$1（媒合費用報表）＋手填項）÷1.05。'
   +'物流運費維持手填。按下去會先預覽，確認後才寫入。';
 // 對帳單資料到了沒＝app/kpi 的快照到了（sources 跟 KPI 同一份文件）。
 function _kpiShopeeDataLoaded(){
@@ -11741,7 +11742,7 @@ async function _kpiEnsureShopeeData(month){
 function _kpiShopeeSources(month,cloud){
   const s=(cloud&&cloud.sources&&cloud.sources[month]&&cloud.sources[month].shopee)||{};
   const m=x=>_kpiIsMap(x)?x:{};
-  return{payout:m(s.payout),mobic:_kpiIsMap(s.mobic)?s.mobic:null,ads:m(s.ads),manual:m(s.manual)};
+  return{payout:m(s.payout),mobic:_kpiIsMap(s.mobic)?s.mobic:null,ads:m(s.ads),manual:m(s.manual),nopack:_kpiIsMap(s.nopack)?s.nopack:null};
 }
 const _kpiShopeeFin=v=>typeof v==='number'&&Number.isFinite(v);
 function _kpiShopeeN(v){return Math.abs(Number(v)||0).toLocaleString('en-US',{maximumFractionDigits:2});}
@@ -11787,11 +11788,13 @@ function _kpiShopeeCalc(src,shop){
     else{
       const ams=_kpiShopeeFin(P.feeAms)?-P.feeAms:0;
       const mv=k=>(Man&&_kpiShopeeFin(Man[k]))?Man[k]:0;
-      const np=mv('noPackPerOrder'),ot=mv('other'),rs=mv('returnSubsidy');
+      // 無包裝$1：對帳分頁存過媒合費用報表（nopack）就用它；沒有才退回手填格。
+      const NP=src.nopack&&_kpiIsMap(src.nopack.shops)&&_kpiIsMap(src.nopack.shops[shop])&&_kpiShopeeFin(src.nopack.shops[shop].amount)?src.nopack.shops[shop]:null;
+      const np=NP?NP.amount:mv('noPackPerOrder'),ot=mv('other'),rs=mv('returnSubsidy');
       const sum=Ms.ordersPlain*KPI_SHOPEE_PACK_PLAIN+Ms.ordersNoPack*KPI_SHOPEE_PACK_NOPACK+Ms.discount+ams+np+ot-rs;
       const comp='（一般 '+_kpiShopeeN(Ms.ordersPlain)+' 筆×'+KPI_SHOPEE_PACK_PLAIN+'＋無包裝 '+_kpiShopeeN(Ms.ordersNoPack)+' 筆×'+KPI_SHOPEE_PACK_NOPACK
         +_kpiShopeeTerm('折扣',Ms.discount)+_kpiShopeeTerm('聯盟行銷 AMS',ams)+(_kpiShopeeFin(P.feeAms)?'':'（PDF 沒有這行）')
-        +_kpiShopeeTerm('無包裝$1',np)+_kpiShopeeTerm('其他',ot)+_kpiShopeeTerm('退貨運費補助',-rs)+'）÷1.05';
+        +_kpiShopeeTerm('無包裝$1',np)+(NP?'（媒合費用報表 '+_kpiShopeeN(NP.orders)+' 筆）':'（手填）')+_kpiShopeeTerm('其他',ot)+_kpiShopeeTerm('退貨運費補助',-rs)+'）÷1.05';
       out.misc={val:Math.round(sum/KPI_SHOPEE_TAX),comp,
         warnNote:Man?null:'各項費用的手填項尚未存檔，以 0 計'};
     }
@@ -24887,6 +24890,254 @@ function reconMobicHtml(){
     +'<div class="recon-mobic-save"><span class="recon-save-st">'+st+'</span>'+btn+why+msg+'</div>'
     +'</div>';
 }
+// ═══ 對帳分頁 · 無包裝 $1／筆（蝦皮店到店個案派車物流媒合費用，全賣場）（2026-11-04）═══
+// 一份 xlsx（蝦皮匯出，分頁「YYYYMM_蝦皮店到店個案派車物流媒合費用」，一列＝一筆訂單）四店一起算、一起存一次：
+//   app/kpi → sources.{YYYY-MM}.shopee.nopack ＝ {shops:{店:{orders, amount}}, unit, unmapped:{ShopID:列數},
+//                                                range:{from,to}, rows, file, fileModified, by, at}
+//   orders＝物流選項含「無包裝」的訂單編號去重數；amount＝orders × RECON_NOPACK_UNIT（含稅原值，跟原本手填格同口徑，KPI 端才 ÷1.05）。
+// 🔴 只存彙總數字：訂單編號、包裹查詢號碼【一個都不上雲】。
+// 🔴 KPI「從對帳單帶入」：這筆存在 ⇒ 無包裝$1 用 amount；不存在 ⇒ 退回手填格 manual.noPackPerOrder（舊月份照舊）。
+//   手填格本身不動也不清（存在 manual.{店}，廣告區存檔照舊寫它），只是有這筆時廣告區改成唯讀顯示。
+// ⚠ 月份＝分頁名稱前 6 碼；每列「理貨中心驗收時間」都要落在那個月，否則不准存。
+const RECON_NOPACK_UNIT=1;   // 每筆 $1（含稅）。蝦皮調價時改這裡
+// Shop ID → 店（2026-11-04 Vanessa 提供）。新開賣場要加在這裡，否則那家的列會被列為「對不到」、不准存。
+const RECON_NOPACK_SHOPID_MAP={'40177218':'好麻吉','67734871':'玩樂','594705932':'森之旅','371940479':'維克'};
+const RECON_NOPACK_REQ_COLS=['訂單編號','理貨中心驗收時間','Shop ID','物流選項'];
+// 一格時間 → 'YYYY-MM-DD hh:mm'（字串比大小用）；讀不出來回 null。
+//   number＝Excel 序號（不帶時區，直接用 UTC 算才不會被瀏覽器時區偏移）；Date 用本地時間；字串取前 16 碼。
+function _reconNopackTime(v){
+  const p=n=>String(n).padStart(2,'0');
+  if(typeof v==='number'&&isFinite(v)){
+    const d=new Date(Math.round((v-25569)*86400000));
+    return d.getUTCFullYear()+'-'+p(d.getUTCMonth()+1)+'-'+p(d.getUTCDate())+' '+p(d.getUTCHours())+':'+p(d.getUTCMinutes());
+  }
+  if(v instanceof Date&&!isNaN(v))return v.getFullYear()+'-'+p(v.getMonth()+1)+'-'+p(v.getDate())+' '+p(v.getHours())+':'+p(v.getMinutes());
+  const m=/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2}))?/.exec(String(v==null?'':v).trim());
+  return m?m[1]+'-'+p(m[2])+'-'+p(m[3])+' '+p(m[4]||0)+':'+(m[5]||'00'):null;
+}
+// 純函式：sheet_to_json(ws,{header:1}) 的二維陣列 + 分頁月份 → 四店彙總。
+//   回 {ok:true, shops, unmapped, range, rows, noPackRows, dupRows, outOfMonth} 或 {ok:false, err}。
+function _reconNopackCalc(aoa,month){
+  if(!Array.isArray(aoa)||!aoa.length)return{ok:false,err:'分頁是空的'};
+  const H=(aoa[0]||[]).map(h=>String(h==null?'':h).trim());
+  const ix={};
+  RECON_NOPACK_REQ_COLS.forEach(k=>{ix[k]=H.indexOf(k);});
+  const miss=RECON_NOPACK_REQ_COLS.filter(k=>ix[k]<0);
+  if(miss.length)return{ok:false,err:'缺少必要欄位：'+miss.join('、')};
+  const acc={};RECON_SHOPS.forEach(s=>{acc[s]=new Set();});
+  const unmapped={},bad=[];
+  let rows=0,noPackRows=0,dupRows=0,outOfMonth=0,from=null,to=null;
+  for(let i=1;i<aoa.length;i++){
+    const r=aoa[i];
+    if(!r||!r.some(v=>v!=null&&String(v).trim()!==''))continue;
+    rows++;
+    const oid=String(r[ix['訂單編號']]==null?'':r[ix['訂單編號']]).trim();
+    const t=_reconNopackTime(r[ix['理貨中心驗收時間']]);
+    if(!oid||!t){if(bad.length<5)bad.push('第 '+(i+1)+' 列'+(!oid?'（訂單編號空白）':'（驗收時間讀不出來）'));else bad.push(null);continue;}
+    if(!from||t<from)from=t;
+    if(!to||t>to)to=t;
+    if(month&&t.slice(0,7)!==month)outOfMonth++;
+    if(String(r[ix['物流選項']]==null?'':r[ix['物流選項']]).indexOf('無包裝')<0)continue;
+    noPackRows++;
+    const sid=String(r[ix['Shop ID']]==null?'':r[ix['Shop ID']]).trim();
+    const shop=RECON_NOPACK_SHOPID_MAP[sid];
+    if(!shop){const k=sid||'（空白）';unmapped[k]=(unmapped[k]||0)+1;continue;}
+    if(acc[shop].has(oid))dupRows++;
+    acc[shop].add(oid);
+  }
+  if(bad.length)return{ok:false,err:'有 '+bad.length+' 列資料不完整：'+bad.filter(Boolean).join('、')+(bad.length>5?'…':'')};
+  if(!rows)return{ok:false,err:'表頭下面沒有任何資料列'};
+  const shops={};
+  RECON_SHOPS.forEach(s=>{const n=acc[s].size;shops[s]={orders:n,amount:Math.round(n*RECON_NOPACK_UNIT*100)/100};});
+  return{ok:true,shops,unmapped,range:{from,to},rows,noPackRows,dupRows,outOfMonth};
+}
+let _reconNopack=null;        // {name, modified, sheet, month, ok, err, res}
+let _reconNopackBusy=false;
+let _reconNopackSaving=false;
+let _reconNopackMsg=null;     // {month, file, modified, kind, text}
+function _reconNopackSavedOf(cloud,month){
+  const s=cloud&&cloud.sources&&cloud.sources[month];
+  const r=s&&s.shopee&&s.shopee.nopack;
+  return (r&&typeof r==='object')?r:null;
+}
+function _reconNopackCtx(){
+  return{m:_reconNopack,month:_reconMonth,
+    readOnly:!!(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()),
+    ready:!!(window.__cloudKpi&&typeof window.__cloudKpi.writePaths==='function'&&_kpiReady()),
+    busy:_reconNopackSaving};
+}
+function _reconNopackCheck(c){
+  const reasons=[];
+  const m=c&&c.m;
+  if(c&&c.readOnly)reasons.push('檢視帳號為唯讀');
+  if(!(c&&c.ready))reasons.push('雲端尚未就緒');
+  if(!m)reasons.push('尚未上傳檔案');
+  else if(!m.ok)reasons.push('檔案解析失敗');
+  if(!(c&&c.month))reasons.push('上方月份未選');
+  if(m&&m.ok){
+    if(!m.month)reasons.push('分頁名稱抓不到月份');
+    else if(c.month&&m.month!==c.month)reasons.push('檔案是 '+m.month+'，與所選 '+c.month+' 不符');
+    if(m.res.outOfMonth)reasons.push('有 '+m.res.outOfMonth+' 列驗收時間不在 '+(m.month||'?'));
+    const um=Object.keys(m.res.unmapped);
+    if(um.length)reasons.push('有 Shop ID 對不到四店：'+um.join('、'));
+  }
+  if(c&&c.busy)reasons.push('存檔中');
+  return{ok:!reasons.length,reasons};
+}
+function _reconNopackPayload(m,user){
+  const shops={};
+  RECON_SHOPS.forEach(s=>{const x=m.res.shops[s];shops[s]={orders:x.orders,amount:x.amount};});
+  return{shops,unit:RECON_NOPACK_UNIT,unmapped:Object.assign({},m.res.unmapped),
+    range:{from:m.res.range.from,to:m.res.range.to},rows:m.res.rows,
+    file:m.name||'',fileModified:m.modified==null?null:m.modified,
+    by:{username:(user&&user.username)||'',name:(user&&user.name)||''}};
+}
+function _reconNopackDiff(oldRec,neu){
+  if(!oldRec||typeof oldRec!=='object')return [];
+  const out=[];
+  const f=v=>v==null?'（無）':_reconPayoutFmt(v);
+  RECON_SHOPS.forEach(s=>{
+    const a=(oldRec.shops&&oldRec.shops[s])||{},b=neu.shops[s];
+    [['orders','無包裝筆數'],['amount','金額']].forEach(([k,l])=>{const x=a[k]==null?null:a[k];if(x!==b[k])out.push({l:s+' '+l,a:f(x),b:f(b[k])});});
+  });
+  if((oldRec.unit==null?null:oldRec.unit)!==neu.unit)out.push({l:'每筆單價',a:f(oldRec.unit),b:f(neu.unit)});
+  return out;
+}
+function _reconNopackVerify(got,want){
+  if(!got||typeof got!=='object')return ['（雲端沒有這筆）'];
+  const bad=[];
+  RECON_SHOPS.forEach(s=>{
+    const a=got.shops&&got.shops[s];
+    if(!a){bad.push(s);return;}
+    if(a.orders!==want.shops[s].orders)bad.push(s+' 筆數');
+    if(a.amount!==want.shops[s].amount)bad.push(s+' 金額');
+  });
+  if(got.unit!==want.unit)bad.push('單價');
+  if(!got.range||got.range.from!==want.range.from||got.range.to!==want.range.to)bad.push('期間');
+  if(got.rows!==want.rows)bad.push('列數');
+  if(got.file!==want.file)bad.push('檔名');
+  if((got.fileModified==null?null:got.fileModified)!==want.fileModified)bad.push('檔案時間');
+  if(!got.by||got.by.username!==want.by.username||got.by.name!==want.by.name)bad.push('存檔人');
+  if(!_reconAtOk(got.at))bad.push('時間');
+  return bad;
+}
+async function reconNopackPick(e){
+  const f=(e&&e.target&&e.target.files||[])[0];
+  try{e.target.value='';}catch{}
+  if(!f||_reconNopackBusy)return;
+  _reconNopackBusy=true;renderReconTab();
+  const base={name:f.name,modified:(typeof f.lastModified==='number'&&f.lastModified>0)?f.lastModified:null};
+  try{
+    const X=window.XLSX;
+    if(!X||!X.read)throw new Error('XLSX 函式庫尚未載入，請硬重整（Ctrl+F5）後再試');
+    await new Promise(r=>setTimeout(r,50));
+    const buf=await new Promise((res,rej)=>{const rd=new FileReader();rd.onload=()=>res(rd.result);rd.onerror=()=>rej(rd.error||new Error('讀檔失敗'));rd.readAsArrayBuffer(f);});
+    const book=X.read(buf,{type:'array',bookSheets:true});
+    const names=(book.SheetNames||[]).filter(n=>String(n).indexOf('媒合費用')>=0);
+    if(!names.length)throw new Error('找不到名稱含「媒合費用」的分頁（這份檔的分頁：'+(book.SheetNames||[]).join('、')+'）');
+    if(names.length>1)throw new Error('有 '+names.length+' 個「媒合費用」分頁，不知道該用哪一個：'+names.join('、'));
+    const mm=/^(\d{4})(\d{2})(?!\d)/.exec(String(names[0]));
+    const month=(mm&&+mm[2]>=1&&+mm[2]<=12)?mm[1]+'-'+mm[2]:null;
+    const wb=X.read(buf,{type:'array',dense:true,sheets:[names[0]]});
+    const ws=wb.Sheets[names[0]];
+    if(!ws)throw new Error('讀不到分頁「'+names[0]+'」');
+    const res=_reconNopackCalc(X.utils.sheet_to_json(ws,{header:1}),month);
+    if(!res.ok)throw new Error(res.err);
+    _reconNopack=Object.assign(base,{sheet:names[0],month,ok:true,err:'',res});
+    if(!_reconMonthTouched&&!_reconMonth&&month)_reconMonth=month;
+  }catch(err){
+    console.warn('[對帳·無包裝] 解析失敗',f.name,err);
+    _reconNopack=Object.assign(base,{sheet:'',month:null,ok:false,err:(err&&err.message)||String(err),res:null});
+  }
+  _reconNopackBusy=false;
+  renderReconTab();
+}
+function clearReconNopack(){if(_reconNopackBusy)return;_reconNopack=null;renderReconTab();}
+async function reconNopackSave(){
+  const chk=_reconNopackCheck(_reconNopackCtx());
+  if(!chk.ok){if(typeof showToast==='function')showToast('無法存檔：'+chk.reasons.join('；'),'error',5000);return;}
+  const ck=window.__cloudKpi;
+  const m=_reconNopack,month=_reconMonth;
+  const want=_reconNopackPayload(m,(window.App&&App.currentUser)||{});
+  const done=(kind,text)=>{_reconNopackMsg={month,file:m.name,modified:m.modified,kind,text};_reconNopackSaving=false;renderReconTab();};
+  _reconNopackSaving=true;renderReconTab();
+  let old=null;
+  try{const s=await ck.getDoc();old=_reconNopackSavedOf((s&&s.exists&&s.exists())?(s.data()||{}):null,month);}
+  catch(err){console.error('[對帳·無包裝] 讀取雲端現值失敗',err);done('err','❌ 讀不到雲端現值，沒有存檔：'+((err&&(err.code||err.message))||err));return;}
+  const diff=_reconNopackDiff(old,want);
+  if(diff.length){
+    const who=old.by&&(old.by.name||old.by.username);
+    const msg='無包裝 $1 '+month+' 已經有存檔'+(who?'（'+who+(_reconFmtAt(old.at)?' · '+_reconFmtAt(old.at):'')+'）':'')
+      +'，以下數字不同：\n\n'+diff.map(x=>x.l+'：'+x.a+' → '+x.b).join('\n')+'\n\n確定用這份檔（'+m.name+'）覆蓋嗎？';
+    if(!confirm(msg)){done('info','已取消，雲端維持原本的存檔');return;}
+  }
+  try{await ck.writePaths([[['sources',month,'shopee','nopack'],Object.assign({},want,{at:ck.TS})]]);}
+  catch(err){console.error('[對帳·無包裝] 寫入 app/kpi 失敗',err);done('err','❌ 沒有寫進雲端：'+((err&&(err.code||err.message))||err));return;}
+  // 🔴 被擋下時 writePaths 不會丟錯，只有讀回看得出來 —— 不一致一律當失敗。
+  let bad;
+  try{const s=await ck.getDoc();bad=_reconNopackVerify(_reconNopackSavedOf((s&&s.exists&&s.exists())?(s.data()||{}):null,month),want);}
+  catch(err){console.error('[對帳·無包裝] 讀回驗證失敗',err);done('err','⚠ 已送出但讀不回雲端確認，請重新整理後看「已存」狀態');return;}
+  if(bad.length){console.warn('[對帳·無包裝] 讀回不一致',month,bad);done('err','❌ 沒有寫進雲端（讀回不一致：'+bad.join('、')+'）');return;}
+  const imported=RECON_SHOPS.some(s=>_reconAdsKpiImported(month,s));
+  done('ok','✓ 已存進雲端'+(imported?'。KPI 要重新按『從對帳單帶入』才會套用':''));
+}
+function reconNopackHtml(){
+  const m=_reconNopack;
+  const cloud=_kpiV2.cloud;
+  const saved=(_reconMonth&&cloud)?_reconNopackSavedOf(cloud,_reconMonth):null;
+  let st;
+  if(_reconReadyGaveUp&&!_kpiReady())st='<span class="recon-bad">雲端尚未就緒，請重新整理頁面</span>';
+  else if(!_reconMonth)st='選月份後顯示已存狀態';
+  else if(cloud===undefined)st='讀取雲端中…';
+  else if(!saved)st=_reconMonth+' 尚未存檔（KPI 會用廣告區的手填格）';
+  else{
+    const who=(saved.by&&(saved.by.name||saved.by.username))||'?';
+    st='<span class="recon-save-has">'+escapeHtmlLike(_reconMonth)+' 已存：'+escapeHtmlLike(who)+'・'+escapeHtmlLike(_reconFmtAt(saved.at)||'時間確認中')+'</span>';
+  }
+  let info='';
+  if(_reconNopackBusy)info='<div class="recon-mobic-busy"><span class="recon-spin"></span>解析中…</div>';
+  else if(m&&!m.ok)info='<div class="recon-err">❌ '+escapeHtmlLike(m.name)+' 解析失敗：'+escapeHtmlLike(m.err)+'</div>';
+  else if(m){
+    const r=m.res;
+    const mBad=!m.month||(_reconMonth&&m.month!==_reconMonth)||r.outOfMonth;
+    info='<div class="recon-mobic-info">'
+      +'<span>檔案：'+escapeHtmlLike(m.name)+'</span>'
+      +'<span>分頁：'+escapeHtmlLike(m.sheet)+'</span>'
+      +'<span class="'+(mBad?'recon-period-bad':'')+'">月份：'+escapeHtmlLike(m.month||'抓不到')+'（驗收時間 '+escapeHtmlLike(r.range.from+' ~ '+r.range.to)+'）</span>'
+      +'<span>無包裝 '+_reconPayoutFmt(r.noPackRows)+' / 全部 '+_reconPayoutFmt(r.rows)+' 列</span>'
+      +'</div>';
+    if(r.outOfMonth)info+='<div class="recon-warn">⚠ 有 '+r.outOfMonth+' 列驗收時間不在 '+escapeHtmlLike(m.month||'?')+'，請確認檔案。</div>';
+    const um=Object.entries(r.unmapped);
+    if(um.length)info+='<div class="recon-warn">⚠ 有 Shop ID 對不到四店（要先在程式 RECON_NOPACK_SHOPID_MAP 加上對照）：'+escapeHtmlLike(um.map(([k,v])=>k+' '+v+' 列').join('、'))+'</div>';
+    if(r.dupRows)info+='<div class="recon-note">同一訂單編號重複出現 '+r.dupRows+' 列，已去重只算一次。</div>';
+  }
+  const src=(m&&m.ok)?m.res.shops:(saved&&saved.shops)||null;
+  const srcLbl=(m&&m.ok)?'這份檔的計算結果':(src?'雲端已存的數字（'+escapeHtmlLike(_reconMonth)+'）':'');
+  let tbl='';
+  if(src){
+    const cell=(s,k)=>(src[s]&&src[s][k]!=null)?_reconPayoutFmt(src[s][k]):'<span class="recon-miss">—</span>';
+    tbl='<div class="recon-scroll"><table class="recon-tbl recon-mobic-tbl"><thead><tr><th class="recon-rowhead">'+srcLbl+'</th>'
+      +RECON_SHOPS.map(s=>'<th>'+escapeHtmlLike(s)+'</th>').join('')+'</tr></thead><tbody>'
+      +'<tr><th class="recon-rowhead">無包裝訂單數</th>'+RECON_SHOPS.map(s=>'<td>'+cell(s,'orders')+'</td>').join('')+'</tr>'
+      +'<tr><th class="recon-rowhead">金額（×$'+RECON_NOPACK_UNIT+'，含稅）</th>'+RECON_SHOPS.map(s=>'<td>'+cell(s,'amount')+'</td>').join('')+'</tr>'
+      +'</tbody></table></div>';
+  }
+  const chk=_reconNopackCheck(_reconNopackCtx());
+  const btn='<button type="button" class="recon-btn recon-save-btn"'+(chk.ok?'':' disabled')+' onclick="reconNopackSave()">'+(_reconNopackSaving?'存檔中…':'存檔（四店一起）')+'</button>';
+  const why=(!chk.ok&&!_reconNopackSaving)?'<span class="recon-save-why">'+escapeHtmlLike(chk.reasons.join('；'))+'</span>':'';
+  const mm=_reconNopackMsg;
+  const msg=(mm&&m&&mm.month===_reconMonth&&mm.file===m.name&&mm.modified===m.modified)
+    ?'<span class="recon-save-msg '+(mm.kind==='ok'?'recon-ok':mm.kind==='err'?'recon-bad':'recon-note')+'">'+escapeHtmlLike(mm.text)+'</span>':'';
+  return '<div class="recon-wrap recon-mobic recon-nopack">'
+    +'<div class="recon-hd"><span class="recon-title">無包裝 $1／筆（蝦皮店到店個案派車物流媒合費用，全賣場）</span>'
+    +'<input type="file" accept=".xlsx" class="recon-file recon-mobic-file" onchange="reconNopackPick(event)"'+(_reconNopackBusy?' disabled':'')+'>'
+    +(m&&!_reconNopackBusy?'<button type="button" class="recon-btn" onclick="clearReconNopack()">清除</button>':'')
+    +'<span class="recon-note">上傳蝦皮「店到店個案派車物流媒合費用」xlsx（四店同一份）。只算物流選項為「環保無包裝」的訂單，每筆 $'+RECON_NOPACK_UNIT+'（含稅）。<b>按「存檔」才會存到雲端</b>，只存四店筆數與金額，不存任何訂單資料。存過之後 KPI 帶入改用這裡的金額，廣告區的手填格不用再填。</span></div>'
+    +info+tbl
+    +'<div class="recon-mobic-save"><span class="recon-save-st">'+st+'</span>'+btn+why+msg+'</div>'
+    +'</div>';
+}
+Object.assign(window,{reconNopackPick,clearReconNopack,reconNopackSave});
 // ═══ 對帳分頁 · 廣告與各項費用（每店）（KPI 蝦皮帶入的來源，2026-10-16 第 3 塊）═══
 // 每店一欄、一顆存檔，一次 writePaths 寫兩條：
 //   sources.{YYYY-MM}.shopee.ads.{店}    ＝ {spend, shopAdSpend, noSidSpend, rows, period, exportedAt, file, rebate, by, at}
@@ -25279,7 +25530,13 @@ function reconAdsHtml(){
     return dis?'<span class="recon-ads-lock" title="'+escapeHtmlLike(disTip)+'">'+el+'</span>':el;
   };
   h+=row('廣告回饋金（含稅）',(s,i)=>inp(s,i,'rebate'));
-  RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{h+=row(l+'（含稅）',(s,i)=>inp(s,i,k));});
+  // 無包裝 $1：這個月已存「媒合費用報表」⇒ KPI 用那邊的金額，這格改成唯讀顯示（手填值仍留在 manual，不清）。
+  const np=(_reconMonth&&cloud)?_reconNopackSavedOf(cloud,_reconMonth):null;
+  RECON_ADS_MANUAL_KEYS.forEach(({k,l})=>{h+=row(l+'（含稅）',(s,i)=>{
+    if(k==='noPackPerOrder'&&np&&np.shops&&np.shops[s]&&_kpiShopeeFin(np.shops[s].amount))
+      return '<span class="recon-ads-auto" title="由上方「無包裝 $1／筆」媒合費用報表帶入，不用手填">'+_reconAdsFmt(np.shops[s].amount)+'<span class="recon-ads-src">報表</span></span>';
+    return inp(s,i,k);
+  });});
   h+=row('其他備註',(s,i)=>inp(s,i,'otherNote','text'));
   h+='<tr class="recon-saverow"><th class="recon-rowhead">雲端存檔</th>'
     +RECON_SHOPS.map((s,i)=>'<td class="recon-save-cell" id="recon-ads-act-'+i+'">'+_reconAdsActHtml(s)+'</td>').join('')+'</tr>';
@@ -25327,7 +25584,7 @@ function renderReconTab(){
   // 廣告區輸入框有焦點時，重畫後把焦點與游標放回同一格（值本來就存在 _reconAdsForm，不會掉）。
   const fa=_reconAdsTyping()?document.activeElement:null;
   const fid=fa?fa.id:'',fs=fa?fa.selectionStart:null,fe=fa?fa.selectionEnd:null;
-  el.innerHTML=reconShopeeHtml()+reconMobicHtml()+reconAdsHtml();
+  el.innerHTML=reconShopeeHtml()+reconMobicHtml()+reconNopackHtml()+reconAdsHtml();
   if(fid){try{const n=document.getElementById(fid);if(n&&!n.disabled){n.focus();if(fs!=null)n.setSelectionRange(fs,fe);}}catch{}}
   // 雲端（app/kpi 第一個快照）還沒到 ⇒ 已存狀態與存檔鈕都還不能判斷，每秒再看一次（有上限，見 _reconReadyTick）。
   //   ⚠ 只輪詢記憶體裡的 _kpiV2，不另開 Firestore 訂閱；分頁不在畫面上（未 active）就停。
