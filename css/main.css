@@ -3096,3 +3096,22 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
   .hl-drag-table .hl-drag-opt { display: none; }   /* 手機只留品號、商品、原因、拖累金額、調整；營收／純利／廣告費在桌機看 */
   .hl-info-body { max-width: 200px; }
 }
+/* 洞察表上傳視窗：整月商品表現（健檢用）卡片與確認窗 */
+.ins-pm-card { position: relative; display: block; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.ins-pm-card:hover { border-color: var(--text-muted); }
+.ins-pm-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.ins-pm-icon { font-size: 18px; }
+.ins-pm-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.ins-pm-pick { margin-left: auto; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.ins-pm-sub { font-size: 12px; line-height: 1.4; color: var(--text-muted); }
+.ins-pm-msg { margin-top: 6px; font-size: 12px; line-height: 1.4; color: var(--text-muted); }
+.ins-pm-msg:empty { display: none; }
+.ins-pm-msg-err { color: var(--danger); font-weight: 600; }
+.ins-pm-msg-ok { color: var(--success); font-weight: 600; }
+.ins-pm-input { display: none; }
+.ins-pm-confirm { font-size: 13px; line-height: 1.6; color: var(--text); }
+.ins-pm-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
+.ins-pm-facts dt { color: var(--text-muted); }
+.ins-pm-facts dd { margin: 0; font-weight: 600; }
+.ins-pm-warn { margin-top: 10px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--text); font-size: 12px; }
+.ins-pm-replace { margin-top: 10px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--text); font-size: 12px; }

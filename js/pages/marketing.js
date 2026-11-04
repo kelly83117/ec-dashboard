@@ -328,6 +328,7 @@ Object.assign(App, {
                 <input type="file" id="${u.inputId}" accept="${u.accept}" style="display:none">
               </label>
             `).join('')}
+            ${_insPmCardHtml(currentShop)}
           </div>
         </div>
       </div>
@@ -851,6 +852,168 @@ Object.assign(App, {
       reader.readAsArrayBuffer(file);
     });
   },
+  // ── 蝦皮「整月商品表現」（通路健檢算動銷率用，跟上面週報用的 parseInsightPerfExcel 無關）──
+  //   下面兩支是純函式：不碰 window、DOM、Store，也不用 this。
+
+  // 從檔名判斷是不是一整個月。例：parentskudetail.20261001_20261031 (2).xlsx → { month:'2026-10', from:'2026-10-01', to:'2026-10-31' }
+  //   不符合回 { error:'白話原因' }。蝦皮的檔案內容裡沒有期間，只能靠檔名。
+  insPerfMonthPeriodFromName(fileName) {
+    const m = /(\d{8})_(\d{8})/.exec(String(fileName == null ? '' : fileName));
+    if (!m) return { error: '檔名裡找不到期間' };
+    const parse = s => ({ y: +s.slice(0, 4), m: +s.slice(4, 6), d: +s.slice(6, 8) });
+    const a = parse(m[1]), b = parse(m[2]);
+    const lastDay = (y, mo) => new Date(y, mo, 0).getDate();   // mo 是 1～12：下個月第 0 天＝這個月最後一天（閏年自動對）
+    const real = x => x.m >= 1 && x.m <= 12 && x.d >= 1 && x.d <= lastDay(x.y, x.m);
+    const p2 = n => String(n).padStart(2, '0');
+    const label = x => `${x.y}/${p2(x.m)}/${p2(x.d)}`;
+    const range = `${label(a)}–${a.y === b.y ? `${p2(b.m)}/${p2(b.d)}` : label(b)}`;
+    if (!real(a) || !real(b)) return { error: `檔名裡的期間不是有效日期：${m[1]}_${m[2]}` };
+    if (a.y !== b.y || a.m !== b.m || a.d !== 1 || b.d !== lastDay(b.y, b.m)) return { error: `檔名裡的期間不是一整個月：${range}` };
+    const ym = `${a.y}-${p2(a.m)}`;
+    return { month: ym, from: `${ym}-01`, to: `${ym}-${p2(b.d)}` };
+  },
+
+  // 輸入各分頁的二維陣列（XLSX.utils.sheet_to_json(ws, { header:1, defval:'' })），找出有狀態欄的分頁（實測是「最佳表現商品」，其他分頁沒有狀態欄），只算商品列。
+  //   輸出 { items:{ 商品ID:[狀態碼, 數量] }, counts:{ products, normal, soldNormal, soldAll, byStatus:{ 狀態原文:n } }, dupIds, headerOk:true }；
+  //   缺欄位或沒有商品列回 { error }，不丟例外。
+  //   商品列＝「商品規格ID」是 - 或空白（規格列放的是數字 ID）。不能加總規格列：實測商品列的數量合計比規格列大（192,631 比 168,271）。
+  //   數量＝「數量(全部訂單)」。狀態碼：正常 N、未上架 U、已刪除 D、已違規 B；其他狀態存原文。動銷率分母＝normal、分子＝soldNormal。
+  //   同一商品 ID 重複出現：數量取大、狀態用第一次出現的、dupIds 記重複幾次（實測沒有重複；取大同 parseInsightPerfExcel 的做法）。
+  insPerfMonthFromRows(sheets) {
+    const STATUS_CODE = { '正常': 'N', '未上架': 'U', '已刪除': 'D', '已違規': 'B' };
+    const NEED = { id: '商品ID', status: '商品當前狀態', variant: '商品規格ID', qty: '數量(全部訂單)' };
+    const clean = v => String(v == null ? '' : v).trim();
+    const headerKey = v => clean(v).replace(/\s+/g, '').replace(/（/g, '(').replace(/）/g, ')');
+    const list = Array.isArray(sheets) ? sheets : (sheets && typeof sheets === 'object' ? Object.values(sheets) : []);
+    let rows = null, cols = null, best = null;
+    for (const r of list) {
+      if (!Array.isArray(r) || !Array.isArray(r[0])) continue;
+      const hs = r[0].map(headerKey), c = {}, missing = [];
+      Object.keys(NEED).forEach(k => { c[k] = hs.indexOf(NEED[k]); if (c[k] < 0) missing.push(NEED[k]); });
+      if (!missing.length) { rows = r; cols = c; break; }
+      if (!best || missing.length < best.missing.length) best = { missing, headers: r[0].map(clean) };
+    }
+    if (!rows) {
+      if (!best) return { error: '檔案裡沒有任何資料' };
+      return { error: `缺少欄位：${best.missing.join('、')}（表頭實際是：${best.headers.join('、')}）` };
+    }
+    const qtyOf = v => { const n = Number(clean(v).replace(/,/g, '')); return Number.isFinite(n) ? n : 0; };   // "-"、空白都當 0
+    const items = {}, statusOf = {};
+    let dupIds = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!Array.isArray(row)) continue;
+      const variant = clean(row[cols.variant]);
+      if (variant !== '-' && variant !== '') continue;   // 規格列
+      const id = clean(row[cols.id]);
+      if (!id || id === '-') continue;
+      const qty = qtyOf(row[cols.qty]);
+      if (Object.prototype.hasOwnProperty.call(items, id)) { dupIds++; items[id][1] = Math.max(items[id][1], qty); continue; }
+      const status = clean(row[cols.status]);
+      statusOf[id] = status;
+      items[id] = [Object.prototype.hasOwnProperty.call(STATUS_CODE, status) ? STATUS_CODE[status] : status, qty];
+    }
+    const ids = Object.keys(items);
+    if (!ids.length) return { error: '表頭正確，但找不到任何商品列（「商品規格ID」是 - 的列）' };
+    const counts = { products: ids.length, normal: 0, soldNormal: 0, soldAll: 0, byStatus: {} };
+    ids.forEach(id => {
+      const st = statusOf[id], sold = items[id][1] > 0, key = st || '(空白)';
+      counts.byStatus[key] = (counts.byStatus[key] || 0) + 1;
+      if (sold) counts.soldAll++;
+      if (st === '正常') { counts.normal++; if (sold) counts.soldNormal++; }
+    });
+    return { items, counts, dupIds, headerOk: true };
+  },
+
+  // 整月商品表現：SheetJS 讀法同 parseInsightPerfExcel，回各分頁的二維陣列（只讀，不判斷內容）
+  insPerfMonthReadSheets(file) {
+    return new Promise((resolve, reject) => {
+      if (typeof XLSX === 'undefined') return reject(new Error('XLSX 函式庫未載入'));
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+          resolve(wb.SheetNames.map(sn => XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '' })));
+        } catch (err) { reject(err); }
+      };
+      reader.onerror = () => reject(reader.error || new Error('讀取失敗'));
+      reader.readAsArrayBuffer(file);
+    });
+  },
+
+  // 整月商品表現上傳：檔名、內容檢查 → 讀舊資料 → 確認窗 → insPerfMonthSave。任何一步失敗都只在卡片上顯示，不寫入。
+  //   🔴 確認窗點背景關掉時 openModal 不呼叫 onCancel（Promise 不會 resolve），所以「處理中」旗標只包寫入那一段（insPerfMonthSave），等確認時不佔用，下一次上傳才不會卡死。
+  async insPerfMonthUpload(file, shop) {
+    const say = (text, kind) => _insPmSetMsg(shop, text, kind);
+    if (this.isReadOnly()) { say('檢視帳號為唯讀，不能上傳', 'err'); showToast('檢視帳號為唯讀，不能上傳', 'error'); return; }
+    if (_insPm.busy) { showToast('上一份還在存，請稍候', 'error'); return; }
+    const be = window.__cloudShopeePerf;
+    if (!be) { say('雲端還沒連上，請重新整理後再試', 'err'); return; }
+    const period = this.insPerfMonthPeriodFromName(file && file.name);
+    if (period.error) { say(period.error, 'err'); return; }
+    say('讀取中…', '');
+    let parsed, old;
+    try {
+      parsed = this.insPerfMonthFromRows(await this.insPerfMonthReadSheets(file));
+    } catch (err) { console.error('[整月商品表現] 解析失敗', err); say(`解析失敗：${err.message}`, 'err'); return; }
+    if (parsed.error) { say(parsed.error, 'err'); return; }
+    try {
+      old = _insPmSnapData(await be.getDoc(shop, period.month));
+    } catch (err) { console.error('[整月商品表現] 讀舊資料失敗', err); say(`讀不到雲端現有資料，沒有存檔：${err.message}`, 'err'); return; }
+    say('', '');
+    const overlap = _insPmOverlap(parsed.items, Store.get(`ec.insight_${shop}_master`, null));
+    const ok = await new Promise((resolve) => {
+      this.openModal({
+        title: '📥 確認上傳整月商品表現',
+        width: '460px',
+        bodyHtml: _insPmConfirmHtml(shop, period, parsed, overlap, old),
+        saveLabel: '確認寫入',
+        cancelLabel: '取消',
+        onSave: () => { resolve(true); return true; },
+        onCancel: () => resolve(false),
+      });
+    });
+    if (ok) await this.insPerfMonthSave(shop, period, file.name, parsed, old);
+  },
+
+  // 整月商品表現寫入：一次 setMonth 整份覆蓋 → 讀回比對 counts 與 items 筆數。不是 { ok:true }、丟錯、讀回不一致都不算成功。
+  async insPerfMonthSave(shop, period, fileName, parsed, old) {
+    const say = (text, kind) => _insPmSetMsg(shop, text, kind);
+    if (this.isReadOnly()) { say('檢視帳號為唯讀，不能上傳', 'err'); showToast('檢視帳號為唯讀，不能上傳', 'error'); return false; }
+    if (_insPm.busy) { showToast('上一份還在存，請稍候', 'error'); return false; }
+    const be = window.__cloudShopeePerf, me = this.currentUser || {}, itemN = Object.keys(parsed.items).length;
+    const payload = {
+      schema: 1, shop, month: period.month, from: period.from, to: period.to, fileName,
+      items: parsed.items, counts: parsed.counts,
+      uploadedAt: Date.now(), uploadedBy: me.username || '', uploadedByName: me.name || '',
+      prev: _insPmPrevOf(old),
+    };
+    const fail = (text, step, extra) => {
+      console.error('[整月商品表現] 存檔失敗', { step, shop, month: period.month, fileName, counts: parsed.counts, itemN, uploadedAt: payload.uploadedAt, prev: payload.prev, ...extra });
+      say(text, 'err');
+      showToast(text, 'error');
+      return false;
+    };
+    _insPm.busy = true;
+    say('存檔中…', '');
+    try {
+      let w;
+      try { w = await be.setMonth(shop, period.month, payload); }
+      catch (err) { return fail(`寫入失敗，沒有存進雲端：${err.message}`, 'setMonth', { error: String(err) }); }
+      if (!(w && w.ok)) return fail('這次沒有寫進雲端（目前是防寫或唯讀狀態）', 'blocked', { result: w === undefined ? 'undefined' : w });
+      let back;
+      try { back = _insPmSnapData(await be.getDoc(shop, period.month)); }
+      catch (err) { return fail(`已送出寫入，但讀不回來確認：${err.message}。請重新整理後再確認一次`, 'readback', { error: String(err) }); }
+      const backN = back && back.items ? Object.keys(back.items).length : -1;
+      if (!back || back.uploadedAt !== payload.uploadedAt || backN !== itemN || _insPmStable(back.counts) !== _insPmStable(parsed.counts)) {
+        return fail('寫入後讀回來的內容對不上，請重新整理後再確認一次', 'mismatch', { backCounts: back && back.counts, backItemN: backN, backUploadedAt: back && back.uploadedAt });
+      }
+      const c = parsed.counts, text = `已存：${shop} ${period.month.replace('-', '/')} 動銷率 ${_insPmRate(c)}（${c.soldNormal}／${c.normal}）`;
+      say(text, 'ok');
+      showToast(text, 'success');
+      return true;
+    } finally { _insPm.busy = false; }
+  },
   migrateInsightDataIfNeeded() {
     if (Store.get('ec.insightMigrated', false)) return;
     const oldWeekly = Store.get('ec.insightWeekly', null);
@@ -1104,6 +1267,17 @@ Object.assign(App, {
         } finally {
           perfInput.value = '';
         }
+      });
+    }
+
+    // 整月商品表現（健檢用）：通路一律用目前洞察表正在看的 currentShop，不另外選。流程見 insPerfMonthUpload。
+    const perfMonthInput = document.getElementById('insight-perfmonth-upload');
+    if (perfMonthInput) {
+      perfMonthInput.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        perfMonthInput.value = '';   // 馬上清空：確認窗點背景關掉時流程不會往下走，要能重選同一份檔案
+        this.insPerfMonthUpload(file, currentShop);
       });
     }
 
@@ -2162,6 +2336,73 @@ Object.assign(App, {
 // （ab17051 原設計）。編輯與刪除一律以【物件參照】定位被指定的那一筆，只動那一筆：
 // 不合併同日其他筆、不改原作者 by、不受同一天 date 寫法不同（2026-06-18 / 2026/06/18）影響。
 // 填寫人寫法比照淨利表 submitProfitNote：取不到登入者就【不加 by 欄位】，不寫 ''。
+// ── 整月商品表現（健檢用）的畫面與小工具（流程在 App.insPerfMonthUpload）──
+//   訊息存在這裡、卡片畫面從這裡讀：雲端快照造成整頁重畫時訊息不會不見。只顯示在同一個通路。
+const _insPm = { busy: false, msg: null };
+function _insPmSetMsg(shop, text, kind) {
+  _insPm.msg = text ? { shop, text, kind: kind || '' } : null;
+  const el = document.getElementById('insight-perfmonth-msg');
+  if (!el || el.getAttribute('data-shop') !== shop) return;
+  el.textContent = text || '';
+  el.className = 'ins-pm-msg' + (kind ? ' ins-pm-msg-' + kind : '');
+}
+function _insPmCardHtml(shop) {
+  const m = _insPm.msg && _insPm.msg.shop === shop ? _insPm.msg : null;
+  return `<label class="ins-pm-card" data-drop-input="insight-perfmonth-upload">
+                <div class="ins-pm-hd"><span class="ins-pm-icon">🗓️</span><span class="ins-pm-title">整月商品表現（健檢用）</span><span class="ins-pm-pick">點此上傳</span></div>
+                <div class="ins-pm-sub">每月初上傳上個月整月的檔案（檔名要是 1 號到月底）</div>
+                <div id="insight-perfmonth-msg" data-shop="${escapeHtml(shop)}" class="ins-pm-msg${m && m.kind ? ' ins-pm-msg-' + m.kind : ''}" role="status">${m ? escapeHtml(m.text) : ''}</div>
+                <input type="file" id="insight-perfmonth-upload" class="ins-pm-input" accept=".xlsx,.xls">
+              </label>`;
+}
+// 快照 → 資料（沒有文件回 null）。讀到本機快取當讀取失敗：不能拿快取當「雲端現值」比對。
+function _insPmSnapData(snap) {
+  if (!snap || typeof snap.exists !== 'function') throw new Error('讀不到文件');
+  if (snap.metadata && snap.metadata.fromCache) throw new Error('連不到伺服器（讀到的是本機快取）');
+  return snap.exists() ? (snap.data() || {}) : null;
+}
+function _insPmStable(v) {
+  if (Array.isArray(v)) return '[' + v.map(_insPmStable).join(',') + ']';
+  if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + _insPmStable(v[k])).join(',') + '}';
+  return JSON.stringify(v === undefined ? null : v);
+}
+const _insPmRate = c => (c && c.normal > 0 ? (c.soldNormal / c.normal * 100).toFixed(1) + '%' : '—');
+// 舊資料摘要（寫進 prev，不留 items）。Firestore 不接受 undefined，缺的欄位一律 null。
+function _insPmPrevOf(old) {
+  if (!old) return null;
+  const c = old.counts || {}, n = v => (typeof v === 'number' ? v : null);
+  return { uploadedAt: n(old.uploadedAt), uploadedBy: old.uploadedBy || '', uploadedByName: old.uploadedByName || '', counts: { products: n(c.products), normal: n(c.normal), soldNormal: n(c.soldNormal), soldAll: n(c.soldAll) } };
+}
+// 檔案的商品 ID 跟母表（master.byCode[編號].id）比重疊率。分母用檔案裡「正常」的商品（下架、刪除的商品母表本來就可能沒有）；沒有正常商品才用全部。
+function _insPmOverlap(items, master) {
+  const ids = new Set();
+  Object.values((master && master.byCode) || {}).forEach(m => { const id = String((m && m.id) || '').trim(); if (id) ids.add(id); });
+  if (!ids.size) return { hasMaster: false, pct: 0, low: true };
+  const all = Object.keys(items), normal = all.filter(id => items[id][0] === 'N'), base = normal.length ? normal : all;
+  const hit = base.filter(id => ids.has(id)).length;
+  return { hasMaster: true, pct: Math.round(hit / base.length * 100), low: hit / base.length < 0.5 };
+}
+function _insPmConfirmHtml(shop, period, parsed, overlap, old) {
+  const c = parsed.counts, e = escapeHtml;
+  const range = `${period.from.replace(/-/g, '/')}–${period.to.slice(5).replace('-', '/')}`;
+  const when = ts => (typeof ts === 'number' ? new Date(ts).toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short' }) : '時間不明');
+  const warns = [];
+  if (overlap.low) warns.push(`⚠ 這份檔案的商品跟 ${shop} 對不太起來（${overlap.hasMaster ? `重疊 ${overlap.pct}%` : '母表沒有資料'}），請確認沒有傳錯通路`);
+  if (parsed.dupIds) warns.push(`⚠ 檔案裡有 ${parsed.dupIds} 列重複的商品 ID（同一商品數量取大）`);
+  const oc = (old && old.counts) || {};
+  return `<div class="ins-pm-confirm">
+      <dl class="ins-pm-facts">
+        <dt>通路</dt><dd>${e(shop)}</dd>
+        <dt>月份</dt><dd>${e(range)}</dd>
+        <dt>正常</dt><dd>${c.normal}</dd>
+        <dt>有賣</dt><dd>${c.soldNormal}</dd>
+        <dt>動銷率</dt><dd>${_insPmRate(c)}</dd>
+      </dl>
+      ${warns.map(w => `<div class="ins-pm-warn">${e(w)}</div>`).join('')}
+      ${old ? `<div class="ins-pm-replace">${e(`會取代 ${when(old.uploadedAt)} ${old.uploadedByName || old.uploadedBy || '不明'} 傳的那一份（舊：正常 ${oc.normal == null ? '—' : oc.normal}、有賣 ${oc.soldNormal == null ? '—' : oc.soldNormal}）`)}</div>` : ''}
+    </div>`;
+}
+
 function _insAdjNewEntry(date, text, username) {
   const entry = { date, text };
   const by = String(username || '').trim();

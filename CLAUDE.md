@@ -62,8 +62,10 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    判斷防護碼有沒有殘留要看 `grep -c "TEST_NOWRITE v2 結束" js/firebase.js` 是 0（貼上防護碼時才是 1）。
    不要因為 repo 裡沒有防護碼就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「TEST_NOWRITE v2 已啟用：29 個物件 / 47 個寫入方法已停用」**，才能放心測。
-   **判斷標準是「物件數對不對」：必須是 29**（2026-11-04 KPI 博客來加 `__cloudBooksRecon`（寫入只有 `writePaths`）→ 28 變 29、
+   **「TEST_NOWRITE v2 已啟用：30 個物件 / 48 個寫入方法已停用」**，才能放心測。
+   **判斷標準是「物件數對不對」：必須是 30**（2026-11-04 塊 6-2 加 `__cloudShopeePerf`（寫入只有 `setMonth`），跟 KPI 博客來的 `__cloudBooksRecon` 合併後 → 29 變 30、方法 47 變 48（推算：47 是下面那組防護碼實測值，加 `setMonth` 1 支）；
+   同日離線實數（假 SDK、READ_OK 規則）是 30 / 47，比推算少 1（差 1 從 2026-10-27 就有），方法數以防護碼實際輸出為準。
+   再之前：2026-11-04 KPI 博客來加 `__cloudBooksRecon`（寫入只有 `writePaths`）→ 28 變 29、
    方法 46 變 47——**這組是防護碼實測**（floor 29、MUST 補 `['__cloudHealthRules','writePaths']`、`['__cloudBooksRecon','writePaths']`）。
    再之前：2026-11-04 通路健檢塊 3 加 `__cloudHealthRules`（寫入只有 `writePaths`）→ 27 變 28、方法 45 變 46（推算）；
    同日離線實數（node 裡用假 SDK 跑 firebase.js，套 `__installReadonlyCloudGuard` 的 READ_OK 規則）是 28 / 45，跟推算的 46 差 1（差 1 從 2026-10-27 就有），以防護碼實際輸出為準。
@@ -85,7 +87,7 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
    唯讀觀測點**不算**進物件數：`window.__profitArchivesReady()`、`window.__profitsCollectionReady()`（#315，profits collection
-   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 29 / 47 這個基準。
+   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 30 / 48 這個基準。
    #306 通路負責人存檔走既有的 `__cloudStore.setField`（寫 `ec.adjOwnerTimeline`），**沒有新增雲端物件**。
    開機時會攔到 1 筆既有寫入（`__cloudStore.setField` `['ec.seeded.v5', true]`），屬正常；開機不會有任何 `removeFields`。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
@@ -102,13 +104,13 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    `['__cloudPchomeRecon', 'setField']`、`['__cloudPchomeRecon', 'removeFields']`、
    `['__cloudInsightByShop', 'updateNoteTx']`、`['__cloudIssues', 'create']`、`['__cloudIssues', 'update']`、
    `['__cloudIssueImage', 'setImage']`、`['__cloudIssueImage', 'removeImage']`、
-   `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`、`['__cloudInventory', 'writePaths']`、`['__cloudHealthRules', 'writePaths']`、`['__cloudBooksRecon', 'writePaths']`，
-   物件下限改 29，否則新物件沒有 fail-loud 保護。
+   `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`、`['__cloudInventory', 'writePaths']`、`['__cloudHealthRules', 'writePaths']`、`['__cloudBooksRecon', 'writePaths']`、`['__cloudShopeePerf', 'setMonth']`，
+   物件下限改 30，否則新物件沒有 fail-loud 保護。
    ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
    （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
    `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
    放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
-3. 沒看到這行紅字、或**物件數不是 29** → **絕對不要繼續操作，立刻關閉分頁**。
+3. 沒看到這行紅字、或**物件數不是 30** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 
 ⚠ **物件數會隨著新增雲端物件而變**（曾經是 4 物件 / 9 方法，早就過期）。不要當常數背，
@@ -121,7 +123,7 @@ grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js
 **這不是理論上的可能性 —— 2026-08-12 的實例**：當天 17:39 這份文件才把物件數更正成 13
 （commit `465a799`），**同一天** 23:31 同事的 `__cloudE001` 就 merge 進 main（PR #146，
 commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**。所以永遠當場重數，
-不要相信文件上的數字（包括上面那個 29）。
+不要相信文件上的數字（包括上面那個 30）。
 
 🔴 字元集一定要用 `[A-Za-z0-9_]`，**不能**寫成 `[A-Za-z_]` —— 舊寫法吃不到數字，會漏掉
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
@@ -260,6 +262,10 @@ ESM 有個致命陷阱必須牢記：
   `subscribe` 跟 `__cloudInventory` 差兩點：開 `includeMetadataChanges`、cb 多傳 `{ fromCache }`（健檢頁要分辨伺服器快照；沒開 IndexedDB persistence，離線可能先送 fromCache 的空快照）。
   firebase.js 只建物件、不訂閱；進健檢頁才訂閱（health.js `_hlRulesEnsureSub`，只訂一次）。第一次收到伺服器快照之前不算分（顯示「評分標準載入中」）；
   訂閱出錯或 10 秒沒收到 ⇒ 退回 BASE 照常算分、頁首灰字「評分標準讀取失敗，暫用預設標準」、Console warn 一次；之後快照到了照樣換新標準並重畫。快取來的快照一律不採用。
+- `shopee_perf_month` collection — 蝦皮整月商品表現（通路健檢算動銷率用，取代不了洞察表週報的 `ec.insight_{通路}_perf`），**不放 app/main、不經 Store**。一通路一月一份，doc id `{通路}__{YYYY-MM}`（例 `好麻吉__2026-10`）。透過 `window.__cloudShopeePerf`：讀 `getDoc(shop, month)`；寫 `setMonth(shop, month, data)`（整份覆蓋），成功回 `{ ok:true }`，被唯讀 / 本機防護擋下回 `undefined` → 呼叫端 `r && r.ok`。firebase.js 只建物件、不訂閱。
+  形狀 `{ schema:1, shop, month:'YYYY-MM', from:'YYYY-MM-DD', to:'YYYY-MM-DD', fileName, items:{ 商品ID:[狀態碼, 數量] }, counts:{ products, normal, soldNormal, soldAll, byStatus:{ 狀態原文:n } }, uploadedAt, uploadedBy, uploadedByName, prev:{ uploadedAt, uploadedBy, uploadedByName, counts }|null }`。狀態碼：正常 N、未上架 U、已刪除 D、已違規 B，其他存原文；數量＝`數量(全部訂單)`，只算商品列（`商品規格ID` 是 -）。動銷率＝`soldNormal / normal`。
+  **寫入只有 marketing.js `insPerfMonthSave`**（洞察表上傳視窗的「整月商品表現（健檢用）」卡片，通路＝目前看的通路 `currentShop`，非唯讀帳號可傳）：檢查檔名是整月（`insPerfMonthPeriodFromName`）與內容（`insPerfMonthFromRows`）→ 讀舊資料 → 確認窗（母表重疊率低於 50% 只警告、不擋）→ `setMonth` 一次寫入 → 讀回比對 counts、items 筆數、uploadedAt。失敗都留在卡片上。
+  ⚠ 狀態是**匯出當下**的狀態，不是月底的；檔案裡也沒有期間和店名，只能靠檔名與目前通路。
 - 通路健檢（路由 `health`，js/pages/health.js，方案 docs/plan-channel-health.md）——**只讀頁，不存任何資料**；評分標準版本讀 `app/health_rules`（`__cloudHealthRules`）。
   KPI 月結經 profit.js 的唯讀轉接 `window.__healthKpiSnapshot(months)`（口徑＝KPI 頁 `_kpiShopCalc` / `_kpiRealRev` / `_kpiCommonColTotals`）。
   商品層（塊 B：蝦皮廣告效率、蝦皮／MOMO／PChome 商品結構與拖累商品）經 profit.js 的 `__healthLoadProducts(平台)`＋`__healthProductSnapshot(平台, 通路, 月)`，
