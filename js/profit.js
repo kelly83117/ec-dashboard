@@ -17036,6 +17036,13 @@ function momoPeriodLabel(period){
   const [,m,half]=period.split('-');
   return `${Number(m)}月${half==='FULL'?'整月':half==='H1'?'上':'下'}`;
 }
+// MO+ 對帳結算統計（整期別展開後，各半月是否已有對帳明細）：{settledN,total,unsettled}。
+//   供對帳狀態晶片、KPI 黃字估算提示、標籤/篩選面板「🟡估算月」共用（避免多處各寫一份判斷又分歧）。甲乙配不適用 → {0,0,[]}。
+function momoMoPlusSettledStat(shop, period){
+  if(!(momoIsMoPlus(shop) && period)) return { settledN:0, total:0, unsettled:[] };
+  try{ const c=momoMoPlusE001Ctx(shop), pk=momoExpandPeriod(period); const unsettled=pk.filter(k=>!c.settled.has(k)); return { settledN:pk.length-unsettled.length, total:pk.length, unsettled }; }
+  catch(e){ return { settledN:0, total:0, unsettled:[] }; }
+}
 // MOMO 共用金額格式：$ 緊貼數字、千分位逗號、四捨五入到元、負數用 -$。我們只有台幣，去掉多餘的 NT；保留 $ 好跟數量欄位（銷量/瀏覽量）並排時分得出哪個是錢。
 //   全站設計統一時可沿用（見記憶 dashboard-design-unify）。⚠ 只用在整數金額（營收/毛利/費用/淨利）；成本等要保留小數的欄位不套（會被 round 掉）。
 function momoMoney(v){ const n=Math.round(Number(v)||0); return (n<0?'-$':'$')+Math.abs(n).toLocaleString(); }
@@ -19133,7 +19140,7 @@ function momoRenderProfitBody(shop, tableOnly){
   const _e001Est = (momoIsMoPlus(shop) && period) ? (()=>{ try{ const c=momoMoPlusE001Ctx(shop), pk=momoExpandPeriod(period); return !!(pk.length && pk.every(k=>!c.settled.has(k)) && c.doc && c.doc.hasPrice && pk.some(k=>c.doc.byPeriodSold&&c.doc.byPeriodSold[k])); }catch(e){ return false; } })() : false;
   // MO+ 對帳結算統計（整期別展開後，各半月是否已有對帳明細）：全結算／部分結算／全未結算三態。
   //   供「✓ 已對帳 / ◐ 部分對帳 / ⚠ 未對帳」晶片與黃字估算提示共用；甲乙配不適用（維持 {0,0,[]}、走 tagsRes.estimated）。
-  const _moSettledStat = (momoIsMoPlus(shop) && period) ? (()=>{ try{ const c=momoMoPlusE001Ctx(shop), pk=momoExpandPeriod(period); const unsettled=pk.filter(k=>!c.settled.has(k)); return { settledN:pk.length-unsettled.length, total:pk.length, unsettled }; }catch(e){ return { settledN:0, total:0, unsettled:[] }; } })() : { settledN:0, total:0, unsettled:[] };
+  const _moSettledStat = momoMoPlusSettledStat(shop, period);   // 抽成共用函式（與標籤/篩選面板「🟡估算月」同一份判斷）
   const q=(_momoSearch[shop]||'').trim().toLowerCase();
   const all=momoLoadProducts(shop);
   const _periodIsHalf=/-(H1|H2)$/.test(String(period||''));   // 半月：流量標「估」、成長類本來就沒算（always，便宜）
@@ -20865,6 +20872,8 @@ function momoRenderFilterPanel(shop){
   const full=!!tagsRes.isFullMonth;
   const total=momoLoadProducts(shop).length;
   const active=momoFilterActiveCount(shop);
+  // 🟡估算月：MO+ 用結算統計（部分或全未結算才算估算月；全結算不算——修掉 tagsRes.estimated 對 MO+ 永遠 true 的誤報，與對帳晶片/KPI 黃字同一份判斷）；甲乙配維持 tagsRes.estimated。
+  const _estMonth = momoIsMoPlus(shop) ? (()=>{ const st=momoMoPlusSettledStat(shop, _momoPeriodSel[shop]); return st.total>0 && st.settledN<st.total; })() : tagsRes.estimated;
   // 半月：只有「成長類」停用(標僅整月、disable)，其餘照常可選；流量類另標「半月估算」。
   const tagHTML=MOMO_TAG_GROUPS.map(g=>{
     const gTags=g.tags.filter(t=>!t.shopOnly || t.shopOnly===shop);   // shopOnly 標籤（呆滯庫存＝乙配）在其他賣場整條不出現，甲配/MO+ 零干擾
@@ -20921,7 +20930,7 @@ function momoRenderFilterPanel(shop){
     <div style="${_subh}">時間（entry 日期絕對值，與總表期別脫鉤）</div><div class="mm-fp-tags">${timeHtml}</div>
     <div style="${_subh}">操作者</div><div class="mm-fp-tags">${byHtml}</div>`;
   m.innerHTML=`
-    <div class="mm-fp-top"><b>🏷 標籤 / 篩選</b><span class="mm-fp-total">共 ${total} 項${active?` · 已套用 ${active} 條`:''}${tagsRes.estimated?' · 🟡估算月':''}</span></div>
+    <div class="mm-fp-top"><b>🏷 標籤 / 篩選</b><span class="mm-fp-total">共 ${total} 項${active?` · 已套用 ${active} 條`:''}${_estMonth?' · 🟡估算月':''}</span></div>
     <div class="mm-fp-body">
       <div class="mm-fp-sec-h">標籤（甲乙各自排名／可多選 OR${full?'':'；半月：成長類停用、流量類估算'}）</div>
       ${tagHTML}
