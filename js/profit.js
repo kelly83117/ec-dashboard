@@ -10057,7 +10057,9 @@ const KPI_GROUPS=[
     ],
     fillFormula:['tax'],
   },
-  {key:'friday',since:'2026-08',title:'FriDay',color:'#0891b2',shops:['FriDay'],
+  // 2026-11-04 拆兩店：FriDay-主站（在上）／FriDay-i站，名稱欄顯示「主站」「i站」（KPI_SHOP_LABELS）；欄位、公式、格子型別不動（等報表分析後再改）。
+  //   兩列都照一般規則計入填寫進度、有小計列。正式站拆店前 FriDay 沒有任何存值（2026-11-04 查過 app/kpi），不用搬資料。
+  {key:'friday',since:'2026-08',title:'FriDay',color:'#0891b2',shops:['FriDay-主站','FriDay-i站'],
     manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
     formula:[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material,desc:'純利 = 營收 − 商品成本 − 手續費 − 退貨運費 − 稅金 − 耗材'},
@@ -10104,6 +10106,8 @@ const KPI_SHOP_LABELS={
   'MOMO-寄倉':'乙配',
   '博客來-寄倉':'寄倉',
   '博客來-轉單':'轉單',
+  'FriDay-主站':'主站',
+  'FriDay-i站':'i站',
   'mo+0號店(好麻吉)':'MO+好麻吉',
   'mo+1號店(森之旅)':'MO+森之旅',
   'mo+2號店(玩樂)':'MO+玩樂',
