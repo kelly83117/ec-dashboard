@@ -2022,3 +2022,9 @@ td .km-cmp,.km-sub .km-cmp{display:inline;margin:0;}
 .mm-delg-ok:hover{background:#fee2e2;}
 .mm-delg-cancel{padding:9px 22px;border:0;border-radius:8px;background:var(--primary);color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
 .mm-delg-cancel:focus-visible,.mm-delg-ok:focus-visible,.mm-delg-x:focus-visible{outline:3px solid #a5b4fc;outline-offset:2px;}
+
+/* 博客來報表上傳（2026-11-04）：非寄倉／錯誤紅字、核對區塊、核對不一致黃字 */
+.km-bk-err{color:#dc2626;font-weight:600;}
+.km-bk-errbox{margin:8px 0;padding:8px 10px;border-radius:8px;background:#fef2f2;color:#b91c1c;font-size:12px;font-weight:600;}
+.km-bk-chk{margin:10px 0;padding:8px 10px;border:1px solid #eef0f4;border-radius:8px;font-size:12px;}
+.km-au-check.warn{color:#b45309;}

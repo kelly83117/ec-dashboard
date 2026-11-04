@@ -10063,12 +10063,24 @@ const KPI_GROUPS=[
       {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material,desc:'純利 = 營收 − 商品成本 − 手續費 − 退貨運費 − 稅金 − 耗材'},
       {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ret-d.tax-d.material)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
     ]},
-  {key:'books',since:'2026-08',title:'博客來',color:'#8b5a2b',shops:['博客來'],
-    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'手續費'},{k:'ret',l:'退貨運費'},{k:'tax',l:'稅金'},{k:'material',l:'耗材'}],
+  // 2026-11-04：博客來寄倉「從報表帶入」（app/books_recon，見下方「博客來對帳資料」）。訂單數／營收／商品成本／平台費由帶入寫入（一般手填格、寫了才算已填）；
+  //   寄倉運費手填；稅金＝公式欄（同 MOMO：可覆蓋、不算格數）。手續費只改顯示名稱「平台費」（存的 key 還是 fee）。
+  //   拿掉退貨運費、耗材（雲端既有值不刪；查過正式站博客來各月都沒有存值）。KPI 月份 M＝結算帳月 M。
+  //   2026-11-04 拆兩店：博客來-寄倉（在上）／博客來-轉單，名稱欄顯示「寄倉」「轉單」（KPI_SHOP_LABELS）。從報表帶入只寫寄倉。
+  //   轉單：寄倉運費不適用（fieldMerge notApplicable）；目前沒銷量 → shopOptional：這個月一格都沒填就不列入填寫進度（填了任何一格就照一般規則算）。
+  //   正式站拆店前博客來沒有任何存值（2026-11-04 查過 app/kpi），不用搬資料。
+  {key:'books',since:'2026-08',title:'博客來',color:'#8b5a2b',shops:['博客來-寄倉','博客來-轉單'],
+    shopOptional:['博客來-轉單'],
+    fieldMerge:{ship:{notApplicable:['博客來-轉單']}},
+    manual:[{k:'qty',l:'訂單數'},{k:'rev',l:'營收'},{k:'cost',l:'商品成本'},{k:'fee',l:'平台費',desc:'折讓單（4%）＋博客來運費＋包材費'},{k:'ship',l:'寄倉運費'}],
+    order:['qty','rev','cost','fee','tax','ship','pure','pureRate'],
     formula:[
-      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.ret-d.tax-d.material,desc:'純利 = 營收 − 商品成本 − 手續費 − 退貨運費 − 稅金 − 耗材'},
-      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.ret-d.tax-d.material)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
-    ]},
+      // ⚠ tax 要排在 pure 前面（_kpiCalcAll 依序算）
+      {k:'tax',l:'稅金',fmt:'money',calc:d=>d.rev*5/105,desc:'稅金 = 營收 × 5/105（含稅金額內含的營業稅，可手動覆蓋）'},
+      {k:'pure',l:'純利',fmt:'money',calc:d=>d.rev-d.cost-d.fee-d.tax-d.ship,desc:'純利 = 營收 − 商品成本 − 平台費 − 稅金 − 寄倉運費'},
+      {k:'pureRate',l:'純利率',fmt:'pct',calc:d=>d.rev>0?(d.rev-d.cost-d.fee-d.tax-d.ship)/d.rev:0,desc:'純利率 = 純利 ÷ 營收'},
+    ],
+    fillFormula:['tax']},
 ];
 function _kpiFmt(v,fmt){
   if(fmt==='pct')return v?(v*100).toFixed(2)+'%':'—';
@@ -10090,6 +10102,8 @@ function _kpiEmptyRow(month){return{id:month,month,shopee:{},coupang:{},other:{}
 const KPI_SHOP_LABELS={
   'MOMO-甲配':'甲配',
   'MOMO-寄倉':'乙配',
+  '博客來-寄倉':'寄倉',
+  '博客來-轉單':'轉單',
   'mo+0號店(好麻吉)':'MO+好麻吉',
   'mo+1號店(森之旅)':'MO+森之旅',
   'mo+2號店(玩樂)':'MO+玩樂',
@@ -10395,6 +10409,8 @@ function _kpiFillSlots(row,group){
     // shopSince：這家店在 shopSince 之前的月份 0 格（只影響進度計算與共用格生效；
     //   不影響能不能填、合計算不算）。
     if(group.shopSince&&group.shopSince[shop]&&row&&row.month&&row.month<group.shopSince[shop])return;
+    // shopOptional（博客來轉單）：這家店這個月一格都沒填 → 不列入（同 shopSince 的 0 格）；填了任何一格就照一般規則算
+    if(group.shopOptional&&group.shopOptional.includes(shop)&&!Object.values(box[shop]||{}).some(v=>v!=null&&v!==''))return;
     group.manual.forEach(f=>{
       if(_kpiIsAutoFill(group,shop,f.k))return;   // 自動預設的格子（甲配耗材）不算填寫進度
       const st=_kpiFieldMergeStatus(group,f.k,shop,row.month);
@@ -11195,6 +11211,12 @@ function _kpiFillHtml(row){
     const pr=pchomeKpiFromRecon(month);
     const h=pr.ok?_kpiPchomeAutoHint(month,row):null;
     autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${pr.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(pr.why)}">等對帳</span>`}<button id="km-au-btn" class="km-au-btn${pr.ok?'':' km-au-off'}"${pr.ok?'':' disabled'} onclick="kpiPchomeAutoFill()" title="${_kpiEscAttr(pr.ok?'訂單數／營收／商品成本／平台費／耗材，從 PChome 月對帳（帳務月 '+month+'）與商品主檔帶入。按下去會先預覽，確認後才寫入。稅金是公式（營收×5/105）；物流運費維持手填。':pr.why)}">從對帳單帶入 ${month.replace('-','/')}</button></span>`;
+  }
+  // 博客來：上傳三種報表（存 app/books_recon）＋從報表帶入營收／商品成本／平台費；完全沒有報表 → 帶入鈕 disabled
+  if(group.key==='books'){
+    const br=booksKpiFromRecon(month);
+    const h=br.ok?_kpiBooksAutoHint(month,row):null;
+    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${br.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(br.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiBooksUpload()" title="一次可以選多個檔：對帳表（銷貨明細）、折讓單、費用報表、訂單明細，會自動辨識。先預覽、確認才寫入。">上傳博客來報表</button><button id="km-au-btn" class="km-au-btn${br.ok?'':' km-au-off'}"${br.ok?'':' disabled'} onclick="kpiBooksAutoFill()" title="${_kpiEscAttr(br.ok?'訂單數（訂單明細）、營收（對帳表成本小計）、商品成本（成本表）、平台費（折讓單＋費用報表），從已上傳的博客來報表帶入。按下去會先預覽，確認後才寫入。寄倉運費手填。':br.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
   }
   return `<div class="km-fill">
     <aside class="km-side">${side}</aside>
@@ -12142,6 +12164,472 @@ async function __kpiPchomeRestore(month){
 }
 // 🔴 對帳單帶入（2026-10-16，kpiShopeeAutoFill）上線後不要再執行 __kpiShopeeFeeMigrate：
 //    它會把「等於實際營收×費率」的手續費刪掉改回估算，而對帳單帶入寫的是實際手續費。
+// ══ 博客來對帳資料（app/books_recon）＋ KPI「從報表帶入」（2026-11-04）══
+//   上傳入口暫放 KPI 填寫模式的博客來群組；解析（booksParseWorkbook）與雲端儲存（__cloudBooksRecon）獨立，之後淨利表博客來直接沿用。
+//   本次只做寄倉（供應商／廠商名稱含「寄倉」）；非寄倉列紅字列出、不計入。
+//   三種報表（博客來供應商後台匯出，.xls BIFF8 或 .xlsx；以工作表名稱＋標題列欄名辨識，不靠欄位位置）：
+//     對帳表（銷貨明細）：'sale_report (N)'（舊版）或 '銷售對帳(應稅)'／'銷售對帳(免稅)'（新版）。只讀明細列（結算帳月有值），
+//       表尾「數量總計／發票資訊」不讀（2026-10 匯出檔表尾顯示 0，跟明細不符）。
+//       ⚠ 舊版 .xls 的成本小計是公式 ROUND(單一成本×折扣×0.01×數量,2)、檔案裡沒有計算結果（讀出來 0）→ 用同一個公式重算（會標出重算幾列）。
+//     折讓單：工作表 summary（帳期／計算起訖／總金額，含稅）＋ bill_detail（店內碼／淨銷量／應付金額，表尾館別金額、折讓%）。
+//     費用報表：summary（結算帳月、費用項目、含稅金額）＋ shipping_fee／tally_package（只用來核對）。
+//     訂單明細（queryorders 匯出 .xlsx）：只讀工作表「接單統計」（一列＝一筆訂單）；不讀「成本明細」（同一訂單會拆成多列）。
+//       只計供貨模式＝寄倉；月份依訂單日期的年月（一個檔跨月就依月拆開）；訂單數＝列數、件數＝Σ接單量小計。貨號可能帶 Tab，一律 trim。
+//       ⚠ summary 的「總計」也是沒算的公式（讀出來 0）→ 總額一律用費用項目加總。
+//   雲端：app/books_recon months.{結算帳月}.{sales|rebate|fee|orders}，每塊整塊覆蓋（同月重傳覆蓋、絕不累加）。
+//   KPI 月份 M ＝ 結算帳月 M。
+const BOOKS_RECON_KEY='ec_books_recon';
+const _booksNum=v=>{if(v==null||v==='')return 0;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:0;};
+const _booksYM=s=>{const m=String(s==null?'':s).match(/(\d{4})\D?(\d{2})/);return m?m[1]+'-'+m[2]:'';};
+const _booksTrim=v=>String(v==null?'':v).trim();
+const _booksAoa=ws=>XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
+const _booksR2=v=>Math.round(v*100)/100;
+// 辨識檔案類型 → 交給各自的解析；回傳 {type:'sales'|'rebate'|'fee'|'unknown', file, month, …}
+function booksParseWorkbook(wb,file){
+  const names=(wb&&wb.SheetNames)||[],has=n=>names.includes(n);
+  if(has('接單統計'))return _booksParseOrders(wb,file);
+  if(has('summary')&&has('bill_detail'))return _booksParseRebate(wb,file);
+  if(has('summary')&&(has('shipping_fee')||has('tally_package')))return _booksParseFee(wb,file);
+  const saleSheets=names.filter(n=>/^sale_report/i.test(n)||/^銷售對帳/.test(n));
+  if(saleSheets.length)return _booksParseSales(wb,saleSheets,file);
+  return{type:'unknown',file,error:'認不出是哪一種博客來報表（工作表：'+(names.join('、')||'無')+'）'};
+}
+function _booksParseSales(wb,sheets,file){
+  const rows=[],nonConsign=[],errs=[];let recalc=0;
+  sheets.forEach(sn=>{
+    const a=_booksAoa(wb.Sheets[sn]);
+    const hi=a.findIndex(r=>r.some(c=>_booksTrim(c)==='結算帳月')&&r.some(c=>_booksTrim(c)==='成本小計'));
+    if(hi<0){errs.push('「'+sn+'」找不到標題列（結算帳月／成本小計）');return;}
+    const H=a[hi].map(_booksTrim),ix=n=>H.indexOf(n);
+    const lack=['結算帳月','商品貨號','店內碼','結算類型','數量','成本小計'].filter(n=>ix(n)<0);
+    if(lack.length){errs.push('「'+sn+'」標題列缺欄位：'+lack.join('、'));return;}
+    const iU=ix('單一成本(含稅)'),iD=ix('折扣'),iS=ix('供應商名稱'),iV=ix('廠商名稱');
+    a.slice(hi+1).forEach(r=>{
+      const ym=_booksYM(r[ix('結算帳月')]);if(!ym)return;   // 只讀明細；表尾數量總計／發票資訊沒有結算帳月
+      const q=_booksNum(r[ix('數量')]);let sub=_booksNum(r[ix('成本小計')]);
+      const u=iU>=0?_booksNum(r[iU]):0,d=iD>=0?_booksNum(r[iD]):0;
+      if(!sub&&u&&d&&q){sub=_booksR2(u*d*0.01*q);recalc++;}   // 舊版公式沒計算結果 → 同公式重算
+      const row={月:ym,店內碼:_booksTrim(r[ix('店內碼')]),商品貨號:_booksTrim(r[ix('商品貨號')]),商品名稱:ix('商品名稱')>=0?_booksTrim(r[ix('商品名稱')]):'',結算類型:_booksTrim(r[ix('結算類型')]),數量:q,成本小計:sub};
+      const sup=[iS>=0?_booksTrim(r[iS]):'',iV>=0?_booksTrim(r[iV]):''].filter(Boolean).join(' / ');
+      if(!/寄倉/.test(sup)){nonConsign.push(Object.assign({供應商:sup||'（空白）'},row));return;}
+      rows.push(row);
+    });
+  });
+  const months=[...new Set(rows.map(r=>r.月))].sort();
+  const sum=(arr,k)=>arr.reduce((t,r)=>t+(r[k]||0),0);
+  const byType={};rows.forEach(r=>{const t=r.結算類型||'（空白）';const o=byType[t]=byType[t]||{n:0,qty:0,amt:0};o.n++;o.qty+=r.數量;o.amt+=r.成本小計;});
+  return{type:'sales',file,sheets,month:months[0]||'',months,rows,recalc,nonConsign,errs,
+    n:rows.length,qty:sum(rows,'數量'),amt:_booksR2(sum(rows,'成本小計')),byType,
+    ncAmt:_booksR2(sum(nonConsign,'成本小計'))};
+}
+// 訂單明細：日期可能是 'YYYY/MM/DD' 字串或 Excel 日期序號 → 一律轉 'YYYY/MM/DD'
+function _booksDate(v){
+  if(typeof v==='number'&&v>20000&&v<80000){const d=XLSX.SSF.parse_date_code(v);if(d)return d.y+'/'+String(d.m).padStart(2,'0')+'/'+String(d.d).padStart(2,'0');}
+  const m=_booksTrim(v).match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);return m?m[1]+'/'+m[2].padStart(2,'0')+'/'+m[3].padStart(2,'0'):'';
+}
+function _booksParseOrders(wb,file){
+  const a=_booksAoa(wb.Sheets['接單統計']),errs=[];
+  const hi=a.findIndex(r=>r.some(c=>_booksTrim(c)==='訂單日期')&&r.some(c=>_booksTrim(c)==='接單量小計'));
+  if(hi<0)return{type:'orders',file,month:'',months:[],errs:['「接單統計」找不到標題列（訂單日期／接單量小計）']};
+  const H=a[hi].map(_booksTrim),ix=n=>H.indexOf(n);
+  const lack=['訂單日期','店內碼','貨號','接單量小計','供貨模式'].filter(n=>ix(n)<0);
+  if(lack.length)return{type:'orders',file,month:'',months:[],errs:['「接單統計」標題列缺欄位：'+lack.join('、')]};
+  const byMonth={},nonConsign=[];
+  a.slice(hi+1).forEach(r=>{
+    const d=_booksDate(r[ix('訂單日期')]);if(!d)return;   // 一列＝一筆訂單；沒有訂單日期的列不讀
+    const mode=_booksTrim(r[ix('供貨模式')]),q=_booksNum(r[ix('接單量小計')]);
+    const row={日期:d,店內碼:_booksTrim(r[ix('店內碼')]),貨號:_booksTrim(r[ix('貨號')]),數量:q,模式:mode};
+    if(mode!=='寄倉'){nonConsign.push(row);return;}
+    const m=d.slice(0,7).replace('/','-');const o=byMonth[m]=byMonth[m]||{count:0,qty:0,from:d,to:d};
+    o.count++;o.qty+=q;if(d<o.from)o.from=d;if(d>o.to)o.to=d;
+  });
+  const months=Object.keys(byMonth).sort();
+  const all=months.map(m=>byMonth[m]);
+  return{type:'orders',file,month:months[0]||'',months,byMonth,nonConsign,errs,
+    n:all.reduce((t,o)=>t+o.count,0),qty:all.reduce((t,o)=>t+o.qty,0),
+    from:all.length?all.map(o=>o.from).sort()[0]:'',to:all.length?all.map(o=>o.to).sort().slice(-1)[0]:''};
+}
+function _booksParseRebate(wb,file){
+  const s=_booksAoa(wb.Sheets.summary),errs=[];
+  const hi=s.findIndex(r=>r.some(c=>_booksTrim(c)==='帳期')&&r.some(c=>_booksTrim(c)==='總金額'));
+  let total=null,period='',from='',to='';
+  if(hi<0)errs.push('summary 找不到標題列（帳期／總金額）');
+  else{
+    const H=s[hi].map(_booksTrim),ix=n=>H.indexOf(n);
+    s.slice(hi+1).forEach(r=>{const p=_booksYM(r[ix('帳期')]);if(!p)return;
+      total=(total||0)+_booksNum(r[ix('總金額')]);period=period||p;
+      if(ix('計算起始日')>=0)from=from||_booksTrim(r[ix('計算起始日')]);if(ix('計算結束日')>=0)to=to||_booksTrim(r[ix('計算結束日')]);});
+    if(total==null)errs.push('summary 沒有帳期資料列');
+  }
+  const b=_booksAoa(wb.Sheets.bill_detail),detail=[];let base=null,pct=null;
+  const bh=b.findIndex(r=>r.some(c=>_booksTrim(c)==='店內碼')&&r.some(c=>_booksTrim(c)==='淨銷量'));
+  if(bh<0)errs.push('bill_detail 找不到標題列（店內碼／淨銷量）');
+  else{
+    const H=b[bh].map(_booksTrim),ix=n=>H.indexOf(n),iA=H.findIndex(h=>/^應付金額/.test(h));
+    b.slice(bh+1).forEach((r,k)=>{
+      const c0=_booksTrim(r[0]);
+      if(c0==='館別金額')base=_booksNum(r[1]);
+      const pi=r.findIndex(c=>_booksTrim(c)==='折讓%');
+      if(pi>=0){const nx=b[bh+1+k+1];if(nx)pct=_booksNum(nx[pi]);}
+      const code=_booksTrim(r[ix('店內碼')]);if(!/^[A-Za-z]\d{4,}$/.test(code))return;   // 店內碼＝英文字母＋數字（例 N001967840）；表尾「折讓%」的 4 剛好落在這一欄，不能用寬鬆比對
+      detail.push({店內碼:code,淨銷量:_booksNum(r[ix('淨銷量')]),應付:iA>=0?_booksNum(r[iA]):0});
+    });
+  }
+  return{type:'rebate',file,month:period,total:total==null?null:_booksR2(total),from,to,base,pct,detail,errs};
+}
+function _booksParseFee(wb,file){
+  const s=_booksAoa(wb.Sheets.summary),errs=[];let month='';
+  s.forEach(r=>r.forEach(c=>{const m=_booksTrim(c).match(/結算帳月[:：]\s*(\d{6})/);if(m&&!month)month=_booksYM(m[1]);}));
+  const hi=s.findIndex(r=>r.some(c=>_booksTrim(c)==='費用項目')&&r.some(c=>_booksTrim(c)==='含稅金額'));
+  const items=[];let totalCell=null;
+  if(hi<0)errs.push('summary 找不到標題列（費用項目／含稅金額）');
+  else{
+    const H=s[hi].map(_booksTrim),iN=H.indexOf('費用項目'),iA=H.indexOf('含稅金額');
+    for(const r of s.slice(hi+1)){
+      const name=_booksTrim(r[iN]);if(!name)break;
+      if(/總計/.test(name)){totalCell=_booksNum(r[iA]);break;}
+      items.push({name,amt:_booksNum(r[iA])});
+    }
+  }
+  const sheetSum=(sn,qtyCol,amtCol)=>{
+    if(!wb.Sheets[sn])return null;
+    const a=_booksAoa(wb.Sheets[sn]);const h=a.findIndex(r=>r.some(c=>_booksTrim(c)===qtyCol));if(h<0)return null;
+    const H=a[h].map(_booksTrim),iq=H.indexOf(qtyCol),ia=H.indexOf(amtCol),im=H.indexOf('結帳年月');
+    let qty=0,amt=0,n=0;a.slice(h+1).forEach(r=>{if(im>=0&&!_booksYM(r[im]))return;n++;qty+=_booksNum(r[iq]);if(ia>=0)amt+=_booksNum(r[ia]);});
+    return{n,qty,amt:_booksR2(amt)};
+  };
+  return{type:'fee',file,month,items,total:_booksR2(items.reduce((t,x)=>t+x.amt,0)),totalCell,
+    ship:sheetSum('shipping_fee','出貨數量','運費總計'),pack:sheetSum('tally_package','出貨數量','包材費'),errs};
+}
+// 雲端 → 記憶體（照 PChome：firebase.js boot 就訂閱、先緩存在 window.__booksReconCloudLatest；這裡定義後立刻 drain）
+window.__booksApplyCloudRecon=function(data){
+  try{
+    Store._profitMem=Store._profitMem||{};Store._profitMem[BOOKS_RECON_KEY]=(data&&data.months)||{};
+    if(document.getElementById('kpi-tab-content'))_kpiRefreshViews();
+  }catch(e){console.error('[books_recon] 套用雲端失敗：',e);}
+};
+try{if(typeof window.__booksReconCloudLatest!=='undefined')window.__booksApplyCloudRecon(window.__booksReconCloudLatest);}catch(e){}
+function booksLoadRecon(){try{return(Store._profitMem&&Store._profitMem[BOOKS_RECON_KEY])||{};}catch{return{};}}
+// ── 上傳：多選檔案 → 解析 → 預覽（摘要＋核對）→ 確認才寫 app/books_recon ──
+function kpiBooksUpload(){
+  if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法修改資料','error');return;}
+  if(typeof XLSX==='undefined'){if(typeof showToast==='function')showToast('Excel 元件還沒載入，請稍後再試','error');return;}
+  const inp=document.createElement('input');inp.type='file';inp.multiple=true;inp.accept='.xls,.xlsx';
+  inp.onchange=async()=>{
+    const files=[...(inp.files||[])];if(!files.length)return;
+    const parsed=[];
+    for(const f of files){
+      try{parsed.push(booksParseWorkbook(XLSX.read(await f.arrayBuffer(),{type:'array'}),f.name));}
+      catch(e){parsed.push({type:'unknown',file:f.name,error:'讀檔失敗：'+((e&&e.message)||e)});}
+    }
+    _booksUploadPreview(parsed);
+  };
+  inp.click();
+}
+const BOOKS_TYPE_LABEL={sales:'對帳表（銷貨明細）',rebate:'折讓單',fee:'費用報表',orders:'訂單明細',unknown:'無法辨識'};
+// 核對（不一致標黃、不擋）：用這次上傳的同月對帳表；這次沒傳就用雲端已存的
+function _booksChecks(month,up){
+  const stored=booksLoadRecon()[month]||{};
+  const salesRows=up.sales?up.sales.rows.filter(r=>r.月===month):((stored.sales&&stored.sales.rows)||null);
+  const src=up.sales?'這次上傳的對帳表':'雲端已存的對帳表';
+  const out=[];
+  if(!salesRows){if(up.rebate||up.fee)out.push({ok:null,t:'沒有這個月的對帳表，折讓單／費用報表先不核對（之後補傳對帳表再核對）'});return out;}
+  const byCode={};salesRows.forEach(r=>{const o=byCode[r.店內碼]=byCode[r.店內碼]||{qty:0,amt:0};o.qty+=r.數量;o.amt+=r.成本小計;});
+  const salesAmt=salesRows.reduce((t,r)=>t+r.成本小計,0),saleQty=salesRows.filter(r=>r.結算類型==='銷貨').reduce((t,r)=>t+r.數量,0);
+  if(up.rebate){
+    const rb=up.rebate,bad=[],seen=new Set();
+    rb.detail.forEach(d=>{seen.add(d.店內碼);const s=byCode[d.店內碼];
+      if(!s)bad.push(d.店內碼+'：折讓單有、對帳表沒有');
+      else if(Math.abs(s.qty-d.淨銷量)>1e-6||Math.abs(s.amt-d.應付)>0.01)bad.push(d.店內碼+'：淨銷量 '+fmtN(d.淨銷量)+' vs '+fmtN(s.qty)+'、應付 '+d.應付+' vs '+_booksR2(s.amt));});
+    Object.keys(byCode).forEach(c=>{if(!seen.has(c)&&(byCode[c].qty||byCode[c].amt))bad.push(c+'：對帳表有、折讓單沒有');});
+    out.push(bad.length?{ok:false,t:'折讓單 '+rb.detail.length+' 個店內碼 vs '+src+'：'+bad.length+' 個不一致',list:bad}
+      :{ok:true,t:'折讓單 '+rb.detail.length+' 個店內碼的淨銷量／應付金額，跟'+src+'完全一致'});
+    if(rb.pct!=null&&rb.total!=null){const exp=salesAmt*rb.pct/100,diff=rb.total-exp;
+      out.push({ok:Math.abs(diff)<=1,t:'折讓金額 '+rb.total+' vs 對帳表成本小計 '+_booksR2(salesAmt)+' × '+rb.pct+'% ＝ '+_booksR2(exp)+'（差 '+_booksR2(diff)+'）'});}
+  }
+  if(up.fee&&up.fee.ship){const sq=up.fee.ship.qty;
+    out.push({ok:sq===saleQty,t:'運費明細出貨數量 '+fmtN(sq)+' vs 對帳表銷貨數量 '+fmtN(saleQty)});}
+  return out;
+}
+function _booksUploadPreview(parsed){
+  const esc=_kpiEscAttr,m0=v=>v==null?'—':_kpiMoney(v);
+  // 對帳表含多個結算帳月 → 拆成每月一份（各自存到自己的帳月），不只取第一個月
+  const ok=[];parsed.filter(p=>p.type!=='unknown'&&!(p.errs&&p.errs.length)&&p.month).forEach(p=>{
+    if((p.type==='sales'||p.type==='orders')&&p.months.length>1)p.months.forEach(m=>ok.push(Object.assign({},p,{month:m,months:[m]})));else ok.push(p);});
+  // 同月同類型傳了兩份 → 擋下（不知道要用哪份）
+  const dupKey={};ok.forEach(p=>{const k=p.month+'|'+p.type;dupKey[k]=(dupKey[k]||0)+1;});
+  const dups=Object.keys(dupKey).filter(k=>dupKey[k]>1);
+  const months=[...new Set(ok.map(p=>p.month))].sort();
+  const rowsHtml=parsed.map(p=>{
+    let info='';
+    if(p.type==='sales')info=`${fmtN(p.n)} 列 · 數量 ${_kpiNum(p.qty)} · 成本小計 ${m0(p.amt)}`+Object.entries(p.byType).map(([t,o])=>`<div class="km-au-note">${esc(t)} ${fmtN(o.n)} 列 · ${_kpiNum(o.qty)} 件 · ${m0(o.amt)}</div>`).join('')
+      +(p.recalc?`<div class="km-au-note">成本小計 ${p.recalc} 列用公式重算（舊版 .xls 沒有計算結果）</div>`:'')+(p.months.length>1?`<div class="km-au-note">⚠ 含 ${p.months.length} 個結算帳月：${p.months.join('、')}</div>`:'');
+    else if(p.type==='orders')info=`訂單日期 ${esc(p.from)}～${esc(p.to)} · 訂單數 ${fmtN(p.n)} · 件數 ${_kpiNum(p.qty)}（寄倉）`
+      +(()=>{const t=(p.nonConsign||[]).filter(r=>r.模式==='轉單');return t.length?`<div class="km-au-note">轉單 ${fmtN(t.length)} 筆、${_kpiNum(t.reduce((a,r)=>a+r.數量,0))} 件（先只顯示，不寫入）</div>`:'';})()
+      +(p.months.length>1?p.months.map(m=>`<div class="km-au-note">${m}：${fmtN(p.byMonth[m].count)} 筆 · ${_kpiNum(p.byMonth[m].qty)} 件（${esc(p.byMonth[m].from)}～${esc(p.byMonth[m].to)}）</div>`).join(''):'');
+    else if(p.type==='rebate')info=`總金額 ${p.total==null?'—':p.total}（含稅）· ${p.detail.length} 個店內碼 · 折讓 ${p.pct==null?'—':p.pct+'%'}`+(p.from?`<div class="km-au-note">計算區間 ${esc(p.from)}～${esc(p.to)}</div>`:'');
+    else if(p.type==='fee')info=p.items.map(x=>esc(x.name)+' '+m0(x.amt)).join('、')+` · 合計 ${m0(p.total)}（含稅）`
+      +(p.ship?`<div class="km-au-note">運費明細 ${p.ship.n} 列 · 出貨 ${fmtN(p.ship.qty)} 件 · ${m0(p.ship.amt)}</div>`:'')+(p.pack?`<div class="km-au-note">包材明細 ${p.pack.n} 列 · ${m0(p.pack.amt)}</div>`:'');
+    const err=p.error||((p.errs||[]).join('；'));
+    return `<tr class="${err?'km-au-x':''}"><td>${esc(p.file)}</td><td>${BOOKS_TYPE_LABEL[p.type]||p.type}</td><td>${(p.months&&p.months.length>1)?p.months.join('、'):(p.month||'—')}</td><td>${err?`<span class="km-bk-err">${esc(err)}</span>`:info}</td></tr>`;
+  }).join('');
+  // 紅字：非寄倉列（不計入）
+  const nc=ok.filter(p=>p.type==='sales'&&p.nonConsign.length).map(p=>`<div class="km-bk-errbox">⚠ ${esc(p.file)}：${p.nonConsign.length} 列不是寄倉（${[...new Set(p.nonConsign.map(r=>r.供應商))].map(esc).join('、')}；成本小計 ${m0(p.ncAmt)}），<b>不計入</b>。這次只做寄倉。</div>`).join('');
+  const ncO=parsed.filter(p=>p.type==='orders'&&p.nonConsign&&p.nonConsign.some(r=>r.模式!=='轉單')).map(p=>{const o=p.nonConsign.filter(r=>r.模式!=='轉單');return `<div class="km-bk-errbox">⚠ ${esc(p.file)}：${o.length} 筆訂單的供貨模式不是寄倉也不是轉單（${[...new Set(o.map(r=>r.模式||'（空白）'))].map(esc).join('、')}；${_kpiNum(o.reduce((t,r)=>t+r.數量,0))} 件），<b>不計入</b>。</div>`;}).join('');
+  const monthWarn=months.length>1?`<div class="km-au-warn-box"><div class="km-au-warn-t">⚠ 這次上傳的檔案結算帳月不一致：${months.join('、')}（各自存到自己的帳月）</div></div>`:'';
+  const dupWarn=dups.length?`<div class="km-bk-errbox">⚠ 同一個帳月同一種報表傳了兩份（${dups.map(k=>k.replace('|',' ')).join('、')}）：不知道要用哪一份，這次不寫入，請只選一份重傳。</div>`:'';
+  const checks=months.map(m=>{
+    const up={};ok.filter(p=>p.month===m).forEach(p=>{up[p.type]=p;});
+    const cs=_booksChecks(m,up);if(!cs.length)return '';
+    return `<div class="km-bk-chk"><b>${m.replace('-','/')} 核對</b>`+cs.map(c=>`<div class="km-au-check ${c.ok===true?'ok':c.ok===false?'warn':''}">${c.ok===true?'✓':c.ok===false?'⚠':'·'} ${esc(c.t)}${c.list?`<div class="km-au-note">${c.list.slice(0,30).map(esc).join('<br>')}${c.list.length>30?'<br>…':''}</div>`:''}</div>`).join('')+'</div>';
+  }).join('');
+  // 會寫入的塊
+  const willWrite=dups.length?[]:ok;
+  const exist=booksLoadRecon();
+  const writeList=willWrite.map(p=>`${p.month.replace('-','/')} ${BOOKS_TYPE_LABEL[p.type]}${exist[p.month]&&exist[p.month][p.type]?'（覆蓋雲端已存的）':''}`);
+  App.openModal({title:'上傳博客來報表',width:'980px',
+    bodyHtml:`<div class="km-au">
+      <div class="km-tablewrap"><table class="km-au-tbl"><thead><tr><th>檔案</th><th>類型</th><th>結算帳月</th><th>內容</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
+      ${nc}${ncO}${monthWarn}${dupWarn}${checks}
+      <div class="km-au-sub">${writeList.length?'確認後寫入雲端（app/books_recon，同月同類型整塊覆蓋、不累加）：'+writeList.map(esc).join('、'):'沒有可以寫入的檔案'}</div></div>`,
+    saveLabel:writeList.length?'確認寫入 '+writeList.length+' 份':'關閉',
+    onSave:()=>{if(!writeList.length)return true;_booksWriteRecon(willWrite);return true;}});
+}
+// 寫入 app/books_recon：每塊一個 FieldPath（['months',帳月,類型]）整塊覆蓋 → 讀回比對
+async function _booksWriteRecon(list){
+  const by=_kpiWho(),at=Date.now(),pairs=[[['schema'],1]];
+  list.forEach(p=>{
+    let v;
+    if(p.type==='sales'){const rows=p.rows.filter(r=>r.月===p.month).map(r=>({店內碼:r.店內碼,商品貨號:r.商品貨號,商品名稱:r.商品名稱||'',結算類型:r.結算類型,數量:r.數量,成本小計:r.成本小計}));
+      v={rows,n:rows.length,qty:rows.reduce((t,r)=>t+r.數量,0),amt:_booksR2(rows.reduce((t,r)=>t+r.成本小計,0)),recalc:p.recalc,
+        nonConsignN:p.nonConsign.length,nonConsignAmt:p.ncAmt,file:p.file,at,by};}
+    else if(p.type==='rebate')v={total:p.total,pct:p.pct,base:p.base,from:p.from,to:p.to,codes:p.detail.length,file:p.file,at,by};
+    else if(p.type==='orders'){const o=p.byMonth[p.month];v={count:o.count,qty:o.qty,from:o.from,to:o.to,nonConsignN:p.nonConsign.filter(r=>r.日期.slice(0,7).replace('/','-')===p.month).length,file:p.file,at,by};}
+    else v={items:p.items,total:p.total,shipQty:p.ship?p.ship.qty:null,shipAmt:p.ship?p.ship.amt:null,packAmt:p.pack?p.pack.amt:null,file:p.file,at,by};
+    pairs.push([['months',p.month,p.type],v]);
+  });
+  let r;try{r=await window.__cloudBooksRecon.writePaths(pairs);}catch(e){console.error('[books_recon] 寫入失敗',e);if(typeof showToast==='function')showToast('寫入失敗：'+((e&&e.message)||e),'error',8000);return;}
+  if(!(r&&r.ok)){if(typeof showToast==='function')showToast('沒有寫入（唯讀或本機防護）','error');return;}
+  // 讀回比對（列數／總額）
+  try{
+    const snap=await window.__cloudBooksRecon.getDoc();const d=(snap&&snap.exists&&snap.exists())?(snap.data()||{}):{};
+    const bad=list.filter(p=>{const g=(((d.months||{})[p.month])||{})[p.type];if(!g||g.at!==at)return true;
+      return p.type==='sales'?g.n!==p.rows.filter(r=>r.月===p.month).length:p.type==='orders'?g.count!==p.byMonth[p.month].count:g.total!==p.total;});
+    if(bad.length){if(typeof showToast==='function')showToast('寫入後讀回對不上：'+bad.map(p=>p.month+' '+BOOKS_TYPE_LABEL[p.type]).join('、')+'，請重傳一次','error',10000);return;}
+    window.__booksApplyCloudRecon(d);
+  }catch(e){console.warn('[books_recon] 讀回失敗',e);}
+  if(typeof showToast==='function')showToast('已寫入博客來報表 '+list.length+' 份','success');
+}
+// 純函式：結算帳月 → KPI 營收／商品成本／平台費。只讀 app/books_recon（＋成本表 ec_momo_cost_by_origin，同 MOMO 查成本）。
+//   缺哪個檔就只帶得出能帶的欄位（why 寫缺什麼）；完全沒資料 → ok:false。
+// 博客來查成本（2026-11-04 使用者決定的備援規則，只用在博客來）：①原始商品貨號精確查；②查不到 → 最後一個「-」之後的尾碼
+//   逐次去掉結尾一個 0 再查（尾碼至少留 2 碼），第一個查到的就用（例 E171-04000 → E171-0400 → E171-040 → E171-04）。
+//   回 {key,u}（key≠原貨號＝備援對上的，預覽要列出）或 null（照舊進缺成本清單）。
+function _booksCostLookup(cm,code){
+  const val=k=>{const v=cm[k];const u=(v!=null&&v!=='')?Number(v):NaN;return Number.isFinite(u)?u:null;};
+  let u=val(code);if(u!=null)return{key:code,u};
+  const i=code.lastIndexOf('-');if(i<0)return null;
+  const pre=code.slice(0,i+1);let suf=code.slice(i+1);
+  while(suf.length>2&&suf.endsWith('0')){suf=suf.slice(0,-1);u=val(pre+suf);if(u!=null)return{key:pre+suf,u};}
+  return null;
+}
+function booksKpiFromRecon(month,costMap){
+  const e=booksLoadRecon()[month]||null;
+  const has={sales:!!(e&&e.sales&&Array.isArray(e.sales.rows)),rebate:!!(e&&e.rebate&&e.rebate.total!=null),fee:!!(e&&e.fee&&e.fee.total!=null),orders:!!(e&&e.orders&&e.orders.count!=null)};
+  if(!has.sales&&!has.rebate&&!has.fee&&!has.orders)return{ok:false,has,why:'結算帳月 '+month+' 還沒有上傳博客來報表（對帳表／折讓單／費用報表／訂單明細）'};
+  const out={ok:true,month,has,qty:has.orders?Number(e.orders.count):null,rev:null,cost:null,fee:null,orders:e.orders||null,missing:[],mapped:[],why:{},sales:e.sales||null,rebate:e.rebate||null,feeRep:e.fee||null};
+  if(has.sales){
+    const rows=e.sales.rows;
+    out.rev=rows.reduce((t,r)=>t+(Number(r.成本小計)||0),0);
+    const cm=costMap||momoLoadCostByOrigin()||{};
+    if(!Object.keys(cm).length)out.why.cost='成本表還沒載入';
+    else{
+      const q={},amt={},nm={};rows.forEach(r=>{const c=r.商品貨號;q[c]=(q[c]||0)+(Number(r.數量)||0);amt[c]=(amt[c]||0)+(Number(r.成本小計)||0);if(r.商品名稱&&!nm[c])nm[c]=r.商品名稱;});
+      let cost=0;Object.keys(q).forEach(c=>{const hit=_booksCostLookup(cm,c);
+        if(hit){cost+=hit.u*q[c];if(hit.key!==c)out.mapped.push({from:c,to:hit.key,qty:q[c]});return;}
+        if(q[c]||amt[c])out.missing.push({code:c,name:nm[c]||'',qty:q[c],amt:_booksR2(amt[c])});});
+      out.cost=cost;
+    }
+  }else{out.why.rev=out.why.cost='缺對帳表（銷貨明細）';}
+  if(!has.orders)out.why.qty='缺訂單明細';
+  if(has.rebate&&has.fee)out.fee=Number(e.rebate.total)+Number(e.fee.total);
+  else out.why.fee='缺'+[has.rebate?'':'折讓單',has.fee?'':'費用報表'].filter(Boolean).join('、');
+  return out;
+}
+const KPI_BOOKS_AUTO_FIELDS=['qty','rev','cost','fee'];
+const KPI_BOOKS_CONSIGN='博客來-寄倉';   // 從報表帶入只寫這一家（轉單之後再做）
+function _kpiBooksAutoPlan(month,row,costMap){
+  row=row||getOrCreateKpiRow(month);
+  const group=KPI_GROUPS.find(g=>g.key==='books'),shop=KPI_BOOKS_CONSIGN;
+  const sd=((row.books||{})[shop])||{},items=[],br=booksKpiFromRecon(month,costMap),m0=v=>_kpiMoney(v),src='books-recon:'+month;
+  const push=(it)=>{
+    const meta=_kpiMetaAt(month,it.segs);
+    it.auto=_kpiIsAutoMeta(meta);it.metaVal=meta&&meta.val;
+    if(it.status==='write'){
+      if(it.cur===it.val&&it.auto&&it.metaVal===it.val)it.status='same';
+      it.srcChanged=it.auto&&it.metaVal!=null&&it.metaVal!==it.val;
+    }
+    items.push(it);
+  };
+  const s=br.sales,rb=br.rebate,fe=br.feeRep,od=br.orders;
+  const comp={
+    qty:od?'訂單明細（接單統計）寄倉 '+fmtN(od.count)+' 筆、'+_kpiNum(od.qty)+' 件（訂單日期 '+(od.from||'')+'～'+(od.to||'')+'）':'',
+    rev:s?'對帳表寄倉 Σ成本小計（含稅；'+fmtN(s.n||0)+' 列、淨數量 '+fmtN(s.qty||0)+'）':'',
+    cost:s?'Σ 成本表單位成本 × 淨數量（商品貨號＝原廠編號）':'',
+    fee:(rb&&fe)?'折讓單 '+rb.total+' ＋ 費用報表 '+(fe.items||[]).map(x=>x.name+' '+fmtN(x.amt)).join('＋')+'（含稅原值）':'',
+  };
+  KPI_BOOKS_AUTO_FIELDS.forEach(f=>{
+    const it={shop,ms:shop,field:f,label:group.manual.find(x=>x.k===f).l,segs:['books',shop,f],cur:sd[f]};
+    const v=br.ok?br[f]:null;
+    if(v==null)Object.assign(it,{status:'wait',note:br.ok?(br.why[f]||'算不出來'):br.why});
+    else Object.assign(it,{status:'write',val:Math.round(v),src,comp:comp[f],
+      hintNote:f==='cost'?([br.mapped.length?'補零對應 '+br.mapped.length+' 個（原貨號 → 對應貨號）：'+br.mapped.map(x=>x.from+' → '+x.to).join('、'):'',
+        br.missing.length?'缺成本 '+br.missing.length+' 個原廠編號（見上方），這些件數沒算進成本':''].filter(Boolean).join('；')||null):null});
+    push(it);
+  });
+  let topHtml='';
+  if(br.ok&&br.missing.length)topHtml+=`<div class="km-au-warn-box"><div class="km-au-warn-t">⚠ 缺成本 ${br.missing.length} 個原廠編號（商品貨號；影響營收 ${m0(br.missing.reduce((t,x)=>t+x.amt,0))}，含稅）：這些件數沒算進商品成本，照樣可以帶入；成本表補上後重新帶入才會算 <button class="mm-linkbtn" onclick="kpiBooksOpenMissingCostPanel('${month}')">補成本</button></div>
+    <table class="km-au-warn-tbl"><thead><tr><th>原廠編號</th><th class="km-n">淨數量</th><th class="km-n">影響營收</th></tr></thead><tbody>${br.missing.map(w=>`<tr><td>${_kpiEscAttr(w.code)}</td><td class="km-n">${fmtN(w.qty)}</td><td class="km-n">${m0(w.amt)}</td></tr>`).join('')}</tbody></table></div>`;
+  if(s&&s.nonConsignN)topHtml+=`<div class="km-bk-errbox">⚠ 這個月的對帳表有 ${s.nonConsignN} 列不是寄倉（成本小計 ${m0(s.nonConsignAmt)}），沒有計入</div>`;
+  return{items,checks:{},groupName:'博客來',restoreFn:'__kpiBooksRestore',topHtml,subLabel:'博客來寄倉（結算帳月 '+month+'）'};
+}
+function _kpiBooksAutoHint(month,row){
+  if(!KPI_BOOKS_AUTO_FIELDS.some(f=>_kpiIsAutoMeta(_kpiMetaAt(month,['books',KPI_BOOKS_CONSIGN,f]))))return null;
+  try{return _kpiBooksAutoPlan(month,row).items.some(x=>x.srcChanged)?'changed':null;}catch(e){console.warn('[KPI] 博客來帶入提示計算失敗',e);return null;}
+}
+const _kpiBooksSnapLocal=new Map();
+function _kpiBooksCells(row){
+  const cells=[];
+  _kpiLeaves((row&&row.books)||{},[],[]).forEach(([p,v])=>{if(v!=null)cells.push([['books'].concat(p),v]);});
+  const o=(row&&row.kpiFieldNotes)||{};Object.keys(o).forEach(x=>{if(x.startsWith('books:')&&o[x]!=null)cells.push([['kpiFieldNotes',x],o[x]]);});
+  return cells;
+}
+function _kpiBooksSnapGet(month){
+  const c=_kpiV2.cloud&&_kpiV2.cloud.snapshots&&_kpiV2.cloud.snapshots[month]&&_kpiV2.cloud.snapshots[month].preAutofillBooks;
+  if(_kpiIsMap(c))return Object.assign({},c,{atMs:_kpiTsMs(c.at)});
+  return _kpiBooksSnapLocal.get(month)||null;
+}
+// 成本表跟 MOMO 一起懶載入（__loadMomoSubs）；帶入前先要求載入，最多等 15 秒
+async function _kpiEnsureBooksData(){
+  const t0=Date.now();
+  if(!Object.keys(momoLoadCostByOrigin()||{}).length){try{if(typeof window.__loadMomoSubs==='function')window.__loadMomoSubs();}catch{}}
+  while(Date.now()-t0<15000){
+    if(typeof window.__booksReconCloudLatest!=='undefined'&&Object.keys(momoLoadCostByOrigin()||{}).length)return true;
+    await new Promise(r=>setTimeout(r,300));
+  }
+  return typeof window.__booksReconCloudLatest!=='undefined';
+}
+async function kpiBooksAutoFill(){
+  const month=_kpiYM();
+  if(window.App&&typeof App.isReadOnly==='function'&&App.isReadOnly()){if(typeof showToast==='function')showToast('🔒 檢視帳號為唯讀，無法修改資料','error');return;}
+  const btn=document.getElementById('km-au-btn');if(btn){btn.disabled=true;btn.textContent='載入博客來資料與成本表中…';}
+  const ready=await _kpiEnsureBooksData();
+  if(btn){btn.disabled=false;btn.textContent='從報表帶入 '+month.replace('-','/');}
+  if(!ready){if(typeof showToast==='function')showToast('博客來報表資料還沒載入完成（網路慢？），請稍後再按一次','error',6000);return;}
+  const br=booksKpiFromRecon(month);
+  if(!br.ok){if(typeof showToast==='function')showToast(br.why,'error',6000);renderKpiTab();return;}
+  const plan=_kpiBooksAutoPlan(month);
+  const writes=plan.items.filter(x=>x.status==='write');
+  const row0=getOrCreateKpiRow(month);
+  plan.snap=_kpiBooksSnapGet(month);
+  const snapCells=plan.snap?null:_kpiBooksCells(row0);
+  plan.snapCells=snapCells?snapCells.length:0;
+  App.openModal({title:'從報表帶入 '+month.replace('-','/')+'（博客來寄倉）',width:'980px',bodyHtml:_kpiAutoPreviewHtml(month,plan),
+    saveLabel:(()=>{const n=writes.filter(it=>!_kpiAutoWarn(it)).length;return n?'確認寫入 '+n+' 格':(writes.length?'沒有勾選的格子':'沒有可寫入的格子');})(),
+    onSave:()=>{
+      const sel=new Set([...document.querySelectorAll('.km-au-chk:checked')].map(x=>+x.dataset.i));
+      const chosen=writes.filter(it=>sel.has(plan.items.indexOf(it)));
+      if(!chosen.length)return true;
+      // 第一次帶入這個月：舊值快照跟帶入值【同一次 updateDoc】寫進 snapshots.{月}.preAutofillBooks（只存一次）
+      let extra=null;
+      if(snapCells&&!_kpiBooksSnapGet(month)){
+        const by=_kpiWho();
+        extra=[[['snapshots',month,'preAutofillBooks'],{by,at:window.__cloudKpi.TS,n:snapCells.length,cells:snapCells.map(([p,v])=>({p,v}))}]];
+        _kpiBooksSnapLocal.set(month,{by,atMs:Date.now(),n:snapCells.length,cells:snapCells.map(([p,v])=>({p,v}))});
+      }
+      const pairs=[];
+      chosen.forEach(it=>{
+        pairs.push([it.segs,it.val,{src:'auto',from:it.src,val:it.val}]);
+        const sd=((getOrCreateKpiRow(month).books||{})[it.segs[1]])||{};if(sd[it.segs[2]+'Formula']!=null)pairs.push([[it.segs[0],it.segs[1],it.segs[2]+'Formula'],undefined]);
+      });
+      kpiWriteCell(month,pairs,undefined,{extra}).then(ok=>{
+        if(!ok&&extra)_kpiBooksSnapLocal.delete(month);
+        if(ok&&typeof showToast==='function')showToast('已帶入 '+chosen.length+' 格（博客來 '+month+'）'+(extra?'，已保留舊值快照':''),'success');
+      });
+      _kpiFillRerender();
+      return true;
+    }});
+  renderKpiTab();
+}
+// 博客來缺成本 → 補成本（2026-11-04；照酷澎 cupOpenMissingCostPanel / cupMissCostSave 原樣複製）。
+//   列出該月套用補零規則後仍缺成本的商品貨號；存＝momoSetCostByOrigin（manual、寫共用成本表 cost_by_origin、標 dirty），
+//   跟酷澎一樣只存本機＋待同步，按「☁ 同步雲端」才逐 key 上雲。差異：z-index 100000（要蓋過帶入預覽那個 App 彈窗 99999）、
+//   多一欄數量、上方加組合品提示；存完重開帶入預覽（商品成本立即重算）。
+function kpiBooksOpenMissingCostPanel(month){
+  const br=booksKpiFromRecon(month);
+  const list=((br.ok&&br.missing)||[]).slice().sort((a,b)=>b.amt-a.amt);
+  let ov=document.getElementById('books-misscost-overlay'); if(!ov){ ov=document.createElement('div'); ov.id='books-misscost-overlay'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  const rowsHtml=list.length? list.map((e,i)=>{ const oid=String(e.code).replace(/[^A-Za-z0-9]/g,'_');
+    return `<tr><td style="text-align:right;color:#9ca3af;padding:5px 8px">${i+1}</td><td style="font-weight:700;padding:5px 8px">${_momoEsc(e.code)}</td><td style="color:#6b7280;font-size:12px;padding:5px 8px">${_momoEsc(e.name||'').slice(0,40)}</td><td style="text-align:right;padding:5px 8px">${fmtN(e.qty)}</td><td style="text-align:right;padding:5px 8px">${momoMoney(e.amt)}</td>
+      <td style="padding:5px 8px;white-space:nowrap"><input id="books-mc-${oid}" type="number" placeholder="成本" style="width:80px;padding:3px 6px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px"><button onclick="kpiBooksMissCostSave('${month}','${_momoEsc(e.code)}')" style="margin-left:6px;padding:3px 12px;border:none;border-radius:6px;background:#10b981;color:#fff;font-size:12px;font-weight:600;cursor:pointer">存</button></td></tr>`; }).join('')
+    : `<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:20px">此期別沒有真缺成本 🎉</td></tr>`;
+  ov.innerHTML=`<div class="ana-modal" style="width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:16px 20px;border-bottom:1px solid #eef0f3">
+      <div><div style="font-size:16px;font-weight:800">缺成本清單（博客來寄倉 · 結算帳月 ${_momoEsc(month)}）</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:3px"><b>${list.length}</b> 個原廠編號查無成本 · 影響營收 <b>${momoMoney(list.reduce((s,e)=>s+e.amt,0))}</b>。⚠ 補的成本寫入共用成本表（cost_by_origin）→ <b>甲配／MO+／酷澎／博客來共用、補一次全受惠</b>；存後帶入預覽立即重算商品成本。</div>
+        <div style="font-size:12px;color:#b45309;font-weight:700;margin-top:4px">組合品（如 2 入）請填 單件成本 × 入數</div></div>
+      <button class="mm-linkbtn" onclick="document.getElementById('books-misscost-overlay').remove()">關閉</button>
+    </div>
+    <div style="overflow:auto;padding:4px 20px 16px"><table style="width:100%;border-collapse:collapse;margin-top:8px">
+      <thead><tr style="text-align:left;border-bottom:2px solid #eef0f3;color:#6b7280;font-size:12px"><th style="text-align:right;padding:6px 8px">#</th><th style="padding:6px 8px">原廠編號（貨號）</th><th style="padding:6px 8px">商品</th><th style="text-align:right;padding:6px 8px">數量</th><th style="text-align:right;padding:6px 8px">影響營收</th><th style="padding:6px 8px">補成本</th></tr></thead>
+      <tbody>${rowsHtml}</tbody></table>
+      <div style="font-size:11px;color:#9ca3af;margin-top:10px">已套用補零規則仍查不到的才列在此；存的成本只在這台電腦，記得按「☁ 同步雲端」推上雲。</div>
+    </div></div>`;
+}
+function kpiBooksMissCostSave(month, code){
+  const oid=String(code).replace(/[^A-Za-z0-9]/g,'_'); const inp=document.getElementById('books-mc-'+oid);
+  const c=inp?parseFloat(inp.value):NaN; if(!(c>=0)){ alert('成本需為 ≥0 的數字'); return; }
+  try{ momoSetCostByOrigin(code, c, {manual:true, shop:'博客來', by:momoCurrentUserName(), note:'博客來缺成本補填', src:'博客來'}); }catch(e){ alert('補成本失敗：'+e.message); return; }
+  if(typeof showToast==='function') showToast('已補成本 '+code+' = '+c+'（共用成本表）','success');
+  kpiBooksOpenMissingCostPanel(month);   // 重繪面板（該列消失）
+  if(document.querySelector('#modal .km-au')&&_kpiYM()===month) kpiBooksAutoFill();   // 帶入預覽開著 → 重開（商品成本立即重算）
+}
+// __kpiBooksRestore('2026-09')：用 preAutofillBooks 快照把該月博客來還原回帶入前的值。先預覽，確認後一次原子寫入。
+async function __kpiBooksRestore(month){
+  if(!/^\d{4}-\d{2}$/.test(month||'')){console.error('用法：__kpiBooksRestore("2026-09")');return null;}
+  const snap=_kpiBooksSnapGet(month);
+  if(!snap){console.warn('[KPI 還原] '+month+' 沒有博客來帶入前快照（這個月還沒用「從報表帶入」寫過）');if(typeof showToast==='function')showToast(month+' 沒有博客來帶入前快照','error');return null;}
+  const key=p=>p.join('\u0001');
+  const cur=new Map(_kpiBooksCells(getOrCreateKpiRow(month)).map(([p,v])=>[key(p),{p,v}]));
+  const want=new Map((snap.cells||[]).map(c=>[key(c.p),{p:c.p,v:c.v}]));
+  const changes=[];
+  want.forEach((w,k)=>{const c=cur.get(k);if(!c||c.v!==w.v)changes.push({p:w.p,from:c?c.v:undefined,to:w.v});
+    else if(_kpiIsAutoMeta(_kpiMetaAt(month,w.p)))changes.push({p:w.p,from:c.v,to:w.v,tagOnly:true});});
+  cur.forEach((c,k)=>{if(!want.has(k))changes.push({p:c.p,from:c.v,to:undefined});});
+  console.table(changes.map(c=>({格子:c.p.join(' › '),目前值:c.from===undefined?'（空白）':c.from,還原成:c.to===undefined?'（刪除）':c.to})));
+  if(!changes.length){if(typeof showToast==='function')showToast(month+' 博客來已經和快照相同，不用還原','success');return{changes:0};}
+  const fmt=x=>x===undefined?'<span class="km-au-nil">空白</span>':_kpiEscAttr(typeof x==='number'?fmtN(x):x);
+  const fl=k=>((KPI_GROUPS.find(g=>g.key==='books').manual.find(f=>f.k===k)||{}).l)||({ret:'退貨運費（已移除的欄位）',material:'耗材（已移除的欄位）',tax:'稅金'})[k]||k;   // 店名由 _kpiShopLabel 顯示（寄倉／轉單）
+  const lbl=p=>p[0]==='books'?_kpiShopLabel(p[1])+' '+fl(p[2]):p.join(' › ');
+  const rows=changes.map(c=>`<tr><td>${_kpiEscAttr(lbl(c.p))}</td><td class="km-n">${fmt(c.from)}</td><td class="km-au-arrow">→</td><td class="km-n km-au-val">${c.to===undefined?'（刪除）':c.tagOnly?fmt(c.to)+'<div class="km-au-note">值不變，只清「自動」標籤</div>':fmt(c.to)}</td></tr>`).join('');
+  return new Promise(resolve=>{
+    App.openModal({title:'還原博客來 '+month.replace('-','/')+' 到帶入前',width:'720px',
+      bodyHtml:`<div class="km-au"><div class="km-au-sub">快照：${_kpiEscAttr(snap.by||'?')} ${snap.atMs?_kpiFmtTime(snap.atMs):''} · 會改 <b>${changes.length}</b> 格（一次寫入）</div>
+        <div class="km-tablewrap"><table class="km-au-tbl"><thead><tr><th>格子</th><th class="km-n">目前值</th><th></th><th class="km-n">還原成</th></tr></thead><tbody>${rows}</tbody></table></div></div>`,
+      saveLabel:'確認還原 '+changes.length+' 格',
+      onCancel:()=>resolve({cancelled:true}),
+      onSave:()=>{
+        kpiWriteCell(month,changes.map(c=>[c.p,c.to,c.to===undefined?undefined:{src:'restore'}])).then(ok=>{
+          if(typeof showToast==='function')showToast(ok?'已還原博客來 '+month+'（'+changes.length+' 格）':'還原失敗，請看紅色格子',ok?'success':'error');
+          resolve({changes:changes.length,ok});
+        });
+        if(document.getElementById('kpi-tab-content'))renderKpiTab();
+        return true;
+      }});
+  });
+}
 // ── 蝦皮手續費整理（2026-10-01，手續費改成「自動＝實際營收×費率、可覆蓋」時用）──
 //   規則：存的手續費＝新公式（誤差 ≤1 元）→ 刪掉改自動計算（值不變）；例外：維克 2026-05（手填時用了 20.5%）→ 刪掉改自動（17.5%，純利會變）；
 //         其他不相等 → 保留手動覆蓋（不改）。__kpiShopeeFeeMigrate()：讀雲端現值（伺服器），預覽（console.table＋視窗），確認後【所有月份一次原子寫入】。
@@ -27735,7 +28223,7 @@ Object.assign(window, {
   toggleKpiGroup,editKpiFieldNote,__kpiSmokeTest,setKpiYM,
   kpiOpenFill,kpiCloseFill,kpiFillPickGroup,kpiFillFocus,kpiFillBlur,kpiFillKey,kpiFillPaste,kpiFillTaxPreview,kpiFillDownloadExcel,
   kpiAnomToggle,kpiAnomFocus,kpiAnomGuide,__kpiAnomalyReport,   // 填寫模式異常警示：標題按鈕／清單／ⓘ 警示規則的 inline onclick＋Console 只讀觀測點
-  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,
+  kpiMomoAutoFill,kpiAutoChk,kpiShopeeAutoFill,kpiBooksUpload,kpiBooksAutoFill,__kpiBooksRestore,kpiBooksOpenMissingCostPanel,kpiBooksMissCostSave,booksKpiFromRecon,booksParseWorkbook,kpiPchomeAutoFill,__kpiPchomeRestore,pchomeKpiFromRecon,kpiYearDownloadExcel,__kpiShopeeRestore,__kpiShopeeFeeMigrate,__kpiMomoAutofillBacktest,__kpiMomoRestore,kpiInfoPos,__kpiMomoMaterialMigrate,__kpiMomoTaxMigrate,
   saveAnaThresh,saveCustomAnaRules,saveCustomGrowthRules,saveEdits,saveGroupAdsMeta,
   saveGrowthSettings,saveGrowthThresh,saveNotes,saveSummaryRows,saveTagFilters,setColFilter,
   closeCoupangDist,closeCoupangUpload,generateCoupang,cupGeneratePreview,cupCancelUpload,cupSyncToCloud,onCoupangFile,onCupHalfChange,onCupMonthChange,onCupNoteChange,openCoupangDist,openCoupangUpload,setCoupangShop,setKpis,setMomoShop,setShop,restoreProfitView,setSort,setSearch,setSpin,setTagFilter,shopHTML,showMapWarnBanner,showReconcileDetail,splitCSV,

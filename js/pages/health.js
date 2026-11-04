@@ -192,7 +192,7 @@ const HEALTH_CHANNELS = _hlDeepFreeze([
   { id: 'coupang-buyout', label: '酷澎買斷',        type: 'small',   group: 'coupang', shop: '酷澎買斷' },
   { id: 'pchome',         label: 'PChome',          type: 'small',   group: 'pchome',  shop: 'PChome', prod: { platform: 'pchome', shop: 'PChome' } },
   { id: 'friday',         label: 'FriDay',          type: 'small',   group: 'friday',  shop: 'FriDay' },
-  { id: 'books',          label: '博客來',          type: 'small',   group: 'books',   shop: '博客來' },
+  { id: 'books',          label: '博客來',          type: 'small',   group: 'books',   shop: '博客來-寄倉' },   // 2026-11-04 KPI 博客來拆寄倉／轉單；轉單目前沒銷量
   { id: 'other',          label: '業外',            type: 'other',   group: 'other',   shop: '業外',  ranked: false },
   { id: 'website',        label: '官網',            type: 'small',   group: 'website', shop: '官網',  ranked: false },
 ]);
@@ -3071,7 +3071,7 @@ const _HL_MOCK_GROUPS = [
   { key: 'momo', title: 'MOMO', shops: ['MOMO-甲配', 'MOMO-寄倉', 'mo+0號店(好麻吉)', 'mo+1號店(森之旅)', 'mo+2號店(玩樂)'], since: null, shopSince: { 'mo+2號店(玩樂)': '2026-10' }, closedFrom: null },
   { key: 'pchome', title: 'PChome', shops: ['PChome'], since: '2026-09', shopSince: {}, closedFrom: null },
   { key: 'friday', title: 'FriDay', shops: ['FriDay'], since: '2026-08', shopSince: {}, closedFrom: null },
-  { key: 'books', title: '博客來', shops: ['博客來'], since: '2026-08', shopSince: {}, closedFrom: null },
+  { key: 'books', title: '博客來', shops: ['博客來-寄倉', '博客來-轉單'], since: '2026-08', shopSince: {}, closedFrom: null },
 ];
 function _hlMakeMock(kind) {
   return function (months) {
@@ -3087,7 +3087,7 @@ function _hlMakeMock(kind) {
           const closed = !!(g.closedFrom && m >= g.closedFrom);
           const seed = (gi * 7 + si * 3 + mi * 5) % 17;
           let rev = kind === 'demo' ? 200000 + gi * 90000 + si * 40000 + seed * 9000 : 0;
-          if (shop === '博客來') rev = 18000 + seed * 300;               // 營收過小
+          if (shop === '博客來-寄倉') rev = 18000 + seed * 300;          // 營收過小
           const pureRate = 0.02 + ((seed * 13) % 17) / 100;              // 2%～18%
           const costRate = 0.40 + ((seed * 7) % 21) / 100;               // 40%～60%
           const total = before ? 0 : 6;
