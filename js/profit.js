@@ -104,8 +104,8 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <!-- 動銷率格（蝦皮四家，_stCellSync 填）。不是頂端三格的第四格：只讀整月商品表現，不進 built、不進 lsSave、不進推送。
              跟三格不同，樣式走 css/profit.css 的 .kv-st-*。 -->
         <div id="kv-st-cell" class="kv-st" hidden>
-          <div class="kv-st-hd"><span id="kv-st-title" class="kv-st-title">動銷率</span><details class="kv-st-info"><summary aria-label="動銷率怎麼算" title="動銷率怎麼算">ⓘ</summary><div class="kv-st-info-body">正常商品裡這個月有賣出的比例，來自洞察表每月上傳的整月商品表現；上、下半月也顯示整月數字。</div></details></div>
-          <div id="kv-st-value" class="kv-st-value">…</div>
+          <div class="kv-st-hd"><span id="kv-st-title" class="kv-st-title">動銷率</span><button type="button" class="hdr-help" onclick="openKpiCmpHelp('st')" aria-label="動銷率怎麼算" title="正常商品裡這個月有賣出的比例，來自洞察表每月上傳的整月商品表現；上、下半月也顯示整月數字。">ⓘ</button></div>
+          <div class="kv-st-main"><div id="kv-st-value" class="kv-st-value">…</div><span id="kv-st-note" class="kv-st-rate"></span></div>
           <div id="kv-st-sub" class="kv-st-sub"></div>
           <div id="kv-st-cmp" class="kv-st-cmp"></div>
         </div>
@@ -27704,6 +27704,7 @@ const KPI_CMP_HELP_BUDGET=[
 // mode → {title, 段落陣列}。認不得的 mode 一律回 'full'：它是內容的超集合，
 //   最壞情況是使用者看到比需要的多，而不是看到空白彈窗。
 function _kpiCmpHelpOf(mode){
+  if(mode==='st')         return {title:'動銷率', secs:_ST_HELP};   // 頂端動銷率格的 ⓘ
   if(mode==='col')        return {title:'這一欄的「上期」', secs:KPI_CMP_HELP_COL};
   if(mode==='col-budget') return {title:'這一欄的「上期」', secs:KPI_CMP_HELP_COL.concat(KPI_CMP_HELP_BUDGET)};
   return {title:'比較基準說明', secs:KPI_CMP_HELP};
@@ -27992,60 +27993,65 @@ function _lmSamePeriodParts(month,half){
 //   🔴 只讀（__cloudShopeePerf.getDoc），不寫雲端、不進 built、不進 lsSave、不進推送，也不影響旁邊三格的任何數字。
 //   _stCache['好麻吉|2026-10']＝{ state:'loading'|'none'|'ok'|'failed', normal, soldNormal }：同一個通路月份只讀一次。
 //   setKpis 會被 renderTable 一直呼叫，這裡只查快取，所以不會在 render 迴圈裡重讀；切通路、切月份才會遇到新的 key。
-//   ⚠ 讀到本機快取當讀取失敗。雲端物件還沒好時不寫快取，自己每 0.5 秒重試、最多 20 秒，之後顯示讀取失敗（下次 setKpis 還會再試）。
-//   🔴 沒有報表的月份 setKpis 只呼叫一次，不能靠「下次 setKpis」收尾：所以重試與讀取逾時都要自己重畫，格子才不會停在「…」。
+//   🔴 逾時、丟錯、讀到本機快取、雲端物件還沒好，都不算最終失敗，也不進快取：每 5 秒重試、最多 4 次（雲端忙的時候很常見），全部失敗才顯示讀取失敗，warn 只印一次。
+//     只有真的讀到伺服器的結果（含文件不存在）才進 _stCache。切通路、切月份時舊的重試作廢（_stCellSync）；回到那個月會重新讀。
+//     晚回來的舊結果照樣進快取（key 是它自己的通路月份），畫面永遠照目前選的通路月份畫，所以不會畫錯月份。
 const _ST_SHOPS=['好麻吉','玩樂','森之旅','維克'];
 const _stCache={};
-const _ST_READ_TIMEOUT_MS=10000,_ST_RETRY_MS=500,_ST_RETRY_MAX=40;
-let _stWarned=false,_stBound=false,_stRetryT=0,_stRetryN=0;
+const _ST_ATTEMPT_MS=5000,_ST_ATTEMPTS=4;
+const _ST_HELP=[{q:'動銷率是什麼',a:'正常商品裡這個月有賣出的比例，來自洞察表每月上傳的整月商品表現；上、下半月也顯示整月數字。'}];
+const _stJobs={},_stFail={};   // 重試中的工作、全部失敗的 key（都不算快取）
+let _stWarned=false,_stBound=false,_stSel='';
 function _stWarnOnce(why){
   if(_stWarned)return;
   _stWarned=true;
   console.warn('[淨利表] 整月商品表現讀取失敗：',why);
 }
-// 雲端物件還沒好：過一下再畫一次（同一時間只排一個）
-function _stRetrySoon(){
-  if(_stRetryT)return;
-  _stRetryN++;
-  _stRetryT=setTimeout(()=>{_stRetryT=0;_stCellSync(curShop);},_ST_RETRY_MS);
+// 作廢所有重試。回到那個月會重新讀。
+function _stCancelJobs(){
+  Object.keys(_stJobs).forEach(k=>{clearTimeout(_stJobs[k].timer);delete _stJobs[k];});
+  Object.keys(_stFail).forEach(k=>{delete _stFail[k];});
+}
+// 讀一次。成功就進快取；失敗什麼都不做，交給下面的 5 秒計時決定要不要再試。
+function _stAttempt(shop,ym,k,job){
+  job.n++;
+  job.timer=setTimeout(()=>{
+    if(_stJobs[k]!==job)return;   // 已成功或已作廢
+    if(job.n<_ST_ATTEMPTS){_stAttempt(shop,ym,k,job);return;}
+    delete _stJobs[k];
+    _stFail[k]=true;
+    _stWarnOnce('重試 '+_ST_ATTEMPTS+' 次都沒有結果');
+    if(shop===curShop)_stCellSync(shop);
+  },_ST_ATTEMPT_MS);
+  const be=window.__cloudShopeePerf;
+  if(!be||typeof be.getDoc!=='function')return;
+  Promise.resolve().then(()=>be.getDoc(shop,ym)).then(snap=>{
+    if(!snap||typeof snap.exists!=='function'||(snap.metadata&&snap.metadata.fromCache))return;   // 不算結果：等下一次重試
+    const box=snap.exists()?(()=>{const c=(snap.data()||{}).counts||{};return {state:'ok',normal:Number(c.normal)||0,soldNormal:Number(c.soldNormal)||0};})():{state:'none'};
+    _stCache[k]=box;
+    delete _stFail[k];
+    if(_stJobs[k]===job){clearTimeout(job.timer);delete _stJobs[k];}
+    if(shop===curShop)_stCellSync(shop);
+  }).catch(()=>{});   // 不算結果：等下一次重試
 }
 // 洞察表上傳成功（marketing.js 發 shopee-perf-saved）：清掉那一格（state 不管是什麼，尤其是 'none'）。淨利表開著而且是那一家才重讀；
 //   淨利表不在畫面上時 _stCellSync 找不到格子、什麼都不做，下次進頁 setKpis 會重讀。監聽在第一次讀之前綁、只綁一次（沒讀過就沒有快取要清）。
 function _stOnSaved(e){
   const d=e&&e.detail;
   if(!d||!d.shop||!d.month)return;
-  delete _stCache[d.shop+'|'+d.month];
+  const k=d.shop+'|'+d.month;
+  delete _stCache[k];
+  delete _stFail[k];
+  if(_stJobs[k]){clearTimeout(_stJobs[k].timer);delete _stJobs[k];}
   if(d.shop===curShop)_stCellSync(d.shop);
 }
 function _stRead(shop,ym){
   if(!_stBound&&typeof window.addEventListener==='function'){_stBound=true;window.addEventListener('shopee-perf-saved',_stOnSaved);}
   const k=shop+'|'+ym;
   if(_stCache[k])return _stCache[k];
-  const be=window.__cloudShopeePerf;
-  if(!be||typeof be.getDoc!=='function'){
-    if(_stRetryN>=_ST_RETRY_MAX){_stWarnOnce('雲端物件不在');return {state:'failed'};}
-    _stRetrySoon();
-    return {state:'loading'};
-  }
-  const box=_stCache[k]={state:'loading'};
-  // 逾時只改顯示；真的回來了下面照樣更新
-  const timer=setTimeout(()=>{
-    if(box.state!=='loading')return;
-    box.state='failed';
-    _stWarnOnce('讀取逾時');
-    if(shop===curShop)_stCellSync(shop);
-  },_ST_READ_TIMEOUT_MS);
-  Promise.resolve().then(()=>be.getDoc(shop,ym)).then(snap=>{
-    if(!snap||typeof snap.exists!=='function')throw new Error('讀不到文件');
-    if(snap.metadata&&snap.metadata.fromCache)throw new Error('連不到伺服器（讀到的是本機快取）');
-    if(!snap.exists()){box.state='none';return;}
-    const c=(snap.data()||{}).counts||{};
-    box.state='ok';box.normal=Number(c.normal)||0;box.soldNormal=Number(c.soldNormal)||0;
-  }).catch(e=>{
-    box.state='failed';
-    _stWarnOnce(e&&e.message||e);
-  }).then(()=>{clearTimeout(timer);if(shop===curShop)_stCellSync(shop);});
-  return box;
+  if(_stFail[k])return {state:'failed'};
+  if(!_stJobs[k]){const job=_stJobs[k]={n:0,timer:0};_stAttempt(shop,ym,k,job);}
+  return {state:'loading'};
 }
 function _stPrevYm(ym){
   const y=+ym.slice(0,4),m=+ym.slice(5,7);
@@ -28054,20 +28060,21 @@ function _stPrevYm(ym){
 // 比率用畫面上的 0.1% 比，較上月才會跟兩個月顯示的數字對得起來
 const _stPct10=e=>Math.round(e.soldNormal/e.normal*1000);
 // 這一格要顯示什麼（純函式）。month＝'YYYY/MM'、half＝'full'|'first'|'second'；cur、prev＝_stRead 的結果。
-function _stCellView(month,half,cur,prev){
+function _stCellView(month,half,cur,prev,prevYm){
   const mm=Number(month.slice(5,7));
-  const title=half==='first'||half==='second'?`動銷率（${mm} 月整月）`:'動銷率';
-  const out={title,value:'—',sub:'',cmp:'',dir:''};
+  const title=half==='first'||half==='second'?`動銷率（${mm}月整月）`:'動銷率';
+  const out={title,value:'—',note:'',sub:'',cmp:'',vs:'',dir:''};
   if(cur.state==='loading'){out.value='…';return out;}
-  if(cur.state==='failed'){out.sub='讀取失敗';return out;}
-  if(cur.state==='none'){out.sub=`尚未上傳 ${mm} 月整月商品表現（洞察表）`;return out;}
-  if(!(cur.normal>0)){out.sub='資料不足';return out;}
+  if(cur.state==='failed'){out.note='讀取失敗';return out;}
+  if(cur.state==='none'){out.note=`尚未上傳 ${mm} 月整月商品表現（洞察表）`;return out;}
+  if(!(cur.normal>0)){out.note='資料不足';return out;}
   const a=_stPct10(cur);
   out.value=(a/10).toFixed(1)+'%';
-  out.sub=`${cur.soldNormal}／${cur.normal}`;
+  out.sub=`${cur.soldNormal} / ${cur.normal} 正常商品有賣出`;
   if(prev&&prev.state==='ok'&&prev.normal>0){
-    const d=a-_stPct10(prev);
-    out.cmp=`較上月 ${d>0?'+':d<0?'−':'±'}${(Math.abs(d)/10).toFixed(1)}pp`;
+    const b=_stPct10(prev),d=a-b;
+    out.cmp=`較上月 ${d>0?'+':d<0?'−':'±'}${(Math.abs(d)/10).toFixed(1)} 個百分點`;
+    out.vs=`vs ${Number((prevYm||'').slice(5,7))}月 ${(b/10).toFixed(1)}%`;
     out.dir=d>0?'up':d<0?'down':'flat';
   }
   return out;
@@ -28076,14 +28083,16 @@ function _stCellSync(shop){
   const cell=document.getElementById('kv-st-cell');
   if(!cell)return;
   const s=state[shop],month=s&&s.curMonth;
-  if(_ST_SHOPS.indexOf(shop)<0||!/^\d{4}\/\d{2}$/.test(month||'')){cell.hidden=true;return;}
-  const ym=month.replace('/','-');
-  const v=_stCellView(month,s.curHalf,_stRead(shop,ym),_stRead(shop,_stPrevYm(ym)));
+  if(_ST_SHOPS.indexOf(shop)<0||!/^\d{4}\/\d{2}$/.test(month||'')){cell.hidden=true;if(_stSel){_stSel='';_stCancelJobs();}return;}
+  const ym=month.replace('/','-'),sel=shop+'|'+ym;
+  if(sel!==_stSel){_stSel=sel;_stCancelJobs();}   // 換了通路或月份：舊的重試作廢
+  const prevYm=_stPrevYm(ym);
+  const v=_stCellView(month,s.curHalf,_stRead(shop,ym),_stRead(shop,prevYm),prevYm);
   cell.hidden=false;
   const put=(id,text)=>{const el=document.getElementById(id);if(el)el.textContent=text;};
-  put('kv-st-title',v.title);put('kv-st-value',v.value);put('kv-st-sub',v.sub);put('kv-st-cmp',v.cmp);
+  put('kv-st-title',v.title);put('kv-st-value',v.value);put('kv-st-note',v.note);put('kv-st-sub',v.sub);
   const c=document.getElementById('kv-st-cmp');
-  if(c)c.className='kv-st-cmp'+(v.dir?' kv-st-'+v.dir:'');
+  if(c)c.innerHTML=v.cmp?`<span class="kv-st-d${v.dir==='flat'?'':' kv-st-'+v.dir}">${v.cmp}</span><span class="kv-st-vs">${v.vs}</span>`:'';
 }
 function _lmPeriodShort(month,half){
   const m=/^\d{4}\/(\d{2})$/.exec(month||'');
