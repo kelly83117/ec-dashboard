@@ -578,3 +578,296 @@ A～D 全部照建議做。跟上面設計不同的地方只有三個：
 - 確認視窗在真瀏覽器（不載 firebase.js 的測試頁）用真實鍵盤 / 滑鼠測過：Esc、點背景、✕、預設焦點按 Enter 都是取消；只有「確定刪除並同步」是確定。
 
 整站（登入 → 淨利表 → MOMO 同步）**還沒在瀏覽器實測**。
+
+> 後記：第 1 塊已在 localhost 驗證通過，並以 PR #380 合併進 main（`19c532b`，v2026-11-02-818）。
+
+---
+
+## 9. 第 2 塊實作細節（本機重新勘查）
+
+勘查基準：`main` @ `19c532b`（含第 1 塊、v2026-11-02-818），分支 `feat/momo-compress-2`。只讀程式碼，沒改程式，也沒讀 Firestore。
+行號以 `19c532b` 為準。
+
+範圍照原方案：
+
+- 只壓 `ec_momo_products|<通路>` 和 `ec_momo_products_lastpushed|<通路>`；`ec_momo_cost_by_origin` 不壓。
+- 寫入改成 LZ1，舊資料延後就地壓縮。
+- **不動 `js/firebase.js`**（firebase.js 的 hook 是可選的第 3 塊）。
+
+### 9-1 寫入點與「寫不進去」時怎麼辦
+
+全專案寫這兩類 key 的只有三個地方（用 `setItem(k|pk|key` 掃過全部的變數 key 寫入，沒有其他路徑會寫到這兩類 key）：
+
+| # | 位置 | 今天的行為 | 第 2 塊改成 |
+|---|---|---|---|
+| W1 | profit.js:14183 `momoSaveProducts` 裡的 `localStorage.setItem(k,_json)` | 同步寫 JSON。**失敗被 `catch{}` 吞掉、完全沒提示**；鏡像、pending、dirty 照樣更新，重整後修改就不見了 | 見下方 W1 |
+| W2 | profit.js:14242 `_momoProductsLastPushedSet` | 同步寫 JSON，失敗只印 console.error（舊基準留著） | 見下方 W2 |
+| W3 | firebase.js:291 `momo_products` 訂閱（不是 dirty 而且內容跟 `_profitMem` 不同時，寫 `JSON.stringify(items)`） | 每次開站第一次進 MOMO，`_profitMem` 還是空的，**每個不是 dirty 的通路都會整份重寫一次 JSON** | **不動**（第 3 塊才動）。第 2 塊改成聽它發出的 `momoDataReady`（只在 291 真的寫了才發），對 `changedShops` 排一次延後壓縮 |
+
+另外兩個會「間接寫」的呼叫者都走 W2，不用另外處理：
+
+- firebase.js:286 / 293 透過 `window.__momoProductsLastPushedSet`（profit.js:14244）。
+- profit.js:14403，推送成功後更新 lastpushed。
+
+**W1 `momoSaveProducts`（products）**
+
+1. **照舊先同步寫 JSON**。資料可靠度跟今天一樣：分頁直接被關掉也不會掉資料。
+2. JSON 寫成功 → 排一次「延後壓縮」（`_momoLsCompressSoon(k)`：同一把 key 去抖 3 秒，再等 `requestIdleCallback`，timeout 5 秒）。
+   真正壓縮時要通過 9-2 的同一套條件（含「dirty 的通路不壓」，見 9-7 決定 1）。
+3. JSON 寫**失敗**（多半是 QuotaExceeded）而且 `_LS_COMPRESS_MOMO_WRITE` 開著 → **當場**改寫 LZ1：
+   - 流程：`_lz1Encode` → `setItem` → 用 `_momoLsRead` 讀回，`JSON.stringify` 後必須跟 `_json` 逐字相同。
+   - 這條路會卡 0.5～1.2 秒，但只在空間滿時才會走到。
+   - ⚠ 這是唯一一種「dirty 的商品主檔會變成 LZ1」的情況：資料能存下來，比舊分頁的風險重要。
+4. LZ1 讀回不一致 → 試著寫回**改寫前的原字串**。寫回也失敗 → **保留那份壞的、不刪**。
+   之後它會被讀成 `bad`，第 1 塊的防護會接手（不准存檔、同步不推）。這裡刻意跟報表的「刪掉」不一樣：
+   - 刪掉後會變成「不存在」→ 可以從 `[]` 存檔 → 同步時靠刪除防線才擋得住；
+   - 留著壞的 → 直接拒存，比較保守。
+5. JSON 和 LZ1 都寫不進去 → 照今天的流程更新鏡像、pending、dirty（同步仍然能從 `_mem` 推），但**多一個紅色彈窗**（同一把 key 一個分頁只跳一次）：
+   「本機空間不足，{通路} 的修改只存在這個分頁裡。請先按『☁ 同步雲端』，再關閉或重新整理。」
+   localStorage 裡留下的仍是改寫前那份，**跟今天一樣**。所以只會比今天好：今天完全無聲，而且原本存不下的現在多半能用 LZ1 存下來。
+
+**W2 `_momoProductsLastPushedSet`（lastpushed）**
+
+1. 先比對再寫：`json=JSON.stringify(_momoProductsBuildSig(items))`，內容跟目前存的一樣就**不寫**（只排延後壓縮）。比對方式：
+   - 現值是 JSON：直接比字串。
+   - 現值是 LZ1：先比標頭裡的長度欄位，一樣才解壓比對。這一步會用到 9-2 的解碼快取，通常不到 1ms。
+   - 這樣可以消掉 firebase.js:286 每個 snapshot 都整份重寫的浪費（每個不是 dirty 的通路，每次收到 snapshot 都寫一次）。
+2. 內容不同：同步寫 JSON → 成功就排延後壓縮。
+3. JSON 寫失敗 → 開關開著就當場寫 LZ1 → 還是失敗 → 照今天的做法只印 console.error、舊基準留著。
+   基準過期最壞只會重推一些值相同的 SKU，或對已經不在雲端的 SKU「再刪一次」（第 1 塊的防線本來就不算這種）。不會比今天更糟。
+4. **lastpushed 不受「dirty 不壓」限制**，越早變成 LZ1 越好：舊分頁讀到 LZ1 的 lastpushed 會進 bootstrap，**而 bootstrap 一律不刪雲端**（見 9-3）。
+
+**為什麼不在存檔當下直接寫 LZ1**：630K 字元的 products 每壓一次要 0.5～1.2 秒，而 `momoSaveProducts` 是每改一格就呼叫一次（22 個呼叫點）。
+
+### 9-2 就地壓縮（migrate）與開關
+
+**開關**（放 profit.js 開頭，緊接在 `_LS_COMPRESS_WRITE` / `_LS_COMPRESS_MIGRATE` 下面；跟報表的開關各自獨立，可以分開回滾）：
+
+```js
+const _LS_COMPRESS_MOMO_WRITE=true;    // 寫入：W1/W2 的容量不足時改寫 LZ1、延後壓縮、lastpushed 先比再寫
+const _LS_COMPRESS_MOMO_MIGRATE=true;  // 就地壓縮：開站掃一輪＋momoDataReady 之後＋「一鍵釋出空間」
+```
+
+- **兩個都是 false ⇒ 每一條寫入路徑都走第 1 塊原本的程式碼**，包括不跳新的彈窗、lastpushed 不做「先比再寫」。這點會用 node 逐字比對證明（9-6）。
+- 讀取端（第 1 塊）永遠不回滾。開關關掉後，已經寫成 LZ1 的照樣讀得懂。
+- `_LS_COMPRESS_MOMO_MIGRATE=true` 但 `WRITE=false` 時，就地壓縮也不做（比照報表 `_reportCacheMigrate` 同時檢查兩個開關）。
+
+**時機**（三個入口，共用同一支單把處理流程 `_momoLsCompressOne(k)`）：
+
+1. **開站**：接在報表的 `_reportCacheMigrate` 那個 Promise 結束之後（profit.js:1512-1519），兩者不同時卡主執行緒；再等 `requestIdleCallback`。
+   profit.js 是第一次進淨利表 / KPI 才動態載入，所以沒進淨利表就不會跑。
+2. **`momoDataReady`**：firebase.js:291 每次開站第一次進 MOMO 都會把不是 dirty 的通路整份寫回 JSON，所以收到事件後對 `changedShops` 排延後壓縮。
+   profit.js:14513 已經有一個 listener，另外加一個，不改原本那個。
+3. **「一鍵釋出空間」**：`_lsTidyRun` 的 (a) 壓縮（profit.js:1626）之後接著跑一輪 MOMO 就地壓縮（見 9-7 決定 3）。
+
+**一次處理幾把**：一次只處理一把；每把之間 `setTimeout(…,50)`，讓出主執行緒。
+
+- 單把的壓縮切不開（630K 字元約 0.5～1.2 秒）。
+- 順序是：**所有 lastpushed 先處理**，然後 products 由大到小。理由見 9-3：lastpushed 先變 LZ1，舊分頁就會進 bootstrap。
+
+**單把條件**（任何一條不符就跳過，記進 `skip` 統計；全部只讀，直到最後才覆寫）：
+
+1. key 只認 `^ec_momo_products\|[^|]+$`、`^ec_momo_products_lastpushed\|[^|]+$`。
+2. 已經是 LZ1 → 跳過。
+3. **讀壞（`_momoLsRead` 回 `bad`）→ 跳過，絕不碰**：不刪、不覆寫、不嘗試修。第 1 塊的防護與紅字 toast 照舊。
+4. 形狀：products 必須是陣列，lastpushed 必須是「值全是字串的物件」；而且 `JSON.stringify(JSON.parse(raw))===raw`（標準格式），否則跳過。
+5. **products 專屬**：
+   - 這個通路在 `ec_momo_products_dirty` 裡 → 跳過（9-7 決定 1）。
+   - 同通路的 lastpushed 不是 LZ1 而且存在 → 跳過，等下一輪（保證「products 是 LZ1 ⇒ lastpushed 一定是 LZ1 或不存在」）。
+   - 5 秒內剛存過（`window._momoJustSaved`）→ 跳過。
+6. 壓縮後沒有比原本小 → 跳過。
+7. 覆寫前重讀一次，跟一開始讀到的不一樣（別的分頁剛寫過）→ 跳過。
+8. 覆寫 → 讀回解碼後跟原字串逐字相同 → 完成；不一致 → 寫回原值（比照 `_reportCacheMigrate`）。
+9. 覆寫丟錯（空間）→ 這一輪停止。用更小的內容覆寫既有 key 幾乎不會失敗，所以這種情況代表有其他問題。
+
+- 不登記 pending、不動 `_profitMem` / `_mem`、不推雲端、不改 dirty。
+- 結果放 `window.__momoLsMigrateReport`（唯讀觀測點，名稱不以 `__cloud` 開頭）。
+- console.info 印一行統計（處理幾把、跳過原因、省多少 K 字元）。
+
+**順帶：解碼快取**
+
+`momoRefreshSyncBtn` 有 16 個呼叫點，每次都對 dirty 的通路算 `momoProductsDirtySkus`，也就是每次都讀一次 lastpushed。lastpushed 變成 LZ1 之後，每次解壓要 80～140 ms。
+
+所以在 `_momoLsRead` 加一個「每把 key 一格」的小快取：`{raw, json}`。
+
+- 判斷方式：`raw===快取的 raw`（字串比對很快）→ 直接用快取的 json 字串。
+- **每次仍重新 `JSON.parse`**，維持今天「每次讀都拿到一個新物件」的語意，呼叫端改到一半也不會汙染快取。
+
+### 9-3 舊分頁風險（實際看了 v817 = `a229a47` 的程式碼）
+
+這裡的「舊分頁」指**第 1 塊之前（v817 以前）開的、到現在還沒重新整理的分頁**。v818 以後的分頁讀得懂 LZ1，沒有這個問題。
+
+**舊版讀到 LZ1 字串會怎樣**：`'LZ1:…'` 不是合法 JSON，`JSON.parse` 一定丟 SyntaxError，**而且每個讀點都包在 try 裡**。所以舊版是「當成沒有」，不會出現沒接住的錯誤，也不會壞畫面：
+
+| 舊版讀點（`a229a47`） | 讀到 LZ1 時 |
+|---|---|
+| `momoLoadProducts`（14060） | 丟錯被吞 → 回 `[]`。但它先讀 `_profitMem`、再讀 `_mem`，鏡像有值就根本不會讀到 localStorage |
+| `momoPendingProducts`（14089） | 丟錯被吞 → 退回 `_profitMem` → 沒有就回 null（呼叫端 `||[]`） |
+| `_momoProductsLastPushedGet`（14132） | 印 console.error「JSON 損毀」→ 回 null → **bootstrap：removed 一律空，不刪雲端** |
+| sweep（1862） | 丟錯被吞 → 不補 `_mem` |
+| 同步預覽 | 走 `momoPendingProducts`，同上 |
+
+**舊分頁按同步，會不會造成雲端大量刪除？** 逐一推演：
+
+- **不是 dirty 的通路**：舊分頁開站時，訂閱已經把雲端灌進 `_profitMem` / `_mem`，讀不到 localStorage。推送用的是記憶體裡的完整清單 → 不會大量刪除。
+- **dirty 的通路、舊分頁沒在上面編輯**：推送時本機值是 `[]`（`_mem` 空、LZ1 讀不懂、`_profitMem` 因為 dirty 被訂閱跳過而是空的）→ 舊版的「本機空、雲端有 → 中止」（14197）擋下 → **不寫**。
+- **唯一危險路徑**：dirty 的通路 ＋ 舊分頁兩份鏡像都空 ＋ 商品主檔是 LZ1 ＋ **使用者在舊分頁從空表格新增 / 編輯並存檔** ＋ 舊分頁按同步：
+  - (a) 存檔會用一份小清單的 JSON **蓋掉** LZ1，那份裡面還沒推的修改就從本機消失了。這是本機資料遺失，不是雲端。
+  - (b) 同步時 local＝小清單。如果 lastpushed 還是 JSON → removed＝雲端幾乎全部 → 舊版沒有刪除防線 → **雲端大量刪除**。
+    如果 lastpushed 是 LZ1 → bootstrap → 不刪，只會新增 / 覆蓋那幾筆。
+
+**第 2 塊怎麼把這條路堵到最小**（三層，前兩層已寫進 9-1 / 9-2）：
+
+1. **dirty 通路的商品主檔不壓**（就地壓縮和延後壓縮都跳過）。危險路徑的前提「dirty ＋ LZ1」只剩「空間滿、JSON 寫不進去」這一種情況。
+2. **lastpushed 先壓，而且「products 是 LZ1 ⇒ 同通路 lastpushed 一定是 LZ1 或不存在」**。就算走到 (b)，舊分頁也會進 bootstrap、不刪雲端。
+   舊分頁自己只會在兩種情況把 lastpushed 寫回 JSON：它自己推送成功之後（這時它手上是完整清單），或訂閱更新不是 dirty 的通路（這時它鏡像有值）。這兩種都不在危險路徑上。
+3. **部署時機**：第 2 塊等 v818 上線一段時間、並請大家把所有分頁關掉重開之後再上（9-7 決定 2）。
+   這一層是唯一能處理 (a)「舊分頁蓋掉本機未推修改」的方法。第 1、2 層只保護雲端。
+
+**做不到的**：新版程式沒辦法得知「這台電腦還有沒有舊分頁開著」。舊版不會發出任何訊號，`__app_version` 也只在載入時寫一次。
+
+### 9-4 版本更新提示
+
+- `js/version.js` **只在頁面載入時**比對 `<meta app-version>` 和 localStorage 的 `__app_version`：
+  - 不同 → 清 Service Worker 與 Cache API → 寫新版號 → `location.reload()` 一次。
+  - 使用者看不到任何提示，只是頁面自己多重新整理一次。
+- **沒有輪詢、沒有 `visibilitychange` 檢查、沒有「有新版」的提示**（app.js 的 `setInterval` 只有跨日重繪和空間檢查）。所以**一直開著不重新整理的分頁永遠不會被提醒**，會一直跑舊程式。
+- 新開的分頁：GitHub Pages 對 HTML 有約 10 分鐘的快取，部署後 10 分鐘內新開的分頁偶爾還會拿到舊 HTML。
+  下一次載入時 `version.js` 會發現版號不同、自動重新整理一次（CSS / JS 都帶 `?v=`，不會拿到舊檔）。
+- **上第 2 塊時要不要另外請同事 Ctrl+F5？**
+  - 要請大家**把淨利表 / MOMO 的分頁全部關掉重開（或重新整理）**。目的不是清快取，而是把 v817 以前的舊分頁關掉。
+  - Ctrl+F5 本身不是必要的：一般重新整理就會載入新的 HTML，`version.js` 會處理快取。
+  - 這個通知最好在**部署第 2 塊之前**發，而且要涵蓋「第 1 塊上線前就開著的分頁」。
+- （題外，不在第 2 塊範圍）要讓以後的版本有「有新版請重新整理」的提示，得改 `version.js`（例如切回分頁時抓一次 index.html 比對版號），但只對加了之後才開的分頁有效。建議另案處理。
+
+### 9-5 預估效果
+
+**比例**（§5-A 用同形狀假資料量的；資料結構這次沒變）：products 省 85～88%，lastpushed 省 87～89%（它是「JSON 裡再包一層 JSON 字串」，引號跳脫多，所以更好壓）。
+
+**推估**：你這台 MOMO 合計約 280 萬字元、Kelly 約 250 萬，但這兩個數字含了第 2 塊不碰的 key（reconcile、origins、e001、cost 等）。以下假設這兩類 key 佔 MOMO 的 80～90%：
+
+| | MOMO 合計 | 這兩類（推估） | 壓縮後（推估） | 省下 | MOMO 合計變成 |
+|---|---|---|---|---|---|
+| 你 | 280 萬 | 224～252 萬 | 25～38 萬 | 約 190～225 萬 | 約 53～94 萬 |
+| Kelly | 250 萬 | 200～225 萬 | 22～34 萬 | 約 170～200 萬 | 約 47～84 萬 |
+
+- **決定 1（dirty 的通路不壓）的代價**：dirty 的那幾個通路要等同步成功、dirty 清掉之後才會壓。大通路（乙配約 2600 筆）如果一直是 dirty，那一把在推送前都不會省。
+- 每次開站第一次進 MOMO，firebase.js:291 會先把不是 dirty 的通路寫回完整 JSON，約 1.5～3 秒後才壓回去。這段時間的用量尖峰在第 2 塊仍然存在（第 3 塊才能根治）。
+  快滿的機器在這段時間 291 寫不進去也沒關係：它的 `catch` 會吞掉，localStorage 留著舊的 LZ1，畫面讀的是記憶體。
+- **耗時**：壓縮約 0.8～1 ms／每 K 字元（node；辦公室筆電估 1.5～2 倍）。開站那一輪一次一把、分散在閒置時間，全部約 3～6 秒，不是一口氣卡住。
+
+**用真實資料確認**（只讀、不寫任何東西、不連雲端；在**正式站**的 F12 Console 貼上執行。它會在記憶體裡試壓一次，大 key 會卡 1～2 秒）：
+
+```js
+(()=>{const LZ=window.LZString;const rows=[];let dirty=[];try{dirty=JSON.parse(localStorage.getItem('ec_momo_products_dirty')||'[]')}catch(e){}
+let all=0,momo=0;for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i),v=localStorage.getItem(k)||'';all+=k.length+v.length;if(k.startsWith('ec_momo')||k.startsWith('momo_'))momo+=k.length+v.length;
+if(!/^ec_momo_products(_lastpushed)?\|[^|]+$/.test(k))continue;const isLZ=v.startsWith('LZ1:');let after=null,ms=null;
+if(!isLZ&&LZ&&v){const t=performance.now();after=LZ.compressToUTF16(v).length+String(v.length).length+5;ms=Math.round(performance.now()-t);}
+rows.push({key:k,dirty:dirty.includes(k),K字元:Math.round(v.length/1024),格式:isLZ?'LZ1':'JSON',壓縮後K:after==null?null:Math.round(after/1024),省:after==null?'':Math.round((1-after/v.length)*100)+'%',壓縮ms:ms});}
+rows.sort((a,b)=>b.K字元-a.K字元);console.table(rows);const t=rows.reduce((s,r)=>s+r.K字元,0),ta=rows.reduce((s,r)=>s+(r.壓縮後K??r.K字元),0);
+console.log('全部 localStorage',Math.round(all/1024),'K｜MOMO 全部',Math.round(momo/1024),'K｜這兩類',t,'K → 壓縮後約',ta,'K');})()
+```
+
+拿到表之後，就能把上面的推估換成實數。表裡的 `dirty` 欄也會說明決定 1 實際會讓多少不能壓。
+
+### 9-6 驗證計畫
+
+**快照與指紋**
+
+- 動手前：`git show 19c532b:js/profit.js` 存到 scratchpad，當作「第 1 塊」的基準。node 測試的「舊版」一律從這份抽。
+- **寫入紀錄**：沙箱裡的假 localStorage 記下每一次 `setItem` / `removeItem`（key、值、順序）。
+  開關全關時，第 2 塊的寫入紀錄必須跟第 1 塊**逐字相同**。這是比較嚴格的版本，不只比最後的結果。
+- **內容指紋**（瀏覽器用，只讀）：每把 key 解碼後算 SHA-256。壓縮前後的「內容指紋」必須相同。在 localhost 或正式站的 Console 都能跑：
+
+```js
+(async()=>{const out=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(!/^ec_momo_products(_lastpushed)?\|[^|]+$/.test(k))continue;
+const v=localStorage.getItem(k)||'';let json=v;if(v.startsWith('LZ1:')){const s=v.indexOf(':',4);json=LZString.decompressFromUTF16(v.slice(s+1))||'';}
+const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(json));
+out.push({key:k,格式:v.startsWith('LZ1:')?'LZ1':'JSON',存的字元:v.length,內容字元:json.length,指紋:[...new Uint8Array(h)].slice(0,8).map(b=>b.toString(16).padStart(2,'0')).join('')});}
+out.sort((a,b)=>a.key<b.key?-1:1);console.table(out);return out;})()
+```
+
+**node 測試要涵蓋的情境**
+
+1. **開關全關＝第 1 塊**：沿用第 1 塊的 1500 組隨機（momo_regress），把第 2 塊開關改成 false 再跑，比對所有輸出加上完整的 setItem 紀錄。
+2. **開關全開時，內容不變**：同一批 1500 組，讀取、預覽、推送 payload、lastpushed 的內容（解碼後）全部跟第 1 塊逐字相同；只有 localStorage 裡的字串格式不同。
+3. **壓縮後讀回逐字相同**：每把就地壓縮 / 延後壓縮完成的 key，`_lz1Unwrap(raw).json === 原字串`；`momoLoadProducts` / `momoPendingProducts` / `_momoProductsLastPushedGet` 的結果跟壓縮前 `JSON.stringify` 相同。
+   包含中文、emoji、引號、反斜線、換行、`undefined` 欄位、沒有 sku 的列、空陣列、`'null'`。
+4. **容量滿**（假 localStorage 設配額）：
+   - JSON 寫不進、LZ1 寫得進 → 存成 LZ1，讀回相同，不跳彈窗。
+   - 兩種都寫不進 → 紅色彈窗一次，localStorage 保留改寫前的值（跟第 1 塊相同），鏡像 / pending / dirty 照樣更新。
+   - LZ1 讀回不一致（注入）→ 寫回原值；寫回也失敗 → 保留、讀成 `bad` → 拒存。
+   - lastpushed 同上，而且不跳彈窗。
+   - 就地壓縮覆寫丟錯 → 這一輪停止，其他 key 不動。
+5. **就地壓縮的條件**：
+   - 讀壞的 key 不碰；dirty 通路的 products 不壓。
+   - lastpushed 是 JSON 時同通路 products 不壓；壓完 lastpushed 後下一輪才壓 products。
+   - 5 秒內剛存過不壓；別的分頁搶寫（重讀不符）跳過。
+   - 非標準格式 JSON 跳過；已是 LZ1 跳過；壓了沒變小跳過。
+   - 順序是 lastpushed 先、products 由大到小。
+6. **舊分頁模擬**：把 `a229a47`（v817）的讀取函式與 `momoSyncProductsMerge` 放進同一個假 localStorage，讀第 2 塊壓過的資料：
+   - 不丟錯、回 `[]` / null。
+   - 「從空表新增一筆再同步」→ 雲端不會被刪（因為 lastpushed 是 LZ1，走 bootstrap）。
+   - 對照組：lastpushed 是 JSON 時會大量刪除。這證明「lastpushed 先壓」這一層確實有作用。
+7. **lastpushed 先比再寫**：內容相同時不呼叫 `setItem`；snapshot 連續來 10 次只寫 0 次。
+8. **解碼快取**：同一個 raw 第二次讀不再解壓；兩次回傳的是不同物件；raw 一變就失效。
+
+**你在 localhost 怎麼驗**（只看、不寫雲端）
+
+先知道兩件事：
+
+- **本機開站就會寫正式 Firestore**，所以一律走標準流程，不要用 `python -m http.server`。
+- localhost 和正式站的 localStorage 是分開的。在 localhost 測，只會壓縮 localhost 這邊的本機資料，不會動到正式站那邊的本機資料。
+
+1. PowerShell 先執行 `ec-nowrite-on`，接著執行 `git diff --stat js/firebase.js`，必須**正好是 106 行**；不是的話就停下來，不要往下做。
+2. 執行 `ec-serve` 起站，用瀏覽器打開，按 Ctrl+F5。
+3. 按 F12 → Console，**先確認有紅底白字「TEST_NOWRITE v2 已啟用：27 個物件 / 45 個寫入方法」**；沒看到，或數字不對，就立刻關掉分頁。
+4. **先不要進淨利表**，貼上 9-6 的「內容指紋」程式，記下（截圖）那張表，這是「壓縮前」。
+5. 登入 → 點「淨利表」，等 10 秒，看 Console 有沒有一行「[MOMO 本機] 就地壓縮：處理 N 把…」。
+6. 再貼一次「內容指紋」：
+   - 「格式」應該大多變成 LZ1。dirty 的通路的 products 會維持 JSON，這是設計如此。
+   - 「存的字元」應該大幅變小。
+   - **「內容字元」和「指紋」必須跟步驟 4 完全相同**。
+7. 輸入 `__momoLsState()`：每一列的「狀態」都是 `ok`。
+8. 依序點 MOMO 甲配、乙配、MO+ 的總表，確認商品表格、數字跟平常一樣。再貼一次指紋（這時雲端訂閱可能把內容更新成雲端的版本，指紋變了是正常的，但格式應該在幾秒後再變回 LZ1）。
+9. 同步雲端的「預覽」可以打開來看：確認筆數和平常一樣，然後**關掉預覽，不能按確認推送**。
+10. 切到洞察表、帳號管理確認正常；全程 Console 沒有紅字。
+11. 驗完：先關分頁 → 停 server → PowerShell 執行 `ec-nowrite-off`，再執行 `git diff js/firebase.js`，**必須是空白**。
+
+### 9-7 需要你決定的事
+
+1. **dirty 的通路，商品主檔要不要壓？**
+   建議：**不壓**（只在 JSON 寫不進去時例外改寫 LZ1）。
+   - 好處：這是舊分頁「從空表存檔、蓋掉未推修改」的唯一前提；而且 dirty 通路在每次刷新同步鈕時都會讀 localStorage，不壓就沒有解壓成本。
+   - 代價：dirty 期間那一把不省空間，同步成功後才會壓。
+2. **第 2 塊什麼時候部署？**（已決定：部署時機**不寫進程式**，由 Keani 安排）
+   預計**週三 2026-11-04** 上線。前提是**11/3 早上請所有人把分頁全部關掉重開，並回覆確認**；沒有全員確認就延後。
+   這是唯一能處理「v817 以前的舊分頁蓋掉本機未推修改」的方法。其他兩層只保護雲端。
+3. **「本機空間快滿」的一鍵釋出空間，要不要也順便壓 MOMO？**（已決定：要）
+   建議：**要**。只是壓縮，不刪任何東西，套用 9-2 的同一套條件；空間快滿時這是最有效的一步。
+   - 不做的話：空間警示出現時，使用者按了按鈕，MOMO 這最大的一塊不會變小，只能等開站那一輪。
+
+⚪ 本節只補文件，沒動 runtime 程式。
+### 9-8 實作結果（2026-11-02，未 commit，等 localhost 驗證）
+
+決定 1、3 照建議做；決定 2（部署時機）不寫進程式。跟上面設計不同的地方：
+
+- **W1 寫不進去、改寫 LZ1 之前，先把同通路 lastpushed 壓成 LZ1**（`_momoLsWrite` 的 `beforeLz`、`_momoLsCompressOne` 的 `ignoreRecent`）。
+  原設計在這條路上會出現「products 是 LZ1、lastpushed 還是 JSON」，正好是舊分頁會大量刪除的組合。lastpushed 壓不了時仍照寫 products 的 LZ1（資料能存下來優先）。
+- **W1 存檔後不排延後壓縮**：存檔一定會標 dirty，dirty 的商品主檔本來就不壓。改成在 `syncToCloud` 推送成功、清掉 dirty 的那一行排延後壓縮。
+- **開站那一輪不是用 Promise 串在報表那一輪後面**：改成等 `window.__reportCacheMigrateReport` 出現（最多 60 秒）再開始，這樣報表那段程式一行都不用動。
+- 一鍵釋出空間的結果另存在 `res.momoCompressed`；app.js 的結果明細多一行「壓縮 MOMO 商品主檔：N 把」。
+- 沒有新增任何畫面元素，所以沒有改 css。
+
+node 測試（scratchpad，不進 repo；基準＝`19c532b`，舊分頁＝`a229a47`）：
+
+- 1500 組隨機，情境 1～3：
+  - 開關全關：所有輸出，加上完整的 setItem / removeItem 紀錄，跟第 1 塊**逐字相同 1500 / 1500**，而且沒有留下任何計時器。
+  - 開關全開：解碼後的內容逐字相同 1500 / 1500。
+  - 壓縮後：讀點的結果與每把 key 的內容指紋（SHA-256）都不變 1500 / 1500；共壓了 4454 把。
+  - 不變式「products 是 LZ1 ⇒ lastpushed 是 LZ1」違反 0 次；dirty 的商品主檔被壓 0 次。
+- 情境 4～8 指定測試 48 項全過，包括：
+  - 舊分頁模擬：lastpushed 是 LZ1 時，從空表新增一筆再同步，雲端 800 → 801，一筆都沒刪；對照組（lastpushed 是 JSON）同樣操作會刪到剩 1 筆。
+- 第 1 塊的 75 項情境、報表快取快照（48,955,776 bytes），在新程式上都仍然相同 / 全過。
+
+還沒測：瀏覽器整站（照 9-6 的 localhost 步驟）、真實資料的壓縮率與耗時（9-5 的 Console 只讀程式）、`requestIdleCallback` 的實際時機、一鍵釋出空間的畫面。
