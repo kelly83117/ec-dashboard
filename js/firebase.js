@@ -1041,6 +1041,18 @@ try {
     writePaths: (pairs) => kpiWriteTo(healthRulesDocRef, pairs).then(() => ({ ok: true })),
   };
 
+  // ============== 蝦皮整月商品表現 shopee_perf_month/{通路}__{YYYY-MM}（通路健檢算動銷率用；一通路一月一份，同月重傳整份覆蓋） ==============
+  //   結構：{ schema:1, shop, month, from, to, fileName, items:{ 商品ID:[狀態碼, 數量] }, counts, uploadedAt, uploadedBy, uploadedByName, prev }（js/pages/marketing.js insPerfMonthUpload 寫）。
+  //   doc id 用中文通路名沒問題：Firestore 只禁 /、整串 . 或 ..、整串 __x__（這裡開頭是通路名），app/insight_{通路} 與 profits 也是中文。
+  //   這裡只建物件、不訂閱。⚠ 讀取名稱只能叫 getDoc（防護碼與唯讀守衛的讀取白名單是字串比對）；寫入只有 setMonth。
+  //   寫入成功回 { ok:true }；被唯讀守衛 / 本機防護換成 no-op 時回 undefined → 呼叫端一律 r && r.ok，再讀回比對。
+  //   ⚠ 新增這顆後本機防護物件數 +1、寫入方法 +1（見 CLAUDE.md「本機測試前」那段）。
+  const shopeePerfDocRef = (shop, month) => doc(db, 'shopee_perf_month', shop + '__' + month);
+  window.__cloudShopeePerf = {
+    getDoc: (shop, month) => getDoc(shopeePerfDocRef(shop, month)),
+    setMonth: (shop, month, data) => setDoc(shopeePerfDocRef(shop, month), data || {}).then(() => ({ ok: true })),
+  };
+
   // ══════════ PChome 獨立雲端 doc（三份，成長速率不同→各自一 doc，不擠 app/profit 的 1MB）══════════
   //   照 __cloudProfit 慣例：單 doc + getDoc/setField/removeFields/subscribe，per-field 寫入
   //   （setField 走 safeSetField＝updateDoc+FieldPath，逐格寫、不整包覆蓋、多人各改各欄不互蓋）。
