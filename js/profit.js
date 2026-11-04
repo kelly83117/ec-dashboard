@@ -20,6 +20,16 @@ const _LS_COMPRESS_MOMO_MIGRATE=true;
 const _REPORT_CACHE_DEFER_MS=1500;
 const _reportCacheDeferred=new Map();   // key → { json, meta:{shop,month,half}, timer }
 
+// 淨利表頂端四格標題旁「?」的說明：跟 MOMO 總表同一套做法（span.mm-info + 原生 title，滑鼠移上去才顯示）。
+//   比較那段的原句來自 KPI_CMP_HELP 的 ①④⑤；②③ 講的是表格「上期」，不屬於任何一格，留在「ⓘ 比較基準」彈窗。
+//   文字不含雙引號／角括號，可以直接放進 title 屬性；\n 在 title 裡就是換行。
+const _KV_CMP_TIP='較上月同期：跟上個月的同一段期間比\n7 月下半 → 比 6 月下半\n7 月上半 → 比 6 月上半\n整月 → 比上個月整月\n\n有搜尋、篩選或排序的時候\n看整月 → 改成跟『篩選出來的這批商品』上個月的表現比；\n看上半月／下半月 → 比較不顯示，要看比較請先清掉搜尋、篩選和排序。\n\n基期沒有報表的時候也不顯示\n例如通路剛開始經營的第一個月，或那一期沒有產生過報表。';
+const _KV_TIP={
+  rev:'目前選的期間、表格目前顯示的商品營收合計。\n\n'+_KV_CMP_TIP,
+  net:'目前選的期間、表格目前顯示的商品純利合計。純利率＝純利 ÷ 營收。\n\n'+_KV_CMP_TIP,
+  ads:'目前選的期間、表格目前顯示的商品廣告費合計。佔營收＝廣告費 ÷ 營收。\n\n'+_KV_CMP_TIP,
+  st:'正常商品裡這個月有賣出的比例，來自洞察表每月上傳的整月商品表現；上、下半月也顯示整月數字。\n\n較上月：跟上個月整月的動銷率比，差幾個百分點。\n\n為什麼跟下面表格的筆數不一樣？\n動銷率只算「正常販售中」的商品，整個月一件都沒賣的也算在內；下面表格列的是上傳的銷售報表裡有的商品，再加上有廣告費的商品，已下架但在報表裡的也會列。兩邊範圍不同，而且動銷率數的是蝦皮商品 ID、表格數的是商品編號，所以就算選整月，筆數也不會一樣。',
+};
 // 🔴 最外層卡片刻意【沒有】overflow:hidden（2026-09-04 移除）：它會把「🏷 標籤」與「☰ 欄位」
 //   這兩個 position:absolute 的面板整個裁掉，沒有捲軸、也沒有任何提示。完整理由與副作用
 //   見 css/profit.css 的 .col-picker-menu 上方註解。要回滾就把 overflow:hidden 加回這一行。
@@ -77,14 +87,26 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         </div>
       </div>
     </div>
-    <div id="header-kpi-row" style="display:none;align-items:center;gap:18px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid #f3f4f6">
-      <div id="header-kpi-block" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+    <div id="header-kpi-row" class="kv-row" style="display:none;margin-top:10px;padding-top:8px;border-top:1px solid #f3f4f6">
+      <!-- 控制列（2026-11）：左邊期間、右邊比較基準與三顆按鈕，窄的時候自己換行；樣式走 css/profit.css 的 .kv-ctl。
+           比較基準那顆留著：彈窗的 ② ③ 講的是表格「上期」，不屬於頂端任何一格，表頭 ? 的短版說明也指向它。 -->
+      <div id="header-btn-block" class="kv-ctl">
+        <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
+          <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
+        </div>
+        <div class="kv-ctl-r">
+          <button type="button" class="kpi-info" onclick="openKpiCmpHelp()" title="上面三格跟「上個月同一段期間」比，表格每一列的「上期」跟「上一期」比 —— 點開看完整說明">ⓘ 比較基準</button>
+          <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
+          <button id="global-sync-btn" class="export-btn" onclick="syncToCloud(curShop)" style="opacity:0.4;cursor:default" disabled>☁ 同步雲端</button>
+          <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
+        </div>
+      </div>
+      <div id="header-kpi-block" class="kv-grid">
         <!-- 三格【共用同一個骨架】，這是本區的核心規則，新增第四格請照抄：
                第一行 標題
                第二行 主數字 ＋【具名】比率（kv-*-rate-header）
                第三行 較上月同期 ±X% ＋ vs 期別 ＋ 金額（kv-*-cmp-header）
-             ⚠ 三格【之後】那顆「ⓘ 比較基準」按鈕【不是第四格】，不要照這個骨架長 ——
-               它是本區的說明入口，扁的一顆 button，樣式走 .kpi-info。加新 KPI 才照三行骨架。
+             ⚠ 排版由 .kv-grid 平均分欄（有幾格分幾欄），第三行由 .kv-cmp 換行（vs 那段整段換到下一行）。
              改版前三格的括號位置各放各的（營收放比較幅度、純利放純利率、廣告費放佔營收比），
              同一個位置三種語意 —— 老闆 2026-08-18 指出「沒有規則」，這次收斂成上面那三行。
 
@@ -94,36 +116,16 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
                  三格皆 48.5px。真正需要地板的是第三行，見下方 min-height。）
              ⚠ 第三行的 min-height:18px 是【實測值】（量 12px 字的行框得 18.0px），不是估的。
                cmp 取不到時整行是空字串、高度會塌成 0 → 沒有這道地板，三格底部會差一整行。
-             ⚠ 本區（#header-kpi-row）全部是 inline style、零 CSS class，兩個 css 檔都沒有
-                kv-* / header-kpi-* 的規則。刻意跟隨既有慣例不新增 class（在一片 inline 裡
-                插一個 class，下一個人會不知道該去哪找樣式），此為【既有技術債】，
-                要清就整區一起搬進 css/，不要只搬這一格。 -->
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-rev-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-net-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-net-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
-        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費</div><div style="display:flex;align-items:baseline;gap:5px"><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-ads-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-ads-cmp-header" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
+             ⚠ 三格的字級、顏色仍是 inline style（既有技術債）；排版部分在 css/profit.css 的 .kv-row / .kv-grid / .kv-main / .kv-cmp。 -->
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期總營收 <span class="mm-info" title="${_KV_TIP.rev}">?</span></div><div class="kv-main" style="display:flex;align-items:baseline;gap:5px"><div id="kv-rev-header" style="font-size:20px;font-weight:700;color:#374151;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-rev-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-rev-cmp-header" class="kv-cmp" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">本期純利 <span class="mm-info" title="${_KV_TIP.net}">?</span></div><div class="kv-main" style="display:flex;align-items:baseline;gap:5px"><div id="kv-net-header" style="font-size:20px;font-weight:700;color:#10b981;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-net-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-net-cmp-header" class="kv-cmp" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
+        <div><div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">廣告費 <span class="mm-info" title="${_KV_TIP.ads}">?</span></div><div class="kv-main" style="display:flex;align-items:baseline;gap:5px"><div id="kv-ads-header" style="font-size:20px;font-weight:700;color:#f59e0b;font-variant-numeric:tabular-nums;letter-spacing:-.01em">—</div><span id="kv-ads-rate-header" style="font-size:13px;color:#6b7280;font-weight:500"></span></div><div id="kv-ads-cmp-header" class="kv-cmp" style="font-size:12px;font-weight:600;color:#6b7280;min-height:18px;margin-top:2px"></div></div>
         <!-- 動銷率格（蝦皮四家，_stCellSync 填）。不是頂端三格的第四格：只讀整月商品表現，不進 built、不進 lsSave、不進推送。
              跟三格不同，樣式走 css/profit.css 的 .kv-st-*。 -->
         <div id="kv-st-cell" class="kv-st" hidden>
-          <div class="kv-st-hd"><span id="kv-st-title" class="kv-st-title">動銷率</span><button type="button" class="hdr-help" onclick="openKpiCmpHelp('st')" aria-label="動銷率怎麼算" title="正常商品裡這個月有賣出的比例，來自洞察表每月上傳的整月商品表現；上、下半月也顯示整月數字。">ⓘ</button></div>
+          <div class="kv-st-hd"><span id="kv-st-title" class="kv-st-title">動銷率</span> <span class="mm-info" title="${_KV_TIP.st}">?</span></div>
           <div class="kv-st-main"><div id="kv-st-value" class="kv-st-value">…</div><span id="kv-st-note" class="kv-st-rate"></span></div>
           <div id="kv-st-cmp" class="kv-st-cmp"></div>
-        </div>
-        <!-- 比較基準說明入口。放在三格【之後】、#header-kpi-block 之內：這裡到 #header-btn-block
-             之間是彈性空白（後者 margin-left:auto），加它不會擠到任何人。
-             實測（2026-08-18，innerWidth 1600）：本區 1037.2px、這顆 +102.7px（84.7 按鈕 + 18 gap），
-             改前改後都是斷行狀態、列高不變（按鈕 28px < 本區 68.5px，align-items:center 吃得下）。
-             ⚠ 帶文字、不做純圓圈：PR #108 實測 14px 灰圓圈在期間列完全被忽略（見 css 的 .tp-info 註解）。
-                表頭那三顆 .hdr-help 才是圓的 —— 那裡沒有橫向空間，而且它們是這顆的補充入口、不是主入口。 -->
-        <button type="button" class="kpi-info" onclick="openKpiCmpHelp()" title="上面三格跟「上個月同一段期間」比，表格每一列的「上期」跟「上一期」比 —— 點開看完整說明">ⓘ 比較基準</button>
-      </div>
-      <div id="header-btn-block" style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto">
-        <div id="profit-period-wrap-row" style="display:none;align-items:center;gap:8px">
-          <div id="profit-period-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button class="export-btn" onclick="openUploadModal()" style="border-color:#5b5fcf;color:#5b5fcf">⬆ 上傳檔案</button>
-          <button id="global-sync-btn" class="export-btn" onclick="syncToCloud(curShop)" style="opacity:0.4;cursor:default" disabled>☁ 同步雲端</button>
-          <button id="global-exp-btn" class="export-btn" onclick="doExport(curShop)" disabled>⬇ 匯出 Excel</button>
         </div>
       </div>
     </div>
@@ -3688,6 +3690,7 @@ function onMonthChange(shop,byUser,month,half){
 }
 function onHalfChange(shop,half,btn,byUser){
   if(byUser) _userPickedPeriod[shop]=true; // 使用者親手切半月 → 鎖住，之後不再自動跳
+  if(byUser) _stRetryFailed(shop);          // 動銷率顯示讀取失敗的月份再讀一次
   delete _editedAt[shop]; // 用戶主動切換區間，清除 edit 保護
   state[shop].curHalf=half;
   try{localStorage.setItem('ec_lastHalf_'+shop,half);}catch{} // 記住這個賣場的最後區間
@@ -28122,8 +28125,8 @@ const KPI_CMP_HELP=[
    a:'7 月下半 → 比 7 月上半\n7 月上半 → 比 6 月下半\n整月 → 比上個月整月\n營收、廣告費、淨利、日預算四欄的副標都是這一套。'},
   {q:'③ 兩者不同是刻意的',
    a:'上面看的是月對月的整體趨勢，下面看的是單一商品上一次的表現。\n整月的時候兩套剛好是同一段期間，數字會一樣；只有上半月／下半月才會分岔。'},
-  {q:'④ 有篩選的時候，上面三格的比較會整個消失',
-   a:'本期是篩選後的子集、基期只能是全量，比出來的數字會騙人。\n要看比較，先把搜尋和篩選清掉。'},
+  {q:'④ 有搜尋、篩選或排序的時候',
+   a:'看整月 → 改成跟『篩選出來的這批商品』上個月的表現比；\n看上半月／下半月 → 比較不顯示，要看比較請先清掉搜尋、篩選和排序。'},
   {q:'⑤ 基期沒有報表的時候也不顯示',
    a:'例如通路剛開始經營的第一個月，或那一期沒有產生過報表。'},
 ];
@@ -28156,7 +28159,6 @@ const KPI_CMP_HELP_BUDGET=[
 // mode → {title, 段落陣列}。認不得的 mode 一律回 'full'：它是內容的超集合，
 //   最壞情況是使用者看到比需要的多，而不是看到空白彈窗。
 function _kpiCmpHelpOf(mode){
-  if(mode==='st')         return {title:'動銷率', secs:_ST_HELP};   // 頂端動銷率格的 ⓘ
   if(mode==='col')        return {title:'這一欄的「上期」', secs:KPI_CMP_HELP_COL};
   if(mode==='col-budget') return {title:'這一欄的「上期」', secs:KPI_CMP_HELP_COL.concat(KPI_CMP_HELP_BUDGET)};
   return {title:'比較基準說明', secs:KPI_CMP_HELP};
@@ -28448,10 +28450,15 @@ function _lmSamePeriodParts(month,half){
 //   🔴 逾時、丟錯、讀到本機快取、雲端物件還沒好，都不算最終失敗，也不進快取：每 5 秒重試、最多 4 次（雲端忙的時候很常見），全部失敗才顯示讀取失敗，warn 只印一次。
 //     只有真的讀到伺服器的結果（含文件不存在）才進 _stCache。切通路、切月份時舊的重試作廢（_stCellSync）；回到那個月會重新讀。
 //     晚回來的舊結果照樣進快取（key 是它自己的通路月份），畫面永遠照目前選的通路月份畫，所以不會畫錯月份。
+//   🔴 開頁時 profits 等重量級訂閱（約 10MB）會讓頁面忙 80 秒上下，這段期間 getDoc 回不來，重試會白白用完。所以重試計時要等 __profitsCollectionReady() 為 true 才開始；
+//     等的時候顯示…、不算次數、不 warn，但會先讀一次（不忙的時候不用等，讀到就顯示）。它不存在或一直不變 true，從第一次需要等起算最多 120 秒，之後照常重試。
+//     已經顯示讀取失敗的月份：使用者點上／下／整月（onHalfChange 的 byUser）或切通路（_stCancelJobs）再讀一次；雲端快照造成的重繪不會重讀，不然會變成迴圈。
 const _ST_SHOPS=['好麻吉','玩樂','森之旅','維克'];
 const _stCache={};
 const _ST_ATTEMPT_MS=5000,_ST_ATTEMPTS=4;
-const _ST_HELP=[{q:'動銷率是什麼',a:'正常商品裡這個月有賣出的比例，來自洞察表每月上傳的整月商品表現；上、下半月也顯示整月數字。'}];
+const _ST_WAIT_POLL_MS=1000;
+const _ST_WAIT_MAX_MS=120000;
+let _stWaitExpired=false,_stWaitTimer=0;
 const _stJobs={},_stFail={};   // 重試中的工作、全部失敗的 key（都不算快取）
 let _stWarned=false,_stBound=false,_stSel='';
 function _stWarnOnce(why){
@@ -28464,17 +28471,17 @@ function _stCancelJobs(){
   Object.keys(_stJobs).forEach(k=>{clearTimeout(_stJobs[k].timer);delete _stJobs[k];});
   Object.keys(_stFail).forEach(k=>{delete _stFail[k];});
 }
-// 讀一次。成功就進快取；失敗什麼都不做，交給下面的 5 秒計時決定要不要再試。
-function _stAttempt(shop,ym,k,job){
-  job.n++;
-  job.timer=setTimeout(()=>{
-    if(_stJobs[k]!==job)return;   // 已成功或已作廢
-    if(job.n<_ST_ATTEMPTS){_stAttempt(shop,ym,k,job);return;}
-    delete _stJobs[k];
-    _stFail[k]=true;
-    _stWarnOnce('重試 '+_ST_ATTEMPTS+' 次都沒有結果');
-    if(shop===curShop)_stCellSync(shop);
-  },_ST_ATTEMPT_MS);
+// 重量級訂閱忙完了嗎。第一次答 false 才開始算 120 秒，到了就不再等（整個分頁只算一次，切月份不會重新等）。
+function _stHeavyDone(){
+  if(_stWaitExpired)return true;
+  let ok=false;
+  try{ok=typeof window.__profitsCollectionReady==='function'&&!!window.__profitsCollectionReady();}catch(e){}
+  if(ok)return true;
+  if(!_stWaitTimer)_stWaitTimer=setTimeout(()=>{_stWaitExpired=true;},_ST_WAIT_MAX_MS);
+  return false;
+}
+// 讀一次。成功就進快取；失敗什麼都不做，由呼叫端的計時決定要不要再試。
+function _stFetch(shop,ym,k,job){
   const be=window.__cloudShopeePerf;
   if(!be||typeof be.getDoc!=='function')return;
   Promise.resolve().then(()=>be.getDoc(shop,ym)).then(snap=>{
@@ -28485,6 +28492,29 @@ function _stAttempt(shop,ym,k,job){
     if(_stJobs[k]===job){clearTimeout(job.timer);delete _stJobs[k];}
     if(shop===curShop)_stCellSync(shop);
   }).catch(()=>{});   // 不算結果：等下一次重試
+}
+// 算次數的一次：讀一次，5 秒後還沒結果就再試或宣告失敗。
+function _stAttempt(shop,ym,k,job){
+  job.n++;
+  job.timer=setTimeout(()=>{
+    if(_stJobs[k]!==job)return;   // 已成功或已作廢
+    if(job.n<_ST_ATTEMPTS){_stAttempt(shop,ym,k,job);return;}
+    delete _stJobs[k];
+    _stFail[k]=true;
+    _stWarnOnce('重試 '+_ST_ATTEMPTS+' 次都沒有結果');
+    if(shop===curShop)_stCellSync(shop);
+  },_ST_ATTEMPT_MS);
+  _stFetch(shop,ym,k,job);
+}
+// 等重量級訂閱忙完才開始算次數。
+function _stWaitThenAttempt(shop,ym,k,job){
+  if(_stHeavyDone()){_stAttempt(shop,ym,k,job);return;}
+  job.timer=setTimeout(()=>{if(_stJobs[k]===job)_stWaitThenAttempt(shop,ym,k,job);},_ST_WAIT_POLL_MS);
+}
+// 使用者親手點上／下／整月：這個通路顯示讀取失敗的月份再讀一次（接著的 tryLoadSaved 會重繪這一格）。
+function _stRetryFailed(shop){
+  const pre=shop+'|';
+  Object.keys(_stFail).forEach(k=>{if(k.indexOf(pre)===0)delete _stFail[k];});
 }
 // 洞察表上傳成功（marketing.js 發 shopee-perf-saved）：清掉那一格（state 不管是什麼，尤其是 'none'）。淨利表開著而且是那一家才重讀；
 //   淨利表不在畫面上時 _stCellSync 找不到格子、什麼都不做，下次進頁 setKpis 會重讀。監聽在第一次讀之前綁、只綁一次（沒讀過就沒有快取要清）。
@@ -28502,7 +28532,11 @@ function _stRead(shop,ym){
   const k=shop+'|'+ym;
   if(_stCache[k])return _stCache[k];
   if(_stFail[k])return {state:'failed'};
-  if(!_stJobs[k]){const job=_stJobs[k]={n:0,timer:0};_stAttempt(shop,ym,k,job);}
+  if(!_stJobs[k]){
+    const job=_stJobs[k]={n:0,timer:0};
+    if(!_stHeavyDone())_stFetch(shop,ym,k,job);   // 還在忙：先讀一次，不算次數
+    _stWaitThenAttempt(shop,ym,k,job);
+  }
   return {state:'loading'};
 }
 function _stPrevYm(ym){
@@ -28707,7 +28741,7 @@ function setKpis(shop,rev,gross,ads,pure,cmp){
     }
     const per=_lmPeriodShort(cmp.month,cmp.half);
     const amt=`vs ${per} ${base<0?'−':''}NT$ ${fmtN(base)}`;
-    return `${pct}<span style="margin-left:${pct?10:0}px;font-weight:500">${amt}</span>`;
+    return `${pct}<span class="kv-cmp-vs">${amt}</span>`;
   };
   const cRev=document.getElementById('kv-rev-cmp-header');
   if(cRev)cRev.innerHTML=lmLine(rev,cmp&&cmp.rev,true);
