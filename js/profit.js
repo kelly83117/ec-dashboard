@@ -106,7 +106,6 @@ window.__profitTabHtml = `<div style="background:white;border:1px solid #e5e7eb;
         <div id="kv-st-cell" class="kv-st" hidden>
           <div class="kv-st-hd"><span id="kv-st-title" class="kv-st-title">動銷率</span><button type="button" class="hdr-help" onclick="openKpiCmpHelp('st')" aria-label="動銷率怎麼算" title="正常商品裡這個月有賣出的比例，來自洞察表每月上傳的整月商品表現；上、下半月也顯示整月數字。">ⓘ</button></div>
           <div class="kv-st-main"><div id="kv-st-value" class="kv-st-value">…</div><span id="kv-st-note" class="kv-st-rate"></span></div>
-          <div id="kv-st-sub" class="kv-st-sub"></div>
           <div id="kv-st-cmp" class="kv-st-cmp"></div>
         </div>
         <!-- 比較基準說明入口。放在三格【之後】、#header-kpi-block 之內：這裡到 #header-btn-block
@@ -28063,20 +28062,24 @@ const _stPct10=e=>Math.round(e.soldNormal/e.normal*1000);
 function _stCellView(month,half,cur,prev,prevYm){
   const mm=Number(month.slice(5,7));
   const title=half==='first'||half==='second'?`動銷率（${mm}月整月）`:'動銷率';
-  const out={title,value:'—',note:'',sub:'',cmp:'',vs:'',dir:''};
+  const out={title,value:'—',note:'',cmp:'',vs:'',dir:''};
+  // 本月沒有數字：第 2 行放狀態，第 3 行留空（沒有東西可比）
   if(cur.state==='loading'){out.value='…';return out;}
   if(cur.state==='failed'){out.note='讀取失敗';return out;}
   if(cur.state==='none'){out.note=`尚未上傳 ${mm} 月整月商品表現（洞察表）`;return out;}
   if(!(cur.normal>0)){out.note='資料不足';return out;}
   const a=_stPct10(cur);
   out.value=(a/10).toFixed(1)+'%';
-  out.sub=`${cur.soldNormal} / ${cur.normal} 正常商品有賣出`;
-  if(prev&&prev.state==='ok'&&prev.normal>0){
-    const b=_stPct10(prev),d=a-b;
-    out.cmp=`較上月 ${d>0?'+':d<0?'−':'±'}${(Math.abs(d)/10).toFixed(1)} 個百分點`;
-    out.vs=`vs ${Number((prevYm||'').slice(5,7))}月 ${(b/10).toFixed(1)}%`;
-    out.dir=d>0?'up':d<0?'down':'flat';
-  }
+  out.note=`${cur.soldNormal} / ${cur.normal} 有賣出`;
+  // 第 3 行永遠顯示，跟旁邊三格一樣。上個月的狀態決定怎麼寫；沒有比較的情況一律灰色（dir 留空）
+  const pm=Number((prevYm||'').slice(5,7));
+  if(!prev||prev.state==='loading'){out.cmp='較上月 …';return out;}
+  if(prev.state==='failed'){out.cmp='較上月 —';out.vs=`${pm}月讀取失敗`;return out;}
+  if(!(prev.state==='ok'&&prev.normal>0)){out.cmp='較上月 —';out.vs=`${pm}月尚未上傳`;return out;}
+  const b=_stPct10(prev),d=a-b;
+  out.cmp=`較上月 ${d>0?'+':d<0?'−':'±'}${(Math.abs(d)/10).toFixed(1)} 個百分點`;
+  out.vs=`vs ${pm}月 ${(b/10).toFixed(1)}%`;
+  out.dir=d>0?'up':d<0?'down':'flat';
   return out;
 }
 function _stCellSync(shop){
@@ -28090,9 +28093,9 @@ function _stCellSync(shop){
   const v=_stCellView(month,s.curHalf,_stRead(shop,ym),_stRead(shop,prevYm),prevYm);
   cell.hidden=false;
   const put=(id,text)=>{const el=document.getElementById(id);if(el)el.textContent=text;};
-  put('kv-st-title',v.title);put('kv-st-value',v.value);put('kv-st-note',v.note);put('kv-st-sub',v.sub);
+  put('kv-st-title',v.title);put('kv-st-value',v.value);put('kv-st-note',v.note);
   const c=document.getElementById('kv-st-cmp');
-  if(c)c.innerHTML=v.cmp?`<span class="kv-st-d${v.dir==='flat'?'':' kv-st-'+v.dir}">${v.cmp}</span><span class="kv-st-vs">${v.vs}</span>`:'';
+  if(c)c.innerHTML=v.cmp?`<span class="kv-st-d${v.dir==='up'||v.dir==='down'?' kv-st-'+v.dir:''}">${v.cmp}</span>${v.vs?`<span class="kv-st-vs">${v.vs}</span>`:''}`:'';
 }
 function _lmPeriodShort(month,half){
   const m=/^\d{4}\/(\d{2})$/.exec(month||'');
