@@ -1023,6 +1023,24 @@ try {
     writePaths: (pairs) => kpiWriteTo(invDocRef, pairs).then(() => ({ ok: true })),
   };
 
+  // ============== 通路健檢評分標準 app/health_rules（依月份適用的版本清單，逐格 FieldPath 寫入） ==============
+  //   結構：{ schema:1, versions:{ 'YYYY-MM':{ from:'YYYY-MM', items:{…}, note, by, byName, at } } }（js/pages/health.js healthRulesForMonth 讀）。
+  //   不放 app/main：理由同 app/inventory。這裡只建物件、不訂閱：進健檢頁才訂閱（health.js _hlRulesEnsureSub）。
+  //   ⚠ 讀取名稱只能叫 getDoc / subscribe（防護碼與唯讀守衛的讀取白名單是字串比對）；寫入只有 writePaths，只給設定頁用（只限管理員）。
+  //   subscribe 跟 __cloudInventory 差兩點：開 includeMetadataChanges、cb 多傳第二個參數 { fromCache }。
+  //     健檢頁要等「伺服器來的快照」才算分：本專案沒開 IndexedDB persistence，離線可能先送 fromCache 的空快照；
+  //     不開 includeMetadataChanges 的話，之後轉成伺服器快照但內容沒變時 SDK 不會再通知（見上面 #315 的註解），會卡到逾時、誤報讀取失敗。
+  //   寫入成功回 { ok:true }；被唯讀守衛 / 本機防護換成 no-op 時回 undefined → 呼叫端一律 r && r.ok，再讀回比對。
+  //   ⚠ 新增這顆後本機防護物件數 +1、寫入方法 +1（見 CLAUDE.md「本機測試前」那段）。
+  const healthRulesDocRef = doc(db, 'app', 'health_rules');
+  window.__cloudHealthRules = {
+    TS: KPI_TS,
+    getDoc: () => getDoc(healthRulesDocRef),
+    subscribe: (cb, onErr) => onSnapshot(healthRulesDocRef, { includeMetadataChanges: true },
+      snap => cb(snap.exists() ? (snap.data() || {}) : null, { fromCache: !!(snap.metadata && snap.metadata.fromCache) }), onErr),
+    writePaths: (pairs) => kpiWriteTo(healthRulesDocRef, pairs).then(() => ({ ok: true })),
+  };
+
   // ══════════ PChome 獨立雲端 doc（三份，成長速率不同→各自一 doc，不擠 app/profit 的 1MB）══════════
   //   照 __cloudProfit 慣例：單 doc + getDoc/setField/removeFields/subscribe，per-field 寫入
   //   （setField 走 safeSetField＝updateDoc+FieldPath，逐格寫、不整包覆蓋、多人各改各欄不互蓋）。
