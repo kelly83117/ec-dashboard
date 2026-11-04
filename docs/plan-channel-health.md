@@ -9,7 +9,7 @@
 
 1. **三塊的寫入性質**：
    - **塊 A、B 完全不寫雲端，也不新增雲端物件**。TEST_NOWRITE 基準維持 **27 / 45**。
-   - **塊 C** 新開 collection `shopee_perf_month`，**新增 1 個雲端物件** `__cloudShopeePerf`（2026-11-04 塊 6-2：這條分支 28 → 29；物件數以當時重數為準）。
+   - **塊 C** 新開 collection `shopee_perf_month`，**新增 1 個雲端物件** `__cloudShopeePerf`（2026-11-04 塊 6-2；跟 KPI 博客來的 `__cloudBooksRecon` 合併後共 30 個；物件數以當時重數為準）。
 2. **健檢頁是純讀取頁**：
    - 只讀 KPI 月結、淨利表報表、MOMO 商品主檔、PChome 對帳／商品清單。
    - 所有分數當場用固定規則重算，不存檔。
@@ -347,7 +347,7 @@
   - 上傳時間晚於該月結束後 10 天，就在快照加 `stLate:true`。
   - 健檢卡片顯示「狀態為 11/15 匯出，可能不代表 10 月底」。
 - **本機測試**：`__shopeePerfMock(true)`，只在 localhost 生效、只放記憶體，照 `__inventoryMock`。
-- **CLAUDE.md 要同步改**：「資料與後端」加一段 `shopee_perf_month`；TEST_NOWRITE 物件數 28 → 29（塊 6-2 當場重數）；MUST 清單加 `['__cloudShopeePerf', 'setMonth']`；物件下限改 29。
+- **CLAUDE.md 要同步改**：「資料與後端」加一段 `shopee_perf_month`；TEST_NOWRITE 物件數 29 → 30（塊 6-2 合併 main 後當場重數）；MUST 清單加 `['__cloudShopeePerf', 'setMonth']`；物件下限改 30。
   - ⚠ 防護碼不在 repo 裡，**你本機的防護碼 MUST 清單和下限要你自己更新**，否則新物件沒有 fail-loud 保護。
 
 **舊資料怎麼處理**
@@ -367,7 +367,7 @@
    - 改完再跑一次，**逐字相同**。
    - 取得 `file` 的方法：在 Console 建一個 `<input type=file>`，自己選檔。程式碼附在 §5-3。
 2. **新解析器對真實檔**：維克 10 月必須是 437 個商品；正常 370、未上架 65、已違規 1、已刪除 1；有賣 276、零銷 161。這些是動銷追記的數字。
-3. 雲端物件：`grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js` 必須從 28 行變 29 行（塊 6-2 當場重數），多出來的是 `__cloudShopeePerf`。
+3. 雲端物件：`grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js` 必須從 29 行變 30 行（塊 6-2 合併 main 後當場重數），多出來的是 `__cloudShopeePerf`。
 
 ---
 

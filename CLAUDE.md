@@ -62,8 +62,11 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    判斷防護碼有沒有殘留要看 `grep -c "TEST_NOWRITE v2 結束" js/firebase.js` 是 0（貼上防護碼時才是 1）。
    不要因為 repo 裡沒有防護碼就以為它被移除了、或去補一套測試環境切換。
 2. 在瀏覽器 F12 Console 看到紅字
-   **「TEST_NOWRITE v2 已啟用：29 個物件 / 46 個寫入方法已停用」**，才能放心測。
-   **判斷標準是「物件數對不對」：必須是 29**（2026-11-04 塊 6-2 加 `__cloudShopeePerf`（寫入只有 `setMonth`）→ 28 變 29；離線實數（假 SDK、READ_OK 規則）是 29 / 46。上一版的「46」是推算值、離線實數是 45（差 1 的原因不確定），所以這次防護碼可能印 46 或 47，方法數以防護碼實際輸出為準。
+   **「TEST_NOWRITE v2 已啟用：30 個物件 / 48 個寫入方法已停用」**，才能放心測。
+   **判斷標準是「物件數對不對」：必須是 30**（2026-11-04 塊 6-2 加 `__cloudShopeePerf`（寫入只有 `setMonth`），跟 KPI 博客來的 `__cloudBooksRecon` 合併後 → 29 變 30、方法 47 變 48（推算：47 是下面那組防護碼實測值，加 `setMonth` 1 支）；
+   同日離線實數（假 SDK、READ_OK 規則）是 30 / 47，比推算少 1（差 1 從 2026-10-27 就有），方法數以防護碼實際輸出為準。
+   再之前：2026-11-04 KPI 博客來加 `__cloudBooksRecon`（寫入只有 `writePaths`）→ 28 變 29、
+   方法 46 變 47——**這組是防護碼實測**（floor 29、MUST 補 `['__cloudHealthRules','writePaths']`、`['__cloudBooksRecon','writePaths']`）。
    再之前：2026-11-04 通路健檢塊 3 加 `__cloudHealthRules`（寫入只有 `writePaths`）→ 27 變 28、方法 45 變 46（推算）；
    同日離線實數（node 裡用假 SDK 跑 firebase.js，套 `__installReadonlyCloudGuard` 的 READ_OK 規則）是 28 / 45，跟推算的 46 差 1（差 1 從 2026-10-27 就有），以防護碼實際輸出為準。
    再之前：2026-10-27 庫存第 1 塊加 `__cloudInventory`（寫入只有 `writePaths`）→ 26 變 27、方法 44 變 45（推算）；
@@ -84,7 +87,7 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    **以實際防護碼輸出為準**；下方 table 的條數也**以工具實際印出的為準**。
    雲端物件全在 firebase.js，boot 就建好，跟 profit.js 何時載入無關。
    唯讀觀測點**不算**進物件數：`window.__profitArchivesReady()`、`window.__profitsCollectionReady()`（#315，profits collection
-   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響物件數這個基準。
+   收過伺服器快照就回 true、之後一直是 true）這類都是函式、**刻意不以 `__cloud` 開頭**，不被防護包、不影響 30 / 48 這個基準。
    #306 通路負責人存檔走既有的 `__cloudStore.setField`（寫 `ec.adjOwnerTimeline`），**沒有新增雲端物件**。
    開機時會攔到 1 筆既有寫入（`__cloudStore.setField` `['ec.seeded.v5', true]`），屬正常；開機不會有任何 `removeFields`。
    ⚠ 但 `__kpiMigrateToV2` / `__kpiSmokeTest` 這類 profit.js 的 console 函式，要**先進 KPI 或淨利表**
@@ -101,13 +104,13 @@ Firestore。動工前請先讀完本檔與 [PROJECT_MAP.md](PROJECT_MAP.md)、
    `['__cloudPchomeRecon', 'setField']`、`['__cloudPchomeRecon', 'removeFields']`、
    `['__cloudInsightByShop', 'updateNoteTx']`、`['__cloudIssues', 'create']`、`['__cloudIssues', 'update']`、
    `['__cloudIssueImage', 'setImage']`、`['__cloudIssueImage', 'removeImage']`、
-   `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`、`['__cloudInventory', 'writePaths']`、`['__cloudHealthRules', 'writePaths']`、`['__cloudShopeePerf', 'setMonth']`，
-   物件下限改 29，否則新物件沒有 fail-loud 保護。
+   `['__cloudIssueNotes', 'create']`、`['__cloudIssueNotes', 'update']`、`['__cloudInventory', 'writePaths']`、`['__cloudHealthRules', 'writePaths']`、`['__cloudBooksRecon', 'writePaths']`、`['__cloudShopeePerf', 'setMonth']`，
+   物件下限改 30，否則新物件沒有 fail-loud 保護。
    ⚠ **唯一的例外放行**：`__kpiSmokeTest()` 要驗真實 FieldPath 寫入，只寫 `app/kpi_smoke`
    （`smokeWritePaths` 在 firebase.js 寫死那份文件）。要跑它得在防護碼**之後**另貼一段「只把
    `smokeWritePaths` 換回真實寫入」的放行碼，console 會出現橘字 `KPI_SMOKE_ALLOW`。
    放行碼跟防護碼一樣**不進 repo**；沒貼放行碼時 `__kpiSmokeTest()` 會自己說「被攔下、沒有真的寫」。
-3. 沒看到這行紅字、或**物件數不是 29** → **絕對不要繼續操作，立刻關閉分頁**。
+3. 沒看到這行紅字、或**物件數不是 30** → **絕對不要繼續操作，立刻關閉分頁**。
    那代表有雲端物件沒被掃到，也就是有一條沒被保護的寫入路徑直通公司正式 Firestore。
 
 ⚠ **物件數會隨著新增雲端物件而變**（曾經是 4 物件 / 9 方法，早就過期）。不要當常數背，
@@ -120,7 +123,7 @@ grep -nE "^\s*(window\.)?__cloud[A-Za-z0-9_]*\s*=" js/firebase.js
 **這不是理論上的可能性 —— 2026-08-12 的實例**：當天 17:39 這份文件才把物件數更正成 13
 （commit `465a799`），**同一天** 23:31 同事的 `__cloudE001` 就 merge 進 main（PR #146，
 commit `1b2cce4`），數字當場變成 14 —— **不到六小時就過期**。所以永遠當場重數，
-不要相信文件上的數字（包括上面那個 29）。
+不要相信文件上的數字（包括上面那個 30）。
 
 🔴 字元集一定要用 `[A-Za-z0-9_]`，**不能**寫成 `[A-Za-z_]` —— 舊寫法吃不到數字，會漏掉
 `__cloudS1103`，這正是「12 個物件」這個錯誤數字的來源。
@@ -239,6 +242,19 @@ ESM 有個致命陷阱必須牢記：
   🔴 財務儀表板之後改讀這份文件時要用**同一條規則**，改規則兩邊一起改。財務儀表板目前仍讀舊的 Google 試算表，沒動。
   頁面是獨立路由 `inventory`（**不是部門**，不碰 `ec.departments` / `canAccessOffice`）：所有登入者可看、非 view 可編輯。
   本機測試用 `__inventoryMock(true)`（空資料）或 `__inventoryMock('demo')`（假資料），只在 localhost 生效、資料只在記憶體。
+- `app/books_recon` — 博客來對帳資料（2026-11-04；目前只做**寄倉**），**不放 app/main**。透過 `window.__cloudBooksRecon`：讀 `subscribe` / `getDoc`；寫只有 `writePaths(pairs)`（共用 `kpiWriteTo`）。
+  形狀 `{ schema:1, months:{ '結算帳月 YYYY-MM':{ sales:{ rows:[{店內碼,商品貨號,商品名稱,結算類型,數量,成本小計}], n, qty, amt, recalc, nonConsignN, nonConsignAmt, file, at, by },
+  rebate:{ total, pct, base, from, to, codes, file, at, by }, fee:{ items:[{name,amt}], total, shipQty, shipAmt, packAmt, file, at, by },
+  orders:{ count, qty, from, to, nonConsignN, file, at, by } } } }`（orders＝訂單明細 queryorders「接單統計」：一列一筆訂單、只計供貨模式＝寄倉、依訂單日期年月拆月；不讀「成本明細」）；
+  三塊各自 `['months',帳月,類型]` 整塊覆蓋（同月重傳覆蓋、絕不累加），寫完讀回比對。上傳入口暫放 KPI 填寫模式博客來群組（`kpiBooksUpload`），
+  解析 `booksParseWorkbook`（以工作表名稱＋標題列欄名辨識三種報表）獨立，之後淨利表博客來直接沿用。
+  ⚠ 舊版 .xls 對帳表的「成本小計」與費用報表 summary 的「總計」是**沒有計算結果的公式**（讀出來 0）：成本小計用同一公式 ROUND(單一成本×折扣×0.01×數量,2) 重算、
+  費用總額用項目加總；表尾「數量總計／發票資訊」一律不讀。訂閱照 PChome：boot 先緩存 `window.__booksReconCloudLatest`，profit.js 載入後 drain（`__booksApplyCloudRecon`）。
+  KPI 博客來拆兩店 `博客來-寄倉`／`博客來-轉單`（顯示寄倉／轉單）；轉單寄倉運費不適用、一格都沒填就不列入填寫進度（`shopOptional`）；通路健檢的博客來讀寄倉那一家。
+  KPI「從報表帶入」（只寫寄倉）：純函式 `booksKpiFromRecon(帳月)`（訂單數＝訂單明細筆數、營收＝寄倉 Σ成本小計、商品成本＝成本表 × 淨數量（商品貨號＝原廠編號）、平台費＝折讓＋費用報表），
+  快照 `snapshots.{月}.preAutofillBooks`、還原 `__kpiBooksRestore`。
+  帶入預覽缺成本清單旁「補成本」（`kpiBooksOpenMissingCostPanel` / `kpiBooksMissCostSave`，照酷澎 cupOpenMissingCostPanel 複製）：寫共用成本表（manual、dirty，按「☁ 同步雲端」才上雲），
+  同酷澎也會記一筆「補成本」優化紀錄（`ec_momo_optlog|博客來`，計入工作日誌）。
 - `app/health_rules` — 通路健檢的評分標準版本（「從某個月開始適用」，過去月份照舊標準），**不放 app/main**。透過 `window.__cloudHealthRules`：
   讀 `subscribe(cb, onErr)` / `getDoc()`；寫只有 `writePaths(pairs)`（共用 `kpiWriteTo`）。**寫入只有 health.js `_hlStdSave`**（評分標準設定視窗，只限管理員）。
   形狀 `{ schema:1, versions:{ 'YYYY-MM':{ from:'YYYY-MM', items:{ pureRate:{ w, lines, linesByChannel?, provisional? }, sellThrough:{…} }, note, by, byName, at } } }`；
