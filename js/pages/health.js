@@ -4,7 +4,7 @@
  *
  * 方案：docs/plan-channel-health.md（§1-1／§1-2 範圍、§2 規則、§3 動銷率口徑、§4 畫面）。
  * 路由 'health'：【不是部門】（不走 office-），不碰 ec.departments / canAccessOffice / OFFICE_FEATURES；所有登入者都能看（app.js _isRouteAllowed）。
- * 純讀取頁：不寫雲端、不寫 Store、不新增 __cloud 物件。分數一律當場依「那個月適用的評分標準」（healthRulesForMonth）重算，不存檔；同樣的資料一定得到同樣的分數。
+ * 這一頁只讀：不寫雲端、不寫 Store。評分標準版本讀 app/health_rules（window.__cloudHealthRules，firebase.js；進這頁才訂閱，寫入只有設定頁）。分數一律當場依「那個月適用的評分標準」（healthRulesForMonth）重算，不存檔；同樣的資料一定得到同樣的分數。
  * 資料：KPI 月結經 profit.js 的唯讀轉接 window.__healthKpiSnapshot(months)（口徑＝KPI 頁：_kpiShopCalc／_kpiRealRev／_kpiCommonColTotals）。
  *   商品層（塊 B）經 window.__healthLoadProducts(平台)（載訂閱組並等到齊）＋ window.__healthProductSnapshot(平台, 通路, 月)（同步、只讀）。
  *   profit.js 是動態載入：進頁先 await window.__ensureProfit()，載完再 render（同 daily.js / offices.js）。
@@ -13,7 +13,7 @@
  *   商品層快照逐筆排隊算（setTimeout 分批，不卡畫面），算完才重畫一次；結果放記憶體（_hlProd.cache），不存檔。
  * 沒資料不得算成 0 分：每個子指標 / 面向都帶 status —— ok｜na（不適用）｜insufficient（資料不足）｜pending（尚未上傳）｜smallRev（營收過小）；
  *   整個通路另有 closed（已關站）。只有 ok 的才有分數、才參與加權。
- * 不加進 app.js 的 CLOUD_RENDER_ROUTES：雲端推播不重畫這頁（白名單設計）；畫面上有「↻ 重新計算」。
+ * 不加進 app.js 的 CLOUD_RENDER_ROUTES：雲端推播不重畫這頁（白名單設計）；畫面上有「↻ 重新計算」。例外：評分標準的快照到了會重畫（_hlRulesOnSnap，內容有變才畫）。
  * 事件：data-hl-* ＋ #main-content 上【只綁一次】的具名委派（同 inventory.js），不寫 inline handler，所以本檔函式不必掛 window。
  * Console：__healthBacktest({from,to})＝唯讀回測（印原始值與各類型 P10／P25／P50／P75）；
  *   __healthMock('demo'|'empty'|false)＝本機假資料，只在 localhost 生效、資料只在記憶體（見檔尾）。
@@ -241,6 +241,7 @@ function _hlLinesBad(a) {
 function _hlVersionProblems(v) {
   if (!_hlIsObj(v)) return ['不是物件'];
   const out = [];
+  if (_hlHas(v, 'key') && v.key !== v.from) out.push(`文件裡的 key（${v.key}）跟 from 不同`);
   if (!_hlIsYm(v.from)) out.push(`from 格式錯（${v.from}）`);
   else if (v.from < HEALTH_RULES.firstMonth) out.push(`from 早於 ${HEALTH_RULES.firstMonth}`);
   if (!_hlIsObj(v.items)) return out.concat('items 不是物件');
@@ -285,7 +286,7 @@ function _hlRulesFromVersion(v) {
 }
 // 驗證＋依起始月排序。回 { chain:[由舊到新的完整規則], problems:[] }；有任何問題 chain 一律空（整份不用）。
 function _hlBuildRuleChain(versions) {
-  if (!Array.isArray(versions)) return { chain: [], problems: ['版本清單不是陣列'] };
+  if (!Array.isArray(versions)) return { chain: [], problems: [(versions && versions.invalid) || '版本清單不是陣列'] };
   const tag = (v, i) => `第 ${i + 1} 版（from=${_hlIsObj(v) ? v.from : v}）`;
   const problems = [], seen = {};
   versions.forEach((v, i) => {
@@ -319,6 +320,16 @@ function _hlRuleChain(versions) {
     _hlRuleChains.set(sig, hit);
   }
   return hit;
+}
+// app/health_rules 文件 → healthRulesForMonth 要的陣列（依 from 排序）。文件不存在、沒有 versions ⇒ 空清單。
+//   文件形狀：{ schema:1, versions:{ 'YYYY-MM':{ from, items, note, by, byName, at } } }。note／by／byName／at 不參與驗證，留在版本物件上給之後顯示用。
+//   形狀不對（schema 不認得、versions 不是物件）⇒ 回 { invalid:原因 }，healthRulesForMonth 會整份退回 BASE 並 warn 一次。
+function _hlRuleVersionsFromDoc(d) {
+  if (!_hlIsObj(d) || d.versions == null) return [];
+  if (d.schema !== 1) return { invalid: `schema 不認得（${d.schema}）` };
+  if (!_hlIsObj(d.versions)) return { invalid: 'versions 不是物件' };
+  return Object.keys(d.versions).map(k => Object.assign({}, d.versions[k], { key: k }))
+    .sort((a, b) => (String(a.from) < String(b.from) ? -1 : String(a.from) > String(b.from) ? 1 : 0));
 }
 // 🔴 某個月適用的完整規則（凍結物件）：所有 from ≤ month 的版本裡最新的那一版，沒有就是 HEALTH_RULES（BASE）。純函式，不碰 window／DOM。
 //   versions＝[{ from:'YYYY-MM', items:{ pureRate:{ w, lines:{ 類型:[a,b,c] }, linesByChannel:{ 通路 id:[a,b,c] }, provisional?:布林 }, sellThrough:{…} } }]，順序不拘（provisional 沒寫＝沿用 BASE）；
@@ -1312,8 +1323,66 @@ function _hlCollect() {
   snap.prod = _hlProd.cache;
   snap.prodState = Object.assign({}, _hlProd.state);
   snap.prodWaitSec = _hlWaitSecs();
+  snap.healthRuleVersions = _hlRuleVersionsNow();   // 塊 3：純函式只讀 snap.healthRuleVersions，不碰 window
   return snap;
 }
+// ── 評分標準版本（app/health_rules）：進健檢頁才訂閱，只訂一次（比照 inventory.js _invEnsureSub）──
+//   🔴 第一次收到「伺服器來的快照」之前不算分（避免先用 BASE 算一次、再跳成新分數）。
+//     快取來的快照一律不採用：離線時 SDK 可能送 exists()===false + fromCache 的空快照，採用了會把版本清掉、分數跳回 BASE。
+//   訂閱出錯或 HL_RULES_WAIT_MS 還沒收到 ⇒ 退回 BASE 照常算分，頁首一行灰字、Console warn 一次；之後快照到了照樣換成新標準、重畫。
+//   出錯後 Firestore 的監聽已經斷了，不自動重訂（每次重畫都重訂會一直閃載入中），重新整理頁面才會再試。
+//   模擬模式（__healthMock）不碰雲端，一律當成沒有版本。
+const HL_RULES_WAIT_MS = 10000;
+const _hlRules = { state: 'idle', versions: [], sig: '[]', unsub: null, timer: null, warned: false, subscribing: false };
+function _hlRulesWarn(why) {
+  if (_hlRules.warned) return;
+  _hlRules.warned = true;
+  console.warn('[health] 評分標準讀取失敗，暫用預設標準：' + why);
+}
+function _hlRulesRerender() {
+  if (!_hlRules.subscribing && App.route === 'health') App.render();   // 訂閱當下同步回呼：呼叫端 viewHealth 正在 render，重畫會遞迴
+}
+function _hlRulesOnSnap(data, meta) {
+  if (meta && meta.fromCache) return;
+  const versions = _hlRuleVersionsFromDoc(data), sig = JSON.stringify(versions);
+  const changed = _hlRules.state !== 'ready' || sig !== _hlRules.sig;
+  clearTimeout(_hlRules.timer);
+  _hlRules.state = 'ready'; _hlRules.versions = versions; _hlRules.sig = sig;
+  if (changed) _hlRulesRerender();   // includeMetadataChanges 會多送純 metadata 的快照：內容沒變不重畫
+}
+function _hlRulesOnErr(err) {
+  _hlRulesWarn(String((err && err.message) || err));
+  clearTimeout(_hlRules.timer);
+  if (_hlRules.state === 'ready') return;   // 已經有伺服器資料：留著最後一份，不跳回 BASE
+  _hlRules.state = 'failed';
+  _hlRulesRerender();
+}
+function _hlRulesOnTimeout() {
+  if (_hlRules.state !== 'wait') return;
+  _hlRulesWarn(`${HL_RULES_WAIT_MS / 1000} 秒內沒有收到伺服器資料`);
+  _hlRules.state = 'failed';
+  _hlRulesRerender();
+}
+function _hlRulesEnsureSub() {
+  if (_hlMock) return;
+  if (_hlRules.state === 'idle') { _hlRules.state = 'wait'; _hlRules.timer = setTimeout(_hlRulesOnTimeout, HL_RULES_WAIT_MS); }
+  if (_hlRules.unsub) return;
+  const be = window.__cloudHealthRules;
+  if (!be || typeof be.subscribe !== 'function') return;   // 雲端層還沒好：下次重畫再試；等太久由逾時接手
+  _hlRules.subscribing = true;
+  try {
+    const un = be.subscribe(_hlRulesOnSnap, _hlRulesOnErr);
+    _hlRules.unsub = typeof un === 'function' ? un : () => {};
+  } catch (e) {
+    _hlRules.unsub = () => {};
+    _hlRulesOnErr(e);
+  } finally {
+    _hlRules.subscribing = false;
+  }
+}
+const _hlRulesSettled = () => !!_hlMock || _hlRules.state === 'ready' || _hlRules.state === 'failed';
+const _hlRulesFailed = () => !_hlMock && _hlRules.state === 'failed';
+const _hlRuleVersionsNow = () => (!_hlMock && _hlRules.state === 'ready' ? _hlRules.versions : []);
 // 各平台已經等了幾秒（只算還在載入中的）
 function _hlWaitSecs() {
   const out = {}, now = Date.now();
@@ -2488,6 +2557,7 @@ Object.assign(App, {
       } catch (e) { console.error('[health] __ensureProfit 觸發失敗', e); }
       return `<div class="hl-page">${header}<div class="empty hl-loading"><div class="emoji">⏳</div>載入中…</div></div>`;
     }
+    _hlRulesEnsureSub();   // 塊 3：評分標準版本（只訂一次）
     _hlAutoLoad();   // 電腦：背景依序載入三個平台的商品層（只排一次）；放在 _hlCollect 前面，第一個畫面就是「載入中」不是「未載入」
     const _t0 = _hlNow();
     const snap = _hlCollect();
@@ -2506,6 +2576,8 @@ Object.assign(App, {
     } else {
       _hlWaitTries = 0;
     }
+    // 🔴 評分標準還沒到不算分（到了 _hlRulesOnSnap 會重畫；出錯、逾時會退回 BASE）
+    if (!_hlRulesSettled()) return `<div class="hl-page">${header}<div class="empty"><div class="emoji">⏳</div>評分標準載入中…</div></div>`;
     const month = _hlIsYm(_hlState.month) ? _hlState.month : healthDefaultMonth(snap, _hlTodayYm());
     if (!_hlState.month) _hlState.month = month;
     _hlWantProd(month, _hlState.open);   // 已載入的平台：補排這次要用到的商品層快照（算完會再重畫一次）
@@ -2540,7 +2612,7 @@ Object.assign(App, {
     return `<div class="hl-page">
         ${header}
         ${_hlMock ? `<div class="hl-mock-banner">模擬模式：假資料只在本機記憶體（__healthMock(false) 關閉）</div>` : ''}
-        ${staleNote}
+        ${staleNote}${_hlRulesFailed() ? '<div class="hl-rules-note">評分標準讀取失敗，暫用預設標準</div>' : ''}
         ${_hlPendingHtml(healthPendingKpi(snap, month))}
         ${_hlProdNoteHtml(snap, _hlNoteWait = _hlNoteWaitLabels(results, monthRules))}
         <div class="hl-toolbar">
@@ -2608,7 +2680,8 @@ window.__healthBacktest = function (opts) {
   if (!_hlMock && !window.__profitReady) { console.warn('[health] profit.js 還沒載入：先進「通路健檢」頁或 KPI 頁再跑'); return null; }
   const { snap, months, from, to, need } = _hlBacktestSnap(o);
   const res = healthBacktest(snap, months);
-  console.log(`[health] 回測 ${from}～${to}，規則 ${HEALTH_RULES.version}（只讀，不寫任何資料）${need.length ? '，含商品層：' + need.join('、') : '，只算 KPI'}`);
+  if (!_hlRulesSettled()) console.warn('[health] 評分標準的雲端版本還沒讀到（先進通路健檢頁），這次回測全部用預設標準');
+  console.log(`[health] 回測 ${from}～${to}，評分標準：各月適用的版本（雲端 ${Array.isArray(snap.healthRuleVersions) ? snap.healthRuleVersions.length : 0} 版＋預設 ${HEALTH_RULES.version}）（只讀，不寫任何資料）${need.length ? '，含商品層：' + need.join('、') : '，只算 KPI'}`);
   console.table(res.rows);
   console.log('[health] 各類型子指標百分位（業外、官網不列入）。校準規則見 docs/plan-channel-health.md §2-7-1、§2-7-2');
   console.table(res.pct);
