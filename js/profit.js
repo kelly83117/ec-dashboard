@@ -24282,6 +24282,11 @@ async function _reconPayoutParseFile(file){
 //   （見本檔 fmtN 定義與 _fSigned 上方那段說明）。這張表的整個重點就是如實顯示方向，
 //   所以【絕對不可以】用 fmtN。也不用 _fSigned —— 那支會加 '$' 前綴，這裡要的是原始數字。
 // ⚠ 0 要印成 '0'，不是 '—'（'—' 留給「抓不到」，兩者必須分得開）。
+// 金額（整數、前面帶 $；負數寫 -$1,234）。筆數／列數用 _reconPayoutFmt（不帶 $）。
+function _reconMoneyFmt(n){
+  const v=Math.round(Number(n)||0);
+  return (v<0?'-':'')+'$'+Math.abs(v).toLocaleString();
+}
 function _reconPayoutFmt(n){
   const v=Math.round(Number(n)||0);
   return (v<0?'-':'')+Math.abs(v).toLocaleString();
@@ -24344,7 +24349,7 @@ function clearRecon(){_reconFiles={};_reconBusy={};_reconMonth='';_reconMonthTou
 //   0 是合法值（實測維克的「優惠券與補貼」就是 0），兩者混在一起這張表就沒有查核價值了。
 function _reconCell(hit){
   if(!hit)return '<span class="recon-miss">抓不到</span>';
-  return _reconPayoutFmt(hit.v);
+  return _reconMoneyFmt(hit.v);
 }
 
 // ── 存檔上雲（KPI 蝦皮帶入的來源，2026-10-16 第 1 塊）──
@@ -24397,7 +24402,7 @@ function _reconSavePayload(d,user){
 function _reconSaveDiff(oldRec,neu){
   if(!oldRec||typeof oldRec!=='object')return [];
   const out=[];
-  const f=v=>v==null?'（無）':_reconPayoutFmt(v);
+  const f=v=>v==null?'（無）':_reconMoneyFmt(v);
   RECON_SAVE_NUM_KEYS.forEach(k=>{
     const a=oldRec[k]==null?null:oldRec[k],b=neu[k]==null?null:neu[k];
     if(a!==b)out.push({l:_reconSaveLabel(k),a:f(a),b:f(b)});
@@ -24528,7 +24533,8 @@ function reconShopeeHtml(){
                                         :'這一欄的期間跨月，不屬於任何單一月份')
       :(periodBad&&p)?'這一欄的期間與其他欄不一致'
       :(d&&!p)?'這份 PDF 抓不到期間（第 1 頁沒有「從…到…的報表」那一行）':'';
-    return '<th>'+escapeHtmlLike(s)+'<div class="'+cls+'"'+(tip?' title="'+escapeHtmlLike(tip)+'"':'')+'>'+escapeHtmlLike(pTxt)+'</div></th>';
+    // 還沒上傳這家的 PDF ⇒ 賣場名稱下面不放東西（不顯示「—」）；上傳後才顯示期間。
+    return '<th>'+escapeHtmlLike(s)+(d?'<div class="'+cls+'"'+(tip?' title="'+escapeHtmlLike(tip)+'"':'')+'>'+escapeHtmlLike(pTxt)+'</div>':'')+'</th>';
   }).join('');
   // 上傳列：每家一個獨立的 input。⚠ 解析中的那一欄顯示「解析中…」而不是換掉 input——
   //   換掉會讓使用者以為欄位消失了。
@@ -24563,7 +24569,7 @@ function reconShopeeHtml(){
       if(!d)return '<td><span class="recon-empty">—</span></td>';
       const sum=RECON_PAYOUT_FEE_SUBS.reduce((a,fd)=>a+(d.fields[fd.k]?d.fields[fd.k].v:0),0);
       const got=RECON_PAYOUT_FEE_SUBS.filter(fd=>d.fields[fd.k]).length;
-      return '<td title="'+got+' / '+RECON_PAYOUT_FEE_SUBS.length+' 項有抓到">'+_reconPayoutFmt(sum)
+      return '<td title="'+got+' / '+RECON_PAYOUT_FEE_SUBS.length+' 項有抓到">'+_reconMoneyFmt(sum)
         +'<span class="recon-note"> ('+got+'項)</span></td>';
     }).join('')+'</tr>';
     dataRows+='<tr class="recon-sumrow"><th class="recon-rowhead">小計 − 子項加總</th>'+RECON_SHOPS.map(s=>{
@@ -24573,7 +24579,7 @@ function reconShopeeHtml(){
       if(sub===null)return '<td><span class="recon-miss">抓不到</span></td>';
       const sum=RECON_PAYOUT_FEE_SUBS.reduce((a,fd)=>a+(d.fields[fd.k]?d.fields[fd.k].v:0),0);
       const diff=sub-sum;
-      return '<td class="'+(diff===0?'recon-ok':'recon-bad')+'">'+(diff===0?'✓ 0（相符）':'⚠ '+_reconPayoutFmt(diff))+'</td>';
+      return '<td class="'+(diff===0?'recon-ok':'recon-bad')+'">'+(diff===0?'✓ 0（相符）':'⚠ '+_reconMoneyFmt(diff))+'</td>';
     }).join('')+'</tr>';
   }
 
@@ -24727,12 +24733,12 @@ function _reconMobicPayload(m,user){
 function _reconMobicDiff(oldRec,neu){
   if(!oldRec||typeof oldRec!=='object')return [];
   const out=[];
-  const f=v=>v==null?'（無）':_reconPayoutFmt(v);
+  const f=(v,k)=>v==null?'（無）':((k==='cost'||k==='discount')?_reconMoneyFmt(v):_reconPayoutFmt(v));
   RECON_SHOPS.forEach(s=>{
     const a=(oldRec.shops&&oldRec.shops[s])||{},b=neu.shops[s];
     RECON_MOBIC_NUM_KEYS.forEach(({k,l})=>{
       const x=a[k]==null?null:a[k];
-      if(x!==b[k])out.push({l:s+' '+l.trim(),a:f(x),b:f(b[k])});
+      if(x!==b[k])out.push({l:s+' '+l.trim(),a:f(x,k),b:f(b[k],k)});
     });
   });
   const ou=JSON.stringify(Object.entries(oldRec.unmapped||{}).sort()),nu=JSON.stringify(Object.entries(neu.unmapped||{}).sort());
@@ -24872,7 +24878,7 @@ function reconMobicHtml(){
     tbl='<div class="recon-scroll"><table class="recon-tbl recon-mobic-tbl"><thead><tr><th class="recon-rowhead">'+srcLbl+'</th>'
       +RECON_SHOPS.map(s=>'<th>'+escapeHtmlLike(s)+'</th>').join('')+'</tr></thead><tbody>'
       +RECON_MOBIC_NUM_KEYS.map(({k,l})=>'<tr><th class="recon-rowhead'+(l.indexOf('　')===0?' recon-sub':'')+'">'+escapeHtmlLike(l.trim())+'</th>'
-        +RECON_SHOPS.map(s=>'<td>'+((src[s]&&src[s][k]!=null)?_reconPayoutFmt(src[s][k]):'<span class="recon-miss">—</span>')+'</td>').join('')+'</tr>').join('')
+        +RECON_SHOPS.map(s=>'<td>'+((src[s]&&src[s][k]!=null)?((k==='cost'||k==='discount')?_reconMoneyFmt(src[s][k]):_reconPayoutFmt(src[s][k])):'<span class="recon-miss">—</span>')+'</td>').join('')+'</tr>').join('')
       +'</tbody></table></div>';
   }
   const chk=_reconMobicCheck(_reconMobicCtx());
@@ -24996,12 +25002,12 @@ function _reconNopackPayload(m,user){
 function _reconNopackDiff(oldRec,neu){
   if(!oldRec||typeof oldRec!=='object')return [];
   const out=[];
-  const f=v=>v==null?'（無）':_reconPayoutFmt(v);
+  const f=(v,k)=>v==null?'（無）':(k==='orders'?_reconPayoutFmt(v):_reconMoneyFmt(v));
   RECON_SHOPS.forEach(s=>{
     const a=(oldRec.shops&&oldRec.shops[s])||{},b=neu.shops[s];
-    [['orders','無包裝筆數'],['amount','金額']].forEach(([k,l])=>{const x=a[k]==null?null:a[k];if(x!==b[k])out.push({l:s+' '+l,a:f(x),b:f(b[k])});});
+    [['orders','無包裝筆數'],['amount','金額']].forEach(([k,l])=>{const x=a[k]==null?null:a[k];if(x!==b[k])out.push({l:s+' '+l,a:f(x,k),b:f(b[k],k)});});
   });
-  if((oldRec.unit==null?null:oldRec.unit)!==neu.unit)out.push({l:'每筆單價',a:f(oldRec.unit),b:f(neu.unit)});
+  if((oldRec.unit==null?null:oldRec.unit)!==neu.unit)out.push({l:'每筆單價',a:f(oldRec.unit,'unit'),b:f(neu.unit,'unit')});
   return out;
 }
 function _reconNopackVerify(got,want){
@@ -25116,11 +25122,10 @@ function reconNopackHtml(){
   const srcLbl=(m&&m.ok)?'這份檔的計算結果':(src?'雲端已存的數字（'+escapeHtmlLike(_reconMonth)+'）':'');
   let tbl='';
   if(src){
-    const cell=(s,k)=>(src[s]&&src[s][k]!=null)?_reconPayoutFmt(src[s][k]):'<span class="recon-miss">—</span>';
+    const cell=(s,k)=>(src[s]&&src[s][k]!=null)?_reconMoneyFmt(src[s][k]):'<span class="recon-miss">—</span>';
     tbl='<div class="recon-scroll"><table class="recon-tbl recon-mobic-tbl"><thead><tr><th class="recon-rowhead">'+srcLbl+'</th>'
       +RECON_SHOPS.map(s=>'<th>'+escapeHtmlLike(s)+'</th>').join('')+'</tr></thead><tbody>'
-      +'<tr><th class="recon-rowhead">無包裝訂單數</th>'+RECON_SHOPS.map(s=>'<td>'+cell(s,'orders')+'</td>').join('')+'</tr>'
-      +'<tr><th class="recon-rowhead">金額（×$'+RECON_NOPACK_UNIT+'，含稅）</th>'+RECON_SHOPS.map(s=>'<td>'+cell(s,'amount')+'</td>').join('')+'</tr>'
+      +'<tr><th class="recon-rowhead">無包裝訂單數×$'+RECON_NOPACK_UNIT+'</th>'+RECON_SHOPS.map(s=>'<td>'+cell(s,'amount')+'</td>').join('')+'</tr>'
       +'</tbody></table></div>';
   }
   const chk=_reconNopackCheck(_reconNopackCtx());
@@ -25219,7 +25224,7 @@ function _reconMonthLastDay(ym){
 }
 // 手填金額：空白 ⇒ {ok:true,v:null}；≥0 的數字（可千分位、最多 2 位小數）⇒ {ok:true,v}；其他 ⇒ {ok:false}。
 function _reconAdsMoney(s){
-  const t=String(s==null?'':s).replace(/,/g,'').trim();
+  const t=String(s==null?'':s).replace(/[,$]/g,'').trim();
   if(t==='')return{ok:true,v:null};
   if(!/^\d+(\.\d{1,2})?$/.test(t))return{ok:false,v:null};
   return{ok:true,v:parseFloat(t)};
@@ -25292,10 +25297,11 @@ const _RECON_ADS_KEEP=['spend','shopAdSpend','noSidSpend','rows','period','expor
 const _RECON_ADS_CMP=[
   {k:'spend',l:'廣告花費'},{k:'shopAdSpend',l:'賣場廣告'},{k:'noSidSpend',l:'沒有商品 ID'},{k:'rows',l:'列數'},{k:'rebate',l:'廣告回饋金'},
 ];
-function _reconAdsFmt(v){
+function _reconAdsFmt(v,asCount){
   if(v==null)return '（未填）';
   const n=Number(v);
-  return (n<0?'-':'')+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:2});
+  if(asCount)return (n<0?'-':'')+Math.abs(Math.round(n)).toLocaleString('en-US');   // 筆數／列數：整數、不帶 $
+  return (n<0?'-':'')+'$'+Math.abs(Math.round(n)).toLocaleString('en-US');   // 廣告區金額一律顯示整數（四捨五入，只影響畫面、不改存的值）
 }
 // 舊存檔 vs 這次要寫的：只比這次【會寫】的那幾條（ads 為 null 就不比 ads）。→ [{l,a,b}]
 //   rebateOnly（沒重傳 CSV、只改回饋金）⇒ ads 只比回饋金那一項。CSV 模式不傳這個參數 ⇒ 輸出跟改版前相同。
@@ -25303,7 +25309,7 @@ function _reconAdsDiff(oldAds,oldManual,ads,manual,rebateOnly){
   const out=[];
   if(!ads&&rebateOnly){const a=(oldAds&&oldAds.rebate!=null)?oldAds.rebate:null;if(a!==rebateOnly.rebate)out.push({l:'廣告回饋金',a:_reconAdsFmt(a),b:_reconAdsFmt(rebateOnly.rebate)});}
   if(ads&&oldAds&&typeof oldAds==='object'){
-    _RECON_ADS_CMP.forEach(({k,l})=>{const a=oldAds[k]==null?null:oldAds[k];if(a!==ads[k])out.push({l,a:_reconAdsFmt(a),b:_reconAdsFmt(ads[k])});});
+    _RECON_ADS_CMP.forEach(({k,l})=>{const a=oldAds[k]==null?null:oldAds[k];if(a!==ads[k])out.push({l,a:_reconAdsFmt(a,k==='rows'),b:_reconAdsFmt(ads[k],k==='rows')});});
     const op=oldAds.period||{},np=ads.period||{};
     if(op.from!==np.from||op.to!==np.to)out.push({l:'廣告報表期間',a:(op.from||'?')+' ~ '+(op.to||'?'),b:(np.from||'?')+' ~ '+(np.to||'?')});
   }
@@ -25410,22 +25416,25 @@ async function reconAdsPick(e,shop){
 function clearReconAds(shop){if(_reconAdsBusy[shop])return;delete _reconAds[shop];renderReconTab();}
 // 輸入框 oninput：只更新記憶體與這一店的「存檔」那一格，【不整頁重畫】（重畫會把打到一半的輸入框焦點弄掉）。
 // 金額輸入框千分位：只留數字與第一個小數點，整數部分加逗號（小數照打的樣子保留，打到一半的「1234.」不會被吃掉）。
-function _reconAdsGroup(s){
-  const t=String(s==null?'':s).replace(/,/g,'');
-  const m=t.match(/^(\d*)(\.?)(\d*)/);
+// 手填金額格一律整數：有數字才在最前面帶「$」（貼著數字，一起放在格子裡），千分位。
+//   round=true（載入雲端舊值時用）：舊資料若有小數就四捨五入顯示；打字時只留整數位。
+function _reconAdsGroup(s,round){
+  let t=String(s==null?'':s).replace(/[,$\s]/g,'');
+  if(round&&/^\d+\.\d+$/.test(t))t=String(Math.round(parseFloat(t)));
+  const m=t.match(/^\d+/);
   if(!m)return '';
-  return m[1].replace(/\B(?=(\d{3})+(?!\d))/g,',')+m[2]+m[3];
+  return '$'+m[0].replace(/\B(?=(\d{3})+(?!\d))/g,',');
 }
 function reconAdsInput(shop,key,val,inpEl){
   if(RECON_SHOPS.indexOf(shop)<0||_RECON_ADS_FIELDS.indexOf(key)<0)return;
   if(inpEl&&key!=='otherNote'){
     // 即時加千分位，並把游標留在原本的數字位置（以游標左邊的「非逗號字元數」定位）
     const raw=String(val==null?'':val),pos=inpEl.selectionStart==null?raw.length:inpEl.selectionStart;
-    const left=raw.slice(0,pos).replace(/,/g,'').length;
+    const left=raw.slice(0,pos).replace(/[,$]/g,'').length;
     const g=_reconAdsGroup(raw);
     if(g!==raw){
       inpEl.value=g;
-      let n=0,i=0;for(;i<g.length&&n<left;i++)if(g[i]!==',')n++;
+      let n=0,i=0;for(;i<g.length&&n<left;i++)if(g[i]!==','&&g[i]!=='$')n++;
       try{inpEl.setSelectionRange(i,i);}catch{}
       val=g;
     }
@@ -25533,7 +25542,6 @@ function reconAdsHtml(){
   h+=row('期間',s=>{const o=src(s);if(!o)return '<span class="recon-empty">—</span>';
     const p=o.x.period;const bad=!o.cloud&&_reconMonth&&p&&(p.from!==_reconMonth+'-01'||p.to!==_reconMonthLastDay(_reconMonth));
     return '<span class="'+(bad||!p?'recon-period-bad':'recon-period')+'">'+(p?escapeHtmlLike(p.from+' ~ '+p.to):'抓不到')+'</span>'+tag(o);});
-  h+=row('匯出時間',s=>{const o=src(s);return o?escapeHtmlLike(o.x.exportedAt||'抓不到')+tag(o):'<span class="recon-empty">—</span>';});
   h+=row('賣場名稱',s=>{const a=_reconAds[s];if(!(a&&a.ok))return '<span class="recon-empty">—</span>';
     const okN=String(a.res.shopName||'').indexOf(s)>=0;
     return '<span class="recon-ads-shopname'+(okN?'':' recon-period-bad')+'" title="'+escapeHtmlLike(a.res.shopName||'')+'">'+escapeHtmlLike(a.res.shopName||'（空白）')+'</span>';});
@@ -25552,8 +25560,8 @@ function reconAdsHtml(){
     // 鎖住時：格子內 placeholder 直接看得到原因；title 放外層 span（disabled 的 input 不顯示 title，
     //   CSS 讓 disabled input pointer-events:none，滑鼠才會落在外層）。解鎖時輸出跟改版前逐字相同。
     const el='<input id="recon-ads-'+i+'-'+k+'" class="recon-ads-inp'+(type==='text'?' recon-ads-note':'')+'"'
-      +(type==='text'?' type="text" maxlength="'+RECON_ADS_NOTE_MAX+'"':' type="text" inputmode="decimal"')
-      +' value="'+escapeHtmlLike(type==='text'?vals[k]:_reconAdsGroup(vals[k]))+'"'+(dis?' disabled placeholder="'+RECON_ADS_LOCK_PH+'"':'')
+      +(type==='text'?' type="text" maxlength="'+RECON_ADS_NOTE_MAX+'"':' type="text" inputmode="numeric"')
+      +' value="'+escapeHtmlLike(type==='text'?vals[k]:_reconAdsGroup(vals[k],true))+'"'+(dis?' disabled placeholder="'+RECON_ADS_LOCK_PH+'"':'')
       +' oninput="reconAdsInput(\''+s+'\',\''+k+'\',this.value,this)">';
     return dis?'<span class="recon-ads-lock" title="'+escapeHtmlLike(disTip)+'">'+el+'</span>':el;
   };

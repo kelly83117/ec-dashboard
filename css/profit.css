@@ -1285,8 +1285,10 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   border-collapse:collapse;
   font-size:12.5px;
   width:100%;
-  min-width:640px;
+  min-width:720px;
+  table-layout:fixed;   /* 對帳頁四張表：第一欄同寬、四店四欄等寬，上下對齊 */
 }
+.recon-tbl th.recon-rowhead{width:260px;}
 .recon-tbl th,.recon-tbl td{
   border:1px solid var(--border);
   padding:5px 10px;
@@ -1422,7 +1424,7 @@ th.mm-th::after{content:"";position:absolute;top:0;right:0;height:100%;width:1px
   animation:spin .8s linear infinite;
   flex:none;
 }
-.recon-mobic-tbl{min-width:560px;}
+.recon-mobic-tbl{min-width:720px;}
 .recon-mobic-save{
   display:flex;
   flex-wrap:wrap;
