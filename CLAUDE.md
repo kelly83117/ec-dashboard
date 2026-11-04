@@ -258,6 +258,8 @@ ESM 有個致命陷阱必須牢記：
   評分標準設定視窗（頁首「⚙ 評分標準」，`_hlStdOpen`）：所有人看得到完整表格；非管理員、唯讀帳號輸入框全停用、沒有存檔鈕。只有管理員能存，存檔函式 `_hlStdSave` 自己再檢查一次管理員與 `App.isReadOnly()`（Firestore 規則全開，這只是前端防呆）。
   存檔流程：確認內容（同一個視窗內切換，不另開 modal，表單才留得住）→ `__cloudHealthRules.getDoc()` 讀伺服器現值跟開窗時比對（不同就不寫；讀到 fromCache 當讀取失敗）→ 🔴 **一次 `writePaths` 整份寫入** `schema` 與 `versions.<from>`（分多次訂閱端會收到半份版本、判不合法、全公司閃回預設；`at` 用 `Date.now()`）→ 讀回比對。任何一步失敗都留在視窗、內容保留、Console 印 payload。檢查規則不另寫：共用 `_hlLinesBad`／`_hlWeightBad`／`_hlWeightsSumBad`，存前再跑 `_hlBuildRuleChain`。
   有改過還沒存時，點背景、✕、取消、切月份都先在同一個視窗問「要放棄這些修改嗎？」。背景和 ✕ 是全站共用的 handler，靠 health.js `_hlStdCloseGuard`（document 捕獲階段）只攔這個視窗，沒有動 modal.js。
+  主看板分三區（蝦皮／MOMO／其他通路），區內順序寫死在 health.js `HL_BOARD_SECTIONS`、不依分數排，跟評分標準的分組（types）無關。**新增通路要加進去，不然主看板看不到**；官網已關站，不上主看板（所有月份都不上）。沒有總分的通路也有卡片，寫「未評分」＋原因（`_hlNoScoreWhy`），可點開細項；商品層還沒好、資料到了就會有分數的卡片不寫「未評分」，改寫灰字「載入中…」（`_HL_TILE_WAIT`，另有未載入、載入逾時）；`data-hl-fp` 格式不變（仍用 `_hlScoreHtml` 的文字）。
+  商品清單的畫面文字是「表現好商品」「需注意商品」（內部仍是 `good` / `bad`）。
   評分標準依月份查版本：`healthRulesForMonth(month, versions)`；BASE＝寫死的 `HEALTH_RULES`（從 `firstMonth` 起適用）；通路可各自覆蓋（`linesByChannel`），查線順序＝通路自己的 → 類型的 → 標準未設定。每版要寫完整（兩項都要有 `w`、`lines`），不沿用前一版：沒寫到的類型／通路就是標準未設定（`provisional` 選填，沒寫沿用 BASE）。版本清單從 `app/health_rules` 來（掛在 `snap.healthRuleVersions`），文件不存在時所有月份都用 BASE。
   分數一律依規則當場重算；改 BASE 任何門檻要升 `version`（目前 `v5-2026-11`：總分只看 `score` 的純利率、動銷率兩項；舊面向的門檻：獲利、成長是 v2 校準值，校準紀錄在方案 §2-7-1；
   廣告效率、商品結構是 v4 校準值（方案 §2-5、§2-7-2）；毛利率、低利商品營收占比只顯示、不計分；

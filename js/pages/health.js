@@ -196,6 +196,13 @@ const HEALTH_CHANNELS = _hlDeepFreeze([
   { id: 'other',          label: '業外',            type: 'other',   group: 'other',   shop: '業外',  ranked: false },
   { id: 'website',        label: '官網',            type: 'small',   group: 'website', shop: '官網',  ranked: false },
 ]);
+// 主看板的三區與區內順序（寫死、不依分數排）。只影響畫面分區，評分標準的分組（types）不變。官網已關站，不上主看板。
+//   🔴 新增通路要加進這裡，不然主看板看不到它。
+const HL_BOARD_SECTIONS = _hlDeepFreeze([
+  { title: '蝦皮', ids: ['shopee-maji', 'shopee-wanle', 'shopee-sen', 'shopee-wick'] },
+  { title: 'MOMO', ids: ['momo-jia', 'momo-yi', 'moplus-maji', 'moplus-sen', 'moplus-wanle'] },
+  { title: '其他通路', ids: ['coupang-maji', 'coupang-luying', 'coupang-buyout', 'pchome', 'friday', 'books', 'other'] },
+]);
 
 /* ---------- 月份 ---------- */
 function _hlIsYm(s) { return typeof s === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(s); }
@@ -810,17 +817,17 @@ const _HL_DIM_FNS = { profit: _hlProfitDim, growth: _hlGrowthDim, ads: _hlAdsDim
  *   跟淨利表同一份；成長率 > risePct% ＝綠、< −fallPct% ＝紅，同 calcGrowthAnalysis 用嚴格 > ／ <）。
  *   廣告＝_hlAdsLossHit（拖累清單同一條「廣告致虧」）；動銷＝_hlDeadLongHit（拖累清單同一條「連續零動銷」）。
  *   毛利率與月份變化表的「持平」範圍是健檢自己的（HEALTH_TAG_RULES）。只看整月：蝦皮要有整月報表，半月拼的月份當作沒資料。
- * 亮點＝綠燈數 > 紅燈數；警訊＝紅燈數 > 綠燈數（灰、黃不算）。排序：燈數多 → 營收高 → 品號。 */
+ * 表現好＝綠燈數 > 紅燈數；需注意＝紅燈數 > 綠燈數（灰、黃不算）。排序：燈數多 → 營收高 → 品號。 */
 const HEALTH_TAG_RULES = _hlDeepFreeze({
   gm: { window: 3, minMonths: 2, flat: 0.01, warn: 0.03 },   // 跟前 3 個月平均：≥ +1pp 綠、±1pp 內灰、−1～−3pp 黃、低超過 3pp 紅；前 3 個月有資料少於 2 個月不顯示
   topN: 10,
-  minRev: 3000,   // 亮點／警訊（數量與清單）只算本月或上月營收 ≥ 3,000 元的商品；燈號本身照算（items 全部都有，只是不進亮點／警訊）
+  minRev: 3000,   // 表現好／需注意（數量與清單）只算本月或上月營收 ≥ 3,000 元的商品；燈號本身照算（items 全部都有，只是不進表現好／需注意）
   flat: { rate: 0.005, money: 0.03 },   // 月份變化表跟前一個月比的「持平」：比率 ±0.5 個百分點以內、金額 ±3% 以內
 });
 const HL_LIGHT_SYM = { green: '▲', gray: '●', yellow: '▽', red: '▼' };
 const HL_LIGHT_TEXT = { green: '變好', gray: '持平', yellow: '留意', red: '警示' };
 // 口徑變更提醒（只是提示文字，不改任何計算）。評分月份落在 from～to（含）時，在 where 列的位置顯示一行 short＋ⓘ（點了看 text）；
-//   where：'tags'＝亮點／警訊清單上方、'grossRate'＝逐月變化表毛利率那一列下面。以後有類似的口徑變更，在這裡加一筆就好。
+//   where：'tags'＝表現好／需注意清單上方、'grossRate'＝逐月變化表毛利率那一列下面。以後有類似的口徑變更，在這裡加一筆就好。
 const HEALTH_NOTICES = _hlDeepFreeze([
   { id: 'cost-2026-09', from: '2026-09', to: '2026-11', where: ['tags', 'grossRate'],
     short: '9 月成本更新，毛利率紅燈偏多',
@@ -1235,7 +1242,7 @@ function _hlGuideDetails(key, R) {
       '資料來源：KPI 月結裡各通路每個月的營收、商品成本、純利。某個通路某個月的 KPI 還沒填完，就顯示「尚未上傳」，不會亂算。',
       `營收未滿 ${_hlFmtMoney(R.minRev)} 的月份不評分（比率波動太大）。`,
       ex != null ? `比的時候用畫面上顯示的數字（小數一位）：畫面寫 ${(Math.round(ex * 1000) / 10).toFixed(1)}% 就算達到 ${_hlPctTrim(ex)} 那條線。` : '',
-      '這一項沒有分數（標準未設定、營收過小、KPI 還沒填、資料不足）時，整張卡沒有總分，收到最下方「另有 N 個通路沒有分數」。',
+      '這一項沒有分數（標準未設定、營收過小、KPI 還沒填、資料不足）時，整張卡沒有總分，卡片寫「未評分」和原因，不算 0 分。',
       '不同通路的分數線、營收口徑都不同，跨類型的分數高低只供參考。',
       ...notes,
     ].filter(Boolean);
@@ -1252,7 +1259,7 @@ function _hlGuideDetails(key, R) {
       '蝦皮的動銷率現在是「待上傳」：要等洞察表的商品表現按月保存才有上架清單當分母。',
       'MOMO、PChome 只有「目前」的上下架狀態，回頭看舊月份時，分母用的是今天的上架狀態，會有落差。',
       `本月有銷售且有成本的商品少於 ${R.structure.minSold} 個時，動銷率寫「資料不足」。`,
-      wait.length ? `${wait.join('、')}的動銷率要等商品資料載好，之前卡片寫「載入中」、先不給總分；其他通路的分數只看 KPI，一開頁就算好。手機不會自動載入商品資料，要按卡片裡的「載入商品資料」。` : '',
+      wait.length ? `${wait.join('、')}的動銷率要等商品資料載好，之前卡片寫「載入中…」、先不給總分；其他通路的分數只看 KPI，一開頁就算好。手機不會自動載入商品資料，要按卡片裡的「載入商品資料」。` : '',
       `沒有標準或這個月沒有資料時，總分＝${pure ? pure.label : '純利率'}分數，卡片寫「只看${pure ? pure.label : '純利率'}」。`,
     ].filter(Boolean);
   }
@@ -1278,7 +1285,9 @@ function _hlGuideFullHtml(rules) {
     <table class="hl-gt"><thead><tr><th class="hl-gt-c1">指標</th><th class="hl-gt-c2">怎麼算</th><th class="hl-gt-c3">標準</th></tr></thead><tbody>${scored}${row('grossRate', gross.label, '', '（營收 − 商品成本）÷ 營收，取 KPI 月結。', e('只顯示、不計分（用來判斷要不要調價）'))}</tbody></table>
     <p class="hl-gt-note">分數顏色：綠 ${L.green} 以上、黃 ${L.yellow}–${L.green - 1}、紅未滿 ${L.yellow}。</p>
     <p class="hl-gt-note">${e(`沒有資料、營收太小、標準未設定的通路不給分，不算 0 分。總分＝${total}；只有${pure.label}有分數時，總分＝${pure.label}分數。`)}</p>
-    <p class="hl-gt-note">亮點／警訊只列本月或上月營收 ${e(minRev)} 元以上的商品。</p>`;
+    <p class="hl-gt-note">表現好商品、需注意商品只列本月或上月營收 ${e(minRev)} 元以上的商品。</p>
+    <p class="hl-gt-note">沒有分數的原因 <button type="button" class="hl-gt-i" data-hl-gt-info="noscore" aria-expanded="false" aria-controls="hl-gt-d-noscore" aria-label="沒有分數的原因" title="沒有分數的原因">ⓘ</button></p>
+    <ul class="hl-gt-detail-list hl-gt-noscore" id="hl-gt-d-noscore" hidden>${_hlUnratedHelpLines(R).map(x => `<li>${e(x)}</li>`).join('')}</ul>`;
 }
 // 「📖 怎麼看這頁」第一層：最多 5 行、每行 25 字內的白話；燈號、權重、分數線、暫定項目都從規則產生
 function _hlGuideIntro(rules) {
@@ -1290,7 +1299,7 @@ function _hlGuideIntro(rules) {
     `只看${SC.items.map(it => it.label).join('、')}` + (w.length === 1 ? `，各占 ${w[0]}%。` : '。'),
     `分數線：${T.join('／')}，沒達到就 0 分。`,
     prov ? `${prov}標「暫定」；沒標準的寫「標準未設定」。` : '沒標準的項目寫「標準未設定」，不算分。',
-    '最下方「另有 N 個通路沒有分數」：點了看清單。',
+    '沒分數的卡寫「未評分」和原因，不算 0 分。',
   ];
 }
 // 說明彈窗：第一層 5 行；第二層「看完整規則」預設收合（opts.openFull＝直接展開），內容＝_hlGuideFullHtml(rules)（一張表，門檻、權重都從傳進來的規則產生）。
@@ -1310,8 +1319,8 @@ let _hlWaitTries = 0;        // KPI 還沒就緒時的重畫次數（最多 _HL_
 const _HL_WAIT_MAX = 20;     // × 600ms ≈ 12 秒
 const _HL_TREND_N = 12;
 // 只在記憶體：選的月份、展開的通路、「KPI 尚未填完」有沒有展開、「看評分細節」有沒有展開、重畫後要不要捲到商品清單、
-//   哪個通路按了「顯示全部待處理」、哪個通路展開了「已調整 N 個」、最下方「另有 N 個通路沒有分數」有沒有展開
-const _hlState = { month: null, open: null, pendingOpen: false, scoreOpen: false, scrollTo: null, todoAll: null, doneOpen: null, unratedOpen: false, metOpen: null, metCols: null, tagsMore: {} };
+//   哪個通路按了「顯示全部待處理」、哪個通路展開了「已調整 N 個」
+const _hlState = { month: null, open: null, pendingOpen: false, scoreOpen: false, scrollTo: null, todoAll: null, doneOpen: null, metOpen: null, metCols: null, tagsMore: {} };
 let _hlChart = null;
 
 function _hlIsLocalHost() {
@@ -1532,7 +1541,7 @@ function _hlRefreshPlatform(platform) {
 }
 function _hlProdKey(p, s, m) { return p + '|' + s + '|' + m; }
 //   商品標籤（塊 4）要再往前一個月（毛利率比前 3 個月平均）：分數用得到的月份全部算完、畫面重畫之後才排（第二批），
-//   分數出現的時間不會因為標籤變慢；第二批算完再重畫一次，卡片的「★ 亮點／⚠ 警訊」那一行才補上。
+//   分數出現的時間不會因為標籤變慢；第二批算完再重畫一次，細項的商品清單才補上。
 function _hlWantProd(month, openId) {
   const today = _hlTodayYm();
   const want = (ch, m) => {
@@ -1664,16 +1673,13 @@ function _hlTrendHelpLines() {
     `持平＝比率差 ${_hlPctTrim(F.rate).replace('%', '')} 個百分點以內、金額差 ${_hlPctTrim(F.money)} 以內。▲ 變好、▼ 變差（廣告佔比越低越好，寫「改善／變差」）；計分項目後面接本月分數。`,
   ];
 }
-// 「另有 N 個通路」：狀態的意思＋通路分類（清單本身看不出每家屬於哪一類）。分類從 HEALTH_CHANNELS 產生。
+// 完整規則表下方 ⓘ「沒有分數的原因」：卡片上那行原因是什麼意思
 function _hlUnratedHelpLines(R) {
   const S = _HL_STATUS_TEXT;
-  const groups = Object.keys(R.types).sort((a, b) => R.types[a].order - R.types[b].order)
-    .map(t => `${R.types[t].label}＝${HEALTH_CHANNELS.filter(ch => ch.type === t).map(ch => ch.label).join('、')}`).join('；');
   return [
     `${S.nostd}：這類通路還沒有這一項的分數線。${S.insufficient}：KPI 還沒開始有資料的月份，或商品太少算不出來。`,
-    `${S.smallRev}（清單寫「營收太小」）：當月營收未滿 ${_hlFmtMoney(R.minRev)}，比率波動太大。${S.pending}（清單寫「KPI 還沒填」）：這個月的 KPI 還沒填完，或還沒有商品資料。`,
+    `營收未滿 ${_hlFmtMoney(R.minRev)}：當月營收太小，比率波動太大。KPI 還沒填：這個月的 KPI 還沒填完，或還沒有商品資料。`,
     `${S.closed}：關站月份起不評分。${S.loading}：商品資料還沒載好，到了自動重算。以上都不算 0 分。`,
-    `通路分類：${groups}。`,
   ];
 }
 // 百分比去掉多餘的 .0（滿分標準用：24%、0.5%、62%）
@@ -1731,23 +1737,13 @@ function _hlTodoHtml(r, snap) {
   if (!t.n) return `<div class="hl-tile-todo hl-todo-ok" ${attrs} title="${t.total ? `這個月 ${t.total} 個拖累商品都有調整紀錄` : '這個月沒有拖累商品'}；點一下看清單">✓ 沒有待處理商品</div>`;
   return `<div class="hl-tile-todo hl-todo-warn" ${attrs} title="這個月拖累商品 ${t.total} 個，其中 ${t.n} 個還沒有調整紀錄；點一下看清單">⚠ 待處理商品 ${t.n} 個</div>`;
 }
-// 卡片上「★ 亮點 N　⚠ 警訊 N」（塊 4，取代「待處理商品 N 個」；_hlTodoHtml 留著不用）。N＝符合條件的商品總數（不是只算前 10）。
-//   沒有商品層的通路＝空的佔位（卡片才一樣高）；資料還在載入＝「商品標籤載入中…」（不影響分數顯示）。點一下展開細項、捲到清單。
+// 商品標籤還在載入時，細項清單顯示的字
 const _HL_TAG_WAIT = { loading: '商品標籤載入中…', notLoaded: '商品標籤：商品資料未載入', timeout: '商品標籤：商品資料逾時' };
-function _hlTagLineHtml(r, snap) {
-  const ch = HEALTH_CHANNELS.find(c => c.id === r.id);
-  const t = healthProductTags(ch, r.month, snap);
-  if (t.status === 'na') return '<div class="hl-tile-todo hl-todo-none" aria-hidden="true"></div>';
-  if (_HL_TAG_WAIT[t.status]) return `<div class="hl-tile-todo hl-todo-wait">${_HL_TAG_WAIT[t.status]}</div>`;
-  if (t.status !== 'ok') return `<div class="hl-tile-todo hl-todo-wait" title="${escapeHtml(t.reason)}">商品標籤：${t.status === 'none' ? '這個月沒有整月資料' : '讀不到門檻'}</div>`;
-  return `<div class="hl-tile-todo hl-tag-line" role="button" tabindex="0" data-hl-todo="${escapeHtml(r.id)}" title="亮點商品 ${t.goodN} 個（綠燈多於紅燈）、警訊商品 ${t.badN} 個（紅燈多於綠燈）；只算本月或上月營收 ${_hlFmtMoney(HEALTH_TAG_RULES.minRev).replace('$', '')} 元以上的商品；點一下看清單">`
-    + `<span class="hl-tl-good">★ 亮點 ${t.goodN}</span><span class="hl-tl-bad">⚠ 警訊 ${t.badN}</span></div>`;
-}
 function _hlPtagHtml(t) {
   return `<span class="hl-ptag hl-pt-${t.light}" title="${escapeHtml(HL_LIGHT_TEXT[t.light] + '：' + t.title)}">${escapeHtml(t.label)} ${HL_LIGHT_SYM[t.light]}</span>`;
 }
-// 細項最上面：「★ 亮點商品（前 10）」「⚠ 警訊商品（前 10）」兩張清單（寬螢幕左右、窄螢幕上下，見 css .hl-tags-cols）。
-//   精簡版：亮點清單每列只放綠燈、警訊清單只放紅燈；其他燈（另一色、灰、黃）與純利率收進該列 title。
+// 細項最上面：「★ 表現好商品（前 10）」「⚠ 需注意商品（前 10）」兩張清單（寬螢幕左右、窄螢幕上下，見 css .hl-tags-cols）。
+//   精簡版：表現好清單每列只放綠燈、需注意清單只放紅燈；其他燈（另一色、灰、黃）與純利率收進該列 title。
 //   欄位：商品名稱＋燈號（同一行，名稱太長截斷）、營收（萬）、營收比上月（|成長率| ≥ 999.5% 寫 >+999%）。不放品號、調整紀錄、廣告費。
 //   預設顯示前 HL_TAGS_SHOW（5）名，「看全部 10 名 ▾」展開（開關記在記憶體，整頁重畫不會自己收）。數量、排序都是 healthProductTags 的，沒改。
 const HL_TAGS_SHOW = 5;
@@ -1765,7 +1761,7 @@ function _hlTagListsHtml(ch, month, snap) {
   if (t.status === 'na') return '';
   const minRev = _hlFmtMoney(HEALTH_TAG_RULES.minRev).replace('$', '');
   const legend = `<div class="hl-tags-legend">${['green', 'gray', 'yellow', 'red'].map(l => `<span class="hl-ptag hl-pt-${l}">${HL_LIGHT_SYM[l]} ${HL_LIGHT_TEXT[l]}</span>`).join('')}`
-    + `<span class="hl-w">亮點只列綠燈、警訊只列紅燈；其他燈與純利率：滑鼠移到那一列。只列本月或上月營收 ${minRev} 元以上的商品。不計分。</span></div>`;
+    + `<span class="hl-w">表現好商品只列綠燈、需注意商品只列紅燈；其他燈與純利率：滑鼠移到那一列。只列本月或上月營收 ${minRev} 元以上的商品。不計分。</span></div>`;
   const notes = _hlNotices(month, 'tags').map(n => `<div class="hl-notice">${_hlNoticeHtml(n)}</div>`).join('');
   if (t.status !== 'ok') {
     const msg = _HL_TAG_WAIT[t.status] || ('商品標籤：' + t.reason);
@@ -1784,8 +1780,8 @@ function _hlTagListsHtml(ch, month, snap) {
   };
   const prevNote = t.prevMissing ? '<div class="hl-w">上個月沒有商品資料：營收、純利、動銷的燈這次判斷不了。</div>' : '';
   return `<section class="hl-tags">${legend}${notes}${prevNote}<div class="hl-tags-cols">
-      ${list('good', '★ 亮點商品', 'hl-tags-good', 'green', t.good, t.goodN, '這個月沒有綠燈多於紅燈的商品')}
-      ${list('bad', '⚠ 警訊商品', 'hl-tags-bad', 'red', t.bad, t.badN, '這個月沒有紅燈多於綠燈的商品')}
+      ${list('good', '★ 表現好商品', 'hl-tags-good', 'green', t.good, t.goodN, '這個月沒有綠燈多於紅燈的商品')}
+      ${list('bad', '⚠ 需注意商品', 'hl-tags-bad', 'red', t.bad, t.badN, '這個月沒有紅燈多於綠燈的商品')}
     </div></section>`;
 }
 
@@ -1936,8 +1932,6 @@ function _hlTileDeltaHtml(r, prev) {
   if (!prev || r.score == null || prev.score == null) return '';
   return `<span class="hl-tile-delta">比上月 ${_hlDeltaHtml(r, prev)}</span>`;
 }
-// 卡片牆（塊 3）：有總分（含參考分）或商品層還在載入的通路做卡片；其餘（總分「—」、已關站）收進最下方「未評分」那一行
-function _hlTileRated(r) { return r.status !== 'closed' && (r.score != null || !!_HL_WAIT_SCORE[r.status]); }
 // 卡片三欄（卡片改版塊 1）：上＝小標「純利率／毛利率／動銷率」、中＝大字數值（狀態字灰色、小一點）、
 //   下＝「↑ 上月 22.2%」（方向、顏色同塊 2 的上月邏輯；上月沒資料就是空行，卡片才一樣高）。任何寬度都不截斷（不用 …）。
 function _hlTileMetsHtml(r, prev) {
@@ -1949,14 +1943,19 @@ function _hlTileMetsHtml(r, prev) {
 }
 // 卡片（卡片改版塊 1）：拿掉「類型第 N」與主要扣分原因句（排名 _hlRank、原因 _hlPlainReason 照算，只是卡片上不顯示；rank 參數留著不用）。
 //   商品層還在載入時沒有總分，卡片標題列的 title 放原因全文（例：仍在載入（已等 N 秒）），滑鼠移上去看得到。
-//   「不排名」小標也拿掉了（排名不顯示；會不排名的業外、官網本來也收在未評分那一行）。
+//   「不排名」小標也拿掉了（排名不顯示）。沒有總分的卡片寫「未評分」＋一行原因（_hlNoScoreWhy），不算 0 分；data-hl-fp 照舊（裡面的總分文字還是 _hlScoreHtml）。
+//   商品層還沒好的卡片（資料到了就會有分數）不是「未評分」：分數那格只寫灰字狀態（_HL_TILE_WAIT）。原因全文在標題列的 title。
+const _HL_TILE_WAIT = { prodLoading: '載入中…', prodIdle: '未載入', prodTimeout: '載入逾時' };
 function _hlTileHtml(r, prev, rank, open, snap) {
   const tip = r.score == null && r.reason ? ` title="${escapeHtml(String(r.reason))}"` : '';
   return `<div class="hl-tile${open ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" data-hl-row="${escapeHtml(r.id)}" data-hl-fp="${escapeHtml(_hlFpText(r, prev))}">
       <div class="hl-tile-hd"${tip}><span class="hl-tile-name">${escapeHtml(r.label)}</span></div>
-      <div class="hl-tile-score">${_hlScoreHtml(r)}${_hlTileDeltaHtml(r, prev)}</div>
+      ${r.score == null && _HL_TILE_WAIT[r.status]
+        ? `<div class="hl-tile-score hl-tile-score-none"><span class="hl-tile-noscore">${_HL_TILE_WAIT[r.status]}</span></div>`
+        : r.score == null
+        ? `<div class="hl-tile-score hl-tile-score-none"><span class="hl-tile-noscore">未評分</span><span class="hl-tile-why">${escapeHtml(_hlNoScoreWhy(r, healthRulesForMonth(r.month, snap && snap.healthRuleVersions)))}</span></div>`
+        : `<div class="hl-tile-score">${_hlScoreHtml(r)}${_hlTileDeltaHtml(r, prev)}</div>`}
       ${_hlTilePartsHtml(r)}
-      ${_hlTagLineHtml(r, snap)}
       <div class="hl-tile-mets">${_hlTileMetsHtml(r, prev)}</div>
     </div>`;
 }
@@ -1969,7 +1968,7 @@ function _hlWaitTypeLabels(rules) {
   return types.sort((a, b) => (R.types[a].order - R.types[b].order)).map(t => R.types[t].label);
 }
 // 卡片分數下面一行（v5）：「純利 80 · 動銷 60」；只有純利率算分時「純利 80 · 只看純利率」；動銷率在等商品層時「純利 80 · 動銷 載入中…」。
-//   沒有總分的卡片（只剩載入中這種）也留這一行的位置，卡片才等高。
+//   純利率沒有分數的卡片也留這一行的位置，卡片才等高。
 function _hlTilePartsHtml(r) {
   const pure = (r.items || []).find(it => it.key === 'pureRate'), st = (r.items || []).find(it => it.key === 'sellThrough');
   if (!pure || pure.status !== 'ok') return '<div class="hl-tile-parts" aria-hidden="true"></div>';
@@ -1978,22 +1977,11 @@ function _hlTilePartsHtml(r) {
     : st && st.lines && waitTxt[st.status] ? `${st.short} ${waitTxt[st.status]}` : '只看純利率';
   return `<div class="hl-tile-parts">${escapeHtml(pure.short)} ${pure.score} · ${escapeHtml(right)}</div>`;
 }
-// 「未評分：酷澎 商城-好麻吉（KPI 還沒填）、…、官網（已關站）」：通路名可點（Enter／Space 也可以），點了展開細項
-function _hlUnratedHtml(list, prev, open, snap) {
-  if (!list.length) return '';
-  const items = list.map(r => {
-    // 括號裡不再套括號：「KPI 還沒填完（4/6）」→「KPI 還沒填完 4/6」
-    const why = r.status === 'closed' ? '已關站' : _hlShortReason(r).replace(/（([^（）]*)）$/, ' $1');
-    const isOpen = open === r.id;
-    return `<span class="hl-unrated-item${isOpen ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${isOpen ? 'true' : 'false'}" data-hl-row="${escapeHtml(r.id)}" data-hl-fp="${escapeHtml(_hlFpText(r, prev[r.id]))}" title="${escapeHtml(String(r.reason || why))}">${escapeHtml(r.label)}</span>（${escapeHtml(why)}）`;
-  });
-  const det = list.find(r => r.id === open);
-  // 卡片改版塊 1：平常收成一行「另有 N 個通路沒有分數 ▸」，點了才展開清單；正在看其中一個通路的細項時一律展開。
-  //   清單收合時用 hidden 藏起來（不從 DOM 拿掉），每個通路的 data-hl-row／data-hl-fp 都還在。
-  const show = !!(_hlState.unratedOpen || det);
-  const why = `<div class="hl-unrated-why">括號裡的狀態是什麼意思${_hlHelpHtml('狀態的意思與通路分類', _hlUnratedHelpLines(healthRulesForMonth(list[0].month, snap && snap.healthRuleVersions)))}</div>`;
-  return `<div class="hl-unrated"><button type="button" class="hl-unrated-toggle" data-hl-act="unrated"${det ? ` data-hl-det="${escapeHtml(det.id)}"` : ''} aria-expanded="${show ? 'true' : 'false'}">另有 ${list.length} 個通路沒有分數</button>
-      <div class="hl-unrated-list"${show ? '' : ' hidden'}>${why}${items.join('、')}</div></div>${det ? `<div class="hl-tile-detail">${_hlCardHtml(det, snap)}</div>` : ''}`;
+// 卡片上「未評分」下面那行原因。括號裡不再套括號：「KPI 還沒填完（4/6）」→「KPI 還沒填完 4/6」
+function _hlNoScoreWhy(r, R) {
+  if (r.status === 'closed') return '已關站';
+  if (r.status === 'smallRev') return `營收未滿 ${_hlFmtMoney(R.minRev)}`;
+  return _hlShortReason(r).replace(/（([^（）]*)）$/, ' $1');
 }
 // 總覽「主要扣分原因」白話版（2026-11-03）：只換說法，不碰計分。
 //   挑哪一個子指標＝跟 _hlTopReason 同一條規則（(100 − 得分) × 子指標權重 × 面向權重 最大）；_hlTopReason 本身不動（computeChannelHealth 的 topReason 照舊）。
@@ -2456,13 +2444,6 @@ function _hlOnClick(e) {
   if (act) {
     if (act.dataset.hlAct === 'refresh') { _hlProdReset(); App.render(); }
     else if (act.dataset.hlAct === 'pending') { _hlState.pendingOpen = !_hlState.pendingOpen; App.render(); }
-    else if (act.dataset.hlAct === 'unrated') {
-      // 收起清單時，如果正在看清單裡某個通路的細項，也一起收起來
-      const shown = act.getAttribute && act.getAttribute('aria-expanded') === 'true';
-      _hlState.unratedOpen = !shown;
-      if (shown && act.dataset.hlDet && _hlState.open === act.dataset.hlDet) _hlState.open = null;
-      App.render();
-    }
     else if (act.dataset.hlAct === 'tagsmore' && act.dataset.hlList) { _hlState.tagsMore = Object.assign({}, _hlState.tagsMore, { [act.dataset.hlList]: !(_hlState.tagsMore || {})[act.dataset.hlList] }); App.render(); }
     else if (act.dataset.hlAct === 'todoall' && act.dataset.hlCh) { _hlState.todoAll = _hlState.todoAll === act.dataset.hlCh ? null : act.dataset.hlCh; App.render(); }
     else if (act.dataset.hlAct === 'guide' && typeof App.openModal === 'function') App.openModal({ title: '📖 通路健檢 · 怎麼看這頁', width: '640px', hideFooter: true, bodyHtml: _hlGuideModalHtml(_hlSelectedRules(), { openFull: act.dataset.hlGuideFull === '1' }), onMount: _hlGuideBindInfo });
@@ -2585,11 +2566,14 @@ function _hlStdMonths() {
   const m0 = _hlTaipeiYm(Date.now());
   return _hlMonthRange(m0, _hlAddMonth(m0, 12));
 }
-// 三格一組的輸入格（或鎖住的文字）
-function _hlStdGroupHtml(key, lines, lock, disabled, placeholder, label) {
-  if (lock) return `<td class="hl-std-lock">${escapeHtml(lock)}</td>`;
-  const inputs = [0, 1, 2].map(i => `<input type="text" inputmode="decimal" class="hl-std-in" data-hl-std-cell="${escapeHtml(key)}" data-hl-std-i="${i}" value="${lines ? _hlStdToPct(lines[i]) : ''}" placeholder="${escapeHtml(placeholder)}" aria-label="${escapeHtml(label + ' ' + [100, 80, 60][i] + ' 分線（%）')}"${disabled ? ' disabled' : ''}>`).join('');
-  return `<td><div class="hl-std-3">${inputs}</div><div class="hl-std-err" data-hl-std-err="${escapeHtml(key)}"></div></td>`;
+// 三格一組：一個輸入框一格（對齊表頭的 100／80／60 分），或跨三欄的鎖住文字。hints＝淺灰提示（個別通路傳共用那列的數字，類型列傳 null）。
+function _hlStdGroupHtml(key, lines, lock, disabled, hints, label) {
+  if (lock) return `<td class="hl-std-lock hl-std-gs" colspan="3">${escapeHtml(lock)}</td>`;
+  return [0, 1, 2].map(i => `<td${i === 0 ? ' class="hl-std-gs"' : ''}><input type="text" inputmode="decimal" class="hl-std-in" data-hl-std-cell="${escapeHtml(key)}" data-hl-std-i="${i}" value="${lines ? _hlStdToPct(lines[i]) : ''}" placeholder="${hints ? _hlStdToPct(hints[i]) : ''}" aria-label="${escapeHtml(label + ' ' + [100, 80, 60][i] + ' 分線（%）')}"${disabled ? ' disabled' : ''}></td>`).join('');
+}
+// 一列的紅字放在下面一列（跨三欄）。沒有紅字時這一列高度是 0。
+function _hlStdErrRowHtml(cols, attrs) {
+  return `<tr class="hl-std-errrow"${attrs}><td></td>${cols.map(c => `<td colspan="3">${c.lock ? '' : `<div class="hl-std-err" data-hl-std-err="${escapeHtml(c.key)}"></div>`}</td>`).join('')}</tr>`;
 }
 function _hlStdBodyHtml() {
   const from = _hlStd.from, list = _hlStdList(), R = healthRulesForMonth(from, _hlStd.versions);
@@ -2604,10 +2588,15 @@ function _hlStdBodyHtml() {
     const chs = HEALTH_CHANNELS.filter(ch => ch.type === t), label = R.types[t].label;
     const override = chs.some(ch => items.some(it => it.linesByChannel && it.linesByChannel[ch.id]));
     const open = _hlStd.open[t] != null ? _hlStd.open[t] : override;
-    const chRows = chs.map(ch => `<tr class="hl-std-chrow" data-hl-std-chrow="${escapeHtml(t)}"${open ? '' : ' hidden'}><td class="hl-std-chname">${escapeHtml(ch.label)}</td>${
-      items.map(it => _hlStdGroupHtml(`${it.key}|c|${ch.id}`, it.linesByChannel && it.linesByChannel[ch.id], _hlStdLockChannel(it.key, ch), off, '同類型', `${ch.label} ${it.label}`)).join('')}</tr>`).join('');
-    return `<tr class="hl-std-trow"><td class="hl-std-tname">${escapeHtml(label)}<button type="button" class="hl-std-toggle" data-hl-std-act="chs" data-hl-std-type="${escapeHtml(t)}" aria-expanded="${open ? 'true' : 'false'}">${open ? '▾' : '▸'} 個別通路</button></td>${
-      items.map(it => _hlStdGroupHtml(`${it.key}|t|${t}`, it.lines && it.lines[t], _hlStdLockType(it.key, t), off, '', `${label} ${it.label}`)).join('')}</tr>${chRows}`;
+    const chRows = chs.map(ch => {
+      const attrs = ` data-hl-std-chrow="${escapeHtml(t)}"${open ? '' : ' hidden'}`;
+      return `<tr class="hl-std-chrow"${attrs}><td class="hl-std-chname">${escapeHtml(ch.label)}</td>${
+        items.map(it => _hlStdGroupHtml(`${it.key}|c|${ch.id}`, it.linesByChannel && it.linesByChannel[ch.id], _hlStdLockChannel(it.key, ch), off, it.lines && it.lines[t], `${ch.label} ${it.label}`)).join('')}</tr>${
+        _hlStdErrRowHtml(items.map(it => ({ key: `${it.key}|c|${ch.id}`, lock: _hlStdLockChannel(it.key, ch) })), attrs)}`;
+    }).join('');
+    return `<tr class="hl-std-trow"><td class="hl-std-tname">${escapeHtml(label)}（共用）<button type="button" class="hl-std-toggle" data-hl-std-act="chs" data-hl-std-type="${escapeHtml(t)}" aria-expanded="${open ? 'true' : 'false'}">${open ? '▾' : '▸'} 個別通路</button></td>${
+      items.map(it => _hlStdGroupHtml(`${it.key}|t|${t}`, it.lines && it.lines[t], _hlStdLockType(it.key, t), off, null, `${label} ${it.label}`)).join('')}</tr>${
+      _hlStdErrRowHtml(items.map(it => ({ key: `${it.key}|t|${t}`, lock: _hlStdLockType(it.key, t) })), '')}${chRows}`;
   }).join('');
   const lockMsg = !_hlStdCanEdit() ? '只有管理員可以修改評分標準'
     : !_hlStdCloudReady() ? '評分標準還沒讀到，暫時不能修改（請重新整理後再試）' : '';
@@ -2616,8 +2605,10 @@ function _hlStdBodyHtml() {
       <label class="hl-std-field">從哪個月開始適用
         <select data-hl-std-from>${_hlStdMonths().map(m => `<option value="${m}"${m === from ? ' selected' : ''}>${escapeHtml(_hlYmLabel(m))}</option>`).join('')}</select></label>
       <div data-hl-std-notes>${notes.map(n => `<div class="hl-std-note">${escapeHtml(n)}</div>`).join('')}</div>
-      <div class="hl-std-wrap"><table class="hl-std-tbl"><thead><tr><th class="hl-std-c1">通路類型</th>${items.map(it => `<th>${escapeHtml(it.label)} 100／80／60 線（%）</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="hl-std-tip">整組留空＝標準未設定；三格要全填或全空。個別通路留空＝跟著類型那一列。</div>
+      <div class="hl-std-lead">共用那一列是這類通路的標準；下面個別通路沒填就照用，填了只改那一家。</div>
+      <div class="hl-std-wrap"><table class="hl-std-tbl"><thead><tr><th class="hl-std-c1" rowspan="2">通路類型</th>${items.map(it => `<th class="hl-std-gs" colspan="3">${escapeHtml(it.label)}（%）</th>`).join('')}</tr>
+        <tr>${items.map(() => [100, 80, 60].map((n, i) => `<th${i === 0 ? ' class="hl-std-gs"' : ''}>${n} 分</th>`).join('')).join('')}</tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="hl-std-tip">整組留空＝標準未設定；三格要全填或全空。</div>
       <div class="hl-std-row">權重
         ${items.map(it => `<label class="hl-std-w">${escapeHtml(it.label)} <input type="text" inputmode="decimal" class="hl-std-in" data-hl-std-w="${escapeHtml(it.key)}" value="${_hlStdToPct(it.w)}" aria-label="${escapeHtml(it.label)}權重（%）"${dis}> %<span class="hl-std-err" data-hl-std-err="w|${escapeHtml(it.key)}"></span></label>`).join('')}
         <span class="hl-std-err" data-hl-std-err="w"></span></div>
@@ -2698,8 +2689,23 @@ function _hlStdBind() {
   _hlStd.root = root;
   root.addEventListener('click', _hlStdOnClick);
   root.addEventListener('change', _hlStdOnChange);
+  root.addEventListener('input', _hlStdOnInput);
   _hlStd.formSig = _hlStdFormSig();
   if (!_hlStd.guardBound) { _hlStd.guardBound = true; document.addEventListener('click', _hlStdCloseGuard, true); }
+}
+// 共用那列改了，下面個別通路的淺灰數字跟著變。只改 placeholder、不碰 value：存檔（_hlStdSubmit）與「有沒有改過」（_hlStdFormSig）都只讀 value，提示不會被當成已填。
+function _hlStdOnInput(e) {
+  const el = e.target, key = el && el.getAttribute && el.getAttribute('data-hl-std-cell');
+  if (!key) return;
+  const [itemKey, kind, type] = key.split('|');
+  if (kind !== 't') return;
+  const i = el.getAttribute('data-hl-std-i'), s = String(el.value == null ? '' : el.value).trim();
+  const hint = s !== '' && _hlFinite(Number(s)) ? s : '';
+  HEALTH_CHANNELS.filter(ch => ch.type === type).forEach(ch => {
+    _hlStd.root.querySelectorAll(`[data-hl-std-cell="${itemKey}|c|${ch.id}"]`).forEach(c => {
+      if (c.getAttribute('data-hl-std-i') === i) c.placeholder = hint;
+    });
+  });
 }
 function _hlStdOnChange(e) {
   const sel = e.target && e.target.closest && e.target.closest('[data-hl-std-from]');
@@ -2917,25 +2923,17 @@ Object.assign(App, {
     const prev = {};   // 上個月的分數用上個月自己的標準（computeChannelHealth 依 prevM 查），「比上月」才不會拿新標準重算舊月份
     if (prevM >= HEALTH_RULES.firstMonth) HEALTH_CHANNELS.forEach(ch => { prev[ch.id] = computeChannelHealth(ch, prevM, snap); });
     const rank = _hlRank(results);
-    const sorted = _hlSortResults(results);
     const _tScore = _hlNow() - _t0 - _tKpi;
-    // 卡片牆（塊 3）：依通路類型分組（順序同 _hlSortResults）；展開的細項放在該組卡片下方、全寬
-    //   塊 3b：每組是一個帶小標題的區塊，寬度＝卡片數（最多 5 張）× 卡寬，區塊之間依視窗寬度自動並排（只有 1、2 張的小組不再各佔一整排）；
-    //   展開的細項是寬 100% 的項目，排在那一組所在那一排的下面。
-    const groups = [];
-    sorted.filter(_hlTileRated).forEach(r => {
-      let g = groups[groups.length - 1];
-      if (!g || g.type !== r.type) groups.push(g = { type: r.type, items: [] });
-      g.items.push(r);
-    });
-    const wall = groups.map(g => {
-      const tl = (HEALTH_RULES.types[g.type] || {}).label || g.type;
-      const det = g.items.find(r => r.id === _hlState.open);
-      return `<section class="hl-group hl-group-n${Math.min(g.items.length, 5)}" aria-label="${escapeHtml(tl)}"><div class="hl-group-hd">${escapeHtml(tl)}</div>
-        <div class="hl-tiles">${g.items.map(r => _hlTileHtml(r, prev[r.id], rank[r.id], _hlState.open === r.id, snap)).join('')}</div></section>
+    // 主看板三區（HL_BOARD_SECTIONS）：所有通路都有一張卡（官網不上）；展開的細項放在該區卡片下方、全寬
+    const byId = {};
+    results.forEach(r => { byId[r.id] = r; });
+    const wall = HL_BOARD_SECTIONS.map(sec => {
+      const items = sec.ids.map(id => byId[id]).filter(Boolean);
+      const det = items.find(r => r.id === _hlState.open);
+      return `<section class="hl-group" aria-label="${escapeHtml(sec.title)}"><div class="hl-group-hd">${escapeHtml(sec.title)}</div>
+        <div class="hl-tiles">${items.map(r => _hlTileHtml(r, prev[r.id], rank[r.id], _hlState.open === r.id, snap)).join('')}</div></section>
         ${det ? `<div class="hl-tile-detail">${_hlCardHtml(det, snap)}</div>` : ''}`;
     }).join('');
-    const unrated = _hlUnratedHtml(sorted.filter(r => !_hlTileRated(r)), prev, _hlState.open, snap);
     const mo = snap.months && snap.months[month];
     try { console.info(`[health] 整頁重算 ${Math.round(_hlNow() - _t0)} ms（KPI 快照 ${Math.round(_tKpi)} ms、評分 ${Math.round(_tScore)} ms）`); } catch {}
     return `<div class="hl-page">
@@ -2954,8 +2952,6 @@ Object.assign(App, {
           <button type="button" class="btn-ghost" data-hl-act="refresh">↻ 重新計算</button>
         </div>
         <div class="hl-wall">${wall}</div>
-        ${unrated}
-
       </div>`;
   },
 

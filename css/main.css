@@ -2757,19 +2757,22 @@
 .hl-std-field { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
 .hl-std-field select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-weight: 400; }
 .hl-std-note { margin-top: 6px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--text); font-size: 12px; }
-.hl-std-wrap { margin-top: 10px; max-width: 100%; overflow-x: auto; }
+.hl-std-lead { margin-top: 10px; color: var(--text-muted); font-size: 12px; }
+.hl-std-wrap { margin-top: 6px; max-width: 100%; overflow-x: auto; }
 .hl-std-tbl { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 13px; }
 .hl-std-tbl th, .hl-std-tbl td { padding: 6px; text-align: left; vertical-align: top; white-space: normal; border-bottom: 1px solid var(--border); color: var(--text); font-size: 13px; }
 .hl-std-tbl th { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: none; letter-spacing: normal; cursor: default; user-select: auto; background: none; }
 .hl-std-tbl th:hover { color: var(--text-muted); }
+.hl-std-tbl .hl-std-gs { border-left: 1px solid var(--border); }
+.hl-std-tbl .hl-std-errrow td { padding-top: 0; padding-bottom: 0; border-bottom: 0; }
 .hl-std-c1 { width: 130px; }
 .hl-std-tname { font-weight: 600; }
-.hl-std-chname { padding-left: 18px; color: var(--text-muted); }
+.hl-std-tbl .hl-std-chname { padding-left: 24px; color: var(--text-muted); }
 .hl-std-toggle { display: block; margin-top: 2px; padding: 0; border: 0; background: none; color: var(--info); font: inherit; font-size: 11px; font-weight: 400; cursor: pointer; }
-.hl-std-3 { display: flex; gap: 4px; }
 .hl-std-in { box-sizing: border-box; width: 56px; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
+.hl-std-in::placeholder { color: var(--text-muted); opacity: 0.6; }
 .hl-std-in:disabled, .hl-std-notein:disabled { background: var(--border); color: var(--text-muted); cursor: not-allowed; }
-.hl-std-lock { color: var(--text-muted); font-size: 12px; }
+.hl-std-tbl .hl-std-lock { color: var(--text-muted); font-size: 12px; }
 .hl-std-err { display: block; color: var(--danger); font-size: 11px; line-height: 1.4; }
 .hl-std-err:empty { display: none; }
 .hl-std-tip { margin-top: 6px; color: var(--text-muted); font-size: 11px; }
@@ -2813,15 +2816,10 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-sub th:hover { color: var(--text-muted); }
 .hl-sub td { text-align: left; white-space: normal; }
 /* 卡片牆（塊 3，2026-11-03）：依通路類型分組；點卡片在該組下方展開細項（全寬），同一時間只展開一個 */
-/* 塊 3b：每組是一個帶小標題的區塊，寬度＝卡片數（最多 5 張）× 卡寬，區塊依視窗寬度自動並排；展開的細項佔滿一整排、排在那一排下面 */
-.hl-wall { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 16px; }
-.hl-group { flex: 0 1 auto; min-width: 0; max-width: 100%; }
-.hl-group-n1 { width: 215px; }
-.hl-group-n2 { width: 440px; }
-.hl-group-n3 { width: 665px; }
-.hl-group-n4 { width: 890px; }
-.hl-group-n5 { width: 1115px; }
-.hl-group-hd { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+/* 主看板三區：每區佔滿一整排，區內卡片自動換行；展開的細項佔滿一整排 */
+.hl-wall { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; }
+.hl-group { flex: 0 0 100%; min-width: 0; max-width: 100%; }
+.hl-group-hd { margin: 0 0 6px; font-size: 14px; font-weight: 700; color: var(--text); }
 /* 組內卡片：每張最小 205px（組寬 215 × 張數 + 間距，正好一張一欄）；卡寬要放得下三欄「↑ 上月 22.2%」不截斷；組被視窗擠窄時在組內換行；手機一排 1 張（見下方手機區塊）。同一排卡片等高 */
 .hl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(205px, 1fr)); gap: 10px; align-items: stretch; }
 .hl-tile { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 10px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); cursor: pointer; }
@@ -2839,13 +2837,17 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-tile-score .hl-score { flex-direction: row; align-items: baseline; gap: 4px; min-width: 52px; padding: 2px 8px; font-size: 22px; }
 .hl-tile-score .hl-score-wait { font-size: 14px; }
 .hl-tile-score .hl-delta { font-size: 13px; color: var(--text-muted); }
+/* 沒有總分的卡片：灰字「未評分」＋一行原因（不是 0 分） */
+.hl-tile-score-none { flex-direction: column; align-items: flex-start; gap: 2px; }
+.hl-tile-noscore { font-size: 16px; line-height: 20px; font-weight: 600; color: var(--text-muted); }
+.hl-tile-why { font-size: 12px; line-height: 16px; color: var(--text-muted); }
 /* 底部三欄（卡片改版塊 1）：上＝小標、中＝大字數值、下＝「↑ 上月 x%」（上月沒資料是空行，卡片才一樣高）；一律不截斷（沒有 …）。
    卡寬 215、左右 padding 8、欄距 3 ⇒ 每欄約 64px，放得下「↓ 上月 18.0%」；更寬的（例：上月 100.0%）在空白處換行，不切字 */
 .hl-tile-mets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 3px; margin-top: auto; padding-top: 6px; border-top: 1px dashed var(--border); color: var(--text); }
 .hl-tile-met { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
 .hl-tile-met-k { font-size: 11px; line-height: 16px; color: var(--text-muted); white-space: nowrap; cursor: help; }
 .hl-tile-met-v { font-size: 18px; line-height: 24px; font-weight: 700; color: var(--text); white-space: nowrap; }
-.hl-tile-met-off .hl-tile-met-v { font-size: 13px; font-weight: 400; color: var(--text-muted); }
+.hl-tile-met-off .hl-tile-met-v { font-size: 13px; line-height: 18px; font-weight: 400; color: var(--text-muted); white-space: normal; }
 .hl-tile-met-p { min-height: 15px; font-size: 10px; line-height: 15px; color: var(--text-muted); white-space: normal; word-break: keep-all; }
 .hl-tile-met-p.hl-ov-up { color: var(--success); }
 .hl-tile-met-p.hl-ov-down { color: var(--danger); }
@@ -2907,19 +2909,9 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-gt .hl-gt-detail td { background: var(--primary-soft); font-size: 12px; }
 .hl-gt-detail-list { margin: 0; padding-left: 18px; }
 .hl-gt-detail-list li + li { margin-top: 4px; }
+.hl-gt-noscore { margin-top: 4px; padding: 8px 8px 8px 26px; border-radius: var(--radius-sm); background: var(--primary-soft); font-size: 12px; }
 .hl-gt-note { margin: 8px 0 0; font-size: 13px; line-height: 1.6; color: var(--text); }
 .hl-tile-detail .hl-card { margin: 0; }
-/* 頁面最下方「另有 N 個通路沒有分數」：展開後通路名可點（展開細項） */
-.hl-unrated { margin-top: 18px; font-size: 12px; line-height: 1.8; color: var(--text-muted); }
-/* 卡片改版塊 1：平常收成一行「另有 N 個通路沒有分數 ▸」，點了展開清單（清單收合時用 hidden） */
-.hl-unrated-toggle { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--text-muted); cursor: pointer; }
-.hl-unrated-toggle:hover, .hl-unrated-toggle:focus-visible { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
-.hl-unrated-toggle::after { content: ' ▸'; }
-.hl-unrated-toggle[aria-expanded="true"]::after { content: ' ▾'; }
-.hl-unrated-list { margin-top: 4px; }
-.hl-unrated-item { color: var(--primary-dark); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
-.hl-unrated-item:hover, .hl-unrated-item:focus-visible { color: var(--primary); outline: none; }
-.hl-unrated-item.open { font-weight: 600; }
 .hl-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 400; white-space: nowrap; }
 .hl-tag { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
 .hl-score { display: inline-flex; flex-direction: column; align-items: center; min-width: 44px; padding: 3px 8px; border-radius: var(--radius-sm); font-size: 16px; font-weight: 700; line-height: 1.15; }
@@ -2979,7 +2971,6 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-help .hl-info-body { max-width: min(420px, 100%); font-size: 12px; font-weight: 400; }
 .hl-help-list { margin: 0; padding-left: 16px; }
 .hl-help-list li + li { margin-top: 4px; }
-.hl-unrated-why { margin-bottom: 2px; }
 .hl-more { margin-top: 4px; }
 .hl-info .hl-more > summary { display: block; font-size: 11px; color: var(--info); }
 .hl-more > summary::after { content: ' ▸'; }
@@ -3026,18 +3017,12 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
 .hl-drag-info { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
 .hl-drag-info summary { cursor: pointer; }
 .hl-drag-info ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.8; }
-/* 卡片「★ 亮點 N　⚠ 警訊 N」（塊 4，取代待處理商品那行）：符號＋文字，不只靠顏色 */
-.hl-tag-line { display: flex; gap: 12px; cursor: pointer; font-weight: 600; }
-.hl-tag-line:hover { text-decoration: underline; text-underline-offset: 2px; }
-.hl-tag-line:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.hl-tl-good { color: var(--success); }
-.hl-tl-bad { color: var(--danger); }
 /* 商品標籤小燈：綠▲ 灰● 黃▽ 紅▼ */
 .hl-ptag { display: inline-block; margin: 0 3px 2px 0; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; line-height: 18px; white-space: nowrap; color: var(--text-muted); }
 .hl-pt-green { border-color: var(--success); background: var(--success-soft); color: var(--success); }
 .hl-pt-yellow { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
 .hl-pt-red { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
-/* 細項：亮點／警訊兩張清單，寬螢幕左右並排、窄螢幕上下 */
+/* 細項：表現好商品／需注意商品兩張清單，寬螢幕左右並排、窄螢幕上下 */
 .hl-tags { margin-top: 12px; }
 .hl-tags-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; font-size: 11px; color: var(--text-muted); }
 .hl-tags-legend .hl-w { margin-left: 4px; }
@@ -3096,7 +3081,6 @@ button.hl-pending-item:hover, button.hl-pending-item:focus-visible { color: var(
   .hl-tags-name { flex: 1 1 96px; }   /* 名稱至少留 96px，燈號擠不下才換行 */
   .hl-tags-wrap, .hl-mt-wrap { max-width: calc(100vw - 72px); }
   .hl-tiles { grid-template-columns: 1fr; }
-  .hl-group { width: 100%; }
   .hl-card { margin: 8px 4px 12px; padding: 12px; }
   .hl-card-hd { align-items: flex-start; gap: 12px; }
   .hl-ring { width: 56px; height: 56px; font-size: 20px; }
