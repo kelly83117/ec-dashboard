@@ -11169,7 +11169,8 @@ function _kpiFillHtml(row){
         +(cell.fx&&_kpiFillCur(row,cell).v!=null&&!autoSame?`<div class="km-sublabel"><span class="km-fx-tag" title="${fxTtl}">手動</span></div>`:'')
         +(auKind==='auto'?`<div class="km-sublabel"><span class="km-au-tag" title="從對帳單自動帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；手動改這格後標籤會消失">自動</span></div>`:'')
         +(auKind==='legacy'?`<div class="km-sublabel"><span class="km-legacy-tag" title="2026/10/01 舊版從淨利表帶入（${_kpiEscAttr(_kpiMetaAt(month,cell.segs).from||'')}）；之後的對帳單帶入沒有寫這一格">舊版帶入</span></div>`:'')
-        +_kpiAnomTagHtml(ax,JSON.stringify(cell.segs));
+        +_kpiAnomTagHtml(ax,JSON.stringify(cell.segs))
+        +_kpiCostMissTagHtml(group,shop,f.k,month);
       return `<td${cell.kind==='merge'?` title="${_kpiMergeHint(group,cell.st,f.k)}：這裡填${['','一','兩','三','四'][cell.st.shops.length]||cell.st.shops.length}家共用的總額"`:''}>${_kpiFillInputHtml(month,row,cell,ri,ci)}${hint}</td>`;
     }).join('');
     const gt=_kpiCommonColTotals(row,group);
@@ -12622,6 +12623,7 @@ function kpiBooksMissCostSave(month, code){
   if(typeof showToast==='function') showToast('已補成本 '+code+' = '+c+'（共用成本表）','success');
   kpiBooksOpenMissingCostPanel(month);   // 重繪面板（該列消失）
   if(document.querySelector('#modal .km-au')&&_kpiYM()===month) kpiBooksAutoFill();   // 帶入預覽開著 → 重開（商品成本立即重算）
+  else if(document.getElementById('kpi-tab-content')) _kpiRefreshViews();   // 商品成本格的「缺成本」標籤跟著更新
 }
 // __kpiBooksRestore('2026-09')：用 preAutofillBooks 快照把該月博客來還原回帶入前的值。先預覽，確認後一次原子寫入。
 async function __kpiBooksRestore(month){
@@ -13064,6 +13066,22 @@ function kpiFridayOpenMissingCostPanel(month){
       <div style="font-size:11px;color:#9ca3af;margin-top:10px">已套用補零規則仍查不到的才列在此；存的成本只在這台電腦，記得按「☁ 同步雲端」推上雲。</div>
     </div></div>`;
 }
+// 商品成本格下方「⚠ 缺成本 N」（2026-11-04）：博客來寄倉／FriDay 主站用報表算成本時，成本表（套補零規則後）仍查不到的料號 → 點了開補成本視窗。
+//   只看報表與成本表，不管這格目前是帶入、手填或空白；成本表還沒載入、沒有報表時不顯示。FriDay 料號「-」（補不了）不算。酷澎還沒做完，先不加。
+function _kpiCostMissTagHtml(group,shop,k,month){
+  if(k!=='cost')return '';
+  let r=null,open='';
+  try{
+    if(group.key==='books'&&shop===KPI_BOOKS_CONSIGN){r=booksKpiFromRecon(month);open='kpiBooksOpenMissingCostPanel';}
+    else if(group.key==='friday'&&shop===KPI_FRIDAY_MAIN){r=fridayKpiFromRecon(month);open='kpiFridayOpenMissingCostPanel';}
+  }catch(e){return '';}
+  if(!r||!r.ok)return '';
+  const miss=(r.missing||[]).filter(x=>x.code!=='-');
+  if(!miss.length)return '';
+  const amt=miss.reduce((t,x)=>t+(x.amt||0),0);
+  const tip='成本表查不到 '+miss.length+' 個料號：'+miss.map(x=>x.code).join('、')+'（影響營收 '+_kpiMoney(amt)+'，含稅）。這些件數沒算進商品成本；點這裡補成本，補完重新「從報表帶入」才會算進去';
+  return `<div class="km-sublabel"><span class="km-cost-miss" role="button" tabindex="0" onclick="${open}('${month}')" onkeydown="if(event.key==='Enter')this.click()" title="${_kpiEscAttr(tip)}">⚠ 缺成本 ${miss.length}</span></div>`;
+}
 function kpiFridayMissCostSave(month, code){
   const oid=String(code).replace(/[^A-Za-z0-9]/g,'_'); const inp=document.getElementById('friday-mc-'+oid);
   const c=inp?parseFloat(inp.value):NaN; if(!(c>=0)){ alert('成本需為 ≥0 的數字'); return; }
@@ -13071,6 +13089,7 @@ function kpiFridayMissCostSave(month, code){
   if(typeof showToast==='function') showToast('已補成本 '+code+' = '+c+'（共用成本表）','success');
   kpiFridayOpenMissingCostPanel(month);
   if(document.querySelector('#modal .km-au')&&_kpiYM()===month) kpiFridayAutoFill();
+  else if(document.getElementById('kpi-tab-content')) _kpiRefreshViews();   // 商品成本格的「缺成本」標籤跟著更新
 }
 // ── 蝦皮手續費整理（2026-10-01，手續費改成「自動＝實際營收×費率、可覆蓋」時用）──
 //   規則：存的手續費＝新公式（誤差 ≤1 元）→ 刪掉改自動計算（值不變）；例外：維克 2026-05（手填時用了 20.5%）→ 刪掉改自動（17.5%，純利會變）；
