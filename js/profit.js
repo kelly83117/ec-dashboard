@@ -11244,7 +11244,7 @@ function _kpiFillHtml(row){
   if(group.key==='books'){
     const br=booksKpiFromRecon(month);
     const h=br.ok?_kpiBooksAutoHint(month,row):null;
-    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${br.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(br.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiBooksUpload()" title="一次可以選多個檔：對帳表（銷貨明細）、折讓單、費用報表、訂單明細，會自動辨識。先預覽、確認才寫入。">上傳博客來報表</button><button id="km-au-btn" class="km-au-btn${br.ok?'':' km-au-off'}"${br.ok?'':' disabled'} onclick="kpiBooksAutoFill()" title="${_kpiEscAttr(br.ok?'訂單數（訂單明細）、營收（對帳表成本小計）、商品成本（成本表）、平台費（折讓單＋費用報表），從已上傳的博客來報表帶入。按下去會先預覽，確認後才寫入。寄倉運費手填。':br.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
+    autoBtn=`<span class="km-au-bar">${h==='changed'?'<span class="km-au-hint">來源已更新，可重新帶入</span>':''}${br.ok?'':`<span class="km-au-hint" title="${_kpiEscAttr(br.why)}">等上傳</span>`}<button class="km-au-btn" onclick="kpiBooksUpload()" title="一次可以選多個檔：對帳表（銷貨明細）、折讓單、費用報表、訂單明細，會自動辨識。先預覽、確認才寫入。">上傳博客來報表</button><span class="km-howto">怎麼傳？${_kpiInfoHtml('博客來寄倉每月傳 4 種：',BOOKS_HOWTO_LINES,'km-info-pre')}</span><button id="km-au-btn" class="km-au-btn${br.ok?'':' km-au-off'}"${br.ok?'':' disabled'} onclick="kpiBooksAutoFill()" title="${_kpiEscAttr(br.ok?'訂單數（訂單明細）、營收（對帳表成本小計）、商品成本（成本表）、平台費（折讓單＋費用報表），從已上傳的博客來報表帶入。按下去會先預覽，確認後才寫入。寄倉運費手填。':br.why)}">從報表帶入 ${month.replace('-','/')}</button></span>`;
   }
   return `<div class="km-fill">
     <aside class="km-side">${side}</aside>
@@ -12207,6 +12207,8 @@ async function __kpiPchomeRestore(month){
 //   雲端：app/books_recon months.{結算帳月}.{sales|rebate|fee|orders}，每塊整塊覆蓋（同月重傳覆蓋、絕不累加）。
 //   KPI 月份 M ＝ 結算帳月 M。
 const BOOKS_RECON_KEY='ec_books_recon';
+// 填寫模式「上傳博客來報表」旁的「怎麼傳？」ⓘ（2026-11-04 使用者給的原文，照抄、不加字；做法同 FRIDAY_HOWTO_LINES）
+const BOOKS_HOWTO_LINES=['① 對帳表（銷貨明細）','② 折讓單（rebate 開頭的檔）','③ 供應商費用報表（運費、包材費）','④ 訂單明細（接單統計）','   日期選整個月','4 份可以一次選，重傳不會重複計算。','寄倉運費請手填。'];
 const _booksNum=v=>{if(v==null||v==='')return 0;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:0;};
 const _booksYM=s=>{const m=String(s==null?'':s).match(/(\d{4})\D?(\d{2})/);return m?m[1]+'-'+m[2]:'';};
 const _booksTrim=v=>String(v==null?'':v).trim();
