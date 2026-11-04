@@ -1104,6 +1104,25 @@ try {
     window.__cloudPchomeRecon.subscribe(data => { window.__pchomeReconCloudLatest = data; if (typeof window.__pchomeApplyCloudRecon === 'function') window.__pchomeApplyCloudRecon(data); });
   } catch (e) { console.error('[pchome cloud] 訂閱失敗：', e); }
 
+  // ============== 博客來對帳資料 app/books_recon（2026-11-04；KPI 博客來「從報表帶入」用，之後淨利表博客來沿用） ==============
+  //   結構：{ schema:1, months:{ 'YYYY-MM'(結算帳月):{ sales:{…}, rebate:{…}, fee:{…} } } }；三塊各自整塊覆蓋（同月重傳覆蓋、絕不累加）。
+  //   寫入只有 writePaths（共用 kpiWriteTo，FieldPath 逐段 → ['months','2026-09','sales'] 只蓋那一塊）；成功回 { ok:true }，
+  //   被唯讀守衛 / 本機防護 no-op 時回 undefined → 呼叫端一律 r && r.ok，再讀回比對。
+  //   ⚠ 讀取名稱只能叫 getDoc / subscribe（防護碼與唯讀守衛的讀取白名單是字串比對）。
+  //   ⚠ 新增這顆後本機防護物件數 28 → 29、寫入方法 +1（見 CLAUDE.md「本機測試前」那段）。
+  //   訂閱照 PChome：profit.js 動態載入 → 先把最新快照緩存到 window.__booksReconCloudLatest，profit.js 載入後 drain。
+  const booksReconRef = doc(db, 'app', 'books_recon');
+  window.__cloudBooksRecon = {
+    TS: KPI_TS,
+    getDoc: () => getDoc(booksReconRef),
+    subscribe: (cb, onErr) => onSnapshot(booksReconRef, snap => cb(snap.exists() ? (snap.data() || {}) : {}), onErr),
+    writePaths: (pairs) => kpiWriteTo(booksReconRef, pairs).then(() => ({ ok: true })),
+  };
+  try {
+    window.__cloudBooksRecon.subscribe(data => { window.__booksReconCloudLatest = data; if (typeof window.__booksApplyCloudRecon === 'function') window.__booksApplyCloudRecon(data); },
+      e => console.error('[books_recon] 訂閱失敗：', e));
+  } catch (e) { console.error('[books_recon] 訂閱失敗：', e); }
+
   window.dispatchEvent(new Event('cloudStoreReady'));
 
   // ⚡ 重量級訂閱（profits + momo_products/origins/… 全部訂完初次快照約 10MB）：
