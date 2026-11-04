@@ -19118,6 +19118,9 @@ function momoRenderProfitBody(shop, tableOnly){
   const period=_momoPeriodSel[shop];
   // E001 未結算估算期別旗標：整期別皆無對帳明細且 E001 有售價資料 → 全列走估算覆蓋。用於「不與結算期別環比/對比」（口徑不同、point 四）。
   const _e001Est = (momoIsMoPlus(shop) && period) ? (()=>{ try{ const c=momoMoPlusE001Ctx(shop), pk=momoExpandPeriod(period); return !!(pk.length && pk.every(k=>!c.settled.has(k)) && c.doc && c.doc.hasPrice && pk.some(k=>c.doc.byPeriodSold&&c.doc.byPeriodSold[k])); }catch(e){ return false; } })() : false;
+  // MO+ 對帳結算統計（整期別展開後，各半月是否已有對帳明細）：全結算／部分結算／全未結算三態。
+  //   供「✓ 已對帳 / ◐ 部分對帳 / ⚠ 未對帳」晶片與黃字估算提示共用；甲乙配不適用（維持 {0,0,[]}、走 tagsRes.estimated）。
+  const _moSettledStat = (momoIsMoPlus(shop) && period) ? (()=>{ try{ const c=momoMoPlusE001Ctx(shop), pk=momoExpandPeriod(period); const unsettled=pk.filter(k=>!c.settled.has(k)); return { settledN:pk.length-unsettled.length, total:pk.length, unsettled }; }catch(e){ return { settledN:0, total:0, unsettled:[] }; } })() : { settledN:0, total:0, unsettled:[] };
   const q=(_momoSearch[shop]||'').trim().toLowerCase();
   const all=momoLoadProducts(shop);
   const _periodIsHalf=/-(H1|H2)$/.test(String(period||''));   // 半月：流量標「估」、成長類本來就沒算（always，便宜）
@@ -19417,13 +19420,18 @@ function momoRenderProfitBody(shop, tableOnly){
         statusBanner=`<div class="mm-banner mm-banner-warn" title="${tipLines}">⚠ <b>${String(mo).replace('-','/')} 未對帳，目前皆為估算數字。</b> 到「月對帳」上傳帳單後將自動校正${highWarn}</div>`;
       }
     } else if(momoIsMoPlus(shop) && period){
-      // MO+ 狀態晶片：已對帳→沿用甲乙配綠標「✓ 已對帳」（同 mm-status ok 值/樣式/容器）；未結算(E001)→沿用甲配「⚠ 未對帳」。二態互斥（_e001Est 需該期別全未結算）。
+      // MO+ 狀態晶片：全結算→綠標「✓ 已對帳」；部分結算→橘標「◐ 部分對帳」（列出未結算期別）；全未結算(E001)→沿用甲配「⚠ 未對帳」。
       //   ⚠ MO+ 無 C1202/C1204 物流精算概念（代收代付，運費已含在對帳單）→ 不加物流晶片（不硬湊）。判定與 _e001Est 同源 c.settled（YYYY-MM-H1/H2），一致。
-      const _moSettled=(()=>{ try{ const c=momoMoPlusE001Ctx(shop), pk=momoExpandPeriod(period); return pk.length>0 && pk.some(k=>c.settled.has(k)); }catch(e){ return false; } })();
-      if(_moSettled){
+      const { settledN, total, unsettled } = _moSettledStat;
+      const _plabel=k=>{ const a=String(k).split('-'); return a[0]+'/'+a[1]+(a[2]==='H1'?' 上半月':a[2]==='H2'?' 下半月':''); };
+      if(settledN===total && total>0){
         // 沿用甲乙配晶片值/樣式/容器；tooltip 用 MO+ 自己的口徑（不沿用甲乙的「÷1.05 按營收攤」，套 MO+ 會誤導）。
         const _okTip=('資料來源＝對帳明細（逐訂單逐 SKU）。營收＝A 貨款＋B 運費代收（含稅）；淨利＝營收×100/105 − 成本 − D 手續費逐列 − C 代扣運費逐列（B 同訂單營收攤）。').replace(/"/g,'&quot;');
         statusChip=`<span class="mm-status ok" title="${_okTip}">✓ 已對帳</span>`;
+      } else if(settledN>0){
+        // 部分結算：整期別展開後只有部分半月上傳了對帳明細 → 橘標並列出未結算期別（避免「✓ 已對帳」誤導成整月都對過）。沿用 mm-status no 的橘色 warn 樣式。
+        const _pTip=('部分期別已結算（'+settledN+'/'+total+'）；'+unsettled.map(_plabel).join('、')+' 尚未上傳對帳明細，該期別數字仍為估算，整月為「已結算＋估算」混合。').replace(/"/g,'&quot;');
+        statusChip=`<span class="mm-status no" title="${_pTip}">◐ 部分對帳</span>`;
       } else if(_e001Est){
         // MO+ 未結算（E001）：沿用甲配未對帳狀態晶片「⚠ 未對帳」（同 mm-status no 樣式、同容器）；估算費率與來源月放 tooltip、不佔版面、不另做橫幅。
         const _efr=momoMoPlusE001Ctx(shop).estFee;
@@ -19457,7 +19465,9 @@ function momoRenderProfitBody(shop, tableOnly){
     }
     // 「已篩選 N/M ＋ 清除」已移到工具列篩選鈕旁（見上方 momo-filter-info 更新）。此處只留「跟著 KPI 數字走」的兩條小標，各自獨立、不再混在一條：
     //   ① 估算標（🟡 期別層、與篩選無關）：本期未對帳/未結算＝KPI 數字含估算。② 篩選標：套篩選時 KPI＝子集數字。分開放才不誤導。
-    const estNote = tagsRes.estimated ? `<div class="mm-kpi-note" style="color:#d97706">🟡 本期數字含未對帳估算（尚未上傳當月對帳單／未結算）</div>` : '';
+    // 🟡 估算黃字：MO+ 改用結算統計（部分或全未結算才顯示；全結算不顯示——修掉 tagsRes.estimated 對 MO+ 永遠 true 的誤報）；甲乙配維持原本 tagsRes.estimated 不變。
+    const _estShow = momoIsMoPlus(shop) ? (_moSettledStat.total>0 && _moSettledStat.settledN<_moSettledStat.total) : tagsRes.estimated;
+    const estNote = _estShow ? `<div class="mm-kpi-note" style="color:#d97706">🟡 本期數字含未對帳估算（尚未上傳當月對帳單／未結算）</div>` : '';
     const filterNote = _filterOn ? `<div class="mm-kpi-note" style="color:#5b5fcf">🏷 以下數字為篩選後 <b>${_filteredCount}</b> 項（清除篩選見上方工具列）</div>` : '';
     const kpiNotes = estNote + filterNote;
     // 乙配「口徑已變更·不可對照」橫幅已於 2026-08-18 移除：七個月已同口徑、無 5→6 斷點，該說明過期（留著反讓新同事困惑能不能對比）。
